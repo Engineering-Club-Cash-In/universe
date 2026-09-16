@@ -749,6 +749,27 @@ export type FlujoCuotasPorInversionistaResponse = {
 		iva: string;
 		isr: string;
 		total: string;
+		externos: {
+			reinversion_total: string;
+			cash_total: string;
+			total: string;
+		};
+		cube: {
+			reinversion_total: string;
+			cash_total: string;
+			total: string;
+		};
+	};
+	contexto: {
+		cancelaciones_pendientes: {
+			cantidad_creditos: number;
+			monto_bruto: string;
+			capital_externo_asociado: string;
+		};
+		cierres_naturales_periodo: {
+			cantidad_creditos: number;
+			capital_externo_asociado: string;
+		};
 	};
 };
 
@@ -776,6 +797,27 @@ const flujoCuotasPorInversionistaSchema = z.object({
 		iva: moneySchema,
 		isr: moneySchema,
 		total: moneySchema,
+		externos: z.object({
+			reinversion_total: moneySchema,
+			cash_total: moneySchema,
+			total: moneySchema,
+		}),
+		cube: z.object({
+			reinversion_total: moneySchema,
+			cash_total: moneySchema,
+			total: moneySchema,
+		}),
+	}),
+	contexto: z.object({
+		cancelaciones_pendientes: z.object({
+			cantidad_creditos: z.number().int().nonnegative(),
+			monto_bruto: moneySchema,
+			capital_externo_asociado: moneySchema,
+		}),
+		cierres_naturales_periodo: z.object({
+			cantidad_creditos: z.number().int().nonnegative(),
+			capital_externo_asociado: moneySchema,
+		}),
 	}),
 });
 

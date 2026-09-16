@@ -111,6 +111,16 @@ export function buildProjectedInvestorFlow(rows: ProjectionSourceRow[]): {
     iva: string;
     isr: string;
     total: string;
+    externos: {
+      reinversion_total: string;
+      cash_total: string;
+      total: string;
+    };
+    cube: {
+      reinversion_total: string;
+      cash_total: string;
+      total: string;
+    };
   };
 } {
   const byInvestor = new Map<number, Accumulator>();
@@ -577,6 +587,22 @@ export function buildProjectedInvestorFlow(rows: ProjectionSourceRow[]): {
     },
   );
 
+  const flowTotals = (investors: ProjectedInvestor[]) => {
+    const sums = investors.reduce(
+      (sum, investor) => ({
+        reinvestment: sum.reinvestment.plus(investor.reinversion_total),
+        cash: sum.cash.plus(investor.cash_total),
+        total: sum.total.plus(investor.total),
+      }),
+      { reinvestment: zero(), cash: zero(), total: zero() },
+    );
+    return {
+      reinversion_total: sums.reinvestment.toFixed(2),
+      cash_total: sums.cash.toFixed(2),
+      total: sums.total.toFixed(2),
+    };
+  };
+
   return {
     porInversionista: projected,
     totales: {
@@ -586,6 +612,12 @@ export function buildProjectedInvestorFlow(rows: ProjectionSourceRow[]): {
       iva: totals.iva.toFixed(2),
       isr: totals.isr.toFixed(2),
       total: totals.total.toFixed(2),
+      externos: flowTotals(
+        projected.filter((investor) => investor.inversionista_id !== CUBE_ID),
+      ),
+      cube: flowTotals(
+        projected.filter((investor) => investor.inversionista_id === CUBE_ID),
+      ),
     },
   };
 }

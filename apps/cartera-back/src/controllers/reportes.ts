@@ -674,7 +674,86 @@ export async function getFlujoCuotasInversiones({
     },
   };
 }
+export async function getInvestmentProjectionContext({
+  fechaInicio,
+  fechaFin,
+}: {
+  fechaInicio: string;
+  fechaFin: string;
+}) {
+  const contextRows = await db.execute(sql`
+    WITH latest_cancelation AS (
+      SELECT DISTINCT ON (cc.credit_id)
+        cc.credit_id,
+        cc.monto_cancelacion::numeric AS monto_cancelacion
+      FROM cartera.credit_cancelations cc
+      ORDER BY cc.credit_id, cc.id DESC
+    ),
+    external_positions AS (
+      SELECT
+        ce.credito_id,
+        COALESCE(SUM(ce.monto_aportado::numeric) FILTER (
+          WHERE ce.inversionista_id <> 86
+            AND ce.status::text IS DISTINCT FROM 'cancelado'
+        ), 0) AS capital_externo
+      FROM cartera.creditos_inversionistas_espejo ce
+      GROUP BY ce.credito_id
+    ),
+    cuotas_autoritativas AS (
+      SELECT DISTINCT ON (c.credito_id, c.numero_cuota)
+        c.credito_id,
+        c.numero_cuota,
+        c.fecha_vencimiento::date AS fecha_vencimiento
+      FROM cartera.cuotas_credito c
+      ORDER BY c.credito_id, c.numero_cuota, c.cuota_id DESC
+    ),
+    cierres_naturales AS (
+      SELECT ca.credito_id
+      FROM cuotas_autoritativas ca
+      JOIN cartera.creditos cr ON cr.credito_id = ca.credito_id
+      WHERE cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+      GROUP BY ca.credito_id
+      HAVING MAX(ca.fecha_vencimiento) >= ${fechaInicio}::date
+        AND MAX(ca.fecha_vencimiento) <= ${fechaFin}::date
+    )
+    SELECT
+      COUNT(DISTINCT lc.credit_id) FILTER (
+        WHERE cr."statusCredit" = 'PENDIENTE_CANCELACION'
+      )::integer AS cancelaciones_pendientes,
+      COALESCE(SUM(lc.monto_cancelacion) FILTER (
+        WHERE cr."statusCredit" = 'PENDIENTE_CANCELACION'
+      ), 0)::numeric(18, 2)::text AS monto_cancelaciones_pendientes,
+      COALESCE(SUM(ep.capital_externo) FILTER (
+        WHERE cr."statusCredit" = 'PENDIENTE_CANCELACION'
+      ), 0)::numeric(18, 2)::text AS capital_externo_cancelaciones,
+      (SELECT COUNT(*)::integer FROM cierres_naturales) AS cierres_naturales,
+      COALESCE((
+        SELECT SUM(epc.capital_externo)
+        FROM cierres_naturales cn
+        LEFT JOIN external_positions epc ON epc.credito_id = cn.credito_id
+      ), 0)::numeric(18, 2)::text AS capital_externo_cierres
+    FROM latest_cancelation lc
+    JOIN cartera.creditos cr ON cr.credito_id = lc.credit_id
+    LEFT JOIN external_positions ep ON ep.credito_id = lc.credit_id
+  `);
+  const context = contextRows.rows[0] as Record<string, unknown> | undefined;
 
+  return {
+    cancelaciones_pendientes: {
+      cantidad_creditos: Number(context?.cancelaciones_pendientes ?? 0),
+      monto_bruto: String(context?.monto_cancelaciones_pendientes ?? "0.00"),
+      capital_externo_asociado: String(
+        context?.capital_externo_cancelaciones ?? "0.00",
+      ),
+    },
+    cierres_naturales_periodo: {
+      cantidad_creditos: Number(context?.cierres_naturales ?? 0),
+      capital_externo_asociado: String(
+        context?.capital_externo_cierres ?? "0.00",
+      ),
+    },
+  };
+}
 
 export async function getFlujoCuotasPorInversionista({
   fechaInicio,
@@ -863,7 +942,12 @@ export async function getFlujoCuotasPorInversionista({
     monto_compras_mes_actual: String(row.monto_compras_mes_actual),
   }));
 
-  return buildProjectedInvestorFlow(sourceRows);
+  const projection = buildProjectedInvestorFlow(sourceRows);
+
+  return {
+    ...projection,
+    contexto: await getInvestmentProjectionContext({ fechaInicio, fechaFin }),
+  };
 }
 
 /**

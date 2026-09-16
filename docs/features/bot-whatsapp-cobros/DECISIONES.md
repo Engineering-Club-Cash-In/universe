@@ -2085,23 +2085,38 @@ Desde COBROS-02 el asesor recibe `bot_cliente_escribio` cuando un cliente suyo
 usa el bot. El PM pidió el segundo momento: **cuando la conversación pasa a
 modo agente**, que es cuando el cliente está esperando a una persona.
 
-- **Lo informa SimpleTech**, con `POST /api/bot/cobros/conversacion/modo-agente`
-  (`referencia` + `numeroSifco`). El modo agente vive en su motor; nosotros no
-  lo vemos pasar. Documentado en el Swagger como servicio 10.
-- **Tipo propio (`bot_modo_agente`) y no un segundo "escribió":** el asesor
-  termina con dos alertas de la misma conversación — "escribió" y "pidió un
-  agente" — y la segunda apunta a la primera por `notificacion_origen_id`
-  (migración CRM `0056`, corrida en dev el 2026-09-16). Si no hubo inicial,
-  se crea igual sin origen.
-- **Una por conversación, crédito y asesor**, con la misma llave de dedup que el
-  aviso inicial (`bot:sesion:<referencia>:credito:<sifco>`); repetir la llamada
-  responde `YA_NOTIFICADO`. Primero se resuelve el dueño de HOY y la dedup y el
-  origen se buscan acotados a él: si el crédito se reasignó dentro de las 24 h,
-  el dueño nuevo recibe su alerta.
+- **Lo informa SimpleTech**, con `POST /api/bot/cobros/conversacion/modo-agente`.
+  El modo agente vive en su motor; nosotros no lo vemos pasar. Documentado en el
+  Swagger como servicio 10.
+- **`referencia` o `telefono` (al menos uno), `numeroSifco` opcional.** Lo pidió
+  el integrador del bot: un cliente que solo escribe "hola" y pide un humano
+  nunca genera referencia, y con el primer diseño (referencia + SIFCO
+  obligatorios) ese cliente —el que más espera— no le llegaba a nadie. Si la
+  referencia sirve, manda ella; si no vino, es inválida o venció y hay teléfono,
+  se busca por el número (titular o codeudor con crédito). Con `numeroSifco` se
+  avisa solo por ese crédito y tiene que ser de esa persona (404 si no); sin él,
+  por todos los suyos.
+- **El teléfono no es control de acceso, y no tiene que serlo:** el servicio no
+  devuelve datos del crédito, solo decide a qué asesores avisar, y el número lo
+  pone WhatsApp. La respuesta al cliente es el mismo texto neutro en todos los
+  casos.
+- **Tipo propio (`bot_modo_agente`) y no un segundo "escribió":** con
+  referencia, la alerta apunta al `bot_cliente_escribio` de ese asesor en esa
+  conversación por `notificacion_origen_id` (migración CRM `0056`, corrida en
+  dev el 2026-09-16). Por teléfono no hay aviso inicial que enlazar; el número va
+  en el texto para que el asesor encuentre el chat.
+- **Una alerta por asesor, no por crédito.** Llave de la conversación:
+  `bot:sesion:<referencia>:agente`, o `bot:tel:<8 dígitos>:dia:<fecha GT>:agente`
+  sin referencia (el día evita que la alerta de hoy calle al cliente que vuelve
+  mañana). La dedup y el origen se buscan acotados al dueño de HOY: si el
+  crédito se reasignó, el dueño nuevo recibe su alerta. Repetir la llamada
+  responde `YA_NOTIFICADO` **solo mientras la alerta siga abierta**: cada alerta
+  es un episodio (`<llave>:ep:<n>`) y, si el asesor la cerró y el cliente vuelve
+  a pedir un humano —p. ej. otra conversación sin referencia el mismo día—, se
+  abre el episodio siguiente (review de Codex, #1628).
 - **La referencia vale 24 h en este servicio**, no los 30 min del menú: el modo
   agente suele llegar al final de una conversación larga, y ahí es donde menos
-  puede perderse el aviso. No abre datos: el servicio no devuelve nada del
-  crédito y sigue exigiendo OTP canjeado y crédito del cliente.
+  puede perderse el aviso.
 - **No es best-effort silencioso:** si cartera no responde (no se sabe quién es
   el dueño) sale `503 CARTERA_NO_DISPONIBLE` para que el bot reintente.
 - El middleware del historial **no** genera un "escribió" para esta acción:

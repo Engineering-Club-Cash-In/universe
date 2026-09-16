@@ -231,11 +231,14 @@ const CURADORES: Record<
 		}),
 
 	// Pidió un humano: si su asesor quedó avisado y por qué no, si no.
+	// El teléfono del chat NO: basta con saber por dónde se lo identificó.
 	[ACCION_MODO_AGENTE]: (_cuerpo, data, exito) =>
 		conValor({
 			notificado:
 				exito && typeof data.notificado === "boolean" ? data.notificado : null,
 			motivo: exito ? texto(data.motivo) : null,
+			asesores: exito ? numero(data.asesoresNotificados) : null,
+			identificadoPor: exito ? texto(data.identificadoPor) : null,
 		}),
 };
 

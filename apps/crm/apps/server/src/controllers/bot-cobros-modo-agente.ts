@@ -1,33 +1,25 @@
 /**
  * Servicio 10 · El cliente pasó a MODO AGENTE (pidió hablar con una persona).
  *
- * POST /api/bot/cobros/conversacion/modo-agente → { referencia, numeroSifco }
+ * POST /api/bot/cobros/conversacion/modo-agente
+ *   → { referencia?, telefono?, numeroSifco? }   (referencia o telefono, al menos uno)
  *
  * SimpleTech lo llama cuando su motor pasa la conversación a un agente humano.
  * Nosotros no devolvemos datos del crédito: creamos la alerta `bot_modo_agente`
- * para el asesor dueño, enlazada a la de "tu cliente escribió" de la misma
- * conversación (ver `services/aviso-bot-modo-agente.ts`).
+ * para el asesor dueño de cada crédito de esa persona. Quién es, se resuelve en
+ * `lib/bot-cobros/modo-agente.ts`; la alerta, en
+ * `services/aviso-bot-modo-agente.ts`.
  *
  * Mismo formato de respuesta que el resto del bot (D-22): `data.mensaje` viene
  * siempre, y el bot rutea por `codigo`.
  */
 
 import type { Context } from "hono";
-import { verificarAcceso } from "../lib/bot-cobros/menu-credito";
+import { buscarCreditosPorTelefono } from "../lib/bot-cobros/cliente-por-telefono";
+import { anotarIdentidadBot } from "../lib/bot-cobros/historial";
+import { verificarSesion } from "../lib/bot-cobros/menu-credito";
+import { resolverClienteModoAgente } from "../lib/bot-cobros/modo-agente";
 import { avisarAsesorModoAgente } from "../services/aviso-bot-modo-agente";
-
-/**
- * Cuánto vale la referencia para ESTE servicio: 24 horas, no los 30 minutos
- * del menú.
- *
- * El modo agente llega justo cuando el bot ya no pudo resolver, y eso pasa
- * muchas veces después de una conversación larga o de que el cliente volvió
- * más tarde al chat. Con 30 minutos, el aviso que más importa sería el que
- * más se pierde. Estirarlo acá no abre datos: este servicio no devuelve nada
- * del crédito, solo avisa a su asesor, y sigue exigiendo que la referencia sea
- * de un código canjeado y que el crédito sea de esa persona.
- */
-const VIGENCIA_MODO_AGENTE_MINUTOS = 24 * 60;
 
 type RespuestaError = {
 	codigo: string;
@@ -47,36 +39,37 @@ function error(c: Context, { codigo, mensaje, estado }: RespuestaError) {
 	);
 }
 
-const MENSAJE_AVISADO =
-	"Listo, ya le avisamos a tu asesor. En un momento te atiende por este chat.";
-const MENSAJE_SIN_ASESOR = "En un momento un asesor te atiende por este chat.";
+// El mismo texto pase lo que pase: al cliente no se le cuenta si tiene asesor
+// ni si su número está en el CRM. Y no promete "ya le avisamos": con
+// `SIN_ASESOR` o `CLIENTE_NO_IDENTIFICADO` no se avisó a nadie — lo atiende
+// quien tome el chat en modo agente.
+const MENSAJE_AL_CLIENTE = "En un momento un asesor te atiende por este chat.";
 
 export async function modoAgenteBotCobros(c: Context) {
 	try {
 		const body = await c.req.json<{
 			referencia?: unknown;
+			telefono?: unknown;
 			numeroSifco?: unknown;
 		}>();
-		const referencia = String(body.referencia ?? "").trim();
-		const numeroSifco = String(body.numeroSifco ?? "").trim();
 
-		if (!referencia || !numeroSifco) {
-			return error(c, {
-				codigo: "PARAMETROS_INVALIDOS",
-				mensaje: "Faltan datos para avisarle a tu asesor.",
-				estado: 400,
-			});
-		}
-
-		// Sin esto, la API key sola alcanzaría para disparar alertas a cualquier
-		// asesor con un SIFCO inventado.
-		const acceso = await verificarAcceso(
-			referencia,
-			numeroSifco,
-			VIGENCIA_MODO_AGENTE_MINUTOS,
+		const resolucion = await resolverClienteModoAgente(
+			{
+				referencia: String(body.referencia ?? "").trim(),
+				telefono: String(body.telefono ?? "").trim(),
+				numeroSifco: String(body.numeroSifco ?? "").trim(),
+			},
+			{ verificarSesion, buscarPorTelefono: buscarCreditosPorTelefono },
 		);
-		if (!acceso.ok) {
-			switch (acceso.codigo) {
+
+		if (resolucion.estado === "error") {
+			switch (resolucion.codigo) {
+				case "PARAMETROS_INVALIDOS":
+					return error(c, {
+						codigo: "PARAMETROS_INVALIDOS",
+						mensaje: "Faltan datos para avisarle a tu asesor.",
+						estado: 400,
+					});
 				case "SESION_VENCIDA":
 					return error(c, {
 						codigo: "SESION_VENCIDA",
@@ -100,11 +93,26 @@ export async function modoAgenteBotCobros(c: Context) {
 			}
 		}
 
+		if (resolucion.estado === "no_identificado") {
+			return c.json({
+				success: true,
+				data: {
+					notificado: false,
+					motivo: "CLIENTE_NO_IDENTIFICADO",
+					asesoresNotificados: 0,
+					identificadoPor: null,
+					mensaje: MENSAJE_AL_CLIENTE,
+				},
+			});
+		}
+
+		// Sin referencia, el historial no tiene de qué ficha colgar la
+		// interacción: se le pasa la persona que salió del teléfono.
+		if (resolucion.identidad) anotarIdentidadBot(c, resolucion.identidad);
+
 		const resultado = await avisarAsesorModoAgente({
-			// La sesión del historial ES el id del OTP: misma llave con la que
-			// se deduplicó el aviso inicial, que es lo que permite enlazarlos.
-			sesionId: acceso.identidad.otpId,
-			numeroSifco,
+			origen: resolucion.origen,
+			creditos: resolucion.creditos,
 		});
 
 		if (!resultado.ok) {
@@ -116,13 +124,14 @@ export async function modoAgenteBotCobros(c: Context) {
 			});
 		}
 
-		const notificado = resultado.motivo !== "SIN_ASESOR";
 		return c.json({
 			success: true,
 			data: {
-				notificado,
+				notificado: resultado.motivo !== "SIN_ASESOR",
 				motivo: resultado.motivo,
-				mensaje: notificado ? MENSAJE_AVISADO : MENSAJE_SIN_ASESOR,
+				asesoresNotificados: resultado.asesores,
+				identificadoPor: resolucion.origen.tipo,
+				mensaje: MENSAJE_AL_CLIENTE,
 			},
 		});
 	} catch (err) {

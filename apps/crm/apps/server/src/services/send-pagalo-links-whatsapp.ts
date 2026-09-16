@@ -72,12 +72,12 @@ export function construirMensajePagaloLinks(
 ): string {
 	const ordenados = [...links].sort(porOrdenDeLinkPagalo);
 	const dosLinks = ordenados.length === 2;
-	const saludo = clienteNombre ? `Hola ${clienteNombre}` : "Hola";
+	const saludo = clienteNombre ? `${clienteNombre}, aquí` : "Aquí";
 	const lineas = ordenados.map((link, index) => {
 		const etiqueta = dosLinks ? `Pago ${index + 1} de 2` : "Pago";
 		return `${etiqueta}: ${link.paymentUrl}`;
 	});
-	return `${saludo}, aquí tienes el enlace de pago de tu ${identificadorCredito}.\n\n${lineas.join("\n")}`;
+	return `${saludo} tienes el enlace de pago de tu ${identificadorCredito}.\n\n${lineas.join("\n")}`;
 }
 
 /** Deps inyectables solo para tests — en producción no se pasa nada. */

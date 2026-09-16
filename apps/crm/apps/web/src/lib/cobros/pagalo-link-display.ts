@@ -147,10 +147,10 @@ export function previewMensajePagaloLinks(
 		(a, b) => ORDEN_LINKS_PAGALO.indexOf(a) - ORDEN_LINKS_PAGALO.indexOf(b),
 	);
 	const dosLinks = ordenados.length === 2;
-	const saludo = clienteNombre ? `Hola ${clienteNombre}` : "Hola";
+	const saludo = clienteNombre ? `${clienteNombre}, aquí` : "Aquí";
 	const lineas = ordenados.map((_linkType, index) => {
 		const etiqueta = dosLinks ? `Pago ${index + 1} de 2` : "Pago";
 		return `${etiqueta}: [link de pago]`;
 	});
-	return `${saludo}, aquí tienes el enlace de pago de tu ${identificadorCredito}.\n\n${lineas.join("\n")}`;
+	return `${saludo} tienes el enlace de pago de tu ${identificadorCredito}.\n\n${lineas.join("\n")}`;
 }

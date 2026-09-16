@@ -798,7 +798,12 @@ function NotificationsPage() {
 							size="sm"
 							variant="destructive"
 							onClick={() => {
+								// Los TRES filtros: uno por página de destino que quedara
+								// puesto (o una alerta sin redirect_page) dejaba la lista
+								// vacía con el banner diciendo que hay clientes esperando
+								// (review de Codex, P2).
 								handleStatusFilter("all");
+								handleTypeFilter("all");
 								handleCobrosFilter(COBROS_TIPO_PRIORITARIO);
 							}}
 						>

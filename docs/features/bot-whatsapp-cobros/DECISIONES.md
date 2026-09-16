@@ -2093,9 +2093,11 @@ modo agente**, que es cuando el cliente está esperando a una persona.
   agente" — y la segunda apunta a la primera por `notificacion_origen_id`
   (migración CRM `0056`, corrida en dev el 2026-09-16). Si no hubo inicial,
   se crea igual sin origen.
-- **Una por conversación y crédito**, con la misma llave de dedup que el aviso
-  inicial (`bot:sesion:<referencia>:credito:<sifco>`); repetir la llamada
-  responde `YA_NOTIFICADO`.
+- **Una por conversación, crédito y asesor**, con la misma llave de dedup que el
+  aviso inicial (`bot:sesion:<referencia>:credito:<sifco>`); repetir la llamada
+  responde `YA_NOTIFICADO`. Primero se resuelve el dueño de HOY y la dedup y el
+  origen se buscan acotados a él: si el crédito se reasignó dentro de las 24 h,
+  el dueño nuevo recibe su alerta.
 - **La referencia vale 24 h en este servicio**, no los 30 min del menú: el modo
   agente suele llegar al final de una conversación larga, y ahí es donde menos
   puede perderse el aviso. No abre datos: el servicio no devuelve nada del

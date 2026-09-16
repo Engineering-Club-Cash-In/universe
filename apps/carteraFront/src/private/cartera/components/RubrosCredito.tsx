@@ -502,6 +502,7 @@ export default function RubrosCredito({
           />
         ) : vista === "crearTipo" && esAdmin ? (
           <VistaCrearTipo
+            onGuardando={setGuardando}
             volverA={origenCrearTipo}
             onVolver={() => setVista(origenCrearTipo)}
             onCreado={(tipo) => {
@@ -829,16 +830,26 @@ function VistaCrear({
           <Label>Tipo de rubro</Label>
           {esAdmin && (
             <span className="flex items-center gap-3">
+              {/*
+                Apagados mientras el POST del rubro viaja. Irse por acá desmonta
+                esta vista, y su `useReportarGuardando` limpia el guard del modal
+                al desmontarse: volver monta una mutación nueva con `isPending`
+                en false y deja mandar un segundo rubro con el primero todavía en
+                vuelo. Y cuando el primero termina, borra el borrador del segundo
+                y redirige la vista.
+              */}
               <button
                 type="button"
                 onClick={onCrearTipo}
-                className="text-xs font-semibold text-purple-700 hover:underline"
+                disabled={crear.isPending}
+                className="text-xs font-semibold text-purple-700 hover:underline disabled:opacity-50 disabled:pointer-events-none"
               >
                 + Crear tipo nuevo
               </button>
               <button
                 type="button"
                 onClick={onAdministrarTipos}
+                disabled={crear.isPending}
                 className="flex items-center gap-1 text-xs font-semibold text-gray-600 hover:underline"
               >
                 <Settings2 className="w-3.5 h-3.5" />
@@ -1244,11 +1255,14 @@ function VistaCrearTipo({
   volverA,
   onVolver,
   onCreado,
+  onGuardando,
 }: {
   /** Desde dónde se llegó; solo cambia el texto del botón de volver. */
   volverA: "crear" | "tipos";
   onVolver: () => void;
   onCreado: (tipo: TipoRubro) => void;
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
 }) {
   const queryClient = useQueryClient();
   const [nombre, setNombre] = useState("");
@@ -1296,6 +1310,8 @@ function VistaCrearTipo({
       setError(getApiErrorMessage(e, "No se pudo crear el tipo de rubro"));
     },
   });
+
+  useReportarGuardando(crear.isPending, onGuardando);
 
   const submit = () => {
     setError(null);

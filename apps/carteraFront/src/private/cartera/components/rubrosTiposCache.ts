@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { QK_RUBROS } from "./rubrosCache";
 import type { TipoRubro } from "../services/rubros.services";
 
 /** Clave raíz de las queries de tipos; las variantes cuelgan de acá. */
@@ -83,4 +84,20 @@ export async function sincronizarTipoEditado(
     queryKey: [QK_TIPOS],
     refetchType: "all",
   });
+
+  /**
+   * Y la LISTA DE RUBROS del crédito, que también guarda el nombre del tipo.
+   *
+   * Cada `RubroCredito` trae `tipo_nombre` pegado desde el join del GET, así que
+   * renombrar un tipo deja esa copia vieja en caché. La query del listado vive
+   * en el componente padre y NO se desmonta mientras se navega por las vistas
+   * internas, así que al volver de administrar tipos la tabla sigue mostrando el
+   * nombre anterior —y el encabezado del historial también— hasta que algo no
+   * relacionado la refresque.
+   *
+   * Se invalida sin esperar y sin `refetchType`: la query está activa, así que el
+   * refetch sale solo, y a quien renombró un tipo no hay por qué hacerlo esperar
+   * una lista que ni siquiera está mirando.
+   */
+  queryClient.invalidateQueries({ queryKey: [QK_RUBROS] });
 }

@@ -72,7 +72,23 @@ export function buildDocumentRecommendedAction(params: {
 					(signal) => signal.code === "captura_impide_verificar_alineacion",
 				)
 			) {
-				return `${pageText ? `Revisa${pageText}. ` : "Revisa las señales del documento completo. "}Solicita el PDF original o una foto frontal y nítida para comprobar la alineación y revisa las demás alertas, si existen; solo un supervisor puede aprobarlo con justificación.${params.signals.some((signal) => signal.code === "errores_ortograficos") ? " Verifica también con el banco las faltas de ortografía." : ""}`;
+				const alignmentPages = [
+					...new Set(
+						params.signals
+							.filter(
+								(signal) =>
+									signal.code === "captura_impide_verificar_alineacion" &&
+									typeof signal.page === "number" &&
+									signal.page > 0,
+							)
+							.map((signal) => signal.page as number),
+					),
+				].sort((left, right) => left - right);
+				const alignmentPageText =
+					alignmentPages.length > 0
+						? ` de la${alignmentPages.length === 1 ? "" : "s"} página${alignmentPages.length === 1 ? "" : "s"} ${alignmentPages.join(", ")}`
+						: "";
+				return `${pageText ? `Revisa${pageText}. ` : "Revisa las señales del documento completo. "}Solicita el PDF original o una foto frontal y nítida para comprobar la alineación${alignmentPageText} y revisa las demás alertas, si existen; solo un supervisor puede aprobarlo con justificación.${params.signals.some((signal) => signal.code === "errores_ortograficos") ? " Verifica también con el banco las faltas de ortografía." : ""}`;
 			}
 			if (
 				params.signals.some((signal) => signal.code === "errores_ortograficos")

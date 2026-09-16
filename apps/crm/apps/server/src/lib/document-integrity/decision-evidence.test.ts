@@ -69,27 +69,28 @@ describe("document integrity decision evidence", () => {
 			}),
 		).not.toContain("página 3");
 	});
-	test("solicita PDF original o fotografía adecuada cuando la captura limita la revisión", () => {
+	test("la recomendación distingue la página de captura informativa de la alerta con peso", () => {
 		const action = buildDocumentRecommendedAction({
 			result: "revision_manual",
 			signals: [
 				{
 					code: "captura_impide_verificar_alineacion",
 					page: 3,
-					severity: "media",
-					weight: 4,
+					severity: "baja",
+					weight: 0,
 					source: "ia",
 				},
 				{
 					code: "errores_ortograficos",
-					page: 3,
+					page: 2,
 					severity: "media",
 					weight: 4,
 					source: "ia",
 				},
 			],
 		});
-		expect(action).toContain("la página 3");
+		expect(action).toContain("Revisa la página 2.");
+		expect(action).toContain("comprobar la alineación de la página 3");
 		expect(action).toContain("PDF original o una foto frontal y nítida");
 		expect(action).toContain("banco");
 		expect(

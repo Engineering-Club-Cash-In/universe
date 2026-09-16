@@ -74,6 +74,10 @@ export function CambiarContrasenaPage() {
 			toast.error("Las contraseñas nuevas no coinciden");
 			return;
 		}
+		if (newPassword === currentPassword) {
+			toast.error("La contraseña nueva debe ser distinta de la actual");
+			return;
+		}
 
 		setCargando(true);
 		try {

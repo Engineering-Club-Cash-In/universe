@@ -234,6 +234,24 @@ const consultaBase = () =>
 			eq(ultimaCotizacion.opportunityId, opportunities.id),
 		);
 
+export const changePartnerPasswordInputSchema = z
+	.object({
+		email: z.string().email(),
+		currentPassword: z.string().min(1),
+		newPassword: z.string().min(8),
+		confirmPassword: z.string().min(8),
+	})
+	.refine((data) => data.newPassword === data.confirmPassword, {
+		message: "Las contraseñas nuevas no coinciden",
+		path: ["confirmPassword"],
+	})
+	// Better Auth acepta un cambio a la misma contraseña: sin esto, repetir la
+	// temporal marca passwordChangedAt sin rotar nada de verdad.
+	.refine((data) => data.newPassword !== data.currentPassword, {
+		message: "La contraseña nueva debe ser distinta de la actual",
+		path: ["newPassword"],
+	});
+
 export const trackerRouter = {
 	getPartnerAgencies: partnerIdentityProcedure.handler(async ({ context }) => {
 		return db
@@ -248,19 +266,7 @@ export const trackerRouter = {
 	})),
 
 	changePartnerPassword: partnerIdentityProcedure
-		.input(
-			z
-				.object({
-					email: z.string().email(),
-					currentPassword: z.string().min(1),
-					newPassword: z.string().min(8),
-					confirmPassword: z.string().min(8),
-				})
-				.refine((data) => data.newPassword === data.confirmPassword, {
-					message: "Las contraseñas nuevas no coinciden",
-					path: ["confirmPassword"],
-				}),
-		)
+		.input(changePartnerPasswordInputSchema)
 		.handler(async ({ input, context }) => {
 			if (
 				input.email.trim().toLowerCase() !==

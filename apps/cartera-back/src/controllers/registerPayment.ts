@@ -57,7 +57,7 @@ import {
 } from "./registerPaymentPolicy";
 import {
   aplicarRubrosDelPago,
-  cobrarRubrosParaBoleta,
+  cobroRubrosSeguro,
   registrarReclamosDeRubros,
   RubroError,
 } from "./rubros";
@@ -909,7 +909,10 @@ export const insertPayment = async ({ body, set }: any) => {
     // persistida no existe el `pago_id` al que colgarlos. Mismo diferimiento
     // que usa el convenio con `commitConvenio`, y con el mismo beneficio: un
     // rechazo posterior no deja rubros reclamados por una boleta que no existe.
-    const cobroRubros = await cobrarRubrosParaBoleta({
+    // Con red: ver el docblock de `cobroRubrosSeguro`. Un fallo de esta
+    // consulta no puede tumbar el registro de la boleta — es un cargo
+    // adicional, no la cuota.
+    const cobroRubros = await cobroRubrosSeguro({
       credito_id: credito.credito_id,
       disponible: disponible_restante,
     });

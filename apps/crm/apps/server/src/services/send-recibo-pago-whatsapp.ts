@@ -179,7 +179,7 @@ export function construirMensajeReciboPago(
 	numeroSifco: string,
 	extra: { numeroCuota?: number | null; asesor?: ContactoAsesor | null } = {},
 ): string {
-	const saludo = clienteNombre ? `Hola ${clienteNombre}` : "Hola";
+	const saludo = clienteNombre ? `${clienteNombre}, te` : "Te";
 	const descripcionVehiculo = [vehiculo.marca, vehiculo.modelo, vehiculo.year]
 		.filter((valor): valor is string | number => valor !== null)
 		.join(" ");
@@ -189,7 +189,7 @@ export function construirMensajeReciboPago(
 	const cuota =
 		extra.numeroCuota != null ? ` (cuota ${extra.numeroCuota})` : "";
 
-	return `${saludo}, te compartimos el recibo de tu pago${identificador}${cuota} en el documento adjunto. ${construirCierreAsesor(extra.asesor ?? null)}`;
+	return `${saludo} compartimos el recibo de tu pago${identificador}${cuota} en el documento adjunto. ${construirCierreAsesor(extra.asesor ?? null)}`;
 }
 
 /** Deps inyectables solo para tests — en producción no se pasa nada. */

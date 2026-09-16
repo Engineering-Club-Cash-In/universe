@@ -423,7 +423,7 @@ describe("construirMensajeReciboPago", () => {
 			{ marca: "TOYOTA", modelo: "RAV4", year: 2017, placa: "P-507GFV" },
 			SIFCO,
 		);
-		expect(msg).toContain("Hola Juan Pérez");
+		expect(msg).toContain("Juan Pérez, te");
 		expect(msg).toContain("TOYOTA RAV4 2017, placas P-507GFV");
 		expect(msg).not.toContain(SIFCO);
 	});

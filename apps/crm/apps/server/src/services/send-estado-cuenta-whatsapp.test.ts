@@ -428,7 +428,7 @@ describe("construirMensajeEstadoCuenta", () => {
 			},
 			SIFCO,
 		);
-		expect(msg).toContain("Hola Juan Pérez");
+		expect(msg).toContain("Juan Pérez, te");
 		expect(msg).toContain("TOYOTA RAV4 2017, placas P-507GFV");
 		expect(msg).not.toContain(SIFCO);
 	});
@@ -449,8 +449,9 @@ describe("construirMensajeEstadoCuenta", () => {
 			{ marca: null, modelo: null, year: null, placa: null },
 			SIFCO,
 		);
-		expect(msg).not.toContain("Hola ,");
-		expect(msg.startsWith("Hola,")).toBe(true);
+		expect(msg).not.toContain(", te");
+		expect(msg.startsWith("Te,")).toBe(false);
+		expect(msg.startsWith("Te compartimos")).toBe(true);
 		expect(msg).toContain(SIFCO);
 	});
 });

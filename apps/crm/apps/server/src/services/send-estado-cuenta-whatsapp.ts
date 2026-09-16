@@ -138,14 +138,14 @@ export function construirMensajeEstadoCuenta(
 	numeroSifco: string,
 	asesor: ContactoAsesor | null = null,
 ): string {
-	const saludo = clienteNombre ? `Hola ${clienteNombre}` : "Hola";
+	const saludo = clienteNombre ? `${clienteNombre}, te` : "Te";
 	const descripcionVehiculo = [vehiculo.marca, vehiculo.modelo, vehiculo.year]
 		.filter((valor): valor is string | number => valor !== null)
 		.join(" ");
 	const identificador = descripcionVehiculo
 		? ` de tu ${descripcionVehiculo}${vehiculo.placa ? `, placas ${vehiculo.placa}` : ""}`
 		: ` de tu crédito ${numeroSifco}`;
-	return `${saludo}, te compartimos el estado de cuenta${identificador} en el documento adjunto. ${construirCierreAsesor(asesor)}`;
+	return `${saludo} compartimos el estado de cuenta${identificador} en el documento adjunto. ${construirCierreAsesor(asesor)}`;
 }
 
 /** Deps inyectables solo para tests — en producción no se pasa nada. */

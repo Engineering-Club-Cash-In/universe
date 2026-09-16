@@ -1,9 +1,12 @@
+import { sql } from "drizzle-orm";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { admin } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
 import { db } from "../db";
 import * as schema from "../db/schema/auth";
+import { ROLES } from "./roles";
 
 // Create access control for custom roles
 const statement = {
@@ -92,6 +95,41 @@ export const vehicleVerifierRole = ac.newRole({
 	report: ["read"],
 });
 
+// Sin permisos del CRM: el acceso del socio sale solo de partner_members.
+export const partnerRole = ac.newRole({
+	user: [],
+	lead: [],
+	report: [],
+});
+
+/**
+ * Los socios (predios y agencias) tienen su propia instancia de auth en
+ * partner-auth.ts. Aquí se les rechaza de plano: en el CRM y en taller no
+ * verían nada y todos los procedimientos les responderían FORBIDDEN.
+ *
+ * Es una guarda de experiencia, no el control de acceso: ese sigue siendo
+ * `PERMISSIONS` en roles.ts y `partnerProcedure` en orpc.ts.
+ */
+const rechazarSocios = createAuthMiddleware(async (ctx) => {
+	if (ctx.path !== "/sign-in/email") return;
+
+	const email = (ctx.body as { email?: unknown } | undefined)?.email;
+	if (typeof email !== "string") return;
+
+	const [cuenta] = await db
+		.select({ role: schema.user.role })
+		.from(schema.user)
+		.where(sql`lower(${schema.user.email}) = lower(${email})`)
+		.limit(1);
+
+	if (cuenta?.role === ROLES.PARTNER) {
+		throw new APIError("FORBIDDEN", {
+			message:
+				"Esta cuenta solo puede ingresar al portal de predios y agencias",
+		});
+	}
+});
+
 export const auth = betterAuth({
 	database: drizzleAdapter(db, {
 		provider: "pg",
@@ -114,6 +152,7 @@ export const auth = betterAuth({
 				investment_manager: investmentManagerRole,
 				service_center_manager: serviceCenterManagerRole,
 				vehicle_verifier: vehicleVerifierRole,
+				partner: partnerRole,
 			},
 			schema: {
 				user: {
@@ -131,6 +170,9 @@ export const auth = betterAuth({
 			},
 		}),
 	],
+	hooks: {
+		before: rechazarSocios,
+	},
 	trustedOrigins: [
 		process.env.CORS_ORIGIN,
 		process.env.FRONT_URL,

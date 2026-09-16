@@ -178,14 +178,75 @@ const bucket = (cantidad: number, capital: string): Bucket => ({
 	sumaMora: "0.00",
 });
 
+const parseOfficialMoraRate = (value: string) => {
+	let rate: Big;
+	try {
+		rate = new Big(value);
+	} catch {
+		throw new Error("El porcentaje mensual de mora es inválido");
+	}
+	if (rate.lte(0) || rate.gt(100)) {
+		throw new Error("El porcentaje mensual de mora es inválido");
+	}
+	const canonical = rate.toFixed(2);
+	if (!rate.eq(canonical)) {
+		throw new Error("El porcentaje mensual de mora admite máximo dos decimales");
+	}
+	return canonical;
+};
+
 export function summarizeOfficialAdvisorClosure(
 	periodo: string,
 	rows: OfficialAdvisorClosureRow[],
+	porcentajeMora: string,
 ) {
+	const porcentajeMoraCanonico = parseOfficialMoraRate(porcentajeMora);
 	const sumMoney = (select: (row: OfficialAdvisorClosureRow) => string) =>
 		rows.reduce((sum, row) => sum.plus(select(row)), new Big(0));
 	const sumCount = (select: (row: OfficialAdvisorClosureRow) => number) =>
 		rows.reduce((sum, row) => sum + select(row), 0);
+	const rate = new Big(porcentajeMoraCanonico);
+	const expectedFor = (row: OfficialAdvisorClosureRow) =>
+		new Big(row.mora30)
+			.plus(row.mora60)
+			.plus(row.mora90)
+			.plus(row.mora120)
+			.times(rate)
+			.div(100);
+	const expectedTotal = rows.reduce(
+		(sum, row) => sum.plus(expectedFor(row)),
+		new Big(0),
+	);
+	const expectedTotalCents = expectedTotal
+		.times(100)
+		.round(0, Big.roundHalfUp);
+	const allocations = rows.map((row) => {
+		const exactCents = expectedFor(row).times(100);
+		const cents = exactCents.round(0, Big.roundDown);
+		return {
+			asesorId: row.asesorId,
+			cents,
+			remainder: exactCents.minus(cents),
+		};
+	});
+	let remainingCents = Number(
+		expectedTotalCents
+			.minus(
+				allocations.reduce((sum, allocation) => sum.plus(allocation.cents), new Big(0)),
+			)
+			.toString(),
+	);
+	for (const allocation of [...allocations].sort(
+		(left, right) =>
+			right.remainder.cmp(left.remainder) || left.asesorId - right.asesorId,
+	)) {
+		if (remainingCents === 0) break;
+		allocation.cents = allocation.cents.plus(1);
+		remainingCents -= 1;
+	}
+	const expectedCentsByAdvisor = new Map(
+		allocations.map((allocation) => [allocation.asesorId, allocation.cents]),
+	);
 
 	return {
 		periodo,
@@ -223,6 +284,17 @@ export function summarizeOfficialAdvisorClosure(
 				capital: displayMoney(new Big(row.capital)),
 			})),
 		},
+		moraMensual: {
+			porcentaje: rate.toFixed(2),
+			esperado: displayMoney(expectedTotal),
+			porAsesor: rows.map((row) => ({
+				asesorId: row.asesorId,
+				nombre: row.asesorNombre,
+				esperado: (expectedCentsByAdvisor.get(row.asesorId) ?? new Big(0))
+					.div(100)
+					.toFixed(2),
+			})),
+		},
 		metadata: { fuente: "oficial" as const, inmutable: true as const },
 	};
 }
@@ -231,6 +303,7 @@ export type SaveOfficialClosureInput = {
 	periodo: string;
 	fechaCorte: string;
 	reglaVersion: string;
+	porcentajeMora: string;
 	fuente: string;
 	fuenteHash: string;
 	rows: OfficialAdvisorClosureRow[];
@@ -255,6 +328,7 @@ export async function getOfficialClosure(
 			cantidad_mora_60: number;
 			cantidad_mora_90: number;
 			cantidad_mora_120: number;
+			porcentaje_mora: string;
 		}>(
 			`SELECT
          cierre.asesor_id, cierre.asesor_nombre,
@@ -264,7 +338,8 @@ export async function getOfficialClosure(
          cierre.capital_mora_90::text AS mora_90,
          cierre.capital_mora_120::text AS mora_120,
          cierre.cantidad_mora_30, cierre.cantidad_mora_60,
-         cierre.cantidad_mora_90, cierre.cantidad_mora_120
+         cierre.cantidad_mora_90, cierre.cantidad_mora_120,
+         cierre.porcentaje_mora::text
        FROM cartera.cierre_mora_oficial cierre
        WHERE cierre.periodo = $1
          AND ($2::integer[] IS NULL OR cierre.asesor_id = ANY($2))
@@ -287,6 +362,7 @@ export async function getOfficialClosure(
 				cantidadMora90: row.cantidad_mora_90,
 				cantidadMora120: row.cantidad_mora_120,
 			})),
+			result.rows[0].porcentaje_mora,
 		);
 	} finally {
 		connection.release();
@@ -311,6 +387,7 @@ export async function saveOfficialClosure(
 	if (!/^[0-9a-f]{64}$/.test(input.fuenteHash)) {
 		throw new Error("El hash SHA-256 de la fuente es inválido");
 	}
+	const porcentajeMora = parseOfficialMoraRate(input.porcentajeMora);
 	if (
 		new Set(input.rows.map((row) => row.asesorId)).size !== input.rows.length
 	) {
@@ -343,9 +420,11 @@ export async function saveOfficialClosure(
 		}
 		const existing = await connection.query<{
 			fuente_hash: string;
+			porcentaje_mora: string;
 			asesores: number;
 		}>(
-			`SELECT fuente_hash, count(*)::integer AS asesores
+			`SELECT fuente_hash, min(porcentaje_mora)::text AS porcentaje_mora,
+              count(*)::integer AS asesores
        FROM cartera.cierre_mora_oficial
        WHERE periodo = $1
        GROUP BY fuente_hash`,
@@ -356,6 +435,14 @@ export async function saveOfficialClosure(
 				existing.rows.length === 1 &&
 				existing.rows[0]?.fuente_hash === input.fuenteHash
 			) {
+				if (
+					new Big(existing.rows[0].porcentaje_mora).toFixed(2) !==
+					porcentajeMora
+				) {
+					throw new Error(
+						`El cierre ${input.periodo} ya fue importado con otra tasa de mora`,
+					);
+				}
 				await connection.query("COMMIT");
 				return {
 					periodo: input.periodo,
@@ -374,10 +461,10 @@ export async function saveOfficialClosure(
           periodo, asesor_id, asesor_nombre, capital_cierre,
           capital_mora_30, capital_mora_60, capital_mora_90, capital_mora_120,
           cantidad_mora_30, cantidad_mora_60, cantidad_mora_90, cantidad_mora_120,
-          fecha_corte, regla_version, fuente, fuente_hash
+          fecha_corte, regla_version, porcentaje_mora, fuente, fuente_hash
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8,
-          $9, $10, $11, $12, $13, $14, $15, $16
+          $9, $10, $11, $12, $13, $14, $15, $16, $17
         )`,
 				[
 					input.periodo,
@@ -394,6 +481,7 @@ export async function saveOfficialClosure(
 					row.cantidadMora120,
 					input.fechaCorte,
 					input.reglaVersion,
+					porcentajeMora,
 					input.fuente,
 					input.fuenteHash,
 				],

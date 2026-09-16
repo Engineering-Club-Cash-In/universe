@@ -10,10 +10,10 @@ import {
 	summarizeOfficialAdvisorClosure,
 } from "../controllers/cierreMoraOficial";
 
-const [filePath, periodo, fechaCorte, mode] = Bun.argv.slice(2);
-if (!filePath || !periodo || !fechaCorte) {
+const [filePath, periodo, fechaCorte, porcentajeMora, mode] = Bun.argv.slice(2);
+if (!filePath || !periodo || !fechaCorte || !porcentajeMora) {
 	throw new Error(
-		"Uso: bun src/scripts/importCierreMoraOficial.ts <archivo.xlsx> <YYYY-MM-01> <fecha-corte-ISO> [--write]",
+		"Uso: bun src/scripts/importCierreMoraOficial.ts <archivo.xlsx> <YYYY-MM-01> <fecha-corte-ISO> <porcentaje-mora> [--write]",
 	);
 }
 
@@ -90,7 +90,11 @@ try {
 		detail,
 		resolveAdvisorId,
 	);
-	const summary = summarizeOfficialAdvisorClosure(periodo, rows);
+	const summary = summarizeOfficialAdvisorClosure(
+		periodo,
+		rows,
+		porcentajeMora,
+	);
 	const response = {
 		mode: write ? "written" : "dry-run",
 		periodo,
@@ -101,6 +105,8 @@ try {
 		mora60: summary.totales.mora_60.sumaCapital,
 		mora90: summary.totales.mora_90.sumaCapital,
 		mora120: summary.totales.mora_120_plus.sumaCapital,
+		porcentajeMora: summary.moraMensual.porcentaje,
+		moraMensualEsperada: summary.moraMensual.esperado,
 	};
 
 	if (write) {
@@ -108,6 +114,7 @@ try {
 			periodo,
 			fechaCorte,
 			reglaVersion: "finanzas-v1",
+			porcentajeMora,
 			fuente: basename(filePath),
 			fuenteHash,
 			rows,

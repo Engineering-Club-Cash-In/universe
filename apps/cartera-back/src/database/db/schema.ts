@@ -407,6 +407,9 @@
       cantidad_mora_120: integer("cantidad_mora_120").notNull().default(0),
       fecha_corte: timestamp("fecha_corte", { withTimezone: true }).notNull(),
       regla_version: text("regla_version").notNull(),
+      porcentaje_mora: numeric("porcentaje_mora", { precision: 5, scale: 2 })
+        .notNull()
+        .default("1.12"),
       fuente: text("fuente").notNull(),
       fuente_hash: text("fuente_hash").notNull(),
       created_at: timestamp("created_at", { withTimezone: true })

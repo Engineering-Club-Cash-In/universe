@@ -28,7 +28,8 @@ describe("prioridadNotificacion", () => {
 				/\.orderBy\(prioridadNotificacion, desc\(notifications\.createdAt\)\)\s*\.limit\(500\)/g,
 			),
 		].length;
-		expect(limites).toBe(4);
+		// 3 listas por rol/asignación + getAllNotifications (propias y sistema).
+		expect(limites).toBe(5);
 		expect(ordenados).toBe(limites);
 	});
 });

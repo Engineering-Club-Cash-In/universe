@@ -4,7 +4,7 @@ import { describe, expect, it, mock } from "bun:test";
 // `crearRubro` contra la carrera con `eliminarTipo` — hallazgo de Codex en el
 // PR #1602.
 //
-// El bloqueo (`FOR KEY SHARE` sobre el tipo, tomado ANTES del INSERT) es lo que
+// El bloqueo (`FOR SHARE` sobre el tipo, tomado ANTES del INSERT) es lo que
 // cierra la ventana de verdad, y eso no se puede probar sin dos transacciones
 // reales corriendo en paralelo contra Postgres. Lo que SÍ se puede probar sin
 // base de datos es la red de seguridad: si por debajo del bloqueo —o por
@@ -81,7 +81,7 @@ const PEDIDO = {
 describe("crearRubro — red de seguridad contra la carrera con eliminarTipo", () => {
   it("traduce una violación de FK en el INSERT a un 409 legible, no un 500 crudo", async () => {
     // Secuencia de `await` que hace `crearRubro`: credito (FOR UPDATE), tipo
-    // (FOR KEY SHARE), mora activa (COALESCE SUM) — las tres resuelven normal,
+    // (FOR SHARE), mora activa (COALESCE SUM) — las tres resuelven normal,
     // como si el tipo todavía existiera al leerlo — y el INSERT final es el que
     // choca, como pasaría si el borrado se coló por debajo del bloqueo.
     dbImpl = motorConCola(

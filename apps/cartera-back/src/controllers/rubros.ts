@@ -437,6 +437,21 @@ export async function listarRubrosDeCredito(credito_id: number) {
  * crédito con mora viva — justo lo que la regla prohíbe, y de forma
  * intermitente, que es la peor manera de fallar. Sumar es fail-closed: cualquier
  * mora con saldo bloquea, sin importar cuántas filas la representen.
+ *
+ * ⚠️ Va SIN candado a propósito, y no es un olvido: es la única lectura que
+ * decide en este módulo que se deja plana. Ponerle `FOR SHARE` o `FOR UPDATE`
+ * cerraría un ciclo de verdad, porque los dos lados toman los mismos dos
+ * recursos en orden opuesto: acá se toma primero `creditos` y después se
+ * miraría `moras_credito`, mientras `latefee.ts` toma `moras_credito` con
+ * `FOR UPDATE` y después escribe `creditos`. Hoy no hay deadlock sólo porque
+ * esta lectura es plana y bajo READ COMMITTED no espera a nadie.
+ *
+ * Lo que se pierde es real y está aceptado: una mora que se salda justo entre
+ * esta lectura y el commit puede dejar pasar un rubro que el guard habría
+ * frenado, o al revés. Es una ventana de milisegundos sobre una acción manual,
+ * y el precio de cerrarla sería colgar el cron de moras contra el alta de
+ * rubros. Si algún día hay que cerrarla igual, el camino NO es agregar el
+ * candado acá: es que las dos rutas tomen los recursos en el mismo orden.
  */
 async function moraActivaMonto(
   credito_id: number,
@@ -532,17 +547,25 @@ export async function crearRubro({
       // TIPO, no en el body — quien crea el rubro elige el concepto, no si ese
       // concepto se salta los frenos de mora.
       //
-      // `FOR KEY SHARE` sobre esta fila: sin bloqueo, la lectura era plana y
-      // corría en paralelo con el `FOR UPDATE` de `eliminarTipo` sobre el mismo
-      // tipo. Si el borrado alcanzaba a contar CERO usos (todavía no existe
-      // ningún rubro de ese tipo) mientras este alta ya había leído el tipo
-      // como bueno, el borrado commiteaba y el INSERT de más abajo reventaba
-      // contra la FK de `tipo_id` con un 500 — sobre una petición que era
-      // válida cuando se hizo. `KEY SHARE` es la cerradura mínima que sirve:
-      // no estorba a otro lector ni a otro alta del mismo tipo, pero bloquea
-      // un DELETE (o un cambio de llave) sobre esta fila hasta que esta
-      // transacción termine, así que el borrado queda esperando y cuando le
+      // `FOR SHARE` sobre esta fila: sin bloqueo, la lectura era plana y corría
+      // en paralelo con el `FOR UPDATE` de `eliminarTipo` sobre el mismo tipo.
+      // Si el borrado alcanzaba a contar CERO usos (todavía no existe ningún
+      // rubro de ese tipo) mientras este alta ya había leído el tipo como
+      // bueno, el borrado commiteaba y el INSERT de más abajo reventaba contra
+      // la FK de `tipo_id` con un 500 — sobre una petición que era válida
+      // cuando se hizo. Con el candado el borrado queda esperando, y cuando le
       // toca ya cuenta este rubro como uso y se rechaza solo con su propio 409.
+      //
+      // `SHARE` y no `KEY SHARE`, aunque `KEY SHARE` alcance para el DELETE:
+      // esta lectura también mira `activo`, y DESACTIVAR el tipo es un UPDATE
+      // de una columna común, que `KEY SHARE` deja pasar. Con la cerradura
+      // débil el alta podía ver `activo = true` mientras `actualizarTipo`
+      // commiteaba su `activo = false`, y el rubro entraba sobre un concepto ya
+      // retirado del catálogo. Hoy no se notaría porque `actualizarTipo` toma
+      // `FOR UPDATE` explícito, pero depender de ese detalle del OTRO lado es
+      // la clase de invariante que se rompe sola el día que alguien escriba el
+      // UPDATE directo. Y no cuesta nada: `SHARE` sigue sin estorbar a otro
+      // lector ni a otra alta del mismo tipo.
       const [tipo] = await tx
         .select({
           tipo_id: rubros_tipos.tipo_id,
@@ -552,7 +575,7 @@ export async function crearRubro({
         .from(rubros_tipos)
         .where(eq(rubros_tipos.tipo_id, tipo_id))
         .limit(1)
-        .for("key share");
+        .for("share");
 
       if (!tipo) throw new RubroError(404, "El tipo de rubro no existe.");
 
@@ -625,8 +648,8 @@ export async function crearRubro({
         "Este crédito ya tiene un rubro vivo de ese tipo."
       );
     }
-    // Red de seguridad, no la defensa principal: el `FOR KEY SHARE` de arriba
-    // ya cierra la ventana con `eliminarTipo`. Pero si algo se cuela por debajo
+    // Red de seguridad, no la defensa principal: el `FOR SHARE` de arriba ya
+    // cierra la ventana con `eliminarTipo`. Pero si algo se cuela por debajo
     // del bloqueo (o el día de mañana aparece otra vía de borrado del tipo que
     // no pase por ahí), la FK de `tipo_id` sigue siendo el freno de último
     // recurso — y sin esto, ese freno se traducía en un 500 crudo para un
@@ -712,6 +735,73 @@ export async function editarRubro(
      * espera y recalcula sobre el saldo real.
      */
     return await db.transaction(async (tx) => {
+      /**
+       * ORDEN DE CANDADOS: el CRÉDITO primero, el rubro después.
+       *
+       * Es el mismo orden que toma `crearRubro` (crédito → tipo → INSERT en
+       * `rubros`), y tomarlo igual no es prolijidad: es lo único que evita un
+       * deadlock entre las dos rutas. Si esta función bloqueara el rubro
+       * primero y el crédito después, las dos pedirían los mismos dos recursos
+       * en orden opuesto. El ciclo concreto: una edición que REVIVE un rubro
+       * completado deja sin commitear su entrada en el índice único
+       * `(credito_id, tipo_id) WHERE completado = false` y se queda esperando
+       * el crédito, mientras un alta simultánea del mismo tipo —que ya tiene el
+       * crédito— espera esa entrada del índice para poder insertar. Postgres
+       * mata a una de las dos y el usuario ve un 500 sin explicación.
+       *
+       * Por eso hace falta esta lectura previa SIN candado: para bloquear el
+       * crédito primero hay que saber cuál es, y eso sólo lo sabe el rubro. Va
+       * plana a propósito y su único resultado que se usa es `credito_id`, que
+       * no cambia nunca en la vida de un rubro. Todo lo demás —monto, saldo,
+       * anulado— se relee abajo bajo `FOR UPDATE`, que es la lectura que manda.
+       */
+      const [duenio] = await tx
+        .select({ credito_id: rubros.credito_id })
+        .from(rubros)
+        .where(eq(rubros.rubro_id, rubro_id))
+        .limit(1);
+
+      if (!duenio) throw new RubroError(404, "El rubro no existe.");
+
+      /**
+       * `FOR UPDATE` sobre el crédito, y se toma SIEMPRE, no sólo cuando el
+       * monto sube.
+       *
+       * El `statusCredit` decide si un alza entra (`puedeCrearRubro`, más
+       * abajo), y una lectura que decide no puede ser plana. Esa columna la
+       * escriben varios: el cron de moras la mueve entre ACTIVO y MOROSO
+       * (`latefee.ts`), y las transiciones terminales —INCOBRABLE, CANCELADO,
+       * CAIDO— salen de `credits.ts` y de la caída de créditos. Sin candado,
+       * esta lectura puede ver un estado que admite deuda mientras una de esas
+       * transiciones commitea el suyo un instante después, y el alza termina
+       * escrita sobre un crédito que ya no la admitía. Es exactamente la
+       * carrera que `crearRubro` cerró con su propio `FOR UPDATE`, entrando por
+       * la puerta de al lado.
+       *
+       * Se toma siempre —y no dentro del `if (subeMonto)`— porque si "sube el
+       * monto" recién se sabe DESPUÉS de leer el rubro, y leer el rubro después
+       * del crédito es justamente lo que pide el orden de arriba. Condicionarlo
+       * obligaría a tomar los candados en orden distinto según el patch, que es
+       * el deadlock de vuelta. El costo es una edición que espera si hay un
+       * pago en curso sobre ese crédito: son transacciones cortas y editar un
+       * rubro es una acción manual de administrador, no un camino caliente.
+       */
+      const [credito] = await tx
+        .select({ statusCredit: creditos.statusCredit })
+        .from(creditos)
+        .where(eq(creditos.credito_id, duenio.credito_id))
+        .limit(1)
+        .for("update");
+
+      // Mismo 404 explícito que el alta, y por la misma razón que el del tipo:
+      // sin esto, un crédito ausente se colaba hasta `credito?.statusCredit` y
+      // la policy juzgaba un estado `undefined`. Es inalcanzable —el
+      // `credito_id` del rubro es FK con ON DELETE CASCADE, así que un rubro no
+      // sobrevive a su crédito—, pero dejar la misma decisión resuelta de dos
+      // maneras en el mismo bloque es lo que hace que una de las dos se
+      // pudra callada.
+      if (!credito) throw new RubroError(404, "El crédito no existe.");
+
       const [actual] = await tx
         .select()
         .from(rubros)
@@ -814,11 +904,9 @@ export async function editarRubro(
        * y no `cambiaMonto`.
        */
       if (subeMonto) {
-        const [credito] = await tx
-          .select({ statusCredit: creditos.statusCredit })
-          .from(creditos)
-          .where(eq(creditos.credito_id, actual.credito_id))
-          .limit(1);
+        // El crédito ya se leyó y bloqueó al abrir la transacción: acá sólo se
+        // usa. Ver el comentario del `FOR UPDATE` allá arriba para por qué no
+        // se lee recién en este punto, que sería lo natural.
 
         // Se lee `activo` además de `obligatorio`, y por la misma razón que lo
         // lee el alta: subir el monto CREA DEUDA NUEVA. Sin esto, retirar un
@@ -826,6 +914,23 @@ export async function editarRubro(
         // 409 pero dejaba pasar con 200 un alza sobre un rubro existente de ese
         // tipo — la misma deuda nueva de un concepto retirado, por la puerta
         // de al lado.
+        /**
+         * `FOR SHARE` sobre el tipo: esta lectura DECIDE, así que no puede ser
+         * plana.
+         *
+         * Sin bloqueo, puede ver `activo = true` mientras `actualizarTipo`
+         * commitea su `activo = false` un instante después, y el alza entra
+         * sobre un concepto ya retirado del catálogo — exactamente la deuda
+         * nueva que este chequeo existe para impedir.
+         *
+         * `SHARE` y no `KEY SHARE`, la misma cerradura que toma el alta y por
+         * la misma razón: `KEY SHARE` defiende de que el tipo se BORRE (un
+         * DELETE toma `FOR UPDATE`), pero DESACTIVARLO es un UPDATE de una
+         * columna común, que `KEY SHARE` deja pasar. Hoy no se notaría porque
+         * `actualizarTipo` toma `FOR UPDATE` explícito, pero depender de ese
+         * detalle del otro lado es la clase de invariante que se rompe sola el
+         * día que alguien escriba el UPDATE directo.
+         */
         const [tipo] = await tx
           .select({
             obligatorio: rubros_tipos.obligatorio,
@@ -833,9 +938,20 @@ export async function editarRubro(
           })
           .from(rubros_tipos)
           .where(eq(rubros_tipos.tipo_id, actual.tipo_id))
-          .limit(1);
+          .limit(1)
+          .for("share");
 
-        if (tipo && !tipo.activo) {
+        // El 404 va primero y con la misma grafía que el alta (`if (!tipo)`).
+        // Antes se preguntaba `if (tipo && !tipo.activo)`: un tipo ausente se
+        // colaba en silencio y más abajo caía en `tipo?.obligatorio ?? false`,
+        // o sea se juzgaba como OPCIONAL y el alza se saltaba el freno de mora
+        // que su propio tipo obligatorio le habría puesto. Hoy es inalcanzable
+        // —la FK no admite borrar un tipo en uso—, pero es la misma decisión
+        // resuelta de dos maneras a 300 líneas de distancia, y esa clase de
+        // asimetría es la que sobrevive al refactor que sí la alcanza.
+        if (!tipo) throw new RubroError(404, "El tipo de rubro no existe.");
+
+        if (!tipo.activo) {
           throw new RubroError(
             409,
             "El tipo de rubro está inactivo: no se puede aumentar el monto de un rubro de ese tipo."
@@ -844,8 +960,8 @@ export async function editarRubro(
 
         const veredicto = puedeCrearRubro({
           role,
-          statusCredit: credito?.statusCredit,
-          tipoObligatorio: tipo?.obligatorio ?? false,
+          statusCredit: credito.statusCredit,
+          tipoObligatorio: tipo.obligatorio,
           moraActivaMonto: await moraActivaMonto(actual.credito_id, tx),
         });
 

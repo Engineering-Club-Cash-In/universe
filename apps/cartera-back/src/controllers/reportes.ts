@@ -2,6 +2,10 @@ import { sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import {
+  buildProjectedInvestorFlow,
+  type ProjectionSourceRow,
+} from "./investmentProjection";
+import {
 	type MoraRecoverySourceRow,
 	buildMoraRecoveryQuery,
 	buildMoraRecoveryReport,
@@ -670,7 +674,86 @@ export async function getFlujoCuotasInversiones({
     },
   };
 }
+export async function getInvestmentProjectionContext({
+  fechaInicio,
+  fechaFin,
+}: {
+  fechaInicio: string;
+  fechaFin: string;
+}) {
+  const contextRows = await db.execute(sql`
+    WITH latest_cancelation AS (
+      SELECT DISTINCT ON (cc.credit_id)
+        cc.credit_id,
+        cc.monto_cancelacion::numeric AS monto_cancelacion
+      FROM cartera.credit_cancelations cc
+      ORDER BY cc.credit_id, cc.id DESC
+    ),
+    external_positions AS (
+      SELECT
+        ce.credito_id,
+        COALESCE(SUM(ce.monto_aportado::numeric) FILTER (
+          WHERE ce.inversionista_id <> 86
+            AND ce.status::text IS DISTINCT FROM 'cancelado'
+        ), 0) AS capital_externo
+      FROM cartera.creditos_inversionistas_espejo ce
+      GROUP BY ce.credito_id
+    ),
+    cuotas_autoritativas AS (
+      SELECT DISTINCT ON (c.credito_id, c.numero_cuota)
+        c.credito_id,
+        c.numero_cuota,
+        c.fecha_vencimiento::date AS fecha_vencimiento
+      FROM cartera.cuotas_credito c
+      ORDER BY c.credito_id, c.numero_cuota, c.cuota_id DESC
+    ),
+    cierres_naturales AS (
+      SELECT ca.credito_id
+      FROM cuotas_autoritativas ca
+      JOIN cartera.creditos cr ON cr.credito_id = ca.credito_id
+      WHERE cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+      GROUP BY ca.credito_id
+      HAVING MAX(ca.fecha_vencimiento) >= ${fechaInicio}::date
+        AND MAX(ca.fecha_vencimiento) <= ${fechaFin}::date
+    )
+    SELECT
+      COUNT(DISTINCT lc.credit_id) FILTER (
+        WHERE cr."statusCredit" = 'PENDIENTE_CANCELACION'
+      )::integer AS cancelaciones_pendientes,
+      COALESCE(SUM(lc.monto_cancelacion) FILTER (
+        WHERE cr."statusCredit" = 'PENDIENTE_CANCELACION'
+      ), 0)::numeric(18, 2)::text AS monto_cancelaciones_pendientes,
+      COALESCE(SUM(ep.capital_externo) FILTER (
+        WHERE cr."statusCredit" = 'PENDIENTE_CANCELACION'
+      ), 0)::numeric(18, 2)::text AS capital_externo_cancelaciones,
+      (SELECT COUNT(*)::integer FROM cierres_naturales) AS cierres_naturales,
+      COALESCE((
+        SELECT SUM(epc.capital_externo)
+        FROM cierres_naturales cn
+        LEFT JOIN external_positions epc ON epc.credito_id = cn.credito_id
+      ), 0)::numeric(18, 2)::text AS capital_externo_cierres
+    FROM latest_cancelation lc
+    JOIN cartera.creditos cr ON cr.credito_id = lc.credit_id
+    LEFT JOIN external_positions ep ON ep.credito_id = lc.credit_id
+  `);
+  const context = contextRows.rows[0] as Record<string, unknown> | undefined;
 
+  return {
+    cancelaciones_pendientes: {
+      cantidad_creditos: Number(context?.cancelaciones_pendientes ?? 0),
+      monto_bruto: String(context?.monto_cancelaciones_pendientes ?? "0.00"),
+      capital_externo_asociado: String(
+        context?.capital_externo_cancelaciones ?? "0.00",
+      ),
+    },
+    cierres_naturales_periodo: {
+      cantidad_creditos: Number(context?.cierres_naturales ?? 0),
+      capital_externo_asociado: String(
+        context?.capital_externo_cierres ?? "0.00",
+      ),
+    },
+  };
+}
 
 export async function getFlujoCuotasPorInversionista({
   fechaInicio,
@@ -680,6 +763,44 @@ export async function getFlujoCuotasPorInversionista({
   fechaFin: string;
 }) {
   const rows = await db.execute(sql`
+    WITH parametros AS (
+      SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'America/Guatemala')::date AS fecha_corte
+    ),
+    compras_pendientes AS (
+      SELECT
+        compra.credito_id,
+        compra.inversionista_id,
+        SUM(compra.monto_aportado::numeric) AS monto_pendiente
+      FROM cartera.compras_credito_inversionista compra
+      WHERE compra.tipo_operacion IN ('compra_cartera', 'reinversion')
+        AND compra.status IN (
+          'pendiente_revision',
+          'pendiente_compra_cartera',
+          'pendiente_reinversion'
+        )
+        AND compra.revertida_at IS NULL
+      GROUP BY compra.credito_id, compra.inversionista_id
+    ),
+    cuotas_autoritativas AS (
+      SELECT DISTINCT ON (c.credito_id, c.numero_cuota)
+        c.credito_id,
+        c.numero_cuota,
+        c.fecha_vencimiento,
+        c.pagado
+      FROM cartera.cuotas_credito c
+      ORDER BY c.credito_id, c.numero_cuota, c.cuota_id DESC
+    ),
+    cuotas_hasta_periodo AS (
+      SELECT
+        c.credito_id,
+        c.numero_cuota,
+        c.fecha_vencimiento
+      FROM cuotas_autoritativas c
+      CROSS JOIN parametros p
+      WHERE c.pagado = false
+        AND c.fecha_vencimiento >= p.fecha_corte
+        AND c.fecha_vencimiento <= ${fechaFin}::date
+    )
     SELECT
       CASE
         WHEN i.tipo_reinversion = 'reinversion_combinada'
@@ -688,108 +809,144 @@ export async function getFlujoCuotasPorInversionista({
       END AS tipo_reinv_efectivo,
       i.inversionista_id,
       i.nombre,
-      COALESCE(SUM(ci.cuota_inversionista::numeric), 0) AS total_capital,
-      COALESCE(SUM(ci.monto_inversionista::numeric), 0) AS total_interes,
-      COALESCE(SUM(ci.iva_inversionista::numeric), 0)   AS total_iva,
-      MAX(i.monto_reinversion::numeric)                  AS monto_reinversion_inv
-    FROM cartera.cuotas_credito c
+      i.monto_reinversion,
+      i.descuenta_impuestos,
+      i.emite_factura,
+      cube_i.nombre AS cube_nombre,
+      CASE
+        WHEN cube_i.tipo_reinversion = 'reinversion_combinada'
+        THEN COALESCE(cube_ce.tipo_reinversion::text, 'sin_reinversion')
+        ELSE cube_i.tipo_reinversion::text
+      END AS cube_tipo_reinv_efectivo,
+      cube_i.monto_reinversion AS cube_monto_reinversion,
+      cube_i.descuenta_impuestos AS cube_descuenta_impuestos,
+      cube_i.emite_factura AS cube_emite_factura,
+      ce.cuota_inversionista AS cuota,
+      ce.monto_inversionista AS interes_inversionista,
+      ce.monto_cash_in AS interes_cube,
+      ce.iva_inversionista,
+      ce.iva_cash_in AS iva_cube,
+      ce.monto_aportado,
+      cr."statusCredit" AS status_credito,
+      ce.status::text AS status_posicion,
+      ce.fecha_inicio_participacion,
+      p.fecha_corte::text AS fecha_corte,
+      c.credito_id,
+      c.numero_cuota,
+      c.fecha_vencimiento::text,
+      c.fecha_vencimiento >= ${fechaInicio}::date AS en_periodo,
+      cr.capital AS capital_credito,
+      cr.cuota AS cuota_credito,
+      cr.porcentaje_interes,
+      ce.porcentaje_participacion_inversionista AS porcentaje_inversionista,
+      ce.porcentaje_cash_in AS porcentaje_cube,
+      COALESCE(cp.monto_pendiente, 0) AS monto_pendiente,
+      COALESCE((
+        SELECT SUM(compra.monto_aportado::numeric)
+        FROM cartera.compras_credito_inversionista compra
+        WHERE compra.credito_id = ce.credito_id
+          AND compra.inversionista_id = ce.inversionista_id
+          AND compra.tipo_operacion = 'compra_cartera'
+          AND compra.status = 'completado'
+          AND compra.revertida_at IS NULL
+          AND (COALESCE(compra.fecha_completada, compra.updated_at)
+            AT TIME ZONE 'America/Guatemala') >=
+            date_trunc('month', c.fecha_vencimiento::date - INTERVAL '1 month')
+          AND (COALESCE(compra.fecha_completada, compra.updated_at)
+            AT TIME ZONE 'America/Guatemala') <
+            date_trunc('month', c.fecha_vencimiento::date)
+      ), 0) AS monto_compras_mes_anterior,
+      COALESCE((
+        SELECT SUM(compra.monto_aportado::numeric)
+        FROM cartera.compras_credito_inversionista compra
+        WHERE compra.credito_id = ce.credito_id
+          AND compra.inversionista_id = ce.inversionista_id
+          AND compra.tipo_operacion = 'compra_cartera'
+          AND compra.status = 'completado'
+          AND compra.revertida_at IS NULL
+          AND (COALESCE(compra.fecha_completada, compra.updated_at)
+            AT TIME ZONE 'America/Guatemala') >=
+            date_trunc('month', c.fecha_vencimiento::date)
+          AND (COALESCE(compra.fecha_completada, compra.updated_at)
+            AT TIME ZONE 'America/Guatemala') <
+            date_trunc('month', c.fecha_vencimiento::date + INTERVAL '1 month')
+      ), 0) AS monto_compras_mes_actual,
+      COALESCE(cr.membresias_pago::numeric, 0)
+        + COALESCE(cr.gps::numeric, 0)
+        + COALESCE(cr.seguro_10_cuotas::numeric, 0) AS cargos,
+      false AS es_mayor_participacion
+    FROM cuotas_hasta_periodo c
+    CROSS JOIN parametros p
     JOIN cartera.creditos cr ON c.credito_id = cr.credito_id
-    JOIN cartera.creditos_inversionistas ci ON cr.credito_id = ci.credito_id
-    JOIN cartera.inversionistas i ON ci.inversionista_id = i.inversionista_id
-    LEFT JOIN cartera.creditos_inversionistas_espejo ce
-      ON cr.credito_id = ce.credito_id AND ci.inversionista_id = ce.inversionista_id
-    WHERE c.pagado = false
-      AND cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
-      AND c.fecha_vencimiento >= ${fechaInicio}::date
-      AND c.fecha_vencimiento <= ${fechaFin}::date
-    GROUP BY tipo_reinv_efectivo, i.inversionista_id, i.nombre
-    ORDER BY i.nombre
+    JOIN cartera.creditos_inversionistas_espejo ce
+      ON cr.credito_id = ce.credito_id
+    LEFT JOIN cartera.creditos_inversionistas_espejo cube_ce
+      ON cube_ce.credito_id = ce.credito_id
+      AND cube_ce.inversionista_id = 86
+    LEFT JOIN compras_pendientes cp
+      ON cp.credito_id = ce.credito_id
+      AND cp.inversionista_id = ce.inversionista_id
+    JOIN cartera.inversionistas i ON ce.inversionista_id = i.inversionista_id
+    LEFT JOIN cartera.inversionistas cube_i ON cube_i.inversionista_id = 86
+    WHERE cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+      AND ce.fecha_inicio_participacion <= p.fecha_corte
+      AND ce.monto_aportado::numeric - COALESCE(cp.monto_pendiente, 0) > 0
+    ORDER BY c.fecha_vencimiento, ce.credito_id, c.numero_cuota, i.nombre
   `);
 
-  const fmt = (n: number) => n.toFixed(2);
+  const sourceRows: ProjectionSourceRow[] = (
+    rows.rows as Record<string, unknown>[]
+  ).map((row) => ({
+    inversionista_id: Number(row.inversionista_id),
+    nombre: String(row.nombre),
+    tipo_reinv_efectivo: String(row.tipo_reinv_efectivo),
+    monto_reinversion:
+      row.monto_reinversion === null ? null : String(row.monto_reinversion),
+    descuenta_impuestos: row.descuenta_impuestos === true,
+    emite_factura: row.emite_factura === true,
+    cube_nombre:
+      row.cube_nombre === null ? undefined : String(row.cube_nombre),
+    cube_tipo_reinv_efectivo:
+      row.cube_tipo_reinv_efectivo === null
+        ? undefined
+        : String(row.cube_tipo_reinv_efectivo),
+    cube_monto_reinversion:
+      row.cube_monto_reinversion === null
+        ? null
+        : String(row.cube_monto_reinversion),
+    cube_descuenta_impuestos: row.cube_descuenta_impuestos === true,
+    cube_emite_factura: row.cube_emite_factura === true,
+    cuota: String(row.cuota),
+    interes_inversionista: String(row.interes_inversionista),
+    interes_cube: String(row.interes_cube),
+    iva_inversionista: String(row.iva_inversionista),
+    iva_cube: String(row.iva_cube),
+    cargos: String(row.cargos),
+    es_mayor_participacion: row.es_mayor_participacion === true,
+    monto_aportado: String(row.monto_aportado),
+    status_credito: String(row.status_credito),
+    status_posicion: String(row.status_posicion),
+    fecha_inicio_participacion: String(row.fecha_inicio_participacion),
+    fecha_corte: String(row.fecha_corte),
+    credito_id: Number(row.credito_id),
+    numero_cuota: Number(row.numero_cuota),
+    fecha_vencimiento: String(row.fecha_vencimiento),
+    en_periodo: row.en_periodo === true,
+    capital_credito: String(row.capital_credito),
+    cuota_credito: String(row.cuota_credito),
+    porcentaje_interes: String(row.porcentaje_interes),
+    porcentaje_inversionista: String(row.porcentaje_inversionista),
+    porcentaje_cube: String(row.porcentaje_cube),
+    monto_pendiente: String(row.monto_pendiente),
+    monto_compras_mes_anterior: String(row.monto_compras_mes_anterior),
+    monto_compras_mes_actual: String(row.monto_compras_mes_actual),
+  }));
 
-  type InvRow = {
-    inversionista_id: number;
-    nombre: string;
-    reinv_capital: number;
-    reinv_interes: number;
-    cash_capital: number;
-    cash_interes: number;
-  };
-
-  const porInv: Record<number, InvRow> = {};
-
-  for (const row of rows.rows as Record<string, unknown>[]) {
-    const id = Number(row.inversionista_id);
-    const nombre = String(row.nombre);
-    const capital = Number(row.total_capital);
-    const interes = Number(row.total_interes);
-    const iva = Number(row.total_iva);
-    const tipo = String(row.tipo_reinv_efectivo);
-    const montoReinvInv = Number(row.monto_reinversion_inv ?? 0);
-    const totalCuota = capital + interes + iva;
-
-    if (!porInv[id]) {
-      porInv[id] = { inversionista_id: id, nombre, reinv_capital: 0, reinv_interes: 0, cash_capital: 0, cash_interes: 0 };
-    }
-
-    const inv = porInv[id];
-
-    if (tipo === "sin_reinversion") {
-      inv.cash_capital += capital;
-      inv.cash_interes += interes + iva;
-    } else if (tipo === "reinversion_capital") {
-      inv.reinv_capital += capital;
-      inv.cash_interes += interes + iva;
-    } else if (tipo === "reinversion_interes") {
-      inv.reinv_interes += interes + iva;
-      inv.cash_capital += capital;
-    } else if (tipo === "reinversion_total") {
-      inv.reinv_capital += capital;
-      inv.reinv_interes += interes + iva;
-    } else if (tipo === "reinversion_variable") {
-      const reinvertido = Math.min(montoReinvInv, totalCuota);
-      const cash = Math.max(0, totalCuota - reinvertido);
-      inv.reinv_capital += reinvertido;
-      inv.cash_capital += cash;
-    } else if (tipo === "reinversion_excedente") {
-      const recibe = Math.min(montoReinvInv, totalCuota);
-      inv.cash_capital += recibe;
-      inv.reinv_capital += Math.max(0, totalCuota - recibe);
-    }
-  }
-
-  const lista = Object.values(porInv).sort((a, b) => a.nombre.localeCompare(b.nombre));
-
-  let totalReinv = 0;
-  let totalCash = 0;
-
-  for (const inv of lista) {
-    totalReinv += inv.reinv_capital + inv.reinv_interes;
-    totalCash += inv.cash_capital + inv.cash_interes;
-  }
+  const projection = buildProjectedInvestorFlow(sourceRows);
 
   return {
-    porInversionista: lista.map((inv) => {
-      const reinvTotal = inv.reinv_capital + inv.reinv_interes;
-      const cashTotal = inv.cash_capital + inv.cash_interes;
-      return {
-        inversionista_id: inv.inversionista_id,
-        nombre: inv.nombre,
-        reinversion_capital: fmt(inv.reinv_capital),
-        reinversion_interes: fmt(inv.reinv_interes),
-        reinversion_total: fmt(reinvTotal),
-        cash_capital: fmt(inv.cash_capital),
-        cash_interes: fmt(inv.cash_interes),
-        cash_total: fmt(cashTotal),
-        total: fmt(reinvTotal + cashTotal),
-      };
-    }),
-    totales: {
-      reinversion_total: fmt(totalReinv),
-      cash_total: fmt(totalCash),
-      total: fmt(totalReinv + totalCash),
-    },
+    ...projection,
+    contexto: await getInvestmentProjectionContext({ fechaInicio, fechaFin }),
   };
 }
 

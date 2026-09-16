@@ -201,6 +201,7 @@ function RouteComponent() {
 							nombreMayusculas: previewQuery.data.vendedor.nombreMayusculas,
 							dpi: previewQuery.data.vendedor.dpi,
 							dpiLetras: previewQuery.data.vendedor.dpiLetras,
+							genero: previewQuery.data.vendedor.genero,
 						}
 					: undefined,
 				agencia: previewQuery.data.agencia,

@@ -25,6 +25,7 @@ import {
 	vehicleDocuments,
 	vehicleInspections,
 	vehicles,
+	vehicleVendors,
 } from "../db/schema";
 import { user } from "../db/schema/auth";
 import {
@@ -567,6 +568,19 @@ export const crmRouter = {
 			.orderBy(companies.createdAt);
 	}),
 
+	// Catálogo completo para asignar la agencia desde análisis: getCompanies
+	// filtra por creador y a los analistas les devolvería vacío.
+	getCompaniesForContracts: analystProcedure.handler(async () => {
+		return await db
+			.select({
+				id: companies.id,
+				name: companies.name,
+				razonSocial: companies.razonSocial,
+			})
+			.from(companies)
+			.orderBy(companies.name);
+	}),
+
 	getCompanyRelationshipStats: crmProcedure.handler(async ({ context }) => {
 		const leadsOwnerCondition =
 			context.userRole === "sales"
@@ -615,6 +629,7 @@ export const crmRouter = {
 		.input(
 			z.object({
 				name: z.string().min(1, "Company name is required"),
+				razonSocial: z.string().trim().optional(),
 				industry: z.string().optional(),
 				size: z.string().optional(),
 				website: z.string().optional(),
@@ -641,6 +656,7 @@ export const crmRouter = {
 			z.object({
 				id: z.string().uuid(),
 				name: z.string().min(1, "Company name is required").optional(),
+				razonSocial: z.string().trim().optional(),
 				industry: z.string().optional(),
 				size: z.string().optional(),
 				website: z.string().optional(),
@@ -6696,6 +6712,8 @@ export const crmRouter = {
 					diaPagoMensual: opportunities.diaPagoMensual,
 					diaPagoOriginalSistema: opportunities.diaPagoOriginalSistema,
 					creditType: opportunities.creditType,
+					vendorId: opportunities.vendorId,
+					companyId: opportunities.companyId,
 					createdAt: opportunities.createdAt,
 					updatedAt: opportunities.updatedAt,
 				})
@@ -6774,6 +6792,43 @@ export const crmRouter = {
 							.from(creditAnalysis)
 							.where(inArray(creditAnalysis.opportunityId, opportunityIds))
 					: [];
+
+			// Partes del contrato ya asignadas (vendedor o agencia)
+			const vendorIds = [
+				...new Set(
+					opps.map((o) => o.vendorId).filter((id): id is string => !!id),
+				),
+			];
+			const companyIds = [
+				...new Set(
+					opps.map((o) => o.companyId).filter((id): id is string => !!id),
+				),
+			];
+			const vendorsData =
+				vendorIds.length > 0
+					? await db
+							.select({
+								id: vehicleVendors.id,
+								name: vehicleVendors.name,
+								dpi: vehicleVendors.dpi,
+								gender: vehicleVendors.gender,
+							})
+							.from(vehicleVendors)
+							.where(inArray(vehicleVendors.id, vendorIds))
+					: [];
+			const companiesData =
+				companyIds.length > 0
+					? await db
+							.select({
+								id: companies.id,
+								name: companies.name,
+								razonSocial: companies.razonSocial,
+							})
+							.from(companies)
+							.where(inArray(companies.id, companyIds))
+					: [];
+			const vendorsMap = new Map(vendorsData.map((v) => [v.id, v]));
+			const companiesMap = new Map(companiesData.map((c) => [c.id, c]));
 
 			// Create maps for quick lookup
 			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
@@ -6888,6 +6943,12 @@ export const crmRouter = {
 								}),
 							}
 						: null,
+					vendedor: opp.vendorId
+						? (vendorsMap.get(opp.vendorId) ?? null)
+						: null,
+					empresa: opp.companyId
+						? (companiesMap.get(opp.companyId) ?? null)
+						: null,
 					stage: {
 						id: stage50.id,
 						name: stage50.name,
@@ -6921,9 +6982,36 @@ export const crmRouter = {
 				// aunque coincida numéricamente con 15/30 (ver esDiaIA). Se revalida
 				// server-side contra suggestedPaymentDays. Requerido, sin default.
 				elegidoDesdeRecomendacionIA: z.boolean(),
+				// Partes del contrato. Opcionales: si faltan, jurídico las llena a
+				// mano. Carro usado: el dueño que vende. Carro nuevo: la agencia.
+				vendedor: z
+					.object({
+						dpi: z.string(),
+						nombre: z.string().trim().min(1, "El nombre es requerido"),
+						genero: z.enum(["male", "female"]),
+					})
+					.optional(),
+				agencia: z
+					.object({
+						companyId: z.string().uuid(),
+						razonSocial: z
+							.string()
+							.trim()
+							.min(1, "La razón social es requerida"),
+					})
+					.optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			const dpiVendedor = input.vendedor
+				? validarDpi(input.vendedor.dpi)
+				: null;
+			if (dpiVendedor && !dpiVendedor.valid) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `DPI del vendedor: ${dpiVendedor.error}`,
+				});
+			}
+
 			// Get the opportunity
 			const [opportunity] = await db
 				.select()
@@ -7160,10 +7248,62 @@ export const crmRouter = {
 
 			// Update opportunity and record history in a transaction for atomicity
 			await auditedTransaction(async (tx) => {
+				// El vendedor se identifica por DPI: si ya existe se actualiza con lo
+				// capturado (nombre legal y género) en vez de duplicarlo.
+				let vendorId: string | undefined;
+				if (input.vendedor && dpiVendedor?.valid) {
+					const [existente] = await tx
+						.select({ id: vehicleVendors.id })
+						.from(vehicleVendors)
+						.where(eqDpi(vehicleVendors.dpi, dpiVendedor.dpiLimpio))
+						.limit(1);
+
+					if (existente) {
+						await tx
+							.update(vehicleVendors)
+							.set({
+								name: input.vendedor.nombre,
+								gender: input.vendedor.genero,
+								updatedAt: new Date(),
+							})
+							.where(eq(vehicleVendors.id, existente.id));
+						vendorId = existente.id;
+					} else {
+						const [nuevo] = await tx
+							.insert(vehicleVendors)
+							.values({
+								name: input.vendedor.nombre,
+								dpi: dpiVendedor.dpiLimpio,
+								gender: input.vendedor.genero,
+								vendorType: "individual",
+							})
+							.returning({ id: vehicleVendors.id });
+						vendorId = nuevo.id;
+					}
+				}
+
+				if (input.agencia) {
+					const [empresa] = await tx
+						.update(companies)
+						.set({
+							razonSocial: input.agencia.razonSocial,
+							updatedAt: new Date(),
+						})
+						.where(eq(companies.id, input.agencia.companyId))
+						.returning({ id: companies.id });
+					if (!empresa) {
+						throw new ORPCError("NOT_FOUND", {
+							message: "La empresa (agencia) no existe",
+						});
+					}
+				}
+
 				// Update opportunity with combined investors and move to 80%
 				await tx
 					.update(opportunities)
 					.set({
+						...(vendorId && { vendorId }),
+						...(input.agencia && { companyId: input.agencia.companyId }),
 						inversionistas: JSON.stringify(allInvestors),
 						stageId: stage80.id,
 						categoria: input.categoria,
@@ -7181,7 +7321,11 @@ export const crmRouter = {
 					entity: "opportunity",
 					id: input.opportunityId,
 					action: "assign_investor",
-					data: { categoria: input.categoria },
+					data: {
+						categoria: input.categoria,
+						vendedor: input.vendedor,
+						agencia: input.agencia,
+					},
 				});
 
 				// Record stage history

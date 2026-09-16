@@ -23,6 +23,12 @@ import {
 import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+	ContractPartiesFields,
+	type ContractPartiesValue,
+	emptyContractParties,
+	toContractPartiesPayload,
+} from "@/components/contract-parties/ContractPartiesFields";
+import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
 } from "@/components/opportunity-detail-modal";
@@ -106,6 +112,8 @@ export function InvestmentAssignmentSection({
 	// Estados para campos adicionales del detalle de crédito
 	const [editDireccion, setEditDireccion] = useState<string>("");
 	const [editNit, setEditNit] = useState<string>("");
+	const [contractParties, setContractParties] =
+		useState<ContractPartiesValue>(emptyContractParties);
 	// Default: si estamos del 1-20 del mes es 15, si es 21-31 es último día (31)
 	const getDefaultDiaPago = (): PaymentDay => {
 		const today = new Date();
@@ -214,6 +222,22 @@ export function InvestmentAssignmentSection({
 			setElegidoDesdeRecomendacionIA(
 				selectedOpportunity.diaPagoOriginalSistema != null,
 			);
+			// Partes del contrato: se precargan con lo que ya tenga la oportunidad
+			setContractParties({
+				vendedor: {
+					dpi: selectedOpportunity.vendedor?.dpi ?? "",
+					nombre: selectedOpportunity.vendedor?.name ?? "",
+					genero:
+						selectedOpportunity.vendedor?.gender === "male" ||
+						selectedOpportunity.vendedor?.gender === "female"
+							? selectedOpportunity.vendedor.gender
+							: "",
+				},
+				agencia: {
+					companyId: selectedOpportunity.empresa?.id ?? "",
+					razonSocial: selectedOpportunity.empresa?.razonSocial ?? "",
+				},
+			});
 			// Limpiar inversionistas seleccionados
 			setSelectedInversionistas([]);
 			setIsEditingExisting(false);
@@ -230,6 +254,7 @@ export function InvestmentAssignmentSection({
 			nit,
 			diaPagoMensual,
 			elegidoDesdeRecomendacionIA,
+			partesContrato,
 		}: {
 			opportunityId: string;
 			inversionistas?: string;
@@ -237,6 +262,7 @@ export function InvestmentAssignmentSection({
 			nit: string;
 			diaPagoMensual: PaymentDay;
 			elegidoDesdeRecomendacionIA: boolean;
+			partesContrato: ReturnType<typeof toContractPartiesPayload>;
 		}) => {
 			return client.assignInvestorAndAdvance({
 				opportunityId,
@@ -246,6 +272,7 @@ export function InvestmentAssignmentSection({
 				nit: nit,
 				diaPagoMensual: diaPagoMensual,
 				elegidoDesdeRecomendacionIA,
+				...partesContrato,
 			});
 		},
 		onSuccess: () => {
@@ -476,6 +503,10 @@ export function InvestmentAssignmentSection({
 			nit: editNit,
 			diaPagoMensual: editDiaPagoMensual,
 			elegidoDesdeRecomendacionIA,
+			partesContrato: toContractPartiesPayload(
+				contractParties,
+				selectedOpportunity?.vehicle?.isNew,
+			),
 		});
 	};
 
@@ -1010,6 +1041,18 @@ export function InvestmentAssignmentSection({
 							</div>
 
 							<Separator />
+
+							{/* Partes del contrato: solo con vehículo, que decide qué pedir */}
+							{selectedOpportunity.vehicle && (
+								<>
+									<ContractPartiesFields
+										vehicleIsNew={selectedOpportunity.vehicle.isNew}
+										value={contractParties}
+										onChange={setContractParties}
+									/>
+									<Separator />
+								</>
+							)}
 
 							{/* Existing Investors section */}
 							{selectedOpportunity?.existingInvestors &&

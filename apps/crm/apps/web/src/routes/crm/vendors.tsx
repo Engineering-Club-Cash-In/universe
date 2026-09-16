@@ -1,11 +1,21 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Building2, Edit, Plus, Search, Trash2, User, X } from "lucide-react";
+import {
+	Building2,
+	Edit,
+	Loader2,
+	Plus,
+	Search,
+	Trash2,
+	User,
+	X,
+} from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import { VendorGenderSelect } from "@/components/contract-parties/VendorGenderSelect";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -59,6 +69,10 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { usePersistedState } from "@/hooks/usePersistedState";
+import {
+	soloDigitosDpi,
+	useVendorDpiLookup,
+} from "@/hooks/useVendorDpiLookup";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/vendors")({
@@ -67,7 +81,7 @@ export const Route = createFileRoute("/crm/vendors")({
 
 const vendorSchema = z.object({
 	name: z.string().min(1, "El nombre es requerido"),
-	phone: z.string().min(8, "El teléfono es requerido"),
+	phone: z.string().optional(),
 	dpi: z
 		.string()
 		.min(13, "DPI debe tener 13 dígitos")
@@ -78,6 +92,7 @@ const vendorSchema = z.object({
 	companyName: z.string().optional(),
 	email: z.string().email("Email inválido").optional().or(z.literal("")),
 	address: z.string().optional(),
+	gender: z.enum(["male", "female"]).optional(),
 });
 
 type VendorFormData = z.infer<typeof vendorSchema>;
@@ -108,6 +123,7 @@ function VendorsPage() {
 		mutationFn: async (data: VendorFormData) => {
 			return await client.createVendor({
 				...data,
+				phone: data.phone || undefined,
 				email: data.email || undefined,
 			});
 		},
@@ -127,6 +143,7 @@ function VendorsPage() {
 				id,
 				data: {
 					...data,
+					phone: data.phone || undefined,
 					email: data.email || undefined,
 				},
 			});
@@ -166,6 +183,7 @@ function VendorsPage() {
 			companyName: "",
 			email: "",
 			address: "",
+			gender: undefined,
 		},
 	});
 
@@ -173,12 +191,22 @@ function VendorsPage() {
 		resolver: zodResolver(vendorSchema),
 	});
 
+	// DPI → RENAP: autollena nombre y género (solo persona individual)
+	const createLookup = useVendorDpiLookup((result) => {
+		if (result.nombre) createForm.setValue("name", result.nombre);
+		if (result.genero) createForm.setValue("gender", result.genero);
+	});
+	const editLookup = useVendorDpiLookup((result) => {
+		if (result.nombre) editForm.setValue("name", result.nombre);
+		if (result.genero) editForm.setValue("gender", result.genero);
+	});
+
 	// Filter vendors
 	const filteredVendors = vendorsQuery.data?.filter((vendor: any) => {
 		const matchesSearch =
 			vendor.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
 			vendor.dpi.includes(searchTerm) ||
-			vendor.phone.includes(searchTerm) ||
+			(vendor.phone ?? "").includes(searchTerm) ||
 			(vendor.companyName &&
 				vendor.companyName.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -192,12 +220,13 @@ function VendorsPage() {
 		setSelectedVendor(vendor);
 		editForm.reset({
 			name: vendor.name,
-			phone: vendor.phone,
+			phone: vendor.phone ?? "",
 			dpi: vendor.dpi,
 			vendorType: vendor.vendorType,
 			companyName: vendor.companyName || "",
 			email: vendor.email || "",
 			address: vendor.address || "",
+			gender: vendor.gender ?? undefined,
 		});
 		setIsEditOpen(true);
 	};
@@ -264,7 +293,7 @@ function VendorsPage() {
 										name="phone"
 										render={({ field }) => (
 											<FormItem>
-												<FormLabel>Teléfono</FormLabel>
+												<FormLabel>Teléfono (opcional)</FormLabel>
 												<FormControl>
 													<Input placeholder="5555-5555" {...field} />
 												</FormControl>
@@ -281,9 +310,39 @@ function VendorsPage() {
 										render={({ field }) => (
 											<FormItem>
 												<FormLabel>DPI</FormLabel>
-												<FormControl>
-													<Input placeholder="1234567890101" {...field} />
-												</FormControl>
+												<div className="flex gap-2">
+													<FormControl>
+														<Input
+															placeholder="1234567890101"
+															{...field}
+															onChange={(e) => {
+																field.onChange(e);
+																if (
+																	createForm.getValues("vendorType") === "individual" &&
+																	soloDigitosDpi(e.target.value).length === 13
+																) {
+																	createLookup.buscar(e.target.value);
+																}
+															}}
+														/>
+													</FormControl>
+													<Button
+														type="button"
+														variant="outline"
+														size="icon"
+														title="Buscar en RENAP"
+														disabled={createLookup.isPending}
+														onClick={() =>
+															createLookup.buscar(createForm.getValues("dpi"), { force: true })
+														}
+													>
+														{createLookup.isPending ? (
+															<Loader2 className="h-4 w-4 animate-spin" />
+														) : (
+															<Search className="h-4 w-4" />
+														)}
+													</Button>
+												</div>
 												<FormMessage />
 											</FormItem>
 										)}
@@ -315,6 +374,23 @@ function VendorsPage() {
 										)}
 									/>
 								</div>
+
+								{createForm.watch("vendorType") === "individual" && (
+									<FormField
+										control={createForm.control}
+										name="gender"
+										render={({ field }) => (
+											<FormItem>
+												<FormLabel>Género</FormLabel>
+												<VendorGenderSelect
+													value={field.value}
+													onChange={field.onChange}
+												/>
+												<FormMessage />
+											</FormItem>
+										)}
+									/>
+								)}
 
 								{createForm.watch("vendorType") === "empresa" && (
 									<FormField
@@ -551,7 +627,7 @@ function VendorsPage() {
 										name="phone"
 										render={({ field }) => (
 											<FormItem>
-												<FormLabel>Teléfono</FormLabel>
+												<FormLabel>Teléfono (opcional)</FormLabel>
 												<FormControl>
 													<Input placeholder="5555-5555" {...field} />
 												</FormControl>
@@ -568,9 +644,39 @@ function VendorsPage() {
 										render={({ field }) => (
 											<FormItem>
 												<FormLabel>DPI</FormLabel>
-												<FormControl>
-													<Input placeholder="1234567890101" {...field} />
-												</FormControl>
+												<div className="flex gap-2">
+													<FormControl>
+														<Input
+															placeholder="1234567890101"
+															{...field}
+															onChange={(e) => {
+																field.onChange(e);
+																if (
+																	editForm.getValues("vendorType") === "individual" &&
+																	soloDigitosDpi(e.target.value).length === 13
+																) {
+																	editLookup.buscar(e.target.value);
+																}
+															}}
+														/>
+													</FormControl>
+													<Button
+														type="button"
+														variant="outline"
+														size="icon"
+														title="Buscar en RENAP"
+														disabled={editLookup.isPending}
+														onClick={() =>
+															editLookup.buscar(editForm.getValues("dpi"), { force: true })
+														}
+													>
+														{editLookup.isPending ? (
+															<Loader2 className="h-4 w-4 animate-spin" />
+														) : (
+															<Search className="h-4 w-4" />
+														)}
+													</Button>
+												</div>
 												<FormMessage />
 											</FormItem>
 										)}
@@ -602,6 +708,23 @@ function VendorsPage() {
 										)}
 									/>
 								</div>
+
+								{editForm.watch("vendorType") === "individual" && (
+									<FormField
+										control={editForm.control}
+										name="gender"
+										render={({ field }) => (
+											<FormItem>
+												<FormLabel>Género</FormLabel>
+												<VendorGenderSelect
+													value={field.value}
+													onChange={field.onChange}
+												/>
+												<FormMessage />
+											</FormItem>
+										)}
+									/>
+								)}
 
 								{editForm.watch("vendorType") === "empresa" && (
 									<FormField

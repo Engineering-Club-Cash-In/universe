@@ -40,6 +40,7 @@ export const crmAppRouter = {
 	getSalesStages: crmRouter.getSalesStages,
 	getCrmUsers: crmRouter.getCrmUsers,
 	getCompanies: crmRouter.getCompanies,
+	getCompaniesForContracts: crmRouter.getCompaniesForContracts,
 	getCompanyRelationshipStats: crmRouter.getCompanyRelationshipStats,
 	createCompany: crmRouter.createCompany,
 	updateCompany: crmRouter.updateCompany,
@@ -290,6 +291,7 @@ export const miscAppRouter = {
 	updateVendor: vendorsRouter.update,
 	deleteVendor: vendorsRouter.delete,
 	searchVendors: vendorsRouter.search,
+	lookupVendorByDpi: vendorsRouter.lookupByDpi,
 
 	// Notes routes
 	getEntityNotes: notesRouter.getEntityNotes,

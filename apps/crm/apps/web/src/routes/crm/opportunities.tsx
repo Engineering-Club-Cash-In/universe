@@ -69,6 +69,8 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { CompanyQuickCreateDialog } from "@/components/contract-parties/CompanyQuickCreateDialog";
+import { VendorQuickCreateDialog } from "@/components/contract-parties/VendorQuickCreateDialog";
 import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
@@ -433,6 +435,11 @@ function RouteComponent() {
 	const [selectedOpportunity, setSelectedOpportunity] =
 		useState<Opportunity | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
+	// Alta rápida de vendedor o empresa desde los modales de la oportunidad
+	const [quickCreate, setQuickCreate] = useState<{
+		tipo: "vendedor" | "empresa";
+		form: "create" | "edit";
+	} | null>(null);
 	const [stageFilter, setStageFilter] = usePersistedState<string>("crm/opportunities/stageFilter", "all");
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -2245,6 +2252,12 @@ function RouteComponent() {
 											placeholder="Seleccionar vendedor"
 											width="full"
 										/>
+										<QuickCreateLink
+											label="Crear vendedor"
+											onClick={() =>
+												setQuickCreate({ tipo: "vendedor", form: "create" })
+											}
+										/>
 									</div>
 								)}
 							</createOpportunityForm.Field>
@@ -3186,6 +3199,14 @@ function RouteComponent() {
 													width="full"
 													disabled={isWonLocked}
 												/>
+												{!isWonLocked && (
+													<QuickCreateLink
+														label="Crear empresa"
+														onClick={() =>
+															setQuickCreate({ tipo: "empresa", form: "edit" })
+														}
+													/>
+												)}
 											</div>
 										)}
 								</editOpportunityForm.Field>
@@ -3326,6 +3347,14 @@ function RouteComponent() {
 												width="full"
 												disabled={isWonLocked}
 											/>
+											{!isWonLocked && (
+												<QuickCreateLink
+													label="Crear vendedor"
+													onClick={() =>
+														setQuickCreate({ tipo: "vendedor", form: "edit" })
+													}
+												/>
+											)}
 										</div>
 									)}
 								</editOpportunityForm.Field>
@@ -3908,7 +3937,46 @@ function RouteComponent() {
 					vehicleLabel={`${selectedOpportunity.vehicle.year} ${selectedOpportunity.vehicle.make} ${selectedOpportunity.vehicle.model}${selectedOpportunity.vehicle.licensePlate ? ` • ${selectedOpportunity.vehicle.licensePlate}` : ""}`}
 				/>
 			)}
+
+			<VendorQuickCreateDialog
+				open={quickCreate?.tipo === "vendedor"}
+				onOpenChange={(open) => !open && setQuickCreate(null)}
+				onSaved={(vendor) => {
+					if (quickCreate?.form === "edit") {
+						editOpportunityForm.setFieldValue("vendorId", vendor.id);
+					} else {
+						createOpportunityForm.setFieldValue("vendorId", vendor.id);
+					}
+				}}
+			/>
+			<CompanyQuickCreateDialog
+				open={quickCreate?.tipo === "empresa"}
+				onOpenChange={(open) => !open && setQuickCreate(null)}
+				onSaved={(company) =>
+					editOpportunityForm.setFieldValue("companyId", company.id)
+				}
+			/>
 		</div>
+	);
+}
+
+/** Acceso directo bajo un selector para crear el registro sin salir del modal. */
+function QuickCreateLink({
+	label,
+	onClick,
+}: {
+	label: string;
+	onClick: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			className="inline-flex items-center gap-1 text-primary text-xs hover:underline"
+		>
+			<Plus className="h-3 w-3" />
+			{label}
+		</button>
 	);
 }
 

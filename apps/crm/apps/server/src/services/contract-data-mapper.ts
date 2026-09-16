@@ -217,6 +217,8 @@ export interface ContractData {
 		dpiFormateado: string;
 		dpiLetras: string;
 		tipo: string;
+		// "male" | "female": precarga {genderVendedor} de la Declaración de Vendedor
+		genero?: string;
 		empresaNombre?: string;
 		telefono?: string;
 		email?: string;
@@ -573,6 +575,7 @@ export async function mapOpportunityToContractData(
 				dpiFormateado: formatDpi(vendor.dpi || ""),
 				dpiLetras: dpiToWordsUppercase(vendor.dpi || ""),
 				tipo: vendor.vendorType,
+				genero: vendor.gender || undefined,
 				empresaNombre: vendor.companyName || undefined,
 				// {agencia} NO sale de aquí: en los contratos históricos es la
 				// distribuidora de autos nuevos (JAC, AUTOMAQ), que no está en
@@ -617,7 +620,7 @@ export async function mapOpportunityToContractData(
 	// del lead y no necesariamente representa una agencia del vehículo.
 	const [empresaAgencia] = vehicle?.isNew === true && opportunity.companyId
 		? await db
-				.select({ name: companies.name })
+				.select({ name: companies.name, razonSocial: companies.razonSocial })
 				.from(companies)
 				.where(eq(companies.id, opportunity.companyId))
 				.limit(1)
@@ -690,7 +693,11 @@ export async function mapOpportunityToContractData(
 		desembolso,
 		entidad,
 		// trim: varios nombres en `companies` traen espacios sobrantes
-		agencia: empresaAgencia?.name?.trim() || undefined,
+		// La razón social es el nombre legal; el comercial queda de respaldo.
+		agencia:
+			empresaAgencia?.razonSocial?.trim() ||
+			empresaAgencia?.name?.trim() ||
+			undefined,
 		oportunidad: {
 			id: opportunity.id,
 			titulo: opportunity.title,

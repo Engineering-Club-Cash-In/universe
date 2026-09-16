@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { levantarRecuperacionSiPagoTodo } from "./buckets/levantarRecuperacion";
 import { eq, and, ne } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
@@ -200,6 +201,24 @@ export async function validarPagoRegistrado({
     undefined,
     tx
   );
+
+  // COBROS-02 Fase 4 — este es EL punto donde se levanta `EN_RECUPERACION`
+  // (decisión 5: al VALIDARSE el pago, no al registrarlo). Va dentro de la
+  // misma transacción: si la validación se revierte, el levantamiento también.
+  // No hace nada si el crédito no está en ese estado.
+  const levantamiento = await levantarRecuperacionSiPagoTodo(
+    credito_id,
+    tx,
+    // El `pago_id` es lo que hace REVERSIBLE el levantamiento: sin él se guarda
+    // NULL y reversar este pago ya no puede devolver el estado (review de
+    // Codex, P1 — el camino normal sí lo pasaba, este se me quedó atrás).
+    pago_id,
+  );
+  if (levantamiento.levantado) {
+    console.log(
+      `🚗 Crédito ${credito_id} sale de EN_RECUPERACION: ya no debe cuotas ni mora`,
+    );
+  }
 
   return {
     pago_id,

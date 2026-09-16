@@ -42,7 +42,11 @@ import {
   convenios_pagos_resume,
   creditos,
 } from "../database/db/schema";
-import { contarCuotasVencidasReales, createMora } from "./latefee";
+import {
+  contarCuotasVencidasReales,
+  createMora,
+  STATUS_EN_RECUPERACION,
+} from "./latefee";
 
 export type ConvenioDecisionTipo = "aprobado" | "rechazado";
 export type ConvenioDecisionOrigen = "crm" | "cartera_front";
@@ -318,9 +322,18 @@ export async function decidirConvenio(
 
         const montoMora = new Big(capital).times("0.0112").times(numCuotasAtrasadas);
 
+        // COBROS-02 Fase 4: si el crédito venía EN_RECUPERACION, ahí vuelve —
+        // rechazar el convenio no puede levantar un estado que puso una
+        // persona (mismo criterio que deshacerlo). Los convenios anteriores a
+        // la migración 0020 no tienen el dato y siguen el camino de siempre.
         await tx
           .update(creditos)
-          .set({ statusCredit: "MOROSO" })
+          .set({
+            statusCredit:
+              convenioActualizado.status_credito_previo === STATUS_EN_RECUPERACION
+                ? STATUS_EN_RECUPERACION
+                : "MOROSO",
+          })
           .where(eq(creditos.credito_id, convenioActualizado.credito_id));
 
         const resultMora = await createMora(
@@ -345,7 +358,12 @@ export async function decidirConvenio(
       } else {
         await tx
           .update(creditos)
-          .set({ statusCredit: "ACTIVO" })
+          .set({
+            statusCredit:
+              convenioActualizado.status_credito_previo === STATUS_EN_RECUPERACION
+                ? STATUS_EN_RECUPERACION
+                : "ACTIVO",
+          })
           .where(eq(creditos.credito_id, convenioActualizado.credito_id));
       }
     }

@@ -13,6 +13,12 @@ export type StatusCreditEnum =
 	| "INCOBRABLE"
 	| "PENDIENTE_CANCELACION"
 	| "MOROSO"
+	/**
+	 * COBROS-02 Fase 4 — se decidió recuperar la unidad y todavía no se recoge.
+	 * Se comporta como MOROSO en todo (cobra, devenga mora, se gestiona) salvo
+	 * en dos cosas: fija B4 como PISO y el motor no se lo pisa.
+	 */
+	| "EN_RECUPERACION"
 	| "EN_CONVENIO";
 
 export type EstadoLiquidacionEnum =

@@ -158,6 +158,19 @@
     MOROSO = "MOROSO",
     EN_CONVENIO = "EN_CONVENIO",
     CAIDO = "CAIDO",
+    /**
+     * COBROS-02 Fase 4 — se decidió recuperar la unidad y todavía no se recoge.
+     *
+     * `statusCredit` es una columna `text`, no un enum de Postgres: agregar un
+     * valor NO necesita migración de columna. La contrapartida es que nada en
+     * la base rechaza un valor inválido, así que esta lista y la del `text(...)`
+     * de abajo son la única validación que hay — tienen que ir juntas.
+     *
+     * Ojo con lo que NO es: no es INCOBRABLE. Volverse incobrable es un castigo
+     * contable (calendario de insoluto, regla propia de cierre de cuota, trato
+     * distinto en facturación) que pasa por contabilidad — decisión 6 del plan 08.
+     */
+    EN_RECUPERACION = "EN_RECUPERACION",
   }
   // 2. Créditos
 
@@ -223,11 +236,18 @@
     }).notNull(),
 
     statusCredit: text("statusCredit", {
-      enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO", "CAIDO"],
+      enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO", "CAIDO", "EN_RECUPERACION"],
     })
       .notNull()
       .default(StatusCredit.ACTIVO),
     otros: numeric("otros", { precision: 18, scale: 2 }).notNull().default("0"), // Otros cargos o pagos adicionales
+    // COBROS-02 Fase 4 — qué pago levantó `EN_RECUPERACION` (migración 0021).
+    //
+    // El levantamiento deja el crédito ACTIVO y borra toda huella de la
+    // decisión humana. Si contabilidad reversa ESE pago, sin esta marca el
+    // crédito se queda ACTIVO y el motor a lo sumo lo vuelve MOROSO: el piso en
+    // B4 se pierde en silencio. Sin FK a propósito: es una marca histórica.
+    recuperacion_levantada_pago_id: integer("recuperacion_levantada_pago_id"),
     permite_abono_capital: boolean("permite_abono_capital").notNull().default(false),
     estado_devolucion: estadoDevolucionEnum("estado_devolucion").notNull().default("NO_APLICA"),
     is_vehiculo_propio: boolean("is_vehiculo_propio").notNull().default(false), // true si el vehículo es propiedad de Cash In
@@ -517,6 +537,14 @@
       .array()
       .notNull()
       .default(sql`ARRAY[]::text[]`), // estados que FUERZAN este bucket (INCOBRABLE→B5)
+    // COBROS-02 Fase 4 — estados para los que este bucket es el MÍNIMO (piso).
+    // Distinto de `estados_incluidos`, que lo CLAVA: con un piso el crédito
+    // puede SUBIR por cuotas atrasadas (EN_RECUPERACION con 5 cuotas llega a B5
+    // conservando el estado), pero nunca baja de acá. Ver bucketDeCredito.
+    estados_piso: text("estados_piso")
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
     es_operativo: boolean("es_operativo").notNull().default(true), // false = fuera del funnel (B5 jurídico)
     orden: integer("orden").notNull().default(0),
     color: varchar("color", { length: 16 }),
@@ -1705,6 +1733,15 @@
     // "pendiente de aprobación" (CB-033). Sin filtrar por esta columna, un
     // convenio deshecho reaparece en la cola del supervisor y aprobarlo lo
     // resucita. Toda consulta de pendientes tiene que exigir `anulado_at IS NULL`.
+    // COBROS-02 Fase 4 — statusCredit del crédito ANTES de entrar al convenio.
+    //
+    // `statusCredit` es UNA columna: al firmar, el crédito pasa a EN_CONVENIO y
+    // el EN_RECUPERACION que traía desaparece. Sin esta copia, completar el
+    // convenio lo dejaba ACTIVO — o sea que pagar el convenio LEVANTABA la
+    // recuperación por la puerta de atrás, justo lo que la decisión 4 prohíbe.
+    // NULL en los convenios anteriores a la migración 0020.
+    status_credito_previo: text("status_credito_previo"),
+
     anulado_at: timestamp("anulado_at", { withTimezone: true }),
     anulado_por: integer("anulado_por").references(() => platform_users.id),
     motivo_anulacion: text("motivo_anulacion"),

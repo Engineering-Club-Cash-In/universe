@@ -108,7 +108,7 @@ export function buildMoraRecoveryQuery({
       SELECT m.credito_id, m.esperado
       FROM mora_activa m
       JOIN cartera.creditos c ON c.credito_id = m.credito_id
-      WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+      WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
     )`;
 
 	return sql`

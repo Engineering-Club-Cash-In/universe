@@ -2988,7 +2988,18 @@ export const cobrosRouter = {
 						"El crédito ya tiene un convenio de pago. Para cambiarlo hay que rechazar el vigente desde cartera.",
 				});
 			}
-			if (statusCredit !== "ACTIVO" && statusCredit !== "MOROSO") {
+			// COBROS-02 Fase 4: EN_RECUPERACION entra acá porque la decisión 4 lo
+			// pide explícitamente — "un convenio creado desde B4 se queda en B4".
+			// Sin esto, todo el manejo de `status_credito_previo` (guardar el
+			// estado al firmar y devolvérselo al completar/deshacer/rechazar)
+			// era inalcanzable desde el CRM: el crédito ni siquiera podía crear
+			// un convenio (review de Codex, P1). Y negarle un convenio a quien
+			// está por perder la unidad es negarle justo la salida.
+			if (
+				statusCredit !== "ACTIVO" &&
+				statusCredit !== "MOROSO" &&
+				statusCredit !== "EN_RECUPERACION"
+			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `No se puede crear un convenio sobre un crédito ${statusCredit}`,
 				});

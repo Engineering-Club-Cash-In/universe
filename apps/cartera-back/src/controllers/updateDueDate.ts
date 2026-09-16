@@ -315,7 +315,7 @@ export const fixCreditosWithoutFebruary = async ({
     }>(
       `SELECT c.credito_id, c.numero_credito_sifco
        FROM ${CARTERA_SCHEMA}.creditos c
-       WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+       WHERE c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')
          AND c.credito_id NOT IN (
            SELECT DISTINCT cc.credito_id
            FROM ${CARTERA_SCHEMA}.cuotas_credito cc

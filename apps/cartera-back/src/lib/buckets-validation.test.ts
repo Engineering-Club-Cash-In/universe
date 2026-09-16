@@ -4,12 +4,12 @@ import { bucketDeCredito } from "./buckets-classification";
 import type { BucketCatalogo, BucketCatalogoCompleto } from "./buckets-classification";
 
 const SEED_VALIDO: BucketCatalogoCompleto[] = [
-  { numero: 0, prefijo: "B0", nombre: "Cartera Sana", descripcion: null, cuotas_min: 0, cuotas_max: 0, estados_incluidos: [], es_operativo: true, orden: 0, color: null, estado_mora: "al_dia", dias_sla: null },
-  { numero: 1, prefijo: "B1", nombre: "Alerta Temprana", descripcion: null, cuotas_min: 1, cuotas_max: 1, estados_incluidos: [], es_operativo: true, orden: 1, color: null, estado_mora: "mora_30", dias_sla: 3 },
-  { numero: 2, prefijo: "B2", nombre: "Gestión Activa", descripcion: null, cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], es_operativo: true, orden: 2, color: null, estado_mora: "mora_60", dias_sla: 3 },
-  { numero: 3, prefijo: "B3", nombre: "Rescate", descripcion: null, cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], es_operativo: true, orden: 3, color: null, estado_mora: "mora_90", dias_sla: 2 },
-  { numero: 4, prefijo: "B4", nombre: "Última Instancia / Pre Jurídico", descripcion: null, cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], es_operativo: true, orden: 4, color: null, estado_mora: "mora_120", dias_sla: 2 },
-  { numero: 5, prefijo: "B5", nombre: "Jurídico", descripcion: null, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], es_operativo: false, orden: 5, color: null, estado_mora: "mora_120_plus", dias_sla: 1 },
+  { numero: 0, prefijo: "B0", nombre: "Cartera Sana", descripcion: null, cuotas_min: 0, cuotas_max: 0, estados_incluidos: [], estados_piso: [], es_operativo: true, orden: 0, color: null, estado_mora: "al_dia", dias_sla: null },
+  { numero: 1, prefijo: "B1", nombre: "Alerta Temprana", descripcion: null, cuotas_min: 1, cuotas_max: 1, estados_incluidos: [], estados_piso: [], es_operativo: true, orden: 1, color: null, estado_mora: "mora_30", dias_sla: 3 },
+  { numero: 2, prefijo: "B2", nombre: "Gestión Activa", descripcion: null, cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], estados_piso: [], es_operativo: true, orden: 2, color: null, estado_mora: "mora_60", dias_sla: 3 },
+  { numero: 3, prefijo: "B3", nombre: "Rescate", descripcion: null, cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], estados_piso: [], es_operativo: true, orden: 3, color: null, estado_mora: "mora_90", dias_sla: 2 },
+  { numero: 4, prefijo: "B4", nombre: "Última Instancia / Pre Jurídico", descripcion: null, cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], estados_piso: ["EN_RECUPERACION"], es_operativo: true, orden: 4, color: null, estado_mora: "mora_120", dias_sla: 2 },
+  { numero: 5, prefijo: "B5", nombre: "Jurídico", descripcion: null, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], estados_piso: [], es_operativo: false, orden: 5, color: null, estado_mora: "mora_120_plus", dias_sla: 1 },
 ];
 
 describe("validarCatalogoBuckets", () => {
@@ -124,6 +124,7 @@ describe("bucketDeCredito", () => {
     cuotas_min: b.cuotas_min,
     cuotas_max: b.cuotas_max,
     estados_incluidos: b.estados_incluidos,
+    estados_piso: b.estados_piso,
   }));
 
   it("clasifica por rango de cuotas atrasadas", () => {
@@ -173,10 +174,66 @@ describe("bucketDeCredito", () => {
         cuotas_min: b.cuotas_min,
         cuotas_max: b.cuotas_max,
         estados_incluidos: b.estados_incluidos,
+        estados_piso: b.estados_piso,
       }));
 
     expect(bucketDeCredito("MOROSO", 0, catalogoOrdenInvertido)).toBe(0);
     expect(bucketDeCredito("MOROSO", 3, catalogoOrdenInvertido)).toBe(3);
     expect(bucketDeCredito("MOROSO", 100, catalogoOrdenInvertido)).toBe(5);
+  });
+});
+
+/**
+ * COBROS-02 Fase 4 — el PISO. Es un mecanismo NUEVO del catálogo y lo que lo
+ * distingue del clavo (`estados_incluidos`) es exactamente esto: deja subir.
+ */
+describe("bucketDeCredito — piso por estado (EN_RECUPERACION)", () => {
+  it("con 2 cuotas sube a B4: max(B2, piso B4)", () => {
+    expect(bucketDeCredito("EN_RECUPERACION", 2, SEED_VALIDO)).toBe(4);
+  });
+
+  it("con 0 cuotas también: el piso no depende del atraso", () => {
+    expect(bucketDeCredito("EN_RECUPERACION", 0, SEED_VALIDO)).toBe(4);
+  });
+
+  it("con 4 cuotas se queda en B4 (el atraso y el piso coinciden)", () => {
+    expect(bucketDeCredito("EN_RECUPERACION", 4, SEED_VALIDO)).toBe(4);
+  });
+
+  it("con 5 cuotas SÍ sube a B5 — esto es lo que un clavo no permitiría", () => {
+    expect(bucketDeCredito("EN_RECUPERACION", 5, SEED_VALIDO)).toBe(5);
+  });
+
+  it("no afecta a los demás estados", () => {
+    expect(bucketDeCredito("MOROSO", 2, SEED_VALIDO)).toBe(2);
+    expect(bucketDeCredito("ACTIVO", 0, SEED_VALIDO)).toBe(0);
+  });
+
+  it("el clavo sigue ganando: INCOBRABLE con 2 cuotas es B5, no B2", () => {
+    expect(bucketDeCredito("INCOBRABLE", 2, SEED_VALIDO)).toBe(5);
+  });
+
+  it("un estado fuera del funnel no tiene bucket, con piso o sin él", () => {
+    expect(bucketDeCredito("EN_CONVENIO", 3, SEED_VALIDO)).toBeNull();
+  });
+});
+
+describe("validarCatalogoBuckets — coherencia del piso", () => {
+  it("el mismo estado como piso en dos buckets es ambigüedad", () => {
+    const catalogo = SEED_VALIDO.map((b) =>
+      b.numero === 3 ? { ...b, estados_piso: ["EN_RECUPERACION"] } : b,
+    );
+    const { ok, problemas } = validarCatalogoBuckets(catalogo);
+    expect(ok).toBe(false);
+    expect(problemas.some((p) => p.includes("piso en más de un bucket"))).toBe(true);
+  });
+
+  it("un estado que es piso Y clavo a la vez se rechaza: el piso sería letra muerta", () => {
+    const catalogo = SEED_VALIDO.map((b) =>
+      b.numero === 5 ? { ...b, estados_incluidos: ["INCOBRABLE", "EN_RECUPERACION"] } : b,
+    );
+    const { ok, problemas } = validarCatalogoBuckets(catalogo);
+    expect(ok).toBe(false);
+    expect(problemas.some((p) => p.includes("piso y a la vez"))).toBe(true);
   });
 });

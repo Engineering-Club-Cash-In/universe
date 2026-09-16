@@ -37,6 +37,14 @@ export type BucketCatalogo = {
   cuotas_min: number;
   cuotas_max: number | null; // null = abierto (B5 = 5..∞)
   estados_incluidos: string[];
+  /**
+   * COBROS-02 Fase 4 — estados para los que este bucket es el MÍNIMO.
+   *
+   * No confundir con `estados_incluidos`, que CLAVA el bucket (INCOBRABLE→B5).
+   * Un piso deja subir: `EN_RECUPERACION` con 5 cuotas atrasadas llega a B5
+   * conservando el estado, pero nunca baja de B4. Ver bucketDeCredito.
+   */
+  estados_piso: string[];
 };
 
 /**
@@ -51,6 +59,8 @@ export type BucketCatalogoCompleto = {
   cuotas_min: number;
   cuotas_max: number | null;
   estados_incluidos: string[];
+  /** COBROS-02 Fase 4 — bucket MÍNIMO para estos estados (ver BucketCatalogo). */
+  estados_piso: string[];
   es_operativo: boolean;
   orden: number;
   color: string | null;
@@ -83,8 +93,21 @@ export const STATUS_READER_FUERA = STATUS_BUCKET_FUERA.filter(
 
 /**
  * Bucket de un crédito (0-5) resuelto contra el catálogo dinámico `catalogo`.
- * Orden: (1) estado fuera del funnel → null; (2) estado que fuerza un bucket
- * (p.ej. INCOBRABLE → B5 vía `estados_incluidos`); (3) rango de cuotas atrasadas.
+ *
+ * Orden:
+ *   (1) estado fuera del funnel → null;
+ *   (2) estado que CLAVA un bucket (INCOBRABLE → B5 vía `estados_incluidos`);
+ *   (3) rango de cuotas atrasadas;
+ *   (4) COBROS-02 Fase 4 — PISO por estado (`estados_piso`): el resultado no
+ *       puede quedar por debajo del bucket que el estado fija como mínimo.
+ *
+ * (2) y (4) son mecanismos DISTINTOS y la diferencia importa: clavar impide
+ * subir, y un crédito EN_RECUPERACION clavado en B4 nunca llegaría a B5 con la
+ * 5ª cuota (decisión 3 del plan 08). El piso deja subir y prohíbe bajar.
+ *
+ * El piso se aplica DESPUÉS del rango y no antes: si el atraso ya lo pone más
+ * arriba, manda el atraso.
+ *
  * Devuelve `null` si el crédito está fuera del funnel operativo (no se trackea).
  */
 export function bucketDeCredito(
@@ -94,7 +117,8 @@ export function bucketDeCredito(
 ): number | null {
   // (1) Fuera del funnel operativo (lista en código, Opción A).
   if (status && STATUS_BUCKET_FUERA.includes(status)) return null;
-  // (2) Estado que fuerza un bucket (p.ej. INCOBRABLE → B5).
+  // (2) Estado que fuerza un bucket (p.ej. INCOBRABLE → B5). Clava: gana
+  //     incluso sobre el atraso, y por eso se resuelve antes que todo lo demás.
   if (status) {
     const porEstado = catalogo.find((b) => b.estados_incluidos.includes(status));
     if (porEstado) return porEstado.numero;
@@ -104,7 +128,23 @@ export function bucketDeCredito(
   const porRango = catalogo.find(
     (b) => cuotas >= b.cuotas_min && (b.cuotas_max == null || cuotas <= b.cuotas_max),
   );
-  return porRango ? porRango.numero : null;
+  if (!porRango) return null;
+  // (4) Piso por estado.
+  return Math.max(porRango.numero, pisoPorEstado(status, catalogo));
+}
+
+/**
+ * Bucket mínimo que el estado del crédito impone, o -1 si no impone ninguno
+ * (-1 y no 0 a propósito: 0 ES un bucket, y usarlo como "sin piso" haría que un
+ * catálogo con `estados_piso` en B0 fuera indistinguible de no tener piso).
+ */
+export function pisoPorEstado(
+  status: string | null | undefined,
+  catalogo: BucketCatalogo[],
+): number {
+  if (!status) return -1;
+  const fila = catalogo.find((b) => b.estados_piso?.includes(status));
+  return fila ? fila.numero : -1;
 }
 
 /**
@@ -129,6 +169,18 @@ export const bucketActualSql = (credAlias: string, moraAlias: string) => {
   const c = sql.raw(credAlias);
   const m = sql.raw(moraAlias);
   return sql`
+  GREATEST(
+  -- COBROS-02 Fase 4 — PISO por estado (buckets.estados_piso). Va por fuera
+  -- del COALESCE y no dentro de una de sus ramas: el bucket de un crédito
+  -- EN_RECUPERACION no puede leerse por debajo de B4 venga de donde venga —
+  -- ni de una fila vieja del historial, ni del rango de cuotas. Es la misma
+  -- regla que aplica bucketDeCredito en JS, y las dos tienen que decir lo
+  -- mismo o la tabla por bucket y el motor se contradicen.
+  -- NULL cuando el estado no tiene piso, y GREATEST ignora los NULL.
+  (SELECT bp.numero FROM ${SQL_CARTERA_SCHEMA}.buckets bp
+    WHERE bp.activo = true
+      AND ${c}."statusCredit" = ANY (bp.estados_piso)
+    ORDER BY bp.numero DESC LIMIT 1),
   COALESCE(
     (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
       WHERE h.credito_id = ${c}.credito_id
@@ -155,6 +207,6 @@ export const bucketActualSql = (credAlias: string, moraAlias: string) => {
         AND COALESCE(${m}.cuotas_atrasadas, 0) >= b.cuotas_min
         AND (b.cuotas_max IS NULL OR COALESCE(${m}.cuotas_atrasadas, 0) <= b.cuotas_max)
       ORDER BY b.numero LIMIT 1)
-  )
+  ))
 `;
 };

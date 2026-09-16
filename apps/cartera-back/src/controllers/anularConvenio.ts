@@ -9,7 +9,11 @@ import {
 } from "../database/db/schema";
 import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../lib/buckets-job-locks";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
-import { contarCuotasVencidasReales, createMora } from "./latefee";
+import {
+  contarCuotasVencidasReales,
+  createMora,
+  STATUS_EN_RECUPERACION,
+} from "./latefee";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COBROS-02 · Fase 3 — DESHACER un convenio YA APROBADO.
@@ -34,13 +38,16 @@ import { contarCuotasVencidasReales, createMora } from "./latefee";
 // `CONGELADO` que dejó el convenio. No hay nada que "descongelar" a mano.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Estados posibles del crédito después de deshacer el convenio. */
+export type EstadoTrasAnular = "MOROSO" | "ACTIVO" | "EN_RECUPERACION";
+
 export type AnularConvenioResultado =
   | {
       success: true;
       convenio_id: number;
       credito_id: number;
       /** Status con el que quedó el crédito tras deshacer. */
-      status_credito: "MOROSO" | "ACTIVO";
+      status_credito: EstadoTrasAnular;
       /** Cuotas vencidas reales recontadas al deshacer (0 si quedó ACTIVO). */
       cuotas_atrasadas: number;
     }
@@ -176,10 +183,17 @@ export async function anularConvenio(params: {
            AND completado = false
            AND anulado_at IS NULL
            ${condicionDueno}
-        RETURNING convenio_id, credito_id
+        RETURNING convenio_id, credito_id, status_credito_previo
       `);
       const anulado = anuladoRes.rows?.[0] as
-        | { convenio_id: number; credito_id: number }
+        | {
+            convenio_id: number;
+            credito_id: number;
+            // COBROS-02 Fase 4: la columna la agrega la migración 0020, que
+            // viaja en ESTE PR. Antes de él no existe, y pedirla en el
+            // RETURNING levantaba 42703 y tumbaba toda anulación.
+            status_credito_previo: string | null;
+          }
         | undefined;
 
       if (!anulado) {
@@ -194,8 +208,17 @@ export async function anularConvenio(params: {
         );
       }
 
+      // COBROS-02 Fase 4 — si el crédito venía EN_RECUPERACION, ahí vuelve: el
+      // convenio fue un paréntesis, no una absolución. Deshacerlo no puede
+      // levantar un estado que puso una persona (decisión 5: solo lo levanta
+      // pagar el total). Los convenios anteriores a la migración 0020 no tienen
+      // el dato y siguen el camino de siempre.
+      const volverARecuperacion =
+        anulado.status_credito_previo === STATUS_EN_RECUPERACION;
+
       // ¿Cuánto debe el crédito ahora que el convenio no cuenta? Mismo recuento
-      // que usa el rechazo — la pregunta es idéntica.
+      // que usa el rechazo — la pregunta es idéntica. Se necesita igual aunque
+      // vuelva a recuperación: la mora hay que recrearla en los dos casos.
       const cuotasAtrasadas = await contarCuotasVencidasReales(
         anulado.credito_id,
         "MOROSO",
@@ -213,7 +236,9 @@ export async function anularConvenio(params: {
 
         await tx
           .update(creditos)
-          .set({ statusCredit: "MOROSO" })
+          .set({
+            statusCredit: volverARecuperacion ? STATUS_EN_RECUPERACION : "MOROSO",
+          })
           .where(eq(creditos.credito_id, anulado.credito_id));
 
         const resultMora = await createMora(
@@ -242,21 +267,32 @@ export async function anularConvenio(params: {
           success: true as const,
           convenio_id: anulado.convenio_id,
           credito_id: anulado.credito_id,
-          status_credito: "MOROSO" as const,
+          status_credito: (volverARecuperacion
+            ? STATUS_EN_RECUPERACION
+            : "MOROSO") as EstadoTrasAnular,
           cuotas_atrasadas: cuotasAtrasadas,
         };
       }
 
+      // Sin cuotas vencidas: ACTIVO, salvo que venga de recuperación. Ojo, no
+      // es una contradicción con la decisión 5 — el crédito no "pagó todo": las
+      // cuotas que debía las absorbió el convenio y ahora vuelven a estar
+      // abiertas. Levantarlo acá sería regalar la recuperación deshaciendo el
+      // acuerdo.
       await tx
         .update(creditos)
-        .set({ statusCredit: "ACTIVO" })
+        .set({
+          statusCredit: volverARecuperacion ? STATUS_EN_RECUPERACION : "ACTIVO",
+        })
         .where(eq(creditos.credito_id, anulado.credito_id));
 
       return {
         success: true as const,
         convenio_id: anulado.convenio_id,
         credito_id: anulado.credito_id,
-        status_credito: "ACTIVO" as const,
+        status_credito: (volverARecuperacion
+          ? STATUS_EN_RECUPERACION
+          : "ACTIVO") as EstadoTrasAnular,
         cuotas_atrasadas: 0,
       };
       }),

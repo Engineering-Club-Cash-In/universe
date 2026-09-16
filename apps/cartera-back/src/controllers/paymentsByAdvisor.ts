@@ -37,6 +37,7 @@ export const getCuotasPorDiaYAsesor = async (
       inArray(creditos.statusCredit, [
         "ACTIVO",
         "MOROSO",
+        "EN_RECUPERACION",
         "EN_CONVENIO",
       ]),
     ];

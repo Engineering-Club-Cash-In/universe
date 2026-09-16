@@ -58,7 +58,7 @@ export async function construirFilasCredito(
 		) pag ON true
 		WHERE c.fecha_vencimiento::date = make_date(${p.anio}, ${p.mes}, ${p.dia})
 			AND c.numero_cuota > 0
-			AND cr."statusCredit" IN ('ACTIVO','MOROSO','EN_CONVENIO')
+			AND cr."statusCredit" IN ('ACTIVO','MOROSO','EN_RECUPERACION','EN_CONVENIO')
 			${asesorFilter}
 		ORDER BY cr.asesor_id, cr.numero_credito_sifco
 		${pageFilter}
@@ -150,7 +150,7 @@ export async function getCobranzaDiariaDetalle(p: {
 		JOIN cartera.usuarios u ON cr.usuario_id = u.usuario_id
 		WHERE c.fecha_vencimiento::date = make_date(${p.anio}, ${p.mes}, ${p.dia})
 			AND c.numero_cuota > 0
-			AND cr."statusCredit" IN ('ACTIVO','MOROSO','EN_CONVENIO')
+			AND cr."statusCredit" IN ('ACTIVO','MOROSO','EN_RECUPERACION','EN_CONVENIO')
 			AND cr.asesor_id = ${p.asesorId}
 	`);
 	const total = Number((countRes.rows[0] as any)?.total ?? 0);

@@ -23,6 +23,7 @@ import { createNotification } from "../routers/notifications";
 import type { StatusCreditEnum } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
+import { debeCrearCasoCobros } from "./sync-casos-cobros.politica";
 
 type EstadoMoraEnum = (typeof estadoMoraEnum.enumValues)[number];
 
@@ -68,19 +69,6 @@ const MORA_SEVERITY: Record<string, number> = {
 function moraEscalo(estadoAnterior: string, estadoNuevo: string): boolean {
 	return (
 		(MORA_SEVERITY[estadoNuevo] ?? 0) > (MORA_SEVERITY[estadoAnterior] ?? 0)
-	);
-}
-
-/**
- * Determina si un crédito debe tener caso de cobros activo
- */
-function debeCrearCasoCobros(
-	statusCredit: StatusCreditEnum,
-	diasMora: number,
-): boolean {
-	// Solo crear casos para créditos activos o morosos con días de mora > 0
-	return (
-		(statusCredit === "ACTIVO" || statusCredit === "MOROSO") && diasMora > 0
 	);
 }
 
@@ -209,12 +197,15 @@ export async function sincronizarCasosCobros(
 				| "INCOBRABLE"
 				| "PENDIENTE_CANCELACION"
 				| "MOROSO"
+				| "EN_RECUPERACION"
 			> = [
 				"ACTIVO",
 				"CANCELADO",
 				"INCOBRABLE",
 				"PENDIENTE_CANCELACION",
 				"MOROSO",
+				// COBROS-02 Fase 4 — mismos créditos que antes venían como MOROSO.
+				"EN_RECUPERACION",
 			];
 
 			// allSettled en vez de Promise.all: si un estado falla (red, cartera-back
@@ -268,16 +259,51 @@ export async function sincronizarCasosCobros(
 				result.success = false;
 			}
 		} else {
-			// Solo créditos morosos — paginar hasta agotar resultados
-			creditos = await fetchAllPages((page) =>
-				carteraBackClient.getAllCreditos({
-					mes,
-					anio,
-					estado: "MOROSO",
-					page,
-					perPage: 1000,
-				}),
+			// Créditos en mora — paginar hasta agotar resultados.
+			//
+			// `EN_RECUPERACION` va junto a `MOROSO` (COBROS-02 Fase 4): es el mismo
+			// crédito moroso al que además se le decidió recuperar la unidad, y
+			// traer solo MOROSO lo dejaba sin refrescar su caso. Con allSettled por
+			// las mismas razones que el force-sync: que un estado falle no debe
+			// tumbar al otro.
+			const estadosEnMora = ["MOROSO", "EN_RECUPERACION"] as const;
+			const porEstado = await Promise.allSettled(
+				estadosEnMora.map((estado) =>
+					fetchAllPages((page) =>
+						carteraBackClient.getAllCreditos({
+							mes,
+							anio,
+							estado,
+							page,
+							perPage: 1000,
+						}),
+					),
+				),
 			);
+			creditos = [];
+			porEstado.forEach((resultado, i) => {
+				if (resultado.status === "fulfilled") {
+					creditos.push(...resultado.value);
+				} else {
+					console.error(
+						`[SyncCobros] Falló la consulta de créditos ${estadosEnMora[i]}:`,
+						resultado.reason,
+					);
+					result.success = false;
+					// Al log también (review de Codex, P2): su status sale SOLO de
+					// `result.errors.length`, así que sin esto una corrida que se
+					// saltó un estado entero —o los dos— quedaba registrada como
+					// "success" y el monitoreo veía una sync sana. Mismo formato
+					// que la rama forzada.
+					const mensaje =
+						resultado.reason instanceof Error
+							? resultado.reason.message
+							: String(resultado.reason);
+					result.errors.push(
+						`Estado ${estadosEnMora[i]}: no se pudo obtener créditos de cartera-back (${mensaje})`,
+					);
+				}
+			});
 		}
 
 		console.log(

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { restaurarRecuperacionSiEstePagoLaLevanto } from "./buckets/levantarRecuperacion";
 import { eq, and, or } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
@@ -250,6 +251,25 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
         })
         .where(eq(pagos_credito.pago_id, pago_id));
       console.log("✅ Pago marcado como pending y fecha_aplicado anulada");
+
+      // COBROS-02 Fase 4 — "Revertir Especial" también deshace la aplicación
+      // del pago, así que si ESTE era el que levantó la recuperación, el
+      // crédito vuelve a EN_RECUPERACION (review de Codex, P1).
+      //
+      // Es la misma restauración que hace `reversePayment`; faltaba acá y el
+      // resultado era peor que no tenerla: el crédito quedaba ACTIVO con la
+      // marca de provenance puesta, o sea señalando a un pago que ya no está
+      // aplicado. Va dentro de la transacción, por lo mismo que allá.
+      const volvioARecuperacion = await restaurarRecuperacionSiEstePagoLaLevanto(
+        credito_id,
+        pago_id,
+        tx as never,
+      );
+      if (volvioARecuperacion) {
+        console.log(
+          `↩️ Crédito ${credito_id} vuelve a EN_RECUPERACION: el pago que la había levantado volvió a pendiente.`,
+        );
+      }
 
       return {
         pago_id,

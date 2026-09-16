@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { sql, type SQL } from "drizzle-orm";
 import { creditos, usuarios } from "../database/db/schema";
 
-export const ACTIVE_PORTFOLIO_STATUSES = ["ACTIVO", "MOROSO", "EN_CONVENIO"] as const;
+export const ACTIVE_PORTFOLIO_STATUSES = ["ACTIVO", "MOROSO", "EN_RECUPERACION", "EN_CONVENIO"] as const;
 
 export type ActivePortfolioCredit = {
   numero_credito_sifco: string;

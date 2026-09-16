@@ -106,7 +106,16 @@ const LECTURA_COLGADA = sql`(
  * `INCOBRABLE` cartera sí lo acepta, pero acá no: es decisión del contrato
  * (§13) mandar esos casos con un asesor.
  */
-const ESTADOS_QUE_ACEPTAN = new Set(["ACTIVO", "MOROSO", "EN_CONVENIO"]);
+// COBROS-02 Fase 4: EN_RECUPERACION entra porque estos mismos créditos hasta
+// ayer eran MOROSO. Que se haya decidido recuperar la unidad no es razón para
+// dejar de recibirle una boleta al cliente — al contrario: pagar es justo lo
+// que puede frenar la recuperación (decisión 5).
+const ESTADOS_QUE_ACEPTAN = new Set([
+	"ACTIVO",
+	"MOROSO",
+	"EN_RECUPERACION",
+	"EN_CONVENIO",
+]);
 
 /** ¿A este crédito se le puede registrar una boleta desde el bot? */
 export function creditoAceptaBoleta(estado: string): boolean {

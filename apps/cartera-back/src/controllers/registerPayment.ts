@@ -1,4 +1,5 @@
 import Big from "big.js";
+import { levantarRecuperacionSiPagoTodo } from "./buckets/levantarRecuperacion";
 import z from "zod";
 import { db, lockPool } from "../database";
 import { withCapitalContext, setCapitalSource } from "../utils/withAuditContext";
@@ -372,7 +373,7 @@ const obtenerInfoCompletaCredito = async (
 
     // Mantener intactos los estados que históricamente admiten pagos.
     if (
-      !["ACTIVO", "MOROSO", "EN_CONVENIO", "INCOBRABLE"].includes(
+      !["ACTIVO", "MOROSO", "EN_RECUPERACION", "EN_CONVENIO", "INCOBRABLE"].includes(
         info.credito.statusCredit
       )
     ) {
@@ -2997,6 +2998,33 @@ export async function aplicarPagoNormalEnTx(
       }
     }
 
+    // COBROS-02 Fase 4 — levantar `EN_RECUPERACION` si este pago dejó al
+    // crédito sin deber nada (decisión 5: al VALIDARSE el pago).
+    //
+    // Corre en las DOS ramas de abajo, y no solo en la que cierra cuota
+    // (review de Codex, P1). La primera versión estaba solo al final de la
+    // RAMA B, pero la RAMA A retorna antes. Un pago solo de mora es válido con
+    // `monto_aplicado = 0` y, si ya no quedan cuotas vencidas, entra por la
+    // RAMA A: es justo el pago que salda la ÚLTIMA deuda —la mora— y el
+    // crédito se quedaba en recuperación para siempre.
+    //
+    // Dentro de la misma transacción: si el pago se revierte, el levantamiento
+    // también. No hace nada si el crédito no está en ese estado.
+    // `credito.credito_id` y no `pago.credito_id`: es el mismo crédito, pero
+    // dentro del closure TS pierde el estrechamiento de null del segundo.
+    const levantarRecuperacionSiCorresponde = async () => {
+      const levantamiento = await levantarRecuperacionSiPagoTodo(
+        credito.credito_id,
+        tx as never,
+        pago_id,
+      );
+      if (levantamiento.levantado) {
+        console.log(
+          `🚗 Crédito ${credito.credito_id} sale de EN_RECUPERACION: ya no debe cuotas ni mora`
+        );
+      }
+    };
+
     // ─────────────────────────────────────────────────────────────────
     // RAMA A: la cuota AÚN no se cierra con este pago
     //   → valida el pago, aplica abono_capital al crédito si lo hay,
@@ -3053,6 +3081,8 @@ export async function aplicarPagoNormalEnTx(
         console.log("💰 Nuevo capital:", nuevoCapitalParc.toString());
         console.log("✅ Capital aplicado al crédito (cuota aún abierta)");
       }
+
+      await levantarRecuperacionSiCorresponde();
 
       return {
         success: true,
@@ -3237,6 +3267,12 @@ export async function aplicarPagoNormalEnTx(
         tx
       );
     }
+
+    // Levantar `EN_RECUPERACION` también acá: este es el camino NORMAL de
+    // validación —el botón "Validar Pago" y la importación de Págalo pasan por
+    // acá—, no solo `revalidatePayment` (review de Codex, P1). Ver la
+    // definición arriba de la RAMA A.
+    await levantarRecuperacionSiCorresponde();
 
     return {
       success: true,

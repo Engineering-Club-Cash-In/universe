@@ -20,7 +20,11 @@ import {
   CREDITO_ASESOR_LOCK_NAMESPACE,
   PROCESAR_MORAS_LOCK_KEY,
 } from "../../lib/buckets-job-locks";
-import { elegirAsesorParaBucket } from "../latefee";
+import {
+  elegirAsesorParaBucket,
+  STATUS_EN_RECUPERACION,
+  STATUS_NO_PISAR,
+} from "../latefee";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COBROS-02 · Buckets — RECUPERACIÓN DE VEHÍCULO (traslado manual a B4).
@@ -37,11 +41,15 @@ import { elegirAsesorParaBucket } from "../latefee";
 // destino se queda; si no, el del pool con menos carga) + el par UPDATE
 // creditos.asesor_id / INSERT credito_asesor_historial.
 //
-// ⚠️ PENDIENTE CONOCIDO (docs/features/cobros-02/07-recuperacion-de-vehiculo.md):
-// el traslado NO es permanente. El motor de las 23:59 GT vuelve a derivar el
-// bucket de las cuotas atrasadas; un crédito con 2 cuotas que se mandó a B4 hoy
-// amanece en B2 mañana. La solución acordada (estado `EN_RECUPERACION` como piso
-// en B4) es la fase 4 del documento 8. Este módulo hace el traslado y nada más.
+// ✅ COBROS-02 Fase 4 — el traslado YA ES PERMANENTE. Antes no lo era: el motor
+// de las 23:59 volvía a derivar el bucket de las cuotas atrasadas y un crédito
+// con 2 cuotas mandado a B4 hoy amanecía en B2. Ahora el traslado además pone el
+// estado `EN_RECUPERACION`, que el catálogo declara como PISO de B4
+// (`buckets.estados_piso`): el crédito nunca baja de ahí, pero SÍ sube a B5 si
+// le caen 5 cuotas — conservando el estado (decisión 3 del plan 08).
+//
+// El estado se levanta en un solo lugar: al VALIDARSE un pago que deja al
+// crédito sin nada que deber, ni cuotas vencidas ni mora (decisiones 5 y 18).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -101,6 +109,8 @@ export type RecuperacionVehiculoResultado =
       asesor_nuevo: number | null;
       /** true si el dueño ya cubría B4 y por eso no cambió (misma regla del motor). */
       asesor_sin_cambio: boolean;
+      /** COBROS-02 Fase 4: status con el que quedó el crédito. */
+      status_credito: string | null;
     }
   | { success: false; message: string; status?: number };
 
@@ -443,6 +453,25 @@ export async function enviarARecuperacionVehiculo(params: {
         });
       }
 
+      // COBROS-02 Fase 4 — el estado, en la MISMA transacción que el traslado.
+      // Si se escribiera aparte, un fallo entre las dos escrituras dejaría un
+      // crédito en B4 sin piso: el motor lo devolvería a su escalón esa misma
+      // noche y la decisión humana se perdería sin que nadie se entere.
+      //
+      // Se respeta STATUS_NO_PISAR por el mismo motivo que el motor: un crédito
+      // INCOBRABLE o EN_CONVENIO tiene su propio régimen y no se le sobreescribe
+      // el estado desde acá. El traslado de bucket sí ocurre igual — lo que se
+      // decidió es recuperar la unidad, y eso vale con o sin cambio de estado.
+      const pisaEstado = !STATUS_NO_PISAR.includes(
+        (estado.status_credito ?? "") as (typeof STATUS_NO_PISAR)[number],
+      );
+      if (pisaEstado) {
+        await tx
+          .update(creditos)
+          .set({ statusCredit: STATUS_EN_RECUPERACION })
+          .where(eq(creditos.credito_id, credito_id));
+      }
+
       await tx.insert(buckets_historial).values({
         credito_id,
         bucket_anterior: bucketAnterior,
@@ -450,7 +479,9 @@ export async function enviarARecuperacionVehiculo(params: {
         tipo_evento: tipoEvento,
         origen: "API_MANUAL",
         cuotas_atrasadas_nuevas: estado.cuotas_atrasadas,
-        status_credito: estado.status_credito,
+        // El status que queda, no el que había: la bitácora tiene que poder
+        // responder en qué estado quedó el crédito con este traslado.
+        status_credito: pisaEstado ? STATUS_EN_RECUPERACION : estado.status_credito,
         motivo: motivoBucket,
       });
 
@@ -463,6 +494,9 @@ export async function enviarARecuperacionVehiculo(params: {
         asesor_anterior: asesorActual,
         asesor_nuevo: cambiaAsesor ? asesorElegido : asesorActual,
         asesor_sin_cambio: !cambiaAsesor,
+        status_credito: pisaEstado
+          ? STATUS_EN_RECUPERACION
+          : (estado.status_credito ?? null),
       };
     });
   } catch (err) {

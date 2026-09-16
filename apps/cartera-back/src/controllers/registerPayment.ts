@@ -4304,6 +4304,41 @@ async function aplicarMontoAPagoSinLock(pago_id: number, monto: number, fecha_pa
       fechaPago = new Date(`${year}-${month}-${day}T${timePart}`);
     }
 
+    /**
+     * Esta ruta NO sabe cobrar rubros, así que tampoco puede decir que un pago
+     * quedó aplicado si carga un cobro adicional.
+     *
+     * `/aplicar-monto-pago` acepta un `validationStatus` y lo escribe tal cual,
+     * pero a diferencia de `/aplicar-pago` y `/revalidatePayment` nunca llama a
+     * `aplicarRubrosDelPago`. Usarla sobre una boleta con reclamo dejaba el peor
+     * estado posible: el `saldo_pendiente` del rubro intacto —o sea el cargo sin
+     * cobrar—, el reclamo en `aplicado = false`, y el pago marcado como aplicado.
+     * A partir de ahí la aplicación normal lo rechaza por ya-aplicado, así que
+     * el reclamo se queda para siempre CONGELANDO el rubro: con un reclamo vivo
+     * encima no se puede editar ni anular.
+     *
+     * Se RECHAZA en vez de aplicar el reclamo acá. Aplicarlo sería duplicar la
+     * mitad de la cascada de cobro —con su transacción y su orden de candados—
+     * sin ninguna de sus guardas, y es la clase de copia que después se
+     * desincroniza. Rechazar no cierra ningún camino: la aplicación normal sigue
+     * disponible y hace el trabajo completo.
+     *
+     * Sólo se juzga cuando la llamada pide un estado APLICADO: usar esta ruta
+     * para corregir montos sin tocar el estado sigue funcionando igual.
+     */
+    if (
+      validationStatus === "validated" ||
+      validationStatus === "capital_validated"
+    ) {
+      const reclamado = await totalReclamadoPorPago(pago_id);
+      if (reclamado.gt(0)) {
+        return {
+          success: false,
+          message: `Esta boleta cobra Q${reclamado.toFixed(2)} de cobros adicionales y esta ruta no sabe aplicarlos. Aplicá el pago por la vía normal, que cobra el rubro junto con la cuota.`,
+        };
+      }
+    }
+
     // 5. Actualizar el pago
     const [pagoActualizado] = await db
       .update(pagos_credito)

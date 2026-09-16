@@ -189,6 +189,7 @@ export const cobrosAppRouter = {
 
 	// CRM Cobros — nuevas vistas
 	getMoraByEtapaYAsesor: cobrosRouter.getMoraByEtapaYAsesor,
+	getCierreMoraOficial: cobrosRouter.getCierreMoraOficial,
 	getMoraCobradaPorAsesor: cobrosRouter.getMoraCobradaPorAsesor,
 	getMoraRecuperacionPorAsesor: cobrosRouter.getMoraRecuperacionPorAsesor,
 	getCuotasPorFecha: cobrosRouter.getCuotasPorFecha,

@@ -377,6 +377,50 @@
     })
   );
 
+  // Cierre financiero oficial e inmutable. El Excel aprobado se consolida
+  // antes de persistir: una fila por asesor y período.
+  export const cierre_mora_oficial = customSchema.table(
+    "cierre_mora_oficial",
+    {
+      id: serial("id").primaryKey(),
+      periodo: date("periodo").notNull(),
+      asesor_id: integer("asesor_id")
+        .notNull()
+        .references(() => asesores.asesor_id),
+      asesor_nombre: text("asesor_nombre").notNull(),
+      capital_cierre: numeric("capital_cierre", { precision: 18, scale: 2 }).notNull(),
+      capital_mora_30: numeric("capital_mora_30", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      capital_mora_60: numeric("capital_mora_60", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      capital_mora_90: numeric("capital_mora_90", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      capital_mora_120: numeric("capital_mora_120", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      cantidad_mora_30: integer("cantidad_mora_30").notNull().default(0),
+      cantidad_mora_60: integer("cantidad_mora_60").notNull().default(0),
+      cantidad_mora_90: integer("cantidad_mora_90").notNull().default(0),
+      cantidad_mora_120: integer("cantidad_mora_120").notNull().default(0),
+      fecha_corte: timestamp("fecha_corte", { withTimezone: true }).notNull(),
+      regla_version: text("regla_version").notNull(),
+      fuente: text("fuente").notNull(),
+      fuente_hash: text("fuente_hash").notNull(),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+    },
+    (table) => ({
+      uqPeriodoAsesor: uniqueIndex("cierre_mora_oficial_periodo_asesor_unique").on(
+        table.periodo,
+        table.asesor_id,
+      ),
+    }),
+  );
+
   export const moras_credito = customSchema.table(
     "moras_credito",
     {

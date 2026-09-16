@@ -1939,6 +1939,23 @@ export async function falsePayment(pago_id: number, credito_id: number) {
     throw new Error("No payment found to mark as false with the given criteria");
   }
   if (yaFalso.paymentFalse) {
+    // Antes de salir, limpiar el ajuste por fecha ideal — sí, otra vez.
+    //
+    // Es la red de seguridad de las filas que quedaron a medias: el reset vivía
+    // DESPUÉS del commit de la transacción de abajo, así que si esa consulta
+    // fallaba la boleta quedaba commiteada como falsa con el ajuste todavía
+    // marcado como cobrado, y el reintento entraba justo por acá y se iba sin
+    // limpiar nada. El ajuste quedaba cobrado para siempre apuntando a un pago
+    // que nunca entró, y ningún pago futuro se lo volvía a cobrar al cliente.
+    //
+    // Correrlo de más no cuesta nada: el UPDATE filtra por el `pago_id` de ESTE
+    // pago invalidado, así que en el caso normal no encuentra filas, y nunca
+    // puede pisar un ajuste que un pago posterior ya reclamó (ese apunta a otro
+    // `pago_id`). Va fuera de transacción a propósito: es una sola sentencia
+    // sobre a lo sumo una fila, toma y suelta su candado sola y no puede entrar
+    // en un ciclo de deadlock.
+    await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
+
     return {
       message: "Payment was already marked as false",
       updatedCount: 0,
@@ -2022,13 +2039,35 @@ export async function falsePayment(pago_id: number, credito_id: number) {
       tx as unknown as Parameters<typeof revertirRubrosDelPago>[1]
     );
 
+    // Si este pago era el que cobró un ajuste por fecha ideal de pago,
+    // resetearlo a pendiente — la boleta resultó falsa, el dinero nunca entró
+    // de verdad y el ajuste tiene que quedar disponible para un pago futuro.
+    //
+    // DENTRO de la transacción, igual que en `reversePayment` y en la anulación
+    // por incobrable de `credits.ts`. Afuera —donde estaba— no era atómico:
+    // si esta consulta fallaba, el `paymentFalse = true` ya estaba commiteado y
+    // el ajuste se quedaba marcado como cobrado sin nadie que lo soltara. Acá
+    // adentro, o se invalida la boleta y se suelta el ajuste, o no pasa ninguna
+    // de las dos.
+    //
+    // No estrena una inversión de orden de candados, que es el riesgo real de
+    // meter una tabla más adentro de una transacción. Va ÚLTIMA, después de
+    // `pagos_credito` y de los rubros, y las otras dos rutas que resetean el
+    // ajuste dentro de su transacción —la caída a incobrable y la anulación de
+    // `credits.ts`— también tocan `pagos_credito` ANTES. O sea: nadie toma este
+    // par al revés.
+    //
+    // Se dice `credits.ts` y no "todos" a propósito: esas rutas NO toman el
+    // advisory lock del crédito, así que la serialización no viene de ahí sino
+    // del orden. El advisory lock sí envuelve a esta transacción
+    // (`withPaymentAdvisoryLock`, más arriba), pero no es lo que sostiene este
+    // argumento. El índice único por `credito_id` garantiza que sea a lo sumo
+    // una fila.
+    await resetAjusteFechaIdealSiPagoInvalidado(pago_id, tx);
+
     return actualizado;
     })
   );
-
-  // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo
-  // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad.
-  await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
 
   return {
     message: "Payment marked as false successfully",

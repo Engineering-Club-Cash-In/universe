@@ -75,18 +75,58 @@ export interface AvisoBotParams {
 	numeroSifco: string | null;
 	/** La acción del historial (`menu_credito`, `estado_cuenta`, `boleta_leer`…). */
 	accion: string;
-	/**
-	 * ¿La petición del bot salió bien?
-	 *
-	 * Es una precondición, no un adorno (review de Codex, P2): el `numeroSifco`
-	 * viene del BODY de la petición, así que una sesión válida con el SIFCO de
-	 * OTRO cliente llega hasta acá. El endpoint lo rechaza con
-	 * `CREDITO_NO_ES_DEL_CLIENTE`, pero el historial igual se escribe — y sin
-	 * este filtro se le avisaba al asesor del crédito ajeno Y se quemaba la
-	 * llave de dedup de la sesión, dejando al asesor correcto sin aviso cuando
-	 * el cliente por fin pedía SU crédito.
-	 */
+	/** ¿La petición del bot salió bien? */
 	exito: boolean;
+	/** `codigo` del fallo (OTP_INVALIDO, CARTERA_NO_DISPONIBLE…). Null si salió bien. */
+	codigo?: string | null;
+}
+
+/**
+ * Códigos de fallo en los que el bot NUNCA llegó a verificar que el crédito
+ * fuera del cliente: o no se identificó, o la sesión no valía, o el SIFCO que
+ * mandó es de otra persona.
+ *
+ * Es la lista que decide si se avisa, y el porqué es asimétrico:
+ *
+ *  · El `numeroSifco` viene del BODY, así que una sesión válida con el crédito
+ *    de OTRO cliente llega hasta acá. Avisar ahí le manda el aviso al asesor
+ *    del crédito ajeno y quema la llave de dedup de esa conversación.
+ *  · Pero exigir que TODA la operación salga bien es demasiado (review de
+ *    Codex, P2): `obtenerInfoCredito` verifica la propiedad ANTES de poder
+ *    devolver `CARTERA_NO_DISPONIBLE`, y lo mismo pasa con los flujos de
+ *    boleta y de link de pago. Todos esos son fallos POSTERIORES al control,
+ *    sobre el crédito legítimo del cliente — y son justo los casos en los que
+ *    el cliente MÁS necesita que alguien lo llame, porque el bot no pudo
+ *    ayudarlo.
+ *
+ * Un código nuevo que signifique "no pasó el control de acceso" tiene que
+ * sumarse acá; si no, el aviso se manda igual.
+ */
+const CODIGOS_SIN_PROPIEDAD_VERIFICADA = new Set([
+	"CREDITO_NO_ES_DEL_CLIENTE",
+	"CLIENTE_NO_ENCONTRADO",
+	"NO_AUTORIZADO",
+	"OTP_INVALIDO",
+	"OTP_VENCIDO",
+	"OTP_YA_USADO",
+	"OTP_NO_ENVIADO",
+	"REFERENCIA_INVALIDA",
+	"SESION_VENCIDA",
+]);
+
+/**
+ * ¿Esta interacción probó que el crédito es del cliente? Exportada para poder
+ * testear la regla sin montar todo el servicio.
+ */
+export function pruebaPropiedadDelCredito(params: {
+	exito: boolean;
+	codigo?: string | null;
+}): boolean {
+	if (params.exito) return true;
+	// Un fallo SIN código no se puede clasificar: se trata como si no hubiera
+	// pasado el control (el lado seguro).
+	if (!params.codigo) return false;
+	return !CODIGOS_SIN_PROPIEDAD_VERIFICADA.has(params.codigo);
 }
 
 /**
@@ -111,9 +151,9 @@ export async function avisarAsesorPorInteraccionBot(
 		const { sesionId, numeroSifco } = params;
 		// Sin conversación no hay llave de dedup; sin SIFCO no hay asesor.
 		if (!sesionId || !numeroSifco) return;
-		// Solo las peticiones que el bot respondió BIEN: el SIFCO viene del body
-		// y una que falló pudo traer el crédito de otro cliente (ver `exito`).
-		if (!params.exito) return;
+		// Solo si esta interacción probó que el crédito es del cliente: salió
+		// bien, o falló DESPUÉS del control de acceso (ver la lista de códigos).
+		if (!pruebaPropiedadDelCredito(params)) return;
 
 		// Corte barato PRIMERO: si esta conversación ya avisó por este crédito,
 		// se sale sin tocar cartera. Es el caso común —una conversación son
@@ -185,6 +225,11 @@ export async function avisarAsesorPorInteraccionBot(
 			? `${cliente} (crédito ${numeroSifco})`
 			: `El crédito ${numeroSifco}`;
 		const queHizo = QUE_HIZO[params.accion] ?? "escribió al bot de cobros";
+		// Cuando el bot le falló, decirlo: es la diferencia entre "escribió" y
+		// "escribió y se quedó sin respuesta", que cambia la urgencia.
+		const cierre = params.exito
+			? "Dale seguimiento: si escribió es porque algo necesita."
+			: "El bot no pudo completarlo, así que sigue esperando. Llamalo.";
 		// Sin caso no hay a dónde navegar: el aviso se manda igual pero sin
 		// enlace, y el texto carga el SIFCO para que se pueda buscar a mano.
 		const anclaCaso = caso
@@ -199,7 +244,7 @@ export async function avisarAsesorPorInteraccionBot(
 			.insert(notifications)
 			.values({
 				titulo: "Tu cliente escribió por WhatsApp",
-				descripcion: `${quien} ${queHizo} en el bot. Dale seguimiento: si escribió es porque algo necesita.`,
+				descripcion: `${quien} ${queHizo} en el bot. ${cierre}`,
 				type: "reminder",
 				status: "pending",
 				cobrosTipo: "bot_cliente_escribio",

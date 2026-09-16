@@ -239,11 +239,15 @@ que no hay asesor a quién avisarle.
 - El texto dice **qué vino a hacer** (`pidió su estado de cuenta`, `subió una boleta`…),
   que es lo que le dice al asesor si puede esperar o no. Una acción futura del bot sin
   texto propio avisa igual, con uno genérico — misma filosofía que D-41.
-- **Solo peticiones que el bot respondió bien.** El `numero_sifco` sale del *body*, así
-  que una sesión válida con el crédito de OTRO cliente llega hasta acá; el endpoint la
-  rechaza con `CREDITO_NO_ES_DEL_CLIENTE` pero el historial se escribe igual. Sin ese
-  filtro se le avisaba al asesor del crédito ajeno **y** se quemaba la llave de dedup de
-  la sesión, dejando al asesor correcto sin aviso cuando el cliente por fin pedía el suyo.
+- **Solo si la interacción probó que el crédito es del cliente.** El `numero_sifco` sale
+  del *body*, así que una sesión válida con el crédito de OTRO cliente llega hasta acá; el
+  endpoint la rechaza pero el historial se escribe igual, y avisar ahí le manda el aviso al
+  asesor del crédito ajeno. Pero exigir que **toda** la operación salga bien es demasiado:
+  un `CARTERA_NO_DISPONIBLE` ocurre *después* de verificar la propiedad, sobre el crédito
+  legítimo — y es justo cuando el cliente más necesita que alguien lo llame, porque el bot
+  no pudo ayudarlo. El filtro es una lista de **códigos de acceso**
+  (`CODIGOS_SIN_PROPIEDAD_VERIFICADA`); un fallo sin código se trata como no verificado.
+  Cuando el bot falló, el texto del aviso lo dice.
 - **Sin caso de cobros también avisa**, pero sin enlace. `sync-casos-cobros` solo mantiene
   un caso activo cuando `diasMora > 0`, así que exigirlo dejaba justo a los buckets sanos
   sin aviso — los mismos que la decisión 16 nombra. Un cliente al día que escribe es de

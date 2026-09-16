@@ -70,9 +70,11 @@ mock.module("../db", () => ({
 	},
 }));
 
-const { avisarAsesorPorInteraccionBot, llaveDedupSesionBot } = await import(
-	"./aviso-bot-asesor"
-);
+const {
+	avisarAsesorPorInteraccionBot,
+	llaveDedupSesionBot,
+	pruebaPropiedadDelCredito,
+} = await import("./aviso-bot-asesor");
 
 const SESION = "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0000";
 
@@ -151,19 +153,30 @@ describe("cuándo NO se avisa", () => {
 		expect(insertadas).toHaveLength(0);
 	});
 
-	it("una petición que el bot RECHAZÓ no avisa ni quema la llave", async () => {
+	it("un fallo de ACCESO no avisa ni quema la llave", async () => {
 		// El numeroSifco sale del body: una sesión válida con el crédito de otro
 		// cliente llega hasta acá y el endpoint la rechaza. Sin este filtro se
-		// avisaba al asesor ajeno y se consumía la dedup de la sesión, dejando
-		// al asesor correcto sin aviso (review de Codex, P2).
+		// avisaba al asesor ajeno y se consumía la dedup de la conversación.
 		await avisarAsesorPorInteraccionBot({
 			sesionId: SESION,
 			numeroSifco: "0101",
 			accion: "menu_credito",
 			exito: false,
+			codigo: "CREDITO_NO_ES_DEL_CLIENTE",
 		});
 		expect(insertadas).toHaveLength(0);
 		expect(llamadasCartera).toHaveLength(0);
+	});
+
+	it("un fallo SIN código se trata como si no hubiera pasado el control", async () => {
+		await avisarAsesorPorInteraccionBot({
+			sesionId: SESION,
+			numeroSifco: "0101",
+			accion: "menu_credito",
+			exito: false,
+			codigo: null,
+		});
+		expect(insertadas).toHaveLength(0);
 	});
 
 	it("un crédito sin asesor en cartera tampoco", async () => {
@@ -178,7 +191,60 @@ describe("cuándo NO se avisa", () => {
 	});
 });
 
+/**
+ * La regla que decide si la interacción probó que el crédito es del cliente.
+ * Exigir que TODA la operación saliera bien era demasiado: los fallos
+ * posteriores al control de acceso son sobre el crédito legítimo, y son justo
+ * cuando el cliente más necesita que lo llamen (review de Codex, P2).
+ */
+describe("pruebaPropiedadDelCredito", () => {
+	it("una petición exitosa, obviamente", () => {
+		expect(pruebaPropiedadDelCredito({ exito: true })).toBe(true);
+	});
+
+	it("un fallo POSTERIOR al control sí cuenta: el bot no pudo ayudarlo", () => {
+		expect(
+			pruebaPropiedadDelCredito({
+				exito: false,
+				codigo: "CARTERA_NO_DISPONIBLE",
+			}),
+		).toBe(true);
+	});
+
+	it("un fallo de acceso no", () => {
+		for (const codigo of [
+			"CREDITO_NO_ES_DEL_CLIENTE",
+			"OTP_VENCIDO",
+			"SESION_VENCIDA",
+			"NO_AUTORIZADO",
+		]) {
+			expect(pruebaPropiedadDelCredito({ exito: false, codigo })).toBe(false);
+		}
+	});
+
+	it("un fallo sin código tampoco (lado seguro)", () => {
+		expect(pruebaPropiedadDelCredito({ exito: false })).toBe(false);
+		expect(pruebaPropiedadDelCredito({ exito: false, codigo: null })).toBe(
+			false,
+		);
+	});
+});
+
 describe("cuando sí se avisa", () => {
+	it("un fallo posterior al control avisa, y el texto lo dice", async () => {
+		await avisarAsesorPorInteraccionBot({
+			sesionId: SESION,
+			numeroSifco: "0101",
+			accion: "estado_cuenta",
+			exito: false,
+			codigo: "CARTERA_NO_DISPONIBLE",
+		});
+		expect(insertadas).toHaveLength(1);
+		expect(String(insertadas[0].descripcion)).toContain(
+			"El bot no pudo completarlo",
+		);
+	});
+
 	it("un crédito SIN caso de cobros igual avisa, pero sin enlace", async () => {
 		// sync-casos-cobros solo mantiene caso activo con diasMora > 0, así que
 		// exigirlo dejaba sin aviso justo a los buckets sanos — los que la

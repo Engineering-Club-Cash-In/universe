@@ -426,9 +426,12 @@ export async function persistirInteraccion(
 		sesionId: otpId,
 		numeroSifco: interaccion.numeroSifco,
 		accion: interaccion.accion,
-		// El `exito` viaja porque el `numeroSifco` sale del body: una petición
-		// rechazada pudo traer el crédito de otro cliente (ver AvisoBotParams).
+		// `exito` y `codigo` viajan porque el `numeroSifco` sale del body: hay
+		// que poder distinguir un fallo de ACCESO —que pudo traer el crédito de
+		// otro cliente— de uno posterior al control, que es sobre el crédito
+		// legítimo y sí merece aviso (ver CODIGOS_SIN_PROPIEDAD_VERIFICADA).
 		exito: interaccion.exito,
+		codigo: interaccion.codigo,
 	});
 }
 

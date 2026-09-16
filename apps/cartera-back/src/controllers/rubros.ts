@@ -1906,6 +1906,40 @@ export async function cobroRubrosSeguro(args: {
   }
 }
 
+/**
+ * Lo que una boleta tiene comprometido en rubros — vivo o ya aplicado.
+ *
+ * Existe para un guard de `editarPago`, y el porqué es incómodo: el total de
+ * rubros de una boleta no se guarda en ninguna columna propia, se SUMA a
+ * `pagos_credito.otros`. Y esa columna es editable por
+ * `PATCH /editPayment/:pagoId`, que la pisa sin enterarse de `rubros_pagos`.
+ *
+ * Si un admin la edita con un reclamo encima, los dos lados quedan diciendo
+ * cosas distintas del mismo cobro: la validación le descuenta al rubro el monto
+ * ORIGINAL del reclamo, mientras los reportes y la facturación leen el `otros`
+ * nuevo. Según para qué lado se edite, se factura un cargo que nunca se cobró o
+ * se omite uno que sí.
+ *
+ * Cuenta `aplicado` en cualquiera de sus dos valores a propósito: un reclamo
+ * todavía sin aplicar ya apartó saldo del rubro, así que editar el `otros` por
+ * debajo de él rompe igual.
+ */
+export async function totalReclamadoPorPago(
+  pago_id: number,
+  ejecutor: Ejecutor = db
+): Promise<Big> {
+  const [fila] = await ejecutor
+    .select({
+      // COALESCE porque el SUM de cero filas es NULL, no 0, y ese NULL llegando
+      // crudo al `Big` reventaría el guard sobre una boleta editable.
+      total: sql<string>`COALESCE(SUM(${rubros_pagos.monto}), 0)`,
+    })
+    .from(rubros_pagos)
+    .where(eq(rubros_pagos.pago_id, pago_id));
+
+  return new Big(fila?.total ?? 0);
+}
+
 export async function registrarReclamosDeRubros(
   pago_id: number,
   cobros: { rubro_id: number; monto: string }[],

@@ -14,6 +14,116 @@ const cleanAiResponse = {
 };
 
 describe("document integrity decision evidence", () => {
+	test("una captura ilegible recomienda mejorar la captura, no reemplazar por documento inválido", () => {
+		expect(
+			buildDocumentRecommendedAction({
+				result: "revision_manual",
+				signals: [
+					{
+						code: "captura_con_legibilidad_insuficiente",
+						weight: 0,
+						severity: "media",
+						source: "ia",
+					},
+				],
+			}),
+		).toContain("PDF original o una foto frontal y nítida");
+	});
+	test("las páginas tipográficas no se presentan como motivo determinante del rechazo", () => {
+		expect(
+			buildDocumentRecommendedAction({
+				result: "rechazado",
+				signals: [
+					{
+						code: "tipografia_inconsistente",
+						severity: "alta",
+						weight: 4,
+						source: "ia",
+						confidence: 99,
+						page: 3,
+					},
+					{
+						code: "titular_no_coincide_fuerte",
+						severity: "alta",
+						weight: 4,
+						source: "identidad",
+						confidence: 99,
+						page: 1,
+					},
+				],
+			}),
+		).toContain("la página 1");
+		expect(
+			buildDocumentRecommendedAction({
+				result: "rechazado",
+				signals: [
+					{
+						code: "tipografia_inconsistente",
+						severity: "alta",
+						weight: 4,
+						source: "ia",
+						confidence: 99,
+						page: 3,
+					},
+				],
+			}),
+		).not.toContain("página 3");
+	});
+	test("la recomendación distingue la página de captura informativa de la alerta con peso", () => {
+		const action = buildDocumentRecommendedAction({
+			result: "revision_manual",
+			signals: [
+				{
+					code: "captura_impide_verificar_alineacion",
+					page: 3,
+					severity: "baja",
+					weight: 0,
+					source: "ia",
+				},
+				{
+					code: "errores_ortograficos",
+					page: 2,
+					severity: "media",
+					weight: 4,
+					source: "ia",
+				},
+			],
+		});
+		expect(action).toContain("Revisa la página 2.");
+		expect(action).toContain("comprobar la alineación de la página 3");
+		expect(action).toContain("PDF original o una foto frontal y nítida");
+		expect(action).toContain("banco");
+		expect(
+			buildDocumentRecommendedAction({
+				result: "rechazado",
+				signals: [
+					{
+						code: "captura_impide_verificar_alineacion",
+						page: 3,
+						severity: "media",
+						weight: 4,
+						source: "ia",
+					},
+				],
+			}),
+		).toContain("nuevo estado de cuenta válido");
+	});
+	test("recomienda verificar con el banco la ortografía y señala la página", () => {
+		const action = buildDocumentRecommendedAction({
+			result: "revision_manual",
+			signals: [
+				{
+					code: "errores_ortograficos",
+					page: 2,
+					severity: "media",
+					weight: 4,
+					source: "ia",
+				},
+			],
+		});
+		expect(action).toContain("la página 2");
+		expect(action).toContain("Verifica con el banco");
+	});
 	test("recomienda actuar sobre las paginas con senales determinantes", () => {
 		expect(
 			buildDocumentRecommendedAction({
@@ -80,11 +190,11 @@ describe("document integrity decision evidence", () => {
 			result: "rechazado",
 			signals: [
 				{
-					code: "formato_no_corresponde_al_emisor",
+					code: "titular_no_coincide_fuerte",
 					page: 9,
 					severity: "alta",
 					weight: 4,
-					source: "ia",
+					source: "identidad",
 					confidence: 90,
 				},
 				{

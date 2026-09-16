@@ -9,6 +9,7 @@ import {
 	X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { logo } from "@/assets";
 import { BarraPasos } from "@/components/barra-pasos";
 import { authClient, cerrarSesion } from "@/lib/auth-client";
 import {
@@ -289,6 +290,7 @@ export function ListadoPage() {
 		<div className="min-h-screen bg-slate-50">
 			<header className="sticky top-0 z-10 border-slate-200 border-b bg-white">
 				<div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-4">
+					<img src={logo} alt="CCI" className="h-8 w-auto shrink-0" />
 					<div className="min-w-0 flex-1">
 						<h1 className="truncate font-bold text-lg text-slate-900">
 							Seguimiento de Créditos

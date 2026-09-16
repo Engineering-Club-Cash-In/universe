@@ -16,6 +16,121 @@ const cleanAiResult: DocumentIntegrityAiResult = {
 };
 
 describe("document integrity engine", () => {
+	test.each([
+		["ortografia_en_descripcion_movimiento", "Desfile hpico", "valido", 0],
+		["errores_ortograficos", "codigó", "revision_manual", 4],
+	] as const)("distingue ortografía en movimientos de texto bancario: %s", async (code, text, expectedResult, expectedScore) => {
+		const pdf = await PDFDocument.create();
+		pdf.addPage().drawText("Estado de cuenta");
+		const result = await runDocumentIntegrityEngine({
+			buffer: Buffer.from(await pdf.save()),
+			registeredNames: ["FREDERIC ARIEL SOC MORALES"],
+			llm: {
+				...cleanAiResult,
+				observaciones_forenses: [
+					{
+						codigo: code,
+						pagina: 1,
+						descripcion: "Falta ortográfica visible",
+						confianza: 99,
+						texto_detectado: text,
+					},
+				],
+			},
+		});
+		expect(result).toMatchObject({
+			result: expectedResult,
+			score: expectedScore,
+		});
+		expect(result.signals.find((signal) => signal.code === code)).toMatchObject(
+			{ weight: expectedScore, page: 1, evidence: { textoDetectado: text } },
+		);
+	});
+	test.each([
+		false,
+		true,
+	])("detecta una captura con OCR=%s sin penalizar la rasterización", async (ocr) => {
+		const pdf = await PDFDocument.create();
+		const image = await pdf.embedPng(
+			Buffer.from(
+				"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5XkAAAAASUVORK5CYII=",
+				"base64",
+			),
+		);
+		const page = pdf.addPage();
+		page.drawImage(image);
+		if (ocr) page.drawText("Capa OCR");
+		const buffer = Buffer.from(await pdf.save());
+		const llm = { ...cleanAiResult, paginas_fotografiadas_o_escaneadas: [1] };
+		const result = await runDocumentIntegrityEngine({
+			buffer,
+			llm,
+			registeredNames: ["FREDERIC ARIEL SOC MORALES"],
+		});
+		expect(result).toMatchObject({ result: "valido", score: 0 });
+		expect(
+			result.signals.some(
+				(signal) => signal.code === "documento_fotografiado_o_escaneado",
+			),
+		).toBe(true);
+		const unreadable = await runDocumentIntegrityEngine({
+			buffer,
+			llm: { ...llm, es_legible: false },
+			registeredNames: ["FREDERIC ARIEL SOC MORALES"],
+		});
+		expect(unreadable.result).toBe("revision_manual");
+		expect(
+			unreadable.signals.some(
+				(signal) => signal.code === "captura_con_legibilidad_insuficiente",
+			),
+		).toBe(true);
+	});
+	test("una página digital sin imagen no se convierte en captura por un índice reportado por IA", async () => {
+		const pdf = await PDFDocument.create();
+		pdf.addPage().drawText("Documento digital");
+		const result = await runDocumentIntegrityEngine({
+			buffer: Buffer.from(await pdf.save()),
+			llm: {
+				...cleanAiResult,
+				es_legible: false,
+				paginas_fotografiadas_o_escaneadas: [1, 99],
+			},
+			registeredNames: ["FREDERIC ARIEL SOC MORALES"],
+		});
+		expect(result.result).toBe("rechazado");
+		expect(
+			result.signals.some(
+				(signal) => signal.code === "documento_fotografiado_o_escaneado",
+			),
+		).toBe(false);
+	});
+	test("una diferencia de fuente solo informa sin alterar el veredicto", async () => {
+		const pdf = await PDFDocument.create();
+		pdf.addPage().drawText("Estado de cuenta");
+		const result = await runDocumentIntegrityEngine({
+			buffer: Buffer.from(await pdf.save()),
+			registeredNames: ["FREDERIC ARIEL SOC MORALES"],
+			llm: {
+				...cleanAiResult,
+				observaciones_forenses: [
+					{
+						codigo: "tipografia_inconsistente",
+						pagina: 1,
+						descripcion: "Una parte del texto tiene mayor grosor",
+						confianza: 99,
+						texto_detectado: null,
+					},
+				],
+			},
+		});
+		expect(result.result).toBe("valido");
+		expect(result.score).toBe(0);
+		expect(
+			result.signals.find(
+				(signal) => signal.code === "tipografia_inconsistente",
+			),
+		).toMatchObject({ weight: 0, severity: "baja", page: 1 });
+	});
 	test("una inspección degradada requiere revisión manual", async () => {
 		const buffer = Buffer.alloc(20 * 1024 * 1024 + 1);
 		buffer.write("%PDF-1.7\n");

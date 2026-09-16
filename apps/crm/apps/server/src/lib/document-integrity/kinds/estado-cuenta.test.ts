@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	ESTADO_CUENTA_ISSUER_FINGERPRINTS,
+	ESTADO_CUENTA_AI_SIGNAL_META,
 	ESTADO_CUENTA_PROMPT,
 	estadoCuentaBatchAiSchema,
 	getIssuerFingerprint,
@@ -8,6 +9,43 @@ import {
 } from "./estado-cuenta";
 
 describe("estado de cuenta", () => {
+	test("el contrato y prompt separan ortografía de movimientos y texto fijo", () => {
+		expect(ESTADO_CUENTA_PROMPT).toContain(
+			"Reservá errores_ortograficos únicamente para encabezados",
+		);
+		expect(ESTADO_CUENTA_PROMPT).toContain(
+			"No dupliques el mismo hallazgo en ambos códigos",
+		);
+		expect(
+			ESTADO_CUENTA_AI_SIGNAL_META.ortografia_en_descripcion_movimiento,
+		).toMatchObject({ weight: 0, severity: "baja" });
+		const parsed = estadoCuentaBatchAiSchema.parse({
+			documentos: [
+				{
+					...batchDocument,
+					observaciones_forenses: [
+						{
+							codigo: "ortografia_en_descripcion_movimiento",
+							pagina: 1,
+							descripcion: "Falta en descripción de un movimiento",
+							confianza: 99,
+							texto_detectado: "Desfile hpico",
+						},
+					],
+				},
+			],
+		});
+		expect(parsed.documentos[0].observaciones_forenses[0].codigo).toBe(
+			"ortografia_en_descripcion_movimiento",
+		);
+	});
+	test("la tipografía es informativa en cualquier parte del documento", () => {
+		expect(ESTADO_CUENTA_PROMPT).toContain("En cualquier parte del documento");
+		expect(ESTADO_CUENTA_PROMPT).toContain("es únicamente informativa");
+		expect(ESTADO_CUENTA_AI_SIGNAL_META.tipografia_inconsistente).toMatchObject(
+			{ severity: "baja", weight: 0 },
+		);
+	});
 	const batchDocument = {
 		document_ref: "document_1",
 		corresponde_al_tipo_declarado: true,
@@ -31,6 +69,88 @@ describe("estado de cuenta", () => {
 			estadoCuentaBatchAiSchema.safeParse({ documentos: [batchDocument] })
 				.success,
 		).toBe(true);
+	});
+	test("las páginas de captura son opcionales pero deben ser índices válidos", () => {
+		expect(
+			estadoCuentaBatchAiSchema.parse({ documentos: [batchDocument] })
+				.documentos[0].paginas_fotografiadas_o_escaneadas,
+		).toEqual([]);
+		expect(
+			estadoCuentaBatchAiSchema.parse({
+				documentos: [
+					{ ...batchDocument, paginas_fotografiadas_o_escaneadas: [1, 3] },
+				],
+			}).documentos[0].paginas_fotografiadas_o_escaneadas,
+		).toEqual([1, 3]);
+		expect(
+			estadoCuentaBatchAiSchema.safeParse({
+				documentos: [
+					{ ...batchDocument, paginas_fotografiadas_o_escaneadas: [0] },
+				],
+			}).success,
+		).toBe(false);
+	});
+	test("distingue perspectiva de anomalías y conserva la página de la limitación", () => {
+		const result = estadoCuentaBatchAiSchema.parse({
+			documentos: [
+				{
+					...batchDocument,
+					observaciones_forenses: [
+						{
+							codigo: "captura_impide_verificar_alineacion",
+							pagina: 3,
+							descripcion: "La curvatura del papel impide verificar las filas",
+							confianza: 95,
+							texto_detectado: null,
+						},
+					],
+				},
+			],
+		});
+		expect(result.documentos[0].observaciones_forenses[0]).toMatchObject({
+			codigo: "captura_impide_verificar_alineacion",
+			pagina: 3,
+		});
+		expect(
+			ESTADO_CUENTA_AI_SIGNAL_META.captura_impide_verificar_alineacion,
+		).toMatchObject({ severity: "baja", weight: 0 });
+		expect(ESTADO_CUENTA_PROMPT).toContain(
+			"no generes observaciones por esa deformación",
+		);
+		expect(ESTADO_CUENTA_PROMPT).toContain("desplazado aisladamente");
+		expect(ESTADO_CUENTA_PROMPT).toContain(
+			"Ser una fotografía no garantiza legitimidad",
+		);
+	});
+	test("conserva la palabra y página de una falta ortográfica sin tratarla como tipografía", () => {
+		const result = estadoCuentaBatchAiSchema.parse({
+			documentos: [
+				{
+					...batchDocument,
+					observaciones_forenses: [
+						{
+							codigo: "errores_ortograficos",
+							pagina: 1,
+							descripcion: "La palabra codigó tiene una tilde incorrecta",
+							confianza: 99,
+							texto_detectado: "codigó",
+						},
+					],
+				},
+			],
+		});
+		expect(result.documentos[0].observaciones_forenses[0].codigo).toBe(
+			"errores_ortograficos",
+		);
+		expect(result.documentos[0].observaciones_forenses[0].texto_detectado).toBe(
+			"codigó",
+		);
+		expect(result.documentos[0].observaciones_forenses[0].pagina).toBe(1);
+		expect(ESTADO_CUENTA_AI_SIGNAL_META.errores_ortograficos).toMatchObject({
+			severity: "media",
+			weight: 4,
+		});
+		expect(ESTADO_CUENTA_PROMPT).toContain("no errores lingüísticos");
 	});
 
 	test("rechaza una respuesta de IA sin veredictos críticos", () => {

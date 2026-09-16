@@ -4626,25 +4626,21 @@ export const liquidateByInvestorSchema = z.object({
   fecha_liquidacion: z.string().datetime().optional(),
 });
 
-export const orderUniqueCreditIds = (creditoIds: number[]): number[] =>
-  [...new Set(creditoIds)].sort((a, b) => a - b);
+// El cierre de la devolución vive en utils/devolucionCompletada.ts: son
+// funciones puras respecto de la conexión y así se pueden probar sin
+// arrastrar el grafo de imports de este archivo. Se re-exportan para no
+// romper a quien ya las importaba desde acá.
+export {
+  filtrarCreditosTotalmenteDevueltos,
+  lockPendingReturnCreditsForLiquidation,
+  marcarDevolucionCompletadaSiCorresponde,
+  orderUniqueCreditIds,
+} from "../utils/devolucionCompletada";
 
-export async function lockPendingReturnCreditsForLiquidation(
-  tx: any,
-  creditoIds: number[],
-) {
-  const orderedCreditIds = orderUniqueCreditIds(creditoIds);
-  return tx
-    .select({
-      creditoId: creditos.credito_id,
-      numeroCreditoSifco: creditos.numero_credito_sifco,
-      estadoDevolucion: creditos.estado_devolucion,
-    })
-    .from(creditos)
-    .where(inArray(creditos.credito_id, orderedCreditIds))
-    .orderBy(creditos.credito_id)
-    .for("no key update");
-}
+import {
+  lockPendingReturnCreditsForLiquidation,
+  marcarDevolucionCompletadaSiCorresponde,
+} from "../utils/devolucionCompletada";
 
 export async function liquidateByInvestorId(inversionista_id?: number, fechaLiquidacion?: Date) {
   // Verificar si ya hay una liquidación en proceso para este inversionista (o masiva)
@@ -5541,6 +5537,13 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         //    exitInvestor con skipStatusAndEmail (sin correo, no inactiva) y
         //    validación de monto_aportado==0 en espejo antes de mover a CUBE.
         // Al ser excluyentes, ningún crédito pasa por exitInvestor dos veces.
+        //
+        // En ambas ramas el cierre de la devolución (COMPLETADO) lo decide
+        // `marcarDevolucionCompletadaSiCorresponde`: un crédito solo se cierra
+        // cuando su tabla padre ya no tiene inversionistas fuera de CUBE. Un
+        // crédito compartido se devuelve de a un inversionista por vez —cada uno
+        // en su propia liquidación— y cerrarlo con el primero dejaba a los demás
+        // fuera del flujo.
         // ========================================
         try {
           const creditoIdsConPagos = [
@@ -5589,27 +5592,17 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
 
                 console.log(`  ✅ Inversionista ${inv_id} marcado como inactivo`);
 
-                // Solo los créditos realmente transferidos por exitInvestor y que
-                // estaban VERIFICADO pasan a COMPLETADO (no la lista de entrada).
+                // Solo los créditos realmente transferidos por exitInvestor son
+                // candidatos a COMPLETADO (no la lista de entrada), y de esos
+                // solo cierran los que ya no le quedan inversionistas al padre.
                 const creditoIdsProcesados: number[] = (exitResult.creditos_procesados ?? []).map(
                   (r: any) => r.credito_id
                 );
 
-                if (creditoIdsProcesados.length > 0) {
-                  await db
-                    .update(creditos)
-                    .set({ estado_devolucion: "COMPLETADO" })
-                    .where(
-                      and(
-                        inArray(creditos.credito_id, creditoIdsProcesados),
-                        eq(creditos.estado_devolucion, "VERIFICADO")
-                      )
-                    );
-
-                  console.log(
-                    `  ✅ Créditos VERIFICADO reseteados a COMPLETADO tras salida total del inversionista ${inv_id}`
-                  );
-                }
+                await marcarDevolucionCompletadaSiCorresponde(
+                  creditoIdsProcesados,
+                  `salida total inv ${inv_id}`
+                );
 
                 if (Array.isArray(exitResult.errores) && exitResult.errores.length > 0) {
                   console.warn(
@@ -5713,20 +5706,23 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                       exitResultDevolucion?.message ?? exitResultDevolucion
                     );
                   } else {
-                    // Solo los créditos realmente transferidos por exitInvestor pasan
-                    // a COMPLETADO (no la lista de entrada).
+                    // Solo los créditos realmente transferidos por exitInvestor son
+                    // candidatos (no la lista de entrada), y de esos solo cierran
+                    // los que ya no le quedan inversionistas al padre: este
+                    // inversionista puede ser uno de varios en el mismo crédito.
                     const creditoIdsProcesados: number[] = (exitResultDevolucion.creditos_procesados ?? []).map(
                       (r: any) => r.credito_id
                     );
 
-                    if (creditoIdsProcesados.length > 0) {
-                      await db
-                        .update(creditos)
-                        .set({ estado_devolucion: "COMPLETADO" })
-                        .where(inArray(creditos.credito_id, creditoIdsProcesados));
+                    console.log(
+                      `  ✅ Salida por estado_devolucion=VERIFICADO ejecutada para inversionista ${inv_id}:`,
+                      exitResultDevolucion
+                    );
 
-                      console.log(`  ✅ Salida por estado_devolucion=VERIFICADO ejecutada y créditos reseteados a COMPLETADO:`, exitResultDevolucion);
-                    }
+                    await marcarDevolucionCompletadaSiCorresponde(
+                      creditoIdsProcesados,
+                      `devolución VERIFICADO inv ${inv_id}`
+                    );
 
                     if (Array.isArray(exitResultDevolucion.errores) && exitResultDevolucion.errores.length > 0) {
                       console.warn(
@@ -5743,6 +5739,42 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           console.error(
             `  ❌ Error en salida automática (liquidación ya guardada):`,
             exitError
+          );
+        }
+
+        // ── Barrido de rezagados ──
+        // Un crédito puede quedar en VERIFICADO con su último inversionista ya
+        // devuelto: si dos liquidaciones del mismo crédito corren en paralelo,
+        // cada una puede ver a la otra todavía presente y ninguna cerrarlo.
+        //
+        // Va al FINAL y en su propio try/catch: es una limpieza oportunista y
+        // no puede tumbar la salida automática (antes corría primero, y un
+        // fallo suyo dejaba al inversionista sin inactivar y sin correo).
+        //
+        // Se filtra por VERIFICADO antes de llamar al helper: sin eso se toma
+        // FOR NO KEY UPDATE sobre todos los créditos liquidados en CADA
+        // corrida —incluida la masiva— para un caso que casi nunca aplica.
+        try {
+          const creditoIdsRezagados = await db
+            .select({ credito_id: creditos.credito_id })
+            .from(creditos)
+            .where(
+              and(
+                inArray(creditos.credito_id, creditoIdsLiquidados),
+                eq(creditos.estado_devolucion, "VERIFICADO")
+              )
+            );
+
+          if (creditoIdsRezagados.length > 0) {
+            await marcarDevolucionCompletadaSiCorresponde(
+              creditoIdsRezagados.map((c) => c.credito_id),
+              `barrido inv ${inv_id}`
+            );
+          }
+        } catch (barridoError) {
+          console.error(
+            `  ⚠️  Error en barrido de rezagados (no afecta la liquidación ni la salida):`,
+            barridoError
           );
         }
       } catch (excelError) {

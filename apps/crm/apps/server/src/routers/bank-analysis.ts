@@ -1,16 +1,17 @@
+import { createHash } from "node:crypto";
 import { google } from "@ai-sdk/google";
 import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { opportunityDocuments } from "../db/schema/documents";
 import {
 	coDebtors,
 	creditAnalysis,
 	leads,
 	opportunities,
 } from "../db/schema/crm";
+import { opportunityDocuments } from "../db/schema/documents";
 import {
 	BANK_ANALYSIS_PROMPT,
 	type BankStatementAnalysis,
@@ -39,6 +40,12 @@ import {
 	uploadFileToR2,
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
+import {
+	DocumentIntegrityError,
+	linkUploadedValidationsToDocuments,
+	releaseCapacityAnalysisReservation,
+	reserveCapacityAnalysis,
+} from "../services/document-integrity";
 
 const MAX_AI_ATTEMPTS = 2;
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB por archivo
@@ -88,7 +95,9 @@ function convertAnalysisToQuetzales(
 			promedio_ingresos_variables: toQuetzales(
 				promedio_mensual.promedio_ingresos_variables,
 			),
-			promedio_gastos_fijos: toQuetzales(promedio_mensual.promedio_gastos_fijos),
+			promedio_gastos_fijos: toQuetzales(
+				promedio_mensual.promedio_gastos_fijos,
+			),
 			promedio_gastos_variables: toQuetzales(
 				promedio_mensual.promedio_gastos_variables,
 			),
@@ -117,6 +126,11 @@ export const bankAnalysisRouter = {
 						)
 						.min(1)
 						.max(9),
+					integrityValidationIds: z
+						.array(z.string().uuid())
+						.min(1)
+						.max(9)
+						.optional(),
 					annualRate: z.number().default(0.18),
 					termMonths: z.number().int().min(12).max(120).default(60),
 					maxDebtRatio: z.number().min(0).max(1).default(0.2),
@@ -131,7 +145,16 @@ export const bankAnalysisRouter = {
 				})
 				.refine((data) => !(data.leadId && data.coDebtorId), {
 					message: "No puede analizar un lead y un co-deudor a la vez",
-				}),
+				})
+				.refine(
+					(data) =>
+						!data.leadId ||
+						data.integrityValidationIds?.length === data.files.length,
+					{
+						message:
+							"Valide la legitimidad de todos los documentos antes de analizar la capacidad de pago",
+					},
+				),
 		)
 		.handler(async ({ input, context }) => {
 			const isForLead = !!input.leadId;
@@ -224,11 +247,17 @@ export const bankAnalysisRouter = {
 			}
 
 			const uploadedKeys: string[] = [];
+			const uploadedKeysToDelete = new Set<string>();
+			let capacityReservation: {
+				opportunityId: string;
+				token: string;
+			} | null = null;
 
 			try {
 				// 2. Validar archivos: descargar de R2 y verificar formato PDF
 				const downloadedFiles: {
 					name: string;
+					key: string;
 					buffer: Buffer;
 					mimeType: string;
 					size: number;
@@ -256,103 +285,133 @@ export const bankAnalysisRouter = {
 
 					downloadedFiles.push({
 						name: file.name,
+						key: uploadedFile.key,
 						buffer,
 						mimeType: uploadedFile.mimeType,
 						size: uploadedFile.size,
 					});
 				}
 
-				// 3. Incremento atómico del contador para evitar race conditions
 				const whereCondition = getCreditAnalysisOwnerCondition(owner);
-
-				const updateResult = await db
-					.update(creditAnalysis)
-					.set({
-						attemptCount: sql`${creditAnalysis.attemptCount} + 1`,
-						updatedAt: new Date(),
-					})
-					.where(
-						and(
-							whereCondition,
-							lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
-							isNull(creditAnalysis.analyzedAt),
-						),
-					)
-					.returning({
-						id: creditAnalysis.id,
-						attemptCount: creditAnalysis.attemptCount,
-					});
-
 				let currentAttemptCount: number;
 
-				if (updateResult.length > 0) {
-					// Registro existente actualizado exitosamente
-					currentAttemptCount = updateResult[0].attemptCount;
-				} else {
-					// No se actualizó: o no existe, o ya tiene análisis, o alcanzó el límite
-					const existing = await db
-						.select()
-						.from(creditAnalysis)
-						.where(whereCondition)
-						.limit(1);
-
-					if (existing.length === 0) {
-						// No existe, crear nuevo registro
-						const insertValues = isForLead
-							? {
-									leadId: input.leadId!,
-									opportunityId: input.opportunityId!,
-									attemptCount: 1,
-									createdBy: context.userId,
-								}
-							: {
-									coDebtorId: input.coDebtorId!,
-									attemptCount: 1,
-									createdBy: context.userId,
-								};
-
-						const insertResult = await db
-							.insert(creditAnalysis)
-							.values(insertValues)
-							.onConflictDoNothing() // En caso de race condition en insert
-							.returning({ attemptCount: creditAnalysis.attemptCount });
-
-						if (insertResult.length === 0) {
-							// Hubo conflict, reintentar el update
-							const retryUpdate = await db
-								.update(creditAnalysis)
-								.set({
-									attemptCount: sql`${creditAnalysis.attemptCount} + 1`,
-									updatedAt: new Date(),
-								})
-								.where(
-									and(
-										whereCondition,
-										lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
-										isNull(creditAnalysis.analyzedAt),
-									),
-								)
-								.returning({ attemptCount: creditAnalysis.attemptCount });
-
-							if (retryUpdate.length === 0) {
-								throw new ORPCError("PRECONDITION_FAILED", {
-									message: `Se alcanzó el límite de ${MAX_AI_ATTEMPTS} intentos o ya existe un análisis exitoso.`,
-								});
-							}
-							currentAttemptCount = retryUpdate[0].attemptCount;
-						} else {
-							currentAttemptCount = insertResult[0].attemptCount;
-						}
-					} else {
-						// Existe pero no se pudo actualizar
-						if (existing[0].analyzedAt !== null) {
+				if (isForLead) {
+					if (!input.opportunityId) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: "Debe proporcionar opportunityId para analizar un lead",
+						});
+					}
+					try {
+						const reservation = await reserveCapacityAnalysis({
+							opportunityId: input.opportunityId,
+							leadId: input.leadId!,
+							validationIds: input.integrityValidationIds ?? [],
+							userId: context.userId,
+							maxAttempts: MAX_AI_ATTEMPTS,
+							files: downloadedFiles.map((file) => ({
+								filePath: file.key,
+								contentSha256: createHash("sha256")
+									.update(file.buffer)
+									.digest("hex"),
+							})),
+						});
+						capacityReservation = {
+							opportunityId: input.opportunityId,
+							token: reservation.token,
+						};
+						currentAttemptCount = reservation.attemptCount;
+					} catch (error) {
+						if (error instanceof DocumentIntegrityError) {
 							throw new ORPCError("PRECONDITION_FAILED", {
-								message: `Ya existe un análisis exitoso para este ${isForLead ? "lead" : "co-deudor"}. No se permiten más intentos.`,
+								message: error.message,
 							});
 						}
-						throw new ORPCError("PRECONDITION_FAILED", {
-							message: `Se alcanzó el límite de ${MAX_AI_ATTEMPTS} intentos de análisis. Contacte al administrador.`,
+						throw error;
+					}
+				} else {
+					// El flujo de codeudor no usa validación documental, pero conserva
+					// su contador atómico existente.
+					const updateResult = await db
+						.update(creditAnalysis)
+						.set({
+							attemptCount: sql`${creditAnalysis.attemptCount} + 1`,
+							updatedAt: new Date(),
+						})
+						.where(
+							and(
+								whereCondition,
+								lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
+								isNull(creditAnalysis.analyzedAt),
+							),
+						)
+						.returning({
+							id: creditAnalysis.id,
+							attemptCount: creditAnalysis.attemptCount,
 						});
+
+					if (updateResult.length > 0) {
+						// Registro existente actualizado exitosamente
+						currentAttemptCount = updateResult[0].attemptCount;
+					} else {
+						// No se actualizó: o no existe, o ya tiene análisis, o alcanzó el límite
+						const existing = await db
+							.select()
+							.from(creditAnalysis)
+							.where(whereCondition)
+							.limit(1);
+
+						if (existing.length === 0) {
+							// No existe, crear nuevo registro
+							const insertValues = {
+								coDebtorId: input.coDebtorId!,
+								attemptCount: 1,
+								createdBy: context.userId,
+							};
+
+							const insertResult = await db
+								.insert(creditAnalysis)
+								.values(insertValues)
+								.onConflictDoNothing() // En caso de race condition en insert
+								.returning({ attemptCount: creditAnalysis.attemptCount });
+
+							if (insertResult.length === 0) {
+								// Hubo conflict, reintentar el update
+								const retryUpdate = await db
+									.update(creditAnalysis)
+									.set({
+										attemptCount: sql`${creditAnalysis.attemptCount} + 1`,
+										updatedAt: new Date(),
+									})
+									.where(
+										and(
+											whereCondition,
+											lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
+											isNull(creditAnalysis.analyzedAt),
+										),
+									)
+									.returning({ attemptCount: creditAnalysis.attemptCount });
+
+								if (retryUpdate.length === 0) {
+									throw new ORPCError("PRECONDITION_FAILED", {
+										message: `Se alcanzó el límite de ${MAX_AI_ATTEMPTS} intentos o ya existe un análisis exitoso.`,
+									});
+								}
+								currentAttemptCount = retryUpdate[0].attemptCount;
+							} else {
+								currentAttemptCount = insertResult[0].attemptCount;
+							}
+						} else {
+							// Existe pero no se pudo actualizar
+							if (existing[0].analyzedAt !== null) {
+								throw new ORPCError("PRECONDITION_FAILED", {
+									message:
+										"Ya existe un análisis exitoso para este co-deudor. No se permiten más intentos.",
+								});
+							}
+							throw new ORPCError("PRECONDITION_FAILED", {
+								message: `Se alcanzó el límite de ${MAX_AI_ATTEMPTS} intentos de análisis. Contacte al administrador.`,
+							});
+						}
 					}
 				}
 
@@ -422,13 +481,32 @@ export const bankAnalysisRouter = {
 					// El intento se contó antes de llamar a la IA, pero esto no es un análisis
 					// fallido sino documentos mal armados: se devuelve para no dejar al usuario
 					// bloqueado esperando un reset de admin por algo que puede corregir solo.
-					await db
+					const mixedCurrencyCondition = capacityReservation
+						? and(
+								whereCondition,
+								eq(
+									creditAnalysis.analysisReservationToken,
+									capacityReservation.token,
+								),
+							)
+						: whereCondition;
+					const releasedAttempt = await db
 						.update(creditAnalysis)
 						.set({
 							attemptCount: sql`GREATEST(${creditAnalysis.attemptCount} - 1, 0)`,
+							...(capacityReservation
+								? {
+										analysisReservationToken: null,
+										analysisReservationStartedAt: null,
+									}
+								: {}),
 							updatedAt: new Date(),
 						})
-						.where(whereCondition);
+						.where(mixedCurrencyCondition)
+						.returning({ id: creditAnalysis.id });
+					if (capacityReservation && releasedAttempt.length > 0) {
+						capacityReservation = null;
+					}
 
 					throw new ORPCError("BAD_REQUEST", {
 						message:
@@ -466,7 +544,16 @@ export const bankAnalysisRouter = {
 					tipo: file.mimeType,
 				}));
 
-				await db
+				const completionCondition = capacityReservation
+					? and(
+							whereCondition,
+							eq(
+								creditAnalysis.analysisReservationToken,
+								capacityReservation.token,
+							),
+						)
+					: whereCondition;
+				const completedAnalysis = await db
 					.update(creditAnalysis)
 					.set({
 						fullAnalysis: JSON.stringify({
@@ -488,13 +575,36 @@ export const bankAnalysisRouter = {
 						suggestedPaymentDays:
 							analysis.analisis_fecha_pago?.dias_pago_sugeridos ?? null,
 						analyzedAt: new Date(),
+						...(capacityReservation
+							? {
+									analysisReservationToken: null,
+									analysisReservationStartedAt: null,
+								}
+							: {}),
 						updatedAt: new Date(),
 					})
-					.where(whereCondition);
+					.where(completionCondition)
+					.returning({ id: creditAnalysis.id });
+
+				if (capacityReservation) {
+					if (completedAnalysis.length === 0) {
+						throw new ORPCError("PRECONDITION_FAILED", {
+							message:
+								"La validación documental cambió mientras se analizaba la capacidad. Actualiza la pantalla e inténtalo nuevamente.",
+						});
+					}
+					capacityReservation = null;
+				}
 
 				if (opportunityForDocuments) {
 					const savedDocuments: { id: string; documentType: string }[] = [];
 					const savedKeys: string[] = [];
+					const pendingValidationLinks: Array<{
+						documentId: string;
+						documentFilePath: string;
+						sourceFilePath: string;
+						buffer: Buffer;
+					}> = [];
 					let checklistDocumentsSaved = false;
 
 					try {
@@ -511,7 +621,8 @@ export const bankAnalysisRouter = {
 						});
 
 						for (let slot = 0; slot < documentSlots.length; slot++) {
-							const documentType = getBankStatementOpportunityDocumentType(slot);
+							const documentType =
+								getBankStatementOpportunityDocumentType(slot);
 							const file = filesToUpload[documentSlots[slot]];
 							if (!documentType || !file) {
 								continue;
@@ -519,7 +630,9 @@ export const bankAnalysisRouter = {
 
 							const uniqueFilename = generateUniqueFilename(file.name);
 							const { key } = await uploadFileToR2(
-								new Blob([new Uint8Array(file.buffer)], { type: file.mimeType }),
+								new Blob([new Uint8Array(file.buffer)], {
+									type: file.mimeType,
+								}),
 								uniqueFilename,
 								opportunityForDocuments.id,
 							);
@@ -543,6 +656,12 @@ export const bankAnalysisRouter = {
 
 							if (newDocument) {
 								savedDocuments.push({ id: newDocument.id, documentType });
+								pendingValidationLinks.push({
+									documentId: newDocument.id,
+									documentFilePath: key,
+									sourceFilePath: file.key,
+									buffer: file.buffer,
+								});
 								await updateChecklistForClientDocument(
 									opportunityForDocuments.id,
 									documentType,
@@ -551,6 +670,14 @@ export const bankAnalysisRouter = {
 									opportunityForDocuments.vehicleId || undefined,
 								);
 							}
+						}
+						const sourceFilePathsToDelete =
+							await linkUploadedValidationsToDocuments({
+								opportunityId: opportunityForDocuments.id,
+								links: pendingValidationLinks,
+							});
+						for (const filePath of sourceFilePathsToDelete) {
+							uploadedKeysToDelete.add(filePath);
 						}
 
 						checklistDocumentsSaved = true;
@@ -578,13 +705,16 @@ export const bankAnalysisRouter = {
 							),
 						);
 
-						console.error("Failed to save bank statement opportunity documents", {
-							opportunityId: opportunityForDocuments.id,
-							savedDocuments: savedDocuments.length,
-							savedFiles: savedKeys.length,
-							failedCleanups: failedCleanups.length,
-							error: error instanceof Error ? error.message : String(error),
-						});
+						console.error(
+							"Failed to save bank statement opportunity documents",
+							{
+								opportunityId: opportunityForDocuments.id,
+								savedDocuments: savedDocuments.length,
+								savedFiles: savedKeys.length,
+								failedCleanups: failedCleanups.length,
+								error: error instanceof Error ? error.message : String(error),
+							},
+						);
 					}
 
 					// El checklist solo tiene tres casillas, pero el análisis acepta hasta
@@ -604,6 +734,12 @@ export const bankAnalysisRouter = {
 					if (checklistDocumentsSaved && extraFiles.length > 0) {
 						const savedExtraDocumentIds: string[] = [];
 						const savedExtraKeys: string[] = [];
+						const pendingExtraValidationLinks: Array<{
+							documentId: string;
+							documentFilePath: string;
+							sourceFilePath: string;
+							buffer: Buffer;
+						}> = [];
 
 						try {
 							for (const [index, file] of extraFiles.entries()) {
@@ -637,7 +773,21 @@ export const bankAnalysisRouter = {
 
 								if (newDocument) {
 									savedExtraDocumentIds.push(newDocument.id);
+									pendingExtraValidationLinks.push({
+										documentId: newDocument.id,
+										documentFilePath: key,
+										sourceFilePath: file.key,
+										buffer: file.buffer,
+									});
 								}
+							}
+							const sourceFilePathsToDelete =
+								await linkUploadedValidationsToDocuments({
+									opportunityId: opportunityForDocuments.id,
+									links: pendingExtraValidationLinks,
+								});
+							for (const filePath of sourceFilePathsToDelete) {
+								uploadedKeysToDelete.add(filePath);
 							}
 						} catch (error) {
 							const cleanupResults = await Promise.allSettled([
@@ -665,15 +815,27 @@ export const bankAnalysisRouter = {
 						}
 					}
 				}
-
 				// 8. Retornar resultados
 				return {
 					analysis,
 					creditCapacity,
 				};
 			} finally {
+				if (capacityReservation) {
+					try {
+						await releaseCapacityAnalysisReservation(capacityReservation);
+					} catch (error) {
+						console.error("Failed to release capacity analysis reservation", {
+							resourceId,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
+				const cleanupKeys = isForLead
+					? [...uploadedKeysToDelete]
+					: uploadedKeys;
 				const cleanupResults = await Promise.allSettled(
-					uploadedKeys.map((key) => deleteFileFromR2(key)),
+					cleanupKeys.map((key) => deleteFileFromR2(key)),
 				);
 				const failedDeletes = cleanupResults.filter(
 					(result) => result.status === "rejected",
@@ -682,7 +844,7 @@ export const bankAnalysisRouter = {
 				if (failedDeletes.length > 0) {
 					console.error("Failed to cleanup bank statement uploads from R2", {
 						resourceId,
-						keys: uploadedKeys,
+						keys: cleanupKeys,
 						failedDeletes: failedDeletes.length,
 					});
 				}

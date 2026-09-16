@@ -6,6 +6,8 @@ import { user } from "../db/schema/auth";
 import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { notifications } from "../db/schema/notifications";
 import { vehicles } from "../db/schema/vehicles";
+import { canWriteOpportunityCreditAnalysis } from "../lib/credit-analysis-ownership";
+import { canRunDocumentIntegrityValidation } from "../lib/document-integrity/workflow-policy";
 import { protectedProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -146,12 +148,6 @@ async function assertCanUploadToResource(params: {
 		}
 
 		case "bank_statement": {
-			if (!PERMISSIONS.canAccessClients(userRole)) {
-				throw new ORPCError("FORBIDDEN", {
-					message: "CRM access role required",
-				});
-			}
-
 			const [opportunity] = await db
 				.select({
 					id: opportunities.id,
@@ -162,12 +158,27 @@ async function assertCanUploadToResource(params: {
 				.limit(1);
 
 			if (opportunity) {
-				if (userRole === "sales" && opportunity.assignedTo !== userId) {
+				if (
+					!canRunDocumentIntegrityValidation(userRole) ||
+					!canWriteOpportunityCreditAnalysis(
+						userRole,
+						userId,
+						opportunity.assignedTo,
+					)
+				) {
 					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para analizar esta oportunidad",
+						message: "No tienes permiso para subir estados de cuenta",
 					});
 				}
 				return;
+			}
+
+			// Los codeudores conservan el permiso previo del análisis de capacidad;
+			// la validación documental nueva aplica únicamente a oportunidades.
+			if (!PERMISSIONS.canAccessClients(userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "CRM access role required",
+				});
 			}
 
 			const [coDebtor] = await db

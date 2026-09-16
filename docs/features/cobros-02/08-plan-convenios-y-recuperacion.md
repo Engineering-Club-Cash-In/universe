@@ -34,12 +34,45 @@ más que las cuotas vencidas, y en las dos el crédito debe quedarse quieto y co
 | 8 | **Sin días de gracia.** Todo lo dispara una persona |
 | 9 | El convenio **congela bucket y asesor** hasta que se pague o se deshaga |
 | 10 | Deshacer un convenio es **soft delete**, no borrado |
+| 11 | El crédito en convenio **se queda en el bucket que tenía** al firmarlo |
+| 12 | **Sí aparece en la cola del día**, con la prioridad de "su fecha de pago ya viene" — las cuotas del convenio heredan las fechas del crédito, así que el vencimiento es el mismo |
+| 13 | **Sí cuenta para la capacidad** del asesor |
+| 14 | **No devenga mora** mientras está en convenio (ya era así: `EN_CONVENIO` está en `STATUS_EXCLUIDOS_MORA`) |
+| 15 | Cuando un crédito **escribe en el bot**, se le avisa a su asesor asignado — tipo nuevo de alerta + migración |
+| 16 | El aviso del bot es para **todos los buckets**, no solo B0: va al asesor dueño del crédito, esté donde esté |
+| 17 | El aviso se agrupa **por referencia de conversación** (`sesion_id`): una alerta por conversación, no por mensaje ni por día |
+| 18 | "El total de lo que debe" para levantar `EN_RECUPERACION` **incluye la mora** |
+| 19 | Los convenios que ya existen se re-siembran por **estado de pago, no por origen**: al día → **B2**, atrasado → **B4** |
 
 > ⚠️ **Anotado para revisar con el PM.** Puede que después decidan que con 5 cuotas **no**
 > suba solo a B5 y que la única forma de llegar sea el botón. En ese escenario **la mora
 > tampoco correría**. Quedó escrito para no re-discutirlo desde cero.
 
 ---
+
+## Qué significa "al día" con un convenio
+
+El criterio del ticket dice dos cosas que parecen chocar: *"no se va a regresar de bucket"*
+y *"el crédito se toma como que está al día"*. No chocan — **separan propiedad de trato**:
+
+| Dimensión | Con convenio vigente |
+| --- | --- |
+| Bucket | **El que tenía al firmar.** No baja ni sube solo |
+| Asesor | El mismo, hasta que se pague o se deshaga |
+| Cola del día | **Sí aparece**, con la prioridad de "ya viene su fecha de pago" |
+| Capacidad del asesor | **Sí cuenta** |
+| Mora | **No devenga** |
+| Recordatorios al cliente | Siguen, D-5/D-3/D-1/D-0 sobre las cuotas del convenio |
+
+O sea: "al día" significa que **no se lo castiga** (no baja de bucket, no le corre mora, no
+se lo trata como moroso nuevo), no que desaparezca de la gestión. Sigue siendo del asesor,
+sigue ocupando su cupo y sigue saliendo en su cola el día que toca pagar.
+
+> 📌 **Ojo con el monto en la cola.** Si se mete `EN_CONVENIO` al filtro de
+> `cuotasProximas.ts` a secas, sale la **cuota normal** del crédito. Pero en convenio el
+> cliente debe pagar **las dos** ese mes, y `convenioProximos.ts` ya calcula
+> `monto_cuota = cuota normal + cuota del convenio`. La cola debería tomar ese número, no
+> el de la cuota suelta.
 
 ## El hallazgo que define la implementación: piso, no clavo
 
@@ -65,8 +98,9 @@ Se implementa como: **el estado se levanta cuando el crédito queda sin cuotas v
 (es decir, cuando el bucket derivado daría B0), evaluado en la **validación** del pago —
 no en el registro, porque una boleta se sube hoy y contabilidad la valida después.
 
-Con ese criterio la **mora pendiente no bloquea** la salida: si pagó todas las cuotas pero
-quedó debiendo mora, sale de recuperación igual. **Falta confirmarlo con el PM.**
+**Confirmado el 15-sep (decisión 18): el total INCLUYE la mora.** Si pagó todas las cuotas
+pero quedó debiendo mora, **no** sale de recuperación. El estado se levanta cuando no debe
+nada: ni cuotas vencidas ni mora.
 
 ---
 
@@ -114,19 +148,68 @@ La que más valor da por lo que cuesta. Nada de esto toca un bucket.
 - Tipo nuevo en el enum `cobros_notif_tipo` (migración del CRM) para convenio incumplido.
 - Job que detecta cuotas de convenio vencidas e impagas y notifica **al asesor y al
   supervisor**.
-- Meter `EN_CONVENIO` al filtro de estados de la agenda del día (`cuotasProximas.ts`).
+- Meter `EN_CONVENIO` a la agenda del día, **tomando el monto de `convenioProximos.ts`**
+  (normal + convenio), no la cuota suelta de `cuotasProximas.ts`.
 - Pantalla **Alertas de Convenios**, calcada de `/cobros/promesas`: las mismas cuatro
   tarjetas (Vencidas · Vencen hoy · Por vencer · Próximas) + ítem en el menú.
 - La señal de convenio vencido/por vencer en la Cola del día.
+- **Encender `CONVENIO_WHATSAPP_ENABLED`** y validar un envío real. El código de los
+  recordatorios D-5/D-3/D-1/D-0 ya existe (`send-convenio-reminders.ts`) pero está apagado:
+  sin esto, el criterio 5 del ticket no se cumple aunque esté implementado.
+
+### Fase 1.b · Aviso cuando el cliente escribe en el bot
+
+Sale del criterio 1 del ticket (*"si escriben por WhatsApp… el asesor asignado debe
+responder"*) y **no existe nada**: el bot atiende al cliente, deja su historial en la Ficha
+360 y no avisa a nadie — no hay una sola `createNotification` en todo el módulo del bot. Hoy
+el asesor se entera solo si abre la ficha.
+
+- Tipo nuevo en `cobros_notif_tipo` + migración del CRM.
+- Se dispara desde el middleware `historialBotCobros`, que ya está montado comodín sobre
+  `/api/bot/cobros/*`: cae solo, sin tocar cada endpoint.
+- Va **al asesor dueño del crédito, sea cual sea su bucket** (decisión 16).
+- **Dedup por referencia de conversación** (decisión 17). La "conversación" del bot es la
+  `referencia` del paso 1 — la fila de `otps`—, que en `bot_cobros_interacciones` vive como
+  **`sesion_id`**: es la misma llave por la que la Ficha 360 agrupa y numera ("Referencia 1"
+  = la más vieja), y está sin FK a propósito para sobrevivir a la purga del OTP. Una alerta
+  por `sesion_id`, no por mensaje ni por día.
+
+**Mecánica de a quién avisar.** La interacción guarda `numero_sifco`, pero **solo en las
+acciones sobre un crédito**: las primeras de la conversación (`buscar_cliente`,
+`listar_creditos`) no lo traen. Entonces la alerta se emite en la **primera interacción de
+la sesión que ya trae `numero_sifco`**, que es cuando recién se sabe de qué crédito —y por
+lo tanto de qué asesor— se trata. De ahí la cadena es la de siempre: `numero_sifco` →
+crédito de cartera → `asesor_id` → `email_cash_in` → usuario del CRM.
+
+Los `acceso_fallido` quedan fuera solos: no tienen sesión (D-43) ni identidad resuelta, así
+que no hay asesor a quién avisarle.
 
 ### Fase 2 · Congelar el convenio — invierte la regla vieja
 
 - Se va `nacioConElConvenio` y el borrón y cuenta nueva.
 - El job de convenios deja de mover buckets: pasa a **vigilante** (calcula el atraso solo
   para alertar). Bucket y asesor quedan donde estaban al firmar.
-- **Pendiente de decidir:** hay ~63 créditos `EN_CONVENIO` que el job ya movió con la regla
-  vieja, repartidos entre B0 y B5. ¿Se quedan donde están o se recalculan? Probablemente
-  hace falta un script de una sola corrida.
+#### La re-siembra de los convenios que ya existen (decisión 19)
+
+Los ~63 `EN_CONVENIO` que el job ya movió con la regla vieja están repartidos entre B0 y B5,
+con asesores que no les tocaban. **No se intenta reconstruir de qué bucket venían** — esa
+información no está en ningún lado y adivinarla sería peor que elegir un default honesto.
+
+Se re-siembran por **cómo están pagando hoy**, no por su origen:
+
+| Situación del convenio | Bucket |
+| --- | --- |
+| **Al día** (cumpliendo su convenio) | **B2** |
+| **Atrasado** (debe alguna cuota del convenio) | **B4** |
+
+Aplica igual en el sandbox y en el pase a producción: es un script de **una sola corrida**,
+idempotente, que corre junto con el cambio de regla.
+
+> ⚠️ **Cómo se mide "al día" acá.** Se reusa el modelo que el job de convenios ya calcula —
+> meses atrasados = fechas de vencimiento distintas, pasadas, con algo impago, uniendo
+> cuotas del crédito no absorbidas por el convenio + cuotas del convenio vencidas. Cero
+> meses atrasados = al día → B2; uno o más → B4. **Confirmar con el PM** que ese es el
+> criterio esperado antes de correrlo en producción.
 
 ### Fase 3 · Ficha 360 — banda roja y acciones
 
@@ -154,5 +237,9 @@ La que más valor da por lo que cuesta. Nada de esto toca un bucket.
 
 ## Lo que sigue sin definirse
 
-1. **¿"El total de lo que debe" incluye la mora?** (ver el supuesto de arriba).
-2. **¿Qué pasa con los ~63 convenios que el job ya movió** con la regla vieja?
+**Nada bloqueante para arrancar.** Las tres preguntas que quedaban se cerraron el 15-sep
+(decisiones 16 a 19). Queda una sola cosa por confirmar, y no frena el desarrollo:
+
+1. **El criterio de "al día" de la re-siembra** (decisión 19): se propone usar el modelo de
+   meses atrasados que el job de convenios ya calcula. Confirmarlo con el PM **antes de
+   correr el script en producción**, no antes de escribirlo.

@@ -121,6 +121,19 @@ export function ListaCreditosPagos() {
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
 
+  /**
+   * El crédito cuyo modal de rubros está abierto.
+   *
+   * Vive ACÁ, por encima del `isMobile ? <MobileView/> : <DesktopView/>`, y no
+   * dentro de cada vista. Con una copia por vista, cruzar el breakpoint de
+   * 1200px —rotar una tablet, arrastrar el borde de la ventana— desmontaba la
+   * vista activa y con ella el diálogo: el borrador a medio escribir se perdía,
+   * y peor, se saltaba la protección del propio modal contra cerrarse con una
+   * escritura en curso, porque no es el modal el que se cierra sino el árbol
+   * entero el que se va.
+   */
+  const [rubrosCredito, setRubrosCredito] = useState<any | null>(null);
+
   // Aseguradoras para el filtro
   const [aseguradoras, setAseguradoras] = useState<Aseguradora[]>([]);
   React.useEffect(() => {
@@ -733,6 +746,7 @@ export function ListaCreditosPagos() {
         <>
           {isMobile ? (
             <MobileView
+              setRubrosCredito={setRubrosCredito}
               data={data}
               expandedRow={expandedRow}
               setExpandedRow={setExpandedRow}
@@ -759,6 +773,7 @@ export function ListaCreditosPagos() {
             />
           ) : (
             <DesktopView
+              setRubrosCredito={setRubrosCredito}
               data={data}
               expandedRow={expandedRow}
               setExpandedRow={setExpandedRow}
@@ -812,6 +827,14 @@ export function ListaCreditosPagos() {
           )}
         </>
       )}
+
+      <RubrosCredito
+        open={!!rubrosCredito}
+        onOpenChange={(o) => !o && setRubrosCredito(null)}
+        creditoId={rubrosCredito?.credito_id ?? null}
+        statusCredit={rubrosCredito?.statusCredit ?? null}
+        rol={user?.role ?? null}
+      />
 
       <ModalEditCredit
         open={editModalOpen}
@@ -1279,10 +1302,10 @@ function MobileView({
   setFechaInicioModalOpen,
   setSelectedCreditCaido,
   setCaidoModalOpen,
+  setRubrosCredito,
 }: any) {
   // Crédito cuyo modal de Rubros está abierto (uno a la vez). El modal vive
   // FUERA del map: montarlo por fila lo desmontaría al colapsar la tarjeta.
-  const [rubrosCredito, setRubrosCredito] = useState<any | null>(null);
 
   return (
     <div className="space-y-4">
@@ -1440,13 +1463,6 @@ function MobileView({
       ))}
 
       {/* Rubros: cobros adicionales del crédito (ADMIN y ASESOR). */}
-      <RubrosCredito
-        open={!!rubrosCredito}
-        onOpenChange={(o) => !o && setRubrosCredito(null)}
-        creditoId={rubrosCredito?.credito_id ?? null}
-        statusCredit={rubrosCredito?.statusCredit ?? null}
-        rol={user?.role ?? null}
-      />
     </div>
   );
 }
@@ -1476,10 +1492,10 @@ function DesktopView({
   setFechaInicioModalOpen,
   setSelectedCreditCaido,
   setCaidoModalOpen,
+  setRubrosCredito,
 }: any) {
   // Crédito cuyo modal de Rubros está abierto (uno a la vez). El modal vive
   // FUERA de la tabla: montarlo por fila lo desmontaría al colapsar la fila.
-  const [rubrosCredito, setRubrosCredito] = useState<any | null>(null);
 
   return (
 <div className="w-full">
@@ -1667,13 +1683,6 @@ function DesktopView({
       </Table>
 
       {/* Rubros: cobros adicionales del crédito (ADMIN y ASESOR). */}
-      <RubrosCredito
-        open={!!rubrosCredito}
-        onOpenChange={(o) => !o && setRubrosCredito(null)}
-        creditoId={rubrosCredito?.credito_id ?? null}
-        statusCredit={rubrosCredito?.statusCredit ?? null}
-        rol={user?.role ?? null}
-      />
     </div>
   );
 }

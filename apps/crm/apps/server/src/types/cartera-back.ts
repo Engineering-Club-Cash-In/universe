@@ -1423,6 +1423,56 @@ export interface CarteraConvenioProximosResponse {
 }
 
 /**
+ * COBROS-02 · Fase 1 — una fila por CONVENIO con su cuota impaga más urgente,
+ * ya clasificada por cartera-back (`/cuotas/convenio/alertas`). La consumen el
+ * job `check-convenios-incumplidos` y la pantalla /cobros/alertas-convenios.
+ *
+ * No confundir con `CarteraConvenioProximoVencer`, que es una fila por CUOTA y
+ * alimenta el WhatsApp D-5/D-3/D-1/D-0 al cliente.
+ */
+export type CarteraConvenioAlertaCategoria =
+	| "vencida"
+	| "vence_hoy"
+	| "por_vencer"
+	| "proxima";
+
+export interface CarteraConvenioAlerta {
+	convenio_id: number;
+	credito_id: number;
+	numero_credito_sifco: string;
+	status_credit: string;
+	cliente: string | null;
+	asesor_id: number | null;
+	asesor: string | null;
+	/** Vencimiento de la cuota impaga más urgente (YYYY-MM-DD). */
+	fecha_vencimiento: string;
+	/** Negativo = ya venció hace tantos días. */
+	dias_para_vencer: number;
+	/** Cuántas cuotas del convenio están vencidas e impagas. */
+	cuotas_vencidas: number;
+	/** Cuántas cuotas del convenio quedan por pagar (vencidas + futuras). */
+	cuotas_pendientes: number;
+	/** Suma de lo que resta de las cuotas VENCIDAS. */
+	monto_vencido: string;
+	/** Saldo total del convenio. */
+	monto_pendiente_convenio: string;
+	/** Cuota mensual pactada en el convenio. */
+	cuota_convenio: string;
+	fecha_convenio: string;
+	/** Bucket motor (última fila de buckets_historial); null si no tiene. */
+	bucket: number | null;
+	/** Total del día de la cuota urgente: convenio + cuota normal si sigue impaga. */
+	monto_cuota: string;
+	categoria: CarteraConvenioAlertaCategoria;
+}
+
+export interface CarteraConvenioAlertasResponse {
+	success: boolean;
+	total: number;
+	data: CarteraConvenioAlerta[];
+}
+
+/**
  * CB-010: comportamiento de pago de un crédito activo — racha de cuotas ya
  * vencidas pagadas AL DÍA (fecha_pago <= vencimiento) desde la más reciente
  * hacia atrás hasta el primer atraso. Elegibilidad (racha >= 4) la decide el CRM.

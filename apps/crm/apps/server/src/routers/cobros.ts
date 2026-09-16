@@ -2444,6 +2444,66 @@ export const cobrosRouter = {
 				});
 		}),
 
+	// COBROS-02 · Fase 1: apartado "Alertas de Convenios" (/cobros/alertas-convenios).
+	// Hermano de getAlertasPromesas, con la misma forma y las mismas cuatro
+	// categorías, pero leyendo el estado VIVO del convenio en cartera-back
+	// (`/convenio/alertas`) en vez de una tabla del CRM: los convenios viven
+	// allá y un pago de hoy tiene que sacarlo de la lista hoy.
+	//
+	// Scope por rol, igual que el resto de cobros: el asesor ve solo los
+	// créditos cuyo caso es suyo; supervisor/admin ven todo. El filtro se hace
+	// por CASO y no por `asesor_id` de cartera a propósito — es el mismo
+	// criterio de propiedad que usan getCasosCobros y getAlertasPromesas, así
+	// que las tres pantallas coinciden en qué es "mío".
+	//
+	// Un convenio cuyo crédito no tiene caso en el CRM no se lista: no hay a
+	// dónde navegar ni contra qué chequear propiedad. Es la misma limitación
+	// que tiene el job de avisos, y se reporta en `sinCaso` allá.
+	getAlertasConvenios: cobrosProcedure
+		.input(z.object({}).optional())
+		.handler(async ({ context }) => {
+			if (!isCarteraBackEnabled()) return [];
+
+			const respuesta = await carteraBackClient.getConvenioAlertas({});
+			const alertas = respuesta.data ?? [];
+			if (alertas.length === 0) return [];
+
+			const sifcos = [
+				...new Set(alertas.map((a) => a.numero_credito_sifco).filter(Boolean)),
+			];
+			const casos = await db
+				.select({
+					id: casosCobros.id,
+					sifco: casosCobros.numeroCreditoSifco,
+					responsable: casosCobros.responsableCobros,
+				})
+				.from(casosCobros)
+				.where(
+					and(
+						eq(casosCobros.activo, true),
+						inArray(casosCobros.numeroCreditoSifco, sifcos),
+					),
+				);
+
+			const puedeVerTodo = PERMISSIONS.canViewAllCasosCobros(context.userRole);
+			const casoPorSifco = new Map<
+				string,
+				{ id: string; responsable: string | null }
+			>();
+			for (const c of casos) {
+				if (!c.sifco) continue;
+				if (!puedeVerTodo && c.responsable !== context.userId) continue;
+				casoPorSifco.set(c.sifco, { id: c.id, responsable: c.responsable });
+			}
+
+			return alertas
+				.filter((a) => casoPorSifco.has(a.numero_credito_sifco))
+				.map((a) => ({
+					...a,
+					casoCobroId: casoPorSifco.get(a.numero_credito_sifco)?.id ?? null,
+				}));
+		}),
+
 	// CB-031 (ficha 360): alertas de ESTE caso — las notificaciones de cobros
 	// que ya generan los jobs (promesa por vencer / incumplida, cliente subido
 	// de bucket, 3 días sin contacto) y las asignaciones manuales. La campanita

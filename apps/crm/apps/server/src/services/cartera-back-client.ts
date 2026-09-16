@@ -24,6 +24,7 @@ import type {
 	CarteraColaDiaResponse,
 	CarteraComportamientoPagoResponse,
 	CarteraConvenio,
+	CarteraConvenioAlertasResponse,
 	CarteraConvenioCuota,
 	CarteraConvenioDecision,
 	CarteraConvenioListado,
@@ -1967,6 +1968,35 @@ export class CarteraBackClient {
 		const queryParams = new URLSearchParams({ dias: dias.join(",") });
 		return this.request<CarteraConvenioProximosResponse>(
 			`/convenio/proximas-vencer?${queryParams}`,
+			{ method: "GET" },
+		);
+	}
+
+	/**
+	 * COBROS-02 · Fase 1 — alertas de convenios: una fila por convenio con su
+	 * cuota impaga más urgente, ya clasificada (vencida / vence_hoy /
+	 * por_vencer / proxima).
+	 *
+	 * Sin cache, igual que sus hermanas: un convenio que se pagó hace un minuto
+	 * deja de ser alerta, y tanto el job como la pantalla tienen que verlo.
+	 */
+	async getConvenioAlertas(
+		opts: {
+			diasAtras?: number;
+			diasAdelante?: number;
+			diasAlerta?: number;
+			asesorId?: number;
+		} = {},
+	): Promise<CarteraConvenioAlertasResponse> {
+		const qs = new URLSearchParams();
+		if (opts.diasAtras != null) qs.set("dias_atras", String(opts.diasAtras));
+		if (opts.diasAdelante != null)
+			qs.set("dias_adelante", String(opts.diasAdelante));
+		if (opts.diasAlerta != null) qs.set("dias_alerta", String(opts.diasAlerta));
+		if (opts.asesorId != null) qs.set("asesor_id", String(opts.asesorId));
+		const suffix = qs.toString() ? `?${qs}` : "";
+		return this.request<CarteraConvenioAlertasResponse>(
+			`/convenio/alertas${suffix}`,
 			{ method: "GET" },
 		);
 	}

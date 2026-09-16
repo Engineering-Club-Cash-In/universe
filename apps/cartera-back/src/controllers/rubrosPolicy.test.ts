@@ -919,11 +919,18 @@ describe("puedeApartarReclamo", () => {
     expect(v.permitido).toBe(false);
     expect(v.status).toBe(409);
     // El mensaje es para el asesor que tiene la boleta en la mano: qué pasó,
-    // cuánto queda, y que reintentar recalcula.
+    // cuánto queda, y sobre todo QUÉ NO HACER.
     expect(v.motivo).toContain("#7");
     expect(v.motivo).toContain("150.00");
     expect(v.motivo).toContain("400.00");
-    expect(v.motivo).toContain("NO se registró");
+    // Lo importante no es la grafía sino la conducta que induce. Cuando
+    // esto dispara, las filas de `pagos_credito` YA están commiteadas:
+    // sólo se perdió el cobro adicional. El texto decía "la boleta NO se
+    // registró, vuelva a registrarla" y un asesor que obedeciera le
+    // cobraba DOS VECES al cliente — justo el daño que este módulo
+    // existe para no causar.
+    expect(v.motivo).toContain("SÍ QUEDÓ REGISTRADA");
+    expect(v.motivo).not.toContain("Vuelva a registrarla");
   });
 
   it("un rubro ANULADO (saldo 0) nunca deja apartar", () => {

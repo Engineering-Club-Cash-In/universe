@@ -30,6 +30,7 @@ const {
   registrarReclamosDeRubros,
   desaplicarRubrosDelPago,
   cobroRubrosSeguro,
+  totalReclamadoPorPago,
   RubroError,
 } = await import("./rubros");
 
@@ -339,5 +340,38 @@ describe("cobroRubrosSeguro", () => {
 
     expect(r.total.toFixed(2)).toBe("300.00");
     expect(r.cobros).toEqual([{ rubro_id: 7, monto: "300.00" }]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `totalReclamadoPorPago` — lo que una boleta tiene comprometido en rubros.
+//
+// Existe para un guard de `editarPago`. El total de rubros de una boleta se
+// guarda SUMÁNDOLO a `pagos_credito.otros`, y esa columna es editable por
+// `PATCH /editPayment/:pagoId`, que la pisa sin mirar `rubros_pagos`. Si un
+// admin la edita con un reclamo vivo encima, la validación sigue descontándole
+// al rubro el monto ORIGINAL mientras los reportes y la facturación leen el
+// `otros` nuevo: dos números para el mismo cobro.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("totalReclamadoPorPago", () => {
+  it("suma lo reclamado por la boleta", async () => {
+    const total = await totalReclamadoPorPago(
+      77,
+      ejecutorConCola([{ total: "350.00" }])
+    );
+    expect(total.toFixed(2)).toBe("350.00");
+  });
+
+  it("sin reclamos da cero, no null", async () => {
+    // El SUM de cero filas es NULL en Postgres: si eso llegara crudo al `Big`,
+    // el guard reventaría con un 500 sobre una boleta perfectamente editable.
+    const total = await totalReclamadoPorPago(77, ejecutorConCola([{ total: null }]));
+    expect(total.toFixed(2)).toBe("0.00");
+  });
+
+  it("sin filas tampoco explota", async () => {
+    const total = await totalReclamadoPorPago(77, ejecutorConCola([]));
+    expect(total.toFixed(2)).toBe("0.00");
   });
 });

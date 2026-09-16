@@ -58,6 +58,7 @@ import {
 import {
   aplicarRubrosDelPago,
   cobroRubrosSeguro,
+  totalReclamadoPorPago,
   registrarReclamosDeRubros,
   RubroError,
 } from "./rubros";
@@ -4439,7 +4440,33 @@ export async function editarPago(pago_id: number, campos: {
     if (campos.membresias_pago !== undefined) updateData.membresias_pago = campos.membresias_pago;
 
     // Otros campos
-    if (campos.otros !== undefined) updateData.otros = campos.otros;
+    /**
+     * `otros` NO se puede editar si la boleta carga un cobro de rubros.
+     *
+     * El total de rubros de una boleta no tiene columna propia: se SUMA a
+     * `otros`. Acá se pisaba esa columna sin enterarse de `rubros_pagos`, así
+     * que después de la edición los dos lados decían cosas distintas del mismo
+     * cobro — la validación le descuenta al rubro el monto ORIGINAL del
+     * reclamo, mientras los reportes y la facturación leen el `otros` nuevo.
+     * Según para qué lado se editara, se facturaba un cargo que nunca se cobró
+     * o se omitía uno que sí.
+     *
+     * Se RECHAZA en vez de recalcular. Recalcular exigiría adivinar qué quiso
+     * decir el admin con el número que mandó —¿incluye el rubro o no?— y en
+     * plata no se adivina. Rechazar además deja el camino abierto: primero se
+     * revierte la boleta, que sí devuelve el rubro por su propia ruta, y
+     * después se registra de nuevo con el monto correcto.
+     */
+    if (campos.otros !== undefined) {
+      const reclamado = await totalReclamadoPorPago(pago_id);
+      if (reclamado.gt(0)) {
+        return {
+          success: false,
+          message: `Esta boleta cobra Q${reclamado.toFixed(2)} de cobros adicionales, que van incluidos en "otros": editarlo dejaría el cobro del rubro y el del pago diciendo cosas distintas. Revertí la boleta y volvé a registrarla con el monto correcto.`,
+        };
+      }
+      updateData.otros = campos.otros;
+    }
     if (campos.mora !== undefined) updateData.mora = campos.mora;
     if (campos.monto_boleta !== undefined) updateData.monto_boleta = campos.monto_boleta;
     if (campos.observaciones !== undefined) updateData.observaciones = campos.observaciones;

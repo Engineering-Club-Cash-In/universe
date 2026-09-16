@@ -153,6 +153,24 @@ function ErrorEnLinea({ mensaje }: { mensaje: string }) {
  * aterrizar después del primero y PISAR el monto y la descripción recién
  * guardados.
  */
+/**
+ * Reporta hacia arriba si esta vista tiene una escritura en curso.
+ *
+ * Es un hook y no una prop suelta porque las tres vistas que escriben lo
+ * necesitan igual, y porque hace falta el `false` de salida: si la vista se
+ * desmonta con la mutación todavía viva, sin esto el diálogo se quedaría
+ * trabado sin poder cerrarse nunca.
+ */
+function useReportarGuardando(
+  pendiente: boolean,
+  onGuardando?: (v: boolean) => void
+) {
+  useEffect(() => {
+    onGuardando?.(pendiente);
+    return () => onGuardando?.(false);
+  }, [pendiente, onGuardando]);
+}
+
 function BotonVolver({ onClick, disabled = false, children = "Volver a la lista" }: {
   onClick: () => void;
   disabled?: boolean;
@@ -281,8 +299,32 @@ export default function RubrosCredito({
     setRubroSel(null);
   };
 
+  /**
+   * Hay una escritura en curso (PUT/POST y su refresco posterior).
+   *
+   * Vive acá arriba porque los botones apagados de cada vista NO alcanzan: el
+   * diálogo tiene tres salidas propias —la X de Radix, la tecla Escape y el clic
+   * afuera— que no pasan por ningún botón nuestro. Cerrando por ahí a mitad de un
+   * guardado, el modal se puede reabrir sobre la lista en caché, entrar otra vez
+   * a la misma fila vieja y reenviarla: el segundo PUT corre después del primero
+   * y le pisa el monto o la descripción recién guardados.
+   *
+   * Las vistas lo reportan desde su propio `isPending`, que es la única fuente
+   * que cubre la ventana ENTERA —desde que sale la petición hasta que termina el
+   * refresco—, no sólo la parte que el padre ve al esperar su callback.
+   */
+  const [guardando, setGuardando] = useState(false);
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(abierto) => {
+        // Abrir siempre se deja pasar; lo que se frena es CERRAR a mitad de una
+        // escritura.
+        if (!abierto && guardando) return;
+        onOpenChange(abierto);
+      }}
+    >
       {/*
         Ancho: la tabla de la lista trae 8 columnas y con `max-w-5xl` el
         `sm:max-w-lg` de la base ganaba en pantallas grandes (distinto
@@ -291,7 +333,16 @@ export default function RubrosCredito({
         `sm:` explícitamente con un ancho fluido topado: en escritorio da aire
         de sobra y en pantallas chicas sigue siendo un margen de 95vw.
       */}
-      <DialogContent className="bg-white max-w-[calc(100%-1.5rem)] sm:max-w-[min(95vw,1400px)] max-h-[90vh] overflow-y-auto">
+      <DialogContent
+        className="bg-white max-w-[calc(100%-1.5rem)] sm:max-w-[min(95vw,1400px)] max-h-[90vh] overflow-y-auto"
+        // Las tres salidas de Radix, tapadas mientras se guarda. La X se ESCONDE
+        // en vez de quedar inerte: un botón que no responde se lee como que la
+        // pantalla se colgó.
+        showCloseButton={!guardando}
+        onEscapeKeyDown={(e) => { if (guardando) e.preventDefault(); }}
+        onPointerDownOutside={(e) => { if (guardando) e.preventDefault(); }}
+        onInteractOutside={(e) => { if (guardando) e.preventDefault(); }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-purple-700">
             <Receipt className="w-5 h-5 shrink-0" />
@@ -352,6 +403,7 @@ export default function RubrosCredito({
           />
         ) : vista === "crear" ? (
           <VistaCrear
+            onGuardando={setGuardando}
             creditoId={creditoVisible}
             esAdmin={esAdmin}
             borrador={borrador}
@@ -378,6 +430,7 @@ export default function RubrosCredito({
           // una confirmación de fila, y apilar un segundo Dialog es justo lo que
           // este componente evita.
           <VistaAnular
+            onGuardando={setGuardando}
             key={rubroSel.rubro_id}
             rubro={rubroSel}
             onVolver={volver}
@@ -400,6 +453,7 @@ export default function RubrosCredito({
           // lo evita que el único camino a "editar" pase por la lista; eso es un
           // invariante frágil, no una garantía.
           <VistaEditar
+            onGuardando={setGuardando}
             key={rubroSel.rubro_id}
             rubro={rubroSel}
             onVolver={volver}
@@ -676,6 +730,7 @@ function VistaCrear({
   onCrearTipo,
   onAdministrarTipos,
   onCreado,
+  onGuardando,
 }: {
   creditoId: number;
   esAdmin: boolean;
@@ -686,6 +741,8 @@ function VistaCrear({
   onAdministrarTipos: () => void;
   /** Puede devolver promesa: el refresco de la lista se espera antes de volver. */
   onCreado: () => void | Promise<void>;
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
 }) {
   const { tipoId, monto, descripcion } = borrador;
   const campo = (k: keyof BorradorRubro) => (v: string) =>
@@ -743,6 +800,8 @@ function VistaCrear({
       setError(getApiErrorMessage(e, "No se pudo crear el rubro"));
     },
   });
+
+  useReportarGuardando(crear.isPending, onGuardando);
 
   const submit = () => {
     setError(null);
@@ -890,11 +949,14 @@ function VistaEditar({
   rubro,
   onVolver,
   onEditado,
+  onGuardando,
 }: {
   rubro: RubroCredito;
   onVolver: () => void;
   /** Recibe la fila que devolvió el PUT, para sembrarla en la lista. */
   onEditado: (guardado: RubroGuardado | null) => void | Promise<void>;
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
 }) {
   const [monto, setMonto] = useState(String(rubro.monto_original ?? ""));
   const [descripcion, setDescripcion] = useState(rubro.descripcion ?? "");
@@ -928,6 +990,8 @@ function VistaEditar({
       setError(getApiErrorMessage(e, "No se pudo editar el rubro"));
     },
   });
+
+  useReportarGuardando(editar.isPending, onGuardando);
 
   const submit = () => {
     setError(null);
@@ -1048,11 +1112,14 @@ function VistaAnular({
   rubro,
   onVolver,
   onAnulado,
+  onGuardando,
 }: {
   rubro: RubroCredito;
   onVolver: () => void;
   /** Puede devolver promesa: el refresco de la lista se espera antes de volver. */
   onAnulado: () => void | Promise<void>;
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
 }) {
   const [motivo, setMotivo] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -1075,6 +1142,8 @@ function VistaAnular({
       setError(getApiErrorMessage(e, "No se pudo anular el rubro"));
     },
   });
+
+  useReportarGuardando(anular.isPending, onGuardando);
 
   const submit = () => {
     setError(null);

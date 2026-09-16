@@ -2110,7 +2110,10 @@ modo agente**, que es cuando el cliente está esperando a una persona.
   sin referencia (el día evita que la alerta de hoy calle al cliente que vuelve
   mañana). La dedup y el origen se buscan acotados al dueño de HOY: si el
   crédito se reasignó, el dueño nuevo recibe su alerta. Repetir la llamada
-  responde `YA_NOTIFICADO`.
+  responde `YA_NOTIFICADO` **solo mientras la alerta siga abierta**: cada alerta
+  es un episodio (`<llave>:ep:<n>`) y, si el asesor la cerró y el cliente vuelve
+  a pedir un humano —p. ej. otra conversación sin referencia el mismo día—, se
+  abre el episodio siguiente (review de Codex, #1628).
 - **La referencia vale 24 h en este servicio**, no los 30 min del menú: el modo
   agente suele llegar al final de una conversación larga, y ahí es donde menos
   puede perderse el aviso.

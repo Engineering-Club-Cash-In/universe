@@ -25,11 +25,22 @@
  * anterior no puede tapar la del actual. Por eso primero se resuelve el dueño
  * y la dedup va acotada a él — el mismo `assigned_to` del índice único.
  *
- * La llave de la conversación:
+ * La llave de la conversación (la BASE):
  *   · con referencia → `bot:sesion:<referencia>:agente`
  *   · con teléfono   → `bot:tel:<8 dígitos>:dia:<fecha GT>:agente`
  *     (sin referencia no hay conversación que nombrar; el día evita que un
  *     cliente que vuelve mañana quede callado por la alerta de hoy).
+ *
+ * ── Episodios: la dedup solo calla mientras la alerta siga ABIERTA ─────────
+ * Review de Codex (P1, PR #1628): sin referencia, dos conversaciones del mismo
+ * día comparten la base. Si la primera alerta ya se resolvió o descartó y el
+ * cliente vuelve a pedir un humano, una dedup por llave fija respondía
+ * `YA_NOTIFICADO` y ese cliente no le llegaba a nadie. Por eso cada alerta
+ * lleva `<base>:ep:<n>`:
+ *   · hay una abierta (pending/read/in_progress) → `YA_NOTIFICADO`;
+ *   · no hay, o todas se cerraron → episodio `n+1`.
+ * Dos peticiones simultáneas calculan el mismo `n`, así que el índice único
+ * sigue garantizando una sola fila por episodio.
  *
  * ── Hilo con el aviso inicial ───────────────────────────────────────────────
  * Con referencia, la alerta apunta por `notificacion_origen_id` al
@@ -41,7 +52,7 @@
  * puede reintentar (la dedup evita duplicar lo que ya salió).
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import { notifications } from "../db/schema/notifications";
 import { toDateStrGT } from "../lib/guatemala-month-window";
@@ -62,7 +73,7 @@ export type OrigenModoAgente =
 export type ResultadoAvisoModoAgente =
 	/** Al menos un asesor recibió una alerta nueva. */
 	| { ok: true; motivo: "NOTIFICADO"; asesores: number }
-	/** Todos los asesores ya tenían su alerta de esta conversación. */
+	/** Todos los asesores ya tienen una alerta ABIERTA de esta conversación. */
 	| { ok: true; motivo: "YA_NOTIFICADO"; asesores: number }
 	/** Ningún crédito tiene un asesor con usuario en el CRM. */
 	| { ok: true; motivo: "SIN_ASESOR"; asesores: 0 }
@@ -71,8 +82,19 @@ export type ResultadoAvisoModoAgente =
 
 type FilaNueva = typeof notifications.$inferInsert;
 
+/** Estados en los que la alerta todavía le pide algo al asesor. */
+const ESTADOS_ABIERTOS = ["pending", "read", "in_progress"] as const;
+
 /** Lo que toca afuera. Inyectable para probar la decisión sin base ni HTTP. */
 export type DependenciasModoAgente = {
+	/**
+	 * Episodios de modo agente con esa base PARA ese asesor: cuántos hubo y si
+	 * alguno sigue abierto.
+	 */
+	episodios: (
+		base: string,
+		asesorUserId: string,
+	) => Promise<{ total: number; abierto: boolean }>;
 	/** id de la alerta de ese tipo, con esa llave, PARA ese asesor, si existe. */
 	buscarAviso: (
 		tipo: "bot_cliente_escribio" | "bot_modo_agente",
@@ -85,7 +107,34 @@ export type DependenciasModoAgente = {
 	hoyGT: () => string;
 };
 
+/** Episodios de modo agente con esa base para ese asesor (ver encabezado). */
+export async function episodiosModoAgente(
+	base: string,
+	asesorUserId: string,
+): Promise<{ total: number; abierto: boolean }> {
+	// La base sola cuenta como episodio: es la forma de las alertas creadas
+	// antes de que existieran los episodios (#1627).
+	const [fila] = await db
+		.select({
+			total: sql<number>`count(*)::int`,
+			abierto: sql<boolean>`coalesce(bool_or(${inArray(notifications.status, [...ESTADOS_ABIERTOS])}), false)`,
+		})
+		.from(notifications)
+		.where(
+			and(
+				eq(notifications.cobrosTipo, "bot_modo_agente"),
+				eq(notifications.assignedTo, asesorUserId),
+				or(
+					eq(notifications.cobrosDedupKey, base),
+					sql`left(${notifications.cobrosDedupKey}, length(${`${base}:ep:`}::text)) = ${`${base}:ep:`}::text`,
+				),
+			),
+		);
+	return { total: fila?.total ?? 0, abierto: fila?.abierto ?? false };
+}
+
 const dependenciasReales: DependenciasModoAgente = {
+	episodios: episodiosModoAgente,
 	buscarAviso: async (tipo, llave, asesorUserId) => {
 		const [fila] = await db
 			.select({ id: notifications.id })
@@ -166,13 +215,15 @@ export async function avisarAsesorModoAgente(
 		return { ok: true, motivo: "SIN_ASESOR", asesores: 0 };
 	}
 
-	const llave = llaveModoAgente(params.origen, deps.hoyGT());
+	const base = llaveModoAgente(params.origen, deps.hoyGT());
 	let nuevos = 0;
 
 	for (const [asesorUserId, { destino, creditos }] of porAsesor) {
-		if (await deps.buscarAviso("bot_modo_agente", llave, asesorUserId)) {
-			continue;
-		}
+		const { total, abierto } = await deps.episodios(base, asesorUserId);
+		// Ya tiene una alerta que le pide atender a este cliente: no se duplica.
+		// Si la cerró y el cliente volvió a pedir un humano, es un episodio nuevo.
+		if (abierto) continue;
+		const llave = `${base}:ep:${total + 1}`;
 
 		// El origen tiene que ser SU "escribió" de esta conversación: el de otro
 		// asesor sería un hilo que no puede ver. Se busca al final a propósito:

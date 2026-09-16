@@ -44,14 +44,21 @@ function destino(userId: string, sifco: string): DestinoAvisoBot {
 /**
  * `duenos`: SIFCO → usuario del asesor (null = sin asesor, Error = cartera
  * caída). `avisos`: `tipo|llave|usuario` → id de una alerta existente.
+ * `episodios`: `base|usuario` → episodios de modo agente de ese asesor.
  */
 function dependencias(opciones: {
 	duenos?: Record<string, string | null | Error>;
 	avisos?: Record<string, string>;
+	episodios?: Record<string, { total: number; abierto: boolean }>;
 	carteraHabilitada?: boolean;
 }) {
 	const insertadas: Record<string, unknown>[] = [];
 	const deps: DependenciasModoAgente = {
+		episodios: async (base, asesor) =>
+			opciones.episodios?.[`${base}|${asesor}`] ?? {
+				total: 0,
+				abierto: false,
+			},
 		buscarAviso: async (tipo, llave, asesor) =>
 			opciones.avisos?.[`${tipo}|${llave}|${asesor}`] ?? null,
 		carteraHabilitada: () => opciones.carteraHabilitada ?? true,
@@ -99,7 +106,7 @@ describe("avisarAsesorModoAgente", () => {
 		expect(insertadas).toHaveLength(1);
 		const fila = insertadas[0];
 		expect(fila.cobrosTipo).toBe("bot_modo_agente");
-		expect(fila.cobrosDedupKey).toBe(LLAVE_REF);
+		expect(fila.cobrosDedupKey).toBe(`${LLAVE_REF}:ep:1`);
 		expect(fila.notificacionOrigenId).toBe("notif-inicial");
 		expect(fila.assignedTo).toBe("user-1");
 		expect(fila.relatedEntityId).toBe(`caso-${SIFCO}`);
@@ -140,14 +147,14 @@ describe("avisarAsesorModoAgente", () => {
 
 		expect(insertadas[0].notificacionOrigenId).toBeNull();
 		expect(insertadas[0].cobrosDedupKey).toBe(
-			`bot:tel:58446376:dia:${HOY}:agente`,
+			`bot:tel:58446376:dia:${HOY}:agente:ep:1`,
 		);
 		expect(String(insertadas[0].descripcion)).toContain("58446376");
 	});
 
-	it("no repite al mismo asesor en la misma conversación", async () => {
+	it("no repite al mismo asesor mientras su alerta siga abierta", async () => {
 		const { deps, insertadas } = dependencias({
-			avisos: { [`bot_modo_agente|${LLAVE_REF}|user-1`]: "ya-existe" },
+			episodios: { [`${LLAVE_REF}|user-1`]: { total: 1, abierto: true } },
 		});
 		const r = await avisarAsesorModoAgente(
 			{ origen: POR_REFERENCIA, creditos: [SIFCO] },
@@ -158,12 +165,32 @@ describe("avisarAsesorModoAgente", () => {
 		expect(insertadas).toHaveLength(0);
 	});
 
+	// Review de Codex, P1 (#1628): sin referencia, dos conversaciones del mismo
+	// día comparten la base. Si el asesor ya cerró la primera alerta y el
+	// cliente vuelve a pedir un humano, tiene que llegarle de nuevo.
+	it("si la alerta anterior ya se cerró, abre un episodio nuevo", async () => {
+		const base = `bot:tel:58446376:dia:${HOY}:agente`;
+		const { deps, insertadas } = dependencias({
+			episodios: { [`${base}|user-1`]: { total: 1, abierto: false } },
+		});
+		const r = await avisarAsesorModoAgente(
+			{ origen: POR_TELEFONO, creditos: [SIFCO] },
+			deps,
+		);
+
+		expect(r).toEqual({ ok: true, motivo: "NOTIFICADO", asesores: 1 });
+		expect(insertadas).toHaveLength(1);
+		expect(insertadas[0].cobrosDedupKey).toBe(`${base}:ep:2`);
+	});
+
 	// Review de Codex, P1: el crédito puede cambiar de dueño dentro de la
 	// ventana. Lo del asesor anterior no puede tapar al actual.
 	it("si reasignaron el crédito, el dueño nuevo recibe su alerta", async () => {
 		const { deps, insertadas } = dependencias({
+			episodios: {
+				[`${LLAVE_REF}|asesor-anterior`]: { total: 1, abierto: true },
+			},
 			avisos: {
-				[`bot_modo_agente|${LLAVE_REF}|asesor-anterior`]: "del-anterior",
 				[`bot_cliente_escribio|bot:sesion:${SESION}:credito:${SIFCO}|asesor-anterior`]:
 					"escribio-anterior",
 			},

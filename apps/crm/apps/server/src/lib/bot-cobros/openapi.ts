@@ -2949,7 +2949,7 @@ export const especificacionBotCobros = {
 					"",
 					"**La respuesta:**",
 					"",
-					"- `data.notificado` es `true` si al menos un asesor tiene la alerta. `data.motivo`: `NOTIFICADO`, `YA_NOTIFICADO` (ya se había avisado en esta conversación —podés reintentar sin miedo—), `SIN_ASESOR` (sus créditos no tienen asesor en el CRM) o `CLIENTE_NO_IDENTIFICADO` (ni la referencia ni el teléfono son de un cliente con crédito).",
+					"- `data.notificado` es `true` si al menos un asesor tiene la alerta. `data.motivo`: `NOTIFICADO`, `YA_NOTIFICADO` (el asesor ya tiene una alerta **abierta** de esta conversación —podés reintentar sin miedo—; si ya la cerró y el cliente vuelve a pedir un humano, se le avisa de nuevo), `SIN_ASESOR` (sus créditos no tienen asesor en el CRM) o `CLIENTE_NO_IDENTIFICADO` (ni la referencia ni el teléfono son de un cliente con crédito).",
 					"- En todos esos casos es `200`: la conversación sigue en modo agente igual, y `data.mensaje` es el mismo texto neutro para el cliente.",
 					"- `data.identificadoPor` dice si se lo encontró por `referencia` o por `telefono`.",
 				].join("\n"),

@@ -758,6 +758,21 @@ function RouteComponent() {
 		enabled: !!session && !!casoDetails.data?.id,
 	});
 
+	// COBROS-02 Fase 3 — el convenio VIGENTE de este caso, resuelto por el
+	// servidor con el MISMO criterio que usa la mutación de deshacer.
+	//
+	// No alcanzaba con lo que ya tenía la ficha: `convenioActivo` es null cuando
+	// el calendario original del crédito ya no tiene cuotas futuras, y
+	// `statusCredit === 'EN_CONVENIO'` también es true para un convenio PENDIENTE
+	// de aprobación — que no se deshace, se rechaza. Con cualquiera de los dos, el
+	// botón aparecía cuando no debía o faltaba cuando sí (review de Codex).
+	const convenioVigente = useQuery({
+		...orpc.getConvenioVigenteDelCaso.queryOptions({
+			input: { casoCobroId: casoDetails.data?.id || "" },
+		}),
+		enabled: !!session && !!casoDetails.data?.id,
+	});
+
 	// Rol real del usuario: el modal de la oportunidad decide con el que se le
 	// pase (contratos, cotizaciones). Antes se le mandaba ROLES.COBROS fijo y
 	// hasta un admin veia la ficha recortada.
@@ -961,6 +976,9 @@ function RouteComponent() {
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getAlertaConvenioDelCaso.key(),
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getConvenioVigenteDelCaso.key(),
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getHistorialPagos.key(),
@@ -1270,17 +1288,12 @@ function RouteComponent() {
 	// El convenio vigente es el que se puede DESHACER. Uno pendiente de
 	// aprobación no: eso se rechaza en la cola del supervisor, que es otra
 	// operación con otra bitácora (y el server lo rebota con ese mensaje).
-	// `tieneConvenioVigente` y NO `caso.convenioActivo` (review de Codex, P2):
-	// `getCredito` devuelve temprano con `convenioActivo: null` hardcodeado
-	// cuando el calendario original del crédito ya no tiene ninguna cuota de hoy
-	// en adelante, así que el botón no aparecía justo para los créditos que el
-	// backend sí sabe resolver — los más atrasados. `statusCredit` viene de la
-	// fila del crédito y sí llega por ese camino.
-	//
-	// El servidor re-valida igual y devuelve un mensaje claro si no hay convenio
-	// vigente: acá el criterio solo decide si vale la pena ofrecer la acción.
+	// La acción se ofrece SOLO si el servidor confirma que hay un convenio
+	// vigente que deshacer. Nada de deducirlo de la ficha: un convenio pendiente
+	// de aprobación se rechaza, no se deshace, y ofrecerlo garantizaba un error
+	// al hacer clic.
 	const puedeDeshacerConvenio =
-		tieneConvenioVigente &&
+		!!convenioVigente.data &&
 		PERMISSIONS.canAccessCobros(userProfile.data?.role ?? "");
 
 	// El alerta viva del convenio: la misma fuente que la pantalla de Alertas

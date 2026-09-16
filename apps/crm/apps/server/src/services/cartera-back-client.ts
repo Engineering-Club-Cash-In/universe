@@ -2223,6 +2223,33 @@ export class CarteraBackClient {
 	}
 
 	/**
+	 * COBROS-02 Fase 3 — convenios de UN crédito, por `credito_id` EXACTO.
+	 *
+	 * No es `getConveniosListado` (review de Codex, P2): aquel filtra el SIFCO
+	 * con `ILIKE '%valor%'`, ordena por fecha y recién después pagina, así que
+	 * un SIFCO que es subcadena de otro puede empujar al convenio buscado fuera
+	 * de la primera página — y la acción reportaría que no hay convenio cuando
+	 * sí lo hay. Acá el filtro es `credito_id = N` y no hay paginación.
+	 *
+	 * Sin cache: se usa para decidir si se puede deshacer un convenio y para
+	 * deshacerlo; una foto vieja decide mal.
+	 */
+	async getConveniosPorCredito(
+		creditoId: number,
+		status: "active" | "completed" | "inactive" | "all" = "all",
+	): Promise<CarteraConvenio[]> {
+		const qs = new URLSearchParams({
+			credit_id: String(creditoId),
+			status,
+		});
+		const respuesta = await this.request<{
+			success: boolean;
+			data?: CarteraConvenio[];
+		}>(`/payment-agreements?${qs}`, { method: "GET" }, false);
+		return respuesta?.data ?? [];
+	}
+
+	/**
 	 * COBROS-02 Fase 3 — DESHACER un convenio ya aprobado (soft delete).
 	 *
 	 * No es `decidirConvenio`: eso decide sobre un convenio que nunca estuvo

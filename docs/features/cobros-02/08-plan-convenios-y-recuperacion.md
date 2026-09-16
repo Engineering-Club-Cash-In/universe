@@ -516,11 +516,20 @@ Cuatro cosas más que salieron de la segunda review:
   actualizaba por `convenio_id` a secas y escribía `activo: true` desde un snapshot leído
   antes, dejando `anulado_at` puesto: el convenio volvía a la vida y seguía recibiendo
   pagos. El `UPDATE` ahora exige que siga vigente, y si no, la transacción del pago aborta.
-- **El SIFCO se compara exacto.** `listPaymentAgreements` filtra con `ILIKE '%valor%'`, así
-  que un SIFCO que es subcadena de otro traía las dos filas — y se podía deshacer el
-  convenio del crédito equivocado.
-- **El botón se ofrece según `statusCredit`**, no según `convenioActivo`: si no, no
-  aparecía justo para los créditos que el backend sí sabe resolver.
+- **Una sola definición de "convenio vigente"**, compartida por la mutación y por el botón
+  que la ofrece (`resolverConvenioVigenteDelCaso`). Busca por **`credito_id` exacto y sin
+  paginar**: el listado filtra el SIFCO con `ILIKE '%valor%'`, así que uno que es subcadena
+  de otro podía traer el convenio del crédito equivocado —o empujar al correcto fuera de la
+  página y reportar que no hay ninguno—. En el sandbox hay **una** colisión de esas, así
+  que no es teórico.
+- **Vigente excluye "pendiente de aprobación".** Un convenio recién creado ya deja el
+  crédito en `EN_CONVENIO` pero nace `activo = false`: eso se **rechaza** desde la cola del
+  supervisor, no se deshace. Guiando el botón por `statusCredit` aparecía igual y cada
+  clic terminaba en error.
+- **Una reversa tampoco resucita un convenio deshecho.** `reverseConvenioPayment` elegía
+  cualquier convenio del crédito —incluido uno anulado, que conserva su fila— y le escribía
+  `activo` desde su propio cálculo. Ahora los anulados quedan fuera de la búsqueda y el
+  `UPDATE` exige `anulado_at IS NULL`.
 
 #### La banda pregunta, no deduce
 

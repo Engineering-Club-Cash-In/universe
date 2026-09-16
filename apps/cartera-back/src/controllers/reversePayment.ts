@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { eq, and, not, desc, inArray, isNotNull, sql } from "drizzle-orm";
+import { eq, and, not, desc, inArray, isNotNull, sql, isNull } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
@@ -862,11 +862,21 @@ export async function reverseConvenioPayment(
     console.log("🏦 Crédito ID:", credito_id);
     console.log("💵 Monto a revertir:", monto_pago);
 
-    // 1. Buscar el convenio del crédito (puede estar completado o activo)
+    // 1. Buscar el convenio del crédito (puede estar completado o activo).
+    //
+    // Los ANULADOS quedan fuera (review de Codex, P1): un convenio deshecho
+    // conserva su fila —eso es el soft delete— y sin este filtro la reversa lo
+    // elegía y más abajo le escribía `activo` desde su propio cálculo,
+    // resucitándolo con la metadata de anulación todavía puesta.
     const [convenio] = await db
       .select()
       .from(convenios_pago)
-      .where(eq(convenios_pago.credito_id, credito_id))
+      .where(
+        and(
+          eq(convenios_pago.credito_id, credito_id),
+          isNull(convenios_pago.anulado_at),
+        ),
+      )
       .limit(1);
 
     if (!convenio) {
@@ -935,7 +945,12 @@ export async function reverseConvenioPayment(
 
     console.log("🔓 Convenio reactivado:", convenioActivo);
 
-    // 7. Actualizar el convenio
+    // 7. Actualizar el convenio.
+    //
+    // El WHERE exige que siga SIN ANULAR, no solo que exista: `convenio` es un
+    // snapshot leído arriba y alguien pudo deshacerlo entre medio. Sin esto, el
+    // `activo` calculado acá lo devolvía a la vida (mismo blindaje que el
+    // camino de aplicar el pago).
     const [convenioActualizado] = await db
       .update(convenios_pago)
       .set({
@@ -947,8 +962,19 @@ export async function reverseConvenioPayment(
         activo: convenioActivo,
         updated_at: new Date(),
       })
-      .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
+      .where(
+        and(
+          eq(convenios_pago.convenio_id, convenio.convenio_id),
+          isNull(convenios_pago.anulado_at),
+        ),
+      )
       .returning();
+
+    if (!convenioActualizado) {
+      throw new Error(
+        `El convenio ${convenio.convenio_id} se deshizo mientras se revertía el pago. La reversa no se aplicó al convenio.`,
+      );
+    }
 
     // 7.5 Desmarcar las cuotas del convenio que el dinero reversado ya no
     // cubre: el marcado por acumulado (processConvenioPayment) escribe

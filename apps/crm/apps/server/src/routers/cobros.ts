@@ -796,6 +796,44 @@ export async function assertAccesoCasoCobro(
 	}
 }
 
+/**
+ * Convenio VIGENTE (aprobado y sin completar) del crédito de un caso, o null.
+ *
+ * "Vigente" = `activo = true AND completado = false`. Un convenio esperando
+ * aprobación NO lo es: eso se rechaza desde la cola del supervisor, no se
+ * deshace, y ofrecerlo desde la ficha solo produce un error al hacer clic.
+ *
+ * Resuelve el crédito por `carteraBackReferences` y consulta cartera por
+ * `credito_id` exacto — nunca por SIFCO, que del otro lado se compara con
+ * `ILIKE '%valor%'`.
+ */
+async function resolverConvenioVigenteDelCaso(casoCobroId: string) {
+	const [caso] = await db
+		.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+		.from(casosCobros)
+		.where(eq(casosCobros.id, casoCobroId))
+		.limit(1);
+	if (!caso?.numeroCreditoSifco) return null;
+
+	const [referencia] = await db
+		.select({ carteraCreditoId: carteraBackReferences.carteraCreditoId })
+		.from(carteraBackReferences)
+		.where(
+			eq(carteraBackReferences.numeroCreditoSifco, caso.numeroCreditoSifco),
+		)
+		.limit(1);
+	if (!referencia?.carteraCreditoId) return null;
+
+	const convenios = await carteraBackClient.getConveniosPorCredito(
+		referencia.carteraCreditoId,
+		"active",
+	);
+	// `status=active` ya filtra activo=true AND completado=false del lado de
+	// cartera; se re-verifica acá para no depender de un contrato ajeno en una
+	// decisión que borra datos.
+	return convenios.find((c) => c.activo && !c.completado) ?? null;
+}
+
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
 	getDashboardStats: cobrosProcedure
@@ -8730,6 +8768,41 @@ export const cobrosRouter = {
 		}),
 
 	/**
+	 * COBROS-02 Fase 3 — el convenio VIGENTE de un caso, o null.
+	 *
+	 * Una sola definición de "vigente" para las dos cosas que la necesitan: la
+	 * mutación que deshace y el botón que la ofrece. Tenerla en dos lugares fue
+	 * justo el problema — la UI se guiaba por `convenioActivo` (que `getCredito`
+	 * pone en null cuando el calendario original ya no tiene cuotas futuras) y
+	 * por `statusCredit === 'EN_CONVENIO'` (que también es true para un convenio
+	 * PENDIENTE de aprobación, que no se deshace: se rechaza).
+	 *
+	 * La búsqueda es por `credito_id` EXACTO y sin paginar. NO por SIFCO: el
+	 * listado filtra con `ILIKE '%valor%'`, así que un SIFCO que es subcadena de
+	 * otro puede traer el convenio de otro crédito o empujar al correcto fuera
+	 * de la página (review de Codex, P1 y P2).
+	 */
+	getConvenioVigenteDelCaso: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			if (!isCarteraBackEnabled()) return null;
+			const convenio = await resolverConvenioVigenteDelCaso(input.casoCobroId);
+			if (!convenio) return null;
+			return {
+				convenioId: convenio.convenio_id,
+				creditoId: convenio.credito_id,
+				cuotaMensual: convenio.cuota_mensual,
+				montoPendiente: convenio.monto_pendiente ?? null,
+				fechaConvenio: convenio.fecha_convenio ?? null,
+			};
+		}),
+
+	/**
 	 * COBROS-02 Fase 3 — DESHACER el convenio de un crédito (soft delete), con
 	 * la opción de mandarlo en el mismo gesto a recuperación de vehículo.
 	 *
@@ -8778,34 +8851,10 @@ export const cobrosRouter = {
 				accion: "deshacer su convenio de pago",
 			});
 
-			// El convenio se resuelve con una consulta DEDICADA y no leyendo
-			// `getCredito().convenioActivo` (review de Codex, P2): ese endpoint
-			// devuelve temprano —con `convenioActivo: null` hardcodeado— cuando el
-			// calendario original del crédito ya no tiene ninguna cuota de hoy en
-			// adelante, y un convenio puede perfectamente sobrevivir al calendario
-			// que reestructuró. Justo los créditos más atrasados, que son los que
-			// más necesitan deshacer, se quedaban sin la acción.
-			//
-			// Sin cache: el convenio pudo decidirse, completarse o deshacerse hace
-			// un minuto, y sobre la foto vieja se intentaría anular algo que ya no
-			// está vigente.
-			const listado = await carteraBackClient.getConveniosListado({
-				numeroCreditoSifco: caso.numeroCreditoSifco,
-				estado: "active",
-				perPage: 5,
-			});
-			// El SIFCO se compara EXACTO acá (review de Codex, P1):
-			// `listPaymentAgreements` implementa el filtro como
-			// `ILIKE '%valor%'`, así que un SIFCO que es subcadena de otro trae
-			// las dos filas. Sin esta comparación, el `find` podía quedarse con
-			// el convenio de OTRO crédito y deshacerlo — y para un supervisor,
-			// que no lleva precondición de dueño, nada lo habría frenado.
-			const convenio = (listado?.data ?? []).find(
-				(c) =>
-					c.activo &&
-					!c.completado &&
-					c.numero_credito_sifco === caso.numeroCreditoSifco,
-			);
+			// El MISMO resolver que alimenta el botón de la ficha: una sola
+			// definición de "vigente", buscada por `credito_id` exacto y sin
+			// paginar (ver `resolverConvenioVigenteDelCaso`).
+			const convenio = await resolverConvenioVigenteDelCaso(input.casoCobroId);
 			if (!convenio) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:

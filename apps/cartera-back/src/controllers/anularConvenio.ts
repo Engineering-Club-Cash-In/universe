@@ -157,14 +157,10 @@ export async function anularConvenio(params: {
            AND completado = false
            AND anulado_at IS NULL
            ${condicionDueno}
-        RETURNING convenio_id, credito_id, status_credito_previo
+        RETURNING convenio_id, credito_id
       `);
       const anulado = anuladoRes.rows?.[0] as
-        | {
-            convenio_id: number;
-            credito_id: number;
-            status_credito_previo: string | null;
-          }
+        | { convenio_id: number; credito_id: number }
         | undefined;
 
       if (!anulado) {

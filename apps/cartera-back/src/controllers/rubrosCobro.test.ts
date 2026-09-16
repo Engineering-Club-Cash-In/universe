@@ -31,6 +31,7 @@ const {
   desaplicarRubrosDelPago,
   cobroRubrosSeguro,
   totalReclamadoPorPago,
+  aplicarRubrosDelPago,
   RubroError,
 } = await import("./rubros");
 
@@ -373,5 +374,48 @@ describe("totalReclamadoPorPago", () => {
   it("sin filas tampoco explota", async () => {
     const total = await totalReclamadoPorPago(77, ejecutorConCola([]));
     expect(total.toFixed(2)).toBe("0.00");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `aplicarRubrosDelPago` — no se le cobra al cliente por una boleta anulada.
+//
+// Los reclamos se elegían sólo por `pago_id` y `aplicado`, sin mirar si la
+// boleta sigue viva. Y hay rutas que marcan `paymentFalse = true` EN BLOQUE
+// —`resetCredit` y la caída a incobrable de `credits.ts`— sin tocar
+// `rubros_pagos`. Aplicar después una de esas boletas le descontaba el saldo al
+// rubro y marcaba el reclamo como aplicado: el cliente termina pagando un cargo
+// por una boleta que la empresa ya declaró falsa.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("aplicarRubrosDelPago — la boleta tiene que seguir viva", () => {
+  it("no aplica nada si el pago está marcado como falso", async () => {
+    // Primera consulta: el pago. Si el guard funciona, corta ahí y no llega a
+    // pedir los reclamos — con la cola agotada, seguir rechazaría.
+    const ej = ejecutorConCola([{ paymentFalse: true }]);
+
+    expect(await aplicarRubrosDelPago(77, ej)).toEqual([]);
+    expect(ej.escrituras).toEqual([]);
+  });
+
+  it("si el pago desapareció tampoco aplica", async () => {
+    const ej = ejecutorConCola([]);
+    expect(await aplicarRubrosDelPago(77, ej)).toEqual([]);
+    expect(ej.escrituras).toEqual([]);
+  });
+
+  it("con la boleta viva sigue aplicando normal", async () => {
+    const ej = ejecutorConCola(
+      [{ paymentFalse: false }],
+      [{ id: 1, rubro_id: 7, monto: "300.00" }],
+      [{ rubro_id: 7, saldo_pendiente: "500.00", anulado: false }],
+      [],
+      [],
+      []
+    );
+
+    const r = await aplicarRubrosDelPago(77, ej);
+
+    expect(r).toEqual([{ rubro_id: 7, monto_aplicado: "300.00" }]);
   });
 });

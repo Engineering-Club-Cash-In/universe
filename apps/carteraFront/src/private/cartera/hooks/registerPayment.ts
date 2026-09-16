@@ -487,7 +487,12 @@ const convenioAplicado = getConvenioAplicado(
   montoDisponibleTotal,
   otrosNum,
   moraNum,
-  cuotaConvenioNum
+  cuotaConvenioNum,
+  // Los rubros se cobran ANTES que el convenio en la cascada del back, así que
+  // la proyección tiene que partir de lo que queda después de ellos. Sin esto,
+  // una boleta con rubros y convenio infla el umbral de excedente y se envía
+  // sin ofrecer las opciones que correspondían.
+  rubrosNum
 );
 const montoBoletaReal = montoDisponibleTotal - otrosNum - moraNum;
 const montoBoletaSinMora = montoDisponibleTotal - otrosNum;

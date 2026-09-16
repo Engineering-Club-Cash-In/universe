@@ -271,11 +271,142 @@ que no hay asesor a quién avisarle.
   sin aviso — los mismos que la decisión 16 nombra. Un cliente al día que escribe es de
   los que más vale la pena atender rápido.
 
-### Fase 2 · Congelar el convenio — invierte la regla vieja
+### Fase 2 · Congelar el convenio — invierte la regla vieja ✅ implementada
 
-- Se va `nacioConElConvenio` y el borrón y cuenta nueva.
-- El job de convenios deja de mover buckets: pasa a **vigilante** (calcula el atraso solo
-  para alertar). Bucket y asesor quedan donde estaban al firmar.
+- ✅ El job de convenios **dejó de mover buckets y de reasignar asesores**: pasó a
+  vigilante. Calcula el atraso solo para el log y hace de red de seguridad.
+- ✅ El congelamiento ocurre **al firmar** (`createPaymentAgreement`): se lee el bucket
+  ANTES de borrar la mora y ANTES del cambio de estado —los dos pasos que destruyen la
+  información con la que se deriva— y se escribe la fila.
+- ✅ Evento nuevo **`CONGELADO`** en `cartera.bucket_evento_tipo` (migración **0017**).
+- ✅ Script de re-siembra `src/scripts/resiembraConveniosBuckets.ts`, idempotente, con
+  simulación por default.
+
+#### Por qué hizo falta un evento nuevo
+
+Los tres eventos que había describen **movimiento**, y el CHECK de coherencia los obliga a
+moverse (`SUBIDA` exige `bucket_nuevo > bucket_anterior`, etc.). No existía forma de
+registrar *"se quedó donde estaba, y a propósito"*. Un `INICIAL` tampoco servía:
+`buckets_historial_uq_inicial` permite **una sola** línea base por crédito y estos ya la
+tienen de cuando eran MOROSO.
+
+Y la fila tiene que existir: para un crédito `EN_CONVENIO`, `bucketActualSql` ignora —a
+propósito, review Codex #1223— todo el historial que no sea de su régimen de convenio. Sin
+fila propia, el crédito se queda **sin bucket visible**.
+
+#### Dos criterios de "atrasado", y por qué el default es el estricto
+
+Este documento decía dos cosas distintas sin darse cuenta: la tabla de la decisión 19 dice
+*"debe alguna cuota **del convenio**"*, y el párrafo "Cómo se mide al día" dice *"uniendo
+las cuotas del crédito no absorbidas **+** las del convenio"*. Medido contra el sandbox, la
+diferencia no es cosmética:
+
+| Criterio | Qué pregunta | Atrasados en dev (de 63) |
+| --- | --- | --- |
+| `convenio` (**default**) | ¿Está cumpliendo el acuerdo que firmó? | **9** |
+| `union` (`--criterio=union`) | ¿Debe algo, convenio o cuota normal del mes? | **57** |
+
+Se implementó el estricto como default porque el ancho **no clasifica, vuelca**: manda el
+90% de los convenios a B4 (pre-jurídico) y a un solo asesor. El otro queda disponible con
+una bandera y el vigilante loguea **las dos** medidas cada noche.
+
+> 🔸 **Para el PM**: la diferencia entre los dos números —48 créditos— es *"gente que paga
+> su convenio pero no su cuota normal del mes"*. Hoy nadie está mirando ese dato, y
+> decidir si eso es incumplir el convenio o no es de negocio, no de código.
+
+#### La idempotencia se acota al convenio VIGENTE
+
+`buckets_historial` es append-only: las filas de un convenio viejo **nunca se borran**.
+Preguntar *"¿tiene alguna fila con `status_credito = 'EN_CONVENIO'`?"* daba verdadero para
+siempre, así que un crédito que completó o rechazó un convenio y después firma **otro** se
+quedaba sin congelar — ni al firmar ni en la red de seguridad — y el lector seguía
+exponiendo el bucket del convenio anterior.
+
+La comprobación lleva ahora un corte por la fecha de creación del convenio. Sin ese
+parámetro conserva el comportamiento viejo, que es lo correcto para un caller que no sabe
+de qué convenio habla.
+
+El corte se calcula sobre los convenios **que todavía no terminaron**, aprobados *o*
+esperando aprobación — no solo los `activo = true`. Un convenio recién firmado nace
+inactivo mientras el supervisor decide, pero el crédito ya quedó `EN_CONVENIO`: dejándolo
+fuera del corte, la red de seguridad no podía reparar un congelamiento fallido durante
+todo ese período (indefinido si nadie decide). El **atraso**, en cambio, se sigue midiendo
+solo sobre los activos: un convenio sin aprobar todavía no reestructuró nada.
+
+#### Comprobar e insertar van juntos
+
+El advisory lock del vigilante solo lo serializa **contra sí mismo**. Si la firma de un
+convenio se cruza con esa corrida, las dos pueden ver "todavía no está congelado" y las dos
+insertan — y para un crédito sin historial previo la firma usa su bucket vivo mientras el
+vigilante cae al default B2/B4, así que el que gane por timestamp decide el bucket visible
+y puede violar justo la regla que este código existe para sostener.
+
+El lock cubre desde **leer el bucket** hasta **escribir la fila** —
+`pg_advisory_xact_lock(CREDITO_ASESOR_LOCK_NAMESPACE, credito_id)`, la misma llave que usa
+la reasignación de asesor, porque el congelamiento fija bucket **y** dueño.
+
+Cubrir solo el check y el insert no alcanzaba: el vigilante podía arrancar en medio, tomar
+el lock primero e insertar su fallback B2/B4, y después el firmante encontraba esa fila y
+descartaba el valor autoritativo que ya tenía en la mano. El bucket de un crédito sin
+historial terminaba decidido por el job en vez de por la firma.
+
+Y la lectura del bucket **ignora el historial de convenio**: para un crédito que ya no está
+`EN_CONVENIO`, el lector general acepta cualquier régimen — incluida la fila `CONGELADO` de
+un convenio anterior. Si se rechaza un convenio y se firma otro antes de que corra el motor
+de las 23:59, el rechazo no escribe historial de bucket, así que el nuevo se congelaba en el
+bucket del viejo en vez del que le toca por su mora de hoy.
+
+#### El orden importa más que el lock
+
+Con el lock ya cubriendo la lectura, la lectura seguía en el lugar equivocado: **después**
+de borrar la mora activa y de pasar el crédito a `EN_CONVENIO`. Esos dos pasos destruyen
+justo la información con la que se deriva el bucket, así que para un crédito sin historial
+la derivación caía al rango por cuotas, que sin mora da **B0** — el "borrón y cuenta nueva"
+que esta fase existe para impedir. El comentario del código decía "la lectura tiene que ir
+antes"; el código la tenía después.
+
+Ahora es **una sola transacción** con el lock por crédito: *leer → borrar mora → cambiar
+status → congelar*. Los dos pasos que pueden fallar sin que eso deba tumbar el convenio
+(la lectura y el congelamiento) van cada uno en un `SAVEPOINT`: en Postgres un statement
+que falla aborta la transacción entera, y con el savepoint su fallo se descarta solo.
+
+El lector del **vigilante** tenía la misma omisión que ya se había corregido en el de la
+firma: tomaba la última fila de cualquier régimen. Toda fila `EN_CONVENIO` que llegue a ver
+es de un convenio **anterior** —si fuera del vigente, el corte por fecha habría cortado
+antes—, así que si fallaba el congelamiento de un segundo convenio, el vigilante reinsertaba
+el bucket del primero después del corte nuevo y lo dejaba certificado para siempre.
+
+#### Cuándo termina el congelamiento: en el motor, no antes
+
+No hay evento de "salida" al completar, rechazar o deshacer el convenio, y es a propósito
+(se planteó en la review). El crédito vuelve a `ACTIVO`/`MOROSO` y la fila `CONGELADO` sigue
+siendo la última hasta que el motor de las 23:59 deriva el bucket real y escribe la
+transición. La ventana es de horas: el motor recorre **todos** los créditos con cuotas, no
+solo los morosos (en el sandbox hay `BAJADA` a B0 registradas).
+
+Escribir la salida en el momento se ve más correcto y es peor: el motor **solo reasigna
+cuando detecta cambio de bucket**. Una fila eager con el bucket ya correcto se come esa
+transición, y el crédito queda en su bucket nuevo con el asesor de B4/B5 que tenía
+congelado, sin nada que lo vuelva a mover. Soltar el congelamiento y re-hogar el crédito son
+el mismo paso, y ese paso vive en el motor.
+
+#### La trampa de Drizzle que se pagó acá
+
+La medición vivía copiada en el job y en el script. En la copia del script la subconsulta
+correlacionada de `hasPaidPayment` daba **siempre verdadero** y el atraso salía 0: Drizzle
+solo califica la columna externa cuando la query tiene más de una tabla, así que con un
+`select().from(cuotas_credito)` a secas emitía
+
+```sql
+EXISTS (SELECT 1 FROM pagos_credito pc WHERE pc.cuota_id = "cuota_id" ...)
+```
+
+y ese `"cuota_id"` sin calificar Postgres lo resuelve contra `pc` — o sea
+`pc.cuota_id = pc.cuota_id`, siempre cierto. **Toda cuota se leía como pagada.** Con el
+`INNER JOIN` a `creditos` califica bien y correlaciona. Se arregló extrayendo UNA
+implementación (`controllers/buckets/atrasoConvenio.ts`) que usan el vigilante y el
+script; la trampa quedó documentada en su cabecera.
+
 #### La re-siembra de los convenios que ya existen (decisión 19)
 
 Los ~63 `EN_CONVENIO` que el job ya movió con la regla vieja están repartidos entre B0 y B5,
@@ -289,7 +420,20 @@ Se re-siembran por **cómo están pagando hoy**, no por su origen:
 | **Al día** (cumpliendo su convenio) | **B2** |
 | **Atrasado** (debe alguna cuota del convenio) | **B4** |
 
-Es un script de **una sola corrida**, idempotente, que va junto con el cambio de regla.
+Es un script idempotente que va junto con el cambio de regla:
+
+```bash
+bun run src/scripts/resiembraConveniosBuckets.ts            # simulación
+bun run src/scripts/resiembraConveniosBuckets.ts --apply    # escribe
+bun run src/scripts/resiembraConveniosBuckets.ts --criterio=union   # el criterio ancho
+```
+
+Reasigna también el **asesor**, con la misma regla del motor (`elegirAsesorParaBucket`: si
+el dueño actual ya cubre el bucket destino se queda, sin churn; si no, el del pool con
+menos carga). Un crédito re-sembrado en B2 con un asesor de B0 no lo gestiona nadie.
+
+**Corrido en dev el 15-sep**: 54 al día → B2 (repartidos entre Jorge y Samuel), 9 atrasados
+→ B4 (Erik), 39 reasignaciones. La segunda corrida no escribe nada.
 
 > 🔸 **Corre en el sandbox de dev (`cartera_cobros2`), no en producción.** Todo COBROS-02
 > vive en ese schema mientras dure la rama, así que acá se mueve sin clavo: si el reparto

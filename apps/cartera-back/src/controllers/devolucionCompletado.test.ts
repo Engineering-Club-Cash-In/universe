@@ -1,7 +1,6 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { PgDialect } from "drizzle-orm/pg-core";
 
-import { lockPoolMock } from "../utils/testMocks";
 
 // ============================================================================
 // COMPLETADO solo cuando todos los inversionistas fueron devueltos.
@@ -21,6 +20,7 @@ let espejoResidual: Array<{
   monto_aportado: string;
 }> = [];
 let updateReturning: Array<{ credito_id: number }> = [];
+let historialInsertado: any[] = [];
 
 let updateWasCalled = false;
 let lastUpdateData: Record<string, unknown> | undefined;
@@ -37,6 +37,7 @@ const sqlDe = (condicion: unknown) => dialect.sqlToQuery(condicion as any).sql;
 //   tx.select().from().where().groupBy()        -> conteo de no-CUBE en el padre
 //   tx.select().from().where()                  -> filas espejo no-CUBE
 //   tx.update().set().where().returning()       -> el COMPLETADO
+//   tx.insert().values()                        -> la fila de historial
 function makeTx() {
   return {
     select: () => ({
@@ -68,6 +69,12 @@ function makeTx() {
         };
       },
     }),
+    insert: () => ({
+      values: (filas: any) => {
+        historialInsertado.push(...(Array.isArray(filas) ? filas : [filas]));
+        return Promise.resolve([]);
+      },
+    }),
   } as any;
 }
 
@@ -75,25 +82,23 @@ function makeTx() {
 // contra este handle falso y no contra una conexión real.
 const ejecutorFalso = { transaction: async (cb: any) => cb(makeTx()) };
 
-// El mock de la base es igual necesario: importar "./investor" arrastra
-// "../database/index", y varios tests de la suite lo registran sin `lockPool`.
-// Sin esto, el link del módulo revienta antes de llegar a los helpers (ver el
-// docstring de utils/testMocks.ts).
-mock.module("../database/index", () => ({
-  client: {},
-  lockPool: lockPoolMock,
-  db: { transaction: async (cb: any) => cb(makeTx()) },
-}));
-
-const {
+// Los helpers viven en utils/devolucionCompletada.ts, fuera de investor.ts, y
+// reciben el ejecutor por parámetro. Eso permite importarlos directo y sin
+// `mock.module`: no arrastran el grafo de imports de investor.ts —que incluye
+// `lockPool`— hasta los mocks de "../database" que instalan otros archivos de
+// la suite (aseguradoras, abonosCapital, devolucion, latefee...) sin ese
+// export. Con un import top-level de investor.ts, estas pruebas pasaban
+// aisladas pero fallaban en una corrida completa, protegiendo nada en CI.
+import {
   filtrarCreditosTotalmenteDevueltos,
   marcarDevolucionCompletadaSiCorresponde,
-} = await import("./investor");
+} from "../utils/devolucionCompletada";
 
 beforeEach(() => {
   padreRestantes = [];
   espejoResidual = [];
   updateReturning = [];
+  historialInsertado = [];
   updateWasCalled = false;
   lastUpdateData = undefined;
   lastUpdateWhere = undefined;
@@ -104,25 +109,25 @@ beforeEach(() => {
 
 describe("filtrarCreditosTotalmenteDevueltos", () => {
   it("un crédito sin filas no-CUBE en el padre queda completado", async () => {
-    const { completados, pendientes } = await filtrarCreditosTotalmenteDevueltos(
+    const { completados, diferidos } = await filtrarCreditosTotalmenteDevueltos(
       makeTx(),
       [500],
     );
 
     expect(completados).toEqual([500]);
-    expect(pendientes.size).toBe(0);
+    expect(diferidos.size).toBe(0);
   });
 
   it("un crédito con un inversionista restante NO se completa", async () => {
     padreRestantes = [{ credito_id: 500, restantes: 1 }];
 
-    const { completados, pendientes } = await filtrarCreditosTotalmenteDevueltos(
+    const { completados, diferidos } = await filtrarCreditosTotalmenteDevueltos(
       makeTx(),
       [500],
     );
 
     expect(completados).toEqual([]);
-    expect(pendientes.get(500)).toBe(1);
+    expect(diferidos.get(500)).toEqual({ tipo: "inversionistas_en_padre", restantes: 1 });
   });
 
   it("la fila de CUBE no cuenta como inversionista pendiente", async () => {
@@ -141,24 +146,24 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
       { credito_id: 8730, restantes: 1 },
     ];
 
-    const { completados, pendientes } = await filtrarCreditosTotalmenteDevueltos(
+    const { completados, diferidos } = await filtrarCreditosTotalmenteDevueltos(
       makeTx(),
       [8730, 78, 141],
     );
 
     expect(completados).toEqual([78]);
-    expect(pendientes.get(141)).toBe(2);
-    expect(pendientes.get(8730)).toBe(1);
+    expect(diferidos.get(141)).toEqual({ tipo: "inversionistas_en_padre", restantes: 2 });
+    expect(diferidos.get(8730)).toEqual({ tipo: "inversionistas_en_padre", restantes: 1 });
   });
 
   it("con lista vacía no toca la base", async () => {
-    const { completados, pendientes } = await filtrarCreditosTotalmenteDevueltos(
+    const { completados, diferidos } = await filtrarCreditosTotalmenteDevueltos(
       makeTx(),
       [],
     );
 
     expect(completados).toEqual([]);
-    expect(pendientes.size).toBe(0);
+    expect(diferidos.size).toBe(0);
     expect(selectCallCount).toBe(0);
   });
 
@@ -189,13 +194,13 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
     ];
     const warn = spyOn(console, "warn").mockImplementation(() => {});
 
-    const { completados, pendientes } = await filtrarCreditosTotalmenteDevueltos(
+    const { completados, diferidos } = await filtrarCreditosTotalmenteDevueltos(
       makeTx(),
       [500],
     );
 
     expect(completados).toEqual([]);
-    expect(pendientes.has(500)).toBe(true);
+    expect(diferidos.get(500)).toEqual({ tipo: "saldo_en_espejo" });
     expect(warn.mock.calls[0].join(" ")).toContain("NO se cierra");
     warn.mockRestore();
   });
@@ -208,13 +213,13 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
     ];
     const warn = spyOn(console, "warn").mockImplementation(() => {});
 
-    const { completados, pendientes } = await filtrarCreditosTotalmenteDevueltos(
+    const { completados, diferidos } = await filtrarCreditosTotalmenteDevueltos(
       makeTx(),
       [500, 501],
     );
 
     expect(completados).toEqual([500]);
-    expect(pendientes.has(501)).toBe(true);
+    expect(diferidos.get(501)).toEqual({ tipo: "saldo_en_espejo" });
     warn.mockRestore();
   });
 });
@@ -271,14 +276,33 @@ describe("marcarDevolucionCompletadaSiCorresponde", () => {
     expect(where).toContain("in (");
   });
 
-  it("no explota si el crédito ya no estaba en VERIFICADO", async () => {
+  it("no reporta como cerrado un crédito que el UPDATE no cambió", async () => {
+    // El crédito ya no estaba en VERIFICADO (returning vacío), típico de la
+    // RAMA 1: pasa todo lo que movió exitInvestor, mucho en NO_APLICA. Antes
+    // se devolvían los candidatos y la función mentía diciendo que cerró.
     padreRestantes = [];
     updateReturning = [];
 
     const { completados } = await marcarDevolucionCompletadaSiCorresponde([500], "test", ejecutorFalso);
 
     expect(updateWasCalled).toBe(true);
-    expect(completados).toEqual([500]);
+    expect(completados).toEqual([]);
+    expect(historialInsertado).toEqual([]);
+  });
+
+  it("registra la transición en historial_devolucion_credito al cerrar", async () => {
+    padreRestantes = [];
+    updateReturning = [{ credito_id: 500 }];
+
+    await marcarDevolucionCompletadaSiCorresponde([500], "salida total inv 42", ejecutorFalso);
+
+    expect(historialInsertado).toHaveLength(1);
+    expect(historialInsertado[0]).toMatchObject({
+      credito_id: 500,
+      estado_anterior: "VERIFICADO",
+      estado_nuevo: "COMPLETADO",
+    });
+    expect(historialInsertado[0].motivo).toContain("salida total inv 42");
   });
 
   it("con lista vacía no abre transacción ni actualiza", async () => {

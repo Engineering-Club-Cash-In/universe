@@ -4626,199 +4626,21 @@ export const liquidateByInvestorSchema = z.object({
   fecha_liquidacion: z.string().datetime().optional(),
 });
 
-export const orderUniqueCreditIds = (creditoIds: number[]): number[] =>
-  [...new Set(creditoIds)].sort((a, b) => a - b);
+// El cierre de la devolución vive en utils/devolucionCompletada.ts: son
+// funciones puras respecto de la conexión y así se pueden probar sin
+// arrastrar el grafo de imports de este archivo. Se re-exportan para no
+// romper a quien ya las importaba desde acá.
+export {
+  filtrarCreditosTotalmenteDevueltos,
+  lockPendingReturnCreditsForLiquidation,
+  marcarDevolucionCompletadaSiCorresponde,
+  orderUniqueCreditIds,
+} from "../utils/devolucionCompletada";
 
-export async function lockPendingReturnCreditsForLiquidation(
-  tx: any,
-  creditoIds: number[],
-) {
-  const orderedCreditIds = orderUniqueCreditIds(creditoIds);
-  return tx
-    .select({
-      creditoId: creditos.credito_id,
-      numeroCreditoSifco: creditos.numero_credito_sifco,
-      estadoDevolucion: creditos.estado_devolucion,
-    })
-    .from(creditos)
-    .where(inArray(creditos.credito_id, orderedCreditIds))
-    .orderBy(creditos.credito_id)
-    .for("no key update");
-}
-
-/**
- * Parte una lista de créditos entre los que YA no tienen ningún inversionista
- * externo y los que todavía conservan alguno.
- *
- * El predicado se mide sobre `creditos_inversionistas` (el PADRE), no sobre el
- * espejo, y la razón es que `exitInvestor` trata al padre como la fuente
- * autoritativa: si el inversionista no tiene fila en el espejo, se salta esa
- * mitad y mueve el padre igual. O sea que el espejo puede quedar con filas de
- * más en estados anómalos. Exigir "espejo en cero" dejaría esos créditos
- * colgados para siempre, que es justo la trampa que se quiere evitar.
- *
- * No hay soft-delete: `exitInvestor` hace SWAP (UPDATE del inversionista_id) o
- * MERGE + DELETE, así que contar filas no-CUBE es un predicado exacto.
- *
- * Si un crédito pasa el predicado del padre pero conserva filas espejo que no
- * son de CUBE, se reporta por consola y se deja pasar: esa divergencia es un
- * problema de datos que hay que ver aparte, no una razón para trabar el cierre
- * de la devolución.
- */
-export async function filtrarCreditosTotalmenteDevueltos(
-  ejecutor: any,
-  creditoIds: number[],
-): Promise<{ completados: number[]; pendientes: Map<number, number> }> {
-  const orderedCreditIds = orderUniqueCreditIds(creditoIds);
-  if (orderedCreditIds.length === 0) {
-    return { completados: [], pendientes: new Map() };
-  }
-
-  const restantes = await ejecutor
-    .select({
-      credito_id: creditos_inversionistas.credito_id,
-      restantes: sql<number>`count(*)::int`,
-    })
-    .from(creditos_inversionistas)
-    .where(
-      and(
-        inArray(creditos_inversionistas.credito_id, orderedCreditIds),
-        ne(creditos_inversionistas.inversionista_id, CUBE_ID),
-      ),
-    )
-    .groupBy(creditos_inversionistas.credito_id);
-
-  const pendientes = new Map<number, number>(
-    restantes.map((fila: any) => [fila.credito_id, Number(fila.restantes)]),
-  );
-  const candidatos = orderedCreditIds.filter((id) => !pendientes.has(id));
-
-  if (candidatos.length === 0) return { completados: [], pendientes };
-
-  // Segundo filtro, sobre el espejo. El padre puede estar limpio y el espejo
-  // conservar una fila no-CUBE: son estados desincronizados que existen.
-  //
-  // Si esa fila tiene saldo, al inversionista TODAVÍA le deben capital y el
-  // crédito no puede cerrarse. La RAMA 2 ya lo protege con su validación de
-  // monto_aportado==0, pero ese guard solo corre sobre créditos en VERIFICADO:
-  // cerrar acá sacaría al crédito de ese estado y la validación nunca llegaría
-  // a ejecutarse. Los créditos con saldo en el espejo quedan en VERIFICADO para
-  // revisión manual, igual que hace la RAMA 2 con los suyos.
-  //
-  // En cambio una fila espejo en CERO no bloquea: es exactamente lo que deja
-  // una liquidación ya pagada, y es el caso que este cierre existe para
-  // resolver. Se reporta la divergencia y se sigue.
-  const espejoResidual = await ejecutor
-    .select({
-      credito_id: creditos_inversionistas_espejo.credito_id,
-      inversionista_id: creditos_inversionistas_espejo.inversionista_id,
-      monto_aportado: creditos_inversionistas_espejo.monto_aportado,
-    })
-    .from(creditos_inversionistas_espejo)
-    .where(
-      and(
-        inArray(creditos_inversionistas_espejo.credito_id, candidatos),
-        ne(creditos_inversionistas_espejo.inversionista_id, CUBE_ID),
-      ),
-    );
-
-  const conSaldoEnEspejo = new Set<number>(
-    espejoResidual
-      .filter((f: any) => Number(f.monto_aportado) !== 0)
-      .map((f: any) => f.credito_id),
-  );
-
-  if (espejoResidual.length > 0) {
-    console.warn(
-      `⚠️  DIVERGENCIA padre/espejo: crédito(s) sin inversionistas en el padre pero con filas espejo no-CUBE:`,
-      espejoResidual
-        .map(
-          (f: any) =>
-            `credito_id=${f.credito_id} inversionista_id=${f.inversionista_id} ` +
-            `monto_aportado=${f.monto_aportado}` +
-            `${Number(f.monto_aportado) !== 0 ? " ← NO se cierra (capital pendiente)" : ""}`,
-        )
-        .join(", "),
-    );
-  }
-
-  const completados = candidatos.filter((id) => !conSaldoEnEspejo.has(id));
-
-  // Los bloqueados por el espejo se reportan como pendientes para que quien
-  // llama los loguee como diferidos en vez de darlos por cerrados en silencio.
-  for (const id of conSaldoEnEspejo) {
-    if (!pendientes.has(id)) pendientes.set(id, 0);
-  }
-
-  return { completados, pendientes };
-}
-
-/**
- * Cierra la devolución de los créditos que ya no le deben nada a nadie.
- *
- * Un crédito puede tener varios inversionistas, y cada uno se liquida por su
- * cuenta (la liquidación corre por inversionista, y las boletas individuales
- * caen en momentos distintos). Marcar COMPLETADO al salir el primero sacaba al
- * crédito del flujo para los demás: el filtro de la RAMA 2 pide VERIFICADO, así
- * que los que venían atrás nunca llegaban a `exitInvestor` y su fila en el
- * padre se quedaba viva con monto mientras su espejo ya estaba en cero.
- *
- * Entonces: COMPLETADO solo cuando el padre ya no tiene inversionistas fuera de
- * CUBE. Mientras quede alguno, el crédito sigue en VERIFICADO, que es lo que
- * mantiene vivo tanto el filtro de la RAMA 2 como la devolución completa de
- * capital en la generación de pagos (payments.ts).
- *
- * El UPDATE exige VERIFICADO además del predicado — la RAMA 2 no lo hacía y
- * podía pisar un crédito que ya había cambiado de estado por otra vía.
- */
-export async function marcarDevolucionCompletadaSiCorresponde(
-  creditoIdsProcesados: number[],
-  contexto: string,
-  // Inyectable para poder ejercitar el helper sin una conexión real. En
-  // producción siempre es `db`.
-  ejecutor: { transaction: (cb: (tx: any) => Promise<any>) => Promise<any> } = db,
-): Promise<{ completados: number[]; diferidos: number[] }> {
-  const ids = orderUniqueCreditIds(creditoIdsProcesados);
-  if (ids.length === 0) return { completados: [], diferidos: [] };
-
-  return ejecutor.transaction(async (tx) => {
-    // Mismo lock (y mismo orden por credito_id) que usa el guard de devolución
-    // al inicio de la liquidación, para no abrir un deadlock entre los dos.
-    await lockPendingReturnCreditsForLiquidation(tx, ids);
-
-    const { completados, pendientes } = await filtrarCreditosTotalmenteDevueltos(tx, ids);
-
-    if (completados.length > 0) {
-      const actualizados = await tx
-        .update(creditos)
-        .set({ estado_devolucion: "COMPLETADO" })
-        .where(
-          and(
-            inArray(creditos.credito_id, completados),
-            eq(creditos.estado_devolucion, "VERIFICADO"),
-          ),
-        )
-        .returning({ credito_id: creditos.credito_id });
-
-      console.log(
-        `  ✅ [${contexto}] COMPLETADO aplicado a ${actualizados.length} crédito(s):`,
-        actualizados.map((c: any) => c.credito_id).join(", ") || "(ninguno seguía en VERIFICADO)",
-      );
-    }
-
-    const diferidos = ids.filter((id) => pendientes.has(id));
-    if (diferidos.length > 0) {
-      console.log(
-        `  ⏸️  [${contexto}] ${diferidos.length} crédito(s) siguen en VERIFICADO — todavía quedan inversionistas por devolver: ` +
-          diferidos
-            .map((id) => `credito_id=${id} restantes=${pendientes.get(id)}`)
-            .join(", "),
-      );
-    }
-
-    return { completados, diferidos };
-  });
-}
+import {
+  lockPendingReturnCreditsForLiquidation,
+  marcarDevolucionCompletadaSiCorresponde,
+} from "../utils/devolucionCompletada";
 
 export async function liquidateByInvestorId(inversionista_id?: number, fechaLiquidacion?: Date) {
   // Verificar si ya hay una liquidación en proceso para este inversionista (o masiva)
@@ -5729,17 +5551,6 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           ];
 
           if (creditoIdsConPagos.length > 0) {
-            // Rezagados: un crédito puede haber quedado en VERIFICADO con su
-            // último inversionista ya devuelto, si dos liquidaciones del mismo
-            // crédito corrieron en paralelo y cada una alcanzó a ver a la otra
-            // todavía presente. Es idempotente —solo toca créditos VERIFICADO
-            // sin inversionistas no-CUBE—, así que la siguiente liquidación que
-            // pase por el crédito lo cierra sin que nadie intervenga.
-            await marcarDevolucionCompletadaSiCorresponde(
-              creditoIdsConPagos,
-              `barrido inv ${inv_id}`
-            );
-
             const [invRow] = await db
               .select({ status: inversionistas.status })
               .from(inversionistas)
@@ -5928,6 +5739,42 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           console.error(
             `  ❌ Error en salida automática (liquidación ya guardada):`,
             exitError
+          );
+        }
+
+        // ── Barrido de rezagados ──
+        // Un crédito puede quedar en VERIFICADO con su último inversionista ya
+        // devuelto: si dos liquidaciones del mismo crédito corren en paralelo,
+        // cada una puede ver a la otra todavía presente y ninguna cerrarlo.
+        //
+        // Va al FINAL y en su propio try/catch: es una limpieza oportunista y
+        // no puede tumbar la salida automática (antes corría primero, y un
+        // fallo suyo dejaba al inversionista sin inactivar y sin correo).
+        //
+        // Se filtra por VERIFICADO antes de llamar al helper: sin eso se toma
+        // FOR NO KEY UPDATE sobre todos los créditos liquidados en CADA
+        // corrida —incluida la masiva— para un caso que casi nunca aplica.
+        try {
+          const creditoIdsRezagados = await db
+            .select({ credito_id: creditos.credito_id })
+            .from(creditos)
+            .where(
+              and(
+                inArray(creditos.credito_id, creditoIdsLiquidados),
+                eq(creditos.estado_devolucion, "VERIFICADO")
+              )
+            );
+
+          if (creditoIdsRezagados.length > 0) {
+            await marcarDevolucionCompletadaSiCorresponde(
+              creditoIdsRezagados.map((c) => c.credito_id),
+              `barrido inv ${inv_id}`
+            );
+          }
+        } catch (barridoError) {
+          console.error(
+            `  ⚠️  Error en barrido de rezagados (no afecta la liquidación ni la salida):`,
+            barridoError
           );
         }
       } catch (excelError) {

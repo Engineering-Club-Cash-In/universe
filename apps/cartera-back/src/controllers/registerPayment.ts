@@ -1,4 +1,5 @@
 import Big from "big.js";
+import { levantarRecuperacionSiPagoTodo } from "./buckets/levantarRecuperacion";
 import z from "zod";
 import { db, lockPool } from "../database";
 import { withCapitalContext, setCapitalSource } from "../utils/withAuditContext";
@@ -3235,6 +3236,26 @@ export async function aplicarPagoNormalEnTx(
         pago.credito_id,
         undefined,
         tx
+      );
+    }
+
+    // COBROS-02 Fase 4 — levantar `EN_RECUPERACION` si este pago dejó al crédito
+    // sin deber nada (decisión 5: al VALIDARSE el pago).
+    //
+    // Va acá y no solo en `revalidatePayment` (review de Codex, P1): este es el
+    // camino NORMAL de validación —el botón "Validar Pago" y la importación de
+    // Págalo pasan por acá—, así que la mayoría de los pagos que saldan todo no
+    // levantaban nada y el crédito se quedaba en recuperación para siempre.
+    // Dentro de la misma transacción: si el pago se revierte, el levantamiento
+    // también. No hace nada si el crédito no está en ese estado.
+    const levantamiento = await levantarRecuperacionSiPagoTodo(
+      pago.credito_id,
+      tx as never,
+      pago_id,
+    );
+    if (levantamiento.levantado) {
+      console.log(
+        `🚗 Crédito ${pago.credito_id} sale de EN_RECUPERACION: ya no debe cuotas ni mora`
       );
     }
 

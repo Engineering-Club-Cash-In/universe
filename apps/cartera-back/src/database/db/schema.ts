@@ -241,6 +241,13 @@
       .notNull()
       .default(StatusCredit.ACTIVO),
     otros: numeric("otros", { precision: 18, scale: 2 }).notNull().default("0"), // Otros cargos o pagos adicionales
+    // COBROS-02 Fase 4 — qué pago levantó `EN_RECUPERACION` (migración 0021).
+    //
+    // El levantamiento deja el crédito ACTIVO y borra toda huella de la
+    // decisión humana. Si contabilidad reversa ESE pago, sin esta marca el
+    // crédito se queda ACTIVO y el motor a lo sumo lo vuelve MOROSO: el piso en
+    // B4 se pierde en silencio. Sin FK a propósito: es una marca histórica.
+    recuperacion_levantada_pago_id: integer("recuperacion_levantada_pago_id"),
     permite_abono_capital: boolean("permite_abono_capital").notNull().default(false),
     estado_devolucion: estadoDevolucionEnum("estado_devolucion").notNull().default("NO_APLICA"),
     is_vehiculo_propio: boolean("is_vehiculo_propio").notNull().default(false), // true si el vehículo es propiedad de Cash In

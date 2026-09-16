@@ -637,6 +637,26 @@ le devuelve en los tres finales posibles:
 Los convenios anteriores a la 0020 no tienen el dato y conservan el comportamiento de
 siempre.
 
+#### Cuatro cosas que la review de Codex corrigió acá
+
+- **El levantamiento corre en el camino NORMAL de validación**, no solo en
+  `revalidatePayment`. El botón "Validar Pago" y la importación de Págalo pasan por
+  `aplicarPagoNormalEnTx`: la mayoría de los pagos que saldan todo no levantaban nada y el
+  crédito se quedaba en recuperación para siempre.
+- **`STATUS_FUNNEL` incluye el estado.** Sin eso, apretar el botón hacía *desaparecer* el
+  crédito de la tabla por bucket, de la reasignación y del traslado masivo — en vez de
+  mostrarlo en B4. Justo la cuenta que más hay que mirar.
+- **El gate de convenio del CRM lo acepta.** La decisión 4 dice que un convenio creado
+  desde B4 se queda en B4; sin esto un crédito `EN_RECUPERACION` no podía crear convenio,
+  y todo el manejo de `status_credito_previo` era inalcanzable. Negarle un convenio a
+  quien está por perder la unidad es negarle justo la salida.
+- **El levantamiento es reversible** (migración **0021**): el crédito guarda *qué* pago lo
+  levantó, y si contabilidad reversa ese pago vuelve a `EN_RECUPERACION`. Antes la reversa
+  restauraba cuotas, capital y mora pero dejaba el crédito `ACTIVO`, y el motor a lo sumo
+  lo ponía `MOROSO`: la decisión humana y su piso en B4 se perdían en silencio. Es el
+  mismo criterio con el que la reversa des-completa un convenio y devuelve el crédito a
+  `EN_CONVENIO`.
+
 #### El triaje de las listas de estados
 
 El plan hablaba de "~90 listas de estados escritas a mano en ~45 archivos". El criterio
@@ -672,6 +692,7 @@ Las cuatro fases están **implementadas** (15-sep). Todo corrió contra el sandb
 | cartera 0018 | `anulado_at` / `anulado_por` / `motivo_anulacion` | `cartera_cobros2` |
 | cartera 0019 | `buckets.estados_piso` (+ seed de B4) | `cartera_cobros2` |
 | cartera 0020 | `convenios_pago.status_credito_previo` | `cartera_cobros2` |
+| cartera 0021 | `creditos.recuperacion_levantada_pago_id` | `cartera_cobros2` |
 
 Los archivos de migración dicen `cartera.` (la convención del repo); al aplicarlas se
 sustituye por el schema del ambiente.

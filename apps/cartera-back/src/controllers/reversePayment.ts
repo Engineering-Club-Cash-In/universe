@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { restaurarRecuperacionSiEstePagoLaLevanto } from "./buckets/levantarRecuperacion";
 
 import { eq, and, not, desc, inArray, isNotNull, sql, isNull } from "drizzle-orm";
 import Big from "big.js";
@@ -759,6 +760,22 @@ export const reversePayment = async ({ body, set }: any) => {
         numeroCreditoSifco: datosReversa.creditData.creditos.numero_credito_sifco,
         statusCredit: datosReversa.creditData.creditos.statusCredit,
       });
+
+      // COBROS-02 Fase 4 — si este era EL pago que levantó la recuperación, el
+      // crédito vuelve a EN_RECUPERACION. Sin esto la reversa restauraba
+      // cuotas, capital y mora pero dejaba el crédito ACTIVO, y la corrida
+      // nocturna a lo sumo lo ponía MOROSO: la decisión humana y su piso en B4
+      // se perdían en silencio (review de Codex, P1). Mismo criterio con el que
+      // la reversa des-completa un convenio y devuelve el crédito a EN_CONVENIO.
+      const volvioARecuperacion = await restaurarRecuperacionSiEstePagoLaLevanto(
+        datosReversa.creditData.creditos.credito_id,
+        pago_id,
+      );
+      if (volvioARecuperacion) {
+        console.log(
+          `↩️ Crédito ${datosReversa.creditData.creditos.credito_id} vuelve a EN_RECUPERACION: se reversó el pago que la había levantado.`,
+        );
+      }
 
       return datosReversa;
     });

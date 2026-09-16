@@ -40,6 +40,11 @@ import { StatusCredit } from "../database/db/schema";
 const STATUS_FUNNEL: StatusCredit[] = [
   StatusCredit.ACTIVO,
   StatusCredit.MOROSO,
+  // COBROS-02 Fase 4 — sin esto, apretar "Recuperación de vehículo" hacía
+  // DESAPARECER el crédito de la tabla por bucket, de la reasignación y del
+  // traslado masivo, en vez de mostrarlo en B4. Justo la cuenta que más hay que
+  // mirar (review de Codex, P1).
+  StatusCredit.EN_RECUPERACION,
   StatusCredit.INCOBRABLE,
   StatusCredit.EN_CONVENIO,
 ];

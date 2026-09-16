@@ -14,12 +14,14 @@ mock.module("../latefee", () => ({
   STATUS_EN_RECUPERACION: "EN_RECUPERACION",
 }));
 
-const { levantarRecuperacionSiPagoTodo } = await import("./levantarRecuperacion");
+const { levantarRecuperacionSiPagoTodo, restaurarRecuperacionSiEstePagoLaLevanto } =
+  await import("./levantarRecuperacion");
 
 /** Ejecutor falso: responde el crédito, luego la mora, y anota los UPDATE. */
 function ejecutorFalso(opciones: {
   status: string;
   moraMonto?: string | null;
+  levantadaPor?: number | null;
 }) {
   const updates: Record<string, unknown>[] = [];
   let selects = 0;
@@ -31,7 +33,14 @@ function ejecutorFalso(opciones: {
           where: () => ({
             limit: async () => {
               selects += 1;
-              if (selects === 1) return [{ statusCredit: opciones.status }];
+              if (selects === 1) {
+                return [
+                  {
+                    statusCredit: opciones.status,
+                    levantadaPor: opciones.levantadaPor ?? null,
+                  },
+                ];
+              }
               return opciones.moraMonto == null
                 ? []
                 : [{ monto: opciones.moraMonto }];
@@ -85,9 +94,12 @@ describe("levantarRecuperacionSiPagoTodo", () => {
       status: "EN_RECUPERACION",
       moraMonto: "0",
     });
-    const r = await levantarRecuperacionSiPagoTodo(1, ejecutor as never);
+    const r = await levantarRecuperacionSiPagoTodo(1, ejecutor as never, 777);
     expect(r).toEqual({ levantado: true });
-    expect(updates).toEqual([{ statusCredit: "ACTIVO" }]);
+    // Guarda QUÉ pago lo levantó: es lo único que hace reversible la decisión.
+    expect(updates).toEqual([
+      { statusCredit: "ACTIVO", recuperacion_levantada_pago_id: 777 },
+    ]);
   });
 
   it("una mora inactiva (sin fila) no bloquea el levantamiento", async () => {
@@ -99,5 +111,59 @@ describe("levantarRecuperacionSiPagoTodo", () => {
     const r = await levantarRecuperacionSiPagoTodo(1, ejecutor as never);
     expect(r).toEqual({ levantado: true });
     expect(updates).toHaveLength(1);
+  });
+});
+
+/**
+ * La vuelta atrás. Sin esto, reversar el pago que levantó la recuperación
+ * dejaba el crédito ACTIVO para siempre: el motor a lo sumo lo pone MOROSO y la
+ * decisión humana —con su piso en B4— se perdía en silencio.
+ */
+describe("restaurarRecuperacionSiEstePagoLaLevanto", () => {
+  it("devuelve el estado cuando se reversa EL pago que lo levantó", async () => {
+    const { ejecutor, updates } = ejecutorFalso({
+      status: "ACTIVO",
+      levantadaPor: 777,
+    });
+    const r = await restaurarRecuperacionSiEstePagoLaLevanto(
+      1,
+      777,
+      ejecutor as never,
+    );
+    expect(r).toBe(true);
+    expect(updates).toEqual([
+      {
+        statusCredit: "EN_RECUPERACION",
+        recuperacion_levantada_pago_id: null,
+      },
+    ]);
+  });
+
+  it("reversar OTRO pago no resucita una recuperación ajena", async () => {
+    const { ejecutor, updates } = ejecutorFalso({
+      status: "ACTIVO",
+      levantadaPor: 777,
+    });
+    const r = await restaurarRecuperacionSiEstePagoLaLevanto(
+      1,
+      999,
+      ejecutor as never,
+    );
+    expect(r).toBe(false);
+    expect(updates).toHaveLength(0);
+  });
+
+  it("un crédito que nunca estuvo en recuperación no se toca", async () => {
+    const { ejecutor, updates } = ejecutorFalso({
+      status: "MOROSO",
+      levantadaPor: null,
+    });
+    const r = await restaurarRecuperacionSiEstePagoLaLevanto(
+      1,
+      777,
+      ejecutor as never,
+    );
+    expect(r).toBe(false);
+    expect(updates).toHaveLength(0);
   });
 });

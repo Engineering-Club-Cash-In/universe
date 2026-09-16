@@ -44,6 +44,13 @@ export type LevantamientoRecuperacion = {
 export async function levantarRecuperacionSiPagoTodo(
   credito_id: number,
   ejecutor: Ejecutor = db,
+  /**
+   * El pago cuya validación lo levanta. Se GUARDA en el crédito para poder
+   * devolver el estado si ese pago se reversa (ver
+   * `restaurarRecuperacionSiEstePagoLaLevanto`). Sin él el levantamiento
+   * funciona igual, pero deja de ser reversible.
+   */
+  pago_id?: number,
 ): Promise<LevantamientoRecuperacion> {
   const [credito] = await ejecutor
     .select({ statusCredit: creditos.statusCredit })
@@ -86,7 +93,13 @@ export async function levantarRecuperacionSiPagoTodo(
   // una cancelación), y pisarlo desharía una decisión más reciente.
   await ejecutor
     .update(creditos)
-    .set({ statusCredit: "ACTIVO" })
+    .set({
+      statusCredit: "ACTIVO",
+      // Provenance: qué pago lo levantó. Es lo único que permite devolverle el
+      // estado si ese pago se reversa — sin esto, la decisión humana y su piso
+      // en B4 se pierden en silencio (review de Codex, P1).
+      recuperacion_levantada_pago_id: pago_id ?? null,
+    })
     .where(
       and(
         eq(creditos.credito_id, credito_id),
@@ -99,4 +112,60 @@ export async function levantarRecuperacionSiPagoTodo(
   // debe nada— y deja su BAJADA en la bitácora. Escribirla desde acá duplicaría
   // el evento y competiría con el motor por la misma fila.
   return { levantado: true };
+}
+
+/**
+ * La vuelta atrás: si el pago que se está reversando es EL que levantó la
+ * recuperación, el crédito vuelve a `EN_RECUPERACION`.
+ *
+ * Por qué hace falta. `reversePayment` restaura cuotas, capital y mora, pero el
+ * status queda `ACTIVO`: la corrida nocturna a lo sumo lo pone `MOROSO`, así
+ * que la decisión humana —y con ella el piso en B4— se perdía para siempre sin
+ * que nadie se entere (review de Codex, P1). Es el mismo criterio con el que la
+ * reversa "des-completa" un convenio y devuelve el crédito a `EN_CONVENIO`.
+ *
+ * Solo actúa sobre el crédito que guarda ESE `pago_id`: reversar cualquier otro
+ * pago no resucita una recuperación que se levantó con otro.
+ *
+ * No lanza: una reversa no puede fallar por esto.
+ */
+export async function restaurarRecuperacionSiEstePagoLaLevanto(
+  credito_id: number,
+  pago_id: number,
+  ejecutor: Ejecutor = db,
+): Promise<boolean> {
+  try {
+    const [credito] = await ejecutor
+      .select({
+        statusCredit: creditos.statusCredit,
+        levantadaPor: creditos.recuperacion_levantada_pago_id,
+      })
+      .from(creditos)
+      .where(eq(creditos.credito_id, credito_id))
+      .limit(1);
+
+    if (!credito || credito.levantadaPor !== pago_id) return false;
+
+    // El UPDATE es condicional sobre el estado leído: si entre medio el crédito
+    // entró a un convenio o se canceló, ese régimen es más reciente y manda.
+    await ejecutor
+      .update(creditos)
+      .set({
+        statusCredit: STATUS_EN_RECUPERACION,
+        recuperacion_levantada_pago_id: null,
+      })
+      .where(
+        and(
+          eq(creditos.credito_id, credito_id),
+          eq(creditos.statusCredit, credito.statusCredit ?? "ACTIVO"),
+        ),
+      );
+    return true;
+  } catch (err) {
+    console.error(
+      `[RECUPERACION] ⚠️ No se pudo devolver EN_RECUPERACION al crédito ${credito_id}:`,
+      err,
+    );
+    return false;
+  }
 }

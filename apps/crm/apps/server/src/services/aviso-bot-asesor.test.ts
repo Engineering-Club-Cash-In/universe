@@ -44,14 +44,20 @@ mock.module("../db", () => ({
 	db: {
 		select: () => ({
 			from: () => ({
-				where: () => ({
-					limit: async () => {
+				where: () => {
+					// El lookup del caso ordena antes de limitar (activo primero,
+					// luego el más reciente); los otros dos van directo a limit.
+					const responder = async () => {
 						selectsHechos += 1;
 						if (selectsHechos === 1) return yaAvisado;
 						if (selectsHechos === 2) return casoEncontrado;
 						return usuarioEncontrado;
-					},
-				}),
+					};
+					return {
+						limit: responder,
+						orderBy: () => ({ limit: responder }),
+					};
+				},
 			}),
 		}),
 		insert: () => ({
@@ -92,6 +98,7 @@ describe("cuándo NO se avisa", () => {
 			sesionId: null,
 			numeroSifco: "0101",
 			accion: "buscar_cliente",
+		exito: true,
 		});
 		expect(insertadas).toHaveLength(0);
 		expect(llamadasCartera).toHaveLength(0);
@@ -102,6 +109,7 @@ describe("cuándo NO se avisa", () => {
 			sesionId: SESION,
 			numeroSifco: null,
 			accion: "listar_creditos",
+		exito: true,
 		});
 		expect(insertadas).toHaveLength(0);
 		expect(llamadasCartera).toHaveLength(0);
@@ -113,19 +121,10 @@ describe("cuándo NO se avisa", () => {
 			sesionId: SESION,
 			numeroSifco: "0101",
 			accion: "menu_credito",
+		exito: true,
 		});
 		expect(insertadas).toHaveLength(0);
 		expect(llamadasCartera).toHaveLength(0);
-	});
-
-	it("un crédito sin caso de cobros no tiene a dónde navegar", async () => {
-		casoEncontrado = [];
-		await avisarAsesorPorInteraccionBot({
-			sesionId: SESION,
-			numeroSifco: "0101",
-			accion: "menu_credito",
-		});
-		expect(insertadas).toHaveLength(0);
 	});
 
 	it("un asesor sin usuario del CRM enlazado por correo no recibe nada", async () => {
@@ -134,8 +133,24 @@ describe("cuándo NO se avisa", () => {
 			sesionId: SESION,
 			numeroSifco: "0101",
 			accion: "menu_credito",
+		exito: true,
 		});
 		expect(insertadas).toHaveLength(0);
+	});
+
+	it("una petición que el bot RECHAZÓ no avisa ni quema la llave", async () => {
+		// El numeroSifco sale del body: una sesión válida con el crédito de otro
+		// cliente llega hasta acá y el endpoint la rechaza. Sin este filtro se
+		// avisaba al asesor ajeno y se consumía la dedup de la sesión, dejando
+		// al asesor correcto sin aviso (review de Codex, P2).
+		await avisarAsesorPorInteraccionBot({
+			sesionId: SESION,
+			numeroSifco: "0101",
+			accion: "menu_credito",
+			exito: false,
+		});
+		expect(insertadas).toHaveLength(0);
+		expect(llamadasCartera).toHaveLength(0);
 	});
 
 	it("un crédito sin asesor en cartera tampoco", async () => {
@@ -144,17 +159,37 @@ describe("cuándo NO se avisa", () => {
 			sesionId: SESION,
 			numeroSifco: "0101",
 			accion: "menu_credito",
+		exito: true,
 		});
 		expect(insertadas).toHaveLength(0);
 	});
 });
 
 describe("cuando sí se avisa", () => {
+	it("un crédito SIN caso de cobros igual avisa, pero sin enlace", async () => {
+		// sync-casos-cobros solo mantiene caso activo con diasMora > 0, así que
+		// exigirlo dejaba sin aviso justo a los buckets sanos — los que la
+		// decisión 16 nombra explícitamente (review de Codex, P1).
+		casoEncontrado = [];
+		await avisarAsesorPorInteraccionBot({
+			sesionId: SESION,
+			numeroSifco: "01010214119660",
+			accion: "menu_credito",
+			exito: true,
+		});
+		expect(insertadas).toHaveLength(1);
+		expect(insertadas[0].relatedEntityId).toBeUndefined();
+		expect(insertadas[0].redirectPage).toBeUndefined();
+		expect(insertadas[0].assignedTo).toBe("user-1");
+		expect(String(insertadas[0].descripcion)).toContain("01010214119660");
+	});
+
 	it("le escribe al asesor dueño, con la llave de la conversación", async () => {
 		await avisarAsesorPorInteraccionBot({
 			sesionId: SESION,
 			numeroSifco: "01010214119660",
 			accion: "estado_cuenta",
+		exito: true,
 		});
 		expect(insertadas).toHaveLength(1);
 		const fila = insertadas[0];
@@ -173,6 +208,7 @@ describe("cuando sí se avisa", () => {
 			sesionId: SESION,
 			numeroSifco: "0101",
 			accion: "menu_credito",
+		exito: true,
 		});
 		expect(llamadasCartera).toHaveLength(1);
 		expect(llamadasCartera[0].useCache).toBe(false);
@@ -183,6 +219,7 @@ describe("cuando sí se avisa", () => {
 			sesionId: SESION,
 			numeroSifco: "0101",
 			accion: "una_accion_nueva_del_bot",
+		exito: true,
 		});
 		expect(insertadas).toHaveLength(1);
 		expect(String(insertadas[0].descripcion)).toContain(

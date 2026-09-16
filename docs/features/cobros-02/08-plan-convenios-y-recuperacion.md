@@ -232,6 +232,15 @@ que no hay asesor a quién avisarle.
 - El texto dice **qué vino a hacer** (`pidió su estado de cuenta`, `subió una boleta`…),
   que es lo que le dice al asesor si puede esperar o no. Una acción futura del bot sin
   texto propio avisa igual, con uno genérico — misma filosofía que D-41.
+- **Solo peticiones que el bot respondió bien.** El `numero_sifco` sale del *body*, así
+  que una sesión válida con el crédito de OTRO cliente llega hasta acá; el endpoint la
+  rechaza con `CREDITO_NO_ES_DEL_CLIENTE` pero el historial se escribe igual. Sin ese
+  filtro se le avisaba al asesor del crédito ajeno **y** se quemaba la llave de dedup de
+  la sesión, dejando al asesor correcto sin aviso cuando el cliente por fin pedía el suyo.
+- **Sin caso de cobros también avisa**, pero sin enlace. `sync-casos-cobros` solo mantiene
+  un caso activo cuando `diasMora > 0`, así que exigirlo dejaba justo a los buckets sanos
+  sin aviso — los mismos que la decisión 16 nombra. Un cliente al día que escribe es de
+  los que más vale la pena atender rápido.
 
 ### Fase 2 · Congelar el convenio — invierte la regla vieja
 

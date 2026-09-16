@@ -33,7 +33,7 @@
  * costar una conversación.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
@@ -55,6 +55,18 @@ export interface AvisoBotParams {
 	numeroSifco: string | null;
 	/** La acción del historial (`menu_credito`, `estado_cuenta`, `boleta_leer`…). */
 	accion: string;
+	/**
+	 * ¿La petición del bot salió bien?
+	 *
+	 * Es una precondición, no un adorno (review de Codex, P2): el `numeroSifco`
+	 * viene del BODY de la petición, así que una sesión válida con el SIFCO de
+	 * OTRO cliente llega hasta acá. El endpoint lo rechaza con
+	 * `CREDITO_NO_ES_DEL_CLIENTE`, pero el historial igual se escribe — y sin
+	 * este filtro se le avisaba al asesor del crédito ajeno Y se quemaba la
+	 * llave de dedup de la sesión, dejando al asesor correcto sin aviso cuando
+	 * el cliente por fin pedía SU crédito.
+	 */
+	exito: boolean;
 }
 
 /**
@@ -79,6 +91,9 @@ export async function avisarAsesorPorInteraccionBot(
 		const { sesionId, numeroSifco } = params;
 		// Sin conversación no hay llave de dedup; sin SIFCO no hay asesor.
 		if (!sesionId || !numeroSifco) return;
+		// Solo las peticiones que el bot respondió BIEN: el SIFCO viene del body
+		// y una que falló pudo traer el crédito de otro cliente (ver `exito`).
+		if (!params.exito) return;
 
 		// Corte barato PRIMERO: si esta conversación ya avisó, se sale sin tocar
 		// cartera. Es el caso común —una conversación son varias peticiones— y
@@ -100,19 +115,22 @@ export async function avisarAsesorPorInteraccionBot(
 
 		if (!isCarteraBackEnabled()) return;
 
-		// El caso de cobros es a dónde navega la notificación y el ancla de
-		// `related_entity_id`. Sin caso no hay a dónde mandar al asesor.
+		// El caso de cobros es a dónde navega la notificación. Se toma el ACTIVO
+		// si lo hay y si no el más reciente — un caso cerrado sigue siendo la
+		// ficha correcta de ese crédito.
+		//
+		// Y si no hay ninguno, el aviso se manda IGUAL, sin enlace (review de
+		// Codex, P1): `sync-casos-cobros` solo mantiene caso activo cuando
+		// `diasMora > 0`, así que exigirlo dejaba justo a los buckets sanos sin
+		// aviso — los mismos que la decisión 16 nombra explícitamente ("al
+		// asesor dueño del crédito, esté donde esté"). Un cliente al día que
+		// escribe es de los que MÁS vale la pena atender rápido.
 		const [caso] = await db
 			.select({ id: casosCobros.id })
 			.from(casosCobros)
-			.where(
-				and(
-					eq(casosCobros.numeroCreditoSifco, numeroSifco),
-					eq(casosCobros.activo, true),
-				),
-			)
+			.where(eq(casosCobros.numeroCreditoSifco, numeroSifco))
+			.orderBy(desc(casosCobros.activo), desc(casosCobros.createdAt))
 			.limit(1);
-		if (!caso) return;
 
 		// Dueño REAL del crédito, sin cache: entre el bucket de ayer y hoy el
 		// motor pudo reasignarlo, y el aviso tiene que llegarle a quien lo lleva
@@ -139,6 +157,15 @@ export async function avisarAsesorPorInteraccionBot(
 			? `${cliente} (crédito ${numeroSifco})`
 			: `El crédito ${numeroSifco}`;
 		const queHizo = QUE_HIZO[params.accion] ?? "escribió al bot de cobros";
+		// Sin caso no hay a dónde navegar: el aviso se manda igual pero sin
+		// enlace, y el texto carga el SIFCO para que se pueda buscar a mano.
+		const anclaCaso = caso
+			? {
+					relatedEntityType: "collection_case" as const,
+					relatedEntityId: caso.id,
+					redirectPage: "cobros_detail" as const,
+				}
+			: {};
 
 		await db
 			.insert(notifications)
@@ -149,9 +176,7 @@ export async function avisarAsesorPorInteraccionBot(
 				status: "pending",
 				cobrosTipo: "bot_cliente_escribio",
 				cobrosDedupKey: llave,
-				relatedEntityType: "collection_case",
-				relatedEntityId: caso.id,
-				redirectPage: "cobros_detail",
+				...anclaCaso,
 				// La UI muestra el nombre de `createdBy` junto a `createdByRole`:
 				// acá los dos describen al mismo asesor, que es también el
 				// destinatario. No hay un humano distinto detrás — lo dispara el

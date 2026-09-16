@@ -426,6 +426,9 @@ export async function persistirInteraccion(
 		sesionId: otpId,
 		numeroSifco: interaccion.numeroSifco,
 		accion: interaccion.accion,
+		// El `exito` viaja porque el `numeroSifco` sale del body: una petición
+		// rechazada pudo traer el crédito de otro cliente (ver AvisoBotParams).
+		exito: interaccion.exito,
 	});
 }
 

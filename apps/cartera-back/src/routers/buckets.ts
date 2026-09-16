@@ -926,11 +926,14 @@ export const bucketsRouter = new Elysia()
     },
   )
 
-  // COBROS-02 · Motor de buckets de CONVENIO — trigger manual. El motor de mora
-  // excluye EN_CONVENIO, así que este job es el dueño de sus transiciones. La 1ª
-  // corrida auto-siembra la LÍNEA BASE (INICIAL) de todos los EN_CONVENIO (la
-  // "carga inicial" a buckets_historial); después mantiene SUBIDA/BAJADA. Corre
-  // solo a diario (schedule.ts), pero se expone para dispararlo a mano.
+  // COBROS-02 · Vigilante de buckets de CONVENIO — trigger manual.
+  //
+  // ⚠️ Desde la Fase 2 este job NO mueve buckets ni reasigna asesores: el
+  // convenio los CONGELA al firmarse (decisión 9 del plan 08). Lo que hace es
+  // la red de seguridad —congelar a los EN_CONVENIO que no tengan fila de su
+  // régimen— y medir el atraso del convenio para el log. El aviso de convenio
+  // incumplido lo manda el CRM. Corre a diario (schedule.ts); se expone para
+  // dispararlo a mano.
   .post("/buckets/convenio/procesar", async ({ set, user }: any) => {
     if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
     try {

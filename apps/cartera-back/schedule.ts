@@ -76,17 +76,17 @@ export function iniciarTareasProgramadas(
     }
   });
 
-  // 🤝 Buckets de CONVENIO - 00:30 hora Guatemala (después de procesarMoras 23:59).
-  //    El motor de mora EXCLUYE EN_CONVENIO; este job es el dueño de sus
-  //    transiciones de bucket (mide cuotas_credito atrasadas EXCLUYENDO las que el
-  //    convenio reestructuró). 1ª corrida auto-siembra INICIAL de todos los
-  //    EN_CONVENIO. No pisa a procesarMoras (otros créditos, otro advisory lock).
+  // 🧊 Vigilante de convenios - 00:30 hora Guatemala (después de procesarMoras 23:59).
+  //    El motor de mora EXCLUYE EN_CONVENIO. Desde la Fase 2 este job NO mueve
+  //    buckets: el convenio los congela al firmarse. Acá quedan la red de
+  //    seguridad (congelar a los que no tengan fila de su régimen) y la medición
+  //    del atraso para el log. No pisa a procesarMoras (otro advisory lock).
   if (activa('buckets_convenio')) schedule.scheduleJob({ rule: '30 0 * * *', tz: TZ_GUATEMALA }, async () => {
-    console.log('🤝 Ejecutando procesarBucketsConvenio a las 00:30 Guatemala...');
+    console.log('🧊 Ejecutando el vigilante de convenios a las 00:30 Guatemala...');
     try {
       const res = await procesarBucketsConvenio();
       console.log(
-        `✅ bucketsConvenio: creditos=${res.creditos}, iniciales=${res.iniciales}, subidas=${res.subidas}, bajadas=${res.bajadas}, reasignados=${res.reasignados}`,
+        `✅ bucketsConvenio: creditos=${res.creditos}, congelados=${res.congelados}, con atraso=${res.atrasados}`,
       );
     } catch (error) {
       console.error('❌ Error al ejecutar procesarBucketsConvenio:', error);

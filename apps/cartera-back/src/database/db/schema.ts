@@ -488,6 +488,12 @@
     "INICIAL", // línea base: primer registro del crédito (punto de partida)
     "SUBIDA",
     "BAJADA",
+    // COBROS-02 Fase 2: el crédito NO se movió, y eso es el dato — un convenio
+    // lo congeló en el bucket que tenía al firmarlo (decisión 9 del plan 08).
+    // Los otros tres eventos describen movimiento y el CHECK de coherencia los
+    // obliga a moverse; un INICIAL tampoco sirve (uq_inicial permite uno solo
+    // por crédito y estos ya lo tienen de cuando eran MOROSO).
+    "CONGELADO",
   ]);
 
   export const bucketEventoOrigenEnum = customSchema.enum(

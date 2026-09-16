@@ -24,6 +24,10 @@ import { getPagosDelMesActual } from "./payments";
 import { calcularProgresoConvenio } from "./paymentAgreement-helpers";
 import { creditRouter } from "../routers";
 import { ConvenioDecisionError, decidirConvenio, generarOperacionId } from "./convenioDecision";
+import {
+  bucketAntesDelConvenio,
+  congelarBucketPorConvenio,
+} from "./buckets/congelarBucketConvenio";
 
 interface CreatePaymentAgreementInput {
   credit_id: number;
@@ -391,7 +395,17 @@ export async function createPaymentAgreement(
     console.log("🔥 Estado actual:", creditExists.statusCredit);
     console.log("🔥 Estado nuevo: EN_CONVENIO");
     console.log("🔥 Convenio ID:", agreement.convenio_id);
-  // ============================================
+    // ============================================
+    // 🧊 BUCKET AL FIRMAR (COBROS-02 Fase 2)
+    // ============================================
+    // Se lee ANTES de borrar la mora y ANTES de cambiar el status: los dos
+    // pasos que siguen destruyen la información con la que se deriva el bucket.
+    // Con el crédito ya EN_CONVENIO y sin mora, `bucketActualSql` devuelve null
+    // y la derivación viva caería a B0 ("al día"), que es justo lo que la
+    // decisión 9 vino a corregir.
+    const bucketAlFirmar = await bucketAntesDelConvenio(credit_id);
+
+    // ============================================
     // 💸 ELIMINAR MORA ACTIVA (si existe)
     // ============================================
     console.log("✅ Paso 13: Eliminando mora activa del crédito (si existe)...");
@@ -431,6 +445,33 @@ export async function createPaymentAgreement(
     }
 
     console.log("🔥 ========== FIN ACTUALIZACIÓN DE ESTADO ==========");
+
+    // ============================================
+    // 🧊 CONGELAR EL BUCKET (COBROS-02 Fase 2)
+    // ============================================
+    // El crédito se queda en el bucket que tenía al firmar, con su asesor,
+    // hasta que pague completo o alguien deshaga el convenio (decisión 9 del
+    // plan 08). Va DESPUÉS del cambio de estado porque la fila se escribe con
+    // `status_credito = 'EN_CONVENIO'`: es la que el lector reconoce como del
+    // régimen de convenio.
+    //
+    // No lanza y no aborta la creación: el convenio ya existe y tiene plata de
+    // por medio. Si esto falla, el crédito queda sin bucket visible hasta la
+    // siguiente corrida del job de convenios, que lo arregla (red de seguridad).
+    if (bucketAlFirmar !== null) {
+      const congelado = await congelarBucketPorConvenio({
+        credito_id: credit_id,
+        bucket: bucketAlFirmar,
+        convenio_id: agreement.convenio_id,
+      });
+      if (congelado !== null) {
+        console.log(`🧊 Bucket congelado en B${congelado} por el convenio`);
+      }
+    } else {
+      console.warn(
+        "🧊 No se pudo determinar el bucket al firmar; lo resolverá el job de convenios",
+      );
+    }
 
     // ============================================
     // 🎉 RESPUESTA EXITOSA

@@ -2,6 +2,7 @@ import { Link, useSearch } from "@tanstack/react-router";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { logo } from "@/assets";
 import { authClient } from "@/lib/auth-client";
 import { rutaDeRetorno } from "@/lib/rutas";
 
@@ -52,9 +53,12 @@ export function LoginPage() {
 				className="w-full max-w-sm space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
 			>
 				<div>
-					<h1 className="font-bold text-2xl text-slate-900">
-						Seguimiento de Créditos
-					</h1>
+					<div className="flex items-center gap-3">
+						<img src={logo} alt="CCI" className="h-10 w-auto shrink-0" />
+						<h1 className="font-bold text-2xl text-slate-900">
+							Seguimiento de Créditos
+						</h1>
+					</div>
 					<p className="mt-1 text-slate-600 text-sm">
 						Consulta en qué etapa va cada crédito de los vehículos.
 					</p>

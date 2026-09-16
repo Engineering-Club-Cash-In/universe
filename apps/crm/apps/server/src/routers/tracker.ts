@@ -92,7 +92,9 @@ const filaSelect = {
 	closurePercentage: salesStages.closurePercentage,
 	agenciaNombre: companies.name,
 	leadFirstName: leads.firstName,
+	leadMiddleName: leads.middleName,
 	leadLastName: leads.lastName,
+	leadSecondLastName: leads.secondLastName,
 		vehicleMake: vehicles.make,
 		vehicleModel: vehicles.model,
 		vehicleYear: vehicles.year,
@@ -110,7 +112,9 @@ type Fila = {
 	closurePercentage: number;
 	agenciaNombre: string;
 	leadFirstName: string | null;
+	leadMiddleName: string | null;
 	leadLastName: string | null;
+	leadSecondLastName: string | null;
 	vehicleMake: string | null;
 	vehicleModel: string | null;
 	vehicleYear: number | null;
@@ -120,12 +124,16 @@ type Fila = {
 	vehicleValue: string | null;
 };
 
-function nombreCliente(firstName: string | null, lastName: string | null) {
-	const nombre = (firstName ?? "").trim();
-	const apellido = (lastName ?? "").trim();
-	if (!nombre && !apellido) return "Cliente sin nombre";
-	if (!apellido) return nombre;
-	return `${nombre} ${apellido.charAt(0).toUpperCase()}.`.trim();
+export function nombreCliente(
+	firstName: string | null,
+	middleName: string | null,
+	lastName: string | null,
+	secondLastName: string | null,
+) {
+	const partes = [firstName, middleName, lastName, secondLastName]
+		.map((parte) => (parte ?? "").trim())
+		.filter(Boolean);
+	return partes.length > 0 ? partes.join(" ") : "Cliente sin nombre";
 }
 
 function descripcionVehiculo(fila: Fila) {
@@ -207,7 +215,12 @@ function aCaso(fila: Fila, historial: EntradaHistorial[]): CasoTracker {
 	return {
 		id: fila.id,
 		referencia: fila.id.slice(0, 8).toUpperCase(),
-		cliente: nombreCliente(fila.leadFirstName, fila.leadLastName),
+		cliente: nombreCliente(
+			fila.leadFirstName,
+			fila.leadMiddleName,
+			fila.leadLastName,
+			fila.leadSecondLastName,
+		),
 		agencia: fila.agenciaNombre.trim(),
 		vehiculo: descripcionVehiculo(fila),
 		valorVehiculo:

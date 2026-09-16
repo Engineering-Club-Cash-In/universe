@@ -836,26 +836,48 @@ export const calcularAplicacionConvenio = ({
  * el monto a la PRIMERA fila que lo pide y "0" a todas las demás.
  */
 export const crearEstampadorPagoConvenio = (
-  montoConvenio: BigInput | null | undefined
+  montoConvenio: BigInput | null | undefined,
+  /**
+   * El convenio que recibió el monto (el que devolvió
+   * `processConvenioPaymentEnTx`). Viaja con el sello: ver `campos()`.
+   */
+  convenioId: number | null = null
 ) => {
   const monto = new Big(montoConvenio ?? 0);
   let estampado = false;
-  return Object.assign(
-    (): string => {
-      if (estampado || monto.lte(0)) return "0";
-      estampado = true;
-      return monto.toString();
+  const consumir = (): string => {
+    if (estampado || monto.lte(0)) return "0";
+    estampado = true;
+    return monto.toString();
+  };
+  return Object.assign(consumir, {
+    /**
+     * Peek NO consumidor: cuánto estamparía la próxima llamada. Lo usa el
+     * loop de cuotas para decidir si una cuota sin saldo puede saltarse
+     * (`debeInsertarFilaParcialCuota`) sin quemar el sello en la consulta.
+     */
+    pendiente: (): string =>
+      estampado || monto.lte(0) ? "0" : monto.toString(),
+    /**
+     * El sello COMPLETO de una fila: el monto Y el convenio que lo recibió,
+     * consumidos en el mismo acto. Es lo que deben usar las escrituras.
+     *
+     * Por qué existe (review de Codex, P1): `pago_convenio` decía cuánto pero
+     * no a cuál, y la reversa lo adivinaba. Ni "algún convenio del crédito"
+     * ni el pivot `convenios_pagos_resume` —que solo tiene las filas
+     * pre-sembradas al crear el convenio— identifican los pagos acreditados
+     * después. Sellarlo acá garantiza por construcción que la única fila que
+     * carga el monto es la única que carga el convenio: no hay dos llamadas
+     * que puedan quedar desparejas.
+     */
+    campos: (): { pagoConvenio: string; convenioId: number | null } => {
+      const pagoConvenio = consumir();
+      return {
+        pagoConvenio,
+        convenioId: new Big(pagoConvenio).gt(0) ? convenioId : null,
+      };
     },
-    {
-      /**
-       * Peek NO consumidor: cuánto estamparía la próxima llamada. Lo usa el
-       * loop de cuotas para decidir si una cuota sin saldo puede saltarse
-       * (`debeInsertarFilaParcialCuota`) sin quemar el sello en la consulta.
-       */
-      pendiente: (): string =>
-        estampado || monto.lte(0) ? "0" : monto.toString(),
-    }
-  );
+  });
 };
 
 /**

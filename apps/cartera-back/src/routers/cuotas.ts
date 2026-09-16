@@ -221,11 +221,19 @@ export const cuotasRouter = new Elysia()
           return { success: false, message: "[ERROR] asesor_id inválido (entero positivo)" };
         }
 
+        // numero_credito_sifco: filtra a UN crédito (la banda de la Ficha 360).
+        const numeroSifco =
+          query.numero_credito_sifco != null &&
+          String(query.numero_credito_sifco).trim() !== ""
+            ? String(query.numero_credito_sifco).trim()
+            : undefined;
+
         return await getConvenioAlertas({
           diasAtras,
           diasAdelante,
           diasAlerta,
           asesorId,
+          numeroSifco,
         });
       } catch (err) {
         set.status = 500;
@@ -242,6 +250,7 @@ export const cuotasRouter = new Elysia()
         dias_adelante: t.Optional(t.String()),
         dias_alerta: t.Optional(t.String()),
         asesor_id: t.Optional(t.String()),
+        numero_credito_sifco: t.Optional(t.String()),
       }),
     },
   )

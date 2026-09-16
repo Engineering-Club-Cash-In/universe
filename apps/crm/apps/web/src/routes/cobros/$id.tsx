@@ -27,6 +27,7 @@ import {
 	Upload,
 	User,
 	Users,
+	TriangleAlert,
 	X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -444,6 +445,11 @@ function RouteComponent() {
 	// Recuperación de vehículo: traslado manual a B4. Motivo obligatorio.
 	const [recuperacionAbierta, setRecuperacionAbierta] = useState(false);
 	const [motivoRecuperacion, setMotivoRecuperacion] = useState("");
+	// COBROS-02 Fase 3: deshacer el convenio, con o sin recuperación en el mismo
+	// gesto. El mismo modal sirve para las dos; lo que cambia es el interruptor.
+	const [deshacerAbierto, setDeshacerAbierto] = useState(false);
+	const [motivoDeshacer, setMotivoDeshacer] = useState("");
+	const [deshacerConRecuperacion, setDeshacerConRecuperacion] = useState(false);
 	// CB-032: el botón "Promesa / Convenio" abre UNO de dos modales distintos.
 	// Promesa = gestión del CRM (ContactoModal variante promesa); convenio =
 	// reestructura en cartera (ConvenioModal). Estados controlados para que un
@@ -740,6 +746,33 @@ function RouteComponent() {
 			casoDetails.data?.estadoMora === "incobrable",
 	});
 
+	// COBROS-02 Fase 3 — estado del convenio de ESTE crédito, para la banda roja.
+	// Se pregunta al server (que le pregunta a cartera) en vez de deducirlo del
+	// plan de cuotas que ya viene en la ficha: la cobertura de una cuota del
+	// convenio se mide por MONTO —los parciales acumulativos no marcan
+	// `fecha_pago`— y esa regla no debe vivir duplicada en el front.
+	const alertaConvenio = useQuery({
+		...orpc.getAlertaConvenioDelCaso.queryOptions({
+			input: { casoCobroId: casoDetails.data?.id || "" },
+		}),
+		enabled: !!session && !!casoDetails.data?.id,
+	});
+
+	// COBROS-02 Fase 3 — el convenio VIGENTE de este caso, resuelto por el
+	// servidor con el MISMO criterio que usa la mutación de deshacer.
+	//
+	// No alcanzaba con lo que ya tenía la ficha: `convenioActivo` es null cuando
+	// el calendario original del crédito ya no tiene cuotas futuras, y
+	// `statusCredit === 'EN_CONVENIO'` también es true para un convenio PENDIENTE
+	// de aprobación — que no se deshace, se rechaza. Con cualquiera de los dos, el
+	// botón aparecía cuando no debía o faltaba cuando sí (review de Codex).
+	const convenioVigente = useQuery({
+		...orpc.getConvenioVigenteDelCaso.queryOptions({
+			input: { casoCobroId: casoDetails.data?.id || "" },
+		}),
+		enabled: !!session && !!casoDetails.data?.id,
+	});
+
 	// Rol real del usuario: el modal de la oportunidad decide con el que se le
 	// pase (contratos, cotizaciones). Antes se le mandaba ROLES.COBROS fijo y
 	// hasta un admin veia la ficha recortada.
@@ -896,6 +929,63 @@ function RouteComponent() {
 			toast.error(
 				error.message || "No se pudo enviar el crédito a recuperación",
 			);
+		},
+	});
+
+	// COBROS-02 Fase 3 — deshacer el convenio (soft delete), con la opción de
+	// mandar el crédito a recuperación en el mismo gesto.
+	const deshacerConvenioMutation = useMutation({
+		mutationFn: () =>
+			client.deshacerConvenio({
+				// El convenio lo resuelve el servidor desde el caso: mandar el
+				// convenio_id desde acá dejaba deshacer convenios ajenos (es numérico
+				// y enumerable, mismo criterio que la recuperación).
+				casoCobroId: casoDetails.data?.id ?? "",
+				motivo: motivoDeshacer.trim(),
+				mandarARecuperacion: deshacerConRecuperacion,
+			}),
+		onSuccess: (r: any) => {
+			const base =
+				r.status_credito === "MOROSO"
+					? `Convenio deshecho. El crédito vuelve a MOROSO con ${r.cuotas_atrasadas} cuota(s) vencida(s) y su mora recalculada.`
+					: "Convenio deshecho. El crédito queda ACTIVO: no tiene cuotas vencidas.";
+			// El parcial se reporta como parcial. Son dos transacciones distintas
+			// en cartera y el convenio YA quedó deshecho: decir "falló" mandaría al
+			// asesor a reintentar algo que no se puede repetir.
+			if (r.recuperacionError) {
+				toast.warning(
+					`${base} No se pudo mandar a recuperación: ${r.recuperacionError}`,
+				);
+			} else if (r.recuperacion) {
+				toast.success(
+					`${base} Y se envió a B${r.recuperacion.bucket_nuevo} por recuperación de vehículo.`,
+				);
+			} else {
+				toast.success(base);
+			}
+			setDeshacerAbierto(false);
+			setMotivoDeshacer("");
+			setDeshacerConRecuperacion(false);
+			// Deshacer cambia status, mora, bucket y el convenio mismo: es todo lo
+			// que la ficha lee de cartera.
+			queryClient.invalidateQueries({
+				queryKey: orpc.getDetallesCreditoCarteraBack.key(),
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getBucketActualCredito.key(),
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getAlertaConvenioDelCaso.key(),
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getConvenioVigenteDelCaso.key(),
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getHistorialPagos.key(),
+			});
+		},
+		onError: (error: Error) => {
+			toast.error(error.message || "No se pudo deshacer el convenio");
 		},
 	});
 
@@ -1193,6 +1283,50 @@ function RouteComponent() {
 					? `Disponible a partir de B2. Este caso está en ${bucketPrefijo ?? "un bucket sin definir"}; registrá una promesa de pago.`
 					: null;
 	const convenioHabilitado = convenioMotivoBloqueo === null;
+
+	// ── COBROS-02 Fase 3 — resolución de la cuenta ──────────────────────────
+	// El convenio vigente es el que se puede DESHACER. Uno pendiente de
+	// aprobación no: eso se rechaza en la cola del supervisor, que es otra
+	// operación con otra bitácora (y el server lo rebota con ese mensaje).
+	// La acción se ofrece SOLO si el servidor confirma que hay un convenio
+	// vigente que deshacer. Nada de deducirlo de la ficha: un convenio pendiente
+	// de aprobación se rechaza, no se deshace, y ofrecerlo garantizaba un error
+	// al hacer clic.
+	const puedeDeshacerConvenio =
+		!!convenioVigente.data &&
+		PERMISSIONS.canAccessCobros(userProfile.data?.role ?? "");
+
+	// El alerta viva del convenio: la misma fuente que la pantalla de Alertas
+	// de Convenios y que el job de avisos. `vencida` = tiene cuota del convenio
+	// vencida e impaga.
+	const alertaConv = alertaConvenio.data as
+		| {
+				categoria: "vencida" | "vence_hoy" | "por_vencer" | "proxima";
+				cuotas_vencidas: number;
+				monto_vencido: string;
+				fecha_vencimiento: string;
+		  }
+		| null
+		| undefined;
+	const convenioIncumplido = alertaConv?.categoria === "vencida";
+
+	// Mandar a recuperación: la decisión es "ya no se recupera por teléfono".
+	// Se habilita de B1 a B3 (decisión del plan 08): en B0 no hay nada que
+	// recuperar todavía, y en B4/B5 el crédito ya está donde la recuperación lo
+	// pondría. El botón NO se esconde — el asesor tiene que saber que existe y
+	// por qué hoy no aplica, mismo criterio que el convenio.
+	const recuperacionMotivoBloqueo: string | null = !puedeRecuperarVehiculo
+		? "Solo el equipo de cobros puede mandar una cuenta a recuperación."
+		: !caso.id || !caso.numeroCreditoSifco
+			? "Este caso todavía no tiene crédito de cartera asociado."
+			: bucketActual.isPending
+				? "Cargando el bucket del crédito…"
+				: bucketNumero === null
+					? "El crédito no tiene bucket: no se puede registrar el traslado."
+					: bucketNumero < 1 || bucketNumero > 3
+						? `Disponible de B1 a B3. Este caso está en ${bucketPrefijo ?? "un bucket sin definir"}.`
+						: null;
+	const recuperacionHabilitada = recuperacionMotivoBloqueo === null;
 	// El cliente ORPC infiere `{}` para esta query (mismo caso que CasoDetalle).
 	const maxMesesConvenio =
 		(convenioConfig.data as { maxMeses?: number } | undefined)?.maxMeses ?? 6;
@@ -1264,6 +1398,41 @@ function RouteComponent() {
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
+			{/* ── COBROS-02 Fase 3 · Banda de alerta ──────────────────────────
+			    Lo primero que se ve al abrir la ficha, arriba de la identidad:
+			    si el cliente rompió el acuerdo que ya había negociado, eso
+			    cambia toda la conversación que el asesor está por tener. Antes
+			    ese dato solo existía en un job nocturno y en otra pantalla. */}
+			{convenioIncumplido && alertaConv && (
+				<div className="flex items-start gap-3 rounded-lg border border-red-300 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/50">
+					<TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
+					<div className="min-w-0 space-y-1">
+						<p className="font-semibold text-red-900 text-sm dark:text-red-200">
+							Convenio incumplido
+						</p>
+						<p className="text-red-800 text-sm dark:text-red-300">
+							{alertaConv.cuotas_vencidas > 1
+								? `${alertaConv.cuotas_vencidas} cuotas del convenio están vencidas e impagas`
+								: "Una cuota del convenio está vencida e impaga"}
+							{" — debe "}
+							<strong>
+								Q
+								{Number(alertaConv.monto_vencido).toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
+							</strong>
+							{" desde el "}
+							{(() => {
+								const [y, m, d] = alertaConv.fecha_vencimiento.split("-");
+								return y && m && d ? `${d}/${m}/${y}` : alertaConv.fecha_vencimiento;
+							})()}
+							. El cliente ya había negociado este acuerdo.
+						</p>
+					</div>
+				</div>
+			)}
+
 			{/* ── Identidad del caso ─────────────────────────────────────────
 			    Header fijo: quién es, qué crédito, en qué estado está y las
 			    acciones de gestión. Antes esto era "Detalles del Caso" + un
@@ -1513,7 +1682,79 @@ function RouteComponent() {
 										}}
 									/>
 
-									{/* 3 · Lo demás — y lo que se venga a futuro — cabe acá
+									{/* 3 · COBROS-02 Fase 3 — RESOLUCIÓN de la cuenta: las
+									    decisiones que sacan al crédito del ciclo normal de
+									    cobro. Van visibles y en rojo, no escondidas en un
+									    dropdown de gestiones. */}
+									{puedeDeshacerConvenio && (
+										<DropdownMenu>
+											<DropdownMenuTrigger asChild>
+												<Button
+													variant="outline"
+													className="flex items-center gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:hover:bg-red-950"
+												>
+													<Handshake className="h-4 w-4" />
+													Deshacer convenio
+													<ChevronDown className="h-3.5 w-3.5 opacity-60" />
+												</Button>
+											</DropdownMenuTrigger>
+											<DropdownMenuContent align="end" className="w-80">
+												<DropdownMenuItem
+													className="cursor-pointer items-start gap-2 py-2"
+													onClick={() => {
+														setDeshacerConRecuperacion(false);
+														setDeshacerAbierto(true);
+													}}
+												>
+													<Handshake className="mt-0.5 h-4 w-4 text-red-600" />
+													<div>
+														<p className="font-medium">Deshacer convenio</p>
+														<p className="text-muted-foreground text-xs">
+															El crédito vuelve a MOROSO con su mora
+															recalculada. El acuerdo y sus pagos quedan
+															guardados.
+														</p>
+													</div>
+												</DropdownMenuItem>
+												<DropdownMenuItem
+													className="cursor-pointer items-start gap-2 py-2"
+													onClick={() => {
+														setDeshacerConRecuperacion(true);
+														setDeshacerAbierto(true);
+													}}
+												>
+													<Car className="mt-0.5 h-4 w-4 text-red-600" />
+													<div>
+														<p className="font-medium">
+															Deshacer y mandar a recuperación
+														</p>
+														<p className="text-muted-foreground text-xs">
+															Lo mismo, y además pasa a B4 · Última Instancia /
+															Pre Jurídico.
+														</p>
+													</div>
+												</DropdownMenuItem>
+											</DropdownMenuContent>
+										</DropdownMenu>
+									)}
+
+									{/* Mandar a recuperación, sin convenio de por medio. No se
+									    esconde cuando no aplica: se deshabilita y el título dice
+									    por qué (mismo criterio que el convenio). */}
+									{puedeRecuperarVehiculo && !puedeDeshacerConvenio && (
+										<Button
+											variant="outline"
+											className="flex items-center gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 dark:border-red-900 dark:hover:bg-red-950"
+											disabled={!recuperacionHabilitada}
+											title={recuperacionMotivoBloqueo ?? undefined}
+											onClick={() => setRecuperacionAbierta(true)}
+										>
+											<Car className="h-4 w-4" />
+											Recuperación de vehículo
+										</Button>
+									)}
+
+									{/* 4 · Lo demás — y lo que se venga a futuro — cabe acá
 									    sin estirar la fila. */}
 									<DropdownMenu>
 										<DropdownMenuTrigger asChild>
@@ -1548,26 +1789,16 @@ function RouteComponent() {
 													: "Enviar Estado de Cuenta"}
 											</DropdownMenuItem>
 
-											{/* Recuperación de vehículo: no es una gestión más, es
-											    sacar la unidad. Va separada y en rojo para que no se
-											    apriete de pasada. */}
-											{puedeRecuperarVehiculo && (
-												<>
-													<DropdownMenuSeparator />
-													<DropdownMenuItem
-														className="cursor-pointer text-red-600 focus:bg-red-50 focus:text-red-700 dark:focus:bg-red-950"
-														disabled={!caso.id || !caso.numeroCreditoSifco}
-														onClick={() => setRecuperacionAbierta(true)}
-													>
-														<Car className="mr-2 h-4 w-4" />
-														Recuperación de vehículo
-													</DropdownMenuItem>
-												</>
-											)}
+											{/* COBROS-02 Fase 3: "Recuperación de vehículo" ya NO
+											    vive acá. Estaba escondida en un dropdown de gestiones
+											    —cartas, estados de cuenta— cuando es la decisión más
+											    grave que se toma en esta pantalla. Ahora tiene su
+											    lugar fijo en la fila de acciones, junto a deshacer el
+											    convenio. */}
 										</DropdownMenuContent>
 									</DropdownMenu>
 
-									{/* 4 · LA acción principal de la ficha. Cobrar tiene dos
+									{/* 5 · LA acción principal de la ficha. Cobrar tiene dos
 									    vías y las dos son "registrar un pago": mandarle links
 									    de Págalo al cliente, o subir la boleta de un depósito
 									    que ya hizo. Antes los links eran un botón aparte, como
@@ -1722,6 +1953,86 @@ function RouteComponent() {
 												{recuperacionMutation.isPending
 													? "Enviando…"
 													: "Enviar a recuperación"}
+											</AlertDialogAction>
+										</AlertDialogFooter>
+									</AlertDialogContent>
+								</AlertDialog>
+
+								{/* COBROS-02 Fase 3 — deshacer el convenio. Un solo modal
+								    para las dos variantes: lo que cambia es si además manda el
+								    crédito a recuperación. */}
+								<AlertDialog
+									open={deshacerAbierto}
+									onOpenChange={(abierto) => {
+										setDeshacerAbierto(abierto);
+										if (!abierto) {
+											setMotivoDeshacer("");
+											setDeshacerConRecuperacion(false);
+										}
+									}}
+								>
+									<AlertDialogContent>
+										<AlertDialogHeader>
+											<AlertDialogTitle>
+												{deshacerConRecuperacion
+													? "¿Deshacer el convenio y mandar a recuperación?"
+													: "¿Deshacer el convenio de pago?"}
+											</AlertDialogTitle>
+											<AlertDialogDescription asChild>
+												<div className="space-y-3">
+													<p>
+														El acuerdo deja de estar vigente y el crédito
+														vuelve a <strong>MOROSO</strong>, con la mora
+														recalculada sobre las cuotas que realmente debe.
+													</p>
+													<p>
+														El convenio <strong>no se borra</strong>: su plan de
+														cuotas y los pagos que recibió quedan guardados para
+														auditoría.
+													</p>
+													{deshacerConRecuperacion && (
+														<p className="rounded-md border border-red-200 bg-red-50 p-3 text-red-900 text-xs dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+															Además pasa a{" "}
+															<strong>
+																B4 · Última Instancia / Pre Jurídico
+															</strong>{" "}
+															y queda con el asesor que cubre ese bucket.
+														</p>
+													)}
+												</div>
+											</AlertDialogDescription>
+										</AlertDialogHeader>
+										<div className="space-y-2">
+											<Label htmlFor="motivo-deshacer">
+												Motivo <span className="text-red-600">*</span>
+											</Label>
+											<Textarea
+												id="motivo-deshacer"
+												value={motivoDeshacer}
+												onChange={(e) => setMotivoDeshacer(e.target.value)}
+												placeholder="Por qué se deshace el acuerdo (mínimo 5 caracteres)"
+												rows={3}
+											/>
+										</div>
+										<AlertDialogFooter>
+											<AlertDialogCancel>Cancelar</AlertDialogCancel>
+											<AlertDialogAction
+												disabled={
+													motivoDeshacer.trim().length < 5 ||
+													deshacerConvenioMutation.isPending
+												}
+												onClick={(e) => {
+													// Se cierra al confirmar el éxito, para no perder el
+													// motivo escrito si la operación falla.
+													e.preventDefault();
+													deshacerConvenioMutation.mutate();
+												}}
+											>
+												{deshacerConvenioMutation.isPending
+													? "Deshaciendo…"
+													: deshacerConRecuperacion
+														? "Deshacer y mandar a recuperación"
+														: "Deshacer convenio"}
 											</AlertDialogAction>
 										</AlertDialogFooter>
 									</AlertDialogContent>

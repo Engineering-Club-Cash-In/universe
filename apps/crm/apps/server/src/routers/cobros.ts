@@ -693,6 +693,16 @@ async function promesaActivaDelCaso(casoCobroId: string) {
  */
 const TIMEOUT_BUCKET_SNAPSHOT_MS = 3000;
 
+/**
+ * Rango de origen de la recuperación de vehículo: B1 a B3 (plan 08). La MISMA
+ * regla vive en tres lugares y tienen que coincidir:
+ *  · la ficha (`routes/cobros/$id.tsx`), que deshabilita el botón suelto;
+ *  · este router, que la exige antes de "deshacer y mandar";
+ *  · cartera (`BUCKET_MINIMO/MAXIMO_RECUPERACION`), que manda bajo sus locks.
+ */
+const BUCKET_MINIMO_RECUPERACION = 1;
+const BUCKET_MAXIMO_RECUPERACION = 3;
+
 async function capturarBucketSnapshot(
 	casoCobroId: string,
 ): Promise<number | null> {
@@ -794,6 +804,44 @@ export async function assertAccesoCasoCobro(
 			message: "Caso de cobro no encontrado o sin acceso.",
 		});
 	}
+}
+
+/**
+ * Convenio VIGENTE (aprobado y sin completar) del crédito de un caso, o null.
+ *
+ * "Vigente" = `activo = true AND completado = false`. Un convenio esperando
+ * aprobación NO lo es: eso se rechaza desde la cola del supervisor, no se
+ * deshace, y ofrecerlo desde la ficha solo produce un error al hacer clic.
+ *
+ * Resuelve el crédito por `carteraBackReferences` y consulta cartera por
+ * `credito_id` exacto — nunca por SIFCO, que del otro lado se compara con
+ * `ILIKE '%valor%'`.
+ */
+async function resolverConvenioVigenteDelCaso(casoCobroId: string) {
+	const [caso] = await db
+		.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+		.from(casosCobros)
+		.where(eq(casosCobros.id, casoCobroId))
+		.limit(1);
+	if (!caso?.numeroCreditoSifco) return null;
+
+	const [referencia] = await db
+		.select({ carteraCreditoId: carteraBackReferences.carteraCreditoId })
+		.from(carteraBackReferences)
+		.where(
+			eq(carteraBackReferences.numeroCreditoSifco, caso.numeroCreditoSifco),
+		)
+		.limit(1);
+	if (!referencia?.carteraCreditoId) return null;
+
+	const convenios = await carteraBackClient.getConveniosPorCredito(
+		referencia.carteraCreditoId,
+		"active",
+	);
+	// `status=active` ya filtra activo=true AND completado=false del lado de
+	// cartera; se re-verifica acá para no depender de un contrato ajeno en una
+	// decisión que borra datos.
+	return convenios.find((c) => c.activo && !c.completado) ?? null;
 }
 
 export const cobrosRouter = {
@@ -8688,6 +8736,238 @@ export const cobrosRouter = {
 							? err.message
 							: "No se pudo enviar el crédito a recuperación de vehículo",
 				});
+			}
+		}),
+
+	/**
+	 * COBROS-02 Fase 3 — el estado del convenio de ESTE caso, para la banda roja
+	 * de la Ficha 360.
+	 *
+	 * Se pregunta a cartera en vez de deducirlo del plan de cuotas que ya viene
+	 * en la ficha: la cobertura de una cuota del convenio se mide por MONTO
+	 * (los parciales acumulativos no marcan `fecha_pago`) y la re-indexación de
+	 * las cuotas posteriores al acuerdo no es algo que deba vivir duplicado en
+	 * el front. Es la misma fuente que la pantalla de Alertas de Convenios y que
+	 * el job de avisos: una sola definición de "incumplido".
+	 */
+	getAlertaConvenioDelCaso: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			if (!isCarteraBackEnabled()) return null;
+			const [caso] = await db
+				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+			if (!caso?.numeroCreditoSifco) return null;
+			// `diasAtras` amplio a propósito (review de Codex, P2): el default de
+			// 365 es una cota de VOLUMEN para el listado, pero acá la consulta ya
+			// está acotada a un solo crédito. Con el default, un convenio cuya
+			// cuota impaga más vieja pasaba del año dejaba de responder y la banda
+			// roja desaparecía justo del caso más grave.
+			const respuesta = await carteraBackClient.getConvenioAlertas({
+				numeroSifco: caso.numeroCreditoSifco,
+				diasAtras: 3650,
+			});
+			return respuesta.data?.[0] ?? null;
+		}),
+
+	/**
+	 * COBROS-02 Fase 3 — el convenio VIGENTE de un caso, o null.
+	 *
+	 * Una sola definición de "vigente" para las dos cosas que la necesitan: la
+	 * mutación que deshace y el botón que la ofrece. Tenerla en dos lugares fue
+	 * justo el problema — la UI se guiaba por `convenioActivo` (que `getCredito`
+	 * pone en null cuando el calendario original ya no tiene cuotas futuras) y
+	 * por `statusCredit === 'EN_CONVENIO'` (que también es true para un convenio
+	 * PENDIENTE de aprobación, que no se deshace: se rechaza).
+	 *
+	 * La búsqueda es por `credito_id` EXACTO y sin paginar. NO por SIFCO: el
+	 * listado filtra con `ILIKE '%valor%'`, así que un SIFCO que es subcadena de
+	 * otro puede traer el convenio de otro crédito o empujar al correcto fuera
+	 * de la página (review de Codex, P1 y P2).
+	 */
+	getConvenioVigenteDelCaso: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			if (!isCarteraBackEnabled()) return null;
+			const convenio = await resolverConvenioVigenteDelCaso(input.casoCobroId);
+			if (!convenio) return null;
+			return {
+				convenioId: convenio.convenio_id,
+				creditoId: convenio.credito_id,
+				cuotaMensual: convenio.cuota_mensual,
+				montoPendiente: convenio.monto_pendiente ?? null,
+				fechaConvenio: convenio.fecha_convenio ?? null,
+			};
+		}),
+
+	/**
+	 * COBROS-02 Fase 3 — DESHACER el convenio de un crédito (soft delete), con
+	 * la opción de mandarlo en el mismo gesto a recuperación de vehículo.
+	 *
+	 * Autorización: exactamente la misma cadena que `enviarCreditoARecuperacion`,
+	 * y por las mismas razones (el caso se puede fabricar, cartera es la verdad
+	 * de quién es el crédito, y se lee SIN cache). No se repite acá el
+	 * razonamiento: está escrito entero allá arriba.
+	 *
+	 * El `convenio_id` NO se recibe del cliente. Es numérico y enumerable, y
+	 * `cobrosProcedure` solo valida el rol: se resuelve leyendo el convenio
+	 * ACTIVO del crédito en cartera, que además es la única definición correcta
+	 * de "el convenio de este crédito".
+	 */
+	deshacerConvenio: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				motivo: z
+					.string()
+					.trim()
+					.min(5, "El motivo debe tener al menos 5 caracteres"),
+				/** Encadena la recuperación de vehículo después de deshacer. */
+				mandarARecuperacion: z.boolean().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const [caso] = await db
+				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+			if (!caso?.numeroCreditoSifco) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El caso no tiene crédito de cartera asociado.",
+				});
+			}
+			await assertCreditoAsignadoEnCarteraPorSifco({
+				numeroSifco: caso.numeroCreditoSifco,
+				emailUsuario: context.session.user.email,
+				userRole: context.userRole,
+				accion: "deshacer su convenio de pago",
+			});
+
+			// El MISMO resolver que alimenta el botón de la ficha: una sola
+			// definición de "vigente", buscada por `credito_id` exacto y sin
+			// paginar (ver `resolverConvenioVigenteDelCaso`).
+			const convenio = await resolverConvenioVigenteDelCaso(input.casoCobroId);
+			if (!convenio) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este crédito no tiene un convenio vigente que deshacer. Si el convenio está esperando aprobación, lo que corresponde es rechazarlo.",
+				});
+			}
+
+			const dueñoEsperado = PERMISSIONS.canViewAllCasosCobros(
+				context.userRole ?? "",
+			)
+				? undefined
+				: context.session.user.email;
+
+			// "Deshacer y mandar a recuperación": el rango B1–B3 se verifica ANTES
+			// de deshacer (review de Codex, P2). La regla vivía solo en el botón
+			// suelto de la ficha, y este flujo no pasa por él:
+			//  · en B4, el convenio quedaba deshecho y la recuperación rechazaba
+			//    después ("ya está en B4") — la mitad de lo que el asesor pidió;
+			//  · en B5, la recuperación registraba una BAJADA a B4 y le restaba
+			//    gravedad a la cuenta.
+			//
+			// El bucket que se lee es el congelado del convenio, y es el correcto:
+			// deshacer no escribe historial de bucket, así que es el mismo que la
+			// recuperación va a leer un instante después.
+			//
+			// Este chequeo es de conveniencia —evita el parcial en el caso normal—
+			// y cartera lo vuelve a hacer bajo sus locks, que es el que manda. Si
+			// no se puede leer el bucket, no se arriesga: el asesor todavía puede
+			// deshacer solo.
+			if (input.mandarARecuperacion) {
+				const actual = await carteraBackClient
+					.getBucketActualCredito(caso.numeroCreditoSifco)
+					.catch(() => null);
+				const bucket = actual?.bucket ?? null;
+				if (bucket === null) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"No se pudo confirmar el bucket del crédito, así que no se deshizo nada. Podés deshacer el convenio solo, o intentar de nuevo en un momento.",
+					});
+				}
+				if (
+					bucket < BUCKET_MINIMO_RECUPERACION ||
+					bucket > BUCKET_MAXIMO_RECUPERACION
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `La recuperación de vehículo aplica de B${BUCKET_MINIMO_RECUPERACION} a B${BUCKET_MAXIMO_RECUPERACION} y este crédito está en B${bucket}. No se deshizo nada: si corresponde, deshacé el convenio solo.`,
+					});
+				}
+			}
+
+			let resultado: Awaited<ReturnType<typeof carteraBackClient.anularConvenio>>;
+			try {
+				resultado = await carteraBackClient.anularConvenio(convenio.convenio_id, {
+					motivo: input.motivo,
+					solicitado_por_email: context.session.user.email,
+					// Autorizar y escribir son dos requests distintas: entre una y
+					// otra el motor o un supervisor pueden reasignar el crédito, y
+					// sin precondición el asesor que acaba de perderlo deshacía
+					// igual el convenio (review de Codex, P1). Cartera lo revalida
+					// bajo su transacción. Para quien ve toda la cartera no hay
+					// dueño que exigir.
+					asesor_esperado_email: dueñoEsperado,
+				});
+			} catch (err) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						err instanceof Error
+							? err.message
+							: "No se pudo deshacer el convenio",
+				});
+			}
+
+			if (!input.mandarARecuperacion) {
+				return { ...resultado, recuperacion: null };
+			}
+
+			// La recuperación va DESPUÉS y por separado a propósito: son dos
+			// operaciones en dos transacciones distintas de cartera y no hay forma
+			// de unirlas desde acá. Si esta falla, el convenio YA quedó deshecho —
+			// se reporta el parcial en vez de mentir con un error total, porque
+			// reintentar "deshacer y mandar" fallaría en el primer paso (el
+			// convenio ya no está vigente) y el asesor no entendería por qué.
+			//
+			// El rango de origen ya se verificó arriba, antes de deshacer. Cartera
+			// lo revalida bajo sus locks: si entre medio el crédito cambió de
+			// bucket, esto falla y se reporta el parcial como siempre.
+			try {
+				const recuperacion = await carteraBackClient.enviarARecuperacionVehiculo({
+					credito_id: resultado.credito_id,
+					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo}`,
+					usuario_email: context.session.user.email,
+					asesor_esperado_email: dueñoEsperado,
+				});
+				return { ...resultado, recuperacion };
+			} catch (err) {
+				return {
+					...resultado,
+					recuperacion: null,
+					recuperacionError:
+						err instanceof Error
+							? err.message
+							: "No se pudo enviar el crédito a recuperación",
+				};
 			}
 		}),
 

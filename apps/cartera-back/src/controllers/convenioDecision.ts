@@ -31,7 +31,7 @@
 // (y solo acá) ese resultado se convierte en excepción.
 
 import { randomUUID, createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import {
@@ -260,13 +260,17 @@ export async function decidirConvenio(
           eq(convenios_pago.convenio_id, input.convenioId),
           eq(convenios_pago.activo, false),
           eq(convenios_pago.completado, false),
+          // COBROS-02 Fase 3: un convenio DESHECHO queda con activo=false y
+          // completado=false — la misma firma que "pendiente de aprobación".
+          // Sin esto, aprobarlo lo resucitaría.
+          isNull(convenios_pago.anulado_at),
         ),
       )
       .returning();
 
     if (!convenioActualizado) {
       throw new ConvenioDecisionError(
-        "El convenio ya fue decidido por otro supervisor, o ya está completado y no puede reabrirse.",
+        "El convenio ya fue decidido por otro supervisor, ya está completado, o se deshizo: no puede reabrirse.",
         409,
         "convenio_no_pendiente",
       );

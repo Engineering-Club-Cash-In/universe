@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { eq, and, not, desc, inArray, isNotNull, sql } from "drizzle-orm";
+import { eq, and, not, desc, inArray, isNotNull, sql, isNull } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import { setCapitalSource } from "../utils/withAuditContext";
@@ -12,6 +12,7 @@ import {
   boletas,
   pagos_credito_inversionistas,
   convenios_pago,
+  convenios_pagos_resume,
   convenio_cuotas,
   facturas_electronicas,
 } from "../database/db";
@@ -23,6 +24,7 @@ import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { refrescarProyeccionTrasReversa } from "./reversePaymentRecalculo";
+import { convenioQueRecibioElPago } from "./convenioDelPago";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
   isReversibleIncobrablePayment,
@@ -246,6 +248,11 @@ export const reversePayment = async ({ body, set }: any) => {
         const reverseConvenioResult = await reverseConvenioPayment({
           credito_id,
           monto_pago: Number(pago.pagoConvenio),
+          // El pago identifica a SU convenio: el sello de la fila, leído acá
+          // arriba ANTES de que la reversa la limpie. Sin esto se le
+          // descontaba a "alguno" del crédito.
+          pago_id,
+          convenio_id: pago.convenioId,
         });
         console.log(
           `✅ Pago de convenio reversado: ${reverseConvenioResult.message}`,
@@ -372,6 +379,7 @@ export const reversePayment = async ({ body, set }: any) => {
             mora: "0",
             otros: "0",
             pagoConvenio: "0",
+            convenioId: null,
 
             // Limpiar metadata
             fecha_pago: null,
@@ -450,6 +458,7 @@ export const reversePayment = async ({ body, set }: any) => {
               mora: "0",
               otros: "0",
               pagoConvenio: "0",
+              convenioId: null,
               fecha_pago: null,
               mes_pagado: "",
               pagado: false,
@@ -833,6 +842,17 @@ export const reversePayment = async ({ body, set }: any) => {
 interface ReverseConvenioPaymentParams {
   credito_id: number;
   monto_pago: number;
+  /**
+   * El pago que se está revirtiendo. Es lo que permite encontrar el convenio
+   * AL QUE SE LE APLICÓ, en vez de "alguno de este crédito".
+   */
+  pago_id: number;
+  /**
+   * El convenio SELLADO en la fila del pago (`pagos_credito.convenio_id`), leído
+   * antes de que la reversa la limpie. Es la respuesta exacta; `pago_id` queda
+   * para los pagos anteriores al sello.
+   */
+  convenio_id?: number | null;
 }
 
 interface ReverseConvenioPaymentResult {
@@ -856,18 +876,20 @@ export async function reverseConvenioPayment(
   params: ReverseConvenioPaymentParams,
 ): Promise<ReverseConvenioPaymentResult> {
   try {
-    const { credito_id, monto_pago } = params;
+    const { credito_id, monto_pago, pago_id } = params;
 
     console.log("\n🔄 ========== REVIRTIENDO PAGO DE CONVENIO ==========");
     console.log("🏦 Crédito ID:", credito_id);
     console.log("💵 Monto a revertir:", monto_pago);
 
-    // 1. Buscar el convenio del crédito (puede estar completado o activo)
-    const [convenio] = await db
-      .select()
-      .from(convenios_pago)
-      .where(eq(convenios_pago.credito_id, credito_id))
-      .limit(1);
+    // 1. El convenio AL QUE SE LE APLICÓ ESTE PAGO — no "alguno del crédito".
+    //    Ver `convenioQueRecibioElPago` para el orden de criterios y por qué
+    //    un convenio anulado SÍ se elige.
+    const convenio = await convenioQueRecibioElPago({
+      credito_id,
+      pago_id,
+      convenio_id: params.convenio_id,
+    });
 
     if (!convenio) {
       throw new Error(
@@ -935,7 +957,13 @@ export async function reverseConvenioPayment(
 
     console.log("🔓 Convenio reactivado:", convenioActivo);
 
-    // 7. Actualizar el convenio
+    // 7. Actualizar el convenio.
+    //
+    // Los totales se descuentan SIEMPRE —el pago existió y hay que deshacerlo—
+    // pero un convenio anulado NO vuelve a `activo`: deshacerlo fue una
+    // decisión humana y una reversa contable no la revierte. Sin esto, revertir
+    // un pago resucitaba el convenio con su metadata de anulación puesta.
+    const sigueAnulado = convenio.anulado_at != null;
     const [convenioActualizado] = await db
       .update(convenios_pago)
       .set({
@@ -943,12 +971,18 @@ export async function reverseConvenioPayment(
         monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
         pagos_realizados: nuevosPagosRealizados,
         pagos_pendientes: nuevosPagosPendientes,
-        completado: convenioCompletado,
-        activo: convenioActivo,
+        completado: sigueAnulado ? convenio.completado : convenioCompletado,
+        activo: sigueAnulado ? false : convenioActivo,
         updated_at: new Date(),
       })
       .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
       .returning();
+
+    if (!convenioActualizado) {
+      throw new Error(
+        `No se pudo actualizar el convenio ${convenio.convenio_id} al revertir el pago.`,
+      );
+    }
 
     // 7.5 Desmarcar las cuotas del convenio que el dinero reversado ya no
     // cubre: el marcado por acumulado (processConvenioPayment) escribe
@@ -994,7 +1028,11 @@ export async function reverseConvenioPayment(
     // (paso 9.b): regresar el crédito a EN_CONVENIO y volver a marcar IMPAGAS las
     // cuotas reestructuradas (cuotas_convenio). Sin esto el crédito se queda ACTIVO
     // con un convenio vivo → sale de los jobs de convenio y entra a mora normal.
-    if (convenio.completado === true && convenioActivo === true) {
+    if (
+      !sigueAnulado &&
+      convenio.completado === true &&
+      convenioActivo === true
+    ) {
       const cuotasReestructuradas = convenio.cuotas_convenio ?? [];
       if (cuotasReestructuradas.length > 0) {
         await db

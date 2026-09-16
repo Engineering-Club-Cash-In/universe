@@ -1986,6 +1986,7 @@ export class CarteraBackClient {
 			diasAdelante?: number;
 			diasAlerta?: number;
 			asesorId?: number;
+			numeroSifco?: string;
 		} = {},
 	): Promise<CarteraConvenioAlertasResponse> {
 		const qs = new URLSearchParams();
@@ -1994,6 +1995,7 @@ export class CarteraBackClient {
 			qs.set("dias_adelante", String(opts.diasAdelante));
 		if (opts.diasAlerta != null) qs.set("dias_alerta", String(opts.diasAlerta));
 		if (opts.asesorId != null) qs.set("asesor_id", String(opts.asesorId));
+		if (opts.numeroSifco) qs.set("numero_credito_sifco", opts.numeroSifco);
 		const suffix = qs.toString() ? `?${qs}` : "";
 		return this.request<CarteraConvenioAlertasResponse>(
 			`/convenio/alertas${suffix}`,
@@ -2218,6 +2220,91 @@ export class CarteraBackClient {
 			);
 		}
 		return response as CarteraDecidirConvenioResultado;
+	}
+
+	/**
+	 * COBROS-02 Fase 3 — convenios de UN crédito, por `credito_id` EXACTO.
+	 *
+	 * No es `getConveniosListado` (review de Codex, P2): aquel filtra el SIFCO
+	 * con `ILIKE '%valor%'`, ordena por fecha y recién después pagina, así que
+	 * un SIFCO que es subcadena de otro puede empujar al convenio buscado fuera
+	 * de la primera página — y la acción reportaría que no hay convenio cuando
+	 * sí lo hay. Acá el filtro es `credito_id = N` y no hay paginación.
+	 *
+	 * Sin cache: se usa para decidir si se puede deshacer un convenio y para
+	 * deshacerlo; una foto vieja decide mal.
+	 */
+	async getConveniosPorCredito(
+		creditoId: number,
+		status: "active" | "completed" | "inactive" | "all" = "all",
+	): Promise<CarteraConvenio[]> {
+		const qs = new URLSearchParams({
+			credit_id: String(creditoId),
+			status,
+		});
+		const respuesta = await this.request<{
+			success: boolean;
+			data?: CarteraConvenio[];
+		}>(`/payment-agreements?${qs}`, { method: "GET" }, false);
+		return respuesta?.data ?? [];
+	}
+
+	/**
+	 * COBROS-02 Fase 3 — DESHACER un convenio ya aprobado (soft delete).
+	 *
+	 * No es `decidirConvenio`: eso decide sobre un convenio que nunca estuvo
+	 * vigente. Esto cancela un acuerdo firmado, conservando su plan de cuotas y
+	 * los pagos que recibió.
+	 *
+	 * Misma invalidación de cache y por la misma razón: deshacer cambia
+	 * `statusCredit`, recrea la mora y suelta el bucket congelado, y si la
+	 * petición falla por timeout cartera pudo haberlo commiteado igual.
+	 */
+	async anularConvenio(
+		convenioId: number,
+		input: {
+			motivo: string;
+			solicitado_por_email?: string;
+			/** Dueño esperado; cartera lo revalida dentro de su transacción. */
+			asesor_esperado_email?: string;
+		},
+	): Promise<{
+		convenio_id: number;
+		credito_id: number;
+		status_credito: "MOROSO" | "ACTIVO";
+		cuotas_atrasadas: number;
+	}> {
+		let response: {
+			success: boolean;
+			message?: string;
+			convenio_id?: number;
+			credito_id?: number;
+			status_credito?: "MOROSO" | "ACTIVO";
+			cuotas_atrasadas?: number;
+		};
+		try {
+			response = await this.request(`/payment-agreements/${convenioId}/anular`, {
+				method: "POST",
+				body: JSON.stringify(input),
+			});
+		} finally {
+			this.cache.invalidate("/credito?");
+			this.cache.invalidate("payment-agreements");
+			this.cache.invalidate("getAllCredits");
+			this.cache.invalidate("stats");
+			this.cache.invalidate("/buckets/credito/");
+		}
+		if (!response?.success || response.credito_id == null) {
+			throw new Error(
+				response?.message || "cartera-back no pudo deshacer el convenio",
+			);
+		}
+		return {
+			convenio_id: response.convenio_id as number,
+			credito_id: response.credito_id,
+			status_credito: response.status_credito ?? "MOROSO",
+			cuotas_atrasadas: response.cuotas_atrasadas ?? 0,
+		};
 	}
 
 	// CB-033 — historial de decisiones POR CRÉDITO (no por convenio: el

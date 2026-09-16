@@ -788,6 +788,30 @@ describe("crearEstampadorPagoConvenio", () => {
     expect(estampar()).toBe("981.86");
     expect(estampar()).toBe("0");
   });
+
+  // El sello completo: la reversa necesita saber A QUÉ convenio descontarle,
+  // y la única garantía de que monto y convenio no queden desparejos es que
+  // los entregue el mismo consumo (review de Codex, P1).
+  it("campos(): la fila que carga el monto es la única que carga el convenio", () => {
+    const estampar = registerPaymentPolicy.crearEstampadorPagoConvenio(981.86, 98);
+    expect(estampar.campos()).toEqual({ pagoConvenio: "981.86", convenioId: 98 });
+    expect(estampar.campos()).toEqual({ pagoConvenio: "0", convenioId: null });
+    expect(estampar.campos()).toEqual({ pagoConvenio: "0", convenioId: null });
+  });
+
+  it("campos(): sin monto no sella convenio aunque se conozca", () => {
+    expect(
+      registerPaymentPolicy.crearEstampadorPagoConvenio(0, 98).campos(),
+    ).toEqual({ pagoConvenio: "0", convenioId: null });
+  });
+
+  it("campos() y la llamada directa comparten el mismo sello", () => {
+    const estampar = registerPaymentPolicy.crearEstampadorPagoConvenio(500, 7);
+    expect(estampar.pendiente()).toBe("500");
+    expect(estampar.campos().convenioId).toBe(7);
+    expect(estampar()).toBe("0");
+    expect(estampar.pendiente()).toBe("0");
+  });
 });
 
 describe("debeInsertarFilaParcialCuota", () => {

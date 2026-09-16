@@ -445,18 +445,152 @@ atrasados = fechas de vencimiento distintas, pasadas, con algo impago, uniendo l
 del crédito no absorbidas por el convenio + las cuotas del convenio vencidas. Cero meses
 atrasados = al día → B2; uno o más → B4.
 
-### Fase 3 · Ficha 360 — banda roja y acciones
+### Fase 3 · Ficha 360 — banda roja y acciones ✅ implementada
 
-- Sacar "Recuperación de vehículo" del dropdown de **Más acciones** y darle un lugar fijo
-  y visible en la fila de acciones.
-- Banda roja arriba cuando: (a) hay convenio activo con cuota vencida impaga, o
-  (b) está `EN_RECUPERACION` y ya acumuló 5 cuotas.
-- **Tres** acciones (la de jurídico se cayó por la decisión 6):
+- ✅ "Recuperación de vehículo" salió del dropdown de **Más acciones**. Estaba escondida
+  entre cartas notariales y estados de cuenta siendo la decisión más grave de la pantalla;
+  ahora tiene lugar fijo en la fila de acciones.
+- ✅ Banda roja arriba de la identidad del caso cuando el convenio está incumplido. La
+  rama (b) —`EN_RECUPERACION` con 5 cuotas— llega con la Fase 4, que es la que crea el
+  estado.
+- ✅ Las **tres** acciones (la de jurídico se cayó por la decisión 6):
   - Deshacer convenio
   - Deshacer convenio y mandar a recuperación (B4)
-  - Mandar a recuperación (B4) — **habilitado solo en B1–B3**
-- **Soft delete** del convenio: columnas nuevas (`anulado_at`, `anulado_por`, `motivo`) y
-  migración de cartera. Ojo: carteraFront consume el mismo endpoint, el cambio se ve allá.
+  - Mandar a recuperación (B4) — **habilitado solo en B1–B3**, y cuando no aplica se
+    deshabilita con el motivo en el título, no se esconde.
+- ✅ **Soft delete** del convenio (migración **0018** de cartera).
+
+#### Deshacer ≠ rechazar
+
+Son dos operaciones distintas y por eso son dos funciones distintas:
+
+| | Rechazar (CB-033) | Deshacer (Fase 3) |
+| --- | --- | --- |
+| Sobre qué | Un convenio que **nunca estuvo vigente** | Un acuerdo **firmado** que dejó de pagarse |
+| Qué hace con la fila | `DELETE` duro | `anulado_at` + motivo + quién |
+| Por qué | No hubo acuerdo: no hay nada que conservar | Borrarlo destruye el plan de cuotas y la traza de lo que sí pagó |
+
+El efecto financiero **sí** es el mismo, porque la pregunta es la misma: *¿cuánto debe
+este crédito si el convenio no existiera?* Se recuenta el atraso real y se recrea la mora,
+o queda `ACTIVO` si ya no debe nada. El bucket se suelta solo: al volver a `MOROSO`, el
+motor de las 23:59 lo vuelve a derivar y escribe la transición contra la fila `CONGELADO`.
+
+> ⚠️ **`anulado_at` no es decorativo.** Un convenio deshecho queda con `activo=false` y
+> `completado=false` — **exactamente** la firma de "pendiente de aprobación" (CB-033). Sin
+> filtrar por esa columna, un convenio deshecho reaparece en la cola del supervisor y
+> aprobarlo lo resucita. Se filtró en los dos lugares que importan: el `UPDATE` de
+> exclusión mutua de `decidirConvenio` y el filtro `pending` de `listPaymentAgreements`.
+> Un CHECK exige además que la anulación esté completa (fecha + motivo) o no exista.
+
+Probado contra el sandbox dentro de una transacción revertida: el segundo intento de
+anular no toca ninguna fila, el convenio anulado no aparece como pendiente, y el CHECK
+rechaza una anulación sin motivo.
+
+#### Tres cosas que la review de Codex corrigió acá
+
+- **La escritura revalida al dueño.** Autorizar y escribir son dos requests distintas:
+  entre una y otra el motor o un supervisor pueden reasignar el crédito, y sin
+  precondición el asesor que acaba de perderlo deshacía igual el convenio. Ahora viaja el
+  dueño **esperado** y cartera lo revalida dentro de su transacción — la misma carrera que
+  la recuperación de vehículo ya cerraba así.
+- **El convenio se resuelve con una consulta dedicada**, no leyendo
+  `getCredito().convenioActivo`: ese endpoint devuelve temprano con `convenioActivo: null`
+  *hardcodeado* cuando el calendario original del crédito ya no tiene ninguna cuota de hoy
+  en adelante — y un convenio puede sobrevivir al calendario que reestructuró. Justo los
+  créditos más atrasados, los que más necesitan deshacer, se quedaban sin la acción.
+- **La banda no caduca al año.** El `diasAtras` de 365 es una cota de *volumen* del
+  listado; en una consulta ya acotada a un solo crédito hacía desaparecer la banda roja
+  cuando la cuota impaga más vieja pasaba del año — justo el caso más grave.
+
+#### Deshacer es una escritura destructiva, y se protege como tal
+
+Cuatro cosas más que salieron de la segunda review:
+
+- **La condición de dueño viaja DENTRO del `UPDATE`**, no en un `SELECT` previo. Dos
+  statements son dos momentos: bajo READ COMMITTED una reasignación puede commitear entre
+  medio y el asesor que ya perdió el crédito pasaba igual el chequeo. Con el predicado en
+  el `WHERE`, comprobar y escribir son el mismo acto — o el crédito sigue siendo suyo en el
+  instante en que se escribe, o no se escribe nada. Además se toma el lock por crédito, el
+  mismo de la reasignación y la recuperación.
+- **Un pago no puede resucitar un convenio deshecho.** `processConvenioPaymentEnTx`
+  actualizaba por `convenio_id` a secas y escribía `activo: true` desde un snapshot leído
+  antes, dejando `anulado_at` puesto: el convenio volvía a la vida y seguía recibiendo
+  pagos. El `UPDATE` ahora exige que siga vigente, y si no, la transacción del pago aborta.
+- **Una sola definición de "convenio vigente"**, compartida por la mutación y por el botón
+  que la ofrece (`resolverConvenioVigenteDelCaso`). Busca por **`credito_id` exacto y sin
+  paginar**: el listado filtra el SIFCO con `ILIKE '%valor%'`, así que uno que es subcadena
+  de otro podía traer el convenio del crédito equivocado —o empujar al correcto fuera de la
+  página y reportar que no hay ninguno—. En el sandbox hay **una** colisión de esas, así
+  que no es teórico.
+- **Vigente excluye "pendiente de aprobación".** Un convenio recién creado ya deja el
+  crédito en `EN_CONVENIO` pero nace `activo = false`: eso se **rechaza** desde la cola del
+  supervisor, no se deshace. Guiando el botón por `statusCredit` aparecía igual y cada
+  clic terminaba en error.
+- **Una reversa descuenta al convenio del PAGO, y no resucita uno deshecho.**
+  `reverseConvenioPayment` elegía "algún convenio de este crédito" con un `.limit(1)`, y eso
+  se rompe de las dos formas posibles: si el convenio del pago se deshizo, no había nada que
+  descontar; y si después se firmó otro, el pago viejo le descontaba a **ese**, que nunca lo
+  recibió. Un convenio anulado **sí** recibe el descuento —el pago existió— pero no vuelve
+  a `activo`: deshacerlo fue una decisión humana y una reversa contable no la revierte.
+  (Cómo se identifica ese convenio lo corrigió la ronda siguiente: ver abajo.)
+- **La anulación toma también el lock de PAGOS.** Es otra llave que la del lock por crédito,
+  y las dos hacen falta: `reversePayment` sostiene aquella mientras deshace un pago, y su
+  actualización del convenio es una escritura suelta que podía interleavearse con la
+  anulación. Va por fuera de la transacción, porque ese lock usa el pool dedicado y su
+  propia documentación prohíbe esperarlo con conexiones del pool de trabajo.
+
+#### A qué convenio se le acreditó un pago: se sella, no se adivina
+
+La ronda anterior resolvía el convenio de un pago por el pivot `convenios_pagos_resume`
+y lo llamaba "la respuesta exacta". **No lo era.** Ese pivot se llena *una vez*, al crear
+el convenio, con las filas pre-sembradas de las cuotas que reestructura; los pagos que
+después se le acreditan caen en otras filas. En el sandbox, **196 de 204** pagos con
+`pago_convenio > 0` no tienen fila ahí. El pivot casi nunca acertaba, y el respaldo
+—"el convenio vigente del crédito"— excluía los anulados, que es justo cuando la reversa
+tiene que encontrarlos.
+
+La respuesta exacta solo existe en el instante de acreditar, así que se guarda ahí:
+**`pagos_credito.convenio_id`** (migración **0022**). No lo escribe cada sitio por su
+cuenta: el estampador que ya garantizaba que *una sola* fila por boleta carga el monto
+(`crearEstampadorPagoConvenio`) ahora entrega monto y convenio **en el mismo consumo**
+(`campos()`). Por construcción, la fila que carga uno es la única que carga el otro.
+
+La reversa busca en este orden (`convenioQueRecibioElPago`):
+
+| Criterio | Cuándo aplica | Exacto |
+| --- | --- | --- |
+| El sello de la fila | Todo pago registrado desde la 0022 | Sí |
+| El pivot | Filas pre-sembradas que se cobraron | Sí, cuando acierta |
+| El convenio más reciente del crédito, anulados incluidos | Pagos viejos sin sello ni pivot | Salvo un crédito con varios convenios y un pago del anterior: **1 pago** en el sandbox |
+
+Dato aparte que salió midiendo, y que **no** cambia con esto: hay **22** pagos con
+`pago_convenio > 0` cuyo crédito ya no tiene ningún convenio. Su reversa fallaba antes y
+sigue fallando igual ("no se encontró un convenio").
+
+#### El rango B1–B3 de la recuperación lo exige el servidor
+
+"Mandar a recuperación" está **habilitado solo en B1–B3**, pero esa regla vivía únicamente
+en el botón de la ficha. "Deshacer convenio y mandar a recuperación" no pasa por ese botón:
+
+- en **B4**, el convenio quedaba deshecho y después la recuperación rechazaba por "ya está
+  en B4" — la mitad de lo que el asesor pidió;
+- en **B5**, la recuperación registraba una **BAJADA** a B4: le restaba gravedad a la
+  cuenta. Y ni siquiera duraba: con 5 cuotas el piso de la Fase 4 da `max(B5, B4) = B5`, y
+  el motor la devolvía esa misma noche.
+
+Ahora el rango se exige en dos lugares con papeles distintos: el CRM lo verifica **antes**
+de deshacer (evita el parcial en el caso normal) y cartera lo vuelve a verificar **bajo sus
+locks** (es el que manda, y cubre también el botón suelto). El doc 07 contemplaba llegar a
+B4 "desde B5"; la decisión del plan 08 es posterior y es la que rige.
+
+#### La banda pregunta, no deduce
+
+El estado del convenio lo responde cartera (`GET /convenio/alertas` filtrado a ese
+crédito), no el front mirando el plan de cuotas que ya tiene a mano. La cobertura de una
+cuota del convenio se mide por **monto** —un abono parcial acumulativo no marca
+`fecha_pago`— y la re-indexación de las cuotas posteriores al acuerdo tampoco es algo que
+deba vivir duplicado en el navegador. Es la misma fuente que la pantalla de Alertas de
+Convenios y que el job de avisos: **una sola definición de "incumplido"**.
 
 ### Fase 4 · El estado `EN_RECUPERACION` — la invasiva, de último
 

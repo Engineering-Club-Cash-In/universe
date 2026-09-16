@@ -2,6 +2,7 @@
 import { Elysia, t } from "elysia";
 import { createPaymentAgreement, getPaymentAgreements, updateConvenioStatus, listPaymentAgreements, getConvenioCuotas, resolverPlatformUserIdPorEmail } from "../controllers/paymentAgreement";
 import { ConvenioDecisionError, decidirConvenio } from "../controllers/convenioDecision";
+import { anularConvenio } from "../controllers/anularConvenio";
 import { db } from "../database";
 import { convenioDecisiones } from "../database/db/schema";
 import { desc, eq } from "drizzle-orm";
@@ -334,6 +335,73 @@ export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements
       detail: {
         summary: "Decide (approve/reject) a pending payment agreement",
         description: "CB-033: transactional approve/reject with idempotency, audit trail, and role gate",
+        tags: ["Payment Agreements"],
+      },
+    }
+  )
+
+  // COBROS-02 Fase 3 — DESHACER un convenio ya aprobado (soft delete).
+  //
+  // No es lo mismo que /decidir: eso decide sobre un convenio que nunca estuvo
+  // vigente (y el rechazo borra duro). Esto cancela un acuerdo que el cliente
+  // firmó y dejó de pagar, conservando el plan de cuotas y lo que sí pagó
+  // (decisión 10 del plan 08).
+  //
+  // Mismo gate de rol que decidir: quien puede aprobar un convenio puede
+  // deshacerlo. Desde el CRM lo llama la cuenta de servicio, que ya validó del
+  // otro lado que quien lo pidió es el asesor dueño o un supervisor.
+  .post(
+    "/:convenio_id/anular",
+    async ({ params, body, set, user }: any) => {
+      const gate = requireConvenioDecisionRole(user, set);
+      if (!gate.ok) return gate.body;
+
+      const convenioId = Number.parseInt(params.convenio_id, 10);
+      if (!Number.isInteger(convenioId) || convenioId < 1) {
+        set.status = 400;
+        return { success: false, message: "convenio_id inválido", error: "convenio_id_invalido" };
+      }
+
+      // Igual que en /decidir: solo la cuenta de servicio puede atribuir la
+      // acción a otra persona. Cualquier otro llamante que mande el campo es un
+      // intento de suplantación.
+      if (body.solicitado_por_email && !esCuentaDeServicioCRM(user)) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "Solo la cuenta de servicio del CRM puede atribuir la anulación a otra persona.",
+          error: "solicitado_por_email_no_permitido",
+        };
+      }
+
+      const resultado = await anularConvenio({
+        convenio_id: convenioId,
+        motivo: body.motivo,
+        usuario_email: body.solicitado_por_email ?? user?.email,
+        // Precondición de dueño: el CRM la manda cuando quien pidió deshacer NO
+        // ve toda la cartera. Se revalida dentro de la transacción contra el
+        // dueño real (review de Codex, P1).
+        asesor_esperado_email: body.asesor_esperado_email,
+      });
+
+      if (!resultado.success) {
+        set.status = resultado.status;
+        return { success: false, message: resultado.message };
+      }
+      set.status = 200;
+      return resultado;
+    },
+    {
+      params: t.Object({ convenio_id: t.String() }),
+      body: t.Object({
+        motivo: t.String({ minLength: 5 }),
+        solicitado_por_email: t.Optional(t.String()),
+        asesor_esperado_email: t.Optional(t.String()),
+      }),
+      detail: {
+        summary: "Undo an approved payment agreement (soft delete)",
+        description:
+          "COBROS-02 Fase 3: marca el convenio como anulado conservando su plan de cuotas y sus pagos, recuenta el atraso real y recrea la mora",
         tags: ["Payment Agreements"],
       },
     }

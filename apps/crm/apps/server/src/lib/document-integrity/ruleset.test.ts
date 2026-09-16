@@ -3,6 +3,7 @@ import {
 	applyRuleset,
 	LLM_WEIGHT_CAP,
 	makeSignal,
+	isRejectionEligibleSignal,
 	SIGNAL_LABELS,
 	SIGNAL_WEIGHTS,
 } from "./ruleset";
@@ -28,6 +29,7 @@ const nonOverrideSignals = Object.entries(SIGNAL_WEIGHTS)
 				"pdf_protegido_no_abre",
 				"inspeccion_tecnica_incompleta",
 				"tipo_documento_incierto",
+				"captura_con_legibilidad_insuficiente",
 			].includes(code),
 	)
 	.map(([code, weight]) =>
@@ -40,6 +42,273 @@ const nonOverrideSignals = Object.entries(SIGNAL_WEIGHTS)
 	) satisfies Signal[];
 
 describe("document integrity ruleset", () => {
+	test("la ortografía de movimientos no exige revisión ni contribuye al rechazo", () => {
+		const typo = makeSignal(
+			"ortografia_en_descripcion_movimiento",
+			0,
+			"baja",
+			"ia",
+			{
+				confidence: 99,
+				page: 1,
+				evidence: { textoDetectado: "Desfile hpico" },
+			},
+		);
+		expect(applyRuleset({ llm: cleanLlm, signals: [typo] })).toMatchObject({
+			result: "valido",
+			score: 0,
+		});
+		expect(isRejectionEligibleSignal(typo)).toBe(false);
+		expect(
+			applyRuleset({
+				llm: cleanLlm,
+				signals: [
+					typo,
+					makeSignal("titular_no_coincide_fuerte", 6, "alta", "identidad"),
+				],
+			}),
+		).toMatchObject({ result: "revision_manual", score: 6 });
+		expect(
+			applyRuleset({
+				llm: cleanLlm,
+				signals: [
+					typo,
+					makeSignal("errores_ortograficos", 4, "media", "ia", {
+						confidence: 99,
+					}),
+				],
+			}),
+		).toMatchObject({ result: "revision_manual", score: 4 });
+	});
+	test.each([
+		"todas_las_paginas_rasterizadas",
+		"paginas_mixtas_texto_e_imagen",
+		"documento_fotografiado_o_escaneado",
+	])("%s no obliga a revisión y protege las dudas de captura", (code) => {
+		const capture = makeSignal(code, 0, "baja", "contenido");
+		expect(applyRuleset({ signals: [capture], llm: cleanLlm })).toMatchObject({
+			result: "valido",
+			score: 0,
+		});
+		expect(
+			applyRuleset({
+				signals: [capture],
+				llm: { ...cleanLlm, es_legible: false },
+			}).result,
+		).toBe("revision_manual");
+		expect(
+			applyRuleset({
+				signals: [
+					capture,
+					makeSignal("titular_no_coincide_fuerte", 6, "alta", "identidad"),
+					makeSignal("huella_no_coincide_con_emisor", 3, "media", "emisor"),
+				],
+				llm: cleanLlm,
+			}).result,
+		).toBe("revision_manual");
+		expect(
+			applyRuleset({
+				signals: [capture],
+				llm: { ...cleanLlm, corresponde_al_tipo_declarado: false },
+			}).result,
+		).toBe("rechazado");
+		expect(
+			applyRuleset({ signals: [capture], llm: cleanLlm, corruptPdf: true })
+				.result,
+		).toBe("rechazado");
+		const synthetic = makeSignal(
+			"documento_declarado_sintetico_o_sin_validez",
+			7,
+			"alta",
+			"ia",
+			{
+				confidence: 99,
+				page: 1,
+				evidence: { textoDetectado: "MUESTRA SINTÉTICA" },
+			},
+		);
+		expect(
+			applyRuleset({ signals: [capture, synthetic], llm: cleanLlm }).result,
+		).toBe("rechazado");
+		expect(
+			applyRuleset({
+				signals: [capture, synthetic],
+				llm: { ...cleanLlm, es_legible: false },
+			}).result,
+		).toBe("rechazado");
+		expect(
+			applyRuleset({
+				signals: [capture],
+				llm: { ...cleanLlm, es_legible: false },
+				pipelineError: "R2 no disponible",
+			}).result,
+		).toBe("error");
+	});
+	test("el escaneo de Gilson con desalineación y ortografía queda en revisión", () => {
+		const result = applyRuleset({
+			llm: cleanLlm,
+			signals: [
+				makeSignal("todas_las_paginas_rasterizadas", 4, "media", "contenido"),
+				makeSignal("desalineacion_columnas", 4, "alta", "ia", {
+					confidence: 85,
+					page: 1,
+				}),
+				makeSignal("errores_ortograficos", 4, "media", "ia", {
+					confidence: 95,
+					page: 1,
+				}),
+				makeSignal("captura_impide_verificar_alineacion", 4, "media", "ia", {
+					confidence: 90,
+					page: 4,
+				}),
+			],
+		});
+		expect(result).toMatchObject({ result: "revision_manual", score: 8 });
+	});
+	test.each([
+		"desalineacion_columnas",
+		"montos_sobrepuestos",
+		"formato_no_corresponde_al_emisor",
+	])("la alerta visual %s no contribuye al rechazo ni siquiera combinada con identidad", (code) => {
+		const visual = makeSignal(code, 4, "alta", "ia", { confidence: 99 });
+		expect(isRejectionEligibleSignal(visual)).toBe(false);
+		expect(
+			applyRuleset({
+				llm: cleanLlm,
+				signals: [
+					visual,
+					makeSignal("titular_no_coincide_fuerte", 6, "alta", "identidad"),
+				],
+			}).result,
+		).toBe("revision_manual");
+	});
+	test("la tipografía es informativa y no exige revisión ni ayuda al rechazo", () => {
+		const typography = makeSignal(
+			"tipografia_inconsistente",
+			SIGNAL_WEIGHTS.tipografia_inconsistente,
+			"baja",
+			"ia",
+			{
+				confidence: 99,
+				page: 3,
+			},
+		);
+		const displacement = makeSignal("desalineacion_columnas", 4, "alta", "ia", {
+			confidence: 99,
+		});
+		expect(isRejectionEligibleSignal(typography)).toBe(false);
+		expect(
+			applyRuleset({ signals: [typography], llm: cleanLlm }),
+		).toMatchObject({ result: "valido", score: 0 });
+		expect(
+			applyRuleset({ signals: [typography, displacement], llm: cleanLlm }),
+		).toMatchObject({ result: "revision_manual", score: 4 });
+		expect(
+			applyRuleset({
+				signals: [
+					typography,
+					makeSignal("xmp_historial_de_ediciones", 7, "alta", "estructura"),
+				],
+				llm: cleanLlm,
+			}).result,
+		).toBe("revision_manual");
+		expect(
+			applyRuleset({
+				signals: [
+					typography,
+					displacement,
+					makeSignal("montos_sobrepuestos", 4, "alta", "ia", {
+						confidence: 99,
+					}),
+				],
+				llm: cleanLlm,
+			}).result,
+		).toBe("revision_manual");
+		expect(
+			applyRuleset({
+				signals: [typography],
+				llm: { ...cleanLlm, es_legible: false },
+			}).result,
+		).toBe("rechazado");
+	});
+	test("la limitación de alineación es informativa sin exigir revisión", () => {
+		const capture = makeSignal(
+			"captura_impide_verificar_alineacion",
+			0,
+			"baja",
+			"ia",
+			{ confidence: 99, page: 3 },
+		);
+		const displacement = makeSignal("desalineacion_columnas", 4, "alta", "ia", {
+			confidence: 99,
+			page: 3,
+		});
+		expect(applyRuleset({ signals: [capture], llm: cleanLlm }).result).toBe(
+			"valido",
+		);
+		expect(
+			applyRuleset({ signals: [capture, displacement], llm: cleanLlm }).result,
+		).toBe("revision_manual");
+		expect(
+			applyRuleset({ signals: [displacement], llm: cleanLlm }).result,
+		).toBe("revision_manual");
+		expect(
+			applyRuleset({
+				signals: [
+					capture,
+					displacement,
+					makeSignal("montos_sobrepuestos", 4, "alta", "ia", {
+						confidence: 99,
+					}),
+				],
+				llm: cleanLlm,
+			}).result,
+		).toBe("revision_manual");
+		expect(
+			applyRuleset({
+				signals: [capture],
+				llm: { ...cleanLlm, es_legible: false },
+			}).result,
+		).toBe("rechazado");
+		expect(
+			applyRuleset({
+				signals: [capture],
+				llm: { ...cleanLlm, corresponde_al_tipo_declarado: false },
+			}).result,
+		).toBe("rechazado");
+	});
+	test("la ortografía exige revisión pero nunca suma al rechazo", () => {
+		const typo = makeSignal("errores_ortograficos", 4, "media", "ia", {
+			confidence: 99,
+			page: 1,
+			evidence: { textoDetectado: "codigó" },
+		});
+		const format = makeSignal(
+			"formato_no_corresponde_al_emisor",
+			4,
+			"alta",
+			"ia",
+			{ confidence: 99 },
+		);
+		expect(applyRuleset({ signals: [typo], llm: cleanLlm }).result).toBe(
+			"revision_manual",
+		);
+		expect(
+			applyRuleset({ signals: [typo, format], llm: cleanLlm }).result,
+		).toBe("revision_manual");
+		expect(
+			applyRuleset({
+				signals: [
+					typo,
+					format,
+					makeSignal("montos_sobrepuestos", 4, "alta", "ia", {
+						confidence: 99,
+					}),
+				],
+				llm: cleanLlm,
+			}).result,
+		).toBe("revision_manual");
+	});
 	test("un input limpio es válido sin señales", () => {
 		expect(applyRuleset({ signals: [], llm: cleanLlm })).toEqual({
 			result: "valido",
@@ -141,10 +410,6 @@ describe("document integrity ruleset", () => {
 
 	test.each([
 		"titular_no_coincide_fuerte",
-		"desalineacion_columnas",
-		"tipografia_inconsistente",
-		"montos_sobrepuestos",
-		"formato_no_corresponde_al_emisor",
 	])("la señal fuerte habilitada %s puede sustentar un rechazo", (code) => {
 		const result = applyRuleset({
 			signals: [
@@ -234,21 +499,20 @@ describe("document integrity ruleset", () => {
 					"alta",
 					"duplicado",
 				),
-				makeSignal("formato_no_corresponde_al_emisor", 4, "alta", "ia", {
+				makeSignal("titular_no_coincide_fuerte", 6, "alta", "identidad", {
 					confidence: 90,
 				}),
 				makeSignal("huella_no_coincide_con_emisor", 3, "media", "emisor"),
 			],
 			llm: cleanLlm,
 		});
-		expect(result.score).toBe(13);
+		expect(result.score).toBe(15);
 		expect(result.result).toBe("rechazado");
 	});
 
 	test.each([
 		"xmp_historial_de_ediciones",
 		"xmp_contradice_info_dict",
-		"paginas_mixtas_texto_e_imagen",
 	])("la señal alta excluida %s no provoca rechazo por score", (code) => {
 		const result = applyRuleset({
 			signals: [makeSignal(code, 7, "alta", "estructura")],
@@ -347,7 +611,7 @@ describe("document integrity ruleset", () => {
 				makeSignal("desalineacion_columnas", 4, "alta", "ia", {
 					confidence: 1,
 				}),
-				makeSignal("tipografia_inconsistente", 4, "alta", "ia", {
+				makeSignal("montos_sobrepuestos", 4, "alta", "ia", {
 					confidence: 1,
 				}),
 			],
@@ -363,7 +627,7 @@ describe("document integrity ruleset", () => {
 				makeSignal("desalineacion_columnas", 4, "alta", "ia", {
 					confidence: 90,
 				}),
-				makeSignal("tipografia_inconsistente", 4, "alta", "ia", {
+				makeSignal("montos_sobrepuestos", 4, "alta", "ia", {
 					confidence: 1,
 				}),
 			],
@@ -372,20 +636,20 @@ describe("document integrity ruleset", () => {
 		expect(result.result).toBe("revision_manual");
 	});
 
-	test("dos señales visuales confiables sí pueden provocar rechazo", () => {
+	test("dos señales visuales confiables requieren revisión, no rechazo", () => {
 		const result = applyRuleset({
 			llm: cleanLlm,
 			signals: [
 				makeSignal("desalineacion_columnas", 4, "alta", "ia", {
 					confidence: 90,
 				}),
-				makeSignal("tipografia_inconsistente", 4, "alta", "ia", {
+				makeSignal("montos_sobrepuestos", 4, "alta", "ia", {
 					confidence: 90,
 				}),
 			],
 		});
 		expect(result.score).toBe(8);
-		expect(result.result).toBe("rechazado");
+		expect(result.result).toBe("revision_manual");
 	});
 
 	test("el aporte total del LLM está topado", () => {

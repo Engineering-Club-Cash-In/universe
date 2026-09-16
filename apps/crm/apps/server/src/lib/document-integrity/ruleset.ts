@@ -10,15 +10,18 @@ export const MIN_AI_REJECTION_CONFIDENCE = 70;
 
 const REJECTION_ELIGIBLE_SIGNAL_CODES = new Set([
 	"titular_no_coincide_fuerte",
-	"desalineacion_columnas",
-	"tipografia_inconsistente",
-	"montos_sobrepuestos",
-	"formato_no_corresponde_al_emisor",
 	"documento_declarado_sintetico_o_sin_validez",
 ]);
 
 const REJECTION_SCORE_EXCLUDED_SIGNAL_CODES = new Set([
+	"desalineacion_columnas",
+	"montos_sobrepuestos",
+	"formato_no_corresponde_al_emisor",
+	"tipografia_inconsistente",
 	"sha256_duplicado_oportunidad_ganada",
+	"errores_ortograficos",
+	"ortografia_en_descripcion_movimiento",
+	"captura_impide_verificar_alineacion",
 ]);
 
 export function isRejectionEligibleSignal(
@@ -57,6 +60,10 @@ function contributesToRejectionScore(signal: Signal): boolean {
 }
 
 export const SIGNAL_WEIGHTS: Record<string, number> = {
+	ortografia_en_descripcion_movimiento: 0,
+	tipografia_inconsistente: 0,
+	captura_impide_verificar_alineacion: 0,
+	errores_ortograficos: 4,
 	productor_es_editor: 0,
 	xmp_historial_de_ediciones: 7,
 	creacion_anterior_al_cierre_del_periodo: 0,
@@ -69,8 +76,10 @@ export const SIGNAL_WEIGHTS: Record<string, number> = {
 	encrypt_de_emisor_intacto: -2,
 	encrypt_ausente_pero_esperado: 3,
 	pdf_protegido_no_abre: 0,
-	paginas_mixtas_texto_e_imagen: 7,
-	todas_las_paginas_rasterizadas: 4,
+	paginas_mixtas_texto_e_imagen: 0,
+	todas_las_paginas_rasterizadas: 0,
+	documento_fotografiado_o_escaneado: 0,
+	captura_con_legibilidad_insuficiente: 0,
 	fuente_no_embebida: 0,
 	fuente_type3: 2,
 	huella_coincide_con_emisor: -2,
@@ -89,6 +98,16 @@ export const SIGNAL_WEIGHTS: Record<string, number> = {
 };
 
 export const SIGNAL_LABELS: Record<string, string> = {
+	ortografia_en_descripcion_movimiento:
+		"Ortografía en la descripción de un movimiento",
+	documento_fotografiado_o_escaneado:
+		"El documento contiene fotografías o escaneos",
+	captura_con_legibilidad_insuficiente:
+		"La captura no permite leer correctamente el documento",
+	tipografia_inconsistente: "Tipografía inconsistente",
+	captura_impide_verificar_alineacion:
+		"La captura impide verificar la alineación",
+	errores_ortograficos: "Faltas de ortografía o acentuación",
 	productor_es_editor: "El PDF fue procesado por una herramienta externa",
 	xmp_historial_de_ediciones: "El historial XMP contiene múltiples guardados",
 	creacion_anterior_al_cierre_del_periodo:
@@ -163,6 +182,13 @@ export function applyRuleset(params: {
 	pipelineError?: string | null;
 }): ValidationOutcome {
 	const { signals, llm } = params;
+	const isCapture = signals.some((signal) =>
+		[
+			"todas_las_paginas_rasterizadas",
+			"paginas_mixtas_texto_e_imagen",
+			"documento_fotografiado_o_escaneado",
+		].includes(signal.code),
+	);
 	if (params.pipelineError) {
 		return { result: "error", score: 0, reason: params.pipelineError, signals };
 	}
@@ -177,7 +203,7 @@ export function applyRuleset(params: {
 		};
 	}
 
-	if (llm?.es_legible === false) {
+	if (llm?.es_legible === false && !isCapture) {
 		return {
 			result: "rechazado",
 			score: 0,
@@ -208,7 +234,24 @@ export function applyRuleset(params: {
 						evidence: { detected: llm.tipo_documento_detectado },
 					}),
 				]
-			: signals;
+			: [...signals];
+	if (
+		isCapture &&
+		llm?.es_legible === false &&
+		!signals.some(
+			(signal) =>
+				signal.code === "documento_declarado_sintetico_o_sin_validez" &&
+				isRejectionEligibleSignal(signal),
+		)
+	)
+		evaluatedSignals.push(
+			makeSignal("captura_con_legibilidad_insuficiente", 0, "media", "ia"),
+		);
+	const rejectionSignals = evaluatedSignals.filter(
+		(signal) =>
+			!(isCapture && signal.code === "titular_no_coincide_fuerte") &&
+			contributesToRejectionScore(signal),
+	);
 
 	const calculateScore = (scoredSignals: Signal[]) => {
 		const deterministicScore = scoredSignals
@@ -223,20 +266,19 @@ export function applyRuleset(params: {
 		return Math.max(0, deterministicScore + aiScore);
 	};
 	const score = calculateScore(evaluatedSignals);
-	const rejectionScore = calculateScore(
-		evaluatedSignals.filter(contributesToRejectionScore),
-	);
+	const rejectionScore = calculateScore(rejectionSignals);
 	const requiresManual = evaluatedSignals.some((signal) =>
 		[
 			"ia_no_disponible",
 			"pdf_protegido_no_abre",
 			"inspeccion_tecnica_incompleta",
 			"tipo_documento_incierto",
+			"captura_con_legibilidad_insuficiente",
 		].includes(signal.code),
 	);
 	const mustRejectByScore =
 		rejectionScore >= REJECTION_SCORE_THRESHOLD &&
-		evaluatedSignals.some(isRejectionEligibleSignal);
+		rejectionSignals.some(isRejectionEligibleSignal);
 
 	const result = requiresManual
 		? "revision_manual"

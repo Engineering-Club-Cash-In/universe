@@ -61,6 +61,24 @@ export function buildDocumentRecommendedAction(params: {
 				? `Verifica${pageText} antes de continuar.`
 				: "Puedes continuar, tomando en cuenta las observaciones indicadas.";
 		case "revision_manual":
+			if (
+				params.signals.some(
+					(signal) => signal.code === "captura_con_legibilidad_insuficiente",
+				)
+			)
+				return "Solicita el PDF original o una foto frontal y nítida para comprobar el contenido ilegible y revisa las demás alertas; solo un supervisor puede aprobarlo con justificación.";
+			if (
+				params.signals.some(
+					(signal) => signal.code === "captura_impide_verificar_alineacion",
+				)
+			) {
+				return `${pageText ? `Revisa${pageText}. ` : "Revisa las señales del documento completo. "}Solicita el PDF original o una foto frontal y nítida para comprobar la alineación y revisa las demás alertas, si existen; solo un supervisor puede aprobarlo con justificación.${params.signals.some((signal) => signal.code === "errores_ortograficos") ? " Verifica también con el banco las faltas de ortografía." : ""}`;
+			}
+			if (
+				params.signals.some((signal) => signal.code === "errores_ortograficos")
+			) {
+				return `${pageText ? `Revisa${pageText}. ` : "Revisa las señales del documento completo. "}Verifica con el banco si las faltas de ortografía provienen del documento original y revisa las demás alertas, si existen; solo un supervisor puede aprobarlo con justificación.`;
+			}
 			return pageText
 				? `Revisa${pageText}. Si no puedes confirmar su legitimidad, solicita un nuevo estado de cuenta; solo un supervisor puede aprobarlo con justificación.`
 				: "Revisa las señales del documento completo. Si no puedes confirmar su legitimidad, solicita un nuevo estado de cuenta; solo un supervisor puede aprobarlo con justificación.";

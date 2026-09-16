@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../../database";
 import { SQL_CARTERA_SCHEMA } from "../../database/db/schema";
 import { bucketActualSql } from "../../lib/buckets-classification";
+import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../../lib/buckets-job-locks";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COBROS-02 · Fase 2 — EL CONVENIO CONGELA EL BUCKET.
@@ -144,28 +145,39 @@ export async function congelarBucketPorConvenio(params: {
    * `tieneBucketDeConvenio`).
    */
   desde?: Date | null;
+  /**
+   * Ejecutor propio. Cuando se pasa, el caller ES dueño de la transacción y de
+   * la exclusión: acá no se abre ninguna y no se toma el lock (abrir una
+   * transacción anidada o pedir un lock de transacción desde afuera de la suya
+   * sería peor que el problema que resuelve).
+   */
   ejecutor?: Pick<typeof db, "execute">;
 }): Promise<number | null> {
-  const ejecutor = params.ejecutor ?? db;
   try {
-    if (await tieneBucketDeConvenio(params.credito_id, ejecutor, params.desde))
-      return null;
-
-    const motivo =
-      params.motivo ??
-      (params.convenio_id != null
-        ? `Convenio ${params.convenio_id}: el crédito se congela en B${params.bucket} (no baja de bucket ni cambia de asesor)`
-        : `Convenio: el crédito se congela en B${params.bucket}`);
-
-    await ejecutor.execute(sql`
-      INSERT INTO ${SQL_CARTERA_SCHEMA}.buckets_historial
-        (credito_id, bucket_anterior, bucket_nuevo, tipo_evento, origen,
-         cuotas_atrasadas_nuevas, status_credito, motivo)
-      VALUES
-        (${params.credito_id}, ${params.bucket}, ${params.bucket}, 'CONGELADO',
-         'PROCESO_AUTO', 0, 'EN_CONVENIO', ${motivo})
-    `);
-    return params.bucket;
+    // Sin ejecutor propio: comprobar e insertar van juntos, en UNA transacción
+    // y detrás del lock por crédito.
+    //
+    // Por qué (review de Codex, P2): el advisory lock del vigilante solo
+    // serializa corridas del vigilante contra sí mismo. Si la firma de un
+    // convenio se cruza con esa corrida, las dos pueden ver `false` acá y las
+    // dos insertan un CONGELADO — y para un crédito sin historial previo la
+    // firma usa su bucket vivo mientras el vigilante cae al default B2/B4, así
+    // que el que gane por timestamp decide el bucket visible y puede violar
+    // justo la regla que este código existe para sostener ("el bucket que
+    // tenía al firmar").
+    //
+    // La llave es la misma que usa la reasignación de asesor
+    // (CREDITO_ASESOR_LOCK_NAMESPACE, credito_id): el congelamiento fija bucket
+    // y dueño, así que pertenece a esa familia de operaciones por crédito.
+    if (!params.ejecutor) {
+      return await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${params.credito_id})`,
+        );
+        return await congelarBajoExclusion(params, tx);
+      });
+    }
+    return await congelarBajoExclusion(params, params.ejecutor);
   } catch (err) {
     console.error(
       `[CONGELAR-CONVENIO] ⚠️ No se pudo congelar el bucket del crédito ${params.credito_id}:`,
@@ -173,4 +185,35 @@ export async function congelarBucketPorConvenio(params: {
     );
     return null;
   }
+}
+
+/** El check + insert propiamente dicho. El caller garantiza la exclusión. */
+async function congelarBajoExclusion(
+  params: {
+    credito_id: number;
+    bucket: number;
+    convenio_id?: number;
+    motivo?: string;
+    desde?: Date | null;
+  },
+  ejecutor: Pick<typeof db, "execute">,
+): Promise<number | null> {
+  if (await tieneBucketDeConvenio(params.credito_id, ejecutor, params.desde))
+    return null;
+
+  const motivo =
+    params.motivo ??
+    (params.convenio_id != null
+      ? `Convenio ${params.convenio_id}: el crédito se congela en B${params.bucket} (no baja de bucket ni cambia de asesor)`
+      : `Convenio: el crédito se congela en B${params.bucket}`);
+
+  await ejecutor.execute(sql`
+    INSERT INTO ${SQL_CARTERA_SCHEMA}.buckets_historial
+      (credito_id, bucket_anterior, bucket_nuevo, tipo_evento, origen,
+       cuotas_atrasadas_nuevas, status_credito, motivo)
+    VALUES
+      (${params.credito_id}, ${params.bucket}, ${params.bucket}, 'CONGELADO',
+       'PROCESO_AUTO', 0, 'EN_CONVENIO', ${motivo})
+  `);
+  return params.bucket;
 }

@@ -326,6 +326,20 @@ La comprobación lleva ahora un corte por la fecha de creación del convenio vig
 ese parámetro conserva el comportamiento viejo, que es lo correcto para un caller que no
 sabe de qué convenio habla.
 
+#### Comprobar e insertar van juntos
+
+El advisory lock del vigilante solo lo serializa **contra sí mismo**. Si la firma de un
+convenio se cruza con esa corrida, las dos pueden ver "todavía no está congelado" y las dos
+insertan — y para un crédito sin historial previo la firma usa su bucket vivo mientras el
+vigilante cae al default B2/B4, así que el que gane por timestamp decide el bucket visible
+y puede violar justo la regla que este código existe para sostener.
+
+El check y el insert corren ahora en una transacción detrás de
+`pg_advisory_xact_lock(CREDITO_ASESOR_LOCK_NAMESPACE, credito_id)` — la misma llave que usa
+la reasignación de asesor, porque el congelamiento fija bucket **y** dueño. Cuando el caller
+pasa su propio ejecutor, él es dueño de la transacción y de la exclusión: acá no se abre
+ninguna ni se pide el lock.
+
 #### La trampa de Drizzle que se pagó acá
 
 La medición vivía copiada en el job y en el script. En la copia del script la subconsulta

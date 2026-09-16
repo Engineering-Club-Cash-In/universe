@@ -124,6 +124,22 @@ describe("congelarBucketPorConvenio", () => {
     expect(sentencias[1]).toContain("CONGELADO");
   });
 
+  // Review de Codex, P2: sin exclusión, la firma y el vigilante podían ver los
+  // dos `false` e insertar los dos. Con ejecutor propio el caller es dueño de la
+  // transacción y del lock; sin él, este módulo abre la suya y lo toma.
+  it("con ejecutor propio NO abre transacción ni pide lock: manda el caller", async () => {
+    const sentencias: string[] = [];
+    const ej = ejecutorFalso([[{ existe: false }], []], sentencias);
+    await congelarBucketPorConvenio({
+      credito_id: 1,
+      bucket: 3,
+      ejecutor: ej as never,
+    });
+    expect(sentencias.some((q) => q.includes("pg_advisory_xact_lock"))).toBe(
+      false,
+    );
+  });
+
   it("NO lanza si la escritura falla: el convenio ya existe y tiene plata", async () => {
     const ej = {
       execute: async () => {

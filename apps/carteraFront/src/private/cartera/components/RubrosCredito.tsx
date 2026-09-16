@@ -1204,8 +1204,9 @@ function VistaEditar({
  *
  * Es la única salida real: un rubro no se puede borrar (se llevaría el
  * historial de cobros) ni editar a cero (la política de montos lo rechaza), y
- * mientras siga vivo el índice único impide crear el rubro correcto de ese
- * mismo tipo. Sin esta pantalla el arreglo era SQL a mano en producción.
+ * mientras siga vivo bloquea el alta del rubro correcto de ese mismo tipo (el
+ * backend rechaza un segundo rubro vivo del mismo crédito y tipo). Sin esta
+ * pantalla el arreglo era SQL a mano en producción.
  *
  * Como es irreversible, la vista dice antes de ejecutar qué queda después:
  * deja de cobrarse, NO se borra —el monto original sigue ahí y la anulación

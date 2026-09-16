@@ -1659,7 +1659,18 @@ export async function listarHistorial(rubro_id: number) {
     .leftJoin(platform_users, eq(rubros_historial.usuario_id, platform_users.id))
     .leftJoin(asesores, eq(platform_users.asesor_id, asesores.asesor_id))
     .where(eq(rubros_historial.rubro_id, rubro_id))
-    .orderBy(desc(rubros_historial.created_at));
+    // Ordena por `historial_id` y no por `created_at`, aunque el timestamp sea
+    // lo que se muestra. `created_at` sale del `DEFAULT now()` de la columna, y
+    // `now()` en Postgres es la hora de INICIO DE LA TRANSACCIÓN, no del INSERT:
+    // una edición que abrió su transacción primero pero se quedó esperando el
+    // candado del rubro commitea DESPUÉS y con una hora ANTERIOR. Ordenando por
+    // la hora, esas dos ediciones se muestran al revés — y este historial existe
+    // justamente para responder en qué orden se tocó un cobro y por qué.
+    //
+    // El `historial_id` es un serial: lo asigna la secuencia al insertar, así
+    // que respeta el orden real de las escrituras aunque los relojes mientan.
+    // La hora se sigue mostrando; lo que deja de decidir es el ORDEN.
+    .orderBy(desc(rubros_historial.historial_id));
 
   return filas.map(({ evento, usuario_email, usuario_nombre }) => ({
     ...evento,

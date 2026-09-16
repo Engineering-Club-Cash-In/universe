@@ -33,7 +33,7 @@
  * costar una conversación.
  */
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
@@ -43,9 +43,29 @@ import { isCarteraBackEnabled } from "./cartera-back-integration";
 
 const LOG_PREFIX = "[BotAvisoAsesor]";
 
-/** La llave del episodio: una conversación del bot = una alerta. */
-export function llaveDedupSesionBot(sesionId: string): string {
-	return `bot:sesion:${sesionId}`;
+/**
+ * La llave del episodio: una conversación del bot **por crédito** = una alerta.
+ *
+ * El crédito entra en la llave y no es un detalle (review de Codex, P2). El
+ * índice único es `(cobros_tipo, cobros_dedup_key, assigned_to)` —lleva el
+ * destinatario porque otras alertas de cobros van al asesor Y a cada
+ * supervisor—, así que una llave de solo `sesionId` NO garantizaba nada cuando
+ * dos peticiones simultáneas de la misma conversación tocaban créditos de
+ * asesores distintos: las dos insertaban.
+ *
+ * Con el crédito adentro, la unicidad que la base sostiene es exactamente la
+ * que el código promete, porque un crédito tiene un solo dueño a la vez. Y la
+ * semántica que queda es la que conviene:
+ *
+ *   · diez pantallas sobre el mismo crédito → UN aviso (el caso real de spam);
+ *   · dos créditos de dos asesores en una conversación → un aviso cada uno,
+ *     que es justo lo que cada dueño necesita saber.
+ */
+export function llaveDedupSesionBot(
+	sesionId: string,
+	numeroSifco: string,
+): string {
+	return `bot:sesion:${sesionId}:credito:${numeroSifco}`;
 }
 
 export interface AvisoBotParams {
@@ -95,12 +115,13 @@ export async function avisarAsesorPorInteraccionBot(
 		// y una que falló pudo traer el crédito de otro cliente (ver `exito`).
 		if (!params.exito) return;
 
-		// Corte barato PRIMERO: si esta conversación ya avisó, se sale sin tocar
-		// cartera. Es el caso común —una conversación son varias peticiones— y
-		// evita un HTTP por cada pantalla que el cliente abre. No sustituye al
-		// índice único (dos peticiones simultáneas lo pasan las dos): ese es el
-		// que garantiza la unicidad, esto solo evita el trabajo.
-		const llave = llaveDedupSesionBot(sesionId);
+		// Corte barato PRIMERO: si esta conversación ya avisó por este crédito,
+		// se sale sin tocar cartera. Es el caso común —una conversación son
+		// varias peticiones— y evita un HTTP por cada pantalla que el cliente
+		// abre. No sustituye al índice único (dos peticiones simultáneas lo
+		// pasan las dos): ese es el que garantiza la unicidad, esto solo evita
+		// el trabajo.
+		const llave = llaveDedupSesionBot(sesionId, numeroSifco);
 		const [yaAvisado] = await db
 			.select({ id: notifications.id })
 			.from(notifications)
@@ -145,10 +166,17 @@ export async function avisarAsesorPorInteraccionBot(
 		if (!emailAsesor) return;
 
 		// El puente de identidad de siempre: `asesores.email_cash_in` == `user.email`.
+		//
+		// Los DOS lados normalizados (review de Codex, P2): el alta de usuarios
+		// del CRM no normaliza el correo que guarda, así que una cuenta creada
+		// con mayúsculas o un espacio de más no matcheaba y la función se
+		// devolvía en silencio, sin avisarle a nadie. Mismo criterio que el
+		// resto de los puentes de cobros (`convenio-decision.ts` compara contra
+		// `lower(btrim(user.email))`).
 		const [usuarioAsesor] = await db
 			.select({ id: user.id, name: user.name })
 			.from(user)
-			.where(eq(user.email, emailAsesor))
+			.where(sql`lower(trim(${user.email})) = ${emailAsesor}`)
 			.limit(1);
 		if (!usuarioAsesor) return;
 

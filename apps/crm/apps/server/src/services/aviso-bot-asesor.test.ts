@@ -88,7 +88,20 @@ beforeEach(() => {
 
 describe("la llave de dedup", () => {
 	it("es la referencia de conversación, no el mensaje ni el día", () => {
-		expect(llaveDedupSesionBot(SESION)).toBe(`bot:sesion:${SESION}`);
+		expect(llaveDedupSesionBot(SESION, "0101")).toBe(
+			`bot:sesion:${SESION}:credito:0101`,
+		);
+	});
+
+	// El índice único lleva `assigned_to`, así que una llave de solo sesión no
+	// garantizaba nada entre asesores distintos: dos peticiones simultáneas de
+	// la misma conversación sobre créditos de dos dueños insertaban las dos
+	// (review de Codex, P2). Con el crédito adentro, la unicidad que sostiene la
+	// base es la que el código promete.
+	it("distingue créditos: cada dueño recibe lo suyo", () => {
+		expect(llaveDedupSesionBot(SESION, "0101")).not.toBe(
+			llaveDedupSesionBot(SESION, "0202"),
+		);
 	});
 });
 
@@ -194,7 +207,9 @@ describe("cuando sí se avisa", () => {
 		expect(insertadas).toHaveLength(1);
 		const fila = insertadas[0];
 		expect(fila.cobrosTipo).toBe("bot_cliente_escribio");
-		expect(fila.cobrosDedupKey).toBe(`bot:sesion:${SESION}`);
+		expect(fila.cobrosDedupKey).toBe(
+			`bot:sesion:${SESION}:credito:01010214119660`,
+		);
 		expect(fila.assignedTo).toBe("user-1");
 		expect(fila.relatedEntityId).toBe("caso-1");
 		// El texto dice QUÉ vino a hacer: es lo que le dice al asesor si puede

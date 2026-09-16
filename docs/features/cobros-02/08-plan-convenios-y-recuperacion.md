@@ -170,7 +170,7 @@ parcial sobre `(cobros_tipo, cobros_dedup_key, assigned_to)`. La llave es del **
 | Alerta | Llave | Qué la hace cambiar |
 | --- | --- | --- |
 | `convenio_incumplido` | `convenio:<id>:venc:<fecha>` | Pagar la cuota vencida más vieja y seguir debiendo otra |
-| `bot_cliente_escribio` (Fase 1.b) | `bot:sesion:<uuid>` | Una conversación nueva del bot |
+| `bot_cliente_escribio` (Fase 1.b) | `bot:sesion:<uuid>:credito:<sifco>` | Una conversación nueva, o un crédito distinto dentro de ella |
 
 La unicidad la sostiene el índice con `ON CONFLICT DO NOTHING`, **no** un `SELECT` previo
 (que no protege bajo concurrencia). Es genérica a propósito: la siguiente alerta que
@@ -203,7 +203,14 @@ el asesor se entera solo si abre la ficha.
   `referencia` del paso 1 — la fila de `otps`—, que en `bot_cobros_interacciones` vive como
   **`sesion_id`**: es la misma llave por la que la Ficha 360 agrupa y numera ("Referencia 1"
   = la más vieja), y está sin FK a propósito para sobrevivir a la purga del OTP. Una alerta
-  por `sesion_id`, no por mensaje ni por día.
+  por conversación, no por mensaje ni por día.
+- **El crédito entra en la llave**, junto a la conversación. El índice único lleva
+  `assigned_to` (otras alertas de cobros van al asesor *y* a cada supervisor), así que una
+  llave de solo `sesion_id` no garantizaba nada cuando dos peticiones simultáneas de la
+  misma conversación tocaban créditos de **asesores distintos**: las dos insertaban. Con el
+  crédito adentro, lo que la base sostiene es lo que el código promete — y la semántica que
+  queda es la que conviene: diez pantallas del mismo crédito son **un** aviso, y dos
+  créditos de dos asesores son **uno para cada dueño**.
 
 **Mecánica de a quién avisar.** La interacción guarda `numero_sifco`, pero **solo en las
 acciones sobre un crédito**: las primeras de la conversación (`buscar_cliente`,

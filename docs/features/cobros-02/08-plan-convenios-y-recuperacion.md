@@ -526,10 +526,19 @@ Cuatro cosas más que salieron de la segunda review:
   crédito en `EN_CONVENIO` pero nace `activo = false`: eso se **rechaza** desde la cola del
   supervisor, no se deshace. Guiando el botón por `statusCredit` aparecía igual y cada
   clic terminaba en error.
-- **Una reversa tampoco resucita un convenio deshecho.** `reverseConvenioPayment` elegía
-  cualquier convenio del crédito —incluido uno anulado, que conserva su fila— y le escribía
-  `activo` desde su propio cálculo. Ahora los anulados quedan fuera de la búsqueda y el
-  `UPDATE` exige `anulado_at IS NULL`.
+- **Una reversa descuenta al convenio del PAGO, y no resucita uno deshecho.**
+  `reverseConvenioPayment` elegía "algún convenio de este crédito" con un `.limit(1)`, y eso
+  se rompe de las dos formas posibles: si el convenio del pago se deshizo, no había nada que
+  descontar; y si después se firmó otro, el pago viejo le descontaba a **ese**, que nunca lo
+  recibió. Ahora se resuelve por el pivot `convenios_pagos_resume` (pago ↔ convenio), que es
+  la respuesta exacta. Un convenio anulado **sí** recibe el descuento —el pago existió— pero
+  no vuelve a `activo`: deshacerlo fue una decisión humana y una reversa contable no la
+  revierte.
+- **La anulación toma también el lock de PAGOS.** Es otra llave que la del lock por crédito,
+  y las dos hacen falta: `reversePayment` sostiene aquella mientras deshace un pago, y su
+  actualización del convenio es una escritura suelta que podía interleavearse con la
+  anulación. Va por fuera de la transacción, porque ese lock usa el pool dedicado y su
+  propia documentación prohíbe esperarlo con conexiones del pool de trabajo.
 
 #### La banda pregunta, no deduce
 

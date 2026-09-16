@@ -8,6 +8,7 @@ import {
   SQL_CARTERA_SCHEMA,
 } from "../database/db/schema";
 import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../lib/buckets-job-locks";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { contarCuotasVencidasReales, createMora } from "./latefee";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,8 +85,38 @@ export async function anularConvenio(params: {
     };
   }
 
+  // El crédito se resuelve ANTES de la transacción, solo para saber qué lock
+  // tomar. La decisión no se toma con esta lectura: adentro se vuelve a exigir
+  // todo en el WHERE del UPDATE.
+  const [delConvenioPrevio] = await db
+    .select({ credito_id: convenios_pago.credito_id })
+    .from(convenios_pago)
+    .where(eq(convenios_pago.convenio_id, params.convenio_id))
+    .limit(1);
+  if (!delConvenioPrevio) {
+    return {
+      success: false,
+      status: 404,
+      message: `[ERROR] No se encontró el convenio ${params.convenio_id}`,
+    };
+  }
+
   try {
-    return await db.transaction(async (tx) => {
+    // ── El lock de PAGOS, por fuera de la transacción ──────────────────────
+    //
+    // Es otra llave que la del lock por crédito de adentro, y las dos hacen
+    // falta (review de Codex, P1): `reversePayment` sostiene ESTA mientras
+    // deshace un pago, y su actualización del convenio es una escritura suelta.
+    // Sin coordinarse, una reversa podía commitear justo antes de la anulación
+    // y después seguir tocando el convenio — desmarcando cuotas y, para uno
+    // completado, devolviendo el crédito a EN_CONVENIO desde su snapshot viejo.
+    //
+    // Va POR FUERA del `db.transaction` a propósito: `withPaymentAdvisoryLock`
+    // usa el pool dedicado de locks y su propia documentación prohíbe esperarlo
+    // con conexiones del pool de trabajo (agotarlo deja sin conexiones al dueño
+    // del lock: deadlock de pool).
+    return await withPaymentAdvisoryLock(delConvenioPrevio.credito_id, async () =>
+      db.transaction(async (tx) => {
       // Exclusión mutua por UPDATE condicional, no read-then-write: dos clics
       // simultáneos no pueden anular dos veces ni pisar una decisión en curso.
       // `anulado_at IS NULL` es lo que hace la operación idempotente-segura, y
@@ -103,23 +134,11 @@ export async function anularConvenio(params: {
       }
 
       // ── Exclusión: el lock por crédito, el mismo que toman la reasignación
-      // de asesor y la recuperación de vehículo.
-      //
-      // Hace falta leer el crédito para saber sobre qué bloquear, así que esa
-      // primera lectura es solo para eso: la decisión NO se toma con ella.
-      const [delConvenio] = await tx
-        .select({ credito_id: convenios_pago.credito_id })
-        .from(convenios_pago)
-        .where(eq(convenios_pago.convenio_id, params.convenio_id))
-        .limit(1);
-      if (!delConvenio) {
-        throw new AnulacionAbortada(
-          404,
-          `[ERROR] No se encontró el convenio ${params.convenio_id}`,
-        );
-      }
+      // de asesor y la recuperación de vehículo. Es complementario al lock de
+      // PAGOS que envuelve toda esta transacción: aquel coordina con reversas y
+      // aplicaciones de pago, este con los movimientos de bucket y asesor.
       await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${delConvenio.credito_id})`,
+        sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${delConvenioPrevio.credito_id})`,
       );
 
       // ── Dueño esperado: la condición viaja DENTRO del UPDATE, no en un
@@ -240,7 +259,8 @@ export async function anularConvenio(params: {
         status_credito: "ACTIVO" as const,
         cuotas_atrasadas: 0,
       };
-    });
+      }),
+    );
   } catch (err) {
     if (err instanceof AnulacionAbortada) {
       return { success: false, status: err.status, message: err.message };

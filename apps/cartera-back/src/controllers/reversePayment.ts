@@ -12,6 +12,7 @@ import {
   boletas,
   pagos_credito_inversionistas,
   convenios_pago,
+  convenios_pagos_resume,
   convenio_cuotas,
   facturas_electronicas,
 } from "../database/db";
@@ -246,6 +247,9 @@ export const reversePayment = async ({ body, set }: any) => {
         const reverseConvenioResult = await reverseConvenioPayment({
           credito_id,
           monto_pago: Number(pago.pagoConvenio),
+          // El pago identifica a SU convenio (pivot convenios_pagos_resume):
+          // sin esto se le descontaba a "alguno" del crédito.
+          pago_id,
         });
         console.log(
           `✅ Pago de convenio reversado: ${reverseConvenioResult.message}`,
@@ -833,6 +837,11 @@ export const reversePayment = async ({ body, set }: any) => {
 interface ReverseConvenioPaymentParams {
   credito_id: number;
   monto_pago: number;
+  /**
+   * El pago que se está revirtiendo. Es lo que permite encontrar el convenio
+   * AL QUE SE LE APLICÓ, en vez de "alguno de este crédito".
+   */
+  pago_id: number;
 }
 
 interface ReverseConvenioPaymentResult {
@@ -856,28 +865,49 @@ export async function reverseConvenioPayment(
   params: ReverseConvenioPaymentParams,
 ): Promise<ReverseConvenioPaymentResult> {
   try {
-    const { credito_id, monto_pago } = params;
+    const { credito_id, monto_pago, pago_id } = params;
 
     console.log("\n🔄 ========== REVIRTIENDO PAGO DE CONVENIO ==========");
     console.log("🏦 Crédito ID:", credito_id);
     console.log("💵 Monto a revertir:", monto_pago);
 
-    // 1. Buscar el convenio del crédito (puede estar completado o activo).
+    // 1. El convenio AL QUE SE LE APLICÓ ESTE PAGO (review de Codex, P1).
     //
-    // Los ANULADOS quedan fuera (review de Codex, P1): un convenio deshecho
-    // conserva su fila —eso es el soft delete— y sin este filtro la reversa lo
-    // elegía y más abajo le escribía `activo` desde su propio cálculo,
-    // resucitándolo con la metadata de anulación todavía puesta.
-    const [convenio] = await db
-      .select()
-      .from(convenios_pago)
-      .where(
-        and(
-          eq(convenios_pago.credito_id, credito_id),
-          isNull(convenios_pago.anulado_at),
-        ),
-      )
+    // Antes se buscaba "algún convenio de este crédito" con un `.limit(1)`, y
+    // eso se rompe de las dos maneras posibles:
+    //  · si el convenio al que pertenecía el pago se deshizo, excluirlo dejaba
+    //    la reversa sin nada que descontar —o peor, la hacía fallar entera—;
+    //  · si después se firmó otro convenio, el pago viejo le descontaba a ESE,
+    //    que nunca lo recibió.
+    //
+    // `convenios_pagos_resume` es el pivot pago↔convenio: es la respuesta
+    // exacta. Un convenio ANULADO sí se elige —hay que descontarle lo que se
+    // le aplicó— pero más abajo se preserva su anulación.
+    const [porPago] = await db
+      .select({ convenio_id: convenios_pagos_resume.convenio_id })
+      .from(convenios_pagos_resume)
+      .where(eq(convenios_pagos_resume.pago_id, pago_id))
       .limit(1);
+
+    const [convenio] = porPago
+      ? await db
+          .select()
+          .from(convenios_pago)
+          .where(eq(convenios_pago.convenio_id, porPago.convenio_id))
+          .limit(1)
+      : // Sin fila en el pivot (pagos viejos, previos a que se poblara): se cae
+        // al criterio anterior, pero sin tocar los anulados — para esos, sin
+        // pivot, no hay forma de saber si el pago era suyo.
+        await db
+          .select()
+          .from(convenios_pago)
+          .where(
+            and(
+              eq(convenios_pago.credito_id, credito_id),
+              isNull(convenios_pago.anulado_at),
+            ),
+          )
+          .limit(1);
 
     if (!convenio) {
       throw new Error(
@@ -947,10 +977,11 @@ export async function reverseConvenioPayment(
 
     // 7. Actualizar el convenio.
     //
-    // El WHERE exige que siga SIN ANULAR, no solo que exista: `convenio` es un
-    // snapshot leído arriba y alguien pudo deshacerlo entre medio. Sin esto, el
-    // `activo` calculado acá lo devolvía a la vida (mismo blindaje que el
-    // camino de aplicar el pago).
+    // Los totales se descuentan SIEMPRE —el pago existió y hay que deshacerlo—
+    // pero un convenio anulado NO vuelve a `activo`: deshacerlo fue una
+    // decisión humana y una reversa contable no la revierte. Sin esto, revertir
+    // un pago resucitaba el convenio con su metadata de anulación puesta.
+    const sigueAnulado = convenio.anulado_at != null;
     const [convenioActualizado] = await db
       .update(convenios_pago)
       .set({
@@ -958,21 +989,16 @@ export async function reverseConvenioPayment(
         monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
         pagos_realizados: nuevosPagosRealizados,
         pagos_pendientes: nuevosPagosPendientes,
-        completado: convenioCompletado,
-        activo: convenioActivo,
+        completado: sigueAnulado ? convenio.completado : convenioCompletado,
+        activo: sigueAnulado ? false : convenioActivo,
         updated_at: new Date(),
       })
-      .where(
-        and(
-          eq(convenios_pago.convenio_id, convenio.convenio_id),
-          isNull(convenios_pago.anulado_at),
-        ),
-      )
+      .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
       .returning();
 
     if (!convenioActualizado) {
       throw new Error(
-        `El convenio ${convenio.convenio_id} se deshizo mientras se revertía el pago. La reversa no se aplicó al convenio.`,
+        `No se pudo actualizar el convenio ${convenio.convenio_id} al revertir el pago.`,
       );
     }
 
@@ -1020,7 +1046,11 @@ export async function reverseConvenioPayment(
     // (paso 9.b): regresar el crédito a EN_CONVENIO y volver a marcar IMPAGAS las
     // cuotas reestructuradas (cuotas_convenio). Sin esto el crédito se queda ACTIVO
     // con un convenio vivo → sale de los jobs de convenio y entra a mora normal.
-    if (convenio.completado === true && convenioActivo === true) {
+    if (
+      !sigueAnulado &&
+      convenio.completado === true &&
+      convenioActivo === true
+    ) {
       const cuotasReestructuradas = convenio.cuotas_convenio ?? [];
       if (cuotasReestructuradas.length > 0) {
         await db

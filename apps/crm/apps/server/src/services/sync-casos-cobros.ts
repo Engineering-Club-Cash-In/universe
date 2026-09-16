@@ -23,6 +23,7 @@ import { createNotification } from "../routers/notifications";
 import type { StatusCreditEnum } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
+import { debeCrearCasoCobros } from "./sync-casos-cobros.politica";
 
 type EstadoMoraEnum = (typeof estadoMoraEnum.enumValues)[number];
 
@@ -68,28 +69,6 @@ const MORA_SEVERITY: Record<string, number> = {
 function moraEscalo(estadoAnterior: string, estadoNuevo: string): boolean {
 	return (
 		(MORA_SEVERITY[estadoNuevo] ?? 0) > (MORA_SEVERITY[estadoAnterior] ?? 0)
-	);
-}
-
-/**
- * Determina si un crédito debe tener caso de cobros activo
- */
-function debeCrearCasoCobros(
-	statusCredit: StatusCreditEnum,
-	diasMora: number,
-): boolean {
-	// Solo crear casos para créditos activos o morosos con días de mora > 0.
-	//
-	// COBROS-02 Fase 4: EN_RECUPERACION entra acá porque hasta ayer estos mismos
-	// créditos eran MOROSO (review de Codex, P1). Son los de más riesgo de la
-	// cartera —se decidió recuperarles la unidad— y siguen devengando mora; sin
-	// esta rama dejaban de crear y de refrescar su caso de cobros justo cuando
-	// más seguimiento necesitan.
-	return (
-		(statusCredit === "ACTIVO" ||
-			statusCredit === "MOROSO" ||
-			statusCredit === "EN_RECUPERACION") &&
-		diasMora > 0
 	);
 }
 
@@ -311,6 +290,18 @@ export async function sincronizarCasosCobros(
 						resultado.reason,
 					);
 					result.success = false;
+					// Al log también (review de Codex, P2): su status sale SOLO de
+					// `result.errors.length`, así que sin esto una corrida que se
+					// saltó un estado entero —o los dos— quedaba registrada como
+					// "success" y el monitoreo veía una sync sana. Mismo formato
+					// que la rama forzada.
+					const mensaje =
+						resultado.reason instanceof Error
+							? resultado.reason.message
+							: String(resultado.reason);
+					result.errors.push(
+						`Estado ${estadosEnMora[i]}: no se pudo obtener créditos de cartera-back (${mensaje})`,
+					);
 				}
 			});
 		}

@@ -124,6 +124,7 @@ describe("bucketDeCredito", () => {
     cuotas_min: b.cuotas_min,
     cuotas_max: b.cuotas_max,
     estados_incluidos: b.estados_incluidos,
+    estados_piso: b.estados_piso,
   }));
 
   it("clasifica por rango de cuotas atrasadas", () => {
@@ -173,6 +174,7 @@ describe("bucketDeCredito", () => {
         cuotas_min: b.cuotas_min,
         cuotas_max: b.cuotas_max,
         estados_incluidos: b.estados_incluidos,
+        estados_piso: b.estados_piso,
       }));
 
     expect(bucketDeCredito("MOROSO", 0, catalogoOrdenInvertido)).toBe(0);

@@ -1136,3 +1136,34 @@ describe("capitalSuprimidoPorConvenio (devolución a saldo a favor)", () => {
     ).toBe("0");
   });
 });
+
+/**
+ * COBROS-02 Fase 4 — el levantamiento de EN_RECUPERACION tiene que correr en
+ * las DOS ramas de validación (review de Codex, P1).
+ *
+ * La RAMA A (la cuota todavía no cierra) retorna antes de llegar al final de la
+ * RAMA B. Un pago solo de mora entra por la A cuando ya no hay cuotas vencidas
+ * —es justo el pago que salda la última deuda— y con el levantamiento solo al
+ * final de la B el crédito se quedaba en recuperación para siempre.
+ */
+describe("aplicar-pago: levantamiento de EN_RECUPERACION", () => {
+  it("se invoca antes del return de la RAMA A y también en la RAMA B", async () => {
+    const source = await Bun.file(
+      new URL("./registerPayment.ts", import.meta.url).pathname,
+    ).text();
+
+    const ramaA = source.indexOf(
+      "if (!cuotaCompleta) {",
+      source.indexOf("// RAMA A: la cuota AÚN no se cierra"),
+    );
+    expect(ramaA).toBeGreaterThan(-1);
+    const retornoA = source.indexOf("return {", ramaA);
+    const tramoA = source.slice(ramaA, retornoA);
+    expect(tramoA).toContain("await levantarRecuperacionSiCorresponde();");
+
+    const ramaB = source.indexOf("// RAMA B: la cuota queda COMPLETA");
+    expect(ramaB).toBeGreaterThan(ramaA);
+    const tramoB = source.slice(ramaB, source.indexOf("export ", ramaB));
+    expect(tramoB).toContain("await levantarRecuperacionSiCorresponde();");
+  });
+});

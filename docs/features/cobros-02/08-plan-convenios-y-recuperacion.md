@@ -695,6 +695,24 @@ Tres cosas más de la segunda review, todas sobre la misma pieza:
   más riesgo de la cartera dejaban de crear y refrescar su caso de cobros — justo cuando
   más seguimiento necesitan.
 
+#### Dos puertas más: la del pago solo de mora y la del caso sin cuotas
+
+La misma forma de bug que las anteriores —el estado se crea bien, pero otra pieza lo
+ignora—, esta vez en los dos lugares que miran "¿todavía debe?":
+
+- **El levantamiento corre en las dos ramas de la validación.** Estaba solo al final de la
+  rama que cierra cuota, y la otra retorna antes. Un pago **solo de mora** es válido con
+  `monto_aplicado = 0` y, sin cuotas vencidas, entra por la rama que no cierra cuota: es
+  justo el pago que salda la última deuda, y el crédito se quedaba en recuperación para
+  siempre. Ahora es una sola función que se llama antes de cada `return`.
+- **`EN_RECUPERACION` siempre tiene caso de cobros.** La sync lo admitía, pero detrás del
+  mismo `diasMora > 0` que los morosos, y esos días se calculan sobre **cuotas**. Un crédito
+  que pagó las cuotas y no la mora sigue en recuperación a propósito (decisión 18) con 0
+  días: la sync le cerraba el caso mientras el vehículo seguía en recuperación.
+- **La sync registra cuando un estado no se pudo traer.** El log de la corrida deriva su
+  status solo de la lista de errores, y la rama programada marcaba el fallo sin agregarlo:
+  una corrida que se saltó `MOROSO` o `EN_RECUPERACION` —o los dos— quedaba como `success`.
+
 #### El triaje de las listas de estados
 
 El plan hablaba de "~90 listas de estados escritas a mano en ~45 archivos". El criterio

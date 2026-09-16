@@ -2076,3 +2076,34 @@ emisor; el OTP ya lo hacía correctamente.
 
 **Lo que NO cambia:** con `TEST_MESSAGE=false` todo sale igual que siempre. La
 red no apaga envíos, los redirige.
+
+## D-56 · El modo agente avisa al asesor, enlazado al aviso inicial
+
+**Fecha:** 2026-09-16 · **Decidió:** Daniel (pedido del PM)
+
+Desde COBROS-02 el asesor recibe `bot_cliente_escribio` cuando un cliente suyo
+usa el bot. El PM pidió el segundo momento: **cuando la conversación pasa a
+modo agente**, que es cuando el cliente está esperando a una persona.
+
+- **Lo informa SimpleTech**, con `POST /api/bot/cobros/conversacion/modo-agente`
+  (`referencia` + `numeroSifco`). El modo agente vive en su motor; nosotros no
+  lo vemos pasar. Documentado en el Swagger como servicio 10.
+- **Tipo propio (`bot_modo_agente`) y no un segundo "escribió":** el asesor
+  termina con dos alertas de la misma conversación — "escribió" y "pidió un
+  agente" — y la segunda apunta a la primera por `notificacion_origen_id`
+  (migración CRM `0056`, corrida en dev el 2026-09-16). Si no hubo inicial,
+  se crea igual sin origen.
+- **Una por conversación y crédito**, con la misma llave de dedup que el aviso
+  inicial (`bot:sesion:<referencia>:credito:<sifco>`); repetir la llamada
+  responde `YA_NOTIFICADO`.
+- **La referencia vale 24 h en este servicio**, no los 30 min del menú: el modo
+  agente suele llegar al final de una conversación larga, y ahí es donde menos
+  puede perderse el aviso. No abre datos: el servicio no devuelve nada del
+  crédito y sigue exigiendo OTP canjeado y crédito del cliente.
+- **No es best-effort silencioso:** si cartera no responde (no se sabe quién es
+  el dueño) sale `503 CARTERA_NO_DISPONIBLE` para que el bot reintente.
+- El middleware del historial **no** genera un "escribió" para esta acción:
+  llegaría después y taparía la alerta que importa.
+- **En la campanita es la alerta prioritaria:** mientras siga abierta sube arriba
+  de la lista (antes de paginar), hay un banner con cuántos clientes esperan y
+  un filtro por tipo de alerta de cobros. En la Ficha 360 también va primero.

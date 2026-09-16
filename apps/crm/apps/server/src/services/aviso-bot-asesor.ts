@@ -160,6 +160,100 @@ const QUE_HIZO: Record<string, string> = {
 	pago_link_estado: "revisó el estado de su link de pago",
 };
 
+/** Acción del historial para `POST /api/bot/cobros/conversacion/modo-agente`. */
+export const ACCION_MODO_AGENTE = "modo_agente";
+
+type AnclaCaso =
+	| {
+			relatedEntityType: "collection_case";
+			relatedEntityId: string;
+			redirectPage: "cobros_detail";
+	  }
+	| Record<string, never>;
+
+export type DestinoAvisoBot = {
+	usuarioAsesor: { id: string; name: string };
+	/** "Cliente (crédito X)", o "El crédito X" si cartera no trae nombre. */
+	quien: string;
+	/** A dónde navega la notificación; vacío si el crédito no tiene caso. */
+	anclaCaso: AnclaCaso;
+};
+
+/**
+ * A quién le llega y a dónde navega un aviso del bot sobre un crédito: el
+ * asesor DUEÑO hoy y el caso de cobros, si hay. `null` si no hay a quién
+ * avisar (crédito sin asesor, o asesor sin usuario vinculado en el CRM).
+ *
+ * La comparten el aviso de "tu cliente escribió" y el de modo agente
+ * (`aviso-bot-modo-agente.ts`): los dos le hablan al mismo dueño y navegan a la
+ * misma ficha. Lanza si cartera no responde; cada caller decide si eso se
+ * traga (best-effort) o se reporta.
+ */
+export async function resolverDestinoAvisoBot(
+	numeroSifco: string,
+): Promise<DestinoAvisoBot | null> {
+	// El caso de cobros es a dónde navega la notificación. Se toma el ACTIVO
+	// si lo hay y si no el más reciente — un caso cerrado sigue siendo la
+	// ficha correcta de ese crédito.
+	//
+	// Y si no hay ninguno, el aviso se manda IGUAL, sin enlace (review de
+	// Codex, P1): `sync-casos-cobros` solo mantiene caso activo cuando
+	// `diasMora > 0`, así que exigirlo dejaba justo a los buckets sanos sin
+	// aviso — los mismos que la decisión 16 nombra explícitamente ("al
+	// asesor dueño del crédito, esté donde esté"). Un cliente al día que
+	// escribe es de los que MÁS vale la pena atender rápido.
+	const [caso] = await db
+		.select({ id: casosCobros.id })
+		.from(casosCobros)
+		.where(eq(casosCobros.numeroCreditoSifco, numeroSifco))
+		.orderBy(desc(casosCobros.activo), desc(casosCobros.createdAt))
+		.limit(1);
+
+	// Dueño REAL del crédito, sin cache: entre el bucket de ayer y hoy el
+	// motor pudo reasignarlo, y el aviso tiene que llegarle a quien lo lleva
+	// ahora. `useCircuitBreaker=false` porque esto es best-effort y no debe
+	// compartir contador de fallos con las operaciones que sí importan.
+	const respuesta = await carteraBackClient.getCredito(
+		numeroSifco,
+		false,
+		false,
+	);
+	const emailAsesor = respuesta?.asesor?.emailCashIn?.trim().toLowerCase();
+	if (!emailAsesor) return null;
+
+	// El puente de identidad de siempre: `asesores.email_cash_in` == `user.email`.
+	//
+	// Los DOS lados normalizados (review de Codex, P2): el alta de usuarios
+	// del CRM no normaliza el correo que guarda, así que una cuenta creada
+	// con mayúsculas o un espacio de más no matcheaba y la función se
+	// devolvía en silencio, sin avisarle a nadie. Mismo criterio que el
+	// resto de los puentes de cobros (`convenio-decision.ts` compara contra
+	// `lower(btrim(user.email))`).
+	const [usuarioAsesor] = await db
+		.select({ id: user.id, name: user.name })
+		.from(user)
+		.where(sql`lower(trim(${user.email})) = ${emailAsesor}`)
+		.limit(1);
+	if (!usuarioAsesor) return null;
+
+	const cliente = respuesta?.usuario?.nombre?.trim();
+	const quien = cliente
+		? `${cliente} (crédito ${numeroSifco})`
+		: `El crédito ${numeroSifco}`;
+
+	// Sin caso no hay a dónde navegar: el aviso se manda igual pero sin
+	// enlace, y el texto carga el SIFCO para que se pueda buscar a mano.
+	const anclaCaso: AnclaCaso = caso
+		? {
+				relatedEntityType: "collection_case",
+				relatedEntityId: caso.id,
+				redirectPage: "cobros_detail",
+			}
+		: {};
+
+	return { usuarioAsesor, quien, anclaCaso };
+}
+
 export async function avisarAsesorPorInteraccionBot(
 	params: AvisoBotParams,
 ): Promise<void> {
@@ -167,6 +261,10 @@ export async function avisarAsesorPorInteraccionBot(
 		const { sesionId, numeroSifco } = params;
 		// Sin conversación no hay llave de dedup; sin SIFCO no hay asesor.
 		if (!sesionId || !numeroSifco) return;
+		// El modo agente tiene su propio aviso, que el endpoint crea ANTES de
+		// que este middleware corra: sumarle acá un "escribió" llegaría después
+		// y quedaría como la alerta más nueva, tapando la que importa.
+		if (params.accion === ACCION_MODO_AGENTE) return;
 		// Solo si esta interacción probó que el crédito es del cliente: salió
 		// bien, o falló DESPUÉS del control de acceso (ver la lista de códigos).
 		if (!pruebaPropiedadDelCredito(params)) return;
@@ -192,70 +290,16 @@ export async function avisarAsesorPorInteraccionBot(
 
 		if (!isCarteraBackEnabled()) return;
 
-		// El caso de cobros es a dónde navega la notificación. Se toma el ACTIVO
-		// si lo hay y si no el más reciente — un caso cerrado sigue siendo la
-		// ficha correcta de ese crédito.
-		//
-		// Y si no hay ninguno, el aviso se manda IGUAL, sin enlace (review de
-		// Codex, P1): `sync-casos-cobros` solo mantiene caso activo cuando
-		// `diasMora > 0`, así que exigirlo dejaba justo a los buckets sanos sin
-		// aviso — los mismos que la decisión 16 nombra explícitamente ("al
-		// asesor dueño del crédito, esté donde esté"). Un cliente al día que
-		// escribe es de los que MÁS vale la pena atender rápido.
-		const [caso] = await db
-			.select({ id: casosCobros.id })
-			.from(casosCobros)
-			.where(eq(casosCobros.numeroCreditoSifco, numeroSifco))
-			.orderBy(desc(casosCobros.activo), desc(casosCobros.createdAt))
-			.limit(1);
+		const destino = await resolverDestinoAvisoBot(numeroSifco);
+		if (!destino) return;
+		const { usuarioAsesor, quien, anclaCaso } = destino;
 
-		// Dueño REAL del crédito, sin cache: entre el bucket de ayer y hoy el
-		// motor pudo reasignarlo, y el aviso tiene que llegarle a quien lo lleva
-		// ahora. `useCircuitBreaker=false` porque esto es best-effort y no debe
-		// compartir contador de fallos con las operaciones que sí importan.
-		const respuesta = await carteraBackClient.getCredito(
-			numeroSifco,
-			false,
-			false,
-		);
-		const emailAsesor = respuesta?.asesor?.emailCashIn?.trim().toLowerCase();
-		if (!emailAsesor) return;
-
-		// El puente de identidad de siempre: `asesores.email_cash_in` == `user.email`.
-		//
-		// Los DOS lados normalizados (review de Codex, P2): el alta de usuarios
-		// del CRM no normaliza el correo que guarda, así que una cuenta creada
-		// con mayúsculas o un espacio de más no matcheaba y la función se
-		// devolvía en silencio, sin avisarle a nadie. Mismo criterio que el
-		// resto de los puentes de cobros (`convenio-decision.ts` compara contra
-		// `lower(btrim(user.email))`).
-		const [usuarioAsesor] = await db
-			.select({ id: user.id, name: user.name })
-			.from(user)
-			.where(sql`lower(trim(${user.email})) = ${emailAsesor}`)
-			.limit(1);
-		if (!usuarioAsesor) return;
-
-		const cliente = respuesta?.usuario?.nombre?.trim();
-		const quien = cliente
-			? `${cliente} (crédito ${numeroSifco})`
-			: `El crédito ${numeroSifco}`;
 		const queHizo = QUE_HIZO[params.accion] ?? "escribió al bot de cobros";
 		// Cuando el bot le falló, decirlo: es la diferencia entre "escribió" y
 		// "escribió y se quedó sin respuesta", que cambia la urgencia.
 		const cierre = params.exito
 			? "Dale seguimiento: si escribió es porque algo necesita."
 			: "El bot no pudo completarlo, así que sigue esperando. Llamalo.";
-		// Sin caso no hay a dónde navegar: el aviso se manda igual pero sin
-		// enlace, y el texto carga el SIFCO para que se pueda buscar a mano.
-		const anclaCaso = caso
-			? {
-					relatedEntityType: "collection_case" as const,
-					relatedEntityId: caso.id,
-					redirectPage: "cobros_detail" as const,
-				}
-			: {};
-
 		await db
 			.insert(notifications)
 			.values({

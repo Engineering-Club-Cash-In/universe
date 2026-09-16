@@ -20,6 +20,7 @@ import {
 	listarCreditosBotCobros,
 } from "./controllers/bot-cobros";
 import { eventoPagoBotCobros } from "./controllers/bot-cobros-eventos";
+import { modoAgenteBotCobros } from "./controllers/bot-cobros-modo-agente";
 import {
 	crearPagoLinkBotCobros,
 	estadoPagoLinkBotCobros,
@@ -1287,6 +1288,15 @@ app.post(
 	"/api/bot/cobros/pago-link/estado",
 	autenticarBotCobros,
 	estadoPagoLinkBotCobros,
+);
+
+// Servicio 10 · el cliente pasó a modo agente en el bot. No devuelve datos:
+// crea la alerta `bot_modo_agente` al asesor dueño, enlazada a la de "tu
+// cliente escribió" de la misma conversación.
+app.post(
+	"/api/bot/cobros/conversacion/modo-agente",
+	autenticarBotCobros,
+	modoAgenteBotCobros,
 );
 
 // Documentación de esos dos endpoints, para SimpleTech. Va SIN API key —no

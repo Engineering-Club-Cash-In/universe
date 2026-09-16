@@ -368,3 +368,30 @@ describe("consultas del menú", () => {
 		expect(interaccion?.detalle).toEqual({});
 	});
 });
+
+describe("modo agente (servicio 10)", () => {
+	test("queda con su acción y si el asesor quedó avisado", () => {
+		const interaccion = armarInteraccion({
+			ruta: "/api/bot/cobros/conversacion/modo-agente",
+			cuerpo: { referencia: REFERENCIA, numeroSifco: "115900" },
+			estado: 200,
+			respuesta: {
+				success: true,
+				data: {
+					notificado: true,
+					motivo: "NOTIFICADO",
+					mensaje: "Listo, ya le avisamos a tu asesor.",
+				},
+			},
+			identidad: null,
+		});
+
+		expect(interaccion?.accion).toBe("modo_agente");
+		expect(interaccion?.numeroSifco).toBe("115900");
+		// El mensaje al cliente no es historial: solo el resultado del aviso.
+		expect(interaccion?.detalle).toEqual({
+			notificado: true,
+			motivo: "NOTIFICADO",
+		});
+	});
+});

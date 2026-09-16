@@ -352,3 +352,18 @@ describe("orden de validación en crearPagoLink", () => {
 		expect(posPropiedad).toBeLessThan(posMonto);
 	});
 });
+
+// El modo agente trae su propia alerta, creada por el endpoint ANTES de que el
+// historial corra: un "escribió" acá llegaría después y taparía la importante.
+describe("modo agente", () => {
+	it("no genera el aviso de 'escribió': tiene el suyo", async () => {
+		await avisarAsesorPorInteraccionBot({
+			sesionId: SESION,
+			numeroSifco: "0101",
+			accion: "modo_agente",
+			exito: true,
+		});
+		expect(insertadas).toHaveLength(0);
+		expect(llamadasCartera).toHaveLength(0);
+	});
+});

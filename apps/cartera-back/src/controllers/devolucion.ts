@@ -2,6 +2,7 @@ import { db } from "../database";
 import { creditos, historial_devolucion_credito, usuarios } from "../database/db/schema";
 import { eq, desc, sql, and, or, ilike, inArray } from "drizzle-orm";
 import { registrarCancelacionEspejo } from "./abonosCapital";
+import { filtrarCreditosTotalmenteDevueltos } from "../utils/devolucionCompletada";
 
 export async function listPendingDevolucion({ query, set }: any) {
   try {
@@ -18,11 +19,16 @@ export async function listPendingDevolucion({ query, set }: any) {
 
     const search = String(query.search || "").trim();
 
+    // HISTORIAL: la vista completa del ciclo de vida de la devolución, no
+    // solo la bandeja de pendientes. Trae todos los estados (incluido
+    // NO_APLICA no tendría sentido acá — un crédito que nunca entró al flujo
+    // no es "historial" — así que se excluye) sin filtrar por estado.
     const estadoFilter =
-      requestedStatus === "BANDEJA_DEVOLUCION" ||
-      requestedStatus === "PENDIENTE_Y_RECHAZADO"
-        ? inArray(creditos.estado_devolucion, ["PENDIENTE_AUTORIZACION", "RECHAZADO"] as any)
-        : eq(creditos.estado_devolucion, requestedStatus as any);
+      requestedStatus === "HISTORIAL"
+        ? sql`${creditos.estado_devolucion} <> 'NO_APLICA'`
+        : (requestedStatus === "BANDEJA_DEVOLUCION" || requestedStatus === "PENDIENTE_Y_RECHAZADO")
+          ? inArray(creditos.estado_devolucion, ["PENDIENTE_AUTORIZACION", "RECHAZADO"] as any)
+          : eq(creditos.estado_devolucion, requestedStatus as any);
 
     const whereClause = and(
       estadoFilter,
@@ -68,10 +74,53 @@ export async function listPendingDevolucion({ query, set }: any) {
       .limit(limit)
       .offset(offset);
 
+    // Solo en HISTORIAL: por cada crédito VERIFICADO de esta página, por qué
+    // sigue sin cerrar. Si sigue en VERIFICADO es porque el cierre
+    // (marcarDevolucionCompletadaSiCorresponde) todavía no encontró el padre
+    // limpio — lo normal es que falte liquidar a alguien, y esto se lo dice
+    // al operador sin que tenga que ir a mirar la base. Se reusa el mismo
+    // predicado que decide el cierre real, así que nunca puede divergir de
+    // "cuándo cierra de verdad" un crédito.
+    //
+    // Dos motivos posibles (ver MotivoDiferido en devolucionCompletada.ts):
+    //   - inversionistas_en_padre: quedan N filas no-CUBE en el padre.
+    //   - saldo_en_espejo: el padre ya está limpio, pero el inversionista que
+    //     salió todavía tiene saldo en el espejo (no se le puede cerrar por
+    //     el guard de monto_aportado==0 de la RAMA 2 de la liquidación).
+    const pendientesPorCredito = new Map<
+      number,
+      { motivo: "inversionistas_en_padre"; restantes: number } | { motivo: "saldo_en_espejo" }
+    >();
+    if (requestedStatus === "HISTORIAL") {
+      const verificadosIds = pendingCredits
+        .filter((c) => c.estado_devolucion === "VERIFICADO")
+        .map((c) => c.credito_id);
+
+      if (verificadosIds.length > 0) {
+        const { diferidos } = await filtrarCreditosTotalmenteDevueltos(db, verificadosIds);
+        for (const [creditoId, motivoDiferido] of diferidos) {
+          pendientesPorCredito.set(
+            creditoId,
+            motivoDiferido.tipo === "inversionistas_en_padre"
+              ? { motivo: "inversionistas_en_padre", restantes: motivoDiferido.restantes }
+              : { motivo: "saldo_en_espejo" },
+          );
+        }
+      }
+    }
+
+    const creditsConAlerta = pendingCredits.map((c) => ({
+      ...c,
+      pendiente_cierre:
+        c.estado_devolucion === "VERIFICADO"
+          ? (pendientesPorCredito.get(c.credito_id) ?? null)
+          : null,
+    }));
+
     return {
       success: true,
       data: {
-        credits: pendingCredits,
+        credits: creditsConAlerta,
         pagination: { page, limit, total, totalPages },
         status: requestedStatus,
         search,

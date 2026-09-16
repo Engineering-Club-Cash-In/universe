@@ -55,6 +55,43 @@ export const crearResumenAbonosCuota = (input: Parameters<
 // con assignCapital. Toda compra de cartera se le hace a Cube.
 const CUBE_ID = 86;
 
+/**
+ * Único punto de este archivo que decide "¿este inversionista es CUBE?".
+ * Por ID primero — es la fuente canónica en todo el resto del código
+ * (investor.ts, assignCapital.ts, devolucionCompletada.ts) — con el nombre
+ * como red de seguridad para datos históricos con el ID distinto, no como vía
+ * principal: guards que dependen de "nunca tratar a CUBE como un
+ * inversionista que sale" (ver aplicarDevolucionCube más abajo) se
+ * desactivarían solos, sin error, si alguien renombra el inversionista y el
+ * chequeo fuera solo por nombre.
+ */
+const esCube = (inv: { inversionista_id: number; nombre: string }): boolean =>
+  inv.inversionista_id === CUBE_ID ||
+  inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+
+/**
+ * ¿A este inversionista le toca la devolución COMPLETA de su capital en este
+ * pago (crédito en VERIFICADO, o el inversionista saliendo del todo)?
+ *
+ * Único punto que decide esta regla — antes vivía repetida en tres lugares
+ * de insertPagosCreditoInversionistas (el cálculo de abono_capital, el `if`
+ * que lo aplica, y lo que se le pasa a resolverAbonosNoLiquidados), lo que
+ * dejaba abierta la posibilidad de que un cambio futuro actualizara uno y se
+ * olvidara de los otros dos.
+ *
+ * NUNCA es true para CUBE: CUBE es quien absorbe la cartera cuando los demás
+ * inversionistas salen, jamás "sale" él mismo. Tratarlo como saliente le
+ * devolvería su propio capital como si estuviera abandonando el crédito —
+ * exactamente el bug que dejó ~Q1.9M en filas CANCELACION a nombre de CUBE
+ * en producción, ninguna liquidada porque CUBE no pasa por ese flujo.
+ */
+const esDevolucionCompleta = (
+  inv: { inversionista_id: number; nombre: string; status_inversionista?: string | null },
+  estadoDevolucionCredito: string | null | undefined,
+): boolean =>
+  !esCube(inv) &&
+  (estadoDevolucionCredito === "VERIFICADO" || inv.status_inversionista === "pendiente_devolucion");
+
 type PendingReturnLockRow = {
   creditoId: number;
   numeroCreditoSifco: string;
@@ -430,6 +467,82 @@ export async function getPayments(
     totalPages: Math.ceil(Number(count) / perPage),
   };
 }
+type AbonoNoLiquidado = { abono_id: number; tipo: string; monto: string | number };
+
+/**
+ * Decide qué hacer con los abonos_capital no liquidados de un inversionista
+ * al armar su fila de espejo: cuánto sumar a `abono_capital` (a partir de un
+ * valor ya calculado) y qué abonos marcar como "consumidos" (se cerrarán con
+ * `liquidado=true` cuando el pago espejo se liquide).
+ *
+ * Extraída de insertPagosCreditoInversionistas para poder probarla sin la
+ * conexión real: esa función arma el mock de `abonos_capital` mal cableado
+ * (ver payments.test.ts, ningún test simula esta tabla), así que un bug acá
+ * no se detectaría por ese camino.
+ *
+ * Reglas:
+ * - Si el inversionista está saliendo del crédito por completo
+ *   (`devolucionCompleta`, o sea VERIFICADO/pendiente_devolucion y no-CUBE),
+ *   los abonos pendientes NO se tocan: su abono_capital ya es el
+ *   monto_aportado completo, sumarlos duplicaría el conteo.
+ * - Si no, los CAPITAL se suman al abono_capital base. Un CANCELACION (que
+ *   normalmente dispara "devolver todo el aportado") solo lo hace si el
+ *   inversionista no es CUBE — CUBE nunca sale del crédito, así que una
+ *   CANCELACION a su nombre es basura de una corrida anterior del bug de
+ *   payments.ts:916, no algo que corresponda pagarle.
+ * - Los abonos "consumidos" (los que se cerrarán al liquidar) son TODOS los
+ *   no liquidados, EXCEPTO una CANCELACION de CUBE: si esa se marcara
+ *   consumida iría a `liquidado=true` sin que su monto haya entrado en
+ *   ningún cálculo, dejando un registro contable falso de "se le pagó a
+ *   CUBE su devolución". Queda abierta para revisión/limpieza manual.
+ */
+export function resolverAbonosNoLiquidados(params: {
+  abonosNoLiquidados: AbonoNoLiquidado[];
+  abonoCapitalBase: Big;
+  montoAportado: string | number;
+  devolucionCompleta: boolean;
+  isCube: boolean;
+}): {
+  abonoCapital: Big;
+  abonoCapitalId: number | null;
+  abonoIdsConsumidos: number[];
+  saltado: boolean;
+} {
+  const { abonosNoLiquidados, abonoCapitalBase, montoAportado, devolucionCompleta, isCube } = params;
+
+  if (abonosNoLiquidados.length === 0) {
+    return { abonoCapital: abonoCapitalBase, abonoCapitalId: null, abonoIdsConsumidos: [], saltado: false };
+  }
+
+  if (devolucionCompleta) {
+    return { abonoCapital: abonoCapitalBase, abonoCapitalId: null, abonoIdsConsumidos: [], saltado: true };
+  }
+
+  let abonoCapital = abonoCapitalBase;
+  let montoAbono = new Big(0);
+  for (const abono of abonosNoLiquidados) {
+    if (abono.tipo === "CAPITAL") {
+      montoAbono = montoAbono.plus(abono.monto);
+    } else if (abono.tipo === "CANCELACION" && !isCube) {
+      abonoCapital = new Big(montoAportado || 0);
+    }
+  }
+  if (!montoAbono.eq(0)) {
+    abonoCapital = abonoCapital.plus(montoAbono);
+  }
+
+  const abonoIdsConsumidos = abonosNoLiquidados
+    .filter((a) => !(isCube && a.tipo === "CANCELACION"))
+    .map((a) => a.abono_id);
+
+  return {
+    abonoCapital,
+    abonoCapitalId: abonosNoLiquidados[0].abono_id,
+    abonoIdsConsumidos,
+    saltado: false,
+  };
+}
+
 /**
  * Inserta los registros en pagos_credito_inversionistas para cada inversionista,
  * repartiendo los abonos según el porcentaje de participación (Big.js).
@@ -638,8 +751,7 @@ export async function insertPagosCreditoInversionistas(
     console.log(`   Nombre: ${inv.nombre}`);
     console.log(`   inversionista_id: ${inv.inversionista_id}`);
 
-    const isCube =
-      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+    const isCube = esCube(inv);
 
     console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
 
@@ -913,9 +1025,13 @@ export async function insertPagosCreditoInversionistas(
       `   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`
     );
 
-    const aplicarDevolucionCube = currentCredit?.estado_devolucion === 'VERIFICADO';
+    // Ver esDevolucionCompleta (arriba del archivo) para la regla completa y
+    // por qué nunca aplica a CUBE. `aplicarDevolucionCube` se conserva aparte
+    // solo para distinguir en el log si el motivo fue el crédito en
+    // VERIFICADO o el inversionista en pendiente_devolucion.
+    const aplicarDevolucionCube = !isCube && currentCredit?.estado_devolucion === 'VERIFICADO';
 
-    if (aplicarDevolucionCube || inv.status_inversionista === "pendiente_devolucion") {
+    if (esDevolucionCompleta(inv, currentCredit?.estado_devolucion)) {
       // 🆕 CASO ESPECIAL:
       // - crédito con devolucion_cube=true, o
       // - inversionista en pendiente_devolucion.
@@ -1004,41 +1120,38 @@ export async function insertPagosCreditoInversionistas(
         )
       );
 
-    let abonoCapitalId: number | null = null;
     // Abonos que esta fila de espejo consume (los que suma en su abono_capital).
     // Se marcan con el id de la fila después del insert: son "los que entraron en
     // la foto" y por lo tanto los únicos que la liquidación puede cerrar.
-    let abonoIdsConsumidos: number[] = [];
-    if (abonosNoLiquidados.length > 0) {
-      if (inv.status_inversionista === "pendiente_devolucion" || aplicarDevolucionCube) {
-        // 🆕 Si está en pendiente_devolucion o el crédito usa devolucion_cube,
-        // su abono_capital ya es el monto_aportado completo del espejo.
-        // Sumar abonos pendientes provocaría doble conteo.
-        console.log(
-          `   ⏭️  DEVOLUCIÓN COMPLETA: saltando ${abonosNoLiquidados.length} ` +
-            `abono(s) a capital pendiente(s) (no se suman al abono_capital ` +
-            `ni se linkea abono_capital_id)`
-        );
-      } else {
-        let montoAbono = new Big(0);
-        for (const abono of abonosNoLiquidados) {
-          if (abono.tipo === "CAPITAL") {
-            montoAbono = montoAbono.plus(abono.monto);
-          } else if (abono.tipo === "CANCELACION") {
-            // colocar el monto aportado del espejo como abono a capital, para que se liquide aunque el abono sea de cancelación
-            abono_capital = new Big(inv.monto_aportado || 0);
-          }
-        }
-        if (!montoAbono.eq(0)) {
-          abono_capital = abono_capital.plus(montoAbono);
-        }
-        abonoCapitalId = abonosNoLiquidados[0].abono_id;
-        // Todos, no solo el linkeado: el abono_capital de arriba los sumó a todos.
-        abonoIdsConsumidos = abonosNoLiquidados.map((a) => a.abono_id);
+    //
+    // La decisión de qué sumar y qué marcar como consumido vive en
+    // resolverAbonosNoLiquidados (arriba de esta función): CUBE nunca sale
+    // del crédito, así que una CANCELACION a su nombre (basura de una
+    // corrida anterior del bug de la línea de aplicarDevolucionCube) no se
+    // suma ni se marca consumida — si se marcara, quedaría `liquidado=true`
+    // sin que su monto haya entrado en ningún cálculo real.
+    const resuelto = resolverAbonosNoLiquidados({
+      abonosNoLiquidados,
+      abonoCapitalBase: abono_capital,
+      montoAportado: inv.monto_aportado,
+      devolucionCompleta: esDevolucionCompleta(inv, currentCredit?.estado_devolucion),
+      isCube,
+    });
+    abono_capital = resuelto.abonoCapital;
+    const abonoCapitalId = resuelto.abonoCapitalId;
+    const abonoIdsConsumidos = resuelto.abonoIdsConsumidos;
 
-        console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
-        console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
-      }
+    if (resuelto.saltado) {
+      // 🆕 Si está en pendiente_devolucion o el crédito usa devolucion_cube,
+      // su abono_capital ya es el monto_aportado completo del espejo.
+      // Sumar abonos pendientes provocaría doble conteo.
+      console.log(
+        `   ⏭️  DEVOLUCIÓN COMPLETA: saltando ${abonosNoLiquidados.length} ` +
+          `abono(s) a capital pendiente(s) (no se suman al abono_capital ` +
+          `ni se linkea abono_capital_id)`
+      );
+    } else if (abonosNoLiquidados.length > 0) {
+      console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): abono_capital ahora ${abono_capital.toString()} (tipo: ${abonosNoLiquidados[0].tipo})`);
     }
 
     // Validation 2: abono_capital must not exceed monto_aportado (prevents negative balance)
@@ -1427,8 +1540,7 @@ export async function insertPagosCreditoInversionistasV2(
 
   const inserts = [];
   for (const inv of inversionistasWithName) {
-    const isCube =
-      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+    const isCube = esCube(inv);
 
     const montoBaseCalculoV2 = new Big(inv.monto_aportado ?? 0);
 
@@ -1847,8 +1959,7 @@ export async function insertPagosCreditoInversionistasSpecial(
   );
   // 3. Calcular e insertar el abono proporcional de cada inversionista
   const inserts = inversionistasWithName.map(async (inv, idx) => {
-    const isCube =
-      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+    const isCube = esCube(inv);
 
     let abono_universo = new Big(0);
     let porcentaje = new Big(0);

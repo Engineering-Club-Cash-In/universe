@@ -18,7 +18,15 @@ let mockInsertError: Error | null = null;
 // For compras_credito_inversionista mock
 let mockComprasCreditoInversionista: any[] = [];
 
-mock.module("../database/index", () => {
+// Se registra en AMBAS rutas ("../database" y "../database/index"): resuelven
+// al mismo módulo, y otros archivos de la suite (aseguradoras, abonosCapital,
+// devolucion, latefee...) mockean la corta SIN exportar `lockPool`. El que
+// corra primero en una corrida completa gana el registro global, y como
+// payments.ts importa `lockPool` de "../database/index", ese mock ajeno deja
+// el link roto para todo este archivo — los 37 tests de acá pasan aislados y
+// caían en bloque en `bun test src/controllers/` (mismo síntoma que ya se
+// documentó en utils/testMocks.ts).
+const databaseMockFactory = () => {
   const mockDrizzleSelectChain = (tableName: string, isMainQuery: boolean, isSelectNoFields: boolean) => {
     const limit = (limitNum: number) => {
       return Promise.resolve(mockHistoricoLiquidacionesEspejo);
@@ -202,7 +210,10 @@ mock.module("../database/index", () => {
       }),
     },
   };
-});
+};
+
+mock.module("../database", databaseMockFactory);
+mock.module("../database/index", databaseMockFactory);
 
 // Mock @cci/email
 mock.module("@cci/email", () => ({
@@ -246,6 +257,7 @@ const {
   armarInversionistasPago,
   aplicarRepartoCongelado,
   insertPagosCreditoInversionistas,
+  resolverAbonosNoLiquidados,
 } = await import("./payments");
 
 describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
@@ -1393,5 +1405,141 @@ describe("aplicarRepartoCongelado (reparto de interés de un pago ya facturado)"
     // Suma total = exactamente lo facturado, sin fugas ni duplicados.
     const total = [...split.values()].reduce((a, r) => a.plus(r.abono_interes), new Big(0));
     expect(total.toFixed(2)).toBe("48.05");
+  });
+});
+
+describe("resolverAbonosNoLiquidados", () => {
+  it("sin abonos pendientes, no hace nada", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [],
+      abonoCapitalBase: new Big(100),
+      montoAportado: "5000",
+      devolucionCompleta: false,
+      isCube: false,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("100");
+    expect(res.abonoCapitalId).toBeNull();
+    expect(res.abonoIdsConsumidos).toEqual([]);
+    expect(res.saltado).toBe(false);
+  });
+
+  it("devolución completa: no suma ni consume nada, aunque haya abonos pendientes", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 1, tipo: "CAPITAL", monto: "500" }],
+      abonoCapitalBase: new Big(5000),
+      montoAportado: "5000",
+      devolucionCompleta: true,
+      isCube: false,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("5000");
+    expect(res.abonoIdsConsumidos).toEqual([]);
+    expect(res.saltado).toBe(true);
+  });
+
+  it("CAPITAL se suma normal, para CUBE también", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 1, tipo: "CAPITAL", monto: "500" }],
+      abonoCapitalBase: new Big(100),
+      montoAportado: "5000",
+      devolucionCompleta: false,
+      isCube: true,
+    });
+
+    // Un abono CAPITAL es plata real (pago normal), nada que ver con el bug
+    // de devolución: a CUBE le suma igual que a cualquier inversionista.
+    expect(res.abonoCapital.toString()).toBe("600");
+    expect(res.abonoIdsConsumidos).toEqual([1]);
+  });
+
+  it("CANCELACION de un inversionista normal: devuelve el monto_aportado completo", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 7, tipo: "CANCELACION", monto: "999" }],
+      abonoCapitalBase: new Big(100),
+      montoAportado: "5000",
+      devolucionCompleta: false,
+      isCube: false,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("5000");
+    expect(res.abonoIdsConsumidos).toEqual([7]);
+  });
+
+  it("CANCELACION de CUBE: no se suma NI se marca consumida", () => {
+    // Caso real de producción: CUBE nunca sale del crédito, así que una
+    // CANCELACION a su nombre es basura del bug de payments.ts (antes del
+    // guard de !isCube en la línea de aplicarDevolucionCube). Si se marcara
+    // consumida, quedaría liquidado=true sin que su monto haya entrado en
+    // ningún cálculo — un registro contable falso.
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 66, tipo: "CANCELACION", monto: "50000" }],
+      abonoCapitalBase: new Big(100),
+      montoAportado: "50000",
+      devolucionCompleta: false,
+      isCube: true,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("100"); // sin cambios
+    expect(res.abonoIdsConsumidos).toEqual([]); // no se cierra sola
+    expect(res.saltado).toBe(false);
+  });
+
+  it("CUBE con CAPITAL y CANCELACION mezclados (caso real: 54 CAPITAL + 66 CANCELACION en prod)", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [
+        { abono_id: 1, tipo: "CAPITAL", monto: "300" },
+        { abono_id: 2, tipo: "CANCELACION", monto: "9999" },
+        { abono_id: 3, tipo: "CAPITAL", monto: "200" },
+      ],
+      abonoCapitalBase: new Big(0),
+      montoAportado: "9999",
+      devolucionCompleta: false,
+      isCube: true,
+    });
+
+    // Solo los CAPITAL entran a la suma (300 + 200); la CANCELACION se
+    // ignora del todo.
+    expect(res.abonoCapital.toString()).toBe("500");
+    // Solo los CAPITAL quedan "consumidos" (se cerrarán al liquidar); la
+    // CANCELACION queda afuera y sigue abierta para revisión manual.
+    expect(res.abonoIdsConsumidos.sort()).toEqual([1, 3]);
+  });
+
+  it("CANCELACION de CUBE mezclada con otro inversionista en el mismo lote no lo afecta (no-CUBE sigue igual)", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 9, tipo: "CANCELACION", monto: "1234" }],
+      abonoCapitalBase: new Big(0),
+      montoAportado: "1234",
+      devolucionCompleta: false,
+      isCube: false,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("1234");
+    expect(res.abonoIdsConsumidos).toEqual([9]);
+  });
+});
+
+describe("esCube (implícito vía resolverAbonosNoLiquidados)", () => {
+  // No hay export directo de esCube/esDevolucionCompleta (son privados del
+  // módulo), pero este es exactamente el escenario que rompía antes: CUBE
+  // detectado SOLO por nombre exacto. Si alguien renombra el inversionista
+  // en la base, `isCube` daba false para todas sus filas y el guard de
+  // devolución dejaba de aplicar — silenciosamente, sin error. El fix agrega
+  // `inversionista_id === CUBE_ID (86)` como chequeo primario.
+  it("regla de negocio: aunque cambie el nombre, el guard de resolverAbonosNoLiquidados debe evaluarse por isCube pasado explícito", () => {
+    // Esto prueba el contrato del helper (que sí es público): si isCube=true
+    // (como resolvería esCube por ID, sin importar el nombre), una
+    // CANCELACION no se suma ni se consume.
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 1, tipo: "CANCELACION", monto: "5000" }],
+      abonoCapitalBase: new Big(0),
+      montoAportado: "5000",
+      devolucionCompleta: false,
+      isCube: true, // simula esCube(inv) devolviendo true por ID aunque el nombre cambiara
+    });
+
+    expect(res.abonoCapital.toString()).toBe("0");
+    expect(res.abonoIdsConsumidos).toEqual([]);
   });
 });

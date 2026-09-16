@@ -1,5 +1,6 @@
 // routes/inversionistas.ts
 import { Elysia, t } from "elysia";
+import { exitInvestorHandler } from "../controllers/exitInvestorHandler";
 import {
   getInvestors,
   insertInvestor,
@@ -9,7 +10,6 @@ import {
   liquidateByInvestorSchema,
   updateInvestor,
   updateInvestorStatus,
-  exitInvestor,
   resumenGlobalInversionistas,
   resumenGlobalLiquidaciones,
   resumenTransferencias,
@@ -401,7 +401,7 @@ export const inversionistasRouter = new Elysia()
   )
   .post(
     "/investor/exit",
-    exitInvestor,
+    exitInvestorHandler,
     {
       body: t.Object({
         inversionista_id: t.Number({ minimum: 1 }),
@@ -415,7 +415,9 @@ export const inversionistasRouter = new Elysia()
           "YA está, los campos numéricos del row del inversionista se suman al row de " +
           "CUBE y el row del inversionista se elimina. Lo mismo en el espejo, dejando " +
           "status='completado'. Al final, el inversionista pasa a status='inactivo' y " +
-          "se envía correo de notificación a la lista hardcodeada.",
+          "se envía correo de notificación a la lista hardcodeada. Si con esto el " +
+          "crédito ya no tiene inversionistas fuera de CUBE en la tabla padre y estaba " +
+          "en devolución (estado_devolucion='VERIFICADO'), se marca COMPLETADO.",
         tags: ["Inversionistas"],
       },
     }

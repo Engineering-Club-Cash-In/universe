@@ -1,5 +1,6 @@
 import { describe, expect, it, mock, beforeEach } from "bun:test";
 import Big from "big.js";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 // Evita que database/index.ts abra la conexión (y truene por falta de
 // SUPABASE_DB_URL) al importar el controller. registrarCancelacionEspejo no usa
@@ -25,19 +26,28 @@ const {
 type CreateDependencies = NonNullable<Parameters<typeof createAbonoCapital>[1]>;
 type UpdateDependencies = NonNullable<Parameters<typeof updateAbonoCapital>[2]>;
 
+const dialect = new PgDialect();
+const sqlDe = (condicion: unknown) => dialect.sqlToQuery(condicion as any).sql;
+
 // Mock del handle de transacción (tx) de drizzle. Simula:
 //   tx.select().from().innerJoin().where()  -> filas del espejo
 //   tx.delete().where()                     -> borrado idempotente (contado)
 //   tx.insert().values(vals).returning()    -> eco de lo insertado
-// y captura en `inserted` cada values() para poder afirmar sobre él.
+// y captura en `inserted` cada values() para poder afirmar sobre él, y en
+// `selectWhereSql` la condición del SELECT ya renderizada a SQL (para
+// verificar el filtro de CUBE sin depender de que el mock lo aplique de
+// verdad — acá se ignora la condición y siempre se devuelve `espejoRows`).
 function makeTx(espejoRows: any[]) {
   const inserted: any[] = [];
-  const state = { deleteCalls: 0 };
+  const state = { deleteCalls: 0, selectWhereSql: undefined as string | undefined };
   const tx: any = {
     select: () => ({
       from: () => ({
         innerJoin: () => ({
-          where: () => Promise.resolve(espejoRows),
+          where: (condicion: unknown) => {
+            state.selectWhereSql = sqlDe(condicion);
+            return Promise.resolve(espejoRows);
+          },
         }),
       }),
     }),
@@ -315,6 +325,29 @@ describe("registrarCancelacionEspejo", () => {
     await registrarCancelacionEspejo(tx, 1);
 
     expect(inserted[0].monto).toBe("1000.5");
+  });
+
+  it("la query del espejo excluye a CUBE (id 86)", async () => {
+    // CUBE nunca sale del crédito: una CANCELACION a su nombre no
+    // corresponde a nada real y nunca se liquida (CUBE no pasa por el flujo
+    // de liquidación — confirmado en producción: decenas de filas
+    // CANCELACION a inversionista_id=86, todas con liquidado=false). El
+    // filtro va en la query, no en un `if` después del loop, para que no
+    // dependa de que nadie lo repita si se agrega otro punto de inserción.
+    //
+    // El mock de `where()` no aplica la condición (siempre devuelve
+    // `espejoRows` tal cual), así que lo único verificable acá es que la
+    // query GENERADA excluye a CUBE — no que el resultado la respete, eso
+    // lo garantiza Postgres al ejecutarla de verdad.
+    const { tx, state } = makeTx([
+      { inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" },
+    ]);
+
+    await registrarCancelacionEspejo(tx, 1);
+
+    expect(state.selectWhereSql).toContain("<>");
+    expect(state.selectWhereSql).toContain("credito_id");
+    expect(state.selectWhereSql).toContain("inversionista_id");
   });
 });
 

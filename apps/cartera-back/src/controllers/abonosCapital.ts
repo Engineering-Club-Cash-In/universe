@@ -1,8 +1,9 @@
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 import { abonos_capital, creditos_inversionistas_espejo, inversionistas } from "../database/db";
 import { db } from "../database";
 import Big from "big.js";
 import { obtenerSumaComprasPendientes } from "../utils/comprasAjuste";
+import { CUBE_ID } from "../utils/devolucionCompletada";
 import {
   emitCreditCapitalContributionCompleted,
   emitCreditCapitalContributionFailed,
@@ -317,9 +318,16 @@ export async function revertirAbonoCapitalEspejo(
  *   global (no participaría en la transacción) y suma sobre filas no-liquidadas
  *   existentes sin discriminar por tipo, con lo que podría fusionar la
  *   cancelación dentro de un abono CAPITAL previo.
+ * - CUBE (id 86) se excluye siempre: CUBE es quien absorbe la cartera cuando
+ *   los demás inversionistas salen, nunca "sale" él mismo del crédito. Sin
+ *   este filtro, un crédito donde CUBE es el único que quedó en el espejo
+ *   generaba una CANCELACION a su propio nombre —como si CUBE se estuviera
+ *   devolviendo su propio capital—, que además nunca llega a liquidarse
+ *   porque CUBE no pasa por el flujo de liquidación (confirmado en
+ *   producción: decenas de estas filas, todas con liquidado=false).
  */
 export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
-  // 1. Inversionistas del espejo con su capital aportado
+  // 1. Inversionistas del espejo con su capital aportado (nunca CUBE)
   const invsEspejo = await tx
     .select({
       inversionista_id: creditos_inversionistas_espejo.inversionista_id,
@@ -331,7 +339,12 @@ export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
       inversionistas,
       eq(creditos_inversionistas_espejo.inversionista_id, inversionistas.inversionista_id)
     )
-    .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
+    .where(
+      and(
+        eq(creditos_inversionistas_espejo.credito_id, credito_id),
+        ne(creditos_inversionistas_espejo.inversionista_id, CUBE_ID),
+      ),
+    );
 
   // Sin espejo → no hay capital de inversionistas que cancelar. No es error.
   if (invsEspejo.length === 0) {

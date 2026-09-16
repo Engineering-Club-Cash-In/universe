@@ -170,6 +170,20 @@ export const notifications = pgTable(
 		index("idx_notifications_convenio_pendiente")
 			.on(table.convenioId)
 			.where(sql`${table.convenioId} IS NOT NULL`),
+		// COBROS-02 Fase 1 — la dedup POR EPISODIO. Va declarado acá y no solo
+		// en la migración 0054 por la misma razón que el de arriba: `db:push`
+		// compara la base contra este schema, así que un índice creado solo por
+		// SQL se ve como sobrante y lo dropearía. Y sin el índice,
+		// `onConflictDoNothing()` no tiene nada que suprimir: el job de
+		// convenios incumplidos volvería a crear el mismo aviso cada mañana al
+		// asesor y a cada supervisor, y dos peticiones simultáneas del bot
+		// duplicarían la alerta de una conversación (review de Codex, P2).
+		//
+		// `assigned_to` es parte de la llave porque la misma alerta va a varias
+		// personas: una fila por (tipo, episodio, destinatario), nunca dos.
+		uniqueIndex("uq_notifications_cobros_dedup")
+			.on(table.cobrosTipo, table.cobrosDedupKey, table.assignedTo)
+			.where(sql`${table.cobrosDedupKey} IS NOT NULL`),
 	],
 );
 

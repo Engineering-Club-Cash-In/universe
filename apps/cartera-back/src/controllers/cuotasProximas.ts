@@ -154,31 +154,49 @@ export async function getCuotasProximasVencer(
       LIMIT 1
     ) cvn ON true`;
 
+  // ── ¿La cuota NORMAL del crédito sigue cobrable? ───────────────────────────
+  // Se arma una sola vez porque la responden DOS lugares que tienen que decir
+  // lo mismo: el WHERE (si esta fila entra a la agenda) y el SELECT (si el
+  // monto normal suma o vale 0).
+  //
+  // "Cobrable" = sin pagar, sin pago validado que haya aplicado plata, sin
+  // boleta pendiente de validar, y no absorbida por un convenio vigente (esa
+  // ya vive como cuota del convenio: cobrarla otra vez sería doble).
+  const normalCobrable = sql`(
+    cu.pagado = false
+    AND NOT EXISTS (${pagoCubriente(sql.raw("cu.cuota_id"))})
+    AND NOT EXISTS (
+      SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pr
+      WHERE pr.cuota_id = cu.cuota_id
+        AND pr."paymentFalse" = false
+        AND pr.validation_status = 'pending'
+        AND COALESCE(pr.monto_boleta, 0) > 0
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.convenios_pago cp2
+      WHERE cp2.credito_id = c.credito_id
+        AND cp2.activo = true
+        AND cp2.completado = false
+        AND cu.cuota_id = ANY(COALESCE(cp2.cuotas_convenio, '{}'::int[]))
+    )
+  )`;
+
   const whereClause = sql`
     WHERE ${filtroEstado}
       ${filtroBuckets}
       ${filtroAsesor}
-      AND cu.pagado = false
-      AND NOT EXISTS (${pagoCubriente(sql.raw("cu.cuota_id"))})
-      -- Ya hay un pago REGISTRADO para esta cuota aunque CONTA no lo haya
-      -- validado todavía: no recordarle a quien ya mandó su boleta.
-      AND NOT EXISTS (
-        SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pr
-        WHERE pr.cuota_id = cu.cuota_id
-          AND pr."paymentFalse" = false
-          AND pr.validation_status = 'pending'
-          AND COALESCE(pr.monto_boleta, 0) > 0
-      )
       AND (cu.fecha_vencimiento::date - ${hoyGT}) IN (${diasList})
-      -- COBROS-02 · Fase 1 — una cuota del crédito que el convenio ya
-      -- reestructuró NO se cobra por separado: vive como cuota del convenio y
-      -- listarla acá sería doble cobro (mismo criterio que el job de buckets).
-      AND NOT EXISTS (
-        SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.convenios_pago cp2
-        WHERE cp2.credito_id = c.credito_id
-          AND cp2.activo = true
-          AND cp2.completado = false
-          AND cu.cuota_id = ANY(COALESCE(cp2.cuotas_convenio, '{}'::int[]))
+      -- La fila entra si hay ALGO que cobrar ese día: la cuota normal, o lo que
+      -- reste de la cuota del CONVENIO que vence el mismo día.
+      --
+      -- El segundo término no es un detalle (review de Codex, P1): la query
+      -- está enraizada en cuotas_credito, así que exigir solo que la normal
+      -- siga impaga borraba del día al cliente que YA pagó su cuota normal pero
+      -- todavía debe la del convenio — justo la mitad del trato que se le
+      -- olvida a la gente. En premora no aplica: ahí no hay convenios.
+      AND (
+        ${normalCobrable}
+        ${soloAlDia ? sql`` : sql`OR COALESCE(cvn.restante, 0) > 0`}
       )
       -- Crédito AL DÍA: ninguna cuota ya vencida sigue pendiente (solo premora).
       ${
@@ -227,11 +245,21 @@ export async function getCuotasProximasVencer(
         WHERE h.credito_id = c.credito_id
         ORDER BY h.fecha DESC, h.historial_id DESC
         LIMIT 1) AS bucket,
-      -- Total a cobrar ese día: cuota normal del crédito + lo que resta de la
-      -- cuota del convenio que vence el mismo día (0 si no hay convenio).
-      ROUND((c.cuota::numeric + COALESCE(cvn.restante, 0)), 2)::text AS monto_cuota,
+      -- Total a cobrar ese día: cuota normal + lo que resta de la cuota del
+      -- convenio que vence el mismo día (0 si no hay convenio).
+      --
+      -- La parte normal vale 0 cuando esa cuota ya no se cobra —pagada, con
+      -- boleta en validación, o absorbida por el convenio—: sin eso, una fila
+      -- que entra SOLO por la cuota del convenio pediría además una cuota que
+      -- el cliente ya pagó. Mismo criterio que convenioProximos.ts.
+      ROUND(
+        (CASE WHEN ${normalCobrable} THEN c.cuota::numeric ELSE 0 END
+         + COALESCE(cvn.restante, 0)), 2
+      )::text AS monto_cuota,
       -- Desglose, para que la UI pueda decir "cuota + convenio" sin recalcular.
-      ROUND(c.cuota::numeric, 2)::text AS monto_cuota_normal,
+      ROUND(
+        CASE WHEN ${normalCobrable} THEN c.cuota::numeric ELSE 0 END, 2
+      )::text AS monto_cuota_normal,
       ROUND(COALESCE(cvn.restante, 0), 2)::text AS monto_convenio,
       -- Mora ACTIVA del crédito (0 si no tiene). OJO: monto_mora es SOLO el
       -- RECARGO (capital × porcentaje × cuotas atrasadas), NO incluye las

@@ -34,6 +34,7 @@ import { Route as CrmClientsRouteImport } from './routes/crm/clients'
 import { Route as CobrosReportesRouteImport } from './routes/cobros/reportes'
 import { Route as CobrosReduccionRouteImport } from './routes/cobros/reduccion'
 import { Route as CobrosReasignacionesRouteImport } from './routes/cobros/reasignaciones'
+import { Route as CobrosAlertasConveniosRouteImport } from './routes/cobros/alertas-convenios'
 import { Route as CobrosPromesasRouteImport } from './routes/cobros/promesas'
 import { Route as CobrosPagaloRouteImport } from './routes/cobros/pagalo'
 import { Route as CobrosMiDiaRouteImport } from './routes/cobros/mi-dia'
@@ -194,6 +195,11 @@ const CobrosReasignacionesRoute = CobrosReasignacionesRouteImport.update({
 const CobrosPromesasRoute = CobrosPromesasRouteImport.update({
   id: '/cobros/promesas',
   path: '/cobros/promesas',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CobrosAlertasConveniosRoute = CobrosAlertasConveniosRouteImport.update({
+  id: '/cobros/alertas-convenios',
+  path: '/cobros/alertas-convenios',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CobrosPagaloRoute = CobrosPagaloRouteImport.update({
@@ -370,6 +376,7 @@ export interface FileRoutesByFullPath {
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/pagalo': typeof CobrosPagaloRoute
+  '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -427,6 +434,7 @@ export interface FileRoutesByTo {
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/pagalo': typeof CobrosPagaloRoute
+  '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -485,6 +493,7 @@ export interface FileRoutesById {
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/pagalo': typeof CobrosPagaloRoute
+  '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -544,6 +553,7 @@ export interface FileRouteTypes {
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/pagalo'
+    | '/cobros/alertas-convenios'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -601,6 +611,7 @@ export interface FileRouteTypes {
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/pagalo'
+    | '/cobros/alertas-convenios'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -658,6 +669,7 @@ export interface FileRouteTypes {
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/pagalo'
+    | '/cobros/alertas-convenios'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -716,6 +728,7 @@ export interface RootRouteChildren {
   CobrosMetasRoute: typeof CobrosMetasRoute
   CobrosMiDiaRoute: typeof CobrosMiDiaRoute
   CobrosPagaloRoute: typeof CobrosPagaloRoute
+  CobrosAlertasConveniosRoute: typeof CobrosAlertasConveniosRoute
   CobrosPromesasRoute: typeof CobrosPromesasRoute
   CobrosReasignacionesRoute: typeof CobrosReasignacionesRoute
   CobrosReduccionRoute: typeof CobrosReduccionRoute
@@ -935,6 +948,13 @@ declare module '@tanstack/react-router' {
       path: '/cobros/promesas'
       fullPath: '/cobros/promesas'
       preLoaderRoute: typeof CobrosPromesasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cobros/alertas-convenios': {
+      id: '/cobros/alertas-convenios'
+      path: '/cobros/alertas-convenios'
+      fullPath: '/cobros/alertas-convenios'
+      preLoaderRoute: typeof CobrosAlertasConveniosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cobros/pagalo': {
@@ -1164,6 +1184,7 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosMetasRoute: CobrosMetasRoute,
   CobrosMiDiaRoute: CobrosMiDiaRoute,
   CobrosPagaloRoute: CobrosPagaloRoute,
+  CobrosAlertasConveniosRoute: CobrosAlertasConveniosRoute,
   CobrosPromesasRoute: CobrosPromesasRoute,
   CobrosReasignacionesRoute: CobrosReasignacionesRoute,
   CobrosReduccionRoute: CobrosReduccionRoute,

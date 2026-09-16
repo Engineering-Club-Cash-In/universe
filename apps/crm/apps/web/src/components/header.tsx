@@ -15,6 +15,7 @@ import {
 	FileText,
 	Gauge,
 	Gavel,
+	HandCoins,
 	Handshake,
 	Landmark,
 	Layers,
@@ -313,6 +314,19 @@ export default function Header() {
 											<Link to="/cobros/convenios" className="cursor-pointer">
 												<Handshake className="mr-2 h-4 w-4" />
 												Convenios
+											</Link>
+										</DropdownMenuItem>
+										{/* COBROS-02 Fase 1: hermana de Alertas de Promesas —
+												convenios incumplidos y próximos a vencer. Va pegada a
+												"Convenios" (el listado) porque son la misma cuenta
+												vista desde dos lados: el catálogo y lo que urge. */}
+										<DropdownMenuItem asChild>
+											<Link
+												to="/cobros/alertas-convenios"
+												className="cursor-pointer"
+											>
+												<HandCoins className="mr-2 h-4 w-4" />
+												Alertas de Convenios
 											</Link>
 										</DropdownMenuItem>
 										{/* CB-128: va bajo canAccessCobros y NO canAssignCobros — el
@@ -770,6 +784,13 @@ function MobileNav({
 										<Link to="/cobros/convenios" className={MOBILE_LINK_CLASS}>
 											<Handshake />
 											Convenios
+										</Link>
+										<Link
+											to="/cobros/alertas-convenios"
+											className={MOBILE_LINK_CLASS}
+										>
+											<HandCoins />
+											Alertas de Convenios
 										</Link>
 										<Link
 											to="/cobros/historial-agendas"

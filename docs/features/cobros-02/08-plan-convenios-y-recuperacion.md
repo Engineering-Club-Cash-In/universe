@@ -34,12 +34,45 @@ más que las cuotas vencidas, y en las dos el crédito debe quedarse quieto y co
 | 8 | **Sin días de gracia.** Todo lo dispara una persona |
 | 9 | El convenio **congela bucket y asesor** hasta que se pague o se deshaga |
 | 10 | Deshacer un convenio es **soft delete**, no borrado |
+| 11 | El crédito en convenio **se queda en el bucket que tenía** al firmarlo |
+| 12 | **Sí aparece en la cola del día**, con la prioridad de "su fecha de pago ya viene" — las cuotas del convenio heredan las fechas del crédito, así que el vencimiento es el mismo |
+| 13 | **Sí cuenta para la capacidad** del asesor |
+| 14 | **No devenga mora** mientras está en convenio (ya era así: `EN_CONVENIO` está en `STATUS_EXCLUIDOS_MORA`) |
+| 15 | Cuando un crédito **escribe en el bot**, se le avisa a su asesor asignado — tipo nuevo de alerta + migración |
+| 16 | El aviso del bot es para **todos los buckets**, no solo B0: va al asesor dueño del crédito, esté donde esté |
+| 17 | El aviso se agrupa **por referencia de conversación** (`sesion_id`): una alerta por conversación, no por mensaje ni por día |
+| 18 | "El total de lo que debe" para levantar `EN_RECUPERACION` **incluye la mora** |
+| 19 | Los convenios que ya existen se re-siembran por **estado de pago, no por origen**: al día → **B2**, atrasado → **B4** |
 
 > ⚠️ **Anotado para revisar con el PM.** Puede que después decidan que con 5 cuotas **no**
 > suba solo a B5 y que la única forma de llegar sea el botón. En ese escenario **la mora
 > tampoco correría**. Quedó escrito para no re-discutirlo desde cero.
 
 ---
+
+## Qué significa "al día" con un convenio
+
+El criterio del ticket dice dos cosas que parecen chocar: *"no se va a regresar de bucket"*
+y *"el crédito se toma como que está al día"*. No chocan — **separan propiedad de trato**:
+
+| Dimensión | Con convenio vigente |
+| --- | --- |
+| Bucket | **El que tenía al firmar.** No baja ni sube solo |
+| Asesor | El mismo, hasta que se pague o se deshaga |
+| Cola del día | **Sí aparece**, con la prioridad de "ya viene su fecha de pago" |
+| Capacidad del asesor | **Sí cuenta** |
+| Mora | **No devenga** |
+| Recordatorios al cliente | Siguen, D-5/D-3/D-1/D-0 sobre las cuotas del convenio |
+
+O sea: "al día" significa que **no se lo castiga** (no baja de bucket, no le corre mora, no
+se lo trata como moroso nuevo), no que desaparezca de la gestión. Sigue siendo del asesor,
+sigue ocupando su cupo y sigue saliendo en su cola el día que toca pagar.
+
+> 📌 **Ojo con el monto en la cola.** Si se mete `EN_CONVENIO` al filtro de
+> `cuotasProximas.ts` a secas, sale la **cuota normal** del crédito. Pero en convenio el
+> cliente debe pagar **las dos** ese mes, y `convenioProximos.ts` ya calcula
+> `monto_cuota = cuota normal + cuota del convenio`. La cola debería tomar ese número, no
+> el de la cuota suelta.
 
 ## El hallazgo que define la implementación: piso, no clavo
 
@@ -65,8 +98,9 @@ Se implementa como: **el estado se levanta cuando el crédito queda sin cuotas v
 (es decir, cuando el bucket derivado daría B0), evaluado en la **validación** del pago —
 no en el registro, porque una boleta se sube hoy y contabilidad la valida después.
 
-Con ese criterio la **mora pendiente no bloquea** la salida: si pagó todas las cuotas pero
-quedó debiendo mora, sale de recuperación igual. **Falta confirmarlo con el PM.**
+**Confirmado el 15-sep (decisión 18): el total INCLUYE la mora.** Si pagó todas las cuotas
+pero quedó debiendo mora, **no** sale de recuperación. El estado se levanta cuando no debe
+nada: ni cuotas vencidas ni mora.
 
 ---
 
@@ -107,26 +141,109 @@ quedó debiendo mora, sale de recuperación igual. **Falta confirmarlo con el PM
 "Mi día" ya no se pinta para admin/supervisor: en su lugar va **Cola del día**, y
 `/cobros/mi-dia` los redirige en vez de mostrarles un cartel sin salida.
 
-### Fase 1 · Avisos — aditiva, no mueve ningún crédito
+### Fase 1 · Avisos — aditiva, no mueve ningún crédito ✅ implementada
 
 La que más valor da por lo que cuesta. Nada de esto toca un bucket.
 
-- Tipo nuevo en el enum `cobros_notif_tipo` (migración del CRM) para convenio incumplido.
-- Job que detecta cuotas de convenio vencidas e impagas y notifica **al asesor y al
-  supervisor**.
-- Meter `EN_CONVENIO` al filtro de estados de la agenda del día (`cuotasProximas.ts`).
-- Pantalla **Alertas de Convenios**, calcada de `/cobros/promesas`: las mismas cuatro
-  tarjetas (Vencidas · Vencen hoy · Por vencer · Próximas) + ítem en el menú.
-- La señal de convenio vencido/por vencer en la Cola del día.
+- ✅ Tipo nuevo `convenio_incumplido` en `cobros_notif_tipo` (migración **0054** del CRM).
+- ✅ Job `check-convenios-incumplidos.ts`, en la tanda de las 8:00 GT junto a las otras
+  alertas de cobros. Notifica **al asesor y a los `cobros_supervisor`**.
+- ✅ `EN_CONVENIO` entra a la agenda del día (`cuotasProximas.ts`, `solo_al_dia=false`) y
+  `monto_cuota` pasa a ser **cuota normal + lo que resta de la cuota del convenio** del
+  mismo día, con el desglose aparte. Premora (`solo_al_dia=true`) no cambia.
+- ✅ Pantalla **Alertas de Convenios** (`/cobros/alertas-convenios`), calcada de
+  `/cobros/promesas`: las mismas cuatro tarjetas + ítem en el menú (desktop y móvil).
+- ✅ Fuente única de las dos cosas: `GET /convenio/alertas` en cartera-back
+  (`convenioAlertas.ts`), **una fila por convenio** con su cuota impaga más urgente ya
+  clasificada (vencida · vence hoy · por vencer · próxima).
+- ✅ `recordatoriosConvenio` pasa de `false` a `isTestModeEnabled()`.
+
+#### Dedup por episodio, no por ventana de tiempo
+
+Los jobs de alertas viejos deduplican con `created_at > now() - 24h`. Sirve cuando el
+episodio dura un día; **no sirve para un convenio incumplido**, que sigue incumplido
+mañana: la ventana repetiría el aviso cada mañana al asesor y a **cada** supervisor.
+
+La migración 0054 agrega `notifications.cobros_dedup_key` (text) con un índice único
+parcial sobre `(cobros_tipo, cobros_dedup_key, assigned_to)`. La llave es del **episodio**:
+
+| Alerta | Llave | Qué la hace cambiar |
+| --- | --- | --- |
+| `convenio_incumplido` | `convenio:<id>:venc:<fecha>` | Pagar la cuota vencida más vieja y seguir debiendo otra |
+| `bot_cliente_escribio` (Fase 1.b) | `bot:sesion:<uuid>` | Una conversación nueva del bot |
+
+La unicidad la sostiene el índice con `ON CONFLICT DO NOTHING`, **no** un `SELECT` previo
+(que no protege bajo concurrencia). Es genérica a propósito: la siguiente alerta que
+necesite dedup por episodio no necesita una columna nueva.
+
+#### El envío real al cliente sigue apagado, y es a propósito
+
+`recordatoriosConvenio` quedó atado a `isTestModeEnabled()` y **no** a un `true` fijo —
+exactamente el mismo criterio (y la misma razón) que `recordatorioPagalo`. El despliegue
+documentado de esta rama corre contra una **copia de producción**, y con
+`TEST_MESSAGE=false` el emisor le escribe al teléfono real del cliente.
+
+Con el modo prueba activo, el circuito completo queda validado (cartera → plantilla →
+envío → `cobros_send_logs`) sin escribirle a nadie real. Para el envío de verdad hacen
+falta dos cosas más, y las dos son **decisión de negocio**: `CONVENIO_WHATSAPP_ENABLED=true`
+en el ambiente y apagar el modo prueba.
+
+### Fase 1.b · Aviso cuando el cliente escribe en el bot
+
+Sale del criterio 1 del ticket (*"si escriben por WhatsApp… el asesor asignado debe
+responder"*) y **no existe nada**: el bot atiende al cliente, deja su historial en la Ficha
+360 y no avisa a nadie — no hay una sola `createNotification` en todo el módulo del bot. Hoy
+el asesor se entera solo si abre la ficha.
+
+- Tipo nuevo en `cobros_notif_tipo` + migración del CRM.
+- Se dispara desde el middleware `historialBotCobros`, que ya está montado comodín sobre
+  `/api/bot/cobros/*`: cae solo, sin tocar cada endpoint.
+- Va **al asesor dueño del crédito, sea cual sea su bucket** (decisión 16).
+- **Dedup por referencia de conversación** (decisión 17). La "conversación" del bot es la
+  `referencia` del paso 1 — la fila de `otps`—, que en `bot_cobros_interacciones` vive como
+  **`sesion_id`**: es la misma llave por la que la Ficha 360 agrupa y numera ("Referencia 1"
+  = la más vieja), y está sin FK a propósito para sobrevivir a la purga del OTP. Una alerta
+  por `sesion_id`, no por mensaje ni por día.
+
+**Mecánica de a quién avisar.** La interacción guarda `numero_sifco`, pero **solo en las
+acciones sobre un crédito**: las primeras de la conversación (`buscar_cliente`,
+`listar_creditos`) no lo traen. Entonces la alerta se emite en la **primera interacción de
+la sesión que ya trae `numero_sifco`**, que es cuando recién se sabe de qué crédito —y por
+lo tanto de qué asesor— se trata. De ahí la cadena es la de siempre: `numero_sifco` →
+crédito de cartera → `asesor_id` → `email_cash_in` → usuario del CRM.
+
+Los `acceso_fallido` quedan fuera solos: no tienen sesión (D-43) ni identidad resuelta, así
+que no hay asesor a quién avisarle.
 
 ### Fase 2 · Congelar el convenio — invierte la regla vieja
 
 - Se va `nacioConElConvenio` y el borrón y cuenta nueva.
 - El job de convenios deja de mover buckets: pasa a **vigilante** (calcula el atraso solo
   para alertar). Bucket y asesor quedan donde estaban al firmar.
-- **Pendiente de decidir:** hay ~63 créditos `EN_CONVENIO` que el job ya movió con la regla
-  vieja, repartidos entre B0 y B5. ¿Se quedan donde están o se recalculan? Probablemente
-  hace falta un script de una sola corrida.
+#### La re-siembra de los convenios que ya existen (decisión 19)
+
+Los ~63 `EN_CONVENIO` que el job ya movió con la regla vieja están repartidos entre B0 y B5,
+con asesores que no les tocaban. **No se intenta reconstruir de qué bucket venían** — esa
+información no está en ningún lado y adivinarla sería peor que elegir un default honesto.
+
+Se re-siembran por **cómo están pagando hoy**, no por su origen:
+
+| Situación del convenio | Bucket |
+| --- | --- |
+| **Al día** (cumpliendo su convenio) | **B2** |
+| **Atrasado** (debe alguna cuota del convenio) | **B4** |
+
+Es un script de **una sola corrida**, idempotente, que va junto con el cambio de regla.
+
+> 🔸 **Corre en el sandbox de dev (`cartera_cobros2`), no en producción.** Todo COBROS-02
+> vive en ese schema mientras dure la rama, así que acá se mueve sin clavo: si el reparto
+> no convence, se vuelve a correr. El día que esta versión pase a producción, el criterio
+> se revisa entonces — no es una decisión que frene el desarrollo hoy.
+
+**Cómo se mide "al día" acá.** Se reusa el modelo que el job de convenios ya calcula: meses
+atrasados = fechas de vencimiento distintas, pasadas, con algo impago, uniendo las cuotas
+del crédito no absorbidas por el convenio + las cuotas del convenio vencidas. Cero meses
+atrasados = al día → B2; uno o más → B4.
 
 ### Fase 3 · Ficha 360 — banda roja y acciones
 
@@ -154,5 +271,10 @@ La que más valor da por lo que cuesta. Nada de esto toca un bucket.
 
 ## Lo que sigue sin definirse
 
-1. **¿"El total de lo que debe" incluye la mora?** (ver el supuesto de arriba).
-2. **¿Qué pasa con los ~63 convenios que el job ya movió** con la regla vieja?
+**Nada.** Las tres preguntas que quedaban se cerraron el 15-sep (decisiones 16 a 19).
+
+Y una aclaración que evita cautela de más: **este plan se ejecuta contra el sandbox de dev
+(`cartera_cobros2`)**, no contra producción. Los scripts de re-siembra y los cambios de
+regla se prueban ahí y se pueden repetir cuantas veces haga falta. El pase a producción es
+otro momento, con su propio runbook
+([RUNBOOK-refrescar-sandbox.md](./RUNBOOK-refrescar-sandbox.md) es el ensayo).

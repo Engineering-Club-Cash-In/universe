@@ -71,6 +71,11 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// CB-033: la decisión (aprobado/rechazado) de un convenio, de vuelta al
 	// asesor que lo creó.
 	"convenio_resuelto",
+	// COBROS-02 Fase 1: el convenio tiene una cuota vencida e impaga. Va al
+	// asesor dueño del crédito Y a los cobros_supervisor (decisión 7 del plan
+	// 08): incumplir un convenio ya negociado es una señal de escalamiento, no
+	// solo una tarea más del asesor.
+	"convenio_incumplido",
 ]);
 
 // Notifications table
@@ -112,6 +117,15 @@ export const notifications = pgTable(
 		// índice único de abajo. Null para el resto de notificaciones y para
 		// el aviso "convenio_pendiente_aprobacion" (todavía no hay decisión).
 		convenioDecisionId: integer("convenio_decision_id"),
+
+		// COBROS-02 Fase 1: llave de deduplicación del EPISODIO que originó la
+		// alerta — "este convenio con esta cuota vencida", "esta conversación
+		// del bot". Los jobs viejos deduplican por ventana de 24 h, que no
+		// sirve para un episodio que dura días: repetiría el aviso cada
+		// mañana. El formato lo define cada job (ver el índice único parcial
+		// `uq_notifications_cobros_dedup`, migración 0054). Null para todo lo
+		// que no lo use.
+		cobrosDedupKey: text("cobros_dedup_key"),
 
 		// CB-033: id del convenio en cartera-back (SIN FK — otra DB, y el
 		// rechazo borra la fila). Lo lleva el aviso
@@ -156,6 +170,20 @@ export const notifications = pgTable(
 		index("idx_notifications_convenio_pendiente")
 			.on(table.convenioId)
 			.where(sql`${table.convenioId} IS NOT NULL`),
+		// COBROS-02 Fase 1 — la dedup POR EPISODIO. Va declarado acá y no solo
+		// en la migración 0054 por la misma razón que el de arriba: `db:push`
+		// compara la base contra este schema, así que un índice creado solo por
+		// SQL se ve como sobrante y lo dropearía. Y sin el índice,
+		// `onConflictDoNothing()` no tiene nada que suprimir: el job de
+		// convenios incumplidos volvería a crear el mismo aviso cada mañana al
+		// asesor y a cada supervisor, y dos peticiones simultáneas del bot
+		// duplicarían la alerta de una conversación (review de Codex, P2).
+		//
+		// `assigned_to` es parte de la llave porque la misma alerta va a varias
+		// personas: una fila por (tipo, episodio, destinatario), nunca dos.
+		uniqueIndex("uq_notifications_cobros_dedup")
+			.on(table.cobrosTipo, table.cobrosDedupKey, table.assignedTo)
+			.where(sql`${table.cobrosDedupKey} IS NOT NULL`),
 	],
 );
 

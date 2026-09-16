@@ -24,7 +24,8 @@ export type CobrosNotifTipo =
 	| "sin_contacto_3d"
 	| "promesa_por_vencer"
 	| "convenio_pendiente_aprobacion"
-	| "convenio_resuelto";
+	| "convenio_resuelto"
+	| "convenio_incumplido";
 
 /**
  * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando el correo de cash-in del
@@ -120,6 +121,13 @@ export function filasNotificacionCobros(params: {
 	supervisores: string[];
 	/** FK created_by para las filas de supervisor (no dependen del asesor). */
 	usuarioSistema: string;
+	/**
+	 * Llave del EPISODIO, para los jobs que deduplican por episodio y no por
+	 * ventana de tiempo (`uq_notifications_cobros_dedup`, migración 0054). El
+	 * caller debe insertar con `onConflictDoNothing` para que la restricción
+	 * haga su trabajo en vez de reventar.
+	 */
+	dedupKey?: string;
 }): NewNotification[] {
 	const base = {
 		titulo: params.titulo,
@@ -129,6 +137,7 @@ export function filasNotificacionCobros(params: {
 		relatedEntityType: "collection_case" as const,
 		relatedEntityId: params.casoId,
 		redirectPage: "cobros_detail" as const,
+		...(params.dedupKey ? { cobrosDedupKey: params.dedupKey } : {}),
 	};
 
 	const filas: NewNotification[] = [];

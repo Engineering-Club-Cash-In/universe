@@ -92,6 +92,7 @@ import { recuperacionVehiculoRouter } from "./routers/recuperacion-vehiculo";
 import externalContractsRouter from "./routes/external-contracts";
 import { carteraBackClient } from "./services/cartera-back-client";
 import { checkCobrosAlertas } from "./services/check-cobros-alertas";
+import { checkConveniosIncumplidos } from "./services/check-convenios-incumplidos";
 import {
 	type CheckPromesasResumen,
 	checkPromesasPago,
@@ -1761,7 +1762,20 @@ const JOBS_PROGRAMADOS = {
 	cierreDiarioAsesores: false,
 	/** ⚠️ Le escribe al CLIENTE. Apagados a propósito en pruebas. */
 	recordatoriosPremora: false,
-	recordatoriosConvenio: false,
+	/** ⚠️ Le escribe al CLIENTE por WhatsApp (D-5/D-3/D-1/D-0 del convenio).
+	 *
+	 *  COBROS-02 Fase 1 lo PRENDE, pero atado a `isTestModeEnabled()` y no a un
+	 *  `true` fijo — exactamente el mismo criterio (y la misma razón) que
+	 *  `recordatorioPagalo`: el despliegue documentado de esta rama corre contra
+	 *  una COPIA DE PRODUCCIÓN, y con `TEST_MESSAGE=false` el emisor manda al
+	 *  teléfono real del cliente. Con el modo prueba activo los envíos van al
+	 *  número de pruebas y el circuito completo (cartera → plantilla → envío →
+	 *  `cobros_send_logs`) queda validado sin escribirle a nadie real.
+	 *
+	 *  Para el envío real hacen falta DOS cosas más, y las dos son decisión de
+	 *  negocio, no del código: `CONVENIO_WHATSAPP_ENABLED=true` en el ambiente
+	 *  (el gate propio del servicio) y apagar el modo prueba. */
+	recordatoriosConvenio: isTestModeEnabled(),
 } as const;
 
 const HAY_JOBS_ACTIVOS = Object.values(JOBS_PROGRAMADOS).some(Boolean);
@@ -2083,6 +2097,13 @@ if (HAY_JOBS_ACTIVOS) {
 		await checkCobrosAlertas().catch(console.error);
 		await checkSeguimientosVencidos().catch((error) =>
 			console.error("Error en el aviso de seguimientos vencidos:", error),
+		);
+		// COBROS-02 Fase 1: convenio incumplido. Va en la misma tanda por la
+		// misma razón que los otros dos — es la bandeja de la mañana del asesor
+		// — y deduplica por episodio (no por ventana), así que el run de boot
+		// de más abajo no duplica nada.
+		await checkConveniosIncumplidos().catch((error) =>
+			console.error("Error en el aviso de convenios incumplidos:", error),
 		);
 	}
 

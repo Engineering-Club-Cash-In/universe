@@ -2444,6 +2444,74 @@ export const cobrosRouter = {
 				});
 		}),
 
+	// COBROS-02 · Fase 1: apartado "Alertas de Convenios" (/cobros/alertas-convenios).
+	// Hermano de getAlertasPromesas, con la misma forma y las mismas cuatro
+	// categorías, pero leyendo el estado VIVO del convenio en cartera-back
+	// (`/convenio/alertas`) en vez de una tabla del CRM: los convenios viven
+	// allá y un pago de hoy tiene que sacarlo de la lista hoy.
+	//
+	// Scope por rol, igual que el resto de cobros: el asesor ve solo los
+	// créditos cuyo caso es suyo; supervisor/admin ven todo. El filtro se hace
+	// por CASO y no por `asesor_id` de cartera a propósito — es el mismo
+	// criterio de propiedad que usan getCasosCobros y getAlertasPromesas, así
+	// que las tres pantallas coinciden en qué es "mío".
+	//
+	// Un convenio cuyo crédito no tiene caso en el CRM no se lista: no hay a
+	// dónde navegar ni contra qué chequear propiedad. Es la misma limitación
+	// que tiene el job de avisos, y se reporta en `sinCaso` allá.
+	getAlertasConvenios: cobrosProcedure
+		.input(z.object({}).optional())
+		.handler(async ({ context }) => {
+			if (!isCarteraBackEnabled()) return [];
+
+			const respuesta = await carteraBackClient.getConvenioAlertas({});
+			const alertas = respuesta.data ?? [];
+			if (alertas.length === 0) return [];
+
+			const sifcos = [
+				...new Set(alertas.map((a) => a.numero_credito_sifco).filter(Boolean)),
+			];
+			// Un mismo SIFCO puede tener VARIAS filas en casos_cobros (reaperturas,
+			// migraciones, altas manuales): no hay índice único. Se resuelve
+			// primero cuál es el VIGENTE —gana el activo y, a igualdad, el más
+			// reciente por updatedAt— y recién después se aplica la propiedad
+			// (review de Codex, P2).
+			//
+			// El orden importa: quedándose con la última fila que devolviera
+			// Postgres, dos asesores podían ver la misma alerta cada uno por su
+			// caso duplicado, y a un supervisor se lo mandaba a un caso
+			// arbitrario. `agruparCasosVigentesPorSifco` es el mismo criterio que
+			// ya usan la agenda, la cola y el listado.
+			const casos = await db
+				.select({
+					id: casosCobros.id,
+					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+					activo: casosCobros.activo,
+					updatedAt: casosCobros.updatedAt,
+					responsable: casosCobros.responsableCobros,
+				})
+				.from(casosCobros)
+				.where(inArray(casosCobros.numeroCreditoSifco, sifcos));
+
+			const vigentes = agruparCasosVigentesPorSifco(casos);
+			const puedeVerTodo = PERMISSIONS.canViewAllCasosCobros(context.userRole);
+			const casoPorSifco = new Map<
+				string,
+				{ id: string; responsable: string | null }
+			>();
+			for (const [sifco, c] of vigentes) {
+				if (!puedeVerTodo && c.responsable !== context.userId) continue;
+				casoPorSifco.set(sifco, { id: c.id, responsable: c.responsable });
+			}
+
+			return alertas
+				.filter((a) => casoPorSifco.has(a.numero_credito_sifco))
+				.map((a) => ({
+					...a,
+					casoCobroId: casoPorSifco.get(a.numero_credito_sifco)?.id ?? null,
+				}));
+		}),
+
 	// CB-031 (ficha 360): alertas de ESTE caso — las notificaciones de cobros
 	// que ya generan los jobs (promesa por vencer / incumplida, cliente subido
 	// de bucket, 3 días sin contacto) y las asignaciones manuales. La campanita

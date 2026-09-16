@@ -2,6 +2,7 @@
 import { Elysia, t } from "elysia";
 import { authMiddleware } from "./midleware";
 import { getComportamientoPago } from "../controllers/comportamientoPago";
+import { getConvenioAlertas } from "../controllers/convenioAlertas";
 import { getConvenioProximosVencer } from "../controllers/convenioProximos";
 import { getCuotasProximasVencer } from "../controllers/cuotasProximas";
 
@@ -171,6 +172,78 @@ export const cuotasRouter = new Elysia()
       }
     },
     { query: t.Object({ dias: t.Optional(t.String()) }) },
+  )
+
+  // COBROS-02 · Fase 1 — ALERTAS DE CONVENIOS: una fila por convenio con su
+  // cuota más urgente impaga, clasificada (vencida / vence_hoy / por_vencer /
+  // proxima). La consumen el job de avisos del CRM y la pantalla
+  // /cobros/alertas-convenios. Sin gate de rol (solo auth), igual que sus
+  // hermanas de este router: la cuenta de servicio del CRM debe poder llamarlo.
+  .get(
+    "/convenio/alertas",
+    async ({ query, set, user }: any) => {
+      if (!user) {
+        set.status = 401;
+        return { success: false, message: "[ERROR] No autenticado" };
+      }
+      try {
+        // Los tres son cotas de VOLUMEN con default sano; se validan igual que
+        // el resto del router para no dejar pasar un ORDER BY sobre la cartera
+        // entera por un parámetro mal formado.
+        const enteroOpcional = (
+          valor: unknown,
+          nombre: string,
+          max: number,
+        ): number | undefined => {
+          if (valor == null || String(valor).trim() === "") return undefined;
+          const s = String(valor).trim();
+          if (!/^\d{1,4}$/.test(s) || Number(s) > max) {
+            throw new Error(`[ERROR] ${nombre} inválido (entero 0-${max})`);
+          }
+          return Number(s);
+        };
+
+        let diasAtras: number | undefined;
+        let diasAdelante: number | undefined;
+        let diasAlerta: number | undefined;
+        let asesorId: number | undefined;
+        try {
+          diasAtras = enteroOpcional(query.dias_atras, "dias_atras", 3650);
+          diasAdelante = enteroOpcional(query.dias_adelante, "dias_adelante", 365);
+          diasAlerta = enteroOpcional(query.dias_alerta, "dias_alerta", 365);
+          asesorId = enteroOpcional(query.asesor_id, "asesor_id", 9999);
+        } catch (err) {
+          set.status = 400;
+          return { success: false, message: String((err as Error).message) };
+        }
+        if (asesorId != null && asesorId < 1) {
+          set.status = 400;
+          return { success: false, message: "[ERROR] asesor_id inválido (entero positivo)" };
+        }
+
+        return await getConvenioAlertas({
+          diasAtras,
+          diasAdelante,
+          diasAlerta,
+          asesorId,
+        });
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudieron obtener las alertas de convenios",
+          error: String(err),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        dias_atras: t.Optional(t.String()),
+        dias_adelante: t.Optional(t.String()),
+        dias_alerta: t.Optional(t.String()),
+        asesor_id: t.Optional(t.String()),
+      }),
+    },
   )
 
   // CB-010 · Comportamiento de pago — racha de cuotas pagadas AL DÍA por

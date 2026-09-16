@@ -34,7 +34,6 @@ import { Route as CrmClientsRouteImport } from './routes/crm/clients'
 import { Route as CobrosReportesRouteImport } from './routes/cobros/reportes'
 import { Route as CobrosReduccionRouteImport } from './routes/cobros/reduccion'
 import { Route as CobrosReasignacionesRouteImport } from './routes/cobros/reasignaciones'
-import { Route as CobrosAlertasConveniosRouteImport } from './routes/cobros/alertas-convenios'
 import { Route as CobrosPromesasRouteImport } from './routes/cobros/promesas'
 import { Route as CobrosPagaloRouteImport } from './routes/cobros/pagalo'
 import { Route as CobrosMiDiaRouteImport } from './routes/cobros/mi-dia'
@@ -46,6 +45,7 @@ import { Route as CobrosCierreRouteImport } from './routes/cobros/cierre'
 import { Route as CobrosCargaRouteImport } from './routes/cobros/carga'
 import { Route as CobrosBucketsRouteImport } from './routes/cobros/buckets'
 import { Route as CobrosAperturaRouteImport } from './routes/cobros/apertura'
+import { Route as CobrosAlertasConveniosRouteImport } from './routes/cobros/alertas-convenios'
 import { Route as CobrosAgendaRouteImport } from './routes/cobros/agenda'
 import { Route as CobrosIdRouteImport } from './routes/cobros/$id'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
@@ -197,11 +197,6 @@ const CobrosPromesasRoute = CobrosPromesasRouteImport.update({
   path: '/cobros/promesas',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CobrosAlertasConveniosRoute = CobrosAlertasConveniosRouteImport.update({
-  id: '/cobros/alertas-convenios',
-  path: '/cobros/alertas-convenios',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const CobrosPagaloRoute = CobrosPagaloRouteImport.update({
   id: '/cobros/pagalo',
   path: '/cobros/pagalo',
@@ -250,6 +245,11 @@ const CobrosBucketsRoute = CobrosBucketsRouteImport.update({
 const CobrosAperturaRoute = CobrosAperturaRouteImport.update({
   id: '/cobros/apertura',
   path: '/cobros/apertura',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CobrosAlertasConveniosRoute = CobrosAlertasConveniosRouteImport.update({
+  id: '/cobros/alertas-convenios',
+  path: '/cobros/alertas-convenios',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CobrosAgendaRoute = CobrosAgendaRouteImport.update({
@@ -366,6 +366,7 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
   '/cobros/agenda': typeof CobrosAgendaRoute
+  '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/apertura': typeof CobrosAperturaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
@@ -376,7 +377,6 @@ export interface FileRoutesByFullPath {
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/pagalo': typeof CobrosPagaloRoute
-  '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -424,6 +424,7 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
   '/cobros/agenda': typeof CobrosAgendaRoute
+  '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/apertura': typeof CobrosAperturaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
@@ -434,7 +435,6 @@ export interface FileRoutesByTo {
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/pagalo': typeof CobrosPagaloRoute
-  '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -483,6 +483,7 @@ export interface FileRoutesById {
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
   '/cobros/agenda': typeof CobrosAgendaRoute
+  '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/apertura': typeof CobrosAperturaRoute
   '/cobros/buckets': typeof CobrosBucketsRoute
   '/cobros/carga': typeof CobrosCargaRoute
@@ -493,7 +494,6 @@ export interface FileRoutesById {
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/pagalo': typeof CobrosPagaloRoute
-  '/cobros/alertas-convenios': typeof CobrosAlertasConveniosRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
@@ -543,6 +543,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/cobros/$id'
     | '/cobros/agenda'
+    | '/cobros/alertas-convenios'
     | '/cobros/apertura'
     | '/cobros/buckets'
     | '/cobros/carga'
@@ -553,7 +554,6 @@ export interface FileRouteTypes {
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/pagalo'
-    | '/cobros/alertas-convenios'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -601,6 +601,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/cobros/$id'
     | '/cobros/agenda'
+    | '/cobros/alertas-convenios'
     | '/cobros/apertura'
     | '/cobros/buckets'
     | '/cobros/carga'
@@ -611,7 +612,6 @@ export interface FileRouteTypes {
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/pagalo'
-    | '/cobros/alertas-convenios'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -659,6 +659,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/cobros/$id'
     | '/cobros/agenda'
+    | '/cobros/alertas-convenios'
     | '/cobros/apertura'
     | '/cobros/buckets'
     | '/cobros/carga'
@@ -669,7 +670,6 @@ export interface FileRouteTypes {
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/pagalo'
-    | '/cobros/alertas-convenios'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
     | '/cobros/reduccion'
@@ -718,6 +718,7 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRoute
   CobrosIdRoute: typeof CobrosIdRoute
   CobrosAgendaRoute: typeof CobrosAgendaRoute
+  CobrosAlertasConveniosRoute: typeof CobrosAlertasConveniosRoute
   CobrosAperturaRoute: typeof CobrosAperturaRoute
   CobrosBucketsRoute: typeof CobrosBucketsRoute
   CobrosCargaRoute: typeof CobrosCargaRoute
@@ -728,7 +729,6 @@ export interface RootRouteChildren {
   CobrosMetasRoute: typeof CobrosMetasRoute
   CobrosMiDiaRoute: typeof CobrosMiDiaRoute
   CobrosPagaloRoute: typeof CobrosPagaloRoute
-  CobrosAlertasConveniosRoute: typeof CobrosAlertasConveniosRoute
   CobrosPromesasRoute: typeof CobrosPromesasRoute
   CobrosReasignacionesRoute: typeof CobrosReasignacionesRoute
   CobrosReduccionRoute: typeof CobrosReduccionRoute
@@ -950,13 +950,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosPromesasRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/cobros/alertas-convenios': {
-      id: '/cobros/alertas-convenios'
-      path: '/cobros/alertas-convenios'
-      fullPath: '/cobros/alertas-convenios'
-      preLoaderRoute: typeof CobrosAlertasConveniosRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/cobros/pagalo': {
       id: '/cobros/pagalo'
       path: '/cobros/pagalo'
@@ -1025,6 +1018,13 @@ declare module '@tanstack/react-router' {
       path: '/cobros/apertura'
       fullPath: '/cobros/apertura'
       preLoaderRoute: typeof CobrosAperturaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cobros/alertas-convenios': {
+      id: '/cobros/alertas-convenios'
+      path: '/cobros/alertas-convenios'
+      fullPath: '/cobros/alertas-convenios'
+      preLoaderRoute: typeof CobrosAlertasConveniosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cobros/agenda': {
@@ -1174,6 +1174,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRoute,
   CobrosIdRoute: CobrosIdRoute,
   CobrosAgendaRoute: CobrosAgendaRoute,
+  CobrosAlertasConveniosRoute: CobrosAlertasConveniosRoute,
   CobrosAperturaRoute: CobrosAperturaRoute,
   CobrosBucketsRoute: CobrosBucketsRoute,
   CobrosCargaRoute: CobrosCargaRoute,
@@ -1184,7 +1185,6 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosMetasRoute: CobrosMetasRoute,
   CobrosMiDiaRoute: CobrosMiDiaRoute,
   CobrosPagaloRoute: CobrosPagaloRoute,
-  CobrosAlertasConveniosRoute: CobrosAlertasConveniosRoute,
   CobrosPromesasRoute: CobrosPromesasRoute,
   CobrosReasignacionesRoute: CobrosReasignacionesRoute,
   CobrosReduccionRoute: CobrosReduccionRoute,

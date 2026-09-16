@@ -341,11 +341,20 @@ insertan — y para un crédito sin historial previo la firma usa su bucket vivo
 vigilante cae al default B2/B4, así que el que gane por timestamp decide el bucket visible
 y puede violar justo la regla que este código existe para sostener.
 
-El check y el insert corren ahora en una transacción detrás de
-`pg_advisory_xact_lock(CREDITO_ASESOR_LOCK_NAMESPACE, credito_id)` — la misma llave que usa
-la reasignación de asesor, porque el congelamiento fija bucket **y** dueño. Cuando el caller
-pasa su propio ejecutor, él es dueño de la transacción y de la exclusión: acá no se abre
-ninguna ni se pide el lock.
+El lock cubre desde **leer el bucket** hasta **escribir la fila** —
+`pg_advisory_xact_lock(CREDITO_ASESOR_LOCK_NAMESPACE, credito_id)`, la misma llave que usa
+la reasignación de asesor, porque el congelamiento fija bucket **y** dueño.
+
+Cubrir solo el check y el insert no alcanzaba: el vigilante podía arrancar en medio, tomar
+el lock primero e insertar su fallback B2/B4, y después el firmante encontraba esa fila y
+descartaba el valor autoritativo que ya tenía en la mano. El bucket de un crédito sin
+historial terminaba decidido por el job en vez de por la firma.
+
+Y la lectura del bucket **ignora el historial de convenio**: para un crédito que ya no está
+`EN_CONVENIO`, el lector general acepta cualquier régimen — incluida la fila `CONGELADO` de
+un convenio anterior. Si se rechaza un convenio y se firma otro antes de que corra el motor
+de las 23:59, el rechazo no escribe historial de bucket, así que el nuevo se congelaba en el
+bucket del viejo en vez del que le toca por su mora de hoy.
 
 #### La trampa de Drizzle que se pagó acá
 

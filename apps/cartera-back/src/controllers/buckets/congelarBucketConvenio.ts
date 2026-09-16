@@ -1,7 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "../../database";
 import { SQL_CARTERA_SCHEMA } from "../../database/db/schema";
-import { bucketActualSql } from "../../lib/buckets-classification";
 import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../../lib/buckets-job-locks";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -49,8 +48,36 @@ export async function bucketAntesDelConvenio(
   credito_id: number,
   ejecutor: Ejecutor = db,
 ): Promise<number | null> {
+  // No se usa `bucketActualSql` acá, y la diferencia es UNA línea con
+  // consecuencias (review de Codex, P2): ese lector, para un crédito que NO
+  // está EN_CONVENIO, acepta el historial de cualquier régimen — incluida la
+  // fila `CONGELADO` de un convenio ANTERIOR.
+  //
+  // El escenario: se rechaza un convenio y se firma otro antes de que corra el
+  // motor de las 23:59. El rechazo devuelve el crédito a MOROSO/ACTIVO pero no
+  // escribe historial de bucket, así que la última fila sigue siendo el
+  // congelamiento viejo — y el convenio nuevo se congelaba en el bucket del
+  // anterior en vez del que le toca por su mora de HOY.
+  //
+  // Por eso acá el historial de convenio se ignora explícitamente: la pregunta
+  // es "qué bucket tiene este crédito FUERA de todo régimen de convenio".
   const res = await ejecutor.execute<{ bucket: number | null }>(sql`
-    SELECT ${bucketActualSql("c", "m")} AS bucket
+    SELECT COALESCE(
+      (SELECT h.bucket_nuevo FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
+        WHERE h.credito_id = c.credito_id
+          AND (h.status_credito IS DISTINCT FROM 'EN_CONVENIO')
+        ORDER BY h.fecha DESC, h.historial_id DESC
+        LIMIT 1),
+      (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
+        WHERE b.activo = true
+          AND c."statusCredit" = ANY (b.estados_incluidos)
+        ORDER BY b.numero LIMIT 1),
+      (SELECT b.numero FROM ${SQL_CARTERA_SCHEMA}.buckets b
+        WHERE b.activo = true
+          AND COALESCE(m.cuotas_atrasadas, 0) >= b.cuotas_min
+          AND (b.cuotas_max IS NULL OR COALESCE(m.cuotas_atrasadas, 0) <= b.cuotas_max)
+        ORDER BY b.numero LIMIT 1)
+    ) AS bucket
     FROM ${SQL_CARTERA_SCHEMA}.creditos c
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.moras_credito m
       ON m.credito_id = c.credito_id AND m.activa = true

@@ -239,13 +239,37 @@ async function main() {
     });
 
     movidos++;
-    if (cambiaAsesor) {
-      reasignados++;
-      // La carga viva se ajusta para que el siguiente crédito del lote se
-      // reparta parejo, igual que hace el motor dentro de su corrida.
-      const porAsesor = carga.get(destino) ?? new Map<number, number>();
-      porAsesor.set(asesorElegido as number, (porAsesor.get(asesorElegido as number) ?? 0) + 1);
-      carga.set(destino, porAsesor);
+    if (cambiaAsesor) reasignados++;
+
+    // La carga viva se ajusta en TODO movimiento, no solo cuando cambia el
+    // asesor (review de Codex, P2).
+    //
+    // El caso que faltaba: un crédito que cambia de bucket pero conserva a su
+    // asesor porque también cubre el destino. La foto inicial lo contó en su
+    // bucket VIEJO, así que sin este ajuste el destino se veía artificialmente
+    // vacío para ese asesor y los créditos siguientes del lote se le
+    // amontonaban encima.
+    //
+    // Sale del bucket anterior y entra al destino, siempre con el asesor FINAL
+    // — el mismo criterio que usa el motor dentro de su corrida.
+    const asesorFinal = cambiaAsesor ? asesorElegido : fila.asesor_id;
+    if (actual !== null) {
+      const porAsesorOrigen = carga.get(actual);
+      const previoOrigen = porAsesorOrigen?.get(fila.asesor_id as number);
+      if (porAsesorOrigen && previoOrigen != null) {
+        porAsesorOrigen.set(
+          fila.asesor_id as number,
+          Math.max(0, previoOrigen - 1),
+        );
+      }
+    }
+    if (asesorFinal != null) {
+      const porAsesorDestino = carga.get(destino) ?? new Map<number, number>();
+      porAsesorDestino.set(
+        asesorFinal,
+        (porAsesorDestino.get(asesorFinal) ?? 0) + 1,
+      );
+      carga.set(destino, porAsesorDestino);
     }
   }
 

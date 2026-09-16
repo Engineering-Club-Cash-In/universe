@@ -28,6 +28,7 @@ import {
   bucketAntesDelConvenio,
   congelarBucketPorConvenio,
 } from "./buckets/congelarBucketConvenio";
+import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../lib/buckets-job-locks";
 
 interface CreatePaymentAgreementInput {
   credit_id: number;
@@ -396,14 +397,6 @@ export async function createPaymentAgreement(
     console.log("🔥 Estado nuevo: EN_CONVENIO");
     console.log("🔥 Convenio ID:", agreement.convenio_id);
     // ============================================
-    // 🧊 BUCKET AL FIRMAR (COBROS-02 Fase 2)
-    // ============================================
-    // Se lee ANTES de borrar la mora y ANTES de cambiar el status: los dos
-    // pasos que siguen destruyen la información con la que se deriva el bucket.
-    // Con el crédito ya EN_CONVENIO y sin mora, `bucketActualSql` devuelve null
-    // y la derivación viva caería a B0 ("al día"), que es justo lo que la
-    // decisión 9 vino a corregir.
-    const bucketAlFirmar = await bucketAntesDelConvenio(credit_id);
 
     // ============================================
     // 💸 ELIMINAR MORA ACTIVA (si existe)
@@ -450,30 +443,54 @@ export async function createPaymentAgreement(
     // 🧊 CONGELAR EL BUCKET (COBROS-02 Fase 2)
     // ============================================
     // El crédito se queda en el bucket que tenía al firmar, con su asesor,
-    // hasta que pague completo o alguien deshaga el convenio (decisión 9 del
-    // plan 08). Va DESPUÉS del cambio de estado porque la fila se escribe con
-    // `status_credito = 'EN_CONVENIO'`: es la que el lector reconoce como del
-    // régimen de convenio.
+    // hasta que pague completo o alguien deshaga el convenio (decisión 9).
+    //
+    // LEER EL BUCKET Y CONGELARLO VAN JUNTOS, bajo el mismo lock por crédito
+    // (review de Codex, P2). Antes el lock cubría solo la comprobación y el
+    // INSERT, y la lectura del bucket quedaba afuera: el vigilante podía
+    // arrancar en medio, tomar el lock primero e insertar su fallback B2/B4,
+    // y después el firmante encontraba esa fila y descartaba el valor
+    // autoritativo que ya tenía en la mano. El bucket de un crédito sin
+    // historial terminaba decidido por el job en vez de por la firma.
+    //
+    // La lectura tiene que ir ANTES de borrar la mora y de cambiar el status:
+    // los dos pasos que siguen destruyen la información con la que se deriva.
     //
     // No lanza y no aborta la creación: el convenio ya existe y tiene plata de
     // por medio. Si esto falla, el crédito queda sin bucket visible hasta la
     // siguiente corrida del job de convenios, que lo arregla (red de seguridad).
-    if (bucketAlFirmar !== null) {
-      const congelado = await congelarBucketPorConvenio({
-        credito_id: credit_id,
-        bucket: bucketAlFirmar,
-        convenio_id: agreement.convenio_id,
-        // Acota la idempotencia a ESTE convenio: un crédito que ya tuvo uno
-        // antes conserva su fila vieja en la bitácora (append-only) y sin el
-        // corte nunca se volvía a congelar (review de Codex, P2).
-        desde: agreement.created_at ? new Date(agreement.created_at) : new Date(),
+    try {
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(${CREDITO_ASESOR_LOCK_NAMESPACE}, ${credit_id})`,
+        );
+        const bucketAlFirmar = await bucketAntesDelConvenio(credit_id, tx);
+        if (bucketAlFirmar === null) {
+          console.warn(
+            "🧊 No se pudo determinar el bucket al firmar; lo resolverá el job de convenios",
+          );
+          return;
+        }
+        const congelado = await congelarBucketPorConvenio({
+          credito_id: credit_id,
+          bucket: bucketAlFirmar,
+          convenio_id: agreement.convenio_id,
+          // Acota la idempotencia a ESTE convenio: un crédito que ya tuvo uno
+          // antes conserva su fila vieja en la bitácora (append-only) y sin el
+          // corte nunca se volvía a congelar.
+          desde: agreement.created_at ? new Date(agreement.created_at) : new Date(),
+          // Con ejecutor propio: la transacción y el lock los maneja este
+          // bloque, que es quien necesita que abarquen también la lectura.
+          ejecutor: tx,
+        });
+        if (congelado !== null) {
+          console.log(`🧊 Bucket congelado en B${congelado} por el convenio`);
+        }
       });
-      if (congelado !== null) {
-        console.log(`🧊 Bucket congelado en B${congelado} por el convenio`);
-      }
-    } else {
-      console.warn(
-        "🧊 No se pudo determinar el bucket al firmar; lo resolverá el job de convenios",
+    } catch (errCongelamiento) {
+      console.error(
+        "🧊 ⚠️ No se pudo congelar el bucket del convenio (lo resolverá el vigilante):",
+        errCongelamiento,
       );
     }
 

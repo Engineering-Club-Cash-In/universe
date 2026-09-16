@@ -646,9 +646,16 @@ export async function listarRubrosDeCredito(credito_id: number) {
     }
 
     return { ...rubro, tipo_nombre, abonado };
-  },
-  { isolationLevel: "repeatable read", accessMode: "read only" });
   });
+    },
+    // Las opciones van en `db.transaction`, NO acá arriba. Estuvieron mal
+    // puestas como segundo argumento de `filas.map()`, donde `map` las toma
+    // como su `thisArg` y las ignora en silencio — el tipado no se queja, así
+    // que la transacción corrió en READ COMMITTED durante varios commits, con
+    // el comentario de más arriba explicando al lado por qué eso no alcanza.
+    // Hay un test que fija que lleguen.
+    { isolationLevel: "repeatable read", accessMode: "read only" }
+  );
 }
 
 /**

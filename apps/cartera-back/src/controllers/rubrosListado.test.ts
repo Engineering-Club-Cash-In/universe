@@ -62,7 +62,12 @@ const motorConCola = (...pasos: unknown[][]) => {
       return consultas;
     },
   };
-  motor.transaction = (cb: any) => cb(motor);
+  /** Opciones con las que se abrió la transacción (undefined si no se pasaron). */
+  motor.opcionesTx = undefined;
+  motor.transaction = (cb: any, opciones?: any) => {
+    motor.opcionesTx = opciones;
+    return cb(motor);
+  };
   return motor;
 };
 
@@ -324,5 +329,28 @@ describe("listarRubrosDeCredito — el `abonado` es lo que el cliente PAGÓ", ()
 
     expect(await listarRubrosDeCredito(9)).toEqual([]);
     expect(dbImpl.consultas).toBe(2);
+  });
+
+  it("abre la transacción en `repeatable read` y de sólo lectura", async () => {
+    // No es decorativo y por eso tiene test propio: la base corre en READ
+    // COMMITTED, donde cada sentencia toma una instantánea NUEVA. Un
+    // `db.transaction` pelado no congela nada, así que `abonado` podría salir
+    // de una instantánea y `saldo_pendiente` de otra, y la ficha mostraría
+    // monto, abonado y saldo que no cierran entre sí — exactamente lo que este
+    // `abonado` vino a evitar.
+    //
+    // El test existe porque ese objeto de opciones ya se coló UNA VEZ como
+    // segundo argumento de `filas.map()` —donde TypeScript lo acepta feliz,
+    // porque `map` toma un `thisArg`— y la transacción corrió en READ COMMITTED
+    // durante varios commits, con un comentario al lado explicando por qué eso
+    // no alcanzaba. Un error que el tipado no ve necesita un test que sí.
+    dbImpl = motorConCola(EXISTE_EL_CREDITO, [fila({})], []);
+
+    await listarRubrosDeCredito(9);
+
+    expect(dbImpl.opcionesTx).toEqual({
+      isolationLevel: "repeatable read",
+      accessMode: "read only",
+    });
   });
 });

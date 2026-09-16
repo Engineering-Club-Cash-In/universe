@@ -32,8 +32,15 @@ import { describe, expect, it, mock } from "bun:test";
 // misma suerte.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Todo lo que el controlador mandó a escribir, en orden. */
-let escrituras: { op: "update" | "insert" | "delete"; valores: any }[] = [];
+/**
+ * Todo lo que el controlador mandó a escribir, en orden. `tx-begin`/`tx-commit`
+ * son marcas del motor falso, no escrituras: permiten afirmar que una escritura
+ * cayó DENTRO de la transacción y no después del commit.
+ */
+let escrituras: {
+  op: "update" | "insert" | "delete" | "tx-begin" | "tx-commit";
+  valores: any;
+}[] = [];
 
 /**
  * Motor de base falso manejado por una COLA: cada `await` de una cadena drizzle
@@ -85,7 +92,13 @@ const motorConCola = (...resultados: unknown[]) => {
     },
   };
   // La transacción corre contra el MISMO motor: el controlador no distingue.
-  motor.transaction = (cb: any) => cb(motor);
+  // Las marcas alrededor son lo único que la hace visible desde el test.
+  motor.transaction = async (cb: any) => {
+    escrituras.push({ op: "tx-begin", valores: null });
+    const resultado = await cb(motor);
+    escrituras.push({ op: "tx-commit", valores: null });
+    return resultado;
+  };
   return motor;
 };
 
@@ -194,16 +207,82 @@ describe("falsePayment — la boleta falsa devuelve lo que cobró de los rubros"
     // corre antes, commitea sus filas y resta del aporte, y NO es idempotente.
     // Una segunda llamada sobre un pago ya falso duplicaba el espejo y restaba
     // dos veces, rompiendo `capital == Σ monto_aportado`.
-    //
-    // La cola trae SÓLO el chequeo: si el early-return desapareciera, el
-    // controlador seguiría hasta el espejo y la cola agotada haría fallar esto.
     escrituras = [];
-    dbImpl = motorConCola([{ paymentFalse: true }]);
+    dbImpl = motorConCola(
+      [{ paymentFalse: true }], // chequeo temprano: el pago YA es falso
+      [] // reset del ajuste por fecha ideal (returning) — ver el test de abajo
+    );
 
     const resultado = await falsePayment(77, 5);
 
     expect(resultado.updatedCount).toBe(0);
-    expect(escrituras).toEqual([]);
+
+    // Lo que el early-return protege: NI UN insert (el espejo de inversionistas
+    // es lo único que inserta antes de la transacción), ni transacción abierta,
+    // ni rubros tocados.
+    expect(escrituras.some((e) => e.op === "insert")).toBe(false);
+    expect(escrituras.some((e) => e.op === "delete")).toBe(false);
+    expect(escrituras.some((e) => e.op === "tx-begin")).toBe(false);
+    expect(
+      escrituras.some(
+        (e) => e.op === "update" && e.valores?.saldo_pendiente !== undefined
+      )
+    ).toBe(false);
+  });
+
+  it("el reset del ajuste por fecha ideal corre DENTRO de la transacción", async () => {
+    // Estaba DESPUÉS del commit. Si esa consulta fallaba, la boleta quedaba
+    // commiteada como falsa con el ajuste todavía marcado como cobrado, y el
+    // reintento se iba por el early-return sin volver a limpiarlo nunca: el
+    // ajuste quedaba cobrado para siempre apuntando a un pago que no existe, y
+    // ningún pago futuro se lo volvía a cobrar al cliente.
+    escrituras = [];
+    dbImpl = motorConCola(
+      [{ paymentFalse: false }],
+      CUBE,
+      { rowCount: 1 },
+      RECLAMO_APLICADO,
+      RUBRO_SALDADO,
+      [],
+      [],
+      [],
+      [{ id: 3 }] // reset del ajuste: devolvió la fila reseteada
+    );
+
+    await falsePayment(77, 5);
+
+    const inicio = escrituras.findIndex((e) => e.op === "tx-begin");
+    const commit = escrituras.findIndex((e) => e.op === "tx-commit");
+    const reset = escrituras.findIndex(
+      (e) =>
+        e.op === "update" &&
+        e.valores?.fecha_cobro === null &&
+        e.valores?.pago_id === null
+    );
+
+    expect(reset).toBeGreaterThan(inicio);
+    expect(reset).toBeLessThan(commit);
+  });
+
+  it("el camino del pago ya falso vuelve a correr el reset, que es idempotente", async () => {
+    // Red de seguridad para las filas que el bug ya dejó sucias en producción:
+    // si un ajuste sigue apuntando a un pago que YA está declarado falso, una
+    // segunda llamada a `/false-payment` tiene que limpiarlo. El UPDATE filtra
+    // por `pago_id` del pago invalidado, así que correrlo de más no toca nada
+    // (0 filas) y jamás puede pisar un ajuste que un pago posterior reclamó.
+    escrituras = [];
+    dbImpl = motorConCola([{ paymentFalse: true }], [{ id: 3 }]);
+
+    await falsePayment(77, 5);
+
+    expect(
+      escrituras.some(
+        (e) =>
+          e.op === "update" &&
+          e.valores?.fecha_cobro === null &&
+          e.valores?.pago_id === null
+      )
+    ).toBe(true);
   });
 
   it("si la boleta no existe no toca ningún rubro", async () => {

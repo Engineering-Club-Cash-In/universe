@@ -115,6 +115,62 @@ export const investorDocumentsRouter = new Elysia()
     }
   )
 
+  // GET Cliente por id - Mismo contrato que la ruta por email (solo visibles,
+  // url inline + downloadUrl), pero apuntando a una entidad concreta. La usa el
+  // portal cuando la persona tiene varias: por correo se devolvía la primera
+  // fila que apareciera.
+  //
+  // NO reusar /investor-documents/admin/:inversionistaId: esa no filtra
+  // `visible` y le enseñaría al inversionista los documentos internos.
+  .get(
+    "/investor-documents/client-by-id/:inversionistaId",
+    async ({ params, set }) => {
+      try {
+        const inversionistaId = Number(params.inversionistaId);
+        if (!Number.isInteger(inversionistaId) || inversionistaId <= 0) {
+          set.status = 400;
+          return { success: false, message: "inversionistaId inválido" };
+        }
+
+        const documentos = await db
+          .select()
+          .from(documentos_inversionista)
+          .where(
+            and(
+              eq(documentos_inversionista.inversionista_id, inversionistaId),
+              eq(documentos_inversionista.visible, true)
+            )
+          );
+
+        const documentosConUrl = await Promise.all(
+          documentos.map(async (doc) => {
+            const mimeType = await resolveDocumentMimeType(doc.key);
+            return {
+              ...doc,
+              url: await getSignedDocumentUrl(doc.key, { disposition: "inline", filename: doc.nombre, mimeType }),
+              downloadUrl: await getSignedDocumentUrl(doc.key, { disposition: "attachment", filename: doc.nombre, mimeType }),
+            };
+          })
+        );
+
+        return { success: true, data: documentosConUrl };
+      } catch (error) {
+        console.error("Error al obtener documentos (client-by-id):", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al obtener documentos",
+          error: error instanceof Error ? error.message : "Error desconocido",
+        };
+      }
+    },
+    {
+      params: t.Object({
+        inversionistaId: t.String(),
+      }),
+    }
+  )
+
   // GET Cliente - Solo documentos visibles, busca por email del inversionista
   .get(
     "/investor-documents/client/:email",

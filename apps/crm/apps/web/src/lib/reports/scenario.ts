@@ -158,7 +158,7 @@ export type FlujoCuotasInversionesResponse = {
 };
 
 export type ReinversionLiquidacionesResponse = {
-	contrato_version: 3;
+	contrato_version: 4;
 	/**
 	 * Distribución mensual por modalidad. `total_cuota` es el pago neto y
 	 * `reinversion_total` el flujo que permanece colocado; juntos forman el
@@ -202,7 +202,7 @@ export type ReinversionLiquidacionesResponse = {
 	comprasMes: {
 		modalidad_facturacion: string;
 		tipo_reinversion: string;
-		tipo_compra: PurchaseClassification;
+		origen_dinero: FundingOrigin;
 		cantidad: number;
 		monto: string;
 	}[];
@@ -242,7 +242,7 @@ export type ReinversionLiquidacionesResponse = {
 		inversionista: string;
 		modalidad_facturacion: string;
 		tipo_reinversion: string;
-		tipo_compra: PurchaseClassification;
+		origen_dinero: FundingOrigin;
 		monto: string;
 	}[];
 	detalle_estado: {
@@ -252,10 +252,7 @@ export type ReinversionLiquidacionesResponse = {
 	cantidad_liquidaciones: number;
 };
 
-export type PurchaseClassification =
-	| "nueva_posicion"
-	| "ampliacion_posicion"
-	| "sin_clasificar";
+export type FundingOrigin = "compra_nueva" | "reinversion";
 
 export type PurchaseTicketMonth = {
 	periodo: string;

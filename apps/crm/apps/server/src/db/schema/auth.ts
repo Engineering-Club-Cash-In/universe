@@ -14,6 +14,7 @@ export const userRoleEnum = pgEnum("user_role", [
 	"investment_manager",
 	"service_center_manager",
 	"vehicle_verifier",
+	"partner",
 ]);
 
 export const user = pgTable("user", {

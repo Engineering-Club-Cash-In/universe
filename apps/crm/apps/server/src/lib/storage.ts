@@ -288,6 +288,21 @@ export async function getFileBuffer(key: string): Promise<Buffer> {
 	return Buffer.from(arrayBuffer);
 }
 
+export async function uploadBufferToR2(
+	key: string,
+	buffer: Buffer,
+	contentType = "application/pdf",
+): Promise<void> {
+	await r2Client.send(
+		new PutObjectCommand({
+			Bucket: R2_BUCKET_NAME,
+			Key: key,
+			Body: buffer,
+			ContentType: contentType,
+		}),
+	);
+}
+
 // Subir archivo a R2 (para oportunidades)
 export async function uploadFileToR2(
 	file: File | Blob,

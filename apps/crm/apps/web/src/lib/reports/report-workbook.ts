@@ -7,7 +7,7 @@ import {
 	buildInvestorExportRows,
 	buildReinvestmentReportModel,
 	getBillingModeLabel,
-	getPurchaseClassificationLabel,
+	getFundingOriginLabel,
 	getReinvestmentModeLabel,
 } from "./reinvestment-report";
 
@@ -141,7 +141,7 @@ export function buildAdminReportsWorkbook(input: {
 		);
 		append("Inversionistas", buildInvestorExportRows(model.data));
 		append(
-			"Compras",
+			"Movimientos",
 			model.data.detalleComprasMes.map((row) => ({
 				Fecha: row.fecha,
 				Inversionista: row.inversionista,
@@ -149,10 +149,10 @@ export function buildAdminReportsWorkbook(input: {
 					row.modalidad_facturacion,
 				),
 				"Tipo de reinversión": getReinvestmentModeLabel(row.tipo_reinversion),
-				"Tipo de compra": getPurchaseClassificationLabel(row.tipo_compra),
+				"Origen del dinero": getFundingOriginLabel(row.origen_dinero),
 				Monto: Number(row.monto),
 				"Ticket promedio del período": model.summary.ticket.amount,
-				"Nuevas posiciones del período": model.summary.ticket.count,
+				"Compras nuevas del período": model.summary.ticket.count,
 			})),
 		);
 		append(
@@ -160,7 +160,8 @@ export function buildAdminReportsWorkbook(input: {
 			model.data.detalleInteresNeto.map((row) => ({
 				Inversionista: row.inversionista,
 				Referencia: row.referencia,
-				"Tratamiento fiscal": row.tratamiento_fiscal,
+				"Tratamiento fiscal":
+					row.tratamiento_fiscal === "cube" ? "CUBE" : "No verificado",
 				Interés: Number(row.interes),
 				IVA: Number(row.iva),
 				ISR: Number(row.isr),
@@ -168,7 +169,12 @@ export function buildAdminReportsWorkbook(input: {
 			})),
 		);
 	} else {
-		for (const sheet of ["Modalidades", "Inversionistas", "Compras", "Interés"])
+		for (const sheet of [
+			"Modalidades",
+			"Inversionistas",
+			"Movimientos",
+			"Interés",
+		])
 			append(sheet, [{ Estado: "Contrato incompatible" }]);
 	}
 
@@ -178,7 +184,7 @@ export function buildAdminReportsWorkbook(input: {
 		{ Campo: "Generado", Valor: input.metadata.generatedAt },
 		{
 			Campo: "Contrato Inversión",
-			Valor: model.compatible ? 3 : "Incompatible",
+			Valor: model.compatible ? model.data.contrato_version : "Incompatible",
 		},
 		{
 			Campo: "Advertencia legacy",

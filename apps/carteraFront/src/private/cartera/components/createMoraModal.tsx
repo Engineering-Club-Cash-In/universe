@@ -27,7 +27,8 @@ export function ModalCreateMora({
   const [cuotas, setCuotas] = useState<number | undefined>();
   const [override, setOverride] = useState(false);
   const [motivo, setMotivo] = useState("");
-  const { createMora } = useMoras({});
+  // enabled: false → este modal solo usa la mutación, no necesita los listados
+  const { createMora } = useMoras({ enabled: false });
   
   // 🔥 Ref para prevenir ejecución doble       
   const mutationIdRef = useRef<string | null>(null);

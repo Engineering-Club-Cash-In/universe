@@ -49,7 +49,7 @@ const buildRows = (total: number) =>
 	Array.from({ length: total }, (_, index) => index + 1);
 
 const reportFixture = (): ReinversionLiquidacionesResponse => ({
-	contrato_version: 3,
+	contrato_version: 4,
 	porTipo: {
 		sin_reinversion: {
 			reinversion_capital: "0.00",
@@ -83,7 +83,7 @@ const reportFixture = (): ReinversionLiquidacionesResponse => ({
 	},
 	interesNeto: {
 		noVerificado: { interes: "10.00" },
-		cube: { interes: "0.00", iva: "0.00", neto: "0.00" },
+		cube: { interes: "10.00", iva: "1.20", neto: "11.20" },
 	},
 	pagosExtras: { abonos_capital: "20.00", cancelaciones: "30.00" },
 	porInversionista: [],
@@ -91,7 +91,7 @@ const reportFixture = (): ReinversionLiquidacionesResponse => ({
 		{
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "sin_reinversion",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			cantidad: 1,
 			monto: "80.00",
 		},
@@ -116,6 +116,16 @@ const reportFixture = (): ReinversionLiquidacionesResponse => ({
 			iva: "0.00",
 			isr: "0.00",
 		},
+		{
+			inversionista_id: 2,
+			inversionista: "Beatriz",
+			referencia: "LIQ-2",
+			tratamiento_fiscal: "cube",
+			interes: "10.00",
+			iva: "1.20",
+			isr: "0.00",
+			neto: "11.20",
+		},
 	],
 	detallePagosExtras: [
 		{
@@ -137,7 +147,7 @@ const reportFixture = (): ReinversionLiquidacionesResponse => ({
 			inversionista: "Ana",
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "sin_reinversion",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			monto: "80.00",
 		},
 	],
@@ -240,6 +250,11 @@ describe("detalle secundario compartido", () => {
 		expect(panel?.parentElement?.className).toContain("lg:grid-cols-3");
 		expect(panel?.className).toContain("lg:col-span-3");
 		expect(panel?.textContent).toContain("LIQ-1");
+		expect(panel?.textContent).toContain("Tratamiento fiscal");
+		expect(panel?.textContent).toContain("No verificado");
+		expect(panel?.textContent).toContain("CUBE");
+		expect(panel?.textContent).toContain("Neto");
+		expect(panel?.textContent).toMatch(/Q\s+11\.20/);
 		expect(
 			buttons.map((button) => button.getAttribute("aria-controls")),
 		).toEqual([panelId, panelId, panelId]);

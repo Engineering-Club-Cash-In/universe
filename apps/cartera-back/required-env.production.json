@@ -3,6 +3,7 @@
 		{ "key": "AMJK_PASSWORD", "runtime": true },
 		{ "key": "AMJK_REQUESTOR", "runtime": true },
 		{ "key": "AMJK_USER", "runtime": true },
+		{ "key": "AUTH_GOOGLE_URL", "runtime": true },
 		{ "key": "BUCKET_REPORTS", "runtime": true },
 		{ "key": "BUCKET_REPORTS_URL", "runtime": true },
 
@@ -22,6 +23,7 @@
 		{ "key": "JWT_SECRET", "runtime": true },
 
 		{ "key": "PORT", "runtime": true },
+		{ "key": "PORTAL_PROVISIONING_SECRET", "runtime": true },
 		{ "key": "R2_ACCESS_KEY_ID", "runtime": true },
 		{ "key": "R2_BUCKET", "runtime": true },
 		{ "key": "R2_ENDPOINT", "runtime": true },

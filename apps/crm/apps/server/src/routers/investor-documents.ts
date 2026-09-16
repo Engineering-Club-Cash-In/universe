@@ -114,6 +114,52 @@ export const investorDocumentsRouter = {
 			return result;
 		}),
 
+	/**
+	 * ¿De quién es este DPI o este correo? Alimenta la detección del alta: si el
+	 * dato ya es de alguien, conta no está duplicando — está por dar de alta su
+	 * empresa.
+	 *
+	 * Devuelve `null` cuando no hay nadie, que es el caso normal de un alta
+	 * corriente. No es un error y no debe tratarse como tal.
+	 *
+	 * Un fallo de cartera SÍ es un error y se propaga. Antes se tragaba y se
+	 * devolvía el mismo `null` que "no hay nadie", cuando eso ya no es inocuo:
+	 * al desaparecer el interruptor "¿Es empresa?", la única forma de mover el
+	 * DPI a representante legal es que la detección haya corrido. Con el fallo
+	 * disfrazado de "no existe", conta enviaba el alta con el DPI en su sitio y
+	 * cartera la rechazaba por duplicada, sin ninguna salida.
+	 */
+	identidadInversionista: crmCobrosOrInvestmentsProcedure
+		.input(
+			z.object({
+				dpi: z.string().optional(),
+				email: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const dpi = input.dpi?.trim();
+			const email = input.email?.trim();
+			if (!dpi && !email) return null;
+
+			try {
+				const result = await carteraBackClient.buscarIdentidadInversionista({
+					...(dpi ? { dpi } : {}),
+					...(email ? { email } : {}),
+				});
+				return result.data ?? null;
+			} catch (error) {
+				console.error("[identidadInversionista] error en cartera-back:", error);
+
+				// Se distingue de "no hay nadie" a propósito: el formulario tiene que
+				// poder decir "no pudimos verificar" y ofrecer reintentar, en vez de
+				// dejar creer que el DPI está libre.
+				throw new ORPCError("SERVICE_UNAVAILABLE", {
+					message:
+						"No pudimos verificar el DPI contra cartera. Reintenta en un momento.",
+				});
+			}
+		}),
+
 	getInvestorDocumentsAdmin: crmCobrosOrInvestmentsProcedure
 		.input(
 			z.object({
@@ -322,10 +368,17 @@ export const investorDocumentsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const result = await carteraBackClient.setInvestorStatus({
-				inversionista_id: input.inversionistaId,
-				status: input.status,
-			});
+			let result: Awaited<
+				ReturnType<typeof carteraBackClient.setInvestorStatus>
+			>;
+			try {
+				result = await carteraBackClient.setInvestorStatus({
+					inversionista_id: input.inversionistaId,
+					status: input.status,
+				});
+			} catch (error) {
+				throw toCarteraOrpcError(error, "Cambiar status de inversionista");
+			}
 
 			try {
 				await db.insert(investorActivityLog).values({
@@ -430,6 +483,14 @@ export const investorDocumentsRouter = {
 				});
 			}
 
+			// Qué pasó con su acceso al portal. Cartera nunca falla el alta por
+			// esto, así que el dato viaja aparte: el inversionista puede haber
+			// quedado perfecto y el acceso no, y son dos cosas distintas.
+			const accesoPortal =
+				createResult.provisioning?.find(
+					(p) => p.inversionistaId === created.inversionista_id,
+				) ?? null;
+
 			// 2. Log de creación
 			await db.insert(investorActivityLog).values({
 				inversionistaId: created.inversionista_id,
@@ -439,6 +500,10 @@ export const investorDocumentsRouter = {
 					dpi: input.dpi,
 					email: input.email,
 					moneda: input.moneda,
+					// Queda registrado acá también: si el correo con la contraseña
+					// se desvió por SERVER != PROD, la cuenta existe y su dueño no
+					// puede entrar, y sin este rastro nadie se enteraría.
+					accesoPortal,
 				},
 				performedBy: context.session.user.id,
 				performedByName:
@@ -502,6 +567,7 @@ export const investorDocumentsRouter = {
 				success: true,
 				inversionista: created,
 				compraCartera: compraResult,
+				accesoPortal,
 			};
 		}),
 

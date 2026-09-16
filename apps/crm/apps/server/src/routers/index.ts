@@ -11,6 +11,7 @@ import { clientFormsRouter } from "./client-forms";
 import { cobrosRouter } from "./cobros";
 import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
+import { documentIntegrityProcedures } from "./document-integrity";
 import { insuranceRouter } from "./insurance";
 import { investorDocumentsRouter } from "./investor-documents";
 import { juridicoDashboardRouter } from "./juridico-dashboard";
@@ -25,6 +26,7 @@ import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
 import { seguimientosRouter } from "./seguimientos";
+import { trackerRouter } from "./tracker";
 import { uploadRouter } from "./upload";
 import { validationsRouter } from "./validations";
 import { vehiclesRouter } from "./vehicles";
@@ -213,6 +215,7 @@ export const adminAppRouter = {
 	toggleUserSuspension: adminRouter.toggleUserSuspension,
 	deleteUser: adminRouter.deleteUser,
 	createUser: adminRouter.createUser,
+	setPartnerCompanies: adminRouter.setPartnerCompanies,
 
 	// Admin Import routes
 	setupImportacion: adminImportRouter.setupImportacion,
@@ -384,6 +387,7 @@ export const reportsAppRouter = {
 
 	// Investor Documents routes (Documentos de inversionista)
 	getInvestorRendimiento: investorDocumentsRouter.getInvestorRendimiento,
+	identidadInversionista: investorDocumentsRouter.identidadInversionista,
 	getInvestorDocumentsAdmin: investorDocumentsRouter.getInvestorDocumentsAdmin,
 	createInvestorDocument: investorDocumentsRouter.createInvestorDocument,
 	toggleInvestorDocumentVisibility:
@@ -432,6 +436,7 @@ export const appRouter = Object.assign(
 	legalAppRouter,
 	miscAppRouter,
 	reportsAppRouter,
+	documentIntegrityProcedures,
 );
 
 // Disbursement routes exported separately to avoid TS7056 with declaration emit.
@@ -453,6 +458,15 @@ export const disbursementRouter = {
 	// Dashboard jurídico manual
 	getJuridicoDashboardSnapshot: juridicoDashboardRouter.getSnapshot,
 	updateJuridicoDashboardSnapshot: juridicoDashboardRouter.updateSnapshot,
+};
+
+// Tracker de predios/agencias. Aparte del appRouter para no empujar TS7056.
+export const partnerTrackerRouter = {
+	getCasos: trackerRouter.getCasos,
+	getCasoById: trackerRouter.getCasoById,
+	getPartnerAgencies: trackerRouter.getPartnerAgencies,
+	getPartnerPasswordStatus: trackerRouter.getPartnerPasswordStatus,
+	changePartnerPassword: trackerRouter.changePartnerPassword,
 };
 
 export const manualVehicleRouter = {
@@ -479,4 +493,5 @@ export type AppRouter = typeof healthRouter &
 	typeof formsAppRouter &
 	typeof legalAppRouter &
 	typeof miscAppRouter &
-	typeof reportsAppRouter;
+	typeof reportsAppRouter &
+	typeof documentIntegrityProcedures;

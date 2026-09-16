@@ -78,6 +78,7 @@ import {
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
+import { buildLeadDuplicateConflict } from "./lead-duplicate-conflict";
 import { getLeadSourceLabel } from "../lib/lead-sources";
 import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
@@ -90,6 +91,7 @@ import {
 	getWonOpportunityRevokeError,
 	stripUnchangedFrozenFields,
 } from "../lib/opportunity-stage-guard";
+import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -104,6 +106,11 @@ import {
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
 import { carteraBackClient } from "../services/cartera-back-client";
+import {
+	DocumentIntegrityError,
+	resetOpportunityCreditAnalysis,
+	upsertOpportunityCreditAnalysis,
+} from "../services/document-integrity";
 import { scoreLead } from "../services/lead-scoring";
 import {
 	ejecutarValidaciones,
@@ -996,6 +1003,10 @@ export const crmRouter = {
 				const matchingLeads = await db
 					.select({
 						id: leads.id,
+						firstName: leads.firstName,
+						middleName: leads.middleName,
+						lastName: leads.lastName,
+						secondLastName: leads.secondLastName,
 						assignedTo: leads.assignedTo,
 						assignedToName: user.name,
 					})
@@ -1024,84 +1035,14 @@ export const crmRouter = {
 						.orderBy(desc(opportunities.createdAt))
 						.limit(1);
 
-					if (activeOpportunity) {
-						// El conflicto se reporta con el dueño del proceso en curso, que
-						// no necesariamente es el del lead más antiguo.
-						const leadEnProceso =
-							matchingLeads.find(
-								(lead) => lead.id === activeOpportunity.leadId,
-							) ?? matchingLeads[0];
-
-						throw new ORPCError("CONFLICT", {
-							message: `Ya existe un lead con este DPI y tiene un proceso activo, asignado al asesor: ${leadEnProceso.assignedToName}`,
-						});
-					}
-
-					// Sin procesos activos: se reusa el más antiguo, que arrastra el
-					// historial.
-					const existingLead = matchingLeads[0];
-
-					// Lead existe pero sin procesos activos → reasignar al nuevo asesor
-					const reassignedLead = await auditedTransaction(async (tx) => {
-						const [lead] = await tx
-							.update(leads)
-							.set({
-								assignedTo,
-								status: "new",
-								source: input.source,
-								campaign: input.campaign,
-								updatedAt: new Date(),
-							})
-							.where(eq(leads.id, existingLead.id))
-							.returning();
-
-						// Crear nueva oportunidad en el primer stage
-						const [firstStage] = await tx
-							.select({ id: salesStages.id })
-							.from(salesStages)
-							.orderBy(salesStages.order)
-							.limit(1);
-
-						if (!firstStage) {
-							throw new ORPCError("INTERNAL_SERVER_ERROR", {
-								message: "No se encontró el primer stage de ventas",
-							});
-						}
-
-						// Este lead ya existía: lo que pasó fue una reasignación, no
-						// un alta.
-						auditRecord({
-							entity: "lead",
-							id: existingLead.id,
-							action: "reassign",
-							data: { dpi: normalizedDpi, assignedTo },
-						});
-
-						const [nuevaOportunidad] = await tx
-							.insert(opportunities)
-							.values({
-								title: `${input.firstName} ${input.lastName}`,
-								leadId: existingLead.id,
-								creditType: "autocompra",
-								stageId: firstStage.id,
-								probability: 1,
-								assignedTo,
-								createdBy: context.userId,
-								source: input.source,
-								campaign: input.campaign,
-							})
-							.returning({ id: opportunities.id });
-						auditRecord({
-							entity: "opportunity",
-							id: nuevaOportunidad.id,
-							action: "create",
-							data: { leadId: existingLead.id, assignedTo },
-						});
-
-						return lead;
+					throw new ORPCError("CONFLICT", {
+						message: "Ya existe un lead con este DPI",
+						data: buildLeadDuplicateConflict(
+							matchingLeads,
+							activeOpportunity ?? null,
+							context.userId,
+						),
 					});
-
-					return reassignedLead;
 				}
 			}
 
@@ -1511,42 +1452,21 @@ export const crmRouter = {
 					});
 				}
 
-				const ownerCondition = getCreditAnalysisOwnerCondition({
-					leadId,
-					opportunityId: opportunityId!,
-				});
-
-				// Check if analysis already exists
-				const existing = await db
-					.select()
-					.from(creditAnalysis)
-					.where(ownerCondition)
-					.limit(1);
-
-				if (existing.length > 0) {
-					const updated = await db
-						.update(creditAnalysis)
-						.set({
-							...dataForDb,
-							analyzedAt: existing[0].analyzedAt ?? new Date(),
-							updatedAt: new Date(),
-						})
-						.where(ownerCondition)
-						.returning();
-					return updated[0];
-				}
-
-				const created = await db
-					.insert(creditAnalysis)
-					.values({
+				try {
+					return await upsertOpportunityCreditAnalysis({
 						leadId,
 						opportunityId: opportunityId!,
-						...dataForDb,
-						createdBy: context.userId,
-						analyzedAt: new Date(),
-					})
-					.returning();
-				return created[0];
+						userId: context.userId,
+						analysisData: dataForDb,
+					});
+				} catch (error) {
+					if (error instanceof DocumentIntegrityError) {
+						throw new ORPCError("PRECONDITION_FAILED", {
+							message: error.message,
+						});
+					}
+					throw error;
+				}
 			}
 
 			// Si es para un co-deudor
@@ -1649,18 +1569,30 @@ export const crmRouter = {
 				}
 			}
 
-			const whereCondition = getCreditAnalysisOwnerCondition(
-				input.leadId
-					? { leadId: input.leadId, opportunityId: input.opportunityId! }
-					: { coDebtorId: input.coDebtorId! },
-			);
+			let deleted: { id: string } | null;
+			if (input.leadId) {
+				try {
+					deleted = await resetOpportunityCreditAnalysis({
+						opportunityId: input.opportunityId!,
+						leadId: input.leadId,
+					});
+				} catch (error) {
+					if (error instanceof DocumentIntegrityError) {
+						throw new ORPCError("PRECONDITION_FAILED", {
+							message: error.message,
+						});
+					}
+					throw error;
+				}
+			} else {
+				const [coDebtorAnalysis] = await db
+					.delete(creditAnalysis)
+					.where(eq(creditAnalysis.coDebtorId, input.coDebtorId!))
+					.returning({ id: creditAnalysis.id });
+				deleted = coDebtorAnalysis ?? null;
+			}
 
-			const deleted = await db
-				.delete(creditAnalysis)
-				.where(whereCondition)
-				.returning({ id: creditAnalysis.id });
-
-			if (deleted.length === 0) {
+			if (!deleted) {
 				throw new ORPCError("NOT_FOUND", {
 					message: "No se encontró análisis crediticio para resetear",
 				});
@@ -5230,8 +5162,21 @@ export const crmRouter = {
 				context.userRole === "analyst" ||
 				document.uploadedBy === context.userId
 			) {
-				// Eliminar de R2
-				await deleteFileFromR2(document.filePath);
+				// Si el archivo es la evidencia inmutable de una validación de
+				// integridad documental, no se borra de R2: esa misma ruta queda
+				// referenciada por document_integrity_validations para auditoría.
+				const isDocumentIntegrityEvidence = isImmutableDocumentIntegrityEvidencePath({
+					filePath: document.filePath,
+					bankStatementPrefix: buildUploadPrefix(
+						"bank_statement",
+						document.opportunityId,
+					),
+				});
+
+				if (!isDocumentIntegrityEvidence) {
+					// Eliminar de R2
+					await deleteFileFromR2(document.filePath);
+				}
 
 				// Eliminar de la base de datos
 				await db

@@ -5,6 +5,8 @@
 import apiAuth from "@/lib/api/apiAuth";
 import type { AxiosError } from "axios";
 
+import { mensajeDelServidor } from "./mensajeDelServidor";
+
 export interface ProfileData {
   name: string;
   lastName: string;
@@ -126,5 +128,28 @@ export const getNumbersSifco = async (
     customError.status = axiosError.response?.status;
     customError.data = axiosError.response?.data;
     throw customError;
+  }
+};
+
+/**
+ * Fija el DPI de la cuenta autenticada.
+ *
+ * El DPI dejó de aceptarse como campo del cliente en Better Auth; el servidor
+ * lo escribe sobre la cuenta de la sesión.
+ */
+export const updateOwnDpi = async (dpi: string): Promise<string> => {
+  try {
+    const response = await apiAuth.post<{
+      success: boolean;
+      data: { dpi: string };
+    }>("/api/profile/me/dpi", { dpi });
+
+    return response.data.data.dpi;
+  } catch (error) {
+    // El motivo se lee con `mensajeDelServidor`: los errores de esta ruta son
+    // `HTTPException`, y el manejador global de auth-google los serializa como
+    // `{ error: { message } }`. Leer `data.error` como texto le mostraba al
+    // usuario "[object Object]" en lugar del 409 que sí puede corregir.
+    throw new Error(mensajeDelServidor(error, "Error al actualizar el DPI"));
   }
 };

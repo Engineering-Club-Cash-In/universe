@@ -4,11 +4,7 @@ import * as Yup from "yup";
 import { useState } from "react";
 import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
-
-interface ResetPasswordValues {
-  password: string;
-  confirmPassword: string;
-}
+import type { ValoresNuevaPassword } from "../components/FormularioNuevaPassword";
 
 // Esquema de validación con Yup
 const validationSchema = Yup.object({
@@ -67,7 +63,7 @@ export const useResetPassword = (token: string) => {
   });
 
   // Formik
-  const formik = useFormik<ResetPasswordValues>({
+  const formik = useFormik<ValoresNuevaPassword>({
     initialValues: {
       password: "",
       confirmPassword: "",

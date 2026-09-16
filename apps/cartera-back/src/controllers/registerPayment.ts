@@ -191,6 +191,7 @@ const procesarPagoMora = async ({
       numero_credito_sifco,
       tipo: "DECREMENTO",
       monto_cambio: montoMora.toNumber(),
+      motivo: `Pago aplicado a mora (crédito ${numero_credito_sifco}): cubre la mora completa`,
     });
 
     if (!resultadoMora.success) {
@@ -222,6 +223,7 @@ const procesarPagoMora = async ({
     numero_credito_sifco,
     tipo: "DECREMENTO",
     monto_cambio: disponible.toNumber(),
+    motivo: `Pago aplicado a mora (crédito ${numero_credito_sifco}): abono parcial, queda saldo de mora pendiente`,
   });
 
   if (!resultadoMora.success) {

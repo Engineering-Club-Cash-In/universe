@@ -380,7 +380,7 @@ export function LicenciasContent({
 				open={!!selectedVerificationId}
 				onOpenChange={(open) => !open && setSelectedVerificationId(null)}
 			>
-				<DialogContent className="max-w-lg">
+				<DialogContent className="max-h-[90vh] w-[95vw] max-w-[1800px] overflow-y-auto sm:max-w-[1800px]">
 					<DialogHeader>
 						<DialogTitle>Detalle de verificación</DialogTitle>
 					</DialogHeader>
@@ -557,7 +557,13 @@ function NewVerificationDialog({
 	};
 
 	return (
-		<DialogContent className="max-w-lg">
+		<DialogContent
+			className={
+				result
+					? "max-h-[90vh] w-[95vw] max-w-[1800px] overflow-y-auto sm:max-w-[1800px]"
+					: "max-h-[90vh] max-w-lg overflow-y-auto"
+			}
+		>
 			<DialogHeader>
 				<DialogTitle>Nueva verificación de licencia</DialogTitle>
 				<DialogDescription>
@@ -684,6 +690,44 @@ function VerificationDetailsView({
 }) {
 	const hasClientInfo = result.subjectName || result.opportunityTitle;
 
+	const verificacionTecnica = (
+		<div className="space-y-3">
+			<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+				Verificación técnica
+			</p>
+			{/* Apilado, no en grilla: "Código de respuesta Tránsito" es una
+			    etiqueta larga y partida a la mitad se corta en 2 líneas. */}
+			<div className="space-y-3">
+				{result.cardCode && (
+					<DetailField label="Código de tarjeta" value={result.cardCode} />
+				)}
+				{result.apiResponseCode != null && (
+					<DetailField
+						label="Código de respuesta Tránsito"
+						value={result.apiResponseCode}
+					/>
+				)}
+			</div>
+			<div className="flex flex-wrap items-center gap-2 pt-1 text-sm">
+				{result.qrRawUrl ? (
+					<a
+						href={result.qrRawUrl}
+						target="_blank"
+						rel="noreferrer"
+						className="truncate text-primary underline"
+					>
+						{result.qrRawUrl}
+					</a>
+				) : (
+					<span className="text-muted-foreground">QR no se pudo leer</span>
+				)}
+				<Badge variant={result.qrDomainValid ? "secondary" : "destructive"}>
+					{result.qrDomainValid ? "Dominio oficial" : "Dominio no válido"}
+				</Badge>
+			</div>
+		</div>
+	);
+
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
@@ -693,32 +737,43 @@ function VerificationDetailsView({
 				</span>
 			</div>
 
-			{hasClientInfo && (
-				<div className="space-y-3">
-					<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-						Cliente
-					</p>
-					<div className="grid grid-cols-2 gap-x-6 gap-y-3">
-						{result.subjectName && (
-							<DetailField label="Lead / Co-deudor" value={result.subjectName} />
-						)}
-						{result.opportunityTitle && (
-							<DetailField label="Oportunidad" value={result.opportunityTitle} />
-						)}
+			{/* 3 franjas de arriba a abajo: Cliente + Verificación técnica lado a
+			    lado, Datos de la licencia en una sola fila, y Otros datos al final. */}
+			{hasClientInfo ? (
+				<div className="grid grid-cols-1 gap-x-8 gap-y-6 sm:grid-cols-2">
+					<div className="space-y-3">
+						<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+							Cliente
+						</p>
+						<div className="space-y-3">
+							{result.subjectName && (
+								<DetailField label="Lead / Co-deudor" value={result.subjectName} />
+							)}
+							{result.opportunityTitle && (
+								<DetailField label="Oportunidad" value={result.opportunityTitle} />
+							)}
+						</div>
 					</div>
+					{verificacionTecnica}
 				</div>
+			) : (
+				verificacionTecnica
 			)}
 
-			{hasClientInfo && <Separator />}
+			<Separator />
 
 			<div className="space-y-3">
 				<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
 					Datos de la licencia
 				</p>
-				<div className="grid grid-cols-2 gap-x-6 gap-y-3">
-					{result.licenseHolderName && (
-						<DetailField label="Nombre en Tránsito" value={result.licenseHolderName} />
-					)}
+				{/* Nombre en Tránsito en su propia línea, con todo el ancho de la
+				    sección — es el único campo con texto largo (nombre completo)
+				    y compitiendo en la misma fila que los otros 3 siempre termina
+				    apretado, sin importar cuánto ancho tenga el modal. */}
+				{result.licenseHolderName && (
+					<DetailField label="Nombre en Tránsito" value={result.licenseHolderName} />
+				)}
+				<div className="grid grid-cols-3 gap-x-4 gap-y-3">
 					{result.licenseNumber && (
 						<DetailField label="N.º de licencia" value={result.licenseNumber} />
 					)}
@@ -738,49 +793,12 @@ function VerificationDetailsView({
 
 			<Separator />
 
-			<div className="space-y-3">
-				<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-					Verificación técnica
-				</p>
-				<div className="grid grid-cols-2 gap-x-6 gap-y-3">
-					{result.cardCode && (
-						<DetailField label="Código de tarjeta" value={result.cardCode} />
-					)}
-					{result.apiResponseCode != null && (
-						<DetailField
-							label="Código de respuesta Tránsito"
-							value={result.apiResponseCode}
-						/>
-					)}
-				</div>
-				<div className="flex flex-wrap items-center gap-2 pt-1 text-sm">
-					{result.qrRawUrl ? (
-						<a
-							href={result.qrRawUrl}
-							target="_blank"
-							rel="noreferrer"
-							className="truncate text-primary underline"
-						>
-							{result.qrRawUrl}
-						</a>
-					) : (
-						<span className="text-muted-foreground">QR no se pudo leer</span>
-					)}
-					<Badge variant={result.qrDomainValid ? "secondary" : "destructive"}>
-						{result.qrDomainValid ? "Dominio oficial" : "Dominio no válido"}
-					</Badge>
-				</div>
-			</div>
-
 			<RawResponseDetails rawResponse={result.rawResponse} />
 
 			{result.failureReason && (
-				<>
-					<Separator />
-					<p className="rounded-md border border-red-200 bg-red-50 p-3 text-red-800 text-sm dark:border-red-900 dark:bg-red-900/20 dark:text-red-300">
-						{result.failureReason}
-					</p>
-				</>
+				<p className="rounded-md border border-red-200 bg-red-50 p-3 text-red-800 text-sm dark:border-red-900 dark:bg-red-900/20 dark:text-red-300">
+					{result.failureReason}
+				</p>
 			)}
 
 			<DialogFooter>

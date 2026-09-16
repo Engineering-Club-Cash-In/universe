@@ -17,11 +17,20 @@ test("la CTE inyectada usa factores de monto y spread histÃ³rico sin excluir crÃ
 	expect(participacionExternaActualCteSql).toContain("ci.porcentaje_participacion_inversionista::numeric / 100");
 	expect(participacionExternaActualCteSql).not.toContain("FILTER (WHERE NOT participacion_invalida)");
 	expect(participacionExternaActualCteSql).toContain("AS participacion_invalida");
-	expect(source).toContain(
+	expect(source).not.toContain(
 		"SUM(capital_inv_participacion_actual) FILTER (WHERE NOT participacion_invalida)",
 	);
-	expect(source).toContain(
+	expect(source).not.toContain(
 		"SUM(interes_iva_cube_participacion_actual) FILTER (WHERE NOT participacion_invalida)",
+	);
+	expect(source).toContain(
+		"CASE WHEN participacion_invalida THEN 0 ELSE ROUND((CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) * factor_capital_inversionista, 2) END",
+	);
+	expect(source).toContain(
+		"CASE WHEN participacion_invalida THEN 0 ELSE (CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) - ROUND",
+	);
+	expect(source).toContain(
+		"CASE WHEN participacion_invalida THEN 0 ELSE (CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes + acum_iva ELSE interes + iva END) -",
 	);
 	expect(source).toContain("COUNT(credito_id) FILTER (WHERE participacion_invalida)");
 	expect(source).not.toContain("0::int AS creditos_participacion_invalida");

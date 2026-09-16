@@ -1,18 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Loader2, Plus, Scale, Search } from "lucide-react";
-import { type Dispatch, type SetStateAction, useState } from "react";
+import { AlertTriangle, Plus, Scale } from "lucide-react";
+import {
+	type Dispatch,
+	type ReactNode,
+	type SetStateAction,
+	useState,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-	soloDigitosDpi,
-	useVendorDpiLookup,
-	type VendorGender,
-} from "@/hooks/useVendorDpiLookup";
+import { soloDigitosDpi, type VendorGender } from "@/hooks/useVendorDpiLookup";
 import { orpc } from "@/utils/orpc";
 import { CompanyQuickCreateDialog } from "./CompanyQuickCreateDialog";
-import { VendorGenderSelect } from "./VendorGenderSelect";
 import { VendorQuickCreateDialog } from "./VendorQuickCreateDialog";
 
 export interface ContractPartiesValue {
@@ -48,9 +48,25 @@ export function toContractPartiesPayload(
 		: {};
 }
 
+const GENERO_LABEL: Record<VendorGender, string> = {
+	male: "Masculino",
+	female: "Femenino",
+};
+
+function Dato({ label, children }: { label: string; children: ReactNode }) {
+	return (
+		<div className="min-w-0">
+			<p className="text-[10px] text-muted-foreground">{label}</p>
+			<p className="truncate font-medium text-sm">{children}</p>
+		</div>
+	);
+}
+
 /**
  * Partes del contrato en la asignación de inversión: la agencia para carro
- * nuevo o el vendedor (dueño) para usado. No bloquean el avance al 80%.
+ * nuevo o el vendedor (dueño) para usado. Se escoge del catálogo o se crea
+ * con el "+"; abajo solo se muestra lo que llevará el contrato. No bloquean
+ * el avance al 80%.
  */
 export function ContractPartiesFields({
 	vehicleIsNew,
@@ -62,7 +78,9 @@ export function ContractPartiesFields({
 	onChange: Dispatch<SetStateAction<ContractPartiesValue>>;
 }) {
 	const esNuevo = vehicleIsNew === true;
-	const [crearVendedor, setCrearVendedor] = useState(false);
+	const [dialogoVendedor, setDialogoVendedor] = useState<{
+		initialDpi?: string;
+	} | null>(null);
 	const [crearEmpresa, setCrearEmpresa] = useState(false);
 
 	const vendorsQuery = useQuery({
@@ -74,31 +92,39 @@ export function ContractPartiesFields({
 		enabled: esNuevo,
 	});
 
-	// Actualizaciones funcionales: la búsqueda en RENAP y los diálogos
-	// responden después de un render y no deben pisar lo escrito mientras tanto.
-	const setVendedor = (vendedor: Partial<ContractPartiesValue["vendedor"]>) =>
-		onChange((prev) => ({
-			...prev,
-			vendedor: { ...prev.vendedor, ...vendedor },
-		}));
+	// Actualizaciones funcionales: los diálogos responden después de un render
+	// y no deben pisar lo que cambió mientras tanto.
+	const setVendedor = (vendedor: ContractPartiesValue["vendedor"]) =>
+		onChange((prev) => ({ ...prev, vendedor }));
 	const setAgencia = (agencia: Partial<ContractPartiesValue["agencia"]>) =>
 		onChange((prev) => ({ ...prev, agencia: { ...prev.agencia, ...agencia } }));
 
-	const lookup = useVendorDpiLookup((result) =>
-		setVendedor({
-			...(result.nombre && { nombre: result.nombre }),
-			...(result.genero && { genero: result.genero }),
-		}),
-	);
-
-	const vendedorSeleccionado = vendorsQuery.data?.find(
-		(v) =>
-			soloDigitosDpi(v.dpi) === soloDigitosDpi(value.vendedor.dpi) &&
-			value.vendedor.dpi !== "",
-	);
+	const { dpi, nombre, genero } = value.vendedor;
+	const vendedorSeleccionado = dpi
+		? vendorsQuery.data?.find(
+				(v) => soloDigitosDpi(v.dpi) === soloDigitosDpi(dpi),
+			)
+		: undefined;
+	// Mientras carga el catálogo se confía en lo precargado de la oportunidad
+	const razonSocialGuardada = companiesQuery.data
+		? companiesQuery.data.find((c) => c.id === value.agencia.companyId)
+				?.razonSocial
+		: value.agencia.razonSocial;
 
 	const incompleto =
 		Object.keys(toContractPartiesPayload(value, vehicleIsNew)).length === 0;
+
+	const botonCrear = (onClick: () => void, title: string) => (
+		<Button
+			type="button"
+			variant="outline"
+			size="icon"
+			title={title}
+			onClick={onClick}
+		>
+			<Plus className="h-4 w-4" />
+		</Button>
+	);
 
 	return (
 		<div className="space-y-3">
@@ -121,12 +147,12 @@ export function ContractPartiesFields({
 										}))}
 										value={value.agencia.companyId || null}
 										onChange={(companyId) => {
-											const empresa = companiesQuery.data?.find(
+											const elegida = companiesQuery.data?.find(
 												(c) => c.id === companyId,
 											);
 											setAgencia({
 												companyId,
-												razonSocial: empresa?.razonSocial ?? "",
+												razonSocial: elegida?.razonSocial ?? "",
 											});
 										}}
 										isLoading={companiesQuery.isLoading}
@@ -134,30 +160,29 @@ export function ContractPartiesFields({
 										width="full"
 									/>
 								</div>
-								<Button
-									type="button"
-									variant="outline"
-									size="icon"
-									title="Crear empresa"
-									onClick={() => setCrearEmpresa(true)}
-								>
-									<Plus className="h-4 w-4" />
-								</Button>
+								{botonCrear(() => setCrearEmpresa(true), "Crear empresa")}
 							</div>
 						</div>
-						<div>
-							<Label className="text-xs">Razón social</Label>
-							<Input
-								value={value.agencia.razonSocial}
-								onChange={(e) => setAgencia({ razonSocial: e.target.value })}
-								placeholder="JAC GUATEMALA, SOCIEDAD ANÓNIMA"
-								disabled={!value.agencia.companyId}
-							/>
-							<p className="mt-1 text-[10px] text-muted-foreground">
-								Nombre legal como va en el contrato. Se guarda en la empresa
-								para las próximas oportunidades.
-							</p>
-						</div>
+						{value.agencia.companyId &&
+							(razonSocialGuardada ? (
+								<Dato label="Razón social">{razonSocialGuardada}</Dato>
+							) : (
+								// Única captura en línea: la empresa ya existe sin nombre legal
+								<div>
+									<Label className="text-xs">Razón social</Label>
+									<Input
+										value={value.agencia.razonSocial}
+										onChange={(e) =>
+											setAgencia({ razonSocial: e.target.value })
+										}
+										placeholder="JAC GUATEMALA, SOCIEDAD ANÓNIMA"
+									/>
+									<p className="mt-1 text-[10px] text-muted-foreground">
+										Esta empresa no tiene razón social; se guardará para las
+										próximas oportunidades.
+									</p>
+								</div>
+							))}
 					</>
 				) : (
 					<>
@@ -187,66 +212,30 @@ export function ContractPartiesFields({
 										width="full"
 									/>
 								</div>
-								<Button
-									type="button"
-									variant="outline"
-									size="icon"
-									title="Crear vendedor"
-									onClick={() => setCrearVendedor(true)}
-								>
-									<Plus className="h-4 w-4" />
-								</Button>
+								{botonCrear(() => setDialogoVendedor({}), "Crear vendedor")}
 							</div>
 						</div>
-						<div className="grid grid-cols-2 gap-2">
-							<div>
-								<Label className="text-xs">DPI</Label>
-								<div className="flex gap-1">
-									<Input
-										inputMode="numeric"
-										value={value.vendedor.dpi}
-										onChange={(e) => {
-											setVendedor({ dpi: e.target.value });
-											if (soloDigitosDpi(e.target.value).length === 13) {
-												lookup.buscar(e.target.value);
-											}
-										}}
-										placeholder="1234567890101"
-									/>
-									<Button
-										type="button"
-										variant="outline"
-										size="icon"
-										title="Buscar en RENAP"
-										onClick={() =>
-											lookup.buscar(value.vendedor.dpi, { force: true })
-										}
-										disabled={lookup.isPending}
-									>
-										{lookup.isPending ? (
-											<Loader2 className="h-4 w-4 animate-spin" />
-										) : (
-											<Search className="h-4 w-4" />
-										)}
-									</Button>
+						{dpi && (
+							<div className="grid grid-cols-3 gap-2">
+								<Dato label="DPI">{dpi}</Dato>
+								<Dato label="Género">
+									{genero ? (
+										GENERO_LABEL[genero]
+									) : (
+										<button
+											type="button"
+											className="text-primary text-xs hover:underline"
+											onClick={() => setDialogoVendedor({ initialDpi: dpi })}
+										>
+											Completar
+										</button>
+									)}
+								</Dato>
+								<div className="col-span-3">
+									<Dato label="Nombre completo">{nombre}</Dato>
 								</div>
 							</div>
-							<div>
-								<Label className="text-xs">Género</Label>
-								<VendorGenderSelect
-									value={value.vendedor.genero}
-									onChange={(genero) => setVendedor({ genero })}
-								/>
-							</div>
-						</div>
-						<div>
-							<Label className="text-xs">Nombre completo</Label>
-							<Input
-								value={value.vendedor.nombre}
-								onChange={(e) => setVendedor({ nombre: e.target.value })}
-								placeholder="Como aparece en el DPI"
-							/>
-						</div>
+						)}
 					</>
 				)}
 
@@ -256,7 +245,7 @@ export function ContractPartiesFields({
 						<span>
 							{esNuevo
 								? "Falta la empresa con su razón social."
-								: "Faltan DPI, nombre o género del vendedor."}{" "}
+								: "Falta el vendedor con su género."}{" "}
 							Puedes avanzar igual, pero jurídico tendrá que llenarlo a mano.
 						</span>
 					</div>
@@ -264,8 +253,9 @@ export function ContractPartiesFields({
 			</div>
 
 			<VendorQuickCreateDialog
-				open={crearVendedor}
-				onOpenChange={setCrearVendedor}
+				open={dialogoVendedor !== null}
+				onOpenChange={(open) => !open && setDialogoVendedor(null)}
+				initialDpi={dialogoVendedor?.initialDpi}
 				onSaved={(vendor) =>
 					setVendedor({
 						dpi: vendor.dpi,

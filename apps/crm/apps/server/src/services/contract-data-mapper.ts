@@ -11,6 +11,7 @@ import { getRenapData } from "../functions/getRenapInfo";
 import { auditRecord } from "../lib/audit";
 import { mapChecksToDisbursementRows } from "../lib/contract-disbursement";
 import {
+	formatEntityName,
 	parseOpportunityInvestors,
 	resolveEntityType,
 	selectPrimaryInvestor,
@@ -628,7 +629,7 @@ export async function mapOpportunityToContractData(
 
 	const entidad = inversionistaPrincipal
 		? {
-				nombre: inversionistaPrincipal.nombre,
+				nombre: formatEntityName(inversionistaPrincipal.nombre),
 				tipo: resolveEntityType(
 					investorProfile?.clientType,
 					inversionistaPrincipal.nombre,

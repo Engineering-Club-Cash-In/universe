@@ -120,3 +120,15 @@ export function resolveEntityType(
 			return looksLikeCorporation(nombre) ? "la entidad" : "la persona";
 	}
 }
+
+/**
+ * Texto de {entidad}: jurídico lo escribe completo y en mayúsculas, sin
+ * abreviar la sociedad. El catálogo de cartera-back guarda "Cube Investments
+ * S.A.", así que se traduce al valor más usado a mano en
+ * `contract_generation_snapshots`. El resto de nombres pasa sin cambios.
+ */
+export const CUBE_ENTITY_NAME = "CUBE INVESTMENTS, SOCIEDAD ANÓNIMA";
+
+export function formatEntityName(nombre: string): string {
+	return /^\s*cube\s+investments?\b/i.test(nombre) ? CUBE_ENTITY_NAME : nombre;
+}

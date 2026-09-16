@@ -70,6 +70,7 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CompanyQuickCreateDialog } from "@/components/contract-parties/CompanyQuickCreateDialog";
+import { OpportunityContractPartyCard } from "@/components/contract-parties/OpportunityContractPartyCard";
 import { VendorQuickCreateDialog } from "@/components/contract-parties/VendorQuickCreateDialog";
 import { Combobox } from "@/components/ui/combobox";
 import {
@@ -2643,6 +2644,31 @@ function RouteComponent() {
 													</div>
 												)}
 										</div>
+									)}
+
+									{/* Parte del contrato: agencia (nuevo) o vendedor (usado) */}
+									{selectedOpportunity.vehicle && (
+										<OpportunityContractPartyCard
+											vehicleIsNew={selectedOpportunity.vehicle.isNew}
+											vendorId={selectedOpportunity.vendorId}
+											company={selectedOpportunity.company}
+											vendors={vendorsQuery.data ?? []}
+											companies={companiesQuery.data ?? []}
+											disabled={isWonLocked}
+											isSaving={updateOpportunityMutation.isPending}
+											onAssignVendor={(vendorId) =>
+												updateOpportunityMutation.mutate({
+													id: selectedOpportunity.id,
+													vendorId,
+												})
+											}
+											onAssignCompany={(companyId) =>
+												updateOpportunityMutation.mutate({
+													id: selectedOpportunity.id,
+													companyId,
+												})
+											}
+										/>
 									)}
 								</div>
 

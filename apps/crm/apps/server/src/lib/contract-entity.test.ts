@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+	CUBE_ENTITY_NAME,
+	formatEntityName,
 	looksLikeCorporation,
 	parseOpportunityInvestors,
 	resolveEntityType,
@@ -182,5 +184,30 @@ describe("resolveEntityType", () => {
 		]) {
 			expect(resolveEntityType(null, nombre).length).toBeGreaterThan(0);
 		}
+	});
+});
+
+describe("formatEntityName", () => {
+	test("Cube sale completo y en mayúsculas, como lo escribe jurídico", () => {
+		for (const nombre of [
+			"Cube Investments S.A.",
+			"Cube Investments, S.A.",
+			"CUBE INVESTMENTS, S.A",
+			" cube investment s.a.",
+		]) {
+			expect(formatEntityName(nombre)).toBe(CUBE_ENTITY_NAME);
+		}
+		expect(CUBE_ENTITY_NAME).toBe("CUBE INVESTMENTS, SOCIEDAD ANÓNIMA");
+	});
+
+	test("los demás inversionistas no cambian", () => {
+		expect(formatEntityName("Adriana Bahaia")).toBe("Adriana Bahaia");
+		expect(formatEntityName("Cubero Investments S.A.")).toBe(
+			"Cubero Investments S.A.",
+		);
+	});
+
+	test("el nombre formateado se sigue reconociendo como sociedad", () => {
+		expect(resolveEntityType(null, CUBE_ENTITY_NAME)).toBe("la entidad");
 	});
 });

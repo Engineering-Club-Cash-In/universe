@@ -1728,6 +1728,7 @@ export const crmRouter = {
 				company: {
 					id: companies.id,
 					name: companies.name,
+					razonSocial: companies.razonSocial,
 				},
 				lead: {
 					id: leads.id,

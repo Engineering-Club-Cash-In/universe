@@ -37,10 +37,13 @@ export function VendorQuickCreateDialog({
 	open,
 	onOpenChange,
 	onSaved,
+	initialDpi,
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onSaved: (vendor: QuickVendor) => void;
+	/** Para completar un vendedor ya registrado: se consulta al abrir. */
+	initialDpi?: string;
 }) {
 	const queryClient = useQueryClient();
 	const [dpi, setDpi] = useState("");
@@ -49,20 +52,22 @@ export function VendorQuickCreateDialog({
 	const [telefono, setTelefono] = useState("");
 	const [existenteId, setExistenteId] = useState<string | null>(null);
 
-	useEffect(() => {
-		if (!open) return;
-		setDpi("");
-		setNombre("");
-		setGenero("");
-		setTelefono("");
-		setExistenteId(null);
-	}, [open]);
-
 	const lookup = useVendorDpiLookup((result) => {
 		setExistenteId(result.vendorId);
 		if (result.nombre) setNombre(result.nombre);
 		if (result.genero) setGenero(result.genero);
 	});
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: solo al abrir
+	useEffect(() => {
+		if (!open) return;
+		setDpi(initialDpi ?? "");
+		setNombre("");
+		setGenero("");
+		setTelefono("");
+		setExistenteId(null);
+		if (initialDpi) lookup.buscar(initialDpi, { force: true });
+	}, [open]);
 
 	const saveMutation = useMutation({
 		mutationFn: async (): Promise<QuickVendor> => {
@@ -111,7 +116,9 @@ export function VendorQuickCreateDialog({
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="max-h-[90vh] overflow-y-auto">
 				<DialogHeader>
-					<DialogTitle>Nuevo vendedor del vehículo</DialogTitle>
+					<DialogTitle>
+						{initialDpi ? "Completar vendedor" : "Nuevo vendedor del vehículo"}
+					</DialogTitle>
 					<DialogDescription>
 						Escribe el DPI del dueño y se traen su nombre y género de RENAP.
 					</DialogDescription>

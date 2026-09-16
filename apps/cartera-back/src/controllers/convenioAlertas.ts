@@ -60,6 +60,12 @@ export async function getConvenioAlertas(opts: ConvenioAlertasOpciones = {}) {
   const diasAdelante = opts.diasAdelante ?? DEFAULTS.diasAdelante;
   const diasAlerta = opts.diasAlerta ?? DEFAULTS.diasAlerta;
 
+  // Los días se castean a `::int` en cada `fecha ± días`. node-postgres manda
+  // los parámetros sin tipo, y `date + $1` es ambiguo para Postgres (date +
+  // integer, + interval o + time): la consulta entera fallaba con "operator is
+  // not unique: date + unknown" — para cualquier crédito, así que la banda
+  // roja, la pantalla de alertas y el job de las 8:00 nunca respondieron.
+  // Las pruebas no lo veían porque mockean la DB.
   const hoyGT = sql`(now() AT TIME ZONE 'America/Guatemala')::date`;
   const filtroAsesor =
     opts.asesorId != null ? sql`AND c.asesor_id = ${opts.asesorId}` : sql``;
@@ -143,7 +149,7 @@ export async function getConvenioAlertas(opts: ConvenioAlertasOpciones = {}) {
       CASE
         WHEN r.fecha_urgente <  ${hoyGT} THEN 'vencida'
         WHEN r.fecha_urgente =  ${hoyGT} THEN 'vence_hoy'
-        WHEN r.fecha_urgente <= ${hoyGT} + ${diasAlerta} THEN 'por_vencer'
+        WHEN r.fecha_urgente <= ${hoyGT} + ${diasAlerta}::int THEN 'por_vencer'
         ELSE 'proxima'
       END AS categoria
     FROM resumen r
@@ -187,8 +193,8 @@ export async function getConvenioAlertas(opts: ConvenioAlertasOpciones = {}) {
       LIMIT 1
     ) norm ON true
     WHERE c."statusCredit" = 'EN_CONVENIO'
-      AND r.fecha_urgente >= ${hoyGT} - ${diasAtras}
-      AND r.fecha_urgente <= ${hoyGT} + ${diasAdelante}
+      AND r.fecha_urgente >= ${hoyGT} - ${diasAtras}::int
+      AND r.fecha_urgente <= ${hoyGT} + ${diasAdelante}::int
       ${filtroAsesor}
       ${filtroSifco}
     ORDER BY r.fecha_urgente ASC, u.nombre ASC

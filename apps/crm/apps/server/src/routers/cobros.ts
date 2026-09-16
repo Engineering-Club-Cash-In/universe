@@ -693,6 +693,16 @@ async function promesaActivaDelCaso(casoCobroId: string) {
  */
 const TIMEOUT_BUCKET_SNAPSHOT_MS = 3000;
 
+/**
+ * Rango de origen de la recuperación de vehículo: B1 a B3 (plan 08). La MISMA
+ * regla vive en tres lugares y tienen que coincidir:
+ *  · la ficha (`routes/cobros/$id.tsx`), que deshabilita el botón suelto;
+ *  · este router, que la exige antes de "deshacer y mandar";
+ *  · cartera (`BUCKET_MINIMO/MAXIMO_RECUPERACION`), que manda bajo sus locks.
+ */
+const BUCKET_MINIMO_RECUPERACION = 1;
+const BUCKET_MAXIMO_RECUPERACION = 3;
+
 async function capturarBucketSnapshot(
 	casoCobroId: string,
 ): Promise<number | null> {
@@ -8868,6 +8878,43 @@ export const cobrosRouter = {
 				? undefined
 				: context.session.user.email;
 
+			// "Deshacer y mandar a recuperación": el rango B1–B3 se verifica ANTES
+			// de deshacer (review de Codex, P2). La regla vivía solo en el botón
+			// suelto de la ficha, y este flujo no pasa por él:
+			//  · en B4, el convenio quedaba deshecho y la recuperación rechazaba
+			//    después ("ya está en B4") — la mitad de lo que el asesor pidió;
+			//  · en B5, la recuperación registraba una BAJADA a B4 y le restaba
+			//    gravedad a la cuenta.
+			//
+			// El bucket que se lee es el congelado del convenio, y es el correcto:
+			// deshacer no escribe historial de bucket, así que es el mismo que la
+			// recuperación va a leer un instante después.
+			//
+			// Este chequeo es de conveniencia —evita el parcial en el caso normal—
+			// y cartera lo vuelve a hacer bajo sus locks, que es el que manda. Si
+			// no se puede leer el bucket, no se arriesga: el asesor todavía puede
+			// deshacer solo.
+			if (input.mandarARecuperacion) {
+				const actual = await carteraBackClient
+					.getBucketActualCredito(caso.numeroCreditoSifco)
+					.catch(() => null);
+				const bucket = actual?.bucket ?? null;
+				if (bucket === null) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"No se pudo confirmar el bucket del crédito, así que no se deshizo nada. Podés deshacer el convenio solo, o intentar de nuevo en un momento.",
+					});
+				}
+				if (
+					bucket < BUCKET_MINIMO_RECUPERACION ||
+					bucket > BUCKET_MAXIMO_RECUPERACION
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `La recuperación de vehículo aplica de B${BUCKET_MINIMO_RECUPERACION} a B${BUCKET_MAXIMO_RECUPERACION} y este crédito está en B${bucket}. No se deshizo nada: si corresponde, deshacé el convenio solo.`,
+					});
+				}
+			}
+
 			let resultado: Awaited<ReturnType<typeof carteraBackClient.anularConvenio>>;
 			try {
 				resultado = await carteraBackClient.anularConvenio(convenio.convenio_id, {
@@ -8901,9 +8948,9 @@ export const cobrosRouter = {
 			// reintentar "deshacer y mandar" fallaría en el primer paso (el
 			// convenio ya no está vigente) y el asesor no entendería por qué.
 			//
-			// Además el crédito acaba de volver a MOROSO con su mora recreada, así
-			// que su bucket vivo ya es el que le toca: la recuperación lo lee
-			// después y lo manda a B4 desde ahí.
+			// El rango de origen ya se verificó arriba, antes de deshacer. Cartera
+			// lo revalida bajo sus locks: si entre medio el crédito cambió de
+			// bucket, esto falla y se reporta el parcial como siempre.
 			try {
 				const recuperacion = await carteraBackClient.enviarARecuperacionVehiculo({
 					credito_id: resultado.credito_id,

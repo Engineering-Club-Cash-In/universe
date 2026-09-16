@@ -24,6 +24,7 @@ import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { refrescarProyeccionTrasReversa } from "./reversePaymentRecalculo";
+import { convenioQueRecibioElPago } from "./convenioDelPago";
 import {
   getRemainingPaymentPaidStatusAfterReversal,
   isReversibleIncobrablePayment,
@@ -247,9 +248,11 @@ export const reversePayment = async ({ body, set }: any) => {
         const reverseConvenioResult = await reverseConvenioPayment({
           credito_id,
           monto_pago: Number(pago.pagoConvenio),
-          // El pago identifica a SU convenio (pivot convenios_pagos_resume):
-          // sin esto se le descontaba a "alguno" del crédito.
+          // El pago identifica a SU convenio: el sello de la fila, leído acá
+          // arriba ANTES de que la reversa la limpie. Sin esto se le
+          // descontaba a "alguno" del crédito.
           pago_id,
+          convenio_id: pago.convenioId,
         });
         console.log(
           `✅ Pago de convenio reversado: ${reverseConvenioResult.message}`,
@@ -376,6 +379,7 @@ export const reversePayment = async ({ body, set }: any) => {
             mora: "0",
             otros: "0",
             pagoConvenio: "0",
+            convenioId: null,
 
             // Limpiar metadata
             fecha_pago: null,
@@ -454,6 +458,7 @@ export const reversePayment = async ({ body, set }: any) => {
               mora: "0",
               otros: "0",
               pagoConvenio: "0",
+              convenioId: null,
               fecha_pago: null,
               mes_pagado: "",
               pagado: false,
@@ -842,6 +847,12 @@ interface ReverseConvenioPaymentParams {
    * AL QUE SE LE APLICÓ, en vez de "alguno de este crédito".
    */
   pago_id: number;
+  /**
+   * El convenio SELLADO en la fila del pago (`pagos_credito.convenio_id`), leído
+   * antes de que la reversa la limpie. Es la respuesta exacta; `pago_id` queda
+   * para los pagos anteriores al sello.
+   */
+  convenio_id?: number | null;
 }
 
 interface ReverseConvenioPaymentResult {
@@ -871,43 +882,14 @@ export async function reverseConvenioPayment(
     console.log("🏦 Crédito ID:", credito_id);
     console.log("💵 Monto a revertir:", monto_pago);
 
-    // 1. El convenio AL QUE SE LE APLICÓ ESTE PAGO (review de Codex, P1).
-    //
-    // Antes se buscaba "algún convenio de este crédito" con un `.limit(1)`, y
-    // eso se rompe de las dos maneras posibles:
-    //  · si el convenio al que pertenecía el pago se deshizo, excluirlo dejaba
-    //    la reversa sin nada que descontar —o peor, la hacía fallar entera—;
-    //  · si después se firmó otro convenio, el pago viejo le descontaba a ESE,
-    //    que nunca lo recibió.
-    //
-    // `convenios_pagos_resume` es el pivot pago↔convenio: es la respuesta
-    // exacta. Un convenio ANULADO sí se elige —hay que descontarle lo que se
-    // le aplicó— pero más abajo se preserva su anulación.
-    const [porPago] = await db
-      .select({ convenio_id: convenios_pagos_resume.convenio_id })
-      .from(convenios_pagos_resume)
-      .where(eq(convenios_pagos_resume.pago_id, pago_id))
-      .limit(1);
-
-    const [convenio] = porPago
-      ? await db
-          .select()
-          .from(convenios_pago)
-          .where(eq(convenios_pago.convenio_id, porPago.convenio_id))
-          .limit(1)
-      : // Sin fila en el pivot (pagos viejos, previos a que se poblara): se cae
-        // al criterio anterior, pero sin tocar los anulados — para esos, sin
-        // pivot, no hay forma de saber si el pago era suyo.
-        await db
-          .select()
-          .from(convenios_pago)
-          .where(
-            and(
-              eq(convenios_pago.credito_id, credito_id),
-              isNull(convenios_pago.anulado_at),
-            ),
-          )
-          .limit(1);
+    // 1. El convenio AL QUE SE LE APLICÓ ESTE PAGO — no "alguno del crédito".
+    //    Ver `convenioQueRecibioElPago` para el orden de criterios y por qué
+    //    un convenio anulado SÍ se elige.
+    const convenio = await convenioQueRecibioElPago({
+      credito_id,
+      pago_id,
+      convenio_id: params.convenio_id,
+    });
 
     if (!convenio) {
       throw new Error(

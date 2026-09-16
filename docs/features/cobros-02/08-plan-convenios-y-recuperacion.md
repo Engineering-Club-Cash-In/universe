@@ -530,15 +530,58 @@ Cuatro cosas más que salieron de la segunda review:
   `reverseConvenioPayment` elegía "algún convenio de este crédito" con un `.limit(1)`, y eso
   se rompe de las dos formas posibles: si el convenio del pago se deshizo, no había nada que
   descontar; y si después se firmó otro, el pago viejo le descontaba a **ese**, que nunca lo
-  recibió. Ahora se resuelve por el pivot `convenios_pagos_resume` (pago ↔ convenio), que es
-  la respuesta exacta. Un convenio anulado **sí** recibe el descuento —el pago existió— pero
-  no vuelve a `activo`: deshacerlo fue una decisión humana y una reversa contable no la
-  revierte.
+  recibió. Un convenio anulado **sí** recibe el descuento —el pago existió— pero no vuelve
+  a `activo`: deshacerlo fue una decisión humana y una reversa contable no la revierte.
+  (Cómo se identifica ese convenio lo corrigió la ronda siguiente: ver abajo.)
 - **La anulación toma también el lock de PAGOS.** Es otra llave que la del lock por crédito,
   y las dos hacen falta: `reversePayment` sostiene aquella mientras deshace un pago, y su
   actualización del convenio es una escritura suelta que podía interleavearse con la
   anulación. Va por fuera de la transacción, porque ese lock usa el pool dedicado y su
   propia documentación prohíbe esperarlo con conexiones del pool de trabajo.
+
+#### A qué convenio se le acreditó un pago: se sella, no se adivina
+
+La ronda anterior resolvía el convenio de un pago por el pivot `convenios_pagos_resume`
+y lo llamaba "la respuesta exacta". **No lo era.** Ese pivot se llena *una vez*, al crear
+el convenio, con las filas pre-sembradas de las cuotas que reestructura; los pagos que
+después se le acreditan caen en otras filas. En el sandbox, **196 de 204** pagos con
+`pago_convenio > 0` no tienen fila ahí. El pivot casi nunca acertaba, y el respaldo
+—"el convenio vigente del crédito"— excluía los anulados, que es justo cuando la reversa
+tiene que encontrarlos.
+
+La respuesta exacta solo existe en el instante de acreditar, así que se guarda ahí:
+**`pagos_credito.convenio_id`** (migración **0022**). No lo escribe cada sitio por su
+cuenta: el estampador que ya garantizaba que *una sola* fila por boleta carga el monto
+(`crearEstampadorPagoConvenio`) ahora entrega monto y convenio **en el mismo consumo**
+(`campos()`). Por construcción, la fila que carga uno es la única que carga el otro.
+
+La reversa busca en este orden (`convenioQueRecibioElPago`):
+
+| Criterio | Cuándo aplica | Exacto |
+| --- | --- | --- |
+| El sello de la fila | Todo pago registrado desde la 0022 | Sí |
+| El pivot | Filas pre-sembradas que se cobraron | Sí, cuando acierta |
+| El convenio más reciente del crédito, anulados incluidos | Pagos viejos sin sello ni pivot | Salvo un crédito con varios convenios y un pago del anterior: **1 pago** en el sandbox |
+
+Dato aparte que salió midiendo, y que **no** cambia con esto: hay **22** pagos con
+`pago_convenio > 0` cuyo crédito ya no tiene ningún convenio. Su reversa fallaba antes y
+sigue fallando igual ("no se encontró un convenio").
+
+#### El rango B1–B3 de la recuperación lo exige el servidor
+
+"Mandar a recuperación" está **habilitado solo en B1–B3**, pero esa regla vivía únicamente
+en el botón de la ficha. "Deshacer convenio y mandar a recuperación" no pasa por ese botón:
+
+- en **B4**, el convenio quedaba deshecho y después la recuperación rechazaba por "ya está
+  en B4" — la mitad de lo que el asesor pidió;
+- en **B5**, la recuperación registraba una **BAJADA** a B4: le restaba gravedad a la
+  cuenta. Y ni siquiera duraba: con 5 cuotas el piso de la Fase 4 da `max(B5, B4) = B5`, y
+  el motor la devolvía esa misma noche.
+
+Ahora el rango se exige en dos lugares con papeles distintos: el CRM lo verifica **antes**
+de deshacer (evita el parcial en el caso normal) y cartera lo vuelve a verificar **bajo sus
+locks** (es el que manda, y cubre también el botón suelto). El doc 07 contemplaba llegar a
+B4 "desde B5"; la decisión del plan 08 es posterior y es la que rige.
 
 #### La banda pregunta, no deduce
 

@@ -119,7 +119,11 @@ const fakeDb: any = {
 mock.module("../../database", () => ({ db: fakeDb, client: {} }));
 
 const schema = await import("../../database/db/schema");
-const { enviarARecuperacionVehiculo, BUCKET_RECUPERACION_VEHICULO } = await import(
+const {
+  enviarARecuperacionVehiculo,
+  BUCKET_RECUPERACION_VEHICULO,
+  motivoBucketNoRecuperable,
+} = await import(
   "./recuperacionVehiculo"
 );
 
@@ -247,7 +251,14 @@ describe("enviarARecuperacionVehiculo — controller real con DB fakeada", () =>
     expect(estado.updates).toHaveLength(0);
   });
 
-  it("desde B5 el evento es BAJADA (el CHECK de coherencia lo exige)", async () => {
+  // Antes esta prueba afirmaba lo contrario: que desde B5 se registraba una
+  // BAJADA a B4. Era el comportamiento, no la regla. La regla es la del plan 08
+  // ("habilitado solo en B1–B3") y vivía únicamente en la ficha del CRM, así
+  // que el flujo combinado "deshacer convenio y mandar a recuperación" —que no
+  // pasa por ese botón— le bajaba la gravedad a una cuenta en B5 (review de
+  // Codex, P2). Además el motor la devolvería a B5 esa misma noche: con 5
+  // cuotas el piso de EN_RECUPERACION da max(B5, B4) = B5, e INCOBRABLE clava.
+  it("rechaza desde B5: mandarla a recuperación le bajaría la gravedad", async () => {
     prepararCredito({ bucket: 5, asesor_id: 3, status: "INCOBRABLE", cuotas: 6 });
 
     const r = await enviarARecuperacionVehiculo({
@@ -255,12 +266,18 @@ describe("enviarARecuperacionVehiculo — controller real con DB fakeada", () =>
       motivo: "Regresa a pre jurídico",
     });
 
-    expect(r).toMatchObject({ success: true, tipo_evento: "BAJADA", bucket_anterior: 5 });
-    expect(insertsDe(schema.buckets_historial)[0].filas[0]).toMatchObject({
-      tipo_evento: "BAJADA",
-      bucket_anterior: 5,
-      bucket_nuevo: 4,
-    });
+    expect(r).toMatchObject({ success: false, status: 400 });
+    expect((r as { message: string }).message).toContain("por encima de B4");
+    expect(estado.inserts).toHaveLength(0);
+    expect(estado.updates).toHaveLength(0);
+  });
+
+  it("rechaza desde B0: sin atraso no hay nada que recuperar", async () => {
+    prepararCredito({ bucket: 0, asesor_id: 3 });
+    const r = await enviarARecuperacionVehiculo({ credito_id: 9116, motivo: "válido" });
+    expect(r).toMatchObject({ success: false, status: 400 });
+    expect(estado.inserts).toHaveLength(0);
+    expect(estado.updates).toHaveLength(0);
   });
 
   it("reparte al de MENOR carga cuando el dueño no cubre B4", async () => {
@@ -422,5 +439,16 @@ describe("enviarARecuperacionVehiculo — controller real con DB fakeada", () =>
     // El agregado de carga barre toda la cartera; hacerlo dentro de los locks
     // cuando el resultado no se usa alarga la retención sin motivo.
     expect(estado.consultas.some((q) => q.includes("COUNT(*)"))).toBe(false);
+  });
+});
+
+describe("motivoBucketNoRecuperable — rango de origen B1–B3", () => {
+  it("acepta B1, B2 y B3", () => {
+    for (const b of [1, 2, 3]) expect(motivoBucketNoRecuperable(b)).toBeNull();
+  });
+  it("rechaza B0, B4 y B5 con un motivo que dice por qué", () => {
+    expect(motivoBucketNoRecuperable(0)).toContain("sin atraso");
+    expect(motivoBucketNoRecuperable(4)).toContain("ya está en B4");
+    expect(motivoBucketNoRecuperable(5)).toContain("por encima de B4");
   });
 });

@@ -1070,6 +1070,12 @@
       cuenta_empresa_id: integer("cuenta_empresa_id")
       .references(() => cuentasEmpresa.cuentaId), //
     pagoConvenio :numeric("pago_convenio",{precision:18,scale:2}).notNull(),
+    // A QUÉ convenio se le acreditó `pagoConvenio` (migración cobros-02/0022).
+    // Lo escribe el mismo estampador que el monto, en el mismo acto: la fila que
+    // carga uno carga el otro. NULL = no cargó monto de convenio, o es anterior.
+    // Sin `.references()` acá: `convenios_pago` se declara más abajo; la FK vive
+    // en la migración.
+    convenioId: integer("convenio_id"),
 
     fecha_boleta: date("fecha_boleta"), // Fecha del pago en la boleta
     monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }).notNull(),

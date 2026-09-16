@@ -101,9 +101,14 @@ la misma que usa el job. O sea:
 
 ### El evento respeta el CHECK de coherencia
 
-`buckets_historial` tiene un CHECK que exige `SUBIDA ⇒ sube` y `BAJADA ⇒ baja`. Como se
-puede llegar a B4 desde abajo (lo normal) o desde B5, el `tipo_evento` se calcula
-comparando contra el bucket actual, no se asume.
+`buckets_historial` tiene un CHECK que exige `SUBIDA ⇒ sube` y `BAJADA ⇒ baja`. El
+`tipo_evento` se calcula comparando contra el bucket actual, no se asume.
+
+> **Actualización (plan 08, review de Codex):** este documento contemplaba llegar a B4
+> también *desde B5*. Ya no: el origen válido es **B1–B3** y cartera lo exige bajo sus locks
+> (`motivoBucketNoRecuperable`). Desde B5 la operación le restaba gravedad a la cuenta, y con
+> el piso de `EN_RECUPERACION` el motor la devolvía a B5 esa misma noche. Hoy toda
+> recuperación es una `SUBIDA`; el cálculo contra el bucket actual se conserva igual.
 
 ### Validaciones (todas antes de escribir)
 

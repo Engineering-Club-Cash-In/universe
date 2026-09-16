@@ -54,6 +54,37 @@ import { elegirAsesorParaBucket } from "../latefee";
 export const BUCKET_RECUPERACION_VEHICULO = 4;
 
 /**
+ * Desde qué buckets se puede mandar a recuperación: B1 a B3. Es la misma regla
+ * que muestra la ficha del CRM ("Disponible de B1 a B3"), y hasta la review de
+ * Codex (P2) vivía SOLO ahí — el servidor aceptaba cualquier origen menos el
+ * destino mismo.
+ *
+ * Los dos bordes no son estéticos:
+ *  · B0 no tiene atraso: no hay nada que recuperar todavía.
+ *  · B5 está POR ENCIMA del destino. Aceptarlo registraba una BAJADA a B4 y le
+ *    restaba gravedad a la cuenta — lo contrario de lo que el asesor pidió. El
+ *    flujo combinado "deshacer convenio y mandar a recuperación" del CRM no
+ *    pasaba por el botón de la ficha, así que llegaba acá sin ese filtro.
+ */
+export const BUCKET_MINIMO_RECUPERACION = 1;
+export const BUCKET_MAXIMO_RECUPERACION = BUCKET_RECUPERACION_VEHICULO - 1;
+
+/** Mensaje de rechazo, o null si el bucket admite la recuperación. */
+export function motivoBucketNoRecuperable(
+  bucket: number,
+  destino: number = BUCKET_RECUPERACION_VEHICULO,
+): string | null {
+  if (bucket === destino) return `El crédito ya está en B${destino}.`;
+  if (bucket > destino) {
+    return `El crédito está en B${bucket}, por encima de B${destino}: mandarlo a recuperación le bajaría la gravedad.`;
+  }
+  if (bucket < BUCKET_MINIMO_RECUPERACION) {
+    return `El crédito está en B${bucket}: sin atraso no hay nada que recuperar.`;
+  }
+  return null;
+}
+
+/**
  * Tope de espera para los locks de FILA (el UPDATE del crédito). Los advisory
  * locks de abajo NO esperan: se piden con `pg_try_advisory_xact_lock`.
  */
@@ -278,10 +309,16 @@ export async function enviarARecuperacionVehiculo(params: {
           "[ERROR] El crédito no tiene bucket actual: no se puede registrar el traslado.",
         );
       }
-      if (estado.bucket_actual === destino) {
+      // Rango de origen B1–B3, bajo los locks: es la foto sobre la que se
+      // decide. Ver `motivoBucketNoRecuperable`.
+      const noRecuperable = motivoBucketNoRecuperable(
+        estado.bucket_actual,
+        destino,
+      );
+      if (noRecuperable) {
         throw new RecuperacionAbortada(
           400,
-          `[ERROR] El crédito ya está en B${destino} (${bucketDestino.nombre}).`,
+          `[ERROR] ${noRecuperable} La recuperación de vehículo aplica de B${BUCKET_MINIMO_RECUPERACION} a B${destino - 1} (${bucketDestino.nombre} es el destino).`,
         );
       }
 

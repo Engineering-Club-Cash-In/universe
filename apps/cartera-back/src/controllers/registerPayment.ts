@@ -1006,7 +1006,13 @@ export async function procesarRegistroPago(
     // convenio para capturar el monto ya topado al pendiente real; el loop de
     // cuotas lo estampa en su primera fila (siempre corre, porque el convenio
     // ya no consume disponible).
-    const estamparPagoConvenio = crearEstampadorPagoConvenio(montoConvenio);
+    //
+    // Con el convenio que RECIBIÓ el monto: el sello de la fila lleva los dos
+    // (`campos()`), para que la reversa sepa a cuál descontárselo.
+    const estamparPagoConvenio = crearEstampadorPagoConvenio(
+      montoConvenio,
+      pagoConvenio?.convenio?.convenio_id ?? null
+    );
 
     let cuotas_completas = 0;
     let cuotas_parciales = 0;
@@ -1637,7 +1643,7 @@ export async function procesarRegistroPago(
                 // fallback del convenio insertaba una SEGUNDA fila con el
                 // mismo monto; además el reverso no tenía pago_convenio de
                 // dónde leer en los cierres por UPDATE.
-                .set({ ...pagoData, pagoConvenio: estamparPagoConvenio() })
+                .set({ ...pagoData, ...estamparPagoConvenio.campos() })
                 .from(cuotas_credito)
                 .where(
                   and(
@@ -1768,7 +1774,7 @@ export async function procesarRegistroPago(
                   banco_id: pagoData.banco_id || null,
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
-                  pagoConvenio: estamparPagoConvenio(),
+                  ...estamparPagoConvenio.campos(),
                   fecha_boleta: pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
                   // Paridad con la rama UPDATE de cierre (que persiste pagoData
@@ -1916,7 +1922,7 @@ export async function procesarRegistroPago(
                   banco_id: pagoData.banco_id || null,
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
-                  pagoConvenio: estamparPagoConvenio(),
+                  ...estamparPagoConvenio.campos(),
                   fecha_boleta:pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
                   origen_pago: pagoData.origen_pago,
@@ -2155,7 +2161,7 @@ export async function procesarRegistroPago(
         validationStatus: "capital" as const,
         paymentFalse: false,
         registerBy: registerBy,
-        pagoConvenio: estamparPagoConvenio(),
+        ...estamparPagoConvenio.campos(),
         fecha_boleta: fecha_boleta,
         monto_aplicado: abonoCapital.toString(),
         origen_pago: origen_pago,
@@ -2308,6 +2314,7 @@ export async function procesarRegistroPago(
       // reversa posible del convenio. El disponible sigue yendo a saldo a
       // favor: el registro del convenio no consume la boleta.
       if (new Big(estamparPagoConvenio.pendiente()).gt(0)) {
+        const selloConvenio = estamparPagoConvenio.campos();
         await insertarPago({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
@@ -2322,7 +2329,8 @@ export async function procesarRegistroPago(
           registerBy: registerBy ?? "",
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
-          pagoConvenio: Number(estamparPagoConvenio()),
+          pagoConvenio: Number(selloConvenio.pagoConvenio),
+          convenioId: selloConvenio.convenioId,
           origen_pago,
           pagalo_import_id,
         }, tx);
@@ -2448,6 +2456,8 @@ interface InsertarPagoParams {
   fecha_boleta?: string;
   monto_aplicado: number;
   pagoConvenio?: number;
+  /** Convenio que recibió `pagoConvenio` (ver `crearEstampadorPagoConvenio`). */
+  convenioId?: number | null;
   origen_pago?: "transferencia" | "cheque" | "boleta" | "pagalo";
   pagalo_import_id?: number;
 }
@@ -2466,6 +2476,7 @@ export async function insertarPago({
   fecha_boleta,
   monto_aplicado,
   pagoConvenio = 0,
+  convenioId = null,
   origen_pago,
   pagalo_import_id,
 }: InsertarPagoParams, executor: RegisterPaymentExecutor = db) {
@@ -2612,6 +2623,7 @@ export async function insertarPago({
       numeroAutorizacion: numeroAutorizacion ?? "",
       registerBy: registerBy,
       pagoConvenio: pagoConvenio.toString(),
+      convenioId,
       monto_aplicado: monto_aplicado.toString(),
       origen_pago,
       pagalo_import_id,

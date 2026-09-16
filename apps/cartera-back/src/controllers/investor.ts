@@ -9396,6 +9396,7 @@ export async function simularInversionista(
         inArray(creditos.statusCredit, [
           "ACTIVO",
           "MOROSO",
+          "EN_RECUPERACION",
           "PENDIENTE_CANCELACION",
           "EN_CONVENIO",
           "CANCELADO",

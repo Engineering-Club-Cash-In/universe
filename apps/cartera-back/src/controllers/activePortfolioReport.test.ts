@@ -9,7 +9,17 @@ import {
 
 describe("active portfolio report", () => {
   it("uses all live cartera statuses", () => {
-    expect(ACTIVE_PORTFOLIO_STATUSES).toEqual(["ACTIVO", "MOROSO", "EN_CONVENIO"]);
+    // COBROS-02 Fase 4: EN_RECUPERACION entra acá porque hasta ahora ESTOS
+    // MISMOS créditos estaban como MOROSO. El estado nuevo no los saca de la
+    // cartera viva —el capital sigue prestado y sigue cobrándose—, así que
+    // omitirlo encogía el reporte en silencio el día que alguien apretara el
+    // botón de recuperación.
+    expect(ACTIVE_PORTFOLIO_STATUSES).toEqual([
+      "ACTIVO",
+      "MOROSO",
+      "EN_RECUPERACION",
+      "EN_CONVENIO",
+    ]);
   });
 
   it("maps report rows with vehicle fallback and preserves SIFCO order", () => {

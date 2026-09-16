@@ -372,7 +372,7 @@ const obtenerInfoCompletaCredito = async (
 
     // Mantener intactos los estados que históricamente admiten pagos.
     if (
-      !["ACTIVO", "MOROSO", "EN_CONVENIO", "INCOBRABLE"].includes(
+      !["ACTIVO", "MOROSO", "EN_RECUPERACION", "EN_CONVENIO", "INCOBRABLE"].includes(
         info.credito.statusCredit
       )
     ) {

@@ -1336,6 +1336,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
           inArray(creditos.statusCredit, [
             "ACTIVO",
             "MOROSO",
+            "EN_RECUPERACION",
             "PENDIENTE_CANCELACION",
             "EN_CONVENIO",
             "INCOBRABLE"
@@ -2711,6 +2712,7 @@ export const updateAllInstallments = async ({
       : inArray(creditos.statusCredit, [
           "ACTIVO",
           "MOROSO",
+          "EN_RECUPERACION",
           "PENDIENTE_CANCELACION",
           "EN_CONVENIO",
         ]);

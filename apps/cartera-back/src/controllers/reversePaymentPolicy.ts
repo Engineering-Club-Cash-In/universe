@@ -25,6 +25,7 @@ const toBig = (value?: string | number | null) => new Big(value ?? 0);
 export const REVERSIBLE_CREDIT_STATUSES = [
   "ACTIVO",
   "MOROSO",
+  "EN_RECUPERACION",
   "EN_CONVENIO",
   "INCOBRABLE",
 ] as const;

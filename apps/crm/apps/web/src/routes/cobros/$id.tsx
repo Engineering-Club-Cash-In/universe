@@ -1310,6 +1310,14 @@ function RouteComponent() {
 		| undefined;
 	const convenioIncumplido = alertaConv?.categoria === "vencida";
 
+	// COBROS-02 Fase 4 — la otra rama de la banda: el crédito está en
+	// recuperación y ya acumuló 5 cuotas, o sea que el piso dejó de sostenerlo y
+	// subió solo a B5 (jurídico). Es un cambio de escalón que nadie apretó: si no
+	// se ve al abrir la ficha, el asesor sigue gestionando como si nada.
+	const enRecuperacion = caso.statusCredit === "EN_RECUPERACION";
+	const recuperacionEnB5 =
+		enRecuperacion && bucketNumero !== null && bucketNumero >= 5;
+
 	// Mandar a recuperación: la decisión es "ya no se recupera por teléfono".
 	// Se habilita de B1 a B3 (decisión del plan 08): en B0 no hay nada que
 	// recuperar todavía, y en B4/B5 el crédito ya está donde la recuperación lo
@@ -1403,6 +1411,23 @@ function RouteComponent() {
 			    si el cliente rompió el acuerdo que ya había negociado, eso
 			    cambia toda la conversación que el asesor está por tener. Antes
 			    ese dato solo existía en un job nocturno y en otra pantalla. */}
+			{recuperacionEnB5 && (
+				<div className="flex items-start gap-3 rounded-lg border border-red-300 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/50">
+					<TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
+					<div className="min-w-0 space-y-1">
+						<p className="font-semibold text-red-900 text-sm dark:text-red-200">
+							En recuperación y ya llegó a {bucketPrefijo ?? "B5"}
+						</p>
+						<p className="text-red-800 text-sm dark:text-red-300">
+							El crédito acumuló 5 cuotas atrasadas estando en recuperación de
+							vehículo, así que subió solo a jurídico. Sigue en recuperación:
+							el estado no se levanta con un convenio, solo pagando todo lo que
+							debe.
+						</p>
+					</div>
+				</div>
+			)}
+
 			{convenioIncumplido && alertaConv && (
 				<div className="flex items-start gap-3 rounded-lg border border-red-300 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/50">
 					<TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
@@ -1913,12 +1938,18 @@ function RouteComponent() {
 														sin importar cuántas cuotas lleve atrasadas, y queda
 														con el asesor que cubre ese bucket.
 													</p>
+													<p>
+														El crédito queda en estado{" "}
+														<strong>En recuperación</strong>, que fija B4 como
+														piso: ya no vuelve a bajar en la corrida nocturna.
+														Si le caen 5 cuotas atrasadas sube solo a B5,
+														conservando el estado.
+													</p>
 													<p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-														<strong>Ojo:</strong> hoy el traslado no se sostiene
-														solo. El job de moras vuelve a calcular el bucket
-														desde las cuotas atrasadas, así que esta cuenta
-														puede regresar a su escalón en la corrida de las
-														23:59. Está pendiente definir cómo se ancla.
+														El estado se levanta <strong>solo</strong> si el
+														cliente paga todo lo que debe —cuotas vencidas y
+														mora— y contabilidad valida ese pago. Un convenio
+														no lo levanta.
 													</p>
 												</div>
 											</AlertDialogDescription>

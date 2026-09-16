@@ -61,6 +61,34 @@ export function validarCatalogoBuckets(
     }
   }
 
+  // COBROS-02 Fase 4 — el PISO (`estados_piso`) tiene las mismas trampas que
+  // `estados_incluidos`, más una propia:
+  //  · el mismo estado en DOS buckets distintos hace que `pisoPorEstado` gane
+  //    por orden de array — mis-clasificación silenciosa;
+  //  · el mismo estado como CLAVO y como PISO a la vez es una contradicción:
+  //    clavar gana siempre (se resuelve antes), así que el piso sería letra
+  //    muerta y quien lo configuró creería que hizo algo.
+  const estadoAPisos = new Map<string, number[]>();
+  for (const b of catalogo) {
+    for (const estado of new Set(b.estados_piso ?? [])) {
+      const numeros = estadoAPisos.get(estado) ?? [];
+      numeros.push(b.numero);
+      estadoAPisos.set(estado, numeros);
+    }
+  }
+  for (const [estado, numeros] of estadoAPisos) {
+    if (numeros.length > 1) {
+      problemas.push(
+        `estado "${estado}" usado como piso en más de un bucket: numero=${numeros.join(", ")}`,
+      );
+    }
+    if (estadoABuckets.has(estado)) {
+      problemas.push(
+        `estado "${estado}" es piso y a la vez está incluido (clavado) en un bucket: el clavo gana y el piso nunca se aplicaría`,
+      );
+    }
+  }
+
   const porOrden = catalogo.slice().sort((a, b) => a.orden - b.orden);
   const ordenes = porOrden.map((b) => b.orden);
   const ordenesDuplicados = ordenes.filter((o, i) => ordenes.indexOf(o) !== i);

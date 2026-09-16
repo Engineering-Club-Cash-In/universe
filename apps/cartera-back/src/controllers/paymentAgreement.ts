@@ -29,6 +29,7 @@ import {
   congelarBucketPorConvenio,
 } from "./buckets/congelarBucketConvenio";
 import { CREDITO_ASESOR_LOCK_NAMESPACE } from "../lib/buckets-job-locks";
+import { STATUS_EN_RECUPERACION } from "./latefee";
 
 interface CreatePaymentAgreementInput {
   credit_id: number;
@@ -397,6 +398,12 @@ export async function createPaymentAgreement(
     console.log("🔥 Estado nuevo: EN_CONVENIO");
     console.log("🔥 Convenio ID:", agreement.convenio_id);
     // ============================================
+    // COBROS-02 Fase 4 — el estado con el que ENTRA al convenio. `statusCredit`
+    // es una sola columna: al pasar a EN_CONVENIO, un EN_RECUPERACION se
+    // perdería, y al completar el convenio el crédito quedaría ACTIVO — o sea
+    // que pagar el convenio levantaría la recuperación por la puerta de atrás,
+    // justo lo que la decisión 4 prohíbe.
+    const statusAlFirmar = creditExists.statusCredit ?? null;
 
     // ============================================
     // 🚪 SALIDA DEL RÉGIMEN NORMAL — UNA SOLA TRANSACCIÓN
@@ -473,6 +480,13 @@ export async function createPaymentAgreement(
         })
         .where(eq(creditos.credito_id, credit_id))
         .returning();
+
+      // COBROS-02 Fase 4 — con qué estado ENTRÓ al convenio, en la misma
+      // transacción que lo reemplaza (ver `statusAlFirmar` arriba).
+      await tx
+        .update(convenios_pago)
+        .set({ status_credito_previo: statusAlFirmar })
+        .where(eq(convenios_pago.convenio_id, agreement.convenio_id));
 
       // 4. CONGELAR EL BUCKET (COBROS-02 Fase 2). El crédito se queda en el
       //    bucket que tenía al firmar, con su asesor, hasta que pague completo
@@ -979,9 +993,19 @@ export async function processConvenioPaymentEnTx(
           .set({ pagado: true })
           .where(inArray(cuotas_credito.cuota_id, cuotasReestructuradas));
       }
+      // COBROS-02 Fase 4 — se le devuelve el estado con el que ENTRÓ, no un
+      // ACTIVO fijo. Si venía EN_RECUPERACION, ahí vuelve: ningún pago del
+      // convenio levanta ese estado (decisión 4). Lo levanta únicamente pagar
+      // el total SIN convenio, al validarse ese pago (decisión 5).
+      // Los convenios anteriores a la migración 0020 no tienen el dato: para
+      // ellos se conserva el comportamiento de siempre (ACTIVO).
+      const statusAlSalir =
+        convenio.status_credito_previo === STATUS_EN_RECUPERACION
+          ? STATUS_EN_RECUPERACION
+          : "ACTIVO";
       await tx
         .update(creditos)
-        .set({ statusCredit: "ACTIVO" })
+        .set({ statusCredit: statusAlSalir })
         .where(
           and(
             eq(creditos.credito_id, convenio.credito_id),
@@ -989,7 +1013,7 @@ export async function processConvenioPaymentEnTx(
           ),
         );
       console.log(
-        `✅ Convenio ${convenio.convenio_id} COMPLETADO → crédito ${convenio.credito_id} sale de EN_CONVENIO (ACTIVO); ${cuotasReestructuradas.length} cuota(s) reestructurada(s) marcadas pagadas.`,
+        `✅ Convenio ${convenio.convenio_id} COMPLETADO → crédito ${convenio.credito_id} sale de EN_CONVENIO (${statusAlSalir}); ${cuotasReestructuradas.length} cuota(s) reestructurada(s) marcadas pagadas.`,
       );
     }
 

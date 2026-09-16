@@ -152,6 +152,10 @@ const getCarteraStatusLabel = (status?: string | null) => {
 			return "Moroso";
 		case "EN_CONVENIO":
 			return "En convenio";
+		// COBROS-02 Fase 4: sin esta rama caía en "Cartera" y el cliente se veía
+		// igual que uno sin estado conocido.
+		case "EN_RECUPERACION":
+			return "En recuperación";
 		default:
 			return "Cartera";
 	}
@@ -165,6 +169,8 @@ const getCarteraStatusClassName = (status?: string | null) => {
 			return "bg-red-100 text-red-800";
 		case "EN_CONVENIO":
 			return "bg-blue-100 text-blue-800";
+		case "EN_RECUPERACION":
+			return "bg-orange-100 text-orange-800";
 		default:
 			return "bg-muted text-muted-foreground";
 	}

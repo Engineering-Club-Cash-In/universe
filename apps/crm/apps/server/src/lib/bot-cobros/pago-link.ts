@@ -73,7 +73,9 @@ import { verificarAcceso, verificarSesion } from "./menu-credito";
 export const MAXIMO_OPCIONES = 4;
 
 /** Estados de cartera en los que el bot puede cobrar por link (D-15 excluye convenio). */
-const ESTADOS_PAGABLES = new Set(["ACTIVO", "MOROSO"]);
+// COBROS-02 Fase 4: EN_RECUPERACION cobra igual que MOROSO — pagar es lo que
+// puede frenar la recuperación. EN_CONVENIO sigue fuera por D-15.
+const ESTADOS_PAGABLES = new Set(["ACTIVO", "MOROSO", "EN_RECUPERACION"]);
 
 /** Grupos —de cualquier origen— con dinero ya entrando a cartera: no se toca nada. */
 const ESTADOS_POST_PAGO: PagaloPaymentGroupStatus[] = [

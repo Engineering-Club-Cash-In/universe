@@ -592,20 +592,101 @@ cuota del convenio se mide por **monto** —un abono parcial acumulativo no marc
 deba vivir duplicado en el navegador. Es la misma fuente que la pantalla de Alertas de
 Convenios y que el job de avisos: **una sola definición de "incumplido"**.
 
-### Fase 4 · El estado `EN_RECUPERACION` — la invasiva, de último
+### Fase 4 · El estado `EN_RECUPERACION` — la invasiva, de último ✅ implementada
 
-- El **piso** en B4 (mecanismo nuevo, ver arriba).
-- El levantamiento del estado al **validarse** un pago que deja el crédito sin cuotas
-  vencidas.
-- La **precedencia del convenio** por encima del estado (decisión 4).
-- El triaje de las ~90 listas de estados escritas a mano, una por una, marcando cuáles
-  necesitan visto bueno de contabilidad.
+- ✅ El **piso** en B4: columna nueva `buckets.estados_piso` (migración **0019**), aplicada
+  en los dos lados — `bucketDeCredito` (JS) y `bucketActualSql` (el lector SQL). Las dos
+  tienen que decir lo mismo o la tabla por bucket y el motor se contradicen.
+- ✅ El estado se pone en la **misma transacción** que el traslado a B4. Si se escribiera
+  aparte, un fallo entre las dos dejaría un crédito en B4 sin piso: el motor lo devolvería
+  a su escalón esa noche y la decisión humana se perdería sin que nadie se entere.
+- ✅ El levantamiento al **validarse** el pago (`revalidatePayment`), y solo si no debe
+  **nada**: ni cuotas vencidas ni mora (decisión 18).
+- ✅ La **precedencia del convenio** (decisión 4), vía `convenios_pago.status_credito_previo`
+  (migración **0020**).
+- ✅ El triaje de las listas de estados escritas a mano.
+
+#### El estado no se puede pisar, y eso es otra lista
+
+`STATUS_EXCLUIDOS_MORA` respondía dos preguntas a la vez: *¿devenga mora?* y *¿se le puede
+cambiar el estado?* Para `EN_RECUPERACION` las respuestas son distintas — **sí** devenga
+mora (decisión 2) pero **no** se le pisa el estado. Si el motor lo sobreescribiera con
+`MOROSO` al recalcular, el piso duraría hasta la primera corrida nocturna.
+
+De ahí `STATUS_NO_PISAR` = `STATUS_EXCLUIDOS_MORA` + `EN_RECUPERACION`, aplicada en los
+cuatro escritores de estado del motor y en la condonación de mora (condonar no es pagar:
+no puede levantar una recuperación).
+
+#### El convenio manda, y `statusCredit` es una sola columna
+
+La decisión 4 dice que el convenio manda sobre el estado, y ahí aparece un problema que el
+plan no había visto: **`statusCredit` es UNA columna**. Al firmar el convenio el crédito
+pasa a `EN_CONVENIO` y el `EN_RECUPERACION` que traía desaparece; al completarse, el código
+lo dejaba `ACTIVO`. O sea que **pagar el convenio levantaba la recuperación por la puerta
+de atrás** — exactamente lo que la decisión 4 prohíbe.
+
+`convenios_pago.status_credito_previo` guarda el estado con el que el crédito entró, y se
+le devuelve en los tres finales posibles:
+
+| Qué pasa con el convenio | Estado que queda |
+| --- | --- |
+| Se **completa** (pagó todas sus cuotas) | El previo — si venía en recuperación, ahí vuelve |
+| Se **deshace** (Fase 3) | El previo, o MOROSO/ACTIVO según el recuento |
+| Se **rechaza** (CB-033) | Igual |
+
+Los convenios anteriores a la 0020 no tienen el dato y conservan el comportamiento de
+siempre.
+
+#### El triaje de las listas de estados
+
+El plan hablaba de "~90 listas de estados escritas a mano en ~45 archivos". El criterio
+que las resuelve casi todas es uno solo, y es el que evita el daño silencioso:
+
+> **Hasta hoy estos créditos estaban como `MOROSO`.** Un estado nuevo que no se agrega a
+> las listas de inclusión no "no hace nada": hace que esos créditos **desaparezcan** de
+> cada reporte, cada cobro y cada pantalla que enumera estados, el día que alguien apriete
+> el botón de recuperación.
+
+Así que `EN_RECUPERACION` se agregó donde estaba `MOROSO` como filtro de inclusión — 21
+lugares en cartera-back (reportes, facturación, cartera activa, pagos, inversionistas,
+agenda) y 5 en el CRM (incluidos el bot: **un crédito en recuperación sigue pudiendo pagar
+por boleta y por link** — pagar es justo lo que puede frenar la recuperación). No se tocó
+ninguna lista que *escriba* un estado ni el enum de acciones permitidas.
+
+> 📌 **Lo que sigue necesitando visto bueno de contabilidad** es la pregunta contraria:
+> si algún reporte debería **excluir** los créditos en recuperación (separarlos de la
+> cartera sana, por ejemplo). Eso ya no es un cambio de código sino una definición
+> contable, y hoy el comportamiento es idéntico al de antes.
 
 ---
 
-## Lo que sigue sin definirse
+## Estado de la ejecución
 
-**Nada.** Las tres preguntas que quedaban se cerraron el 15-sep (decisiones 16 a 19).
+Las cuatro fases están **implementadas** (15-sep). Todo corrió contra el sandbox de dev:
+
+| Migración | Qué agrega | Dónde |
+| --- | --- | --- |
+| CRM 0054 | `convenio_incumplido` + `cobros_dedup_key` | `public` |
+| CRM 0055 | `bot_cliente_escribio` | `public` |
+| cartera 0017 | evento `CONGELADO` | `cartera_cobros2` |
+| cartera 0018 | `anulado_at` / `anulado_por` / `motivo_anulacion` | `cartera_cobros2` |
+| cartera 0019 | `buckets.estados_piso` (+ seed de B4) | `cartera_cobros2` |
+| cartera 0020 | `convenios_pago.status_credito_previo` | `cartera_cobros2` |
+
+Los archivos de migración dicen `cartera.` (la convención del repo); al aplicarlas se
+sustituye por el schema del ambiente.
+
+## Lo que queda pendiente de una persona, no de código
+
+1. **El criterio de "atrasado" de la re-siembra** (ver Fase 2): estricto o ancho. Hoy corre
+   el estricto; el ancho manda 57 de 63 a B4.
+2. **Encender los recordatorios de convenio al cliente de verdad**:
+   `CONVENIO_WHATSAPP_ENABLED=true` + apagar el modo prueba. El código ya está y validado.
+3. **Si algún reporte debería excluir** los créditos en recuperación (definición contable).
+4. La nota del PM que sigue abierta desde el principio: si con 5 cuotas el crédito **no**
+   debería subir solo a B5. Está implementado como se acordó (sube), y revertirlo es
+   quitar `EN_RECUPERACION` de `estados_piso` y ponerlo en `estados_incluidos` de B4 — un
+   `UPDATE` al catálogo, sin tocar código.
 
 Y una aclaración que evita cautela de más: **este plan se ejecuta contra el sandbox de dev
 (`cartera_cobros2`)**, no contra producción. Los scripts de re-siembra y los cambios de

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
 import { client, db } from "../database";
 import { asesor_bucket, asesores, buckets, buckets_historial, CARTERA_SCHEMA, credito_asesor_historial, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, pagos_credito, platform_users, promesas_pago_espejo, SQL_CARTERA_SCHEMA, usuarios } from "../database/db/schema";
 import Big from "big.js";
@@ -29,6 +29,33 @@ type MoraEventoOrigen =
   | "CONDONACION_MASIVA";
 
 export const STATUS_EXCLUIDOS_MORA = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION", "CAIDO"];
+
+/**
+ * COBROS-02 Fase 4 — el estado que pone la recuperación de vehículo.
+ *
+ * NO está en STATUS_EXCLUIDOS_MORA a propósito: la decisión 2 del plan 08 dice
+ * que un crédito en recuperación SÍ devenga mora. Lo que hay que protegerle es
+ * otra cosa — que el motor no le pise el estado.
+ */
+export const STATUS_EN_RECUPERACION = "EN_RECUPERACION";
+
+/**
+ * Estados que el motor NO puede PISAR al mover `statusCredit`.
+ *
+ * Es una lista distinta de STATUS_EXCLUIDOS_MORA y la diferencia es exactamente
+ * `EN_RECUPERACION`: ese estado sí devenga mora (entra al cálculo), pero si el
+ * motor lo sobreescribiera con MOROSO al recalcular, el piso en B4 duraría
+ * hasta la primera corrida nocturna y la decisión humana se perdería sola.
+ *
+ * "Devengar mora" y "poder cambiar de estado" son dos preguntas distintas y
+ * hasta la Fase 4 las respondía la misma lista.
+ */
+export type StatusCreditValor = typeof creditos.$inferSelect["statusCredit"];
+
+export const STATUS_NO_PISAR = [
+  ...STATUS_EXCLUIDOS_MORA,
+  STATUS_EN_RECUPERACION,
+] as StatusCreditValor[];
 
 // CB-030 — promesa vigente para el freeze por cuota. Espejo local de una fila
 // de contactos_cobros (crm-server, otra DB) — ver promesas_pago_espejo en
@@ -150,12 +177,12 @@ export type { BucketCatalogo, BucketCatalogoCompleto };
 // ambiente): sin esto, GET /config/buckets devolvía 500 en vez de degradar,
 // a diferencia de los demás consumidores de getBucketsCatalogo() en credits.ts.
 const FALLBACK_BUCKETS_CATALOGO: BucketCatalogoCompleto[] = [
-  { numero: 0, prefijo: "B0", nombre: "Cartera Sana", descripcion: null, cuotas_min: 0, cuotas_max: 0, estados_incluidos: [], es_operativo: true, orden: 0, color: null, estado_mora: "al_dia", dias_sla: null },
-  { numero: 1, prefijo: "B1", nombre: "Alerta Temprana", descripcion: null, cuotas_min: 1, cuotas_max: 1, estados_incluidos: [], es_operativo: true, orden: 1, color: null, estado_mora: "mora_30", dias_sla: 3 },
-  { numero: 2, prefijo: "B2", nombre: "Gestión Activa", descripcion: null, cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], es_operativo: true, orden: 2, color: null, estado_mora: "mora_60", dias_sla: 3 },
-  { numero: 3, prefijo: "B3", nombre: "Rescate", descripcion: null, cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], es_operativo: true, orden: 3, color: null, estado_mora: "mora_90", dias_sla: 2 },
-  { numero: 4, prefijo: "B4", nombre: "Última Instancia / Pre Jurídico", descripcion: null, cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], es_operativo: true, orden: 4, color: null, estado_mora: "mora_120", dias_sla: 2 },
-  { numero: 5, prefijo: "B5", nombre: "Jurídico", descripcion: null, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], es_operativo: false, orden: 5, color: null, estado_mora: "mora_120_plus", dias_sla: 1 },
+  { numero: 0, prefijo: "B0", nombre: "Cartera Sana", descripcion: null, cuotas_min: 0, cuotas_max: 0, estados_incluidos: [], estados_piso: [], es_operativo: true, orden: 0, color: null, estado_mora: "al_dia", dias_sla: null },
+  { numero: 1, prefijo: "B1", nombre: "Alerta Temprana", descripcion: null, cuotas_min: 1, cuotas_max: 1, estados_incluidos: [], estados_piso: [], es_operativo: true, orden: 1, color: null, estado_mora: "mora_30", dias_sla: 3 },
+  { numero: 2, prefijo: "B2", nombre: "Gestión Activa", descripcion: null, cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], estados_piso: [], es_operativo: true, orden: 2, color: null, estado_mora: "mora_60", dias_sla: 3 },
+  { numero: 3, prefijo: "B3", nombre: "Rescate", descripcion: null, cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], estados_piso: [], es_operativo: true, orden: 3, color: null, estado_mora: "mora_90", dias_sla: 2 },
+  { numero: 4, prefijo: "B4", nombre: "Última Instancia / Pre Jurídico", descripcion: null, cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], estados_piso: ["EN_RECUPERACION"], es_operativo: true, orden: 4, color: null, estado_mora: "mora_120", dias_sla: 2 },
+  { numero: 5, prefijo: "B5", nombre: "Jurídico", descripcion: null, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], estados_piso: [], es_operativo: false, orden: 5, color: null, estado_mora: "mora_120_plus", dias_sla: 1 },
 ];
 
 export type CatalogoBucketsResultado = {
@@ -183,6 +210,7 @@ export async function getBucketsCatalogoConEstado(): Promise<CatalogoBucketsResu
         cuotas_min: buckets.cuotas_min,
         cuotas_max: buckets.cuotas_max,
         estados_incluidos: buckets.estados_incluidos,
+        estados_piso: buckets.estados_piso,
         es_operativo: buckets.es_operativo,
         orden: buckets.orden,
         color: buckets.color,
@@ -820,7 +848,9 @@ export async function updateMoraEnTx({
     .where(eq(creditos.credito_id, targetCreditoId))
     .limit(1);
 
-  const estadoProtegido = STATUS_EXCLUIDOS_MORA.includes(
+  // STATUS_NO_PISAR, no STATUS_EXCLUIDOS_MORA: EN_RECUPERACION sí devenga mora
+  // pero su estado no se pisa (ver la definición de la lista).
+  const estadoProtegido = STATUS_NO_PISAR.includes(
     creditoActual?.statusCredit ?? "",
   );
 
@@ -831,7 +861,7 @@ export async function updateMoraEnTx({
       .where(eq(creditos.credito_id, targetCreditoId));
   } else {
     console.log(
-      `[${requestId}] ⏭️ Status '${creditoActual?.statusCredit}' protegido (STATUS_EXCLUIDOS_MORA): no se cambia a ${newStatus}`,
+      `[${requestId}] ⏭️ Status '${creditoActual?.statusCredit}' protegido (STATUS_NO_PISAR): no se cambia a ${newStatus}`,
     );
   }
 
@@ -1144,10 +1174,19 @@ export async function procesarMoras() {
           throw e;
         }
 
+        // COBROS-02 Fase 4: no pisar un estado que es una decisión humana. Un
+        // crédito EN_RECUPERACION devenga mora igual (por eso llegó hasta acá),
+        // pero si el motor lo volviera MOROSO, el piso en B4 se perdería en la
+        // primera corrida nocturna.
         await db
           .update(creditos)
           .set({ statusCredit: "MOROSO" })
-          .where(eq(creditos.credito_id, creditoId));
+          .where(
+            and(
+              eq(creditos.credito_id, creditoId),
+              notInArray(creditos.statusCredit, STATUS_NO_PISAR),
+            ),
+          );
 
         await registrarHistorialMora({
           credito_id: creditoId,
@@ -1183,10 +1222,16 @@ export async function procesarMoras() {
           })
           .where(eq(moras_credito.mora_id, moraActual.mora_id));
 
+        // Mismo criterio que arriba: el recálculo de la mora no pisa el estado.
         await db
           .update(creditos)
           .set({ statusCredit: "MOROSO" })
-          .where(eq(creditos.credito_id, creditoId));
+          .where(
+            and(
+              eq(creditos.credito_id, creditoId),
+              notInArray(creditos.statusCredit, STATUS_NO_PISAR),
+            ),
+          );
 
         await registrarHistorialMora({
           credito_id: creditoId,
@@ -1601,10 +1646,18 @@ export async function condonarMora({
         return { kind: "not_found" as const };
       }
 
+      // Condonar la mora no levanta un estado que puso una persona: un crédito
+      // EN_RECUPERACION al que se le condona la mora sigue en recuperación
+      // (decisión 5: solo lo levanta pagar el total de lo que debe).
       await tx
         .update(creditos)
         .set({ statusCredit: "ACTIVO" })
-        .where(eq(creditos.credito_id, credito_id));
+        .where(
+          and(
+            eq(creditos.credito_id, credito_id),
+            notInArray(creditos.statusCredit, STATUS_NO_PISAR),
+          ),
+        );
 
       const [condonacion] = await tx
         .insert(moras_condonaciones)

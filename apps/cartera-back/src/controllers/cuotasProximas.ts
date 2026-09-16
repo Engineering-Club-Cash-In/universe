@@ -78,7 +78,7 @@ export async function getCuotasProximasVencer(
   // funnel es solo para cartera sana.
   const filtroEstado = soloAlDia
     ? sql`c."statusCredit" = 'ACTIVO'`
-    : sql`c."statusCredit" IN ('ACTIVO', 'MOROSO', 'INCOBRABLE', 'EN_CONVENIO')`;
+    : sql`c."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'INCOBRABLE', 'EN_CONVENIO')`;
 
   const bucketMotorSub = sql`(SELECT h.bucket_nuevo
       FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h

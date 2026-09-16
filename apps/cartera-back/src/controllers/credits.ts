@@ -72,16 +72,18 @@ const FALLBACK_BUCKETS_CUOTAS: {
   cuotas_min: number;
   cuotas_max: number | null;
   estados_incluidos: string[];
+  /** COBROS-02 Fase 4: bucket MÍNIMO para estos estados (piso, no clavo). */
+  estados_piso: string[];
   prefijo: string;
   nombre: string;
   estado_mora: string;
 }[] = [
-  { numero: 0, cuotas_min: 0, cuotas_max: 0, estados_incluidos: [], prefijo: "B0", nombre: "Cartera Sana", estado_mora: "al_dia" },
-  { numero: 1, cuotas_min: 1, cuotas_max: 1, estados_incluidos: [], prefijo: "B1", nombre: "Alerta Temprana", estado_mora: "mora_30" },
-  { numero: 2, cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], prefijo: "B2", nombre: "Gestión Activa", estado_mora: "mora_60" },
-  { numero: 3, cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], prefijo: "B3", nombre: "Rescate", estado_mora: "mora_90" },
-  { numero: 4, cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], prefijo: "B4", nombre: "Última Instancia / Pre Jurídico", estado_mora: "mora_120" },
-  { numero: 5, cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], prefijo: "B5", nombre: "Jurídico", estado_mora: "mora_120_plus" },
+  { numero: 0, estados_piso: [], cuotas_min: 0, cuotas_max: 0, estados_incluidos: [], prefijo: "B0", nombre: "Cartera Sana", estado_mora: "al_dia" },
+  { numero: 1, estados_piso: [], cuotas_min: 1, cuotas_max: 1, estados_incluidos: [], prefijo: "B1", nombre: "Alerta Temprana", estado_mora: "mora_30" },
+  { numero: 2, estados_piso: [], cuotas_min: 2, cuotas_max: 2, estados_incluidos: [], prefijo: "B2", nombre: "Gestión Activa", estado_mora: "mora_60" },
+  { numero: 3, estados_piso: [], cuotas_min: 3, cuotas_max: 3, estados_incluidos: [], prefijo: "B3", nombre: "Rescate", estado_mora: "mora_90" },
+  { numero: 4, estados_piso: ["EN_RECUPERACION"], cuotas_min: 4, cuotas_max: 4, estados_incluidos: [], prefijo: "B4", nombre: "Última Instancia / Pre Jurídico", estado_mora: "mora_120" },
+  { numero: 5, estados_piso: [], cuotas_min: 5, cuotas_max: null, estados_incluidos: ["INCOBRABLE"], prefijo: "B5", nombre: "Jurídico", estado_mora: "mora_120_plus" },
 ];
 
 
@@ -860,7 +862,7 @@ export async function getCreditosWithUserByMesAnio(
         if (esAlDia) {
           conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO')`);
         } else {
-          conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')`);
+          conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO', 'EN_RECUPERACION', 'EN_CONVENIO')`);
         }
       } else {
         console.log(`🔎 Filtrando por estado: ${estado}`);
@@ -1300,6 +1302,7 @@ export async function getCreditosWithUserByMesAnio(
       cuotas_min: b.cuotas_min,
       cuotas_max: b.cuotas_max,
       estados_incluidos: b.estados_incluidos,
+      estados_piso: b.estados_piso,
     }));
     FALLBACK_BUCKETS_CUOTAS.forEach((b) => {
       bucketDisplayMap.set(b.numero, {
@@ -1320,6 +1323,7 @@ export async function getCreditosWithUserByMesAnio(
         cuotas_min: b.cuotas_min,
         cuotas_max: b.cuotas_max,
         estados_incluidos: b.estados_incluidos,
+        estados_piso: b.estados_piso,
       }));
       catalogoRows.forEach((b) => {
         bucketDisplayMap.set(b.numero, {
@@ -3311,7 +3315,7 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
 
   // Primero obtener el total de créditos activos para calcular porcentajes
   const baseConditionsTotal = [
-    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_CONVENIO"]),
+    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_RECUPERACION", "EN_CONVENIO"]),
   ];
   if (asesorId) {
     baseConditionsTotal.push(eq(creditos.asesor_id, asesorId));
@@ -3385,7 +3389,7 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
 
   // Consulta para créditos activos/morosos con sus moras
   const baseConditionsActive = [
-    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_CONVENIO"]),
+    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_RECUPERACION", "EN_CONVENIO"]),
   ];
 
   if (asesorId) {

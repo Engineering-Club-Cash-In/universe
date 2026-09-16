@@ -210,7 +210,9 @@ describe("enviarARecuperacionVehiculo — controller real con DB fakeada", () =>
       tipo_evento: "SUBIDA",
       origen: "API_MANUAL",
       cuotas_atrasadas_nuevas: 2,
-      status_credito: "MOROSO",
+      // COBROS-02 Fase 4: la bitácora registra el status con el que QUEDA el
+      // crédito, no el que traía.
+      status_credito: "EN_RECUPERACION",
     });
     // Sin columna usuario_id en la tabla, el actor tiene que quedar en el motivo.
     expect(historialBucket[0].filas[0].motivo).toContain("supervisor@clubcashin.com");
@@ -226,10 +228,17 @@ describe("enviarARecuperacionVehiculo — controller real con DB fakeada", () =>
       usuario_id: 55,
     });
 
-    // UPDATE: ÚNICAMENTE asesor_id (decisión de raíz).
-    expect(estado.updates).toHaveLength(1);
-    expect(estado.updates[0].tabla).toBe(schema.creditos);
-    expect(estado.updates[0].set).toEqual({ asesor_id: 7 });
+    // Dos UPDATE a `creditos` y nada más: el dueño (decisión de raíz) y el
+    // estado EN_RECUPERACION, que es lo que hace permanente el traslado
+    // (COBROS-02 Fase 4).
+    expect(estado.updates).toHaveLength(2);
+    expect(estado.updates.every((u) => u.tabla === schema.creditos)).toBe(true);
+    expect(estado.updates.map((u) => u.set)).toEqual(
+      expect.arrayContaining([
+        { asesor_id: 7 },
+        { statusCredit: "EN_RECUPERACION" },
+      ]),
+    );
   });
 
   it("el dueño ya cubre B4 → registra el traslado pero NO cambia de asesor", async () => {
@@ -245,10 +254,13 @@ describe("enviarARecuperacionVehiculo — controller real con DB fakeada", () =>
       asesor_anterior: 7,
       asesor_nuevo: 7,
       asesor_sin_cambio: true,
+      status_credito: "EN_RECUPERACION",
     });
     expect(insertsDe(schema.buckets_historial)).toHaveLength(1);
     expect(insertsDe(schema.credito_asesor_historial)).toHaveLength(0);
-    expect(estado.updates).toHaveLength(0);
+    // Sin cambio de asesor queda UN solo UPDATE: el del estado.
+    expect(estado.updates).toHaveLength(1);
+    expect(estado.updates[0].set).toEqual({ statusCredit: "EN_RECUPERACION" });
   });
 
   // Antes esta prueba afirmaba lo contrario: que desde B5 se registraba una

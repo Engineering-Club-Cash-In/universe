@@ -257,7 +257,7 @@ export async function generarSnapshotDiario(fecha: string) {
         fd.pago_id IS NULL OR (
           p.pago_id IS NOT NULL
           AND c."statusCredit" IN
-            ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+            ('ACTIVO','MOROSO','EN_RECUPERACION','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
           AND p.validation_status IN
             ('validated','pending','reset','capital','capital_validated')
         )
@@ -332,7 +332,7 @@ export async function generarSnapshotDiario(fecha: string) {
     WHERE (p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
       AND p.validation_status IN ('validated','pending','reset','capital','capital_validated')
       AND c."statusCredit" IN
-        ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+        ('ACTIVO','MOROSO','EN_RECUPERACION','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
       AND UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%'
     GROUP BY u.categoria
   `);
@@ -578,7 +578,7 @@ export async function generarSnapshotDiario(fecha: string) {
           OR (
             p.pago_id IS NOT NULL
             AND c."statusCredit" IN
-              ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+              ('ACTIVO','MOROSO','EN_RECUPERACION','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
             AND p.validation_status IN
               ('validated','pending','reset','capital','capital_validated')
           )
@@ -606,7 +606,7 @@ export async function generarSnapshotDiario(fecha: string) {
       WHERE (p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = ${fecha}::date
         AND p.validation_status IN ('validated','pending','reset','capital','capital_validated')
         AND c."statusCredit" IN
-          ('ACTIVO','MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
+          ('ACTIVO','MOROSO','EN_RECUPERACION','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')
         AND UPPER(TRIM(i.nombre)) LIKE '%CUBE INVESTMENTS%'
       GROUP BY 3
       HAVING SUM(pci.abono_capital) <> 0

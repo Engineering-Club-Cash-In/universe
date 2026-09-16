@@ -25,6 +25,11 @@ import type { LeadSource } from "server/src/lib/lead-sources";
 import { toast } from "sonner";
 import { z } from "zod";
 import { BankStatementAnalysis } from "@/components/credit/BankStatementAnalysis";
+import {
+	getLeadDuplicateConflict,
+	type LeadDuplicateConflict,
+} from "@/components/crm/lead-duplicate-conflict";
+import { LeadDuplicateDialog } from "@/components/crm/lead-duplicate-dialog";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
@@ -160,6 +165,8 @@ function RouteComponent() {
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 	const [editingLead, setEditingLead] = useState<Lead | null>(null);
+	const [leadDuplicateConflict, setLeadDuplicateConflict] =
+		useState<LeadDuplicateConflict | null>(null);
 	const [searchTerm, setSearchTerm] = usePersistedState("crm/leads/searchTerm", "");
 	const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
 	const [dateRange, setDateRange] = usePersistedDateRange("crm/leads/dateRange");
@@ -485,8 +492,15 @@ function RouteComponent() {
 			setEditingLead(null);
 			createLeadForm.reset();
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al crear el lead");
+		onError: (error: unknown) => {
+			const conflict = getLeadDuplicateConflict(error);
+			if (conflict) {
+				setLeadDuplicateConflict(conflict);
+				return;
+			}
+			toast.error(
+				error instanceof Error ? error.message : "Error al crear el lead",
+			);
 		},
 	});
 
@@ -979,6 +993,24 @@ function RouteComponent() {
 								Ver y gestionar tus leads de ventas
 							</CardDescription>
 						</div>
+						<LeadDuplicateDialog
+							conflict={leadDuplicateConflict}
+							onClose={() => setLeadDuplicateConflict(null)}
+							onViewLead={() => {
+								if (!leadDuplicateConflict) return;
+								processedLeadIdRef.current = null;
+								setLeadDuplicateConflict(null);
+								setIsCreateDialogOpen(false);
+								setEditingLead(null);
+								createLeadForm.reset();
+								void navigate({
+									search: {
+										...search,
+										leadId: leadDuplicateConflict.leadId,
+									},
+								});
+							}}
+						/>
 						<Dialog
 							open={isCreateDialogOpen}
 							onOpenChange={(open) => {

@@ -78,6 +78,7 @@ import {
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
+import { buildLeadDuplicateConflict } from "./lead-duplicate-conflict";
 import { getLeadSourceLabel } from "../lib/lead-sources";
 import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
@@ -1002,6 +1003,10 @@ export const crmRouter = {
 				const matchingLeads = await db
 					.select({
 						id: leads.id,
+						firstName: leads.firstName,
+						middleName: leads.middleName,
+						lastName: leads.lastName,
+						secondLastName: leads.secondLastName,
 						assignedTo: leads.assignedTo,
 						assignedToName: user.name,
 					})
@@ -1030,84 +1035,14 @@ export const crmRouter = {
 						.orderBy(desc(opportunities.createdAt))
 						.limit(1);
 
-					if (activeOpportunity) {
-						// El conflicto se reporta con el dueño del proceso en curso, que
-						// no necesariamente es el del lead más antiguo.
-						const leadEnProceso =
-							matchingLeads.find(
-								(lead) => lead.id === activeOpportunity.leadId,
-							) ?? matchingLeads[0];
-
-						throw new ORPCError("CONFLICT", {
-							message: `Ya existe un lead con este DPI y tiene un proceso activo, asignado al asesor: ${leadEnProceso.assignedToName}`,
-						});
-					}
-
-					// Sin procesos activos: se reusa el más antiguo, que arrastra el
-					// historial.
-					const existingLead = matchingLeads[0];
-
-					// Lead existe pero sin procesos activos → reasignar al nuevo asesor
-					const reassignedLead = await auditedTransaction(async (tx) => {
-						const [lead] = await tx
-							.update(leads)
-							.set({
-								assignedTo,
-								status: "new",
-								source: input.source,
-								campaign: input.campaign,
-								updatedAt: new Date(),
-							})
-							.where(eq(leads.id, existingLead.id))
-							.returning();
-
-						// Crear nueva oportunidad en el primer stage
-						const [firstStage] = await tx
-							.select({ id: salesStages.id })
-							.from(salesStages)
-							.orderBy(salesStages.order)
-							.limit(1);
-
-						if (!firstStage) {
-							throw new ORPCError("INTERNAL_SERVER_ERROR", {
-								message: "No se encontró el primer stage de ventas",
-							});
-						}
-
-						// Este lead ya existía: lo que pasó fue una reasignación, no
-						// un alta.
-						auditRecord({
-							entity: "lead",
-							id: existingLead.id,
-							action: "reassign",
-							data: { dpi: normalizedDpi, assignedTo },
-						});
-
-						const [nuevaOportunidad] = await tx
-							.insert(opportunities)
-							.values({
-								title: `${input.firstName} ${input.lastName}`,
-								leadId: existingLead.id,
-								creditType: "autocompra",
-								stageId: firstStage.id,
-								probability: 1,
-								assignedTo,
-								createdBy: context.userId,
-								source: input.source,
-								campaign: input.campaign,
-							})
-							.returning({ id: opportunities.id });
-						auditRecord({
-							entity: "opportunity",
-							id: nuevaOportunidad.id,
-							action: "create",
-							data: { leadId: existingLead.id, assignedTo },
-						});
-
-						return lead;
+					throw new ORPCError("CONFLICT", {
+						message: "Ya existe un lead con este DPI",
+						data: buildLeadDuplicateConflict(
+							matchingLeads,
+							activeOpportunity ?? null,
+							context.userId,
+						),
 					});
-
-					return reassignedLead;
 				}
 			}
 

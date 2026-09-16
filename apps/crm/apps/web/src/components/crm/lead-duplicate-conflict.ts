@@ -13,6 +13,10 @@ export type LeadDuplicateConflict = z.infer<
 	typeof leadDuplicateConflictSchema
 >;
 
+export function getDuplicateLeadSearch(leadId: string) {
+	return { leadId };
+}
+
 export function getLeadDuplicateConflict(
 	error: unknown,
 ): LeadDuplicateConflict | null {

@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { BankStatementAnalysis } from "@/components/credit/BankStatementAnalysis";
 import {
+	getDuplicateLeadSearch,
 	getLeadDuplicateConflict,
 	type LeadDuplicateConflict,
 } from "@/components/crm/lead-duplicate-conflict";
@@ -998,16 +999,14 @@ function RouteComponent() {
 							onClose={() => setLeadDuplicateConflict(null)}
 							onViewLead={() => {
 								if (!leadDuplicateConflict) return;
+								processedCompanyIdRef.current = null;
 								processedLeadIdRef.current = null;
 								setLeadDuplicateConflict(null);
 								setIsCreateDialogOpen(false);
 								setEditingLead(null);
 								createLeadForm.reset();
 								void navigate({
-									search: {
-										...search,
-										leadId: leadDuplicateConflict.leadId,
-									},
+									search: getDuplicateLeadSearch(leadDuplicateConflict.leadId),
 								});
 							}}
 						/>

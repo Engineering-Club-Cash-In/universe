@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { ORPCError } from "@orpc/client";
 import {
+	getDuplicateLeadSearch,
 	getLeadDuplicateConflict,
 	getLeadDuplicatePresentation,
 } from "./lead-duplicate-conflict";
@@ -48,5 +49,11 @@ describe("getLeadDuplicatePresentation", () => {
 			assignment: "Este lead está asignado a ti.",
 			canViewLead: true,
 		});
+	});
+});
+
+describe("getDuplicateLeadSearch", () => {
+	it("reemplaza el flujo de empresa por la ruta del lead existente", () => {
+		expect(getDuplicateLeadSearch("lead-1")).toEqual({ leadId: "lead-1" });
 	});
 });

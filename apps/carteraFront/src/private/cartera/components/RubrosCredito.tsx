@@ -55,7 +55,8 @@ import {
   type TipoRubro,
 } from "../services/rubros.services";
 import { ajustarApertura, type SesionRubros } from "./rubrosApertura";
-import { QK_RUBROS, sincronizarRubroEditado } from "./rubrosCache";
+import { QK_RUBROS, refrescarRubros, sincronizarRubroEditado } from "./rubrosCache";
+import { QK_HISTORIAL, olvidarHistorialRubro } from "./rubrosHistorialCache";
 import { QK_TIPOS, sincronizarTipoEditado } from "./rubrosTiposCache";
 
 /**
@@ -143,15 +144,26 @@ function ErrorEnLinea({ mensaje }: { mensaje: string }) {
   );
 }
 
-function BotonVolver({ onClick, children = "Volver a la lista" }: {
+/**
+ * El `disabled` no es decorativo: mientras una mutación viaja, este botón es la
+ * otra puerta de salida del formulario, y la de arriba —lejos del pie, donde
+ * están "Cancelar" y "Guardar", que sí se apagan solos—. Sin apagarlo, en un
+ * PUT lento el administrador volvía a la lista, que todavía mostraba la fila
+ * VIEJA, reabría ese mismo rubro y lo guardaba de nuevo: el segundo PUT podía
+ * aterrizar después del primero y PISAR el monto y la descripción recién
+ * guardados.
+ */
+function BotonVolver({ onClick, disabled = false, children = "Volver a la lista" }: {
   onClick: () => void;
+  disabled?: boolean;
   children?: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-1 text-sm font-semibold text-gray-500 hover:text-gray-800 transition-colors"
+      disabled={disabled}
+      className="flex items-center gap-1 text-sm font-semibold text-gray-500 hover:text-gray-800 transition-colors disabled:opacity-50 disabled:pointer-events-none"
     >
       <ArrowLeft className="w-4 h-4" />
       {children}
@@ -253,8 +265,7 @@ export default function RubrosCredito({
     [rubros]
   );
 
-  const invalidar = () =>
-    queryClient.invalidateQueries({ queryKey: [QK_RUBROS, creditoVisible] });
+  const refrescarLista = () => refrescarRubros(queryClient, creditoVisible);
 
   // Gate SOLO de creación: la lista y el historial se siguen viendo (es el
   // registro de lo que ya se le cobró al cliente) y la edición tampoco se toca
@@ -351,8 +362,12 @@ export default function RubrosCredito({
               setVista("crearTipo");
             }}
             onAdministrarTipos={() => setVista("tipos")}
-            onCreado={() => {
-              invalidar();
+            onCreado={async () => {
+              // Se ESPERA el refresco antes de volver, igual que en editar: sin
+              // el await, el toast de "Rubro creado" salía sobre la lista de
+              // antes —sin el rubro nuevo, y en un crédito que no tenía ninguno
+              // todavía con el cartel de "no hay rubros" a la vista—.
+              await refrescarLista();
               setBorrador(BORRADOR_VACIO);
               volver();
             }}
@@ -366,8 +381,14 @@ export default function RubrosCredito({
             key={rubroSel.rubro_id}
             rubro={rubroSel}
             onVolver={volver}
-            onAnulado={() => {
-              invalidar();
+            onAnulado={async () => {
+              // La anulación deja el rubro en saldo 0, inactivo y con un evento
+              // nuevo en su historial. Las dos cachés que hablan de ese rubro se
+              // ponen al día ANTES de volver: sin el await, la lista seguía
+              // mostrándolo "Activo" con el saldo de antes y con los botones de
+              // editar y anular, que el backend ya rechaza con 409.
+              olvidarHistorialRubro(queryClient, rubroSel.rubro_id);
+              await refrescarLista();
               volver();
             }}
           />
@@ -387,6 +408,14 @@ export default function RubrosCredito({
               // la fila vieja mientras el GET viajaba, y reabrirla en ese hueco
               // cargaba el formulario con el monto anterior — el PUT siguiente
               // revertía la edición recién hecha.
+              //
+              // El historial se olvida además de refrescar la lista: toda
+              // edición que cambia algo escribe su evento con el motivo, y si el
+              // administrador ya había mirado el historial de este rubro, esa
+              // caché quedó sin el cambio que acaba de hacer. (Una edición que
+              // no cambia nada no escribe evento; olvidar de más sólo cuesta un
+              // GET si se reabre el historial.)
+              olvidarHistorialRubro(queryClient, rubroSel.rubro_id);
               await sincronizarRubroEditado(
                 queryClient,
                 creditoVisible,
@@ -655,7 +684,8 @@ function VistaCrear({
   onVolver: () => void;
   onCrearTipo: () => void;
   onAdministrarTipos: () => void;
-  onCreado: () => void;
+  /** Puede devolver promesa: el refresco de la lista se espera antes de volver. */
+  onCreado: () => void | Promise<void>;
 }) {
   const { tipoId, monto, descripcion } = borrador;
   const campo = (k: keyof BorradorRubro) => (v: string) =>
@@ -697,7 +727,13 @@ function VistaCrear({
       }),
     onSuccess: () => {
       toast.success("Rubro creado");
-      onCreado();
+      // Se DEVUELVE la promesa, no se descarta: React Query espera lo que
+      // devuelva este callback antes de dar la mutación por terminada, así que
+      // `isPending` sigue en true durante el refresco de la lista y el
+      // formulario queda apagado hasta que la pantalla tenga el dato nuevo. Sin
+      // devolverla, la mutación se daba por cerrada al responder el POST y los
+      // botones revivían justo en el hueco en que la lista todavía era la vieja.
+      return onCreado();
     },
     onError: (e) => {
       // 403 = el asesor intentó un tipo obligatorio. 409 = regla de negocio
@@ -721,7 +757,7 @@ function VistaCrear({
 
   return (
     <div className="flex flex-col gap-3 text-gray-800">
-      <BotonVolver onClick={onVolver} />
+      <BotonVolver onClick={onVolver} disabled={crear.isPending} />
 
       <h3 className="flex items-center gap-2 font-bold text-purple-700">
         <PlusCircle className="w-5 h-5" />
@@ -881,7 +917,11 @@ function VistaEditar({
       }),
     onSuccess: (guardado) => {
       toast.success("Rubro actualizado");
-      onEditado(guardado);
+      // Se DEVUELVE la promesa (ver el mismo comentario en `VistaCrear`): es lo
+      // que mantiene `isPending` en true mientras la lista se refresca. Acá pesa
+      // más que en ningún otro lado, porque es el hueco en el que reabrir la
+      // fila vieja y volver a guardar PISA la edición recién hecha.
+      return onEditado(guardado);
     },
     onError: (e) => {
       // 409 = regla de negocio ("el monto no puede ser menor a lo ya abonado").
@@ -904,7 +944,7 @@ function VistaEditar({
 
   return (
     <div className="flex flex-col gap-3 text-gray-800">
-      <BotonVolver onClick={onVolver} />
+      <BotonVolver onClick={onVolver} disabled={editar.isPending} />
 
       <div>
         <h3 className="flex items-center gap-2 font-bold text-blue-700">
@@ -1011,7 +1051,8 @@ function VistaAnular({
 }: {
   rubro: RubroCredito;
   onVolver: () => void;
-  onAnulado: () => void;
+  /** Puede devolver promesa: el refresco de la lista se espera antes de volver. */
+  onAnulado: () => void | Promise<void>;
 }) {
   const [motivo, setMotivo] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -1020,7 +1061,10 @@ function VistaAnular({
     mutationFn: () => anularRubro(rubro.rubro_id, { motivo: motivo.trim() }),
     onSuccess: () => {
       toast.success("Rubro anulado");
-      onAnulado();
+      // Se DEVUELVE la promesa (ver el mismo comentario en `VistaCrear`): la
+      // vista se queda apagada hasta que la lista traiga el rubro ya anulado, en
+      // vez de volver a una fila que todavía se ofrece para anular de nuevo.
+      return onAnulado();
     },
     onError: (e) => {
       // 403 = no es ADMIN. 409 = el rubro ya estaba anulado o completado (dos
@@ -1042,7 +1086,7 @@ function VistaAnular({
 
   return (
     <div className="flex flex-col gap-3 text-gray-800">
-      <BotonVolver onClick={onVolver} />
+      <BotonVolver onClick={onVolver} disabled={anular.isPending} />
 
       <div>
         <h3 className="flex items-center gap-2 font-bold text-red-700">
@@ -1672,7 +1716,9 @@ function VistaEditarTipo({
 
   return (
     <div className="flex flex-col gap-3 text-gray-800">
-      <BotonVolver onClick={onVolver}>Volver a los tipos</BotonVolver>
+      <BotonVolver onClick={onVolver} disabled={guardar.isPending}>
+        Volver a los tipos
+      </BotonVolver>
 
       <div>
         <h3 className="flex items-center gap-2 font-bold text-blue-700">
@@ -1755,7 +1801,7 @@ function VistaHistorial({
   onVolver: () => void;
 }) {
   const historialQuery = useQuery({
-    queryKey: ["rubroHistorial", rubro.rubro_id],
+    queryKey: [QK_HISTORIAL, rubro.rubro_id],
     queryFn: () => getHistorialRubro(rubro.rubro_id),
   });
 

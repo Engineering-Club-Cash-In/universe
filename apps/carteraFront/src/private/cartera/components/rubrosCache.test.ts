@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { QK_RUBROS, sincronizarRubroEditado } from "./rubrosCache";
+import { QK_RUBROS, refrescarRubros, sincronizarRubroEditado } from "./rubrosCache";
 import type { RubroCredito, RubroGuardado } from "../services/rubros.services";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -190,6 +190,92 @@ describe("sincronizarRubroEditado", () => {
       5,
       guardado({ monto_original: "800.00" })
     );
+
+    expect(
+      p.queryClient.getQueryData<RubroCredito[]>([QK_RUBROS, 99])![0]!.monto_original
+    ).toBe("100.00");
+    p.desuscribir();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Crear y anular tienen el mismo agujero de TIEMPO que tenía editar, y por la
+// misma razón: la lista vive en el padre y sigue activa, así que el refetch sale
+// solo — lo que faltaba era ESPERARLO antes de volver a la lista.
+//
+// Lo que NO tienen es de dónde sembrar: `crearRubro` y `anularRubro` responden
+// `void` (el POST y el POST /anular del backend no devuelven la fila), así que
+// no hay "estado posterior a la escritura" que poner en caché y el refetch es la
+// única fuente. Por eso `refrescarRubros` sólo espera, y no hay orden
+// refresco/siembra que discutir como en `sincronizarRubroEditado`.
+//
+// Anular es el caso que más duele: la fila vieja sigue diciendo "Activo" con su
+// saldo pendiente de antes y ofrece acciones —editar, anular de nuevo— que el
+// servidor ya va a rechazar.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("refrescarRubros", () => {
+  it("resuelve recién cuando el servidor respondió, no antes", async () => {
+    // `volver()` corre después de este await. Si resolviera antes, la lista se
+    // pintaría con el rubro anulado todavía "Activo" y su saldo de antes.
+    let respondio = false;
+    const p = pantallaConRubros(async () => {
+      await esperar(20);
+      respondio = true;
+      return [rubro({ activo: false, anulado: true, saldo_pendiente: "0.00" })];
+    });
+    await esperar(40);
+    respondio = false;
+
+    await refrescarRubros(p.queryClient, CRED);
+
+    expect(respondio).toBe(true);
+    expect(p.fila()!.anulado).toBe(true);
+    p.desuscribir();
+  });
+
+  it("trae el rubro recién creado, que antes faltaba en la lista", async () => {
+    // El toast de "Rubro creado" salía mientras la lista seguía siendo la de
+    // antes: en un crédito sin rubros, el cartel de "no hay rubros" convivía
+    // con el aviso de que se acababa de crear uno.
+    let creado = false;
+    const p = pantallaConRubros(async () => (creado ? [rubro()] : []));
+    await esperar(10);
+    expect(p.fila()).toBeNull();
+    creado = true;
+
+    await refrescarRubros(p.queryClient, CRED);
+
+    expect(p.fila()!.rubro_id).toBe(5);
+    p.desuscribir();
+  });
+
+  it("si el refetch falla igual resuelve, para no dejar al usuario atrapado", async () => {
+    // El cargo ya se creó/anuló en la base; que se caiga la red después no
+    // puede dejar la vista del formulario colgada para siempre.
+    let primera = true;
+    const p = pantallaConRubros(() => {
+      if (primera) return [rubro()];
+      throw new Error("servidor caído");
+    });
+    await esperar(10);
+    primera = false;
+
+    await refrescarRubros(p.queryClient, CRED);
+
+    expect(p.fila()).not.toBeNull();
+    p.desuscribir();
+  });
+
+  it("no toca la lista de otro crédito", async () => {
+    const p = pantallaConRubros(async () => [rubro()]);
+    await esperar(10);
+    p.queryClient.setQueryData<RubroCredito[]>(
+      [QK_RUBROS, 99],
+      [rubro({ credito_id: 99, monto_original: "100.00" })]
+    );
+
+    await refrescarRubros(p.queryClient, CRED);
 
     expect(
       p.queryClient.getQueryData<RubroCredito[]>([QK_RUBROS, 99])![0]!.monto_original

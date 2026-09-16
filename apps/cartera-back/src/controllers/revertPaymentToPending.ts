@@ -487,6 +487,23 @@ export function createRevertPaymentToPending(
       });
     }
 
+    // El rechazo por abono a capital sale con SU status y SU texto.
+    //
+    // El mapeo de abajo decide por el MENSAJE, y sólo conoce los dos literales
+    // históricos: un mensaje nuevo cae en el `else` y sale 500. O sea que el
+    // rechazo —que es un choque de negocio previsto, con instrucciones para el
+    // operador— se reportaba como caída del servidor, y cualquier alerta o
+    // reintento cableado a 5xx lo trataba como tal. Se decide por el TIPO del
+    // error y no por su texto, que es lo que no se rompe la próxima vez que
+    // alguien reescriba un mensaje.
+    if (
+      error instanceof RevertPaymentCreditRejection &&
+      error.reasonCode === "capital_no_soportado"
+    ) {
+      set.status = 409;
+      return { success: false, message: error.message };
+    }
+
     if (error.message === "Payment not found") {
       set.status = 404;
     } else if (error.message === "Credit not found or not active") {

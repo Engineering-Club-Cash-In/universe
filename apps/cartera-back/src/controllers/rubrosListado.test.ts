@@ -112,7 +112,8 @@ describe("listarRubrosDeCredito — el `abonado` es lo que el cliente PAGÓ", ()
           activo: false,
         }),
       ],
-      [{ rubro_id: 7, abonado: "400.00" }]
+      [{ rubro_id: 7, abonado: "400.00" }],
+      [{ rubro_id: 7, abonado: "400.00", reversas: 0 }]
     );
 
     const [rubro] = await listarRubrosDeCredito(9);
@@ -157,20 +158,113 @@ describe("listarRubrosDeCredito — el `abonado` es lo que el cliente PAGÓ", ()
     expect(rubro.abonado).toBe("400.00");
   });
 
-  it("un rubro ANULADO sin reclamos reporta 0.00, no su monto entero", async () => {
+  it("un rubro ANULADO sin reclamos ni historial reporta 0.00, no su monto entero", async () => {
     // Acá la resta NO sirve como red: anular fuerza el saldo a 0, así que
     // daría el monto completo — el defecto original, que decía que el cliente
-    // pagó todo. Si hubo cobros, sus reclamos existen y el agregado los suma;
-    // si no hay reclamos, no hubo nada que cobrar.
+    // pagó todo. Sin reclamos y sin ningún evento de abono en el historial, no
+    // hubo nada que cobrar y 0.00 es la respuesta.
     dbImpl = motorConCola(
       EXISTE_EL_CREDITO,
       [fila({ monto_original: "1000.00", saldo_pendiente: "0.00", anulado: true })],
+      [],
       []
     );
 
     const [rubro] = await listarRubrosDeCredito(9);
 
     expect(rubro.abonado).toBe("0.00");
+  });
+
+  it("un rubro ANULADO al que una limpieza le borró el pago recupera el abono del historial", async () => {
+    // El hueco que la suma sola no puede tapar en un rubro anulado.
+    //
+    // Secuencia: rubro de Q1,000 → boleta cobra Q400 y contabilidad la aplica
+    // (saldo 600) → un ADMIN lo anula (saldo forzado a 0) → después corre
+    // `/recalculate` (o la carga por Excel, o `marcarCreditoComoCaido`) y borra
+    // el `pagos_credito`. El FK de `rubros_pagos` es ON DELETE CASCADE, así que
+    // el reclamo desaparece y la suma queda en 0. La resta tampoco sirve: anular
+    // ya había puesto el saldo en 0, así que daría el monto entero.
+    //
+    // Lo que SÍ sobrevive es `rubros_historial`: su `pago_id` es ON DELETE SET
+    // NULL, así que la fila queda con el pago en null pero conserva el par
+    // `saldo_anterior`/`saldo_nuevo` del evento `abono` — 1000 → 600. Esa
+    // diferencia es la evidencia de los Q400 que el cliente pagó y que además
+    // se facturaron.
+    dbImpl = motorConCola(
+      EXISTE_EL_CREDITO,
+      [
+        fila({
+          monto_original: "1000.00",
+          saldo_pendiente: "0.00",
+          anulado: true,
+          completado: true,
+          activo: false,
+        }),
+      ],
+      [],
+      [{ rubro_id: 7, abonado: "400.00", reversas: 0 }]
+    );
+
+    const [rubro] = await listarRubrosDeCredito(9);
+
+    expect(rubro.abonado).toBe("400.00");
+  });
+
+  it("un rubro ANULADO cuyo pago se REVIRTIÓ no resucita el abono desde el historial", async () => {
+    // El caso que obliga a mirar `reversas` y no sólo sumar los abonos.
+    //
+    // Revertir un pago sobre un rubro ANULADO borra el reclamo pero NO
+    // restituye el saldo, a propósito: restituirlo reviviría un cargo que ya se
+    // canceló. Por eso el evento `reversa` que queda en el historial tiene
+    // `saldo_anterior == saldo_nuevo`, o sea diferencia CERO — el historial
+    // registra que hubo una reversa, pero no cuánta plata volvió.
+    //
+    // Sumar los abonos a ciegas diría Q400 sobre una boleta anulada, que es
+    // plata que el cliente no puso. Con una reversa en el historial la suma deja
+    // de ser confiable y manda el reclamo: si no queda ninguno, es 0.00.
+    dbImpl = motorConCola(
+      EXISTE_EL_CREDITO,
+      [
+        fila({
+          monto_original: "1000.00",
+          saldo_pendiente: "0.00",
+          anulado: true,
+          completado: true,
+          activo: false,
+        }),
+      ],
+      [],
+      [{ rubro_id: 7, abonado: "400.00", reversas: 1 }]
+    );
+
+    const [rubro] = await listarRubrosDeCredito(9);
+
+    expect(rubro.abonado).toBe("0.00");
+  });
+
+  it("un rubro ANULADO con un reclamo vivo y otro borrado toma el mayor", async () => {
+    // Dos boletas: una sigue viva (Q200, su reclamo está) y a la otra le
+    // borraron el pago en cascada (Q400, su reclamo ya no está). La suma sola
+    // diría Q200; el historial conserva los dos eventos de abono y suma Q600,
+    // que es lo que el cliente realmente puso.
+    dbImpl = motorConCola(
+      EXISTE_EL_CREDITO,
+      [
+        fila({
+          monto_original: "1000.00",
+          saldo_pendiente: "0.00",
+          anulado: true,
+          completado: true,
+          activo: false,
+        }),
+      ],
+      [{ rubro_id: 7, abonado: "200.00" }],
+      [{ rubro_id: 7, abonado: "600.00", reversas: 0 }]
+    );
+
+    const [rubro] = await listarRubrosDeCredito(9);
+
+    expect(rubro.abonado).toBe("600.00");
   });
 
   it("con un reclamo borrado en cascada y otro vivo, toma el mayor de los dos", async () => {

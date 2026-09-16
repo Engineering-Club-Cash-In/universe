@@ -441,6 +441,75 @@ async function abonosAplicadosDeRubros(
 }
 
 /**
+ * Lo abonado SEGÚN EL HISTORIAL — la última evidencia que queda cuando ya no
+ * hay ni reclamo ni saldo que restar.
+ *
+ * Existe por un caso puntual y feo: un rubro ANULADO al que después le borraron
+ * el pago. Ahí las dos fuentes normales fallan a la vez. El reclamo se fue con
+ * el pago (`rubros_pagos.pago_id` es ON DELETE CASCADE, y `/recalculate`, la
+ * carga por Excel, la reducción de plazo y `marcarCreditoComoCaido` borran
+ * `pagos_credito` sin pasar por `revertirRubrosDelPago`), así que la suma da 0;
+ * y la resta `monto − saldo` tampoco sirve porque anular ya había forzado el
+ * saldo a 0, así que daría el monto ENTERO. La ficha terminaba diciendo que el
+ * cliente no pagó nada sobre plata que sí pagó y que además se facturó.
+ *
+ * `rubros_historial` sobrevive a eso: su `pago_id` es ON DELETE SET NULL, así
+ * que la fila queda huérfana del pago pero conserva el par
+ * `saldo_anterior`/`saldo_nuevo` de cada evento `abono`. La suma de esas
+ * diferencias es cuánto bajó el saldo por cobros, que es exactamente lo abonado.
+ *
+ * Por eso también se cuentan las REVERSAS, y no es un detalle: revertir un pago
+ * sobre un rubro anulado borra el reclamo pero NO restituye el saldo —a
+ * propósito, restituirlo reviviría un cargo ya cancelado—, así que su evento
+ * queda con `saldo_anterior == saldo_nuevo`, o sea diferencia cero. El historial
+ * registra QUE hubo una reversa, pero no CUÁNTO volvió. Sumar los abonos a
+ * ciegas ahí diría que el cliente pagó Q400 sobre una boleta anulada.
+ *
+ * El conteo NO distingue qué clase de reversa fue, y es a propósito: cuenta
+ * también la del rubro que todavía no estaba anulado (donde el saldo sí se
+ * restituyó) y la de `desaplicarRubrosDelPago` —el "Revertir Especial", que
+ * devuelve el pago a PENDIENTE y estampa `reversa` con el mismo evento porque
+ * el enum de la base no tiene uno propio—. O sea que una boleta que va y viene
+ * de pendiente apaga esta red para ese rubro de por vida.
+ *
+ * Se elige así porque los dos errores no cuestan lo mismo: apagarla de más deja
+ * el `abonado` en lo que ya reportaba antes —corto, nunca menos que eso—,
+ * mientras encenderla de más inventaría un cobro que el cliente no hizo. Entre
+ * quedarse corto y mentir sobre plata cobrada, corto.
+ */
+async function abonosSegunHistorial(
+  rubroIds: number[],
+  ejecutor: Ejecutor = db
+): Promise<Map<number, { abonado: string; huboReversa: boolean }>> {
+  const porRubro = new Map<number, { abonado: string; huboReversa: boolean }>();
+  if (rubroIds.length === 0) return porRubro;
+
+  const filas = await ejecutor
+    .select({
+      rubro_id: rubros_historial.rubro_id,
+      abonado: sql<string>`COALESCE(SUM(${rubros_historial.saldo_anterior} - ${rubros_historial.saldo_nuevo}) FILTER (WHERE ${rubros_historial.tipo_evento} = 'abono'), 0)`,
+      reversas: sql<string>`COUNT(*) FILTER (WHERE ${rubros_historial.tipo_evento} = 'reversa')`,
+    })
+    .from(rubros_historial)
+    .where(inArray(rubros_historial.rubro_id, rubroIds))
+    .groupBy(rubros_historial.rubro_id);
+
+  for (const fila of filas) {
+    porRubro.set(fila.rubro_id, {
+      abonado: fila.abonado ?? "0",
+      // `COUNT` viaja como STRING: es `bigint` y el driver no lo convierte.
+      // `"0" > 0` da false igual, porque el operador relacional castea el
+      // string a número, así que el `Number()` no arregla un bug — lo hace
+      // explícito. Se queda porque de lo contrario el lector tiene que saberse
+      // de memoria que `>` castea pero `Boolean("0")` es true, y esa asimetría
+      // es justo donde se cuela un `if (fila.reversas)` en el próximo cambio.
+      huboReversa: Number(fila.reversas ?? 0) > 0,
+    });
+  }
+  return porRubro;
+}
+
+/**
  * TODOS los rubros del crédito, activos e inactivos: la ficha muestra también
  * los ya completados, que son parte del historial de cobro del cliente — y la
  * única explicación de por qué se puede volver a crear un rubro del mismo tipo.
@@ -453,8 +522,12 @@ async function abonosAplicadosDeRubros(
  * a "abonado Q0.00" con el caso especial que la rama de `anulado` le hacía—: las
  * dos respuestas borran los Q400 que el cliente sí pagó, y la pantalla de
  * confirmación de anular los muestra un segundo antes de que la tabla los
- * desaparezca. Sumar lo aplicado responde la única pregunta que importa —cuánto
- * puso el cliente— y por eso ya no hace falta bifurcar por `anulado`.
+ * desaparezca. Sumar lo aplicado responde la única pregunta que importa: cuánto
+ * puso el cliente.
+ *
+ * Los reclamos no siempre sobreviven, así que la suma tiene dos redes según el
+ * rubro esté vivo o anulado —la resta `monto − saldo` para uno, el historial
+ * para el otro—. El porqué de cada una está donde se calcula el `abonado`.
  *
  * Se convierte con `Big` (vía `aMonto`) y no se devuelve el string crudo del
  * SUM para que salga con la misma escala que los demás montos de la fila.
@@ -483,18 +556,26 @@ export async function listarRubrosDeCredito(credito_id: number) {
     .where(eq(rubros.credito_id, credito_id))
     .orderBy(desc(rubros.created_at));
 
-  // Las TRES lecturas bajo la MISMA instantánea: `abonado` sale de una consulta
+  // TODAS las lecturas bajo la MISMA instantánea: `abonado` sale de una consulta
   // y `saldo_pendiente` de otra, así que sin esto un `/aplicar-pago` que caiga
   // entre las dos deja la ficha con monto, abonado y saldo que no cierran entre
   // sí — justo lo que este `abonado` vino a evitar.
   //
   // El `isolationLevel` NO es decorativo: la base corre en READ COMMITTED, donde
   // cada sentencia toma una instantánea nueva, así que un `db.transaction` pelado
-  // no compra nada acá. `repeatable read` es lo que congela las tres lecturas en
-  // el mismo instante, y `read only` le dice a Postgres que no hay nada que
-  // versionar. Es el mismo idioma que usa `reportes.ts`.
+  // no compra nada acá. `repeatable read` es lo que las congela en el mismo
+  // instante, y `read only` le dice a Postgres que no hay nada que versionar. Es
+  // el mismo idioma que usa `reportes.ts`.
   const abonados = await abonosAplicadosDeRubros(
     filas.map(({ rubro }) => rubro.rubro_id),
+    tx
+  );
+
+  // El historial se consulta SÓLO si hay algún rubro anulado: es la única rama
+  // que puede necesitarlo, y así la ficha normal —que es el caso de siempre—
+  // sigue costando las mismas tres consultas de antes.
+  const porHistorial = await abonosSegunHistorial(
+    filas.filter(({ rubro }) => rubro.anulado).map(({ rubro }) => rubro.rubro_id),
     tx
   );
 
@@ -522,17 +603,33 @@ export async function listarRubrosDeCredito(credito_id: number) {
      * `puedeEditarMonto` para decidir hasta dónde se puede bajar el monto, así
      * que la pantalla deja de contradecir al 409 que recibiría el admin.
      *
-     * La red NO aplica a los rubros ANULADOS, y esto es lo sutil: anular fuerza
-     * `saldo_pendiente` a 0, así que la resta da SIEMPRE el monto entero. Un
-     * rubro anulado sin reclamos reportaría haber cobrado todo, que es
-     * exactamente el defecto que la suma vino a arreglar. Para ellos el 0 es la
-     * respuesta correcta: si hubo cobros, sus reclamos están ahí y la suma los
-     * encuentra; si no hay reclamos, no hubo nada que cobrar.
+     * La red de la RESTA no aplica a los rubros ANULADOS, y esto es lo sutil:
+     * anular fuerza `saldo_pendiente` a 0, así que la resta da SIEMPRE el monto
+     * entero. Un rubro anulado sin reclamos reportaría haber cobrado todo, que
+     * es exactamente el defecto que la suma vino a arreglar.
+     *
+     * Pero "entonces para ellos vale 0" tampoco era cierto, y ese es el hueco
+     * que tapa `abonosSegunHistorial`: un rubro anulado al que DESPUÉS le
+     * borraron el pago se queda sin reclamo y sin saldo que restar, y la ficha
+     * decía Q0.00 sobre plata cobrada y facturada. Ahí manda el historial, que
+     * es la única fuente que sobrevive al borrado — salvo que haya habido una
+     * reversa, porque sobre un rubro anulado la reversa no mueve el saldo y el
+     * historial no puede decir cuánto volvió. Ver el docblock de esa función.
      */
     const sumado = abonados.get(rubro.rubro_id);
     let abonado: string;
     if (rubro.anulado) {
-      abonado = aMonto(sumado ?? 0);
+      const historial = porHistorial.get(rubro.rubro_id);
+      const delHistorial =
+        historial && !historial.huboReversa
+          ? new Big(historial.abonado)
+          : new Big(0);
+      const porSuma = new Big(sumado ?? 0);
+      // El MAYOR, por la misma razón que abajo: una limpieza puede llevarse UN
+      // reclamo y dejar otro, y ahí la suma se queda corta mientras el
+      // historial conserva los dos eventos.
+      const mayor = delHistorial.gt(porSuma) ? delHistorial : porSuma;
+      abonado = aMonto(mayor.gt(0) ? mayor : 0);
     } else {
       // El MAYOR de los dos, no uno u otro. La red no es todo-o-nada: la
       // reducción de plazo borra sólo los pagos de las cuotas que caen fuera

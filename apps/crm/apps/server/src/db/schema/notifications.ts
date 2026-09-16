@@ -76,6 +76,10 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// 08): incumplir un convenio ya negociado es una señal de escalamiento, no
 	// solo una tarea más del asesor.
 	"convenio_incumplido",
+	// COBROS-02 Fase 1.b: un cliente escribió en el bot de WhatsApp. Va SOLO al
+	// asesor dueño del crédito (decisión 16 del plan 08) y se deduplica por
+	// referencia de conversación (`sesion_id`), no por mensaje ni por día.
+	"bot_cliente_escribio",
 ]);
 
 // Notifications table

@@ -30,6 +30,7 @@ import { db } from "../../db";
 import { botCobrosInteracciones } from "../../db/schema/bot-cobros-interacciones";
 import { coDebtors, opportunities } from "../../db/schema/crm";
 import { otps } from "../../db/schema/otp";
+import { avisarAsesorPorInteraccionBot } from "../../services/aviso-bot-asesor";
 
 /**
  * Lo montado bajo `/api/bot/cobros/` que NO es una interacción del cliente.
@@ -410,6 +411,21 @@ export async function persistirInteraccion(
 		numeroSifco: interaccion.numeroSifco,
 		detalle: interaccion.detalle,
 		creadoEn: registradaEn,
+	});
+
+	// COBROS-02 Fase 1.b — avisarle al asesor que su cliente escribió. Va acá y
+	// no en el middleware porque acá ya está resuelta la sesión (`otpId`), que
+	// es la llave por la que se deduplica: una alerta por CONVERSACIÓN.
+	//
+	// Con `await` pero sin poder fallar: esta función corre en background (el
+	// middleware la lanza sin esperarla) y el aviso ya se traga sus propios
+	// errores, así que esperar no le cuesta nada al bot y mantiene el orden
+	// —fila de historial primero, aviso después— si algún día alguien la llama
+	// desde otro lado.
+	await avisarAsesorPorInteraccionBot({
+		sesionId: otpId,
+		numeroSifco: interaccion.numeroSifco,
+		accion: interaccion.accion,
 	});
 }
 

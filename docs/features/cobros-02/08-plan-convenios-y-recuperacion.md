@@ -188,7 +188,7 @@ envío → `cobros_send_logs`) sin escribirle a nadie real. Para el envío de ve
 falta dos cosas más, y las dos son **decisión de negocio**: `CONVENIO_WHATSAPP_ENABLED=true`
 en el ambiente y apagar el modo prueba.
 
-### Fase 1.b · Aviso cuando el cliente escribe en el bot
+### Fase 1.b · Aviso cuando el cliente escribe en el bot ✅ implementada
 
 Sale del criterio 1 del ticket (*"si escriben por WhatsApp… el asesor asignado debe
 responder"*) y **no existe nada**: el bot atiende al cliente, deja su historial en la Ficha
@@ -214,6 +214,24 @@ crédito de cartera → `asesor_id` → `email_cash_in` → usuario del CRM.
 
 Los `acceso_fallido` quedan fuera solos: no tienen sesión (D-43) ni identidad resuelta, así
 que no hay asesor a quién avisarle.
+
+#### Cómo quedó
+
+- Tipo `bot_cliente_escribio` en `cobros_notif_tipo` (migración **0055**). No hizo falta
+  nada más: reusa la `cobros_dedup_key` de la 0054 con `bot:sesion:<uuid>`.
+- `services/aviso-bot-asesor.ts`, colgado del final de `persistirInteraccion` —no del
+  middleware— porque ahí ya está resuelta la sesión, que es la llave de la dedup.
+- **Corte barato primero**: antes de tocar cartera se consulta si esta conversación ya
+  avisó. Es el caso común (una conversación son varias peticiones) y evita un HTTP por
+  cada pantalla que el cliente abre. No sustituye al índice único —dos peticiones
+  simultáneas pasan el `SELECT`—, solo evita el trabajo.
+- El dueño del crédito se lee de cartera **sin cache** (`getCredito(sifco, false, false)`):
+  el motor pudo reasignarlo anoche y el aviso tiene que llegarle a quien lo lleva hoy. El
+  `useCircuitBreaker=false` es porque esto es best-effort y no debe compartir contador de
+  fallos con las operaciones que sí importan.
+- El texto dice **qué vino a hacer** (`pidió su estado de cuenta`, `subió una boleta`…),
+  que es lo que le dice al asesor si puede esperar o no. Una acción futura del bot sin
+  texto propio avisa igual, con uno genérico — misma filosofía que D-41.
 
 ### Fase 2 · Congelar el convenio — invierte la regla vieja
 

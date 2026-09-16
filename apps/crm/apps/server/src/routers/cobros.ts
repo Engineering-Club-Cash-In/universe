@@ -2667,7 +2667,15 @@ export const cobrosRouter = {
 				// la última que se ve de cada tipo es la más antigua.
 				if (r.createdAt < previa.desde) previa.desde = r.createdAt;
 			}
-			return [...porTipo.values()].slice(0, 10);
+			// El cliente esperando en modo agente va primero: es la única alerta
+			// con alguien del otro lado aguardando respuesta ahora mismo.
+			return [...porTipo.values()]
+				.sort(
+					(a, b) =>
+						Number(b.cobrosTipo === "bot_modo_agente") -
+						Number(a.cobrosTipo === "bot_modo_agente"),
+				)
+				.slice(0, 10);
 		}),
 
 	// LEGACY (tabla CRM `convenios_pago`, no cartera-back): nunca se llama desde

@@ -42,6 +42,7 @@ const notificationWithCreator = {
 	relatedEntityId: notifications.relatedEntityId,
 	redirectPage: notifications.redirectPage,
 	cobrosTipo: notifications.cobrosTipo,
+	notificacionOrigenId: notifications.notificacionOrigenId,
 	readAt: notifications.readAt,
 	resolvedAt: notifications.resolvedAt,
 	createdAt: notifications.createdAt,

@@ -112,6 +112,10 @@ describe("revertPaymentToPending observability contract", () => {
     expect(clasificarEstadoParaRevertir("capital_validated")).toBe(
       "capital_no_soportado"
     );
+    // Y el INTERMEDIO, que es el que de verdad aparece: un pago que ya cobró
+    // sus rubros y se quedó en `"capital"` porque el flujo falló en el medio.
+    // Cubrir sólo el sellado dejaba pasar justo al roto.
+    expect(clasificarEstadoParaRevertir("capital")).toBe("capital_no_soportado");
     // Los demás siguen igual: `pending` es el caso legítimo del early-return y
     // `validated` es el camino completo.
     expect(clasificarEstadoParaRevertir("pending")).toBeNull();

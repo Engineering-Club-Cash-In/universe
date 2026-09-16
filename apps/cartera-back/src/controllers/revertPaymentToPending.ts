@@ -61,7 +61,15 @@ export function classifyRevertPaymentCredit(
 export function clasificarEstadoParaRevertir(
   validationStatus: string | null | undefined
 ): "capital_no_soportado" | null {
-  return validationStatus === "capital_validated"
+  // Los DOS estados de la rama de capital, no sólo el sellado. `"capital"` es
+  // el intermedio: el pago ya cobró sus rubros y todavía no llegó a
+  // `capital_validated`, y ahí se queda si el flujo de capital falla en el
+  // medio. Cubrir sólo el de llegada dejaba pasar justo al que produce el
+  // problema —el atascado— por el `pagoValidado` de más abajo, que reconoce
+  // únicamente `"validated"`: salía por el early-return de "el pago ya estaba
+  // pendiente" respondiendo éxito, sin desaplicar los rubros ni cambiar nada.
+  return validationStatus === "capital_validated" ||
+    validationStatus === "capital"
     ? "capital_no_soportado"
     : null;
 }

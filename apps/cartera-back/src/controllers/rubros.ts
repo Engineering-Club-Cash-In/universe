@@ -1856,6 +1856,48 @@ export async function cobrarRubrosParaBoleta({
  * cae —cuota sin cerrar, capital sin tocar, inversionistas sin repartir— y lo
  * descubre contabilidad días después.
  */
+/**
+ * `cobrarRubrosParaBoleta` con red: si revienta, la boleta sigue sin cobrar
+ * rubros en vez de caerse.
+ *
+ * Existe por una asimetría de consecuencias, no por prolijidad. Esta consulta
+ * corre en medio del reparto de TODA boleta de la empresa: sin red, cualquier
+ * fallo suyo —la migración todavía no corrió y `cartera.rubros` no existe, un
+ * corte de conexión, un bug del módulo— tumba el pago entero. O sea que un
+ * módulo NUEVO y OPCIONAL podía dejar a la financiera sin poder cobrar nada.
+ *
+ * Los dos errores no cuestan lo mismo:
+ *
+ *   * fallar → nadie puede registrar pagos hasta que alguien lo note;
+ *   * seguir sin cobrar → ese cargo adicional queda pendiente y lo toma la
+ *     próxima boleta. No se pierde plata: el `saldo_pendiente` del rubro no se
+ *     toca, y el `total` en cero deja el disponible de la boleta intacto, así
+ *     que las cuotas reciben exactamente lo que habrían recibido sin el módulo.
+ *
+ * Es la misma red que `getCreditoByNumero` ya se puso alrededor de su lectura de
+ * rubros y por la misma razón. Que el motor de pagos —que es más crítico— no la
+ * tuviera era una asimetría, no una decisión.
+ *
+ * El `console.error` no es decorativo: tragarse el error es aceptable sólo si
+ * queda ruidoso en los logs. Un módulo que deja de cobrar en silencio es peor
+ * que uno que falla.
+ */
+export async function cobroRubrosSeguro(args: {
+  credito_id: number;
+  disponible: Big | string | number;
+  ejecutor?: Ejecutor;
+}): Promise<{ cobros: { rubro_id: number; monto: string }[]; total: Big }> {
+  try {
+    return await cobrarRubrosParaBoleta(args);
+  } catch (error) {
+    console.error(
+      `[cobroRubrosSeguro] El cobro de rubros del crédito ${args.credito_id} falló; la boleta sigue SIN cobrarlos:`,
+      error
+    );
+    return { cobros: [], total: new Big(0) };
+  }
+}
+
 export async function registrarReclamosDeRubros(
   pago_id: number,
   cobros: { rubro_id: number; monto: string }[],

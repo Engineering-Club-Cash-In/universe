@@ -26,8 +26,12 @@ import { describe, expect, it } from "bun:test";
 // se abre ninguna conexión.
 process.env.SUPABASE_DB_URL ??= "postgresql://127.0.0.1:1/synthetic";
 
-const { registrarReclamosDeRubros, desaplicarRubrosDelPago, RubroError } =
-  await import("./rubros");
+const {
+  registrarReclamosDeRubros,
+  desaplicarRubrosDelPago,
+  cobroRubrosSeguro,
+  RubroError,
+} = await import("./rubros");
 
 /**
  * Ejecutor falso manejado por una COLA: cada `await` de una consulta drizzle
@@ -272,5 +276,68 @@ describe("desaplicarRubrosDelPago — el pago vuelve a PENDIENTE pero sigue vivo
     const ej = cola([]);
     expect(await desaplicarRubrosDelPago(30, ej)).toEqual([]);
     expect(ej.escrituras).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `cobroRubrosSeguro` — la red entre el motor de pagos y los rubros.
+//
+// `insertPayment` llama al cobro de rubros en medio del reparto de TODA boleta
+// de la empresa, y lo hacía sin red: cualquier fallo de esa consulta —la tabla
+// todavía no existe porque la migración no corrió, un blip de conexión— tumbaba
+// el pago entero. O sea que un módulo nuevo y opcional podía dejar a la
+// financiera sin poder cobrar NADA.
+//
+// La decisión es asimétrica a propósito, porque las consecuencias lo son: fallar
+// deja a la empresa sin cobranza; seguir sin cobrar el rubro deja ese cargo
+// pendiente para la próxima boleta, sin tocarle el saldo a nadie. Es la misma
+// red que `getCreditoByNumero` ya se puso por la misma razón.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("cobroRubrosSeguro", () => {
+  const ejecutorQueRevienta = (mensaje: string) =>
+    ({
+      select: () => {
+        throw Object.assign(new Error(mensaje), { code: "42P01" });
+      },
+    }) as any;
+
+  it("si la consulta revienta, devuelve cobro vacío en vez de tumbar el pago", async () => {
+    const r = await cobroRubrosSeguro({
+      credito_id: 9,
+      disponible: "1000",
+      ejecutor: ejecutorQueRevienta('relation "cartera.rubros" does not exist'),
+    });
+
+    expect(r.cobros).toEqual([]);
+    expect(r.total.toFixed(2)).toBe("0.00");
+  });
+
+  it("el disponible de la boleta queda INTACTO cuando el cobro falla", async () => {
+    // Lo que de verdad importa: si el total no fuera cero, el motor restaría de
+    // `disponible_restante` una plata que nunca se cobró y las cuotas
+    // recibirían de menos.
+    const r = await cobroRubrosSeguro({
+      credito_id: 9,
+      disponible: "1000",
+      ejecutor: ejecutorQueRevienta("connection terminated"),
+    });
+
+    expect(r.total.toFixed(2)).toBe("0.00");
+  });
+
+  it("cuando NO falla, deja pasar el cobro tal cual", async () => {
+    // La red no puede cambiar el camino feliz: mismo resultado que llamar
+    // directo a `cobrarRubrosParaBoleta`.
+    const r = await cobroRubrosSeguro({
+      credito_id: 9,
+      disponible: "500",
+      ejecutor: ejecutorConCola([
+        { rubro_id: 7, saldo_pendiente: "300.00", created_at: "2026-01-01" },
+      ], []),
+    });
+
+    expect(r.total.toFixed(2)).toBe("300.00");
+    expect(r.cobros).toEqual([{ rubro_id: 7, monto: "300.00" }]);
   });
 });

@@ -177,6 +177,13 @@ describe("revalidatePayment", () => {
       [pagoCompletoPendiente],
       [credito],
       [], // no hay hermanos vivos en la cuota
+        // `aplicarRubrosDelPago` empieza comprobando que la boleta siga VIVA
+        // (no marcada como falsa) antes de mirar los reclamos: hay rutas que
+        // ponen `paymentFalse` en bloque sin tocar `rubros_pagos`, y sin ese
+        // chequeo se le cobraba al cliente por una boleta anulada. La cola es
+        // POSICIONAL, así que esa consulta tiene que estar acá o todo lo de
+        // abajo se corre un lugar y el rubro llega vacío.
+        [{ paymentFalse: false }],
       [{ id: 9, rubro_id: 4, monto: "400.00" }], // el reclamo apartado por el pago
       [
         {

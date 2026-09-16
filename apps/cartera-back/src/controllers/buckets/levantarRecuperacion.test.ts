@@ -153,6 +153,57 @@ describe("restaurarRecuperacionSiEstePagoLaLevanto", () => {
     expect(updates).toHaveLength(0);
   });
 
+  // Review de Codex, P1: comparar contra "el estado que acabo de leer" hacía que
+  // un régimen POSTERIOR y más específico —convenio, incobrable— se pisara con
+  // una decisión anterior.
+  it("NO pisa un régimen más nuevo: un convenio le gana a la recuperación", async () => {
+    const { ejecutor, updates } = ejecutorFalso({
+      status: "EN_CONVENIO",
+      levantadaPor: 777,
+    });
+    const r = await restaurarRecuperacionSiEstePagoLaLevanto(
+      1,
+      777,
+      ejecutor as never,
+    );
+    expect(r).toBe(false);
+    // La marca se limpia igual: ese pago ya no puede restaurar nada.
+    expect(updates).toEqual([{ recuperacion_levantada_pago_id: null }]);
+  });
+
+  it("tampoco pisa un INCOBRABLE (es un castigo contable posterior)", async () => {
+    const { ejecutor, updates } = ejecutorFalso({
+      status: "INCOBRABLE",
+      levantadaPor: 777,
+    });
+    const r = await restaurarRecuperacionSiEstePagoLaLevanto(
+      1,
+      777,
+      ejecutor as never,
+    );
+    expect(r).toBe(false);
+    expect(updates).toEqual([{ recuperacion_levantada_pago_id: null }]);
+  });
+
+  it("sí restaura sobre MOROSO: es donde lo dejó el motor tras el levantamiento", async () => {
+    const { ejecutor, updates } = ejecutorFalso({
+      status: "MOROSO",
+      levantadaPor: 777,
+    });
+    const r = await restaurarRecuperacionSiEstePagoLaLevanto(
+      1,
+      777,
+      ejecutor as never,
+    );
+    expect(r).toBe(true);
+    expect(updates).toEqual([
+      {
+        statusCredit: "EN_RECUPERACION",
+        recuperacion_levantada_pago_id: null,
+      },
+    ]);
+  });
+
   it("un crédito que nunca estuvo en recuperación no se toca", async () => {
     const { ejecutor, updates } = ejecutorFalso({
       status: "MOROSO",

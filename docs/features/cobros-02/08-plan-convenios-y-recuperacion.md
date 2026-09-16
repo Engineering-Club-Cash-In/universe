@@ -657,6 +657,22 @@ siempre.
   mismo criterio con el que la reversa des-completa un convenio y devuelve el crédito a
   `EN_CONVENIO`.
 
+#### Que el levantamiento sea de verdad reversible
+
+Tres cosas más de la segunda review, todas sobre la misma pieza:
+
+- **El `pago_id` también en `/revalidatePayment`.** El camino normal ya lo pasaba, ese no:
+  guardaba `NULL` y con eso la reversa no podía reconocer su propio pago. La provenance a
+  medias no sirve de nada.
+- **La restauración corre DENTRO de la transacción de la reversa.** Corriendo después del
+  commit —y el helper se traga sus errores— un fallo suyo dejaba la reversa financiera
+  firme y el crédito fuera de recuperación. Ahora se revierten o se comitean juntas.
+- **Solo reemplaza estados que la recuperación tiene derecho a reemplazar** (`ACTIVO`,
+  `MOROSO`). Comparar contra "el estado que acabo de leer" hacía que un `EN_CONVENIO` o un
+  `INCOBRABLE` —decisiones **posteriores** y más específicas— se pisaran con una anterior.
+  Si el estado ya no es reemplazable, la marca se limpia igual: ese pago no va a restaurar
+  nada y dejarla puesta haría que una reversa futura lo intentara de nuevo.
+
 #### El triaje de las listas de estados
 
 El plan hablaba de "~90 listas de estados escritas a mano en ~45 archivos". El criterio

@@ -27,6 +27,19 @@ import { contarCuotasVencidasReales, STATUS_EN_RECUPERACION } from "../latefee";
 
 type Ejecutor = Pick<typeof db, "select" | "update" | "execute">;
 
+/**
+ * Estados que la recuperación puede reemplazar al restaurarse.
+ *
+ * Son los que el levantamiento pudo haber dejado: `ACTIVO` (no debía nada) y
+ * `MOROSO` (el motor lo movió después). Cualquier otro —`EN_CONVENIO`,
+ * `INCOBRABLE`, una cancelación— es una decisión POSTERIOR a la recuperación y
+ * más específica que ella: restaurar encima sería deshacerla.
+ */
+const ESTADOS_QUE_LA_RECUPERACION_PUEDE_REEMPLAZAR = [
+  "ACTIVO",
+  "MOROSO",
+] as const;
+
 export type LevantamientoRecuperacion = {
   /** true si el crédito salió de EN_RECUPERACION en esta llamada. */
   levantado: boolean;
@@ -146,8 +159,29 @@ export async function restaurarRecuperacionSiEstePagoLaLevanto(
 
     if (!credito || credito.levantadaPor !== pago_id) return false;
 
-    // El UPDATE es condicional sobre el estado leído: si entre medio el crédito
-    // entró a un convenio o se canceló, ese régimen es más reciente y manda.
+    // La restauración solo puede reemplazar estados que la recuperación TIENE
+    // DERECHO a reemplazar (review de Codex, P1).
+    //
+    // Comparar contra "el estado que acabo de leer" no alcanzaba: si el crédito
+    // entró a un convenio o lo castigaron como incobrable después del
+    // levantamiento —los dos son estados que `reversePaymentPolicy` admite—,
+    // ese régimen es MÁS NUEVO que la recuperación y pisarlo sería deshacer una
+    // decisión posterior con una anterior. La lista blanca lo dice explícito en
+    // vez de depender de una comparación que casualmente coincidía.
+    if (!ESTADOS_QUE_LA_RECUPERACION_PUEDE_REEMPLAZAR.includes(
+      (credito.statusCredit ?? "") as (typeof ESTADOS_QUE_LA_RECUPERACION_PUEDE_REEMPLAZAR)[number],
+    )) {
+      // La marca se limpia igual: ese pago ya no puede restaurar nada, y
+      // dejarla puesta haría que una reversa futura lo intentara de nuevo.
+      await ejecutor
+        .update(creditos)
+        .set({ recuperacion_levantada_pago_id: null })
+        .where(eq(creditos.credito_id, credito_id));
+      return false;
+    }
+
+    // El UPDATE sigue siendo condicional sobre el estado leído, para que una
+    // transición que ocurra entre la lectura y la escritura tampoco se pise.
     await ejecutor
       .update(creditos)
       .set({

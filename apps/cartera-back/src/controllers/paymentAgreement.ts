@@ -463,6 +463,10 @@ export async function createPaymentAgreement(
         credito_id: credit_id,
         bucket: bucketAlFirmar,
         convenio_id: agreement.convenio_id,
+        // Acota la idempotencia a ESTE convenio: un crédito que ya tuvo uno
+        // antes conserva su fila vieja en la bitácora (append-only) y sin el
+        // corte nunca se volvía a congelar (review de Codex, P2).
+        desde: agreement.created_at ? new Date(agreement.created_at) : new Date(),
       });
       if (congelado !== null) {
         console.log(`🧊 Bucket congelado en B${congelado} por el convenio`);

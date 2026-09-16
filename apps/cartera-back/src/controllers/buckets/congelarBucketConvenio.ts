@@ -90,16 +90,33 @@ export async function bucketParaCongelarEnConvenio(
   return mesesAtrasados > 0 ? BUCKET_CONVENIO_ATRASADO : BUCKET_CONVENIO_AL_DIA;
 }
 
-/** ¿El crédito ya tiene una fila de bucket DE SU RÉGIMEN DE CONVENIO? */
+/**
+ * ¿El crédito ya tiene fila de bucket para el convenio VIGENTE?
+ *
+ * El corte por fecha no es cosmético (review de Codex, P2): preguntar por
+ * cualquier fila histórica con `status_credito = 'EN_CONVENIO'` da verdadero
+ * para siempre, porque la bitácora es append-only y esas filas nunca se borran.
+ * Un crédito que completó o rechazó un convenio y después firma otro quedaba
+ * así: el congelamiento del convenio NUEVO se saltaba —tanto al firmar como en
+ * la red de seguridad— y `bucketActualSql` seguía exponiendo el bucket del
+ * convenio VIEJO en vez del que tenía al firmar este.
+ *
+ * `desde` es el instante de creación del convenio vigente. Sin él se conserva el
+ * comportamiento viejo (cualquier fila del régimen), que es lo correcto para un
+ * caller que no sabe de qué convenio habla.
+ */
 export async function tieneBucketDeConvenio(
   credito_id: number,
   ejecutor: Ejecutor = db,
+  desde?: Date | null,
 ): Promise<boolean> {
+  const corte = desde ? sql`AND h.fecha >= ${desde}` : sql``;
   const res = await ejecutor.execute<{ existe: boolean }>(sql`
     SELECT EXISTS (
       SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.buckets_historial h
       WHERE h.credito_id = ${credito_id}
         AND h.status_credito = 'EN_CONVENIO'
+        ${corte}
     ) AS existe
   `);
   return Boolean(res.rows?.[0]?.existe);
@@ -121,11 +138,18 @@ export async function congelarBucketPorConvenio(params: {
   bucket: number;
   convenio_id?: number;
   motivo?: string;
+  /**
+   * Creación del convenio vigente. Acota la idempotencia a ESE convenio: sin
+   * esto, un crédito que ya tuvo uno antes nunca se vuelve a congelar (ver
+   * `tieneBucketDeConvenio`).
+   */
+  desde?: Date | null;
   ejecutor?: Pick<typeof db, "execute">;
 }): Promise<number | null> {
   const ejecutor = params.ejecutor ?? db;
   try {
-    if (await tieneBucketDeConvenio(params.credito_id, ejecutor)) return null;
+    if (await tieneBucketDeConvenio(params.credito_id, ejecutor, params.desde))
+      return null;
 
     const motivo =
       params.motivo ??

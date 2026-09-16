@@ -1,4 +1,4 @@
-import { client } from "../database";
+import { client, db } from "../database";
 import { BUCKETS_CONVENIO_LOCK_KEY } from "../lib/buckets-job-locks";
 import { medirAtrasoDeConvenios } from "./buckets/atrasoConvenio";
 import {
@@ -93,7 +93,7 @@ export async function procesarBucketsConvenio(): Promise<BucketsConvenioResultad
     // El catálogo de buckets ya no hace falta: el bucket no se deriva de rangos
     // de cuotas, lo congela el convenio. Por lo mismo desapareció el guard de
     // "catálogo inconsistente" — no hay nada que este job pueda clasificar mal.
-    const { creditoIds, mesesAtrasados, mesesUnion } =
+    const { creditoIds, mesesAtrasados, mesesUnion, convenioDesde } =
       await medirAtrasoDeConvenios();
 
     if (creditoIds.length === 0) {
@@ -108,12 +108,17 @@ export async function procesarBucketsConvenio(): Promise<BucketsConvenioResultad
     // corrida completa.
     let congelados = 0;
     for (const creditoId of creditoIds) {
-      if (await tieneBucketDeConvenio(creditoId)) continue;
+      // El corte por fecha acota la pregunta al convenio VIGENTE: la bitácora
+      // es append-only, así que la fila de un convenio anterior haría creer
+      // para siempre que este ya está congelado (review de Codex, P2).
+      const desde = convenioDesde.get(creditoId) ?? null;
+      if (await tieneBucketDeConvenio(creditoId, db, desde)) continue;
       const meses = mesesAtrasados.get(creditoId) ?? 0;
       const bucket = await bucketParaCongelarEnConvenio(creditoId, meses);
       const resultado = await congelarBucketPorConvenio({
         credito_id: creditoId,
         bucket,
+        desde,
         motivo: `Convenio: congelado en B${bucket} por el vigilante (sin bucket de su régimen)`,
       });
       if (resultado !== null) congelados++;

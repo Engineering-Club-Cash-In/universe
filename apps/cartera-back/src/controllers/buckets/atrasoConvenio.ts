@@ -130,6 +130,12 @@ export async function medirAtrasoDeConvenios(
   creditoIds: number[];
   mesesAtrasados: Map<number, number>;
   mesesUnion: Map<number, number>;
+  /**
+   * Cuándo se creó el convenio VIGENTE de cada crédito. Lo usa el vigilante
+   * para acotar el congelamiento a ese convenio y no a cualquiera que el
+   * crédito haya tenido antes (review de Codex, P2).
+   */
+  convenioDesde: Map<number, Date | null>;
 }> {
   const hoy = opciones.hoy ?? hoyGT();
   const criterio = opciones.criterio ?? "convenio";
@@ -159,14 +165,16 @@ export async function medirAtrasoDeConvenios(
   const creditoIds = [...new Set(cuotas.map((c) => c.credito_id))];
   const mesesAtrasados = new Map<number, number>();
   const mesesUnion = new Map<number, number>();
+  const convenioDesde = new Map<number, Date | null>();
   if (creditoIds.length === 0)
-    return { creditoIds, mesesAtrasados, mesesUnion };
+    return { creditoIds, mesesAtrasados, mesesUnion, convenioDesde };
 
   // 2. Cuotas del crédito que el convenio absorbió (snapshot al crear).
   const convenios = await db
     .select({
       credito_id: convenios_pago.credito_id,
       cuotas_convenio: convenios_pago.cuotas_convenio,
+      created_at: convenios_pago.created_at,
     })
     .from(convenios_pago)
     .where(
@@ -178,6 +186,13 @@ export async function medirAtrasoDeConvenios(
     );
   const excluidas = new Map<number, Set<number>>();
   for (const cv of convenios) {
+    // El más reciente gana: si un crédito tuviera dos vigentes (no debería), el
+    // congelamiento se acota al último, que es el que manda.
+    const previo = convenioDesde.get(cv.credito_id) ?? null;
+    const nacido = cv.created_at ? new Date(cv.created_at) : null;
+    if (!previo || (nacido && nacido > previo)) {
+      convenioDesde.set(cv.credito_id, nacido);
+    }
     if (!cv.cuotas_convenio || cv.cuotas_convenio.length === 0) continue;
     const set = excluidas.get(cv.credito_id) ?? new Set<number>();
     for (const cid of cv.cuotas_convenio) set.add(cid);
@@ -258,5 +273,5 @@ export async function medirAtrasoDeConvenios(
         : (fechasConvenio.get(id)?.size ?? 0),
     );
   }
-  return { creditoIds, mesesAtrasados, mesesUnion };
+  return { creditoIds, mesesAtrasados, mesesUnion, convenioDesde };
 }

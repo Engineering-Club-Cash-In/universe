@@ -314,6 +314,18 @@ una bandera y el vigilante loguea **las dos** medidas cada noche.
 > su convenio pero no su cuota normal del mes"*. Hoy nadie está mirando ese dato, y
 > decidir si eso es incumplir el convenio o no es de negocio, no de código.
 
+#### La idempotencia se acota al convenio VIGENTE
+
+`buckets_historial` es append-only: las filas de un convenio viejo **nunca se borran**.
+Preguntar *"¿tiene alguna fila con `status_credito = 'EN_CONVENIO'`?"* daba verdadero para
+siempre, así que un crédito que completó o rechazó un convenio y después firma **otro** se
+quedaba sin congelar — ni al firmar ni en la red de seguridad — y el lector seguía
+exponiendo el bucket del convenio anterior.
+
+La comprobación lleva ahora un corte por la fecha de creación del convenio vigente. Sin
+ese parámetro conserva el comportamiento viejo, que es lo correcto para un caller que no
+sabe de qué convenio habla.
+
 #### La trampa de Drizzle que se pagó acá
 
 La medición vivía copiada en el job y en el script. En la copia del script la subconsulta

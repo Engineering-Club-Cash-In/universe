@@ -23,12 +23,16 @@ function ejecutorFalso(respuestas: Fila[][], registro?: string[]) {
   return {
     execute: async (consulta: unknown) => {
       if (registro) {
-        const chunks = (consulta as { queryChunks?: unknown[] })?.queryChunks;
-        registro.push(
-          (chunks ?? [])
-            .map((c) => (c as { value?: unknown[] })?.value?.join?.("") ?? "")
-            .join(" "),
-        );
+        // Aplana en PROFUNDIDAD: un fragmento `sql` anidado (el corte por
+        // fecha) viaja como otro objeto con sus propios queryChunks, así que
+        // leer solo el primer nivel lo perdía.
+        const aplanar = (nodo: unknown): string => {
+          const chunks = (nodo as { queryChunks?: unknown[] })?.queryChunks;
+          if (Array.isArray(chunks)) return chunks.map(aplanar).join("");
+          const valor = (nodo as { value?: unknown[] })?.value;
+          return Array.isArray(valor) ? valor.join("") : "";
+        };
+        registro.push(aplanar(consulta));
       }
       const rows = respuestas[i] ?? [];
       i++;
@@ -72,6 +76,22 @@ describe("tieneBucketDeConvenio", () => {
   it("es false cuando no la hay", async () => {
     const ej = ejecutorFalso([[{ existe: false }]]);
     expect(await tieneBucketDeConvenio(1, ej as never)).toBe(false);
+  });
+
+  // Review de Codex, P2: la bitácora es append-only, así que la fila de un
+  // convenio ANTERIOR haría creer para siempre que el nuevo ya está congelado.
+  it("con `desde`, la pregunta se acota al convenio vigente", async () => {
+    const sentencias: string[] = [];
+    const ej = ejecutorFalso([[{ existe: false }]], sentencias);
+    await tieneBucketDeConvenio(1, ej as never, new Date("2026-09-01T00:00:00Z"));
+    expect(sentencias[0]).toContain("h.fecha >=");
+  });
+
+  it("sin `desde` conserva el comportamiento viejo (cualquier fila)", async () => {
+    const sentencias: string[] = [];
+    const ej = ejecutorFalso([[{ existe: false }]], sentencias);
+    await tieneBucketDeConvenio(1, ej as never);
+    expect(sentencias[0]).not.toContain("h.fecha >=");
   });
 });
 

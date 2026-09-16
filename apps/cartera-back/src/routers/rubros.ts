@@ -104,6 +104,11 @@ export const rubrosRouter = new Elysia({ prefix: "/rubros" })
   // contrato acordado con el front dice 400 para "body malformado". Sólo se
   // traduce ese caso: el resto de errores (401 del middleware de sesión, 500)
   // caen al manejador por defecto tal como en los demás routers.
+  //
+  // Esto sólo alcanza a correr porque `validationErrorMiddleware` —que se
+  // registra antes y responde 422 a toda validación— se aparta a propósito en
+  // las rutas de rubros. Si aquel deja de hacerlo, este handler queda muerto y
+  // el front vuelve a recibir 422 sin que nada acá cambie.
   .onError(({ code, error, set }: any) => {
     if (code === "VALIDATION") {
       set.status = 400;

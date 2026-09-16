@@ -144,6 +144,8 @@ const ALERTA_LABEL: Record<string, string> = {
 	promesa_por_vencer: "Promesa por vencer",
 	cliente_subido: "Subió de bucket",
 	sin_contacto_3d: "Sin contacto",
+	bot_cliente_escribio: "Escribió al bot",
+	bot_modo_agente: "Esperando asesor",
 };
 
 function money(v: string | number | null | undefined) {

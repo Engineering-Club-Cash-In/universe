@@ -45,6 +45,7 @@ const VIGENCIA_SESION_MINUTOS = 30;
 export function sesionVigente(
 	canjeadoEn: Date,
 	ahora: Date = new Date(),
+	vigenciaMinutos: number = VIGENCIA_SESION_MINUTOS,
 ): boolean {
 	const minutos = (ahora.getTime() - canjeadoEn.getTime()) / (60 * 1000);
 
@@ -52,7 +53,7 @@ export function sesionVigente(
 	// premia con una sesión eterna.
 	if (minutos < 0) return false;
 
-	return minutos <= VIGENCIA_SESION_MINUTOS;
+	return minutos <= vigenciaMinutos;
 }
 
 export type InfoCreditoBot = {
@@ -223,6 +224,9 @@ export type ResultadoSesion =
  */
 export async function verificarSesion(
 	referencia: string,
+	// Solo el aviso de modo agente la estira (ver `aviso-bot-modo-agente.ts`):
+	// todo lo que CONSULTA datos del crédito se queda en los 30 minutos.
+	vigenciaMinutos: number = VIGENCIA_SESION_MINUTOS,
 ): Promise<ResultadoSesion> {
 	// La referencia es el uuid de la fila; con otra cosa la consulta explota.
 	if (
@@ -247,7 +251,7 @@ export async function verificarSesion(
 		return { ok: false, codigo: "REFERENCIA_INVALIDA" };
 	}
 
-	if (!sesionVigente(otp.usedAt)) {
+	if (!sesionVigente(otp.usedAt, new Date(), vigenciaMinutos)) {
 		return { ok: false, codigo: "SESION_VENCIDA" };
 	}
 
@@ -263,8 +267,9 @@ export async function verificarSesion(
 export async function verificarAcceso(
 	referencia: string,
 	numeroSifco: string,
+	vigenciaMinutos: number = VIGENCIA_SESION_MINUTOS,
 ): Promise<ResultadoAcceso> {
-	const sesion = await verificarSesion(referencia);
+	const sesion = await verificarSesion(referencia, vigenciaMinutos);
 	if (!sesion.ok) return sesion;
 	const { otp, creditos } = sesion;
 

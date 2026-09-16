@@ -30,7 +30,10 @@ import { db } from "../../db";
 import { botCobrosInteracciones } from "../../db/schema/bot-cobros-interacciones";
 import { coDebtors, opportunities } from "../../db/schema/crm";
 import { otps } from "../../db/schema/otp";
-import { avisarAsesorPorInteraccionBot } from "../../services/aviso-bot-asesor";
+import {
+	ACCION_MODO_AGENTE,
+	avisarAsesorPorInteraccionBot,
+} from "../../services/aviso-bot-asesor";
 
 /**
  * Lo montado bajo `/api/bot/cobros/` que NO es una interacción del cliente.
@@ -56,6 +59,7 @@ const ACCIONES: Record<string, string> = {
 	"/api/bot/cobros/pago-link/opciones": "pago_link_opciones",
 	"/api/bot/cobros/pago-link/crear": "pago_link_crear",
 	"/api/bot/cobros/pago-link/estado": "pago_link_estado",
+	"/api/bot/cobros/conversacion/modo-agente": ACCION_MODO_AGENTE,
 };
 
 /**
@@ -224,6 +228,14 @@ const CURADORES: Record<
 			linksPagados: exito ? numero(data.linksPagados) : null,
 			totalLinks: exito ? numero(data.totalLinks) : null,
 			referenciaPago: exito ? texto(data.referenciaPago) : null,
+		}),
+
+	// Pidió un humano: si su asesor quedó avisado y por qué no, si no.
+	[ACCION_MODO_AGENTE]: (_cuerpo, data, exito) =>
+		conValor({
+			notificado:
+				exito && typeof data.notificado === "boolean" ? data.notificado : null,
+			motivo: exito ? texto(data.motivo) : null,
 		}),
 };
 

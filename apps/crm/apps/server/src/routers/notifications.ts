@@ -7,7 +7,9 @@ import {
 	inArray,
 	isNotNull,
 	isNull,
+	not,
 	or,
+	sql,
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -18,6 +20,7 @@ import {
 	notificationDocuments,
 	notifications,
 } from "../db/schema/notifications";
+import { prioridadNotificacion } from "../lib/notificaciones-prioridad";
 import { adminProcedure, protectedProcedure } from "../lib/orpc";
 import {
 	buildUploadPrefix,
@@ -42,6 +45,7 @@ const notificationWithCreator = {
 	relatedEntityId: notifications.relatedEntityId,
 	redirectPage: notifications.redirectPage,
 	cobrosTipo: notifications.cobrosTipo,
+	notificacionOrigenId: notifications.notificacionOrigenId,
 	readAt: notifications.readAt,
 	resolvedAt: notifications.resolvedAt,
 	createdAt: notifications.createdAt,
@@ -123,15 +127,36 @@ export const notificationsRouter = {
 	),
 
 	// Obtener todas las notificaciones (solo admin)
-	getAllNotifications: adminProcedure.handler(async () => {
-		const result = await db
-			.select(notificationWithCreator)
-			.from(notifications)
-			.leftJoin(user, eq(notifications.createdBy, user.id))
-			.orderBy(desc(notifications.createdAt))
-			.limit(500);
+	getAllNotifications: adminProcedure.handler(async ({ context }) => {
+		const userId = context.session.user.id;
+		// Las PROPIAS del admin van en su propia consulta, con su propio límite
+		// (review de Codex, P2). Con un solo corte global, más de 500 alertas
+		// abiertas de modo agente de otros asesores —que ordenan primero—
+		// llenaban el resultado, y "Mis notificaciones" quedaba vacía mientras
+		// el contador de no leídas (que consulta aparte) marcaba pendientes. La
+		// web separa propias/sistema con este mismo criterio.
+		// NULL-safe a propósito: con `assigned_to = uid`, una fila sin asignar
+		// da NULL, `NOT NULL` también, y la sección de sistema perdía todas las
+		// notificaciones asignadas solo por rol.
+		const propias = sql`(${notifications.assignedToRole} = 'admin' OR ${notifications.assignedTo} IS NOT DISTINCT FROM ${userId}::text)`;
+		const [mias, sistema] = await Promise.all([
+			db
+				.select(notificationWithCreator)
+				.from(notifications)
+				.leftJoin(user, eq(notifications.createdBy, user.id))
+				.where(propias)
+				.orderBy(prioridadNotificacion, desc(notifications.createdAt))
+				.limit(500),
+			db
+				.select(notificationWithCreator)
+				.from(notifications)
+				.leftJoin(user, eq(notifications.createdBy, user.id))
+				.where(not(propias))
+				.orderBy(prioridadNotificacion, desc(notifications.createdAt))
+				.limit(500),
+		]);
 
-		return result;
+		return [...mias, ...sistema];
 	}),
 
 	// Obtener notificaciones por rol del usuario autenticado
@@ -158,7 +183,7 @@ export const notificationsRouter = {
 					isNull(notifications.assignedTo),
 				),
 			)
-			.orderBy(desc(notifications.createdAt))
+			.orderBy(prioridadNotificacion, desc(notifications.createdAt))
 			.limit(500);
 
 		return result;
@@ -173,7 +198,7 @@ export const notificationsRouter = {
 			.from(notifications)
 			.leftJoin(user, eq(notifications.createdBy, user.id))
 			.where(eq(notifications.assignedTo, userId))
-			.orderBy(desc(notifications.createdAt))
+			.orderBy(prioridadNotificacion, desc(notifications.createdAt))
 			.limit(500);
 
 		return result;
@@ -227,7 +252,7 @@ export const notificationsRouter = {
 				.from(notifications)
 				.leftJoin(user, eq(notifications.createdBy, user.id))
 				.where(inArray(notifications.assignedToRole, allowedRoles))
-				.orderBy(desc(notifications.createdAt))
+				.orderBy(prioridadNotificacion, desc(notifications.createdAt))
 				.limit(500);
 
 			return result;

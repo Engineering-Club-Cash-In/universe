@@ -22,6 +22,7 @@ import { codigosDocumentados, especificacionBotCobros } from "./openapi";
 const FUENTES = [
 	"../../controllers/bot-cobros.ts",
 	"../../controllers/bot-cobros-pago-link.ts",
+	"../../controllers/bot-cobros-modo-agente.ts",
 	"./auth.ts",
 ];
 

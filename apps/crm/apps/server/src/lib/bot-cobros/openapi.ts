@@ -112,6 +112,11 @@ export const especificacionBotCobros = {
 				"Contrato completo: `docs/features/bot-whatsapp-cobros/07-pago-con-link.md`. Los links se emiten en el **sandbox** de Págalo mientras dure la integración.",
 			].join("\n"),
 		},
+		{
+			name: "Atención humana",
+			description:
+				"Cuando la conversación pasa a un agente: avisarle al asesor del cliente para que lo atienda.",
+		},
 	],
 	components: {
 		securitySchemes: {
@@ -2921,6 +2926,228 @@ export const especificacionBotCobros = {
 									error: {
 										codigo: "SERVICIO_NO_DISPONIBLE",
 										mensaje: "El servicio no está disponible en este momento.",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		"/api/bot/cobros/conversacion/modo-agente": {
+			post: {
+				tags: ["Atención humana"],
+				summary: "Servicio 10 · El cliente pasó a modo agente",
+				description: [
+					"Llamalo **cuando la conversación pase a modo agente** (el cliente pidió hablar con una persona). No devuelve datos del crédito: le crea una alerta en el CRM al **asesor dueño del crédito** para que entre a Witty Agent y le conteste, o lo llame.",
+					"",
+					"Mismos parámetros que el resto del menú: la `referencia` del servicio 1 y el `numeroSifco` del crédito sobre el que venía hablando.",
+					"",
+					'- **Es idempotente:** llamarlo dos veces en la misma conversación para el mismo crédito no repite la alerta (`motivo: "YA_NOTIFICADO"`). Podés reintentar sin miedo.',
+					"- **La referencia vale 24 horas acá**, no los 30 minutos del menú: el modo agente suele llegar al final de una conversación larga. Pasado eso responde `401 SESION_VENCIDA`.",
+					'- `data.notificado` es `false` solo si el crédito no tiene un asesor con usuario en el CRM (`motivo: "SIN_ASESOR"`). El `200` es igual: la conversación sigue en modo agente y `data.mensaje` no le cuenta nada interno al cliente.',
+				].join("\n"),
+				operationId: "modoAgente",
+				requestBody: {
+					required: true,
+					content: {
+						"application/json": {
+							schema: {
+								type: "object",
+								required: ["referencia", "numeroSifco"],
+								properties: {
+									referencia: {
+										type: "string",
+										format: "uuid",
+										description: "La que devolvió el servicio 1.",
+									},
+									numeroSifco: {
+										type: "string",
+										description:
+											"El crédito sobre el que venía hablando el cliente.",
+									},
+								},
+							},
+							example: {
+								referencia: "3f9c2a1e-6b7d-4c8e-9a0b-1c2d3e4f5a6b",
+								numeroSifco: "01010214117590",
+							},
+						},
+					},
+				},
+				responses: {
+					"200": {
+						description: "Aviso procesado.",
+						content: {
+							"application/json": {
+								schema: {
+									type: "object",
+									properties: {
+										success: { type: "boolean", enum: [true] },
+										data: {
+											type: "object",
+											properties: {
+												notificado: {
+													type: "boolean",
+													description:
+														"`true` si el asesor tiene la alerta (recién creada o de antes).",
+												},
+												motivo: {
+													type: "string",
+													enum: ["NOTIFICADO", "YA_NOTIFICADO", "SIN_ASESOR"],
+												},
+												mensaje: {
+													type: "string",
+													description: "Listo para mostrarle al cliente.",
+												},
+											},
+										},
+									},
+								},
+								examples: {
+									notificado: {
+										summary: "Se le avisó al asesor",
+										value: {
+											success: true,
+											data: {
+												notificado: true,
+												motivo: "NOTIFICADO",
+												mensaje:
+													"Listo, ya le avisamos a tu asesor. En un momento te atiende por este chat.",
+											},
+										},
+									},
+									ya_notificado: {
+										summary: "Segunda llamada en la misma conversación",
+										value: {
+											success: true,
+											data: {
+												notificado: true,
+												motivo: "YA_NOTIFICADO",
+												mensaje:
+													"Listo, ya le avisamos a tu asesor. En un momento te atiende por este chat.",
+											},
+										},
+									},
+									sin_asesor: {
+										summary: "El crédito no tiene asesor vinculado",
+										value: {
+											success: true,
+											data: {
+												notificado: false,
+												motivo: "SIN_ASESOR",
+												mensaje:
+													"En un momento un asesor te atiende por este chat.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"400": {
+						description: "Faltan `referencia` o `numeroSifco`.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "PARAMETROS_INVALIDOS",
+										mensaje: "Faltan datos para avisarle a tu asesor.",
+									},
+								},
+							},
+						},
+					},
+					"401": {
+						description:
+							"La referencia no sirve o pasaron más de 24 horas desde que el cliente se identificó.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									SESION_VENCIDA: {
+										value: {
+											success: false,
+											error: {
+												codigo: "SESION_VENCIDA",
+												mensaje:
+													"Por seguridad tu sesión expiró. Vuelve a identificarte para continuar.",
+											},
+										},
+									},
+									REFERENCIA_INVALIDA: {
+										value: {
+											success: false,
+											error: {
+												codigo: "REFERENCIA_INVALIDA",
+												mensaje:
+													"No encontramos tu solicitud. Comienza de nuevo.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"404": {
+						description: "El `numeroSifco` no es de este cliente.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "CREDITO_NO_ENCONTRADO",
+										mensaje: "No encontramos ese crédito.",
+									},
+								},
+							},
+						},
+					},
+					"500": {
+						description: "Error inesperado.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								example: {
+									success: false,
+									error: {
+										codigo: "ERROR_INTERNO",
+										mensaje:
+											"Ocurrió un error. Intenta de nuevo en unos minutos.",
+									},
+								},
+							},
+						},
+					},
+					"503": {
+						description:
+							"No pudimos saber quién es el asesor (cartera no respondió), o falta configuración del servidor. Reintentá.",
+						content: {
+							"application/json": {
+								schema: { $ref: "#/components/schemas/RespuestaError" },
+								examples: {
+									CARTERA_NO_DISPONIBLE: {
+										value: {
+											success: false,
+											error: {
+												codigo: "CARTERA_NO_DISPONIBLE",
+												mensaje:
+													"No pudimos avisarle a tu asesor en este momento. Intenta de nuevo en unos minutos.",
+											},
+										},
+									},
+									SERVICIO_NO_DISPONIBLE: {
+										value: {
+											success: false,
+											error: {
+												codigo: "SERVICIO_NO_DISPONIBLE",
+												mensaje:
+													"El servicio no está disponible en este momento.",
+											},
+										},
 									},
 								},
 							},

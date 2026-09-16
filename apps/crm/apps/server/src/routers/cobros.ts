@@ -123,6 +123,7 @@ import {
 	rangoCuotasPorEstadoMora,
 	refreshMoraBucketsCache,
 } from "../lib/moraBuckets";
+import { prioridadNotificacion } from "../lib/notificaciones-prioridad";
 import {
 	adminProcedure,
 	cobrosProcedure,
@@ -2610,7 +2611,9 @@ export const cobrosRouter = {
 						inArray(notifications.status, ["pending", "read", "in_progress"]),
 					),
 				)
-				.orderBy(desc(notifications.createdAt))
+				// Modo agente primero ANTES del límite: con 50 avisos más nuevos
+				// quedaba fuera y el orden de abajo no tenía qué subir.
+				.orderBy(prioridadNotificacion, desc(notifications.createdAt))
 				.limit(50);
 
 			// Agrupa por TIPO de alerta, no por fila: los jobs son diarios, así que
@@ -2667,7 +2670,15 @@ export const cobrosRouter = {
 				// la última que se ve de cada tipo es la más antigua.
 				if (r.createdAt < previa.desde) previa.desde = r.createdAt;
 			}
-			return [...porTipo.values()].slice(0, 10);
+			// El cliente esperando en modo agente va primero: es la única alerta
+			// con alguien del otro lado aguardando respuesta ahora mismo.
+			return [...porTipo.values()]
+				.sort(
+					(a, b) =>
+						Number(b.cobrosTipo === "bot_modo_agente") -
+						Number(a.cobrosTipo === "bot_modo_agente"),
+				)
+				.slice(0, 10);
 		}),
 
 	// LEGACY (tabla CRM `convenios_pago`, no cartera-back): nunca se llama desde

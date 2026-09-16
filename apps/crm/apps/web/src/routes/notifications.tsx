@@ -10,8 +10,12 @@ import {
 	ExternalLink,
 	Eye,
 	FileUp,
+	Handshake,
+	Headset,
 	Info,
+	Link2,
 	Loader2,
+	MessageCircle,
 	PhoneOff,
 	Send,
 	TrendingUp,
@@ -41,6 +45,13 @@ import {
 } from "@/components/ui/select";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
+import {
+	COBROS_TIPO_PRIORITARIO,
+	coincideFiltroCobros,
+	esPrioritaria,
+	FILTRO_COBROS_TODAS,
+	ordenarPorPrioridad,
+} from "@/lib/notificaciones-cobros";
 import { getRoleLabel, ROLES } from "@/lib/roles";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client, orpc, queryClient } from "@/utils/orpc";
@@ -240,6 +251,57 @@ const COBROS_TIPO_CONFIG: Record<
 		badge:
 			"bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
 	},
+	// CB-033: convenio esperando que un supervisor lo apruebe o rechace.
+	convenio_pendiente_aprobacion: {
+		label: "Convenio por aprobar",
+		border: "border-indigo-200 dark:border-indigo-900/50",
+		bg: "bg-indigo-50/50 dark:bg-indigo-950/20",
+		icon: Handshake,
+		iconWrap: "bg-indigo-100 dark:bg-indigo-900/40",
+		iconColor: "text-indigo-600 dark:text-indigo-400",
+		badge:
+			"bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400",
+	},
+	convenio_resuelto: {
+		label: "Convenio decidido",
+		border: "border-emerald-200 dark:border-emerald-900/50",
+		bg: "bg-emerald-50/50 dark:bg-emerald-950/20",
+		icon: Handshake,
+		iconWrap: "bg-emerald-100 dark:bg-emerald-900/40",
+		iconColor: "text-emerald-600 dark:text-emerald-400",
+		badge:
+			"bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+	},
+	convenio_incumplido: {
+		label: "Convenio incumplido",
+		border: "border-rose-200 dark:border-rose-900/50",
+		bg: "bg-rose-50/50 dark:bg-rose-950/20",
+		icon: Handshake,
+		iconWrap: "bg-rose-100 dark:bg-rose-900/40",
+		iconColor: "text-rose-600 dark:text-rose-400",
+		badge: "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400",
+	},
+	// COBROS-02: el cliente empezó a usar el bot de WhatsApp.
+	bot_cliente_escribio: {
+		label: "Escribió al bot",
+		border: "border-teal-200 dark:border-teal-900/50",
+		bg: "bg-teal-50/50 dark:bg-teal-950/20",
+		icon: MessageCircle,
+		iconWrap: "bg-teal-100 dark:bg-teal-900/40",
+		iconColor: "text-teal-600 dark:text-teal-400",
+		badge: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400",
+	},
+	// COBROS-02: el cliente pidió un humano y está esperando. Es la alerta
+	// PRIORITARIA de la campanita (ver lib/notificaciones-cobros.ts).
+	bot_modo_agente: {
+		label: "Esperando asesor",
+		border: "border-red-300 dark:border-red-800",
+		bg: "bg-red-50 dark:bg-red-950/30",
+		icon: Headset,
+		iconWrap: "bg-red-100 dark:bg-red-900/40",
+		iconColor: "text-red-600 dark:text-red-400",
+		badge: "bg-red-600 text-white dark:bg-red-700 dark:text-white",
+	},
 };
 
 // Acento lateral por redirectPage: da variedad de color al resto de la lista
@@ -342,6 +404,11 @@ function NotificationsPage() {
 		"notifications/typeFilter",
 		"all",
 	);
+	// COBROS-02: filtro por subtipo de alerta de cobros (columna cobros_tipo).
+	const [cobrosFilter, setCobrosFilter] = usePersistedState<string>(
+		"notifications/cobrosFilter",
+		"all",
+	);
 
 	// Tipos (redirect_page) que este usuario/rol realmente tiene — alimenta el
 	// dropdown para que solo aparezcan las opciones a las que tiene acceso.
@@ -357,10 +424,12 @@ function NotificationsPage() {
 		[availableTypesQuery.data],
 	);
 
-	const hasActiveFilters = statusFilter !== "all" || typeFilter !== "all";
+	const hasActiveFilters =
+		statusFilter !== "all" || typeFilter !== "all" || cobrosFilter !== "all";
 	const resetFilters = () => {
 		setStatusFilter("all");
 		setTypeFilter("all");
+		setCobrosFilter("all");
 	};
 
 	// Admin: todas las notificaciones
@@ -501,9 +570,28 @@ function NotificationsPage() {
 			if (typeFilter !== "all") {
 				result = result.filter((n) => n.redirectPage === typeFilter);
 			}
-			return result;
+			result = result.filter((n) => coincideFiltroCobros(n, cobrosFilter));
+			// Un cliente esperando en modo agente va primero, antes de paginar:
+			// si quedara en la página 3 por fecha, nadie lo vería a tiempo.
+			return ordenarPorPrioridad(result);
 		},
-		[statusFilter, typeFilter],
+		[statusFilter, typeFilter, cobrosFilter],
+	);
+
+	// Subtipos de cobros presentes en lo que este usuario ve: alimentan el
+	// filtro, igual que `availableTypes` con redirect_page.
+	const availableCobrosTipos = useMemo(() => {
+		const tipos = new Set<string>();
+		for (const n of notifications) if (n.cobrosTipo) tipos.add(n.cobrosTipo);
+		return [...tipos]
+			.map((t) => ({ value: t, label: COBROS_TIPO_CONFIG[t]?.label ?? t }))
+			.sort((a, b) => a.label.localeCompare(b.label));
+	}, [notifications]);
+
+	// Para mostrar de qué aviso viene cada alerta de modo agente.
+	const titulosPorId = useMemo(
+		() => new Map(notifications.map((n) => [n.id, n.titulo])),
+		[notifications],
 	);
 
 	const filteredMy = useMemo(
@@ -537,6 +625,12 @@ function NotificationsPage() {
 
 	const handleTypeFilter = (value: string) => {
 		setTypeFilter(value);
+		myPagination.setPage(1);
+		systemPagination.setPage(1);
+	};
+
+	const handleCobrosFilter = (value: string) => {
+		setCobrosFilter(value);
 		myPagination.setPage(1);
 		systemPagination.setPage(1);
 	};
@@ -575,6 +669,7 @@ function NotificationsPage() {
 	const dismissedCount = countSource.filter(
 		(n) => n.status === "dismissed",
 	).length;
+	const esperandoCount = countSource.filter(esPrioritaria).length;
 
 	const renderNotificationList = (
 		items: typeof notifications,
@@ -600,6 +695,11 @@ function NotificationsPage() {
 					<NotificationCard
 						key={notification.id}
 						notification={notification}
+						tituloOrigen={
+							notification.notificacionOrigenId
+								? (titulosPorId.get(notification.notificacionOrigenId) ?? null)
+								: null
+						}
 						onChangeStatus={(status) =>
 							changeStatus.mutate({
 								notificationId: notification.id,
@@ -674,8 +774,47 @@ function NotificationsPage() {
 				</div>
 			</div>
 
+			{/* COBROS-02: clientes esperando en modo agente — lo primero que se ve */}
+			{esperandoCount > 0 && (
+				<div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-300 bg-red-50 p-4 dark:border-red-800 dark:bg-red-950/30">
+					<div className="flex items-center gap-3">
+						<div className="flex h-9 w-9 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40">
+							<Headset className="h-5 w-5 text-red-600 dark:text-red-400" />
+						</div>
+						<div>
+							<p className="font-semibold text-red-900 text-sm dark:text-red-200">
+								{esperandoCount === 1
+									? "1 cliente está esperando un asesor en WhatsApp"
+									: `${esperandoCount} clientes están esperando un asesor en WhatsApp`}
+							</p>
+							<p className="text-red-800/80 text-xs dark:text-red-300/80">
+								Pidieron hablar con una persona en el bot. Contestales desde
+								Witty Agent o llamalos.
+							</p>
+						</div>
+					</div>
+					{cobrosFilter !== COBROS_TIPO_PRIORITARIO && (
+						<Button
+							size="sm"
+							variant="destructive"
+							onClick={() => {
+								// Los TRES filtros: uno por página de destino que quedara
+								// puesto (o una alerta sin redirect_page) dejaba la lista
+								// vacía con el banner diciendo que hay clientes esperando
+								// (review de Codex, P2).
+								handleStatusFilter("all");
+								handleTypeFilter("all");
+								handleCobrosFilter(COBROS_TIPO_PRIORITARIO);
+							}}
+						>
+							Ver solo estos
+						</Button>
+					)}
+				</div>
+			)}
+
 			{/* Filtro */}
-			<div className="flex items-center gap-4">
+			<div className="flex flex-wrap items-center gap-4">
 				<Select value={statusFilter} onValueChange={handleStatusFilter}>
 					<SelectTrigger className="w-[200px]">
 						<SelectValue placeholder="Filtrar por estado" />
@@ -704,6 +843,24 @@ function NotificationsPage() {
 						</SelectContent>
 					</Select>
 				)}
+				{availableCobrosTipos.length > 0 && (
+					<Select value={cobrosFilter} onValueChange={handleCobrosFilter}>
+						<SelectTrigger className="w-[220px]">
+							<SelectValue placeholder="Alertas de cobros" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="all">Todas las alertas</SelectItem>
+							<SelectItem value={FILTRO_COBROS_TODAS}>
+								Solo alertas de cobros
+							</SelectItem>
+							{availableCobrosTipos.map((opt) => (
+								<SelectItem key={opt.value} value={opt.value}>
+									{opt.label}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				)}
 				{hasActiveFilters && (
 					<Button
 						variant="ghost"
@@ -715,8 +872,11 @@ function NotificationsPage() {
 						Limpiar filtros
 						<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
 							{
-								[statusFilter !== "all", typeFilter !== "all"].filter(Boolean)
-									.length
+								[
+									statusFilter !== "all",
+									typeFilter !== "all",
+									cobrosFilter !== "all",
+								].filter(Boolean).length
 							}
 						</Badge>
 					</Button>
@@ -770,6 +930,7 @@ function NotificationsPage() {
 
 function NotificationCard({
 	notification,
+	tituloOrigen,
 	onChangeStatus,
 	isChanging,
 }: {
@@ -787,8 +948,11 @@ function NotificationCard({
 		relatedEntityId: string | null;
 		redirectPage?: string | null;
 		cobrosTipo?: string | null;
+		notificacionOrigenId?: string | null;
 		createdAt: Date;
 	};
+	/** Título del aviso del que esta es continuación, si está cargado. */
+	tituloOrigen?: string | null;
 	onChangeStatus: (status: NotificationStatus) => void;
 	isChanging: boolean;
 }) {
@@ -838,6 +1002,7 @@ function NotificationCard({
 	const isUploadType = notification.type === "action_upload_files";
 	const isResolved = notification.status === "resolved";
 	const isDismissed = notification.status === "dismissed";
+	const prioritaria = esPrioritaria(notification);
 
 	// Para action_upload_files: consultar documentos para saber si puede resolver
 	const docsQuery = useQuery({
@@ -858,7 +1023,9 @@ function NotificationCard({
 						: isPending
 							? "border-yellow-200 bg-yellow-50/40 dark:border-yellow-900/50 dark:bg-yellow-950/20"
 							: "border-border bg-card"
-				} ${accent ? `border-l-4 ${accent}` : ""}`}
+				} ${accent ? `border-l-4 ${accent}` : ""} ${
+					prioritaria ? "border-l-4 border-l-red-500 shadow-sm" : ""
+				}`}
 			>
 				{/* Fila superior: icono + titulo + badges */}
 				<div className="flex items-start justify-between gap-3">
@@ -893,6 +1060,13 @@ function NotificationCard({
 							{notification.descripcion && (
 								<p className="mt-0.5 text-muted-foreground text-xs leading-relaxed">
 									{notification.descripcion}
+								</p>
+							)}
+							{notification.notificacionOrigenId && (
+								<p className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+									<Link2 className="h-3 w-3" />
+									Sigue a:{" "}
+									{tituloOrigen ?? "el aviso inicial de esta conversación"}
 								</p>
 							)}
 						</div>

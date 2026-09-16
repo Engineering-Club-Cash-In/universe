@@ -274,6 +274,15 @@ const ALERTA_COBROS_CONFIG: Record<string, { label: string; clase: string }> = {
 		clase:
 			"bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
 	},
+	bot_cliente_escribio: {
+		label: "Escribió al bot",
+		clase: "bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300",
+	},
+	// El cliente pidió un humano y está esperando: el backend la manda primero.
+	bot_modo_agente: {
+		label: "Esperando asesor",
+		clase: "bg-red-600 text-white dark:bg-red-700 dark:text-white",
+	},
 };
 
 function getMetodoIcon(metodo: string) {

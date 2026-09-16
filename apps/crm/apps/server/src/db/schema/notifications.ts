@@ -1,5 +1,6 @@
 import { relations, sql } from "drizzle-orm";
 import {
+	type AnyPgColumn,
 	index,
 	integer,
 	pgEnum,
@@ -80,6 +81,11 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// asesor dueño del crédito (decisión 16 del plan 08) y se deduplica por
 	// referencia de conversación (`sesion_id`), no por mensaje ni por día.
 	"bot_cliente_escribio",
+	// COBROS-02: el cliente pasó a MODO AGENTE en el bot (pidió un humano).
+	// Mismo destinatario que `bot_cliente_escribio` —el asesor dueño— y apunta
+	// a esa alerta por `notificacion_origen_id`: son la misma conversación, en
+	// dos momentos. Lo crea `POST /api/bot/cobros/conversacion/modo-agente`.
+	"bot_modo_agente",
 ]);
 
 // Notifications table
@@ -142,6 +148,17 @@ export const notifications = pgTable(
 		// avisos del convenio nuevo si el filtro fuera solo por caso.
 		convenioId: integer("convenio_id"),
 
+		// COBROS-02: la notificación de la que esta es continuación. Hoy la usa
+		// solo `bot_modo_agente`, que apunta al `bot_cliente_escribio` de la
+		// misma conversación y crédito — así el asesor ve un solo hilo
+		// ("escribió" → "pidió un agente") y no dos alertas sueltas. Null si no
+		// hubo aviso inicial (p. ej. el asesor no estaba vinculado todavía).
+		// SET NULL: descartar o purgar la inicial no puede borrar la segunda.
+		notificacionOrigenId: uuid("notificacion_origen_id").references(
+			(): AnyPgColumn => notifications.id,
+			{ onDelete: "set null" },
+		),
+
 		// Timestamps de estado
 		readAt: timestamp("read_at"),
 		resolvedAt: timestamp("resolved_at"),
@@ -188,6 +205,11 @@ export const notifications = pgTable(
 		uniqueIndex("uq_notifications_cobros_dedup")
 			.on(table.cobrosTipo, table.cobrosDedupKey, table.assignedTo)
 			.where(sql`${table.cobrosDedupKey} IS NOT NULL`),
+		// Declarado acá por lo mismo que los de arriba (migración 0056): sirve
+		// para traer las continuaciones de una notificación.
+		index("idx_notifications_origen")
+			.on(table.notificacionOrigenId)
+			.where(sql`${table.notificacionOrigenId} IS NOT NULL`),
 	],
 );
 

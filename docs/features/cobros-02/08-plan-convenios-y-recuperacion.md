@@ -680,6 +680,21 @@ Tres cosas más de la segunda review, todas sobre la misma pieza:
   Si el estado ya no es reemplazable, la marca se limpia igual: ese pago no va a restaurar
   nada y dejarla puesta haría que una reversa futura lo intentara de nuevo.
 
+#### Tres puertas más que el estado tenía abiertas
+
+- **`createMora` ya no pisa el estado.** Crear mora y decidir el estado del crédito venían
+  pegados: al deshacer o rechazar un convenio que venía de `EN_RECUPERACION`, el código
+  restauraba ese estado y un renglón después `createMora` lo volvía `MOROSO`. La
+  restauración quedaba en el log y el crédito perdía su piso igual. Ahora respeta
+  `STATUS_NO_PISAR`, como el resto del motor.
+- **"Revertir Especial" también restaura.** `/revertPaymentToPending` deshace la aplicación
+  del pago igual que la reversa normal, pero no llamaba al helper: el crédito quedaba
+  `ACTIVO` con la marca de provenance apuntando a un pago que ya no está aplicado.
+- **La sincronización de casos incluye el estado.** `sincronizarCasosCobros` traía solo
+  `MOROSO` y su predicado de caso activo rechazaba el valor nuevo, así que los créditos de
+  más riesgo de la cartera dejaban de crear y refrescar su caso de cobros — justo cuando
+  más seguimiento necesitan.
+
 #### El triaje de las listas de estados
 
 El plan hablaba de "~90 listas de estados escritas a mano en ~45 archivos". El criterio

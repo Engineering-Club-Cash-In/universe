@@ -78,9 +78,18 @@ function debeCrearCasoCobros(
 	statusCredit: StatusCreditEnum,
 	diasMora: number,
 ): boolean {
-	// Solo crear casos para créditos activos o morosos con días de mora > 0
+	// Solo crear casos para créditos activos o morosos con días de mora > 0.
+	//
+	// COBROS-02 Fase 4: EN_RECUPERACION entra acá porque hasta ayer estos mismos
+	// créditos eran MOROSO (review de Codex, P1). Son los de más riesgo de la
+	// cartera —se decidió recuperarles la unidad— y siguen devengando mora; sin
+	// esta rama dejaban de crear y de refrescar su caso de cobros justo cuando
+	// más seguimiento necesitan.
 	return (
-		(statusCredit === "ACTIVO" || statusCredit === "MOROSO") && diasMora > 0
+		(statusCredit === "ACTIVO" ||
+			statusCredit === "MOROSO" ||
+			statusCredit === "EN_RECUPERACION") &&
+		diasMora > 0
 	);
 }
 
@@ -209,12 +218,15 @@ export async function sincronizarCasosCobros(
 				| "INCOBRABLE"
 				| "PENDIENTE_CANCELACION"
 				| "MOROSO"
+				| "EN_RECUPERACION"
 			> = [
 				"ACTIVO",
 				"CANCELADO",
 				"INCOBRABLE",
 				"PENDIENTE_CANCELACION",
 				"MOROSO",
+				// COBROS-02 Fase 4 — mismos créditos que antes venían como MOROSO.
+				"EN_RECUPERACION",
 			];
 
 			// allSettled en vez de Promise.all: si un estado falla (red, cartera-back
@@ -268,16 +280,39 @@ export async function sincronizarCasosCobros(
 				result.success = false;
 			}
 		} else {
-			// Solo créditos morosos — paginar hasta agotar resultados
-			creditos = await fetchAllPages((page) =>
-				carteraBackClient.getAllCreditos({
-					mes,
-					anio,
-					estado: "MOROSO",
-					page,
-					perPage: 1000,
-				}),
+			// Créditos en mora — paginar hasta agotar resultados.
+			//
+			// `EN_RECUPERACION` va junto a `MOROSO` (COBROS-02 Fase 4): es el mismo
+			// crédito moroso al que además se le decidió recuperar la unidad, y
+			// traer solo MOROSO lo dejaba sin refrescar su caso. Con allSettled por
+			// las mismas razones que el force-sync: que un estado falle no debe
+			// tumbar al otro.
+			const estadosEnMora = ["MOROSO", "EN_RECUPERACION"] as const;
+			const porEstado = await Promise.allSettled(
+				estadosEnMora.map((estado) =>
+					fetchAllPages((page) =>
+						carteraBackClient.getAllCreditos({
+							mes,
+							anio,
+							estado,
+							page,
+							perPage: 1000,
+						}),
+					),
+				),
 			);
+			creditos = [];
+			porEstado.forEach((resultado, i) => {
+				if (resultado.status === "fulfilled") {
+					creditos.push(...resultado.value);
+				} else {
+					console.error(
+						`[SyncCobros] Falló la consulta de créditos ${estadosEnMora[i]}:`,
+						resultado.reason,
+					);
+					result.success = false;
+				}
+			});
 		}
 
 		console.log(

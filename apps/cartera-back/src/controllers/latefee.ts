@@ -628,12 +628,29 @@ export async function createMora({
 
     // Actualizar status a MOROSO. Llegar aquí implica que el crédito NO está en estado
     // excluido (V3 ya los rechaza), así que es seguro marcarlo MOROSO.
+    //
+    // COBROS-02 Fase 4 — salvo los estados de STATUS_NO_PISAR (review de Codex,
+    // P1). Crear mora y decidir el estado del crédito son dos cosas distintas, y
+    // acá venían pegadas: al deshacer o rechazar un convenio que venía de
+    // EN_RECUPERACION, el código restauraba ese estado y un renglón después
+    // `createMora` lo volvía MOROSO — la restauración quedaba en el log y el
+    // crédito perdía su piso en B4 igual.
     console.log(`[${requestId}] 🔄 Actualizando status a MOROSO...`);
-    await executor
+    const [statusTrasMora] = await executor
       .update(creditos)
       .set({ statusCredit: "MOROSO" })
-      .where(eq(creditos.credito_id, credito_id));
-    console.log(`[${requestId}] ✅ Status actualizado a MOROSO`);
+      .where(
+        and(
+          eq(creditos.credito_id, credito_id),
+          notInArray(creditos.statusCredit, STATUS_NO_PISAR),
+        ),
+      )
+      .returning({ statusCredit: creditos.statusCredit });
+    console.log(
+      statusTrasMora
+        ? `[${requestId}] ✅ Status actualizado a MOROSO`
+        : `[${requestId}] ⏭️ Status protegido (STATUS_NO_PISAR): la mora se creó sin tocarlo`,
+    );
 
     // CB-033: `required: true` cuando corre dentro de un `tx` explícito —
     // `registrarHistorialMora` traga errores por default (para no romper

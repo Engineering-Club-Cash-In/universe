@@ -46,6 +46,18 @@ export interface RubroCredito {
   created_at: string;
 }
 
+/**
+ * La fila que devuelve el `PUT /rubros/:id` — que NO es una `RubroCredito`.
+ *
+ * El PUT responde `{ success, rubro }` con la fila de la tabla `rubros` tal
+ * cual la dejó el UPDATE, mientras que `tipo_nombre` y `abonado` sólo existen
+ * en el GET de la lista: el primero sale del join con `rubros_tipos` y el
+ * segundo lo deriva el controlador (`monto_original − saldo_pendiente`). Por
+ * eso este tipo los excluye en vez de decir "es un rubro": quien use esta
+ * respuesta tiene que conservar esos dos campos de lo que ya tenía.
+ */
+export type RubroGuardado = Omit<RubroCredito, "tipo_nombre" | "abonado">;
+
 export interface EventoRubro {
   historial_id: number;
   tipo_evento: string;
@@ -151,11 +163,19 @@ export const crearRubro = async (payload: CrearRubroPayload): Promise<void> => {
   await api.post(`${API_URL}/rubros`, payload);
 };
 
+/**
+ * Devuelve la fila guardada —no `void`— porque el saldo y el `completado` que
+ * deja una edición de monto los calcula el BACKEND (`saldo = monto − abonado`,
+ * con `Big`), no el formulario: sin la respuesta, la lista volvía a mostrar el
+ * saldo viejo hasta que llegara el refetch. `null` si la respuesta no la trae,
+ * para que quien la use no dé por hecho un cuerpo que no miró.
+ */
 export const editarRubro = async (
   rubro_id: number,
   payload: EditarRubroPayload
-): Promise<void> => {
-  await api.put(`${API_URL}/rubros/${rubro_id}`, payload);
+): Promise<RubroGuardado | null> => {
+  const { data } = await api.put(`${API_URL}/rubros/${rubro_id}`, payload);
+  return (data?.rubro as RubroGuardado | undefined) ?? null;
 };
 
 /**

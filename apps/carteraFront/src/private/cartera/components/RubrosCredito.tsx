@@ -51,8 +51,11 @@ import {
   getTiposRubro,
   type EventoRubro,
   type RubroCredito,
+  type RubroGuardado,
   type TipoRubro,
 } from "../services/rubros.services";
+import { ajustarApertura, type SesionRubros } from "./rubrosApertura";
+import { QK_RUBROS, sincronizarRubroEditado } from "./rubrosCache";
 import { QK_TIPOS, sincronizarTipoEditado } from "./rubrosTiposCache";
 
 /**
@@ -195,23 +198,40 @@ export default function RubrosCredito({
    * último valor no nulo retenido, esos ~200ms siguen mostrando el contenido de
    * siempre en vez de un cartel de error.
    */
-  const [creditoVisible, setCreditoVisible] = useState<number | null>(creditoId);
-  useEffect(() => {
-    if (creditoId !== null) setCreditoVisible(creditoId);
-  }, [creditoId]);
+  const [sesion, setSesion] = useState<SesionRubros>(() => ({
+    abierta: open,
+    creditoId,
+  }));
 
-  // Cada apertura empieza en la lista: si el modal recordara la última vista,
-  // reabrirlo en otro crédito caería en un formulario de edición ajeno.
-  useEffect(() => {
-    if (!open) return;
-    setVista("lista");
-    setRubroSel(null);
-    setTipoSel(null);
-    setBorrador(BORRADOR_VACIO);
-  }, [open, creditoId]);
+  /**
+   * Qué crédito se pinta y si toca volver a la lista, decidido EN LA RENDER.
+   *
+   * Antes eran dos `useEffect`, y un efecto corre DESPUÉS de que la render ya se
+   * pintó: reabrir el modal sobre otro crédito alcanzaba a mostrar un cuadro con
+   * el encabezado del crédito nuevo y los rubros del anterior, y —como el
+   * reinicio de vista también era efecto— podía reabrirse directo en el
+   * formulario de editar del rubro de antes, cargado con los datos del cliente
+   * equivocado y listo para enviarse.
+   *
+   * Ajustar estado durante la render es el patrón que React documenta para
+   * estado derivado de props: no hay bucle porque `ajustarApertura` devuelve la
+   * MISMA sesión cuando nada cambió, así que la segunda pasada no vuelve a
+   * entrar acá.
+   */
+  const apertura = ajustarApertura(sesion, { open, creditoId });
+  const creditoVisible = apertura.creditoVisible;
+  if (apertura.sesion !== sesion) {
+    setSesion(apertura.sesion);
+    if (apertura.reiniciar) {
+      setVista("lista");
+      setRubroSel(null);
+      setTipoSel(null);
+      setBorrador(BORRADOR_VACIO);
+    }
+  }
 
   const rubrosQuery = useQuery({
-    queryKey: ["rubrosCredito", creditoVisible],
+    queryKey: [QK_RUBROS, creditoVisible],
     queryFn: () => getRubrosByCredito(creditoVisible!),
     enabled: open && !!creditoVisible,
   });
@@ -234,7 +254,7 @@ export default function RubrosCredito({
   );
 
   const invalidar = () =>
-    queryClient.invalidateQueries({ queryKey: ["rubrosCredito", creditoVisible] });
+    queryClient.invalidateQueries({ queryKey: [QK_RUBROS, creditoVisible] });
 
   // Gate SOLO de creación: la lista y el historial se siguen viendo (es el
   // registro de lo que ya se le cobró al cliente) y la edición tampoco se toca
@@ -362,8 +382,17 @@ export default function RubrosCredito({
             key={rubroSel.rubro_id}
             rubro={rubroSel}
             onVolver={volver}
-            onEditado={() => {
-              invalidar();
+            onEditado={async (guardado) => {
+              // Se ESPERA antes de volver: sin el await, la lista se pintaba con
+              // la fila vieja mientras el GET viajaba, y reabrirla en ese hueco
+              // cargaba el formulario con el monto anterior — el PUT siguiente
+              // revertía la edición recién hecha.
+              await sincronizarRubroEditado(
+                queryClient,
+                creditoVisible,
+                rubroSel.rubro_id,
+                guardado
+              );
               volver();
             }}
           />
@@ -828,7 +857,8 @@ function VistaEditar({
 }: {
   rubro: RubroCredito;
   onVolver: () => void;
-  onEditado: () => void;
+  /** Recibe la fila que devolvió el PUT, para sembrarla en la lista. */
+  onEditado: (guardado: RubroGuardado | null) => void | Promise<void>;
 }) {
   const [monto, setMonto] = useState(String(rubro.monto_original ?? ""));
   const [descripcion, setDescripcion] = useState(rubro.descripcion ?? "");
@@ -849,9 +879,9 @@ function VistaEditar({
         descripcion: descripcion.trim(),
         motivo: motivo.trim(),
       }),
-    onSuccess: () => {
+    onSuccess: (guardado) => {
       toast.success("Rubro actualizado");
-      onEditado();
+      onEditado(guardado);
     },
     onError: (e) => {
       // 409 = regla de negocio ("el monto no puede ser menor a lo ya abonado").

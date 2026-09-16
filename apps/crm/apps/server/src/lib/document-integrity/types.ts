@@ -49,6 +49,7 @@ export interface DocumentIntegrityAiResult {
 	titular_detectado: string | null;
 	identificador_detectado: string | null;
 	es_legible: boolean;
+	paginas_fotografiadas_o_escaneadas?: number[];
 	observaciones_forenses: AiForensicObservation[];
 }
 
@@ -89,6 +90,14 @@ export function createDocumentIntegrityAiSchema<
 		titular_detectado: nullableText,
 		identificador_detectado: nullableText,
 		es_legible: z.boolean(),
+		paginas_fotografiadas_o_escaneadas: z
+			.array(z.number().int().positive())
+			.max(200)
+			.optional()
+			.default([])
+			.describe(
+				"Páginas con fotografías o escaneos del papel, incluso con OCR; no incluir páginas digitales solo por tener un logo",
+			),
 		// Un codigo desconocido se degrada al de respaldo en vez de descartar toda
 		// la evidencia. Sin catch en el array: una respuesta estructuralmente rota
 		// debe fallar, no volverse permisiva.
@@ -102,7 +111,9 @@ export function createDocumentIntegrityAiSchema<
 					.min(0)
 					.max(100)
 					.catch(0)
-					.describe("Porcentaje de confianza entre 0 y 100; no usar escala 0 a 1"),
+					.describe(
+						"Porcentaje de confianza entre 0 y 100; no usar escala 0 a 1",
+					),
 				texto_detectado: nullableText.describe(
 					"Leyenda literal visible que sustenta la observación, o null si no aplica",
 				),

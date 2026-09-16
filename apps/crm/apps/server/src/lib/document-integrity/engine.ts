@@ -159,7 +159,7 @@ function structureSignals(forensics: PdfForensicsResult): Signal[] {
 	).length;
 	if (textPages > 0 && rasterPages > 0) {
 		signals.push(
-			makeSignal("paginas_mixtas_texto_e_imagen", 7, "alta", "contenido", {
+			makeSignal("paginas_mixtas_texto_e_imagen", 0, "baja", "contenido", {
 				evidence: { textPages, rasterPages },
 			}),
 		);
@@ -168,7 +168,7 @@ function structureSignals(forensics: PdfForensicsResult): Signal[] {
 		rasterPages === forensics.pages.length
 	) {
 		signals.push(
-			makeSignal("todas_las_paginas_rasterizadas", 4, "media", "contenido", {
+			makeSignal("todas_las_paginas_rasterizadas", 0, "baja", "contenido", {
 				evidence: { pages: rasterPages },
 			}),
 		);
@@ -344,6 +344,19 @@ export async function runDocumentIntegrityEngine(params: {
 	}
 	if (llm) signals.push(...aiSignals(llm, forensics.pageCount));
 	else signals.push(makeSignal("ia_no_disponible", 0, "alta", "ia"));
+	const capturePages = [
+		...new Set(llm?.paginas_fotografiadas_o_escaneadas ?? []),
+	].filter((page) =>
+		forensics.pages.some(
+			(parsedPage) => parsedPage.page === page && parsedPage.hasImage,
+		),
+	);
+	if (capturePages.length > 0)
+		signals.push(
+			makeSignal("documento_fotografiado_o_escaneado", 0, "baja", "contenido", {
+				evidence: { pages: capturePages.join(", ") },
+			}),
+		);
 
 	const outcome = applyRuleset({
 		signals,

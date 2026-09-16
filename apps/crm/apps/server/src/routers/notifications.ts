@@ -18,6 +18,7 @@ import {
 	notificationDocuments,
 	notifications,
 } from "../db/schema/notifications";
+import { prioridadNotificacion } from "../lib/notificaciones-prioridad";
 import { adminProcedure, protectedProcedure } from "../lib/orpc";
 import {
 	buildUploadPrefix,
@@ -129,7 +130,7 @@ export const notificationsRouter = {
 			.select(notificationWithCreator)
 			.from(notifications)
 			.leftJoin(user, eq(notifications.createdBy, user.id))
-			.orderBy(desc(notifications.createdAt))
+			.orderBy(prioridadNotificacion, desc(notifications.createdAt))
 			.limit(500);
 
 		return result;
@@ -159,7 +160,7 @@ export const notificationsRouter = {
 					isNull(notifications.assignedTo),
 				),
 			)
-			.orderBy(desc(notifications.createdAt))
+			.orderBy(prioridadNotificacion, desc(notifications.createdAt))
 			.limit(500);
 
 		return result;
@@ -174,7 +175,7 @@ export const notificationsRouter = {
 			.from(notifications)
 			.leftJoin(user, eq(notifications.createdBy, user.id))
 			.where(eq(notifications.assignedTo, userId))
-			.orderBy(desc(notifications.createdAt))
+			.orderBy(prioridadNotificacion, desc(notifications.createdAt))
 			.limit(500);
 
 		return result;
@@ -228,7 +229,7 @@ export const notificationsRouter = {
 				.from(notifications)
 				.leftJoin(user, eq(notifications.createdBy, user.id))
 				.where(inArray(notifications.assignedToRole, allowedRoles))
-				.orderBy(desc(notifications.createdAt))
+				.orderBy(prioridadNotificacion, desc(notifications.createdAt))
 				.limit(500);
 
 			return result;

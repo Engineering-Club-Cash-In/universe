@@ -123,6 +123,7 @@ import {
 	rangoCuotasPorEstadoMora,
 	refreshMoraBucketsCache,
 } from "../lib/moraBuckets";
+import { prioridadNotificacion } from "../lib/notificaciones-prioridad";
 import {
 	adminProcedure,
 	cobrosProcedure,
@@ -2610,7 +2611,9 @@ export const cobrosRouter = {
 						inArray(notifications.status, ["pending", "read", "in_progress"]),
 					),
 				)
-				.orderBy(desc(notifications.createdAt))
+				// Modo agente primero ANTES del límite: con 50 avisos más nuevos
+				// quedaba fuera y el orden de abajo no tenía qué subir.
+				.orderBy(prioridadNotificacion, desc(notifications.createdAt))
 				.limit(50);
 
 			// Agrupa por TIPO de alerta, no por fila: los jobs son diarios, así que

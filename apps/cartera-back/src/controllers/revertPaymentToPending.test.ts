@@ -47,7 +47,8 @@ const voidInvoice = mock(() => Promise.resolve(cofidiResult));
 process.env.SUPABASE_DB_URL ??= "postgresql://127.0.0.1:1/synthetic";
 process.env.RESEND_API_KEY ??= "synthetic-test-key";
 process.env.EMAIL_DOMAIN ??= "example.invalid";
-const { createRevertPaymentToPending, classifyRevertPaymentCredit, classifyRevertPendingTerminal } = await import("./revertPaymentToPending");
+const { createRevertPaymentToPending, clasificarEstadoParaRevertir,
+  classifyRevertPaymentCredit, classifyRevertPendingTerminal } = await import("./revertPaymentToPending");
 type Dependencies = NonNullable<Parameters<typeof createRevertPaymentToPending>[0]>;
 const revertPaymentToPending = createRevertPaymentToPending({
   runTransaction: transaction as unknown as Dependencies["runTransaction"],
@@ -99,6 +100,23 @@ describe("revertPaymentToPending observability contract", () => {
     expect(classifyRevertPaymentCredit(undefined)).toBe("credit_not_found");
     expect(classifyRevertPaymentCredit({ statusCredit: "CANCELADO" })).toBe("state_conflict");
     expect(classifyRevertPaymentCredit({ statusCredit: "ACTIVO" })).toBeNull();
+  });
+
+  test("no finge que revirtió un pago de capital, que esta ruta no maneja", () => {
+    // `capital_validated` caía en el early-return de "el pago ya estaba
+    // pendiente" y respondía éxito sin desaplicar nada. Desde que un abono
+    // directo a capital también cobra rubros, eso deja el saldo del rubro
+    // descontado y su reclamo aplicado mientras al operador le dijeron que la
+    // reversa salió bien — y el rubro queda congelado, porque un reclamo vivo
+    // impide editarlo o anularlo.
+    expect(clasificarEstadoParaRevertir("capital_validated")).toBe(
+      "capital_no_soportado"
+    );
+    // Los demás siguen igual: `pending` es el caso legítimo del early-return y
+    // `validated` es el camino completo.
+    expect(clasificarEstadoParaRevertir("pending")).toBeNull();
+    expect(clasificarEstadoParaRevertir("validated")).toBeNull();
+    expect(clasificarEstadoParaRevertir(undefined)).toBeNull();
   });
 
   test("prioritizes local invoice inconsistency over provider partials", () => {

@@ -37,6 +37,35 @@ export function classifyRevertPaymentCredit(
   return REVERSIBLE_CREDIT_STATES.has(credit.statusCredit ?? "") ? null : "state_conflict";
 }
 
+/**
+ * ¿Esta ruta sabe revertir un pago en este estado de validación?
+ *
+ * Sólo mira `capital_validated`, y devuelve el motivo del rechazo en vez de un
+ * booleano para que quien llame pueda decir QUÉ pasó.
+ *
+ * El caso: `pagoValidado` reconoce únicamente `"validated"`, así que un abono
+ * directo a capital caía en el early-return de "el pago ya estaba pendiente" —
+ * que para ese estado es falso— y respondía ÉXITO sin haber revertido nada.
+ *
+ * Eso ya era engañoso, y desde que un abono directo a capital también cobra
+ * rubros (`aplicarRubrosDelPago` corre antes de sellar `capital_validated`)
+ * pasó a dejar daño: el saldo del rubro queda descontado y su reclamo aplicado,
+ * mientras al operador le dijeron que la reversa salió bien. Y un reclamo vivo
+ * congela el rubro, así que después tampoco se puede editar ni anular.
+ *
+ * Se RECHAZA en vez de arreglarlo acá. Desaplicar el rubro dejaría el pago
+ * diciendo que lo cobró y el rubro diciendo que no, que es el estado a medias
+ * que el comentario del early-return ya advierte para los abonos a capital. El
+ * reverso de esos pagos vive en `reversePayment`, que sí los reconoce.
+ */
+export function clasificarEstadoParaRevertir(
+  validationStatus: string | null | undefined
+): "capital_no_soportado" | null {
+  return validationStatus === "capital_validated"
+    ? "capital_no_soportado"
+    : null;
+}
+
 export function classifyRevertPendingTerminal({
   failedCount,
   localStateFailureCount,
@@ -49,8 +78,14 @@ export function classifyRevertPendingTerminal({
 }
 
 class RevertPaymentCreditRejection extends Error {
-  constructor(readonly reasonCode: "credit_not_found" | "state_conflict") {
-    super("Credit not found or not active");
+  constructor(
+    readonly reasonCode:
+      | "credit_not_found"
+      | "state_conflict"
+      | "capital_no_soportado",
+    mensaje = "Credit not found or not active"
+  ) {
+    super(mensaje);
   }
 }
 
@@ -163,6 +198,17 @@ export function createRevertPaymentToPending(
       }
 
       const pagoValidado = pago.validationStatus === "validated";
+
+      // Un abono directo a capital NO lo maneja esta ruta, y hasta acá lo decía
+      // respondiendo "éxito". Ver `clasificarEstadoParaRevertir`: el reverso de
+      // esos pagos vive en `reversePayment`, que sí los reconoce, y fingir que
+      // acá salió bien deja el rubro cobrado y congelado.
+      if (clasificarEstadoParaRevertir(pago.validationStatus) !== null) {
+        throw new RevertPaymentCreditRejection(
+          "capital_no_soportado",
+          "Este pago es un abono directo a capital: Revertir Especial no lo maneja. Usá Revertir (la reversa normal), que sí devuelve el abono y los cobros adicionales."
+        );
+      }
 
       // 3️⃣ OBTENER DATOS DEL CRÉDITO
       const [creditData] = await tx
@@ -422,7 +468,15 @@ export function createRevertPaymentToPending(
     } else if (reasonCode) {
       dependencies.emitTerminal({
         outcome: "rejected",
-        reasonCode,
+        // El motivo nuevo se reporta como `state_conflict` a la telemetría y no
+        // como código propio: la unión de motivos vive en el paquete compartido
+        // `@repo/structured-logger`, y agregarle un valor por un rechazo de esta
+        // ruta le cambia el tipo a todos los módulos que lo usan.
+        // `state_conflict` dice lo cierto —el pago está en un estado que esta
+        // ruta no maneja—; el motivo fino viaja en el mensaje de la respuesta,
+        // que es donde lo lee la persona.
+        reasonCode:
+          reasonCode === "capital_no_soportado" ? "state_conflict" : reasonCode,
         durationMs: elapsedMilliseconds(startedAt),
       });
     } else {

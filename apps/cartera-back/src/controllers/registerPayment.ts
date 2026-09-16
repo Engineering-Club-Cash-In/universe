@@ -2574,8 +2574,15 @@ export const insertPayment = async ({ body, set }: any) => {
     // cuando el rubro cambió entre el cálculo del reparto y el INSERT del
     // reclamo (lo anularon, o el saldo ya no alcanza). Es un choque de NEGOCIO
     // con su propio `status` —casi siempre 409— y un texto que le dice al asesor
-    // qué hacer ("vuelva a registrarla: el reparto se recalcula sin ese cobro"),
-    // no una caída del servidor. Sin esta rama salía 500: el texto igual llegaba
+    // qué hacer, no una caída del servidor.
+    //
+    // Ese texto insiste en que la boleta SÍ quedó registrada y que no la
+    // reintente, y eso no es redundancia: cuando esto dispara, las filas de
+    // `pagos_credito` YA están commiteadas —`commitRubros` abre su propia
+    // transacción y exige que la fila del pago exista de antes—, así que lo
+    // único que se perdió es el cobro adicional. El mensaje decía lo contrario
+    // ("la boleta NO se registró, vuelva a registrarla") y un asesor que lo
+    // obedeciera le cobraba dos veces al cliente. Sin esta rama salía 500: el texto igual llegaba
     // al toast (`extraerDetalle` del front descarta el "Internal server error"
     // genérico y cae al campo `error`), pero el código HTTP mentía — cualquier
     // alerta o reintento cableado a 5xx trataba un conflicto previsto como una

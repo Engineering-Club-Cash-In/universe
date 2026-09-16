@@ -794,8 +794,9 @@ export const puedeApartarReclamo = ({
       motivo:
         `El cobro adicional #${rubro_id} cambió mientras se registraba esta ` +
         `boleta: ahora quedan Q${disponible.toFixed(2)} por cobrar y la boleta ` +
-        `iba a apartar Q${apartado.toFixed(2)}. La boleta NO se registró. ` +
-        `Vuelva a registrarla: el reparto se recalcula con el cobro ya corregido.`,
+        `iba a apartar Q${apartado.toFixed(2)}, así que ese cobro no se aplicó. ` +
+        `LA BOLETA SÍ QUEDÓ REGISTRADA y el resto del pago se aplicó: NO la ` +
+        `registre de nuevo. Revise el crédito para confirmar el reparto.`,
     };
   }
 

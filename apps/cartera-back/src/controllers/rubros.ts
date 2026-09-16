@@ -1894,7 +1894,7 @@ export async function registrarReclamosDeRubros(
     if (!actual || actual.anulado) {
       throw new RubroError(
         409,
-        `El cobro adicional #${cobro.rubro_id} se anuló mientras se registraba esta boleta, así que ya no se cobra. La boleta NO se registró. Vuelva a registrarla: el reparto se recalcula sin ese cobro.`
+        `El cobro adicional #${cobro.rubro_id} se anuló mientras se registraba esta boleta, así que no se cobró. LA BOLETA SÍ QUEDÓ REGISTRADA y el resto del pago se aplicó: NO la registre de nuevo. Revise el crédito para confirmar el reparto.`
       );
     }
 

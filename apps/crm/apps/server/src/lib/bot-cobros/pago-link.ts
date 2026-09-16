@@ -768,11 +768,24 @@ export async function crearPagoLink(
 	numeroSifco: string,
 	montoCrudo: unknown,
 ): Promise<ResultadoCrear> {
-	const monto = normalizarMonto(montoCrudo);
-	if (!monto) return { ok: false, codigo: "MONTO_DESACTUALIZADO" };
-
+	// La PROPIEDAD DEL CRÉDITO SE VERIFICA PRIMERO, antes de mirar el monto
+	// (review de Codex, P2). El orden no es cosmético: `MONTO_DESACTUALIZADO`
+	// es uno de los códigos que el aviso al asesor trata como prueba de que el
+	// crédito ya pasó el control de propiedad (`pruebaPropiedadDelCredito` en
+	// `aviso-bot-asesor.ts`), y con la validación acá arriba el código salía
+	// ANTES de ese control. Una sesión válida podía mandar el SIFCO de otro
+	// cliente con un monto basura y hacer que se le avisara al asesor de un
+	// crédito ajeno — exactamente lo que la allowlist existe para impedir.
+	//
+	// Poner `armarContexto` primero cuesta una query en el caso de monto
+	// inválido y devuelve el error de propiedad en su lugar, que es la
+	// respuesta correcta: quien no es dueño del crédito no tiene por qué
+	// enterarse de si su monto estaba al día.
 	const contexto = await armarContexto(referencia, numeroSifco);
 	if (!contexto.ok) return contexto;
+
+	const monto = normalizarMonto(montoCrudo);
+	if (!monto) return { ok: false, codigo: "MONTO_DESACTUALIZADO" };
 	const { ctx } = contexto;
 	const carteraCreditoId = ctx.credito.credito.credito_id;
 

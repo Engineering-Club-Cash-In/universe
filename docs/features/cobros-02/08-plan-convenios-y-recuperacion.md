@@ -257,6 +257,15 @@ que no hay asesor a quién avisarle.
   > las formas en que la propiedad puede fallar**, porque el vocabulario lo define otra capa.
   > Lo contrario sí se puede enumerar. Con lista blanca, un código nuevo cuesta un
   > seguimiento perdido; con lista negra, costaba avisarle al asesor de un crédito ajeno.
+  >
+  > Y la lista blanca tiene su propia condición, que tampoco se ve desde ese archivo:
+  > cada código vale como prueba **solo si su camino verifica la propiedad antes de
+  > devolverlo**. `MONTO_DESACTUALIZADO` no lo cumplía — `crearPagoLink` validaba el monto
+  > antes de `armarContexto`, así que un monto basura contra el SIFCO de otro cliente
+  > devolvía un código "posterior al control" sin haber pasado por ninguno. Se invirtió el
+  > orden y se auditaron los 17 códigos: los demás salen después de `armarContexto` o de
+  > una fila acotada a `(otpId, numeroSifco)`. Hay una prueba sobre el orden en la fuente,
+  > porque es exactamente lo que un refactor puede invertir sin que nada más lo note.
 - **Sin caso de cobros también avisa**, pero sin enlace. `sync-casos-cobros` solo mantiene
   un caso activo cuando `diasMora > 0`, así que exigirlo dejaba justo a los buckets sanos
   sin aviso — los mismos que la decisión 16 nombra. Un cliente al día que escribe es de

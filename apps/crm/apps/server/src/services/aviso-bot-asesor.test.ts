@@ -322,3 +322,33 @@ describe("cuando sí se avisa", () => {
 		);
 	});
 });
+
+/**
+ * La allowlist de `pruebaPropiedadDelCredito` no se sostiene sola: cada código
+ * vale como prueba SOLO si su camino verifica la propiedad antes de devolverlo.
+ *
+ * `MONTO_DESACTUALIZADO` fue el contraejemplo real (review de Codex, P2):
+ * `crearPagoLink` parseaba el monto antes de `armarContexto`, así que un monto
+ * inválido contra el SIFCO de otro cliente devolvía un código "posterior al
+ * control" sin haber pasado por control alguno — y el asesor de ese crédito
+ * ajeno recibía el aviso.
+ *
+ * Se afirma sobre el ORDEN EN LA FUENTE porque es exactamente lo que un
+ * refactor puede invertir sin que ninguna prueba de comportamiento lo note.
+ */
+describe("orden de validación en crearPagoLink", () => {
+	it("verifica la propiedad del crédito antes de rechazar por monto", async () => {
+		const fuente = await Bun.file(
+			new URL("../lib/bot-cobros/pago-link.ts", import.meta.url).pathname,
+		).text();
+		const cuerpo = fuente.slice(
+			fuente.indexOf("export async function crearPagoLink("),
+		);
+		const posPropiedad = cuerpo.indexOf("await armarContexto(");
+		const posMonto = cuerpo.indexOf("normalizarMonto(montoCrudo)");
+
+		expect(posPropiedad).toBeGreaterThan(-1);
+		expect(posMonto).toBeGreaterThan(-1);
+		expect(posPropiedad).toBeLessThan(posMonto);
+	});
+});

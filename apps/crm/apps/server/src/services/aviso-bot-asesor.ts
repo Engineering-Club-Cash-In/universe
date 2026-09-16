@@ -118,6 +118,12 @@ const CODIGOS_POSTERIORES_AL_CONTROL = new Set([
 	"SIN_CUOTAS_QUE_PAGAR",
 	"SIN_LINKS",
 	"PAGALO_NO_DISPONIBLE",
+	// Solo vale como prueba porque `crearPagoLink` verifica la propiedad ANTES
+	// de mirar el monto. Con el orden inverso este código salía sin haber
+	// pasado por el control, y un monto basura contra el SIFCO de otro cliente
+	// le avisaba a un asesor ajeno (review de Codex, P2). Se auditaron los
+	// demás códigos de esta lista: todos salen después de `armarContexto`, o
+	// de una fila acotada a (otpId, numeroSifco), que es la misma prueba.
 	"MONTO_DESACTUALIZADO",
 	// El crédito es suyo y ya hay plata en camino.
 	"PAGO_EN_PROCESO",

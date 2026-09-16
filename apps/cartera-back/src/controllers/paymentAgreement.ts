@@ -398,12 +398,6 @@ export async function createPaymentAgreement(
     console.log("🔥 Estado nuevo: EN_CONVENIO");
     console.log("🔥 Convenio ID:", agreement.convenio_id);
     // ============================================
-    // COBROS-02 Fase 4 — el estado con el que ENTRA al convenio. `statusCredit`
-    // es una sola columna: al pasar a EN_CONVENIO, un EN_RECUPERACION se
-    // perdería, y al completar el convenio el crédito quedaría ACTIVO — o sea
-    // que pagar el convenio levantaría la recuperación por la puerta de atrás,
-    // justo lo que la decisión 4 prohíbe.
-    const statusAlFirmar = creditExists.statusCredit ?? null;
 
     // ============================================
     // 🚪 SALIDA DEL RÉGIMEN NORMAL — UNA SOLA TRANSACCIÓN
@@ -472,17 +466,40 @@ export async function createPaymentAgreement(
         .returning();
       morasEliminadasCount = morasEliminadas.length;
 
-      // 3. El crédito sale del funnel normal.
-      const cambio = await tx
-        .update(creditos)
-        .set({
-          statusCredit: "EN_CONVENIO",
-        })
-        .where(eq(creditos.credito_id, credit_id))
-        .returning();
+      // 3. El crédito sale del funnel normal — y se guarda con qué estado ENTRÓ.
+      //
+      // COBROS-02 Fase 4: `statusCredit` es una sola columna. Al pasar a
+      // EN_CONVENIO un EN_RECUPERACION se perdería, y al completar el convenio
+      // el crédito quedaría ACTIVO — o sea que pagar el convenio levantaría la
+      // recuperación por la puerta de atrás, justo lo que la decisión 4 prohíbe.
+      //
+      // Se captura EN EL MISMO ACTO que lo reemplaza, y no de la foto que esta
+      // función leyó hace varios pasos (review de Codex, P1): entre aquella
+      // lectura y este UPDATE puede commitear una recuperación de vehículo, o
+      // el pago que la levanta, y guardar el valor viejo hacía que completar o
+      // deshacer el convenio restaurara un estado equivocado.
+      //
+      // El `FOR UPDATE` del subselect bloquea la fila antes de leerla, así que
+      // nadie puede cambiarla entre el SELECT y el UPDATE; el `RETURNING` de un
+      // UPDATE devuelve los valores NUEVOS, por eso el anterior sale del
+      // subselect.
+      const cambio = await tx.execute<{
+        previo: string | null;
+        statusCredit: string;
+      }>(sql`
+        UPDATE ${SQL_CARTERA_SCHEMA}.creditos c
+           SET "statusCredit" = 'EN_CONVENIO'
+          FROM (
+            SELECT "statusCredit" AS previo
+              FROM ${SQL_CARTERA_SCHEMA}.creditos
+             WHERE credito_id = ${credit_id}
+             FOR UPDATE
+          ) anterior
+         WHERE c.credito_id = ${credit_id}
+        RETURNING anterior.previo, c."statusCredit"
+      `);
+      const statusAlFirmar = cambio.rows?.[0]?.previo ?? null;
 
-      // COBROS-02 Fase 4 — con qué estado ENTRÓ al convenio, en la misma
-      // transacción que lo reemplaza (ver `statusAlFirmar` arriba).
       await tx
         .update(convenios_pago)
         .set({ status_credito_previo: statusAlFirmar })
@@ -521,7 +538,7 @@ export async function createPaymentAgreement(
         }
       }
 
-      return cambio;
+      return cambio.rows ?? [];
     });
 
     if (morasEliminadasCount > 0) {

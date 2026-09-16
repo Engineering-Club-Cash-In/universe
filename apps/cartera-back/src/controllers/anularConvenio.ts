@@ -183,10 +183,17 @@ export async function anularConvenio(params: {
            AND completado = false
            AND anulado_at IS NULL
            ${condicionDueno}
-        RETURNING convenio_id, credito_id
+        RETURNING convenio_id, credito_id, status_credito_previo
       `);
       const anulado = anuladoRes.rows?.[0] as
-        | { convenio_id: number; credito_id: number }
+        | {
+            convenio_id: number;
+            credito_id: number;
+            // COBROS-02 Fase 4: la columna la agrega la migración 0020, que
+            // viaja en ESTE PR. Antes de él no existe, y pedirla en el
+            // RETURNING levantaba 42703 y tumbaba toda anulación.
+            status_credito_previo: string | null;
+          }
         | undefined;
 
       if (!anulado) {

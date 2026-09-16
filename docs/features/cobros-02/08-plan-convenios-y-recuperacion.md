@@ -625,8 +625,15 @@ pasa a `EN_CONVENIO` y el `EN_RECUPERACION` que traía desaparece; al completars
 lo dejaba `ACTIVO`. O sea que **pagar el convenio levantaba la recuperación por la puerta
 de atrás** — exactamente lo que la decisión 4 prohíbe.
 
-`convenios_pago.status_credito_previo` guarda el estado con el que el crédito entró, y se
-le devuelve en los tres finales posibles:
+`convenios_pago.status_credito_previo` guarda el estado con el que el crédito entró. Se
+captura **en el mismo acto que lo reemplaza**, no de la foto que la función leyó pasos
+antes: entre una cosa y otra puede commitear una recuperación de vehículo, o el pago que la
+levanta, y guardar el valor viejo hacía que completar o deshacer el convenio restaurara un
+estado equivocado — descartando una decisión manual, o resucitando una ya levantada. El
+`FOR UPDATE` del subselect bloquea la fila antes de leerla y las dos escrituras van en una
+transacción.
+
+Se le devuelve en los tres finales posibles:
 
 | Qué pasa con el convenio | Estado que queda |
 | --- | --- |

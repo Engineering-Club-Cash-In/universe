@@ -53,6 +53,7 @@ import {
   type RubroCredito,
   type TipoRubro,
 } from "../services/rubros.services";
+import { QK_TIPOS, sincronizarTipoEditado } from "./rubrosTiposCache";
 
 /**
  * Modal "Rubros" de un crédito.
@@ -86,9 +87,6 @@ type Vista =
 type BorradorRubro = { tipoId: string; monto: string; descripcion: string };
 
 const BORRADOR_VACIO: BorradorRubro = { tipoId: "", monto: "", descripcion: "" };
-
-/** Clave raíz de las queries de tipos; las variantes cuelgan de acá. */
-const QK_TIPOS = "rubrosTipos";
 
 const CLASE_SELECT =
   "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500";
@@ -1618,7 +1616,17 @@ function VistaEditarTipo({
       }),
     onSuccess: async () => {
       toast.success("Tipo de rubro actualizado");
-      await queryClient.invalidateQueries({ queryKey: [QK_TIPOS] });
+      // Mismo defecto que al crear o borrar un tipo (ver `VistaCrearTipo`):
+      // esta vista REEMPLAZA al listado, así que las dos queries de tipos
+      // están desmontadas y un `invalidateQueries` pelado sólo las marcaba
+      // obsoletas. Volver al listado con el nombre viejo no es cosmético: si
+      // el administrador reabre la fila antes del refetch, el formulario nace
+      // con lo viejo y el PUT siguiente revierte esta misma edición.
+      await sincronizarTipoEditado(queryClient, tipo.tipo_id, {
+        nombre: nombre.trim(),
+        descripcion: descripcion.trim(),
+        obligatorio,
+      });
       onGuardado();
     },
     onError: (e) => {

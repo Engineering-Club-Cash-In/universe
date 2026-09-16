@@ -486,6 +486,22 @@ Probado contra el sandbox dentro de una transacción revertida: el segundo inten
 anular no toca ninguna fila, el convenio anulado no aparece como pendiente, y el CHECK
 rechaza una anulación sin motivo.
 
+#### Tres cosas que la review de Codex corrigió acá
+
+- **La escritura revalida al dueño.** Autorizar y escribir son dos requests distintas:
+  entre una y otra el motor o un supervisor pueden reasignar el crédito, y sin
+  precondición el asesor que acaba de perderlo deshacía igual el convenio. Ahora viaja el
+  dueño **esperado** y cartera lo revalida dentro de su transacción — la misma carrera que
+  la recuperación de vehículo ya cerraba así.
+- **El convenio se resuelve con una consulta dedicada**, no leyendo
+  `getCredito().convenioActivo`: ese endpoint devuelve temprano con `convenioActivo: null`
+  *hardcodeado* cuando el calendario original del crédito ya no tiene ninguna cuota de hoy
+  en adelante — y un convenio puede sobrevivir al calendario que reestructuró. Justo los
+  créditos más atrasados, los que más necesitan deshacer, se quedaban sin la acción.
+- **La banda no caduca al año.** El `diasAtras` de 365 es una cota de *volumen* del
+  listado; en una consulta ya acotada a un solo crédito hacía desaparecer la banda roja
+  cuando la cuota impaga más vieja pasaba del año — justo el caso más grave.
+
 #### La banda pregunta, no deduce
 
 El estado del convenio lo responde cartera (`GET /convenio/alertas` filtrado a ese

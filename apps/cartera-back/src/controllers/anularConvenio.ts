@@ -2,6 +2,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import {
+  asesores,
   convenios_pago,
   creditos,
   platform_users,
@@ -59,6 +60,19 @@ export async function anularConvenio(params: {
   motivo: string;
   /** Correo de quien lo pidió; se resuelve a platform_users para la bitácora. */
   usuario_email?: string;
+  /**
+   * PRECONDICIÓN de dueño, revalidada acá adentro contra el dueño REAL.
+   *
+   * Quien autorizó del lado del CRM verificó, en OTRA request, que el crédito
+   * era de esa persona. Entre esa verificación y esta escritura el motor o un
+   * supervisor pueden haberlo reasignado, y sin precondición el asesor que ya
+   * lo perdió deshacía igual el convenio (review de Codex, P1 — es la misma
+   * carrera que la recuperación de vehículo ya cerraba así).
+   *
+   * Va vacío cuando quien llama ve toda la cartera (admin / supervisor): ahí no
+   * hay dueño esperado que exigir.
+   */
+  asesor_esperado_email?: string;
 }): Promise<AnularConvenioResultado> {
   const motivo = (params.motivo ?? "").trim();
   if (motivo.length < 5) {
@@ -85,6 +99,28 @@ export async function anularConvenio(params: {
           .where(sql`lower(trim(${platform_users.email})) = ${correo}`)
           .limit(1);
         usuarioId = u?.id ?? null;
+      }
+
+      // Dueño esperado ANTES de escribir: se lee el crédito del convenio y se
+      // compara por `email_cash_in`, el mismo puente por correo con el que el
+      // CRM decide la propiedad. Va dentro de la transacción para que la
+      // comprobación y la escritura no puedan separarse.
+      const esperado = params.asesor_esperado_email?.trim().toLowerCase();
+      if (esperado) {
+        const [dueno] = await tx
+          .select({ email: asesores.emailCashIn })
+          .from(convenios_pago)
+          .innerJoin(creditos, eq(creditos.credito_id, convenios_pago.credito_id))
+          .leftJoin(asesores, eq(asesores.asesor_id, creditos.asesor_id))
+          .where(eq(convenios_pago.convenio_id, params.convenio_id))
+          .limit(1);
+        const emailDueno = dueno?.email?.trim().toLowerCase();
+        if (!emailDueno || emailDueno !== esperado) {
+          throw new AnulacionAbortada(
+            409,
+            "[ERROR] El crédito se reasignó a otro asesor mientras se deshacía el convenio. Actualizá la vista e intentá de nuevo.",
+          );
+        }
       }
 
       const [anulado] = await tx

@@ -378,6 +378,10 @@ export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements
         convenio_id: convenioId,
         motivo: body.motivo,
         usuario_email: body.solicitado_por_email ?? user?.email,
+        // Precondición de dueño: el CRM la manda cuando quien pidió deshacer NO
+        // ve toda la cartera. Se revalida dentro de la transacción contra el
+        // dueño real (review de Codex, P1).
+        asesor_esperado_email: body.asesor_esperado_email,
       });
 
       if (!resultado.success) {
@@ -392,6 +396,7 @@ export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements
       body: t.Object({
         motivo: t.String({ minLength: 5 }),
         solicitado_por_email: t.Optional(t.String()),
+        asesor_esperado_email: t.Optional(t.String()),
       }),
       detail: {
         summary: "Undo an approved payment agreement (soft delete)",

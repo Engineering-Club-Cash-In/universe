@@ -2235,7 +2235,12 @@ export class CarteraBackClient {
 	 */
 	async anularConvenio(
 		convenioId: number,
-		input: { motivo: string; solicitado_por_email?: string },
+		input: {
+			motivo: string;
+			solicitado_por_email?: string;
+			/** Dueño esperado; cartera lo revalida dentro de su transacción. */
+			asesor_esperado_email?: string;
+		},
 	): Promise<{
 		convenio_id: number;
 		credito_id: number;

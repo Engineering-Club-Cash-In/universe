@@ -8717,8 +8717,14 @@ export const cobrosRouter = {
 				.where(eq(casosCobros.id, input.casoCobroId))
 				.limit(1);
 			if (!caso?.numeroCreditoSifco) return null;
+			// `diasAtras` amplio a propósito (review de Codex, P2): el default de
+			// 365 es una cota de VOLUMEN para el listado, pero acá la consulta ya
+			// está acotada a un solo crédito. Con el default, un convenio cuya
+			// cuota impaga más vieja pasaba del año dejaba de responder y la banda
+			// roja desaparecía justo del caso más grave.
 			const respuesta = await carteraBackClient.getConvenioAlertas({
 				numeroSifco: caso.numeroCreditoSifco,
+				diasAtras: 3650,
 			});
 			return respuesta.data?.[0] ?? null;
 		}),
@@ -8772,26 +8778,50 @@ export const cobrosRouter = {
 				accion: "deshacer su convenio de pago",
 			});
 
+			// El convenio se resuelve con una consulta DEDICADA y no leyendo
+			// `getCredito().convenioActivo` (review de Codex, P2): ese endpoint
+			// devuelve temprano —con `convenioActivo: null` hardcodeado— cuando el
+			// calendario original del crédito ya no tiene ninguna cuota de hoy en
+			// adelante, y un convenio puede perfectamente sobrevivir al calendario
+			// que reestructuró. Justo los créditos más atrasados, que son los que
+			// más necesitan deshacer, se quedaban sin la acción.
+			//
 			// Sin cache: el convenio pudo decidirse, completarse o deshacerse hace
 			// un minuto, y sobre la foto vieja se intentaría anular algo que ya no
 			// está vigente.
-			const credito = await carteraBackClient.getCredito(
-				caso.numeroCreditoSifco,
-				false,
+			const listado = await carteraBackClient.getConveniosListado({
+				numeroCreditoSifco: caso.numeroCreditoSifco,
+				estado: "active",
+				perPage: 5,
+			});
+			const convenio = (listado?.data ?? []).find(
+				(c) => c.activo && !c.completado,
 			);
-			const convenio = credito?.convenioActivo ?? null;
-			if (!convenio || !convenio.activo || convenio.completado) {
+			if (!convenio) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
 						"Este crédito no tiene un convenio vigente que deshacer. Si el convenio está esperando aprobación, lo que corresponde es rechazarlo.",
 				});
 			}
 
+			const dueñoEsperado = PERMISSIONS.canViewAllCasosCobros(
+				context.userRole ?? "",
+			)
+				? undefined
+				: context.session.user.email;
+
 			let resultado: Awaited<ReturnType<typeof carteraBackClient.anularConvenio>>;
 			try {
 				resultado = await carteraBackClient.anularConvenio(convenio.convenio_id, {
 					motivo: input.motivo,
 					solicitado_por_email: context.session.user.email,
+					// Autorizar y escribir son dos requests distintas: entre una y
+					// otra el motor o un supervisor pueden reasignar el crédito, y
+					// sin precondición el asesor que acaba de perderlo deshacía
+					// igual el convenio (review de Codex, P1). Cartera lo revalida
+					// bajo su transacción. Para quien ve toda la cartera no hay
+					// dueño que exigir.
+					asesor_esperado_email: dueñoEsperado,
 				});
 			} catch (err) {
 				throw new ORPCError("BAD_REQUEST", {
@@ -8821,11 +8851,7 @@ export const cobrosRouter = {
 					credito_id: resultado.credito_id,
 					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo}`,
 					usuario_email: context.session.user.email,
-					asesor_esperado_email: PERMISSIONS.canViewAllCasosCobros(
-						context.userRole ?? "",
-					)
-						? undefined
-						: context.session.user.email,
+					asesor_esperado_email: dueñoEsperado,
 				});
 				return { ...resultado, recuperacion };
 			} catch (err) {

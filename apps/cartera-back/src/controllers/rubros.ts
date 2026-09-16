@@ -2052,6 +2052,30 @@ export async function aplicarRubrosDelPago(
    * justo la invariante que ya se rompió una vez cuando una ruta nueva empezó a
    * llamar sin tomarlo.
    */
+  /**
+   * La boleta tiene que seguir VIVA. Sin esto, se le cobra al cliente un cargo
+   * por un pago que la empresa ya declaró falso.
+   *
+   * No es teórico: `resetCredit` y la caída a incobrable de `credits.ts` marcan
+   * `paymentFalse = true` EN BLOQUE sobre los pagos no pagados de un crédito, y
+   * no tocan `rubros_pagos` —no tienen por qué saber que existe—. El reclamo
+   * queda ahí, sin aplicar, colgado de una boleta muerta; y como esta consulta
+   * elegía sólo por `pago_id` y `aplicado`, aplicar después ese pago le
+   * descontaba el saldo al rubro y marcaba el reclamo como aplicado.
+   *
+   * El guard va ACÁ y no en cada ruta que marca pagos falsos, que es la otra
+   * salida posible: acá hay un solo lugar por donde se aplica, y allá hay tantos
+   * como rutas existan hoy y se agreguen mañana. Una guarda en el cuello de
+   * botella sobrevive a las rutas que todavía no se escribieron.
+   */
+  const [pago] = await ejecutor
+    .select({ paymentFalse: pagos_credito.paymentFalse })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.pago_id, pago_id))
+    .limit(1);
+
+  if (!pago || pago.paymentFalse) return [];
+
   const reclamos = await ejecutor
     .select({
       id: rubros_pagos.id,

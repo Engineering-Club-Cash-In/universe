@@ -445,18 +445,55 @@ atrasados = fechas de vencimiento distintas, pasadas, con algo impago, uniendo l
 del crédito no absorbidas por el convenio + las cuotas del convenio vencidas. Cero meses
 atrasados = al día → B2; uno o más → B4.
 
-### Fase 3 · Ficha 360 — banda roja y acciones
+### Fase 3 · Ficha 360 — banda roja y acciones ✅ implementada
 
-- Sacar "Recuperación de vehículo" del dropdown de **Más acciones** y darle un lugar fijo
-  y visible en la fila de acciones.
-- Banda roja arriba cuando: (a) hay convenio activo con cuota vencida impaga, o
-  (b) está `EN_RECUPERACION` y ya acumuló 5 cuotas.
-- **Tres** acciones (la de jurídico se cayó por la decisión 6):
+- ✅ "Recuperación de vehículo" salió del dropdown de **Más acciones**. Estaba escondida
+  entre cartas notariales y estados de cuenta siendo la decisión más grave de la pantalla;
+  ahora tiene lugar fijo en la fila de acciones.
+- ✅ Banda roja arriba de la identidad del caso cuando el convenio está incumplido. La
+  rama (b) —`EN_RECUPERACION` con 5 cuotas— llega con la Fase 4, que es la que crea el
+  estado.
+- ✅ Las **tres** acciones (la de jurídico se cayó por la decisión 6):
   - Deshacer convenio
   - Deshacer convenio y mandar a recuperación (B4)
-  - Mandar a recuperación (B4) — **habilitado solo en B1–B3**
-- **Soft delete** del convenio: columnas nuevas (`anulado_at`, `anulado_por`, `motivo`) y
-  migración de cartera. Ojo: carteraFront consume el mismo endpoint, el cambio se ve allá.
+  - Mandar a recuperación (B4) — **habilitado solo en B1–B3**, y cuando no aplica se
+    deshabilita con el motivo en el título, no se esconde.
+- ✅ **Soft delete** del convenio (migración **0018** de cartera).
+
+#### Deshacer ≠ rechazar
+
+Son dos operaciones distintas y por eso son dos funciones distintas:
+
+| | Rechazar (CB-033) | Deshacer (Fase 3) |
+| --- | --- | --- |
+| Sobre qué | Un convenio que **nunca estuvo vigente** | Un acuerdo **firmado** que dejó de pagarse |
+| Qué hace con la fila | `DELETE` duro | `anulado_at` + motivo + quién |
+| Por qué | No hubo acuerdo: no hay nada que conservar | Borrarlo destruye el plan de cuotas y la traza de lo que sí pagó |
+
+El efecto financiero **sí** es el mismo, porque la pregunta es la misma: *¿cuánto debe
+este crédito si el convenio no existiera?* Se recuenta el atraso real y se recrea la mora,
+o queda `ACTIVO` si ya no debe nada. El bucket se suelta solo: al volver a `MOROSO`, el
+motor de las 23:59 lo vuelve a derivar y escribe la transición contra la fila `CONGELADO`.
+
+> ⚠️ **`anulado_at` no es decorativo.** Un convenio deshecho queda con `activo=false` y
+> `completado=false` — **exactamente** la firma de "pendiente de aprobación" (CB-033). Sin
+> filtrar por esa columna, un convenio deshecho reaparece en la cola del supervisor y
+> aprobarlo lo resucita. Se filtró en los dos lugares que importan: el `UPDATE` de
+> exclusión mutua de `decidirConvenio` y el filtro `pending` de `listPaymentAgreements`.
+> Un CHECK exige además que la anulación esté completa (fecha + motivo) o no exista.
+
+Probado contra el sandbox dentro de una transacción revertida: el segundo intento de
+anular no toca ninguna fila, el convenio anulado no aparece como pendiente, y el CHECK
+rechaza una anulación sin motivo.
+
+#### La banda pregunta, no deduce
+
+El estado del convenio lo responde cartera (`GET /convenio/alertas` filtrado a ese
+crédito), no el front mirando el plan de cuotas que ya tiene a mano. La cobertura de una
+cuota del convenio se mide por **monto** —un abono parcial acumulativo no marca
+`fecha_pago`— y la re-indexación de las cuotas posteriores al acuerdo tampoco es algo que
+deba vivir duplicado en el navegador. Es la misma fuente que la pantalla de Alertas de
+Convenios y que el job de avisos: **una sola definición de "incumplido"**.
 
 ### Fase 4 · El estado `EN_RECUPERACION` — la invasiva, de último
 

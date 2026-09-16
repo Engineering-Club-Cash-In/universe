@@ -8691,6 +8691,155 @@ export const cobrosRouter = {
 			}
 		}),
 
+	/**
+	 * COBROS-02 Fase 3 — el estado del convenio de ESTE caso, para la banda roja
+	 * de la Ficha 360.
+	 *
+	 * Se pregunta a cartera en vez de deducirlo del plan de cuotas que ya viene
+	 * en la ficha: la cobertura de una cuota del convenio se mide por MONTO
+	 * (los parciales acumulativos no marcan `fecha_pago`) y la re-indexación de
+	 * las cuotas posteriores al acuerdo no es algo que deba vivir duplicado en
+	 * el front. Es la misma fuente que la pantalla de Alertas de Convenios y que
+	 * el job de avisos: una sola definición de "incumplido".
+	 */
+	getAlertaConvenioDelCaso: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			if (!isCarteraBackEnabled()) return null;
+			const [caso] = await db
+				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+			if (!caso?.numeroCreditoSifco) return null;
+			const respuesta = await carteraBackClient.getConvenioAlertas({
+				numeroSifco: caso.numeroCreditoSifco,
+			});
+			return respuesta.data?.[0] ?? null;
+		}),
+
+	/**
+	 * COBROS-02 Fase 3 — DESHACER el convenio de un crédito (soft delete), con
+	 * la opción de mandarlo en el mismo gesto a recuperación de vehículo.
+	 *
+	 * Autorización: exactamente la misma cadena que `enviarCreditoARecuperacion`,
+	 * y por las mismas razones (el caso se puede fabricar, cartera es la verdad
+	 * de quién es el crédito, y se lee SIN cache). No se repite acá el
+	 * razonamiento: está escrito entero allá arriba.
+	 *
+	 * El `convenio_id` NO se recibe del cliente. Es numérico y enumerable, y
+	 * `cobrosProcedure` solo valida el rol: se resuelve leyendo el convenio
+	 * ACTIVO del crédito en cartera, que además es la única definición correcta
+	 * de "el convenio de este crédito".
+	 */
+	deshacerConvenio: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				motivo: z
+					.string()
+					.trim()
+					.min(5, "El motivo debe tener al menos 5 caracteres"),
+				/** Encadena la recuperación de vehículo después de deshacer. */
+				mandarARecuperacion: z.boolean().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const [caso] = await db
+				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+			if (!caso?.numeroCreditoSifco) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El caso no tiene crédito de cartera asociado.",
+				});
+			}
+			await assertCreditoAsignadoEnCarteraPorSifco({
+				numeroSifco: caso.numeroCreditoSifco,
+				emailUsuario: context.session.user.email,
+				userRole: context.userRole,
+				accion: "deshacer su convenio de pago",
+			});
+
+			// Sin cache: el convenio pudo decidirse, completarse o deshacerse hace
+			// un minuto, y sobre la foto vieja se intentaría anular algo que ya no
+			// está vigente.
+			const credito = await carteraBackClient.getCredito(
+				caso.numeroCreditoSifco,
+				false,
+			);
+			const convenio = credito?.convenioActivo ?? null;
+			if (!convenio || !convenio.activo || convenio.completado) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este crédito no tiene un convenio vigente que deshacer. Si el convenio está esperando aprobación, lo que corresponde es rechazarlo.",
+				});
+			}
+
+			let resultado: Awaited<ReturnType<typeof carteraBackClient.anularConvenio>>;
+			try {
+				resultado = await carteraBackClient.anularConvenio(convenio.convenio_id, {
+					motivo: input.motivo,
+					solicitado_por_email: context.session.user.email,
+				});
+			} catch (err) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						err instanceof Error
+							? err.message
+							: "No se pudo deshacer el convenio",
+				});
+			}
+
+			if (!input.mandarARecuperacion) {
+				return { ...resultado, recuperacion: null };
+			}
+
+			// La recuperación va DESPUÉS y por separado a propósito: son dos
+			// operaciones en dos transacciones distintas de cartera y no hay forma
+			// de unirlas desde acá. Si esta falla, el convenio YA quedó deshecho —
+			// se reporta el parcial en vez de mentir con un error total, porque
+			// reintentar "deshacer y mandar" fallaría en el primer paso (el
+			// convenio ya no está vigente) y el asesor no entendería por qué.
+			//
+			// Además el crédito acaba de volver a MOROSO con su mora recreada, así
+			// que su bucket vivo ya es el que le toca: la recuperación lo lee
+			// después y lo manda a B4 desde ahí.
+			try {
+				const recuperacion = await carteraBackClient.enviarARecuperacionVehiculo({
+					credito_id: resultado.credito_id,
+					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo}`,
+					usuario_email: context.session.user.email,
+					asesor_esperado_email: PERMISSIONS.canViewAllCasosCobros(
+						context.userRole ?? "",
+					)
+						? undefined
+						: context.session.user.email,
+				});
+				return { ...resultado, recuperacion };
+			} catch (err) {
+				return {
+					...resultado,
+					recuperacion: null,
+					recuperacionError:
+						err instanceof Error
+							? err.message
+							: "No se pudo enviar el crédito a recuperación",
+				};
+			}
+		}),
+
 	// Bitácora de reasignaciones de asesor (auditoría) — manual + automática.
 	getHistorialReasignaciones: cobrosSupervisorProcedure
 		.input(

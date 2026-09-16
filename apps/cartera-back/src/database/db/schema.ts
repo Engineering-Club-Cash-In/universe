@@ -1692,6 +1692,17 @@
     motivo: text("motivo"),
     observaciones: text("observaciones"),
 
+    // COBROS-02 Fase 3 — DESHACER el convenio es soft delete (decisión 10).
+    //
+    // ⚠️ `anulado_at` NO es decorativo: un convenio anulado queda con
+    // activo=false y completado=false, que es EXACTAMENTE la firma de
+    // "pendiente de aprobación" (CB-033). Sin filtrar por esta columna, un
+    // convenio deshecho reaparece en la cola del supervisor y aprobarlo lo
+    // resucita. Toda consulta de pendientes tiene que exigir `anulado_at IS NULL`.
+    anulado_at: timestamp("anulado_at", { withTimezone: true }),
+    anulado_por: integer("anulado_por").references(() => platform_users.id),
+    motivo_anulacion: text("motivo_anulacion"),
+
     // Snapshot de las cuotas (cuota_id) que se metieron al convenio al momento de
     // crearlo. NO cambia con reversas/borrados posteriores de pagos. Se usa para
     // que el job de buckets EXCLUYA estas cuotas del conteo de atraso (son las que

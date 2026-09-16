@@ -1727,6 +1727,10 @@ export async function listPaymentAgreements(filters: ListPaymentAgreementsFilter
       // lo reactivaría (activo=true sobre completado=true).
       conditions.push(eq(convenios_pago.activo, false));
       conditions.push(eq(convenios_pago.completado, false));
+      // COBROS-02 Fase 3: un convenio DESHECHO tiene exactamente esa misma
+      // firma. Sin este filtro reaparece en la cola del supervisor como si
+      // estuviera esperando aprobación.
+      conditions.push(isNull(convenios_pago.anulado_at));
     }
 
     // Búsqueda libre (SIFCO o cliente): el CRM manda el mismo texto en ambos

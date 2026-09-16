@@ -45,6 +45,8 @@ export interface ConvenioAlertasOpciones {
   diasAlerta?: number;
   /** Filtra por el asesor DUEÑO del crédito. */
   asesorId?: number;
+  /** Filtra a UN crédito — lo usa la banda de la Ficha 360. */
+  numeroSifco?: string;
 }
 
 const DEFAULTS = {
@@ -61,6 +63,9 @@ export async function getConvenioAlertas(opts: ConvenioAlertasOpciones = {}) {
   const hoyGT = sql`(now() AT TIME ZONE 'America/Guatemala')::date`;
   const filtroAsesor =
     opts.asesorId != null ? sql`AND c.asesor_id = ${opts.asesorId}` : sql``;
+  const filtroSifco = opts.numeroSifco
+    ? sql`AND c.numero_credito_sifco = ${opts.numeroSifco}`
+    : sql``;
 
   const res = await db.execute<any>(sql`
     WITH adelante AS (
@@ -185,6 +190,7 @@ export async function getConvenioAlertas(opts: ConvenioAlertasOpciones = {}) {
       AND r.fecha_urgente >= ${hoyGT} - ${diasAtras}
       AND r.fecha_urgente <= ${hoyGT} + ${diasAdelante}
       ${filtroAsesor}
+      ${filtroSifco}
     ORDER BY r.fecha_urgente ASC, u.nombre ASC
   `);
 

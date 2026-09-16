@@ -150,6 +150,38 @@ export const redondearMonto = (monto: BigInput): string =>
 export const MONTO_MAXIMO_RUBRO = 99999999.99;
 
 /**
+ * El mismo tope, pero medido sobre el valor CRUDO que llega en el body — para
+ * el esquema TypeBox del router, que valida antes de que nadie redondee.
+ *
+ * Existe porque el esquema y `puedeUsarMonto` juzgaban números distintos: la
+ * policy redondea primero (el invariante "se valida y se guarda EL MISMO
+ * número", el que nació del rubro de Q0 que entró con `monto: 0.004`), mientras
+ * que un `maximum: MONTO_MAXIMO_RUBRO` a secas comparaba la milésima cruda. O
+ * sea que `99999999.994` —que la policy acepta, porque la columna guardaría
+ * "99999999.99"— se llevaba un 400 por una fracción de centavo que nunca iba a
+ * existir. Es un borde inalcanzable en la práctica, pero dos jueces con dos
+ * números es justo la forma del defecto que ya se pagó una vez en el piso.
+ *
+ * Es medio centavo por encima del tope y se usa como cota EXCLUSIVA: con
+ * redondeo half-up (el default de big.js, que este repo nunca cambia), todo lo
+ * que está estrictamente por debajo de `tope + 0.005` redondea al tope o menos,
+ * y `tope + 0.005` ya sube al centavo siguiente. La suma va con `Big` y no con
+ * `+ 0.005` porque en coma flotante esa cuenta da 99999999.99499999 —el double
+ * ANTERIOR al que se busca—, que volvería a rechazar valores que la policy
+ * acepta: exactamente el desajuste que esta constante viene a cerrar.
+ *
+ * NO se resolvió al revés (sacar el tope del esquema y dejarlo sólo en la
+ * policy) por dos razones: un monto que no cabe en la columna es una entrada
+ * malformada —400, lo que el módulo ya le prometió al front— y no un choque de
+ * negocio, que es el 409 que devuelve `puedeUsarMonto`; y el esquema es el
+ * único que corta `Infinity` (un `1e400` del body es un `number` para
+ * JavaScript, pero `new Big(Infinity)` tira y saldría como 500).
+ */
+export const MONTO_MAXIMO_RUBRO_CRUDO = Number(
+  new Big(MONTO_MAXIMO_RUBRO).plus("0.005")
+);
+
+/**
  * ¿Es un monto que un rubro puede cobrar?
  *
  * Un rubro ES una deuda a cobrar, así que el cero y el negativo no son montos

@@ -14,7 +14,7 @@ import {
   listarTipos,
   resolverUsuarioId,
 } from "../controllers/rubros";
-import { MONTO_MAXIMO_RUBRO } from "../controllers/rubrosPolicy";
+import { MONTO_MAXIMO_RUBRO_CRUDO } from "../controllers/rubrosPolicy";
 
 /**
  * Gate de rol server-side. `authMiddleware` SÓLO valida la firma del JWT: no
@@ -289,7 +289,12 @@ export const rubrosRouter = new Elysia({ prefix: "/rubros" })
         // explica el rechazo. El techo va acá además de en la policy porque un
         // `1e16` no es una decisión de negocio: es un valor que no cabe en
         // `numeric(18,2)` y terminaba en `numeric field overflow`.
-        monto: t.Number({ maximum: MONTO_MAXIMO_RUBRO }),
+        //
+        // La cota es la del valor CRUDO y EXCLUSIVA: el esquema mira el número
+        // tal como viene y la policy lo mira redondeado, así que un `maximum`
+        // pegado al tope rechazaba con 400 montos que la policy acepta porque
+        // redondean justo a él. `MONTO_MAXIMO_RUBRO_CRUDO` explica la cuenta.
+        monto: t.Number({ exclusiveMaximum: MONTO_MAXIMO_RUBRO_CRUDO }),
         // REQUERIDA: la columna es NOT NULL y el tipo sólo dice QUÉ se cobra —
         // la descripción es lo que le explica el cargo a este cliente. El
         // `minLength` corta el string vacío acá; el de puros espacios lo corta
@@ -327,7 +332,10 @@ export const rubrosRouter = new Elysia({ prefix: "/rubros" })
     },
     {
       body: t.Object({
-        monto: t.Optional(t.Number({ maximum: MONTO_MAXIMO_RUBRO })),
+        // Misma cota cruda y exclusiva que el alta: el tope es del monto, no
+        // del endpoint, y con dos números distintos el mismo valor entraba por
+        // POST y rebotaba por PUT.
+        monto: t.Optional(t.Number({ exclusiveMaximum: MONTO_MAXIMO_RUBRO_CRUDO })),
         // Opcional pero NUNCA vacía: omitirla es "no la toques", mandarla es
         // reemplazarla por algo que se pueda leer. Ya no acepta `null` porque
         // la columna es NOT NULL — borrar la descripción dejaría el cargo sin

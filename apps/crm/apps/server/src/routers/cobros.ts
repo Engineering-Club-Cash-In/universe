@@ -2471,29 +2471,37 @@ export const cobrosRouter = {
 			const sifcos = [
 				...new Set(alertas.map((a) => a.numero_credito_sifco).filter(Boolean)),
 			];
+			// Un mismo SIFCO puede tener VARIAS filas en casos_cobros (reaperturas,
+			// migraciones, altas manuales): no hay índice único. Se resuelve
+			// primero cuál es el VIGENTE —gana el activo y, a igualdad, el más
+			// reciente por updatedAt— y recién después se aplica la propiedad
+			// (review de Codex, P2).
+			//
+			// El orden importa: quedándose con la última fila que devolviera
+			// Postgres, dos asesores podían ver la misma alerta cada uno por su
+			// caso duplicado, y a un supervisor se lo mandaba a un caso
+			// arbitrario. `agruparCasosVigentesPorSifco` es el mismo criterio que
+			// ya usan la agenda, la cola y el listado.
 			const casos = await db
 				.select({
 					id: casosCobros.id,
-					sifco: casosCobros.numeroCreditoSifco,
+					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+					activo: casosCobros.activo,
+					updatedAt: casosCobros.updatedAt,
 					responsable: casosCobros.responsableCobros,
 				})
 				.from(casosCobros)
-				.where(
-					and(
-						eq(casosCobros.activo, true),
-						inArray(casosCobros.numeroCreditoSifco, sifcos),
-					),
-				);
+				.where(inArray(casosCobros.numeroCreditoSifco, sifcos));
 
+			const vigentes = agruparCasosVigentesPorSifco(casos);
 			const puedeVerTodo = PERMISSIONS.canViewAllCasosCobros(context.userRole);
 			const casoPorSifco = new Map<
 				string,
 				{ id: string; responsable: string | null }
 			>();
-			for (const c of casos) {
-				if (!c.sifco) continue;
+			for (const [sifco, c] of vigentes) {
 				if (!puedeVerTodo && c.responsable !== context.userId) continue;
-				casoPorSifco.set(c.sifco, { id: c.id, responsable: c.responsable });
+				casoPorSifco.set(sifco, { id: c.id, responsable: c.responsable });
 			}
 
 			return alertas

@@ -146,7 +146,7 @@ export async function getConvenioAlertas(opts: ConvenioAlertasOpciones = {}) {
     INNER JOIN ${SQL_CARTERA_SCHEMA}.creditos c ON c.credito_id = r.credito_id
     INNER JOIN ${SQL_CARTERA_SCHEMA}.usuarios u ON u.usuario_id = c.usuario_id
     LEFT JOIN ${SQL_CARTERA_SCHEMA}.asesores a ON a.asesor_id = c.asesor_id
-    -- La cuota urgente en sí (para su ordinal `j` y su monto restante).
+    -- La cuota urgente en sí (para su ordinal j y su monto restante).
     INNER JOIN LATERAL (
       SELECT p.j
       FROM pendientes p
@@ -164,6 +164,15 @@ export async function getConvenioAlertas(opts: ConvenioAlertasOpciones = {}) {
              WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false
                AND pc.pagado = true AND pc.validation_status IN ('validated', 'no_required')
                AND COALESCE(pc.monto_aplicado, 0) > 0)
+          -- Ya hay un pago REGISTRADO aunque CONTA no lo haya validado todavía:
+          -- no pedirle plata a quien ya mandó su boleta. Mismo predicado que
+          -- cuotasProximas.ts y convenioProximos.ts — sin él, esta pantalla le
+          -- decía al asesor que cobrara algo que el cliente ya depositó.
+          AND NOT EXISTS (
+            SELECT 1 FROM ${SQL_CARTERA_SCHEMA}.pagos_credito pr
+             WHERE pr.cuota_id = cu.cuota_id AND pr."paymentFalse" = false
+               AND pr.validation_status = 'pending'
+               AND COALESCE(pr.monto_boleta, 0) > 0)
         THEN c.cuota ELSE 0 END AS monto
       FROM ${SQL_CARTERA_SCHEMA}.cuotas_credito cu
       WHERE cu.credito_id = c.credito_id

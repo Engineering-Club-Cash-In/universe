@@ -25,9 +25,10 @@
  * check-cobros-alertas / checkPromesasPago).
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
+import { agruparCasosVigentesPorSifco } from "../lib/caso-vigente";
 import type { NewNotification } from "../db/schema/notifications";
 import { notifications } from "../db/schema/notifications";
 import type { CarteraConvenioAlerta } from "../types/cartera-back";
@@ -171,22 +172,33 @@ export async function checkConveniosIncumplidos(): Promise<ConveniosIncumplidosR
 	}
 }
 
-/** Mapa `numero_credito_sifco → caso.id` (solo casos activos). */
+/**
+ * Mapa `numero_credito_sifco → caso.id` del caso VIGENTE de cada crédito.
+ *
+ * No hay índice único sobre `numero_credito_sifco`, así que un crédito puede
+ * tener varias filas (reaperturas, migraciones, altas manuales). Quedarse con
+ * la última que devuelva Postgres es quedarse con una arbitraria: el aviso
+ * podía colgarse de un caso viejo y no aparecer en la ficha que el asesor
+ * abre (review de Codex, P2). `agruparCasosVigentesPorSifco` aplica el criterio
+ * de siempre: gana el activo y, a igualdad, el más reciente.
+ */
 async function mapearCasosPorSifco(
 	sifcos: string[],
 ): Promise<Map<string, string>> {
 	const unicos = [...new Set(sifcos.filter(Boolean))];
 	if (unicos.length === 0) return new Map();
 	const rows = await db
-		.select({ id: casosCobros.id, sifco: casosCobros.numeroCreditoSifco })
+		.select({
+			id: casosCobros.id,
+			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			activo: casosCobros.activo,
+			updatedAt: casosCobros.updatedAt,
+		})
 		.from(casosCobros)
-		.where(
-			and(
-				eq(casosCobros.activo, true),
-				inArray(casosCobros.numeroCreditoSifco, unicos),
-			),
-		);
+		.where(inArray(casosCobros.numeroCreditoSifco, unicos));
 	const map = new Map<string, string>();
-	for (const r of rows) if (r.sifco) map.set(r.sifco, r.id);
+	for (const [sifco, caso] of agruparCasosVigentesPorSifco(rows)) {
+		map.set(sifco, caso.id);
+	}
 	return map;
 }

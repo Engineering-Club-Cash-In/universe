@@ -322,9 +322,16 @@ siempre, así que un crédito que completó o rechazó un convenio y después fi
 quedaba sin congelar — ni al firmar ni en la red de seguridad — y el lector seguía
 exponiendo el bucket del convenio anterior.
 
-La comprobación lleva ahora un corte por la fecha de creación del convenio vigente. Sin
-ese parámetro conserva el comportamiento viejo, que es lo correcto para un caller que no
-sabe de qué convenio habla.
+La comprobación lleva ahora un corte por la fecha de creación del convenio. Sin ese
+parámetro conserva el comportamiento viejo, que es lo correcto para un caller que no sabe
+de qué convenio habla.
+
+El corte se calcula sobre los convenios **que todavía no terminaron**, aprobados *o*
+esperando aprobación — no solo los `activo = true`. Un convenio recién firmado nace
+inactivo mientras el supervisor decide, pero el crédito ya quedó `EN_CONVENIO`: dejándolo
+fuera del corte, la red de seguridad no podía reparar un congelamiento fallido durante
+todo ese período (indefinido si nadie decide). El **atraso**, en cambio, se sigue midiendo
+solo sobre los activos: un convenio sin aprobar todavía no reestructuró nada.
 
 #### Comprobar e insertar van juntos
 

@@ -131,9 +131,10 @@ export async function medirAtrasoDeConvenios(
   mesesAtrasados: Map<number, number>;
   mesesUnion: Map<number, number>;
   /**
-   * Cuándo se creó el convenio VIGENTE de cada crédito. Lo usa el vigilante
-   * para acotar el congelamiento a ese convenio y no a cualquiera que el
-   * crédito haya tenido antes (review de Codex, P2).
+   * Cuándo se creó el convenio de cada crédito que **todavía no terminó** —
+   * aprobado o esperando aprobación. Lo usa el vigilante para acotar el
+   * congelamiento a ESE convenio y no a cualquiera que el crédito haya tenido
+   * antes.
    */
   convenioDesde: Map<number, Date | null>;
 }> {
@@ -174,7 +175,6 @@ export async function medirAtrasoDeConvenios(
     .select({
       credito_id: convenios_pago.credito_id,
       cuotas_convenio: convenios_pago.cuotas_convenio,
-      created_at: convenios_pago.created_at,
     })
     .from(convenios_pago)
     .where(
@@ -184,15 +184,42 @@ export async function medirAtrasoDeConvenios(
         eq(convenios_pago.activo, true),
       ),
     );
-  const excluidas = new Map<number, Set<number>>();
-  for (const cv of convenios) {
-    // El más reciente gana: si un crédito tuviera dos vigentes (no debería), el
-    // congelamiento se acota al último, que es el que manda.
+  // ── El corte del congelamiento va por su propia consulta ─────────────────
+  //
+  // No se puede reusar `convenios` de arriba porque esa exige `activo = true`, y
+  // un convenio recién firmado nace `activo = false` esperando la aprobación del
+  // supervisor MIENTRAS el crédito ya quedó EN_CONVENIO (review de Codex, P2).
+  //
+  // Dejando ese convenio fuera del mapa, el corte quedaba en `null`, la
+  // comprobación caía al modo "cualquier fila histórica" y encontraba la del
+  // convenio ANTERIOR: la red de seguridad no podía reparar un congelamiento
+  // fallido durante todo el período pendiente — indefinido si nadie decide.
+  //
+  // El atraso, en cambio, se sigue midiendo solo sobre los activos: un convenio
+  // sin aprobar todavía no reestructuró nada.
+  const paraCorte = await db
+    .select({
+      credito_id: convenios_pago.credito_id,
+      created_at: convenios_pago.created_at,
+    })
+    .from(convenios_pago)
+    .where(
+      and(
+        inArray(convenios_pago.credito_id, creditoIds),
+        eq(convenios_pago.completado, false),
+      ),
+    );
+  for (const cv of paraCorte) {
+    // El más reciente gana: es el convenio cuyo congelamiento hay que exigir.
     const previo = convenioDesde.get(cv.credito_id) ?? null;
     const nacido = cv.created_at ? new Date(cv.created_at) : null;
     if (!previo || (nacido && nacido > previo)) {
       convenioDesde.set(cv.credito_id, nacido);
     }
+  }
+
+  const excluidas = new Map<number, Set<number>>();
+  for (const cv of convenios) {
     if (!cv.cuotas_convenio || cv.cuotas_convenio.length === 0) continue;
     const set = excluidas.get(cv.credito_id) ?? new Set<number>();
     for (const cid of cv.cuotas_convenio) set.add(cid);

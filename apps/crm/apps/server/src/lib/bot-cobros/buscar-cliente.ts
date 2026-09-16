@@ -25,7 +25,7 @@ import { detectarTipoBusqueda } from "./identificadores";
 import type { Ejecutor } from "./otp";
 
 /** Estados de oportunidad que representan un crédito real (D-17). */
-const ESTADOS_CON_CREDITO = ["won", "migrate"] as const;
+export const ESTADOS_CON_CREDITO = ["won", "migrate"] as const;
 
 export type ClienteBot = {
 	tipo: "titular" | "codeudor";

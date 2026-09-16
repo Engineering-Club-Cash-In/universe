@@ -380,7 +380,9 @@ describe("modo agente (servicio 10)", () => {
 				data: {
 					notificado: true,
 					motivo: "NOTIFICADO",
-					mensaje: "Listo, ya le avisamos a tu asesor.",
+					asesoresNotificados: 1,
+					identificadoPor: "referencia",
+					mensaje: "En un momento un asesor te atiende por este chat.",
 				},
 			},
 			identidad: null,
@@ -392,6 +394,33 @@ describe("modo agente (servicio 10)", () => {
 		expect(interaccion?.detalle).toEqual({
 			notificado: true,
 			motivo: "NOTIFICADO",
+			asesores: 1,
+			identificadoPor: "referencia",
 		});
+	});
+
+	// Sin referencia la fila cuelga de la identidad que salió del teléfono, y
+	// el número del chat no llega al detalle (D-42).
+	test("identificado por teléfono: sin referencia, con identidad, sin el número", () => {
+		const interaccion = armarInteraccion({
+			ruta: "/api/bot/cobros/conversacion/modo-agente",
+			cuerpo: { telefono: "50258446376" },
+			estado: 200,
+			respuesta: {
+				success: true,
+				data: {
+					notificado: true,
+					motivo: "NOTIFICADO",
+					asesoresNotificados: 2,
+					identificadoPor: "telefono",
+				},
+			},
+			identidad: IDENTIDAD,
+		});
+
+		expect(interaccion?.referencia).toBeNull();
+		expect(interaccion?.identidad).toEqual(IDENTIDAD);
+		expect(JSON.stringify(interaccion?.detalle)).not.toContain("58446376");
+		expect(interaccion?.detalle.identificadoPor).toBe("telefono");
 	});
 });

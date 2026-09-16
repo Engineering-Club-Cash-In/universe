@@ -2939,13 +2939,19 @@ export const especificacionBotCobros = {
 				tags: ["Atención humana"],
 				summary: "Servicio 10 · El cliente pasó a modo agente",
 				description: [
-					"Llamalo **cuando la conversación pase a modo agente** (el cliente pidió hablar con una persona). No devuelve datos del crédito: le crea una alerta en el CRM al **asesor dueño del crédito** para que entre a Witty Agent y le conteste, o lo llame.",
+					"Llamalo **cuando la conversación pase a modo agente** (el cliente pidió hablar con una persona). No devuelve datos del crédito: le crea una alerta en el CRM al **asesor dueño** para que entre a Witty Agent y le conteste, o lo llame.",
 					"",
-					"Mismos parámetros que el resto del menú: la `referencia` del servicio 1 y el `numeroSifco` del crédito sobre el que venía hablando.",
+					"**Cómo sabemos quién es — mandá `referencia` o `telefono` (al menos uno):**",
 					"",
-					'- **Es idempotente:** llamarlo dos veces en la misma conversación para el mismo crédito no repite la alerta (`motivo: "YA_NOTIFICADO"`). Podés reintentar sin miedo.',
-					"- **La referencia vale 24 horas acá**, no los 30 minutos del menú: el modo agente suele llegar al final de una conversación larga. Pasado eso responde `401 SESION_VENCIDA`.",
-					'- `data.notificado` es `false` solo si el crédito no tiene un asesor con usuario en el CRM (`motivo: "SIN_ASESOR"`). El `200` es igual: la conversación sigue en modo agente y `data.mensaje` no le cuenta nada interno al cliente.',
+					"- `referencia`: la del servicio 1, si el cliente se identificó. Vale **24 horas** en este servicio.",
+					"- `telefono`: el número de WhatsApp desde el que escribe (`50258446376` o `58446376`). Es lo que sirve cuando el cliente solo dijo *hola* y nunca se identificó. **Mandalo siempre que lo tengas:** si la referencia no sirve (inválida o vencida), buscamos por el teléfono en vez de rechazar.",
+					"- `numeroSifco` (**opcional**): si la conversación venía sobre un crédito, avisamos solo a su asesor. Sin él, avisamos al asesor de **cada** crédito de la persona (una alerta por asesor). Si mandás uno que no es de esa persona, `404 CREDITO_NO_ENCONTRADO`.",
+					"",
+					"**La respuesta:**",
+					"",
+					"- `data.notificado` es `true` si al menos un asesor tiene la alerta. `data.motivo`: `NOTIFICADO`, `YA_NOTIFICADO` (ya se había avisado en esta conversación —podés reintentar sin miedo—), `SIN_ASESOR` (sus créditos no tienen asesor en el CRM) o `CLIENTE_NO_IDENTIFICADO` (ni la referencia ni el teléfono son de un cliente con crédito).",
+					"- En todos esos casos es `200`: la conversación sigue en modo agente igual, y `data.mensaje` es el mismo texto neutro para el cliente.",
+					"- `data.identificadoPor` dice si se lo encontró por `referencia` o por `telefono`.",
 				].join("\n"),
 				operationId: "modoAgente",
 				requestBody: {
@@ -2954,23 +2960,39 @@ export const especificacionBotCobros = {
 						"application/json": {
 							schema: {
 								type: "object",
-								required: ["referencia", "numeroSifco"],
+								description: "Al menos uno de `referencia` o `telefono`.",
 								properties: {
 									referencia: {
 										type: "string",
 										format: "uuid",
-										description: "La que devolvió el servicio 1.",
+										description:
+											"La que devolvió el servicio 1, si el cliente se identificó.",
+									},
+									telefono: {
+										type: "string",
+										description:
+											"Número de WhatsApp del cliente, con o sin el 502.",
 									},
 									numeroSifco: {
 										type: "string",
 										description:
-											"El crédito sobre el que venía hablando el cliente.",
+											"Opcional: el crédito sobre el que venía hablando el cliente.",
 									},
 								},
 							},
-							example: {
-								referencia: "3f9c2a1e-6b7d-4c8e-9a0b-1c2d3e4f5a6b",
-								numeroSifco: "01010214117590",
+							examples: {
+								identificado: {
+									summary: "Se identificó y venía sobre un crédito",
+									value: {
+										referencia: "3f9c2a1e-6b7d-4c8e-9a0b-1c2d3e4f5a6b",
+										telefono: "50258446376",
+										numeroSifco: "01010214117590",
+									},
+								},
+								solo_telefono: {
+									summary: 'Solo escribió "hola" y pidió un humano',
+									value: { telefono: "50258446376" },
+								},
 							},
 						},
 					},
@@ -2990,11 +3012,26 @@ export const especificacionBotCobros = {
 												notificado: {
 													type: "boolean",
 													description:
-														"`true` si el asesor tiene la alerta (recién creada o de antes).",
+														"`true` si al menos un asesor tiene la alerta (recién creada o de antes).",
 												},
 												motivo: {
 													type: "string",
-													enum: ["NOTIFICADO", "YA_NOTIFICADO", "SIN_ASESOR"],
+													enum: [
+														"NOTIFICADO",
+														"YA_NOTIFICADO",
+														"SIN_ASESOR",
+														"CLIENTE_NO_IDENTIFICADO",
+													],
+												},
+												asesoresNotificados: {
+													type: "integer",
+													description:
+														"Cuántos asesores tienen la alerta (uno por asesor, no por crédito).",
+												},
+												identificadoPor: {
+													type: "string",
+													enum: ["referencia", "telefono"],
+													nullable: true,
 												},
 												mensaje: {
 													type: "string",
@@ -3012,8 +3049,24 @@ export const especificacionBotCobros = {
 											data: {
 												notificado: true,
 												motivo: "NOTIFICADO",
+												asesoresNotificados: 1,
+												identificadoPor: "referencia",
 												mensaje:
-													"Listo, ya le avisamos a tu asesor. En un momento te atiende por este chat.",
+													"En un momento un asesor te atiende por este chat.",
+											},
+										},
+									},
+									por_telefono: {
+										summary: "No se identificó: se lo encontró por su teléfono",
+										value: {
+											success: true,
+											data: {
+												notificado: true,
+												motivo: "NOTIFICADO",
+												asesoresNotificados: 2,
+												identificadoPor: "telefono",
+												mensaje:
+													"En un momento un asesor te atiende por este chat.",
 											},
 										},
 									},
@@ -3024,18 +3077,37 @@ export const especificacionBotCobros = {
 											data: {
 												notificado: true,
 												motivo: "YA_NOTIFICADO",
+												asesoresNotificados: 1,
+												identificadoPor: "referencia",
 												mensaje:
-													"Listo, ya le avisamos a tu asesor. En un momento te atiende por este chat.",
+													"En un momento un asesor te atiende por este chat.",
 											},
 										},
 									},
 									sin_asesor: {
-										summary: "El crédito no tiene asesor vinculado",
+										summary: "Sus créditos no tienen asesor vinculado",
 										value: {
 											success: true,
 											data: {
 												notificado: false,
 												motivo: "SIN_ASESOR",
+												asesoresNotificados: 0,
+												identificadoPor: "referencia",
+												mensaje:
+													"En un momento un asesor te atiende por este chat.",
+											},
+										},
+									},
+									no_identificado: {
+										summary:
+											"Ni la referencia ni el teléfono son de un cliente",
+										value: {
+											success: true,
+											data: {
+												notificado: false,
+												motivo: "CLIENTE_NO_IDENTIFICADO",
+												asesoresNotificados: 0,
+												identificadoPor: null,
 												mensaje:
 													"En un momento un asesor te atiende por este chat.",
 											},
@@ -3046,7 +3118,7 @@ export const especificacionBotCobros = {
 						},
 					},
 					"400": {
-						description: "Faltan `referencia` o `numeroSifco`.",
+						description: "No vino `referencia` ni un `telefono` válido.",
 						content: {
 							"application/json": {
 								schema: { $ref: "#/components/schemas/RespuestaError" },
@@ -3062,7 +3134,7 @@ export const especificacionBotCobros = {
 					},
 					"401": {
 						description:
-							"La referencia no sirve o pasaron más de 24 horas desde que el cliente se identificó.",
+							"Vino solo `referencia` (sin `telefono`) y no sirve, o pasaron más de 24 horas desde que el cliente se identificó. Con `telefono` no se rechaza: se busca por el número.",
 						content: {
 							"application/json": {
 								schema: { $ref: "#/components/schemas/RespuestaError" },

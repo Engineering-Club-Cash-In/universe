@@ -3,12 +3,15 @@ import type { DestinoAvisoBot } from "./aviso-bot-asesor";
 import {
 	avisarAsesorModoAgente,
 	type DependenciasModoAgente,
+	llaveModoAgente,
+	type OrigenModoAgente,
 } from "./aviso-bot-modo-agente";
 
 /**
- * COBROS-02 — aviso de modo agente. Lo que cuidan estas pruebas: que quede
- * enlazado al aviso inicial de la MISMA conversación, que no se repita, y que
- * un fallo de cartera se reporte en vez de tragarse (el bot puede reintentar).
+ * COBROS-02 — aviso de modo agente. Lo que cuidan estas pruebas: una alerta
+ * por asesor (no por crédito), dedup por asesor y conversación, enlace al
+ * aviso inicial solo cuando hubo referencia, y que un fallo de cartera se
+ * reporte en vez de tragarse.
  *
  * Dependencias inyectadas y no `mock.module`: los mocks de módulo de bun se
  * filtran entre archivos de prueba.
@@ -16,133 +19,182 @@ import {
 
 const SESION = "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0000";
 const SIFCO = "01010214119660";
-const LLAVE = `bot:sesion:${SESION}:credito:${SIFCO}`;
-
-const DESTINO: DestinoAvisoBot = {
-	usuarioAsesor: { id: "user-1", name: "Asesor" },
-	quien: `Cliente de Prueba (crédito ${SIFCO})`,
-	anclaCaso: {
-		relatedEntityType: "collection_case",
-		relatedEntityId: "caso-1",
-		redirectPage: "cobros_detail",
-	},
+const HOY = "2026-09-16";
+const POR_REFERENCIA: OrigenModoAgente = {
+	tipo: "referencia",
+	sesionId: SESION,
+};
+const POR_TELEFONO: OrigenModoAgente = {
+	tipo: "telefono",
+	telefono8: "58446376",
 };
 
-/** Avisos existentes como `tipo|asesorUserId` → id. */
+function destino(userId: string, sifco: string): DestinoAvisoBot {
+	return {
+		usuarioAsesor: { id: userId, name: userId },
+		quien: `Cliente de Prueba (crédito ${sifco})`,
+		anclaCaso: {
+			relatedEntityType: "collection_case",
+			relatedEntityId: `caso-${sifco}`,
+			redirectPage: "cobros_detail",
+		},
+	};
+}
+
+/**
+ * `duenos`: SIFCO → usuario del asesor (null = sin asesor, Error = cartera
+ * caída). `avisos`: `tipo|llave|usuario` → id de una alerta existente.
+ */
 function dependencias(opciones: {
+	duenos?: Record<string, string | null | Error>;
 	avisos?: Record<string, string>;
 	carteraHabilitada?: boolean;
-	destino?: DestinoAvisoBot | null | Error;
 }) {
 	const insertadas: Record<string, unknown>[] = [];
-	const buscadas: { tipo: string; llave: string; asesor: string }[] = [];
 	const deps: DependenciasModoAgente = {
-		buscarAviso: async (tipo, llave, asesor) => {
-			buscadas.push({ tipo, llave, asesor });
-			return opciones.avisos?.[`${tipo}|${asesor}`] ?? null;
-		},
+		buscarAviso: async (tipo, llave, asesor) =>
+			opciones.avisos?.[`${tipo}|${llave}|${asesor}`] ?? null,
 		carteraHabilitada: () => opciones.carteraHabilitada ?? true,
-		resolverDestino: async () => {
-			if (opciones.destino instanceof Error) throw opciones.destino;
-			return opciones.destino === undefined ? DESTINO : opciones.destino;
+		resolverDestino: async (sifco) => {
+			const dueno =
+				opciones.duenos && sifco in opciones.duenos
+					? opciones.duenos[sifco]
+					: "user-1";
+			if (dueno instanceof Error) throw dueno;
+			return dueno === null ? null : destino(dueno, sifco);
 		},
 		insertar: async (fila) => {
 			insertadas.push(fila as Record<string, unknown>);
 		},
+		hoyGT: () => HOY,
 	};
-	return { deps, insertadas, buscadas };
+	return { deps, insertadas };
 }
 
+const LLAVE_REF = `bot:sesion:${SESION}:agente`;
+
+describe("llaveModoAgente", () => {
+	it("con referencia es la conversación; con teléfono, el número y el día", () => {
+		expect(llaveModoAgente(POR_REFERENCIA, HOY)).toBe(LLAVE_REF);
+		expect(llaveModoAgente(POR_TELEFONO, HOY)).toBe(
+			`bot:tel:58446376:dia:${HOY}:agente`,
+		);
+	});
+});
+
 describe("avisarAsesorModoAgente", () => {
-	it("enlaza la alerta al aviso inicial de la misma conversación", async () => {
-		const { deps, insertadas, buscadas } = dependencias({
-			avisos: { "bot_cliente_escribio|user-1": "notif-inicial" },
+	it("con referencia, enlaza al 'escribió' de ese asesor en esa conversación", async () => {
+		const { deps, insertadas } = dependencias({
+			avisos: {
+				[`bot_cliente_escribio|bot:sesion:${SESION}:credito:${SIFCO}|user-1`]:
+					"notif-inicial",
+			},
 		});
 		const r = await avisarAsesorModoAgente(
-			{ sesionId: SESION, numeroSifco: SIFCO },
+			{ origen: POR_REFERENCIA, creditos: [SIFCO] },
 			deps,
 		);
 
-		expect(r).toEqual({ ok: true, motivo: "NOTIFICADO", conOrigen: true });
+		expect(r).toEqual({ ok: true, motivo: "NOTIFICADO", asesores: 1 });
 		expect(insertadas).toHaveLength(1);
 		const fila = insertadas[0];
 		expect(fila.cobrosTipo).toBe("bot_modo_agente");
-		expect(fila.cobrosDedupKey).toBe(LLAVE);
+		expect(fila.cobrosDedupKey).toBe(LLAVE_REF);
 		expect(fila.notificacionOrigenId).toBe("notif-inicial");
 		expect(fila.assignedTo).toBe("user-1");
-		expect(fila.relatedEntityId).toBe("caso-1");
+		expect(fila.relatedEntityId).toBe(`caso-${SIFCO}`);
 		expect(String(fila.descripcion)).toContain(SIFCO);
-		// La inicial se busca con la MISMA llave: es lo que las hace un hilo.
-		expect(buscadas).toContainEqual({
-			tipo: "bot_cliente_escribio",
-			llave: LLAVE,
-			asesor: "user-1",
-		});
 	});
 
-	it("sin aviso inicial se crea igual, sin origen: el cliente sigue esperando", async () => {
+	it("un asesor con varios créditos del cliente recibe UNA alerta que los nombra", async () => {
 		const { deps, insertadas } = dependencias({});
 		const r = await avisarAsesorModoAgente(
-			{ sesionId: SESION, numeroSifco: SIFCO },
+			{ origen: POR_REFERENCIA, creditos: ["A1", "A2"] },
 			deps,
 		);
 
-		expect(r).toEqual({ ok: true, motivo: "NOTIFICADO", conOrigen: false });
+		expect(r).toEqual({ ok: true, motivo: "NOTIFICADO", asesores: 1 });
 		expect(insertadas).toHaveLength(1);
+		expect(String(insertadas[0].descripcion)).toContain("créditos A1, A2");
+	});
+
+	it("créditos de dos asesores: una alerta para cada uno", async () => {
+		const { deps, insertadas } = dependencias({
+			duenos: { A1: "user-1", B1: "user-2" },
+		});
+		const r = await avisarAsesorModoAgente(
+			{ origen: POR_TELEFONO, creditos: ["A1", "B1"] },
+			deps,
+		);
+
+		expect(r).toEqual({ ok: true, motivo: "NOTIFICADO", asesores: 2 });
+		expect(insertadas.map((f) => f.assignedTo)).toEqual(["user-1", "user-2"]);
+	});
+
+	it("por teléfono: sin origen, y el número va en el texto para encontrar el chat", async () => {
+		const { deps, insertadas } = dependencias({});
+		await avisarAsesorModoAgente(
+			{ origen: POR_TELEFONO, creditos: [SIFCO] },
+			deps,
+		);
+
 		expect(insertadas[0].notificacionOrigenId).toBeNull();
+		expect(insertadas[0].cobrosDedupKey).toBe(
+			`bot:tel:58446376:dia:${HOY}:agente`,
+		);
+		expect(String(insertadas[0].descripcion)).toContain("58446376");
 	});
 
 	it("no repite al mismo asesor en la misma conversación", async () => {
 		const { deps, insertadas } = dependencias({
-			avisos: { "bot_modo_agente|user-1": "ya-existe" },
+			avisos: { [`bot_modo_agente|${LLAVE_REF}|user-1`]: "ya-existe" },
 		});
 		const r = await avisarAsesorModoAgente(
-			{ sesionId: SESION, numeroSifco: SIFCO },
+			{ origen: POR_REFERENCIA, creditos: [SIFCO] },
 			deps,
 		);
 
-		expect(r).toEqual({ ok: true, motivo: "YA_NOTIFICADO" });
+		expect(r).toEqual({ ok: true, motivo: "YA_NOTIFICADO", asesores: 1 });
 		expect(insertadas).toHaveLength(0);
 	});
 
-	// Review de Codex, P1: la referencia vale 24 h y el crédito puede cambiar
-	// de dueño en ese rato. Lo del asesor anterior no puede tapar al actual.
+	// Review de Codex, P1: el crédito puede cambiar de dueño dentro de la
+	// ventana. Lo del asesor anterior no puede tapar al actual.
 	it("si reasignaron el crédito, el dueño nuevo recibe su alerta", async () => {
 		const { deps, insertadas } = dependencias({
 			avisos: {
-				"bot_modo_agente|asesor-anterior": "del-anterior",
-				"bot_cliente_escribio|asesor-anterior": "escribio-anterior",
+				[`bot_modo_agente|${LLAVE_REF}|asesor-anterior`]: "del-anterior",
+				[`bot_cliente_escribio|bot:sesion:${SESION}:credito:${SIFCO}|asesor-anterior`]:
+					"escribio-anterior",
 			},
 		});
 		const r = await avisarAsesorModoAgente(
-			{ sesionId: SESION, numeroSifco: SIFCO },
+			{ origen: POR_REFERENCIA, creditos: [SIFCO] },
 			deps,
 		);
 
-		expect(r).toEqual({ ok: true, motivo: "NOTIFICADO", conOrigen: false });
-		expect(insertadas).toHaveLength(1);
+		expect(r).toEqual({ ok: true, motivo: "NOTIFICADO", asesores: 1 });
 		expect(insertadas[0].assignedTo).toBe("user-1");
-		// El "escribió" del anterior no es su hilo.
 		expect(insertadas[0].notificacionOrigenId).toBeNull();
 	});
 
-	it("sin asesor vinculado no inserta y lo dice", async () => {
-		const { deps, insertadas } = dependencias({ destino: null });
+	it("sin asesor vinculado en ningún crédito no inserta y lo dice", async () => {
+		const { deps, insertadas } = dependencias({ duenos: { [SIFCO]: null } });
 		const r = await avisarAsesorModoAgente(
-			{ sesionId: SESION, numeroSifco: SIFCO },
+			{ origen: POR_REFERENCIA, creditos: [SIFCO] },
 			deps,
 		);
 
-		expect(r).toEqual({ ok: true, motivo: "SIN_ASESOR" });
+		expect(r).toEqual({ ok: true, motivo: "SIN_ASESOR", asesores: 0 });
 		expect(insertadas).toHaveLength(0);
 	});
 
 	it("si cartera no responde lo reporta en vez de tragárselo", async () => {
 		const { deps, insertadas } = dependencias({
-			destino: new Error("timeout"),
+			duenos: { [SIFCO]: new Error("timeout") },
 		});
 		const r = await avisarAsesorModoAgente(
-			{ sesionId: SESION, numeroSifco: SIFCO },
+			{ origen: POR_REFERENCIA, creditos: [SIFCO] },
 			deps,
 		);
 
@@ -153,7 +205,7 @@ describe("avisarAsesorModoAgente", () => {
 	it("con cartera deshabilitada tampoco finge haber avisado", async () => {
 		const { deps, insertadas } = dependencias({ carteraHabilitada: false });
 		const r = await avisarAsesorModoAgente(
-			{ sesionId: SESION, numeroSifco: SIFCO },
+			{ origen: POR_REFERENCIA, creditos: [SIFCO] },
 			deps,
 		);
 

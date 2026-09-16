@@ -927,6 +927,13 @@ export async function processConvenioPaymentEnTx(
     const convenioCompletado = nuevoMontoPendienteBig.lte(0) || nuevosPagosPendientes <= 0;
 
     // 9. Actualizar el convenio
+    //
+    // El WHERE exige que siga VIGENTE, no solo que exista (review de Codex,
+    // P1). `convenio` es un snapshot leído antes: si mientras tanto alguien
+    // deshizo el convenio (Fase 3), este UPDATE escribía `activo: true` desde
+    // ese snapshot viejo y dejaba `anulado_at` puesto — o sea RESUCITABA un
+    // convenio anulado, que seguía recibiendo pagos. La condición lo convierte
+    // en un no-op: la fila no matchea y `convenioActualizado` queda undefined.
     const [convenioActualizado] = await tx
       .update(convenios_pago)
       .set({
@@ -938,8 +945,22 @@ export async function processConvenioPaymentEnTx(
         activo: !convenioCompletado, // Si se completó, ya no está activo
         updated_at: new Date(),
       })
-      .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
+      .where(
+        and(
+          eq(convenios_pago.convenio_id, convenio.convenio_id),
+          eq(convenios_pago.activo, true),
+          isNull(convenios_pago.anulado_at),
+        ),
+      )
       .returning();
+
+    if (!convenioActualizado) {
+      // Lanzar y no devolver: estamos dentro de la transacción del pago y hay
+      // que revertir TODO lo que se escribió creyendo que el convenio vivía.
+      throw new Error(
+        `El convenio ${convenio.convenio_id} dejó de estar vigente mientras se aplicaba el pago (se deshizo o se completó). El pago no se aplicó al convenio.`,
+      );
+    }
 
     // 9.b COBROS-02 — SALIDA POR COMPLETADO: si el convenio quedó saldado, sacar
     // el crédito de EN_CONVENIO (antes quedaba atrapado ahí = gap). Las cuotas que

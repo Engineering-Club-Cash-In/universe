@@ -1270,8 +1270,18 @@ function RouteComponent() {
 	// El convenio vigente es el que se puede DESHACER. Uno pendiente de
 	// aprobación no: eso se rechaza en la cola del supervisor, que es otra
 	// operación con otra bitácora (y el server lo rebota con ese mensaje).
+	// `tieneConvenioVigente` y NO `caso.convenioActivo` (review de Codex, P2):
+	// `getCredito` devuelve temprano con `convenioActivo: null` hardcodeado
+	// cuando el calendario original del crédito ya no tiene ninguna cuota de hoy
+	// en adelante, así que el botón no aparecía justo para los créditos que el
+	// backend sí sabe resolver — los más atrasados. `statusCredit` viene de la
+	// fila del crédito y sí llega por ese camino.
+	//
+	// El servidor re-valida igual y devuelve un mensaje claro si no hay convenio
+	// vigente: acá el criterio solo decide si vale la pena ofrecer la acción.
 	const puedeDeshacerConvenio =
-		!!caso.convenioActivo && PERMISSIONS.canAccessCobros(userProfile.data?.role ?? "");
+		tieneConvenioVigente &&
+		PERMISSIONS.canAccessCobros(userProfile.data?.role ?? "");
 
 	// El alerta viva del convenio: la misma fuente que la pantalla de Alertas
 	// de Convenios y que el job de avisos. `vencida` = tiene cuota del convenio

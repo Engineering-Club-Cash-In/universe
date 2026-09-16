@@ -502,6 +502,26 @@ rechaza una anulación sin motivo.
   listado; en una consulta ya acotada a un solo crédito hacía desaparecer la banda roja
   cuando la cuota impaga más vieja pasaba del año — justo el caso más grave.
 
+#### Deshacer es una escritura destructiva, y se protege como tal
+
+Cuatro cosas más que salieron de la segunda review:
+
+- **La condición de dueño viaja DENTRO del `UPDATE`**, no en un `SELECT` previo. Dos
+  statements son dos momentos: bajo READ COMMITTED una reasignación puede commitear entre
+  medio y el asesor que ya perdió el crédito pasaba igual el chequeo. Con el predicado en
+  el `WHERE`, comprobar y escribir son el mismo acto — o el crédito sigue siendo suyo en el
+  instante en que se escribe, o no se escribe nada. Además se toma el lock por crédito, el
+  mismo de la reasignación y la recuperación.
+- **Un pago no puede resucitar un convenio deshecho.** `processConvenioPaymentEnTx`
+  actualizaba por `convenio_id` a secas y escribía `activo: true` desde un snapshot leído
+  antes, dejando `anulado_at` puesto: el convenio volvía a la vida y seguía recibiendo
+  pagos. El `UPDATE` ahora exige que siga vigente, y si no, la transacción del pago aborta.
+- **El SIFCO se compara exacto.** `listPaymentAgreements` filtra con `ILIKE '%valor%'`, así
+  que un SIFCO que es subcadena de otro traía las dos filas — y se podía deshacer el
+  convenio del crédito equivocado.
+- **El botón se ofrece según `statusCredit`**, no según `convenioActivo`: si no, no
+  aparecía justo para los créditos que el backend sí sabe resolver.
+
 #### La banda pregunta, no deduce
 
 El estado del convenio lo responde cartera (`GET /convenio/alertas` filtrado a ese

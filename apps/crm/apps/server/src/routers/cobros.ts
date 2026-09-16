@@ -8794,8 +8794,17 @@ export const cobrosRouter = {
 				estado: "active",
 				perPage: 5,
 			});
+			// El SIFCO se compara EXACTO acá (review de Codex, P1):
+			// `listPaymentAgreements` implementa el filtro como
+			// `ILIKE '%valor%'`, así que un SIFCO que es subcadena de otro trae
+			// las dos filas. Sin esta comparación, el `find` podía quedarse con
+			// el convenio de OTRO crédito y deshacerlo — y para un supervisor,
+			// que no lleva precondición de dueño, nada lo habría frenado.
 			const convenio = (listado?.data ?? []).find(
-				(c) => c.activo && !c.completado,
+				(c) =>
+					c.activo &&
+					!c.completado &&
+					c.numero_credito_sifco === caso.numeroCreditoSifco,
 			);
 			if (!convenio) {
 				throw new ORPCError("BAD_REQUEST", {

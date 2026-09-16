@@ -27,6 +27,11 @@ type CapitalAgingInput = {
 		total: string;
 		porAsesor: { asesorId: number; nombre: string; capital: string }[];
 	};
+	moraMensual?: {
+		porcentaje: string;
+		esperado: string;
+		porAsesor: { asesorId: number; nombre: string; esperado: string }[];
+	};
 	dataDisponibleDesde?: string;
 };
 
@@ -132,7 +137,9 @@ export function buildCapitalAging(data: CapitalAgingInput) {
 					: capitalMoroso > 0
 						? null
 						: 0,
-			moraMensualEstimada: capitalMoroso * 0.0112,
+			moraMensualEstimada: Number(
+				data.moraMensual?.esperado ?? capitalMoroso * 0.0112,
+			),
 		},
 		bandas,
 		acumulados,
@@ -182,8 +189,13 @@ export function buildMoraDisplayRows(
 	porAsesor: MoraSnapshotAsesor[],
 	recuperacion: MoraRecoveryAsesor[] | undefined,
 	verCobrado = true,
+	moraMensualPorAsesor?: {
+		asesorId: number;
+		nombre: string;
+		esperado: string;
+	}[],
 ): MoraDisplayAsesor[] {
-	if (!verCobrado || !recuperacion) {
+	if (!verCobrado) {
 		return porAsesor.map((asesor) => ({
 			...asesor,
 			esperado: asesor.totalEnMora.sumaMora,
@@ -196,10 +208,61 @@ export function buildMoraDisplayRows(
 	const snapshotPorAsesor = new Map<number, MoraSnapshotAsesor>(
 		porAsesor.map((asesor) => [asesor.asesorId, asesor]),
 	);
-	return recuperacion.map((asesor) => ({
-		...(asesor.asesorId === null
-			? undefined
-			: snapshotPorAsesor.get(asesor.asesorId)),
-		...asesor,
-	}));
+	if (!moraMensualPorAsesor) {
+		if (!recuperacion) {
+			return porAsesor.map((asesor) => ({
+				...asesor,
+				esperado: asesor.totalEnMora.sumaMora,
+				cobradoEnSnapshot: "0",
+				cobradoFueraSnapshot: "0",
+				excedenteEnSnapshot: "0",
+				pendiente: asesor.totalEnMora.sumaMora,
+			}));
+		}
+		return recuperacion.map((asesor) => ({
+			...(asesor.asesorId === null
+				? undefined
+				: snapshotPorAsesor.get(asesor.asesorId)),
+			...asesor,
+		}));
+	}
+
+	const recuperacionPorAsesor = new Map(
+		(recuperacion ?? [])
+			.filter((asesor) => asesor.asesorId !== null)
+			.map((asesor) => [asesor.asesorId as number, asesor]),
+	);
+	const idsOficiales = new Set(
+		moraMensualPorAsesor.map((asesor) => asesor.asesorId),
+	);
+	const officialRows = moraMensualPorAsesor.map((oficial) => {
+		const recovery = recuperacionPorAsesor.get(oficial.asesorId);
+		const esperado = Number(oficial.esperado);
+		const cobrado = Number(recovery?.cobradoEnSnapshot ?? 0);
+		return {
+			...snapshotPorAsesor.get(oficial.asesorId),
+			asesorId: oficial.asesorId,
+			nombre: oficial.nombre,
+			esperado: esperado.toFixed(2),
+			cobradoEnSnapshot: cobrado.toFixed(2),
+			cobradoFueraSnapshot: recovery?.cobradoFueraSnapshot ?? "0.00",
+			excedenteEnSnapshot: Math.max(cobrado - esperado, 0).toFixed(2),
+			pendiente: Math.max(esperado - cobrado, 0).toFixed(2),
+		};
+	});
+	const extraRows = (recuperacion ?? [])
+		.filter(
+			(asesor) =>
+				asesor.asesorId === null || !idsOficiales.has(asesor.asesorId),
+		)
+		.map((asesor) => ({
+			...(asesor.asesorId === null
+				? undefined
+				: snapshotPorAsesor.get(asesor.asesorId)),
+			...asesor,
+			esperado: "0.00",
+			excedenteEnSnapshot: Number(asesor.cobradoEnSnapshot).toFixed(2),
+			pendiente: "0.00",
+		}));
+	return [...officialRows, ...extraRows];
 }

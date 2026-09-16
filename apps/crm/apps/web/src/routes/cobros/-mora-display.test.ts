@@ -115,6 +115,23 @@ describe("buildCapitalAging", () => {
 		expect(aging.porAsesor[0]?.mora_30.porcentaje).toBe(0);
 	});
 
+	test("usa el monto mensual congelado del cierre oficial", () => {
+		const aging = moraDisplay.buildCapitalAging({
+			totales: {
+				mora_30: { cantidad: 1, sumaCapital: "500", sumaMora: "2000" },
+			},
+			porAsesor: [],
+			capitalCartera: { total: "1000", porAsesor: [] },
+			moraMensual: {
+				porcentaje: "2.50",
+				esperado: "12.50",
+				porAsesor: [],
+			},
+		});
+
+		expect(aging.resumen.moraMensualEstimada).toBe(12.5);
+	});
+
 	test("marca como indefinido un numerador positivo sin denominador actual", () => {
 		const aging = moraDisplay.buildCapitalAging({
 			totales: {
@@ -190,6 +207,9 @@ describe("jerarquía del reporte de mora", () => {
 		expect(source).not.toContain("Bandas exclusivas por asesor");
 		expect(source).toContain("orpc.getCierreMoraOficial.queryOptions");
 		expect(source).toContain("cierre oficial importado");
+		expect(source).toContain("capitalAging.resumen.moraMensualEstimada");
+		expect(source).not.toContain("recuperacion?.totales.esperado");
+		expect(source).toContain("verCobrado || porAsesor.length > 0");
 		expect(source).toContain('? "N/D"');
 		expect(source).not.toContain('role="progressbar"');
 	});
@@ -263,6 +283,37 @@ describe("buildMoraDisplayRows", () => {
 				pendiente: "30.00",
 			}),
 		]);
+	});
+
+	test("usa el esperado oficial por asesor y recalcula pendiente o excedente", () => {
+		const rows = buildMoraDisplayRows(
+			[
+				{
+					asesorId: 7,
+					nombre: "Ana",
+					totalEnMora: { cantidad: 1, sumaMora: "100.00" },
+				},
+			],
+			[
+				{
+					asesorId: 7,
+					nombre: "Ana",
+					esperado: "100.00",
+					cobradoEnSnapshot: "12.00",
+					cobradoFueraSnapshot: "3.00",
+					excedenteEnSnapshot: "0.00",
+					pendiente: "88.00",
+				},
+			],
+			true,
+			[{ asesorId: 7, nombre: "Ana", esperado: "10.00" }],
+		);
+
+		expect(rows[0]).toMatchObject({
+			esperado: "10.00",
+			excedenteEnSnapshot: "2.00",
+			pendiente: "0.00",
+		});
 	});
 
 	test("ignora recuperación cacheada en modo hoy", () => {

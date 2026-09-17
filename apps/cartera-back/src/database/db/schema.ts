@@ -981,6 +981,18 @@
       liquidacionIdxEspejo: index("idx_pagos_liquidacion_espejo").on(
         table.liquidacion_id
       ),
+      // draftPaymentsGuard.ts (checkCreditHasUnliquidatedDrafts /
+      // checkInvestorHasUnliquidatedDrafts) y getAllCredits (credits.ts,
+      // tiene_pagos_sin_liquidar) filtran por credito_id/inversionista_id +
+      // estado_liquidacion != 'LIQUIDADO'. Parcial: las filas LIQUIDADO
+      // crecen sin límite y nunca las consulta este patrón.
+      // Migración manual: drizzle/0035_idx_pagos_espejo_credito_no_liquidado.sql
+      creditoNoLiquidadoIdx: index("ix_pcie_credito_no_liquidado")
+        .on(table.credito_id)
+        .where(sql`${table.estado_liquidacion} <> 'LIQUIDADO'`),
+      inversionistaNoLiquidadoIdx: index("ix_pcie_inversionista_no_liquidado")
+        .on(table.inversionista_id)
+        .where(sql`${table.estado_liquidacion} <> 'LIQUIDADO'`),
     })
   );
   export const bancos = customSchema.table('bancos', {
@@ -1043,6 +1055,12 @@
     dpi_rep_legal: varchar("dpi_rep_legal", { length: 20 }),
     celular: varchar("celular", { length: 100 }),
     status: statusInversionistaEnum("status").notNull().default("activo"),
+    // Id de la cuenta de auth-google que creó esta fila desde el registro del
+    // portal (migración 0034). NULL en todo lo demás: carteraFront, el CRM y
+    // las importaciones no la escriben, y las filas anteriores a la columna se
+    // quedan así a propósito. Es la única prueba de que un registro del portal
+    // creó la fila, y por tanto de que puede reclamarla al reintentar.
+    creado_por_usuario_portal: text("creado_por_usuario_portal"),
   });
 
   export const cuentas_extra_inversionista = customSchema.table(

@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import { db } from "../database";
+import { checkCreditHasUnliquidatedDrafts } from "../utils/draftPaymentsGuard";
 import {
   creditos,
   creditos_inversionistas,
@@ -1801,6 +1802,36 @@ export const updateCredit = async ({ body, set, request }: any) => {
         set.status = 400;
         return { message: "Motivo de devolución es obligatorio al solicitar devolución" };
       }
+      // Un borrador NO_LIQUIDADO es plata que todavía no se repartió. Si el
+      // crédito entra a devolución con borradores vivos, la liquidación que
+      // los cerraría queda bloqueada por pendingReturnGuard y quedan
+      // colgados. Solo aplica al SOLICITAR (esSolicitudValida): desactivar
+      // (-> NO_APLICA) sigue libre para no dejar el crédito atrapado si los
+      // borradores aparecieron después de la solicitud.
+      //
+      // FOR NO KEY UPDATE antes de consultar: sin esto, el SELECT del guard
+      // no se serializa con withPendingReturnCreditLocks (payments.ts), que
+      // toma el mismo lock de fila sobre creditos antes de insertar un
+      // borrador. Sin este lock, la carrera es real: el guard puede leer
+      // "sin borradores", generación de pagos inserta uno justo después, y
+      // esta transacción de todos modos deja el crédito en
+      // PENDIENTE_AUTORIZACION con el borrador recién creado — exactamente
+      // el estado que el guard existe para impedir. Con el lock, cualquiera
+      // de las dos transacciones que llegue primero bloquea a la otra hasta
+      // su commit/rollback, así que el guard siempre ve el estado final.
+      if (esSolicitudValida) {
+        await db
+          .select({ credito_id: creditos.credito_id })
+          .from(creditos)
+          .where(eq(creditos.credito_id, credito_id))
+          .for("no key update");
+
+        const bloqueo = await checkCreditHasUnliquidatedDrafts(credito_id, db);
+        if (bloqueo) {
+          set.status = 400;
+          return bloqueo;
+        }
+      }
       historialDevolucion = {
         credito_id,
         usuario_id: 1,
@@ -3139,6 +3170,59 @@ export const recalcularPagosCredito = async ({
           total_restante: capitalEnMemoria.round(2).toString(),
           pagado,
         },
+      });
+    }
+
+    // Los `*_restante` NO son historia del pago: son el espejo de lo que la
+    // CUOTA todavía debe, y registerPayment reparte el siguiente pago contra
+    // la fila más reciente que tenga saldo (`pagoSaldoVigente`). Hasta acá el
+    // recálculo refrescaba ese espejo solo en las filas que reescribe, así que
+    // las VALIDADAS se quedaban con el saldo de antes: tras una reversa el
+    // siguiente pago se repartía contra plata que ya no debía y el sobrante
+    // rebalsaba a la cuota siguiente. Caso real (crédito 483, cuota 7): al
+    // reversar un parcial de Q1,500 las filas hermanas siguieron diciendo
+    // "faltan Q157.60"; el pago de Q1,276.80 cerró la cuota con Q157.60 y
+    // mandó Q1,119.20 —con sus facturas— a la cuota 8.
+    //
+    // Se escribe SOLO el espejo del saldo final de la cuota. Ni abonos, ni
+    // `pagado`, ni `total_restante`: el split del validado ya se facturó y se
+    // distribuyó a inversionistas, y esa parte sigue intocable.
+    //
+    // SOLO cuando el validado es la ÚNICA fila de la cuota con abonos. El
+    // espejo viene neto de TODAS las filas con plata, y `registerPayment`
+    // vuelve a restarle el interés/IVA de sus hermanos vivos al elegirlo como
+    // fila vigente (`calcularSaldoNetoCuota`, neteo `hermanosInteres`/
+    // `hermanosIva`): cualquier hermano con abonos se contaría dos veces y ese
+    // interés se correría a capital, ensuciando recibo y reparto a
+    // inversionistas. Hermano con abonos hay de dos clases, y las dos cuentan
+    // como vivas para el neteo: otro validado, y una fila `no_required` que
+    // lleva plata (crédito 890 / cuota 12) — que además NO es elegible como
+    // fuente de saldo, así que el validado igual gana la elección.
+    //
+    // Con el validado como única fila con abonos, ese neteo da cero —sus
+    // hermanos son recibos vacíos, sin abonos propios que restar— y el espejo
+    // llega intacto a la distribución. Es el caso que motivó el fix (crédito
+    // 483, cuota 7). Lo demás queda como estaba: no se toca, no se empeora.
+    // Cubrirlo pide que el neteo distinga un espejo sincronizado de uno viejo,
+    // y eso es cirugía sobre el reparto de pagos.
+    const llevaAbonosDeCuota = (p: (typeof rows)[number]["pagos_credito"]) =>
+      [
+        p.abono_interes,
+        p.abono_iva_12,
+        p.abono_seguro,
+        p.abono_gps,
+        p.membresias_pago,
+        p.abono_capital,
+      ].some((rubro) => new Big(rubro ?? 0).gt(0));
+    const filasConAbonos = pagos.filter(llevaAbonosDeCuota);
+    if (
+      validadosVivos.length === 1 &&
+      filasConAbonos.length === 1 &&
+      filasConAbonos[0].pago_id === validadosVivos[0].pago_id
+    ) {
+      actualizaciones.push({
+        pago_id: validadosVivos[0].pago_id,
+        datos: { ...snapshotRestantes() },
       });
     }
   }

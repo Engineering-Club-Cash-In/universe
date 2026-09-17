@@ -4,12 +4,15 @@ import { rootCertificates } from "node:tls";
 // compilado (bun build --compile, que es como se despliega el server — ver
 // Dockerfile). Con require.resolve() a secas esto se rompe en producción
 // porque el contenedor final no tiene node_modules, solo el binario.
-// biome-ignore lint/style/useImportType: es un import de asset, no de tipos
-import zxingWasmPath from "zxing-wasm/reader/zxing_reader.wasm" with { type: "file" };
+import zxingWasmPath from "zxing-wasm/reader/zxing_reader.wasm" with {
+	type: "file",
+};
+import {
+	IDENTITY_MATCH_THRESHOLD,
+	nameSimilarity,
+} from "./name-similarity";
 
-// Umbral de similitud de nombre (0-100) para considerar que la licencia es de la
-// persona registrada. Por debajo de esto, el resultado queda en revisión manual.
-export const IDENTITY_MATCH_THRESHOLD = 85;
+export { IDENTITY_MATCH_THRESHOLD, nameSimilarity };
 
 const TRANSITO_ORIGIN = "https://vl.transito.gob.gt";
 const OFFICIAL_QR_HOST = "vl.transito.gob.gt";
@@ -292,52 +295,6 @@ export async function queryTransito(params: {
 // =============================================================================
 // Comparación de nombre (nombreCiudadano de Tránsito vs. lead/co-deudor)
 // =============================================================================
-
-function normalizeNameTokens(name: string): string[] {
-	return name
-		.normalize("NFD")
-		.replace(/[\u0300-\u036f]/g, "") // quitar acentos
-		.toUpperCase()
-		.replace(/[^A-Z\s]/g, " ")
-		.split(/\s+/)
-		.filter(Boolean);
-}
-
-// Similitud por coeficiente de Dice sobre los tokens del nombre (0-100).
-// Robusto a nombres en distinto orden o con segundo nombre/apellido faltante,
-// que es justo el tipo de variación que se ve entre el CRM y el dato oficial.
-//
-// Nota conocida: al ser insensible al orden, dos nombres con las mismas
-// palabras en distinto orden (ej. hermanos con nombre/segundo nombre
-// invertidos) pueden dar 100%. Es una limitación real, aceptada por ahora —
-// resolverla bien requeriría comparar contra un identificador único (DPI/CUI)
-// en vez de nombre, y el campo que devuelve Tránsito (idCiudadano) no tiene
-// pinta de ser el CUI real (le faltan dígitos), así que no se implementa
-// hasta confirmar qué es ese campo.
-export function nameSimilarity(nameA: string, nameB: string): number {
-	const tokensA = normalizeNameTokens(nameA);
-	const tokensB = normalizeNameTokens(nameB);
-	if (tokensA.length === 0 || tokensB.length === 0) return 0;
-
-	// Conteo por token (multiset), no Set — si no, un nombre con una palabra
-	// repetida ("JOSE JOSE") infla los matches contra el otro lado y el score
-	// puede pasar de 100%.
-	const remaining = new Map<string, number>();
-	for (const token of tokensB) {
-		remaining.set(token, (remaining.get(token) ?? 0) + 1);
-	}
-	let matches = 0;
-	for (const token of tokensA) {
-		const count = remaining.get(token) ?? 0;
-		if (count > 0) {
-			matches++;
-			remaining.set(token, count - 1);
-		}
-	}
-	const score = (2 * matches) / (tokensA.length + tokensB.length);
-
-	return Math.round(score * 100 * 100) / 100;
-}
 
 // Guatemala es UTC-6 todo el año (sin horario de verano) — mismo criterio que
 // lib/guatemala-month-window.ts. El contenedor corre en UTC, así que construir

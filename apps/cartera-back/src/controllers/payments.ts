@@ -177,6 +177,12 @@ export async function getAllPagosWithCreditAndInversionistas(
         observaciones: pagos_credito.observaciones,
         usuario_id: creditos.usuario_id,
         numero_credito_sifco: creditos.numero_credito_sifco,
+        // Estado del crédito: la pantalla de pagos resalta las cuotas en atraso
+        // con el MISMO criterio que la mora (isOverdueInstallmentForMora), que
+        // excluye EN_CONVENIO / INCOBRABLE / CANCELADO / PENDIENTE_CANCELACION
+        // / CAIDO. Sin este campo el front pintaba "Atrasada" en créditos que
+        // por política no devengan mora.
+        statusCredit: creditos.statusCredit,
         usuario_nombre: usuarios.nombre,
         usuario_categoria: usuarios.categoria,
         usuario_nit: usuarios.nit,
@@ -1771,6 +1777,7 @@ export async function insertarPago({
       credito_id: creditData.credito_id,
       monto_cambio: Number(mora),
       tipo: "DECREMENTO", // 👈 bajamos la mora porque el cliente ya pagó
+      motivo: `Registro de pago #${nuevoPago?.pago_id} (crédito ${numero_credito_sifco}, cuota ${numero_cuota}): mora cobrada en la boleta`,
     });
   }
 

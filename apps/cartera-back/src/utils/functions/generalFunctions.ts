@@ -2,7 +2,7 @@ import { generarHTMLReporte } from "../../controllers/investor";
 import { GetCreditDTO, InversionistaReporte } from "../interface";
 import { launchBrowser } from "./browser";
 import ExcelJS from "exceljs";
-import axios from "axios";
+import { CASHIN_COLOR, fetchImageBase64 } from "./excelBrand";
 import Big from "big.js";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { sql, type SQL } from "drizzle-orm";
@@ -392,22 +392,6 @@ function paintCard(ws: ExcelJS.Worksheet, range: string) {
   }
 }
 
-/** trae imagen como base64 (evita tipos de Buffer) */
-async function fetchImageBase64(
-  url?: string
-): Promise<{ data: string; ext: "png" | "jpeg" } | null> {
-  if (!url) return null;
-  try {
-    const res = await axios.get(url, { responseType: "arraybuffer" });
-    // infiere extensión simple
-    const ct = String(res.headers["content-type"] || "");
-    const ext: "png" | "jpeg" = ct.includes("png") ? "png" : "jpeg";
-    const b64 = Buffer.from(res.data).toString("base64");
-    return { data: b64, ext };
-  } catch {
-    return null;
-  }
-}
 
 /** ───────── builder principal ───────── */
 export async function buildCancelationWorkbook(
@@ -677,21 +661,9 @@ export async function buildInversionistaWorkbook(
 
   baseWidths.forEach((w, i) => (ws.getColumn(i + 1).width = w));
 
-  const CINV = {
-    purple:      "FF4E57EA",
-    purpleLight: "FFF0F0FF",
-    navy:        "FF0F1B4C",
-    blue:        "FF0485C2",
-    text:        "FF0F172A",
-    slate:       "FF334155",
-    white:       "FFFFFFFF",
-    line:        "FFE0E7EF",
-    zebra:       "FFF9FBFF",
-    total:       "FFF0F9FF",
-    gray:        "FF8C98B5",
-    // Resalte para filas con interés "partido" (cálculo dividido por compras)
-    partido:     "FFFEF3C7",
-  };
+  // Paleta compartida con el resto de los Excel de CashIn (excelBrand.ts): antes
+  // esta constante y CASHIN_COLOR eran dos copias con 9 de 10 hex idénticos.
+  const CINV = CASHIN_COLOR;
 
   const esDolares = inv.moneda === "dolares";
   const sym = esDolares ? "$" : "Q";
@@ -1021,7 +993,6 @@ export async function buildInversionistaWorkbook(
       for (const pago of cr.pagos ?? []) {
         row++;
         rowIdx++;
-        hasData = true;
         const rr = ws.getRow(row);
 
         // Para pagos NO_LIQUIDADO el monto_aportado del espejo todavía no
@@ -1035,7 +1006,7 @@ export async function buildInversionistaWorkbook(
         // - Si el pago es NO_LIQUIDADO: el abono a capital del mes aún NO se ha restado del espejo en la BD.
         //   Por lo tanto, 'Capital' (inicial) es el montoBaseCalculo actual, y 'Capital Restante' es el saldo inicial menos el abono que se le pagará.
         // - Si el pago es LIQUIDADO: el abono a capital ya se restó físicamente en la BD.
-        //   Para mostrar el 'Capital' inicial con el que empezó el mes, se lo sumamos de vuelta (montoBaseCalculo + abono). 
+        //   Para mostrar el 'Capital' inicial con el que empezó el mes, se lo sumamos de vuelta (montoBaseCalculo + abono).
         //   El 'Capital Restante' actual post-abono ya es exactamente el valor de montoBaseCalculo.
         const capital = esNoLiquidado
           ? montoBaseCalculo
@@ -1045,6 +1016,30 @@ export async function buildInversionistaWorkbook(
           : montoBaseCalculo;
         const tasaFmt = toN(pago.tasaInteresInvesor) / 100;
         const cuotaMes = `${pago.mes || "-"}${pago.cuota ? ` (Cuota #${pago.cuota})` : ""}`;
+
+        // Créditos ya devueltos/cancelados para este inversionista dejan
+        // monto_aportado en 0, y el proceso de pagos igual genera una fila
+        // mensual con todo en cero. Se omite del reporte por no aportar info.
+        const interesInversor = toN(pago.abono_interes);
+        const iva = toN(pago.abono_iva);
+        const isr = toN(pago.isr);
+        const abonoCapital = toN(pago.abono_capital);
+        const interesNeto = toN(pago.abonoGeneralInteres);
+        const filaEnCeros =
+          capital === 0 &&
+          capitalRestante === 0 &&
+          interesInversor === 0 &&
+          iva === 0 &&
+          isr === 0 &&
+          abonoCapital === 0 &&
+          interesNeto === 0;
+
+        if (filaEnCeros) {
+          row--;
+          rowIdx--;
+          continue;
+        }
+        hasData = true;
 
         rr.values = [
           ...(showId ? [cr.numero_credito_sifco] : []),

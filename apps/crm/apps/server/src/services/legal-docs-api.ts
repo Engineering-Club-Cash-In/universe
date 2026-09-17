@@ -119,6 +119,25 @@ export interface DocumentResult {
 	linkDocument: string;
 	r2Key?: string;
 	signing_links?: string[];
+	error?: string;
+}
+
+/**
+ * Motivo por el que un resultado del generador no sirve, o null si está bien.
+ *
+ * No alcanza con mirar `success`: si la conversión a PDF se cae, el contrato puede
+ * volver marcado como exitoso pero sin `r2Key` ni `linkDocument`, y entonces se
+ * enlaza a la oportunidad un documento que no se puede abrir ni firmar. Se trata
+ * como fallido para que jurídico lo vea y lo reintente en el momento.
+ */
+export function motivoDeFalla(result: DocumentResult): string | null {
+	if (!result.success) {
+		return result.error || "Error al generar el documento";
+	}
+	if (!result.r2Key && !result.linkDocument) {
+		return "El documento se generó pero no quedó el PDF (falló la conversión). Reintenta este documento.";
+	}
+	return null;
 }
 
 export interface BatchGenerateResponse {

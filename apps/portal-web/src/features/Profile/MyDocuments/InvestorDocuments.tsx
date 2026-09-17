@@ -1,24 +1,63 @@
 import { useState } from "react";
 import { IconTarget, Loading } from "@/components";
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/lib";
 import { getInvestorDocuments, type InvestorDocument } from "../services/investorService";
 import { useIsMobile } from "@/hooks";
 import { DocumentViewerModal } from "./DocumentViewerModal";
+import { useEntidades } from "../hooks/useEntidades";
+import { ErrorCarga } from "../components/ErrorCarga";
+import { SinEntidades } from "../components/SinEntidades";
+import { pantallaDeEntidad } from "../pantallaDeEntidad";
+import { CACHE_FICHA } from "../constants/cache";
 
 export const InvestorDocuments = () => {
-  const { user } = useAuth();
   const isMobile = useIsMobile();
   const [selectedDocument, setSelectedDocument] = useState<InvestorDocument | null>(null);
+  const {
+    inversionistaId,
+    isLoading: cargandoEntidades,
+    error: errorEntidades,
+    reintentar: reintentarEntidades,
+    sinEntidades,
+  } = useEntidades();
 
-  const { data: documents, isLoading } = useQuery({
-    queryKey: ["investor-documents", user?.email],
-    queryFn: () => getInvestorDocuments(user?.email || ""),
-    enabled: !!user?.email,
+  const {
+    data: documents,
+    isLoading,
+    error: errorDocumentos,
+    refetch,
+  } = useQuery({
+    queryKey: ["investor-documents", inversionistaId],
+    queryFn: () => getInvestorDocuments(inversionistaId!),
+    enabled: !!inversionistaId,
+    ...CACHE_FICHA,
   });
 
-  if (isLoading) {
+  // Sin esto, un fallo de red se veía igual que "esta entidad no tiene
+  // documentos" —y no tener NINGUNA entidad se veía igual también: sin ficha no
+  // hay documentos que traer, así que salía "No tienes documentos" cuando lo
+  // cierto es que a su usuario le falta que lo asocien.
+  const pantalla = pantallaDeEntidad({
+    cargando: cargandoEntidades || (!!inversionistaId && isLoading),
+    hayError: !!(errorEntidades || errorDocumentos),
+    sinEntidades,
+  });
+
+  if (pantalla === "cargando") {
     return <Loading />;
+  }
+
+  if (pantalla === "error") {
+    return (
+      <ErrorCarga
+        titulo="No pudimos cargar los documentos"
+        onReintentar={() => (errorEntidades ? reintentarEntidades() : refetch())}
+      />
+    );
+  }
+
+  if (pantalla === "sin-entidades") {
+    return <SinEntidades queVerias="tus documentos" />;
   }
 
   return (

@@ -20,6 +20,7 @@ import {
   montos_adicionales,
   moras_credito,
   pagos_credito,
+  pagos_credito_inversionistas_espejo,
   platform_users,
   StatusCredit,
   usuarios,
@@ -30,6 +31,7 @@ import {
   and,
   desc,
   eq,
+  ne,
   sql,
   inArray,
   asc,
@@ -665,6 +667,8 @@ export interface CreditoConInfo {
   fecha_inicio?: string | null;
   /** Nombre de la aseguradora vinculada al crédito (null si no tiene). */
   aseguradora?: string | null;
+  /** Hay filas en el espejo de pagos aún sin liquidar → no puede entrar a devolución a CUBE. */
+  tiene_pagos_sin_liquidar?: boolean;
 }
 
 // 🔥 Función auxiliar para calcular proximidad (con zona horaria de Guatemala)
@@ -1131,6 +1135,35 @@ export async function getCreditosWithUserByMesAnio(
     }
   }
 
+  // 3.5 Créditos con borradores de pago vivos: bloquean la entrada a
+  // devolución a CUBE (el backend lo rechaza en updateCredit; acá solo
+  // apagamos el toggle correspondiente en el modal de edición).
+  let creditosConBorradores = new Set<number>();
+  if (creditosIds.length > 0) {
+    try {
+      const filasBorrador = await db
+        .selectDistinct({
+          credito_id: pagos_credito_inversionistas_espejo.credito_id,
+        })
+        .from(pagos_credito_inversionistas_espejo)
+        .where(
+          and(
+            inArray(
+              pagos_credito_inversionistas_espejo.credito_id,
+              creditosIds
+            ),
+            ne(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO")
+          )
+        );
+      creditosConBorradores = new Set(filasBorrador.map((f) => f.credito_id));
+    } catch (err) {
+      console.error("❌ Error consultando borradores de pago:", err);
+      // Fail-open a propósito: el guard del backend (updateCredit) es la
+      // fuente de verdad; fallar cerrado acá trabaría el toggle sin poder
+      // explicar por qué.
+    }
+  }
+
   // 4️⃣ Moras Map
   const morasMap: Record<number, any> = {};
   rows.forEach((row) => {
@@ -1331,6 +1364,7 @@ export async function getCreditosWithUserByMesAnio(
           proxima_cuota,
           fecha_inicio,
           aseguradora: row.aseguradora_nombre ?? null,
+          tiene_pagos_sin_liquidar: creditosConBorradores.has(creditoId),
         });
       }
     });

@@ -1,10 +1,12 @@
-import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, sql, sum } from "drizzle-orm";
 import { client, db } from "../database";
 import { asesores, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, platform_users, usuarios } from "../database/db/schema";
 import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import ExcelJS from "exceljs";
+import { buildReporteCashInWorkbook } from "../utils/functions/excelCashInReport";
+import { inicioDiaGTComoTimestampUTC } from "../utils/functions/diaGuatemala";
+import { clampPagination, contienePatron } from "../utils/functions/pagination";
 import { stat } from "fs";
 import { emitCreditLateFee } from "../utils/structuredLogger";
 import type { PoolClient } from "pg";
@@ -590,6 +592,7 @@ export async function updateMora({
   cuotas_atrasadas,
   activa,
   usuario_email,
+  motivo,
 }: {
   credito_id?: number;
   numero_credito_sifco?: string;
@@ -598,6 +601,12 @@ export async function updateMora({
   cuotas_atrasadas?: number;
   activa?: boolean;
   usuario_email?: string;
+  /**
+   * Justificación del ajuste; queda en moras_historial.motivo. Opcional a nivel de
+   * función (los callers internos pasan uno automático), pero OBLIGATORIO en la
+   * ruta POST /mora/update, la única puerta de entrada desde la interfaz.
+   */
+  motivo?: string;
 }) {
   const startedAt = safeNow();
   try {
@@ -743,9 +752,14 @@ export async function updateMora({
       monto_anterior: result.montoAnterior,
       monto_nuevo: result.montoNuevo,
       cuotas_atrasadas_anterior: result.cuotasAnteriores,
-      cuotas_atrasadas_nuevas: cuotas_atrasadas,
+      // Si el llamador NO mandó cuotas_atrasadas (los flujos de pago y de
+      // reversa solo ajustan el monto), la fila conservó su valor: registrar 0
+      // inventaba un "3 → 0" que el modal de Historial de mora mostraba en cada
+      // pago como si las cuotas atrasadas se hubieran limpiado.
+      cuotas_atrasadas_nuevas: cuotas_atrasadas ?? result.updated.cuotas_atrasadas ?? result.cuotasAnteriores,
       porcentaje_mora: result.updated.porcentaje_mora,
       usuario_id: usuarioId,
+      motivo,
     });
 
     emitCreditLateFee({ outcome: "completed", operation: "update", durationMs: elapsedMilliseconds(startedAt) });
@@ -1144,6 +1158,7 @@ export async function condonarMora({
         .select({
           id: moras_credito.mora_id,
           monto: moras_credito.monto_mora,
+          cuotas_atrasadas: moras_credito.cuotas_atrasadas,
         })
         .from(moras_credito)
         .where(and(
@@ -1194,7 +1209,14 @@ export async function condonarMora({
         })
         .returning();
 
-      return { kind: "ok" as const, moraId: moraActual.id, monto, updatedMora, condonacion };
+      return {
+        kind: "ok" as const,
+        moraId: moraActual.id,
+        monto,
+        cuotas: moraActual.cuotas_atrasadas,
+        updatedMora,
+        condonacion,
+      };
     });
 
     if (result.kind === "not_found") {
@@ -1209,6 +1231,10 @@ export async function condonarMora({
       origen: "CONDONACION_INDIVIDUAL",
       monto_anterior: result.monto,
       monto_nuevo: "0",
+      // Condonar pone el MONTO en 0; las cuotas atrasadas de la fila no se
+      // tocan. Registrar el valor real evita el "N → 0" falso en el historial.
+      cuotas_atrasadas_anterior: result.cuotas ?? 0,
+      cuotas_atrasadas_nuevas: result.updatedMora?.cuotas_atrasadas ?? result.cuotas ?? 0,
       usuario_id: user.id,
       motivo,
     });
@@ -1231,37 +1257,86 @@ export async function condonarMora({
 }
 
 
+// Clamp defensivo de paginación. Vive en utils/functions/pagination.ts porque
+// `getMoraHistorialSnapshot` (moraHistorial.ts) tenía su propia copia inline con
+// "el mismo criterio". Se re-exporta para no romper importadores.
+export { clampPagination };
+
+/**
+ * Parámetro de entrada inválido: el request pide algo que no se puede cumplir.
+ *
+ * NO es un 500: el `status` es 400 y el `message` está en español para
+ * mostrarlo tal cual. Existe porque descartar un filtro que no se pudo
+ * interpretar y responder 200 hace que "filtro inválido" y "no pedí filtro"
+ * se vean igual: el usuario cree estar viendo un rango de fechas y está
+ * viendo TODA la historia (y con excel=true se sube ese Excel a R2).
+ */
+export class ParametroInvalidoError extends Error {
+  readonly status = 400;
+  readonly parametro: string;
+  constructor(parametro: string, message: string) {
+    super(message);
+    this.name = "ParametroInvalidoError";
+    this.parametro = parametro;
+  }
+}
+
 /**
  * Obtener créditos con información de mora.
- * 
+ *
  * Filtros disponibles:
  * - numero_credito_sifco
+ * - nombre_usuario (ILIKE sobre usuarios.nombre)
  * - cuotas_atrasadas (ej: > 2)
  * - estado (ACTIVO, MOROSO, etc.)
- * 
- * Si excel=true, exporta a Excel y sube a R2.
+ *
+ * Pagina el listado JSON (page/pageSize) y devuelve `pagination` + `totales`
+ * calculados sobre TODO el conjunto filtrado (no sobre la página).
+ * Si excel=true, exporta TODAS las filas filtradas (sin paginar) y sube a R2.
  */
 export async function getCreditosWithMoras({
   numero_credito_sifco,
+  nombre_usuario,
   cuotas_atrasadas,
   estado,
   excel,
+  page,
+  pageSize,
 }: {
   numero_credito_sifco?: string;
+  nombre_usuario?: string;
   cuotas_atrasadas?: number;
   estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
   excel?: boolean;
+  page?: number;
+  pageSize?: number;
 }) {
+  const startedAt = safeNow();
+  try {
   // 1️⃣ Build query base
   let whereClauses: any[] = [];
 
   if (numero_credito_sifco) {
     whereClauses.push(eq(creditos.numero_credito_sifco, numero_credito_sifco));
   }
+  if (nombre_usuario) {
+    // `contienePatron` escapa % _ \: sin eso, buscar "_" matchea a TODOS y "%"
+    // devuelve la tabla entera (son los comodines de ILIKE).
+    whereClauses.push(ilike(usuarios.nombre, contienePatron(nombre_usuario)));
+  }
   if (estado) {
     whereClauses.push(eq(creditos.statusCredit, estado));
   }
-  if (cuotas_atrasadas !== undefined) {
+  if (cuotas_atrasadas !== undefined && cuotas_atrasadas !== null) {
+    // Llega de un query string vía `Number(...)`: "abc" da NaN, que NO es
+    // undefined, se colaba hasta el `gte` y Postgres tumbaba el request con un
+    // 500. Se valida acá, junto al resto de los parámetros del listado.
+    if (!Number.isInteger(cuotas_atrasadas) || cuotas_atrasadas < 0) {
+      throw new ParametroInvalidoError(
+        "cuotas_atrasadas",
+        `[ERROR] cuotas_atrasadas inválido: "${cuotas_atrasadas}". Se espera un número entero mayor o igual a 0.`
+      );
+    }
     whereClauses.push(gte(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
   }
   whereClauses.push(eq(moras_credito.activa, true)); // Solo moras activas
@@ -1281,48 +1356,84 @@ export async function getCreditosWithMoras({
       asesor: asesores.nombre,
       monto_mora: moras_credito.monto_mora,
       cuotas_atrasadas: moras_credito.cuotas_atrasadas,
-      mora_activa: moras_credito.activa, 
+      mora_activa: moras_credito.activa,
     })
     .from(creditos)
     .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
     .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
     .leftJoin(moras_credito, eq(moras_credito.credito_id, creditos.credito_id))
-    .where(whereClauses.length > 0 ? and(...whereClauses) : undefined);
-
-  const data = await query;
+    .where(whereClauses.length > 0 ? and(...whereClauses) : undefined)
+    // Orden estable: sin ORDER BY explícito la paginación puede repetir/saltar filas.
+    // mora_id desempata si un crédito llegara a tener más de una mora activa (el índice
+    // único lo impide hoy, pero ya pasó cuando el índice no existía).
+    .orderBy(desc(moras_credito.monto_mora), creditos.credito_id, moras_credito.mora_id);
 
   if (!excel) {
+    // 1️⃣.1 Totales sobre TODO el conjunto filtrado (el front los usa para el
+    // encabezado y para el diálogo de condonación masiva), NO sobre la página.
+    const { page: pageNum, pageSize: size, offset } = clampPagination(page, pageSize);
+
+    const [totalesRes, data] = await Promise.all([
+      db
+        .select({
+          creditos: count(),
+          mora_total: sum(moras_credito.monto_mora),
+        })
+        .from(creditos)
+        .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+        .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
+        .leftJoin(moras_credito, eq(moras_credito.credito_id, creditos.credito_id))
+        .where(whereClauses.length > 0 ? and(...whereClauses) : undefined),
+      query.limit(size).offset(offset),
+    ]);
+
+    const total = Number(totalesRes?.[0]?.creditos ?? 0);
+
+    // Misma convención que getCondonacionesMora: el listado también emite
+    // telemetría en la rama JSON, no solo en la del Excel.
+    emitCreditLateFee({ outcome: "completed", operation: "list", durationMs: elapsedMilliseconds(startedAt), processedCount: data.length, succeededCount: data.length, failedCount: 0, skippedCount: 0 });
     return {
       success: true,
       count: data.length,
       data,
+      pagination: { page: pageNum, pageSize: size, total, totalPages: Math.ceil(total / size) },
+      totales: {
+        mora_total: Number(totalesRes?.[0]?.mora_total ?? 0).toFixed(2),
+        creditos: total,
+      },
     };
   }
 
-  // 2️⃣ Generar Excel
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("CreditosMora");
+  // Excel: TODAS las filas que cumplen los filtros, sin paginar.
+  const data = await query;
 
-  sheet.columns = [
-    { header: "Crédito ID", key: "credito_id", width: 12 },
-    { header: "Número SIFCO", key: "numero_credito_sifco", width: 20 },
-    { header: "Estado", key: "estado", width: 15 },
-    { header: "Capital", key: "capital", width: 15 },
-    { header: "Cuota", key: "cuota", width: 15 },
-    { header: "Plazo", key: "plazo", width: 10 },
-    { header: "Usuario", key: "usuario", width: 25 },
-    { header: "NIT", key: "usuario_nit", width: 20 },
-    { header: "Categoría", key: "usuario_categoria", width: 15 },
-    { header: "Asesor", key: "asesor", width: 20 },
-    { header: "Fecha Creación", key: "fecha_creacion", width: 20 },
-    { header: "Observaciones", key: "observaciones", width: 40 },
-    { header: "Monto Mora", key: "monto_mora", width: 15 },
-    { header: "Cuotas Atrasadas", key: "cuotas_atrasadas", width: 18 },
-    { header: "Mora Activa", key: "mora_activa", width: 12 },
-  ];
-
-  data.forEach((row) => {
-    sheet.addRow(row);
+  // 2️⃣ Generar Excel (mismo lenguaje visual que el reporte de inversionistas)
+  const excelBuffer = await buildReporteCashInWorkbook({
+    sheetName: "CreditosMora",
+    titulo: "Créditos con mora",
+    subtitulo: `${data.length} crédito${data.length === 1 ? "" : "s"}`,
+    conTotales: true,
+    filas: data as any[],
+    columnas: [
+      { header: "Crédito ID", key: "credito_id", width: 12, type: "number" },
+      { header: "Número SIFCO", key: "numero_credito_sifco", width: 20 },
+      { header: "Estado", key: "estado", width: 15 },
+      // Sin `total`: sumar capitales de créditos distintos no significa nada y
+      // no tiene contraparte en pantalla (la tarjeta es de MORA, no de capital).
+      // Mismo criterio que el reporte de condonaciones.
+      { header: "Capital", key: "capital", width: 16, type: "money" },
+      { header: "Cuota", key: "cuota", width: 15, type: "money" },
+      { header: "Plazo", key: "plazo", width: 10, type: "number" },
+      { header: "Usuario", key: "usuario", width: 28 },
+      { header: "NIT", key: "usuario_nit", width: 20 },
+      { header: "Categoría", key: "usuario_categoria", width: 15 },
+      { header: "Asesor", key: "asesor", width: 22 },
+      { header: "Fecha Creación (GT)", key: "fecha_creacion", width: 20, type: "date" },
+      { header: "Observaciones", key: "observaciones", width: 40 },
+      { header: "Monto Mora", key: "monto_mora", width: 16, type: "money", total: true },
+      { header: "Cuotas Atrasadas", key: "cuotas_atrasadas", width: 18, type: "number" },
+      { header: "Mora Activa", key: "mora_activa", width: 12 },
+    ],
   });
 
   // 3️⃣ Subir a R2
@@ -1336,8 +1447,7 @@ export async function getCreditosWithMoras({
     },
   });
 
-  const buffer = await workbook.xlsx.writeBuffer();
-  const uint8Array = new Uint8Array(buffer);
+  const uint8Array = new Uint8Array(excelBuffer);
 
   await s3.send(
     new PutObjectCommand({
@@ -1350,34 +1460,108 @@ export async function getCreditosWithMoras({
 
   const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
 
+  emitCreditLateFee({ outcome: "completed", operation: "list", durationMs: elapsedMilliseconds(startedAt), processedCount: data.length, succeededCount: data.length, failedCount: 0, skippedCount: 0 });
   return {
     success: true,
     excelUrl: url,
     count: data.length,
   };
+  } catch (error) {
+    if (error instanceof ParametroInvalidoError) {
+      emitCreditLateFee({ outcome: "rejected", operation: "list", durationMs: elapsedMilliseconds(startedAt), reasonCode: "schema_invalid" });
+    } else {
+      emitCreditLateFee({ outcome: "failed", operation: "list", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
+    }
+    throw error;
+  }
 }
+/**
+ * Filtro por día de Guatemala sobre `moras_condonaciones.fecha`.
+ *
+ * La columna es `timestamp` SIN zona con el instante en UTC y la pantalla
+ * muestra el día de Guatemala: comparar crudo contra "2026-08-25" dejaría
+ * fuera las condonaciones de las 18:00–23:59 GT (que en UTC ya son del 26) y
+ * metería las de las 00:00–05:59 UTC del 25 (que en GT son del 24).
+ *
+ * Se convierten los límites del día GT a instantes UTC y se compara contra la
+ * columna CRUDA, no contra `(fecha AT TIME ZONE …)::date`: así el índice de
+ * `fecha` sigue sirviendo. El rango es semiabierto [desde, díaSiguiente) para
+ * que el día "hasta" entre completo hasta su último microsegundo.
+ *
+ * Una fecha PRESENTE pero que no se puede interpretar lanza
+ * `ParametroInvalidoError` (400) en vez de descartarse: ver la docstring de esa
+ * clase. Ausente o vacía sí significa "sin filtro".
+ *
+ * Exportada para poder afirmar el SQL generado en los tests.
+ */
+export function filtroFechaCondonacionesGT(
+  fecha_desde?: string,
+  fecha_hasta?: string
+) {
+  const convertir = (valor: string | undefined, nombre: string, offsetDias: number) => {
+    if (valor === undefined || valor === null || String(valor).trim() === "") return null;
+    const ts = inicioDiaGTComoTimestampUTC(String(valor), offsetDias);
+    if (!ts) {
+      throw new ParametroInvalidoError(
+        nombre,
+        `[ERROR] ${nombre} inválida: "${valor}". Se espera un día de Guatemala con formato YYYY-MM-DD (año entre 1900 y 9998).`
+      );
+    }
+    return ts;
+  };
+
+  const desde = convertir(fecha_desde, "fecha_desde", 0);
+  // +1 día: el límite superior es la medianoche del día SIGUIENTE, así el día
+  // elegido entra completo.
+  const hastaExclusivo = convertir(fecha_hasta, "fecha_hasta", 1);
+  const clauses: any[] = [];
+  // Independientes a propósito: antes el filtro solo se aplicaba con AMBOS
+  // presentes y mandar solo uno se ignoraba en silencio.
+  if (desde) {
+    clauses.push(sql`${moras_condonaciones.fecha} >= ${desde}::timestamp`);
+  }
+  if (hastaExclusivo) {
+    clauses.push(
+      sql`${moras_condonaciones.fecha} < ${hastaExclusivo}::timestamp`
+    );
+  }
+  return clauses;
+}
+
 /**
  * Get mora condonations (history of condonations).
  *
  * Filters:
  * - numero_credito_sifco (string)
+ * - nombre_usuario (ILIKE sobre usuarios.nombre)
  * - usuario_email (string)
- * - fecha_desde / fecha_hasta (rango de fechas)
+ * - fecha_desde / fecha_hasta (`YYYY-MM-DD`, DÍAS DE GUATEMALA, independientes:
+ *   se puede mandar solo uno)
  *
- * If excel=true, export to Excel and upload to R2.
+ * Pagina el listado JSON (page/pageSize) y devuelve `pagination` + `totales`
+ * sobre TODO el conjunto filtrado. If excel=true, exporta todas las filas
+ * filtradas (sin paginar) y sube a R2.
  */
 export async function getCondonacionesMora({
   numero_credito_sifco,
+  nombre_usuario,
   usuario_email,
   fecha_desde,
   fecha_hasta,
   excel,
+  page,
+  pageSize,
 }: {
   numero_credito_sifco?: string;
+  nombre_usuario?: string;
   usuario_email?: string;
-  fecha_desde?: Date;
-  fecha_hasta?: Date;
+  /** Día de Guatemala `YYYY-MM-DD` (inclusive). */
+  fecha_desde?: string;
+  /** Día de Guatemala `YYYY-MM-DD` (inclusive, día completo). */
+  fecha_hasta?: string;
   excel?: boolean;
+  page?: number;
+  pageSize?: number;
 }) {
   const startedAt = safeNow();
   try {
@@ -1387,17 +1571,14 @@ export async function getCondonacionesMora({
   if (numero_credito_sifco) {
     whereClauses.push(eq(creditos.numero_credito_sifco, numero_credito_sifco));
   }
+  if (nombre_usuario) {
+    // Comodines de ILIKE escapados: ver getCreditosWithMoras.
+    whereClauses.push(ilike(usuarios.nombre, contienePatron(nombre_usuario)));
+  }
   if (usuario_email) {
     whereClauses.push(eq(platform_users.email, usuario_email));
   }
-    if (fecha_desde && fecha_hasta) {
-    whereClauses.push(
-      and(
-        gte(moras_condonaciones.fecha, fecha_desde),
-        lte(moras_condonaciones.fecha, fecha_hasta)
-      )
-    );
-  }
+  whereClauses.push(...filtroFechaCondonacionesGT(fecha_desde, fecha_hasta));
 
   // 2️⃣ Query con joins
   const query = db
@@ -1419,38 +1600,77 @@ export async function getCondonacionesMora({
     .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
     .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
     .innerJoin(platform_users, eq(moras_condonaciones.usuario_id, platform_users.id))
-    .where(whereClauses.length > 0 ? and(...whereClauses) : undefined);
-
-  const data = await query;
+    .where(whereClauses.length > 0 ? and(...whereClauses) : undefined)
+    // Orden estable (y útil): lo más reciente primero; sin ORDER BY la paginación
+    // puede repetir/saltar filas entre páginas.
+    .orderBy(desc(moras_condonaciones.fecha), desc(moras_condonaciones.condonacion_id));
 
   if (!excel) {
+    const { page: pageNum, pageSize: size, offset } = clampPagination(page, pageSize);
+
+    const [totalesRes, data] = await Promise.all([
+      db
+        .select({
+          condonaciones: count(),
+          monto_total: sum(moras_condonaciones.montoCondonacion),
+        })
+        .from(moras_condonaciones)
+        .innerJoin(creditos, eq(moras_condonaciones.credito_id, creditos.credito_id))
+        .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+        .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
+        .innerJoin(platform_users, eq(moras_condonaciones.usuario_id, platform_users.id))
+        .where(whereClauses.length > 0 ? and(...whereClauses) : undefined),
+      query.limit(size).offset(offset),
+    ]);
+
+    const total = Number(totalesRes?.[0]?.condonaciones ?? 0);
+
     emitCreditLateFee({ outcome: "completed", operation: "list", durationMs: elapsedMilliseconds(startedAt), processedCount: data.length, succeededCount: data.length, failedCount: 0, skippedCount: 0 });
     return {
       success: true,
       count: data.length,
       data,
+      pagination: { page: pageNum, pageSize: size, total, totalPages: Math.ceil(total / size) },
+      totales: {
+        monto_total: Number(totalesRes?.[0]?.monto_total ?? 0).toFixed(2),
+        condonaciones: total,
+      },
     };
   }
 
-  // 3️⃣ Crear Excel
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Condonaciones");
+  // Excel: TODAS las filas filtradas, sin paginar.
+  const data = await query;
 
-  sheet.columns = [
-    { header: "Condonación ID", key: "condonacion_id", width: 12 },
-    { header: "Crédito ID", key: "credito_id", width: 12 },
-    { header: "Número SIFCO", key: "numero_credito_sifco", width: 20 },
-    { header: "Estado Crédito", key: "estado_credito", width: 18 },
-    { header: "Capital", key: "capital", width: 15 },
-    { header: "Usuario Cliente", key: "usuario", width: 25 },
-    { header: "Asesor", key: "asesor", width: 25 },
-    { header: "Motivo", key: "motivo", width: 40 },
-    { header: "Fecha", key: "fecha", width: 20 },
-    { header: "Usuario que condonó", key: "usuario_email", width: 30 },
-  ];
-
-  data.forEach((row) => {
-    sheet.addRow(row);
+  // 3️⃣ Crear Excel (mismo lenguaje visual que el reporte de inversionistas)
+  const excelBuffer = await buildReporteCashInWorkbook({
+    sheetName: "Condonaciones",
+    titulo: "Condonaciones de mora",
+    subtitulo: `${data.length} condonaci${data.length === 1 ? "ón" : "ones"}`,
+    // La fila de totales suma SOLO el monto condonado (ver `total: true` abajo):
+    // es el dato del reporte y tiene que cuadrar con la tarjeta "Monto total
+    // condonado" de la pantalla. El capital del crédito no se suma —sumar
+    // capitales no dice nada— y por eso va sin `total`.
+    conTotales: true,
+    filas: data as any[],
+    columnas: [
+      { header: "Condonación ID", key: "condonacion_id", width: 14, type: "number" },
+      { header: "Crédito ID", key: "credito_id", width: 12, type: "number" },
+      { header: "Número SIFCO", key: "numero_credito_sifco", width: 20 },
+      { header: "Estado Crédito", key: "estado_credito", width: 18 },
+      { header: "Capital", key: "capital", width: 16, type: "money" },
+      {
+        header: "Monto Condonado",
+        key: "montoCondonacion",
+        width: 18,
+        type: "money",
+        total: true,
+      },
+      { header: "Usuario Cliente", key: "usuario", width: 28 },
+      { header: "Asesor", key: "asesor", width: 25 },
+      { header: "Motivo", key: "motivo", width: 40 },
+      { header: "Fecha (GT)", key: "fecha", width: 18, type: "date" },
+      { header: "Usuario que condonó", key: "usuario_email", width: 30 },
+    ],
   });
 
   // 4️⃣ Subir a R2
@@ -1464,8 +1684,7 @@ export async function getCondonacionesMora({
     },
   });
 
-  const buffer = await workbook.xlsx.writeBuffer();
-  const uint8Array = new Uint8Array(buffer);
+  const uint8Array = new Uint8Array(excelBuffer);
 
   await s3.send(
     new PutObjectCommand({
@@ -1485,7 +1704,11 @@ export async function getCondonacionesMora({
     count: data.length,
   };
   } catch (error) {
-    emitCreditLateFee({ outcome: "failed", operation: "list", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
+    if (error instanceof ParametroInvalidoError) {
+      emitCreditLateFee({ outcome: "rejected", operation: "list", durationMs: elapsedMilliseconds(startedAt), reasonCode: "schema_invalid" });
+    } else {
+      emitCreditLateFee({ outcome: "failed", operation: "list", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });
+    }
     throw error;
   }
 }
@@ -1517,6 +1740,7 @@ export async function condonarTodasLasMoras({
         credito_id: creditos.credito_id,
         mora_id: moras_credito.mora_id,
         monto_mora: moras_credito.monto_mora,
+        cuotas_atrasadas: moras_credito.cuotas_atrasadas,
       })
       .from(creditos)
       .leftJoin(
@@ -1538,8 +1762,26 @@ export async function condonarTodasLasMoras({
       };
     }
 
+    // El leftJoin trae también los créditos MOROSO SIN mora activa (mora_id
+    // null): esos no se actualizan, no generan condonación y no deben contarse.
+    // Contarlos inflaba el "Se condonaron N moras" y el `condonados`.
+    const conMoraActiva = creditosMorosos.filter(
+      (c): c is typeof c & { mora_id: number } => c.mora_id !== null
+    );
+
+    if (conMoraActiva.length === 0) {
+      emitCreditLateFee({ outcome: "completed", operation: "bulk_condone", durationMs: elapsedMilliseconds(startedAt), processedCount: creditosMorosos.length, succeededCount: 0, failedCount: 0, skippedCount: creditosMorosos.length });
+      return {
+        success: true,
+        message: "[INFO] No hay moras activas para condonar",
+        condonados: 0,
+        creditos_afectados: 0,
+        condonaciones: [],
+      };
+    }
+
     // 3. Actualizar todas las moras a 0 (mantener activas y estado MOROSO)
-    const moraIds = creditosMorosos.map((c) => c.mora_id).filter((id): id is number => id !== null);
+    const moraIds = conMoraActiva.map((c) => c.mora_id);
     await db
       .update(moras_credito)
       .set({
@@ -1551,15 +1793,13 @@ export async function condonarTodasLasMoras({
 
 
     // 5. Insertar registros masivos en moras_condonaciones
-    const condonacionesData = creditosMorosos
-      .filter((credito) => credito.mora_id !== null)
-      .map((credito) => ({
-        credito_id: credito.credito_id,
-        mora_id: credito.mora_id as number,
-        motivo,
-        usuario_id: user.id,
-        montoCondonacion: credito.monto_mora ??"0",
-      }));
+    const condonacionesData = conMoraActiva.map((credito) => ({
+      credito_id: credito.credito_id,
+      mora_id: credito.mora_id,
+      motivo,
+      usuario_id: user.id,
+      montoCondonacion: credito.monto_mora ?? "0",
+    }));
 
     const condonaciones = await db
       .insert(moras_condonaciones)
@@ -1568,20 +1808,22 @@ export async function condonarTodasLasMoras({
 
     // Registrar histórico para cada condonación masiva
     await Promise.all(
-      creditosMorosos
-        .filter((c) => c.mora_id !== null)
-        .map((c) =>
-          registrarHistorialMora({
-            credito_id: c.credito_id,
-            mora_id: c.mora_id as number,
-            tipo_evento: "CONDONACION",
-            origen: "CONDONACION_MASIVA",
-            monto_anterior: c.monto_mora ?? "0",
-            monto_nuevo: "0",
-            usuario_id: user.id,
-            motivo,
-          })
-        )
+      conMoraActiva.map((c) =>
+        registrarHistorialMora({
+          credito_id: c.credito_id,
+          mora_id: c.mora_id,
+          tipo_evento: "CONDONACION",
+          origen: "CONDONACION_MASIVA",
+          monto_anterior: c.monto_mora ?? "0",
+          monto_nuevo: "0",
+          // La condonación masiva NO toca cuotas_atrasadas de la fila: se
+          // registra el valor real (antes y después) en vez de un "→ 0" falso.
+          cuotas_atrasadas_anterior: c.cuotas_atrasadas ?? 0,
+          cuotas_atrasadas_nuevas: c.cuotas_atrasadas ?? 0,
+          usuario_id: user.id,
+          motivo,
+        })
+      )
     );
 
     emitCreditLateFee({
@@ -1595,9 +1837,9 @@ export async function condonarTodasLasMoras({
     });
     return {
       success: true,
-      message: `[SUCCESS] Se condonaron ${creditosMorosos.length} moras`,
-      condonados: creditosMorosos.length,
-      creditos_afectados: creditosMorosos.length,
+      message: `[SUCCESS] Se condonaron ${condonacionesData.length} moras`,
+      condonados: condonacionesData.length,
+      creditos_afectados: condonacionesData.length,
       condonaciones,
     };
   } catch (error) {

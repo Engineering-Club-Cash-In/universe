@@ -4,6 +4,8 @@
  */
 
 import apiAuth from "@/lib/api/apiAuth";
+import { registroExternoErrorDesde } from "./registroExterno.errors";
+import type { IdentidadDelRegistro } from "./registroSinDpi";
 
 export type UserType = "CLIENT" | "INVESTOR";
 
@@ -20,27 +22,26 @@ export interface RegisterExternalUserResponse {
   message: string;
   userType: UserType;
   data?: any;
+  /**
+   * Identidad que quedó EN VIGOR en la cuenta tras el registro. La manda
+   * `register-external-auth` y no se declaraba, así que el formulario no podía
+   * ver que el servidor se había negado a escribir el DPI y trataba ese 200
+   * como éxito. Ver `registroQuedoSinDpi`.
+   */
+  identity?: IdentidadDelRegistro | null;
+  /**
+   * Aviso del CRM de que reconoció la ficha pero NO le escribió el DPI. Se
+   * declara para no perderla de vista, pero la decisión del formulario se toma
+   * con `identity.dpi`: esta bandera solo la emite el camino de CLIENT y viene
+   * `undefined` en el de INVESTOR y en las altas nuevas.
+   */
+  dpiRegistradoEnLead?: boolean;
 }
 
-/**
- * Registrar usuario externo (sin autenticación requerida)
- * La API decide automáticamente si crear en CRM o Cartera según userType
- */
-export const registerExternalUser = async (
-  payload: RegisterExternalUserPayload
-): Promise<RegisterExternalUserResponse> => {
-  try {
-    const response = await apiAuth.post<RegisterExternalUserResponse>(
-      "/api/unified/register-external",
-      payload
-    );
-    return response.data;
-  } catch (error: any) {
-    const message = error.response?.data?.message || "Error al registrar usuario externo";
-    console.error("Error al registrar usuario externo:", error);
-    throw new Error(message);
-  }
-};
+// `registerExternalUser` (sin sesión, contra POST /api/unified/register-external)
+// se retiró junto con esa ruta: llamaba al CRM con el secreto de servicio
+// usando datos que elegía quien llamara, y devolvía el lead completo cuando
+// coincidía el correo o el DPI. No tenía ningún llamador vivo.
 
 /**
  * Registrar usuario externo (con autenticación)
@@ -56,8 +57,9 @@ export const registerExternalUserAuth = async (
     );
     return response.data;
   } catch (error: any) {
-    const message = error.response?.data?.message || "Error al registrar usuario externo";
     console.error("Error al registrar usuario externo:", error);
-    throw new Error(message);
+    // Se conserva el status/código: el formulario necesita distinguir el DPI
+    // ya tomado (corregible por el titular) de un fallo cualquiera.
+    throw registroExternoErrorDesde(error);
   }
 };

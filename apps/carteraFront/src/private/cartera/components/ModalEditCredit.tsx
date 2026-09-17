@@ -75,6 +75,8 @@ interface ModalEditCreditProps {
   onSuccess: () => void;
   investorsOptions: InvestorOption[];
   advisorsOptions: { asesor_id: number; nombre: string }[];
+  /** El crédito tiene pagos espejo sin liquidar: no puede SOLICITAR devolución a CUBE. */
+  tienePagosSinLiquidar?: boolean;
 }
 
 // Los campos se renderizan por grupo (creditFieldGroups), no como lista plana.
@@ -145,6 +147,7 @@ export function ModalEditCredit({
   onSuccess,
   investorsOptions,
   advisorsOptions,
+  tienePagosSinLiquidar,
 }: ModalEditCreditProps) {
   const { mutate: updateCredit, isPending } = useUpdateCredit();
   const { mutate: recalculateQuota, isPending: isRecalculating } =
@@ -511,6 +514,16 @@ export function ModalEditCredit({
       });
     },
   });
+
+  // Entrada bloqueada, salida libre: si el crédito YA está en
+  // PENDIENTE_AUTORIZACION hay que poder apagarlo aunque tenga borradores, o
+  // queda atrapado (el backend permite PENDIENTE_AUTORIZACION -> NO_APLICA
+  // sin condiciones, ver esDesactivacionValida en updateCredit.ts). Lee
+  // formik.values (no el initial) para que apagarlo funcione dentro de la
+  // misma sesión del modal.
+  const yaEnDevolucion =
+    formik.values.estado_devolucion === "PENDIENTE_AUTORIZACION";
+  const devolucionBloqueada = !!tienePagosSinLiquidar && !yaEnDevolucion;
 
   const montoAportadoPadreCambia = hasMontoAportadoChanged(
     formik.values.investors,
@@ -968,8 +981,15 @@ export function ModalEditCredit({
                 <button
                   type="button"
                   role="switch"
+                  disabled={devolucionBloqueada}
+                  title={
+                    devolucionBloqueada
+                      ? "Este crédito tiene pagos sin liquidar. Liquidalos antes de solicitar la devolución a CUBE."
+                      : undefined
+                  }
                   aria-checked={formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION'}
                   onClick={() => {
+                    if (devolucionBloqueada) return;
                     if (formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION') {
                       formik.setFieldValue('estado_devolucion', 'NO_APLICA');
                       formik.setFieldValue('motivo_devolucion', '');
@@ -977,10 +997,13 @@ export function ModalEditCredit({
                       formik.setFieldValue('estado_devolucion', 'PENDIENTE_AUTORIZACION');
                     }
                   }}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                    formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION'
-                      ? "bg-green-500"
-                      : "bg-gray-300"
+                  className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    devolucionBloqueada
+                      ? "cursor-not-allowed opacity-50 bg-gray-200"
+                      : "cursor-pointer " +
+                        (formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION'
+                          ? "bg-green-500"
+                          : "bg-gray-300")
                   }`}
                 >
                   <span
@@ -992,6 +1015,12 @@ export function ModalEditCredit({
                   />
                 </button>
               </div>
+              {devolucionBloqueada && (
+                <div className="xl:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+                  Este crédito tiene pagos sin liquidar. Corré la liquidación
+                  correspondiente antes de solicitar la devolución a CUBE.
+                </div>
+              )}
               {formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION' && (
                 <div className="xl:col-span-2">
                   <Label className="text-gray-700 font-medium">Motivo de devolución *</Label>

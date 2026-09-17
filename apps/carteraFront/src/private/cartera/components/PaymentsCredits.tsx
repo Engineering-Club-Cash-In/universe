@@ -16,6 +16,7 @@ import { useState } from "react";
 import React from "react";
 import { Label } from "@/components/ui/label";
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronUp,
   Calendar,
@@ -48,6 +49,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DollarSign, Pencil, History } from "lucide-react";
 import { toast } from "sonner";
+import { cuotasEnAtraso } from "@/lib/cuotaAtrasada";
 // Iconos y colores por atributo
 const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
   pago_id: {
@@ -559,6 +561,16 @@ const handleDownloadExcel = async () => {
     return new Set([...porCuota.values()].map((v) => v.pago_id));
   }, [pagosFiltrados]);
 
+  // 🔶 Cuotas en atraso. El criterio (espejo de `isOverdueInstallmentForMora`
+  // del backend, con su exclusión por estado y su `monto_aplicado > 0`) vive en
+  // `@/lib/cuotaAtrasada`, donde está probado contra la regla de la mora.
+  // Se calcula sobre TODOS los pagos del crédito (`data`) y no sobre `pagosFiltrados`,
+  // para que el filtro de mes/año no esconda el pago que sí cubre la cuota.
+  const cuotasAtrasadas = React.useMemo(
+    () => cuotasEnAtraso(Array.isArray(data) ? (data as any[]) : []),
+    [data]
+  );
+
   return (
     <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
       <div className="w-full max-w-[1600px] mx-auto">
@@ -731,6 +743,23 @@ const handleDownloadExcel = async () => {
           </div>
         ) : (
           <div className="bg-white rounded-3xl shadow-xl p-6 w-full overflow-x-auto">
+            {/* Leyenda del resaltado de cuotas en atraso */}
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600" />
+              <p>
+                <span className="font-bold">Cuota en atraso:</span> las filas con
+                fondo ámbar y la etiqueta{" "}
+                <span className="font-semibold">“Atrasada”</span> corresponden a
+                cuotas ya vencidas (fecha de vencimiento anterior a hoy, hora de
+                Guatemala) que siguen sin marcarse como pagadas y sin ningún pago
+                con monto aplicado que las cubra. Es el mismo criterio con el que
+                el sistema calcula la mora: por eso los créditos en{" "}
+                <span className="font-semibold">
+                  convenio, incobrables, caídos o cancelados
+                </span>{" "}
+                no muestran cuotas atrasadas — por política no devengan mora.
+              </p>
+            </div>
             <Table className="w-full text-lg text-gray-900">
               <TableHeader>
                 <TableRow className="bg-blue-100 border-b-2 border-blue-200">
@@ -765,22 +794,53 @@ const handleDownloadExcel = async () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pagosFiltrados.map((item, idx) => (
+                {pagosFiltrados.map((item, idx) => {
+                  const vencimientoAtrasado = cuotasAtrasadas.get(
+                    (item.pago as any).cuota_id
+                  );
+                  const enAtraso = vencimientoAtrasado !== undefined;
+                  return (
                   <React.Fragment key={item.pago.pago_id}>
                     <TableRow
-                      className={idx % 2 === 0 ? "bg-blue-50" : "bg-white"}
+                      className={
+                        enAtraso
+                          ? "bg-amber-100/70 hover:bg-amber-100"
+                          : idx % 2 === 0
+                          ? "bg-blue-50"
+                          : "bg-white"
+                      }
                       style={{ cursor: "pointer" }}
+                      title={
+                        vencimientoAtrasado
+                          ? `Cuota en atraso: venció el ${formatDate(
+                              vencimientoAtrasado
+                            )} y no tiene pago aplicado que la cubra`
+                          : undefined
+                      }
                       onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
                     >
                       <TableCell className="text-center">
-                        {openIdx === idx ? (
-                          <ChevronUp className="mx-auto text-blue-500" />
-                        ) : (
-                          <ChevronDown className="mx-auto text-blue-400" />
-                        )}
+                        <div className="flex items-center justify-center gap-1">
+                          {enAtraso && (
+                            <AlertTriangle
+                              className="w-5 h-5 shrink-0 text-amber-600"
+                              aria-label="Cuota en atraso"
+                            />
+                          )}
+                          {openIdx === idx ? (
+                            <ChevronUp className="text-blue-500" />
+                          ) : (
+                            <ChevronDown className="text-blue-400" />
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-center font-bold text-blue-700">
                         {item.pago.numero_cuota ?? idx + 1}
+                        {enAtraso && (
+                          <span className="block mx-auto mt-1 w-fit px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 text-xs font-bold whitespace-nowrap">
+                            Atrasada
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-center text-blue-900 font-bold">
                         {formatCurrency(item.pago.monto_boleta)}
@@ -1273,7 +1333,8 @@ const handleDownloadExcel = async () => {
                       </TableRow>
                     )}
                   </React.Fragment>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

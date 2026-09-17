@@ -1,6 +1,7 @@
 import { relations, sql } from "drizzle-orm";
 import {
 	boolean,
+	check,
 	decimal,
 	integer,
 	jsonb,
@@ -288,6 +289,10 @@ export const creditAnalysis = pgTable(
 		>(),
 		// Control de intentos de análisis con IA (cada llamada a IA cuesta dinero)
 		attemptCount: integer("attempt_count").notNull().default(0), // Se incrementa al llamar a la IA
+		analysisReservationToken: uuid("analysis_reservation_token"),
+		analysisReservationStartedAt: timestamp("analysis_reservation_started_at", {
+			withTimezone: true,
+		}),
 		// Metadata
 		analyzedAt: timestamp("analyzed_at"), // null hasta que haya un análisis exitoso
 		createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -297,6 +302,10 @@ export const creditAnalysis = pgTable(
 			.references(() => user.id),
 	},
 	(table) => [
+		check(
+			"credit_analysis_reservation_pair_check",
+			sql`(${table.analysisReservationToken} IS NULL) = (${table.analysisReservationStartedAt} IS NULL)`,
+		),
 		uniqueIndex("credit_analysis_opportunity_id_unique")
 			.on(table.opportunityId)
 			.where(sql`${table.opportunityId} IS NOT NULL`),

@@ -1,206 +1,72 @@
+/**
+ * Rutas de perfil de la cuenta del portal.
+ *
+ * Todo el router exige sesión y la cuenta afectada sale SIEMPRE de esa sesión.
+ * Aquí vivieron rutas `/:userId/...` que leían y escribían el perfil de
+ * cualquiera con solo poner su id en la URL, y un `check-dpi/:dpi` público que
+ * confirmaba si un DPI estaba registrado —un oráculo de DPIs abierto a
+ * internet—. Las `/:userId/...` no tenían consumidor; `check-dpi` sí: lo
+ * llamaba `features/Login/hook/useRegister.ts` para avisar del DPI repetido
+ * antes de enviar el formulario. Aun así se eliminaron en vez de protegerse,
+ * porque esa verificación ya la hace el propio registro: fijar el DPI sobre la
+ * cuenta responde 409, y ese 409 es el que el formulario muestra ahora.
+ */
+
 import { Hono } from "hono";
-import { ProfileService } from "../services/profile.service";
 import { HTTPException } from "hono/http-exception";
+import { requireAuth, type AuthedVariables } from "../middleware/requireAuth";
+import {
+  DpiAlreadyTakenError,
+  DpiFormatError,
+  setUserDpi,
+} from "../services/portalIdentity.service";
 
-const profileRoutes = new Hono();
+const profileRoutes = new Hono<{ Variables: AuthedVariables }>();
+
+profileRoutes.use("*", requireAuth);
 
 /**
- * GET /api/profile/check-dpi/:dpi
- * Verifica si un DPI ya está registrado
+ * POST /api/profile/me/dpi
+ * Fija el DPI de la cuenta autenticada.
+ *
+ * El DPI dejó de aceptarse como campo de registro (`input: false`), así que
+ * esta es la ruta por la que un usuario lo establece. La cuenta afectada sale
+ * siempre de la sesión: el body solo trae el valor del DPI.
  */
-profileRoutes.get("/check-dpi/:dpi", async (c) => {
+profileRoutes.post("/me/dpi", async (c) => {
+  const user = c.get("user");
+
+  let body: { dpi?: unknown };
   try {
-    const dpi = c.req.param("dpi");
+    body = await c.req.json();
+  } catch {
+    throw new HTTPException(400, { message: "Cuerpo de la petición inválido" });
+  }
 
-    if (!dpi) {
-      throw new HTTPException(400, { message: "DPI es requerido" });
-    }
-
-    if (!/^\d{13}$/.test(dpi)) {
-      throw new HTTPException(400, {
-        message: "El DPI debe tener exactamente 13 dígitos",
-      });
-    }
-
-    const exists = await ProfileService.checkDpiExists(dpi);
-
-    return c.json({
-      success: true,
-      data: { exists },
-    });
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error;
-    }
-
-    throw new HTTPException(500, {
-      message: "Error al verificar el DPI",
+  if (typeof body.dpi !== "string") {
+    throw new HTTPException(400, {
+      message: "El campo dpi es requerido y debe ser un string",
     });
   }
-});
 
-/**
- * GET /api/profile/:userId
- * Obtiene el perfil de un usuario
- */
-profileRoutes.get("/:userId", async (c) => {
   try {
-    const userId = c.req.param("userId");
-
-    if (!userId) {
-      throw new HTTPException(400, { message: "userId es requerido" });
-    }
-
-    const profile = await ProfileService.getProfile(userId);
-
-    if (!profile) {
-      throw new HTTPException(404, { message: "Perfil no encontrado" });
-    }
-
-    return c.json({
-      success: true,
-      data: profile,
-    });
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error;
-    }
-
-    throw new HTTPException(500, {
-      message: "Error al obtener el perfil",
-    });
-  }
-});
-
-/**
- * POST /api/profile/:userId/dpi
- * Actualiza el DPI del usuario
- */
-profileRoutes.post("/:userId/dpi", async (c) => {
-  try {
-    const userId = c.req.param("userId");
-    const body = await c.req.json();
-
-    if (!userId) {
-      throw new HTTPException(400, { message: "userId es requerido" });
-    }
-
-    if (!body.dpi || typeof body.dpi !== "string") {
-      throw new HTTPException(400, {
-        message: "El campo dpi es requerido y debe ser un string",
-      });
-    }
-
-    // Validar formato DPI (13 dígitos)
-    if (!/^\d{13}$/.test(body.dpi)) {
-      throw new HTTPException(400, {
-        message: "El DPI debe tener exactamente 13 dígitos",
-      });
-    }
-
-    const profile = await ProfileService.updateDpi(userId, body.dpi);
+    const dpi = await setUserDpi(user.id, body.dpi);
 
     return c.json({
       success: true,
       message: "DPI actualizado correctamente",
-      data: profile,
+      data: { dpi },
     });
   } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error;
+    if (error instanceof DpiFormatError) {
+      throw new HTTPException(400, { message: error.message });
     }
 
-    throw new HTTPException(500, {
-      message: error instanceof Error ? error.message : "Error al actualizar el DPI",
-    });
-  }
-});
-
-/**
- * POST /api/profile/:userId/phone
- * Actualiza el teléfono del usuario
- */
-profileRoutes.post("/:userId/phone", async (c) => {
-  try {
-    const userId = c.req.param("userId");
-    const body = await c.req.json();
-
-    if (!userId) {
-      throw new HTTPException(400, { message: "userId es requerido" });
+    if (error instanceof DpiAlreadyTakenError) {
+      throw new HTTPException(409, { message: error.message });
     }
 
-    if (!body.phone || typeof body.phone !== "string") {
-      throw new HTTPException(400, {
-        message: "El campo phone es requerido y debe ser un string",
-      });
-    }
-
-    // Validar formato teléfono (8 dígitos para Guatemala)
-    if (!/^\d{8}$/.test(body.phone)) {
-      throw new HTTPException(400, {
-        message: "El teléfono debe tener exactamente 8 dígitos",
-      });
-    }
-
-    const profile = await ProfileService.updatePhone(userId, body.phone);
-
-    return c.json({
-      success: true,
-      message: "Teléfono actualizado correctamente",
-      data: profile,
-    });
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error;
-    }
-
-    throw new HTTPException(500, {
-      message: error instanceof Error ? error.message : "Error al actualizar el teléfono",
-    });
-  }
-});
-
-/**
- * POST /api/profile/:userId/address
- * Actualiza la dirección del usuario
- */
-profileRoutes.post("/:userId/address", async (c) => {
-  try {
-    const userId = c.req.param("userId");
-    const body = await c.req.json();
-
-    if (!userId) {
-      throw new HTTPException(400, { message: "userId es requerido" });
-    }
-
-    if (!body.address || typeof body.address !== "string") {
-      throw new HTTPException(400, {
-        message: "El campo address es requerido y debe ser un string",
-      });
-    }
-
-    // Validar longitud mínima
-    if (body.address.length < 10) {
-      throw new HTTPException(400, {
-        message: "La dirección debe tener al menos 10 caracteres",
-      });
-    }
-
-    const profile = await ProfileService.updateAddress(userId, body.address);
-
-    return c.json({
-      success: true,
-      message: "Dirección actualizada correctamente",
-      data: profile,
-    });
-  } catch (error) {
-    if (error instanceof HTTPException) {
-      throw error;
-    }
-
-    throw new HTTPException(500, {
-      message: error instanceof Error ? error.message : "Error al actualizar la dirección",
-    });
+    throw new HTTPException(500, { message: "Error al actualizar el DPI" });
   }
 });
 

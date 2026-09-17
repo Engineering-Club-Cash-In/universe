@@ -1,0 +1,939 @@
+import { beforeEach, describe, expect, it } from "bun:test";
+import {
+  asegurarCuentaInversionista,
+  avisarEmpresaAgregada,
+  consultarCuentaInversionista,
+  type DependenciasProvisionamiento,
+  type UsuarioPortal,
+} from "./ensureInvestorAccount";
+
+const PORTAL = "https://portal.clubcashin.com";
+
+let usuarios: UsuarioPortal[];
+let bienvenidas: any[];
+let avisos: any[];
+let creados: any[];
+let borrados: string[];
+let actualizaciones: any[];
+let fallarCreacion: null | (() => void);
+let modo: { server: string; redirige: boolean; destinatarioUnico: string | null };
+
+const deps = (): DependenciasProvisionamiento => ({
+  portalUrl: PORTAL,
+  modoEnvio: () => modo,
+  generarPassword: () => "PASSWORD-FIJA",
+  buscarPorDpi: async (dpi) =>
+    usuarios.find((u) => u.dpi && u.dpi.replace(/[\s.\-]/g, "").replace(/^0+/, "") === dpi) ?? null,
+  buscarPorEmail: async (email) =>
+    usuarios.find((u) => u.email.toLowerCase() === email) ?? null,
+  crearUsuario: async ({ nombre, email, password }) => {
+    fallarCreacion?.();
+    const u: UsuarioPortal = { id: `u${usuarios.length + 1}`, email, nombre, role: "CLIENT", dpi: null };
+    usuarios.push(u);
+    creados.push({ nombre, email, password });
+    return { id: u.id };
+  },
+  actualizarUsuario: async (id, cambios) => {
+    actualizaciones.push({ id, ...cambios });
+    const u = usuarios.find((x) => x.id === id)!;
+    if (cambios.role) u.role = cambios.role;
+    if (cambios.dpi !== undefined) u.dpi = cambios.dpi;
+  },
+  eliminarUsuario: async (id) => {
+    borrados.push(id);
+    usuarios = usuarios.filter((u) => u.id !== id);
+  },
+  enviarBienvenida: async (p) => { bienvenidas.push(p); return { success: true }; },
+  enviarEmpresaAgregada: async (p) => { avisos.push(p); return { success: true }; },
+});
+
+beforeEach(() => {
+  usuarios = [];
+  bienvenidas = [];
+  avisos = [];
+  creados = [];
+  borrados = [];
+  actualizaciones = [];
+  fallarCreacion = null;
+  modo = { server: "PROD", redirige: false, destinatarioUnico: null };
+});
+
+const entrada = (over: any = {}) => ({
+  email: "ana@example.com",
+  dpi: "1234567890101",
+  nombre: "Ana Pérez",
+  inversionistaId: 1,
+  inversionistaNombre: "Ana Pérez",
+  ...over,
+});
+
+// Gemelo de `marca()` (ver el describe de la marca fail-closed): el alta hace
+// DOS updates y la marca `passwordProvisionadaAt` va PRIMERO a propósito, así
+// que `actualizaciones[0]` ya no es el update de rol/DPI. Se busca por
+// contenido, no por índice.
+const rolYDpi = () =>
+  actualizaciones.find((u) => u.role !== undefined || u.dpi !== undefined);
+
+describe("asegurarCuentaInversionista — cuenta nueva", () => {
+  it("crea la cuenta y manda la bienvenida CON la contraseña", () => {
+    return asegurarCuentaInversionista(entrada(), deps()).then((r) => {
+      expect(r.estado).toBe("creada");
+      expect(creados).toEqual([
+        { nombre: "Ana Pérez", email: "ana@example.com", password: "PASSWORD-FIJA" },
+      ]);
+      expect(bienvenidas[0]).toMatchObject({
+        to: "ana@example.com",
+        password: "PASSWORD-FIJA",
+        portalUrl: PORTAL,
+      });
+      expect(r.correo).toMatchObject({ enviado: true, plantilla: "bienvenida" });
+    });
+  });
+
+  it("promueve a INVESTOR y guarda el DPI", async () => {
+    await asegurarCuentaInversionista(entrada(), deps());
+    // Índice no: la marca de contraseña se escribe primero y en su propio UPDATE.
+    expect(rolYDpi()).toMatchObject({ role: "INVESTOR", dpi: "1234567890101" });
+  });
+
+  it("NUNCA devuelve la contraseña: la respuesta queda en audit_logs", async () => {
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+    expect(JSON.stringify(r)).not.toContain("PASSWORD-FIJA");
+  });
+});
+
+describe("asegurarCuentaInversionista — ya tenía cuenta", () => {
+  it("resuelve por DPI ANTES que por correo", async () => {
+    // Las 3 colisiones reales son la misma persona con dos correos. Buscar por
+    // correo primero las estrellaría contra users_dpi_key; por DPI son ya_tenia.
+    usuarios.push({ id: "u1", email: "esdras@gmail.com", nombre: "Esdras", role: "INVESTOR", dpi: "1234567890101" });
+    const r = await asegurarCuentaInversionista(entrada({ email: "esdrasgamboa8@gmail.com" }), deps());
+    // Se resolvió por DPI y NO se creó una segunda cuenta, que es lo que este
+    // caso vino a fijar. El desenlace no es "ya tenía acceso" porque con dos
+    // correos distintos cartera no le ancla ninguna entidad: queda pendiente
+    // de que un humano los cuadre.
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+      resueltoPor: "dpi",
+      usuarioEmail: "esdras@gmail.com",
+    });
+    expect(creados).toEqual([]);
+  });
+
+  it("con el correo cuadrado sí es un ya_tenia limpio", async () => {
+    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Ana", role: "INVESTOR", dpi: "1234567890101" });
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+    expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "dpi", motivo: null });
+    expect(r.advertencias).toEqual([]);
+  });
+
+  it("avisa cuando el correo de cartera no es el de la cuenta, y NO lo reescribe", async () => {
+    usuarios.push({ id: "u1", email: "esdras@gmail.com", nombre: "Esdras", role: "INVESTOR", dpi: "1234567890101" });
+    const r = await asegurarCuentaInversionista(entrada({ email: "esdrasgamboa8@gmail.com" }), deps());
+    expect(r.advertencias).toContain("correo_de_cartera_distinto_al_de_la_cuenta");
+    // Reescribir users.email le rompería el login a esa persona.
+    expect(actualizaciones.some((a) => "email" in a)).toBe(false);
+  });
+
+  it("encuentra los DPI sucios que ya están en producción", async () => {
+    // Mismo correo en los dos lados: acá lo que se prueba es que el DPI sucio
+    // de producción se encuentre, no lo que pasa cuando los correos difieren.
+    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Monaco", role: "INVESTOR", dpi: "1852752810101." });
+    const r = await asegurarCuentaInversionista(entrada({ dpi: "1852752810101" }), deps());
+    expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "dpi" });
+  });
+
+  it("cae a la búsqueda por correo cuando no hay DPI", async () => {
+    // La cuenta es INVESTOR y sin DPI: el caso real de producción, herencia del
+    // normalizador viejo que guardaba NULL. El fallback por correo la reconoce
+    // y no escribe nada. (Antes esta prueba usaba un CLIENT y daba por bueno el
+    // ascenso; eso es justo lo que se cerró: ver "el rol no se promueve sobre
+    // un vínculo que es solo el correo".)
+    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Ana", role: "INVESTOR", dpi: null });
+    const r = await asegurarCuentaInversionista(entrada({ dpi: null }), deps());
+    expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "email" });
+    expect(actualizaciones).toEqual([]);
+  });
+
+  it("NO manda correo a quien ya tenía cuenta", async () => {
+    // El registro del portal crea la cuenta primero y el inversionista después:
+    // mandarle "bienvenida" o "ahora representas a Ana Pérez" a Ana sería
+    // absurdo. El aviso de empresa es de la otra rama.
+    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: null });
+    const r = await asegurarCuentaInversionista(entrada({ dpi: null }), deps());
+    expect(bienvenidas).toEqual([]);
+    expect(avisos).toEqual([]);
+    expect(r.correo.enviado).toBe(false);
+  });
+
+  it("promueve CLIENT a INVESTOR pero no toca un ADMIN", async () => {
+    // El CLIENT lleva el DPI de cartera: es el ascenso legítimo, el de quien se
+    // registró solo y a quien el staff da de alta después. Sin ese respaldo el
+    // ascenso ya no ocurre (ver "el rol no se promueve sobre un vínculo que es
+    // solo el correo"), y lo que esta prueba fija es la otra mitad: que a un
+    // rol administrativo no se le toca ni con respaldo ni sin él.
+    usuarios.push({ id: "u1", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: "1234567890101" });
+    usuarios.push({ id: "u2", email: "jefe@example.com", nombre: "Jefe", role: "ADMIN", dpi: null });
+
+    await asegurarCuentaInversionista(entrada(), deps());
+    expect(actualizaciones).toContainEqual({ id: "u1", role: "INVESTOR" });
+
+    actualizaciones.length = 0;
+    await asegurarCuentaInversionista(entrada({ dpi: null, email: "jefe@example.com" }), deps());
+    expect(actualizaciones).toEqual([]);
+  });
+
+  it("es idempotente: la segunda corrida no crea ni manda nada", async () => {
+    const d = deps();
+    await asegurarCuentaInversionista(entrada(), d);
+    await asegurarCuentaInversionista(entrada(), d);
+    expect(creados).toHaveLength(1);
+    expect(bienvenidas).toHaveLength(1);
+  });
+
+  it("una carrera de dos altas simultáneas termina en ya_tenia, sin pisar la contraseña", async () => {
+    const d = deps();
+    fallarCreacion = () => {
+      // Simula el 23505: otro proceso creó la cuenta entre la búsqueda y el insert.
+      // El proceso que gana la carrera deja la cuenta como la deja el alta:
+      // con rol y DPI escritos. Si el perdedor la alcanza ANTES de ese UPDATE,
+      // hoy la ve como "anclada solo por el correo" y sale reportada — no se
+      // pierde acceso, lo concede el que ganó.
+      usuarios.push({ id: "u9", email: "ana@example.com", nombre: "Ana", role: "INVESTOR", dpi: "1234567890101" });
+      throw new Error("duplicate key value violates unique constraint users_email_key");
+    };
+    const r = await asegurarCuentaInversionista(entrada(), d);
+    expect(r.estado).toBe("ya_tenia");
+    // Pisar la contraseña de una cuenta viva le sacaría a alguien su acceso.
+    expect(bienvenidas).toEqual([]);
+    expect(actualizaciones.some((a) => "password" in a)).toBe(false);
+  });
+});
+
+describe("asegurarCuentaInversionista — el correo puede fallar sin tumbar la cuenta", () => {
+  it("reporta el fallo de envío pero deja la cuenta creada", async () => {
+    const d = { ...deps(), enviarBienvenida: async () => ({ success: false, error: "resend caído" }) };
+    const r = await asegurarCuentaInversionista(entrada(), d);
+    expect(r.estado).toBe("creada");
+    expect(r.correo).toMatchObject({ enviado: false });
+    expect(r.advertencias).toContain("correo_no_enviado");
+  });
+
+  it("delata el modo DEV: la contraseña se fue a una sola bandeja", async () => {
+    modo = { server: "DEV", redirige: true, destinatarioUnico: "jalvarado@clubcashin.com" };
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+    expect(r.correo).toMatchObject({
+      enviado: true,
+      redirigido: true,
+      destinatarioReal: "jalvarado@clubcashin.com",
+    });
+    expect(r.advertencias).toContain("correo_redirigido_por_modo_no_prod");
+  });
+});
+
+describe("avisarEmpresaAgregada", () => {
+  const empresa = (over: any = {}) => ({
+    representanteEmail: "richard@example.com",
+    representanteDpi: "1573661970101",
+    representanteNombre: "Richard Kachler",
+    inversionistaId: 86,
+    inversionistaNombre: "Cube Investments S.A.",
+    ...over,
+  });
+
+  it("manda el aviso al correo de la CUENTA del representante", async () => {
+    usuarios.push({ id: "u1", email: "richard@example.com", nombre: "Richard", role: "INVESTOR", dpi: "1573661970101" });
+    const r = await avisarEmpresaAgregada(empresa(), deps());
+    expect(r).toMatchObject({ estado: "avisada", resueltoPor: "dpi" });
+    expect(avisos[0]).toMatchObject({
+      to: "richard@example.com",
+      companyName: "Cube Investments S.A.",
+      portalUrl: PORTAL,
+    });
+  });
+
+  // El aviso dice "la empresa te aparece al entrar". Si eso no va a ser verdad,
+  // mandarlo es citar a alguien a mirar una pantalla vacía.
+  it("NO avisa si el correo de la cuenta no es el que tiene cartera", async () => {
+    usuarios.push({ id: "u1", email: "richardkachler93@gmail.com", nombre: "Richard", role: "INVESTOR", dpi: "1573661970101" });
+    const r = await avisarEmpresaAgregada(empresa(), deps());
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    });
+    expect(avisos).toEqual([]);
+  });
+
+  it("NO avisa si el ascenso de rol falló: sin INVESTOR no ve nada", async () => {
+    usuarios.push({ id: "u1", email: "richard@example.com", nombre: "Richard", role: "CLIENT", dpi: "1573661970101" });
+    const r = await avisarEmpresaAgregada(empresa(), {
+      ...deps(),
+      actualizarUsuario: async () => {
+        throw new Error("update falló");
+      },
+    });
+    expect(r).toMatchObject({ estado: "fallo", motivo: "sin_rol_de_inversionista" });
+    expect(r.advertencias).toContain("rol_no_promovido");
+    expect(avisos).toEqual([]);
+  });
+
+  it("nunca crea una cuenta: si el representante no tiene, lo reporta", async () => {
+    const r = await avisarEmpresaAgregada(empresa(), deps());
+    expect(r).toMatchObject({ estado: "fallo", motivo: "representante_sin_cuenta" });
+    expect(creados).toEqual([]);
+    expect(avisos).toEqual([]);
+  });
+
+  it("sin correo ni cuenta del representante, lo dice explícito", async () => {
+    const r = await avisarEmpresaAgregada(empresa({ representanteEmail: null, representanteDpi: null }), deps());
+    expect(r).toMatchObject({ estado: "fallo", motivo: "representante_sin_cuenta" });
+  });
+});
+
+// El escenario que producía la cuenta duplicada. Cartera manda el DPI sin ceros
+// a la izquierda ("4036613"); el normalizador de ESCRITURA exigía 13 dígitos
+// exactos y guardaba NULL, así que a esa persona solo se la encontraba por
+// correo. En cuanto alguien corrige el correo en cartera —cosa que este mismo
+// sistema PIDE con `correo_de_cartera_distinto_al_de_la_cuenta`— la corrida
+// siguiente no la encuentra ni por DPI (es NULL) ni por correo (cambió), y le
+// crea otra cuenta: dos cuentas, un humano, dos contraseñas.
+describe("asegurarCuentaInversionista — lo que se guarda es lo que se busca", () => {
+  it("guarda el DPI corto, y por eso sobrevive a que le corrijan el correo", async () => {
+    const d = deps();
+
+    const primera = await asegurarCuentaInversionista(
+      entrada({ dpi: "4036613", email: "jckafie@gmail.com" }),
+      d,
+    );
+    expect(primera.estado).toBe("creada");
+    // Índice no: antes de este update va el de `passwordProvisionadaAt`.
+    expect(rolYDpi()).toMatchObject({ dpi: "4036613" });
+
+    // Operación corrige el correo en cartera y el job vuelve a correr.
+    const segunda = await asegurarCuentaInversionista(
+      entrada({ dpi: "4036613", email: "jckafie@outlook.com" }),
+      d,
+    );
+
+    // Lo que importa: se la encontró por DPI y NO se le creó una segunda
+    // cuenta con una segunda contraseña, que era el bug. Que el desenlace sea
+    // "pendiente" y no "ya_tenia" es correcto: hasta que los dos correos
+    // coincidan, esa cuenta entra al portal y no ve sus inversiones.
+    expect(segunda).toMatchObject({
+      estado: "fallo",
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+      resueltoPor: "dpi",
+    });
+    expect(usuarios).toHaveLength(1);
+    expect(creados).toHaveLength(1);
+  });
+
+  it("guarda el DPI en la MISMA forma con la que después se busca", async () => {
+    // Guardarlo con ceros a la izquierda o con basura de captura sería guardar
+    // algo que la búsqueda normalizada no vuelve a encontrar tal cual.
+    await asegurarCuentaInversionista(entrada({ dpi: "04036613" }), deps());
+    // Índice no: antes de este update va el de `passwordProvisionadaAt`.
+    expect(rolYDpi()).toMatchObject({ dpi: "4036613" });
+  });
+
+  it("lo que no es un DPI sigue quedando en NULL, jamás en cadena vacía", async () => {
+    // El slot del '' en users.dpi (UNIQUE) YA está ocupado en producción.
+    for (const basura of ["", "   ", "no-aplica", "000"]) {
+      actualizaciones.length = 0;
+      usuarios.length = 0;
+      await asegurarCuentaInversionista(
+        entrada({ dpi: basura, email: `x${basura.length}@example.com` }),
+        deps(),
+      );
+      // Índice no: antes de este update va el de `passwordProvisionadaAt`.
+      expect(rolYDpi()).toMatchObject({ dpi: null });
+    }
+  });
+});
+
+// A partir de que `crearUsuario` devuelve, la cuenta EXISTE y la contraseña
+// solo vive en una variable local: no se persiste, no se devuelve (a propósito,
+// para que no acabe en audit_logs) y no hay ninguna ruta de reenvío en todo el
+// sistema. Cualquier throw después de ese punto deja a una persona con una
+// cuenta que no sabe que tiene y a la que no puede entrar.
+describe("asegurarCuentaInversionista — nada puede tirar después de crear la cuenta", () => {
+  // El nombre cambió con el orden de escritura: antes el rol y el DPI viajaban
+  // en el mismo (y único) UPDATE del alta, así que este stub —que tira en
+  // TODOS— era "falla el update de rol/DPI" y el desenlace era mandar la
+  // contraseña igual. Hoy la marca `passwordProvisionadaAt` va primero y sola,
+  // de modo que aquí el que se cae primero es el de la marca y el desenlace
+  // correcto es fail-closed: la contraseña no sale. El caso que sí conserva el
+  // nombre viejo —solo rol/DPI se cae, la marca queda— vive en el describe de
+  // la marca ("guarda la marca aunque el rol y el DPI se estrellen...").
+  it("si NINGÚN update pasa, no tira: se traga el fallo y lo reporta sin mandar la contraseña", async () => {
+    const d = {
+      ...deps(),
+      actualizarUsuario: async () => {
+        // Real: 23505 sobre users_dpi_key contra una fila sucia, o una carrera.
+        throw new Error("duplicate key value violates unique constraint users_dpi_key");
+      },
+    };
+
+    // Lo que este describe fija: nada de esto propaga un throw sobre una cuenta
+    // que YA existe.
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "no_se_pudo_marcar_password_provisionada",
+    });
+    expect(bienvenidas).toEqual([]);
+    // Y la cuenta a medias se deshace, así que el reintento la recupera. La
+    // advertencia queda reservada para cuando ni eso se pudo (ver el describe
+    // de la marca fail-closed).
+    expect(usuarios).toEqual([]);
+    expect(r.advertencias).not.toContain("cuenta_creada_sin_marca_de_password");
+  });
+
+  it("si el envío TIRA, no se traga la cuenta creada: la reporta como acceso perdido", async () => {
+    const d = {
+      ...deps(),
+      enviarBienvenida: async () => {
+        // Real: `emailSchema.parse(to)` de @cci/email tira fuera de su try.
+        throw new Error("Invalid email");
+      },
+    };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    expect(r.estado).toBe("creada");
+    expect(r.correo.enviado).toBe(false);
+    expect(r.advertencias).toContain("correo_no_enviado");
+    expect(r.advertencias).toContain("cuenta_creada_sin_contrasena_entregada");
+  });
+
+  it("un envío que devuelve success:false también es un acceso perdido", async () => {
+    // Distinto de `correo_no_enviado` a secas: en `avisarEmpresaAgregada` un
+    // correo que no sale es un aviso perdido, aquí es un ACCESO perdido.
+    const d = { ...deps(), enviarBienvenida: async () => ({ success: false, error: "resend caído" }) };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    expect(r.advertencias).toContain("cuenta_creada_sin_contrasena_entregada");
+  });
+
+  it("el aviso de empresa que falla NO se marca como acceso perdido", async () => {
+    usuarios.push({ id: "u1", email: "r@example.com", nombre: "R", role: "INVESTOR", dpi: "1573661970101" });
+    const d = { ...deps(), enviarEmpresaAgregada: async () => { throw new Error("resend caído"); } };
+
+    const r = await avisarEmpresaAgregada(
+      {
+        representanteEmail: "r@example.com",
+        representanteDpi: "1573661970101",
+        representanteNombre: "R",
+        inversionistaId: 86,
+        inversionistaNombre: "Cube Investments S.A.",
+      },
+      d,
+    );
+
+    expect(r.advertencias).toContain("correo_no_enviado");
+    expect(r.advertencias).not.toContain("cuenta_creada_sin_contrasena_entregada");
+  });
+});
+
+describe("vínculo frágil: la cuenta se encontró solo por el correo", () => {
+  it("lo reporta y NO escribe el DPI", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "CLIENT",
+      dpi: null,
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    // Ya no es un "ya_tenia": sobre un vínculo que es solo el correo tampoco se
+    // escribe el ROL. Queda como pendiente para que lo mire un humano.
+    expect(r.estado).toBe("fallo");
+    expect(r.motivo).toBe("cuenta_anclada_solo_por_correo");
+    expect(r.resueltoPor).toBe("email");
+    expect(r.advertencias).toContain("cuenta_anclada_solo_por_correo");
+    // NO se escribe el DPI: `resolverUsuario` busca por DPI PRIMERO, así que
+    // escribirlo dejaría esta cuenta ganando para siempre y corregir el correo
+    // en cartera —el remedio que el propio sistema pide con
+    // `correo_de_cartera_distinto_al_de_la_cuenta`— dejaría de servir. Además
+    // `users.dpi` es UNIQUE y es llave de ESCRITURA contra cartera
+    // (POST /api/cartera/investor resuelve la fila por DPI y aplica
+    // numero_cuenta): afirmar identidad sobre la evidencia más débil del
+    // módulo (un correo sin verificar) es peor que el duplicado que evita.
+    expect(actualizaciones).toEqual([]);
+    expect(usuarios[0].dpi).toBeNull();
+  });
+
+  it("no lo reporta cuando la cuenta se resolvió por DPI", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "otro@example.com",
+      nombre: "Ana",
+      role: "INVESTOR",
+      dpi: "1234567890101",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r.resueltoPor).toBe("dpi");
+    expect(r.advertencias).not.toContain("cuenta_anclada_solo_por_correo");
+  });
+
+  it("reporta también cuando el DPI de la cuenta NO es el que tiene cartera", async () => {
+    // Por correo se llegó a una cuenta con OTRO DPI: el vínculo tampoco se
+    // sostiene, y aquí escribir sería pisar un dato de identidad ajeno.
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "INVESTOR",
+      dpi: "9999999999999",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r.resueltoPor).toBe("email");
+    expect(r.advertencias).toContain("cuenta_anclada_solo_por_correo");
+    expect(usuarios[0].dpi).toBe("9999999999999");
+  });
+
+  it("no lo reporta cuando el DPI de la cuenta ya es el de cartera", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "INVESTOR",
+      // Mismo DPI, escrito con ceros a la izquierda: es el MISMO vínculo.
+      dpi: "01234567890101",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r.advertencias).not.toContain("cuenta_anclada_solo_por_correo");
+  });
+});
+
+describe("consultarCuentaInversionista — la mitad que NO escribe", () => {
+  /**
+   * La reconciliación diaria pasa por aquí sobre la tabla entera. Si esto
+   * escribiera aunque fuera una vez, el cron volvería a ser lo que era: un
+   * repartidor automático de contraseñas para filas que cualquiera puede
+   * sembrar.
+   */
+  it("a quien no tiene cuenta lo devuelve como CANDIDATA, sin crear nada", async () => {
+    const r = await consultarCuentaInversionista(entrada(), deps());
+
+    expect(r.estado).toBe("candidata");
+    expect(creados).toEqual([]);
+    expect(actualizaciones).toEqual([]);
+    expect(bienvenidas).toEqual([]);
+    expect(usuarios).toEqual([]);
+  });
+
+  it("a quien ya tiene cuenta lo devuelve como YA_TENIA, y tampoco escribe", async () => {
+    usuarios = [
+      { id: "u1", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: "1234567890101" },
+    ];
+
+    const r = await consultarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "dpi" });
+    // Ni siquiera promueve el rol: promover es escribir, y esta función se
+    // llama ~200 veces al día sobre filas que nadie revisó.
+    expect(actualizaciones).toEqual([]);
+    expect(creados).toEqual([]);
+    expect(bienvenidas).toEqual([]);
+  });
+
+  it("reporta el correo distinto sin tocarlo", async () => {
+    usuarios = [
+      { id: "u1", email: "otro@example.com", nombre: "Ana", role: "INVESTOR", dpi: "1234567890101" },
+    ];
+
+    const r = await consultarCuentaInversionista(entrada(), deps());
+
+    // "Candidata" y no "ya_tenia": la cuenta existe pero con ese correo el
+    // portal no le ancla ninguna entidad, así que sigue siendo trabajo
+    // pendiente y tiene que salir en el resumen diario.
+    expect(r.estado).toBe("candidata");
+    expect(r.advertencias).toContain("correo_de_cartera_distinto_al_de_la_cuenta");
+    expect(actualizaciones).toEqual([]);
+  });
+
+  // Tener cuenta no es tener acceso: el portal solo carga entidades con
+  // INVESTOR. Contarlo como "ya tenía" hacía desaparecer del resumen un
+  // ascenso de rol que falló en un alta anterior.
+  it("delata la cuenta que quedó como CLIENT", async () => {
+    usuarios = [
+      { id: "u1", email: "ana@example.com", nombre: "Ana", role: "CLIENT", dpi: "1234567890101" },
+    ];
+
+    const r = await consultarCuentaInversionista(entrada(), deps());
+
+    expect(r.advertencias).toContain("cuenta_sin_rol_de_inversionista");
+    expect(actualizaciones).toEqual([]);
+  });
+
+  it("no delata a quien ya es INVESTOR", async () => {
+    usuarios = [
+      { id: "u1", email: "ana@example.com", nombre: "Ana", role: "INVESTOR", dpi: "1234567890101" },
+    ];
+
+    const r = await consultarCuentaInversionista(entrada(), deps());
+
+    expect(r.estado).toBe("ya_tenia");
+    expect(r.advertencias).toEqual([]);
+  });
+});
+
+/**
+ * El rol NO se promueve sobre una cuenta cuyo correo no es el de cartera.
+ *
+ * El registro de Better Auth es abierto y no verifica el correo, así que
+ * cualquiera se hace una cuenta con SU correo y el DPI de OTRA persona. Cuando
+ * el staff provisiona a esa otra persona, la búsqueda por DPI —que va primero—
+ * cae en la cuenta del impostor. Promoverla a INVESTOR antes de comprobar el
+ * correo le entrega el rol que habilita la carga de entidades del portal: el
+ * "fallo" que se devuelve después no lo quita, porque el UPDATE ya ocurrió.
+ *
+ * El desenlace tiene que ser fallo Y sin escritura: la única evidencia que se
+ * tiene de esa cuenta es un DPI que nadie probó.
+ */
+describe("el rol no se promueve antes de validar el correo", () => {
+  it("cuenta encontrada por DPI con otro correo: falla y NO promueve el rol", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "impostor@example.com",
+      nombre: "Impostor",
+      role: "CLIENT",
+      dpi: "1234567890101",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+      resueltoPor: "dpi",
+      usuarioEmail: "impostor@example.com",
+    });
+    // Lo que de verdad se está fijando: ni un solo UPDATE sobre esa cuenta.
+    expect(actualizaciones).toEqual([]);
+    expect(usuarios[0].role).toBe("CLIENT");
+  });
+
+  it("el aviso de empresa tampoco promueve a una cuenta con otro correo", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "impostor@example.com",
+      nombre: "Impostor",
+      role: "CLIENT",
+      dpi: "1573661970101",
+    });
+
+    const r = await avisarEmpresaAgregada(
+      {
+        representanteEmail: "richard@example.com",
+        representanteDpi: "1573661970101",
+        representanteNombre: "Richard Kachler",
+        inversionistaId: 86,
+        inversionistaNombre: "Cube Investments S.A.",
+      },
+      deps(),
+    );
+
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    });
+    expect(actualizaciones).toEqual([]);
+    expect(usuarios[0].role).toBe("CLIENT");
+    expect(avisos).toEqual([]);
+  });
+});
+
+/**
+ * El rol tampoco se promueve sobre una cuenta que solo casa por CORREO.
+ *
+ * Es la otra mitad del mismo agujero, y la ASIMETRÍA es la clave: el correo de
+ * cartera lo escribió el STAFF; el de la cuenta lo eligió quien se registró, y
+ * `requireEmailVerification: false` (`lib/auth.ts`) deja que nadie lo haya
+ * comprobado nunca. Cuando NINGUNA cuenta casa por DPI, `resolverUsuario` cae
+ * al correo — y ahí `correoDeCarteraCoincide` no prueba nada: a esa cuenta se
+ * llegó BUSCANDO ese correo, así que la comprobación es tautológica.
+ *
+ * El ataque completo: alguien registra el correo de un inversionista conocido
+ * con la contraseña que él elige; el siguiente provisionamiento del staff
+ * encuentra esa cuenta CLIENT por correo, le regala INVESTOR, y la búsqueda de
+ * entidades por correo del portal le entrega las inversiones de la víctima.
+ *
+ * Para ESCRIBIR el rol hace falta que el DPI de la cuenta respalde al de
+ * cartera. Es el mismo criterio del camino por DPI —que además exige el
+ * correo— y la misma política que el módulo ya aplica al DPI: no afirmar la
+ * identidad más fuerte desde la evidencia más débil.
+ */
+describe("el rol no se promueve sobre un vínculo que es solo el correo", () => {
+  it("cuenta CLIENT hallada solo por correo: falla y NO promueve", async () => {
+    // El impostor: se registró con el correo de Ana y su cuenta no tiene DPI.
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "CLIENT",
+      dpi: null,
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "cuenta_anclada_solo_por_correo",
+      resueltoPor: "email",
+    });
+    expect(actualizaciones).toEqual([]);
+    expect(usuarios[0].role).toBe("CLIENT");
+  });
+
+  it("tampoco promueve si la cuenta trae OTRO DPI", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "CLIENT",
+      dpi: "9999999999999",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "cuenta_anclada_solo_por_correo",
+      resueltoPor: "email",
+    });
+    expect(actualizaciones).toEqual([]);
+  });
+
+  it("ni cuando cartera tampoco tiene DPI: sin nada que cotejar, no se escribe", async () => {
+    // Los dos lados en NULL "coinciden" si se comparan con ===. No es un
+    // respaldo: es la ausencia de cualquier evidencia.
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "CLIENT",
+      dpi: null,
+    });
+
+    const r = await asegurarCuentaInversionista(entrada({ dpi: null }), deps());
+
+    expect(r).toMatchObject({ estado: "fallo", motivo: "cuenta_anclada_solo_por_correo" });
+    expect(actualizaciones).toEqual([]);
+  });
+
+  // El control positivo: con el DPI de cartera en la cuenta el ascenso sigue
+  // pasando. Lo que se cerró es la promoción SIN respaldo, no la promoción.
+  it("con el DPI de cartera en la cuenta sí promueve a INVESTOR", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "CLIENT",
+      dpi: "1234567890101",
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "dpi" });
+    expect(actualizaciones).toEqual([{ id: "u1", role: "INVESTOR" }]);
+  });
+
+  // A quien YA es INVESTOR no se le escribe nada, así que aquí no hay nada que
+  // cerrar: el acceso que tiene no se lo da esta corrida. Bloquearlo solo
+  // llenaría el resumen diario de falsos pendientes —hay cuentas legítimas de
+  // producción con `users.dpi` NULL— y dejaría sin avisar a representantes
+  // reales.
+  it("a quien ya es INVESTOR lo sigue reconociendo, y sigue sin escribir", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "ana@example.com",
+      nombre: "Ana",
+      role: "INVESTOR",
+      dpi: null,
+    });
+
+    const r = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(r).toMatchObject({ estado: "ya_tenia", resueltoPor: "email" });
+    expect(r.advertencias).toContain("cuenta_anclada_solo_por_correo");
+    expect(actualizaciones).toEqual([]);
+  });
+
+  it("el aviso de empresa tampoco promueve a una cuenta hallada solo por correo", async () => {
+    usuarios.push({
+      id: "u1",
+      email: "richard@example.com",
+      nombre: "Richard",
+      role: "CLIENT",
+      dpi: null,
+    });
+
+    const r = await avisarEmpresaAgregada(
+      {
+        representanteEmail: "richard@example.com",
+        representanteDpi: "1573661970101",
+        representanteNombre: "Richard Kachler",
+        inversionistaId: 86,
+        inversionistaNombre: "Cube Investments S.A.",
+      },
+      deps(),
+    );
+
+    expect(r).toMatchObject({ estado: "fallo", motivo: "cuenta_anclada_solo_por_correo" });
+    expect(r.advertencias).toContain("cuenta_anclada_solo_por_correo");
+    expect(actualizaciones).toEqual([]);
+    expect(usuarios[0].role).toBe("CLIENT");
+    expect(avisos).toEqual([]);
+  });
+});
+
+
+// La marca `passwordProvisionadaAt` es lo ÚNICO que hace que al dueño de una
+// cuenta recién creada se le pida cambiar la contraseña que le llegó por correo:
+// el back la mira en `sigueConLaPasswordQueLeDimos` (403 sobre toda la
+// superficie autenticada) y el portal en `debeElegirPassword`. Los dos leen NULL
+// como "esta contraseña es suya, no hay nada que pedirle".
+//
+// Por eso la marca NO puede viajar en el mismo UPDATE que el rol y el DPI: ese
+// update se cae de verdad —23505 sobre `users_dpi_key`, que las pruebas de
+// arriba ya cubren— y al caerse se lleva la marca con él, mientras el correo con
+// la contraseña sale igual. Queda una credencial que viajó por correo y que
+// nadie va a pedir que se cambie, ni después de completar el registro ni después
+// de que un humano le repare el rol.
+describe("asegurarCuentaInversionista — la marca de contraseña temporal es fail-closed", () => {
+  const marca = () =>
+    actualizaciones.find((u) => u.passwordProvisionadaAt !== undefined);
+
+  it("guarda la marca aunque el rol y el DPI se estrellen contra users_dpi_key", async () => {
+    const d = {
+      ...deps(),
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.role !== undefined || cambios.dpi !== undefined) {
+          throw new Error(
+            "duplicate key value violates unique constraint users_dpi_key",
+          );
+        }
+        actualizaciones.push({ id, ...cambios });
+      },
+    };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    // El rol se pierde —eso lo repara un humano— pero la marca queda puesta, así
+    // que la contraseña que va en este correo se le va a pedir cambiar al entrar.
+    expect(marca()?.passwordProvisionadaAt).toBeInstanceOf(Date);
+    expect(r.estado).toBe("creada");
+    expect(r.advertencias).toContain("cuenta_creada_sin_rol_ni_dpi");
+    expect(bienvenidas).toHaveLength(1);
+  });
+
+  it("si la marca no se pudo guardar, la contraseña NO sale por correo", async () => {
+    const d = {
+      ...deps(),
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.passwordProvisionadaAt !== undefined) {
+          throw new Error("update falló");
+        }
+        actualizaciones.push({ id, ...cambios });
+      },
+    };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    // Quedarse sin correo es recuperable: sale en el reporte de la corrida y un
+    // humano la vuelve a dar de alta. Una contraseña que ya llegó a una bandeja
+    // y que nadie va a pedir que se cambie, no.
+    expect(bienvenidas).toEqual([]);
+    expect(r).toMatchObject({
+      estado: "fallo",
+      motivo: "no_se_pudo_marcar_password_provisionada",
+    });
+  });
+
+  // "Un humano la vuelve a dar de alta" era falso mientras la cuenta a medias
+  // siguiera en pie: con su correo y su DPI ya escritos, el reintento deja de
+  // entrar por el camino que CREA y cae en `reconocerExistente`, que a una
+  // cuenta existente no le manda contraseña —nunca lo hace— y encima suele
+  // negarle el rol porque la fila recién creada no tiene DPI. Ningún reintento
+  // la recuperaba: el único arreglo era a mano en la base.
+  it("deshace la cuenta a medias, así el reintento SÍ la recupera", async () => {
+    const marcaRota = (base: DependenciasProvisionamiento) => ({
+      ...base,
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.passwordProvisionadaAt !== undefined) {
+          throw new Error("update falló");
+        }
+        return base.actualizarUsuario(id, cambios);
+      },
+    });
+
+    const primera = await asegurarCuentaInversionista(entrada(), marcaRota(deps()));
+
+    expect(primera.estado).toBe("fallo");
+    expect(borrados).toHaveLength(1);
+    expect(usuarios).toEqual([]);
+    // Deshecha, no hay nada a medias que reportar ni que arreglar a mano.
+    expect(primera.advertencias).not.toContain("cuenta_creada_sin_marca_de_password");
+
+    // Y el reintento entra por donde tiene que entrar: crea y manda contraseña.
+    const segunda = await asegurarCuentaInversionista(entrada(), deps());
+
+    expect(segunda.estado).toBe("creada");
+    expect(bienvenidas).toHaveLength(1);
+  });
+
+  it("si tampoco se puede deshacer, lo dice: ahí reintentar no sirve", async () => {
+    const base = deps();
+    const d = {
+      ...base,
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.passwordProvisionadaAt !== undefined) {
+          throw new Error("update falló");
+        }
+        return base.actualizarUsuario(id, cambios);
+      },
+      eliminarUsuario: async () => {
+        throw new Error("la base sigue sin responder");
+      },
+    };
+
+    const r = await asegurarCuentaInversionista(entrada(), d);
+
+    expect(r.estado).toBe("fallo");
+    expect(r.advertencias).toContain("cuenta_creada_sin_marca_de_password");
+    expect(bienvenidas).toEqual([]);
+  });
+
+  it("pone la marca ANTES de que el correo salga, no después", async () => {
+    const orden: string[] = [];
+    const base = deps();
+    const d = {
+      ...base,
+      actualizarUsuario: async (id: string, cambios: any) => {
+        if (cambios.passwordProvisionadaAt !== undefined) orden.push("marca");
+        return base.actualizarUsuario(id, cambios);
+      },
+      enviarBienvenida: async (p: any) => {
+        orden.push("correo");
+        return base.enviarBienvenida(p);
+      },
+    };
+
+    await asegurarCuentaInversionista(entrada(), d);
+
+    expect(orden).toEqual(["marca", "correo"]);
+  });
+});

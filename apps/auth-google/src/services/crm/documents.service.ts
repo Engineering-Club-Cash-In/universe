@@ -3,6 +3,7 @@
  */
 
 import { env } from "../../config/env";
+import { portalAuthHeaders } from "./portalAuth";
 
 // ============================================
 // TIPOS DE DOCUMENTOS
@@ -136,14 +137,13 @@ export interface ContractsResponse {
  */
 export const getPersonalDocuments = async (
   email: string,
-  dpi: string,
-  token?: string
+  dpi: string
 ): Promise<Document[]> => {
   const response = await fetch(
     `${env.CRM_API_URL}/api/portal/lead/documents?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`,
     {
       headers: {
-        ...(token && { Authorization: `Bearer ${token}` }),
+        ...portalAuthHeaders(),
       },
     }
   );
@@ -161,14 +161,13 @@ export const getPersonalDocuments = async (
  */
 export const getContracts = async (
   email: string,
-  dpi: string,
-  token?: string
+  dpi: string
 ): Promise<Contract[]> => {
   const response = await fetch(
     `${env.CRM_API_URL}/api/portal/lead/contracts?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`,
     {
       headers: {
-        ...(token && { Authorization: `Bearer ${token}` }),
+        ...portalAuthHeaders(),
       },
     }
   );

@@ -84,8 +84,7 @@ export interface LiquidacionesResponse {
  * Obtener liquidaciones del inversionista por DPI con paginación
  */
 export const getLiquidaciones = async (
-  dpi: string = "",
-  email: string = "",
+  inversionistaId: number,
   page: number = 1,
   perPage: number = 10
 ): Promise<LiquidacionesResponse> => {
@@ -98,7 +97,7 @@ export const getLiquidaciones = async (
       totalItems: number;
       totalPages: number;
     }>(
-      `/api/cartera/liquidaciones?dpi=${encodeURIComponent(dpi)}&email=${encodeURIComponent(email)}&page=${page}&perPage=${perPage}`
+      `/api/cartera/liquidaciones?inversionista_id=${inversionistaId}&page=${page}&perPage=${perPage}`
     );
 
     const result = response.data;
@@ -163,10 +162,12 @@ export interface InvestmentsStatsResponse {
 /**
  * Obtener estadísticas de inversiones desde la API de Cartera
  */
-export const getInvestmentsStats = async (dpi: string = "", email: string = ""): Promise<InvestmentsStats> => {
+export const getInvestmentsStats = async (
+  inversionistaId: number
+): Promise<InvestmentsStats> => {
   try {
     const response = await apiAuth.get<InvestmentsStatsResponse>(
-      `/api/cartera/investments/stats?dpi=${encodeURIComponent(dpi)}&email=${encodeURIComponent(email)}`
+      `/api/cartera/investments/stats?inversionista_id=${inversionistaId}`
     );
     return response.data.data;
   } catch (error) {
@@ -190,12 +191,16 @@ export interface HistorialReporteResponse {
 }
 
 /**
- * Obtener el link del historial de reporte de liquidaciones por email
+ * Obtener el link del historial de reporte de liquidaciones.
+ *
+ * Sigue resolviendo por el correo de la sesión (el archivo en R2 está nombrado
+ * así): es el histórico de los inversionistas viejos y no se reparte por
+ * entidad.
  */
-export const getHistorialReporte = async (email: string): Promise<HistorialReporte> => {
+export const getHistorialReporte = async (): Promise<HistorialReporte> => {
   try {
     const response = await apiAuth.get<HistorialReporteResponse>(
-      `/api/cartera/liquidaciones/reporte?email=${encodeURIComponent(email)}`
+      "/api/cartera/liquidaciones/reporte"
     );
     return response.data.data;
   } catch (error) {

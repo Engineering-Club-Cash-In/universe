@@ -29,6 +29,7 @@ import {
 import {
 	getDocumentsByDpi,
 	getDocumentTypes,
+	motivoDeFalla,
 } from "../services/legal-docs-api";
 
 // URL de la API de generación de contratos (legal-docs-blueprints)
@@ -518,7 +519,9 @@ export const contractGenerationRouter = {
 						const contractResult = apiResult.results[i];
 						const originalContract = input.contracts[i];
 
-						if (contractResult.success) {
+						const falla = motivoDeFalla(contractResult);
+
+						if (!falla) {
 							successCount++;
 
 							// NO guardamos en BD aquí, solo retornamos los datos
@@ -537,12 +540,15 @@ export const contractGenerationRouter = {
 							});
 						} else {
 							failCount++;
+							console.error(
+								`[generateContractsDirect] ${originalContract.contractType}: ${falla}`,
+							);
 							results.push({
 								contractType: originalContract.contractType,
 								contractName:
 									contractResult.nameDocument?.[0]?.label || "Contrato",
 								success: false,
-								error: "Error al generar el documento",
+								error: falla,
 							});
 						}
 					}
@@ -951,7 +957,9 @@ export const contractGenerationRouter = {
 					const contractResult = apiResult.results[i];
 					const originalContract = contractsWithNewDate[i];
 
-					if (contractResult.success) {
+					// Un contrato sin PDF no puede reemplazar al anterior: se perdería el
+					// documento bueno a cambio de uno que no se puede abrir.
+					if (!motivoDeFalla(contractResult)) {
 						// Solo borrar el contrato anterior si la generación fue exitosa
 						await db
 							.delete(generatedLegalContracts)

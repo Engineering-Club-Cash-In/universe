@@ -421,9 +421,9 @@ export type FlujoCuotasInversionesResponse = {
 	};
 };
 
-export type ReinversionLiquidacionesResponse = {
+type ReinversionLiquidacionesResponseV4 = {
 	/** Versión runtime del contrato de conciliación por modalidad. */
-	contrato_version: 3;
+	contrato_version: 4;
 	/**
 	 * Distribución mensual por modalidad. `total_cuota` es el pago neto y
 	 * `reinversion_total` el capital que permanece colocado.
@@ -464,11 +464,11 @@ export type ReinversionLiquidacionesResponse = {
 		capital_activo: string;
 		composicion: LiquidationComposition;
 	}[];
-	/** Compras completadas del mes agrupadas por sus snapshots de operación. */
+	/** Movimientos completados del mes agrupados por origen del dinero. */
 	comprasMes: {
 		modalidad_facturacion: string;
 		tipo_reinversion: string;
-		tipo_compra: PurchaseClassification;
+		origen_dinero: FundingOrigin;
 		cantidad: number;
 		monto: string;
 	}[];
@@ -508,7 +508,7 @@ export type ReinversionLiquidacionesResponse = {
 		inversionista: string;
 		modalidad_facturacion: string;
 		tipo_reinversion: string;
-		tipo_compra: PurchaseClassification;
+		origen_dinero: FundingOrigin;
 		monto: string;
 	}[];
 	detalle_estado: {
@@ -517,6 +517,8 @@ export type ReinversionLiquidacionesResponse = {
 	};
 	cantidad_liquidaciones: number;
 };
+
+type FundingOrigin = "compra_nueva" | "reinversion";
 
 type PurchaseClassification =
 	| "nueva_posicion"
@@ -529,6 +531,23 @@ type PurchaseTicketMonth = {
 	monto_total: string;
 	ticket_promedio: string;
 };
+
+export type ReinversionLiquidacionesResponse =
+	| ReinversionLiquidacionesResponseV4
+	| (Omit<
+			ReinversionLiquidacionesResponseV4,
+			"contrato_version" | "comprasMes" | "detalleComprasMes"
+	  > & {
+			contrato_version: 3;
+			comprasMes: (Omit<
+				ReinversionLiquidacionesResponseV4["comprasMes"][number],
+				"origen_dinero"
+			> & { tipo_compra: PurchaseClassification })[];
+			detalleComprasMes: (Omit<
+				ReinversionLiquidacionesResponseV4["detalleComprasMes"][number],
+				"origen_dinero"
+			> & { tipo_compra: PurchaseClassification })[];
+	  });
 
 type CompositionDestination = {
 	capital: string;
@@ -559,6 +578,7 @@ const billingModes = [
 	"factura_cube_pequeno",
 	"sin_modalidad",
 ] as const;
+const fundingOrigins = ["compra_nueva", "reinversion"] as const;
 const purchaseClassifications = [
 	"nueva_posicion",
 	"ampliacion_posicion",
@@ -595,8 +615,8 @@ const modeSummarySchema = z.object({
 	cantidad_liquidaciones: countSchema,
 	composicion: liquidationCompositionSchema,
 });
-const reinversionLiquidacionesSchema = z.object({
-	contrato_version: z.literal(3),
+const reinversionLiquidacionesV4Schema = z.object({
+	contrato_version: z.literal(4),
 	porTipo: z.record(z.enum(reinversionModes), modeSummarySchema),
 	interesNeto: z.object({
 		noVerificado: z.object({ interes: moneySchema }),
@@ -627,7 +647,7 @@ const reinversionLiquidacionesSchema = z.object({
 		z.object({
 			modalidad_facturacion: z.enum(billingModes),
 			tipo_reinversion: z.enum(reinversionModes),
-			tipo_compra: z.enum(purchaseClassifications),
+			origen_dinero: z.enum(fundingOrigins),
 			cantidad: countSchema,
 			monto: moneySchema,
 		}),
@@ -686,7 +706,7 @@ const reinversionLiquidacionesSchema = z.object({
 			inversionista: z.string().trim().min(1),
 			modalidad_facturacion: z.enum(billingModes),
 			tipo_reinversion: z.enum(reinversionModes),
-			tipo_compra: z.enum(purchaseClassifications),
+			origen_dinero: z.enum(fundingOrigins),
 			monto: moneySchema,
 		}),
 	),
@@ -696,6 +716,33 @@ const reinversionLiquidacionesSchema = z.object({
 	]),
 	cantidad_liquidaciones: countSchema,
 });
+const reinversionLiquidacionesV3Schema =
+	reinversionLiquidacionesV4Schema.extend({
+		contrato_version: z.literal(3),
+		comprasMes: z.array(
+			z.object({
+				modalidad_facturacion: z.enum(billingModes),
+				tipo_reinversion: z.enum(reinversionModes),
+				tipo_compra: z.enum(purchaseClassifications),
+				cantidad: countSchema,
+				monto: moneySchema,
+			}),
+		),
+		detalleComprasMes: z.array(
+			z.object({
+				fecha: z.string().trim().min(1),
+				inversionista: z.string().trim().min(1),
+				modalidad_facturacion: z.enum(billingModes),
+				tipo_reinversion: z.enum(reinversionModes),
+				tipo_compra: z.enum(purchaseClassifications),
+				monto: moneySchema,
+			}),
+		),
+	});
+const reinversionLiquidacionesSchema = z.discriminatedUnion(
+	"contrato_version",
+	[reinversionLiquidacionesV3Schema, reinversionLiquidacionesV4Schema],
+);
 
 export type FlujoPorInversionistaRow = {
 	inversionista_id: number;
@@ -806,6 +853,15 @@ export type MoraRecoveryMetric = {
 // ============================================================================
 // HTTP CLIENT
 // ============================================================================
+
+export interface IdentidadInversionista {
+	inversionista_id: number;
+	nombre: string;
+	email: string | null;
+	dpi: string;
+	via: "directo" | "representante_de_la_sociedad";
+	sociedad: string | null;
+}
 
 export class CarteraBackClient {
 	private config: CarteraBackClientConfig;
@@ -1460,6 +1516,34 @@ export class CarteraBackClient {
 		return response;
 	}
 
+	/**
+	 * Persona dueña de un DPI o de un correo. `data: null` = no existe.
+	 *
+	 * La usa el alta del CRM para detectar que conta no está duplicando por
+	 * error, sino dando de alta la empresa de alguien que ya es inversionista.
+	 */
+	async buscarIdentidadInversionista(params: {
+		dpi?: string;
+		email?: string;
+	}): Promise<{ success: boolean; data: IdentidadInversionista | null }> {
+		const queryParams = new URLSearchParams();
+		if (params.dpi) queryParams.set("dpi", params.dpi);
+		if (params.email) queryParams.set("email", params.email);
+
+		// Sin cache: el `data: null` de "no es de nadie" es un 200 y se guardaría
+		// cinco minutos. Con cache en memoria + varias instancias, el invalidate
+		// de `createInvestor` no llega a las demás —y el alta puede venir de
+		// cartera, donde no hay invalidate ninguno—, así que el negativo viejo
+		// sobrevive: la detección no ve a la persona recién creada y, sin el
+		// interruptor "¿Es empresa?", su sociedad rebota como duplicada.
+		// Es una consulta por DPI tecleado, disparada por un humano llenando un
+		// formulario: no hay volumen que justifique cachearla.
+		return this.request<{
+			success: boolean;
+			data: IdentidadInversionista | null;
+		}>(`/investor/identidad?${queryParams}`, { method: "GET" }, false);
+	}
+
 	async getInvestorReport(
 		params: GetInvestorReportParams,
 	): Promise<InversionistaReporte> {
@@ -1894,10 +1978,43 @@ export class CarteraBackClient {
 	}): Promise<{
 		message: string;
 		data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+		/**
+		 * Qué pasó con el acceso al portal de cada inversionista recién creado.
+		 *
+		 * Viaja aparte de `data` porque el alta puede haber salido perfecta y el
+		 * acceso no: son dos desenlaces distintos y el operador tiene que poder
+		 * distinguirlos. Cartera nunca falla el alta por esto.
+		 */
+		provisioning?: {
+			inversionistaId: number;
+			estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+			usuarioEmail: string | null;
+			correo: {
+				enviado: boolean;
+				plantilla: string | null;
+				redirigido: boolean;
+				destinatarioReal: string | null;
+			};
+			advertencias: string[];
+			motivo: string | null;
+		}[];
 	}> {
 		const response = await this.request<{
 			message: string;
 			data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+			provisioning?: {
+				inversionistaId: number;
+				estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+				usuarioEmail: string | null;
+				correo: {
+					enviado: boolean;
+					plantilla: string | null;
+					redirigido: boolean;
+					destinatarioReal: string | null;
+				};
+				advertencias: string[];
+				motivo: string | null;
+			}[];
 		}>("/investor", {
 			method: "POST",
 			body: JSON.stringify({
@@ -1915,6 +2032,13 @@ export class CarteraBackClient {
 				tipo_reinversion: input.tipo_reinversion ?? "sin_reinversion",
 				monto_reinversion: input.monto_reinversion ?? null,
 				moneda: input.moneda ?? "quetzales",
+				// El alta de back office SÍ pide acceso al portal. La llave es el
+				// permiso: cartera no provisiona sin ella, para que el registro
+				// público de auth-google no pueda fabricarse una cuenta con la
+				// contraseña en su propio correo. Va explícita porque no hay
+				// forma de distinguir por identidad quién llama (todo entra con
+				// el mismo token de servicio ADMIN).
+				provisionar_portal: true,
 				// A propósito NO usamos `?? null`: cartera distingue "la llave no
 				// viene" (no tocar) de "viene vacía" (borrar). Mandar null siempre
 				// borraría el DPI del representante en cada edición que no lo

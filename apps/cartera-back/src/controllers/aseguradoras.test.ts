@@ -15,22 +15,11 @@ mock.module("../database", () => ({
   },
 }));
 
-// Also mock ExcelJS to avoid needing the real library in unit tests
-mock.module("exceljs", () => {
-  class MockWorkbook {
-    addWorksheet(_name: string) {
-      return {
-        columns: [] as any[],
-        getRow: () => ({ font: {} }),
-        addRow: () => {},
-      };
-    }
-    xlsx = {
-      writeBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3])),
-    };
-  }
-  return { default: MockWorkbook };
-});
+// NO se mockea "exceljs": `mock.module` es global al proceso de bun test, y el
+// stub de Workbook que vivía aquí envenenaba a excelCashInReport.test.ts (que sí
+// construye y vuelve a leer el archivo de verdad). exceljs es una dependencia
+// real del paquete y ningún test de este archivo asserta sobre el Excel, así que
+// no hay nada que mockear.
 
 // ---------------------------------------------------------------------------
 // Chainable mock executor — mirrors the drizzle .select().from().orderBy() chain

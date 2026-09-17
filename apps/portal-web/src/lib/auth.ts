@@ -1,5 +1,9 @@
 import { redirect } from "@tanstack/react-router";
 import { createAuthClient } from "better-auth/client";
+import {
+  debeElegirPassword,
+  type UsuarioConMarcaDePassword,
+} from "./primerIngreso";
 
 export const authClient = createAuthClient({
   baseURL: import.meta.env.VITE_BETTER_AUTH_URL,
@@ -8,26 +12,53 @@ export const authClient = createAuthClient({
   },
 });
 
-// Función para verificar autenticación con better-auth
-export const checkAuth = async () => {
+/**
+ * El usuario de la sesión, o `null`.
+ *
+ * Separado de los guards porque los `redirect()` de TanStack Router se lanzan,
+ * y aquí había un `try/catch` que envolvía también al `throw redirect(...)`:
+ * cualquier redirección que se decidiera adentro terminaba tratada como un
+ * error de sesión y mandando al login. Con la consulta aislada, el `catch` solo
+ * cubre lo que de verdad puede fallar —la petición— y los guards deciden en
+ * terreno limpio.
+ */
+const usuarioDeSesion = async (): Promise<UsuarioConMarcaDePassword | null> => {
   try {
     const sessionData = await authClient.getSession();
-    console.log("checkAuth - Respuesta de getSession:", sessionData);
-    
-    if (sessionData?.data?.user) {
-      return; // Sesión válida
-    }
-    
-    // Si no hay sesión, redirigir al login
-    throw redirect({
-      to: "/login",
-    });
+    // El cliente no está tipado con los campos extra de Better Auth
+    // (`role`, `dpi`, `passwordProvisionadaAt`), pero el servidor sí los manda.
+    return (sessionData?.data?.user as UsuarioConMarcaDePassword) ?? null;
   } catch (error) {
     console.error("checkAuth - Error:", error);
-    throw redirect({
-      to: "/login",
-    });
+    return null;
   }
+};
+
+/**
+ * Guard de las pantallas privadas: exige sesión y, antes que nada, que la
+ * contraseña sea suya y no la que le generamos.
+ */
+export const checkAuth = async () => {
+  const usuario = await usuarioDeSesion();
+
+  if (!usuario) throw redirect({ to: "/login" });
+
+  if (debeElegirPassword(usuario)) throw redirect({ to: "/primer-ingreso" });
+};
+
+/**
+ * Guard de la pantalla de primer ingreso.
+ *
+ * Devuelve al perfil a quien ya eligió su contraseña: sin esto, la pantalla
+ * quedaría accesible por URL pidiendo una "contraseña temporal" que ya no
+ * existe.
+ */
+export const checkPrimerIngreso = async () => {
+  const usuario = await usuarioDeSesion();
+
+  if (!usuario) throw redirect({ to: "/login" });
+
+  if (!debeElegirPassword(usuario)) throw redirect({ to: "/profile" });
 };
 
 // Tipos para la autenticación

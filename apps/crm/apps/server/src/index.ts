@@ -41,11 +41,13 @@ import { verificarVehiculosEnSat } from "./jobs/sat-verificacion-vehiculos";
 import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
+import { PARTNER_AUTH_BASE_PATH, partnerAuth } from "./lib/partner-auth";
 import { PERMISSIONS } from "./lib/roles";
 import {
 	appRouter,
 	disbursementRouter,
 	manualVehicleRouter,
+	partnerTrackerRouter,
 	proyeccionRouter,
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
@@ -108,6 +110,7 @@ app.use(
 				process.env.CORS_ORIGIN,
 				process.env.FRONT_URL,
 				process.env.TALLER_URL,
+				process.env.TRACKER_URL,
 			].filter((o): o is string => Boolean(o && o !== "*"));
 
 			if (origin && allowedOrigins.includes(origin)) {
@@ -172,6 +175,11 @@ app.on(["POST", "GET"], "/api/auth/**", async (c) => {
 	return response;
 });
 
+// Auth de socios (predios/agencias): instancia aparte, cookie aparte.
+app.on(["POST", "GET"], `${PARTNER_AUTH_BASE_PATH}/**`, (c) =>
+	partnerAuth.handler(c.req.raw),
+);
+
 // External contracts endpoint (requires service account authentication)
 app.route("/api/contracts/external", externalContractsRouter);
 
@@ -183,6 +191,7 @@ const handler = new RPCHandler(
 		investmentsRouter,
 		disbursementRouter,
 		proyeccionRouter,
+		partnerTrackerRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {

@@ -147,7 +147,10 @@ pnpm dev
 | GOOGLE_CLIENT_ID | Client ID de Google | ✅ |
 | GOOGLE_CLIENT_SECRET | Client Secret de Google | ✅ |
 | GOOGLE_REDIRECT_URI | URI de redirección de Google | ✅ |
-| CORS_ORIGIN | Origen permitido para CORS | ❌ (default: *) |
+| CORS_ORIGIN | Origen(es) del portal permitidos. Admite varios separados por comas (`https://a.com,https://b.com`); cada uno debe traer esquema. Junto con `FRONTEND_URL` y `BETTER_AUTH_URL` forma la lista que usan el CORS, Better Auth y la defensa anti-CSRF; un valor sin esquema tumba el arranque. Es una lista de **permisos**: no sirve como base del enlace de recuperación de contraseña, para eso está `FRONTEND_URL`. | ❌ (default: http://localhost:5173) |
+| FRONTEND_URL | Dominio **canónico** del portal. Es la base del enlace del correo de recuperación de contraseña, así que debe ser **UN solo origen**: una lista con comas tumba el arranque. Si no se declara, cae a `CORS_ORIGIN`, lo cual solo es correcto mientras esa variable tenga un único dominio. | ❌ con un dominio (cae a `CORS_ORIGIN`) · ✅ si `CORS_ORIGIN` trae más de uno |
+| INTERNAL_API_SECRET | Secreto compartido para endpoints internos servicio-a-servicio. Se envía como `Authorization: Bearer <secreto>`. Sin él, esos endpoints rechazan todo (fail closed). | ✅ en producción |
+| CRM_PORTAL_SECRET | Secreto compartido con el CRM para `/api/portal/*`. Debe valer **lo mismo** que `BETTER_SECRET_PORTAL_WEB` en el CRM; si no coincide, el CRM responde 401. | ✅ en producción |
 
 ## 📄 Licencia
 

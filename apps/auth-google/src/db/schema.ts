@@ -29,6 +29,19 @@ export const users = customSchema.table("users", {
   password: text("password"),
   role: userRoleEnum("role").default("CLIENT").notNull(),
   dpi: text("dpi").unique(),
+  /**
+   * Cuándo se le generó a esta cuenta una contraseña que ELLA no eligió.
+   *
+   * Solo lo escribe el provisionamiento al CREAR la cuenta, y se limpia en
+   * cuanto su dueño pone la suya (ver `services/password/passwordPropia.ts`).
+   * Mientras tenga fecha, el portal manda a esa persona a elegir contraseña
+   * antes de dejarla ver nada.
+   *
+   * NULL no significa "ya la cambió": significa "no sabemos que la suya sea
+   * nuestra". Por eso las cuentas que ya existían antes de esta columna quedan
+   * en NULL y NO se les pide nada — es el comportamiento que se quiere.
+   */
+  passwordProvisionadaAt: timestamp("password_provisionada_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

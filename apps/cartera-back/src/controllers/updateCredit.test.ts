@@ -7,6 +7,12 @@ import { PgDialect } from "drizzle-orm/pg-core";
 // termine ahí (early return) sin tocar nada más.
 const capturedWheres: any[] = [];
 const capturedCreditWheres: any[] = [];
+// Cuántas veces se llamó .for(...) sobre un select — solo lo toca el FOR NO
+// KEY UPDATE que precede al guard de borradores. Regresión directa contra
+// borrar ese lock por accidente: sin él, el guard no se serializa con
+// withPendingReturnCreditLocks (payments.ts) y la carrera vuelve a abrirse.
+let forCallsCount = 0;
+let lastForArg: unknown;
 // Fixture completo: updateCredit lee estos campos con new Big(...) (que truena
 // con undefined) o los necesita para llegar al UPDATE final.
 const fakeCredito = {
@@ -39,11 +45,19 @@ const dbMock = {
       // select del crédito: .where(cond).limit(1)
       // select de montos de inversionistas: .where(cond) y se await directo,
       // por eso el retorno es thenable además de traer .limit().
+      // .for(): el FOR NO KEY UPDATE que precede al guard de borradores
+      // (checkCreditHasUnliquidatedDrafts está mockeado aparte, así que acá
+      // solo hace falta no tronar la cadena).
       where: (cond: any) => {
         capturedCreditWheres.push(cond);
         const filas = inversionistasActuales;
         return {
           limit: () => Promise.resolve([creditoActual]),
+          for: (strength: unknown) => {
+            forCallsCount++;
+            lastForArg = strength;
+            return Promise.resolve([]);
+          },
           then: (resolve: any, reject: any) =>
             Promise.resolve(filas).then(resolve, reject),
         };
@@ -88,6 +102,15 @@ mock.module("../database", () => ({
 mock.module("../services/sifcoIntegrations", () => ({
   consultarEstadoCuentaPrestamo: () => Promise.resolve(null),
 }));
+// Guard de borradores sin liquidar (draftPaymentsGuard.test.ts prueba sus
+// builders puros por separado): acá se mockea para controlar exactamente
+// cuándo bloquea la transición de estado_devolucion, sin reconstruir su
+// query de selectDistinct/innerJoin dentro de este dbMock ya complejo.
+let draftsWarning: any = null;
+const checkCreditHasUnliquidatedDraftsMock = mock(() => Promise.resolve(draftsWarning));
+mock.module("../utils/draftPaymentsGuard", () => ({
+  checkCreditHasUnliquidatedDrafts: checkCreditHasUnliquidatedDraftsMock,
+}));
 
 const { recalcularPagosCredito, updateCredit } = await import("./updateCredit");
 
@@ -101,6 +124,10 @@ beforeEach(() => {
   pagosActuales = [];
   inversionistasActuales = [];
   creditoActual = fakeCredito;
+  draftsWarning = null;
+  checkCreditHasUnliquidatedDraftsMock.mockClear();
+  forCallsCount = 0;
+  lastForArg = undefined;
 });
 
 describe("recalcularPagosCredito — exclusión de pagos de reset", () => {
@@ -226,18 +253,19 @@ describe("recalcularPagosCredito — pagos validados no se reescriben", () => {
 
     await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
 
-    // Solo se escribe la fila sembrada; el validado queda intacto.
-    expect(capturedUpdates.length).toBe(1);
+    // La fila sembrada se reescribe entera; el validado recibe SOLO el espejo
+    // de restantes (su split queda intacto — ver el test de abajo).
     const idsEscritos = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
     expect(idsEscritos).toContain(74540);
-    expect(idsEscritos).not.toContain(156048);
 
     // La cuota se proyecta desde el principal PRE-parcial: 18493.39 + 50 =
     // 18543.39 × 1.5% = 278.15 de interés, IVA 33.38; capital de la cuota =
     // 2021.83 − 278.15 − 33.38 − 260.93 − 399.73 = 1049.64. El sembrado queda
     // neto de lo que el validado ya abonó (100 / 12 / 50), sin restar el
     // capital validado dos veces.
-    const vals = capturedUpdates[0].vals;
+    const vals = capturedUpdates.find((u) =>
+      renderSql(u.cond).params.includes(74540),
+    )!.vals;
     expect(vals.interes_restante).toBe("178.15");
     expect(vals.iva_12_restante).toBe("21.38");
     expect(vals.seguro_restante).toBe("260.93");
@@ -248,6 +276,108 @@ describe("recalcularPagosCredito — pagos validados no se reescriben", () => {
     expect(vals.total_restante).toBe("17493.75");
     expect(vals.abono_interes).toBe("0");
     expect(vals.pagado).toBe(false);
+  });
+
+  // Regresión crédito 483 / cuota 7 (sep-2026): al reversar un parcial, la
+  // fila validada se quedaba con el espejo de restantes de ANTES de la reversa
+  // ("faltan Q157.60"). registerPayment reparte contra la fila más reciente
+  // con saldo, así que el siguiente pago cerraba la cuota con esos Q157.60 y
+  // mandaba el resto —con sus facturas— a la cuota siguiente.
+  it("refresca el espejo de restantes del validado sin tocar su split", async () => {
+    pagosActuales = [
+      {
+        pagos_credito: {
+          ...parcialValidado,
+          // Espejo viejo que dejó la reversa.
+          capital_restante: "157.60",
+          interes_restante: "0",
+          iva_12_restante: "0",
+          seguro_restante: "0",
+          gps_restante: "0",
+          membresias: "0",
+        },
+        cuotas_credito: cuota18,
+      },
+      { pagos_credito: filaSembrada, cuotas_credito: cuota18 },
+    ];
+
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    const espejo = capturedUpdates.find((u) =>
+      renderSql(u.cond).params.includes(156048),
+    )!.vals;
+    // Mismo saldo que el hermano sembrado: lo que la cuota debe de verdad.
+    expect(espejo.interes_restante).toBe("178.15");
+    expect(espejo.iva_12_restante).toBe("21.38");
+    expect(espejo.seguro_restante).toBe("260.93");
+    expect(espejo.membresias).toBe("399.73");
+    expect(espejo.capital_restante).toBe("999.64");
+    // El split validado (ya facturado y distribuido a inversionistas) y su
+    // estado no se tocan: en el UPDATE solo viajan los restantes.
+    expect(Object.keys(espejo).sort()).toEqual([
+      "capital_restante",
+      "gps_restante",
+      "interes_restante",
+      "iva_12_restante",
+      "membresias",
+      "seguro_restante",
+    ]);
+  });
+
+  // Con dos o más validados vivos el espejo ya viene neto de TODOS, y
+  // registerPayment volvería a restarle el interés/IVA de los otros al elegir
+  // uno como fila vigente (`calcularSaldoNetoCuota`): el mismo parcial contado
+  // dos veces, con ese interés corriéndose a capital. Se deja como estaba.
+  it("no toca el espejo cuando la cuota tiene dos validados vivos", async () => {
+    const segundoValidado = {
+      ...parcialValidado,
+      pago_id: 156050,
+      fecha_pago: "2026-08-28",
+      abono_interes: "40",
+      abono_iva_12: "5",
+      abono_capital: "20",
+    };
+    pagosActuales = [
+      { pagos_credito: parcialValidado, cuotas_credito: cuota18 },
+      { pagos_credito: segundoValidado, cuotas_credito: cuota18 },
+      { pagos_credito: filaSembrada, cuotas_credito: cuota18 },
+    ];
+
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    const idsEscritos = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
+    expect(idsEscritos).toContain(74540);
+    expect(idsEscritos).not.toContain(156048);
+    expect(idsEscritos).not.toContain(156050);
+  });
+
+  // Una fila `no_required` CON plata (crédito 890 / cuota 12) también cuenta
+  // como hermana viva para el neteo de registerPayment, y encima no es
+  // elegible como fuente de saldo: el validado gana la elección y le restarían
+  // el interés/IVA de esa fila otra vez. Mismo doble conteo, así que tampoco
+  // se sincroniza.
+  it("no toca el espejo cuando un hermano no_required lleva abonos", async () => {
+    pagosActuales = [
+      { pagos_credito: parcialValidado, cuotas_credito: cuota18 },
+      {
+        pagos_credito: {
+          ...filaSembrada,
+          pago_id: 74539,
+          monto_aplicado: "705.88",
+          abono_interes: "60",
+          abono_iva_12: "7.20",
+          abono_capital: "638.68",
+        },
+        cuotas_credito: cuota18,
+      },
+      { pagos_credito: filaSembrada, cuotas_credito: cuota18 },
+    ];
+
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    const idsEscritos = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
+    expect(idsEscritos).toContain(74540);
+    expect(idsEscritos).not.toContain(156048);
   });
 });
 
@@ -290,12 +420,17 @@ describe("recalcularPagosCredito — capital validado de cuotas posteriores", ()
 
     await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
 
-    // Se escriben solo las dos sembradas; el validado (aunque pagado=true) no.
-    expect(capturedUpdates.length).toBe(2);
+    // Las dos sembradas se reescriben enteras; el validado (aunque
+    // pagado=true) solo recibe el espejo de restantes de su cuota.
     const ids = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
     expect(ids).toContain(74540);
     expect(ids).toContain(74541);
-    expect(ids).not.toContain(156049);
+    const validado = capturedUpdates.find((u) =>
+      renderSql(u.cond).params.includes(156049),
+    )!.vals;
+    expect(validado.abono_capital).toBeUndefined();
+    expect(validado.pagado).toBeUndefined();
+    expect(validado.total_restante).toBeUndefined();
 
     // La cuota 18 se proyecta desde 18493.39 + 50 (capital del parcial de la
     // 19) = 18543.39 × 1.5% = 278.15, no desde el capital ya reducido.
@@ -363,6 +498,169 @@ describe("updateCredit — validaciones antes de escribir", () => {
     expect(result.message).toContain("Transición de estado de devolución no permitida");
     expect(capturedUpdates).toHaveLength(0);
     expect(capturedInserts).toHaveLength(0);
+  });
+});
+
+describe("updateCredit — guard de borradores sin liquidar al solicitar devolución", () => {
+  const bloqueo = {
+    warning: true,
+    code: "UNLIQUIDATED_DRAFT_PAYMENTS",
+    message:
+      "No se puede solicitar la devolución: este crédito tiene pagos sin liquidar de Ana Pérez. Liquidalos antes de enviarlo a devolución.",
+    inversionistas_bloqueantes: [{ inversionista_id: 10, nombre: "Ana Pérez" }],
+  };
+
+  it("toma FOR NO KEY UPDATE sobre el crédito antes de consultar el guard", async () => {
+    // Regresión: sin este lock el guard no se serializa con
+    // withPendingReturnCreditLocks (payments.ts), que toma el mismo lock de
+    // fila antes de insertar un borrador — la carrera vuelve a abrirse.
+    creditoActual = { ...fakeCredito, estado_devolucion: "NO_APLICA" };
+    draftsWarning = null;
+    const { set, request } = makeCtx();
+
+    await updateCredit({
+      body: {
+        ...baseBody,
+        estado_devolucion: "PENDIENTE_AUTORIZACION",
+        motivo_devolucion: "Solicitud de prueba",
+      },
+      set,
+      request,
+    });
+
+    expect(forCallsCount).toBe(1);
+    expect(lastForArg).toBe("no key update");
+  });
+
+  it("no toma el lock cuando la transición no aplica (no es esSolicitudValida)", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "PENDIENTE_AUTORIZACION" };
+    draftsWarning = null;
+    const { set, request } = makeCtx();
+
+    await updateCredit({
+      body: { ...baseBody, estado_devolucion: "NO_APLICA" },
+      set,
+      request,
+    });
+
+    expect(forCallsCount).toBe(0);
+  });
+
+  it("bloquea NO_APLICA -> PENDIENTE_AUTORIZACION si hay pagos espejo sin liquidar", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "NO_APLICA" };
+    draftsWarning = bloqueo;
+    const { set, request } = makeCtx();
+
+    const result: any = await updateCredit({
+      body: {
+        ...baseBody,
+        estado_devolucion: "PENDIENTE_AUTORIZACION",
+        motivo_devolucion: "Solicitud de prueba",
+      },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.code).toBe("UNLIQUIDATED_DRAFT_PAYMENTS");
+    expect(result.message).toContain("Ana Pérez");
+    expect(capturedUpdates).toHaveLength(0);
+    expect(capturedInserts).toHaveLength(0);
+  });
+
+  it("permite NO_APLICA -> PENDIENTE_AUTORIZACION sin borradores pendientes", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "NO_APLICA" };
+    draftsWarning = null;
+    const { set, request } = makeCtx();
+
+    const result: any = await updateCredit({
+      body: {
+        ...baseBody,
+        estado_devolucion: "PENDIENTE_AUTORIZACION",
+        motivo_devolucion: "Solicitud de prueba",
+      },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result.credito_id).toBe(794);
+    expect(capturedUpdates.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("permite salir de PENDIENTE_AUTORIZACION aunque haya borradores sin liquidar", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "PENDIENTE_AUTORIZACION" };
+    draftsWarning = bloqueo;
+    const { set, request } = makeCtx();
+
+    const result: any = await updateCredit({
+      body: { ...baseBody, estado_devolucion: "NO_APLICA" },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result.credito_id).toBe(794);
+    // El guard solo se consulta al SOLICITAR devolución, no al desactivarla.
+    expect(checkCreditHasUnliquidatedDraftsMock).not.toHaveBeenCalled();
+  });
+
+  it("no consulta el guard cuando estado_devolucion se reenvía sin cambios", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "PENDIENTE_AUTORIZACION" };
+    draftsWarning = bloqueo;
+    const { set, request } = makeCtx();
+
+    // ModalEditCredit.tsx manda estado_devolucion en cada guardado, cambie o
+    // no — esto reproduce ese reenvío incondicional.
+    const result: any = await updateCredit({
+      body: { ...baseBody, estado_devolucion: "PENDIENTE_AUTORIZACION" },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result.credito_id).toBe(794);
+    expect(checkCreditHasUnliquidatedDraftsMock).not.toHaveBeenCalled();
+  });
+
+  it("bloquea RECHAZADO -> PENDIENTE_AUTORIZACION si hay pagos espejo sin liquidar", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "RECHAZADO" };
+    draftsWarning = bloqueo;
+    const { set, request } = makeCtx();
+
+    const result: any = await updateCredit({
+      body: {
+        ...baseBody,
+        estado_devolucion: "PENDIENTE_AUTORIZACION",
+        motivo_devolucion: "Reintento de solicitud",
+      },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.code).toBe("UNLIQUIDATED_DRAFT_PAYMENTS");
+    expect(capturedUpdates).toHaveLength(0);
+  });
+
+  it("bloquea VERIFICADO -> PENDIENTE_AUTORIZACION si hay pagos espejo sin liquidar", async () => {
+    creditoActual = { ...fakeCredito, estado_devolucion: "VERIFICADO" };
+    draftsWarning = bloqueo;
+    const { set, request } = makeCtx();
+
+    const result: any = await updateCredit({
+      body: {
+        ...baseBody,
+        estado_devolucion: "PENDIENTE_AUTORIZACION",
+        motivo_devolucion: "Re-solicitud tras verificación",
+      },
+      set,
+      request,
+    });
+
+    expect(set.status).toBe(400);
+    expect(result.code).toBe("UNLIQUIDATED_DRAFT_PAYMENTS");
+    expect(capturedUpdates).toHaveLength(0);
   });
 });
 

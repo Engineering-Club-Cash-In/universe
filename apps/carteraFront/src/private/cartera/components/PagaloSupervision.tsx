@@ -15,7 +15,7 @@ import {
 import {
   alternarEstado, antiguedad, colorPuntoLink, ESTADOS_FILTRABLES, etiquetaEstadoLink,
   etiquetaFuente, etiquetaTipoLink, getEstadoGrupoInfo, normalizarNombreCliente,
-  PROBLEMAS_LINK_FILTRABLES, siguienteOrden, type ColumnaOrdenable,
+  paginaCorregida, PROBLEMAS_LINK_FILTRABLES, siguienteOrden, type ColumnaOrdenable,
 } from "./pagaloSupervision.helpers";
 
 const fmtQ = (v: unknown) =>
@@ -129,6 +129,11 @@ export function PagaloSupervision() {
     queryFn: () =>
       getPagaloSupervision({ ...filtros, limit: pageSize, offset: (page - 1) * pageSize }),
     refetchOnWindowFocus: false,
+    // Conserva la página anterior mientras carga la nueva. Sin esto, al pasar de
+    // página `query.data` queda undefined por un instante, `total` cae a 0 y el
+    // efecto de abajo devuelve al usuario a la página 1 antes de que llegue la
+    // respuesta: ninguna página más allá de la primera resultaba accesible.
+    placeholderData: (anterior) => anterior,
   });
 
   const grupos = query.data?.grupos ?? [];
@@ -139,8 +144,12 @@ export function PagaloSupervision() {
   // Cambiar de filtro puede reducir el total y dejar la página actual fuera de
   // rango: el offset cae vacío y se ve como "no hay grupos" aunque sí los haya.
   useEffect(() => {
-    if (page > totalPaginas) setPage(totalPaginas);
-  }, [page, totalPaginas]);
+    const destino = paginaCorregida(page, totalPaginas, {
+      cargando: query.isFetching,
+      hayDatos: !!query.data,
+    });
+    if (destino !== null) setPage(destino);
+  }, [page, totalPaginas, query.isFetching, query.data]);
 
   const alternarOrden = (columna: ColumnaOrdenable) => {
     const siguiente = siguienteOrden({ columna: ordenPor, direccion: ordenDir }, columna);

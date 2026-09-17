@@ -3,6 +3,7 @@ import {
   alternarEstado,
   antiguedad,
   normalizarNombreCliente,
+  paginaCorregida,
   siguienteOrden,
 } from "./pagaloSupervision.helpers";
 
@@ -74,5 +75,30 @@ describe("antiguedad", () => {
   it("usa singular para un día", () => {
     const ayer = new Date(Date.now() - 1.2 * 86_400_000).toISOString();
     expect(antiguedad(ayer).etiqueta).toBe("1 día");
+  });
+});
+
+describe("paginaCorregida", () => {
+  const cargado = { cargando: false, hayDatos: true };
+
+  // El bug que reportó la review: al pasar de página react-query deja `data` en
+  // undefined, el total cae a 0 y totalPaginas a 1. Recortar ahí devolvía a la
+  // página 1 antes de que llegara la respuesta.
+  it("no recorta mientras la consulta está en vuelo", () => {
+    expect(paginaCorregida(2, 1, { cargando: true, hayDatos: false })).toBeNull();
+    expect(paginaCorregida(5, 1, { cargando: true, hayDatos: true })).toBeNull();
+  });
+
+  it("no recorta sin datos cargados", () => {
+    expect(paginaCorregida(3, 1, { cargando: false, hayDatos: false })).toBeNull();
+  });
+
+  it("recorta a la última página válida cuando el filtro achicó el total", () => {
+    expect(paginaCorregida(7, 3, cargado)).toBe(3);
+  });
+
+  it("deja la página quieta cuando está en rango", () => {
+    expect(paginaCorregida(2, 5, cargado)).toBeNull();
+    expect(paginaCorregida(5, 5, cargado)).toBeNull();
   });
 });

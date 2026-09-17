@@ -149,3 +149,22 @@ export function antiguedad(desde: string | null): {
     alerta: dias >= DIAS_ALERTA_ANTIGUEDAD,
   };
 }
+
+/**
+ * Página a la que hay que moverse cuando la actual queda fuera de rango, o
+ * `null` si se queda donde está.
+ *
+ * `cargando` es lo que evita el bug: al pasar de página, react-query deja
+ * `data` en undefined por un instante y el total cae a 0. Recortar ahí devuelve
+ * al usuario a la página 1 antes de que llegue la respuesta, y ninguna página
+ * más allá de la primera resulta accesible. Solo se recorta con datos ya
+ * cargados, que son los únicos que describen el resultado vigente.
+ */
+export function paginaCorregida(
+  pagina: number,
+  totalPaginas: number,
+  { cargando, hayDatos }: { cargando: boolean; hayDatos: boolean },
+): number | null {
+  if (cargando || !hayDatos) return null;
+  return pagina > totalPaginas ? totalPaginas : null;
+}

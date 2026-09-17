@@ -68,28 +68,37 @@ export async function refrescarRubros(
  * descripción anteriores — el PUT siguiente PISABA la edición que acababa de
  * guardar, sin que nada se lo avisara.
  *
- * Es el mismo defecto que ya se había arreglado para los TIPOS de rubro, pero no
- * el mismo caso, y conviene saber en qué difiere: allá la query queda DESMONTADA
- * al editar, así que el `invalidateQueries` pelado ni siquiera la volvía a pedir
- * y hubo que forzar `refetchType: "all"`. Acá la query vive en el componente
- * padre y sigue activa, así que el refetch sí salía — el agujero era de TIEMPO.
+ * QUIÉN MANDA: el servidor. El refetch posterior al PUT es lo que queda en
+ * pantalla, y `guardado` —la fila que el backend devolvió de nuestro propio
+ * UPDATE— entra SÓLO si ese refetch no trajo nada.
  *
- * ORDEN: primero se refresca y DESPUÉS se siembra, que es al revés de lo que
- * parece natural. El motivo es que `guardado` no es lo que el formulario mandó:
- * es la fila que el backend devolvió de su propio UPDATE, o sea el estado
- * posterior a la escritura. Cualquier GET que estuviera en vuelo salió ANTES del
- * PUT y por lo tanto trae datos más viejos; si se sembrara primero, esa
- * respuesta rezagada aterrizaría encima y la pantalla volvería sola al monto
- * anterior sin que nadie tocara nada. Sembrando al final, lo último que queda en
- * caché es siempre lo que el servidor guardó.
+ * Parece al revés, porque `guardado` es dato fresco del backend y no lo que el
+ * formulario mandó. Pero entre que el PUT respondió y el GET volvió, otro
+ * administrador puede haber editado la misma fila: el refetch trae SU valor, más
+ * nuevo que el nuestro, y sembrar encima lo revierte. Peor, no queda sólo en
+ * pantalla — el que reabre esa fila carga el formulario con el valor revertido y
+ * al guardar lo persiste. Entre mostrar un dato viejo un rato y borrarle la
+ * edición a otro, se elige lo primero: es visible y se cura solo al refrescar.
  *
- * Eso mismo cubre el caso en que el refetch FALLA —la red se cayó justo después
- * del PUT, que es cuando perder la edición más duele porque el cargo ya está
- * cambiado en la base—: `invalidateQueries` se traga el error y resuelve igual,
- * y la siembra posterior deja en pantalla lo guardado y no lo anterior.
+ * CUÁNDO SIEMBRA: sólo si el refetch no trajo valor nuevo, que no es lo mismo
+ * que "falló". Hay dos formas, y ninguna levanta una excepción:
  *
- * El refetch sigue haciendo falta aunque la siembra sea la que manda: es lo que
- * trae `tipo_nombre` y `abonado`, que el PUT no devuelve.
+ *   * la red se cayó — `invalidateQueries` resuelve igual, sin tirar error, y
+ *     deja el fetch en `fetchStatus: "paused"` mientras el `status` sigue
+ *     diciendo `success` porque conserva el último dato bueno. Mirar sólo el
+ *     `status` da "todo bien" cuando no se refrescó nada;
+ *   * el refetch NUNCA SALIÓ. `invalidateQueries` por defecto es
+ *     `refetchType: "active"`, y la query de rubros es `enabled: open && …`: si
+ *     el modal se cerró mientras el PUT viajaba, queda inactiva y la invalidación
+ *     sólo la marca obsoleta. Por eso el refetch va forzado con
+ *     `refetchType: "all"`, igual que en los TIPOS y por el mismo motivo.
+ *
+ * Perder la edición es peor justo en esos casos, porque el cargo YA está cambiado
+ * en la base: el administrador vuelve a la lista, ve el monto anterior y lo
+ * "corrige" sobre un dato que ya no existe.
+ *
+ * El refetch además es lo único que trae `tipo_nombre` y `abonado`, que el PUT no
+ * devuelve.
  *
  * Todo va apuntado a `[QK_RUBROS, creditoId]`: sembrar por `rubro_id` sin mirar
  * de quién es la lista pondría el cargo de un cliente en la ficha de otro.
@@ -102,9 +111,22 @@ export async function sincronizarRubroEditado(
 ): Promise<void> {
   const queryKey = [QK_RUBROS, creditoId];
 
-  await queryClient.invalidateQueries({ queryKey });
+  // `refetchType: "all"` alcanza también a la query INACTIVA, que es el caso que
+  // el default (`"active"`) deja sin refrescar: modal cerrado mientras el PUT
+  // viajaba. Ver el bloque de arriba.
+  //
+  // No hace falta cancelar a mano lo que esté en vuelo: la invalidación dispara
+  // su refetch con `cancelRefetch: true`, y eso descarta el resultado del GET
+  // rezagado aunque el `queryFn` no acepte un AbortSignal —la cancelación actúa
+  // sobre el caché, no sobre el socket—.
+  await queryClient.invalidateQueries({ queryKey, refetchType: "all" });
 
-  if (guardado) {
+  // Si el servidor contestó, el servidor manda. La siembra es el plan B.
+  const estado = queryClient.getQueryState<RubroCredito[]>(queryKey);
+  const refetchNoTrajoNada =
+    estado?.status === "error" || estado?.fetchStatus === "paused";
+
+  if (guardado && refetchNoTrajoNada) {
     queryClient.setQueryData<RubroCredito[]>(queryKey, (actuales) =>
       aplicarEdicionRubro(actuales, rubroId, guardado)
     );

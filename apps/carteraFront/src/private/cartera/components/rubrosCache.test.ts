@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { QueryClient, QueryObserver, onlineManager } from "@tanstack/react-query";
 import { QK_RUBROS, refrescarRubros, sincronizarRubroEditado } from "./rubrosCache";
 import type { RubroCredito, RubroGuardado } from "../services/rubros.services";
 
@@ -73,14 +73,25 @@ function pantallaConRubros(servidor: () => RubroCredito[] | Promise<RubroCredito
 const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("sincronizarRubroEditado", () => {
-  it("al volver a la lista la fila ya trae lo guardado, no lo viejo", async () => {
-    // El servidor tarda: es exactamente el hueco en el que el administrador
-    // reabre la fila y el formulario nace con el monto anterior.
+  it("un GET que salió ANTES del PUT no puede pisar lo guardado", async () => {
+    // La lista YA está cargada —es el único estado desde el que se puede editar
+    // una fila— y hay un GET rezagado en vuelo que todavía trae el monto viejo.
+    // `invalidateQueries` cancela ese fetch al disparar el suyo, así que la
+    // respuesta rezagada se descarta y lo que queda es el refetch posterior al
+    // PUT. No hace falta que el `queryFn` acepte un AbortSignal: la cancelación
+    // actúa a nivel del caché, descartando el resultado tardío.
+    let respuesta: RubroCredito[] = [rubro()];
     const p = pantallaConRubros(async () => {
       await esperar(50);
-      return [rubro()];
+      return respuesta;
     });
-    await esperar(10);
+    await esperar(80); // la carga inicial YA terminó
+
+    // Sale un GET que todavía ve el monto viejo...
+    p.queryClient.refetchQueries({ queryKey: [QK_RUBROS, CRED] });
+    await esperar(5);
+    // ...y recién entonces el PUT cambia el dato del servidor.
+    respuesta = [rubro({ monto_original: "800.00", saldo_pendiente: "600.00", descripcion: "Calcomanía 2027" })];
 
     await sincronizarRubroEditado(
       p.queryClient,
@@ -94,6 +105,66 @@ describe("sincronizarRubroEditado", () => {
     expect(fila.saldo_pendiente).toBe("600.00");
     expect(fila.descripcion).toBe("Calcomanía 2027");
     p.desuscribir();
+  });
+
+  it("si el modal se cerró durante el guardado, la lista igual queda al día", async () => {
+    // `enabled: open && !!creditoVisible` en `RubrosCredito`: si el modal se
+    // cierra mientras el PUT viaja, la query queda INACTIVA. Y `invalidateQueries`
+    // por defecto es `refetchType: "active"`, así que a una query inactiva sólo
+    // la marca obsoleta y NO la vuelve a pedir.
+    //
+    // Sin forzar el refetch el agujero es silencioso: no hay error que detectar,
+    // el estado queda en `success`/`idle` —o sea "todo bien"— y la lista se queda
+    // con el monto ANTERIOR al PUT aunque el backend ya guardó el nuevo. Es el
+    // mismo caso que los TIPOS ya habían tenido que resolver con `refetchType`.
+    let primera = true;
+    const p = pantallaConRubros(async () => {
+      if (primera) {
+        primera = false;
+        return [rubro()];
+      }
+      return [rubro({ monto_original: "800.00", saldo_pendiente: "600.00" })];
+    });
+    await esperar(20);
+
+    p.desuscribir(); // el modal se cerró: la query queda inactiva
+
+    await sincronizarRubroEditado(
+      p.queryClient,
+      CRED,
+      5,
+      guardado({ monto_original: "800.00", saldo_pendiente: "600.00" })
+    );
+
+    expect(p.fila()!.monto_original).toBe("800.00");
+  });
+
+  it("con la red caída la siembra es lo único que salva la edición", async () => {
+    // Offline, `invalidateQueries` resuelve igual (no se cuelga) pero el fetch
+    // queda en `paused` y el `status` sigue diciendo `success`, porque conserva
+    // el último dato bueno. O sea: mirar sólo el `status` da "todo bien" cuando
+    // en realidad no se refrescó nada.
+    //
+    // Es cuando perder la edición más duele, porque el cargo YA está cambiado en
+    // la base: el administrador vuelve a la lista, ve el monto viejo y lo
+    // corrige otra vez sobre un dato que ya no existe.
+    const p = pantallaConRubros(async () => [rubro()]);
+    await esperar(20);
+
+    onlineManager.setOnline(false);
+    try {
+      await sincronizarRubroEditado(
+        p.queryClient,
+        CRED,
+        5,
+        guardado({ monto_original: "800.00", saldo_pendiente: "600.00" })
+      );
+
+      expect(p.fila()!.monto_original).toBe("800.00");
+    } finally {
+      onlineManager.setOnline(true);
+      p.desuscribir();
+    }
   });
 
   it("conserva el tipo y lo abonado, que el PUT no devuelve", async () => {
@@ -171,6 +242,34 @@ describe("sincronizarRubroEditado", () => {
 
     expect(p.refetches()).toBe(1);
     expect(p.fila()!.monto_original).toBe("800.00");
+    p.desuscribir();
+  });
+
+  it("si OTRO admin editó después, gana el servidor y no la respuesta del PUT", async () => {
+    // El otro lado de la moneda de sembrar al final. Entre que nuestro PUT
+    // respondió y el refetch volvió, otro administrador puede haber editado la
+    // misma fila: el GET trae su valor —más nuevo que el nuestro— y sembrar
+    // encima lo pisaría con el nuestro, que ya es viejo. Y como la siembra pasa
+    // después del refetch, React Query lo trata como fresco: reabrir esa fila y
+    // guardar revierte la edición del otro.
+    //
+    // Por eso la siembra sólo entra cuando el refetch FALLÓ. Si el servidor
+    // contestó, el servidor manda.
+    const p = pantallaConRubros(async () => [
+      rubro({ monto_original: "999.00", descripcion: "lo que puso el otro" }),
+    ]);
+    await esperar(10);
+
+    await sincronizarRubroEditado(
+      p.queryClient,
+      CRED,
+      5,
+      guardado({ monto_original: "800.00", descripcion: "lo mío" })
+    );
+
+    const fila = p.fila()!;
+    expect(fila.monto_original).toBe("999.00");
+    expect(fila.descripcion).toBe("lo que puso el otro");
     p.desuscribir();
   });
 

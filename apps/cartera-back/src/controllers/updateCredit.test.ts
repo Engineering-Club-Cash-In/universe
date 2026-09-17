@@ -350,6 +350,35 @@ describe("recalcularPagosCredito — pagos validados no se reescriben", () => {
     expect(idsEscritos).not.toContain(156048);
     expect(idsEscritos).not.toContain(156050);
   });
+
+  // Una fila `no_required` CON plata (crédito 890 / cuota 12) también cuenta
+  // como hermana viva para el neteo de registerPayment, y encima no es
+  // elegible como fuente de saldo: el validado gana la elección y le restarían
+  // el interés/IVA de esa fila otra vez. Mismo doble conteo, así que tampoco
+  // se sincroniza.
+  it("no toca el espejo cuando un hermano no_required lleva abonos", async () => {
+    pagosActuales = [
+      { pagos_credito: parcialValidado, cuotas_credito: cuota18 },
+      {
+        pagos_credito: {
+          ...filaSembrada,
+          pago_id: 74539,
+          monto_aplicado: "705.88",
+          abono_interes: "60",
+          abono_iva_12: "7.20",
+          abono_capital: "638.68",
+        },
+        cuotas_credito: cuota18,
+      },
+      { pagos_credito: filaSembrada, cuotas_credito: cuota18 },
+    ];
+
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    const idsEscritos = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
+    expect(idsEscritos).toContain(74540);
+    expect(idsEscritos).not.toContain(156048);
+  });
 });
 
 describe("recalcularPagosCredito — capital validado de cuotas posteriores", () => {

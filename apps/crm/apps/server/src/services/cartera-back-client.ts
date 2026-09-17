@@ -193,6 +193,14 @@ const REPORTE_NO_LIQUIDADOS_TIMEOUT_MS = Number.parseInt(
 	process.env.CARTERA_BACK_REPORTE_TIMEOUT || "300000",
 );
 
+/**
+ * A partir de cuántos SIFCOs una consulta bulk deja de ir por query string y
+ * pasa a POST, para no armar una URL que el servidor rechace con 414. Umbral
+ * conservador: 50 SIFCOs * ~15 chars ≈ 750 bytes, muy por debajo de cualquier
+ * límite. Lo comparten getAllCreditos y getAsesorPorSifco.
+ */
+const SIFCO_LIST_POST_THRESHOLD = 50;
+
 // ============================================================================
 // ERROR TIPADO CON STATUS HTTP
 // ============================================================================
@@ -1453,10 +1461,6 @@ export class CarteraBackClient {
 	async getAllCreditos(
 		params: GetAllCreditsParams,
 	): Promise<PaginatedResponse<CreditoDetailResponse>> {
-		// Si la lista de SIFCOs es grande, usar POST para evitar URL too long
-		// (414). Threshold conservador: ~50 SIFCOs * 15 chars ≈ 750 bytes, muy
-		// por debajo de cualquier límite. Por arriba de eso, body en POST.
-		const SIFCO_LIST_POST_THRESHOLD = 50;
 		const useBulkPost =
 			!!params.numeros_credito_sifco &&
 			params.numeros_credito_sifco.length > SIFCO_LIST_POST_THRESHOLD;
@@ -2111,6 +2115,21 @@ export class CarteraBackClient {
 			throw new Error("getAsesorPorSifco admite máximo 1000 SIFCOs");
 		}
 		if (sifcos.length === 0) return { data: [] };
+
+		// Con lista larga va por POST para no armar una URL imposible (414):
+		// la exportación pide hasta 1000 SIFCOs de una vez y 1000 números de 14
+		// dígitos, con cada coma codificada como %2C, dan ~17 KB de query string
+		// contra un límite habitual de 8 KB. El 414 lo absorbe el catch de la
+		// bandeja y la columna Asesor saldría vacía en todo el reporte sin que
+		// nadie se entere. Mismo umbral y motivo que getAllCreditos.
+		if (sifcos.length > SIFCO_LIST_POST_THRESHOLD) {
+			return this.request<CarteraAsesorPorSifcoResponse>(
+				"/buckets/asesor-por-sifco",
+				{ method: "POST", body: JSON.stringify({ sifcos }) },
+				false,
+			);
+		}
+
 		const queryParams = new URLSearchParams({ sifcos: sifcos.join(",") });
 		return this.request<CarteraAsesorPorSifcoResponse>(
 			`/buckets/asesor-por-sifco?${queryParams}`,

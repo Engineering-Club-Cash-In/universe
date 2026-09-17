@@ -77,6 +77,29 @@ const NO_AUTORIZADO = {
   message: "[ERROR] No autorizado (requiere ADMIN o CONTA)",
 };
 
+/** Cuerpo compartido por el GET y el POST de /buckets/asesor-por-sifco. */
+const MAX_SIFCOS_ASESOR = 1000;
+async function resolverAsesorPorSifco(crudos: string[], set: { status: number }) {
+  const sifcos = [...new Set(crudos.map((s) => String(s).trim()).filter(Boolean))];
+  if (sifcos.length === 0 || sifcos.length > MAX_SIFCOS_ASESOR) {
+    set.status = 400;
+    return {
+      success: false,
+      message: `[ERROR] sifcos debe contener entre 1 y ${MAX_SIFCOS_ASESOR} valores`,
+    };
+  }
+  try {
+    return await getAsesorPorSifco({ sifcos });
+  } catch (err) {
+    set.status = 500;
+    return {
+      success: false,
+      message: "[ERROR] No se pudo obtener el asesor de los créditos",
+      error: String(err),
+    };
+  }
+}
+
 // ¿Algún token del CSV NO pasa la validación? Rechazar en vez de descartar en
 // silencio (review Codex): `?bucket_nuevo=abc` sin esto devolvía el historial
 // completo, y un tipo_evento inválido revienta en el cast al enum de PG (500).
@@ -328,37 +351,34 @@ export const bucketsRouter = new Elysia()
   // EL asesor dueño de cada crédito (creditos.asesor_id), en bulk. Contraparte
   // de /buckets/pool-asignaciones: aquel da el POOL de elegibles del bucket
   // (varios por crédito, "quién PUEDE atenderlo"); este da el único que lo
-  // lleva hoy. El tope es más alto porque lo consume la exportación de la
-  // supervisión Págalo, que pagina de a 1000 filas.
+  // lleva hoy.
+  //
+  // Dos verbos para el mismo dato: GET para listas cortas (una página de
+  // pantalla) y POST para las largas. La exportación de la supervisión Págalo
+  // pide hasta 1000 SIFCOs de una vez y esos no entran en una query string —
+  // 1000 números de 14 dígitos con las comas codificadas como %2C dan ~17 KB,
+  // sobre el límite de 8 KB de la mayoría de los servidores, y la respuesta
+  // sería un 414 que el CRM traga dejando la columna Asesor vacía. Mismo
+  // motivo y mismo patrón que getAllCreditos en el cliente del CRM.
   .get(
     "/buckets/asesor-por-sifco",
     async ({ query, set, user }: any) => {
       if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
-      const sifcos = [
-        ...new Set<string>(
-          String(query.sifcos)
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-        ),
-      ];
-      if (sifcos.length === 0 || sifcos.length > 1000) {
-        set.status = 400;
-        return { success: false, message: "[ERROR] sifcos debe contener entre 1 y 1000 valores" };
-      }
-      try {
-        return await getAsesorPorSifco({ sifcos });
-      } catch (err) {
-        set.status = 500;
-        return {
-          success: false,
-          message: "[ERROR] No se pudo obtener el asesor de los créditos",
-          error: String(err),
-        };
-      }
+      return resolverAsesorPorSifco(String(query.sifcos ?? "").split(","), set);
     },
     {
       query: t.Object({ sifcos: t.String() }),
+    },
+  )
+
+  .post(
+    "/buckets/asesor-por-sifco",
+    async ({ body, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      return resolverAsesorPorSifco(body?.sifcos ?? [], set);
+    },
+    {
+      body: t.Object({ sifcos: t.Array(t.String()) }),
     },
   )
 

@@ -10,7 +10,14 @@ const getPagaloSupervision = mock(
   }),
 );
 
-mock.module("../services/crm.service", () => ({ getPagaloSupervision }));
+// Se reexporta lo demás del módulo: `mock.module` lo reemplaza para todo el
+// proceso de test, y los suites que importan otras funciones de crm.service
+// (p. ej. reportes.test.ts con getVehiclesBySifcoMap) abortarían al cargar.
+const crmServiceReal = await import("../services/crm.service");
+mock.module("../services/crm.service", () => ({
+  ...crmServiceReal,
+  getPagaloSupervision,
+}));
 
 const { traerDatasetCompletoPagalo, LIMITE_EXPORT_PAGALO } = await import(
   "./pagaloSupervisionReporte"

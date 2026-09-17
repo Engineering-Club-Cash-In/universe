@@ -99,3 +99,54 @@ test("getAsignacionesPoolPorSifco envía una sola consulta bulk acotada a págin
 		{ numero_credito_sifco: "SIFCO-1", asesor_id: 7 },
 	]);
 });
+
+// Una lista larga por query string produce una URL de ~17 KB (1000 SIFCOs de 14
+// dígitos con las comas como %2C), sobre el límite de 8 KB de la mayoría de los
+// servidores. El 414 lo absorbe el catch de la bandeja, así que el síntoma no
+// sería un error sino la columna Asesor vacía en todo el reporte.
+test("getAsesorPorSifco usa POST con listas largas para no romper la URL", async () => {
+	let metodo = "";
+	let urlSolicitada = "";
+	let cuerpo: unknown = null;
+	const fetchDePrueba = (async (url: string, init?: RequestInit) => {
+		urlSolicitada = url;
+		metodo = init?.method ?? "GET";
+		cuerpo = init?.body ? JSON.parse(String(init.body)) : null;
+		return new Response(JSON.stringify({ success: true, data: [] }));
+	}) as unknown as typeof fetch;
+	const cliente = new CarteraBackClient({
+		baseUrl: "http://cartera-back.test",
+		enableCache: false,
+		accessTokenProvider: async () => "token-de-prueba",
+		fetchTransport: fetchDePrueba,
+	});
+	const sifcos = Array.from({ length: 300 }, (_, i) => `0101021410${i}`);
+
+	await cliente.getAsesorPorSifco({ sifcos });
+
+	expect(metodo).toBe("POST");
+	expect(urlSolicitada).not.toContain("?");
+	expect(urlSolicitada.length).toBeLessThan(200);
+	expect(cuerpo).toEqual({ sifcos });
+});
+
+test("getAsesorPorSifco mantiene GET con listas cortas", async () => {
+	let metodo = "";
+	let urlSolicitada = "";
+	const fetchDePrueba = (async (url: string, init?: RequestInit) => {
+		urlSolicitada = url;
+		metodo = init?.method ?? "GET";
+		return new Response(JSON.stringify({ success: true, data: [] }));
+	}) as unknown as typeof fetch;
+	const cliente = new CarteraBackClient({
+		baseUrl: "http://cartera-back.test",
+		enableCache: false,
+		accessTokenProvider: async () => "token-de-prueba",
+		fetchTransport: fetchDePrueba,
+	});
+
+	await cliente.getAsesorPorSifco({ sifcos: ["SIFCO-1", "SIFCO-2"] });
+
+	expect(metodo).toBe("GET");
+	expect(urlSolicitada).toContain("/buckets/asesor-por-sifco?sifcos=SIFCO-1%2CSIFCO-2");
+});

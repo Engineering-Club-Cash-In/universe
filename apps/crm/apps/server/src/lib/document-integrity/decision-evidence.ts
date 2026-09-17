@@ -64,6 +64,8 @@ export function buildDocumentRecommendedAction(params: {
 			? `Solicita un nuevo estado de cuenta que reemplace el contenido inválido de ${pages} y realiza una nueva validación documental.`
 			: "Solicita un nuevo estado de cuenta válido y realiza una nueva validación documental antes de continuar.";
 	}
+	if (result === "revision_manual" || result === "observacion")
+		return "Esta validación histórica requiere volver a cargar los documentos y realizar una nueva validación antes de continuar.";
 	const advice = ["Puedes continuar al análisis de capacidad de pago."];
 	const weightedPages = pageTextFor(
 		params.signals.filter((signal) => signal.weight > 0),

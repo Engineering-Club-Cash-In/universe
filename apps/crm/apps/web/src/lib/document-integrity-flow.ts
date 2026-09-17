@@ -37,7 +37,13 @@ export function hasCompleteIntegrityValidation(
 	);
 }
 
-const RESULT_PRIORITY: IntegrityResult[] = ["rechazado", "error", "valido"];
+const RESULT_PRIORITY: IntegrityResult[] = [
+	"rechazado",
+	"error",
+	"revision_manual",
+	"observacion",
+	"valido",
+];
 
 export function aggregateIntegrityResult(
 	results: Array<{ autoResult: IntegrityResult }>,

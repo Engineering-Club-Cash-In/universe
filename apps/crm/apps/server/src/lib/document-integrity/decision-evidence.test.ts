@@ -14,10 +14,18 @@ const cleanAiResponse = {
 };
 
 describe("document integrity decision evidence", () => {
+	test("los resultados histÃ³ricos exigen volver a validar", () => {
+		const action = buildDocumentRecommendedAction({
+			result: "revision_manual",
+			signals: [],
+		});
+		expect(action).toContain("volver a cargar los documentos");
+	});
+
 	test("una captura ilegible recomienda mejorar la captura, no reemplazar por documento inválido", () => {
 		expect(
 			buildDocumentRecommendedAction({
-				result: "revision_manual",
+				result: "valido",
 				signals: [
 					{
 						code: "captura_con_legibilidad_insuficiente",
@@ -72,7 +80,7 @@ describe("document integrity decision evidence", () => {
 	});
 	test("la recomendación distingue la página de captura informativa de la alerta con peso", () => {
 		const action = buildDocumentRecommendedAction({
-			result: "revision_manual",
+			result: "valido",
 			signals: [
 				{
 					code: "captura_impide_verificar_alineacion",
@@ -113,7 +121,7 @@ describe("document integrity decision evidence", () => {
 	});
 	test("recomienda verificar con el banco la ortografía y señala la página", () => {
 		const action = buildDocumentRecommendedAction({
-			result: "revision_manual",
+			result: "valido",
 			signals: [
 				{
 					code: "errores_ortograficos",
@@ -130,7 +138,7 @@ describe("document integrity decision evidence", () => {
 	test("recomienda actuar sobre las paginas con senales determinantes", () => {
 		expect(
 			buildDocumentRecommendedAction({
-				result: "revision_manual",
+				result: "valido",
 				signals: [
 					{
 						code: "titular_no_coincide_fuerte",

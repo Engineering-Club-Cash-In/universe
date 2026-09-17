@@ -110,7 +110,7 @@ describe("document integrity UI flow", () => {
 				{ autoResult: "revision_manual" },
 				{ autoResult: "observacion" },
 			]),
-		).toBe("valido");
+		).toBe("revision_manual");
 		expect(
 			aggregateIntegrityResult([
 				{ autoResult: "revision_manual" },

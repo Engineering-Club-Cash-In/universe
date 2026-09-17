@@ -1304,7 +1304,7 @@ async function assertUploadedBankStatementsValidatedWithTransaction(
 	if (legacyValidationCount > 0) {
 		throw new DocumentIntegrityError(
 			"BAD_REQUEST",
-			"Estos documentos tienen una validaciÃ³n histÃ³rica que requiere volver a validar antes de analizar la capacidad de pago.",
+			"Estos documentos tienen una validación histórica que requiere volver a validar antes de analizar la capacidad de pago.",
 		);
 	}
 	const rejectedDocumentCount = getRejectedDocumentCount(validations);

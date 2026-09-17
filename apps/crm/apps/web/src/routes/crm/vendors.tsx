@@ -11,7 +11,7 @@ import {
 	User,
 	X,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -191,15 +191,42 @@ function VendorsPage() {
 		resolver: zodResolver(vendorSchema),
 	});
 
-	// DPI → RENAP: autollena nombre y género (solo persona individual)
-	const createLookup = useVendorDpiLookup((result) => {
-		if (result.nombre) createForm.setValue("name", result.nombre);
-		if (result.genero) createForm.setValue("gender", result.genero);
-	});
-	const editLookup = useVendorDpiLookup((result) => {
-		if (result.nombre) editForm.setValue("name", result.nombre);
-		if (result.genero) editForm.setValue("gender", result.genero);
-	});
+	// DPI → RENAP: autollena nombre y género (solo persona individual).
+	// La identidad sigue al DPI: se recuerda de qué DPI salieron el nombre y el
+	// género, y si el DPI cambia se limpian para no guardar a una persona con
+	// el DPI de otra.
+	const createDatosDe = useRef<string | null>(null);
+	const editDatosDe = useRef<string | null>(null);
+
+	const aplicarLookup =
+		(form: typeof createForm, datosDe: typeof createDatosDe) =>
+		(result: { dpi: string; nombre: string | null; genero: "male" | "female" | null }) => {
+			if (result.nombre || result.genero) datosDe.current = result.dpi;
+			if (result.nombre) form.setValue("name", result.nombre);
+			if (result.genero) form.setValue("gender", result.genero);
+		};
+	const createLookup = useVendorDpiLookup(
+		aplicarLookup(createForm, createDatosDe),
+	);
+	const editLookup = useVendorDpiLookup(aplicarLookup(editForm, editDatosDe));
+
+	const onDpiChange = (
+		dpi: string,
+		form: typeof createForm,
+		datosDe: typeof createDatosDe,
+		lookup: typeof createLookup,
+	) => {
+		lookup.dpiEditado(dpi);
+		const limpio = soloDigitosDpi(dpi);
+		if (datosDe.current && datosDe.current !== limpio) {
+			datosDe.current = null;
+			form.setValue("name", "");
+			form.setValue("gender", undefined);
+		}
+		if (form.getValues("vendorType") === "individual" && limpio.length === 13) {
+			lookup.buscar(dpi);
+		}
+	};
 
 	// Filter vendors
 	const filteredVendors = vendorsQuery.data?.filter((vendor: any) => {
@@ -228,6 +255,9 @@ function VendorsPage() {
 			address: vendor.address || "",
 			gender: vendor.gender ?? undefined,
 		});
+		// El nombre y género guardados son de este DPI
+		editDatosDe.current =
+			vendor.vendorType === "individual" ? soloDigitosDpi(vendor.dpi) : null;
 		setIsEditOpen(true);
 	};
 
@@ -235,11 +265,14 @@ function VendorsPage() {
 		setVendorToDelete(id);
 	};
 
+	// No se guarda mientras se consulta el DPI: los datos podrían ser de otro
 	const onCreateSubmit = (data: VendorFormData) => {
+		if (createLookup.isPending) return;
 		createVendorMutation.mutate(data);
 	};
 
 	const onEditSubmit = (data: VendorFormData) => {
+		if (editLookup.isPending) return;
 		if (selectedVendor) {
 			updateVendorMutation.mutate({ id: selectedVendor.id, data });
 		}
@@ -317,13 +350,12 @@ function VendorsPage() {
 															{...field}
 															onChange={(e) => {
 																field.onChange(e);
-																createLookup.dpiEditado(e.target.value);
-																if (
-																	createForm.getValues("vendorType") === "individual" &&
-																	soloDigitosDpi(e.target.value).length === 13
-																) {
-																	createLookup.buscar(e.target.value);
-																}
+																onDpiChange(
+																	e.target.value,
+																	createForm,
+																	createDatosDe,
+																	createLookup,
+																);
 															}}
 														/>
 													</FormControl>
@@ -441,7 +473,9 @@ function VendorsPage() {
 								<DialogFooter>
 									<Button
 										type="submit"
-										disabled={createVendorMutation.isPending}
+										disabled={
+											createVendorMutation.isPending || createLookup.isPending
+										}
 									>
 										{createVendorMutation.isPending
 											? "Creando..."
@@ -652,13 +686,12 @@ function VendorsPage() {
 															{...field}
 															onChange={(e) => {
 																field.onChange(e);
-																editLookup.dpiEditado(e.target.value);
-																if (
-																	editForm.getValues("vendorType") === "individual" &&
-																	soloDigitosDpi(e.target.value).length === 13
-																) {
-																	editLookup.buscar(e.target.value);
-																}
+																onDpiChange(
+																	e.target.value,
+																	editForm,
+																	editDatosDe,
+																	editLookup,
+																);
 															}}
 														/>
 													</FormControl>
@@ -776,7 +809,9 @@ function VendorsPage() {
 								<DialogFooter>
 									<Button
 										type="submit"
-										disabled={updateVendorMutation.isPending}
+										disabled={
+											updateVendorMutation.isPending || editLookup.isPending
+										}
 									>
 										{updateVendorMutation.isPending
 											? "Guardando..."

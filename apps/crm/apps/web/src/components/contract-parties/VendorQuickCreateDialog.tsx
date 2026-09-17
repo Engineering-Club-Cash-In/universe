@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,10 +57,15 @@ export function VendorQuickCreateDialog({
 		dpi: string;
 	} | null>(null);
 
+	// DPI del que salieron el nombre y el género en pantalla (null si se
+	// escribieron a mano). La identidad sigue al DPI: si cambia, se limpia.
+	const datosDe = useRef<string | null>(null);
+
 	const lookup = useVendorDpiLookup((result) => {
 		setExistente(
 			result.vendorId ? { id: result.vendorId, dpi: result.dpi } : null,
 		);
+		if (result.nombre || result.genero) datosDe.current = result.dpi;
 		if (result.nombre) setNombre(result.nombre);
 		if (result.genero) setGenero(result.genero);
 	});
@@ -73,6 +78,7 @@ export function VendorQuickCreateDialog({
 		setGenero("");
 		setTelefono("");
 		setExistente(null);
+		datosDe.current = null;
 		if (initialDpi) lookup.buscar(initialDpi, { force: true });
 	}, [open]);
 
@@ -145,9 +151,17 @@ export function VendorQuickCreateDialog({
 								onChange={(e) => {
 									const nuevo = e.target.value;
 									setDpi(nuevo);
-									// Otro DPI es otra persona: se descartan los datos traídos
-									if (lookup.dpiEditado(nuevo) && existente) {
+									lookup.dpiEditado(nuevo);
+									// Otro DPI es otra persona: se descartan los datos traídos,
+									// vengan del vendedor registrado o de RENAP
+									if (existente && existente.dpi !== soloDigitosDpi(nuevo)) {
 										setExistente(null);
+									}
+									if (
+										datosDe.current &&
+										datosDe.current !== soloDigitosDpi(nuevo)
+									) {
+										datosDe.current = null;
 										setNombre("");
 										setGenero("");
 									}

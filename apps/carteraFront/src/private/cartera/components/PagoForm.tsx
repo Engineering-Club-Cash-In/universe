@@ -6,6 +6,7 @@ import { formatFieldErrors } from "@/lib/formErrors";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { escalonesQueConsumenLaBoleta } from "./escalonesQueConsumenLaBoleta";
 import { DollarSign, Info, FileText, Building2, CheckCircle2, ChevronsUpDown, Check } from "lucide-react";
 import { Combobox, Transition } from "@headlessui/react";
 import { Fragment, useMemo } from "react";
@@ -343,13 +344,18 @@ export function PagoForm() {
         // aparte que compite con la cuota por la plata). El CONVENIO no está en
         // la lista: se registra pero no consume (ver el escalón 4), así que
         // culparlo del faltante era acusar a quien no se llevó nada.
-        const causasCobroCorto = [
+        //
+        // La lista sale del módulo compartido porque el aviso de "Abonar todo a
+        // Capital" —más abajo— necesita EXACTAMENTE la misma: lo que consume la
+        // boleta antes de la cuota es lo mismo que esa opción deja sin cobrar.
+        // Teniéndola dos veces terminarían contradiciéndose.
+        const consumo = escalonesQueConsumenLaBoleta([
           { etiqueta: "otros", monto: montoOtrosAplicado },
           { etiqueta: "mora", monto: montoMoraAplicado },
           { etiqueta: "rubros", monto: montoRubrosAplicado },
-        ].filter((c) => c.monto > 0.005);
+        ]);
 
-        const textoCausas = causasCobroCorto
+        const textoCausas = consumo.escalones
           .map((c) => `Q${c.monto.toFixed(2)} a ${c.etiqueta}`)
           .reduce(
             (acc, txt, i, arr) =>
@@ -361,7 +367,7 @@ export function PagoForm() {
         // abono parcial "pelado" (boleta menor a la cuota, sin nada más de por
         // medio) se sigue mostrando sin aviso, igual que hoy.
         const cuotaQuedaCorta =
-          causasCobroCorto.length > 0 &&
+          consumo.hayConsumo &&
           cuotaNormal > 0 &&
           montoCuotaAplicado < cuotaNormal - 0.005;
 
@@ -512,6 +518,35 @@ export function PagoForm() {
     </span>
   </div>
 </div>
+
+{/* "Abonar todo a Capital" —el botón verde de acá abajo— NO aplica el desglose
+    de arriba: manda la boleta entera a `abono_directo_capital`, y el backend
+    arranca la cascada con `boleta − otros − abono directo`, que en ese caso da
+    cero. El asesor terminaba de leer un desglose que decía "3. Rubros Q300" y
+    tenía justo debajo un botón que los dejaba en Q0, sin nada que se lo dijera.
+
+    Duele sobre todo con los rubros: son deuda del cliente que queda pendiente
+    igual. El que cobró Q1,000 incluyendo Q300 de tarjeta de circulación manda
+    los Q1,000 a capital y el cliente sigue debiendo la tarjeta. No se pierde
+    plata, pero queda aplicada donde nadie la mandó.
+
+    Se avisa en vez de bloquear: el abono directo a capital es una operación
+    legítima y un rubro puede quedar pendiente mucho tiempo. Lo que no puede
+    pasar es que el asesor elija a ciegas. */}
+{permiteAbonoCapital &&
+  !(cuotasAtrasadasInfo && cuotasAtrasadasInfo.total > 0) &&
+  consumo.hayConsumo && (
+    <div className="mt-3 rounded-lg border-2 border-amber-300 bg-amber-50 p-3">
+      <p className="text-sm font-bold text-amber-900">
+        "Abonar todo a Capital" no aplica este desglose
+      </p>
+      <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+        Esa opción manda los Q{Number(montoBoleta).toFixed(2)} completos a reducir
+        capital: no se cobra {textoCausas} —Q{consumo.total.toFixed(2)} en total— y
+        la cuota queda sin abono. Lo que no se cobre sigue pendiente.
+      </p>
+    </div>
+  )}
           </div>
         );
       })()

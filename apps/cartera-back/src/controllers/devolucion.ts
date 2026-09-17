@@ -2,7 +2,10 @@ import { db } from "../database";
 import { creditos, historial_devolucion_credito, usuarios } from "../database/db/schema";
 import { eq, desc, sql, and, or, ilike, inArray } from "drizzle-orm";
 import { registrarCancelacionEspejo } from "./abonosCapital";
-import { filtrarCreditosTotalmenteDevueltos } from "../utils/devolucionCompletada";
+import {
+  filtrarCreditosTotalmenteDevueltos,
+  marcarDevolucionCompletadaSiCorresponde,
+} from "../utils/devolucionCompletada";
 
 export async function listPendingDevolucion({ query, set }: any) {
   try {
@@ -137,7 +140,14 @@ export async function listPendingDevolucion({ query, set }: any) {
   }
 }
 
-export async function aceptarDevolucion({ params, set }: any) {
+export type AceptarDevolucionDeps = {
+  marcarDevolucionCompletadaSiCorresponde?: typeof marcarDevolucionCompletadaSiCorresponde;
+};
+
+export async function aceptarDevolucion(
+  { params, set }: any,
+  deps: AceptarDevolucionDeps = {}
+) {
   try {
     const { id: credito_id } = params;
     const credito_id_num = parseInt(credito_id);
@@ -199,6 +209,21 @@ export async function aceptarDevolucion({ params, set }: any) {
       // 3. Registrar la cancelación de capital: una fila por inversionista del espejo
       return await registrarCancelacionEspejo(tx, credito_id_num);
     });
+
+    // 4. Si el crédito ya no tiene inversionistas externos pendientes (p. ej. en el espejo
+    //    solo queda CUBE o ningún inversionista con saldo), cerrar la devolución a COMPLETADO
+    //    inmediatamente. De lo contrario, quedaría en VERIFICADO indefinidamente ya que no
+    //    habrá pagos ni salidas manuales de inversionistas externos que invoquen el cierre.
+    const marcarFn =
+      deps.marcarDevolucionCompletadaSiCorresponde ?? marcarDevolucionCompletadaSiCorresponde;
+    try {
+      await marcarFn([credito_id_num], "aceptacion devolucion");
+    } catch (cierreError) {
+      console.error(
+        "  ⚠️  Error cerrando la devolución tras aceptarDevolucion:",
+        cierreError
+      );
+    }
 
     return {
       success: true,

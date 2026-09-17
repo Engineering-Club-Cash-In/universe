@@ -706,10 +706,15 @@ describe("document integrity ruleset", () => {
 		);
 	});
 
-	test("una inspección incompleta nunca produce válido", () => {
+	test("un PDF protegido se rechaza y los errores técnicos son reintentables", () => {
+		expect(
+			applyRuleset({
+				signals: [makeSignal("pdf_protegido_no_abre", 0, "alta", "estructura")],
+			}).result,
+		).toBe("rechazado");
+
 		for (const code of [
 			"ia_no_disponible",
-			"pdf_protegido_no_abre",
 			"inspeccion_tecnica_incompleta",
 		]) {
 			expect(

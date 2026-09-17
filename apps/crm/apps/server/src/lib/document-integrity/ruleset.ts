@@ -168,12 +168,21 @@ export function applyRuleset(params: {
 		};
 	}
 
+	if (signals.some((signal) => signal.code === "pdf_protegido_no_abre")) {
+		return {
+			result: "rechazado",
+			score: 0,
+			reason:
+				"El PDF está protegido y no se puede inspeccionar. Solicita una copia sin contraseña ni protección.",
+			signals,
+		};
+	}
+
 	if (
 		!llm ||
 		signals.some((signal) =>
 			[
 				"ia_no_disponible",
-				"pdf_protegido_no_abre",
 				"inspeccion_tecnica_incompleta",
 			].includes(signal.code),
 		)

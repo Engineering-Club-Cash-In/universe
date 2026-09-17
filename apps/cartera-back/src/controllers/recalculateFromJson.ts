@@ -1,5 +1,6 @@
 import {
   excluirTraspasosSinBorrar,
+  poolsConTraspasoRechazado,
   type EntradaPool,
 } from "./poolsTraspasos";
 import Big from "big.js";
@@ -646,6 +647,21 @@ export async function processPoolsRaros(
     resultadoEliminacion?.detalles ?? null
   );
 
+  /**
+   * Y los pools que NO pueden tocar el plan de pagos, por el mismo motivo.
+   *
+   * El filtro de arriba cubre el recálculo de capital, pero el paso de cuotas de
+   * más abajo recorre `pools` —la lista ORIGINAL— y le marca cuotas pagadas y le
+   * sobrescribe el monto al crédito principal con el `numeroCuota` y la `cuota`
+   * del pool, que asumen que los traspasos entraron. Filtrar sólo el capital
+   * dejaba esa mitad abierta: el censo de quién consume `pools` da exactamente
+   * dos lugares, y éste era el segundo.
+   */
+  const poolsSinTocarCuotas = poolsConTraspasoRechazado(
+    poolsMarcados,
+    resultadoEliminacion?.detalles ?? null
+  );
+
   const resultadoRecalculo = await recalcularCreditosDesdeJson(
     creditosParaRecalcular,
     {
@@ -723,6 +739,7 @@ export async function processPoolsRaros(
   let cuotasError = 0;
   let cuotasRecalculadas = 0;
   let cuotasRecalculoError = 0;
+  let cuotasSalteadasPorRubros = 0;
 
   for (const pool of pools) {
     const numeroBasePool = pool.numeroCredito.split("_")[0];
@@ -734,6 +751,15 @@ export async function processPoolsRaros(
     const cuotaCredito = datosUltimoPago?.cuota ?? 0;
 
     if (numeroCuota <= 0) continue;
+
+      // El plan de pagos NO se toca si alguno de los traspasos de este pool no
+      // se borró: `numeroCuota` y `cuotaCredito` describen un pool que absorbió
+      // TODO su capital, y acá eso no pasó. Marcarle cuotas pagadas al principal
+      // con esa foto es peor que no marcarle ninguna.
+      if (poolsSinTocarCuotas.has(numeroBasePool)) {
+        cuotasSalteadasPorRubros++;
+        continue;
+      }
 
     try {
       await marcarCuotasPagadasHastaNumero({
@@ -790,7 +816,17 @@ export async function processPoolsRaros(
     success: resultadoRecalculo.success || (resultadoEliminacion?.success ?? false),
     recalculo: resultadoRecalculo,
     eliminacion: resultadoEliminacion,
-    cuotas: { marcadas: cuotasMarcadas, recalculadas: cuotasRecalculadas, errores: cuotasError },
+    cuotas: {
+      marcadas: cuotasMarcadas,
+      recalculadas: cuotasRecalculadas,
+      errores: cuotasError,
+      // Sale en el resultado, no sólo en un contador: un pool que se salteó
+      // queda a medio aplicar —capital recalculado sin sus traspasos rechazados,
+      // plan de pagos sin tocar— y el operador tiene que saber que le falta una
+      // pasada después de anular el rubro. Un salteo silencioso se lee como
+      // "salió todo bien".
+      salteadas_por_rubros: cuotasSalteadasPorRubros,
+    },
   };
 }
 

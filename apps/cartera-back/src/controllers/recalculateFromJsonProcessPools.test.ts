@@ -4,6 +4,8 @@ import { createCarteraStructuredLogger } from "../utils/structuredLogger";
 let selectResults: unknown[][] = [];
 let deleteCalls = 0;
 let quotaPersistenceMode: "success" | "persisted_then_failed" | "noop_then_failed" = "success";
+/** Cuántas veces se intentó tocar el plan de pagos del crédito principal. */
+let marcarCuotasCalls = 0;
 
 const dbMock = {
   select: mock(() => ({
@@ -40,6 +42,7 @@ mock.module("./updateCredit", () => ({
 }));
 mock.module("./migratePayments", () => ({
   marcarCuotasPagadasHastaNumero: mock(async (input: { onPersisted?: () => void }) => {
+    marcarCuotasCalls += 1;
     if (quotaPersistenceMode === "persisted_then_failed") input.onPersisted?.();
     if (quotaPersistenceMode !== "success") throw new Error("schedule update failed");
   }),
@@ -55,6 +58,7 @@ beforeEach(() => {
   ];
   deleteCalls = 0;
   quotaPersistenceMode = "success";
+  marcarCuotasCalls = 0;
 });
 
 test("process pools normal return retains nested persistence evidence after a later nested failure", async () => {
@@ -195,4 +199,39 @@ test("un traspaso cuyo borrado rechaza el guard de rubros NO se recalcula", asyn
   // traspaso, y se excluyó. Sin el filtro, acá llegaría 1 y el capital quedaría
   // duplicado.
   expect(result.recalculo).toMatchObject({ total: 0, exitosos: 0 });
+});
+
+test("un pool con traspaso rechazado tampoco toca el plan de pagos", async () => {
+  // `/pools-raros` tiene DOS pasos que consumen la lista de pools, y el arreglo
+  // anterior sólo cubrió el primero: el recálculo de capital. El segundo recorre
+  // los pools y le marca cuotas pagadas y le sobrescribe el monto al crédito
+  // PRINCIPAL con el `numeroCuota` y la `cuota` del pool — datos que asumen que
+  // los traspasos entraron. Con uno rechazado, ese paso aplicaba una foto que no
+  // ocurrió mientras el capital seguía en el crédito origen, que quedó vivo.
+  //
+  // El test anterior no lo cubría porque su pool traía `numeroCuota: "0"` y el
+  // loop sale antes con su propio `continue`. Acá va en 3 para que llegue al
+  // guard: sin el filtro, `marcarCuotasPagadasHastaNumero` se llama.
+  selectResults = [
+    [{ credito_id: 77 }],
+    [{ rubro_id: 1, descripcion: "GPS" }],
+  ];
+
+  const result = await processPoolsRaros([{
+    nombre: "pool",
+    numeroCredito: "POOL_1",
+    numeroCuota: "3",
+    creditos: [{
+      numeroCredito: "DELETE_1",
+      inversionista: "Investor",
+      capitalRestante: "100",
+    }],
+  }], { startedAt: Date.now() });
+
+  expect(result.eliminacion).toMatchObject({ exitosos: 0, errores: 1 });
+  // El plan de pagos NO se tocó...
+  expect(marcarCuotasCalls).toBe(0);
+  // ...y el salteo SALE en el resultado, no se pierde en un contador: un pool a
+  // medio aplicar leído como "todo bien" es peor que el defecto.
+  expect(result.cuotas).toMatchObject({ marcadas: 0, salteadas_por_rubros: 1 });
 });

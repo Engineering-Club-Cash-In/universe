@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-	calcularRegeneracionCotizacionFechaIdeal,
 	aplicarDeltaMontosInversionistas,
+	calcularFinanciamientoFechaIdeal,
+	calcularRegeneracionCotizacionFechaIdeal,
 } from "./fecha-ideal-cotizacion";
 
 const cotizacionBase = {
@@ -13,6 +14,45 @@ const cotizacionBase = {
 	insuranceCost: 842.95,
 	gpsCost: 148.2,
 };
+
+describe("calcularFinanciamientoFechaIdeal", () => {
+	test("regenera un caso IA legado y conserva las aportaciones base", () => {
+		const resultado = calcularFinanciamientoFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 2,
+			fechaReferencia: new Date("2026-09-16T12:00:00.000Z"),
+			membershipCost: 722.58,
+			investors: [
+				{ monto_aportado: 60000, porcentaje_participacion: 50 },
+				{ monto_aportado: 26995.15, porcentaje_participacion: 50 },
+			],
+			quotation: {
+				adminCost: 7145.15,
+				totalFinanced: 86995.15,
+				extraAdminCost: 600,
+				interestRate: 1.5,
+				termMonths: 60,
+				insuranceCost: 268.56,
+				gpsCost: 0,
+				idealPaymentDateAdjustment: 0,
+			},
+		});
+
+		expect(resultado.adjustment).toMatchObject({
+			diasDiferencia: 18,
+			montoTotal: 1424.12,
+		});
+		expect(resultado.regenerated).toMatchObject({
+			adminCost: 8569.27,
+			totalFinanced: 88419.27,
+			extraAdminCost: 2024.12,
+			delta: 1424.12,
+		});
+		expect(
+			resultado.investors.map(({ monto_aportado }) => monto_aportado),
+		).toEqual([60712.06, 27707.21]);
+	});
+});
 
 describe("calcularRegeneracionCotizacionFechaIdeal", () => {
 	test("financia el proporcional sin cambiar el líquido del desembolso", () => {
@@ -124,8 +164,7 @@ describe("aplicarDeltaMontosInversionistas", () => {
 		);
 
 		expect(resultado.map(({ monto_aportado }) => monto_aportado)).toEqual([
-			60000,
-			40000,
+			60000, 40000,
 		]);
 	});
 });

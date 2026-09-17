@@ -297,6 +297,10 @@ export default function RubrosCredito({
   const volver = () => {
     setVista("lista");
     setRubroSel(null);
+    // También el tipo: hoy no cambia nada porque la vista se desmonta, pero
+    // dejar la mitad de la selección viva es la clase de asimetría que después
+    // alimenta un `key` que falta.
+    setTipoSel(null);
   };
 
   /**
@@ -445,7 +449,7 @@ export default function RubrosCredito({
               volver();
             }}
           />
-        ) : vista === "editar" && rubroSel ? (
+        ) : vista === "editar" && esAdmin && rubroSel ? (
           // `key` por rubro: los campos de `VistaEditar` se inicializan desde
           // las props, así que sin remontar, cambiar de rubro con la vista ya
           // montada dejaría el monto y la descripción del rubro ANTERIOR en el
@@ -496,6 +500,12 @@ export default function RubrosCredito({
           />
         ) : vista === "editarTipo" && esAdmin && tipoSel ? (
           <VistaEditarTipo
+            // `key` por tipo, igual que `VistaEditar` y `VistaAnular`: los campos
+            // se inicializan desde las props, así que sin remontar, cambiar de
+            // tipo con la vista ya montada dejaría el nombre y la descripción del
+            // ANTERIOR en el formulario. Hoy lo evita que el único camino acá
+            // pase por el listado; eso es un invariante frágil, no una garantía.
+            key={tipoSel.tipo_id}
             onGuardando={setGuardando}
             tipo={tipoSel}
             onVolver={() => setVista("tipos")}
@@ -851,7 +861,7 @@ function VistaCrear({
                 type="button"
                 onClick={onAdministrarTipos}
                 disabled={crear.isPending}
-                className="flex items-center gap-1 text-xs font-semibold text-gray-600 hover:underline"
+                className="flex items-center gap-1 text-xs font-semibold text-gray-600 disabled:opacity-50 disabled:pointer-events-none hover:underline"
               >
                 <Settings2 className="w-3.5 h-3.5" />
                 Administrar tipos
@@ -877,6 +887,7 @@ function VistaCrear({
         ) : (
           <>
             <select
+              disabled={crear.isPending}
               className={CLASE_SELECT}
               value={tipoId}
               onChange={(e) => campo("tipoId")(e.target.value)}
@@ -910,6 +921,7 @@ function VistaCrear({
           Monto
         </Label>
         <Input
+          disabled={crear.isPending}
           id="rubro-monto"
           type="number"
           min="0"
@@ -925,6 +937,7 @@ function VistaCrear({
           Descripción
         </Label>
         <Input
+          disabled={crear.isPending}
           id="rubro-desc"
           value={descripcion}
           onChange={(e) => campo("descripcion")(e.target.value)}
@@ -1040,6 +1053,7 @@ function VistaEditar({
           Monto
         </Label>
         <Input
+          disabled={editar.isPending}
           id="edit-monto"
           type="number"
           min="0"
@@ -1054,6 +1068,7 @@ function VistaEditar({
           Descripción
         </Label>
         <Input
+          disabled={editar.isPending}
           id="edit-desc"
           value={descripcion}
           onChange={(e) => setDescripcion(e.target.value)}
@@ -1065,6 +1080,7 @@ function VistaEditar({
           Motivo <span className="text-red-600" aria-hidden="true">*</span>
         </Label>
         <Input
+          disabled={editar.isPending}
           id="edit-motivo"
           value={motivo}
           onChange={(e) => setMotivo(e.target.value)}
@@ -1213,6 +1229,7 @@ function VistaAnular({
           Motivo <span className="text-red-600" aria-hidden="true">*</span>
         </Label>
         <Input
+          disabled={anular.isPending}
           id="anular-motivo"
           value={motivo}
           onChange={(e) => setMotivo(e.target.value)}
@@ -1343,6 +1360,7 @@ function VistaCrearTipo({
           Nombre
         </Label>
         <Input
+          disabled={crear.isPending}
           id="tipo-nombre"
           value={nombre}
           onChange={(e) => setNombre(e.target.value)}
@@ -1355,6 +1373,7 @@ function VistaCrearTipo({
           Descripción <span className="text-gray-400 font-normal">(opcional)</span>
         </Label>
         <Input
+          disabled={crear.isPending}
           id="tipo-desc"
           value={descripcion}
           onChange={(e) => setDescripcion(e.target.value)}
@@ -1364,6 +1383,7 @@ function VistaCrearTipo({
       <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
         <input
           type="checkbox"
+            disabled={crear.isPending}
           className="h-4 w-4 accent-purple-600"
           checked={obligatorio}
           onChange={(e) => setObligatorio(e.target.checked)}
@@ -1893,6 +1913,7 @@ function VistaEditarTipo({
           Nombre
         </Label>
         <Input
+          disabled={guardar.isPending}
           id="edit-tipo-nombre"
           value={nombre}
           onChange={(e) => setNombre(e.target.value)}
@@ -1904,6 +1925,7 @@ function VistaEditarTipo({
           Descripción <span className="text-gray-400 font-normal">(opcional)</span>
         </Label>
         <Input
+          disabled={guardar.isPending}
           id="edit-tipo-desc"
           value={descripcion}
           onChange={(e) => setDescripcion(e.target.value)}
@@ -1913,6 +1935,7 @@ function VistaEditarTipo({
       <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
         <input
           type="checkbox"
+            disabled={guardar.isPending}
           className="h-4 w-4 accent-purple-600"
           checked={obligatorio}
           onChange={(e) => setObligatorio(e.target.checked)}

@@ -3,6 +3,7 @@ import {
   getAjusteFechaIdealADeducir,
   recomputeCreditAfterCapital,
   shouldIncobrableInstallmentBePaid,
+  resolverCuotaParaFilaSuelta,
 } from "./registerPaymentPolicy";
 import * as registerPaymentPolicy from "./registerPaymentPolicy";
 
@@ -1660,5 +1661,101 @@ describe("esReciboSaldado vía filtrar — pagos exactos por la vía stale-zero"
       }),
     ];
     expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A QUÉ CUOTA se cuelga una fila de pago que el loop de cuotas no escribió.
+//
+// Dos rutas crean filas así: el abono directo a capital y la "fila-rastro" que
+// necesita una boleta cuando el cobro de rubros o el registro del convenio no
+// alcanzaron a estamparse en ninguna fila de cuota.
+//
+// El 0 NO es una respuesta válida, y es todo el punto de esta función.
+// `insertarPago` trata el `cuotaId` 0 como "sin filtro de cuota": el left join
+// pierde su predicado, queda ordenado por `pago_id` y hereda el `cuota_id` del
+// pago MÁS VIEJO del crédito — que es la fila estructural de la cuota 0, porque
+// `insertPayments` la inserta primera. A partir de ahí la fila-rastro pasa a ser
+// tratada como la cuota inicial:
+//
+//   * `updateInitialQuotaOtros` PISA `otros` en todas las filas de la cuota 0,
+//     así que borra el cargo del rubro —o lo infla con los gastos del crédito—
+//     sin tocar `rubros_pagos`. El saldo del rubro queda descontado, el reclamo
+//     dice que se cobró, y el pago no muestra el cobro: es la única huella del
+//     cargo dentro de la boleta y de la factura;
+//   * revertir esa fila recalcula la cuota 0 como NO pagada, porque la fila
+//     estructural nace `no_required` y no suma. Y una vez en `pagado = false`
+//     con boleta y aplicado en cero, la fila cae en el predicado de
+//     `shouldRemoveSameInstallmentPaymentOnReverse`: la reversa siguiente la
+//     BORRA — y es el ancla que sostiene a un crédito CAIDO.
+//
+// Por eso devuelve `null` en vez de 0 cuando no hay dónde colgarla, y el
+// llamador tira. Una boleta con plata que no encuentra cuota tiene que fallar
+// ruidosa, no inventarse una asociación.
+//
+// Colgarla de una cuota pagada de verdad es seguro para la reversa, y ahí está
+// la diferencia con la cuota 0: esa cuota tiene un pago `validated` detrás que
+// suma, así que `shouldInstallmentRemainPaidAfterReversal` la deja pagada.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("resolverCuotaParaFilaSuelta", () => {
+  it("prefiere la última cuota PAGADA", () => {
+    expect(
+      resolverCuotaParaFilaSuelta({
+        ultimaCuotaPagada: { cuota_id: 55 },
+        primeraPendiente: { cuota_id: 70 },
+        cuotaReferenciaCapital: { cuota_id: 88 },
+      })
+    ).toBe(55);
+  });
+
+  it("si no hay pagada, la primera pendiente", () => {
+    expect(
+      resolverCuotaParaFilaSuelta({
+        ultimaCuotaPagada: null,
+        primeraPendiente: { cuota_id: 70 },
+        cuotaReferenciaCapital: { cuota_id: 88 },
+      })
+    ).toBe(70);
+  });
+
+  it("y si tampoco, la de referencia (INCOBRABLE con todas cubiertas)", () => {
+    // La lista filtrada viene vacía y no hay ninguna cuota pagada con
+    // `numero_cuota > 0`: el pago se cuelga de la cuota cubierta.
+    expect(
+      resolverCuotaParaFilaSuelta({
+        ultimaCuotaPagada: null,
+        primeraPendiente: null,
+        cuotaReferenciaCapital: { cuota_id: 88 },
+      })
+    ).toBe(88);
+  });
+
+  it("🔴 sin ninguna devuelve null, NUNCA 0", () => {
+    // El 0 es lo que hace que `insertarPago` herede la cuota 0 y que el cargo
+    // termine a merced de `updateInitialQuotaOtros` y de la reversa.
+    expect(
+      resolverCuotaParaFilaSuelta({
+        ultimaCuotaPagada: null,
+        primeraPendiente: null,
+        cuotaReferenciaCapital: null,
+      })
+    ).toBeNull();
+  });
+
+  it("un cuota_id 0 explícito tampoco pasa", () => {
+    // Defensa por si alguna consulta devuelve la cuota inicial: el 0 no es una
+    // cuota donde colgar plata, es el agujero.
+    expect(
+      resolverCuotaParaFilaSuelta({
+        ultimaCuotaPagada: { cuota_id: 0 },
+        primeraPendiente: { cuota_id: 70 },
+        cuotaReferenciaCapital: null,
+      })
+    ).toBe(70);
+  });
+
+  it("tolera undefined, no sólo null", () => {
+    expect(resolverCuotaParaFilaSuelta({})).toBeNull();
   });
 });

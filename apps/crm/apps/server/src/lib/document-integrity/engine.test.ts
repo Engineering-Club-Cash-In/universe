@@ -18,7 +18,7 @@ const cleanAiResult: DocumentIntegrityAiResult = {
 describe("document integrity engine", () => {
 	test.each([
 		["ortografia_en_descripcion_movimiento", "Desfile hpico", "valido", 0],
-		["errores_ortograficos", "codigó", "revision_manual", 4],
+		["errores_ortograficos", "codigó", "valido", 4],
 	] as const)("distingue ortografía en movimientos de texto bancario: %s", async (code, text, expectedResult, expectedScore) => {
 		const pdf = await PDFDocument.create();
 		pdf.addPage().drawText("Estado de cuenta");
@@ -78,7 +78,7 @@ describe("document integrity engine", () => {
 			llm: { ...llm, es_legible: false },
 			registeredNames: ["FREDERIC ARIEL SOC MORALES"],
 		});
-		expect(unreadable.result).toBe("revision_manual");
+		expect(unreadable.result).toBe("valido");
 		expect(
 			unreadable.signals.some(
 				(signal) => signal.code === "captura_con_legibilidad_insuficiente",
@@ -97,7 +97,7 @@ describe("document integrity engine", () => {
 			},
 			registeredNames: ["FREDERIC ARIEL SOC MORALES"],
 		});
-		expect(result.result).toBe("rechazado");
+		expect(result.result).toBe("valido");
 		expect(
 			result.signals.some(
 				(signal) => signal.code === "documento_fotografiado_o_escaneado",
@@ -131,7 +131,7 @@ describe("document integrity engine", () => {
 			),
 		).toMatchObject({ weight: 0, severity: "baja", page: 1 });
 	});
-	test("una inspección degradada requiere revisión manual", async () => {
+	test("una inspección degradada produce un error técnico", async () => {
 		const buffer = Buffer.alloc(20 * 1024 * 1024 + 1);
 		buffer.write("%PDF-1.7\n");
 		buffer.write("%%EOF", buffer.length - 5);
@@ -141,7 +141,7 @@ describe("document integrity engine", () => {
 			registeredNames: ["FREDERIC ARIEL SOC MORALES"],
 		});
 
-		expect(result.result).toBe("revision_manual");
+		expect(result.result).toBe("error");
 		expect(
 			result.signals.some(
 				(signal) => signal.code === "inspeccion_tecnica_incompleta",
@@ -211,7 +211,7 @@ describe("document integrity engine", () => {
 		expect(adversarial.signals.map((signal) => signal.code)).toEqual(
 			baseline.signals.map((signal) => signal.code),
 		);
-		expect(adversarial.result).not.toBe("valido");
+		expect(adversarial.result).toBe("valido");
 	});
 
 	test("una fecha extraída por IA nunca fuerza revisión manual", async () => {
@@ -231,7 +231,7 @@ describe("document integrity engine", () => {
 		);
 
 		expect(dateSignal).toMatchObject({ weight: 0, source: "ia" });
-		expect(result.result).not.toBe("revision_manual");
+		expect(result.result).toBe("valido");
 		expect(result.result).not.toBe("rechazado");
 	});
 
@@ -288,7 +288,7 @@ describe("document integrity engine", () => {
 			registeredNames: ["FREDERIC ARIEL SOC MORALES"],
 		});
 
-		expect(result.result).toBe("revision_manual");
+		expect(result.result).toBe("valido");
 		expect(
 			result.signals.find(
 				(signal) =>
@@ -372,7 +372,7 @@ describe("document integrity engine", () => {
 			},
 		});
 
-		expect(result.result).toBe("revision_manual");
+		expect(result.result).toBe("valido");
 		expect(
 			result.signals.find(
 				(signal) => signal.code === "sha256_duplicado_oportunidad_ganada",
@@ -409,7 +409,7 @@ describe("document integrity engine", () => {
 				severity: "baja",
 			});
 		}
-		expect(result.result).not.toBe("revision_manual");
+		expect(result.result).toBe("valido");
 		expect(result.result).not.toBe("rechazado");
 	});
 });

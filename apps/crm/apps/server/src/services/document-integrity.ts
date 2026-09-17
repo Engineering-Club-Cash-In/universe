@@ -55,12 +55,14 @@ import {
 } from "../lib/document-integrity/pdf-forensics";
 import type { DocumentIntegrityAiResult } from "../lib/document-integrity/types";
 import {
+	currentValidationResult,
+} from "../lib/document-integrity/types";
+import {
 	canApproveDocumentIntegrityValidation,
 	canRunDocumentIntegrityValidation,
 	getAttemptAvailability,
 	getAttemptStatus,
 	getManualApprovalAvailability,
-	getPendingManualApprovalCount,
 	getRejectedDocumentCount,
 	getResetAvailability,
 	isCompleteValidationRun,
@@ -699,7 +701,9 @@ function buildValidationEvidenceFilePath(params: {
 	contentSha256: string;
 	sourceFilePath: string;
 }) {
-	const sourceName = originalNameFromDocumentIntegrityPath(params.sourceFilePath);
+	const sourceName = originalNameFromDocumentIntegrityPath(
+		params.sourceFilePath,
+	);
 	const safeName = encodeDocumentIntegrityEvidenceName(sourceName);
 	return `${buildUploadPrefix("bank_statement", params.opportunityId)}/validated/${params.validationId}/${params.contentSha256}-${safeName}`;
 }
@@ -717,12 +721,15 @@ async function freezeCompletedValidationEvidence(params: {
 	// corrida termina en error solo después de preservar todo lo preservable.
 	let freezeFailure: string | null = null;
 	for (const [index, result] of params.results.entries()) {
-		if (!result.validation || result.validation.autoResult === "error") continue;
+		if (!result.validation || result.validation.autoResult === "error")
+			continue;
 		const document = params.documents[index];
 		const validation = result.validation;
 		try {
 			if (!document?.buffer)
-				throw new Error("Missing source bytes for completed validation evidence");
+				throw new Error(
+					"Missing source bytes for completed validation evidence",
+				);
 			const sourceFilePath = document.filePath;
 			const opportunityDocumentId = document.opportunityDocumentId;
 			const filePath = buildValidationEvidenceFilePath({
@@ -1289,18 +1296,20 @@ async function assertUploadedBankStatementsValidatedWithTransaction(
 			"Los archivos del análisis no coinciden con la validación documental realizada.",
 		);
 	}
+	const legacyValidationCount = validations.filter(
+		(validation) => validation.autoResult === "revision_manual",
+	).length;
+	if (legacyValidationCount > 0) {
+		throw new DocumentIntegrityError(
+			"BAD_REQUEST",
+			"Estos documentos tienen una validación histórica que requiere volver a validar antes de analizar la capacidad de pago.",
+		);
+	}
 	const rejectedDocumentCount = getRejectedDocumentCount(validations);
 	if (rejectedDocumentCount > 0) {
 		throw new DocumentIntegrityError(
 			"BAD_REQUEST",
 			`${rejectedDocumentCount} documento${rejectedDocumentCount === 1 ? " fue rechazado" : "s fueron rechazados"}. Solicita documentos válidos y realiza una nueva validación documental antes de analizar la capacidad de pago.`,
-		);
-	}
-	const pendingManualApprovalCount = getPendingManualApprovalCount(validations);
-	if (pendingManualApprovalCount > 0) {
-		throw new DocumentIntegrityError(
-			"BAD_REQUEST",
-			`${pendingManualApprovalCount} documento${pendingManualApprovalCount === 1 ? " requiere" : "s requieren"} aprobación manual antes de analizar la capacidad de pago.`,
 		);
 	}
 }
@@ -1814,11 +1823,11 @@ export async function getDocumentIntegrityStatuses(params: {
 	return rows.map((row) => ({
 		opportunityDocumentId: row.opportunityDocumentId,
 		documentType: row.documentType,
-		result: row.autoResult,
-		manuallyApproved:
-			row.autoResult === "revision_manual" && !!row.manualApprovalId,
+		result: currentValidationResult(row.autoResult),
+		manuallyApproved: false,
 		validatedAt: row.validatedAt,
 		isStale:
+			row.autoResult === "revision_manual" ||
 			!row.isCurrentCompletedRun ||
 			currentPaths.get(row.opportunityDocumentId) !== row.linkedFilePath,
 		signalCount: row.signalCount,
@@ -1962,7 +1971,7 @@ export async function getLatestReusableDocumentIntegrityRun(params: {
 			file: originalNameFromDocumentIntegrityPath(validation.filePath),
 			validation: {
 				id: validation.id,
-				result: validation.result,
+				result: currentValidationResult(validation.result),
 				reason: validation.reason,
 				recommendedAction: buildDocumentRecommendedAction({
 					result: validation.result,
@@ -2012,10 +2021,7 @@ export async function listDocumentIntegrityValidations(params: {
 				${documentIntegrityValidationRuns.status} = 'error'
 					or ${documentIntegrityValidations.autoResult} = 'error'
 					or ${documentIntegrityValidations.autoResult} = 'rechazado'
-					or (
-						${documentIntegrityValidations.autoResult} = 'revision_manual'
-							and ${documentIntegrityValidationApprovals.id} is null
-					)
+					or ${documentIntegrityValidations.autoResult} = 'revision_manual'
 			)`,
 		);
 	if (params.search) {
@@ -2307,6 +2313,8 @@ export async function getDocumentIntegrityValidationGroup(params: {
 				: (linkedDocumentFilePath ?? documentFilePath);
 			return {
 				...details,
+				autoResult: currentValidationResult(row.autoResult),
+				autoReason: row.autoReason,
 				signals: details.signals.filter(
 					(signal) => signal.code !== "identidad_comparada",
 				),
@@ -2344,14 +2352,7 @@ export async function getDocumentIntegrityValidationGroup(params: {
 			]
 		: [];
 	const latestReset = resets.at(-1);
-	const canApproveManual =
-		canApproveDocumentIntegrityValidation(params.userRole) &&
-		latestFinalizedRun?.status === "completed" &&
-		latestRun?.status === "completed" &&
-		latestRun.id === latestFinalizedRun.id &&
-		latestFinalizedRun.attemptNumber >
-			(latestReset?.resetAfterAttemptNumber ?? 0) &&
-		!currentAttemptStatus.hasProcessingRun;
+	const canApproveManual = false;
 
 	return {
 		...opportunity,

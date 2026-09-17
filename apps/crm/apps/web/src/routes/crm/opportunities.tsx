@@ -3952,9 +3952,9 @@ const DOCUMENT_INTEGRITY_STATUS_META: Record<
 		Icon: CheckCircle2,
 	},
 	observacion: {
-		label: "Con observación",
+		label: "Observación",
 		rowClassName: "border-amber-200 bg-amber-50 text-amber-800",
-		Icon: AlertTriangle,
+		Icon: AlertCircle,
 	},
 	revision_manual: {
 		label: "Revisión manual",

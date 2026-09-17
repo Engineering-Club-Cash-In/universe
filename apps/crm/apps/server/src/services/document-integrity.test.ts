@@ -2,25 +2,25 @@ import { describe, expect, test } from "bun:test";
 
 const routerSource = await Bun.file(
 	new URL("../routers/document-integrity.ts", import.meta.url),
-).text();
+).text().then((source) => source.replace(/\r\n/g, "\n"));
 const schemaSource = await Bun.file(
 	new URL("../db/schema/document-integrity-validations.ts", import.meta.url),
-).text();
+).text().then((source) => source.replace(/\r\n/g, "\n"));
 const forensicsSource = await Bun.file(
 	new URL("../lib/document-integrity/pdf-forensics.ts", import.meta.url),
-).text();
+).text().then((source) => source.replace(/\r\n/g, "\n"));
 const serviceSource = await Bun.file(
 	new URL("./document-integrity.ts", import.meta.url),
-).text();
+).text().then((source) => source.replace(/\r\n/g, "\n"));
 const uploadRouterSource = await Bun.file(
 	new URL("../routers/upload.ts", import.meta.url),
-).text();
+).text().then((source) => source.replace(/\r\n/g, "\n"));
 const migrationSource = await Bun.file(
 	new URL(
 		"../db/migrations/0033_create_document_integrity_validation.sql",
 		import.meta.url,
 	),
-).text();
+).text().then((source) => source.replace(/\r\n/g, "\n"));
 
 describe("document integrity boundaries", () => {
 	test("los endpoints aplican el alcance de acceso esperado", () => {
@@ -81,7 +81,7 @@ describe("document integrity boundaries", () => {
 		expect(migrationSource).toContain(
 			'CREATE TABLE "public"."document_integrity_validation_approvals"',
 		);
-		expect(serviceSource).toContain("getPendingManualApprovalCount");
+		expect(serviceSource).not.toContain("getPendingManualApprovalCount");
 		expect(serviceSource).toContain("getManualApprovalAvailability");
 		expect(serviceSource).toContain(
 			"canApproveDocumentIntegrityValidation(params.userRole)",
@@ -94,7 +94,7 @@ describe("document integrity boundaries", () => {
 			'length(btrim("reason")) BETWEEN 5 AND 1000',
 		);
 		expect(serviceSource).toContain(
-			'row.autoResult === "revision_manual" && !!row.manualApprovalId',
+			"manuallyApproved: false",
 		);
 		expect(serviceSource).toContain("getRejectedDocumentCount(validations)");
 		expect(serviceSource).toContain(
@@ -164,7 +164,7 @@ describe("document integrity boundaries", () => {
 			'inArray(documentIntegrityValidationRuns.status, ["completed", "error"])',
 		);
 		expect(serviceSource).toContain("status: latestFinalizedRun.status");
-		expect(serviceSource).toContain("latestRun.id === latestFinalizedRun.id");
+		expect(serviceSource).toContain("const canApproveManual = false;");
 		expect(serviceSource).toContain("resetByName: user.name");
 		expect(serviceSource).toContain("resetByEmail: user.email");
 	});
@@ -224,9 +224,7 @@ describe("document integrity boundaries", () => {
 
 	test("cada resultado completado usa una copia inmutable ligada a la validación", () => {
 		expect(serviceSource).toContain("freezeCompletedValidationEvidence");
-		expect(serviceSource).toContain(
-			'result.validation.autoResult === "error"',
-		);
+		expect(serviceSource).toContain('result.validation.autoResult === "error"');
 		expect(serviceSource).not.toContain(
 			'result.validation?.autoResult !== "revision_manual"',
 		);
@@ -236,8 +234,8 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain(
 			"/validated/${params.validationId}/${params.contentSha256}-",
 		);
-		expect(serviceSource).toContain(
-			"originalNameFromDocumentIntegrityPath(params.sourceFilePath)",
+		expect(serviceSource.replace(/\s/g, "")).toContain(
+			"originalNameFromDocumentIntegrityPath(params.sourceFilePath,)",
 		);
 		expect(serviceSource).toContain("set({ documentFilePath: filePath })");
 		expect(serviceSource).toContain(
@@ -260,9 +258,9 @@ describe("document integrity boundaries", () => {
 			executeStart,
 		);
 		const executeRun = serviceSource.slice(executeStart, executeEnd);
-		expect(executeRun.indexOf("freezeCompletedValidationEvidence")).toBeLessThan(
-			executeRun.indexOf("isCompleteValidationRun"),
-		);
+		expect(
+			executeRun.indexOf("freezeCompletedValidationEvidence"),
+		).toBeLessThan(executeRun.indexOf("isCompleteValidationRun"));
 	});
 
 	test("cada lote reserva uno de dos intentos por oportunidad", () => {
@@ -330,9 +328,7 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain("getLatestReusableDocumentIntegrityRun");
 		expect(serviceSource).toContain('"analisis_capacidad"');
 		expect(serviceSource).toContain("validation.hasLinkedDocuments");
-		expect(serviceSource).toContain(
-			"originalNameFromDocumentIntegrityPath",
-		);
+		expect(serviceSource).toContain("originalNameFromDocumentIntegrityPath");
 		expect(serviceSource).toContain(
 			'run.validationSource !== "analisis_capacidad"',
 		);

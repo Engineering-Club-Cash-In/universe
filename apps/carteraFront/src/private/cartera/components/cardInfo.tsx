@@ -221,11 +221,23 @@ export function MiniCardCredito({
     otros: otrosFormulario ?? 0,
     abonoDirectoCapital: abonoDirectoCapitalFormulario ?? 0,
   });
-  // Sin mora, sin rubros y sin convenio no hay nada que combinar: la tarjeta
-  // amarilla sigue siendo la de "Abonos Realizados" de siempre (el 99% de la
-  // cartera se ve exactamente igual que antes de este cambio).
+  /**
+   * Sin nada que combinar, la tarjeta amarilla sigue siendo la de "Abonos
+   * Realizados" de siempre.
+   *
+   * 🔴 Los dos campos del FORMULARIO cuentan para esto, y era el mismo error que
+   * el del cálculo: arreglé `calcularTotalACobrar` para que los sumara y dejé el
+   * gate que decide si el total SE VE mirando sólo mora, rubros y convenio. O
+   * sea que en un crédito normal —sin mora, sin rubros, sin convenio— el asesor
+   * tipeaba un `Otros` y no había ningún total a la vista: el número correcto
+   * estaba calculado y no se pintaba.
+   */
   const mostrarTotalCombinado =
-    !!convenioActivoInfo || moraNum > 0 || rubrosNum > 0;
+    !!convenioActivoInfo ||
+    moraNum > 0 ||
+    rubrosNum > 0 ||
+    (otrosFormulario ?? 0) > 0 ||
+    (abonoDirectoCapitalFormulario ?? 0) > 0;
 
   return (
     <div className="w-full flex flex-col items-center gap-4">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { motivoMontoNoEditable } from "./rubrosEdicionMonto";
+import { motivoMontoNoEditable, montoQuedaEnCeroAlCentavo } from "./rubrosEdicionMonto";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // El backend rechaza con 409 si el monto nuevo es MENOR a lo ya abonado: bajarlo
@@ -36,6 +36,12 @@ describe("motivoMontoNoEditable", () => {
     expect(motivoMontoNoEditable({ monto: "-5", abonado: "0.00" })).toContain("mayor a cero");
   });
 
+  it("🔴 lo que REDONDEA a cero tampoco, aunque en crudo sea positivo", () => {
+    // `0.004` pasa el chequeo crudo y se guarda como `0.00`, que el backend
+    // rechaza después de redondear igual.
+    expect(motivoMontoNoEditable({ monto: "0.004", abonado: "0.00" })).toContain("mayor a cero");
+  });
+
   it("lo no numérico también", () => {
     expect(motivoMontoNoEditable({ monto: "", abonado: "0.00" })).toContain("mayor a cero");
     expect(motivoMontoNoEditable({ monto: "abc", abonado: "0.00" })).toContain("mayor a cero");
@@ -52,5 +58,27 @@ describe("motivoMontoNoEditable", () => {
     // Ante la duda se OFRECE: el backend es la autoridad y su 409 viene
     // redactado. Bloquear con un dato que no tenemos deja al ADMIN sin salida.
     expect(motivoMontoNoEditable({ monto: "10", abonado: undefined })).toBeNull();
+  });
+});
+
+describe("montoQuedaEnCeroAlCentavo", () => {
+  it("🔴 `0.004` queda en cero: crudo es positivo, al centavo no", () => {
+    // Medido contra una copia de producción: el backend contesta
+    // «El monto del rubro debe ser mayor a cero» tanto al CREAR como al EDITAR,
+    // y la fila no se toca. La pantalla tiene que decir lo mismo antes de enviar.
+    expect(montoQuedaEnCeroAlCentavo("0.004")).toBe(true);
+  });
+
+  it("`0.005` NO queda en cero: redondea a un centavo", () => {
+    expect(montoQuedaEnCeroAlCentavo("0.005")).toBe(false);
+  });
+
+  it("un monto normal no queda en cero", () => {
+    expect(montoQuedaEnCeroAlCentavo("500")).toBe(false);
+  });
+
+  it("el cero y lo negativo también quedan en cero", () => {
+    expect(montoQuedaEnCeroAlCentavo("0")).toBe(true);
+    expect(montoQuedaEnCeroAlCentavo("-5")).toBe(true);
   });
 });

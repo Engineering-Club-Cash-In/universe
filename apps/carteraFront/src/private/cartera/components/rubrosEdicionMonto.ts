@@ -18,6 +18,24 @@ import { sumaQ } from "../../../lib/moneda";
  * bloquear con un dato que no tenemos deja al ADMIN sin salida desde la
  * pantalla.
  */
+/**
+ * ¿El monto se le va a cero cuando se redondee al centavo?
+ *
+ * `0.004` pasa cualquier chequeo de "mayor a cero" hecho sobre el número crudo y
+ * después se guarda como `0.00`. El backend redondea igual y contesta
+ * «El monto del rubro debe ser mayor a cero» —verificado contra una copia de
+ * producción, tanto al CREAR como al EDITAR—, así que sin esto la pantalla deja
+ * llenar el motivo y enviar algo que ya sabía que iba a rebotar.
+ *
+ * Vive acá y no dentro de cada formulario para que creación y edición no se
+ * separen: era justo la asimetría del hallazgo.
+ */
+export function montoQuedaEnCeroAlCentavo(monto: string | number): boolean {
+  const n = Number(monto);
+  if (!Number.isFinite(n)) return true;
+  return sumaQ([n]) <= 0;
+}
+
 export function motivoMontoNoEditable(entrada: {
   monto: string | number;
   abonado: string | number | undefined | null;
@@ -29,6 +47,15 @@ export function motivoMontoNoEditable(entrada: {
 
   // `sumaQ` redondea al centavo igual que el backend.
   const montoAlCentavo = sumaQ([monto]);
+
+  // Y el redondeo puede comerse el monto entero: `0.004` pasa el chequeo crudo
+  // de "mayor a cero" y termina en `0.00`, que el backend rechaza. Sin esto, el
+  // admin llena el motivo y envía un valor que la pantalla ya sabía que no se
+  // puede guardar.
+  if (montoQuedaEnCeroAlCentavo(monto)) {
+    return "El monto debe ser un número mayor a cero";
+  }
+
   const abonado = Number(entrada.abonado ?? 0) || 0;
 
   if (montoAlCentavo < abonado) {

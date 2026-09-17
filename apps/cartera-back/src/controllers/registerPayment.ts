@@ -4306,37 +4306,45 @@ async function aplicarMontoAPagoSinLock(pago_id: number, monto: number, fecha_pa
 
     /**
      * Esta ruta NO sabe cobrar rubros, así que tampoco puede decir que un pago
-     * quedó aplicado si carga un cobro adicional.
+    /**
+     * Esta ruta NO sabe cobrar rubros, así que tampoco puede tocar una boleta
+     * que lleve uno — ni su estado ni su monto.
      *
-     * `/aplicar-monto-pago` acepta un `validationStatus` y lo escribe tal cual,
-     * pero a diferencia de `/aplicar-pago` y `/revalidatePayment` nunca llama a
-     * `aplicarRubrosDelPago`. Usarla sobre una boleta con reclamo dejaba el peor
-     * estado posible: el `saldo_pendiente` del rubro intacto —o sea el cargo sin
-     * cobrar—, el reclamo en `aplicado = false`, y el pago marcado como aplicado.
-     * A partir de ahí la aplicación normal lo rechaza por ya-aplicado, así que
-     * el reclamo se queda para siempre CONGELANDO el rubro: con un reclamo vivo
-     * encima no se puede editar ni anular.
+     * `/aplicar-monto-pago` reescribe `monto_boleta` y todo el reparto entre
+     * capital, interés, seguro y demás, y además puede sellar el
+     * `validationStatus`. Lo que NUNCA hace, a diferencia de `/aplicar-pago` y
+     * `/revalidatePayment`, es llamar a `aplicarRubrosDelPago` ni mirar
+     * `rubros_pagos`.
      *
-     * Se RECHAZA en vez de aplicar el reclamo acá. Aplicarlo sería duplicar la
-     * mitad de la cascada de cobro —con su transacción y su orden de candados—
-     * sin ninguna de sus guardas, y es la clase de copia que después se
-     * desincroniza. Rechazar no cierra ningún camino: la aplicación normal sigue
-     * disponible y hace el trabajo completo.
+     * Con un reclamo encima eso rompe por dos lados distintos:
      *
-     * Sólo se juzga cuando la llamada pide un estado APLICADO: usar esta ruta
-     * para corregir montos sin tocar el estado sigue funcionando igual.
+     *   * si la llamada SELLA el pago como aplicado, el rubro queda con su
+     *     saldo intacto —el cargo sin cobrar—, el reclamo en `aplicado = false`,
+     *     y el pago marcado como aplicado. Desde ahí la aplicación normal lo
+     *     rechaza por ya-aplicado y el reclamo se queda para siempre;
+     *   * y si la llamada sólo CORRIGE EL MONTO —que el esquema de la ruta
+     *     permite, `validationStatus` es opcional—, reescribe el reparto y deja
+     *     `otros` y `rubros_pagos` como estaban. Bajar una boleta a Q20 cuando
+     *     tiene un reclamo de Q50 hace que la validación posterior le descuente
+     *     al rubro esos Q50 ADEMÁS del reparto nuevo, con un comprobante que
+     *     dice Q20.
+     *
+     * Por eso el chequeo NO mira el estado que se pide: cubre toda llamada que
+     * mute el pago. Antes era condicional a un estado aplicado y dejaba abierta
+     * justamente la corrección de monto, que es el uso más común de esta ruta.
+     *
+     * Se RECHAZA en vez de arreglarlo acá. Aplicar o recalcular el reclamo sería
+     * duplicar la mitad de la cascada de cobro —con su transacción y su orden de
+     * candados— sin ninguna de sus guardas. Rechazar no cierra ningún camino:
+     * revertir la boleta devuelve el rubro por su propia ruta, y después se
+     * registra de nuevo con el monto correcto.
      */
-    if (
-      validationStatus === "validated" ||
-      validationStatus === "capital_validated"
-    ) {
-      const reclamado = await totalReclamadoPorPago(pago_id);
-      if (reclamado.gt(0)) {
-        return {
-          success: false,
-          message: `Esta boleta cobra Q${reclamado.toFixed(2)} de cobros adicionales y esta ruta no sabe aplicarlos. Aplicá el pago por la vía normal, que cobra el rubro junto con la cuota.`,
-        };
-      }
+    const reclamado = await totalReclamadoPorPago(pago_id);
+    if (reclamado.gt(0)) {
+      return {
+        success: false,
+        message: `Esta boleta cobra Q${reclamado.toFixed(2)} de cobros adicionales y esta ruta no sabe manejarlos: no se puede cambiarle el monto ni aplicarla desde acá. Revertí la boleta y volvé a registrarla con el monto correcto.`,
+      };
     }
 
     // 5. Actualizar el pago

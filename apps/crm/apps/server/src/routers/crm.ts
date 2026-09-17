@@ -659,6 +659,40 @@ export const crmRouter = {
 			return newCompany[0];
 		}),
 
+	/**
+	 * Completar el nombre legal de una agencia desde el detalle de la
+	 * oportunidad. Va aparte de updateCompany porque ese limita a las empresas
+	 * creadas por uno y las agencias son de todos; aquí solo se escribe la
+	 * razón social, que es el dato que el contrato necesita.
+	 */
+	setCompanyRazonSocial: crmProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				razonSocial: z.string().trim().min(1),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (!PERMISSIONS.canCreateCompanies(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para editar empresas",
+				});
+			}
+			const [empresa] = await db
+				.update(companies)
+				.set({ razonSocial: input.razonSocial, updatedAt: new Date() })
+				.where(eq(companies.id, input.id))
+				.returning({
+					id: companies.id,
+					name: companies.name,
+					razonSocial: companies.razonSocial,
+				});
+			if (!empresa) {
+				throw new ORPCError("NOT_FOUND", { message: "Empresa no encontrada" });
+			}
+			return empresa;
+		}),
+
 	updateCompany: crmProcedure
 		.input(
 			z.object({

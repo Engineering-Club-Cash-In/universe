@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { CompanyQuickCreateDialog } from "./CompanyQuickCreateDialog";
 import { GENERO_LABEL } from "./ContractPartiesFields";
 import {
@@ -25,11 +27,12 @@ export function OpportunityContractPartyCard({
 	vendors,
 	companies,
 	cargandoCatalogo,
-	puedeCrearEmpresa = true,
+	puedeGestionarEmpresa = true,
 	disabled,
 	isSaving,
 	onAssignVendor,
 	onAssignCompany,
+	onSaveRazonSocial,
 }: {
 	vehicleIsNew: boolean | null | undefined;
 	vendorId: string | null | undefined;
@@ -48,15 +51,23 @@ export function OpportunityContractPartyCard({
 	companies: Array<{ id: string; name: string }>;
 	/** Catálogos en vuelo: sin esto, un vendedor aún no cargado parece borrado. */
 	cargandoCatalogo?: boolean;
-	/** Alta rápida de empresa: jurídico entra al CRM pero no da de alta agencias. */
-	puedeCrearEmpresa?: boolean;
+	/** Alta y edición de la agencia: jurídico entra al CRM pero no las gestiona. */
+	puedeGestionarEmpresa?: boolean;
 	disabled?: boolean;
 	isSaving?: boolean;
 	onAssignVendor: (vendorId: string | null) => void;
 	onAssignCompany: (companyId: string | null) => void;
+	/** Guarda el nombre legal que falta, sin salir del detalle. */
+	onSaveRazonSocial?: (companyId: string, razonSocial: string) => void;
 }) {
 	const esNuevo = vehicleIsNew === true;
 	const [dialogo, setDialogo] = useState<{ initialDpi?: string } | null>(null);
+	// Captura de la razón social cuando la empresa asignada no la tiene
+	const [razonSocial, setRazonSocial] = useState("");
+	// biome-ignore lint/correctness/useExhaustiveDependencies: solo al cambiar de empresa
+	useEffect(() => {
+		setRazonSocial("");
+	}, [company?.id]);
 
 	if (esNuevo) {
 		const options = companies.map((c) => ({ value: c.id, label: c.name }));
@@ -93,15 +104,53 @@ export function OpportunityContractPartyCard({
 							disabled={disabled || isSaving}
 						/>
 					}
-					onNuevo={puedeCrearEmpresa ? () => setDialogo({}) : undefined}
+					onNuevo={puedeGestionarEmpresa ? () => setDialogo({}) : undefined}
 					nuevoLabel="Nueva"
 					ayudaVacio="La agencia que vende el carro nuevo."
 					disabled={disabled}
 				>
-					{company?.razonSocial && (
+					{company?.razonSocial ? (
 						<PartyFields>
 							<PartyField label="Razón social">{company.razonSocial}</PartyField>
 						</PartyFields>
+					) : (
+						company?.id &&
+						onSaveRazonSocial &&
+						puedeGestionarEmpresa &&
+						!disabled && (
+							// Sin razón social {agencia} sale vacío en el contrato, así que
+							// se completa desde aquí y queda guardada en la empresa
+							<div className="space-y-1 pt-1">
+								<Label htmlFor="razon-social-detalle" className="text-xs">
+									Razón social
+								</Label>
+								<div className="flex gap-2">
+									<Input
+										id="razon-social-detalle"
+										value={razonSocial}
+										onChange={(e) => setRazonSocial(e.target.value)}
+										placeholder="Ej. JAC GUATEMALA, SOCIEDAD ANÓNIMA"
+										className="h-8 text-sm"
+									/>
+									<Button
+										type="button"
+										size="sm"
+										className="h-8 shrink-0"
+										disabled={!razonSocial.trim() || isSaving}
+										onClick={() =>
+											company.id &&
+											onSaveRazonSocial(company.id, razonSocial.trim())
+										}
+									>
+										Guardar
+									</Button>
+								</div>
+								<p className="text-muted-foreground text-xs">
+									Como va en el contrato. Queda guardada para las próximas
+									oportunidades de esta empresa.
+								</p>
+							</div>
+						)
 					)}
 				</ContractPartySlot>
 				<CompanyQuickCreateDialog

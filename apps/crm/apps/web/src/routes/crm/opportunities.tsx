@@ -1438,6 +1438,32 @@ function RouteComponent() {
 		},
 	});
 
+	// La razón social vive en la empresa: al guardarla queda para las próximas
+	// oportunidades de esa agencia, y {agencia} deja de salir vacío.
+	const saveRazonSocialMutation = useMutation({
+		mutationFn: (input: { id: string; razonSocial: string }) =>
+			client.setCompanyRazonSocial(input),
+		onSuccess: async (_data, variables) => {
+			queryClient.invalidateQueries({
+				queryKey: orpc.getCompaniesForContracts.key(),
+			});
+			const frescas = await client.getOpportunities();
+			const actualizada = frescas.find(
+				(opp) => opp.id === selectedOpportunity?.id,
+			);
+			if (actualizada) setSelectedOpportunity(actualizada);
+			queryClient.setQueryData(
+				["getOpportunities", session?.user?.id, userProfile.data?.role],
+				frescas,
+			);
+			toast.success("Razón social guardada");
+			return variables;
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "No se pudo guardar la razón social");
+		},
+	});
+
 	// Parte del contrato en el detalle: agencia si el carro es nuevo, vendedor
 	// (dueño) si es usado. Se guarda al elegir o crear. El vendedor sale solo
 	// de la oportunidad, igual que en la generación de contratos.
@@ -1451,12 +1477,15 @@ function RouteComponent() {
 			cargandoCatalogo={
 				vendorsQuery.isLoading || companiesForContractsQuery.isLoading
 			}
-			puedeCrearEmpresa={
+			puedeGestionarEmpresa={
 				!!userProfile.data?.role &&
 				PERMISSIONS.canCreateCompanies(userProfile.data.role)
 			}
 			disabled={isWonLocked}
-			isSaving={updateOpportunityMutation.isPending}
+			isSaving={
+				updateOpportunityMutation.isPending ||
+				saveRazonSocialMutation.isPending
+			}
 			onAssignVendor={(vendorId) =>
 				updateOpportunityMutation.mutate({
 					id: selectedOpportunity.id,
@@ -1468,6 +1497,9 @@ function RouteComponent() {
 					id: selectedOpportunity.id,
 					companyId,
 				})
+			}
+			onSaveRazonSocial={(companyId, razonSocial) =>
+				saveRazonSocialMutation.mutate({ id: companyId, razonSocial })
 			}
 		/>
 	) : null;

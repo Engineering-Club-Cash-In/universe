@@ -13,11 +13,16 @@ import { PgDialect } from "drizzle-orm/pg-core";
 // ============================================================================
 
 // ── Estado mutable que leen los mocks; cada test lo configura antes de llamar ──
-let padreRestantes: Array<{ credito_id: number; restantes: number }> = [];
+// Ambas son las filas CRUDAS (ya con `nombre` del join a inversionistas) que
+// devuelve la query: filtrarCreditosTotalmenteDevueltos aplica `esCube` en JS,
+// no en el WHERE, así que el mock no filtra nada — deja pasar todo lo que el
+// test ponga acá, CUBE incluido, igual que la query real.
+let padreRestantes: Array<{ credito_id: number; inversionista_id: number; nombre: string }> = [];
 let espejoResidual: Array<{
   credito_id: number;
   inversionista_id: number;
   monto_aportado: string;
+  nombre: string;
 }> = [];
 let updateReturning: Array<{ credito_id: number }> = [];
 let historialInsertado: any[] = [];
@@ -32,20 +37,21 @@ let selectCallCount = 0;
 const dialect = new PgDialect();
 const sqlDe = (condicion: unknown) => dialect.sqlToQuery(condicion as any).sql;
 
-// El handle de transacción cubre las tres cadenas que se ejecutan adentro:
-//   tx.select().from().where().orderBy().for()  -> lock de los créditos
-//   tx.select().from().where().groupBy()        -> conteo de no-CUBE en el padre
-//   tx.select().from().where()                  -> filas espejo no-CUBE
-//   tx.update().set().where().returning()       -> el COMPLETADO
-//   tx.insert().values()                        -> la fila de historial
+// El handle de transacción cubre las cuatro cadenas que se ejecutan adentro:
+//   tx.select().from().where().orderBy().for()      -> lock de los créditos
+//   tx.select().from().innerJoin().where()          -> filas crudas del padre (no-CUBE se filtra en JS)
+//   tx.select().from().innerJoin().where()          -> filas crudas del espejo (ídem)
+//   tx.update().set().where().returning()           -> el COMPLETADO
+//   tx.insert().values()                            -> la fila de historial
+// Se distinguen `padreRestantes` de `espejoResidual` por orden de llamada: la
+// primera query con join que corre es la del padre, la segunda la del espejo.
 function makeTx() {
+  let joinCallCount = 0;
   return {
     select: () => ({
       from: () => ({
         where: (condicion: unknown) => {
-          selectCallCount++;
-          const resultado: any = Promise.resolve(espejoResidual);
-          resultado.groupBy = () => Promise.resolve(padreRestantes);
+          const resultado: any = Promise.resolve([]);
           resultado.orderBy = () => ({
             for: (modo: string) => {
               lockedWithFor = modo;
@@ -55,6 +61,13 @@ function makeTx() {
           });
           return resultado;
         },
+        innerJoin: () => ({
+          where: () => {
+            selectCallCount++;
+            joinCallCount++;
+            return Promise.resolve(joinCallCount === 1 ? padreRestantes : espejoResidual);
+          },
+        }),
       }),
     }),
     update: () => ({
@@ -119,7 +132,7 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
   });
 
   it("un crédito con un inversionista restante NO se completa", async () => {
-    padreRestantes = [{ credito_id: 500, restantes: 1 }];
+    padreRestantes = [{ credito_id: 500, inversionista_id: 42, nombre: "Inversionista 42" }];
 
     const { completados, diferidos } = await filtrarCreditosTotalmenteDevueltos(
       makeTx(),
@@ -131,9 +144,17 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
   });
 
   it("la fila de CUBE no cuenta como inversionista pendiente", async () => {
-    // El mock devuelve solo lo que la query ya filtró con ne(..., CUBE_ID):
-    // si el crédito solo tiene a CUBE, no hay filas y el crédito cierra.
-    padreRestantes = [];
+    // La query trae la fila cruda de CUBE (no la filtra en SQL); esCube la
+    // descarta en JS antes de contar restantes.
+    padreRestantes = [{ credito_id: 500, inversionista_id: 86, nombre: "CUBE Investments S.A." }];
+
+    const { completados } = await filtrarCreditosTotalmenteDevueltos(makeTx(), [500]);
+
+    expect(completados).toEqual([500]);
+  });
+
+  it("una fila histórica de CUBE con ID distinto tampoco cuenta (reconocida por nombre)", async () => {
+    padreRestantes = [{ credito_id: 500, inversionista_id: 999, nombre: "CUBE Investments S.A." }];
 
     const { completados } = await filtrarCreditosTotalmenteDevueltos(makeTx(), [500]);
 
@@ -142,8 +163,9 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
 
   it("parte correctamente un lote mixto", async () => {
     padreRestantes = [
-      { credito_id: 141, restantes: 2 },
-      { credito_id: 8730, restantes: 1 },
+      { credito_id: 141, inversionista_id: 10, nombre: "Inv 10" },
+      { credito_id: 141, inversionista_id: 11, nombre: "Inv 11" },
+      { credito_id: 8730, inversionista_id: 12, nombre: "Inv 12" },
     ];
 
     const { completados, diferidos } = await filtrarCreditosTotalmenteDevueltos(
@@ -170,7 +192,7 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
   it("padre limpio con espejo residual EN CERO: completa igual y avisa de la divergencia", async () => {
     padreRestantes = [];
     espejoResidual = [
-      { credito_id: 500, inversionista_id: 42, monto_aportado: "0" },
+      { credito_id: 500, inversionista_id: 42, monto_aportado: "0", nombre: "Inv 42" },
     ];
     const warn = spyOn(console, "warn").mockImplementation(() => {});
 
@@ -190,7 +212,7 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
     // si se cerrara acá, ese guard nunca llegaría a ejecutarse.
     padreRestantes = [];
     espejoResidual = [
-      { credito_id: 500, inversionista_id: 42, monto_aportado: "52941.82" },
+      { credito_id: 500, inversionista_id: 42, monto_aportado: "52941.82", nombre: "Inv 42" },
     ];
     const warn = spyOn(console, "warn").mockImplementation(() => {});
 
@@ -208,8 +230,8 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
   it("lote mixto en el espejo: cierra el de saldo cero y retiene el otro", async () => {
     padreRestantes = [];
     espejoResidual = [
-      { credito_id: 500, inversionista_id: 42, monto_aportado: "0" },
-      { credito_id: 501, inversionista_id: 43, monto_aportado: "1500.00" },
+      { credito_id: 500, inversionista_id: 42, monto_aportado: "0", nombre: "Inv 42" },
+      { credito_id: 501, inversionista_id: 43, monto_aportado: "1500.00", nombre: "Inv 43" },
     ];
     const warn = spyOn(console, "warn").mockImplementation(() => {});
 
@@ -241,7 +263,7 @@ describe("marcarDevolucionCompletadaSiCorresponde", () => {
     // Éste es el bug reportado: al liquidar al primer inversionista de un
     // crédito compartido, el crédito entero se marcaba COMPLETADO y los demás
     // quedaban fuera del flujo de devolución.
-    padreRestantes = [{ credito_id: 500, restantes: 1 }];
+    padreRestantes = [{ credito_id: 500, inversionista_id: 42, nombre: "Inv 42" }];
 
     const { completados, diferidos } = await marcarDevolucionCompletadaSiCorresponde(
       [500],
@@ -329,7 +351,7 @@ describe("marcarDevolucionCompletadaSiCorresponde", () => {
 
   it("el crédito compartido cierra recién cuando sale el último inversionista", async () => {
     // Liquidación del inversionista A: B sigue en el padre.
-    padreRestantes = [{ credito_id: 500, restantes: 1 }];
+    padreRestantes = [{ credito_id: 500, inversionista_id: 43, nombre: "Inv B" }];
     const trasA = await marcarDevolucionCompletadaSiCorresponde(
       [500],
       "devolución VERIFICADO inv A",

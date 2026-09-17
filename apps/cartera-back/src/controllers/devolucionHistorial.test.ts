@@ -15,8 +15,14 @@ import { beforeEach, describe, expect, it } from "bun:test";
 
 let creditosRows: any[] = [];
 let totalRow: { count: number } = { count: 0 };
-let padreRestantes: Array<{ credito_id: number; restantes: number }> = [];
-let espejoResidual: Array<{ credito_id: number; inversionista_id: number; monto_aportado: string }> = [];
+let padreRestantes: Array<{ credito_id: number; inversionista_id: number; nombre: string }> = [];
+let espejoResidual: Array<{ credito_id: number; inversionista_id: number; monto_aportado: string; nombre: string }> = [];
+// Cuenta las llamadas a innerJoin().where() DENTRO de una sola invocación de
+// filtrarCreditosTotalmenteDevueltos (padre=1ra, espejo=2da). Vive fuera de
+// dbMock() porque fabricaDb()/dbMock() corren una sola vez al registrar el
+// mock.module, no por test — un contador local ahí quedaría pegado tras el
+// primer test.
+let joinCallCount = 0;
 
 // db.select(...).from(creditos).leftJoin(...).where(...) tiene DOS formas:
 //   - con .orderBy().limit().offset()  -> la query paginada de créditos
@@ -40,13 +46,19 @@ function dbMock() {
           return base;
         },
         // Usado por filtrarCreditosTotalmenteDevueltos vía el ejecutor `db`
-        // (no una tx): select().from(tabla).where(...).groupBy() / plano.
+        // (no una tx): lock plano, o join+where para las filas crudas
+        // (padre/espejo, en ese orden) que la función filtra en JS con esCube.
         where: (..._args: any[]) => {
-          const r: any = Promise.resolve(espejoResidual);
-          r.groupBy = () => Promise.resolve(padreRestantes);
+          const r: any = Promise.resolve([]);
           r.orderBy = () => ({ for: () => Promise.resolve([]) });
           return r;
         },
+        innerJoin: () => ({
+          where: () => {
+            joinCallCount++;
+            return Promise.resolve(joinCallCount === 1 ? padreRestantes : espejoResidual);
+          },
+        }),
       }),
     }),
     transaction: async (cb: any) => cb(dbMock()),
@@ -70,6 +82,7 @@ beforeEach(() => {
   totalRow = { count: 0 };
   padreRestantes = [];
   espejoResidual = [];
+  joinCallCount = 0;
 });
 
 describe("listPendingDevolucion — status=HISTORIAL", () => {
@@ -105,7 +118,7 @@ describe("listPendingDevolucion — status=HISTORIAL", () => {
       { credito_id: 78, numero_credito_sifco: "S78", usuario_nombre: "Cliente", capital: "100", cuota: "10", fecha_creacion: new Date(), estado_devolucion: "VERIFICADO", motivo_contextual: null },
     ];
     totalRow = { count: 1 };
-    padreRestantes = [{ credito_id: 78, restantes: 1 }];
+    padreRestantes = [{ credito_id: 78, inversionista_id: 42, nombre: "Inv 42" }];
 
     const res: any = await listPendingDevolucion(makeCtx({ status: "HISTORIAL" }));
 
@@ -121,7 +134,7 @@ describe("listPendingDevolucion — status=HISTORIAL", () => {
     ];
     totalRow = { count: 1 };
     padreRestantes = [];
-    espejoResidual = [{ credito_id: 500, inversionista_id: 42, monto_aportado: "1500.00" }];
+    espejoResidual = [{ credito_id: 500, inversionista_id: 42, monto_aportado: "1500.00", nombre: "Inv 42" }];
 
     const res: any = await listPendingDevolucion(makeCtx({ status: "HISTORIAL" }));
 

@@ -1,3 +1,7 @@
+import {
+  excluirTraspasosSinBorrar,
+  type EntradaPool,
+} from "./poolsTraspasos";
 import Big from "big.js";
 import { eq, and, inArray } from "drizzle-orm";
 import fs from "fs";
@@ -569,19 +573,26 @@ export async function processPoolsRaros(
 
   // Separar: creditos que coinciden con el pool → recalcular
   //          creditos con numero diferente → eliminar de la BD
-  const creditosParaRecalcular: CreditoAgrupado[] = [];
+  // Las entradas se ARMAN MARCADAS con el crédito origen del que dependen, para
+  // poder descartar después los traspasos cuyo borrado no llegó a ocurrir. Ver
+  // `excluirTraspasosSinBorrar`.
+  const poolsMarcados: {
+    numeroCredito: string;
+    entradas: EntradaPool<CreditoJson>[];
+  }[] = [];
   const creditosParaEliminar: CreditoEliminar[] = [];
 
   for (const pool of pools) {
     const numeroBasePool = pool.numeroCredito.split("_")[0];
-    const creditosDelPool: CreditoJson[] = [];
+    const entradasDelPool: EntradaPool<CreditoJson>[] = [];
 
     for (const credito of pool.creditos) {
       const numeroBaseCredito = credito.numeroCredito.split("_")[0];
 
       if (numeroBaseCredito === numeroBasePool) {
-        // Coincide con el pool → asignar al credito principal
-        creditosDelPool.push(credito);
+        // Coincide con el pool → asignar al credito principal. No depende de
+        // ningún borrado, así que va sin origen.
+        entradasDelPool.push({ credito, origenBase: null });
       } else {
         // Numero diferente → eliminar ese credito de la BD
         creditosParaEliminar.push({
@@ -589,18 +600,23 @@ export async function processPoolsRaros(
           inversionista: credito.inversionista,
           capitalRestante: credito.capitalRestante,
         });
-        // Pero el inversionista va al credito principal con su capital
-        creditosDelPool.push({
-          ...credito,
-          numeroCredito: numeroBasePool, // Reasignar al credito correcto
+        // Pero el inversionista va al credito principal con su capital — SÓLO
+        // si el borrado de arriba de verdad ocurre. Se guarda de qué crédito
+        // depende para poder verificarlo después.
+        entradasDelPool.push({
+          credito: {
+            ...credito,
+            numeroCredito: numeroBasePool, // Reasignar al credito correcto
+          },
+          origenBase: numeroBaseCredito,
         });
       }
     }
 
-    if (creditosDelPool.length > 0) {
-      creditosParaRecalcular.push({
+    if (entradasDelPool.length > 0) {
+      poolsMarcados.push({
         numeroCredito: numeroBasePool,
-        creditos: creditosDelPool,
+        entradas: entradasDelPool,
       });
     }
   }
@@ -615,7 +631,21 @@ export async function processPoolsRaros(
     });
   }
 
-  // 2. Luego recalcular los creditos correctos con todos sus inversionistas
+  /**
+   * 2. Recién ACÁ se decide qué se recalcula, y con el resultado del borrado en
+   * la mano — no antes.
+   *
+   * El borrado puede rechazarse (crédito con un cobro adicional con deuda viva),
+   * y mientras esto no se miraba, el recálculo le sumaba al crédito principal
+   * las tenencias de un crédito que quedó en pie: el mismo capital contado dos
+   * veces. Ver `excluirTraspasosSinBorrar` para por qué se excluye el traspaso
+   * en vez de abortar el pool o tirar.
+   */
+  const creditosParaRecalcular: CreditoAgrupado[] = excluirTraspasosSinBorrar(
+    poolsMarcados,
+    resultadoEliminacion?.detalles ?? null
+  );
+
   const resultadoRecalculo = await recalcularCreditosDesdeJson(
     creditosParaRecalcular,
     {

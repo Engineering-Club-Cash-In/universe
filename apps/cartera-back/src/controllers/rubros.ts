@@ -447,7 +447,7 @@ async function abonosAplicadosDeRubros(
  * Existe por un caso puntual y feo: un rubro ANULADO al que después le borraron
  * el pago. Ahí las dos fuentes normales fallan a la vez. El reclamo se fue con
  * el pago (`rubros_pagos.pago_id` es ON DELETE CASCADE, y la carga por Excel,
- * `migratePayments`, `/recalculate` y `marcarCreditoComoCaido` borran
+ * `migratePayments`, `eliminarCreditos` y `marcarCreditoComoCaido` borran
  * `pagos_credito` sin pasar por `revertirRubrosDelPago` — los dos últimos sólo
  * cuando el rubro ya está saldado o anulado, que es justo este caso), así que la
  * suma da 0;
@@ -593,14 +593,20 @@ export async function listarRubrosDeCredito(credito_id: number) {
      * Pero el FK de `rubros_pagos.pago_id` es ON DELETE CASCADE, y hay varios
      * flujos que borran filas de `pagos_credito` sin pasar por
      * `revertirRubrosDelPago`: la carga por Excel (`processFromExcelFull` y las
-     * dos de `migration.ts`), `migratePayments`, `/recalculate` y
+     * dos de `migration.ts`), `migratePayments`, `eliminarCreditos` y
      * `marcarCreditoComoCaido`.
      *
-     * Los dos últimos hoy BLOQUEAN si el crédito tiene rubros con deuda viva
+     * Los dos últimos BLOQUEAN si el crédito tiene rubros con deuda viva
      * (`anulado = false AND completado = false`), así que por esas dos vías sólo
      * llegan acá rubros ya saldados o anulados — que es exactamente el caso que
      * esta función atiende, no una excepción. Las de Excel y `migratePayments`
      * no tienen guard, y ahí el rubro puede ser cualquiera.
+     *
+     * ⚠️ Ojo con la ruta, que acá decía `/recalculate` y es inexacto: el guard
+     * vive en `eliminarCreditos` (`/recalculate/eliminar-creditos` y
+     * `/recalculate/pools-raros`). `recalcularCreditosDesdeJson` —la que sirve
+     * `/recalculate/from-json`— NO tiene guard de rubros de ningún tipo, y ésa
+     * no borra pagos: los recrea desde el JSON.
      *
      * Después de cualquiera de esos los reclamos ya no existen pero
      * `saldo_pendiente` sigue descontado, y la suma sola diría 0.00 sobre plata

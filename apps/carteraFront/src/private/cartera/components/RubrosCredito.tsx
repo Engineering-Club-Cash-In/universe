@@ -904,11 +904,7 @@ function VistaCrear({
               <button
                 type="button"
                 onClick={onCrearTipo}
-          // También se apaga con un tipo no cobrable: el desplegable ya lo
-          // muestra deshabilitado, pero el borrador sobrevive al desvío a
-          // "Administrar tipos" y el crédito pudo cambiar de estado en el medio,
-          // así que la selección puede quedar apuntando a uno apagado.
-          disabled={crear.isPending || !!motivoTipoElegido}
+                disabled={crear.isPending}
                 className="text-xs font-semibold text-purple-700 hover:underline disabled:opacity-50 disabled:pointer-events-none"
               >
                 + Crear tipo nuevo
@@ -1032,7 +1028,14 @@ function VistaCrear({
         <Button
           onClick={submit}
           className="bg-purple-600 hover:bg-purple-700 text-white"
-          disabled={crear.isPending}
+          // Se apaga también con un tipo no cobrable, y no alcanza con que la
+          // `<option>` esté deshabilitada: al crear un tipo nuevo desde acá,
+          // `onCreado` lo deja SELECCIONADO, así que el valor del select puede
+          // quedar apuntando a una opción apagada. Y el borrador sobrevive al
+          // desvío a "Administrar tipos", donde el crédito pudo cambiar de
+          // estado. Sin este guard el envío se come el 409 con el formulario ya
+          // lleno — que es justo lo que el apagado quería evitar.
+          disabled={crear.isPending || !!motivoTipoElegido}
         >
           {crear.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
           Crear rubro

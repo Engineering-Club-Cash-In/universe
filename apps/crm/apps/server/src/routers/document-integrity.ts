@@ -4,7 +4,6 @@ import { buildDocumentRecommendedAction } from "../lib/document-integrity/decisi
 import type { Signal, ValidationResult } from "../lib/document-integrity/types";
 import {
 	currentValidationResult,
-	currentValidationReason,
 } from "../lib/document-integrity/types";
 import {
 	canRunDocumentIntegrityValidation,
@@ -64,10 +63,7 @@ function toPublicValidation(validation: {
 	return {
 		id: validation.id,
 		result: currentValidationResult(validation.autoResult),
-		reason: currentValidationReason(
-			validation.autoResult,
-			validation.autoReason,
-		),
+		reason: validation.autoReason,
 		recommendedAction: buildDocumentRecommendedAction({
 			result: validation.autoResult,
 			signals: validation.signals,

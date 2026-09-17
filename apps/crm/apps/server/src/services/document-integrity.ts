@@ -56,7 +56,6 @@ import {
 import type { DocumentIntegrityAiResult } from "../lib/document-integrity/types";
 import {
 	currentValidationResult,
-	currentValidationReason,
 } from "../lib/document-integrity/types";
 import {
 	canApproveDocumentIntegrityValidation,
@@ -1297,6 +1296,17 @@ async function assertUploadedBankStatementsValidatedWithTransaction(
 			"Los archivos del análisis no coinciden con la validación documental realizada.",
 		);
 	}
+	const legacyValidationCount = validations.filter(
+		(validation) =>
+			validation.autoResult === "revision_manual" ||
+			validation.autoResult === "observacion",
+	).length;
+	if (legacyValidationCount > 0) {
+		throw new DocumentIntegrityError(
+			"BAD_REQUEST",
+			"Estos documentos tienen una validaciÃ³n histÃ³rica que requiere volver a validar antes de analizar la capacidad de pago.",
+		);
+	}
 	const rejectedDocumentCount = getRejectedDocumentCount(validations);
 	if (rejectedDocumentCount > 0) {
 		throw new DocumentIntegrityError(
@@ -1963,7 +1973,7 @@ export async function getLatestReusableDocumentIntegrityRun(params: {
 			validation: {
 				id: validation.id,
 				result: currentValidationResult(validation.result),
-				reason: currentValidationReason(validation.result, validation.reason),
+				reason: validation.reason,
 				recommendedAction: buildDocumentRecommendedAction({
 					result: validation.result,
 					signals: validation.signals,
@@ -2302,7 +2312,7 @@ export async function getDocumentIntegrityValidationGroup(params: {
 			return {
 				...details,
 				autoResult: currentValidationResult(row.autoResult),
-				autoReason: currentValidationReason(row.autoResult, row.autoReason),
+				autoReason: row.autoReason,
 				signals: details.signals.filter(
 					(signal) => signal.code !== "identidad_comparada",
 				),

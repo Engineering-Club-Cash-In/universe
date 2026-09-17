@@ -8,10 +8,7 @@ import {
 
 describe("document integrity UI flow", () => {
 	test("habilita capacidad para veredictos que no requieren aprobación manual", () => {
-		for (const result of [
-			"valido",
-			"observacion",
-		] satisfies IntegrityResult[]) {
+		for (const result of ["valido"] satisfies IntegrityResult[]) {
 			expect(
 				hasCompleteIntegrityValidation({
 					payloads: [{ key: "a.pdf" }],
@@ -29,7 +26,7 @@ describe("document integrity UI flow", () => {
 					{ validation: { result: "revision_manual", manualApproval: null } },
 				],
 			}),
-		).toBe(true);
+		).toBe(false);
 		expect(
 			hasCompleteIntegrityValidation({
 				payloads: [{ key: "a.pdf" }],
@@ -42,7 +39,7 @@ describe("document integrity UI flow", () => {
 					},
 				],
 			}),
-		).toBe(true);
+		).toBe(false);
 	});
 
 	test("un rechazo bloquea capacidad aunque exista una aprobación histórica", () => {

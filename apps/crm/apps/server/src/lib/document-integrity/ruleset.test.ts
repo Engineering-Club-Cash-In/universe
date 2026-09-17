@@ -65,10 +65,10 @@ describe("document integrity ruleset", () => {
 	});
 	test("las revisiones y observaciones históricas se habilitan sin reescribir el resultado original", () => {
 		for (const result of ["revision_manual", "observacion"] as const) {
-			expect(currentValidationResult(result)).toBe("valido");
+			expect(currentValidationResult(result)).toBe(result);
 			expect(
 				currentValidationReason(result, "Requiere revisión humana"),
-			).toContain("alertas informativas");
+			).toContain("Requiere");
 		}
 		expect(currentValidationResult("error")).toBe("error");
 		expect(currentValidationResult("rechazado")).toBe("rechazado");

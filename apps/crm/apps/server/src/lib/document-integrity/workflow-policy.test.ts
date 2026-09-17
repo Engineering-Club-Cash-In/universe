@@ -182,7 +182,7 @@ describe("document integrity workflow policy", () => {
 				],
 				2,
 			),
-		).toBe(true);
+		).toBe(false);
 		expect(
 			isCompleteValidationRun(
 				[{ validation: { autoResult: "valido" } }, { validation: null }],

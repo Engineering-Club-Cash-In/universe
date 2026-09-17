@@ -118,7 +118,10 @@ export function isCompleteValidationRun(
 		results.length === expectedDocuments &&
 		results.every(
 			(result) =>
-				!!result.validation && result.validation.autoResult !== "error",
+				!!result.validation &&
+				result.validation.autoResult !== "error" &&
+				result.validation.autoResult !== "revision_manual" &&
+				result.validation.autoResult !== "observacion",
 		)
 	);
 }

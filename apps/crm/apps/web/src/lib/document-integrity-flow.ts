@@ -30,7 +30,9 @@ export function hasCompleteIntegrityValidation(
 			(result) =>
 				!!result.validation &&
 				result.validation.result !== "error" &&
-				result.validation.result !== "rechazado",
+				result.validation.result !== "rechazado" &&
+				result.validation.result !== "revision_manual" &&
+				result.validation.result !== "observacion",
 		)
 	);
 }

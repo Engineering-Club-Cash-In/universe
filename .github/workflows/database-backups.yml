@@ -1,6 +1,13 @@
 name: Database backups
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/database-backups.yml
+      - scripts/backup-postgres-to-r2.sh
+      - scripts/backup-postgres-to-r2.test.sh
+      - scripts/validate-r2-lifecycle.py
+      - scripts/write-pg-service.py
   schedule:
     - cron: "17 8 * * *"
   workflow_dispatch:
@@ -18,18 +25,41 @@ on:
 
 permissions:
   contents: read
-  issues: write
-
-concurrency:
-  group: production-database-backups
-  cancel-in-progress: false
 
 jobs:
+  validate:
+    name: Validate database backup workflow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Run tests and static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+          scripts/backup-postgres-to-r2.test.sh
+          shellcheck scripts/backup-postgres-to-r2.sh scripts/backup-postgres-to-r2.test.sh
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/database-backups.yml
+
   backup:
     name: Backup CRM and Cartera to R2
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: production-backups
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: production-database-backups
+      cancel-in-progress: false
 
     steps:
       - name: Check out repository

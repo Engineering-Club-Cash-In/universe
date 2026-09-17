@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	calcularRegeneracionCotizacionFechaIdeal,
-	redistribuirMontosInversionistas,
+	aplicarDeltaMontosInversionistas,
 } from "./fecha-ideal-cotizacion";
 
 const cotizacionBase = {
@@ -82,35 +82,50 @@ describe("calcularRegeneracionCotizacionFechaIdeal", () => {
 	});
 });
 
-describe("redistribuirMontosInversionistas", () => {
-	test("reconcilia el capital al centavo sin depender del redondeo individual", () => {
-		const resultado = redistribuirMontosInversionistas(
+describe("aplicarDeltaMontosInversionistas", () => {
+	test("preserva la asignación ingresada y distribuye solo el delta", () => {
+		const resultado = aplicarDeltaMontosInversionistas(
 			[
 				{
 					inversionista_id: 10,
 					nombre: "Inversionista A",
-					monto_aportado: 43497.58,
+					monto_aportado: 60000,
 					porcentaje_participacion: 50,
 				},
 				{
 					inversionista_id: 20,
 					nombre: "Inversionista B",
-					monto_aportado: 43497.57,
+					monto_aportado: 40000,
 					porcentaje_participacion: 50,
 				},
 			],
-			88419.27,
+			1424.13,
 		);
 
 		expect(
 			resultado.map((inversionista) => inversionista.monto_aportado),
-		).toEqual([44209.64, 44209.63]);
+		).toEqual([60712.07, 40712.06]);
 		expect(
 			resultado.reduce(
 				(total, inversionista) =>
 					total + Math.round(inversionista.monto_aportado * 100),
 				0,
 			),
-		).toBe(8841927);
+		).toBe(10142413);
+	});
+
+	test("resta únicamente el delta al reemplazar un ajuste", () => {
+		const resultado = aplicarDeltaMontosInversionistas(
+			[
+				{ monto_aportado: 60712.07, porcentaje_participacion: 50 },
+				{ monto_aportado: 40712.06, porcentaje_participacion: 50 },
+			],
+			-1424.13,
+		);
+
+		expect(resultado.map(({ monto_aportado }) => monto_aportado)).toEqual([
+			60000,
+			40000,
+		]);
 	});
 });

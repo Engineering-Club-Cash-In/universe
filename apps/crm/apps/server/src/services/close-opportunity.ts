@@ -1039,13 +1039,13 @@ async function createCredit(
 			};
 		}
 		if (
-			ajusteYaFinanciado &&
+			opportunity.diaPagoOriginalSistema != null &&
 			params.idealPaymentDateAdjustmentReferenceDate == null
 		) {
 			return {
 				success: false,
 				error:
-					"La cotización financiada no tiene fecha de referencia para generar el calendario. Regenera la asignación antes de crear el crédito.",
+					"La cotización con fecha ideal no tiene fecha de referencia para generar el calendario. Regenera la asignación antes de crear el crédito.",
 			};
 		}
 		const fechaReferenciaPrimeraCuota =

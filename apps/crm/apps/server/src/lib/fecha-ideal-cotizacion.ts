@@ -21,11 +21,11 @@ export interface RegeneracionCotizacionFechaIdeal {
 	delta: number;
 }
 
-export function redistribuirMontosInversionistas<
+export function aplicarDeltaMontosInversionistas<
 	T extends { monto_aportado?: number; porcentaje_participacion?: number },
 >(
 	inversionistas: T[],
-	totalFinanciado: number,
+	delta: number,
 ): Array<T & { monto_aportado: number }> {
 	const totalPorcentaje = inversionistas.reduce(
 		(total, inversionista) =>
@@ -36,17 +36,17 @@ export function redistribuirMontosInversionistas<
 		throw new Error("La participación total debe ser mayor a cero");
 	}
 
-	const totalCentavos = new Big(totalFinanciado)
-		.times(100)
-		.round(0, Big.roundHalfUp);
+	const deltaCentavos = new Big(delta).times(100).round(0, Big.roundHalfUp);
+	const signo = deltaCentavos.lt(0) ? -1 : 1;
+	const centavosARepartir = deltaCentavos.abs();
 	const asignaciones = inversionistas.map((inversionista, index) => {
-		const exacto = totalCentavos
+		const exacto = centavosARepartir
 			.times(inversionista.porcentaje_participacion ?? 0)
 			.div(totalPorcentaje);
 		const centavos = exacto.round(0, Big.roundDown);
 		return { index, centavos, residuo: exacto.minus(centavos) };
 	});
-	let restantes = totalCentavos
+	let restantes = centavosARepartir
 		.minus(
 			asignaciones.reduce(
 				(total, asignacion) => total.plus(asignacion.centavos),
@@ -61,10 +61,21 @@ export function redistribuirMontosInversionistas<
 		asignacion.centavos = asignacion.centavos.plus(1);
 	}
 
-	return inversionistas.map((inversionista, index) => ({
-		...inversionista,
-		monto_aportado: asignaciones[index].centavos.div(100).toNumber(),
-	}));
+	return inversionistas.map((inversionista, index) => {
+		const montoActualCentavos = new Big(inversionista.monto_aportado ?? 0)
+			.times(100)
+			.round(0, Big.roundHalfUp);
+		const nuevoMontoCentavos = montoActualCentavos.plus(
+			asignaciones[index].centavos.times(signo),
+		);
+		if (nuevoMontoCentavos.lt(0)) {
+			throw new Error("El delta no puede dejar aportaciones negativas");
+		}
+		return {
+			...inversionista,
+			monto_aportado: nuevoMontoCentavos.div(100).toNumber(),
+		};
+	});
 }
 
 export function calcularRegeneracionCotizacionFechaIdeal(

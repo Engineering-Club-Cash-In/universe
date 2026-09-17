@@ -75,7 +75,6 @@ import {
 	calcularAjusteFechaIdeal,
 	getDiaPagoOriginalSistema,
 } from "../lib/fecha-ideal-pago-ajuste";
-import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
 	puedeAsignarInversionistas,
 	puedeCambiarDiaPago,
@@ -83,9 +82,12 @@ import {
 } from "../lib/fecha-ideal-pago-edicion";
 import {
 	calcularRegeneracionCotizacionFechaIdeal,
-	redistribuirMontosInversionistas,
+	aplicarDeltaMontosInversionistas,
 } from "../lib/fecha-ideal-cotizacion";
-import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
+import {
+	getGuatemalaMonthWindow,
+	toDateStrGT,
+} from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
@@ -7286,9 +7288,9 @@ export const crmRouter = {
 						ajusteAnterior: previousAdjustment,
 						ajusteNuevo: idealPaymentDateAdjustment,
 					});
-					investorsToPersist = redistribuirMontosInversionistas(
+					investorsToPersist = aplicarDeltaMontosInversionistas(
 						allInvestors,
-						regenerated.totalFinanced,
+						regenerated.delta,
 					);
 
 					await tx
@@ -7302,7 +7304,7 @@ export const crmRouter = {
 								idealPaymentDateAdjustment.toFixed(2),
 							idealPaymentDateAdjustmentDays,
 							idealPaymentDateAdjustmentReferenceDate:
-								idealPaymentDateAdjustment > 0
+								esDiaIA
 									? toDateStrGT(fechaReferencia)
 									: null,
 							updatedAt: fechaReferencia,

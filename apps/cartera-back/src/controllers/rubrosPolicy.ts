@@ -385,9 +385,10 @@ export const eventoDeEdicion = ({
  * Dejan de coincidir cuando algo borra filas de `pagos_credito` sin pasar por
  * `revertirRubrosDelPago`: el FK de `rubros_pagos` es ON DELETE CASCADE, así
  * que los reclamos desaparecen mientras `saldo_pendiente` sigue descontado.
- * Lo hacen `/recalcular-pagos`, `marcarCreditoComoCaido`, la reducción de plazo
- * y la carga por Excel, entre otros. Después de cualquiera de esos, la suma de
- * reclamos cae a 0 y esta resta sigue dando lo de antes.
+ * Lo hacen la carga por Excel, `migratePayments`, `/recalculate` y
+ * `marcarCreditoComoCaido` — los dos últimos ya sólo cuando el rubro está
+ * saldado o anulado, porque bloquean si hay deuda viva. Después de cualquiera de
+ * esos, la suma de reclamos cae a 0 y esta resta sigue dando lo de antes.
  *
  * Y para lo que esta función decide —hasta dónde se puede BAJAR el monto— la
  * versión derivada del saldo es la correcta, justamente por eso: el saldo sigue

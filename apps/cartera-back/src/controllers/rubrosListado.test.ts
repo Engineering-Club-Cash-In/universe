@@ -145,9 +145,10 @@ describe("listarRubrosDeCredito — el `abonado` es lo que el cliente PAGÓ", ()
     // Este caso NO puede venir de una boleta apartada: apartar no baja el
     // saldo (lo dice `cobrarRubrosParaBoleta`). Si no hay ningún reclamo
     // aplicado y aun así el saldo es MENOR que el monto, el hueco sólo puede
-    // venir de un borrado de `pagos_credito` en cascada —`marcarCreditoComoCaido`,
-    // la reducción de plazo, la carga por Excel o `/recalculate`—, que se lleva
-    // los reclamos y deja el descuento.
+    // venir de un borrado de `pagos_credito` en cascada —la carga por Excel,
+    // `migratePayments`, `/recalculate` o `marcarCreditoComoCaido`—, que se lleva
+    // los reclamos y deja el descuento. (Los dos últimos bloquean si hay deuda
+    // viva, así que por ahí llega justo este caso: el rubro ya saldado.)
     //
     // Reportar 0.00 ahí borraría de la pantalla plata que el cliente pagó y que
     // se facturó, y además contradiría al backend: `puedeEditarMonto` usa esa
@@ -185,7 +186,9 @@ describe("listarRubrosDeCredito — el `abonado` es lo que el cliente PAGÓ", ()
     //
     // Secuencia: rubro de Q1,000 → boleta cobra Q400 y contabilidad la aplica
     // (saldo 600) → un ADMIN lo anula (saldo forzado a 0) → después corre
-    // `/recalculate` (o la carga por Excel, o `marcarCreditoComoCaido`) y borra
+    // `/recalculate` (o la carga por Excel, o `marcarCreditoComoCaido` — los dos
+    // primeros no miran el rubro; el tercero lo deja pasar porque ya está
+    // anulado) y borra
     // el `pagos_credito`. El FK de `rubros_pagos` es ON DELETE CASCADE, así que
     // el reclamo desaparece y la suma queda en 0. La resta tampoco sirve: anular
     // ya había puesto el saldo en 0, así que daría el monto entero.

@@ -1086,24 +1086,6 @@ export async function insertPagosCreditoInversionistas(
       );
     }
 
-    if (updateCredito) {
-      console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors:`);
-      console.log(`      credito_id: ${credito_id}`);
-      console.log(`      abono_capital: ${abono_capital.toNumber()}`);
-      console.log(`      addition: false (RESTA)`);
-      console.log(`      inversionista_id: ${inv.inversionista_id}`);
-
-      await processAndReplaceCreditInvestors(
-        credito_id,
-        abono_capital.toNumber(),
-        false,
-        inv.inversionista_id,
-        true
-      );
-    } else {
-      console.log(`\n   ⏭️  updateCredito=false → omitiendo UPDATE a creditos_inversionistas_espejo`);
-    }
-
     console.log(`   📊 Porcentajes:`);
     console.log(`      porcentaje_cash_in: ${inv.porcentaje_cash_in}`);
     console.log(
@@ -1172,6 +1154,30 @@ export async function insertPagosCreditoInversionistas(
           `[ABONO_SUPERA_MONTO] Inv ${inv.inversionista_id} Cred ${credito_id}: abono_capital (${abono_capital.toString()}) > monto_aportado (${inv.monto_aportado})`
         );
       }
+    }
+
+    // Se llama recién acá, con el abono_capital YA final (incluye lo sumado por
+    // resolverAbonosNoLiquidados y el clamp de la validación de arriba): antes
+    // se llamaba con el valor previo a esos dos ajustes, así que un abono
+    // CAPITAL pendiente sumado al abono_capital de este pago nunca se
+    // restaba de creditos_inversionistas_espejo.monto_aportado — quedaba
+    // marcado liquidado acá pero sin descontar del espejo, pagable de nuevo.
+    if (updateCredito) {
+      console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors:`);
+      console.log(`      credito_id: ${credito_id}`);
+      console.log(`      abono_capital: ${abono_capital.toNumber()}`);
+      console.log(`      addition: false (RESTA)`);
+      console.log(`      inversionista_id: ${inv.inversionista_id}`);
+
+      await processAndReplaceCreditInvestors(
+        credito_id,
+        abono_capital.toNumber(),
+        false,
+        inv.inversionista_id,
+        true
+      );
+    } else {
+      console.log(`\n   ⏭️  updateCredito=false → omitiendo UPDATE a creditos_inversionistas_espejo`);
     }
 
     const resultado = {

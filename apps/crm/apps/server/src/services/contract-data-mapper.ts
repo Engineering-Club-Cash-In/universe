@@ -693,12 +693,13 @@ export async function mapOpportunityToContractData(
 		vendedor,
 		desembolso,
 		entidad,
-		// trim: varios nombres en `companies` traen espacios sobrantes
-		// La razón social es el nombre legal; el comercial queda de respaldo.
-		agencia:
-			empresaAgencia?.razonSocial?.trim() ||
-			empresaAgencia?.name?.trim() ||
-			undefined,
+		// Solo la razón social: {agencia} es el nombre legal de la
+		// distribuidora. El nombre comercial de `companies` ("Jetour",
+		// "GRUPO Q / PEUGEOT") no sirve para el contrato, y precargarlo dejaría
+		// el campo como completo con un dato que jurídico igual reescribe.
+		// Sin razón social el campo queda vacío y el asistente lo marca como
+		// pendiente. trim: varios valores traen espacios sobrantes.
+		agencia: empresaAgencia?.razonSocial?.trim() || undefined,
 		oportunidad: {
 			id: opportunity.id,
 			titulo: opportunity.title,

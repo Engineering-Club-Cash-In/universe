@@ -21,7 +21,7 @@ integrationTest("constraints Nexa resisten concurrencia, replay y rollback", asy
   parseTestDatabaseUrl(testDatabaseUrl!);
   const sql = postgres(testDatabaseUrl!, { ssl: false });
   const migration = await Bun.file(
-    new URL("../../drizzle/0035_add_nexa_internal_payments.sql", import.meta.url),
+    new URL("../../drizzle/0039_add_nexa_internal_payments.sql", import.meta.url),
   ).text();
 
   try {

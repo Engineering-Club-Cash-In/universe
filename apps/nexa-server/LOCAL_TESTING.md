@@ -7,7 +7,7 @@ This flow tests the integration locally without exposing a real webhook URL.
 From `apps/cartera-back`:
 
 ```bash
-NEXA_INTERNAL_API_SECRET=replace-with-at-least-32-characters bun run devStart
+INTERNAL_API_KEY=dev-secret bun run devStart
 ```
 
 ## 2. Configure nexa-server
@@ -18,11 +18,7 @@ From `apps/nexa-server`, make sure `.env` has:
 DATABASE_URL=postgres://...
 PORT=7010
 CARTERA_API_BASE_URL=http://localhost:7000
-NEXA_ADMIN_API_KEY=replace-with-a-distinct-admin-key
-CARTERA_INTERNAL_API_SECRET=replace-with-at-least-32-characters
-CARTERA_API_TIMEOUT_MS=10000
-CARTERA_TARGET_ENV=development
-CARTERA_DEVELOPMENT_ALLOWED_ORIGINS=http://localhost:7000
+INTERNAL_API_KEY=dev-secret
 NEXA_WEBHOOK_FLOW_ID=local-flow
 NEXA_WEBHOOK_BEARER_TOKEN=local-webhook-token
 ```
@@ -44,7 +40,7 @@ curl http://localhost:7010/health
 
 ```bash
 curl -X POST http://localhost:7010/admin/tokens/bootstrap \
-  -H "Authorization: Bearer $NEXA_ADMIN_API_KEY"
+  -H "Authorization: Bearer dev-secret"
 ```
 
 ## 5. Create one token user for a credit
@@ -53,7 +49,7 @@ Replace `123` and the DPI with valid local data:
 
 ```bash
 curl -X POST http://localhost:7010/admin/token-users \
-  -H "Authorization: Bearer $NEXA_ADMIN_API_KEY" \
+  -H "Authorization: Bearer dev-secret" \
   -H "Content-Type: application/json" \
   -d '{
     "creditoId": 123,
@@ -119,8 +115,3 @@ Check:
 - `nexa-server` logs show review `APPROVED` sent to Nexa UAT.
 
 Use a new reference for each re-test unless you intentionally want to validate duplicate/idempotent behavior.
-
-## Log events to monitor
-
-- `scope=nexa-webhook event=received`: webhook receipt heartbeat; absence alone cannot prove silence without external request telemetry.
-- `scope=nexa-reconciliation event=reconciliation_alert`: actionable `FAILED_DUE`, `FAILED_AGED`, `MANUAL_REVIEW`, or `REVIEW_PENDING_AGED` row. Fields are bounded to reconciliation identifiers and safe failure codes.

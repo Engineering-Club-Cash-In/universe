@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-test("0035 vincula cada fila de pago al evento Nexa con FK", () => {
+test("0039 vincula cada fila de pago al evento Nexa con FK", () => {
   const migration = readFileSync(
-    join(import.meta.dir, "../../drizzle/0035_add_nexa_internal_payments.sql"),
+    join(import.meta.dir, "../../drizzle/0039_add_nexa_internal_payments.sql"),
     "utf8",
   );
 

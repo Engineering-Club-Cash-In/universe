@@ -47,7 +47,7 @@ test("define el binding y los eventos idempotentes de Nexa", async () => {
     .toHaveLength(1);
 
   const migration = Bun.file(
-    new URL("../../drizzle/0035_add_nexa_internal_payments.sql", import.meta.url),
+    new URL("../../drizzle/0039_add_nexa_internal_payments.sql", import.meta.url),
   );
   expect(await migration.exists()).toBe(true);
 });

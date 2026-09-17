@@ -370,6 +370,10 @@ export function PagoForm() {
           mora: montoMoraAplicado,
           rubros: montoRubrosAplicado,
           convenio: montoConvenioAplicado,
+          // La cuota es el término que faltaba, y el caso más común: sin ella,
+          // una boleta normal sin mora ni rubros ni convenio dejaba todo en cero
+          // y el aviso no salía.
+          cuota: montoCuotaAplicado,
           // El excedente es lo que sobra al final de la cascada, que es lo mismo
           // que el modal pinta como "Excedente (nuevo saldo a favor)".
           excedente: montoRestante,
@@ -570,8 +574,8 @@ export function PagoForm() {
       <p className="text-xs text-amber-800 mt-1 leading-relaxed">
         Esa opción manda los Q{Number(montoBoleta).toFixed(2)} completos a reducir
         capital: no se aplica {noSeAplica.etiquetas.join(", ")} —Q
-        {noSeAplica.total.toFixed(2)} en total— y la cuota queda sin abono. Lo que
-        quede sin cobrar sigue pendiente.
+        {noSeAplica.total.toFixed(2)} en total—. Lo que quede sin cobrar sigue
+        pendiente.
       </p>
     </div>
   )}

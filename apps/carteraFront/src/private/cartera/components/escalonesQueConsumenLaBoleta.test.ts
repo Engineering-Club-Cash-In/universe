@@ -94,7 +94,7 @@ describe("escalonesQueConsumenLaBoleta", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("loQueElAbonoACapitalNoAplica", () => {
-  const sinNada = { mora: 0, rubros: 0, convenio: 0, excedente: 0 };
+  const sinNada = { mora: 0, rubros: 0, convenio: 0, excedente: 0, cuota: 0 };
 
   it("incluye el convenio, que el otro predicado excluye a propósito", () => {
     const a = loQueElAbonoACapitalNoAplica({ ...sinNada, convenio: 300 });
@@ -125,6 +125,7 @@ describe("loQueElAbonoACapitalNoAplica", () => {
       mora: 100,
       rubros: 200,
       convenio: 300,
+      cuota: 0,
       excedente: 500,
     });
 
@@ -148,12 +149,46 @@ describe("loQueElAbonoACapitalNoAplica", () => {
       mora: 100,
       rubros: 200,
       convenio: 300,
+      cuota: 0,
       excedente: 400,
     });
 
     expect(a.etiquetas.join(" ")).not.toContain("otros");
     // Y el total tampoco lo incluye: son los cuatro que salen del disponible.
     expect(a.total).toBe(1000);
+  });
+
+  it("🔴 avisa con SÓLO la cuota, que es el caso MÁS COMÚN", () => {
+    // El que se escapó dos rondas: una boleta normal, sin mora, sin rubros, sin
+    // convenio y sin excedente. Todos los términos en cero, el aviso no salía, y
+    // el botón manda la cuota entera a capital dejándola sin abono.
+    //
+    // Y el texto del aviso YA decía "la cuota queda sin abono": nombraba la
+    // consecuencia mientras el predicado que lo mostraba no la miraba.
+    const a = loQueElAbonoACapitalNoAplica({ ...sinNada, cuota: 1000 });
+
+    expect(a.hayAviso).toBe(true);
+    expect(a.etiquetas).toContain("Q1000.00 a la cuota");
+    expect(a.total).toBe(1000);
+  });
+
+  it("la cuota va ÚLTIMA, que es su lugar en la cascada", () => {
+    const a = loQueElAbonoACapitalNoAplica({
+      mora: 100,
+      rubros: 200,
+      convenio: 300,
+      cuota: 1000,
+      excedente: 400,
+    });
+
+    expect(a.etiquetas).toEqual([
+      "Q100.00 a mora",
+      "Q200.00 a rubros",
+      "Q300.00 al convenio",
+      "Q1000.00 a la cuota",
+      "Q400.00 de excedente a saldo a favor",
+    ]);
+    expect(a.total).toBe(2000);
   });
 
   it("sin nada prometido no hay aviso", () => {

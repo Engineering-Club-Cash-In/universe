@@ -642,6 +642,12 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// crmProcedure deja pasar a jurídico, que no da de alta empresas
+			if (!PERMISSIONS.canCreateCompanies(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para crear empresas",
+				});
+			}
 			const newCompany = await db
 				.insert(companies)
 				.values({

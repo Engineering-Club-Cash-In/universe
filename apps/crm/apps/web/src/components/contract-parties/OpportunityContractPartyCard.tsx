@@ -25,6 +25,7 @@ export function OpportunityContractPartyCard({
 	vendors,
 	companies,
 	cargandoCatalogo,
+	puedeCrearEmpresa = true,
 	disabled,
 	isSaving,
 	onAssignVendor,
@@ -47,6 +48,8 @@ export function OpportunityContractPartyCard({
 	companies: Array<{ id: string; name: string }>;
 	/** Catálogos en vuelo: sin esto, un vendedor aún no cargado parece borrado. */
 	cargandoCatalogo?: boolean;
+	/** Alta rápida de empresa: jurídico entra al CRM pero no da de alta agencias. */
+	puedeCrearEmpresa?: boolean;
 	disabled?: boolean;
 	isSaving?: boolean;
 	onAssignVendor: (vendorId: string | null) => void;
@@ -90,7 +93,7 @@ export function OpportunityContractPartyCard({
 							disabled={disabled || isSaving}
 						/>
 					}
-					onNuevo={() => setDialogo({})}
+					onNuevo={puedeCrearEmpresa ? () => setDialogo({}) : undefined}
 					nuevoLabel="Nueva"
 					ayudaVacio="La agencia que vende el carro nuevo."
 					disabled={disabled}

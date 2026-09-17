@@ -85,7 +85,8 @@ export function ContractPartySlot({
 	/** Identidad y nombre visible de lo asignado; null si no hay. */
 	seleccionado: { id: string; nombre: string } | null;
 	selector: ReactNode;
-	onNuevo: () => void;
+	/** Sin esto no se ofrece crear: el rol no tiene permiso. */
+	onNuevo?: () => void;
 	nuevoLabel: string;
 	ayudaVacio: string;
 	disabled?: boolean;
@@ -114,7 +115,7 @@ export function ContractPartySlot({
 					<div className="space-y-2">
 						<div className="flex gap-2">
 							<div className="min-w-0 flex-1">{selector}</div>
-							{!disabled && (
+							{!disabled && onNuevo && (
 								<Button
 									type="button"
 									variant="outline"

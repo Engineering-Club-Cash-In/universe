@@ -1451,6 +1451,10 @@ function RouteComponent() {
 			cargandoCatalogo={
 				vendorsQuery.isLoading || companiesForContractsQuery.isLoading
 			}
+			puedeCrearEmpresa={
+				!!userProfile.data?.role &&
+				PERMISSIONS.canCreateCompanies(userProfile.data.role)
+			}
 			disabled={isWonLocked}
 			isSaving={updateOpportunityMutation.isPending}
 			onAssignVendor={(vendorId) =>

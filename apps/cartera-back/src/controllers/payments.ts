@@ -1078,29 +1078,10 @@ export async function insertPagosCreditoInversionistas(
       }
     }
 
-    // Se llama recién acá, con el abono_capital YA final (incluye lo sumado por
-    // resolverAbonosNoLiquidados y el clamp de la validación de arriba): antes
-    // se llamaba con el valor previo a esos dos ajustes, así que un abono
-    // CAPITAL pendiente sumado al abono_capital de este pago nunca se
-    // restaba de creditos_inversionistas_espejo.monto_aportado — quedaba
-    // marcado liquidado acá pero sin descontar del espejo, pagable de nuevo.
-    if (updateCredito) {
-      console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors:`);
-      console.log(`      credito_id: ${credito_id}`);
-      console.log(`      abono_capital: ${abono_capital.toNumber()}`);
-      console.log(`      addition: false (RESTA)`);
-      console.log(`      inversionista_id: ${inv.inversionista_id}`);
-
-      await processAndReplaceCreditInvestors(
-        credito_id,
-        abono_capital.toNumber(),
-        false,
-        inv.inversionista_id,
-        true
-      );
-    } else {
-      console.log(`\n   ⏭️  updateCredito=false → omitiendo UPDATE a creditos_inversionistas_espejo`);
-    }
+    // Se actualiza en la transacción atómica de abajo (Codex P1 fix):
+    // Descontar el espejo dentro de db.transaction(tx) garantiza que si falla
+    // la inserción de las fotos o el marcado de abonos, el débito al saldo del
+    // espejo también hace rollback y no se descuenta capital sin foto de pago.
 
     const resultado = {
       pago_id,
@@ -1120,8 +1101,9 @@ export async function insertPagosCreditoInversionistas(
       estado_liquidacion: "NO_LIQUIDADO" as const,
       abono_capital_id: abonoCapitalId,
       fecha_pago: fechaDelPeriodo,
-      // No es columna del espejo: se separa antes del insert (ver abajo).
+      // No son columnas del espejo: se separan antes del insert (ver abajo).
       _abonoIdsConsumidos: abonoIdsConsumidos,
+      _updateCredito: updateCredito,
     };
 
     console.log(`   ✅ Resultado final para ${inv.nombre}:`, {
@@ -1141,25 +1123,42 @@ export async function insertPagosCreditoInversionistas(
   // 4. Insertar todos los registros (ESPEJO)
   const resolvedInserts = await Promise.all(inserts);
 
-  // `_abonoIdsConsumidos` es interno, no es columna: se separa antes del insert.
+  // `_abonoIdsConsumidos` y `_updateCredito` son internos, no son columnas: se separan antes del insert.
   const filas = resolvedInserts.map(
-    ({ _abonoIdsConsumidos, ...fila }) => fila
+    ({ _abonoIdsConsumidos, _updateCredito, ...fila }) => fila
   );
 
-  // 5. Insertar el espejo y marcar los abonos que consumió, ATADOS en una sola
-  //    transacción: o se guardan los dos o ninguno.
+  // 5. Descontar del espejo, insertar la foto de pagos y marcar los abonos consumidos,
+  //    TODO ATADO en una sola transacción: o se aplican todos o ninguno hace commit.
   //
-  //    🔴 Van juntos y no sueltos porque la marca (`pago_espejo_id`) es lo único
-  //    que dice "este abono ya entró en una foto que se va a pagar". Si el espejo
-  //    quedara guardado con el monto adentro pero los abonos sin marcar (falla el
-  //    update, se cae la conexión, se reinicia el proceso), la liquidación —que
-  //    cierra SOLO los marcados— los dejaría abiertos: se pagarían con esta foto
-  //    y el siguiente cálculo los agarraría de nuevo, pagándole DOS VECES el
-  //    mismo capital al inversionista.
-  //
-  //    Atados, si se rompe en el medio no queda foto tampoco y el cálculo se
-  //    rehace limpio la próxima vez.
+  //    🔴 Atomicidad garantizada (Codex P1 fix): el débito a creditos_inversionistas_espejo
+  //    (processAndReplaceCreditInvestors) corre dentro de la misma transacción usando `tx`.
+  //    Si el insert del espejo o el update de abonos_capital falla, el descuento al saldo
+  //    se revierte automáticamente (rollback) en vez de quedar descontado sin foto de pago.
   await db.transaction(async (tx) => {
+    // 5a. Descontar del espejo atómicamente con el abono_capital YA final
+    for (const origen of resolvedInserts) {
+      if (origen._updateCredito) {
+        console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors (en transacción):`);
+        console.log(`      credito_id: ${credito_id}`);
+        console.log(`      abono_capital: ${Number(origen.abono_capital)}`);
+        console.log(`      addition: false (RESTA)`);
+        console.log(`      inversionista_id: ${origen.inversionista_id}`);
+
+        await processAndReplaceCreditInvestors(
+          credito_id,
+          Number(origen.abono_capital),
+          false,
+          origen.inversionista_id,
+          true,
+          tx as any
+        );
+      } else {
+        console.log(`\n   ⏭️  updateCredito=false → omitiendo UPDATE a creditos_inversionistas_espejo para inv ${origen.inversionista_id}`);
+      }
+    }
+
+    // 5b. Insertar fotos en pagos_credito_inversionistas_espejo
     const filasInsertadas = await tx
       .insert(pagos_credito_inversionistas_espejo)
       .values(filas)
@@ -1168,8 +1167,7 @@ export async function insertPagosCreditoInversionistas(
         inversionista_id: pagos_credito_inversionistas_espejo.inversionista_id,
       });
 
-    // Se matchea por inversionista_id (hay una fila por inversionista) y no por
-    // índice, para no depender del orden que devuelve el INSERT.
+    // 5c. Vincular abonos consumidos con pago_espejo_id
     for (const insertada of filasInsertadas) {
       const origen = resolvedInserts.find(
         (r) => r.inversionista_id === insertada.inversionista_id

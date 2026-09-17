@@ -7003,14 +7003,11 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Un DPI inválido no bloquea el avance: el vendedor es opcional y hay
+			// registros viejos cuyo DPI solo se validó por largo.
 			const dpiVendedor = input.vendedor
 				? validarDpi(input.vendedor.dpi)
 				: null;
-			if (dpiVendedor && !dpiVendedor.valid) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: `DPI del vendedor: ${dpiVendedor.error}`,
-				});
-			}
 
 			// Get the opportunity
 			const [opportunity] = await db
@@ -7249,13 +7246,20 @@ export const crmRouter = {
 			// Update opportunity and record history in a transaction for atomicity
 			await auditedTransaction(async (tx) => {
 				// El vendedor se identifica por DPI: si ya existe se actualiza con lo
-				// capturado (nombre legal y género) en vez de duplicarlo.
+				// capturado (nombre legal y género) en vez de duplicarlo. Con un DPI
+				// inválido solo se reusa el vendedor que ya lo tenga registrado; no
+				// se crea uno nuevo con ese DPI y el avance sigue sin vendedor.
 				let vendorId: string | undefined;
-				if (input.vendedor && dpiVendedor?.valid) {
+				if (input.vendedor && dpiVendedor) {
 					const [existente] = await tx
 						.select({ id: vehicleVendors.id })
 						.from(vehicleVendors)
-						.where(eqDpi(vehicleVendors.dpi, dpiVendedor.dpiLimpio))
+						.where(
+							eqDpi(
+								vehicleVendors.dpi,
+								dpiVendedor.valid ? dpiVendedor.dpiLimpio : input.vendedor.dpi,
+							),
+						)
 						.limit(1);
 
 					if (existente) {
@@ -7271,7 +7275,7 @@ export const crmRouter = {
 							})
 							.where(eq(vehicleVendors.id, existente.id));
 						vendorId = existente.id;
-					} else {
+					} else if (dpiVendedor.valid) {
 						const [nuevo] = await tx
 							.insert(vehicleVendors)
 							.values({

@@ -3952,14 +3952,14 @@ const DOCUMENT_INTEGRITY_STATUS_META: Record<
 		Icon: CheckCircle2,
 	},
 	observacion: {
-		label: "Válido",
-		rowClassName: "border-green-200 bg-green-50 text-green-800",
-		Icon: CheckCircle2,
+		label: "Observación",
+		rowClassName: "border-amber-200 bg-amber-50 text-amber-800",
+		Icon: AlertCircle,
 	},
 	revision_manual: {
-		label: "Válido",
-		rowClassName: "border-green-200 bg-green-50 text-green-800",
-		Icon: CheckCircle2,
+		label: "Revisión manual",
+		rowClassName: "border-blue-200 bg-blue-50 text-blue-800",
+		Icon: HelpCircle,
 	},
 	rechazado: {
 		label: "Rechazado",

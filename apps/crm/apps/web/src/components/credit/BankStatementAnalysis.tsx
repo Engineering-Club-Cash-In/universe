@@ -83,12 +83,12 @@ const INTEGRITY_META: Record<
 > = {
 	valido: { label: "Válido", className: "bg-green-100 text-green-800" },
 	observacion: {
-		label: "Válido",
-		className: "bg-green-100 text-green-800",
+		label: "Observación",
+		className: "bg-amber-100 text-amber-800",
 	},
 	revision_manual: {
-		label: "Válido",
-		className: "bg-green-100 text-green-800",
+		label: "Revisión manual",
+		className: "bg-blue-100 text-blue-800",
 	},
 	rechazado: { label: "Rechazado", className: "bg-red-100 text-red-800" },
 	error: { label: "Error", className: "bg-gray-100 text-gray-800" },

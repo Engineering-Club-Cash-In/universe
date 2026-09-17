@@ -710,6 +710,7 @@ describe("document integrity ruleset", () => {
 		expect(
 			applyRuleset({
 				signals: [makeSignal("pdf_protegido_no_abre", 0, "alta", "estructura")],
+				pipelineError: "Gemini no pudo abrir el PDF",
 			}).result,
 		).toBe("rechazado");
 

@@ -1829,6 +1829,8 @@ export async function getDocumentIntegrityStatuses(params: {
 		manuallyApproved: false,
 		validatedAt: row.validatedAt,
 		isStale:
+			row.autoResult === "revision_manual" ||
+			row.autoResult === "observacion" ||
 			!row.isCurrentCompletedRun ||
 			currentPaths.get(row.opportunityDocumentId) !== row.linkedFilePath,
 		signalCount: row.signalCount,
@@ -2022,6 +2024,8 @@ export async function listDocumentIntegrityValidations(params: {
 				${documentIntegrityValidationRuns.status} = 'error'
 					or ${documentIntegrityValidations.autoResult} = 'error'
 					or ${documentIntegrityValidations.autoResult} = 'rechazado'
+					or ${documentIntegrityValidations.autoResult} = 'revision_manual'
+					or ${documentIntegrityValidations.autoResult} = 'observacion'
 			)`,
 		);
 	if (params.search) {
@@ -2058,6 +2062,8 @@ export async function listDocumentIntegrityValidations(params: {
 				when bool_or(${documentIntegrityValidationRuns.status} = 'error') then 'error'
 				when bool_or(${documentIntegrityValidations.autoResult} = 'rechazado') then 'rechazado'
 				when bool_or(${documentIntegrityValidations.autoResult} = 'error') then 'error'
+				when bool_or(${documentIntegrityValidations.autoResult} = 'revision_manual') then 'revision_manual'
+				when bool_or(${documentIntegrityValidations.autoResult} = 'observacion') then 'observacion'
 				else 'valido'
 			end`,
 		})

@@ -103,16 +103,16 @@ const RESULT_META: Record<
 		Icon: CheckCircle2,
 	},
 	observacion: {
-		label: "Válido",
+		label: "Observación",
 		className:
-			"bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
-		Icon: CheckCircle2,
+			"bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+		Icon: AlertTriangle,
 	},
 	revision_manual: {
-		label: "Válido",
+		label: "Revisión manual",
 		className:
-			"bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
-		Icon: CheckCircle2,
+			"bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
+		Icon: HelpCircle,
 	},
 	rechazado: {
 		label: "Rechazado",

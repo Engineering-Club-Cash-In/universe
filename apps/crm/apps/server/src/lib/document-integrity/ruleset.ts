@@ -154,6 +154,15 @@ export function applyRuleset(params: {
 	pipelineError?: string | null;
 }): ValidationOutcome {
 	const { signals, llm } = params;
+	if (signals.some((signal) => signal.code === "pdf_protegido_no_abre")) {
+		return {
+			result: "rechazado",
+			score: 0,
+			reason:
+				"El PDF está protegido y no se puede inspeccionar. Solicita una copia sin contraseña ni protección.",
+			signals,
+		};
+	}
 	if (params.pipelineError) {
 		return { result: "error", score: 0, reason: params.pipelineError, signals };
 	}
@@ -164,16 +173,6 @@ export function applyRuleset(params: {
 			score: 0,
 			reason:
 				"El PDF está dañado o su formato no es válido. Vuelve a cargar una copia válida del estado de cuenta.",
-			signals,
-		};
-	}
-
-	if (signals.some((signal) => signal.code === "pdf_protegido_no_abre")) {
-		return {
-			result: "rechazado",
-			score: 0,
-			reason:
-				"El PDF está protegido y no se puede inspeccionar. Solicita una copia sin contraseña ni protección.",
 			signals,
 		};
 	}

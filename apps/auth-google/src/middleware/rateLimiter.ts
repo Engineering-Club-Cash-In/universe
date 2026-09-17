@@ -6,15 +6,12 @@ interface RateLimitConfig {
   max: number;
   message: string;
   code: string;
-  keySuffix?: (c: Context) => string | null | Promise<string | null>;
   /**
-   * Solo cuentan las respuestas con error (>= 400), y una respuesta buena
-   * borra lo acumulado en su propia cubeta.
+   * Solo cuentan las respuestas con error (>= 400).
    *
    * Es la diferencia entre "cuántas veces te podés equivocar" y "cuántas veces
    * podés entrar". Un límite que cuenta los logins exitosos deja afuera a quien
-   * hace todo bien —y en una oficina detrás de una sola IP pública, el quinto
-   * que entra en 15 minutos tumba a todos los demás.
+   * hace todo bien.
    */
   soloFallos?: boolean;
 }
@@ -42,16 +39,6 @@ function ipDelCliente(c: Context): string | null {
   return null;
 }
 
-async function emailDelLogin(c: Context): Promise<string | null> {
-  if (c.req.path !== "/api/auth/sign-in/email") return null;
-
-  const body: unknown = await c.req.raw.clone().json().catch(() => null);
-  if (!body || typeof body !== "object" || !("email" in body)) return null;
-
-  const email = body.email;
-  return typeof email === "string" ? email.trim().toLowerCase() || null : null;
-}
-
 export function createRateLimiter(config: RateLimitConfig) {
   return async (c: Context, next: Next) => {
     // En desarrollo, no aplicar rate limiting
@@ -66,8 +53,7 @@ export function createRateLimiter(config: RateLimitConfig) {
       return;
     }
 
-    const suffix = await config.keySuffix?.(c);
-    const key = `${config.namespace}:${ip}:${c.req.path}:${suffix ?? ""}`;
+    const key = `${config.namespace}:${ip}`;
     const now = Date.now();
 
     let record = store.get(key);
@@ -116,23 +102,18 @@ export function createRateLimiter(config: RateLimitConfig) {
       return;
     }
 
+    // Reserva antes de ejecutar el handler para que solicitudes concurrentes no
+    // crucen juntas el límite. Los éxitos liberan su reserva; los fallos la dejan.
+    record.count++;
     await next();
-
-    if (c.res.status >= 400) {
-      record.count++;
-    } else {
-      // Entró bien: solo deja de contar el historial de ESTA cuenta. La llave
-      // del login incluye el correo para que un éxito no borre los intentos
-      // contra otra cuenta que comparte la misma IP.
-      store.delete(key);
-    }
+    if (c.res.status < 400) record.count--;
   };
 }
 
 // Rate limiter para endpoints de autenticación.
 //
-// Cuenta SOLO los intentos fallidos: el que escribe bien su contraseña nunca se
-// topa con esto, aunque comparta la IP con toda la oficina.
+// Cuenta SOLO los intentos fallidos por IP y ruta. Los éxitos no consumen ni
+// borran intentos, así que otra cuenta no puede reiniciar la ventana.
 export const authLimiter = createRateLimiter({
   namespace: "auth",
   windowMs: 15 * 60 * 1000, // 15 minutos
@@ -140,15 +121,12 @@ export const authLimiter = createRateLimiter({
   message: "Demasiados intentos de inicio de sesión, intenta de nuevo más tarde",
   code: "RATE_LIMIT_EXCEEDED",
   soloFallos: true,
-  keySuffix: emailDelLogin,
 });
 
 // Rate limiter general para API.
 //
-// La llave incluye el path, pero varias personas pueden compartir IP pública y
-// el portal consulta `/api/auth/get-session` en cada carga y cada foco de
-// pestaña: con 100 por ventana, una oficina se quedaba sin sesión a media
-// mañana. El número sigue siendo un tope contra un bucle desbocado.
+// Varias personas pueden compartir IP pública y el portal consulta sesión con
+// frecuencia. El número sigue siendo un tope contra un bucle desbocado.
 export const apiLimiter = createRateLimiter({
   namespace: "api",
   windowMs: 15 * 60 * 1000, // 15 minutos

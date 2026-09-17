@@ -6,7 +6,10 @@ import { formatFieldErrors } from "@/lib/formErrors";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { escalonesQueConsumenLaBoleta } from "./escalonesQueConsumenLaBoleta";
+import {
+  escalonesQueConsumenLaBoleta,
+  loQueElAbonoACapitalNoAplica,
+} from "./escalonesQueConsumenLaBoleta";
 import { DollarSign, Info, FileText, Building2, CheckCircle2, ChevronsUpDown, Check } from "lucide-react";
 import { Combobox, Transition } from "@headlessui/react";
 import { Fragment, useMemo } from "react";
@@ -355,6 +358,23 @@ export function PagoForm() {
           { etiqueta: "rubros", monto: montoRubrosAplicado },
         ]);
 
+        /**
+         * Lo que el botón de "Abonar todo a Capital" deja sin aplicar. Es OTRA
+         * pregunta que la de arriba, con otros miembros: entra el convenio
+         * —que no consume la boleta pero sí se acredita, y con el abono directo
+         * no—, entra el excedente prometido como saldo a favor, y NO entra
+         * `otros`, que sí se cobra igual porque es una columna de la fila del
+         * pago. Ver el docstring de la función.
+         */
+        const noSeAplica = loQueElAbonoACapitalNoAplica({
+          mora: montoMoraAplicado,
+          rubros: montoRubrosAplicado,
+          convenio: montoConvenioAplicado,
+          // El excedente es lo que sobra al final de la cascada, que es lo mismo
+          // que el modal pinta como "Excedente (nuevo saldo a favor)".
+          excedente: montoRestante,
+        });
+
         const textoCausas = consumo.escalones
           .map((c) => `Q${c.monto.toFixed(2)} a ${c.etiqueta}`)
           .reduce(
@@ -530,20 +550,28 @@ export function PagoForm() {
     los Q1,000 a capital y el cliente sigue debiendo la tarjeta. No se pierde
     plata, pero queda aplicada donde nadie la mandó.
 
+    El aviso se gatea con su PROPIO predicado y no con `consumo`, que contesta
+    otra pregunta. Gatearlo por los escalones que consumen dejaba dos huecos: un
+    crédito con convenio activo y sin otros/mora/rubros mostraba la contribución
+    al convenio DOS veces y el botón aparecía sin aviso, y lo mismo con el
+    excedente prometido como saldo a favor. Ninguno de los dos consume la
+    boleta, pero los dos se dejan de aplicar.
+
     Se avisa en vez de bloquear: el abono directo a capital es una operación
     legítima y un rubro puede quedar pendiente mucho tiempo. Lo que no puede
     pasar es que el asesor elija a ciegas. */}
 {permiteAbonoCapital &&
   !(cuotasAtrasadasInfo && cuotasAtrasadasInfo.total > 0) &&
-  consumo.hayConsumo && (
+  noSeAplica.hayAviso && (
     <div className="mt-3 rounded-lg border-2 border-amber-300 bg-amber-50 p-3">
       <p className="text-sm font-bold text-amber-900">
         "Abonar todo a Capital" no aplica este desglose
       </p>
       <p className="text-xs text-amber-800 mt-1 leading-relaxed">
         Esa opción manda los Q{Number(montoBoleta).toFixed(2)} completos a reducir
-        capital: no se cobra {textoCausas} —Q{consumo.total.toFixed(2)} en total— y
-        la cuota queda sin abono. Lo que no se cobre sigue pendiente.
+        capital: no se aplica {noSeAplica.etiquetas.join(", ")} —Q
+        {noSeAplica.total.toFixed(2)} en total— y la cuota queda sin abono. Lo que
+        quede sin cobrar sigue pendiente.
       </p>
     </div>
   )}

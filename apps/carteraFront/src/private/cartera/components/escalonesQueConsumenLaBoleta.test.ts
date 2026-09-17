@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { escalonesQueConsumenLaBoleta } from "./escalonesQueConsumenLaBoleta";
+import { escalonesQueConsumenLaBoleta, loQueElAbonoACapitalNoAplica } from "./escalonesQueConsumenLaBoleta";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Los dos avisos del modal de confirmación salen de esta lista: el de "cobro
@@ -74,5 +74,95 @@ describe("escalonesQueConsumenLaBoleta", () => {
     ]);
 
     expect(c.total).toBe(0.3);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Son DOS PREGUNTAS, no una, y colapsarlas en una sola lista fue el error.
+//
+//   * "¿quién se comió la plata que le faltó a la cuota?" → **consume**.
+//     El convenio queda AFUERA: se registra pero no descuenta de la boleta, así
+//     que culparlo de un faltante es acusar a quien no se llevó nada.
+//   * "¿qué NO va a pasar si aprieto Abonar todo a Capital?" → **se deja de
+//     aplicar**. El convenio va ADENTRO: con la boleta entera a capital el
+//     disponible queda en cero, `debeProcesarConvenio` exige `> 0` y no se
+//     acredita nada en `convenios_pago`. Y el excedente también, porque el
+//     bloque que lo manda a saldo a favor tampoco corre.
+//
+// El mismo predicado no puede contestar las dos: una pregunta mide quién
+// consume, la otra qué se promete en pantalla y no ocurre.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("loQueElAbonoACapitalNoAplica", () => {
+  const sinNada = { mora: 0, rubros: 0, convenio: 0, excedente: 0 };
+
+  it("incluye el convenio, que el otro predicado excluye a propósito", () => {
+    const a = loQueElAbonoACapitalNoAplica({ ...sinNada, convenio: 300 });
+
+    expect(a.hayAviso).toBe(true);
+    expect(a.etiquetas).toContain("Q300.00 al convenio");
+    expect(a.total).toBe(300);
+  });
+
+  it("incluye el excedente prometido como saldo a favor", () => {
+    const a = loQueElAbonoACapitalNoAplica({ ...sinNada, excedente: 4000 });
+
+    expect(a.hayAviso).toBe(true);
+    expect(a.etiquetas).toContain("Q4000.00 de excedente a saldo a favor");
+  });
+
+  it("🔴 avisa con SÓLO convenio, que es el caso que se escapaba", () => {
+    // Con convenio activo y sin otros/mora/rubros, el aviso se gateaba por
+    // `hayConsumo` y no salía — mientras el desglose de arriba mostraba la
+    // contribución al convenio dos veces.
+    const a = loQueElAbonoACapitalNoAplica({ ...sinNada, convenio: 300 });
+
+    expect(a.hayAviso).toBe(true);
+  });
+
+  it("suma todo lo que sale del disponible, en orden de pantalla", () => {
+    const a = loQueElAbonoACapitalNoAplica({
+      mora: 100,
+      rubros: 200,
+      convenio: 300,
+      excedente: 500,
+    });
+
+    expect(a.total).toBe(1100);
+    expect(a.etiquetas).toEqual([
+      "Q100.00 a mora",
+      "Q200.00 a rubros",
+      "Q300.00 al convenio",
+      "Q500.00 de excedente a saldo a favor",
+    ]);
+  });
+
+  it("⚠️ NO nombra `otros`, porque el abono directo no lo anula", () => {
+    // `otros` consume la boleta —se resta en `calcularMontoEfectivo`— pero es
+    // una columna de la fila del pago y se guarda tal como vino, así que SÍ se
+    // cobra. El aviso decía "no se cobra QX a otros", que era falso.
+    // Con los cuatro montos encima: si alguna etiqueta dijera "otros", acá se
+    // ve. Con sólo rubros no alcanzaba —el resto se filtra por estar en cero y
+    // una etiqueta mal escrita pasaba igual—.
+    const a = loQueElAbonoACapitalNoAplica({
+      mora: 100,
+      rubros: 200,
+      convenio: 300,
+      excedente: 400,
+    });
+
+    expect(a.etiquetas.join(" ")).not.toContain("otros");
+    // Y el total tampoco lo incluye: son los cuatro que salen del disponible.
+    expect(a.total).toBe(1000);
+  });
+
+  it("sin nada prometido no hay aviso", () => {
+    expect(loQueElAbonoACapitalNoAplica(sinNada).hayAviso).toBe(false);
+  });
+
+  it("ignora las colas por debajo de medio centavo", () => {
+    const a = loQueElAbonoACapitalNoAplica({ ...sinNada, convenio: 0.004, excedente: 0.004 });
+
+    expect(a.hayAviso).toBe(false);
   });
 });

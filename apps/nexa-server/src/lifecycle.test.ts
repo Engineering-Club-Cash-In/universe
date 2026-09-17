@@ -167,6 +167,7 @@ const applicationClaim = {
   tokenIdentifier: "identifier",
   tokenPrefix: "prefix",
   transactionId: "1",
+  wasReturn: 0 as const,
   attemptCount: 1,
 };
 

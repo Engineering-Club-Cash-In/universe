@@ -29,6 +29,13 @@
       "when": 1788904621078,
       "tag": "0003_durable_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789665550727,
+      "tag": "0004_classify_legacy_pending",
+      "breakpoints": true
     }
   ]
 }

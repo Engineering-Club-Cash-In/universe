@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import type { TokenTransaction } from "../nexa/schemas";
 import type { ApplicationClaim } from "../payments/application-worker";
 import type { MockCreditLedger } from "../payments/mock-ledger";
@@ -59,7 +59,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
 
   async upsertReceived(transaction: TokenTransaction) {
     const reference = String(transaction.reference);
-    const payloadFingerprint = fingerprint(reference, transaction.amount, transaction.token, transaction.transactionId);
+    const payloadFingerprint = fingerprint({ ...transaction, reference });
     const sanitizedPayload = {
       reference,
       amount: transaction.amount,
@@ -95,13 +95,24 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       amount: nexaPaymentTransactions.amount,
       token: nexaPaymentTransactions.token,
       transactionId: nexaPaymentTransactions.transactionId,
+      currency: nexaPaymentTransactions.currency,
+      tokenIdentifier: nexaPaymentTransactions.tokenIdentifier,
+      tokenPrefix: nexaPaymentTransactions.tokenPrefix,
+      wasReturn: nexaPaymentTransactions.wasReturn,
       processingStatus: nexaPaymentTransactions.processingStatus,
       payloadFingerprint: nexaPaymentTransactions.payloadFingerprint,
       created: sql<boolean>`xmax = 0`,
     });
 
-    const storedFingerprint = stored.payloadFingerprint
-      ?? (stored.token ? fingerprint(stored.reference, Number(stored.amount), stored.token, stored.transactionId) : null);
+    const storedFingerprint = fingerprint({
+      reference: stored.reference,
+      amount: stored.amount,
+      currency: paymentCurrency(stored.currency),
+      tokenIdentifier: stored.tokenIdentifier,
+      tokenPrefix: stored.tokenPrefix,
+      wasReturn: paymentReturn(stored.wasReturn),
+      transactionId: stored.transactionId,
+    });
     if (storedFingerprint !== payloadFingerprint) {
       throw new Error(`Incompatible replay for reference ${reference}`);
     }
@@ -155,6 +166,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         payment.token_identifier AS "tokenIdentifier",
         payment.token_prefix AS "tokenPrefix",
         payment.transaction_id AS "transactionId",
+        payment.was_return AS "wasReturn",
         payment.attempt_count AS "attemptCount"
     `);
     const row = result.rows[0];
@@ -166,6 +178,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       tokenIdentifier: String(row.tokenIdentifier),
       tokenPrefix: String(row.tokenPrefix),
       transactionId: String(row.transactionId),
+      wasReturn: paymentReturn(row.wasReturn),
       attemptCount: Number(row.attemptCount),
     } : null;
   }
@@ -188,7 +201,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
     paymentId: number | null;
     reviewStatus: "APPROVED" | "REJECTED";
     failureReason: string | null;
-  }, now: Date) {
+  }, now: Date, attemptCount: number) {
     await this.db.transaction(async (tx) => {
       const [payment] = await tx.update(nexaPaymentTransactions).set({
         processingStatus: "REVIEW_PENDING",
@@ -197,10 +210,14 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         nextAttemptAt: null,
         leaseUntil: null,
         updatedAt: now,
-      }).where(eq(nexaPaymentTransactions.id, id)).returning({
+      }).where(and(
+        eq(nexaPaymentTransactions.id, id),
+        eq(nexaPaymentTransactions.attemptCount, attemptCount),
+        eq(nexaPaymentTransactions.processingStatus, "APPLYING"),
+      )).returning({
         reference: nexaPaymentTransactions.reference,
       });
-      if (!payment) throw new Error("Application payment not found");
+      if (!payment) return;
       await tx.insert(nexaReviews).values({
         transactionId: id,
         reference: payment.reference,
@@ -212,14 +229,18 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
     });
   }
 
-  async markApplicationFailed(id: number, reason: string, nextAttemptAt: Date | null, now: Date) {
+  async markApplicationFailed(id: number, reason: string, nextAttemptAt: Date | null, now: Date, attemptCount: number) {
     await this.db.update(nexaPaymentTransactions).set({
       processingStatus: nextAttemptAt ? "FAILED" : "MANUAL_REVIEW",
       failureReason: reason,
       nextAttemptAt,
       leaseUntil: null,
       updatedAt: now,
-    }).where(eq(nexaPaymentTransactions.id, id));
+    }).where(and(
+      eq(nexaPaymentTransactions.id, id),
+      eq(nexaPaymentTransactions.attemptCount, attemptCount),
+      eq(nexaPaymentTransactions.processingStatus, "APPLYING"),
+    ));
   }
 
   async listReconciliation() {
@@ -298,45 +319,90 @@ export class DbReviewRepository implements ReviewWorkerRepository {
 
   async completeReview(claim: ReviewClaim, responsePayload: { reference: number; status: "APPROVED" | "REJECTED" } | null, now: Date) {
     await this.db.transaction(async (tx) => {
-      await tx.update(nexaReviews).set({
+      const [review] = await tx.update(nexaReviews).set({
         responsePayload,
         lastError: null,
         nextAttemptAt: null,
         leaseUntil: null,
         completedAt: now,
         updatedAt: now,
-      }).where(eq(nexaReviews.id, claim.id));
-      await tx.update(nexaPaymentTransactions).set({
+      }).where(and(
+        eq(nexaReviews.id, claim.id),
+        eq(nexaReviews.attempts, claim.attemptCount),
+        isNull(nexaReviews.completedAt),
+        isNotNull(nexaReviews.leaseUntil),
+      )).returning({ id: nexaReviews.id });
+      if (!review) return;
+      const [payment] = await tx.update(nexaPaymentTransactions).set({
         processingStatus: "COMPLETED",
         updatedAt: now,
-      }).where(eq(nexaPaymentTransactions.id, claim.paymentTransactionId));
+      }).where(and(
+        eq(nexaPaymentTransactions.id, claim.paymentTransactionId),
+        eq(nexaPaymentTransactions.processingStatus, "REVIEW_PENDING"),
+      )).returning({ id: nexaPaymentTransactions.id });
+      if (!payment) throw new Error("Review payment is not active");
     });
   }
 
   async failReview(claim: ReviewClaim, nextAttemptAt: Date | null, now: Date) {
     await this.db.transaction(async (tx) => {
-      await tx.update(nexaReviews).set({
+      const [review] = await tx.update(nexaReviews).set({
         lastError: "review_processing_failed",
         nextAttemptAt,
         leaseUntil: null,
         completedAt: nextAttemptAt ? null : now,
         updatedAt: now,
-      }).where(eq(nexaReviews.id, claim.id));
-      await tx.update(nexaPaymentTransactions).set({
+      }).where(and(
+        eq(nexaReviews.id, claim.id),
+        eq(nexaReviews.attempts, claim.attemptCount),
+        isNull(nexaReviews.completedAt),
+        isNotNull(nexaReviews.leaseUntil),
+      )).returning({ id: nexaReviews.id });
+      if (!review) return;
+      const [payment] = await tx.update(nexaPaymentTransactions).set({
         processingStatus: nextAttemptAt ? "REVIEW_PENDING" : "MANUAL_REVIEW",
         updatedAt: now,
-      }).where(eq(nexaPaymentTransactions.id, claim.paymentTransactionId));
+      }).where(and(
+        eq(nexaPaymentTransactions.id, claim.paymentTransactionId),
+        eq(nexaPaymentTransactions.processingStatus, "REVIEW_PENDING"),
+      )).returning({ id: nexaPaymentTransactions.id });
+      if (!payment) throw new Error("Review payment is not active");
     });
   }
 }
 
-function fingerprint(reference: string, amount: number, token: string, transactionId: string) {
-  return createHash("sha256").update(JSON.stringify([reference, amount, token, transactionId])).digest("hex");
+type PaymentFingerprintInput = {
+  reference: string;
+  amount: string | number;
+  currency: "GTQ" | "USD";
+  tokenIdentifier: string;
+  tokenPrefix: string;
+  wasReturn: 0 | 1;
+  transactionId: string;
+};
+
+function fingerprint(input: PaymentFingerprintInput) {
+  const canonical = [
+    input.reference,
+    Number(input.amount).toFixed(2),
+    input.currency,
+    input.tokenIdentifier,
+    input.tokenPrefix,
+    input.wasReturn,
+    input.transactionId,
+  ];
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
 function paymentCurrency(value: unknown): "GTQ" | "USD" {
   if (value !== "GTQ" && value !== "USD") throw new Error("Stored payment currency is invalid");
   return value;
+}
+
+function paymentReturn(value: unknown): 0 | 1 {
+  const number = Number(value);
+  if (number !== 0 && number !== 1) throw new Error("Stored payment return flag is invalid");
+  return number;
 }
 
 function storedReviewStatus(value: unknown): "APPROVED" | "REJECTED" {

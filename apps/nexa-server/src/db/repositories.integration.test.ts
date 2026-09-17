@@ -68,11 +68,54 @@ integrationTest("upsertReceived is concurrent, idempotent, fail-closed and keeps
 
   const replay = await repository.upsertReceived(transaction);
   expect(replay).toMatchObject({ id: concurrent[0]?.id, created: false, processingStatus: "RECEIVED" });
+  const [sanitized] = await db.select().from(nexaPaymentTransactions)
+    .where(eq(nexaPaymentTransactions.reference, "4617307"));
+  expect(sanitized).toMatchObject({ account: "", bank: "", comments: "", token: "", tokenName: "" });
+  expect(sanitized?.rawPayload).toEqual({
+    reference: "4617307",
+    amount: 50,
+    currency: "GTQ",
+    tokenDate: "2026-05-04T10:00:00-06:00",
+    tokenIdentifier: "10005010",
+    tokenPrefix: "1234567",
+    wasReturn: 0,
+    transactionId: "7293",
+  });
 
   for (const incompatible of [
     { ...transaction, amount: 51 },
-    { ...transaction, token: "7654321310005010" },
+    { ...transaction, tokenIdentifier: "10005011" },
     { ...transaction, transactionId: "7294" },
+    { ...transaction, currency: "USD" as const },
+    { ...transaction, wasReturn: 1 as const },
+  ]) {
+    expect(repository.upsertReceived(incompatible)).rejects.toThrow("Incompatible replay for reference 4617307");
+  }
+
+  for (const [original, replay] of [
+    [
+      { ...transaction, reference: "currency-reverse", currency: "USD" as const },
+      { ...transaction, reference: "currency-reverse", currency: "GTQ" as const },
+    ],
+    [
+      { ...transaction, reference: "return-reverse", wasReturn: 1 as const },
+      { ...transaction, reference: "return-reverse", wasReturn: 0 as const },
+    ],
+  ]) {
+    await repository.upsertReceived(original);
+    expect(repository.upsertReceived(replay)).rejects.toThrow(`Incompatible replay for reference ${original.reference}`);
+  }
+
+  await db.update(nexaPaymentTransactions)
+    .set({ payloadFingerprint: null, token: transaction.token })
+    .where(eq(nexaPaymentTransactions.reference, "4617307"));
+  expect(await repository.upsertReceived(transaction)).toMatchObject({
+    id: concurrent[0]?.id,
+    created: false,
+  });
+  for (const incompatible of [
+    { ...transaction, currency: "USD" as const },
+    { ...transaction, wasReturn: 1 as const },
   ]) {
     expect(repository.upsertReceived(incompatible)).rejects.toThrow("Incompatible replay for reference 4617307");
   }
@@ -83,17 +126,27 @@ integrationTest("upsertReceived is concurrent, idempotent, fail-closed and keeps
   const failedReplay = await repository.upsertReceived(transaction);
   expect(failedReplay).toMatchObject({ id: concurrent[0]?.id, created: false, processingStatus: "FAILED" });
 
-  const [stored] = await db.select().from(nexaPaymentTransactions);
-  expect(stored).toMatchObject({ account: "", bank: "", comments: "", token: "", tokenName: "" });
-  expect(stored?.rawPayload).toEqual({
-    reference: "4617307",
-    amount: 50,
-    currency: "GTQ",
-    tokenDate: "2026-05-04T10:00:00-06:00",
-    tokenIdentifier: "10005010",
-    tokenPrefix: "1234567",
-    wasReturn: 0,
-    transactionId: "7293",
+});
+
+integrationTest("0004 classifies legacy PENDING payments for manual reconciliation", async () => {
+  if (!db || !pool) throw new Error("TEST_DATABASE_URL is required");
+  const migration = Bun.file(new URL("../../drizzle/0004_classify_legacy_pending.sql", import.meta.url));
+  const exists = await migration.exists();
+  expect(exists).toBe(true);
+  if (!exists) return;
+
+  const repository = new DbPaymentTransactionRepository(db);
+  const stored = await repository.upsertReceived({ ...transaction, reference: "legacy-pending" });
+  await db.update(nexaPaymentTransactions)
+    .set({ processingStatus: "PENDING", failureReason: null })
+    .where(eq(nexaPaymentTransactions.id, stored.id));
+
+  await pool.query(await migration.text());
+
+  const [row] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, stored.id));
+  expect(row).toMatchObject({
+    processingStatus: "MANUAL_REVIEW",
+    failureReason: "legacy_pending_requires_reconciliation",
   });
 });
 
@@ -143,6 +196,53 @@ integrationTest("application worker claims once, recovers expired work, backs of
 
 });
 
+integrationTest("stale application claimants cannot overwrite replacement success or failure", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  const claimedAt = new Date("2026-09-08T12:00:00.000Z");
+  const reclaimedAt = new Date("2026-09-08T12:00:11.000Z");
+
+  const success = await repository.upsertReceived({ ...transaction, reference: "application-fence-success" });
+  const oldSuccess = await repository.claimNextApplication(claimedAt, 10);
+  const replacementSuccess = await repository.claimNextApplication(reclaimedAt, 10);
+  if (!oldSuccess || !replacementSuccess) throw new Error("application claims were not created");
+  await repository.finalizeApplication(replacementSuccess.id, {
+    paymentId: 801,
+    reviewStatus: "APPROVED",
+    failureReason: null,
+  }, reclaimedAt, replacementSuccess.attemptCount);
+  await repository.markApplicationFailed(
+    oldSuccess.id,
+    "application_processing_failed",
+    null,
+    new Date("2026-09-08T12:00:12.000Z"),
+    oldSuccess.attemptCount,
+  );
+  const [successfulRow] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, success.id));
+  expect(successfulRow).toMatchObject({ processingStatus: "REVIEW_PENDING", carteraPaymentId: 801 });
+  expect(await db.select().from(nexaReviews).where(eq(nexaReviews.transactionId, success.id))).toHaveLength(1);
+
+  const failed = await repository.upsertReceived({ ...transaction, reference: "application-fence-failure" });
+  const oldFailure = await repository.claimNextApplication(claimedAt, 10);
+  const replacementFailure = await repository.claimNextApplication(reclaimedAt, 10);
+  if (!oldFailure || !replacementFailure) throw new Error("application claims were not created");
+  await repository.markApplicationFailed(
+    replacementFailure.id,
+    "application_processing_failed",
+    null,
+    reclaimedAt,
+    replacementFailure.attemptCount,
+  );
+  await repository.finalizeApplication(oldFailure.id, {
+    paymentId: 802,
+    reviewStatus: "APPROVED",
+    failureReason: null,
+  }, new Date("2026-09-08T12:00:12.000Z"), oldFailure.attemptCount);
+  const [failedRow] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, failed.id));
+  expect(failedRow).toMatchObject({ processingStatus: "MANUAL_REVIEW", carteraPaymentId: null });
+  expect(await db.select().from(nexaReviews).where(eq(nexaReviews.transactionId, failed.id))).toHaveLength(0);
+});
+
 integrationTest("APPLIED payment persists its id and queues APPROVED without reviewing Nexa inline", async () => {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const repository = new DbPaymentTransactionRepository(db);
@@ -172,6 +272,40 @@ integrationTest("APPLIED payment persists its id and queues APPROVED without rev
   expect(reviews[0]).toMatchObject({ transactionId: stored.id, reference: "4617307", status: "APPROVED", attempts: 0 });
   expect(calls).toEqual([{ creditoId: 42, reference: "4617307" }]);
   expect(payment?.rawPayload).not.toHaveProperty("token");
+});
+
+integrationTest("returned transfers queue a safe REJECTED review without calling Cartera", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await associateToken("10005010", "1234567", 42);
+  const stored = await repository.upsertReceived({
+    ...transaction,
+    reference: "returned-transfer",
+    transactionId: "returned-transaction",
+    wasReturn: 1,
+  });
+  let carteraCalls = 0;
+
+  expect(await runApplicationWorkerOnce({
+    repository,
+    cartera: {
+      applyNexaPayment: async () => {
+        carteraCalls += 1;
+        return { status: "APPLIED", paymentId: 999 };
+      },
+    },
+    now: () => new Date("2026-09-08T13:30:00.000Z"),
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 2,
+    maxBackoffSeconds: 10,
+  })).toBe(true);
+
+  const [payment] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, stored.id));
+  const [review] = await db.select().from(nexaReviews).where(eq(nexaReviews.transactionId, stored.id));
+  expect(carteraCalls).toBe(0);
+  expect(payment).toMatchObject({ processingStatus: "REVIEW_PENDING", carteraPaymentId: null, failureReason: "returned_transfer" });
+  expect(review).toMatchObject({ status: "REJECTED" });
 });
 
 integrationTest("terminal rejection and missing token association queue safe REJECTED reviews", async () => {
@@ -491,6 +625,36 @@ integrationTest("two review workers cannot claim the same review", async () => {
   expect(calls).toBe(1);
 });
 
+integrationTest("stale review claimants cannot overwrite replacement success or failure", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const claimedAt = new Date("2026-09-08T17:30:00.000Z");
+  const reclaimedAt = new Date("2026-09-08T17:30:11.000Z");
+
+  const successful = await queuedReview("review-fence-success", "9201");
+  const oldSuccess = await successful.repository.claimNextReview(claimedAt, 10);
+  const replacementSuccess = await successful.repository.claimNextReview(reclaimedAt, 10);
+  if (!oldSuccess || !replacementSuccess) throw new Error("review claims were not created");
+  await successful.repository.completeReview(replacementSuccess, { reference: 9201, status: "APPROVED" }, reclaimedAt);
+  await successful.repository.failReview(oldSuccess, null, new Date("2026-09-08T17:30:12.000Z"));
+  const [successfulPayment] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, successful.paymentId));
+  const [successfulReview] = await db.select().from(nexaReviews).where(eq(nexaReviews.transactionId, successful.paymentId));
+  expect(successfulPayment?.processingStatus).toBe("COMPLETED");
+  expect(successfulReview).toMatchObject({ attempts: 2, lastError: null, responsePayload: { reference: 9201, status: "APPROVED" } });
+  expect(successfulReview?.completedAt).toEqual(reclaimedAt);
+
+  const failed = await queuedReview("review-fence-failure", "9202");
+  const oldFailure = await failed.repository.claimNextReview(claimedAt, 10);
+  const replacementFailure = await failed.repository.claimNextReview(reclaimedAt, 10);
+  if (!oldFailure || !replacementFailure) throw new Error("review claims were not created");
+  await failed.repository.failReview(replacementFailure, null, reclaimedAt);
+  await failed.repository.completeReview(oldFailure, { reference: 9202, status: "APPROVED" }, new Date("2026-09-08T17:30:12.000Z"));
+  const [failedPayment] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, failed.paymentId));
+  const [failedReview] = await db.select().from(nexaReviews).where(eq(nexaReviews.transactionId, failed.paymentId));
+  expect(failedPayment?.processingStatus).toBe("MANUAL_REVIEW");
+  expect(failedReview).toMatchObject({ attempts: 2, lastError: "review_processing_failed", responsePayload: null });
+  expect(failedReview?.completedAt).toEqual(reclaimedAt);
+});
+
 integrationTest("review max attempts moves payment to MANUAL_REVIEW", async () => {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const { paymentId, repository } = await queuedReview("8103", "9103");
@@ -557,11 +721,13 @@ async function queuedReview(reference: string, transactionId: string) {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const transactions = new DbPaymentTransactionRepository(db);
   const stored = await transactions.upsertReceived({ ...transaction, reference, transactionId });
+  const claim = await transactions.claimNextApplication(new Date("2026-09-08T12:00:00.000Z"), 10);
+  if (!claim) throw new Error("application claim was not created");
   await transactions.finalizeApplication(stored.id, {
     paymentId: 900,
     reviewStatus: "APPROVED",
     failureReason: null,
-  }, new Date("2026-09-08T12:00:00.000Z"));
+  }, new Date("2026-09-08T12:00:00.000Z"), claim.attemptCount);
   return { paymentId: stored.id, repository: new DbReviewRepository(db) };
 }
 

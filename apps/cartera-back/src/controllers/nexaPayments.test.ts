@@ -1,5 +1,8 @@
 import { createHash, createHmac } from "node:crypto";
 import { expect, test } from "bun:test";
+import type { PaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+
+const paymentLock = {} as PaymentAdvisoryLock;
 
 test("acepta el body mínimo GTQ con decimal cent-safe", async () => {
   const nexa = await import("./nexaPayments").catch(() => ({}));
@@ -136,7 +139,7 @@ test("registra y aplica una vez por el flujo canónico", async () => {
     },
     { nonce: "nonce-1", payloadHash: "a".repeat(64), now: new Date() },
     {
-      withCreditLock: async (_creditoId, work) => work(),
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
       claim: async () => ({ kind: "new", eventId: 7 }),
       loadCredit: async () => ({
         usuarioId: 5,
@@ -165,7 +168,7 @@ test("no consume claim cuando el crédito no existe", async () => {
     { externalReference: "missing-credit", creditoId: 10, amount: "10.00", currency: "GTQ" },
     { nonce: "nonce-missing", payloadHash: "a".repeat(64), now: new Date() },
     {
-      withCreditLock: async (_creditoId, work) => work(),
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
       claim: async () => { claimed = true; return { kind: "new", eventId: 7 }; },
       loadCredit: async () => null,
       findPayments: async () => [],
@@ -187,7 +190,7 @@ test("revalida el binding con reloj fresco dentro del lock", async () => {
     { nonce: "nonce-expired", payloadHash: "a".repeat(64), now: new Date("2026-09-08T11:59:00Z") },
     {
       now: () => new Date("2026-09-08T12:01:00Z"),
-      withCreditLock: async (_creditoId, work) => { calls.push("lock"); return work(); },
+      withCreditLock: async (_creditoId, work) => { calls.push("lock"); return work(paymentLock); },
       claim: async () => { calls.push("claim"); return { kind: "new", eventId: 7 }; },
       loadCredit: async () => ({
         usuarioId: 5,
@@ -204,6 +207,45 @@ test("revalida el binding con reloj fresco dentro del lock", async () => {
   expect(calls).toEqual(["lock", "claim"]);
 });
 
+test.each([
+  ["expira", "binding_expired"],
+  ["se desactiva", "binding_inactive"],
+] as const)("revalida el binding bajo el lock canónico cuando %s durante la espera", async (mode, code) => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  let now = new Date("2026-09-08T11:59:00Z");
+  let active = true;
+  let mutated = false;
+
+  await expect(processNexaPayment(
+    { externalReference: `binding-${mode}`, creditoId: 10, amount: "10.00", currency: "GTQ" },
+    { nonce: `nonce-${mode}`, payloadHash: "a".repeat(64), now },
+    {
+      now: () => now,
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "new", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: active, expires_at: new Date("2026-09-08T12:00:00Z"), max_payment_amount: null },
+      }),
+      findPayments: async () => mutated
+        ? [{ paymentId: 17, validationStatus: "validated", amount: "10.00" }]
+        : [],
+      registerPayment: async (_body, _eventId, _usuarioId, validateAfterLock?: () => Promise<void>) => {
+        if (mode === "expira") now = new Date("2026-09-08T12:01:00Z");
+        else active = false;
+        await validateAfterLock?.();
+        mutated = true;
+        return { success: true };
+      },
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async () => undefined,
+    },
+  )).rejects.toEqual(new NexaPaymentError(code, 403));
+  expect(mutated).toBe(false);
+});
+
 test("solo completa cuando todas las filas vinculadas suman el monto exacto", async () => {
   const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
   let applied = 0;
@@ -213,7 +255,7 @@ test("solo completa cuando todas las filas vinculadas suman el monto exacto", as
     { externalReference: "partial-link", creditoId: 10, amount: "10.00", currency: "GTQ" },
     { nonce: "nonce-partial", payloadHash: "a".repeat(64), now: new Date() },
     {
-      withCreditLock: async (_creditoId, work) => work(),
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
       claim: async () => ({ kind: "retry", eventId: 7 }),
       loadCredit: async () => ({
         usuarioId: 5,
@@ -237,7 +279,7 @@ test("exige success true al aplicar cada fila", async () => {
     { externalReference: "undefined-success", creditoId: 10, amount: "10.00", currency: "GTQ" },
     { nonce: "nonce-undefined", payloadHash: "a".repeat(64), now: new Date() },
     {
-      withCreditLock: async (_creditoId, work) => work(),
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
       claim: async () => ({ kind: "retry", eventId: 7 }),
       loadCredit: async () => ({
         usuarioId: 5,
@@ -261,7 +303,7 @@ test("exige success true al registrar el pago", async () => {
     { externalReference: "registration-result", creditoId: 10, amount: "10.00", currency: "GTQ" },
     { nonce: "nonce-registration", payloadHash: "a".repeat(64), now: new Date() },
     {
-      withCreditLock: async (_creditoId, work) => work(),
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
       claim: async () => ({ kind: "new", eventId: 7 }),
       loadCredit: async () => ({
         usuarioId: 5,
@@ -286,7 +328,7 @@ test("devuelve el mismo paymentId en un reintento ya aplicado", async () => {
     { externalReference: "qa-payment-1", creditoId: 10, amount: "10.00", currency: "GTQ" },
     { nonce: "nonce-2", payloadHash: "a".repeat(64), now: new Date() },
     {
-      withCreditLock: async (_creditoId, work) => work(),
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
       claim: async () => ({ kind: "applied", paymentId: 17 }),
       loadCredit: async () => ({
         usuarioId: 5,
@@ -312,7 +354,7 @@ test.each(["conflict", "replay"] as const)("rechaza un claim %s sin mutar", asyn
     { externalReference: "qa-payment-1", creditoId: 10, amount: "10.00", currency: "GTQ" },
     { nonce: "nonce-2", payloadHash: "b".repeat(64), now: new Date() },
     {
-      withCreditLock: async (_creditoId, work) => work(),
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
       claim: async () => ({ kind }),
       loadCredit: async () => ({
         usuarioId: 5,
@@ -389,7 +431,7 @@ test("el handler verifica el body exacto antes de procesar", async () => {
     secret: `  ${secret}  `,
     now: () => 1_800_000_000_000,
     dependencies: {
-      withCreditLock: async (_creditoId, work) => work(),
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
       claim: async () => ({ kind: "applied", paymentId: 17 }),
       loadCredit: async () => ({
         usuarioId: 5,
@@ -430,7 +472,7 @@ test("un fallo queda reintentable sin registrar ni aplicar dos veces", async () 
   let applyAttempts = 0;
   let paymentStatus = "pending";
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: () => Promise<{ paymentId: number; idempotent: boolean }>) => work(),
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => work(paymentLock),
     claim: async () => eventStatus === "new"
       ? { kind: "new" as const, eventId: 7 }
       : { kind: "retry" as const, eventId: 7 },
@@ -470,12 +512,12 @@ test("serializa requests concurrentes y devuelve un único paymentId", async () 
   let registered = 0;
   let applied = 0;
   const dependencies = {
-    withCreditLock: async (_creditoId: number, work: () => Promise<{ paymentId: number; idempotent: boolean }>) => {
+    withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => {
       const previous = tail;
       let release: () => void = () => undefined;
       tail = new Promise<void>((resolve) => { release = resolve; });
       await previous;
-      try { return await work(); } finally { release(); }
+      try { return await work(paymentLock); } finally { release(); }
     },
     claim: async () => eventStatus === "missing"
       ? (eventStatus = "processing", { kind: "new" as const, eventId: 7 })
@@ -511,7 +553,7 @@ test("serializa referencias distintas del mismo crédito", async () => {
   const locks = new Map<string | number, Promise<void>>();
   const lock = async (
     key: string | number,
-    work: () => Promise<{ paymentId: number; idempotent: boolean }>,
+    work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>,
   ) => {
     const previous = locks.get(key) ?? Promise.resolve();
     let release: () => void = () => undefined;
@@ -519,7 +561,7 @@ test("serializa referencias distintas del mismo crédito", async () => {
     locks.set(key, current);
     await previous;
     try {
-      return await work();
+      return await work(paymentLock);
     } finally {
       release();
       if (locks.get(key) === current) locks.delete(key);

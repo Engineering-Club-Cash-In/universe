@@ -9,6 +9,7 @@ export type ApplicationClaim = {
   tokenIdentifier: string;
   tokenPrefix: string;
   transactionId: string;
+  wasReturn: 0 | 1;
   attemptCount: number;
 };
 
@@ -19,8 +20,8 @@ export type ApplicationWorkerRepository = {
     paymentId: number | null;
     reviewStatus: ReviewTransferStatus;
     failureReason: string | null;
-  }, now: Date): Promise<void>;
-  markApplicationFailed(id: number, reason: string, nextAttemptAt: Date | null, now: Date): Promise<void>;
+  }, now: Date, attemptCount: number): Promise<void>;
+  markApplicationFailed(id: number, reason: string, nextAttemptAt: Date | null, now: Date, attemptCount: number): Promise<void>;
 };
 
 export async function runApplicationWorkerOnce(options: {
@@ -37,13 +38,22 @@ export async function runApplicationWorkerOnce(options: {
   if (!claim) return false;
 
   try {
+    if (claim.wasReturn === 1) {
+      await options.repository.finalizeApplication(claim.id, {
+        paymentId: null,
+        reviewStatus: "REJECTED",
+        failureReason: "returned_transfer",
+      }, now, claim.attemptCount);
+      return true;
+    }
+
     const creditoId = await options.repository.resolveCreditoId(claim.tokenIdentifier, claim.tokenPrefix);
     if (!creditoId) {
       await options.repository.finalizeApplication(claim.id, {
         paymentId: null,
         reviewStatus: "REJECTED",
         failureReason: "token_user_not_found",
-      }, now);
+      }, now, claim.attemptCount);
       return true;
     }
 
@@ -64,7 +74,7 @@ export async function runApplicationWorkerOnce(options: {
       paymentId: null,
       reviewStatus: "REJECTED",
       failureReason: safeRejectionReason(result.reason),
-    }, now);
+    }, now, claim.attemptCount);
   } catch {
     const nextAttemptAt = getNextAttemptAt(
       now,
@@ -78,6 +88,7 @@ export async function runApplicationWorkerOnce(options: {
       "application_processing_failed",
       nextAttemptAt,
       now,
+      claim.attemptCount,
     );
     return true;
   }

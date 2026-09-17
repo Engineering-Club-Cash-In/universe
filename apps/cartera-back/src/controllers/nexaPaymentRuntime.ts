@@ -1,5 +1,5 @@
 import { and, asc, eq, ne, sql } from "drizzle-orm";
-import { client, db, lockPool } from "../database";
+import { client, db } from "../database";
 import {
   creditos,
   nexa_credit_bindings,
@@ -7,34 +7,30 @@ import {
   pagos_credito,
 } from "../database/db";
 import { aplicarPagoAlCredito, insertPayment } from "./registerPayment";
+import {
+  withPaymentAdvisoryLock,
+  withPaymentBindingLock,
+} from "../utils/paymentAdvisoryLock";
 import { claimNexaPaymentEvent } from "./nexaPaymentRepository";
 import {
   createNexaPaymentHandler,
   formatNexaPaymentDate,
+  NexaPaymentError,
   type NexaPaymentDependencies,
 } from "./nexaPayments";
 
-const NEXA_CREDIT_LOCK_NAMESPACE = 8766;
 export const nexaPaymentDependencies: NexaPaymentDependencies = {
-  withCreditLock: async (creditoId, work) => {
-    const connection = await lockPool.connect();
-    try {
-      await connection.query("SELECT pg_advisory_lock($1, $2)", [
-        NEXA_CREDIT_LOCK_NAMESPACE,
-        creditoId,
-      ]);
-      return await work();
-    } finally {
-      try {
-        await connection.query("SELECT pg_advisory_unlock($1, $2)", [
-          NEXA_CREDIT_LOCK_NAMESPACE,
-          creditoId,
-        ]);
-      } finally {
-        connection.release();
-      }
-    }
-  },
+  withCreditLock: (creditoId, work) => withPaymentAdvisoryLock(
+    creditoId,
+    (paymentLock) => withPaymentBindingLock(
+      paymentLock,
+      creditoId,
+      (bindingExists) => {
+        if (!bindingExists) throw new NexaPaymentError("binding_missing", 403);
+        return work(paymentLock);
+      },
+    ),
+  ),
   claim: (body, context) => claimNexaPaymentEvent(
     { query: async (text, values) => {
       const result = await client.query(text, values);
@@ -85,7 +81,16 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
       eq(pagos_credito.nexaPaymentEventId, eventId),
     ))
     .orderBy(asc(pagos_credito.pago_id)),
-  registerPayment: async (body, eventId, usuarioId) => {
+  registerPayment: async (body, eventId, usuarioId, validateAfterLock, paymentLock) => {
+    try {
+      await validateAfterLock();
+    } catch (error) {
+      if (error instanceof NexaPaymentError) {
+        return { success: false as const, code: error.code, status: error.status };
+      }
+      throw error;
+    }
+
     const date = formatNexaPaymentDate(new Date());
     const set = { status: 200 };
     const result = await insertPayment({
@@ -103,10 +108,13 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
         origen_pago: "transferencia",
       },
       set,
-    }, { nexaPaymentEventId: eventId });
+    }, {
+      nexaPaymentEventId: eventId,
+      paymentLock,
+    });
     return result && "success" in result ? result : {};
   },
-  applyPayment: aplicarPagoAlCredito,
+  applyPayment: (paymentId, paymentLock) => aplicarPagoAlCredito(paymentId, { paymentLock }),
   complete: async (eventId, paymentId) => {
     await db
       .update(nexa_payment_events)

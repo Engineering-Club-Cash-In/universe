@@ -56,8 +56,10 @@ import {
   cuentaComoHermanoVivo,
 } from "./registerPaymentPolicy";
 import {
+  holdsPaymentAdvisoryLock,
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
   withPaymentAdvisoryLock,
+  type PaymentAdvisoryLock,
   type PaymentAdvisoryLockConnection,
 } from "../utils/paymentAdvisoryLock";
 import { emitRecoveredDuplicatePendingInstallment } from "../utils/structuredLogger";
@@ -612,7 +614,13 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 
 export const insertPayment = async (
   { body, set }: any,
-  { nexaPaymentEventId }: { nexaPaymentEventId?: number } = {},
+  {
+    nexaPaymentEventId,
+    paymentLock,
+  }: {
+    nexaPaymentEventId?: number;
+    paymentLock?: PaymentAdvisoryLock;
+  } = {},
 ) => {
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
   let lockConn: PaymentAdvisoryLockConnection | undefined;
@@ -653,13 +661,15 @@ export const insertPayment = async (
     // termine y vea el saldo ya actualizado.
     // Conexión del pool DEDICADO de locks: los waiters de pg_advisory_lock no
     // deben consumir conexiones del pool de trabajo (deadlock de pool).
-    const acquiredLockConn = await lockPool.connect();
-    lockConn = acquiredLockConn;
-    lockedCreditoId = credito_id;
-    await acquiredLockConn.query("SELECT pg_advisory_lock($1, $2)", [
-      PAYMENT_ADVISORY_LOCK_NAMESPACE,
-      credito_id,
-    ]);
+    if (!holdsPaymentAdvisoryLock(paymentLock, credito_id)) {
+      const acquiredLockConn = await lockPool.connect();
+      lockConn = acquiredLockConn;
+      lockedCreditoId = credito_id;
+      await acquiredLockConn.query("SELECT pg_advisory_lock($1, $2)", [
+        PAYMENT_ADVISORY_LOCK_NAMESPACE,
+        credito_id,
+      ]);
+    }
 
     // 2. Preparar datos
     const urlCompletas = prepararURLsBoletas(url_boletas);
@@ -2711,7 +2721,21 @@ export async function insertarPago({
  * viejo pre-abono, o marcaría la fila validated para que el recálculo la
  * salte. La lectura real del pago ocurre adentro, YA bajo el lock.
  */
-export async function aplicarPagoAlCredito(pago_id: number) {
+export async function aplicarPagoAlCredito(
+  pago_id: number,
+  { paymentLock }: { paymentLock?: PaymentAdvisoryLock } = {},
+) {
+  if (paymentLock) {
+    const [pago] = await db
+      .select({ credito_id: pagos_credito.credito_id })
+      .from(pagos_credito)
+      .where(eq(pagos_credito.pago_id, pago_id))
+      .limit(1);
+    if (pago?.credito_id != null && holdsPaymentAdvisoryLock(paymentLock, pago.credito_id)) {
+      return aplicarPagoAlCreditoSinLock(pago_id);
+    }
+  }
+
   // Pre-lectura mínima: solo para conocer el crédito a serializar.
   const [pagoPre] = await db
     .select({ credito_id: pagos_credito.credito_id })

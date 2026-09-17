@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import Big from "big.js";
 import { z } from "zod";
+import type { PaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { verifyNexaHmac } from "./nexaHmac";
 
 export const nexaPaymentSchema = z
@@ -99,7 +100,7 @@ export const formatNexaPaymentDate = (date: Date) => {
 export type NexaPaymentDependencies = {
   withCreditLock: (
     creditoId: number,
-    work: () => Promise<NexaPaymentResult>,
+    work: (lock: PaymentAdvisoryLock) => Promise<NexaPaymentResult>,
   ) => Promise<NexaPaymentResult>;
   claim: (body: NexaPaymentBody, context: NexaPaymentContext) => Promise<NexaClaim>;
   loadCredit: (creditoId: number) => Promise<{
@@ -116,8 +117,13 @@ export type NexaPaymentDependencies = {
     body: NexaPaymentBody,
     eventId: number,
     usuarioId: number,
+    validateAfterLock: () => Promise<void>,
+    paymentLock: PaymentAdvisoryLock,
+  ) => Promise<{ success?: boolean; code?: string; status?: number }>;
+  applyPayment: (
+    paymentId: number,
+    paymentLock: PaymentAdvisoryLock,
   ) => Promise<{ success?: boolean }>;
-  applyPayment: (paymentId: number) => Promise<{ success?: boolean }>;
   complete: (eventId: number, paymentId: number) => Promise<void>;
   fail: (eventId: number, code: string) => Promise<void>;
   now?: () => Date;
@@ -136,7 +142,7 @@ export const processNexaPayment = (
   body: NexaPaymentBody,
   context: NexaPaymentContext,
   dependencies: NexaPaymentDependencies,
-) => dependencies.withCreditLock(body.creditoId, async () => {
+) => dependencies.withCreditLock(body.creditoId, async (paymentLock) => {
   const existingCredit = await dependencies.loadCredit(body.creditoId);
   if (!existingCredit) throw new NexaPaymentError("credit_not_found", 404);
   const claim = await dependencies.claim(body, context);
@@ -163,9 +169,27 @@ export const processNexaPayment = (
 
     let payments = await dependencies.findPayments(eventId, body.creditoId);
     if (payments.length === 0) {
-      const registered = await dependencies.registerPayment(body, eventId, credit.usuarioId);
+      const registered = await dependencies.registerPayment(
+        body,
+        eventId,
+        credit.usuarioId,
+        async () => {
+          const currentCredit = await dependencies.loadCredit(body.creditoId);
+          if (!currentCredit) throw new NexaPaymentError("credit_not_found", 404);
+          const rejection = getNexaBindingRejection(
+            currentCredit.binding,
+            body.amount,
+            dependencies.now?.() ?? new Date(),
+          );
+          if (rejection) throw new NexaPaymentError(rejection, 403);
+        },
+        paymentLock,
+      );
       if (registered.success !== true) {
-        throw new NexaPaymentError("payment_registration_rejected", 409);
+        throw new NexaPaymentError(
+          registered.code ?? "payment_registration_rejected",
+          registered.status ?? 409,
+        );
       }
       payments = await dependencies.findPayments(eventId, body.creditoId);
     }
@@ -177,7 +201,7 @@ export const processNexaPayment = (
 
     for (const payment of payments) {
       if (["validated", "capital_validated"].includes(payment.validationStatus)) continue;
-      const applied = await dependencies.applyPayment(payment.paymentId);
+      const applied = await dependencies.applyPayment(payment.paymentId, paymentLock);
       if (applied.success !== true) throw new NexaPaymentError("payment_not_applied", 409);
     }
     await dependencies.complete(eventId, payments[0]!.paymentId);

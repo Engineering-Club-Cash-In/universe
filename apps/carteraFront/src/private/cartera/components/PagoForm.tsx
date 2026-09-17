@@ -10,6 +10,7 @@ import {
   escalonesQueConsumenLaBoleta,
   loQueElAbonoACapitalNoAplica,
 } from "./escalonesQueConsumenLaBoleta";
+import { montoParaAbonoDirectoACapital } from "./abonoDirectoACapital";
 import { DollarSign, Info, FileText, Building2, CheckCircle2, ChevronsUpDown, Check } from "lucide-react";
 import { Combobox, Transition } from "@headlessui/react";
 import { Fragment, useMemo } from "react";
@@ -348,10 +349,12 @@ export function PagoForm() {
         // la lista: se registra pero no consume (ver el escalón 4), así que
         // culparlo del faltante era acusar a quien no se llevó nada.
         //
-        // La lista sale del módulo compartido porque el aviso de "Abonar todo a
-        // Capital" —más abajo— necesita EXACTAMENTE la misma: lo que consume la
-        // boleta antes de la cuota es lo mismo que esa opción deja sin cobrar.
-        // Teniéndola dos veces terminarían contradiciéndose.
+        // ⚠️ Esta lista es SÓLO de este aviso. Acá estaba escrito que el aviso de
+        // "Abonar todo a Capital" necesitaba "exactamente la misma", y eso era
+        // falso: ese otro pregunta qué se deja de APLICAR, no quién consume, y
+        // colapsar las dos costó un agujero (el convenio y el excedente quedaban
+        // fuera). El otro usa `loQueElAbonoACapitalNoAplica`, con sus propios
+        // miembros. No volver a unirlas.
         const consumo = escalonesQueConsumenLaBoleta([
           { etiqueta: "otros", monto: montoOtrosAplicado },
           { etiqueta: "mora", monto: montoMoraAplicado },
@@ -366,6 +369,15 @@ export function PagoForm() {
          * `otros`, que sí se cobra igual porque es una columna de la fila del
          * pago. Ver el docstring de la función.
          */
+        // Lo que de verdad va a capital si el asesor aprieta el botón: la boleta
+        // MENOS `otros`, porque `otros` se cobra igual (es una columna de la fila
+        // del pago). Mandar la boleta completa dejaba Q1,200 asignados contra un
+        // comprobante de Q1,100. Ver `montoParaAbonoDirectoACapital`.
+        const aCapitalSiAprieta = montoParaAbonoDirectoACapital({
+          boleta: montoBoleta,
+          otros,
+        });
+
         const noSeAplica = loQueElAbonoACapitalNoAplica({
           mora: montoMoraAplicado,
           rubros: montoRubrosAplicado,
@@ -572,8 +584,9 @@ export function PagoForm() {
         "Abonar todo a Capital" no aplica este desglose
       </p>
       <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-        Esa opción manda los Q{Number(montoBoleta).toFixed(2)} completos a reducir
-        capital: no se aplica {noSeAplica.etiquetas.join(", ")} —Q
+        Esa opción manda Q{aCapitalSiAprieta.toFixed(2)} a reducir capital
+        {otros > 0 && ` (la boleta menos los Q${otros.toFixed(2)} de otros, que se cobran igual)`}:
+        no se aplica {noSeAplica.etiquetas.join(", ")} —Q
         {noSeAplica.total.toFixed(2)} en total—. Lo que quede sin cobrar sigue
         pendiente.
       </p>
@@ -592,7 +605,17 @@ export function PagoForm() {
           <span className="font-bold text-green-800 text-sm">Opcion disponible: Abono directo a capital</span>
         </div>
         <p className="text-xs text-green-700 mb-3">
-          Este credito permite abonar directamente a capital. El monto completo de la boleta (Q{Number(formik.values.monto_boleta || 0).toFixed(2)}) se aplicara como reduccion al saldo de capital.
+          {/* Decía "el monto completo de la boleta". Con `otros` tipeado eso era
+              falso y además describía el descuadre: `otros` se cobra igual, así
+              que a capital va la boleta MENOS otros. */}
+          Este credito permite abonar directamente a capital. Se aplicaran
+          Q{montoParaAbonoDirectoACapital({
+            boleta: Number(formik.values.monto_boleta || 0),
+            otros: Number(formik.values.otros) || 0,
+          }).toFixed(2)} como reduccion al saldo de capital
+          {(Number(formik.values.otros) || 0) > 0
+            ? ` (la boleta menos los Q${(Number(formik.values.otros) || 0).toFixed(2)} de otros).`
+            : "."}
         </p>
         <Button
           onClick={() => {

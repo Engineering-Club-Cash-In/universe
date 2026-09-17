@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { montoParaAbonoDirectoACapital } from "../components/abonoDirectoACapital";
 import { z } from "zod";
 import { useFormik } from "formik";
 import {
@@ -611,12 +612,30 @@ const handleAbonoCapitalDirecto = () => {
   }
 
   const montoBoleta = Number(formik.values.monto_boleta) || 0;
+  const otrosTipeado = Number(formik.values.otros) || 0;
+
+  /**
+   * A capital va la boleta MENOS `otros`, no la boleta entera.
+   *
+   * `otros` es una columna de la fila del pago y se guarda tal como vino, así
+   * que mandando la boleta completa una boleta de Q1,100 con Q100 de otros
+   * quedaba con Q1,100 de capital MÁS Q100 de otros: Q1,200 asignados contra un
+   * comprobante de Q1,100, sin compensación por ningún lado. Ver el docstring
+   * de `montoParaAbonoDirectoACapital`.
+   *
+   * Es lo que el hermano `handleAbonoCapital` ya hacía: su excedente sale de
+   * `boleta − otros − mora`.
+   */
+  const aCapital = montoParaAbonoDirectoACapital({
+    boleta: montoBoleta,
+    otros: otrosTipeado,
+  });
 
   console.log("=== ABONO DIRECTO A CAPITAL ===");
-  console.log("Monto boleta completo:", montoBoleta);
+  console.log("Boleta:", montoBoleta, "| otros:", otrosTipeado, "| a capital:", aCapital);
   console.log("Cuota seleccionada:", cuotaSeleccionada);
 
-  formik.values.abono_directo_capital = montoBoleta;
+  formik.values.abono_directo_capital = aCapital;
   formik.values.cuotaApagar = cuotaSeleccionada;
 
   setModalExcesoOpen(false);

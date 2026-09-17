@@ -50,14 +50,26 @@ const BORRADO_O_INEXISTENTE = new Set(["success", "not_found"]);
  * pool sin inversionistas le pondría capital 0 al crédito principal, que es peor
  * que no recalcularlo.
  */
-export function excluirTraspasosSinBorrar<T>(
-  pools: { numeroCredito: string; entradas: EntradaPool<T>[] }[],
-  detalles: DetalleEliminacion[] | null
-): { numeroCredito: string; creditos: T[] }[] {
+/**
+ * Por cada crédito origen, si YA NO ESTÁ en la base — o sea si su borrado
+ * ocurrió (`success`) o nunca hizo falta (`not_found`).
+ *
+ * Un origen que no aparece en el detalle cuenta como "sigue ahí": sin evidencia
+ * de que el borrado pasó, ante la duda no se duplica.
+ */
+const mapaDeBorrados = (detalles: DetalleEliminacion[] | null) => {
   const yaNoEsta = new Map<string, boolean>();
   for (const d of detalles ?? []) {
     yaNoEsta.set(d.numeroCredito, BORRADO_O_INEXISTENTE.has(d.status));
   }
+  return yaNoEsta;
+};
+
+export function excluirTraspasosSinBorrar<T>(
+  pools: { numeroCredito: string; entradas: EntradaPool<T>[] }[],
+  detalles: DetalleEliminacion[] | null
+): { numeroCredito: string; creditos: T[] }[] {
+  const yaNoEsta = mapaDeBorrados(detalles);
 
   return pools
     .map((pool) => ({
@@ -67,4 +79,42 @@ export function excluirTraspasosSinBorrar<T>(
         .map((e) => e.credito),
     }))
     .filter((pool) => pool.creditos.length > 0);
+}
+
+/**
+ * Qué pools NO pueden tocar el plan de pagos, porque alguno de sus traspasos no
+ * se borró.
+ *
+ * `/pools-raros` tiene DOS pasos que consumen la lista de pools, y
+ * `excluirTraspasosSinBorrar` sólo cubre el primero —el recálculo de capital—.
+ * El segundo recorre los pools y llama `marcarCuotasPagadasHastaNumero` y
+ * `updateInstallments` sobre el crédito PRINCIPAL, con el `numeroCuota` y la
+ * `cuota` del pool. Esos datos asumen que los traspasos entraron: si uno se
+ * rechazó, ese paso marca cuotas del principal como pagadas y le sobrescribe el
+ * monto con una foto que no ocurrió, mientras el capital sigue en el crédito
+ * origen que quedó vivo.
+ *
+ * **Se saltea el pool ENTERO, no sólo los que quedaron vacíos**, y la diferencia
+ * con el otro filtro es el punto: la cuota del pool no es por traspaso, así que
+ * no hay forma de descontarle "la parte" del rechazado. Conservador a propósito
+ * — no sobrescribir el plan de pagos del principal con datos que suponían
+ * capital que no se movió. El operador anula el rubro y vuelve a correr.
+ *
+ * Un pool sin traspasos nunca se saltea: no depende de ningún borrado.
+ */
+export function poolsConTraspasoRechazado<T>(
+  pools: { numeroCredito: string; entradas: EntradaPool<T>[] }[],
+  detalles: DetalleEliminacion[] | null
+): Set<string> {
+  const yaNoEsta = mapaDeBorrados(detalles);
+  const rechazados = new Set<string>();
+
+  for (const pool of pools) {
+    const hayRechazado = pool.entradas.some(
+      (e) => e.origenBase !== null && yaNoEsta.get(e.origenBase) !== true
+    );
+    if (hayRechazado) rechazados.add(pool.numeroCredito);
+  }
+
+  return rechazados;
 }

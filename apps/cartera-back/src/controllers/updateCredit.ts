@@ -3172,6 +3172,28 @@ export const recalcularPagosCredito = async ({
         },
       });
     }
+
+    // Los `*_restante` NO son historia del pago: son el espejo de lo que la
+    // CUOTA todavía debe, y registerPayment reparte el siguiente pago contra
+    // la fila más reciente que tenga saldo (`pagoSaldoVigente`). Hasta acá el
+    // recálculo refrescaba ese espejo solo en las filas que reescribe, así que
+    // las VALIDADAS se quedaban con el saldo de antes: tras una reversa el
+    // siguiente pago se repartía contra plata que ya no debía y el sobrante
+    // rebalsaba a la cuota siguiente. Caso real (crédito 483, cuota 7): al
+    // reversar un parcial de Q1,500 las filas hermanas siguieron diciendo
+    // "faltan Q157.60"; el pago de Q1,276.80 cerró la cuota con Q157.60 y
+    // mandó Q1,119.20 —con sus facturas— a la cuota 8.
+    //
+    // Se escribe SOLO el espejo del saldo final de la cuota. Ni abonos, ni
+    // `pagado`, ni `total_restante`: el split del validado ya se facturó y se
+    // distribuyó a inversionistas, y esa parte sigue intocable.
+    const espejoCuota = snapshotRestantes();
+    for (const validado of validadosVivos) {
+      actualizaciones.push({
+        pago_id: validado.pago_id,
+        datos: { ...espejoCuota },
+      });
+    }
   }
 
   // 6️⃣ Ejecutar todas las actualizaciones en una transacción

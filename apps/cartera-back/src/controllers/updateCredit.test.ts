@@ -253,18 +253,19 @@ describe("recalcularPagosCredito — pagos validados no se reescriben", () => {
 
     await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
 
-    // Solo se escribe la fila sembrada; el validado queda intacto.
-    expect(capturedUpdates.length).toBe(1);
+    // La fila sembrada se reescribe entera; el validado recibe SOLO el espejo
+    // de restantes (su split queda intacto — ver el test de abajo).
     const idsEscritos = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
     expect(idsEscritos).toContain(74540);
-    expect(idsEscritos).not.toContain(156048);
 
     // La cuota se proyecta desde el principal PRE-parcial: 18493.39 + 50 =
     // 18543.39 × 1.5% = 278.15 de interés, IVA 33.38; capital de la cuota =
     // 2021.83 − 278.15 − 33.38 − 260.93 − 399.73 = 1049.64. El sembrado queda
     // neto de lo que el validado ya abonó (100 / 12 / 50), sin restar el
     // capital validado dos veces.
-    const vals = capturedUpdates[0].vals;
+    const vals = capturedUpdates.find((u) =>
+      renderSql(u.cond).params.includes(74540),
+    )!.vals;
     expect(vals.interes_restante).toBe("178.15");
     expect(vals.iva_12_restante).toBe("21.38");
     expect(vals.seguro_restante).toBe("260.93");
@@ -275,6 +276,52 @@ describe("recalcularPagosCredito — pagos validados no se reescriben", () => {
     expect(vals.total_restante).toBe("17493.75");
     expect(vals.abono_interes).toBe("0");
     expect(vals.pagado).toBe(false);
+  });
+
+  // Regresión crédito 483 / cuota 7 (sep-2026): al reversar un parcial, la
+  // fila validada se quedaba con el espejo de restantes de ANTES de la reversa
+  // ("faltan Q157.60"). registerPayment reparte contra la fila más reciente
+  // con saldo, así que el siguiente pago cerraba la cuota con esos Q157.60 y
+  // mandaba el resto —con sus facturas— a la cuota siguiente.
+  it("refresca el espejo de restantes del validado sin tocar su split", async () => {
+    pagosActuales = [
+      {
+        pagos_credito: {
+          ...parcialValidado,
+          // Espejo viejo que dejó la reversa.
+          capital_restante: "157.60",
+          interes_restante: "0",
+          iva_12_restante: "0",
+          seguro_restante: "0",
+          gps_restante: "0",
+          membresias: "0",
+        },
+        cuotas_credito: cuota18,
+      },
+      { pagos_credito: filaSembrada, cuotas_credito: cuota18 },
+    ];
+
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    const espejo = capturedUpdates.find((u) =>
+      renderSql(u.cond).params.includes(156048),
+    )!.vals;
+    // Mismo saldo que el hermano sembrado: lo que la cuota debe de verdad.
+    expect(espejo.interes_restante).toBe("178.15");
+    expect(espejo.iva_12_restante).toBe("21.38");
+    expect(espejo.seguro_restante).toBe("260.93");
+    expect(espejo.membresias).toBe("399.73");
+    expect(espejo.capital_restante).toBe("999.64");
+    // El split validado (ya facturado y distribuido a inversionistas) y su
+    // estado no se tocan: en el UPDATE solo viajan los restantes.
+    expect(Object.keys(espejo).sort()).toEqual([
+      "capital_restante",
+      "gps_restante",
+      "interes_restante",
+      "iva_12_restante",
+      "membresias",
+      "seguro_restante",
+    ]);
   });
 });
 
@@ -317,12 +364,17 @@ describe("recalcularPagosCredito — capital validado de cuotas posteriores", ()
 
     await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
 
-    // Se escriben solo las dos sembradas; el validado (aunque pagado=true) no.
-    expect(capturedUpdates.length).toBe(2);
+    // Las dos sembradas se reescriben enteras; el validado (aunque
+    // pagado=true) solo recibe el espejo de restantes de su cuota.
     const ids = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
     expect(ids).toContain(74540);
     expect(ids).toContain(74541);
-    expect(ids).not.toContain(156049);
+    const validado = capturedUpdates.find((u) =>
+      renderSql(u.cond).params.includes(156049),
+    )!.vals;
+    expect(validado.abono_capital).toBeUndefined();
+    expect(validado.pagado).toBeUndefined();
+    expect(validado.total_restante).toBeUndefined();
 
     // La cuota 18 se proyecta desde 18493.39 + 50 (capital del parcial de la
     // 19) = 18543.39 × 1.5% = 278.15, no desde el capital ya reducido.

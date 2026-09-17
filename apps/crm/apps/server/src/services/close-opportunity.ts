@@ -5,10 +5,9 @@
  */
 
 import crypto from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord, auditedTransaction } from "../lib/audit";
 import {
 	carteraBackReferences,
 	carteraBackSyncLog,
@@ -19,8 +18,16 @@ import {
 	vehicles,
 } from "../db/schema";
 import { contratosFinanciamiento } from "../db/schema/cobros";
-import { clients, leads, opportunities } from "../db/schema/crm";
+import {
+	clients,
+	leads,
+	opportunities,
+	opportunityStageHistory,
+	salesStages,
+} from "../db/schema/crm";
+import { auditedTransaction, auditRecord } from "../lib/audit";
 import { eqDpi } from "../lib/dpi-lookup";
+import { calcularFinanciamientoFechaIdeal } from "../lib/fecha-ideal-cotizacion";
 import { calcularAjusteFechaIdeal } from "../lib/fecha-ideal-pago-ajuste";
 import { formatMissingFields, getMissingFields } from "../lib/vehicle-helpers";
 import type { FacturaItem } from "../types/cartera-back";
@@ -144,6 +151,8 @@ interface CreateCreditParams {
 	userId: string;
 	cuotaMensual?: string;
 	membershipCost?: number;
+	idealPaymentDateAdjustment?: string;
+	idealPaymentDateAdjustmentReferenceDate?: string | null;
 	isVehicleOwned?: boolean;
 	// Info del vehículo para el correo
 	vehiculo_marca?: string;
@@ -181,6 +190,13 @@ interface CompleteClientResult {
 
 /** Datos de la última cotización aprobada para facturación */
 interface QuotationDataForBilling {
+	id: string;
+	adminCost: string;
+	totalFinanced: string;
+	interestRate: string;
+	termMonths: number;
+	insuranceCost: string;
+	gpsCost: string;
 	vehicleTransferCost: string | null; // Traspaso de vehículo
 	leasingContractCost: string | null; // Contrato de abogado (leasing)
 	mobileGuaranteeCost: string | null; // Garantía mobiliaria
@@ -194,6 +210,8 @@ interface QuotationDataForBilling {
 	value: string | null; // Valor del vehículo (para correo)
 	monthlyPayment: string | null; // Cuota mensual (para asegurar el valor que es)
 	membershipCost: string | null; // Membresía efectiva que debe viajar a cartera
+	idealPaymentDateAdjustment: string;
+	idealPaymentDateAdjustmentReferenceDate: string | null;
 	isInterno: boolean; // Créditos internos no cobran membresía
 	insuranceProvider: string | null; // Aseguradora elegida (gyt | universales)
 }
@@ -469,6 +487,13 @@ export async function getLatestApprovedQuotation(
 	try {
 		const [quotation] = await db
 			.select({
+				id: quotations.id,
+				adminCost: quotations.adminCost,
+				totalFinanced: quotations.totalFinanced,
+				interestRate: quotations.interestRate,
+				termMonths: quotations.termMonths,
+				insuranceCost: quotations.insuranceCost,
+				gpsCost: quotations.gpsCost,
 				vehicleTransferCost: quotations.vehicleTransferCost,
 				leasingContractCost: quotations.leasingContractCost,
 				mobileGuaranteeCost: quotations.mobileGuaranteeCost,
@@ -482,15 +507,14 @@ export async function getLatestApprovedQuotation(
 				value: quotations.vehicleValue,
 				monthlyPayment: quotations.monthlyPayment,
 				membershipCost: quotations.membershipCost,
+				idealPaymentDateAdjustment: quotations.idealPaymentDateAdjustment,
+				idealPaymentDateAdjustmentReferenceDate:
+					quotations.idealPaymentDateAdjustmentReferenceDate,
 				isInterno: quotations.isInterno,
 				insuranceProvider: quotations.insuranceProvider,
 			})
 			.from(quotations)
-			.where(
-				and(
-					eq(quotations.opportunityId, opportunityId)
-				),
-			)
+			.where(and(eq(quotations.opportunityId, opportunityId)))
 			.orderBy(
 				desc(eq(quotations.status, "accepted")),
 				desc(quotations.createdAt),
@@ -501,6 +525,182 @@ export async function getLatestApprovedQuotation(
 	} catch (error) {
 		console.error("[CloseOpportunity] Error fetching latest quotation:", error);
 		return null;
+	}
+}
+
+async function financeLegacyIdealDateAdjustment(
+	opportunity: OpportunityData,
+	quotation: QuotationDataForBilling | null,
+	userId: string,
+): Promise<void> {
+	if (
+		!quotation ||
+		opportunity.diaPagoOriginalSistema == null ||
+		Number(quotation.idealPaymentDateAdjustment) > 0
+	) {
+		return;
+	}
+
+	const financed = await auditedTransaction(async (tx) => {
+		const [lockedOpportunity] = await tx
+			.select()
+			.from(opportunities)
+			.where(eq(opportunities.id, opportunity.id))
+			.limit(1)
+			.for("update");
+		const [lockedQuotation] = await tx
+			.select()
+			.from(quotations)
+			.where(eq(quotations.id, quotation.id))
+			.limit(1)
+			.for("update");
+		if (!lockedOpportunity || !lockedQuotation) {
+			throw new Error(
+				"No se encontró la oportunidad o cotización para financiar",
+			);
+		}
+		if (Number(lockedQuotation.idealPaymentDateAdjustment) > 0) {
+			return {
+				quotationPatch: {
+					adminCost: lockedQuotation.adminCost,
+					totalFinanced: lockedQuotation.totalFinanced,
+					monthlyPayment: lockedQuotation.monthlyPayment,
+					extraAdminCost: lockedQuotation.extraAdminCost,
+					idealPaymentDateAdjustment:
+						lockedQuotation.idealPaymentDateAdjustment,
+					idealPaymentDateAdjustmentReferenceDate:
+						lockedQuotation.idealPaymentDateAdjustmentReferenceDate,
+				},
+				opportunityPatch: {
+					value: lockedOpportunity.value,
+					cuotaMensual: lockedOpportunity.cuotaMensual,
+					gastosAdministrativos: lockedOpportunity.gastosAdministrativos,
+					inversionistas: lockedOpportunity.inversionistas,
+				},
+			};
+		}
+		const referenceWasMissing =
+			!lockedQuotation.idealPaymentDateAdjustmentReferenceDate;
+		let referenceDate = lockedQuotation.idealPaymentDateAdjustmentReferenceDate;
+		if (!referenceDate) {
+			const [stage80Event] = await tx
+				.select({
+					referenceDate: sql<string>`(
+						(${opportunityStageHistory.changedAt} AT TIME ZONE 'UTC')
+						AT TIME ZONE 'America/Guatemala'
+					)::date`,
+				})
+				.from(opportunityStageHistory)
+				.innerJoin(
+					salesStages,
+					eq(salesStages.id, opportunityStageHistory.toStageId),
+				)
+				.where(
+					and(
+						eq(opportunityStageHistory.opportunityId, lockedOpportunity.id),
+						eq(salesStages.closurePercentage, 80),
+					),
+				)
+				.orderBy(desc(opportunityStageHistory.changedAt))
+				.limit(1);
+			if (!stage80Event) {
+				throw new Error(
+					"La cotización con fecha ideal no tiene fecha de referencia ni historial de entrada a 80%.",
+				);
+			}
+			referenceDate = stage80Event.referenceDate;
+		}
+		const diaPagoMensual = normalizePaymentDay(
+			lockedOpportunity.diaPagoMensual,
+		);
+		const investors = parseInversionistas(lockedOpportunity.inversionistas);
+		if (
+			lockedOpportunity.diaPagoOriginalSistema == null ||
+			diaPagoMensual == null ||
+			!investors
+		) {
+			throw new Error(
+				"La oportunidad no tiene datos válidos para financiar el ajuste por fecha ideal.",
+			);
+		}
+
+		const result = calcularFinanciamientoFechaIdeal({
+			diaPagoOriginalSistema: lockedOpportunity.diaPagoOriginalSistema,
+			diaPagoMensualElegido: diaPagoMensual,
+			fechaReferencia: new Date(`${referenceDate}T12:00:00.000Z`),
+			membershipCost: Number(lockedQuotation.membershipCost ?? 0),
+			investors,
+			quotation: {
+				adminCost: Number(lockedQuotation.adminCost),
+				totalFinanced: Number(lockedQuotation.totalFinanced),
+				extraAdminCost: Number(lockedQuotation.extraAdminCost ?? 600),
+				interestRate: Number(lockedQuotation.interestRate),
+				termMonths: lockedQuotation.termMonths,
+				insuranceCost: Number(lockedQuotation.insuranceCost ?? 0),
+				gpsCost: Number(lockedQuotation.gpsCost ?? 0),
+				idealPaymentDateAdjustment: Number(
+					lockedQuotation.idealPaymentDateAdjustment,
+				),
+			},
+		});
+		if (!result.adjustment) {
+			if (!referenceWasMissing) return null;
+			await tx
+				.update(quotations)
+				.set({
+					idealPaymentDateAdjustmentReferenceDate: referenceDate,
+					updatedAt: new Date(),
+				})
+				.where(eq(quotations.id, lockedQuotation.id));
+			return {
+				quotationPatch: {
+					idealPaymentDateAdjustmentReferenceDate: referenceDate,
+				},
+				opportunityPatch: {},
+			};
+		}
+
+		const quotationPatch = {
+			adminCost: result.regenerated.adminCost.toFixed(2),
+			totalFinanced: result.regenerated.totalFinanced.toFixed(2),
+			monthlyPayment: result.regenerated.monthlyPayment.toFixed(2),
+			extraAdminCost: result.regenerated.extraAdminCost.toFixed(2),
+			idealPaymentDateAdjustment: result.adjustment.montoTotal.toFixed(2),
+			idealPaymentDateAdjustmentDays: result.adjustment.diasDiferencia,
+			idealPaymentDateAdjustmentReferenceDate: referenceDate,
+			updatedAt: new Date(),
+		};
+		const opportunityPatch = {
+			value: quotationPatch.totalFinanced,
+			cuotaMensual: quotationPatch.monthlyPayment,
+			gastosAdministrativos: quotationPatch.extraAdminCost,
+			inversionistas: JSON.stringify(result.investors),
+			updatedAt: quotationPatch.updatedAt,
+		};
+		await tx
+			.update(quotations)
+			.set(quotationPatch)
+			.where(eq(quotations.id, lockedQuotation.id));
+		await tx
+			.update(opportunities)
+			.set(opportunityPatch)
+			.where(eq(opportunities.id, lockedOpportunity.id));
+		auditRecord({
+			entity: "opportunity",
+			id: lockedOpportunity.id,
+			action: "finance_legacy_ideal_date_adjustment",
+			data: {
+				quotationId: lockedQuotation.id,
+				adjustment: result.adjustment.montoTotal,
+				userId,
+			},
+		});
+		return { quotationPatch, opportunityPatch };
+	});
+
+	if (financed) {
+		Object.assign(quotation, financed.quotationPatch);
+		Object.assign(opportunity, financed.opportunityPatch);
 	}
 }
 
@@ -749,7 +949,6 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 			// Cuántos gastos administrativos se registraron (para refrescar el
 			// snapshot del día una sola vez al final, si hubo al menos uno).
 			let gastosRegistrados = 0;
-
 
 			for (const invoice of invoices) {
 				const startTime = Date.now();
@@ -1022,9 +1221,33 @@ async function createCredit(
 		// sistema hubiera asignado por default. Solo aplica cuando diaPagoOriginalSistema
 		// quedó capturado en el 50% (assignInvestorAndAdvance) — es decir, solo cuando
 		// se eligió un día IA, nunca cuando se eligió 15/30 manualmente.
-		const fechaReferenciaPrimeraCuota = new Date();
+		const ajusteYaFinanciado =
+			Number(params.idealPaymentDateAdjustment ?? 0) > 0;
+		if (ajusteYaFinanciado && opportunity.diaPagoOriginalSistema == null) {
+			return {
+				success: false,
+				error:
+					"La cotización financiada no tiene el día original del sistema. Regenera la asignación antes de crear el crédito.",
+			};
+		}
+		if (
+			opportunity.diaPagoOriginalSistema != null &&
+			params.idealPaymentDateAdjustmentReferenceDate == null
+		) {
+			return {
+				success: false,
+				error:
+					"La cotización con fecha ideal no tiene fecha de referencia para generar el calendario. Regenera la asignación antes de crear el crédito.",
+			};
+		}
+		const fechaReferenciaPrimeraCuota =
+			params.idealPaymentDateAdjustmentReferenceDate != null
+				? new Date(
+						`${params.idealPaymentDateAdjustmentReferenceDate}T12:00:00.000Z`,
+					)
+				: new Date();
 		const ajusteCalculado =
-			opportunity.diaPagoOriginalSistema != null
+			opportunity.diaPagoOriginalSistema != null && !ajusteYaFinanciado
 				? calcularAjusteFechaIdeal({
 						diaPagoOriginalSistema: opportunity.diaPagoOriginalSistema,
 						diaPagoMensualElegido: diaPagoMensual,
@@ -1039,19 +1262,13 @@ async function createCredit(
 					})
 				: null;
 
-		const ajusteFechaIdeal = ajusteCalculado
-			? {
-					dia_pago_original_sistema: opportunity.diaPagoOriginalSistema as number,
-					dia_pago_mensual_elegido: diaPagoMensual,
-					dias_diferencia: ajusteCalculado.diasDiferencia,
-					dias_del_mes: ajusteCalculado.diasDelMes,
-					monto_interes: ajusteCalculado.montoInteres,
-					monto_membresia: ajusteCalculado.montoMembresia,
-					monto_servicios: ajusteCalculado.montoServicios,
-					monto_total: ajusteCalculado.montoTotal,
-					fecha_referencia: fechaReferenciaPrimeraCuota.toISOString(),
-				}
-			: undefined;
+		if (ajusteCalculado != null) {
+			return {
+				success: false,
+				error:
+					"La cotización no tiene financiado el ajuste por fecha ideal. Regenera la asignación antes de crear el crédito.",
+			};
+		}
 
 		const creditoResult = await createCreditoInCarteraBack({
 			opportunityId: opportunity.id,
@@ -1067,7 +1284,13 @@ async function createCredit(
 				? Number(params.cuotaMensual)
 				: Number.parseFloat(opportunity.cuotaMensual as string),
 			dia_pago_mensual: diaPagoMensual,
-			ajuste_fecha_ideal: ajusteFechaIdeal,
+			fecha_referencia_calendario:
+				opportunity.diaPagoOriginalSistema != null
+					? fechaReferenciaPrimeraCuota.toISOString()
+					: undefined,
+			desplazar_primera_cuota_un_mes:
+				opportunity.diaPagoOriginalSistema != null &&
+				diaPagoMensual < opportunity.diaPagoOriginalSistema,
 			tipoCredito: opportunity.creditType || "autocompra",
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,
 			seguro_10_cuotas: seguro,
@@ -1464,6 +1687,7 @@ export async function closeOpportunity(
 		console.log(
 			`[CloseOpportunity] Latest quotation found: ${quotation ? "YES" : "NO"}`,
 		);
+		await financeLegacyIdealDateAdjustment(opportunity, quotation, userId);
 
 		// Estampar la aseguradora elegida (fuente: cotización) en la oportunidad,
 		// para que viaje a cartera y quede consistente en el CRM.
@@ -1499,6 +1723,9 @@ export async function closeOpportunity(
 				opportunity.membresiaPago,
 				quotation?.isInterno ?? false,
 			),
+			idealPaymentDateAdjustment: quotation?.idealPaymentDateAdjustment,
+			idealPaymentDateAdjustmentReferenceDate:
+				quotation?.idealPaymentDateAdjustmentReferenceDate,
 			isVehicleOwned: vehicleData?.isOwned ?? false,
 			// Enviar info del vehículo para que llegue en el correo de cartera
 			vehiculo_marca: vehicleData?.make ?? undefined,

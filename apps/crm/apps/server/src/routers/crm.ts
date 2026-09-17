@@ -71,8 +71,23 @@ import {
 } from "../lib/credit-analysis-ownership";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
 import { eqDpi } from "../lib/dpi-lookup";
-import { getDiaPagoOriginalSistema } from "../lib/fecha-ideal-pago-ajuste";
-import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
+import {
+	calcularAjusteFechaIdeal,
+	getDiaPagoOriginalSistema,
+} from "../lib/fecha-ideal-pago-ajuste";
+import {
+	puedeAsignarInversionistas,
+	puedeCambiarDiaPago,
+	requiereCongelarEtapaParaCambioDia,
+} from "../lib/fecha-ideal-pago-edicion";
+import {
+	calcularRegeneracionCotizacionFechaIdeal,
+	aplicarDeltaMontosInversionistas,
+} from "../lib/fecha-ideal-cotizacion";
+import {
+	getGuatemalaMonthWindow,
+	toDateStrGT,
+} from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
@@ -2388,13 +2403,30 @@ export const crmRouter = {
 			const leadIdCambio =
 				input.leadId !== undefined &&
 				input.leadId !== currentOpportunity[0].leadId;
-			let diaPagoOriginalSistemaUpdate: number | null | undefined;
-			if (
+			const requiereCongelarEtapa =
 				input.diaPagoMensual !== undefined &&
-				(input.diaPagoMensual !== currentOpportunity[0].diaPagoMensual ||
-					cambioDeIntencion ||
-					leadIdCambio)
-			) {
+				requiereCongelarEtapaParaCambioDia(
+					input.diaPagoMensual !== currentOpportunity[0].diaPagoMensual,
+					cambioDeIntencion,
+					leadIdCambio,
+				);
+			let diaPagoOriginalSistemaUpdate: number | null | undefined;
+			if (requiereCongelarEtapa) {
+				const [paymentDayStage] = await db
+					.select({ closurePercentage: salesStages.closurePercentage })
+					.from(salesStages)
+					.where(eq(salesStages.id, currentOpportunity[0].stageId))
+					.limit(1);
+				if (
+					!paymentDayStage ||
+					!puedeCambiarDiaPago(paymentDayStage.closurePercentage)
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El día de pago no puede cambiar después de asignar inversionistas",
+					});
+				}
+
 				const effectiveLeadId =
 					"leadId" in input ? input.leadId : currentOpportunity[0].leadId;
 				// Se consulta sin importar si el día es 15/30: esDiaIA (más abajo)
@@ -2669,10 +2701,13 @@ export const crmRouter = {
 					...(input.stageId ? { stageId: input.stageId } : {}),
 					...("leadId" in input ? { leadId: input.leadId } : {}),
 				});
-			const invariantWhereClause = and(
-				baseWhereClause,
-				relationshipInvariantCondition,
-			);
+			const invariantWhereClause = requiereCongelarEtapa
+				? and(
+						baseWhereClause,
+						relationshipInvariantCondition,
+						eq(opportunities.stageId, currentOpportunity[0].stageId),
+					)
+				: and(baseWhereClause, relationshipInvariantCondition);
 			const wonLockWhereClause = enforceNotWonInPredicate
 				? and(invariantWhereClause, not(eq(opportunities.status, "won")))
 				: invariantWhereClause;
@@ -7158,36 +7193,171 @@ export const crmRouter = {
 						(suggestedDays?.some((d) => d.dia === input.diaPagoMensual) ??
 							false);
 
-			// Update opportunity and record history in a transaction for atomicity
+			const fechaReferencia = new Date();
+			const diaPagoOriginalSistema = esDiaIA
+				? getDiaPagoOriginalSistema(fechaReferencia)
+				: null;
+
+			// Update opportunity, quotation and history atomically.
 			await auditedTransaction(async (tx) => {
-				// Update opportunity with combined investors and move to 80%
-				await tx
+				const [lockedOpportunity] = await tx
+					.select({ stageId: opportunities.stageId })
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1)
+					.for("update");
+				if (!lockedOpportunity) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Oportunidad no encontrada",
+					});
+				}
+				const [lockedStage] = await tx
+					.select({ closurePercentage: salesStages.closurePercentage })
+					.from(salesStages)
+					.where(eq(salesStages.id, lockedOpportunity.stageId))
+					.limit(1);
+				if (
+					!lockedStage ||
+					!puedeAsignarInversionistas(lockedStage.closurePercentage)
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "La oportunidad debe estar en la etapa del 50%",
+					});
+				}
+
+				const [quotation] = await tx
+					.select()
+					.from(quotations)
+					.where(eq(quotations.opportunityId, input.opportunityId))
+					.orderBy(
+						desc(eq(quotations.status, "accepted")),
+						desc(quotations.createdAt),
+					)
+					.limit(1)
+					.for("update");
+
+				if (esDiaIA && !quotation) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"No se puede financiar el ajuste de fecha ideal sin una cotización",
+					});
+				}
+
+				let regenerated:
+					| ReturnType<typeof calcularRegeneracionCotizacionFechaIdeal>
+					| undefined;
+				let idealPaymentDateAdjustment = 0;
+				let idealPaymentDateAdjustmentDays = 0;
+				let investorsToPersist = allInvestors;
+
+				if (quotation) {
+					const previousAdjustment = Number(
+						quotation.idealPaymentDateAdjustment ?? 0,
+					);
+					const baseCapital =
+						Number(quotation.totalFinanced) - previousAdjustment;
+					if (baseCapital <= 0) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: "El monto base de la cotización no es válido",
+						});
+					}
+
+					const adjustment =
+						esDiaIA && diaPagoOriginalSistema != null
+							? calcularAjusteFechaIdeal({
+									diaPagoOriginalSistema,
+									diaPagoMensualElegido: input.diaPagoMensual,
+									capital: baseCapital,
+									porcentajeInteres: Number(quotation.interestRate),
+									membresiaMensual: Number(quotation.membershipCost ?? 0),
+									seguroMensual: Number(quotation.insuranceCost ?? 0),
+									gpsMensual: Number(quotation.gpsCost ?? 0),
+									fechaReferencia,
+								})
+							: null;
+					idealPaymentDateAdjustment = adjustment?.montoTotal ?? 0;
+					idealPaymentDateAdjustmentDays = adjustment?.diasDiferencia ?? 0;
+					regenerated = calcularRegeneracionCotizacionFechaIdeal({
+						adminCost: Number(quotation.adminCost),
+						totalFinanced: Number(quotation.totalFinanced),
+						extraAdminCost: Number(quotation.extraAdminCost ?? 600),
+						interestRate: Number(quotation.interestRate),
+						termMonths: quotation.termMonths,
+						insuranceCost: Number(quotation.insuranceCost),
+						gpsCost: Number(quotation.gpsCost),
+						ajusteAnterior: previousAdjustment,
+						ajusteNuevo: idealPaymentDateAdjustment,
+					});
+					investorsToPersist = aplicarDeltaMontosInversionistas(
+						allInvestors,
+						regenerated.delta,
+					);
+
+					await tx
+						.update(quotations)
+						.set({
+							adminCost: regenerated.adminCost.toFixed(2),
+							totalFinanced: regenerated.totalFinanced.toFixed(2),
+							monthlyPayment: regenerated.monthlyPayment.toFixed(2),
+							extraAdminCost: regenerated.extraAdminCost.toFixed(2),
+							idealPaymentDateAdjustment:
+								idealPaymentDateAdjustment.toFixed(2),
+							idealPaymentDateAdjustmentDays,
+							idealPaymentDateAdjustmentReferenceDate:
+								esDiaIA
+									? toDateStrGT(fechaReferencia)
+									: null,
+							updatedAt: fechaReferencia,
+						})
+						.where(eq(quotations.id, quotation.id));
+				}
+
+				const updatedOpportunities = await tx
 					.update(opportunities)
 					.set({
-						inversionistas: JSON.stringify(allInvestors),
+						inversionistas: JSON.stringify(investorsToPersist),
 						stageId: stage80.id,
 						categoria: input.categoria,
 						nit: input.nit,
 						diaPagoMensual: input.diaPagoMensual,
-						// Se captura AHORA (momento de la asignación) porque depende de qué
-						// día es "hoy" en este instante — no se puede recalcular después.
-						diaPagoOriginalSistema: esDiaIA
-							? getDiaPagoOriginalSistema()
-							: null,
-						updatedAt: new Date(),
+						diaPagoOriginalSistema,
+						...(regenerated
+							? {
+									value: regenerated.totalFinanced.toFixed(2),
+									cuotaMensual: regenerated.monthlyPayment.toFixed(2),
+									gastosAdministrativos:
+										regenerated.extraAdminCost.toFixed(2),
+								}
+							: {}),
+						updatedAt: fechaReferencia,
 					})
-					.where(eq(opportunities.id, input.opportunityId));
+					.where(
+						and(
+							eq(opportunities.id, input.opportunityId),
+							eq(opportunities.stageId, lockedOpportunity.stageId),
+						),
+					)
+					.returning({ id: opportunities.id });
+				if (updatedOpportunities.length !== 1) {
+					throw new ORPCError("CONFLICT", {
+						message: "La oportunidad cambió mientras se asignaban inversionistas",
+					});
+				}
 				auditRecord({
 					entity: "opportunity",
 					id: input.opportunityId,
 					action: "assign_investor",
-					data: { categoria: input.categoria },
+					data: {
+						categoria: input.categoria,
+						idealPaymentDateAdjustment,
+						idealPaymentDateAdjustmentDays,
+					},
 				});
 
 				// Record stage history
 				await tx.insert(opportunityStageHistory).values({
 					opportunityId: input.opportunityId,
-					fromStageId: opportunity.stageId,
+					fromStageId: lockedOpportunity.stageId,
 					toStageId: stage80.id,
 					changedBy: context.userId,
 					reason: "Inversión asignada - Avance a etapa jurídica",

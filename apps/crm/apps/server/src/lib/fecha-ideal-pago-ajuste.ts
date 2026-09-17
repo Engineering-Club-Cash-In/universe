@@ -44,14 +44,21 @@ export interface AjusteFechaIdealResult {
 	montoTotal: number;
 }
 
-
 /**
- * Días del mes de la primera cuota usando la misma fecha calendario de
- * Guatemala que generatePaymentDates en cartera-back.
+ * Contexto calendario de la primera cuota usando la misma fecha de Guatemala
+ * que generatePaymentDates en cartera-back.
  */
-function getDiasDelMesPrimeraCuota(fechaReferencia: Date): number {
+function getPrimeraCuotaCalendar(fechaReferencia: Date): {
+	anio: number;
+	mesIndex: number;
+	diasDelMes: number;
+} {
 	const [anio, mes] = toDateStrGT(fechaReferencia).split("-").map(Number);
-	return new Date(Date.UTC(anio, mes + 1, 0)).getUTCDate();
+	return {
+		anio,
+		mesIndex: mes,
+		diasDelMes: new Date(Date.UTC(anio, mes + 1, 0)).getUTCDate(),
+	};
 }
 
 /**
@@ -59,27 +66,33 @@ function getDiasDelMesPrimeraCuota(fechaReferencia: Date): number {
  * que hay que cobrar por elegir un día de pago IA que cae DESPUÉS del día que
  * el sistema hubiera asignado por default. El monto no incluye capital.
  *
- * Si la fecha IA no cae después del día original (diferencia ≤ 0), no aplica
- * ningún ajuste y retorna null — no se debe generar fila de auditoría en ese caso.
+ * Si el día IA es menor al original, se interpreta como el mes siguiente.
+ * Solo cuando ambos días efectivos coinciden no aplica ajuste y retorna null.
  */
 export function calcularAjusteFechaIdeal(
 	params: CalcularAjusteFechaIdealParams,
 ): AjusteFechaIdealResult | null {
-	const diasDelMes = getDiasDelMesPrimeraCuota(
+	const { anio, mesIndex, diasDelMes } = getPrimeraCuotaCalendar(
 		params.fechaReferencia ?? new Date(),
 	);
 
-	// Clamp de fin de mes: el pago real cae en el último día del mes si el día
-	// elegido (29/30/31) no existe ese mes — mismo criterio que
-	// generatePaymentDates en cartera-back.
-	const diaElegidoClamped = Math.min(
-		params.diaPagoMensualElegido,
-		diasDelMes,
+	const rollover = params.diaPagoMensualElegido < params.diaPagoOriginalSistema;
+	const mesElegidoIndex = mesIndex + (rollover ? 1 : 0);
+	const diasDelMesElegido = new Date(
+		Date.UTC(anio, mesElegidoIndex + 1, 0),
+	).getUTCDate();
+	const fechaOriginal = Date.UTC(
+		anio,
+		mesIndex,
+		Math.min(params.diaPagoOriginalSistema, diasDelMes),
 	);
-
-	const diasDiferencia = Math.max(
-		0,
-		diaElegidoClamped - params.diaPagoOriginalSistema,
+	const fechaElegida = Date.UTC(
+		anio,
+		mesElegidoIndex,
+		Math.min(params.diaPagoMensualElegido, diasDelMesElegido),
+	);
+	const diasDiferencia = Math.round(
+		(fechaElegida - fechaOriginal) / (24 * 60 * 60 * 1000),
 	);
 
 	if (diasDiferencia === 0) return null;

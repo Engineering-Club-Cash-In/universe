@@ -277,6 +277,13 @@ const menuSections: MenuSection[] = [
         roles: ["ADMIN", "CONTA"],
       },
       {
+        key: "pagalo-supervision",
+        label: "Supervisión Págalo",
+        icon: <CreditCard className="h-4 w-4" />,
+        path: "/pagalo-supervision",
+        roles: ["ADMIN", "CONTA"],
+      },
+      {
         key: "cierre-cartera",
         label: "Cierre de Cartera",
         icon: <PiggyBank className="h-4 w-4" />,

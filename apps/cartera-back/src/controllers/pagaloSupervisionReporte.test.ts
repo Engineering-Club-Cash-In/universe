@@ -38,10 +38,10 @@ describe("traerDatasetCompletoPagalo", () => {
     expect(getPagaloSupervision.mock.calls[1][0].offset).toBe(1000);
   });
 
-  it("deduplica por id los grupos que se repiten entre páginas", async () => {
+  it("deduplica por id los grupos que se repiten entre páginas y marca el faltante", async () => {
     getPagaloSupervision.mockClear();
-    // Una página puede corrersele al llegar una escritura entre request y
-    // request; sin dedup el mismo grupo saldría dos veces en el reporte.
+    // Una página puede corrérsele al llegar una escritura entre request y
+    // request: sin dedup el mismo grupo saldría dos veces en el reporte.
     getPagaloSupervision
       .mockResolvedValueOnce({ success: true, grupos: grupos(0, 1000), total: 1200, conteoPorEstado: {} })
       .mockResolvedValueOnce({ success: true, grupos: grupos(990, 200), total: 1200, conteoPorEstado: {} });
@@ -50,6 +50,39 @@ describe("traerDatasetCompletoPagalo", () => {
 
     expect(resultado.filas).toHaveLength(1190);
     expect(new Set(resultado.filas.map((f) => f.id)).size).toBe(1190);
+    // Las 10 filas que el corrimiento dejó fuera nunca se piden: el archivo sale
+    // incompleto y tiene que decirlo, aunque el total esté lejos del tope.
+    expect(resultado.truncado).toBe(true);
+  });
+
+  it("no marca truncado cuando el dataset vino completo", async () => {
+    getPagaloSupervision.mockClear();
+    getPagaloSupervision.mockResolvedValueOnce({
+      success: true,
+      grupos: grupos(0, 300),
+      total: 300,
+      conteoPorEstado: {},
+    });
+
+    const resultado = await traerDatasetCompletoPagalo({});
+
+    expect(resultado.filas).toHaveLength(300);
+    expect(resultado.truncado).toBe(false);
+  });
+
+  it("no marca truncado por un dataset vacío", async () => {
+    getPagaloSupervision.mockClear();
+    getPagaloSupervision.mockResolvedValueOnce({
+      success: true,
+      grupos: [],
+      total: 0,
+      conteoPorEstado: {},
+    });
+
+    const resultado = await traerDatasetCompletoPagalo({});
+
+    expect(resultado.filas).toHaveLength(0);
+    expect(resultado.truncado).toBe(false);
   });
 
   it("corta en el límite y marca truncado cuando el filtro excede el tope", async () => {

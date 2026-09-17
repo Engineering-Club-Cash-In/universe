@@ -71,10 +71,21 @@ export async function traerDatasetCompletoPagalo(
     offset += PAGE_SIZE_EXPORT_PAGALO;
   }
 
+  const recortadas = filas.slice(0, LIMITE_EXPORT_PAGALO);
+  // Dos formas de quedar incompleto, y las dos tienen que avisar:
+  //   1. El filtro excede el tope de seguridad.
+  //   2. Con OFFSET/LIMIT, una escritura entre página y página corre las filas:
+  //      la siguiente repite lo ya visto (el Set lo descarta) y algo que estaba
+  //      más atrás nunca se pide. El bucle igual avanza el offset completo y
+  //      corta al llegar al total informado, así que sin esto el archivo sale
+  //      con menos filas de las que el servidor dijo tener y `truncado` era
+  //      false: un reporte incompleto presentado como completo.
+  const faltanFilas = totalServidor > 0 && recortadas.length < Math.min(totalServidor, LIMITE_EXPORT_PAGALO);
+
   return {
-    filas: filas.slice(0, LIMITE_EXPORT_PAGALO),
+    filas: recortadas,
     total: totalServidor,
-    truncado: totalServidor > LIMITE_EXPORT_PAGALO,
+    truncado: totalServidor > LIMITE_EXPORT_PAGALO || faltanFilas,
   };
 }
 
@@ -132,8 +143,11 @@ export function buildPagaloSupervisionHTML(
   filas: PagaloGrupoSupervision[],
   { total, truncado }: { total: number; truncado: boolean },
 ): string {
+  // "reporte parcial" y no "límite alcanzado": ahora truncado también cubre el
+  // caso en que la paginación perdió filas por un corrimiento, donde no se
+  // alcanzó ningún límite.
   const titulo = truncado
-    ? `Supervisión Págalo (${filas.length.toLocaleString("es-GT")} de ${total.toLocaleString("es-GT")} registros - límite alcanzado)`
+    ? `Supervisión Págalo (${filas.length.toLocaleString("es-GT")} de ${total.toLocaleString("es-GT")} registros - reporte parcial)`
     : "Supervisión Págalo";
 
   const encabezados = ENCABEZADOS_EXPORT_PAGALO.map(

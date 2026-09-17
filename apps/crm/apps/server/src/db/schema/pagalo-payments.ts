@@ -63,31 +63,49 @@ import {
 import { user } from "./auth";
 import { casosCobros, contactosCobros } from "./cobros";
 
+/**
+ * Los mismos valores del CHECK de `status` en la tabla, disponibles en runtime
+ * para validar entradas externas (el tipo sale de acá, no al revés, para que no
+ * puedan desincronizarse).
+ *
+ * Esta lista es la fuente de verdad, pero hay dos espejos fuera de este repo de
+ * código que NO se actualizan solos — al agregar un estado, tocar también:
+ *   · cartera-back .../routers/pagaloSupervision.ts (si no, rechaza con 400)
+ *   · carteraFront .../pagaloSupervision.helpers.ts (si no, no aparece su chip)
+ */
+export const PAGALO_PAYMENT_GROUP_STATUSES = [
+	"DRAFT",
+	"LINKS_PENDING",
+	"PENDING_PAYMENT",
+	"PARTIALLY_PAID",
+	"READY_TO_APPLY",
+	"APPLYING",
+	"COMPLETED",
+	"APPLICATION_FAILED",
+	"REVIEW_REQUIRED",
+	"CANCELLED",
+] as const;
+
 export type PagaloPaymentGroupStatus =
-	| "DRAFT"
-	| "LINKS_PENDING"
-	| "PENDING_PAYMENT"
-	| "PARTIALLY_PAID"
-	| "READY_TO_APPLY"
-	| "APPLYING"
-	| "COMPLETED"
-	| "APPLICATION_FAILED"
-	| "REVIEW_REQUIRED"
-	| "CANCELLED";
+	(typeof PAGALO_PAYMENT_GROUP_STATUSES)[number];
 
 export type PagaloEnvironment = "STAGING" | "PRODUCTION";
 export type PagaloLinkType = "CAPITAL" | "MORA_INTERES";
 export type PagaloPaymentGroupOrigen = "ASESOR" | "BOT";
 
+export const PAGALO_PAYMENT_LINK_STATUSES = [
+	"CREATING",
+	"ACTIVE",
+	"PAID",
+	"REJECTED",
+	"CANCELLED",
+	"EXPIRED",
+	"REPLACED",
+	"ERROR",
+] as const;
+
 export type PagaloPaymentLinkStatus =
-	| "CREATING"
-	| "ACTIVE"
-	| "PAID"
-	| "REJECTED"
-	| "CANCELLED"
-	| "EXPIRED"
-	| "REPLACED"
-	| "ERROR";
+	(typeof PAGALO_PAYMENT_LINK_STATUSES)[number];
 
 export type PagaloVoucherSource = "NONE" | "PAGALO" | "GENERATED";
 

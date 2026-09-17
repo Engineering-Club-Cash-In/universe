@@ -11,6 +11,7 @@ import type {
 	BoletaPagoInversionista,
 	CargaPorAsesorBucketResponse,
 	CarteraAsesor,
+	CarteraAsesorPorSifcoResponse,
 	CarteraAsignacionesPoolPorSifcoResponse,
 	CarteraBackApiResponse,
 	CarteraBackAuthError,
@@ -54,6 +55,7 @@ import type {
 	GetAdvisorsParams,
 	GetAllCreditsParams,
 	GetAsesorHistorialParams,
+	GetAsesorPorSifcoParams,
 	GetAsignacionesPoolPorSifcoParams,
 	GetBucketsHistorialParams,
 	GetCargaPorAsesorBucketParams,
@@ -2089,6 +2091,29 @@ export class CarteraBackClient {
 		const queryParams = new URLSearchParams({ sifcos: sifcos.join(",") });
 		return this.request<CarteraAsignacionesPoolPorSifcoResponse>(
 			`/buckets/pool-asignaciones?${queryParams}`,
+			{ method: "GET" },
+			false,
+		);
+	}
+
+	/**
+	 * EL asesor dueño de cada crédito (`creditos.asesor_id`), en bulk. A
+	 * diferencia de getAsignacionesPoolPorSifco —que devuelve el pool de
+	 * elegibles del bucket y puede traer varios por crédito— acá viene el único
+	 * que lo lleva hoy, que es lo que corresponde mostrar en una columna
+	 * "Asesor".
+	 */
+	async getAsesorPorSifco(
+		params: GetAsesorPorSifcoParams,
+	): Promise<CarteraAsesorPorSifcoResponse> {
+		const sifcos = [...new Set(params.sifcos)];
+		if (sifcos.length > 1000) {
+			throw new Error("getAsesorPorSifco admite máximo 1000 SIFCOs");
+		}
+		if (sifcos.length === 0) return { data: [] };
+		const queryParams = new URLSearchParams({ sifcos: sifcos.join(",") });
+		return this.request<CarteraAsesorPorSifcoResponse>(
+			`/buckets/asesor-por-sifco?${queryParams}`,
 			{ method: "GET" },
 			false,
 		);

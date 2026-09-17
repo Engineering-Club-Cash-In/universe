@@ -221,6 +221,19 @@ export interface CarteraAsignacionesPoolPorSifcoResponse {
 	data: Array<{ numero_credito_sifco: string; asesor_id: number }>;
 }
 
+export interface GetAsesorPorSifcoParams {
+	sifcos: string[];
+}
+
+/** El asesor dueño del crédito (`creditos.asesor_id`), uno por SIFCO. */
+export interface CarteraAsesorPorSifcoResponse {
+	data: Array<{
+		numero_credito_sifco: string;
+		asesor_id: number;
+		nombre: string;
+	}>;
+}
+
 /** Fila del listado /buckets/creditos: CreditoDetailResponse + el bucket derivado. */
 export interface CreditoBucketResponse extends CreditoDetailResponse {
 	bucket?: {

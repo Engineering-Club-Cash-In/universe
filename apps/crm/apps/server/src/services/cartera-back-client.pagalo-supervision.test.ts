@@ -150,3 +150,39 @@ test("getAsesorPorSifco mantiene GET con listas cortas", async () => {
 	expect(metodo).toBe("GET");
 	expect(urlSolicitada).toContain("/buckets/asesor-por-sifco?sifcos=SIFCO-1%2CSIFCO-2");
 });
+
+// El enriquecimiento de nombres de cliente en la bandeja cruza a POST cuando la
+// página del export trae más de 50 SIFCOs. Ese POST no debe inventar un
+// `estado`: la bandeja necesita el nombre de cualquier crédito, sin importar en
+// qué estado esté, y filtrarlo dejaría la columna Cliente vacía para el resto.
+test("getAllCreditos por POST no acota por estado cuando no se pidió", async () => {
+	let metodo = "";
+	const capturado: { cuerpo: Record<string, unknown> | null } = { cuerpo: null };
+	const fetchDePrueba = (async (_url: string, init?: RequestInit) => {
+		metodo = init?.method ?? "GET";
+		capturado.cuerpo = init?.body ? JSON.parse(String(init.body)) : null;
+		return new Response(
+			JSON.stringify({ data: [], page: 1, perPage: 1, total: 0, totalPages: 1 }),
+		);
+	}) as unknown as typeof fetch;
+	const cliente = new CarteraBackClient({
+		baseUrl: "http://cartera-back.test",
+		enableCache: false,
+		accessTokenProvider: async () => "token-de-prueba",
+		fetchTransport: fetchDePrueba,
+	});
+	const sifcos = Array.from({ length: 120 }, (_, i) => `0101021410${i}`);
+
+	await cliente.getAllCreditos({
+		mes: 0,
+		anio: 2026,
+		numeros_credito_sifco: sifcos,
+		page: 1,
+		perPage: sifcos.length,
+	});
+
+	expect(metodo).toBe("POST");
+	expect(capturado.cuerpo).not.toBeNull();
+	expect(capturado.cuerpo).not.toHaveProperty("estado");
+	expect(capturado.cuerpo?.numeros_credito_sifco).toHaveLength(120);
+});

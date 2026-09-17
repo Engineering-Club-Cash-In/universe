@@ -11,7 +11,7 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { and, count, desc, eq, exists, ilike, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, ilike, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -41,6 +41,34 @@ import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 const MAX_GRUPOS_POR_PAGINA = 25;
+const MAX_LIMIT_SUPERVISION = 100;
+const COLUMNAS_ORDENABLES_SUPERVISION = ["totalAmount", "createdAt"] as const;
+type ColumnaOrdenableSupervision =
+	(typeof COLUMNAS_ORDENABLES_SUPERVISION)[number];
+
+const COLUMNA_ORDEN = {
+	totalAmount: pagaloPaymentGroups.totalAmount,
+	createdAt: pagaloPaymentGroups.createdAt,
+} as const;
+
+/** ORDER BY seguro: columna siempre de esta whitelist, nunca del input crudo. */
+function ordenSupervision(
+	sortBy: ColumnaOrdenableSupervision,
+	sortDir: "asc" | "desc",
+) {
+	const columna = COLUMNA_ORDEN[sortBy];
+	const direccion = sortDir === "asc" ? asc : desc;
+	// Desempate estable por fecha cuando se ordena por monto, y por ID
+	// como desempate final determinista entre páginas con LIMIT/OFFSET.
+	return sortBy === "createdAt"
+		? [direccion(columna), desc(pagaloPaymentGroups.id)]
+		: [
+				direccion(columna),
+				desc(pagaloPaymentGroups.createdAt),
+				desc(pagaloPaymentGroups.id),
+			];
+}
+
 const CACHE_SCOPE_FALLBACK_MS = 60_000;
 const scopeFallbackPorAsesor = new Map<
 	number,
@@ -91,12 +119,13 @@ export const pagaloSupervisionRouter = {
 			const asesores = await carteraBackClient.getPoolPorAsesor({
 				useCache: false,
 			});
-			return asesoresConBucketsCompatibles(asesores)
-				.map(({ asesor_id, nombre, buckets }) => ({
+			return asesoresConBucketsCompatibles(asesores).map(
+				({ asesor_id, nombre, buckets }) => ({
 					asesorId: asesor_id,
 					nombre,
 					buckets,
-				}));
+				}),
+			);
 		}),
 
 	// Supervisor/admin ve toda la cartera. Rol cobros recibe solo créditos en
@@ -110,6 +139,10 @@ export const pagaloSupervisionRouter = {
 				antiguedadMinDias: z.number().int().positive().optional(),
 				numeroSifco: z.string().trim().optional(),
 				asesorId: z.number().int().positive().optional(),
+				fechaDesde: z.string().date().optional(),
+				fechaHasta: z.string().date().optional(),
+				sortBy: z.enum(COLUMNAS_ORDENABLES_SUPERVISION).default("createdAt"),
+				sortDir: z.enum(["asc", "desc"]).default("desc"),
 				// Sin esto en `true`, la bandeja parte del predicado "problemático"
 				// (REVIEW_REQUIRED/APPLICATION_FAILED/huérfano/estancado). El
 				// checkbox "Solo problemáticos" de la UI lo controla; con chips de
@@ -120,7 +153,7 @@ export const pagaloSupervisionRouter = {
 					.number()
 					.int()
 					.min(1)
-					.max(MAX_GRUPOS_POR_PAGINA)
+					.max(MAX_LIMIT_SUPERVISION)
 					.default(MAX_GRUPOS_POR_PAGINA),
 				offset: z.number().int().min(0).default(0),
 			}),
@@ -181,6 +214,8 @@ export const pagaloSupervisionRouter = {
 				estados: input.estados as PagaloPaymentGroupStatus[] | undefined,
 				soloHuerfanos: input.soloHuerfanos,
 				antiguedadMinDias: input.antiguedadMinDias,
+				fechaDesde: input.fechaDesde,
+				fechaHasta: input.fechaHasta,
 			};
 			const condicionesExplicitas = condicionesFiltro(filtroInput);
 			const problemasLink = input.problemasLink as
@@ -244,11 +279,13 @@ export const pagaloSupervisionRouter = {
 			const whereClause =
 				condiciones.length > 0 ? and(...condiciones) : undefined;
 
-			// Conteo por estado para los chips de filtro — SIEMPRE sobre el
-			// universo completo (solo con numeroSifco aplicado, si lo hay), no
-			// sobre el filtro de estados/soloProblematicos activo. Así el chip
-			// "Falló al aplicar (2)" sigue mostrando 2 aunque el supervisor tenga
-			// otro chip activo — es lo que le dice qué más hay para mirar.
+			// Conteo por estado para los chips de filtro — sobre el universo
+			// completo salvo numeroSifco y rango de fecha (si los hay), no sobre
+			// el filtro de estados/soloProblematicos activo. Así el chip "Falló
+			// al aplicar (2)" sigue mostrando 2 aunque el supervisor tenga otro
+			// chip activo — es lo que le dice qué más hay para mirar. El rango de
+			// fecha SÍ lo respeta: si el supervisor acota a "últimos 7 días", los
+			// chips deben contar ese mismo universo, no el histórico completo.
 			const condicionesConteo = sifcosPermitidos
 				? [condicionSifcosPermitidos([...sifcosPermitidos])]
 				: [];
@@ -260,6 +297,12 @@ export const pagaloSupervisionRouter = {
 					),
 				);
 			}
+			condicionesConteo.push(
+				...condicionesFiltro({
+					fechaDesde: input.fechaDesde,
+					fechaHasta: input.fechaHasta,
+				}),
+			);
 			const conteoWhere =
 				condicionesConteo.length > 0 ? and(...condicionesConteo) : undefined;
 			const conteoPorEstadoFilas = await db
@@ -316,7 +359,7 @@ export const pagaloSupervisionRouter = {
 				.from(pagaloPaymentGroups)
 				.leftJoin(user, eq(user.id, pagaloPaymentGroups.createdBy))
 				.where(whereClause)
-				.orderBy(desc(pagaloPaymentGroups.createdAt))
+				.orderBy(...ordenSupervision(input.sortBy, input.sortDir))
 				.limit(input.limit)
 				.offset(input.offset);
 
@@ -504,10 +547,12 @@ export const pagaloSupervisionRouter = {
 				}
 			}
 			const asesoresPorSifco = nombresAsesoresPorSifco(
-				(usarFallback ? asesoresCompatibles : asesoresVisibles).map((asesor) => ({
-					...asesor,
-					sifcos: sifcosPorAsesor.get(asesor.asesor_id) ?? [],
-				})),
+				(usarFallback ? asesoresCompatibles : asesoresVisibles).map(
+					(asesor) => ({
+						...asesor,
+						sifcos: sifcosPorAsesor.get(asesor.asesor_id) ?? [],
+					}),
+				),
 				sifcosPagina,
 			);
 

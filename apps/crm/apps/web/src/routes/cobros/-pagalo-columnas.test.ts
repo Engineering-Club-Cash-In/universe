@@ -4,6 +4,7 @@ import {
 	colorPuntoLink,
 	etiquetaLinkCompacta,
 	normalizarNombreCliente,
+	siguienteOrden,
 	tituloLink,
 } from "./-pagalo-columnas";
 
@@ -84,6 +85,35 @@ describe("tituloLink", () => {
 		expect(tituloLink({ linkType: "CAPITAL" }, "Pagado", undefined)).toBe(
 			"Capital · Pagado",
 		);
+	});
+});
+
+describe("siguienteOrden", () => {
+	test("click en columna distinta: la selecciona con desc por defecto", () => {
+		expect(
+			siguienteOrden(
+				{ columna: "createdAt", direccion: "desc" },
+				"totalAmount",
+			),
+		).toEqual({ columna: "totalAmount", direccion: "desc" });
+	});
+
+	test("click en la misma columna: invierte de desc a asc", () => {
+		expect(
+			siguienteOrden(
+				{ columna: "totalAmount", direccion: "desc" },
+				"totalAmount",
+			),
+		).toEqual({ columna: "totalAmount", direccion: "asc" });
+	});
+
+	test("click en la misma columna: invierte de asc a desc", () => {
+		expect(
+			siguienteOrden(
+				{ columna: "totalAmount", direccion: "asc" },
+				"totalAmount",
+			),
+		).toEqual({ columna: "totalAmount", direccion: "desc" });
 	});
 });
 

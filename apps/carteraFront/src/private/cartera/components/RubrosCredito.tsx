@@ -56,7 +56,7 @@ import {
 } from "../services/rubros.services";
 import { ajustarApertura, type SesionRubros } from "./rubrosApertura";
 import { motivoTipoNoCobrable } from "./rubrosTiposOfrecibles";
-import { motivoMontoNoEditable } from "./rubrosEdicionMonto";
+import { motivoMontoNoEditable, montoQuedaEnCeroAlCentavo } from "./rubrosEdicionMonto";
 import {
   QK_RUBROS,
   sincronizarRubroAnulado,
@@ -873,7 +873,10 @@ function VistaCrear({
     setError(null);
     if (!tipoId) return setError("Selecciona el tipo de rubro");
     const montoNum = Number(monto);
-    if (!monto.trim() || !Number.isFinite(montoNum) || montoNum <= 0) {
+    // El chequeo va sobre el monto YA redondeado al centavo, no sobre el crudo:
+    // `0.004` es "mayor a cero" en crudo y `0.00` guardado, y el backend lo
+    // rechaza después de redondear igual. Es la misma regla que la edición.
+    if (!monto.trim() || !Number.isFinite(montoNum) || montoQuedaEnCeroAlCentavo(monto)) {
       return setError("El monto debe ser un número mayor a cero");
     }
     if (!descripcion.trim()) return setError("La descripción es obligatoria");
@@ -1394,7 +1397,24 @@ function VistaCrearTipo({
       // (la administración de tipos). El orden replica el `ORDER BY nombre`
       // del backend para no desordenar la lista.
       const insertarOrdenado = (actuales: TipoRubro[] | undefined) => {
-        const lista = actuales ? [...actuales] : [];
+        /**
+         * Sin lista en caché NO se siembra, y es el mismo defecto que ya mordió
+         * en la lista de rubros: convertir `undefined` en `[]` deja el tipo
+         * recién creado como si fuera el catálogo COMPLETO.
+         *
+         * Pasa de verdad con `[QK_TIPOS, true]` —la variante que trae también
+         * los inactivos— cuando el tipo se crea desde el formulario de rubro sin
+         * haber abierto nunca la administración: al entrar, la pantalla arranca
+         * en éxito mostrando un solo tipo y escondiendo todos los demás hasta que
+         * el refetch termine. Y si ese refetch está pausado o lento, el admin
+         * trabaja sobre un catálogo inventado.
+         *
+         * Devolver `undefined` deja la query como estaba, así que el refetch
+         * siguiente trae el catálogo entero.
+         */
+        if (!actuales) return actuales;
+
+        const lista = [...actuales];
         if (lista.some((t) => t.tipo_id === tipo.tipo_id)) return lista;
         const idx = lista.findIndex((t) => t.nombre.localeCompare(tipo.nombre) > 0);
         if (idx === -1) lista.push(tipo);

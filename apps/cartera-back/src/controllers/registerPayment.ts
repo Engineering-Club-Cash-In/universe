@@ -2347,14 +2347,38 @@ export const insertPayment = async ({ body, set }: any) => {
       // efectivo restante se evaporaba sin acreditarse. Mismo espejo contable
       // que el else: saldo viejo + sobrante (el capital acá SÍ se aplicó, no
       // hay capitalDevuelto).
-      if (disponible_restante.gt(0)) {
-        const saldoConSobrante = saldoAFavor.plus(disponible_restante);
+      /**
+       * Se DEJA ESCRITO cuánto se acreditó, no sólo se acredita.
+       *
+       * La reversa le descontaba el `monto_boleta` completo, y eso no es lo que
+       * el pago dio. Medido contra una copia de producción: una boleta de
+       * Q1,100 con Q100 de `otros` y Q1,000 a capital acredita CERO —la boleta
+       * se reparte entera— y revertirla le quitaba Q1,000 de saldo a favor al
+       * cliente, plata que este pago nunca le dio.
+       *
+       * Va a una columna y no se deriva porque no se puede derivar: en un pago
+       * mixto el disponible inicial se consume después en mora, rubros y cuotas,
+       * así que `boleta − otros − abono_capital` es el disponible de ARRANQUE,
+       * no lo acreditado. Reconstruirlo desde ahí borraría saldo ajeno.
+       */
+      const acreditadoASaldo = disponible_restante.gt(0)
+        ? disponible_restante
+        : new Big(0);
+
+      if (acreditadoASaldo.gt(0)) {
+        const saldoConSobrante = saldoAFavor.plus(acreditadoASaldo);
         await db
           .update(usuarios)
           .set({ saldo_a_favor: saldoConSobrante.toString() })
           .where(eq(usuarios.usuario_id, credito.usuario_id));
-
       }
+
+      // Se escribe SIEMPRE, incluso el cero: es la diferencia entre "acreditó
+      // nada" y "no se sabe" (NULL, las filas anteriores a la 0039).
+      await db
+        .update(pagos_credito)
+        .set({ saldo_a_favor_acreditado: acreditadoASaldo.toString() })
+        .where(eq(pagos_credito.pago_id, pagoInsertado.pago_id));
 
       // Ídem rubros: la fila ya existe, así que recién acá se escriben los
       // reclamos y se le suma el cobro a su `otros`.

@@ -544,6 +544,15 @@
     seguro_facturado: numeric("seguro_facturado", { precision: 18, scale: 2 }), //viene del credito
     gps_facturado: numeric("gps_facturado", { precision: 18, scale: 2 }), //viene del credito
     reserva: numeric("reserva", { precision: 18, scale: 2 }), //seguro + 600
+  /**
+   * Cuánto acreditó ESTA fila a `usuarios.saldo_a_favor`.
+   *
+   * NULL = fila anterior a la migración 0039; la reversa cae en su conducta
+   * vieja para ésas. No se deriva de las otras columnas: en un pago mixto el
+   * disponible inicial se consume después en mora, rubros y cuotas, y sólo se
+   * acredita el remanente final.
+   */
+  saldo_a_favor_acreditado: numeric("saldo_a_favor_acreditado", { precision: 14, scale: 2 }),
     observaciones: text("observaciones"), //input
 
     paymentFalse: boolean("paymentFalse").notNull().default(false), // indica si el pago es falso

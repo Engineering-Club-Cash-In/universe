@@ -596,8 +596,33 @@ export function createReversePayment(
       // ======================================================================
 
       const saldoActual = new Big(user.saldo_a_favor ?? 0);
-      const montoBoleta = new Big(pago.monto_boleta ?? 0);
-      let nuevoSaldoAFavor = saldoActual.minus(montoBoleta);
+
+      /**
+       * Se devuelve lo que el pago ACREDITÓ, no el `monto_boleta`.
+       *
+       * Medido contra una copia de producción: un abono directo a capital de
+       * Q1,100 con Q100 de `otros` acredita CERO a saldo a favor —la boleta se
+       * reparte entera— y esta resta le quitaba Q1,000 al cliente. Plata que ese
+       * pago nunca le dio.
+       *
+       * La columna la escribe el registro (migración 0039) en vez de derivarse,
+       * porque no se puede derivar: en un pago mixto el disponible inicial se
+       * consume después en mora, rubros y cuotas, así que
+       * `boleta − otros − abono_capital` es el disponible de ARRANQUE. Calcularlo
+       * así borraría saldo ajeno — es exactamente el error que tuvo el primer
+       * intento de arreglar esto.
+       *
+       * NULL significa "fila anterior a la 0039, no se sabe": ahí se conserva la
+       * conducta vieja. Cambiarla a ciegas para las filas históricas sería
+       * inventar un dato que nadie registró.
+       */
+      const acreditado = pago.saldo_a_favor_acreditado;
+      const aDevolver =
+        acreditado === null || acreditado === undefined
+          ? new Big(pago.monto_boleta ?? 0)
+          : new Big(acreditado);
+
+      let nuevoSaldoAFavor = saldoActual.minus(aDevolver);
 
       // Si el saldo queda negativo, ponerlo en cero
       if (nuevoSaldoAFavor.lt(0)) {

@@ -111,6 +111,48 @@ describe("devengaMora", () => {
   });
 });
 
+describe("estado visible del pago", () => {
+  it("distingue registro, validación y cuota en la matriz QA-03", async () => {
+    const module = await import("./cuotaAtrasada");
+    const estadoVisible = Reflect.get(module, "estadoVisiblePago");
+    expect(estadoVisible).toBeFunction();
+    if (typeof estadoVisible !== "function") return;
+
+    expect(estadoVisible({
+      pagado: true,
+      paymentFalse: false,
+      validationStatus: "pending",
+      cuota_pagada: false,
+    })).toEqual({
+      registro: { label: "Registrado completo", tone: "blue" },
+      validacion: { label: "Validación pendiente", tone: "amber" },
+      cuota: { label: "Cuota pendiente", tone: "amber" },
+    });
+
+    expect(estadoVisible({
+      pagado: true,
+      paymentFalse: false,
+      validationStatus: "validated",
+      cuota_pagada: true,
+    })).toEqual({
+      registro: { label: "Registrado completo", tone: "blue" },
+      validacion: { label: "Validado", tone: "green" },
+      cuota: { label: "Cuota pagada", tone: "green" },
+    });
+
+    expect(estadoVisible({
+      pagado: false,
+      paymentFalse: true,
+      validationStatus: "pending",
+      cuota_pagada: false,
+    })).toEqual({
+      registro: { label: "Pago anulado", tone: "red" },
+      validacion: { label: "No válido", tone: "red" },
+      cuota: { label: "Cuota pendiente", tone: "amber" },
+    });
+  });
+});
+
 describe("cuotasEnAtraso", () => {
   it("marca la cuota vencida, sin pagar y sin cubrir", () => {
     const m = cuotasEnAtraso([pagoBase()], HOY);

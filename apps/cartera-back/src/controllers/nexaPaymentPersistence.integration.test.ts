@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import Big from "big.js";
 import postgres from "postgres";
 import { parseTestDatabaseUrl } from "./monto-a-cobrar-participacion-test-db";
 
@@ -19,6 +20,9 @@ const expectRejected = async (promise: PromiseLike<unknown>, message?: string) =
 
 integrationTest("constraints Nexa resisten concurrencia, replay y rollback", async () => {
   parseTestDatabaseUrl(testDatabaseUrl!);
+  process.env.SUPABASE_DB_URL = testDatabaseUrl;
+  process.env.RESEND_API_KEY = "re_test_only";
+  process.env.EMAIL_DOMAIN = "example.test";
   const sql = postgres(testDatabaseUrl!, { ssl: false });
   const migration = await Bun.file(
     new URL("../../drizzle/0039_add_nexa_internal_payments.sql", import.meta.url),
@@ -70,6 +74,19 @@ integrationTest("constraints Nexa resisten concurrencia, replay y rollback", asy
       SELECT nonce FROM cartera.nexa_payment_nonces WHERE nonce = 'nonce-rollback'
     `;
     expect(rolledBackNonce).toHaveLength(0);
+
+    const [uncertain] = await sql<{ id: number }[]>`
+      INSERT INTO cartera.nexa_payment_events
+        (external_reference, nonce, credito_id, amount, currency, payload_hash)
+      VALUES ('qa-uncertain', 'nonce-uncertain', 10, 10.00, 'GTQ', ${"c".repeat(64)})
+      RETURNING id
+    `;
+    const { nexaPaymentDependencies } = await import("./nexaPaymentRuntime");
+    await nexaPaymentDependencies.fail(uncertain!.id, "payment_outcome_uncertain");
+    const [manual] = await sql<{ status: string; error: string }[]>`
+      SELECT status, error FROM cartera.nexa_payment_events WHERE id = ${uncertain!.id}
+    `;
+    expect(manual).toEqual({ status: "manual_review", error: "payment_outcome_uncertain" });
   } finally {
     await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
     await sql.end();
@@ -186,6 +203,67 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
     if (blockerHeld) {
       await sql`SELECT pg_advisory_unlock(8765, ${creditoId})`.catch(() => undefined);
     }
+    await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
+    await sql.end();
+  }
+}, 30_000);
+
+integrationTest("la reconciliación Nexa cuenta mora y otros una sola vez", async () => {
+  parseTestDatabaseUrl(testDatabaseUrl!);
+  process.env.SUPABASE_DB_URL = testDatabaseUrl;
+  process.env.RESEND_API_KEY = "re_test_only";
+  process.env.EMAIL_DOMAIN = "example.test";
+  const sql = postgres(testDatabaseUrl!, { ssl: false });
+
+  try {
+    await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
+    await sql`CREATE SCHEMA cartera`;
+    await sql`
+      CREATE TABLE cartera.pagos_credito (
+        pago_id serial PRIMARY KEY,
+        credito_id integer NOT NULL,
+        nexa_payment_event_id integer NOT NULL,
+        validation_status text NOT NULL DEFAULT 'pending',
+        monto_aplicado numeric(18, 2) NOT NULL DEFAULT 0,
+        mora numeric(18, 2) NOT NULL DEFAULT 0,
+        otros text NOT NULL DEFAULT '0',
+        abono_capital numeric(18, 2) NOT NULL DEFAULT 0,
+        abono_interes numeric(18, 2) NOT NULL DEFAULT 0,
+        abono_iva_12 numeric(18, 2) NOT NULL DEFAULT 0,
+        abono_seguro numeric(18, 2) NOT NULL DEFAULT 0,
+        abono_gps numeric(18, 2) NOT NULL DEFAULT 0,
+        membresias_pago numeric(18, 2) NOT NULL DEFAULT 0
+      )
+    `;
+    await sql`
+      INSERT INTO cartera.pagos_credito
+        (credito_id, nexa_payment_event_id, monto_aplicado, mora, otros, abono_capital)
+      VALUES
+        (9488, 700, 30.00, 5.38, '15.00', 15.00),
+        (9488, 701, 0.00, 0.00, '12.50', 0.00),
+        (9488, 702, 30.00, 0.00, '15.00', 15.00),
+        (9488, 703, 15.00, 5.38, '0', 15.00),
+        (9488, 703, 15.00, 0.00, '0', 15.00)
+    `;
+
+    const { nexaPaymentDependencies } = await import("./nexaPaymentRuntime");
+    await expect(nexaPaymentDependencies.findPayments(700, 9488)).resolves.toEqual([
+      { paymentId: 1, validationStatus: "pending", amount: "35.38" },
+    ]);
+    await expect(nexaPaymentDependencies.findPayments(701, 9488)).resolves.toEqual([
+      { paymentId: 2, validationStatus: "pending", amount: "12.50" },
+    ]);
+    await expect(nexaPaymentDependencies.findPayments(702, 9488)).resolves.toEqual([
+      { paymentId: 3, validationStatus: "pending", amount: "30.00" },
+    ]);
+    const allocations = await nexaPaymentDependencies.findPayments(703, 9488);
+    expect(allocations).toEqual([
+      { paymentId: 4, validationStatus: "pending", amount: "20.38" },
+      { paymentId: 5, validationStatus: "pending", amount: "15.00" },
+    ]);
+    expect(allocations.reduce((total, payment) => total.plus(payment.amount), new Big(0)).toFixed(2))
+      .toBe("35.38");
+  } finally {
     await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
     await sql.end();
   }

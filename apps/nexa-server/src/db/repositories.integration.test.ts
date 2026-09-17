@@ -604,6 +604,61 @@ integrationTest("uncertain Cartera failure retries the same reference and create
   expect(await db.select().from(nexaReviews)).toHaveLength(1);
 });
 
+integrationTest("uncertain Cartera outcome reaches MANUAL_REVIEW without bank review", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await associateToken("10005010", "1234567", 42);
+  const stored = await repository.upsertReceived({
+    ...transaction,
+    reference: "uncertain-outcome",
+    transactionId: "7297",
+  });
+  const references: Array<string | number> = [];
+  let now = new Date("2026-09-08T15:30:00.000Z");
+  const run = () => runApplicationWorkerOnce({
+    repository,
+    cartera: {
+      applyNexaPayment: async (input) => {
+        references.push(input.transaction.reference);
+        throw new Error("payment_outcome_uncertain");
+      },
+    },
+    now: () => now,
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 2,
+    maxBackoffSeconds: 10,
+  });
+
+  expect(await run()).toBe(true);
+  now = new Date("2026-09-08T15:30:02.000Z");
+  expect(await run()).toBe(true);
+  now = new Date("2026-09-08T15:30:06.000Z");
+  expect(await run()).toBe(true);
+
+  const [payment] = await db.select().from(nexaPaymentTransactions)
+    .where(eq(nexaPaymentTransactions.id, stored.id));
+  expect(payment).toMatchObject({
+    processingStatus: "MANUAL_REVIEW",
+    attemptCount: 3,
+    failureReason: "application_processing_failed",
+  });
+  expect(references).toEqual(["uncertain-outcome", "uncertain-outcome", "uncertain-outcome"]);
+  expect(await db.select().from(nexaReviews)).toHaveLength(0);
+
+  let bankReviews = 0;
+  expect(await runReviewWorkerOnce({
+    repository: new DbReviewRepository(db),
+    nexa: { reviewTransfer: async () => { bankReviews += 1; } },
+    now: () => now,
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 2,
+    maxBackoffSeconds: 10,
+  })).toBe(false);
+  expect(bankReviews).toBe(0);
+});
+
 integrationTest("review failure becomes due and then recovers to COMPLETED", async () => {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const { paymentId, repository } = await queuedReview("8101", " 9101 ");

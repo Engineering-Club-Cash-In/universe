@@ -165,6 +165,15 @@ describe("HttpCarteraPaymentClient", () => {
       .rejects.toThrow("HTTP 403 Forbidden");
   });
 
+  test("mantiene payment_outcome_uncertain como fallo retryable", async () => {
+    const { client } = capturingClient(Response.json(
+      { error: "payment_outcome_uncertain" },
+      { status: 503, statusText: "Service Unavailable" },
+    ));
+    await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))
+      .rejects.toThrow("HTTP 503 Service Unavailable");
+  });
+
   test.each([500, 503, 408, 429, 401])("mantiene HTTP %s como fallo retryable", async (status) => {
     const { client } = capturingClient(new Response("upstream failure", { status }));
     await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))

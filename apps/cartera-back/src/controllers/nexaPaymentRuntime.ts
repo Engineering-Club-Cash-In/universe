@@ -73,7 +73,17 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
     .select({
       paymentId: pagos_credito.pago_id,
       validationStatus: pagos_credito.validationStatus,
-      amount: sql<string>`COALESCE(${pagos_credito.monto_aplicado}, 0) + COALESCE(${pagos_credito.mora}, 0) + COALESCE(NULLIF(${pagos_credito.otros}, ''), '0')::numeric`,
+      amount: sql<string>`GREATEST(
+        COALESCE(${pagos_credito.monto_aplicado}, 0),
+        COALESCE(${pagos_credito.abono_capital}, 0)
+          + COALESCE(${pagos_credito.abono_interes}, 0)
+          + COALESCE(${pagos_credito.abono_iva_12}, 0)
+          + COALESCE(${pagos_credito.abono_seguro}, 0)
+          + COALESCE(${pagos_credito.abono_gps}, 0)
+          + COALESCE(${pagos_credito.membresias_pago}, 0)
+          + COALESCE(${pagos_credito.mora}, 0)
+          + COALESCE(NULLIF(${pagos_credito.otros}, ''), '0')::numeric
+      )`,
     })
     .from(pagos_credito)
     .where(and(
@@ -129,7 +139,11 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
   fail: async (eventId, code) => {
     await db
       .update(nexa_payment_events)
-      .set({ status: "failed", error: code, updated_at: new Date() })
+      .set({
+        status: code === "payment_outcome_uncertain" ? "manual_review" : "failed",
+        error: code,
+        updated_at: new Date(),
+      })
       .where(and(
         eq(nexa_payment_events.id, eventId),
         ne(nexa_payment_events.status, "applied"),

@@ -51,6 +51,7 @@ import {
   shouldRejectZeroAppliedNormalValidation,
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
+  shouldApplyFinalSmallRemainderAsOther,
   sumarAplicadoACuota,
   pagoSchema,
   cuentaComoHermanoVivo,
@@ -1001,6 +1002,7 @@ export const insertPayment = async (
     // conteo tenía efectos observables (ajuste stale y guard anti-pérdida).
     let cuotas_saltadas = 0;
     let disponible_para_cuotasPosteriores = new Big(0);
+    let ultimoPagoInsertado: typeof pagos_credito.$inferSelect | undefined;
     for (const cuota of cuotasPendientes) {
 
 
@@ -1991,6 +1993,8 @@ export const insertPayment = async (
             }
           }
 
+          if (pagoInsertado?.pago_id) ultimoPagoInsertado = pagoInsertado;
+
           // ── Sincronizar `*_restante` en TODAS las filas vivas de la cuota ──
           // Antes los `*_restante` se guardaban por fila (snapshot del momento)
           // y se desincronizaban entre pagos hermanos: la fila `no_required` y
@@ -2029,24 +2033,31 @@ export const insertPayment = async (
           if (disponible_restante.lte(0)) {
             break;
           }
-          // Si el sobrante es <= Q25, agregarlo como "otros" al pago actual y no continuar
-          if (disponible_restante.lte(25) && pagoInsertado?.pago_id) {
-            const otrosActual = new Big(pagoInsertado.otros ?? "0");
-            await db
-              .update(pagos_credito)
-              .set({
-                otros: otrosActual.plus(disponible_restante).toString(),
-                monto_aplicado: new Big(pagoInsertado.monto_aplicado ?? "0").plus(disponible_restante).toString(),
-              })
-              .where(eq(pagos_credito.pago_id, pagoInsertado.pago_id));
-            disponible_restante = new Big(0);
-            break;
-          }
         }
       }
 
       // 7. Procesar abono directo a capital (si aplica)
     }
+
+    // Sólo después de intentar TODAS las cuotas pagables, el sobrante pequeño
+    // final puede conservar la regla legacy de "otros".
+    if (shouldApplyFinalSmallRemainderAsOther({
+      availableRemaining: disponible_restante,
+      hasInsertedPayment: !!ultimoPagoInsertado?.pago_id,
+    }) && ultimoPagoInsertado) {
+      const otrosActual = new Big(ultimoPagoInsertado.otros ?? "0");
+      await db
+        .update(pagos_credito)
+        .set({
+          otros: otrosActual.plus(disponible_restante).toString(),
+          monto_aplicado: new Big(ultimoPagoInsertado.monto_aplicado ?? "0")
+            .plus(disponible_restante)
+            .toString(),
+        })
+        .where(eq(pagos_credito.pago_id, ultimoPagoInsertado.pago_id));
+      disponible_restante = new Big(0);
+    }
+
     // Jalar la última cuota pagada
     const hoy = new Date().toISOString().slice(0, 10);
     const [ultimaCuotaPagada] = await db

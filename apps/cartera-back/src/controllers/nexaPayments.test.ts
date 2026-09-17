@@ -246,10 +246,11 @@ test.each([
   expect(mutated).toBe(false);
 });
 
-test("solo completa cuando todas las filas vinculadas suman el monto exacto", async () => {
+test("un total vinculado distinto queda incierto sin aplicar ni completar", async () => {
   const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
   let applied = 0;
   let completed = false;
+  const failures: string[] = [];
 
   await expect(processNexaPayment(
     { externalReference: "partial-link", creditoId: 10, amount: "10.00", currency: "GTQ" },
@@ -266,10 +267,14 @@ test("solo completa cuando todas las filas vinculadas suman el monto exacto", as
       registerPayment: async () => ({ success: true }),
       applyPayment: async () => { applied += 1; return { success: true }; },
       complete: async () => { completed = true; },
-      fail: async () => undefined,
+      fail: async (_eventId, code) => { failures.push(code); },
     },
-  )).rejects.toEqual(new NexaPaymentError("payment_amount_mismatch", 409));
-  expect({ applied, completed }).toEqual({ applied: 0, completed: false });
+  )).rejects.toEqual(new NexaPaymentError("payment_outcome_uncertain", 503));
+  expect({ applied, completed, failures }).toEqual({
+    applied: 0,
+    completed: false,
+    failures: ["payment_outcome_uncertain"],
+  });
 });
 
 test("exige success true al aplicar cada fila", async () => {
@@ -339,7 +344,7 @@ test("continúa un pago parcial de mora legado cuando dejó la fila exacta vincu
   });
 });
 
-test("rechaza un registro sin success que no dejó pagos vinculados", async () => {
+test("mantiene un rechazo explícito sin efectos como rechazo normal", async () => {
   const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
   let registered = 0;
 
@@ -355,13 +360,77 @@ test("rechaza un registro sin success que no dejó pagos vinculados", async () =
         binding: { activo: true, expires_at: null, max_payment_amount: null },
       }),
       findPayments: async () => [],
-      registerPayment: async () => { registered += 1; return {}; },
+      registerPayment: async () => {
+        registered += 1;
+        return { success: false, code: "credit_not_payable", status: 409 };
+      },
       applyPayment: async () => ({ success: true }),
       complete: async () => undefined,
       fail: async () => undefined,
     },
-  )).rejects.toEqual(new NexaPaymentError("payment_registration_rejected", 409));
+  )).rejects.toEqual(new NexaPaymentError("credit_not_payable", 409));
   expect(registered).toBe(1);
+});
+
+test("marca como incierto cualquier registro no rechazado sin fila vinculada", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  const failures: Array<{ eventId: number; code: string }> = [];
+
+  const registrationAttempts = [
+    async () => ({}),
+    async () => ({ success: true }),
+    async () => { throw new Error("post-registration failure"); },
+  ];
+  for (const registerPayment of registrationAttempts) {
+    await expect(processNexaPayment(
+      { externalReference: "uncertain-registration", creditoId: 10, amount: "10.00", currency: "GTQ" },
+      { nonce: "nonce-uncertain", payloadHash: "a".repeat(64), now: new Date() },
+      {
+        withCreditLock: async (_creditoId, work) => work(paymentLock),
+        claim: async () => ({ kind: "new", eventId: 7 }),
+        loadCredit: async () => ({
+          usuarioId: 5,
+          statusCredit: "MOROSO",
+          binding: { activo: true, expires_at: null, max_payment_amount: null },
+        }),
+        findPayments: async () => [],
+        registerPayment,
+        applyPayment: async () => ({ success: true }),
+        complete: async () => undefined,
+        fail: async (eventId, code) => { failures.push({ eventId, code }); },
+      },
+    )).rejects.toEqual(new NexaPaymentError("payment_outcome_uncertain", 503));
+  }
+  expect(failures).toEqual([
+    { eventId: 7, code: "payment_outcome_uncertain" },
+    { eventId: 7, code: "payment_outcome_uncertain" },
+    { eventId: 7, code: "payment_outcome_uncertain" },
+  ]);
+});
+
+test("un evento manual_review bloquea reintentos antes de mutar pagos", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  let mutated = false;
+
+  await expect(processNexaPayment(
+    { externalReference: "uncertain-registration", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    { nonce: "nonce-uncertain-retry", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "manual_review" }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "MOROSO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null },
+      }),
+      findPayments: async () => { mutated = true; return []; },
+      registerPayment: async () => { mutated = true; return { success: true }; },
+      applyPayment: async () => { mutated = true; return { success: true }; },
+      complete: async () => { mutated = true; },
+      fail: async () => { mutated = true; },
+    },
+  )).rejects.toEqual(new NexaPaymentError("payment_outcome_uncertain", 503));
+  expect(mutated).toBe(false);
 });
 
 test("devuelve el mismo paymentId en un reintento ya aplicado", async () => {
@@ -439,6 +508,8 @@ test("clasifica conflicto de payload, replay, retry e idempotencia persistente",
   };
 
   expect(classify(event, false, requested)).toEqual({ kind: "retry", eventId: 7 });
+  expect(classify({ ...event, status: "manual_review" }, false, requested))
+    .toEqual({ kind: "manual_review" });
   expect(classify({ ...event, status: "applied", pago_id: 17 }, false, requested))
     .toEqual({ kind: "applied", paymentId: 17 });
   expect(classify(event, true, requested)).toEqual({ kind: "replay" });

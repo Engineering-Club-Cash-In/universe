@@ -47,6 +47,17 @@ export const getCuotaIdForPaymentInsert = (
 
 export const getRequestedInstallmentFloor = (_requestedInstallment: number) => 1;
 
+export const shouldApplyFinalSmallRemainderAsOther = ({
+  availableRemaining,
+  hasInsertedPayment,
+}: {
+  availableRemaining: BigInput;
+  hasInsertedPayment: boolean;
+}) =>
+  hasInsertedPayment &&
+  new Big(availableRemaining).gt(0) &&
+  new Big(availableRemaining).lte(25);
+
 export const shouldMarkInstallmentPaymentPaid = ({
   allRemainingZero,
   hasExistingInstallmentPayment,

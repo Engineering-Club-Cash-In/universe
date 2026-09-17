@@ -57,6 +57,33 @@ export interface PagoParaAtraso {
  * `pagado = true` y `monto_aplicado = 0` SIN cubrirla. Sin esa condición la
  * cuota se pintaba como cubierta mientras el backend le seguía cobrando mora.
  */
+type EstadoVisible = { label: string; tone: "blue" | "amber" | "green" | "red" };
+
+export function estadoVisiblePago(p: Pick<
+  PagoParaAtraso,
+  "pagado" | "paymentFalse" | "validationStatus" | "cuota_pagada"
+>): { registro: EstadoVisible; validacion: EstadoVisible; cuota: EstadoVisible } {
+  const anulado = p.paymentFalse === true;
+  return {
+    registro: anulado
+      ? { label: "Pago anulado", tone: "red" }
+      : {
+          label: p.pagado === true ? "Registrado completo" : "Registrado parcial",
+          tone: "blue",
+        },
+    validacion: anulado
+      ? { label: "No válido", tone: "red" }
+      : p.validationStatus === "validated" || p.validationStatus === "capital_validated"
+        ? { label: "Validado", tone: "green" }
+        : p.validationStatus === "no_required"
+          ? { label: "No requiere validación", tone: "blue" }
+          : { label: "Validación pendiente", tone: "amber" },
+    cuota: p.cuota_pagada === true
+      ? { label: "Cuota pagada", tone: "green" }
+      : { label: "Cuota pendiente", tone: "amber" },
+  };
+}
+
 export function pagoCubreCuota(p: PagoParaAtraso): boolean {
   return (
     p.paymentFalse === false &&

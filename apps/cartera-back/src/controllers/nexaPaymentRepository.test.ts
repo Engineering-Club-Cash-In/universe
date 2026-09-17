@@ -43,6 +43,30 @@ test("claim usa el evento persistente para devolver el paymentId aplicado", asyn
   ).resolves.toEqual({ kind: "applied", paymentId: 17 });
 });
 
+test("claim bloquea un reintento cuyo evento quedó en manual_review", async () => {
+  const { claimNexaPaymentEvent } = await import("./nexaPaymentRepository");
+  const responses = [
+    { rows: [{ nonce_claimed: true, id: null }] },
+    {
+      rows: [{
+        id: 7,
+        credito_id: 10,
+        amount: "10.00",
+        currency: "GTQ",
+        payload_hash: "a".repeat(64),
+        status: "manual_review",
+        pago_id: null,
+      }],
+    },
+  ];
+
+  await expect(claimNexaPaymentEvent(
+    { query: async () => responses.shift() ?? { rows: [] } },
+    { externalReference: "qa-payment-uncertain", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    { nonce: "nonce-retry", payloadHash: "a".repeat(64), now: new Date() },
+  )).resolves.toEqual({ kind: "manual_review" });
+});
+
 test("claim rechaza en una sola operación un nonce ya consumido", async () => {
   const { claimNexaPaymentEvent } = await import("./nexaPaymentRepository");
   const queries: string[] = [];

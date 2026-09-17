@@ -45,7 +45,7 @@ export type NexaPaymentContext = {
 export type NexaClaim =
   | { kind: "new" | "retry"; eventId: number }
   | { kind: "applied"; paymentId: number }
-  | { kind: "conflict" | "replay" };
+  | { kind: "conflict" | "replay" | "manual_review" };
 
 export type StoredNexaEvent = {
   id: number;
@@ -80,6 +80,7 @@ export const classifyNexaClaim = (
   if (event.status === "applied" && event.pago_id !== null) {
     return { kind: "applied", paymentId: event.pago_id };
   }
+  if (event.status === "manual_review") return { kind: "manual_review" };
   return { kind: "retry", eventId: event.id };
 };
 
@@ -149,6 +150,9 @@ export const processNexaPayment = (
   if ("paymentId" in claim) {
     return { paymentId: claim.paymentId, idempotent: true };
   }
+  if (claim.kind === "manual_review") {
+    throw new NexaPaymentError("payment_outcome_uncertain", 503);
+  }
   if (!("eventId" in claim)) {
     throw new NexaPaymentError(claim.kind, 409);
   }
@@ -169,34 +173,42 @@ export const processNexaPayment = (
 
     let payments = await dependencies.findPayments(eventId, body.creditoId);
     if (payments.length === 0) {
-      const registered = await dependencies.registerPayment(
-        body,
-        eventId,
-        credit.usuarioId,
-        async () => {
-          const currentCredit = await dependencies.loadCredit(body.creditoId);
-          if (!currentCredit) throw new NexaPaymentError("credit_not_found", 404);
-          const rejection = getNexaBindingRejection(
-            currentCredit.binding,
-            body.amount,
-            dependencies.now?.() ?? new Date(),
-          );
-          if (rejection) throw new NexaPaymentError(rejection, 403);
-        },
-        paymentLock,
-      );
-      payments = await dependencies.findPayments(eventId, body.creditoId);
-      if (registered.success !== true && payments.length === 0) {
-        throw new NexaPaymentError(
-          registered.code ?? "payment_registration_rejected",
-          registered.status ?? 409,
+      let registered: Awaited<ReturnType<NexaPaymentDependencies["registerPayment"]>>;
+      try {
+        registered = await dependencies.registerPayment(
+          body,
+          eventId,
+          credit.usuarioId,
+          async () => {
+            const currentCredit = await dependencies.loadCredit(body.creditoId);
+            if (!currentCredit) throw new NexaPaymentError("credit_not_found", 404);
+            const rejection = getNexaBindingRejection(
+              currentCredit.binding,
+              body.amount,
+              dependencies.now?.() ?? new Date(),
+            );
+            if (rejection) throw new NexaPaymentError(rejection, 403);
+          },
+          paymentLock,
         );
+      } catch (error) {
+        if (error instanceof NexaPaymentError) throw error;
+        throw new NexaPaymentError("payment_outcome_uncertain", 503);
+      }
+      payments = await dependencies.findPayments(eventId, body.creditoId);
+      if (payments.length === 0) {
+        throw registered.success === false
+          ? new NexaPaymentError(
+              registered.code ?? "payment_registration_rejected",
+              registered.status ?? 409,
+            )
+          : new NexaPaymentError("payment_outcome_uncertain", 503);
       }
     }
     if (payments.length === 0) throw new NexaPaymentError("payment_not_created", 500);
     const linkedAmount = payments.reduce((total, payment) => total.plus(payment.amount), new Big(0));
     if (!linkedAmount.eq(body.amount)) {
-      throw new NexaPaymentError("payment_amount_mismatch", 409);
+      throw new NexaPaymentError("payment_outcome_uncertain", 503);
     }
 
     for (const payment of payments) {

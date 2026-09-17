@@ -73,6 +73,7 @@ import {
 	soloDigitosDpi,
 	useVendorDpiLookup,
 } from "@/hooks/useVendorDpiLookup";
+import { cuiValido, normalizarDpi } from "@/lib/dpi";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/vendors")({
@@ -96,6 +97,20 @@ const vendorSchema = z.object({
 });
 
 type VendorFormData = z.infer<typeof vendorSchema>;
+
+/**
+ * Alta: además del largo se valida el dígito verificador, para no registrar
+ * a una persona con un DPI que no existe. Al editar se usa `vendorSchema` a
+ * secas porque hay registros viejos que solo se validaron por largo y si no
+ * no se les podría corregir el nombre ni completar el género.
+ */
+const createVendorSchema = vendorSchema.refine(
+	(v) => v.vendorType !== "individual" || cuiValido(normalizarDpi(v.dpi)),
+	{
+		path: ["dpi"],
+		message: "El DPI no es válido: revisa los dígitos",
+	},
+);
 
 function VendorsPage() {
 	const [searchTerm, setSearchTerm] = usePersistedState<string>("crm/vendors/searchTerm", "");
@@ -174,7 +189,7 @@ function VendorsPage() {
 
 	// Forms
 	const createForm = useForm<VendorFormData>({
-		resolver: zodResolver(vendorSchema),
+		resolver: zodResolver(createVendorSchema),
 		defaultValues: {
 			name: "",
 			phone: "",

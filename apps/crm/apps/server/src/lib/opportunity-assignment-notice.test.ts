@@ -62,14 +62,14 @@ describe("getMissingOpportunityAssignments", () => {
 		).toEqual([]);
 	});
 
-	test("un vendedor asignado al vehículo cuenta como fallback", () => {
+	test("el vendedor del vehículo ya no cuenta: solo el de la oportunidad", () => {
 		expect(
 			getMissingOpportunityAssignments({
 				...base,
+				companyId: "c1",
 				vendorId: null,
-				vehicleVendorId: "vehicle-vendor-1",
 			}),
-		).toEqual(["empresa"]);
+		).toEqual(["vendedor"]);
 	});
 
 	test.each([null, undefined])(

@@ -18,6 +18,7 @@ import {
 	useVendorDpiLookup,
 	type VendorGender,
 } from "@/hooks/useVendorDpiLookup";
+import { cuiValido } from "@/lib/dpi";
 import { client, orpc } from "@/utils/orpc";
 import { VendorGenderSelect } from "./VendorGenderSelect";
 
@@ -126,13 +127,22 @@ export function VendorQuickCreateDialog({
 		},
 	});
 
-	const dpiCompleto = soloDigitosDpi(dpi).length === 13;
+	const dpiLimpio = soloDigitosDpi(dpi);
+	const dpiCompleto = dpiLimpio.length === 13;
+	// Un vendedor nuevo no se crea con un DPI que no existe: se valida el
+	// dígito verificador, igual que el servidor. A uno ya registrado no se le
+	// exige, porque hay DPI viejos que solo se validaron por largo y si no no
+	// se les podría completar el género.
+	const dpiEsDeRegistrado = existente?.dpi === dpiLimpio;
+	const dpiInvalido =
+		dpiCompleto && !dpiEsDeRegistrado && !cuiValido(dpiLimpio);
 	// El correo es opcional, pero el servidor lo rechaza si está mal escrito
 	const correoInvalido = correo.trim() !== "" && !/^\S+@\S+\.\S+$/.test(correo.trim());
 	// No se guarda mientras se consulta: los datos en pantalla podrían ser de
 	// otro DPI.
 	const puedeGuardar =
 		dpiCompleto &&
+		!dpiInvalido &&
 		nombre.trim() &&
 		genero &&
 		!correoInvalido &&
@@ -159,6 +169,8 @@ export function VendorQuickCreateDialog({
 								inputMode="numeric"
 								placeholder="1234567890101"
 								value={dpi}
+								aria-invalid={dpiInvalido}
+								className={dpiInvalido ? "border-destructive" : ""}
 								onChange={(e) => {
 									const nuevo = e.target.value;
 									const anterior = soloDigitosDpi(dpi);
@@ -199,6 +211,12 @@ export function VendorQuickCreateDialog({
 								)}
 							</Button>
 						</div>
+						{dpiInvalido && (
+							<p className="text-destructive text-xs">
+								Este número no es un DPI guatemalteco válido: revisa los
+								dígitos.
+							</p>
+						)}
 						{existente && (
 							<p className="text-muted-foreground text-xs">
 								Ya existe un vendedor con este DPI: se actualizará con estos

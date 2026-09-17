@@ -246,7 +246,6 @@ function DraggableOpportunityCard({
 						vehicleIsNew: opportunity.vehicle?.isNew,
 						companyId: opportunity.company?.id,
 						vendorId: opportunity.vendorId,
-						vehicleVendorId: opportunity.vehicle?.vendorId,
 					});
 					const mensaje = formatMissingAssignmentsMessage(faltan);
 					if (!mensaje) return null;
@@ -1429,15 +1428,12 @@ function RouteComponent() {
 	});
 
 	// Parte del contrato en el detalle: agencia si el carro es nuevo, vendedor
-	// (dueño) si es usado. Se guarda al elegir o crear. El vendedor respeta el
-	// mismo respaldo que la generación de contratos: si la oportunidad no tiene
-	// uno, se muestra el que está en el vehículo.
+	// (dueño) si es usado. Se guarda al elegir o crear. El vendedor sale solo
+	// de la oportunidad, igual que en la generación de contratos.
 	const contractPartyCard = selectedOpportunity?.vehicle ? (
 		<OpportunityContractPartyCard
 			vehicleIsNew={selectedOpportunity.vehicle.isNew}
-			vendorId={
-				selectedOpportunity.vendorId ?? selectedOpportunity.vehicle.vendorId
-			}
+			vendorId={selectedOpportunity.vendorId}
 			company={selectedOpportunity.company}
 			vendors={vendorsQuery.data ?? []}
 			companies={companiesQuery.data ?? []}

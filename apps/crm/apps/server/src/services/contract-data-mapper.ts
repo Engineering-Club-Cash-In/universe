@@ -554,12 +554,14 @@ export async function mapOpportunityToContractData(
 		? getDateComponents(opportunity.fechaInicio)
 		: undefined;
 
-	// Vendedor del vehículo. Se prioriza el de la oportunidad porque es la
-	// única columna que hoy se escribe (desde el combobox al crear/editar) y
-	// porque el vendedor es un hecho de esta venta: un mismo vehículo puede
-	// recomprarse y cambiar de dueño. Se conserva el fallback al vehículo para
-	// no perder el dato si alguien lo llena por ese lado.
-	const vendorId = opportunity.vendorId || vehicle?.vendorId || null;
+	// Vendedor del vehículo: solo el de la oportunidad. `vehicles.vendor_id`
+	// quedó de un diseño viejo y nadie lo escribe (0 de 2,224 vehículos en
+	// producción); además un mismo vehículo puede estar en varias
+	// oportunidades (2,212 oportunidades sobre 1,979 vehículos), así que el
+	// dueño de esta venta no puede colgar de ahí. Con una sola columna, lo
+	// que se ve en el CRM es lo que sale en el contrato, y quitar al vendedor
+	// desde la pantalla realmente lo quita.
+	const vendorId = opportunity.vendorId || null;
 	const [vendor] = vendorId
 		? await db
 				.select()

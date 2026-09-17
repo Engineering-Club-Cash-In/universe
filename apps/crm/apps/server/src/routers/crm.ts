@@ -6775,7 +6775,6 @@ export const crmRouter = {
 								motorNumber: vehicles.motorNumber,
 								seats: vehicles.seats,
 								vehicleUse: vehicles.vehicleUse,
-								vendorId: vehicles.vendorId,
 							})
 							.from(vehicles)
 							.where(inArray(vehicles.id, vehicleIds))
@@ -6798,14 +6797,10 @@ export const crmRouter = {
 			// Create maps for quick lookup
 			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
 			const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
-			// Partes del contrato ya asignadas. El vendedor respeta el mismo
-			// respaldo que usa la generación de contratos: si la oportunidad no
-			// tiene uno, se muestra el que está en el vehículo.
+			// Partes del contrato ya asignadas. El vendedor sale solo de la
+			// oportunidad, igual que en la generación de contratos.
 			const vendorIdDeLaParte = (opp: (typeof opps)[number]) =>
-				opp.vendorId ??
-				(opp.vehicleId
-					? (vehiclesMap.get(opp.vehicleId)?.vendorId ?? null)
-					: null);
+				opp.vendorId ?? null;
 
 			const vendorIds = [
 				...new Set(

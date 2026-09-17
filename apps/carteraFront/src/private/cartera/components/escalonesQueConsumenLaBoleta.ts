@@ -87,6 +87,13 @@ export type AvisoAbonoACapital = {
  * directo deja en cero es todo lo que sale del DISPONIBLE: mora, rubros,
  * convenio, cuota y excedente.
  *
+ * 🔴 **La cuota es el término que más costó**, y por eso está acá arriba: el
+ * aviso se gateó dos rondas sin ella, así que en el caso MÁS COMÚN —una boleta
+ * normal, sin mora ni rubros ni convenio ni excedente— todos los términos daban
+ * cero y el aviso no salía. Y el texto del aviso ya decía "la cuota queda sin
+ * abono": nombraba la consecuencia mientras el predicado que lo mostraba no la
+ * miraba. Si mañana la cascada gana un escalón, va acá.
+ *
  * Por eso recibe montos explícitos en vez de reusar la lista de la otra
  * pregunta. Compartirla fue el error original: las dos listas se parecen y no
  * son la misma, y el parecido tapó que `otros` estaba de un lado y no del otro.
@@ -95,6 +102,13 @@ export function loQueElAbonoACapitalNoAplica(entrada: {
   mora: number;
   rubros: number;
   convenio: number;
+  /**
+   * Lo que la boleta le alcanza a pagar a la cuota. **Es el término que faltaba
+   * y el caso más común de todos**: una boleta normal, sin mora, sin rubros, sin
+   * convenio y sin excedente, dejaba todos los demás en cero y el aviso no
+   * salía — mientras el botón mandaba la cuota entera a capital.
+   */
+  cuota: number;
   excedente: number;
 }): AvisoAbonoACapital {
   // El orden es el de la pantalla, de arriba hacia abajo: el asesor lee el aviso
@@ -103,6 +117,7 @@ export function loQueElAbonoACapitalNoAplica(entrada: {
     { etiqueta: `Q${entrada.mora.toFixed(2)} a mora`, monto: entrada.mora },
     { etiqueta: `Q${entrada.rubros.toFixed(2)} a rubros`, monto: entrada.rubros },
     { etiqueta: `Q${entrada.convenio.toFixed(2)} al convenio`, monto: entrada.convenio },
+    { etiqueta: `Q${entrada.cuota.toFixed(2)} a la cuota`, monto: entrada.cuota },
     {
       etiqueta: `Q${entrada.excedente.toFixed(2)} de excedente a saldo a favor`,
       monto: entrada.excedente,

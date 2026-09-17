@@ -56,7 +56,11 @@ import {
 	normalizarNombreCliente,
 	siguienteOrden,
 } from "./-pagalo-columnas";
-import { exportarPagaloPDF, exportarPagaloXLSX } from "./-pagalo-export";
+import {
+	exportarPagaloPDF,
+	exportarPagaloXLSX,
+	LIMITE_EXPORT_PAGALO,
+} from "./-pagalo-export";
 
 export const Route = createFileRoute("/cobros/pagalo")({
 	component: PagaloSupervisionPage,
@@ -375,16 +379,35 @@ function PagaloSupervisionPage() {
 
 	async function ejecutarExport(tipo: "xlsx" | "pdf") {
 		if (exportando) return;
+
+		if (total > LIMITE_EXPORT_PAGALO) {
+			const seguir = window.confirm(
+				`Tu filtro tiene ${total.toLocaleString("es-GT")} grupos. ` +
+					`Por rendimiento del navegador, se exportarán los primeros ${LIMITE_EXPORT_PAGALO.toLocaleString("es-GT")}.\n\n` +
+					"Te recomendamos acotar el rango de fechas si necesitás el reporte completo.\n\n" +
+					"¿Deseás continuar con la exportación parcial?",
+			);
+			if (!seguir) return;
+		}
+
 		setExportando(tipo);
 		try {
 			const filtrosExport = inputConsulta(0);
-			const cantidad =
+			const resultado =
 				tipo === "xlsx"
 					? await exportarPagaloXLSX(filtrosExport)
 					: await exportarPagaloPDF(filtrosExport);
-			toast.success(
-				`Se exportaron ${cantidad.toLocaleString("es-GT")} grupos.`,
-			);
+
+			if (resultado.truncado) {
+				toast.warning(
+					`Se exportaron los primeros ${resultado.cantidad.toLocaleString("es-GT")} de ${resultado.total.toLocaleString("es-GT")} grupos (límite alcanzado). Acotá las fechas para el reporte completo.`,
+					{ duration: 6000 },
+				);
+			} else {
+				toast.success(
+					`Se exportaron ${resultado.cantidad.toLocaleString("es-GT")} grupos.`,
+				);
+			}
 		} catch (error) {
 			console.error("[pagalo] Error exportando:", error);
 			toast.error("No se pudo generar el archivo. Intentá de nuevo.");

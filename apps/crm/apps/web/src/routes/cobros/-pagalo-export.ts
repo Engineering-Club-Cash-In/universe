@@ -14,7 +14,7 @@ import { client } from "@/utils/orpc";
  * esperado es muchísimo menor que el de historial-agendas.tsx (que usa
  * 20,000). 5,000 es margen amplio de sobra para el uso real.
  */
-const LIMITE_EXPORT_PAGALO = 5_000;
+export const LIMITE_EXPORT_PAGALO = 5_000;
 const PAGE_SIZE_EXPORT_PAGALO = 100;
 
 export type FiltrosExportPagalo = {
@@ -26,6 +26,12 @@ export type FiltrosExportPagalo = {
 	fechaHasta?: string;
 	sortBy: "totalAmount" | "createdAt";
 	sortDir: "asc" | "desc";
+};
+
+export type ResultadoExportPagalo = {
+	cantidad: number;
+	total: number;
+	truncado: boolean;
 };
 
 type GrupoSupervisionExport = {
@@ -41,11 +47,16 @@ type GrupoSupervisionExport = {
 
 async function traerDatasetCompletoPagalo(
 	filtros: FiltrosExportPagalo,
-): Promise<GrupoSupervisionExport[]> {
+): Promise<{
+	filas: GrupoSupervisionExport[];
+	total: number;
+	truncado: boolean;
+}> {
 	const filas: GrupoSupervisionExport[] = [];
 	const idsVistos = new Set<string>();
 	let offset = 0;
 	let hayMas = true;
+	let totalServidor = 0;
 
 	while (hayMas && filas.length < LIMITE_EXPORT_PAGALO) {
 		const respuesta = await client.getPagaloSupervision({
@@ -53,15 +64,23 @@ async function traerDatasetCompletoPagalo(
 			limit: PAGE_SIZE_EXPORT_PAGALO,
 			offset,
 		});
+		totalServidor = respuesta.total;
 		for (const grupo of respuesta.grupos as GrupoSupervisionExport[]) {
 			if (idsVistos.has(grupo.id)) continue;
 			idsVistos.add(grupo.id);
 			filas.push(grupo);
 		}
-		hayMas = respuesta.grupos.length === PAGE_SIZE_EXPORT_PAGALO;
+		hayMas =
+			respuesta.grupos.length === PAGE_SIZE_EXPORT_PAGALO &&
+			offset + PAGE_SIZE_EXPORT_PAGALO < respuesta.total;
 		offset += PAGE_SIZE_EXPORT_PAGALO;
 	}
-	return filas.slice(0, LIMITE_EXPORT_PAGALO);
+	const truncado = totalServidor > LIMITE_EXPORT_PAGALO;
+	return {
+		filas: filas.slice(0, LIMITE_EXPORT_PAGALO),
+		total: totalServidor,
+		truncado,
+	};
 }
 
 const ENCABEZADOS_EXPORT_PAGALO = [
@@ -88,11 +107,11 @@ function filaExportComoTexto(grupo: GrupoSupervisionExport) {
 	];
 }
 
-/** Devuelve la cantidad de filas exportadas. */
+/** Devuelve el resultado de la exportación incluyendo si fue acotada por el límite. */
 export async function exportarPagaloXLSX(
 	filtros: FiltrosExportPagalo,
-): Promise<number> {
-	const filas = await traerDatasetCompletoPagalo(filtros);
+): Promise<ResultadoExportPagalo> {
+	const { filas, total, truncado } = await traerDatasetCompletoPagalo(filtros);
 	const cuerpo = filas.map((g) => [
 		g.numeroCreditoSifco,
 		g.clienteNombre ?? "—",
@@ -107,21 +126,25 @@ export async function exportarPagaloXLSX(
 	const hoja = XLSX.utils.aoa_to_sheet([ENCABEZADOS_EXPORT_PAGALO, ...cuerpo]);
 	const libro = XLSX.utils.book_new();
 	XLSX.utils.book_append_sheet(libro, hoja, "Supervisión Págalo");
+	const sufijo = truncado ? "-parcial" : "";
 	XLSX.writeFile(
 		libro,
-		`supervision-pagalo-${new Date().toISOString().slice(0, 10)}.xlsx`,
+		`supervision-pagalo${sufijo}-${new Date().toISOString().slice(0, 10)}.xlsx`,
 	);
-	return filas.length;
+	return { cantidad: filas.length, total, truncado };
 }
 
-/** Devuelve la cantidad de filas exportadas. */
+/** Devuelve el resultado de la exportación incluyendo si fue acotada por el límite. */
 export async function exportarPagaloPDF(
 	filtros: FiltrosExportPagalo,
-): Promise<number> {
-	const filas = await traerDatasetCompletoPagalo(filtros);
+): Promise<ResultadoExportPagalo> {
+	const { filas, total, truncado } = await traerDatasetCompletoPagalo(filtros);
 	const doc = new jsPDF({ orientation: "landscape" });
 	doc.setFontSize(14);
-	doc.text("Supervisión Págalo", 14, 15);
+	const titulo = truncado
+		? `Supervisión Págalo (${filas.length.toLocaleString("es-GT")} de ${total.toLocaleString("es-GT")} registros - límite alcanzado)`
+		: "Supervisión Págalo";
+	doc.text(titulo, 14, 15);
 	autoTable(doc, {
 		startY: 20,
 		head: [ENCABEZADOS_EXPORT_PAGALO],
@@ -129,6 +152,9 @@ export async function exportarPagaloPDF(
 		styles: { fontSize: 8 },
 		headStyles: { fillColor: [124, 58, 237] },
 	});
-	doc.save(`supervision-pagalo-${new Date().toISOString().slice(0, 10)}.pdf`);
-	return filas.length;
+	const sufijo = truncado ? "-parcial" : "";
+	doc.save(
+		`supervision-pagalo${sufijo}-${new Date().toISOString().slice(0, 10)}.pdf`,
+	);
+	return { cantidad: filas.length, total, truncado };
 }

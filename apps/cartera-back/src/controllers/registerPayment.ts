@@ -4450,147 +4450,195 @@ export async function editarPago(pago_id: number, campos: {
   origen_pago?: "transferencia" | "cheque" | "boleta";
 }) {
   try {
-    // 1. Verificar que el pago existe
-    const [pago] = await db
-      .select()
+    /**
+     * 1. Pre-lectura MÍNIMA: sólo para saber de qué crédito es el pago y con qué
+     *    clave tomar el candado. La lectura REAL de la fila ocurre adentro, ya
+     *    bajo el lock.
+     *
+     * Leer la fila entera acá y usarla adentro parece inofensivo y no lo es: los
+     * campos que no vienen en el request se rellenan con los valores de esta
+     * lectura (`campos.abono_capital ?? pago.abono_capital`, y lo mismo con los
+     * restantes) para recalcular `monto_aplicado` y `pagado`. Si mientras esta
+     * llamada espera el candado otro escritor del mismo crédito —la aplicación
+     * de un monto, una reversa— mueve esos campos, la edición entra y los
+     * reescribe desde una foto anterior, pisando lo que el otro acababa de
+     * dejar. Es el mismo criterio que ya aplica `aplicarMontoAPago`.
+     */
+    const [ubicacion] = await db
+      .select({ credito_id: pagos_credito.credito_id })
       .from(pagos_credito)
       .where(eq(pagos_credito.pago_id, pago_id))
       .limit(1);
 
-    if (!pago) {
+    if (!ubicacion) {
       return { success: false, message: `Pago ${pago_id} no encontrado` };
     }
 
-    // 2. Construir objeto de update solo con los campos enviados
-    const updateData: Record<string, any> = {};
-
-    // Abonos
-    if (campos.abono_capital !== undefined) updateData.abono_capital = campos.abono_capital;
-    if (campos.abono_interes !== undefined) updateData.abono_interes = campos.abono_interes;
-    if (campos.abono_iva_12 !== undefined) updateData.abono_iva_12 = campos.abono_iva_12;
-    if (campos.abono_seguro !== undefined) updateData.abono_seguro = campos.abono_seguro;
-    if (campos.abono_gps !== undefined) updateData.abono_gps = campos.abono_gps;
-
-    // Restantes
-    if (campos.capital_restante !== undefined) updateData.capital_restante = campos.capital_restante;
-    if (campos.interes_restante !== undefined) updateData.interes_restante = campos.interes_restante;
-    if (campos.iva_12_restante !== undefined) updateData.iva_12_restante = campos.iva_12_restante;
-    if (campos.seguro_restante !== undefined) updateData.seguro_restante = campos.seguro_restante;
-    if (campos.gps_restante !== undefined) updateData.gps_restante = campos.gps_restante;
-
-    // Membresías
-    if (campos.membresias !== undefined) updateData.membresias = campos.membresias;
-    if (campos.membresias_pago !== undefined) updateData.membresias_pago = campos.membresias_pago;
-
-    // Otros campos
     /**
-     * Una boleta con cobro de rubros NO se edita desde acá. Ningún campo.
+     * 🔒 Todo lo que lee o escribe va bajo el advisory lock del crédito — el
+     * mismo que sostiene `insertPayment` mientras registra una boleta.
      *
-     * El total de rubros no tiene columna propia: se SUMA a `otros`. Pero el
-     * daño no se limita a esa columna, y por eso el chequeo dejó de mirarla:
+     * Sin él el guard de rubros era un TOCTOU, y la ventana es ancha por cómo
+     * registra el motor: `insertPayment` commitea la fila de `pagos_credito`
+     * bastante antes de insertar el reclamo, que se escribe al final en
+     * `commitRubros` —dentro del mismo lock, decenas de operaciones después—. En
+     * ese hueco el chequeo veía CERO reclamos, dejaba reescribir los montos, y
+     * después el registro le colgaba el reclamo y le sumaba el cargo a la fila
+     * ya editada: el comprobante y el cobro del rubro terminaban diciendo cosas
+     * distintas, que es exactamente lo que el guard existe para impedir.
      *
-     *   * pisar `otros` borra el cargo del pago mientras el saldo del rubro
-     *     sigue descontado;
-     *   * y pisar `monto_boleta` o los abonos deja la boleta diciendo un total
-     *     que ya no incluye lo que el rubro se llevó. Bajar a Q20 una boleta de
-     *     Q1,000 con un reclamo de Q300 hace que la validación posterior le
-     *     descuente al rubro esos Q300 igual, con un comprobante que dice Q20.
-     *
-     * Es el mismo razonamiento —y el mismo texto— que el guard de
-     * `aplicarMontoAPago`. Acá había quedado atado a `otros`, que es justo el
-     * error que allá se corrigió: cerrar el campo que te señalaron en vez de la
-     * operación entera.
-     *
-     * Se RECHAZA en vez de recalcular. Adivinar si el número que mandó el admin
-     * incluye el rubro o no es exactamente lo que no se hace con plata. Y no
-     * cierra ningún camino: revertir la boleta devuelve el rubro por su propia
-     * ruta, y después se registra de nuevo con el monto correcto.
+     * El orden del módulo queda igual: advisory afuera, consultas adentro.
      */
-    const reclamado = await totalReclamadoPorPago(pago_id);
-    if (reclamado.gt(0)) {
+    // `credito_id` es nullable en la columna. Un pago sin crédito no puede tener
+    // rubros —el cobro se calcula por crédito—, así que el chequeo de adentro va
+    // a dar cero igual; se usa 0 como clave para no dejar la llamada sin candado
+    // y que el tipo cierre. No colisiona con nada: `creditos.credito_id` es
+    // `serial` y arranca en 1, así que ninguna otra ruta toma esta clave. Los
+    // huérfanos se serializan entre sí, que es inofensivo y casi inexistente.
+    return await withPaymentAdvisoryLock(ubicacion.credito_id ?? 0, async () => {
+      // La fila se relee ACÁ, ya bajo el candado, y es ésta la que alimenta los
+      // fallback de más abajo. Se vuelve a chequear que exista porque entre la
+      // pre-lectura y el lock la pueden haber borrado.
+      const [pago] = await db
+        .select()
+        .from(pagos_credito)
+        .where(eq(pagos_credito.pago_id, pago_id))
+        .limit(1);
+
+      if (!pago) {
+        return { success: false, message: `Pago ${pago_id} no encontrado` };
+      }
+
+      // 2. Construir objeto de update solo con los campos enviados
+      const updateData: Record<string, any> = {};
+
+      // Abonos
+      if (campos.abono_capital !== undefined) updateData.abono_capital = campos.abono_capital;
+      if (campos.abono_interes !== undefined) updateData.abono_interes = campos.abono_interes;
+      if (campos.abono_iva_12 !== undefined) updateData.abono_iva_12 = campos.abono_iva_12;
+      if (campos.abono_seguro !== undefined) updateData.abono_seguro = campos.abono_seguro;
+      if (campos.abono_gps !== undefined) updateData.abono_gps = campos.abono_gps;
+
+      // Restantes
+      if (campos.capital_restante !== undefined) updateData.capital_restante = campos.capital_restante;
+      if (campos.interes_restante !== undefined) updateData.interes_restante = campos.interes_restante;
+      if (campos.iva_12_restante !== undefined) updateData.iva_12_restante = campos.iva_12_restante;
+      if (campos.seguro_restante !== undefined) updateData.seguro_restante = campos.seguro_restante;
+      if (campos.gps_restante !== undefined) updateData.gps_restante = campos.gps_restante;
+
+      // Membresías
+      if (campos.membresias !== undefined) updateData.membresias = campos.membresias;
+      if (campos.membresias_pago !== undefined) updateData.membresias_pago = campos.membresias_pago;
+
+      /**
+       * Una boleta con cobro de rubros NO se edita desde acá. Ningún campo.
+       *
+       * El total de rubros no tiene columna propia: se SUMA a `otros`. Pero el
+       * daño no se limita a esa columna, y por eso el chequeo dejó de mirarla:
+       *
+       *   * pisar `otros` borra el cargo del pago mientras el saldo del rubro
+       *     sigue descontado;
+       *   * y pisar `monto_boleta` o los abonos deja la boleta diciendo un total
+       *     que ya no incluye lo que el rubro se llevó. Bajar a Q20 una boleta de
+       *     Q1,000 con un reclamo de Q300 hace que la validación posterior le
+       *     descuente al rubro esos Q300 igual, con un comprobante que dice Q20.
+       *
+       * Es el mismo razonamiento —y el mismo texto— que el guard de
+       * `aplicarMontoAPago`. Acá había quedado atado a `otros`, que es justo el
+       * error que allá se corrigió: cerrar el campo que te señalaron en vez de la
+       * operación entera.
+       *
+       * Se RECHAZA en vez de recalcular. Adivinar si el número que mandó el admin
+       * incluye el rubro o no es exactamente lo que no se hace con plata. Y no
+       * cierra ningún camino: revertir la boleta devuelve el rubro por su propia
+       * ruta, y después se registra de nuevo con el monto correcto.
+       */
+      const reclamado = await totalReclamadoPorPago(pago_id);
+      if (reclamado.gt(0)) {
+        return {
+          success: false,
+          message: `Esta boleta cobra Q${reclamado.toFixed(2)} de cobros adicionales: no se puede editar desde acá sin dejar el cobro del rubro y el del pago diciendo cosas distintas. Revertí la boleta y volvé a registrarla con los datos correctos.`,
+        };
+      }
+
+      // Otros campos
+      if (campos.otros !== undefined) updateData.otros = campos.otros;
+      if (campos.mora !== undefined) updateData.mora = campos.mora;
+      if (campos.monto_boleta !== undefined) updateData.monto_boleta = campos.monto_boleta;
+      if (campos.observaciones !== undefined) updateData.observaciones = campos.observaciones;
+      if (campos.fecha_pago !== undefined) updateData.fecha_pago = new Date(campos.fecha_pago);
+      if (campos.origen_pago !== undefined) updateData.origen_pago = campos.origen_pago;
+
+      // 3. Recalcular monto_aplicado si se enviaron abonos
+      const abonoCapital = new Big(campos.abono_capital ?? pago.abono_capital ?? 0);
+      const abonoInteres = new Big(campos.abono_interes ?? pago.abono_interes ?? 0);
+      const abonoIva = new Big(campos.abono_iva_12 ?? pago.abono_iva_12 ?? 0);
+      const abonoSeguro = new Big(campos.abono_seguro ?? pago.abono_seguro ?? 0);
+      const abonoGps = new Big(campos.abono_gps ?? pago.abono_gps ?? 0);
+      const abonoMembresias = new Big(campos.membresias_pago ?? pago.membresias_pago ?? 0);
+
+      if (campos.monto_aplicado !== undefined) {
+        updateData.monto_aplicado = campos.monto_aplicado;
+      } else if (
+        campos.abono_capital !== undefined ||
+        campos.abono_interes !== undefined ||
+        campos.abono_iva_12 !== undefined ||
+        campos.abono_seguro !== undefined ||
+        campos.abono_gps !== undefined ||
+        campos.membresias_pago !== undefined
+      ) {
+        const nuevoMontoAplicado = abonoCapital
+          .plus(abonoInteres)
+          .plus(abonoIva)
+          .plus(abonoSeguro)
+          .plus(abonoGps)
+          .plus(abonoMembresias);
+        updateData.monto_aplicado = nuevoMontoAplicado.toString();
+      }
+
+      // 4. Recalcular pagado si se enviaron restantes
+      if (campos.pagado !== undefined) {
+        updateData.pagado = campos.pagado;
+      } else if (
+        campos.capital_restante !== undefined ||
+        campos.interes_restante !== undefined ||
+        campos.iva_12_restante !== undefined ||
+        campos.seguro_restante !== undefined ||
+        campos.gps_restante !== undefined ||
+        campos.membresias !== undefined
+      ) {
+        const capRest = new Big(campos.capital_restante ?? pago.capital_restante ?? 0);
+        const intRest = new Big(campos.interes_restante ?? pago.interes_restante ?? 0);
+        const ivaRest = new Big(campos.iva_12_restante ?? pago.iva_12_restante ?? 0);
+        const segRest = new Big(campos.seguro_restante ?? pago.seguro_restante ?? 0);
+        const gpsRest = new Big(campos.gps_restante ?? pago.gps_restante ?? 0);
+        const memRest = new Big(campos.membresias ?? pago.membresias ?? 0);
+
+        const todosEnCero = capRest.eq(0) && intRest.eq(0) && ivaRest.eq(0) &&
+          segRest.eq(0) && gpsRest.eq(0) && memRest.eq(0);
+
+        updateData.pagado = todosEnCero;
+      }
+
+      if (Object.keys(updateData).length === 0) {
+        return { success: false, message: "No se enviaron campos para actualizar" };
+      }
+
+      // 5. Ejecutar update
+      const [pagoActualizado] = await db
+        .update(pagos_credito)
+        .set(updateData)
+        .where(eq(pagos_credito.pago_id, pago_id))
+        .returning();
+
+
+
       return {
-        success: false,
-        message: `Esta boleta cobra Q${reclamado.toFixed(2)} de cobros adicionales: no se puede editar desde acá sin dejar el cobro del rubro y el del pago diciendo cosas distintas. Revertí la boleta y volvé a registrarla con los datos correctos.`,
+        success: true,
+        message: "Pago actualizado correctamente",
+        data: pagoActualizado,
       };
-    }
-
-    // Otros campos
-    if (campos.otros !== undefined) updateData.otros = campos.otros;
-    if (campos.mora !== undefined) updateData.mora = campos.mora;
-    if (campos.monto_boleta !== undefined) updateData.monto_boleta = campos.monto_boleta;
-    if (campos.observaciones !== undefined) updateData.observaciones = campos.observaciones;
-    if (campos.fecha_pago !== undefined) updateData.fecha_pago = new Date(campos.fecha_pago);
-    if (campos.origen_pago !== undefined) updateData.origen_pago = campos.origen_pago;
-
-    // 3. Recalcular monto_aplicado si se enviaron abonos
-    const abonoCapital = new Big(campos.abono_capital ?? pago.abono_capital ?? 0);
-    const abonoInteres = new Big(campos.abono_interes ?? pago.abono_interes ?? 0);
-    const abonoIva = new Big(campos.abono_iva_12 ?? pago.abono_iva_12 ?? 0);
-    const abonoSeguro = new Big(campos.abono_seguro ?? pago.abono_seguro ?? 0);
-    const abonoGps = new Big(campos.abono_gps ?? pago.abono_gps ?? 0);
-    const abonoMembresias = new Big(campos.membresias_pago ?? pago.membresias_pago ?? 0);
-
-    if (campos.monto_aplicado !== undefined) {
-      updateData.monto_aplicado = campos.monto_aplicado;
-    } else if (
-      campos.abono_capital !== undefined ||
-      campos.abono_interes !== undefined ||
-      campos.abono_iva_12 !== undefined ||
-      campos.abono_seguro !== undefined ||
-      campos.abono_gps !== undefined ||
-      campos.membresias_pago !== undefined
-    ) {
-      const nuevoMontoAplicado = abonoCapital
-        .plus(abonoInteres)
-        .plus(abonoIva)
-        .plus(abonoSeguro)
-        .plus(abonoGps)
-        .plus(abonoMembresias);
-      updateData.monto_aplicado = nuevoMontoAplicado.toString();
-    }
-
-    // 4. Recalcular pagado si se enviaron restantes
-    if (campos.pagado !== undefined) {
-      updateData.pagado = campos.pagado;
-    } else if (
-      campos.capital_restante !== undefined ||
-      campos.interes_restante !== undefined ||
-      campos.iva_12_restante !== undefined ||
-      campos.seguro_restante !== undefined ||
-      campos.gps_restante !== undefined ||
-      campos.membresias !== undefined
-    ) {
-      const capRest = new Big(campos.capital_restante ?? pago.capital_restante ?? 0);
-      const intRest = new Big(campos.interes_restante ?? pago.interes_restante ?? 0);
-      const ivaRest = new Big(campos.iva_12_restante ?? pago.iva_12_restante ?? 0);
-      const segRest = new Big(campos.seguro_restante ?? pago.seguro_restante ?? 0);
-      const gpsRest = new Big(campos.gps_restante ?? pago.gps_restante ?? 0);
-      const memRest = new Big(campos.membresias ?? pago.membresias ?? 0);
-
-      const todosEnCero = capRest.eq(0) && intRest.eq(0) && ivaRest.eq(0) &&
-        segRest.eq(0) && gpsRest.eq(0) && memRest.eq(0);
-
-      updateData.pagado = todosEnCero;
-    }
-
-    if (Object.keys(updateData).length === 0) {
-      return { success: false, message: "No se enviaron campos para actualizar" };
-    }
-
-    // 5. Ejecutar update
-    const [pagoActualizado] = await db
-      .update(pagos_credito)
-      .set(updateData)
-      .where(eq(pagos_credito.pago_id, pago_id))
-      .returning();
-
-
-
-    return {
-      success: true,
-      message: "Pago actualizado correctamente",
-      data: pagoActualizado,
-    };
+    });
   } catch (error: any) {
 
     return {

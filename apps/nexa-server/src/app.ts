@@ -16,7 +16,29 @@ export function createApp(config: AppConfig, deps: AppDependencies = createDepen
       const result = await deps.db.execute<{ ready: boolean }>(sql`
         SELECT
           to_regclass('public.nexa_payment_transactions') IS NOT NULL
-          AND to_regclass('public.mock_cartera_credits') IS NOT NULL AS ready
+          AND to_regclass('public.nexa_payment_tokens') IS NOT NULL
+          AND to_regclass('public.nexa_token_users') IS NOT NULL
+          AND to_regclass('public.nexa_reviews') IS NOT NULL
+          AND to_regclass('public.mock_cartera_credits') IS NOT NULL
+          AND (
+            SELECT count(*) = 7
+            FROM pg_attribute
+            WHERE attrelid = to_regclass('public.nexa_payment_transactions')
+              AND attname IN (
+                'payload_fingerprint', 'attempt_count', 'next_attempt_at', 'last_attempt_at',
+                'lease_until', 'review_attempt_count', 'review_next_attempt_at'
+              )
+              AND attnum > 0
+              AND NOT attisdropped
+          )
+          AND (
+            SELECT count(*) = 3
+            FROM pg_attribute
+            WHERE attrelid = to_regclass('public.nexa_reviews')
+              AND attname IN ('next_attempt_at', 'lease_until', 'completed_at')
+              AND attnum > 0
+              AND NOT attisdropped
+          ) AS ready
       `);
       if (!result.rows[0]?.ready) {
         return c.json({ ok: false, reason: "schema_not_migrated" }, 503);

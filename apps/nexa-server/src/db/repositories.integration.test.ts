@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
+import { createApp } from "../app";
 import type { ReviewTransferStatus, TokenTransaction } from "../nexa/schemas";
 import { runApplicationWorkerOnce } from "../payments/application-worker";
 import { runReviewWorkerOnce } from "../payments/review-worker";
@@ -51,6 +52,59 @@ beforeEach(async () => {
   await db.delete(nexaPaymentTransactions);
   await db.delete(nexaTokenUsers);
   await db.delete(nexaPaymentTokens);
+});
+
+integrationTest("rejects sub-cent amounts before persistence without colliding replays", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+
+  await repository.upsertReceived({ ...transaction, reference: "cent-safe", amount: 0.29 });
+  for (const amount of [10.001, 10.002]) {
+    expect(repository.upsertReceived({ ...transaction, reference: "sub-cent", amount })).rejects.toThrow();
+  }
+
+  const rows = await db.select({ reference: nexaPaymentTransactions.reference, amount: nexaPaymentTransactions.amount })
+    .from(nexaPaymentTransactions);
+  expect(rows).toEqual([{ reference: "cent-safe", amount: "0.29" }]);
+});
+
+integrationTest("readiness rejects the legacy schema and accepts the durable schema", async () => {
+  if (!db || !pool) throw new Error("TEST_DATABASE_URL is required");
+  const config = {
+    enableTestUi: false,
+    enableAdminApi: false,
+    nexaWebhookFlowId: "test-flow",
+    nexaWebhookBearerToken: "test-token",
+  } as never;
+
+  const current = await createApp(config, { db } as never).request("/ready");
+  expect(current.status).toBe(200);
+
+  const connection = await pool.connect();
+  try {
+    await connection.query("BEGIN");
+    await connection.query(`
+      ALTER TABLE nexa_payment_transactions
+        DROP COLUMN payload_fingerprint,
+        DROP COLUMN attempt_count,
+        DROP COLUMN next_attempt_at,
+        DROP COLUMN last_attempt_at,
+        DROP COLUMN lease_until,
+        DROP COLUMN review_attempt_count,
+        DROP COLUMN review_next_attempt_at;
+      ALTER TABLE nexa_reviews
+        DROP COLUMN next_attempt_at,
+        DROP COLUMN lease_until,
+        DROP COLUMN completed_at;
+    `);
+    const legacyDb = drizzle(connection, { schema });
+    const legacy = await createApp(config, { db: legacyDb } as never).request("/ready");
+    expect(legacy.status).toBe(503);
+    expect(await legacy.json()).toEqual({ ok: false, reason: "schema_not_migrated" });
+  } finally {
+    await connection.query("ROLLBACK");
+    connection.release();
+  }
 });
 
 integrationTest("upsertReceived is concurrent, idempotent, fail-closed and keeps FAILED rows", async () => {

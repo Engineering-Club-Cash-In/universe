@@ -23,9 +23,11 @@ export const reviewTransferResponseSchema = z.object({
   status: reviewTransferStatusSchema,
 });
 
+const exactCentAmount = z.number().multipleOf(0.01);
+
 export const tokenTransactionSchema = z.object({
   reference: z.union([z.string(), z.number()]),
-  amount: z.number(),
+  amount: exactCentAmount,
   bank: z.string(),
   comments: z.string().nullable().default(""),
   currency: z.enum(["GTQ", "USD"]),
@@ -52,7 +54,7 @@ export const paymentTokenWebhookSchema = z.object({
   id: safePositiveInteger,
   reference: safePositiveInteger,
   token: z.string(),
-  amount: z.number().positive(),
+  amount: exactCentAmount.positive(),
   originAccount: z.string(),
   originBank: z.string(),
   comments: z.string().nullable().default(""),

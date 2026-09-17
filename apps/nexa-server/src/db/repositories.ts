@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, eq, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
-import type { TokenTransaction } from "../nexa/schemas";
+import { tokenTransactionSchema, type TokenTransaction } from "../nexa/schemas";
 import type { ApplicationClaim } from "../payments/application-worker";
 import type { MockCreditLedger } from "../payments/mock-ledger";
 import type { ReviewClaim, ReviewWorkerRepository } from "../payments/review-worker";
@@ -58,6 +58,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
   constructor(private readonly db: NexaDb) {}
 
   async upsertReceived(transaction: TokenTransaction) {
+    transaction = tokenTransactionSchema.parse(transaction);
     const reference = String(transaction.reference);
     const payloadFingerprint = fingerprint({ ...transaction, reference });
     const sanitizedPayload = {

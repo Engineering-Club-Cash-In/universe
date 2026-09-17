@@ -295,9 +295,53 @@ test("exige success true al aplicar cada fila", async () => {
   )).rejects.toEqual(new NexaPaymentError("payment_not_applied", 409));
 });
 
-test("exige success true al registrar el pago", async () => {
+test("continúa un pago parcial de mora legado cuando dejó la fila exacta vinculada", async () => {
+  const { processNexaPayment } = await import("./nexaPayments");
+  let registered = 0;
+  let applied = 0;
+  let completed = 0;
+  let failed = 0;
+
+  const result = await processNexaPayment(
+    { externalReference: "partial-mora", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    { nonce: "nonce-partial-mora", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "new", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "MOROSO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null },
+      }),
+      findPayments: async () => registered
+        ? [{ paymentId: 17, validationStatus: "pending", amount: "10.00" }]
+        : [],
+      registerPayment: async () => {
+        registered += 1;
+        return {
+          message: "Pago parcial de mora aplicado",
+          pagos: [],
+          saldo_a_favor: "0",
+        } as never;
+      },
+      applyPayment: async () => { applied += 1; return { success: true }; },
+      complete: async () => { completed += 1; },
+      fail: async () => { failed += 1; },
+    },
+  );
+
+  expect(result).toEqual({ paymentId: 17, idempotent: false });
+  expect({ registered, applied, completed, failed }).toEqual({
+    registered: 1,
+    applied: 1,
+    completed: 1,
+    failed: 0,
+  });
+});
+
+test("rechaza un registro sin success que no dejó pagos vinculados", async () => {
   const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
-  let registered = false;
+  let registered = 0;
 
   await expect(processNexaPayment(
     { externalReference: "registration-result", creditoId: 10, amount: "10.00", currency: "GTQ" },
@@ -310,15 +354,14 @@ test("exige success true al registrar el pago", async () => {
         statusCredit: "ACTIVO",
         binding: { activo: true, expires_at: null, max_payment_amount: null },
       }),
-      findPayments: async () => registered
-        ? [{ paymentId: 17, validationStatus: "pending", amount: "10.00" }]
-        : [],
-      registerPayment: async () => { registered = true; return {}; },
+      findPayments: async () => [],
+      registerPayment: async () => { registered += 1; return {}; },
       applyPayment: async () => ({ success: true }),
       complete: async () => undefined,
       fail: async () => undefined,
     },
   )).rejects.toEqual(new NexaPaymentError("payment_registration_rejected", 409));
+  expect(registered).toBe(1);
 });
 
 test("devuelve el mismo paymentId en un reintento ya aplicado", async () => {

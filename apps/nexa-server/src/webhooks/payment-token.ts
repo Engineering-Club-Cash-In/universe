@@ -81,7 +81,7 @@ function toTokenTransaction(webhook: ReturnType<typeof paymentTokenWebhookSchema
     tokenDate: new Date().toISOString(),
     tokenIdentifier: webhook.token.slice(-9),
     tokenName: webhook.originAccountName ?? "Webhook Nexa",
-    tokenPrefix: webhook.token.slice(0, 7),
+    tokenPrefix: webhook.token.slice(0, -9),
     wasReturn: 0,
     transactionId: String(webhook.id),
   };

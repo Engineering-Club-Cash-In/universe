@@ -47,11 +47,59 @@ describe("payment token webhook", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ reference: "4617307", status: "OK" });
     expect(persisted).toHaveLength(1);
-    expect(persisted[0]).toMatchObject({ reference: "4617307", transactionId: "7293" });
+    expect(persisted[0]).toMatchObject({
+      reference: "4617307",
+      transactionId: "7293",
+      tokenIdentifier: "310005010",
+      tokenPrefix: "1234567",
+    });
     expect(JSON.parse(logs[0] ?? "{}")).toMatchObject({ scope: "nexa-webhook", event: "received" });
     expect(logs.join(" ")).not.toContain("webhook-token");
     expect(logs.join(" ")).not.toContain("1234567310005010");
     expect(logs.join(" ")).not.toContain("19451958");
+  });
+
+  test("keeps a supported 5-digit token prefix before the 9-digit identifier", async () => {
+    const persisted: TokenTransaction[] = [];
+    const router = createPaymentTokenWebhookRouter({
+      flowId: "flow-id",
+      bearerToken: "webhook-token",
+      nexa: { reviewTransfer: async () => undefined },
+      cartera: { applyNexaPayment: async () => ({ status: "REJECTED", reason: "unused" }) },
+      transactions: {
+        upsertReceived: async (value) => {
+          persisted.push(value);
+          return { id: 9, reference: String(value.reference), processingStatus: "RECEIVED", created: true };
+        },
+        markApplied: async () => undefined,
+        markRejected: async () => undefined,
+        markFailed: async () => undefined,
+      },
+      tokenUsers: { findByToken: async () => null },
+      logInfo: () => undefined,
+    });
+
+    const response = await router.request("/webhook/v1/payment-token", {
+      method: "POST",
+      headers: {
+        flowId: "flow-id",
+        Authorization: "Bearer webhook-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        id: 7293,
+        reference: 4617307,
+        token: "12345100000001",
+        amount: 0.29,
+        originAccount: "account",
+        originBank: "INDLGTGC",
+        comments: "",
+        currency: "GTQ",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(persisted[0]).toMatchObject({ tokenIdentifier: "100000001", tokenPrefix: "12345" });
   });
 
   test("rejects notifications without configured flowId", async () => {

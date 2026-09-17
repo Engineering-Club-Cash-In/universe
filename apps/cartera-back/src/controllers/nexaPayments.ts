@@ -185,13 +185,13 @@ export const processNexaPayment = (
         },
         paymentLock,
       );
-      if (registered.success !== true) {
+      payments = await dependencies.findPayments(eventId, body.creditoId);
+      if (registered.success !== true && payments.length === 0) {
         throw new NexaPaymentError(
           registered.code ?? "payment_registration_rejected",
           registered.status ?? 409,
         );
       }
-      payments = await dependencies.findPayments(eventId, body.creditoId);
     }
     if (payments.length === 0) throw new NexaPaymentError("payment_not_created", 500);
     const linkedAmount = payments.reduce((total, payment) => total.plus(payment.amount), new Big(0));

@@ -52,6 +52,15 @@ export const condicionUltimaCuotaPagada = (credito_id: number) =>
     // mal anclado un abono viejo seguiría contando como pagada y el defecto se
     // reproduciría solo. `reset` NO se excluye: es una cancelación con plata
     // real (sacarlo mueve el ancla de 66 créditos).
+    //
+    // El `notInArray` va sin guarda de NULL a propósito: `validation_status` es
+    // NOT NULL con default `no_required` en prod y en DEV (0 filas NULL en las
+    // dos), y el schema la declara `.notNull()`. Si eso cambiara habría que
+    // envolverlo en `or(isNull(...), ...)`, porque `NULL NOT IN (...)` es NULL
+    // y la fila se caería del ancla.
+    //
+    // ⚠️ DEV no tiene `capital_validated` en el enum: falta aplicar la
+    // migración 0012 allá, y sin ella esta consulta revienta.
     notInArray(pagos_credito.validationStatus, ["capital", "capital_validated"]),
     or(
       gt(pagos_credito.monto_aplicado, "0"),

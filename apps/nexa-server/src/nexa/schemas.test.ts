@@ -28,11 +28,21 @@ const webhook = (amount: number) => ({
   originBank: "INDLGTGC",
   comments: "",
   currency: "GTQ",
+  tokenDate: "2026-09-08T12:00:00Z",
 });
 
 test.each([10.001, 10.002])("rejects sub-cent statement and webhook amount %s", (amount) => {
   expect(paymentTokenStatementResponseSchema.safeParse(statement(amount)).success).toBe(false);
   expect(paymentTokenWebhookSchema.safeParse(webhook(amount)).success).toBe(false);
+});
+
+test("requires an offset-safe statement tokenDate without changing the date-less webhook contract", () => {
+  const malformed = statement(10);
+  malformed.transactions[0]!.tokenDate = "2026-09-08T12:00:00+24:00";
+  expect(paymentTokenStatementResponseSchema.safeParse(malformed).success).toBe(false);
+  expect(paymentTokenWebhookSchema.safeParse({ ...webhook(10), tokenDate: undefined }).success).toBe(true);
+  expect(paymentTokenStatementResponseSchema.safeParse(statement(10)).success).toBe(true);
+  expect(paymentTokenWebhookSchema.safeParse(webhook(10)).success).toBe(true);
 });
 
 test("accepts ordinary cent values without floating-point false positives", () => {

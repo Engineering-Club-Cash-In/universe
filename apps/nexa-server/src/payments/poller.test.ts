@@ -28,7 +28,7 @@ test("poller upserts a FAILED reference once without processing or reviewing it"
     cartera: { applyNexaPayment: async () => { throw new Error("Cartera must not run during ingestion"); } },
     transactions: {
       upsertReceived: async (value) => {
-        persisted.push(value);
+        persisted.push(value as TokenTransaction);
         return { id: 1, reference: String(value.reference), processingStatus: "FAILED", created: false };
       },
       markApplied: async () => undefined,

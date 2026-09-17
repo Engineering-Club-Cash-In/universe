@@ -3,8 +3,8 @@ import type { TokenTransaction } from "../nexa/schemas";
 import { createPaymentTokenWebhookRouter } from "./payment-token";
 
 describe("payment token webhook", () => {
-  test("persists once without processing or reviewing the payment", async () => {
-    const persisted: TokenTransaction[] = [];
+  test("durably accepts the established date-less payload without inventing a transfer date", async () => {
+    const persisted: Array<Omit<TokenTransaction, "tokenDate"> & { tokenDate?: string }> = [];
     const logs: string[] = [];
     const router = createPaymentTokenWebhookRouter({
       flowId: "flow-id",
@@ -53,6 +53,7 @@ describe("payment token webhook", () => {
       tokenIdentifier: "310005010",
       tokenPrefix: "1234567",
     });
+    expect(persisted[0]).not.toHaveProperty("tokenDate");
     expect(JSON.parse(logs[0] ?? "{}")).toMatchObject({ scope: "nexa-webhook", event: "received" });
     expect(logs.join(" ")).not.toContain("webhook-token");
     expect(logs.join(" ")).not.toContain("1234567310005010");
@@ -60,7 +61,7 @@ describe("payment token webhook", () => {
   });
 
   test("keeps a supported 5-digit token prefix before the 9-digit identifier", async () => {
-    const persisted: TokenTransaction[] = [];
+    const persisted: Array<Omit<TokenTransaction, "tokenDate"> & { tokenDate?: string }> = [];
     const router = createPaymentTokenWebhookRouter({
       flowId: "flow-id",
       bearerToken: "webhook-token",

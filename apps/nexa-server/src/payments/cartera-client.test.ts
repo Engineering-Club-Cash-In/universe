@@ -51,9 +51,10 @@ describe("HttpCarteraPaymentClient", () => {
       creditoId: 123,
       amount: expectedAmount,
       currency: "GTQ",
+      tokenDate: "2026-09-08T12:00:00Z",
       transactionId: "tx-123",
     }));
-    expect(body).not.toContain("token");
+    expect(body).not.toContain("synthetic-token");
     expect(body).not.toContain("Synthetic Bank");
     expect(request?.init?.headers).toMatchObject({
       "Content-Type": "application/json",
@@ -81,6 +82,7 @@ describe("HttpCarteraPaymentClient", () => {
       creditoId: 123,
       amount: "10.00",
       currency: "GTQ",
+      tokenDate: "2026-09-08T12:00:00Z",
     }));
   });
 
@@ -95,6 +97,7 @@ describe("HttpCarteraPaymentClient", () => {
       creditoId: 123,
       amount: "10.00",
       currency: "GTQ",
+      tokenDate: "2026-09-08T12:00:00Z",
     }));
   });
 
@@ -122,8 +125,18 @@ describe("HttpCarteraPaymentClient", () => {
       creditoId: 123,
       amount: "10.00",
       currency: "GTQ",
+      tokenDate: "2026-09-08T12:00:00Z",
       transactionId: "0",
     }));
+  });
+
+  test("rechaza tokenDate malformado antes de enviar", async () => {
+    const { client, getRequest } = capturingClient();
+    await expect(client.applyNexaPayment({
+      creditoId: 123,
+      transaction: transaction({ tokenDate: "not-a-date" }),
+    })).rejects.toThrow("Invalid datetime");
+    expect(getRequest()).toBeUndefined();
   });
 
   test.each([
@@ -163,6 +176,15 @@ describe("HttpCarteraPaymentClient", () => {
     ));
     await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))
       .rejects.toThrow("HTTP 403 Forbidden");
+  });
+
+  test("new Nexa retries safely when old Cartera rejects the added field", async () => {
+    const { client } = capturingClient(Response.json(
+      { error: "invalid_body" },
+      { status: 400, statusText: "Bad Request" },
+    ));
+    await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))
+      .rejects.toThrow("HTTP 400 Bad Request");
   });
 
   test("mantiene payment_outcome_uncertain como fallo retryable", async () => {

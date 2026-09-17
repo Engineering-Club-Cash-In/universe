@@ -17,7 +17,10 @@ export type ReviewWorkerRepository = {
 };
 
 type NexaReviewClient = {
-  reviewTransfer(payload: { id: number; reference: number; status: ReviewTransferStatus }): Promise<unknown>;
+  reviewTransfer(payload: { id: number; reference: number; status: ReviewTransferStatus }): Promise<{
+    reference: string | number;
+    status: ReviewTransferStatus;
+  }>;
 };
 
 export async function runReviewWorkerOnce(options: {
@@ -41,8 +44,11 @@ export async function runReviewWorkerOnce(options: {
     }
     const reference = positiveSafeInteger(claim.reference);
     if (reference === null) throw new Error("Review reference is not a positive safe integer");
-    await options.nexa.reviewTransfer({ id: transactionId, reference, status: claim.status });
-    await options.repository.completeReview(claim, { reference, status: claim.status }, now);
+    const response = await options.nexa.reviewTransfer({ id: transactionId, reference, status: claim.status });
+    if (String(response.reference) !== String(reference) || response.status !== claim.status) {
+      throw new Error("Nexa review response does not match the claim");
+    }
+    await options.repository.completeReview(claim, { reference, status: response.status }, now);
   } catch {
     await options.repository.failReview(claim, getNextAttemptAt(
       now,

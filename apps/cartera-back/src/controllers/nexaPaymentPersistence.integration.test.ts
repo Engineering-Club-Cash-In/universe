@@ -96,7 +96,7 @@ integrationTest("constraints Nexa resisten concurrencia, replay y rollback", asy
   }
 }, 30_000);
 
-integrationTest("un processing persistido tras un efecto financiero queda en revisión sin registrar de nuevo", async () => {
+integrationTest("un evento legado en crash-window acepta el cliente nuevo y queda en revisión sin duplicar efectos", async () => {
   parseTestDatabaseUrl(testDatabaseUrl!);
   const sql = postgres(testDatabaseUrl!, { ssl: false });
   const migration = await Bun.file(
@@ -107,8 +107,12 @@ integrationTest("un processing persistido tras un efecto financiero queda en rev
     creditoId: 10,
     amount: "10.00",
     currency: "GTQ" as const,
+    tokenDate: "2026-09-08T23:30:00-06:00",
   };
-  const payloadHash = "d".repeat(64);
+  const { tokenDate: _legacyOmittedDate, ...legacyBody } = body;
+  const legacyPayloadHash = createHash("sha256").update(JSON.stringify(legacyBody)).digest("hex");
+  const newPayloadHash = createHash("sha256").update(JSON.stringify(body)).digest("hex");
+  const eventFingerprint = "e".repeat(64);
 
   try {
     await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
@@ -128,9 +132,9 @@ integrationTest("un processing persistido tras un efecto financiero queda en rev
     };
     const { claimNexaPaymentEvent } = await import("./nexaPaymentRepository");
     const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
-    const freshClaim = await claimNexaPaymentEvent(queryClient, body, {
+    const freshClaim = await claimNexaPaymentEvent(queryClient, legacyBody, {
       nonce: "nonce-before-crash",
-      payloadHash,
+      payloadHash: legacyPayloadHash,
       now: new Date(),
     });
     expect(freshClaim).toMatchObject({ kind: "new" });
@@ -140,9 +144,9 @@ integrationTest("un processing persistido tras un efecto financiero queda en rev
       SET status = 'failed', error = 'pre_effect_failure'
       WHERE external_reference = ${body.externalReference}
     `;
-    await expect(claimNexaPaymentEvent(queryClient, body, {
+    await expect(claimNexaPaymentEvent(queryClient, legacyBody, {
       nonce: "nonce-safe-failed-retry",
-      payloadHash,
+      payloadHash: legacyPayloadHash,
       now: new Date(),
     })).resolves.toMatchObject({ kind: "retry" });
     const [rearmed] = await sql<{ status: string }[]>`
@@ -159,7 +163,13 @@ integrationTest("un processing persistido tras un efecto financiero queda en rev
 
     await expect(processNexaPayment(
       body,
-      { nonce: "nonce-after-crash", payloadHash, now: new Date() },
+      {
+        nonce: "nonce-after-crash",
+        payloadHash: newPayloadHash,
+        eventFingerprint,
+        legacyPayloadHash,
+        now: new Date(),
+      },
       {
         withCreditLock: async (_creditoId, work) => work({} as never),
         claim: (retryBody, context) => claimNexaPaymentEvent(queryClient, retryBody, context),
@@ -255,6 +265,7 @@ integrationTest("/newPayment reserva NEXA pero el flujo HMAC interno alcanza el 
       creditoId: 10,
       amount: "10.00",
       currency: "GTQ",
+      tokenDate: "2026-09-08T23:30:00-06:00",
     });
     const timestamp = String(now / 1000);
     const nonce = "nonce-internal-schema-boundary";
@@ -356,6 +367,7 @@ integrationTest("revalida bajo el lock canónico antes del primer efecto de pago
           creditoId,
           amount: "10.00",
           currency: "GTQ",
+          tokenDate: "2026-09-08T23:30:00-06:00",
           transactionId: "binding-race",
         },
         7,

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { paymentTokenWebhookSchema, type ReviewTransferStatus, type TokenTransaction } from "../nexa/schemas";
+import { paymentTokenWebhookSchema, type ReceivedTokenTransaction, type ReviewTransferStatus } from "../nexa/schemas";
 import type { CarteraPaymentClient } from "../payments/cartera-client";
 import type { PaymentTransactionRepository, TokenUserRepository } from "../payments/repositories";
 
@@ -69,7 +69,7 @@ export function createPaymentTokenWebhookRouter(deps: {
   return router;
 }
 
-function toTokenTransaction(webhook: ReturnType<typeof paymentTokenWebhookSchema.parse>): TokenTransaction {
+function toTokenTransaction(webhook: ReturnType<typeof paymentTokenWebhookSchema.parse>): ReceivedTokenTransaction {
   return {
     reference: String(webhook.reference),
     amount: webhook.amount,
@@ -78,7 +78,6 @@ function toTokenTransaction(webhook: ReturnType<typeof paymentTokenWebhookSchema
     currency: webhook.currency,
     account: webhook.originAccount,
     token: webhook.token,
-    tokenDate: new Date().toISOString(),
     tokenIdentifier: webhook.token.slice(-9),
     tokenName: webhook.originAccountName ?? "Webhook Nexa",
     tokenPrefix: webhook.token.slice(0, -9),

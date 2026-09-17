@@ -6,6 +6,8 @@ import { runReviewWorkerOnce } from "./payments/review-worker";
 
 export type LifecycleScheduler = Scheduler;
 
+const MANUAL_REVIEW_ALERT_INTERVAL_SECONDS = 300;
+
 export function startPaymentLifecycle(
   config: AppConfig,
   deps: AppDependencies,
@@ -22,6 +24,26 @@ export function startPaymentLifecycle(
     backoffSeconds: config.workerBackoffSeconds,
     maxBackoffSeconds: config.workerMaxBackoffSeconds,
   };
+  type ReconciliationAlert =
+    | Awaited<ReturnType<typeof deps.transactions.listReconciliationAlerts>>[number]
+    | Awaited<ReturnType<typeof deps.transactions.listManualReviewAlerts>>[number];
+  const logAlerts = (alerts: ReconciliationAlert[]) => {
+    for (const alert of alerts) {
+      logInfo(JSON.stringify({
+        scope: "nexa-reconciliation",
+        event: "reconciliation_alert",
+        alertType: alert.alertType,
+        reference: alert.reference,
+        processingStatus: alert.processingStatus,
+        attemptCount: alert.attemptCount,
+        reviewAttemptCount: alert.reviewAttemptCount,
+        failureReason: alert.failureReason,
+        updatedAt: alert.updatedAt.toISOString(),
+        nextAttemptAt: alert.nextAttemptAt?.toISOString() ?? null,
+        reviewNextAttemptAt: alert.reviewNextAttemptAt?.toISOString() ?? null,
+      }));
+    }
+  };
   const stops = [
     startWorkerLoop("Application worker", config.workerIntervalSeconds, () => runApplicationWorkerOnce({
       repository: deps.transactions,
@@ -35,25 +57,19 @@ export function startPaymentLifecycle(
     }), scheduler, logError),
     startWorkerLoop("Reconciliation scanner", config.workerIntervalSeconds, async () => {
       const now = new Date();
-      const staleBefore = new Date(now.getTime() - config.workerIntervalSeconds * 1_000);
-      const alerts = await deps.transactions.listReconciliationAlerts(now, staleBefore);
-      for (const alert of alerts) {
-        logInfo(JSON.stringify({
-          scope: "nexa-reconciliation",
-          event: "reconciliation_alert",
-          alertType: alert.alertType,
-          reference: alert.reference,
-          processingStatus: alert.processingStatus,
-          attemptCount: alert.attemptCount,
-          reviewAttemptCount: alert.reviewAttemptCount,
-          failureReason: alert.failureReason,
-          updatedAt: alert.updatedAt.toISOString(),
-          nextAttemptAt: alert.nextAttemptAt?.toISOString() ?? null,
-          reviewNextAttemptAt: alert.reviewNextAttemptAt?.toISOString() ?? null,
-        }));
-      }
+      logAlerts(await deps.transactions.listReconciliationAlerts(
+        now,
+        new Date(now.getTime() - config.workerIntervalSeconds * 1_000),
+      ));
       return false;
     }, scheduler, logError),
+    startWorkerLoop("Manual review scanner", MANUAL_REVIEW_ALERT_INTERVAL_SECONDS, async () => {
+      const now = new Date();
+      logAlerts(await deps.transactions.listManualReviewAlerts(
+        new Date(now.getTime() - MANUAL_REVIEW_ALERT_INTERVAL_SECONDS * 1_000),
+      ));
+      return false;
+    }, scheduler, logError, true),
   ];
 
   return () => stops.forEach((stop) => stop());
@@ -65,6 +81,7 @@ function startWorkerLoop(
   runOnce: () => Promise<boolean>,
   scheduler: Scheduler,
   logError: (message: string) => void,
+  delayFirstRun = false,
 ) {
   let stopped = false;
   let timer: unknown;
@@ -77,7 +94,8 @@ function startWorkerLoop(
     }
     if (!stopped) timer = scheduler.setTimeout(() => void cycle(), intervalSeconds * 1000);
   };
-  void cycle();
+  if (delayFirstRun) timer = scheduler.setTimeout(() => void cycle(), intervalSeconds * 1000);
+  else void cycle();
 
   return () => {
     stopped = true;

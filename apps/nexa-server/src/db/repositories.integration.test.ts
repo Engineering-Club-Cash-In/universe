@@ -158,6 +158,7 @@ integrationTest("upsertReceived is concurrent, idempotent, fail-closed and keeps
 
   for (const incompatible of [
     { ...transaction, amount: 51 },
+    { ...transaction, tokenDate: "2026-05-05T10:00:00-06:00" },
     { ...transaction, tokenIdentifier: "10005011" },
     { ...transaction, transactionId: "7294" },
     { ...transaction, currency: "USD" as const },
@@ -200,6 +201,62 @@ integrationTest("upsertReceived is concurrent, idempotent, fail-closed and keeps
   const failedReplay = await repository.upsertReceived(transaction);
   expect(failedReplay).toMatchObject({ id: concurrent[0]?.id, created: false, processingStatus: "FAILED" });
 
+});
+
+integrationTest("date-less webhook rows wait visibly for authoritative statement enrichment before application", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  const dateLess = { ...transaction, reference: "webhook-awaiting-statement", tokenDate: undefined } as unknown as TokenTransaction;
+
+  const stored = await repository.upsertReceived(dateLess);
+  expect(stored).toMatchObject({ created: true, processingStatus: "MANUAL_REVIEW" });
+  expect(await repository.claimNextApplication(new Date("2026-09-08T12:00:00Z"), 10)).toBeNull();
+  expect(await repository.listManualReviewAlerts(new Date("2000-01-01T00:00:00Z"))).toEqual([]);
+  expect(await repository.listManualReviewAlerts(new Date("2100-01-01T00:00:00Z"))).toEqual([
+    expect.objectContaining({
+      reference: "webhook-awaiting-statement",
+      processingStatus: "MANUAL_REVIEW",
+      failureReason: "missing_token_date",
+      alertType: "MISSING_TOKEN_DATE",
+    }),
+  ]);
+
+  const enriched = await repository.upsertReceived({
+    ...transaction,
+    reference: "webhook-awaiting-statement",
+  });
+  expect(enriched).toMatchObject({ id: stored.id, created: false, processingStatus: "RECEIVED" });
+  const [row] = await db.select().from(nexaPaymentTransactions)
+    .where(eq(nexaPaymentTransactions.id, stored.id));
+  expect(row).toMatchObject({
+    tokenDate: transaction.tokenDate,
+    processingStatus: "RECEIVED",
+    failureReason: null,
+  });
+  expect(await repository.upsertReceived(dateLess)).toMatchObject({
+    id: stored.id,
+    created: false,
+    processingStatus: "RECEIVED",
+  });
+
+  await associateToken("10005010", "1234567", 42);
+  const appliedDates: string[] = [];
+  expect(await runApplicationWorkerOnce({
+    repository,
+    cartera: {
+      applyNexaPayment: async ({ transaction: payment }) => {
+        appliedDates.push(payment.tokenDate);
+        return { status: "APPLIED", paymentId: 702 };
+      },
+    },
+    now: () => new Date("2026-09-08T12:01:00Z"),
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 1,
+    maxBackoffSeconds: 10,
+  })).toBe(true);
+  expect(appliedDates).toEqual(["2026-05-04T10:00:00-06:00"]);
+  expect(await repository.listManualReviewAlerts(new Date("2100-01-01T00:00:00Z"))).toEqual([]);
 });
 
 integrationTest("0004 classifies legacy PENDING payments for manual reconciliation", async () => {
@@ -322,13 +379,17 @@ integrationTest("APPLIED payment persists its id and queues APPROVED without rev
   const repository = new DbPaymentTransactionRepository(db);
   await associateToken("10005010", "1234567", 42);
   const stored = await repository.upsertReceived(transaction);
-  const calls: Array<{ creditoId: number; reference: string | number }> = [];
+  const calls: Array<{ creditoId: number; reference: string | number; tokenDate: string }> = [];
 
   expect(await runApplicationWorkerOnce({
     repository,
     cartera: {
       applyNexaPayment: async (input) => {
-        calls.push({ creditoId: input.creditoId, reference: input.transaction.reference });
+        calls.push({
+          creditoId: input.creditoId,
+          reference: input.transaction.reference,
+          tokenDate: input.transaction.tokenDate,
+        });
         return { status: "APPLIED", paymentId: 701 };
       },
     },
@@ -344,8 +405,49 @@ integrationTest("APPLIED payment persists its id and queues APPROVED without rev
   expect(payment).toMatchObject({ processingStatus: "REVIEW_PENDING", carteraPaymentId: 701, failureReason: null });
   expect(reviews).toHaveLength(1);
   expect(reviews[0]).toMatchObject({ transactionId: stored.id, reference: "4617307", status: "APPROVED", attempts: 0 });
-  expect(calls).toEqual([{ creditoId: 42, reference: "4617307" }]);
+  expect(calls).toEqual([{
+    creditoId: 42,
+    reference: "4617307",
+    tokenDate: "2026-05-04T10:00:00-06:00",
+  }]);
   expect(payment?.rawPayload).not.toHaveProperty("token");
+});
+
+integrationTest("malformed persisted tokenDate fails closed through bounded application attempts", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await associateToken("10005010", "1234567", 42);
+  const stored = await repository.upsertReceived({
+    ...transaction,
+    reference: "malformed-token-date",
+  });
+  await db.update(nexaPaymentTransactions)
+    .set({ tokenDate: "not-a-date" })
+    .where(eq(nexaPaymentTransactions.id, stored.id));
+  let carteraCalls = 0;
+
+  expect(await runApplicationWorkerOnce({
+    repository,
+    cartera: {
+      applyNexaPayment: async () => {
+        carteraCalls += 1;
+        return { status: "APPLIED", paymentId: 999 };
+      },
+    },
+    now: () => new Date("2026-09-08T13:15:00.000Z"),
+    leaseSeconds: 10,
+    maxAttempts: 1,
+    backoffSeconds: 2,
+    maxBackoffSeconds: 10,
+  })).toBe(true);
+
+  const [payment] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, stored.id));
+  expect(carteraCalls).toBe(0);
+  expect(payment).toMatchObject({
+    processingStatus: "MANUAL_REVIEW",
+    attemptCount: 1,
+    failureReason: "application_processing_failed",
+  });
 });
 
 integrationTest("returned transfers queue a safe REJECTED review without calling Cartera", async () => {
@@ -472,7 +574,7 @@ integrationTest("payment_amount_mismatch agota intentos en MANUAL_REVIEW sin rev
   let bankReviews = 0;
   expect(await runReviewWorkerOnce({
     repository: new DbReviewRepository(db),
-    nexa: { reviewTransfer: async () => { bankReviews += 1; } },
+    nexa: { reviewTransfer: async () => { bankReviews += 1; return { reference: 1, status: "APPROVED" }; } },
     now: () => now,
     leaseSeconds: 10,
     maxAttempts: 3,
@@ -633,12 +735,15 @@ integrationTest("reconciliation alert query selects only due or aged actionable 
   }
 
   const alerts = await repository.listReconciliationAlerts(now, staleBefore);
+  const manualAlerts = await repository.listManualReviewAlerts(staleBefore);
 
   expect(alerts.map(({ alertType, reference, failureReason }) => ({ alertType, reference, failureReason }))).toEqual([
     { alertType: "FAILED_DUE", reference: "failed-due", failureReason: "payment_amount_mismatch" },
     { alertType: "FAILED_AGED", reference: "failed-aged", failureReason: "application_processing_failed" },
-    { alertType: "MANUAL_REVIEW", reference: "manual", failureReason: "application_processing_failed" },
     { alertType: "REVIEW_PENDING_AGED", reference: "review-aged", failureReason: "payment_amount_mismatch" },
+  ]);
+  expect(manualAlerts.map(({ alertType, reference, failureReason }) => ({ alertType, reference, failureReason }))).toEqual([
+    { alertType: "MANUAL_REVIEW", reference: "manual", failureReason: "application_processing_failed" },
   ]);
 });
 
@@ -721,7 +826,7 @@ integrationTest("uncertain Cartera outcome reaches MANUAL_REVIEW without bank re
   let bankReviews = 0;
   expect(await runReviewWorkerOnce({
     repository: new DbReviewRepository(db),
-    nexa: { reviewTransfer: async () => { bankReviews += 1; } },
+    nexa: { reviewTransfer: async () => { bankReviews += 1; return { reference: 1, status: "APPROVED" }; } },
     now: () => now,
     leaseSeconds: 10,
     maxAttempts: 3,
@@ -860,13 +965,47 @@ integrationTest("review max attempts moves payment to MANUAL_REVIEW", async () =
   expect(review?.completedAt).toEqual(now);
 });
 
+integrationTest("mismatched review responses exhaust retries into MANUAL_REVIEW", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const { paymentId, repository } = await queuedReview("8104", "9104");
+  let now = new Date("2026-09-08T18:30:00.000Z");
+  let calls = 0;
+  const run = () => runReviewWorkerOnce({
+    repository,
+    nexa: {
+      reviewTransfer: async () => ++calls === 1
+        ? { reference: 8104, status: "REJECTED" as const }
+        : { reference: 9999, status: "APPROVED" as const },
+    },
+    now: () => now,
+    leaseSeconds: 10,
+    maxAttempts: 2,
+    backoffSeconds: 2,
+    maxBackoffSeconds: 10,
+  });
+
+  expect(await run()).toBe(true);
+  now = new Date("2026-09-08T18:30:02.000Z");
+  expect(await run()).toBe(true);
+  const [payment] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, paymentId));
+  const [review] = await db.select().from(nexaReviews).where(eq(nexaReviews.transactionId, paymentId));
+  expect(payment?.processingStatus).toBe("MANUAL_REVIEW");
+  expect(review).toMatchObject({
+    attempts: 2,
+    lastError: "review_processing_failed",
+    responsePayload: null,
+    nextAttemptAt: null,
+  });
+  expect(review?.completedAt).toEqual(now);
+});
+
 integrationTest("review without a reviewable transactionId completes without calling Nexa", async () => {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const { paymentId, repository } = await queuedReview("8104", "");
   let called = false;
   expect(await runReviewWorkerOnce({
     repository,
-    nexa: { reviewTransfer: async () => { called = true; } },
+    nexa: { reviewTransfer: async () => { called = true; return { reference: 8104, status: "APPROVED" }; } },
     now: () => new Date("2026-09-08T19:00:00.000Z"),
     leaseSeconds: 10,
     maxAttempts: 3,

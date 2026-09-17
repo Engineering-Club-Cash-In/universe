@@ -72,7 +72,7 @@ test("a failed cycle is logged without its error detail and the next cycle runs"
       return false;
     },
   }), { scheduler, logError: (message) => logs.push(message) });
-  await waitFor(() => logs.length === 1 && scheduler.callbacks.length === 3);
+  await waitFor(() => logs.length === 1 && scheduler.callbacks.length === 4);
 
   scheduler.callbacks.forEach((callback) => callback());
   await waitFor(() => applications === 2);
@@ -124,11 +124,47 @@ test("qa lifecycle scans reconciliation alerts at the worker interval and logs o
   expect(logs.join(" ")).not.toContain("token");
 });
 
+test("MANUAL_REVIEW uses a restart-safe throttled cadence without delaying actionable alerts", async () => {
+  let actionableScans = 0;
+  let manualScans = 0;
+  const dependencies = () => lifecycleDependencies({
+    reconciliation: () => { actionableScans += 1; return []; },
+    manualReconciliation: () => { manualScans += 1; return []; },
+  });
+  const scheduler = controlledScheduler();
+  const stop = startPaymentLifecycle(loadConfig(baseEnv), dependencies(), { scheduler });
+  await waitFor(() => actionableScans === 1 && scheduler.scheduled.length === 4);
+
+  expect(manualScans).toBe(0);
+  expect(scheduler.scheduled.map(({ delay }) => delay).sort((a, b) => a - b)).toEqual([
+    1_000,
+    1_000,
+    1_000,
+    300_000,
+  ]);
+  scheduler.scheduled.filter(({ delay }) => delay === 1_000).forEach(({ callback }) => callback());
+  await waitFor(() => actionableScans === 2);
+  expect(manualScans).toBe(0);
+
+  scheduler.scheduled.find(({ delay }) => delay === 300_000)?.callback();
+  await waitFor(() => manualScans === 1);
+  stop();
+
+  const restartedScheduler = controlledScheduler();
+  const stopRestarted = startPaymentLifecycle(loadConfig(baseEnv), dependencies(), { scheduler: restartedScheduler });
+  await waitFor(() => actionableScans === 3 && restartedScheduler.scheduled.length === 4);
+  expect(manualScans).toBe(1);
+  restartedScheduler.scheduled.find(({ delay }) => delay === 300_000)?.callback();
+  await waitFor(() => manualScans === 2);
+  stopRestarted();
+});
+
 function lifecycleDependencies(options: {
   poll?: () => void;
   application?: () => boolean;
   review?: () => boolean;
   reconciliation?: () => Array<Record<string, unknown>>;
+  manualReconciliation?: () => Array<Record<string, unknown>>;
 }): AppDependencies {
   return {
     nexa: {
@@ -146,6 +182,7 @@ function lifecycleDependencies(options: {
       markApplicationFailed: async () => undefined,
       upsertReceived: async () => ({ id: 1, reference: "1", processingStatus: "RECEIVED" as const, created: true }),
       listReconciliationAlerts: async () => options.reconciliation?.() ?? [],
+      listManualReviewAlerts: async () => options.manualReconciliation?.() ?? [],
     },
     reviews: {
       claimNextReview: async () => options.review?.() ? reviewClaim : null,
@@ -164,6 +201,7 @@ const applicationClaim = {
   reference: "1",
   amount: 1,
   currency: "GTQ" as const,
+  tokenDate: "2026-09-08T12:00:00Z",
   tokenIdentifier: "identifier",
   tokenPrefix: "prefix",
   transactionId: "1",
@@ -182,10 +220,13 @@ const reviewClaim = {
 
 function controlledScheduler() {
   const callbacks: Array<() => void> = [];
-  const scheduler: LifecycleScheduler & { callbacks: typeof callbacks } = {
+  const scheduled: Array<{ callback: () => void; delay: number }> = [];
+  const scheduler: LifecycleScheduler & { callbacks: typeof callbacks; scheduled: typeof scheduled } = {
     callbacks,
-    setTimeout(callback) {
+    scheduled,
+    setTimeout(callback, delay) {
       callbacks.push(callback);
+      scheduled.push({ callback, delay });
       return callback;
     },
     clearTimeout() {},

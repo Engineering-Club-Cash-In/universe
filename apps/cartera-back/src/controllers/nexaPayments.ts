@@ -10,6 +10,9 @@ export const nexaPaymentSchema = z
     creditoId: z.number().int().positive().max(2_147_483_647),
     amount: z.string().regex(/^(?=.*[1-9])(?:0|[1-9]\d{0,15})\.\d{2}$/),
     currency: z.literal("GTQ"),
+    tokenDate: z.string().datetime({ offset: true })
+      .refine((value) => !Number.isNaN(Date.parse(value)), "Invalid tokenDate")
+      .optional(),
     transactionId: z.string().trim().max(100).transform((value) => value || undefined).optional(),
   })
   .strict();
@@ -39,6 +42,8 @@ export type NexaPaymentBody = z.infer<typeof nexaPaymentSchema>;
 export type NexaPaymentContext = {
   nonce: string;
   payloadHash: string;
+  eventFingerprint?: string;
+  legacyPayloadHash?: string;
   now: Date;
 };
 
@@ -65,6 +70,7 @@ export const classifyNexaClaim = (
     amount: string;
     currency: string;
     payloadHash: string;
+    compatiblePayloadHashes?: string[];
   },
 ): NexaClaim => {
   if (nonceUsed) return { kind: "replay" };
@@ -73,7 +79,7 @@ export const classifyNexaClaim = (
     event.credito_id !== requested.creditoId ||
     !new Big(event.amount).eq(requested.amount) ||
     event.currency !== requested.currency ||
-    event.payload_hash !== requested.payloadHash
+    ![requested.payloadHash, ...(requested.compatiblePayloadHashes ?? [])].includes(event.payload_hash)
   ) {
     return { kind: "conflict" };
   }
@@ -159,6 +165,7 @@ export const processNexaPayment = (
   const eventId = claim.eventId;
 
   try {
+    if (!body.tokenDate) throw new NexaPaymentError("payment_date_required", 503);
     const credit = await dependencies.loadCredit(body.creditoId);
     if (!credit) throw new NexaPaymentError("credit_not_found", 404);
     const bindingRejection = getNexaBindingRejection(
@@ -284,7 +291,9 @@ export const createNexaPaymentHandler = ({
       parsed.data,
       {
         nonce,
-        payloadHash: createHash("sha256").update(rawBody).digest("hex"),
+        payloadHash: hashNexaPayload(rawBody),
+        eventFingerprint: getNexaEventFingerprint(parsed.data),
+        legacyPayloadHash: hashNexaPayload(JSON.stringify(getLegacyNexaPaymentBody(parsed.data))),
         now: new Date(now()),
       },
       dependencies,
@@ -298,3 +307,25 @@ export const createNexaPaymentHandler = ({
     };
   }
 };
+
+const hashNexaPayload = (payload: string) => createHash("sha256").update(payload).digest("hex");
+
+export const getNexaEventFingerprint = (body: NexaPaymentBody) => body.tokenDate
+  ? hashNexaPayload(JSON.stringify([
+      "nexa-payment-v2",
+      body.externalReference,
+      body.creditoId,
+      body.amount,
+      body.currency,
+      body.transactionId ?? "",
+      body.tokenDate,
+    ]))
+  : hashNexaPayload(JSON.stringify(getLegacyNexaPaymentBody(body)));
+
+const getLegacyNexaPaymentBody = (body: NexaPaymentBody) => ({
+  externalReference: body.externalReference,
+  creditoId: body.creditoId,
+  amount: body.amount,
+  currency: body.currency,
+  ...(body.transactionId ? { transactionId: body.transactionId } : {}),
+});

@@ -18,12 +18,14 @@ import {
   getSpecialPaymentCuotaId,
   getSpecialPaymentInstallmentFields,
   pagoSchema,
+  internalNexaPagoSchema,
   shouldApplyStaleZeroRestanteAdjustment,
   shouldRejectZeroAppliedNormalValidation,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
   calcularCoberturaCuota,
   getCreditPaymentBlock,
+  getInternalNexaPaymentDate,
 } from "./registerPaymentPolicy";
 
 describe("register payment", () => {
@@ -56,6 +58,26 @@ describe("register payment", () => {
     expect(pagoSchema.safeParse({ ...body, registerBy: "  nexa  " }).success).toBe(false);
     expect(pagoSchema.safeParse({ ...body, registerBy: "NEXA:7" }).success).toBe(false);
     expect(pagoSchema.safeParse({ ...body, registerBy: "  nexa:forged" }).success).toBe(false);
+  });
+
+  it("el registro interno Nexa exige fecha de transferencia ISO y fecha de boleta", () => {
+    const body = {
+      credito_id: 10,
+      usuario_id: 5,
+      monto_boleta: "10.00",
+      fecha_pago: "2026-09-08T23:30:00-06:00",
+      cuotaApagar: 1,
+      url_boletas: [],
+      fecha_boleta: "2026-09-08",
+      registerBy: "NEXA",
+    };
+
+    expect(internalNexaPagoSchema.safeParse(body).success).toBe(true);
+    expect(internalNexaPagoSchema.safeParse({ ...body, fecha_pago: "not-a-date" }).success).toBe(false);
+    expect(internalNexaPagoSchema.safeParse({ ...body, fecha_boleta: "not-a-date" }).success).toBe(false);
+    expect(getInternalNexaPaymentDate(body.fecha_pago, 7)?.toISOString())
+      .toBe("2026-09-08T23:30:00.000Z");
+    expect(getInternalNexaPaymentDate(body.fecha_pago)).toBeNull();
   });
 
   it("clasifica un crédito pendiente de cancelación con un mensaje descriptivo", () => {
@@ -1406,6 +1428,20 @@ function extraerObjetoPagoDataPendiente(source: string): string {
   }
   return source.slice(inicio, fin);
 }
+
+describe("fecha del pago interno Nexa", () => {
+  it("estampa la fecha transferida en escritores normales y especiales", () => {
+    const specialWriters = [...registerPaymentSource.matchAll(
+      /await insertarPago\(\{([\s\S]*?)\n\s*\}\);/g,
+    )];
+    expect(specialWriters).toHaveLength(5);
+    for (const [, body] of specialWriters) {
+      expect(body).toContain("fecha_pago: paymentRegistrationDate()");
+    }
+    expect(registerPaymentSource).toContain("const fechaGuatemala = paymentRegistrationDate()");
+    expect(registerPaymentSource).toContain("fecha_pago,\n\n      renuevo_o_nuevo");
+  });
+});
 
 describe("fecha_aplicado del pago pendiente", () => {
   it("el payload del pago pendiente limpia fecha_aplicado", () => {

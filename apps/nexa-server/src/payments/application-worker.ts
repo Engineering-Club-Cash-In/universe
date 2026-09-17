@@ -1,4 +1,4 @@
-import type { ReviewTransferStatus } from "../nexa/schemas";
+import { tokenDateSchema, type ReviewTransferStatus } from "../nexa/schemas";
 import type { CarteraPaymentClient } from "./cartera-client";
 
 export type ApplicationClaim = {
@@ -6,6 +6,7 @@ export type ApplicationClaim = {
   reference: string;
   amount: number;
   currency: "GTQ" | "USD";
+  tokenDate: string;
   tokenIdentifier: string;
   tokenPrefix: string;
   transactionId: string;
@@ -63,6 +64,7 @@ export async function runApplicationWorkerOnce(options: {
         reference: claim.reference,
         amount: claim.amount,
         currency: claim.currency,
+        tokenDate: tokenDateSchema.parse(claim.tokenDate),
         transactionId: claim.transactionId,
       },
     });

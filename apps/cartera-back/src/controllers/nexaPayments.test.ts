@@ -3,6 +3,14 @@ import { expect, test } from "bun:test";
 import type { PaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 
 const paymentLock = {} as PaymentAdvisoryLock;
+const tokenDate = "2026-09-08T12:00:00Z";
+const paymentBody = (externalReference: string) => ({
+  externalReference,
+  creditoId: 10,
+  amount: "10.00",
+  currency: "GTQ" as const,
+  tokenDate,
+});
 
 test("acepta el body mínimo GTQ con decimal cent-safe", async () => {
   const nexa = await import("./nexaPayments").catch(() => ({}));
@@ -17,6 +25,7 @@ test("acepta el body mínimo GTQ con decimal cent-safe", async () => {
       creditoId: 10,
       amount: "1250.40",
       currency: "GTQ",
+      tokenDate: "2026-09-08T23:30:00-06:00",
       transactionId: "synthetic-transaction-1",
     }),
   ).toEqual({
@@ -24,8 +33,54 @@ test("acepta el body mínimo GTQ con decimal cent-safe", async () => {
     creditoId: 10,
     amount: "1250.40",
     currency: "GTQ",
+    tokenDate: "2026-09-08T23:30:00-06:00",
     transactionId: "synthetic-transaction-1",
   });
+});
+
+test("acepta el body legado sin fecha pero valida tokenDate cuando está presente", async () => {
+  const { nexaPaymentSchema } = await import("./nexaPayments");
+  const base = {
+    externalReference: "qa-payment-date",
+    creditoId: 10,
+    amount: "10.00",
+    currency: "GTQ" as const,
+  };
+
+  expect(nexaPaymentSchema.safeParse(base).success).toBe(true);
+  expect(nexaPaymentSchema.safeParse({ ...base, tokenDate: "not-a-date" }).success).toBe(false);
+  expect(nexaPaymentSchema.safeParse({ ...base, tokenDate: "2026-09-08T23:30:00-06:00" }).success).toBe(true);
+});
+
+test("un evento legado nuevo sin fecha falla retryable antes de cualquier efecto financiero", async () => {
+  const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+  let registered = false;
+  let failedWith: string | undefined;
+
+  await expect(processNexaPayment(
+    {
+      externalReference: "legacy-without-date",
+      creditoId: 10,
+      amount: "10.00",
+      currency: "GTQ",
+    },
+    { nonce: "legacy-nonce", payloadHash: "a".repeat(64), now: new Date() },
+    {
+      withCreditLock: async (_creditoId, work) => work(paymentLock),
+      claim: async () => ({ kind: "new", eventId: 7 }),
+      loadCredit: async () => ({
+        usuarioId: 5,
+        statusCredit: "ACTIVO",
+        binding: { activo: true, expires_at: null, max_payment_amount: null },
+      }),
+      findPayments: async () => [],
+      registerPayment: async () => { registered = true; return { success: true }; },
+      applyPayment: async () => ({ success: true }),
+      complete: async () => undefined,
+      fail: async (_eventId, code) => { failedWith = code; },
+    },
+  )).rejects.toEqual(new NexaPaymentError("payment_date_required", 503));
+  expect({ registered, failedWith }).toEqual({ registered: false, failedWith: "payment_date_required" });
 });
 
 test("rechaza montos que no sean strings positivos con dos decimales", async () => {
@@ -34,6 +89,7 @@ test("rechaza montos que no sean strings positivos con dos decimales", async () 
     externalReference: "qa-payment-1",
     creditoId: 10,
     currency: "GTQ" as const,
+    tokenDate,
   };
 
   expect(nexaPaymentSchema.safeParse({ ...base, amount: "1.001" }).success).toBe(false);
@@ -47,6 +103,7 @@ test("rechaza moneda distinta de GTQ y campos desconocidos", async () => {
     externalReference: "qa-payment-1",
     creditoId: 10,
     amount: "10.00",
+    tokenDate,
   };
 
   expect(nexaPaymentSchema.safeParse({ ...base, currency: "USD" }).success).toBe(false);
@@ -57,7 +114,7 @@ test("rechaza moneda distinta de GTQ y campos desconocidos", async () => {
 
 test("limita referencias al tamaño persistible", async () => {
   const { nexaPaymentSchema } = await import("./nexaPayments");
-  const base = { creditoId: 10, amount: "10.00", currency: "GTQ" as const };
+  const base = { creditoId: 10, amount: "10.00", currency: "GTQ" as const, tokenDate };
 
   expect(
     nexaPaymentSchema.safeParse({ ...base, externalReference: "r".repeat(151) }).success,
@@ -73,7 +130,7 @@ test("limita referencias al tamaño persistible", async () => {
 
 test("normaliza referencias y limita creditoId al integer de PostgreSQL", async () => {
   const { nexaPaymentSchema } = await import("./nexaPayments");
-  const base = { amount: "10.00", currency: "GTQ" as const };
+  const base = { amount: "10.00", currency: "GTQ" as const, tokenDate };
 
   expect(nexaPaymentSchema.parse({
     ...base,
@@ -131,12 +188,7 @@ test("registra y aplica una vez por el flujo canónico", async () => {
   let applied = 0;
   let completed = 0;
   const result = await processPayment(
-    {
-      externalReference: "qa-payment-1",
-      creditoId: 10,
-      amount: "10.00",
-      currency: "GTQ",
-    },
+    paymentBody("qa-payment-1"),
     { nonce: "nonce-1", payloadHash: "a".repeat(64), now: new Date() },
     {
       withCreditLock: async (_creditoId, work) => work(paymentLock),
@@ -165,7 +217,7 @@ test("no consume claim cuando el crédito no existe", async () => {
   let claimed = false;
 
   await expect(processNexaPayment(
-    { externalReference: "missing-credit", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    paymentBody("missing-credit"),
     { nonce: "nonce-missing", payloadHash: "a".repeat(64), now: new Date() },
     {
       withCreditLock: async (_creditoId, work) => work(paymentLock),
@@ -186,7 +238,7 @@ test("revalida el binding con reloj fresco dentro del lock", async () => {
   const calls: string[] = [];
 
   await expect(processNexaPayment(
-    { externalReference: "expired-in-lock", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    paymentBody("expired-in-lock"),
     { nonce: "nonce-expired", payloadHash: "a".repeat(64), now: new Date("2026-09-08T11:59:00Z") },
     {
       now: () => new Date("2026-09-08T12:01:00Z"),
@@ -217,7 +269,7 @@ test.each([
   let mutated = false;
 
   await expect(processNexaPayment(
-    { externalReference: `binding-${mode}`, creditoId: 10, amount: "10.00", currency: "GTQ" },
+    paymentBody(`binding-${mode}`),
     { nonce: `nonce-${mode}`, payloadHash: "a".repeat(64), now },
     {
       now: () => now,
@@ -253,7 +305,7 @@ test("un total vinculado distinto queda incierto sin aplicar ni completar", asyn
   const failures: string[] = [];
 
   await expect(processNexaPayment(
-    { externalReference: "partial-link", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    paymentBody("partial-link"),
     { nonce: "nonce-partial", payloadHash: "a".repeat(64), now: new Date() },
     {
       withCreditLock: async (_creditoId, work) => work(paymentLock),
@@ -281,7 +333,7 @@ test("exige success true al aplicar cada fila", async () => {
   const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
 
   await expect(processNexaPayment(
-    { externalReference: "undefined-success", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    paymentBody("undefined-success"),
     { nonce: "nonce-undefined", payloadHash: "a".repeat(64), now: new Date() },
     {
       withCreditLock: async (_creditoId, work) => work(paymentLock),
@@ -308,7 +360,7 @@ test("continúa un pago parcial de mora legado cuando dejó la fila exacta vincu
   let failed = 0;
 
   const result = await processNexaPayment(
-    { externalReference: "partial-mora", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    paymentBody("partial-mora"),
     { nonce: "nonce-partial-mora", payloadHash: "a".repeat(64), now: new Date() },
     {
       withCreditLock: async (_creditoId, work) => work(paymentLock),
@@ -349,7 +401,7 @@ test("mantiene un rechazo explícito sin efectos como rechazo normal", async () 
   let registered = 0;
 
   await expect(processNexaPayment(
-    { externalReference: "registration-result", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    paymentBody("registration-result"),
     { nonce: "nonce-registration", payloadHash: "a".repeat(64), now: new Date() },
     {
       withCreditLock: async (_creditoId, work) => work(paymentLock),
@@ -383,7 +435,7 @@ test("marca como incierto cualquier registro no rechazado sin fila vinculada", a
   ];
   for (const registerPayment of registrationAttempts) {
     await expect(processNexaPayment(
-      { externalReference: "uncertain-registration", creditoId: 10, amount: "10.00", currency: "GTQ" },
+      paymentBody("uncertain-registration"),
       { nonce: "nonce-uncertain", payloadHash: "a".repeat(64), now: new Date() },
       {
         withCreditLock: async (_creditoId, work) => work(paymentLock),
@@ -413,7 +465,7 @@ test("un evento manual_review bloquea reintentos antes de mutar pagos", async ()
   let mutated = false;
 
   await expect(processNexaPayment(
-    { externalReference: "uncertain-registration", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    paymentBody("uncertain-registration"),
     { nonce: "nonce-uncertain-retry", payloadHash: "a".repeat(64), now: new Date() },
     {
       withCreditLock: async (_creditoId, work) => work(paymentLock),
@@ -437,7 +489,7 @@ test("devuelve el mismo paymentId en un reintento ya aplicado", async () => {
   const { processNexaPayment } = await import("./nexaPayments");
   let mutated = false;
   const result = await processNexaPayment(
-    { externalReference: "qa-payment-1", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    paymentBody("qa-payment-1"),
     { nonce: "nonce-2", payloadHash: "a".repeat(64), now: new Date() },
     {
       withCreditLock: async (_creditoId, work) => work(paymentLock),
@@ -463,7 +515,7 @@ test.each(["conflict", "replay"] as const)("rechaza un claim %s sin mutar", asyn
   const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
   let mutated = false;
   const promise = processNexaPayment(
-    { externalReference: "qa-payment-1", creditoId: 10, amount: "10.00", currency: "GTQ" },
+    paymentBody("qa-payment-1"),
     { nonce: "nonce-2", payloadHash: "b".repeat(64), now: new Date() },
     {
       withCreditLock: async (_creditoId, work) => work(paymentLock),
@@ -517,6 +569,21 @@ test("clasifica conflicto de payload, replay, retry e idempotencia persistente",
   expect(classify(event, true, requested)).toEqual({ kind: "replay" });
   expect(classify(event, false, { ...requested, payloadHash: "b".repeat(64) }))
     .toEqual({ kind: "conflict" });
+
+  const fingerprint = Reflect.get(module, "getNexaEventFingerprint");
+  expect(fingerprint).toBeFunction();
+  const firstDate = fingerprint(paymentBody("dated-retry"));
+  const secondDate = fingerprint({ ...paymentBody("dated-retry"), tokenDate: "2026-09-09T12:00:00Z" });
+  expect(firstDate).not.toBe(secondDate);
+  expect(classify(
+    { ...event, payload_hash: firstDate, status: "failed" },
+    false,
+    {
+      ...requested,
+      payloadHash: "b".repeat(64),
+      compatiblePayloadHashes: [secondDate, "legacy-hash"],
+    },
+  )).toEqual({ kind: "conflict" });
 });
 
 test("el handler verifica el body exacto antes de procesar", async () => {
@@ -530,6 +597,7 @@ test("el handler verifica el body exacto antes de procesar", async () => {
     creditoId: 10,
     amount: "10.00",
     currency: "GTQ",
+    tokenDate,
   });
   const timestamp = "1800000000";
   const nonce = "nonce-handler-1";
@@ -543,12 +611,16 @@ test("el handler verifica el body exacto antes de procesar", async () => {
   const secret = "s".repeat(32);
   const signature = createHmac("sha256", secret).update(canonical).digest("hex");
   const set: { status?: number | string } = {};
+  let claimContext: Record<string, unknown> | undefined;
   const handler = createHandler({
     secret: `  ${secret}  `,
     now: () => 1_800_000_000_000,
     dependencies: {
       withCreditLock: async (_creditoId, work) => work(paymentLock),
-      claim: async () => ({ kind: "applied", paymentId: 17 }),
+      claim: async (_body, context) => {
+        claimContext = context;
+        return { kind: "applied", paymentId: 17 };
+      },
       loadCredit: async () => ({
         usuarioId: 5,
         statusCredit: "ACTIVO",
@@ -578,11 +650,22 @@ test("el handler verifica el body exacto antes de procesar", async () => {
 
   expect(set.status).toBe(200);
   expect(result).toEqual({ status: "APPLIED", paymentId: 17, idempotent: true });
+  expect(claimContext).toMatchObject({
+    payloadHash: createHash("sha256").update(rawBody).digest("hex"),
+    legacyPayloadHash: createHash("sha256").update(JSON.stringify({
+      externalReference: "qa-payment-1",
+      creditoId: 10,
+      amount: "10.00",
+      currency: "GTQ",
+    })).digest("hex"),
+  });
+  expect(claimContext?.eventFingerprint).toMatch(/^[0-9a-f]{64}$/);
+  expect(claimContext?.eventFingerprint).not.toBe(claimContext?.payloadHash);
 });
 
 test("un fallo queda reintentable sin registrar ni aplicar dos veces", async () => {
   const { processNexaPayment } = await import("./nexaPayments");
-  const body = { externalReference: "qa-retry-1", creditoId: 10, amount: "10.00", currency: "GTQ" as const };
+  const body = paymentBody("qa-retry-1");
   let eventStatus = "new";
   let registered = 0;
   let applyAttempts = 0;
@@ -622,7 +705,7 @@ test("un fallo queda reintentable sin registrar ni aplicar dos veces", async () 
 
 test("serializa requests concurrentes y devuelve un único paymentId", async () => {
   const { processNexaPayment } = await import("./nexaPayments");
-  const body = { externalReference: "qa-concurrent-1", creditoId: 10, amount: "10.00", currency: "GTQ" as const };
+  const body = paymentBody("qa-concurrent-1");
   let tail = Promise.resolve();
   let eventStatus = "missing";
   let registered = 0;
@@ -718,12 +801,12 @@ test("serializa referencias distintas del mismo crédito", async () => {
 
   await Promise.all([
     processNexaPayment(
-      { externalReference: "qa-credit-lock-1", creditoId: 10, amount: "10.00", currency: "GTQ" },
+      paymentBody("qa-credit-lock-1"),
       { ...context, nonce: "nonce-credit-lock-1" },
       dependencies,
     ),
     processNexaPayment(
-      { externalReference: "qa-credit-lock-2", creditoId: 10, amount: "10.00", currency: "GTQ" },
+      paymentBody("qa-credit-lock-2"),
       { ...context, nonce: "nonce-credit-lock-2" },
       dependencies,
     ),

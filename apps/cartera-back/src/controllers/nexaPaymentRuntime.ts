@@ -92,6 +92,7 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
     ))
     .orderBy(asc(pagos_credito.pago_id)),
   registerPayment: async (body, eventId, usuarioId, validateAfterLock, paymentLock) => {
+    if (!body.tokenDate) throw new NexaPaymentError("payment_date_required", 503);
     try {
       await validateAfterLock();
     } catch (error) {
@@ -101,14 +102,14 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
       throw error;
     }
 
-    const date = formatNexaPaymentDate(new Date());
+    const date = formatNexaPaymentDate(new Date(body.tokenDate));
     const set = { status: 200 };
     const result = await insertPayment({
       body: {
         credito_id: body.creditoId,
         usuario_id: usuarioId,
         monto_boleta: body.amount,
-        fecha_pago: date,
+        fecha_pago: body.tokenDate,
         cuotaApagar: 1,
         url_boletas: [],
         numeroAutorizacion: body.transactionId,

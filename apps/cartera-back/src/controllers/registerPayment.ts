@@ -55,6 +55,7 @@ import {
   sumarAplicadoACuota,
   pagoSchema,
   internalNexaPagoSchema,
+  getInternalNexaPaymentDate,
   cuentaComoHermanoVivo,
 } from "./registerPaymentPolicy";
 import {
@@ -654,6 +655,23 @@ export const insertPayment = async (
       fecha_boleta,
       origen_pago,
     } = parseResult.data;
+    const nexaPaymentDate = getInternalNexaPaymentDate(fecha_pago, nexaPaymentEventId);
+    const paymentRegistrationDate = () => {
+      if (nexaPaymentDate) return nexaPaymentDate;
+      const guatemalaTimeString = new Date().toLocaleString("en-US", {
+        timeZone: "America/Guatemala",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      const [datePart, timePart] = guatemalaTimeString.split(", ");
+      const [month, day, year] = datePart.split("/");
+      return new Date(`${year}-${month}-${day}T${timePart}`);
+    };
 
     // 🔒 LOCK PESIMISTA POR CRÉDITO
     // Serializa los pagos concurrentes del MISMO crédito. Sin esto, dos pagos
@@ -789,6 +807,7 @@ export const insertPayment = async (
         banco_id: banco_id ?? 0,
         numeroAutorizacion: numeroAutorizacion ?? "",
         registerBy: registerBy ?? "",
+        fecha_pago: paymentRegistrationDate(),
         fecha_boleta,
         monto_aplicado: pagoEspecialCuota.montoAplicado,
         observaciones,
@@ -840,6 +859,7 @@ export const insertPayment = async (
             banco_id: banco_id ?? 0,
             numeroAutorizacion: numeroAutorizacion ?? "",
             registerBy: registerBy ?? "",
+            fecha_pago: paymentRegistrationDate(),
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
             observaciones,
@@ -862,6 +882,7 @@ export const insertPayment = async (
             banco_id: banco_id ?? 0,
             numeroAutorizacion: numeroAutorizacion ?? "",
             registerBy: registerBy ?? "",
+            fecha_pago: paymentRegistrationDate(),
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
             observaciones,
@@ -890,6 +911,7 @@ export const insertPayment = async (
           banco_id: banco_id ?? 0,
           numeroAutorizacion: numeroAutorizacion ?? "",
           registerBy: registerBy ?? "",
+          fecha_pago: paymentRegistrationDate(),
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
           observaciones,
@@ -1497,21 +1519,7 @@ export const insertPayment = async (
         const paymentFalse = existingPago
           ? existingPago.pago.paymentFalse
           : false;
-        const guatemalaTimeString = new Date().toLocaleString("en-US", {
-          timeZone: "America/Guatemala",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: false,
-        });
-
-        // Convertir "11/22/2025, 17:07:09" a Date object
-        const [datePart, timePart] = guatemalaTimeString.split(", ");
-        const [month, day, year] = datePart.split("/");
-        const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+        const fechaGuatemala = paymentRegistrationDate();
 
         // Mora y otros solo van en la primera cuota (si ya hubo completas antes, no se repiten)
         const esPrimeraCuota = cuotas_completas === 0 && cuotas_parciales === 0;
@@ -1686,21 +1694,7 @@ export const insertPayment = async (
               cuotas_completas++;
 
 
-              const guatemalaTimeString = new Date().toLocaleString("en-US", {
-                timeZone: "America/Guatemala",
-                year: "numeric",
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: false,
-              });
-              const [datePart, timePart] = guatemalaTimeString.split(", ");
-              const [month, day, year] = datePart.split("/");
-              const fechaGuatemala = new Date(
-                `${year}-${month}-${day}T${timePart}`
-              );
+              const fechaGuatemala = paymentRegistrationDate();
 
               // El INSERT de esta fila y el marcado del ajuste (si aplica a la
               // cuota 1) van en una sola transacción: si el marcado falla, el
@@ -1856,23 +1850,7 @@ export const insertPayment = async (
                 disponible_para_cuotasPosteriores.plus(disponible);
 
               cuotas_parciales++;
-              const guatemalaTimeString = new Date().toLocaleString("en-US", {
-                timeZone: "America/Guatemala",
-                year: "numeric",
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: false,
-              });
-
-              // Convertir "11/22/2025, 17:07:09" a Date object
-              const [datePart, timePart] = guatemalaTimeString.split(", ");
-              const [month, day, year] = datePart.split("/");
-              const fechaGuatemala = new Date(
-                `${year}-${month}-${day}T${timePart}`
-              );
+              const fechaGuatemala = paymentRegistrationDate();
 
 
 
@@ -2153,21 +2131,7 @@ export const insertPayment = async (
         );
       }
 
-      const guatemalaTimeString = new Date().toLocaleString("en-US", {
-        timeZone: "America/Guatemala",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      });
-
-      // Convertir "11/22/2025, 17:07:09" a Date object
-      const [datePart, timePart] = guatemalaTimeString.split(", ");
-      const [month, day, year] = datePart.split("/");
-      const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+      const fechaGuatemala = paymentRegistrationDate();
       const pagoConvenioParaFila = estamparPagoConvenio();
       const pagoData = {
         credito_id,
@@ -2408,6 +2372,7 @@ export const insertPayment = async (
           banco_id: banco_id ?? 0,
           numeroAutorizacion: numeroAutorizacion ?? "",
           registerBy: registerBy ?? "",
+          fecha_pago: paymentRegistrationDate(),
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
           pagoConvenio: 0,
@@ -2542,6 +2507,7 @@ interface InsertarPagoParams {
   banco_id: number;
   numeroAutorizacion: string;
   registerBy: string;
+  fecha_pago?: Date;
   fecha_boleta?: string;
   monto_aplicado: number;
   pagoConvenio?: number;
@@ -2560,6 +2526,7 @@ export async function insertarPago({
   banco_id,
   numeroAutorizacion,
   registerBy,
+  fecha_pago,
   fecha_boleta,
   monto_aplicado,
   pagoConvenio = 0,
@@ -2681,6 +2648,7 @@ export async function insertarPago({
       total_restante: "0",
 
       llamada: "",
+      fecha_pago,
 
       renuevo_o_nuevo: "renuevo",
 

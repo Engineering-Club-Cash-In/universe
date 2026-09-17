@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { and, eq, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
-import { tokenTransactionSchema, type TokenTransaction } from "../nexa/schemas";
+import { and, eq, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { receivedTokenTransactionSchema, type ReceivedTokenTransaction } from "../nexa/schemas";
 import type { ApplicationClaim } from "../payments/application-worker";
 import type { MockCreditLedger } from "../payments/mock-ledger";
 import type { ReviewClaim, ReviewWorkerRepository } from "../payments/review-worker";
@@ -57,20 +57,31 @@ export class DbTokenUserRepository implements TokenUserRepository, TokenUserCrea
 export class DbPaymentTransactionRepository implements PaymentTransactionRepository {
   constructor(private readonly db: NexaDb) {}
 
-  async upsertReceived(transaction: TokenTransaction) {
-    transaction = tokenTransactionSchema.parse(transaction);
+  async upsertReceived(input: ReceivedTokenTransaction) {
+    const transaction = receivedTokenTransactionSchema.parse(input);
     const reference = String(transaction.reference);
-    const payloadFingerprint = fingerprint({ ...transaction, reference });
+    const tokenDate = transaction.tokenDate ?? "";
+    const payloadFingerprint = fingerprint({ ...transaction, reference, tokenDate });
     const sanitizedPayload = {
       reference,
       amount: transaction.amount,
       currency: transaction.currency,
-      tokenDate: transaction.tokenDate,
+      ...(tokenDate ? { tokenDate } : {}),
       tokenIdentifier: transaction.tokenIdentifier,
       tokenPrefix: transaction.tokenPrefix,
       wasReturn: transaction.wasReturn,
       transactionId: transaction.transactionId,
     };
+    const canEnrich = sql`
+      ${nexaPaymentTransactions.tokenDate} = ''
+      AND excluded.token_date <> ''
+      AND ${nexaPaymentTransactions.amount} = excluded.amount
+      AND ${nexaPaymentTransactions.currency} = excluded.currency
+      AND ${nexaPaymentTransactions.tokenIdentifier} = excluded.token_identifier
+      AND ${nexaPaymentTransactions.tokenPrefix} = excluded.token_prefix
+      AND ${nexaPaymentTransactions.wasReturn} = excluded.was_return
+      AND ${nexaPaymentTransactions.transactionId} = excluded.transaction_id
+    `;
     const [stored] = await this.db.insert(nexaPaymentTransactions).values({
       reference,
       amount: String(transaction.amount),
@@ -79,17 +90,26 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       currency: transaction.currency,
       account: "",
       token: "",
-      tokenDate: transaction.tokenDate,
+      tokenDate,
       tokenIdentifier: transaction.tokenIdentifier,
       tokenName: "",
       tokenPrefix: transaction.tokenPrefix,
       wasReturn: transaction.wasReturn,
       transactionId: transaction.transactionId,
+      processingStatus: tokenDate ? "RECEIVED" : "MANUAL_REVIEW",
+      failureReason: tokenDate ? null : "missing_token_date",
       rawPayload: sanitizedPayload,
       payloadFingerprint,
     }).onConflictDoUpdate({
       target: nexaPaymentTransactions.reference,
-      set: { reference: sql`excluded.reference` },
+      set: {
+        tokenDate: sql`CASE WHEN ${canEnrich} THEN excluded.token_date ELSE ${nexaPaymentTransactions.tokenDate} END`,
+        processingStatus: sql`CASE WHEN ${canEnrich} AND ${nexaPaymentTransactions.failureReason} = 'missing_token_date' THEN 'RECEIVED'::nexa_processing_status ELSE ${nexaPaymentTransactions.processingStatus} END`,
+        failureReason: sql`CASE WHEN ${canEnrich} AND ${nexaPaymentTransactions.failureReason} = 'missing_token_date' THEN NULL ELSE ${nexaPaymentTransactions.failureReason} END`,
+        rawPayload: sql`CASE WHEN ${canEnrich} THEN excluded.raw_payload ELSE ${nexaPaymentTransactions.rawPayload} END`,
+        payloadFingerprint: sql`CASE WHEN ${canEnrich} THEN excluded.payload_fingerprint ELSE ${nexaPaymentTransactions.payloadFingerprint} END`,
+        updatedAt: sql`CASE WHEN ${canEnrich} THEN NOW() ELSE ${nexaPaymentTransactions.updatedAt} END`,
+      },
     }).returning({
       id: nexaPaymentTransactions.id,
       reference: nexaPaymentTransactions.reference,
@@ -97,6 +117,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       token: nexaPaymentTransactions.token,
       transactionId: nexaPaymentTransactions.transactionId,
       currency: nexaPaymentTransactions.currency,
+      tokenDate: nexaPaymentTransactions.tokenDate,
       tokenIdentifier: nexaPaymentTransactions.tokenIdentifier,
       tokenPrefix: nexaPaymentTransactions.tokenPrefix,
       wasReturn: nexaPaymentTransactions.wasReturn,
@@ -105,16 +126,21 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       created: sql<boolean>`xmax = 0`,
     });
 
-    const storedFingerprint = fingerprint({
+    const storedBaseFingerprint = fingerprint({
       reference: stored.reference,
       amount: stored.amount,
       currency: paymentCurrency(stored.currency),
+      tokenDate: "",
       tokenIdentifier: stored.tokenIdentifier,
       tokenPrefix: stored.tokenPrefix,
       wasReturn: paymentReturn(stored.wasReturn),
       transactionId: stored.transactionId,
     });
-    if (storedFingerprint !== payloadFingerprint) {
+    const incomingBaseFingerprint = fingerprint({ ...transaction, reference, tokenDate: "" });
+    if (
+      storedBaseFingerprint !== incomingBaseFingerprint ||
+      (tokenDate && stored.tokenDate && stored.tokenDate !== tokenDate)
+    ) {
       throw new Error(`Incompatible replay for reference ${reference}`);
     }
 
@@ -143,9 +169,12 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       WITH candidate AS (
         SELECT id
         FROM nexa_payment_transactions
-        WHERE processing_status = 'RECEIVED'
-          OR (processing_status = 'FAILED' AND next_attempt_at <= ${now})
-          OR (processing_status = 'APPLYING' AND lease_until <= ${now})
+        WHERE token_date <> ''
+          AND (
+            processing_status = 'RECEIVED'
+            OR (processing_status = 'FAILED' AND next_attempt_at <= ${now})
+            OR (processing_status = 'APPLYING' AND lease_until <= ${now})
+          )
         ORDER BY created_at, id
         FOR UPDATE SKIP LOCKED
         LIMIT 1
@@ -164,6 +193,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         payment.reference,
         payment.amount,
         payment.currency,
+        payment.token_date AS "tokenDate",
         payment.token_identifier AS "tokenIdentifier",
         payment.token_prefix AS "tokenPrefix",
         payment.transaction_id AS "transactionId",
@@ -176,6 +206,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       reference: String(row.reference),
       amount: Number(row.amount),
       currency: paymentCurrency(row.currency),
+      tokenDate: String(row.tokenDate),
       tokenIdentifier: String(row.tokenIdentifier),
       tokenPrefix: String(row.tokenPrefix),
       transactionId: String(row.transactionId),
@@ -250,7 +281,6 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
 
   async listReconciliationAlerts(now: Date, staleBefore: Date) {
     const rows = await reconciliationQuery(this.db, or(
-      eq(nexaPaymentTransactions.processingStatus, "MANUAL_REVIEW"),
       and(
         eq(nexaPaymentTransactions.processingStatus, "FAILED"),
         or(
@@ -262,13 +292,27 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
     ));
     return rows.map((row) => ({
       ...toSafeReconciliationRow(row),
-      alertType: row.processingStatus === "MANUAL_REVIEW"
-        ? "MANUAL_REVIEW" as const
-        : row.processingStatus === "REVIEW_PENDING"
-          ? "REVIEW_PENDING_AGED" as const
-          : row.nextAttemptAt && row.nextAttemptAt <= now
-            ? "FAILED_DUE" as const
-            : "FAILED_AGED" as const,
+      alertType: row.processingStatus === "REVIEW_PENDING"
+        ? "REVIEW_PENDING_AGED" as const
+        : row.nextAttemptAt && row.nextAttemptAt <= now
+          ? "FAILED_DUE" as const
+          : "FAILED_AGED" as const,
+    }));
+  }
+
+  async listManualReviewAlerts(staleBefore: Date) {
+    const rows = await reconciliationQuery(this.db, or(
+      and(eq(nexaPaymentTransactions.tokenDate, ""), lte(nexaPaymentTransactions.updatedAt, staleBefore)),
+      and(
+        eq(nexaPaymentTransactions.processingStatus, "MANUAL_REVIEW"),
+        or(isNull(nexaPaymentTransactions.failureReason), ne(nexaPaymentTransactions.failureReason, "missing_token_date")),
+      ),
+    ));
+    return rows.map((row) => ({
+      ...toSafeReconciliationRow(row),
+      alertType: row.failureReason === "missing_token_date"
+        ? "MISSING_TOKEN_DATE" as const
+        : "MANUAL_REVIEW" as const,
     }));
   }
 }
@@ -376,6 +420,7 @@ type PaymentFingerprintInput = {
   reference: string;
   amount: string | number;
   currency: "GTQ" | "USD";
+  tokenDate: string;
   tokenIdentifier: string;
   tokenPrefix: string;
   wasReturn: 0 | 1;
@@ -387,6 +432,7 @@ function fingerprint(input: PaymentFingerprintInput) {
     input.reference,
     Number(input.amount).toFixed(2),
     input.currency,
+    input.tokenDate,
     input.tokenIdentifier,
     input.tokenPrefix,
     input.wasReturn,

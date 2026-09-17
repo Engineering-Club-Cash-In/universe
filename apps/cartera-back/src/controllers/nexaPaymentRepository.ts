@@ -28,6 +28,7 @@ export async function claimNexaPaymentEvent(
   body: NexaPaymentBody,
   context: NexaPaymentContext,
 ): Promise<NexaClaim> {
+  const eventFingerprint = context.eventFingerprint ?? context.payloadHash;
   const [claimRow] = (await client.query(
     `WITH claimed_nonce AS (
        INSERT INTO cartera.nexa_payment_nonces (nonce)
@@ -51,7 +52,7 @@ export async function claimNexaPaymentEvent(
       body.creditoId,
       body.amount,
       body.currency,
-      context.payloadHash,
+      eventFingerprint,
     ],
   )).rows;
   if (!claimRow?.nonce_claimed) return { kind: "replay" };
@@ -72,24 +73,25 @@ export async function claimNexaPaymentEvent(
     amount: body.amount,
     currency: body.currency,
     payloadHash: context.payloadHash,
+    compatiblePayloadHashes: [eventFingerprint, context.legacyPayloadHash].filter((value): value is string => Boolean(value)),
   });
   if (event?.status === "failed" && claim.kind === "retry") {
     const transitioned = await client.query(
       `UPDATE cartera.nexa_payment_events
-          SET status = 'processing', error = NULL, updated_at = NOW()
+          SET status = 'processing', payload_hash = $2, error = NULL, updated_at = NOW()
         WHERE id = $1 AND status = 'failed'
         RETURNING id`,
-      [event.id],
+      [event.id, eventFingerprint],
     );
     if (!transitioned.rows[0]) throw new Error("nexa retry fence transition failed");
   }
   if (event?.status === "processing" && claim.kind === "manual_review") {
     const transitioned = await client.query(
       `UPDATE cartera.nexa_payment_events
-          SET status = 'manual_review', error = 'payment_outcome_uncertain', updated_at = NOW()
+          SET status = 'manual_review', payload_hash = $2, error = 'payment_outcome_uncertain', updated_at = NOW()
         WHERE id = $1 AND status = 'processing'
         RETURNING id`,
-      [event.id],
+      [event.id, eventFingerprint],
     );
     if (!transitioned.rows[0]) throw new Error("nexa processing fence transition failed");
   }

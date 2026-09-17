@@ -19,6 +19,7 @@ describe("mock cartera ledger", () => {
         reference: "4617309",
         amount: 50,
         currency: "GTQ",
+        tokenDate: "2026-09-08T12:00:00Z",
         transactionId: "",
       },
     });

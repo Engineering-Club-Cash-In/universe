@@ -1,4 +1,4 @@
-import type { TokenTransaction } from "../nexa/schemas";
+import type { ReceivedTokenTransaction } from "../nexa/schemas";
 
 export type StoredPaymentTransaction = {
   id: number;
@@ -8,7 +8,7 @@ export type StoredPaymentTransaction = {
 };
 
 export interface PaymentTransactionRepository {
-  upsertReceived(transaction: TokenTransaction): Promise<StoredPaymentTransaction>;
+  upsertReceived(transaction: ReceivedTokenTransaction): Promise<StoredPaymentTransaction>;
   markApplied(id: number, paymentId: number): Promise<void>;
   markRejected(id: number, reason: string): Promise<void>;
   markFailed(id: number, reason: string): Promise<void>;

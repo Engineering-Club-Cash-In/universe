@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { tokenDateSchema } from "../nexa/schemas";
 export type CarteraApplyPaymentResult =
   | { status: "APPLIED"; paymentId: number; idempotent?: boolean }
   | { status: "REJECTED"; reason: string };
@@ -8,6 +9,7 @@ type CarteraTransaction = {
   reference: string | number;
   amount: number;
   currency: "GTQ" | "USD";
+  tokenDate: string;
   transactionId?: string | number | null;
 };
 
@@ -69,6 +71,7 @@ export class HttpCarteraPaymentClient implements CarteraPaymentClient {
       creditoId: input.creditoId,
       amount: formatAmount(input.transaction.amount),
       currency: "GTQ",
+      tokenDate: tokenDateSchema.parse(input.transaction.tokenDate),
       ...(transactionId
         ? { transactionId }
         : {}),
@@ -96,9 +99,9 @@ export class HttpCarteraPaymentClient implements CarteraPaymentClient {
       const error = await response.json()
         .then((body: unknown) => safeErrorResponseSchema.safeParse(body))
         .catch(() => undefined);
-      const retryableCode = error?.success && ["invalid_authentication", "configuration_error"].includes(error.data.error);
+      const retryableCode = error?.success && ["invalid_authentication", "configuration_error", "invalid_body"].includes(error.data.error);
       const uncertainCode = error?.success && ["payment_amount_mismatch", "payment_outcome_uncertain"].includes(error.data.error);
-      if (uncertainCode || [401, 408, 429].includes(response.status) || response.status >= 500 || (response.status === 403 && (!error?.success || retryableCode))) {
+      if (uncertainCode || retryableCode || [401, 408, 429].includes(response.status) || response.status >= 500 || (response.status === 403 && !error?.success)) {
         throw new CarteraPaymentRequestError(`Cartera payment request failed: HTTP ${status}`);
       }
       return {

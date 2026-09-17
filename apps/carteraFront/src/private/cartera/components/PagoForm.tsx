@@ -225,8 +225,21 @@ export function PagoForm() {
         const cuotaConvenio = Number(convenioActivoInfo?.cuotaConvenioAPagar) || 0;
         const saldoAFavor = Number(dataCredito?.usuario?.saldo_a_favor) || 0;
 
-        // Total disponible = Boleta + Saldo a Favor
-        let montoRestante = montoBoleta;
+        /**
+         * El abono DIRECTO a capital sale primero, antes que todo lo demás.
+         *
+         * Es lo que hace el backend: `calcularMontoEfectivo` lo resta de la
+         * boleta y recién sobre ese resto corre la cascada otros → mora →
+         * rubros → convenio → cuotas. Acá se partía de la boleta entera, así que
+         * con "Abonar todo a Capital" —que manda la boleta completa a capital—
+         * este desglose seguía anunciando que una parte se iba a los rubros
+         * mientras el backend no les dejaba un quetzal. El asesor confirmaba una
+         * pantalla y pasaba otra cosa.
+         */
+        const abonoCapitalDirecto = Number(formik.values.abono_directo_capital) || 0;
+
+        // Total disponible = Boleta − abono directo a capital
+        let montoRestante = Math.max(0, montoBoleta - abonoCapitalDirecto);
 
         const distribucion: { concepto: string; monto: number }[] = [];
 

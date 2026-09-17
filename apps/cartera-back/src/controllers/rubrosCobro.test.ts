@@ -389,17 +389,29 @@ describe("totalReclamadoPorPago", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("aplicarRubrosDelPago — la boleta tiene que seguir viva", () => {
-  it("no aplica nada si el pago está marcado como falso", async () => {
-    // Primera consulta: el pago. Si el guard funciona, corta ahí y no llega a
-    // pedir los reclamos — con la cola agotada, seguir rechazaría.
+  it("ABORTA si el pago está marcado como falso, no lo saltea en silencio", async () => {
+    // Devolver `[]` no alcanzaba: quien llama sigue de largo, marca el pago como
+    // aplicado y le aplica capital y cuotas igual. Y el cargo del rubro YA está
+    // sumado en `pagos_credito.otros` desde que se registró la boleta, así que
+    // el saldo del rubro queda intacto mientras los reportes muestran plata
+    // cobrada que nadie le acreditó. Tirar acá tumba la transacción entera, que
+    // es lo único que deja los dos lados diciendo lo mismo.
     const ej = ejecutorConCola([{ paymentFalse: true }]);
 
-    expect(await aplicarRubrosDelPago(77, ej)).toEqual([]);
+    const error = await aplicarRubrosDelPago(77, ej).catch((e) => e);
+
+    expect(error).toBeInstanceOf(RubroError);
+    expect((error as InstanceType<typeof RubroError>).status).toBe(409);
     expect(ej.escrituras).toEqual([]);
   });
 
-  it("si el pago desapareció tampoco aplica", async () => {
+  it("sin fila de pago sale sin escribir, y sin tirar", async () => {
+    // Acá NO se aborta, a diferencia de la boleta falsa: sin fila de pago
+    // tampoco puede haber reclamos (lo impide la FK), así que no hay nada que
+    // salvar. Tirar convertiría en 409 a una docena de llamadores cuyos pagos
+    // son legítimos y simplemente no tienen rubros.
     const ej = ejecutorConCola([]);
+
     expect(await aplicarRubrosDelPago(77, ej)).toEqual([]);
     expect(ej.escrituras).toEqual([]);
   });

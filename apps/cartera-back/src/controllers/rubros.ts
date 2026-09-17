@@ -2085,7 +2085,40 @@ export async function aplicarRubrosDelPago(
     // el deadlock que ya costó una vez.
     .for("update");
 
-  if (!pago || pago.paymentFalse) return [];
+  if (!pago) {
+    // Sin fila de pago no hay nada que aplicar, y tampoco puede haber reclamos:
+    // la FK de `rubros_pagos.pago_id` lo impide. Se sale en silencio —con un
+    // log, porque si alguna vez pasa es corrupción— y NO se tira: hacerlo
+    // convertiría en 409 a una docena de llamadores cuyos pagos son legítimos y
+    // simplemente no tienen rubros, sin ganar nada a cambio.
+    console.warn(
+      `[aplicarRubrosDelPago] El pago ${pago_id} no existe; no hay rubros que aplicar.`
+    );
+    return [];
+  }
+
+  if (pago.paymentFalse) {
+    // ABORTA, no devuelve vacío. Saltearlo en silencio dejaba el peor estado de
+    // los tres: quien llama sigue de largo, marca el pago como aplicado y le
+    // aplica capital y cuotas igual — o sea que la boleta declarada falsa se
+    // aplica entera y lo único que se perdona es el rubro.
+    //
+    // Y encima queda descuadrado: `pagos_credito.otros` YA trae el cargo del
+    // rubro desde que se registró la boleta (lo suma `commitRubros`), así que el
+    // saldo del rubro sigue intacto mientras los reportes muestran plata cobrada
+    // que nadie le acreditó. Tirar acá tumba la transacción entera, que es lo
+    // único que deja los dos lados diciendo lo mismo.
+    //
+    // OJO: esto NO arregla que `/aplicar-pago` aplique boletas falsas en
+    // general. Esa ruta no tiene el chequeo de `paymentFalse` que `revalidatePayment`
+    // sí tiene, así que una boleta falsa SIN rubros se sigue aplicando entera.
+    // Es un agujero más grande y más viejo que este módulo, y cerrarlo cambia el
+    // comportamiento de todos los pagos de la empresa: va aparte.
+    throw new RubroError(
+      409,
+      `La boleta #${pago_id} está marcada como falsa: no se puede aplicar. Si la invalidación fue un error, revertila antes de volver a aplicar el pago.`
+    );
+  }
 
   const reclamos = await ejecutor
     .select({

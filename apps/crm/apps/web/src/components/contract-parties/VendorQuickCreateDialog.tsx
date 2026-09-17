@@ -72,6 +72,8 @@ export function VendorQuickCreateDialog({
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: solo al abrir
 	useEffect(() => {
+		// Una búsqueda de la apertura anterior no debe llenar esta
+		lookup.cancelar();
 		if (!open) return;
 		setDpi(initialDpi ?? "");
 		setNombre("");

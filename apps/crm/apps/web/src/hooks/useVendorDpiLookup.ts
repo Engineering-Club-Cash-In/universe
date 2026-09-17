@@ -69,9 +69,15 @@ export function useVendorDpiLookup(
 		return true;
 	};
 
+	/** Descartar la búsqueda en curso (al abrir o cerrar un formulario). */
+	const cancelar = () => {
+		dpiVigente.current = null;
+	};
+
 	return {
 		buscar,
 		dpiEditado,
+		cancelar,
 		/** El DPI cuyos datos están aplicados (o en camino). */
 		dpiVigente: () => dpiVigente.current,
 		isPending: mutation.isPending,

@@ -255,6 +255,8 @@ function VendorsPage() {
 			address: vendor.address || "",
 			gender: vendor.gender ?? undefined,
 		});
+		// Otro vendedor: una búsqueda pendiente del anterior ya no aplica
+		editLookup.cancelar();
 		// El nombre y género guardados son de este DPI
 		editDatosDe.current =
 			vendor.vendorType === "individual" ? soloDigitosDpi(vendor.dpi) : null;
@@ -288,7 +290,13 @@ function VendorsPage() {
 					</p>
 				</div>
 
-				<Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+				<Dialog
+					open={isCreateOpen}
+					onOpenChange={(open) => {
+						createLookup.cancelar();
+						setIsCreateOpen(open);
+					}}
+				>
 					<DialogTrigger asChild>
 						<Button>
 							<Plus className="mr-2 h-4 w-4" />
@@ -629,7 +637,13 @@ function VendorsPage() {
 			</Card>
 
 			{/* Edit Dialog */}
-			<Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+			<Dialog
+				open={isEditOpen}
+				onOpenChange={(open) => {
+					editLookup.cancelar();
+					setIsEditOpen(open);
+				}}
+			>
 				<DialogContent className="max-h-[90vh] overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Editar Vendedor</DialogTitle>

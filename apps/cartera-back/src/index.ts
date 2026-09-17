@@ -55,7 +55,8 @@ const app = new Elysia()
   .use(routers.aseguradorasRouter)
   .use(routers.bucketsRouter)
   .use(routers.cuotasRouter)
-  .use(routers.modalidadFacturacionRouter);
+  .use(routers.modalidadFacturacionRouter)
+  .use(routers.pagaloSupervisionRouter);
 
 // ═══════════════════════════════════════════════════════════════════════════
 //   🚨 FIXME(COBROS-02): REVERTIR ESTA LÍNEA ANTES DE MERGEAR A DEVELOP 🚨

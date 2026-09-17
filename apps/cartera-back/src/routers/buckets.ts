@@ -16,6 +16,7 @@ import {
 import { enviarARecuperacionVehiculo } from "../controllers/buckets/recuperacionVehiculo";
 import { getPoolPorAsesor } from "../controllers/buckets/poolPorAsesor";
 import { getSifcosPoolAutoritativos } from "../controllers/buckets/sifcosPoolAutoritativos";
+import { getAsesorPorSifco } from "../controllers/buckets/asesorPorSifco";
 import { getAsignacionesPoolPorSifco } from "../controllers/buckets/asignacionesPoolPorSifco";
 import { getCargaPorAsesorBucket } from "../controllers/buckets/cargaAsesorBucket";
 import { actualizarCapacidadAsesorBucket } from "../controllers/buckets/actualizarAsesorBucket";
@@ -315,6 +316,43 @@ export const bucketsRouter = new Elysia()
         return {
           success: false,
           message: "[ERROR] No se pudo obtener las asignaciones del pool",
+          error: String(err),
+        };
+      }
+    },
+    {
+      query: t.Object({ sifcos: t.String() }),
+    },
+  )
+
+  // EL asesor dueño de cada crédito (creditos.asesor_id), en bulk. Contraparte
+  // de /buckets/pool-asignaciones: aquel da el POOL de elegibles del bucket
+  // (varios por crédito, "quién PUEDE atenderlo"); este da el único que lo
+  // lleva hoy. El tope es más alto porque lo consume la exportación de la
+  // supervisión Págalo, que pagina de a 1000 filas.
+  .get(
+    "/buckets/asesor-por-sifco",
+    async ({ query, set, user }: any) => {
+      if (!requireBucketsRole(user, set)) return NO_AUTORIZADO;
+      const sifcos = [
+        ...new Set<string>(
+          String(query.sifcos)
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        ),
+      ];
+      if (sifcos.length === 0 || sifcos.length > 1000) {
+        set.status = 400;
+        return { success: false, message: "[ERROR] sifcos debe contener entre 1 y 1000 valores" };
+      }
+      try {
+        return await getAsesorPorSifco({ sifcos });
+      } catch (err) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "[ERROR] No se pudo obtener el asesor de los créditos",
           error: String(err),
         };
       }

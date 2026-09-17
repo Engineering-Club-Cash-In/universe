@@ -41,11 +41,17 @@
 // entero se rechaza si CUALQUIER crédito en devolución tiene saldo residual
 // != 0 o liquidaciones pendientes, con set.status=400.
 //
-// Créditos legacy sin fila espejo (Point 6):
-// Según devolucionCompletada.ts:76-81, si el crédito no tiene fila en el espejo,
-// exitInvestor limpia al inversionista vía el padre y lo mueve a CUBE.
-// Por ende, no tener fila en el espejo NO es motivo de rechazo por saldo != 0,
-// a menos que tenga abonos/pagos pendientes de liquidación.
+// Créditos en devolución sin fila espejo (P1 guard):
+// Al igual que en investor.ts:5653-5669, un crédito en devolución solo es válido
+// si tiene fila en el espejo Y su saldo es exactamente 0. Si no tiene fila espejo,
+// no hay evidencia de que el inversionista haya sido pagado; se rechaza para
+// revisión manual en vez de asumir saldo cero.
+//
+// Lotes mixtos en activación automática (P2 guard):
+// Cuando el guard se activa automáticamente (sin motivo explícito), la exigencia
+// de saldo en 0 y pendientes solo aplica a los créditos en VERIFICADO. Los créditos
+// ordinarios transfieren válidamente su saldo a CUBE. Si cualquiera de los créditos
+// en VERIFICADO es inválido, se rechaza el lote completo (todo o nada).
 // ============================================================================
 
 import { and, eq, inArray, ne } from "drizzle-orm";
@@ -185,23 +191,32 @@ export const exitInvestorHandler = async (ctx: any, deps?: Deps) => {
     creditoIds.length > 0
   ) {
     const estadosDevolucion = await obtenerEstadosDevolucion(creditoIds);
-    const tieneCreditoVerificado = Array.from(estadosDevolucion.values()).some(
-      (estado) => estado === "VERIFICADO"
+    const creditosVerificados = creditoIds.filter(
+      (id: number) => estadosDevolucion.get(id) === "VERIFICADO"
     );
+    const tieneCreditoVerificado = creditosVerificados.length > 0;
 
     if (motivo === "devolucion_verificado" || tieneCreditoVerificado) {
+      // Cuando motivo === "devolucion_verificado", el llamador declara explícitamente que el lote
+      // entero es de devolución, por lo que se valida todo el lote.
+      // Cuando el guard se activa automáticamente (sin motivo), solo se valida que los créditos
+      // en estado VERIFICADO tengan su devolución completa (saldo en 0 y sin pendientes),
+      // permitiendo que los créditos ordinarios transfieran legítimamente su capital a CUBE.
+      const creditosAValidar =
+        motivo === "devolucion_verificado" ? creditoIds : creditosVerificados;
+
       const [montoPorCredito, creditosConPendientes] = await Promise.all([
-        obtenerMontoAportadoEspejo(inversionista_id, creditoIds),
-        tienePendientesLiquidacion(inversionista_id, creditoIds),
+        obtenerMontoAportadoEspejo(inversionista_id, creditosAValidar),
+        tienePendientesLiquidacion(inversionista_id, creditosAValidar),
       ]);
 
-      const creditoIdsInvalidos = creditoIds.filter((id: number) => {
+      const creditoIdsInvalidos = creditosAValidar.filter((id: number) => {
         if (creditosConPendientes.has(id)) return true;
         const saldo = montoPorCredito.get(id);
-        // Point 6 fix: si no tiene fila en el espejo (anomalía de créditos legacy de producción),
-        // devolucionCompletada.ts:76-81 permite limpiarlos vía el padre si no tiene pendientes de liquidación.
-        // Solo falla si la fila espejo EXISTE y su saldo es distinto de 0.
-        if (saldo !== undefined && saldo !== 0) return true;
+        // P1 guard: un crédito en devolución solo es válido si tiene fila en el espejo
+        // Y su saldo es exactamente 0. Si no tiene fila espejo (saldo === undefined)
+        // o su saldo es distinto de 0, queda en revisión manual (igual que investor.ts:5653).
+        if (saldo !== 0) return true;
         return false;
       });
 

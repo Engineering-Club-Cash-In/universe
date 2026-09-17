@@ -225,28 +225,11 @@ describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_
     expect(ctx.set.status).toBe(400);
   });
 
-  it("crédito legacy sin fila en el espejo (Point 6 fix): pasa el guard si no tiene liquidaciones pendientes (permite limpiar vía padre)", async () => {
-    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
-      { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [{ credito_id: 999 }] },
-      {}, // sin fila espejo
-      [],
-      { 999: "VERIFICADO" }
-    );
-
-    const ctx = { body: { inversionista_id: 13, creditos: [999] }, set: { status: 200 } };
-    const res = await exitInvestorHandler(ctx, deps as any);
-
-    expect(res.success).toBe(true);
-    expect(res.creditos_invalidos).toBeUndefined();
-    expect(getExitInvestorLlamadoCon()).toEqual({ inversionista_id: 13, creditos: [999] });
-    expect(ctx.set.status).toBe(200);
-  });
-
-  it("crédito legacy sin fila en el espejo pero con liquidaciones pendientes: se rechaza con 400", async () => {
+  it("crédito en VERIFICADO sin fila en el espejo (P1 guard): se rechaza con 400 para revisión manual (no asume saldo en 0)", async () => {
     const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
       { success: true, creditos_procesados: [] },
-      {}, // sin fila espejo
-      [999], // pendientes de liquidación
+      {}, // sin fila espejo (saldo === undefined)
+      [],
       { 999: "VERIFICADO" }
     );
 
@@ -255,6 +238,40 @@ describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_
 
     expect(res.success).toBe(false);
     expect(res.creditos_invalidos).toEqual([999]);
+    expect(getExitInvestorLlamadoCon()).toBeNull();
+    expect(ctx.set.status).toBe(400);
+  });
+
+  it("SIN motivo, lote mixto con VERIFICADO en 0 y crédito ordinario con saldo (P2 guard): pasa exitInvestor porque solo el VERIFICADO exige saldo 0", async () => {
+    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
+      { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [{ credito_id: 78 }, { credito_id: 200 }] },
+      { 78: 0, 200: 10000 }, // 78 en 0 (devolución), 200 con saldo (crédito ordinario para CUBE)
+      [],
+      { 78: "VERIFICADO", 200: "NO_APLICA" }
+    );
+
+    const ctx = { body: { inversionista_id: 13, creditos: [78, 200] }, set: { status: 200 } };
+    const res = await exitInvestorHandler(ctx, deps as any);
+
+    expect(res.success).toBe(true);
+    expect(res.creditos_invalidos).toBeUndefined();
+    expect(ctx.set.status).toBe(200);
+    expect(getExitInvestorLlamadoCon()).toEqual({ inversionista_id: 13, creditos: [78, 200] });
+  });
+
+  it("SIN motivo, lote mixto con VERIFICADO inválido (saldo != 0): rechaza el lote completo (todo o nada)", async () => {
+    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
+      { success: true, creditos_procesados: [] },
+      { 78: 1500, 200: 10000 }, // 78 en devolución pero con saldo pendiente
+      [],
+      { 78: "VERIFICADO", 200: "NO_APLICA" }
+    );
+
+    const ctx = { body: { inversionista_id: 13, creditos: [78, 200] }, set: { status: 200 } };
+    const res = await exitInvestorHandler(ctx, deps as any);
+
+    expect(res.success).toBe(false);
+    expect(res.creditos_invalidos).toEqual([78]);
     expect(getExitInvestorLlamadoCon()).toBeNull();
     expect(ctx.set.status).toBe(400);
   });

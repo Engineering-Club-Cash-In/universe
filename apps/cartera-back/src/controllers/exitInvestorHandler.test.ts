@@ -106,7 +106,8 @@ describe("exitInvestorHandler", () => {
 describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_verificado)", () => {
   function makeDepsConGuard(
     exitInvestorResultado: any,
-    montoPorCredito: Record<number, number>
+    montoPorCredito: Record<number, number>,
+    creditosConPendientes: number[] = []
   ) {
     let exitInvestorLlamadoCon: any = null;
     return {
@@ -121,6 +122,8 @@ describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_
         },
         obtenerMontoAportadoEspejo: async (_inversionista_id: number, creditoIds: number[]) =>
           new Map(creditoIds.map((id) => [id, montoPorCredito[id]])),
+        tienePendientesLiquidacion: async (_inversionista_id: number, _creditoIds: number[]) =>
+          new Set(creditosConPendientes),
       },
       getExitInvestorLlamadoCon: () => exitInvestorLlamadoCon,
     };
@@ -206,6 +209,25 @@ describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_
 
     expect(res.success).toBe(false);
     expect(res.creditos_invalidos).toEqual([141]);
+    expect(getExitInvestorLlamadoCon()).toBeNull();
+    expect(ctx.set.status).toBe(400);
+    expect(marcarLlamadoCon).toBeNull();
+  });
+
+  it("con motivo=devolucion_verificado y abonos/pagos pendientes de liquidar: rechaza el lote entero con 400 aunque el saldo esté en 0", async () => {
+    // Al calcular pagos, el saldo en el espejo ya baja a 0 antes de la liquidación,
+    // pero el dinero todavía no se liquida. Salir en esa ventana rompería la liquidación.
+    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
+      { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [] },
+      { 78: 0 },
+      [78] // credito 78 tiene abonos_capital o pagos espejo pendientes de liquidar
+    );
+
+    const ctx = { body: { inversionista_id: 13, creditos: [78], motivo: "devolucion_verificado" }, set: { status: 200 } };
+    const res = await exitInvestorHandler(ctx, deps as any);
+
+    expect(res.success).toBe(false);
+    expect(res.creditos_invalidos).toEqual([78]);
     expect(getExitInvestorLlamadoCon()).toBeNull();
     expect(ctx.set.status).toBe(400);
     expect(marcarLlamadoCon).toBeNull();

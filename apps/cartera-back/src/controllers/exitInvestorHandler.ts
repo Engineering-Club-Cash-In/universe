@@ -45,13 +45,24 @@
 // el batch entero se rechaza si CUALQUIER crédito no tiene el espejo en 0,
 // con set.status=400 para que el caller lo note por código de estado y no
 // solo por `success:false` en el body.
+//
+// Asimismo, saldo en 0 no es suficiente por sí solo: el cálculo de pagos
+// (payments.ts) descuenta el monto_aportado del espejo antes de liquidar el
+// dinero, por lo que el guard también valida que no existan abonos_capital
+// ni pagos espejo pendientes de liquidación para esos créditos. Si hay
+// liquidaciones pendientes, el lote se rechaza para no desasociar al
+// inversionista antes del cierre contable.
 // ============================================================================
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 
 import type { exitInvestor as ExitInvestorFn } from "./investor";
 import { db } from "../database/index";
-import { creditos_inversionistas_espejo } from "../database/db/schema";
+import {
+  abonos_capital,
+  creditos_inversionistas_espejo,
+  pagos_credito_inversionistas_espejo,
+} from "../database/db/schema";
 import { marcarDevolucionCompletadaSiCorresponde } from "../utils/devolucionCompletada";
 
 type Deps = {
@@ -61,6 +72,10 @@ type Deps = {
     inversionista_id: number,
     creditoIds: number[]
   ) => Promise<Map<number, number>>;
+  tienePendientesLiquidacion?: (
+    inversionista_id: number,
+    creditoIds: number[]
+  ) => Promise<Set<number>>;
 };
 
 // Por defecto usa `db` real; inyectable para los tests del guard.
@@ -88,6 +103,45 @@ const obtenerMontoAportadoEspejoReal = async (
   );
 };
 
+// Verifica si hay abonos a capital (ej. CANCELACION de devolución) o pagos
+// espejo pendientes de liquidar. Durante el cálculo de pagos, el monto_aportado
+// del espejo ya se reduce a 0 pero la liquidación aún no ocurre; permitir la
+// salida en esa ventana dejaría las filas huérfanas al desaparecer el inversionista.
+const tienePendientesLiquidacionReal = async (
+  inversionista_id: number,
+  creditoIds: number[]
+): Promise<Set<number>> => {
+  if (creditoIds.length === 0) return new Set();
+
+  const [abonosAbiertos, pagosNoLiquidados] = await Promise.all([
+    db
+      .select({ credito_id: abonos_capital.credito_id })
+      .from(abonos_capital)
+      .where(
+        and(
+          inArray(abonos_capital.credito_id, creditoIds),
+          eq(abonos_capital.inversionista_id, inversionista_id),
+          eq(abonos_capital.liquidado, false)
+        )
+      ),
+    db
+      .select({ credito_id: pagos_credito_inversionistas_espejo.credito_id })
+      .from(pagos_credito_inversionistas_espejo)
+      .where(
+        and(
+          inArray(pagos_credito_inversionistas_espejo.credito_id, creditoIds),
+          eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionista_id),
+          ne(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO")
+        )
+      ),
+  ]);
+
+  const pendientes = new Set<number>();
+  for (const a of abonosAbiertos) pendientes.add(a.credito_id);
+  for (const p of pagosNoLiquidados) pendientes.add(p.credito_id);
+  return pendientes;
+};
+
 // `deps` es inyectable para poder probar el wrapper sin pasar por la
 // conexión real ni por exitInvestor completo. Sin inyección (uso normal
 // desde el router), resuelve las funciones reales perezosamente.
@@ -97,8 +151,10 @@ export const exitInvestorHandler = async (ctx: any, deps?: Deps) => {
       exitInvestor: (await import("./investor")).exitInvestor,
       marcarDevolucionCompletadaSiCorresponde,
       obtenerMontoAportadoEspejo: obtenerMontoAportadoEspejoReal,
+      tienePendientesLiquidacion: tienePendientesLiquidacionReal,
     };
   const obtenerMontoAportadoEspejo = resolved.obtenerMontoAportadoEspejo ?? obtenerMontoAportadoEspejoReal;
+  const tienePendientesLiquidacion = resolved.tienePendientesLiquidacion ?? tienePendientesLiquidacionReal;
 
   const { inversionista_id, creditos: creditoIds, motivo } = ctx?.body ?? {};
 
@@ -108,8 +164,14 @@ export const exitInvestorHandler = async (ctx: any, deps?: Deps) => {
     Array.isArray(creditoIds) &&
     creditoIds.length > 0
   ) {
-    const montoPorCredito = await obtenerMontoAportadoEspejo(inversionista_id, creditoIds);
-    const creditoIdsInvalidos = creditoIds.filter((id: number) => montoPorCredito.get(id) !== 0);
+    const [montoPorCredito, creditosConPendientes] = await Promise.all([
+      obtenerMontoAportadoEspejo(inversionista_id, creditoIds),
+      tienePendientesLiquidacion(inversionista_id, creditoIds),
+    ]);
+
+    const creditoIdsInvalidos = creditoIds.filter(
+      (id: number) => montoPorCredito.get(id) !== 0 || creditosConPendientes.has(id)
+    );
 
     // Todo o nada: nunca se llama a exitInvestor con un subconjunto. Ver
     // comentario de arriba sobre por qué filtrar dejaba al inversionista
@@ -117,17 +179,23 @@ export const exitInvestorHandler = async (ctx: any, deps?: Deps) => {
     if (creditoIdsInvalidos.length > 0) {
       console.warn(
         `  ⚠️  [POST /investor/exit motivo=devolucion_verificado] inversionista ${inversionista_id}: ` +
-          `lote rechazado, ${creditoIdsInvalidos.length}/${creditoIds.length} crédito(s) con espejo != 0 ` +
-          `(o sin fila) — ` +
+          `lote rechazado, ${creditoIdsInvalidos.length}/${creditoIds.length} crédito(s) inválidos ` +
+          `(saldo != 0, sin fila espejo, o abonos/pagos sin liquidar) — ` +
           creditoIdsInvalidos
-            .map((id) => `credito_id=${id} monto_aportado=${montoPorCredito.get(id) ?? "SIN_FILA_ESPEJO"}`)
+            .map((id) => {
+              const saldo = montoPorCredito.get(id);
+              const saldoDesc = saldo === undefined ? "SIN_FILA_ESPEJO" : `monto_aportado=${saldo}`;
+              const pendDesc = creditosConPendientes.has(id) ? "TIENE_PENDIENTES_LIQUIDACION" : null;
+              const detalle = [saldoDesc, pendDesc].filter(Boolean).join(" ");
+              return `credito_id=${id} (${detalle})`;
+            })
             .join(", ")
       );
       if (ctx?.set) ctx.set.status = 400;
       return {
         success: false,
         message:
-          "Lote rechazado: al menos un crédito tiene capital pendiente (monto_aportado != 0 en el espejo o sin fila). No se movió nada.",
+          "Lote rechazado: al menos un crédito tiene capital pendiente, no tiene fila en el espejo, o tiene abonos/pagos pendientes de liquidación. No se movió nada.",
         creditos_invalidos: creditoIdsInvalidos,
       };
     }

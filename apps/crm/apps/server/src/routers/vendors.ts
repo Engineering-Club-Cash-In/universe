@@ -15,7 +15,7 @@ import {
 } from "../lib/contract-parties";
 import { eqDpi } from "../lib/dpi-lookup";
 import { crmProcedure } from "../lib/orpc";
-import { validarDpi } from "../utils/cui-validation";
+import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 
 export const vendorsRouter = {
 	// Get all vendors
@@ -229,16 +229,33 @@ export const vendorsRouter = {
 		.input(z.object({ dpi: z.string() }))
 		.handler(async ({ input }) => {
 			const resultadoDpi = validarDpi(input.dpi);
-			if (!resultadoDpi.valid) {
-				throw new ORPCError("BAD_REQUEST", { message: resultadoDpi.error });
-			}
-			const dpi = resultadoDpi.dpiLimpio;
+			// Un DPI que no pasa el dígito verificador se busca igual: si ya hay
+			// un vendedor registrado con él (registros viejos guardados validando
+			// solo el largo), hay que poder completarle el género con "Completar
+			// con RENAP". Solo se rechaza si no existe.
+			const dpi = resultadoDpi.valid
+				? resultadoDpi.dpiLimpio
+				: normalizarDpi(input.dpi);
 
 			const [vendor] = await db
 				.select()
 				.from(vehicleVendors)
 				.where(eqDpi(vehicleVendors.dpi, dpi))
 				.limit(1);
+
+			if (!resultadoDpi.valid) {
+				if (!vendor) {
+					throw new ORPCError("BAD_REQUEST", { message: resultadoDpi.error });
+				}
+				// RENAP no resuelve un DPI inválido: se devuelve lo registrado
+				return {
+					fuente: "vendedor" as const,
+					vendorId: vendor.id,
+					dpi,
+					nombre: vendor.name,
+					genero: (vendor.gender as "male" | "female" | null) ?? null,
+				};
+			}
 
 			if (vendor?.gender) {
 				return {

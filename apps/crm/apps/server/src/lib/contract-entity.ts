@@ -129,6 +129,15 @@ export function resolveEntityType(
  */
 export const CUBE_ENTITY_NAME = "CUBE INVESTMENTS, SOCIEDAD ANÓNIMA";
 
+/**
+ * Solo la entidad exacta, con o sin la sociedad al final. Va anclado al final
+ * a propósito: otro inversionista que empiece igual ("Cube Investments II,
+ * S.A.", "Cube Investment Fund") es una entidad distinta y saldría como
+ * acreedor equivocado en el contrato.
+ */
+const CUBE_ENTITY_PATTERN =
+	/^\s*cube\s+investments?\s*,?(?:\s+(?:s\.?\s*a\.?|sociedad\s+an[oó]nima))?\s*$/i;
+
 export function formatEntityName(nombre: string): string {
-	return /^\s*cube\s+investments?\b/i.test(nombre) ? CUBE_ENTITY_NAME : nombre;
+	return CUBE_ENTITY_PATTERN.test(nombre) ? CUBE_ENTITY_NAME : nombre;
 }

@@ -193,6 +193,8 @@ describe("formatEntityName", () => {
 			"Cube Investments S.A.",
 			"Cube Investments, S.A.",
 			"CUBE INVESTMENTS, S.A",
+			"Cube Investments, Sociedad Anónima",
+			"Cube Investments",
 			" cube investment s.a.",
 		]) {
 			expect(formatEntityName(nombre)).toBe(CUBE_ENTITY_NAME);
@@ -205,6 +207,16 @@ describe("formatEntityName", () => {
 		expect(formatEntityName("Cubero Investments S.A.")).toBe(
 			"Cubero Investments S.A.",
 		);
+	});
+
+	test("otra entidad que empieza igual es un acreedor distinto", () => {
+		for (const nombre of [
+			"Cube Investments II, S.A.",
+			"Cube Investment Fund",
+			"Cube Investments Guatemala, S.A.",
+		]) {
+			expect(formatEntityName(nombre)).toBe(nombre);
+		}
 	});
 
 	test("el nombre formateado se sigue reconociendo como sociedad", () => {

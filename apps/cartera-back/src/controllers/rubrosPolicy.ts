@@ -541,8 +541,17 @@ export const ordenarRubrosParaCobro = <T extends RubroOrdenable>(
 
   return [...rubros].sort((a, b) => {
     if (a.obligatorio !== b.obligatorio) return a.obligatorio ? -1 : 1;
-    const fecha = alMilis(a.created_at) - alMilis(b.created_at);
-    if (fecha !== 0) return fecha;
+    // Se COMPARAN, no se restan. Con los dos `created_at` en null —la columna
+    // es nullable— ambos se normalizan al mismo infinito, y `Infinity - Infinity`
+    // da `NaN`: como `NaN !== 0`, el comparador devolvía NaN y nunca llegaba al
+    // desempate por id. Un comparador que devuelve NaN deja el orden a merced
+    // del algoritmo de sort, y la consulta que alimenta esto no trae `ORDER BY`,
+    // así que la misma boleta parcial podía cobrarle a un rubro distinto en cada
+    // corrida. Con dos rubros del mismo monto y una boleta que sólo alcanza para
+    // uno, cuál se cobra dejaba de ser determinístico.
+    const fechaA = alMilis(a.created_at);
+    const fechaB = alMilis(b.created_at);
+    if (fechaA !== fechaB) return fechaA < fechaB ? -1 : 1;
     return a.rubro_id - b.rubro_id;
   });
 };

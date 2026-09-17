@@ -13,6 +13,7 @@ import {
   efectividad_asesores,
   rubros,
 } from "../database/db";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { findOrCreateInvestor } from "./investor";
 import { updateInstallments } from "./updateCredit";
 import { marcarCuotasPagadasHastaNumero } from "./migratePayments";
@@ -810,87 +811,128 @@ export async function eliminarCreditos(
 
       const creditoId = creditoDB.credito_id;
 
-      // 🛡️ Un crédito con RUBROS vivos no se borra en silencio.
-      //
-      // El DELETE de `creditos` de más abajo cascadea a `cartera.rubros`, y con
-      // ellos se van `rubros_pagos` y `rubros_historial`. El crédito se reconstruye
-      // desde un JSON que no tiene concepto de rubro, así que NO se recrean: se
-      // pierde la deuda vigente por cobros adicionales y el rastro de lo que ya se
-      // le cobró y facturó al cliente. No es un descuadre, es borrado total.
-      //
-      // Se corta acá y no se intenta preservarlos: reconstruirlos exigiría saber a
-      // qué pago de los nuevos colgar cada reclamo, y esa correspondencia no existe
-      // —los pago_id cambian—. Anular los rubros es una decisión de negocio (deja
-      // de cobrarse un cargo real), así que la toma una persona antes de recalcular,
-      // no un efecto colateral de una herramienta de reparación.
-      const rubrosVivos = await db
-        .select({ rubro_id: rubros.rubro_id, descripcion: rubros.descripcion })
-        .from(rubros)
-        .where(and(eq(rubros.credito_id, creditoId), eq(rubros.anulado, false)));
+      /**
+       * 🔒 El chequeo de rubros y TODO el borrado van bajo el advisory lock del
+       * crédito — el mismo que toman `crearRubro`, `editarRubro` y el registro
+       * de pagos.
+       *
+       * Sin él era un TOCTOU: el chequeo es un SELECT plano y los borrados que
+       * le siguen son autocommit sueltos, así que un `crearRubro` que entrara en
+       * el medio commiteaba su rubro y el DELETE final del crédito se lo llevaba
+       * por cascada. La protección existía y la carrera la esquivaba entera.
+       *
+       * No cambia el orden de candados del módulo: advisory afuera, filas
+       * adentro.
+       */
+      const rubrosQueBloquean = await withPaymentAdvisoryLock(
+        creditoId,
+        async () => {
+          /**
+           * 🛡️ Un crédito con deuda viva por cobros adicionales no se borra en
+           * silencio.
+           *
+           * El DELETE de `creditos` cascadea a `cartera.rubros`, y con ellos se
+           * van los reclamos y el historial. El crédito se reconstruye desde un
+           * JSON que no tiene concepto de rubro, así que no se recrean: se
+           * pierde la deuda vigente por cobros adicionales.
+           *
+           * La condición mira `completado`, NO `anulado`, y la diferencia
+           * importa: un rubro totalmente PAGADO queda `completado = true` con
+           * `anulado = false`, y `puedeAnularRubro` rechaza anularlo con un 409
+           * ("no hay nada que anular"). Bloqueando por `anulado` —como estaba—
+           * cualquier crédito que alguna vez terminara de pagar un rubro quedaba
+           * INDELEBLE para siempre, y el mensaje le pedía al operador algo que
+           * el sistema le iba a negar.
+           *
+           * Lo que esto NO protege, y conviene saberlo: el historial de los
+           * rubros ya saldados se va igual con la cascada. Protegerlo también
+           * dejaría el crédito sin forma de borrarse nunca, que es peor; la
+           * evidencia de lo cobrado vive además en las facturas.
+           */
+          const rubrosConDeuda = await db
+            .select({ rubro_id: rubros.rubro_id, descripcion: rubros.descripcion })
+            .from(rubros)
+            .where(
+              and(
+                eq(rubros.credito_id, creditoId),
+                eq(rubros.anulado, false),
+                eq(rubros.completado, false)
+              )
+            );
+
+          // `continue` no sirve adentro del callback: se devuelve el motivo y
+          // decide el llamador, ya fuera del candado.
+          if (rubrosConDeuda.length > 0) return rubrosConDeuda;
+
+
       
-      if (rubrosVivos.length > 0) {
+        // 2. Obtener pago_ids para limpiar boletas
+        const pagos = await db
+          .select({ pago_id: pagos_credito.pago_id })
+          .from(pagos_credito)
+          .where(eq(pagos_credito.credito_id, creditoId));
+
+        const pagoIds = pagos.map(p => p.pago_id);
+
+        // 3. Eliminar en orden (respetando FKs sin CASCADE)
+        if (pagoIds.length > 0) {
+          // Boletas (referencia pago_id sin CASCADE)
+          await db
+            .delete(boletas)
+            .where(inArray(boletas.pago_id, pagoIds));
+          hasPersistedChanges = true;
+          notifyPersisted(telemetry);
+
+          // Pagos inversionistas (referencia pago_id y credito_id sin CASCADE)
+          await db
+            .delete(pagos_credito_inversionistas)
+            .where(eq(pagos_credito_inversionistas.credito_id, creditoId));
+
+          // Pagos credito (referencia credito_id sin CASCADE)
+          await db
+            .delete(pagos_credito)
+            .where(eq(pagos_credito.credito_id, creditoId));
+        }
+
+        // Cuotas (referencia credito_id sin CASCADE)
+        await db
+          .delete(cuotas_credito)
+          .where(eq(cuotas_credito.credito_id, creditoId));
+        hasPersistedChanges = true;
+        notifyPersisted(telemetry);
+
+        // Inversionistas del credito (sin CASCADE)
+        await db
+          .delete(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, creditoId));
+
+        // Efectividad asesores (sin CASCADE)
+        await db
+          .delete(efectividad_asesores)
+          .where(eq(efectividad_asesores.credito_id, creditoId));
+
+        // 4. Eliminar el credito (CASCADE borra: moras, condonaciones, rubros, cancelaciones, bad_debts, montos_adicionales, convenios)
+        // facturas_electronicas pone pago_id en NULL automaticamente (SET NULL)
+        await db
+          .delete(creditos)
+          .where(eq(creditos.credito_id, creditoId));
+
+          return null;
+        }
+      );
+
+      if (rubrosQueBloquean) {
         resultados.push({
           numeroCredito: numeroBase,
           status: "error",
           message:
-            `El crédito tiene ${rubrosVivos.length} cobro(s) adicional(es) sin anular ` +
-            `(${rubrosVivos.map((r) => r.descripcion).join(", ")}). Recalcular borraría ` +
-            `su deuda y el historial de lo ya cobrado. Anulalos primero desde la ` +
-            `pantalla de Rubros del crédito y volvé a intentar.`,
+            `El crédito tiene ${rubrosQueBloquean.length} cobro(s) adicional(es) con saldo ` +
+            `pendiente (${rubrosQueBloquean.map((r) => r.descripcion).join(", ")}). Borrarlo ` +
+            `se llevaría esa deuda. Anulalos primero desde la pantalla de Rubros del ` +
+            `crédito y volvé a intentar.`,
         });
         continue;
       }
-      
-      // 2. Obtener pago_ids para limpiar boletas
-      const pagos = await db
-        .select({ pago_id: pagos_credito.pago_id })
-        .from(pagos_credito)
-        .where(eq(pagos_credito.credito_id, creditoId));
-
-      const pagoIds = pagos.map(p => p.pago_id);
-
-      // 3. Eliminar en orden (respetando FKs sin CASCADE)
-      if (pagoIds.length > 0) {
-        // Boletas (referencia pago_id sin CASCADE)
-        await db
-          .delete(boletas)
-          .where(inArray(boletas.pago_id, pagoIds));
-        hasPersistedChanges = true;
-        notifyPersisted(telemetry);
-
-        // Pagos inversionistas (referencia pago_id y credito_id sin CASCADE)
-        await db
-          .delete(pagos_credito_inversionistas)
-          .where(eq(pagos_credito_inversionistas.credito_id, creditoId));
-
-        // Pagos credito (referencia credito_id sin CASCADE)
-        await db
-          .delete(pagos_credito)
-          .where(eq(pagos_credito.credito_id, creditoId));
-      }
-
-      // Cuotas (referencia credito_id sin CASCADE)
-      await db
-        .delete(cuotas_credito)
-        .where(eq(cuotas_credito.credito_id, creditoId));
-      hasPersistedChanges = true;
-      notifyPersisted(telemetry);
-
-      // Inversionistas del credito (sin CASCADE)
-      await db
-        .delete(creditos_inversionistas)
-        .where(eq(creditos_inversionistas.credito_id, creditoId));
-
-      // Efectividad asesores (sin CASCADE)
-      await db
-        .delete(efectividad_asesores)
-        .where(eq(efectividad_asesores.credito_id, creditoId));
-
-      // 4. Eliminar el credito (CASCADE borra: moras, condonaciones, rubros, cancelaciones, bad_debts, montos_adicionales, convenios)
-      // facturas_electronicas pone pago_id en NULL automaticamente (SET NULL)
-      await db
-        .delete(creditos)
-        .where(eq(creditos.credito_id, creditoId));
 
       resultados.push({
         numeroCredito: numeroBase,

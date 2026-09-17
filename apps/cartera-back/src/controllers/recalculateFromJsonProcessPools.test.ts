@@ -26,6 +26,12 @@ const dbMock = {
 };
 
 mock.module("../database", () => ({ db: dbMock, client: {}, lockPool: {} }));
+// El borrado de créditos corre bajo el advisory lock del crédito (cierra el
+// TOCTOU contra `crearRubro`). Acá no hay concurrencia que serializar y el real
+// abriría conexión al `lockPool`, así que se pasa de largo.
+mock.module("../utils/paymentAdvisoryLock", () => ({
+  withPaymentAdvisoryLock: (_creditoId: number, fn: () => Promise<unknown>) => fn(),
+}));
 mock.module("./investor", () => ({
   findOrCreateInvestor: mock(() => Promise.resolve({ inversionista_id: 1 })),
 }));

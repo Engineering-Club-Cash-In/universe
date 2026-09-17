@@ -6775,6 +6775,7 @@ export const crmRouter = {
 								motorNumber: vehicles.motorNumber,
 								seats: vehicles.seats,
 								vehicleUse: vehicles.vehicleUse,
+								vendorId: vehicles.vendorId,
 							})
 							.from(vehicles)
 							.where(inArray(vehicles.id, vehicleIds))
@@ -6794,10 +6795,21 @@ export const crmRouter = {
 							.where(inArray(creditAnalysis.opportunityId, opportunityIds))
 					: [];
 
-			// Partes del contrato ya asignadas (vendedor o agencia)
+			// Create maps for quick lookup
+			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
+			const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
+			// Partes del contrato ya asignadas. El vendedor respeta el mismo
+			// respaldo que usa la generación de contratos: si la oportunidad no
+			// tiene uno, se muestra el que está en el vehículo.
+			const vendorIdDeLaParte = (opp: (typeof opps)[number]) =>
+				opp.vendorId ??
+				(opp.vehicleId
+					? (vehiclesMap.get(opp.vehicleId)?.vendorId ?? null)
+					: null);
+
 			const vendorIds = [
 				...new Set(
-					opps.map((o) => o.vendorId).filter((id): id is string => !!id),
+					opps.map(vendorIdDeLaParte).filter((id): id is string => !!id),
 				),
 			];
 			const companyIds = [
@@ -6831,9 +6843,6 @@ export const crmRouter = {
 			const vendorsMap = new Map(vendorsData.map((v) => [v.id, v]));
 			const companiesMap = new Map(companiesData.map((c) => [c.id, c]));
 
-			// Create maps for quick lookup
-			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
-			const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
 			// Se guarda también el leadId del análisis: si la oportunidad fue
 			// reasignada a otro lead sin volver a vincular el análisis, no se debe
 			// mostrar el día recomendado del cliente anterior.
@@ -6944,9 +6953,10 @@ export const crmRouter = {
 								}),
 							}
 						: null,
-					vendedor: opp.vendorId
-						? (vendorsMap.get(opp.vendorId) ?? null)
-						: null,
+					vendedor: (() => {
+						const id = vendorIdDeLaParte(opp);
+						return id ? (vendorsMap.get(id) ?? null) : null;
+					})(),
 					empresa: opp.companyId
 						? (companiesMap.get(opp.companyId) ?? null)
 						: null,

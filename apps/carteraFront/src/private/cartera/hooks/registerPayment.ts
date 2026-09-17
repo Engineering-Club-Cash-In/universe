@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { montoParaAbonoDirectoACapital } from "../components/abonoDirectoACapital";
+import { montoParaAbonoDirectoACapital, motivoAbonoACapitalNoPosible } from "../components/abonoDirectoACapital";
 import { z } from "zod";
 import { useFormik } from "formik";
 import {
@@ -630,6 +630,16 @@ const handleAbonoCapitalDirecto = () => {
     boleta: montoBoleta,
     otros: otrosTipeado,
   });
+
+  // Y si no queda nada, NO se manda. El piso en cero evita el descuadre, pero
+  // mandar el cero igual es peor que un error: el backend lo acepta con 200 y
+  // guarda una fila de sólo `otros`, así que el asesor ve "registrado" y el
+  // capital no bajó. Verificado contra una copia de producción.
+  const motivo = motivoAbonoACapitalNoPosible({ boleta: montoBoleta, otros: otrosTipeado });
+  if (motivo) {
+    toast.error(motivo);
+    return;
+  }
 
   console.log("=== ABONO DIRECTO A CAPITAL ===");
   console.log("Boleta:", montoBoleta, "| otros:", otrosTipeado, "| a capital:", aCapital);

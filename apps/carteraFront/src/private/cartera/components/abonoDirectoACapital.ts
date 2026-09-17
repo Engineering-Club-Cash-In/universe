@@ -39,3 +39,29 @@ export function montoParaAbonoDirectoACapital(entrada: {
   // backend, y descarta lo no numérico en vez de envenenar el monto.
   return Math.max(0, sumaQ([Number(entrada.boleta) || 0, -(Number(entrada.otros) || 0)]));
 }
+
+/**
+ * Por qué NO se puede abonar a capital, o `null` si sí se puede.
+ *
+ * `montoParaAbonoDirectoACapital` pone piso en cero, pero el piso solo no
+ * alcanza: el handler mandaba ese cero igual y **el backend lo acepta**. Medido
+ * contra una copia de producción —boleta Q100 con Q100 de `otros`— la respuesta
+ * es `200` y la fila queda con `abono_capital = 0.00` y `otros = 100`. El
+ * capital del crédito no se mueve.
+ *
+ * Desde la silla del asesor eso es lo peor que puede pasar: aprieta «Abonar todo
+ * a Capital», la pantalla le dice que se registró, y el abono no existe. No hay
+ * error que investigar después, porque el pago SÍ se guardó — sólo que como un
+ * cobro de otros. Se descubre cuando alguien nota que el saldo no bajó.
+ *
+ * El chequeo de `otros` sobredimensionado que vive en `handleFormSubmit` no
+ * corre en esta vía: el modal escribe `formik.values` y llama `handleSubmit`
+ * directo. Por eso el motivo se pregunta acá, en el handler.
+ */
+export function motivoAbonoACapitalNoPosible(entrada: {
+  boleta: number;
+  otros: number;
+}): string | null {
+  if (montoParaAbonoDirectoACapital(entrada) > 0) return null;
+  return "Otros se lleva toda la boleta: a capital no queda nada que abonar. Bajá el monto de Otros o registrá el pago sin abono a capital.";
+}

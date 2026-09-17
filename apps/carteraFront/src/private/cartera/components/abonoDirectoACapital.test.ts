@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { montoParaAbonoDirectoACapital } from "./abonoDirectoACapital";
+import { montoParaAbonoDirectoACapital, motivoAbonoACapitalNoPosible } from "./abonoDirectoACapital";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // "Abonar todo a Capital" mandaba la boleta ENTERA a `abono_directo_capital`,
@@ -45,5 +45,36 @@ describe("montoParaAbonoDirectoACapital", () => {
     expect(
       montoParaAbonoDirectoACapital({ boleta: 1100, otros: undefined as unknown as number })
     ).toBe(1100);
+  });
+});
+
+describe("motivoAbonoACapitalNoPosible", () => {
+  it("🔴 con `otros` igual a la boleta NO se puede abonar: a capital no queda nada", () => {
+    // Medido contra una copia de producción: el backend ACEPTA este request con
+    // 200 y escribe una fila de sólo `otros` con `abono_capital = 0.00`. El
+    // capital del crédito no baja un centavo, pero el asesor ve éxito.
+    expect(motivoAbonoACapitalNoPosible({ boleta: 100, otros: 100 })).toContain("no queda nada");
+  });
+
+  it("con `otros` MAYOR a la boleta tampoco", () => {
+    expect(motivoAbonoACapitalNoPosible({ boleta: 100, otros: 150 })).toBeTruthy();
+  });
+
+  it("lo que el redondeo deja en cero tampoco pasa", () => {
+    // `100.001 − 100` da `0.001` crudo, que es "mayor a cero" y redondea a cero.
+    expect(motivoAbonoACapitalNoPosible({ boleta: 100.001, otros: 100 })).toBeTruthy();
+  });
+
+  it("con `otros` menor SÍ se puede, y no estorba", () => {
+    expect(motivoAbonoACapitalNoPosible({ boleta: 1100, otros: 100 })).toBeNull();
+  });
+
+  it("sin `otros` SÍ se puede", () => {
+    expect(motivoAbonoACapitalNoPosible({ boleta: 1100, otros: 0 })).toBeNull();
+  });
+
+  it("el motivo NOMBRA a otros, que es el campo que el asesor tiene que bajar", () => {
+    // Si el mensaje no dice qué corregir, el asesor vuelve a apretar el botón.
+    expect(motivoAbonoACapitalNoPosible({ boleta: 100, otros: 100 })).toContain("Otros");
   });
 });

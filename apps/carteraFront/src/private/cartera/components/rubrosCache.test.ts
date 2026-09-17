@@ -560,3 +560,60 @@ describe("crear y anular — no dejan al usuario atrapado", () => {
     expect(otra[0].monto_original).toBe("100.00");
   });
 });
+
+describe("la siembra NO inventa una lista", () => {
+  it("🔴 si el GET nunca cargó, no deja el rubro nuevo como si fuera toda la lista", async () => {
+    // El caso: la lista nunca se pudo cargar, el POST sí entró, y el GET de la
+    // invalidación también falla. El estado de la query EXISTE —con `data`
+    // undefined y `dataUpdatedAt` en 0— así que mirar sólo `estado !== undefined`
+    // daba "no llegó nada" y sembraba.
+    //
+    // Y sembrar sobre `undefined` convierte la lista en `[nueva]`: la pantalla
+    // mostraría UN rubro, escondiendo todos los que el crédito ya tenía, con el
+    // total pendiente equivocado. Mejor dejarla en error para que el refetch
+    // siguiente traiga la lista completa.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    const observer = new QueryObserver<RubroCredito[]>(queryClient, {
+      queryKey: [QK_RUBROS, CRED],
+      queryFn: async () => {
+        throw new Error("el GET nunca funcionó");
+      },
+    });
+    const off = observer.subscribe(() => {});
+    await esperar(30);
+
+    await sincronizarRubroCreado(
+      queryClient,
+      CRED,
+      guardado({ rubro_id: 9 }),
+      "Placas"
+    );
+
+    // Sin lista en caché no hay nada que corregir: se deja el error.
+    expect(queryClient.getQueryData<RubroCredito[]>([QK_RUBROS, CRED])).toBeUndefined();
+    expect(queryClient.getQueryState([QK_RUBROS, CRED])?.status).toBe("error");
+    off();
+  });
+
+  it("y tampoco al editar o anular sobre una lista que nunca cargó", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    const observer = new QueryObserver<RubroCredito[]>(queryClient, {
+      queryKey: [QK_RUBROS, CRED],
+      queryFn: async () => {
+        throw new Error("el GET nunca funcionó");
+      },
+    });
+    const off = observer.subscribe(() => {});
+    await esperar(30);
+
+    await sincronizarRubroEditado(queryClient, CRED, 5, guardado());
+    await sincronizarRubroAnulado(queryClient, CRED, 5, anulado());
+
+    expect(queryClient.getQueryData<RubroCredito[]>([QK_RUBROS, CRED])).toBeUndefined();
+    off();
+  });
+});

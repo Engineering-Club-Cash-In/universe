@@ -111,10 +111,22 @@ async function refrescarYSembrarSiNoLlegoNada(
   // Si llegó algo del servidor, manda el servidor. La siembra es el plan B.
   const estado = queryClient.getQueryState<RubroCredito[]>(queryKey);
 
-  // Sin entrada en caché no hay lista que corregir: la próxima vez que monte va
-  // a pedirla de cero. Sembrar acá dejaría un listado de una sola fila.
+  /**
+   * Sin LISTA en caché no hay nada que corregir, y por eso se exige `data` y no
+   * sólo que el estado exista.
+   *
+   * La diferencia mordió: una query que NUNCA cargó igual tiene entrada de
+   * estado —con `data` en `undefined` y `dataUpdatedAt` en 0—, así que mirar
+   * sólo `estado !== undefined` daba "no llegó nada" y sembraba. Y sembrar sobre
+   * `undefined` convierte la lista en la fila sembrada y nada más: la pantalla
+   * mostraría UN rubro, escondiendo todos los que el crédito ya tenía, con el
+   * total pendiente equivocado, y encima pasando de `error` a un éxito falso que
+   * ya nadie vuelve a pedir.
+   *
+   * Dejarla en error es mejor: el refetch siguiente trae la lista completa.
+   */
   const noLlegoNada =
-    estado !== undefined && estado.dataUpdatedAt === selloPrevio;
+    estado?.data !== undefined && estado.dataUpdatedAt === selloPrevio;
 
   if (noLlegoNada) {
     queryClient.setQueryData<RubroCredito[]>(queryKey, sembrar);

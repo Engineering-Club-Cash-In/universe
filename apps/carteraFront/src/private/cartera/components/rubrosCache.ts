@@ -185,6 +185,10 @@ export async function sincronizarRubroCreado(
     // Por si el refetch lo trajo y el sello no se movió por otra razón: agregar
     // dos filas del mismo rubro sería peor que no agregar ninguna.
     if (lista.some((r) => r.rubro_id === creado.rubro_id)) return lista;
-    return [...lista, { ...creado, tipo_nombre: tipoNombre, abonado: "0.00" }];
+    // PRIMERO, no al final: el GET ordena `desc(rubros.created_at)`, así que el
+    // más nuevo va arriba. Agregarlo al final lo dejaba como la fila más vieja y
+    // en un crédito con varios cobros se iba fuera de pantalla — justo cuando la
+    // siembra es lo único que lo muestra.
+    return [{ ...creado, tipo_nombre: tipoNombre, abonado: "0.00" }, ...lista];
   });
 }

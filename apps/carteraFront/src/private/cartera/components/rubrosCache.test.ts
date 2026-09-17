@@ -465,6 +465,30 @@ describe("sincronizarRubroCreado", () => {
     expect(filas[0].rubro_id).toBe(9);
   });
 
+  it("🔴 lo pone PRIMERO, que es donde el servidor lo devolvería", async () => {
+    // El GET ordena `desc(rubros.created_at)`: el más nuevo va arriba. Agregarlo
+    // al final lo dejaba como la fila más vieja de la lista, y en un crédito con
+    // varios cobros el rubro recién creado se iba fuera de pantalla —justo
+    // cuando la siembra es lo único que lo muestra—.
+    const p = pantallaConRubros(async () => [
+      rubro({ rubro_id: 1, descripcion: "Vieja" }),
+      rubro({ rubro_id: 2, descripcion: "Media" }),
+    ]);
+    await esperar(20);
+    p.cerrarModal();
+
+    await sincronizarRubroCreado(
+      p.queryClient,
+      CRED,
+      guardado({ rubro_id: 9, descripcion: "Nueva" }),
+      "Placas"
+    );
+
+    const filas = p.queryClient.getQueryData<RubroCredito[]>([QK_RUBROS, CRED])!;
+    expect(filas).toHaveLength(3);
+    expect(filas[0].descripcion).toBe("Nueva");
+  });
+
   it("le pone el tipo que eligió el usuario, que el POST no devuelve", async () => {
     // `tipo_nombre` sale del join del GET. Sin ponerlo, la fila sembrada
     // aparecería con la columna "Tipo" en blanco.

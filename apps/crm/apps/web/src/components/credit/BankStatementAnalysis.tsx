@@ -41,6 +41,7 @@ import {
 	getReusableBatchSyncAction,
 	hasCompleteIntegrityValidation,
 	type IntegrityResult,
+	requiresDocumentRevalidation,
 	requiresManualApproval,
 } from "@/lib/document-integrity-flow";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
@@ -424,6 +425,11 @@ export function BankStatementAnalysis({
 			requiresManualApproval(result.validation.result) &&
 			!result.validation.manualApproval,
 	);
+	const hasHistoricalManualReview = validatedBatch?.results.some(
+		(result) =>
+			!!result.validation &&
+			requiresDocumentRevalidation(result.validation.result),
+	);
 	const hasIncompleteValidation = !!validatedBatch && !allDocumentsValidated;
 	const activeFileCount = validatedBatch?.payloads.length ?? files.length;
 	const isBusy =
@@ -761,6 +767,8 @@ export function BankStatementAnalysis({
 						<p className="text-muted-foreground text-xs">
 							{hasRejectedDocument
 								? "Hay documentos rechazados. Reemplázalos y realiza una nueva validación documental."
+								: hasHistoricalManualReview
+									? "Estos documentos provienen de una validación manual histórica. Vuelve a cargarlos y realiza una nueva validación antes de continuar."
 								: hasPendingManualApproval
 									? "Hay documentos pendientes de aprobación manual."
 									: "La validación documental terminó. Puede continuar con estos archivos o solicitar documentos nuevos."}

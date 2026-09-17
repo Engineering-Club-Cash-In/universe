@@ -19,6 +19,17 @@ export function requiresManualApproval(_result: IntegrityResult): boolean {
 	return false;
 }
 
+/**
+ * Historical manual-review outcomes predate the current hotfix. They cannot
+ * continue to capacity analysis and must be revalidated, while observations
+ * remain eligible to continue.
+ */
+export function requiresDocumentRevalidation(
+	result: IntegrityResult,
+): boolean {
+	return result === "revision_manual";
+}
+
 export function hasCompleteIntegrityValidation(
 	batch: IntegrityValidatedBatchLike | null,
 ): boolean {

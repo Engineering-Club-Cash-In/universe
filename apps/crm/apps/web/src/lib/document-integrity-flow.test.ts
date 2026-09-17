@@ -3,10 +3,16 @@ import {
 	aggregateIntegrityResult,
 	getReusableBatchSyncAction,
 	hasCompleteIntegrityValidation,
+	requiresDocumentRevalidation,
 	type IntegrityResult,
 } from "./document-integrity-flow";
 
 describe("document integrity UI flow", () => {
+	test("legacy manual review requires revalidation", () => {
+		expect(requiresDocumentRevalidation("revision_manual")).toBe(true);
+		expect(requiresDocumentRevalidation("observacion")).toBe(false);
+		expect(requiresDocumentRevalidation("valido")).toBe(false);
+	});
 	test("habilita capacidad para veredictos que no requieren aprobación manual", () => {
 		for (const result of ["valido", "observacion"] satisfies IntegrityResult[]) {
 			expect(

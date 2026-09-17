@@ -3172,6 +3172,59 @@ export const recalcularPagosCredito = async ({
         },
       });
     }
+
+    // Los `*_restante` NO son historia del pago: son el espejo de lo que la
+    // CUOTA todavía debe, y registerPayment reparte el siguiente pago contra
+    // la fila más reciente que tenga saldo (`pagoSaldoVigente`). Hasta acá el
+    // recálculo refrescaba ese espejo solo en las filas que reescribe, así que
+    // las VALIDADAS se quedaban con el saldo de antes: tras una reversa el
+    // siguiente pago se repartía contra plata que ya no debía y el sobrante
+    // rebalsaba a la cuota siguiente. Caso real (crédito 483, cuota 7): al
+    // reversar un parcial de Q1,500 las filas hermanas siguieron diciendo
+    // "faltan Q157.60"; el pago de Q1,276.80 cerró la cuota con Q157.60 y
+    // mandó Q1,119.20 —con sus facturas— a la cuota 8.
+    //
+    // Se escribe SOLO el espejo del saldo final de la cuota. Ni abonos, ni
+    // `pagado`, ni `total_restante`: el split del validado ya se facturó y se
+    // distribuyó a inversionistas, y esa parte sigue intocable.
+    //
+    // SOLO cuando el validado es la ÚNICA fila de la cuota con abonos. El
+    // espejo viene neto de TODAS las filas con plata, y `registerPayment`
+    // vuelve a restarle el interés/IVA de sus hermanos vivos al elegirlo como
+    // fila vigente (`calcularSaldoNetoCuota`, neteo `hermanosInteres`/
+    // `hermanosIva`): cualquier hermano con abonos se contaría dos veces y ese
+    // interés se correría a capital, ensuciando recibo y reparto a
+    // inversionistas. Hermano con abonos hay de dos clases, y las dos cuentan
+    // como vivas para el neteo: otro validado, y una fila `no_required` que
+    // lleva plata (crédito 890 / cuota 12) — que además NO es elegible como
+    // fuente de saldo, así que el validado igual gana la elección.
+    //
+    // Con el validado como única fila con abonos, ese neteo da cero —sus
+    // hermanos son recibos vacíos, sin abonos propios que restar— y el espejo
+    // llega intacto a la distribución. Es el caso que motivó el fix (crédito
+    // 483, cuota 7). Lo demás queda como estaba: no se toca, no se empeora.
+    // Cubrirlo pide que el neteo distinga un espejo sincronizado de uno viejo,
+    // y eso es cirugía sobre el reparto de pagos.
+    const llevaAbonosDeCuota = (p: (typeof rows)[number]["pagos_credito"]) =>
+      [
+        p.abono_interes,
+        p.abono_iva_12,
+        p.abono_seguro,
+        p.abono_gps,
+        p.membresias_pago,
+        p.abono_capital,
+      ].some((rubro) => new Big(rubro ?? 0).gt(0));
+    const filasConAbonos = pagos.filter(llevaAbonosDeCuota);
+    if (
+      validadosVivos.length === 1 &&
+      filasConAbonos.length === 1 &&
+      filasConAbonos[0].pago_id === validadosVivos[0].pago_id
+    ) {
+      actualizaciones.push({
+        pago_id: validadosVivos[0].pago_id,
+        datos: { ...snapshotRestantes() },
+      });
+    }
   }
 
   // 6️⃣ Ejecutar todas las actualizaciones en una transacción

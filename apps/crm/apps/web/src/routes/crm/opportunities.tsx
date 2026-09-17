@@ -1428,6 +1428,32 @@ function RouteComponent() {
 		},
 	});
 
+	// Parte del contrato en el detalle: agencia si el carro es nuevo, vendedor
+	// (dueño) si es usado. Se guarda al elegir o crear.
+	const contractPartyCard = selectedOpportunity?.vehicle ? (
+		<OpportunityContractPartyCard
+			vehicleIsNew={selectedOpportunity.vehicle.isNew}
+			vendorId={selectedOpportunity.vendorId}
+			company={selectedOpportunity.company}
+			vendors={vendorsQuery.data ?? []}
+			companies={companiesQuery.data ?? []}
+			disabled={isWonLocked}
+			isSaving={updateOpportunityMutation.isPending}
+			onAssignVendor={(vendorId) =>
+				updateOpportunityMutation.mutate({
+					id: selectedOpportunity.id,
+					vendorId,
+				})
+			}
+			onAssignCompany={(companyId) =>
+				updateOpportunityMutation.mutate({
+					id: selectedOpportunity.id,
+					companyId,
+				})
+			}
+		/>
+	) : null;
+
 	useEffect(() => {
 		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
@@ -2463,8 +2489,13 @@ function RouteComponent() {
 										</div>
 									)}
 
+									{/* Carro nuevo: la empresa es la agencia, se asigna aquí mismo */}
+									{selectedOpportunity.vehicle?.isNew === true &&
+										contractPartyCard}
+
 									{/* Company Information */}
-									{selectedOpportunity.company && (
+									{selectedOpportunity.company &&
+										selectedOpportunity.vehicle?.isNew !== true && (
 										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
 											<Label className="font-semibold text-muted-foreground text-sm">
 												Empresa
@@ -2646,30 +2677,10 @@ function RouteComponent() {
 										</div>
 									)}
 
-									{/* Parte del contrato: agencia (nuevo) o vendedor (usado) */}
-									{selectedOpportunity.vehicle && (
-										<OpportunityContractPartyCard
-											vehicleIsNew={selectedOpportunity.vehicle.isNew}
-											vendorId={selectedOpportunity.vendorId}
-											company={selectedOpportunity.company}
-											vendors={vendorsQuery.data ?? []}
-											companies={companiesQuery.data ?? []}
-											disabled={isWonLocked}
-											isSaving={updateOpportunityMutation.isPending}
-											onAssignVendor={(vendorId) =>
-												updateOpportunityMutation.mutate({
-													id: selectedOpportunity.id,
-													vendorId,
-												})
-											}
-											onAssignCompany={(companyId) =>
-												updateOpportunityMutation.mutate({
-													id: selectedOpportunity.id,
-													companyId,
-												})
-											}
-										/>
-									)}
+									{/* Carro usado: el vendedor (dueño) va junto al vehículo */}
+									{selectedOpportunity.vehicle &&
+										selectedOpportunity.vehicle.isNew !== true &&
+										contractPartyCard}
 								</div>
 
 								{/* Consolidated Credit Analysis Summary */}

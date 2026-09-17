@@ -235,6 +235,7 @@ export function InvestmentAssignmentSection({
 				},
 				agencia: {
 					companyId: selectedOpportunity.empresa?.id ?? "",
+					nombre: selectedOpportunity.empresa?.name ?? "",
 					razonSocial: selectedOpportunity.empresa?.razonSocial ?? "",
 				},
 			});

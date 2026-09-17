@@ -72,6 +72,8 @@ if [[ "$*" == *"s3api get-bucket-lifecycle-configuration"* ]]; then
     printf '%s\n' '{"Rules":[]}'
   elif [[ "${SHORT_OVERLAPPING_LIFECYCLE:-}" == "1" ]]; then
     printf '%s\n' '{"Rules":[{"Status":"Enabled","Filter":{"Prefix":"daily/"},"Expiration":{"Days":14}},{"Status":"Enabled","Filter":{"Prefix":"weekly/"},"Expiration":{"Days":56}},{"Status":"Enabled","Filter":{"Prefix":"monthly/"},"Expiration":{"Days":365}},{"Status":"Enabled","Filter":{"Prefix":""},"Expiration":{"Days":7}}]}'
+  elif [[ "${NON_EXPIRING_OVERLAP:-}" == "1" ]]; then
+    printf '%s\n' '{"Rules":[{"Status":"Enabled","Filter":{"Prefix":"daily/"},"Expiration":{"Days":14}},{"Status":"Enabled","Filter":{"Prefix":"weekly/"},"Expiration":{"Days":56}},{"Status":"Enabled","Filter":{"Prefix":"monthly/"},"Expiration":{"Days":365}},{"Status":"Enabled","Filter":{"Prefix":""},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}}]}'
   else
     printf '%s\n' '{"Rules":[{"ID":"expire-daily-after-14-days","Status":"Enabled","Filter":{"Prefix":"daily/"},"Expiration":{"Days":14}},{"ID":"expire-weekly-after-56-days","Status":"Enabled","Filter":{"Prefix":"weekly/"},"Expiration":{"Days":56}},{"ID":"expire-monthly-after-365-days","Status":"Enabled","Filter":{"Prefix":"monthly/"},"Expiration":{"Days":365}}]}'
   fi
@@ -177,6 +179,12 @@ if SHORT_OVERLAPPING_LIFECYCLE=1 run_backup; then
 fi
 [[ ! -s "$TMP/calls.log" ]]
 assert_no_uploads
+
+: >"$TMP/calls.log"
+: >"$TMP/aws.log"
+NON_EXPIRING_OVERLAP=1 run_backup
+[[ $(grep -c '^crm-pg-dump$' "$TMP/calls.log") -eq 1 ]]
+[[ $(grep -c '^cartera-pg-dump$' "$TMP/calls.log") -eq 1 ]]
 
 : >"$TMP/aws.log"
 if FAIL_AWS_MATCH='/weekly/2026/09/17/20260917T210000Z/cartera.dump.sha256' run_backup; then

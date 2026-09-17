@@ -22,7 +22,11 @@ def rule_retention(rule):
         prefix = rule.get("Prefix", "")
     return prefix, rule.get("Expiration", {}).get("Days")
 
-enabled = [rule_retention(rule) for rule in rules if rule.get("Status") == "Enabled"]
+enabled = [
+    rule_retention(rule)
+    for rule in rules
+    if rule.get("Status") == "Enabled" and "Expiration" in rule
+]
 missing = required - set(enabled)
 if missing:
     raise SystemExit(f"missing required R2 lifecycle rules: {sorted(missing)}")

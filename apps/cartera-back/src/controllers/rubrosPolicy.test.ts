@@ -1054,3 +1054,45 @@ describe("crearEstampadorRubros", () => {
     expect(estampar()).toBe("0");
   });
 });
+
+describe("ordenarRubrosParaCobro — el desempate por id no se puede saltear", () => {
+  const r = (rubro_id: number, created_at: any, obligatorio = false) =>
+    ({ rubro_id, created_at, obligatorio }) as any;
+
+  it("dos rubros SIN fecha se ordenan por id, no al azar", () => {
+    // `created_at` es nullable en la base. Con los dos en null, la comparación
+    // por resta daba `Infinity - Infinity = NaN`, y como `NaN !== 0` el
+    // comparador devolvía NaN y NUNCA llegaba al desempate por `rubro_id`.
+    //
+    // Un comparador que devuelve NaN deja el orden a merced del algoritmo de
+    // sort, y la consulta que alimenta esto no trae `ORDER BY`: la misma boleta
+    // parcial podía cobrarle a un rubro distinto en cada corrida. Con dos
+    // rubros de Q1,000 y una boleta que sólo alcanza para uno, cuál se cobra
+    // dejaba de ser determinístico.
+    const orden = ordenarRubrosParaCobro([r(9, null), r(4, null)]);
+    expect(orden.map((x) => x.rubro_id)).toEqual([4, 9]);
+  });
+
+  it("una fecha inválida tampoco rompe el desempate", () => {
+    // `new Date("no soy fecha").getTime()` es NaN y se normaliza al mismo
+    // infinito, así que cae en el mismo caso.
+    const orden = ordenarRubrosParaCobro([r(9, "no soy fecha"), r(4, null)]);
+    expect(orden.map((x) => x.rubro_id)).toEqual([4, 9]);
+  });
+
+  it("con fechas distintas manda la más vieja", () => {
+    const orden = ordenarRubrosParaCobro([
+      r(4, "2026-03-01T00:00:00Z"),
+      r(9, "2026-01-01T00:00:00Z"),
+    ]);
+    expect(orden.map((x) => x.rubro_id)).toEqual([9, 4]);
+  });
+
+  it("y el obligatorio sigue yendo primero aunque no tenga fecha", () => {
+    const orden = ordenarRubrosParaCobro([
+      r(4, "2026-01-01T00:00:00Z", false),
+      r(9, null, true),
+    ]);
+    expect(orden.map((x) => x.rubro_id)).toEqual([9, 4]);
+  });
+});

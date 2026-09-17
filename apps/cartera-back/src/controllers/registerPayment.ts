@@ -54,6 +54,7 @@ import {
   sumarAplicadoACuota,
   pagoSchema,
   cuentaComoHermanoVivo,
+  resolverCuotaParaFilaSuelta,
 } from "./registerPaymentPolicy";
 import {
   aplicarRubrosDelPago,
@@ -2209,12 +2210,17 @@ export const insertPayment = async ({ body, set }: any) => {
       // filtrada viene vacía y no hay cuota pagada con numero_cuota > 0: el
       // abono se cuelga de la cuota cubierta (igual que los capital_validated
       // históricos del crédito 9272, colgados de su cuota 1).
-      const cuotaReferencia =
-        ultimaCuotaPagada ??
-        cuotasPendientes[0]?.cuotas_credito ??
-        cuotaReferenciaCapital;
+      //
+      // La cadena vive en `resolverCuotaParaFilaSuelta` porque la fila-rastro
+      // del `else` necesita exactamente la misma —y por no tenerla heredaba la
+      // cuota 0—. Ver el docstring de esa función.
+      const cuotaReferenciaId = resolverCuotaParaFilaSuelta({
+        ultimaCuotaPagada,
+        primeraPendiente: cuotasPendientes[0]?.cuotas_credito,
+        cuotaReferenciaCapital,
+      });
 
-      if (!cuotaReferencia?.cuota_id) {
+      if (cuotaReferenciaId === null) {
         throw new Error(
           "No se encontró una cuota existente para enlazar el abono directo a capital"
         );
@@ -2265,7 +2271,7 @@ export const insertPayment = async ({ body, set }: any) => {
         gps_restante: "0",
         total_restante: "0",
 
-        cuota_id: cuotaReferencia.cuota_id,
+        cuota_id: cuotaReferenciaId,
         numero_cuota: 0,
         llamada: llamada ?? "",
         fecha_pago: fechaGuatemala,
@@ -2484,10 +2490,40 @@ export const insertPayment = async ({ body, set }: any) => {
       ) {
         const pagoConvenioParaFila = estamparPagoConvenio();
         const rubrosParaFila = estamparRubros();
+
+        /**
+         * 🔴 La fila-rastro se cuelga de una cuota REGULAR explícita.
+         *
+         * `cuotaIdPagoEspecial` vale 0 justo acá —esta rama existe para el
+         * crédito sin cuotas abiertas, y con la lista vacía la política no tiene
+         * de dónde sacar un id—, y `insertarPago` trata el 0 como "sin filtro de
+         * cuota": hereda el `cuota_id` del pago más viejo, que es la fila
+         * estructural de la cuota 0. A partir de ahí `updateInitialQuotaOtros`
+         * pisa el `otros` de esta fila —borrando el cargo del rubro sin tocar
+         * `rubros_pagos`— y revertirla marca la cuota 0 como no pagada, dejándola
+         * a un paso de que la reversa siguiente la borre.
+         *
+         * Es la misma cadena que ya usaba el abono directo a capital para no
+         * caer en esto; acá faltaba. Y se TIRA si no hay ninguna cuota: una
+         * boleta con plata que no encuentra dónde colgarse tiene que fallar
+         * ruidosa, no inventarse una asociación.
+         */
+        const cuotaFilaRastro = resolverCuotaParaFilaSuelta({
+          ultimaCuotaPagada,
+          primeraPendiente: cuotasPendientes[0]?.cuotas_credito,
+          cuotaReferenciaCapital,
+        });
+
+        if (cuotaFilaRastro === null) {
+          throw new Error(
+            "No se encontró una cuota existente para enlazar la boleta del cobro adicional o del convenio"
+          );
+        }
+
         const pagoEspecialInsertado = await insertarPago({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
-          cuotaId: cuotaIdPagoEspecial,
+          cuotaId: cuotaFilaRastro,
           otros: otrosBig.toNumber(),
           mora: resultadoMora.montoAplicadoMora,
           boleta: montoBoleta.toNumber(),

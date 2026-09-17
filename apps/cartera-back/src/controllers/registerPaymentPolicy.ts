@@ -1342,3 +1342,57 @@ export const debeInsertarFilaParcialCuota = ({
   new Big(otros ?? 0).gt(0) ||
   new Big(pagoConvenio ?? 0).gt(0) ||
   new Big(rubros ?? 0).gt(0);
+
+/** Una cuota de la que se puede colgar un pago. */
+type CuotaColgable = { cuota_id: number } | null | undefined;
+
+/**
+ * A qué cuota se cuelga una fila de pago que el loop de cuotas NO escribió.
+ *
+ * La usan las dos rutas que crean filas así: el abono directo a capital y la
+ * "fila-rastro" que necesita una boleta cuando el cobro de rubros o el registro
+ * del convenio no alcanzaron a estamparse en ninguna fila de cuota.
+ *
+ * **Devuelve `null`, nunca 0, y ahí está todo el punto.** `insertarPago` trata el
+ * `cuotaId` 0 como "sin filtro de cuota": el left join pierde su predicado,
+ * queda ordenado por `pago_id` y hereda el `cuota_id` del pago MÁS VIEJO del
+ * crédito — que es la fila estructural de la cuota 0, porque `insertPayments` la
+ * inserta primera. Desde ahí la fila pasa a ser tratada como la cuota inicial:
+ *
+ *   * `updateInitialQuotaOtros` PISA `otros` en todas las filas de la cuota 0,
+ *     así que borra el cargo del rubro —o lo infla con los gastos del crédito—
+ *     sin tocar `rubros_pagos`. Queda el saldo del rubro descontado, el reclamo
+ *     diciendo que se cobró, y el pago sin mostrar el cobro: `otros` es la única
+ *     huella del cargo dentro de la boleta y de la factura;
+ *   * revertir esa fila recalcula la cuota 0 como NO pagada, porque la fila
+ *     estructural nace `no_required` y no suma. Y una vez en `pagado = false`
+ *     con boleta y aplicado en cero, cae en el predicado de
+ *     `shouldRemoveSameInstallmentPaymentOnReverse`: la reversa siguiente la
+ *     BORRA, y es el ancla que sostiene a un crédito CAIDO.
+ *
+ * Colgarla de una cuota pagada de verdad sí es seguro, y la diferencia es
+ * exactamente esa: esa cuota tiene un pago `validated` detrás que suma, así que
+ * `shouldInstallmentRemainPaidAfterReversal` la deja pagada al revertir.
+ *
+ * Con `null`, el llamador TIRA. Una boleta con plata que no encuentra ninguna
+ * cuota donde colgarse tiene que fallar ruidosa, no inventarse una asociación.
+ */
+export function resolverCuotaParaFilaSuelta(opciones: {
+  ultimaCuotaPagada?: CuotaColgable;
+  primeraPendiente?: CuotaColgable;
+  cuotaReferenciaCapital?: CuotaColgable;
+}): number | null {
+  const candidatas = [
+    opciones.ultimaCuotaPagada,
+    opciones.primeraPendiente,
+    opciones.cuotaReferenciaCapital,
+  ];
+
+  for (const c of candidatas) {
+    // El 0 se descarta explícitamente, no sólo por falsy: si alguna consulta
+    // devolviera la cuota inicial, dejarla pasar reabre el mismo agujero.
+    if (c?.cuota_id) return c.cuota_id;
+  }
+
+  return null;
+}

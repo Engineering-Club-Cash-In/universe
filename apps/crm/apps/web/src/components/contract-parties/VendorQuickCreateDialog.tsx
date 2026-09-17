@@ -49,6 +49,7 @@ export function VendorQuickCreateDialog({
 	const [dpi, setDpi] = useState("");
 	const [nombre, setNombre] = useState("");
 	const [genero, setGenero] = useState<VendorGender | "">("");
+	const [correo, setCorreo] = useState("");
 	const [telefono, setTelefono] = useState("");
 	// Vendedor registrado con el DPI consultado. Guarda también ese DPI para
 	// no actualizar a una persona con el DPI de otra.
@@ -78,6 +79,7 @@ export function VendorQuickCreateDialog({
 		setDpi(initialDpi ?? "");
 		setNombre("");
 		setGenero("");
+		setCorreo("");
 		setTelefono("");
 		setExistente(null);
 		datosDe.current = null;
@@ -98,7 +100,7 @@ export function VendorQuickCreateDialog({
 						dpi: dpiLimpio,
 						vendorType: actual.vendorType as "individual" | "empresa",
 						companyName: actual.companyName || undefined,
-						email: actual.email || undefined,
+						email: correo.trim() || actual.email || undefined,
 						address: actual.address || undefined,
 						gender: genero || null,
 					},
@@ -106,6 +108,7 @@ export function VendorQuickCreateDialog({
 			}
 			return client.createVendor({
 				name: nombre.trim(),
+				email: correo.trim() || undefined,
 				phone: telefono.trim() || undefined,
 				dpi: dpiLimpio,
 				vendorType: "individual",
@@ -124,10 +127,16 @@ export function VendorQuickCreateDialog({
 	});
 
 	const dpiCompleto = soloDigitosDpi(dpi).length === 13;
+	// El correo es opcional, pero el servidor lo rechaza si está mal escrito
+	const correoInvalido = correo.trim() !== "" && !/^\S+@\S+\.\S+$/.test(correo.trim());
 	// No se guarda mientras se consulta: los datos en pantalla podrían ser de
 	// otro DPI.
 	const puedeGuardar =
-		dpiCompleto && nombre.trim() && genero && !lookup.isPending;
+		dpiCompleto &&
+		nombre.trim() &&
+		genero &&
+		!correoInvalido &&
+		!lookup.isPending;
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -203,14 +212,32 @@ export function VendorQuickCreateDialog({
 						/>
 					</div>
 
+					<div className="space-y-2">
+						<Label htmlFor="quick-vendor-genero">Género</Label>
+						<VendorGenderSelect
+							id="quick-vendor-genero"
+							value={genero}
+							onChange={setGenero}
+						/>
+					</div>
+
 					<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 						<div className="space-y-2">
-							<Label htmlFor="quick-vendor-genero">Género</Label>
-							<VendorGenderSelect
-								id="quick-vendor-genero"
-								value={genero}
-								onChange={setGenero}
+							<Label htmlFor="quick-vendor-correo">Correo (opcional)</Label>
+							<Input
+								id="quick-vendor-correo"
+								type="email"
+								placeholder="correo@ejemplo.com"
+								value={correo}
+								onChange={(e) => setCorreo(e.target.value)}
+								aria-invalid={correoInvalido}
+								className={correoInvalido ? "border-destructive" : ""}
 							/>
+							{correoInvalido && (
+								<p className="text-destructive text-xs">
+									Escribe un correo válido o déjalo vacío.
+								</p>
+							)}
 						</div>
 						<div className="space-y-2">
 							<Label htmlFor="quick-vendor-telefono">Teléfono (opcional)</Label>

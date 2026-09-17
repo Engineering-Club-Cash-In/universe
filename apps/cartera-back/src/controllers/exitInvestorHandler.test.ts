@@ -94,3 +94,123 @@ describe("exitInvestorHandler", () => {
     expect(marcarLlamadoCon?.contexto).toContain("?");
   });
 });
+
+// ============================================================================
+// Guard de monto_aportado==0, activado SOLO con body.motivo ===
+// "devolucion_verificado". El endpoint es genérico (salida total de un
+// inversionista, transfiere saldo != 0 a CUBE a propósito); sin el flag debe
+// comportarse exactamente igual que antes de este guard, aunque venga
+// inversionista_id + creditos (ver revert 3d433df5e y el hilo de Codex sobre
+// por qué el guard incondicional rompía la salida total).
+// ============================================================================
+describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_verificado)", () => {
+  function makeDepsConGuard(
+    exitInvestorResultado: any,
+    montoPorCredito: Record<number, number>
+  ) {
+    let exitInvestorLlamadoCon: any = null;
+    return {
+      deps: {
+        exitInvestor: async (ctx: any) => {
+          exitInvestorLlamadoCon = ctx.body;
+          return exitInvestorResultado;
+        },
+        marcarDevolucionCompletadaSiCorresponde: async (creditoIds: number[], contexto: string) => {
+          marcarLlamadoCon = { creditoIds, contexto };
+          return { completados: creditoIds, diferidos: [] };
+        },
+        obtenerMontoAportadoEspejo: async (_inversionista_id: number, creditoIds: number[]) =>
+          new Map(creditoIds.map((id) => [id, montoPorCredito[id]])),
+      },
+      getExitInvestorLlamadoCon: () => exitInvestorLlamadoCon,
+    };
+  }
+
+  it("SIN motivo: saldo != 0 pasa igual a exitInvestor (comportamiento default, salida total)", async () => {
+    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
+      { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [{ credito_id: 78 }] },
+      { 78: 1500 }
+    );
+
+    const res = await exitInvestorHandler(
+      { body: { inversionista_id: 13, creditos: [78] }, set: { status: 200 } },
+      deps as any
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.creditos_omitidos).toBeUndefined();
+    expect(getExitInvestorLlamadoCon()).toEqual({ inversionista_id: 13, creditos: [78] });
+  });
+
+  it("con motivo=devolucion_verificado y espejo en 0: pasa el guard y llega a exitInvestor", async () => {
+    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
+      { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [{ credito_id: 78 }] },
+      { 78: 0 }
+    );
+
+    const res = await exitInvestorHandler(
+      { body: { inversionista_id: 13, creditos: [78], motivo: "devolucion_verificado" }, set: { status: 200 } },
+      deps as any
+    );
+
+    expect(res.success).toBe(true);
+    expect(getExitInvestorLlamadoCon()).toEqual({
+      inversionista_id: 13,
+      creditos: [78],
+      motivo: "devolucion_verificado",
+    });
+  });
+
+  it("con motivo=devolucion_verificado y espejo != 0: se omite, NO llega a exitInvestor", async () => {
+    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
+      { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [] },
+      { 78: 1500 }
+    );
+
+    const res = await exitInvestorHandler(
+      { body: { inversionista_id: 13, creditos: [78], motivo: "devolucion_verificado" }, set: { status: 200 } },
+      deps as any
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.creditos_omitidos).toEqual([78]);
+    expect(getExitInvestorLlamadoCon()).toBeNull();
+  });
+
+  it("con motivo=devolucion_verificado y sin fila en el espejo: se omite igual que uno con saldo (undefined !== 0)", async () => {
+    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
+      { success: true, creditos_procesados: [] },
+      {}
+    );
+
+    const res = await exitInvestorHandler(
+      { body: { inversionista_id: 13, creditos: [999], motivo: "devolucion_verificado" }, set: { status: 200 } },
+      deps as any
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.creditos_omitidos).toEqual([999]);
+    expect(getExitInvestorLlamadoCon()).toBeNull();
+  });
+
+  it("con motivo=devolucion_verificado, lote mixto: solo pasan los créditos con espejo en 0", async () => {
+    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
+      { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [{ credito_id: 78 }] },
+      { 78: 0, 141: 500 }
+    );
+
+    const res = await exitInvestorHandler(
+      { body: { inversionista_id: 13, creditos: [78, 141], motivo: "devolucion_verificado" }, set: { status: 200 } },
+      deps as any
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.creditos_omitidos).toEqual([141]);
+    expect(getExitInvestorLlamadoCon()).toEqual({
+      inversionista_id: 13,
+      creditos: [78],
+      motivo: "devolucion_verificado",
+    });
+    expect(marcarLlamadoCon?.creditoIds).toEqual([78]);
+  });
+});

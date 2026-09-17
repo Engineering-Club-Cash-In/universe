@@ -406,6 +406,12 @@ export const inversionistasRouter = new Elysia()
       body: t.Object({
         inversionista_id: t.Number({ minimum: 1 }),
         creditos: t.Array(t.Number({ minimum: 1 }), { minItems: 1 }),
+        // Opcional: cuando se pasa "devolucion_verificado", el handler exige
+        // monto_aportado==0 en el espejo antes de mover cada crédito a CUBE
+        // (ver guard en exitInvestorHandler.ts). Sin este campo el endpoint
+        // sigue siendo la salida TOTAL de un inversionista, que transfiere
+        // saldo != 0 a propósito.
+        motivo: t.Optional(t.Literal("devolucion_verificado")),
       }),
       detail: {
         summary: "Saca a un inversionista de los créditos indicados (CUBE absorbe) y lo marca como inactivo",

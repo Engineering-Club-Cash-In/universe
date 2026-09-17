@@ -24,8 +24,32 @@ describe("condicionUltimaCuotaPagada (ancla del abono directo a capital)", () =>
     expect(sql).toContain('"cartera"."pagos_credito"."abono_interes" > ');
 
     // Los valores, no sólo los nombres de columna: el crédito pedido, la cuota 0
-    // excluida, `pagado = true` (no false) y el umbral de plata en cero.
-    expect(params).toEqual([CREDITO_ID, 0, true, "0", "0", "0"]);
+    // excluida, `pagado = true` (no false), los dos estados de capital fuera y
+    // el umbral de plata en cero.
+    expect(params).toEqual([
+      CREDITO_ID,
+      0,
+      true,
+      "capital",
+      "capital_validated",
+      "0",
+      "0",
+      "0",
+    ]);
+  });
+
+  it("excluye los abonos directos a capital, que llevan plata pero no pagan cuota", () => {
+    // Su fila se escribe con pagado = true y monto_aplicado/abono_capital > 0,
+    // así que pasaría el filtro de plata. Sin esta exclusión, una cuota futura
+    // donde quedó mal anclado un abono viejo sigue contando como pagada y el
+    // defecto se reproduce solo.
+    const { sql } = render();
+    expect(sql).toContain('"cartera"."pagos_credito"."validation_status" not in');
+  });
+
+  it("NO excluye `reset`: es una cancelación con plata real", () => {
+    const { params } = render();
+    expect(params).not.toContain("reset");
   });
 
   it("NO exige cuotas_credito.pagado — esa columna sólo la escribe conta", () => {

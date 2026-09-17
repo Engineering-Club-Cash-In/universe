@@ -1,4 +1,4 @@
-import { and, eq, gt, or } from "drizzle-orm";
+import { and, eq, gt, notInArray, or } from "drizzle-orm";
 import { cuotas_credito, pagos_credito } from "../database/db";
 
 /**
@@ -8,14 +8,16 @@ import { cuotas_credito, pagos_credito } from "../database/db";
  * abre la compuerta del abono directo a capital sin `permite_abono_capital`.
  *
  * Exige que la fila del pago haya aplicado plata A LA CUOTA — `monto_aplicado`,
- * `abono_capital` o `abono_interes`. Eso deja fuera las dos clases de fila que
- * dicen `pagado = true` sin que nadie haya pagado la cuota:
+ * `abono_capital` o `abono_interes` — y que no sea un abono directo a capital.
+ * Eso deja fuera las tres clases de fila que dicen `pagado = true` sin que
+ * nadie haya pagado la cuota:
  *
  * 1. Filas históricas de import con `pagado = true` y todo en cero.
  * 2. Los recibos especiales de solo mora / solo otros, que se guardan con
  *    `pagado = true` y `monto_aplicado = 0` sobre una cuota que sigue ABIERTA y
  *    puede vencer a futuro (ver `updateCredit.ts`, el where de
  *    `recalcularPagosCredito`).
+ * 3. Los abonos directos a capital, que sí llevan plata pero no pagan cuota.
  *
  * ⚠️ NO agregar `monto_boleta` al `or`: no es plata aplicada a esta cuota, es
  * el total de la boleta, que `insertPayment` estampa IGUAL en todas las filas
@@ -42,6 +44,15 @@ export const condicionUltimaCuotaPagada = (credito_id: number) =>
     eq(cuotas_credito.credito_id, credito_id),
     gt(cuotas_credito.numero_cuota, 0),
     eq(pagos_credito.pagado, true),
+    // Un abono directo a capital NO es pago de cuota — lo dice el propio
+    // `registerPayment.ts` al elegir `capital_validated` justamente para que
+    // "quede fuera de la lógica de cuota". Pero su fila se escribe con
+    // `pagado = true` y `monto_aplicado`/`abono_capital` positivos, así que sin
+    // esta exclusión pasaría el filtro de plata: una cuota futura donde quedó
+    // mal anclado un abono viejo seguiría contando como pagada y el defecto se
+    // reproduciría solo. `reset` NO se excluye: es una cancelación con plata
+    // real (sacarlo mueve el ancla de 66 créditos).
+    notInArray(pagos_credito.validationStatus, ["capital", "capital_validated"]),
     or(
       gt(pagos_credito.monto_aplicado, "0"),
       gt(pagos_credito.abono_capital, "0"),

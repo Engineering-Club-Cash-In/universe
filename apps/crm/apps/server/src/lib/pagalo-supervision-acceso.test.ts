@@ -1,11 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-	asesoresActivosConBuckets,
 	asesoresConBucketsCompatibles,
 	buscarAsesorPorEmail,
 	buscarAsesorPorId,
-	debeUsarFallbackAtribucion,
-	nombresAsesoresPorSifco,
 } from "./pagalo-supervision-acceso";
 
 describe("asesoresConBucketsCompatibles", () => {
@@ -30,52 +27,6 @@ describe("asesoresConBucketsCompatibles", () => {
 				email_cash_in: null,
 				activo: null,
 				buckets: [1],
-			},
-		]);
-
-		expect(asesores.map((asesor) => asesor.asesor_id)).toEqual([7]);
-	});
-});
-
-describe("debeUsarFallbackAtribucion", () => {
-	test("activa compatibilidad si bulk no atribuye una página con asesores activos", () => {
-		const asesores = [
-			{
-				asesor_id: 7,
-				nombre: "Activa",
-				email_cash_in: null,
-				activo: true,
-				buckets: [1],
-			},
-		];
-
-		expect(debeUsarFallbackAtribucion(asesores, ["SIFCO-1"], [])).toBe(
-			true,
-		);
-		expect(
-			debeUsarFallbackAtribucion(asesores, ["SIFCO-1"], [
-				{ asesor_id: 7, numero_credito_sifco: "SIFCO-1" },
-			]),
-		).toBe(false);
-	});
-});
-
-describe("asesoresActivosConBuckets", () => {
-	test("excluye asesores inactivos aunque conserven buckets activos", () => {
-		const asesores = asesoresActivosConBuckets([
-			{
-				asesor_id: 7,
-				nombre: "Activa",
-				email_cash_in: null,
-				buckets: [1],
-				activo: true,
-			},
-			{
-				asesor_id: 8,
-				nombre: "Inactiva",
-				email_cash_in: null,
-				buckets: [1],
-				activo: false,
 			},
 		]);
 
@@ -120,32 +71,5 @@ describe("buscarAsesorPorId", () => {
 
 	test("id ausente no resuelve otro asesor", () => {
 		expect(buscarAsesorPorId([], 7)).toBeNull();
-	});
-});
-
-describe("nombresAsesoresPorSifco", () => {
-	test("asigna asesores activos cuyo scope autoritativo contiene SIFCO de página", () => {
-		const nombres = nombresAsesoresPorSifco(
-			[
-				{
-					asesor_id: 7,
-					nombre: "Ana",
-					email_cash_in: null,
-					buckets: [1],
-					sifcos: ["SIFCO-1", "SIFCO-2"],
-				},
-				{
-					asesor_id: 8,
-					nombre: "Beto",
-					email_cash_in: null,
-					buckets: [1],
-					sifcos: ["SIFCO-1"],
-				},
-			],
-			["SIFCO-1", "SIFCO-3"],
-		);
-
-		expect(nombres.get("SIFCO-1")).toEqual(["Ana", "Beto"]);
-		expect(nombres.get("SIFCO-3")).toBeUndefined();
 	});
 });

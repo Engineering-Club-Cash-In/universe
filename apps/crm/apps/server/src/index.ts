@@ -4,6 +4,7 @@ import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { z } from "zod";
 import {
 	getLeadProgress,
 	getRenapInfoController,
@@ -76,6 +77,11 @@ import { createContext } from "./lib/context";
 import { toDateStrGT } from "./lib/guatemala-month-window";
 import { getTestPhone, isTestModeEnabled } from "./lib/messaging-test-mode";
 import { autenticarNotificacionesCarteraBack } from "./lib/notifications-api-key-auth";
+import {
+	camposFiltroSupervision,
+	consultarSupervisionPagalo,
+	MAX_GRUPOS_POR_PAGINA,
+} from "./lib/pagalo-supervision-consulta";
 import { PERMISSIONS } from "./lib/roles";
 import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
 import { convenioDecisionRouter } from "./routers/convenio-decision";
@@ -1217,6 +1223,85 @@ app.post(
 			console.error("[ReciboPagoWhatsapp] Error:", err);
 			return c.json(
 				{ success: false, error: err.message || "Error al enviar el recibo" },
+				500,
+			);
+		}
+	},
+);
+
+// El límite es más alto que el de la bandeja del CRM (100) porque acá el
+// consumidor es cartera-back paginando para armar un XLSX/PDF, no un navegador
+// pintando filas.
+const MAX_LIMIT_SUPERVISION_HTTP = 1000;
+
+const esquemaSupervisionPagaloHttp = z.object({
+	...camposFiltroSupervision,
+	limit: z
+		.number()
+		.int()
+		.min(1)
+		.max(MAX_LIMIT_SUPERVISION_HTTP)
+		.default(MAX_GRUPOS_POR_PAGINA),
+	offset: z.number().int().min(0).default(0),
+});
+
+// Bandeja de supervisión Págalo para cartera-back (y con ella carteraFront).
+// Los grupos Págalo viven solo en la base del CRM, así que esta es la única
+// forma de que carteraFront los vea. Servidor-a-servidor con API key: quien
+// autoriza al usuario final es cartera-back (solo ADMIN/CONTA), por eso acá
+// no hay recorte por pool — el llamador ya viene autorizado a ver todo.
+app.get(
+	"/api/cartera/pagalo/supervision",
+	autenticarNotificacionesCarteraBack,
+	async (c) => {
+		const listaCsv = (valor: string | undefined) =>
+			valor
+				?.split(",")
+				.map((item) => item.trim())
+				.filter(Boolean);
+
+		const parseado = esquemaSupervisionPagaloHttp.safeParse({
+			estados: listaCsv(c.req.query("estados")),
+			problemasLink: listaCsv(c.req.query("problemasLink")),
+			soloHuerfanos: c.req.query("soloHuerfanos") === "true" || undefined,
+			antiguedadMinDias: c.req.query("antiguedadMinDias")
+				? Number(c.req.query("antiguedadMinDias"))
+				: undefined,
+			numeroSifco: c.req.query("numeroSifco") || undefined,
+			fechaDesde: c.req.query("fechaDesde") || undefined,
+			fechaHasta: c.req.query("fechaHasta") || undefined,
+			sortBy: c.req.query("sortBy") ?? undefined,
+			sortDir: c.req.query("sortDir") ?? undefined,
+			// Ausente = undefined para que mande el default del esquema, en vez de
+			// que cada capa invente el suyo: cartera-back resolvía el ausente como
+			// false y acá como true, y el mismo pedido devolvía 18 grupos o 0.
+			soloProblematicos: c.req.query("soloProblematicos")
+				? c.req.query("soloProblematicos") === "true"
+				: undefined,
+			limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
+			offset: c.req.query("offset") ? Number(c.req.query("offset")) : undefined,
+		});
+
+		if (!parseado.success) {
+			return c.json(
+				{
+					success: false,
+					error: "Parámetros inválidos",
+					detalle: parseado.error.issues,
+				},
+				400,
+			);
+		}
+
+		try {
+			const resultado = await consultarSupervisionPagalo(parseado.data, {
+				sifcosPermitidos: null,
+			});
+			return c.json({ success: true, ...resultado });
+		} catch (error) {
+			console.error("[Págalo/cartera] Error consultando la bandeja:", error);
+			return c.json(
+				{ success: false, error: "Error consultando la supervisión Págalo" },
 				500,
 			);
 		}

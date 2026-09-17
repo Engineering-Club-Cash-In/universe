@@ -493,9 +493,13 @@ export const creditRouter = new Elysia()
         excluir_pagados_mes,
       } = body;
 
-      if (mes === undefined || anio === undefined || !estado) {
+      // Mismos obligatorios que el GET (mes y anio): `estado` es un filtro
+      // opcional y el controller ya lo resuelve como "sin filtro" cuando falta.
+      // Pedirlo solo en esta variante rompía a quien busca por lista de SIFCOs
+      // sin acotar por estado, que es justo el caso que empuja a usar POST.
+      if (mes === undefined || anio === undefined) {
         set.status = 400;
-        return { message: "Faltan parámetros 'mes', 'anio' y/o 'estado'." };
+        return { message: "Faltan parámetros 'mes' y/o 'anio'." };
       }
       if (mes < 0 || mes > 12 || anio < 0) {
         set.status = 400;
@@ -582,15 +586,23 @@ export const creditRouter = new Elysia()
         perPage: t.Optional(t.Number()),
         numero_credito_sifco: t.Optional(t.String()),
         numeros_credito_sifco: t.Optional(t.Array(t.String())),
-        estado: t.Union([
-          t.Literal("ACTIVO"),
-          t.Literal("CANCELADO"),
-          t.Literal("INCOBRABLE"),
-          t.Literal("PENDIENTE_CANCELACION"),
-          t.Literal("EN_CONVENIO"),
-          t.Literal("MOROSO"),
-          t.Literal("CAIDO"),
-        ]),
+        // Opcional, igual que en el GET: el controller ya resuelve `estado`
+        // ausente como "sin filtro" (estadoParam queda undefined). Exigirlo solo
+        // acá rechazaba con 422 a quien busca por lista de SIFCOs sin querer
+        // acotar por estado — el que enriquece nombres de cliente en la bandeja
+        // Págalo, por ejemplo, que necesita el nombre sin importar el estado del
+        // crédito y solo cruza a POST cuando la lista pasa de 50.
+        estado: t.Optional(
+          t.Union([
+            t.Literal("ACTIVO"),
+            t.Literal("CANCELADO"),
+            t.Literal("INCOBRABLE"),
+            t.Literal("PENDIENTE_CANCELACION"),
+            t.Literal("EN_CONVENIO"),
+            t.Literal("MOROSO"),
+            t.Literal("CAIDO"),
+          ]),
+        ),
         excel: t.Optional(t.Boolean()),
         asesor_id: t.Optional(t.Number()),
         nombre_usuario: t.Optional(t.String()),

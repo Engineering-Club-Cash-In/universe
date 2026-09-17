@@ -4484,32 +4484,38 @@ export async function editarPago(pago_id: number, campos: {
 
     // Otros campos
     /**
-     * `otros` NO se puede editar si la boleta carga un cobro de rubros.
+     * Una boleta con cobro de rubros NO se edita desde acá. Ningún campo.
      *
-     * El total de rubros de una boleta no tiene columna propia: se SUMA a
-     * `otros`. Acá se pisaba esa columna sin enterarse de `rubros_pagos`, así
-     * que después de la edición los dos lados decían cosas distintas del mismo
-     * cobro — la validación le descuenta al rubro el monto ORIGINAL del
-     * reclamo, mientras los reportes y la facturación leen el `otros` nuevo.
-     * Según para qué lado se editara, se facturaba un cargo que nunca se cobró
-     * o se omitía uno que sí.
+     * El total de rubros no tiene columna propia: se SUMA a `otros`. Pero el
+     * daño no se limita a esa columna, y por eso el chequeo dejó de mirarla:
      *
-     * Se RECHAZA en vez de recalcular. Recalcular exigiría adivinar qué quiso
-     * decir el admin con el número que mandó —¿incluye el rubro o no?— y en
-     * plata no se adivina. Rechazar además deja el camino abierto: primero se
-     * revierte la boleta, que sí devuelve el rubro por su propia ruta, y
-     * después se registra de nuevo con el monto correcto.
+     *   * pisar `otros` borra el cargo del pago mientras el saldo del rubro
+     *     sigue descontado;
+     *   * y pisar `monto_boleta` o los abonos deja la boleta diciendo un total
+     *     que ya no incluye lo que el rubro se llevó. Bajar a Q20 una boleta de
+     *     Q1,000 con un reclamo de Q300 hace que la validación posterior le
+     *     descuente al rubro esos Q300 igual, con un comprobante que dice Q20.
+     *
+     * Es el mismo razonamiento —y el mismo texto— que el guard de
+     * `aplicarMontoAPago`. Acá había quedado atado a `otros`, que es justo el
+     * error que allá se corrigió: cerrar el campo que te señalaron en vez de la
+     * operación entera.
+     *
+     * Se RECHAZA en vez de recalcular. Adivinar si el número que mandó el admin
+     * incluye el rubro o no es exactamente lo que no se hace con plata. Y no
+     * cierra ningún camino: revertir la boleta devuelve el rubro por su propia
+     * ruta, y después se registra de nuevo con el monto correcto.
      */
-    if (campos.otros !== undefined) {
-      const reclamado = await totalReclamadoPorPago(pago_id);
-      if (reclamado.gt(0)) {
-        return {
-          success: false,
-          message: `Esta boleta cobra Q${reclamado.toFixed(2)} de cobros adicionales, que van incluidos en "otros": editarlo dejaría el cobro del rubro y el del pago diciendo cosas distintas. Revertí la boleta y volvé a registrarla con el monto correcto.`,
-        };
-      }
-      updateData.otros = campos.otros;
+    const reclamado = await totalReclamadoPorPago(pago_id);
+    if (reclamado.gt(0)) {
+      return {
+        success: false,
+        message: `Esta boleta cobra Q${reclamado.toFixed(2)} de cobros adicionales: no se puede editar desde acá sin dejar el cobro del rubro y el del pago diciendo cosas distintas. Revertí la boleta y volvé a registrarla con los datos correctos.`,
+      };
     }
+
+    // Otros campos
+    if (campos.otros !== undefined) updateData.otros = campos.otros;
     if (campos.mora !== undefined) updateData.mora = campos.mora;
     if (campos.monto_boleta !== undefined) updateData.monto_boleta = campos.monto_boleta;
     if (campos.observaciones !== undefined) updateData.observaciones = campos.observaciones;

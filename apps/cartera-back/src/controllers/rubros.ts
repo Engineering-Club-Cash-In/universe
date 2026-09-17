@@ -2109,11 +2109,21 @@ export async function aplicarRubrosDelPago(
     // que nadie le acreditó. Tirar acá tumba la transacción entera, que es lo
     // único que deja los dos lados diciendo lo mismo.
     //
-    // OJO: esto NO arregla que `/aplicar-pago` aplique boletas falsas en
-    // general. Esa ruta no tiene el chequeo de `paymentFalse` que `revalidatePayment`
-    // sí tiene, así que una boleta falsa SIN rubros se sigue aplicando entera.
-    // Es un agujero más grande y más viejo que este módulo, y cerrarlo cambia el
-    // comportamiento de todos los pagos de la empresa: va aparte.
+    // ⚠️ ALCANCE REAL, y es más ancho de lo que parece: esto rechaza TODA
+    // boleta falsa en `/aplicar-pago`, tenga rubros o no.
+    //
+    // El motivo es que este chequeo corre ANTES de leer `rubros_pagos`, y la
+    // función se llama incondicionalmente desde `aplicarPagoNormalEnTx` y desde
+    // la rama de capital — no sólo cuando hay rubros. Una versión anterior de
+    // este comentario decía que el agujero de `/aplicar-pago` quedaba abierto y
+    // que cerrarlo iba aparte; era falso, ya está cerrado acá.
+    //
+    // Se deja así porque aplicar una boleta que la empresa declaró falsa es
+    // aplicar plata que no entró, y `revalidatePayment` ya lo rechazaba de
+    // entrada: lo raro era la asimetría, no el bloqueo. Pero conviene saberlo al
+    // desplegar: `resetCredit` y la caída a incobrable marcan `paymentFalse` en
+    // BLOQUE sobre los pagos no pagados de un crédito, así que cualquier flujo
+    // que después reaplicara una de esas boletas ahora recibe este 409.
     throw new RubroError(
       409,
       `La boleta #${pago_id} está marcada como falsa: no se puede aplicar. Si la invalidación fue un error, revertila antes de volver a aplicar el pago.`

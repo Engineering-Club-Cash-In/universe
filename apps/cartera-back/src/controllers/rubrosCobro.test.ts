@@ -405,6 +405,27 @@ describe("aplicarRubrosDelPago — la boleta tiene que seguir viva", () => {
     expect(ej.escrituras).toEqual([]);
   });
 
+  it("rechaza la boleta falsa AUNQUE no tenga ningún rubro", async () => {
+    // El alcance real del guard, fijado a propósito porque es más ancho de lo
+    // que sugiere el nombre de la función: corre ANTES de leer `rubros_pagos` y
+    // la llaman incondicionalmente el flujo normal y el de capital, así que hoy
+    // NINGUNA boleta falsa se aplica, tenga rubros o no.
+    //
+    // Eso es un cambio de conducta de toda la empresa y merece un test, no un
+    // comentario: `revalidatePayment` ya rechazaba las falsas de entrada, así
+    // que lo raro era la asimetría — pero si alguien decide revertirlo, que sea
+    // a la vista y no por accidente.
+    const ej = ejecutorConCola([{ paymentFalse: true }]);
+
+    const error = await aplicarRubrosDelPago(77, ej).catch((e) => e);
+
+    expect(error).toBeInstanceOf(RubroError);
+    expect((error as InstanceType<typeof RubroError>).status).toBe(409);
+    // La cola tenía UNA sola entrada: si hubiera llegado a pedir los reclamos,
+    // la consulta habría rechazado por cola agotada en vez de dar este error.
+    expect(ej.escrituras).toEqual([]);
+  });
+
   it("sin fila de pago sale sin escribir, y sin tirar", async () => {
     // Acá NO se aborta, a diferencia de la boleta falsa: sin fila de pago
     // tampoco puede haber reclamos (lo impide la FK), así que no hay nada que

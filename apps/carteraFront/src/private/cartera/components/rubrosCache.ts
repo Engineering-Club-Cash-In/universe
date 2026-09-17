@@ -28,36 +28,6 @@ export function aplicarEdicionRubro(
 }
 
 /**
- * Deja la lista del crédito al día después de CREAR o ANULAR un rubro, y recién
- * entonces resuelve.
- *
- * Es el mismo agujero de TIEMPO que tenía la edición y que arregla
- * `sincronizarRubroEditado`: la lista vive en el componente padre y sigue
- * activa, así que el refetch salía solo — lo que faltaba era ESPERARLO. Sin el
- * await se volvía a la lista en el acto y, durante el viaje del GET, se pintaba
- * la de antes: el rubro recién creado no estaba (con el toast de "Rubro creado"
- * arriba, y en un crédito sin rubros el cartel de "no hay rubros" todavía a la
- * vista), y el recién anulado seguía diciendo "Activo" con su saldo pendiente de
- * antes, ofreciendo editar y anular — acciones que el servidor ya rechaza.
- *
- * No siembra nada, a diferencia del helper de edición, y no es una omisión:
- * `crearRubro` y `anularRubro` responden `void` porque el POST y el
- * POST /anular del backend no devuelven la fila. No hay "estado posterior a la
- * escritura" que poner en caché, así que el refetch es la única fuente y no hay
- * orden refresco/siembra que decidir.
- *
- * Que `invalidateQueries` se trague el error del refetch es lo que acá se
- * quiere: el cargo ya se creó o se anuló en la base, y una red caída después no
- * puede dejar al usuario atrapado en el formulario.
- */
-export async function refrescarRubros(
-  queryClient: QueryClient,
-  creditoId: number | null
-): Promise<void> {
-  await queryClient.invalidateQueries({ queryKey: [QK_RUBROS, creditoId] });
-}
-
-/**
  * Deja la lista del crédito al día después de editar un rubro, y recién
  * entonces resuelve.
  *
@@ -116,11 +86,10 @@ export async function refrescarRubros(
  * Todo va apuntado a `[QK_RUBROS, creditoId]`: sembrar por `rubro_id` sin mirar
  * de quién es la lista pondría el cargo de un cliente en la ficha de otro.
  */
-export async function sincronizarRubroEditado(
+async function refrescarYSembrarSiNoLlegoNada(
   queryClient: QueryClient,
   creditoId: number | null,
-  rubroId: number,
-  guardado: RubroGuardado | null
+  sembrar: (actuales: RubroCredito[] | undefined) => RubroCredito[] | undefined
 ): Promise<void> {
   const queryKey = [QK_RUBROS, creditoId];
 
@@ -147,9 +116,75 @@ export async function sincronizarRubroEditado(
   const noLlegoNada =
     estado !== undefined && estado.dataUpdatedAt === selloPrevio;
 
-  if (guardado && noLlegoNada) {
-    queryClient.setQueryData<RubroCredito[]>(queryKey, (actuales) =>
-      aplicarEdicionRubro(actuales, rubroId, guardado)
-    );
+  if (noLlegoNada) {
+    queryClient.setQueryData<RubroCredito[]>(queryKey, sembrar);
   }
+}
+
+export async function sincronizarRubroEditado(
+  queryClient: QueryClient,
+  creditoId: number | null,
+  rubroId: number,
+  guardado: RubroGuardado | null
+): Promise<void> {
+  await refrescarYSembrarSiNoLlegoNada(queryClient, creditoId, (actuales) =>
+    aplicarEdicionRubro(actuales, rubroId, guardado)
+  );
+}
+
+/**
+ * Lo mismo, para una ANULACIÓN. Comparte el helper y no por simetría: es
+ * literalmente la misma operación sobre el caché —parchar una fila con lo que el
+ * backend devolvió— y el mismo agujero si el refetch no trae nada.
+ *
+ * Acá duele más que al editar, porque la anulación deja la fila TERMINAL. Sin
+ * red, la lista sigue diciendo "Activo" con el saldo de antes y ofreciendo
+ * Editar y Anular: el usuario aprieta botones que el backend ya rechaza con 409.
+ * Con la fila sembrada —`anulado`, `completado`, `activo: false`, saldo 0—
+ * `estadoDeRubro` pinta "Anulado" y los dos botones desaparecen solos.
+ *
+ * Se parcha en vez de reemplazar, igual que al editar: la respuesta del POST es
+ * la fila cruda de `rubros`, sin `tipo_nombre` ni `abonado`.
+ */
+export async function sincronizarRubroAnulado(
+  queryClient: QueryClient,
+  creditoId: number | null,
+  rubroId: number,
+  anulado: RubroGuardado | null
+): Promise<void> {
+  await refrescarYSembrarSiNoLlegoNada(queryClient, creditoId, (actuales) =>
+    aplicarEdicionRubro(actuales, rubroId, anulado)
+  );
+}
+
+/**
+ * Y para un rubro RECIÉN CREADO, que en vez de parchar AGREGA.
+ *
+ * Mismo criterio, con una diferencia que obliga a pasar el nombre del tipo: acá
+ * no hay fila previa que parchar, y la respuesta del POST —igual que la del PUT—
+ * es la fila cruda de `rubros`, sin el `tipo_nombre` que el GET saca del join.
+ * Sembrarla pelada dejaría la columna "Tipo" en blanco, así que se usa el nombre
+ * del tipo que el usuario ACABA de elegir en el formulario. No se adivina de
+ * ninguna caché: es el dato que se tipeó.
+ *
+ * `abonado` arranca en cero porque un rubro nuevo no tiene abonos; es lo mismo
+ * que va a devolver el GET.
+ *
+ * Si el refetch sí trajo la lista, ésta no corre — así que no hay riesgo de
+ * duplicar la fila.
+ */
+export async function sincronizarRubroCreado(
+  queryClient: QueryClient,
+  creditoId: number | null,
+  creado: RubroGuardado | null,
+  tipoNombre: string
+): Promise<void> {
+  await refrescarYSembrarSiNoLlegoNada(queryClient, creditoId, (actuales) => {
+    if (!creado) return actuales;
+    const lista = actuales ?? [];
+    // Por si el refetch lo trajo y el sello no se movió por otra razón: agregar
+    // dos filas del mismo rubro sería peor que no agregar ninguna.
+    if (lista.some((r) => r.rubro_id === creado.rubro_id)) return lista;
+    return [...lista, { ...creado, tipo_nombre: tipoNombre, abonado: "0.00" }];
+  });
 }

@@ -159,8 +159,20 @@ export const getRubrosByCredito = async (credito_id: number): Promise<RubroCredi
   return Array.isArray(data?.rubros) ? data.rubros : [];
 };
 
-export const crearRubro = async (payload: CrearRubroPayload): Promise<void> => {
-  await api.post(`${API_URL}/rubros`, payload);
+/**
+ * Devuelve la fila creada —no `void`— por el mismo motivo que `editarRubro`: si
+ * el refetch de la lista no llega, es lo único con que sembrarla, y sin eso el
+ * toast de "Rubro creado" salía sobre una lista sin el rubro.
+ *
+ * Es la fila cruda de `rubros`: sin `tipo_nombre` (del join del GET) ni
+ * `abonado` (lo deriva el GET). `null` si la respuesta no la trae, para que
+ * quien la use no dé por hecho un cuerpo que no miró.
+ */
+export const crearRubro = async (
+  payload: CrearRubroPayload
+): Promise<RubroGuardado | null> => {
+  const { data } = await api.post(`${API_URL}/rubros`, payload);
+  return (data?.rubro as RubroGuardado | undefined) ?? null;
 };
 
 /**
@@ -192,14 +204,21 @@ export const editarRubro = async (
  *
  * El backend responde 403 si quien llama no es ADMIN, 400 si el motivo viene en
  * blanco y 409 —con un `message` de negocio— si el rubro ya estaba anulado o
- * completado. Devuelve `void` y no el rubro: quien anula refresca la lista
- * completa, que es la que decide qué se ve.
+ * completado.
+ *
+ * Devuelve la fila anulada. Acá estaba escrito que respondía `void` porque "quien
+ * anula refresca la lista completa", y las dos mitades eran falsas: el endpoint
+ * devuelve `{ success: true, rubro }` y el refresco puede no traer nada sin
+ * levantar error. Sin la fila, la lista se quedaba mostrándolo "Activo" con el
+ * saldo de antes y con los botones de editar y anular, que el servidor rechaza
+ * con 409.
  */
 export const anularRubro = async (
   rubro_id: number,
   payload: AnularRubroPayload
-): Promise<void> => {
-  await api.post(`${API_URL}/rubros/${rubro_id}/anular`, payload);
+): Promise<RubroGuardado | null> => {
+  const { data } = await api.post(`${API_URL}/rubros/${rubro_id}/anular`, payload);
+  return (data?.rubro as RubroGuardado | undefined) ?? null;
 };
 
 export const getHistorialRubro = async (rubro_id: number): Promise<EventoRubro[]> => {

@@ -55,7 +55,12 @@ import {
   type TipoRubro,
 } from "../services/rubros.services";
 import { ajustarApertura, type SesionRubros } from "./rubrosApertura";
-import { QK_RUBROS, refrescarRubros, sincronizarRubroEditado } from "./rubrosCache";
+import {
+  QK_RUBROS,
+  sincronizarRubroAnulado,
+  sincronizarRubroCreado,
+  sincronizarRubroEditado,
+} from "./rubrosCache";
 import { QK_HISTORIAL, olvidarHistorialRubro } from "./rubrosHistorialCache";
 import { QK_TIPOS, sincronizarTipoEditado } from "./rubrosTiposCache";
 
@@ -283,8 +288,6 @@ export default function RubrosCredito({
     [rubros]
   );
 
-  const refrescarLista = () => refrescarRubros(queryClient, creditoVisible);
-
   // Gate SOLO de creación: la lista y el historial se siguen viendo (es el
   // registro de lo que ya se le cobró al cliente) y la edición tampoco se toca
   // —el backend la permite y puede hacer falta corregir un monto ya cobrado—.
@@ -418,12 +421,22 @@ export default function RubrosCredito({
               setVista("crearTipo");
             }}
             onAdministrarTipos={() => setVista("tipos")}
-            onCreado={async () => {
+            onCreado={async (creado, tipoNombre) => {
               // Se ESPERA el refresco antes de volver, igual que en editar: sin
               // el await, el toast de "Rubro creado" salía sobre la lista de
               // antes —sin el rubro nuevo, y en un crédito que no tenía ninguno
               // todavía con el cartel de "no hay rubros" a la vista—.
-              await refrescarLista();
+              // Y si el refresco no trae nada —red caída, o el modal cerrado
+              // durante el POST, que deja la query DESHABILITADA y fuera del
+              // alcance del refetch—, se siembra la fila del POST. Con
+              // el refresco pelado de antes, que no sembraba, el toast de
+              // "Rubro creado" quedaba sobre una lista sin el rubro.
+              await sincronizarRubroCreado(
+                queryClient,
+                creditoVisible,
+                creado,
+                tipoNombre
+              );
               setBorrador(BORRADOR_VACIO);
               volver();
             }}
@@ -438,14 +451,22 @@ export default function RubrosCredito({
             key={rubroSel.rubro_id}
             rubro={rubroSel}
             onVolver={volver}
-            onAnulado={async () => {
+            onAnulado={async (anulado) => {
               // La anulación deja el rubro en saldo 0, inactivo y con un evento
               // nuevo en su historial. Las dos cachés que hablan de ese rubro se
               // ponen al día ANTES de volver: sin el await, la lista seguía
               // mostrándolo "Activo" con el saldo de antes y con los botones de
               // editar y anular, que el backend ya rechaza con 409.
+              // Y si el refresco no trae nada se siembra la fila anulada: el
+              // mismo agujero que tenía la edición. Sin eso, la fila queda
+              // TERMINAL pero ofreciendo Editar y Anular, que dan 409.
               olvidarHistorialRubro(queryClient, rubroSel.rubro_id);
-              await refrescarLista();
+              await sincronizarRubroAnulado(
+                queryClient,
+                creditoVisible,
+                rubroSel.rubro_id,
+                anulado
+              );
               volver();
             }}
           />
@@ -753,7 +774,13 @@ function VistaCrear({
   onCrearTipo: () => void;
   onAdministrarTipos: () => void;
   /** Puede devolver promesa: el refresco de la lista se espera antes de volver. */
-  onCreado: () => void | Promise<void>;
+  /**
+   * Recibe la fila que devolvió el POST y el NOMBRE del tipo elegido. El nombre
+   * no viene en la respuesta —lo agrega el join del GET—, así que si el refresco
+   * de la lista no llega, es lo único con que sembrar la fila sin dejar la
+   * columna "Tipo" en blanco.
+   */
+  onCreado: (creado: RubroGuardado | null, tipoNombre: string) => void | Promise<void>;
   /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
   onGuardando?: (v: boolean) => void;
 }) {
@@ -795,7 +822,7 @@ function VistaCrear({
         monto: Number(monto),
         descripcion: descripcion.trim(),
       }),
-    onSuccess: () => {
+    onSuccess: (creado) => {
       toast.success("Rubro creado");
       // Se DEVUELVE la promesa, no se descarta: React Query espera lo que
       // devuelva este callback antes de dar la mutación por terminada, así que
@@ -803,7 +830,7 @@ function VistaCrear({
       // formulario queda apagado hasta que la pantalla tenga el dato nuevo. Sin
       // devolverla, la mutación se daba por cerrada al responder el POST y los
       // botones revivían justo en el hueco en que la lista todavía era la vieja.
-      return onCreado();
+      return onCreado(creado, tipoElegido?.nombre ?? "");
     },
     onError: (e) => {
       // 403 = el asesor intentó un tipo obligatorio. 409 = regla de negocio
@@ -1146,7 +1173,8 @@ function VistaAnular({
   rubro: RubroCredito;
   onVolver: () => void;
   /** Puede devolver promesa: el refresco de la lista se espera antes de volver. */
-  onAnulado: () => void | Promise<void>;
+  /** Recibe la fila anulada que devolvió el POST (saldo 0, inactiva, anulada). */
+  onAnulado: (anulado: RubroGuardado | null) => void | Promise<void>;
   /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
   onGuardando?: (v: boolean) => void;
 }) {
@@ -1155,12 +1183,12 @@ function VistaAnular({
 
   const anular = useMutation({
     mutationFn: () => anularRubro(rubro.rubro_id, { motivo: motivo.trim() }),
-    onSuccess: () => {
+    onSuccess: (anulado) => {
       toast.success("Rubro anulado");
       // Se DEVUELVE la promesa (ver el mismo comentario en `VistaCrear`): la
       // vista se queda apagada hasta que la lista traiga el rubro ya anulado, en
       // vez de volver a una fila que todavía se ofrece para anular de nuevo.
-      return onAnulado();
+      return onAnulado(anulado);
     },
     onError: (e) => {
       // 403 = no es ADMIN. 409 = el rubro ya estaba anulado o completado (dos

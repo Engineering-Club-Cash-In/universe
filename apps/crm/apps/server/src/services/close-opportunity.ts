@@ -145,6 +145,7 @@ interface CreateCreditParams {
 	cuotaMensual?: string;
 	membershipCost?: number;
 	idealPaymentDateAdjustment?: string;
+	idealPaymentDateAdjustmentReferenceDate?: string | null;
 	isVehicleOwned?: boolean;
 	// Info del vehículo para el correo
 	vehiculo_marca?: string;
@@ -196,6 +197,7 @@ interface QuotationDataForBilling {
 	monthlyPayment: string | null; // Cuota mensual (para asegurar el valor que es)
 	membershipCost: string | null; // Membresía efectiva que debe viajar a cartera
 	idealPaymentDateAdjustment: string;
+	idealPaymentDateAdjustmentReferenceDate: string | null;
 	isInterno: boolean; // Créditos internos no cobran membresía
 	insuranceProvider: string | null; // Aseguradora elegida (gyt | universales)
 }
@@ -485,6 +487,8 @@ export async function getLatestApprovedQuotation(
 				monthlyPayment: quotations.monthlyPayment,
 				membershipCost: quotations.membershipCost,
 				idealPaymentDateAdjustment: quotations.idealPaymentDateAdjustment,
+				idealPaymentDateAdjustmentReferenceDate:
+					quotations.idealPaymentDateAdjustmentReferenceDate,
 				isInterno: quotations.isInterno,
 				insuranceProvider: quotations.insuranceProvider,
 			})
@@ -1025,9 +1029,31 @@ async function createCredit(
 		// sistema hubiera asignado por default. Solo aplica cuando diaPagoOriginalSistema
 		// quedó capturado en el 50% (assignInvestorAndAdvance) — es decir, solo cuando
 		// se eligió un día IA, nunca cuando se eligió 15/30 manualmente.
-		const fechaReferenciaPrimeraCuota = new Date();
 		const ajusteYaFinanciado =
 			Number(params.idealPaymentDateAdjustment ?? 0) > 0;
+		if (ajusteYaFinanciado && opportunity.diaPagoOriginalSistema == null) {
+			return {
+				success: false,
+				error:
+					"La cotización financiada no tiene el día original del sistema. Regenera la asignación antes de crear el crédito.",
+			};
+		}
+		if (
+			ajusteYaFinanciado &&
+			params.idealPaymentDateAdjustmentReferenceDate == null
+		) {
+			return {
+				success: false,
+				error:
+					"La cotización financiada no tiene fecha de referencia para generar el calendario. Regenera la asignación antes de crear el crédito.",
+			};
+		}
+		const fechaReferenciaPrimeraCuota =
+			params.idealPaymentDateAdjustmentReferenceDate != null
+				? new Date(
+						`${params.idealPaymentDateAdjustmentReferenceDate}T12:00:00.000Z`,
+					)
+				: new Date();
 		const ajusteCalculado =
 			opportunity.diaPagoOriginalSistema != null && !ajusteYaFinanciado
 				? calcularAjusteFechaIdeal({
@@ -1044,19 +1070,13 @@ async function createCredit(
 					})
 				: null;
 
-		const ajusteFechaIdeal = ajusteCalculado
-			? {
-					dia_pago_original_sistema: opportunity.diaPagoOriginalSistema as number,
-					dia_pago_mensual_elegido: diaPagoMensual,
-					dias_diferencia: ajusteCalculado.diasDiferencia,
-					dias_del_mes: ajusteCalculado.diasDelMes,
-					monto_interes: ajusteCalculado.montoInteres,
-					monto_membresia: ajusteCalculado.montoMembresia,
-					monto_servicios: ajusteCalculado.montoServicios,
-					monto_total: ajusteCalculado.montoTotal,
-					fecha_referencia: fechaReferenciaPrimeraCuota.toISOString(),
-				}
-			: undefined;
+		if (ajusteCalculado != null) {
+			return {
+				success: false,
+				error:
+					"La cotización no tiene financiado el ajuste por fecha ideal. Regenera la asignación antes de crear el crédito.",
+			};
+		}
 
 		const creditoResult = await createCreditoInCarteraBack({
 			opportunityId: opportunity.id,
@@ -1072,7 +1092,13 @@ async function createCredit(
 				? Number(params.cuotaMensual)
 				: Number.parseFloat(opportunity.cuotaMensual as string),
 			dia_pago_mensual: diaPagoMensual,
-			ajuste_fecha_ideal: ajusteFechaIdeal,
+			fecha_referencia_calendario:
+				opportunity.diaPagoOriginalSistema != null
+					? fechaReferenciaPrimeraCuota.toISOString()
+					: undefined,
+			desplazar_primera_cuota_un_mes:
+				opportunity.diaPagoOriginalSistema != null &&
+				diaPagoMensual < opportunity.diaPagoOriginalSistema,
 			tipoCredito: opportunity.creditType || "autocompra",
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,
 			seguro_10_cuotas: seguro,
@@ -1505,6 +1531,8 @@ export async function closeOpportunity(
 				quotation?.isInterno ?? false,
 			),
 			idealPaymentDateAdjustment: quotation?.idealPaymentDateAdjustment,
+			idealPaymentDateAdjustmentReferenceDate:
+				quotation?.idealPaymentDateAdjustmentReferenceDate,
 			isVehicleOwned: vehicleData?.isOwned ?? false,
 			// Enviar info del vehículo para que llegue en el correo de cartera
 			vehiculo_marca: vehicleData?.make ?? undefined,

@@ -130,6 +130,8 @@ export interface CreateCreditoInput {
 	aseguradora?: string;
 	como_se_entero?: string;
 	dia_pago_mensual?: number;
+	fecha_referencia_calendario?: string;
+	desplazar_primera_cuota_un_mes?: boolean;
 	// Ingreso adicional por elegir un día IA que cae después del día que el
 	// sistema hubiera asignado por default (solo presente cuando aplica el
 	// ajuste, ver apps/crm/apps/server/src/lib/fecha-ideal-pago-ajuste.ts).

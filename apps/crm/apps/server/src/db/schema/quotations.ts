@@ -1,5 +1,6 @@
 import {
 	boolean,
+	date,
 	decimal,
 	integer,
 	pgEnum,
@@ -193,6 +194,9 @@ export const quotations = pgTable("quotations", {
 	idealPaymentDateAdjustmentDays: integer("ideal_payment_date_adjustment_days")
 		.notNull()
 		.default(0),
+	idealPaymentDateAdjustmentReferenceDate: date(
+		"ideal_payment_date_adjustment_reference_date",
+	),
 	interestCost: decimal("interest_cost", {
 		precision: 16,
 		scale: 8,

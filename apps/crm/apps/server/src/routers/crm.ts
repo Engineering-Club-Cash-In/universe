@@ -75,6 +75,7 @@ import {
 	calcularAjusteFechaIdeal,
 	getDiaPagoOriginalSistema,
 } from "../lib/fecha-ideal-pago-ajuste";
+import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
 	puedeAsignarInversionistas,
 	puedeCambiarDiaPago,
@@ -7266,13 +7267,9 @@ export const crmRouter = {
 									diaPagoMensualElegido: input.diaPagoMensual,
 									capital: baseCapital,
 									porcentajeInteres: Number(quotation.interestRate),
-									membresiaMensual: Number(
-										quotation.extraMembershipCost ?? 0,
-									),
-									seguroMensual: Number(
-										quotation.extraInsuranceCost ?? 0,
-									),
-									gpsMensual: Number(quotation.extraGpsCost ?? 0),
+									membresiaMensual: Number(quotation.membershipCost ?? 0),
+									seguroMensual: Number(quotation.insuranceCost ?? 0),
+									gpsMensual: Number(quotation.gpsCost ?? 0),
 									fechaReferencia,
 								})
 							: null;
@@ -7304,6 +7301,10 @@ export const crmRouter = {
 							idealPaymentDateAdjustment:
 								idealPaymentDateAdjustment.toFixed(2),
 							idealPaymentDateAdjustmentDays,
+							idealPaymentDateAdjustmentReferenceDate:
+								idealPaymentDateAdjustment > 0
+									? toDateStrGT(fechaReferencia)
+									: null,
 							updatedAt: fechaReferencia,
 						})
 						.where(eq(quotations.id, quotation.id));

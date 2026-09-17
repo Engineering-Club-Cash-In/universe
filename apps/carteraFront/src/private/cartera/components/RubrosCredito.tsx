@@ -1732,7 +1732,21 @@ function VistaAdminTipos({
                                 });
                               }}
                             >
-                              <Power className="w-3.5 h-3.5 mr-1" />
+                              {/*
+                                Spinner en ESTE botón, que era el único que muta
+                                sin tenerlo. Antes el indicador de fila era
+                                implícito —sólo la fila que trabajaba quedaba
+                                apagada—, y al pasar el candado a `mutando` se
+                                apagan todas: sin esto, un Desactivar/Reactivar
+                                no muestra en ninguna parte qué está pasando.
+                                `filaOcupada` sigue siendo el que sabe CUÁL es la
+                                fila, que es para lo único que quedó.
+                              */}
+                              {filaOcupada ? (
+                                <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                              ) : (
+                                <Power className="w-3.5 h-3.5 mr-1" />
+                              )}
                               {t.activo ? "Desactivar" : "Reactivar"}
                             </Button>
                             <Button

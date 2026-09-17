@@ -1,5 +1,5 @@
 import { tokenDateSchema, type ReviewTransferStatus } from "../nexa/schemas";
-import type { CarteraPaymentClient } from "./cartera-client";
+import { formatAmount, type CarteraPaymentClient } from "./cartera-client";
 
 export type ApplicationClaim = {
   id: number;
@@ -48,6 +48,17 @@ export async function runApplicationWorkerOnce(options: {
       return true;
     }
 
+    const tokenDate = tokenDateSchema.parse(claim.tokenDate);
+    const unsupportedReason = getUnsupportedTransactionReason(claim);
+    if (unsupportedReason) {
+      await options.repository.finalizeApplication(claim.id, {
+        paymentId: null,
+        reviewStatus: "REJECTED",
+        failureReason: unsupportedReason,
+      }, now, claim.attemptCount);
+      return true;
+    }
+
     const creditoId = await options.repository.resolveCreditoId(claim.tokenIdentifier, claim.tokenPrefix);
     if (!creditoId) {
       await options.repository.finalizeApplication(claim.id, {
@@ -64,7 +75,7 @@ export async function runApplicationWorkerOnce(options: {
         reference: claim.reference,
         amount: claim.amount,
         currency: claim.currency,
-        tokenDate: tokenDateSchema.parse(claim.tokenDate),
+        tokenDate,
         transactionId: claim.transactionId,
       },
     });
@@ -95,6 +106,19 @@ export async function runApplicationWorkerOnce(options: {
     return true;
   }
   return true;
+}
+
+function getUnsupportedTransactionReason(claim: ApplicationClaim) {
+  if (claim.currency !== "GTQ") return "unsupported_currency";
+  try {
+    formatAmount(claim.amount);
+  } catch {
+    return "invalid_amount";
+  }
+  const reference = claim.reference.trim();
+  if (!reference || reference.length > 150) return "invalid_reference";
+  if (claim.transactionId.trim().length > 100) return "invalid_transaction_id";
+  return null;
 }
 
 function safeRejectionReason(reason: string) {

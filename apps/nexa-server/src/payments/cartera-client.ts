@@ -30,7 +30,7 @@ export class CarteraPaymentRequestError extends Error {
   readonly retryable = true;
 }
 
-function formatAmount(amount: number) {
+export function formatAmount(amount: number) {
   const value = String(amount);
   if (!Number.isFinite(amount) || amount <= 0 || !/^\d+(?:\.\d{1,2})?$/.test(value)) {
     throw new Error("Cartera payment amount must be positive with at most two decimal places");

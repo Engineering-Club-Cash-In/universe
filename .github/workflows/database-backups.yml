@@ -26,6 +26,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: database-backups-${{ github.event.pull_request.number || 'production' }}
+  cancel-in-progress: false
+
 jobs:
   validate:
     name: Validate database backup workflow
@@ -56,10 +60,6 @@ jobs:
     environment: production-backups
     permissions:
       contents: read
-    concurrency:
-      group: production-database-backups
-      cancel-in-progress: false
-
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

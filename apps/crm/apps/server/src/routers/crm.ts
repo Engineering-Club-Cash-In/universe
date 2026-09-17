@@ -568,9 +568,11 @@ export const crmRouter = {
 			.orderBy(companies.createdAt);
 	}),
 
-	// Catálogo completo para asignar la agencia desde análisis: getCompanies
-	// filtra por creador y a los analistas les devolvería vacío.
-	getCompaniesForContracts: analystProcedure.handler(async () => {
+	// Catálogo completo para asignar la agencia del vehículo (análisis y
+	// detalle de la oportunidad): getCompanies filtra por creador y a los
+	// analistas y asesores les devolvería casi vacío. Son las agencias y
+	// predios con los que se trabaja, no información de clientes.
+	getCompaniesForContracts: crmProcedure.handler(async () => {
 		return await db
 			.select({
 				id: companies.id,

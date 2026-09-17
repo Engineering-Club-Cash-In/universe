@@ -24,6 +24,7 @@ export function OpportunityContractPartyCard({
 	company,
 	vendors,
 	companies,
+	cargandoCatalogo,
 	disabled,
 	isSaving,
 	onAssignVendor,
@@ -44,6 +45,8 @@ export function OpportunityContractPartyCard({
 		companyName?: string | null;
 	}>;
 	companies: Array<{ id: string; name: string }>;
+	/** Catálogos en vuelo: sin esto, un vendedor aún no cargado parece borrado. */
+	cargandoCatalogo?: boolean;
 	disabled?: boolean;
 	isSaving?: boolean;
 	onAssignVendor: (vendorId: string | null) => void;
@@ -108,11 +111,19 @@ export function OpportunityContractPartyCard({
 	}
 
 	const vendor = vendors.find((v) => v.id === vendorId);
+	// Un vendedor asignado que ya no está en el catálogo fue borrado: la
+	// generación de contratos no lo encuentra y deja los campos del dueño
+	// vacíos, así que la ficha no puede decir que está lista.
 	const status: ContractPartyStatus = !vendorId
 		? { tipo: "vacio" }
-		: vendor && !vendor.gender
-			? { tipo: "incompleto", falta: "Falta género" }
-			: { tipo: "completo" };
+		: !vendor
+			? {
+					tipo: "incompleto",
+					falta: cargandoCatalogo ? "Cargando…" : "El vendedor ya no existe",
+				}
+			: !vendor.gender
+				? { tipo: "incompleto", falta: "Falta género" }
+				: { tipo: "completo" };
 
 	return (
 		<>
@@ -122,7 +133,12 @@ export function OpportunityContractPartyCard({
 				status={status}
 				seleccionado={
 					vendorId
-						? { id: vendorId, nombre: vendor?.name ?? "Cargando…" }
+						? {
+								id: vendorId,
+								nombre:
+									vendor?.name ??
+									(cargandoCatalogo ? "Cargando…" : "Vendedor no encontrado"),
+							}
 						: null
 				}
 				selector={

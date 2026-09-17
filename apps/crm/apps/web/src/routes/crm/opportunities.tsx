@@ -1005,6 +1005,17 @@ function RouteComponent() {
 			!!session?.user?.id,
 	});
 
+	// Catálogo completo de agencias para la ficha del contrato: getCompanies
+	// filtra por creador, así que ahí no aparecerían las demás empresas ya
+	// registradas y la agencia no se podría corregir.
+	const companiesForContractsQuery = useQuery({
+		...orpc.getCompaniesForContracts.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+	});
+
 	// Query for inversionistas
 	const inversionistasQuery = useQuery({
 		...orpc.getInversionistas.queryOptions({
@@ -1436,7 +1447,10 @@ function RouteComponent() {
 			vendorId={selectedOpportunity.vendorId}
 			company={selectedOpportunity.company}
 			vendors={vendorsQuery.data ?? []}
-			companies={companiesQuery.data ?? []}
+			companies={companiesForContractsQuery.data ?? []}
+			cargandoCatalogo={
+				vendorsQuery.isLoading || companiesForContractsQuery.isLoading
+			}
 			disabled={isWonLocked}
 			isSaving={updateOpportunityMutation.isPending}
 			onAssignVendor={(vendorId) =>

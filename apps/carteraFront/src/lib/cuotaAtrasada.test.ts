@@ -150,6 +150,17 @@ describe("estado visible del pago", () => {
       validacion: { label: "No válido", tone: "red" },
       cuota: { label: "Cuota pendiente", tone: "amber" },
     });
+
+    expect(estadoVisible({
+      pagado: true,
+      paymentFalse: false,
+      validationStatus: "reset",
+      cuota_pagada: true,
+    })).toEqual({
+      registro: { label: "Registrado completo", tone: "blue" },
+      validacion: { label: "Validado", tone: "green" },
+      cuota: { label: "Cuota pagada", tone: "green" },
+    });
   });
 });
 

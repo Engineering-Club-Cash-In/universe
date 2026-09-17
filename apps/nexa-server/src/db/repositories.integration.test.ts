@@ -81,6 +81,25 @@ integrationTest("readiness rejects the legacy schema and accepts the durable sch
   const current = await createApp(config, { db } as never).request("/ready");
   expect(current.status).toBe(200);
 
+  const repository = new DbPaymentTransactionRepository(db);
+  const pending = await repository.upsertReceived({
+    ...transaction,
+    reference: "readiness-legacy-pending",
+  });
+  await db.update(nexaPaymentTransactions)
+    .set({ processingStatus: "PENDING", failureReason: null })
+    .where(eq(nexaPaymentTransactions.id, pending.id));
+  const legacyPending = await createApp(config, { db } as never).request("/ready");
+  expect(legacyPending.status).toBe(503);
+  expect(await legacyPending.json()).toEqual({ ok: false, reason: "schema_not_migrated" });
+
+  const classifyLegacyPending = await Bun.file(
+    new URL("../../drizzle/0004_classify_legacy_pending.sql", import.meta.url),
+  ).text();
+  await pool.query(classifyLegacyPending);
+  const classified = await createApp(config, { db } as never).request("/ready");
+  expect(classified.status).toBe(200);
+
   const connection = await pool.connect();
   try {
     await connection.query("BEGIN");

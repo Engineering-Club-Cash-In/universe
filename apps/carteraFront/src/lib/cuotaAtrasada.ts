@@ -73,7 +73,7 @@ export function estadoVisiblePago(p: Pick<
         },
     validacion: anulado
       ? { label: "No válido", tone: "red" }
-      : p.validationStatus === "validated" || p.validationStatus === "capital_validated"
+      : p.validationStatus === "validated" || p.validationStatus === "capital_validated" || p.validationStatus === "reset"
         ? { label: "Validado", tone: "green" }
         : p.validationStatus === "no_required"
           ? { label: "No requiere validación", tone: "blue" }

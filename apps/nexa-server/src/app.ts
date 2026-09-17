@@ -43,6 +43,14 @@ export function createApp(config: AppConfig, deps: AppDependencies = createDepen
       if (!result.rows[0]?.ready) {
         return c.json({ ok: false, reason: "schema_not_migrated" }, 503);
       }
+      const legacy = await deps.db.execute<{ ready: boolean }>(sql`
+        SELECT NOT EXISTS (
+          SELECT 1 FROM public.nexa_payment_transactions WHERE processing_status = 'PENDING'
+        ) AS ready
+      `);
+      if (!legacy.rows[0]?.ready) {
+        return c.json({ ok: false, reason: "schema_not_migrated" }, 503);
+      }
       return c.json({ ok: true, version: appVersion });
     } catch {
       return c.json({ ok: false, reason: "database_unavailable" }, 503);

@@ -40,3 +40,14 @@ it("renderiza un pago anulado como no válido", () => {
   expect(html).toContain("No válido");
   expect(html).toContain("Cuota pendiente");
 });
+
+it("renderiza reset como estado final validado", () => {
+  const html = render({
+    pagado: true,
+    paymentFalse: false,
+    validationStatus: "reset",
+    cuota_pagada: true,
+  });
+  expect(html).toContain("Validado");
+  expect(html).not.toContain("Validación pendiente");
+});

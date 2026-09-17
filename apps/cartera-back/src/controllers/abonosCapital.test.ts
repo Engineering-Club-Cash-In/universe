@@ -26,30 +26,53 @@ const {
 type CreateDependencies = NonNullable<Parameters<typeof createAbonoCapital>[1]>;
 type UpdateDependencies = NonNullable<Parameters<typeof updateAbonoCapital>[2]>;
 
+import { pagos_credito_inversionistas_espejo } from "../database/db";
+
 const dialect = new PgDialect();
 const sqlDe = (condicion: unknown) => dialect.sqlToQuery(condicion as any).sql;
 
 // Mock del handle de transacción (tx) de drizzle. Simula:
 //   tx.select().from().innerJoin().where()  -> filas del espejo
+//   tx.select().from().where()              -> filas de cancelacionesAbiertas o pagosEspejo
 //   tx.delete().where()                     -> borrado idempotente (contado)
 //   tx.insert().values(vals).returning()    -> eco de lo insertado
 // y captura en `inserted` cada values() para poder afirmar sobre él, y en
 // `selectWhereSql` la condición del SELECT ya renderizada a SQL (para
 // verificar el filtro de CUBE sin depender de que el mock lo aplique de
 // verdad — acá se ignora la condición y siempre se devuelve `espejoRows`).
-function makeTx(espejoRows: any[], cancelacionesAbiertasRows: any[] = []) {
+function makeTx(
+  espejoRows: any[],
+  cancelacionesAbiertasRows: any[] = [],
+  pagosEspejoRows?: any[]
+) {
   const inserted: any[] = [];
   const state = { deleteCalls: 0, selectWhereSql: undefined as string | undefined };
+  const effectivePagosEspejo =
+    pagosEspejoRows !== undefined
+      ? pagosEspejoRows
+      : cancelacionesAbiertasRows
+          .filter((f: any) => f.pago_espejo_id != null)
+          .map((f: any) => ({ id: f.pago_espejo_id, estado_liquidacion: "NO_LIQUIDADO" }));
+
   const tx: any = {
     select: () => ({
-      from: () => ({
+      from: (table: any) => ({
         innerJoin: () => ({
           where: (condicion: unknown) => {
             state.selectWhereSql = sqlDe(condicion);
             return Promise.resolve(espejoRows);
           },
         }),
-        where: () => Promise.resolve(cancelacionesAbiertasRows),
+        where: () => {
+          if (table === pagos_credito_inversionistas_espejo) {
+            return Promise.resolve(
+              effectivePagosEspejo.filter(
+                (p: any) => p.estado_liquidacion !== "LIQUIDADO"
+              )
+            );
+          }
+          return Promise.resolve(cancelacionesAbiertasRows);
+        },
       }),
     }),
     delete: () => ({
@@ -368,6 +391,33 @@ describe("registrarCancelacionEspejo", () => {
     await expect(registrarCancelacionEspejo(tx, 1)).rejects.toThrow(
       /\[CANCELACION_EN_CALCULO_PENDIENTE\]/
     );
+  });
+
+  it("permite re-aceptar si la cancelación apunta a un snapshot descartado/eliminado (pago_espejo_id huérfano)", async () => {
+    const { tx, inserted } = makeTx(
+      [{ inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" }],
+      [{ abono_id: 42, pago_espejo_id: 888 }],
+      [] // El snapshot 888 fue eliminado (p. ej. descartado con /deletePagosEspejoNoLiquidados)
+    );
+
+    const res = await registrarCancelacionEspejo(tx, 1);
+    expect(res.insertados).toBe(1);
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].inversionista_id).toBe(10);
+    expect(inserted[0].monto).toBe("1000");
+  });
+
+  it("permite re-aceptar si el snapshot referenciado ya fue LIQUIDADO", async () => {
+    const { tx, inserted } = makeTx(
+      [{ inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" }],
+      [{ abono_id: 42, pago_espejo_id: 888 }],
+      [{ id: 888, estado_liquidacion: "LIQUIDADO" }] // No está pendiente
+    );
+
+    const res = await registrarCancelacionEspejo(tx, 1);
+    expect(res.insertados).toBe(1);
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].inversionista_id).toBe(10);
   });
 
   it("reconcilia cancelaciones previas y borra abiertas si solo queda CUBE en el espejo", async () => {

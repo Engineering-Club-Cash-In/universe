@@ -1,5 +1,5 @@
-import { eq, and, sql } from "drizzle-orm";
-import { abonos_capital, creditos_inversionistas_espejo, inversionistas } from "../database/db";
+import { eq, and, sql, inArray, ne } from "drizzle-orm";
+import { abonos_capital, creditos_inversionistas_espejo, inversionistas, pagos_credito_inversionistas_espejo } from "../database/db";
 import { db } from "../database";
 import Big from "big.js";
 import { obtenerSumaComprasPendientes } from "../utils/comprasAjuste";
@@ -358,8 +358,11 @@ export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
   // 2. Idempotencia y reconciliación: reemplazar las cancelaciones ABIERTAS previas
   //    del crédito (una re-aceptación no debe acumular). Solo las no-liquidadas.
   //    Portero financiero: si alguna cancelación abierta ya entró en un cálculo
-  //    de pagos (pago_espejo_id != null), borrarla y re-insertarla causaría un
-  //    doble pago al inversionista. Se debe liquidar o descartar el cálculo primero.
+  //    de pagos activo (pago_espejo_id apunta a un snapshot no liquidado que existe),
+  //    borrarla y re-insertarla causaría un doble pago al inversionista. Se debe liquidar
+  //    o descartar el cálculo primero.
+  //    Si el snapshot ya fue eliminado/descartado (p. ej. vía /deletePagosEspejoNoLiquidados),
+  //    el ID huérfano no debe bloquear la re-aceptación.
   //    Esta reconciliación debe correr aun si en el espejo solo queda CUBE, para
   //    limpiar cancelaciones abiertas previas o proteger aquellas ya en cálculo.
   const cancelacionesAbiertas = await tx
@@ -376,11 +379,33 @@ export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
       )
     );
 
-  const enEspejo = cancelacionesAbiertas.filter((f: any) => f.pago_espejo_id != null);
+  const idsEspejoCandidatos = cancelacionesAbiertas
+    .map((f: { abono_id: number; pago_espejo_id: number | null }) => f.pago_espejo_id)
+    .filter((id: number | null | undefined): id is number => id != null);
+
+  let enEspejo: typeof cancelacionesAbiertas = [];
+  if (idsEspejoCandidatos.length > 0) {
+    const snapshotsActivos = await tx
+      .select({ id: pagos_credito_inversionistas_espejo.id })
+      .from(pagos_credito_inversionistas_espejo)
+      .where(
+        and(
+          inArray(pagos_credito_inversionistas_espejo.id, idsEspejoCandidatos),
+          ne(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO")
+        )
+      );
+
+    const idsActivos = new Set(snapshotsActivos.map((s: { id: number }) => s.id));
+    enEspejo = cancelacionesAbiertas.filter(
+      (f: { abono_id: number; pago_espejo_id: number | null }) =>
+        f.pago_espejo_id != null && idsActivos.has(f.pago_espejo_id)
+    );
+  }
+
   if (enEspejo.length > 0) {
     throw new Error(
       `[CANCELACION_EN_CALCULO_PENDIENTE] El crédito ${credito_id} tiene ${enEspejo.length} cancelación(es) que ya entraron ` +
-        `en un cálculo de pagos (espejo id: ${enEspejo.map((f: any) => f.pago_espejo_id).join(", ")}). ` +
+        `en un cálculo de pagos (espejo id: ${enEspejo.map((f: { pago_espejo_id: number | null }) => f.pago_espejo_id).join(", ")}). ` +
         `Ese monto ya quedó congelado para liquidar: hay que liquidar o descartar el espejo antes de re-aceptar la devolución.`
     );
   }

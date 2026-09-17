@@ -743,6 +743,13 @@ export function PagoForm() {
                 rubrosActual={rubrosActual}
                 convenioActivoInfo={convenioActivoInfo}
                 cuotaMensualAPagar={dataCredito.cuotaMensualAPagar}
+                // Los valores VIVOS de formik: `NumberInput` usa `setFieldValue`,
+                // así que esto re-renderiza mientras el asesor tipea y el total
+                // no queda congelado en el valor inicial.
+                otrosFormulario={Number(formik.values.otros) || 0}
+                abonoDirectoCapitalFormulario={
+                  Number(formik.values.abono_directo_capital) || 0
+                }
                 abonosParciales={(() => {
                   if (!abonosCuota || displayedPartialContribution === 0) {
                     return null;

@@ -12,7 +12,7 @@ import { BadgeCheck, AlertTriangle, FileText, ChevronDown, ChevronUp, Calendar, 
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import type { RubroPendiente } from "../services/services";
-import { sumaQ } from "@/lib/moneda";
+import { calcularTotalACobrar } from "./totalACobrar";
 
 export function MiniCardCredito({
   credito,
@@ -30,6 +30,8 @@ export function MiniCardCredito({
   rubrosActual,
   convenioActivoInfo,
   cuotaMensualAPagar,
+  otrosFormulario,
+  abonoDirectoCapitalFormulario,
   abonosParciales,
 }: {
   credito: any;
@@ -107,6 +109,13 @@ export function MiniCardCredito({
   pagosConvenio?: any[]; // 👈 Opcional
 } | null;
   cuotaMensualAPagar?: string;
+  /**
+   * Los dos campos del FORMULARIO de pago que el motor resta ANTES de repartir
+   * (`boleta − otros − abono directo`). Sin ellos el "Total a Cobrar" pide de
+   * menos y la cuota queda corta.
+   */
+  otrosFormulario?: number;
+  abonoDirectoCapitalFormulario?: number;
   abonosParciales?: {
     abono_capital: number;
     abono_interes: number;
@@ -185,14 +194,33 @@ export function MiniCardCredito({
   const convenioNum = Number(convenioActivoInfo?.cuotaConvenioAPagar ?? 0) || 0;
   const abonosNum = abonosParciales?.total ?? 0;
 
-  // El motor de pagos cobra en cascada: otros → mora → RUBROS → convenio →
-  // cuotas. El asesor tiene que ver UNA sola cifra y que esa cifra contemple
-  // todo lo que la boleta se va a llevar; si no, cobra de menos. `sumaQ` suma
-  // en centavos enteros para no descuadrar contra el `Big` del backend.
-  const totalACobrar = Math.max(
-    0,
-    sumaQ([moraNum, rubrosNum, convenioNum, cuotaNum, -abonosNum]),
-  );
+  // El asesor tiene que ver UNA sola cifra y que esa cifra contemple todo lo que
+  // la boleta se va a llevar; si no, cobra de menos y la cuota queda corta con
+  // el cliente ya ido.
+  //
+  // Acá faltaban los DOS campos del formulario, `otros` y
+  // `abono_directo_capital`: los dos salen de la misma línea del motor
+  // (`boleta − otros − abono directo`) y de ese resto recién salen mora, rubros
+  // y la cuota. Con cuota Q1,000, rubros Q300 y otros Q100 la tarjeta decía
+  // Q1,300, y cobrar eso dejaba Q900 para la cuota.
+  //
+  // El cálculo vive en `totalACobrar.ts` —puro y con tests— porque acá dentro no
+  // hay forma de fijarlo: `carteraFront` no tiene testing-library.
+  //
+  // ⚠️ Corrección al comentario que estaba acá: decía que la cascada es
+  // "otros → mora → rubros → CONVENIO → cuotas", y el convenio NO consume la
+  // boleta (se registra y se acredita, pero no descuenta). Eso contradecía al
+  // comentario del escalón 4 de `PagoForm`. El convenio se suma igual a este
+  // total por herencia deliberada; ver el docstring del módulo.
+  const totalACobrar = calcularTotalACobrar({
+    mora: moraNum,
+    rubros: rubrosNum,
+    convenio: convenioNum,
+    cuota: cuotaNum,
+    abonosParciales: abonosNum,
+    otros: otrosFormulario ?? 0,
+    abonoDirectoCapital: abonoDirectoCapitalFormulario ?? 0,
+  });
   // Sin mora, sin rubros y sin convenio no hay nada que combinar: la tarjeta
   // amarilla sigue siendo la de "Abonos Realizados" de siempre (el 99% de la
   // cartera se ve exactamente igual que antes de este cambio).

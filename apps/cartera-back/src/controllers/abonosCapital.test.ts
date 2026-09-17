@@ -327,27 +327,53 @@ describe("registrarCancelacionEspejo", () => {
     expect(inserted[0].monto).toBe("1000.5");
   });
 
-  it("la query del espejo excluye a CUBE (id 86)", async () => {
+  it("excluye a CUBE por id (86) aunque no tenga el nombre esperado", async () => {
     // CUBE nunca sale del crédito: una CANCELACION a su nombre no
     // corresponde a nada real y nunca se liquida (CUBE no pasa por el flujo
     // de liquidación — confirmado en producción: decenas de filas
-    // CANCELACION a inversionista_id=86, todas con liquidado=false). El
-    // filtro va en la query, no en un `if` después del loop, para que no
-    // dependa de que nadie lo repita si se agrega otro punto de inserción.
-    //
-    // El mock de `where()` no aplica la condición (siempre devuelve
-    // `espejoRows` tal cual), así que lo único verificable acá es que la
-    // query GENERADA excluye a CUBE — no que el resultado la respete, eso
-    // lo garantiza Postgres al ejecutarla de verdad.
+    // CANCELACION a inversionista_id=86, todas con liquidado=false).
+    const { tx, inserted } = makeTx([
+      { inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" },
+      { inversionista_id: 86, monto_aportado: "5000", nombre: "Cube Investments S.A." },
+    ]);
+
+    const res = await registrarCancelacionEspejo(tx, 1);
+
+    expect(res.insertados).toBe(1);
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].inversionista_id).toBe(10);
+  });
+
+  it("excluye a CUBE por nombre aunque su id histórico sea distinto de 86", async () => {
+    // Regresión del comment de review: el filtro de exclusión debe usar
+    // exactamente el mismo criterio que payments.ts::esCube (ID primero,
+    // nombre como respaldo). Antes este filtro vivía en el WHERE de SQL como
+    // `ne(inversionista_id, 86)`, así que una fila histórica de CUBE con
+    // otro ID pasaba el filtro acá, generaba una CANCELACION nueva, y
+    // payments.ts la reconocía como CUBE por nombre y la excluía de todo
+    // cálculo — dejando otra vez el mismo dato fantasma que este guard
+    // existe para evitar.
+    const { tx, inserted } = makeTx([
+      { inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" },
+      { inversionista_id: 999, monto_aportado: "5000", nombre: "Cube Investments S.A." },
+    ]);
+
+    const res = await registrarCancelacionEspejo(tx, 1);
+
+    expect(res.insertados).toBe(1);
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].inversionista_id).toBe(10);
+  });
+
+  it("la query del espejo solo filtra por credito_id (el filtro de CUBE es en JS)", async () => {
     const { tx, state } = makeTx([
       { inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" },
     ]);
 
     await registrarCancelacionEspejo(tx, 1);
 
-    expect(state.selectWhereSql).toContain("<>");
     expect(state.selectWhereSql).toContain("credito_id");
-    expect(state.selectWhereSql).toContain("inversionista_id");
+    expect(state.selectWhereSql).not.toContain("inversionista_id");
   });
 });
 

@@ -37,6 +37,7 @@ import {
   PendingReturnAuthorizationError,
   PENDING_RETURN_AUTHORIZATION_CODE,
 } from "../utils/pendingReturnGuard";
+import { esCube } from "../utils/devolucionCompletada";
 
 export const crearResumenAbonosCuota = (input: Parameters<
   typeof calcularResumenAbonosCuota
@@ -55,19 +56,11 @@ export const crearResumenAbonosCuota = (input: Parameters<
 // con assignCapital. Toda compra de cartera se le hace a Cube.
 const CUBE_ID = 86;
 
-/**
- * Único punto de este archivo que decide "¿este inversionista es CUBE?".
- * Por ID primero — es la fuente canónica en todo el resto del código
- * (investor.ts, assignCapital.ts, devolucionCompletada.ts) — con el nombre
- * como red de seguridad para datos históricos con el ID distinto, no como vía
- * principal: guards que dependen de "nunca tratar a CUBE como un
- * inversionista que sale" (ver aplicarDevolucionCube más abajo) se
- * desactivarían solos, sin error, si alguien renombra el inversionista y el
- * chequeo fuera solo por nombre.
- */
-const esCube = (inv: { inversionista_id: number; nombre: string }): boolean =>
-  inv.inversionista_id === CUBE_ID ||
-  inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+// `esCube` se importa de devolucionCompletada.ts (no se redefine acá): debe
+// ser EXACTAMENTE el mismo criterio que usa abonosCapital.ts al decidir si
+// generar una CANCELACION, o una fila histórica de CUBE con ID distinto
+// pasaría el filtro de creación allá y quedaría igual excluida de todo
+// cálculo acá — el mismo dato fantasma que este guard evita.
 
 /**
  * ¿A este inversionista le toca la devolución COMPLETA de su capital en este
@@ -535,9 +528,18 @@ export function resolverAbonosNoLiquidados(params: {
     .filter((a) => !(isCube && a.tipo === "CANCELACION"))
     .map((a) => a.abono_id);
 
+  // abonoCapitalId debe apuntar a una fila realmente reflejada en el pago
+  // (sumada o consumida), nunca a abonosNoLiquidados[0] a secas: si la
+  // CANCELACION de CUBE ignorada es la única fila pendiente,
+  // abonoIdsConsumidos queda vacío y no hay ningún abono que enlazar —
+  // dejar el id crudo del primero (aunque sea el de CUBE) generaría un
+  // abono_capital_detalle fantasma vía resumeInvestor, apuntando a capital
+  // que ni se sumó ni se consumió.
+  const abonoCapitalId = abonoIdsConsumidos.length > 0 ? abonoIdsConsumidos[0] : null;
+
   return {
     abonoCapital,
-    abonoCapitalId: abonosNoLiquidados[0].abono_id,
+    abonoCapitalId,
     abonoIdsConsumidos,
     saltado: false,
   };

@@ -19,6 +19,25 @@ import {
 
 export const CUBE_ID = 86;
 
+/**
+ * Único punto del proyecto que decide "¿este inversionista es CUBE?".
+ * Por ID primero — es la fuente canónica — con el nombre como red de
+ * seguridad para filas históricas donde el ID quedó distinto.
+ *
+ * Exportado desde acá (no redefinido por archivo) porque dos guards
+ * independientes dependen de que ambos usen EXACTAMENTE el mismo criterio:
+ * `payments.ts::esDevolucionCompleta` (nunca tratar a CUBE como saliente) y
+ * `abonosCapital.ts::registrarCancelacionEspejo` (nunca generarle una
+ * CANCELACION). Si cada uno filtrara solo por `inversionista_id === 86`,
+ * una fila histórica de CUBE con otro ID pasaría el filtro de creación en
+ * abonosCapital.ts pero payments.ts la reconocería como CUBE por nombre y
+ * la excluiría de todo cálculo — recreando el mismo dato fantasma que este
+ * guard existe para evitar.
+ */
+export const esCube = (inv: { inversionista_id: number; nombre: string }): boolean =>
+  inv.inversionista_id === CUBE_ID ||
+  inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+
 // Placeholder del usuario autenticado, igual que en devolucion.ts y
 // updateCredit.ts mientras no se propague el usuario real hasta acá.
 const USUARIO_SISTEMA_ID = 1;

@@ -1438,6 +1438,26 @@ describe("resolverAbonosNoLiquidados", () => {
     expect(res.saltado).toBe(true);
   });
 
+  it("inversionista normal (no-CUBE) con varias filas: abonoCapitalId sigue siendo el primer id crudo, sin cambio de comportamiento", () => {
+    // El fix de abonoCapitalId solo cambia el caso isCube=true (ver describe
+    // "esCube" más abajo). Para el caso normal, isCube=false hace que el
+    // filtro `!(isCube && ...)` sea siempre true, así que abonoIdsConsumidos
+    // es el array completo en el mismo orden — este test fija ese contrato.
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [
+        { abono_id: 5, tipo: "CAPITAL", monto: "300" },
+        { abono_id: 6, tipo: "CANCELACION", monto: "9999" },
+      ],
+      abonoCapitalBase: new Big(0),
+      montoAportado: "9999",
+      devolucionCompleta: false,
+      isCube: false,
+    });
+
+    expect(res.abonoIdsConsumidos).toEqual([5, 6]);
+    expect(res.abonoCapitalId).toBe(5);
+  });
+
   it("CAPITAL se suma normal, para CUBE también", () => {
     const res = resolverAbonosNoLiquidados({
       abonosNoLiquidados: [{ abono_id: 1, tipo: "CAPITAL", monto: "500" }],
@@ -1521,12 +1541,12 @@ describe("resolverAbonosNoLiquidados", () => {
 });
 
 describe("esCube (implícito vía resolverAbonosNoLiquidados)", () => {
-  // No hay export directo de esCube/esDevolucionCompleta (son privados del
-  // módulo), pero este es exactamente el escenario que rompía antes: CUBE
-  // detectado SOLO por nombre exacto. Si alguien renombra el inversionista
-  // en la base, `isCube` daba false para todas sus filas y el guard de
-  // devolución dejaba de aplicar — silenciosamente, sin error. El fix agrega
-  // `inversionista_id === CUBE_ID (86)` como chequeo primario.
+  // esCube ahora se importa de devolucionCompletada.ts (exportado, no
+  // privado de este módulo), pero el escenario de regresión sigue siendo el
+  // mismo: CUBE detectado SOLO por nombre exacto. Si alguien renombra el
+  // inversionista en la base, `isCube` daba false para todas sus filas y el
+  // guard de devolución dejaba de aplicar — silenciosamente, sin error. El
+  // fix agrega `inversionista_id === CUBE_ID (86)` como chequeo primario.
   it("regla de negocio: aunque cambie el nombre, el guard de resolverAbonosNoLiquidados debe evaluarse por isCube pasado explícito", () => {
     // Esto prueba el contrato del helper (que sí es público): si isCube=true
     // (como resolvería esCube por ID, sin importar el nombre), una
@@ -1541,5 +1561,40 @@ describe("esCube (implícito vía resolverAbonosNoLiquidados)", () => {
 
     expect(res.abonoCapital.toString()).toBe("0");
     expect(res.abonoIdsConsumidos).toEqual([]);
+  });
+
+  it("abonoCapitalId no apunta a una CANCELACION de CUBE ignorada cuando es la única fila pendiente", () => {
+    // Regresión del comment de review: antes abonoCapitalId era siempre
+    // abonosNoLiquidados[0].abono_id, sin filtrar. Si esa primera fila era
+    // justo la CANCELACION de CUBE que abonoIdsConsumidos excluye, el pago
+    // quedaba enlazado (vía abono_capital_id) a una fila que ni se sumó ni
+    // se consumió — resumeInvestor la expone luego como
+    // abono_capital_detalle, generando metadata de auditoría falsa.
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 66, tipo: "CANCELACION", monto: "50000" }],
+      abonoCapitalBase: new Big(100),
+      montoAportado: "50000",
+      devolucionCompleta: false,
+      isCube: true,
+    });
+
+    expect(res.abonoIdsConsumidos).toEqual([]);
+    expect(res.abonoCapitalId).toBeNull();
+  });
+
+  it("abonoCapitalId sí referencia una fila consumida cuando hay CAPITAL mezclado con la CANCELACION de CUBE", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [
+        { abono_id: 1, tipo: "CAPITAL", monto: "300" },
+        { abono_id: 2, tipo: "CANCELACION", monto: "9999" },
+      ],
+      abonoCapitalBase: new Big(0),
+      montoAportado: "9999",
+      devolucionCompleta: false,
+      isCube: true,
+    });
+
+    expect(res.abonoIdsConsumidos).toEqual([1]);
+    expect(res.abonoCapitalId).toBe(1);
   });
 });

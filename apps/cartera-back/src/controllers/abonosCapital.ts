@@ -1,9 +1,9 @@
-import { eq, and, ne, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { abonos_capital, creditos_inversionistas_espejo, inversionistas } from "../database/db";
 import { db } from "../database";
 import Big from "big.js";
 import { obtenerSumaComprasPendientes } from "../utils/comprasAjuste";
-import { CUBE_ID } from "../utils/devolucionCompletada";
+import { esCube } from "../utils/devolucionCompletada";
 import {
   emitCreditCapitalContributionCompleted,
   emitCreditCapitalContributionFailed,
@@ -327,8 +327,15 @@ export async function revertirAbonoCapitalEspejo(
  *   producción: decenas de estas filas, todas con liquidado=false).
  */
 export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
-  // 1. Inversionistas del espejo con su capital aportado (nunca CUBE)
-  const invsEspejo = await tx
+  // 1. Inversionistas del espejo con su capital aportado (nunca CUBE).
+  //    El filtro de CUBE se aplica en JS con `esCube` (por ID con el nombre
+  //    como respaldo), no en el WHERE: un `ne(inversionista_id, CUBE_ID)` en
+  //    SQL solo excluiría el ID 86 exacto, dejando pasar una fila histórica
+  //    de CUBE con otro ID — que payments.ts sí reconocería como CUBE por
+  //    nombre (vía esCube) y excluiría de todo cálculo, recreando el mismo
+  //    dato fantasma que este guard existe para evitar. Debe ser
+  //    exactamente el mismo criterio en ambos archivos.
+  const invsEspejoCrudo = await tx
     .select({
       inversionista_id: creditos_inversionistas_espejo.inversionista_id,
       monto_aportado: creditos_inversionistas_espejo.monto_aportado,
@@ -339,12 +346,9 @@ export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
       inversionistas,
       eq(creditos_inversionistas_espejo.inversionista_id, inversionistas.inversionista_id)
     )
-    .where(
-      and(
-        eq(creditos_inversionistas_espejo.credito_id, credito_id),
-        ne(creditos_inversionistas_espejo.inversionista_id, CUBE_ID),
-      ),
-    );
+    .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
+
+  const invsEspejo = invsEspejoCrudo.filter((inv: { inversionista_id: number; nombre: string }) => !esCube(inv));
 
   // Sin espejo → no hay capital de inversionistas que cancelar. No es error.
   if (invsEspejo.length === 0) {

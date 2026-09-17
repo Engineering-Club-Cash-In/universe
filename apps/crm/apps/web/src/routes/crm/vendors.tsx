@@ -212,13 +212,20 @@ function VendorsPage() {
 
 	const onDpiChange = (
 		dpi: string,
+		dpiAnterior: string,
 		form: typeof createForm,
 		datosDe: typeof createDatosDe,
 		lookup: typeof createLookup,
 	) => {
 		lookup.dpiEditado(dpi);
 		const limpio = soloDigitosDpi(dpi);
-		if (datosDe.current && datosDe.current !== limpio) {
+		const anterior = soloDigitosDpi(dpiAnterior);
+		// De quién es el nombre y el género del formulario: de la búsqueda
+		// (datosDe) o, si se escribieron a mano, de la persona del DPI que estaba
+		// completo antes de editarlo.
+		const duenoIdentidad =
+			datosDe.current ?? (anterior.length === 13 ? anterior : null);
+		if (duenoIdentidad && duenoIdentidad !== limpio) {
 			datosDe.current = null;
 			form.setValue("name", "");
 			form.setValue("gender", undefined);
@@ -360,6 +367,7 @@ function VendorsPage() {
 																field.onChange(e);
 																onDpiChange(
 																	e.target.value,
+																	field.value ?? "",
 																	createForm,
 																	createDatosDe,
 																	createLookup,
@@ -702,6 +710,7 @@ function VendorsPage() {
 																field.onChange(e);
 																onDpiChange(
 																	e.target.value,
+																	field.value ?? "",
 																	editForm,
 																	editDatosDe,
 																	editLookup,

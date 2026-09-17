@@ -32,6 +32,10 @@ export const emptyContractParties: ContractPartiesValue = {
  * incompleta: si no, la oportunidad se quedaría con el vendedor o la agencia
  * anterior y el contrato saldría con la persona equivocada. Lo que falte
  * (género, razón social) se omite y jurídico lo llena a mano.
+ *
+ * Quitar la agencia en el selector manda `agencia: null` para desasignarla:
+ * si no, la pantalla diría "Sin asignar" pero el contrato seguiría saliendo
+ * con la empresa anterior.
  */
 export function toContractPartiesPayload(
 	value: ContractPartiesValue,
@@ -39,7 +43,7 @@ export function toContractPartiesPayload(
 ) {
 	if (vehicleIsNew === true) {
 		const { companyId, razonSocial } = value.agencia;
-		if (!companyId) return {};
+		if (!companyId) return { agencia: null };
 		return {
 			agencia: {
 				companyId,

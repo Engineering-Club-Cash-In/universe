@@ -161,22 +161,27 @@ export function VendorQuickCreateDialog({
 								value={dpi}
 								onChange={(e) => {
 									const nuevo = e.target.value;
+									const anterior = soloDigitosDpi(dpi);
+									const digitos = soloDigitosDpi(nuevo);
 									setDpi(nuevo);
 									lookup.dpiEditado(nuevo);
 									// Otro DPI es otra persona: se descartan los datos traídos,
 									// vengan del vendedor registrado o de RENAP
-									if (existente && existente.dpi !== soloDigitosDpi(nuevo)) {
+									if (existente && existente.dpi !== digitos) {
 										setExistente(null);
 									}
-									if (
-										datosDe.current &&
-										datosDe.current !== soloDigitosDpi(nuevo)
-									) {
+									// De quién es el nombre y el género en pantalla: de la
+									// búsqueda (datosDe) o, si se escribieron a mano, de la
+									// persona del DPI que estaba completo antes de editarlo.
+									const duenoIdentidad =
+										datosDe.current ??
+										(anterior.length === 13 ? anterior : null);
+									if (duenoIdentidad && duenoIdentidad !== digitos) {
 										datosDe.current = null;
 										setNombre("");
 										setGenero("");
 									}
-									if (soloDigitosDpi(nuevo).length === 13) {
+									if (digitos.length === 13) {
 										lookup.buscar(nuevo);
 									}
 								}}

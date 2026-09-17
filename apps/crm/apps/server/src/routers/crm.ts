@@ -7004,11 +7004,14 @@ export const crmRouter = {
 						genero: z.enum(["male", "female"]).optional(),
 					})
 					.optional(),
+				// null = la agencia se quitó a propósito en la pantalla, hay que
+				// desasignarla. undefined = no viene en la petición, no se toca.
 				agencia: z
 					.object({
 						companyId: z.string().uuid(),
 						razonSocial: z.string().trim().min(1).optional(),
 					})
+					.nullable()
 					.optional(),
 			}),
 		)
@@ -7327,7 +7330,9 @@ export const crmRouter = {
 					.update(opportunities)
 					.set({
 						...(vendorId && { vendorId }),
-						...(input.agencia && { companyId: input.agencia.companyId }),
+						...(input.agencia !== undefined && {
+							companyId: input.agencia?.companyId ?? null,
+						}),
 						inversionistas: JSON.stringify(allInvestors),
 						stageId: stage80.id,
 						categoria: input.categoria,

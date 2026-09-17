@@ -8,7 +8,7 @@ import {
 
 describe("document integrity UI flow", () => {
 	test("habilita capacidad para veredictos que no requieren aprobación manual", () => {
-		for (const result of ["valido"] satisfies IntegrityResult[]) {
+		for (const result of ["valido", "observacion"] satisfies IntegrityResult[]) {
 			expect(
 				hasCompleteIntegrityValidation({
 					payloads: [{ key: "a.pdf" }],
@@ -18,7 +18,7 @@ describe("document integrity UI flow", () => {
 		}
 	});
 
-	test("la revisión manual histórica permite capacidad sin aprobación", () => {
+	test("la revisión manual histórica sigue bloqueando capacidad", () => {
 		expect(
 			hasCompleteIntegrityValidation({
 				payloads: [{ key: "a.pdf" }],

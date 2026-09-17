@@ -1297,9 +1297,7 @@ async function assertUploadedBankStatementsValidatedWithTransaction(
 		);
 	}
 	const legacyValidationCount = validations.filter(
-		(validation) =>
-			validation.autoResult === "revision_manual" ||
-			validation.autoResult === "observacion",
+		(validation) => validation.autoResult === "revision_manual",
 	).length;
 	if (legacyValidationCount > 0) {
 		throw new DocumentIntegrityError(
@@ -1830,7 +1828,6 @@ export async function getDocumentIntegrityStatuses(params: {
 		validatedAt: row.validatedAt,
 		isStale:
 			row.autoResult === "revision_manual" ||
-			row.autoResult === "observacion" ||
 			!row.isCurrentCompletedRun ||
 			currentPaths.get(row.opportunityDocumentId) !== row.linkedFilePath,
 		signalCount: row.signalCount,
@@ -2025,7 +2022,6 @@ export async function listDocumentIntegrityValidations(params: {
 					or ${documentIntegrityValidations.autoResult} = 'error'
 					or ${documentIntegrityValidations.autoResult} = 'rechazado'
 					or ${documentIntegrityValidations.autoResult} = 'revision_manual'
-					or ${documentIntegrityValidations.autoResult} = 'observacion'
 			)`,
 		);
 	if (params.search) {

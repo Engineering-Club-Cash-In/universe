@@ -20,6 +20,9 @@ describe("document integrity decision evidence", () => {
 			signals: [],
 		});
 		expect(action).toContain("volver a cargar los documentos");
+		expect(
+			buildDocumentRecommendedAction({ result: "observacion", signals: [] }),
+		).toContain("Puedes continuar al análisis de capacidad de pago");
 	});
 
 	test("una captura ilegible recomienda mejorar la captura, no reemplazar por documento inválido", () => {

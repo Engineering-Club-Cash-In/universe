@@ -144,6 +144,7 @@ interface CreateCreditParams {
 	userId: string;
 	cuotaMensual?: string;
 	membershipCost?: number;
+	idealPaymentDateAdjustment?: string;
 	isVehicleOwned?: boolean;
 	// Info del vehículo para el correo
 	vehiculo_marca?: string;
@@ -194,6 +195,7 @@ interface QuotationDataForBilling {
 	value: string | null; // Valor del vehículo (para correo)
 	monthlyPayment: string | null; // Cuota mensual (para asegurar el valor que es)
 	membershipCost: string | null; // Membresía efectiva que debe viajar a cartera
+	idealPaymentDateAdjustment: string;
 	isInterno: boolean; // Créditos internos no cobran membresía
 	insuranceProvider: string | null; // Aseguradora elegida (gyt | universales)
 }
@@ -482,6 +484,7 @@ export async function getLatestApprovedQuotation(
 				value: quotations.vehicleValue,
 				monthlyPayment: quotations.monthlyPayment,
 				membershipCost: quotations.membershipCost,
+				idealPaymentDateAdjustment: quotations.idealPaymentDateAdjustment,
 				isInterno: quotations.isInterno,
 				insuranceProvider: quotations.insuranceProvider,
 			})
@@ -1023,8 +1026,10 @@ async function createCredit(
 		// quedó capturado en el 50% (assignInvestorAndAdvance) — es decir, solo cuando
 		// se eligió un día IA, nunca cuando se eligió 15/30 manualmente.
 		const fechaReferenciaPrimeraCuota = new Date();
+		const ajusteYaFinanciado =
+			Number(params.idealPaymentDateAdjustment ?? 0) > 0;
 		const ajusteCalculado =
-			opportunity.diaPagoOriginalSistema != null
+			opportunity.diaPagoOriginalSistema != null && !ajusteYaFinanciado
 				? calcularAjusteFechaIdeal({
 						diaPagoOriginalSistema: opportunity.diaPagoOriginalSistema,
 						diaPagoMensualElegido: diaPagoMensual,
@@ -1499,6 +1504,7 @@ export async function closeOpportunity(
 				opportunity.membresiaPago,
 				quotation?.isInterno ?? false,
 			),
+			idealPaymentDateAdjustment: quotation?.idealPaymentDateAdjustment,
 			isVehicleOwned: vehicleData?.isOwned ?? false,
 			// Enviar info del vehículo para que llegue en el correo de cartera
 			vehiculo_marca: vehicleData?.make ?? undefined,

@@ -1051,6 +1051,12 @@ function RouteComponent() {
 			userProfile.data?.role,
 		],
 	});
+	const contractualQuotation =
+		opportunityQuotationsQuery.data?.find(
+			(quotation) => quotation.status === "accepted",
+		) ??
+		opportunityQuotationsQuery.data?.[0] ??
+		null;
 
 	const createOpportunityForm = useForm({
 		defaultValues: {
@@ -2998,12 +3004,8 @@ function RouteComponent() {
 										);
 									}
 
-									// Obtener la cotización más reciente
-									const latestQuotation =
-										opportunityQuotationsQuery.data?.[0] || null;
-
 									// Si no hay cotización, mostrar mensaje para crear una
-									if (!latestQuotation) {
+									if (!contractualQuotation) {
 										return (
 											<div className="rounded-lg border border-orange-300 border-dashed bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
 												<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
@@ -3037,7 +3039,7 @@ function RouteComponent() {
 											opportunityId={selectedOpportunity.id}
 											userRole={userProfile.data?.role}
 											opportunity={selectedOpportunity}
-											quotation={latestQuotation}
+											quotation={contractualQuotation}
 										/>
 									);
 								})()}

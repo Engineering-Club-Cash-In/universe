@@ -54,6 +54,7 @@ import {
   shouldApplyFinalSmallRemainderAsOther,
   sumarAplicadoACuota,
   pagoSchema,
+  internalNexaPagoSchema,
   cuentaComoHermanoVivo,
 } from "./registerPaymentPolicy";
 import {
@@ -628,7 +629,9 @@ export const insertPayment = async (
   let lockedCreditoId: number | undefined;
   try {
     // 1. Validar schema
-    const parseResult = pagoSchema.safeParse(body);
+    const parseResult = (nexaPaymentEventId === undefined
+      ? pagoSchema
+      : internalNexaPagoSchema).safeParse(body);
     if (!parseResult.success) {
       set.status = 400;
       return validationFailed(parseResult.error.flatten().fieldErrors);

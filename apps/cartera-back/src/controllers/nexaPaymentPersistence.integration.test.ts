@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
+import { createHash, createHmac } from "node:crypto";
 import Big from "big.js";
+import { Elysia } from "elysia";
+import jwt from "jsonwebtoken";
 import postgres from "postgres";
 import { parseTestDatabaseUrl } from "./monto-a-cobrar-participacion-test-db";
 
@@ -87,6 +90,226 @@ integrationTest("constraints Nexa resisten concurrencia, replay y rollback", asy
       SELECT status, error FROM cartera.nexa_payment_events WHERE id = ${uncertain!.id}
     `;
     expect(manual).toEqual({ status: "manual_review", error: "payment_outcome_uncertain" });
+  } finally {
+    await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
+    await sql.end();
+  }
+}, 30_000);
+
+integrationTest("un processing persistido tras un efecto financiero queda en revisión sin registrar de nuevo", async () => {
+  parseTestDatabaseUrl(testDatabaseUrl!);
+  const sql = postgres(testDatabaseUrl!, { ssl: false });
+  const migration = await Bun.file(
+    new URL("../../drizzle/0039_add_nexa_internal_payments.sql", import.meta.url),
+  ).text();
+  const body = {
+    externalReference: "qa-crash-before-linked-row",
+    creditoId: 10,
+    amount: "10.00",
+    currency: "GTQ" as const,
+  };
+  const payloadHash = "d".repeat(64);
+
+  try {
+    await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
+    await sql`CREATE SCHEMA cartera`;
+    await sql`CREATE TABLE cartera.creditos (
+      credito_id integer PRIMARY KEY,
+      financial_mutations integer NOT NULL DEFAULT 0
+    )`;
+    await sql`CREATE TABLE cartera.pagos_credito (pago_id integer PRIMARY KEY)`;
+    await sql`INSERT INTO cartera.creditos (credito_id) VALUES (10)`;
+    await sql.unsafe(migration).simple();
+
+    const queryClient = {
+      query: async (text: string, values: unknown[] = []) => ({
+        rows: await sql.unsafe(text, values as never[]),
+      }),
+    };
+    const { claimNexaPaymentEvent } = await import("./nexaPaymentRepository");
+    const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
+    const freshClaim = await claimNexaPaymentEvent(queryClient, body, {
+      nonce: "nonce-before-crash",
+      payloadHash,
+      now: new Date(),
+    });
+    expect(freshClaim).toMatchObject({ kind: "new" });
+
+    await sql`
+      UPDATE cartera.nexa_payment_events
+      SET status = 'failed', error = 'pre_effect_failure'
+      WHERE external_reference = ${body.externalReference}
+    `;
+    await expect(claimNexaPaymentEvent(queryClient, body, {
+      nonce: "nonce-safe-failed-retry",
+      payloadHash,
+      now: new Date(),
+    })).resolves.toMatchObject({ kind: "retry" });
+    const [rearmed] = await sql<{ status: string }[]>`
+      SELECT status FROM cartera.nexa_payment_events
+      WHERE external_reference = ${body.externalReference}
+    `;
+    expect(rearmed?.status).toBe("processing");
+
+    // Simula updateMora ya confirmado y la caída antes de insertar la primera fila vinculada.
+    await sql`UPDATE cartera.creditos SET financial_mutations = financial_mutations + 1 WHERE credito_id = 10`;
+    let registrationCalls = 0;
+    let paymentLookups = 0;
+    let failCalls = 0;
+
+    await expect(processNexaPayment(
+      body,
+      { nonce: "nonce-after-crash", payloadHash, now: new Date() },
+      {
+        withCreditLock: async (_creditoId, work) => work({} as never),
+        claim: (retryBody, context) => claimNexaPaymentEvent(queryClient, retryBody, context),
+        loadCredit: async () => ({
+          usuarioId: 5,
+          statusCredit: "MOROSO",
+          binding: { activo: true, expires_at: null, max_payment_amount: null },
+        }),
+        findPayments: async () => { paymentLookups += 1; return []; },
+        registerPayment: async () => {
+          registrationCalls += 1;
+          await sql`UPDATE cartera.creditos SET financial_mutations = financial_mutations + 1 WHERE credito_id = 10`;
+          return { success: true };
+        },
+        applyPayment: async () => ({ success: true }),
+        complete: async () => undefined,
+        fail: async () => { failCalls += 1; },
+      },
+    )).rejects.toEqual(new NexaPaymentError("payment_outcome_uncertain", 503));
+
+    const [event] = await sql<{ status: string; error: string | null }[]>`
+      SELECT status, error
+      FROM cartera.nexa_payment_events
+      WHERE external_reference = ${body.externalReference}
+    `;
+    const [credit] = await sql<{ financial_mutations: number }[]>`
+      SELECT financial_mutations FROM cartera.creditos WHERE credito_id = 10
+    `;
+    expect(event).toEqual({ status: "manual_review", error: "payment_outcome_uncertain" });
+    expect(credit?.financial_mutations).toBe(1);
+    expect({ registrationCalls, paymentLookups, failCalls }).toEqual({
+      registrationCalls: 0,
+      paymentLookups: 0,
+      failCalls: 0,
+    });
+  } finally {
+    await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
+    await sql.end();
+  }
+}, 30_000);
+
+integrationTest("/newPayment reserva NEXA pero el flujo HMAC interno alcanza el escritor", async () => {
+  parseTestDatabaseUrl(testDatabaseUrl!);
+  process.env.SUPABASE_DB_URL = testDatabaseUrl;
+  process.env.RESEND_API_KEY = "re_test_only";
+  process.env.EMAIL_DOMAIN = "example.test";
+  const sql = postgres(testDatabaseUrl!, { ssl: false });
+
+  try {
+    await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
+    await sql`CREATE SCHEMA cartera`;
+
+    const { paymentRouter } = await import("../routers/payments");
+    const app = new Elysia().use(paymentRouter);
+    const token = jwt.sign(
+      { id: 1, email: "qa@example.test", role: "ADMIN" },
+      process.env.JWT_SECRET || "supersecreto",
+    );
+    const publicBody = {
+      credito_id: 10,
+      usuario_id: 5,
+      monto_boleta: "10.00",
+      fecha_pago: "2026-09-08",
+      cuotaApagar: 1,
+      url_boletas: [],
+      fecha_boleta: "2026-09-08",
+    };
+
+    for (const registerBy of ["NEXA", "  nexa  ", "NEXA:7", "  nexa:forged  "]) {
+      const response = await app.handle(new Request("http://localhost/newPayment", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ...publicBody, registerBy }),
+      }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        success: false,
+        code: "VALIDATION_FAILED",
+        errors: { registerBy: expect.any(Array) },
+      });
+    }
+
+    const { nexaPaymentDependencies } = await import("./nexaPaymentRuntime");
+    const { createNexaPaymentHandler } = await import("./nexaPayments");
+    const { withPaymentAdvisoryLock } = await import("../utils/paymentAdvisoryLock");
+    const secret = "s".repeat(32);
+    const now = 1_800_000_000_000;
+    const rawBody = JSON.stringify({
+      externalReference: "qa-internal-schema-boundary",
+      creditoId: 10,
+      amount: "10.00",
+      currency: "GTQ",
+    });
+    const timestamp = String(now / 1000);
+    const nonce = "nonce-internal-schema-boundary";
+    const signature = createHmac("sha256", secret)
+      .update([
+        "POST",
+        "/internal/nexa/payments/apply",
+        timestamp,
+        nonce,
+        createHash("sha256").update(rawBody).digest("hex"),
+      ].join("\n"))
+      .digest("hex");
+    let registrationCalls = 0;
+    let failureCode: string | undefined;
+    const handler = createNexaPaymentHandler({
+      secret,
+      now: () => now,
+      dependencies: {
+        withCreditLock: (creditoId, work) => withPaymentAdvisoryLock(creditoId, work),
+        claim: async () => ({ kind: "new", eventId: 7 }),
+        loadCredit: async () => ({
+          usuarioId: 5,
+          statusCredit: "ACTIVO",
+          binding: { activo: true, expires_at: null, max_payment_amount: null },
+        }),
+        findPayments: async () => [],
+        registerPayment: async (...args) => {
+          registrationCalls += 1;
+          return nexaPaymentDependencies.registerPayment(...args);
+        },
+        applyPayment: async () => ({ success: true }),
+        complete: async () => undefined,
+        fail: async (_eventId, code) => { failureCode = code; },
+      },
+    });
+    const set: { status?: number | string } = {};
+    const result = await handler({
+      request: new Request("http://localhost/internal/nexa/payments/apply", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-nexa-timestamp": timestamp,
+          "x-nexa-nonce": nonce,
+          "x-nexa-signature": signature,
+        },
+        body: rawBody,
+      }),
+      body: undefined,
+      set,
+    });
+
+    expect(registrationCalls).toBe(1);
+    expect(set.status).toBe(503);
+    expect(result).toEqual({ error: "payment_outcome_uncertain" });
+    expect(failureCode).toBe("payment_outcome_uncertain");
   } finally {
     await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
     await sql.end();

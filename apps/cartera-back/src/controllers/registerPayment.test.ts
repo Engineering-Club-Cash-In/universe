@@ -53,6 +53,7 @@ describe("register payment", () => {
       fecha_boleta: "2026-09-08",
     };
 
+    expect(pagoSchema.safeParse({ ...body, registerBy: "  nexa  " }).success).toBe(false);
     expect(pagoSchema.safeParse({ ...body, registerBy: "NEXA:7" }).success).toBe(false);
     expect(pagoSchema.safeParse({ ...body, registerBy: "  nexa:forged" }).success).toBe(false);
   });

@@ -80,8 +80,8 @@ export const classifyNexaClaim = (
   if (event.status === "applied" && event.pago_id !== null) {
     return { kind: "applied", paymentId: event.pago_id };
   }
-  if (event.status === "manual_review") return { kind: "manual_review" };
-  return { kind: "retry", eventId: event.id };
+  if (event.status === "failed") return { kind: "retry", eventId: event.id };
+  return { kind: "manual_review" };
 };
 
 type NexaPaymentResult = { paymentId: number; idempotent: boolean };

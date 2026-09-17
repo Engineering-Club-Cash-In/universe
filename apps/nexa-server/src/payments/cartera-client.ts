@@ -97,7 +97,8 @@ export class HttpCarteraPaymentClient implements CarteraPaymentClient {
         .then((body: unknown) => safeErrorResponseSchema.safeParse(body))
         .catch(() => undefined);
       const retryableCode = error?.success && ["invalid_authentication", "configuration_error"].includes(error.data.error);
-      if ([401, 408, 429].includes(response.status) || response.status >= 500 || (response.status === 403 && (!error?.success || retryableCode))) {
+      const uncertainCode = error?.success && ["payment_amount_mismatch", "payment_outcome_uncertain"].includes(error.data.error);
+      if (uncertainCode || [401, 408, 429].includes(response.status) || response.status >= 500 || (response.status === 403 && (!error?.success || retryableCode))) {
         throw new CarteraPaymentRequestError(`Cartera payment request failed: HTTP ${status}`);
       }
       return {

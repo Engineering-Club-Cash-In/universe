@@ -6,6 +6,7 @@ import { Pool } from "pg";
 import { createApp } from "../app";
 import type { ReviewTransferStatus, TokenTransaction } from "../nexa/schemas";
 import { runApplicationWorkerOnce } from "../payments/application-worker";
+import { HttpCarteraPaymentClient } from "../payments/cartera-client";
 import { runReviewWorkerOnce } from "../payments/review-worker";
 import { createAdminRouter } from "../routes/admin";
 import { DbPaymentTransactionRepository, DbReviewRepository, DbTokenUserRepository, PaymentTokenRepository, PollRunRepository } from "./repositories";
@@ -366,7 +367,6 @@ integrationTest("terminal rejection and missing token association queue safe REJ
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const repository = new DbPaymentTransactionRepository(db);
   await associateToken("10005010", "1234567", 42);
-  const rejected = await repository.upsertReceived({ ...transaction, reference: "4617308", transactionId: "7294" });
   const unsafe = await repository.upsertReceived({ ...transaction, reference: "4617318", transactionId: "7298" });
   const missing = await repository.upsertReceived({
     ...transaction,
@@ -378,11 +378,9 @@ integrationTest("terminal rejection and missing token association queue safe REJ
   const run = () => runApplicationWorkerOnce({
     repository,
     cartera: {
-      applyNexaPayment: async ({ transaction: input }) => {
+      applyNexaPayment: async () => {
         carteraCalls++;
-        return input.reference === "4617308"
-          ? { status: "REJECTED", reason: "payment_amount_mismatch" }
-          : { status: "REJECTED", reason: "unsafe token=1234567310005010 account=19451958" };
+        return { status: "REJECTED", reason: "unsafe token=1234567310005010 account=19451958" };
       },
     },
     now: () => new Date("2026-09-08T14:00:00.000Z"),
@@ -394,20 +392,75 @@ integrationTest("terminal rejection and missing token association queue safe REJ
 
   expect(await run()).toBe(true);
   expect(await run()).toBe(true);
-  expect(await run()).toBe(true);
   const payments = await db.select().from(nexaPaymentTransactions).orderBy(nexaPaymentTransactions.id);
   const reviews = await db.select().from(nexaReviews).orderBy(nexaReviews.id);
   expect(payments).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: rejected.id, processingStatus: "REVIEW_PENDING", failureReason: "payment_amount_mismatch" }),
     expect.objectContaining({ id: unsafe.id, processingStatus: "REVIEW_PENDING", failureReason: "cartera_rejected" }),
     expect.objectContaining({ id: missing.id, processingStatus: "REVIEW_PENDING", failureReason: "token_user_not_found" }),
   ]));
   expect(reviews.map((review) => [review.transactionId, review.status])).toEqual([
-    [rejected.id, "REJECTED"],
     [unsafe.id, "REJECTED"],
     [missing.id, "REJECTED"],
   ]);
-  expect(carteraCalls).toBe(2);
+  expect(carteraCalls).toBe(1);
+});
+
+integrationTest("payment_amount_mismatch agota intentos en MANUAL_REVIEW sin revisión bancaria", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await associateToken("10005010", "1234567", 42);
+  const stored = await repository.upsertReceived({
+    ...transaction,
+    reference: "amount-mismatch",
+    transactionId: "7294",
+  });
+  let carteraCalls = 0;
+  let now = new Date("2026-09-08T14:30:00.000Z");
+  const cartera = new HttpCarteraPaymentClient({
+    baseUrl: "https://cartera.example.test",
+    secret: "c".repeat(32),
+    fetch: async () => {
+      carteraCalls += 1;
+      return Response.json({ error: "payment_amount_mismatch" }, { status: 409 });
+    },
+  });
+  const run = () => runApplicationWorkerOnce({
+    repository,
+    cartera,
+    now: () => now,
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 2,
+    maxBackoffSeconds: 10,
+  });
+
+  expect(await run()).toBe(true);
+  now = new Date("2026-09-08T14:30:02.000Z");
+  expect(await run()).toBe(true);
+  now = new Date("2026-09-08T14:30:06.000Z");
+  expect(await run()).toBe(true);
+
+  const [payment] = await db.select().from(nexaPaymentTransactions)
+    .where(eq(nexaPaymentTransactions.id, stored.id));
+  expect(payment).toMatchObject({
+    processingStatus: "MANUAL_REVIEW",
+    attemptCount: 3,
+    failureReason: "application_processing_failed",
+  });
+  expect(carteraCalls).toBe(3);
+  expect(await db.select().from(nexaReviews)).toHaveLength(0);
+
+  let bankReviews = 0;
+  expect(await runReviewWorkerOnce({
+    repository: new DbReviewRepository(db),
+    nexa: { reviewTransfer: async () => { bankReviews += 1; } },
+    now: () => now,
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 2,
+    maxBackoffSeconds: 10,
+  })).toBe(false);
+  expect(bankReviews).toBe(0);
 });
 
 integrationTest("authenticated reconciliation routes join PostgreSQL rows and never expose payment PII", async () => {

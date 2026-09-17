@@ -66,14 +66,32 @@ export async function claimNexaPaymentEvent(
       LIMIT 1`,
     [body.externalReference],
   );
-  return classifyNexaClaim(
-    existing.rows[0] ? storedEvent(existing.rows[0]) : null,
-    false,
-    {
-      creditoId: body.creditoId,
-      amount: body.amount,
-      currency: body.currency,
-      payloadHash: context.payloadHash,
-    },
-  );
+  const event = existing.rows[0] ? storedEvent(existing.rows[0]) : null;
+  const claim = classifyNexaClaim(event, false, {
+    creditoId: body.creditoId,
+    amount: body.amount,
+    currency: body.currency,
+    payloadHash: context.payloadHash,
+  });
+  if (event?.status === "failed" && claim.kind === "retry") {
+    const transitioned = await client.query(
+      `UPDATE cartera.nexa_payment_events
+          SET status = 'processing', error = NULL, updated_at = NOW()
+        WHERE id = $1 AND status = 'failed'
+        RETURNING id`,
+      [event.id],
+    );
+    if (!transitioned.rows[0]) throw new Error("nexa retry fence transition failed");
+  }
+  if (event?.status === "processing" && claim.kind === "manual_review") {
+    const transitioned = await client.query(
+      `UPDATE cartera.nexa_payment_events
+          SET status = 'manual_review', error = 'payment_outcome_uncertain', updated_at = NOW()
+        WHERE id = $1 AND status = 'processing'
+        RETURNING id`,
+      [event.id],
+    );
+    if (!transitioned.rows[0]) throw new Error("nexa processing fence transition failed");
+  }
+  return claim;
 }

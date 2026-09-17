@@ -174,6 +174,15 @@ describe("HttpCarteraPaymentClient", () => {
       .rejects.toThrow("HTTP 503 Service Unavailable");
   });
 
+  test.each([400, 409, 422])("mantiene payment_amount_mismatch HTTP %s como fallo retryable", async (status) => {
+    const { client } = capturingClient(Response.json(
+      { error: "payment_amount_mismatch" },
+      { status },
+    ));
+    await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))
+      .rejects.toThrow(`HTTP ${status}`);
+  });
+
   test.each([500, 503, 408, 429, 401])("mantiene HTTP %s como fallo retryable", async (status) => {
     const { client } = capturingClient(new Response("upstream failure", { status }));
     await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))

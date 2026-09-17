@@ -507,7 +507,9 @@ test("clasifica conflicto de payload, replay, retry e idempotencia persistente",
     pago_id: null,
   };
 
-  expect(classify(event, false, requested)).toEqual({ kind: "retry", eventId: 7 });
+  expect(classify(event, false, requested)).toEqual({ kind: "manual_review" });
+  expect(classify({ ...event, status: "failed" }, false, requested))
+    .toEqual({ kind: "retry", eventId: 7 });
   expect(classify({ ...event, status: "manual_review" }, false, requested))
     .toEqual({ kind: "manual_review" });
   expect(classify({ ...event, status: "applied", pago_id: 17 }, false, requested))

@@ -1,14 +1,46 @@
-import { ContractType } from '../types/contract';
+import { ContractType, SignerRole, type ContractSigner } from '../types/contract';
 
 /**
  * Configuración de patrones de firma para cada tipo de contrato
  * Estos patrones corresponden al texto de las líneas de firma que ya existen en los templates DOCX
  */
 
+/**
+ * Un bloque de líneas de firma dentro del documento, en orden de lectura.
+ *
+ * - `REP_LEGAL`: una sola línea, la del representante legal. Su nombre viene
+ *   impreso en el template (ej. garantía mobiliaria trae a LUCRECIA MARISOL
+ *   CUX TECÚN), así que siempre ocupa exactamente un widget.
+ * - `DEUDORES`: la fila de deudores, que se expande a titular + N cofirmantes.
+ *   Los templates plural la generan con un loop `{#firmantesFilas}`, de modo
+ *   que la cantidad de widgets depende de los datos, no del template.
+ */
+export type SignatureBlock = 'REP_LEGAL' | 'DEUDORES';
+
 export interface SignaturePatternConfig {
   /** Patrón de texto a buscar en el PDF para ubicar la línea de firma */
   pattern: string;
-  /** Número de firmantes esperados para este contrato (= cantidad de emails) */
+  /**
+   * Bloques de firma tal como aparecen en el PDF **renderizado**, en orden de
+   * lectura (página, luego de arriba hacia abajo, luego de izquierda a derecha).
+   *
+   * El orden no se puede deducir del DOCX: los bloques viven en tablas y el
+   * texto plano del XML no refleja la disposición visual. Estos valores salen
+   * de inspeccionar los PDF generados (`scripts/inventario-firmas.ts`).
+   */
+  bloques?: SignatureBlock[];
+  /**
+   * Cuántas veces se repite la secuencia de `bloques` en el documento. Sirve
+   * para los contratos que llevan el mismo juego de firmas más de una vez
+   * (cobertura Inrexsa lo repite en dos secciones).
+   */
+  repeticiones?: number;
+  /**
+   * Número de firmantes esperados para este contrato.
+   * @deprecated No describe la realidad cuando hay cofirmantes: el template
+   * plural expande la fila de deudores y el PDF termina con más widgets que
+   * este número. Usar `bloques`.
+   */
   signerCount: number;
   /**
    * Cantidad de widgets de firma a colocar en el PDF. Por defecto es igual a
@@ -16,9 +48,14 @@ export interface SignaturePatternConfig {
    * en varios lugares (ej. un documento con 2 anexos, cada uno con su bloque de
    * firma del inversionista): signerCount=1 (un solo email) pero
    * signatureFieldCount=2 (dos widgets, ambos asignados a ese firmante).
+   * @deprecated Para los contratos con `bloques`, usar `repeticiones`.
    */
   signatureFieldCount?: number;
-  /** Descripción de quién firma (opcional, para debugging) */
+  /**
+   * Descripción de quién firma.
+   * @deprecated Era sólo informativo y en varios contratos quedó al revés del
+   * PDF real. Usar `bloques`.
+   */
   signers?: string[];
   /** Offset en Y para ajustar posición vertical (opcional, en unidades Documenso) */
   yOffset?: number;
@@ -31,12 +68,14 @@ export interface SignaturePatternConfig {
 export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.CARTA_ACEPTACION_INSTALACION_GPS]: {
     pattern: 'F)_______________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Cliente']
   },
 
   [ContractType.CARTA_CARRO_NUEVO]: {
     pattern: 'F)________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Cliente'],
     xOffset: -2.5,  // Mover más a la izquierda
@@ -45,6 +84,7 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   [ContractType.CARTA_EMISION_CHEQUES]: {
     pattern: 'F)_______________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Cliente'],
     yOffset: -1.5  // Subir 1.5 puntos
@@ -52,12 +92,15 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   [ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO]: {
     pattern: 'F)_______________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Cliente']
   },
 
   [ContractType.COBERTURA_INREXSA]: {
     pattern: 'Firma:___________________________',
+    bloques: ['DEUDORES'],
+    repeticiones: 2,
     signerCount: 1,
     signers: ['Cliente'],
     yOffset: -4.0,  // Un poquito más arriba
@@ -66,6 +109,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   [ContractType.COBERTURA_INREXSA_COMERCIAL]: {
     pattern: 'Firma:___________________________',
+    bloques: ['DEUDORES'],
+    repeticiones: 2,
     signerCount: 1,
     signers: ['Cliente'],
     yOffset: -4.0,  // Un poquito más arriba
@@ -74,6 +119,7 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   [ContractType.CONTRATO_PRIVADO_USO]: {
     pattern: 'f)_____________________________',
+    bloques: ['REP_LEGAL', 'DEUDORES'],
     signerCount: 2,
     signers: ['Deudor', 'Richard/CCI'],
     xOffset: 1.5,  // Un punto y medio a la derecha
@@ -82,6 +128,7 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   [ContractType.USO_CARRO_USADO]: {
     pattern: 'f)_____________________________',
+    bloques: ['REP_LEGAL', 'DEUDORES'],
     signerCount: 2,
     signers: ['Deudor', 'Richard/CCI'],
     yOffset: -1.5,  // Subir 1.5 puntos
@@ -92,6 +139,7 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   [ContractType.DECLARACION_DE_VENDEDOR]: {
     pattern: 'f)____________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Vendedor'],
     yOffset: -2  // Subir 2 puntos
@@ -99,12 +147,14 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   [ContractType.DESCARGO_RESPONSABILIDADES]: {
     pattern: 'f)____________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Cliente']
   },
 
   [ContractType.GARANTIA_MOBILIARIA]: {
     pattern: 'f)_______________________________________',
+    bloques: ['REP_LEGAL', 'DEUDORES'],
     signerCount: 2,
     signers: ['Andrés', 'Deudor'],
     yOffset: -6,  // Bajar un punto más (era -7, ahora -6)
@@ -113,12 +163,14 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   [ContractType.PAGARE_UNICO_LIBRE_PROTESTO]: {
     pattern: 'f. _______________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Deudor']
   },
 
   [ContractType.RECONOCIMIENTO_DEUDA]: {
     pattern: 'f)___________________________',
+    bloques: ['REP_LEGAL', 'DEUDORES'],
     signerCount: 2,
     signers: ['Andrés', 'Deudor'],
     yOffset: -3.5,  // Subir 3.5 puntos,
@@ -127,6 +179,7 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   [ContractType.SOLICITUD_COMPRA_VEHICULO]: {
     pattern: 'F)_______________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Cliente']
   },
@@ -302,4 +355,81 @@ export function getSignaturePattern(contractType: ContractType): SignaturePatter
   }
 
   return config;
+}
+
+/**
+ * Error de calce entre los firmantes que nos pasaron y las líneas de firma del
+ * documento. Se lanza en lugar de inventar posiciones: una firma colocada en
+ * coordenadas arbitrarias produce un contrato firmado en el lugar equivocado,
+ * que es peor que no generarlo.
+ */
+export class SignatureLayoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SignatureLayoutError';
+  }
+}
+
+/**
+ * Calcula a qué firmante le toca cada línea de firma del documento.
+ *
+ * Devuelve un arreglo paralelo a los widgets del PDF en orden de lectura: la
+ * posición `i` del resultado es quien debe firmar en el widget `i`.
+ *
+ * Expande el bloque `DEUDORES` a titular + cofirmantes, de modo que 1, 2 o más
+ * cofirmantes funcionan sin tocar el template (los templates plural generan la
+ * fila con un loop). Si el contrato repite el juego de firmas
+ * (`repeticiones`), la secuencia se repite igual.
+ */
+export function resolveSignerOrder(
+  contractType: ContractType,
+  signers: ContractSigner[],
+): ContractSigner[] {
+  const config = getSignaturePattern(contractType);
+
+  const titular = signers.find((s) => s.role === SignerRole.TITULAR);
+  const cofirmantes = signers.filter((s) => s.role === SignerRole.COFIRMANTE);
+  const repLegal = signers.find((s) => s.role === SignerRole.REP_LEGAL);
+  const vendedor = signers.find((s) => s.role === SignerRole.VENDEDOR);
+
+  // Sin layout declarado no podemos ubicar a nadie de forma confiable.
+  if (!config.bloques || config.bloques.length === 0) {
+    throw new SignatureLayoutError(
+      `El contrato "${contractType}" no tiene declarado su layout de firmas (\`bloques\`). ` +
+        `Hay que auditarlo con scripts/inventario-firmas.ts antes de mandarlo a firmar.`,
+    );
+  }
+
+  // El bloque de deudores es el titular seguido de los cofirmantes, en orden.
+  // La declaración de vendedor es el único contrato cuyo firmante es el vendedor.
+  const deudores =
+    contractType === ContractType.DECLARACION_DE_VENDEDOR
+      ? vendedor
+        ? [vendedor]
+        : []
+      : [...(titular ? [titular] : []), ...cofirmantes];
+
+  const secuencia: ContractSigner[] = [];
+  for (let rep = 0; rep < (config.repeticiones ?? 1); rep++) {
+    for (const bloque of config.bloques) {
+      if (bloque === 'REP_LEGAL') {
+        if (!repLegal) {
+          throw new SignatureLayoutError(
+            `El contrato "${contractType}" lleva firma del representante legal, ` +
+              `pero no se recibió ningún firmante con rol ${SignerRole.REP_LEGAL}.`,
+          );
+        }
+        secuencia.push(repLegal);
+      } else {
+        if (deudores.length === 0) {
+          throw new SignatureLayoutError(
+            `El contrato "${contractType}" no recibió ningún deudor que firme.`,
+          );
+        }
+        secuencia.push(...deudores);
+      }
+    }
+  }
+
+  return secuencia;
 }

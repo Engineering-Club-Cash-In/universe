@@ -9,14 +9,21 @@ import {
   ContractGenerationResponse,
   ContractGeneratorOptions,
   ContractTemplateConfig,
-  AnyContractData
+  AnyContractData,
+  SignerRole,
+  type ContractSigner
 } from '../types/contract';
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
 import { documensoService } from './DocumensoService';
 import { WeeTrustService } from './WeeTrustService';
-import { getRequiredEmailCount } from '../config/docusealConfig';
+import { SignatureLayoutError } from './signaturePatterns';
 import { crmApiService } from './CrmApiService';
 import { uploadPdfToR2 } from './R2Service';
+
+/** Texto legible de un error desconocido, para reportarlo al CRM. */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 // Instancia de WeeTrust (servicio principal de firma)
 // Si WEETRUST_DISABLED=true o faltan credenciales, queda como null y se usa Documenso directo.
@@ -580,6 +587,13 @@ export class ContractGeneratorService {
     contracts: Array<{
       contractType: ContractType;
       data: Record<string, any>;
+      /**
+       * Firmantes con su rol. Es por donde manda el CRM desde que la firma se
+       * reparte por rol; `emails` es el camino viejo.
+       */
+      signers?: ContractSigner[];
+      /** Observadores: ven el flujo de firma sin firmar. */
+      observers?: string[];
       emails?: string[];
       options?: { generatePdf?: boolean; filenamePrefix?: string; gender?: "male" | "female"; isPlural?: boolean };
     }>
@@ -601,13 +615,22 @@ export class ContractGeneratorService {
 
     // Procesar cada contrato de manera secuencial
     for (let i = 0; i < contracts.length; i++) {
-      const { contractType, data, emails, options } = contracts[i];
+      const { contractType, data, signers, observers, emails, options } =
+        contracts[i];
 
       console.log(`[${i + 1}/${contracts.length}] Procesando contrato: ${contractType}`);
       console.log(`  Options recibidas:`, JSON.stringify(options));
 
       try {
-        const result = await this.generateContract(contractType, data, { ...options, emails });
+        // `signers` y `observers` tienen que viajar igual que `emails`: el batch
+        // es el camino que usa el wizard, y dejarlos afuera hacía que el
+        // contrato saliera sin firmantes y, por lo tanto, sin links.
+        const result = await this.generateContract(contractType, data, {
+          ...options,
+          signers,
+          observers,
+          emails,
+        });
         results.push(result);
         
         if (result.success) {
@@ -666,7 +689,16 @@ export class ContractGeneratorService {
   public async generateContract(
     contractType: ContractType,
     data: Record<string, any>,
-    options: { gender?: "male" | "female"; generatePdf?: boolean; filenamePrefix?: string; emails?: string[]; isPlural?: boolean } = { gender: "male" }
+    options: {
+      gender?: "male" | "female";
+      generatePdf?: boolean;
+      filenamePrefix?: string;
+      /** @deprecated Usar `signers`, que lleva el rol de cada firmante. */
+      emails?: string[];
+      signers?: ContractSigner[];
+      observers?: string[];
+      isPlural?: boolean;
+    } = { gender: "male" }
   ): Promise<ContractGenerationResponse> {
     try {
       // 1. Obtener configuración del template
@@ -831,18 +863,34 @@ export class ContractGeneratorService {
         signs: string[];
         linkDocument: string;
         r2Key?: string;
+        documentID?: string;
+        signatories?: Array<{
+          role: SignerRole;
+          email: string;
+          name: string;
+          signatoryID?: string;
+          signingUrl?: string;
+        }>;
        } | undefined;
       let signingLinks: string[] | undefined;
       let shouldCleanupFiles = false;
       let signingProvider: 'weetrust' | 'documenso' | undefined;
+      /** Motivo por el que no hay links de firma, si se pidieron. */
+      let signingError: string | undefined;
 
-      if (options.emails && options.emails.length > 0 && pdfBuffer) {
-        // Validar número de emails
-        const requiredEmails = getRequiredEmailCount(contractType);
-        if (options.emails.length !== requiredEmails) {
-          console.warn(`⚠ Se esperaban ${requiredEmails} email(s) pero se recibieron ${options.emails.length}`);
-        }
+      // Los firmantes pueden venir con rol (`signers`) o como lista plana de
+      // emails (`emails`, el camino viejo). La lista plana se interpreta como
+      // titular seguido de cofirmantes, que es como la armaba el CRM.
+      const signers: ContractSigner[] =
+        options.signers && options.signers.length > 0
+          ? options.signers
+          : (options.emails ?? []).map((email, i) => ({
+              role: i === 0 ? SignerRole.TITULAR : SignerRole.COFIRMANTE,
+              email,
+              name: data.nombreCompleto ?? email,
+            }));
 
+      if (signers.length > 0 && pdfBuffer) {
         // Intentar primero con WeeTrust (si está habilitado)
         try {
           if (!weeTrustService) {
@@ -855,7 +903,8 @@ export class ContractGeneratorService {
             baseFilename,
             pdfBuffer,
             contractType,
-            options.emails
+            signers,
+            options.observers,
           );
 
           signingLinks = signing.signs ?? [];
@@ -865,29 +914,44 @@ export class ContractGeneratorService {
           shouldCleanupFiles = true;
 
         } catch (weeTrustError) {
-          console.error('⚠ Error con WeeTrust, intentando Documenso como fallback:', weeTrustError);
+          // Un desajuste de layout es un problema de nuestra configuración, no
+          // del proveedor: mandarlo a Documenso pondría las firmas igual de mal.
+          // Se corta acá para que el error salga a la vista.
+          if (weeTrustError instanceof SignatureLayoutError) {
+            signingError = weeTrustError.message;
+            console.error(`✗ Layout de firmas inválido: ${weeTrustError.message}`);
+          } else {
+            console.error('⚠ Error con WeeTrust, intentando Documenso como fallback:', weeTrustError);
 
-          // Fallback a Documenso
-          try {
-            console.log(`🔗 Creando documento en Documenso (fallback)...`);
+            // Fallback a Documenso
+            try {
+              console.log(`🔗 Creando documento en Documenso (fallback)...`);
 
-            signing = await documensoService.createDocumentAndGetSigningLinks(
-              baseFilename,
-              pdfBuffer,
-              contractType,
-              options.emails
-            );
+              signing = await documensoService.createDocumentAndGetSigningLinks(
+                baseFilename,
+                pdfBuffer,
+                contractType,
+                signers.map((s) => s.email)
+              );
 
-            signingLinks = signing.signs ?? [];
-            signingProvider = 'documenso';
+              signingLinks = signing.signs ?? [];
+              signingProvider = 'documenso';
 
-            console.log(`✓ Documenso: ${signingLinks.length} link(s) de firma generados`);
-            shouldCleanupFiles = true;
+              console.log(`✓ Documenso: ${signingLinks.length} link(s) de firma generados`);
+              shouldCleanupFiles = true;
 
-          } catch (documensoError) {
-            console.error('⚠ Error al crear documento en Documenso:', documensoError);
-            // No fallar si ambos servicios fallan, los archivos ya están generados
+            } catch (documensoError) {
+              console.error('⚠ Error al crear documento en Documenso:', documensoError);
+              signingError = `WeeTrust: ${errorMessage(weeTrustError)} | Documenso: ${errorMessage(documensoError)}`;
+            }
           }
+        }
+
+        // Pedimos firma y no la conseguimos. Devolver `success: true` acá era lo
+        // que dejaba pasar contratos sin link: el CRM los guardaba como buenos y
+        // nadie se enteraba hasta que alguien iba a firmarlos.
+        if (!signingLinks || signingLinks.length === 0) {
+          signingError ??= 'No se generaron links de firma';
         }
       }
 
@@ -972,18 +1036,26 @@ export class ContractGeneratorService {
 
       return {
         templateId: Math.floor(Math.random() * 100000), // ID de template simulado
-        success: true,
+        // Se pidió firma y no hubo links: el contrato no sirve, aunque el PDF exista.
+        success: !signingError,
         nameDocument: [{ enum: contractType, label: config.description }],
         data: submissionData,
         signing_links: signingLinks,
         linkDocument: signing?.linkDocument || '',
         signingProvider,
         r2Key: r2KeyDirect || signing?.r2Key,
+        // Identificadores de WeeTrust: sin ellos no se puede consultar el estado
+        // del documento ni reintentar la firma de una persona más adelante.
+        documentID: signing?.documentID,
+        signatories: signing?.signatories,
         // Campos adicionales para backward compatibility
         contractType,
         docx_path: docxPath,
         pdf_path: pdfPath,
-        message: `Contrato ${contractType} generado exitosamente`,
+        message: signingError
+          ? `Contrato ${contractType} generado, pero sin firma electrónica`
+          : `Contrato ${contractType} generado exitosamente`,
+        error: signingError,
         generatedAt: new Date().toISOString()
       };
 

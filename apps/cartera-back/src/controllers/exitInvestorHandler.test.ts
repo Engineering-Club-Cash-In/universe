@@ -138,7 +138,7 @@ describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_
     );
 
     expect(res.success).toBe(true);
-    expect(res.creditos_omitidos).toBeUndefined();
+    expect(res.creditos_invalidos).toBeUndefined();
     expect(getExitInvestorLlamadoCon()).toEqual({ inversionista_id: 13, creditos: [78] });
   });
 
@@ -148,12 +148,12 @@ describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_
       { 78: 0 }
     );
 
-    const res = await exitInvestorHandler(
-      { body: { inversionista_id: 13, creditos: [78], motivo: "devolucion_verificado" }, set: { status: 200 } },
-      deps as any
-    );
+    const ctx = { body: { inversionista_id: 13, creditos: [78], motivo: "devolucion_verificado" }, set: { status: 200 } };
+    const res = await exitInvestorHandler(ctx, deps as any);
 
     expect(res.success).toBe(true);
+    expect(res.creditos_invalidos).toBeUndefined();
+    expect(ctx.set.status).toBe(200);
     expect(getExitInvestorLlamadoCon()).toEqual({
       inversionista_id: 13,
       creditos: [78],
@@ -161,56 +161,53 @@ describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_
     });
   });
 
-  it("con motivo=devolucion_verificado y espejo != 0: se omite, NO llega a exitInvestor", async () => {
+  it("con motivo=devolucion_verificado y espejo != 0: rechaza el lote entero con status 400, NO llega a exitInvestor", async () => {
     const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
       { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [] },
       { 78: 1500 }
     );
 
-    const res = await exitInvestorHandler(
-      { body: { inversionista_id: 13, creditos: [78], motivo: "devolucion_verificado" }, set: { status: 200 } },
-      deps as any
-    );
+    const ctx = { body: { inversionista_id: 13, creditos: [78], motivo: "devolucion_verificado" }, set: { status: 200 } };
+    const res = await exitInvestorHandler(ctx, deps as any);
 
     expect(res.success).toBe(false);
-    expect(res.creditos_omitidos).toEqual([78]);
+    expect(res.creditos_invalidos).toEqual([78]);
     expect(getExitInvestorLlamadoCon()).toBeNull();
+    expect(ctx.set.status).toBe(400);
   });
 
-  it("con motivo=devolucion_verificado y sin fila en el espejo: se omite igual que uno con saldo (undefined !== 0)", async () => {
+  it("con motivo=devolucion_verificado y sin fila en el espejo: rechaza igual que uno con saldo (undefined !== 0)", async () => {
     const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
       { success: true, creditos_procesados: [] },
       {}
     );
 
-    const res = await exitInvestorHandler(
-      { body: { inversionista_id: 13, creditos: [999], motivo: "devolucion_verificado" }, set: { status: 200 } },
-      deps as any
-    );
+    const ctx = { body: { inversionista_id: 13, creditos: [999], motivo: "devolucion_verificado" }, set: { status: 200 } };
+    const res = await exitInvestorHandler(ctx, deps as any);
 
     expect(res.success).toBe(false);
-    expect(res.creditos_omitidos).toEqual([999]);
+    expect(res.creditos_invalidos).toEqual([999]);
     expect(getExitInvestorLlamadoCon()).toBeNull();
+    expect(ctx.set.status).toBe(400);
   });
 
-  it("con motivo=devolucion_verificado, lote mixto: solo pasan los créditos con espejo en 0", async () => {
+  it("con motivo=devolucion_verificado, lote mixto: se rechaza TODO (no se filtra un subconjunto)", async () => {
+    // Antes filtraba y pasaba solo el subconjunto en 0 a exitInvestor, pero
+    // exitInvestor marca inactivo con que UN crédito se procese — el lote
+    // mixto dejaba al inversionista inactivo con la posición omitida
+    // (capital pendiente) todavía a su nombre. Ahora es todo o nada.
     const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
       { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [{ credito_id: 78 }] },
       { 78: 0, 141: 500 }
     );
 
-    const res = await exitInvestorHandler(
-      { body: { inversionista_id: 13, creditos: [78, 141], motivo: "devolucion_verificado" }, set: { status: 200 } },
-      deps as any
-    );
+    const ctx = { body: { inversionista_id: 13, creditos: [78, 141], motivo: "devolucion_verificado" }, set: { status: 200 } };
+    const res = await exitInvestorHandler(ctx, deps as any);
 
-    expect(res.success).toBe(true);
-    expect(res.creditos_omitidos).toEqual([141]);
-    expect(getExitInvestorLlamadoCon()).toEqual({
-      inversionista_id: 13,
-      creditos: [78],
-      motivo: "devolucion_verificado",
-    });
-    expect(marcarLlamadoCon?.creditoIds).toEqual([78]);
+    expect(res.success).toBe(false);
+    expect(res.creditos_invalidos).toEqual([141]);
+    expect(getExitInvestorLlamadoCon()).toBeNull();
+    expect(ctx.set.status).toBe(400);
+    expect(marcarLlamadoCon).toBeNull();
   });
 });

@@ -35,6 +35,16 @@
 // consumir (Codex, hilo original). El caller que sabe que está haciendo esa
 // devolución debe pedirlo explícitamente con `motivo`; sin él, el endpoint se
 // comporta exactamente igual que antes (salida total, sin validar saldo).
+//
+// TODO o nada, nunca un subconjunto filtrado: una primera versión de este
+// guard pasaba solo los créditos con espejo en 0 a exitInvestor, pero
+// exitInvestor marca inactivo con que UN crédito se haya procesado —no exige
+// que se hayan procesado TODOS los pedidos—, así que un lote mixto dejaba al
+// inversionista inactivo con la posición omitida (capital pendiente) todavía
+// a su nombre (Codex, hilo de seguimiento). Con motivo=devolucion_verificado
+// el batch entero se rechaza si CUALQUIER crédito no tiene el espejo en 0,
+// con set.status=400 para que el caller lo note por código de estado y no
+// solo por `success:false` en el body.
 // ============================================================================
 
 import { and, eq, inArray } from "drizzle-orm";
@@ -92,9 +102,6 @@ export const exitInvestorHandler = async (ctx: any, deps?: Deps) => {
 
   const { inversionista_id, creditos: creditoIds, motivo } = ctx?.body ?? {};
 
-  let ctxFiltrado = ctx;
-  let creditoIdsOmitidos: number[] = [];
-
   if (
     motivo === "devolucion_verificado" &&
     typeof inversionista_id === "number" &&
@@ -102,37 +109,31 @@ export const exitInvestorHandler = async (ctx: any, deps?: Deps) => {
     creditoIds.length > 0
   ) {
     const montoPorCredito = await obtenerMontoAportadoEspejo(inversionista_id, creditoIds);
+    const creditoIdsInvalidos = creditoIds.filter((id: number) => montoPorCredito.get(id) !== 0);
 
-    const creditoIdsValidos = creditoIds.filter((id: number) => montoPorCredito.get(id) === 0);
-    creditoIdsOmitidos = creditoIds.filter((id: number) => !creditoIdsValidos.includes(id));
-
-    if (creditoIdsOmitidos.length > 0) {
+    // Todo o nada: nunca se llama a exitInvestor con un subconjunto. Ver
+    // comentario de arriba sobre por qué filtrar dejaba al inversionista
+    // inactivo con posiciones pendientes a su nombre.
+    if (creditoIdsInvalidos.length > 0) {
       console.warn(
         `  ⚠️  [POST /investor/exit motivo=devolucion_verificado] inversionista ${inversionista_id}: ` +
-          `${creditoIdsOmitidos.length} crédito(s) con espejo != 0 (o sin fila) se omiten para no dejar ` +
-          `capital pendiente huérfano — ` +
-          creditoIdsOmitidos
+          `lote rechazado, ${creditoIdsInvalidos.length}/${creditoIds.length} crédito(s) con espejo != 0 ` +
+          `(o sin fila) — ` +
+          creditoIdsInvalidos
             .map((id) => `credito_id=${id} monto_aportado=${montoPorCredito.get(id) ?? "SIN_FILA_ESPEJO"}`)
             .join(", ")
       );
-    }
-
-    if (creditoIdsValidos.length === 0) {
+      if (ctx?.set) ctx.set.status = 400;
       return {
         success: false,
         message:
-          "Ningún crédito pasó la validación de capital pendiente (monto_aportado != 0 en el espejo o sin fila). No se movió nada.",
-        creditos_omitidos: creditoIdsOmitidos,
+          "Lote rechazado: al menos un crédito tiene capital pendiente (monto_aportado != 0 en el espejo o sin fila). No se movió nada.",
+        creditos_invalidos: creditoIdsInvalidos,
       };
     }
-
-    ctxFiltrado = { ...ctx, body: { ...ctx.body, creditos: creditoIdsValidos } };
   }
 
-  const resultado: any = await resolved.exitInvestor(ctxFiltrado);
-  if (resultado?.success && creditoIdsOmitidos.length > 0) {
-    resultado.creditos_omitidos = creditoIdsOmitidos;
-  }
+  const resultado: any = await resolved.exitInvestor(ctx);
 
   if (resultado?.success) {
     // En su propio try/catch, igual que el barrido de liquidateByInvestorId:

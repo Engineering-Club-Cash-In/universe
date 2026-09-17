@@ -2072,7 +2072,18 @@ export async function aplicarRubrosDelPago(
     .select({ paymentFalse: pagos_credito.paymentFalse })
     .from(pagos_credito)
     .where(eq(pagos_credito.pago_id, pago_id))
-    .limit(1);
+    .limit(1)
+    // `FOR UPDATE`, y no una lectura plana, por la misma razón que el guard
+    // existe: los dos escritores de los que defiende —`actualizarEstadoCredito`
+    // y `resetCredit`, en `credits.ts`— **no toman el advisory lock del
+    // crédito** (ese archivo no tiene una sola llamada a `pg_advisory`). O sea
+    // que el candado que sí toma `/aplicar-pago` no los excluye, y bajo READ
+    // COMMITTED quedaba la ventana entera abierta: esta lectura ve la boleta
+    // viva, el otro la marca falsa en bloque y commitea, y acá se cobra el rubro
+    // igual. Bloquear la fila hace que ese UPDATE espere. No cambia el orden de
+    // candados —el advisory sigue afuera y la fila adentro—, así que no reabre
+    // el deadlock que ya costó una vez.
+    .for("update");
 
   if (!pago || pago.paymentFalse) return [];
 

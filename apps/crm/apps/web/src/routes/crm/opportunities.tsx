@@ -1464,6 +1464,37 @@ function RouteComponent() {
 		},
 	});
 
+	// Las partes del contrato se guardan con su propio endpoint:
+	// updateOpportunity limita la edición al asesor asignado y quien prepara
+	// los datos para jurídico suele ser el analista.
+	const saveContractPartyMutation = useMutation({
+		mutationFn: (input: {
+			opportunityId: string;
+			vendorId?: string | null;
+			companyId?: string | null;
+		}) => client.setOpportunityContractParty(input),
+		onSuccess: async () => {
+			const frescas = await client.getOpportunities();
+			const actualizada = frescas.find(
+				(opp) => opp.id === selectedOpportunity?.id,
+			);
+			if (actualizada) setSelectedOpportunity(actualizada);
+			queryClient.setQueryData(
+				["getOpportunities", session?.user?.id, userProfile.data?.role],
+				frescas,
+			);
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "No se pudo guardar el dato del contrato");
+		},
+	});
+
+	// Quien no puede guardar tampoco debería poder tocar los selectores
+	const puedeEditarPartesContrato =
+		!!userProfile.data?.role &&
+		(PERMISSIONS.canAccessAnalysis(userProfile.data.role) ||
+			selectedOpportunity?.assignedTo === session?.user?.id);
+
 	// Parte del contrato en el detalle: agencia si el carro es nuevo, vendedor
 	// (dueño) si es usado. Se guarda al elegir o crear. El vendedor sale solo
 	// de la oportunidad, igual que en la generación de contratos.
@@ -1481,20 +1512,20 @@ function RouteComponent() {
 				!!userProfile.data?.role &&
 				PERMISSIONS.canCreateCompanies(userProfile.data.role)
 			}
-			disabled={isWonLocked}
+			disabled={isWonLocked || !puedeEditarPartesContrato}
 			isSaving={
-				updateOpportunityMutation.isPending ||
+				saveContractPartyMutation.isPending ||
 				saveRazonSocialMutation.isPending
 			}
 			onAssignVendor={(vendorId) =>
-				updateOpportunityMutation.mutate({
-					id: selectedOpportunity.id,
+				saveContractPartyMutation.mutate({
+					opportunityId: selectedOpportunity.id,
 					vendorId,
 				})
 			}
 			onAssignCompany={(companyId) =>
-				updateOpportunityMutation.mutate({
-					id: selectedOpportunity.id,
+				saveContractPartyMutation.mutate({
+					opportunityId: selectedOpportunity.id,
 					companyId,
 				})
 			}

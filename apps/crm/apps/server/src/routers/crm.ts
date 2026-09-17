@@ -665,6 +665,62 @@ export const crmRouter = {
 	 * creadas por uno y las agencias son de todos; aquí solo se escribe la
 	 * razón social, que es el dato que el contrato necesita.
 	 */
+	/**
+	 * Asignar o quitar las partes del contrato (vendedor del vehículo y agencia)
+	 * desde el detalle de la oportunidad. Va aparte de updateOpportunity porque
+	 * ese limita las ediciones al asesor asignado, y quien prepara los datos
+	 * para jurídico suele ser el analista, que no es el dueño de la
+	 * oportunidad. Solo toca esas dos columnas.
+	 */
+	setOpportunityContractParty: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "update" } })
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				// null desasigna la parte; ausente la deja como está
+				vendorId: z.string().uuid().nullable().optional(),
+				companyId: z.string().uuid().nullable().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const [oportunidad] = await db
+				.select({ id: opportunities.id, assignedTo: opportunities.assignedTo })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+			if (!oportunidad) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			// Análisis (admin, analista y supervisor de ventas) prepara los datos
+			// de contratos; el asesor puede hacerlo sobre las suyas.
+			const puedeEditar =
+				PERMISSIONS.canAccessAnalysis(context.userRole) ||
+				oportunidad.assignedTo === context.userId;
+			if (!puedeEditar) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para editar esta oportunidad",
+				});
+			}
+
+			const [actualizada] = await db
+				.update(opportunities)
+				.set({
+					...(input.vendorId !== undefined && { vendorId: input.vendorId }),
+					...(input.companyId !== undefined && { companyId: input.companyId }),
+					updatedAt: new Date(),
+				})
+				.where(eq(opportunities.id, input.opportunityId))
+				.returning({
+					id: opportunities.id,
+					vendorId: opportunities.vendorId,
+					companyId: opportunities.companyId,
+				});
+			return actualizada;
+		}),
+
 	setCompanyRazonSocial: crmProcedure
 		.input(
 			z.object({

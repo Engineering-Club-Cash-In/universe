@@ -45,6 +45,7 @@ export const crmAppRouter = {
 	createCompany: crmRouter.createCompany,
 	updateCompany: crmRouter.updateCompany,
 	setCompanyRazonSocial: crmRouter.setCompanyRazonSocial,
+	setOpportunityContractParty: crmRouter.setOpportunityContractParty,
 	getLeads: crmRouter.getLeads,
 	getLeadById: crmRouter.getLeadById,
 	getLeadsStats: crmRouter.getLeadsStats,

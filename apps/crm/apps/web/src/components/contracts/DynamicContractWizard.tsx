@@ -169,6 +169,25 @@ interface GenerationResult {
 	results: ContractResult[];
 }
 
+/**
+ * Rol de un firmante del contrato. Decide en qué línea de firma cae la persona:
+ * el generador conoce el layout de cada template y reparte por rol, porque el
+ * orden no es el mismo en todos (en la garantía mobiliaria y el reconocimiento
+ * de deuda el representante legal firma primero, no último).
+ *
+ * `REP_LEGAL` lo agrega el servidor, que es donde vive su correo.
+ */
+export type SignerRole = "TITULAR" | "COFIRMANTE" | "REP_LEGAL" | "VENDEDOR";
+
+export interface ContractSigner {
+	role: SignerRole;
+	email: string;
+	/** Nombre real de la persona, tal como debe verse en el documento. */
+	name: string;
+	dpi?: string;
+	phone?: string;
+}
+
 // Editable fields for additional debtors
 interface EditableCoDebtorFields {
 	id: string;
@@ -212,6 +231,7 @@ interface DynamicContractWizardProps {
 		contracts: Array<{
 			contractType: string;
 			data: Record<string, string>;
+			signers?: ContractSigner[];
 			emails?: string[];
 			options: {
 				gender: "male" | "female";
@@ -236,6 +256,7 @@ interface DynamicContractWizardProps {
 		generationData?: Array<{
 			contractType: string;
 			data: Record<string, string>;
+			signers?: ContractSigner[];
 			emails?: string[];
 			options: {
 				gender: "male" | "female";
@@ -658,6 +679,7 @@ export function DynamicContractWizard({
 		Array<{
 			contractType: string;
 			data: Record<string, string>;
+			signers?: ContractSigner[];
 			emails?: string[];
 			options: {
 				gender: "male" | "female";
@@ -1703,11 +1725,28 @@ export function DynamicContractWizard({
 					nacionalidad: cd.nacionalidad,
 				}));
 
-				// Collect all emails (lead + co-debtors)
-				const allEmails: string[] = [];
-				if (clientEmail) allEmails.push(clientEmail);
+				// Firmantes con su rol. El rol es lo que decide en qué línea de firma
+				// del documento cae cada persona: mandarlos como una lista plana los
+				// repartía por índice y con cofirmante el link salía cruzado. Al
+				// representante legal lo agrega el servidor, que es donde vive su correo.
+				const signers: ContractSigner[] = [];
+				if (clientEmail) {
+					signers.push({
+						role: "TITULAR",
+						email: clientEmail,
+						name: crmData.cliente.nombreCompleto ?? clientEmail,
+						dpi: crmData.cliente.dpi,
+					});
+				}
 				coDebtorFields.forEach((cd) => {
-					if (cd.correoElectronico) allEmails.push(cd.correoElectronico);
+					if (cd.correoElectronico) {
+						signers.push({
+							role: "COFIRMANTE",
+							email: cd.correoElectronico,
+							name: cd.nombreCompleto || cd.correoElectronico,
+							dpi: cd.dpi,
+						});
+					}
 				});
 
 				// Determine combined gender: if any male (lead or co-debtor), use "male"
@@ -1747,7 +1786,7 @@ export function DynamicContractWizard({
 						return {
 							contractType: doc.nombre_documento,
 							data: contractData as Record<string, string>,
-							emails: allEmails.length > 0 ? allEmails : undefined,
+							signers: signers.length > 0 ? signers : undefined,
 							options: {
 								gender,
 								generatePdf: true,

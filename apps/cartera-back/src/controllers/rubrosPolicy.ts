@@ -385,7 +385,7 @@ export const eventoDeEdicion = ({
  * Dejan de coincidir cuando algo borra filas de `pagos_credito` sin pasar por
  * `revertirRubrosDelPago`: el FK de `rubros_pagos` es ON DELETE CASCADE, así
  * que los reclamos desaparecen mientras `saldo_pendiente` sigue descontado.
- * Lo hacen la carga por Excel, `migratePayments`, `/recalculate` y
+ * Lo hacen la carga por Excel, `migratePayments`, `eliminarCreditos` y
  * `marcarCreditoComoCaido` — los dos últimos ya sólo cuando el rubro está
  * saldado o anulado, porque bloquean si hay deuda viva. Después de cualquiera de
  * esos, la suma de reclamos cae a 0 y esta resta sigue dando lo de antes.

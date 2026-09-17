@@ -146,7 +146,7 @@ describe("listarRubrosDeCredito — el `abonado` es lo que el cliente PAGÓ", ()
     // saldo (lo dice `cobrarRubrosParaBoleta`). Si no hay ningún reclamo
     // aplicado y aun así el saldo es MENOR que el monto, el hueco sólo puede
     // venir de un borrado de `pagos_credito` en cascada —la carga por Excel,
-    // `migratePayments`, `/recalculate` o `marcarCreditoComoCaido`—, que se lleva
+    // `migratePayments`, `eliminarCreditos` o `marcarCreditoComoCaido`—, que se lleva
     // los reclamos y deja el descuento. (Los dos últimos bloquean si hay deuda
     // viva, así que por ahí llega justo este caso: el rubro ya saldado.)
     //

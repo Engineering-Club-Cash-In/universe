@@ -53,17 +53,29 @@ function pantallaConRubros(servidor: () => RubroCredito[] | Promise<RubroCredito
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
   let llamadas = 0;
-  const observer = new QueryObserver<RubroCredito[]>(queryClient, {
+  const opciones = {
     queryKey: [QK_RUBROS, CRED],
     queryFn: () => {
       llamadas++;
       return servidor();
     },
-  });
+  };
+  const observer = new QueryObserver<RubroCredito[]>(queryClient, opciones);
   const desuscribir = observer.subscribe(() => {});
   return {
     queryClient,
     desuscribir,
+    /**
+     * Cierra el modal SIN desmontar el componente, que es lo que de verdad pasa:
+     * el `useQuery` es `enabled: open && !!creditoVisible`, así que al cerrar el
+     * observer sigue montado y sólo queda deshabilitado.
+     *
+     * La diferencia con desuscribir NO es cosmética: una query sin observadores
+     * queda "inactiva" y `refetchType: "all"` sí la alcanza, pero una con un
+     * observador deshabilitado queda `isDisabled`, y a ésa `refetchQueries` la
+     * FILTRA incluso con `"all"`. Un test que desuscribe no prueba este caso.
+     */
+    cerrarModal: () => observer.setOptions({ ...opciones, enabled: false }),
     refetches: () => llamadas - 1,
     fila: () =>
       queryClient.getQueryData<RubroCredito[]>([QK_RUBROS, CRED])?.[0] ?? null,
@@ -107,16 +119,15 @@ describe("sincronizarRubroEditado", () => {
     p.desuscribir();
   });
 
-  it("si el modal se cerró durante el guardado, la lista igual queda al día", async () => {
-    // `enabled: open && !!creditoVisible` en `RubrosCredito`: si el modal se
-    // cierra mientras el PUT viaja, la query queda INACTIVA. Y `invalidateQueries`
-    // por defecto es `refetchType: "active"`, así que a una query inactiva sólo
-    // la marca obsoleta y NO la vuelve a pedir.
+  it("si el modal se CERRÓ durante el guardado, la lista igual queda al día", async () => {
+    // El caso real, y el más difícil de ver: al cerrar, `enabled` pasa a false y
+    // el observer sigue montado. Esa query queda `isDisabled`, y `refetchQueries`
+    // la filtra INCLUSO con `refetchType: "all"` — así que no hay refetch, no hay
+    // error, y el estado queda en `success`/`idle`, o sea "todo bien".
     //
-    // Sin forzar el refetch el agujero es silencioso: no hay error que detectar,
-    // el estado queda en `success`/`idle` —o sea "todo bien"— y la lista se queda
-    // con el monto ANTERIOR al PUT aunque el backend ya guardó el nuevo. Es el
-    // mismo caso que los TIPOS ya habían tenido que resolver con `refetchType`.
+    // Sin detectarlo, la lista se queda con el monto ANTERIOR al PUT aunque el
+    // backend ya guardó el nuevo. Al reabrir, ese dato viejo se alcanza a pintar
+    // y el que edite esa fila lo manda de vuelta.
     let primera = true;
     const p = pantallaConRubros(async () => {
       if (primera) {
@@ -127,7 +138,64 @@ describe("sincronizarRubroEditado", () => {
     });
     await esperar(20);
 
-    p.desuscribir(); // el modal se cerró: la query queda inactiva
+    p.cerrarModal();
+
+    await sincronizarRubroEditado(
+      p.queryClient,
+      CRED,
+      5,
+      guardado({ monto_original: "800.00", saldo_pendiente: "600.00" })
+    );
+
+    expect(p.fila()!.monto_original).toBe("800.00");
+  });
+
+  it("con el componente desmontado igual SE PIDE, para no caer al plan B a ciegas", async () => {
+    // Sin `refetchType: "all"` una query inactiva no se vuelve a pedir, y la
+    // siembra taparía el hueco con NUESTRO valor. Funcionaría de casualidad: se
+    // vería lo guardado, pero se perdería la edición de otro administrador, que
+    // es justo lo que este helper existe para no hacer.
+    //
+    // Forzando el refetch, la inactiva sí trae la verdad del servidor y el plan B
+    // queda para cuando de verdad no llega nada. Acá el servidor devuelve 999,
+    // que es lo que dejó el otro admin: tiene que ganar sobre nuestro 800.
+    let primera = true;
+    const p = pantallaConRubros(async () => {
+      if (primera) {
+        primera = false;
+        return [rubro()];
+      }
+      return [rubro({ monto_original: "999.00", saldo_pendiente: "799.00" })];
+    });
+    await esperar(20);
+
+    p.desuscribir();
+
+    await sincronizarRubroEditado(
+      p.queryClient,
+      CRED,
+      5,
+      guardado({ monto_original: "800.00", saldo_pendiente: "600.00" })
+    );
+
+    expect(p.fila()!.monto_original).toBe("999.00");
+  });
+
+  it("si el componente se desmontó, tampoco queda con el dato viejo", async () => {
+    // Variante del anterior por el otro lado: sin observadores la query queda
+    // "inactiva", no "deshabilitada". Son estados distintos de TanStack y se
+    // comportan distinto frente a `refetchType`, así que se prueban los dos.
+    let primera = true;
+    const p = pantallaConRubros(async () => {
+      if (primera) {
+        primera = false;
+        return [rubro()];
+      }
+      return [rubro({ monto_original: "800.00", saldo_pendiente: "600.00" })];
+    });
+    await esperar(20);
+
+    p.desuscribir();
 
     await sincronizarRubroEditado(
       p.queryClient,

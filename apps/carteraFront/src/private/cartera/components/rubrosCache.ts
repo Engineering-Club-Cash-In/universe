@@ -80,18 +80,31 @@ export async function refrescarRubros(
  * al guardar lo persiste. Entre mostrar un dato viejo un rato y borrarle la
  * edición a otro, se elige lo primero: es visible y se cura solo al refrescar.
  *
- * CUÁNDO SIEMBRA: sólo si el refetch no trajo valor nuevo, que no es lo mismo
- * que "falló". Hay dos formas, y ninguna levanta una excepción:
+ * CUÁNDO SIEMBRA: sólo si el refetch no trajo valor nuevo — y eso se MIDE, no se
+ * deduce de la causa. Se guarda el `dataUpdatedAt` antes de invalidar y se
+ * compara después: si no avanzó, no llegó nada.
  *
- *   * la red se cayó — `invalidateQueries` resuelve igual, sin tirar error, y
- *     deja el fetch en `fetchStatus: "paused"` mientras el `status` sigue
- *     diciendo `success` porque conserva el último dato bueno. Mirar sólo el
- *     `status` da "todo bien" cuando no se refrescó nada;
- *   * el refetch NUNCA SALIÓ. `invalidateQueries` por defecto es
- *     `refetchType: "active"`, y la query de rubros es `enabled: open && …`: si
- *     el modal se cerró mientras el PUT viajaba, queda inactiva y la invalidación
- *     sólo la marca obsoleta. Por eso el refetch va forzado con
- *     `refetchType: "all"`, igual que en los TIPOS y por el mismo motivo.
+ * Enumerar las causas fue el primer intento y se quedó corto tres veces, porque
+ * ninguna de ellas levanta una excepción y varias dejan el estado diciendo
+ * `success`:
+ *
+ *   * **la red se cayó** — `invalidateQueries` resuelve igual, sin tirar error, y
+ *     deja el fetch en `fetchStatus: "paused"` mientras el `status` sigue en
+ *     `success` porque conserva el último dato bueno;
+ *   * **el refetch no salió por inactiva** — el default es
+ *     `refetchType: "active"`, y a una query sin observadores sólo la marca
+ *     obsoleta. De ahí el `refetchType: "all"`, igual que en los TIPOS;
+ *   * **el refetch no salió por DESHABILITADA**, que es el caso real y el que
+ *     `"all"` tampoco alcanza: la query de rubros es `enabled: open && …`, así
+ *     que al cerrar el modal el observer sigue MONTADO con `enabled: false`. Eso
+ *     la vuelve `isDisabled`, y `refetchQueries` filtra las deshabilitadas
+ *     incluso con `"all"`. Estado final: `success`/`idle`, o sea "todo bien".
+ *
+ * Mirar el `dataUpdatedAt` cubre las tres y las que vengan, porque pregunta por
+ * el resultado en vez de por el motivo. Y no se confunde con un refetch exitoso
+ * que devuelve lo mismo: el sello avanza en cada respuesta buena, aunque los
+ * datos sean idénticos. Las cinco situaciones están medidas contra la versión
+ * instalada de TanStack, no deducidas.
  *
  * Perder la edición es peor justo en esos casos, porque el cargo YA está cambiado
  * en la base: el administrador vuelve a la lista, ve el monto anterior y lo
@@ -111,9 +124,14 @@ export async function sincronizarRubroEditado(
 ): Promise<void> {
   const queryKey = [QK_RUBROS, creditoId];
 
-  // `refetchType: "all"` alcanza también a la query INACTIVA, que es el caso que
-  // el default (`"active"`) deja sin refrescar: modal cerrado mientras el PUT
-  // viajaba. Ver el bloque de arriba.
+  // El sello de la última respuesta buena, ANTES de pedir la nueva. Es la vara
+  // con la que después se mide si llegó algo.
+  const selloPrevio = queryClient.getQueryState<RubroCredito[]>(queryKey)
+    ?.dataUpdatedAt;
+
+  // `refetchType: "all"` alcanza a la query inactiva, que el default
+  // (`"active"`) deja sin refrescar. No alcanza a la DESHABILITADA —ver arriba—,
+  // y por eso la decisión no se apoya en esto sino en el sello.
   //
   // No hace falta cancelar a mano lo que esté en vuelo: la invalidación dispara
   // su refetch con `cancelRefetch: true`, y eso descarta el resultado del GET
@@ -121,12 +139,15 @@ export async function sincronizarRubroEditado(
   // sobre el caché, no sobre el socket—.
   await queryClient.invalidateQueries({ queryKey, refetchType: "all" });
 
-  // Si el servidor contestó, el servidor manda. La siembra es el plan B.
+  // Si llegó algo del servidor, manda el servidor. La siembra es el plan B.
   const estado = queryClient.getQueryState<RubroCredito[]>(queryKey);
-  const refetchNoTrajoNada =
-    estado?.status === "error" || estado?.fetchStatus === "paused";
 
-  if (guardado && refetchNoTrajoNada) {
+  // Sin entrada en caché no hay lista que corregir: la próxima vez que monte va
+  // a pedirla de cero. Sembrar acá dejaría un listado de una sola fila.
+  const noLlegoNada =
+    estado !== undefined && estado.dataUpdatedAt === selloPrevio;
+
+  if (guardado && noLlegoNada) {
     queryClient.setQueryData<RubroCredito[]>(queryKey, (actuales) =>
       aplicarEdicionRubro(actuales, rubroId, guardado)
     );

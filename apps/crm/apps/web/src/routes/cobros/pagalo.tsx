@@ -5,8 +5,17 @@
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Loader2, RotateCcw, UserRound } from "lucide-react";
+import {
+	ArrowUpDown,
+	FileSpreadsheet,
+	FileText,
+	Loader2,
+	RotateCcw,
+	UserRound,
+} from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { aFechaISO } from "@/components/cobros/historial/formato";
 import { GrupoLinksPorTipo } from "@/components/cobros/pagalo/chip-link-pagalo";
 import {
 	antiguedadLink,
@@ -14,6 +23,7 @@ import {
 	getEstadoGrupoInfo,
 } from "@/components/cobros/pagalo/formato-pagalo";
 import { Pagination } from "@/components/cobros/pagination";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +42,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { authClient } from "@/lib/auth-client";
 import {
@@ -40,7 +51,12 @@ import {
 } from "@/lib/cobros/pagalo-link-display";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
-import { alternarEstado, normalizarNombreCliente } from "./-pagalo-columnas";
+import {
+	alternarEstado,
+	normalizarNombreCliente,
+	siguienteOrden,
+} from "./-pagalo-columnas";
+import { exportarPagaloPDF, exportarPagaloXLSX } from "./-pagalo-export";
 
 export const Route = createFileRoute("/cobros/pagalo")({
 	component: PagaloSupervisionPage,
@@ -60,6 +76,7 @@ const ESTADOS_FILTRABLES = [
 	"COMPLETED",
 	"APPLICATION_FAILED",
 	"REVIEW_REQUIRED",
+	"CANCELLED",
 ] as const;
 
 const POR_PAGINA = 25;
@@ -106,6 +123,43 @@ type AsesorPool = {
 	nombre: string;
 	buckets: number[];
 };
+
+type ColumnaOrdenable = "totalAmount" | "createdAt";
+
+function EncabezadoOrdenable({
+	label,
+	columna,
+	ordenPor,
+	ordenDir,
+	onOrdenar,
+	className,
+}: {
+	label: string;
+	columna: ColumnaOrdenable;
+	ordenPor: ColumnaOrdenable;
+	ordenDir: "asc" | "desc";
+	onOrdenar: (columna: ColumnaOrdenable) => void;
+	className?: string;
+}) {
+	const activo = ordenPor === columna;
+	return (
+		<TableHead className={className}>
+			<button
+				type="button"
+				onClick={() => onOrdenar(columna)}
+				className="inline-flex items-center gap-1 hover:text-foreground"
+			>
+				{label}
+				<ArrowUpDown
+					className={`h-3.5 w-3.5 ${activo ? "text-violet-600" : "text-muted-foreground"}`}
+				/>
+				{activo && (
+					<span className="text-[10px]">{ordenDir === "asc" ? "↑" : "↓"}</span>
+				)}
+			</button>
+		</TableHead>
+	);
+}
 
 function FilaGrupo({
 	grupo,
@@ -215,6 +269,18 @@ function PagaloSupervisionPage() {
 	const [numeroSifco, setNumeroSifco] = useState("");
 	const [asesorSel, setAsesorSel] = useState("todos");
 	const [pagina, setPagina] = useState(1);
+	const [ordenPor, setOrdenPor] = usePersistedState<ColumnaOrdenable>(
+		"cobros-pagalo-supervision-v1-orden-por",
+		"createdAt",
+	);
+	const [ordenDir, setOrdenDir] = usePersistedState<"asc" | "desc">(
+		"cobros-pagalo-supervision-v1-orden-dir",
+		"desc",
+	);
+	const [rangoFechas, setRangoFechas] = usePersistedDateRange(
+		"cobros-pagalo-supervision-v1-rango",
+	);
+	const [exportando, setExportando] = useState<"xlsx" | "pdf" | null>(null);
 	const queryClient = useQueryClient();
 
 	const puedeConsultar = !!userRole && PERMISSIONS.canAccessCobros(userRole);
@@ -230,9 +296,23 @@ function PagaloSupervisionPage() {
 		soloProblematicos: estados.length > 0,
 		numeroSifco: numeroSifco.trim() || undefined,
 		asesorId,
+		fechaDesde: rangoFechas?.from ? aFechaISO(rangoFechas.from) : undefined,
+		fechaHasta: rangoFechas?.to ? aFechaISO(rangoFechas.to) : undefined,
+		sortBy: ordenPor,
+		sortDir: ordenDir,
 		limit: POR_PAGINA,
 		offset,
 	});
+
+	const alternarOrden = (columna: ColumnaOrdenable) => {
+		setPagina(1);
+		const siguiente = siguienteOrden(
+			{ columna: ordenPor, direccion: ordenDir },
+			columna,
+		);
+		setOrdenPor(siguiente.columna);
+		setOrdenDir(siguiente.direccion);
+	};
 
 	const supervisionQuery = useQuery({
 		...orpc.getPagaloSupervision.queryOptions({
@@ -293,6 +373,26 @@ function PagaloSupervisionPage() {
 		setEstados((prev) => alternarEstado(prev, estado));
 	};
 
+	async function ejecutarExport(tipo: "xlsx" | "pdf") {
+		if (exportando) return;
+		setExportando(tipo);
+		try {
+			const filtrosExport = inputConsulta(0);
+			const cantidad =
+				tipo === "xlsx"
+					? await exportarPagaloXLSX(filtrosExport)
+					: await exportarPagaloPDF(filtrosExport);
+			toast.success(
+				`Se exportaron ${cantidad.toLocaleString("es-GT")} grupos.`,
+			);
+		} catch (error) {
+			console.error("[pagalo] Error exportando:", error);
+			toast.error("No se pudo generar el archivo. Intentá de nuevo.");
+		} finally {
+			setExportando(null);
+		}
+	}
+
 	return (
 		<div className="mx-auto max-w-[1600px] px-4 py-6">
 			<div className="mb-6 flex flex-wrap items-start justify-between gap-4">
@@ -309,20 +409,48 @@ function PagaloSupervisionPage() {
 						</p>
 					)}
 				</div>
-				<Button
-					variant="outline"
-					size="sm"
-					onClick={() => supervisionQuery.refetch()}
-					disabled={supervisionQuery.isFetching}
-				>
-					<RotateCcw
-						className={`mr-2 h-4 w-4 ${supervisionQuery.isFetching ? "animate-spin" : ""}`}
-					/>
-					Actualizar
-				</Button>
+				<div className="flex items-center gap-2">
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => ejecutarExport("xlsx")}
+						disabled={!!exportando || total === 0}
+					>
+						{exportando === "xlsx" ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : (
+							<FileSpreadsheet className="mr-2 h-4 w-4" />
+						)}
+						Exportar XLSX
+					</Button>
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => ejecutarExport("pdf")}
+						disabled={!!exportando || total === 0}
+					>
+						{exportando === "pdf" ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : (
+							<FileText className="mr-2 h-4 w-4" />
+						)}
+						Exportar PDF
+					</Button>
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => supervisionQuery.refetch()}
+						disabled={supervisionQuery.isFetching}
+					>
+						<RotateCcw
+							className={`mr-2 h-4 w-4 ${supervisionQuery.isFetching ? "animate-spin" : ""}`}
+						/>
+						Actualizar
+					</Button>
+				</div>
 			</div>
 
-			<div className="mb-4 flex flex-wrap items-center gap-2">
+			<div className="mb-3 flex flex-wrap items-center gap-2">
 				{ESTADOS_FILTRABLES.map((estado) => {
 					const activo = estados.includes(estado);
 					const info = getEstadoGrupoInfo(estado);
@@ -340,47 +468,56 @@ function PagaloSupervisionPage() {
 						</button>
 					);
 				})}
-				<div className="ml-auto flex flex-wrap items-center gap-2">
-					{esSupervisor && (
-						<Select
-							value={asesorSel}
-							onValueChange={(valor) => {
-								setAsesorSel(valor);
-								setPagina(1);
-							}}
-						>
-							<SelectTrigger className="w-56">
-								<UserRound className="mr-1 h-3.5 w-3.5 text-muted-foreground" />
-								<SelectValue placeholder="Asesor" />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="todos">Todos los asesores</SelectItem>
-								{asesoresQuery.isError && (
-									<div className="px-2 py-1.5 text-destructive text-xs">
-										No se pudo cargar asesores
-									</div>
-								)}
-								{asesores.map((asesor) => (
-									<SelectItem
-										key={asesor.asesorId}
-										value={String(asesor.asesorId)}
-									>
-										{asesor.nombre}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					)}
-					<Input
-						placeholder="Buscar por SIFCO…"
-						value={numeroSifco}
-						onChange={(e) => {
-							setNumeroSifco(e.target.value);
+			</div>
+
+			<div className="mb-4 flex flex-wrap items-center gap-2">
+				{esSupervisor && (
+					<Select
+						value={asesorSel}
+						onValueChange={(valor) => {
+							setAsesorSel(valor);
 							setPagina(1);
 						}}
-						className="w-56"
-					/>
-				</div>
+					>
+						<SelectTrigger className="w-56">
+							<UserRound className="mr-1 h-3.5 w-3.5 text-muted-foreground" />
+							<SelectValue placeholder="Asesor" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="todos">Todos los asesores</SelectItem>
+							{asesoresQuery.isError && (
+								<div className="px-2 py-1.5 text-destructive text-xs">
+									No se pudo cargar asesores
+								</div>
+							)}
+							{asesores.map((asesor) => (
+								<SelectItem
+									key={asesor.asesorId}
+									value={String(asesor.asesorId)}
+								>
+									{asesor.nombre}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				)}
+				<DateRangeFilter
+					dateRange={rangoFechas}
+					onDateRangeChange={(rango) => {
+						setRangoFechas(rango);
+						setPagina(1);
+					}}
+					className="shrink-0"
+				/>
+				<Input
+					placeholder="Buscar por SIFCO…"
+					value={numeroSifco}
+					onChange={(e) => {
+						setNumeroSifco(e.target.value);
+						setPagina(1);
+					}}
+					className="w-56"
+				/>
 			</div>
 
 			{supervisionQuery.isLoading ? (
@@ -412,10 +549,23 @@ function PagaloSupervisionPage() {
 								<TableHead>Crédito / Cliente</TableHead>
 								<TableHead>Asesor</TableHead>
 								<TableHead>Estado</TableHead>
-								<TableHead className="text-right">Total</TableHead>
+								<EncabezadoOrdenable
+									label="Total"
+									columna="totalAmount"
+									ordenPor={ordenPor}
+									ordenDir={ordenDir}
+									onOrdenar={alternarOrden}
+									className="text-right"
+								/>
 								<TableHead>Origen</TableHead>
 								<TableHead>Links</TableHead>
-								<TableHead>Antigüedad</TableHead>
+								<EncabezadoOrdenable
+									label="Antigüedad"
+									columna="createdAt"
+									ordenPor={ordenPor}
+									ordenDir={ordenDir}
+									onOrdenar={alternarOrden}
+								/>
 							</TableRow>
 						</TableHeader>
 						<TableBody>

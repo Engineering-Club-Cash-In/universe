@@ -14,6 +14,29 @@ export function alternarEstado(
 		: [...seleccionados, estado];
 }
 
+export type OrdenSupervision = {
+	columna: "totalAmount" | "createdAt";
+	direccion: "asc" | "desc";
+};
+
+/**
+ * Click en un header ordenable: si ya ordena por esa columna, invierte la
+ * dirección; si es otra columna, la selecciona con `desc` por defecto (lo
+ * más relevante primero — monto más alto, fecha más reciente).
+ */
+export function siguienteOrden(
+	actual: OrdenSupervision,
+	columnaClickeada: OrdenSupervision["columna"],
+): OrdenSupervision {
+	if (actual.columna === columnaClickeada) {
+		return {
+			columna: columnaClickeada,
+			direccion: actual.direccion === "asc" ? "desc" : "asc",
+		};
+	}
+	return { columna: columnaClickeada, direccion: "desc" };
+}
+
 /**
  * Etiqueta compacta de un link para la fila de la bandeja: solo tipo +
  * generación (si aplica). El estado completo NO se repite acá — el badge de

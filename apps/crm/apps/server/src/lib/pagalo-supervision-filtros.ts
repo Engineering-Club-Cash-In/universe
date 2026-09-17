@@ -4,13 +4,14 @@
  * testearlo sin DB.
  */
 
-import { and, inArray, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, gte, inArray, lt, or, type SQL, sql } from "drizzle-orm";
 import {
 	type PagaloPaymentGroupStatus,
 	type PagaloPaymentLinkStatus,
 	pagaloPaymentGroups,
 } from "../db/schema/pagalo-payments";
 import { LINKS_PENDING_HUERFANO_MS } from "./bot-cobros/pago-link";
+import { gtDateStrToDate } from "./guatemala-month-window";
 
 export const PENDING_PAYMENT_ESTANCADO_DIAS = 7;
 
@@ -20,6 +21,10 @@ export type SupervisionFiltrosInput = {
 	soloHuerfanos?: boolean;
 	antiguedadMinDias?: number;
 	numeroSifco?: string;
+	/** Día calendario Guatemala (YYYY-MM-DD), inclusive. */
+	fechaDesde?: string;
+	/** Día calendario Guatemala (YYYY-MM-DD), inclusive. */
+	fechaHasta?: string;
 };
 
 const eqStatus = (status: PagaloPaymentGroupStatus) =>
@@ -82,18 +87,34 @@ export function condicionesFiltro(input: SupervisionFiltrosInput): SQL[] {
 			),
 		);
 	}
+	if (input.fechaDesde) {
+		condiciones.push(
+			gte(pagaloPaymentGroups.createdAt, gtDateStrToDate(input.fechaDesde)),
+		);
+	}
+	if (input.fechaHasta) {
+		// fechaHasta es inclusiva del día completo: el límite superior real es
+		// medianoche GT del día siguiente, exclusivo.
+		const finDia = new Date(
+			gtDateStrToDate(input.fechaHasta).getTime() + 24 * 60 * 60 * 1000,
+		);
+		condiciones.push(lt(pagaloPaymentGroups.createdAt, finDia));
+	}
 	return condiciones;
 }
 
 /** Scope de SIFCOs como un arreglo PostgreSQL: un solo bind, no uno por crédito. */
 export function condicionSifcosPermitidos(sifcos: string[]): SQL {
-	return sql`${pagaloPaymentGroups.numeroCreditoSifco} = ANY(${sql.param(sifcos, {
-		mapToDriverValue: (valores) =>
-			`{${valores
-				.map(
-					(valor) =>
-						`"${valor.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`,
-				)
-				.join(",")}}`,
-	})}::text[])`;
+	return sql`${pagaloPaymentGroups.numeroCreditoSifco} = ANY(${sql.param(
+		sifcos,
+		{
+			mapToDriverValue: (valores) =>
+				`{${valores
+					.map(
+						(valor) =>
+							`"${valor.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`,
+					)
+					.join(",")}}`,
+		},
+	)}::text[])`;
 }

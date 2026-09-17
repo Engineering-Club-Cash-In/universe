@@ -101,6 +101,30 @@ describe("condicionesFiltro", () => {
 		});
 		expect(condiciones).toHaveLength(2);
 	});
+
+	test("fechaDesde arma condición gte sobre created_at", () => {
+		const condiciones = condicionesFiltro({ fechaDesde: "2026-09-01" });
+		expect(condiciones).toHaveLength(1);
+		const consulta = new PgDialect().sqlToQuery(condiciones[0] as SQL);
+		expect(consulta.sql).toContain('"created_at" >= $1');
+		expect(consulta.params[0]).toBe("2026-09-01T06:00:00.000Z");
+	});
+
+	test("fechaHasta arma condición lt sobre created_at con fin de día GT", () => {
+		const condiciones = condicionesFiltro({ fechaHasta: "2026-09-30" });
+		expect(condiciones).toHaveLength(1);
+		const consulta = new PgDialect().sqlToQuery(condiciones[0] as SQL);
+		expect(consulta.sql).toContain('"created_at" < $1');
+		expect(consulta.params[0]).toBe("2026-10-01T06:00:00.000Z");
+	});
+
+	test("combina fechaDesde y fechaHasta en dos condiciones", () => {
+		const condiciones = condicionesFiltro({
+			fechaDesde: "2026-09-01",
+			fechaHasta: "2026-09-30",
+		});
+		expect(condiciones).toHaveLength(2);
+	});
 });
 
 test("el umbral de PENDING_PAYMENT estancado es 7 días", () => {

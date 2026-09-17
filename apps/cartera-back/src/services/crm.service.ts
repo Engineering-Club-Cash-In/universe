@@ -329,3 +329,98 @@ export async function notificarRechazoPagoBot(
     return false;
   }
 }
+
+// ============================================
+// 💳 Supervisión Págalo
+// ============================================
+
+export interface PagaloSupervisionParams {
+  estados?: string;
+  problemasLink?: string;
+  soloHuerfanos?: boolean;
+  antiguedadMinDias?: number;
+  numeroSifco?: string;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  sortBy?: "totalAmount" | "createdAt";
+  sortDir?: "asc" | "desc";
+  soloProblematicos?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface PagaloLinkResumen {
+  id: string;
+  linkType: "CAPITAL" | "MORA_INTERES";
+  status: string;
+  generation: number;
+  pollAttempts: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  lastPollError: string | null;
+  activatedAt: string | null;
+  createdAt: string;
+  paymentUrl: string | null;
+  transactionAmount: string | null;
+  motivoCierre: string | null;
+}
+
+export interface PagaloGrupoSupervision {
+  id: string;
+  status: string;
+  origen: "ASESOR" | "BOT";
+  casoCobroId: string | null;
+  numeroCreditoSifco: string;
+  carteraCreditoId: number;
+  totalAmount: string;
+  capitalTotal: string;
+  facturableTotal: string;
+  dispatchAttemptCount: number;
+  nextDispatchAt: string | null;
+  lastDispatchError: string | null;
+  carteraImportId: number | null;
+  createdAt: string;
+  creadoPor: string | null;
+  clienteNombre: string | null;
+  asesoresNombres: string[];
+  links: PagaloLinkResumen[];
+}
+
+export interface PagaloSupervisionResponse {
+  success: boolean;
+  grupos: PagaloGrupoSupervision[];
+  total: number;
+  conteoPorEstado: Record<string, number>;
+}
+
+/**
+ * Los grupos Págalo viven solo en la base del CRM (cartera-back guarda el pago
+ * ya aplicado en pagalo_payment_imports, no el estado operativo del grupo), así
+ * que consultarlos exige salir al CRM. Quien autoriza al usuario final es el
+ * router de cartera-back; acá solo va la API key servidor-a-servidor.
+ *
+ * @param timeoutMs sube el timeout por llamada: el default de `crmApi` (10s)
+ * alcanza para una página de pantalla, pero no para las varias que encadena
+ * una exportación.
+ */
+export async function getPagaloSupervision(
+  params: PagaloSupervisionParams,
+  timeoutMs?: number,
+): Promise<PagaloSupervisionResponse> {
+  if (!CRM_API_URL) {
+    throw new Error("CRM_API_URL no está configurada");
+  }
+  if (!process.env.CARTERA_BACK_API_KEY) {
+    throw new Error("CARTERA_BACK_API_KEY no está configurada");
+  }
+
+  const { data } = await crmApi.get("/api/cartera/pagalo/supervision", {
+    params,
+    headers: {
+      Authorization: `Bearer ${process.env.CARTERA_BACK_API_KEY}`,
+    },
+    ...(timeoutMs ? { timeout: timeoutMs } : {}),
+  });
+
+  return data;
+}

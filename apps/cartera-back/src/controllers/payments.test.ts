@@ -1424,7 +1424,7 @@ describe("resolverAbonosNoLiquidados", () => {
     expect(res.saltado).toBe(false);
   });
 
-  it("devolución completa: un CAPITAL pendiente no se suma NI se consume (capital aparte, no lo paga este pago)", () => {
+  it("devolución completa: un CAPITAL pendiente se consume sin sumarse (el pago devuelve el capital completo y evita filas huérfanas)", () => {
     const res = resolverAbonosNoLiquidados({
       abonosNoLiquidados: [{ abono_id: 1, tipo: "CAPITAL", monto: "500" }],
       abonoCapitalBase: new Big(5000),
@@ -1434,7 +1434,7 @@ describe("resolverAbonosNoLiquidados", () => {
     });
 
     expect(res.abonoCapital.toString()).toBe("5000");
-    expect(res.abonoIdsConsumidos).toEqual([]);
+    expect(res.abonoIdsConsumidos).toEqual([1]);
     expect(res.saltado).toBe(true);
   });
 
@@ -1458,7 +1458,7 @@ describe("resolverAbonosNoLiquidados", () => {
     expect(res.abonoCapitalId).toBeNull();
   });
 
-  it("devolución completa con CANCELACION + CAPITAL: solo consume la CANCELACION", () => {
+  it("devolución completa con CANCELACION + CAPITAL: consume ambos abonos para no dejar filas huérfanas", () => {
     const res = resolverAbonosNoLiquidados({
       abonosNoLiquidados: [
         { abono_id: 9, tipo: "CANCELACION", monto: "5000" },
@@ -1471,7 +1471,7 @@ describe("resolverAbonosNoLiquidados", () => {
     });
 
     expect(res.abonoCapital.toString()).toBe("5000");
-    expect(res.abonoIdsConsumidos).toEqual([9]);
+    expect(res.abonoIdsConsumidos).toEqual([9, 10]);
     expect(res.saltado).toBe(true);
   });
 

@@ -477,9 +477,10 @@ type AbonoNoLiquidado = { abono_id: number; tipo: string; monto: string | number
  * - Si el inversionista está saliendo del crédito por completo
  *   (`devolucionCompleta`, o sea VERIFICADO/pendiente_devolucion y no-CUBE),
  *   ningún abono pendiente se SUMA: su abono_capital ya es el monto_aportado
- *   completo, sumarlos duplicaría el conteo. Las CANCELACION sí se marcan
- *   consumidas (son ese mismo monto_aportado, ya se pagó); los CAPITAL no
- *   (capital aparte, todavía sin descontar del monto que se paga acá).
+ *   completo, sumarlos duplicaría el conteo. Todos los abonos pendientes se
+ *   marcan consumidos (el pago devuelve el 100% del capital restante y cierra
+ *   su posición, por lo que tanto CANCELACION como CAPITAL quedan saldados y
+ *   deben cerrarse al liquidar para no quedar huérfanos).
  * - Si no, los CAPITAL se suman al abono_capital base. Un CANCELACION (que
  *   normalmente dispara "devolver todo el aportado") solo lo hace si el
  *   inversionista no es CUBE — CUBE nunca sale del crédito, así que una
@@ -510,21 +511,19 @@ export function resolverAbonosNoLiquidados(params: {
   }
 
   if (devolucionCompleta) {
-    // No se SUMA ninguno (abonoCapital ya es el monto_aportado completo; sumar
-    // duplicaría), pero las CANCELACION sí se marcan consumidas: representan
-    // exactamente ese monto_aportado que este pago está devolviendo, así que
-    // la plata sí les salió. Sin la marca, la liquidación —que cierra solo por
-    // `pago_espejo_id`— las dejaba en `liquidado=false` para siempre, y al
-    // desaparecer la fila de espejo del inversionista ya no había forma de
-    // consumirlas. Los CAPITAL sí quedan abiertos: ese capital es aparte y
-    // todavía no está descontado del monto_aportado que se paga acá.
-    const cancelacionIds = abonosNoLiquidados
-      .filter((a) => a.tipo === "CANCELACION")
+    // Al devolverse el 100% del monto_aportado, este pago cubre la totalidad del
+    // capital pendiente del inversionista (tanto CANCELACION como abonos CAPITAL
+    // previos no liquidados). Todos deben marcarse como consumidos para que la
+    // liquidación los cierre (liquidado=true) mediante pago_espejo_id. Si alguno
+    // quedara fuera, al salir el inversionista en FASE 5 esa fila quedaría
+    // huérfana en abonos_capital para siempre.
+    const abonoIdsConsumidos = abonosNoLiquidados
+      .filter((a) => !(isCube && a.tipo === "CANCELACION"))
       .map((a) => a.abono_id);
     return {
       abonoCapital: abonoCapitalBase,
       abonoCapitalId: null,
-      abonoIdsConsumidos: cancelacionIds,
+      abonoIdsConsumidos,
       saltado: true,
     };
   }

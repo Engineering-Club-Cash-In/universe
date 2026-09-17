@@ -446,9 +446,11 @@ async function abonosAplicadosDeRubros(
  *
  * Existe por un caso puntual y feo: un rubro ANULADO al que después le borraron
  * el pago. Ahí las dos fuentes normales fallan a la vez. El reclamo se fue con
- * el pago (`rubros_pagos.pago_id` es ON DELETE CASCADE, y `/recalculate`, la
- * carga por Excel, la reducción de plazo y `marcarCreditoComoCaido` borran
- * `pagos_credito` sin pasar por `revertirRubrosDelPago`), así que la suma da 0;
+ * el pago (`rubros_pagos.pago_id` es ON DELETE CASCADE, y la carga por Excel,
+ * `migratePayments`, `/recalculate` y `marcarCreditoComoCaido` borran
+ * `pagos_credito` sin pasar por `revertirRubrosDelPago` — los dos últimos sólo
+ * cuando el rubro ya está saldado o anulado, que es justo este caso), así que la
+ * suma da 0;
  * y la resta `monto − saldo` tampoco sirve porque anular ya había forzado el
  * saldo a 0, así que daría el monto ENTERO. La ficha terminaba diciendo que el
  * cliente no pagó nada sobre plata que sí pagó y que además se facturó.
@@ -588,13 +590,21 @@ export async function listarRubrosDeCredito(credito_id: number) {
      * siendo cierto después de anular (donde la resta daría el monto entero,
      * porque anular pone el saldo en 0).
      *
-     * Pero el FK de `rubros_pagos.pago_id` es ON DELETE CASCADE, y hay cuatro
+     * Pero el FK de `rubros_pagos.pago_id` es ON DELETE CASCADE, y hay varios
      * flujos que borran filas de `pagos_credito` sin pasar por
-     * `revertirRubrosDelPago`: `marcarCreditoComoCaido`, la reducción de plazo,
-     * la carga por Excel y `/recalculate`. Después de cualquiera de esos los
-     * reclamos ya no existen pero `saldo_pendiente` sigue descontado, y la suma
-     * sola diría 0.00 sobre plata que el cliente SÍ pagó y que además se
-     * facturó. La ficha mostraría monto Q1,000 / abonado Q0.00 / saldo Q600:
+     * `revertirRubrosDelPago`: la carga por Excel (`processFromExcelFull` y las
+     * dos de `migration.ts`), `migratePayments`, `/recalculate` y
+     * `marcarCreditoComoCaido`.
+     *
+     * Los dos últimos hoy BLOQUEAN si el crédito tiene rubros con deuda viva
+     * (`anulado = false AND completado = false`), así que por esas dos vías sólo
+     * llegan acá rubros ya saldados o anulados — que es exactamente el caso que
+     * esta función atiende, no una excepción. Las de Excel y `migratePayments`
+     * no tienen guard, y ahí el rubro puede ser cualquiera.
+     *
+     * Después de cualquiera de esos los reclamos ya no existen pero
+     * `saldo_pendiente` sigue descontado, y la suma sola diría 0.00 sobre plata
+     * que el cliente SÍ pagó y que además se facturó. La ficha mostraría monto Q1,000 / abonado Q0.00 / saldo Q600:
      * tres números que no pueden ser ciertos a la vez.
      *
      * Por eso: si no hay ningún reclamo aplicado pero el saldo ES MENOR que el

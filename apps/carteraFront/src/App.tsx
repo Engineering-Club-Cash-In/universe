@@ -23,6 +23,7 @@ import { RecibosGenericos } from "./private/recibos-genericos/components/Recibos
 import { FallenCredits } from "./private/cartera/components/FallenCredits";
 import { PagosPorVencimiento } from "./private/cartera/components/PagosPorVencimiento";
 import { MoraHistorial } from "./private/cartera/components/MoraHistorial";
+import { PagaloSupervision } from "./private/cartera/components/PagaloSupervision";
 import { BucketsHistorial } from "./private/cartera/components/BucketsHistorial";
 import { BucketsCambiosAsesor } from "./private/cartera/components/BucketsCambiosAsesor";
 import { DevolucionCube } from "./private/cartera/components/DevolucionCube";
@@ -266,6 +267,15 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN", "CONTA"]}>
               <MoraHistorial />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="pagalo-supervision"
+          element={
+            <RoleRoute allowedRoles={["ADMIN", "CONTA"]}>
+              <PagaloSupervision />
             </RoleRoute>
           }
         />

@@ -6997,12 +6997,15 @@ export const crmRouter = {
 				// mano. Carro usado: el dueño que vende. Carro nuevo: la agencia.
 				// La selección llega aunque le falte el género o la razón social,
 				// para no dejar asignada la parte anterior.
+				// Igual que agencia: null = se quitó a propósito, hay que
+				// desasignar el vendedor. undefined = no viene, no se toca.
 				vendedor: z
 					.object({
 						dpi: z.string(),
 						nombre: z.string().trim().min(1, "El nombre es requerido"),
 						genero: z.enum(["male", "female"]).optional(),
 					})
+					.nullable()
 					.optional(),
 				// null = la agencia se quitó a propósito en la pantalla, hay que
 				// desasignarla. undefined = no viene en la petición, no se toca.
@@ -7262,7 +7265,9 @@ export const crmRouter = {
 				// capturado (nombre legal y género) en vez de duplicarlo. Con un DPI
 				// inválido solo se reusa el vendedor que ya lo tenga registrado; no
 				// se crea uno nuevo con ese DPI y el avance sigue sin vendedor.
-				let vendorId: string | undefined;
+				// null desasigna el vendedor; undefined lo deja como está
+				let vendorId: string | null | undefined =
+					input.vendedor === null ? null : undefined;
 				if (input.vendedor && dpiVendedor) {
 					const [existente] = await tx
 						.select({ id: vehicleVendors.id })
@@ -7329,7 +7334,7 @@ export const crmRouter = {
 				await tx
 					.update(opportunities)
 					.set({
-						...(vendorId && { vendorId }),
+						...(vendorId !== undefined && { vendorId }),
 						...(input.agencia !== undefined && {
 							companyId: input.agencia?.companyId ?? null,
 						}),

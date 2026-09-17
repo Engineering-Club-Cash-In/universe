@@ -33,9 +33,9 @@ export const emptyContractParties: ContractPartiesValue = {
  * anterior y el contrato saldría con la persona equivocada. Lo que falte
  * (género, razón social) se omite y jurídico lo llena a mano.
  *
- * Quitar la agencia en el selector manda `agencia: null` para desasignarla:
- * si no, la pantalla diría "Sin asignar" pero el contrato seguiría saliendo
- * con la empresa anterior.
+ * Quitar la parte en el selector manda `null` para desasignarla: si no, la
+ * pantalla diría "Sin asignar" pero el contrato seguiría saliendo con la
+ * empresa o el vendedor anterior.
  */
 export function toContractPartiesPayload(
 	value: ContractPartiesValue,
@@ -52,6 +52,8 @@ export function toContractPartiesPayload(
 		};
 	}
 	const { dpi, nombre, genero } = value.vendedor;
+	// Sin DPI la parte se quitó a propósito: hay que desasignarla
+	if (!dpi.trim() && !nombre.trim()) return { vendedor: null };
 	if (soloDigitosDpi(dpi).length !== 13 || !nombre.trim()) return {};
 	return {
 		vendedor: {
@@ -211,6 +213,12 @@ export function ContractPartiesFields({
 							}))}
 							value={vendedorSeleccionado?.id ?? null}
 							onChange={(vendorId) => {
+								// Cadena vacía = se deseleccionó al elegir el mismo de
+								// nuevo: la parte queda sin vendedor
+								if (!vendorId) {
+									setVendedor({ dpi: "", nombre: "", genero: "" });
+									return;
+								}
 								const vendor = vendorsQuery.data?.find(
 									(v) => v.id === vendorId,
 								);

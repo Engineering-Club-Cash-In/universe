@@ -15,7 +15,8 @@ import { VendorQuickCreateDialog } from "./VendorQuickCreateDialog";
 /**
  * Tarjeta del detalle de la oportunidad para asignar la parte del contrato
  * sin entrar a editar: empresa (agencia) si el carro es nuevo, vendedor
- * (dueño) si es usado. Se guarda al elegir.
+ * (dueño) si es usado. Se guarda al elegir, y volver a elegir al que ya está
+ * lo quita.
  */
 export function OpportunityContractPartyCard({
 	vehicleIsNew,
@@ -78,7 +79,9 @@ export function OpportunityContractPartyCard({
 						<Combobox
 							options={options}
 							value={company?.id ?? null}
-							onChange={(value) => value && onAssignCompany(value)}
+							// Cadena vacía = se deseleccionó al elegir la misma de nuevo:
+							// la empresa se desasigna en vez de quedarse pegada
+							onChange={(value) => onAssignCompany(value || null)}
 							placeholder="Buscar empresa registrada"
 							width="full"
 							disabled={disabled || isSaving}
@@ -129,7 +132,8 @@ export function OpportunityContractPartyCard({
 							label: `${v.name}${v.vendorType === "empresa" && v.companyName ? ` (${v.companyName})` : ""} - ${v.dpi}`,
 						}))}
 						value={vendorId ?? null}
-						onChange={(value) => value && onAssignVendor(value)}
+						// Cadena vacía = se deseleccionó al elegir el mismo de nuevo
+						onChange={(value) => onAssignVendor(value || null)}
 						placeholder="Buscar por nombre o DPI"
 						width="full"
 						disabled={disabled || isSaving}

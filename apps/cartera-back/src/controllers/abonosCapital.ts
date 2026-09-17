@@ -348,18 +348,20 @@ export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
     )
     .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
 
-  const invsEspejo = invsEspejoCrudo.filter((inv: { inversionista_id: number; nombre: string }) => !esCube(inv));
-
   // Sin espejo → no hay capital de inversionistas que cancelar. No es error.
-  if (invsEspejo.length === 0) {
+  if (invsEspejoCrudo.length === 0) {
     return { insertados: 0, detalle: [] as any[] };
   }
 
-  // 2. Idempotencia: reemplazar las cancelaciones ABIERTAS previas del crédito
-  //    (una re-aceptación no debe acumular). Solo las no-liquidadas.
+  const invsEspejo = invsEspejoCrudo.filter((inv: { inversionista_id: number; nombre: string }) => !esCube(inv));
+
+  // 2. Idempotencia y reconciliación: reemplazar las cancelaciones ABIERTAS previas
+  //    del crédito (una re-aceptación no debe acumular). Solo las no-liquidadas.
   //    Portero financiero: si alguna cancelación abierta ya entró en un cálculo
   //    de pagos (pago_espejo_id != null), borrarla y re-insertarla causaría un
   //    doble pago al inversionista. Se debe liquidar o descartar el cálculo primero.
+  //    Esta reconciliación debe correr aun si en el espejo solo queda CUBE, para
+  //    limpiar cancelaciones abiertas previas o proteger aquellas ya en cálculo.
   const cancelacionesAbiertas = await tx
     .select({
       abono_id: abonos_capital.abono_id,
@@ -392,6 +394,12 @@ export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
         eq(abonos_capital.liquidado, false)
       )
     );
+
+  // Si en el espejo solo queda CUBE (o ningún inversionista con saldo a cancelar),
+  // ya se limpiaron y verificaron las cancelaciones previas; no hay nuevas que insertar.
+  if (invsEspejo.length === 0) {
+    return { insertados: 0, detalle: [] as any[] };
+  }
 
   // 3. Una fila CANCELACION por inversionista con su capital REAL
   //    (monto_aportado del espejo menos sus compras pendientes).

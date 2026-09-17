@@ -370,6 +370,30 @@ describe("registrarCancelacionEspejo", () => {
     );
   });
 
+  it("reconcilia cancelaciones previas y borra abiertas si solo queda CUBE en el espejo", async () => {
+    const { tx, inserted, state } = makeTx(
+      [{ inversionista_id: 86, monto_aportado: "5000", nombre: "Cube Investments S.A." }],
+      [{ abono_id: 42, pago_espejo_id: null }]
+    );
+
+    const res = await registrarCancelacionEspejo(tx, 1);
+
+    expect(res).toEqual({ insertados: 0, detalle: [] });
+    expect(inserted).toHaveLength(0);
+    expect(state.deleteCalls).toBe(1);
+  });
+
+  it("TIRA ERROR si solo queda CUBE en el espejo pero hay una cancelación previa en cálculo de pagos", async () => {
+    const { tx } = makeTx(
+      [{ inversionista_id: 86, monto_aportado: "5000", nombre: "Cube Investments S.A." }],
+      [{ abono_id: 42, pago_espejo_id: 888 }]
+    );
+
+    await expect(registrarCancelacionEspejo(tx, 1)).rejects.toThrow(
+      /\[CANCELACION_EN_CALCULO_PENDIENTE\]/
+    );
+  });
+
   it("la query del espejo solo filtra por credito_id (el filtro de CUBE es en JS)", async () => {
     const { tx, state } = makeTx([
       { inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" },

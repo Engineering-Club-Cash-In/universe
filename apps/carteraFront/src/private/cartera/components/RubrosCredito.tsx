@@ -56,6 +56,7 @@ import {
 } from "../services/rubros.services";
 import { ajustarApertura, type SesionRubros } from "./rubrosApertura";
 import { motivoTipoNoCobrable } from "./rubrosTiposOfrecibles";
+import { motivoMontoNoEditable } from "./rubrosEdicionMonto";
 import {
   QK_RUBROS,
   sincronizarRubroAnulado,
@@ -1097,10 +1098,17 @@ function VistaEditar({
 
   const submit = () => {
     setError(null);
-    const montoNum = Number(monto);
-    if (!String(monto).trim() || !Number.isFinite(montoNum) || montoNum <= 0) {
-      return setError("El monto debe ser un número mayor a cero");
-    }
+    /**
+     * El piso es lo ya ABONADO, no el cero.
+     *
+     * `puedeEditarMonto` rechaza con 409 si el monto nuevo queda por debajo de lo
+     * que el cliente ya pagó —bajarlo dejaría el rubro debiendo negativo—, y el
+     * formulario sólo pedía "mayor a cero": el admin llenaba el motivo, enviaba,
+     * y se comía el rechazo con todo escrito. El dato estaba a mano: `abonado`
+     * viene del GET de la lista.
+     */
+    const motivoMonto = motivoMontoNoEditable({ monto, abonado: rubro.abonado });
+    if (motivoMonto) return setError(motivoMonto);
     if (!descripcion.trim()) return setError("La descripción es obligatoria");
     if (!motivo.trim()) {
       return setError("El motivo es obligatorio: queda en el historial del rubro");

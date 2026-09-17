@@ -62,6 +62,7 @@ import {
 } from "../utils/paymentAdvisoryLock";
 import { emitRecoveredDuplicatePendingInstallment } from "../utils/structuredLogger";
 import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
+import { condicionUltimaCuotaPagada } from "./registerPaymentQueries";
 
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 
@@ -2026,7 +2027,12 @@ export const insertPayment = async ({ body, set }: any) => {
 
       // 7. Procesar abono directo a capital (si aplica)
     }
-    // Jalar la última cuota pagada
+    // Jalar la última cuota con plata aplicada (ver `condicionUltimaCuotaPagada`
+    // para el criterio y por qué NO se exige `cuotas_credito.pagado`). El
+    // resultado tiene DOS consumidores: su `fecha_vencimiento` es el ancla de
+    // `estaAlDia` — que abre la compuerta del abono directo a capital sin
+    // `permite_abono_capital` — y la fila misma es la primera opción de
+    // `cuotaReferencia`, o sea de qué cuota queda colgado el abono.
     const hoy = new Date().toISOString().slice(0, 10);
     const [ultimaCuotaPagada] = await db
       .select({
@@ -2036,13 +2042,7 @@ export const insertPayment = async ({ body, set }: any) => {
       })
       .from(cuotas_credito)
       .innerJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, credito_id),
-          gt(cuotas_credito.numero_cuota, 0),
-          eq(pagos_credito.pagado, true)
-        )
-      )
+      .where(condicionUltimaCuotaPagada(credito_id))
       .orderBy(desc(cuotas_credito.numero_cuota))
       .limit(1);
 

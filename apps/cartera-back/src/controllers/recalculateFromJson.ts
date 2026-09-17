@@ -11,6 +11,7 @@ import {
   pagos_credito_inversionistas,
   boletas,
   efectividad_asesores,
+  rubros,
 } from "../database/db";
 import { findOrCreateInvestor } from "./investor";
 import { updateInstallments } from "./updateCredit";
@@ -809,6 +810,37 @@ export async function eliminarCreditos(
 
       const creditoId = creditoDB.credito_id;
 
+      // 🛡️ Un crédito con RUBROS vivos no se borra en silencio.
+      //
+      // El DELETE de `creditos` de más abajo cascadea a `cartera.rubros`, y con
+      // ellos se van `rubros_pagos` y `rubros_historial`. El crédito se reconstruye
+      // desde un JSON que no tiene concepto de rubro, así que NO se recrean: se
+      // pierde la deuda vigente por cobros adicionales y el rastro de lo que ya se
+      // le cobró y facturó al cliente. No es un descuadre, es borrado total.
+      //
+      // Se corta acá y no se intenta preservarlos: reconstruirlos exigiría saber a
+      // qué pago de los nuevos colgar cada reclamo, y esa correspondencia no existe
+      // —los pago_id cambian—. Anular los rubros es una decisión de negocio (deja
+      // de cobrarse un cargo real), así que la toma una persona antes de recalcular,
+      // no un efecto colateral de una herramienta de reparación.
+      const rubrosVivos = await db
+        .select({ rubro_id: rubros.rubro_id, descripcion: rubros.descripcion })
+        .from(rubros)
+        .where(and(eq(rubros.credito_id, creditoId), eq(rubros.anulado, false)));
+      
+      if (rubrosVivos.length > 0) {
+        resultados.push({
+          numeroCredito: numeroBase,
+          status: "error",
+          message:
+            `El crédito tiene ${rubrosVivos.length} cobro(s) adicional(es) sin anular ` +
+            `(${rubrosVivos.map((r) => r.descripcion).join(", ")}). Recalcular borraría ` +
+            `su deuda y el historial de lo ya cobrado. Anulalos primero desde la ` +
+            `pantalla de Rubros del crédito y volvé a intentar.`,
+        });
+        continue;
+      }
+      
       // 2. Obtener pago_ids para limpiar boletas
       const pagos = await db
         .select({ pago_id: pagos_credito.pago_id })

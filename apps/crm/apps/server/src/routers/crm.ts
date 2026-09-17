@@ -6985,20 +6985,19 @@ export const crmRouter = {
 				elegidoDesdeRecomendacionIA: z.boolean(),
 				// Partes del contrato. Opcionales: si faltan, jurídico las llena a
 				// mano. Carro usado: el dueño que vende. Carro nuevo: la agencia.
+				// La selección llega aunque le falte el género o la razón social,
+				// para no dejar asignada la parte anterior.
 				vendedor: z
 					.object({
 						dpi: z.string(),
 						nombre: z.string().trim().min(1, "El nombre es requerido"),
-						genero: z.enum(["male", "female"]),
+						genero: z.enum(["male", "female"]).optional(),
 					})
 					.optional(),
 				agencia: z
 					.object({
 						companyId: z.string().uuid(),
-						razonSocial: z
-							.string()
-							.trim()
-							.min(1, "La razón social es requerida"),
+						razonSocial: z.string().trim().min(1).optional(),
 					})
 					.optional(),
 			}),
@@ -7260,11 +7259,14 @@ export const crmRouter = {
 						.limit(1);
 
 					if (existente) {
+						// Sin género capturado no se borra el que ya tenga
 						await tx
 							.update(vehicleVendors)
 							.set({
 								name: input.vendedor.nombre,
-								gender: input.vendedor.genero,
+								...(input.vendedor.genero && {
+									gender: input.vendedor.genero,
+								}),
 								updatedAt: new Date(),
 							})
 							.where(eq(vehicleVendors.id, existente.id));
@@ -7275,7 +7277,7 @@ export const crmRouter = {
 							.values({
 								name: input.vendedor.nombre,
 								dpi: dpiVendedor.dpiLimpio,
-								gender: input.vendedor.genero,
+								gender: input.vendedor.genero ?? null,
 								vendorType: "individual",
 							})
 							.returning({ id: vehicleVendors.id });
@@ -7284,14 +7286,21 @@ export const crmRouter = {
 				}
 
 				if (input.agencia) {
-					const [empresa] = await tx
-						.update(companies)
-						.set({
-							razonSocial: input.agencia.razonSocial,
-							updatedAt: new Date(),
-						})
-						.where(eq(companies.id, input.agencia.companyId))
-						.returning({ id: companies.id });
+					// Sin razón social capturada solo se valida que exista la empresa
+					const [empresa] = input.agencia.razonSocial
+						? await tx
+								.update(companies)
+								.set({
+									razonSocial: input.agencia.razonSocial,
+									updatedAt: new Date(),
+								})
+								.where(eq(companies.id, input.agencia.companyId))
+								.returning({ id: companies.id })
+						: await tx
+								.select({ id: companies.id })
+								.from(companies)
+								.where(eq(companies.id, input.agencia.companyId))
+								.limit(1);
 					if (!empresa) {
 						throw new ORPCError("NOT_FOUND", {
 							message: "La empresa (agencia) no existe",

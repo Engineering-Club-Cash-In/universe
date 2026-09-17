@@ -27,27 +27,35 @@ export const emptyContractParties: ContractPartiesValue = {
 	agencia: { companyId: "", nombre: "", razonSocial: "" },
 };
 
-/** Lo que se envía al asignar la inversión; incompleto no se envía. */
+/**
+ * Lo que se envía al asignar la inversión. La selección se manda aunque esté
+ * incompleta: si no, la oportunidad se quedaría con el vendedor o la agencia
+ * anterior y el contrato saldría con la persona equivocada. Lo que falte
+ * (género, razón social) se omite y jurídico lo llena a mano.
+ */
 export function toContractPartiesPayload(
 	value: ContractPartiesValue,
 	vehicleIsNew: boolean | null | undefined,
 ) {
 	if (vehicleIsNew === true) {
 		const { companyId, razonSocial } = value.agencia;
-		return companyId && razonSocial.trim()
-			? { agencia: { companyId, razonSocial: razonSocial.trim() } }
-			: {};
+		if (!companyId) return {};
+		return {
+			agencia: {
+				companyId,
+				...(razonSocial.trim() && { razonSocial: razonSocial.trim() }),
+			},
+		};
 	}
 	const { dpi, nombre, genero } = value.vendedor;
-	return soloDigitosDpi(dpi).length === 13 && nombre.trim() && genero
-		? {
-				vendedor: {
-					dpi: soloDigitosDpi(dpi),
-					nombre: nombre.trim(),
-					genero,
-				},
-			}
-		: {};
+	if (soloDigitosDpi(dpi).length !== 13 || !nombre.trim()) return {};
+	return {
+		vendedor: {
+			dpi: soloDigitosDpi(dpi),
+			nombre: nombre.trim(),
+			...(genero && { genero }),
+		},
+	};
 }
 
 export const GENERO_LABEL: Record<VendorGender, string> = {

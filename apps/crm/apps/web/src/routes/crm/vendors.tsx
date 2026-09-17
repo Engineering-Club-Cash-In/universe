@@ -317,6 +317,7 @@ function VendorsPage() {
 															{...field}
 															onChange={(e) => {
 																field.onChange(e);
+																createLookup.dpiEditado(e.target.value);
 																if (
 																	createForm.getValues("vendorType") === "individual" &&
 																	soloDigitosDpi(e.target.value).length === 13
@@ -651,6 +652,7 @@ function VendorsPage() {
 															{...field}
 															onChange={(e) => {
 																field.onChange(e);
+																editLookup.dpiEditado(e.target.value);
 																if (
 																	editForm.getValues("vendorType") === "individual" &&
 																	soloDigitosDpi(e.target.value).length === 13

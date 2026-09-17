@@ -15,15 +15,20 @@ export const soloDigitosDpi = (dpi: string) => dpi.replace(/\D/g, "");
  * Busca los datos del dueño por DPI (vendedor registrado → copia local de
  * RENAP → RENAP). Recuerda el último DPI consultado para no volver a pagar
  * RENAP si el usuario re-escribe el mismo número.
+ *
+ * Solo se aplica la respuesta del DPI vigente: si el usuario cambió el número
+ * mientras RENAP respondía, el resultado viejo se descarta para no mezclar la
+ * identidad de una persona con el DPI de otra.
  */
 export function useVendorDpiLookup(
 	onResult: (result: VendorDpiLookupResult) => void,
 ) {
-	const ultimoDpi = useRef<string | null>(null);
+	const dpiVigente = useRef<string | null>(null);
 
 	const mutation = useMutation({
 		mutationFn: (dpi: string) => client.lookupVendorByDpi({ dpi }),
-		onSuccess: (result) => {
+		onSuccess: (result, dpiConsultado) => {
+			if (dpiConsultado !== dpiVigente.current) return;
 			onResult(result);
 			if (result.fuente === "renap") {
 				toast.success("Datos obtenidos de RENAP");
@@ -35,8 +40,9 @@ export function useVendorDpiLookup(
 				);
 			}
 		},
-		onError: (error) => {
-			ultimoDpi.current = null;
+		onError: (error, dpiConsultado) => {
+			if (dpiConsultado !== dpiVigente.current) return;
+			dpiVigente.current = null;
 			toast.error(error.message || "No se pudo consultar el DPI");
 		},
 	});
@@ -47,10 +53,27 @@ export function useVendorDpiLookup(
 			if (force) toast.error("El DPI debe tener 13 dígitos");
 			return;
 		}
-		if (!force && ultimoDpi.current === limpio) return;
-		ultimoDpi.current = limpio;
+		if (!force && dpiVigente.current === limpio) return;
+		dpiVigente.current = limpio;
 		mutation.mutate(limpio);
 	};
 
-	return { buscar, isPending: mutation.isPending };
+	/**
+	 * Avisar que el DPI del campo cambió. Si ya no es el consultado, la
+	 * respuesta pendiente deja de aplicar. Devuelve true si cambió.
+	 */
+	const dpiEditado = (dpi: string) => {
+		const limpio = soloDigitosDpi(dpi);
+		if (limpio === dpiVigente.current) return false;
+		dpiVigente.current = null;
+		return true;
+	};
+
+	return {
+		buscar,
+		dpiEditado,
+		/** El DPI cuyos datos están aplicados (o en camino). */
+		dpiVigente: () => dpiVigente.current,
+		isPending: mutation.isPending,
+	};
 }

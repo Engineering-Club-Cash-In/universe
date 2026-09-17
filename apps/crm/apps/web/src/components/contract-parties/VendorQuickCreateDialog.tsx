@@ -50,10 +50,17 @@ export function VendorQuickCreateDialog({
 	const [nombre, setNombre] = useState("");
 	const [genero, setGenero] = useState<VendorGender | "">("");
 	const [telefono, setTelefono] = useState("");
-	const [existenteId, setExistenteId] = useState<string | null>(null);
+	// Vendedor registrado con el DPI consultado. Guarda también ese DPI para
+	// no actualizar a una persona con el DPI de otra.
+	const [existente, setExistente] = useState<{
+		id: string;
+		dpi: string;
+	} | null>(null);
 
 	const lookup = useVendorDpiLookup((result) => {
-		setExistenteId(result.vendorId);
+		setExistente(
+			result.vendorId ? { id: result.vendorId, dpi: result.dpi } : null,
+		);
 		if (result.nombre) setNombre(result.nombre);
 		if (result.genero) setGenero(result.genero);
 	});
@@ -65,13 +72,14 @@ export function VendorQuickCreateDialog({
 		setNombre("");
 		setGenero("");
 		setTelefono("");
-		setExistenteId(null);
+		setExistente(null);
 		if (initialDpi) lookup.buscar(initialDpi, { force: true });
 	}, [open]);
 
 	const saveMutation = useMutation({
 		mutationFn: async (): Promise<QuickVendor> => {
 			const dpiLimpio = soloDigitosDpi(dpi);
+			const existenteId = existente?.dpi === dpiLimpio ? existente.id : null;
 			if (existenteId) {
 				const actual = await client.getVendorById({ id: existenteId });
 				return client.updateVendor({
@@ -98,9 +106,7 @@ export function VendorQuickCreateDialog({
 		},
 		onSuccess: (vendor) => {
 			queryClient.invalidateQueries({ queryKey: orpc.getVendors.key() });
-			toast.success(
-				existenteId ? "Vendedor actualizado" : "Vendedor creado",
-			);
+			toast.success(existente ? "Vendedor actualizado" : "Vendedor creado");
 			onSaved(vendor);
 			onOpenChange(false);
 		},
@@ -110,7 +116,10 @@ export function VendorQuickCreateDialog({
 	});
 
 	const dpiCompleto = soloDigitosDpi(dpi).length === 13;
-	const puedeGuardar = dpiCompleto && nombre.trim() && genero;
+	// No se guarda mientras se consulta: los datos en pantalla podrían ser de
+	// otro DPI.
+	const puedeGuardar =
+		dpiCompleto && nombre.trim() && genero && !lookup.isPending;
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -134,9 +143,16 @@ export function VendorQuickCreateDialog({
 								placeholder="1234567890101"
 								value={dpi}
 								onChange={(e) => {
-									setDpi(e.target.value);
-									if (soloDigitosDpi(e.target.value).length === 13) {
-										lookup.buscar(e.target.value);
+									const nuevo = e.target.value;
+									setDpi(nuevo);
+									// Otro DPI es otra persona: se descartan los datos traídos
+									if (lookup.dpiEditado(nuevo) && existente) {
+										setExistente(null);
+										setNombre("");
+										setGenero("");
+									}
+									if (soloDigitosDpi(nuevo).length === 13) {
+										lookup.buscar(nuevo);
 									}
 								}}
 							/>
@@ -153,7 +169,7 @@ export function VendorQuickCreateDialog({
 								)}
 							</Button>
 						</div>
-						{existenteId && (
+						{existente && (
 							<p className="text-muted-foreground text-xs">
 								Ya existe un vendedor con este DPI: se actualizará con estos
 								datos.

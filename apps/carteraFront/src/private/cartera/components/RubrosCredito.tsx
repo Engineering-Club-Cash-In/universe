@@ -55,6 +55,7 @@ import {
   type TipoRubro,
 } from "../services/rubros.services";
 import { ajustarApertura, type SesionRubros } from "./rubrosApertura";
+import { motivoTipoNoCobrable } from "./rubrosTiposOfrecibles";
 import {
   QK_RUBROS,
   sincronizarRubroAnulado,
@@ -289,8 +290,16 @@ export default function RubrosCredito({
   );
 
   // Gate SOLO de creación: la lista y el historial se siguen viendo (es el
-  // registro de lo que ya se le cobró al cliente) y la edición tampoco se toca
-  // —el backend la permite y puede hacer falta corregir un monto ya cobrado—.
+  // registro de lo que ya se le cobró al cliente) y la edición tampoco se
+  // toca, porque puede hacer falta corregir un monto ya cobrado.
+  //
+  // ⚠️ Corrección: acá decía que "el backend la permite", y es cierto sólo para
+  // BAJAR el monto y para la descripción. SUBIRLO re-aplica la política del alta
+  // (`puedeCrearRubro` más `tipo.activo`), así que un alza sobre un crédito
+  // MOROSO con tipo opcional, sobre un crédito terminal, o con el tipo
+  // desactivado después de crear el rubro, se come un 409. `VistaEditar` no
+  // distingue subir de bajar ni recibe el estado del crédito: reportado en el
+  // PR, sin cerrar.
   //
   // El motivo viene armado porque no hay un solo bloqueo: el estado terminal no
   // lo levanta nadie, mientras que MOROSO/EN_CONVENIO sólo bloquean a quien no
@@ -421,6 +430,8 @@ export default function RubrosCredito({
               setVista("crearTipo");
             }}
             onAdministrarTipos={() => setVista("tipos")}
+            statusCredit={statusCredit}
+            rubrosDelCredito={rubros}
             onCreado={async (creado, tipoNombre) => {
               // Se ESPERA el refresco antes de volver, igual que en editar: sin
               // el await, el toast de "Rubro creado" salía sobre la lista de
@@ -764,6 +775,8 @@ function VistaCrear({
   onCrearTipo,
   onAdministrarTipos,
   onCreado,
+  statusCredit,
+  rubrosDelCredito,
   onGuardando,
 }: {
   creditoId: number;
@@ -781,6 +794,14 @@ function VistaCrear({
    * columna "Tipo" en blanco.
    */
   onCreado: (creado: RubroGuardado | null, tipoNombre: string) => void | Promise<void>;
+  /**
+   * Para apagar los tipos que el backend va a rechazar. `statusCredit` es la
+   * foto de la fila con que se abrió el modal —no una lectura fresca— y
+   * `rubrosDelCredito` es la lista que ya está en caché. Ver
+   * `motivoTipoNoCobrable`, que explica por qué es una comodidad y no un gate.
+   */
+  statusCredit: string | null;
+  rubrosDelCredito: RubroCredito[];
   /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
   onGuardando?: (v: boolean) => void;
 }) {
@@ -805,6 +826,10 @@ function VistaCrear({
   }, [tiposQuery.data, esAdmin]);
 
   const tipoElegido = tipos.find((t) => String(t.tipo_id) === tipoId) ?? null;
+
+  const motivoTipoElegido = tipoElegido
+    ? motivoTipoNoCobrable({ tipo: tipoElegido, statusCredit, rubros: rubrosDelCredito })
+    : null;
 
   // El borrador sobrevive al desvío a "Administrar tipos", donde el tipo
   // elegido puede haber quedado desactivado o borrado. Si ya no está entre los
@@ -879,7 +904,11 @@ function VistaCrear({
               <button
                 type="button"
                 onClick={onCrearTipo}
-                disabled={crear.isPending}
+          // También se apaga con un tipo no cobrable: el desplegable ya lo
+          // muestra deshabilitado, pero el borrador sobrevive al desvío a
+          // "Administrar tipos" y el crédito pudo cambiar de estado en el medio,
+          // así que la selección puede quedar apuntando a uno apagado.
+          disabled={crear.isPending || !!motivoTipoElegido}
                 className="text-xs font-semibold text-purple-700 hover:underline disabled:opacity-50 disabled:pointer-events-none"
               >
                 + Crear tipo nuevo
@@ -920,11 +949,22 @@ function VistaCrear({
               onChange={(e) => campo("tipoId")(e.target.value)}
             >
               <option value="">Selecciona un tipo</option>
-              {tipos.map((t) => (
-                <option key={t.tipo_id} value={t.tipo_id}>
-                  {t.nombre}
-                </option>
-              ))}
+              {tipos.map((t) => {
+                // Se APAGA con el motivo en el nombre, no se filtra: filtrar
+                // dejaría la lista vacía con el cartel FALSO de "no hay tipos
+                // activos configurados", y le borraría la selección sola a quien
+                // ya había elegido. Ver `motivoTipoNoCobrable`.
+                const motivo = motivoTipoNoCobrable({
+                  tipo: t,
+                  statusCredit,
+                  rubros: rubrosDelCredito,
+                });
+                return (
+                  <option key={t.tipo_id} value={t.tipo_id} disabled={!!motivo}>
+                    {motivo ? `${t.nombre} — ${motivo}` : t.nombre}
+                  </option>
+                );
+              })}
             </select>
             {/* Obligatorio vs opcional decide si el cobro se puede registrar con
                 el crédito en mora, así que se dice explícito y no se deduce. */}
@@ -934,9 +974,15 @@ function VistaCrear({
                   tipoElegido.obligatorio ? "text-red-700" : "text-gray-500"
                 }`}
               >
-                {tipoElegido.obligatorio
-                  ? "Tipo obligatorio: se puede cobrar aunque el crédito esté en mora."
-                  : "Tipo opcional: no se puede cobrar si el crédito está en mora."}
+                {/* Antes decía "no se puede cobrar SI el crédito está en mora":
+                    una regla abstracta, con la etiqueta MOROSO del crédito a la
+                    vista. Se leía como advertencia genérica y no como
+                    impedimento, y el envío se comía un 409 con el formulario
+                    lleno. Ahora se nombra ESTE crédito. */}
+                {motivoTipoElegido ??
+                  (tipoElegido.obligatorio
+                    ? "Tipo obligatorio: se puede cobrar aunque el crédito esté en mora."
+                    : "Tipo opcional: no se puede cobrar si el crédito está en mora.")}
               </p>
             )}
           </>

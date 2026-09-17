@@ -257,8 +257,8 @@ const {
   armarInversionistasPago,
   aplicarRepartoCongelado,
   insertPagosCreditoInversionistas,
-  resolverAbonosNoLiquidados,
 } = await import("./payments");
+const { resolverAbonosNoLiquidados } = await import("../utils/abonosNoLiquidados");
 
 describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
   beforeEach(() => {
@@ -1493,6 +1493,8 @@ describe("resolverAbonosNoLiquidados", () => {
 
     expect(res.abonoIdsConsumidos).toEqual([5, 6]);
     expect(res.abonoCapitalId).toBe(5);
+    // Point 5 fix: CANCELACION fija abonoCapital en montoAportado (no suma CAPITAL encima)
+    expect(res.abonoCapital.toString()).toBe("9999");
   });
 
   it("CAPITAL se suma normal, para CUBE también", () => {

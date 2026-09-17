@@ -357,6 +357,32 @@ export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
 
   // 2. Idempotencia: reemplazar las cancelaciones ABIERTAS previas del crédito
   //    (una re-aceptación no debe acumular). Solo las no-liquidadas.
+  //    Portero financiero: si alguna cancelación abierta ya entró en un cálculo
+  //    de pagos (pago_espejo_id != null), borrarla y re-insertarla causaría un
+  //    doble pago al inversionista. Se debe liquidar o descartar el cálculo primero.
+  const cancelacionesAbiertas = await tx
+    .select({
+      abono_id: abonos_capital.abono_id,
+      pago_espejo_id: abonos_capital.pago_espejo_id,
+    })
+    .from(abonos_capital)
+    .where(
+      and(
+        eq(abonos_capital.credito_id, credito_id),
+        eq(abonos_capital.tipo, "CANCELACION"),
+        eq(abonos_capital.liquidado, false)
+      )
+    );
+
+  const enEspejo = cancelacionesAbiertas.filter((f: any) => f.pago_espejo_id != null);
+  if (enEspejo.length > 0) {
+    throw new Error(
+      `[CANCELACION_EN_CALCULO_PENDIENTE] El crédito ${credito_id} tiene ${enEspejo.length} cancelación(es) que ya entraron ` +
+        `en un cálculo de pagos (espejo id: ${enEspejo.map((f: any) => f.pago_espejo_id).join(", ")}). ` +
+        `Ese monto ya quedó congelado para liquidar: hay que liquidar o descartar el espejo antes de re-aceptar la devolución.`
+    );
+  }
+
   await tx
     .delete(abonos_capital)
     .where(

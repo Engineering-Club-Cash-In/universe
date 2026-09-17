@@ -153,12 +153,13 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
     expect(completados).toEqual([500]);
   });
 
-  it("una fila histórica de CUBE con ID distinto tampoco cuenta (reconocida por nombre)", async () => {
+  it("reconoce a CUBE estrictamente por ID (86): un inversionista 999 con nombre CUBE sí cuenta como pendiente", async () => {
     padreRestantes = [{ credito_id: 500, inversionista_id: 999, nombre: "CUBE Investments S.A." }];
 
-    const { completados } = await filtrarCreditosTotalmenteDevueltos(makeTx(), [500]);
+    const { completados, diferidos } = await filtrarCreditosTotalmenteDevueltos(makeTx(), [500]);
 
-    expect(completados).toEqual([500]);
+    expect(completados).toEqual([]);
+    expect(diferidos.get(500)).toEqual({ tipo: "inversionistas_en_padre", restantes: 1 });
   });
 
   it("parte correctamente un lote mixto", async () => {
@@ -189,7 +190,7 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
     expect(selectCallCount).toBe(0);
   });
 
-  it("padre limpio con espejo residual EN CERO: completa igual y avisa de la divergencia", async () => {
+  it("padre limpio con espejo residual EN CERO: completa igual y no ensucia logs con warnings", async () => {
     padreRestantes = [];
     espejoResidual = [
       { credito_id: 500, inversionista_id: 42, monto_aportado: "0", nombre: "Inv 42" },
@@ -199,10 +200,8 @@ describe("filtrarCreditosTotalmenteDevueltos", () => {
     const { completados } = await filtrarCreditosTotalmenteDevueltos(makeTx(), [500]);
 
     expect(completados).toEqual([500]);
-    expect(warn).toHaveBeenCalled();
-    const mensaje = warn.mock.calls[0].join(" ");
-    expect(mensaje).toContain("DIVERGENCIA");
-    expect(mensaje).toContain("inversionista_id=42");
+    // Minor 2: saldo residual en 0 es esperado tras liquidación y no debe loggear warning en paginación
+    expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
 

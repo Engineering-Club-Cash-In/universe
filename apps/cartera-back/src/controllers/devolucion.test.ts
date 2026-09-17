@@ -41,6 +41,7 @@ function makeTx() {
     select: () => ({
       from: () => ({
         innerJoin: () => ({ where: () => Promise.resolve(txEspejoRows) }),
+        where: () => Promise.resolve([]),
       }),
     }),
   };

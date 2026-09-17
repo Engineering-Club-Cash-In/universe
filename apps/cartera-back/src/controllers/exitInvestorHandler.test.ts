@@ -106,8 +106,9 @@ describe("exitInvestorHandler", () => {
 describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_verificado)", () => {
   function makeDepsConGuard(
     exitInvestorResultado: any,
-    montoPorCredito: Record<number, number>,
-    creditosConPendientes: number[] = []
+    montoPorCredito: Record<number, number | undefined>,
+    creditosConPendientes: number[] = [],
+    estadosDevolucion: Record<number, string | null> = {}
   ) {
     let exitInvestorLlamadoCon: any = null;
     return {
@@ -120,19 +121,30 @@ describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_
           marcarLlamadoCon = { creditoIds, contexto };
           return { completados: creditoIds, diferidos: [] };
         },
-        obtenerMontoAportadoEspejo: async (_inversionista_id: number, creditoIds: number[]) =>
-          new Map(creditoIds.map((id) => [id, montoPorCredito[id]])),
+        obtenerMontoAportadoEspejo: async (_inversionista_id: number, creditoIds: number[]) => {
+          const map = new Map<number, number>();
+          for (const id of creditoIds) {
+            if (montoPorCredito[id] !== undefined) {
+              map.set(id, montoPorCredito[id]!);
+            }
+          }
+          return map;
+        },
         tienePendientesLiquidacion: async (_inversionista_id: number, _creditoIds: number[]) =>
           new Set(creditosConPendientes),
+        obtenerEstadosDevolucion: async (creditoIds: number[]) =>
+          new Map(creditoIds.map((id) => [id, estadosDevolucion[id] ?? null])),
       },
       getExitInvestorLlamadoCon: () => exitInvestorLlamadoCon,
     };
   }
 
-  it("SIN motivo: saldo != 0 pasa igual a exitInvestor (comportamiento default, salida total)", async () => {
+  it("SIN motivo y sin crédito VERIFICADO: saldo != 0 pasa igual a exitInvestor (comportamiento default, salida total)", async () => {
     const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
       { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [{ credito_id: 78 }] },
-      { 78: 1500 }
+      { 78: 1500 },
+      [],
+      { 78: "NO_APLICA" }
     );
 
     const res = await exitInvestorHandler(
@@ -142,6 +154,40 @@ describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_
 
     expect(res.success).toBe(true);
     expect(res.creditos_invalidos).toBeUndefined();
+    expect(getExitInvestorLlamadoCon()).toEqual({ inversionista_id: 13, creditos: [78] });
+  });
+
+  it("SIN motivo pero con crédito en VERIFICADO: activa el guard automáticamente y rechaza con 400 si saldo != 0", async () => {
+    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
+      { success: true, creditos_procesados: [] },
+      { 78: 1500 },
+      [],
+      { 78: "VERIFICADO" }
+    );
+
+    const ctx = { body: { inversionista_id: 13, creditos: [78] }, set: { status: 200 } };
+    const res = await exitInvestorHandler(ctx, deps as any);
+
+    expect(res.success).toBe(false);
+    expect(res.creditos_invalidos).toEqual([78]);
+    expect(getExitInvestorLlamadoCon()).toBeNull();
+    expect(ctx.set.status).toBe(400);
+  });
+
+  it("SIN motivo pero con crédito en VERIFICADO y saldo en 0: pasa el guard automático y llega a exitInvestor", async () => {
+    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
+      { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [{ credito_id: 78 }] },
+      { 78: 0 },
+      [],
+      { 78: "VERIFICADO" }
+    );
+
+    const ctx = { body: { inversionista_id: 13, creditos: [78] }, set: { status: 200 } };
+    const res = await exitInvestorHandler(ctx, deps as any);
+
+    expect(res.success).toBe(true);
+    expect(res.creditos_invalidos).toBeUndefined();
+    expect(ctx.set.status).toBe(200);
     expect(getExitInvestorLlamadoCon()).toEqual({ inversionista_id: 13, creditos: [78] });
   });
 
@@ -179,13 +225,32 @@ describe("exitInvestorHandler — guard de monto_aportado==0 (motivo=devolucion_
     expect(ctx.set.status).toBe(400);
   });
 
-  it("con motivo=devolucion_verificado y sin fila en el espejo: rechaza igual que uno con saldo (undefined !== 0)", async () => {
+  it("crédito legacy sin fila en el espejo (Point 6 fix): pasa el guard si no tiene liquidaciones pendientes (permite limpiar vía padre)", async () => {
     const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
-      { success: true, creditos_procesados: [] },
-      {}
+      { success: true, inversionista: { inversionista_id: 13 }, creditos_procesados: [{ credito_id: 999 }] },
+      {}, // sin fila espejo
+      [],
+      { 999: "VERIFICADO" }
     );
 
-    const ctx = { body: { inversionista_id: 13, creditos: [999], motivo: "devolucion_verificado" }, set: { status: 200 } };
+    const ctx = { body: { inversionista_id: 13, creditos: [999] }, set: { status: 200 } };
+    const res = await exitInvestorHandler(ctx, deps as any);
+
+    expect(res.success).toBe(true);
+    expect(res.creditos_invalidos).toBeUndefined();
+    expect(getExitInvestorLlamadoCon()).toEqual({ inversionista_id: 13, creditos: [999] });
+    expect(ctx.set.status).toBe(200);
+  });
+
+  it("crédito legacy sin fila en el espejo pero con liquidaciones pendientes: se rechaza con 400", async () => {
+    const { deps, getExitInvestorLlamadoCon } = makeDepsConGuard(
+      { success: true, creditos_procesados: [] },
+      {}, // sin fila espejo
+      [999], // pendientes de liquidación
+      { 999: "VERIFICADO" }
+    );
+
+    const ctx = { body: { inversionista_id: 13, creditos: [999] }, set: { status: 200 } };
     const res = await exitInvestorHandler(ctx, deps as any);
 
     expect(res.success).toBe(false);

@@ -24,34 +24,28 @@
 // `exitInvestor` no se toca: la llaman también las dos ramas de FASE 5, que
 // ya hacen su propio cierre después — envolverlo ahí duplicaría la llamada.
 //
-// Guard de monto_aportado==0 — SOLO con `body.motivo === "devolucion_verificado"`:
-// el endpoint es genérico (Codex P1: "the existing full-exit path explicitly
-// permits nonzero balances because it transfers them to CUBE"), así que un
-// guard incondicional rompía la salida total legítima (ver revert 3d433df5e).
-// Pero sin ningún guard, usar este endpoint para la devolución de un crédito
-// VERIFICADO (en vez de esperar al pago normal) puede mover al inversionista
-// a CUBE con su CANCELACION de abonos_capital todavía abierta: esa fila queda
-// huérfana para siempre, porque ya no tiene fila en el espejo que la pueda
-// consumir (Codex, hilo original). El caller que sabe que está haciendo esa
-// devolución debe pedirlo explícitamente con `motivo`; sin él, el endpoint se
-// comporta exactamente igual que antes (salida total, sin validar saldo).
+// Guard de devolución y saldo en 0:
+// Se activa si `body.motivo === "devolucion_verificado"` O si CUALQUIERA de
+// los créditos del lote tiene `estado_devolucion === "VERIFICADO"`. Sin este
+// guard automático por estado (Point 2), un operador que llame a /investor/exit
+// sin mandar `motivo` movería un inversionista en devolución a CUBE dejando su
+// CANCELACION de abonos_capital huérfana. Créditos normales no-VERIFICADO sin
+// motivo siguen el camino de salida total estándar (transfieren saldo a CUBE).
 //
 // TODO o nada, nunca un subconjunto filtrado: una primera versión de este
 // guard pasaba solo los créditos con espejo en 0 a exitInvestor, pero
 // exitInvestor marca inactivo con que UN crédito se haya procesado —no exige
 // que se hayan procesado TODOS los pedidos—, así que un lote mixto dejaba al
 // inversionista inactivo con la posición omitida (capital pendiente) todavía
-// a su nombre (Codex, hilo de seguimiento). Con motivo=devolucion_verificado
-// el batch entero se rechaza si CUALQUIER crédito no tiene el espejo en 0,
-// con set.status=400 para que el caller lo note por código de estado y no
-// solo por `success:false` en el body.
+// a su nombre (Codex, hilo de seguimiento). Con el guard activo, el batch
+// entero se rechaza si CUALQUIER crédito en devolución tiene saldo residual
+// != 0 o liquidaciones pendientes, con set.status=400.
 //
-// Asimismo, saldo en 0 no es suficiente por sí solo: el cálculo de pagos
-// (payments.ts) descuenta el monto_aportado del espejo antes de liquidar el
-// dinero, por lo que el guard también valida que no existan abonos_capital
-// ni pagos espejo pendientes de liquidación para esos créditos. Si hay
-// liquidaciones pendientes, el lote se rechaza para no desasociar al
-// inversionista antes del cierre contable.
+// Créditos legacy sin fila espejo (Point 6):
+// Según devolucionCompletada.ts:76-81, si el crédito no tiene fila en el espejo,
+// exitInvestor limpia al inversionista vía el padre y lo mueve a CUBE.
+// Por ende, no tener fila en el espejo NO es motivo de rechazo por saldo != 0,
+// a menos que tenga abonos/pagos pendientes de liquidación.
 // ============================================================================
 
 import { and, eq, inArray, ne } from "drizzle-orm";
@@ -60,6 +54,7 @@ import type { exitInvestor as ExitInvestorFn } from "./investor";
 import { db } from "../database/index";
 import {
   abonos_capital,
+  creditos,
   creditos_inversionistas_espejo,
   pagos_credito_inversionistas_espejo,
 } from "../database/db/schema";
@@ -76,6 +71,9 @@ type Deps = {
     inversionista_id: number,
     creditoIds: number[]
   ) => Promise<Set<number>>;
+  obtenerEstadosDevolucion?: (
+    creditoIds: number[]
+  ) => Promise<Map<number, string | null>>;
 };
 
 // Por defecto usa `db` real; inyectable para los tests del guard.
@@ -100,6 +98,27 @@ const obtenerMontoAportadoEspejoReal = async (
 
   return new Map(
     filas.map((f: { credito_id: number; monto_aportado: string }) => [f.credito_id, Number(f.monto_aportado)])
+  );
+};
+
+const obtenerEstadosDevolucionReal = async (
+  creditoIds: number[]
+): Promise<Map<number, string | null>> => {
+  if (creditoIds.length === 0) return new Map();
+
+  const filas = await db
+    .select({
+      credito_id: creditos.credito_id,
+      estado_devolucion: creditos.estado_devolucion,
+    })
+    .from(creditos)
+    .where(inArray(creditos.credito_id, creditoIds));
+
+  return new Map(
+    filas.map((f: { credito_id: number; estado_devolucion: string | null }) => [
+      f.credito_id,
+      f.estado_devolucion,
+    ])
   );
 };
 
@@ -152,52 +171,66 @@ export const exitInvestorHandler = async (ctx: any, deps?: Deps) => {
       marcarDevolucionCompletadaSiCorresponde,
       obtenerMontoAportadoEspejo: obtenerMontoAportadoEspejoReal,
       tienePendientesLiquidacion: tienePendientesLiquidacionReal,
+      obtenerEstadosDevolucion: obtenerEstadosDevolucionReal,
     };
   const obtenerMontoAportadoEspejo = resolved.obtenerMontoAportadoEspejo ?? obtenerMontoAportadoEspejoReal;
   const tienePendientesLiquidacion = resolved.tienePendientesLiquidacion ?? tienePendientesLiquidacionReal;
+  const obtenerEstadosDevolucion = resolved.obtenerEstadosDevolucion ?? obtenerEstadosDevolucionReal;
 
   const { inversionista_id, creditos: creditoIds, motivo } = ctx?.body ?? {};
 
   if (
-    motivo === "devolucion_verificado" &&
     typeof inversionista_id === "number" &&
     Array.isArray(creditoIds) &&
     creditoIds.length > 0
   ) {
-    const [montoPorCredito, creditosConPendientes] = await Promise.all([
-      obtenerMontoAportadoEspejo(inversionista_id, creditoIds),
-      tienePendientesLiquidacion(inversionista_id, creditoIds),
-    ]);
-
-    const creditoIdsInvalidos = creditoIds.filter(
-      (id: number) => montoPorCredito.get(id) !== 0 || creditosConPendientes.has(id)
+    const estadosDevolucion = await obtenerEstadosDevolucion(creditoIds);
+    const tieneCreditoVerificado = Array.from(estadosDevolucion.values()).some(
+      (estado) => estado === "VERIFICADO"
     );
 
-    // Todo o nada: nunca se llama a exitInvestor con un subconjunto. Ver
-    // comentario de arriba sobre por qué filtrar dejaba al inversionista
-    // inactivo con posiciones pendientes a su nombre.
-    if (creditoIdsInvalidos.length > 0) {
-      console.warn(
-        `  ⚠️  [POST /investor/exit motivo=devolucion_verificado] inversionista ${inversionista_id}: ` +
-          `lote rechazado, ${creditoIdsInvalidos.length}/${creditoIds.length} crédito(s) inválidos ` +
-          `(saldo != 0, sin fila espejo, o abonos/pagos sin liquidar) — ` +
-          creditoIdsInvalidos
-            .map((id) => {
-              const saldo = montoPorCredito.get(id);
-              const saldoDesc = saldo === undefined ? "SIN_FILA_ESPEJO" : `monto_aportado=${saldo}`;
-              const pendDesc = creditosConPendientes.has(id) ? "TIENE_PENDIENTES_LIQUIDACION" : null;
-              const detalle = [saldoDesc, pendDesc].filter(Boolean).join(" ");
-              return `credito_id=${id} (${detalle})`;
-            })
-            .join(", ")
-      );
-      if (ctx?.set) ctx.set.status = 400;
-      return {
-        success: false,
-        message:
-          "Lote rechazado: al menos un crédito tiene capital pendiente, no tiene fila en el espejo, o tiene abonos/pagos pendientes de liquidación. No se movió nada.",
-        creditos_invalidos: creditoIdsInvalidos,
-      };
+    if (motivo === "devolucion_verificado" || tieneCreditoVerificado) {
+      const [montoPorCredito, creditosConPendientes] = await Promise.all([
+        obtenerMontoAportadoEspejo(inversionista_id, creditoIds),
+        tienePendientesLiquidacion(inversionista_id, creditoIds),
+      ]);
+
+      const creditoIdsInvalidos = creditoIds.filter((id: number) => {
+        if (creditosConPendientes.has(id)) return true;
+        const saldo = montoPorCredito.get(id);
+        // Point 6 fix: si no tiene fila en el espejo (anomalía de créditos legacy de producción),
+        // devolucionCompletada.ts:76-81 permite limpiarlos vía el padre si no tiene pendientes de liquidación.
+        // Solo falla si la fila espejo EXISTE y su saldo es distinto de 0.
+        if (saldo !== undefined && saldo !== 0) return true;
+        return false;
+      });
+
+      // Todo o nada: nunca se llama a exitInvestor con un subconjunto. Ver
+      // comentario de arriba sobre por qué filtrar dejaba al inversionista
+      // inactivo con posiciones pendientes a su nombre.
+      if (creditoIdsInvalidos.length > 0) {
+        console.warn(
+          `  ⚠️  [POST /investor/exit guard devolución] inversionista ${inversionista_id}: ` +
+            `lote rechazado, ${creditoIdsInvalidos.length}/${creditoIds.length} crédito(s) inválidos ` +
+            `(saldo != 0 o abonos/pagos sin liquidar) — ` +
+            creditoIdsInvalidos
+              .map((id) => {
+                const saldo = montoPorCredito.get(id);
+                const saldoDesc = saldo === undefined ? "SIN_FILA_ESPEJO" : `monto_aportado=${saldo}`;
+                const pendDesc = creditosConPendientes.has(id) ? "TIENE_PENDIENTES_LIQUIDACION" : null;
+                const detalle = [saldoDesc, pendDesc].filter(Boolean).join(" ");
+                return `credito_id=${id} (${detalle})`;
+              })
+              .join(", ")
+        );
+        if (ctx?.set) ctx.set.status = 400;
+        return {
+          success: false,
+          message:
+            "Lote rechazado: al menos un crédito en devolución tiene capital pendiente o abonos/pagos pendientes de liquidación. No se movió nada.",
+          creditos_invalidos: creditoIdsInvalidos,
+        };
+      }
     }
   }
 

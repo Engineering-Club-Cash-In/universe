@@ -76,6 +76,7 @@ export function DevolucionCube() {
     setPage: setHistorialPage,
     totalPages: historialTotalPages,
     total: historialTotal,
+    search: historialSearch,
     searchInput: historialSearchInput,
     setSearchInput: setHistorialSearchInput,
     hasActiveFilters: hasActiveHistorialFilters,
@@ -149,10 +150,16 @@ export function DevolucionCube() {
     }
   };
 
+  const currentSearch = tab === "bandeja" ? search : historialSearch;
+
   const subtitle = useMemo(() => {
-    if (search) return `Créditos pendientes filtrados por "${search}"`;
-    return "Créditos pendientes y rechazados para devolución a Cube";
-  }, [search]);
+    if (tab === "bandeja") {
+      if (currentSearch) return `Créditos pendientes filtrados por "${currentSearch}"`;
+      return "Créditos pendientes y rechazados para devolución a Cube";
+    }
+    if (currentSearch) return `Historial de créditos filtrados por "${currentSearch}"`;
+    return "Historial de créditos verificados y completados de devolución a Cube";
+  }, [tab, currentSearch]);
 
   const estadoLabel = (estado: string) => {
     switch (estado) {

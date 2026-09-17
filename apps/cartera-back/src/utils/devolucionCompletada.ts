@@ -22,22 +22,15 @@ export const CUBE_ID = 86;
 
 /**
  * Único punto del proyecto que decide "¿este inversionista es CUBE?".
- * Por ID primero — es la fuente canónica — con el nombre como red de
- * seguridad para filas históricas donde el ID quedó distinto.
+ * Identifica a CUBE estrictamente por su ID canónico (86), alineado con
+ * `exitInvestor` que bloquea la salida de CUBE únicamente por
+ * `inversionista_id === CUBE_INVESTMENT_ID (86)`.
  *
- * Exportado desde acá (no redefinido por archivo) porque dos guards
- * independientes dependen de que ambos usen EXACTAMENTE el mismo criterio:
- * `payments.ts::esDevolucionCompleta` (nunca tratar a CUBE como saliente) y
- * `abonosCapital.ts::registrarCancelacionEspejo` (nunca generarle una
- * CANCELACION). Si cada uno filtrara solo por `inversionista_id === 86`,
- * una fila histórica de CUBE con otro ID pasaría el filtro de creación en
- * abonosCapital.ts pero payments.ts la reconocería como CUBE por nombre y
- * la excluiría de todo cálculo — recreando el mismo dato fantasma que este
- * guard existe para evitar.
+ * Evita matches difusos por string que puedan atribuir a CUBE un inversionista
+ * homónimo no-86 o cerrar prematuramente créditos.
  */
-export const esCube = (inv: { inversionista_id: number; nombre: string }): boolean =>
-  inv.inversionista_id === CUBE_ID ||
-  inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+export const esCube = (inv: { inversionista_id: number; nombre?: string }): boolean =>
+  inv.inversionista_id === CUBE_ID;
 
 // Placeholder del usuario autenticado, igual que en devolucion.ts y
 // updateCredit.ts mientras no se propague el usuario real hasta acá.
@@ -154,15 +147,15 @@ export async function filtrarCreditosTotalmenteDevueltos(
       .map((f: any) => f.credito_id),
   );
 
-  if (espejoResidual.length > 0) {
+  const conSaldoResidual = espejoResidual.filter((f: any) => Number(f.monto_aportado) !== 0);
+  if (conSaldoResidual.length > 0) {
     console.warn(
-      `⚠️  DIVERGENCIA padre/espejo: crédito(s) sin inversionistas en el padre pero con filas espejo no-CUBE:`,
-      espejoResidual
+      `⚠️  DIVERGENCIA padre/espejo: crédito(s) sin inversionistas en el padre pero con saldo en filas espejo no-CUBE:`,
+      conSaldoResidual
         .map(
           (f: any) =>
             `credito_id=${f.credito_id} inversionista_id=${f.inversionista_id} ` +
-            `monto_aportado=${f.monto_aportado}` +
-            `${Number(f.monto_aportado) !== 0 ? " ← NO se cierra (capital pendiente)" : ""}`,
+            `monto_aportado=${f.monto_aportado} ← NO se cierra (capital pendiente)`,
         )
         .join(", "),
     );

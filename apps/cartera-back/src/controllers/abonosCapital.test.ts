@@ -37,7 +37,7 @@ const sqlDe = (condicion: unknown) => dialect.sqlToQuery(condicion as any).sql;
 // `selectWhereSql` la condición del SELECT ya renderizada a SQL (para
 // verificar el filtro de CUBE sin depender de que el mock lo aplique de
 // verdad — acá se ignora la condición y siempre se devuelve `espejoRows`).
-function makeTx(espejoRows: any[]) {
+function makeTx(espejoRows: any[], cancelacionesAbiertasRows: any[] = []) {
   const inserted: any[] = [];
   const state = { deleteCalls: 0, selectWhereSql: undefined as string | undefined };
   const tx: any = {
@@ -49,6 +49,7 @@ function makeTx(espejoRows: any[]) {
             return Promise.resolve(espejoRows);
           },
         }),
+        where: () => Promise.resolve(cancelacionesAbiertasRows),
       }),
     }),
     delete: () => ({
@@ -344,25 +345,29 @@ describe("registrarCancelacionEspejo", () => {
     expect(inserted[0].inversionista_id).toBe(10);
   });
 
-  it("excluye a CUBE por nombre aunque su id histórico sea distinto de 86", async () => {
-    // Regresión del comment de review: el filtro de exclusión debe usar
-    // exactamente el mismo criterio que payments.ts::esCube (ID primero,
-    // nombre como respaldo). Antes este filtro vivía en el WHERE de SQL como
-    // `ne(inversionista_id, 86)`, así que una fila histórica de CUBE con
-    // otro ID pasaba el filtro acá, generaba una CANCELACION nueva, y
-    // payments.ts la reconocía como CUBE por nombre y la excluía de todo
-    // cálculo — dejando otra vez el mismo dato fantasma que este guard
-    // existe para evitar.
+  it("reconoce a CUBE estrictamente por ID (86), no por nombre (un inversionista 999 no es CUBE)", async () => {
     const { tx, inserted } = makeTx([
       { inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" },
-      { inversionista_id: 999, monto_aportado: "5000", nombre: "Cube Investments S.A." },
+      { inversionista_id: 86, monto_aportado: "5000", nombre: "Cube Investments S.A." },
+      { inversionista_id: 999, monto_aportado: "2000", nombre: "Cube Investments S.A." },
     ]);
 
     const res = await registrarCancelacionEspejo(tx, 1);
 
-    expect(res.insertados).toBe(1);
-    expect(inserted).toHaveLength(1);
-    expect(inserted[0].inversionista_id).toBe(10);
+    expect(res.insertados).toBe(2);
+    expect(inserted).toHaveLength(2);
+    expect(inserted.map((i) => i.inversionista_id)).toEqual([10, 999]);
+  });
+
+  it("TIRA ERROR si alguna cancelación abierta ya entró en un cálculo de pagos (pago_espejo_id != null)", async () => {
+    const { tx } = makeTx(
+      [{ inversionista_id: 10, monto_aportado: "1000", nombre: "Ana" }],
+      [{ abono_id: 42, pago_espejo_id: 888 }]
+    );
+
+    await expect(registrarCancelacionEspejo(tx, 1)).rejects.toThrow(
+      /\[CANCELACION_EN_CALCULO_PENDIENTE\]/
+    );
   });
 
   it("la query del espejo solo filtra por credito_id (el filtro de CUBE es en JS)", async () => {

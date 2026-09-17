@@ -323,6 +323,33 @@ describe("recalcularPagosCredito — pagos validados no se reescriben", () => {
       "seguro_restante",
     ]);
   });
+
+  // Con dos o más validados vivos el espejo ya viene neto de TODOS, y
+  // registerPayment volvería a restarle el interés/IVA de los otros al elegir
+  // uno como fila vigente (`calcularSaldoNetoCuota`): el mismo parcial contado
+  // dos veces, con ese interés corriéndose a capital. Se deja como estaba.
+  it("no toca el espejo cuando la cuota tiene dos validados vivos", async () => {
+    const segundoValidado = {
+      ...parcialValidado,
+      pago_id: 156050,
+      fecha_pago: "2026-08-28",
+      abono_interes: "40",
+      abono_iva_12: "5",
+      abono_capital: "20",
+    };
+    pagosActuales = [
+      { pagos_credito: parcialValidado, cuotas_credito: cuota18 },
+      { pagos_credito: segundoValidado, cuotas_credito: cuota18 },
+      { pagos_credito: filaSembrada, cuotas_credito: cuota18 },
+    ];
+
+    await recalcularPagosCredito({ numero_credito_sifco: "01010214120190" });
+
+    const idsEscritos = capturedUpdates.map((u) => renderSql(u.cond).params).flat();
+    expect(idsEscritos).toContain(74540);
+    expect(idsEscritos).not.toContain(156048);
+    expect(idsEscritos).not.toContain(156050);
+  });
 });
 
 describe("recalcularPagosCredito — capital validado de cuotas posteriores", () => {

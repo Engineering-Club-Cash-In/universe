@@ -3187,11 +3187,21 @@ export const recalcularPagosCredito = async ({
     // Se escribe SOLO el espejo del saldo final de la cuota. Ni abonos, ni
     // `pagado`, ni `total_restante`: el split del validado ya se facturó y se
     // distribuyó a inversionistas, y esa parte sigue intocable.
-    const espejoCuota = snapshotRestantes();
-    for (const validado of validadosVivos) {
+    //
+    // SOLO cuando hay UN validado vivo en la cuota. Con dos o más, el espejo
+    // ya viene neto de TODOS ellos y `registerPayment` volvería a restarle el
+    // interés/IVA de los OTROS validados al elegirlo como fila vigente
+    // (`calcularSaldoNetoCuota`, neteo `hermanosInteres`/`hermanosIva`): el
+    // mismo parcial se contaría dos veces y ese interés se correría a capital.
+    // Con un único validado ese neteo da cero —sus hermanos son las filas
+    // sembradas/pendientes, que no traen abonos propios que restar— y el
+    // espejo llega intacto. El caso de varios validados queda como estaba (no
+    // se toca, no se empeora); arreglarlo pide que el neteo sepa distinguir un
+    // espejo sincronizado de uno viejo, y eso es cirugía sobre el reparto.
+    if (validadosVivos.length === 1) {
       actualizaciones.push({
-        pago_id: validado.pago_id,
-        datos: { ...espejoCuota },
+        pago_id: validadosVivos[0].pago_id,
+        datos: { ...snapshotRestantes() },
       });
     }
   }

@@ -8,6 +8,7 @@ import {
 	SIGNAL_WEIGHTS,
 } from "./ruleset";
 import type { DocumentIntegrityAiResult, Signal } from "./types";
+import { currentValidationResult, currentValidationReason } from "./types";
 
 const cleanLlm: DocumentIntegrityAiResult = {
 	corresponde_al_tipo_declarado: true,
@@ -42,6 +43,55 @@ const nonOverrideSignals = Object.entries(SIGNAL_WEIGHTS)
 	) satisfies Signal[];
 
 describe("document integrity ruleset", () => {
+	test.each([
+		0, 69, 70, 90, 94, 95, 100,
+	])("tipo incorrecto se rechaza solamente con confianza >=95: %s", (confidence) => {
+		const result = applyRuleset({
+			signals: [],
+			llm: {
+				...cleanLlm,
+				corresponde_al_tipo_declarado: false,
+				confianza_tipo_documento: confidence,
+				tipo_documento_detectado: "factura",
+			},
+		});
+		expect(result.result).toBe(confidence >= 95 ? "rechazado" : "valido");
+		if (confidence < 95)
+			expect(
+				result.signals.some(
+					(signal) => signal.code === "tipo_documento_incierto",
+				),
+			).toBe(true);
+	});
+	test("las revisiones y observaciones históricas se habilitan sin reescribir el resultado original", () => {
+		for (const result of ["revision_manual", "observacion"] as const) {
+			expect(currentValidationResult(result)).toBe("valido");
+			expect(
+				currentValidationReason(result, "Requiere revisión humana"),
+			).toContain("alertas informativas");
+		}
+		expect(currentValidationResult("error")).toBe("error");
+		expect(currentValidationResult("rechazado")).toBe("rechazado");
+	});
+	test("ni un score muy alto ni la mala legibilidad permiten rechazar sin motivo explícito", () => {
+		const signals = [
+			makeSignal("titular_no_coincide_fuerte", 6, "alta", "identidad"),
+			makeSignal("sha256_duplicado_oportunidad_ganada", 6, "alta", "duplicado"),
+			makeSignal("xmp_historial_de_ediciones", 7, "alta", "estructura"),
+			makeSignal("montos_sobrepuestos", 4, "alta", "ia", { confidence: 99 }),
+		];
+		const result = applyRuleset({
+			signals,
+			llm: { ...cleanLlm, es_legible: false },
+		});
+		expect(result.result).toBe("valido");
+		expect(result.score).toBeGreaterThan(7);
+		expect(
+			result.signals.some(
+				(signal) => signal.code === "captura_con_legibilidad_insuficiente",
+			),
+		).toBe(true);
+	});
 	test("la ortografía de movimientos no exige revisión ni contribuye al rechazo", () => {
 		const typo = makeSignal(
 			"ortografia_en_descripcion_movimiento",
@@ -67,7 +117,7 @@ describe("document integrity ruleset", () => {
 					makeSignal("titular_no_coincide_fuerte", 6, "alta", "identidad"),
 				],
 			}),
-		).toMatchObject({ result: "revision_manual", score: 6 });
+		).toMatchObject({ result: "valido", score: 6 });
 		expect(
 			applyRuleset({
 				llm: cleanLlm,
@@ -78,7 +128,7 @@ describe("document integrity ruleset", () => {
 					}),
 				],
 			}),
-		).toMatchObject({ result: "revision_manual", score: 4 });
+		).toMatchObject({ result: "valido", score: 4 });
 	});
 	test.each([
 		"todas_las_paginas_rasterizadas",
@@ -95,7 +145,7 @@ describe("document integrity ruleset", () => {
 				signals: [capture],
 				llm: { ...cleanLlm, es_legible: false },
 			}).result,
-		).toBe("revision_manual");
+		).toBe("valido");
 		expect(
 			applyRuleset({
 				signals: [
@@ -105,7 +155,7 @@ describe("document integrity ruleset", () => {
 				],
 				llm: cleanLlm,
 			}).result,
-		).toBe("revision_manual");
+		).toBe("valido");
 		expect(
 			applyRuleset({
 				signals: [capture],
@@ -163,7 +213,7 @@ describe("document integrity ruleset", () => {
 				}),
 			],
 		});
-		expect(result).toMatchObject({ result: "revision_manual", score: 8 });
+		expect(result).toMatchObject({ result: "valido", score: 8 });
 	});
 	test.each([
 		"desalineacion_columnas",
@@ -180,7 +230,7 @@ describe("document integrity ruleset", () => {
 					makeSignal("titular_no_coincide_fuerte", 6, "alta", "identidad"),
 				],
 			}).result,
-		).toBe("revision_manual");
+		).toBe("valido");
 	});
 	test("la tipografía es informativa y no exige revisión ni ayuda al rechazo", () => {
 		const typography = makeSignal(
@@ -202,7 +252,7 @@ describe("document integrity ruleset", () => {
 		).toMatchObject({ result: "valido", score: 0 });
 		expect(
 			applyRuleset({ signals: [typography, displacement], llm: cleanLlm }),
-		).toMatchObject({ result: "revision_manual", score: 4 });
+		).toMatchObject({ result: "valido", score: 4 });
 		expect(
 			applyRuleset({
 				signals: [
@@ -211,7 +261,7 @@ describe("document integrity ruleset", () => {
 				],
 				llm: cleanLlm,
 			}).result,
-		).toBe("revision_manual");
+		).toBe("valido");
 		expect(
 			applyRuleset({
 				signals: [
@@ -223,13 +273,13 @@ describe("document integrity ruleset", () => {
 				],
 				llm: cleanLlm,
 			}).result,
-		).toBe("revision_manual");
+		).toBe("valido");
 		expect(
 			applyRuleset({
 				signals: [typography],
 				llm: { ...cleanLlm, es_legible: false },
 			}).result,
-		).toBe("rechazado");
+		).toBe("valido");
 	});
 	test("la limitación de alineación es informativa sin exigir revisión", () => {
 		const capture = makeSignal(
@@ -248,10 +298,10 @@ describe("document integrity ruleset", () => {
 		);
 		expect(
 			applyRuleset({ signals: [capture, displacement], llm: cleanLlm }).result,
-		).toBe("revision_manual");
+		).toBe("valido");
 		expect(
 			applyRuleset({ signals: [displacement], llm: cleanLlm }).result,
-		).toBe("revision_manual");
+		).toBe("valido");
 		expect(
 			applyRuleset({
 				signals: [
@@ -263,13 +313,13 @@ describe("document integrity ruleset", () => {
 				],
 				llm: cleanLlm,
 			}).result,
-		).toBe("revision_manual");
+		).toBe("valido");
 		expect(
 			applyRuleset({
 				signals: [capture],
 				llm: { ...cleanLlm, es_legible: false },
 			}).result,
-		).toBe("rechazado");
+		).toBe("valido");
 		expect(
 			applyRuleset({
 				signals: [capture],
@@ -291,11 +341,11 @@ describe("document integrity ruleset", () => {
 			{ confidence: 99 },
 		);
 		expect(applyRuleset({ signals: [typo], llm: cleanLlm }).result).toBe(
-			"revision_manual",
+			"valido",
 		);
 		expect(
 			applyRuleset({ signals: [typo, format], llm: cleanLlm }).result,
-		).toBe("revision_manual");
+		).toBe("valido");
 		expect(
 			applyRuleset({
 				signals: [
@@ -307,7 +357,7 @@ describe("document integrity ruleset", () => {
 				],
 				llm: cleanLlm,
 			}).result,
-		).toBe("revision_manual");
+		).toBe("valido");
 	});
 	test("un input limpio es válido sin señales", () => {
 		expect(applyRuleset({ signals: [], llm: cleanLlm })).toEqual({
@@ -321,18 +371,13 @@ describe("document integrity ruleset", () => {
 	test.each(
 		nonOverrideSignals,
 	)("cada señal aislada cae en su banda: $code", (signal) => {
-		const expected =
-			signal.weight <= 0
-				? "valido"
-				: signal.weight <= 3
-					? "observacion"
-					: "revision_manual";
+		const expected = "valido";
 		expect(applyRuleset({ signals: [signal], llm: cleanLlm }).result).toBe(
 			expected,
 		);
 	});
 
-	test("rechaza con score mínimo y una señal alta relevante", () => {
+	test("un score alto con identidad distinta conserva alertas sin rechazar", () => {
 		const result = applyRuleset({
 			signals: [
 				makeSignal("titular_no_coincide_fuerte", 6, "alta", "identidad"),
@@ -343,7 +388,7 @@ describe("document integrity ruleset", () => {
 			llm: cleanLlm,
 		});
 		expect(result.score).toBe(7);
-		expect(result.result).toBe("rechazado");
+		expect(result.result).toBe("valido");
 	});
 
 	test("rechaza un documento que se declara sintético con evidencia completa", () => {
@@ -405,12 +450,12 @@ describe("document integrity ruleset", () => {
 		});
 
 		expect(result.score).toBe(7);
-		expect(result.result).toBe("revision_manual");
+		expect(result.result).toBe("valido");
 	});
 
 	test.each([
 		"titular_no_coincide_fuerte",
-	])("la señal fuerte habilitada %s puede sustentar un rechazo", (code) => {
+	])("la señal de identidad %s no sustenta rechazo", (code) => {
 		const result = applyRuleset({
 			signals: [
 				makeSignal(
@@ -425,7 +470,7 @@ describe("document integrity ruleset", () => {
 			llm: cleanLlm,
 		});
 		expect(result.score).toBeGreaterThanOrEqual(7);
-		expect(result.result).toBe("rechazado");
+		expect(result.result).toBe("valido");
 	});
 
 	test("una señal alta relevante con score menor a siete requiere revisión", () => {
@@ -438,7 +483,7 @@ describe("document integrity ruleset", () => {
 				],
 				llm: cleanLlm,
 			}).result,
-		).toBe("revision_manual");
+		).toBe("valido");
 	});
 
 	test("un score alto sin señales de rechazo requiere revisión manual", () => {
@@ -451,7 +496,7 @@ describe("document integrity ruleset", () => {
 			llm: cleanLlm,
 		});
 		expect(result.score).toBe(8);
-		expect(result.result).toBe("revision_manual");
+		expect(result.result).toBe("valido");
 	});
 
 	test("un duplicado en oportunidad ganada nunca provoca rechazo automático", () => {
@@ -468,7 +513,7 @@ describe("document integrity ruleset", () => {
 			llm: cleanLlm,
 		});
 		expect(result.score).toBe(6);
-		expect(result.result).toBe("revision_manual");
+		expect(result.result).toBe("valido");
 	});
 
 	test("el duplicado ganado no ayuda a alcanzar el umbral de rechazo", () => {
@@ -487,10 +532,10 @@ describe("document integrity ruleset", () => {
 			llm: cleanLlm,
 		});
 		expect(result.score).toBe(10);
-		expect(result.result).toBe("revision_manual");
+		expect(result.result).toBe("valido");
 	});
 
-	test("otras señales pueden sustentar el rechazo sin el peso del duplicado ganado", () => {
+	test("identidad y duplicados combinados conservan alertas sin rechazar", () => {
 		const result = applyRuleset({
 			signals: [
 				makeSignal(
@@ -507,7 +552,7 @@ describe("document integrity ruleset", () => {
 			llm: cleanLlm,
 		});
 		expect(result.score).toBe(15);
-		expect(result.result).toBe("rechazado");
+		expect(result.result).toBe("valido");
 	});
 
 	test.each([
@@ -519,7 +564,7 @@ describe("document integrity ruleset", () => {
 			llm: cleanLlm,
 		});
 		expect(result.score).toBeGreaterThanOrEqual(6);
-		expect(result.result).toBe("revision_manual");
+		expect(result.result).toBe("valido");
 	});
 
 	test("una herramienta externa como productor es informativa por sí sola", () => {
@@ -555,7 +600,7 @@ describe("document integrity ruleset", () => {
 				llm: {
 					...cleanLlm,
 					corresponde_al_tipo_declarado: false,
-					confianza_tipo_documento: 70,
+					confianza_tipo_documento: 95,
 				},
 			}).result,
 		).toBe("rechazado");
@@ -597,7 +642,7 @@ describe("document integrity ruleset", () => {
 					confianza_tipo_documento: 69,
 				},
 			});
-			expect(result.result).toBe("revision_manual");
+			expect(result.result).toBe("valido");
 			expect(result.signals.map((signal) => signal.code)).toContain(
 				"tipo_documento_incierto",
 			);
@@ -617,7 +662,7 @@ describe("document integrity ruleset", () => {
 			],
 		});
 		expect(result.score).toBe(8);
-		expect(result.result).toBe("revision_manual");
+		expect(result.result).toBe("valido");
 	});
 
 	test("una señal confiable no usa otra señal dudosa para alcanzar rechazo", () => {
@@ -633,7 +678,7 @@ describe("document integrity ruleset", () => {
 			],
 		});
 		expect(result.score).toBe(8);
-		expect(result.result).toBe("revision_manual");
+		expect(result.result).toBe("valido");
 	});
 
 	test("dos señales visuales confiables requieren revisión, no rechazo", () => {
@@ -649,7 +694,7 @@ describe("document integrity ruleset", () => {
 			],
 		});
 		expect(result.score).toBe(8);
-		expect(result.result).toBe("revision_manual");
+		expect(result.result).toBe("valido");
 	});
 
 	test("el aporte total del LLM está topado", () => {
@@ -669,7 +714,7 @@ describe("document integrity ruleset", () => {
 		]) {
 			expect(
 				applyRuleset({ signals: [makeSignal(code, 0, "alta", "ia")] }).result,
-			).toBe("revision_manual");
+			).toBe("error");
 		}
 	});
 
@@ -682,8 +727,8 @@ describe("document integrity ruleset", () => {
 			],
 			llm: cleanLlm,
 		});
-		expect(result.score).toBe(7);
-		expect(result.result).toBe("revision_manual");
+		expect(result.score).toBe(0);
+		expect(result.result).toBe("error");
 	});
 
 	test("la evidencia favorable no anula señales de riesgo", () => {
@@ -701,7 +746,7 @@ describe("document integrity ruleset", () => {
 			],
 		});
 		expect(result.score).toBe(3);
-		expect(result.result).toBe("observacion");
+		expect(result.result).toBe("valido");
 	});
 
 	test("una fuente no embebida es informativa por si sola", () => {

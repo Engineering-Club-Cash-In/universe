@@ -103,15 +103,16 @@ const RESULT_META: Record<
 		Icon: CheckCircle2,
 	},
 	observacion: {
-		label: "Con observación",
+		label: "Válido",
 		className:
-			"bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
-		Icon: AlertTriangle,
+			"bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
+		Icon: CheckCircle2,
 	},
 	revision_manual: {
-		label: "Revisión manual",
-		className: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
-		Icon: HelpCircle,
+		label: "Válido",
+		className:
+			"bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
+		Icon: CheckCircle2,
 	},
 	rechazado: {
 		label: "Rechazado",
@@ -638,7 +639,9 @@ function NewValidationDialog({
 							size="sm"
 							variant="outline"
 						>
-							{attemptStatusQuery.isFetching ? "Consultando…" : "Reintentar consulta"}
+							{attemptStatusQuery.isFetching
+								? "Consultando…"
+								: "Reintentar consulta"}
 						</Button>
 					</div>
 				)}

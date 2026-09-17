@@ -38,17 +38,17 @@ describe("document integrity workflow policy", () => {
 			expect(canRunDocumentIntegrityValidation(role)).toBe(false);
 	});
 
-	test("solo administradores y supervisores de ventas pueden aprobar", () => {
-		expect(canApproveDocumentIntegrityValidation("admin")).toBe(true);
+	test("la política actual deshabilita aprobaciones sin ampliar otros permisos", () => {
+		expect(canApproveDocumentIntegrityValidation("admin")).toBe(false);
 		expect(canApproveDocumentIntegrityValidation("sales_supervisor")).toBe(
-			true,
+			false,
 		);
 		for (const role of ["sales", "analyst", "juridico", "accounting"]) {
 			expect(canApproveDocumentIntegrityValidation(role)).toBe(false);
 		}
 	});
 
-	test("cuenta únicamente revisiones manuales sin aprobación", () => {
+	test("las revisiones manuales históricas ya no requieren aprobación", () => {
 		expect(
 			getPendingManualApprovalCount([
 				{ autoResult: "valido", manualApprovalId: null },
@@ -57,7 +57,7 @@ describe("document integrity workflow policy", () => {
 				{ autoResult: "rechazado", manualApprovalId: null },
 				{ autoResult: "rechazado", manualApprovalId: "approval-2" },
 			]),
-		).toBe(1);
+		).toBe(0);
 		expect(
 			getRejectedDocumentCount([
 				{ autoResult: "revision_manual" },
@@ -67,7 +67,7 @@ describe("document integrity workflow policy", () => {
 		).toBe(2);
 	});
 
-	test("solo permite aprobar revisión manual de la ejecución vigente", () => {
+	test("deshabilita aprobaciones y conserva el control de ejecuciones antiguas", () => {
 		const current = {
 			autoResult: "revision_manual",
 			validationRunId: "run-2",
@@ -77,7 +77,10 @@ describe("document integrity workflow policy", () => {
 			latestRunId: "run-2",
 			latestRunStatus: "completed" as const,
 		};
-		expect(getManualApprovalAvailability(current)).toEqual({ allowed: true });
+		expect(getManualApprovalAvailability(current)).toEqual({
+			allowed: false,
+			reason: "wrong_result",
+		});
 		expect(
 			getManualApprovalAvailability({ ...current, autoResult: "rechazado" }),
 		).toEqual({ allowed: false, reason: "wrong_result" });

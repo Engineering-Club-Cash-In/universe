@@ -21,7 +21,7 @@ describe("document integrity UI flow", () => {
 		}
 	});
 
-	test("la revisión manual bloquea capacidad hasta aprobarse", () => {
+	test("la revisión manual histórica permite capacidad sin aprobación", () => {
 		expect(
 			hasCompleteIntegrityValidation({
 				payloads: [{ key: "a.pdf" }],
@@ -29,7 +29,7 @@ describe("document integrity UI flow", () => {
 					{ validation: { result: "revision_manual", manualApproval: null } },
 				],
 			}),
-		).toBe(false);
+		).toBe(true);
 		expect(
 			hasCompleteIntegrityValidation({
 				payloads: [{ key: "a.pdf" }],
@@ -113,7 +113,7 @@ describe("document integrity UI flow", () => {
 				{ autoResult: "revision_manual" },
 				{ autoResult: "observacion" },
 			]),
-		).toBe("revision_manual");
+		).toBe("valido");
 		expect(
 			aggregateIntegrityResult([
 				{ autoResult: "revision_manual" },

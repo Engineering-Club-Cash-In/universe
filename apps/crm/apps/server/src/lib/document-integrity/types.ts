@@ -9,6 +9,24 @@ export const VALIDATION_RESULTS = [
 ] as const;
 export type ValidationResult = (typeof VALIDATION_RESULTS)[number];
 
+// Valores históricos se conservan en BD, pero ya no exigen aprobación.
+export function currentValidationResult(
+	result: ValidationResult,
+): ValidationResult {
+	return result === "revision_manual" || result === "observacion"
+		? "valido"
+		: result;
+}
+
+export function currentValidationReason(
+	result: ValidationResult,
+	reason: string,
+): string {
+	return result === "revision_manual" || result === "observacion"
+		? "Documento habilitado para continuar. Las señales se conservan como alertas informativas."
+		: reason;
+}
+
 export const SIGNAL_SEVERITIES = ["baja", "media", "alta"] as const;
 export type SignalSeverity = (typeof SIGNAL_SEVERITIES)[number];
 export type SignalSource =

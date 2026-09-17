@@ -83,12 +83,12 @@ const INTEGRITY_META: Record<
 > = {
 	valido: { label: "Válido", className: "bg-green-100 text-green-800" },
 	observacion: {
-		label: "Con observación",
-		className: "bg-amber-100 text-amber-800",
+		label: "Válido",
+		className: "bg-green-100 text-green-800",
 	},
 	revision_manual: {
-		label: "Revisión manual",
-		className: "bg-blue-100 text-blue-800",
+		label: "Válido",
+		className: "bg-green-100 text-green-800",
 	},
 	rechazado: { label: "Rechazado", className: "bg-red-100 text-red-800" },
 	error: { label: "Error", className: "bg-gray-100 text-gray-800" },
@@ -479,8 +479,8 @@ export function BankStatementAnalysis({
 							<div className="flex gap-2">
 								<AlertTriangle className="h-4 w-4 shrink-0" />
 								<span>
-									No se pudo consultar la validación documental vigente. Reintenta
-									antes de cargar o validar documentos nuevos.
+									No se pudo consultar la validación documental vigente.
+									Reintenta antes de cargar o validar documentos nuevos.
 								</span>
 							</div>
 							<Button

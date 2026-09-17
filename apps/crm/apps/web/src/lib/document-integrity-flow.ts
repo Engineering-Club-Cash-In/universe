@@ -15,8 +15,8 @@ export interface IntegrityValidatedBatchLike {
 	}>;
 }
 
-export function requiresManualApproval(result: IntegrityResult): boolean {
-	return result === "revision_manual";
+export function requiresManualApproval(_result: IntegrityResult): boolean {
+	return false;
 }
 
 export function hasCompleteIntegrityValidation(
@@ -30,20 +30,12 @@ export function hasCompleteIntegrityValidation(
 			(result) =>
 				!!result.validation &&
 				result.validation.result !== "error" &&
-				result.validation.result !== "rechazado" &&
-				(!requiresManualApproval(result.validation.result) ||
-					!!result.validation.manualApproval),
+				result.validation.result !== "rechazado",
 		)
 	);
 }
 
-const RESULT_PRIORITY: IntegrityResult[] = [
-	"rechazado",
-	"error",
-	"revision_manual",
-	"observacion",
-	"valido",
-];
+const RESULT_PRIORITY: IntegrityResult[] = ["rechazado", "error", "valido"];
 
 export function aggregateIntegrityResult(
 	results: Array<{ autoResult: IntegrityResult }>,
@@ -51,7 +43,7 @@ export function aggregateIntegrityResult(
 	return (
 		RESULT_PRIORITY.find((result) =>
 			results.some((validation) => validation.autoResult === result),
-		) ?? "error"
+		) ?? (results.length > 0 ? "valido" : "error")
 	);
 }
 

@@ -43,12 +43,13 @@ describe("document integrity decision evidence", () => {
 						page: 3,
 					},
 					{
-						code: "titular_no_coincide_fuerte",
+						code: "documento_declarado_sintetico_o_sin_validez",
 						severity: "alta",
 						weight: 4,
 						source: "identidad",
 						confidence: 99,
 						page: 1,
+						evidence: { textoDetectado: "MUESTRA SINTÉTICA" },
 					},
 				],
 			}),
@@ -89,7 +90,9 @@ describe("document integrity decision evidence", () => {
 				},
 			],
 		});
-		expect(action).toContain("Revisa la página 2.");
+		expect(action).toContain(
+			"Revisa la página 2 tomando en cuenta las alertas informativas",
+		);
 		expect(action).toContain("comprobar la alineación de la página 3");
 		expect(action).toContain("PDF original o una foto frontal y nítida");
 		expect(action).toContain("banco");
@@ -190,12 +193,13 @@ describe("document integrity decision evidence", () => {
 			result: "rechazado",
 			signals: [
 				{
-					code: "titular_no_coincide_fuerte",
+					code: "documento_declarado_sintetico_o_sin_validez",
 					page: 9,
 					severity: "alta",
 					weight: 4,
 					source: "identidad",
 					confidence: 90,
+					evidence: { textoDetectado: "MUESTRA SINTÉTICA" },
 				},
 				{
 					code: "logo_baja_calidad",

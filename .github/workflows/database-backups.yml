@@ -56,7 +56,6 @@ jobs:
     environment: production-backups
     permissions:
       contents: read
-      issues: write
     concurrency:
       group: production-database-backups
       cancel-in-progress: false
@@ -129,34 +128,36 @@ jobs:
           export PATH="/usr/lib/postgresql/17/bin:$PATH"
           scripts/backup-postgres-to-r2.sh
 
-      - name: Close resolved backup alert
-        if: ${{ success() }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          issue=$(gh issue list --state open \
-            --search 'Database backup failed in:title' \
-            --json number --jq '.[0].number // empty')
-          if [[ -n "$issue" ]]; then
-            gh issue close "$issue" \
-              --comment "Resolved by successful run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          fi
+  report-backup-status:
+    name: Report database backup status
+    needs: backup
+    if: ${{ always() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
 
-      - name: Report backup failure
-        if: ${{ failure() }}
+    steps:
+      - name: Update backup alert
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          BACKUP_RESULT: ${{ needs.backup.result }}
         run: |
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           issue=$(gh issue list --state open \
             --search 'Database backup failed in:title' \
             --json number --jq '.[0].number // empty')
-          if [[ -n "$issue" ]]; then
-            gh issue comment "$issue" --body "Another backup run failed: $run_url"
+          if [[ "$BACKUP_RESULT" == success ]]; then
+            if [[ -n "$issue" ]]; then
+              gh issue close "$issue" --comment "Resolved by successful run: $run_url"
+            fi
+          elif [[ -n "$issue" ]]; then
+            gh issue comment "$issue" \
+              --body "Another backup run ended with $BACKUP_RESULT: $run_url"
           else
             gh issue create \
               --title "Database backup failed" \
-              --body "The production database backup workflow failed: $run_url"
+              --body "The production database backup run ended with $BACKUP_RESULT: $run_url"
           fi

@@ -70,6 +70,8 @@ printf '%s\n' "$*" >>"$AWS_LOG"
 if [[ "$*" == *"s3api get-bucket-lifecycle-configuration"* ]]; then
   if [[ "${BAD_LIFECYCLE:-}" == "1" ]]; then
     printf '%s\n' '{"Rules":[]}'
+  elif [[ "${SHORT_OVERLAPPING_LIFECYCLE:-}" == "1" ]]; then
+    printf '%s\n' '{"Rules":[{"Status":"Enabled","Filter":{"Prefix":"daily/"},"Expiration":{"Days":14}},{"Status":"Enabled","Filter":{"Prefix":"weekly/"},"Expiration":{"Days":56}},{"Status":"Enabled","Filter":{"Prefix":"monthly/"},"Expiration":{"Days":365}},{"Status":"Enabled","Filter":{"Prefix":""},"Expiration":{"Days":7}}]}'
   else
     printf '%s\n' '{"Rules":[{"ID":"expire-daily-after-14-days","Status":"Enabled","Filter":{"Prefix":"daily/"},"Expiration":{"Days":14}},{"ID":"expire-weekly-after-56-days","Status":"Enabled","Filter":{"Prefix":"weekly/"},"Expiration":{"Days":56}},{"ID":"expire-monthly-after-365-days","Status":"Enabled","Filter":{"Prefix":"monthly/"},"Expiration":{"Days":365}}]}'
   fi
@@ -162,6 +164,15 @@ assert_no_uploads
 : >"$TMP/aws.log"
 if BAD_LIFECYCLE=1 run_backup; then
   echo "expected missing lifecycle rules to fail" >&2
+  exit 1
+fi
+[[ ! -s "$TMP/calls.log" ]]
+assert_no_uploads
+
+: >"$TMP/calls.log"
+: >"$TMP/aws.log"
+if SHORT_OVERLAPPING_LIFECYCLE=1 run_backup; then
+  echo "expected shorter overlapping lifecycle rule to fail" >&2
   exit 1
 fi
 [[ ! -s "$TMP/calls.log" ]]

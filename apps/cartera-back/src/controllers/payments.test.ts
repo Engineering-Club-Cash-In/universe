@@ -1424,7 +1424,7 @@ describe("resolverAbonosNoLiquidados", () => {
     expect(res.saltado).toBe(false);
   });
 
-  it("devolución completa: no suma ni consume nada, aunque haya abonos pendientes", () => {
+  it("devolución completa: un CAPITAL pendiente no se suma NI se consume (capital aparte, no lo paga este pago)", () => {
     const res = resolverAbonosNoLiquidados({
       abonosNoLiquidados: [{ abono_id: 1, tipo: "CAPITAL", monto: "500" }],
       abonoCapitalBase: new Big(5000),
@@ -1435,6 +1435,43 @@ describe("resolverAbonosNoLiquidados", () => {
 
     expect(res.abonoCapital.toString()).toBe("5000");
     expect(res.abonoIdsConsumidos).toEqual([]);
+    expect(res.saltado).toBe(true);
+  });
+
+  it("devolución completa: la CANCELACION se consume sin sumarse (es el mismo monto_aportado que ya se paga)", () => {
+    // Sin esto la liquidación —que cierra solo por `pago_espejo_id`— dejaba la
+    // fila en liquidado=false para siempre pese a haberse pagado.
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [{ abono_id: 9, tipo: "CANCELACION", monto: "5000" }],
+      abonoCapitalBase: new Big(5000),
+      montoAportado: "5000",
+      devolucionCompleta: true,
+      isCube: false,
+    });
+
+    // El monto NO cambia: consumir no es sumar.
+    expect(res.abonoCapital.toString()).toBe("5000");
+    expect(res.abonoIdsConsumidos).toEqual([9]);
+    expect(res.saltado).toBe(true);
+    // Sigue sin linkearse: `abono_capital_id` es una sola casilla y el monto
+    // pagado no sale de esta fila sino del monto_aportado completo.
+    expect(res.abonoCapitalId).toBeNull();
+  });
+
+  it("devolución completa con CANCELACION + CAPITAL: solo consume la CANCELACION", () => {
+    const res = resolverAbonosNoLiquidados({
+      abonosNoLiquidados: [
+        { abono_id: 9, tipo: "CANCELACION", monto: "5000" },
+        { abono_id: 10, tipo: "CAPITAL", monto: "700" },
+      ],
+      abonoCapitalBase: new Big(5000),
+      montoAportado: "5000",
+      devolucionCompleta: true,
+      isCube: false,
+    });
+
+    expect(res.abonoCapital.toString()).toBe("5000");
+    expect(res.abonoIdsConsumidos).toEqual([9]);
     expect(res.saltado).toBe(true);
   });
 

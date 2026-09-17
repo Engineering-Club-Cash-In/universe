@@ -476,8 +476,10 @@ type AbonoNoLiquidado = { abono_id: number; tipo: string; monto: string | number
  * Reglas:
  * - Si el inversionista está saliendo del crédito por completo
  *   (`devolucionCompleta`, o sea VERIFICADO/pendiente_devolucion y no-CUBE),
- *   los abonos pendientes NO se tocan: su abono_capital ya es el
- *   monto_aportado completo, sumarlos duplicaría el conteo.
+ *   ningún abono pendiente se SUMA: su abono_capital ya es el monto_aportado
+ *   completo, sumarlos duplicaría el conteo. Las CANCELACION sí se marcan
+ *   consumidas (son ese mismo monto_aportado, ya se pagó); los CAPITAL no
+ *   (capital aparte, todavía sin descontar del monto que se paga acá).
  * - Si no, los CAPITAL se suman al abono_capital base. Un CANCELACION (que
  *   normalmente dispara "devolver todo el aportado") solo lo hace si el
  *   inversionista no es CUBE — CUBE nunca sale del crédito, así que una
@@ -508,7 +510,23 @@ export function resolverAbonosNoLiquidados(params: {
   }
 
   if (devolucionCompleta) {
-    return { abonoCapital: abonoCapitalBase, abonoCapitalId: null, abonoIdsConsumidos: [], saltado: true };
+    // No se SUMA ninguno (abonoCapital ya es el monto_aportado completo; sumar
+    // duplicaría), pero las CANCELACION sí se marcan consumidas: representan
+    // exactamente ese monto_aportado que este pago está devolviendo, así que
+    // la plata sí les salió. Sin la marca, la liquidación —que cierra solo por
+    // `pago_espejo_id`— las dejaba en `liquidado=false` para siempre, y al
+    // desaparecer la fila de espejo del inversionista ya no había forma de
+    // consumirlas. Los CAPITAL sí quedan abiertos: ese capital es aparte y
+    // todavía no está descontado del monto_aportado que se paga acá.
+    const cancelacionIds = abonosNoLiquidados
+      .filter((a) => a.tipo === "CANCELACION")
+      .map((a) => a.abono_id);
+    return {
+      abonoCapital: abonoCapitalBase,
+      abonoCapitalId: null,
+      abonoIdsConsumidos: cancelacionIds,
+      saltado: true,
+    };
   }
 
   let abonoCapital = abonoCapitalBase;

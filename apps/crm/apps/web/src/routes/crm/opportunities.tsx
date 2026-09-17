@@ -1429,11 +1429,15 @@ function RouteComponent() {
 	});
 
 	// Parte del contrato en el detalle: agencia si el carro es nuevo, vendedor
-	// (dueño) si es usado. Se guarda al elegir o crear.
+	// (dueño) si es usado. Se guarda al elegir o crear. El vendedor respeta el
+	// mismo respaldo que la generación de contratos: si la oportunidad no tiene
+	// uno, se muestra el que está en el vehículo.
 	const contractPartyCard = selectedOpportunity?.vehicle ? (
 		<OpportunityContractPartyCard
 			vehicleIsNew={selectedOpportunity.vehicle.isNew}
-			vendorId={selectedOpportunity.vendorId}
+			vendorId={
+				selectedOpportunity.vendorId ?? selectedOpportunity.vehicle.vendorId
+			}
 			company={selectedOpportunity.company}
 			vendors={vendorsQuery.data ?? []}
 			companies={companiesQuery.data ?? []}

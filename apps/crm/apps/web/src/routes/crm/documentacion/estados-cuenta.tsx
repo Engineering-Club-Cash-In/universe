@@ -1087,7 +1087,7 @@ export function ValidationDetailsView({
 						<p className="font-semibold">Acción recomendada</p>
 						<p className="mt-1">{result.recommendedAction}</p>
 					</div>
-					{result.manualApproval && result.autoResult === "revision_manual" && (
+					{result.manualApproval && result.autoResult !== "rechazado" && (
 						<div className="rounded-md border border-green-200 bg-green-50 p-3 text-green-900 text-sm dark:border-green-900 dark:bg-green-950/30 dark:text-green-200">
 							<p className="font-semibold">Aprobado manualmente</p>
 							<p className="mt-1 text-xs">

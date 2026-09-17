@@ -1,3 +1,7 @@
+import {
+  esFilaDeAbonoDirectoACapital,
+  saldoAFavorAcreditadoPorPagoDeCapital,
+} from "./saldoAFavorCapital";
 import { z } from "zod";
 
 import { eq, and, not, inArray, isNotNull, desc, sql } from "drizzle-orm";
@@ -596,8 +600,28 @@ export function createReversePayment(
       // ======================================================================
 
       const saldoActual = new Big(user.saldo_a_favor ?? 0);
-      const montoBoleta = new Big(pago.monto_boleta ?? 0);
-      let nuevoSaldoAFavor = saldoActual.minus(montoBoleta);
+
+      /**
+       * Se devuelve lo que el pago ACREDITÓ, no el `monto_boleta` completo.
+       *
+       * La rama de abono directo a capital acredita sólo el sobrante
+       * —`boleta − otros − abono_capital`, y sólo si es positivo—, así que
+       * descontarle la boleta entera le arranca saldo a favor a un usuario al
+       * que ese pago no le dio nada.
+       *
+       * Estaba tapado por otro descuadre: esa rama guardaba
+       * `monto_boleta = abono_capital`, así que sin `otros` los dos números
+       * coincidían por casualidad. Al persistir la boleta real, la asimetría
+       * queda a la vista — por eso los dos cambios van en el mismo commit.
+       *
+       * Sólo para las filas de capital. El resto de las rutas queda como estaba:
+       * su modelo de saldo a favor es otro y no se toca acá.
+       */
+      const aDevolver = esFilaDeAbonoDirectoACapital(pago.validationStatus ?? null)
+        ? saldoAFavorAcreditadoPorPagoDeCapital(pago)
+        : new Big(pago.monto_boleta ?? 0);
+
+      let nuevoSaldoAFavor = saldoActual.minus(aDevolver);
 
       // Si el saldo queda negativo, ponerlo en cero
       if (nuevoSaldoAFavor.lt(0)) {

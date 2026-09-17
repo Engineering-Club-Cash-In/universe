@@ -2261,7 +2261,20 @@ export const insertPayment = async ({ body, set }: any) => {
         abono_gps: "0",
 
         pago_del_mes: monthPaymentsBig.toString(),
-        monto_boleta: abonoCapital.toString(),
+        /**
+         * La boleta REAL, no el monto que va a capital.
+         *
+         * Acá decía `abonoCapital`, y con `otros` tipeado eso deja la fila —y el
+         * recibo que se imprime— diciendo un total menor que el comprobante del
+         * banco: una boleta de Q1,100 con Q100 de otros quedaba registrada como
+         * Q1,000. `generateReciboPagoPDF` lee esta columna cruda y la imprime
+         * como "Monto Boleta", así que el papel que firma el cliente no
+         * coincidía con el del banco.
+         *
+         * `monto_boleta_cuota` sí se queda en `abonoCapital`: ésa es cuánto de la
+         * boleta se aplicó a esta cuota, y a capital fue exactamente eso.
+         */
+        monto_boleta: montoBoleta.toString(),
 
         // Restantes - valores del crédito actual (SIN cambiar nada)
         capital_restante: credito.capital,

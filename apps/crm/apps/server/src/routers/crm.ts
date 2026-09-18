@@ -684,7 +684,13 @@ export const crmRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const [oportunidad] = await db
-				.select({ id: opportunities.id, assignedTo: opportunities.assignedTo })
+				.select({
+					id: opportunities.id,
+					assignedTo: opportunities.assignedTo,
+					status: opportunities.status,
+					vendorId: opportunities.vendorId,
+					companyId: opportunities.companyId,
+				})
 				.from(opportunities)
 				.where(eq(opportunities.id, input.opportunityId))
 				.limit(1);
@@ -705,6 +711,31 @@ export const crmRouter = {
 				});
 			}
 
+			// Ganada = ya se firmaron los contratos y el crédito viajó a cartera:
+			// el vendedor y la empresa son campos congelados, igual que en
+			// updateOpportunity. Reasignar el mismo valor no cuenta como cambio.
+			const cambiosCongelados = getWonOpportunityFrozenFieldChanges(
+				{
+					...(input.vendorId !== undefined && { vendorId: input.vendorId }),
+					...(input.companyId !== undefined && { companyId: input.companyId }),
+				},
+				oportunidad,
+			);
+			const wonLockError = getWonOpportunityLockError(
+				oportunidad.status,
+				context.userRole,
+				cambiosCongelados,
+			);
+			if (wonLockError) {
+				throw new ORPCError("FORBIDDEN", { message: wonLockError });
+			}
+
+			// La lectura de arriba pudo quedar vieja: si closeOpportunity marca la
+			// oportunidad como ganada en el medio, el predicado lo vuelve a exigir
+			// dentro de la misma sentencia.
+			const exigirNoGanada =
+				cambiosCongelados.length > 0 &&
+				!PERMISSIONS.canAccessAdmin(context.userRole ?? "");
 			const [actualizada] = await db
 				.update(opportunities)
 				.set({
@@ -712,12 +743,24 @@ export const crmRouter = {
 					...(input.companyId !== undefined && { companyId: input.companyId }),
 					updatedAt: new Date(),
 				})
-				.where(eq(opportunities.id, input.opportunityId))
+				.where(
+					exigirNoGanada
+						? and(
+								eq(opportunities.id, input.opportunityId),
+								not(eq(opportunities.status, "won")),
+							)
+						: eq(opportunities.id, input.opportunityId),
+				)
 				.returning({
 					id: opportunities.id,
 					vendorId: opportunities.vendorId,
 					companyId: opportunities.companyId,
 				});
+			if (!actualizada) {
+				throw new ORPCError("FORBIDDEN", {
+					message: buildWonOpportunityFrozenFieldError(cambiosCongelados),
+				});
+			}
 			// El meta solo cubre los fallos: la escritura buena se anota aquí, que
 			// es como se reconstruye después quién puso al vendedor o la agencia.
 			auditRecord({

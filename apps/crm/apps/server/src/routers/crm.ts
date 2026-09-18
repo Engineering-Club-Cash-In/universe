@@ -3241,8 +3241,7 @@ export const crmRouter = {
 			// sentencias quedaría una ventana con la oportunidad ya reabierta y
 			// todavía marcada como validada.
 			const reabreUnaPerdida =
-				currentOpportunity[0].status === "lost" &&
-				updateData.status === "open";
+				currentOpportunity[0].status === "lost" && updateData.status === "open";
 
 			let parcheRevalidacion: ReturnType<typeof parcheDeRevalidacion> | null =
 				null;
@@ -8480,8 +8479,7 @@ export const crmRouter = {
 					// Mismo agujero que en `updateLead`, con el equivalente del
 					// co-deudor: su cartera propia no es la de un lead sino la de su
 					// oportunidad (una sola). Ver `numerosSifcoDelDpiYDeLaOportunidad`.
-					const oportunidadDelCoDeudor =
-						coDebtorAntesDelUpdate?.opportunityId;
+					const oportunidadDelCoDeudor = coDebtorAntesDelUpdate?.opportunityId;
 					const gate = await evaluarGateMoraDpi(updateData.dpi, {
 						...depsGateMora,
 						numerosCreditoConocidos: (dpiConsultado) =>
@@ -8607,52 +8605,124 @@ export const crmRouter = {
 				.where(eq(coDebtors.id, input.id))
 				.limit(1);
 
-			if (coDeudorABorrar) {
-				const esAdmin = context.userRole === "admin";
-				const candado = await evaluarCandadoBorradoCoDeudor({
-					opportunityId: coDeudorABorrar.opportunityId,
-					esAdmin,
-				});
+			const esAdmin = context.userRole === "admin";
+			const candado = coDeudorABorrar
+				? await evaluarCandadoBorradoCoDeudor({
+						opportunityId: coDeudorABorrar.opportunityId,
+						esAdmin,
+					})
+				: null;
 
-				if (candado.bloqueado) {
-					throw new ORPCError("BAD_REQUEST", { message: candado.message });
-				}
-
-				// El paso del admin no es silencioso, igual que el del gate de mora:
-				// después hay que poder preguntar por qué salió ese co-deudor.
-				if (candado.overrideAdmin) {
-					auditRecord({
-						entity: "opportunity",
-						id: coDeudorABorrar.opportunityId,
-						action: "candado_dpi_override_admin",
-						data: {
-							coDebtorId: input.id,
-							detalle:
-								"un administrador eliminó al co-deudor de una solicitud que ya pasó del 30%",
-						},
-					});
-				}
+			if (candado?.bloqueado) {
+				throw new ORPCError("BAD_REQUEST", { message: candado.message });
 			}
 
-			// Eliminar el credit analysis asociado al co-deudor si existe
-			await db
-				.delete(creditAnalysis)
-				.where(eq(creditAnalysis.coDebtorId, input.id));
+			// 🔴 Todo el borrado en UNA transacción, con el candado DENTRO del WHERE.
+			//
+			// Antes el chequeo del candado vivía fuera de la escritura y la evidencia
+			// (análisis y verificación de licencia) se borraba sin transacción: una
+			// aprobación concurrente podía candar la oportunidad entre el chequeo y
+			// los deletes, y el co-deudor se iba igual — o peor, se quedaba en el
+			// expediente pero SIN su análisis ni su QR, que ya estaban borrados.
+			//
+			// Ahora el candado viaja en el WHERE del delete de `coDebtors`: Postgres
+			// re-evalúa el predicado tras esperar a la escritura rival, así que la
+			// carrera se cierra. Y cero filas por el predicado aborta la transacción:
+			// la evidencia vuelve, el expediente queda entero.
+			//
+			// ⚠️ La evidencia se borra ANTES que el co-deudor y no después, aunque la
+			// decisión sea del co-deudor: `creditAnalysis.co_debtor_id` y
+			// `licenseQrVerifications.co_debtor_id` son FK NO ACTION y NO deferidas,
+			// así que Postgres las verifica al final de CADA sentencia — borrar al
+			// padre primero revienta en el acto cuando tiene análisis. Lo que hace que
+			// el orden ya no importe es la transacción: si el predicado no deja borrar
+			// al co-deudor, el throw de adentro revierte también estos dos deletes.
+			await db.transaction(async (tx) => {
+				await tx
+					.delete(creditAnalysis)
+					.where(eq(creditAnalysis.coDebtorId, input.id));
 
-			// Mismo motivo: FK NO ACTION, sin esto el borrado de abajo revienta.
-			await db
-				.delete(licenseQrVerifications)
-				.where(eq(licenseQrVerifications.coDebtorId, input.id));
+				await tx
+					.delete(licenseQrVerifications)
+					.where(eq(licenseQrVerifications.coDebtorId, input.id));
 
-			const [deletedCoDebtor] = await db
-				.delete(coDebtors)
-				.where(eq(coDebtors.id, input.id))
-				.returning();
+				// El admin conserva su válvula: sin predicado. El costo se cobra
+				// abajo, revalidando la oportunidad.
+				const where =
+					!esAdmin && coDeudorABorrar
+						? and(
+								eq(coDebtors.id, input.id),
+								noExisteOportunidadCandantePorId(coDeudorABorrar.opportunityId),
+							)
+						: eq(coDebtors.id, input.id);
 
-			if (!deletedCoDebtor) {
+				const [deletedCoDebtor] = await tx
+					.delete(coDebtors)
+					.where(where)
+					.returning();
+
+				if (deletedCoDebtor) return;
+
+				// Cero filas con la condición puesta puede ser el candado cerrándose
+				// en el medio: se distingue del NOT_FOUND preguntando si la fila sigue
+				// ahí. Cualquiera de los dos throws revierte los deletes de arriba.
+				const [sigueVivo] = await tx
+					.select({ id: coDebtors.id })
+					.from(coDebtors)
+					.where(eq(coDebtors.id, input.id))
+					.limit(1);
+
+				if (sigueVivo && coDeudorABorrar) {
+					// Lee por fuera de la transacción a propósito: pregunta por el
+					// estado ya comprometido de la oportunidad, que es el que ganó la
+					// carrera. Solo se consultan `opportunities` y `salesStages`, que
+					// esta transacción no escribió.
+					const candadoAhora = await evaluarCandadoBorradoCoDeudor({
+						opportunityId: coDeudorABorrar.opportunityId,
+						esAdmin: false,
+					});
+
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							candadoAhora.message ??
+							"No se pudo eliminar al co-deudor: la solicitud cambió de estado mientras se procesaba. Volvé a intentarlo.",
+					});
+				}
+
 				throw new ORPCError("NOT_FOUND", {
 					message: "Co-deudor no encontrado",
 				});
+			});
+
+			// El paso del admin no es silencioso, igual que el del gate de mora:
+			// después hay que poder preguntar por qué salió ese co-deudor.
+			if (candado?.overrideAdmin && coDeudorABorrar) {
+				auditRecord({
+					entity: "opportunity",
+					id: coDeudorABorrar.opportunityId,
+					action: "candado_dpi_override_admin",
+					data: {
+						coDebtorId: input.id,
+						detalle:
+							"un administrador eliminó al co-deudor de una solicitud que ya pasó del 30%",
+					},
+				});
+
+				// 🔴 Y cuesta lo mismo que corregir el DPI: la oportunidad vuelve a
+				// análisis. Antes del override solo quedaba la bitácora y la solicitud
+				// seguía aprobada, con la evidencia de identidad producida contra un
+				// respaldo que ya no existe. Borrar al co-deudor analizado es el mismo
+				// costo que cambiarle el DPI (decisión del dueño del producto).
+				if (candado.candantes?.length) {
+					await revalidarOportunidades({
+						oportunidades: candado.candantes,
+						accion: "candado_override_revalidacion",
+						detalle:
+							"un administrador eliminó al co-deudor pese al candado; la validación de identidad de esta oportunidad se hizo con ese respaldo",
+						datosExtra: { coDebtorId: input.id },
+						anotar: auditRecord,
+					});
+				}
 			}
 
 			return { success: true, message: "Co-deudor eliminado correctamente" };

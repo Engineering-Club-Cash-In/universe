@@ -7451,25 +7451,31 @@ export const crmRouter = {
 				}
 
 				if (input.agencia) {
-					// Sin razón social capturada solo se valida que exista la empresa
-					const [empresa] = input.agencia.razonSocial
-						? await tx
-								.update(companies)
-								.set({
-									razonSocial: input.agencia.razonSocial,
-									updatedAt: new Date(),
-								})
-								.where(eq(companies.id, input.agencia.companyId))
-								.returning({ id: companies.id })
-						: await tx
-								.select({ id: companies.id })
-								.from(companies)
-								.where(eq(companies.id, input.agencia.companyId))
-								.limit(1);
+					const [empresa] = await tx
+						.select({
+							id: companies.id,
+							razonSocial: companies.razonSocial,
+						})
+						.from(companies)
+						.where(eq(companies.id, input.agencia.companyId))
+						.limit(1);
 					if (!empresa) {
 						throw new ORPCError("NOT_FOUND", {
 							message: "La empresa (agencia) no existe",
 						});
+					}
+					// La razón social aquí solo se COMPLETA. La pantalla la trae
+					// precargada, así que sobrescribirla pisaría con un valor viejo la
+					// corrección que otro haya hecho mientras tanto, y el nombre legal
+					// es compartido por todas las oportunidades de esa agencia.
+					if (input.agencia.razonSocial && !empresa.razonSocial?.trim()) {
+						await tx
+							.update(companies)
+							.set({
+								razonSocial: input.agencia.razonSocial,
+								updatedAt: new Date(),
+							})
+							.where(eq(companies.id, input.agencia.companyId));
 					}
 				}
 

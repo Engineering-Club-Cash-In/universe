@@ -174,8 +174,20 @@ function codigoClienteUtilizable(
   return /^\d+$/.test(String(codigo).trim());
 }
 
+/** Resultado de mirar las fichas que el core devolvió para un DPI. */
+export interface SeleccionFichasDpi<T> {
+  /** Las que sí se le pueden pedir préstamos al core. */
+  fichas: T[];
+  /**
+   * El DPI tenía fichas y al menos una quedó inconsultable (código ausente,
+   * vacío o no numérico). No se puede armar veredicto con lo que queda.
+   */
+  indeterminado: boolean;
+}
+
 /**
- * Las fichas de SIFCO que hay que consultar para un DPI.
+ * Las fichas de SIFCO que hay que consultar para un DPI, y si el descarte dejó
+ * el veredicto en el aire.
  *
  * 🔴 NO alcanza con la primera. Un mismo DPI puede tener más de una ficha en el
  * core —persona natural y jurídica, o duplicados que nunca se unificaron— y los
@@ -190,21 +202,45 @@ function codigoClienteUtilizable(
  * veredicto bloquearía a quien no debe. La ficha SIN `NumeroIdentificacion` se
  * conserva —el core no siempre lo devuelve— porque descartarla sería volver al
  * falso negativo que este endpoint existe para evitar.
+ *
+ * 🔴 Los dos descartes NO son lo mismo y por eso solo uno levanta
+ * `indeterminado`. La ficha de OTRA identificación no es del DPI: dejarla fuera
+ * no le quita nada al veredicto. La ficha del DPI con código basura SÍ es suya
+ * y tiene créditos que no se pudieron mirar: una ficha basura no es "no
+ * cliente", es "no pude verificar". Descartarla en silencio hacía que el
+ * resultado se viera idéntico a "el DPI no existe" —CLIENTE_NO_ENCONTRADO,
+ * `puedeContinuar: true`— con la deuda sin consultar, justo el falso negativo
+ * que el endpoint existe para evitar.
+ *
+ * Alcanza con UNA inconsultable: media lista no alcanza para firmar un "sin
+ * mora", mismo principio que el espejo a medio actualizar.
  */
-export function fichasDelDpi<T extends FichaClienteSifco>(
+export function seleccionarFichasDelDpi<T extends FichaClienteSifco>(
   clientes: T[],
   dpi: string
-): T[] {
+): SeleccionFichasDpi<T> {
   const buscado = normalizarIdentificacion(dpi);
 
-  return clientes.filter((cliente) => {
-    if (!codigoClienteUtilizable(cliente.CodigoCliente)) return false;
-
+  const delDpi = clientes.filter((cliente) => {
     const propia = (cliente.NumeroIdentificacion ?? "").trim();
     if (!propia) return true;
 
     return normalizarIdentificacion(propia) === buscado;
   });
+
+  const fichas = delDpi.filter((cliente) =>
+    codigoClienteUtilizable(cliente.CodigoCliente)
+  );
+
+  return { fichas, indeterminado: fichas.length < delDpi.length };
+}
+
+/** Solo las fichas consultables. Ver `seleccionarFichasDelDpi`. */
+export function fichasDelDpi<T extends FichaClienteSifco>(
+  clientes: T[],
+  dpi: string
+): T[] {
+  return seleccionarFichasDelDpi(clientes, dpi).fichas;
 }
 
 /**

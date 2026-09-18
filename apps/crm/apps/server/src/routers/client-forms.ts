@@ -9,6 +9,7 @@ import {
 } from "../db/schema/client-forms";
 import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
+import { verificarDpiDelFormulario } from "../lib/client-form-dpi";
 import { crmProcedure, publicProcedure } from "../lib/orpc";
 import { validarDpi } from "../utils/cui-validation";
 
@@ -443,6 +444,54 @@ async function resolveTokenParticipant(tokenRow: TokenRow): Promise<{
 	};
 }
 
+/**
+ * El DPI que el CRM ya tiene guardado para el participante del token.
+ *
+ * `null` cuando todavía no tiene ninguno: ese es el caso de captura legítima y
+ * el formulario lo puede traer. Ver `verificarDpiDelFormulario`.
+ */
+async function dpiGuardadoDelParticipante(
+	participantRef: { personType: FormPersonType; personId: string } | null,
+): Promise<string | null> {
+	if (!participantRef) return null;
+
+	if (participantRef.personType === "coDebtor") {
+		const [fila] = await db
+			.select({ dpi: coDebtors.dpi })
+			.from(coDebtors)
+			.where(eq(coDebtors.id, participantRef.personId))
+			.limit(1);
+		return fila?.dpi ?? null;
+	}
+
+	const [fila] = await db
+		.select({ dpi: leads.dpi })
+		.from(leads)
+		.where(eq(leads.id, participantRef.personId))
+		.limit(1);
+	return fila?.dpi ?? null;
+}
+
+/**
+ * Corta el submit si el DPI del formulario no es el del dueño del enlace.
+ *
+ * 🔴 Estas rutas son públicas: la única credencial es el token, que identifica
+ * a UNA persona. Sin este cruce, con un enlace vigente se podía firmar una
+ * solicitud a nombre de otro DPI —puenteando de paso el invariante del candado,
+ * que existe para que la identidad de un expediente no se mueva—.
+ */
+async function exigirDpiDelParticipante(
+	participantRef: { personType: FormPersonType; personId: string } | null,
+	datos: { dpi?: string },
+): Promise<void> {
+	const guardado = await dpiGuardadoDelParticipante(participantRef);
+	const resultado = verificarDpiDelFormulario(guardado, datos.dpi);
+
+	if (!resultado.coincide) {
+		throw new ORPCError("BAD_REQUEST", { message: resultado.mensaje });
+	}
+}
+
 async function getVehicleForOpportunity(opportunityId: string) {
 	const [opp] = await db
 		.select({ vehicleId: opportunities.vehicleId })
@@ -687,6 +736,10 @@ export const clientFormsRouter = {
 
 			const datos = normalizarDpiDelFormulario(parsed.data);
 
+			// El enlace identifica a UNA persona: el DPI que llega no puede ser el
+			// de otra. Ver `exigirDpiDelParticipante`.
+			await exigirDpiDelParticipante(participantRef, datos);
+
 			const values = {
 				opportunityId: tokenRow.opportunityId,
 				...(participantRef
@@ -818,6 +871,10 @@ export const clientFormsRouter = {
 			}
 
 			const datos = normalizarDpiDelFormulario(parsed.data);
+
+			// El enlace identifica a UNA persona: el DPI que llega no puede ser el
+			// de otra. Ver `exigirDpiDelParticipante`.
+			await exigirDpiDelParticipante(participantRef, datos);
 
 			const values = {
 				opportunityId: tokenRow.opportunityId,

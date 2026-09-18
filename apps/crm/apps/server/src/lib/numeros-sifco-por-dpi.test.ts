@@ -7,7 +7,6 @@ import {
 	exigirNumerosCompletos,
 	SONDA_DESBORDE_NUMEROS,
 	TOPE_NUMEROS_CREDITO_CONOCIDOS,
-	SONDA_DESBORDE_NUMEROS,
 	unirNumerosSifco,
 } from "./numeros-sifco-por-dpi";
 

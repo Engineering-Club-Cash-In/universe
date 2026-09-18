@@ -2,7 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import {
 	CheckCircle2,
 	Clock,
+	Copy,
 	ExternalLink,
+	Eye,
 	FileSignature,
 	FileText,
 	Loader2,
@@ -40,6 +42,8 @@ interface ContratoDeOportunidad {
 	additionalSigningLinks: string[] | null;
 	/** Cuándo se consultó por última vez a WeeTrust cómo va la firma. */
 	signingStatusCheckedAt?: Date | string | null;
+	/** Enlace de observador: ver el documento y su avance sin poder firmar. */
+	observerUrl?: string | null;
 }
 
 export interface FilaDeContrato {
@@ -172,6 +176,28 @@ function ContratoFila({
 					<Badge variant="outline" className={`${estado.className} text-xs`}>
 						{estado.label}
 					</Badge>
+					{/* El de observador es el link que importa acá: muestra el documento
+					    y cómo va la firma, y es el único que se puede abrir sin quedar
+					    firmando en nombre de alguien. */}
+					{contract.observerUrl && (
+						<Button
+							variant="outline"
+							size="sm"
+							asChild
+							className="h-7 text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
+						>
+							<a
+								href={contract.observerUrl}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="flex items-center gap-1"
+								title="Ver el documento y su avance en WeeTrust (no permite firmar)"
+							>
+								<Eye className="h-3 w-3" />
+								Seguimiento en WeeTrust
+							</a>
+						</Button>
+					)}
 					{contract.pdfLink && (
 						<Button variant="outline" size="sm" asChild className="h-7">
 							<a
@@ -221,7 +247,7 @@ function ContratoFila({
 										)}
 									</div>
 
-									<div className="flex shrink-0 items-center gap-1">
+									<div className="flex shrink-0 items-center gap-0.5">
 										<span
 											className={
 												firmante.estado === "signed"
@@ -237,22 +263,43 @@ function ContratoFila({
 													? "Link vencido"
 													: "Pendiente"}
 										</span>
+										{/* Copiar va primero: casi siempre el link se le pasa a
+										    alguien, y abrirlo desde acá te deja firmando en su
+										    nombre. */}
 										{firmante.url && firmante.estado !== "signed" && (
-											<Button
-												variant="ghost"
-												size="sm"
-												asChild
-												className="h-6 px-2"
-											>
-												<a
-													href={firmante.url}
-													target="_blank"
-													rel="noopener noreferrer"
-													title={`Abrir el enlace de ${firmante.etiqueta}`}
+											<>
+												<Button
+													variant="ghost"
+													size="sm"
+													className="ml-1 h-6 w-6 p-0"
+													title={`Copiar el enlace de ${firmante.etiqueta}`}
+													onClick={() => {
+														navigator.clipboard.writeText(
+															firmante.url as string,
+														);
+														toast.success(
+															`Enlace de ${firmante.etiqueta} copiado`,
+														);
+													}}
 												>
-													<ExternalLink className="h-3 w-3" />
-												</a>
-											</Button>
+													<Copy className="h-3 w-3" />
+												</Button>
+												<Button
+													variant="ghost"
+													size="sm"
+													asChild
+													className="h-6 w-6 p-0"
+												>
+													<a
+														href={firmante.url}
+														target="_blank"
+														rel="noopener noreferrer"
+														title={`Abrir el enlace de ${firmante.etiqueta}`}
+													>
+														<ExternalLink className="h-3 w-3" />
+													</a>
+												</Button>
+											</>
 										)}
 									</div>
 								</div>
@@ -264,11 +311,13 @@ function ContratoFila({
 						</p>
 					)}
 
-					<div className="flex flex-wrap items-center gap-2">
+					{/* Acciones discretas: se usan de vez en cuando y no tienen por qué
+					    competir con los firmantes, que es lo que se viene a mirar. */}
+					<div className="flex flex-wrap items-center gap-1">
 						<Button
-							variant="outline"
+							variant="ghost"
 							size="sm"
-							className="h-7"
+							className="h-6 px-1.5 text-muted-foreground text-xs hover:text-foreground"
 							disabled={ocupado}
 							onClick={() => actualizarEstado.mutate()}
 						>
@@ -282,9 +331,13 @@ function ContratoFila({
 
 						{firmantes.length > 0 && (
 							<Button
-								variant="outline"
+								variant="ghost"
 								size="sm"
-								className="h-7"
+								className={
+									hayVencidos
+										? "h-6 px-1.5 text-amber-600 text-xs dark:text-amber-400"
+										: "h-6 px-1.5 text-muted-foreground text-xs hover:text-foreground"
+								}
 								disabled={ocupado}
 								onClick={() => regenerarEnlaces.mutate()}
 								title="Emite enlaces nuevos para quienes aún no firman. Los anteriores dejan de servir; quien ya firmó no se toca."
@@ -294,14 +347,8 @@ function ContratoFila({
 								) : (
 									<RefreshCw className="mr-1 h-3 w-3" />
 								)}
-								Regenerar enlaces
+								{hayVencidos ? "Regenerar (hay vencidos)" : "Regenerar enlaces"}
 							</Button>
-						)}
-
-						{hayVencidos && (
-							<span className="text-amber-600 text-xs dark:text-amber-400">
-								Hay enlaces vencidos: regeneralos para que puedan firmar.
-							</span>
 						)}
 					</div>
 				</div>

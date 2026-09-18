@@ -753,6 +753,11 @@ export interface ContractGenerationResponse {
    * y para reintentar la verificación de un firmante desde el CRM.
    */
   documentID?: string;
+  /**
+   * Enlace de observador de WeeTrust: muestra el documento y cómo va la firma
+   * sin dejar firmar. Sólo existe si se mandaron observadores.
+   */
+  observerUrl?: string;
   /** Firmantes efectivamente enviados, con su rol y su link. */
   signatories?: Array<{
     role: SignerRole;

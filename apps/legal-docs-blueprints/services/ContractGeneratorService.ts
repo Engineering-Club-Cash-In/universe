@@ -864,6 +864,7 @@ export class ContractGeneratorService {
         linkDocument: string;
         r2Key?: string;
         documentID?: string;
+        observerUrl?: string;
         signatories?: Array<{
           role: SignerRole;
           email: string;
@@ -1058,6 +1059,7 @@ export class ContractGeneratorService {
         // Identificadores de WeeTrust: sin ellos no se puede consultar el estado
         // del documento ni reintentar la firma de una persona más adelante.
         documentID: signing?.documentID,
+        observerUrl: signing?.observerUrl,
         signatories: signing?.signatories,
         // Campos adicionales para backward compatibility
         contractType,
@@ -1190,6 +1192,7 @@ export class ContractGeneratorService {
         linkDocument: signing.linkDocument,
         signingProvider: 'weetrust',
         documentID: signing.documentID,
+        observerUrl: signing.observerUrl,
         signatories: signing.signatories,
         message: `Contrato ${contractType} subido y enviado a firma`,
       };

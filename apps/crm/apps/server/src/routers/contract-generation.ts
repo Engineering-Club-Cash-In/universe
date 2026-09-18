@@ -199,18 +199,21 @@ function firmaDelGenerador(apiResponse: unknown): {
 	signatories?: FirmanteEnviado[];
 	signingProvider?: string;
 	documentID?: string;
+	observerUrl?: string;
 } {
 	if (!apiResponse || typeof apiResponse !== "object") return {};
 	const r = apiResponse as {
 		signatories?: FirmanteEnviado[];
 		signingProvider?: string;
 		documentID?: string;
+		observerUrl?: string;
 	};
 	return {
 		signatories: Array.isArray(r.signatories) ? r.signatories : undefined,
 		signingProvider:
 			typeof r.signingProvider === "string" ? r.signingProvider : undefined,
 		documentID: typeof r.documentID === "string" ? r.documentID : undefined,
+		observerUrl: typeof r.observerUrl === "string" ? r.observerUrl : undefined,
 	};
 }
 
@@ -615,6 +618,7 @@ export const contractGenerationRouter = {
 								...linksPorRol(apiResult.signatories, apiResult.signingLinks),
 								signingProvider: apiResult.signingProvider ?? null,
 								weetrustDocumentId: apiResult.documentID ?? null,
+								observerUrl: apiResult.observerUrl ?? null,
 								signatureMode: getSignatureMode(contractType),
 								templateId: apiResult.templateId,
 								apiResponse: apiResult.rawResponse,
@@ -913,6 +917,7 @@ export const contractGenerationRouter = {
 							...linksPorRol(generado.signatories, contract.signingLinks),
 							signingProvider: generado.signingProvider ?? null,
 							weetrustDocumentId: generado.documentID ?? null,
+							observerUrl: generado.observerUrl ?? null,
 							signatureMode: getSignatureMode(contract.contractType),
 							templateId: contract.templateId,
 							apiResponse: contract.apiResponse,
@@ -1273,6 +1278,7 @@ export const contractGenerationRouter = {
 								),
 								signingProvider: contractResult.signingProvider ?? null,
 								weetrustDocumentId: contractResult.documentID ?? null,
+								observerUrl: contractResult.observerUrl ?? null,
 								signatureMode: getSignatureMode(originalContract.contractType),
 								templateId: contractResult.templateId,
 								apiResponse: contractResult,
@@ -1407,6 +1413,7 @@ export const contractGenerationRouter = {
 					...linksPorRol(resultado.signatories, resultado.signing_links),
 					signingProvider: resultado.signingProvider ?? null,
 					weetrustDocumentId: resultado.documentID ?? null,
+					observerUrl: resultado.observerUrl ?? null,
 					signatureMode: getSignatureMode(input.contractType),
 					apiResponse: resultado,
 					pdfLink: resultado.r2Key || resultado.linkDocument || null,
@@ -1589,6 +1596,7 @@ interface LegalDocsApiResult {
 	signatories?: FirmanteEnviado[];
 	signingProvider?: string;
 	documentID?: string;
+	observerUrl?: string;
 	pdfUrl?: string;
 	rawResponse?: unknown;
 	error?: string;

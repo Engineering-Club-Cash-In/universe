@@ -72,6 +72,18 @@ export const generatedLegalContracts = pgTable("generated_legal_contracts", {
 	 */
 	signingStatusCheckedAt: timestamp("signing_status_checked_at"),
 
+	/**
+	 * Enlace de observador de WeeTrust (`/observer/...`).
+	 *
+	 * Es el único link que se puede abrir sin riesgo: muestra el documento y cómo
+	 * va la firma, pero no deja firmar. El de cada firmante (`/signatory/...`) sí
+	 * firma en su nombre, así que no sirve para que el analista "vaya a ver".
+	 *
+	 * Sale de `sharedWith` del documento, y sólo existe si hay observadores
+	 * configurados (`CONTRATOS_OBSERVADORES`).
+	 */
+	observerUrl: text("observer_url"),
+
 	// Metadata de generación
 	templateId: integer("template_id"),
 	apiResponse: jsonb("api_response"), // Guardar response completo del API para referencia

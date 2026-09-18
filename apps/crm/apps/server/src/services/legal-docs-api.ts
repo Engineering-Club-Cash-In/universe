@@ -160,6 +160,11 @@ export interface DocumentResult {
 	 */
 	documentID?: string;
 	/**
+	 * Enlace de observador: muestra el documento y cómo va la firma sin dejar
+	 * firmar. Es el único que se le puede pasar a alguien para que mire.
+	 */
+	observerUrl?: string;
+	/**
 	 * Quiénes quedaron efectivamente enviados a firmar, con su rol y su link.
 	 * Es lo que reemplaza al reparto por posición de `signing_links`.
 	 */

@@ -53,8 +53,8 @@ function contar(fuente: string, aguja: string): number {
 }
 
 /**
- * Inventario de TODO lo que muta `leads` o `co_debtors`, con por qué cada uno
- * está o no detrás del gate.
+ * Inventario de TODO lo que ESCRIBE en `leads` o `co_debtors` —altas incluidas—,
+ * con por qué cada uno está o no detrás del gate.
  *
  * 🔴 Es un inventario y no un detector de `dpi:` por una razón que costó
  * descubrir: el DPI no se escribe con una propiedad literal. `updateLead` hace
@@ -63,20 +63,31 @@ function contar(fuente: string, aguja: string): number {
  * siempre y no protege nada. (Y buscando `dpi` en una ventana de texto alrededor
  * marcaba `liveness.ts`, que solo lo menciona en un `auditRecord`.)
  *
- * Lo que sí se puede afirmar con el texto es esto: estos ocho archivos y no
- * otros tocan esas tablas. Cuando aparezca un noveno, este test falla y obliga a
- * decidir explícitamente si ese camino nuevo mete un DPI al sistema y necesita
- * gate. Esa decisión consciente es la protección.
+ * Lo que sí se puede afirmar con el texto es esto: estos archivos y no otros
+ * tocan esas tablas. Cuando aparezca uno nuevo, este test falla y obliga a
+ * decidir explícitamente si ese camino mete un DPI al sistema y necesita gate.
+ * Esa decisión consciente es la protección.
+ *
+ * 🔴 El escaneo mira `insert(` además de `update(`. Mirando solo el update, un
+ * `insert(leads)` nuevo entraba sin inventariar — y el alta es justo la
+ * operación que el gate existe para vigilar: es donde un DPI aparece por primera
+ * vez. Que `crm.ts` y `portal-lead.ts` ya estuvieran en la lista por sus updates
+ * escondía el hueco, porque los archivos que faltaban eran otros.
  */
-const MUTAN_LEADS_O_CODEUDORES: Record<string, string> = {
+const ESCRIBEN_LEADS_O_CODEUDORES: Record<string, string> = {
 	"routers/crm.ts":
-		"updateLead escribe el DPI vía `...updateData` — GATEADO (4 llamadas)",
+		"createLead, updateLead y el alta/edición del co-deudor escriben dpi (updateLead vía `...updateData`) — GATEADO (4 llamadas)",
 	"controllers/portal-lead.ts":
-		"el portal actualiza el lead — GATEADO (2 llamadas)",
+		"el portal da de alta y actualiza el lead con dpi — GATEADO (2 llamadas)",
 	"controllers/public-lead.ts":
-		"ruta anónima sin gate a propósito; sus `.set()` son campaign/email/source/assignedTo, nunca dpi",
+		"ruta anónima SIN GATE a propósito: su `insert(leads)` sí escribe dpi, pero consultar la mora ahí la volvería un oráculo público; sus `.set()` son campaign/email/source/assignedTo, nunca dpi",
 	"controllers/bot.ts":
-		"ruta anónima sin gate a propósito; `leadUpdates` se arma campo por campo y no incluye dpi",
+		"ruta anónima SIN GATE a propósito, misma razón: su `insert(leads)` escribe dpi; `leadUpdates` se arma campo por campo y no incluye dpi",
+	"controllers/migrate-creditos.ts":
+		"MIGRACIÓN desde el sistema anterior: crea el lead con nombre/correo/teléfono y `status: 'migrate'`, sin dpi — no es un alta comercial y no pasa por el gate",
+	"routers/cobros.ts":
+		"crea el lead espejo de un crédito que YA existe en cartera (`status: 'migrate'`, sin dpi): el cliente ya está adentro, el gate no tiene a quién frenar",
+	"db/seed.ts": "semilla de desarrollo; no corre en producción",
 	"controllers/liveness.ts": "solo `livenessValidated`",
 	"routers/messaging.ts": "solo `phone`",
 	"services/contract-data-mapper.ts":
@@ -129,31 +140,34 @@ describe("cableado del gate de mora por DPI", () => {
 		}
 	});
 
-	test("🔴 ningún archivo NUEVO muta leads/coDebtors sin declarar si necesita gate", async () => {
+	test("🔴 ningún archivo NUEVO escribe leads/coDebtors sin declarar si necesita gate", async () => {
 		// El agujero que ataja: alguien agrega otro procedure que escribe el DPI de
 		// un lead, y ese DPI entra al sistema sin que su mora se haya mirado nunca.
 		// Los tests de la regla no lo notarían: pasan con o sin llamadas al gate.
+		const ESCRITURAS = [
+			"insert(leads)",
+			"insert(coDebtors)",
+			"update(leads)",
+			"update(coDebtors)",
+		];
 		const encontrados: string[] = [];
 
 		for (const absoluto of archivosTs(SRC)) {
 			const texto = await Bun.file(absoluto).text();
-			if (
-				texto.includes("update(leads)") ||
-				texto.includes("update(coDebtors)")
-			) {
+			if (ESCRITURAS.some((escritura) => texto.includes(escritura))) {
 				encontrados.push(absoluto.slice(SRC.length).replace(/^\/+/, ""));
 			}
 		}
 
-		const declarados = Object.keys(MUTAN_LEADS_O_CODEUDORES);
+		const declarados = Object.keys(ESCRIBEN_LEADS_O_CODEUDORES);
 
 		const nuevos = encontrados.filter((f) => !declarados.includes(f));
 		expect(
 			nuevos,
-			"Estos archivos mutan leads/co_debtors y no están en el inventario. " +
+			"Estos archivos escriben leads/co_debtors (alta o edición) y no están en el inventario. " +
 				"Decidí si el camino escribe un DPI: si lo escribe, tiene que llamar a " +
 				"evaluarGateMoraDpi (y sumarse a LLAMADAS_DECLARADAS); si no, agregalo a " +
-				"MUTAN_LEADS_O_CODEUDORES diciendo qué campos toca.",
+				"ESCRIBEN_LEADS_O_CODEUDORES diciendo qué campos toca.",
 		).toEqual([]);
 
 		// El inventario tampoco puede quedar con fantasmas: un archivo borrado o
@@ -162,7 +176,7 @@ describe("cableado del gate de mora por DPI", () => {
 		const fantasmas = declarados.filter((f) => !encontrados.includes(f));
 		expect(
 			fantasmas,
-			"Estos archivos están en el inventario pero ya no mutan leads/co_debtors. Sacalos.",
+			"Estos archivos están en el inventario pero ya no escriben leads/co_debtors. Sacalos.",
 		).toEqual([]);
 	});
 
@@ -175,6 +189,31 @@ describe("cableado del gate de mora por DPI", () => {
 				"gate-mora-dpi",
 			);
 		}
+	});
+
+	/**
+	 * 🔴 El preflight informativo (`validarMoraPorDpi`) tiene que contestar lo
+	 * mismo que va a contestar el gate. Desalineado es peor que ausente: decía
+	 * "seguí" al deudor que solo existe en el CRM —porque preguntaba solo por
+	 * DPI, sin los números que el gate sí manda— y anunciaba un bloqueo cuando el
+	 * kill switch estaba abajo y el gate dejaba pasar. Las dos cosas se ven en la
+	 * fuente.
+	 */
+	test("el preflight pregunta con los mismos datos que el gate", async () => {
+		const texto = await fuente("routers/crm.ts");
+
+		expect(
+			contar(texto, "numerosSifcoConocidosPorDpi"),
+			"crm.ts debería usar los números conocidos DOS veces: en depsGateMora y en el " +
+				"preflight validarMoraPorDpi. Si el preflight pregunta solo por DPI, le dice " +
+				"'podés continuar' a quien el gate va a rechazar después.",
+		).toBeGreaterThanOrEqual(2);
+
+		expect(
+			texto,
+			"validarMoraPorDpi debería respetar el kill switch: con la integración apagada " +
+				"el gate deja pasar, así que anunciar un bloqueo en el preflight sería inventarlo.",
+		).toContain("!isCarteraBackEnabled()");
 	});
 
 	test("los dos puntos cablean la palanca de emergencia", async () => {

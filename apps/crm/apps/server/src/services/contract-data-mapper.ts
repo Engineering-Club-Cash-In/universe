@@ -629,13 +629,16 @@ export async function mapOpportunityToContractData(
 				.limit(1)
 		: [];
 
-	const entidad = inversionistaPrincipal
+	// El tipo sale del nombre YA normalizado: "Cube Investments" sin sufijo se
+	// reconoce como sociedad solo después de formatearlo, y si no el contrato
+	// diría "la persona: CUBE INVESTMENTS, SOCIEDAD ANÓNIMA".
+	const nombreEntidad = inversionistaPrincipal
+		? formatEntityName(inversionistaPrincipal.nombre)
+		: null;
+	const entidad = nombreEntidad
 		? {
-				nombre: formatEntityName(inversionistaPrincipal.nombre),
-				tipo: resolveEntityType(
-					investorProfile?.clientType,
-					inversionistaPrincipal.nombre,
-				),
+				nombre: nombreEntidad,
+				tipo: resolveEntityType(investorProfile?.clientType, nombreEntidad),
 			}
 		: undefined;
 

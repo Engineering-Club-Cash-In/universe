@@ -94,7 +94,10 @@ import {
 import { investmentsRouter } from "./routers/investments";
 import { pagaloGrupoActivoRouter } from "./routers/pagalo-grupo-activo";
 import { pagaloLinkActionsRouter } from "./routers/pagalo-link-actions";
-import { pagaloSupervisionRouter } from "./routers/pagalo-supervision";
+import {
+	pagaloSupervisionRouter,
+	resolverSifcosPermitidosPagalo,
+} from "./routers/pagalo-supervision";
 import { recuperacionVehiculoRouter } from "./routers/recuperacion-vehiculo";
 import externalContractsRouter from "./routes/external-contracts";
 import { carteraBackClient } from "./services/cartera-back-client";
@@ -1250,62 +1253,230 @@ const esquemaSupervisionPagaloHttp = z.object({
 // forma de que carteraFront los vea. Servidor-a-servidor con API key: quien
 // autoriza al usuario final es cartera-back (solo ADMIN/CONTA), por eso acá
 // no hay recorte por pool — el llamador ya viene autorizado a ver todo.
+//
+// GET: uso histórico, sin sifcosPermitidos (ni cartera-back ni carteraFront
+// lo mandan). POST: el mismo cartera-back, cuando SÍ reenvía el scope que le
+// llegó del proxy de exportación del CRM — va en el body, no en la query
+// string, porque un pool puede tener cientos/miles de SIFCOs (ver el mismo
+// criterio en /api/pagalo/supervision/{excel,pdf}).
+async function handlerCarteraPagaloSupervision(
+	c: HonoContext,
+	sifcosPermitidosBody: string | undefined,
+	incluirKpisBody?: boolean,
+) {
+	const listaCsv = (valor: string | undefined) =>
+		valor
+			?.split(",")
+			.map((item) => item.trim())
+			.filter(Boolean);
+
+	const incluirKpisQuery = c.req.query("incluirKpis");
+	const parseado = esquemaSupervisionPagaloHttp.safeParse({
+		estados: listaCsv(c.req.query("estados")),
+		problemasLink: listaCsv(c.req.query("problemasLink")),
+		soloHuerfanos: c.req.query("soloHuerfanos") === "true" || undefined,
+		antiguedadMinDias: c.req.query("antiguedadMinDias")
+			? Number(c.req.query("antiguedadMinDias"))
+			: undefined,
+		numeroSifco: c.req.query("numeroSifco") || undefined,
+		fechaDesde: c.req.query("fechaDesde") || undefined,
+		fechaHasta: c.req.query("fechaHasta") || undefined,
+		sortBy: c.req.query("sortBy") ?? undefined,
+		sortDir: c.req.query("sortDir") ?? undefined,
+		// Ausente = undefined para que mande el default del esquema, en vez de
+		// que cada capa invente el suyo: cartera-back resolvía el ausente como
+		// false y acá como true, y el mismo pedido devolvía 18 grupos o 0.
+		soloProblematicos: c.req.query("soloProblematicos")
+			? c.req.query("soloProblematicos") === "true"
+			: undefined,
+		incluirKpis:
+			incluirKpisBody !== undefined
+				? incluirKpisBody
+				: incluirKpisQuery !== undefined
+					? incluirKpisQuery === "true"
+					: undefined,
+		limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
+		offset: c.req.query("offset") ? Number(c.req.query("offset")) : undefined,
+	});
+
+	if (!parseado.success) {
+		return c.json(
+			{
+				success: false,
+				error: "Parámetros inválidos",
+				detalle: parseado.error.issues,
+			},
+			400,
+		);
+	}
+
+	// Ausente = null = sin recorte (llamada server-a-server ya autorizada,
+	// caso histórico). Presente = el llamador (el propio server del CRM,
+	// resolviendo scope de un usuario con permisos acotados) ya decidió el
+	// universo exacto de SIFCOs — nunca confiar en un scope vacío como "sin
+	// recorte": una lista vacía != sin parámetro.
+	const sifcosCsv = listaCsv(sifcosPermitidosBody ?? c.req.query("sifcosPermitidos"));
+	const sifcosPermitidos =
+		(sifcosPermitidosBody ?? c.req.query("sifcosPermitidos")) !== undefined
+			? new Set(sifcosCsv ?? [])
+			: null;
+
+	try {
+		const resultado = await consultarSupervisionPagalo(parseado.data, {
+			sifcosPermitidos,
+		});
+		return c.json({ success: true, ...resultado });
+	} catch (error) {
+		console.error("[Págalo/cartera] Error consultando la bandeja:", error);
+		return c.json(
+			{ success: false, error: "Error consultando la supervisión Págalo" },
+			500,
+		);
+	}
+}
+
 app.get(
 	"/api/cartera/pagalo/supervision",
 	autenticarNotificacionesCarteraBack,
+	(c) => handlerCarteraPagaloSupervision(c, undefined),
+);
+app.post(
+	"/api/cartera/pagalo/supervision",
+	autenticarNotificacionesCarteraBack,
 	async (c) => {
-		const listaCsv = (valor: string | undefined) =>
-			valor
-				?.split(",")
-				.map((item) => item.trim())
-				.filter(Boolean);
-
-		const parseado = esquemaSupervisionPagaloHttp.safeParse({
-			estados: listaCsv(c.req.query("estados")),
-			problemasLink: listaCsv(c.req.query("problemasLink")),
-			soloHuerfanos: c.req.query("soloHuerfanos") === "true" || undefined,
-			antiguedadMinDias: c.req.query("antiguedadMinDias")
-				? Number(c.req.query("antiguedadMinDias"))
-				: undefined,
-			numeroSifco: c.req.query("numeroSifco") || undefined,
-			fechaDesde: c.req.query("fechaDesde") || undefined,
-			fechaHasta: c.req.query("fechaHasta") || undefined,
-			sortBy: c.req.query("sortBy") ?? undefined,
-			sortDir: c.req.query("sortDir") ?? undefined,
-			// Ausente = undefined para que mande el default del esquema, en vez de
-			// que cada capa invente el suyo: cartera-back resolvía el ausente como
-			// false y acá como true, y el mismo pedido devolvía 18 grupos o 0.
-			soloProblematicos: c.req.query("soloProblematicos")
-				? c.req.query("soloProblematicos") === "true"
-				: undefined,
-			limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
-			offset: c.req.query("offset") ? Number(c.req.query("offset")) : undefined,
-		});
-
-		if (!parseado.success) {
-			return c.json(
-				{
-					success: false,
-					error: "Parámetros inválidos",
-					detalle: parseado.error.issues,
-				},
-				400,
-			);
-		}
-
-		try {
-			const resultado = await consultarSupervisionPagalo(parseado.data, {
-				sifcosPermitidos: null,
-			});
-			return c.json({ success: true, ...resultado });
-		} catch (error) {
-			console.error("[Págalo/cartera] Error consultando la bandeja:", error);
-			return c.json(
-				{ success: false, error: "Error consultando la supervisión Págalo" },
-				500,
-			);
-		}
+		const body = await c.req.json().catch(() => ({}));
+		return handlerCarteraPagaloSupervision(
+			c,
+			body?.sifcosPermitidos,
+			typeof body?.incluirKpis === "boolean" ? body.incluirKpis : undefined,
+		);
 	},
+);
+
+/** Ver el comentario en el llamado a getPagaloSupervisionArchivo, abajo. */
+const TIMEOUT_EXPORT_PAGALO_MS = 330_000;
+
+/**
+ * Proxy binario: cartera-back genera el Excel/PDF de supervisión Págalo (tiene
+ * el diseño centralizado con logo y KPIs, ver pagaloSupervisionReporte.ts) y el
+ * server del CRM lo reenvía tal cual al navegador. El scope de SIFCOs se
+ * resuelve ACÁ, con la sesión Better Auth del usuario — cartera-back no conoce
+ * asesores/buckets del CRM, solo filtra por la lista de SIFCOs que se le manda.
+ */
+async function proxyPagaloSupervisionArchivo(
+	c: HonoContext,
+	formato: "excel" | "pdf",
+) {
+	const context = await createContext({ context: c });
+	if (!context.session?.user?.id) {
+		return c.json({ error: "No autorizado" }, 401);
+	}
+	const userRole = context.session.user.role;
+	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
+		return c.json(
+			{ error: "No tenés permiso para exportar la supervisión Págalo" },
+			403,
+		);
+	}
+
+	const asesorIdParam = c.req.query("asesorId");
+	const asesorIdNum = asesorIdParam ? Number(asesorIdParam) : undefined;
+	if (asesorIdParam !== undefined && !Number.isInteger(asesorIdNum)) {
+		return c.json({ error: "asesorId debe ser un entero" }, 400);
+	}
+	const asesorId = asesorIdNum;
+
+	let scope: Awaited<ReturnType<typeof resolverSifcosPermitidosPagalo>>;
+	try {
+		scope = await resolverSifcosPermitidosPagalo(
+			{ userRole, userEmail: context.session.user.email },
+			asesorId,
+		);
+	} catch (error) {
+		console.error("[Págalo export] Error resolviendo scope:", error);
+		return c.json({ error: "No se pudo resolver el alcance del reporte" }, 502);
+	}
+	if (scope.forbidden) {
+		return c.json(
+			{ error: "No tenés permiso para filtrar por otro asesor." },
+			403,
+		);
+	}
+
+	const query: Record<string, string> = {};
+	for (const campo of [
+		"estados",
+		"problemasLink",
+		"soloHuerfanos",
+		"antiguedadMinDias",
+		"numeroSifco",
+		"fechaDesde",
+		"fechaHasta",
+		"sortBy",
+		"sortDir",
+		"soloProblematicos",
+	]) {
+		const valor = c.req.query(campo);
+		if (valor !== undefined) query[campo] = valor;
+	}
+	// Va en el body de la request a cartera-back (no en esta query string): un
+	// pool de asesor puede tener cientos/miles de SIFCOs, y esta query solo
+	// sirve para los filtros acotados de arriba. Ver getPagaloSupervisionArchivo.
+	// Presente (aunque sea "") = "acotar a esta lista exacta"; ausente = sin
+	// recorte (supervisor/admin sin filtro de asesor).
+	const sifcosPermitidosBody =
+		scope.sifcosPermitidos !== null
+			? [...scope.sifcosPermitidos].join(",")
+			: undefined;
+
+	try {
+		const { carteraBackClient } = await import(
+			"./services/cartera-back-client"
+		);
+		// Este timeout cubre TODO el trabajo de cartera-back, que internamente
+		// pagina contra el CRM y recién después arma el archivo. Con el default
+		// (60s, el de una sola página) un export grande legítimo se cortaba acá
+		// con 500 aunque cartera-back siguiera dentro de sus propios límites.
+		//
+		// TIMEOUT_EXPORT_PAGALO_MS = (LIMITE_EXPORT_PAGALO / PAGE_SIZE_EXPORT_PAGALO)
+		//   × TIMEOUT_EXPORT_MS + margen de render
+		//   = (5000 / 1000) × 60s + 30s = 330s
+		//
+		// Esas tres constantes viven en cartera-back
+		// (src/controllers/pagaloSupervisionReporte.ts) y no se pueden importar
+		// desde acá (repos separados, sin paquete compartido): AL CAMBIAR
+		// CUALQUIERA DE ELLAS, recalcular este número.
+		const archivo = await carteraBackClient.getPagaloSupervisionArchivo(
+			formato,
+			query,
+			sifcosPermitidosBody,
+			TIMEOUT_EXPORT_PAGALO_MS,
+		);
+		return new Response(new Uint8Array(archivo.buffer), {
+			headers: {
+				"content-type": archivo.contentType,
+				"content-disposition": `attachment; filename="${archivo.filename}"`,
+				"x-export-truncado": String(archivo.truncado),
+				"x-export-total": String(archivo.total),
+				"x-export-cantidad": String(archivo.cantidad),
+				"access-control-expose-headers":
+					"content-disposition, x-export-truncado, x-export-total, x-export-cantidad",
+			},
+		});
+	} catch (error) {
+		console.error(`[Págalo export] Error generando ${formato}:`, error);
+		return c.json(
+			{ error: "No se pudo generar el reporte de supervisión Págalo" },
+			500,
+		);
+	}
+}
+
+app.get("/api/pagalo/supervision/excel", (c) =>
+	proxyPagaloSupervisionArchivo(c, "excel"),
+);
+app.get("/api/pagalo/supervision/pdf", (c) =>
+	proxyPagaloSupervisionArchivo(c, "pdf"),
 );
 
 // Bot de WhatsApp de cobros (SimpleTech).

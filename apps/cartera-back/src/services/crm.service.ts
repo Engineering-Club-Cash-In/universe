@@ -342,11 +342,15 @@ export interface PagaloSupervisionParams {
   numeroSifco?: string;
   fechaDesde?: string;
   fechaHasta?: string;
-  sortBy?: "totalAmount" | "createdAt";
+  sortBy?: "totalAmount" | "createdAt" | "linksAmountCapital" | "linksAmountMora";
   sortDir?: "asc" | "desc";
   soloProblematicos?: boolean;
   limit?: number;
   offset?: number;
+  /** CSV de SIFCOs. Ausente = sin recorte; presente (aunque sea "") = acotar
+   * exactamente a esta lista. Ver el mismo criterio en el HTTP del CRM. */
+  sifcosPermitidos?: string;
+  incluirKpis?: boolean;
 }
 
 export interface PagaloLinkResumen {
@@ -386,11 +390,21 @@ export interface PagaloGrupoSupervision {
   links: PagaloLinkResumen[];
 }
 
+export interface PagaloResumenKpis {
+  grupos: number;
+  capitalTotal: string;
+  facturableTotal: string;
+  totalAmount: string;
+  linksTotal: number;
+  linksPagados: number;
+}
+
 export interface PagaloSupervisionResponse {
   success: boolean;
   grupos: PagaloGrupoSupervision[];
   total: number;
   conteoPorEstado: Record<string, number>;
+  resumenKpis?: PagaloResumenKpis;
 }
 
 /**
@@ -414,13 +428,26 @@ export async function getPagaloSupervision(
     throw new Error("CARTERA_BACK_API_KEY no está configurada");
   }
 
-  const { data } = await crmApi.get("/api/cartera/pagalo/supervision", {
-    params,
-    headers: {
-      Authorization: `Bearer ${process.env.CARTERA_BACK_API_KEY}`,
-    },
-    ...(timeoutMs ? { timeout: timeoutMs } : {}),
-  });
+  const headers = { Authorization: `Bearer ${process.env.CARTERA_BACK_API_KEY}` };
+  const timeout = timeoutMs ? { timeout: timeoutMs } : {};
+  const { sifcosPermitidos, ...paramsQuery } = params;
+
+  // sifcosPermitidos puede ser el pool completo de un asesor (cientos/miles
+  // de SIFCOs): va en el body de un POST, no en la query string de un GET,
+  // para no arriesgar el límite de longitud de URL de proxies intermedios
+  // (mismo criterio que el salto anterior, CRM server -> cartera-back).
+  const { data } =
+    sifcosPermitidos !== undefined
+      ? await crmApi.post(
+          "/api/cartera/pagalo/supervision",
+          { sifcosPermitidos },
+          { params: paramsQuery, headers, ...timeout },
+        )
+      : await crmApi.get("/api/cartera/pagalo/supervision", {
+          params: paramsQuery,
+          headers,
+          ...timeout,
+        });
 
   return data;
 }

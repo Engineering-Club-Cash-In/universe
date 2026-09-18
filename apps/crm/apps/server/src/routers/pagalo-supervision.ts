@@ -50,6 +50,86 @@ async function resolverScopeAsesorPagalo(asesor: AsesorPoolPagalo | null) {
 	};
 }
 
+export interface DatosAsesorSeleccionado {
+	asesorId: number;
+	nombre: string;
+}
+
+export interface ResultadoScopePagalo {
+	sifcosPermitidos: Set<string> | null;
+	forbidden: boolean;
+	bucketsAsignados: number[] | null;
+	asesorSeleccionado: DatosAsesorSeleccionado | null;
+}
+
+/**
+ * Mismo cálculo de scope que usa el handler ORPC de abajo, extraído para que
+ * la ruta HTTP de exportación (/api/pagalo/supervision/{excel,pdf} en
+ * index.ts) resuelva el mismo universo de SIFCOs antes de pedirle el reporte
+ * a cartera-back — sin este paso, un usuario con scope acotado (rol cobros)
+ * podría exportar TODA la cartera, no solo lo que ve en pantalla.
+ *
+ * Devuelve también bucketsAsignados y asesorSeleccionado para que el handler
+ * ORPC reutilice la misma llamada a cartera-back en vez de pedir el pool dos
+ * veces consecutivas en cada refresco.
+ */
+export async function resolverSifcosPermitidosPagalo(
+	contexto: {
+		userRole: string | undefined;
+		userEmail: string | null | undefined;
+	},
+	asesorId?: number,
+): Promise<ResultadoScopePagalo> {
+	const puedeVerTodo = PERMISSIONS.canAssignCobros(contexto.userRole ?? "");
+	if (asesorId && !puedeVerTodo) {
+		return {
+			sifcosPermitidos: null,
+			forbidden: true,
+			bucketsAsignados: null,
+			asesorSeleccionado: null,
+		};
+	}
+
+	const necesitaScope = !puedeVerTodo || asesorId !== undefined;
+	if (!necesitaScope) {
+		return {
+			sifcosPermitidos: null,
+			forbidden: false,
+			bucketsAsignados: null,
+			asesorSeleccionado: null,
+		};
+	}
+
+	const asesores = await carteraBackClient.getPoolPorAsesor({ useCache: false });
+	const asesorSeleccionado = asesorId
+		? buscarAsesorPorId(asesores, asesorId)
+		: null;
+	const asesorPropio = puedeVerTodo
+		? null
+		: buscarAsesorPorEmail(asesores, contexto.userEmail);
+	const scopeAsesor = asesorId
+		? await resolverScopeAsesorPagalo(asesorSeleccionado)
+		: await resolverScopeAsesorPagalo(asesorPropio);
+
+	const bucketsAsignados = asesorId
+		? (asesorSeleccionado?.buckets ?? [])
+		: (asesorPropio?.buckets ?? []);
+
+	const datosAsesorSeleccionado = asesorSeleccionado
+		? {
+				asesorId: asesorSeleccionado.asesor_id,
+				nombre: asesorSeleccionado.nombre,
+			}
+		: null;
+
+	return {
+		sifcosPermitidos: scopeAsesor.sifcosPermitidos,
+		forbidden: false,
+		bucketsAsignados,
+		asesorSeleccionado: datosAsesorSeleccionado,
+	};
+}
+
 export const pagaloSupervisionRouter = {
 	// Catálogo para selector Págalo: solo asesores con por lo menos un bucket
 	// activo. El selector no usa getAsesores porque su email/activo no expresa
@@ -86,56 +166,39 @@ export const pagaloSupervisionRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const puedeVerTodo = PERMISSIONS.canAssignCobros(context.userRole ?? "");
-			if (input.asesorId && !puedeVerTodo) {
+			const {
+				sifcosPermitidos,
+				forbidden,
+				bucketsAsignados,
+				asesorSeleccionado,
+			} = await resolverSifcosPermitidosPagalo(
+				{
+					userRole: context.userRole,
+					userEmail: context.session?.user?.email,
+				},
+				input.asesorId,
+			);
+			if (forbidden) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tenés permiso para filtrar por otro asesor.",
 				});
 			}
-
-			const necesitaScope = !puedeVerTodo || input.asesorId !== undefined;
-			let asesores: AsesorPoolPagalo[] = [];
-			try {
-				asesores = await carteraBackClient.getPoolPorAsesor({
-					useCache: false,
-				});
-			} catch (error) {
-				// Para admin/supervisor sin filtro, el pool solo alimenta columna
-				// Asesor: Págalo sigue usable si cartera-back está degradado. Para
-				// scope propio o filtro elegido, fallar cerrado conserva autorización.
-				if (necesitaScope) throw error;
-				console.error(
-					"[Págalo] No se pudo resolver catálogo de pools:",
-					error instanceof Error ? error.message : error,
-				);
-			}
-			const asesorSeleccionado = input.asesorId
-				? buscarAsesorPorId(asesores, input.asesorId)
-				: null;
-			const asesorPropio = puedeVerTodo
-				? null
-				: buscarAsesorPorEmail(asesores, context.session?.user?.email);
-			const scopeAsesor = input.asesorId
-				? await resolverScopeAsesorPagalo(asesorSeleccionado)
-				: puedeVerTodo
-					? null
-					: await resolverScopeAsesorPagalo(asesorPropio);
-			const bucketsAsignados = scopeAsesor?.bucketsAsignados ?? null;
-			const sifcosPermitidos = scopeAsesor?.sifcosPermitidos ?? null;
-			const datosAsesorSeleccionado = asesorSeleccionado
-				? {
-						asesorId: asesorSeleccionado.asesor_id,
-						nombre: asesorSeleccionado.nombre,
-					}
-				: null;
 
 			if (sifcosPermitidos?.size === 0) {
 				return {
 					grupos: [],
 					total: 0,
 					conteoPorEstado: {},
+					resumenKpis: {
+						grupos: 0,
+						capitalTotal: "0",
+						facturableTotal: "0",
+						totalAmount: "0",
+						linksTotal: 0,
+						linksPagados: 0,
+					},
 					bucketsAsignados,
-					asesorSeleccionado: datosAsesorSeleccionado,
+					asesorSeleccionado,
 				};
 			}
 
@@ -146,7 +209,7 @@ export const pagaloSupervisionRouter = {
 			return {
 				...resultado,
 				bucketsAsignados,
-				asesorSeleccionado: datosAsesorSeleccionado,
+				asesorSeleccionado,
 			};
 		}),
 };

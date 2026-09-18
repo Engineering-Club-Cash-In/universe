@@ -51,8 +51,11 @@ function validarFiltros(query: Record<string, string>): string | null {
   if (query.fechaDesde && query.fechaHasta && query.fechaDesde > query.fechaHasta) {
     return "fechaDesde debe ser menor o igual a fechaHasta";
   }
-  if (query.sortBy && !["totalAmount", "createdAt"].includes(query.sortBy)) {
-    return "sortBy inválido. Valores: totalAmount, createdAt";
+  if (
+    query.sortBy &&
+    !["totalAmount", "createdAt", "linksAmountCapital", "linksAmountMora"].includes(query.sortBy)
+  ) {
+    return "sortBy inválido. Valores: totalAmount, createdAt, linksAmountCapital, linksAmountMora";
   }
   if (query.sortDir && !["asc", "desc"].includes(query.sortDir)) {
     return "sortDir inválido. Valores: asc, desc";
@@ -92,12 +95,125 @@ function armarFiltros(query: Record<string, string>): PagaloSupervisionParams {
     numeroSifco: query.numeroSifco || undefined,
     fechaDesde: query.fechaDesde || undefined,
     fechaHasta: query.fechaHasta || undefined,
-    sortBy: (query.sortBy as "totalAmount" | "createdAt") || undefined,
+    sortBy:
+      (query.sortBy as "totalAmount" | "createdAt" | "linksAmountCapital" | "linksAmountMora") ||
+      undefined,
     sortDir: (query.sortDir as "asc" | "desc") || undefined,
     // Sin chips de estado activos la bandeja muestra todo; el front manda
     // soloProblematicos=true solo cuando el usuario acotó por estado.
     soloProblematicos: query.soloProblematicos === "true",
+    // Ausente (undefined) = sin recorte; presente (aunque "") = acotar exacto.
+    // No usar `|| undefined`: convertiría un scope vacío legítimo en "sin scope".
+    sifcosPermitidos: query.sifcosPermitidos,
   };
+}
+
+/**
+ * `sifcosPermitidos` es potencialmente una lista de cientos/miles de SIFCOs
+ * (el pool completo de un asesor): va en el BODY, no en la query string, para
+ * no arriesgar el límite de longitud de URL de proxies/servidores intermedios
+ * (8KB típico) en pools grandes. El resto de filtros (fechas, estados, orden)
+ * son acotados y siguen viajando por query en ambos verbos.
+ */
+async function armarFiltrosConScope(
+  q: Record<string, string>,
+  body: { sifcosPermitidos?: string } | null,
+): Promise<PagaloSupervisionParams> {
+  return {
+    ...armarFiltros(q),
+    sifcosPermitidos: body?.sifcosPermitidos ?? q.sifcosPermitidos,
+  };
+}
+
+async function excelHandler({
+  query,
+  body,
+  set,
+  user,
+}: {
+  query: Record<string, string>;
+  body: { sifcosPermitidos?: string } | null;
+  set: { status?: number };
+  user: { role?: string } | undefined;
+}) {
+  if (!puedeVerSupervisionPagalo(user)) {
+    set.status = 403;
+    return { error: "No autorizado" };
+  }
+
+  const errorFiltro = validarFiltros(query);
+  if (errorFiltro) {
+    set.status = 400;
+    return { error: errorFiltro };
+  }
+
+  try {
+    const filtros = await armarFiltrosConScope(query, body);
+    const { filas, total, truncado, resumenKpis } = await traerDatasetCompletoPagalo(filtros);
+    const buf = await buildPagaloSupervisionWorkbook(filas, resumenKpis);
+    return new Response(new Uint8Array(buf), {
+      headers: {
+        "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "content-disposition": `attachment; filename="${nombreArchivoExport("xlsx", truncado)}"`,
+        // El archivo viaja como blob, así que la señal de "esto salió
+        // incompleto" no cabe en el cuerpo: va por header para que el front
+        // pueda avisarle al usuario que acote el rango.
+        "x-export-truncado": String(truncado),
+        "x-export-total": String(total),
+        "x-export-cantidad": String(filas.length),
+        "access-control-expose-headers":
+          "content-disposition, x-export-truncado, x-export-total, x-export-cantidad",
+      },
+    });
+  } catch (error) {
+    console.error("[/pagalo/supervision/excel]", error);
+    set.status = 500;
+    return { error: "Error generando el reporte de supervisión Págalo" };
+  }
+}
+
+async function pdfHandler({
+  query,
+  body,
+  set,
+  user,
+}: {
+  query: Record<string, string>;
+  body: { sifcosPermitidos?: string } | null;
+  set: { status?: number };
+  user: { role?: string } | undefined;
+}) {
+  if (!puedeVerSupervisionPagalo(user)) {
+    set.status = 403;
+    return { error: "No autorizado" };
+  }
+
+  const errorFiltro = validarFiltros(query);
+  if (errorFiltro) {
+    set.status = 400;
+    return { error: errorFiltro };
+  }
+
+  try {
+    const filtros = await armarFiltrosConScope(query, body);
+    const { filas, total, truncado, resumenKpis } = await traerDatasetCompletoPagalo(filtros);
+    const buf = await buildPagaloSupervisionPDF(filas, { total, truncado, resumenKpis });
+    return new Response(new Uint8Array(buf), {
+      headers: {
+        "content-type": "application/pdf",
+        "content-disposition": `attachment; filename="${nombreArchivoExport("pdf", truncado)}"`,
+        "x-export-truncado": String(truncado),
+        "x-export-total": String(total),
+        "x-export-cantidad": String(filas.length),
+        "access-control-expose-headers":
+          "content-disposition, x-export-truncado, x-export-total, x-export-cantidad",
+      },
+    });
+  } catch (error) {
+    console.error("[/pagalo/supervision/pdf]", error);
+    set.status = 500;
+    return { error: "Error generando el reporte de supervisión Págalo" };
+  }
 }
 
 export const pagaloSupervisionRouter = new Elysia().use(authMiddleware)
@@ -128,73 +244,29 @@ export const pagaloSupervisionRouter = new Elysia().use(authMiddleware)
     }
   })
 
-  .get("/pagalo/supervision/excel", async ({ query, set, user }) => {
-    if (!puedeVerSupervisionPagalo(user)) {
-      set.status = 403;
-      return { error: "No autorizado" };
-    }
+  // GET: usado por carteraFront (sin scope de SIFCOs, mismo comportamiento de
+  // siempre). POST: usado por el server del CRM, que manda sifcosPermitidos
+  // (potencialmente largo) en el body en vez de la query string.
+  .get("/pagalo/supervision/excel", ({ query, set, user }) =>
+    excelHandler({ query: query as Record<string, string>, body: null, set, user }),
+  )
+  .post("/pagalo/supervision/excel", ({ query, body, set, user }) =>
+    excelHandler({
+      query: query as Record<string, string>,
+      body: body as { sifcosPermitidos?: string } | null,
+      set,
+      user,
+    }),
+  )
 
-    const q = query as Record<string, string>;
-    const errorFiltro = validarFiltros(q);
-    if (errorFiltro) {
-      set.status = 400;
-      return { error: errorFiltro };
-    }
-
-    try {
-      const { filas, total, truncado } = await traerDatasetCompletoPagalo(armarFiltros(q));
-      const buf = await buildPagaloSupervisionWorkbook(filas);
-      return new Response(new Uint8Array(buf), {
-        headers: {
-          "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "content-disposition": `attachment; filename="${nombreArchivoExport("xlsx", truncado)}"`,
-          // El archivo viaja como blob, así que la señal de "esto salió
-          // incompleto" no cabe en el cuerpo: va por header para que el front
-          // pueda avisarle al usuario que acote el rango.
-          "x-export-truncado": String(truncado),
-          "x-export-total": String(total),
-          "x-export-cantidad": String(filas.length),
-          "access-control-expose-headers":
-            "x-export-truncado, x-export-total, x-export-cantidad",
-        },
-      });
-    } catch (error) {
-      console.error("[/pagalo/supervision/excel]", error);
-      set.status = 500;
-      return { error: "Error generando el reporte de supervisión Págalo" };
-    }
-  })
-
-  .get("/pagalo/supervision/pdf", async ({ query, set, user }) => {
-    if (!puedeVerSupervisionPagalo(user)) {
-      set.status = 403;
-      return { error: "No autorizado" };
-    }
-
-    const q = query as Record<string, string>;
-    const errorFiltro = validarFiltros(q);
-    if (errorFiltro) {
-      set.status = 400;
-      return { error: errorFiltro };
-    }
-
-    try {
-      const { filas, total, truncado } = await traerDatasetCompletoPagalo(armarFiltros(q));
-      const buf = await buildPagaloSupervisionPDF(filas, { total, truncado });
-      return new Response(new Uint8Array(buf), {
-        headers: {
-          "content-type": "application/pdf",
-          "content-disposition": `attachment; filename="${nombreArchivoExport("pdf", truncado)}"`,
-          "x-export-truncado": String(truncado),
-          "x-export-total": String(total),
-          "x-export-cantidad": String(filas.length),
-          "access-control-expose-headers":
-            "x-export-truncado, x-export-total, x-export-cantidad",
-        },
-      });
-    } catch (error) {
-      console.error("[/pagalo/supervision/pdf]", error);
-      set.status = 500;
-      return { error: "Error generando el reporte de supervisión Págalo" };
-    }
-  });
+  .get("/pagalo/supervision/pdf", ({ query, set, user }) =>
+    pdfHandler({ query: query as Record<string, string>, body: null, set, user }),
+  )
+  .post("/pagalo/supervision/pdf", ({ query, body, set, user }) =>
+    pdfHandler({
+      query: query as Record<string, string>,
+      body: body as { sifcosPermitidos?: string } | null,
+      set,
+      user,
+    }),
+  );

@@ -18,6 +18,7 @@ import {
   fichasDelDpi,
   fusionarCreditosPorId,
   nombreClienteSifco,
+  normalizarIdentificacion,
   respuestaClienteNoEncontrado,
   respuestaServicioNoDisponible,
   siguientePasoConsulta,
@@ -49,7 +50,12 @@ export async function consultarMoraPorDpi(
   const consultadoEn = new Date();
 
   try {
-    const dpiLimpio = dpi.trim();
+    // Normalizado a dígitos, no solo trim: los DPI viajan con espacios y
+    // guiones internos, y el core busca por igualdad. Un DPI formateado de un
+    // moroso volvía como "sin ficha" → CLIENTE_NO_ENCONTRADO → pasaba.
+    // Normalizar solo las fichas de la respuesta no rescata una búsqueda que
+    // ya volvió vacía.
+    const dpiLimpio = normalizarIdentificacion(dpi);
     const clientes = await buscarClientesPorIdentificacion(dpiLimpio);
 
     // TODAS las fichas del DPI, no la primera: un mismo DPI puede tener varias

@@ -91,6 +91,7 @@ import {
 	getWonOpportunityLockError,
 	getWonOpportunityRevokeError,
 	stripUnchangedFrozenFields,
+	type WonOpportunityFrozenField,
 } from "../lib/opportunity-stage-guard";
 import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
@@ -735,8 +736,20 @@ export const crmRouter = {
 			// después de esperar a la escritura rival. Si closeOpportunity la marca
 			// ganada, o un supervisor se la reasigna a otro asesor, el cambio ya no
 			// entra.
+			// La condición se exige por cualquier parte enviada, no solo por las que
+			// se veían distintas: si otro cambió el vendedor y cerró la oportunidad
+			// entre la lectura y esta escritura, mandar "el mismo valor" que se leyó
+			// la restauraría sobre una oportunidad ya ganada.
+			const camposEnviados: WonOpportunityFrozenField[] = [
+				...(input.vendorId !== undefined
+					? (["vendorId"] as const)
+					: ([] as const)),
+				...(input.companyId !== undefined
+					? (["companyId"] as const)
+					: ([] as const)),
+			];
 			const exigirNoGanada =
-				cambiosCongelados.length > 0 &&
+				camposEnviados.length > 0 &&
 				!PERMISSIONS.canAccessAdmin(context.userRole ?? "");
 			const soloPorSerElAsesor = !PERMISSIONS.canAccessAnalysis(
 				context.userRole,
@@ -778,7 +791,9 @@ export const crmRouter = {
 					});
 				}
 				throw new ORPCError("FORBIDDEN", {
-					message: buildWonOpportunityFrozenFieldError(cambiosCongelados),
+					message: buildWonOpportunityFrozenFieldError(
+						cambiosCongelados.length > 0 ? cambiosCongelados : camposEnviados,
+					),
 				});
 			}
 			// El meta solo cubre los fallos: la escritura buena se anota aquí, que

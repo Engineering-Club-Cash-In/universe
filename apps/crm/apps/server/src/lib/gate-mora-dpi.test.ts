@@ -11,6 +11,7 @@ import {
 	MENSAJE_DPI_EN_BLANCO,
 	MENSAJE_GATE_APAGADO,
 	mensajeRechazoGateMora,
+	type ResolucionEdicionConMora,
 	requiereConsultaDeMora,
 	resolverEdicionConMora,
 } from "./gate-mora-dpi";
@@ -607,40 +608,30 @@ describe("gate de mora: corrección de un DPI mal capturado (solo ediciones)", (
 		mensaje: mensajeRechazoGateMora("MORA_ACTIVA"),
 	};
 
-	function bitacora() {
-		const anotaciones: AuditEntry[] = [];
-		return {
-			anotaciones,
-			anotar: (entrada: AuditEntry) => {
-				anotaciones.push(entrada);
-			},
-		};
-	}
+	/** La fila que el llamador va a anotar, o null si no hay override. */
+	const pendiente = (
+		resolucion: ResolucionEdicionConMora,
+	): AuditEntry | null =>
+		resolucion.permitir ? resolucion.anotacionPendiente : null;
 
 	test("un asesor de ventas sigue bloqueado", () => {
-		const { anotaciones, anotar } = bitacora();
-
-		const resolucion = resolverEdicionConMora(
-			RECHAZO,
-			"sales",
-			{ entity: "lead", id: "lead-1", dpi: DPI },
-			anotar,
-		);
+		const resolucion = resolverEdicionConMora(RECHAZO, "sales", {
+			entity: "lead",
+			id: "lead-1",
+			dpi: DPI,
+		});
 
 		expect(resolucion.permitir).toBe(false);
 		// Bloqueado no deja rastro de override: no hubo ninguno.
-		expect(anotaciones).toEqual([]);
+		expect(pendiente(resolucion)).toBeNull();
 	});
 
 	test("el mensaje del bloqueado le dice a dónde ir: a un administrador", () => {
-		const { anotar } = bitacora();
-
-		const resolucion = resolverEdicionConMora(
-			RECHAZO,
-			"sales",
-			{ entity: "lead", id: "lead-1", dpi: DPI },
-			anotar,
-		);
+		const resolucion = resolverEdicionConMora(RECHAZO, "sales", {
+			entity: "lead",
+			id: "lead-1",
+			dpi: DPI,
+		});
 
 		expect(resolucion.permitir).toBe(false);
 		if (resolucion.permitir) return;
@@ -656,85 +647,80 @@ describe("gate de mora: corrección de un DPI mal capturado (solo ediciones)", (
 		// lead de cualquiera. Saltarse el gate de mora es otra cosa: es exactamente
 		// el favor que un asesor con presión de cuota le pediría a su supervisor.
 		for (const rol of ["sales_supervisor", "analyst", "juridico"]) {
-			const { anotaciones, anotar } = bitacora();
-
-			const resolucion = resolverEdicionConMora(
-				RECHAZO,
-				rol,
-				{ entity: "lead", id: "lead-1", dpi: DPI },
-				anotar,
-			);
+			const resolucion = resolverEdicionConMora(RECHAZO, rol, {
+				entity: "lead",
+				id: "lead-1",
+				dpi: DPI,
+			});
 
 			expect(resolucion.permitir, `${rol} no debería poder`).toBe(false);
-			expect(anotaciones).toEqual([]);
+			expect(pendiente(resolucion)).toBeNull();
 		}
 	});
 
 	test("un administrador sí puede corregir, y deja rastro con el motivo del gate", () => {
-		const { anotaciones, anotar } = bitacora();
-
-		const resolucion = resolverEdicionConMora(
-			RECHAZO,
-			"admin",
-			{ entity: "lead", id: "lead-1", dpi: DPI },
-			anotar,
-		);
+		const resolucion = resolverEdicionConMora(RECHAZO, "admin", {
+			entity: "lead",
+			id: "lead-1",
+			dpi: DPI,
+		});
 
 		expect(resolucion.permitir).toBe(true);
-		expect(anotaciones).toHaveLength(1);
-		expect(anotaciones[0]?.action).toBe("validar_mora_dpi_override_admin");
-		expect(anotaciones[0]?.id).toBe("lead-1");
+		const fila = pendiente(resolucion);
+		expect(fila?.action).toBe("validar_mora_dpi_override_admin");
+		expect(fila?.id).toBe("lead-1");
 		// Sin el motivo, la fila diría que alguien pasó pero no por encima de qué.
-		expect(anotaciones[0]?.data).toMatchObject({
-			dpi: DPI,
-			motivo: "MORA_ACTIVA",
-		});
+		expect(fila?.data).toMatchObject({ dpi: DPI, motivo: "MORA_ACTIVA" });
+	});
+
+	/**
+	 * 🔴 La fila es una INTENCIÓN y la escribe el llamador después de confirmar
+	 * el UPDATE. Anotándola acá —antes del UPDATE— un lead inexistente o
+	 * cualquier fallo posterior dejaba en la bitácora un override `ok: true` que
+	 * nunca ocurrió: el DPI seguía siendo el viejo y la revisión leía que un
+	 * administrador había forzado un cambio inexistente. Justo al revés de para
+	 * qué existe esa fila.
+	 *
+	 * La función ya no recibe con qué anotar, así que no PUEDE escribir; esto fija
+	 * esa forma para que nadie se la devuelva sin darse cuenta.
+	 */
+	test("🔴 la resolución no escribe la bitácora: la devuelve para después", () => {
+		expect(resolverEdicionConMora).toHaveLength(3);
 	});
 
 	test("el co-deudor viaja en el detalle porque la bitácora no conoce esa entidad", () => {
-		const { anotaciones, anotar } = bitacora();
+		const resolucion = resolverEdicionConMora(RECHAZO, "admin", {
+			entity: "lead",
+			id: null,
+			dpi: DPI,
+			datosExtra: { coDebtorId: "codeudor-9" },
+		});
 
-		resolverEdicionConMora(
-			RECHAZO,
-			"admin",
-			{
-				entity: "lead",
-				id: null,
-				dpi: DPI,
-				datosExtra: { coDebtorId: "codeudor-9" },
-			},
-			anotar,
-		);
-
-		expect(anotaciones[0]?.id).toBeNull();
-		expect(anotaciones[0]?.data).toMatchObject({ coDebtorId: "codeudor-9" });
+		expect(pendiente(resolucion)?.id).toBeNull();
+		expect(pendiente(resolucion)?.data).toMatchObject({
+			coDebtorId: "codeudor-9",
+		});
 	});
 
 	test("si el gate no rechazó, no se anota override de nadie", () => {
-		const { anotaciones, anotar } = bitacora();
-
 		const resolucion = resolverEdicionConMora(
 			{ rechazado: false, motivo: "SIN_MORA", mensaje: "" },
 			"admin",
 			{ entity: "lead", id: "lead-1", dpi: DPI },
-			anotar,
 		);
 
 		expect(resolucion.permitir).toBe(true);
-		expect(anotaciones).toEqual([]);
+		expect(pendiente(resolucion)).toBeNull();
 	});
 
 	test("un rol ausente no abre la válvula", () => {
-		const { anotar } = bitacora();
-
 		for (const rol of [undefined, null, ""]) {
 			expect(
-				resolverEdicionConMora(
-					RECHAZO,
-					rol,
-					{ entity: "lead", id: "lead-1", dpi: DPI },
-					anotar,
-				).permitir,
+				resolverEdicionConMora(RECHAZO, rol, {
+					entity: "lead",
+					id: "lead-1",
+					dpi: DPI,
+				}).permitir,
 			).toBe(false);
 		}
 	});
@@ -747,28 +733,24 @@ describe("gate de mora: corrección de un DPI mal capturado (solo ediciones)", (
 	 * kill switch, que lo baja alguien a propósito y deja su propia fila.
 	 */
 	test("con cartera caída el administrador queda bloqueado como todos", () => {
-		const { anotaciones, anotar } = bitacora();
 		const caida = {
 			rechazado: true as const,
 			motivo: "SERVICIO_NO_DISPONIBLE" as const,
 			mensaje: mensajeRechazoGateMora("SERVICIO_NO_DISPONIBLE"),
 		};
 
-		const resolucion = resolverEdicionConMora(
-			caida,
-			"admin",
-			{ entity: "lead", id: "lead-1", dpi: DPI },
-			anotar,
-		);
+		const resolucion = resolverEdicionConMora(caida, "admin", {
+			entity: "lead",
+			id: "lead-1",
+			dpi: DPI,
+		});
 
 		expect(resolucion.permitir).toBe(false);
 		// Y no hay override que anotar: nadie pasó.
-		expect(anotaciones).toEqual([]);
+		expect(pendiente(resolucion)).toBeNull();
 	});
 
 	test("al admin bloqueado por la caída se le habla de la caída, no de buscar un admin", () => {
-		const { anotar } = bitacora();
-
 		const resolucion = resolverEdicionConMora(
 			{
 				rechazado: true,
@@ -777,7 +759,6 @@ describe("gate de mora: corrección de un DPI mal capturado (solo ediciones)", (
 			},
 			"admin",
 			{ entity: "lead", id: "lead-1", dpi: DPI },
-			anotar,
 		);
 
 		expect(resolucion.permitir).toBe(false);
@@ -792,20 +773,16 @@ describe("gate de mora: corrección de un DPI mal capturado (solo ediciones)", (
 
 	test("los otros dos motivos de negocio sí abren la válvula del admin", () => {
 		for (const motivo of ["EN_CONVENIO", "CREDITO_INSOLUTO"] as const) {
-			const { anotaciones, anotar } = bitacora();
-
 			const resolucion = resolverEdicionConMora(
 				{ rechazado: true, motivo, mensaje: mensajeRechazoGateMora(motivo) },
 				"admin",
 				{ entity: "lead", id: "lead-1", dpi: DPI },
-				anotar,
 			);
 
 			expect(resolucion.permitir, `${motivo} debería poder corregirse`).toBe(
 				true,
 			);
-			expect(anotaciones).toHaveLength(1);
-			expect(anotaciones[0]?.data).toMatchObject({ motivo });
+			expect(pendiente(resolucion)?.data).toMatchObject({ motivo });
 		}
 	});
 
@@ -815,8 +792,6 @@ describe("gate de mora: corrección de un DPI mal capturado (solo ediciones)", (
 	 * empiece cerrado y alguien tenga que decidir a mano si abrirlo.
 	 */
 	test("un motivo desconocido que bloquea no abre la válvula", () => {
-		const { anotaciones, anotar } = bitacora();
-
 		const resolucion = resolverEdicionConMora(
 			{
 				rechazado: true,
@@ -825,10 +800,9 @@ describe("gate de mora: corrección de un DPI mal capturado (solo ediciones)", (
 			},
 			"admin",
 			{ entity: "lead", id: "lead-1", dpi: DPI },
-			anotar,
 		);
 
 		expect(resolucion.permitir).toBe(false);
-		expect(anotaciones).toEqual([]);
+		expect(pendiente(resolucion)).toBeNull();
 	});
 });

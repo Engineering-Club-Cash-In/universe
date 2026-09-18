@@ -59,7 +59,7 @@ import {
 	hasStaleAnalysisChecklistDocumentState,
 	hasStaleAnalysisChecklistVehicleState,
 } from "../lib/analysis-checklist";
-import { auditedTransaction, auditRecord } from "../lib/audit";
+import { type AuditEntry, auditedTransaction, auditRecord } from "../lib/audit";
 import {
 	isReservedBankCoverageDescription,
 	redactBankStatementCoverageEvidence,
@@ -1416,6 +1416,12 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const { id, assignedTo, ...updateData } = input;
 
+			// La fila de bitácora del override de admin, si lo hubo. Se escribe
+			// DESPUÉS de confirmar que el UPDATE tocó una fila: anotarla antes
+			// dejaba overrides `ok: true` de cambios que nunca ocurrieron (lead
+			// inexistente, o sin permiso sobre él). Ver `resolverEdicionConMora`.
+			let overrideDeMora: AuditEntry | null = null;
+
 			// 🔴 El DPI en blanco se rechaza ANTES que nada: sin esto, `dpi: ""` se
 			// saltaba la validación y el gate por falsy y el `.set` lo escribía
 			// igual, dejando al moroso invisible para siempre. Ver
@@ -1459,17 +1465,17 @@ export const crmRouter = {
 					// Válvula de corrección: un DPI mal tecleado cuyo valor correcto
 					// pertenece a alguien con mora sería incorregible para siempre. Solo
 					// admin, y queda anotado. Ver `resolverEdicionConMora`.
-					const resolucion = resolverEdicionConMora(
-						gate,
-						context.userRole,
-						{ entity: "lead", id, dpi: updateData.dpi },
-						auditRecord,
-					);
+					const resolucion = resolverEdicionConMora(gate, context.userRole, {
+						entity: "lead",
+						id,
+						dpi: updateData.dpi,
+					});
 					if (!resolucion.permitir) {
 						throw new ORPCError("BAD_REQUEST", {
 							message: resolucion.mensaje,
 						});
 					}
+					overrideDeMora = resolucion.anotacionPendiente;
 				}
 			}
 
@@ -1523,6 +1529,12 @@ export const crmRouter = {
 
 			// Después del chequeo: con cero filas no hubo escritura que anotar.
 			auditRecord({ entity: "lead", id: id, action: "update" });
+
+			// El override recién existe si el cambio existió. Va después del
+			// `auditRecord` del update por el mismo motivo: son la misma escritura.
+			if (overrideDeMora) {
+				auditRecord(overrideDeMora);
+			}
 
 			// Sync NIT to associated opportunities.
 			// Solo a las que siguen con la copia del NIT del lead: el que viaja a
@@ -8387,6 +8399,10 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const { id, ...updateData } = input;
 
+			// Igual que en `updateLead`: el override se anota después de confirmar
+			// que el UPDATE tocó una fila. Ver `resolverEdicionConMora`.
+			let overrideDeMora: AuditEntry | null = null;
+
 			// El mismo rechazo que en `updateLead`. El `min(1)` del schema ya para el
 			// `""`, pero no el `"   "`, y los dos son el mismo intento: dejar sin DPI
 			// a alguien para que el gate no lo vuelva a encontrar.
@@ -8434,22 +8450,18 @@ export const crmRouter = {
 					// tipea mal y también hay que poder corregirlo. `id` va en `null`
 					// porque la bitácora solo conoce lead/opportunity/vehicle y este es
 					// un co-deudor; su uuid viaja en el detalle.
-					const resolucion = resolverEdicionConMora(
-						gate,
-						context.userRole,
-						{
-							entity: "lead",
-							id: null,
-							dpi: updateData.dpi,
-							datosExtra: { coDebtorId: id },
-						},
-						auditRecord,
-					);
+					const resolucion = resolverEdicionConMora(gate, context.userRole, {
+						entity: "lead",
+						id: null,
+						dpi: updateData.dpi,
+						datosExtra: { coDebtorId: id },
+					});
 					if (!resolucion.permitir) {
 						throw new ORPCError("BAD_REQUEST", {
 							message: resolucion.mensaje,
 						});
 					}
+					overrideDeMora = resolucion.anotacionPendiente;
 				}
 			}
 
@@ -8466,6 +8478,11 @@ export const crmRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Co-deudor no encontrado",
 				});
+			}
+
+			// Recién acá: el override existe si el cambio existió.
+			if (overrideDeMora) {
+				auditRecord(overrideDeMora);
 			}
 
 			return updatedCoDebtor;

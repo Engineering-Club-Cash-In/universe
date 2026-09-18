@@ -8155,17 +8155,10 @@ export const crmRouter = {
 				});
 			}
 
-			// Alta de co-deudor: siempre se consulta. Un co-deudor moroso respalda
-			// el crédito igual de mal que un titular moroso.
-			const gateCoDeudor = await evaluarGateMoraDpi(
-				resultadoDpi.dpiLimpio,
-				depsGateMora,
-			);
-			if (gateCoDeudor.rechazado) {
-				throw new ORPCError("BAD_REQUEST", { message: gateCoDeudor.mensaje });
-			}
-
-			// Verificar que la oportunidad existe
+			// La oportunidad se verifica ANTES del gate: con un id inexistente no
+			// hay alta posible, y correr el gate primero convertía el NOT_FOUND en
+			// un rechazo por mora (o en "no disponible" si cartera estaba caída),
+			// gastando además el viaje a SIFCO y una fila de bitácora por nada.
 			const [opportunity] = await db
 				.select({ id: opportunities.id })
 				.from(opportunities)
@@ -8176,6 +8169,16 @@ export const crmRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Oportunidad no encontrada",
 				});
+			}
+
+			// Alta de co-deudor: siempre se consulta. Un co-deudor moroso respalda
+			// el crédito igual de mal que un titular moroso.
+			const gateCoDeudor = await evaluarGateMoraDpi(
+				resultadoDpi.dpiLimpio,
+				depsGateMora,
+			);
+			if (gateCoDeudor.rechazado) {
+				throw new ORPCError("BAD_REQUEST", { message: gateCoDeudor.mensaje });
 			}
 
 			const [newCoDebtor] = await db

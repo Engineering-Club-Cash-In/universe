@@ -31,6 +31,13 @@ export interface CambioDeDpi<T> {
   fijarDpiDeLaCuenta: (dpi: string) => Promise<unknown>;
   /** `updateLead` con el payload ya armado. */
   actualizarElLead: () => Promise<T>;
+  /**
+   * `updateLead` con el MISMO payload más `soloValidar: true`: corre candado,
+   * gate de mora y duplicados en el CRM sin escribir nada. Con esto el rechazo
+   * llega ANTES de tocar la cuenta y la reversa queda solo para carreras — en
+   * particular, la cuenta SIN DPI previo ya no puede quedar con uno rechazado.
+   */
+  validarEnElCrm?: () => Promise<unknown>;
   /** Para dejar rastro de lo que no se pudo deshacer. Por defecto, la consola. */
   avisar?: (mensaje: string, detalle: unknown) => void;
 }
@@ -39,6 +46,11 @@ export async function aplicarCambioDeDpi<T>(cambio: CambioDeDpi<T>): Promise<T> 
   const avisar =
     cambio.avisar ??
     ((mensaje: string, detalle: unknown) => console.error(mensaje, detalle));
+
+  if (cambio.validarEnElCrm) {
+    // Si el CRM va a decir que no, que lo diga antes de escribir la cuenta.
+    await cambio.validarEnElCrm();
+  }
 
   await cambio.fijarDpiDeLaCuenta(cambio.dpiNuevo);
 

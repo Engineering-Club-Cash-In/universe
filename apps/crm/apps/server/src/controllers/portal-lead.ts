@@ -232,7 +232,7 @@ export async function getLeadByEmail(c: Context) {
 export async function updateLeadByEmail(c: Context) {
 	try {
 		const body = await c.req.json();
-		const { email, dpi: dpiRaw, address, phone } = body;
+		const { email, dpi: dpiRaw, address, phone, soloValidar } = body;
 		// Se guarda siempre normalizado; si no, el mismo DPI escrito con espacios
 		// queda como un registro distinto y deja de detectarse como duplicado.
 		let dpi: string | undefined = dpiRaw;
@@ -332,6 +332,15 @@ export async function updateLeadByEmail(c: Context) {
 					);
 				}
 			}
+		}
+
+		// 🔴 Modo solo-validar: el portal necesita saber si el cambio de DPI va a
+		// pasar ANTES de escribirlo en la cuenta (auth-google), porque el contrato
+		// obliga a escribir la cuenta primero y un rechazo del CRM dejaba la
+		// identidad partida entre servicios. Acá ya corrieron candado, gate y
+		// duplicados: si llegó hasta esta línea, el cambio real va a entrar.
+		if (soloValidar === true) {
+			return c.json({ success: true, validado: true });
 		}
 
 		// Build update object with only provided fields

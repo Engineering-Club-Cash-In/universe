@@ -106,12 +106,19 @@ CREATE INDEX IF NOT EXISTS rubros_credito_activo_idx
   ON cartera.rubros (credito_id, activo);
 
 -- Un solo rubro VIVO por crédito y tipo: dos "tarjeta de circulación"
--- pendientes a la vez son un cobro duplicado. El filtro por `completado` es lo
--- que permite volver a cobrar el mismo concepto más adelante: el rubro saldado
--- sale del índice y deja lugar al siguiente.
+-- pendientes a la vez son un cobro duplicado. El filtro es lo que permite volver
+-- a cobrar el mismo concepto más adelante: el rubro que sale de circulación deja
+-- lugar al siguiente.
+--
+-- "Vivo" son las DOS condiciones, y `completado` sola no alcanza: anular un
+-- rubro equivocado prende `anulado` y NO prende `completado` —el esquema no lo
+-- exige y los comentarios de arriba dicen que anular libera el tipo—, así que un
+-- rubro anulado seguía ocupando el índice y crear el corregido para el mismo
+-- crédito y tipo fallaba por unicidad. Depender de que el llamador prenda
+-- `completado`, que significa otra cosa, es pedirle que mienta.
 CREATE UNIQUE INDEX IF NOT EXISTS rubros_uq_credito_tipo_vivo
   ON cartera.rubros (credito_id, tipo_id)
-  WHERE completado = false;
+  WHERE completado = false AND anulado = false;
 
 CREATE TABLE IF NOT EXISTS cartera.rubros_historial (
   historial_id SERIAL PRIMARY KEY,

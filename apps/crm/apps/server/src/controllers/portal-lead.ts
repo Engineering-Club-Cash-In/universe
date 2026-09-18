@@ -13,7 +13,10 @@ import {
 	evaluarGateMoraDpi,
 	requiereConsultaDeMora,
 } from "../lib/gate-mora-dpi";
-import { numerosSifcoConocidosPorDpi } from "../lib/numeros-sifco-por-dpi";
+import {
+	numerosSifcoConocidosPorDpi,
+	numerosSifcoDelDpiYDelLead,
+} from "../lib/numeros-sifco-por-dpi";
 import { extractBearerToken, secretsMatch } from "../lib/service-token";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 import { carteraBackClient } from "../services/cartera-back-client";
@@ -264,7 +267,15 @@ export async function updateLeadByEmail(c: Context) {
 			// es una edición común —dirección, teléfono— y no puede quedar trabada
 			// porque la persona esté en mora.
 			if (requiereConsultaDeMora(dpi, existingLead.dpi)) {
-				const gate = await evaluarGateMoraDpi(dpi, depsGateMora);
+				// 🔴 Igual que en `updateLead` del CRM: la pregunta lleva los números
+				// del DPI NUEVO **y** los del lead que se está editando. Buscando solo
+				// por el DPI nuevo, el lead con su propio crédito moroso —invisible
+				// para SIFCO— se sacaba el gate de encima tecleando un DPI virgen.
+				const gate = await evaluarGateMoraDpi(dpi, {
+					...depsGateMora,
+					numerosCreditoConocidos: (dpiConsultado) =>
+						numerosSifcoDelDpiYDelLead(dpiConsultado, existingLead.id),
+				});
 				if (gate.rechazado) {
 					return c.json({ success: false, error: gate.mensaje }, 400);
 				}

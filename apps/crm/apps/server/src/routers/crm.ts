@@ -108,7 +108,11 @@ import {
 } from "../lib/lead-helpers";
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
 import { getLeadSourceLabel } from "../lib/lead-sources";
-import { numerosSifcoConocidosPorDpi } from "../lib/numeros-sifco-por-dpi";
+import {
+	numerosSifcoConocidosPorDpi,
+	numerosSifcoDelDpiYDeLaOportunidad,
+	numerosSifcoDelDpiYDelLead,
+} from "../lib/numeros-sifco-por-dpi";
 import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
 	buildOpportunityRelationshipInvariantCondition,
@@ -1421,7 +1425,17 @@ export const crmRouter = {
 					.limit(1);
 
 				if (requiereConsultaDeMora(updateData.dpi, leadGuardado?.dpi)) {
-					const gate = await evaluarGateMoraDpi(updateData.dpi, depsGateMora);
+					// 🔴 La pregunta lleva los números del DPI NUEVO **y** los del lead
+					// que se está editando. Con solo los del DPI nuevo, el lead que
+					// tiene su propio crédito moroso —un `CRM-<uuid>` o un `insoluto-N`,
+					// invisibles para SIFCO— salía del gate tecleando un DPI virgen:
+					// cartera contestaba CLIENTE_NO_ENCONTRADO y el cambio pasaba para
+					// cualquiera. Su propia deuda quedaba fuera de su propia evaluación.
+					const gate = await evaluarGateMoraDpi(updateData.dpi, {
+						...depsGateMora,
+						numerosCreditoConocidos: (dpiConsultado) =>
+							numerosSifcoDelDpiYDelLead(dpiConsultado, id),
+					});
 					// Válvula de corrección: un DPI mal tecleado cuyo valor correcto
 					// pertenece a alguien con mora sería incorregible para siempre. Solo
 					// admin, y queda anotado. Ver `resolverEdicionConMora`.
@@ -8372,13 +8386,29 @@ export const crmRouter = {
 				// Igual que en `updateLead`: solo si el DPI es nuevo o cambia, para no
 				// dejar congelada la ficha de un co-deudor que ya está en mora.
 				const [coDeudorGuardado] = await db
-					.select({ dpi: coDebtors.dpi })
+					.select({
+						dpi: coDebtors.dpi,
+						opportunityId: coDebtors.opportunityId,
+					})
 					.from(coDebtors)
 					.where(eq(coDebtors.id, id))
 					.limit(1);
 
 				if (requiereConsultaDeMora(updateData.dpi, coDeudorGuardado?.dpi)) {
-					const gate = await evaluarGateMoraDpi(updateData.dpi, depsGateMora);
+					// Mismo agujero que en `updateLead`, con el equivalente del
+					// co-deudor: su cartera propia no es la de un lead sino la de su
+					// oportunidad (una sola). Ver `numerosSifcoDelDpiYDeLaOportunidad`.
+					const oportunidadDelCoDeudor = coDeudorGuardado?.opportunityId;
+					const gate = await evaluarGateMoraDpi(updateData.dpi, {
+						...depsGateMora,
+						numerosCreditoConocidos: (dpiConsultado) =>
+							oportunidadDelCoDeudor
+								? numerosSifcoDelDpiYDeLaOportunidad(
+										dpiConsultado,
+										oportunidadDelCoDeudor,
+									)
+								: numerosSifcoConocidosPorDpi(dpiConsultado),
+					});
 					// Misma válvula que en `updateLead`: el DPI del co-deudor también se
 					// tipea mal y también hay que poder corregirlo. `id` va en `null`
 					// porque la bitácora solo conoce lead/opportunity/vehicle y este es

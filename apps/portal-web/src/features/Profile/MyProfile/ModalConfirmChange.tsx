@@ -104,6 +104,10 @@ export const ModalConfirmChange = ({
         dpiPrevioEnLaCuenta: user?.dpi?.trim() ?? "",
         fijarDpiDeLaCuenta: updateOwnDpi,
         actualizarElLead: () => updateLead(payload),
+        // El rechazo del CRM llega ANTES de escribir la cuenta: candado, mora y
+        // duplicados corren en seco. Sin esto, el primer DPI de una cuenta
+        // podía quedar escrito aunque el CRM lo rechazara.
+        validarEnElCrm: () => updateLead({ ...payload, soloValidar: true }),
       });
     },
     onSuccess: () => {

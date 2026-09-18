@@ -189,14 +189,20 @@ export function consultaNumerosSifcoDeLead(
 				ne(numeroLimpio, ""),
 			),
 		)
-		.limit(TOPE_NUMEROS_CREDITO_CONOCIDOS);
+		// Sonda, no tope: un lead con más créditos de los que el contrato admite
+		// no puede evaluarse con una lista recortada en silencio.
+		.limit(SONDA_DESBORDE_NUMEROS);
 }
 
 export async function numerosSifcoDeLead(
 	database: Pick<typeof db, "selectDistinct">,
 	leadId: string,
 ): Promise<string[]> {
-	return sanear(await consultaNumerosSifcoDeLead(database, leadId));
+	const filas = await consultaNumerosSifcoDeLead(database, leadId);
+	// Misma sonda que las consultas por DPI: si el lead editado desborda el
+	// tope, el número que quedó afuera puede ser justo el del crédito moroso.
+	exigirNumerosCompletos(filas, `lead:${leadId}`);
+	return sanear(filas);
 }
 
 /**

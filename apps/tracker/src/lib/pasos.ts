@@ -60,21 +60,32 @@ function entradasDePaso(caso: Caso, paso: number) {
 export type Coincidencia = { porcentaje: number; fecha: string };
 
 /**
+ * La llegada al estado ACTUAL del caso (su `porcentaje` de hoy), si ocurrió
+ * dentro de la ventana. Es la única fuente de "cuándo" que se usa en toda
+ * esta vista: no importa por cuántas etapas o porcentajes pasó el caso ese
+ * mes, solo si el que tiene hoy lo alcanzó en ese período.
+ */
+function llegoAEsteEstadoEn(caso: Caso, ventana: Ventana): Coincidencia | null {
+	const entrada = caso.historial.find((h) => h.porcentaje === caso.porcentaje);
+	if (!entrada || !dentroDeVentana(entrada.fecha, ventana)) return null;
+	return { porcentaje: entrada.porcentaje, fecha: entrada.fecha };
+}
+
+/**
  * Cómo cuenta un caso en una etapa. Vacío si no cuenta.
  *
- * Sin período: cuenta solo en la etapa donde está hoy, con su avance actual.
- * Con período: devuelve **todas** las llegadas de esa etapa dentro del mes. Un
- * caso puede alcanzar dos porcentajes de la misma etapa en un mismo mes —30% y
- * luego 40%—, y ambos son avances reales que el filtro por porcentaje exacto
- * debe poder encontrar.
+ * Un caso solo cuenta en su etapa actual — nunca en una que ya dejó atrás,
+ * aunque haya pasado por ella este mismo mes. Sin período, con su avance
+ * actual. Con período, solo si llegó a ese avance dentro del mes.
  */
 export function coincidenciasEnPaso(
 	caso: Caso,
 	paso: number,
 	ventana: Ventana | null,
 ): Coincidencia[] {
+	if (caso.pasoActual !== paso) return [];
+
 	if (!ventana) {
-		if (caso.pasoActual !== paso) return [];
 		return [
 			{
 				porcentaje: caso.porcentaje,
@@ -83,9 +94,8 @@ export function coincidenciasEnPaso(
 		];
 	}
 
-	return entradasDePaso(caso, paso)
-		.filter((h) => dentroDeVentana(h.fecha, ventana))
-		.map((h) => ({ porcentaje: h.porcentaje, fecha: h.fecha }));
+	const llegada = llegoAEsteEstadoEn(caso, ventana);
+	return llegada ? [llegada] : [];
 }
 
 /** La llegada que representa al caso: la del porcentaje filtrado, o la primera. */
@@ -99,27 +109,19 @@ export function coincidenciaPrincipal(
 }
 
 /**
- * La llegada dentro del período, sin importar la etapa.
- *
- * Sin filtro de etapa, un caso entra al listado por `tuvoAvanceEn`, que mira
- * todo su historial. La tarjeta debe mostrar esa llegada y no la de su etapa
- * actual, que puede ser de otro mes.
+ * La llegada del caso al período, sin filtro de etapa: cuándo llegó a su
+ * estado actual, si fue dentro de ese mes.
  */
 export function llegadaEnVentana(
 	caso: Caso,
 	ventana: Ventana,
 ): Coincidencia | null {
-	const entrada = [...caso.historial]
-		.sort((a, b) => a.fecha.localeCompare(b.fecha))
-		.find((h) => dentroDeVentana(h.fecha, ventana));
-	return entrada
-		? { porcentaje: entrada.porcentaje, fecha: entrada.fecha }
-		: null;
+	return llegoAEsteEstadoEn(caso, ventana);
 }
 
-/** ¿El caso registró algún avance dentro del período? */
+/** ¿El caso llegó a su estado actual dentro del período? */
 export function tuvoAvanceEn(caso: Caso, ventana: Ventana): boolean {
-	return caso.historial.some((h) => dentroDeVentana(h.fecha, ventana));
+	return llegoAEsteEstadoEn(caso, ventana) !== null;
 }
 
 export const ESTADOS: Record<

@@ -250,12 +250,20 @@ export function leerTimeoutConsultaMora(crudo: string | undefined): number {
  */
 export async function conPresupuestoConsultaMora<T>(
 	presupuestoMs: number,
-	tarea: () => Promise<T>,
+	tarea: (senalVencimiento: AbortSignal) => Promise<T>,
 ): Promise<T> {
 	let temporizador: ReturnType<typeof setTimeout> | undefined;
+	// La señal viaja hasta el fetch de `request()`: al vencerse el presupuesto
+	// no solo se suelta la espera — la tarea perdedora que siga corriendo (el
+	// auth no es cancelable) encuentra la señal ya abortada y NO dispara el
+	// viaje a cartera cuando el token por fin llegue. Sin esto, cada intento
+	// vencido durante una caída del auth quedaba en cola y descargaba una
+	// ráfaga de consultas inútiles sobre el core al recuperarse.
+	const control = new AbortController();
 
 	const vencimiento = new Promise<never>((_, rechazar) => {
 		temporizador = setTimeout(() => {
+			control.abort();
 			rechazar(
 				new ConsultaMoraNoDisponibleError(
 					`La consulta de mora no respondió en ${presupuestoMs}ms`,
@@ -268,7 +276,7 @@ export async function conPresupuestoConsultaMora<T>(
 	});
 
 	try {
-		return await Promise.race([tarea(), vencimiento]);
+		return await Promise.race([tarea(control.signal), vencimiento]);
 	} finally {
 		clearTimeout(temporizador);
 	}
@@ -1149,7 +1157,16 @@ export class CarteraBackClient {
 					Authorization: `Bearer ${token}`,
 					...options.headers,
 				},
-				signal: AbortSignal.timeout(timeoutMs ?? this.config.timeout),
+				// Si el llamador trae su propia señal (p. ej. el presupuesto de la
+				// consulta de mora, que corre desde ANTES de la autenticación), se
+				// combina con el timeout del fetch en vez de pisarla: una señal ya
+				// abortada frena el fetch aunque el token haya llegado tarde.
+				signal: options.signal
+					? AbortSignal.any([
+							options.signal,
+							AbortSignal.timeout(timeoutMs ?? this.config.timeout),
+						])
+					: AbortSignal.timeout(timeoutMs ?? this.config.timeout),
 			};
 		};
 
@@ -1698,14 +1715,20 @@ export class CarteraBackClient {
 			// El presupuesto envuelve la llamada COMPLETA y no solo el fetch: la
 			// autenticación corre antes de que `request()` arme su AbortSignal y no
 			// tiene señal propia. Ver `conPresupuestoConsultaMora`.
-			crudo = await conPresupuestoConsultaMora(CONSULTA_MORA_TIMEOUT_MS, () =>
-				this.request<unknown>(
-					"/clientes/consulta-mora",
-					{ method: "POST", body: JSON.stringify(cuerpo) },
-					false, // sin caché (ver arriba)
-					CONSULTA_MORA_TIMEOUT_MS,
-					false, // un solo intento (ver arriba)
-				),
+			crudo = await conPresupuestoConsultaMora(
+				CONSULTA_MORA_TIMEOUT_MS,
+				(senalVencimiento) =>
+					this.request<unknown>(
+						"/clientes/consulta-mora",
+						{
+							method: "POST",
+							body: JSON.stringify(cuerpo),
+							signal: senalVencimiento,
+						},
+						false, // sin caché (ver arriba)
+						CONSULTA_MORA_TIMEOUT_MS,
+						false, // un solo intento (ver arriba)
+					),
 			);
 		} catch (error) {
 			// El vencimiento del presupuesto ya llega con el motivo correcto; no se

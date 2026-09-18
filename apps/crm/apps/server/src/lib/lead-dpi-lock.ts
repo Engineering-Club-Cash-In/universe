@@ -1,6 +1,10 @@
-import { eq } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 import { db } from "../db";
-import { opportunities, salesStages } from "../db/schema";
+import {
+	opportunities,
+	opportunityStageHistory,
+	salesStages,
+} from "../db/schema";
 import { normalizarDpi } from "../utils/cui-validation";
 
 /**
@@ -16,6 +20,15 @@ export type OportunidadParaCandadoDpi = {
 	status: string;
 	stageName: string;
 	closurePercentage: number;
+	/**
+	 * El porcentaje MÁS ALTO por el que esta oportunidad pasó alguna vez, según
+	 * `opportunityStageHistory`. `null` cuando no tiene historial: una
+	 * oportunidad recién creada no registró ningún movimiento todavía, y por eso
+	 * la etapa ACTUAL sigue contando aparte (ver `etapaQueCanda`).
+	 */
+	maxHistoricoClosurePercentage?: number | null;
+	/** Presente cuando la oportunidad vino de la base; la regla no lo usa. */
+	id?: string;
 };
 
 export type SujetoCandadoDpi = "lead" | "codeudor" | "portal";
@@ -23,6 +36,17 @@ export type SujetoCandadoDpi = "lead" | "codeudor" | "portal";
 export type ResultadoCandadoDpi = {
 	bloqueado: boolean;
 	message?: string;
+	/**
+	 * `true` cuando el candado HABRÍA bloqueado y lo abrió el rol admin.
+	 *
+	 * Distinguirlo de "pasó porque no candaba" es lo que permite cobrar el costo
+	 * del override: tras usar la válvula, las oportunidades que estaban candando
+	 * vuelven a análisis, porque la evidencia de identidad que tenían
+	 * (RENAP/buró/documentos) se validó contra el DPI viejo.
+	 */
+	overrideAdmin?: boolean;
+	/** Las oportunidades que candaban, para poder revalidarlas tras un override. */
+	candantes?: OportunidadParaCandadoDpi[];
 };
 
 export function dpiCambia(
@@ -47,13 +71,34 @@ export function dpiCambia(
 	return actual !== normalizarDpi(dpiNuevo);
 }
 
-function etapaQueCanda(
+/**
+ * 🔴 El candado pregunta si la oportunidad ALGUNA VEZ cruzó el 30%, no solo
+ * dónde está parada hoy.
+ *
+ * Mirando únicamente la etapa actual, retroceder la oportunidad de 40% a 30 o
+ * 20 —`updateOpportunity` lo permite por debajo del 90— descandaba el DPI con
+ * RENAP, buró y documentos ya atados a la identidad vieja. La maniobra no
+ * dejaba rastro: bajar, cambiar el DPI, volver a subir.
+ *
+ * Las dos señales van en OR y ninguna sobra: el historial cubre el retroceso,
+ * y la etapa actual cubre a la oportunidad recién creada directamente al 40%,
+ * que todavía no tiene ninguna fila en `opportunityStageHistory`.
+ */
+export function cruzoElCandado(o: OportunidadParaCandadoDpi): boolean {
+	return (
+		o.closurePercentage > PORCENTAJE_CANDADO_DPI ||
+		(o.maxHistoricoClosurePercentage ?? 0) > PORCENTAJE_CANDADO_DPI
+	);
+}
+
+export function etapaQueCanda(
 	oportunidades: OportunidadParaCandadoDpi[],
 ): OportunidadParaCandadoDpi | null {
 	// Las perdidas no candan: un crédito que no se dio no puede dejar al cliente
-	// con el DPI fijo para siempre.
+	// con el DPI fijo para siempre. (Decisión de producto vigente; el costo de
+	// reabrir una perdida avanzada se cobra aparte, al reabrirla.)
 	const bloqueantes = oportunidades.filter(
-		(o) => o.status !== "lost" && o.closurePercentage > PORCENTAJE_CANDADO_DPI,
+		(o) => o.status !== "lost" && cruzoElCandado(o),
 	);
 
 	if (bloqueantes.length === 0) {
@@ -61,8 +106,13 @@ function etapaQueCanda(
 	}
 
 	return bloqueantes.reduce((mayor, actual) =>
-		actual.closurePercentage > mayor.closurePercentage ? actual : mayor,
+		alturaAlcanzada(actual) > alturaAlcanzada(mayor) ? actual : mayor,
 	);
+}
+
+/** Lo más alto que llegó a estar: hoy o alguna vez. */
+function alturaAlcanzada(o: OportunidadParaCandadoDpi): number {
+	return Math.max(o.closurePercentage, o.maxHistoricoClosurePercentage ?? 0);
 }
 
 function mensajeCandado(
@@ -70,7 +120,19 @@ function mensajeCandado(
 	etapa: OportunidadParaCandadoDpi,
 ): string {
 	const queDpi = sujeto === "codeudor" ? " del co-deudor" : "";
-	return `No se puede cambiar el DPI${queDpi}: la solicitud ya avanzó a ${etapa.stageName} (${etapa.closurePercentage}%). El DPI${queDpi} quedó fijo porque las validaciones de RENAP y buró y los documentos del expediente están atados a esa identidad. Si fue un error de captura, pedile a un administrador que lo corrija.`;
+
+	// Cuando canda por el historial y no por la etapa de hoy, decir "ya avanzó a
+	// Solución y propuesta (20%)" sería incomprensible: el 20% no canda nada. Se
+	// nombra el punto por el que pasó, que es el que explica el bloqueo.
+	const porElHistorial =
+		etapa.closurePercentage <= PORCENTAJE_CANDADO_DPI &&
+		(etapa.maxHistoricoClosurePercentage ?? 0) > PORCENTAJE_CANDADO_DPI;
+
+	const donde = porElHistorial
+		? `ya pasó por el ${etapa.maxHistoricoClosurePercentage}% (hoy está en ${etapa.stageName}, ${etapa.closurePercentage}%)`
+		: `ya avanzó a ${etapa.stageName} (${etapa.closurePercentage}%)`;
+
+	return `No se puede cambiar el DPI${queDpi}: la solicitud ${donde}. El DPI${queDpi} quedó fijo porque las validaciones de RENAP y buró y los documentos del expediente están atados a esa identidad. Si fue un error de captura, pedile a un administrador que lo corrija.`;
 }
 
 export function resolverCandadoDpi(input: {
@@ -93,14 +155,36 @@ export function resolverCandadoDpi(input: {
 		return { bloqueado: true, message: MENSAJE_CANDADO_DPI_PORTAL };
 	}
 
+	// Las que candan, para poder revalidarlas después de un override.
+	const candantes = input.oportunidades.filter(
+		(o) => o.status !== "lost" && cruzoElCandado(o),
+	);
+
 	// Válvula de escape para un DPI mal tipeado: solo dentro del CRM, nunca en el
-	// portal público.
+	// portal público. No es gratis: sale marcada, y el llamador cobra el costo
+	// mandando las candantes de vuelta a análisis (ver `overrideAdmin`).
 	if (input.esAdmin) {
-		return { bloqueado: false };
+		return { bloqueado: false, overrideAdmin: true, candantes };
 	}
 
-	return { bloqueado: true, message: mensajeCandado(input.sujeto, etapa) };
+	return {
+		bloqueado: true,
+		message: mensajeCandado(input.sujeto, etapa),
+		candantes,
+	};
 }
+
+/**
+ * El máximo histórico, como subconsulta correlacionada y no como una consulta
+ * por oportunidad: una oportunidad puede tener decenas de filas de historial y
+ * traerlas aparte sería un N+1 en el camino caliente de cada edición.
+ */
+const MAX_HISTORICO = sql<number | null>`(
+	select max(${salesStages.closurePercentage})
+	from ${opportunityStageHistory}
+	inner join ${salesStages} on ${salesStages.id} = ${opportunityStageHistory.toStageId}
+	where ${opportunityStageHistory.opportunityId} = ${opportunities.id}
+)`;
 
 export async function obtenerOportunidadesParaCandadoDpi(filtro: {
 	leadId?: string;
@@ -116,13 +200,78 @@ export async function obtenerOportunidadesParaCandadoDpi(filtro: {
 
 	return await db
 		.select({
+			id: opportunities.id,
 			status: opportunities.status,
 			stageName: salesStages.name,
 			closurePercentage: salesStages.closurePercentage,
+			maxHistoricoClosurePercentage: MAX_HISTORICO,
 		})
 		.from(opportunities)
 		.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
 		.where(where);
+}
+
+/**
+ * 🔴 La MISMA señal de `cruzoElCandado`, pero escrita en SQL para meterla en el
+ * WHERE del UPDATE que escribe el DPI.
+ *
+ * Por qué hacen falta las dos formas. El chequeo en memoria y el `UPDATE` no
+ * son atómicos: entre que el candado dice "abierto" y la escritura ocurre, otra
+ * transacción puede aprobar el análisis (30 → 40) y el DPI se escribe igual,
+ * sobre un expediente que ya quedó atado a la identidad vieja. Postgres
+ * re-evalúa el predicado después de esperar a la escritura rival, así que
+ * poniendo la condición adentro la carrera se cierra. El repo ya usa
+ * exactamente este patrón en `approveOpportunityAnalysis`.
+ *
+ * ⚠️ Las dos formas tienen que decir lo mismo. Si tocás una, tocá la otra: el
+ * test "las dos formas de la señal dicen lo mismo" existe para que no se
+ * separen en silencio. Drizzle no permite reusar literalmente el predicado de
+ * JS dentro del SQL, así que viven una al lado de la otra a propósito.
+ */
+function sqlCandanteDeLaOportunidad(): SQL {
+	return sql`
+		${opportunities.status} <> 'lost'
+		and (
+			${salesStages.closurePercentage} > ${PORCENTAJE_CANDADO_DPI}
+			or exists (
+				select 1
+				from ${opportunityStageHistory} as h
+				inner join ${salesStages} as hs on hs.id = h.to_stage_id
+				where h.opportunity_id = ${opportunities.id}
+					and hs.closure_percentage > ${PORCENTAJE_CANDADO_DPI}
+			)
+		)
+	`;
+}
+
+/** ¿Este lead tiene alguna oportunidad que cande? Para el WHERE de `leads`. */
+export function existeOportunidadCandanteDelLead(leadId: string): SQL {
+	return sql`exists (
+		select 1
+		from ${opportunities}
+		inner join ${salesStages} on ${salesStages.id} = ${opportunities.stageId}
+		where ${opportunities.leadId} = ${leadId}
+			and ${sqlCandanteDeLaOportunidad()}
+	)`;
+}
+
+/** Lo mismo para UNA oportunidad: el caso del co-deudor. */
+export function existeOportunidadCandantePorId(opportunityId: string): SQL {
+	return sql`exists (
+		select 1
+		from ${opportunities}
+		inner join ${salesStages} on ${salesStages.id} = ${opportunities.stageId}
+		where ${opportunities.id} = ${opportunityId}
+			and ${sqlCandanteDeLaOportunidad()}
+	)`;
+}
+
+export function noExisteOportunidadCandanteDelLead(leadId: string): SQL {
+	return sql`not ${existeOportunidadCandanteDelLead(leadId)}`;
+}
+
+export function noExisteOportunidadCandantePorId(opportunityId: string): SQL {
+	return sql`not ${existeOportunidadCandantePorId(opportunityId)}`;
 }
 
 export async function evaluarCandadoDpi(input: {

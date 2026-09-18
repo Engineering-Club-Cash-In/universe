@@ -158,6 +158,119 @@ export function normalizarIdentificacion(valor: string): string {
   return valor.replace(/\D/g, "");
 }
 
+/** Dígitos del DPI (CUI) guatemalteco. */
+export const LARGO_DPI = 13;
+
+/**
+ * Lo único que puede traer el campo de DPI: dígitos y los separadores con que
+ * la gente lo escribe. Se mira ANTES de normalizar; ver `validarDpiConsulta`.
+ */
+const FORMA_DPI_ACEPTADA = /^[\d\s-]*$/;
+
+export type ValidacionDpi =
+  | { valido: true; dpi: string }
+  | { valido: false; mensaje: string };
+
+/**
+ * ¿Lo que llegó es un DPI, antes de gastarle un viaje al core?
+ *
+ * 🔴 El `minLength: 1` del schema deja pasar un valor que después se normaliza
+ * a NADA —espacios, guiones, letras— y la consulta se iba igual a SIFCO con el
+ * string vacío. El fallo aguas abajo volvía como 200 SERVICIO_NO_DISPONIBLE:
+ * un error de VALIDACIÓN disfrazado de caída del core, que el CRM le muestra
+ * al asesor como "no se pudo verificar, intentá de nuevo" cuando lo que hay
+ * que hacer es corregir el dato.
+ *
+ * Se exige el largo EXACTO porque es un DPI, no una identificación cualquiera:
+ * un valor de 7 dígitos no es un DPI mal escrito que el core podría reconocer,
+ * es otra cosa.
+ *
+ * 🔴 Y se valida la FORMA antes de normalizar. Normalizar primero es borrar la
+ * evidencia: `normalizarIdentificacion` tira todo lo que no sea dígito, así que
+ * `abc1234567890123xyz` quedaba en 13 dígitos y pasaba como DPI legítimo. El
+ * que escribe un DPI lo separa con espacios o guiones y nada más; cualquier
+ * otro carácter significa que el campo trae otra cosa —texto pegado, un
+ * intento de inyectar—, y eso es un dato a corregir, no un DPI a consultar.
+ */
+export function validarDpiConsulta(valor: string): ValidacionDpi {
+  const crudo = String(valor ?? "");
+
+  if (!FORMA_DPI_ACEPTADA.test(crudo)) {
+    return {
+      valido: false,
+      mensaje:
+        "El DPI solo puede traer dígitos, espacios y guiones: revisá lo que se escribió en el campo.",
+    };
+  }
+
+  const dpi = normalizarIdentificacion(crudo);
+
+  if (!dpi) {
+    return {
+      valido: false,
+      mensaje: "El DPI no trae ningún dígito: se esperan los 13 del DPI.",
+    };
+  }
+
+  if (dpi.length !== LARGO_DPI) {
+    return {
+      valido: false,
+      mensaje: `El DPI debe tener ${LARGO_DPI} dígitos; se recibieron ${dpi.length}.`,
+    };
+  }
+
+  return { valido: true, dpi };
+}
+
+/**
+ * Roles que pueden preguntar por la mora de un DPI.
+ *
+ * 🔴 `authMiddleware` SOLO valida la firma del JWT: sin gate, cualquier token
+ * vivo entra —incluido el de un INVESTOR del portal, que es un CLIENTE, no
+ * personal de la casa—. Y esta consulta devuelve la historia crediticia de una
+ * persona a partir de su DPI, más el canal confiado de
+ * `numerosCreditoConocidos` (ver el router), así que un token de afuera podía
+ * pescar la cartera de cualquiera.
+ *
+ * Son los tres roles de `user_role` en cartera, o sea TODO usuario propio del
+ * sistema. Deliberadamente NO se cierra solo a ADMIN aunque DEPLOYMENT.md exija
+ * que la cuenta de `CARTERA_USER` lo sea: un 403 acá no degrada nada, el CRM lo
+ * lee como "no se pudo verificar" y el gate es fail-closed, así que una cuenta
+ * de servicio con rol CONTA o ASESOR —el propio DEPLOYMENT.md admite que puede
+ * pasar— dejaría al CRM sin poder dar de alta a NADIE. La población que sobra
+ * es la de afuera, y esa queda afuera.
+ */
+export const ROLES_CONSULTA_MORA = ["ADMIN", "CONTA", "ASESOR"] as const;
+
+/** Ver `ROLES_CONSULTA_MORA`. */
+export function rolPuedeConsultarMora(rol: unknown): boolean {
+  return (ROLES_CONSULTA_MORA as readonly string[]).includes(String(rol ?? ""));
+}
+
+/**
+ * Cota de un paso bajo el presupuesto GLOBAL de la consulta.
+ *
+ * 🔴 Los presupuestos por paso eran ADITIVOS: identificación + espejo + API por
+ * cada ficha, todo secuencial. Una sola ficha ya podía tardar ~25s y cada ficha
+ * extra sumaba lo suyo, así que el techo real era "depende de cuántas fichas
+ * tenga el DPI" — y del otro lado hay un asesor esperando en pantalla. Ahora el
+ * presupuesto lo fija la CONSULTA entera y cada paso se acota contra lo que
+ * queda; los tiempos por paso sobreviven solo como cotas internas.
+ *
+ * Devuelve `null` cuando ya no queda presupuesto: el llamador corta
+ * fail-closed, porque una lista de créditos a medias no alcanza para firmar un
+ * "sin mora".
+ */
+export function cotaDelPresupuesto(
+  cotaDelPasoMs: number,
+  venceEnMs: number,
+  ahoraMs: number
+): number | null {
+  const restante = venceEnMs - ahoraMs;
+  if (restante <= 0) return null;
+  return Math.min(cotaDelPasoMs, restante);
+}
+
 /**
  * ¿El código de la ficha sirve para pedirle los créditos al core?
  *
@@ -285,6 +398,81 @@ export function unirNumerosCredito(
   return [...vistos];
 }
 
+/**
+ * Corre la consulta al ESPEJO con un presupuesto corto y, pase lo que pase, sin
+ * poder voltear el veredicto.
+ *
+ * 🔴 El espejo no tenía reloj: con su pool agotado o la base colgada, la request
+ * del asesor quedaba viva sin llegar ni al API ni al catch —ni respuesta ni
+ * fail-closed, solo la pantalla girando—.
+ *
+ * ⚠️ Vencerse o fallar acá NO es fail-closed, y es la asimetría a propósito de
+ * esta función: el espejo es un CACHE del core y el API es la fuente
+ * autoritativa viva, así que seguir con SOLO el API deja la lista COMPLETA, no
+ * media lista. Es el caso opuesto al del API caído —ahí sí falta la fuente
+ * autoritativa y el throw sube a SERVICIO_NO_DISPONIBLE— y al del espejo que sí
+ * contesta pero atrasado, que por eso NO corta la consulta al API.
+ *
+ * El `clearTimeout` en el `finally` evita dejar el temporizador vivo cuando el
+ * espejo gana la carrera. La consulta perdedora sigue su curso contra la base
+ * (no hay cómo cancelarla); lo que no sigue es la espera.
+ */
+export async function numerosEspejoConPresupuesto(
+  consultarEspejo: () => Promise<string[]>,
+  presupuestoMs: number,
+  avisar: (detalle: unknown) => void
+): Promise<string[]> {
+  let temporizador: ReturnType<typeof setTimeout> | undefined;
+
+  const vencimiento = new Promise<never>((_, rechazar) => {
+    temporizador = setTimeout(
+      () =>
+        rechazar(
+          new Error(`El espejo de SIFCO no respondió en ${presupuestoMs}ms`)
+        ),
+      presupuestoMs
+    );
+  });
+
+  try {
+    return await Promise.race([consultarEspejo(), vencimiento]);
+  } catch (error) {
+    avisar(error);
+    return [];
+  } finally {
+    clearTimeout(temporizador);
+  }
+}
+
+export type SiguientePasoConsulta =
+  | "BUSCAR_CREDITOS"
+  | "RESPONDER_SIN_CREDITOS"
+  | "CLIENTE_NO_ENCONTRADO";
+
+/**
+ * Qué hacer una vez resueltas las fichas del DPI y los números a mirar.
+ *
+ * 🔴 Quedarse sin números NO significa que el DPI sea un desconocido. El cliente
+ * con ficha en el core pero sin un solo préstamo —o cuyos préstamos el core no
+ * devolvió porque no los tiene— es un cliente CONOCIDO y al día: su respuesta es
+ * `encontrado: true` con `SIN_MORA` y sus datos, no `CLIENTE_NO_ENCONTRADO`.
+ * Cortar ahí por "no hay números" tiraba a la basura una ficha válida y le decía
+ * al CRM que esa persona nunca fue cliente.
+ *
+ * El no-encontrado de verdad exige las dos cosas: ni ficha en el core ni un
+ * número que mirar (ni de SIFCO ni de los que aportó quien pregunta).
+ */
+export function siguientePasoConsulta(params: {
+  cantidadFichas: number;
+  cantidadNumeros: number;
+}): SiguientePasoConsulta {
+  if (params.cantidadNumeros > 0) return "BUSCAR_CREDITOS";
+
+  return params.cantidadFichas > 0
+    ? "RESPONDER_SIN_CREDITOS"
+    : "CLIENTE_NO_ENCONTRADO";
+}
+
 /** Fila de `creditos` + su mora viva, tal como la leen las dos consultas. */
 export interface FilaCreditoMora {
   credito_id: number;
@@ -336,12 +524,16 @@ export interface FuentesHistorialMora {
     monto_nuevo: string | number | null;
     tipo_evento: string;
     numeroCreditoSifco: string;
+    /** Para rescatar el monto de la mora cerrada. Ver `montoDeMorasCerradas`. */
+    mora_id?: number | null;
+    monto_anterior?: string | number | null;
   }>;
   /** `moras_credito` con `activa = false`. */
   morasCerradas: Array<{
     fecha: Date | string;
     monto_mora: string | number | null;
     numeroCreditoSifco: string;
+    mora_id?: number | null;
   }>;
   /** `convenios_pago`. */
   convenios: Array<{
@@ -349,6 +541,56 @@ export interface FuentesHistorialMora {
     monto_total_convenio: string | number | null;
     numeroCreditoSifco: string;
   }>;
+}
+
+/**
+ * Cuánto debía cada mora cerrada JUSTO ANTES de que la apagaran, sacado de su
+ * evento de DESACTIVACION.
+ *
+ * 🔴 `moras_credito.monto_mora` NO sirve para esto: `latefee.ts` pone
+ * `monto_mora = "0"` en el mismo update que baja `activa` (ver las tres
+ * desactivaciones del motor), así que toda MORA_CERRADA salía con monto 0 y el
+ * asesor leía un historial de moras que nunca debieron nada. El monto real
+ * sobrevive en `moras_historial.monto_anterior` del evento DESACTIVACION.
+ *
+ * Se queda con el ÚLTIMO evento por mora: una mora puede desactivarse y
+ * reactivarse, y lo que cerró la fila es la última vez.
+ *
+ * ⚠️ Puede no haber evento, y entonces el monto queda en el 0 de la fila. El
+ * caso conocido es el convenio: `paymentAgreement.ts` borra la mora activa sin
+ * escribir en `moras_historial`. Ese historial no se pierde —viaja por la
+ * fuente CONVENIO, que es la única evidencia que sobrevive— así que acá no hay
+ * nada que inventar.
+ */
+export function montoDeMorasCerradas(
+  eventos: ReadonlyArray<{
+    fecha: Date | string;
+    tipo_evento: string;
+    mora_id?: number | null;
+    monto_anterior?: string | number | null;
+  }>
+): Map<number, string> {
+  const ultimo = new Map<number, { fecha: string; monto: string }>();
+
+  for (const fila of eventos) {
+    // La condonación individual también cierra la mora dejando monto_mora en
+    // "0", pero su rastro va en un evento CONDONACION (latefee.ts ~1227), no
+    // en DESACTIVACION: sin esta línea, la mora condonada salía cerrada en 0.
+    if (
+      fila.tipo_evento !== "DESACTIVACION" &&
+      fila.tipo_evento !== "CONDONACION"
+    )
+      continue;
+    if (fila.mora_id === null || fila.mora_id === undefined) continue;
+
+    const fecha = aISO(fila.fecha);
+    const previo = ultimo.get(fila.mora_id);
+    if (previo && previo.fecha >= fecha) continue;
+
+    ultimo.set(fila.mora_id, { fecha, monto: aMonto(fila.monto_anterior) });
+  }
+
+  return new Map([...ultimo].map(([moraId, { monto }]) => [moraId, monto]));
 }
 
 /**
@@ -367,16 +609,28 @@ export interface FuentesHistorialMora {
 export function construirHistorialMora(
   fuentes: FuentesHistorialMora
 ): EventoHistorialMora[] {
+  const montoDesactivada = montoDeMorasCerradas(fuentes.eventos);
+
   const eventos: EventoHistorialMora[] = [
     ...fuentes.eventos.map((fila) => ({
       fecha: aISO(fila.fecha),
-      monto: aMonto(fila.monto_nuevo),
+      // En la CONDONACION el monto que importa es lo condonado: latefee deja
+      // monto_nuevo en 0 y el original viaja en monto_anterior. Con
+      // monto_nuevo, la fila decía "condonación de 0".
+      monto: aMonto(
+        fila.tipo_evento === "CONDONACION" && fila.monto_anterior != null
+          ? fila.monto_anterior
+          : fila.monto_nuevo
+      ),
       numeroCreditoSifco: fila.numeroCreditoSifco,
       evento: fila.tipo_evento,
     })),
     ...fuentes.morasCerradas.map((fila) => ({
       fecha: aISO(fila.fecha),
-      monto: aMonto(fila.monto_mora),
+      monto:
+        (fila.mora_id !== null && fila.mora_id !== undefined
+          ? montoDesactivada.get(fila.mora_id)
+          : undefined) ?? aMonto(fila.monto_mora),
       numeroCreditoSifco: fila.numeroCreditoSifco,
       evento: "MORA_CERRADA",
     })),

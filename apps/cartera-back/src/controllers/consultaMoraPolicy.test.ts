@@ -3,14 +3,20 @@ import {
   construirHistorialMora,
   construirRespuesta,
   construirVeredicto,
+  cotaDelPresupuesto,
   esCreditoInsoluto,
   fichasDelDpi,
   seleccionarFichasDelDpi,
   fusionarCreditosPorId,
+  montoDeMorasCerradas,
   nombreClienteSifco,
+  numerosEspejoConPresupuesto,
   respuestaClienteNoEncontrado,
+  rolPuedeConsultarMora,
   respuestaServicioNoDisponible,
+  siguientePasoConsulta,
   unirNumerosCredito,
+  validarDpiConsulta,
   type CreditoConsultaMora,
   type FilaCreditoMora,
 } from "./consultaMoraPolicy";
@@ -238,6 +244,20 @@ describe("unión de números de crédito", () => {
     expect(unirNumerosCredito([], undefined)).toEqual([]);
   });
 
+  it("el espejo con filas NO descarta lo que trae el API: se unen", () => {
+    // La misma unión la usa `obtenerNumerosPrestamo` para juntar el espejo
+    // `sifco.prestamos` con la respuesta del API. Antes el espejo cortaba la
+    // consulta apenas devolvía algo, y un espejo PARCIALMENTE atrasado —tiene
+    // el préstamo viejo, le falta el que acaba de caer en mora— armaba el
+    // veredicto sobre media cartera y salía SIN_MORA.
+    expect(
+      unirNumerosCredito(
+        ["01010214124060"],
+        ["01010214124060", "01010214115650"],
+      ).sort(),
+    ).toEqual(["01010214115650", "01010214124060"]);
+  });
+
   it("el cliente sin ficha en SIFCO llega igual por los números del CRM", () => {
     // SIFCO no devolvió nada porque no tiene ficha suya; los créditos nacieron
     // todos en el CRM. Sin esta unión no habría un solo número que consultar.
@@ -245,6 +265,53 @@ describe("unión de números de crédito", () => {
       "CRM-abc",
       "insoluto-9",
     ]);
+  });
+});
+
+describe("siguiente paso de la consulta", () => {
+  it("con números que mirar va a buscar los créditos", () => {
+    expect(
+      siguientePasoConsulta({ cantidadFichas: 1, cantidadNumeros: 2 }),
+    ).toBe("BUSCAR_CREDITOS");
+  });
+
+  it("el cliente sin ficha pero con números del CRM también se busca", () => {
+    expect(
+      siguientePasoConsulta({ cantidadFichas: 0, cantidadNumeros: 1 }),
+    ).toBe("BUSCAR_CREDITOS");
+  });
+
+  it("ficha válida sin un solo préstamo es un cliente conocido y al día", () => {
+    // 🔴 El caso que salía CLIENTE_NO_ENCONTRADO tirando la ficha: el core sí
+    // sabe quién es, solo que no tiene créditos. Responder "no es cliente"
+    // borraba un dato cierto y le negaba al CRM el nombre que ya tenía.
+    expect(
+      siguientePasoConsulta({ cantidadFichas: 1, cantidadNumeros: 0 }),
+    ).toBe("RESPONDER_SIN_CREDITOS");
+  });
+
+  it("ni ficha ni números: recién ahí el DPI no le consta a nadie", () => {
+    expect(
+      siguientePasoConsulta({ cantidadFichas: 0, cantidadNumeros: 0 }),
+    ).toBe("CLIENTE_NO_ENCONTRADO");
+  });
+
+  it("el cliente conocido y sin créditos sale encontrado y SIN_MORA", () => {
+    // Lo que el controller arma cuando el paso es RESPONDER_SIN_CREDITOS.
+    const respuesta = construirRespuesta({
+      cliente: { codigoClienteSifco: "4821", nombre: "ANA LOPEZ" },
+      creditos: [],
+      historialMora: [],
+      consultadoEn: CONSULTADO_EN,
+    });
+
+    expect(respuesta.encontrado).toBeTrue();
+    expect(respuesta.motivo).toBe("SIN_MORA");
+    expect(respuesta.puedeContinuar).toBeTrue();
+    expect(respuesta.cliente).toEqual({
+      codigoClienteSifco: "4821",
+      nombre: "ANA LOPEZ",
+    });
   });
 });
 
@@ -439,6 +506,283 @@ describe("historial de mora compuesto", () => {
       ["CONVENIO", "2026-03-21T02:00:00.000Z"],
       ["INCREMENTO", "2026-03-20T23:00:00.000Z"],
     ]);
+  });
+});
+
+describe("monto de la mora cerrada", () => {
+  const moraCerrada = (mora_id: number | null) => ({
+    fecha: new Date("2026-04-01T00:00:00.000Z"),
+    monto_mora: "0",
+    numeroCreditoSifco: "A",
+    mora_id,
+  });
+
+  it("🔴 usa el monto_anterior de la DESACTIVACION, no el 0 que dejó latefee", () => {
+    // `latefee.ts` pone monto_mora = "0" en el mismo update que apaga la mora,
+    // así que toda MORA_CERRADA salía en 0 y el asesor leía un historial de
+    // moras que nunca debieron nada.
+    const historial = construirHistorialMora({
+      eventos: [
+        {
+          fecha: new Date("2026-04-01T00:00:00.000Z"),
+          monto_nuevo: "0",
+          monto_anterior: "735.50",
+          mora_id: 7,
+          tipo_evento: "DESACTIVACION",
+          numeroCreditoSifco: "A",
+        },
+      ],
+      morasCerradas: [moraCerrada(7)],
+      convenios: [],
+    });
+
+    const cerrada = historial.find((e) => e.evento === "MORA_CERRADA");
+    expect(cerrada?.monto).toBe("735.50");
+  });
+
+  it("se queda con la ÚLTIMA desactivación: una mora puede revivir y volver a cerrarse", () => {
+    const historial = construirHistorialMora({
+      eventos: [
+        {
+          fecha: new Date("2026-02-01T00:00:00.000Z"),
+          monto_nuevo: "0",
+          monto_anterior: "100.00",
+          mora_id: 7,
+          tipo_evento: "DESACTIVACION",
+          numeroCreditoSifco: "A",
+        },
+        {
+          fecha: new Date("2026-04-01T00:00:00.000Z"),
+          monto_nuevo: "0",
+          monto_anterior: "980.00",
+          mora_id: 7,
+          tipo_evento: "DESACTIVACION",
+          numeroCreditoSifco: "A",
+        },
+      ],
+      morasCerradas: [moraCerrada(7)],
+      convenios: [],
+    });
+
+    expect(historial.find((e) => e.evento === "MORA_CERRADA")?.monto).toBe(
+      "980.00"
+    );
+  });
+
+  it("no toma el monto de OTRA mora ni de un evento que no es DESACTIVACION", () => {
+    const historial = construirHistorialMora({
+      eventos: [
+        {
+          fecha: new Date("2026-03-01T00:00:00.000Z"),
+          monto_nuevo: "500.00",
+          monto_anterior: "400.00",
+          mora_id: 7,
+          tipo_evento: "INCREMENTO",
+          numeroCreditoSifco: "A",
+        },
+        {
+          fecha: new Date("2026-03-15T00:00:00.000Z"),
+          monto_nuevo: "0",
+          monto_anterior: "1200.00",
+          mora_id: 99,
+          tipo_evento: "DESACTIVACION",
+          numeroCreditoSifco: "A",
+        },
+      ],
+      morasCerradas: [moraCerrada(7)],
+      convenios: [],
+    });
+
+    expect(historial.find((e) => e.evento === "MORA_CERRADA")?.monto).toBe("0");
+  });
+
+  it("sin evento de desactivación queda el monto de la fila: el convenio borra sin rastro", () => {
+    // `paymentAgreement.ts` borra la mora activa sin escribir en
+    // moras_historial. Ese historial no se pierde: viaja por la fuente CONVENIO.
+    const historial = construirHistorialMora({
+      eventos: [],
+      morasCerradas: [moraCerrada(7)],
+      convenios: [],
+    });
+
+    expect(historial.find((e) => e.evento === "MORA_CERRADA")?.monto).toBe("0");
+  });
+
+  it("el evento con mora_id nulo no rescata a nadie", () => {
+    // `moras_historial.mora_id` es ON DELETE SET NULL: sin él no hay a qué mora
+    // atribuirle el monto.
+    const mapa = montoDeMorasCerradas([
+      {
+        fecha: new Date("2026-04-01T00:00:00.000Z"),
+        tipo_evento: "DESACTIVACION",
+        mora_id: null,
+        monto_anterior: "500.00",
+      },
+    ]);
+
+    expect(mapa.size).toBe(0);
+  });
+});
+
+describe("presupuesto del espejo de SIFCO", () => {
+  it("devuelve los números cuando el espejo contesta a tiempo", async () => {
+    const numeros = await numerosEspejoConPresupuesto(
+      async () => ["01010214124060"],
+      1000,
+      () => {
+        throw new Error("no debía avisar");
+      }
+    );
+
+    expect(numeros).toEqual(["01010214124060"]);
+  });
+
+  it("⚠️ al vencerse sigue con el API: lista vacía y aviso, NO fail-closed", async () => {
+    // El espejo es un cache del core; el API es la fuente autoritativa viva, así
+    // que seguir sin él deja la lista completa, no media lista.
+    const avisos: unknown[] = [];
+
+    const numeros = await numerosEspejoConPresupuesto(
+      () => new Promise<string[]>(() => {}),
+      10,
+      (detalle) => avisos.push(detalle)
+    );
+
+    expect(numeros).toEqual([]);
+    expect(avisos).toHaveLength(1);
+  });
+
+  it("el espejo que falla tampoco tumba la consulta", async () => {
+    const avisos: unknown[] = [];
+
+    const numeros = await numerosEspejoConPresupuesto(
+      async () => {
+        throw new Error("pool agotado");
+      },
+      1000,
+      (detalle) => avisos.push(detalle)
+    );
+
+    expect(numeros).toEqual([]);
+    expect((avisos[0] as Error).message).toBe("pool agotado");
+  });
+});
+
+describe("presupuesto global de la consulta", () => {
+  const VENCE_EN = 1_000_000;
+
+  it("un paso no puede pedir más de lo que queda del presupuesto", () => {
+    // Quedan 3s y el paso pediría 10s: se queda con los 3s. Antes los topes
+    // eran aditivos y el paso arrancaba sus 10s completos por más que el
+    // presupuesto de la consulta ya estuviera casi consumido.
+    expect(cotaDelPresupuesto(10000, VENCE_EN, VENCE_EN - 3000)).toBe(3000);
+  });
+
+  it("con presupuesto de sobra manda la cota interna del paso", () => {
+    // El espejo no se come el presupuesto entero por el hecho de que sobre.
+    expect(cotaDelPresupuesto(5000, VENCE_EN, VENCE_EN - 15000)).toBe(5000);
+  });
+
+  it("presupuesto agotado devuelve null: el llamador corta fail-closed", () => {
+    expect(cotaDelPresupuesto(10000, VENCE_EN, VENCE_EN)).toBeNull();
+    expect(cotaDelPresupuesto(10000, VENCE_EN, VENCE_EN + 1)).toBeNull();
+  });
+
+  it("🔴 la suma de los pasos deja de crecer con cada ficha", () => {
+    // Simulación del camino real: identificación (10s) + espejo (5s) + API
+    // (10s) por cada ficha, secuencial, con un presupuesto global de 15s. Antes
+    // esto daba 25s con una ficha y 40s con dos; ahora el total está acotado.
+    const PRESUPUESTO = 15000;
+    let ahora = 0;
+    const venceEn = PRESUPUESTO;
+
+    const correr = (cota: number) => {
+      const ms = cotaDelPresupuesto(cota, venceEn, ahora);
+      if (ms === null) return false;
+      // Peor caso: el paso consume toda su cota.
+      ahora += ms;
+      return true;
+    };
+
+    correr(10000); // identificación
+    for (const _ficha of [1, 2, 3]) {
+      correr(5000); // espejo
+      correr(10000); // API
+    }
+
+    expect(ahora).toBeLessThanOrEqual(PRESUPUESTO);
+    // Y el paso siguiente ya no arranca: fail-closed en vez de seguir sumando.
+    expect(cotaDelPresupuesto(10000, venceEn, ahora)).toBeNull();
+  });
+});
+
+describe("validación del DPI antes de tocar SIFCO", () => {
+  it("acepta el DPI de 13 dígitos y lo devuelve normalizado", () => {
+    expect(validarDpiConsulta(" 2543 87621 0101 ")).toEqual({
+      valido: true,
+      dpi: "2543876210101",
+    });
+  });
+
+  it("🔴 lo que se normaliza a nada es un error de validación, no una caída", () => {
+    // `minLength: 1` los dejaba pasar: se normalizaban a "" y el fallo aguas
+    // abajo volvía como 200 SERVICIO_NO_DISPONIBLE, que le dice al asesor
+    // "reintentá" cuando lo que hay que hacer es corregir el dato.
+    for (const basura of ["   ", "---", " - "]) {
+      const resultado = validarDpiConsulta(basura);
+      expect(resultado.valido).toBeFalse();
+      expect(resultado.valido === false && resultado.mensaje).toContain("13");
+    }
+  });
+
+  it("🔴 rechaza la forma antes de normalizar: el strip disimulaba la basura", () => {
+    // `abc1234567890123xyz` pasaba: normalizar borra la evidencia y lo que
+    // quedaba eran 13 dígitos impecables. El DPI se escribe con dígitos y, a lo
+    // sumo, espacios o guiones; cualquier otra cosa es un campo a corregir.
+    for (const forma of [
+      "abc1234567890123xyz",
+      "2543-87621-0101'",
+      "2543/87621/0101",
+      "abc",
+    ]) {
+      const resultado = validarDpiConsulta(forma);
+      expect(resultado.valido).toBeFalse();
+      expect(resultado.valido === false && resultado.mensaje).toContain(
+        "dígitos, espacios y guiones"
+      );
+    }
+  });
+
+  it("sigue aceptando los separadores con que la gente escribe el DPI", () => {
+    expect(validarDpiConsulta("2543-87621-0101").valido).toBeTrue();
+    expect(validarDpiConsulta("2543 87621 0101").valido).toBeTrue();
+  });
+
+  it("exige el largo exacto: ni de más ni de menos", () => {
+    for (const largo of ["123456789012", "12345678901234"]) {
+      const resultado = validarDpiConsulta(largo);
+      expect(resultado.valido).toBeFalse();
+      expect(resultado.valido === false && resultado.mensaje).toContain(
+        `se recibieron ${largo.length}`
+      );
+    }
+  });
+});
+
+describe("quién puede preguntar por la mora de un DPI", () => {
+  it("deja pasar a los tres roles propios de cartera", () => {
+    for (const rol of ["ADMIN", "CONTA", "ASESOR"]) {
+      expect(rolPuedeConsultarMora(rol)).toBeTrue();
+    }
+  });
+
+  it("🔴 deja afuera al INVESTOR del portal y a lo que no trae rol", () => {
+    // `authMiddleware` solo valida la firma: sin este gate, el token de un
+    // cliente del portal pescaba la historia crediticia de cualquier DPI —y
+    // podía colgarle créditos ajenos por `numerosCreditoConocidos`.
+    for (const rol of ["INVESTOR", "", null, undefined, 1, "admin"]) {
+      expect(rolPuedeConsultarMora(rol)).toBeFalse();
+    }
   });
 });
 

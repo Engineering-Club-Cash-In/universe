@@ -16,10 +16,17 @@ import type {
 	SatVehiculosPropiosResponse,
 	VehiculoSatPropio,
 } from "../controllers/satVehiculos";
+import {
+	getGuatemalaMonthWindow,
+	toDateStrGT,
+} from "../lib/guatemala-month-window";
 
 const HORAS_ANTIDUPLICADO = 20;
 const MINUTOS_CORRIDA_EN_PROCESO = 10;
 const MAX_EVIDENCIA = 20000;
+// Namespace 2 queda reservado para la verificación SAT. La conexión que
+// adquiere este candado se mantiene viva durante toda la corrida de Puppeteer.
+const SAT_VERIFICACION_LOCK = [2, 1] as const;
 
 let ejecucionLocalActiva: Promise<ResumenVerificacion> | null = null;
 
@@ -39,6 +46,14 @@ export interface ResumenVerificacion {
 }
 
 type EstadoCorrida = "ok" | "error" | "codigo_requerido" | "bloqueado";
+
+interface AdvisoryLockClient {
+	query<T extends object>(
+		text: string,
+		values?: unknown[],
+	): Promise<{ rows: T[] }>;
+	release(): void;
+}
 
 /**
  * Traduce el estado que reporta el scraper al enum de la corrida. Explícito
@@ -107,6 +122,38 @@ async function hayCorridaEnProceso(): Promise<boolean> {
 		.limit(1);
 
 	return Boolean(activa);
+}
+
+async function adquirirCandadoDistribuido(): Promise<AdvisoryLockClient | null> {
+	const client = (await db.$client.connect()) as AdvisoryLockClient;
+
+	try {
+		const { rows } = await client.query<{ acquired: boolean }>(
+			"SELECT pg_try_advisory_lock($1, $2) AS acquired",
+			[...SAT_VERIFICACION_LOCK],
+		);
+
+		if (!rows[0]?.acquired) {
+			client.release();
+			return null;
+		}
+
+		return client;
+	} catch (error) {
+		client.release();
+		throw error;
+	}
+}
+
+async function liberarCandadoDistribuido(client: AdvisoryLockClient) {
+	try {
+		await client.query(
+			"SELECT pg_advisory_unlock($1, $2)",
+			[...SAT_VERIFICACION_LOCK],
+		);
+	} finally {
+		client.release();
+	}
 }
 
 /** Universo esperado: lo que el CRM da por propiedad de Cash In y tiene placa. */
@@ -209,6 +256,10 @@ export function construirResultados(
 	return filas;
 }
 
+export function esAlertaSat(resultado: Veredicto): boolean {
+	return resultado === "inactivo" || resultado === "no_aparece_en_sat";
+}
+
 async function ejecutarVerificacionVehiculosEnSat(
 	opciones: {
 		origen?: "cron" | "manual";
@@ -302,9 +353,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 			);
 		}
 
-		const totalAlertas = filas.filter(
-			(f) => f.resultado === "no_aparece_en_sat" || f.resultado === "inactivo",
-		).length;
+		const totalAlertas = filas.filter((f) => esAlertaSat(f.resultado)).length;
 
 		await db
 			.update(satVerificacionCorridas)
@@ -401,9 +450,44 @@ export async function obtenerUltimaVerificacion() {
 					: "La consulta contra SAT no pudo completarse.",
 		},
 		resultados: filas,
-		alertas: filas.filter((f) => f.resultado !== "no_registrado_interno"),
+		alertas: filas.filter((f) => esAlertaSat(f.resultado)),
 		descubiertos: filas.filter((f) => f.resultado === "no_registrado_interno"),
 	};
+}
+
+/** Momento en que vence la corrida mensual del primer día de cada mes. */
+export function debeEjecutarseVerificacionSatMensual(now: Date): boolean {
+	const [year, month] = toDateStrGT(now).split("-").map(Number);
+	const { startOfMonth } = getGuatemalaMonthWindow(year, month);
+	const vencimiento = new Date(startOfMonth.getTime() + 3 * 60 * 60 * 1000);
+
+	return now >= vencimiento;
+}
+
+/**
+ * Recupera la corrida mensual si el servidor arrancó después del horario
+ * programado. Solo considera exitosa una corrida automática del mes actual.
+ */
+export async function verificarSatMensualPendiente(now = new Date()) {
+	if (!debeEjecutarseVerificacionSatMensual(now)) return null;
+
+	const [year, month] = toDateStrGT(now).split("-").map(Number);
+	const { startOfMonth } = getGuatemalaMonthWindow(year, month);
+	const [corridaExitosa] = await db
+		.select({ id: satVerificacionCorridas.id })
+		.from(satVerificacionCorridas)
+		.where(
+			and(
+				eq(satVerificacionCorridas.estado, "ok"),
+				eq(satVerificacionCorridas.origen, "cron"),
+				gte(satVerificacionCorridas.iniciadaAt, startOfMonth),
+			),
+		)
+		.limit(1);
+
+	if (corridaExitosa) return null;
+
+	return verificarVehiculosEnSat({ origen: "cron" });
 }
 
 /**
@@ -424,7 +508,25 @@ export function verificarVehiculosEnSat(
 		});
 	}
 
-	const ejecucion = ejecutarVerificacionVehiculosEnSat(opciones);
+	const ejecucion = (async () => {
+		const candado = await adquirirCandadoDistribuido();
+		if (!candado) {
+			return {
+				corridaId: null,
+				estado: "omitida",
+				totalEsperados: 0,
+				totalReportadosSat: 0,
+				totalAlertas: 0,
+				omitida: "Ya hay una verificación SAT en proceso en otra instancia.",
+			};
+		}
+
+		try {
+			return await ejecutarVerificacionVehiculosEnSat(opciones);
+		} finally {
+			await liberarCandadoDistribuido(candado);
+		}
+	})();
 	ejecucionLocalActiva = ejecucion;
 	return ejecucion.finally(() => {
 		if (ejecucionLocalActiva === ejecucion) ejecucionLocalActiva = null;

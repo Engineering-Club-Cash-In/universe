@@ -297,6 +297,21 @@ export async function leerTablaVehiculos(frame: Frame): Promise<VehiculoSatPropi
 		};
 
 		return [...tabla.querySelectorAll("tbody tr")]
+			.filter((fila) => {
+				const celdas = [...fila.querySelectorAll("td")];
+				const texto = (fila.textContent || "").trim().replace(/\s+/g, " ");
+
+				// PrimeFaces renderiza una fila especial para estados vacíos o de
+				// carga. No tiene las diez columnas del registro real y no debe
+				// convertirse en un vehículo con la frase de la interfaz como placa.
+				return (
+					celdas.length >= 10 &&
+					!fila.classList.contains("ui-datatable-empty-message") &&
+					!fila.querySelector(".ui-datatable-empty-message") &&
+					!fila.querySelector("[colspan]") &&
+					!/no se encontraron registros|no hay registros|no records found/i.test(texto)
+				);
+			})
 			.map((fila) => {
 				const celdas = [...fila.querySelectorAll("td")];
 				const textos = celdas.map((celda) =>

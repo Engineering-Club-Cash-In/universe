@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { VehiculoSatPropio } from "../controllers/satVehiculos";
 import {
 	construirResultados,
+	debeEjecutarseVerificacionSatMensual,
+	esAlertaSat,
 	estadoCorridaDesdeSat,
 } from "./sat-verificacion-vehiculos";
 
@@ -172,5 +174,24 @@ describe("cruce de vehículos contra SAT", () => {
 			(f) => f.resultado === "no_aparece_en_sat" || f.resultado === "inactivo",
 		);
 		expect(alertas).toHaveLength(0);
+	});
+
+	test("solo clasifica como alerta los vehículos inactivos o ausentes en SAT", () => {
+		expect(esAlertaSat("activo_ok")).toBe(false);
+		expect(esAlertaSat("inactivo")).toBe(true);
+		expect(esAlertaSat("no_aparece_en_sat")).toBe(true);
+		expect(esAlertaSat("no_registrado_interno")).toBe(false);
+	});
+
+	test("marca como pendiente la corrida mensual después del horario del primer día", () => {
+		expect(
+			debeEjecutarseVerificacionSatMensual(new Date("2026-09-01T08:59:59.000Z")),
+		).toBe(false);
+		expect(
+			debeEjecutarseVerificacionSatMensual(new Date("2026-09-01T09:00:00.000Z")),
+		).toBe(true);
+		expect(
+			debeEjecutarseVerificacionSatMensual(new Date("2026-09-02T12:00:00.000Z")),
+		).toBe(true);
 	});
 });

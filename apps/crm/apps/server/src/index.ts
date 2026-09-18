@@ -37,7 +37,10 @@ import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
-import { verificarVehiculosEnSat } from "./jobs/sat-verificacion-vehiculos";
+import {
+	verificarSatMensualPendiente,
+	verificarVehiculosEnSat,
+} from "./jobs/sat-verificacion-vehiculos";
 import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
@@ -1179,6 +1182,7 @@ setTimeout(() => {
 	checkSeguimientosVencidos().catch(console.error);
 	checkCasosSinContacto(3).catch(console.error);
 	procesarSeguimientosRecurrentes().catch(console.error);
+	verificarSatMensualPendiente().catch(console.error);
 }, 10_000);
 
 // Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
@@ -1195,8 +1199,8 @@ function scheduleAtMidnightGT() {
 scheduleAtMidnightGT();
 
 // Verificación de vehículos en SAT: 03:00 GT (09:00 UTC) del día 1 de cada mes.
-// El job se despierta cada día pero solo actúa el 1; la guarda anti-duplicado
-// del propio job evita repetir si ya corrió con éxito.
+// Si el proceso inició después de esa hora, el catch-up de arranque cubre la
+// corrida pendiente; el timer conserva el disparo mensual normal.
 function scheduleVerificacionSatMensual() {
 	const now = new Date();
 	const next = new Date();

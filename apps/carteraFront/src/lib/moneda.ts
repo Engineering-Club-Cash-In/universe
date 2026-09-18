@@ -26,6 +26,39 @@ export const fmtQ = (v: unknown): string =>
  *    discreparía con el backend en cada monto negativo.
  */
 const aCentavos = (v: unknown): number | null => {
+  /**
+   * Si viene como TEXTO decimal se parsea directo a centavos, sin pasar por un
+   * `number` intermedio.
+   *
+   * El camino numérico de abajo usa `toPrecision(15)` para recortar los dígitos
+   * basura del double, y con más de 15 significativos eso recorta centavos
+   * REALES: `"12345678901234.56"` salía `12345678901234.6`, mientras el `Big`
+   * del backend los conserva. La columna es `numeric(18,2)`, así que el caso
+   * cabe en la base y los dos lados discrepaban.
+   *
+   * Los montos que llegan del backend son justamente strings (`"500.00"`), así
+   * que esta rama es la que corre casi siempre.
+   *
+   * ⚠️ El techo que queda NO es del parseo sino del `number`: los centavos son
+   * exactos hasta `Number.MAX_SAFE_INTEGER`, o sea ~Q90,071,992,547,409. Más
+   * arriba el valor ya no cabe en un double y ningún parseo lo arregla — haría
+   * falta una librería decimal en el front. `numeric(18,2)` admite más que eso,
+   * así que el límite se documenta en vez de taparse.
+   */
+  if (typeof v === "string") {
+    const m = /^\s*([+-]?)(\d*)(?:\.(\d*))?\s*$/.exec(v);
+    if (m && (m[2] || m[3])) {
+      const signo = m[1] === "-" ? -1 : 1;
+      const enteros = m[2] || "0";
+      const dec = (m[3] ?? "").padEnd(3, "0");
+      // Se toman dos decimales y el tercero decide el redondeo, alejándose del
+      // cero igual que el `ROUND_HALF_UP` de `big.js`.
+      const centavos = Number(enteros) * 100 + Number(dec.slice(0, 2));
+      const sube = Number(dec[2]) >= 5 ? 1 : 0;
+      return signo * (centavos + sube);
+    }
+  }
+
   const n = Number(v ?? 0);
   if (!Number.isFinite(n)) return null;
   const centavos = Number((n * 100).toPrecision(15));

@@ -76,3 +76,36 @@ describe("sumaQ", () => {
     expect(sumaQ([-1.005])).toBe(-1.01);
   });
 });
+
+describe("sumaQ con montos de muchos dígitos", () => {
+  it("🔴 un `numeric(18,2)` grande NO pierde los centavos", () => {
+    // `toPrecision(15)` recorta dígitos basura del double, pero con más de 15
+    // significativos recorta centavos REALES: `12345678901234.56` salía
+    // `12345678901234.6` y discrepaba con el `Big` del backend, que los conserva.
+    // La columna admite 18 dígitos, así que el caso cabe en la base.
+    expect(sumaQ(["12345678901234.56"])).toBe(12345678901234.56);
+  });
+
+  it("y sumarlos tampoco los pierde", () => {
+    expect(sumaQ(["12345678901234.56", "0.44"])).toBe(12345678901235);
+  });
+
+  it("el techo es el del `number`, no el del parseo: ~Q90 billones", () => {
+    // Medido: exacto hasta 15 significativos (Q12,345,678,901,234.56 sale
+    // exacto), y de ahí para arriba el valor ya no CABE en un double —
+    // Q123,456,789,012,345.67 vuelve como .69. Ningún parseo lo arregla: haría
+    // falta una librería decimal. `numeric(18,2)` admite más que eso, así que el
+    // techo queda documentado y no tapado.
+    expect(sumaQ(["12345678901234.56"])).toBe(12345678901234.56);
+    expect(sumaQ(["123456789012345.67"])).not.toBe(123456789012345.67);
+  });
+
+  it("sigue arreglando el `.xx5` que era el motivo original del helper", () => {
+    expect(sumaQ(["1.005"])).toBe(1.01);
+    expect(sumaQ([1.005])).toBe(1.01);
+  });
+
+  it("y el empate negativo sigue alejándose del cero como `big.js`", () => {
+    expect(sumaQ(["-1.005"])).toBe(-1.01);
+  });
+});

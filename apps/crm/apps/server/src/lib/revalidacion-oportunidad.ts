@@ -63,6 +63,35 @@ export type DecisionRevalidacion =
 	/** Nunca cruzó el 30%: no hay validación que invalidar. */
 	| { tipo: "nada" };
 
+/**
+ * ¿Esta edición SACA a la oportunidad de `lost`?
+ *
+ * 🔴 Antes se miraba solo `lost → open`, y el schema admite `on_hold`: la
+ * escapatoria se rearmaba en dos saltos —perder, cambiar el DPI, pasar a
+ * `on_hold`, y de ahí a `open`—, porque el segundo salto ya no sale de `lost` y
+ * el primero no era "open". Con dos llamadas la revalidación no se disparaba
+ * nunca y el expediente volvía a estar vivo con la evidencia de la identidad
+ * vieja, que es justo lo que el reset existe para impedir.
+ *
+ * La pregunta correcta es la salida, no el destino: `lost` es el único estado
+ * donde el DPI se puede cambiar (las perdidas no candan, por decisión de
+ * producto), así que cualquier estado que no sea `lost` devuelve la oportunidad
+ * a la vida y tiene que pagar la revalidación. `lost → won` incluido: ahí las
+ * salvaguardas de `decidirRevalidacion` deciden que no se toca y solo se avisa,
+ * pero el aviso queda.
+ *
+ * Una edición que no manda `status` no saca a nadie de ningún lado.
+ */
+export function saleDeLaPerdida(
+	statusActual: string | null | undefined,
+	statusNuevo: string | null | undefined,
+): boolean {
+	if (statusActual !== "lost") return false;
+	if (statusNuevo === null || statusNuevo === undefined) return false;
+
+	return statusNuevo !== "lost";
+}
+
 export function decidirRevalidacion(
 	oportunidad: OportunidadParaRevalidar,
 ): DecisionRevalidacion {

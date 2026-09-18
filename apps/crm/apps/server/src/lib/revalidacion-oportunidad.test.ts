@@ -1,21 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/node-postgres";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { opportunities } from "../db/schema";
 import type { AuditEntry } from "./audit";
 import {
 	decidirRevalidacion,
+	documentosDeIdentidadVigentes,
+	faltaPorIdentidadRevalidada,
+	MENSAJE_DPI_DESACTUALIZADO,
 	MOTIVO_AVISO,
 	MOTIVO_SALVAGUARDA,
 	PORCENTAJE_ETAPA_ANALISIS,
 	PORCENTAJE_SIN_RETROCESO,
 	parcheDeRevalidacion,
 	revalidarOportunidades,
-	documentosDeIdentidadVigentes,
-	faltaPorIdentidadRevalidada,
-	MENSAJE_DPI_DESACTUALIZADO,
+	saleDeLaPerdida,
 	separarPorSalvaguarda,
 	sqlResetPermitido,
 } from "./revalidacion-oportunidad";
@@ -129,6 +130,51 @@ describe("a quién hay que revalidar", () => {
 				maxHistoricoClosurePercentage: 89,
 			}),
 		).toEqual({ tipo: "resetear" });
+	});
+});
+
+/**
+ * 🔴 La escapatoria se rearmaba en dos saltos. Mirando solo `lost → open`, el
+ * camino `lost → on_hold → open` no disparaba la revalidación NUNCA: el primer
+ * salto no va a "open" y el segundo ya no sale de "lost". El expediente volvía
+ * a estar vivo con la evidencia de la identidad vieja.
+ */
+describe("salir de una perdida: cualquier destino cuesta revalidar", () => {
+	test("la transición directa sigue contando", () => {
+		expect(saleDeLaPerdida("lost", "open")).toBe(true);
+	});
+
+	test("🔴 el primer salto del rodeo de dos pasos también cuenta", () => {
+		expect(saleDeLaPerdida("lost", "on_hold")).toBe(true);
+	});
+
+	test("el segundo salto ya no: la oportunidad salió de lost en el primero", () => {
+		// Y ahí está el punto: con el primero cubierto, el rodeo no gana nada.
+		expect(saleDeLaPerdida("on_hold", "open")).toBe(false);
+	});
+
+	test("ganarla directo desde perdida también sale de lost", () => {
+		// Las salvaguardas de `decidirRevalidacion` deciden después que a una won
+		// no se la toca, pero la maniobra queda avisada en la bitácora.
+		expect(saleDeLaPerdida("lost", "won")).toBe(true);
+		expect(
+			decidirRevalidacion({ status: "won", closurePercentage: 40 }),
+		).toEqual({ tipo: "solo_aviso", razon: "won" });
+	});
+
+	test("quedarse en lost, o no mandar status, no saca a nadie", () => {
+		expect(saleDeLaPerdida("lost", "lost")).toBe(false);
+		expect(saleDeLaPerdida("lost", undefined)).toBe(false);
+		expect(saleDeLaPerdida("lost", null)).toBe(false);
+	});
+
+	test("la que nunca estuvo perdida no revalida por cambiar de estado", () => {
+		// Si no, toda edición de status pagaría un reset y las solicitudes vivas
+		// quedarían rebotando a análisis sin que nadie haya tocado una identidad.
+		expect(saleDeLaPerdida("open", "on_hold")).toBe(false);
+		expect(saleDeLaPerdida("open", "won")).toBe(false);
+		expect(saleDeLaPerdida(null, "open")).toBe(false);
+		expect(saleDeLaPerdida(undefined, "open")).toBe(false);
 	});
 });
 
@@ -494,8 +540,15 @@ describe("cableado de la revalidación", () => {
 		expect(crm).toContain("reabrir_oportunidad_revalidacion");
 		expect(
 			crm,
-			"updateOpportunity debería detectar la transición lost → open",
-		).toContain('currentOpportunity[0].status === "lost"');
+			"updateOpportunity debería detectar CUALQUIER salida de lost con `saleDeLaPerdida`, " +
+				"no solo la transición a open: con `lost → on_hold → open` la revalidación no se disparaba.",
+		).toContain("saleDeLaPerdida(");
+	});
+
+	test("la decisión se toma sobre el status al que la oportunidad VUELVE", () => {
+		// Con un "open" fijo, un `lost → won` se evaluaba como si volviera a open y
+		// la salvaguarda de las ganadas —contratos ya firmados— no lo reconocía.
+		expect(crm).toContain("status: updateData.status ?? comoEsta.status");
 	});
 
 	test("el reset de la reapertura viaja en el MISMO UPDATE que el status", () => {

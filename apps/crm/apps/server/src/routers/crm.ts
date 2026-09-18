@@ -99,18 +99,6 @@ import {
 	type ResultadoCandadoDpi,
 } from "../lib/lead-dpi-lock";
 import {
-	decidirRevalidacion,
-	type DecisionRevalidacion,
-	documentosDeIdentidadVigentes,
-	faltaPorIdentidadRevalidada,
-	MENSAJE_DPI_DESACTUALIZADO,
-	MOTIVO_AVISO,
-	obtenerEtapaDeAnalisis,
-	type OportunidadParaRevalidar,
-	parcheDeRevalidacion,
-	revalidarOportunidades,
-} from "../lib/revalidacion-oportunidad";
-import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
@@ -134,6 +122,19 @@ import {
 	type WonOpportunityFrozenField,
 } from "../lib/opportunity-stage-guard";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
+import {
+	type DecisionRevalidacion,
+	decidirRevalidacion,
+	documentosDeIdentidadVigentes,
+	faltaPorIdentidadRevalidada,
+	MENSAJE_DPI_DESACTUALIZADO,
+	MOTIVO_AVISO,
+	type OportunidadParaRevalidar,
+	obtenerEtapaDeAnalisis,
+	parcheDeRevalidacion,
+	revalidarOportunidades,
+	saleDeLaPerdida,
+} from "../lib/revalidacion-oportunidad";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	buildUploadPrefix,
@@ -3243,8 +3244,13 @@ export const crmRouter = {
 			// El reset viaja en ESTE MISMO UPDATE, junto al cambio de status: en dos
 			// sentencias quedaría una ventana con la oportunidad ya reabierta y
 			// todavía marcada como validada.
-			const reabreUnaPerdida =
-				currentOpportunity[0].status === "lost" && updateData.status === "open";
+			// 🔴 CUALQUIER salida de `lost`, no solo `lost → open`: el schema admite
+			// `on_hold` y en dos saltos (`lost → on_hold → open`) la revalidación no
+			// se disparaba nunca. Ver `saleDeLaPerdida`.
+			const reabreUnaPerdida = saleDeLaPerdida(
+				currentOpportunity[0].status,
+				updateData.status,
+			);
 
 			let parcheRevalidacion: ReturnType<typeof parcheDeRevalidacion> | null =
 				null;
@@ -3259,9 +3265,14 @@ export const crmRouter = {
 				});
 
 				if (comoEsta) {
-					// La decisión se toma sobre el status al que VUELVE ("open"), no
-					// sobre el "lost" del que sale: es el estado con el que va a quedar.
-					oportunidadRevalidada = { ...comoEsta, status: "open" };
+					// La decisión se toma sobre el status al que VUELVE, no sobre el
+					// "lost" del que sale: es el estado con el que va a quedar. Y es el
+					// status REAL de la request, no un "open" fijo — con `lost → won`
+					// la salvaguarda de las ganadas tiene que poder reconocerla.
+					oportunidadRevalidada = {
+						...comoEsta,
+						status: updateData.status ?? comoEsta.status,
+					};
 					decisionRevalidacion = decidirRevalidacion(oportunidadRevalidada);
 
 					if (decisionRevalidacion.tipo === "resetear") {

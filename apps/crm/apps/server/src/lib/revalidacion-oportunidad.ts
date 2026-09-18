@@ -98,12 +98,78 @@ export const MOTIVO_AVISO: Record<"won" | "formalizacion_final", string> = {
  * propia sentencia: el reset y el cambio de status tienen que viajar juntos o
  * queda una ventana con la oportunidad reabierta y todavía validada.
  */
-export function parcheDeRevalidacion(etapaDeAnalisisId: string) {
+export function parcheDeRevalidacion(
+	etapaDeAnalisisId: string,
+	revalidadaEn: Date = new Date(),
+) {
 	return {
 		stageId: etapaDeAnalisisId,
 		analysisStatus: "pending" as const,
 		creditDetailApproved: false,
+		// 🔴 La marca viaja en el MISMO UPDATE que el reset y solo alcanza a las
+		// oportunidades que de verdad se resetearon. Es la mitad que le faltaba al
+		// reset: mandar el expediente de vuelta a análisis no servía de nada
+		// mientras el DPI escaneado de la identidad VIEJA siguiera satisfaciendo el
+		// requisito. `approveOpportunityAnalysis` lee esta marca y deja de contar
+		// los documentos de identidad anteriores a ella (ver
+		// `documentosDeIdentidadVigentes`).
+		identityRevalidatedAt: revalidadaEn,
 	};
+}
+
+/**
+ * Los tipos de documento que acreditan la identidad del TITULAR.
+ *
+ * `dpi` es el del flujo vigente; `identification` es la categoría general
+ * heredada que sigue viva en expedientes viejos. Los demás documentos —recibos,
+ * estados de cuenta, papeles del vehículo— no dicen quién es el solicitante y
+ * no tienen por qué re-subirse porque el DPI haya cambiado.
+ */
+export const TIPOS_DOCUMENTO_IDENTIDAD = ["dpi", "identification"] as const;
+
+export const MENSAJE_DPI_DESACTUALIZADO =
+	"La identidad de esta solicitud fue revalidada (se corrigió o cambió el DPI), así que el documento de identidad que hay en el expediente es de la identidad anterior y ya no sirve para aprobar. Subí el DPI actualizado del solicitante y volvé a intentarlo.";
+
+/**
+ * Los documentos que todavía acreditan la identidad VIGENTE.
+ *
+ * Un documento de identidad subido ANTES de la revalidación es del DPI anterior:
+ * sigue en el expediente —el historial no se toca— pero deja de satisfacer el
+ * requisito. Sin esta regla, el reset se podía deshacer aprobando de nuevo con
+ * el DPI escaneado de otra persona, que es justo lo que el reset existe para
+ * impedir.
+ *
+ * Sin marca (`null`) no hay nada que comparar y pasa todo, como siempre.
+ */
+export function documentosDeIdentidadVigentes<
+	T extends { documentType: string; uploadedAt: Date },
+>(documentos: readonly T[], revalidadaEn: Date | null | undefined): T[] {
+	if (!revalidadaEn) return [...documentos];
+
+	const esIdentidad = new Set<string>(TIPOS_DOCUMENTO_IDENTIDAD);
+
+	return documentos.filter(
+		(documento) =>
+			!esIdentidad.has(documento.documentType) ||
+			documento.uploadedAt.getTime() >= revalidadaEn.getTime(),
+	);
+}
+
+/**
+ * ¿Lo que falta es el DPI, y falta porque quedó viejo y no porque nunca se
+ * subió? Decide cuál de los dos mensajes leerá el analista.
+ */
+export function faltaPorIdentidadRevalidada(
+	tiposFaltantes: readonly string[],
+	tiposSubidos: readonly string[],
+): boolean {
+	const subidos = new Set(tiposSubidos);
+
+	return tiposFaltantes.some(
+		(tipo) =>
+			(TIPOS_DOCUMENTO_IDENTIDAD as readonly string[]).includes(tipo) &&
+			subidos.has(tipo),
+	);
 }
 
 /**

@@ -21,8 +21,6 @@ let lastInserted: any[] = [];
 //   tx.insert().values(vals)[.returning()]  -> capturado en lastInserted
 //   tx.select().from().innerJoin().where()  -> inversionistas del espejo
 function makeTx() {
-  const inserted: any[] = [];
-  lastInserted = inserted;
   const tx: any = {
     update: () => ({
       set: () => ({
@@ -31,9 +29,10 @@ function makeTx() {
     }),
     insert: () => ({
       values: (vals: any) => {
-        inserted.push(vals);
-        const p: any = Promise.resolve([vals]);
-        p.returning = () => Promise.resolve([vals]);
+        const arr = Array.isArray(vals) ? vals : [vals];
+        lastInserted.push(...arr);
+        const p: any = Promise.resolve(arr);
+        p.returning = () => Promise.resolve(arr);
         return p;
       },
     }),
@@ -41,6 +40,12 @@ function makeTx() {
     select: () => ({
       from: () => ({
         innerJoin: () => ({ where: () => Promise.resolve(txEspejoRows) }),
+        where: () => {
+          const p: any = Promise.resolve([]);
+          p.orderBy = () => p;
+          p.for = () => p;
+          return p;
+        },
       }),
     }),
   };
@@ -124,5 +129,31 @@ describe("aceptarDevolucion", () => {
     // Nada se insertó: el throw ocurre antes del log y de los abonos.
     expect(lastInserted.find((v) => v.tipo === "CANCELACION")).toBeUndefined();
     expect(lastInserted).toHaveLength(0);
+  });
+
+  it("invoca marcarDevolucionCompletadaSiCorresponde tras aceptar para cerrar devoluciones sin saldo externo", async () => {
+    let llamadoCon: { ids: number[]; contexto: string } | null = null;
+    const ctx = makeCtx("5");
+    const res: any = await aceptarDevolucion(ctx, {
+      marcarDevolucionCompletadaSiCorresponde: async (ids, contexto) => {
+        llamadoCon = { ids, contexto };
+        return { completados: ids, diferidos: [] };
+      },
+    });
+
+    expect(res.success).toBe(true);
+    expect(llamadoCon).toEqual({ ids: [5], contexto: "aceptacion devolucion" });
+  });
+
+  it("si el cierre automático falla, aceptarDevolucion devuelve success igualmente (no revienta la aceptación)", async () => {
+    const ctx = makeCtx("5");
+    const res: any = await aceptarDevolucion(ctx, {
+      marcarDevolucionCompletadaSiCorresponde: async () => {
+        throw new Error("fallo de red en lock");
+      },
+    });
+
+    expect(res.success).toBe(true);
+    expect(ctx.set.status).toBe(200);
   });
 });

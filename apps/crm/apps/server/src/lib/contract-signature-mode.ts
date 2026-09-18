@@ -9,6 +9,12 @@
  * link, y para etiquetarlo en la ficha.
  *
  * Si se agrega otro contrato en papel, hay que tocar los dos lados.
+ *
+ * OJO: este módulo lo importa también el navegador (`ContractCard`,
+ * `ContractResults`, `DynamicContractWizard` lo traen por el alias `server/`),
+ * así que **no puede leer `process.env`**: en el browser `process` no existe y
+ * el import revienta la página entera. La configuración por entorno va en los
+ * módulos que sólo corren en el servidor.
  */
 export type SignatureMode = "electronica" | "fisica";
 

@@ -889,7 +889,7 @@ export class WeeTrustService {
 			(s, index) => ({
 				emailID: s.email,
 				name: nombreParaWeeTrust(s.name, index),
-				identification: identificationPara(contractType),
+				...identificacionDe(s.role, contractType),
 				...(s.phone ? { phone: s.phone } : {}),
 			}),
 		);
@@ -1242,13 +1242,31 @@ function nombreParaWeeTrust(nombre: string, index: number): string {
 }
 
 /**
- * Verificación de identidad que le toca a cada contrato. El reconocimiento de
- * deuda usa biometría facial con prueba de vida; el resto valida el DPI.
+ * Verificación de identidad que le toca a cada firmante.
+ *
+ * Al cliente y a los codeudores se les valida el DPI, y en el reconocimiento de
+ * deuda además se les pide biometría facial con prueba de vida.
+ *
+ * Al **representante legal no se le pide nada**: firma por la entidad, es
+ * personal nuestro y su nombre y cargo ya vienen impresos en el template.
+ * Pedirle DPI o selfie no agrega ninguna garantía y le pone un trámite encima a
+ * alguien que firma decenas de contratos al día.
+ *
+ * `identification` es opcional en WeeTrust: omitirlo deja la firma electrónica
+ * sin verificación de identidad.
  */
-function identificationPara(contractType: ContractType): IdentificationMode {
-	return contractType === ContractType.RECONOCIMIENTO_DEUDA
-		? "face"
-		: WEETRUST_DEFAULT_IDENTIFICATION;
+function identificacionDe(
+	role: SignerRole,
+	contractType: ContractType,
+): { identification?: IdentificationMode } {
+	if (role === SignerRole.REP_LEGAL) return {};
+
+	return {
+		identification:
+			contractType === ContractType.RECONOCIMIENTO_DEUDA
+				? "face"
+				: WEETRUST_DEFAULT_IDENTIFICATION,
+	};
 }
 
 // Singleton para uso global

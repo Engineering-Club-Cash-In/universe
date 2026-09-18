@@ -290,30 +290,43 @@ const senalAbortada = () => {
 };
 
 test("la señal del llamador ya abortada es cancelación, no fallo de cartera", () => {
-	expect(esCancelacionDelLlamador(abortError(), senalAbortada())).toBe(true);
+	expect(esCancelacionDelLlamador(senalAbortada())).toBe(true);
 });
 
 test("⚠️ el timeout PROPIO del fetch sigue contando como fallo", () => {
-	// `AbortSignal.timeout` aborta con TimeoutError: cartera no contestó a
-	// tiempo, y eso sí es un síntoma de su salud.
-	const timeoutError = Object.assign(new Error("timed out"), {
-		name: "TimeoutError",
-	});
-
-	expect(esCancelacionDelLlamador(timeoutError, senalAbortada())).toBe(false);
+	// `AbortSignal.timeout` aborta sin tocar la señal del llamador: cartera no
+	// contestó a tiempo con el CRM todavía esperando, y eso sí es un síntoma de
+	// su salud.
+	expect(esCancelacionDelLlamador(new AbortController().signal)).toBe(false);
+	expect(esCancelacionDelLlamador(undefined)).toBe(false);
+	expect(esCancelacionDelLlamador(null)).toBe(false);
 });
 
-test("un AbortError con la señal del llamador intacta vino de otro lado", () => {
-	expect(
-		esCancelacionDelLlamador(abortError(), new AbortController().signal),
-	).toBe(false);
-	expect(esCancelacionDelLlamador(abortError(), undefined)).toBe(false);
-});
+/**
+ * 🔴 Antes el clasificador exigía `AbortError` y eso dejaba afuera al caso más
+ * común de todos: `loginCartera()` lanza un `Error` PELADO cuando el login de
+ * cartera contesta non-OK. Un auth colgado más allá del presupuesto y caído
+ * después rechazaba con ese error sin nombre especial y contaba como fallo
+ * igual — cinco de esos abrían el breaker compartido justo cuando el auth se
+ * estaba recuperando.
+ */
+test("🔴 el auth caído después del vencimiento no abre el breaker (Error pelado)", async () => {
+	const breaker = new CircuitBreaker(5, 60000);
+	const vencida = senalAbortada();
 
-test("un error común nunca se confunde con una cancelación", () => {
-	expect(
-		esCancelacionDelLlamador(new Error("network down"), senalAbortada()),
-	).toBe(false);
+	for (let intento = 0; intento < 5; intento++) {
+		await expect(
+			breaker.execute(
+				async () => {
+					// Exactamente lo que lanza `loginCartera()` ante un login non-OK.
+					throw new Error("Cartera auth failed: 503 Service Unavailable");
+				},
+				() => esCancelacionDelLlamador(vencida),
+			),
+		).rejects.toBeDefined();
+	}
+
+	expect(breaker.getState()).toBe("CLOSED");
 });
 
 /**
@@ -333,7 +346,7 @@ test("cinco cancelaciones seguidas no abren el breaker", async () => {
 				async () => {
 					throw abortError();
 				},
-				(error) => esCancelacionDelLlamador(error, senal),
+				() => esCancelacionDelLlamador(senal),
 			),
 		).rejects.toBeDefined();
 	}
@@ -343,6 +356,9 @@ test("cinco cancelaciones seguidas no abren el breaker", async () => {
 
 test("cinco fallos de verdad sí lo abren: la válvula sigue sirviendo", async () => {
 	const breaker = new CircuitBreaker(5, 60000);
+	// Señal VIVA: el CRM sigue esperando la respuesta, así que lo que le pase a
+	// cartera es un dato real sobre su salud.
+	const esperando = new AbortController().signal;
 
 	for (let intento = 0; intento < 5; intento++) {
 		await expect(
@@ -350,7 +366,7 @@ test("cinco fallos de verdad sí lo abren: la válvula sigue sirviendo", async (
 				async () => {
 					throw new Error("cartera caída");
 				},
-				(error) => esCancelacionDelLlamador(error, senalAbortada()),
+				() => esCancelacionDelLlamador(esperando),
 			),
 		).rejects.toBeDefined();
 	}

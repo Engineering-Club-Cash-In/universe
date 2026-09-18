@@ -344,20 +344,30 @@ const consultaMoraResponseSchema = z.object({
  * Por eso la cancelación se relanza sin contar `onFailure` ni `onSuccess`: de
  * un viaje que nunca salió no se aprende nada sobre la salud de cartera.
  *
- * ⚠️ El timeout PROPIO del fetch SÍ sigue contando como fallo, y por eso la
- * distinción no es "abortó" sino QUIÉN abortó: `AbortSignal.timeout` aborta con
- * `TimeoutError` (cartera no contestó a tiempo: eso es un síntoma real) y la
- * señal del llamador con `AbortError`. Se exige además que esa señal externa
- * esté efectivamente abortada: un `AbortError` con la señal del llamador intacta
- * vino de otro lado y se cuenta como lo que es.
+ * ⚠️ El timeout PROPIO del fetch SÍ sigue contando como fallo: `AbortSignal.timeout`
+ * aborta sin tocar la señal externa, así que cartera no contestó a tiempo con el
+ * CRM todavía esperando — eso es un síntoma real de su salud.
+ *
+ * 🔴 Lo único que se mira es SI LA SEÑAL EXTERNA YA ESTÁ ABORTADA al momento del
+ * catch; el nombre del error no se exige. Antes se pedía `AbortError` y eso
+ * dejaba afuera al caso más común de todos: `getCarteraAccessToken()` lanza un
+ * `Error` PELADO cuando el login de cartera contesta non-OK, así que un auth
+ * colgado más allá del presupuesto y caído después rechazaba con un error sin
+ * nombre especial y contaba como fallo igual — cinco de esos abrían el breaker
+ * compartido justo cuando el auth se estaba recuperando, que es exactamente el
+ * agujero que esta función existe para tapar.
+ *
+ * El criterio ahora es temporal, no de forma: si el presupuesto ya venció, nada
+ * de lo que esa tarea haga después puede contar —ni fallo ni éxito—, porque
+ * nadie está esperando esa respuesta y lo que le pase ya no describe la salud de
+ * cartera. Se acepta el costo: una caída REAL de cartera que llegue después del
+ * vencimiento tampoco se cuenta. No se pierde la señal, solo se pierde ESA
+ * muestra: la consulta siguiente, con su señal viva, la vuelve a ver.
  */
 export function esCancelacionDelLlamador(
-	error: unknown,
 	senalExterna: AbortSignal | null | undefined,
 ): boolean {
-	if (!senalExterna?.aborted) return false;
-
-	return (error as { name?: string } | null)?.name === "AbortError";
+	return senalExterna?.aborted === true;
 }
 
 /** Exportado para poder verificar en tests cuándo se abre y cuándo no. */
@@ -1287,7 +1297,7 @@ export class CarteraBackClient {
 					},
 					// La señal del llamador no es cartera fallando: ver
 					// `esCancelacionDelLlamador`.
-					(error) => esCancelacionDelLlamador(error, options.signal),
+					() => esCancelacionDelLlamador(options.signal),
 				);
 
 				const data = (await response.json()) as T;
@@ -1303,7 +1313,7 @@ export class CarteraBackClient {
 
 				// El llamador ya se cansó: reintentar es mandar viajes que nadie
 				// va a esperar, y cada uno vuelve a rechazar por la misma señal.
-				if (esCancelacionDelLlamador(lastError, options.signal)) {
+				if (esCancelacionDelLlamador(options.signal)) {
 					break;
 				}
 

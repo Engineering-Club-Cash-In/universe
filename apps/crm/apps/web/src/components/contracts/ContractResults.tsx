@@ -8,6 +8,7 @@ import {
 	RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -142,6 +143,17 @@ export function ContractResults({
 												Ver PDF
 											</Button>
 										</div>
+									</div>
+								)}
+
+								{/* Firma en papel: no hay links y no debería parecer un faltante */}
+								{esFirmaFisica(result.contractType) && (
+									<div className="flex items-center gap-2 rounded border border-amber-200 bg-amber-50 p-2 text-amber-800 text-sm">
+										<FileText className="h-4 w-4 shrink-0" />
+										<span>
+											Se firma en papel: imprimí el PDF y que lo firme el
+											vendedor. No lleva link de firma.
+										</span>
 									</div>
 								)}
 

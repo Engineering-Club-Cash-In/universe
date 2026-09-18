@@ -13,7 +13,10 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { WeeTrustService } from "../services/WeeTrustService";
-import { SignatureLayoutError } from "../services/signaturePatterns";
+import {
+	getSignatureMode,
+	SignatureLayoutError,
+} from "../services/signaturePatterns";
 import { SignerRole, type ContractSigner, type ContractType } from "../types/contract";
 
 /** Roster de prueba: un titular, un cofirmante y el representante legal. */
@@ -54,6 +57,12 @@ async function main() {
 
 		console.log("=".repeat(78));
 		console.log(contractType);
+
+		if (getSignatureMode(contractType) === "fisica") {
+			console.log("  ✍️  se firma en papel: no se manda a firma electrónica");
+			continue;
+		}
+
 		try {
 			const posiciones = await WeeTrustService.locateSignatureWidgets(
 				buffer,

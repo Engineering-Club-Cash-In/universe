@@ -12,6 +12,8 @@ const LEGAL_DOCS_API_URL =
 	process.env.LEGAL_DOCS_API_URL ||
 	"https://legal-docs-blueprints.s4.devteamatcci.site";
 
+import type { SignatureMode } from "../lib/contract-signature-mode";
+
 // ============ TIPOS ============
 
 export interface DocumentType {
@@ -145,6 +147,11 @@ export interface DocumentResult {
 	linkDocument: string;
 	r2Key?: string;
 	signing_links?: string[];
+	/**
+	 * Cómo se firma el documento. Los `fisica` (hoy sólo la declaración de
+	 * vendedor) vuelven sin `signing_links` a propósito: se firman en papel.
+	 */
+	signatureMode?: SignatureMode;
 	error?: string;
 }
 
@@ -162,6 +169,15 @@ export function motivoDeFalla(result: DocumentResult): string | null {
 	}
 	if (!result.r2Key && !result.linkDocument) {
 		return "El documento se generó pero no quedó el PDF (falló la conversión). Reintenta este documento.";
+	}
+	// Un contrato electrónico sin links no está listo, por más que el PDF exista:
+	// nadie lo puede firmar. Volvía marcado como éxito y jurídico se enteraba
+	// recién al buscar el link que no estaba.
+	if (
+		result.signatureMode === "electronica" &&
+		(!result.signing_links || result.signing_links.length === 0)
+	) {
+		return "El contrato se generó pero no salió a firma: no quedó ningún enlace. Revisa que el cliente y los cofirmantes tengan correo registrado.";
 	}
 	return null;
 }

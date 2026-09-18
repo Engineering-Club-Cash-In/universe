@@ -153,13 +153,13 @@ describe("números de SIFCO del lead que se está editando", () => {
 		);
 	});
 
-	test("sigue acotada al mismo tope que el contrato de cartera admite", () => {
+	test("pide la fila sonda, igual que las consultas por DPI", () => {
 		expect(sqlDelLead).toContain(
 			`limit $${consultaDelLead.toSQL().params.length}`,
 		);
-		expect(consultaDelLead.toSQL().params).toContain(
-			TOPE_NUMEROS_CREDITO_CONOCIDOS,
-		);
+		// Sonda y no tope: el desborde del lead editado se detecta y falla
+		// cerrado en `numerosSifcoDeLead`, no se recorta en silencio.
+		expect(consultaDelLead.toSQL().params).toContain(SONDA_DESBORDE_NUMEROS);
 	});
 });
 

@@ -415,6 +415,21 @@ export const opportunities = pgTable("opportunities", {
 		() => user.id,
 	),
 
+	/**
+	 * 🔴 Cuándo se invalidó la identidad de este expediente —reapertura de una
+	 * perdida u override del candado de DPI—. Ver `lib/revalidacion-oportunidad.ts`.
+	 *
+	 * El reset devolvía la oportunidad a análisis, pero los DOCUMENTOS de la
+	 * identidad vieja seguían ahí y seguían satisfaciendo el requisito: se podía
+	 * volver a aprobar con el DPI escaneado de otra persona. Con esta marca,
+	 * `approveOpportunityAnalysis` deja de contar el documento de identidad subido
+	 * ANTES de ella y exige uno nuevo. El documento viejo NO se borra: queda en el
+	 * expediente y en el historial, solo deja de alcanzar.
+	 *
+	 * `null` es lo normal —nunca se revalidó— y ahí no cambia nada.
+	 */
+	identityRevalidatedAt: timestamp("identity_revalidated_at"),
+
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),

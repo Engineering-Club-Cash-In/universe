@@ -205,6 +205,15 @@ export interface SeleccionFichasDpi<T> {
  * conserva —el core no siempre lo devuelve— porque descartarla sería volver al
  * falso negativo que este endpoint existe para evitar.
  *
+ * 🔴 "Sin identificación" se decide DESPUÉS de normalizar, no antes. El core
+ * rellena el campo con placeholders —"N/A", "SIN DATO", "-"— que tienen texto
+ * pero cero dígitos: normalizan a `""`. Compararlos contra el DPI los hacía
+ * salir como ficha "de OTRA persona" y se descartaban sin levantar
+ * `indeterminado`; si era la única ficha del DPI, el endpoint contestaba
+ * CLIENTE_NO_ENCONTRADO con `puedeContinuar: true` y la deuda sin consultar.
+ * Un placeholder no dice de quién es la ficha: es el mismo caso que el campo
+ * ausente, así que la ficha se conserva y se consulta.
+ *
  * 🔴 Los dos descartes NO son lo mismo y por eso solo uno levanta
  * `indeterminado`. La ficha de OTRA identificación no es del DPI: dejarla fuera
  * no le quita nada al veredicto. La ficha del DPI con código basura SÍ es suya
@@ -224,10 +233,10 @@ export function seleccionarFichasDelDpi<T extends FichaClienteSifco>(
   const buscado = normalizarIdentificacion(dpi);
 
   const delDpi = clientes.filter((cliente) => {
-    const propia = (cliente.NumeroIdentificacion ?? "").trim();
+    const propia = normalizarIdentificacion(cliente.NumeroIdentificacion ?? "");
     if (!propia) return true;
 
-    return normalizarIdentificacion(propia) === buscado;
+    return propia === buscado;
   });
 
   const fichas = delDpi.filter((cliente) =>

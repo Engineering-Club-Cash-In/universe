@@ -523,6 +523,31 @@ describe("fichas del DPI", () => {
     expect(fichas.map((f) => f.CodigoCliente)).toEqual([11, 22]);
   });
 
+  it("conserva la ficha cuya identificación es un placeholder sin dígitos", () => {
+    // "N/A" normaliza a "" y salía clasificada como "de OTRA persona": se
+    // descartaba en silencio y, siendo la única, el DPI contestaba
+    // CLIENTE_NO_ENCONTRADO con la deuda sin consultar. Un placeholder no dice
+    // de quién es la ficha; es el mismo caso que el campo ausente.
+    const fichas = fichasDelDpi(
+      [{ CodigoCliente: 11, NumeroIdentificacion: "N/A" }],
+      DPI
+    );
+
+    expect(fichas.map((f) => f.CodigoCliente)).toEqual([11]);
+  });
+
+  it("el placeholder no desplaza a la ficha que sí trae el DPI: se consultan las dos", () => {
+    const fichas = fichasDelDpi(
+      [
+        { CodigoCliente: 11, NumeroIdentificacion: "N/A" },
+        { CodigoCliente: 22, NumeroIdentificacion: DPI },
+      ],
+      DPI
+    );
+
+    expect(fichas.map((f) => f.CodigoCliente)).toEqual([11, 22]);
+  });
+
   it("descarta la ficha con código vacío", () => {
     // El tipo admite string, así que un "" pasaba el guard de null/undefined y
     // llegaba al lookup como `Number("")` = 0: una consulta a la ficha ajena 0.

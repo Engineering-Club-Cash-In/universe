@@ -176,6 +176,13 @@
 			"when": 1790089286602,
 			"tag": "0035_create_buro_interno",
 			"breakpoints": true
+		},
+		{
+			"idx": 25,
+			"version": "7",
+			"when": 1789776000000,
+			"tag": "0035_add_identity_revalidated_at",
+			"breakpoints": true
 		}
 	]
 }

@@ -13,9 +13,18 @@ import {
 	PORCENTAJE_SIN_RETROCESO,
 	parcheDeRevalidacion,
 	revalidarOportunidades,
+	documentosDeIdentidadVigentes,
+	faltaPorIdentidadRevalidada,
+	MENSAJE_DPI_DESACTUALIZADO,
 	separarPorSalvaguarda,
 	sqlResetPermitido,
 } from "./revalidacion-oportunidad";
+
+/** El router, leído una sola vez: varios bloques revisan su cableado. */
+const crmFuente = readFileSync(
+	join(dirname(import.meta.dir), "routers/crm.ts"),
+	"utf8",
+);
 
 /**
  * 🔴 La evidencia de identidad de un expediente —RENAP, buró, documentos— se
@@ -125,15 +134,103 @@ describe("a quién hay que revalidar", () => {
 
 describe("qué se le toca a la que se resetea", () => {
 	test("vuelve a análisis, pendiente y con el detalle de crédito sin aprobar", () => {
-		expect(parcheDeRevalidacion("etapa-30")).toEqual({
+		const cuando = new Date("2026-09-18T10:00:00.000Z");
+
+		expect(parcheDeRevalidacion("etapa-30", cuando)).toEqual({
 			stageId: "etapa-30",
 			analysisStatus: "pending",
 			creditDetailApproved: false,
+			// La marca viaja en el mismo parche: sin ella el DPI escaneado de la
+			// identidad vieja seguiría alcanzando para volver a aprobar.
+			identityRevalidatedAt: cuando,
 		});
 	});
 
 	test("la etapa de análisis es la del 30%, el mismo umbral del candado", () => {
 		expect(PORCENTAJE_ETAPA_ANALISIS).toBe(30);
+	});
+});
+
+/**
+ * 🔴 El reset mandaba el expediente de vuelta a análisis, pero los DOCUMENTOS de
+ * la identidad vieja seguían satisfaciendo el requisito: bastaba con volver a
+ * aprobar, con el DPI escaneado de otra persona en el expediente.
+ */
+describe("el documento de identidad tiene que ser posterior a la revalidación", () => {
+	const REVALIDADA = new Date("2026-09-18T12:00:00.000Z");
+	const doc = (documentType: string, iso: string) => ({
+		documentType,
+		uploadedAt: new Date(iso),
+	});
+
+	test("sin marca no cambia nada: pasa todo lo subido", () => {
+		const documentos = [doc("dpi", "2026-01-01T00:00:00.000Z")];
+
+		expect(documentosDeIdentidadVigentes(documentos, null)).toEqual(documentos);
+		expect(documentosDeIdentidadVigentes(documentos, undefined)).toEqual(
+			documentos,
+		);
+	});
+
+	test("el DPI anterior a la marca deja de contar", () => {
+		expect(
+			documentosDeIdentidadVigentes(
+				[doc("dpi", "2026-09-18T11:59:59.000Z")],
+				REVALIDADA,
+			),
+		).toEqual([]);
+	});
+
+	test("el DPI posterior a la marca sí cuenta", () => {
+		const nuevo = doc("dpi", "2026-09-18T12:00:01.000Z");
+
+		expect(documentosDeIdentidadVigentes([nuevo], REVALIDADA)).toEqual([nuevo]);
+	});
+
+	test("también cae la categoría heredada `identification`", () => {
+		expect(
+			documentosDeIdentidadVigentes(
+				[doc("identification", "2026-01-01T00:00:00.000Z")],
+				REVALIDADA,
+			),
+		).toEqual([]);
+	});
+
+	test("los demás documentos no se re-piden: no dicen quién es el solicitante", () => {
+		const otros = [
+			doc("recibo_luz", "2026-01-01T00:00:00.000Z"),
+			doc("estados_cuenta_1", "2026-01-01T00:00:00.000Z"),
+		];
+
+		expect(documentosDeIdentidadVigentes(otros, REVALIDADA)).toEqual(otros);
+	});
+
+	test("distingue 'quedó viejo' de 'nunca se subió' para elegir el mensaje", () => {
+		// Hay dpi subido y igual falta → quedó viejo: mandar al analista a buscar
+		// un archivo que está ahí sería el peor de los mensajes.
+		expect(faltaPorIdentidadRevalidada(["dpi"], ["dpi", "licencia"])).toBe(
+			true,
+		);
+		// Falta el dpi y no hay ninguno → nunca se subió: mensaje de siempre.
+		expect(faltaPorIdentidadRevalidada(["dpi"], ["licencia"])).toBe(false);
+		// Falta otra cosa → no es asunto de la identidad.
+		expect(faltaPorIdentidadRevalidada(["recibo_luz"], ["dpi"])).toBe(false);
+	});
+
+	test("el mensaje dice qué pasó y qué hacer", () => {
+		expect(MENSAJE_DPI_DESACTUALIZADO).toContain("revalidada");
+		expect(MENSAJE_DPI_DESACTUALIZADO).toContain("Subí el DPI actualizado");
+	});
+
+	test("el chequeo está cableado en approveOpportunityAnalysis", () => {
+		const desde = crmFuente.indexOf(
+			"approveOpportunityAnalysis: analystProcedure",
+		);
+		expect(desde).toBeGreaterThan(-1);
+		const bloque = crmFuente.slice(desde, desde + 12000);
+
+		expect(bloque).toContain("documentosDeIdentidadVigentes(");
+		expect(bloque).toContain("MENSAJE_DPI_DESACTUALIZADO");
 	});
 });
 
@@ -391,10 +488,7 @@ describe("la carrera entre el snapshot y el UPDATE", () => {
  * —la reapertura y el override del candado— tienen que estar cableados.
  */
 describe("cableado de la revalidación", () => {
-	const crm = readFileSync(
-		join(dirname(import.meta.dir), "routers/crm.ts"),
-		"utf8",
-	);
+	const crm = crmFuente;
 
 	test("la reapertura de una perdida dispara la revalidación", () => {
 		expect(crm).toContain("reabrir_oportunidad_revalidacion");

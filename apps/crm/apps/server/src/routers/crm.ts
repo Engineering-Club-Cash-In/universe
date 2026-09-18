@@ -116,6 +116,9 @@ import {
 import {
 	decidirRevalidacion,
 	type DecisionRevalidacion,
+	documentosDeIdentidadVigentes,
+	faltaPorIdentidadRevalidada,
+	MENSAJE_DPI_DESACTUALIZADO,
 	MOTIVO_AVISO,
 	obtenerEtapaDeAnalisis,
 	type OportunidadParaRevalidar,
@@ -3766,6 +3769,9 @@ export const crmRouter = {
 					clientType: leads.clientType,
 					analysisStatus: opportunities.analysisStatus,
 					analysisRejectionCount: opportunities.analysisRejectionCount,
+					// Para no dar por válido el DPI de la identidad anterior: ver
+					// `documentosDeIdentidadVigentes`.
+					identityRevalidatedAt: opportunities.identityRevalidatedAt,
 				})
 				.from(opportunities)
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -3843,9 +3849,35 @@ export const crmRouter = {
 					.from(opportunityDocuments)
 					.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
 
-				const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
+				// 🔴 El DPI de la identidad VIEJA no cuenta. Si la oportunidad se
+				// revalidó (reapertura u override del candado), el documento de
+				// identidad subido antes de esa marca es de la persona anterior: sigue
+				// en el expediente pero deja de satisfacer el requisito. Sin esto, el
+				// reset se deshacía aprobando otra vez con el mismo escaneo.
+				const docsDeIdentidadVigentes = documentosDeIdentidadVigentes(
+					uploadedDocs,
+					opportunity[0].identityRevalidatedAt,
+				);
+
+				const uploadedTypes = new Set(
+					docsDeIdentidadVigentes.map((d) => d.documentType),
+				);
 				const requiredTypes = requiredDocs.map((r) => r.documentType);
 				const missingDocs = requiredTypes.filter((t) => !uploadedTypes.has(t));
+
+				// Falta el DPI pero SÍ hay uno subido: quedó viejo por la
+				// revalidación. El mensaje genérico ("faltan documentos") mandaría al
+				// analista a buscar un archivo que está ahí.
+				if (
+					faltaPorIdentidadRevalidada(
+						missingDocs,
+						uploadedDocs.map((d) => d.documentType),
+					)
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: MENSAJE_DPI_DESACTUALIZADO,
+					});
+				}
 
 				if (missingDocs.length > 0) {
 					const docLabels: Record<string, string> = {

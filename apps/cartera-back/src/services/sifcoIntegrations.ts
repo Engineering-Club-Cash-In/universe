@@ -25,10 +25,19 @@ import { exigirRespuestaExitosa } from "./sifcoRespuesta";
 const sifcoApi = axios.create({
   baseURL:  "http://localhost:9500",
   // Sin timeout explícito, axios espera para siempre: una pasarela colgada deja
-  // la petición viva hasta que el cliente de arriba se rinda. 20s es holgado
-  // para cualquier llamada de este archivo (las que traen el suyo lo bajan a
-  // 10s) y sigue por debajo de los cortes de quien nos llama.
-  timeout: 20000,
+  // la petición viva hasta que el cliente de arriba se rinda.
+  //
+  // 🔴 30s y no menos: la pasarela le da 25s al core, así que cortar antes
+  // mataría respuestas VÁLIDAS pero lentas —las de los caminos por lote, sync y
+  // migración, que son los que llegan a esos tiempos— y las convertiría en un
+  // error que no existió. Esto es el techo de los lotes, no el presupuesto de
+  // nadie más.
+  //
+  // El camino interactivo pide lo suyo aparte: el gate de mora del CRM tiene a
+  // un asesor esperando en pantalla y no espera lotes, así que sus dos llamadas
+  // (`buscarClientesPorIdentificacion` y el `consultarPrestamosPorCliente` que
+  // hace `consultaMora.ts`) pasan 10s explícitos.
+  timeout: 30000,
   headers: {
     "Content-Type": "application/json",
     Authorization: `OAuth ${process.env.SIFCO_TOKEN}`,
@@ -89,14 +98,27 @@ export async function buscarClientesPorIdentificacion(
  * donde está explicado por qué es defensa en profundidad y no el cierre de un
  * agujero vivo. Un cliente sin préstamos sigue devolviendo la respuesta con la
  * lista vacía.
+ *
+ * `timeoutMs` es opcional y por omisión manda el del cliente (30s, el techo de
+ * los lotes). Lo pasa quien tiene a alguien esperando: el gate de mora llama con
+ * 10s desde `consultaMora.ts` porque su presupuesto lo fija el asesor frente a
+ * la pantalla, no el core. Los llamadores por lote —sync, migración— se quedan
+ * con el default a propósito.
  */
-export async function consultarPrestamosPorCliente(clienteCodigo: number) {
+export async function consultarPrestamosPorCliente(
+  clienteCodigo: number,
+  timeoutMs?: number
+) {
   // 👇 Usar la misma key que espera el backend (camelCase)
   const request = { clienteCodigo };
 
   const { data } = await sifcoApi.post<
     ServiceResponse<WSVerPrestamosPorClienteResponse>
-  >("/api/clientes/prestamos", request);
+  >(
+    "/api/clientes/prestamos",
+    request,
+    timeoutMs === undefined ? undefined : { timeout: timeoutMs }
+  );
 
   return exigirRespuestaExitosa(
     data,

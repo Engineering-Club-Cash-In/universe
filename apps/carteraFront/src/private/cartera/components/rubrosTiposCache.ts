@@ -25,9 +25,15 @@ export type EdicionTipo = Pick<TipoRubro, "nombre" | "descripcion" | "obligatori
  * desplegable de creación —que es de sólo activos— seguía ofreciendo un tipo que
  * el backend rechaza.
  *
- * Por eso `soloActivos`: en la variante `[QK_TIPOS, false]` un tipo que volvió
- * inactivo no se parcha, se SACA. Dejarlo ahí con `activo: false` sería el mismo
- * problema con otra forma, porque esa lista no filtra al pintar — filtra al pedir.
+ * Por eso `soloActivos`, que gobierna las dos direcciones en la variante
+ * `[QK_TIPOS, false]`:
+ *
+ *  - un tipo que volvió inactivo no se parcha, se SACA. Dejarlo ahí con
+ *    `activo: false` sería el mismo problema con otra forma, porque esa lista no
+ *    filtra al pintar — filtra al pedir;
+ *  - y uno que se REACTIVA se INSERTA, porque no puede estar ahí: esa lista sólo
+ *    guarda activos, así que un `map` no lo alcanza y la pantalla decía
+ *    "reactivado" mientras el desplegable de crear seguía sin ofrecerlo.
  *
  * Reordena por nombre porque el backend devuelve los tipos con `ORDER BY nombre`
  * y un renombrado que se queda en su lugar viejo hace saltar la lista cuando
@@ -45,9 +51,14 @@ export function aplicarEdicionTipo(
     return actuales.filter((t) => t.tipo_id !== tipoId);
   }
 
-  return actuales
-    .map((t) => (t.tipo_id === tipoId ? { ...t, ...tipo } : t))
-    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const estaba = actuales.some((t) => t.tipo_id === tipoId);
+  const lista = estaba
+    ? actuales.map((t) => (t.tipo_id === tipoId ? { ...t, ...tipo } : t))
+    : [...actuales, tipo];
+
+  // El orden replica el `ORDER BY nombre` del backend, así que el insertado cae
+  // en su lugar y la lista no salta cuando llega el refetch.
+  return lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
 }
 
 /**

@@ -211,6 +211,38 @@ describe("sincronizarTipoEditado", () => {
     expect(lista.map((t) => t.tipo_id)).toEqual([8]);
   });
 
+  it("🔴 al REACTIVAR, la fila se INSERTA en la lista de sólo activos", async () => {
+    // Esa lista sólo guarda activos, así que al reactivar el tipo NO está ahí y
+    // un `map` no lo puede meter. Sin insertarlo, la pantalla dice "reactivado"
+    // y el desplegable de crear sigue sin ofrecerlo hasta que llegue un refetch
+    // exitoso — justo el caso que la siembra a mano existe para cubrir.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    queryClient.setQueryData<TipoRubro[]>(
+      [QK_TIPOS, false],
+      [tipo({ tipo_id: 8, nombre: "Otro" })]
+    );
+
+    await sincronizarTipoEditado(
+      queryClient,
+      7,
+      tipo({ tipo_id: 7, nombre: "Aaa placa", activo: true })
+    );
+
+    const lista = queryClient.getQueryData<TipoRubro[]>([QK_TIPOS, false])!;
+    expect(lista.map((t) => t.tipo_id)).toEqual([7, 8]);
+  });
+
+  it("reactivar dos veces no la duplica", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, false], [tipo({ tipo_id: 7 })]);
+    await sincronizarTipoEditado(queryClient, 7, tipo({ tipo_id: 7, activo: true }));
+    expect(queryClient.getQueryData<TipoRubro[]>([QK_TIPOS, false])!).toHaveLength(1);
+  });
+
   it("si sigue activa, la fila se queda en la lista de sólo activos", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: Infinity } },

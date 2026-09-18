@@ -1277,15 +1277,16 @@ export const crmRouter = {
 					});
 				}
 				normalizedDpi = resultado.dpiLimpio;
-
-				// Alta: el DPI entra al sistema por primera vez, así que siempre se
-				// consulta. Fail-closed — si cartera no contesta, no entra nadie.
-				const gate = await evaluarGateMoraDpi(normalizedDpi, depsGateMora);
-				if (gate.rechazado) {
-					throw new ORPCError("BAD_REQUEST", { message: gate.mensaje });
-				}
 			}
 
+			// 🔴 El duplicado se revisa ANTES del gate, y el orden importa. Si el DPI
+			// ya es de un lead existente que está en mora, correr el gate primero
+			// devolvía el error del gate ("cliente con saldo en mora") en vez del
+			// CONFLICT con el payload que el front usa para mostrar el lead
+			// existente y ofrecer ir a su ficha: el asesor quedaba sin la salida que
+			// esa pantalla ya tiene resuelta. Y de paso se pagaba un viaje a SIFCO
+			// para averiguar algo que no iba a cambiar el resultado — acá no se está
+			// dando de alta a nadie, ya está adentro.
 			// Validar DPI duplicado
 			if (normalizedDpi) {
 				// Se traen todos los leads del DPI, no uno solo: mientras queden
@@ -1335,6 +1336,16 @@ export const crmRouter = {
 							context.userId,
 						),
 					});
+				}
+			}
+
+			// El gate, ya con el alta decidida: es un DPI que de verdad va a entrar
+			// al sistema por primera vez. Siempre se consulta y es fail-closed — si
+			// cartera no contesta, no entra nadie.
+			if (normalizedDpi) {
+				const gate = await evaluarGateMoraDpi(normalizedDpi, depsGateMora);
+				if (gate.rechazado) {
+					throw new ORPCError("BAD_REQUEST", { message: gate.mensaje });
 				}
 			}
 

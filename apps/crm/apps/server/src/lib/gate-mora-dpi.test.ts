@@ -12,6 +12,7 @@ import {
 	requiereConsultaDeMora,
 	resolverEdicionConMora,
 } from "./gate-mora-dpi";
+import { unirNumerosSifco } from "./numeros-sifco-por-dpi";
 
 /**
  * El gate de mora aplicado a los seis puntos de alta y edición por DPI.
@@ -386,6 +387,61 @@ describe("gate de mora: números de crédito que aporta el CRM", () => {
 
 		expect(veredicto.rechazado).toBe(true);
 		expect(veredicto.motivo).toBe("CREDITO_INSOLUTO");
+	});
+
+	/**
+	 * 🔴 El agujero del CAMBIO de DPI. Los números se buscaban SOLO por el DPI
+	 * NUEVO. Un lead con su propio crédito moroso —`CRM-<uuid>` o `insoluto-N`,
+	 * invisibles para SIFCO— tecleaba un DPI virgen, cartera contestaba
+	 * CLIENTE_NO_ENCONTRADO → `puedeContinuar`, y el cambio pasaba para un
+	 * no-admin: su propia deuda quedaba fuera de su propia evaluación.
+	 *
+	 * El arreglo vive en el armado de `numerosCreditoConocidos` del sitio que
+	 * edita (`numerosSifcoDelDpiYDelLead`); acá se prueba que la unión llega
+	 * hasta cartera y que el veredicto cambia por ella.
+	 */
+	test("🔴 en un cambio de DPI viajan también los números del lead editado", async () => {
+		const numerosPorDpiNuevo: string[] = []; // el DPI nuevo no registra nada
+		const numerosDelLeadEditado = ["CRM-8f14e45f", "insoluto-3"];
+
+		const { deps, recibidos } = bancoConNumeros(
+			async (_dpi, numeros) =>
+				numeros?.includes("insoluto-3")
+					? {
+							...SIN_MORA,
+							cliente: null,
+							puedeContinuar: false,
+							motivo: "CREDITO_INSOLUTO",
+						}
+					: // Sin los números del lead, cartera no lo reconoce y lo deja pasar.
+						{
+							...SIN_MORA,
+							encontrado: false,
+							motivo: "CLIENTE_NO_ENCONTRADO",
+						},
+			// Así lo arma el sitio que edita: unión de las dos fuentes.
+			async () => unirNumerosSifco(numerosPorDpiNuevo, numerosDelLeadEditado),
+		);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(recibidos).toEqual([{ dpi: DPI, numeros: numerosDelLeadEditado }]);
+		expect(veredicto.rechazado).toBe(true);
+		expect(veredicto.motivo).toBe("CREDITO_INSOLUTO");
+	});
+
+	test("sin la unión, el mismo caso pasaba limpio (la regresión que se tapa)", async () => {
+		const { deps } = bancoConNumeros(
+			async (_dpi, numeros) =>
+				numeros?.includes("insoluto-3")
+					? { ...SIN_MORA, puedeContinuar: false, motivo: "CREDITO_INSOLUTO" }
+					: { ...SIN_MORA, encontrado: false, motivo: "CLIENTE_NO_ENCONTRADO" },
+			async () => [], // solo el DPI nuevo, que no registra nada
+		);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(false);
 	});
 });
 

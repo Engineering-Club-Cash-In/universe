@@ -114,8 +114,125 @@ export async function numerosSifcoConocidosPorDpi(
 	// estar completa. Ver `exigirNumerosCompletos`.
 	exigirNumerosCompletos(filas, dpi);
 
-	// Segunda línea: el SQL ya vino limpio y deduplicado, pero esto cuesta nada
-	// y cubre cualquier motor o vista que devuelva algo inesperado.
+	return sanear(filas);
+}
+
+/**
+ * La consulta hermana: los números que el CRM conoce para UN LEAD, por su id.
+ *
+ * 🔴 Por qué no alcanza con la de arriba en las EDICIONES de DPI. Cuando se
+ * cambia el DPI de un lead, lo único que se busca es el DPI NUEVO. Si el lead
+ * que se está editando tiene su propio crédito moroso —un `CRM-<uuid>` o un
+ * `insoluto-N`, que SIFCO nunca devuelve— y el DPI nuevo no registra nada en
+ * ningún lado, cartera contesta `CLIENTE_NO_ENCONTRADO` → `puedeContinuar` y el
+ * cambio pasa para cualquiera. La deuda del propio editado queda fuera de su
+ * propia evaluación: basta con teclear un DPI virgen para salir del gate.
+ *
+ * Por eso el gate de las ediciones pregunta por la UNIÓN: los números del DPI
+ * nuevo MÁS los del lead que se está editando. Se busca por `leadId` y no por
+ * dpi justamente porque el dpi es el dato que está cambiando.
+ *
+ * Mismo saneo que la otra: DISTINCT y `trim` en SQL, ANTES del `limit`, por la
+ * razón explicada en `consultaNumerosSifcoPorDpi`.
+ */
+export function consultaNumerosSifcoDeLead(
+	database: Pick<typeof db, "selectDistinct">,
+	leadId: string,
+) {
+	const numeroLimpio = sql<string>`trim(${opportunities.numeroSifco})`;
+
+	return database
+		.selectDistinct({ numeroSifco: numeroLimpio })
+		.from(opportunities)
+		.where(
+			and(
+				eq(opportunities.leadId, leadId),
+				isNotNull(opportunities.numeroSifco),
+				ne(numeroLimpio, ""),
+			),
+		)
+		.limit(TOPE_NUMEROS_CREDITO_CONOCIDOS);
+}
+
+export async function numerosSifcoDeLead(
+	database: Pick<typeof db, "selectDistinct">,
+	leadId: string,
+): Promise<string[]> {
+	return sanear(await consultaNumerosSifcoDeLead(database, leadId));
+}
+
+/**
+ * El equivalente del co-deudor. Un co-deudor no cuelga de un lead sino de UNA
+ * oportunidad (`opportunityId`), así que su "cartera propia" es a lo sumo un
+ * número: el `numeroSifco` de esa oportunidad. Se incluye por la misma razón —
+ * si la oportunidad que respalda ya parió un crédito moroso, cambiarle el DPI al
+ * co-deudor no puede evaluarse ignorándolo.
+ */
+export async function numeroSifcoDeOportunidad(
+	database: Pick<typeof db, "select">,
+	opportunityId: string,
+): Promise<string[]> {
+	const filas = await database
+		.select({ numeroSifco: opportunities.numeroSifco })
+		.from(opportunities)
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+
+	return sanear(filas);
+}
+
+/**
+ * La unión, aparte y pura: los números de las dos fuentes, saneados y sin
+ * repetir. El tope de cada consulta ya acotó cada lado; acá solo se juntan.
+ */
+export function unirNumerosSifco(
+	...grupos: ReadonlyArray<readonly string[]>
+): string[] {
+	const vistos = new Set<string>();
+	for (const grupo of grupos) {
+		for (const numero of grupo) {
+			const limpio = numero.trim();
+			if (limpio) vistos.add(limpio);
+		}
+	}
+
+	return [...vistos];
+}
+
+/**
+ * Los números del DPI nuevo MÁS los del lead editado, deduplicados. Es lo que
+ * el gate necesita en una EDICIÓN de DPI; ver `consultaNumerosSifcoDeLead`.
+ */
+export async function numerosSifcoDelDpiYDelLead(
+	dpi: string,
+	leadId: string,
+): Promise<string[]> {
+	const [porDpi, delLead] = await Promise.all([
+		numerosSifcoConocidosPorDpi(dpi),
+		numerosSifcoDeLead(db, leadId),
+	]);
+
+	return unirNumerosSifco(porDpi, delLead);
+}
+
+/** La misma unión para el co-deudor: su oportunidad en vez de su lead. */
+export async function numerosSifcoDelDpiYDeLaOportunidad(
+	dpi: string,
+	opportunityId: string,
+): Promise<string[]> {
+	const [porDpi, deLaOportunidad] = await Promise.all([
+		numerosSifcoConocidosPorDpi(dpi),
+		numeroSifcoDeOportunidad(db, opportunityId),
+	]);
+
+	return unirNumerosSifco(porDpi, deLaOportunidad);
+}
+
+/**
+ * Segunda línea: el SQL ya vino limpio y deduplicado, pero esto cuesta nada y
+ * cubre cualquier motor o vista que devuelva algo inesperado.
+ */
+function sanear(filas: Array<{ numeroSifco: string | null }>): string[] {
 	const vistos = new Set<string>();
 	for (const fila of filas) {
 		const numero = (fila.numeroSifco ?? "").trim();

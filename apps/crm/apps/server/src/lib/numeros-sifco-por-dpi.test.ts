@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import {
+	consultaNumerosSifcoDeLead,
 	consultaNumerosSifcoPorDpi,
 	exigirNumerosCompletos,
 	SONDA_DESBORDE_NUMEROS,
 	TOPE_NUMEROS_CREDITO_CONOCIDOS,
+	unirNumerosSifco,
 } from "./numeros-sifco-por-dpi";
 
 const sqlDe = (dpi: string) =>
@@ -13,6 +15,15 @@ const sqlDe = (dpi: string) =>
 		.toSQL()
 		.sql.replace(/\s+/g, " ")
 		.toLowerCase();
+
+const consultaDelLead = consultaNumerosSifcoDeLead(
+	drizzle.mock(),
+	"8f14e45f-ceea-467a-9f07-6c0b6e0a1c33",
+);
+const sqlDelLead = consultaDelLead
+	.toSQL()
+	.sql.replace(/\s+/g, " ")
+	.toLowerCase();
 
 describe("números de SIFCO que el CRM conoce para un DPI", () => {
 	/**
@@ -114,5 +125,59 @@ describe("desborde de una fuente: fail-closed, no cobertura recortada", () => {
 				String(TOPE_NUMEROS_CREDITO_CONOCIDOS),
 			);
 		}
+	});
+});
+
+/**
+ * 🔴 La consulta hermana. Buscando SOLO por el DPI nuevo, el lead que tiene su
+ * propio crédito moroso —un `CRM-<uuid>` o un `insoluto-N`, que SIFCO nunca
+ * devuelve— se sacaba el gate de encima tecleando un DPI virgen: cartera
+ * contestaba CLIENTE_NO_ENCONTRADO y el cambio pasaba para un no-admin. Su
+ * propia deuda quedaba fuera de su propia evaluación.
+ */
+describe("números de SIFCO del lead que se está editando", () => {
+	test("busca por leadId y NO por dpi: el dpi es justo lo que está cambiando", () => {
+		expect(sqlDelLead).toContain('"opportunities"."lead_id" =');
+		expect(sqlDelLead).not.toContain("regexp_replace");
+		// Sin join a `leads`: el lead ya viene identificado por id.
+		expect(sqlDelLead).not.toContain("inner join");
+	});
+
+	test("reusa el MISMO saneo: distinct + trim antes del limit", () => {
+		expect(sqlDelLead).toContain("select distinct");
+		expect(sqlDelLead).toContain("trim(");
+		expect(sqlDelLead).toContain("is not null");
+		expect(sqlDelLead).toContain('trim("opportunities"."numero_sifco") <>');
+		expect(sqlDelLead.indexOf("distinct")).toBeLessThan(
+			sqlDelLead.indexOf("limit"),
+		);
+	});
+
+	test("sigue acotada al mismo tope que el contrato de cartera admite", () => {
+		expect(sqlDelLead).toContain(
+			`limit $${consultaDelLead.toSQL().params.length}`,
+		);
+		expect(consultaDelLead.toSQL().params).toContain(
+			TOPE_NUMEROS_CREDITO_CONOCIDOS,
+		);
+	});
+});
+
+describe("unión de las dos fuentes", () => {
+	test("junta los del DPI nuevo con los del lead editado", () => {
+		expect(unirNumerosSifco(["01010214124060"], ["insoluto-3"]).sort()).toEqual(
+			["01010214124060", "insoluto-3"],
+		);
+	});
+
+	test("no repite el número que ambas fuentes conocen", () => {
+		expect(unirNumerosSifco(["01010214124060"], ["01010214124060"])).toEqual([
+			"01010214124060",
+		]);
+	});
+
+	test("descarta vacíos y espacios, y tolera una fuente vacía", () => {
+		expect(unirNumerosSifco(["", "   "], [])).toEqual([]);
+		expect(unirNumerosSifco([], [" insoluto-3 "])).toEqual(["insoluto-3"]);
 	});
 });

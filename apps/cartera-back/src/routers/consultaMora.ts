@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { consultarMoraPorDpi } from "../controllers/consultaMora";
+import { validarDpiConsulta } from "../controllers/consultaMoraPolicy";
 import { authMiddleware } from "./midleware";
 
 export const consultaMoraRouter = new Elysia()
@@ -21,12 +22,28 @@ export const consultaMoraRouter = new Elysia()
    * a los del core; ver `unirNumerosCredito` en el controller. El tope de 50 es
    * holgado para el caso real —las oportunidades ganadas de un lead— y evita
    * que un cuerpo grande se convierta en un `IN (...)` sin fin.
+   *
+   * ⏱️ Toda la resolución de números (identificación + espejo + API de cada
+   * ficha) corre bajo UN presupuesto global de 15s; ver
+   * `PRESUPUESTO_NUMEROS_GATE_MS` en el controller. Al vencerse sale
+   * SERVICIO_NO_DISPONIBLE, fail-closed.
+   *
+   * 🔴 La ÚNICA respuesta que no es 200 es el 400 de validación del DPI: un
+   * valor que no son 13 dígitos ni siquiera se le pregunta al core, y decirle
+   * "SERVICIO_NO_DISPONIBLE" a un dato mal escrito manda al asesor a reintentar
+   * en vez de a corregirlo. Ver `validarDpiConsulta`.
    */
   .post(
     "/clientes/consulta-mora",
     async ({ body, set }) => {
+      const validacion = validarDpiConsulta(body.dpi);
+      if (!validacion.valido) {
+        set.status = 400;
+        return { success: false, message: `❌ ${validacion.mensaje}` };
+      }
+
       const resultado = await consultarMoraPorDpi(
-        body.dpi,
+        validacion.dpi,
         body.numerosCreditoConocidos
       );
       set.status = 200;

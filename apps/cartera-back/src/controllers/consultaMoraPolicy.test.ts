@@ -14,6 +14,7 @@ import {
   respuestaServicioNoDisponible,
   siguientePasoConsulta,
   unirNumerosCredito,
+  validarDpiConsulta,
   type CreditoConsultaMora,
   type FilaCreditoMora,
 } from "./consultaMoraPolicy";
@@ -662,6 +663,36 @@ describe("presupuesto del espejo de SIFCO", () => {
 
     expect(numeros).toEqual([]);
     expect((avisos[0] as Error).message).toBe("pool agotado");
+  });
+});
+
+describe("validación del DPI antes de tocar SIFCO", () => {
+  it("acepta el DPI de 13 dígitos y lo devuelve normalizado", () => {
+    expect(validarDpiConsulta(" 2543 87621 0101 ")).toEqual({
+      valido: true,
+      dpi: "2543876210101",
+    });
+  });
+
+  it("🔴 lo que se normaliza a nada es un error de validación, no una caída", () => {
+    // `minLength: 1` los dejaba pasar: se normalizaban a "" y el fallo aguas
+    // abajo volvía como 200 SERVICIO_NO_DISPONIBLE, que le dice al asesor
+    // "reintentá" cuando lo que hay que hacer es corregir el dato.
+    for (const basura of ["   ", "---", "abc", " - "]) {
+      const resultado = validarDpiConsulta(basura);
+      expect(resultado.valido).toBeFalse();
+      expect(resultado.valido === false && resultado.mensaje).toContain("13");
+    }
+  });
+
+  it("exige el largo exacto: ni de más ni de menos", () => {
+    for (const largo of ["123456789012", "12345678901234"]) {
+      const resultado = validarDpiConsulta(largo);
+      expect(resultado.valido).toBeFalse();
+      expect(resultado.valido === false && resultado.mensaje).toContain(
+        `se recibieron ${largo.length}`
+      );
+    }
   });
 });
 

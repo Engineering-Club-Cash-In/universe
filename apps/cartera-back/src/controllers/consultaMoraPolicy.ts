@@ -158,6 +158,47 @@ export function normalizarIdentificacion(valor: string): string {
   return valor.replace(/\D/g, "");
 }
 
+/** Dígitos del DPI (CUI) guatemalteco. */
+export const LARGO_DPI = 13;
+
+export type ValidacionDpi =
+  | { valido: true; dpi: string }
+  | { valido: false; mensaje: string };
+
+/**
+ * ¿Lo que llegó es un DPI, antes de gastarle un viaje al core?
+ *
+ * 🔴 El `minLength: 1` del schema deja pasar un valor que después se normaliza
+ * a NADA —espacios, guiones, letras— y la consulta se iba igual a SIFCO con el
+ * string vacío. El fallo aguas abajo volvía como 200 SERVICIO_NO_DISPONIBLE:
+ * un error de VALIDACIÓN disfrazado de caída del core, que el CRM le muestra
+ * al asesor como "no se pudo verificar, intentá de nuevo" cuando lo que hay
+ * que hacer es corregir el dato.
+ *
+ * Se exige el largo EXACTO porque es un DPI, no una identificación cualquiera:
+ * un valor de 7 dígitos no es un DPI mal escrito que el core podría reconocer,
+ * es otra cosa.
+ */
+export function validarDpiConsulta(valor: string): ValidacionDpi {
+  const dpi = normalizarIdentificacion(String(valor ?? ""));
+
+  if (!dpi) {
+    return {
+      valido: false,
+      mensaje: "El DPI no trae ningún dígito: se esperan los 13 del DPI.",
+    };
+  }
+
+  if (dpi.length !== LARGO_DPI) {
+    return {
+      valido: false,
+      mensaje: `El DPI debe tener ${LARGO_DPI} dígitos; se recibieron ${dpi.length}.`,
+    };
+  }
+
+  return { valido: true, dpi };
+}
+
 /**
  * ¿El código de la ficha sirve para pedirle los créditos al core?
  *

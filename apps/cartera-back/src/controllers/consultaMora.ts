@@ -25,6 +25,7 @@ import {
   respuestaServicioNoDisponible,
   siguientePasoConsulta,
   unirNumerosCredito,
+  usuariosParaExpandir,
   type CreditoConsultaMora,
   type FilaCreditoMora,
   type RespuestaConsultaMora,
@@ -148,10 +149,16 @@ async function conRelojDePostgres<T>(
  * `numerosCreditoConocidos` los aporta quien pregunta (ver
  * `unirNumerosCredito`): son créditos que existen en `creditos` pero que SIFCO
  * no sabe asociar a este DPI.
+ *
+ * `numerosCreditoGarantizados` son los créditos que este DPI AFIANZÓ. Entran al
+ * veredicto igual que los demás, pero NO expanden por dueño: el fiador responde
+ * por lo que garantizó, no por la vida entera del titular. Ver
+ * `usuariosParaExpandir`.
  */
 export async function consultarMoraPorDpi(
   dpi: string,
-  numerosCreditoConocidos?: string[]
+  numerosCreditoConocidos?: string[],
+  numerosCreditoGarantizados?: string[]
 ): Promise<RespuestaConsultaMora> {
   const consultadoEn = new Date();
   // El reloj arranca acá, no en cada paso: ver `PRESUPUESTO_NUMEROS_GATE_MS`.
@@ -203,9 +210,18 @@ export async function consultarMoraPorDpi(
       numerosSifco.push(...(await obtenerNumerosPrestamo(codigo, venceEn)));
     }
 
-    const numerosPrestamo = unirNumerosCredito(
+    // Los que SÍ expanden por dueño: lo que el core sabe de este DPI más lo que
+    // el llamador conoce de él como TITULAR.
+    const numerosExpansivos = unirNumerosCredito(
       numerosSifco,
       numerosCreditoConocidos
+    );
+    // Los afianzados, que entran al veredicto pero no arrastran la cartera del
+    // titular. Ver `usuariosParaExpandir`.
+    const numerosGarantizados = unirNumerosCredito(numerosCreditoGarantizados);
+    const numerosPrestamo = unirNumerosCredito(
+      numerosExpansivos,
+      numerosGarantizados
     );
 
     // Ver `siguientePasoConsulta`: sin números pero CON ficha el cliente existe
@@ -225,7 +241,7 @@ export async function consultarMoraPorDpi(
       paso === "BUSCAR_CREDITOS"
         ? await bajoPlazo(
             conRelojDePostgres(venceEn, "la lectura de creditos y moras", (ej) =>
-              obtenerCreditosConMora(numerosPrestamo, ej)
+              obtenerCreditosConMora(numerosPrestamo, numerosExpansivos, ej)
             ),
             venceEn,
             "la lectura de creditos y moras"
@@ -301,22 +317,22 @@ function selectCreditosConMora(ejecutor: EjecutorCartera = db) {
 /**
  * Dos pasadas: por número y después por dueño. Ver `fusionarCreditosPorId` para
  * por qué la segunda existe y por qué no reemplaza a la primera.
+ *
+ * `numerosExpansivos` es un SUBCONJUNTO de `numerosPrestamo`: los números que
+ * este DPI tiene como titular. Los que no están ahí —los afianzados— se miran
+ * uno por uno y no arrastran la cartera de su dueño. Ver
+ * `usuariosParaExpandir`.
  */
 async function obtenerCreditosConMora(
   numerosPrestamo: string[],
+  numerosExpansivos: string[],
   ejecutor: EjecutorCartera = db
 ): Promise<FilaCreditoMora[]> {
   const porNumero = await selectCreditosConMora(ejecutor).where(
     inArray(creditos.numero_credito_sifco, numerosPrestamo)
   );
 
-  const usuarioIds = [
-    ...new Set(
-      porNumero
-        .map((fila) => fila.usuario_id)
-        .filter((id): id is number => id !== null)
-    ),
-  ];
+  const usuarioIds = usuariosParaExpandir(porNumero, numerosExpansivos);
 
   if (!usuarioIds.length) {
     return porNumero;

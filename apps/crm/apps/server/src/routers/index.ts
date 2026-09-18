@@ -237,6 +237,9 @@ export const formsAppRouter = {
 
 	// Bank Analysis routes (Análisis de estados de cuenta)
 	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
+	retryBankStatementCoverageSave:
+		bankAnalysisRouter.retryBankStatementCoverageSave,
+	confirmBankStatementCoverage: bankAnalysisRouter.confirmBankStatementCoverage,
 };
 
 /**

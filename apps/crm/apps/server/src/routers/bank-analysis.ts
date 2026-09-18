@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { google } from "@ai-sdk/google";
 import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
@@ -18,12 +18,13 @@ import {
 	bankStatementAnalysisSchema,
 } from "../lib/bank-analysis-schema";
 import {
-	BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES,
 	canAutoAttachBankStatementDocuments,
-	getBankStatementOpportunityDocumentType,
-	resolveBankStatementDocumentSlots,
+	resolveBankStatementMonthlyCoverage,
 } from "../lib/bank-statement-documents";
-import { updateChecklistForClientDocument } from "../lib/checklist";
+import {
+	rebuildClientDocumentChecklistInTransaction,
+	refreshChecklistForClientDocuments,
+} from "../lib/checklist";
 import {
 	assertOpportunityBelongsToLead,
 	canWriteOpportunityCreditAnalysis,
@@ -41,14 +42,35 @@ import {
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import {
+	type CreditAnalysisResetReservation,
 	DocumentIntegrityError,
 	linkUploadedValidationsToDocuments,
 	releaseCapacityAnalysisReservation,
+	reserveBankStatementCoverageMutation,
 	reserveCapacityAnalysis,
+	reserveCreditAnalysisReset,
 } from "../services/document-integrity";
+import {
+	applyManualCoverageDeclaration,
+	assertBankStatementCoverageMutation,
+	BankStatementCoverageSaveError,
+	buildBankStatementArtifactPlan,
+	getBankStatementArtifactTag,
+	getInitialBankStatementCoverageSaveStatus,
+	type BankStatementCoverageCleanupDebt,
+	type PersistedBankStatementCoverage,
+	runBankStatementArtifactPersistenceCore,
+	runInitialBankStatementHandlerCore,
+	runOpportunityCreditAnalysisResetCore,
+	runBankStatementCleanupDebtCore,
+	runBankStatementCoverageMutationHandlerCore,
+	runBankStatementCoverageSaveLifecycle,
+	toPublicBankStatementCoverage,
+} from "./bank-analysis-coverage";
 
 const MAX_AI_ATTEMPTS = 2;
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB por archivo
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 const AI_TIMEOUT_MS = 120_000; // 2 minutos timeout para la IA
 
 // Mismo nombre de variable que usa cartera-back para no tener dos tasas distintas.
@@ -107,6 +129,838 @@ function convertAnalysisToQuetzales(
 		},
 		moneda: "GTQ",
 	};
+}
+
+const persistedCoverageSchema = z.object({
+	version: z.literal(1),
+	analysisBatchId: z.string().uuid(),
+	status: z.enum(["detected", "needs_confirmation"]),
+	saveStatus: z.enum(["pending", "saved", "failed", "not_applicable"]),
+	saveError: z.string().optional(),
+	months: z.array(
+		z.object({
+			month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+			sourceFileIndexes: z.array(z.number().int().min(0).max(8)),
+		}),
+	),
+	files: z
+		.array(
+			z.object({
+				fileIndex: z.number().int().min(0).max(8),
+				name: z.string().min(1),
+				evidenceKey: z.string().min(1),
+				contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+				integrityValidationId: z.string().uuid(),
+				mimeType: z.string().optional(),
+				size: z.number().int().nonnegative().optional(),
+				status: z.enum(["detected", "confirmed", "needs_confirmation"]),
+				detectedMonths: z.array(z.string()),
+				effectiveMonths: z.array(z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)),
+			}),
+		)
+		.min(1)
+		.max(9),
+	checklistAssignments: z.array(
+		z.object({
+			month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+			fileIndex: z.number().int().min(0).max(8),
+			sourceFileIndexes: z.array(z.number().int().min(0).max(8)),
+			documentType: z
+				.enum(["estados_cuenta_1", "estados_cuenta_2", "estados_cuenta_3"])
+				.optional(),
+		}),
+	),
+	requestedChecklistAssignments: z
+		.array(
+			z.object({
+				month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+				fileIndex: z.number().int().min(0).max(8),
+				sourceFileIndexes: z.array(z.number().int().min(0).max(8)),
+			}),
+		)
+		.optional(),
+	pendingChecklistAssignments: z
+		.array(
+			z.object({
+				month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+				fileIndex: z.number().int().min(0).max(8),
+				sourceFileIndexes: z.array(z.number().int().min(0).max(8)),
+			}),
+		)
+		.optional(),
+	cleanupDebt: z
+		.array(
+			z.object({
+				status: z.literal("pending"),
+				key: z.string().min(1),
+				artifactId: z.string().uuid().optional(),
+			}),
+		)
+		.optional(),
+	manualDeclarations: z.array(
+		z.object({
+			fileIndex: z.number().int().min(0).max(8),
+			months: z.array(z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/)),
+			detectedMonths: z.array(z.string()),
+			actorId: z.string(),
+			declaredAt: z.string().datetime(),
+		}),
+	),
+	reportedCoverage: z.array(
+		z.object({
+			indice_archivo: z.number().int(),
+			meses: z.array(z.string()),
+		}),
+	),
+	issues: z.array(z.string()),
+	savedDocuments: z
+		.array(
+			z.object({
+				id: z.string().uuid(),
+				tag: z.string(),
+				fileIndex: z.number().int().min(0).max(8),
+				documentType: z.enum([
+					"estados_cuenta_1",
+					"estados_cuenta_2",
+					"estados_cuenta_3",
+					"other",
+				]),
+				month: z.string().optional(),
+			}),
+		)
+		.optional(),
+});
+
+function parsePersistedBankAnalysis(fullAnalysis: string | null) {
+	if (!fullAnalysis) {
+		throw new ORPCError("PRECONDITION_FAILED", {
+			message: "El análisis no tiene cobertura mensual registrada.",
+		});
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(fullAnalysis);
+	} catch {
+		throw new ORPCError("PRECONDITION_FAILED", {
+			message: "El análisis guardado no se puede recuperar.",
+		});
+	}
+	if (!parsed || typeof parsed !== "object") {
+		throw new ORPCError("PRECONDITION_FAILED", {
+			message: "El análisis guardado no se puede recuperar.",
+		});
+	}
+	const record = parsed as Record<string, unknown>;
+	const coverage = persistedCoverageSchema.safeParse(record.cobertura_mensual);
+	if (!coverage.success) {
+		throw new ORPCError("PRECONDITION_FAILED", {
+			message: "El análisis no tiene cobertura mensual vigente.",
+		});
+	}
+	return { fullAnalysis: record, coverage: coverage.data };
+}
+
+async function saveBankCoverageDocuments(params: {
+	opportunityId: string;
+	vehicleId: string | null;
+	userId: string;
+	reservationToken: string;
+	coverage: PersistedBankStatementCoverage;
+	buffers: Map<number, Buffer>;
+}) {
+	const renewReservation = async () => {
+		const [renewed] = await db
+			.update(creditAnalysis)
+			.set({ analysisReservationStartedAt: new Date(), updatedAt: new Date() })
+			.where(
+				and(
+					eq(creditAnalysis.opportunityId, params.opportunityId),
+					eq(creditAnalysis.analysisReservationToken, params.reservationToken),
+				),
+			)
+			.returning({ id: creditAnalysis.id });
+		if (!renewed) throw new Error("La reserva de guardado ya no está vigente.");
+	};
+	const quarantineArtifactAndRefresh = async (
+		artifactId: string,
+		cleanupTag: string,
+	) => {
+		await db.transaction(async (tx) => {
+			const [updated] = await tx
+				.update(opportunityDocuments)
+				.set({ documentType: "other", description: cleanupTag })
+				.where(
+					and(
+						eq(opportunityDocuments.id, artifactId),
+						eq(opportunityDocuments.opportunityId, params.opportunityId),
+					),
+				)
+				.returning({ id: opportunityDocuments.id });
+			if (!updated) throw new Error("El adjunto ya no existe para aislarlo.");
+			await rebuildClientDocumentChecklistInTransaction(
+				tx,
+				params.opportunityId,
+				!!params.vehicleId,
+			);
+		});
+	};
+	await renewReservation();
+	return runBankStatementArtifactPersistenceCore({
+		coverage: params.coverage,
+		loadExistingDocuments: () =>
+			db
+				.select({
+					id: opportunityDocuments.id,
+					documentType: opportunityDocuments.documentType,
+					description: opportunityDocuments.description,
+					filePath: opportunityDocuments.filePath,
+				})
+				.from(opportunityDocuments)
+				.where(eq(opportunityDocuments.opportunityId, params.opportunityId)),
+		readStoredFile: getFileBuffer,
+		createArtifact: async (artifact) => {
+			const buffer = params.buffers.get(artifact.fileIndex);
+			if (!buffer) throw new Error("No se encontró la evidencia del archivo.");
+			const uniqueFilename = generateUniqueFilename(artifact.file.name);
+			const { key } = await uploadFileToR2(
+				new Blob([new Uint8Array(buffer)], {
+					type: artifact.file.mimeType ?? "application/pdf",
+				}),
+				uniqueFilename,
+				params.opportunityId,
+			);
+			try {
+				const [document] = await db
+					.insert(opportunityDocuments)
+					.values({
+						opportunityId: params.opportunityId,
+						filename: uniqueFilename,
+						originalName: artifact.file.name,
+						mimeType: artifact.file.mimeType ?? "application/pdf",
+						size: artifact.file.size ?? buffer.length,
+						documentType: "other",
+						description: `[bank-coverage-debt:${artifact.analysisBatchId}:staging:file:${artifact.fileIndex}]`,
+						uploadedBy: params.userId,
+						filePath: key,
+					})
+					.returning({ id: opportunityDocuments.id });
+				if (!document) throw new Error("No se pudo registrar el documento.");
+				return { ...artifact, id: document.id, filePath: key };
+			} catch (error) {
+				try {
+					await deleteFileFromR2(key);
+				} catch {
+					throw new BankStatementCoverageSaveError(error, [
+						{ status: "pending", key },
+					]);
+				}
+				throw error;
+			}
+		},
+		reuseArtifact: async (existing, artifact) => ({
+			...artifact,
+			id: existing.id,
+			filePath: existing.filePath,
+		}),
+		rollbackReusedArtifact: async (artifact) => {
+			await db
+				.update(opportunityDocuments)
+				.set({
+					documentType: artifact.documentType,
+					description: artifact.description,
+				})
+				.where(
+					and(
+						eq(opportunityDocuments.id, artifact.id),
+						eq(opportunityDocuments.opportunityId, params.opportunityId),
+					),
+				);
+		},
+		linkArtifacts: async (artifacts) => {
+			await renewReservation();
+			if (
+				artifacts.some(
+					(artifact) =>
+						!artifact.file.evidenceKey.includes("/validated/") ||
+						!artifact.file.integrityValidationId,
+				)
+			) {
+				throw new Error("La evidencia de integridad ya no está vigente.");
+			}
+			await linkUploadedValidationsToDocuments({
+				opportunityId: params.opportunityId,
+				reservationToken: params.reservationToken,
+				links: artifacts.map((artifact) => ({
+					documentId: artifact.id,
+					documentFilePath: artifact.filePath,
+					sourceFilePath: artifact.file.evidenceKey,
+					buffer: params.buffers.get(artifact.fileIndex)!,
+					validationId: artifact.file.integrityValidationId!,
+				})),
+			});
+		},
+		commitArtifacts: (artifacts) =>
+			db.transaction(async (tx) => {
+				const [analysis] = await tx
+					.select({ token: creditAnalysis.analysisReservationToken })
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.opportunityId, params.opportunityId))
+					.limit(1);
+				if (analysis?.token !== params.reservationToken) {
+					throw new Error("La reserva de guardado ya no está vigente.");
+				}
+				for (const artifact of artifacts) {
+					const [updated] = await tx
+						.update(opportunityDocuments)
+						.set({
+							documentType: artifact.documentType,
+							description: artifact.description,
+						})
+						.where(
+							and(
+								eq(opportunityDocuments.id, artifact.id),
+								eq(
+									opportunityDocuments.opportunityId,
+									params.opportunityId,
+								),
+							),
+						)
+						.returning({ id: opportunityDocuments.id });
+					if (!updated) {
+						throw new Error("El adjunto ya no existe para promoverlo.");
+					}
+				}
+				await rebuildClientDocumentChecklistInTransaction(
+					tx,
+					params.opportunityId,
+					!!params.vehicleId,
+				);
+				return artifacts;
+			}),
+		promoteArtifact: async (artifact) => {
+			const [updated] = await db
+				.update(opportunityDocuments)
+				.set({
+					documentType: artifact.documentType,
+					description: artifact.description,
+				})
+				.where(
+					and(
+						eq(opportunityDocuments.id, artifact.id),
+						eq(opportunityDocuments.opportunityId, params.opportunityId),
+					),
+				)
+				.returning({ id: opportunityDocuments.id });
+			if (!updated) throw new Error("El adjunto ya no existe para promoverlo.");
+			return artifact;
+		},
+		refreshChecklist: async () => {
+			await refreshChecklistForClientDocuments(
+				params.opportunityId,
+				"estados_cuenta_1",
+				params.coverage.analysisBatchId,
+				!!params.vehicleId,
+				params.vehicleId ?? undefined,
+			);
+		},
+		rollbackArtifact: async (artifact) => {
+			await deleteFileFromR2(artifact.filePath);
+			await db
+				.delete(opportunityDocuments)
+				.where(
+					and(
+						eq(opportunityDocuments.id, artifact.id),
+						eq(opportunityDocuments.opportunityId, params.opportunityId),
+					),
+				);
+		},
+		quarantineArtifact: (artifact, cleanupTag) =>
+			quarantineArtifactAndRefresh(artifact.id, cleanupTag),
+		retireArtifact: async (artifact) => {
+			const cleanupTag = `[bank-coverage-debt:${artifact.analysisBatchId}:artifact:${artifact.id}:file:${artifact.fileIndex}]`;
+			try {
+				await quarantineArtifactAndRefresh(artifact.id, cleanupTag);
+			} catch (error) {
+				throw new BankStatementCoverageSaveError(error, []);
+			}
+			await deleteFileFromR2(artifact.filePath);
+			await db
+				.delete(opportunityDocuments)
+				.where(
+					and(
+						eq(opportunityDocuments.id, artifact.id),
+						eq(opportunityDocuments.opportunityId, params.opportunityId),
+					),
+				);
+		},
+	});
+}
+
+async function cleanupBankStatementCoverageDebt({
+	opportunityId,
+	vehicleId,
+	analysisBatchId,
+	debt,
+}: {
+	opportunityId: string;
+	vehicleId: string | null;
+	analysisBatchId: string;
+	debt: BankStatementCoverageCleanupDebt[];
+}): Promise<BankStatementCoverageCleanupDebt[]> {
+	return runBankStatementCleanupDebtCore({
+		opportunityId,
+		analysisBatchId,
+		debt,
+		readArtifact: async (artifactId) => {
+			const [document] = await db
+				.select({
+					id: opportunityDocuments.id,
+					description: opportunityDocuments.description,
+					filePath: opportunityDocuments.filePath,
+				})
+				.from(opportunityDocuments)
+				.where(
+					and(
+						eq(opportunityDocuments.id, artifactId),
+						eq(opportunityDocuments.opportunityId, opportunityId),
+					),
+				)
+				.limit(1);
+			return document ?? null;
+		},
+		deleteStoredFile: deleteFileFromR2,
+		deleteArtifact: async (artifactId) => {
+			await db
+				.delete(opportunityDocuments)
+				.where(
+					and(
+						eq(opportunityDocuments.id, artifactId),
+						eq(opportunityDocuments.opportunityId, opportunityId),
+					),
+				);
+		},
+		refreshChecklist: () =>
+			refreshChecklistForClientDocuments(
+				opportunityId,
+				"estados_cuenta_1",
+				analysisBatchId,
+				!!vehicleId,
+				vehicleId ?? undefined,
+			),
+	});
+}
+
+async function assertBankStatementResetReservation(
+	tx: Transaction,
+	params: {
+		opportunityId: string;
+		leadId: string;
+		reservation: CreditAnalysisResetReservation;
+	},
+) {
+	const [analysis] = await tx
+		.update(creditAnalysis)
+		.set({
+			analysisReservationStartedAt: new Date(),
+			updatedAt: new Date(),
+		})
+		.where(
+			and(
+				eq(creditAnalysis.id, params.reservation.analysisId),
+				eq(creditAnalysis.opportunityId, params.opportunityId),
+				eq(creditAnalysis.leadId, params.leadId),
+				eq(creditAnalysis.analysisReservationToken, params.reservation.token),
+			),
+		)
+		.returning({ id: creditAnalysis.id });
+	if (!analysis) {
+		throw new DocumentIntegrityError(
+			"BAD_REQUEST",
+			"La reserva del restablecimiento ya no está vigente.",
+		);
+	}
+}
+
+export async function resetBankStatementCreditAnalysis(params: {
+	opportunityId: string;
+	leadId: string;
+}) {
+	let fullAnalysisRecord: Record<string, unknown> | null = null;
+	let hasVehicle = false;
+	return runOpportunityCreditAnalysisResetCore({
+		opportunityId: params.opportunityId,
+		reserveReset: () => reserveCreditAnalysisReset(params),
+		releaseReset: ({ token }) =>
+			releaseCapacityAnalysisReservation({
+				opportunityId: params.opportunityId,
+				token,
+			}),
+		assertResetCurrent: (reservation) =>
+			db.transaction((tx) =>
+				assertBankStatementResetReservation(tx, {
+					...params,
+					reservation,
+				}),
+			),
+		loadAnalysis: async (reservation) => {
+			const [analysis] = await db
+				.select({
+					id: creditAnalysis.id,
+					fullAnalysis: creditAnalysis.fullAnalysis,
+				})
+				.from(creditAnalysis)
+				.where(
+					and(
+						eq(creditAnalysis.id, reservation.analysisId),
+						eq(creditAnalysis.opportunityId, params.opportunityId),
+						eq(creditAnalysis.leadId, params.leadId),
+						eq(creditAnalysis.analysisReservationToken, reservation.token),
+					),
+				)
+				.limit(1);
+			if (!analysis) return null;
+			const [opportunity] = await db
+				.select({ vehicleId: opportunities.vehicleId })
+				.from(opportunities)
+				.where(eq(opportunities.id, params.opportunityId))
+				.limit(1);
+			hasVehicle = !!opportunity?.vehicleId;
+			if (!analysis.fullAnalysis) {
+				fullAnalysisRecord = null;
+				return { id: analysis.id, coverage: null };
+			}
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(analysis.fullAnalysis);
+			} catch {
+				throw new DocumentIntegrityError(
+					"BAD_REQUEST",
+					"El análisis guardado no se puede recuperar para restablecerlo.",
+				);
+			}
+			if (!parsed || typeof parsed !== "object") {
+				throw new DocumentIntegrityError(
+					"BAD_REQUEST",
+					"El análisis guardado no se puede recuperar para restablecerlo.",
+				);
+			}
+			fullAnalysisRecord = parsed as Record<string, unknown>;
+			if (!("cobertura_mensual" in fullAnalysisRecord)) {
+				return { id: analysis.id, coverage: null };
+			}
+			const coverage = persistedCoverageSchema.safeParse(
+				fullAnalysisRecord.cobertura_mensual,
+			);
+			if (!coverage.success) {
+				throw new DocumentIntegrityError(
+					"BAD_REQUEST",
+					"La cobertura guardada no se puede recuperar para restablecerla.",
+				);
+			}
+			return { id: analysis.id, coverage: coverage.data };
+		},
+		loadDocuments: () =>
+			db
+				.select({
+					id: opportunityDocuments.id,
+					documentType: opportunityDocuments.documentType,
+					description: opportunityDocuments.description,
+					filePath: opportunityDocuments.filePath,
+				})
+				.from(opportunityDocuments)
+				.where(eq(opportunityDocuments.opportunityId, params.opportunityId)),
+		persistRecovery: async (analysisId, coverage, reservation) => {
+			if (!fullAnalysisRecord) {
+				throw new Error("No existe metadata privada para recuperar la limpieza.");
+			}
+			fullAnalysisRecord.cobertura_mensual = coverage;
+			const [updated] = await db
+				.update(creditAnalysis)
+				.set({
+					fullAnalysis: JSON.stringify(fullAnalysisRecord),
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(creditAnalysis.id, analysisId),
+						eq(creditAnalysis.opportunityId, params.opportunityId),
+						eq(creditAnalysis.leadId, params.leadId),
+						eq(creditAnalysis.analysisReservationToken, reservation.token),
+					),
+				)
+				.returning({ id: creditAnalysis.id });
+			if (!updated) throw new Error("El análisis ya no existe para recuperar la limpieza.");
+		},
+		quarantineArtifactsAndRefresh: (
+			artifacts,
+			analysisBatchId,
+			reservation,
+		) =>
+			db.transaction(async (tx) => {
+				await assertBankStatementResetReservation(tx, {
+					...params,
+					reservation,
+				});
+				for (const artifact of artifacts) {
+					const [updated] = await tx
+						.update(opportunityDocuments)
+						.set({
+							documentType: "other",
+							description: `[bank-coverage-debt:${analysisBatchId}:reset:artifact:${artifact.id}]`,
+						})
+						.where(
+							and(
+								eq(opportunityDocuments.id, artifact.id),
+								eq(
+									opportunityDocuments.opportunityId,
+									params.opportunityId,
+								),
+							),
+						)
+						.returning({ id: opportunityDocuments.id });
+					if (!updated) throw new Error("Un adjunto ya no existe para aislarlo.");
+				}
+				await rebuildClientDocumentChecklistInTransaction(
+					tx,
+					params.opportunityId,
+					hasVehicle,
+				);
+			}),
+		deleteStoredFile: deleteFileFromR2,
+		deleteArtifactAndRefresh: (artifact, reservation) =>
+			db.transaction(async (tx) => {
+				await assertBankStatementResetReservation(tx, {
+					...params,
+					reservation,
+				});
+				await tx
+					.delete(opportunityDocuments)
+					.where(
+						and(
+							eq(opportunityDocuments.id, artifact.id),
+							eq(
+								opportunityDocuments.opportunityId,
+								params.opportunityId,
+							),
+						),
+					);
+				await rebuildClientDocumentChecklistInTransaction(
+					tx,
+					params.opportunityId,
+					hasVehicle,
+				);
+			}),
+		deleteAnalysis: async (analysisId, reservation) => {
+			const [deleted] = await db
+				.delete(creditAnalysis)
+				.where(
+					and(
+						eq(creditAnalysis.id, analysisId),
+						eq(creditAnalysis.opportunityId, params.opportunityId),
+						eq(creditAnalysis.leadId, params.leadId),
+						eq(creditAnalysis.analysisReservationToken, reservation.token),
+					),
+				)
+				.returning({ id: creditAnalysis.id });
+			if (!deleted) throw new Error("El análisis ya no existe para restablecerlo.");
+		},
+	});
+}
+
+async function mutatePersistedBankCoverage(params: {
+	leadId: string;
+	opportunityId: string;
+	analysisId: string;
+	analysisBatchId: string;
+	userId: string;
+	userRole: string;
+	manualDeclaration?: { fileIndex: number; months: string[] };
+}) {
+	const [opportunity] = await db
+		.select({
+			id: opportunities.id,
+			leadId: opportunities.leadId,
+			vehicleId: opportunities.vehicleId,
+			assignedTo: opportunities.assignedTo,
+		})
+		.from(opportunities)
+		.where(eq(opportunities.id, params.opportunityId))
+		.limit(1);
+	if (!opportunity) {
+		throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
+	}
+	const [analysisRow] = await db
+		.select({
+			id: creditAnalysis.id,
+			leadId: creditAnalysis.leadId,
+			opportunityId: creditAnalysis.opportunityId,
+			fullAnalysis: creditAnalysis.fullAnalysis,
+		})
+		.from(creditAnalysis)
+		.where(
+			and(
+				eq(creditAnalysis.id, params.analysisId),
+				eq(creditAnalysis.opportunityId, params.opportunityId),
+			),
+		)
+		.limit(1);
+	if (!analysisRow) {
+		throw new ORPCError("PRECONDITION_FAILED", {
+			message: "El análisis ya no corresponde a esta oportunidad.",
+		});
+	}
+	const canWrite = canAutoAttachBankStatementDocuments({
+		userRole: params.userRole,
+		userId: params.userId,
+		opportunityAssignedTo: opportunity.assignedTo,
+	});
+	const { fullAnalysis, coverage } = parsePersistedBankAnalysis(
+		analysisRow.fullAnalysis,
+	);
+	try {
+		assertBankStatementCoverageMutation({
+			requestedOpportunityId: params.opportunityId,
+			requestedAnalysisId: params.analysisId,
+			requestedLeadId: params.leadId,
+			currentOpportunityId: analysisRow.opportunityId,
+			currentAnalysisId: analysisRow.id,
+			currentLeadId: analysisRow.leadId,
+			requestedAnalysisBatchId: params.analysisBatchId,
+			currentAnalysisBatchId: coverage.analysisBatchId,
+			canWrite,
+			integrityBatchCurrent: true,
+		});
+		assertOpportunityBelongsToLead(opportunity, params.leadId);
+	} catch (error) {
+		throw new ORPCError(canWrite ? "PRECONDITION_FAILED" : "FORBIDDEN", {
+			message: error instanceof Error ? error.message : String(error),
+		});
+	}
+
+	if (params.manualDeclaration) {
+		const targetFile = coverage.files.find(
+			(file) => file.fileIndex === params.manualDeclaration?.fileIndex,
+		);
+		if (!targetFile || targetFile.status !== "needs_confirmation") {
+			throw new ORPCError("PRECONDITION_FAILED", {
+				message: "Este archivo ya no requiere confirmación mensual.",
+			});
+		}
+	}
+
+	let reservation: { opportunityId: string; token: string } | null = null;
+	try {
+		const finalCoverage = await runBankStatementCoverageMutationHandlerCore({
+			coverage,
+			manualDeclaration: params.manualDeclaration,
+			actorId: params.userId,
+			declaredAt: new Date().toISOString(),
+			validateCurrent: async () => {
+				try {
+					reservation = await reserveBankStatementCoverageMutation({
+						opportunityId: params.opportunityId,
+						leadId: params.leadId,
+						analysisId: params.analysisId,
+						validationIds: coverage.files.map(
+							(file) => file.integrityValidationId,
+						),
+						files: coverage.files.map((file) => ({
+							filePath: file.evidenceKey,
+							contentSha256: file.contentSha256,
+						})),
+					});
+				} catch (error) {
+					if (error instanceof DocumentIntegrityError) {
+						throw new ORPCError("PRECONDITION_FAILED", {
+							message: error.message,
+						});
+					}
+					throw error;
+				}
+			},
+			persistCoverage: async (updatedCoverage) => {
+				if (!reservation) {
+					throw new ORPCError("PRECONDITION_FAILED", {
+						message: "La reserva de guardado ya no está vigente.",
+					});
+				}
+				fullAnalysis.cobertura_mensual = updatedCoverage;
+				const [updated] = await db
+					.update(creditAnalysis)
+					.set({
+						fullAnalysis: JSON.stringify(fullAnalysis),
+						updatedAt: new Date(),
+					})
+					.where(
+						and(
+							eq(creditAnalysis.id, params.analysisId),
+							eq(
+								creditAnalysis.analysisReservationToken,
+								reservation.token,
+							),
+						),
+					)
+					.returning({ id: creditAnalysis.id });
+				if (!updated) {
+					throw new ORPCError("PRECONDITION_FAILED", {
+						message: "El lote de análisis cambió antes de guardar la cobertura.",
+					});
+				}
+			},
+			cleanupDebt: (debt) =>
+				cleanupBankStatementCoverageDebt({
+					opportunityId: params.opportunityId,
+					vehicleId: opportunity.vehicleId,
+					analysisBatchId: coverage.analysisBatchId,
+					debt,
+				}),
+			saveArtifacts: async (coverageToSave) => {
+				if (!reservation) {
+					throw new Error("La reserva de guardado ya no está vigente.");
+				}
+				const buffers = new Map<number, Buffer>();
+				for (const file of coverageToSave.files) {
+					const expectedPrefix = `${buildUploadPrefix(
+						"bank_statement",
+						params.opportunityId,
+					)}/validated/`;
+					if (!file.evidenceKey.startsWith(expectedPrefix)) {
+						throw new Error(
+							"La evidencia del archivo no pertenece a la oportunidad.",
+						);
+					}
+					const buffer = await getFileBuffer(file.evidenceKey);
+					const hash = createHash("sha256").update(buffer).digest("hex");
+					if (hash !== file.contentSha256) {
+						throw new Error(
+							"La evidencia del archivo cambió desde el análisis.",
+						);
+					}
+					buffers.set(file.fileIndex, buffer);
+				}
+				return saveBankCoverageDocuments({
+					opportunityId: params.opportunityId,
+					vehicleId: opportunity.vehicleId,
+					userId: params.userId,
+					reservationToken: reservation.token,
+					coverage: coverageToSave,
+					buffers,
+				});
+			},
+		});
+		return { coverage: toPublicBankStatementCoverage(finalCoverage) };
+	} finally {
+		if (reservation) {
+			try {
+				await releaseCapacityAnalysisReservation(reservation);
+			} catch (error) {
+				console.error("Failed to release coverage save reservation", {
+					opportunityId: params.opportunityId,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+	}
 }
 
 export const bankAnalysisRouter = {
@@ -416,409 +1270,246 @@ export const bankAnalysisRouter = {
 				}
 
 				// 4. Construir content parts con los PDFs descargados de R2
-				const fileParts = downloadedFiles.map((file) => ({
-					type: "file" as const,
-					data: file.buffer,
-					mediaType: "application/pdf" as const,
-					filename: file.name,
-				}));
+				const fileParts = downloadedFiles.flatMap((file, fileIndex) => [
+					{
+						type: "text" as const,
+						text: `Archivo índice ${fileIndex}: ${file.name}`,
+					},
+					{
+						type: "file" as const,
+						data: file.buffer,
+						mediaType: "application/pdf" as const,
+						filename: file.name,
+					},
+				]);
 
-				// 5. Llamar a Gemini con generateObject (aquí es donde cuesta dinero)
-				let analysis: Awaited<
-					ReturnType<typeof generateObject<typeof bankStatementAnalysisSchema>>
-				>["object"];
-
-				try {
-					const result = await generateObject({
-						model: google("gemini-3-flash-preview"),
-						schema: bankStatementAnalysisSchema,
-						abortSignal: AbortSignal.timeout(AI_TIMEOUT_MS),
-						messages: [
-							{
-								role: "system",
-								content: BANK_ANALYSIS_PROMPT,
-							},
-							{
-								role: "user",
-								content: [
+				// 5-8. La producción y las pruebas usan el mismo núcleo: una sola IA,
+				// persistencia financiera y ciclo real de adjuntos.
+				const initial = await runInitialBankStatementHandlerCore({
+					generateAnalysis: async () => {
+						try {
+							const result = await generateObject({
+								model: google("gemini-3-flash-preview"),
+								schema: bankStatementAnalysisSchema,
+								abortSignal: AbortSignal.timeout(AI_TIMEOUT_MS),
+								messages: [
+									{ role: "system", content: BANK_ANALYSIS_PROMPT },
 									{
-										type: "text",
-										text: "Analiza los siguientes estados de cuenta bancarios:",
+										role: "user",
+										content: [
+											{
+												type: "text",
+												text: "Analiza los siguientes estados de cuenta bancarios:",
+											},
+											...fileParts,
+										],
 									},
-									...fileParts,
 								],
-							},
-						],
-					});
-					analysis = result.object;
-				} catch (error) {
-					// El intento ya se contó, informar al usuario del error
-					const isTimeout =
-						error instanceof Error && error.name === "TimeoutError";
-					console.error("Error en análisis de IA:", {
-						leadId: input.leadId,
-						attemptCount: currentAttemptCount,
-						isTimeout,
-						error: error instanceof Error ? error.message : String(error),
-					});
-
-					const remainingAttempts = MAX_AI_ATTEMPTS - currentAttemptCount;
-					const timeoutMsg = isTimeout
-						? "El análisis tardó demasiado tiempo. "
-						: "";
-					throw new ORPCError("INTERNAL_SERVER_ERROR", {
-						message: `${timeoutMsg}Error al analizar los documentos (intento ${currentAttemptCount}/${MAX_AI_ATTEMPTS}). ${
-							remainingAttempts > 0
-								? `Puede intentar ${remainingAttempts} vez más.`
-								: "Se agotaron los intentos disponibles. Contacte al administrador."
-						}`,
-					});
-				}
-
-				// 5.5. Normalizar a quetzales: los montos vienen en la moneda original del
-				// estado de cuenta y todo lo que sigue (capacidad, columnas, UI) asume Q.
-				if (analysis.moneda === "MIXTA") {
-					// El intento se contó antes de llamar a la IA, pero esto no es un análisis
-					// fallido sino documentos mal armados: se devuelve para no dejar al usuario
-					// bloqueado esperando un reset de admin por algo que puede corregir solo.
-					const mixedCurrencyCondition = capacityReservation
-						? and(
-								whereCondition,
-								eq(
-									creditAnalysis.analysisReservationToken,
-									capacityReservation.token,
-								),
-							)
-						: whereCondition;
-					const releasedAttempt = await db
-						.update(creditAnalysis)
-						.set({
-							attemptCount: sql`GREATEST(${creditAnalysis.attemptCount} - 1, 0)`,
-							...(capacityReservation
-								? {
-										analysisReservationToken: null,
-										analysisReservationStartedAt: null,
-									}
-								: {}),
-							updatedAt: new Date(),
-						})
-						.where(mixedCurrencyCondition)
-						.returning({ id: creditAnalysis.id });
-					if (capacityReservation && releasedAttempt.length > 0) {
-						capacityReservation = null;
-					}
-
-					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"Los estados de cuenta subidos están en monedas distintas (quetzales y dólares). Analice por separado los de cada moneda. Este intento no se descontó.",
-					});
-				}
-
-				if (analysis.moneda === "USD") {
-					analysis = convertAnalysisToQuetzales(analysis);
-				}
-
-				// 5.6. ordenar por porcentaje descendente antes de persistir, ya que la UI
-				// asume que el índice 0 es siempre la mejor recomendación.
-				if (analysis.analisis_fecha_pago) {
-					analysis.analisis_fecha_pago.dias_pago_sugeridos = [
-						...analysis.analisis_fecha_pago.dias_pago_sugeridos,
-					].sort((a, b) => b.porcentaje - a.porcentaje);
-				}
-
-				// 6. Calcular capacidad crediticia
-				const creditCapacity = calculateCreditCapacity(analysis, {
-					annualRate: input.annualRate,
-					termMonths: input.termMonths,
-					maxDebtRatio: input.maxDebtRatio,
-					maxVariableDebtRatio: input.maxVariableDebtRatio,
-				});
-
-				// 7. Actualizar con los resultados del análisis exitoso.
-				// Se deja constancia de con qué archivos se hizo: el checklist solo
-				// tiene tres casillas, así que la lista de la ficha no alcanza para
-				// reconstruir qué leyó la IA cuando se suben más estados de cuenta.
-				const analyzedFiles = downloadedFiles.map((file) => ({
-					nombre: file.name,
-					tamano: file.size,
-					tipo: file.mimeType,
-				}));
-
-				const completionCondition = capacityReservation
-					? and(
-							whereCondition,
-							eq(
-								creditAnalysis.analysisReservationToken,
-								capacityReservation.token,
-							),
-						)
-					: whereCondition;
-				const completedAnalysis = await db
-					.update(creditAnalysis)
-					.set({
-						fullAnalysis: JSON.stringify({
-							...analysis,
-							archivos_analizados: analyzedFiles,
-						}),
-						monthlyFixedIncome:
-							analysis.promedio_mensual.promedio_ingresos_fijos.toString(),
-						monthlyVariableIncome:
-							analysis.promedio_mensual.promedio_ingresos_variables.toString(),
-						monthlyFixedExpenses:
-							analysis.promedio_mensual.promedio_gastos_fijos.toString(),
-						monthlyVariableExpenses:
-							analysis.promedio_mensual.promedio_gastos_variables.toString(),
-						economicAvailability:
-							analysis.promedio_mensual.disponibilidad_economica.toString(),
-						maxPayment: creditCapacity.maxPayment.toString(),
-						maxCreditAmount: creditCapacity.maxCreditAmount.toString(),
-						suggestedPaymentDays:
-							analysis.analisis_fecha_pago?.dias_pago_sugeridos ?? null,
-						analyzedAt: new Date(),
-						...(capacityReservation
-							? {
-									analysisReservationToken: null,
-									analysisReservationStartedAt: null,
-								}
-							: {}),
-						updatedAt: new Date(),
-					})
-					.where(completionCondition)
-					.returning({ id: creditAnalysis.id });
-
-				if (capacityReservation) {
-					if (completedAnalysis.length === 0) {
-						throw new ORPCError("PRECONDITION_FAILED", {
-							message:
-								"La validación documental cambió mientras se analizaba la capacidad. Actualiza la pantalla e inténtalo nuevamente.",
-						});
-					}
-					capacityReservation = null;
-				}
-
-				if (opportunityForDocuments) {
-					const savedDocuments: { id: string; documentType: string }[] = [];
-					const savedKeys: string[] = [];
-					const pendingValidationLinks: Array<{
-						documentId: string;
-						documentFilePath: string;
-						sourceFilePath: string;
-						buffer: Buffer;
-					}> = [];
-					let checklistDocumentsSaved = false;
-
-					try {
-						// Máximo un archivo por slot del checklist (3).
-						const filesToUpload = downloadedFiles.slice(
-							0,
-							BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length,
-						);
-
-						const documentSlots = resolveBankStatementDocumentSlots({
-							uploadedFileCount: filesToUpload.length,
-							statementsDetected:
-								analysis.estados_cuenta_detectados ?? filesToUpload.length,
-						});
-
-						for (let slot = 0; slot < documentSlots.length; slot++) {
-							const documentType =
-								getBankStatementOpportunityDocumentType(slot);
-							const file = filesToUpload[documentSlots[slot]];
-							if (!documentType || !file) {
-								continue;
+							});
+							return result.object;
+						} catch (error) {
+							const isTimeout =
+								error instanceof Error && error.name === "TimeoutError";
+							console.error("Error en análisis de IA:", {
+								leadId: input.leadId,
+								attemptCount: currentAttemptCount,
+								isTimeout,
+								error: error instanceof Error ? error.message : String(error),
+							});
+							const remainingAttempts = MAX_AI_ATTEMPTS - currentAttemptCount;
+							throw new ORPCError("INTERNAL_SERVER_ERROR", {
+								message: `${isTimeout ? "El análisis tardó demasiado tiempo. " : ""}Error al analizar los documentos (intento ${currentAttemptCount}/${MAX_AI_ATTEMPTS}). ${
+									remainingAttempts > 0
+										? `Puede intentar ${remainingAttempts} vez más.`
+										: "Se agotaron los intentos disponibles. Contacte al administrador."
+								}`,
+							});
+						}
+					},
+					prepareAnalysis: async (generated) => {
+						let analysis = generated;
+						if (analysis.moneda === "MIXTA") {
+							const mixedCurrencyCondition = capacityReservation
+								? and(
+										whereCondition,
+										eq(
+											creditAnalysis.analysisReservationToken,
+											capacityReservation.token,
+										),
+									)
+								: whereCondition;
+							const releasedAttempt = await db
+								.update(creditAnalysis)
+								.set({
+									attemptCount: sql`GREATEST(${creditAnalysis.attemptCount} - 1, 0)`,
+									...(capacityReservation
+										? {
+												analysisReservationToken: null,
+												analysisReservationStartedAt: null,
+											}
+										: {}),
+									updatedAt: new Date(),
+								})
+								.where(mixedCurrencyCondition)
+								.returning({ id: creditAnalysis.id });
+							if (capacityReservation && releasedAttempt.length > 0) {
+								capacityReservation = null;
 							}
-
-							const uniqueFilename = generateUniqueFilename(file.name);
-							const { key } = await uploadFileToR2(
-								new Blob([new Uint8Array(file.buffer)], {
-									type: file.mimeType,
-								}),
-								uniqueFilename,
-								opportunityForDocuments.id,
-							);
-							savedKeys.push(key);
-
-							const [newDocument] = await db
-								.insert(opportunityDocuments)
-								.values({
-									opportunityId: opportunityForDocuments.id,
-									filename: uniqueFilename,
-									originalName: file.name,
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"Los estados de cuenta subidos están en monedas distintas (quetzales y dólares). Analice por separado los de cada moneda. Este intento no se descontó.",
+							});
+						}
+						if (analysis.moneda === "USD") {
+							analysis = convertAnalysisToQuetzales(analysis);
+						}
+						if (analysis.analisis_fecha_pago) {
+							analysis.analisis_fecha_pago.dias_pago_sugeridos = [
+								...analysis.analisis_fecha_pago.dias_pago_sugeridos,
+							].sort((a, b) => b.porcentaje - a.porcentaje);
+						}
+						const creditCapacity = calculateCreditCapacity(analysis, {
+							annualRate: input.annualRate,
+							termMonths: input.termMonths,
+							maxDebtRatio: input.maxDebtRatio,
+							maxVariableDebtRatio: input.maxVariableDebtRatio,
+						});
+						const resolvedCoverage = resolveBankStatementMonthlyCoverage({
+							uploadedFileCount: downloadedFiles.length,
+							coverageByFile: analysis.cobertura_por_archivo,
+						});
+						const coverage: PersistedBankStatementCoverage = {
+							...resolvedCoverage,
+							version: 1,
+							analysisBatchId: randomUUID(),
+							saveStatus: getInitialBankStatementCoverageSaveStatus({
+								hasOpportunity: isForLead,
+								canAutoAttach: !!opportunityForDocuments,
+							}),
+							requestedChecklistAssignments:
+								resolvedCoverage.checklistAssignments,
+							files: resolvedCoverage.files.map((fileCoverage) => {
+								const file = downloadedFiles[fileCoverage.fileIndex];
+								return {
+									...fileCoverage,
+									name: file.name,
+									evidenceKey: file.key,
+									contentSha256: createHash("sha256")
+										.update(file.buffer)
+										.digest("hex"),
+									integrityValidationId:
+										input.integrityValidationIds?.[fileCoverage.fileIndex],
 									mimeType: file.mimeType,
 									size: file.size,
-									documentType,
-									description:
-										"Guardado automáticamente desde análisis de capacidad de pago",
-									uploadedBy: context.userId,
-									filePath: key,
-								})
-								.returning({ id: opportunityDocuments.id });
-
-							if (newDocument) {
-								savedDocuments.push({ id: newDocument.id, documentType });
-								pendingValidationLinks.push({
-									documentId: newDocument.id,
-									documentFilePath: key,
-									sourceFilePath: file.key,
-									buffer: file.buffer,
-								});
-								await updateChecklistForClientDocument(
-									opportunityForDocuments.id,
-									documentType,
-									newDocument.id,
-									!!opportunityForDocuments.vehicleId,
-									opportunityForDocuments.vehicleId || undefined,
-								);
-							}
-						}
-						const sourceFilePathsToDelete =
-							await linkUploadedValidationsToDocuments({
-								opportunityId: opportunityForDocuments.id,
-								links: pendingValidationLinks,
+								};
+							}),
+						};
+						const fullAnalysis = {
+							...analysis,
+							archivos_analizados: downloadedFiles.map((file, fileIndex) => ({
+								indice: fileIndex,
+								nombre: file.name,
+								tamano: file.size,
+								tipo: file.mimeType,
+							})),
+							cobertura_mensual: coverage,
+						};
+						const completionCondition = capacityReservation
+							? and(
+									whereCondition,
+									eq(
+										creditAnalysis.analysisReservationToken,
+										capacityReservation.token,
+									),
+								)
+							: whereCondition;
+						return {
+							analysis,
+							creditCapacity,
+							coverage,
+							fullAnalysis,
+							completionCondition,
+						};
+					},
+					persistAnalysis: async (prepared) => {
+						const [completed] = await db
+							.update(creditAnalysis)
+							.set({
+								fullAnalysis: JSON.stringify(prepared.fullAnalysis),
+								monthlyFixedIncome:
+									prepared.analysis.promedio_mensual.promedio_ingresos_fijos.toString(),
+								monthlyVariableIncome:
+									prepared.analysis.promedio_mensual.promedio_ingresos_variables.toString(),
+								monthlyFixedExpenses:
+									prepared.analysis.promedio_mensual.promedio_gastos_fijos.toString(),
+								monthlyVariableExpenses:
+									prepared.analysis.promedio_mensual.promedio_gastos_variables.toString(),
+								economicAvailability:
+									prepared.analysis.promedio_mensual.disponibilidad_economica.toString(),
+								maxPayment: prepared.creditCapacity.maxPayment.toString(),
+								maxCreditAmount: prepared.creditCapacity.maxCreditAmount.toString(),
+								suggestedPaymentDays:
+									prepared.analysis.analisis_fecha_pago?.dias_pago_sugeridos ?? null,
+								analyzedAt: new Date(),
+								updatedAt: new Date(),
+							})
+							.where(prepared.completionCondition)
+							.returning({ id: creditAnalysis.id });
+						if (!completed) {
+							throw new ORPCError("PRECONDITION_FAILED", {
+								message:
+									"La validación documental cambió mientras se analizaba la capacidad. Actualiza la pantalla e inténtalo nuevamente.",
 							});
-						for (const filePath of sourceFilePathsToDelete) {
-							uploadedKeysToDelete.add(filePath);
 						}
-
-						checklistDocumentsSaved = true;
-					} catch (error) {
-						const cleanupResults = await Promise.allSettled([
-							...savedDocuments.map(({ id }) =>
-								db
-									.delete(opportunityDocuments)
-									.where(eq(opportunityDocuments.id, id)),
-							),
-							...savedKeys.map((key) => deleteFileFromR2(key)),
-						]);
-						const failedCleanups = cleanupResults.filter(
-							(result) => result.status === "rejected",
-						);
-						await Promise.allSettled(
-							savedDocuments.map(({ id, documentType }) =>
-								updateChecklistForClientDocument(
-									opportunityForDocuments.id,
-									documentType,
-									id,
-									!!opportunityForDocuments.vehicleId,
-									opportunityForDocuments.vehicleId || undefined,
-								),
-							),
-						);
-
-						console.error(
-							"Failed to save bank statement opportunity documents",
-							{
-								opportunityId: opportunityForDocuments.id,
-								savedDocuments: savedDocuments.length,
-								savedFiles: savedKeys.length,
-								failedCleanups: failedCleanups.length,
-								error: error instanceof Error ? error.message : String(error),
-							},
-						);
-					}
-
-					// El checklist solo tiene tres casillas, pero el análisis acepta hasta
-					// nueve archivos y la IA los usa todos para el resultado. Los que
-					// sobran se adjuntan igual —fuera del checklist— para que la ficha
-					// muestre exactamente con qué se hizo el análisis; antes se
-					// descartaban en silencio y el original se borraba de R2.
-					//
-					// Va en su propio try con su propia limpieza: si falla adjuntando el
-					// cuarto archivo, los tres del checklist ya guardados se quedan donde
-					// están. Arrastrarlos al rollback dejaría el análisis sin ningún
-					// respaldo, que es peor que perder los sobrantes.
-					const extraFiles = downloadedFiles.slice(
-						BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length,
-					);
-
-					if (checklistDocumentsSaved && extraFiles.length > 0) {
-						const savedExtraDocumentIds: string[] = [];
-						const savedExtraKeys: string[] = [];
-						const pendingExtraValidationLinks: Array<{
-							documentId: string;
-							documentFilePath: string;
-							sourceFilePath: string;
-							buffer: Buffer;
-						}> = [];
-
-						try {
-							for (const [index, file] of extraFiles.entries()) {
-								const position =
-									BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length + index + 1;
-
-								const uniqueFilename = generateUniqueFilename(file.name);
-								const { key } = await uploadFileToR2(
-									new Blob([new Uint8Array(file.buffer)], {
-										type: file.mimeType,
-									}),
-									uniqueFilename,
-									opportunityForDocuments.id,
-								);
-								savedExtraKeys.push(key);
-
-								const [newDocument] = await db
-									.insert(opportunityDocuments)
-									.values({
-										opportunityId: opportunityForDocuments.id,
-										filename: uniqueFilename,
-										originalName: file.name,
-										mimeType: file.mimeType,
-										size: file.size,
-										documentType: "other",
-										description: `Estado de cuenta ${position} de ${downloadedFiles.length}, guardado automáticamente desde análisis de capacidad de pago`,
-										uploadedBy: context.userId,
-										filePath: key,
-									})
-									.returning({ id: opportunityDocuments.id });
-
-								if (newDocument) {
-									savedExtraDocumentIds.push(newDocument.id);
-									pendingExtraValidationLinks.push({
-										documentId: newDocument.id,
-										documentFilePath: key,
-										sourceFilePath: file.key,
-										buffer: file.buffer,
-									});
-								}
-							}
-							const sourceFilePathsToDelete =
-								await linkUploadedValidationsToDocuments({
-									opportunityId: opportunityForDocuments.id,
-									links: pendingExtraValidationLinks,
-								});
-							for (const filePath of sourceFilePathsToDelete) {
-								uploadedKeysToDelete.add(filePath);
-							}
-						} catch (error) {
-							const cleanupResults = await Promise.allSettled([
-								...savedExtraDocumentIds.map((id) =>
-									db
-										.delete(opportunityDocuments)
-										.where(eq(opportunityDocuments.id, id)),
-								),
-								...savedExtraKeys.map((key) => deleteFileFromR2(key)),
-							]);
-							const failedCleanups = cleanupResults.filter(
-								(result) => result.status === "rejected",
-							);
-
-							console.error(
-								"Failed to save extra bank statement opportunity documents",
-								{
-									opportunityId: opportunityForDocuments.id,
-									extraFiles: extraFiles.length,
-									savedExtraDocuments: savedExtraDocumentIds.length,
-									failedCleanups: failedCleanups.length,
-									error: error instanceof Error ? error.message : String(error),
-								},
-							);
+					},
+					validateCurrent: async () => {
+						if (isForLead && !capacityReservation) {
+							throw new ORPCError("PRECONDITION_FAILED", {
+								message: "La reserva del análisis ya no está vigente.",
+							});
 						}
-					}
-				}
-				// 8. Retornar resultados
+					},
+					persistCoverage: async (updatedCoverage, prepared) => {
+						prepared.fullAnalysis.cobertura_mensual = updatedCoverage;
+						const [saved] = await db
+							.update(creditAnalysis)
+							.set({
+								fullAnalysis: JSON.stringify(prepared.fullAnalysis),
+								updatedAt: new Date(),
+							})
+							.where(prepared.completionCondition)
+							.returning({ id: creditAnalysis.id });
+						if (!saved) {
+							throw new ORPCError("PRECONDITION_FAILED", {
+								message:
+									"El lote de análisis cambió antes de guardar la cobertura.",
+							});
+						}
+					},
+					cleanupDebt: async () => [],
+					saveArtifacts: async (coverageToSave) => {
+						if (!(opportunityForDocuments && capacityReservation)) {
+							throw new Error("El guardado de adjuntos no aplica a este análisis.");
+						}
+						return saveBankCoverageDocuments({
+							opportunityId: opportunityForDocuments.id,
+							vehicleId: opportunityForDocuments.vehicleId,
+							userId: context.userId,
+							reservationToken: capacityReservation.token,
+							coverage: coverageToSave,
+							buffers: new Map(
+								downloadedFiles.map((file, fileIndex) => [
+									fileIndex,
+									file.buffer,
+								]),
+							),
+						});
+					},
+				});
 				return {
-					analysis,
-					creditCapacity,
+					analysis: initial.analysis,
+					creditCapacity: initial.creditCapacity,
+					coverage: toPublicBankStatementCoverage(initial.coverage),
 				};
 			} finally {
 				if (capacityReservation) {
@@ -850,4 +1541,50 @@ export const bankAnalysisRouter = {
 				}
 			}
 		}),
+
+	retryBankStatementCoverageSave: crmProcedure
+		.input(
+			z.object({
+				leadId: z.string().uuid(),
+				opportunityId: z.string().uuid(),
+				analysisId: z.string().uuid(),
+				analysisBatchId: z.string().uuid(),
+			}),
+		)
+		.handler(({ input, context }) =>
+			mutatePersistedBankCoverage({
+				...input,
+				userId: context.userId,
+				userRole: context.userRole,
+			}),
+		),
+
+	confirmBankStatementCoverage: crmProcedure
+		.input(
+			z.object({
+				leadId: z.string().uuid(),
+				opportunityId: z.string().uuid(),
+				analysisId: z.string().uuid(),
+				analysisBatchId: z.string().uuid(),
+				fileIndex: z.number().int().min(0).max(8),
+				months: z
+					.array(z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/))
+					.min(1)
+					.max(36),
+			}),
+		)
+		.handler(({ input, context }) =>
+			mutatePersistedBankCoverage({
+				leadId: input.leadId,
+				opportunityId: input.opportunityId,
+				analysisId: input.analysisId,
+				analysisBatchId: input.analysisBatchId,
+				userId: context.userId,
+				userRole: context.userRole,
+				manualDeclaration: {
+					fileIndex: input.fileIndex,
+					months: input.months,
+				},
+			}),
+		),
 };

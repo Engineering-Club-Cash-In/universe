@@ -21,6 +21,10 @@ import { z } from "zod";
 import { db } from "../db";
 import { auditRecord, auditedTransaction } from "../lib/audit";
 import {
+	isReservedBankCoverageDescription,
+	redactBankStatementCoverageEvidence,
+} from "../lib/bank-statement-documents";
+import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
 	vehicleInspections,
@@ -60,6 +64,8 @@ import {
 	hasStaleAnalysisChecklistVehicleState,
 } from "../lib/analysis-checklist";
 import {
+	rebuildClientDocumentChecklistInTransaction,
+	refreshChecklistForClientDocuments,
 	updateChecklistForClientDocument,
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
@@ -108,8 +114,8 @@ import {
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	DocumentIntegrityError,
-	resetOpportunityCreditAnalysis,
 	upsertOpportunityCreditAnalysis,
+	withOpportunityDocumentMutationLock,
 } from "../services/document-integrity";
 import { scoreLead } from "../services/lead-scoring";
 import {
@@ -118,7 +124,19 @@ import {
 } from "../services/opportunity-validations";
 import type { StatusCreditEnum } from "../types/cartera-back";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
+import { resetBankStatementCreditAnalysis } from "./bank-analysis";
+import { BankStatementCoverageSaveError } from "./bank-analysis-coverage";
 import { createNotification } from "./notifications";
+import {
+	getManualBankUploadCleanupDescription,
+	isBankStatementChecklistType,
+	isManualBankDocumentCleanupDescription,
+	OpportunityDocumentMutationError,
+	runOpportunityDocumentDeleteCore,
+	runOpportunityDocumentUploadCore,
+} from "./opportunity-document-core";
+
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const CLIENT_CREDIT_CARTERA_STATUSES = [
 	"ACTIVO",
@@ -1339,7 +1357,14 @@ export const crmRouter = {
 					)
 					.limit(1);
 
-				return analysis[0] || null;
+				return analysis[0]
+					? {
+							...analysis[0],
+							fullAnalysis: redactBankStatementCoverageEvidence(
+								analysis[0].fullAnalysis,
+							),
+						}
+					: null;
 			}
 
 			// Si es búsqueda por coDebtorId
@@ -1362,7 +1387,14 @@ export const crmRouter = {
 					.where(eq(creditAnalysis.coDebtorId, input.coDebtorId))
 					.limit(1);
 
-				return analysis[0] || null;
+				return analysis[0]
+					? {
+							...analysis[0],
+							fullAnalysis: redactBankStatementCoverageEvidence(
+								analysis[0].fullAnalysis,
+							),
+						}
+					: null;
 			}
 
 			return null;
@@ -1572,12 +1604,15 @@ export const crmRouter = {
 			let deleted: { id: string } | null;
 			if (input.leadId) {
 				try {
-					deleted = await resetOpportunityCreditAnalysis({
+					deleted = await resetBankStatementCreditAnalysis({
 						opportunityId: input.opportunityId!,
 						leadId: input.leadId,
 					});
 				} catch (error) {
-					if (error instanceof DocumentIntegrityError) {
+					if (
+						error instanceof DocumentIntegrityError ||
+						error instanceof BankStatementCoverageSaveError
+					) {
 						throw new ORPCError("PRECONDITION_FAILED", {
 							message: error.message,
 						});
@@ -5009,6 +5044,11 @@ export const crmRouter = {
 					const url = await getFileUrl(doc.filePath);
 					return {
 						...doc,
+						description: isManualBankDocumentCleanupDescription(
+							doc.description,
+						)
+							? null
+							: doc.description,
 						url,
 					};
 				}),
@@ -5065,6 +5105,14 @@ export const crmRouter = {
 					message: "No tienes permiso para subir documentos a esta oportunidad",
 				});
 			}
+			if (
+				isReservedBankCoverageDescription(input.description) ||
+				isManualBankDocumentCleanupDescription(input.description)
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "La descripción usa una etiqueta reservada por el sistema",
+				});
+			}
 
 			const uploadedFile = await verifyUploadedDocumentInR2({
 				key: input.file.key,
@@ -5077,6 +5125,108 @@ export const crmRouter = {
 			});
 
 			const uniqueFilename = uploadedFile.key.split("/").pop()!;
+
+			if (isBankStatementChecklistType(input.documentType)) {
+				try {
+					return await runOpportunityDocumentUploadCore({
+						opportunityId: input.opportunityId,
+						actorId: context.userId,
+						documentType: input.documentType,
+						uploadedKey: uploadedFile.key,
+						withOpportunityLock: withOpportunityDocumentMutationLock,
+						runTransaction: <R>(
+							operation: (tx: Transaction) => Promise<R>,
+						) => db.transaction(operation),
+						findExistingBankSlot: async (tx) => {
+							const [existing] = await tx
+								.select({ id: opportunityDocuments.id })
+								.from(opportunityDocuments)
+								.where(
+									and(
+										eq(
+											opportunityDocuments.opportunityId,
+											input.opportunityId,
+										),
+										eq(
+											opportunityDocuments.documentType,
+											input.documentType,
+										),
+									),
+								)
+								.limit(1);
+							return existing ?? null;
+						},
+						insertDocument: async (tx) => {
+							const [newDocument] = await tx
+								.insert(opportunityDocuments)
+								.values({
+									opportunityId: input.opportunityId,
+									filename: uniqueFilename,
+									originalName: input.file.name,
+									mimeType: uploadedFile.mimeType,
+									size: uploadedFile.size,
+									documentType: input.documentType,
+									description: input.description,
+									uploadedBy: context.userId,
+									filePath: uploadedFile.key,
+								})
+								.returning();
+							if (!newDocument) {
+								throw new Error("No se pudo registrar el documento.");
+							}
+							return newDocument;
+						},
+						refreshChecklist: async (tx) => {
+							await rebuildClientDocumentChecklistInTransaction(
+								tx,
+								input.opportunityId,
+								!!opportunity[0]?.vehicleId,
+							);
+						},
+						deleteUploadedFile: deleteFileFromR2,
+						persistCleanupDebt: async (debt) => {
+							const description =
+								getManualBankUploadCleanupDescription(debt);
+							const [existing] = await db
+								.select({ id: opportunityDocuments.id })
+								.from(opportunityDocuments)
+								.where(
+									and(
+										eq(
+											opportunityDocuments.opportunityId,
+											debt.opportunityId,
+										),
+										eq(opportunityDocuments.filePath, debt.key),
+									),
+								)
+								.limit(1);
+							if (existing) return;
+							await db.insert(opportunityDocuments).values({
+								opportunityId: debt.opportunityId,
+								filename: uniqueFilename,
+								originalName: input.file.name,
+								mimeType: uploadedFile.mimeType,
+								size: uploadedFile.size,
+								documentType: "other",
+								description,
+								uploadedBy: debt.actorId,
+								filePath: debt.key,
+							});
+						},
+					});
+				} catch (error) {
+					if (error instanceof OpportunityDocumentMutationError) {
+						throw new ORPCError(
+							error.code === "NOT_FOUND" ? "NOT_FOUND" : "BAD_REQUEST",
+							{ message: error.message },
+						);
+					}
+					if (error instanceof DocumentIntegrityError) {
+						throw new ORPCError(error.code, { message: error.message });
+					}
+					throw error;
+				}
+			}
 
 			// Guardar en base de datos
 			const [newDocument] = await db
@@ -5162,6 +5312,114 @@ export const crmRouter = {
 				context.userRole === "analyst" ||
 				document.uploadedBy === context.userId
 			) {
+				if (
+					isBankStatementChecklistType(document.documentType) ||
+					isReservedBankCoverageDescription(document.description) ||
+					document.description?.startsWith("[bank-coverage-debt:") ||
+					isManualBankDocumentCleanupDescription(document.description)
+				) {
+					try {
+						await runOpportunityDocumentDeleteCore({
+							documentId: input.documentId,
+							opportunityId: document.opportunityId,
+							actorId: context.userId,
+							documentType: document.documentType,
+							description: document.description,
+							withOpportunityLock: withOpportunityDocumentMutationLock,
+							runTransaction: <R>(
+								operation: (tx: Transaction) => Promise<R>,
+							) => db.transaction(operation),
+							readDocument: async (tx) => {
+								const [current] = await tx
+									.select()
+									.from(opportunityDocuments)
+									.where(
+										and(
+											eq(opportunityDocuments.id, input.documentId),
+											eq(
+												opportunityDocuments.opportunityId,
+												document.opportunityId,
+											),
+										),
+									)
+									.limit(1);
+								return current ?? null;
+							},
+							quarantineAndRefresh: async (tx, current, cleanupTag) => {
+								const [updated] = await tx
+									.update(opportunityDocuments)
+									.set({ documentType: "other", description: cleanupTag })
+									.where(
+										and(
+											eq(opportunityDocuments.id, current.id),
+											eq(
+												opportunityDocuments.opportunityId,
+												current.opportunityId,
+											),
+										),
+									)
+									.returning({ id: opportunityDocuments.id });
+								if (!updated) throw new Error("Documento no encontrado");
+								const [currentOpportunity] = await tx
+									.select({ vehicleId: opportunities.vehicleId })
+									.from(opportunities)
+									.where(eq(opportunities.id, current.opportunityId))
+									.limit(1);
+								await rebuildClientDocumentChecklistInTransaction(
+									tx,
+									current.opportunityId,
+									!!currentOpportunity?.vehicleId,
+								);
+							},
+							deleteStoredFile: async (current) => {
+								const immutable = isImmutableDocumentIntegrityEvidencePath({
+									filePath: current.filePath,
+									bankStatementPrefix: buildUploadPrefix(
+										"bank_statement",
+										current.opportunityId,
+									),
+								});
+								if (!immutable) await deleteFileFromR2(current.filePath);
+							},
+							deleteDocumentAndRefresh: async (tx, current) => {
+								await tx
+									.delete(opportunityDocuments)
+									.where(
+										and(
+											eq(opportunityDocuments.id, current.id),
+											eq(
+												opportunityDocuments.opportunityId,
+												current.opportunityId,
+											),
+										),
+									);
+								const [currentOpportunity] = await tx
+									.select({ vehicleId: opportunities.vehicleId })
+									.from(opportunities)
+									.where(eq(opportunities.id, current.opportunityId))
+									.limit(1);
+								await rebuildClientDocumentChecklistInTransaction(
+									tx,
+									current.opportunityId,
+									!!currentOpportunity?.vehicleId,
+								);
+							},
+						});
+						return { success: true };
+					} catch (error) {
+						if (error instanceof OpportunityDocumentMutationError) {
+							throw new ORPCError(
+								error.code === "NOT_FOUND" ? "NOT_FOUND" : "BAD_REQUEST",
+								{ message: error.message },
+							);
+						}
+						if (error instanceof DocumentIntegrityError) {
+							throw new ORPCError(error.code, { message: error.message });
+						}
+						throw error;
+					}
+				}
+
 				// Si el archivo es la evidencia inmutable de una validación de
 				// integridad documental, no se borra de R2: esa misma ruta queda
 				// referenciada por document_integrity_validations para auditoría.

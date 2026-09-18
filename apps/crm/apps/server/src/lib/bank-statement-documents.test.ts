@@ -1,75 +1,234 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
 	canAutoAttachBankStatementDocuments,
 	getBankStatementOpportunityDocumentType,
-	resolveBankStatementDocumentSlots,
+	isReservedBankCoverageDescription,
+	redactBankStatementCoverageEvidence,
+	resolveBankStatementMonthlyCoverage,
 } from "./bank-statement-documents";
 
-describe("bank statement opportunity documents", () => {
-	test("maps only the first three PDFs to estados_cuenta document types", () => {
+const coverage = (
+	uploadedFileCount: number,
+	coverageByFile: Array<{ indice_archivo: number; meses: string[] }>,
+) => resolveBankStatementMonthlyCoverage({ uploadedFileCount, coverageByFile });
+
+describe("bank statement monthly coverage", () => {
+	test("maps at most three checklist document types", () => {
 		expect(getBankStatementOpportunityDocumentType(0)).toBe("estados_cuenta_1");
 		expect(getBankStatementOpportunityDocumentType(1)).toBe("estados_cuenta_2");
 		expect(getBankStatementOpportunityDocumentType(2)).toBe("estados_cuenta_3");
 		expect(getBankStatementOpportunityDocumentType(3)).toBeUndefined();
 	});
 
-	test("marks all 3 checklist slots when a single PDF has 3 statements merged", () => {
-		// Ej. el usuario sube un solo PDF con los 3 estados de cuenta fusionados.
+	test("one PDF can support three unique canonical months", () => {
+		const result = coverage(1, [
+			{ indice_archivo: 0, meses: ["2026-06", "2026-07", "2026-08"] },
+		]);
+
+		expect(result.status).toBe("detected");
+		expect(result.months).toEqual([
+			{ month: "2026-06", sourceFileIndexes: [0] },
+			{ month: "2026-07", sourceFileIndexes: [0] },
+			{ month: "2026-08", sourceFileIndexes: [0] },
+		]);
 		expect(
-			resolveBankStatementDocumentSlots({
-				uploadedFileCount: 1,
-				statementsDetected: 3,
-			}),
+			result.checklistAssignments.map(({ fileIndex }) => fileIndex),
 		).toEqual([0, 0, 0]);
 	});
 
-	test("keeps one slot per file when 3 independent PDFs are uploaded", () => {
-		expect(
-			resolveBankStatementDocumentSlots({
-				uploadedFileCount: 3,
-				statementsDetected: 3,
-			}),
-		).toEqual([0, 1, 2]);
+	test("three PDFs preserve one actual source per distinct month", () => {
+		const result = coverage(3, [
+			{ indice_archivo: 0, meses: ["2026-06"] },
+			{ indice_archivo: 1, meses: ["2026-07"] },
+			{ indice_archivo: 2, meses: ["2026-08"] },
+		]);
+
+		expect(result.checklistAssignments).toMatchObject([
+			{ month: "2026-06", fileIndex: 0, sourceFileIndexes: [0] },
+			{ month: "2026-07", fileIndex: 1, sourceFileIndexes: [1] },
+			{ month: "2026-08", fileIndex: 2, sourceFileIndexes: [2] },
+		]);
 	});
 
-	test("fills the remaining slots with the last file when there are fewer files than statements", () => {
-		// 2 PDFs, pero el segundo trae 2 estados de cuenta fusionados.
+	test("uses provenance rather than upload position for a reordered 2+1 batch", () => {
+		const result = coverage(2, [
+			{ indice_archivo: 1, meses: ["2026-06", "2026-07"] },
+			{ indice_archivo: 0, meses: ["2026-08"] },
+		]);
+
 		expect(
-			resolveBankStatementDocumentSlots({
-				uploadedFileCount: 2,
-				statementsDetected: 3,
-			}),
-		).toEqual([0, 1, 1]);
+			result.checklistAssignments.map(({ month, fileIndex }) => ({
+				month,
+				fileIndex,
+			})),
+		).toEqual([
+			{ month: "2026-06", fileIndex: 1 },
+			{ month: "2026-07", fileIndex: 1 },
+			{ month: "2026-08", fileIndex: 0 },
+		]);
 	});
 
-	test("still marks 3 slots when statement periods overlap between files", () => {
-		// 3 archivos con periodos traslapados; la IA solo confirma 2 meses únicos.
-		expect(
-			resolveBankStatementDocumentSlots({
-				uploadedFileCount: 3,
-				statementsDetected: 2, // la IA solo pudo confirmar 2 con certeza
-			}),
-		).toEqual([0, 1, 2]);
+	test("deduplicates the same month across files while preserving every source", () => {
+		const result = coverage(3, [
+			{ indice_archivo: 0, meses: ["2026-06", "2026-06"] },
+			{ indice_archivo: 1, meses: ["2026-06"] },
+			{ indice_archivo: 2, meses: ["2026-06"] },
+		]);
+
+		expect(result.months).toEqual([
+			{ month: "2026-06", sourceFileIndexes: [0, 1, 2] },
+		]);
+		expect(result.checklistAssignments).toHaveLength(1);
 	});
 
-	test("caps slots at 3 even with more files or statements", () => {
-		expect(
-			resolveBankStatementDocumentSlots({
-				uploadedFileCount: 9,
-				statementsDetected: 12,
-			}),
-		).toEqual([0, 1, 2]);
+	test("two accounts in separate files for one month preserve both supporting files", () => {
+		const result = coverage(2, [
+			{ indice_archivo: 0, meses: ["2026-05"] },
+			{ indice_archivo: 1, meses: ["2026-05"] },
+		]);
+
+		expect(result.months[0]).toEqual({
+			month: "2026-05",
+			sourceFileIndexes: [0, 1],
+		});
+		expect(result.files.map((file) => file.fileIndex)).toEqual([0, 1]);
 	});
 
-	test("does not fill slots when no files were uploaded", () => {
+	test("keeps December/January and the same month in different years distinct", () => {
+		const result = coverage(2, [
+			{ indice_archivo: 0, meses: ["2025-12", "2026-01"] },
+			{ indice_archivo: 1, meses: ["2025-01"] },
+		]);
+
+		expect(result.months.map(({ month }) => month)).toEqual([
+			"2025-01",
+			"2025-12",
+			"2026-01",
+		]);
+	});
+
+	test("fails closed for absent, contradictory, noncanonical, or out-of-range provenance", () => {
+		for (const result of [
+			coverage(1, []),
+			coverage(1, [
+				{ indice_archivo: 0, meses: ["2026-06"] },
+				{ indice_archivo: 0, meses: ["2026-07"] },
+			]),
+			coverage(1, [{ indice_archivo: 0, meses: ["Junio 2026"] }]),
+			coverage(1, [{ indice_archivo: 0, meses: ["Junio"] }]),
+			coverage(1, [{ indice_archivo: 0, meses: ["ilegible"] }]),
+			coverage(1, [{ indice_archivo: 1, meses: ["2026-06"] }]),
+		]) {
+			expect(result.status).toBe("needs_confirmation");
+			expect(result.checklistAssignments).toEqual([]);
+		}
+	});
+
+	test("handles zero files without manufacturing coverage", () => {
+		const result = coverage(0, []);
+		expect(result.status).toBe("needs_confirmation");
+		expect(result.months).toEqual([]);
+		expect(result.files).toEqual([]);
+	});
+
+	test("keeps every detected month but caps checklist requirements at three", () => {
+		const result = coverage(1, [
+			{
+				indice_archivo: 0,
+				meses: ["2026-01", "2026-02", "2026-03", "2026-04"],
+			},
+		]);
+
+		expect(result.months).toHaveLength(4);
+		expect(result.checklistAssignments).toHaveLength(3);
+	});
+
+	test("considers all nine files and a fourth file can contribute a checklist month", () => {
+		const result = coverage(
+			9,
+			Array.from({ length: 9 }, (_, fileIndex) => ({
+				indice_archivo: fileIndex,
+				meses:
+					fileIndex === 0
+						? ["2026-01"]
+						: fileIndex === 1
+							? ["2026-02"]
+							: fileIndex === 3
+								? ["2026-03"]
+								: ["2026-01"],
+			})),
+		);
+
+		expect(result.files).toHaveLength(9);
+		expect(result.checklistAssignments).toContainEqual({
+			month: "2026-03",
+			fileIndex: 3,
+			sourceFileIndexes: [3],
+		});
+	});
+
+	test("reserves system artifact descriptions against manual impersonation", () => {
 		expect(
-			resolveBankStatementDocumentSlots({
-				uploadedFileCount: 0,
-				statementsDetected: 3,
+			isReservedBankCoverageDescription(
+				"[bank-coverage:batch-1:file:0:support] contenido manual",
+			),
+		).toBe(true);
+		expect(
+			isReservedBankCoverageDescription(
+				"[bank-coverage-debt:batch-1:artifact:1:file:0]",
+			),
+		).toBe(true);
+		expect(isReservedBankCoverageDescription("Adjunto manual")).toBe(false);
+	});
+
+	test("redacts retry-only evidence from the client-visible analysis", () => {
+		const redacted = redactBankStatementCoverageEvidence(
+			JSON.stringify({
+				promedio_mensual: { disponibilidad_economica: 100 },
+				cobertura_mensual: {
+					analysisBatchId: "batch-1",
+					files: [
+						{
+							fileIndex: 0,
+							name: "estado.pdf",
+							evidenceKey: "bank-statements/private.pdf",
+							contentSha256: "a".repeat(64),
+							integrityValidationId: "validation-1",
+						},
+					],
+				},
 			}),
-		).toEqual([]);
+		);
+
+		expect(redacted).not.toContain("bank-statements/private.pdf");
+		expect(redacted).not.toContain("contentSha256");
+		expect(redacted).not.toContain("integrityValidationId");
+		expect(redacted).toContain("estado.pdf");
+		expect(redacted).toContain("disponibilidad_economica");
+	});
+
+	test("fails closed when persisted coverage is malformed or cannot be parsed", () => {
+		for (const malformed of [
+			'{"cobertura_mensual":{"files":',
+			JSON.stringify({
+				promedio_mensual: { disponibilidad_economica: 100 },
+				cobertura_mensual: {
+					files: "drifted",
+					evidenceKey: "bank-statements/private.pdf",
+					contentSha256: "secret-hash",
+					integrityValidationId: "secret-validation",
+					cleanupDebt: [{ key: "bank-statements/orphan.pdf" }],
+				},
+			}),
+		]) {
+			const redacted = String(redactBankStatementCoverageEvidence(malformed));
+			expect(redacted).not.toContain("evidenceKey");
+			expect(redacted).not.toContain("contentSha256");
+			expect(redacted).not.toContain("integrityValidationId");
+			expect(redacted).not.toContain("cleanupDebt");
+			expect(redacted).not.toContain("private.pdf");
+			expect(redacted).not.toContain("orphan.pdf");
+		}
 	});
 
 	test("allows auto-attachments only for upload roles and assigned sales users", () => {
@@ -101,90 +260,5 @@ describe("bank statement opportunity documents", () => {
 				opportunityAssignedTo: "user-1",
 			}),
 		).toBe(false);
-	});
-
-	test("writes opportunity attachments only after AI analysis succeeds and is persisted", () => {
-		const source = readFileSync(
-			join(import.meta.dir, "../routers/bank-analysis.ts"),
-			"utf8",
-		);
-		const successIndex = source.indexOf(
-			"const creditCapacity = calculateCreditCapacity",
-		);
-		const persistedAnalysisIndex = source.indexOf(
-			"fullAnalysis: JSON.stringify(",
-		);
-		const attachmentWriteIndex = source.indexOf(
-			"const { key } = await uploadFileToR2(",
-		);
-
-		expect(successIndex).toBeGreaterThan(-1);
-		expect(persistedAnalysisIndex).toBeGreaterThan(successIndex);
-		expect(attachmentWriteIndex).toBeGreaterThan(persistedAnalysisIndex);
-	});
-
-	test("attaches the statements that do not fit the checklist instead of dropping them", () => {
-		const source = readFileSync(
-			join(import.meta.dir, "../routers/bank-analysis.ts"),
-			"utf8",
-		);
-
-		// El análisis acepta hasta 9 archivos y la IA los usa todos, así que los
-		// que no caben en las 3 casillas se adjuntan igual, fuera del checklist.
-		expect(source).toContain("const extraFiles = downloadedFiles.slice(");
-		expect(source).toContain("savedExtraDocumentIds.push(newDocument.id)");
-	});
-
-	test("does not roll back the checklist documents when an extra file fails", () => {
-		const source = readFileSync(
-			join(import.meta.dir, "../routers/bank-analysis.ts"),
-			"utf8",
-		);
-
-		// Los sobrantes van después del catch del checklist y con su propia
-		// limpieza: si falla el cuarto archivo, los tres ya guardados se quedan.
-		const checklistCleanupIndex = source.indexOf(
-			"...savedDocuments.map(({ id }) =>",
-		);
-		const extraFilesIndex = source.indexOf(
-			"const extraFiles = downloadedFiles.slice(",
-		);
-		const extraCleanupIndex = source.indexOf(
-			"...savedExtraDocumentIds.map((id) =>",
-		);
-
-		expect(checklistCleanupIndex).toBeGreaterThan(-1);
-		expect(extraFilesIndex).toBeGreaterThan(checklistCleanupIndex);
-		expect(extraCleanupIndex).toBeGreaterThan(extraFilesIndex);
-		expect(source).toContain("checklistDocumentsSaved && extraFiles.length > 0");
-	});
-
-	test("records which files the analysis actually read", () => {
-		const source = readFileSync(
-			join(import.meta.dir, "../routers/bank-analysis.ts"),
-			"utf8",
-		);
-
-		expect(source).toContain("const analyzedFiles = downloadedFiles.map(");
-		expect(source).toContain("archivos_analizados: analyzedFiles");
-	});
-
-	test("keeps non-upload roles analyzing while skipping auto-attachments", () => {
-		const source = readFileSync(
-			join(import.meta.dir, "../routers/bank-analysis.ts"),
-			"utf8",
-		);
-		const permissionCheckIndex = source.indexOf(
-			"canAutoAttachBankStatementDocuments({",
-		);
-		const enableAttachmentsIndex = source.indexOf(
-			"opportunityForDocuments = {",
-		);
-
-		expect(permissionCheckIndex).toBeGreaterThan(-1);
-		expect(enableAttachmentsIndex).toBeGreaterThan(permissionCheckIndex);
-		expect(source).not.toContain(
-			'message: "No tienes permiso para subir documentos"',
-		);
 	});
 });

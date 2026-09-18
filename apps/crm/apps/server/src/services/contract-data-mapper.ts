@@ -561,7 +561,12 @@ export async function mapOpportunityToContractData(
 	// dueño de esta venta no puede colgar de ahí. Con una sola columna, lo
 	// que se ve en el CRM es lo que sale en el contrato, y quitar al vendedor
 	// desde la pantalla realmente lo quita.
-	const vendorId = opportunity.vendorId || null;
+	// Un carro nuevo lo vende la agencia, no un particular: ahí manda
+	// {agencia}. Si la oportunidad quedó con un vendedor de cuando el vehículo
+	// era usado, no debe colarse en el contrato. `isNew` nulo se trata como
+	// usado, igual que en el resto del flujo.
+	const vendorId =
+		vehicle?.isNew === true ? null : opportunity.vendorId || null;
 	const [vendor] = vendorId
 		? await db
 				.select()

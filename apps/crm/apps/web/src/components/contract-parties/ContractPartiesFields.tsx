@@ -43,8 +43,12 @@ export function toContractPartiesPayload(
 ) {
 	if (vehicleIsNew === true) {
 		const { companyId, razonSocial } = value.agencia;
-		if (!companyId) return { agencia: null };
+		// Un carro nuevo lo vende la agencia: si la oportunidad venía de un
+		// usado, el vendedor viejo se quita para que no quede en el contrato.
+		// La pantalla solo muestra la agencia, así que nadie lo vería.
+		if (!companyId) return { agencia: null, vendedor: null };
 		return {
+			vendedor: null,
 			agencia: {
 				companyId,
 				...(razonSocial.trim() && { razonSocial: razonSocial.trim() }),

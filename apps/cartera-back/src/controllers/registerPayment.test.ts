@@ -1316,3 +1316,42 @@ describe("fecha_aplicado del pago pendiente", () => {
     ).toBeGreaterThanOrEqual(3);
   });
 });
+
+// El reparto del `otros` se decide dentro del loop de cuotas, que no es
+// testeable en aislado; se ancla acá sobre el fuente, igual que el pagoData del
+// pago pendiente. Sin esto, revertir el cableado a "la primera cuota recorrida"
+// deja la suite verde (los helpers puros siguen pasando) y vuelve el caso del
+// crédito 8674: los Q10.32 colgados de una cuota que no cobró nada.
+describe("otros: se estampa en la fila que la boleta escribe, no en la primera cuota", () => {
+  const bloqueOtros = (() => {
+    const inicio = registerPaymentSource.indexOf(
+      "        const otrosParaPago =",
+    );
+    if (inicio === -1) {
+      throw new Error("No se encontró el cálculo de otrosParaPago en el loop");
+    }
+    return registerPaymentSource.slice(inicio, inicio + 400);
+  })();
+
+  it("resuelve el otros con el sello, no con esPrimeraCuota", () => {
+    expect(bloqueOtros).toContain("resolverOtrosDeLaFila");
+    // Shorthand a propósito: pasarle otra cosa (p. ej. `esPrimeraCuota`) es
+    // exactamente la regresión que este test ataja.
+    expect(bloqueOtros).toMatch(
+      /resolverOtrosDeLaFila\(\{\s*\n\s*filaSeEscribeSinOtros,/,
+    );
+    expect(bloqueOtros).not.toContain("esPrimeraCuota ? otrosBig");
+  });
+
+  it("pregunta si la fila se escribe SIN contar el otros", () => {
+    const inicio = registerPaymentSource.indexOf(
+      "        const filaSeEscribeSinOtros = debeInsertarFilaParcialCuota({",
+    );
+    expect(inicio).toBeGreaterThan(-1);
+    const bloque = registerPaymentSource.slice(inicio, inicio + 300);
+    // Con `otros` distinto de 0 acá, la pregunta se responde sola y la fila
+    // fantasma vuelve.
+    expect(bloque).toContain("otros: 0,");
+    expect(bloque).toContain("estamparPagoConvenio.pendiente()");
+  });
+});

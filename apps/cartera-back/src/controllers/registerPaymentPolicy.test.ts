@@ -851,6 +851,84 @@ describe("crearEstampadorPagoConvenio", () => {
   });
 });
 
+describe("crearEstampadorOtros / resolverOtrosDeLaFila", () => {
+  // Caso real crédito 8674: boleta de Q3,000 con Q10.32 de otros. La cuota 6 ya
+  // estaba cubierta por un pago pendiente de validar, así que no absorbió nada;
+  // la que cobró los Q2,989.68 fue la 7.
+  it("no gasta el otros en una cuota que no cobra y se lo lleva la que sí", () => {
+    const estamparOtros = registerPaymentPolicy.crearEstampadorOtros(10.32);
+
+    // Cuota 6: sin abonos, sin mora, sin convenio → no escribe fila.
+    const cuota6 = registerPaymentPolicy.resolverOtrosDeLaFila({
+      filaSeEscribeSinOtros: registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: 0,
+        pagoConvenio: 0,
+      }),
+      estamparOtros,
+    });
+    expect(cuota6.toString()).toBe("0");
+    // El sello sigue vivo: la cuota se puede saltar sin perder el otros.
+    expect(estamparOtros.pendiente()).toBe("10.32");
+
+    // Cuota 7: cobra Q2,989.68 → escribe fila y se lleva el otros.
+    const cuota7 = registerPaymentPolicy.resolverOtrosDeLaFila({
+      filaSeEscribeSinOtros: registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 2989.68,
+        mora: 0,
+        otros: 0,
+        pagoConvenio: 0,
+      }),
+      estamparOtros,
+    });
+    expect(cuota7.toString()).toBe("10.32");
+    // Una sola vez: las filas siguientes de la boleta van en 0.
+    expect(estamparOtros.pendiente()).toBe("0");
+  });
+
+  it("un recibo de sólo mora sí carga el otros (no hay cuota que cobre)", () => {
+    const estamparOtros = registerPaymentPolicy.crearEstampadorOtros(10.32);
+
+    const fila = registerPaymentPolicy.resolverOtrosDeLaFila({
+      filaSeEscribeSinOtros: registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 638.67,
+        otros: 0,
+        pagoConvenio: 0,
+      }),
+      estamparOtros,
+    });
+
+    expect(fila.toString()).toBe("10.32");
+  });
+
+  it("suma el ajuste por fecha ideal al otros de la cuota 1", () => {
+    const estamparOtros = registerPaymentPolicy.crearEstampadorOtros(10.32);
+
+    const fila = registerPaymentPolicy.resolverOtrosDeLaFila({
+      filaSeEscribeSinOtros: true,
+      estamparOtros,
+      ajusteFechaIdeal: 25,
+    });
+
+    expect(fila.toString()).toBe("35.32");
+  });
+
+  it("no arrastra el ajuste cuando la fila no se escribe", () => {
+    const estamparOtros = registerPaymentPolicy.crearEstampadorOtros(10.32);
+
+    const fila = registerPaymentPolicy.resolverOtrosDeLaFila({
+      filaSeEscribeSinOtros: false,
+      estamparOtros,
+      ajusteFechaIdeal: 25,
+    });
+
+    expect(fila.toString()).toBe("0");
+    expect(estamparOtros.pendiente()).toBe("10.32");
+  });
+});
+
 describe("debeInsertarFilaParcialCuota", () => {
   it("no inserta fila cuando la cuota no absorbió nada (caso crédito 8717)", () => {
     expect(

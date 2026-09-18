@@ -104,7 +104,12 @@ import {
 	getGuatemalaMonthWindow,
 	toDateStrGT,
 } from "../lib/guatemala-month-window";
-import { evaluarCandadoDpi } from "../lib/lead-dpi-lock";
+import {
+	dpiCambia,
+	evaluarCandadoDpi,
+	noExisteOportunidadCandanteDelLead,
+	noExisteOportunidadCandantePorId,
+} from "../lib/lead-dpi-lock";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
@@ -1472,6 +1477,14 @@ export const crmRouter = {
 							.limit(1)
 					: [];
 
+			const editaAdmin = context.userRole === "admin";
+			// ¿Esta edición cambia el DPI de verdad? Lo decide el mismo predicado
+			// que usa el candado: el formulario manda `dpi` en toda edición, también
+			// cuando el usuario solo tocó el teléfono.
+			const elDpiCambia =
+				updateData.dpi !== undefined &&
+				dpiCambia(leadAntesDelUpdate?.dpi, updateData.dpi);
+
 			if (updateData.dpi !== undefined) {
 				// El candado va ANTES que el gate de mora: es una consulta local
 				// barata, y si el DPI ya no se puede cambiar (solicitud pasada del
@@ -1480,7 +1493,7 @@ export const crmRouter = {
 					dpiActual: leadAntesDelUpdate?.dpi,
 					dpiNuevo: updateData.dpi,
 					sujeto: "lead",
-					esAdmin: context.userRole === "admin",
+					esAdmin: editaAdmin,
 					leadId: id,
 				});
 				if (candado.bloqueado) {
@@ -1522,6 +1535,22 @@ export const crmRouter = {
 				}
 			}
 
+			// 🔴 El candado de arriba y este UPDATE no son atómicos: entre los dos,
+			// otra transacción puede aprobar el análisis (30 → 40) y el DPI se
+			// escribiría igual sobre un expediente que acaba de quedar atado a la
+			// identidad vieja. Postgres re-evalúa el predicado tras esperar a la
+			// escritura rival, así que la condición viaja DENTRO de la sentencia.
+			// Mismo patrón que `approveOpportunityAnalysis`.
+			//
+			// Solo cuando el DPI cambia de verdad: este UPDATE escribe también
+			// teléfono, dirección y demás cuando `dpi` ni siquiera viene, y esas
+			// ediciones no tienen por qué trabarse por una solicitud avanzada.
+			// El admin queda fuera: su válvula sigue abierta (y sale marcada).
+			const candadoEnElPredicado = elDpiCambia && !editaAdmin;
+			const whereDelUpdate = candadoEnElPredicado
+				? and(whereClause, noExisteOportunidadCandanteDelLead(id))
+				: whereClause;
+
 			const updatedLead = await db
 				.update(leads)
 				.set({
@@ -1533,9 +1562,27 @@ export const crmRouter = {
 					...(updateData.score !== undefined && { scoredAt: new Date() }),
 					updatedAt: new Date(),
 				})
-				.where(whereClause)
+				.where(whereDelUpdate)
 				.returning();
 			if (updatedLead.length === 0) {
+				// Con la condición puesta, cero filas puede significar que el candado
+				// se cerró en el medio. Responder NOT_FOUND ahí mandaría a buscar un
+				// lead que existe; se contesta como el candado, con su mismo mensaje.
+				if (candadoEnElPredicado) {
+					const candadoAhora = await evaluarCandadoDpi({
+						dpiActual: leadAntesDelUpdate?.dpi,
+						dpiNuevo: updateData.dpi,
+						sujeto: "lead",
+						esAdmin: false,
+						leadId: id,
+					});
+					if (candadoAhora.bloqueado) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: candadoAhora.message,
+						});
+					}
+				}
+
 				throw new ORPCError("NOT_FOUND", {
 					message: "Lead no encontrado o no tienes permiso para actualizarlo",
 				});
@@ -8438,8 +8485,13 @@ export const crmRouter = {
 				updateData.dpi = resultadoDpi.dpiLimpio;
 			}
 
+			const editaAdmin = context.userRole === "admin";
+			let coDebtorAntesDelUpdate:
+				| { dpi: string | null; opportunityId: string }
+				| undefined;
+
 			if (updateData.dpi !== undefined) {
-				const [coDebtorAntesDelUpdate] = await db
+				[coDebtorAntesDelUpdate] = await db
 					.select({
 						dpi: coDebtors.dpi,
 						opportunityId: coDebtors.opportunityId,
@@ -8456,7 +8508,7 @@ export const crmRouter = {
 						dpiActual: coDebtorAntesDelUpdate.dpi,
 						dpiNuevo: updateData.dpi,
 						sujeto: "codeudor",
-						esAdmin: context.userRole === "admin",
+						esAdmin: editaAdmin,
 						opportunityId: coDebtorAntesDelUpdate.opportunityId,
 					});
 					if (candado.bloqueado) {
@@ -8504,16 +8556,52 @@ export const crmRouter = {
 				}
 			}
 
+			// Misma carrera que en `updateLead`: entre el candado y esta sentencia,
+			// otra transacción puede aprobar el análisis de la oportunidad que
+			// respalda y el DPI del co-deudor se escribiría igual. La condición
+			// viaja adentro; Postgres la re-evalúa tras esperar a la escritura
+			// rival. El admin queda fuera: su válvula sigue abierta.
+			const candadoEnElPredicado =
+				coDebtorAntesDelUpdate !== undefined &&
+				!editaAdmin &&
+				dpiCambia(coDebtorAntesDelUpdate.dpi, updateData.dpi);
+			const whereDelUpdate =
+				candadoEnElPredicado && coDebtorAntesDelUpdate
+					? and(
+							eq(coDebtors.id, id),
+							noExisteOportunidadCandantePorId(
+								coDebtorAntesDelUpdate.opportunityId,
+							),
+						)
+					: eq(coDebtors.id, id);
+
 			const [updatedCoDebtor] = await db
 				.update(coDebtors)
 				.set({
 					...updateData,
 					updatedAt: new Date(),
 				})
-				.where(eq(coDebtors.id, id))
+				.where(whereDelUpdate)
 				.returning();
 
 			if (!updatedCoDebtor) {
+				// Cero filas con la condición puesta puede ser el candado cerrándose
+				// en el medio: se contesta como el candado y no como NOT_FOUND.
+				if (candadoEnElPredicado && coDebtorAntesDelUpdate) {
+					const candadoAhora = await evaluarCandadoDpi({
+						dpiActual: coDebtorAntesDelUpdate.dpi,
+						dpiNuevo: updateData.dpi,
+						sujeto: "codeudor",
+						esAdmin: false,
+						opportunityId: coDebtorAntesDelUpdate.opportunityId,
+					});
+					if (candadoAhora.bloqueado) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: candadoAhora.message,
+						});
+					}
+				}
+
 				throw new ORPCError("NOT_FOUND", {
 					message: "Co-deudor no encontrado",
 				});

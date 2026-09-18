@@ -21,10 +21,23 @@ import { dirname, join, relative } from "node:path";
 const SRC = join(dirname(import.meta.dir), "");
 const LLAMADA_CANDADO = "evaluarCandadoDpi(";
 
-/** Archivos que pueden cambiar el DPI de un lead o un co-deudor, y cuántas veces llaman al candado. */
+/**
+ * Archivos que pueden cambiar el DPI de un lead o un co-deudor, y cuántas veces
+ * llaman al candado.
+ *
+ * Cada punto de control cuenta DOS veces: el chequeo previo y la relectura que
+ * arma el mensaje cuando el UPDATE no afecta ninguna fila. Esa segunda llamada
+ * no es un control nuevo — la condición del candado viaja dentro del WHERE del
+ * UPDATE para cerrar la carrera con una aprobación de análisis simultánea, y al
+ * volver con cero filas hay que distinguir "el candado se cerró en el medio" de
+ * un NOT_FOUND. Ver `noExisteOportunidadCandante*`.
+ *
+ * - `portal-lead.ts`: 1 punto (la edición del portal) × 2.
+ * - `crm.ts`: 2 puntos (updateLead y updateCoDebtor) × 2.
+ */
 const CABLEADO_ESPERADO: Record<string, number> = {
-	"controllers/portal-lead.ts": 1,
-	"routers/crm.ts": 2,
+	"controllers/portal-lead.ts": 2,
+	"routers/crm.ts": 4,
 };
 
 function archivosTs(dir: string): string[] {
@@ -86,6 +99,29 @@ describe("cableado del candado de DPI", () => {
 		// Si esto falla, apareció una puerta nueva: o la candás, o la declarás
 		// arriba explicando por qué no necesita candado (por ejemplo, un alta).
 		expect(sospechosos).toEqual([]);
+	});
+
+	/**
+	 * 🔴 El chequeo previo y el UPDATE no son atómicos: entre los dos, otra
+	 * transacción puede aprobar el análisis (30 → 40) y el DPI se escribe igual
+	 * sobre un expediente que acaba de quedar atado a la identidad vieja.
+	 *
+	 * La condición tiene que viajar DENTRO de la sentencia —Postgres la
+	 * re-evalúa tras esperar a la escritura rival—, y eso no lo nota ningún test
+	 * de la regla: el candado en memoria sigue decidiendo igual de bien.
+	 */
+	test("los tres puntos meten la condición del candado en el WHERE del UPDATE", () => {
+		for (const archivo of Object.keys(CABLEADO_ESPERADO)) {
+			const texto = readFileSync(join(SRC, archivo), "utf8");
+
+			expect(
+				texto.includes("noExisteOportunidadCandanteDelLead") ||
+					texto.includes("noExisteOportunidadCandantePorId"),
+				`${archivo} debería condicionar el UPDATE que escribe el dpi a que no exista ` +
+					"oportunidad candante. Sin eso, una aprobación de análisis simultánea deja " +
+					"pasar el cambio de DPI aunque el candado haya dicho que no.",
+			).toBe(true);
+		}
 	});
 
 	test("en el portal el candado NO vive dentro de la guarda que descarta los vacíos", () => {

@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { FileUp, Loader2 } from "lucide-react";
+import { FileText, FileUp, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { CONTRATOS_VENTA_MAPEADOS } from "server/src/lib/contratos-venta";
 import { toast } from "sonner";
@@ -95,21 +95,23 @@ export function UploadContractModal({
 				onOpenChange(abierto);
 			}}
 		>
-			<DialogContent>
+			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
 					<DialogTitle>Subir contrato firmado por fuera</DialogTitle>
 					<DialogDescription>
 						Para cuando el contrato se armó fuera del sistema. Tiene que ser uno
-						de los tipos que ya tenemos mapeados: si el PDF no trae las líneas
-						de firma de ese contrato, no se envía a firmar.
+						de los tipos que ya tenemos mapeados.
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="space-y-4">
+				{/* `min-w-0` es lo que impide que un nombre de archivo largo ensanche el
+				    contenido por encima del ancho del modal: DialogContent es un grid y
+				    sus hijos, por defecto, no bajan del ancho de su contenido. */}
+				<div className="min-w-0 space-y-4">
 					<div className="space-y-2">
 						<Label htmlFor="tipo-contrato">Tipo de contrato</Label>
 						<Select value={contractType} onValueChange={setContractType}>
-							<SelectTrigger id="tipo-contrato">
+							<SelectTrigger id="tipo-contrato" className="w-full">
 								<SelectValue placeholder="Elegí el tipo" />
 							</SelectTrigger>
 							<SelectContent>
@@ -128,19 +130,32 @@ export function UploadContractModal({
 							id="archivo-contrato"
 							type="file"
 							accept="application/pdf"
+							className="w-full"
 							onChange={(e) => setArchivo(e.target.files?.[0] ?? null)}
 						/>
 						{archivo && (
-							<p className="text-muted-foreground text-xs">
-								{archivo.name} · {(archivo.size / 1024).toFixed(0)} KB
-							</p>
+							<div className="flex min-w-0 items-center gap-2 rounded-md border bg-muted/40 px-2 py-1.5">
+								<FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+								{/* Los nombres que genera el sistema son larguísimos: se trunca
+								    y el completo queda en el tooltip. */}
+								<span
+									className="min-w-0 flex-1 truncate text-xs"
+									title={archivo.name}
+								>
+									{archivo.name}
+								</span>
+								<span className="shrink-0 text-muted-foreground text-xs">
+									{(archivo.size / 1024).toFixed(0)} KB
+								</span>
+							</div>
 						)}
 					</div>
 
-					<p className="text-muted-foreground text-xs">
-						Los firmantes salen de la oportunidad: el titular y los cofirmantes
+					<p className="text-muted-foreground text-xs leading-relaxed">
+						Los firmantes salen de la oportunidad: el titular y los codeudores
 						que tengan correo, más el representante legal cuando el contrato lo
-						lleva.
+						lleva. Si el PDF no trae las líneas de firma de ese contrato, no se
+						envía.
 					</p>
 				</div>
 

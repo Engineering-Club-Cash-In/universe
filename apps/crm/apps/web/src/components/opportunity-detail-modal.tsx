@@ -23,6 +23,7 @@ import {
 import { useState } from "react";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
+import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { DisbursementView } from "@/components/disbursement/DisbursementView";
 import { OpportunityDocumentUpload } from "@/components/opportunity-document-upload";
@@ -36,7 +37,6 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { firmantesEnFicha } from "@/lib/contract-signers-display";
 import {
 	formatGuatemalaCalendarDate,
 	formatGuatemalaDate,
@@ -501,93 +501,10 @@ export function OpportunityDetailModal({
 
 						{/* Contracts Section */}
 						{canViewContracts && (
-							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-								<div className="flex items-center gap-2">
-									<FileSignature className="h-5 w-5 text-muted-foreground" />
-									<Label className="font-semibold text-muted-foreground text-sm">
-										Contratos Legales
-									</Label>
-								</div>
-								{opportunityContractsQuery.isLoading ? (
-									<p className="text-muted-foreground text-sm">
-										Cargando contratos...
-									</p>
-								) : opportunityContractsQuery.data &&
-									opportunityContractsQuery.data.length > 0 ? (
-									<div className="space-y-2">
-										{opportunityContractsQuery.data.map((fila) => {
-											const contract = fila.contract;
-											// Cada firmante viene con su rol: el segundo link ya no se
-											// rotula "Rep. Legal" por estar segundo.
-											const firmantes = firmantesEnFicha(
-												fila.signatories,
-												contract,
-											);
-											return (
-												<div
-													key={contract.id}
-													className="flex items-center justify-between rounded-md border bg-background p-3"
-												>
-													<div className="flex flex-col gap-1">
-														<span className="font-medium text-sm">
-															{contract.contractName}
-														</span>
-														<span className="text-muted-foreground text-xs">
-															{getContractTypeLabel(contract.contractType)} •{" "}
-															{contract.status === "pending"
-																? "Pendiente"
-																: contract.status === "signed"
-																	? "Firmado"
-																	: "Cancelado"}
-														</span>
-													</div>
-
-													<div className="flex gap-2">
-														{contract.pdfLink && (
-															<Button variant="outline" size="sm" asChild>
-																<a
-																	href={contract.pdfLink}
-																	target="_blank"
-																	rel="noopener noreferrer"
-																	className="flex items-center gap-1"
-																>
-																	<FileText className="h-3 w-3" />
-																	PDF
-																</a>
-															</Button>
-														)}
-														{firmantes.map((firmante) =>
-															firmante.url ? (
-																<Button
-																	key={firmante.clave}
-																	variant="outline"
-																	size="sm"
-																	asChild
-																>
-																	<a
-																		href={firmante.url}
-																		target="_blank"
-																		rel="noopener noreferrer"
-																		className="flex items-center gap-1"
-																		title={firmante.nombre ?? undefined}
-																	>
-																		<ExternalLink className="h-3 w-3" />
-																		{firmante.etiqueta}
-																	</a>
-																</Button>
-															) : null,
-														)}
-													</div>
-												</div>
-											);
-										})}
-									</div>
-								) : (
-									<p className="text-muted-foreground text-sm">
-										No hay contratos asociados a esta oportunidad
-									</p>
-								)}
-							</div>
+							<OpportunityContractsCard
+								contracts={opportunityContractsQuery.data}
+								isLoading={opportunityContractsQuery.isLoading}
+							/>
 						)}
 
 						{/* Quotations Section */}

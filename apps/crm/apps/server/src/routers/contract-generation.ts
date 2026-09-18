@@ -27,6 +27,7 @@ import {
 	esFirmaFisica,
 	getSignatureMode,
 } from "../lib/contract-signature-mode";
+import { REP_LEGAL_EMAIL, REP_LEGAL_NOMBRE } from "../lib/contratos-rep-legal";
 import { esContratoVentaMapeado } from "../lib/contratos-venta";
 import { eqDpi } from "../lib/dpi-lookup";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
@@ -50,19 +51,6 @@ import {
 const LEGAL_DOCS_API_URL =
 	process.env.LEGAL_DOCS_API_URL ||
 	"https://legal-docs-blueprints.s4.devteamatcci.site";
-
-/**
- * Representante legal que firma por la entidad.
- *
- * El nombre y el cargo vienen impresos en el template (la garantía mobiliaria
- * trae a LUCRECIA MARISOL CUX TECÚN por CUBE INVESTMENTS), pero el correo hace
- * falta para que WeeTrust le mande su link. Va por entorno para poder cambiarlo
- * sin desplegar; cuando cada entidad tenga su firmante, esto pasa a ser un mapa.
- */
-const REP_LEGAL_EMAIL =
-	process.env.CONTRATOS_REP_LEGAL_EMAIL || "juridico2@sepresta.com";
-const REP_LEGAL_NOMBRE =
-	process.env.CONTRATOS_REP_LEGAL_NOMBRE || "Representante Legal";
 
 /**
  * Correos de prueba para los firmantes.

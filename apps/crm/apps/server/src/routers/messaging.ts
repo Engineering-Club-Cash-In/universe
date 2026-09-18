@@ -12,6 +12,11 @@ import {
 	whatsappLogs,
 } from "../db/schema/whatsapp-logs";
 import { auditRecord } from "../lib/audit";
+import {
+	REP_LEGAL_EMAIL,
+	REP_LEGAL_NOMBRE,
+	REP_LEGAL_TELEFONO,
+} from "../lib/contratos-rep-legal";
 import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
 import { crmProcedure } from "../lib/orpc";
 import { getSimpletechClient, sendWhatsappTemplate } from "../lib/simpletech";
@@ -162,6 +167,15 @@ export async function sendContractLinksToLead(params: {
 			phone: cd.phone,
 			coDebtorId: cd.id,
 		})),
+		// El representante legal firma varios de estos contratos y hasta ahora sólo
+		// se enteraba por el correo de WeeTrust. Va al final porque es interno, y
+		// sin `leadId` ni `coDebtorId`: no es ninguno de los dos, y las dos
+		// columnas admiten nulo.
+		{
+			nombre: REP_LEGAL_NOMBRE,
+			email: REP_LEGAL_EMAIL,
+			phone: REP_LEGAL_TELEFONO || null,
+		},
 	];
 
 	const [log] = await db

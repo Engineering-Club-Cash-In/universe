@@ -14,13 +14,21 @@ import {
   WSCrEstadoCuentaRequest,
   WSInformacionPrestamoRequest,
   WSInformacionPrestamoResponse,
+  WSBuscarClientesRequest,
+  ClienteIdentificacion,
 } from "./sifco.interface";
+import { exigirRespuestaExitosa } from "./sifcoRespuesta";
 
 /**
  * Axios client para consumir SIFCO
  */
 const sifcoApi = axios.create({
   baseURL:  "http://localhost:9500",
+  // Sin timeout explícito, axios espera para siempre: una pasarela colgada deja
+  // la petición viva hasta que el cliente de arriba se rinda. 20s es holgado
+  // para cualquier llamada de este archivo (las que traen el suyo lo bajan a
+  // 10s) y sigue por debajo de los cortes de quien nos llama.
+  timeout: 20000,
   headers: {
     "Content-Type": "application/json",
     Authorization: `OAuth ${process.env.SIFCO_TOKEN}`,
@@ -43,8 +51,44 @@ export async function consultarClientesPorEmail() {
 }
 
 /** ================================
+ * Buscar clientes por número de identificación (DPI)
+ * ================================
+ * Único camino DPI → código de cliente: ni `cartera.usuarios` ni el espejo
+ * `sifco.clientes` guardan identificación, así que la resolución solo la sabe
+ * hacer el core. Del otro lado esto se traduce en un WSIngresarClientes
+ * `{ Modo: "DSP", ConsultaFormaIdentificar: 2, ConsultaValorIdentificador }`,
+ * cuya respuesta viene en `ConsultaResultados`.
+ *
+ * Lanza si la consulta no se pudo hacer (red, 4xx/5xx, y por las dudas
+ * `success: false`; ver `exigirRespuestaExitosa`); un DPI desconocido devuelve
+ * arreglo vacío. Quien llama DEBE distinguir los dos casos: confundirlos
+ * convierte una caída de SIFCO en un "no tiene mora".
+ */
+export async function buscarClientesPorIdentificacion(
+  numeroIdentificacion: string
+): Promise<ClienteIdentificacion[]> {
+  const request: WSBuscarClientesRequest = { numeroIdentificacion };
+
+  const { data } = await sifcoApi.post<ServiceResponse<ClienteIdentificacion[]>>(
+    "/api/clientes/buscar",
+    request,
+    { timeout: 10000 }
+  );
+
+  return (
+    exigirRespuestaExitosa(data, "SIFCO no pudo resolver la identificación") ?? []
+  );
+}
+
+/** ================================
  * Consultar préstamos de un cliente
  * ================================
+ *
+ * Lanza si `success` viene en `false`, igual que
+ * `buscarClientesPorIdentificacion`: las dos pasan por `exigirRespuestaExitosa`,
+ * donde está explicado por qué es defensa en profundidad y no el cierre de un
+ * agujero vivo. Un cliente sin préstamos sigue devolviendo la respuesta con la
+ * lista vacía.
  */
 export async function consultarPrestamosPorCliente(clienteCodigo: number) {
   // 👇 Usar la misma key que espera el backend (camelCase)
@@ -54,7 +98,10 @@ export async function consultarPrestamosPorCliente(clienteCodigo: number) {
     ServiceResponse<WSVerPrestamosPorClienteResponse>
   >("/api/clientes/prestamos", request);
 
-  return data.data;
+  return exigirRespuestaExitosa(
+    data,
+    `SIFCO no pudo listar los préstamos del cliente ${clienteCodigo}`
+  );
 }
 
 /** ================================

@@ -14,6 +14,8 @@ import type {
 
 type InvestmentsRouter =
 	typeof import("../../../server/src/routers/investments").investmentsRouter;
+type SatVehiculosRouter =
+	typeof import("../../../server/src/routers/sat-vehiculos").satVehiculosRouter;
 
 // Detectar si es un error de sesión/autenticación
 const isSessionError = (error: Error): boolean => {
@@ -77,6 +79,7 @@ export const link = new RPCLink({
 type MergedRouter = AppRouter &
 	typeof manualVehicleRouter &
 	InvestmentsRouter &
+	SatVehiculosRouter &
 	typeof disbursementRouter &
 	typeof proyeccionRouter;
 

@@ -25,6 +25,7 @@ export * from "./otp";
 export * from "./partners";
 export * from "./quotations";
 export * from "./renap";
+export * from "./sat-vehiculos";
 export * from "./validations";
 export * from "./vehicles";
 export * from "./views";

@@ -37,9 +37,11 @@ import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
+import { verificarVehiculosEnSat } from "./jobs/sat-verificacion-vehiculos";
 import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
+import { toDateStrGT } from "./lib/guatemala-month-window";
 import { PARTNER_AUTH_BASE_PATH, partnerAuth } from "./lib/partner-auth";
 import { PERMISSIONS } from "./lib/roles";
 import {
@@ -1191,6 +1193,26 @@ function scheduleAtMidnightGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtMidnightGT();
+
+// Verificación de vehículos en SAT: 03:00 GT (09:00 UTC) del día 1 de cada mes.
+// El job se despierta cada día pero solo actúa el 1; la guarda anti-duplicado
+// del propio job evita repetir si ya corrió con éxito.
+function scheduleVerificacionSatMensual() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(9, 0, 0, 0);
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+
+	setTimeout(async () => {
+		const diaGT = Number(toDateStrGT(new Date()).split("-")[2]);
+
+		if (diaGT === 1) {
+			await verificarVehiculosEnSat({ origen: "cron" }).catch(console.error);
+		}
+		scheduleVerificacionSatMensual();
+	}, next.getTime() - now.getTime());
+}
+scheduleVerificacionSatMensual();
 
 
 export default {

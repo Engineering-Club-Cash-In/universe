@@ -552,7 +552,7 @@
    * disponible inicial se consume después en mora, rubros y cuotas, y sólo se
    * acredita el remanente final.
    */
-  saldo_a_favor_acreditado: numeric("saldo_a_favor_acreditado", { precision: 18, scale: 2 }),
+  saldo_a_favor_acreditado: numeric("saldo_a_favor_acreditado", { precision: 18, scale: 2 }).default("0"),
     observaciones: text("observaciones"), //input
 
     paymentFalse: boolean("paymentFalse").notNull().default(false), // indica si el pago es falso

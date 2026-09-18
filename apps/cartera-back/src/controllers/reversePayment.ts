@@ -636,6 +636,19 @@ export function createReversePayment(
        * NULL significa "fila anterior a la 0039, no se sabe": ahí se conserva la
        * conducta vieja. Cambiarla a ciegas para las filas históricas sería
        * inventar un dato que nadie registró.
+       *
+       * Y NULL es SÓLO eso, desde que la 0039 le puso `DEFAULT 0` a la columna en
+       * un segundo paso: las filas que ya existían quedaron en NULL y toda fila
+       * nueva nace diciendo "acreditó cero". Hizo falta porque el NULL de una fila
+       * nueva era indistinguible del de una histórica, y había dos formas de
+       * llegar a él: que la transacción que acredita falle después de insertar la
+       * fila, y el camino NORMAL de pagos, que acredita saldo sin estampar esta
+       * columna.
+       *
+       * ⚠️ Lo que eso NO resuelve: el camino normal sigue sin devolver lo que
+       * acreditó, porque su crédito es uno por boleta y las filas son por cuota —
+       * falta decidir cuál la carga. Pero dejar de sacarle al cliente plata que el
+       * pago nunca le dio es el lado seguro del error.
        */
       const acreditado = pago.saldo_a_favor_acreditado;
       const aDevolver =

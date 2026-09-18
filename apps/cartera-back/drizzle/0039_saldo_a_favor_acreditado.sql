@@ -22,5 +22,25 @@
 ALTER TABLE cartera.pagos_credito
   ADD COLUMN IF NOT EXISTS saldo_a_favor_acreditado numeric(18, 2);
 
+-- En DOS pasos, y el orden es el punto: el `ADD COLUMN` de arriba va SIN default,
+-- así que las filas que ya existían quedan en NULL —"anteriores a la 0039, no se
+-- sabe"—, y este `SET DEFAULT` aplica sólo a las que se inserten de ahora en
+-- adelante. Un `ADD COLUMN ... DEFAULT 0` de una sola vez habría rellenado también
+-- las viejas, afirmando que no acreditaron nada: exactamente lo que no se sabe.
+--
+-- Con esto, toda fila NUEVA nace diciendo "acreditó cero" en vez de "no se sabe", y
+-- eso cierra dos huecos:
+--
+--   * Si la transacción que acredita el saldo falla, la fila ya insertada queda en
+--     0 en vez de NULL. Es el dato REAL —ese intento no acreditó nada— y la reversa
+--     ya no le descuenta el `monto_boleta` completo a un pago que no dio nada.
+--   * El camino NORMAL de pagos acredita saldo sin estampar esta columna. Sin el
+--     default, sus filas nuevas quedaban en NULL y la reversa las trataba como
+--     históricas. Ahora quedan en 0: no devuelve lo que ese camino acreditó —eso
+--     sigue pendiente de atribuir bien— pero deja de sacarle al cliente plata que
+--     el pago nunca le dio, que es el lado seguro del error.
+ALTER TABLE cartera.pagos_credito
+  ALTER COLUMN saldo_a_favor_acreditado SET DEFAULT 0;
+
 COMMENT ON COLUMN cartera.pagos_credito.saldo_a_favor_acreditado IS
-  'Cuánto acreditó esta fila a usuarios.saldo_a_favor. NULL = fila anterior a la 0039; la reversa usa la conducta vieja.';
+  'Cuánto acreditó esta fila a usuarios.saldo_a_favor. NULL = fila anterior a la 0039 (la reversa usa la conducta vieja); las filas nuevas nacen en 0 por DEFAULT.';

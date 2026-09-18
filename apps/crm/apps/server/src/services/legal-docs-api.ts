@@ -354,3 +354,90 @@ export function formatFullNameFromRenap(renapData: RenapData): string {
 
 	return parts.join(" ");
 }
+
+// ============ ESTADO Y REINTENTOS DE FIRMA ============
+
+export interface EstadoFirmante {
+	emailID: string;
+	name: string;
+	signatoryID: string;
+	isSigned: boolean;
+	signingUrl: string | null;
+	/** Epoch en milisegundos, o null si el link no vence. */
+	expiry: number | null;
+}
+
+export interface EstadoDocumentoFirma {
+	success: boolean;
+	documentID: string;
+	status: "DRAFT" | "PENDING" | "COMPLETED" | string;
+	signatories: EstadoFirmante[];
+	error?: string;
+}
+
+async function pedirAlGenerador<T>(
+	ruta: string,
+	method: "GET" | "PUT",
+	queHace: string,
+): Promise<T> {
+	const response = await fetch(`${LEGAL_DOCS_API_URL}${ruta}`, {
+		method,
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+		},
+	});
+
+	const cuerpo = await response.text();
+	if (!response.ok) {
+		// El generador devuelve el mensaje de WeeTrust en el cuerpo; perderlo deja
+		// a jurídico con un "falló" sin nada que hacer al respecto.
+		throw new Error(`${queHace}: ${response.status} - ${cuerpo}`);
+	}
+
+	return JSON.parse(cuerpo) as T;
+}
+
+/**
+ * Estado de firma de un documento, firmante por firmante.
+ *
+ * Se consulta a demanda contra WeeTrust en vez de esperar un webhook: hoy no
+ * hay webhooks registrados, así que el estado guardado nunca se movía solo.
+ */
+export async function consultarEstadoFirma(
+	documentID: string,
+): Promise<EstadoDocumentoFirma> {
+	return pedirAlGenerador<EstadoDocumentoFirma>(
+		`/contracts/signing-status/${encodeURIComponent(documentID)}`,
+		"GET",
+		"No se pudo consultar el estado de firma",
+	);
+}
+
+/**
+ * Regenera los enlaces de firma de un documento.
+ *
+ * Sirve para los dos casos que pasan seguido: el link venció, o la persona
+ * necesita volver a entrar porque falló la verificación. Los que ya firmaron no
+ * se tocan.
+ */
+export async function regenerarEnlacesDeFirma(
+	documentID: string,
+): Promise<EstadoDocumentoFirma> {
+	return pedirAlGenerador<EstadoDocumentoFirma>(
+		`/contracts/refresh-signing-links/${encodeURIComponent(documentID)}`,
+		"PUT",
+		"No se pudieron regenerar los enlaces de firma",
+	);
+}
+
+/** Reenvía el correo de invitación a los firmantes pendientes. */
+export async function reenviarCorreoDeFirma(
+	documentID: string,
+): Promise<{ success: boolean; documentID: string }> {
+	return pedirAlGenerador<{ success: boolean; documentID: string }>(
+		`/contracts/resend-email/${encodeURIComponent(documentID)}`,
+		"PUT",
+		"No se pudo reenviar el correo de firma",
+	);
+}

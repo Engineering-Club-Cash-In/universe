@@ -525,6 +525,120 @@ export class WeeTrustService {
 	}
 
 	// ==========================================================================
+	// REINTENTOS
+	// ==========================================================================
+
+	/**
+	 * Regenera los enlaces de firma de un documento.
+	 *
+	 * Es la salida cuando un link venció o cuando alguien necesita volver a
+	 * entrar (por ejemplo, tecleó mal el DPI y quiere reintentar la
+	 * verificación): WeeTrust emite URLs nuevas para los firmantes que todavía
+	 * no firmaron. Los que ya firmaron no se tocan.
+	 *
+	 * `PUT /documents/update-signatures`, body `{ documentID }`.
+	 */
+	async refreshSignatureUrls(
+		documentID: string,
+	): Promise<WeeTrustSignatoryResponse[]> {
+		console.log(`[WeeTrust] Regenerando enlaces de firma de ${documentID}`);
+
+		const headers = await this.getAuthHeaders();
+
+		const response = await this.httpClient.put<{
+			responseData: WeeTrustSignatoryResponse[] | WeeTrustSignatoryResponse;
+			message: string;
+			success?: boolean;
+			responseCode: number | string;
+		}>(
+			"/documents/update-signatures",
+			{ documentID },
+			{ headers: { ...headers, "Content-Type": "application/json" } },
+		);
+
+		if (response.data.success === false) {
+			throw new Error(
+				`WeeTrust Refresh Signatures Error: ${response.data.message}`,
+			);
+		}
+
+		// La doc muestra un objeto, pero un documento tiene varios firmantes y la
+		// API devuelve el arreglo. Se aceptan las dos formas.
+		const data = response.data.responseData;
+		const firmantes = Array.isArray(data) ? data : data ? [data] : [];
+
+		console.log(
+			`[WeeTrust] ${firmantes.length} enlace(s) regenerado(s) para ${documentID}`,
+		);
+		return firmantes;
+	}
+
+	/**
+	 * Reenvía el correo de invitación a los firmantes que aún no firman.
+	 *
+	 * `PUT /documents/resend-email?documentID=...`, sin body.
+	 */
+	async resendEmailToSignatories(documentID: string): Promise<void> {
+		console.log(`[WeeTrust] Reenviando correo del documento ${documentID}`);
+
+		const headers = await this.getAuthHeaders();
+
+		const response = await this.httpClient.put<{
+			message: string;
+			success?: boolean;
+			responseCode: number | string;
+		}>(
+			`/documents/resend-email?documentID=${encodeURIComponent(documentID)}`,
+			undefined,
+			{ headers: { ...headers, "Content-Type": "application/json" } },
+		);
+
+		if (response.data.success === false) {
+			throw new Error(
+				`WeeTrust Resend Email Error: ${response.data.message}`,
+			);
+		}
+	}
+
+	/**
+	 * Repite (o salta) la verificación facial de un intento fallido.
+	 *
+	 * OJO: necesita el `biometricLogID` del intento, que WeeTrust no expone en
+	 * `GET /documents/{id}`: sólo llega en los webhooks `pendingBiometric` /
+	 * `failedBiometric`. Sin webhooks registrados no hay de dónde sacarlo, y por
+	 * eso el CRM no ofrece este botón todavía.
+	 *
+	 * `PUT /documents/retry-biometric`.
+	 */
+	async retryBiometric(
+		documentID: string,
+		biometricLogID: string,
+		action: "biometricRetry" | "biometricSkipped" = "biometricRetry",
+	): Promise<void> {
+		console.log(
+			`[WeeTrust] ${action} para el intento ${biometricLogID} del documento ${documentID}`,
+		);
+
+		const headers = await this.getAuthHeaders();
+
+		const response = await this.httpClient.put<{
+			message: string;
+			success?: boolean;
+			responseCode: number | string;
+		}>(
+			"/documents/retry-biometric",
+			{ documentID, biometricLogID, action },
+			{ headers: { ...headers, "Content-Type": "application/json" } },
+		);
+
+		if (response.data.success === false) {
+			throw new Error(
+				`WeeTrust Retry Biometric Error: ${response.data.message}`,
+			);
+		}
+	}
+
+	// ==========================================================================
 	// WEBHOOKS
 	// ==========================================================================
 

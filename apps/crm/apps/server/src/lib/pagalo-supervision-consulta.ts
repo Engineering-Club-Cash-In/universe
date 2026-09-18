@@ -8,7 +8,7 @@
  * corrección que se hiciera en una sola.
  */
 
-import { and, asc, count, desc, eq, exists, ilike, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, ilike, inArray, sql, sum } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -33,13 +33,20 @@ export const MAX_LIMIT_SUPERVISION = 100;
 export const COLUMNAS_ORDENABLES_SUPERVISION = [
 	"totalAmount",
 	"createdAt",
+	"linksAmountCapital",
+	"linksAmountMora",
 ] as const;
 export type ColumnaOrdenableSupervision =
 	(typeof COLUMNAS_ORDENABLES_SUPERVISION)[number];
 
+// capitalTotal/facturableTotal ya son columnas del grupo (el monto por el que
+// se generaron los links CAPITAL/MORA_INTERES respectivamente), no hace falta
+// agregarlas desde pagalo_payment_links.
 const COLUMNA_ORDEN = {
 	totalAmount: pagaloPaymentGroups.totalAmount,
 	createdAt: pagaloPaymentGroups.createdAt,
+	linksAmountCapital: pagaloPaymentGroups.capitalTotal,
+	linksAmountMora: pagaloPaymentGroups.facturableTotal,
 } as const;
 
 /** Campos del filtro compartidos por la entrada ORPC y la ruta HTTP. */
@@ -192,12 +199,46 @@ export async function consultarSupervisionPagalo(
 		conteoPorEstado[fila.status] = fila.total;
 	}
 
-	const [{ total }] = await db
-		.select({ total: count() })
-		.from(pagaloPaymentGroups)
-		.where(whereClause);
+	// KPIs sobre el mismo universo que ve la tabla (whereClause, con los filtros
+	// y chips activos aplicados) — a diferencia de conteoPorEstado, que usa un
+	// universo más amplio para que los chips no se acoten entre sí.
+	// LEFT JOIN (no EXISTS) porque necesitamos contar/filtrar filas de links, no
+	// solo saber si existen; capitalTotal/facturableTotal se agregan aparte para
+	// no duplicarse por el join 1-a-N con links.
+	// Las tres consultas son independientes entre sí (todas solo dependen de
+	// whereClause): en paralelo en vez de en serie.
+	const [[{ total }], [montosGrupo], [conteoLinks]] = await Promise.all([
+		db.select({ total: count() }).from(pagaloPaymentGroups).where(whereClause),
+		db
+			.select({
+				capitalTotal: sum(pagaloPaymentGroups.capitalTotal),
+				facturableTotal: sum(pagaloPaymentGroups.facturableTotal),
+				totalAmount: sum(pagaloPaymentGroups.totalAmount),
+			})
+			.from(pagaloPaymentGroups)
+			.where(whereClause),
+		db
+			.select({
+				linksTotal: count(),
+				linksPagados: sql<number>`count(*) filter (where ${pagaloPaymentLinks.status} = 'PAID')::int`,
+			})
+			.from(pagaloPaymentLinks)
+			.innerJoin(
+				pagaloPaymentGroups,
+				eq(pagaloPaymentGroups.id, pagaloPaymentLinks.groupId),
+			)
+			.where(whereClause),
+	]);
+	const resumenKpis = {
+		grupos: total,
+		capitalTotal: montosGrupo?.capitalTotal ?? "0",
+		facturableTotal: montosGrupo?.facturableTotal ?? "0",
+		totalAmount: montosGrupo?.totalAmount ?? "0",
+		linksTotal: conteoLinks?.linksTotal ?? 0,
+		linksPagados: conteoLinks?.linksPagados ?? 0,
+	};
 
-	if (total === 0) return { grupos: [], total: 0, conteoPorEstado };
+	if (total === 0) return { grupos: [], total: 0, conteoPorEstado, resumenKpis };
 
 	const pagina = await db
 		.select({
@@ -224,7 +265,7 @@ export async function consultarSupervisionPagalo(
 		.limit(input.limit)
 		.offset(input.offset);
 
-	if (pagina.length === 0) return { grupos: [], total, conteoPorEstado };
+	if (pagina.length === 0) return { grupos: [], total, conteoPorEstado, resumenKpis };
 
 	const links = await db
 		.select({
@@ -365,5 +406,6 @@ export async function consultarSupervisionPagalo(
 		})),
 		total,
 		conteoPorEstado,
+		resumenKpis,
 	};
 }

@@ -15,7 +15,11 @@ export function alternarEstado(
 }
 
 export type OrdenSupervision = {
-	columna: "totalAmount" | "createdAt";
+	columna:
+		| "totalAmount"
+		| "createdAt"
+		| "linksAmountCapital"
+		| "linksAmountMora";
 	direccion: "asc" | "desc";
 };
 

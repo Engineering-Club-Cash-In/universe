@@ -1,21 +1,15 @@
 /**
  * CB-127 · Export XLSX/PDF de la bandeja de supervisión Págalo
- * (/cobros/pagalo). Pagina contra el server con los mismos filtros y orden
- * que la pantalla, trayendo el dataset COMPLETO filtrado (no solo la página
- * visible). Prefijo `-`: archivo no-ruta, mismo patrón que -pagalo-columnas.ts.
+ * (/cobros/pagalo). El archivo lo genera cartera-back (mismo diseño —logo,
+ * KPIs, colores— que usa carteraFront), no este front: acá solo se pide vía
+ * el server del CRM (que resuelve el scope de SIFCOs del usuario y reenvía el
+ * binario) y se dispara la descarga. Prefijo `-`: archivo no-ruta, mismo
+ * patrón que -pagalo-columnas.ts.
  */
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
-import * as XLSX from "xlsx";
-import { client } from "@/utils/orpc";
 
-/**
- * Bandeja de supervisión operativa, no un histórico de años: el volumen
- * esperado es muchísimo menor que el de historial-agendas.tsx (que usa
- * 20,000). 5,000 es margen amplio de sobra para el uso real.
- */
+/** Mismo tope que LIMITE_EXPORT_PAGALO en cartera-back/pagaloSupervisionReporte.ts —
+ * el aviso previo a exportar necesita saberlo aunque el archivo lo arme cartera-back. */
 export const LIMITE_EXPORT_PAGALO = 5_000;
-const PAGE_SIZE_EXPORT_PAGALO = 100;
 
 export type FiltrosExportPagalo = {
 	estados?: string[];
@@ -24,7 +18,7 @@ export type FiltrosExportPagalo = {
 	asesorId?: number;
 	fechaDesde?: string;
 	fechaHasta?: string;
-	sortBy: "totalAmount" | "createdAt";
+	sortBy: "totalAmount" | "createdAt" | "linksAmountCapital" | "linksAmountMora";
 	sortDir: "asc" | "desc";
 };
 
@@ -34,127 +28,55 @@ export type ResultadoExportPagalo = {
 	truncado: boolean;
 };
 
-type GrupoSupervisionExport = {
-	id: string;
-	status: string;
-	origen: string;
-	numeroCreditoSifco: string;
-	totalAmount: string;
-	createdAt: string | Date;
-	clienteNombre: string | null;
-	asesoresNombres: string[];
-};
+function armarQuery(filtros: FiltrosExportPagalo): string {
+	const params = new URLSearchParams();
+	if (filtros.estados?.length) params.set("estados", filtros.estados.join(","));
+	params.set("soloProblematicos", String(filtros.soloProblematicos));
+	if (filtros.numeroSifco) params.set("numeroSifco", filtros.numeroSifco);
+	if (filtros.asesorId !== undefined) params.set("asesorId", String(filtros.asesorId));
+	if (filtros.fechaDesde) params.set("fechaDesde", filtros.fechaDesde);
+	if (filtros.fechaHasta) params.set("fechaHasta", filtros.fechaHasta);
+	params.set("sortBy", filtros.sortBy);
+	params.set("sortDir", filtros.sortDir);
+	return params.toString();
+}
 
-async function traerDatasetCompletoPagalo(
+async function descargarPagaloArchivo(
+	formato: "excel" | "pdf",
 	filtros: FiltrosExportPagalo,
-): Promise<{
-	filas: GrupoSupervisionExport[];
-	total: number;
-	truncado: boolean;
-}> {
-	const filas: GrupoSupervisionExport[] = [];
-	const idsVistos = new Set<string>();
-	let offset = 0;
-	let hayMas = true;
-	let totalServidor = 0;
-
-	while (hayMas && filas.length < LIMITE_EXPORT_PAGALO) {
-		const respuesta = await client.getPagaloSupervision({
-			...filtros,
-			limit: PAGE_SIZE_EXPORT_PAGALO,
-			offset,
-		});
-		totalServidor = respuesta.total;
-		for (const grupo of respuesta.grupos as GrupoSupervisionExport[]) {
-			if (idsVistos.has(grupo.id)) continue;
-			idsVistos.add(grupo.id);
-			filas.push(grupo);
-		}
-		hayMas =
-			respuesta.grupos.length === PAGE_SIZE_EXPORT_PAGALO &&
-			offset + PAGE_SIZE_EXPORT_PAGALO < respuesta.total;
-		offset += PAGE_SIZE_EXPORT_PAGALO;
+): Promise<ResultadoExportPagalo> {
+	const url = `${import.meta.env.VITE_SERVER_URL}/api/pagalo/supervision/${formato}?${armarQuery(filtros)}`;
+	const res = await fetch(url, { credentials: "include" });
+	if (!res.ok) {
+		const cuerpo = await res.json().catch(() => ({}));
+		throw new Error(cuerpo.error || `No se pudo generar el reporte (HTTP ${res.status})`);
 	}
-	const truncado = totalServidor > LIMITE_EXPORT_PAGALO;
+
+	const disposition = res.headers.get("content-disposition") || "";
+	const filenameMatch = disposition.match(/filename="([^"]+)"/);
+	const filename =
+		filenameMatch?.[1] ||
+		`supervision-pagalo-${new Date().toISOString().slice(0, 10)}.${formato === "excel" ? "xlsx" : "pdf"}`;
+
+	const blob = await res.blob();
+	const objectUrl = URL.createObjectURL(blob);
+	const a = document.createElement("a");
+	a.href = objectUrl;
+	a.download = filename;
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	URL.revokeObjectURL(objectUrl);
+
 	return {
-		filas: filas.slice(0, LIMITE_EXPORT_PAGALO),
-		total: totalServidor,
-		truncado,
+		truncado: res.headers.get("x-export-truncado") === "true",
+		total: Number(res.headers.get("x-export-total") ?? 0),
+		cantidad: Number(res.headers.get("x-export-cantidad") ?? 0),
 	};
 }
 
-const ENCABEZADOS_EXPORT_PAGALO = [
-	"SIFCO",
-	"Cliente",
-	"Asesor",
-	"Estado",
-	"Total",
-	"Origen",
-	"Fecha de creación",
-];
+export const exportarPagaloXLSX = (filtros: FiltrosExportPagalo) =>
+	descargarPagaloArchivo("excel", filtros);
 
-function filaExportComoTexto(grupo: GrupoSupervisionExport) {
-	return [
-		grupo.numeroCreditoSifco,
-		grupo.clienteNombre ?? "—",
-		grupo.asesoresNombres.join(", ") || "—",
-		grupo.status,
-		`Q${Number(grupo.totalAmount).toLocaleString("es-GT", { minimumFractionDigits: 2 })}`,
-		grupo.origen,
-		new Date(grupo.createdAt).toLocaleDateString("es-GT", {
-			timeZone: "America/Guatemala",
-		}),
-	];
-}
-
-/** Devuelve el resultado de la exportación incluyendo si fue acotada por el límite. */
-export async function exportarPagaloXLSX(
-	filtros: FiltrosExportPagalo,
-): Promise<ResultadoExportPagalo> {
-	const { filas, total, truncado } = await traerDatasetCompletoPagalo(filtros);
-	const cuerpo = filas.map((g) => [
-		g.numeroCreditoSifco,
-		g.clienteNombre ?? "—",
-		g.asesoresNombres.join(", ") || "—",
-		g.status,
-		Number(g.totalAmount),
-		g.origen,
-		new Date(g.createdAt).toLocaleString("es-GT", {
-			timeZone: "America/Guatemala",
-		}),
-	]);
-	const hoja = XLSX.utils.aoa_to_sheet([ENCABEZADOS_EXPORT_PAGALO, ...cuerpo]);
-	const libro = XLSX.utils.book_new();
-	XLSX.utils.book_append_sheet(libro, hoja, "Supervisión Págalo");
-	const sufijo = truncado ? "-parcial" : "";
-	XLSX.writeFile(
-		libro,
-		`supervision-pagalo${sufijo}-${new Date().toISOString().slice(0, 10)}.xlsx`,
-	);
-	return { cantidad: filas.length, total, truncado };
-}
-
-/** Devuelve el resultado de la exportación incluyendo si fue acotada por el límite. */
-export async function exportarPagaloPDF(
-	filtros: FiltrosExportPagalo,
-): Promise<ResultadoExportPagalo> {
-	const { filas, total, truncado } = await traerDatasetCompletoPagalo(filtros);
-	const doc = new jsPDF({ orientation: "landscape" });
-	doc.setFontSize(14);
-	const titulo = truncado
-		? `Supervisión Págalo (${filas.length.toLocaleString("es-GT")} de ${total.toLocaleString("es-GT")} registros - límite alcanzado)`
-		: "Supervisión Págalo";
-	doc.text(titulo, 14, 15);
-	autoTable(doc, {
-		startY: 20,
-		head: [ENCABEZADOS_EXPORT_PAGALO],
-		body: filas.map(filaExportComoTexto),
-		styles: { fontSize: 8 },
-		headStyles: { fillColor: [124, 58, 237] },
-	});
-	const sufijo = truncado ? "-parcial" : "";
-	doc.save(
-		`supervision-pagalo${sufijo}-${new Date().toISOString().slice(0, 10)}.pdf`,
-	);
-	return { cantidad: filas.length, total, truncado };
-}
+export const exportarPagaloPDF = (filtros: FiltrosExportPagalo) =>
+	descargarPagaloArchivo("pdf", filtros);

@@ -342,11 +342,14 @@ export interface PagaloSupervisionParams {
   numeroSifco?: string;
   fechaDesde?: string;
   fechaHasta?: string;
-  sortBy?: "totalAmount" | "createdAt";
+  sortBy?: "totalAmount" | "createdAt" | "linksAmountCapital" | "linksAmountMora";
   sortDir?: "asc" | "desc";
   soloProblematicos?: boolean;
   limit?: number;
   offset?: number;
+  /** CSV de SIFCOs. Ausente = sin recorte; presente (aunque sea "") = acotar
+   * exactamente a esta lista. Ver el mismo criterio en el HTTP del CRM. */
+  sifcosPermitidos?: string;
 }
 
 export interface PagaloLinkResumen {
@@ -386,11 +389,21 @@ export interface PagaloGrupoSupervision {
   links: PagaloLinkResumen[];
 }
 
+export interface PagaloResumenKpis {
+  grupos: number;
+  capitalTotal: string;
+  facturableTotal: string;
+  totalAmount: string;
+  linksTotal: number;
+  linksPagados: number;
+}
+
 export interface PagaloSupervisionResponse {
   success: boolean;
   grupos: PagaloGrupoSupervision[];
   total: number;
   conteoPorEstado: Record<string, number>;
+  resumenKpis: PagaloResumenKpis;
 }
 
 /**

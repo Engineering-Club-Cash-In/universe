@@ -94,7 +94,10 @@ import {
 import { investmentsRouter } from "./routers/investments";
 import { pagaloGrupoActivoRouter } from "./routers/pagalo-grupo-activo";
 import { pagaloLinkActionsRouter } from "./routers/pagalo-link-actions";
-import { pagaloSupervisionRouter } from "./routers/pagalo-supervision";
+import {
+	pagaloSupervisionRouter,
+	resolverSifcosPermitidosPagalo,
+} from "./routers/pagalo-supervision";
 import { recuperacionVehiculoRouter } from "./routers/recuperacion-vehiculo";
 import externalContractsRouter from "./routes/external-contracts";
 import { carteraBackClient } from "./services/cartera-back-client";
@@ -1293,9 +1296,20 @@ app.get(
 			);
 		}
 
+		// Ausente = null = sin recorte (llamada server-a-server ya autorizada,
+		// caso histórico). Presente = el llamador (el propio server del CRM,
+		// resolviendo scope de un usuario con permisos acotados) ya decidió el
+		// universo exacto de SIFCOs — nunca confiar en un scope vacío como "sin
+		// recorte": una lista vacía != sin parámetro.
+		const sifcosCsv = listaCsv(c.req.query("sifcosPermitidos"));
+		const sifcosPermitidos =
+			c.req.query("sifcosPermitidos") !== undefined
+				? new Set(sifcosCsv ?? [])
+				: null;
+
 		try {
 			const resultado = await consultarSupervisionPagalo(parseado.data, {
-				sifcosPermitidos: null,
+				sifcosPermitidos,
 			});
 			return c.json({ success: true, ...resultado });
 		} catch (error) {
@@ -1306,6 +1320,111 @@ app.get(
 			);
 		}
 	},
+);
+
+/**
+ * Proxy binario: cartera-back genera el Excel/PDF de supervisión Págalo (tiene
+ * el diseño centralizado con logo y KPIs, ver pagaloSupervisionReporte.ts) y el
+ * server del CRM lo reenvía tal cual al navegador. El scope de SIFCOs se
+ * resuelve ACÁ, con la sesión Better Auth del usuario — cartera-back no conoce
+ * asesores/buckets del CRM, solo filtra por la lista de SIFCOs que se le manda.
+ */
+async function proxyPagaloSupervisionArchivo(
+	c: HonoContext,
+	formato: "excel" | "pdf",
+) {
+	const context = await createContext({ context: c });
+	if (!context.session?.user?.id) {
+		return c.json({ error: "No autorizado" }, 401);
+	}
+	const userRole = context.session.user.role;
+	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
+		return c.json(
+			{ error: "No tenés permiso para exportar la supervisión Págalo" },
+			403,
+		);
+	}
+
+	const asesorIdParam = c.req.query("asesorId");
+	const asesorIdNum = asesorIdParam ? Number(asesorIdParam) : undefined;
+	if (asesorIdParam !== undefined && !Number.isInteger(asesorIdNum)) {
+		return c.json({ error: "asesorId debe ser un entero" }, 400);
+	}
+	const asesorId = asesorIdNum;
+
+	let scope: Awaited<ReturnType<typeof resolverSifcosPermitidosPagalo>>;
+	try {
+		scope = await resolverSifcosPermitidosPagalo(
+			{ userRole, userEmail: context.session.user.email },
+			asesorId,
+		);
+	} catch (error) {
+		console.error("[Págalo export] Error resolviendo scope:", error);
+		return c.json({ error: "No se pudo resolver el alcance del reporte" }, 502);
+	}
+	if (scope.forbidden) {
+		return c.json(
+			{ error: "No tenés permiso para filtrar por otro asesor." },
+			403,
+		);
+	}
+
+	const query: Record<string, string> = {};
+	for (const campo of [
+		"estados",
+		"problemasLink",
+		"soloHuerfanos",
+		"antiguedadMinDias",
+		"numeroSifco",
+		"fechaDesde",
+		"fechaHasta",
+		"sortBy",
+		"sortDir",
+		"soloProblematicos",
+	]) {
+		const valor = c.req.query(campo);
+		if (valor !== undefined) query[campo] = valor;
+	}
+	// Presente (aunque sea "") = "acotar a esta lista exacta"; ausente = sin
+	// recorte (supervisor/admin sin filtro de asesor). Ver el mismo criterio en
+	// /api/cartera/pagalo/supervision más arriba.
+	if (scope.sifcosPermitidos !== null) {
+		query.sifcosPermitidos = [...scope.sifcosPermitidos].join(",");
+	}
+
+	try {
+		const { carteraBackClient } = await import(
+			"./services/cartera-back-client"
+		);
+		const archivo = await carteraBackClient.getPagaloSupervisionArchivo(
+			formato,
+			query,
+		);
+		return new Response(new Uint8Array(archivo.buffer), {
+			headers: {
+				"content-type": archivo.contentType,
+				"content-disposition": `attachment; filename="${archivo.filename}"`,
+				"x-export-truncado": String(archivo.truncado),
+				"x-export-total": String(archivo.total),
+				"x-export-cantidad": String(archivo.cantidad),
+				"access-control-expose-headers":
+					"x-export-truncado, x-export-total, x-export-cantidad",
+			},
+		});
+	} catch (error) {
+		console.error(`[Págalo export] Error generando ${formato}:`, error);
+		return c.json(
+			{ error: "No se pudo generar el reporte de supervisión Págalo" },
+			500,
+		);
+	}
+}
+
+app.get("/api/pagalo/supervision/excel", (c) =>
+	proxyPagaloSupervisionArchivo(c, "excel"),
+);
+app.get("/api/pagalo/supervision/pdf", (c) =>
+	proxyPagaloSupervisionArchivo(c, "pdf"),
 );
 
 // Bot de WhatsApp de cobros (SimpleTech).

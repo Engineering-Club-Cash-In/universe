@@ -3698,6 +3698,53 @@ export class CarteraBackClient {
 			false,
 		);
 	}
+
+	/**
+	 * Trae el binario del reporte (Excel o PDF) de la bandeja de supervisión
+	 * Págalo generado por cartera-back — el server del CRM lo reenvía tal cual
+	 * al navegador (ver /api/pagalo/supervision/{excel,pdf} en index.ts). No usa
+	 * `request<T>` porque ese método siempre hace `.json()` sobre la respuesta;
+	 * acá se necesitan los bytes crudos + los headers para reenviar.
+	 */
+	async getPagaloSupervisionArchivo(
+		formato: "excel" | "pdf",
+		query: Record<string, string>,
+		timeoutMs = 60_000,
+	): Promise<{
+		buffer: Buffer;
+		contentType: string;
+		filename: string;
+		truncado: boolean;
+		total: number;
+		cantidad: number;
+	}> {
+		const qs = new URLSearchParams(query).toString();
+		const url = `${this.config.baseUrl}/pagalo/supervision/${formato}${qs ? `?${qs}` : ""}`;
+		const token = await this.config.accessTokenProvider();
+		const res = await this.config.fetchTransport(url, {
+			headers: { Authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(timeoutMs),
+		});
+		if (!res.ok) {
+			const texto = await res.text().catch(() => "");
+			throw new CarteraBackHttpError(
+				`HTTP ${res.status} generando el reporte de supervisión Págalo: ${texto}`,
+				res.status,
+				{},
+			);
+		}
+		const disposition = res.headers.get("content-disposition") || "";
+		const filenameMatch = disposition.match(/filename="([^"]+)"/);
+		return {
+			buffer: Buffer.from(await res.arrayBuffer()),
+			contentType:
+				res.headers.get("content-type") || "application/octet-stream",
+			filename: filenameMatch?.[1] || `supervision-pagalo.${formato === "excel" ? "xlsx" : "pdf"}`,
+			truncado: res.headers.get("x-export-truncado") === "true",
+			total: Number(res.headers.get("x-export-total") ?? 0),
+			cantidad: Number(res.headers.get("x-export-cantidad") ?? 0),
+		};
+	}
 }
 
 // ============================================================================

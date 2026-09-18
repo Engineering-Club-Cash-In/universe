@@ -39,11 +39,21 @@ export interface PagaloGrupo {
   links: PagaloLinkResumen[];
 }
 
+export interface PagaloResumenKpis {
+  grupos: number;
+  capitalTotal: string;
+  facturableTotal: string;
+  totalAmount: string;
+  linksTotal: number;
+  linksPagados: number;
+}
+
 export interface PagaloSupervisionResponse {
   success: boolean;
   grupos: PagaloGrupo[];
   total: number;
   conteoPorEstado: Record<string, number>;
+  resumenKpis: PagaloResumenKpis;
 }
 
 export interface PagaloSupervisionParams {
@@ -54,7 +64,7 @@ export interface PagaloSupervisionParams {
   numeroSifco?: string;
   fechaDesde?: string;
   fechaHasta?: string;
-  sortBy?: "totalAmount" | "createdAt";
+  sortBy?: "totalAmount" | "createdAt" | "linksAmountCapital" | "linksAmountMora";
   sortDir?: "asc" | "desc";
   soloProblematicos?: boolean;
   limit?: number;

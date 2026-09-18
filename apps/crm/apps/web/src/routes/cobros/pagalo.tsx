@@ -7,11 +7,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	ArrowUpDown,
+	CheckCircle2,
+	Coins,
 	FileSpreadsheet,
 	FileText,
+	Layers,
+	Link2,
 	Loader2,
+	Receipt,
 	RotateCcw,
 	UserRound,
+	Wallet,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -22,6 +28,7 @@ import {
 	etiquetaFuente,
 	getEstadoGrupoInfo,
 } from "@/components/cobros/pagalo/formato-pagalo";
+import { TarjetaKpi } from "@/components/cobros/pagalo/tarjeta-kpi-pagalo";
 import { Pagination } from "@/components/cobros/pagination";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
@@ -128,7 +135,20 @@ type AsesorPool = {
 	buckets: number[];
 };
 
-type ColumnaOrdenable = "totalAmount" | "createdAt";
+type ResumenKpis = {
+	grupos: number;
+	capitalTotal: string;
+	facturableTotal: string;
+	totalAmount: string;
+	linksTotal: number;
+	linksPagados: number;
+};
+
+type ColumnaOrdenable =
+	| "totalAmount"
+	| "createdAt"
+	| "linksAmountCapital"
+	| "linksAmountMora";
 
 function EncabezadoOrdenable({
 	label,
@@ -371,6 +391,9 @@ function PagaloSupervisionPage() {
 			| Record<string, number>
 			| undefined) ?? {};
 	const asesores = (asesoresQuery.data as AsesorPool[] | undefined) ?? [];
+	const resumenKpis = supervisionQuery.data?.resumenKpis as
+		| ResumenKpis
+		| undefined;
 
 	const toggleEstado = (estado: string) => {
 		setPagina(1);
@@ -472,6 +495,47 @@ function PagaloSupervisionPage() {
 					</Button>
 				</div>
 			</div>
+
+			{resumenKpis && (
+				<div className="mb-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+					<TarjetaKpi
+						icono={Layers}
+						label="Grupos"
+						valor={resumenKpis.grupos.toLocaleString("es-GT")}
+						subtitulo="En este filtro"
+					/>
+					<TarjetaKpi
+						icono={Wallet}
+						label="Total capital"
+						valor={q(resumenKpis.capitalTotal)}
+						subtitulo="Rubro no facturable"
+					/>
+					<TarjetaKpi
+						icono={Receipt}
+						label="Total interés/mora"
+						valor={q(resumenKpis.facturableTotal)}
+						subtitulo="Rubro facturable"
+					/>
+					<TarjetaKpi
+						icono={Coins}
+						label="Total general"
+						valor={q(resumenKpis.totalAmount)}
+						subtitulo="Capital + interés/mora"
+					/>
+					<TarjetaKpi
+						icono={Link2}
+						label="Links generados"
+						valor={resumenKpis.linksTotal.toLocaleString("es-GT")}
+						subtitulo="Todos los links del filtro"
+					/>
+					<TarjetaKpi
+						icono={CheckCircle2}
+						label="Links pagados"
+						valor={resumenKpis.linksPagados.toLocaleString("es-GT")}
+						subtitulo="Estado PAID"
+					/>
+				</div>
+			)}
 
 			<div className="mb-3 flex flex-wrap items-center gap-2">
 				{ESTADOS_FILTRABLES.map((estado) => {

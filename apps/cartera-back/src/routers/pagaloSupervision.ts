@@ -51,8 +51,11 @@ function validarFiltros(query: Record<string, string>): string | null {
   if (query.fechaDesde && query.fechaHasta && query.fechaDesde > query.fechaHasta) {
     return "fechaDesde debe ser menor o igual a fechaHasta";
   }
-  if (query.sortBy && !["totalAmount", "createdAt"].includes(query.sortBy)) {
-    return "sortBy inválido. Valores: totalAmount, createdAt";
+  if (
+    query.sortBy &&
+    !["totalAmount", "createdAt", "linksAmountCapital", "linksAmountMora"].includes(query.sortBy)
+  ) {
+    return "sortBy inválido. Valores: totalAmount, createdAt, linksAmountCapital, linksAmountMora";
   }
   if (query.sortDir && !["asc", "desc"].includes(query.sortDir)) {
     return "sortDir inválido. Valores: asc, desc";
@@ -92,11 +95,16 @@ function armarFiltros(query: Record<string, string>): PagaloSupervisionParams {
     numeroSifco: query.numeroSifco || undefined,
     fechaDesde: query.fechaDesde || undefined,
     fechaHasta: query.fechaHasta || undefined,
-    sortBy: (query.sortBy as "totalAmount" | "createdAt") || undefined,
+    sortBy:
+      (query.sortBy as "totalAmount" | "createdAt" | "linksAmountCapital" | "linksAmountMora") ||
+      undefined,
     sortDir: (query.sortDir as "asc" | "desc") || undefined,
     // Sin chips de estado activos la bandeja muestra todo; el front manda
     // soloProblematicos=true solo cuando el usuario acotó por estado.
     soloProblematicos: query.soloProblematicos === "true",
+    // Ausente (undefined) = sin recorte; presente (aunque "") = acotar exacto.
+    // No usar `|| undefined`: convertiría un scope vacío legítimo en "sin scope".
+    sifcosPermitidos: query.sifcosPermitidos,
   };
 }
 
@@ -142,8 +150,8 @@ export const pagaloSupervisionRouter = new Elysia().use(authMiddleware)
     }
 
     try {
-      const { filas, total, truncado } = await traerDatasetCompletoPagalo(armarFiltros(q));
-      const buf = await buildPagaloSupervisionWorkbook(filas);
+      const { filas, total, truncado, resumenKpis } = await traerDatasetCompletoPagalo(armarFiltros(q));
+      const buf = await buildPagaloSupervisionWorkbook(filas, resumenKpis);
       return new Response(new Uint8Array(buf), {
         headers: {
           "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -179,8 +187,8 @@ export const pagaloSupervisionRouter = new Elysia().use(authMiddleware)
     }
 
     try {
-      const { filas, total, truncado } = await traerDatasetCompletoPagalo(armarFiltros(q));
-      const buf = await buildPagaloSupervisionPDF(filas, { total, truncado });
+      const { filas, total, truncado, resumenKpis } = await traerDatasetCompletoPagalo(armarFiltros(q));
+      const buf = await buildPagaloSupervisionPDF(filas, { total, truncado, resumenKpis });
       return new Response(new Uint8Array(buf), {
         headers: {
           "content-type": "application/pdf",

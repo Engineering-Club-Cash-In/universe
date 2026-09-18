@@ -2,7 +2,7 @@ import { useState, useRef, Fragment, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Search, X, ChevronLeft, ChevronRight, FileDown, FileText, Loader2,
-  ArrowUpDown, RotateCcw, AlertTriangle,
+  ArrowUpDown, RotateCcw, AlertTriangle, Wallet, Receipt, Coins, Link2, CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   descargarPagaloExcel, descargarPagaloPDF, getPagaloSupervision,
-  type PagaloGrupo, type PagaloSupervisionParams,
+  type PagaloGrupo, type PagaloResumenKpis, type PagaloSupervisionParams,
 } from "../services/pagaloSupervision.services";
 import {
   alternarEstado, antiguedad, colorPuntoLink, ESTADOS_FILTRABLES, etiquetaEstadoLink,
@@ -47,6 +47,72 @@ function EncabezadoOrdenable({
         {activo && <span className="text-[10px]">{ordenDir === "asc" ? "↑" : "↓"}</span>}
       </button>
     </TableHead>
+  );
+}
+
+/**
+ * Monto del rubro (capitalTotal/facturableTotal del grupo, fijo desde que se
+ * generaron los links) + un punto de color con el estado del link de ese tipo.
+ * No usa transactionAmount: ese queda null hasta que el link se paga, y acá
+ * interesa el monto por el que se generó independientemente de si ya pagó.
+ */
+function LinkMontoCell({
+  grupo, linkType, monto,
+}: {
+  grupo: PagaloGrupo;
+  linkType: "CAPITAL" | "MORA_INTERES";
+  monto: string;
+}) {
+  const link = grupo.links.find((l) => l.linkType === linkType);
+  return (
+    <span className="inline-flex items-center justify-end gap-1.5">
+      {fmtQ(monto)}
+      {link && (
+        <span title={`${etiquetaTipoLink(linkType)} · ${etiquetaEstadoLink(link.status)}`}
+          className={`w-2 h-2 rounded-full shrink-0 ${colorPuntoLink(link.status)}`} />
+      )}
+    </span>
+  );
+}
+
+function TarjetaKpi({
+  icono: Icono, label, valor, className,
+}: {
+  icono: typeof Wallet;
+  label: string;
+  valor: string;
+  className?: string;
+}) {
+  return (
+    <div className="bg-white rounded-2xl shadow-lg border border-violet-100 p-4 flex items-center gap-3">
+      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${className ?? "bg-violet-100 text-violet-700"}`}>
+        <Icono className="w-5 h-5" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs text-gray-500 font-semibold truncate">{label}</p>
+        <p className="text-lg font-bold text-gray-800 truncate">{valor}</p>
+      </div>
+    </div>
+  );
+}
+
+/** KPIs sobre el universo filtrado completo (no solo la página visible). */
+function TarjetasResumen({ resumen }: { resumen: PagaloResumenKpis }) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
+      <TarjetaKpi icono={Coins} label="Grupos" valor={resumen.grupos.toLocaleString("es-GT")}
+        className="bg-violet-100 text-violet-700" />
+      <TarjetaKpi icono={Wallet} label="Total capital" valor={fmtQ(resumen.capitalTotal)}
+        className="bg-blue-100 text-blue-700" />
+      <TarjetaKpi icono={Receipt} label="Total interés/mora" valor={fmtQ(resumen.facturableTotal)}
+        className="bg-amber-100 text-amber-700" />
+      <TarjetaKpi icono={Coins} label="Total general" valor={fmtQ(resumen.totalAmount)}
+        className="bg-green-100 text-green-700" />
+      <TarjetaKpi icono={Link2} label="Links generados" valor={resumen.linksTotal.toLocaleString("es-GT")}
+        className="bg-gray-100 text-gray-700" />
+      <TarjetaKpi icono={CheckCircle2} label="Links pagados" valor={resumen.linksPagados.toLocaleString("es-GT")}
+        className="bg-emerald-100 text-emerald-700" />
+    </div>
   );
 }
 
@@ -139,6 +205,7 @@ export function PagaloSupervision() {
   const grupos = query.data?.grupos ?? [];
   const total = query.data?.total ?? 0;
   const conteoPorEstado = query.data?.conteoPorEstado ?? {};
+  const resumenKpis = query.data?.resumenKpis;
   const totalPaginas = Math.max(1, Math.ceil(total / pageSize));
 
   // Cambiar de filtro puede reducir el total y dejar la página actual fuera de
@@ -223,6 +290,8 @@ export function PagaloSupervision() {
             muestran todos; al elegir uno o más, solo esos. Expande un grupo para ver sus links.
           </p>
         </div>
+
+        {resumenKpis && <TarjetasResumen resumen={resumenKpis} />}
 
         {/* Filtros */}
         <div className="bg-white/80 backdrop-blur rounded-2xl shadow-lg border border-violet-100 p-5 mb-6">
@@ -353,7 +422,10 @@ export function PagaloSupervision() {
                     <EncabezadoOrdenable label="Total" columna="totalAmount" ordenPor={ordenPor}
                       ordenDir={ordenDir} onOrdenar={alternarOrden} className="text-right" />
                     <TableHead className="font-bold text-violet-800 text-center">Origen</TableHead>
-                    <TableHead className="font-bold text-violet-800 text-center">Links</TableHead>
+                    <EncabezadoOrdenable label="Total Link Capital" columna="linksAmountCapital"
+                      ordenPor={ordenPor} ordenDir={ordenDir} onOrdenar={alternarOrden} className="text-right" />
+                    <EncabezadoOrdenable label="Total Link Interés/Mora" columna="linksAmountMora"
+                      ordenPor={ordenPor} ordenDir={ordenDir} onOrdenar={alternarOrden} className="text-right" />
                     <EncabezadoOrdenable label="Antigüedad" columna="createdAt" ordenPor={ordenPor}
                       ordenDir={ordenDir} onOrdenar={alternarOrden} className="text-center" />
                   </TableRow>
@@ -385,17 +457,11 @@ export function PagaloSupervision() {
                           <TableCell className="text-center text-xs text-gray-600">
                             {etiquetaFuente(grupo.origen)}
                           </TableCell>
-                          <TableCell className="text-center">
-                            <span className="inline-flex items-center gap-1">
-                              {grupo.links.length === 0 ? (
-                                <span className="text-xs text-gray-400">--</span>
-                              ) : (
-                                grupo.links.map((link) => (
-                                  <span key={link.id} title={`${etiquetaTipoLink(link.linkType)} · ${etiquetaEstadoLink(link.status)}`}
-                                    className={`w-2.5 h-2.5 rounded-full ${colorPuntoLink(link.status)}`} />
-                                ))
-                              )}
-                            </span>
+                          <TableCell className="text-right text-xs text-gray-700">
+                            <LinkMontoCell grupo={grupo} linkType="CAPITAL" monto={grupo.capitalTotal} />
+                          </TableCell>
+                          <TableCell className="text-right text-xs text-gray-700">
+                            <LinkMontoCell grupo={grupo} linkType="MORA_INTERES" monto={grupo.facturableTotal} />
                           </TableCell>
                           <TableCell className={`text-center text-xs ${edad.alerta ? "text-red-600 font-semibold" : "text-gray-500"}`}>
                             {edad.etiqueta}
@@ -403,7 +469,7 @@ export function PagaloSupervision() {
                         </TableRow>
                         {expanded === grupo.id && (
                           <TableRow className="bg-slate-50/60">
-                            <TableCell colSpan={7} className="p-4">
+                            <TableCell colSpan={8} className="p-4">
                               <DetalleLinks grupo={grupo} />
                             </TableCell>
                           </TableRow>

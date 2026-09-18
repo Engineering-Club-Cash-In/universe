@@ -4,7 +4,11 @@
  * de componentes y no hay paquete compartido entre las dos apps.
  */
 
-export type ColumnaOrdenable = "totalAmount" | "createdAt";
+export type ColumnaOrdenable =
+  | "totalAmount"
+  | "createdAt"
+  | "linksAmountCapital"
+  | "linksAmountMora";
 
 export type OrdenSupervision = {
   columna: ColumnaOrdenable;

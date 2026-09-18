@@ -718,6 +718,13 @@ export const crmRouter = {
 					vendorId: opportunities.vendorId,
 					companyId: opportunities.companyId,
 				});
+			// El meta solo cubre los fallos: la escritura buena se anota aquí, que
+			// es como se reconstruye después quién puso al vendedor o la agencia.
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "update",
+			});
 			return actualizada;
 		}),
 

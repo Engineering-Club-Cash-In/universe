@@ -345,6 +345,30 @@ export interface ConsultaMoraHistorial {
 	evento: string;
 }
 
+/**
+ * El cuerpo de `POST /clientes/consulta-mora`.
+ *
+ * 🔴 Los dos arreglos de números NO son intercambiables y por eso son campos
+ * distintos:
+ *
+ * - `numerosCreditoConocidos`: créditos que el CRM asocia al DPI como TITULAR
+ *   (sus leads). Cartera los usa además para EXPANDIR por dueño y alcanzar los
+ *   créditos que SIFCO no devuelve (`insoluto-N`, `CRM-<uuid>`).
+ * - `numerosCreditoGarantizados`: créditos que ese DPI AFIANZÓ (figura como
+ *   co-deudor). Entran al veredicto —si lo garantizado está en mora, bloquea—
+ *   pero NO expanden: el fiador responde por lo que garantizó, no por la vida
+ *   entera del titular.
+ *
+ * Mandar los afianzados por el primer campo bloqueaba al fiador de un crédito
+ * SANO porque el titular tenía otra deuda, y le mostraba al CRM la historia
+ * crediticia completa de ese tercero.
+ */
+export interface ConsultaMoraRequest {
+	dpi: string;
+	numerosCreditoConocidos?: string[];
+	numerosCreditoGarantizados?: string[];
+}
+
 export interface ConsultaMoraResponse {
 	encontrado: boolean;
 	tieneMoraActiva: boolean;

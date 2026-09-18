@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, ne } from "drizzle-orm";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import { leads, opportunities } from "../db/schema/crm";
 import { eqDpi } from "./dpi-lookup";
@@ -33,22 +33,46 @@ import { eqDpi } from "./dpi-lookup";
  */
 export const TOPE_NUMEROS_CREDITO_CONOCIDOS = 50;
 
-export async function numerosSifcoConocidosPorDpi(
+/**
+ * La consulta, aparte para poder mirarle el SQL en los tests.
+ *
+ * 🔴 El DISTINCT y el `trim` van en SQL, ANTES del `limit`, no después en JS. El
+ * tope corta filas, no números distintos: un lead con el mismo `numeroSifco`
+ * repetido en varias oportunidades —o el mismo número guardado una vez con
+ * espacios y otra sin— llenaba las 50 filas con duplicados y dejaba afuera el
+ * crédito que sí importaba. Con el saneo adentro, el tope cuenta lo que de
+ * verdad se va a mandar.
+ *
+ * El `trim` se repite en el `where`: un `"   "` no es NULL ni `''`, así que sin
+ * recortarlo primero se colaba como número válido y gastaba un lugar del tope.
+ */
+export function consultaNumerosSifcoPorDpi(
+	database: Pick<typeof db, "selectDistinct">,
 	dpi: string,
-): Promise<string[]> {
-	const filas = await db
-		.select({ numeroSifco: opportunities.numeroSifco })
+) {
+	const numeroLimpio = sql<string>`trim(${opportunities.numeroSifco})`;
+
+	return database
+		.selectDistinct({ numeroSifco: numeroLimpio })
 		.from(opportunities)
 		.innerJoin(leads, eq(opportunities.leadId, leads.id))
 		.where(
 			and(
 				eqDpi(leads.dpi, dpi),
 				isNotNull(opportunities.numeroSifco),
-				ne(opportunities.numeroSifco, ""),
+				ne(numeroLimpio, ""),
 			),
 		)
 		.limit(TOPE_NUMEROS_CREDITO_CONOCIDOS);
+}
 
+export async function numerosSifcoConocidosPorDpi(
+	dpi: string,
+): Promise<string[]> {
+	const filas = await consultaNumerosSifcoPorDpi(db, dpi);
+
+	// Segunda línea: el SQL ya vino limpio y deduplicado, pero esto cuesta nada
+	// y cubre cualquier motor o vista que devuelva algo inesperado.
 	const vistos = new Set<string>();
 	for (const fila of filas) {
 		const numero = (fila.numeroSifco ?? "").trim();

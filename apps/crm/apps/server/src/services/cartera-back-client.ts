@@ -330,7 +330,38 @@ const consultaMoraResponseSchema = z.object({
 // CIRCUIT BREAKER
 // ============================================================================
 
-class CircuitBreaker {
+/**
+ * ¿El error vino de que el LLAMADOR se cansó, y no de que cartera fallara?
+ *
+ * 🔴 El breaker es COMPARTIDO por todas las integraciones con cartera (pagos,
+ * inversionistas, reportes). La señal de presupuesto de la consulta de mora
+ * podía abrirlo sola: con el auth colgado, cada intento vencido dejaba su tarea
+ * tardía viva dentro de `execute`, y al revivir el auth todas esas tareas
+ * encontraban la señal ya abortada y rechazaban de una. Cinco rechazos así
+ * —que no son cartera fallando, es el CRM cancelando— abrían el breaker 60s
+ * para todo el mundo.
+ *
+ * Por eso la cancelación se relanza sin contar `onFailure` ni `onSuccess`: de
+ * un viaje que nunca salió no se aprende nada sobre la salud de cartera.
+ *
+ * ⚠️ El timeout PROPIO del fetch SÍ sigue contando como fallo, y por eso la
+ * distinción no es "abortó" sino QUIÉN abortó: `AbortSignal.timeout` aborta con
+ * `TimeoutError` (cartera no contestó a tiempo: eso es un síntoma real) y la
+ * señal del llamador con `AbortError`. Se exige además que esa señal externa
+ * esté efectivamente abortada: un `AbortError` con la señal del llamador intacta
+ * vino de otro lado y se cuenta como lo que es.
+ */
+export function esCancelacionDelLlamador(
+	error: unknown,
+	senalExterna: AbortSignal | null | undefined,
+): boolean {
+	if (!senalExterna?.aborted) return false;
+
+	return (error as { name?: string } | null)?.name === "AbortError";
+}
+
+/** Exportado para poder verificar en tests cuándo se abre y cuándo no. */
+export class CircuitBreaker {
 	private failureCount = 0;
 	private lastFailureTime: number | null = null;
 	private state: "CLOSED" | "OPEN" | "HALF_OPEN" = "CLOSED";
@@ -340,7 +371,15 @@ class CircuitBreaker {
 		private timeout: number,
 	) {}
 
-	async execute<T>(fn: () => Promise<T>): Promise<T> {
+	/**
+	 * `esCancelacion` marca los errores que NO son un fallo de cartera: los que
+	 * pasan por ahí se relanzan sin contar ni éxito ni fallo. Ver
+	 * `esCancelacionDelLlamador`.
+	 */
+	async execute<T>(
+		fn: () => Promise<T>,
+		esCancelacion?: (error: unknown) => boolean,
+	): Promise<T> {
 		if (this.state === "OPEN") {
 			if (Date.now() - (this.lastFailureTime || 0) > this.timeout) {
 				this.state = "HALF_OPEN";
@@ -355,6 +394,9 @@ class CircuitBreaker {
 			return result;
 		} catch (error) {
 			if (error instanceof CarteraBackHttpError && error.status < 500) {
+				throw error;
+			}
+			if (esCancelacion?.(error)) {
 				throw error;
 			}
 			this.onFailure();
@@ -1182,66 +1224,71 @@ export class CarteraBackClient {
 
 		for (let attempt = 0; attempt <= this.config.retryAttempts; attempt++) {
 			try {
-				const response = await this.circuitBreaker.execute(async () => {
-					const requestOptions = await buildRequestOptions();
-					const res = await this.config.fetchTransport(url, requestOptions);
+				const response = await this.circuitBreaker.execute(
+					async () => {
+						const requestOptions = await buildRequestOptions();
+						const res = await this.config.fetchTransport(url, requestOptions);
 
-					if (!res.ok) {
-						const errorText = await res.text();
-						let errorData: { error?: string; message?: string } = {};
+						if (!res.ok) {
+							const errorText = await res.text();
+							let errorData: { error?: string; message?: string } = {};
 
-						try {
-							errorData = JSON.parse(errorText);
-						} catch {
-							errorData = { error: errorText };
-						}
+							try {
+								errorData = JSON.parse(errorText);
+							} catch {
+								errorData = { error: errorText };
+							}
 
-						if (res.status === 401 || res.status === 403) {
-							if (!didReauth) {
-								didReauth = true;
-								const retryOptions = await buildRequestOptions(true);
-								const retryRes = await this.config.fetchTransport(
-									url,
-									retryOptions,
-								);
-								if (retryRes.ok) return retryRes;
-								const retryText = await retryRes.text();
-								let retryData: { error?: string; message?: string } = {};
-								try {
-									retryData = JSON.parse(retryText);
-								} catch {
-									retryData = { error: retryText };
+							if (res.status === 401 || res.status === 403) {
+								if (!didReauth) {
+									didReauth = true;
+									const retryOptions = await buildRequestOptions(true);
+									const retryRes = await this.config.fetchTransport(
+										url,
+										retryOptions,
+									);
+									if (retryRes.ok) return retryRes;
+									const retryText = await retryRes.text();
+									let retryData: { error?: string; message?: string } = {};
+									try {
+										retryData = JSON.parse(retryText);
+									} catch {
+										retryData = { error: retryText };
+									}
+									throw new CarteraBackHttpError(
+										`Authentication failed: ${retryData.error || retryData.message || retryText}`,
+										retryRes.status,
+										retryData,
+									);
 								}
 								throw new CarteraBackHttpError(
-									`Authentication failed: ${retryData.error || retryData.message || retryText}`,
-									retryRes.status,
-									retryData,
+									`Authentication failed: ${errorData.error || errorData.message}`,
+									res.status,
+									errorData,
 								);
 							}
+
+							if (res.status === 400) {
+								throw new CarteraBackHttpError(
+									`Validation failed: ${errorData.error || errorData.message}`,
+									res.status,
+									errorData,
+								);
+							}
+
 							throw new CarteraBackHttpError(
-								`Authentication failed: ${errorData.error || errorData.message}`,
+								`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
 								res.status,
 								errorData,
 							);
 						}
 
-						if (res.status === 400) {
-							throw new CarteraBackHttpError(
-								`Validation failed: ${errorData.error || errorData.message}`,
-								res.status,
-								errorData,
-							);
-						}
-
-						throw new CarteraBackHttpError(
-							`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
-							res.status,
-							errorData,
-						);
-					}
-
-					return res;
-				});
+						return res;
+					},
+					// La señal del llamador no es cartera fallando: ver
+					// `esCancelacionDelLlamador`.
+					(error) => esCancelacionDelLlamador(error, options.signal),
+				);
 
 				const data = (await response.json()) as T;
 
@@ -1253,6 +1300,12 @@ export class CarteraBackClient {
 				return data;
 			} catch (error) {
 				lastError = error as Error;
+
+				// El llamador ya se cansó: reintentar es mandar viajes que nadie
+				// va a esperar, y cada uno vuelve a rechazar por la misma señal.
+				if (esCancelacionDelLlamador(lastError, options.signal)) {
+					break;
+				}
 
 				// Don't retry on authentication/validation errors, nor on 4xx
 				// (esos son respuestas definitivas del servidor, no fallas

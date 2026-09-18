@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import {
 	CarteraBackClient,
+	CircuitBreaker,
 	conPresupuestoConsultaMora,
+	esCancelacionDelLlamador,
 	leerTimeoutConsultaMora,
 } from "./cartera-back-client";
 
@@ -272,4 +274,86 @@ test("la tarea que responde a tiempo nunca ve su señal abortada", async () => {
 	});
 
 	expect(senal?.aborted).toBe(false);
+});
+
+// ============================================================================
+// El presupuesto vencido NO puede abrir el breaker compartido
+// ============================================================================
+
+const abortError = () =>
+	Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
+
+const senalAbortada = () => {
+	const control = new AbortController();
+	control.abort();
+	return control.signal;
+};
+
+test("la señal del llamador ya abortada es cancelación, no fallo de cartera", () => {
+	expect(esCancelacionDelLlamador(abortError(), senalAbortada())).toBe(true);
+});
+
+test("⚠️ el timeout PROPIO del fetch sigue contando como fallo", () => {
+	// `AbortSignal.timeout` aborta con TimeoutError: cartera no contestó a
+	// tiempo, y eso sí es un síntoma de su salud.
+	const timeoutError = Object.assign(new Error("timed out"), {
+		name: "TimeoutError",
+	});
+
+	expect(esCancelacionDelLlamador(timeoutError, senalAbortada())).toBe(false);
+});
+
+test("un AbortError con la señal del llamador intacta vino de otro lado", () => {
+	expect(
+		esCancelacionDelLlamador(abortError(), new AbortController().signal),
+	).toBe(false);
+	expect(esCancelacionDelLlamador(abortError(), undefined)).toBe(false);
+});
+
+test("un error común nunca se confunde con una cancelación", () => {
+	expect(
+		esCancelacionDelLlamador(new Error("network down"), senalAbortada()),
+	).toBe(false);
+});
+
+/**
+ * 🔴 El breaker es compartido por TODAS las integraciones con cartera (pagos,
+ * inversionistas, reportes). Con el auth colgado, cada consulta de mora vencida
+ * dejaba su tarea tardía viva dentro de `execute`; al revivir el auth todas
+ * rechazaban de golpe por la señal ya abortada, y cinco de esos rechazos
+ * —el umbral— abrían el breaker 60s para todo el mundo.
+ */
+test("cinco cancelaciones seguidas no abren el breaker", async () => {
+	const breaker = new CircuitBreaker(5, 60000);
+	const senal = senalAbortada();
+
+	for (let intento = 0; intento < 5; intento++) {
+		await expect(
+			breaker.execute(
+				async () => {
+					throw abortError();
+				},
+				(error) => esCancelacionDelLlamador(error, senal),
+			),
+		).rejects.toBeDefined();
+	}
+
+	expect(breaker.getState()).toBe("CLOSED");
+});
+
+test("cinco fallos de verdad sí lo abren: la válvula sigue sirviendo", async () => {
+	const breaker = new CircuitBreaker(5, 60000);
+
+	for (let intento = 0; intento < 5; intento++) {
+		await expect(
+			breaker.execute(
+				async () => {
+					throw new Error("cartera caída");
+				},
+				(error) => esCancelacionDelLlamador(error, senalAbortada()),
+			),
+		).rejects.toBeDefined();
+	}
+
+	expect(breaker.getState()).toBe("OPEN");
 });

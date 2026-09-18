@@ -1512,8 +1512,8 @@ export const crmRouter = {
 				// consultara en toda edición, un cliente que ya está en mora quedaría
 				// imposible de editar y nadie podría corregirle el teléfono ni la
 				// dirección — y son justamente las fichas que cobranza toca a diario.
-				// El borrado (`dpi: ""`) no consulta; lo resuelve
-				// `requiereConsultaDeMora`.
+				// El borrado (`dpi: ""`) no llega hasta acá: se rechaza con 400 al
+				// entrar al handler. Ver `MENSAJE_DPI_EN_BLANCO`.
 				if (requiereConsultaDeMora(updateData.dpi, leadAntesDelUpdate?.dpi)) {
 					// 🔴 La pregunta lleva los números del DPI NUEVO **y** los del lead
 					// que se está editando. Con solo los del DPI nuevo, el lead que

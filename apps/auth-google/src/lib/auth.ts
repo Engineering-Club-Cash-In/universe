@@ -192,13 +192,10 @@ export const auth = betterAuth({
       sameSite: env.NODE_ENV === "production" ? "none" : "lax" as const,
     },
     ipAddress: {
-      // De quién es cada petición, para el rate limit y para la IP que queda
-      // guardada en la sesión. Por defecto Better Auth solo mira
-      // `x-forwarded-for`, que la arma cada salto; detrás de Cloudflare el
-      // primer elemento puede ser el de un proxy nuestro y entonces medio
-      // portal comparte cubeta. `cf-connecting-ip` la pone el borde y no se
-      // puede falsear desde afuera, así que va primero.
-      ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for", "x-real-ip"],
+      // El origen está detrás de Traefik directo, no de Cloudflare. Traefik
+      // sobrescribe esta cabecera; aceptar `cf-connecting-ip` del cliente le
+      // permitiría elegir una cubeta distinta en cada intento.
+      ipAddressHeaders: ["x-forwarded-for"],
     },
   },
   /**

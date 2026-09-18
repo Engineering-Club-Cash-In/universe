@@ -7474,13 +7474,22 @@ export const crmRouter = {
 						// oportunidades con ese DPI. Para corregirlo está el alta
 						// rápida (RENAP) o la página de Vendedores.
 						if (input.vendedor.genero && !existente.gender) {
+							// La condición va también en el predicado: dos avances a la
+							// vez leen el género vacío y el segundo pisaría al primero.
+							// Postgres re-evalúa el WHERE tras esperar a la otra
+							// transacción, así que solo el primero escribe.
 							await tx
 								.update(vehicleVendors)
 								.set({
 									gender: input.vendedor.genero,
 									updatedAt: new Date(),
 								})
-								.where(eq(vehicleVendors.id, existente.id));
+								.where(
+									and(
+										eq(vehicleVendors.id, existente.id),
+										sql`coalesce(btrim(${vehicleVendors.gender}), '') = ''`,
+									),
+								);
 						}
 						vendorId = existente.id;
 					} else if (dpiVendedor.valid) {
@@ -7516,13 +7525,20 @@ export const crmRouter = {
 					// corrección que otro haya hecho mientras tanto, y el nombre legal
 					// es compartido por todas las oportunidades de esa agencia.
 					if (input.agencia.razonSocial && !empresa.razonSocial?.trim()) {
+						// Igual que el género: la condición se repite en el predicado
+						// para que dos avances simultáneos no se pisen el nombre legal.
 						await tx
 							.update(companies)
 							.set({
 								razonSocial: input.agencia.razonSocial,
 								updatedAt: new Date(),
 							})
-							.where(eq(companies.id, input.agencia.companyId));
+							.where(
+								and(
+									eq(companies.id, input.agencia.companyId),
+									sql`coalesce(btrim(${companies.razonSocial}), '') = ''`,
+								),
+							);
 					}
 				}
 

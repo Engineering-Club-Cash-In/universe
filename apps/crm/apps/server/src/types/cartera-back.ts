@@ -905,6 +905,13 @@ export class ConsultaMoraNoDisponibleError extends Error {
 		message: string,
 		/** El fallo original, para el log. No se le muestra al usuario. */
 		public readonly causa: unknown,
+		/**
+		 * `true` cuando reintentar NO puede arreglarlo (p. ej. más créditos que
+		 * el tope: revisión manual). El mensaje de este error SÍ es para la
+		 * pantalla; sin el flag, el asesor leía "intentá en unos minutos" ante un
+		 * fallo determinista.
+		 */
+		public readonly definitivo: boolean = false,
 	) {
 		super(message);
 		this.name = "ConsultaMoraNoDisponibleError";

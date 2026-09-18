@@ -113,7 +113,10 @@ export async function resolverValidacionMora(
 	//     `motivo: "SERVICIO_NO_DISPONIBLE"` (así lo decidió cartera, para que el
 	//     veredicto no se pierda si alguien descarta el cuerpo de un 5xx). Acá el
 	//     HTTP salió bien: mirar el status no alcanza.
-	const noDisponible = (detalle: string): ResultadoValidacionMora => {
+	const noDisponible = (
+		detalle: string,
+		mensajeDefinitivo?: string,
+	): ResultadoValidacionMora => {
 		console.error(
 			`[validarMoraPorDpi] no se pudo verificar la mora: ${detalle}`,
 		);
@@ -140,7 +143,13 @@ export async function resolverValidacionMora(
 		};
 		return {
 			tipo: "veredicto",
-			veredicto: { ...veredicto, mensaje: mensajeConsultaMora(veredicto) },
+			veredicto: {
+				...veredicto,
+				// El fallo DEFINITIVO (p. ej. más créditos que el tope) trae su propio
+				// texto: decirle al asesor "intentá en unos minutos" ante un fallo
+				// determinista era mandarlo a reintentar para siempre.
+				mensaje: mensajeDefinitivo ?? mensajeConsultaMora(veredicto),
+			},
 		};
 	};
 
@@ -149,7 +158,10 @@ export async function resolverValidacionMora(
 		resultado = await deps.consultar(dpi);
 	} catch (error) {
 		if (!(error instanceof ConsultaMoraNoDisponibleError)) throw error;
-		return noDisponible(error.message);
+		return noDisponible(
+			error.message,
+			error.definitivo ? error.message : undefined,
+		);
 	}
 
 	if (resultado.motivo === "SERVICIO_NO_DISPONIBLE") {

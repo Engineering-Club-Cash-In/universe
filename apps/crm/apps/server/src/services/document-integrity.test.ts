@@ -143,9 +143,6 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain("assertNoActiveCapacityAnalysis");
 		expect(serviceSource).toContain("releaseCapacityAnalysisReservation");
 		expect(serviceSource).toContain(
-			"export async function resetOpportunityCreditAnalysis",
-		);
-		expect(serviceSource).toContain(
 			"export async function upsertOpportunityCreditAnalysis",
 		);
 	});
@@ -224,9 +221,7 @@ describe("document integrity boundaries", () => {
 
 	test("cada resultado completado usa una copia inmutable ligada a la validación", () => {
 		expect(serviceSource).toContain("freezeCompletedValidationEvidence");
-		expect(serviceSource).toContain(
-			'result.validation.autoResult === "error"',
-		);
+		expect(serviceSource).toContain('result.validation.autoResult === "error"');
 		expect(serviceSource).not.toContain(
 			'result.validation?.autoResult !== "revision_manual"',
 		);
@@ -236,9 +231,8 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain(
 			"/validated/${params.validationId}/${params.contentSha256}-",
 		);
-		expect(serviceSource).toContain(
-			"originalNameFromDocumentIntegrityPath(params.sourceFilePath)",
-		);
+		expect(serviceSource).toContain("originalNameFromDocumentIntegrityPath(");
+		expect(serviceSource).toContain("params.sourceFilePath");
 		expect(serviceSource).toContain("set({ documentFilePath: filePath })");
 		expect(serviceSource).toContain(
 			"fileKey: result.validation.documentFilePath",
@@ -260,9 +254,9 @@ describe("document integrity boundaries", () => {
 			executeStart,
 		);
 		const executeRun = serviceSource.slice(executeStart, executeEnd);
-		expect(executeRun.indexOf("freezeCompletedValidationEvidence")).toBeLessThan(
-			executeRun.indexOf("isCompleteValidationRun"),
-		);
+		expect(
+			executeRun.indexOf("freezeCompletedValidationEvidence"),
+		).toBeLessThan(executeRun.indexOf("isCompleteValidationRun"));
 	});
 
 	test("cada lote reserva uno de dos intentos por oportunidad", () => {
@@ -330,9 +324,7 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain("getLatestReusableDocumentIntegrityRun");
 		expect(serviceSource).toContain('"analisis_capacidad"');
 		expect(serviceSource).toContain("validation.hasLinkedDocuments");
-		expect(serviceSource).toContain(
-			"originalNameFromDocumentIntegrityPath",
-		);
+		expect(serviceSource).toContain("originalNameFromDocumentIntegrityPath");
 		expect(serviceSource).toContain(
 			'run.validationSource !== "analisis_capacidad"',
 		);

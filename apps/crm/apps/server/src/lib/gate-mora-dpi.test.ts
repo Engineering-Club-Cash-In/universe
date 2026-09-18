@@ -616,4 +616,97 @@ describe("gate de mora: corrección de un DPI mal capturado (solo ediciones)", (
 			).toBe(false);
 		}
 	});
+
+	/**
+	 * 🔴 La válvula es para los motivos de NEGOCIO, no para las caídas. Ante la
+	 * mora el admin decide con el dato en la mano; con cartera caída NADIE sabe
+	 * si ese DPI tiene mora, y dejarlo pasar a ciegas mientras dura la caída
+	 * convierte el fail-closed en una sugerencia. Para las emergencias está el
+	 * kill switch, que lo baja alguien a propósito y deja su propia fila.
+	 */
+	test("con cartera caída el administrador queda bloqueado como todos", () => {
+		const { anotaciones, anotar } = bitacora();
+		const caida = {
+			rechazado: true as const,
+			motivo: "SERVICIO_NO_DISPONIBLE" as const,
+			mensaje: mensajeRechazoGateMora("SERVICIO_NO_DISPONIBLE"),
+		};
+
+		const resolucion = resolverEdicionConMora(
+			caida,
+			"admin",
+			{ entity: "lead", id: "lead-1", dpi: DPI },
+			anotar,
+		);
+
+		expect(resolucion.permitir).toBe(false);
+		// Y no hay override que anotar: nadie pasó.
+		expect(anotaciones).toEqual([]);
+	});
+
+	test("al admin bloqueado por la caída se le habla de la caída, no de buscar un admin", () => {
+		const { anotar } = bitacora();
+
+		const resolucion = resolverEdicionConMora(
+			{
+				rechazado: true,
+				motivo: "SERVICIO_NO_DISPONIBLE",
+				mensaje: mensajeRechazoGateMora("SERVICIO_NO_DISPONIBLE"),
+			},
+			"admin",
+			{ entity: "lead", id: "lead-1", dpi: DPI },
+			anotar,
+		);
+
+		expect(resolucion.permitir).toBe(false);
+		if (resolucion.permitir) return;
+		expect(resolucion.mensaje).toContain("no está disponible");
+		// Mandar a "pedirle a un administrador" a quien YA lo es no ayuda, y el
+		// administrador al que mandaría tampoco puede.
+		expect(resolucion.mensaje).not.toContain(
+			MENSAJE_CORRECCION_POR_ADMINISTRADOR,
+		);
+	});
+
+	test("los otros dos motivos de negocio sí abren la válvula del admin", () => {
+		for (const motivo of ["EN_CONVENIO", "CREDITO_INSOLUTO"] as const) {
+			const { anotaciones, anotar } = bitacora();
+
+			const resolucion = resolverEdicionConMora(
+				{ rechazado: true, motivo, mensaje: mensajeRechazoGateMora(motivo) },
+				"admin",
+				{ entity: "lead", id: "lead-1", dpi: DPI },
+				anotar,
+			);
+
+			expect(resolucion.permitir, `${motivo} debería poder corregirse`).toBe(
+				true,
+			);
+			expect(anotaciones).toHaveLength(1);
+			expect(anotaciones[0]?.data).toMatchObject({ motivo });
+		}
+	});
+
+	/**
+	 * Si cartera estrena un motivo que bloquea, el admin NO lo hereda: la lista
+	 * de motivos de negocio es explícita justamente para que un motivo nuevo
+	 * empiece cerrado y alguien tenga que decidir a mano si abrirlo.
+	 */
+	test("un motivo desconocido que bloquea no abre la válvula", () => {
+		const { anotaciones, anotar } = bitacora();
+
+		const resolucion = resolverEdicionConMora(
+			{
+				rechazado: true,
+				motivo: "CLIENTE_NO_ENCONTRADO",
+				mensaje: mensajeRechazoGateMora("CLIENTE_NO_ENCONTRADO"),
+			},
+			"admin",
+			{ entity: "lead", id: "lead-1", dpi: DPI },
+			anotar,
+		);
+
+		expect(resolucion.permitir).toBe(false);
+		expect(anotaciones).toEqual([]);
+	});
 });

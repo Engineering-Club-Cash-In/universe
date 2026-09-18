@@ -63,6 +63,45 @@ export const generatedLegalContracts = pgTable("generated_legal_contracts", {
 	 */
 	signatureMode: text("signature_mode").notNull().default("electronica"),
 
+	/**
+	 * Cuándo se le preguntó a WeeTrust por última vez cómo va la firma.
+	 *
+	 * La ficha lo muestra para que se sepa si lo que se está viendo es de hace un
+	 * minuto o de hace tres días. Lo escriben tanto el botón "Actualizar estado"
+	 * como el webhook.
+	 */
+	signingStatusCheckedAt: timestamp("signing_status_checked_at"),
+
+	/**
+	 * Enlace de observador de WeeTrust (`/observer/...`).
+	 *
+	 * Es el único link que se puede abrir sin riesgo: muestra el documento y cómo
+	 * va la firma, pero no deja firmar. El de cada firmante (`/signatory/...`) sí
+	 * firma en su nombre, así que no sirve para que el analista "vaya a ver".
+	 *
+	 * Sale de `sharedWith` del documento, y sólo existe si hay observadores
+	 * configurados (`CONTRATOS_OBSERVADORES`).
+	 */
+	observerUrl: text("observer_url"),
+
+	/**
+	 * Por qué se anuló este contrato, cuando se reemplazó por otro.
+	 *
+	 * Un documento ya firmado NO se puede borrar en WeeTrust: queda registrado en
+	 * su blockchain y su API no tiene forma de anularlo. Lo único que se puede
+	 * hacer es dejarlo sin efecto de este lado, y para eso hace falta que quede
+	 * dicho por qué.
+	 */
+	/** Por qué se reemitió por última vez, y cuándo. */
+	lastRegenerationReason: text("last_regeneration_reason"),
+	lastRegeneratedAt: timestamp("last_regenerated_at"),
+
+	cancellationReason: text("cancellation_reason"),
+	cancelledAt: timestamp("cancelled_at"),
+
+	/** Contrato que lo reemplazó, si se anuló por haber subido uno corregido. */
+	replacedByContractId: uuid("replaced_by_contract_id"),
+
 	// Metadata de generación
 	templateId: integer("template_id"),
 	apiResponse: jsonb("api_response"), // Guardar response completo del API para referencia
@@ -142,6 +181,13 @@ export const contractSignatories = pgTable(
 		/** Identificador del firmante dentro del documento de WeeTrust. */
 		weetrustSignatoryId: text("weetrust_signatory_id"),
 		signingUrl: text("signing_url"),
+
+		/**
+		 * Cuándo vence el link de esta persona. WeeTrust lo devuelve como epoch en
+		 * milisegundos. Guardarlo permite avisar "link vencido" en la ficha sin
+		 * tener que preguntarle a WeeTrust cada vez que se abre la pantalla.
+		 */
+		signingUrlExpiry: timestamp("signing_url_expiry"),
 
 		/** Orden en que WeeTrust devolvió al firmante, sólo para mostrarlo estable. */
 		position: integer("position").notNull().default(0),

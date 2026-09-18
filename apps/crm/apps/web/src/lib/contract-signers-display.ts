@@ -19,6 +19,8 @@ export interface FirmanteDeContrato {
 	email: string;
 	signingUrl?: string | null;
 	status?: "pending" | "signed" | "declined";
+	/** Cuándo vence el link de esta persona. */
+	signingUrlExpiry?: Date | string | null;
 }
 
 export interface LinksLegacyDeContrato {
@@ -36,6 +38,15 @@ export interface FirmanteEnFicha {
 	nombre: string | null;
 	url: string | null;
 	estado: "pending" | "signed" | "declined";
+	/** El link ya venció y hay que regenerarlo para que esa persona pueda firmar. */
+	vencido: boolean;
+}
+
+/** Un link vencido ya no deja firmar: hay que regenerarlo. */
+function linkVencido(expiry: Date | string | null | undefined): boolean {
+	if (!expiry) return false;
+	const vence = expiry instanceof Date ? expiry : new Date(expiry);
+	return !Number.isNaN(vence.getTime()) && vence.getTime() < Date.now();
 }
 
 const ETIQUETA_POR_ROL: Record<string, string> = {
@@ -68,12 +79,15 @@ export function firmantesEnFicha(
 				nCodeudor += 1;
 				etiqueta = `Codeudor ${nCodeudor}`;
 			}
+			const estado = s.status ?? "pending";
 			return {
 				clave: `${s.role}-${s.email}-${i}`,
 				etiqueta,
 				nombre: s.name || null,
 				url: s.signingUrl ?? null,
-				estado: s.status ?? "pending",
+				estado,
+				// A quien ya firmó no le importa que el link haya vencido.
+				vencido: estado === "pending" && linkVencido(s.signingUrlExpiry),
 			};
 		});
 	}
@@ -97,6 +111,7 @@ export function firmantesEnFicha(
 			nombre: null,
 			url,
 			estado: "pending",
+			vencido: false,
 		});
 	}
 	return viejos;

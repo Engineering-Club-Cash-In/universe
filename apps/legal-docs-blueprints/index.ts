@@ -1,8 +1,10 @@
 import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { contractGenerator } from './services/ContractGeneratorService';
+import { downloadPdfFromR2 } from './services/R2Service';
 import { ContractType, GenerateContractRequest } from './types/contract';
 import { WeeTrustService } from './services/WeeTrustService';
+import { notificarEstadoDeFirmaAlCrm } from './services/CrmApiService';
 
 // Inicializar WeeTrust
 const weeTrustService = new WeeTrustService();
@@ -389,6 +391,77 @@ const app = new Elysia()
     }
   })
 
+  /**
+   * DELETE /contracts/document/:documentID
+   *
+   * Borra el documento en WeeTrust. Sólo funciona con documentos en `draft` o
+   * `pending`: uno completado queda registrado en su blockchain y la API no
+   * permite eliminarlo ni anularlo. Para esos, lo único posible es dejarlos sin
+   * efecto del lado del CRM.
+   */
+  .delete('/contracts/document/:documentID', async ({ params, set }) => {
+    try {
+      await weeTrustService.deleteDocument(params.documentID);
+      return { success: true, documentID: params.documentID };
+    } catch (error: any) {
+      console.error('[delete-document] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
+   * POST /contracts/reissue
+   *
+   * Vuelve a emitir un contrato en WeeTrust usando el PDF que ya está en R2.
+   *
+   * No es lo mismo que `update-signatures`, que sólo renueva las URL de quienes
+   * todavía no firmaron y falla con un documento completado ("There are no url
+   * of signatures to update"). Acá se crea un documento NUEVO con el mismo PDF,
+   * así que sirve también cuando ya firmaron todos pero la firma no vale (por
+   * ejemplo, una identificación que no era la del cliente).
+   *
+   * Body: { r2Key, contractType, filenamePrefix?, signers, observers? }
+   */
+  .post('/contracts/reissue', async ({ body, set }) => {
+    try {
+      const { r2Key, contractType, filenamePrefix, signers, observers } =
+        body as {
+          r2Key?: string;
+          contractType?: ContractType;
+          filenamePrefix?: string;
+          signers?: GenerateContractRequest['signers'];
+          observers?: string[];
+        };
+
+      if (!contractType || !Object.values(ContractType).includes(contractType)) {
+        set.status = 400;
+        return { success: false, error: `Tipo de contrato inválido: ${contractType}` };
+      }
+
+      if (!r2Key) {
+        set.status = 400;
+        return { success: false, error: 'El campo "r2Key" es requerido' };
+      }
+
+      const pdfBuffer = await downloadPdfFromR2(r2Key);
+
+      const result = await contractGenerator.signExistingPdf(
+        contractType,
+        pdfBuffer,
+        { filenamePrefix, signers, observers }
+      );
+
+      set.status = result.success ? 200 : 400;
+      return result;
+
+    } catch (error: any) {
+      console.error('Error en /contracts/reissue:', error);
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  })
+
   // ===== ESTADO Y REINTENTOS DE FIRMA =====
 
   /**
@@ -490,6 +563,8 @@ const app = new Elysia()
       generateBatch: 'POST /contracts/batch',
       generateByType: 'POST /contracts/:type',
       uploadForSigning: 'POST /contracts/upload-for-signing',
+      reissue: 'POST /contracts/reissue',
+      deleteDocument: 'DELETE /contracts/document/:documentID',
       signingStatus: 'GET /contracts/signing-status/:documentID',
       refreshSigningLinks: 'PUT /contracts/refresh-signing-links/:documentID',
       resendSigningEmail: 'PUT /contracts/resend-email/:documentID',
@@ -588,25 +663,43 @@ const app = new Elysia()
         return { success: false, error: 'Missing documentID' };
       }
 
-      // Procesar según tipo de evento
-      switch (eventType) {
-        case 'sendDocument':
-          console.log(`[WeeTrust Webhook] Documento ${documentId} enviado a firma`);
-          break;
+      // Eventos que cambian quién firmó. El payload trae el documento, pero se
+      // vuelve a leer de WeeTrust: es la única fuente que devuelve el juego
+      // completo de firmantes con su link vigente, y así el CRM recibe siempre
+      // la misma forma venga de donde venga.
+      const EVENTOS_DE_FIRMA = ['sendDocument', 'signDocument', 'completedDocument'];
 
-        case 'signDocument':
-          console.log(`[WeeTrust Webhook] Documento ${documentId} - Firmante firmó:`, payload.signatory?.emailID);
-          // TODO: Notificar a CRM que un firmante firmó
-          break;
+      if (EVENTOS_DE_FIRMA.includes(eventType)) {
+        console.log(`[WeeTrust Webhook] ${eventType} en ${documentId}`);
 
-        case 'completedDocument':
-          console.log(`[WeeTrust Webhook] Documento ${documentId} - COMPLETADO (todos firmaron)`);
-          // TODO: Notificar a CRM que el documento está completo
-          // await notifyCrmDocumentCompleted(documentId);
-          break;
+        try {
+          const documento = await weeTrustService.getDocument(documentId);
 
-        default:
-          console.log(`[WeeTrust Webhook] Evento desconocido: ${eventType}`);
+          await notificarEstadoDeFirmaAlCrm({
+            documentID: documento.documentID,
+            status: documento.status,
+            signatories: (documento.signatory ?? []).map((s) => ({
+              emailID: s.emailID,
+              name: s.name,
+              signatoryID: s.signatoryID,
+              isSigned: Boolean(Number(s.isSigned)),
+              signingUrl: s.signing?.url ?? null,
+              expiry: s.signing?.expiry ?? null,
+            })),
+          });
+
+          console.log(`[WeeTrust Webhook] Estado de ${documentId} avisado al CRM`);
+        } catch (relayError: any) {
+          // No se le devuelve error a WeeTrust: si respondemos mal, reintenta, y
+          // el problema casi siempre es nuestro (el CRM caído, el secreto mal).
+          // El estado se puede recuperar con el botón "Actualizar estado".
+          console.error(
+            `[WeeTrust Webhook] No se pudo avisar el estado de ${documentId}:`,
+            relayError?.message ?? relayError,
+          );
+        }
+      } else {
+        console.log(`[WeeTrust Webhook] Evento sin manejar: ${eventType}`);
       }
 
       // Responder éxito a WeeTrust

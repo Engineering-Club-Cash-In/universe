@@ -30,7 +30,8 @@ interface ContractsListProps {
 		signatories?: FirmanteDeContrato[];
 	}>;
 	onUpdate?: () => void;
-	onEdit?: (contract: Contract, opportunity?: Opportunity | null) => void;
+	/** Reemplazar el documento de un contrato por uno corregido. */
+	onReplace?: (contract: Contract) => void;
 	onDelete?: (contractId: string) => Promise<void>;
 	deletingContractId?: string | null;
 }
@@ -38,7 +39,7 @@ interface ContractsListProps {
 export function ContractsList({
 	contracts,
 	onUpdate,
-	onEdit,
+	onReplace,
 	onDelete,
 	deletingContractId,
 }: ContractsListProps) {
@@ -65,7 +66,7 @@ export function ContractsList({
 					signatories={signatories}
 					opportunity={opportunity}
 					onUpdate={onUpdate}
-					onEdit={onEdit ? () => onEdit(contract, opportunity) : undefined}
+					onReplace={onReplace ? () => onReplace(contract) : undefined}
 					onDelete={onDelete}
 					isDeleting={deletingContractId === contract.id}
 				/>

@@ -3,9 +3,9 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
 	Copy,
-	Edit,
 	ExternalLink,
 	FileText,
+	FileUp,
 	Loader2,
 	Mail,
 	RefreshCw,
@@ -85,7 +85,8 @@ interface ContractCardProps {
 		value: string | null;
 	} | null;
 	onUpdate?: () => void;
-	onEdit?: () => void;
+	/** Abre la subida para reemplazar el documento de este contrato. */
+	onReplace?: () => void;
 	onDelete?: (contractId: string) => Promise<void>;
 	isDeleting?: boolean;
 }
@@ -112,7 +113,7 @@ export function ContractCard({
 	signatories,
 	opportunity,
 	onUpdate,
-	onEdit,
+	onReplace,
 	onDelete,
 	isDeleting = false,
 }: ContractCardProps) {
@@ -154,17 +155,6 @@ export function ContractCard({
 		onError: (error: Error) => toast.error(error.message),
 	});
 
-	const regenerarEnlaces = useMutation({
-		mutationFn: () =>
-			client.refreshContractSigningLinks({ contractId: contract.id }),
-		onSuccess: (data) => {
-			setEstadoWeeTrust(data);
-			toast.success(data.message);
-			onUpdate?.();
-		},
-		onError: (error: Error) => toast.error(error.message),
-	});
-
 	const reenviarCorreo = useMutation({
 		mutationFn: () =>
 			client.resendContractSigningEmails({ contractId: contract.id }),
@@ -172,10 +162,7 @@ export function ContractCard({
 		onError: (error: Error) => toast.error(error.message),
 	});
 
-	const ocupado =
-		consultarEstado.isPending ||
-		regenerarEnlaces.isPending ||
-		reenviarCorreo.isPending;
+	const ocupado = consultarEstado.isPending || reenviarCorreo.isPending;
 
 	const copyToClipboard = (text: string, label: string) => {
 		navigator.clipboard.writeText(text);
@@ -231,15 +218,20 @@ export function ContractCard({
 								{statusConfig[contract.status].label}
 							</Badge>
 						)}
-						{canCreateLegal && onEdit && (
+						{canCreateLegal && onReplace && (
 							<Button
 								size="sm"
 								variant="outline"
-								onClick={onEdit}
+								onClick={onReplace}
 								className="h-8"
+								title={
+									firmaEnPapel
+										? "Subí el PDF corregido: reemplaza a este."
+										: "Subí el PDF corregido: reemplaza a este y emite enlaces de firma nuevos."
+								}
 							>
-								<Edit className="mr-1 h-3 w-3" />
-								Editar
+								<FileUp className="mr-1 h-3 w-3" />
+								Reemplazar
 							</Button>
 						)}
 						{canCreateLegal && onDelete && (
@@ -362,24 +354,8 @@ export function ContractCard({
 										variant="outline"
 										className="h-7"
 										disabled={ocupado}
-										onClick={() => regenerarEnlaces.mutate()}
-										title="Emite enlaces nuevos para quienes aún no firman. Es el mismo documento; quien ya firmó sigue firmado."
-									>
-										{regenerarEnlaces.isPending ? (
-											<Loader2 className="mr-1 h-3 w-3 animate-spin" />
-										) : (
-											<RefreshCw className="mr-1 h-3 w-3" />
-										)}
-										Regenerar enlaces
-									</Button>
-
-									<Button
-										size="sm"
-										variant="outline"
-										className="h-7"
-										disabled={ocupado}
 										onClick={() => reenviarCorreo.mutate()}
-										title="Reenvía el correo de WeeTrust a los firmantes pendientes."
+										title="Reenvía el correo de firma a los firmantes pendientes."
 									>
 										{reenviarCorreo.isPending ? (
 											<Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -395,7 +371,7 @@ export function ContractCard({
 						{estadoWeeTrust && (
 							<div className="space-y-1">
 								<p className="text-muted-foreground text-xs">
-									Estado en WeeTrust: {estadoWeeTrust.status}
+									Estado de la firma: {estadoWeeTrust.status}
 								</p>
 								{estadoWeeTrust.signatories.map((firmante) => (
 									<p

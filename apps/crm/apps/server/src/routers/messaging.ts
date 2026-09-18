@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, eq, inArray, ne } from "drizzle-orm";
+import { and, count, desc, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { coDebtors, leads } from "../db/schema/crm";
@@ -12,6 +12,12 @@ import {
 	whatsappLogs,
 } from "../db/schema/whatsapp-logs";
 import { auditRecord } from "../lib/audit";
+import { aplicarCorreosDePrueba } from "../lib/contratos-correos-prueba";
+import {
+	REP_LEGAL_EMAIL,
+	REP_LEGAL_NOMBRE,
+	REP_LEGAL_TELEFONO,
+} from "../lib/contratos-rep-legal";
 import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
 import { crmProcedure } from "../lib/orpc";
 import { getSimpletechClient, sendWhatsappTemplate } from "../lib/simpletech";
@@ -56,6 +62,8 @@ export function buildContractLinksMessage(
 }
 
 interface DestinatarioDeFirma {
+	/** TITULAR | COFIRMANTE | REP_LEGAL. Decide qué correo de prueba le toca. */
+	role: string;
 	nombre: string;
 	/** Con el que se emparejan los links: WeeTrust identifica por correo. */
 	email: string | null;
@@ -91,6 +99,8 @@ export async function sendContractLinksToLead(params: {
 		.where(eq(leads.id, params.leadId))
 		.limit(1);
 
+	// Orden estable: el reparto de correos de prueba es posicional, así que hay
+	// que recorrer los codeudores igual que cuando se armaron los firmantes.
 	const coDebtorsList = await db
 		.select({
 			id: coDebtors.id,
@@ -99,7 +109,8 @@ export async function sendContractLinksToLead(params: {
 			phone: coDebtors.phone,
 		})
 		.from(coDebtors)
-		.where(eq(coDebtors.opportunityId, params.opportunityId));
+		.where(eq(coDebtors.opportunityId, params.opportunityId))
+		.orderBy(coDebtors.createdAt);
 
 	const contracts = await db
 		.select({
@@ -149,20 +160,48 @@ export async function sendContractLinksToLead(params: {
 
 	const leadName = lead ? `${lead.firstName} ${lead.lastName}` : "Cliente";
 
-	const destinatarios: DestinatarioDeFirma[] = [
+	// Con TEST_MESSAGE=true los mensajes van a nuestros números en vez de a los
+	// del cliente. Es el mismo interruptor que usa cobros, y es lo que permite
+	// probar el flujo completo con datos reales sin escribirle a nadie de afuera.
+	// Cada destinatario rota por la lista para que no lleguen todos al mismo.
+	const modoPrueba = isTestModeEnabled();
+
+	const destinatariosReales: DestinatarioDeFirma[] = [
 		{
+			role: "TITULAR",
 			nombre: leadName,
 			email: lead?.email ?? null,
 			phone: lead?.phone ?? null,
 			leadId: params.leadId,
 		},
 		...coDebtorsList.map((cd) => ({
+			role: "COFIRMANTE",
 			nombre: cd.fullName,
 			email: cd.email,
 			phone: cd.phone,
 			coDebtorId: cd.id,
 		})),
+		// El representante legal firma varios de estos contratos y hasta ahora sólo
+		// se enteraba por el correo de WeeTrust. Va al final porque es interno, y
+		// sin `leadId` ni `coDebtorId`: no es ninguno de los dos, y las dos
+		// columnas admiten nulo.
+		{
+			role: "REP_LEGAL",
+			nombre: REP_LEGAL_NOMBRE,
+			email: REP_LEGAL_EMAIL,
+			phone: REP_LEGAL_TELEFONO || null,
+		},
 	];
+
+	// En modo de prueba los enlaces se emitieron contra los correos de prueba, no
+	// contra los del cliente. Buscar por el correo real no calza con nada y nadie
+	// recibe su link: le pasó al titular y al codeudor. El representante legal se
+	// salvó porque su correo sale de una env y era el mismo de los dos lados.
+	// Se aplica al arreglo completo y no persona por persona, porque el reparto
+	// entre codeudores es posicional.
+	const destinatarios = modoPrueba
+		? aplicarCorreosDePrueba(destinatariosReales)
+		: destinatariosReales;
 
 	const [log] = await db
 		.insert(whatsappLogs)
@@ -171,11 +210,6 @@ export async function sendContractLinksToLead(params: {
 
 	const stClient = getSimpletechClient();
 
-	// Con TEST_MESSAGE=true los mensajes van a nuestros números en vez de a los
-	// del cliente. Es el mismo interruptor que usa cobros, y es lo que permite
-	// probar el flujo completo con datos reales sin escribirle a nadie de afuera.
-	// Cada destinatario rota por la lista para que no lleguen todos al mismo.
-	const modoPrueba = isTestModeEnabled();
 	let algunoEnviado = false;
 	let motivoDelLead: string | undefined;
 
@@ -398,10 +432,16 @@ export const messagingRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
+			// El más reciente. Una oportunidad junta varios envíos: cada vez que se
+			// aprueba se crea un log nuevo. Sin ordenar, `logs[0]` devolvía una fila
+			// cualquiera —en la práctica la más vieja—, así que la ficha mostraba
+			// "pendientes de enviar" aunque el último envío hubiera salido completo.
 			const logs = await db
 				.select()
 				.from(whatsappLogs)
-				.where(eq(whatsappLogs.opportunityId, input.opportunityId));
+				.where(eq(whatsappLogs.opportunityId, input.opportunityId))
+				.orderBy(desc(whatsappLogs.createdAt))
+				.limit(1);
 
 			if (logs.length === 0) {
 				return null;

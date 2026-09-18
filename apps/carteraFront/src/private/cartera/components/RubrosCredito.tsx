@@ -726,19 +726,31 @@ function VistaLista({
                           </Button>
                         )}
                         {/*
-                          Anular solo sobre lo que el backend todavía acepta:
-                          un rubro anulado queda `completado`, igual que uno ya
-                          cobrado, así que `!completado` es exactamente el
-                          conjunto que no responde 409. Sobre el resto no se
-                          muestra en vez de mostrarse apagado: un botón
-                          deshabilitado en una fila terminal no tiene nada que
-                          ofrecer.
+                          Anular sólo sobre lo que el backend todavía acepta, y
+                          eso son DOS condiciones:
+
+                          - `!completado` — un rubro anulado queda `completado`,
+                            igual que uno ya cobrado. Sobre esas filas el botón
+                            no se muestra: son terminales y no hay nada que
+                            ofrecer.
+                          - sin nada ABONADO — `completado` sigue en false con un
+                            abono parcial, así que el backend rechaza igual. Acá
+                            sí se muestra apagado con el motivo, porque la fila NO
+                            es terminal: el admin necesita saber que primero hay
+                            que revertir o devolver el abono. Escondido, el botón
+                            ausente no explica nada.
                         */}
                         {esAdmin && !r.completado && (
                           <Button
                             size="sm"
                             variant="outline"
-                            className="bg-red-600 hover:bg-red-700 text-white border-red-600"
+                            className="bg-red-600 hover:bg-red-700 text-white border-red-600 disabled:opacity-50"
+                            disabled={sumaQ([r.abonado]) > 0}
+                            title={
+                              sumaQ([r.abonado]) > 0
+                                ? `Este rubro ya tiene ${fmtQ(r.abonado)} abonados: anularlo borraría ese pago. Primero hay que revertir o devolver el abono.`
+                                : undefined
+                            }
                             onClick={() => onAnular(r)}
                           >
                             <Ban className="w-3.5 h-3.5 mr-1" />

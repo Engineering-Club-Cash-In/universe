@@ -1,8 +1,8 @@
-import { describe, expect, it, mock } from "bun:test";
-import type { PagaloGrupoSupervision } from "../services/crm.service";
+import { describe, expect, it, mock, spyOn } from "bun:test";
+import type { PagaloGrupoSupervision, PagaloSupervisionResponse } from "../services/crm.service";
 
 const getPagaloSupervision = mock(
-  async (_params: any, _timeout?: number) => ({
+  async (_params: any, _timeout?: number): Promise<PagaloSupervisionResponse> => ({
     success: true,
     grupos: [] as PagaloGrupoSupervision[],
     total: 0,
@@ -19,9 +19,14 @@ mock.module("../services/crm.service", () => ({
   getPagaloSupervision,
 }));
 
-const { traerDatasetCompletoPagalo, LIMITE_EXPORT_PAGALO } = await import(
-  "./pagaloSupervisionReporte"
-);
+const {
+  traerDatasetCompletoPagalo,
+  LIMITE_EXPORT_PAGALO,
+  fetchLogoBase64,
+  TIMEOUT_LOGO_MS,
+  buildPagaloSupervisionWorkbook,
+  buildPagaloSupervisionHTML,
+} = await import("./pagaloSupervisionReporte");
 
 const grupo = (id: string): PagaloGrupoSupervision =>
   ({ id, numeroCreditoSifco: id, totalAmount: "100", origen: "BOT" }) as PagaloGrupoSupervision;
@@ -157,5 +162,61 @@ describe("traerDatasetCompletoPagalo", () => {
       fechaDesde: "2026-01-01",
       sortBy: "totalAmount",
     });
+  });
+});
+
+describe("fetchLogoBase64", () => {
+  it("incluye timeout acotado y retorna base64 si responde ok", async () => {
+    const axios = (await import("axios")).default;
+    const spyAxios = spyOn(axios, "get").mockResolvedValueOnce({
+      data: Buffer.from("fake-png"),
+      headers: { "content-type": "image/png" },
+    });
+
+    const logo = await fetchLogoBase64();
+    expect(logo).not.toBeNull();
+    expect(logo?.ext).toBe("png");
+    expect(spyAxios).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ timeout: TIMEOUT_LOGO_MS, responseType: "arraybuffer" }),
+    );
+  });
+
+  it("retorna null en caso de timeout o error sin arrojar excepción", async () => {
+    const axios = (await import("axios")).default;
+    spyOn(axios, "get").mockRejectedValueOnce(new Error("timeout of 5000ms exceeded"));
+
+    const logo = await fetchLogoBase64();
+    expect(logo).toBeNull();
+  });
+
+  it("genera el Excel y el HTML correctamente cuando el logo no está disponible", async () => {
+    const axios = (await import("axios")).default;
+    spyOn(axios, "get").mockRejectedValue(new Error("Host unreachable"));
+
+    const filasPrueba: PagaloGrupoSupervision[] = [
+      {
+        id: "g1",
+        numeroCreditoSifco: "010101",
+        clienteNombre: "Cliente Prueba",
+        asesoresNombres: ["Asesor 1"],
+        status: "PENDING_PAYMENT",
+        totalAmount: "100",
+        capitalTotal: "80",
+        facturableTotal: "20",
+        origen: "BOT",
+        createdAt: "2026-01-01T00:00:00Z",
+        links: [],
+      } as unknown as PagaloGrupoSupervision,
+    ];
+    const wbBuffer = await buildPagaloSupervisionWorkbook(filasPrueba);
+    expect(wbBuffer.byteLength).toBeGreaterThan(0);
+
+    const html = await buildPagaloSupervisionHTML(filasPrueba, {
+      total: 1,
+      truncado: false,
+    });
+    expect(html).toContain("Supervisión Págalo");
+    expect(html).toContain("010101");
   });
 });

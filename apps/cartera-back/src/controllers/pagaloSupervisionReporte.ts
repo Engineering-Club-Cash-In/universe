@@ -20,11 +20,18 @@ const LOGO_URL =
   process.env.LOGO_URL ||
   "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
+export const TIMEOUT_LOGO_MS = 5_000;
+
 /** Mismo patrón que generalFunctions.ts: trae el logo como base64 para poder
- * embeberlo en ExcelJS/HTML sin depender de que el visor cargue una URL externa. */
-async function fetchLogoBase64(): Promise<{ data: string; ext: "png" | "jpeg" } | null> {
+ * embeberlo en ExcelJS/HTML sin depender de que el visor cargue una URL externa.
+ * Timeout acotado: el logo es opcional, si el host no responde o se cuelga
+ * continuamos sin logo en vez de bloquear el reporte indefinidamente. */
+export async function fetchLogoBase64(): Promise<{ data: string; ext: "png" | "jpeg" } | null> {
   try {
-    const res = await axios.get(LOGO_URL, { responseType: "arraybuffer" });
+    const res = await axios.get(LOGO_URL, {
+      responseType: "arraybuffer",
+      timeout: TIMEOUT_LOGO_MS,
+    });
     const ct = String(res.headers["content-type"] || "");
     const ext: "png" | "jpeg" = ct.includes("png") ? "png" : "jpeg";
     return { data: Buffer.from(res.data).toString("base64"), ext };

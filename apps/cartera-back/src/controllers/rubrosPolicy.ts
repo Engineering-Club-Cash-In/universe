@@ -122,6 +122,76 @@ export const puedeCrearRubro = ({
 };
 
 /**
+ * ¿Le toca a esta persona cargarle un cobro a ESTE crédito?
+ *
+ * `puedeCrearRubro` juzga el QUÉ (qué tipo de cobro admite el crédito según su
+ * estado y el rol de quien lo pide); esta juzga el A QUIÉN, que es una pregunta
+ * distinta y que hasta ahora no hacía nadie: el alta seleccionaba el crédito
+ * sólo por `credito_id`, así que un ASESOR que mandara el id de un crédito de
+ * OTRO asesor pasaba todos los gates y le sumaba deuda a un cliente que no es
+ * suyo. Medido contra la copia de producción del 10-sep son 1,920 créditos
+ * repartidos entre 8 asesores: cada uno podía escribirle a los 1,920.
+ *
+ * El ADMIN pasa siempre —su trabajo ES la cartera entera— y el router ya no
+ * deja entrar ningún otro rol, así que la regla sólo aprieta al ASESOR.
+ *
+ * FAIL-CLOSED en los dos huecos de datos, y son huecos distintos:
+ *
+ *   - Sin `asesorSesion`: la cuenta tiene rol ASESOR pero `platform_users` no
+ *     la liga a ningún asesor, o sea que no hay con qué comparar. No se puede
+ *     probar que el crédito es suyo, así que no escribe. Hoy es inalcanzable
+ *     —las 8 cuentas ASESOR de producción tienen su `asesor_id`—, pero la
+ *     columna es NULLABLE y una cuenta nueva mal dada de alta no puede
+ *     traducirse en "escribe donde quiera". El mensaje es propio para que quien
+ *     la sufra sepa que le falta el vínculo, no el permiso.
+ *   - Sin `asesorDelCredito`: la columna `creditos.asesor_id` es NOT NULL, así
+ *     que esto tampoco pasa hoy; si llegara a pasar, un crédito sin dueño no es
+ *     de nadie y mucho menos de quien está preguntando.
+ *
+ * El 403 REVELA que el crédito existe (un id inexistente da 404 más arriba), y
+ * es a propósito: es el mismo trato que el resto del módulo le da a una negativa
+ * de permisos —`puedeCrearRubro` ya responde 403 "solo un administrador" sobre
+ * un crédito que confirma existir— y el 404 mentiroso le diría al asesor
+ * legítimo que se equivocó de número cuando lo que pasa es que el cliente es de
+ * un compañero. La enumeración que habilita no agrega nada: hoy un token de
+ * asesor lista la cartera completa por `/credits`.
+ */
+export const puedeOperarCredito = ({
+  role,
+  asesorSesion,
+  asesorDelCredito,
+}: {
+  /** Rol del TOKEN. Se compara literal, igual que en todo el módulo. */
+  role?: string | null;
+  /** `platform_users.asesor_id` de la sesión, resuelto contra la base. */
+  asesorSesion?: number | null;
+  /** `creditos.asesor_id` del crédito que se quiere tocar. */
+  asesorDelCredito?: number | null;
+}): Veredicto => {
+  if (role !== "ASESOR") return { permitido: true };
+
+  if (!asesorSesion) {
+    return {
+      permitido: false,
+      status: 403,
+      motivo:
+        "Tu usuario no está ligado a ningún asesor, así que no se puede verificar que el crédito sea de tu cartera.",
+    };
+  }
+
+  if (!asesorDelCredito || asesorDelCredito !== asesorSesion) {
+    return {
+      permitido: false,
+      status: 403,
+      motivo:
+        "El crédito no está asignado a tu cartera: no le podés cargar cobros. Pedíselo al asesor asignado o a un administrador.",
+    };
+  }
+
+  return { permitido: true };
+};
+
+/**
  * El monto en la escala EXACTA de la columna (`numeric(18,2)`).
  *
  * El redondeo ocurre acá y en ningún otro lado: los guards validaban el valor

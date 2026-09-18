@@ -374,10 +374,17 @@ describe("POST /rubros/:id/anular — la única salida del cobro cargado por err
 describe("POST /rubros — el rol del body no pisa al del token", () => {
   // Orden de las consultas de `crearRubro`: resolver al usuario, el crédito
   // (FOR UPDATE), el tipo y la mora activa.
+  //
+  // El asesor de la sesión y el del crédito coinciden (`ASESOR_DUENIO`) porque
+  // acá se prueba OTRA cosa —de qué rol queda firmado el alta— y sin eso todos
+  // estos casos morirían antes, en el candado de cartera. Que ese candado
+  // exista se prueba aparte, más abajo.
+  const ASESOR_DUENIO = 4;
   const colaDeAlta = (tipo: any, extra: any[][] = []) =>
     motorConCola(
-      [{ id: 1 }], // platform_users: el autor existe
-      [{ statusCredit: "ACTIVO" }], // crédito vivo: no lo frena el status
+      [{ id: 1, asesor_id: ASESOR_DUENIO }], // platform_users: el autor existe
+      // Crédito vivo (no lo frena el status) y de la cartera del asesor.
+      [{ statusCredit: "ACTIVO", asesor_id: ASESOR_DUENIO }],
       [tipo],
       [{ monto: "0" }], // sin mora activa
       ...extra
@@ -436,6 +443,126 @@ describe("POST /rubros — el rol del body no pisa al del token", () => {
       );
       expect(evento).toBeDefined();
       expect(evento.origen).toBe("asesor");
+    } finally {
+      dbImpl = SIN_BD();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /rubros — el crédito tiene que ser de la cartera del asesor.
+//
+// El gate de rol dejaba pasar al ASESOR y `crearRubro` seleccionaba el crédito
+// SÓLO por `credito_id`: nadie comparaba nunca el asesor de la sesión contra
+// `creditos.asesor_id`. Con eso, cualquier asesor que supiera (o adivinara) el
+// id de un crédito ajeno le cargaba un cobro a la deuda de un cliente que no es
+// suyo, firmado con su propio usuario. En la copia de producción del 10-sep son
+// 1,920 créditos repartidos entre 8 asesores: cada uno alcanzaba los 1,920.
+//
+// Se prueba desde el ROUTER y no sólo en la policy a propósito: lo que falló
+// nunca fue la regla —no existía— sino el cableado, o sea que el asesor de la
+// sesión llegue hasta la decisión. Un test de la policy sola habría quedado
+// verde con el controlador sin tocar.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("POST /rubros — el crédito ajeno no se toca", () => {
+  const OPCIONAL = { tipo_id: 1, obligatorio: false, activo: true };
+
+  /** Sesión de un asesor y crédito de otro (o de nadie). */
+  const cola = (asesorSesion: any, asesorDelCredito: any) =>
+    motorConCola(
+      [{ id: 1, asesor_id: asesorSesion }],
+      [{ statusCredit: "ACTIVO", asesor_id: asesorDelCredito }],
+      [OPCIONAL],
+      [{ monto: "0" }],
+      [{ rubro_id: 7 }],
+      []
+    );
+
+  it("403 cuando el crédito es de OTRO asesor, y no se escribe nada", async () => {
+    dbImpl = cola(4, 6);
+    try {
+      const res = await post("/rubros", "ASESOR", RUBRO_NUEVO);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as any).message).toContain(
+        "no está asignado a tu cartera"
+      );
+      // Lo que importa no es el código sino que NO haya quedado deuda: ni el
+      // rubro ni su evento de historial.
+      expect(dbImpl.valoresEscritos).toEqual([]);
+    } finally {
+      dbImpl = SIN_BD();
+    }
+  });
+
+  it("el 403 NO delata el estado del crédito ajeno", async () => {
+    // El candado de cartera corre ANTES que el status, la mora y el tipo: a
+    // quien no le corresponde el crédito no se le contesta si está MOROSO ni
+    // cuánta mora tiene.
+    dbImpl = motorConCola(
+      [{ id: 1, asesor_id: 4 }],
+      [{ statusCredit: "MOROSO", asesor_id: 6 }],
+      [OPCIONAL],
+      [{ monto: "5000" }]
+    );
+    try {
+      const res = await post("/rubros", "ASESOR", RUBRO_NUEVO);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as any).message).not.toMatch(/MOROSO|mora/i);
+    } finally {
+      dbImpl = SIN_BD();
+    }
+  });
+
+  it("control: el MISMO alta sobre un crédito de SU cartera entra (201)", async () => {
+    // Sin este control, el test de arriba también pasaría con el endpoint roto
+    // rechazando todo.
+    dbImpl = cola(4, 4);
+    try {
+      const res = await post("/rubros", "ASESOR", RUBRO_NUEVO);
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as any).rubro.rubro_id).toBe(7);
+    } finally {
+      dbImpl = SIN_BD();
+    }
+  });
+
+  it("el ADMIN sigue cargando cobros en el crédito de CUALQUIER asesor", async () => {
+    // El candado es del asesor, no del módulo: administrar la cartera entera es
+    // justamente el trabajo del ADMIN, y su cuenta no tiene `asesor_id`.
+    dbImpl = cola(null, 6);
+    try {
+      const res = await post("/rubros", "ADMIN", RUBRO_NUEVO);
+      expect(res.status).toBe(201);
+    } finally {
+      dbImpl = SIN_BD();
+    }
+  });
+
+  it("403 si la cuenta ASESOR no está ligada a ningún asesor (fail-closed)", async () => {
+    // `platform_users.asesor_id` es NULLABLE: sin vínculo no hay con qué
+    // comparar, y "no se puede verificar" se resuelve NO escribiendo.
+    dbImpl = cola(null, 6);
+    try {
+      const res = await post("/rubros", "ASESOR", RUBRO_NUEVO);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as any).message).toContain(
+        "no está ligado a ningún asesor"
+      );
+      expect(dbImpl.valoresEscritos).toEqual([]);
+    } finally {
+      dbImpl = SIN_BD();
+    }
+  });
+
+  it("el asesor sale de la SESIÓN: un `asesor_id` en el body no abre nada", async () => {
+    dbImpl = cola(4, 6);
+    try {
+      const res = await post("/rubros", "ASESOR", {
+        ...RUBRO_NUEVO,
+        asesor_id: 6,
+      });
+      expect(res.status).toBe(403);
+      expect(dbImpl.valoresEscritos).toEqual([]);
     } finally {
       dbImpl = SIN_BD();
     }

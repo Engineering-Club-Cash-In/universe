@@ -12,6 +12,7 @@ import {
   puedeCrearRubro,
   puedeEditarMonto,
   puedeEditarRubro,
+  puedeOperarCredito,
   puedeUsarMonto,
   redondearMonto,
   rubroCompletado,
@@ -614,3 +615,99 @@ describe("rubroCompletado", () => {
   });
 });
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `puedeOperarCredito` — el crédito tiene que ser de SU cartera.
+//
+// El agujero que cierra: el alta seleccionaba el crédito sólo por `credito_id`,
+// así que un ASESOR que mandara el id de un crédito de otro asesor le sumaba
+// deuda a un cliente que no es suyo y el cobro quedaba firmado por él.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("puedeOperarCredito", () => {
+  const ASESOR_PROPIO = { role: "ASESOR", asesorSesion: 4, asesorDelCredito: 4 };
+
+  it("el ASESOR opera el crédito de su propia cartera", () => {
+    expect(puedeOperarCredito(ASESOR_PROPIO).permitido).toBe(true);
+  });
+
+  it("el ASESOR NO opera el crédito de otro asesor", () => {
+    const v = puedeOperarCredito({ ...ASESOR_PROPIO, asesorDelCredito: 6 });
+    expect(v.permitido).toBe(false);
+    // 403 y no 409: es un problema de PERMISOS, no del estado del crédito —
+    // ningún cambio en el crédito lo levanta, hace falta otra cuenta.
+    expect(v.status).toBe(403);
+    expect(v.motivo).toContain("no está asignado a tu cartera");
+  });
+
+  it("el motivo NO filtra nada del crédito ajeno (ni estado ni dueño)", () => {
+    const { motivo } = puedeOperarCredito({
+      ...ASESOR_PROPIO,
+      asesorDelCredito: 6,
+    });
+    // Es lo único que se le contesta a quien no le corresponde el crédito: sin
+    // el status, sin la mora y sin el nombre de quién sí lo tiene.
+    expect(motivo).not.toMatch(/MOROSO|CANCELADO|INCOBRABLE|CAIDO|mora/i);
+    expect(motivo).not.toMatch(/\b6\b/);
+  });
+
+  it("el ADMIN pasa siempre: su cartera es la de todos", () => {
+    for (const asesorDelCredito of [1, 6, null]) {
+      expect(
+        puedeOperarCredito({ role: "ADMIN", asesorSesion: null, asesorDelCredito })
+          .permitido,
+      ).toBe(true);
+    }
+  });
+
+  it("fail-closed: un ASESOR sin asesor ligado no escribe, y se le dice por qué", () => {
+    // `platform_users.asesor_id` es NULLABLE: una cuenta ASESOR mal dada de
+    // alta no puede traducirse en "escribe donde quiera".
+    for (const asesorSesion of [null, undefined, 0]) {
+      const v = puedeOperarCredito({
+        role: "ASESOR",
+        asesorSesion,
+        asesorDelCredito: 4,
+      });
+      expect(v.permitido).toBe(false);
+      expect(v.status).toBe(403);
+      expect(v.motivo).toContain("no está ligado a ningún asesor");
+    }
+  });
+
+  it("fail-closed: un crédito sin asesor asignado no es de nadie", () => {
+    for (const asesorDelCredito of [null, undefined, 0]) {
+      const v = puedeOperarCredito({
+        role: "ASESOR",
+        asesorSesion: 4,
+        asesorDelCredito,
+      });
+      expect(v.permitido).toBe(false);
+      expect(v.status).toBe(403);
+    }
+  });
+
+  it("el rol se compara LITERAL, igual que en todo el módulo", () => {
+    // Un `"asesor"` en minúscula no llega hasta acá —`requireRole` ya lo
+    // rechazó con 403—, así que caer del lado permisivo no amplía nada: fija
+    // que esta función NO estrena una normalización que el resto no hace.
+    expect(
+      puedeOperarCredito({
+        role: "asesor",
+        asesorSesion: 4,
+        asesorDelCredito: 6,
+      }).permitido,
+    ).toBe(true);
+  });
+
+  it("la comparación es por id, no por 'parece el mismo'", () => {
+    // El `asesor_id` de la sesión sale de `platform_users` y el del crédito de
+    // `creditos`: los dos son `integer`. Si alguno llegara como string, un
+    // `==` los daría por iguales y el candado se abriría solo.
+    const v = puedeOperarCredito({
+      role: "ASESOR",
+      asesorSesion: 4,
+      asesorDelCredito: "4" as unknown as number,
+    });
+    expect(v.permitido).toBe(false);
+  });
+});

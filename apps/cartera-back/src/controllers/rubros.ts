@@ -36,6 +36,7 @@ import {
   puedeCrearRubro,
   puedeEditarMonto,
   puedeEditarRubro,
+  puedeOperarCredito,
   puedeUsarMonto,
   redondearMonto,
   rubroCompletado,
@@ -95,18 +96,38 @@ const aMonto = redondearMonto;
 const SELLO_DE_TIEMPO = sql`now()`;
 
 /**
- * Quién ejecuta la acción. Sale del TOKEN, nunca del body: el body lo escribe
- * el cliente y el historial de rubros es la evidencia de quién cobró qué.
- * El id directo del JWT es el camino normal; el fallback por email cubre los
- * tokens viejos que no lo traen (mismo patrón que `condonarMora`).
+ * Quién ejecuta la acción: su id de `platform_users` y el asesor al que está
+ * ligada la cuenta (null para un ADMIN, que no lo tiene).
+ *
+ * Sale del TOKEN, nunca del body: el body lo escribe el cliente y el historial
+ * de rubros es la evidencia de quién cobró qué. El id directo del JWT es el
+ * camino normal; el fallback por email cubre los tokens viejos que no lo traen
+ * (mismo patrón que `condonarMora`).
+ *
+ * El `asesor_id` sale de la MISMA fila, y no del claim homónimo que el JWT sí
+ * trae, por dos razones. La primera es la que ya justificaba verificar el id:
+ * este módulo no toma por bueno lo que dice el token sin confirmarlo contra la
+ * base. La segunda es que el claim se congela cuando se firma y los tokens de
+ * acá duran hasta 7 días (el refresh): un asesor al que le cambian la cartera
+ * —o al que le sacan el vínculo— seguiría presentando su asignación vieja toda
+ * una semana, y el permiso se decidiría con ella. No cuesta ninguna consulta
+ * extra: es una columna más en el SELECT que ya se hacía.
  */
-export async function resolverUsuarioId({
+export type Identidad = {
+  usuario_id: number | null;
+  /** `platform_users.asesor_id`: null en las cuentas ADMIN y CONTA. */
+  asesor_id: number | null;
+};
+
+const SIN_IDENTIDAD: Identidad = { usuario_id: null, asesor_id: null };
+
+export async function resolverIdentidad({
   usuario_id,
   usuario_email,
 }: {
   usuario_id?: number | null;
   usuario_email?: string | null;
-}): Promise<number | null> {
+}): Promise<Identidad> {
   // El id del token NO se toma como bueno sin verificarlo: `created_by` y
   // `rubros_historial.usuario_id` son llaves foráneas a platform_users, así que
   // un id que no existe (token viejo de una cuenta borrada, o firmado con otro
@@ -115,24 +136,26 @@ export async function resolverUsuarioId({
   // escrituras de rubros son raras.
   if (usuario_id) {
     const [porId] = await db
-      .select({ id: platform_users.id })
+      .select({ id: platform_users.id, asesor_id: platform_users.asesor_id })
       .from(platform_users)
       .where(eq(platform_users.id, usuario_id))
       .limit(1);
 
-    if (porId) return porId.id;
+    if (porId) return { usuario_id: porId.id, asesor_id: porId.asesor_id };
     // El id no corresponde a ninguna cuenta viva; queda el email como respaldo.
   }
 
-  if (!usuario_email) return null;
+  if (!usuario_email) return SIN_IDENTIDAD;
 
   const [user] = await db
-    .select({ id: platform_users.id })
+    .select({ id: platform_users.id, asesor_id: platform_users.asesor_id })
     .from(platform_users)
     .where(eq(platform_users.email, usuario_email))
     .limit(1);
 
-  return user?.id ?? null;
+  return user
+    ? { usuario_id: user.id, asesor_id: user.asesor_id }
+    : SIN_IDENTIDAD;
 }
 
 /**
@@ -480,6 +503,7 @@ export async function crearRubro({
   motivo,
   role,
   usuario_id,
+  asesor_id,
 }: {
   credito_id: number;
   tipo_id: number;
@@ -489,6 +513,11 @@ export async function crearRubro({
   /** Rol del TOKEN (nunca del body): decide si puede cobrar un tipo obligatorio. */
   role?: string | null;
   usuario_id?: number | null;
+  /**
+   * Asesor de la SESIÓN (resuelto contra `platform_users`, nunca del body):
+   * decide si el crédito es de su cartera. Null en un ADMIN, que pasa igual.
+   */
+  asesor_id?: number | null;
 }) {
   const autor = exigirUsuario(usuario_id);
 
@@ -535,13 +564,44 @@ export async function crearRubro({
      */
     return await db.transaction(async (tx) => {
       const [credito] = await tx
-        .select({ statusCredit: creditos.statusCredit })
+        .select({
+          statusCredit: creditos.statusCredit,
+          // El dueño del crédito viaja en la MISMA lectura que ya se hacía:
+          // cero consultas nuevas y —lo que importa— el `asesor_id` con el que
+          // se decide es el de la fila bloqueada por `FOR UPDATE`, no el de un
+          // snapshot anterior que una reasignación podría haber movido.
+          asesor_id: creditos.asesor_id,
+        })
         .from(creditos)
         .where(eq(creditos.credito_id, credito_id))
         .limit(1)
         .for("update");
 
       if (!credito) throw new RubroError(404, "El crédito no existe.");
+
+      /**
+       * ¿Es de su cartera? Se pregunta ACÁ, apenas se sabe de qué crédito se
+       * habla y ANTES de mirar el tipo, la mora o el status.
+       *
+       * El orden no es estético. Todo lo que viene después le contesta al
+       * cliente algo sobre un crédito que quizá no le toca: que el tipo existe
+       * y está activo (catálogo, da igual), pero también que el crédito está
+       * CANCELADO, o MOROSO, o que tiene mora activa —el estado de cobranza de
+       * un cliente ajeno—. A quien no le corresponde el crédito se le contesta
+       * una sola cosa, y es que no le corresponde.
+       */
+      const veredictoCartera = puedeOperarCredito({
+        role,
+        asesorSesion: asesor_id,
+        asesorDelCredito: credito.asesor_id,
+      });
+
+      if (!veredictoCartera.permitido) {
+        throw new RubroError(
+          veredictoCartera.status ?? 403,
+          veredictoCartera.motivo ?? "El crédito no es de tu cartera."
+        );
+      }
 
       // Se lee `obligatorio` y `activo`: la naturaleza del cobro vive en el
       // TIPO, no en el body — quien crea el rubro elige el concepto, no si ese

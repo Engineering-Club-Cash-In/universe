@@ -12,7 +12,7 @@ import {
   listarHistorial,
   listarRubrosDeCredito,
   listarTipos,
-  resolverUsuarioId,
+  resolverIdentidad,
 } from "../controllers/rubros";
 import { MONTO_MAXIMO_RUBRO_CRUDO } from "../controllers/rubrosPolicy";
 
@@ -146,7 +146,7 @@ export const rubrosRouter = new Elysia({ prefix: "/rubros" })
     async ({ body, user, set }: any) => {
       if (!requireRole(ADMIN)(user, set)) return noAutorizado(ADMIN);
       try {
-        const usuario_id = await resolverUsuarioId({
+        const { usuario_id } = await resolverIdentidad({
           usuario_id: user?.id ?? user?.user_id,
           usuario_email: user?.email ?? user?.correo,
         });
@@ -177,7 +177,7 @@ export const rubrosRouter = new Elysia({ prefix: "/rubros" })
         return { success: false, message: "tipo_id inválido" };
       }
       try {
-        const usuario_id = await resolverUsuarioId({
+        const { usuario_id } = await resolverIdentidad({
           usuario_id: user?.id ?? user?.user_id,
           usuario_email: user?.email ?? user?.correo,
         });
@@ -216,7 +216,7 @@ export const rubrosRouter = new Elysia({ prefix: "/rubros" })
         return { success: false, message: "tipo_id inválido" };
       }
       try {
-        const usuario_id = await resolverUsuarioId({
+        const { usuario_id } = await resolverIdentidad({
           usuario_id: user?.id ?? user?.user_id,
           usuario_email: user?.email ?? user?.correo,
         });
@@ -253,21 +253,26 @@ export const rubrosRouter = new Elysia({ prefix: "/rubros" })
   .post(
     "/",
     async ({ body, user, set }: any) => {
-      // ASESOR entra, pero `crearRubro` le niega (403) los tipos obligatorios:
-      // el gate de rol fino necesita saber QUÉ tipo se pidió, y eso es una
-      // consulta a la base que no le toca al router.
+      // ASESOR entra, pero `crearRubro` le niega (403) dos cosas que este gate
+      // no puede ver: los tipos obligatorios —hace falta saber QUÉ tipo se
+      // pidió— y los créditos que no son de su cartera —hace falta saber DE
+      // QUIÉN es el crédito—. Las dos son consultas a la base que no le tocan
+      // al router.
       if (!requireRole(ADMIN_Y_ASESOR)(user, set))
         return noAutorizado(ADMIN_Y_ASESOR);
       try {
-        const usuario_id = await resolverUsuarioId({
+        const { usuario_id, asesor_id } = await resolverIdentidad({
           usuario_id: user?.id ?? user?.user_id,
           usuario_email: user?.email ?? user?.correo,
         });
-        // El rol sale del TOKEN y va DESPUÉS del body: un `role: "ADMIN"`
-        // inyectado en el JSON no puede pisar al real.
+        // El rol y el asesor salen de la SESIÓN y van DESPUÉS del body: ni un
+        // `role: "ADMIN"` ni un `asesor_id` ajeno inyectados en el JSON pueden
+        // pisar a los reales. (El esquema de abajo tampoco los declara, y
+        // Elysia descarta lo que no declara: son dos defensas, no una.)
         const rubro = await crearRubro({
           ...body,
           usuario_id,
+          asesor_id,
           role: user?.role,
         });
         set.status = 201;
@@ -316,7 +321,7 @@ export const rubrosRouter = new Elysia({ prefix: "/rubros" })
         return { success: false, message: "rubro_id inválido" };
       }
       try {
-        const usuario_id = await resolverUsuarioId({
+        const { usuario_id } = await resolverIdentidad({
           usuario_id: user?.id ?? user?.user_id,
           usuario_email: user?.email ?? user?.correo,
         });
@@ -380,7 +385,7 @@ export const rubrosRouter = new Elysia({ prefix: "/rubros" })
         return { success: false, message: "rubro_id inválido" };
       }
       try {
-        const usuario_id = await resolverUsuarioId({
+        const { usuario_id } = await resolverIdentidad({
           usuario_id: user?.id ?? user?.user_id,
           usuario_email: user?.email ?? user?.correo,
         });

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../database";
 import {
   convenios_pago,
@@ -110,6 +110,33 @@ async function bajoPlazo<T>(
   }
 }
 
+
+/** Lo que las lecturas de cartera necesitan del ejecutor (db o transacción). */
+type EjecutorCartera = Pick<typeof db, "select">;
+
+/**
+ * El reloj del lado de POSTGRES, no solo del nuestro. `bajoPlazo` suelta la
+ * espera, pero la query perdedora seguía corriendo en el servidor: el pool no
+ * tiene `statement_timeout`, así que consultas vencidas repetidas podían
+ * quedarse con todas las conexiones y frenar endpoints ajenos. `SET LOCAL`
+ * dentro de una transacción propia hace que Postgres CANCELE la query al
+ * vencerse, y muere con la transacción: el pool compartido —que usan cierres y
+ * migraciones legítimamente lentos— no se toca.
+ */
+async function conRelojDePostgres<T>(
+  venceEnMs: number,
+  paso: string,
+  correr: (ejecutor: EjecutorCartera) => Promise<T>
+): Promise<T> {
+  const ms = cotaODesistir(PRESUPUESTO_NUMEROS_GATE_MS, venceEnMs, paso);
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql.raw(`SET LOCAL statement_timeout = ${Math.max(1, Math.floor(ms))}`)
+    );
+    return correr(tx);
+  });
+}
+
 /**
  * Responde si el dueño de un DPI ya es cliente y si está en mora, para el gate
  * del CRM antes de dejar avanzar una solicitud.
@@ -197,7 +224,9 @@ export async function consultarMoraPorDpi(
     const creditosCliente =
       paso === "BUSCAR_CREDITOS"
         ? await bajoPlazo(
-            obtenerCreditosConMora(numerosPrestamo),
+            conRelojDePostgres(venceEn, "la lectura de creditos y moras", (ej) =>
+              obtenerCreditosConMora(numerosPrestamo, ej)
+            ),
             venceEn,
             "la lectura de creditos y moras"
           )
@@ -234,7 +263,9 @@ export async function consultarMoraPorDpi(
         : null,
       creditos: creditosRespuesta,
       historialMora: await bajoPlazo(
-        obtenerHistorialMora(numeroPorCreditoId),
+        conRelojDePostgres(venceEn, "la lectura del historial de mora", (ej) =>
+          obtenerHistorialMora(numeroPorCreditoId, ej)
+        ),
         venceEn,
         "la lectura del historial de mora"
       ),
@@ -247,8 +278,8 @@ export async function consultarMoraPorDpi(
 }
 
 /** El SELECT de créditos + mora viva, compartido por las dos pasadas. */
-function selectCreditosConMora() {
-  return db
+function selectCreditosConMora(ejecutor: EjecutorCartera = db) {
+  return ejecutor
     .select({
       credito_id: creditos.credito_id,
       usuario_id: creditos.usuario_id,
@@ -272,9 +303,10 @@ function selectCreditosConMora() {
  * por qué la segunda existe y por qué no reemplaza a la primera.
  */
 async function obtenerCreditosConMora(
-  numerosPrestamo: string[]
+  numerosPrestamo: string[],
+  ejecutor: EjecutorCartera = db
 ): Promise<FilaCreditoMora[]> {
-  const porNumero = await selectCreditosConMora().where(
+  const porNumero = await selectCreditosConMora(ejecutor).where(
     inArray(creditos.numero_credito_sifco, numerosPrestamo)
   );
 
@@ -290,7 +322,7 @@ async function obtenerCreditosConMora(
     return porNumero;
   }
 
-  const porUsuario = await selectCreditosConMora().where(
+  const porUsuario = await selectCreditosConMora(ejecutor).where(
     inArray(creditos.usuario_id, usuarioIds)
   );
 
@@ -379,7 +411,8 @@ async function obtenerNumerosPrestamo(
 }
 
 async function obtenerHistorialMora(
-  numeroPorCreditoId: Map<number, string>
+  numeroPorCreditoId: Map<number, string>,
+  ejecutor: EjecutorCartera = db
 ): Promise<ReturnType<typeof construirHistorialMora>> {
   const creditoIds = [...numeroPorCreditoId.keys()];
 
@@ -390,7 +423,7 @@ async function obtenerHistorialMora(
   const numeroDe = (creditoId: number) => numeroPorCreditoId.get(creditoId) ?? "";
 
   const [eventos, morasCerradas, convenios] = await Promise.all([
-    db
+    ejecutor
       .select({
         credito_id: moras_historial.credito_id,
         fecha: moras_historial.fecha,
@@ -404,7 +437,7 @@ async function obtenerHistorialMora(
       })
       .from(moras_historial)
       .where(inArray(moras_historial.credito_id, creditoIds)),
-    db
+    ejecutor
       .select({
         credito_id: moras_credito.credito_id,
         mora_id: moras_credito.mora_id,
@@ -421,7 +454,7 @@ async function obtenerHistorialMora(
           eq(moras_credito.activa, false)
         )
       ),
-    db
+    ejecutor
       .select({
         credito_id: convenios_pago.credito_id,
         fecha_convenio: convenios_pago.fecha_convenio,

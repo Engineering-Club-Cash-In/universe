@@ -7,7 +7,9 @@ import {
   fichasDelDpi,
   seleccionarFichasDelDpi,
   fusionarCreditosPorId,
+  montoDeMorasCerradas,
   nombreClienteSifco,
+  numerosEspejoConPresupuesto,
   respuestaClienteNoEncontrado,
   respuestaServicioNoDisponible,
   siguientePasoConsulta,
@@ -501,6 +503,165 @@ describe("historial de mora compuesto", () => {
       ["CONVENIO", "2026-03-21T02:00:00.000Z"],
       ["INCREMENTO", "2026-03-20T23:00:00.000Z"],
     ]);
+  });
+});
+
+describe("monto de la mora cerrada", () => {
+  const moraCerrada = (mora_id: number | null) => ({
+    fecha: new Date("2026-04-01T00:00:00.000Z"),
+    monto_mora: "0",
+    numeroCreditoSifco: "A",
+    mora_id,
+  });
+
+  it("🔴 usa el monto_anterior de la DESACTIVACION, no el 0 que dejó latefee", () => {
+    // `latefee.ts` pone monto_mora = "0" en el mismo update que apaga la mora,
+    // así que toda MORA_CERRADA salía en 0 y el asesor leía un historial de
+    // moras que nunca debieron nada.
+    const historial = construirHistorialMora({
+      eventos: [
+        {
+          fecha: new Date("2026-04-01T00:00:00.000Z"),
+          monto_nuevo: "0",
+          monto_anterior: "735.50",
+          mora_id: 7,
+          tipo_evento: "DESACTIVACION",
+          numeroCreditoSifco: "A",
+        },
+      ],
+      morasCerradas: [moraCerrada(7)],
+      convenios: [],
+    });
+
+    const cerrada = historial.find((e) => e.evento === "MORA_CERRADA");
+    expect(cerrada?.monto).toBe("735.50");
+  });
+
+  it("se queda con la ÚLTIMA desactivación: una mora puede revivir y volver a cerrarse", () => {
+    const historial = construirHistorialMora({
+      eventos: [
+        {
+          fecha: new Date("2026-02-01T00:00:00.000Z"),
+          monto_nuevo: "0",
+          monto_anterior: "100.00",
+          mora_id: 7,
+          tipo_evento: "DESACTIVACION",
+          numeroCreditoSifco: "A",
+        },
+        {
+          fecha: new Date("2026-04-01T00:00:00.000Z"),
+          monto_nuevo: "0",
+          monto_anterior: "980.00",
+          mora_id: 7,
+          tipo_evento: "DESACTIVACION",
+          numeroCreditoSifco: "A",
+        },
+      ],
+      morasCerradas: [moraCerrada(7)],
+      convenios: [],
+    });
+
+    expect(historial.find((e) => e.evento === "MORA_CERRADA")?.monto).toBe(
+      "980.00"
+    );
+  });
+
+  it("no toma el monto de OTRA mora ni de un evento que no es DESACTIVACION", () => {
+    const historial = construirHistorialMora({
+      eventos: [
+        {
+          fecha: new Date("2026-03-01T00:00:00.000Z"),
+          monto_nuevo: "500.00",
+          monto_anterior: "400.00",
+          mora_id: 7,
+          tipo_evento: "INCREMENTO",
+          numeroCreditoSifco: "A",
+        },
+        {
+          fecha: new Date("2026-03-15T00:00:00.000Z"),
+          monto_nuevo: "0",
+          monto_anterior: "1200.00",
+          mora_id: 99,
+          tipo_evento: "DESACTIVACION",
+          numeroCreditoSifco: "A",
+        },
+      ],
+      morasCerradas: [moraCerrada(7)],
+      convenios: [],
+    });
+
+    expect(historial.find((e) => e.evento === "MORA_CERRADA")?.monto).toBe("0");
+  });
+
+  it("sin evento de desactivación queda el monto de la fila: el convenio borra sin rastro", () => {
+    // `paymentAgreement.ts` borra la mora activa sin escribir en
+    // moras_historial. Ese historial no se pierde: viaja por la fuente CONVENIO.
+    const historial = construirHistorialMora({
+      eventos: [],
+      morasCerradas: [moraCerrada(7)],
+      convenios: [],
+    });
+
+    expect(historial.find((e) => e.evento === "MORA_CERRADA")?.monto).toBe("0");
+  });
+
+  it("el evento con mora_id nulo no rescata a nadie", () => {
+    // `moras_historial.mora_id` es ON DELETE SET NULL: sin él no hay a qué mora
+    // atribuirle el monto.
+    const mapa = montoDeMorasCerradas([
+      {
+        fecha: new Date("2026-04-01T00:00:00.000Z"),
+        tipo_evento: "DESACTIVACION",
+        mora_id: null,
+        monto_anterior: "500.00",
+      },
+    ]);
+
+    expect(mapa.size).toBe(0);
+  });
+});
+
+describe("presupuesto del espejo de SIFCO", () => {
+  it("devuelve los números cuando el espejo contesta a tiempo", async () => {
+    const numeros = await numerosEspejoConPresupuesto(
+      async () => ["01010214124060"],
+      1000,
+      () => {
+        throw new Error("no debía avisar");
+      }
+    );
+
+    expect(numeros).toEqual(["01010214124060"]);
+  });
+
+  it("⚠️ al vencerse sigue con el API: lista vacía y aviso, NO fail-closed", async () => {
+    // El espejo es un cache del core; el API es la fuente autoritativa viva, así
+    // que seguir sin él deja la lista completa, no media lista.
+    const avisos: unknown[] = [];
+
+    const numeros = await numerosEspejoConPresupuesto(
+      () => new Promise<string[]>(() => {}),
+      10,
+      (detalle) => avisos.push(detalle)
+    );
+
+    expect(numeros).toEqual([]);
+    expect(avisos).toHaveLength(1);
+  });
+
+  it("el espejo que falla tampoco tumba la consulta", async () => {
+    const avisos: unknown[] = [];
+
+    const numeros = await numerosEspejoConPresupuesto(
+      async () => {
+        throw new Error("pool agotado");
+      },
+      1000,
+      (detalle) => avisos.push(detalle)
+    );
+
+    expect(numeros).toEqual([]);
+    expect((avisos[0] as Error).message).toBe("pool agotado");
   });
 });
 

@@ -11,6 +11,7 @@ import { getRenapData } from "../functions/getRenapInfo";
 import { auditRecord } from "../lib/audit";
 import { mapChecksToDisbursementRows } from "../lib/contract-disbursement";
 import {
+	formatEntityName,
 	parseOpportunityInvestors,
 	resolveEntityType,
 	selectPrimaryInvestor,
@@ -217,6 +218,8 @@ export interface ContractData {
 		dpiFormateado: string;
 		dpiLetras: string;
 		tipo: string;
+		// "male" | "female": precarga {genderVendedor} de la Declaración de Vendedor
+		genero?: string;
 		empresaNombre?: string;
 		telefono?: string;
 		email?: string;
@@ -551,12 +554,19 @@ export async function mapOpportunityToContractData(
 		? getDateComponents(opportunity.fechaInicio)
 		: undefined;
 
-	// Vendedor del vehículo. Se prioriza el de la oportunidad porque es la
-	// única columna que hoy se escribe (desde el combobox al crear/editar) y
-	// porque el vendedor es un hecho de esta venta: un mismo vehículo puede
-	// recomprarse y cambiar de dueño. Se conserva el fallback al vehículo para
-	// no perder el dato si alguien lo llena por ese lado.
-	const vendorId = opportunity.vendorId || vehicle?.vendorId || null;
+	// Vendedor del vehículo: solo el de la oportunidad. `vehicles.vendor_id`
+	// quedó de un diseño viejo y nadie lo escribe (0 de 2,224 vehículos en
+	// producción); además un mismo vehículo puede estar en varias
+	// oportunidades (2,212 oportunidades sobre 1,979 vehículos), así que el
+	// dueño de esta venta no puede colgar de ahí. Con una sola columna, lo
+	// que se ve en el CRM es lo que sale en el contrato, y quitar al vendedor
+	// desde la pantalla realmente lo quita.
+	// Un carro nuevo lo vende la agencia, no un particular: ahí manda
+	// {agencia}. Si la oportunidad quedó con un vendedor de cuando el vehículo
+	// era usado, no debe colarse en el contrato. `isNew` nulo se trata como
+	// usado, igual que en el resto del flujo.
+	const vendorId =
+		vehicle?.isNew === true ? null : opportunity.vendorId || null;
 	const [vendor] = vendorId
 		? await db
 				.select()
@@ -573,6 +583,7 @@ export async function mapOpportunityToContractData(
 				dpiFormateado: formatDpi(vendor.dpi || ""),
 				dpiLetras: dpiToWordsUppercase(vendor.dpi || ""),
 				tipo: vendor.vendorType,
+				genero: vendor.gender || undefined,
 				empresaNombre: vendor.companyName || undefined,
 				// {agencia} NO sale de aquí: en los contratos históricos es la
 				// distribuidora de autos nuevos (JAC, AUTOMAQ), que no está en
@@ -617,19 +628,22 @@ export async function mapOpportunityToContractData(
 	// del lead y no necesariamente representa una agencia del vehículo.
 	const [empresaAgencia] = vehicle?.isNew === true && opportunity.companyId
 		? await db
-				.select({ name: companies.name })
+				.select({ name: companies.name, razonSocial: companies.razonSocial })
 				.from(companies)
 				.where(eq(companies.id, opportunity.companyId))
 				.limit(1)
 		: [];
 
-	const entidad = inversionistaPrincipal
+	// El tipo sale del nombre YA normalizado: "Cube Investments" sin sufijo se
+	// reconoce como sociedad solo después de formatearlo, y si no el contrato
+	// diría "la persona: CUBE INVESTMENTS, SOCIEDAD ANÓNIMA".
+	const nombreEntidad = inversionistaPrincipal
+		? formatEntityName(inversionistaPrincipal.nombre)
+		: null;
+	const entidad = nombreEntidad
 		? {
-				nombre: inversionistaPrincipal.nombre,
-				tipo: resolveEntityType(
-					investorProfile?.clientType,
-					inversionistaPrincipal.nombre,
-				),
+				nombre: nombreEntidad,
+				tipo: resolveEntityType(investorProfile?.clientType, nombreEntidad),
 			}
 		: undefined;
 
@@ -689,8 +703,13 @@ export async function mapOpportunityToContractData(
 		vendedor,
 		desembolso,
 		entidad,
-		// trim: varios nombres en `companies` traen espacios sobrantes
-		agencia: empresaAgencia?.name?.trim() || undefined,
+		// Solo la razón social: {agencia} es el nombre legal de la
+		// distribuidora. El nombre comercial de `companies` ("Jetour",
+		// "GRUPO Q / PEUGEOT") no sirve para el contrato, y precargarlo dejaría
+		// el campo como completo con un dato que jurídico igual reescribe.
+		// Sin razón social el campo queda vacío y el asistente lo marca como
+		// pendiente. trim: varios valores traen espacios sobrantes.
+		agencia: empresaAgencia?.razonSocial?.trim() || undefined,
 		oportunidad: {
 			id: opportunity.id,
 			titulo: opportunity.title,

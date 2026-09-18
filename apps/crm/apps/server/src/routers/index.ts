@@ -40,9 +40,12 @@ export const crmAppRouter = {
 	getSalesStages: crmRouter.getSalesStages,
 	getCrmUsers: crmRouter.getCrmUsers,
 	getCompanies: crmRouter.getCompanies,
+	getCompaniesForContracts: crmRouter.getCompaniesForContracts,
 	getCompanyRelationshipStats: crmRouter.getCompanyRelationshipStats,
 	createCompany: crmRouter.createCompany,
 	updateCompany: crmRouter.updateCompany,
+	setCompanyRazonSocial: crmRouter.setCompanyRazonSocial,
+	setOpportunityContractParty: crmRouter.setOpportunityContractParty,
 	getLeads: crmRouter.getLeads,
 	getLeadById: crmRouter.getLeadById,
 	getLeadsStats: crmRouter.getLeadsStats,
@@ -237,6 +240,9 @@ export const formsAppRouter = {
 
 	// Bank Analysis routes (Análisis de estados de cuenta)
 	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
+	retryBankStatementCoverageSave:
+		bankAnalysisRouter.retryBankStatementCoverageSave,
+	confirmBankStatementCoverage: bankAnalysisRouter.confirmBankStatementCoverage,
 };
 
 /**
@@ -290,6 +296,7 @@ export const miscAppRouter = {
 	updateVendor: vendorsRouter.update,
 	deleteVendor: vendorsRouter.delete,
 	searchVendors: vendorsRouter.search,
+	lookupVendorByDpi: vendorsRouter.lookupByDpi,
 
 	// Notes routes
 	getEntityNotes: notesRouter.getEntityNotes,

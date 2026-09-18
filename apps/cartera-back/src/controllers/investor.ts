@@ -10199,19 +10199,35 @@ export async function deletePagosEspejoNoLiquidados(inversionistaId: number) {
   console.log(`\n🔄 DELETE Pagos Espejo NO_LIQUIDADO (inversionista: ${inversionistaId})`);
 
   try {
-    // 1. Eliminar pagos con estado 'NO_LIQUIDADO'
-    const deleted = await db
-      .delete(pagos_credito_inversionistas_espejo)
-      .where(
-        and(
-          eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId),
-          eq(pagos_credito_inversionistas_espejo.estado_liquidacion, 'NO_LIQUIDADO')
+    return await db.transaction(async (tx) => {
+      // 1. Eliminar pagos con estado 'NO_LIQUIDADO'
+      const deleted = await tx
+        .delete(pagos_credito_inversionistas_espejo)
+        .where(
+          and(
+            eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId),
+            eq(pagos_credito_inversionistas_espejo.estado_liquidacion, 'NO_LIQUIDADO')
+          )
         )
-      )
-      .returning();
+        .returning();
 
-    console.log(`✅ ${deleted.length} pagos eliminados.`);
-    return { success: true, deletedCount: deleted.length };
+      // 2. Desvincular atómicamente abonos a capital que apuntaban a los pagos eliminados
+      if (deleted.length > 0) {
+        const deletedIds = deleted.map((p: { id: number }) => p.id);
+        await tx
+          .update(abonos_capital)
+          .set({ pago_espejo_id: null, updated_at: new Date() })
+          .where(
+            and(
+              inArray(abonos_capital.pago_espejo_id, deletedIds),
+              eq(abonos_capital.liquidado, false)
+            )
+          );
+      }
+
+      console.log(`✅ ${deleted.length} pagos eliminados y abonos desvinculados.`);
+      return { success: true, deletedCount: deleted.length };
+    });
   } catch (error) {
     console.error("Error eliminando pagos no liquidados:", error);
     throw error;

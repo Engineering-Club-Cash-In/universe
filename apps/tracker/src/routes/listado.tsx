@@ -366,14 +366,12 @@ export function ListadoPage() {
 					<p className="text-slate-500 text-xs">
 						{hayPeriodo ? (
 							<>
-								Mostrando lo que{" "}
+								Mostrando{" "}
 								<span className="font-medium text-slate-700">
-									llegó a cada etapa en {MESES[Number(periodo) - 1].toLowerCase()}{" "}
-									{anioVigente}
+									dónde está cada caso hoy, si llegó ahí en{" "}
+									{MESES[Number(periodo) - 1].toLowerCase()} {anioVigente}
 								</span>
-								. Un caso puede aparecer en varias etapas, y en varios
-								porcentajes de una misma etapa, si avanzó más de una vez ese
-								mes.
+								.
 							</>
 						) : (
 							<>

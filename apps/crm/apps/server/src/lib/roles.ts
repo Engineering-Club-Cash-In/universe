@@ -131,10 +131,14 @@ export const PERMISSIONS = {
 	canAccessAdmin: (role: UserRole | string): boolean => role === ROLES.ADMIN,
 
 	// Entity Permissions
+	// El analista entra aquí porque en la asignación de inversión (50%) es
+	// quien captura la agencia del vehículo para los contratos, y muchas
+	// agencias todavía no están en el catálogo.
 	canCreateCompanies: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||
-		role === ROLES.SALES_SUPERVISOR,
+		role === ROLES.SALES_SUPERVISOR ||
+		role === ROLES.ANALYST,
 
 	canManageAllCompanies: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,

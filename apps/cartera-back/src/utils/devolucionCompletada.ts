@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "../database/index";
 import {
@@ -6,6 +6,7 @@ import {
   creditos_inversionistas,
   creditos_inversionistas_espejo,
   historial_devolucion_credito,
+  inversionistas,
 } from "../database/db/schema";
 
 // ============================================================================
@@ -18,6 +19,18 @@ import {
 // ============================================================================
 
 export const CUBE_ID = 86;
+
+/**
+ * Único punto del proyecto que decide "¿este inversionista es CUBE?".
+ * Identifica a CUBE estrictamente por su ID canónico (86), alineado con
+ * `exitInvestor` que bloquea la salida de CUBE únicamente por
+ * `inversionista_id === CUBE_INVESTMENT_ID (86)`.
+ *
+ * Evita matches difusos por string que puedan atribuir a CUBE un inversionista
+ * homónimo no-86 o cerrar prematuramente créditos.
+ */
+export const esCube = (inv: { inversionista_id: number; nombre?: string }): boolean =>
+  inv.inversionista_id === CUBE_ID;
 
 // Placeholder del usuario autenticado, igual que en devolucion.ts y
 // updateCredit.ts mientras no se propague el usuario real hasta acá.
@@ -80,43 +93,53 @@ export async function filtrarCreditosTotalmenteDevueltos(
     return { completados: [], diferidos };
   }
 
-  const restantes = await ejecutor
+  const restantesCrudo = await ejecutor
     .select({
       credito_id: creditos_inversionistas.credito_id,
-      restantes: sql<number>`count(*)::int`,
+      inversionista_id: creditos_inversionistas.inversionista_id,
+      nombre: inversionistas.nombre,
     })
     .from(creditos_inversionistas)
-    .where(
-      and(
-        inArray(creditos_inversionistas.credito_id, orderedCreditIds),
-        ne(creditos_inversionistas.inversionista_id, CUBE_ID),
-      ),
+    .innerJoin(
+      inversionistas,
+      eq(creditos_inversionistas.inversionista_id, inversionistas.inversionista_id),
     )
-    .groupBy(creditos_inversionistas.credito_id);
+    .where(inArray(creditos_inversionistas.credito_id, orderedCreditIds));
 
-  for (const fila of restantes as Array<{ credito_id: number; restantes: number }>) {
-    diferidos.set(fila.credito_id, {
-      tipo: "inversionistas_en_padre",
-      restantes: Number(fila.restantes),
-    });
+  const restantesPorCredito = new Map<number, number>();
+  for (const fila of restantesCrudo as Array<{
+    credito_id: number;
+    inversionista_id: number;
+    nombre: string;
+  }>) {
+    if (esCube(fila)) continue;
+    restantesPorCredito.set(fila.credito_id, (restantesPorCredito.get(fila.credito_id) ?? 0) + 1);
+  }
+
+  for (const [credito_id, restantes] of restantesPorCredito) {
+    diferidos.set(credito_id, { tipo: "inversionistas_en_padre", restantes });
   }
 
   const candidatos = orderedCreditIds.filter((id) => !diferidos.has(id));
   if (candidatos.length === 0) return { completados: [], diferidos };
 
-  const espejoResidual = await ejecutor
+  const espejoResidualCrudo = await ejecutor
     .select({
       credito_id: creditos_inversionistas_espejo.credito_id,
       inversionista_id: creditos_inversionistas_espejo.inversionista_id,
       monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+      nombre: inversionistas.nombre,
     })
     .from(creditos_inversionistas_espejo)
-    .where(
-      and(
-        inArray(creditos_inversionistas_espejo.credito_id, candidatos),
-        ne(creditos_inversionistas_espejo.inversionista_id, CUBE_ID),
-      ),
-    );
+    .innerJoin(
+      inversionistas,
+      eq(creditos_inversionistas_espejo.inversionista_id, inversionistas.inversionista_id),
+    )
+    .where(inArray(creditos_inversionistas_espejo.credito_id, candidatos));
+
+  const espejoResidual = espejoResidualCrudo.filter(
+    (f: { inversionista_id: number; nombre: string }) => !esCube(f),
+  );
 
   const conSaldoEnEspejo = new Set<number>(
     espejoResidual
@@ -124,15 +147,15 @@ export async function filtrarCreditosTotalmenteDevueltos(
       .map((f: any) => f.credito_id),
   );
 
-  if (espejoResidual.length > 0) {
+  const conSaldoResidual = espejoResidual.filter((f: any) => Number(f.monto_aportado) !== 0);
+  if (conSaldoResidual.length > 0) {
     console.warn(
-      `⚠️  DIVERGENCIA padre/espejo: crédito(s) sin inversionistas en el padre pero con filas espejo no-CUBE:`,
-      espejoResidual
+      `⚠️  DIVERGENCIA padre/espejo: crédito(s) sin inversionistas en el padre pero con saldo en filas espejo no-CUBE:`,
+      conSaldoResidual
         .map(
           (f: any) =>
             `credito_id=${f.credito_id} inversionista_id=${f.inversionista_id} ` +
-            `monto_aportado=${f.monto_aportado}` +
-            `${Number(f.monto_aportado) !== 0 ? " ← NO se cierra (capital pendiente)" : ""}`,
+            `monto_aportado=${f.monto_aportado} ← NO se cierra (capital pendiente)`,
         )
         .join(", "),
     );

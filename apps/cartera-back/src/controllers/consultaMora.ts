@@ -20,11 +20,15 @@ import {
   nombreClienteSifco,
   respuestaClienteNoEncontrado,
   respuestaServicioNoDisponible,
+  siguientePasoConsulta,
   unirNumerosCredito,
   type CreditoConsultaMora,
   type FilaCreditoMora,
   type RespuestaConsultaMora,
 } from "./consultaMoraPolicy";
+
+/** Presupuesto del camino interactivo: ver `obtenerNumerosPrestamo`. */
+const TIMEOUT_PRESTAMOS_GATE_MS = 10000;
 
 /**
  * Responde si el dueño de un DPI ya es cliente y si está en mora, para el gate
@@ -69,15 +73,23 @@ export async function consultarMoraPorDpi(
       numerosCreditoConocidos
     );
 
-    // Sin ficha en el core Y sin un solo número que mirar no hay nada que
-    // consultar. Ya NO alcanza con `!fichas.length`: el cliente cuyos créditos
-    // nacieron todos en el CRM no tiene ficha, y cortar acá era justo el agujero
-    // que lo dejaba pasar como CLIENTE_NO_ENCONTRADO.
-    if (!numerosPrestamo.length) {
+    // Ver `siguientePasoConsulta`: sin números pero CON ficha el cliente existe
+    // y está al día; el no-encontrado exige que no haya ni ficha ni números.
+    const paso = siguientePasoConsulta({
+      cantidadFichas: fichas.length,
+      cantidadNumeros: numerosPrestamo.length,
+    });
+
+    if (paso === "CLIENTE_NO_ENCONTRADO") {
       return respuestaClienteNoEncontrado(consultadoEn);
     }
 
-    const creditosCliente = await obtenerCreditosConMora(numerosPrestamo);
+    // Sin números no se consulta la base: un `inArray` vacío no tiene nada que
+    // buscar y el cliente sale como lo que es, conocido y sin créditos.
+    const creditosCliente =
+      paso === "BUSCAR_CREDITOS"
+        ? await obtenerCreditosConMora(numerosPrestamo)
+        : [];
 
     // Ni ficha ni crédito: el DPI no le consta a nadie.
     if (!fichas.length && !creditosCliente.length) {
@@ -170,40 +182,56 @@ async function obtenerCreditosConMora(
 }
 
 /**
- * Números de préstamo del cliente, en dos pasos y no en un JOIN.
+ * Números de préstamo del cliente: la UNIÓN del espejo y del API, nunca uno u
+ * otro.
  *
  * 🔴 El schema `sifco.` NO vive en la base de cartera: `database/sifco/index.ts`
  * abre su propio Pool contra `SIFCO_DB_URL`. Cruzar `sifco.prestamos` con
  * `cartera.creditos` en un solo SELECT es imposible; el cruce se hace en JS,
  * con los `pre_numero` de acá y un `inArray` sobre la conexión de cartera.
  *
+ * 🔴 El espejo NO corta la consulta al API aunque devuelva filas. Antes sí: si
+ * el espejo traía algo, se devolvía eso y el API ni se tocaba. Un espejo
+ * PARCIALMENTE atrasado —tiene los préstamos viejos, le falta el que acaba de
+ * caer en mora— pasaba entonces la validación como `SIN_MORA`, que es
+ * exactamente el falso negativo que este endpoint existe para evitar; y es peor
+ * que el espejo vacío, porque ahí sí había fallback. Un espejo incompleto no se
+ * distingue de uno completo mirándolo, así que se preguntan los dos y se unen.
+ *
  * Además `sifcoDb` puede ser `null` (variable sin configurar: el módulo solo
- * avisa por consola). Por eso el API no es un lujo sino el camino principal en
- * cualquier entorno sin esa variable. Y un espejo vacío tampoco prueba que el
- * cliente no tenga créditos —sync atrasada, crédito recién colocado—, así que
- * también cae al API: dar "sin mora" por esa razón sería el falso negativo que
- * este endpoint existe para evitar. Si el API tampoco responde, el throw sube y
- * el llamador responde SERVICIO_NO_DISPONIBLE.
+ * avisa por consola), y por eso el API es el camino principal en cualquier
+ * entorno sin esa variable.
+ *
+ * ⚠️ Si el API lanza, el throw sube y el llamador responde
+ * SERVICIO_NO_DISPONIBLE aunque el espejo hubiera traído filas. Es a propósito:
+ * media lista no alcanza para decir "sin mora" —el crédito que falta puede ser
+ * justo el moroso—, y fail-closed es la regla de todo el endpoint.
  */
 async function obtenerNumerosPrestamo(
   codigoClienteSifco: string
 ): Promise<string[]> {
-  if (sifcoDb) {
-    const filas = await sifcoDb
-      .select({ pre_numero: prestamos.pre_numero })
-      .from(prestamos)
-      .where(eq(prestamos.pre_cli_cod, codigoClienteSifco));
+  const filasEspejo = sifcoDb
+    ? await sifcoDb
+        .select({ pre_numero: prestamos.pre_numero })
+        .from(prestamos)
+        .where(eq(prestamos.pre_cli_cod, codigoClienteSifco))
+    : [];
 
-    if (filas.length) {
-      return filas.map((fila) => fila.pre_numero);
-    }
-  }
+  // 10s y no los 30s del cliente: acá hay un asesor esperando en pantalla. Los
+  // 30s son el techo de los caminos por lote (sync, migración), donde una
+  // respuesta lenta sigue siendo útil; en el gate una respuesta a los 25s ya no
+  // le sirve a nadie. Al vencerse, el throw sube y sale SERVICIO_NO_DISPONIBLE.
+  const respuesta = await consultarPrestamosPorCliente(
+    Number(codigoClienteSifco),
+    TIMEOUT_PRESTAMOS_GATE_MS
+  );
 
-  const respuesta = await consultarPrestamosPorCliente(Number(codigoClienteSifco));
-
-  return (respuesta?.Prestamos ?? [])
-    .map((prestamo) => prestamo.NumeroPrestamo)
-    .filter((numero): numero is string => Boolean(numero));
+  // La misma unión que usa el llamador para los números del CRM: deduplica y
+  // descarta vacíos.
+  return unirNumerosCredito(
+    filasEspejo.map((fila) => fila.pre_numero ?? ""),
+    (respuesta?.Prestamos ?? []).map((prestamo) => prestamo.NumeroPrestamo ?? "")
+  );
 }
 
 async function obtenerHistorialMora(

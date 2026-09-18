@@ -10,6 +10,7 @@ import {
   nombreClienteSifco,
   respuestaClienteNoEncontrado,
   respuestaServicioNoDisponible,
+  siguientePasoConsulta,
   unirNumerosCredito,
   type CreditoConsultaMora,
   type FilaCreditoMora,
@@ -238,6 +239,20 @@ describe("unión de números de crédito", () => {
     expect(unirNumerosCredito([], undefined)).toEqual([]);
   });
 
+  it("el espejo con filas NO descarta lo que trae el API: se unen", () => {
+    // La misma unión la usa `obtenerNumerosPrestamo` para juntar el espejo
+    // `sifco.prestamos` con la respuesta del API. Antes el espejo cortaba la
+    // consulta apenas devolvía algo, y un espejo PARCIALMENTE atrasado —tiene
+    // el préstamo viejo, le falta el que acaba de caer en mora— armaba el
+    // veredicto sobre media cartera y salía SIN_MORA.
+    expect(
+      unirNumerosCredito(
+        ["01010214124060"],
+        ["01010214124060", "01010214115650"],
+      ).sort(),
+    ).toEqual(["01010214115650", "01010214124060"]);
+  });
+
   it("el cliente sin ficha en SIFCO llega igual por los números del CRM", () => {
     // SIFCO no devolvió nada porque no tiene ficha suya; los créditos nacieron
     // todos en el CRM. Sin esta unión no habría un solo número que consultar.
@@ -245,6 +260,53 @@ describe("unión de números de crédito", () => {
       "CRM-abc",
       "insoluto-9",
     ]);
+  });
+});
+
+describe("siguiente paso de la consulta", () => {
+  it("con números que mirar va a buscar los créditos", () => {
+    expect(
+      siguientePasoConsulta({ cantidadFichas: 1, cantidadNumeros: 2 }),
+    ).toBe("BUSCAR_CREDITOS");
+  });
+
+  it("el cliente sin ficha pero con números del CRM también se busca", () => {
+    expect(
+      siguientePasoConsulta({ cantidadFichas: 0, cantidadNumeros: 1 }),
+    ).toBe("BUSCAR_CREDITOS");
+  });
+
+  it("ficha válida sin un solo préstamo es un cliente conocido y al día", () => {
+    // 🔴 El caso que salía CLIENTE_NO_ENCONTRADO tirando la ficha: el core sí
+    // sabe quién es, solo que no tiene créditos. Responder "no es cliente"
+    // borraba un dato cierto y le negaba al CRM el nombre que ya tenía.
+    expect(
+      siguientePasoConsulta({ cantidadFichas: 1, cantidadNumeros: 0 }),
+    ).toBe("RESPONDER_SIN_CREDITOS");
+  });
+
+  it("ni ficha ni números: recién ahí el DPI no le consta a nadie", () => {
+    expect(
+      siguientePasoConsulta({ cantidadFichas: 0, cantidadNumeros: 0 }),
+    ).toBe("CLIENTE_NO_ENCONTRADO");
+  });
+
+  it("el cliente conocido y sin créditos sale encontrado y SIN_MORA", () => {
+    // Lo que el controller arma cuando el paso es RESPONDER_SIN_CREDITOS.
+    const respuesta = construirRespuesta({
+      cliente: { codigoClienteSifco: "4821", nombre: "ANA LOPEZ" },
+      creditos: [],
+      historialMora: [],
+      consultadoEn: CONSULTADO_EN,
+    });
+
+    expect(respuesta.encontrado).toBeTrue();
+    expect(respuesta.motivo).toBe("SIN_MORA");
+    expect(respuesta.puedeContinuar).toBeTrue();
+    expect(respuesta.cliente).toEqual({
+      codigoClienteSifco: "4821",
+      nombre: "ANA LOPEZ",
+    });
   });
 });
 

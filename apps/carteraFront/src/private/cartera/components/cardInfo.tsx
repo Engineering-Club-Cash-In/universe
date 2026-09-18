@@ -757,6 +757,31 @@ export function MiniCardCredito({
                     </span>
                   </div>
 
+                  {/*
+                    Los dos campos del FORMULARIO, que también entran al total.
+                    Sin estas filas el desglose no cuadraba con su propio total:
+                    una cuota de Q1,000 con Q100 de Otros mostraba «Normal:
+                    Q1,000» y debajo «TOTAL: Q1,100», con Q100 que no salían de
+                    ninguna línea. El asesor no tenía cómo conciliarlo.
+                  */}
+                  {(otrosFormulario ?? 0) > 0 && (
+                    <div className="flex items-center justify-between pb-2 border-b border-yellow-200">
+                      <span className="text-xs text-gray-600">Otros:</span>
+                      <span className="text-sm font-bold text-indigo-700">
+                        Q{(otrosFormulario ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+
+                  {(abonoDirectoCapitalFormulario ?? 0) > 0 && (
+                    <div className="flex items-center justify-between pb-2 border-b border-yellow-200">
+                      <span className="text-xs text-gray-600">Abono a capital:</span>
+                      <span className="text-sm font-bold text-indigo-700">
+                        Q{(abonoDirectoCapitalFormulario ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+
                   {/* Abonos realizados */}
                   {abonosNum > 0 && (
                     <div className="flex items-center justify-between pb-2 border-b border-yellow-200">

@@ -408,6 +408,38 @@ describe("historial de mora compuesto", () => {
 
     expect(evento.monto).toBe("0.00");
   });
+
+  it("lee el timestamp sin zona de la BD como UTC, no como hora local", () => {
+    // Las columnas `timestamp` sin zona de cartera guardan UTC y el driver las
+    // entrega como string desnudo. Interpretarlo en la zona del PROCESO
+    // (TZ=America/Guatemala en el servidor) corre esa fecha +6h — y como las
+    // fuentes conviven con fechas que sí llegan como instante (Date), el
+    // desfase invierte el orden: el INCREMENTO de las 23:00Z se leía como
+    // 05:00Z del día siguiente y se colaba ARRIBA del convenio de las 02:00Z.
+    const historial = construirHistorialMora({
+      eventos: [
+        {
+          fecha: "2026-03-20 23:00:00",
+          monto_nuevo: "450.00",
+          tipo_evento: "INCREMENTO",
+          numeroCreditoSifco: "A",
+        },
+      ],
+      morasCerradas: [],
+      convenios: [
+        {
+          fecha_convenio: new Date("2026-03-21T02:00:00.000Z"),
+          monto_total_convenio: "9000.00",
+          numeroCreditoSifco: "A",
+        },
+      ],
+    });
+
+    expect(historial.map((e) => [e.evento, e.fecha])).toEqual([
+      ["CONVENIO", "2026-03-21T02:00:00.000Z"],
+      ["INCREMENTO", "2026-03-20T23:00:00.000Z"],
+    ]);
+  });
 });
 
 describe("nombre del cliente de SIFCO", () => {

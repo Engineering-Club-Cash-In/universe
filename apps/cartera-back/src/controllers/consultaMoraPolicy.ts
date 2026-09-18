@@ -4,6 +4,8 @@
  * quede cubierto por tests que corren siempre.
  */
 
+import { aInstante } from "../utils/functions/diaGuatemala";
+
 export type MotivoConsultaMora =
   | "SIN_MORA"
   | "MORA_ACTIVA"
@@ -467,8 +469,21 @@ export function nombreClienteSifco(cliente: {
     .join(" ");
 }
 
+/**
+ * Las fechas del historial llegan de columnas `timestamp` SIN zona
+ * (`moras_historial.fecha`, `moras_credito.fecha`, `convenios_pago.fecha_convenio`)
+ * y el driver las entrega como string desnudo ("2026-09-09 05:59:05.245566").
+ * `new Date(...)` interpretaría ese string en la zona del PROCESO, así que bajo
+ * TZ=America/Guatemala el historial salía corrido +6h —y con eso hasta cambiaba
+ * el orden descendente de dos eventos cercanos a la medianoche—. Se usa el
+ * helper canónico `aInstante`, que marca como UTC lo que no trae zona.
+ */
 function aISO(fecha: Date | string): string {
-  return fecha instanceof Date ? fecha.toISOString() : new Date(fecha).toISOString();
+  const instante = aInstante(fecha);
+  // `aInstante` solo devuelve null ante algo que la BD no debería producir. Se
+  // conserva el comportamiento anterior (reventar) en lugar de inventar una
+  // fecha: un evento de mora fechado en falso es peor que un error visible.
+  return (instante ?? new Date(fecha as string)).toISOString();
 }
 
 function aMonto(monto: string | number | null | undefined): string {

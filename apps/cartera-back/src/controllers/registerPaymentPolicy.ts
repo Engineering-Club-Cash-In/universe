@@ -1150,23 +1150,29 @@ export const crearEstampadorOtros = (
 /**
  * Cuánto `otros` carga la fila que el loop está por escribir para esta cuota.
  *
- * `filaSeEscribeSinOtros` es la misma pregunta de `debeInsertarFilaParcialCuota`
- * pero con `otros: 0`: ¿esta cuota escribe fila por su propia plata (abonos,
- * mora o el sello del convenio)? Si no, devuelve 0 SIN consumir el sello, así
- * la cuota se salta limpia y el `otros` sigue vivo para la siguiente. Si sí, se
- * lleva el sello y —sólo en la cuota 1— el ajuste por fecha ideal, que comparte
- * el campo con lo que el operador tipeó.
+ * `filaSeEscribeSinOtrosManual` es la misma pregunta de
+ * `debeInsertarFilaParcialCuota` pero SIN contar el `otros` que el operador
+ * tipeó: ¿esta cuota escribe fila por su propia plata (abonos, mora, el sello
+ * del convenio o el ajuste por fecha ideal de la cuota 1)? Si no, devuelve 0
+ * SIN consumir el sello, así la cuota se salta limpia y el `otros` sigue vivo
+ * para la siguiente. Si sí, se lleva el sello y el ajuste, que comparte el
+ * campo con lo tipeado.
+ *
+ * El ajuste va de los dos lados a propósito: su monto ya se descontó del
+ * disponible antes del loop, así que tiene que forzar la fila que lo registra
+ * (y que lo marca como cobrado). El `otros` manual no: ese es el que dejaba
+ * filas fantasma.
  */
 export const resolverOtrosDeLaFila = ({
-  filaSeEscribeSinOtros,
+  filaSeEscribeSinOtrosManual,
   estamparOtros,
   ajusteFechaIdeal = 0,
 }: {
-  filaSeEscribeSinOtros: boolean;
+  filaSeEscribeSinOtrosManual: boolean;
   estamparOtros: () => string;
   ajusteFechaIdeal?: BigInput | null;
 }): Big =>
-  filaSeEscribeSinOtros
+  filaSeEscribeSinOtrosManual
     ? new Big(estamparOtros()).plus(new Big(ajusteFechaIdeal ?? 0))
     : new Big(0);
 

@@ -1499,6 +1499,14 @@ export const insertPayment = async ({ body, set }: any) => {
         // mora es legítimo y debe escribir su fila aunque ninguna cuota absorba.
         const esPrimeraCuota = cuotas_completas === 0 && cuotas_parciales === 0;
         const moraParaPago = esPrimeraCuota ? moraBig : new Big(0);
+        // El ajuste por fecha ideal solo se cobra en la cuota 1 (no en "la
+        // primera que se procese en este pago"). Comparte el campo `otros` con
+        // lo que el operador tipeó a mano; para aislarlo, ver
+        // ajuste_fecha_ideal_pago.fecha_cobro.
+        const ajusteFechaIdealParaFila =
+          esPrimeraCuota && cuota.cuotas_credito.numero_cuota === 1
+            ? ajusteFechaIdealMonto
+            : new Big(0);
         // `otros`, en cambio, viaja hasta la primera fila que la boleta va a
         // escribir DE TODOS MODOS (ver `crearEstampadorOtros`). Si se estampa
         // en la primera cuota recorrida y esa cuota ya está cubierta por un
@@ -1506,26 +1514,25 @@ export const insertPayment = async ({ body, set }: any) => {
         // `monto_aplicado = 0` —la que `debeInsertarFilaParcialCuota` existe
         // para evitar— y queda colgado de una cuota que no cobró nada (crédito
         // 8674: los Q10.32 se quedaron en la cuota 6 y la 7, que sí cobró los
-        // Q2,989.68, salió sin ellos). Se pregunta con `otros: 0` justamente
-        // para saber si la fila se escribe por sí sola.
-        const filaSeEscribeSinOtros = debeInsertarFilaParcialCuota({
+        // Q2,989.68, salió sin ellos).
+        //
+        // El ajuste SÍ entra en la pregunta: su monto ya se descontó de
+        // `disponible_restante` antes del loop, así que si la cuota 1 se
+        // saltara, ese dinero quedaría sin fila que lo registre y el ajuste sin
+        // marcar como cobrado (`claimAjusteFechaIdealPago` corre con la
+        // escritura de la fila) — se volvería a cobrar en el siguiente pago.
+        // Lo único que no puede forzar la fila es el `otros` tipeado a mano.
+        const filaSeEscribeSinOtrosManual = debeInsertarFilaParcialCuota({
           totalPagado,
           mora: moraParaPago,
-          otros: 0,
+          otros: ajusteFechaIdealParaFila,
           // Peek NO consumidor, igual que abajo.
           pagoConvenio: estamparPagoConvenio.pendiente(),
         });
-        // El ajuste solo se suma en la cuota 1 (no en "la primera que se
-        // procese en este pago"). Comparte el campo "otros" con lo que el
-        // operador tipeó a mano; para aislar el ajuste, ver
-        // ajuste_fecha_ideal_pago.fecha_cobro.
         const otrosParaPago = resolverOtrosDeLaFila({
-          filaSeEscribeSinOtros,
+          filaSeEscribeSinOtrosManual,
           estamparOtros,
-          ajusteFechaIdeal:
-            esPrimeraCuota && cuota.cuotas_credito.numero_cuota === 1
-              ? ajusteFechaIdealMonto
-              : 0,
+          ajusteFechaIdeal: ajusteFechaIdealParaFila,
         });
 
         const pagoData = {

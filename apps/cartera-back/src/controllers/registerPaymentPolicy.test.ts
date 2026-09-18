@@ -860,7 +860,7 @@ describe("crearEstampadorOtros / resolverOtrosDeLaFila", () => {
 
     // Cuota 6: sin abonos, sin mora, sin convenio → no escribe fila.
     const cuota6 = registerPaymentPolicy.resolverOtrosDeLaFila({
-      filaSeEscribeSinOtros: registerPaymentPolicy.debeInsertarFilaParcialCuota({
+      filaSeEscribeSinOtrosManual: registerPaymentPolicy.debeInsertarFilaParcialCuota({
         totalPagado: 0,
         mora: 0,
         otros: 0,
@@ -874,7 +874,7 @@ describe("crearEstampadorOtros / resolverOtrosDeLaFila", () => {
 
     // Cuota 7: cobra Q2,989.68 → escribe fila y se lleva el otros.
     const cuota7 = registerPaymentPolicy.resolverOtrosDeLaFila({
-      filaSeEscribeSinOtros: registerPaymentPolicy.debeInsertarFilaParcialCuota({
+      filaSeEscribeSinOtrosManual: registerPaymentPolicy.debeInsertarFilaParcialCuota({
         totalPagado: 2989.68,
         mora: 0,
         otros: 0,
@@ -891,7 +891,7 @@ describe("crearEstampadorOtros / resolverOtrosDeLaFila", () => {
     const estamparOtros = registerPaymentPolicy.crearEstampadorOtros(10.32);
 
     const fila = registerPaymentPolicy.resolverOtrosDeLaFila({
-      filaSeEscribeSinOtros: registerPaymentPolicy.debeInsertarFilaParcialCuota({
+      filaSeEscribeSinOtrosManual: registerPaymentPolicy.debeInsertarFilaParcialCuota({
         totalPagado: 0,
         mora: 638.67,
         otros: 0,
@@ -907,9 +907,33 @@ describe("crearEstampadorOtros / resolverOtrosDeLaFila", () => {
     const estamparOtros = registerPaymentPolicy.crearEstampadorOtros(10.32);
 
     const fila = registerPaymentPolicy.resolverOtrosDeLaFila({
-      filaSeEscribeSinOtros: true,
+      filaSeEscribeSinOtrosManual: true,
       estamparOtros,
       ajusteFechaIdeal: 25,
+    });
+
+    expect(fila.toString()).toBe("35.32");
+  });
+
+  // El ajuste ya se descontó del disponible antes del loop: si la cuota 1 se
+  // saltara, ese dinero quedaría sin fila y el ajuste sin marcar como cobrado,
+  // listo para volver a cobrarse. Por eso entra en la pregunta.
+  it("el ajuste de la cuota 1 obliga a escribir la fila aunque no absorba nada", () => {
+    const ajusteFechaIdeal = 25;
+    const filaSeEscribeSinOtrosManual =
+      registerPaymentPolicy.debeInsertarFilaParcialCuota({
+        totalPagado: 0,
+        mora: 0,
+        otros: ajusteFechaIdeal,
+        pagoConvenio: 0,
+      });
+    expect(filaSeEscribeSinOtrosManual).toBe(true);
+
+    const estamparOtros = registerPaymentPolicy.crearEstampadorOtros(10.32);
+    const fila = registerPaymentPolicy.resolverOtrosDeLaFila({
+      filaSeEscribeSinOtrosManual,
+      estamparOtros,
+      ajusteFechaIdeal,
     });
 
     expect(fila.toString()).toBe("35.32");
@@ -919,7 +943,7 @@ describe("crearEstampadorOtros / resolverOtrosDeLaFila", () => {
     const estamparOtros = registerPaymentPolicy.crearEstampadorOtros(10.32);
 
     const fila = registerPaymentPolicy.resolverOtrosDeLaFila({
-      filaSeEscribeSinOtros: false,
+      filaSeEscribeSinOtrosManual: false,
       estamparOtros,
       ajusteFechaIdeal: 25,
     });

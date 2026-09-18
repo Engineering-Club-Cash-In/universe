@@ -1338,20 +1338,22 @@ describe("otros: se estampa en la fila que la boleta escribe, no en la primera c
     // Shorthand a propósito: pasarle otra cosa (p. ej. `esPrimeraCuota`) es
     // exactamente la regresión que este test ataja.
     expect(bloqueOtros).toMatch(
-      /resolverOtrosDeLaFila\(\{\s*\n\s*filaSeEscribeSinOtros,/,
+      /resolverOtrosDeLaFila\(\{\s*\n\s*filaSeEscribeSinOtrosManual,/,
     );
     expect(bloqueOtros).not.toContain("esPrimeraCuota ? otrosBig");
   });
 
   it("pregunta si la fila se escribe SIN contar el otros", () => {
     const inicio = registerPaymentSource.indexOf(
-      "        const filaSeEscribeSinOtros = debeInsertarFilaParcialCuota({",
+      "        const filaSeEscribeSinOtrosManual = debeInsertarFilaParcialCuota({",
     );
     expect(inicio).toBeGreaterThan(-1);
-    const bloque = registerPaymentSource.slice(inicio, inicio + 300);
-    // Con `otros` distinto de 0 acá, la pregunta se responde sola y la fila
-    // fantasma vuelve.
-    expect(bloque).toContain("otros: 0,");
+    const bloque = registerPaymentSource.slice(inicio, inicio + 320);
+    // Si acá entrara el `otros` tipeado, la pregunta se respondería sola y la
+    // fila fantasma vuelve. Solo el ajuste de la cuota 1 puede forzarla: su
+    // monto ya salió del disponible y necesita fila que lo registre.
+    expect(bloque).toContain("otros: ajusteFechaIdealParaFila,");
+    expect(bloque).not.toContain("otros: otrosBig");
     expect(bloque).toContain("estamparPagoConvenio.pendiente()");
   });
 });

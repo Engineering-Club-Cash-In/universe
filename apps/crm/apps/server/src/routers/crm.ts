@@ -19,7 +19,6 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord, auditedTransaction } from "../lib/audit";
 import {
 	isReservedBankCoverageDescription,
 	redactBankStatementCoverageEvidence,
@@ -64,6 +63,7 @@ import {
 	hasStaleAnalysisChecklistDocumentState,
 	hasStaleAnalysisChecklistVehicleState,
 } from "../lib/analysis-checklist";
+import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
 	rebuildClientDocumentChecklistInTransaction,
 	refreshChecklistForClientDocuments,
@@ -77,6 +77,7 @@ import {
 	getCreditAnalysisOwnerCondition,
 } from "../lib/credit-analysis-ownership";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
+import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { eqDpi } from "../lib/dpi-lookup";
 import {
 	calcularAjusteFechaIdeal,
@@ -92,6 +93,11 @@ import {
 	aplicarDeltaMontosInversionistas,
 } from "../lib/fecha-ideal-cotizacion";
 import {
+	evaluarGateMoraDpi,
+	requiereConsultaDeMora,
+	resolverEdicionConMora,
+} from "../lib/gate-mora-dpi";
+import {
 	getGuatemalaMonthWindow,
 	toDateStrGT,
 } from "../lib/guatemala-month-window";
@@ -100,8 +106,8 @@ import {
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
-import { buildLeadDuplicateConflict } from "./lead-duplicate-conflict";
 import { getLeadSourceLabel } from "../lib/lead-sources";
+import { numerosSifcoConocidosPorDpi } from "../lib/numeros-sifco-por-dpi";
 import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
 	buildOpportunityRelationshipInvariantCondition,
@@ -114,7 +120,6 @@ import {
 	stripUnchangedFrozenFields,
 	type WonOpportunityFrozenField,
 } from "../lib/opportunity-stage-guard";
-import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -123,12 +128,14 @@ import {
 	getFileUrl,
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
+import { resolverValidacionMora } from "../lib/validacion-mora";
 import {
 	formatMissingFields,
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
 import { carteraBackClient } from "../services/cartera-back-client";
+import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import {
 	DocumentIntegrityError,
 	upsertOpportunityCreditAnalysis,
@@ -143,6 +150,7 @@ import type { StatusCreditEnum } from "../types/cartera-back";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { resetBankStatementCreditAnalysis } from "./bank-analysis";
 import { BankStatementCoverageSaveError } from "./bank-analysis-coverage";
+import { buildLeadDuplicateConflict } from "./lead-duplicate-conflict";
 import { createNotification } from "./notifications";
 import {
 	getManualBankUploadCleanupDescription,
@@ -325,6 +333,22 @@ export async function getCurrentClientCreditsFromCartera(
 ) {
 	return getClientCreditsFromCartera(fetchCredits, { mes: 0, anio: 0 });
 }
+
+/**
+ * Las dependencias de producción del gate de mora. La regla vive en
+ * `lib/gate-mora-dpi.ts` sin saber de HTTP ni de bitácora; acá se le enchufan.
+ */
+const depsGateMora = {
+	consultar: (dpi: string, numerosCreditoConocidos?: string[]) =>
+		carteraBackClient.consultarMoraPorDpi(dpi, numerosCreditoConocidos),
+	numerosCreditoConocidos: numerosSifcoConocidosPorDpi,
+	// La palanca de emergencia de siempre: la misma bandera con la que el resto
+	// del CRM degrada cuando cartera no está. Apagarla deja pasar sin consultar
+	// —fail-open deliberado, ver `habilitado` en `lib/gate-mora-dpi.ts`— y cada
+	// paso así queda en la bitácora.
+	habilitado: isCarteraBackEnabled,
+	anotar: auditRecord,
+};
 
 const CARTERA_PAGE_FETCH_SIZE = 100;
 
@@ -1244,6 +1268,13 @@ export const crmRouter = {
 					});
 				}
 				normalizedDpi = resultado.dpiLimpio;
+
+				// Alta: el DPI entra al sistema por primera vez, así que siempre se
+				// consulta. Fail-closed — si cartera no contesta, no entra nadie.
+				const gate = await evaluarGateMoraDpi(normalizedDpi, depsGateMora);
+				if (gate.rechazado) {
+					throw new ORPCError("BAD_REQUEST", { message: gate.mensaje });
+				}
 			}
 
 			// Validar DPI duplicado
@@ -1374,6 +1405,34 @@ export const crmRouter = {
 					});
 				}
 				updateData.dpi = resultado.dpiLimpio;
+
+				// 🔴 Solo se consulta si el DPI es nuevo o cambia. Si se consultara en
+				// toda edición, un cliente que ya está en mora quedaría imposible de
+				// editar y nadie podría corregirle el teléfono ni la dirección — y son
+				// justamente las fichas que cobranza toca todos los días.
+				const [leadGuardado] = await db
+					.select({ dpi: leads.dpi })
+					.from(leads)
+					.where(eq(leads.id, id))
+					.limit(1);
+
+				if (requiereConsultaDeMora(updateData.dpi, leadGuardado?.dpi)) {
+					const gate = await evaluarGateMoraDpi(updateData.dpi, depsGateMora);
+					// Válvula de corrección: un DPI mal tecleado cuyo valor correcto
+					// pertenece a alguien con mora sería incorregible para siempre. Solo
+					// admin, y queda anotado. Ver `resolverEdicionConMora`.
+					const resolucion = resolverEdicionConMora(
+						gate,
+						context.userRole,
+						{ entity: "lead", id, dpi: updateData.dpi },
+						auditRecord,
+					);
+					if (!resolucion.permitir) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: resolucion.mensaje,
+						});
+					}
+				}
 			}
 
 			// Admin and juridico can update any lead, others only their own
@@ -8223,6 +8282,16 @@ export const crmRouter = {
 				});
 			}
 
+			// Alta de co-deudor: siempre se consulta. Un co-deudor moroso respalda
+			// el crédito igual de mal que un titular moroso.
+			const gateCoDeudor = await evaluarGateMoraDpi(
+				resultadoDpi.dpiLimpio,
+				depsGateMora,
+			);
+			if (gateCoDeudor.rechazado) {
+				throw new ORPCError("BAD_REQUEST", { message: gateCoDeudor.mensaje });
+			}
+
 			// Verificar que la oportunidad existe
 			const [opportunity] = await db
 				.select({ id: opportunities.id })
@@ -8283,7 +8352,7 @@ export const crmRouter = {
 				scoredAt: z.date().nullable().optional(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			const { id, ...updateData } = input;
 
 			// Validar DPI si se envía
@@ -8295,6 +8364,38 @@ export const crmRouter = {
 					});
 				}
 				updateData.dpi = resultadoDpi.dpiLimpio;
+
+				// Igual que en `updateLead`: solo si el DPI es nuevo o cambia, para no
+				// dejar congelada la ficha de un co-deudor que ya está en mora.
+				const [coDeudorGuardado] = await db
+					.select({ dpi: coDebtors.dpi })
+					.from(coDebtors)
+					.where(eq(coDebtors.id, id))
+					.limit(1);
+
+				if (requiereConsultaDeMora(updateData.dpi, coDeudorGuardado?.dpi)) {
+					const gate = await evaluarGateMoraDpi(updateData.dpi, depsGateMora);
+					// Misma válvula que en `updateLead`: el DPI del co-deudor también se
+					// tipea mal y también hay que poder corregirlo. `id` va en `null`
+					// porque la bitácora solo conoce lead/opportunity/vehicle y este es
+					// un co-deudor; su uuid viaja en el detalle.
+					const resolucion = resolverEdicionConMora(
+						gate,
+						context.userRole,
+						{
+							entity: "lead",
+							id: null,
+							dpi: updateData.dpi,
+							datosExtra: { coDebtorId: id },
+						},
+						auditRecord,
+					);
+					if (!resolucion.permitir) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: resolucion.mensaje,
+						});
+					}
+				}
 			}
 
 			const [updatedCoDebtor] = await db
@@ -8773,5 +8874,75 @@ export const crmRouter = {
 			);
 
 			return { pipeline, ranking, activity, byTipoCredito, byMarca, byMedio };
+		}),
+
+	/**
+	 * ¿Este DPI ya es cliente y está en mora?
+	 *
+	 * Consulta de solo lectura contra cartera, para que la pantalla pueda avisar
+	 * antes de que alguien llene un formulario entero. NO es el gate: el corte
+	 * duro vive en `evaluarGateMoraDpi` (`lib/gate-mora-dpi.ts`) y ya está
+	 * enganchado en los puntos donde el CRM da de alta o cambia el DPI de una
+	 * persona. Este procedure existe aparte porque informa sin bloquear.
+	 *
+	 * **Fail-closed.** Si cartera o SIFCO no contestan, la respuesta es
+	 * `puedeContinuar: false` con motivo `SERVICIO_NO_DISPONIBLE`. Nunca se
+	 * traduce un fallo a "sin mora": el cliente HTTP lanza
+	 * `ConsultaMoraNoDisponibleError` justamente para que acá no haya forma de
+	 * confundir las dos cosas.
+	 *
+	 * **Las tres salidas quedan en la bitácora, no dos.** Bloqueado, limpio y
+	 * —la importante— no se pudo consultar. Con fail-closed una caída del core
+	 * frena TODAS las solicitudes, y sin esa tercera fila la auditoría no podría
+	 * distinguir "hubo 40 morosos esta mañana" de "SIFCO estuvo caído media
+	 * hora". La fila de servicio caído va con `ok: false`, así que además se
+	 * cuenta aparte de los bloqueos legítimos.
+	 *
+	 * La decisión vive en `lib/validacion-mora.ts` y acá solo se la cablea; de
+	 * ahí que las anotaciones de este procedure no salgan de este archivo.
+	 *
+	 * 🔴 **La respuesta se recorta por rol.** El veredicto completo trae el
+	 * expediente crediticio de un tercero: nombre, código de cliente SIFCO,
+	 * cada crédito con su estado, su monto en mora y sus cuotas atrasadas, y el
+	 * historial. `crmProcedure` deja entrar a `canAccessClients` —ventas,
+	 * analista, contabilidad, jurídico…—, así que sin recorte cualquier asesor
+	 * tecleando un DPI ajeno se lleva la ficha de deuda de esa persona, sin que
+	 * medie ninguna relación con un lead suyo.
+	 *
+	 * El criterio es `PERMISSIONS.canAccessCobros` (admin, cobros y supervisor
+	 * de cobros): es el predicado que el repo ya usa para "esta gente gestiona
+	 * la deuda en cartera", y son quienes tienen motivo para ver el detalle.
+	 * Los demás reciben solo el veredicto —`puedeContinuar`, `motivo`,
+	 * `mensaje`, `consultadoEn`—, que es exactamente lo que necesitan: la
+	 * pregunta que este procedure contesta es "¿sigo con este formulario?", y
+	 * para eso el detalle no aporta nada. `mensaje` ya dice "tiene mora activa
+	 * en 2 créditos" sin nombrar ni un número de crédito.
+	 */
+	validarMoraPorDpi: crmProcedure
+		.meta({ audit: { entity: "lead", action: "validar_mora_dpi" } })
+		.input(z.object({ dpi: z.string().min(1, "El DPI es requerido") }))
+		.handler(async ({ input, context }) => {
+			const resultado = await resolverValidacionMora(input.dpi, {
+				validar: validarDpi,
+				consultar: (dpi) => carteraBackClient.consultarMoraPorDpi(dpi),
+				anotar: auditRecord,
+			});
+
+			if (resultado.tipo === "dpi_invalido") {
+				throw new ORPCError("BAD_REQUEST", { message: resultado.error });
+			}
+
+			const { veredicto } = resultado;
+
+			if (!PERMISSIONS.canAccessCobros(context.userRole ?? "")) {
+				return {
+					puedeContinuar: veredicto.puedeContinuar,
+					motivo: veredicto.motivo,
+					mensaje: veredicto.mensaje,
+					consultadoEn: veredicto.consultadoEn,
+				};
+			}
+
+			return veredicto;
 		}),
 };

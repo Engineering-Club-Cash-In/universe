@@ -1,16 +1,23 @@
 import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
-import { auditRecord } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import { leads, opportunities } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
+import { auditRecord } from "../lib/audit";
 import { eqDpi } from "../lib/dpi-lookup";
 import { eqEmail } from "../lib/email-lookup";
+import {
+	evaluarGateMoraDpi,
+	requiereConsultaDeMora,
+} from "../lib/gate-mora-dpi";
+import { numerosSifcoConocidosPorDpi } from "../lib/numeros-sifco-por-dpi";
 import { extractBearerToken, secretsMatch } from "../lib/service-token";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
+import { carteraBackClient } from "../services/cartera-back-client";
+import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 import {
@@ -22,6 +29,22 @@ import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
 } from "./public-lead";
+
+/**
+ * Las dependencias de producción del gate de mora. La regla vive en
+ * `lib/gate-mora-dpi.ts` sin saber de HTTP ni de bitácora; acá se le enchufan.
+ */
+const depsGateMora = {
+	consultar: (dpi: string, numerosCreditoConocidos?: string[]) =>
+		carteraBackClient.consultarMoraPorDpi(dpi, numerosCreditoConocidos),
+	numerosCreditoConocidos: numerosSifcoConocidosPorDpi,
+	// La palanca de emergencia de siempre: la misma bandera con la que el resto
+	// del CRM degrada cuando cartera no está. Apagarla deja pasar sin consultar
+	// —fail-open deliberado, ver `habilitado` en `lib/gate-mora-dpi.ts`— y cada
+	// paso así queda en la bitácora.
+	habilitado: isCarteraBackEnabled,
+	anotar: auditRecord,
+};
 
 /**
  * Función auxiliar para encontrar un lead por email o DPI
@@ -235,6 +258,17 @@ export async function updateLeadByEmail(c: Context) {
 				);
 			}
 			dpi = resultadoDpi.dpiLimpio;
+
+			// 🔴 Solo si el DPI es nuevo o cambia. El portal reenvía la ficha
+			// completa en cada guardado, así que con el mismo DPI de siempre esto
+			// es una edición común —dirección, teléfono— y no puede quedar trabada
+			// porque la persona esté en mora.
+			if (requiereConsultaDeMora(dpi, existingLead.dpi)) {
+				const gate = await evaluarGateMoraDpi(dpi, depsGateMora);
+				if (gate.rechazado) {
+					return c.json({ success: false, error: gate.mensaje }, 400);
+				}
+			}
 		}
 
 		// Check if new DPI or phone already exists in another lead
@@ -837,6 +871,25 @@ export async function createPortalRegisterLead(c: Context) {
 		}
 
 		// Lead no existe → registro nuevo: crear lead + oportunidad
+
+		// 🔴 El gate de mora va ACÁ y no arriba, aunque arriba se vea "antes de
+		// tocar la base": este endpoint hace dos cosas distintas según si la ficha
+		// existe. Si existe, la persona solo está entrando al portal —no se crea
+		// nada— y ese es justamente el lugar donde un cliente en mora tiene que
+		// poder entrar a ver y pagar su saldo. Con el gate arriba se llevaba un
+		// 400 y quedaba fuera del portal por estar atrasado, que es al revés de lo
+		// que queremos. El corte solo aplica al alta de verdad, que es lo de abajo.
+		//
+		// La idempotencia del reintento tampoco se rompe: el camino que devuelve
+		// la ficha existente ya retornó más arriba sin pasar por acá, así que un
+		// reintento de un alta que sí se completó nunca vuelve a consultar mora.
+		//
+		// Fail-closed: si cartera no contesta, el alta no sigue.
+		const gate = await evaluarGateMoraDpi(dpi, depsGateMora);
+		if (gate.rechazado) {
+			return c.json({ success: false, error: gate.mensaje }, 400);
+		}
+
 		const salesUserForLead = await getSalesUserWithLeastLeads();
 		if (!salesUserForLead) {
 			return c.json(

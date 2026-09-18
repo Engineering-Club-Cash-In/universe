@@ -1556,19 +1556,58 @@ export const crmRouter = {
 				? and(whereClause, noExisteOportunidadCandanteDelLead(id))
 				: whereClause;
 
-			const updatedLead = await db
-				.update(leads)
-				.set({
-					...updateData,
-					monthlyIncome: updateData.monthlyIncome?.toString(),
-					loanAmount: updateData.loanAmount?.toString(),
-					score: updateData.score?.toString(),
-					...(assignedTo && { assignedTo }),
-					...(updateData.score !== undefined && { scoredAt: new Date() }),
-					updatedAt: new Date(),
-				})
-				.where(whereDelUpdate)
-				.returning();
+			// 🔴 El cambio de DPI y su revalidación van en UNA transacción.
+			//
+			// En dos transacciones separadas, una revalidación que falle dejaba el
+			// DPI nuevo COMMITEADO con las oportunidades todavía aprobadas contra la
+			// identidad vieja: el expediente sobreviviente afirma cosas sobre una
+			// persona que ya no es la del DPI. Es exactamente el estado que el reset
+			// existe para impedir, y se alcanzaba con que la revalidación se cayera.
+			//
+			// Ahora o entran las dos escrituras o no entra ninguna. `auditedTransaction`
+			// descarta además las anotaciones de lo que el rollback se llevó.
+			const updatedLead = await auditedTransaction(async (tx) => {
+				const filas = await tx
+					.update(leads)
+					.set({
+						...updateData,
+						monthlyIncome: updateData.monthlyIncome?.toString(),
+						loanAmount: updateData.loanAmount?.toString(),
+						score: updateData.score?.toString(),
+						...(assignedTo && { assignedTo }),
+						...(updateData.score !== undefined && { scoredAt: new Date() }),
+						updatedAt: new Date(),
+					})
+					.where(whereDelUpdate)
+					.returning();
+
+				// Cero filas se resuelve afuera (necesita leer el candado ya
+				// comprometido); acá solo se sale sin escribir nada más.
+				if (filas.length === 0) return filas;
+
+				// 🔴 El override del admin sobre el candado no es gratis. La válvula
+				// existe para corregir un DPI mal tecleado, pero cuando se usa, RENAP,
+				// buró y los documentos de las oportunidades candantes quedaron hechos
+				// contra el DPI VIEJO. Se las manda de vuelta a análisis: corregir el
+				// DPI a esta altura cuesta re-validar.
+				//
+				// Las salvaguardas (won y ≥90% no se tocan, solo se avisa) viven dentro
+				// de `revalidarOportunidades`. Si no puede completarse, lanza y este
+				// mismo `tx` revierte el DPI que se acaba de escribir.
+				if (candadoDpi?.overrideAdmin && candadoDpi.candantes?.length) {
+					await revalidarOportunidades({
+						oportunidades: candadoDpi.candantes,
+						accion: "candado_override_revalidacion",
+						detalle:
+							"un administrador cambió el DPI del lead pese al candado; la validación de identidad de esta oportunidad se hizo contra el DPI anterior",
+						datosExtra: { leadId: id, dpiNuevo: updateData.dpi },
+						anotar: auditRecord,
+						database: tx,
+					});
+				}
+
+				return filas;
+			});
 			if (updatedLead.length === 0) {
 				// Con la condición puesta, cero filas puede significar que el candado
 				// se cerró en el medio. Responder NOT_FOUND ahí mandaría a buscar un
@@ -1600,25 +1639,6 @@ export const crmRouter = {
 			// `auditRecord` del update por el mismo motivo: son la misma escritura.
 			if (overrideDeMora) {
 				auditRecord(overrideDeMora);
-			}
-
-			// 🔴 El override del admin sobre el candado no es gratis. La válvula
-			// existe para corregir un DPI mal tecleado, pero cuando se usa, RENAP,
-			// buró y los documentos de las oportunidades candantes quedaron hechos
-			// contra el DPI VIEJO. Se las manda de vuelta a análisis: corregir el
-			// DPI a esta altura cuesta re-validar.
-			//
-			// Las salvaguardas (won y ≥90% no se tocan, solo se avisa) viven dentro
-			// de `revalidarOportunidades`.
-			if (candadoDpi?.overrideAdmin && candadoDpi.candantes?.length) {
-				await revalidarOportunidades({
-					oportunidades: candadoDpi.candantes,
-					accion: "candado_override_revalidacion",
-					detalle:
-						"un administrador cambió el DPI del lead pese al candado; la validación de identidad de esta oportunidad se hizo contra el DPI anterior",
-					datosExtra: { leadId: id, dpiNuevo: updateData.dpi },
-					anotar: auditRecord,
-				});
 			}
 
 			// Sync NIT to associated opportunities.
@@ -8571,14 +8591,41 @@ export const crmRouter = {
 						)
 					: eq(coDebtors.id, id);
 
-			const [updatedCoDebtor] = await db
-				.update(coDebtors)
-				.set({
-					...updateData,
-					updatedAt: new Date(),
-				})
-				.where(whereDelUpdate)
-				.returning();
+			// Igual que en `updateLead`: el cambio de DPI del co-deudor y la
+			// revalidación que cuesta van en UNA transacción. Separadas, una
+			// revalidación caída dejaba el DPI nuevo commiteado con la oportunidad
+			// aprobada contra la identidad vieja.
+			const [updatedCoDebtor] = await auditedTransaction(async (tx) => {
+				const filas = await tx
+					.update(coDebtors)
+					.set({
+						...updateData,
+						updatedAt: new Date(),
+					})
+					.where(whereDelUpdate)
+					.returning();
+
+				if (filas.length === 0) return filas;
+
+				// Mismo costo que en `updateLead`: si el admin abrió el candado, la
+				// oportunidad que respalda vuelve a análisis, porque su validación de
+				// identidad se hizo contra el DPI anterior del co-deudor. Es una sola
+				// oportunidad: el co-deudor cuelga de una, no de un lead. Si no puede
+				// completarse, lanza y este `tx` revierte el DPI recién escrito.
+				if (candadoDpi?.overrideAdmin && candadoDpi.candantes?.length) {
+					await revalidarOportunidades({
+						oportunidades: candadoDpi.candantes,
+						accion: "candado_override_revalidacion",
+						detalle:
+							"un administrador cambió el DPI del co-deudor pese al candado; la validación de identidad de esta oportunidad se hizo contra el DPI anterior",
+						datosExtra: { coDebtorId: id, dpiNuevo: updateData.dpi },
+						anotar: auditRecord,
+						database: tx,
+					});
+				}
+
+				return filas;
+			});
 
 			if (!updatedCoDebtor) {
 				// Cero filas con la condición puesta puede ser el candado cerrándose
@@ -8606,21 +8653,6 @@ export const crmRouter = {
 			// Recién acá: el override existe si el cambio existió.
 			if (overrideDeMora) {
 				auditRecord(overrideDeMora);
-			}
-
-			// Mismo costo que en `updateLead`: si el admin abrió el candado, la
-			// oportunidad que respalda vuelve a análisis, porque su validación de
-			// identidad se hizo contra el DPI anterior del co-deudor. Es una sola
-			// oportunidad: el co-deudor cuelga de una, no de un lead.
-			if (candadoDpi?.overrideAdmin && candadoDpi.candantes?.length) {
-				await revalidarOportunidades({
-					oportunidades: candadoDpi.candantes,
-					accion: "candado_override_revalidacion",
-					detalle:
-						"un administrador cambió el DPI del co-deudor pese al candado; la validación de identidad de esta oportunidad se hizo contra el DPI anterior",
-					datosExtra: { coDebtorId: id, dpiNuevo: updateData.dpi },
-					anotar: auditRecord,
-				});
 			}
 
 			return updatedCoDebtor;
@@ -8680,7 +8712,10 @@ export const crmRouter = {
 			// padre primero revienta en el acto cuando tiene análisis. Lo que hace que
 			// el orden ya no importe es la transacción: si el predicado no deja borrar
 			// al co-deudor, el throw de adentro revierte también estos dos deletes.
-			await db.transaction(async (tx) => {
+			// `auditedTransaction` y no `db.transaction`: ahora se anota DENTRO de la
+			// transacción (el override del admin y su revalidación), así que si algo
+			// revierte, esas anotaciones tienen que irse con la escritura.
+			await auditedTransaction(async (tx) => {
 				await tx
 					.delete(creditAnalysis)
 					.where(eq(creditAnalysis.coDebtorId, input.id));
@@ -8704,7 +8739,47 @@ export const crmRouter = {
 					.where(where)
 					.returning();
 
-				if (deletedCoDebtor) return;
+				if (deletedCoDebtor) {
+					// El paso del admin no es silencioso, igual que el del gate de mora:
+					// después hay que poder preguntar por qué salió ese co-deudor.
+					if (candado?.overrideAdmin && coDeudorABorrar) {
+						auditRecord({
+							entity: "opportunity",
+							id: coDeudorABorrar.opportunityId,
+							action: "candado_dpi_override_admin",
+							data: {
+								coDebtorId: input.id,
+								detalle:
+									"un administrador eliminó al co-deudor de una solicitud que ya pasó del 30%",
+							},
+						});
+
+						// 🔴 Y cuesta lo mismo que corregir el DPI: la oportunidad vuelve
+						// a análisis. Antes del override solo quedaba la bitácora y la
+						// solicitud seguía aprobada, con la evidencia de identidad
+						// producida contra un respaldo que ya no existe. Borrar al
+						// co-deudor analizado es el mismo costo que cambiarle el DPI
+						// (decisión del dueño del producto).
+						//
+						// 🔴 Va DENTRO de esta transacción —antes corría después de que
+						// cerrara—: si la revalidación no puede completarse, el borrado
+						// del co-deudor se revierte con ella. Si no, el respaldo
+						// desaparecía y la solicitud quedaba viva y aprobada sin él.
+						if (candado.candantes?.length) {
+							await revalidarOportunidades({
+								oportunidades: candado.candantes,
+								accion: "candado_override_revalidacion",
+								detalle:
+									"un administrador eliminó al co-deudor pese al candado; la validación de identidad de esta oportunidad se hizo con ese respaldo",
+								datosExtra: { coDebtorId: input.id },
+								anotar: auditRecord,
+								database: tx,
+							});
+						}
+					}
+
+					return;
+				}
 
 				// Cero filas con la condición puesta puede ser el candado cerrándose
 				// en el medio: se distingue del NOT_FOUND preguntando si la fila sigue
@@ -8736,37 +8811,6 @@ export const crmRouter = {
 					message: "Co-deudor no encontrado",
 				});
 			});
-
-			// El paso del admin no es silencioso, igual que el del gate de mora:
-			// después hay que poder preguntar por qué salió ese co-deudor.
-			if (candado?.overrideAdmin && coDeudorABorrar) {
-				auditRecord({
-					entity: "opportunity",
-					id: coDeudorABorrar.opportunityId,
-					action: "candado_dpi_override_admin",
-					data: {
-						coDebtorId: input.id,
-						detalle:
-							"un administrador eliminó al co-deudor de una solicitud que ya pasó del 30%",
-					},
-				});
-
-				// 🔴 Y cuesta lo mismo que corregir el DPI: la oportunidad vuelve a
-				// análisis. Antes del override solo quedaba la bitácora y la solicitud
-				// seguía aprobada, con la evidencia de identidad producida contra un
-				// respaldo que ya no existe. Borrar al co-deudor analizado es el mismo
-				// costo que cambiarle el DPI (decisión del dueño del producto).
-				if (candado.candantes?.length) {
-					await revalidarOportunidades({
-						oportunidades: candado.candantes,
-						accion: "candado_override_revalidacion",
-						detalle:
-							"un administrador eliminó al co-deudor pese al candado; la validación de identidad de esta oportunidad se hizo con ese respaldo",
-						datosExtra: { coDebtorId: input.id },
-						anotar: auditRecord,
-					});
-				}
-			}
 
 			return { success: true, message: "Co-deudor eliminado correctamente" };
 		}),

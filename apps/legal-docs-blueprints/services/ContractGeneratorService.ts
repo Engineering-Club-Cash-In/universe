@@ -1095,6 +1095,118 @@ export class ContractGeneratorService {
   /**
    * Espera a que haya un slot disponible para conversión PDF
    */
+  /**
+   * Manda a firmar un PDF que ya existe, sin generarlo desde el template.
+   *
+   * Es el camino para cuando jurídico sube el contrato a mano: hay casos en que
+   * el documento se arma fuera (una versión negociada, un escaneo corregido),
+   * pero el tipo de contrato sigue siendo uno de los que tenemos mapeados, así
+   * que las líneas de firma están donde siempre y se puede repartir por rol
+   * igual que en el camino automático.
+   *
+   * No se inventa nada: si el PDF subido no trae las líneas de firma que el
+   * layout declara, `locateSignatureWidgets` lanza `SignatureLayoutError` y no
+   * se manda nada a firmar. Un PDF que no es el contrato que dice ser se
+   * detecta acá y no cuando alguien vaya a firmarlo.
+   */
+  async signExistingPdf(
+    contractType: ContractType,
+    pdfBuffer: Buffer,
+    options: {
+      filenamePrefix?: string;
+      signers?: ContractSigner[];
+      observers?: string[];
+    } = {},
+  ): Promise<ContractGenerationResponse> {
+    const config = this.templateRegistry.get(contractType);
+    const descripcion = config?.description ?? contractType;
+    const baseFilename = options.filenamePrefix || `manual_${contractType}`;
+
+    const respuestaBase = {
+      templateId: 0,
+      nameDocument: [{ enum: contractType, label: descripcion }],
+      data: [],
+      contractType,
+      generatedAt: new Date().toISOString(),
+    };
+
+    try {
+      const signatureMode = getSignatureMode(contractType);
+
+      // El PDF se guarda siempre, aunque después falle la firma: es el
+      // documento que jurídico acaba de subir y perderlo no ayuda a nadie.
+      const { r2Key } = await uploadPdfToR2(pdfBuffer, baseFilename);
+
+      if (signatureMode === 'fisica') {
+        return {
+          ...respuestaBase,
+          success: true,
+          r2Key,
+          linkDocument: '',
+          signatureMode,
+          message: `Contrato ${contractType} subido para firma en papel`,
+        };
+      }
+
+      const signers = options.signers ?? [];
+      if (signers.length === 0) {
+        return {
+          ...respuestaBase,
+          success: false,
+          r2Key,
+          linkDocument: '',
+          signatureMode,
+          message: 'Contrato subido, pero sin firmantes',
+          error: 'No se recibió ningún firmante para este contrato',
+        };
+      }
+
+      if (!weeTrustService) {
+        return {
+          ...respuestaBase,
+          success: false,
+          r2Key,
+          linkDocument: '',
+          signatureMode,
+          message: 'Contrato subido, pero sin firma electrónica',
+          error: 'WeeTrust deshabilitado o no inicializado',
+        };
+      }
+
+      const signing = await weeTrustService.createDocumentForSigning(
+        baseFilename,
+        pdfBuffer,
+        contractType,
+        signers,
+        options.observers,
+      );
+
+      return {
+        ...respuestaBase,
+        success: true,
+        r2Key,
+        signing_links: signing.signs,
+        signatureMode,
+        linkDocument: signing.linkDocument,
+        signingProvider: 'weetrust',
+        documentID: signing.documentID,
+        signatories: signing.signatories,
+        message: `Contrato ${contractType} subido y enviado a firma`,
+      };
+    } catch (error) {
+      // A diferencia del camino automático, acá NO se cae a Documenso: el
+      // documento lo subió una persona y lo que corresponde es decírselo.
+      console.error(`[signExistingPdf] ${contractType}:`, error);
+      return {
+        ...respuestaBase,
+        success: false,
+        linkDocument: '',
+        message: 'No se pudo enviar el contrato a firma',
+        error: errorMessage(error),
+      };
+    }
+  }
+
   private async acquirePdfSlot(): Promise<void> {
     if (this.activePdfConversions < this.maxConcurrentPdfConversions) {
       this.activePdfConversions++;

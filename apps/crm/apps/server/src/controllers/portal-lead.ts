@@ -15,7 +15,11 @@ import {
 	MENSAJE_DPI_EN_BLANCO,
 	requiereConsultaDeMora,
 } from "../lib/gate-mora-dpi";
-import { evaluarCandadoDpi } from "../lib/lead-dpi-lock";
+import {
+	dpiCambia,
+	evaluarCandadoDpi,
+	noExisteOportunidadCandanteDelLead,
+} from "../lib/lead-dpi-lock";
 import {
 	numerosSifcoConocidosPorDpi,
 	numerosSifcoDelDpiYDelLead,
@@ -383,11 +387,28 @@ export async function updateLeadByEmail(c: Context) {
 			updateData.phone = phone;
 		}
 
+		// 🔴 Misma carrera que en el CRM: entre el candado de arriba y esta
+		// sentencia, otra transacción puede aprobar el análisis (30 → 40) y el DPI
+		// se escribiría igual sobre un expediente ya atado a la identidad vieja.
+		// Postgres re-evalúa el predicado tras esperar a la escritura rival, así
+		// que la condición viaja DENTRO del UPDATE.
+		//
+		// Solo cuando el DPI cambia de verdad: este update escribe también
+		// dirección y teléfono, y esas ediciones no tienen por qué trabarse. Acá
+		// no hay válvula de admin que valga: el portal es público.
+		const candadoEnElPredicado = dpiCambia(existingLead.dpi, dpi);
+		const whereDelUpdate = candadoEnElPredicado
+			? and(
+					eq(leads.id, existingLead.id),
+					noExisteOportunidadCandanteDelLead(existingLead.id),
+				)
+			: eq(leads.id, existingLead.id);
+
 		// Update the lead
 		const [updatedLead] = await db
 			.update(leads)
 			.set(updateData)
-			.where(eq(leads.id, existingLead.id))
+			.where(whereDelUpdate)
 			.returning({
 				id: leads.id,
 				firstName: leads.firstName,
@@ -398,6 +419,21 @@ export async function updateLeadByEmail(c: Context) {
 				direccion: leads.direccion,
 				updatedAt: leads.updatedAt,
 			});
+		if (!updatedLead && candadoEnElPredicado) {
+			// Cero filas con la condición puesta: el candado se cerró en el medio.
+			// Se contesta como el candado, con su mismo mensaje.
+			const candadoAhora = await evaluarCandadoDpi({
+				dpiActual: existingLead.dpi,
+				dpiNuevo: dpi,
+				sujeto: "portal",
+				leadId: existingLead.id,
+			});
+			if (candadoAhora.bloqueado) {
+				return c.json({ success: false, error: candadoAhora.message }, 400);
+			}
+		}
+
+		// Después del chequeo: con cero filas no hubo escritura que anotar.
 		auditRecord({
 			entity: "lead",
 			id: existingLead.id,

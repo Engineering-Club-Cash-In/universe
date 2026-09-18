@@ -48,6 +48,15 @@ SUPABASE_DB_URL="$U" bun run src/scripts/humo/03-boleta.ts            # una bole
 SUPABASE_DB_URL="$U" bun run src/scripts/humo/05-revertir.ts          # aplicar y revertir
 SUPABASE_DB_URL="$U" bun run src/scripts/humo/06-capital-con-otros.ts # abono a capital con otros
 SUPABASE_DB_URL="$U" bun run src/scripts/humo/07-doble-clic.ts        # dos clics en "declarar falsa"
+SUPABASE_DB_URL="$U" bun run src/scripts/humo/08-saldo-reversa.ts     # qué le quita la reversa al saldo
+SUPABASE_DB_URL="$U" bun run src/scripts/humo/09-doble-reversa.ts     # revertir DOS veces la misma fila
+```
+
+Los dos últimos necesitan además la migración `0039`:
+
+```bash
+docker exec -i cartera-local psql -U postgres -d smoke_rubros \
+  < drizzle/0039_saldo_a_favor_acreditado.sql
 ```
 
 ## Qué prueba cada uno
@@ -59,6 +68,8 @@ SUPABASE_DB_URL="$U" bun run src/scripts/humo/07-doble-clic.ts        # dos clic
 | `05-revertir` | al aplicar, el saldo baja a 0 y el reclamo queda sellado; al revertir, **el saldo vuelve** y el historial queda `creacion→abono→reversa` |
 | `06-capital-con-otros` | con `otros` encima, el total asignado **no supera la boleta** |
 | `07-doble-clic` | dos `falsePayment` simultáneos no duplican el espejo de inversionistas |
+| `08-saldo-reversa` | la reversa devuelve **lo que el pago acreditó**, no la boleta entera |
+| `09-doble-reversa` | revertir dos veces la misma fila no le resta dos veces al cliente |
 
 ## Lo que NO cubren
 

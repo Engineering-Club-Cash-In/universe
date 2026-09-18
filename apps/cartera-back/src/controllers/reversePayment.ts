@@ -490,6 +490,24 @@ export function createReversePayment(
             validationStatus: "no_required" as const,
             numeroAutorizacion: "",
             banco_id: null,
+
+            /**
+             * Y se limpia lo ACREDITADO, no sólo los montos.
+             *
+             * Sin esto la fila reseteada conserva el crédito de saldo a favor que
+             * ya se devolvió, y el endpoint acepta revertirla otra vez: la segunda
+             * reversa relee el mismo valor y se lo vuelve a restar al cliente.
+             *
+             * Medido contra una copia de producción: un pago que acreditó
+             * Q4,635,531.32 se revierte bien la primera vez, y la SEGUNDA se lleva
+             * los Q5,000 que el cliente ya tenía de antes. El piso en cero evita el
+             * negativo, pero no evita que le vacíe el saldo legítimo.
+             *
+             * Va en CERO y no en NULL a propósito: NULL significa "fila anterior a
+             * la 0039, no se sabe" y haría caer la reversa en la conducta vieja.
+             * Cero es el dato real — esta fila, ya revertida, no acredita nada.
+             */
+            saldo_a_favor_acreditado: "0",
           })
           .where(eq(pagos_credito.pago_id, pago_id));
 
@@ -552,6 +570,9 @@ export function createReversePayment(
               validationStatus: "no_required" as const,
               numeroAutorizacion: "",
               banco_id: null,
+              // Misma limpieza que la rama de arriba: sin esto una segunda
+              // reversa le vuelve a restar al cliente lo que este pago acreditó.
+              saldo_a_favor_acreditado: "0",
             })
             .where(eq(pagos_credito.pago_id, pago_id));
         }

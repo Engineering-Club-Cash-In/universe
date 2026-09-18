@@ -1288,7 +1288,11 @@ export class CarteraBackClient {
 
 		for (let attempt = 0; attempt <= this.config.retryAttempts; attempt++) {
 			try {
-				const response = await this.circuitBreaker.execute(
+				// 🔴 El PARSE del cuerpo vive DENTRO del execute: un servidor que manda
+				// headers y cuelga (o trunca) el JSON resolvía el fetch, el breaker
+				// anotaba éxito, y el fallo real ocurría después — cuelgues de cuerpo
+				// repetidos RESETEABAN el breaker en vez de abrirlo.
+				const data = await this.circuitBreaker.execute<T>(
 					async () => {
 						const requestOptions = await buildRequestOptions();
 						const res = await this.config.fetchTransport(url, requestOptions);
@@ -1311,7 +1315,7 @@ export class CarteraBackClient {
 										url,
 										retryOptions,
 									);
-									if (retryRes.ok) return retryRes;
+									if (retryRes.ok) return (await retryRes.json()) as T;
 									const retryText = await retryRes.text();
 									let retryData: { error?: string; message?: string } = {};
 									try {
@@ -1347,14 +1351,12 @@ export class CarteraBackClient {
 							);
 						}
 
-						return res;
+						return (await res.json()) as T;
 					},
 					// La señal del llamador no es cartera fallando: ver
 					// `esCancelacionDelLlamador`.
 					() => esCancelacionDelLlamador(options.signal),
 				);
-
-				const data = (await response.json()) as T;
 
 				// Cache successful GET requests
 				if (useCache && this.config.enableCache && options.method === "GET") {

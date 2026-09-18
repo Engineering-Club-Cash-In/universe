@@ -25,7 +25,30 @@ const INVENTARIO: Record<
 	string,
 	{ escrituras: number; anotaciones: number; estado: Estado; nota?: string }
 > = {
+	// Anota más de lo que escribe: además de la fila por escritura hay tres que
+	// registran decisiones sin escritura propia —el override del gate de mora, el
+	// del candado al borrar un co-deudor, y la revalidación al reabrir una
+	// oportunidad perdida que ya había cruzado el 30%—.
 	"routers/crm.ts": { escrituras: 17, anotaciones: 20, estado: "listo" },
+	// Manda oportunidades de vuelta a análisis cuando su validación de identidad
+	// quedó vieja: al reabrir una perdida avanzada, y cuando un admin abre el
+	// candado del DPI.
+	//
+	// `exento` de la regla de proximidad, NO de anotar: SÍ deja bitácora por cada
+	// oportunidad —también por las que las salvaguardas dejan intactas, con
+	// `ok: false`—, pero la escribe a través de `anotar`, que entra por
+	// parámetro. Es la misma convención de `gate-mora-dpi.ts`: en bun,
+	// reemplazar un módulo con `mock.module` es global al proceso, así que las
+	// dependencias viajan por parámetro y quedan testeables. El escáner busca el
+	// literal `auditRecord(` y por eso no las ve; los dos llamadores
+	// (`updateLead` y `updateCoDebtor`, en `routers/crm.ts`) le pasan
+	// `auditRecord` de verdad.
+	"lib/revalidacion-oportunidad.ts": {
+		escrituras: 1,
+		anotaciones: 0,
+		estado: "exento",
+		nota: "anota por `anotar` inyectado, no con el literal `auditRecord(`; ver comentario arriba",
+	},
 	"routers/vehicles.ts": { escrituras: 10, anotaciones: 10, estado: "listo" },
 	// Anota una vez más de lo que escribe: el rollback descarta las anotaciones
 	// de la transacción revertida y deja en su lugar el intento fallido.

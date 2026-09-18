@@ -13,8 +13,14 @@
 -- NULLABLE a propósito: las filas viejas no lo tienen y la reversa cae en la
 -- conducta de antes para ellas. Poner 0 por defecto sería peor — afirmaría que
 -- no acreditaron nada, y a las que sí acreditaron les impediría devolverlo.
+-- `numeric(18, 2)`, la MISMA precisión que `monto_boleta`, `abono_capital` y
+-- `usuarios.saldo_a_favor`. Tiene que aguantar lo mismo que ellas: el schema del
+-- request no le pone techo al monto, así que un pago que quepa en esas columnas
+-- pero no en ésta reventaría al estampar la atribución — después de insertar la
+-- fila, o sea un 500 que deja el pago escrito, la columna en NULL y el saldo sin
+-- acreditar.
 ALTER TABLE cartera.pagos_credito
-  ADD COLUMN IF NOT EXISTS saldo_a_favor_acreditado numeric(14, 2);
+  ADD COLUMN IF NOT EXISTS saldo_a_favor_acreditado numeric(18, 2);
 
 COMMENT ON COLUMN cartera.pagos_credito.saldo_a_favor_acreditado IS
   'Cuánto acreditó esta fila a usuarios.saldo_a_favor. NULL = fila anterior a la 0039; la reversa usa la conducta vieja.';

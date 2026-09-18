@@ -107,7 +107,15 @@ export async function traerDatasetCompletoPagalo(
 
   while (hayMas && filas.length < LIMITE_EXPORT_PAGALO) {
     const respuesta = await getPagaloSupervision(
-      { ...filtros, limit: PAGE_SIZE_EXPORT_PAGALO, offset },
+      {
+        ...filtros,
+        limit: PAGE_SIZE_EXPORT_PAGALO,
+        offset,
+        // Los KPIs agregan sobre todo el filtro y solo se usan en el encabezado
+        // del reporte: la primera página los calcula, las siguientes los omiten
+        // para no repetir los agregados costosos en la DB del CRM.
+        incluirKpis: offset === 0,
+      },
       TIMEOUT_EXPORT_MS,
     );
     // El CRM responde 200 solo con el dataset completo (sus errores viajan como
@@ -118,7 +126,9 @@ export async function traerDatasetCompletoPagalo(
       throw new Error("El CRM devolvió una respuesta sin el listado de grupos");
     }
     totalServidor = respuesta.total;
-    if (!resumenKpis) resumenKpis = respuesta.resumenKpis;
+    if (!resumenKpis && respuesta.resumenKpis) {
+      resumenKpis = respuesta.resumenKpis;
+    }
     for (const grupo of respuesta.grupos) {
       if (idsVistos.has(grupo.id)) continue;
       idsVistos.add(grupo.id);

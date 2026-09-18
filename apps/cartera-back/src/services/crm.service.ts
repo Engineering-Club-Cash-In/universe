@@ -350,6 +350,7 @@ export interface PagaloSupervisionParams {
   /** CSV de SIFCOs. Ausente = sin recorte; presente (aunque sea "") = acotar
    * exactamente a esta lista. Ver el mismo criterio en el HTTP del CRM. */
   sifcosPermitidos?: string;
+  incluirKpis?: boolean;
 }
 
 export interface PagaloLinkResumen {
@@ -403,7 +404,7 @@ export interface PagaloSupervisionResponse {
   grupos: PagaloGrupoSupervision[];
   total: number;
   conteoPorEstado: Record<string, number>;
-  resumenKpis: PagaloResumenKpis;
+  resumenKpis?: PagaloResumenKpis;
 }
 
 /**

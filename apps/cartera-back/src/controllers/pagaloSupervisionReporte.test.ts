@@ -33,7 +33,20 @@ describe("traerDatasetCompletoPagalo", () => {
   it("encadena páginas hasta agotar el total del servidor", async () => {
     getPagaloSupervision.mockClear();
     getPagaloSupervision
-      .mockResolvedValueOnce({ success: true, grupos: grupos(0, 1000), total: 1500, conteoPorEstado: {} })
+      .mockResolvedValueOnce({
+        success: true,
+        grupos: grupos(0, 1000),
+        total: 1500,
+        conteoPorEstado: {},
+        resumenKpis: {
+          grupos: 1500,
+          capitalTotal: "10000",
+          facturableTotal: "5000",
+          totalAmount: "15000",
+          linksTotal: 3000,
+          linksPagados: 100,
+        },
+      })
       .mockResolvedValueOnce({ success: true, grupos: grupos(1000, 500), total: 1500, conteoPorEstado: {} });
 
     const resultado = await traerDatasetCompletoPagalo({});
@@ -41,8 +54,18 @@ describe("traerDatasetCompletoPagalo", () => {
     expect(resultado.filas).toHaveLength(1500);
     expect(resultado.total).toBe(1500);
     expect(resultado.truncado).toBe(false);
+    expect(resultado.resumenKpis).toEqual({
+      grupos: 1500,
+      capitalTotal: "10000",
+      facturableTotal: "5000",
+      totalAmount: "15000",
+      linksTotal: 3000,
+      linksPagados: 100,
+    });
     expect(getPagaloSupervision).toHaveBeenCalledTimes(2);
+    expect(getPagaloSupervision.mock.calls[0][0].incluirKpis).toBe(true);
     expect(getPagaloSupervision.mock.calls[1][0].offset).toBe(1000);
+    expect(getPagaloSupervision.mock.calls[1][0].incluirKpis).toBe(false);
   });
 
   it("deduplica por id los grupos que se repiten entre páginas y marca el faltante", async () => {

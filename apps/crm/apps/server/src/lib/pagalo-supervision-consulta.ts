@@ -64,6 +64,7 @@ export const camposFiltroSupervision = {
 	sortBy: z.enum(COLUMNAS_ORDENABLES_SUPERVISION).default("createdAt"),
 	sortDir: z.enum(["asc", "desc"]).default("desc"),
 	soloProblematicos: z.boolean().default(true),
+	incluirKpis: z.boolean().default(true),
 };
 
 export type FiltrosSupervisionPagalo = {
@@ -77,6 +78,7 @@ export type FiltrosSupervisionPagalo = {
 	sortBy: ColumnaOrdenableSupervision;
 	sortDir: "asc" | "desc";
 	soloProblematicos: boolean;
+	incluirKpis?: boolean;
 	limit: number;
 	offset: number;
 };
@@ -166,77 +168,109 @@ export async function consultarSupervisionPagalo(
 	}
 	const whereClause = condiciones.length > 0 ? and(...condiciones) : undefined;
 
-	// Conteo por estado para los chips: sobre el universo completo salvo
-	// numeroSifco y rango de fecha, no sobre el filtro de estados activo. Así el
-	// chip "Falló al aplicar (2)" sigue mostrando 2 aunque haya otro chip activo —
-	// es lo que le dice al supervisor qué más hay para mirar.
-	const condicionesConteo = sifcosPermitidos
-		? [condicionSifcosPermitidos([...sifcosPermitidos])]
-		: [];
-	if (input.numeroSifco) {
-		condicionesConteo.push(
-			ilike(pagaloPaymentGroups.numeroCreditoSifco, `%${input.numeroSifco}%`),
-		);
-	}
-	condicionesConteo.push(
-		...condicionesFiltro({
-			fechaDesde: input.fechaDesde,
-			fechaHasta: input.fechaHasta,
-		}),
-	);
-	const conteoWhere =
-		condicionesConteo.length > 0 ? and(...condicionesConteo) : undefined;
-	const conteoPorEstadoFilas = await db
-		.select({
-			status: pagaloPaymentGroups.status,
-			total: count(),
-		})
-		.from(pagaloPaymentGroups)
-		.where(conteoWhere)
-		.groupBy(pagaloPaymentGroups.status);
-	const conteoPorEstado: Record<string, number> = {};
-	for (const fila of conteoPorEstadoFilas) {
-		conteoPorEstado[fila.status] = fila.total;
-	}
+	let total = 0;
+	let conteoPorEstado: Record<string, number> = {};
+	let resumenKpis:
+		| {
+				grupos: number;
+				capitalTotal: string;
+				facturableTotal: string;
+				totalAmount: string;
+				linksTotal: number;
+				linksPagados: number;
+		  }
+		| undefined;
 
-	// KPIs sobre el mismo universo que ve la tabla (whereClause, con los filtros
-	// y chips activos aplicados) — a diferencia de conteoPorEstado, que usa un
-	// universo más amplio para que los chips no se acoten entre sí.
-	// LEFT JOIN (no EXISTS) porque necesitamos contar/filtrar filas de links, no
-	// solo saber si existen; capitalTotal/facturableTotal se agregan aparte para
-	// no duplicarse por el join 1-a-N con links.
-	// Las tres consultas son independientes entre sí (todas solo dependen de
-	// whereClause): en paralelo en vez de en serie.
-	const [[{ total }], [montosGrupo], [conteoLinks]] = await Promise.all([
-		db.select({ total: count() }).from(pagaloPaymentGroups).where(whereClause),
-		db
-			.select({
-				capitalTotal: sum(pagaloPaymentGroups.capitalTotal),
-				facturableTotal: sum(pagaloPaymentGroups.facturableTotal),
-				totalAmount: sum(pagaloPaymentGroups.totalAmount),
-			})
+	if (input.incluirKpis !== false) {
+		// Conteo por estado para los chips: sobre el universo completo salvo
+		// numeroSifco y rango de fecha, no sobre el filtro de estados activo. Así el
+		// chip "Falló al aplicar (2)" sigue mostrando 2 aunque haya otro chip activo —
+		// es lo que le dice al supervisor qué más hay para mirar.
+		const condicionesConteo = sifcosPermitidos
+			? [condicionSifcosPermitidos([...sifcosPermitidos])]
+			: [];
+		if (input.numeroSifco) {
+			condicionesConteo.push(
+				ilike(pagaloPaymentGroups.numeroCreditoSifco, `%${input.numeroSifco}%`),
+			);
+		}
+		condicionesConteo.push(
+			...condicionesFiltro({
+				fechaDesde: input.fechaDesde,
+				fechaHasta: input.fechaHasta,
+			}),
+		);
+		const conteoWhere =
+			condicionesConteo.length > 0 ? and(...condicionesConteo) : undefined;
+
+		// KPIs sobre el mismo universo que ve la tabla (whereClause, con los filtros
+		// y chips activos aplicados) — a diferencia de conteoPorEstado, que usa un
+		// universo más amplio para que los chips no se acoten entre sí.
+		// LEFT JOIN (no EXISTS) porque necesitamos contar/filtrar filas de links, no
+		// solo saber si existen; capitalTotal/facturableTotal se agregan aparte para
+		// no duplicarse por el join 1-a-N con links.
+		// Las cuatro consultas son independientes entre sí: todas en paralelo.
+		const [
+			conteoPorEstadoFilas,
+			[{ total: totalCalculado }],
+			[montosGrupo],
+			[conteoLinks],
+		] = await Promise.all([
+			db
+				.select({
+					status: pagaloPaymentGroups.status,
+					total: count(),
+				})
+				.from(pagaloPaymentGroups)
+				.where(conteoWhere)
+				.groupBy(pagaloPaymentGroups.status),
+			db
+				.select({ total: count() })
+				.from(pagaloPaymentGroups)
+				.where(whereClause),
+			db
+				.select({
+					capitalTotal: sum(pagaloPaymentGroups.capitalTotal),
+					facturableTotal: sum(pagaloPaymentGroups.facturableTotal),
+					totalAmount: sum(pagaloPaymentGroups.totalAmount),
+				})
+				.from(pagaloPaymentGroups)
+				.where(whereClause),
+			db
+				.select({
+					linksTotal: count(),
+					linksPagados: sql<number>`count(*) filter (where ${pagaloPaymentLinks.status} = 'PAID')::int`,
+				})
+				.from(pagaloPaymentLinks)
+				.innerJoin(
+					pagaloPaymentGroups,
+					eq(pagaloPaymentGroups.id, pagaloPaymentLinks.groupId),
+				)
+				.where(whereClause),
+		]);
+
+		total = totalCalculado;
+		for (const fila of conteoPorEstadoFilas) {
+			conteoPorEstado[fila.status] = fila.total;
+		}
+		resumenKpis = {
+			grupos: total,
+			capitalTotal: montosGrupo?.capitalTotal ?? "0",
+			facturableTotal: montosGrupo?.facturableTotal ?? "0",
+			totalAmount: montosGrupo?.totalAmount ?? "0",
+			linksTotal: conteoLinks?.linksTotal ?? 0,
+			linksPagados: conteoLinks?.linksPagados ?? 0,
+		};
+	} else {
+		// Paginación de export (offset > 0): el llamador ya guardó los KPIs de
+		// la primera página y no muestra chips. Solo necesitamos el total para
+		// saber si quedan más páginas por pedir.
+		const [{ total: totalCalculado }] = await db
+			.select({ total: count() })
 			.from(pagaloPaymentGroups)
-			.where(whereClause),
-		db
-			.select({
-				linksTotal: count(),
-				linksPagados: sql<number>`count(*) filter (where ${pagaloPaymentLinks.status} = 'PAID')::int`,
-			})
-			.from(pagaloPaymentLinks)
-			.innerJoin(
-				pagaloPaymentGroups,
-				eq(pagaloPaymentGroups.id, pagaloPaymentLinks.groupId),
-			)
-			.where(whereClause),
-	]);
-	const resumenKpis = {
-		grupos: total,
-		capitalTotal: montosGrupo?.capitalTotal ?? "0",
-		facturableTotal: montosGrupo?.facturableTotal ?? "0",
-		totalAmount: montosGrupo?.totalAmount ?? "0",
-		linksTotal: conteoLinks?.linksTotal ?? 0,
-		linksPagados: conteoLinks?.linksPagados ?? 0,
-	};
+			.where(whereClause);
+		total = totalCalculado;
+	}
 
 	if (total === 0) return { grupos: [], total: 0, conteoPorEstado, resumenKpis };
 

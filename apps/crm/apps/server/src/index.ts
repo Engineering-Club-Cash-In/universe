@@ -1262,6 +1262,7 @@ const esquemaSupervisionPagaloHttp = z.object({
 async function handlerCarteraPagaloSupervision(
 	c: HonoContext,
 	sifcosPermitidosBody: string | undefined,
+	incluirKpisBody?: boolean,
 ) {
 	const listaCsv = (valor: string | undefined) =>
 		valor
@@ -1269,6 +1270,7 @@ async function handlerCarteraPagaloSupervision(
 			.map((item) => item.trim())
 			.filter(Boolean);
 
+	const incluirKpisQuery = c.req.query("incluirKpis");
 	const parseado = esquemaSupervisionPagaloHttp.safeParse({
 		estados: listaCsv(c.req.query("estados")),
 		problemasLink: listaCsv(c.req.query("problemasLink")),
@@ -1287,6 +1289,12 @@ async function handlerCarteraPagaloSupervision(
 		soloProblematicos: c.req.query("soloProblematicos")
 			? c.req.query("soloProblematicos") === "true"
 			: undefined,
+		incluirKpis:
+			incluirKpisBody !== undefined
+				? incluirKpisBody
+				: incluirKpisQuery !== undefined
+					? incluirKpisQuery === "true"
+					: undefined,
 		limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
 		offset: c.req.query("offset") ? Number(c.req.query("offset")) : undefined,
 	});
@@ -1337,7 +1345,11 @@ app.post(
 	autenticarNotificacionesCarteraBack,
 	async (c) => {
 		const body = await c.req.json().catch(() => ({}));
-		return handlerCarteraPagaloSupervision(c, body?.sifcosPermitidos);
+		return handlerCarteraPagaloSupervision(
+			c,
+			body?.sifcosPermitidos,
+			typeof body?.incluirKpis === "boolean" ? body.incluirKpis : undefined,
+		);
 	},
 );
 

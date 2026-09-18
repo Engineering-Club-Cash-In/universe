@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { InputIcon, Button, IconAddress, IconPhone, IconUser, Select } from "@/components";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { updateLead, updateOwnDpi } from "../services";
+import { aplicarCambioDeDpi } from "../cambioDeDpi";
 import { updateInvestorAccount, getBancos } from "../services/investorService";
 import { useAuth } from "@/lib";
 import { useEntidades } from "../hooks/useEntidades";
@@ -86,17 +87,28 @@ export const ModalConfirmChange = ({
       }
 
       const payload: UpdateLeadPayload = { email };
-      if (field === 'dpi') {
-        // El DPI de la cuenta lo escribe el servidor sobre la sesión actual:
-        // `dpi` está declarado `input: false` en Better Auth, así que
-        // `authClient.updateUser({ dpi })` ya no puede escribirlo.
-        await updateOwnDpi(value);
-        payload.dpi = value;
-      }
       if (field === 'phone') payload.phone = value;
       if (field === 'address') payload.address = value;
 
-      return updateLead(payload);
+      if (field !== 'dpi') return updateLead(payload);
+
+      // El DPI de la cuenta lo escribe el servidor sobre la sesión actual:
+      // `dpi` está declarado `input: false` en Better Auth, así que
+      // `authClient.updateUser({ dpi })` ya no puede escribirlo. Y la cuenta va
+      // ANTES que el lead porque el CRM toma el DPI de la cuenta; si el CRM
+      // rechaza el cambio, esa escritura se deshace. Ver `aplicarCambioDeDpi`.
+      payload.dpi = value;
+
+      return aplicarCambioDeDpi({
+        dpiNuevo: value,
+        dpiPrevioEnLaCuenta: user?.dpi?.trim() ?? "",
+        fijarDpiDeLaCuenta: updateOwnDpi,
+        actualizarElLead: () => updateLead(payload),
+        // El rechazo del CRM llega ANTES de escribir la cuenta: candado, mora y
+        // duplicados corren en seco. Sin esto, el primer DPI de una cuenta
+        // podía quedar escrito aunque el CRM lo rechazara.
+        validarEnElCrm: () => updateLead({ ...payload, soloValidar: true }),
+      });
     },
     onSuccess: () => {
       setServerError("");

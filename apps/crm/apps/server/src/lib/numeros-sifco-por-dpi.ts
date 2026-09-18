@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "../db";
-import { leads, opportunities } from "../db/schema/crm";
+import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import { eqDpi } from "./dpi-lookup";
 
@@ -105,17 +105,198 @@ export function consultaNumerosSifcoPorDpi(
 		.limit(SONDA_DESBORDE_NUMEROS);
 }
 
+/**
+ * La otra puerta al mismo DPI: las oportunidades donde esa persona figura como
+ * CO-DEUDOR.
+ *
+ * 🔴 `consultaNumerosSifcoPorDpi` llega a las oportunidades SOLO por
+ * `leads.dpi`. Quien nunca fue lead pero sí co-deudor de una oportunidad
+ * morosa nacida en el CRM —crédito `CRM-<uuid>`, que SIFCO jamás devuelve— era
+ * invisible para el gate: cartera contestaba `CLIENTE_NO_ENCONTRADO` y esa
+ * persona volvía a entrar como titular de una solicitud nueva.
+ *
+ * Mismo saneo y misma sonda de desborde que su hermana.
+ */
+export function consultaNumerosSifcoPorDpiDeCoDeudor(
+	database: Pick<typeof db, "selectDistinct">,
+	dpi: string,
+) {
+	const numeroLimpio = sql<string>`trim(${opportunities.numeroSifco})`;
+
+	return database
+		.selectDistinct({ numeroSifco: numeroLimpio })
+		.from(opportunities)
+		.innerJoin(coDebtors, eq(coDebtors.opportunityId, opportunities.id))
+		.where(
+			and(
+				eqDpi(coDebtors.dpi, dpi),
+				isNotNull(opportunities.numeroSifco),
+				ne(numeroLimpio, ""),
+			),
+		)
+		.limit(SONDA_DESBORDE_NUMEROS);
+}
+
 export async function numerosSifcoConocidosPorDpi(
 	dpi: string,
 ): Promise<string[]> {
-	const filas = await consultaNumerosSifcoPorDpi(db, dpi);
+	// Las DOS puertas: titular de un lead y co-deudor de una oportunidad —
+	// quien entró por una sola seguía invisible por la otra.
+	const [comoTitular, comoCoDeudor] = await Promise.all([
+		consultaNumerosSifcoPorDpi(db, dpi),
+		consultaNumerosSifcoPorDpiDeCoDeudor(db, dpi),
+	]);
 
 	// Antes de mirar el contenido: si vino la fila sonda, esta lista JAMÁS va a
 	// estar completa. Ver `exigirNumerosCompletos`.
-	exigirNumerosCompletos(filas, dpi);
+	exigirNumerosCompletos(comoTitular, dpi);
+	exigirNumerosCompletos(comoCoDeudor, dpi);
 
-	// Segunda línea: el SQL ya vino limpio y deduplicado, pero esto cuesta nada
-	// y cubre cualquier motor o vista que devuelva algo inesperado.
+	return unirNumerosSifco(sanear(comoTitular), sanear(comoCoDeudor));
+}
+
+/**
+ * La consulta hermana: los números que el CRM conoce para UN LEAD, por su id.
+ *
+ * 🔴 Por qué no alcanza con la de arriba en las EDICIONES de DPI. Cuando se
+ * cambia el DPI de un lead, lo único que se busca es el DPI NUEVO. Si el lead
+ * que se está editando tiene su propio crédito moroso —un `CRM-<uuid>` o un
+ * `insoluto-N`, que SIFCO nunca devuelve— y el DPI nuevo no registra nada en
+ * ningún lado, cartera contesta `CLIENTE_NO_ENCONTRADO` → `puedeContinuar` y el
+ * cambio pasa para cualquiera. La deuda del propio editado queda fuera de su
+ * propia evaluación: basta con teclear un DPI virgen para salir del gate.
+ *
+ * Por eso el gate de las ediciones pregunta por la UNIÓN: los números del DPI
+ * nuevo MÁS los del lead que se está editando. Se busca por `leadId` y no por
+ * dpi justamente porque el dpi es el dato que está cambiando.
+ *
+ * Mismo saneo que la otra: DISTINCT y `trim` en SQL, ANTES del `limit`, por la
+ * razón explicada en `consultaNumerosSifcoPorDpi`.
+ */
+export function consultaNumerosSifcoDeLead(
+	database: Pick<typeof db, "selectDistinct">,
+	leadId: string,
+) {
+	const numeroLimpio = sql<string>`trim(${opportunities.numeroSifco})`;
+
+	return database
+		.selectDistinct({ numeroSifco: numeroLimpio })
+		.from(opportunities)
+		.where(
+			and(
+				eq(opportunities.leadId, leadId),
+				isNotNull(opportunities.numeroSifco),
+				ne(numeroLimpio, ""),
+			),
+		)
+		// Sonda, no tope: un lead con más créditos de los que el contrato admite
+		// no puede evaluarse con una lista recortada en silencio.
+		.limit(SONDA_DESBORDE_NUMEROS);
+}
+
+export async function numerosSifcoDeLead(
+	database: Pick<typeof db, "selectDistinct">,
+	leadId: string,
+): Promise<string[]> {
+	const filas = await consultaNumerosSifcoDeLead(database, leadId);
+	// Misma sonda que las consultas por DPI: si el lead editado desborda el
+	// tope, el número que quedó afuera puede ser justo el del crédito moroso.
+	exigirNumerosCompletos(filas, `lead:${leadId}`);
+	return sanear(filas);
+}
+
+/**
+ * El equivalente del co-deudor. Un co-deudor no cuelga de un lead sino de UNA
+ * oportunidad (`opportunityId`), así que su "cartera propia" es a lo sumo un
+ * número: el `numeroSifco` de esa oportunidad. Se incluye por la misma razón —
+ * si la oportunidad que respalda ya parió un crédito moroso, cambiarle el DPI al
+ * co-deudor no puede evaluarse ignorándolo.
+ */
+export async function numeroSifcoDeOportunidad(
+	database: Pick<typeof db, "select">,
+	opportunityId: string,
+): Promise<string[]> {
+	const filas = await database
+		.select({ numeroSifco: opportunities.numeroSifco })
+		.from(opportunities)
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+
+	return sanear(filas);
+}
+
+/**
+ * La unión, aparte y pura: los números de las fuentes, saneados y sin repetir.
+ *
+ * 🔴 Los grupos van EN ORDEN DE PRIORIDAD y el resultado se corta en
+ * `TOPE_NUMEROS_CREDITO_CONOCIDOS`. Cada consulta acota su propio lado, pero la
+ * UNIÓN de dos lados llenos llegaba a 100 y cartera rechaza el cuerpo por
+ * `maxItems: 50`: el CRM leía ese rechazo como una caída, el gate salía
+ * fail-closed y una corrección perfectamente válida quedaba bloqueada sin que
+ * nadie estuviera caído. Mandar 50 de los 100 degrada la cobertura pero no la
+ * corrección —del otro lado un solo número que empate alcanza al resto por la
+ * expansión de `usuario_id`—, así que se prefiere preguntar por menos antes que
+ * no poder preguntar.
+ *
+ * Primero va la ENTIDAD EDITADA (el lead, el co-deudor, su oportunidad): son
+ * los números que su propio expediente exige mirar, los que el DPI nuevo no
+ * puede aportar y los que el editor está intentando esquivar. Los del DPI nuevo
+ * llenan lo que sobre.
+ */
+export function unirNumerosSifco(
+	...gruposPorPrioridad: ReadonlyArray<readonly string[]>
+): string[] {
+	const vistos = new Set<string>();
+	for (const grupo of gruposPorPrioridad) {
+		for (const numero of grupo) {
+			const limpio = numero.trim();
+			if (limpio) vistos.add(limpio);
+			if (vistos.size === TOPE_NUMEROS_CREDITO_CONOCIDOS) {
+				return [...vistos];
+			}
+		}
+	}
+
+	return [...vistos];
+}
+
+/**
+ * Los números del DPI nuevo MÁS los del lead editado, deduplicados. Es lo que
+ * el gate necesita en una EDICIÓN de DPI; ver `consultaNumerosSifcoDeLead`.
+ */
+export async function numerosSifcoDelDpiYDelLead(
+	dpi: string,
+	leadId: string,
+): Promise<string[]> {
+	const [porDpi, delLead] = await Promise.all([
+		numerosSifcoConocidosPorDpi(dpi),
+		numerosSifcoDeLead(db, leadId),
+	]);
+
+	// El lead editado PRIMERO: si la unión pasa del tope, lo que no puede faltar
+	// es su propia cartera. Ver `unirNumerosSifco`.
+	return unirNumerosSifco(delLead, porDpi);
+}
+
+/** La misma unión para el co-deudor: su oportunidad en vez de su lead. */
+export async function numerosSifcoDelDpiYDeLaOportunidad(
+	dpi: string,
+	opportunityId: string,
+): Promise<string[]> {
+	const [porDpi, deLaOportunidad] = await Promise.all([
+		numerosSifcoConocidosPorDpi(dpi),
+		numeroSifcoDeOportunidad(db, opportunityId),
+	]);
+
+	// La oportunidad del co-deudor PRIMERO, por lo mismo que el lead editado.
+	return unirNumerosSifco(deLaOportunidad, porDpi);
+}
+
+/**
+ * Segunda línea: el SQL ya vino limpio y deduplicado, pero esto cuesta nada y
+ * cubre cualquier motor o vista que devuelva algo inesperado.
+ */
+function sanear(filas: Array<{ numeroSifco: string | null }>): string[] {
 	const vistos = new Set<string>();
 	for (const fila of filas) {
 		const numero = (fila.numeroSifco ?? "").trim();

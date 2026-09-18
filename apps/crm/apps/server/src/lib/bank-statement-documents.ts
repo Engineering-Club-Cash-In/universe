@@ -68,6 +68,7 @@ export function resolveBankStatementMonthlyCoverage({
 		meses: [...entry.meses],
 	}));
 	const issues: string[] = [];
+	const invalidProvenanceIssues: string[] = [];
 	const entriesByFile = new Map<number, BankStatementCoverageByFile[]>();
 
 	for (const entry of reportedCoverage) {
@@ -76,7 +77,9 @@ export function resolveBankStatementMonthlyCoverage({
 			entry.indice_archivo < 0 ||
 			entry.indice_archivo >= fileCount
 		) {
-			issues.push(`Índice de archivo fuera de rango: ${entry.indice_archivo}`);
+			invalidProvenanceIssues.push(
+				`Índice de archivo fuera de rango: ${entry.indice_archivo}`,
+			);
 			continue;
 		}
 		const entries = entriesByFile.get(entry.indice_archivo) ?? [];
@@ -104,6 +107,15 @@ export function resolveBankStatementMonthlyCoverage({
 		}
 	}
 
+	const allFilesManuallyDeclared =
+		fileCount > 0 &&
+		Array.from({ length: fileCount }, (_, fileIndex) => fileIndex).every(
+			(fileIndex) => latestDeclarationByFile.has(fileIndex),
+		);
+	const requiresGlobalConfirmation =
+		invalidProvenanceIssues.length > 0 && !allFilesManuallyDeclared;
+	if (requiresGlobalConfirmation) issues.push(...invalidProvenanceIssues);
+
 	const files: ResolvedBankStatementCoverage["files"] = [];
 	for (let fileIndex = 0; fileIndex < fileCount; fileIndex++) {
 		const entries = entriesByFile.get(fileIndex) ?? [];
@@ -118,6 +130,17 @@ export function resolveBankStatementMonthlyCoverage({
 				detectedMonths,
 				effectiveMonths: uniqueSorted(declaration.months),
 			});
+			continue;
+		}
+
+		if (requiresGlobalConfirmation) {
+			files.push({
+				fileIndex,
+				status: "needs_confirmation",
+				detectedMonths,
+				effectiveMonths: [],
+			});
+			issues.push(`Cobertura no confirmada para archivo ${fileIndex}`);
 			continue;
 		}
 
@@ -221,7 +244,8 @@ export function redactBankStatementCoverageEvidence(
 	if (!fullAnalysis) return fullAnalysis;
 	try {
 		const parsed: unknown = JSON.parse(fullAnalysis);
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+			return null;
 		const analysis = parsed as Record<string, unknown>;
 		if (!("cobertura_mensual" in analysis)) return fullAnalysis;
 		const coverage = analysis.cobertura_mensual;

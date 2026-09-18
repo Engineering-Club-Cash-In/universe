@@ -124,6 +124,91 @@ describe("bank statement monthly coverage", () => {
 		}
 	});
 
+	test("global invalid provenance makes every real detected file confirmable", () => {
+		const reportedCoverage = [
+			{ indice_archivo: 0, meses: ["2026-01"] },
+			{ indice_archivo: 1, meses: ["2026-02"] },
+			{ indice_archivo: 2, meses: ["2026-03"] },
+		];
+		const result = coverage(2, reportedCoverage);
+
+		expect(result.status).toBe("needs_confirmation");
+		expect(result.files).toMatchObject([
+			{ fileIndex: 0, status: "needs_confirmation" },
+			{ fileIndex: 1, status: "needs_confirmation" },
+		]);
+		expect(result.checklistAssignments).toEqual([]);
+		expect(result.reportedCoverage).toEqual(reportedCoverage);
+		expect(result.issues).toContain("Índice de archivo fuera de rango: 2");
+	});
+
+	test("manual confirmation of every real file supersedes invalid model provenance", () => {
+		const reportedCoverage = [
+			{ indice_archivo: 0, meses: ["2026-01"] },
+			{ indice_archivo: 1, meses: ["2026-02"] },
+			{ indice_archivo: 2, meses: ["2026-03"] },
+		];
+		const result = resolveBankStatementMonthlyCoverage({
+			uploadedFileCount: 2,
+			coverageByFile: reportedCoverage,
+			manualDeclarations: [
+				{
+					fileIndex: 0,
+					months: ["2026-01"],
+					detectedMonths: ["2026-01"],
+					actorId: "user-1",
+					declaredAt: "2026-09-17T12:00:00.000Z",
+				},
+				{
+					fileIndex: 1,
+					months: ["2026-02"],
+					detectedMonths: ["2026-02"],
+					actorId: "user-1",
+					declaredAt: "2026-09-17T12:01:00.000Z",
+				},
+			],
+		});
+
+		expect(result.status).toBe("detected");
+		expect(result.files.map(({ status }) => status)).toEqual([
+			"confirmed",
+			"confirmed",
+		]);
+		expect(result.checklistAssignments).toMatchObject([
+			{ month: "2026-01", fileIndex: 0 },
+			{ month: "2026-02", fileIndex: 1 },
+		]);
+		expect(result.issues).toEqual([]);
+		expect(result.reportedCoverage).toEqual(reportedCoverage);
+	});
+
+	test("partial confirmation keeps global invalid provenance pending", () => {
+		const result = resolveBankStatementMonthlyCoverage({
+			uploadedFileCount: 2,
+			coverageByFile: [
+				{ indice_archivo: 0, meses: ["2026-01"] },
+				{ indice_archivo: 1, meses: ["2026-02"] },
+				{ indice_archivo: 9, meses: ["2026-03"] },
+			],
+			manualDeclarations: [
+				{
+					fileIndex: 0,
+					months: ["2026-01"],
+					detectedMonths: ["2026-01"],
+					actorId: "user-1",
+					declaredAt: "2026-09-17T12:00:00.000Z",
+				},
+			],
+		});
+
+		expect(result.status).toBe("needs_confirmation");
+		expect(result.files).toMatchObject([
+			{ fileIndex: 0, status: "confirmed" },
+			{ fileIndex: 1, status: "needs_confirmation" },
+		]);
+		expect(result.checklistAssignments).toEqual([]);
+	});
+
 	test("handles zero files without manufacturing coverage", () => {
 		const result = coverage(0, []);
 		expect(result.status).toBe("needs_confirmation");

@@ -106,6 +106,7 @@ import {
 } from "../lib/guatemala-month-window";
 import {
 	dpiCambia,
+	evaluarCandadoBorradoCoDeudor,
 	evaluarCandadoDpi,
 	noExisteOportunidadCandanteDelLead,
 	noExisteOportunidadCandantePorId,
@@ -8621,7 +8622,49 @@ export const crmRouter = {
 				id: z.string().uuid(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// 🔴 Borrar al co-deudor es la otra forma de reemplazar una identidad
+			// candada: el candado de `updateCoDebtor` impide cambiarle el DPI, pero
+			// borrarlo y crear otro con otro DPI dejaba el expediente respaldado por
+			// alguien distinto de quien pasó por RENAP, buró y documentos.
+			//
+			// Se cierra por acá y no en `createCoDebtor`: agregar un co-deudor tarde
+			// es un flujo legítimo —el analista pide refuerzo justo cuando la
+			// solicitud ya avanzó—. El REEMPLAZO exige borrar primero, así que con
+			// el borrado candado la maniobra queda cerrada sin romper el flujo bueno.
+			const [coDeudorABorrar] = await db
+				.select({ opportunityId: coDebtors.opportunityId })
+				.from(coDebtors)
+				.where(eq(coDebtors.id, input.id))
+				.limit(1);
+
+			if (coDeudorABorrar) {
+				const esAdmin = context.userRole === "admin";
+				const candado = await evaluarCandadoBorradoCoDeudor({
+					opportunityId: coDeudorABorrar.opportunityId,
+					esAdmin,
+				});
+
+				if (candado.bloqueado) {
+					throw new ORPCError("BAD_REQUEST", { message: candado.message });
+				}
+
+				// El paso del admin no es silencioso, igual que el del gate de mora:
+				// después hay que poder preguntar por qué salió ese co-deudor.
+				if (candado.overrideAdmin) {
+					auditRecord({
+						entity: "opportunity",
+						id: coDeudorABorrar.opportunityId,
+						action: "candado_dpi_override_admin",
+						data: {
+							coDebtorId: input.id,
+							detalle:
+								"un administrador eliminó al co-deudor de una solicitud que ya pasó del 30%",
+						},
+					});
+				}
+			}
+
 			// Eliminar el credit analysis asociado al co-deudor si existe
 			await db
 				.delete(creditAnalysis)

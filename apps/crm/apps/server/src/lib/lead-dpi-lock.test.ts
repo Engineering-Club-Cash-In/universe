@@ -7,6 +7,7 @@ import {
 	existeOportunidadCandanteDelLead,
 	existeOportunidadCandantePorId,
 	MENSAJE_CANDADO_DPI_PORTAL,
+	mensajeCandadoBorradoCoDeudor,
 	noExisteOportunidadCandanteDelLead,
 	noExisteOportunidadCandantePorId,
 	type OportunidadParaCandadoDpi,
@@ -331,6 +332,42 @@ describe("el candado mira si ALGUNA VEZ cruzó el 30%, no solo dónde está hoy"
 
 		expect(resultado.bloqueado).toBe(true);
 		expect(resultado.message).toContain("ya pasó por el 80%");
+	});
+});
+
+/**
+ * 🔴 Borrar al co-deudor es la otra forma de reemplazar una identidad candada:
+ * el candado de `updateCoDebtor` impide cambiarle el DPI, pero borrarlo y crear
+ * otro con otro DPI dejaba el expediente respaldado por alguien distinto de
+ * quien pasó por RENAP, buró y documentos.
+ *
+ * `createCoDebtor` NO se canda a propósito: agregar un co-deudor tarde es un
+ * flujo legítimo. El reemplazo exige borrar primero, y eso ya queda cerrado.
+ */
+describe("mensaje del candado al borrar un co-deudor", () => {
+	test("dice por qué no se puede y quién sí puede", () => {
+		const mensaje = mensajeCandadoBorradoCoDeudor({
+			status: "open",
+			stageName: "Cierre de propuesta",
+			closurePercentage: 40,
+			maxHistoricoClosurePercentage: 40,
+		});
+
+		expect(mensaje).toContain("No se puede eliminar al co-deudor");
+		expect(mensaje).toContain("40%");
+		expect(mensaje).toContain("administrador");
+	});
+
+	test("nombra lo más alto que alcanzó, aunque hoy esté más abajo", () => {
+		// Mismo criterio que el candado del DPI: el retroceso no borra el pasado.
+		const mensaje = mensajeCandadoBorradoCoDeudor({
+			status: "open",
+			stageName: "Solución y propuesta",
+			closurePercentage: 20,
+			maxHistoricoClosurePercentage: 80,
+		});
+
+		expect(mensaje).toContain("80%");
 	});
 });
 

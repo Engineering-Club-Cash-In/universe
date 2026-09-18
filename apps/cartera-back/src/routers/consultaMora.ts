@@ -10,7 +10,7 @@ export const consultaMoraRouter = new Elysia()
   .use(authMiddleware)
   /**
    * POST /clientes/consulta-mora
-   * Body: { dpi, numerosCreditoConocidos? }
+   * Body: { dpi, numerosCreditoConocidos?, numerosCreditoGarantizados? }
    * Responde si el DPI corresponde a un cliente y si puede avanzar una nueva
    * solicitud. El veredicto para el gate del CRM es `puedeContinuar`.
    *
@@ -36,6 +36,15 @@ export const consultaMoraRouter = new Elysia()
    * eso el gate de rol de abajo no es cosmético: es lo único que separa este
    * canal de cualquier token vivo. Para el CRM —canal interno, personal de la
    * casa— es aceptable; abrirlo a un rol de afuera no lo sería.
+   *
+   * `numerosCreditoGarantizados` son los créditos que este DPI AFIANZÓ (el CRM
+   * los saca de las filas de co-deudor). Entran al veredicto igual que los
+   * demás —si lo que firmó está en mora, bloquea— pero NO disparan la expansión
+   * por dueño: **el fiador responde por lo que garantizó, no por la vida entera
+   * del titular**. Con la expansión, afianzar un crédito sano bastaba para
+   * heredar la cartera COMPLETA del titular: el fiador quedaba bloqueado por
+   * una mora ajena a lo garantizado y la respuesta le mostraba al CRM la
+   * historia crediticia entera de ese tercero. Ver `usuariosParaExpandir`.
    *
    * ⏱️ Toda la resolución de números (identificación + espejo + API de cada
    * ficha) corre bajo UN presupuesto global de 15s; ver
@@ -67,7 +76,8 @@ export const consultaMoraRouter = new Elysia()
 
       const resultado = await consultarMoraPorDpi(
         validacion.dpi,
-        body.numerosCreditoConocidos
+        body.numerosCreditoConocidos,
+        body.numerosCreditoGarantizados
       );
       set.status = 200;
       return resultado;
@@ -76,6 +86,9 @@ export const consultaMoraRouter = new Elysia()
       body: t.Object({
         dpi: t.String({ minLength: 1, error: "El DPI es obligatorio" }),
         numerosCreditoConocidos: t.Optional(
+          t.Array(t.String(), { maxItems: 50 })
+        ),
+        numerosCreditoGarantizados: t.Optional(
           t.Array(t.String(), { maxItems: 50 })
         ),
       }),

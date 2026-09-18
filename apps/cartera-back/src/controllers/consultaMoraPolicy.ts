@@ -385,14 +385,15 @@ export function fichasDelDpi<T extends FichaClienteSifco>(
  * nada pero ensucia la consulta.
  */
 export function unirNumerosCredito(
-  numerosSifco: readonly string[],
-  numerosConocidos: readonly string[] | undefined
+  ...grupos: ReadonlyArray<readonly string[] | undefined>
 ): string[] {
   const vistos = new Set<string>();
 
-  for (const numero of [...numerosSifco, ...(numerosConocidos ?? [])]) {
-    const limpio = numero.trim();
-    if (limpio) vistos.add(limpio);
+  for (const grupo of grupos) {
+    for (const numero of grupo ?? []) {
+      const limpio = numero.trim();
+      if (limpio) vistos.add(limpio);
+    }
   }
 
   return [...vistos];
@@ -481,6 +482,39 @@ export interface FilaCreditoMora {
   estado: string;
   moraMonto: string | null;
   moraCuotas: number | null;
+}
+
+/**
+ * De qué dueños se traen TAMBIÉN los créditos hermanos.
+ *
+ * 🔴 Decisión de producto, implícita hasta ahora: **el fiador responde por lo
+ * que GARANTIZÓ, no por la vida entera del titular.** Los números que el CRM
+ * aporta porque esa persona figura como CO-DEUDOR de una oportunidad entran al
+ * veredicto como créditos PUNTUALES —si ese crédito está en mora, bloquea, que
+ * para eso firmó— pero NO disparan la expansión por `usuario_id`. Con la
+ * expansión, afianzar un crédito sano bastaba para heredar la cartera COMPLETA
+ * del titular: el fiador quedaba bloqueado por una mora ajena a lo que
+ * garantizó, y encima la respuesta le mostraba al CRM la historia crediticia
+ * entera de ese tercero.
+ *
+ * La expansión sigue viva para los números del PROPIO DPI —los de SIFCO y los
+ * que el CRM conoce por sus leads—, que es donde hace falta: es lo que alcanza
+ * a los `insoluto-N` y `CRM-<uuid>` invisibles del mismo dueño.
+ */
+export function usuariosParaExpandir(
+  filas: readonly FilaCreditoMora[],
+  numerosExpansivos: readonly string[]
+): number[] {
+  const expansivos = new Set(numerosExpansivos.map((numero) => numero.trim()));
+
+  return [
+    ...new Set(
+      filas
+        .filter((fila) => expansivos.has(fila.numeroCreditoSifco))
+        .map((fila) => fila.usuario_id)
+        .filter((id): id is number => id !== null)
+    ),
+  ];
 }
 
 /**

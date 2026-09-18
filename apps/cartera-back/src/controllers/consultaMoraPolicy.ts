@@ -157,6 +157,24 @@ export function normalizarIdentificacion(valor: string): string {
 }
 
 /**
+ * ¿El código de la ficha sirve para pedirle los créditos al core?
+ *
+ * 🔴 `CodigoCliente` viene tipado `number | string | null` porque el core lo
+ * manda de las dos formas, y la variante string admite basura que el tipo no
+ * distingue: `""`, `"   "`, `"N/A"`. Esa basura no se puede consultar —el
+ * lookup posterior la pasa por `Number(...)` y le llega `NaN`— así que la
+ * ficha se descarta ACÁ, igual que la que no trae código: es el mismo caso
+ * ("no se le pueden pedir préstamos"), solo que disfrazado de valor presente.
+ */
+function codigoClienteUtilizable(
+  codigo: number | string | null | undefined
+): boolean {
+  if (codigo === undefined || codigo === null) return false;
+
+  return /^\d+$/.test(String(codigo).trim());
+}
+
+/**
  * Las fichas de SIFCO que hay que consultar para un DPI.
  *
  * 🔴 NO alcanza con la primera. Un mismo DPI puede tener más de una ficha en el
@@ -165,7 +183,8 @@ export function normalizarIdentificacion(valor: string): string {
  * que un moroso con dos fichas pasara limpio cada vez que la primera estaba al
  * día: la mora de la segunda no se consultaba nunca.
  *
- * Se descartan las fichas sin código (no se les puede pedir préstamos) y las
+ * Se descartan las fichas sin código USABLE —ausente, vacío o no numérico, ver
+ * `codigoClienteUtilizable`: a ninguna se le pueden pedir préstamos— y las
  * que traen una identificación que no es la buscada: la búsqueda del core es
  * por identificación, pero es suya y no nuestra, y traer créditos ajenos al
  * veredicto bloquearía a quien no debe. La ficha SIN `NumeroIdentificacion` se
@@ -179,9 +198,7 @@ export function fichasDelDpi<T extends FichaClienteSifco>(
   const buscado = normalizarIdentificacion(dpi);
 
   return clientes.filter((cliente) => {
-    if (cliente.CodigoCliente === undefined || cliente.CodigoCliente === null) {
-      return false;
-    }
+    if (!codigoClienteUtilizable(cliente.CodigoCliente)) return false;
 
     const propia = (cliente.NumeroIdentificacion ?? "").trim();
     if (!propia) return true;

@@ -490,6 +490,55 @@ describe("fichas del DPI", () => {
     expect(fichas.map((f) => f.CodigoCliente)).toEqual([11, 22]);
   });
 
+  it("descarta la ficha con código vacío", () => {
+    // El tipo admite string, así que un "" pasaba el guard de null/undefined y
+    // llegaba al lookup como `Number("")` = 0: una consulta a la ficha ajena 0.
+    const fichas = fichasDelDpi(
+      [
+        { CodigoCliente: "", NumeroIdentificacion: DPI },
+        { CodigoCliente: 22, NumeroIdentificacion: DPI },
+      ],
+      DPI
+    );
+
+    expect(fichas.map((f) => f.CodigoCliente)).toEqual([22]);
+  });
+
+  it("descarta la ficha cuyo código es solo espacios", () => {
+    const fichas = fichasDelDpi(
+      [
+        { CodigoCliente: "   ", NumeroIdentificacion: DPI },
+        { CodigoCliente: 22, NumeroIdentificacion: DPI },
+      ],
+      DPI
+    );
+
+    expect(fichas.map((f) => f.CodigoCliente)).toEqual([22]);
+  });
+
+  it("descarta la ficha con código no numérico", () => {
+    // `Number("N/A")` es NaN: el lookup posterior recibe basura.
+    const fichas = fichasDelDpi(
+      [
+        { CodigoCliente: "N/A", NumeroIdentificacion: DPI },
+        { CodigoCliente: 22, NumeroIdentificacion: DPI },
+      ],
+      DPI
+    );
+
+    expect(fichas.map((f) => f.CodigoCliente)).toEqual([22]);
+  });
+
+  it("conserva el código numérico que viaja como string con espacios", () => {
+    // El core manda el código de las dos formas; un "  22  " sí es consultable.
+    const fichas = fichasDelDpi(
+      [{ CodigoCliente: " 22 ", NumeroIdentificacion: DPI }],
+      DPI
+    );
+
+    expect(fichas).toHaveLength(1);
+  });
+
   it("sin ninguna ficha usable el resultado es vacío (cliente no encontrado)", () => {
     expect(fichasDelDpi([{ NumeroIdentificacion: DPI }], DPI)).toEqual([]);
   });

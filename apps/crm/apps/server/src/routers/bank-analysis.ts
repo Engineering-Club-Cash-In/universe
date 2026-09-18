@@ -42,6 +42,7 @@ import {
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import {
+	assertBankStatementCoverageReservationCurrent,
 	type CreditAnalysisResetReservation,
 	DocumentIntegrityError,
 	linkUploadedValidationsToDocuments,
@@ -53,18 +54,19 @@ import {
 import {
 	applyManualCoverageDeclaration,
 	assertBankStatementCoverageMutation,
+	type BankStatementCoverageCleanupDebt,
 	BankStatementCoverageSaveError,
 	buildBankStatementArtifactPlan,
 	getBankStatementArtifactTag,
 	getInitialBankStatementCoverageSaveStatus,
-	type BankStatementCoverageCleanupDebt,
 	type PersistedBankStatementCoverage,
 	runBankStatementArtifactPersistenceCore,
-	runInitialBankStatementHandlerCore,
-	runOpportunityCreditAnalysisResetCore,
 	runBankStatementCleanupDebtCore,
 	runBankStatementCoverageMutationHandlerCore,
 	runBankStatementCoverageSaveLifecycle,
+	runInitialBankStatementHandlerCore,
+	runOpportunityCreditAnalysisResetCore,
+	runReservedBankStatementCoverageMutationCore,
 	toPublicBankStatementCoverage,
 } from "./bank-analysis-coverage";
 
@@ -419,10 +421,7 @@ async function saveBankCoverageDocuments(params: {
 						.where(
 							and(
 								eq(opportunityDocuments.id, artifact.id),
-								eq(
-									opportunityDocuments.opportunityId,
-									params.opportunityId,
-								),
+								eq(opportunityDocuments.opportunityId, params.opportunityId),
 							),
 						)
 						.returning({ id: opportunityDocuments.id });
@@ -671,7 +670,9 @@ export async function resetBankStatementCreditAnalysis(params: {
 				.where(eq(opportunityDocuments.opportunityId, params.opportunityId)),
 		persistRecovery: async (analysisId, coverage, reservation) => {
 			if (!fullAnalysisRecord) {
-				throw new Error("No existe metadata privada para recuperar la limpieza.");
+				throw new Error(
+					"No existe metadata privada para recuperar la limpieza.",
+				);
 			}
 			fullAnalysisRecord.cobertura_mensual = coverage;
 			const [updated] = await db
@@ -689,13 +690,10 @@ export async function resetBankStatementCreditAnalysis(params: {
 					),
 				)
 				.returning({ id: creditAnalysis.id });
-			if (!updated) throw new Error("El análisis ya no existe para recuperar la limpieza.");
+			if (!updated)
+				throw new Error("El análisis ya no existe para recuperar la limpieza.");
 		},
-		quarantineArtifactsAndRefresh: (
-			artifacts,
-			analysisBatchId,
-			reservation,
-		) =>
+		quarantineArtifactsAndRefresh: (artifacts, analysisBatchId, reservation) =>
 			db.transaction(async (tx) => {
 				await assertBankStatementResetReservation(tx, {
 					...params,
@@ -711,14 +709,12 @@ export async function resetBankStatementCreditAnalysis(params: {
 						.where(
 							and(
 								eq(opportunityDocuments.id, artifact.id),
-								eq(
-									opportunityDocuments.opportunityId,
-									params.opportunityId,
-								),
+								eq(opportunityDocuments.opportunityId, params.opportunityId),
 							),
 						)
 						.returning({ id: opportunityDocuments.id });
-					if (!updated) throw new Error("Un adjunto ya no existe para aislarlo.");
+					if (!updated)
+						throw new Error("Un adjunto ya no existe para aislarlo.");
 				}
 				await rebuildClientDocumentChecklistInTransaction(
 					tx,
@@ -738,10 +734,7 @@ export async function resetBankStatementCreditAnalysis(params: {
 					.where(
 						and(
 							eq(opportunityDocuments.id, artifact.id),
-							eq(
-								opportunityDocuments.opportunityId,
-								params.opportunityId,
-							),
+							eq(opportunityDocuments.opportunityId, params.opportunityId),
 						),
 					);
 				await rebuildClientDocumentChecklistInTransaction(
@@ -762,7 +755,8 @@ export async function resetBankStatementCreditAnalysis(params: {
 					),
 				)
 				.returning({ id: creditAnalysis.id });
-			if (!deleted) throw new Error("El análisis ya no existe para restablecerlo.");
+			if (!deleted)
+				throw new Error("El análisis ya no existe para restablecerlo.");
 		},
 	});
 }
@@ -776,181 +770,203 @@ async function mutatePersistedBankCoverage(params: {
 	userRole: string;
 	manualDeclaration?: { fileIndex: number; months: string[] };
 }) {
-	const [opportunity] = await db
-		.select({
-			id: opportunities.id,
-			leadId: opportunities.leadId,
-			vehicleId: opportunities.vehicleId,
-			assignedTo: opportunities.assignedTo,
-		})
-		.from(opportunities)
-		.where(eq(opportunities.id, params.opportunityId))
-		.limit(1);
-	if (!opportunity) {
-		throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
-	}
-	const [analysisRow] = await db
-		.select({
-			id: creditAnalysis.id,
-			leadId: creditAnalysis.leadId,
-			opportunityId: creditAnalysis.opportunityId,
-			fullAnalysis: creditAnalysis.fullAnalysis,
-		})
-		.from(creditAnalysis)
-		.where(
-			and(
-				eq(creditAnalysis.id, params.analysisId),
-				eq(creditAnalysis.opportunityId, params.opportunityId),
-			),
-		)
-		.limit(1);
-	if (!analysisRow) {
-		throw new ORPCError("PRECONDITION_FAILED", {
-			message: "El análisis ya no corresponde a esta oportunidad.",
-		});
-	}
-	const canWrite = canAutoAttachBankStatementDocuments({
-		userRole: params.userRole,
-		userId: params.userId,
-		opportunityAssignedTo: opportunity.assignedTo,
-	});
-	const { fullAnalysis, coverage } = parsePersistedBankAnalysis(
-		analysisRow.fullAnalysis,
-	);
-	try {
-		assertBankStatementCoverageMutation({
-			requestedOpportunityId: params.opportunityId,
-			requestedAnalysisId: params.analysisId,
-			requestedLeadId: params.leadId,
-			currentOpportunityId: analysisRow.opportunityId,
-			currentAnalysisId: analysisRow.id,
-			currentLeadId: analysisRow.leadId,
-			requestedAnalysisBatchId: params.analysisBatchId,
-			currentAnalysisBatchId: coverage.analysisBatchId,
-			canWrite,
-			integrityBatchCurrent: true,
-		});
-		assertOpportunityBelongsToLead(opportunity, params.leadId);
-	} catch (error) {
-		throw new ORPCError(canWrite ? "PRECONDITION_FAILED" : "FORBIDDEN", {
-			message: error instanceof Error ? error.message : String(error),
-		});
-	}
-
-	if (params.manualDeclaration) {
-		const targetFile = coverage.files.find(
-			(file) => file.fileIndex === params.manualDeclaration?.fileIndex,
-		);
-		if (!targetFile || targetFile.status !== "needs_confirmation") {
-			throw new ORPCError("PRECONDITION_FAILED", {
-				message: "Este archivo ya no requiere confirmación mensual.",
-			});
-		}
-	}
-
-	let reservation: { opportunityId: string; token: string } | null = null;
-	try {
-		const finalCoverage = await runBankStatementCoverageMutationHandlerCore({
-			coverage,
-			manualDeclaration: params.manualDeclaration,
-			actorId: params.userId,
-			declaredAt: new Date().toISOString(),
-			validateCurrent: async () => {
-				try {
-					reservation = await reserveBankStatementCoverageMutation({
-						opportunityId: params.opportunityId,
-						leadId: params.leadId,
-						analysisId: params.analysisId,
-						validationIds: coverage.files.map(
-							(file) => file.integrityValidationId,
-						),
-						files: coverage.files.map((file) => ({
-							filePath: file.evidenceKey,
-							contentSha256: file.contentSha256,
-						})),
+	return runReservedBankStatementCoverageMutationCore({
+		reserve: async () => {
+			try {
+				return await reserveBankStatementCoverageMutation({
+					opportunityId: params.opportunityId,
+					leadId: params.leadId,
+					analysisId: params.analysisId,
+				});
+			} catch (error) {
+				if (error instanceof DocumentIntegrityError) {
+					throw new ORPCError("PRECONDITION_FAILED", {
+						message: error.message,
 					});
-				} catch (error) {
-					if (error instanceof DocumentIntegrityError) {
+				}
+				throw error;
+			}
+		},
+		loadCurrentOpportunity: async () => {
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					leadId: opportunities.leadId,
+					vehicleId: opportunities.vehicleId,
+					assignedTo: opportunities.assignedTo,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, params.opportunityId))
+				.limit(1);
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+			const canWrite = canAutoAttachBankStatementDocuments({
+				userRole: params.userRole,
+				userId: params.userId,
+				opportunityAssignedTo: opportunity.assignedTo,
+			});
+			try {
+				if (!canWrite) throw new Error("Sin permiso para modificar cobertura");
+				assertOpportunityBelongsToLead(opportunity, params.leadId);
+			} catch (error) {
+				throw new ORPCError(canWrite ? "PRECONDITION_FAILED" : "FORBIDDEN", {
+					message: error instanceof Error ? error.message : String(error),
+				});
+			}
+			return { opportunity, canWrite };
+		},
+		loadCurrentCoverage: async (reservation, { canWrite }) => {
+			const [analysisRow] = await db
+				.select({
+					id: creditAnalysis.id,
+					leadId: creditAnalysis.leadId,
+					opportunityId: creditAnalysis.opportunityId,
+					fullAnalysis: creditAnalysis.fullAnalysis,
+				})
+				.from(creditAnalysis)
+				.where(
+					and(
+						eq(creditAnalysis.id, params.analysisId),
+						eq(creditAnalysis.opportunityId, params.opportunityId),
+						eq(creditAnalysis.leadId, params.leadId),
+						eq(creditAnalysis.analysisReservationToken, reservation.token),
+					),
+				)
+				.limit(1);
+			if (!analysisRow) {
+				throw new ORPCError("PRECONDITION_FAILED", {
+					message: "El análisis ya no corresponde a esta oportunidad.",
+				});
+			}
+			const { fullAnalysis, coverage } = parsePersistedBankAnalysis(
+				analysisRow.fullAnalysis,
+			);
+			try {
+				assertBankStatementCoverageMutation({
+					requestedOpportunityId: params.opportunityId,
+					requestedAnalysisId: params.analysisId,
+					requestedLeadId: params.leadId,
+					currentOpportunityId: analysisRow.opportunityId,
+					currentAnalysisId: analysisRow.id,
+					currentLeadId: analysisRow.leadId,
+					requestedAnalysisBatchId: params.analysisBatchId,
+					currentAnalysisBatchId: coverage.analysisBatchId,
+					canWrite,
+					integrityBatchCurrent: true,
+				});
+				if (params.manualDeclaration) {
+					const targetFile = coverage.files.find(
+						(file) => file.fileIndex === params.manualDeclaration?.fileIndex,
+					);
+					if (!targetFile || targetFile.status !== "needs_confirmation") {
+						throw new Error(
+							"Este archivo ya no requiere confirmación mensual.",
+						);
+					}
+				}
+				await assertBankStatementCoverageReservationCurrent({
+					opportunityId: params.opportunityId,
+					leadId: params.leadId,
+					analysisId: params.analysisId,
+					token: reservation.token,
+					validationIds: coverage.files.map(
+						(file) => file.integrityValidationId,
+					),
+					files: coverage.files.map((file) => ({
+						filePath: file.evidenceKey,
+						contentSha256: file.contentSha256,
+					})),
+				});
+			} catch (error) {
+				if (error instanceof ORPCError) throw error;
+				if (error instanceof DocumentIntegrityError) {
+					throw new ORPCError("PRECONDITION_FAILED", {
+						message: error.message,
+					});
+				}
+				throw new ORPCError(canWrite ? "PRECONDITION_FAILED" : "FORBIDDEN", {
+					message: error instanceof Error ? error.message : String(error),
+				});
+			}
+			return { fullAnalysis, coverage };
+		},
+		mutateCurrentCoverage: async (
+			{ fullAnalysis, coverage },
+			reservation,
+			{ opportunity },
+		) => {
+			const finalCoverage = await runBankStatementCoverageMutationHandlerCore({
+				coverage,
+				manualDeclaration: params.manualDeclaration,
+				actorId: params.userId,
+				declaredAt: new Date().toISOString(),
+				validateCurrent: async () => {},
+				persistCoverage: async (updatedCoverage) => {
+					fullAnalysis.cobertura_mensual = updatedCoverage;
+					const [updated] = await db
+						.update(creditAnalysis)
+						.set({
+							fullAnalysis: JSON.stringify(fullAnalysis),
+							updatedAt: new Date(),
+						})
+						.where(
+							and(
+								eq(creditAnalysis.id, params.analysisId),
+								eq(creditAnalysis.analysisReservationToken, reservation.token),
+							),
+						)
+						.returning({ id: creditAnalysis.id });
+					if (!updated) {
 						throw new ORPCError("PRECONDITION_FAILED", {
-							message: error.message,
+							message:
+								"El lote de análisis cambió antes de guardar la cobertura.",
 						});
 					}
-					throw error;
-				}
-			},
-			persistCoverage: async (updatedCoverage) => {
-				if (!reservation) {
-					throw new ORPCError("PRECONDITION_FAILED", {
-						message: "La reserva de guardado ya no está vigente.",
-					});
-				}
-				fullAnalysis.cobertura_mensual = updatedCoverage;
-				const [updated] = await db
-					.update(creditAnalysis)
-					.set({
-						fullAnalysis: JSON.stringify(fullAnalysis),
-						updatedAt: new Date(),
-					})
-					.where(
-						and(
-							eq(creditAnalysis.id, params.analysisId),
-							eq(
-								creditAnalysis.analysisReservationToken,
-								reservation.token,
-							),
-						),
-					)
-					.returning({ id: creditAnalysis.id });
-				if (!updated) {
-					throw new ORPCError("PRECONDITION_FAILED", {
-						message: "El lote de análisis cambió antes de guardar la cobertura.",
-					});
-				}
-			},
-			cleanupDebt: (debt) =>
-				cleanupBankStatementCoverageDebt({
-					opportunityId: params.opportunityId,
-					vehicleId: opportunity.vehicleId,
-					analysisBatchId: coverage.analysisBatchId,
-					debt,
-				}),
-			saveArtifacts: async (coverageToSave) => {
-				if (!reservation) {
-					throw new Error("La reserva de guardado ya no está vigente.");
-				}
-				const buffers = new Map<number, Buffer>();
-				for (const file of coverageToSave.files) {
-					const expectedPrefix = `${buildUploadPrefix(
-						"bank_statement",
-						params.opportunityId,
-					)}/validated/`;
-					if (!file.evidenceKey.startsWith(expectedPrefix)) {
-						throw new Error(
-							"La evidencia del archivo no pertenece a la oportunidad.",
-						);
+				},
+				cleanupDebt: (debt) =>
+					cleanupBankStatementCoverageDebt({
+						opportunityId: params.opportunityId,
+						vehicleId: opportunity.vehicleId,
+						analysisBatchId: coverage.analysisBatchId,
+						debt,
+					}),
+				saveArtifacts: async (coverageToSave) => {
+					const buffers = new Map<number, Buffer>();
+					for (const file of coverageToSave.files) {
+						const expectedPrefix = `${buildUploadPrefix(
+							"bank_statement",
+							params.opportunityId,
+						)}/validated/`;
+						if (!file.evidenceKey.startsWith(expectedPrefix)) {
+							throw new Error(
+								"La evidencia del archivo no pertenece a la oportunidad.",
+							);
+						}
+						const buffer = await getFileBuffer(file.evidenceKey);
+						const hash = createHash("sha256").update(buffer).digest("hex");
+						if (hash !== file.contentSha256) {
+							throw new Error(
+								"La evidencia del archivo cambió desde el análisis.",
+							);
+						}
+						buffers.set(file.fileIndex, buffer);
 					}
-					const buffer = await getFileBuffer(file.evidenceKey);
-					const hash = createHash("sha256").update(buffer).digest("hex");
-					if (hash !== file.contentSha256) {
-						throw new Error(
-							"La evidencia del archivo cambió desde el análisis.",
-						);
-					}
-					buffers.set(file.fileIndex, buffer);
-				}
-				return saveBankCoverageDocuments({
-					opportunityId: params.opportunityId,
-					vehicleId: opportunity.vehicleId,
-					userId: params.userId,
-					reservationToken: reservation.token,
-					coverage: coverageToSave,
-					buffers,
-				});
-			},
-		});
-		return { coverage: toPublicBankStatementCoverage(finalCoverage) };
-	} finally {
-		if (reservation) {
+					return saveBankCoverageDocuments({
+						opportunityId: params.opportunityId,
+						vehicleId: opportunity.vehicleId,
+						userId: params.userId,
+						reservationToken: reservation.token,
+						coverage: coverageToSave,
+						buffers,
+					});
+				},
+			});
+			return { coverage: toPublicBankStatementCoverage(finalCoverage) };
+		},
+		release: async (reservation) => {
 			try {
 				await releaseCapacityAnalysisReservation(reservation);
 			} catch (error) {
@@ -959,8 +975,8 @@ async function mutatePersistedBankCoverage(params: {
 					error: error instanceof Error ? error.message : String(error),
 				});
 			}
-		}
-	}
+		},
+	});
 }
 
 export const bankAnalysisRouter = {
@@ -1447,9 +1463,11 @@ export const bankAnalysisRouter = {
 								economicAvailability:
 									prepared.analysis.promedio_mensual.disponibilidad_economica.toString(),
 								maxPayment: prepared.creditCapacity.maxPayment.toString(),
-								maxCreditAmount: prepared.creditCapacity.maxCreditAmount.toString(),
+								maxCreditAmount:
+									prepared.creditCapacity.maxCreditAmount.toString(),
 								suggestedPaymentDays:
-									prepared.analysis.analisis_fecha_pago?.dias_pago_sugeridos ?? null,
+									prepared.analysis.analisis_fecha_pago?.dias_pago_sugeridos ??
+									null,
 								analyzedAt: new Date(),
 								updatedAt: new Date(),
 							})
@@ -1489,7 +1507,9 @@ export const bankAnalysisRouter = {
 					cleanupDebt: async () => [],
 					saveArtifacts: async (coverageToSave) => {
 						if (!(opportunityForDocuments && capacityReservation)) {
-							throw new Error("El guardado de adjuntos no aplica a este análisis.");
+							throw new Error(
+								"El guardado de adjuntos no aplica a este análisis.",
+							);
 						}
 						return saveBankCoverageDocuments({
 							opportunityId: opportunityForDocuments.id,

@@ -5134,9 +5134,6 @@ export const crmRouter = {
 						documentType: input.documentType,
 						uploadedKey: uploadedFile.key,
 						withOpportunityLock: withOpportunityDocumentMutationLock,
-						runTransaction: <R>(
-							operation: (tx: Transaction) => Promise<R>,
-						) => db.transaction(operation),
 						findExistingBankSlot: async (tx) => {
 							const [existing] = await tx
 								.select({ id: opportunityDocuments.id })

@@ -898,6 +898,43 @@ export async function runBankStatementCoverageSaveLifecycle({
 	}
 }
 
+export async function runReservedBankStatementCoverageMutationCore<
+	TReservation,
+	TCurrentOpportunity,
+	TCurrentCoverage,
+	TResult,
+>({
+	reserve,
+	loadCurrentOpportunity,
+	loadCurrentCoverage,
+	mutateCurrentCoverage,
+	release,
+}: {
+	reserve: () => Promise<TReservation>;
+	loadCurrentOpportunity: (
+		reservation: TReservation,
+	) => Promise<TCurrentOpportunity>;
+	loadCurrentCoverage: (
+		reservation: TReservation,
+		opportunity: TCurrentOpportunity,
+	) => Promise<TCurrentCoverage>;
+	mutateCurrentCoverage: (
+		coverage: TCurrentCoverage,
+		reservation: TReservation,
+		opportunity: TCurrentOpportunity,
+	) => Promise<TResult>;
+	release: (reservation: TReservation) => Promise<void>;
+}): Promise<TResult> {
+	const reservation = await reserve();
+	try {
+		const opportunity = await loadCurrentOpportunity(reservation);
+		const coverage = await loadCurrentCoverage(reservation, opportunity);
+		return await mutateCurrentCoverage(coverage, reservation, opportunity);
+	} finally {
+		await release(reservation);
+	}
+}
+
 export async function runBankStatementCoverageMutationHandlerCore({
 	coverage,
 	manualDeclaration,

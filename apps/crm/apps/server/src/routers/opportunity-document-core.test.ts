@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { runReservedBankStatementCoverageMutationCore } from "./bank-analysis-coverage";
 import {
 	getManualBankUploadCleanupDescription,
 	isManualBankDocumentCleanupDescription,
@@ -46,6 +47,14 @@ function statefulTransaction(rows: Row[], checklist: { uploaded: boolean }) {
 	};
 }
 
+function opportunityLock(rows: Row[], checklist: { uploaded: boolean }) {
+	const transaction = statefulTransaction(rows, checklist);
+	return <T>(
+		_opportunityId: string,
+		operation: (tx: { name: "tx" }) => Promise<T>,
+	) => transaction(operation);
+}
+
 function manualRow(): Row {
 	return {
 		id: "manual-1",
@@ -57,11 +66,208 @@ function manualRow(): Row {
 }
 
 describe("opportunity bank document production cores", () => {
+	test("upload and delete reuse the locked transaction without nested connection requests", async () => {
+		const rows: Row[] = [];
+		const checklist = { uploaded: false };
+		type BudgetTx = { name: "locked" | "follow-up" };
+		const lockedTx: BudgetTx = { name: "locked" };
+		let outerLockActive = false;
+		let opportunityLockTransactions = 0;
+		let followUpTransactions = 0;
+		const withOpportunityLock = async <T>(
+			_opportunityId: string,
+			operation: (tx: BudgetTx) => Promise<T>,
+		) => {
+			opportunityLockTransactions += 1;
+			outerLockActive = true;
+			try {
+				return await operation(lockedTx);
+			} finally {
+				outerLockActive = false;
+			}
+		};
+		const runTransaction = async <T>(
+			operation: (tx: BudgetTx) => Promise<T>,
+		) => {
+			if (outerLockActive) throw new Error("nested connection requested");
+			followUpTransactions += 1;
+			return operation({ name: "follow-up" });
+		};
+
+		const uploaded = await runOpportunityDocumentUploadCore({
+			opportunityId: "opportunity-1",
+			actorId: "user-1",
+			documentType: "estados_cuenta_1",
+			uploadedKey: "opportunities/opportunity-1/manual.pdf",
+			withOpportunityLock,
+			findExistingBankSlot: async (tx) => {
+				expect(tx).toBe(lockedTx);
+				return null;
+			},
+			insertDocument: async (tx) => {
+				expect(tx).toBe(lockedTx);
+				const row = { ...manualRow(), documentType: "estados_cuenta_1" };
+				rows.push(row);
+				return row;
+			},
+			refreshChecklist: async (tx) => {
+				expect(tx).toBe(lockedTx);
+				checklist.uploaded = true;
+			},
+			deleteUploadedFile: async () => {},
+			persistCleanupDebt: async () => {},
+		});
+		expect(uploaded.id).toBe("manual-1");
+		expect(opportunityLockTransactions).toBe(1);
+		expect(followUpTransactions).toBe(0);
+
+		await runOpportunityDocumentDeleteCore({
+			documentId: uploaded.id,
+			opportunityId: uploaded.opportunityId,
+			actorId: "user-1",
+			documentType: uploaded.documentType,
+			description: uploaded.description,
+			withOpportunityLock,
+			runTransaction,
+			readDocument: async (tx) => {
+				expect(tx).toBe(lockedTx);
+				return rows[0] ?? null;
+			},
+			quarantineAndRefresh: async (tx, current, tag) => {
+				expect(tx).toBe(lockedTx);
+				current.documentType = "other";
+				current.description = tag;
+				checklist.uploaded = false;
+			},
+			deleteStoredFile: async () => {
+				expect(outerLockActive).toBe(false);
+			},
+			deleteDocumentAndRefresh: async (tx, current) => {
+				expect(tx).toBe(lockedTx);
+				rows.splice(
+					rows.findIndex(({ id }) => id === current.id),
+					1,
+				);
+			},
+		});
+		expect(opportunityLockTransactions).toBe(3);
+		expect(followUpTransactions).toBe(0);
+		expect(rows).toEqual([]);
+		expect(checklist.uploaded).toBe(false);
+	});
+
+	test("post-R2 bank cleanup cannot overlap coverage promotion or overwrite its checklist", async () => {
+		const rows = [manualRow()];
+		const checklist = { uploaded: true };
+		const transaction = statefulTransaction(rows, checklist);
+		let lockCalls = 0;
+		let plainTransactions = 0;
+		let activeCoverageMutation = false;
+		let deleteDocumentCalls = 0;
+		let signalFinalizationAttempt = () => {};
+		const finalizationAttempted = new Promise<void>((resolve) => {
+			signalFinalizationAttempt = resolve;
+		});
+		let signalCoverageStaged = () => {};
+		const coverageStaged = new Promise<void>((resolve) => {
+			signalCoverageStaged = resolve;
+		});
+		let coverageMutation: Promise<void> | undefined;
+		const withOpportunityLock = async <T>(
+			_opportunityId: string,
+			operation: (tx: { name: "tx" }) => Promise<T>,
+		) => {
+			lockCalls += 1;
+			if (lockCalls === 2) {
+				signalFinalizationAttempt();
+				if (activeCoverageMutation) {
+					throw new Error("active coverage mutation");
+				}
+			}
+			return transaction(operation);
+		};
+
+		const deletion = runOpportunityDocumentDeleteCore({
+			documentId: "manual-1",
+			opportunityId: "opportunity-1",
+			actorId: "deleter-1",
+			documentType: "estados_cuenta_2",
+			description: "Adjunto manual",
+			withOpportunityLock,
+			runTransaction: async (operation) => {
+				plainTransactions += 1;
+				return transaction(operation);
+			},
+			readDocument: async () =>
+				rows.find(({ id }) => id === "manual-1") ?? null,
+			quarantineAndRefresh: async (_tx, current, tag) => {
+				current.documentType = "other";
+				current.description = tag;
+				checklist.uploaded = false;
+			},
+			deleteStoredFile: async () => {
+				coverageMutation = runReservedBankStatementCoverageMutationCore({
+					reserve: async () => {
+						activeCoverageMutation = true;
+						return { token: "coverage-token" };
+					},
+					loadCurrentOpportunity: async () => undefined,
+					loadCurrentCoverage: async () => ({}),
+					mutateCurrentCoverage: async () => {
+						rows.push({
+							id: "coverage-1",
+							opportunityId: "opportunity-1",
+							documentType: "other",
+							description: "staged coverage",
+							filePath: "opportunities/opportunity-1/coverage.pdf",
+						});
+						signalCoverageStaged();
+						await finalizationAttempted;
+						const staged = rows.find(({ id }) => id === "coverage-1");
+						if (staged) staged.documentType = "estados_cuenta_2";
+						checklist.uploaded = true;
+					},
+					release: async () => {
+						activeCoverageMutation = false;
+					},
+				});
+				await coverageStaged;
+			},
+			deleteDocumentAndRefresh: async (_tx, current) => {
+				deleteDocumentCalls += 1;
+				const uploaded = rows.some(
+					(row) =>
+						row.id !== current.id && row.documentType === "estados_cuenta_2",
+				);
+				signalFinalizationAttempt();
+				await coverageMutation;
+				rows.splice(
+					rows.findIndex(({ id }) => id === current.id),
+					1,
+				);
+				checklist.uploaded = uploaded;
+			},
+		});
+
+		await expect(deletion).rejects.toThrow("active coverage mutation");
+		await coverageMutation;
+		expect(lockCalls).toBe(2);
+		expect(plainTransactions).toBe(0);
+		expect(deleteDocumentCalls).toBe(0);
+		expect(rows).toEqual([
+			expect.objectContaining({ id: "manual-1", documentType: "other" }),
+			expect.objectContaining({
+				id: "coverage-1",
+				documentType: "estados_cuenta_2",
+			}),
+		]);
+		expect(checklist.uploaded).toBe(true);
+	});
+
 	test("compensates the exact pre-uploaded key when the locked slot is occupied", async () => {
 		const rows: Row[] = [];
 		const blobs = new Set(["opportunities/opportunity-1/manual.pdf"]);
 		const debt: ManualBankDocumentCleanupDebt[] = [];
-		const checklist = { uploaded: false };
 		const lock = serializedLock();
 		const autoInsert = lock(async () => {
 			rows.push({
@@ -78,8 +284,8 @@ describe("opportunity bank document production cores", () => {
 			actorId: "user-1",
 			documentType: "estados_cuenta_1",
 			uploadedKey: "opportunities/opportunity-1/manual.pdf",
-			withOpportunityLock: (_opportunityId, operation) => lock(operation),
-			runTransaction: statefulTransaction(rows, checklist),
+			withOpportunityLock: (_opportunityId, operation) =>
+				lock(() => operation({ name: "tx" })),
 			findExistingBankSlot: async () =>
 				rows.find(
 					(row) =>
@@ -116,8 +322,7 @@ describe("opportunity bank document production cores", () => {
 				actorId: "user-1",
 				documentType: "estados_cuenta_1",
 				uploadedKey: "opportunities/opportunity-1/manual.pdf",
-				withOpportunityLock: async (_opportunityId, operation) => operation(),
-				runTransaction: statefulTransaction(rows, checklist),
+				withOpportunityLock: opportunityLock(rows, checklist),
 				findExistingBankSlot: async () => null,
 				insertDocument: async () => {
 					const row = { ...manualRow(), documentType: "estados_cuenta_1" };
@@ -153,8 +358,7 @@ describe("opportunity bank document production cores", () => {
 				actorId: "user-1",
 				documentType: "estados_cuenta_1",
 				uploadedKey: "opportunities/opportunity-1/manual.pdf",
-				withOpportunityLock: async (_opportunityId, operation) => operation(),
-				runTransaction: statefulTransaction(rows, checklist),
+				withOpportunityLock: opportunityLock(rows, checklist),
 				findExistingBankSlot: async () => ({ id: "occupied" }),
 				insertDocument: async () => manualRow(),
 				refreshChecklist: async () => {},
@@ -195,7 +399,7 @@ describe("opportunity bank document production cores", () => {
 			actorId: "user-1",
 			documentType: "other",
 			description: rows[0]?.description,
-			withOpportunityLock: async (_opportunityId, operation) => operation(),
+			withOpportunityLock: opportunityLock(rows, checklist),
 			runTransaction: statefulTransaction(rows, checklist),
 			readDocument: async () => rows[0] ?? null,
 			quarantineAndRefresh: async () => {},
@@ -229,7 +433,8 @@ describe("opportunity bank document production cores", () => {
 				actorId: "user-1",
 				documentType: row.documentType,
 				description: row.description,
-				withOpportunityLock: async (_opportunityId, operation) => operation(),
+				withOpportunityLock: async (_opportunityId, operation) =>
+					operation({ name: "tx" }),
 				runTransaction: async (operation) => operation({ name: "tx" }),
 				readDocument: async () => row,
 				quarantineAndRefresh: async () => {},
@@ -254,7 +459,7 @@ describe("opportunity bank document production cores", () => {
 				actorId: "deleter-1",
 				documentType: "estados_cuenta_2",
 				description: "Adjunto manual",
-				withOpportunityLock: async (_opportunityId, operation) => operation(),
+				withOpportunityLock: opportunityLock(rows, checklist),
 				runTransaction: transaction,
 				readDocument: async () => rows[0] ?? null,
 				quarantineAndRefresh: async (_tx, current, tag) => {
@@ -293,7 +498,7 @@ describe("opportunity bank document production cores", () => {
 					actorId: "deleter-1",
 					documentType: rows[0]?.documentType ?? "other",
 					description: rows[0]?.description,
-					withOpportunityLock: async (_opportunityId, operation) => operation(),
+					withOpportunityLock: opportunityLock(rows, checklist),
 					runTransaction: transaction,
 					readDocument: async () => rows[0] ?? null,
 					quarantineAndRefresh: async (_tx, current, tag) => {

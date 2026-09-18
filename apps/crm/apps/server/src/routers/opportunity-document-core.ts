@@ -65,7 +65,6 @@ export async function runOpportunityDocumentUploadCore<T, TTx>({
 	documentType,
 	uploadedKey,
 	withOpportunityLock,
-	runTransaction,
 	findExistingBankSlot,
 	insertDocument,
 	refreshChecklist,
@@ -78,9 +77,8 @@ export async function runOpportunityDocumentUploadCore<T, TTx>({
 	uploadedKey: string;
 	withOpportunityLock: <R>(
 		opportunityId: string,
-		operation: () => Promise<R>,
+		operation: (tx: TTx) => Promise<R>,
 	) => Promise<R>;
-	runTransaction: <R>(operation: (tx: TTx) => Promise<R>) => Promise<R>;
 	findExistingBankSlot: (tx: TTx) => Promise<unknown | null>;
 	insertDocument: (tx: TTx) => Promise<T>;
 	refreshChecklist: (tx: TTx, document: T) => Promise<void>;
@@ -88,19 +86,17 @@ export async function runOpportunityDocumentUploadCore<T, TTx>({
 	persistCleanupDebt: (debt: ManualBankDocumentCleanupDebt) => Promise<void>;
 }): Promise<T> {
 	try {
-		return await withOpportunityLock(opportunityId, () =>
-			runTransaction(async (tx) => {
-				if (await findExistingBankSlot(tx)) {
-					throw new OpportunityDocumentMutationError(
-						"CONFLICT",
-						"El espacio de estado de cuenta ya está ocupado.",
-					);
-				}
-				const document = await insertDocument(tx);
-				await refreshChecklist(tx, document);
-				return document;
-			}),
-		);
+		return await withOpportunityLock(opportunityId, async (tx) => {
+			if (await findExistingBankSlot(tx)) {
+				throw new OpportunityDocumentMutationError(
+					"CONFLICT",
+					"El espacio de estado de cuenta ya está ocupado.",
+				);
+			}
+			const document = await insertDocument(tx);
+			await refreshChecklist(tx, document);
+			return document;
+		});
 	} catch (error) {
 		try {
 			await deleteUploadedFile(uploadedKey);
@@ -144,7 +140,7 @@ export async function runOpportunityDocumentDeleteCore<
 	description?: string | null;
 	withOpportunityLock: <R>(
 		opportunityId: string,
-		operation: () => Promise<R>,
+		operation: (tx: TTx) => Promise<R>,
 	) => Promise<R>;
 	runTransaction: <R>(operation: (tx: TTx) => Promise<R>) => Promise<R>;
 	readDocument: (tx: TTx) => Promise<T | null>;
@@ -156,50 +152,53 @@ export async function runOpportunityDocumentDeleteCore<
 	deleteStoredFile: (document: T) => Promise<void>;
 	deleteDocumentAndRefresh: (tx: TTx, document: T) => Promise<void>;
 }): Promise<void> {
-	const remove = async () => {
-		let current: T | null = null;
-		await runTransaction(async (tx) => {
-			current = await readDocument(tx);
-			if (!current) {
-				throw new OpportunityDocumentMutationError(
-					"NOT_FOUND",
-					"Documento no encontrado",
-				);
-			}
-			if (isReservedCoverageArtifact(current.description)) {
-				throw new OpportunityDocumentMutationError(
-					"CONFLICT",
-					"Este documento es administrado por la cobertura mensual y no se puede eliminar manualmente.",
-				);
-			}
-			if (!isManualBankDocumentCleanupDescription(current.description)) {
-				await quarantineAndRefresh(
-					tx,
-					current,
-					manualDeleteCleanupTag({
-						actorId,
-						documentType: current.documentType,
-					}),
-				);
-			}
-		});
+	let current: T | null = null;
+	const quarantine = async (tx: TTx) => {
+		current = await readDocument(tx);
 		if (!current) {
 			throw new OpportunityDocumentMutationError(
 				"NOT_FOUND",
 				"Documento no encontrado",
 			);
 		}
-		const document = current;
-		await deleteStoredFile(document);
-		await runTransaction((tx) => deleteDocumentAndRefresh(tx, document));
+		if (isReservedCoverageArtifact(current.description)) {
+			throw new OpportunityDocumentMutationError(
+				"CONFLICT",
+				"Este documento es administrado por la cobertura mensual y no se puede eliminar manualmente.",
+			);
+		}
+		if (!isManualBankDocumentCleanupDescription(current.description)) {
+			await quarantineAndRefresh(
+				tx,
+				current,
+				manualDeleteCleanupTag({
+					actorId,
+					documentType: current.documentType,
+				}),
+			);
+		}
 	};
 	const serialized =
 		isBankStatementChecklistType(documentType) ||
 		isReservedCoverageArtifact(description) ||
 		isManualBankDocumentCleanupDescription(description);
 	if (serialized) {
-		await withOpportunityLock(opportunityId, remove);
+		await withOpportunityLock(opportunityId, quarantine);
 	} else {
-		await remove();
+		await runTransaction(quarantine);
+	}
+	if (!current) {
+		throw new OpportunityDocumentMutationError(
+			"NOT_FOUND",
+			"Documento no encontrado",
+		);
+	}
+	const document = current;
+	await deleteStoredFile(document);
+	const finalize = (tx: TTx) => deleteDocumentAndRefresh(tx, document);
+	if (serialized) {
+		await withOpportunityLock(opportunityId, finalize);
+	} else {
+		await runTransaction(finalize);
 	}
 }

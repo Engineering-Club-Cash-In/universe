@@ -295,12 +295,12 @@ export async function reserveCreditAnalysisReset(params: {
 
 export async function withOpportunityDocumentMutationLock<T>(
 	opportunityId: string,
-	operation: () => Promise<T>,
+	operation: (tx: Transaction) => Promise<T>,
 ): Promise<T> {
 	return db.transaction(async (tx) => {
 		await tx.execute(lockOpportunity(opportunityId));
 		await assertNoActiveCapacityAnalysis(tx, opportunityId);
-		return operation();
+		return operation(tx);
 	});
 }
 
@@ -1500,8 +1500,6 @@ export async function reserveBankStatementCoverageMutation(params: {
 	opportunityId: string;
 	leadId: string;
 	analysisId: string;
-	validationIds: string[];
-	files: Array<{ filePath: string; contentSha256: string }>;
 }) {
 	return db.transaction(async (tx) => {
 		await tx.execute(lockOpportunity(params.opportunityId));
@@ -1524,7 +1522,6 @@ export async function reserveBankStatementCoverageMutation(params: {
 				"El análisis ya no corresponde a esta oportunidad.",
 			);
 		}
-		await assertUploadedBankStatementsValidatedWithTransaction(tx, params);
 		const token = randomUUID();
 		const [reserved] = await tx
 			.update(creditAnalysis)
@@ -1547,6 +1544,41 @@ export async function reserveBankStatementCoverageMutation(params: {
 			);
 		}
 		return { opportunityId: params.opportunityId, token };
+	});
+}
+
+export async function assertBankStatementCoverageReservationCurrent(params: {
+	opportunityId: string;
+	leadId: string;
+	analysisId: string;
+	token: string;
+	validationIds: string[];
+	files: Array<{ filePath: string; contentSha256: string }>;
+}) {
+	return db.transaction(async (tx) => {
+		const [renewed] = await tx
+			.update(creditAnalysis)
+			.set({
+				analysisReservationStartedAt: new Date(),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(creditAnalysis.id, params.analysisId),
+					eq(creditAnalysis.opportunityId, params.opportunityId),
+					eq(creditAnalysis.leadId, params.leadId),
+					eq(creditAnalysis.analysisReservationToken, params.token),
+					isNotNull(creditAnalysis.analyzedAt),
+				),
+			)
+			.returning({ id: creditAnalysis.id });
+		if (!renewed) {
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				"La reserva de cobertura ya no está vigente.",
+			);
+		}
+		await assertUploadedBankStatementsValidatedWithTransaction(tx, params);
 	});
 }
 

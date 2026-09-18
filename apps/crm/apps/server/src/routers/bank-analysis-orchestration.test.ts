@@ -5,7 +5,10 @@ import {
 	type ResolvedBankStatementCoverage,
 	resolveBankStatementMonthlyCoverage,
 } from "../lib/bank-statement-documents";
-import { canWriteOpportunityCreditAnalysis } from "../lib/credit-analysis-ownership";
+import {
+	assertOpportunityBelongsToLead,
+	canWriteOpportunityCreditAnalysis,
+} from "../lib/credit-analysis-ownership";
 import { runCreditAnalysisResetReservationCore } from "../services/document-integrity";
 import {
 	getInitialBankStatementCoverageSaveStatus,
@@ -16,6 +19,7 @@ import {
 	runBankStatementCoverageSaveLifecycle,
 	runInitialBankStatementHandlerCore,
 	runOpportunityCreditAnalysisResetCore,
+	runReservedBankStatementCoverageMutationCore,
 } from "./bank-analysis-coverage";
 
 const resolved: ResolvedBankStatementCoverage = {
@@ -99,6 +103,152 @@ describe("bank analysis route orchestration", () => {
 			"validate-current-batch",
 			"pending",
 			"saved",
+		]);
+	});
+
+	test("overlapping confirmation reloads coverage after reservation and preserves the first declaration", async () => {
+		const ambiguous: PersistedBankStatementCoverage = {
+			...coverage("pending"),
+			status: "needs_confirmation",
+			months: [],
+			checklistAssignments: [],
+			requestedChecklistAssignments: [],
+			files: [0, 1].map((fileIndex) => ({
+				...coverage().files[0],
+				fileIndex,
+				name: `archivo-${fileIndex}.pdf`,
+				status: "needs_confirmation" as const,
+				detectedMonths: ["Mes ambiguo"],
+				effectiveMonths: [],
+			})),
+			reportedCoverage: [
+				{ indice_archivo: 0, meses: ["Mes ambiguo"] },
+				{ indice_archivo: 1, meses: ["Mes ambiguo"] },
+			],
+		};
+		let persisted = ambiguous;
+		let active = false;
+		const waiters: Array<() => void> = [];
+		let tokenSequence = 0;
+		const reserve = async () => {
+			if (active) await new Promise<void>((resolve) => waiters.push(resolve));
+			active = true;
+			return { token: `token-${++tokenSequence}` };
+		};
+		const release = async () => {
+			active = false;
+			waiters.shift()?.();
+		};
+		const loadedDeclarations: number[] = [];
+		const execute = (fileIndex: number, month: string) =>
+			runReservedBankStatementCoverageMutationCore({
+				reserve,
+				loadCurrentOpportunity: async () => undefined,
+				loadCurrentCoverage: async () => {
+					loadedDeclarations.push(persisted.manualDeclarations.length);
+					return structuredClone(persisted);
+				},
+				mutateCurrentCoverage: (current) =>
+					runBankStatementCoverageMutationHandlerCore({
+						coverage: current,
+						manualDeclaration: { fileIndex, months: [month] },
+						actorId: `user-${fileIndex}`,
+						declaredAt: `2026-09-1${fileIndex}T16:00:00.000Z`,
+						validateCurrent: async () => {},
+						persistCoverage: async (next) => {
+							persisted = next;
+						},
+						cleanupDebt: async () => [],
+						saveArtifacts: async (next) => ({
+							documents: [],
+							effectiveAssignments:
+								next.requestedChecklistAssignments ?? next.checklistAssignments,
+							pendingAssignments: [],
+						}),
+					}),
+				release,
+			});
+
+		const first = execute(0, "2026-01");
+		const second = execute(1, "2026-02");
+		await Promise.all([first, second]);
+
+		expect(loadedDeclarations).toEqual([0, 1]);
+		expect(persisted.manualDeclarations).toEqual([
+			expect.objectContaining({ fileIndex: 0, months: ["2026-01"] }),
+			expect.objectContaining({ fileIndex: 1, months: ["2026-02"] }),
+		]);
+		expect(persisted.months.map(({ month }) => month)).toEqual([
+			"2026-01",
+			"2026-02",
+		]);
+	});
+
+	test("reloads opportunity authority, ownership, and vehicle after reservation", async () => {
+		type Opportunity = {
+			id: string;
+			leadId: string;
+			assignedTo: string | null;
+			vehicleId: string | null;
+		};
+		const original: Opportunity = {
+			id: "opportunity-1",
+			leadId: "lead-1",
+			assignedTo: "sales-1",
+			vehicleId: "vehicle-old",
+		};
+		const usedVehicles: Array<{
+			operation: "cleanup" | "save";
+			vehicleId: string | null;
+		}> = [];
+		const execute = (afterReservation: Opportunity) => {
+			let authoritative = original;
+			return runReservedBankStatementCoverageMutationCore({
+				reserve: async () => {
+					authoritative = afterReservation;
+					return { token: "coverage-token" };
+				},
+				loadCurrentOpportunity: async () => {
+					const current = structuredClone(authoritative);
+					if (
+						!canAutoAttachBankStatementDocuments({
+							userRole: "sales",
+							userId: "sales-1",
+							opportunityAssignedTo: current.assignedTo,
+						})
+					) {
+						throw new Error("Sin permiso para modificar cobertura");
+					}
+					assertOpportunityBelongsToLead(current, "lead-1");
+					return current;
+				},
+				loadCurrentCoverage: async (_reservation, currentOpportunity) => ({
+					currentOpportunity,
+					coverage: coverage(),
+				}),
+				mutateCurrentCoverage: async ({ currentOpportunity }) => {
+					usedVehicles.push(
+						{ operation: "cleanup", vehicleId: currentOpportunity.vehicleId },
+						{ operation: "save", vehicleId: currentOpportunity.vehicleId },
+					);
+					return currentOpportunity.vehicleId;
+				},
+				release: async () => {},
+			});
+		};
+
+		await expect(
+			execute({ ...original, assignedTo: "sales-2" }),
+		).rejects.toThrow("Sin permiso para modificar cobertura");
+		await expect(execute({ ...original, leadId: "lead-2" })).rejects.toThrow(
+			"no pertenece al lead",
+		);
+		await expect(
+			execute({ ...original, vehicleId: "vehicle-current" }),
+		).resolves.toBe("vehicle-current");
+		expect(usedVehicles).toEqual([
+			{ operation: "cleanup", vehicleId: "vehicle-current" },
+			{ operation: "save", vehicleId: "vehicle-current" },
 		]);
 	});
 

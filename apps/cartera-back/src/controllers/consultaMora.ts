@@ -15,8 +15,9 @@ import {
 import {
   construirHistorialMora,
   construirRespuesta,
-  fichasDelDpi,
   fusionarCreditosPorId,
+  numerosEspejoConPresupuesto,
+  seleccionarFichasDelDpi,
   nombreClienteSifco,
   normalizarIdentificacion,
   respuestaClienteNoEncontrado,
@@ -30,6 +31,9 @@ import {
 
 /** Presupuesto del camino interactivo: ver `obtenerNumerosPrestamo`. */
 const TIMEOUT_PRESTAMOS_GATE_MS = 10000;
+
+/** Presupuesto del espejo: ver `numerosEspejoConPresupuesto`. */
+const TIMEOUT_ESPEJO_GATE_MS = 5000;
 
 /**
  * Responde si el dueño de un DPI ya es cliente y si está en mora, para el gate
@@ -61,8 +65,22 @@ export async function consultarMoraPorDpi(
     // TODAS las fichas del DPI, no la primera: un mismo DPI puede tener varias
     // en el core (natural + jurídica, o duplicados sin unificar) y los créditos
     // cuelgan de la ficha. Con la primera, un moroso con dos fichas pasaba
-    // limpio si la primera estaba al día. Ver `fichasDelDpi`.
-    const fichas = fichasDelDpi(clientes, dpiLimpio);
+    // limpio si la primera estaba al día. Ver `seleccionarFichasDelDpi`.
+    const { fichas, indeterminado } = seleccionarFichasDelDpi(
+      clientes,
+      dpiLimpio
+    );
+
+    // El DPI tenía fichas y alguna quedó inconsultable: no se le pueden pedir
+    // los créditos, así que no sabemos si debe. Una ficha basura no es "no
+    // cliente", es "no pude verificar", y sin este throw el descarte silencioso
+    // se veía idéntico a un DPI inexistente —CLIENTE_NO_ENCONTRADO y a seguir—.
+    // El throw baja al catch y sale SERVICIO_NO_DISPONIBLE, fail-closed.
+    if (indeterminado) {
+      throw new Error(
+        `SIFCO devolvió fichas del DPI con CodigoCliente inconsultable (${fichas.length} de ${clientes.length} consultables)`
+      );
+    }
     const codigosCliente = fichas.map((ficha) => String(ficha.CodigoCliente));
 
     // Secuencial y no en paralelo: son pocas fichas (casi siempre una) y el
@@ -212,15 +230,32 @@ async function obtenerCreditosConMora(
  * SERVICIO_NO_DISPONIBLE aunque el espejo hubiera traído filas. Es a propósito:
  * media lista no alcanza para decir "sin mora" —el crédito que falta puede ser
  * justo el moroso—, y fail-closed es la regla de todo el endpoint.
+ *
+ * ⚠️ El espejo es el caso OPUESTO y por eso no es fail-closed: si vence o falla,
+ * se sigue con solo el API. Ver `numerosEspejoConPresupuesto`.
  */
 async function obtenerNumerosPrestamo(
   codigoClienteSifco: string
 ): Promise<string[]> {
+  // El espejo va con presupuesto propio y corto: es una base aparte
+  // (`SIFCO_DB_URL`) que antes podía colgar la request entera sin llegar nunca
+  // ni al API ni al catch. 5s y no los 10s del API porque el espejo es el
+  // atajo: si no contesta rápido, dejó de ser atajo.
   const filasEspejo = sifcoDb
-    ? await sifcoDb
-        .select({ pre_numero: prestamos.pre_numero })
-        .from(prestamos)
-        .where(eq(prestamos.pre_cli_cod, codigoClienteSifco))
+    ? await numerosEspejoConPresupuesto(
+        () =>
+          sifcoDb!
+            .select({ pre_numero: prestamos.pre_numero })
+            .from(prestamos)
+            .where(eq(prestamos.pre_cli_cod, codigoClienteSifco))
+            .then((filas) => filas.map((fila) => fila.pre_numero ?? "")),
+        TIMEOUT_ESPEJO_GATE_MS,
+        (detalle) =>
+          console.warn(
+            `⚠️ espejo de SIFCO no utilizable para el cliente ${codigoClienteSifco}; se sigue solo con el API:`,
+            detalle
+          )
+      )
     : [];
 
   // 10s y no los 30s del cliente: acá hay un asesor esperando en pantalla. Los
@@ -235,7 +270,7 @@ async function obtenerNumerosPrestamo(
   // La misma unión que usa el llamador para los números del CRM: deduplica y
   // descarta vacíos.
   return unirNumerosCredito(
-    filasEspejo.map((fila) => fila.pre_numero ?? ""),
+    filasEspejo,
     (respuesta?.Prestamos ?? []).map((prestamo) => prestamo.NumeroPrestamo ?? "")
   );
 }
@@ -258,12 +293,18 @@ async function obtenerHistorialMora(
         fecha: moras_historial.fecha,
         monto_nuevo: moras_historial.monto_nuevo,
         tipo_evento: moras_historial.tipo_evento,
+        // Para el monto de las moras cerradas: ver `montoDeMorasCerradas`. Sin
+        // consulta extra —los eventos de esos créditos ya vienen en este
+        // SELECT—, así que no hay N+1 por mora.
+        mora_id: moras_historial.mora_id,
+        monto_anterior: moras_historial.monto_anterior,
       })
       .from(moras_historial)
       .where(inArray(moras_historial.credito_id, creditoIds)),
     db
       .select({
         credito_id: moras_credito.credito_id,
+        mora_id: moras_credito.mora_id,
         // Una mora cerrada no guarda fecha de cierre propia: `updated_at` es el
         // momento en que se la desactivó.
         fecha: moras_credito.updated_at,
@@ -293,15 +334,25 @@ async function obtenerHistorialMora(
       monto_nuevo: fila.monto_nuevo,
       tipo_evento: fila.tipo_evento,
       numeroCreditoSifco: numeroDe(fila.credito_id),
+      mora_id: fila.mora_id,
+      monto_anterior: fila.monto_anterior,
     })),
     morasCerradas: morasCerradas
       .map((fila) => ({
         fecha: fila.fecha ?? fila.created_at,
         monto_mora: fila.monto_mora,
         numeroCreditoSifco: numeroDe(fila.credito_id),
+        mora_id: fila.mora_id,
       }))
-      .filter((fila): fila is { fecha: Date; monto_mora: string; numeroCreditoSifco: string } =>
-        fila.fecha !== null
+      .filter(
+        (
+          fila
+        ): fila is {
+          fecha: Date;
+          monto_mora: string;
+          numeroCreditoSifco: string;
+          mora_id: number;
+        } => fila.fecha !== null
       ),
     convenios: convenios.map((fila) => ({
       fecha_convenio: fila.fecha_convenio,

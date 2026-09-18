@@ -1,6 +1,7 @@
 import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { contractGenerator } from './services/ContractGeneratorService';
+import { downloadPdfFromR2 } from './services/R2Service';
 import { ContractType, GenerateContractRequest } from './types/contract';
 import { WeeTrustService } from './services/WeeTrustService';
 import { notificarEstadoDeFirmaAlCrm } from './services/CrmApiService';
@@ -390,6 +391,77 @@ const app = new Elysia()
     }
   })
 
+  /**
+   * DELETE /contracts/document/:documentID
+   *
+   * Borra el documento en WeeTrust. Sólo funciona con documentos en `draft` o
+   * `pending`: uno completado queda registrado en su blockchain y la API no
+   * permite eliminarlo ni anularlo. Para esos, lo único posible es dejarlos sin
+   * efecto del lado del CRM.
+   */
+  .delete('/contracts/document/:documentID', async ({ params, set }) => {
+    try {
+      await weeTrustService.deleteDocument(params.documentID);
+      return { success: true, documentID: params.documentID };
+    } catch (error: any) {
+      console.error('[delete-document] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
+   * POST /contracts/reissue
+   *
+   * Vuelve a emitir un contrato en WeeTrust usando el PDF que ya está en R2.
+   *
+   * No es lo mismo que `update-signatures`, que sólo renueva las URL de quienes
+   * todavía no firmaron y falla con un documento completado ("There are no url
+   * of signatures to update"). Acá se crea un documento NUEVO con el mismo PDF,
+   * así que sirve también cuando ya firmaron todos pero la firma no vale (por
+   * ejemplo, una identificación que no era la del cliente).
+   *
+   * Body: { r2Key, contractType, filenamePrefix?, signers, observers? }
+   */
+  .post('/contracts/reissue', async ({ body, set }) => {
+    try {
+      const { r2Key, contractType, filenamePrefix, signers, observers } =
+        body as {
+          r2Key?: string;
+          contractType?: ContractType;
+          filenamePrefix?: string;
+          signers?: GenerateContractRequest['signers'];
+          observers?: string[];
+        };
+
+      if (!contractType || !Object.values(ContractType).includes(contractType)) {
+        set.status = 400;
+        return { success: false, error: `Tipo de contrato inválido: ${contractType}` };
+      }
+
+      if (!r2Key) {
+        set.status = 400;
+        return { success: false, error: 'El campo "r2Key" es requerido' };
+      }
+
+      const pdfBuffer = await downloadPdfFromR2(r2Key);
+
+      const result = await contractGenerator.signExistingPdf(
+        contractType,
+        pdfBuffer,
+        { filenamePrefix, signers, observers }
+      );
+
+      set.status = result.success ? 200 : 400;
+      return result;
+
+    } catch (error: any) {
+      console.error('Error en /contracts/reissue:', error);
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  })
+
   // ===== ESTADO Y REINTENTOS DE FIRMA =====
 
   /**
@@ -491,6 +563,8 @@ const app = new Elysia()
       generateBatch: 'POST /contracts/batch',
       generateByType: 'POST /contracts/:type',
       uploadForSigning: 'POST /contracts/upload-for-signing',
+      reissue: 'POST /contracts/reissue',
+      deleteDocument: 'DELETE /contracts/document/:documentID',
       signingStatus: 'GET /contracts/signing-status/:documentID',
       refreshSigningLinks: 'PUT /contracts/refresh-signing-links/:documentID',
       resendSigningEmail: 'PUT /contracts/resend-email/:documentID',

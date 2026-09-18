@@ -419,23 +419,6 @@ export async function consultarEstadoFirma(
 	);
 }
 
-/**
- * Regenera los enlaces de firma de un documento.
- *
- * Sirve para los dos casos que pasan seguido: el link venció, o la persona
- * necesita volver a entrar porque falló la verificación. Los que ya firmaron no
- * se tocan.
- */
-export async function regenerarEnlacesDeFirma(
-	documentID: string,
-): Promise<EstadoDocumentoFirma> {
-	return pedirAlGenerador<EstadoDocumentoFirma>(
-		`/contracts/refresh-signing-links/${encodeURIComponent(documentID)}`,
-		"PUT",
-		"No se pudieron regenerar los enlaces de firma",
-	);
-}
-
 /** Reenvía el correo de invitación a los firmantes pendientes. */
 export async function reenviarCorreoDeFirma(
 	documentID: string,
@@ -491,4 +474,65 @@ export async function subirContratoParaFirma(payload: {
 	}
 
 	return parsed;
+}
+
+/**
+ * Borra el documento en WeeTrust.
+ *
+ * Sólo se puede con documentos que nadie terminó de firmar. Uno completado
+ * queda en su blockchain y no hay forma de eliminarlo ni anularlo.
+ */
+export async function borrarDocumentoDeWeeTrust(
+	documentID: string,
+): Promise<void> {
+	const response = await fetch(
+		`${LEGAL_DOCS_API_URL}/contracts/document/${encodeURIComponent(documentID)}`,
+		{
+			method: "DELETE",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+			},
+		},
+	);
+
+	if (!response.ok) {
+		throw new Error(
+			`No se pudo borrar el documento en WeeTrust: ${response.status} - ${await response.text()}`,
+		);
+	}
+}
+
+/**
+ * Vuelve a emitir un contrato en WeeTrust con el PDF que ya está en R2.
+ *
+ * Es lo que hace "Regenerar": no cambia el documento, crea uno nuevo con el
+ * mismo PDF y enlaces nuevos para todos. A diferencia de `update-signatures` de
+ * WeeTrust —que sólo renueva las URL de quienes no firmaron y falla si ya
+ * firmaron todos— esto sirve también cuando la firma existe pero no vale.
+ */
+export async function reemitirContratoEnWeeTrust(payload: {
+	r2Key: string;
+	contractType: string;
+	filenamePrefix?: string;
+	signers?: ContractSigner[];
+	observers?: string[];
+}): Promise<DocumentResult & { message?: string }> {
+	const response = await fetch(`${LEGAL_DOCS_API_URL}/contracts/reissue`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+		},
+		body: JSON.stringify(payload),
+	});
+
+	const cuerpo = await response.text();
+	try {
+		return JSON.parse(cuerpo);
+	} catch {
+		throw new Error(
+			`No se pudo reemitir el contrato: ${response.status} - ${cuerpo}`,
+		);
+	}
 }

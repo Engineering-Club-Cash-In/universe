@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -56,4 +56,31 @@ export async function uploadPdfToR2(
   console.log(`✓ PDF subido a R2: ${r2Key}`);
 
   return { r2Key };
+}
+
+/**
+ * Baja de R2 un PDF ya generado.
+ *
+ * Sirve para volver a emitir un contrato en WeeTrust sin regenerarlo ni pedirle
+ * a nadie que lo suba: el PDF bueno ya está guardado, lo único que hace falta
+ * es un documento nuevo con enlaces nuevos.
+ *
+ * Acepta la key con el bucket adelante ("legal-documents/contracts/...") que es
+ * como la guarda el CRM, o sin él.
+ */
+export async function downloadPdfFromR2(r2Key: string): Promise<Buffer> {
+  const client = getR2Client();
+
+  const prefijo = `${R2_BUCKET_LEGAL_DOCS}/`;
+  const key = r2Key.startsWith(prefijo) ? r2Key.slice(prefijo.length) : r2Key;
+
+  const res = await client.send(
+    new GetObjectCommand({ Bucket: R2_BUCKET_LEGAL_DOCS, Key: key }),
+  );
+
+  if (!res.Body) {
+    throw new Error(`El objeto ${r2Key} no tiene contenido en R2`);
+  }
+
+  return Buffer.from(await res.Body.transformToByteArray());
 }

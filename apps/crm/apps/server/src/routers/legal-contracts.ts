@@ -15,8 +15,20 @@ import {
 } from "../db/schema/legal-contracts";
 import { vehicles } from "../db/schema/vehicles";
 import { auditedTransaction, auditRecord } from "../lib/audit";
-import { documentIdDesdeLink } from "../lib/contract-signatories";
+import {
+	documentIdDesdeLink,
+	guardarFirmantesDelContrato,
+	linksPorRol,
+} from "../lib/contract-signatories";
 import { sincronizarEstadoDeFirma } from "../lib/contrato-estado-firma";
+import {
+	type AccionSobreContrato,
+	ETAPAS_POR_ACCION,
+	etiquetaDeMotivo,
+	MOTIVOS_DE_ANULACION_KEYS,
+} from "../lib/contratos-anulacion";
+import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
+import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import {
 	adminProcedure,
 	juridicoProcedure,
@@ -31,10 +43,13 @@ import {
 } from "../lib/storage";
 import { closeOpportunity } from "../services/close-opportunity";
 import {
+	borrarDocumentoDeWeeTrust,
+	type ContractSigner,
 	consultarEstadoFirma,
 	type EstadoDocumentoFirma,
+	motivoDeFalla,
+	reemitirContratoEnWeeTrust,
 	reenviarCorreoDeFirma,
-	regenerarEnlacesDeFirma,
 } from "../services/legal-docs-api";
 import { sendContractLinksToLead } from "./messaging";
 import { createNotification } from "./notifications";
@@ -116,6 +131,33 @@ async function contratoConDocumentID(contractId: string): Promise<{
 	}
 
 	return { contract, documentID };
+}
+/**
+ * Corta si la oportunidad ya no está en una etapa que permita esta acción.
+ *
+ * Reemplazar es de jurídico y sólo en 80%; regenerar lo hace análisis y va en
+ * 80% u 85%. Del 90% en adelante los contratos ya son parte de una decisión
+ * tomada y no se tocan.
+ */
+async function exigirEtapaDeFirma(
+	opportunityId: string,
+	accion: AccionSobreContrato,
+): Promise<void> {
+	const [etapa] = await db
+		.select({ porcentaje: salesStages.closurePercentage })
+		.from(opportunities)
+		.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+
+	const porcentaje = etapa?.porcentaje ?? null;
+	const permitidas = ETAPAS_POR_ACCION[accion];
+
+	if (porcentaje === null || !permitidas.includes(porcentaje as never)) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: no se puede ${accion}. Sólo se puede en ${permitidas.join("% u ")}%.`,
+		});
+	}
 }
 
 export const legalContractsRouter = {
@@ -1135,6 +1177,17 @@ export const legalContractsRouter = {
 		}),
 
 	/**
+	 * Si los mensajes salen a números reales o a los de prueba.
+	 *
+	 * Lo necesita la pantalla que aprueba y manda a firmar: ahí es donde se
+	 * disparan los WhatsApp, y quien aprieta el botón tiene que saber si el
+	 * cliente va a recibir algo o no. El navegador no puede leer `TEST_MESSAGE`.
+	 */
+	getMessagingMode: viewOpportunityContractsProcedure.handler(async () => ({
+		modoPrueba: isTestModeEnabled(),
+	})),
+
+	/**
 	 * Estado de firma de un contrato, firmante por firmante, preguntándole a
 	 * WeeTrust en el momento.
 	 *
@@ -1168,7 +1221,11 @@ export const legalContractsRouter = {
 		}),
 
 	/**
-	 * Regenera los enlaces de firma del contrato.
+	 * Regenera los enlaces de firma del contrato, sobre el MISMO documento.
+	 *
+	 * Es lo que hace el analista: no cambia el contrato, sólo emite enlaces
+	 * nuevos para quien no firmó. Reemplazar el documento —que sí lo anula y
+	 * sube otro— es de jurídico y vive en su ficha.
 	 *
 	 * Es la salida para los dos casos que pasan seguido: el link venció, o la
 	 * persona falló la verificación y necesita volver a entrar. No regenera el
@@ -1176,28 +1233,156 @@ export const legalContractsRouter = {
 	 * firmado.
 	 */
 	refreshContractSigningLinks: viewOpportunityContractsProcedure
-		.input(z.object({ contractId: z.string().uuid() }))
+		.input(
+			z.object({
+				contractId: z.string().uuid(),
+				motivo: z.enum(MOTIVOS_DE_ANULACION_KEYS),
+			}),
+		)
 		.handler(async ({ input }) => {
-			const { documentID } = await contratoConDocumentID(input.contractId);
+			const [contract] = await db
+				.select()
+				.from(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.id, input.contractId));
 
-			let estado: EstadoDocumentoFirma;
-			try {
-				estado = await regenerarEnlacesDeFirma(documentID);
-			} catch (error) {
-				throw new ORPCError("INTERNAL_SERVER_ERROR", {
-					message:
-						error instanceof Error
-							? error.message
-							: "No se pudieron regenerar los enlaces de firma",
+			if (!contract) {
+				throw new ORPCError("NOT_FOUND", { message: "Contrato no encontrado" });
+			}
+
+			if (contract.signatureMode === "fisica") {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Este contrato se firma en papel: no tiene enlaces.",
 				});
 			}
 
-			await sincronizarEstadoDeFirma(input.contractId, estado);
+			if (!contract.pdfLink) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato no tiene el PDF guardado, así que no se puede reemitir. Hay que generarlo de nuevo.",
+				});
+			}
+
+			if (contract.opportunityId) {
+				await exigirEtapaDeFirma(contract.opportunityId, "regenerar");
+			}
+
+			// Los mismos firmantes, con su rol. No se recalculan desde la
+			// oportunidad: el documento es el que es y tiene que salir con la misma
+			// gente, aunque después alguien haya editado un contacto.
+			const firmantes = await db
+				.select()
+				.from(contractSignatories)
+				.where(eq(contractSignatories.contractId, input.contractId))
+				.orderBy(contractSignatories.position);
+
+			if (firmantes.length === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato no tiene firmantes guardados. Reemplazalo desde jurídico.",
+				});
+			}
+
+			// Documento NUEVO con el mismo PDF. El `update-signatures` de WeeTrust
+			// sólo renueva las URL de quienes no firmaron, y con todos firmados
+			// devuelve "There are no url of signatures to update".
+			const resultado = await reemitirContratoEnWeeTrust({
+				r2Key: contract.pdfLink,
+				contractType: contract.contractType,
+				filenamePrefix: contract.contractName,
+				signers: firmantes.map((f) => ({
+					role: f.role as ContractSigner["role"],
+					email: f.email,
+					name: f.name,
+				})),
+				observers: CONTRATOS_OBSERVADORES,
+			});
+
+			const falla = motivoDeFalla(resultado);
+			if (falla) {
+				throw new ORPCError("BAD_REQUEST", { message: falla });
+			}
+
+			// El documento viejo: si nadie lo firmó se borra en WeeTrust, para que
+			// nadie entre por el link anterior. Si ya lo firmaron no se puede
+			// borrar; queda el registro de que se reemitió y por qué.
+			if (contract.weetrustDocumentId && contract.status !== "signed") {
+				try {
+					await borrarDocumentoDeWeeTrust(contract.weetrustDocumentId);
+				} catch (error) {
+					console.error(
+						`[refreshContractSigningLinks] no se pudo borrar ${contract.weetrustDocumentId}:`,
+						error,
+					);
+				}
+			}
+
+			const ahora = new Date();
+
+			await db
+				.update(generatedLegalContracts)
+				.set({
+					...linksPorRol(resultado.signatories, resultado.signing_links),
+					weetrustDocumentId: resultado.documentID ?? null,
+					observerUrl: resultado.observerUrl ?? null,
+					// Vuelve a estar pendiente: los enlaces son nuevos y nadie firmó
+					// todavía sobre este documento.
+					status: "pending",
+					lastRegenerationReason: etiquetaDeMotivo(input.motivo),
+					lastRegeneratedAt: ahora,
+					signingStatusCheckedAt: ahora,
+					updatedAt: ahora,
+				})
+				.where(eq(generatedLegalContracts.id, input.contractId));
+
+			// Los firmantes viejos apuntan al documento anterior.
+			await db
+				.delete(contractSignatories)
+				.where(eq(contractSignatories.contractId, input.contractId));
+			await guardarFirmantesDelContrato(
+				input.contractId,
+				resultado.signatories,
+			);
 
 			return {
-				...estado,
 				success: true,
-				message: "Enlaces de firma regenerados",
+				message: "Documento reemitido con enlaces nuevos",
+				documentID: resultado.documentID,
+				enlaces: resultado.signing_links?.length ?? 0,
+			};
+		}),
+
+	/**
+	 * Vuelve a mandar los enlaces de firma por WhatsApp.
+	 *
+	 * Después de reemplazar un contrato o regenerar sus enlaces, los que tenía la
+	 * gente en el teléfono dejaron de servir. Sin esto habría que mover la
+	 * oportunidad de etapa para que el envío automático se dispare otra vez.
+	 */
+	resendContractLinksWhatsapp: viewOpportunityContractsProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const [opportunity] = await db
+				.select({ leadId: opportunities.leadId })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity?.leadId) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			const resultado = await sendContractLinksToLead({
+				leadId: opportunity.leadId,
+				opportunityId: input.opportunityId,
+			});
+
+			return {
+				success: resultado.sent,
+				message: resultado.sent
+					? "Enlaces reenviados por WhatsApp"
+					: `No se envió: ${resultado.reason ?? "sin motivo"}`,
 			};
 		}),
 

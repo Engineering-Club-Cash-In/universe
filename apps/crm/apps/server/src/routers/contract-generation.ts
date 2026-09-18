@@ -27,6 +27,12 @@ import {
 	esFirmaFisica,
 	getSignatureMode,
 } from "../lib/contract-signature-mode";
+import {
+	ETAPAS_POR_ACCION,
+	etiquetaDeMotivo,
+	MOTIVOS_DE_ANULACION_KEYS,
+} from "../lib/contratos-anulacion";
+import { aplicarCorreosDePrueba } from "../lib/contratos-correos-prueba";
 import { REP_LEGAL_EMAIL, REP_LEGAL_NOMBRE } from "../lib/contratos-rep-legal";
 import { esContratoVentaMapeado } from "../lib/contratos-venta";
 import { eqDpi } from "../lib/dpi-lookup";
@@ -40,6 +46,7 @@ import {
 	validateOpportunityForContracts,
 } from "../services/contract-data-mapper";
 import {
+	borrarDocumentoDeWeeTrust,
 	type ContractSigner,
 	getDocumentsByDpi,
 	getDocumentTypes,
@@ -51,31 +58,6 @@ import {
 const LEGAL_DOCS_API_URL =
 	process.env.LEGAL_DOCS_API_URL ||
 	"https://legal-docs-blueprints.s4.devteamatcci.site";
-
-/**
- * Correos de prueba para los firmantes.
- *
- * Con `TEST_MESSAGE=true` los contratos se siguen generando con los datos
- * reales del cliente (nombre, DPI, vehículo), pero los links de firma se emiten
- * contra ESTOS correos y no contra los suyos. Hace falta porque WeeTrust apunta
- * a producción: sin esto, probar el flujo le manda un contrato a firmar a
- * alguien de verdad.
- *
- * Viven acá y no en `contract-signature-mode.ts` porque ese módulo lo importa
- * también el navegador, donde `process` no existe.
- *
- * `CONTRATOS_TEST_EMAIL_COFIRMANTES` va separado por comas y se reparte en
- * orden entre los codeudores; si hay más codeudores que correos, rota.
- */
-const CONTRATOS_TEST_EMAIL_TITULAR =
-	process.env.CONTRATOS_TEST_EMAIL_TITULAR?.trim() || "";
-
-const CONTRATOS_TEST_EMAIL_COFIRMANTES = (
-	process.env.CONTRATOS_TEST_EMAIL_COFIRMANTES || ""
-)
-	.split(",")
-	.map((email) => email.trim())
-	.filter(Boolean);
 
 /**
  * Observadores: reciben copia del flujo de firma en WeeTrust sin firmar.
@@ -116,53 +98,12 @@ function firmantesDelContrato(
 				},
 			];
 
-	return conCorreosDePrueba(conRepLegal);
-}
-
-/**
- * En modo de prueba, cambia los correos de los firmantes por los de las envs.
- *
- * El contrato se sigue armando con los datos reales del cliente (nombre, DPI,
- * vehículo): lo único que se reemplaza es a dónde llega el link de firma. Sin
- * esto, probar contra WeeTrust de producción le manda un contrato a firmar a un
- * cliente de verdad.
- *
- * El representante legal no se toca: su correo ya sale de una env
- * (`CONTRATOS_REP_LEGAL_EMAIL`).
- */
-function conCorreosDePrueba(signers: ContractSigner[]): ContractSigner[] {
-	if (!isTestModeEnabled()) return signers;
-
-	if (
-		!CONTRATOS_TEST_EMAIL_TITULAR &&
-		!CONTRATOS_TEST_EMAIL_COFIRMANTES.length
-	) {
-		console.warn(
-			"[contratos] TEST_MESSAGE=true pero no hay CONTRATOS_TEST_EMAIL_TITULAR " +
-				"ni CONTRATOS_TEST_EMAIL_COFIRMANTES: los links de firma van a salir " +
-				"a los correos REALES del cliente.",
-		);
-		return signers;
-	}
-
-	let nCofirmante = 0;
-
-	return signers.map((s) => {
-		if (s.role === "TITULAR" && CONTRATOS_TEST_EMAIL_TITULAR) {
-			return { ...s, email: CONTRATOS_TEST_EMAIL_TITULAR };
-		}
-		if (s.role === "COFIRMANTE" && CONTRATOS_TEST_EMAIL_COFIRMANTES.length) {
-			// Si hay más codeudores que correos de prueba, rota: es preferible a
-			// dejar a uno con su correo real.
-			const email =
-				CONTRATOS_TEST_EMAIL_COFIRMANTES[
-					nCofirmante % CONTRATOS_TEST_EMAIL_COFIRMANTES.length
-				];
-			nCofirmante += 1;
-			return { ...s, email };
-		}
-		return s;
-	});
+	// Mismo criterio que usa el envío de WhatsApp para saber a quién le toca cada
+	// enlace. Si no coincidieran, los links quedarían guardados con un correo y se
+	// buscarían con otro, y nadie recibiría el suyo. Ya pasó.
+	return isTestModeEnabled()
+		? aplicarCorreosDePrueba(conRepLegal)
+		: conRepLegal;
 }
 
 /**
@@ -261,10 +202,13 @@ async function firmantesDeLaOportunidad(
 		});
 	}
 
+	// Orden estable: el reparto de correos de prueba es posicional, así que los
+	// dos lados tienen que recorrer los codeudores en el mismo orden.
 	const cofirmantes = await db
 		.select()
 		.from(coDebtors)
-		.where(eq(coDebtors.opportunityId, opportunityId));
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
 
 	for (const cd of cofirmantes) {
 		if (!cd.email) continue;
@@ -277,6 +221,105 @@ async function firmantesDeLaOportunidad(
 	}
 
 	return { leadId: lead.id, signers };
+}
+
+/**
+ * Corta si la oportunidad ya pasó de la etapa de firma.
+ *
+ * Del 90% en adelante los contratos que están en análisis son los que son:
+ * cambiarlos ahí sería mover el piso de una decisión ya tomada.
+ */
+async function exigirEtapaQuePermiteReemplazo(
+	opportunityId: string,
+): Promise<void> {
+	const [fila] = await db
+		.select({ porcentaje: salesStages.closurePercentage })
+		.from(opportunities)
+		.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+
+	const porcentaje = fila?.porcentaje ?? null;
+
+	// Reemplazar es de jurídico y sólo mientras la oportunidad está en 80%. En
+	// 85% ya salió de su operación y pasó a análisis, que maneja esa parte
+	// regenerando. Si hace falta que jurídico intervenga, primero hay que
+	// devolver la oportunidad al 80%.
+	if (
+		porcentaje === null ||
+		!ETAPAS_POR_ACCION.reemplazar.includes(porcentaje as never)
+	) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: jurídico sólo puede reemplazar contratos en 80%. Para cambiarlo, hay que devolverla a esa etapa.`,
+		});
+	}
+}
+
+/**
+ * Deja sin efecto el contrato que se está reemplazando.
+ *
+ * Hay dos caminos, y la diferencia no es un capricho:
+ *
+ * - **Nadie lo firmó**: se borra en WeeTrust y se borra la fila. Dejarlo vivo
+ *   allá significa que alguien todavía puede entrar por el link viejo y firmar
+ *   un documento que ya descartamos.
+ * - **Ya lo firmaron**: WeeTrust NO permite borrarlo (queda en su blockchain y
+ *   su API no tiene endpoint para anular). La fila se conserva marcada como
+ *   anulada, con el motivo: ese PDF firmado existe para siempre y borrar su
+ *   registro acá sería perder el rastro de algo que sigue estando.
+ */
+async function anularContratoReemplazado(
+	contractId: string,
+	opportunityId: string,
+	motivo: string,
+): Promise<{ contractId: string; conservado: boolean } | null> {
+	const [viejo] = await db
+		.select()
+		.from(generatedLegalContracts)
+		.where(
+			and(
+				eq(generatedLegalContracts.id, contractId),
+				eq(generatedLegalContracts.opportunityId, opportunityId),
+			),
+		)
+		.limit(1);
+
+	if (!viejo) return null;
+
+	const tieneFirmas = viejo.status === "signed";
+
+	if (!tieneFirmas && viejo.weetrustDocumentId) {
+		try {
+			await borrarDocumentoDeWeeTrust(viejo.weetrustDocumentId);
+		} catch (error) {
+			// Que no se pueda borrar allá no debe frenar el reemplazo: el documento
+			// nuevo ya está enviado y es el bueno. Queda en el log.
+			console.error(
+				`[anularContratoReemplazado] no se pudo borrar ${viejo.weetrustDocumentId} en WeeTrust:`,
+				error,
+			);
+		}
+	}
+
+	if (tieneFirmas) {
+		await db
+			.update(generatedLegalContracts)
+			.set({
+				status: "cancelled",
+				cancellationReason: etiquetaDeMotivo(motivo),
+				cancelledAt: new Date(),
+				updatedAt: new Date(),
+			})
+			.where(eq(generatedLegalContracts.id, contractId));
+
+		return { contractId, conservado: true };
+	}
+
+	await db
+		.delete(generatedLegalContracts)
+		.where(eq(generatedLegalContracts.id, contractId));
+
+	return { contractId, conservado: false };
 }
 
 /** Firmante tal como lo manda el front. */
@@ -1353,9 +1396,22 @@ export const contractGenerationRouter = {
 				 * registrado: el nuevo ocupa su lugar y el viejo se borra.
 				 */
 				replaceContractId: z.string().uuid().optional(),
+				/** Por qué se anula el que se reemplaza. Obligatorio si hay reemplazo. */
+				motivo: z.enum(MOTIVOS_DE_ANULACION_KEYS).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			if (input.replaceContractId && !input.motivo) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Hay que decir por qué se anula el contrato anterior.",
+				});
+			}
+
+			// Reemplazar sólo mientras la oportunidad está en firma.
+			if (input.replaceContractId) {
+				await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+			}
+
 			// Sólo los tipos con layout auditado: el generador ubica las líneas de
 			// firma por ese layout, y sin él no hay forma de repartir por rol.
 			if (!esContratoVentaMapeado(input.contractType)) {
@@ -1405,19 +1461,15 @@ export const contractGenerationRouter = {
 				throw new ORPCError("BAD_REQUEST", { message: falla });
 			}
 
-			// El viejo se borra recién ahora: si el envío a firma hubiera fallado,
+			// El viejo se toca recién ahora: si el envío a firma hubiera fallado,
 			// arriba ya se habría cortado y el contrato original sigue en pie.
-			// Borrarlo se lleva sus firmantes por la FK en cascada.
-			if (input.replaceContractId) {
-				await db
-					.delete(generatedLegalContracts)
-					.where(
-						and(
-							eq(generatedLegalContracts.id, input.replaceContractId),
-							eq(generatedLegalContracts.opportunityId, input.opportunityId),
-						),
-					);
-			}
+			const anulado = input.replaceContractId
+				? await anularContratoReemplazado(
+						input.replaceContractId,
+						input.opportunityId,
+						input.motivo as string,
+					)
+				: null;
 
 			const [saved] = await db
 				.insert(generatedLegalContracts)
@@ -1450,6 +1502,14 @@ export const contractGenerationRouter = {
 			}
 
 			await guardarFirmantes(saved.id, resultado.signatories);
+
+			// Deja el rastro: el anulado apunta al que lo reemplazó.
+			if (anulado?.conservado) {
+				await db
+					.update(generatedLegalContracts)
+					.set({ replacedByContractId: saved.id })
+					.where(eq(generatedLegalContracts.id, anulado.contractId));
+			}
 
 			return {
 				success: true,

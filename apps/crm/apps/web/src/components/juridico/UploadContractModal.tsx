@@ -1,6 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
 import { FileText, FileUp, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import {
+	MOTIVOS_DE_ANULACION,
+	type MotivoDeAnulacion,
+} from "server/src/lib/contratos-anulacion";
 import { CONTRATOS_VENTA_MAPEADOS } from "server/src/lib/contratos-venta";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -67,6 +71,7 @@ export function UploadContractModal({
 }: UploadContractModalProps) {
 	const [contractType, setContractType] = useState<string>("");
 	const [archivo, setArchivo] = useState<File | null>(null);
+	const [motivo, setMotivo] = useState<string>("");
 
 	// Al abrirse para reemplazar, el tipo viene dado por el contrato que se
 	// reemplaza y no se elige.
@@ -77,19 +82,27 @@ export function UploadContractModal({
 	const limpiar = () => {
 		setContractType("");
 		setArchivo(null);
+		setMotivo("");
 	};
 
 	const subir = useMutation({
 		mutationFn: async () => {
 			if (!contractType) throw new Error("Elegí el tipo de contrato");
 			if (!archivo) throw new Error("Elegí el PDF del contrato");
+			if (reemplaza && !motivo)
+				throw new Error("Elegí por qué se anula el contrato anterior");
 
 			return client.uploadContractForSigning({
 				opportunityId,
 				contractType,
 				filename: archivo.name,
 				pdfBase64: await leerBase64(archivo),
-				...(reemplaza ? { replaceContractId: reemplaza.id } : {}),
+				...(reemplaza
+					? {
+							replaceContractId: reemplaza.id,
+							motivo: motivo as MotivoDeAnulacion,
+						}
+					: {}),
 			});
 		},
 		onSuccess: (data) => {
@@ -142,6 +155,26 @@ export function UploadContractModal({
 						</Select>
 					</div>
 
+					{reemplaza && (
+						<div className="space-y-2">
+							<Label htmlFor="motivo-anulacion">Motivo de la anulación</Label>
+							<Select value={motivo} onValueChange={setMotivo}>
+								<SelectTrigger id="motivo-anulacion" className="w-full">
+									<SelectValue placeholder="¿Por qué se anula el anterior?" />
+								</SelectTrigger>
+								<SelectContent>
+									{Object.entries(MOTIVOS_DE_ANULACION).map(
+										([clave, etiqueta]) => (
+											<SelectItem key={clave} value={clave}>
+												{etiqueta}
+											</SelectItem>
+										),
+									)}
+								</SelectContent>
+							</Select>
+						</div>
+					)}
+
 					<div className="space-y-2">
 						<Label htmlFor="archivo-contrato">PDF del contrato</Label>
 						<Input
@@ -187,7 +220,12 @@ export function UploadContractModal({
 					</Button>
 					<Button
 						onClick={() => subir.mutate()}
-						disabled={subir.isPending || !contractType || !archivo}
+						disabled={
+							subir.isPending ||
+							!contractType ||
+							!archivo ||
+							(!!reemplaza && !motivo)
+						}
 					>
 						{subir.isPending ? (
 							<Loader2 className="mr-2 h-4 w-4 animate-spin" />

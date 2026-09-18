@@ -11,6 +11,7 @@ import {
 	RefreshCw,
 	TriangleAlert,
 } from "lucide-react";
+import { useState } from "react";
 import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,8 @@ import {
 } from "@/lib/contract-signers-display";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client } from "@/utils/orpc";
+import { ReenviarWhatsappDialog } from "./ReenviarWhatsappDialog";
+import { RegenerarEnlacesDialog } from "./RegenerarEnlacesDialog";
 
 /**
  * La card de "Contratos Legales" que aparece en el detalle de una oportunidad.
@@ -37,6 +40,7 @@ interface ContratoDeOportunidad {
 	contractType: string;
 	status: "pending" | "signed" | "cancelled";
 	pdfLink?: string | null;
+	opportunityId?: string | null;
 	clientSigningLink: string | null;
 	representativeSigningLink: string | null;
 	additionalSigningLinks: string[] | null;
@@ -134,6 +138,15 @@ function ContratoFila({
 	const firmantes = firmaEnPapel ? [] : firmantesEnFicha(signatories, contract);
 	const estado = ESTADO[contract.status];
 	const hayVencidos = firmantes.some((f) => f.vencido);
+	const todosFirmaron =
+		firmantes.length > 0 && firmantes.every((f) => f.estado === "signed");
+	const alguienFirmo = firmantes.some((f) => f.estado === "signed");
+
+	// Regenerar aparece una vez que alguien firmó, incluso si ya firmaron todos:
+	// es el caso en que la firma existe pero no sirve (por ejemplo, una
+	// identificación que no era la del cliente). También si algún enlace venció,
+	// que si no dejaría a esa persona sin forma de firmar.
+	const puedeRegenerar = alguienFirmo || hayVencidos;
 
 	const actualizarEstado = useMutation({
 		mutationFn: () =>
@@ -148,17 +161,11 @@ function ContratoFila({
 		onError: (error: Error) => toast.error(error.message),
 	});
 
-	const regenerarEnlaces = useMutation({
-		mutationFn: () =>
-			client.refreshContractSigningLinks({ contractId: contract.id }),
-		onSuccess: (data) => {
-			toast.success(data.message);
-			onUpdate?.();
-		},
-		onError: (error: Error) => toast.error(error.message),
-	});
+	const [preguntarReenvio, setPreguntarReenvio] = useState(false);
 
-	const ocupado = actualizarEstado.isPending || regenerarEnlaces.isPending;
+	const [regenerando, setRegenerando] = useState(false);
+
+	const ocupado = actualizarEstado.isPending;
 
 	return (
 		<div className="rounded-md border bg-background p-3">
@@ -191,10 +198,10 @@ function ContratoFila({
 								target="_blank"
 								rel="noopener noreferrer"
 								className="flex items-center gap-1"
-								title="Ver el documento y su avance en WeeTrust (no permite firmar)"
+								title="Ver el documento y cómo va la firma (no permite firmar)"
 							>
 								<Eye className="h-3 w-3" />
-								Seguimiento en WeeTrust
+								Seguimiento
 							</a>
 						</Button>
 					)}
@@ -314,22 +321,28 @@ function ContratoFila({
 					{/* Acciones discretas: se usan de vez en cuando y no tienen por qué
 					    competir con los firmantes, que es lo que se viene a mirar. */}
 					<div className="flex flex-wrap items-center gap-1">
-						<Button
-							variant="ghost"
-							size="sm"
-							className="h-6 px-1.5 text-muted-foreground text-xs hover:text-foreground"
-							disabled={ocupado}
-							onClick={() => actualizarEstado.mutate()}
-						>
-							{actualizarEstado.isPending ? (
-								<Loader2 className="mr-1 h-3 w-3 animate-spin" />
-							) : (
-								<RefreshCw className="mr-1 h-3 w-3" />
-							)}
-							Actualizar estado
-						</Button>
+						{/* Con todo firmado no hay nada que actualizar ni que regenerar:
+						    el documento está cerrado. Acá sólo se regeneran enlaces del
+						    MISMO documento; reemplazarlo por otro es de jurídico y vive
+						    en su ficha. */}
+						{!todosFirmaron && (
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-6 px-1.5 text-muted-foreground text-xs hover:text-foreground"
+								disabled={ocupado}
+								onClick={() => actualizarEstado.mutate()}
+							>
+								{actualizarEstado.isPending ? (
+									<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+								) : (
+									<RefreshCw className="mr-1 h-3 w-3" />
+								)}
+								Actualizar estado
+							</Button>
+						)}
 
-						{firmantes.length > 0 && (
+						{puedeRegenerar && (
 							<Button
 								variant="ghost"
 								size="sm"
@@ -339,20 +352,34 @@ function ContratoFila({
 										: "h-6 px-1.5 text-muted-foreground text-xs hover:text-foreground"
 								}
 								disabled={ocupado}
-								onClick={() => regenerarEnlaces.mutate()}
-								title="Emite enlaces nuevos para quienes aún no firman. Los anteriores dejan de servir; quien ya firmó no se toca."
+								onClick={() => setRegenerando(true)}
+								title="Vuelve a emitir el mismo documento con enlaces nuevos para todos. Los anteriores dejan de servir."
 							>
-								{regenerarEnlaces.isPending ? (
-									<Loader2 className="mr-1 h-3 w-3 animate-spin" />
-								) : (
-									<RefreshCw className="mr-1 h-3 w-3" />
-								)}
+								<RefreshCw className="mr-1 h-3 w-3" />
 								{hayVencidos ? "Regenerar (hay vencidos)" : "Regenerar enlaces"}
 							</Button>
 						)}
 					</div>
 				</div>
 			)}
+
+			<RegenerarEnlacesDialog
+				contractId={contract.id}
+				contractName={contract.contractName}
+				hayFirmas={alguienFirmo}
+				open={regenerando}
+				onOpenChange={setRegenerando}
+				onRegenerado={() => {
+					onUpdate?.();
+					setPreguntarReenvio(true);
+				}}
+			/>
+
+			<ReenviarWhatsappDialog
+				opportunityId={contract.opportunityId ?? null}
+				open={preguntarReenvio}
+				onOpenChange={setPreguntarReenvio}
+			/>
 		</div>
 	);
 }

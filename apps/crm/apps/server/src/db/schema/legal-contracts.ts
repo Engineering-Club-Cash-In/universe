@@ -84,6 +84,24 @@ export const generatedLegalContracts = pgTable("generated_legal_contracts", {
 	 */
 	observerUrl: text("observer_url"),
 
+	/**
+	 * Por qué se anuló este contrato, cuando se reemplazó por otro.
+	 *
+	 * Un documento ya firmado NO se puede borrar en WeeTrust: queda registrado en
+	 * su blockchain y su API no tiene forma de anularlo. Lo único que se puede
+	 * hacer es dejarlo sin efecto de este lado, y para eso hace falta que quede
+	 * dicho por qué.
+	 */
+	/** Por qué se reemitió por última vez, y cuándo. */
+	lastRegenerationReason: text("last_regeneration_reason"),
+	lastRegeneratedAt: timestamp("last_regenerated_at"),
+
+	cancellationReason: text("cancellation_reason"),
+	cancelledAt: timestamp("cancelled_at"),
+
+	/** Contrato que lo reemplazó, si se anuló por haber subido uno corregido. */
+	replacedByContractId: uuid("replaced_by_contract_id"),
+
 	// Metadata de generación
 	templateId: integer("template_id"),
 	apiResponse: jsonb("api_response"), // Guardar response completo del API para referencia

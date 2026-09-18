@@ -12,6 +12,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import type { ContractSigner } from "@/components/contracts/DynamicContractWizard";
+import { ReenviarWhatsappDialog } from "@/components/contracts/ReenviarWhatsappDialog";
 import { ApproveOpportunityModal } from "@/components/juridico/ApproveOpportunityModal";
 import { ContractsList } from "@/components/juridico/ContractsList";
 import { RegenerateContractsModal } from "@/components/juridico/RegenerateContractsModal";
@@ -59,6 +60,7 @@ function RouteComponent() {
 	const [deletingContractId, setDeletingContractId] = useState<string | null>(
 		null,
 	);
+	const [preguntarReenvio, setPreguntarReenvio] = useState(false);
 	const [contratoAReemplazar, setContratoAReemplazar] = useState<{
 		id: string;
 		contractType: string;
@@ -228,6 +230,14 @@ function RouteComponent() {
 			? opportunitiesData[0]
 			: null;
 
+	/**
+	 * Jurídico sólo maneja los contratos mientras la oportunidad está en 80%.
+	 * En 85% ya pasó a análisis, que los regenera desde su ficha; para que
+	 * jurídico intervenga hay que devolverla a esta etapa. Los botones ni
+	 * aparecen para no ofrecer algo que el servidor va a rechazar.
+	 */
+	const enEtapaDeJuridico = opportunityData?.stage?.closurePercentage === 80;
+
 	// Transformar datos de oportunidad para el modal
 	const selectedOpportunity: OpportunityForModal | null = opportunityData
 		? {
@@ -315,6 +325,7 @@ function RouteComponent() {
 
 					<div className="flex gap-2">
 						{canCreateLegal &&
+							enEtapaDeJuridico &&
 							generationSnapshot &&
 							contracts &&
 							contracts.length > 0 && (
@@ -331,7 +342,7 @@ function RouteComponent() {
 						    genera el wizard o se suben acá, y en los dos casos el link
 						    sale de WeeTrust con su rol. El modal sigue montado para
 						    editar un contrato ya registrado. */}
-						{canCreateLegal && opportunityId && (
+						{canCreateLegal && enEtapaDeJuridico && opportunityId && (
 							<Button onClick={() => setIsUploadModalOpen(true)}>
 								<FileUp className="mr-2 h-4 w-4" />
 								Subir contrato
@@ -422,8 +433,14 @@ function RouteComponent() {
 					<ContractsList
 						contracts={contracts || []}
 						onUpdate={refetch}
-						onReplace={canCreateLegal ? handleReplace : undefined}
-						onDelete={canCreateLegal ? handleDeleteContract : undefined}
+						onReplace={
+							canCreateLegal && enEtapaDeJuridico ? handleReplace : undefined
+						}
+						onDelete={
+							canCreateLegal && enEtapaDeJuridico
+								? handleDeleteContract
+								: undefined
+						}
 						deletingContractId={deletingContractId}
 					/>
 				</CardContent>
@@ -460,8 +477,21 @@ function RouteComponent() {
 						setIsUploadModalOpen(abierto);
 						if (!abierto) setContratoAReemplazar(null);
 					}}
-					onUploaded={refetch}
+					onUploaded={() => {
+						refetch();
+						// Sólo al reemplazar: ahí los enlaces viejos dejaron de servir.
+						// Una subida nueva ya avisa por el envío normal al aprobar.
+						if (contratoAReemplazar) setPreguntarReenvio(true);
+					}}
 					reemplaza={contratoAReemplazar}
+				/>
+			)}
+
+			{opportunityId && (
+				<ReenviarWhatsappDialog
+					opportunityId={opportunityId}
+					open={preguntarReenvio}
+					onOpenChange={setPreguntarReenvio}
 				/>
 			)}
 

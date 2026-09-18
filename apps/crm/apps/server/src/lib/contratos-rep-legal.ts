@@ -28,3 +28,15 @@ export const REP_LEGAL_NOMBRE =
  */
 export const REP_LEGAL_TELEFONO =
 	process.env.CONTRATOS_REP_LEGAL_TELEFONO?.trim() || "";
+
+/**
+ * Observadores del flujo de firma: ven el documento y su avance, no firman.
+ * Lista separada por comas.
+ *
+ * Los necesitan tanto la generación como la reemisión, así que viven acá y no
+ * dentro de un router. Sólo servidor: leen `process.env`.
+ */
+export const CONTRATOS_OBSERVADORES = (process.env.CONTRATOS_OBSERVADORES || "")
+	.split(",")
+	.map((email) => email.trim())
+	.filter(Boolean);

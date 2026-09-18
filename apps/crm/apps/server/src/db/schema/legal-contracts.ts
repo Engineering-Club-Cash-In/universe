@@ -63,6 +63,15 @@ export const generatedLegalContracts = pgTable("generated_legal_contracts", {
 	 */
 	signatureMode: text("signature_mode").notNull().default("electronica"),
 
+	/**
+	 * Cuándo se le preguntó a WeeTrust por última vez cómo va la firma.
+	 *
+	 * La ficha lo muestra para que se sepa si lo que se está viendo es de hace un
+	 * minuto o de hace tres días. Lo escriben tanto el botón "Actualizar estado"
+	 * como el webhook.
+	 */
+	signingStatusCheckedAt: timestamp("signing_status_checked_at"),
+
 	// Metadata de generación
 	templateId: integer("template_id"),
 	apiResponse: jsonb("api_response"), // Guardar response completo del API para referencia
@@ -142,6 +151,13 @@ export const contractSignatories = pgTable(
 		/** Identificador del firmante dentro del documento de WeeTrust. */
 		weetrustSignatoryId: text("weetrust_signatory_id"),
 		signingUrl: text("signing_url"),
+
+		/**
+		 * Cuándo vence el link de esta persona. WeeTrust lo devuelve como epoch en
+		 * milisegundos. Guardarlo permite avisar "link vencido" en la ficha sin
+		 * tener que preguntarle a WeeTrust cada vez que se abre la pantalla.
+		 */
+		signingUrlExpiry: timestamp("signing_url_expiry"),
 
 		/** Orden en que WeeTrust devolvió al firmante, sólo para mostrarlo estable. */
 		position: integer("position").notNull().default(0),

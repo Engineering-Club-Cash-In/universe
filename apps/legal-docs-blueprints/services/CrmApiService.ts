@@ -189,3 +189,50 @@ export class CrmApiService {
 
 // Singleton instance
 export const crmApiService = new CrmApiService();
+
+/**
+ * Le avisa al CRM cómo va la firma de un documento.
+ *
+ * El webhook de WeeTrust nos llega a nosotros porque somos los que tenemos la
+ * URL pública y las credenciales, pero la base de contratos es del CRM. Esto es
+ * el puente: se autentica con un secreto compartido, que para una llamada
+ * máquina a máquina alcanza y evita hacerla iniciar sesión.
+ */
+export async function notificarEstadoDeFirmaAlCrm(estado: {
+  documentID: string;
+  status: string;
+  signatories: Array<{
+    emailID: string;
+    name: string;
+    signatoryID: string;
+    isSigned: boolean;
+    signingUrl: string | null;
+    expiry: number | null;
+  }>;
+}): Promise<void> {
+  const baseUrl = process.env.CRM_API_URL;
+  const secret = process.env.WEETRUST_RELAY_SECRET;
+
+  if (!baseUrl || !secret) {
+    console.warn(
+      '[CrmApiService] CRM_API_URL o WEETRUST_RELAY_SECRET sin configurar: no se avisa el estado de firma.',
+    );
+    return;
+  }
+
+  const response = await fetch(`${baseUrl}/api/contracts/weetrust-status`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-weetrust-relay-secret': secret,
+    },
+    body: JSON.stringify(estado),
+  });
+
+  if (!response.ok) {
+    const detalle = await response.text();
+    throw new Error(
+      `El CRM rechazó el estado de firma: ${response.status} - ${detalle}`,
+    );
+  }
+}

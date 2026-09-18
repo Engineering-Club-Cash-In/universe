@@ -16,6 +16,7 @@ import {
 import { vehicles } from "../db/schema/vehicles";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import { documentIdDesdeLink } from "../lib/contract-signatories";
+import { sincronizarEstadoDeFirma } from "../lib/contrato-estado-firma";
 import {
 	adminProcedure,
 	juridicoProcedure,
@@ -115,54 +116,6 @@ async function contratoConDocumentID(contractId: string): Promise<{
 	}
 
 	return { contract, documentID };
-}
-
-/**
- * Baja a la base lo que WeeTrust dice del documento.
- *
- * Actualiza el link y el estado de cada firmante, y marca el contrato como
- * firmado cuando WeeTrust lo da por completado. Los firmantes se emparejan por
- * correo, que es la llave que usa WeeTrust.
- */
-async function sincronizarEstadoDeFirma(
-	contractId: string,
-	estado: EstadoDocumentoFirma,
-): Promise<void> {
-	const ahora = new Date();
-
-	for (const firmante of estado.signatories) {
-		await db
-			.update(contractSignatories)
-			.set({
-				status: firmante.isSigned ? "signed" : "pending",
-				// Un link regenerado reemplaza al anterior; uno vacío no borra el
-				// que ya teníamos, que puede seguir sirviendo.
-				...(firmante.signingUrl ? { signingUrl: firmante.signingUrl } : {}),
-				...(firmante.signatoryID
-					? { weetrustSignatoryId: firmante.signatoryID }
-					: {}),
-				...(firmante.isSigned ? { signedAt: ahora } : { signedAt: null }),
-				updatedAt: ahora,
-			})
-			.where(
-				and(
-					eq(contractSignatories.contractId, contractId),
-					eq(contractSignatories.email, firmante.emailID),
-				),
-			);
-	}
-
-	const completado = estado.status === "COMPLETED";
-	await db
-		.update(generatedLegalContracts)
-		.set({
-			// Sólo se avanza a "firmado". Que WeeTrust reporte PENDING no es motivo
-			// para revivir un contrato que alguien ya cerró o canceló a mano.
-			...(completado ? { status: "signed" as const } : {}),
-			weetrustDocumentId: estado.documentID,
-			updatedAt: ahora,
-		})
-		.where(eq(generatedLegalContracts.id, contractId));
 }
 
 export const legalContractsRouter = {
@@ -1185,11 +1138,15 @@ export const legalContractsRouter = {
 	 * Estado de firma de un contrato, firmante por firmante, preguntándole a
 	 * WeeTrust en el momento.
 	 *
+	 * Va con el mismo permiso que ver los contratos, no con el de jurídico: la
+	 * ficha de la oportunidad es la que miran el analista y el vendedor, y son
+	 * ellos los que necesitan saber si el cliente ya firmó.
+	 *
 	 * Es un pull a propósito: los webhooks de WeeTrust no están registrados, así
 	 * que el estado guardado no se movía solo y jurídico tenía que entrar al
 	 * portal de WeeTrust a ver quién firmó.
 	 */
-	getContractSigningStatus: juridicoProcedure
+	getContractSigningStatus: viewOpportunityContractsProcedure
 		.input(z.object({ contractId: z.string().uuid() }))
 		.handler(async ({ input }) => {
 			const { documentID } = await contratoConDocumentID(input.contractId);
@@ -1218,7 +1175,7 @@ export const legalContractsRouter = {
 	 * documento: es el mismo PDF, con links nuevos, y quien ya firmó sigue
 	 * firmado.
 	 */
-	refreshContractSigningLinks: juridicoProcedure
+	refreshContractSigningLinks: viewOpportunityContractsProcedure
 		.input(z.object({ contractId: z.string().uuid() }))
 		.handler(async ({ input }) => {
 			const { documentID } = await contratoConDocumentID(input.contractId);
@@ -1245,7 +1202,7 @@ export const legalContractsRouter = {
 		}),
 
 	/** Reenvía el correo de WeeTrust a los firmantes que todavía no firman. */
-	resendContractSigningEmails: juridicoProcedure
+	resendContractSigningEmails: viewOpportunityContractsProcedure
 		.input(z.object({ contractId: z.string().uuid() }))
 		.handler(async ({ input }) => {
 			const { documentID } = await contratoConDocumentID(input.contractId);

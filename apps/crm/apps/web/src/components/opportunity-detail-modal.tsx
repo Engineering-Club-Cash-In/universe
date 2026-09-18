@@ -504,6 +504,7 @@ export function OpportunityDetailModal({
 							<OpportunityContractsCard
 								contracts={opportunityContractsQuery.data}
 								isLoading={opportunityContractsQuery.isLoading}
+								onUpdate={() => opportunityContractsQuery.refetch()}
 							/>
 						)}
 

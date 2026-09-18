@@ -2778,6 +2778,7 @@ function RouteComponent() {
 										<OpportunityContractsCard
 											contracts={opportunityContractsQuery.data}
 											isLoading={opportunityContractsQuery.isLoading}
+											onUpdate={() => opportunityContractsQuery.refetch()}
 										/>
 									)}
 

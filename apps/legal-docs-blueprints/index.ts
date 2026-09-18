@@ -3,6 +3,7 @@ import { cors } from '@elysiajs/cors';
 import { contractGenerator } from './services/ContractGeneratorService';
 import { ContractType, GenerateContractRequest } from './types/contract';
 import { WeeTrustService } from './services/WeeTrustService';
+import { notificarEstadoDeFirmaAlCrm } from './services/CrmApiService';
 
 // Inicializar WeeTrust
 const weeTrustService = new WeeTrustService();
@@ -588,25 +589,43 @@ const app = new Elysia()
         return { success: false, error: 'Missing documentID' };
       }
 
-      // Procesar según tipo de evento
-      switch (eventType) {
-        case 'sendDocument':
-          console.log(`[WeeTrust Webhook] Documento ${documentId} enviado a firma`);
-          break;
+      // Eventos que cambian quién firmó. El payload trae el documento, pero se
+      // vuelve a leer de WeeTrust: es la única fuente que devuelve el juego
+      // completo de firmantes con su link vigente, y así el CRM recibe siempre
+      // la misma forma venga de donde venga.
+      const EVENTOS_DE_FIRMA = ['sendDocument', 'signDocument', 'completedDocument'];
 
-        case 'signDocument':
-          console.log(`[WeeTrust Webhook] Documento ${documentId} - Firmante firmó:`, payload.signatory?.emailID);
-          // TODO: Notificar a CRM que un firmante firmó
-          break;
+      if (EVENTOS_DE_FIRMA.includes(eventType)) {
+        console.log(`[WeeTrust Webhook] ${eventType} en ${documentId}`);
 
-        case 'completedDocument':
-          console.log(`[WeeTrust Webhook] Documento ${documentId} - COMPLETADO (todos firmaron)`);
-          // TODO: Notificar a CRM que el documento está completo
-          // await notifyCrmDocumentCompleted(documentId);
-          break;
+        try {
+          const documento = await weeTrustService.getDocument(documentId);
 
-        default:
-          console.log(`[WeeTrust Webhook] Evento desconocido: ${eventType}`);
+          await notificarEstadoDeFirmaAlCrm({
+            documentID: documento.documentID,
+            status: documento.status,
+            signatories: (documento.signatory ?? []).map((s) => ({
+              emailID: s.emailID,
+              name: s.name,
+              signatoryID: s.signatoryID,
+              isSigned: Boolean(Number(s.isSigned)),
+              signingUrl: s.signing?.url ?? null,
+              expiry: s.signing?.expiry ?? null,
+            })),
+          });
+
+          console.log(`[WeeTrust Webhook] Estado de ${documentId} avisado al CRM`);
+        } catch (relayError: any) {
+          // No se le devuelve error a WeeTrust: si respondemos mal, reintenta, y
+          // el problema casi siempre es nuestro (el CRM caído, el secreto mal).
+          // El estado se puede recuperar con el botón "Actualizar estado".
+          console.error(
+            `[WeeTrust Webhook] No se pudo avisar el estado de ${documentId}:`,
+            relayError?.message ?? relayError,
+          );
+        }
+      } else {
+        console.log(`[WeeTrust Webhook] Evento sin manejar: ${eventType}`);
       }
 
       // Responder éxito a WeeTrust

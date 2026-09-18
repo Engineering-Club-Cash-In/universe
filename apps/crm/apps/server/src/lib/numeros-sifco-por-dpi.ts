@@ -220,17 +220,34 @@ export async function numeroSifcoDeOportunidad(
 }
 
 /**
- * La unión, aparte y pura: los números de las dos fuentes, saneados y sin
- * repetir. El tope de cada consulta ya acotó cada lado; acá solo se juntan.
+ * La unión, aparte y pura: los números de las fuentes, saneados y sin repetir.
+ *
+ * 🔴 Los grupos van EN ORDEN DE PRIORIDAD y el resultado se corta en
+ * `TOPE_NUMEROS_CREDITO_CONOCIDOS`. Cada consulta acota su propio lado, pero la
+ * UNIÓN de dos lados llenos llegaba a 100 y cartera rechaza el cuerpo por
+ * `maxItems: 50`: el CRM leía ese rechazo como una caída, el gate salía
+ * fail-closed y una corrección perfectamente válida quedaba bloqueada sin que
+ * nadie estuviera caído. Mandar 50 de los 100 degrada la cobertura pero no la
+ * corrección —del otro lado un solo número que empate alcanza al resto por la
+ * expansión de `usuario_id`—, así que se prefiere preguntar por menos antes que
+ * no poder preguntar.
+ *
+ * Primero va la ENTIDAD EDITADA (el lead, el co-deudor, su oportunidad): son
+ * los números que su propio expediente exige mirar, los que el DPI nuevo no
+ * puede aportar y los que el editor está intentando esquivar. Los del DPI nuevo
+ * llenan lo que sobre.
  */
 export function unirNumerosSifco(
-	...grupos: ReadonlyArray<readonly string[]>
+	...gruposPorPrioridad: ReadonlyArray<readonly string[]>
 ): string[] {
 	const vistos = new Set<string>();
-	for (const grupo of grupos) {
+	for (const grupo of gruposPorPrioridad) {
 		for (const numero of grupo) {
 			const limpio = numero.trim();
 			if (limpio) vistos.add(limpio);
+			if (vistos.size === TOPE_NUMEROS_CREDITO_CONOCIDOS) {
+				return [...vistos];
+			}
 		}
 	}
 
@@ -250,7 +267,9 @@ export async function numerosSifcoDelDpiYDelLead(
 		numerosSifcoDeLead(db, leadId),
 	]);
 
-	return unirNumerosSifco(porDpi, delLead);
+	// El lead editado PRIMERO: si la unión pasa del tope, lo que no puede faltar
+	// es su propia cartera. Ver `unirNumerosSifco`.
+	return unirNumerosSifco(delLead, porDpi);
 }
 
 /** La misma unión para el co-deudor: su oportunidad en vez de su lead. */
@@ -263,7 +282,8 @@ export async function numerosSifcoDelDpiYDeLaOportunidad(
 		numeroSifcoDeOportunidad(db, opportunityId),
 	]);
 
-	return unirNumerosSifco(porDpi, deLaOportunidad);
+	// La oportunidad del co-deudor PRIMERO, por lo mismo que el lead editado.
+	return unirNumerosSifco(deLaOportunidad, porDpi);
 }
 
 /**

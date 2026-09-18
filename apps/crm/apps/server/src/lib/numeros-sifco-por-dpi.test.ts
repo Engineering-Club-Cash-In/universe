@@ -180,4 +180,31 @@ describe("unión de las dos fuentes", () => {
 		expect(unirNumerosSifco(["", "   "], [])).toEqual([]);
 		expect(unirNumerosSifco([], [" insoluto-3 "])).toEqual(["insoluto-3"]);
 	});
+
+	/**
+	 * 🔴 Cada consulta acota SU lado en 50, pero la unión de dos lados llenos
+	 * llegaba a 100 y cartera rechaza el cuerpo por `maxItems: 50`. El CRM leía
+	 * ese rechazo como una caída y el gate bloqueaba una corrección válida sin
+	 * que nadie estuviera caído.
+	 */
+	test("la unión no puede pasarse del tope que cartera admite", () => {
+		const cincuenta = Array.from({ length: 50 }, (_, i) => `entidad-${i}`);
+		const otrosCincuenta = Array.from({ length: 50 }, (_, i) => `dpi-${i}`);
+
+		expect(unirNumerosSifco(cincuenta, otrosCincuenta)).toHaveLength(
+			TOPE_NUMEROS_CREDITO_CONOCIDOS,
+		);
+	});
+
+	test("al cortar sobreviven los de la entidad editada, que van primero", () => {
+		// Son los números que su propio expediente exige mirar: el DPI nuevo no
+		// los puede aportar y son justo los que el editor intenta esquivar.
+		const delLead = ["insoluto-3", "CRM-8f14e45f"];
+		const porDpi = Array.from({ length: 60 }, (_, i) => `dpi-${i}`);
+
+		const unidos = unirNumerosSifco(delLead, porDpi);
+
+		expect(unidos).toHaveLength(TOPE_NUMEROS_CREDITO_CONOCIDOS);
+		expect(unidos.slice(0, 2)).toEqual(delLead);
+	});
 });

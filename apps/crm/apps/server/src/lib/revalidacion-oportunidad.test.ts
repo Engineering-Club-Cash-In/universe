@@ -1,14 +1,20 @@
 import { describe, expect, test } from "bun:test";
+import { sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { opportunities } from "../db/schema";
 import type { AuditEntry } from "./audit";
 import {
 	decidirRevalidacion,
 	MOTIVO_AVISO,
+	MOTIVO_SALVAGUARDA,
 	PORCENTAJE_ETAPA_ANALISIS,
 	PORCENTAJE_SIN_RETROCESO,
 	parcheDeRevalidacion,
 	revalidarOportunidades,
+	separarPorSalvaguarda,
+	sqlResetPermitido,
 } from "./revalidacion-oportunidad";
 
 /**
@@ -131,8 +137,14 @@ describe("qué se le toca a la que se resetea", () => {
 	});
 });
 
-/** Banco de pruebas: una base falsa que registra el UPDATE que recibió. */
-function banco(etapa: { id: string } | null) {
+/**
+ * Banco de pruebas: una base falsa que registra el UPDATE que recibió.
+ *
+ * `devuelve` son los ids que el UPDATE reporta como escritos. Es lo que permite
+ * simular la carrera: el predicado del UPDATE excluye una fila y esa fila no
+ * vuelve, aunque el snapshot la diera por reseteable.
+ */
+function banco(etapa: { id: string } | null, devuelve: string[] = []) {
 	const actualizados: unknown[] = [];
 	const anotaciones: AuditEntry[] = [];
 
@@ -146,9 +158,12 @@ function banco(etapa: { id: string } | null) {
 		}),
 		update: () => ({
 			set: (valores: unknown) => ({
-				where: async () => {
-					actualizados.push(valores);
-				},
+				where: () => ({
+					returning: async () => {
+						actualizados.push(valores);
+						return devuelve.map((id) => ({ id }));
+					},
+				}),
 			}),
 		}),
 	} as never;
@@ -184,7 +199,7 @@ describe("aplicar la revalidación", () => {
 	};
 
 	test("resetea las que corresponde y las anota", async () => {
-		const b = banco({ id: "etapa-30" });
+		const b = banco({ id: "etapa-30" }, ["op-40"]);
 
 		const resultado = await revalidarOportunidades({
 			oportunidades: [RESETEABLE],
@@ -241,13 +256,17 @@ describe("aplicar la revalidación", () => {
 			database: b.database,
 		});
 
-		expect(resultado).toEqual({ reseteadas: [], avisadas: [] });
+		expect(resultado).toEqual({
+			reseteadas: [],
+			avisadas: [],
+			bloqueadasPorSalvaguarda: [],
+		});
 		expect(b.actualizados).toEqual([]);
 		expect(b.anotaciones).toEqual([]);
 	});
 
 	test("mezcladas: resetea unas, avisa por otras, ignora el resto", async () => {
-		const b = banco({ id: "etapa-30" });
+		const b = banco({ id: "etapa-30" }, ["op-40"]);
 
 		const resultado = await revalidarOportunidades({
 			oportunidades: [RESETEABLE, GANADA, INTOCADA],
@@ -281,6 +300,89 @@ describe("aplicar la revalidación", () => {
 		expect(b.actualizados).toEqual([]);
 		expect(b.anotaciones).toHaveLength(1);
 		expect(b.anotaciones[0]?.ok).toBe(false);
+	});
+});
+
+/**
+ * 🔴 El snapshot decidía y el UPDATE escribía sin condiciones: una oportunidad
+ * que llegó a `won` o al 90% ENTRE la lectura y la escritura volvía al 30%
+ * igual, y quedaba ganada-en-análisis o retrocedida desde donde el repo no
+ * permite retroceder. Las salvaguardas viajan ahora dentro del predicado.
+ */
+describe("la carrera entre el snapshot y el UPDATE", () => {
+	const RESETEABLE = {
+		id: "op-40",
+		status: "open",
+		closurePercentage: 40,
+		maxHistoricoClosurePercentage: 40,
+	};
+	const OTRA = {
+		id: "op-50",
+		status: "open",
+		closurePercentage: 50,
+		maxHistoricoClosurePercentage: 50,
+	};
+
+	test("las dos formas de la salvaguarda nombran las mismas condiciones", () => {
+		// `decidirRevalidacion` exceptúa `won` y ≥90; el SQL tiene que decir lo
+		// mismo o la carrera se cierra a medias.
+		const texto = drizzle
+			.mock()
+			.select({ x: sql`1` })
+			.from(opportunities)
+			.where(sqlResetPermitido())
+			.toSQL()
+			.sql.replace(/\s+/g, " ")
+			.toLowerCase();
+
+		expect(texto).toContain("<> 'won'");
+		expect(texto).toContain("closure_percentage <");
+		expect(texto).toContain("sales_stages");
+	});
+
+	test("la fila que el predicado excluye NO se cuenta como reseteada", async () => {
+		const b = banco({ id: "etapa-30" }, ["op-50"]);
+
+		const resultado = await revalidarOportunidades({
+			oportunidades: [RESETEABLE, OTRA],
+			accion: "candado_override_revalidacion",
+			detalle: "porque sí",
+			anotar: b.anotar,
+			database: b.database,
+		});
+
+		expect(resultado.reseteadas).toEqual(["op-50"]);
+		expect(resultado.bloqueadasPorSalvaguarda).toEqual(["op-40"]);
+	});
+
+	test("la excluida queda en la bitácora, no desaparece", async () => {
+		const b = banco({ id: "etapa-30" }, []);
+
+		await revalidarOportunidades({
+			oportunidades: [RESETEABLE],
+			accion: "candado_override_revalidacion",
+			detalle: "porque sí",
+			anotar: b.anotar,
+			database: b.database,
+		});
+
+		expect(b.anotaciones).toHaveLength(1);
+		expect(b.anotaciones[0]?.id).toBe("op-40");
+		expect(b.anotaciones[0]?.ok).toBe(false);
+		expect((b.anotaciones[0]?.data as { resultado: string }).resultado).toBe(
+			MOTIVO_SALVAGUARDA,
+		);
+	});
+
+	test("separar por salvaguarda conserva el orden y no inventa ids", () => {
+		expect(separarPorSalvaguarda(["a", "b", "c"], ["c", "a"])).toEqual({
+			aplicadas: ["a", "c"],
+			bloqueadas: ["b"],
+		});
+		expect(separarPorSalvaguarda([], ["a"])).toEqual({
+			aplicadas: [],
+			bloqueadas: [],
+		});
 	});
 });
 

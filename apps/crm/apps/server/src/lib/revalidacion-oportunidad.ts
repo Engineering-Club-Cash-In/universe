@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { db } from "../db";
 import { opportunities, salesStages } from "../db/schema";
 import type { AuditEntry } from "./audit";
@@ -129,7 +129,64 @@ export async function obtenerEtapaDeAnalisis(
 export type ResultadoRevalidacion = {
 	reseteadas: string[];
 	avisadas: Array<{ id: string; razon: "won" | "formalizacion_final" }>;
+	/**
+	 * Las que el snapshot daba por reseteables y el predicado del UPDATE dejó
+	 * fuera: entre la lectura y la escritura alguien las ganó o las subió del
+	 * 90%. Ver `sqlResetPermitido`.
+	 */
+	bloqueadasPorSalvaguarda: string[];
 };
+
+/**
+ * 🔴 Las MISMAS salvaguardas de `decidirRevalidacion`, pero escritas en SQL para
+ * meterlas en el WHERE del UPDATE.
+ *
+ * El snapshot y la escritura no son atómicos: entre que se leyó la oportunidad y
+ * el UPDATE corre, otra transacción puede ganarla o subirla a Formalización
+ * Final, y el reset la devolvía igual al 30% —una won en análisis, o un
+ * retroceso desde el 90% que el resto del repo no admite—. Postgres re-evalúa el
+ * predicado después de esperar a la escritura rival, así que con la condición
+ * adentro la carrera se cierra. Es el mismo patrón que ya usan el candado del
+ * DPI (`sqlCandanteDeLaOportunidad`) y `approveOpportunityAnalysis`.
+ *
+ * ⚠️ Las dos formas tienen que decir lo mismo: si tocás una, tocá la otra.
+ *
+ * La oportunidad cuya etapa no existe NO se resetea: sin porcentaje no se puede
+ * afirmar que esté por debajo del 90, y ante la duda no se escribe.
+ */
+export function sqlResetPermitido(): SQL {
+	return sql`
+		${opportunities.status} <> 'won'
+		and exists (
+			select 1
+			from ${salesStages} as s
+			where s.id = ${opportunities.stageId}
+				and s.closure_percentage < ${PORCENTAJE_SIN_RETROCESO}
+		)
+	`;
+}
+
+/**
+ * Qué se escribió de verdad, contra lo que el snapshot esperaba escribir.
+ *
+ * Lo que el predicado excluyó no desaparece: se anota como no-reseteada, porque
+ * una revalidación que no ocurrió es exactamente lo que alguien va a querer
+ * buscar después.
+ */
+export function separarPorSalvaguarda(
+	esperadas: readonly string[],
+	devueltas: readonly string[],
+): { aplicadas: string[]; bloqueadas: string[] } {
+	const escritas = new Set(devueltas);
+
+	return {
+		aplicadas: esperadas.filter((id) => escritas.has(id)),
+		bloqueadas: esperadas.filter((id) => !escritas.has(id)),
+	};
+}
+
+export const MOTIVO_SALVAGUARDA =
+	"NO se revalidó: entre la lectura y la escritura la oportunidad quedó ganada o en Formalización Final (≥90%), donde el reset no se aplica; la evidencia de identidad puede ser de un DPI anterior";
 
 /**
  * Aplica el reset a un conjunto de oportunidades y deja la bitácora.
@@ -147,7 +204,11 @@ export async function revalidarOportunidades(params: {
 	database?: Pick<typeof db, "select" | "update">;
 }): Promise<ResultadoRevalidacion> {
 	const database = params.database ?? db;
-	const resultado: ResultadoRevalidacion = { reseteadas: [], avisadas: [] };
+	const resultado: ResultadoRevalidacion = {
+		reseteadas: [],
+		avisadas: [],
+		bloqueadasPorSalvaguarda: [],
+	};
 
 	for (const oportunidad of params.oportunidades) {
 		if (!oportunidad.id) continue;
@@ -184,15 +245,49 @@ export async function revalidarOportunidades(params: {
 					ok: false,
 				});
 			}
-			return { reseteadas: [], avisadas: resultado.avisadas };
+			return {
+				reseteadas: [],
+				avisadas: resultado.avisadas,
+				bloqueadasPorSalvaguarda: [],
+			};
 		}
 
-		await database
+		// Las salvaguardas viajan DENTRO del UPDATE, no solo en el snapshot: ver
+		// `sqlResetPermitido`. Lo que vuelve es lo que se escribió de verdad.
+		const devueltas = await database
 			.update(opportunities)
 			.set({ ...parcheDeRevalidacion(etapa.id), updatedAt: new Date() })
-			.where(inArray(opportunities.id, resultado.reseteadas));
+			.where(
+				and(
+					inArray(opportunities.id, resultado.reseteadas),
+					sqlResetPermitido(),
+				),
+			)
+			.returning({ id: opportunities.id });
 
-		for (const id of resultado.reseteadas) {
+		const { aplicadas, bloqueadas } = separarPorSalvaguarda(
+			resultado.reseteadas,
+			devueltas.map((fila) => fila.id),
+		);
+
+		resultado.reseteadas = aplicadas;
+		resultado.bloqueadasPorSalvaguarda = bloqueadas;
+
+		for (const id of bloqueadas) {
+			params.anotar({
+				entity: "opportunity",
+				id,
+				action: params.accion,
+				data: {
+					...params.datosExtra,
+					detalle: params.detalle,
+					resultado: MOTIVO_SALVAGUARDA,
+				},
+				ok: false,
+			});
+		}
+
+		for (const id of aplicadas) {
 			params.anotar({
 				entity: "opportunity",
 				id,

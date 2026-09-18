@@ -250,8 +250,17 @@ export function leerTimeoutConsultaMora(crudo: string | undefined): number {
  */
 export async function conPresupuestoConsultaMora<T>(
 	presupuestoMs: number,
-	tarea: (senalVencimiento: AbortSignal) => Promise<T>,
+	tarea: (
+		senalVencimiento: AbortSignal,
+		restanteMs: () => number,
+	) => Promise<T>,
 ): Promise<T> {
+	const arranque = Date.now();
+	// Cuánto le queda al presupuesto AHORA. Se expone porque los pasos de
+	// adentro (el fetch) arrancan su propio reloj más tarde y necesitan caber en
+	// lo que sobra, no volver a pedir el presupuesto entero. Ver
+	// `cotaFetchConsultaMora`.
+	const restanteMs = () => presupuestoMs - (Date.now() - arranque);
 	let temporizador: ReturnType<typeof setTimeout> | undefined;
 	// La señal viaja hasta el fetch de `request()`: al vencerse el presupuesto
 	// no solo se suelta la espera — la tarea perdedora que siga corriendo (el
@@ -276,10 +285,48 @@ export async function conPresupuestoConsultaMora<T>(
 	});
 
 	try {
-		return await Promise.race([tarea(control.signal), vencimiento]);
+		return await Promise.race([tarea(control.signal, restanteMs), vencimiento]);
 	} finally {
 		clearTimeout(temporizador);
 	}
+}
+
+/**
+ * Lo que el fetch le cede al presupuesto externo para llegar primero. Medio
+ * segundo alcanza de sobra para que el `AbortSignal.timeout` del fetch dispare,
+ * se propague el `TimeoutError` y el breaker lo cuente, antes de que el
+ * `setTimeout` del presupuesto gane la carrera.
+ */
+export const MARGEN_FETCH_CONSULTA_MORA_MS = 500;
+
+/**
+ * Piso del deadline del fetch: por debajo de un segundo ya no es un intento, es
+ * un aborto con viaje de ida. Si al presupuesto le queda menos que esto, el
+ * corte lo va a dar el presupuesto externo — y está bien: ese tiempo se lo
+ * comió la autenticación, no un transporte colgado, que es justo lo que el
+ * breaker NO tiene que contar.
+ */
+export const PISO_FETCH_CONSULTA_MORA_MS = 1000;
+
+/**
+ * Deadline propio del fetch, calculado con lo que QUEDA del presupuesto.
+ *
+ * 🔴 Antes el fetch usaba el MISMO número que el presupuesto global, y el
+ * presupuesto arranca antes —cubre la autenticación, que corre delante—. O sea
+ * que el externo ganaba la carrera SIEMPRE: un transporte colgado nunca
+ * levantaba el `TimeoutError` propio del fetch, salía por la puerta de la
+ * cancelación del llamador (`esCancelacionDelLlamador`) y el breaker no lo
+ * contaba. Con cartera colgada de verdad, el breaker no abría NUNCA y cada
+ * consulta volvía a pagar el presupuesto entero.
+ *
+ * Restando el margen, el reloj del fetch vence primero y el cuelgue se cuenta
+ * como lo que es: un fallo de cartera.
+ */
+export function cotaFetchConsultaMora(restanteMs: number): number {
+	const cota = restanteMs - MARGEN_FETCH_CONSULTA_MORA_MS;
+	return cota < PISO_FETCH_CONSULTA_MORA_MS
+		? PISO_FETCH_CONSULTA_MORA_MS
+		: cota;
 }
 
 const CONSULTA_MORA_TIMEOUT_MS = leerTimeoutConsultaMora(
@@ -1071,12 +1118,16 @@ export class CarteraBackClient {
 	 *   Por defecto SOLO se reintentan GET/HEAD: reintentar un POST que ya se
 	 *   ejecutó del otro lado duplica el efecto (ver el bloque de reintentos
 	 *   más abajo). Pasar `true` únicamente en POST de solo lectura.
+	 * @param timeoutMs deadline del fetch. Puede ser una FUNCIÓN para que se
+	 *   evalúe al despachar y no al encolar: el reloj del fetch arranca después
+	 *   de la autenticación, así que un número fijo calculado antes se pasa de
+	 *   lo que queda del presupuesto del llamador. Ver `cotaFetchConsultaMora`.
 	 */
 	private async request<T>(
 		endpoint: string,
 		options: RequestInit = {},
 		useCache = false,
-		timeoutMs?: number,
+		timeoutMs?: number | (() => number),
 		retryOnFailure?: boolean,
 	): Promise<T> {
 		const url = `${this.config.baseUrl}${endpoint}`;
@@ -1097,6 +1148,12 @@ export class CarteraBackClient {
 			const token = forceRefresh
 				? await invalidateAndReauth()
 				: await this.config.accessTokenProvider();
+			// Se resuelve ACÁ, con el token ya en mano: es el instante en que el
+			// reloj del fetch arranca de verdad.
+			const deadlineMs =
+				typeof timeoutMs === "function"
+					? timeoutMs()
+					: (timeoutMs ?? this.config.timeout);
 			return {
 				...options,
 				headers: {
@@ -1109,11 +1166,8 @@ export class CarteraBackClient {
 				// combina con el timeout del fetch en vez de pisarla: una señal ya
 				// abortada frena el fetch aunque el token haya llegado tarde.
 				signal: options.signal
-					? AbortSignal.any([
-							options.signal,
-							AbortSignal.timeout(timeoutMs ?? this.config.timeout),
-						])
-					: AbortSignal.timeout(timeoutMs ?? this.config.timeout),
+					? AbortSignal.any([options.signal, AbortSignal.timeout(deadlineMs)])
+					: AbortSignal.timeout(deadlineMs),
 			};
 		};
 
@@ -1675,7 +1729,7 @@ export class CarteraBackClient {
 			// tiene señal propia. Ver `conPresupuestoConsultaMora`.
 			crudo = await conPresupuestoConsultaMora(
 				CONSULTA_MORA_TIMEOUT_MS,
-				(senalVencimiento) =>
+				(senalVencimiento, restanteMs) =>
 					this.request<unknown>(
 						"/clientes/consulta-mora",
 						{
@@ -1684,7 +1738,11 @@ export class CarteraBackClient {
 							signal: senalVencimiento,
 						},
 						false, // sin caché (ver arriba)
-						CONSULTA_MORA_TIMEOUT_MS,
+						// Función, no número: el deadline se calcula al despachar
+						// —con la autenticación ya pagada— para caber DENTRO del
+						// presupuesto y vencer antes que él. Ver
+						// `cotaFetchConsultaMora`.
+						() => cotaFetchConsultaMora(restanteMs()),
 						false, // un solo intento (ver arriba)
 					),
 			);

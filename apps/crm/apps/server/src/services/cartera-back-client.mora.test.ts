@@ -4,8 +4,11 @@ import {
 	CarteraBackClient,
 	CircuitBreaker,
 	conPresupuestoConsultaMora,
+	cotaFetchConsultaMora,
 	esCancelacionDelLlamador,
 	leerTimeoutConsultaMora,
+	MARGEN_FETCH_CONSULTA_MORA_MS,
+	PISO_FETCH_CONSULTA_MORA_MS,
 } from "./cartera-back-client";
 
 const fetchTransport = (
@@ -274,6 +277,69 @@ test("la tarea que responde a tiempo nunca ve su señal abortada", async () => {
 	});
 
 	expect(senal?.aborted).toBe(false);
+});
+
+// ============================================================================
+// El deadline del fetch cabe DENTRO del presupuesto (si no, el breaker es ciego)
+// ============================================================================
+
+/**
+ * 🔴 El fetch usaba el MISMO número que el presupuesto global, y el presupuesto
+ * arranca antes —cubre la autenticación—. Así el externo ganaba la carrera
+ * SIEMPRE: un transporte colgado salía clasificado como cancelación del
+ * llamador (`esCancelacionDelLlamador`) y el breaker no lo contaba nunca.
+ */
+test("el deadline del fetch le cede el margen al presupuesto", () => {
+	expect(cotaFetchConsultaMora(12000)).toBe(
+		12000 - MARGEN_FETCH_CONSULTA_MORA_MS,
+	);
+	expect(cotaFetchConsultaMora(12000)).toBeLessThan(12000);
+});
+
+test("nunca baja del piso, ni con el presupuesto agotado o en negativo", () => {
+	// Cuando queda tan poco, el corte lo va a dar el presupuesto externo — y
+	// está bien: ese tiempo se lo comió el auth, no un transporte colgado.
+	for (const restante of [PISO_FETCH_CONSULTA_MORA_MS, 600, 0, -5000]) {
+		expect(cotaFetchConsultaMora(restante)).toBe(PISO_FETCH_CONSULTA_MORA_MS);
+	}
+});
+
+test("el presupuesto expone lo que queda, y se va gastando", async () => {
+	const medidos: number[] = [];
+
+	await conPresupuestoConsultaMora(1000, async (_senal, restanteMs) => {
+		medidos.push(restanteMs());
+		await new Promise((listo) => setTimeout(listo, 40));
+		medidos.push(restanteMs());
+		return "listo";
+	});
+
+	const [alArrancar, despuesDeEsperar] = medidos as [number, number];
+	expect(alArrancar).toBeLessThanOrEqual(1000);
+	expect(alArrancar).toBeGreaterThan(900);
+	expect(despuesDeEsperar).toBeLessThan(alArrancar);
+});
+
+/**
+ * La prueba de que el cálculo se hace al DESPACHAR y no al encolar: entre que
+ * se arma la llamada y que sale el fetch está la autenticación, y ese tiempo
+ * tiene que salir del deadline del fetch. Con un token que tarda, el deadline
+ * que ve el fetch es visiblemente menor que el presupuesto entero.
+ */
+test("la autenticación lenta se le descuenta al deadline del fetch", async () => {
+	const PRESUPUESTO = 3000;
+	const ESPERA_AUTH = 300;
+	let deadlineVisto: number | undefined;
+
+	await conPresupuestoConsultaMora(PRESUPUESTO, async (_senal, restanteMs) => {
+		await new Promise((listo) => setTimeout(listo, ESPERA_AUTH));
+		deadlineVisto = cotaFetchConsultaMora(restanteMs());
+	});
+
+	expect(deadlineVisto).toBeLessThanOrEqual(
+		PRESUPUESTO - ESPERA_AUTH - MARGEN_FETCH_CONSULTA_MORA_MS,
+	);
+	expect(deadlineVisto).toBeGreaterThan(PISO_FETCH_CONSULTA_MORA_MS);
 });
 
 // ============================================================================

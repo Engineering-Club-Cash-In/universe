@@ -1,6 +1,9 @@
 import { Elysia, t } from "elysia";
 import { consultarMoraPorDpi } from "../controllers/consultaMora";
-import { validarDpiConsulta } from "../controllers/consultaMoraPolicy";
+import {
+  rolPuedeConsultarMora,
+  validarDpiConsulta,
+} from "../controllers/consultaMoraPolicy";
 import { authMiddleware } from "./midleware";
 
 export const consultaMoraRouter = new Elysia()
@@ -23,19 +26,39 @@ export const consultaMoraRouter = new Elysia()
    * holgado para el caso real —las oportunidades ganadas de un lead— y evita
    * que un cuerpo grande se convierta en un `IN (...)` sin fin.
    *
+   * 🔴 `numerosCreditoConocidos` es un CANAL CONFIADO y cartera no puede
+   * verificarlo: la asociación DPI ↔ número de crédito del CRM vive en el CRM,
+   * no acá, así que cartera toma la palabra de quien llama. Las consecuencias
+   * de un número ajeno son dos: (1) ese crédito entra al veredicto y puede
+   * bloquear a un DPI que no le debe nada a nadie, y (2) la expansión por dueño
+   * (`usuario_id`) le cuelga al DPI consultado la cartera COMPLETA del titular
+   * de ese número, que además viaja visible en `creditos`/`historialMora`. Por
+   * eso el gate de rol de abajo no es cosmético: es lo único que separa este
+   * canal de cualquier token vivo. Para el CRM —canal interno, personal de la
+   * casa— es aceptable; abrirlo a un rol de afuera no lo sería.
+   *
    * ⏱️ Toda la resolución de números (identificación + espejo + API de cada
    * ficha) corre bajo UN presupuesto global de 15s; ver
    * `PRESUPUESTO_NUMEROS_GATE_MS` en el controller. Al vencerse sale
    * SERVICIO_NO_DISPONIBLE, fail-closed.
    *
-   * 🔴 La ÚNICA respuesta que no es 200 es el 400 de validación del DPI: un
-   * valor que no son 13 dígitos ni siquiera se le pregunta al core, y decirle
+   * Las únicas respuestas que no son 200 son el 403 del gate de rol (ver
+   * `ROLES_CONSULTA_MORA`) y el 400 de validación del DPI: un valor que no son
+   * 13 dígitos ni siquiera se le pregunta al core, y decirle
    * "SERVICIO_NO_DISPONIBLE" a un dato mal escrito manda al asesor a reintentar
    * en vez de a corregirlo. Ver `validarDpiConsulta`.
    */
   .post(
     "/clientes/consulta-mora",
-    async ({ body, set }) => {
+    async ({ body, set, user }: any) => {
+      if (!rolPuedeConsultarMora(user?.role)) {
+        set.status = 403;
+        return {
+          success: false,
+          message: "[ERROR] No autorizado (requiere ADMIN, CONTA o ASESOR)",
+        };
+      }
+
       const validacion = validarDpiConsulta(body.dpi);
       if (!validacion.valido) {
         set.status = 400;

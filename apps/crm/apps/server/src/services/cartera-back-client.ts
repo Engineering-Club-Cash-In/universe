@@ -17,6 +17,7 @@ import type {
 	CarteraPagoCredito,
 	CarteraStatsResponse,
 	CarteraUsuario,
+	ConsultaMoraResponse,
 	CreateBoletaInput,
 	CreateCreditoInput,
 	CreatePagoInput,
@@ -38,6 +39,7 @@ import type {
 	ReversePagoInput,
 	UpdateCreditoInput,
 } from "../types/cartera-back";
+import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import {
 	getCarteraAccessToken,
 	invalidateAndReauth,
@@ -174,11 +176,249 @@ export class CarteraBackHttpError extends Error {
 	}
 }
 
+/**
+ * Corte de la consulta de mora.
+ *
+ * El gate corre delante de seis puntos donde alguien está esperando en una
+ * pantalla, así que el corte lo manda esa espera y no la suma de los timeouts
+ * de la cadena: cartera-back ya acota a 20s sus llamadas a SIFCO, y si el core
+ * tarda más que esto, para el asesor es una caída — que es exactamente lo que
+ * el fail-closed responde.
+ */
+const CONSULTA_MORA_TIMEOUT_DEFAULT_MS = 12000;
+
+/**
+ * Techo del valor configurable: 10 minutos.
+ *
+ * 🔴 No es una preferencia de producto sino una cota técnica.
+ * `AbortSignal.timeout` acepta como máximo un entero sin signo de 64 bits
+ * (`2^64 - 1` ms); pasado eso lanza `TypeError`. Un `1e30` en la variable de
+ * entorno atraviesa "finito y positivo" y hace estallar TODAS las llamadas del
+ * gate en runtime, antes de cualquier fail-closed. Y un presupuesto de minutos
+ * ya no es un timeout para alguien esperando en pantalla: cualquier cosa por
+ * encima de este techo es una errata, no una intención.
+ */
+const CONSULTA_MORA_TIMEOUT_MAX_MS = 600000;
+
+/**
+ * 🔴 Se valida que sea finito y positivo, no solo `parseInt`. Un valor no
+ * numérico en la variable de entorno daba `NaN`, y `AbortSignal.timeout(NaN)`
+ * lanza: una errata en la configuración tumbaba los ocho puntos del gate a la
+ * vez, y lo hacía en el arranque de cada llamada, sin pasar por el fail-closed.
+ *
+ * Por la misma razón se valida el techo (ver `CONSULTA_MORA_TIMEOUT_MAX_MS`):
+ * un número absurdamente grande pasaba la validación de arriba y llegaba igual
+ * de lejos.
+ */
+export function leerTimeoutConsultaMora(crudo: string | undefined): number {
+	if (crudo === undefined || crudo.trim() === "") {
+		return CONSULTA_MORA_TIMEOUT_DEFAULT_MS;
+	}
+
+	const valor = Number(crudo);
+	if (!Number.isFinite(valor) || valor <= 0) {
+		console.warn(
+			`[cartera-back] CARTERA_BACK_CONSULTA_MORA_TIMEOUT inválido (${crudo}); se usa ${CONSULTA_MORA_TIMEOUT_DEFAULT_MS}ms`,
+		);
+		return CONSULTA_MORA_TIMEOUT_DEFAULT_MS;
+	}
+
+	if (valor > CONSULTA_MORA_TIMEOUT_MAX_MS) {
+		console.warn(
+			`[cartera-back] CARTERA_BACK_CONSULTA_MORA_TIMEOUT fuera de rango (${crudo}; máximo ${CONSULTA_MORA_TIMEOUT_MAX_MS}ms); se usa ${CONSULTA_MORA_TIMEOUT_DEFAULT_MS}ms`,
+		);
+		return CONSULTA_MORA_TIMEOUT_DEFAULT_MS;
+	}
+
+	return valor;
+}
+
+/**
+ * Corre `tarea` con un presupuesto que cubre TODO lo que hay entre la llamada y
+ * la respuesta, autenticación incluida.
+ *
+ * 🔴 El `AbortSignal.timeout` de `request()` NO alcanza: se arma DESPUÉS de
+ * esperar el token, y `getCarteraAccessToken()` no recibe señal alguna. Con el
+ * auth de cartera colgado, la promesa de la consulta quedaba pendiente para
+ * siempre —el reloj del fetch nunca llegaba a arrancar— y el asesor se quedaba
+ * con la pantalla girando sin fail-closed que lo rescatara. Este presupuesto
+ * envuelve la llamada completa, así que el techo se respeta pase lo que pase.
+ *
+ * El `clearTimeout` en el `finally` es lo que evita dejar el temporizador vivo
+ * cuando la tarea gana la carrera. La tarea perdedora sigue su curso en
+ * segundo plano (no hay cómo cancelar el auth); lo que no sigue es la espera.
+ */
+export async function conPresupuestoConsultaMora<T>(
+	presupuestoMs: number,
+	tarea: (
+		senalVencimiento: AbortSignal,
+		restanteMs: () => number,
+	) => Promise<T>,
+): Promise<T> {
+	const arranque = Date.now();
+	// Cuánto le queda al presupuesto AHORA. Se expone porque los pasos de
+	// adentro (el fetch) arrancan su propio reloj más tarde y necesitan caber en
+	// lo que sobra, no volver a pedir el presupuesto entero. Ver
+	// `cotaFetchConsultaMora`.
+	const restanteMs = () => presupuestoMs - (Date.now() - arranque);
+	let temporizador: ReturnType<typeof setTimeout> | undefined;
+	// La señal viaja hasta el fetch de `request()`: al vencerse el presupuesto
+	// no solo se suelta la espera — la tarea perdedora que siga corriendo (el
+	// auth no es cancelable) encuentra la señal ya abortada y NO dispara el
+	// viaje a cartera cuando el token por fin llegue. Sin esto, cada intento
+	// vencido durante una caída del auth quedaba en cola y descargaba una
+	// ráfaga de consultas inútiles sobre el core al recuperarse.
+	const control = new AbortController();
+
+	const vencimiento = new Promise<never>((_, rechazar) => {
+		temporizador = setTimeout(() => {
+			control.abort();
+			rechazar(
+				new ConsultaMoraNoDisponibleError(
+					`La consulta de mora no respondió en ${presupuestoMs}ms`,
+					// No hay fallo original que guardar: nadie falló, se acabó el
+					// tiempo. El mensaje ya dice todo lo que el log necesita.
+					null,
+				),
+			);
+		}, presupuestoMs);
+	});
+
+	try {
+		return await Promise.race([tarea(control.signal, restanteMs), vencimiento]);
+	} finally {
+		clearTimeout(temporizador);
+	}
+}
+
+/**
+ * Lo que el fetch le cede al presupuesto externo para llegar primero. Medio
+ * segundo alcanza de sobra para que el `AbortSignal.timeout` del fetch dispare,
+ * se propague el `TimeoutError` y el breaker lo cuente, antes de que el
+ * `setTimeout` del presupuesto gane la carrera.
+ */
+export const MARGEN_FETCH_CONSULTA_MORA_MS = 500;
+
+/**
+ * Piso del deadline del fetch: por debajo de un segundo ya no es un intento, es
+ * un aborto con viaje de ida. Si al presupuesto le queda menos que esto, el
+ * corte lo va a dar el presupuesto externo — y está bien: ese tiempo se lo
+ * comió la autenticación, no un transporte colgado, que es justo lo que el
+ * breaker NO tiene que contar.
+ */
+export const PISO_FETCH_CONSULTA_MORA_MS = 1000;
+
+/**
+ * Deadline propio del fetch, calculado con lo que QUEDA del presupuesto.
+ *
+ * 🔴 Antes el fetch usaba el MISMO número que el presupuesto global, y el
+ * presupuesto arranca antes —cubre la autenticación, que corre delante—. O sea
+ * que el externo ganaba la carrera SIEMPRE: un transporte colgado nunca
+ * levantaba el `TimeoutError` propio del fetch, salía por la puerta de la
+ * cancelación del llamador (`esCancelacionDelLlamador`) y el breaker no lo
+ * contaba. Con cartera colgada de verdad, el breaker no abría NUNCA y cada
+ * consulta volvía a pagar el presupuesto entero.
+ *
+ * Restando el margen, el reloj del fetch vence primero y el cuelgue se cuenta
+ * como lo que es: un fallo de cartera.
+ */
+export function cotaFetchConsultaMora(restanteMs: number): number {
+	const cota = restanteMs - MARGEN_FETCH_CONSULTA_MORA_MS;
+	return cota < PISO_FETCH_CONSULTA_MORA_MS
+		? PISO_FETCH_CONSULTA_MORA_MS
+		: cota;
+}
+
+const CONSULTA_MORA_TIMEOUT_MS = leerTimeoutConsultaMora(
+	process.env.CARTERA_BACK_CONSULTA_MORA_TIMEOUT,
+);
+
+/**
+ * Forma exacta de `POST /clientes/consulta-mora`. Se valida en vez de castear
+ * porque un cuerpo incompleto se leería como "sin mora" (ver la nota 3 en
+ * `consultarMoraPorDpi`).
+ */
+const consultaMoraResponseSchema = z.object({
+	encontrado: z.boolean(),
+	tieneMoraActiva: z.boolean(),
+	puedeContinuar: z.boolean(),
+	motivo: z.enum([
+		"SIN_MORA",
+		"MORA_ACTIVA",
+		"EN_CONVENIO",
+		"CREDITO_INSOLUTO",
+		"CLIENTE_NO_ENCONTRADO",
+		"SERVICIO_NO_DISPONIBLE",
+	]),
+	cliente: z
+		.object({ codigoClienteSifco: z.string(), nombre: z.string() })
+		.nullable(),
+	creditos: z.array(
+		z.object({
+			numeroCreditoSifco: z.string(),
+			estado: z.string(),
+			moraActiva: z
+				.object({ monto: z.string(), cuotasAtrasadas: z.number() })
+				.nullable(),
+		}),
+	),
+	historialMora: z.array(
+		z.object({
+			fecha: z.string(),
+			monto: z.string(),
+			numeroCreditoSifco: z.string(),
+			evento: z.string(),
+		}),
+	),
+	consultadoEn: z.string(),
+});
+
 // ============================================================================
 // CIRCUIT BREAKER
 // ============================================================================
 
-class CircuitBreaker {
+/**
+ * ¿El error vino de que el LLAMADOR se cansó, y no de que cartera fallara?
+ *
+ * 🔴 El breaker es COMPARTIDO por todas las integraciones con cartera (pagos,
+ * inversionistas, reportes). La señal de presupuesto de la consulta de mora
+ * podía abrirlo sola: con el auth colgado, cada intento vencido dejaba su tarea
+ * tardía viva dentro de `execute`, y al revivir el auth todas esas tareas
+ * encontraban la señal ya abortada y rechazaban de una. Cinco rechazos así
+ * —que no son cartera fallando, es el CRM cancelando— abrían el breaker 60s
+ * para todo el mundo.
+ *
+ * Por eso la cancelación se relanza sin contar `onFailure` ni `onSuccess`: de
+ * un viaje que nunca salió no se aprende nada sobre la salud de cartera.
+ *
+ * ⚠️ El timeout PROPIO del fetch SÍ sigue contando como fallo: `AbortSignal.timeout`
+ * aborta sin tocar la señal externa, así que cartera no contestó a tiempo con el
+ * CRM todavía esperando — eso es un síntoma real de su salud.
+ *
+ * 🔴 Lo único que se mira es SI LA SEÑAL EXTERNA YA ESTÁ ABORTADA al momento del
+ * catch; el nombre del error no se exige. Antes se pedía `AbortError` y eso
+ * dejaba afuera al caso más común de todos: `getCarteraAccessToken()` lanza un
+ * `Error` PELADO cuando el login de cartera contesta non-OK, así que un auth
+ * colgado más allá del presupuesto y caído después rechazaba con un error sin
+ * nombre especial y contaba como fallo igual — cinco de esos abrían el breaker
+ * compartido justo cuando el auth se estaba recuperando, que es exactamente el
+ * agujero que esta función existe para tapar.
+ *
+ * El criterio ahora es temporal, no de forma: si el presupuesto ya venció, nada
+ * de lo que esa tarea haga después puede contar —ni fallo ni éxito—, porque
+ * nadie está esperando esa respuesta y lo que le pase ya no describe la salud de
+ * cartera. Se acepta el costo: una caída REAL de cartera que llegue después del
+ * vencimiento tampoco se cuenta. No se pierde la señal, solo se pierde ESA
+ * muestra: la consulta siguiente, con su señal viva, la vuelve a ver.
+ */
+export function esCancelacionDelLlamador(
+	senalExterna: AbortSignal | null | undefined,
+): boolean {
+	return senalExterna?.aborted === true;
+}
+
+/** Exportado para poder verificar en tests cuándo se abre y cuándo no. */
+export class CircuitBreaker {
 	private failureCount = 0;
 	private lastFailureTime: number | null = null;
 	private state: "CLOSED" | "OPEN" | "HALF_OPEN" = "CLOSED";
@@ -188,7 +428,15 @@ class CircuitBreaker {
 		private timeout: number,
 	) {}
 
-	async execute<T>(fn: () => Promise<T>): Promise<T> {
+	/**
+	 * `esCancelacion` marca los errores que NO son un fallo de cartera: los que
+	 * pasan por ahí se relanzan sin contar ni éxito ni fallo. Ver
+	 * `esCancelacionDelLlamador`.
+	 */
+	async execute<T>(
+		fn: () => Promise<T>,
+		esCancelacion?: (error: unknown) => boolean,
+	): Promise<T> {
 		if (this.state === "OPEN") {
 			if (Date.now() - (this.lastFailureTime || 0) > this.timeout) {
 				this.state = "HALF_OPEN";
@@ -203,6 +451,9 @@ class CircuitBreaker {
 			return result;
 		} catch (error) {
 			if (error instanceof CarteraBackHttpError && error.status < 500) {
+				throw error;
+			}
+			if (esCancelacion?.(error)) {
 				throw error;
 			}
 			this.onFailure();
@@ -867,12 +1118,16 @@ export class CarteraBackClient {
 	 *   Por defecto SOLO se reintentan GET/HEAD: reintentar un POST que ya se
 	 *   ejecutó del otro lado duplica el efecto (ver el bloque de reintentos
 	 *   más abajo). Pasar `true` únicamente en POST de solo lectura.
+	 * @param timeoutMs deadline del fetch. Puede ser una FUNCIÓN para que se
+	 *   evalúe al despachar y no al encolar: el reloj del fetch arranca después
+	 *   de la autenticación, así que un número fijo calculado antes se pasa de
+	 *   lo que queda del presupuesto del llamador. Ver `cotaFetchConsultaMora`.
 	 */
 	private async request<T>(
 		endpoint: string,
 		options: RequestInit = {},
 		useCache = false,
-		timeoutMs?: number,
+		timeoutMs?: number | (() => number),
 		retryOnFailure?: boolean,
 	): Promise<T> {
 		const url = `${this.config.baseUrl}${endpoint}`;
@@ -893,6 +1148,12 @@ export class CarteraBackClient {
 			const token = forceRefresh
 				? await invalidateAndReauth()
 				: await this.config.accessTokenProvider();
+			// Se resuelve ACÁ, con el token ya en mano: es el instante en que el
+			// reloj del fetch arranca de verdad.
+			const deadlineMs =
+				typeof timeoutMs === "function"
+					? timeoutMs()
+					: (timeoutMs ?? this.config.timeout);
 			return {
 				...options,
 				headers: {
@@ -900,7 +1161,13 @@ export class CarteraBackClient {
 					Authorization: `Bearer ${token}`,
 					...options.headers,
 				},
-				signal: AbortSignal.timeout(timeoutMs ?? this.config.timeout),
+				// Si el llamador trae su propia señal (p. ej. el presupuesto de la
+				// consulta de mora, que corre desde ANTES de la autenticación), se
+				// combina con el timeout del fetch en vez de pisarla: una señal ya
+				// abortada frena el fetch aunque el token haya llegado tarde.
+				signal: options.signal
+					? AbortSignal.any([options.signal, AbortSignal.timeout(deadlineMs)])
+					: AbortSignal.timeout(deadlineMs),
 			};
 		};
 
@@ -916,68 +1183,75 @@ export class CarteraBackClient {
 
 		for (let attempt = 0; attempt <= this.config.retryAttempts; attempt++) {
 			try {
-				const response = await this.circuitBreaker.execute(async () => {
-					const requestOptions = await buildRequestOptions();
-					const res = await this.config.fetchTransport(url, requestOptions);
+				// 🔴 El PARSE del cuerpo vive DENTRO del execute: un servidor que manda
+				// headers y cuelga (o trunca) el JSON resolvía el fetch, el breaker
+				// anotaba éxito, y el fallo real ocurría después — cuelgues de cuerpo
+				// repetidos RESETEABAN el breaker en vez de abrirlo.
+				const data = await this.circuitBreaker.execute<T>(
+					async () => {
+						const requestOptions = await buildRequestOptions();
+						const res = await this.config.fetchTransport(url, requestOptions);
 
-					if (!res.ok) {
-						const errorText = await res.text();
-						let errorData: { error?: string; message?: string } = {};
+						if (!res.ok) {
+							const errorText = await res.text();
+							let errorData: { error?: string; message?: string } = {};
 
-						try {
-							errorData = JSON.parse(errorText);
-						} catch {
-							errorData = { error: errorText };
-						}
+							try {
+								errorData = JSON.parse(errorText);
+							} catch {
+								errorData = { error: errorText };
+							}
 
-						if (res.status === 401 || res.status === 403) {
-							if (!didReauth) {
-								didReauth = true;
-								const retryOptions = await buildRequestOptions(true);
-								const retryRes = await this.config.fetchTransport(
-									url,
-									retryOptions,
-								);
-								if (retryRes.ok) return retryRes;
-								const retryText = await retryRes.text();
-								let retryData: { error?: string; message?: string } = {};
-								try {
-									retryData = JSON.parse(retryText);
-								} catch {
-									retryData = { error: retryText };
+							if (res.status === 401 || res.status === 403) {
+								if (!didReauth) {
+									didReauth = true;
+									const retryOptions = await buildRequestOptions(true);
+									const retryRes = await this.config.fetchTransport(
+										url,
+										retryOptions,
+									);
+									if (retryRes.ok) return (await retryRes.json()) as T;
+									const retryText = await retryRes.text();
+									let retryData: { error?: string; message?: string } = {};
+									try {
+										retryData = JSON.parse(retryText);
+									} catch {
+										retryData = { error: retryText };
+									}
+									throw new CarteraBackHttpError(
+										`Authentication failed: ${retryData.error || retryData.message || retryText}`,
+										retryRes.status,
+										retryData,
+									);
 								}
 								throw new CarteraBackHttpError(
-									`Authentication failed: ${retryData.error || retryData.message || retryText}`,
-									retryRes.status,
-									retryData,
+									`Authentication failed: ${errorData.error || errorData.message}`,
+									res.status,
+									errorData,
 								);
 							}
+
+							if (res.status === 400) {
+								throw new CarteraBackHttpError(
+									`Validation failed: ${errorData.error || errorData.message}`,
+									res.status,
+									errorData,
+								);
+							}
+
 							throw new CarteraBackHttpError(
-								`Authentication failed: ${errorData.error || errorData.message}`,
+								`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
 								res.status,
 								errorData,
 							);
 						}
 
-						if (res.status === 400) {
-							throw new CarteraBackHttpError(
-								`Validation failed: ${errorData.error || errorData.message}`,
-								res.status,
-								errorData,
-							);
-						}
-
-						throw new CarteraBackHttpError(
-							`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
-							res.status,
-							errorData,
-						);
-					}
-
-					return res;
-				});
-
-				const data = (await response.json()) as T;
+						return (await res.json()) as T;
+					},
+					// La señal del llamador no es cartera fallando: ver
+					// `esCancelacionDelLlamador`.
+					() => esCancelacionDelLlamador(options.signal),
+				);
 
 				// Cache successful GET requests
 				if (useCache && this.config.enableCache && options.method === "GET") {
@@ -987,6 +1261,12 @@ export class CarteraBackClient {
 				return data;
 			} catch (error) {
 				lastError = error as Error;
+
+				// El llamador ya se cansó: reintentar es mandar viajes que nadie
+				// va a esperar, y cada uno vuelve a rechazar por la misma señal.
+				if (esCancelacionDelLlamador(options.signal)) {
+					break;
+				}
 
 				// Don't retry on authentication/validation errors, nor on 4xx
 				// (esos son respuestas definitivas del servidor, no fallas
@@ -1393,6 +1673,105 @@ export class CarteraBackClient {
 			undefined,
 			true,
 		);
+	}
+
+	// ========================================================================
+	// CONSULTA DE MORA POR DPI
+	// ========================================================================
+
+	/**
+	 * ¿Esta persona ya es cliente y está en mora?
+	 *
+	 * Fail-closed: **nunca** devuelve un veredicto que no venga de cartera. Si
+	 * cartera o SIFCO no contestan, lanza `ConsultaMoraNoDisponibleError` en vez
+	 * de inventar un "sin mora". El llamador (`crm.validarMoraPorDpi`) traduce
+	 * esa excepción a `puedeContinuar: false` con motivo `SERVICIO_NO_DISPONIBLE`.
+	 *
+	 * Tres decisiones que no son obvias:
+	 *
+	 * 1. **Sin caché.** Cachear alivia al core legacy de SIFCO (20s de timeout),
+	 *    pero acá el dato caduca en el peor sentido posible: quien acaba de caer
+	 *    en mora pasaría el filtro durante los cinco minutos del TTL, y ese es
+	 *    justo el caso que el filtro existe para atajar. La caché es en memoria y
+	 *    por proceso, así que ni siquiera hay dónde invalidarla cuando la mora la
+	 *    genera el cron de cartera. Además el volumen no lo pide: es un DPI
+	 *    tecleado por un humano llenando una solicitud, no un barrido. (De hecho
+	 *    `request()` solo cachea GET, así que esto es explícito, no incidental.)
+	 * 2. **Un solo intento.** Es un POST de solo lectura —se podría reintentar
+	 *    sin duplicar nada—, pero cada intento puede tardar los 20s de SIFCO: con
+	 *    reintentos el asesor se queda mirando la pantalla más de un minuto y se
+	 *    le carga la mano al core justo cuando está sufriendo. Bajo fail-closed
+	 *    el costo de no reintentar es un "no se pudo consultar" que se puede
+	 *    volver a pedir, no una respuesta equivocada. Del rebote repetido se
+	 *    encarga el circuit breaker.
+	 * 3. **Se valida la forma.** Un 200 con un cuerpo que no es el contrato es un
+	 *    fallo, no un "sin mora": sin este parseo, un `{}` se leería como
+	 *    `tieneMoraActiva: undefined` y dejaría pasar a cualquiera.
+	 *
+	 * `numerosCreditoConocidos` son los números de crédito que el CRM asocia a
+	 * ese DPI y que SIFCO no sabe devolver (`CRM-<uuid>` de las oportunidades
+	 * ganadas acá, `insoluto-N`). Cartera los suma a los del core antes de
+	 * buscar; sin ellos, el cliente cuyos créditos nacieron todos en el CRM no
+	 * tiene ficha en SIFCO y salía como CLIENTE_NO_ENCONTRADO. Se omiten cuando
+	 * la lista viene vacía: el contrato los tiene como opcionales.
+	 */
+	async consultarMoraPorDpi(
+		dpi: string,
+		numerosCreditoConocidos?: string[],
+	): Promise<ConsultaMoraResponse> {
+		const cuerpo =
+			numerosCreditoConocidos && numerosCreditoConocidos.length > 0
+				? { dpi, numerosCreditoConocidos }
+				: { dpi };
+
+		let crudo: unknown;
+		try {
+			// El presupuesto envuelve la llamada COMPLETA y no solo el fetch: la
+			// autenticación corre antes de que `request()` arme su AbortSignal y no
+			// tiene señal propia. Ver `conPresupuestoConsultaMora`.
+			crudo = await conPresupuestoConsultaMora(
+				CONSULTA_MORA_TIMEOUT_MS,
+				(senalVencimiento, restanteMs) =>
+					this.request<unknown>(
+						"/clientes/consulta-mora",
+						{
+							method: "POST",
+							body: JSON.stringify(cuerpo),
+							signal: senalVencimiento,
+						},
+						false, // sin caché (ver arriba)
+						// Función, no número: el deadline se calcula al despachar
+						// —con la autenticación ya pagada— para caber DENTRO del
+						// presupuesto y vencer antes que él. Ver
+						// `cotaFetchConsultaMora`.
+						() => cotaFetchConsultaMora(restanteMs()),
+						false, // un solo intento (ver arriba)
+					),
+			);
+		} catch (error) {
+			// El vencimiento del presupuesto ya llega con el motivo correcto; no se
+			// vuelve a envolver para no anidar el mismo mensaje dos veces.
+			if (error instanceof ConsultaMoraNoDisponibleError) {
+				throw error;
+			}
+
+			throw new ConsultaMoraNoDisponibleError(
+				`No se pudo consultar la mora en cartera: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+				error,
+			);
+		}
+
+		const parseado = consultaMoraResponseSchema.safeParse(crudo);
+		if (!parseado.success) {
+			throw new ConsultaMoraNoDisponibleError(
+				`Cartera respondió la consulta de mora con una forma inesperada: ${parseado.error.message}`,
+				parseado.error,
+			);
+		}
+
+		return parseado.data;
 	}
 
 	// ========================================================================

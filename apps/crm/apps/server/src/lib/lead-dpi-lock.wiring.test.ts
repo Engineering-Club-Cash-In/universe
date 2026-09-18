@@ -175,9 +175,13 @@ describe("cableado del candado de DPI", () => {
 		const bloqueDelete = texto.slice(desdeDelete, desdeDelete + 6000);
 
 		expect(
-			bloqueDelete.includes("db.transaction("),
+			bloqueDelete.includes("auditedTransaction("),
 			"los tres deletes tienen que viajar en una transacción: si el candado " +
-				"corta el del co-deudor, la evidencia ya borrada tiene que volver.",
+				"corta el del co-deudor, la evidencia ya borrada tiene que volver. " +
+				"Y tiene que ser `auditedTransaction`, no `db.transaction`: ahora se " +
+				"anota DENTRO de la transacción (el override del admin y su " +
+				"revalidación), así que lo que revierta la escritura tiene que " +
+				"llevarse también esas anotaciones.",
 		).toBe(true);
 
 		expect(

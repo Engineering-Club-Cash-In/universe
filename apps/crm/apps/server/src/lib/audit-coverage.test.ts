@@ -34,7 +34,14 @@ const INVENTARIO: Record<
 	// delete de `coDebtors` pasó a hacerse dentro de una transacción y con el
 	// candado en el WHERE, y el override del admin sobre ese borrado ahora
 	// también revalida la oportunidad (antes solo dejaba la fila de bitácora).
-	"routers/crm.ts": { escrituras: 17, anotaciones: 20, estado: "listo" },
+	//
+	// +2 anotaciones (20 → 22) sin escrituras nuevas: el override de admin del
+	// gate de mora dejó de anotarse dentro de `resolverEdicionConMora` —que lo
+	// escribía ANTES del UPDATE, dejando en la bitácora overrides que nunca
+	// ocurrían— y ahora lo anota cada llamador después de confirmar sus filas.
+	// Son los mismos dos sitios de siempre (`updateLead` y `updateCoDebtor`),
+	// solo que el literal `auditRecord(` ahora vive acá y el escáner lo ve.
+	"routers/crm.ts": { escrituras: 17, anotaciones: 22, estado: "listo" },
 	// Manda oportunidades de vuelta a análisis cuando su validación de identidad
 	// quedó vieja: al reabrir una perdida avanzada, y cuando un admin abre el
 	// candado del DPI.

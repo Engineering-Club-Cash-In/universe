@@ -48,6 +48,23 @@ export const PORCENTAJE_ETAPA_ANALISIS = PORCENTAJE_CANDADO_DPI;
  */
 export const PORCENTAJE_SIN_RETROCESO = 90;
 
+/**
+ * La revalidación no se pudo completar, así que el cambio de identidad que la
+ * disparó tampoco vale.
+ *
+ * 🔴 Es un error y no un valor de retorno a propósito: el llamador corre dentro
+ * de una transacción y lo que tiene que pasar es un ROLLBACK. Devolver "no se
+ * pudo" dejaba que el DPI nuevo se commiteara igual con la oportunidad todavía
+ * aprobada contra la identidad vieja, que es el estado que todo esto existe
+ * para que no exista.
+ */
+export class ErrorRevalidacionIncompleta extends Error {
+	constructor(mensaje: string) {
+		super(mensaje);
+		this.name = "ErrorRevalidacionIncompleta";
+	}
+}
+
 export type OportunidadParaRevalidar = {
 	id?: string;
 	status: string;
@@ -319,32 +336,17 @@ export async function revalidarOportunidades(params: {
 	if (resultado.reseteadas.length > 0) {
 		const etapa = await obtenerEtapaDeAnalisis(database);
 
-		// Sin la etapa de análisis no hay a dónde mandarlas. Se avisa y no se
-		// escribe a medias: dejar `analysisStatus: pending` con la etapa al 40%
-		// sería un estado que ninguna pantalla sabe leer.
+		// 🔴 Sin la etapa de análisis no hay a dónde mandarlas, y eso es un FALLO,
+		// no un aviso. Antes se anotaba y se seguía: el llamador commiteaba igual
+		// el cambio de identidad y la oportunidad quedaba viva y aprobada contra la
+		// identidad VIEJA — el agujero entero, con una fila de bitácora que nadie
+		// mira en el momento. Ahora lanza; y como la revalidación corre DENTRO de
+		// la transacción que cambia la identidad, el throw revierte también ese
+		// cambio: o se revalida, o no se cambia.
 		if (!etapa) {
-			console.error(
-				`[revalidarOportunidades] no existe etapa con closurePercentage=${PORCENTAJE_ETAPA_ANALISIS}; no se revalidó nada`,
+			throw new ErrorRevalidacionIncompleta(
+				`No se pudo revalidar la identidad: no existe la etapa de análisis (closurePercentage=${PORCENTAJE_ETAPA_ANALISIS}). El cambio de identidad se revirtió.`,
 			);
-			for (const id of resultado.reseteadas) {
-				params.anotar({
-					entity: "opportunity",
-					id,
-					action: params.accion,
-					data: {
-						...params.datosExtra,
-						detalle: params.detalle,
-						resultado:
-							"NO se pudo revalidar: no existe la etapa de análisis (30%)",
-					},
-					ok: false,
-				});
-			}
-			return {
-				reseteadas: [],
-				avisadas: resultado.avisadas,
-				bloqueadasPorSalvaguarda: [],
-			};
 		}
 
 		// Las salvaguardas viajan DENTRO del UPDATE, no solo en el snapshot: ver

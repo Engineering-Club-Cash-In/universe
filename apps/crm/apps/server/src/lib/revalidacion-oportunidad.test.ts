@@ -8,6 +8,7 @@ import type { AuditEntry } from "./audit";
 import {
 	decidirRevalidacion,
 	documentosDeIdentidadVigentes,
+	ErrorRevalidacionIncompleta,
 	faltaPorIdentidadRevalidada,
 	MENSAJE_DPI_DESACTUALIZADO,
 	MOTIVO_AVISO,
@@ -426,23 +427,48 @@ describe("aplicar la revalidación", () => {
 		expect(b.anotaciones).toHaveLength(2);
 	});
 
-	test("🔴 sin etapa de análisis no se escribe a medias", async () => {
-		// Dejar `analysisStatus: pending` con la etapa al 40% sería un estado que
-		// ninguna pantalla sabe leer.
+	/**
+	 * 🔴 Sin etapa de análisis no hay a dónde mandarlas, y eso es un FALLO, no un
+	 * aviso. Antes se anotaba y se devolvía "no se revalidó nada": el llamador
+	 * seguía su curso y commiteaba igual el cambio de identidad, con la
+	 * oportunidad viva y aprobada contra la identidad VIEJA. El agujero entero,
+	 * con una fila de bitácora que nadie mira en el momento.
+	 *
+	 * Ahora lanza, y como corre dentro de la transacción que cambia la identidad,
+	 * el throw se lleva puesto ese cambio: o se revalida, o no se cambia.
+	 */
+	test("🔴 sin etapa de análisis falla y no deja escribir nada", async () => {
 		const b = banco(null);
 
-		const resultado = await revalidarOportunidades({
-			oportunidades: [RESETEABLE],
-			accion: "candado_override_revalidacion",
-			detalle: "porque sí",
-			anotar: b.anotar,
-			database: b.database,
-		});
+		await expect(
+			revalidarOportunidades({
+				oportunidades: [RESETEABLE],
+				accion: "candado_override_revalidacion",
+				detalle: "porque sí",
+				anotar: b.anotar,
+				database: b.database,
+			}),
+		).rejects.toBeInstanceOf(ErrorRevalidacionIncompleta);
 
-		expect(resultado.reseteadas).toEqual([]);
+		// Dejar `analysisStatus: pending` con la etapa al 40% sería un estado que
+		// ninguna pantalla sabe leer: no se escribió nada.
 		expect(b.actualizados).toEqual([]);
-		expect(b.anotaciones).toHaveLength(1);
-		expect(b.anotaciones[0]?.ok).toBe(false);
+	});
+
+	test("el mensaje del fallo dice que el cambio se revirtió", async () => {
+		// Quien lo lea tiene que saber que el DPI NO quedó cambiado; si no, va a
+		// creer que el cambio pasó y solo falló el reset.
+		const b = banco(null);
+
+		await expect(
+			revalidarOportunidades({
+				oportunidades: [RESETEABLE],
+				accion: "candado_override_revalidacion",
+				detalle: "porque sí",
+				anotar: b.anotar,
+				database: b.database,
+			}),
+		).rejects.toThrow("se revirtió");
 	});
 });
 
@@ -555,6 +581,24 @@ describe("cableado de la revalidación", () => {
 		// En dos sentencias quedaría una ventana con la oportunidad ya reabierta y
 		// todavía marcada como validada.
 		expect(crm).toContain("...(parcheRevalidacion ?? {})");
+	});
+
+	/**
+	 * 🔴 La mutación de identidad y su revalidación corrían en transacciones
+	 * SEPARADAS: si la revalidación fallaba, el DPI nuevo quedaba commiteado con
+	 * la oportunidad todavía aprobada contra la identidad vieja — el expediente
+	 * sobreviviente afirmando cosas de una persona que ya no es la del DPI.
+	 * Ahora entran las dos o no entra ninguna.
+	 */
+	test("los tres sitios revalidan DENTRO de la transacción que cambia la identidad", () => {
+		// `updateLead`, `updateCoDebtor` y `deleteCoDebtor`: cada uno le pasa su
+		// propio `tx` a `revalidarOportunidades`.
+		expect(
+			crm.split("database: tx,").length - 1,
+			"updateLead, updateCoDebtor y deleteCoDebtor tienen que revalidar con su " +
+				"propio tx; si un sitio vuelve a usar la conexión suelta, una " +
+				"revalidación caída deja el DPI nuevo commiteado.",
+		).toBe(3);
 	});
 
 	test("el override del admin sobre el candado dispara la revalidación", () => {

@@ -16,7 +16,7 @@ import {
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
 import { documensoService } from './DocumensoService';
 import { WeeTrustService } from './WeeTrustService';
-import { SignatureLayoutError } from './signaturePatterns';
+import { getSignatureMode, SignatureLayoutError } from './signaturePatterns';
 import { crmApiService } from './CrmApiService';
 import { uploadPdfToR2 } from './R2Service';
 
@@ -890,7 +890,17 @@ export class ContractGeneratorService {
               name: data.nombreCompleto ?? email,
             }));
 
-      if (signers.length > 0 && pdfBuffer) {
+      // Hay contratos que no se firman electrónicamente: se imprimen y se
+      // firman en papel. Para esos el PDF en R2 ES el entregable, y pedirles
+      // links de firma (o marcarlos como fallidos por no tenerlos) es tratar
+      // como error algo que está bien.
+      const signatureMode = getSignatureMode(contractType);
+
+      if (signatureMode === 'fisica') {
+        console.log(
+          `✍️  ${contractType} se firma en papel: no se envía a firma electrónica.`,
+        );
+      } else if (signers.length > 0 && pdfBuffer) {
         // Intentar primero con WeeTrust (si está habilitado)
         try {
           if (!weeTrustService) {
@@ -1041,6 +1051,7 @@ export class ContractGeneratorService {
         nameDocument: [{ enum: contractType, label: config.description }],
         data: submissionData,
         signing_links: signingLinks,
+        signatureMode,
         linkDocument: signing?.linkDocument || '',
         signingProvider,
         r2Key: r2KeyDirect || signing?.r2Key,
@@ -1054,7 +1065,9 @@ export class ContractGeneratorService {
         pdf_path: pdfPath,
         message: signingError
           ? `Contrato ${contractType} generado, pero sin firma electrónica`
-          : `Contrato ${contractType} generado exitosamente`,
+          : signatureMode === 'fisica'
+            ? `Contrato ${contractType} generado para firma en papel`
+            : `Contrato ${contractType} generado exitosamente`,
         error: signingError,
         generatedAt: new Date().toISOString()
       };

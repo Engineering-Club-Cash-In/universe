@@ -15,6 +15,7 @@ import {
 import {
   construirHistorialMora,
   construirRespuesta,
+  cotaDelPresupuesto,
   fusionarCreditosPorId,
   numerosEspejoConPresupuesto,
   seleccionarFichasDelDpi,
@@ -29,11 +30,55 @@ import {
   type RespuestaConsultaMora,
 } from "./consultaMoraPolicy";
 
-/** Presupuesto del camino interactivo: ver `obtenerNumerosPrestamo`. */
+/**
+ * ⏱️ Presupuesto GLOBAL de toda la resolución de números: identificación +
+ * espejo + API de CADA ficha, desde que entra la request hasta que hay lista de
+ * números. Es el único tope que le importa al asesor parado frente a la
+ * pantalla.
+ *
+ * 🔴 Antes no existía: cada paso traía su propio tope y los topes eran
+ * ADITIVOS. Una sola ficha podía tardar 10s (identificación) + 5s (espejo) +
+ * 10s (API) = 25s, y cada ficha extra sumaba otros 15s, así que el techo real
+ * dependía de cuántas fichas tuviera el DPI. Los topes por paso siguen abajo
+ * como COTAS INTERNAS —el espejo no puede comerse el presupuesto entero—, pero
+ * ninguno puede pasarse de lo que queda del global.
+ *
+ * 15s porque el gate corre mientras el asesor espera: más allá de eso el CRM
+ * ya no está mostrando una validación, está mostrando una pantalla colgada. Al
+ * vencer se corta fail-closed con SERVICIO_NO_DISPONIBLE: media lista de
+ * créditos no alcanza para firmar un "sin mora".
+ */
+const PRESUPUESTO_NUMEROS_GATE_MS = 15000;
+
+/** Cota interna de la búsqueda de fichas por identificación. */
+const TIMEOUT_IDENTIFICACION_GATE_MS = 10000;
+
+/** Cota interna del camino interactivo: ver `obtenerNumerosPrestamo`. */
 const TIMEOUT_PRESTAMOS_GATE_MS = 10000;
 
-/** Presupuesto del espejo: ver `numerosEspejoConPresupuesto`. */
+/** Cota interna del espejo: ver `numerosEspejoConPresupuesto`. */
 const TIMEOUT_ESPEJO_GATE_MS = 5000;
+
+/**
+ * Cuánto le toca a un paso, o el corte si el presupuesto global ya venció.
+ * Ver `cotaDelPresupuesto`; el throw sale por el catch como
+ * SERVICIO_NO_DISPONIBLE.
+ */
+function cotaODesistir(
+  cotaDelPasoMs: number,
+  venceEnMs: number,
+  paso: string
+): number {
+  const ms = cotaDelPresupuesto(cotaDelPasoMs, venceEnMs, Date.now());
+
+  if (ms === null) {
+    throw new Error(
+      `El presupuesto de ${PRESUPUESTO_NUMEROS_GATE_MS}ms de la consulta de mora venció antes de ${paso}`
+    );
+  }
+
+  return ms;
+}
 
 /**
  * Responde si el dueño de un DPI ya es cliente y si está en mora, para el gate
@@ -52,6 +97,8 @@ export async function consultarMoraPorDpi(
   numerosCreditoConocidos?: string[]
 ): Promise<RespuestaConsultaMora> {
   const consultadoEn = new Date();
+  // El reloj arranca acá, no en cada paso: ver `PRESUPUESTO_NUMEROS_GATE_MS`.
+  const venceEn = Date.now() + PRESUPUESTO_NUMEROS_GATE_MS;
 
   try {
     // Normalizado a dígitos, no solo trim: los DPI viajan con espacios y
@@ -60,7 +107,14 @@ export async function consultarMoraPorDpi(
     // Normalizar solo las fichas de la respuesta no rescata una búsqueda que
     // ya volvió vacía.
     const dpiLimpio = normalizarIdentificacion(dpi);
-    const clientes = await buscarClientesPorIdentificacion(dpiLimpio);
+    const clientes = await buscarClientesPorIdentificacion(
+      dpiLimpio,
+      cotaODesistir(
+        TIMEOUT_IDENTIFICACION_GATE_MS,
+        venceEn,
+        "buscar las fichas del DPI"
+      )
+    );
 
     // TODAS las fichas del DPI, no la primera: un mismo DPI puede tener varias
     // en el core (natural + jurídica, o duplicados sin unificar) y los créditos
@@ -89,7 +143,7 @@ export async function consultarMoraPorDpi(
     // puede leerse como una ficha sin mora.
     const numerosSifco: string[] = [];
     for (const codigo of codigosCliente) {
-      numerosSifco.push(...(await obtenerNumerosPrestamo(codigo)));
+      numerosSifco.push(...(await obtenerNumerosPrestamo(codigo, venceEn)));
     }
 
     const numerosPrestamo = unirNumerosCredito(
@@ -235,12 +289,14 @@ async function obtenerCreditosConMora(
  * se sigue con solo el API. Ver `numerosEspejoConPresupuesto`.
  */
 async function obtenerNumerosPrestamo(
-  codigoClienteSifco: string
+  codigoClienteSifco: string,
+  venceEn: number
 ): Promise<string[]> {
-  // El espejo va con presupuesto propio y corto: es una base aparte
-  // (`SIFCO_DB_URL`) que antes podía colgar la request entera sin llegar nunca
-  // ni al API ni al catch. 5s y no los 10s del API porque el espejo es el
-  // atajo: si no contesta rápido, dejó de ser atajo.
+  // El espejo va con cota propia y corta: es una base aparte (`SIFCO_DB_URL`)
+  // que antes podía colgar la request entera sin llegar nunca ni al API ni al
+  // catch. 5s y no los 10s del API porque el espejo es el atajo: si no contesta
+  // rápido, dejó de ser atajo. Nunca más de lo que quede del presupuesto global
+  // —con varias fichas, la segunda ya no tiene 5s propios que gastar—.
   const filasEspejo = sifcoDb
     ? await numerosEspejoConPresupuesto(
         () =>
@@ -249,7 +305,11 @@ async function obtenerNumerosPrestamo(
             .from(prestamos)
             .where(eq(prestamos.pre_cli_cod, codigoClienteSifco))
             .then((filas) => filas.map((fila) => fila.pre_numero ?? "")),
-        TIMEOUT_ESPEJO_GATE_MS,
+        cotaODesistir(
+          TIMEOUT_ESPEJO_GATE_MS,
+          venceEn,
+          `consultar el espejo del cliente ${codigoClienteSifco}`
+        ),
         (detalle) =>
           console.warn(
             `⚠️ espejo de SIFCO no utilizable para el cliente ${codigoClienteSifco}; se sigue solo con el API:`,
@@ -262,9 +322,14 @@ async function obtenerNumerosPrestamo(
   // 30s son el techo de los caminos por lote (sync, migración), donde una
   // respuesta lenta sigue siendo útil; en el gate una respuesta a los 25s ya no
   // le sirve a nadie. Al vencerse, el throw sube y sale SERVICIO_NO_DISPONIBLE.
+  // Igual que el espejo, nunca más de lo que quede del presupuesto global.
   const respuesta = await consultarPrestamosPorCliente(
     Number(codigoClienteSifco),
-    TIMEOUT_PRESTAMOS_GATE_MS
+    cotaODesistir(
+      TIMEOUT_PRESTAMOS_GATE_MS,
+      venceEn,
+      `consultar los préstamos del cliente ${codigoClienteSifco}`
+    )
   );
 
   // La misma unión que usa el llamador para los números del CRM: deduplica y

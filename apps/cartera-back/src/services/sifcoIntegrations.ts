@@ -36,7 +36,8 @@ const sifcoApi = axios.create({
   // El camino interactivo pide lo suyo aparte: el gate de mora del CRM tiene a
   // un asesor esperando en pantalla y no espera lotes, así que sus dos llamadas
   // (`buscarClientesPorIdentificacion` y el `consultarPrestamosPorCliente` que
-  // hace `consultaMora.ts`) pasan 10s explícitos.
+  // hace `consultaMora.ts`) pasan un timeout explícito: 10s de cota, y nunca
+  // más de lo que le quede al presupuesto global de la consulta.
   timeout: 30000,
   headers: {
     "Content-Type": "application/json",
@@ -74,14 +75,20 @@ export async function consultarClientesPorEmail() {
  * convierte una caída de SIFCO en un "no tiene mora".
  */
 export async function buscarClientesPorIdentificacion(
-  numeroIdentificacion: string
+  numeroIdentificacion: string,
+  // `timeoutMs` es opcional y por omisión manda el mismo 10s de siempre. Lo
+  // pasa quien tiene a alguien esperando y un presupuesto que repartir: el gate
+  // de mora acota este viaje contra lo que le queda de su presupuesto global
+  // (ver `PRESUPUESTO_NUMEROS_GATE_MS`), igual que hace con
+  // `consultarPrestamosPorCliente`.
+  timeoutMs = 10000
 ): Promise<ClienteIdentificacion[]> {
   const request: WSBuscarClientesRequest = { numeroIdentificacion };
 
   const { data } = await sifcoApi.post<ServiceResponse<ClienteIdentificacion[]>>(
     "/api/clientes/buscar",
     request,
-    { timeout: 10000 }
+    { timeout: timeoutMs }
   );
 
   const encontrados = exigirRespuestaExitosa(

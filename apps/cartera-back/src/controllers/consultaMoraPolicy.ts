@@ -223,6 +223,31 @@ export function validarDpiConsulta(valor: string): ValidacionDpi {
 }
 
 /**
+ * Roles que pueden preguntar por la mora de un DPI.
+ *
+ * 🔴 `authMiddleware` SOLO valida la firma del JWT: sin gate, cualquier token
+ * vivo entra —incluido el de un INVESTOR del portal, que es un CLIENTE, no
+ * personal de la casa—. Y esta consulta devuelve la historia crediticia de una
+ * persona a partir de su DPI, más el canal confiado de
+ * `numerosCreditoConocidos` (ver el router), así que un token de afuera podía
+ * pescar la cartera de cualquiera.
+ *
+ * Son los tres roles de `user_role` en cartera, o sea TODO usuario propio del
+ * sistema. Deliberadamente NO se cierra solo a ADMIN aunque DEPLOYMENT.md exija
+ * que la cuenta de `CARTERA_USER` lo sea: un 403 acá no degrada nada, el CRM lo
+ * lee como "no se pudo verificar" y el gate es fail-closed, así que una cuenta
+ * de servicio con rol CONTA o ASESOR —el propio DEPLOYMENT.md admite que puede
+ * pasar— dejaría al CRM sin poder dar de alta a NADIE. La población que sobra
+ * es la de afuera, y esa queda afuera.
+ */
+export const ROLES_CONSULTA_MORA = ["ADMIN", "CONTA", "ASESOR"] as const;
+
+/** Ver `ROLES_CONSULTA_MORA`. */
+export function rolPuedeConsultarMora(rol: unknown): boolean {
+  return (ROLES_CONSULTA_MORA as readonly string[]).includes(String(rol ?? ""));
+}
+
+/**
  * Cota de un paso bajo el presupuesto GLOBAL de la consulta.
  *
  * 🔴 Los presupuestos por paso eran ADITIVOS: identificación + espejo + API por

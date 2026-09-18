@@ -12,6 +12,7 @@ import {
   nombreClienteSifco,
   numerosEspejoConPresupuesto,
   respuestaClienteNoEncontrado,
+  rolPuedeConsultarMora,
   respuestaServicioNoDisponible,
   siguientePasoConsulta,
   unirNumerosCredito,
@@ -764,6 +765,23 @@ describe("validación del DPI antes de tocar SIFCO", () => {
       expect(resultado.valido === false && resultado.mensaje).toContain(
         `se recibieron ${largo.length}`
       );
+    }
+  });
+});
+
+describe("quién puede preguntar por la mora de un DPI", () => {
+  it("deja pasar a los tres roles propios de cartera", () => {
+    for (const rol of ["ADMIN", "CONTA", "ASESOR"]) {
+      expect(rolPuedeConsultarMora(rol)).toBeTrue();
+    }
+  });
+
+  it("🔴 deja afuera al INVESTOR del portal y a lo que no trae rol", () => {
+    // `authMiddleware` solo valida la firma: sin este gate, el token de un
+    // cliente del portal pescaba la historia crediticia de cualquier DPI —y
+    // podía colgarle créditos ajenos por `numerosCreditoConocidos`.
+    for (const rol of ["INVESTOR", "", null, undefined, 1, "admin"]) {
+      expect(rolPuedeConsultarMora(rol)).toBeFalse();
     }
   });
 });

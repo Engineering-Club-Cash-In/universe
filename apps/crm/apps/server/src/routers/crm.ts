@@ -141,12 +141,15 @@ import {
 	type DecisionRevalidacion,
 	decidirRevalidacion,
 	documentosDeIdentidadVigentes,
+	ErrorRevalidacionIncompleta,
 	faltaPorIdentidadRevalidada,
 	MENSAJE_DPI_DESACTUALIZADO,
 	MOTIVO_AVISO,
 	type OportunidadParaRevalidar,
 	obtenerEtapaDeAnalisis,
+	PORCENTAJE_ETAPA_ANALISIS,
 	parcheDeRevalidacion,
+	RAZON_TRANSICION_REVALIDACION,
 	revalidarOportunidades,
 	saleDeLaPerdida,
 } from "../lib/revalidacion-oportunidad";
@@ -1617,6 +1620,7 @@ export const crmRouter = {
 							"un administrador cambió el DPI del lead pese al candado; la validación de identidad de esta oportunidad se hizo contra el DPI anterior",
 						datosExtra: { leadId: id, dpiNuevo: updateData.dpi },
 						anotar: auditRecord,
+						cambiadaPor: context.userId,
 						database: tx,
 					});
 				}
@@ -3309,6 +3313,8 @@ export const crmRouter = {
 
 			let parcheRevalidacion: ReturnType<typeof parcheDeRevalidacion> | null =
 				null;
+			/** La etapa a la que vuelve, para la fila de `opportunityStageHistory`. */
+			let etapaDeAnalisisId: string | null = null;
 			let decisionRevalidacion: DecisionRevalidacion = { tipo: "nada" };
 			let oportunidadRevalidada: OportunidadParaRevalidar | null = null;
 
@@ -3334,13 +3340,16 @@ export const crmRouter = {
 						const etapaDeAnalisis = await obtenerEtapaDeAnalisis();
 						if (etapaDeAnalisis) {
 							parcheRevalidacion = parcheDeRevalidacion(etapaDeAnalisis.id);
+							etapaDeAnalisisId = etapaDeAnalisis.id;
 						} else {
-							// Sin etapa de análisis no hay a dónde mandarla; se avisa y no
-							// se escribe a medias.
-							console.error(
-								"[updateOpportunity] no existe etapa de análisis (30%); la reapertura no se revalidó",
+							// 🔴 Sin etapa de análisis no hay a dónde mandarla, y eso es un
+							// FALLO: seguir dejaba la perdida REABIERTA con su validación
+							// vieja intacta, que es justo la escapatoria que este reset
+							// existe para cerrar. Mismo criterio que
+							// `revalidarOportunidades`: o se revalida, o no se cambia.
+							throw new ErrorRevalidacionIncompleta(
+								`No se pudo revalidar la identidad al reabrir la oportunidad: no existe la etapa de análisis (closurePercentage=${PORCENTAJE_ETAPA_ANALISIS}). La reapertura no se aplicó.`,
 							);
-							decisionRevalidacion = { tipo: "nada" };
 						}
 					}
 				}
@@ -3351,52 +3360,73 @@ export const crmRouter = {
 				currentOpportunity[0],
 			);
 
-			const updatedOpportunity = await db
-				.update(opportunities)
-				.set({
-					...safeUpdateData,
-					...(assignedTo && { assignedTo }),
-					...(expectedCloseDate && {
-						expectedCloseDate: new Date(expectedCloseDate),
-					}),
-					// `fechaInicio` se destructura fuera de `updateData`, así que
-					// `stripUnchangedFrozenFields` no la ve: se omite acá cuando no
-					// cambia, para no reescribir un campo congelado con el mismo valor.
-					...(fechaInicio &&
-						frozenFieldChanges.includes("fechaInicio") && {
-							fechaInicio: new Date(fechaInicio),
+			// La reapertura y su fila de transición van en UNA transacción: el
+			// timeline no puede quedar sin el retroceso que sí se escribió.
+			const updatedOpportunity = await auditedTransaction(async (tx) => {
+				const filas = await tx
+					.update(opportunities)
+					.set({
+						...safeUpdateData,
+						...(assignedTo && { assignedTo }),
+						...(expectedCloseDate && {
+							expectedCloseDate: new Date(expectedCloseDate),
 						}),
-					// Convert numeric fields to strings for decimal columns
-					...(seguro !== undefined && { seguro: String(seguro) }),
-					...insuranceFallback,
-					...(gps !== undefined && { gps: String(gps) }),
-					...(royalti !== undefined && { royalti: String(royalti) }),
-					...(porcentajeRoyalti !== undefined && {
-						porcentajeRoyalti: String(porcentajeRoyalti),
-					}),
-					...(reserva !== undefined && { reserva: String(reserva) }),
-					...(membresiaPago !== undefined && {
-						membresiaPago: String(membresiaPago),
-					}),
-					...(gastosAdministrativos !== undefined && {
-						gastosAdministrativos: String(gastosAdministrativos),
-					}),
-					...(diaPagoOriginalSistemaUpdate !== undefined && {
-						diaPagoOriginalSistema: diaPagoOriginalSistemaUpdate,
-					}),
-					// Update analysisStatus if it changed during stage transition
-					...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
-						analysisStatus: newAnalysisStatus,
-					}),
-					...(updateData.status === "won" && { actualCloseDate: new Date() }),
-					// Va al final a propósito: si la reapertura manda a análisis, eso
-					// gana sobre cualquier `stageId` que venga en la misma request. La
-					// revalidación no es negociable en el mismo viaje que la dispara.
-					...(parcheRevalidacion ?? {}),
-					updatedAt: new Date(),
-				})
-				.where(whereClause)
-				.returning();
+						// `fechaInicio` se destructura fuera de `updateData`, así que
+						// `stripUnchangedFrozenFields` no la ve: se omite acá cuando no
+						// cambia, para no reescribir un campo congelado con el mismo valor.
+						...(fechaInicio &&
+							frozenFieldChanges.includes("fechaInicio") && {
+								fechaInicio: new Date(fechaInicio),
+							}),
+						// Convert numeric fields to strings for decimal columns
+						...(seguro !== undefined && { seguro: String(seguro) }),
+						...insuranceFallback,
+						...(gps !== undefined && { gps: String(gps) }),
+						...(royalti !== undefined && { royalti: String(royalti) }),
+						...(porcentajeRoyalti !== undefined && {
+							porcentajeRoyalti: String(porcentajeRoyalti),
+						}),
+						...(reserva !== undefined && { reserva: String(reserva) }),
+						...(membresiaPago !== undefined && {
+							membresiaPago: String(membresiaPago),
+						}),
+						...(gastosAdministrativos !== undefined && {
+							gastosAdministrativos: String(gastosAdministrativos),
+						}),
+						...(diaPagoOriginalSistemaUpdate !== undefined && {
+							diaPagoOriginalSistema: diaPagoOriginalSistemaUpdate,
+						}),
+						// Update analysisStatus if it changed during stage transition
+						...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
+							analysisStatus: newAnalysisStatus,
+						}),
+						...(updateData.status === "won" && { actualCloseDate: new Date() }),
+						// Va al final a propósito: si la reapertura manda a análisis, eso
+						// gana sobre cualquier `stageId` que venga en la misma request. La
+						// revalidación no es negociable en el mismo viaje que la dispara.
+						...(parcheRevalidacion ?? {}),
+						updatedAt: new Date(),
+					})
+					.where(whereClause)
+					.returning();
+
+				// 🔴 El reset cambiaba `stageId` sin dejar la transición: para los
+				// timelines y para `latestStageChangedAt` la oportunidad seguía en la
+				// etapa avanzada, así que el retroceso era invisible y el tiempo en
+				// etapa se seguía contando desde una transición que ya no era la real.
+				if (parcheRevalidacion && etapaDeAnalisisId && filas.length > 0) {
+					await tx.insert(opportunityStageHistory).values({
+						opportunityId: id,
+						fromStageId: currentOpportunity[0].stageId,
+						toStageId: etapaDeAnalisisId,
+						changedBy: context.userId,
+						reason: `${RAZON_TRANSICION_REVALIDACION}: se reabrió una oportunidad perdida que ya había cruzado el 30%`,
+						isOverride: false,
+					});
+				}
+
+				return filas;
+			});
 			if (updatedOpportunity.length === 0) {
 				if (enforceNotWonInPredicate) {
 					// Pudo ser la carrera con closeOpportunity: distinguirlo del
@@ -3475,8 +3505,13 @@ export const crmRouter = {
 					.where(eq(analysisChecklists.opportunityId, id));
 			}
 
-			// Record stage history if stage changed
-			if (isStageChange && input.stageId) {
+			// Record stage history if stage changed.
+			// ⚠️ No cuando la revalidación se llevó puesto el `stageId` pedido: el
+			// parche va al final del `.set()`, así que la etapa con la que quedó la
+			// oportunidad es la de análisis y no la de la request. Esta fila diría
+			// que fue a una etapa a la que nunca llegó; la transición real ya la
+			// escribió la transacción de arriba.
+			if (isStageChange && input.stageId && !parcheRevalidacion) {
 				await db.insert(opportunityStageHistory).values({
 					opportunityId: id,
 					fromStageId: currentOpportunity[0].stageId,
@@ -8788,6 +8823,7 @@ export const crmRouter = {
 							"un administrador cambió el DPI del co-deudor pese al candado; la validación de identidad de esta oportunidad se hizo contra el DPI anterior",
 						datosExtra: { coDebtorId: id, dpiNuevo: updateData.dpi },
 						anotar: auditRecord,
+						cambiadaPor: context.userId,
 						database: tx,
 					});
 				}
@@ -8941,6 +8977,7 @@ export const crmRouter = {
 									"un administrador eliminó al co-deudor pese al candado; la validación de identidad de esta oportunidad se hizo con ese respaldo",
 								datosExtra: { coDebtorId: input.id },
 								anotar: auditRecord,
+								cambiadaPor: context.userId,
 								database: tx,
 							});
 						}

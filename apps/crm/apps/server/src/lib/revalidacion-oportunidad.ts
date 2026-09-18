@@ -1,6 +1,10 @@
 import { and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { db } from "../db";
-import { opportunities, salesStages } from "../db/schema";
+import {
+	opportunities,
+	opportunityStageHistory,
+	salesStages,
+} from "../db/schema";
 import type { AuditEntry } from "./audit";
 import { cruzoElCandado, PORCENTAJE_CANDADO_DPI } from "./lead-dpi-lock";
 
@@ -297,6 +301,14 @@ export function separarPorSalvaguarda(
 	};
 }
 
+/**
+ * El `reason` de la fila de `opportunityStageHistory`. Es lo que va a leer
+ * quien mire el timeline y encuentre a la solicitud de vuelta en análisis: sin
+ * esto, el retroceso aparece sin causa y parece un error de alguien.
+ */
+export const RAZON_TRANSICION_REVALIDACION =
+	"Revalidación de identidad (retroceso a análisis)";
+
 export const MOTIVO_SALVAGUARDA =
 	"NO se revalidó: entre la lectura y la escritura la oportunidad quedó ganada o en Formalización Final (≥90%), donde el reset no se aplica; la evidencia de identidad puede ser de un DPI anterior";
 
@@ -313,7 +325,14 @@ export async function revalidarOportunidades(params: {
 	detalle: string;
 	datosExtra?: Record<string, unknown>;
 	anotar: (entrada: AuditEntry) => void;
-	database?: Pick<typeof db, "select" | "update">;
+	/**
+	 * Quién responde por el retroceso de etapa. Va a
+	 * `opportunityStageHistory.changedBy`, que es NOT NULL: el timeline no
+	 * admite una transición sin autor, y acá el autor es quien hizo la maniobra
+	 * que costó la revalidación (el admin que abrió el candado).
+	 */
+	cambiadaPor: string;
+	database?: Pick<typeof db, "select" | "update" | "insert">;
 }): Promise<ResultadoRevalidacion> {
 	const database = params.database ?? db;
 	const resultado: ResultadoRevalidacion = {
@@ -349,6 +368,18 @@ export async function revalidarOportunidades(params: {
 			);
 		}
 
+		// La etapa de la que sale cada una, leída ANTES del UPDATE: `RETURNING`
+		// devuelve la fila NUEVA, así que después del reset el dato ya no existe y
+		// el `from` del timeline quedaría en blanco.
+		const etapaPrevia = new Map(
+			(
+				await database
+					.select({ id: opportunities.id, stageId: opportunities.stageId })
+					.from(opportunities)
+					.where(inArray(opportunities.id, resultado.reseteadas))
+			).map((fila) => [fila.id, fila.stageId]),
+		);
+
 		// Las salvaguardas viajan DENTRO del UPDATE, no solo en el snapshot: ver
 		// `sqlResetPermitido`. Lo que vuelve es lo que se escribió de verdad.
 		const devueltas = await database
@@ -369,6 +400,32 @@ export async function revalidarOportunidades(params: {
 
 		resultado.reseteadas = aplicadas;
 		resultado.bloqueadasPorSalvaguarda = bloqueadas;
+
+		// 🔴 El reset movía `stageId` sin dejar la transición en
+		// `opportunityStageHistory`. Para los timelines y para
+		// `latestStageChangedAt` la oportunidad seguía en la etapa avanzada: el
+		// retroceso era invisible, y la pantalla mostraba una historia que termina
+		// en el 40% con la solicitud parada en el 30%. Peor todavía, el tiempo en
+		// etapa se seguía contando desde la última transición registrada, que ya no
+		// era la real.
+		//
+		// Va en la MISMA transacción del reset y solo por las que de verdad se
+		// escribieron: una transición de una oportunidad que la salvaguarda dejó
+		// intacta sería una fila que miente.
+		if (aplicadas.length > 0) {
+			await database.insert(opportunityStageHistory).values(
+				aplicadas.map((id) => ({
+					opportunityId: id,
+					fromStageId: etapaPrevia.get(id) ?? null,
+					toStageId: etapa.id,
+					changedBy: params.cambiadaPor,
+					reason: `${RAZON_TRANSICION_REVALIDACION}: ${params.detalle}`,
+					// `isOverride` es del flujo de ventas-vs-análisis (ventas pisó la
+					// decisión del analista); este retroceso no es eso.
+					isOverride: false,
+				})),
+			);
+		}
 
 		for (const id of bloqueadas) {
 			params.anotar({

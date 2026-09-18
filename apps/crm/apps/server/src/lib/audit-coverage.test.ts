@@ -138,11 +138,17 @@ const ANOTACION = /auditRecord\(/;
 
 /**
  * Margen entre una escritura y su anotación. Hoy la distancia real máxima es
- * de 62 líneas, en `crm.updateOpportunity`: la anotación va después del
+ * de 91 líneas, en `crm.updateOpportunity`: la anotación va después del
  * chequeo de cero filas —que además relee el estado para distinguir la carrera
  * con el cierre—, porque con cero filas no hubo escritura que anotar.
+ *
+ * Subió de 75 a 100 al meter la reapertura en una transacción: entre el UPDATE
+ * y su anotación ahora viven también la fila de `opportunityStageHistory` del
+ * retroceso a análisis y el cierre de la transacción. El margen es una heurística
+ * de proximidad, no un límite de diseño; lo que protege es que no desaparezca la
+ * anotación, y eso se sigue cumpliendo.
  */
-const LINEAS_DE_MARGEN = 75;
+const LINEAS_DE_MARGEN = 100;
 
 function archivosFuente(dir: string, out: string[] = []): string[] {
 	for (const entrada of readdirSync(dir)) {

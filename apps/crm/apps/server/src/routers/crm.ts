@@ -1570,6 +1570,21 @@ export const crmRouter = {
 			// Ahora o entran las dos escrituras o no entra ninguna. `auditedTransaction`
 			// descarta además las anotaciones de lo que el rollback se llevó.
 			const updatedLead = await auditedTransaction(async (tx) => {
+				// 🔴 Lock ANTES del predicado. El NOT EXISTS del candado lee
+				// `opportunities` bajo el snapshot MVCC del UPDATE a `leads`: no
+				// bloquea la fila de la oportunidad, así que podía ver 30%, escribir
+				// el DPI, y dejar que una aprobación 30→40 ya en vuelo commiteara
+				// después. Con el FOR UPDATE, la escritura del DPI espera a que esa
+				// aprobación termine (o viceversa) y el predicado decide sobre el
+				// estado real, no sobre una foto.
+				if (elDpiCambia) {
+					await tx
+						.select({ id: opportunities.id })
+						.from(opportunities)
+						.where(eq(opportunities.leadId, id))
+						.for("update");
+				}
+
 				const filas = await tx
 					.update(leads)
 					.set({
@@ -3328,6 +3343,34 @@ export const crmRouter = {
 			// La reapertura y su fila de transición van en UNA transacción: el
 			// timeline no puede quedar sin el retroceso que sí se escribió.
 			const updatedOpportunity = await auditedTransaction(async (tx) => {
+				// 🔴 La reapertura no puede aplicar un parche calculado sobre una foto
+				// vieja: sin `expectedUpdatedAt`, entre el cálculo y este UPDATE otra
+				// transacción pudo reabrir y avanzar la misma fila (≥90% o won), y el
+				// reset la regresaría igual — con la fila de historial registrando un
+				// `fromStageId` que ya no era el real. Lock + relectura bajo el lock:
+				// si la premisa murió, se falla claro en vez de escribir sobre viejo.
+				let etapaRealAntesDelReset = currentOpportunity[0].stageId;
+				if (parcheRevalidacion) {
+					const [bajoLock] = await tx
+						.select({
+							status: opportunities.status,
+							stageId: opportunities.stageId,
+							pct: salesStages.closurePercentage,
+						})
+						.from(opportunities)
+						.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
+						.where(eq(opportunities.id, id))
+						.for("update", { of: opportunities });
+
+					if (!bajoLock || bajoLock.status !== "lost" || bajoLock.pct >= 90) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La oportunidad cambió mientras se editaba y la reapertura ya no aplica tal como se calculó. Recarga y volvé a intentar.",
+						});
+					}
+					etapaRealAntesDelReset = bajoLock.stageId;
+				}
+
 				const filas = await tx
 					.update(opportunities)
 					.set({
@@ -3382,7 +3425,8 @@ export const crmRouter = {
 				if (parcheRevalidacion && etapaDeAnalisisId && filas.length > 0) {
 					await tx.insert(opportunityStageHistory).values({
 						opportunityId: id,
-						fromStageId: currentOpportunity[0].stageId,
+						// La etapa leída BAJO el lock, no la del snapshot de la request.
+						fromStageId: etapaRealAntesDelReset,
 						toStageId: etapaDeAnalisisId,
 						changedBy: context.userId,
 						reason: `${RAZON_TRANSICION_REVALIDACION}: se reabrió una oportunidad perdida que ya había cruzado el 30%`,
@@ -8631,6 +8675,21 @@ export const crmRouter = {
 			// revalidación caída dejaba el DPI nuevo commiteado con la oportunidad
 			// aprobada contra la identidad vieja.
 			const [updatedCoDebtor] = await auditedTransaction(async (tx) => {
+				// 🔴 Mismo lock que en `updateLead`: el NOT EXISTS lee bajo snapshot
+				// y no frena una aprobación 30→40 en vuelo. FOR UPDATE sobre SU
+				// oportunidad serializa las dos escrituras.
+				if (
+					coDebtorAntesDelUpdate &&
+					updateData.dpi !== undefined &&
+					dpiCambia(coDebtorAntesDelUpdate.dpi, updateData.dpi)
+				) {
+					await tx
+						.select({ id: opportunities.id })
+						.from(opportunities)
+						.where(eq(opportunities.id, coDebtorAntesDelUpdate.opportunityId))
+						.for("update");
+				}
+
 				const filas = await tx
 					.update(coDebtors)
 					.set({
@@ -8752,6 +8811,16 @@ export const crmRouter = {
 			// transacción (el override del admin y su revalidación), así que si algo
 			// revierte, esas anotaciones tienen que irse con la escritura.
 			await auditedTransaction(async (tx) => {
+				// 🔴 Lock de SU oportunidad antes de tocar nada: el predicado del
+				// candado lee bajo snapshot y no frena una aprobación 30→40 en vuelo.
+				if (coDeudorABorrar) {
+					await tx
+						.select({ id: opportunities.id })
+						.from(opportunities)
+						.where(eq(opportunities.id, coDeudorABorrar.opportunityId))
+						.for("update");
+				}
+
 				await tx
 					.delete(creditAnalysis)
 					.where(eq(creditAnalysis.coDebtorId, input.id));

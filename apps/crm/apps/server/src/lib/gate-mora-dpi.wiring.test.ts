@@ -163,6 +163,27 @@ describe("cableado del gate de mora por DPI", () => {
 		}
 	});
 
+	/**
+	 * 🔴 En `createLead` el gate corre DESPUÉS del chequeo de duplicados. Al
+	 * revés, un DPI que ya es de un lead existente en mora devolvía el error del
+	 * gate en vez del CONFLICT con el payload que el front usa para mostrar el
+	 * lead existente, y encima pagaba un viaje a SIFCO de gusto: ahí no se está
+	 * dando de alta a nadie, esa persona ya está adentro.
+	 */
+	test("el alta revisa el duplicado ANTES de preguntarle la mora a cartera", async () => {
+		const texto = await fuente("routers/crm.ts");
+
+		const conflicto = texto.indexOf("Ya existe un lead con este DPI");
+		const primerGate = texto.indexOf("evaluarGateMoraDpi(");
+
+		expect(conflicto).toBeGreaterThan(-1);
+		expect(
+			conflicto,
+			"El CONFLICT por DPI duplicado de createLead debería quedar ANTES de su " +
+				"llamada al gate; si lo moviste, el asesor pierde el payload con el lead existente.",
+		).toBeLessThan(primerGate);
+	});
+
 	test("las rutas anónimas siguen SIN gate, que es la decisión tomada", async () => {
 		for (const relativo of SIN_GATE_A_PROPOSITO) {
 			const texto = await fuente(relativo);

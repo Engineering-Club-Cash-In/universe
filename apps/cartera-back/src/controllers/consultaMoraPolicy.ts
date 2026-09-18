@@ -295,6 +295,35 @@ export function unirNumerosCredito(
   return [...vistos];
 }
 
+export type SiguientePasoConsulta =
+  | "BUSCAR_CREDITOS"
+  | "RESPONDER_SIN_CREDITOS"
+  | "CLIENTE_NO_ENCONTRADO";
+
+/**
+ * Qué hacer una vez resueltas las fichas del DPI y los números a mirar.
+ *
+ * 🔴 Quedarse sin números NO significa que el DPI sea un desconocido. El cliente
+ * con ficha en el core pero sin un solo préstamo —o cuyos préstamos el core no
+ * devolvió porque no los tiene— es un cliente CONOCIDO y al día: su respuesta es
+ * `encontrado: true` con `SIN_MORA` y sus datos, no `CLIENTE_NO_ENCONTRADO`.
+ * Cortar ahí por "no hay números" tiraba a la basura una ficha válida y le decía
+ * al CRM que esa persona nunca fue cliente.
+ *
+ * El no-encontrado de verdad exige las dos cosas: ni ficha en el core ni un
+ * número que mirar (ni de SIFCO ni de los que aportó quien pregunta).
+ */
+export function siguientePasoConsulta(params: {
+  cantidadFichas: number;
+  cantidadNumeros: number;
+}): SiguientePasoConsulta {
+  if (params.cantidadNumeros > 0) return "BUSCAR_CREDITOS";
+
+  return params.cantidadFichas > 0
+    ? "RESPONDER_SIN_CREDITOS"
+    : "CLIENTE_NO_ENCONTRADO";
+}
+
 /** Fila de `creditos` + su mora viva, tal como la leen las dos consultas. */
 export interface FilaCreditoMora {
   credito_id: number;

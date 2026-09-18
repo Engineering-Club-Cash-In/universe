@@ -93,3 +93,50 @@ export const creacionRubroBloqueada = (
   }
   return null;
 };
+
+/**
+ * ¿Hay que impedir SUBIR el monto de un rubro que ya existe? Devuelve el motivo.
+ *
+ * El hermano de arriba cubre la creación, y su mensaje dice que los rubros ya
+ * registrados "se siguen consultando y editando" — que resultó ser media verdad.
+ * Medido contra una copia de producción, el backend re-evalúa la política de
+ * creación cuando el monto SUBE, y no cuando baja:
+ *
+ *     crédito pasa a CANCELADO     subir 500→900 RECHAZADO   bajar 500→300 ok
+ *     crédito pasa a INCOBRABLE    subir 500→900 RECHAZADO   bajar 500→300 ok
+ *     MOROSO + tipo opcional       subir 500→900 RECHAZADO   bajar 500→300 ok
+ *     MOROSO + tipo obligatorio    subir 500→900 ACEPTADO
+ *     tipo desactivado             subir 500→900 RECHAZADO
+ *
+ * Tiene su razón: subir es plata NUEVA que se le cobra al cliente, así que vale
+ * la misma regla que crear. Bajar sólo descobra, y eso no se le niega a nadie.
+ *
+ * Sin esto el administrador llena el motivo —que es obligatorio—, guarda, y recién
+ * ahí se entera con un 409. Es el mismo defecto que ya se había cerrado en la
+ * creación, con el formulario de edición todavía abierto.
+ *
+ * ⚠️ Fail-OPEN a propósito: sin datos del tipo no se bloquea nada y manda el
+ * backend. La lista de tipos puede no estar cargada, y bloquear a ciegas le
+ * impediría al admin una edición legítima — peor que dejar pasar un 409.
+ */
+export const aumentoRubroBloqueado = (
+  estado?: string | null,
+  tipo?: { obligatorio: boolean; activo: boolean } | null
+): string | null => {
+  if (tipo && !tipo.activo) {
+    return "El tipo de rubro está inactivo: no se puede aumentar el monto. Podés bajarlo o dejarlo como está.";
+  }
+  if (esEstadoTerminalRubro(estado)) {
+    return `No se puede aumentar el monto: el crédito está ${estado}. Subirlo sería cobrarle plata nueva; bajarlo sí se puede.`;
+  }
+  if (
+    tipo &&
+    !tipo.obligatorio &&
+    STATUS_SOLO_RUBRO_OBLIGATORIO.includes(
+      (estado ?? "") as (typeof STATUS_SOLO_RUBRO_OBLIGATORIO)[number]
+    )
+  ) {
+    return `El crédito está ${estado}: solo se puede aumentar el monto de rubros obligatorios. Bajarlo sí se puede.`;
+  }
+  return null;
+};

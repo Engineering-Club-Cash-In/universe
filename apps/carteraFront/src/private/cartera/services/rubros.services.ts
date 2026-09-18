@@ -134,11 +134,22 @@ export const crearTipoRubro = async (
   return data.tipo;
 };
 
+/**
+ * Devuelve la fila COMPLETA que quedó en la base, como su hermano
+ * `crearTipoRubro` — antes tiraba la respuesta y devolvía `void`.
+ *
+ * Importa desde que el PUT es parcial: el servidor conserva bien lo que otro
+ * administrador cambió, pero si el front siembra la caché con su propio
+ * formulario vuelve a pintar el valor viejo de los campos que NO tocó. Con el
+ * GET pausado o lento, el admin ve un `obligatorio` o un `nombre` que la base ya
+ * no tiene. La fila que contesta el endpoint es la única versión autoritativa.
+ */
 export const editarTipoRubro = async (
   tipo_id: number,
   payload: EditarTipoRubroPayload
-): Promise<void> => {
-  await api.put(`${API_URL}/rubros/tipos/${tipo_id}`, payload);
+): Promise<TipoRubro> => {
+  const { data } = await api.put(`${API_URL}/rubros/tipos/${tipo_id}`, payload);
+  return data.tipo;
 };
 
 /**

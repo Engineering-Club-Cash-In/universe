@@ -36,7 +36,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getApiErrorMessage } from "@/lib/apiError";
-import { creacionRubroBloqueada, estadoCreditoStyle } from "@/lib/estadoCredito";
+import { aumentoRubroBloqueado, creacionRubroBloqueada, estadoCreditoStyle } from "@/lib/estadoCredito";
 import { fmtQ, sumaQ } from "@/lib/moneda";
 import { fmtFechaGT, fmtFechaHoraGT } from "@/lib/fechaGT";
 import {
@@ -494,6 +494,7 @@ export default function RubrosCredito({
             onGuardando={setGuardando}
             key={rubroSel.rubro_id}
             rubro={rubroSel}
+            statusCredit={statusCredit}
             onVolver={volver}
             onEditado={async (guardado) => {
               // Se ESPERA antes de volver: sin el await, la lista se pintaba con
@@ -1054,11 +1055,14 @@ function VistaCrear({
 
 function VistaEditar({
   rubro,
+  statusCredit,
   onVolver,
   onEditado,
   onGuardando,
 }: {
   rubro: RubroCredito;
+  /** `creditos."statusCredit"`; si no llega, no se gatea nada y manda el backend. */
+  statusCredit?: string | null;
   onVolver: () => void;
   /** Recibe la fila que devolvió el PUT, para sembrarla en la lista. */
   onEditado: (guardado: RubroGuardado | null) => void | Promise<void>;
@@ -1094,6 +1098,19 @@ function VistaEditar({
    * monto, sigue ganando el último. Para eso haría falta un chequeo de versión
    * optimista, que es una decisión de contrato del endpoint.
    */
+  /**
+   * La variante que trae también los INACTIVOS: un tipo desactivado es
+   * justamente uno de los casos que bloquean el aumento, así que la lista de
+   * sólo-activos no sirve acá.
+   *
+   * Si no llega, `aumentoRubroBloqueado` no gatea nada y manda el backend.
+   */
+  const tiposTodos = useQuery({
+    queryKey: [QK_TIPOS, true],
+    queryFn: () => getTiposRubro(true),
+  });
+  const tipoDelRubro = tiposTodos.data?.find((t) => t.tipo_id === rubro.tipo_id);
+
   const patch = camposRealmenteEditados(
     { monto, descripcion },
     { monto: rubro.monto_original ?? 0, descripcion: rubro.descripcion ?? "" }
@@ -1131,6 +1148,18 @@ function VistaEditar({
      */
     const motivoMonto = motivoMontoNoEditable({ monto, abonado: rubro.abonado });
     if (motivoMonto) return setError(motivoMonto);
+    /**
+     * SUBIR el monto vuelve a correr la política de creación en el backend; bajarlo
+     * no. Medido contra una copia de producción: con el crédito CANCELADO,
+     * INCOBRABLE, o MOROSO con un tipo opcional, subir da 409 y bajar pasa.
+     *
+     * Sin esto el admin llena el motivo —obligatorio— y recién al guardar se
+     * entera. Es el mismo hueco que ya se cerró en la creación.
+     */
+    if (sumaQ([Number(monto) || 0]) > sumaQ([Number(rubro.monto_original) || 0])) {
+      const motivoAumento = aumentoRubroBloqueado(statusCredit, tipoDelRubro);
+      if (motivoAumento) return setError(motivoAumento);
+    }
     if (!descripcion.trim()) return setError("La descripción es obligatoria");
     if (!motivo.trim()) {
       return setError("El motivo es obligatorio: queda en el historial del rubro");
@@ -2001,7 +2030,7 @@ function VistaEditarTipo({
 
   const guardar = useMutation({
     mutationFn: () => editarTipoRubro(tipo.tipo_id, patchTipo),
-    onSuccess: async () => {
+    onSuccess: async (guardado) => {
       toast.success("Tipo de rubro actualizado");
       // Mismo defecto que al crear o borrar un tipo (ver `VistaCrearTipo`):
       // esta vista REEMPLAZA al listado, así que las dos queries de tipos
@@ -2009,10 +2038,17 @@ function VistaEditarTipo({
       // obsoletas. Volver al listado con el nombre viejo no es cosmético: si
       // el administrador reabre la fila antes del refetch, el formulario nace
       // con lo viejo y el PUT siguiente revierte esta misma edición.
+      //
+      // Y se siembra con la fila que DEVOLVIÓ el PUT, no con este formulario.
+      // Desde que el patch es parcial, el servidor conserva bien lo que otro
+      // administrador cambió — pero sembrar con el formulario propio vuelve a
+      // pintar el valor viejo de los campos que no se tocaron, y el admin ve un
+      // `obligatorio` que la base ya no tiene. La respuesta del endpoint es la
+      // única versión autoritativa.
       await sincronizarTipoEditado(queryClient, tipo.tipo_id, {
-        nombre: nombre.trim(),
-        descripcion: descripcion.trim(),
-        obligatorio,
+        nombre: guardado.nombre,
+        descripcion: guardado.descripcion ?? "",
+        obligatorio: guardado.obligatorio,
       });
       onGuardado();
     },

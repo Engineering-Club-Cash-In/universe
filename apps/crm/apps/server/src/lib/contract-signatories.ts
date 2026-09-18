@@ -93,3 +93,19 @@ export function linksPorRol(
 		additionalSigningLinks: resto.length > 0 ? resto : null,
 	};
 }
+
+/**
+ * Saca el `documentID` de WeeTrust de un link de firma ya guardado.
+ *
+ * Los contratos generados antes de que se guardara el `documentID` sólo tienen
+ * la URL, que lo lleva adentro:
+ * `https://app.weetrust.mx/signatory/{documentID}/{signatoryID}/...`
+ *
+ * Es una recuperación, no la vía normal: para los contratos nuevos el
+ * `documentID` viene del generador.
+ */
+export function documentIdDesdeLink(link: string | null): string | null {
+	if (!link) return null;
+	const m = link.match(/\/signatory\/([^/?#]+)/);
+	return m?.[1] ?? null;
+}

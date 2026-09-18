@@ -1,3 +1,4 @@
+import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -6,9 +7,13 @@ import {
 	ExternalLink,
 	FileText,
 	Loader2,
+	Mail,
+	RefreshCw,
+	Search,
 	Trash2,
 } from "lucide-react";
 import { useState } from "react";
+import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import { toast } from "sonner";
 import {
 	AlertDialog,
@@ -29,13 +34,13 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
+import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import {
 	type FirmanteDeContrato,
 	firmantesEnFicha,
 } from "@/lib/contract-signers-display";
-import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
+import { client } from "@/utils/orpc";
 import { OpportunitySelector } from "./OpportunitySelector";
 
 // Contract types mapping
@@ -122,6 +127,55 @@ export function ContractCard({
 	// rotulaba como "Representante" al que estuviera segundo, que con cofirmante
 	// era el cofirmante.
 	const firmantes = firmantesEnFicha(signatories, contract);
+
+	// Estado que devolvió WeeTrust en la última consulta, para no obligar a
+	// jurídico a entrar al portal de WeeTrust a ver quién falta.
+	const [estadoWeeTrust, setEstadoWeeTrust] = useState<{
+		status: string;
+		signatories: Array<{
+			emailID: string;
+			name: string;
+			isSigned: boolean;
+			expiry: number | null;
+		}>;
+	} | null>(null);
+
+	const consultarEstado = useMutation({
+		mutationFn: () =>
+			client.getContractSigningStatus({ contractId: contract.id }),
+		onSuccess: (data) => {
+			setEstadoWeeTrust(data);
+			const firmados = data.signatories.filter((f) => f.isSigned).length;
+			toast.success(
+				`${firmados} de ${data.signatories.length} firmaron (${data.status})`,
+			);
+			onUpdate?.();
+		},
+		onError: (error: Error) => toast.error(error.message),
+	});
+
+	const regenerarEnlaces = useMutation({
+		mutationFn: () =>
+			client.refreshContractSigningLinks({ contractId: contract.id }),
+		onSuccess: (data) => {
+			setEstadoWeeTrust(data);
+			toast.success(data.message);
+			onUpdate?.();
+		},
+		onError: (error: Error) => toast.error(error.message),
+	});
+
+	const reenviarCorreo = useMutation({
+		mutationFn: () =>
+			client.resendContractSigningEmails({ contractId: contract.id }),
+		onSuccess: (data) => toast.success(data.message),
+		onError: (error: Error) => toast.error(error.message),
+	});
+
+	const ocupado =
+		consultarEstado.isPending ||
+		regenerarEnlaces.isPending ||
+		reenviarCorreo.isPending;
 
 	const copyToClipboard = (text: string, label: string) => {
 		navigator.clipboard.writeText(text);
@@ -279,6 +333,95 @@ export function ContractCard({
 								)}
 							</div>
 						))}
+					</div>
+				)}
+
+				{/* Estado de firma y reintentos, sin salir del CRM */}
+				{!firmaEnPapel && firmantes.length > 0 && (
+					<div className="space-y-2 rounded-lg border border-border p-3">
+						<div className="flex flex-wrap gap-2">
+							<Button
+								size="sm"
+								variant="outline"
+								className="h-7"
+								disabled={ocupado}
+								onClick={() => consultarEstado.mutate()}
+							>
+								{consultarEstado.isPending ? (
+									<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+								) : (
+									<Search className="mr-1 h-3 w-3" />
+								)}
+								Ver estado
+							</Button>
+
+							{canCreateLegal && (
+								<>
+									<Button
+										size="sm"
+										variant="outline"
+										className="h-7"
+										disabled={ocupado}
+										onClick={() => regenerarEnlaces.mutate()}
+										title="Emite enlaces nuevos para quienes aún no firman. Es el mismo documento; quien ya firmó sigue firmado."
+									>
+										{regenerarEnlaces.isPending ? (
+											<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+										) : (
+											<RefreshCw className="mr-1 h-3 w-3" />
+										)}
+										Regenerar enlaces
+									</Button>
+
+									<Button
+										size="sm"
+										variant="outline"
+										className="h-7"
+										disabled={ocupado}
+										onClick={() => reenviarCorreo.mutate()}
+										title="Reenvía el correo de WeeTrust a los firmantes pendientes."
+									>
+										{reenviarCorreo.isPending ? (
+											<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+										) : (
+											<Mail className="mr-1 h-3 w-3" />
+										)}
+										Reenviar correo
+									</Button>
+								</>
+							)}
+						</div>
+
+						{estadoWeeTrust && (
+							<div className="space-y-1">
+								<p className="text-muted-foreground text-xs">
+									Estado en WeeTrust: {estadoWeeTrust.status}
+								</p>
+								{estadoWeeTrust.signatories.map((firmante) => (
+									<p
+										key={firmante.emailID}
+										className="flex items-center justify-between gap-2 text-xs"
+									>
+										<span className="truncate">
+											{firmante.name || firmante.emailID}
+										</span>
+										<span
+											className={
+												firmante.isSigned
+													? "shrink-0 text-green-600 dark:text-green-400"
+													: "shrink-0 text-muted-foreground"
+											}
+										>
+											{firmante.isSigned ? "firmado" : "pendiente"}
+											{!firmante.isSigned &&
+												firmante.expiry &&
+												firmante.expiry < Date.now() &&
+												" · link vencido"}
+										</span>
+									</p>
+								))}
+							</div>
+						)}
 					</div>
 				)}
 

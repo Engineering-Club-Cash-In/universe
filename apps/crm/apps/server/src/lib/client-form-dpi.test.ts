@@ -19,10 +19,7 @@ const OTRO_DPI = "1234567890101";
 
 describe("DPI del formulario público contra el participante del token", () => {
 	test("🔴 un DPI distinto al del participante se rechaza", () => {
-		const resultado = verificarDpiDelFormulario(
-			DPI_DEL_PARTICIPANTE,
-			OTRO_DPI,
-		);
+		const resultado = verificarDpiDelFormulario(DPI_DEL_PARTICIPANTE, OTRO_DPI);
 
 		expect(resultado.coincide).toBe(false);
 		expect(resultado).toEqual({
@@ -65,9 +62,9 @@ describe("DPI del formulario público contra el participante del token", () => {
 	});
 
 	test("si el formulario no manda DPI, no hay identidad que contrastar", () => {
-		expect(
-			verificarDpiDelFormulario(DPI_DEL_PARTICIPANTE, undefined),
-		).toEqual({ coincide: true });
+		expect(verificarDpiDelFormulario(DPI_DEL_PARTICIPANTE, undefined)).toEqual({
+			coincide: true,
+		});
 		expect(verificarDpiDelFormulario(DPI_DEL_PARTICIPANTE, "")).toEqual({
 			coincide: true,
 		});

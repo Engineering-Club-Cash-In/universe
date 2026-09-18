@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { sql, type SQL } from "drizzle-orm";
+import { type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { opportunities } from "../db/schema";
 import {

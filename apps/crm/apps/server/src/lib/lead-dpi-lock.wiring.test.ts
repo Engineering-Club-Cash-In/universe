@@ -162,10 +162,7 @@ describe("cableado del candado de DPI", () => {
 	});
 
 	test("en el portal el candado NO vive dentro de la guarda que descarta los vacíos", () => {
-		const texto = readFileSync(
-			join(SRC, "controllers/portal-lead.ts"),
-			"utf8",
-		);
+		const texto = readFileSync(join(SRC, "controllers/portal-lead.ts"), "utf8");
 
 		const posCandado = texto.indexOf(LLAMADA_CANDADO);
 		expect(posCandado).toBeGreaterThan(-1);

@@ -16,17 +16,15 @@ const base: OpportunityAssignmentInput = {
 };
 
 describe("getMissingOpportunityAssignments", () => {
-	test("vehículo nuevo sin nada asignado pide empresa y vendedor", () => {
-		expect(getMissingOpportunityAssignments(base)).toEqual([
-			"empresa",
-			"vendedor",
-		]);
+	test("vehículo nuevo sin nada asignado solo pide la agencia", () => {
+		// Un carro nuevo lo vende la agencia: el contrato no usa vendedor
+		expect(getMissingOpportunityAssignments(base)).toEqual(["empresa"]);
 	});
 
-	test("vehículo nuevo con empresa solo pide vendedor", () => {
+	test("vehículo nuevo con empresa no reclama vendedor", () => {
 		expect(
 			getMissingOpportunityAssignments({ ...base, companyId: "c1" }),
-		).toEqual(["vendedor"]);
+		).toEqual([]);
 	});
 
 	test("vehículo usado nunca pide empresa", () => {
@@ -66,7 +64,7 @@ describe("getMissingOpportunityAssignments", () => {
 		expect(
 			getMissingOpportunityAssignments({
 				...base,
-				companyId: "c1",
+				vehicleIsNew: false,
 				vendorId: null,
 			}),
 		).toEqual(["vendedor"]);
@@ -101,10 +99,13 @@ describe("getMissingOpportunityAssignments", () => {
 		expect(
 			getMissingOpportunityAssignments({
 				...base,
-				companyId: "",
+				vehicleIsNew: false,
 				vendorId: "",
 			}),
-		).toEqual(["empresa", "vendedor"]);
+		).toEqual(["vendedor"]);
+		expect(
+			getMissingOpportunityAssignments({ ...base, companyId: "" }),
+		).toEqual(["empresa"]);
 	});
 });
 

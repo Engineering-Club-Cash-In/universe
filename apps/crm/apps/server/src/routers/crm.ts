@@ -730,12 +730,24 @@ export const crmRouter = {
 				throw new ORPCError("FORBIDDEN", { message: wonLockError });
 			}
 
-			// La lectura de arriba pudo quedar vieja: si closeOpportunity marca la
-			// oportunidad como ganada en el medio, el predicado lo vuelve a exigir
-			// dentro de la misma sentencia.
+			// Las lecturas de arriba pudieron quedar viejas, así que las dos
+			// condiciones se repiten en el predicado: Postgres las re-evalúa
+			// después de esperar a la escritura rival. Si closeOpportunity la marca
+			// ganada, o un supervisor se la reasigna a otro asesor, el cambio ya no
+			// entra.
 			const exigirNoGanada =
 				cambiosCongelados.length > 0 &&
 				!PERMISSIONS.canAccessAdmin(context.userRole ?? "");
+			const soloPorSerElAsesor = !PERMISSIONS.canAccessAnalysis(
+				context.userRole,
+			);
+			const condiciones = [eq(opportunities.id, input.opportunityId)];
+			if (exigirNoGanada) {
+				condiciones.push(not(eq(opportunities.status, "won")));
+			}
+			if (soloPorSerElAsesor) {
+				condiciones.push(eq(opportunities.assignedTo, context.userId));
+			}
 			const [actualizada] = await db
 				.update(opportunities)
 				.set({
@@ -743,20 +755,28 @@ export const crmRouter = {
 					...(input.companyId !== undefined && { companyId: input.companyId }),
 					updatedAt: new Date(),
 				})
-				.where(
-					exigirNoGanada
-						? and(
-								eq(opportunities.id, input.opportunityId),
-								not(eq(opportunities.status, "won")),
-							)
-						: eq(opportunities.id, input.opportunityId),
-				)
+				.where(and(...condiciones))
 				.returning({
 					id: opportunities.id,
 					vendorId: opportunities.vendorId,
 					companyId: opportunities.companyId,
 				});
 			if (!actualizada) {
+				// Distinguir el motivo: la fila cambió entre la lectura y el UPDATE
+				const [ahora] = await db
+					.select({
+						status: opportunities.status,
+						assignedTo: opportunities.assignedTo,
+					})
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1);
+				if (soloPorSerElAsesor && ahora?.assignedTo !== context.userId) {
+					throw new ORPCError("FORBIDDEN", {
+						message:
+							"La oportunidad se reasignó a otra persona mientras editabas",
+					});
+				}
 				throw new ORPCError("FORBIDDEN", {
 					message: buildWonOpportunityFrozenFieldError(cambiosCongelados),
 				});
@@ -784,17 +804,37 @@ export const crmRouter = {
 					message: "No tienes permiso para editar empresas",
 				});
 			}
+			// Solo se completa lo que está vacío: el nombre legal es compartido por
+			// todas las oportunidades de esa agencia, así que si otro lo guardó
+			// mientras esta pantalla estaba abierta, no se le pisa con lo viejo.
 			const [empresa] = await db
 				.update(companies)
 				.set({ razonSocial: input.razonSocial, updatedAt: new Date() })
-				.where(eq(companies.id, input.id))
+				.where(
+					and(
+						eq(companies.id, input.id),
+						sql`coalesce(btrim(${companies.razonSocial}), '') = ''`,
+					),
+				)
 				.returning({
 					id: companies.id,
 					name: companies.name,
 					razonSocial: companies.razonSocial,
 				});
 			if (!empresa) {
-				throw new ORPCError("NOT_FOUND", { message: "Empresa no encontrada" });
+				const [actual] = await db
+					.select({ razonSocial: companies.razonSocial })
+					.from(companies)
+					.where(eq(companies.id, input.id))
+					.limit(1);
+				if (!actual) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Empresa no encontrada",
+					});
+				}
+				throw new ORPCError("CONFLICT", {
+					message: `Otra persona ya guardó la razón social de esta empresa ("${actual.razonSocial}"). Recarga para verla.`,
+				});
 			}
 			return empresa;
 		}),

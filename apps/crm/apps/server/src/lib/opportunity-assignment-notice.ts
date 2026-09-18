@@ -51,8 +51,9 @@ export function getMissingOpportunityAssignments(
 	if (input.vehicleIsNew === true && !input.companyId) falta.push("empresa");
 	// Solo cuenta el vendedor de la oportunidad: `vehicles.vendor_id` es de un
 	// diseño viejo, nadie lo escribe y el vehículo puede compartirse entre
-	// varias oportunidades.
-	if (!input.vendorId) falta.push("vendedor");
+	// varias oportunidades. Y solo aplica al usado: un carro nuevo lo vende la
+	// agencia, y el contrato ni siquiera mira al vendedor en ese caso.
+	if (input.vehicleIsNew !== true && !input.vendorId) falta.push("vendedor");
 
 	return falta;
 }

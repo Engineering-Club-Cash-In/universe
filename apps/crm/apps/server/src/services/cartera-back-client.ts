@@ -188,10 +188,27 @@ export class CarteraBackHttpError extends Error {
 const CONSULTA_MORA_TIMEOUT_DEFAULT_MS = 12000;
 
 /**
+ * Techo del valor configurable: 10 minutos.
+ *
+ * 🔴 No es una preferencia de producto sino una cota técnica.
+ * `AbortSignal.timeout` acepta como máximo un entero sin signo de 64 bits
+ * (`2^64 - 1` ms); pasado eso lanza `TypeError`. Un `1e30` en la variable de
+ * entorno atraviesa "finito y positivo" y hace estallar TODAS las llamadas del
+ * gate en runtime, antes de cualquier fail-closed. Y un presupuesto de minutos
+ * ya no es un timeout para alguien esperando en pantalla: cualquier cosa por
+ * encima de este techo es una errata, no una intención.
+ */
+const CONSULTA_MORA_TIMEOUT_MAX_MS = 600000;
+
+/**
  * 🔴 Se valida que sea finito y positivo, no solo `parseInt`. Un valor no
  * numérico en la variable de entorno daba `NaN`, y `AbortSignal.timeout(NaN)`
  * lanza: una errata en la configuración tumbaba los ocho puntos del gate a la
  * vez, y lo hacía en el arranque de cada llamada, sin pasar por el fail-closed.
+ *
+ * Por la misma razón se valida el techo (ver `CONSULTA_MORA_TIMEOUT_MAX_MS`):
+ * un número absurdamente grande pasaba la validación de arriba y llegaba igual
+ * de lejos.
  */
 export function leerTimeoutConsultaMora(crudo: string | undefined): number {
 	if (crudo === undefined || crudo.trim() === "") {
@@ -206,7 +223,55 @@ export function leerTimeoutConsultaMora(crudo: string | undefined): number {
 		return CONSULTA_MORA_TIMEOUT_DEFAULT_MS;
 	}
 
+	if (valor > CONSULTA_MORA_TIMEOUT_MAX_MS) {
+		console.warn(
+			`[cartera-back] CARTERA_BACK_CONSULTA_MORA_TIMEOUT fuera de rango (${crudo}; máximo ${CONSULTA_MORA_TIMEOUT_MAX_MS}ms); se usa ${CONSULTA_MORA_TIMEOUT_DEFAULT_MS}ms`,
+		);
+		return CONSULTA_MORA_TIMEOUT_DEFAULT_MS;
+	}
+
 	return valor;
+}
+
+/**
+ * Corre `tarea` con un presupuesto que cubre TODO lo que hay entre la llamada y
+ * la respuesta, autenticación incluida.
+ *
+ * 🔴 El `AbortSignal.timeout` de `request()` NO alcanza: se arma DESPUÉS de
+ * esperar el token, y `getCarteraAccessToken()` no recibe señal alguna. Con el
+ * auth de cartera colgado, la promesa de la consulta quedaba pendiente para
+ * siempre —el reloj del fetch nunca llegaba a arrancar— y el asesor se quedaba
+ * con la pantalla girando sin fail-closed que lo rescatara. Este presupuesto
+ * envuelve la llamada completa, así que el techo se respeta pase lo que pase.
+ *
+ * El `clearTimeout` en el `finally` es lo que evita dejar el temporizador vivo
+ * cuando la tarea gana la carrera. La tarea perdedora sigue su curso en
+ * segundo plano (no hay cómo cancelar el auth); lo que no sigue es la espera.
+ */
+export async function conPresupuestoConsultaMora<T>(
+	presupuestoMs: number,
+	tarea: () => Promise<T>,
+): Promise<T> {
+	let temporizador: ReturnType<typeof setTimeout> | undefined;
+
+	const vencimiento = new Promise<never>((_, rechazar) => {
+		temporizador = setTimeout(() => {
+			rechazar(
+				new ConsultaMoraNoDisponibleError(
+					`La consulta de mora no respondió en ${presupuestoMs}ms`,
+					// No hay fallo original que guardar: nadie falló, se acabó el
+					// tiempo. El mensaje ya dice todo lo que el log necesita.
+					null,
+				),
+			);
+		}, presupuestoMs);
+	});
+
+	try {
+		return await Promise.race([tarea(), vencimiento]);
+	} finally {
+		clearTimeout(temporizador);
+	}
 }
 
 const CONSULTA_MORA_TIMEOUT_MS = leerTimeoutConsultaMora(
@@ -1525,14 +1590,25 @@ export class CarteraBackClient {
 
 		let crudo: unknown;
 		try {
-			crudo = await this.request<unknown>(
-				"/clientes/consulta-mora",
-				{ method: "POST", body: JSON.stringify(cuerpo) },
-				false, // sin caché (ver arriba)
-				CONSULTA_MORA_TIMEOUT_MS,
-				false, // un solo intento (ver arriba)
+			// El presupuesto envuelve la llamada COMPLETA y no solo el fetch: la
+			// autenticación corre antes de que `request()` arme su AbortSignal y no
+			// tiene señal propia. Ver `conPresupuestoConsultaMora`.
+			crudo = await conPresupuestoConsultaMora(CONSULTA_MORA_TIMEOUT_MS, () =>
+				this.request<unknown>(
+					"/clientes/consulta-mora",
+					{ method: "POST", body: JSON.stringify(cuerpo) },
+					false, // sin caché (ver arriba)
+					CONSULTA_MORA_TIMEOUT_MS,
+					false, // un solo intento (ver arriba)
+				),
 			);
 		} catch (error) {
+			// El vencimiento del presupuesto ya llega con el motivo correcto; no se
+			// vuelve a envolver para no anidar el mismo mensaje dos veces.
+			if (error instanceof ConsultaMoraNoDisponibleError) {
+				throw error;
+			}
+
 			throw new ConsultaMoraNoDisponibleError(
 				`No se pudo consultar la mora en cartera: ${
 					error instanceof Error ? error.message : String(error)

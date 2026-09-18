@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import {
 	CarteraBackClient,
+	conPresupuestoConsultaMora,
 	leerTimeoutConsultaMora,
 } from "./cartera-back-client";
 
@@ -206,4 +207,38 @@ test("un timeout mal configurado cae al default en vez de dar NaN", () => {
 test("un timeout válido se respeta", () => {
 	expect(leerTimeoutConsultaMora("8000")).toBe(8000);
 	expect(leerTimeoutConsultaMora("  8000  ")).toBe(8000);
+});
+
+/**
+ * "Finito y positivo" no alcanzaba: `AbortSignal.timeout` tiene un techo y
+ * lanza `TypeError` por encima de él, así que un número absurdo pasaba la
+ * validación y volvía a tumbar todas las llamadas del gate en runtime. Diez
+ * minutos además ya no es un timeout para alguien esperando en pantalla.
+ */
+test("un timeout absurdamente grande también cae al default", () => {
+	expect(leerTimeoutConsultaMora("1e30")).toBe(12000);
+	expect(leerTimeoutConsultaMora("99999999999999999999")).toBe(12000);
+	expect(leerTimeoutConsultaMora("600001")).toBe(12000);
+	expect(leerTimeoutConsultaMora("600000")).toBe(600000);
+});
+
+/**
+ * 🔴 Fail-closed, camino 3: el auth de cartera colgado. El `AbortSignal` de
+ * `request()` se arma DESPUÉS de esperar el token, así que con la
+ * autenticación pendiente el reloj del fetch no arrancaba nunca y la consulta
+ * quedaba viva para siempre — sin veredicto y sin error que el gate pudiera
+ * traducir. El presupuesto envuelve la llamada completa.
+ */
+test("el presupuesto corta aunque la tarea nunca resuelva (auth colgado)", async () => {
+	const nuncaResuelve = () => new Promise<never>(() => {});
+
+	await expect(
+		conPresupuestoConsultaMora(20, nuncaResuelve),
+	).rejects.toBeInstanceOf(ConsultaMoraNoDisponibleError);
+});
+
+test("el presupuesto no estorba a la tarea que responde a tiempo", async () => {
+	await expect(
+		conPresupuestoConsultaMora(1000, async () => "listo"),
+	).resolves.toBe("listo");
 });

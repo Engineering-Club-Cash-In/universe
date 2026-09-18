@@ -41,3 +41,33 @@ export function camposRealmenteEditados(
 
   return patch;
 }
+
+/**
+ * Lo mismo para el TIPO de rubro, que tenía el mismo formulario completo.
+ *
+ * Acá el campo que más duele es `obligatorio`, porque es un booleano y se
+ * reenvía sin que nadie lo mire: A marca el tipo como obligatorio, B —con el
+ * formulario abierto desde antes— cambia sólo la descripción y reenvía su
+ * `obligatorio: false`. Lo de A se deshace, y en la pantalla de B nada delata
+ * que tocó esa casilla.
+ *
+ * Vaciar la descripción SÍ se manda, que es cómo se borra: la cadena vacía
+ * contra una descripción que existía es un cambio real. Lo que no cuenta es
+ * pasar de `null` a "" — ahí no había nada y sigue sin haberlo.
+ */
+export function camposTipoEditados(
+  actual: { nombre: string; descripcion: string; obligatorio: boolean },
+  original: { nombre: string; descripcion: string | null; obligatorio: boolean }
+): { nombre?: string; descripcion?: string; obligatorio?: boolean } {
+  const patch: { nombre?: string; descripcion?: string; obligatorio?: boolean } = {};
+
+  const nombreActual = actual.nombre.trim();
+  if (nombreActual !== original.nombre.trim()) patch.nombre = nombreActual;
+
+  const descActual = actual.descripcion.trim();
+  if (descActual !== (original.descripcion ?? "").trim()) patch.descripcion = descActual;
+
+  if (actual.obligatorio !== original.obligatorio) patch.obligatorio = actual.obligatorio;
+
+  return patch;
+}

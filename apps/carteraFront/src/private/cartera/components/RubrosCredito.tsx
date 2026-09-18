@@ -57,7 +57,7 @@ import {
 import { ajustarApertura, type SesionRubros } from "./rubrosApertura";
 import { motivoTipoNoCobrable } from "./rubrosTiposOfrecibles";
 import { motivoMontoNoEditable, montoQuedaEnCeroAlCentavo } from "./rubrosEdicionMonto";
-import { camposRealmenteEditados } from "./rubrosCamposEditados";
+import { camposRealmenteEditados, camposTipoEditados } from "./rubrosCamposEditados";
 import {
   QK_RUBROS,
   sincronizarRubroAnulado,
@@ -1982,16 +1982,25 @@ function VistaEditarTipo({
   const [obligatorio, setObligatorio] = useState(tipo.obligatorio);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Igual que el editor de rubros: viaja sólo lo que se tocó.
+   *
+   * Acá el campo que más duele es `obligatorio`, porque es un booleano y se
+   * reenviaba sin que nadie lo mirara: A marca el tipo como obligatorio, B —con
+   * el formulario abierto desde antes— cambia sólo la descripción y reenvía su
+   * `obligatorio: false`. Lo de A se deshacía, y en la pantalla de B nada
+   * delataba que tocó esa casilla.
+   *
+   * Vaciar la descripción se sigue mandando, que es cómo se borra: la cadena
+   * vacía contra una descripción que existía es un cambio real.
+   */
+  const patchTipo = camposTipoEditados(
+    { nombre, descripcion, obligatorio },
+    { nombre: tipo.nombre, descripcion: tipo.descripcion ?? null, obligatorio: tipo.obligatorio }
+  );
+
   const guardar = useMutation({
-    mutationFn: () =>
-      editarTipoRubro(tipo.tipo_id, {
-        nombre: nombre.trim(),
-        // Vaciar el campo tiene que poder borrar la descripción, así que la
-        // cadena vacía se manda igual —a diferencia de la creación, donde
-        // omitirla es lo mismo que no tenerla—.
-        descripcion: descripcion.trim(),
-        obligatorio,
-      }),
+    mutationFn: () => editarTipoRubro(tipo.tipo_id, patchTipo),
     onSuccess: async () => {
       toast.success("Tipo de rubro actualizado");
       // Mismo defecto que al crear o borrar un tipo (ver `VistaCrearTipo`):
@@ -2017,6 +2026,10 @@ function VistaEditarTipo({
   const submit = () => {
     setError(null);
     if (!nombre.trim()) return setError("El nombre del tipo es obligatorio");
+    // Sin cambios no se manda: igual que en el editor de rubros.
+    if (Object.keys(patchTipo).length === 0) {
+      return setError("No cambiaste nada");
+    }
     guardar.mutate();
   };
 

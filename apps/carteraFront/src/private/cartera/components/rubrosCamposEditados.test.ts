@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { camposRealmenteEditados } from "./rubrosCamposEditados";
+import { camposRealmenteEditados, camposTipoEditados } from "./rubrosCamposEditados";
 
 describe("camposRealmenteEditados", () => {
   const original = { monto: "500.00", descripcion: "Placas 2026" };
@@ -41,6 +41,46 @@ describe("camposRealmenteEditados", () => {
 
   it("los espacios alrededor de la descripción tampoco son una edición", () => {
     const r = camposRealmenteEditados({ monto: "500.00", descripcion: "  Placas 2026  " }, original);
+    expect(r.descripcion).toBeUndefined();
+  });
+});
+
+describe("camposTipoEditados", () => {
+  const original = { nombre: "Placas", descripcion: "Renovación anual", obligatorio: true };
+
+  it("🔴 si sólo cambió la descripción, `obligatorio` NO se manda", () => {
+    // A marca el tipo como obligatorio; B, con el formulario abierto desde antes,
+    // cambia sólo la descripción y reenvía su `obligatorio: false`. Mandando el
+    // formulario entero, B deshace lo de A sin tocar ese campo.
+    const r = camposTipoEditados(
+      { nombre: "Placas", descripcion: "Otra cosa", obligatorio: false },
+      { ...original, obligatorio: false }
+    );
+    expect(r.obligatorio).toBeUndefined();
+    expect(r.descripcion).toBe("Otra cosa");
+    expect(r.nombre).toBeUndefined();
+  });
+
+  it("vaciar la descripción SÍ se manda: es cómo se borra", () => {
+    const r = camposTipoEditados({ nombre: "Placas", descripcion: "", obligatorio: true }, original);
+    expect(r.descripcion).toBe("");
+  });
+
+  it("si de verdad cambió `obligatorio`, va", () => {
+    const r = camposTipoEditados({ nombre: "Placas", descripcion: "Renovación anual", obligatorio: false }, original);
+    expect(r.obligatorio).toBe(false);
+  });
+
+  it("si no cambió nada, no va nada", () => {
+    const r = camposTipoEditados({ nombre: "  Placas  ", descripcion: "Renovación anual", obligatorio: true }, original);
+    expect(Object.keys(r)).toHaveLength(0);
+  });
+
+  it("una descripción que era null y sigue vacía no es una edición", () => {
+    const r = camposTipoEditados(
+      { nombre: "Placas", descripcion: "", obligatorio: true },
+      { nombre: "Placas", descripcion: null, obligatorio: true }
+    );
     expect(r.descripcion).toBeUndefined();
   });
 });

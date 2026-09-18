@@ -40,7 +40,12 @@ import {
 import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
-import { PARTNER_AUTH_BASE_PATH, partnerAuth } from "./lib/partner-auth";
+import {
+	PARTNER_AUTH_BASE_PATH,
+	PARTNER_CHANGE_PASSWORD_PATH,
+	partnerAuth,
+} from "./lib/partner-auth";
+import { partnerAuthLimiter } from "./lib/rate-limit";
 import { PERMISSIONS } from "./lib/roles";
 import {
 	appRouter,
@@ -175,9 +180,27 @@ app.on(["POST", "GET"], "/api/auth/**", async (c) => {
 });
 
 // Auth de socios (predios/agencias): instancia aparte, cookie aparte.
-app.on(["POST", "GET"], `${PARTNER_AUTH_BASE_PATH}/**`, (c) =>
-	partnerAuth.handler(c.req.raw),
-);
+app.on(["POST", "GET"], `${PARTNER_AUTH_BASE_PATH}/**`, async (c) => {
+	// Rate limit solo en sign-in y change-password: sin esto quedan abiertos a
+	// fuerza bruta contra la cuenta de otro socio (suelen arrancar con
+	// contraseña temporal). Se aplica adentro del mismo handler, no como
+	// `app.use()` en un patrón aparte, para no registrar dos rutas que se
+	// superponen con este mismo prefijo. El procedure oRPC
+	// `changePartnerPassword` (tracker.ts) es el camino real de la pantalla de
+	// cambio de contraseña y nunca pasa por acá — usa el mismo `partnerAuthLimiter`
+	// con la misma clave, así comparten cupo en vez de tener uno cada uno.
+	const rutaConLimite =
+		c.req.method === "POST" &&
+		(c.req.path === `${PARTNER_AUTH_BASE_PATH}/sign-in/email` ||
+			c.req.path === PARTNER_CHANGE_PASSWORD_PATH);
+
+	if (rutaConLimite) {
+		const bloqueo = await partnerAuthLimiter.middleware(c, async () => {});
+		if (bloqueo) return bloqueo;
+	}
+
+	return partnerAuth.handler(c.req.raw);
+});
 
 // External contracts endpoint (requires service account authentication)
 app.route("/api/contracts/external", externalContractsRouter);

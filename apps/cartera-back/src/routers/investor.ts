@@ -1,5 +1,6 @@
 // routes/inversionistas.ts
 import { Elysia, t } from "elysia";
+import { exitInvestorHandler } from "../controllers/exitInvestorHandler";
 import {
   getInvestors,
   insertInvestor,
@@ -9,7 +10,6 @@ import {
   liquidateByInvestorSchema,
   updateInvestor,
   updateInvestorStatus,
-  exitInvestor,
   resumenGlobalInversionistas,
   resumenGlobalLiquidaciones,
   resumenTransferencias,
@@ -401,11 +401,17 @@ export const inversionistasRouter = new Elysia()
   )
   .post(
     "/investor/exit",
-    exitInvestor,
+    exitInvestorHandler,
     {
       body: t.Object({
         inversionista_id: t.Number({ minimum: 1 }),
         creditos: t.Array(t.Number({ minimum: 1 }), { minItems: 1 }),
+        // Opcional: cuando se pasa "devolucion_verificado", el handler exige
+        // monto_aportado==0 en el espejo antes de mover cada crédito a CUBE
+        // (ver guard en exitInvestorHandler.ts). Sin este campo el endpoint
+        // sigue siendo la salida TOTAL de un inversionista, que transfiere
+        // saldo != 0 a propósito.
+        motivo: t.Optional(t.Literal("devolucion_verificado")),
       }),
       detail: {
         summary: "Saca a un inversionista de los créditos indicados (CUBE absorbe) y lo marca como inactivo",
@@ -415,7 +421,9 @@ export const inversionistasRouter = new Elysia()
           "YA está, los campos numéricos del row del inversionista se suman al row de " +
           "CUBE y el row del inversionista se elimina. Lo mismo en el espejo, dejando " +
           "status='completado'. Al final, el inversionista pasa a status='inactivo' y " +
-          "se envía correo de notificación a la lista hardcodeada.",
+          "se envía correo de notificación a la lista hardcodeada. Si con esto el " +
+          "crédito ya no tiene inversionistas fuera de CUBE en la tabla padre y estaba " +
+          "en devolución (estado_devolucion='VERIFICADO'), se marca COMPLETADO.",
         tags: ["Inversionistas"],
       },
     }

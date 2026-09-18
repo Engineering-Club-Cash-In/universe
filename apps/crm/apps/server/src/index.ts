@@ -1253,74 +1253,96 @@ const esquemaSupervisionPagaloHttp = z.object({
 // forma de que carteraFront los vea. Servidor-a-servidor con API key: quien
 // autoriza al usuario final es cartera-back (solo ADMIN/CONTA), por eso acá
 // no hay recorte por pool — el llamador ya viene autorizado a ver todo.
+//
+// GET: uso histórico, sin sifcosPermitidos (ni cartera-back ni carteraFront
+// lo mandan). POST: el mismo cartera-back, cuando SÍ reenvía el scope que le
+// llegó del proxy de exportación del CRM — va en el body, no en la query
+// string, porque un pool puede tener cientos/miles de SIFCOs (ver el mismo
+// criterio en /api/pagalo/supervision/{excel,pdf}).
+async function handlerCarteraPagaloSupervision(
+	c: HonoContext,
+	sifcosPermitidosBody: string | undefined,
+) {
+	const listaCsv = (valor: string | undefined) =>
+		valor
+			?.split(",")
+			.map((item) => item.trim())
+			.filter(Boolean);
+
+	const parseado = esquemaSupervisionPagaloHttp.safeParse({
+		estados: listaCsv(c.req.query("estados")),
+		problemasLink: listaCsv(c.req.query("problemasLink")),
+		soloHuerfanos: c.req.query("soloHuerfanos") === "true" || undefined,
+		antiguedadMinDias: c.req.query("antiguedadMinDias")
+			? Number(c.req.query("antiguedadMinDias"))
+			: undefined,
+		numeroSifco: c.req.query("numeroSifco") || undefined,
+		fechaDesde: c.req.query("fechaDesde") || undefined,
+		fechaHasta: c.req.query("fechaHasta") || undefined,
+		sortBy: c.req.query("sortBy") ?? undefined,
+		sortDir: c.req.query("sortDir") ?? undefined,
+		// Ausente = undefined para que mande el default del esquema, en vez de
+		// que cada capa invente el suyo: cartera-back resolvía el ausente como
+		// false y acá como true, y el mismo pedido devolvía 18 grupos o 0.
+		soloProblematicos: c.req.query("soloProblematicos")
+			? c.req.query("soloProblematicos") === "true"
+			: undefined,
+		limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
+		offset: c.req.query("offset") ? Number(c.req.query("offset")) : undefined,
+	});
+
+	if (!parseado.success) {
+		return c.json(
+			{
+				success: false,
+				error: "Parámetros inválidos",
+				detalle: parseado.error.issues,
+			},
+			400,
+		);
+	}
+
+	// Ausente = null = sin recorte (llamada server-a-server ya autorizada,
+	// caso histórico). Presente = el llamador (el propio server del CRM,
+	// resolviendo scope de un usuario con permisos acotados) ya decidió el
+	// universo exacto de SIFCOs — nunca confiar en un scope vacío como "sin
+	// recorte": una lista vacía != sin parámetro.
+	const sifcosCsv = listaCsv(sifcosPermitidosBody ?? c.req.query("sifcosPermitidos"));
+	const sifcosPermitidos =
+		(sifcosPermitidosBody ?? c.req.query("sifcosPermitidos")) !== undefined
+			? new Set(sifcosCsv ?? [])
+			: null;
+
+	try {
+		const resultado = await consultarSupervisionPagalo(parseado.data, {
+			sifcosPermitidos,
+		});
+		return c.json({ success: true, ...resultado });
+	} catch (error) {
+		console.error("[Págalo/cartera] Error consultando la bandeja:", error);
+		return c.json(
+			{ success: false, error: "Error consultando la supervisión Págalo" },
+			500,
+		);
+	}
+}
+
 app.get(
 	"/api/cartera/pagalo/supervision",
 	autenticarNotificacionesCarteraBack,
+	(c) => handlerCarteraPagaloSupervision(c, undefined),
+);
+app.post(
+	"/api/cartera/pagalo/supervision",
+	autenticarNotificacionesCarteraBack,
 	async (c) => {
-		const listaCsv = (valor: string | undefined) =>
-			valor
-				?.split(",")
-				.map((item) => item.trim())
-				.filter(Boolean);
-
-		const parseado = esquemaSupervisionPagaloHttp.safeParse({
-			estados: listaCsv(c.req.query("estados")),
-			problemasLink: listaCsv(c.req.query("problemasLink")),
-			soloHuerfanos: c.req.query("soloHuerfanos") === "true" || undefined,
-			antiguedadMinDias: c.req.query("antiguedadMinDias")
-				? Number(c.req.query("antiguedadMinDias"))
-				: undefined,
-			numeroSifco: c.req.query("numeroSifco") || undefined,
-			fechaDesde: c.req.query("fechaDesde") || undefined,
-			fechaHasta: c.req.query("fechaHasta") || undefined,
-			sortBy: c.req.query("sortBy") ?? undefined,
-			sortDir: c.req.query("sortDir") ?? undefined,
-			// Ausente = undefined para que mande el default del esquema, en vez de
-			// que cada capa invente el suyo: cartera-back resolvía el ausente como
-			// false y acá como true, y el mismo pedido devolvía 18 grupos o 0.
-			soloProblematicos: c.req.query("soloProblematicos")
-				? c.req.query("soloProblematicos") === "true"
-				: undefined,
-			limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
-			offset: c.req.query("offset") ? Number(c.req.query("offset")) : undefined,
-		});
-
-		if (!parseado.success) {
-			return c.json(
-				{
-					success: false,
-					error: "Parámetros inválidos",
-					detalle: parseado.error.issues,
-				},
-				400,
-			);
-		}
-
-		// Ausente = null = sin recorte (llamada server-a-server ya autorizada,
-		// caso histórico). Presente = el llamador (el propio server del CRM,
-		// resolviendo scope de un usuario con permisos acotados) ya decidió el
-		// universo exacto de SIFCOs — nunca confiar en un scope vacío como "sin
-		// recorte": una lista vacía != sin parámetro.
-		const sifcosCsv = listaCsv(c.req.query("sifcosPermitidos"));
-		const sifcosPermitidos =
-			c.req.query("sifcosPermitidos") !== undefined
-				? new Set(sifcosCsv ?? [])
-				: null;
-
-		try {
-			const resultado = await consultarSupervisionPagalo(parseado.data, {
-				sifcosPermitidos,
-			});
-			return c.json({ success: true, ...resultado });
-		} catch (error) {
-			console.error("[Págalo/cartera] Error consultando la bandeja:", error);
-			return c.json(
-				{ success: false, error: "Error consultando la supervisión Págalo" },
-				500,
-			);
-		}
+		const body = await c.req.json().catch(() => ({}));
+		return handlerCarteraPagaloSupervision(c, body?.sifcosPermitidos);
 	},
 );
+
+/** Ver el comentario en el llamado a getPagaloSupervisionArchivo, abajo. */
+const TIMEOUT_EXPORT_PAGALO_MS = 330_000;
 
 /**
  * Proxy binario: cartera-back genera el Excel/PDF de supervisión Págalo (tiene
@@ -1399,10 +1421,24 @@ async function proxyPagaloSupervisionArchivo(
 		const { carteraBackClient } = await import(
 			"./services/cartera-back-client"
 		);
+		// Este timeout cubre TODO el trabajo de cartera-back, que internamente
+		// pagina contra el CRM y recién después arma el archivo. Con el default
+		// (60s, el de una sola página) un export grande legítimo se cortaba acá
+		// con 500 aunque cartera-back siguiera dentro de sus propios límites.
+		//
+		// TIMEOUT_EXPORT_PAGALO_MS = (LIMITE_EXPORT_PAGALO / PAGE_SIZE_EXPORT_PAGALO)
+		//   × TIMEOUT_EXPORT_MS + margen de render
+		//   = (5000 / 1000) × 60s + 30s = 330s
+		//
+		// Esas tres constantes viven en cartera-back
+		// (src/controllers/pagaloSupervisionReporte.ts) y no se pueden importar
+		// desde acá (repos separados, sin paquete compartido): AL CAMBIAR
+		// CUALQUIERA DE ELLAS, recalcular este número.
 		const archivo = await carteraBackClient.getPagaloSupervisionArchivo(
 			formato,
 			query,
 			sifcosPermitidosBody,
+			TIMEOUT_EXPORT_PAGALO_MS,
 		);
 		return new Response(new Uint8Array(archivo.buffer), {
 			headers: {

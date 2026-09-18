@@ -103,6 +103,10 @@ export const satVerificacionResultados = pgTable(
 		marca: varchar("marca", { length: 60 }),
 		modelo: varchar("modelo", { length: 20 }),
 		color: varchar("color", { length: 120 }),
+		impuestoCirculacionPagado: boolean("impuesto_circulacion_pagado"),
+		puedeAutorizarTraspaso: boolean("puede_autorizar_traspaso"),
+		puedeImprimirTarjeta: boolean("puede_imprimir_tarjeta"),
+		puedeImprimirCertificado: boolean("puede_imprimir_certificado"),
 
 		mensajeError: text("mensaje_error"),
 

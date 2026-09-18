@@ -41,6 +41,7 @@ import { verificarVehiculosEnSat } from "./jobs/sat-verificacion-vehiculos";
 import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
+import { toDateStrGT } from "./lib/guatemala-month-window";
 import { PARTNER_AUTH_BASE_PATH, partnerAuth } from "./lib/partner-auth";
 import { PERMISSIONS } from "./lib/roles";
 import {
@@ -1203,9 +1204,7 @@ function scheduleVerificacionSatMensual() {
 	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
 
 	setTimeout(async () => {
-		const diaGT = new Date(
-			new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" }),
-		).getDate();
+		const diaGT = Number(toDateStrGT(new Date()).split("-")[2]);
 
 		if (diaGT === 1) {
 			await verificarVehiculosEnSat({ origen: "cron" }).catch(console.error);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { VehiculoSatPropio } from "../services/cartera-back-client";
+import type { VehiculoSatPropio } from "../controllers/satVehiculos";
 import {
 	construirResultados,
 	estadoCorridaDesdeSat,
@@ -17,6 +17,10 @@ function vehiculoSat(
 		modelo: "2020",
 		color: "Blanco",
 		estado,
+		impuestoCirculacionPagado: true,
+		puedeAutorizarTraspaso: true,
+		puedeImprimirTarjeta: true,
+		puedeImprimirCertificado: true,
 		...extra,
 	};
 }
@@ -33,6 +37,10 @@ describe("cruce de vehículos contra SAT", () => {
 		expect(filas[0].eraEsperado).toBe(true);
 		expect(filas[0].vehicleId).toBe("veh-1");
 		expect(filas[0].estadoSat).toBe("Activo");
+		expect(filas[0].impuestoCirculacionPagado).toBe(true);
+		expect(filas[0].puedeAutorizarTraspaso).toBe(true);
+		expect(filas[0].puedeImprimirTarjeta).toBe(true);
+		expect(filas[0].puedeImprimirCertificado).toBe(true);
 	});
 
 	test("vehículo propio que aparece Inactivo genera alerta de inactivo", () => {
@@ -43,6 +51,24 @@ describe("cruce de vehículos contra SAT", () => {
 
 		expect(filas[0].resultado).toBe("inactivo");
 		expect(filas[0].eraEsperado).toBe(true);
+	});
+
+	test("vehiculo Activo sin senales de documentos queda como impuesto no pagado", () => {
+		const filas = construirResultados(
+			[{ id: "veh-1", placa: "P-123ABC" }],
+			[
+				vehiculoSat("P-123ABC", "Activo", {
+					impuestoCirculacionPagado: false,
+					puedeAutorizarTraspaso: false,
+					puedeImprimirTarjeta: false,
+					puedeImprimirCertificado: false,
+				}),
+			],
+		);
+
+		expect(filas[0].resultado).toBe("activo_ok");
+		expect(filas[0].impuestoCirculacionPagado).toBe(false);
+		expect(filas[0].puedeAutorizarTraspaso).toBe(false);
 	});
 
 	test("vehículo propio que NO aparece en SAT es la alerta principal", () => {
@@ -56,6 +82,7 @@ describe("cruce de vehículos contra SAT", () => {
 		expect(salido?.eraEsperado).toBe(true);
 		// Sin datos de SAT porque no apareció en el listado.
 		expect(salido?.estadoSat).toBeNull();
+		expect(salido?.impuestoCirculacionPagado).toBeNull();
 	});
 
 	test("placa que SAT reporta y el CRM no tiene registrada", () => {
@@ -117,8 +144,8 @@ describe("cruce de vehículos contra SAT", () => {
 		expect(filas).toHaveLength(4);
 	});
 
-	test("preserva la clasificación del fallo que reporta cartera-back", () => {
-		// Estos estados llegan en el cuerpo de una respuesta 200: si cartera
+	test("preserva la clasificación del fallo que reporta el scraper", () => {
+		// Estos estados forman parte de la respuesta estructurada del scraper.
 		// respondiera 5xx, el cliente reintentaría y descartaría el cuerpo.
 		expect(estadoCorridaDesdeSat("OK")).toBe("ok");
 		expect(estadoCorridaDesdeSat("CODIGO_REQUERIDO")).toBe("codigo_requerido");

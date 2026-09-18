@@ -1,24 +1,27 @@
 /**
  * Verificación periódica de vehículos propios contra SAT.
  *
- * cartera-back raspa Agencia Virtual (ahí vive Chromium) y devuelve el listado.
+ * El CRM raspa Agencia Virtual con Puppeteer y devuelve el listado.
  * Acá se guarda, se cruza contra `vehicles` y se emiten las cuatro señales.
  */
-import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 import { db } from "../db";
 import {
 	satVerificacionCorridas,
 	satVerificacionResultados,
 	vehicles,
 } from "../db/schema";
-import { carteraBackClient } from "../services/cartera-back-client";
+import { obtenerVehiculosPropios } from "../controllers/satVehiculos";
 import type {
 	SatVehiculosPropiosResponse,
 	VehiculoSatPropio,
-} from "../services/cartera-back-client";
+} from "../controllers/satVehiculos";
 
 const HORAS_ANTIDUPLICADO = 20;
+const MINUTOS_CORRIDA_EN_PROCESO = 10;
 const MAX_EVIDENCIA = 20000;
+
+let ejecucionLocalActiva: Promise<ResumenVerificacion> | null = null;
 
 type Veredicto =
 	| "activo_ok"
@@ -38,8 +41,8 @@ export interface ResumenVerificacion {
 type EstadoCorrida = "ok" | "error" | "codigo_requerido" | "bloqueado";
 
 /**
- * Traduce el estado que reporta cartera-back al enum de la corrida. Explícito
- * en vez de `toLowerCase()` con cast: si cartera agrega un estado nuevo, cae en
+ * Traduce el estado que reporta el scraper al enum de la corrida. Explícito
+ * en vez de `toLowerCase()` con cast: si SAT agrega un estado nuevo, cae en
  * `error` en lugar de romper el insert con un valor que el enum no acepta.
  */
 export function estadoCorridaDesdeSat(
@@ -88,6 +91,24 @@ async function hayCorridaRecienteOk(): Promise<boolean> {
 	return Boolean(reciente);
 }
 
+/** Evita levantar otro Chromium mientras una corrida sigue en proceso. */
+async function hayCorridaEnProceso(): Promise<boolean> {
+	const desde = new Date(Date.now() - MINUTOS_CORRIDA_EN_PROCESO * 60 * 1000);
+
+	const [activa] = await db
+		.select({ id: satVerificacionCorridas.id })
+		.from(satVerificacionCorridas)
+		.where(
+			and(
+				eq(satVerificacionCorridas.estado, "en_proceso"),
+				gte(satVerificacionCorridas.iniciadaAt, desde),
+			),
+		)
+		.limit(1);
+
+	return Boolean(activa);
+}
+
 /** Universo esperado: lo que el CRM da por propiedad de Cash In y tiene placa. */
 async function obtenerUniversoEsperado() {
 	return db
@@ -115,6 +136,10 @@ export function construirResultados(
 		marca: string | null;
 		modelo: string | null;
 		color: string | null;
+		impuestoCirculacionPagado: boolean | null;
+		puedeAutorizarTraspaso: boolean | null;
+		puedeImprimirTarjeta: boolean | null;
+		puedeImprimirCertificado: boolean | null;
 	}[] = [];
 
 	const emparejadas = new Set<string>();
@@ -136,6 +161,10 @@ export function construirResultados(
 				marca: enSat.marca,
 				modelo: enSat.modelo,
 				color: enSat.color,
+				impuestoCirculacionPagado: enSat.impuestoCirculacionPagado,
+				puedeAutorizarTraspaso: enSat.puedeAutorizarTraspaso,
+				puedeImprimirTarjeta: enSat.puedeImprimirTarjeta,
+				puedeImprimirCertificado: enSat.puedeImprimirCertificado,
 			});
 		} else {
 			// La alerta que justifica el proyecto: lo damos por propio y SAT no lo
@@ -150,6 +179,10 @@ export function construirResultados(
 				marca: null,
 				modelo: null,
 				color: null,
+				impuestoCirculacionPagado: null,
+				puedeAutorizarTraspaso: null,
+				puedeImprimirTarjeta: null,
+				puedeImprimirCertificado: null,
 			});
 		}
 	}
@@ -166,18 +199,22 @@ export function construirResultados(
 			marca: v.marca,
 			modelo: v.modelo,
 			color: v.color,
+			impuestoCirculacionPagado: v.impuestoCirculacionPagado,
+			puedeAutorizarTraspaso: v.puedeAutorizarTraspaso,
+			puedeImprimirTarjeta: v.puedeImprimirTarjeta,
+			puedeImprimirCertificado: v.puedeImprimirCertificado,
 		});
 	}
 
 	return filas;
 }
 
-export async function verificarVehiculosEnSat(
+async function ejecutarVerificacionVehiculosEnSat(
 	opciones: {
 		origen?: "cron" | "manual";
 		forzar?: boolean;
 		intento?: number;
-		/** Sustituible para probar el cruce y el guardado sin levantar cartera-back. */
+		/** Sustituible para probar el cruce y el guardado sin levantar Puppeteer. */
 		proveedor?: () => Promise<SatVehiculosPropiosResponse>;
 	} = {},
 ): Promise<ResumenVerificacion> {
@@ -185,8 +222,19 @@ export async function verificarVehiculosEnSat(
 		origen = "cron",
 		forzar = false,
 		intento = 1,
-		proveedor = () => carteraBackClient.obtenerVehiculosPropiosSat(),
+		proveedor = obtenerVehiculosPropios,
 	} = opciones;
+
+	if (await hayCorridaEnProceso()) {
+		return {
+			corridaId: null,
+			estado: "omitida",
+			totalEsperados: 0,
+			totalReportadosSat: 0,
+			totalAlertas: 0,
+			omitida: "Ya hay una verificación SAT en proceso.",
+		};
+	}
 
 	if (!forzar && (await hayCorridaRecienteOk())) {
 		return {
@@ -217,13 +265,21 @@ export async function verificarVehiculosEnSat(
 	try {
 		const respuesta = await proveedor();
 
-		if (respuesta.estado !== "OK") {
+		const listadoIncompleto =
+			respuesta.estado === "OK" &&
+			(!respuesta.listadoCompleto || respuesta.vehiculos.length === 0);
+
+		if (respuesta.estado !== "OK" || listadoIncompleto) {
+			const estado = respuesta.estado !== "OK" ? estadoCorridaDesdeSat(respuesta.estado) : "error";
+			const mensajeError = listadoIncompleto
+				? "SAT devolvió un listado vacío o incompleto; no se generaron alertas para evitar falsos positivos."
+				: respuesta.mensajeError;
 			await db
 				.update(satVerificacionCorridas)
 				.set({
 					nit: respuesta.nit ?? "",
-					estado: estadoCorridaDesdeSat(respuesta.estado),
-					mensajeError: respuesta.mensajeError,
+					estado,
+					mensajeError,
 					evidencia: respuesta.evidencia?.slice(0, MAX_EVIDENCIA),
 					finalizadaAt: new Date(),
 				})
@@ -231,7 +287,7 @@ export async function verificarVehiculosEnSat(
 
 			return {
 				corridaId: corrida.id,
-				estado: respuesta.estado,
+				estado,
 				totalEsperados: esperados.length,
 				totalReportadosSat: 0,
 				totalAlertas: 0,
@@ -289,7 +345,19 @@ export async function verificarVehiculosEnSat(
 /** Última corrida con sus alertas, para exponer en el CRM. */
 export async function obtenerUltimaVerificacion() {
 	const [corrida] = await db
-		.select()
+		.select({
+			id: satVerificacionCorridas.id,
+			nit: satVerificacionCorridas.nit,
+			estado: satVerificacionCorridas.estado,
+			origen: satVerificacionCorridas.origen,
+			intento: satVerificacionCorridas.intento,
+			corridaOriginalId: satVerificacionCorridas.corridaOriginalId,
+			totalEsperados: satVerificacionCorridas.totalEsperados,
+			totalReportadosSat: satVerificacionCorridas.totalReportadosSat,
+			totalAlertas: satVerificacionCorridas.totalAlertas,
+			iniciadaAt: satVerificacionCorridas.iniciadaAt,
+			finalizadaAt: satVerificacionCorridas.finalizadaAt,
+		})
 		.from(satVerificacionCorridas)
 		.orderBy(desc(satVerificacionCorridas.iniciadaAt))
 		.limit(1);
@@ -297,20 +365,68 @@ export async function obtenerUltimaVerificacion() {
 	if (!corrida) return null;
 
 	const filas = await db
-		.select()
+		.select({
+			id: satVerificacionResultados.id,
+			corridaId: satVerificacionResultados.corridaId,
+			vehicleId: satVerificacionResultados.vehicleId,
+			placa: satVerificacionResultados.placa,
+			resultado: satVerificacionResultados.resultado,
+			eraEsperado: satVerificacionResultados.eraEsperado,
+			estadoSat: satVerificacionResultados.estadoSat,
+			tipo: satVerificacionResultados.tipo,
+			marca: satVerificacionResultados.marca,
+			modelo: satVerificacionResultados.modelo,
+			color: satVerificacionResultados.color,
+			impuestoCirculacionPagado: satVerificacionResultados.impuestoCirculacionPagado,
+			puedeAutorizarTraspaso: satVerificacionResultados.puedeAutorizarTraspaso,
+			puedeImprimirTarjeta: satVerificacionResultados.puedeImprimirTarjeta,
+			puedeImprimirCertificado: satVerificacionResultados.puedeImprimirCertificado,
+			createdAt: satVerificacionResultados.createdAt,
+		})
 		.from(satVerificacionResultados)
 		.where(
-			and(
-				eq(satVerificacionResultados.corridaId, corrida.id),
-				sql`${satVerificacionResultados.resultado} <> 'activo_ok'`,
-			),
+			eq(satVerificacionResultados.corridaId, corrida.id),
 		);
 
 	// Separados a propósito: `no_registrado_interno` es un hallazgo de
 	// reconciliación, no una alarma, y no cuenta en `totalAlertas`.
 	return {
-		corrida,
+		corrida: {
+			...corrida,
+			// El detalle crudo queda solo en la bitácora de base de datos: puede
+			// contener URLs, HTML y parámetros de sesión del portal.
+			mensajeError:
+				corrida.estado === "ok"
+					? null
+					: "La consulta contra SAT no pudo completarse.",
+		},
+		resultados: filas,
 		alertas: filas.filter((f) => f.resultado !== "no_registrado_interno"),
 		descubiertos: filas.filter((f) => f.resultado === "no_registrado_interno"),
 	};
+}
+
+/**
+ * La guarda en base de datos cubre varias instancias; esta promesa evita la
+ * carrera entre dos llamadas simultáneas dentro del mismo proceso.
+ */
+export function verificarVehiculosEnSat(
+	opciones: Parameters<typeof ejecutarVerificacionVehiculosEnSat>[0] = {},
+): Promise<ResumenVerificacion> {
+	if (ejecucionLocalActiva) {
+		return Promise.resolve({
+			corridaId: null,
+			estado: "omitida",
+			totalEsperados: 0,
+			totalReportadosSat: 0,
+			totalAlertas: 0,
+			omitida: "Ya hay una verificación SAT en proceso.",
+		});
+	}
+
+	const ejecucion = ejecutarVerificacionVehiculosEnSat(opciones);
+	ejecucionLocalActiva = ejecucion;
+	return ejecucion.finally(() => {
+		if (ejecucionLocalActiva === ejecucion) ejecucionLocalActiva = null;
+	});
 }

@@ -255,6 +255,30 @@ export async function evaluarGateMoraDpi(
 export const MENSAJE_CORRECCION_POR_ADMINISTRADOR =
 	"Si el DPI quedó mal capturado, un administrador puede corregirlo.";
 
+/**
+ * 🔴 Dejar el DPI EN BLANCO se rechaza, no se guarda.
+ *
+ * `dpi: ""` pasaba de largo por todos lados: la validación se saltaba por
+ * falsy, el gate también, y el `.set` lo escribía igual. Blanquear el DPI de un
+ * moroso lo volvía invisible PARA SIEMPRE: el CRM llega a sus créditos
+ * `CRM-<uuid>` e `insoluto-N` —los que SIFCO no conoce— justamente por el DPI
+ * del lead, así que sin ese dato el próximo lead que lo teclee no hereda nada y
+ * cartera contesta CLIENTE_NO_ENCONTRADO.
+ *
+ * DECISIÓN: el string vacío se rechaza con un error de validación. Un DPI mal
+ * capturado se corrige escribiendo el correcto —para eso está la válvula del
+ * admin en `resolverEdicionConMora`—; no hay ningún caso de negocio que pida
+ * dejarlo en blanco, y el único efecto real de permitirlo era abrir la puerta
+ * de atrás del gate.
+ */
+export const MENSAJE_DPI_EN_BLANCO =
+	"Para corregir un DPI hay que escribir el correcto: no se puede dejar en blanco.";
+
+/** El valor llegó, es un string y no tiene un solo carácter útil. */
+export function esDpiEnBlanco(valor: unknown): boolean {
+	return typeof valor === "string" && valor.trim() === "";
+}
+
 export type ResolucionEdicionConMora =
 	| { permitir: true }
 	| { permitir: false; mensaje: string };
@@ -299,11 +323,9 @@ export type ResolucionEdicionConMora =
  * que son un hecho conocido del cliente. Ver la nota de
  * `resolverEdicionConMora`.
  */
-const MOTIVOS_DE_NEGOCIO: ReadonlySet<ConsultaMoraResponse["motivo"]> = new Set([
-	"MORA_ACTIVA",
-	"EN_CONVENIO",
-	"CREDITO_INSOLUTO",
-]);
+const MOTIVOS_DE_NEGOCIO: ReadonlySet<ConsultaMoraResponse["motivo"]> = new Set(
+	["MORA_ACTIVA", "EN_CONVENIO", "CREDITO_INSOLUTO"],
+);
 export function resolverEdicionConMora(
 	gate: VeredictoGateMora,
 	userRole: string | null | undefined,

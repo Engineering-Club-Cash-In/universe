@@ -5,8 +5,10 @@ import {
 } from "../types/cartera-back";
 import type { AuditEntry } from "./audit";
 import {
+	esDpiEnBlanco,
 	evaluarGateMoraDpi,
 	MENSAJE_CORRECCION_POR_ADMINISTRADOR,
+	MENSAJE_DPI_EN_BLANCO,
 	MENSAJE_GATE_APAGADO,
 	mensajeRechazoGateMora,
 	requiereConsultaDeMora,
@@ -208,6 +210,31 @@ describe("gate de mora: ediciones (solo si el DPI es nuevo o cambia)", () => {
 		expect(requiereConsultaDeMora(DPI, undefined)).toBe(true);
 		expect(requiereConsultaDeMora(DPI, "")).toBe(true);
 		expect(requiereConsultaDeMora(DPI, "   ")).toBe(true);
+	});
+
+	/**
+	 * 🔴 `dpi: ""` pasaba de largo por todos lados: la validación se saltaba por
+	 * falsy, el gate también, y el `.set` lo escribía igual. Blanquear el DPI de
+	 * un moroso lo volvía invisible para siempre, porque el CRM llega a sus
+	 * créditos `CRM-<uuid>` e `insoluto-N` por el DPI del lead. Se rechaza.
+	 */
+	test("dejar el DPI en blanco se reconoce para poder rechazarlo", () => {
+		expect(esDpiEnBlanco("")).toBe(true);
+		expect(esDpiEnBlanco("   ")).toBe(true);
+		expect(esDpiEnBlanco("\t\n")).toBe(true);
+	});
+
+	test("no confunde 'en blanco' con 'no me mandaron el campo'", () => {
+		// `undefined` es una edición que no toca el DPI —el caso más común de
+		// todos— y no puede salir con un error de validación.
+		expect(esDpiEnBlanco(undefined)).toBe(false);
+		expect(esDpiEnBlanco(null)).toBe(false);
+		expect(esDpiEnBlanco(DPI)).toBe(false);
+		expect(esDpiEnBlanco("3460 66638 0101")).toBe(false);
+	});
+
+	test("el mensaje dice qué hacer, no solo que no se puede", () => {
+		expect(MENSAJE_DPI_EN_BLANCO).toContain("escribir el correcto");
 	});
 
 	test("una edición que no toca el DPI no llega a llamar a cartera", async () => {

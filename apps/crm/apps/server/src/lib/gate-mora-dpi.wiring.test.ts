@@ -31,6 +31,22 @@ const LLAMADAS_DECLARADAS: Record<string, number> = {
 };
 
 /**
+ * Dónde se rechaza el DPI EN BLANCO, y cuántas veces. Son las ediciones que
+ * pueden escribir el DPI de alguien que ya está adentro: `updateLead` y
+ * `updateCoDebtor` en `crm.ts`, y el update del portal.
+ *
+ * 🔴 Va acá y no en los tests de la regla por la misma razón que el resto de
+ * este archivo: `esDpiEnBlanco` es una función de tres líneas que pasa sola
+ * aunque nadie la llame. Lo que hay que proteger es que esté ENCHUFADA en los
+ * tres sitios, porque el `dpi: ""` se colaba justamente por los tres huecos
+ * donde el `if (dpi)` la daba por ausente.
+ */
+const RECHAZAN_DPI_EN_BLANCO: Record<string, number> = {
+	"routers/crm.ts": 2,
+	"controllers/portal-lead.ts": 1,
+};
+
+/**
  * Dónde el gate NO va, a propósito. Son rutas anónimas: consultar la mora ahí
  * las convertiría en un oráculo público de situación crediticia (cualquiera
  * manda el DPI de un tercero y la respuesta le dice si está en mora). Está
@@ -124,6 +140,26 @@ describe("cableado del gate de mora por DPI", () => {
 				`${relativo} debería llamar a evaluarGateMoraDpi ${esperadas} vez/veces y llama ${llamadas}. ` +
 					"Si agregaste o quitaste un punto de control a propósito, actualizá LLAMADAS_DECLARADAS acá.",
 			).toBe(esperadas);
+		}
+	});
+
+	test("🔴 las ediciones siguen rechazando el DPI en blanco", async () => {
+		// Blanquear el DPI de un moroso lo vuelve invisible PARA SIEMPRE: el CRM
+		// llega a sus créditos `CRM-<uuid>` e `insoluto-N` por el DPI del lead, así
+		// que sin ese dato el próximo lead que lo teclee no hereda nada y cartera
+		// contesta CLIENTE_NO_ENCONTRADO. Era la puerta de atrás del gate.
+		for (const [relativo, esperados] of Object.entries(
+			RECHAZAN_DPI_EN_BLANCO,
+		)) {
+			const texto = await fuente(relativo);
+
+			expect(
+				contar(texto, "esDpiEnBlanco("),
+				`${relativo} debería rechazar el DPI en blanco ${esperados} vez/veces y lo hace ${contar(
+					texto,
+					"esDpiEnBlanco(",
+				)}. Si moviste una edición, actualizá RECHAZAN_DPI_EN_BLANCO acá.`,
+			).toBe(esperados);
 		}
 	});
 

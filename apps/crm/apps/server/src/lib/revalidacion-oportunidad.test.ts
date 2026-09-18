@@ -16,6 +16,7 @@ import {
 	PORCENTAJE_ETAPA_ANALISIS,
 	PORCENTAJE_SIN_RETROCESO,
 	parcheDeRevalidacion,
+	RAZON_TRANSICION_REVALIDACION,
 	revalidarOportunidades,
 	saleDeLaPerdida,
 	separarPorSalvaguarda,
@@ -288,16 +289,34 @@ describe("el documento de identidad tiene que ser posterior a la revalidación",
  * simular la carrera: el predicado del UPDATE excluye una fila y esa fila no
  * vuelve, aunque el snapshot la diera por reseteable.
  */
-function banco(etapa: { id: string } | null, devuelve: string[] = []) {
+/** Quien responde por el retroceso: va a `opportunityStageHistory.changedBy`. */
+const USUARIO = "usr-admin-1";
+
+/**
+ * `etapasPrevias` es de dónde venía cada oportunidad: la lectura que se hace
+ * ANTES del UPDATE, porque `RETURNING` devuelve la fila NUEVA y después del
+ * reset ya no hay forma de saber de qué etapa salió.
+ */
+function banco(
+	etapa: { id: string } | null,
+	devuelve: string[] = [],
+	etapasPrevias: Array<{ id: string; stageId: string | null }> = [],
+) {
 	const actualizados: unknown[] = [];
 	const anotaciones: AuditEntry[] = [];
+	const transiciones: unknown[] = [];
 
 	const database = {
+		// Dos consultas pasan por acá: la de la etapa de análisis termina en
+		// `.limit(1)` y la de las etapas previas se espera directo sobre el
+		// `.where()`. El doble devuelve un thenable con `.limit()` encima, así cada
+		// una se queda con lo suyo sin tener que mirar la tabla.
 		select: () => ({
 			from: () => ({
-				where: () => ({
-					limit: async () => (etapa ? [etapa] : []),
-				}),
+				where: () =>
+					Object.assign(Promise.resolve(etapasPrevias), {
+						limit: async () => (etapa ? [etapa] : []),
+					}),
 			}),
 		}),
 		update: () => ({
@@ -310,11 +329,17 @@ function banco(etapa: { id: string } | null, devuelve: string[] = []) {
 				}),
 			}),
 		}),
+		insert: () => ({
+			values: async (filas: unknown) => {
+				transiciones.push(filas);
+			},
+		}),
 	} as never;
 
 	return {
 		actualizados,
 		anotaciones,
+		transiciones,
 		database,
 		anotar: (entrada: AuditEntry) => {
 			anotaciones.push(entrada);
@@ -350,6 +375,7 @@ describe("aplicar la revalidación", () => {
 			accion: "candado_override_revalidacion",
 			detalle: "porque sí",
 			anotar: b.anotar,
+			cambiadaPor: USUARIO,
 			database: b.database,
 		});
 
@@ -366,6 +392,68 @@ describe("aplicar la revalidación", () => {
 		expect(b.anotaciones[0]?.ok).toBeUndefined();
 	});
 
+	/**
+	 * 🔴 El reset cambiaba `stageId` sin insertar la transición. Para los
+	 * timelines y para `latestStageChangedAt` la oportunidad seguía en la etapa
+	 * avanzada: el retroceso era invisible —la pantalla mostraba una historia que
+	 * termina en el 40% con la solicitud parada en el 30%— y el tiempo en etapa
+	 * se seguía contando desde una transición que ya no era la real.
+	 */
+	test("🔴 el retroceso deja su fila en el historial de etapas", async () => {
+		const b = banco(
+			{ id: "etapa-30" },
+			["op-40"],
+			[{ id: "op-40", stageId: "etapa-40" }],
+		);
+
+		await revalidarOportunidades({
+			oportunidades: [RESETEABLE],
+			accion: "candado_override_revalidacion",
+			detalle: "porque sí",
+			anotar: b.anotar,
+			cambiadaPor: USUARIO,
+			database: b.database,
+		});
+
+		expect(b.transiciones).toHaveLength(1);
+		expect((b.transiciones[0] as unknown[])[0]).toMatchObject({
+			opportunityId: "op-40",
+			// De dónde salía, leído ANTES del UPDATE: `RETURNING` da la fila nueva.
+			fromStageId: "etapa-40",
+			toStageId: "etapa-30",
+			changedBy: USUARIO,
+			// `isOverride` es del flujo ventas-vs-análisis, no de este retroceso.
+			isOverride: false,
+		});
+	});
+
+	test("la fila dice por qué, para que el retroceso no parezca un error de alguien", () => {
+		expect(RAZON_TRANSICION_REVALIDACION).toContain(
+			"Revalidación de identidad",
+		);
+	});
+
+	test("la que la salvaguarda dejó intacta NO estrena transición", async () => {
+		// Una fila de transición de una oportunidad que nunca se movió es una fila
+		// que miente, y el timeline es justo donde eso se nota.
+		const b = banco(
+			{ id: "etapa-30" },
+			[],
+			[{ id: "op-40", stageId: "etapa-40" }],
+		);
+
+		await revalidarOportunidades({
+			oportunidades: [RESETEABLE],
+			accion: "candado_override_revalidacion",
+			detalle: "porque sí",
+			anotar: b.anotar,
+			cambiadaPor: USUARIO,
+			database: b.database,
+		});
+
+		expect(b.transiciones).toEqual([]);
+	});
+
 	test("🔴 la ganada NO se toca, pero sí queda el aviso", async () => {
 		// El aviso es lo único que deja rastro de que la validación quedó vieja y
 		// nadie la rehizo. Preferimos eso a romper contratos ya firmados.
@@ -376,6 +464,7 @@ describe("aplicar la revalidación", () => {
 			accion: "candado_override_revalidacion",
 			detalle: "porque sí",
 			anotar: b.anotar,
+			cambiadaPor: USUARIO,
 			database: b.database,
 		});
 
@@ -397,6 +486,7 @@ describe("aplicar la revalidación", () => {
 			accion: "candado_override_revalidacion",
 			detalle: "porque sí",
 			anotar: b.anotar,
+			cambiadaPor: USUARIO,
 			database: b.database,
 		});
 
@@ -417,6 +507,7 @@ describe("aplicar la revalidación", () => {
 			accion: "candado_override_revalidacion",
 			detalle: "porque sí",
 			anotar: b.anotar,
+			cambiadaPor: USUARIO,
 			database: b.database,
 		});
 
@@ -446,6 +537,7 @@ describe("aplicar la revalidación", () => {
 				accion: "candado_override_revalidacion",
 				detalle: "porque sí",
 				anotar: b.anotar,
+				cambiadaPor: USUARIO,
 				database: b.database,
 			}),
 		).rejects.toBeInstanceOf(ErrorRevalidacionIncompleta);
@@ -466,6 +558,7 @@ describe("aplicar la revalidación", () => {
 				accion: "candado_override_revalidacion",
 				detalle: "porque sí",
 				anotar: b.anotar,
+				cambiadaPor: USUARIO,
 				database: b.database,
 			}),
 		).rejects.toThrow("se revirtió");
@@ -517,6 +610,7 @@ describe("la carrera entre el snapshot y el UPDATE", () => {
 			accion: "candado_override_revalidacion",
 			detalle: "porque sí",
 			anotar: b.anotar,
+			cambiadaPor: USUARIO,
 			database: b.database,
 		});
 
@@ -532,6 +626,7 @@ describe("la carrera entre el snapshot y el UPDATE", () => {
 			accion: "candado_override_revalidacion",
 			detalle: "porque sí",
 			anotar: b.anotar,
+			cambiadaPor: USUARIO,
 			database: b.database,
 		});
 
@@ -575,6 +670,17 @@ describe("cableado de la revalidación", () => {
 		// Con un "open" fijo, un `lost → won` se evaluaba como si volviera a open y
 		// la salvaguarda de las ganadas —contratos ya firmados— no lo reconocía.
 		expect(crm).toContain("status: updateData.status ?? comoEsta.status");
+	});
+
+	test("la reapertura también deja su transición, en la misma transacción", () => {
+		// Sin la fila, el timeline sigue mostrando la etapa avanzada y
+		// `latestStageChangedAt` sigue contando desde una transición que ya no fue.
+		expect(crm).toContain("RAZON_TRANSICION_REVALIDACION");
+		expect(
+			crm,
+			"la fila de la etapa pedida no puede escribirse cuando la revalidación se llevó " +
+				"puesto ese stageId: diría que la oportunidad fue a una etapa a la que nunca llegó.",
+		).toContain("isStageChange && input.stageId && !parcheRevalidacion");
 	});
 
 	test("el reset de la reapertura viaja en el MISMO UPDATE que el status", () => {

@@ -8,6 +8,11 @@ import { ROLES } from "./roles";
 
 export const PARTNER_AUTH_BASE_PATH = "/api/partner-auth";
 
+// Misma clave de rate limit para la ruta cruda y para el procedure oRPC
+// `changePartnerPassword`, que nunca pasa por esta ruta pero valida la misma
+// contraseña actual — sin esto cada camino tendría su propio cupo aparte.
+export const PARTNER_CHANGE_PASSWORD_PATH = `${PARTNER_AUTH_BASE_PATH}/change-password`;
+
 /**
  * Instancia de auth para socios externos (predios y agencias).
  *

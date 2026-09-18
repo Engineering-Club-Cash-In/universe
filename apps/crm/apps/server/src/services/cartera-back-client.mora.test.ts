@@ -242,3 +242,34 @@ test("el presupuesto no estorba a la tarea que responde a tiempo", async () => {
 		conPresupuestoConsultaMora(1000, async () => "listo"),
 	).resolves.toBe("listo");
 });
+
+/**
+ * El vencimiento no solo suelta la espera: aborta la señal que viaja hasta el
+ * fetch. La tarea perdedora que siga corriendo (el auth no es cancelable)
+ * encuentra la señal abortada y no dispara el viaje a cartera cuando el token
+ * por fin llegue — sin esto, cada intento vencido durante una caída del auth
+ * descargaba una ráfaga de consultas inútiles sobre el core al recuperarse.
+ */
+test("al vencerse el presupuesto, la señal de la tarea queda abortada", async () => {
+	let senal: AbortSignal | undefined;
+
+	await expect(
+		conPresupuestoConsultaMora(10, (senalVencimiento) => {
+			senal = senalVencimiento;
+			return new Promise<never>(() => {});
+		}),
+	).rejects.toBeInstanceOf(ConsultaMoraNoDisponibleError);
+
+	expect(senal?.aborted).toBe(true);
+});
+
+test("la tarea que responde a tiempo nunca ve su señal abortada", async () => {
+	let senal: AbortSignal | undefined;
+
+	await conPresupuestoConsultaMora(1000, async (senalVencimiento) => {
+		senal = senalVencimiento;
+		return "listo";
+	});
+
+	expect(senal?.aborted).toBe(false);
+});

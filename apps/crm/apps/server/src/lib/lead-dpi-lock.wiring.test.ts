@@ -161,6 +161,46 @@ describe("cableado del candado de DPI", () => {
 		).toBe(false);
 	});
 
+	/**
+	 * 🔴 El borrado del co-deudor tenía el mismo agujero que el UPDATE del DPI, y
+	 * uno peor encima: la evidencia (análisis y QR) se borraba sin transacción, así
+	 * que una aprobación concurrente entre el chequeo y los deletes dejaba al
+	 * co-deudor borrado pese al candado —o vivo pero sin su análisis—.
+	 */
+	test("el borrado del co-deudor es atómico y no deja el expediente a medias", () => {
+		const texto = readFileSync(join(SRC, "routers/crm.ts"), "utf8");
+
+		const desdeDelete = texto.indexOf("deleteCoDebtor: crmProcedure");
+		expect(desdeDelete).toBeGreaterThan(-1);
+		const bloqueDelete = texto.slice(desdeDelete, desdeDelete + 6000);
+
+		expect(
+			bloqueDelete.includes("db.transaction("),
+			"los tres deletes tienen que viajar en una transacción: si el candado " +
+				"corta el del co-deudor, la evidencia ya borrada tiene que volver.",
+		).toBe(true);
+
+		expect(
+			bloqueDelete.includes("noExisteOportunidadCandantePorId("),
+			"el candado del borrado tiene que ir DENTRO del WHERE, no solo antes: " +
+				"entre el chequeo y el delete cabe una aprobación de análisis.",
+		).toBe(true);
+	});
+
+	/**
+	 * Borrar al co-deudor analizado cuesta lo mismo que cambiarle el DPI: la
+	 * oportunidad vuelve a análisis. Sin esto, tras el override solo quedaba la
+	 * bitácora y la solicitud seguía aprobada sobre un respaldo que ya no existe.
+	 */
+	test("el override del admin sobre el borrado también revalida", () => {
+		const texto = readFileSync(join(SRC, "routers/crm.ts"), "utf8");
+
+		const desdeDelete = texto.indexOf("deleteCoDebtor: crmProcedure");
+		const bloqueDelete = texto.slice(desdeDelete, desdeDelete + 6000);
+
+		expect(bloqueDelete).toContain("revalidarOportunidades(");
+	});
+
 	test("en el portal el candado NO vive dentro de la guarda que descarta los vacíos", () => {
 		const texto = readFileSync(join(SRC, "controllers/portal-lead.ts"), "utf8");
 

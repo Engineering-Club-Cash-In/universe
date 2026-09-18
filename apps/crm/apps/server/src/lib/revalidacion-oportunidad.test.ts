@@ -412,7 +412,11 @@ describe("cableado de la revalidación", () => {
 
 	test("el override del admin sobre el candado dispara la revalidación", () => {
 		expect(crm).toContain("candado_override_revalidacion");
-		// Los dos sujetos del candado en el CRM: lead y co-deudor.
-		expect(crm.split("candado_override_revalidacion").length - 1).toBe(2);
+		// Tres puntos de override: el DPI del lead, el DPI del co-deudor y el
+		// BORRADO del co-deudor. El tercero se sumó al decidir que borrar al
+		// co-deudor analizado cuesta lo mismo que cambiarle el DPI: si no
+		// revalidara, la oportunidad seguiría aprobada sobre un respaldo que ya no
+		// existe.
+		expect(crm.split("candado_override_revalidacion").length - 1).toBe(3);
 	});
 });

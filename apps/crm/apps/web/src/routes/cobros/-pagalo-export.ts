@@ -41,6 +41,27 @@ function armarQuery(filtros: FiltrosExportPagalo): string {
 	return params.toString();
 }
 
+/**
+ * Extrae el filename enviado por el backend en Content-Disposition, o genera el
+ * fallback con la fecha y el sufijo "-parcial" si el dataset vino truncado.
+ */
+export function resolverNombreArchivoPagalo(
+	disposition: string | null | undefined,
+	formato: "excel" | "pdf",
+	truncado: boolean,
+): string {
+	const filenameMatch =
+		disposition?.match(/filename\*=UTF-8''([^;\s]+)/i) ||
+		disposition?.match(/filename="([^"]+)"/i) ||
+		disposition?.match(/filename=([^;\s]+)/i);
+	if (filenameMatch?.[1]) {
+		return decodeURIComponent(filenameMatch[1].trim());
+	}
+	const sufijo = truncado ? "-parcial" : "";
+	const extension = formato === "excel" ? "xlsx" : "pdf";
+	return `supervision-pagalo${sufijo}-${new Date().toISOString().slice(0, 10)}.${extension}`;
+}
+
 async function descargarPagaloArchivo(
 	formato: "excel" | "pdf",
 	filtros: FiltrosExportPagalo,
@@ -52,11 +73,15 @@ async function descargarPagaloArchivo(
 		throw new Error(cuerpo.error || `No se pudo generar el reporte (HTTP ${res.status})`);
 	}
 
-	const disposition = res.headers.get("content-disposition") || "";
-	const filenameMatch = disposition.match(/filename="([^"]+)"/);
-	const filename =
-		filenameMatch?.[1] ||
-		`supervision-pagalo-${new Date().toISOString().slice(0, 10)}.${formato === "excel" ? "xlsx" : "pdf"}`;
+	const truncado = res.headers.get("x-export-truncado") === "true";
+	const total = Number(res.headers.get("x-export-total") ?? 0);
+	const cantidad = Number(res.headers.get("x-export-cantidad") ?? 0);
+
+	const filename = resolverNombreArchivoPagalo(
+		res.headers.get("content-disposition"),
+		formato,
+		truncado,
+	);
 
 	const blob = await res.blob();
 	const objectUrl = URL.createObjectURL(blob);
@@ -69,9 +94,9 @@ async function descargarPagaloArchivo(
 	URL.revokeObjectURL(objectUrl);
 
 	return {
-		truncado: res.headers.get("x-export-truncado") === "true",
-		total: Number(res.headers.get("x-export-total") ?? 0),
-		cantidad: Number(res.headers.get("x-export-cantidad") ?? 0),
+		truncado,
+		total,
+		cantidad,
 	};
 }
 

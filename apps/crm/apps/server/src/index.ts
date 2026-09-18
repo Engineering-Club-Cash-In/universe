@@ -1460,7 +1460,7 @@ async function proxyPagaloSupervisionArchivo(
 				"x-export-total": String(archivo.total),
 				"x-export-cantidad": String(archivo.cantidad),
 				"access-control-expose-headers":
-					"x-export-truncado, x-export-total, x-export-cantidad",
+					"content-disposition, x-export-truncado, x-export-total, x-export-cantidad",
 			},
 		});
 	} catch (error) {

@@ -162,7 +162,7 @@ async function excelHandler({
         "x-export-total": String(total),
         "x-export-cantidad": String(filas.length),
         "access-control-expose-headers":
-          "x-export-truncado, x-export-total, x-export-cantidad",
+          "content-disposition, x-export-truncado, x-export-total, x-export-cantidad",
       },
     });
   } catch (error) {
@@ -206,7 +206,7 @@ async function pdfHandler({
         "x-export-total": String(total),
         "x-export-cantidad": String(filas.length),
         "access-control-expose-headers":
-          "x-export-truncado, x-export-total, x-export-cantidad",
+          "content-disposition, x-export-truncado, x-export-total, x-export-cantidad",
       },
     });
   } catch (error) {

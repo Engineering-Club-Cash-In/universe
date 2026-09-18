@@ -318,7 +318,10 @@ function PagaloSupervisionPage() {
 	// filtro "problemático" por defecto queda reservado para cuando el
 	// usuario no acotó nada más específico (ver getPagaloSupervision).
 	const inputConsulta = (offset: number) => ({
-		estados: estados.length > 0 ? estados : undefined,
+		estados:
+			estados.length > 0
+				? (estados as unknown as (typeof ESTADOS_FILTRABLES)[number][])
+				: undefined,
 		soloProblematicos: estados.length > 0,
 		numeroSifco: numeroSifco.trim() || undefined,
 		asesorId,

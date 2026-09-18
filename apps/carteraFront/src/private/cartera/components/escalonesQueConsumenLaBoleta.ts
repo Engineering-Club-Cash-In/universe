@@ -113,18 +113,44 @@ export function loQueElAbonoACapitalNoAplica(entrada: {
 }): AvisoAbonoACapital {
   // El orden es el de la pantalla, de arriba hacia abajo: el asesor lee el aviso
   // contra el desglose que tiene a la vista.
-  const partes: { etiqueta: string; monto: number }[] = [
-    { etiqueta: `Q${entrada.mora.toFixed(2)} a mora`, monto: entrada.mora },
-    { etiqueta: `Q${entrada.rubros.toFixed(2)} a rubros`, monto: entrada.rubros },
-    { etiqueta: `Q${entrada.convenio.toFixed(2)} al convenio`, monto: entrada.convenio },
-    { etiqueta: `Q${entrada.cuota.toFixed(2)} a la cuota`, monto: entrada.cuota },
+  const partes: {
+    etiqueta: string;
+    monto: number;
+    /** ¿Sale de la boleta? El convenio NO: se registra sin consumirla. */
+    saleDeLaBoleta: boolean;
+  }[] = [
+    { etiqueta: `Q${entrada.mora.toFixed(2)} a mora`, monto: entrada.mora, saleDeLaBoleta: true },
+    { etiqueta: `Q${entrada.rubros.toFixed(2)} a rubros`, monto: entrada.rubros, saleDeLaBoleta: true },
+    {
+      etiqueta: `Q${entrada.convenio.toFixed(2)} al convenio`,
+      monto: entrada.convenio,
+      saleDeLaBoleta: false,
+    },
+    { etiqueta: `Q${entrada.cuota.toFixed(2)} a la cuota`, monto: entrada.cuota, saleDeLaBoleta: true },
     {
       etiqueta: `Q${entrada.excedente.toFixed(2)} de excedente a saldo a favor`,
       monto: entrada.excedente,
+      saleDeLaBoleta: true,
     },
   ].filter((p) => p.monto > UN_CENTAVO_Y_MEDIO);
 
-  const total = partes.reduce((suma, p) => suma + p.monto, 0);
+  /**
+   * El total suma sólo lo que SALE DE LA BOLETA, no todas las etiquetas.
+   *
+   * El convenio se lista —el asesor tiene que saber que tampoco va a pasar— pero
+   * no se suma, porque se registra sin consumir la boleta. Sumándolo, una boleta
+   * de Q1,000 que acredita Q300 al convenio y aplica Q1,000 a la cuota informaba
+   * «Q1,300 en total»: más plata de la que la boleta trae, que es un número que
+   * el asesor no puede conciliar contra nada.
+   *
+   * Es la MISMA asimetría que separa a este predicado de
+   * `escalonesQueConsumenLaBoleta` —allá el convenio está afuera de la lista—,
+   * sólo que acá aplica al total y no a las etiquetas: son dos preguntas
+   * distintas, "qué no va a pasar" y "cuánta plata de esta boleta se va en eso".
+   */
+  const total = partes
+    .filter((p) => p.saleDeLaBoleta)
+    .reduce((suma, p) => suma + p.monto, 0);
 
   return {
     etiquetas: partes.map((p) => p.etiqueta),

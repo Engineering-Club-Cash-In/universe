@@ -96,12 +96,17 @@ describe("escalonesQueConsumenLaBoleta", () => {
 describe("loQueElAbonoACapitalNoAplica", () => {
   const sinNada = { mora: 0, rubros: 0, convenio: 0, excedente: 0, cuota: 0 };
 
-  it("incluye el convenio, que el otro predicado excluye a propósito", () => {
+  it("NOMBRA el convenio, que el otro predicado ni lista — pero no lo suma", () => {
+    // La asimetría con `escalonesQueConsumenLaBoleta` sigue viva y ahora es más
+    // fina: acá el convenio SÍ se nombra —el asesor tiene que saber que tampoco
+    // va a pasar— pero NO entra al total, porque se registra sin consumir la
+    // boleta. Sumarlo hacía que el aviso reclamara más plata de la que la boleta
+    // trae.
     const a = loQueElAbonoACapitalNoAplica({ ...sinNada, convenio: 300 });
 
     expect(a.hayAviso).toBe(true);
     expect(a.etiquetas).toContain("Q300.00 al convenio");
-    expect(a.total).toBe(300);
+    expect(a.total).toBe(0);
   });
 
   it("incluye el excedente prometido como saldo a favor", () => {
@@ -129,7 +134,9 @@ describe("loQueElAbonoACapitalNoAplica", () => {
       excedente: 500,
     });
 
-    expect(a.total).toBe(1100);
+        // El total ya NO suma el convenio: se registra sin consumir la boleta, así
+    // que sumarlo informaba más plata de la que la boleta trae.
+    expect(a.total).toBe(800);
     expect(a.etiquetas).toEqual([
       "Q100.00 a mora",
       "Q200.00 a rubros",
@@ -155,7 +162,9 @@ describe("loQueElAbonoACapitalNoAplica", () => {
 
     expect(a.etiquetas.join(" ")).not.toContain("otros");
     // Y el total tampoco lo incluye: son los cuatro que salen del disponible.
-    expect(a.total).toBe(1000);
+        // El total ya NO suma el convenio: se registra sin consumir la boleta, así
+    // que sumarlo informaba más plata de la que la boleta trae.
+    expect(a.total).toBe(700);
   });
 
   it("🔴 avisa con SÓLO la cuota, que es el caso MÁS COMÚN", () => {
@@ -188,7 +197,9 @@ describe("loQueElAbonoACapitalNoAplica", () => {
       "Q1000.00 a la cuota",
       "Q400.00 de excedente a saldo a favor",
     ]);
-    expect(a.total).toBe(2000);
+        // El total ya NO suma el convenio: se registra sin consumir la boleta, así
+    // que sumarlo informaba más plata de la que la boleta trae.
+    expect(a.total).toBe(1700);
   });
 
   it("sin nada prometido no hay aviso", () => {
@@ -199,5 +210,34 @@ describe("loQueElAbonoACapitalNoAplica", () => {
     const a = loQueElAbonoACapitalNoAplica({ ...sinNada, convenio: 0.004, excedente: 0.004 });
 
     expect(a.hayAviso).toBe(false);
+  });
+});
+
+describe("el TOTAL del aviso no puede superar la boleta", () => {
+  it("🔴 el convenio se LISTA pero no se SUMA: no sale de la boleta", () => {
+    // Una boleta de Q1,000 que acredita Q300 al convenio y aplica Q1,000 a la
+    // cuota informaba «Q1,300 en total» — más plata de la que la boleta trae.
+    // El convenio se registra SIN consumir la boleta, que es justo la asimetría
+    // que separa a este predicado de `escalonesQueConsumenLaBoleta`.
+    const r = loQueElAbonoACapitalNoAplica({
+      mora: 0, rubros: 0, convenio: 300, cuota: 1000, excedente: 0,
+    });
+    expect(r.total).toBe(1000);
+    expect(r.etiquetas.join(" ")).toContain("convenio");
+  });
+
+  it("lo que SÍ sale de la boleta se suma completo", () => {
+    const r = loQueElAbonoACapitalNoAplica({
+      mora: 50, rubros: 100, convenio: 0, cuota: 800, excedente: 50,
+    });
+    expect(r.total).toBe(1000);
+  });
+
+  it("sólo convenio: se avisa, pero el total es cero", () => {
+    const r = loQueElAbonoACapitalNoAplica({
+      mora: 0, rubros: 0, convenio: 300, cuota: 0, excedente: 0,
+    });
+    expect(r.hayAviso).toBe(true);
+    expect(r.total).toBe(0);
   });
 });

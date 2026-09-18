@@ -1348,6 +1348,11 @@ export const contractGenerationRouter = {
 				filename: z.string().min(1),
 				/** PDF en base64, sin el prefijo `data:`. */
 				pdfBase64: z.string().min(1),
+				/**
+				 * Contrato al que reemplaza. Se usa cuando jurídico corrige uno ya
+				 * registrado: el nuevo ocupa su lugar y el viejo se borra.
+				 */
+				replaceContractId: z.string().uuid().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -1400,6 +1405,20 @@ export const contractGenerationRouter = {
 				throw new ORPCError("BAD_REQUEST", { message: falla });
 			}
 
+			// El viejo se borra recién ahora: si el envío a firma hubiera fallado,
+			// arriba ya se habría cortado y el contrato original sigue en pie.
+			// Borrarlo se lleva sus firmantes por la FK en cascada.
+			if (input.replaceContractId) {
+				await db
+					.delete(generatedLegalContracts)
+					.where(
+						and(
+							eq(generatedLegalContracts.id, input.replaceContractId),
+							eq(generatedLegalContracts.opportunityId, input.opportunityId),
+						),
+					);
+			}
+
 			const [saved] = await db
 				.insert(generatedLegalContracts)
 				.values({
@@ -1442,8 +1461,10 @@ export const contractGenerationRouter = {
 				signingLinks: resultado.signing_links ?? [],
 				message:
 					getSignatureMode(input.contractType) === "fisica"
-						? "Contrato subido. Se firma en papel."
-						: `Contrato subido y enviado a firma (${resultado.signing_links?.length ?? 0} enlace(s))`,
+						? input.replaceContractId
+							? "Contrato reemplazado. Se firma en papel."
+							: "Contrato subido. Se firma en papel."
+						: `Contrato ${input.replaceContractId ? "reemplazado" : "subido"} y enviado a firma (${resultado.signing_links?.length ?? 0} enlace(s))`,
 			};
 		}),
 };

@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { FileText, FileUp, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CONTRATOS_VENTA_MAPEADOS } from "server/src/lib/contratos-venta";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,12 @@ interface UploadContractModalProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onUploaded?: () => void;
+	/**
+	 * Contrato al que reemplaza, si se llegó por "Reemplazar documento" en vez
+	 * de por "Subir contrato". El tipo queda fijo: reemplazar un contrato por
+	 * otro de distinto tipo no es reemplazar, es subir uno nuevo.
+	 */
+	reemplaza?: { id: string; contractType: string; contractName: string } | null;
 }
 
 /** Lee el archivo como base64, sin el prefijo `data:...;base64,`. */
@@ -57,9 +63,16 @@ export function UploadContractModal({
 	open,
 	onOpenChange,
 	onUploaded,
+	reemplaza,
 }: UploadContractModalProps) {
 	const [contractType, setContractType] = useState<string>("");
 	const [archivo, setArchivo] = useState<File | null>(null);
+
+	// Al abrirse para reemplazar, el tipo viene dado por el contrato que se
+	// reemplaza y no se elige.
+	useEffect(() => {
+		if (open) setContractType(reemplaza?.contractType ?? "");
+	}, [open, reemplaza]);
 
 	const limpiar = () => {
 		setContractType("");
@@ -76,6 +89,7 @@ export function UploadContractModal({
 				contractType,
 				filename: archivo.name,
 				pdfBase64: await leerBase64(archivo),
+				...(reemplaza ? { replaceContractId: reemplaza.id } : {}),
 			});
 		},
 		onSuccess: (data) => {
@@ -110,7 +124,11 @@ export function UploadContractModal({
 				<div className="min-w-0 space-y-4">
 					<div className="space-y-2">
 						<Label htmlFor="tipo-contrato">Tipo de contrato</Label>
-						<Select value={contractType} onValueChange={setContractType}>
+						<Select
+							value={contractType}
+							onValueChange={setContractType}
+							disabled={!!reemplaza}
+						>
 							<SelectTrigger id="tipo-contrato" className="w-full">
 								<SelectValue placeholder="Elegí el tipo" />
 							</SelectTrigger>
@@ -176,7 +194,9 @@ export function UploadContractModal({
 						) : (
 							<FileUp className="mr-2 h-4 w-4" />
 						)}
-						Subir y enviar a firma
+						{reemplaza
+							? "Reemplazar y enviar a firma"
+							: "Subir y enviar a firma"}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

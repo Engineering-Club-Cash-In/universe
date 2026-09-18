@@ -5,7 +5,6 @@ import {
 	CheckCircle,
 	FileUp,
 	Loader2,
-	Plus,
 	RefreshCw,
 	User,
 } from "lucide-react";
@@ -15,7 +14,6 @@ import { z } from "zod";
 import type { ContractSigner } from "@/components/contracts/DynamicContractWizard";
 import { ApproveOpportunityModal } from "@/components/juridico/ApproveOpportunityModal";
 import { ContractsList } from "@/components/juridico/ContractsList";
-import { CreateContractModal } from "@/components/juridico/CreateContractModal";
 import { RegenerateContractsModal } from "@/components/juridico/RegenerateContractsModal";
 import { UploadContractModal } from "@/components/juridico/UploadContractModal";
 import {
@@ -54,7 +52,6 @@ function RouteComponent() {
 		isLoading: isLoadingPermissions,
 	} = useJuridicoPermissions();
 
-	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
 	const [isRegenerateModalOpen, setIsRegenerateModalOpen] = useState(false);
@@ -62,20 +59,10 @@ function RouteComponent() {
 	const [deletingContractId, setDeletingContractId] = useState<string | null>(
 		null,
 	);
-	const [contractToEdit, setContractToEdit] = useState<{
+	const [contratoAReemplazar, setContratoAReemplazar] = useState<{
 		id: string;
 		contractType: string;
 		contractName: string;
-		clientSigningLink: string | null;
-		representativeSigningLink: string | null;
-		additionalSigningLinks: string[] | null;
-		pdfLink?: string | null;
-		opportunityId: string | null;
-	} | null>(null);
-	const [opportunityInfo, setOpportunityInfo] = useState<{
-		id: string;
-		title: string;
-		value: string | null;
 	} | null>(null);
 
 	const opportunityId = searchParams?.opportunityId;
@@ -205,30 +192,26 @@ function RouteComponent() {
 
 	const isLoading = isLoadingLead || isLoadingContracts;
 
-	const handleEdit = (
-		contract: {
-			id: string;
-			contractType: string;
-			contractName: string;
-			clientSigningLink: string | null;
-			representativeSigningLink: string | null;
-			additionalSigningLinks: string[] | null;
-			pdfLink?: string | null;
-			opportunityId: string | null;
-		},
-		opportunity?: { id: string; title: string; value: string | null } | null,
-	) => {
-		setContractToEdit(contract);
-		setOpportunityInfo(opportunity || null);
-		setIsCreateModalOpen(true);
-	};
-
-	const handleCloseModal = (open: boolean) => {
-		setIsCreateModalOpen(open);
-		if (!open) {
-			setContractToEdit(null);
-			setOpportunityInfo(null);
-		}
+	/**
+	 * Reemplazar el documento de un contrato ya registrado.
+	 *
+	 * Antes esto abría un formulario donde se pegaban los links de firma a mano.
+	 * Eso venía de cuando los contratos se armaban por fuera; hoy el link lo
+	 * emite WeeTrust con el rol de cada quien, y pegarlo a mano es la forma de
+	 * volver a cruzarlos. Lo que de verdad se quiere corregir es el documento,
+	 * así que "Editar" pasó a ser subir el PDF bueno.
+	 */
+	const handleReplace = (contract: {
+		id: string;
+		contractType: string;
+		contractName: string;
+	}) => {
+		setContratoAReemplazar({
+			id: contract.id,
+			contractType: contract.contractType,
+			contractName: contract.contractName,
+		});
+		setIsUploadModalOpen(true);
 	};
 
 	const handleOpenOpportunityModal = () => {
@@ -343,19 +326,15 @@ function RouteComponent() {
 									Regenerar con nueva fecha
 								</Button>
 							)}
+						{/* "Registrar Contrato" se fue: pedía pegar los links de firma a
+						    mano, de cuando los contratos se generaban por fuera. Hoy los
+						    genera el wizard o se suben acá, y en los dos casos el link
+						    sale de WeeTrust con su rol. El modal sigue montado para
+						    editar un contrato ya registrado. */}
 						{canCreateLegal && opportunityId && (
-							<Button
-								variant="outline"
-								onClick={() => setIsUploadModalOpen(true)}
-							>
+							<Button onClick={() => setIsUploadModalOpen(true)}>
 								<FileUp className="mr-2 h-4 w-4" />
 								Subir contrato
-							</Button>
-						)}
-						{canCreateLegal && (
-							<Button onClick={() => setIsCreateModalOpen(true)}>
-								<Plus className="mr-2 h-4 w-4" />
-								Registrar Contrato
 							</Button>
 						)}
 					</div>
@@ -443,23 +422,12 @@ function RouteComponent() {
 					<ContractsList
 						contracts={contracts || []}
 						onUpdate={refetch}
-						onEdit={canCreateLegal ? handleEdit : undefined}
+						onReplace={canCreateLegal ? handleReplace : undefined}
 						onDelete={canCreateLegal ? handleDeleteContract : undefined}
 						deletingContractId={deletingContractId}
 					/>
 				</CardContent>
 			</Card>
-
-			{/* Modal para crear contrato */}
-			<CreateContractModal
-				leadId={leadId}
-				open={isCreateModalOpen}
-				onOpenChange={handleCloseModal}
-				onSuccess={refetch}
-				preselectedOpportunityId={opportunityId}
-				contractToEdit={contractToEdit || undefined}
-				opportunityInfo={opportunityInfo}
-			/>
 
 			{/* Modal de detalle de oportunidad */}
 			<OpportunityDetailModal
@@ -488,8 +456,12 @@ function RouteComponent() {
 				<UploadContractModal
 					opportunityId={opportunityId}
 					open={isUploadModalOpen}
-					onOpenChange={setIsUploadModalOpen}
+					onOpenChange={(abierto) => {
+						setIsUploadModalOpen(abierto);
+						if (!abierto) setContratoAReemplazar(null);
+					}}
 					onUploaded={refetch}
+					reemplaza={contratoAReemplazar}
 				/>
 			)}
 

@@ -3,9 +3,9 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
 	Copy,
-	Edit,
 	ExternalLink,
 	FileText,
+	FileUp,
 	Loader2,
 	Mail,
 	RefreshCw,
@@ -85,7 +85,8 @@ interface ContractCardProps {
 		value: string | null;
 	} | null;
 	onUpdate?: () => void;
-	onEdit?: () => void;
+	/** Abre la subida para reemplazar el documento de este contrato. */
+	onReplace?: () => void;
 	onDelete?: (contractId: string) => Promise<void>;
 	isDeleting?: boolean;
 }
@@ -112,7 +113,7 @@ export function ContractCard({
 	signatories,
 	opportunity,
 	onUpdate,
-	onEdit,
+	onReplace,
 	onDelete,
 	isDeleting = false,
 }: ContractCardProps) {
@@ -231,15 +232,20 @@ export function ContractCard({
 								{statusConfig[contract.status].label}
 							</Badge>
 						)}
-						{canCreateLegal && onEdit && (
+						{canCreateLegal && onReplace && (
 							<Button
 								size="sm"
 								variant="outline"
-								onClick={onEdit}
+								onClick={onReplace}
 								className="h-8"
+								title={
+									firmaEnPapel
+										? "Subí el PDF corregido: reemplaza a este."
+										: "Subí el PDF corregido: reemplaza a este y emite enlaces de firma nuevos."
+								}
 							>
-								<Edit className="mr-1 h-3 w-3" />
-								Editar
+								<FileUp className="mr-1 h-3 w-3" />
+								Reemplazar
 							</Button>
 						)}
 						{canCreateLegal && onDelete && (

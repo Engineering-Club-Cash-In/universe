@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "../db";
-import { leads, opportunities } from "../db/schema/crm";
+import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import { eqDpi } from "./dpi-lookup";
 
@@ -105,16 +105,54 @@ export function consultaNumerosSifcoPorDpi(
 		.limit(SONDA_DESBORDE_NUMEROS);
 }
 
+/**
+ * La otra puerta al mismo DPI: las oportunidades donde esa persona figura como
+ * CO-DEUDOR.
+ *
+ * 🔴 `consultaNumerosSifcoPorDpi` llega a las oportunidades SOLO por
+ * `leads.dpi`. Quien nunca fue lead pero sí co-deudor de una oportunidad
+ * morosa nacida en el CRM —crédito `CRM-<uuid>`, que SIFCO jamás devuelve— era
+ * invisible para el gate: cartera contestaba `CLIENTE_NO_ENCONTRADO` y esa
+ * persona volvía a entrar como titular de una solicitud nueva.
+ *
+ * Mismo saneo y misma sonda de desborde que su hermana.
+ */
+export function consultaNumerosSifcoPorDpiDeCoDeudor(
+	database: Pick<typeof db, "selectDistinct">,
+	dpi: string,
+) {
+	const numeroLimpio = sql<string>`trim(${opportunities.numeroSifco})`;
+
+	return database
+		.selectDistinct({ numeroSifco: numeroLimpio })
+		.from(opportunities)
+		.innerJoin(coDebtors, eq(coDebtors.opportunityId, opportunities.id))
+		.where(
+			and(
+				eqDpi(coDebtors.dpi, dpi),
+				isNotNull(opportunities.numeroSifco),
+				ne(numeroLimpio, ""),
+			),
+		)
+		.limit(SONDA_DESBORDE_NUMEROS);
+}
+
 export async function numerosSifcoConocidosPorDpi(
 	dpi: string,
 ): Promise<string[]> {
-	const filas = await consultaNumerosSifcoPorDpi(db, dpi);
+	// Las DOS puertas: titular de un lead y co-deudor de una oportunidad —
+	// quien entró por una sola seguía invisible por la otra.
+	const [comoTitular, comoCoDeudor] = await Promise.all([
+		consultaNumerosSifcoPorDpi(db, dpi),
+		consultaNumerosSifcoPorDpiDeCoDeudor(db, dpi),
+	]);
 
 	// Antes de mirar el contenido: si vino la fila sonda, esta lista JAMÁS va a
 	// estar completa. Ver `exigirNumerosCompletos`.
-	exigirNumerosCompletos(filas, dpi);
+	exigirNumerosCompletos(comoTitular, dpi);
+	exigirNumerosCompletos(comoCoDeudor, dpi);
 
-	return sanear(filas);
+	return unirNumerosSifco(sanear(comoTitular), sanear(comoCoDeudor));
 }
 
 /**

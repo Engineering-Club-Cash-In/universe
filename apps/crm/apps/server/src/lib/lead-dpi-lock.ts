@@ -84,7 +84,10 @@ export function dpiCambia(
  * y la etapa actual cubre a la oportunidad recién creada directamente al 40%,
  * que todavía no tiene ninguna fila en `opportunityStageHistory`.
  */
-export function cruzoElCandado(o: OportunidadParaCandadoDpi): boolean {
+export function cruzoElCandado(o: {
+	closurePercentage: number;
+	maxHistoricoClosurePercentage?: number | null;
+}): boolean {
 	return (
 		o.closurePercentage > PORCENTAJE_CANDADO_DPI ||
 		(o.maxHistoricoClosurePercentage ?? 0) > PORCENTAJE_CANDADO_DPI

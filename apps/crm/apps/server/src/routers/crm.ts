@@ -95,7 +95,18 @@ import {
 	evaluarCandadoDpi,
 	noExisteOportunidadCandanteDelLead,
 	noExisteOportunidadCandantePorId,
+	obtenerOportunidadesParaCandadoDpi,
+	type ResultadoCandadoDpi,
 } from "../lib/lead-dpi-lock";
+import {
+	decidirRevalidacion,
+	type DecisionRevalidacion,
+	MOTIVO_AVISO,
+	obtenerEtapaDeAnalisis,
+	type OportunidadParaRevalidar,
+	parcheDeRevalidacion,
+	revalidarOportunidades,
+} from "../lib/revalidacion-oportunidad";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
@@ -1471,19 +1482,23 @@ export const crmRouter = {
 				updateData.dpi !== undefined &&
 				dpiCambia(leadAntesDelUpdate?.dpi, updateData.dpi);
 
+			// El veredicto del candado sobrevive al bloque: si el admin usó la
+			// válvula hay que cobrarle el costo DESPUÉS del UPDATE (ver F9 abajo).
+			let candadoDpi: ResultadoCandadoDpi | null = null;
+
 			if (updateData.dpi !== undefined) {
 				// El candado va ANTES que el gate de mora: es una consulta local
 				// barata, y si el DPI ya no se puede cambiar (solicitud pasada del
 				// 30%) no tiene sentido pagar el viaje a SIFCO.
-				const candado = await evaluarCandadoDpi({
+				candadoDpi = await evaluarCandadoDpi({
 					dpiActual: leadAntesDelUpdate?.dpi,
 					dpiNuevo: updateData.dpi,
 					sujeto: "lead",
 					esAdmin: editaAdmin,
 					leadId: id,
 				});
-				if (candado.bloqueado) {
-					throw new ORPCError("BAD_REQUEST", { message: candado.message });
+				if (candadoDpi.bloqueado) {
+					throw new ORPCError("BAD_REQUEST", { message: candadoDpi.message });
 				}
 
 				// 🔴 Solo se consulta la mora si el DPI es nuevo o cambia. Si se
@@ -1581,6 +1596,25 @@ export const crmRouter = {
 			// `auditRecord` del update por el mismo motivo: son la misma escritura.
 			if (overrideDeMora) {
 				auditRecord(overrideDeMora);
+			}
+
+			// 🔴 El override del admin sobre el candado no es gratis. La válvula
+			// existe para corregir un DPI mal tecleado, pero cuando se usa, RENAP,
+			// buró y los documentos de las oportunidades candantes quedaron hechos
+			// contra el DPI VIEJO. Se las manda de vuelta a análisis: corregir el
+			// DPI a esta altura cuesta re-validar.
+			//
+			// Las salvaguardas (won y ≥90% no se tocan, solo se avisa) viven dentro
+			// de `revalidarOportunidades`.
+			if (candadoDpi?.overrideAdmin && candadoDpi.candantes?.length) {
+				await revalidarOportunidades({
+					oportunidades: candadoDpi.candantes,
+					accion: "candado_override_revalidacion",
+					detalle:
+						"un administrador cambió el DPI del lead pese al candado; la validación de identidad de esta oportunidad se hizo contra el DPI anterior",
+					datosExtra: { leadId: id, dpiNuevo: updateData.dpi },
+					anotar: auditRecord,
+				});
 			}
 
 			// Sync NIT to associated opportunities.
@@ -3190,6 +3224,60 @@ export const crmRouter = {
 			// campo congelado con el mismo valor que se acaba de leer no aporta
 			// nada, y si en el medio la oportunidad se gana y alguien lo corrige,
 			// esta sentencia le pisaría la corrección con un dato ya viejo.
+			// 🔴 Reabrir una perdida avanzada vuelve a mandarla a análisis.
+			//
+			// Las oportunidades `lost` NO candan el DPI, y eso es deliberado: un
+			// crédito que no se dio no puede dejar al cliente con el DPI fijo para
+			// siempre. Pero entonces, mientras está perdida, el DPI se puede
+			// cambiar. Reabrirla con la etapa avanzada intacta dejaba RENAP, buró y
+			// los documentos pegados a lo que se validó ANTES de perderse: si el DPI
+			// cambió en el medio, el expediente miente. La escapatoria completa era
+			// perder la oportunidad, cambiar el DPI y reabrirla.
+			//
+			// No se prohíbe reabrir: se le pone precio. Reabrir cuesta re-validar, y
+			// así la maniobra deja de pagar.
+			//
+			// El reset viaja en ESTE MISMO UPDATE, junto al cambio de status: en dos
+			// sentencias quedaría una ventana con la oportunidad ya reabierta y
+			// todavía marcada como validada.
+			const reabreUnaPerdida =
+				currentOpportunity[0].status === "lost" &&
+				updateData.status === "open";
+
+			let parcheRevalidacion: ReturnType<typeof parcheDeRevalidacion> | null =
+				null;
+			let decisionRevalidacion: DecisionRevalidacion = { tipo: "nada" };
+			let oportunidadRevalidada: OportunidadParaRevalidar | null = null;
+
+			if (reabreUnaPerdida) {
+				// La señal del candado: ¿cruzó el 30% hoy o alguna vez? Se pregunta
+				// por la oportunidad concreta, así que trae una sola fila.
+				const [comoEsta] = await obtenerOportunidadesParaCandadoDpi({
+					opportunityId: id,
+				});
+
+				if (comoEsta) {
+					// La decisión se toma sobre el status al que VUELVE ("open"), no
+					// sobre el "lost" del que sale: es el estado con el que va a quedar.
+					oportunidadRevalidada = { ...comoEsta, status: "open" };
+					decisionRevalidacion = decidirRevalidacion(oportunidadRevalidada);
+
+					if (decisionRevalidacion.tipo === "resetear") {
+						const etapaDeAnalisis = await obtenerEtapaDeAnalisis();
+						if (etapaDeAnalisis) {
+							parcheRevalidacion = parcheDeRevalidacion(etapaDeAnalisis.id);
+						} else {
+							// Sin etapa de análisis no hay a dónde mandarla; se avisa y no
+							// se escribe a medias.
+							console.error(
+								"[updateOpportunity] no existe etapa de análisis (30%); la reapertura no se revalidó",
+							);
+							decisionRevalidacion = { tipo: "nada" };
+						}
+					}
+				}
+			}
+
 			const safeUpdateData = stripUnchangedFrozenFields(
 				updateData,
 				currentOpportunity[0],
@@ -3233,6 +3321,10 @@ export const crmRouter = {
 						analysisStatus: newAnalysisStatus,
 					}),
 					...(updateData.status === "won" && { actualCloseDate: new Date() }),
+					// Va al final a propósito: si la reapertura manda a análisis, eso
+					// gana sobre cualquier `stageId` que venga en la misma request. La
+					// revalidación no es negociable en el mismo viaje que la dispara.
+					...(parcheRevalidacion ?? {}),
 					updatedAt: new Date(),
 				})
 				.where(whereClause)
@@ -3266,6 +3358,31 @@ export const crmRouter = {
 
 			// Después del chequeo de conflicto: con cero filas no hubo escritura.
 			auditRecord({ entity: "opportunity", id: id, action: "update" });
+
+			// La reapertura deja su propia fila, tanto cuando revalidó como cuando
+			// las salvaguardas lo impidieron: en ese segundo caso el aviso es lo
+			// único que queda para saber que la validación es vieja.
+			if (reabreUnaPerdida && decisionRevalidacion.tipo !== "nada") {
+				const detalle =
+					"se reabrió una oportunidad que ya había cruzado el 30%; su validación de identidad (RENAP/buró/documentos) es anterior a la pérdida y el DPI pudo cambiar mientras estuvo perdida";
+
+				auditRecord({
+					entity: "opportunity",
+					id,
+					action: "reabrir_oportunidad_revalidacion",
+					data: {
+						porcentajeActual: oportunidadRevalidada?.closurePercentage,
+						porcentajeMaximoHistorico:
+							oportunidadRevalidada?.maxHistoricoClosurePercentage,
+						detalle,
+						resultado:
+							decisionRevalidacion.tipo === "resetear"
+								? "vuelve a la etapa de análisis (30%), analysisStatus pending y detalle de crédito sin aprobar"
+								: `NO se revalidó: ${MOTIVO_AVISO[decisionRevalidacion.razon]}`,
+					},
+					...(decisionRevalidacion.tipo === "solo_aviso" ? { ok: false } : {}),
+				});
+			}
 
 			// Si viene direccion, actualizar en el lead en lugar de la oportunidad
 			if (direccion !== undefined && currentOpportunity[0].leadId) {
@@ -8322,6 +8439,9 @@ export const crmRouter = {
 			let coDebtorAntesDelUpdate:
 				| { dpi: string | null; opportunityId: string }
 				| undefined;
+			// Igual que en `updateLead`: el veredicto sobrevive al bloque porque el
+			// override del admin se cobra DESPUÉS del UPDATE.
+			let candadoDpi: ResultadoCandadoDpi | null = null;
 
 			if (updateData.dpi !== undefined) {
 				[coDebtorAntesDelUpdate] = await db
@@ -8337,15 +8457,17 @@ export const crmRouter = {
 					// El candado va ANTES que el gate de mora: consulta local barata
 					// contra el viaje a SIFCO. El co-deudor cuelga de una oportunidad:
 					// el candado se evalúa sobre ESA, no sobre las demás del lead.
-					const candado = await evaluarCandadoDpi({
+					candadoDpi = await evaluarCandadoDpi({
 						dpiActual: coDebtorAntesDelUpdate.dpi,
 						dpiNuevo: updateData.dpi,
 						sujeto: "codeudor",
 						esAdmin: editaAdmin,
 						opportunityId: coDebtorAntesDelUpdate.opportunityId,
 					});
-					if (candado.bloqueado) {
-						throw new ORPCError("BAD_REQUEST", { message: candado.message });
+					if (candadoDpi.bloqueado) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: candadoDpi.message,
+						});
 					}
 				}
 
@@ -8443,6 +8565,21 @@ export const crmRouter = {
 			// Recién acá: el override existe si el cambio existió.
 			if (overrideDeMora) {
 				auditRecord(overrideDeMora);
+			}
+
+			// Mismo costo que en `updateLead`: si el admin abrió el candado, la
+			// oportunidad que respalda vuelve a análisis, porque su validación de
+			// identidad se hizo contra el DPI anterior del co-deudor. Es una sola
+			// oportunidad: el co-deudor cuelga de una, no de un lead.
+			if (candadoDpi?.overrideAdmin && candadoDpi.candantes?.length) {
+				await revalidarOportunidades({
+					oportunidades: candadoDpi.candantes,
+					accion: "candado_override_revalidacion",
+					detalle:
+						"un administrador cambió el DPI del co-deudor pese al candado; la validación de identidad de esta oportunidad se hizo contra el DPI anterior",
+					datosExtra: { coDebtorId: id, dpiNuevo: updateData.dpi },
+					anotar: auditRecord,
+				});
 			}
 
 			return updatedCoDebtor;

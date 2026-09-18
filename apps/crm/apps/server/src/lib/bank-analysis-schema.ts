@@ -47,6 +47,17 @@ export const bankStatementAnalysisSchema = z.object({
 		.nullable()
 		.catch(null),
 	estados_cuenta_detectados: z.number().int().min(1).nullable().catch(null),
+	// Evidencia informada por la IA; el servidor valida meses e índices y resuelve
+	// contradicciones. Es opcional para mantener compatibles análisis históricos.
+	cobertura_por_archivo: z
+		.array(
+			z.object({
+				indice_archivo: z.number().int(),
+				meses: z.array(z.string()),
+			}),
+		)
+		.optional()
+		.catch(undefined),
 	// La IA solo detecta la moneda; el servidor convierte a quetzales (no le pedimos
 	// que multiplique, porque no tiene forma de conocer el tipo de cambio).
 	moneda: z.enum(["GTQ", "USD", "MIXTA"]),
@@ -97,7 +108,15 @@ Eres un analista de capacidad de pago para una financiera que otorga créditos p
    - Si dos estados de cuenta se traslapan en fechas (ej. uno cubre enero a marzo y otro cubre solo marzo), igual cuentan como 2 estados de cuenta distintos: NO los fusiones en uno solo por compartir mes.
    - Devuelve el número REAL que identificaste, sin limitarlo artificialmente.
 
-6. **moneda**: La moneda en la que están expresadas TODAS las cifras que devuelves.
+6. **cobertura_por_archivo**: Evidencia mensual por cada archivo recibido en esta misma llamada.
+   - Devuelve exactamente un objeto por archivo: { indice_archivo, meses }.
+   - indice_archivo es el índice explícito (0 a N-1) indicado junto al PDF.
+   - meses contiene solo meses calendario inequívocos en formato canónico YYYY-MM (ej. "2026-06").
+   - No cuentes páginas, cuentas, resúmenes ni documentos. Repite un mismo mes en archivos distintos cuando ambos lo respaldan, pero no lo repitas dentro del mismo archivo.
+   - Si el año falta, el periodo es ilegible o hay contradicción, devuelve meses: [] para ese archivo. No adivines ni uses el mes actual.
+   - Esta procedencia debe salir de la misma llamada de análisis; no solicites ni presupongas otra llamada.
+
+7. **moneda**: La moneda en la que están expresadas TODAS las cifras que devuelves.
    **NUNCA conviertas montos de una moneda a otra.** Reporta los valores exactamente como aparecen impresos en los estados de cuenta; la conversión la hace el sistema después.
    - "GTQ": todos los estados de cuenta están en quetzales.
    - "USD": todos los estados de cuenta están en dólares.

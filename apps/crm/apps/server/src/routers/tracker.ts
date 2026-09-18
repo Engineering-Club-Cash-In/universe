@@ -16,7 +16,8 @@ import { partnerAccounts } from "../db/schema/partners";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
 import { partnerIdentityProcedure, partnerProcedure } from "../lib/orpc";
-import { partnerAuth } from "../lib/partner-auth";
+import { PARTNER_CHANGE_PASSWORD_PATH, partnerAuth } from "../lib/partner-auth";
+import { extraerIp, partnerAuthLimiter } from "../lib/rate-limit";
 import {
 	construirHistorial,
 	type EntradaHistorial,
@@ -55,13 +56,14 @@ export type CasoTracker = {
 const fechaCierre = sql<Date>`COALESCE(${opportunities.actualCloseDate}, ${opportunities.updatedAt})`;
 
 // open/on_hold siempre entran (el socio los necesita aunque lleven meses
-// parados). won y lost ya están cerrados en el pipeline de ventas — aunque
-// "aprobado" no signifique desembolsado, ambos comparten la misma ventana de
-// retención para que el payload no crezca sin límite.
+// parados). won ya está cerrado en el pipeline de ventas — aunque "aprobado"
+// no signifique desembolsado, comparte la misma ventana de retención para
+// que el payload no crezca sin límite. Los perdidos ("lost") no se traen
+// nunca: el socio no debe ver créditos rechazados.
 function dentroDeVentanaDeRetencion(desde: Date) {
 	return or(
 		inArray(opportunities.status, ["open", "on_hold"]),
-		and(inArray(opportunities.status, ["won", "lost"]), gte(fechaCierre, desde)),
+		and(eq(opportunities.status, "won"), gte(fechaCierre, desde)),
 	);
 }
 
@@ -281,6 +283,17 @@ export const trackerRouter = {
 	changePartnerPassword: partnerIdentityProcedure
 		.input(changePartnerPasswordInputSchema)
 		.handler(async ({ input, context }) => {
+			// Esta es la vía real que usa la pantalla de cambio de contraseña — la
+			// ruta cruda /api/partner-auth/change-password casi nadie la llama
+			// directo. Comparte cupo con ella (misma clave) porque ambas validan
+			// la misma contraseña actual.
+			const ip = extraerIp((nombre) => context.headers.get(nombre));
+			if (!partnerAuthLimiter.permitir(`${ip}:${PARTNER_CHANGE_PASSWORD_PATH}`)) {
+				throw new ORPCError("TOO_MANY_REQUESTS", {
+					message: partnerAuthLimiter.mensaje,
+				});
+			}
+
 			if (
 				input.email.trim().toLowerCase() !==
 				context.user.email.trim().toLowerCase()

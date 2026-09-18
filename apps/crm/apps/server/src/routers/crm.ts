@@ -29,6 +29,7 @@ import {
 	vehicleDocuments,
 	vehicleInspections,
 	vehicles,
+	vehicleVendors,
 } from "../db/schema";
 import { user } from "../db/schema/auth";
 import {
@@ -96,6 +97,7 @@ import {
 	getWonOpportunityLockError,
 	getWonOpportunityRevokeError,
 	stripUnchangedFrozenFields,
+	type WonOpportunityFrozenField,
 } from "../lib/opportunity-stage-guard";
 import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
@@ -585,6 +587,21 @@ export const crmRouter = {
 			.orderBy(companies.createdAt);
 	}),
 
+	// Catálogo completo para asignar la agencia del vehículo (análisis y
+	// detalle de la oportunidad): getCompanies filtra por creador y a los
+	// analistas y asesores les devolvería casi vacío. Son las agencias y
+	// predios con los que se trabaja, no información de clientes.
+	getCompaniesForContracts: crmProcedure.handler(async () => {
+		return await db
+			.select({
+				id: companies.id,
+				name: companies.name,
+				razonSocial: companies.razonSocial,
+			})
+			.from(companies)
+			.orderBy(companies.name);
+	}),
+
 	getCompanyRelationshipStats: crmProcedure.handler(async ({ context }) => {
 		const leadsOwnerCondition =
 			context.userRole === "sales"
@@ -633,6 +650,7 @@ export const crmRouter = {
 		.input(
 			z.object({
 				name: z.string().min(1, "Company name is required"),
+				razonSocial: z.string().trim().optional(),
 				industry: z.string().optional(),
 				size: z.string().optional(),
 				website: z.string().optional(),
@@ -643,6 +661,12 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// crmProcedure deja pasar a jurídico, que no da de alta empresas
+			if (!PERMISSIONS.canCreateCompanies(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para crear empresas",
+				});
+			}
 			const newCompany = await db
 				.insert(companies)
 				.values({
@@ -654,11 +678,206 @@ export const crmRouter = {
 			return newCompany[0];
 		}),
 
+	/**
+	 * Completar el nombre legal de una agencia desde el detalle de la
+	 * oportunidad. Va aparte de updateCompany porque ese limita a las empresas
+	 * creadas por uno y las agencias son de todos; aquí solo se escribe la
+	 * razón social, que es el dato que el contrato necesita.
+	 */
+	/**
+	 * Asignar o quitar las partes del contrato (vendedor del vehículo y agencia)
+	 * desde el detalle de la oportunidad. Va aparte de updateOpportunity porque
+	 * ese limita las ediciones al asesor asignado, y quien prepara los datos
+	 * para jurídico suele ser el analista, que no es el dueño de la
+	 * oportunidad. Solo toca esas dos columnas.
+	 */
+	setOpportunityContractParty: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "update" } })
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				// null desasigna la parte; ausente la deja como está
+				vendorId: z.string().uuid().nullable().optional(),
+				companyId: z.string().uuid().nullable().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const [oportunidad] = await db
+				.select({
+					id: opportunities.id,
+					assignedTo: opportunities.assignedTo,
+					status: opportunities.status,
+					vendorId: opportunities.vendorId,
+					companyId: opportunities.companyId,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+			if (!oportunidad) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			// Análisis (admin, analista y supervisor de ventas) prepara los datos
+			// de contratos; el asesor puede hacerlo sobre las suyas.
+			const puedeEditar =
+				PERMISSIONS.canAccessAnalysis(context.userRole) ||
+				oportunidad.assignedTo === context.userId;
+			if (!puedeEditar) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para editar esta oportunidad",
+				});
+			}
+
+			// Ganada = ya se firmaron los contratos y el crédito viajó a cartera:
+			// el vendedor y la empresa son campos congelados, igual que en
+			// updateOpportunity. Reasignar el mismo valor no cuenta como cambio.
+			const cambiosCongelados = getWonOpportunityFrozenFieldChanges(
+				{
+					...(input.vendorId !== undefined && { vendorId: input.vendorId }),
+					...(input.companyId !== undefined && { companyId: input.companyId }),
+				},
+				oportunidad,
+			);
+			const wonLockError = getWonOpportunityLockError(
+				oportunidad.status,
+				context.userRole,
+				cambiosCongelados,
+			);
+			if (wonLockError) {
+				throw new ORPCError("FORBIDDEN", { message: wonLockError });
+			}
+
+			// Las lecturas de arriba pudieron quedar viejas, así que las dos
+			// condiciones se repiten en el predicado: Postgres las re-evalúa
+			// después de esperar a la escritura rival. Si closeOpportunity la marca
+			// ganada, o un supervisor se la reasigna a otro asesor, el cambio ya no
+			// entra.
+			// La condición se exige por cualquier parte enviada, no solo por las que
+			// se veían distintas: si otro cambió el vendedor y cerró la oportunidad
+			// entre la lectura y esta escritura, mandar "el mismo valor" que se leyó
+			// la restauraría sobre una oportunidad ya ganada.
+			const camposEnviados: WonOpportunityFrozenField[] = [
+				...(input.vendorId !== undefined
+					? (["vendorId"] as const)
+					: ([] as const)),
+				...(input.companyId !== undefined
+					? (["companyId"] as const)
+					: ([] as const)),
+			];
+			const exigirNoGanada =
+				camposEnviados.length > 0 &&
+				!PERMISSIONS.canAccessAdmin(context.userRole ?? "");
+			const soloPorSerElAsesor = !PERMISSIONS.canAccessAnalysis(
+				context.userRole,
+			);
+			const condiciones = [eq(opportunities.id, input.opportunityId)];
+			if (exigirNoGanada) {
+				condiciones.push(not(eq(opportunities.status, "won")));
+			}
+			if (soloPorSerElAsesor) {
+				condiciones.push(eq(opportunities.assignedTo, context.userId));
+			}
+			const [actualizada] = await db
+				.update(opportunities)
+				.set({
+					...(input.vendorId !== undefined && { vendorId: input.vendorId }),
+					...(input.companyId !== undefined && { companyId: input.companyId }),
+					updatedAt: new Date(),
+				})
+				.where(and(...condiciones))
+				.returning({
+					id: opportunities.id,
+					vendorId: opportunities.vendorId,
+					companyId: opportunities.companyId,
+				});
+			if (!actualizada) {
+				// Distinguir el motivo: la fila cambió entre la lectura y el UPDATE
+				const [ahora] = await db
+					.select({
+						status: opportunities.status,
+						assignedTo: opportunities.assignedTo,
+					})
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1);
+				if (soloPorSerElAsesor && ahora?.assignedTo !== context.userId) {
+					throw new ORPCError("FORBIDDEN", {
+						message:
+							"La oportunidad se reasignó a otra persona mientras editabas",
+					});
+				}
+				throw new ORPCError("FORBIDDEN", {
+					message: buildWonOpportunityFrozenFieldError(
+						cambiosCongelados.length > 0 ? cambiosCongelados : camposEnviados,
+					),
+				});
+			}
+			// El meta solo cubre los fallos: la escritura buena se anota aquí, que
+			// es como se reconstruye después quién puso al vendedor o la agencia.
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "update",
+			});
+			return actualizada;
+		}),
+
+	setCompanyRazonSocial: crmProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				razonSocial: z.string().trim().min(1),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (!PERMISSIONS.canCreateCompanies(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para editar empresas",
+				});
+			}
+			// Solo se completa lo que está vacío: el nombre legal es compartido por
+			// todas las oportunidades de esa agencia, así que si otro lo guardó
+			// mientras esta pantalla estaba abierta, no se le pisa con lo viejo.
+			const [empresa] = await db
+				.update(companies)
+				.set({ razonSocial: input.razonSocial, updatedAt: new Date() })
+				.where(
+					and(
+						eq(companies.id, input.id),
+						sql`coalesce(btrim(${companies.razonSocial}), '') = ''`,
+					),
+				)
+				.returning({
+					id: companies.id,
+					name: companies.name,
+					razonSocial: companies.razonSocial,
+				});
+			if (!empresa) {
+				const [actual] = await db
+					.select({ razonSocial: companies.razonSocial })
+					.from(companies)
+					.where(eq(companies.id, input.id))
+					.limit(1);
+				if (!actual) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Empresa no encontrada",
+					});
+				}
+				throw new ORPCError("CONFLICT", {
+					message: `Otra persona ya guardó la razón social de esta empresa ("${actual.razonSocial}"). Recarga para verla.`,
+				});
+			}
+			return empresa;
+		}),
+
 	updateCompany: crmProcedure
 		.input(
 			z.object({
 				id: z.string().uuid(),
 				name: z.string().min(1, "Company name is required").optional(),
+				razonSocial: z.string().trim().optional(),
 				industry: z.string().optional(),
 				size: z.string().optional(),
 				website: z.string().optional(),
@@ -1747,6 +1966,7 @@ export const crmRouter = {
 				company: {
 					id: companies.id,
 					name: companies.name,
+					razonSocial: companies.razonSocial,
 				},
 				lead: {
 					id: leads.id,
@@ -6951,6 +7171,8 @@ export const crmRouter = {
 					diaPagoMensual: opportunities.diaPagoMensual,
 					diaPagoOriginalSistema: opportunities.diaPagoOriginalSistema,
 					creditType: opportunities.creditType,
+					vendorId: opportunities.vendorId,
+					companyId: opportunities.companyId,
 					createdAt: opportunities.createdAt,
 					updatedAt: opportunities.updatedAt,
 				})
@@ -7033,6 +7255,47 @@ export const crmRouter = {
 			// Create maps for quick lookup
 			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
 			const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
+			// Partes del contrato ya asignadas. El vendedor sale solo de la
+			// oportunidad, igual que en la generación de contratos.
+			const vendorIdDeLaParte = (opp: (typeof opps)[number]) =>
+				opp.vendorId ?? null;
+
+			const vendorIds = [
+				...new Set(
+					opps.map(vendorIdDeLaParte).filter((id): id is string => !!id),
+				),
+			];
+			const companyIds = [
+				...new Set(
+					opps.map((o) => o.companyId).filter((id): id is string => !!id),
+				),
+			];
+			const vendorsData =
+				vendorIds.length > 0
+					? await db
+							.select({
+								id: vehicleVendors.id,
+								name: vehicleVendors.name,
+								dpi: vehicleVendors.dpi,
+								gender: vehicleVendors.gender,
+							})
+							.from(vehicleVendors)
+							.where(inArray(vehicleVendors.id, vendorIds))
+					: [];
+			const companiesData =
+				companyIds.length > 0
+					? await db
+							.select({
+								id: companies.id,
+								name: companies.name,
+								razonSocial: companies.razonSocial,
+							})
+							.from(companies)
+							.where(inArray(companies.id, companyIds))
+					: [];
+			const vendorsMap = new Map(vendorsData.map((v) => [v.id, v]));
+			const companiesMap = new Map(companiesData.map((c) => [c.id, c]));
+
 			// Se guarda también el leadId del análisis: si la oportunidad fue
 			// reasignada a otro lead sin volver a vincular el análisis, no se debe
 			// mostrar el día recomendado del cliente anterior.
@@ -7143,6 +7406,13 @@ export const crmRouter = {
 								}),
 							}
 						: null,
+					vendedor: (() => {
+						const id = vendorIdDeLaParte(opp);
+						return id ? (vendorsMap.get(id) ?? null) : null;
+					})(),
+					empresa: opp.companyId
+						? (companiesMap.get(opp.companyId) ?? null)
+						: null,
 					stage: {
 						id: stage50.id,
 						name: stage50.name,
@@ -7176,9 +7446,38 @@ export const crmRouter = {
 				// aunque coincida numéricamente con 15/30 (ver esDiaIA). Se revalida
 				// server-side contra suggestedPaymentDays. Requerido, sin default.
 				elegidoDesdeRecomendacionIA: z.boolean(),
+				// Partes del contrato. Opcionales: si faltan, jurídico las llena a
+				// mano. Carro usado: el dueño que vende. Carro nuevo: la agencia.
+				// La selección llega aunque le falte el género o la razón social,
+				// para no dejar asignada la parte anterior.
+				// Igual que agencia: null = se quitó a propósito, hay que
+				// desasignar el vendedor. undefined = no viene, no se toca.
+				vendedor: z
+					.object({
+						dpi: z.string(),
+						nombre: z.string().trim().min(1, "El nombre es requerido"),
+						genero: z.enum(["male", "female"]).optional(),
+					})
+					.nullable()
+					.optional(),
+				// null = la agencia se quitó a propósito en la pantalla, hay que
+				// desasignarla. undefined = no viene en la petición, no se toca.
+				agencia: z
+					.object({
+						companyId: z.string().uuid(),
+						razonSocial: z.string().trim().min(1).optional(),
+					})
+					.nullable()
+					.optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Un DPI inválido no bloquea el avance: el vendedor es opcional y hay
+			// registros viejos cuyo DPI solo se validó por largo.
+			const dpiVendedor = input.vendedor
+				? validarDpi(input.vendedor.dpi)
+				: null;
+
 			// Get the opportunity
 			const [opportunity] = await db
 				.select()
@@ -7415,10 +7714,112 @@ export const crmRouter = {
 
 			// Update opportunity and record history in a transaction for atomicity
 			await auditedTransaction(async (tx) => {
+				// El vendedor se identifica por DPI: si ya existe se actualiza con lo
+				// capturado (nombre legal y género) en vez de duplicarlo. Con un DPI
+				// inválido solo se reusa el vendedor que ya lo tenga registrado; no
+				// se crea uno nuevo con ese DPI y el avance sigue sin vendedor.
+				// null desasigna el vendedor; undefined lo deja como está
+				let vendorId: string | null | undefined =
+					input.vendedor === null ? null : undefined;
+				if (input.vendedor && dpiVendedor) {
+					const [existente] = await tx
+						.select({
+							id: vehicleVendors.id,
+							gender: vehicleVendors.gender,
+						})
+						.from(vehicleVendors)
+						.where(
+							eqDpi(
+								vehicleVendors.dpi,
+								dpiVendedor.valid ? dpiVendedor.dpiLimpio : input.vendedor.dpi,
+							),
+						)
+						.limit(1);
+
+					if (existente) {
+						// Un vendedor ya registrado solo se COMPLETA: el nombre y el
+						// género llegan precargados de la pantalla, así que
+						// reescribirlos pisaría con datos viejos lo que otro haya
+						// corregido, y ese vendedor es el mismo en todas las
+						// oportunidades con ese DPI. Para corregirlo está el alta
+						// rápida (RENAP) o la página de Vendedores.
+						if (input.vendedor.genero && !existente.gender) {
+							// La condición va también en el predicado: dos avances a la
+							// vez leen el género vacío y el segundo pisaría al primero.
+							// Postgres re-evalúa el WHERE tras esperar a la otra
+							// transacción, así que solo el primero escribe.
+							await tx
+								.update(vehicleVendors)
+								.set({
+									gender: input.vendedor.genero,
+									updatedAt: new Date(),
+								})
+								.where(
+									and(
+										eq(vehicleVendors.id, existente.id),
+										sql`coalesce(btrim(${vehicleVendors.gender}), '') = ''`,
+									),
+								);
+						}
+						vendorId = existente.id;
+					} else if (dpiVendedor.valid) {
+						const [nuevo] = await tx
+							.insert(vehicleVendors)
+							.values({
+								name: input.vendedor.nombre,
+								dpi: dpiVendedor.dpiLimpio,
+								gender: input.vendedor.genero ?? null,
+								vendorType: "individual",
+							})
+							.returning({ id: vehicleVendors.id });
+						vendorId = nuevo.id;
+					}
+				}
+
+				if (input.agencia) {
+					const [empresa] = await tx
+						.select({
+							id: companies.id,
+							razonSocial: companies.razonSocial,
+						})
+						.from(companies)
+						.where(eq(companies.id, input.agencia.companyId))
+						.limit(1);
+					if (!empresa) {
+						throw new ORPCError("NOT_FOUND", {
+							message: "La empresa (agencia) no existe",
+						});
+					}
+					// La razón social aquí solo se COMPLETA. La pantalla la trae
+					// precargada, así que sobrescribirla pisaría con un valor viejo la
+					// corrección que otro haya hecho mientras tanto, y el nombre legal
+					// es compartido por todas las oportunidades de esa agencia.
+					if (input.agencia.razonSocial && !empresa.razonSocial?.trim()) {
+						// Igual que el género: la condición se repite en el predicado
+						// para que dos avances simultáneos no se pisen el nombre legal.
+						await tx
+							.update(companies)
+							.set({
+								razonSocial: input.agencia.razonSocial,
+								updatedAt: new Date(),
+							})
+							.where(
+								and(
+									eq(companies.id, input.agencia.companyId),
+									sql`coalesce(btrim(${companies.razonSocial}), '') = ''`,
+								),
+							);
+					}
+				}
+
 				// Update opportunity with combined investors and move to 80%
 				await tx
 					.update(opportunities)
 					.set({
+						...(vendorId !== undefined && { vendorId }),
+						...(input.agencia !== undefined && {
+							companyId: input.agencia?.companyId ?? null,
+						}),
 						inversionistas: JSON.stringify(allInvestors),
 						stageId: stage80.id,
 						categoria: input.categoria,
@@ -7436,7 +7837,11 @@ export const crmRouter = {
 					entity: "opportunity",
 					id: input.opportunityId,
 					action: "assign_investor",
-					data: { categoria: input.categoria },
+					data: {
+						categoria: input.categoria,
+						vendedor: input.vendedor,
+						agencia: input.agencia,
+					},
 				});
 
 				// Record stage history

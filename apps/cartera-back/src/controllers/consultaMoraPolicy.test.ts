@@ -5,6 +5,7 @@ import {
   construirVeredicto,
   esCreditoInsoluto,
   fichasDelDpi,
+  seleccionarFichasDelDpi,
   fusionarCreditosPorId,
   nombreClienteSifco,
   respuestaClienteNoEncontrado,
@@ -539,8 +540,87 @@ describe("fichas del DPI", () => {
     expect(fichas).toHaveLength(1);
   });
 
-  it("sin ninguna ficha usable el resultado es vacío (cliente no encontrado)", () => {
+  it("sin ninguna ficha usable el resultado es vacío", () => {
+    // Vacío sí, pero NO "cliente no encontrado": ver el describe de abajo, la
+    // ficha basura deja el veredicto indeterminado.
     expect(fichasDelDpi([{ NumeroIdentificacion: DPI }], DPI)).toEqual([]);
+  });
+});
+
+describe("ficha basura: indeterminado, no cliente inexistente", () => {
+  const DPI = "3460666380101";
+
+  it("ninguna ficha: el DPI no es cliente y NO es indeterminado", () => {
+    expect(seleccionarFichasDelDpi([], DPI)).toEqual({
+      fichas: [],
+      indeterminado: false,
+    });
+  });
+
+  it("todas basura: indeterminado", () => {
+    // Antes esto se veía idéntico a "no existe" → CLIENTE_NO_ENCONTRADO →
+    // puedeContinuar, con la deuda de esas fichas sin consultar.
+    const seleccion = seleccionarFichasDelDpi(
+      [
+        { CodigoCliente: "N/A", NumeroIdentificacion: DPI },
+        { CodigoCliente: null, NumeroIdentificacion: DPI },
+      ],
+      DPI
+    );
+
+    expect(seleccion.fichas).toEqual([]);
+    expect(seleccion.indeterminado).toBe(true);
+  });
+
+  it("mezcla útil + basura: indeterminado aunque queden fichas consultables", () => {
+    // Media lista no alcanza para firmar un "sin mora".
+    const seleccion = seleccionarFichasDelDpi(
+      [
+        { CodigoCliente: 22, NumeroIdentificacion: DPI },
+        { CodigoCliente: "", NumeroIdentificacion: DPI },
+      ],
+      DPI
+    );
+
+    expect(seleccion.fichas.map((f) => f.CodigoCliente)).toEqual([22]);
+    expect(seleccion.indeterminado).toBe(true);
+  });
+
+  it("todas útiles: no es indeterminado", () => {
+    const seleccion = seleccionarFichasDelDpi(
+      [
+        { CodigoCliente: 11, NumeroIdentificacion: DPI },
+        { CodigoCliente: " 22 ", NumeroIdentificacion: DPI },
+      ],
+      DPI
+    );
+
+    expect(seleccion.fichas).toHaveLength(2);
+    expect(seleccion.indeterminado).toBe(false);
+  });
+
+  it("la ficha basura de OTRA identificación no ensucia el veredicto", () => {
+    // No es del DPI: dejarla fuera no le quita nada a lo que hay que mirar.
+    const seleccion = seleccionarFichasDelDpi(
+      [
+        { CodigoCliente: 11, NumeroIdentificacion: DPI },
+        { CodigoCliente: "N/A", NumeroIdentificacion: "1111111110101" },
+      ],
+      DPI
+    );
+
+    expect(seleccion.fichas.map((f) => f.CodigoCliente)).toEqual([11]);
+    expect(seleccion.indeterminado).toBe(false);
+  });
+
+  it("la ficha basura SIN identificación cuenta como del DPI: indeterminado", () => {
+    // Misma razón por la que la ficha sin identificación se conserva cuando sí
+    // es consultable: el core no siempre la devuelve, y asumir que es de otro
+    // sería volver al falso negativo.
+    const seleccion = seleccionarFichasDelDpi([{ CodigoCliente: "  " }], DPI);
+
+    expect(seleccion.fichas).toEqual([]);
+    expect(seleccion.indeterminado).toBe(true);
   });
 });
 

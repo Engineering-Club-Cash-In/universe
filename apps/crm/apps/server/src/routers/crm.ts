@@ -7413,7 +7413,10 @@ export const crmRouter = {
 					input.vendedor === null ? null : undefined;
 				if (input.vendedor && dpiVendedor) {
 					const [existente] = await tx
-						.select({ id: vehicleVendors.id })
+						.select({
+							id: vehicleVendors.id,
+							gender: vehicleVendors.gender,
+						})
 						.from(vehicleVendors)
 						.where(
 							eqDpi(
@@ -7424,17 +7427,21 @@ export const crmRouter = {
 						.limit(1);
 
 					if (existente) {
-						// Sin género capturado no se borra el que ya tenga
-						await tx
-							.update(vehicleVendors)
-							.set({
-								name: input.vendedor.nombre,
-								...(input.vendedor.genero && {
+						// Un vendedor ya registrado solo se COMPLETA: el nombre y el
+						// género llegan precargados de la pantalla, así que
+						// reescribirlos pisaría con datos viejos lo que otro haya
+						// corregido, y ese vendedor es el mismo en todas las
+						// oportunidades con ese DPI. Para corregirlo está el alta
+						// rápida (RENAP) o la página de Vendedores.
+						if (input.vendedor.genero && !existente.gender) {
+							await tx
+								.update(vehicleVendors)
+								.set({
 									gender: input.vendedor.genero,
-								}),
-								updatedAt: new Date(),
-							})
-							.where(eq(vehicleVendors.id, existente.id));
+									updatedAt: new Date(),
+								})
+								.where(eq(vehicleVendors.id, existente.id));
+						}
 						vendorId = existente.id;
 					} else if (dpiVendedor.valid) {
 						const [nuevo] = await tx

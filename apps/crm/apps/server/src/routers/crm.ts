@@ -82,6 +82,7 @@ import { eqDpi } from "../lib/dpi-lookup";
 import { getDiaPagoOriginalSistema } from "../lib/fecha-ideal-pago-ajuste";
 import {
 	evaluarGateMoraDpi,
+	MENSAJE_GATE_APAGADO,
 	requiereConsultaDeMora,
 	resolverEdicionConMora,
 } from "../lib/gate-mora-dpi";
@@ -131,7 +132,10 @@ import {
 	ejecutarValidaciones,
 	resolverExencionPorBot,
 } from "../services/opportunity-validations";
-import type { StatusCreditEnum } from "../types/cartera-back";
+import {
+	ConsultaMoraNoDisponibleError,
+	type StatusCreditEnum,
+} from "../types/cartera-back";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { resetBankStatementCreditAnalysis } from "./bank-analysis";
 import { BankStatementCoverageSaveError } from "./bank-analysis-coverage";
@@ -8717,6 +8721,15 @@ export const crmRouter = {
 	 * enganchado en los puntos donde el CRM da de alta o cambia el DPI de una
 	 * persona. Este procedure existe aparte porque informa sin bloquear.
 	 *
+	 * 🔴 **Pero tiene que contestar lo MISMO que va a contestar el gate**, o el
+	 * aviso es peor que no avisar: anticipar "todo bien" y que el formulario
+	 * reviente al guardar es exactamente el trabajo perdido que esta pantalla
+	 * existe para ahorrar. De ahí las dos cosas que copia del gate: manda los
+	 * números de crédito que el CRM conoce del DPI (sin ellos, un deudor que solo
+	 * existe en el CRM salía CLIENTE_NO_ENCONTRADO → "seguí"), y respeta el kill
+	 * switch (con la integración apagada el gate deja pasar, así que anunciar un
+	 * bloqueo acá sería inventarlo).
+	 *
 	 * **Fail-closed.** Si cartera o SIFCO no contestan, la respuesta es
 	 * `puedeContinuar: false` con motivo `SERVICIO_NO_DISPONIBLE`. Nunca se
 	 * traduce un fallo a "sin mora": el cliente HTTP lanza
@@ -8754,9 +8767,70 @@ export const crmRouter = {
 		.meta({ audit: { entity: "lead", action: "validar_mora_dpi" } })
 		.input(z.object({ dpi: z.string().min(1, "El DPI es requerido") }))
 		.handler(async ({ input, context }) => {
-			const resultado = await resolverValidacionMora(input.dpi, {
-				validar: validarDpi,
-				consultar: (dpi) => carteraBackClient.consultarMoraPorDpi(dpi),
+			// El DPI se valida SIEMPRE, incluso con la integración apagada: un DPI
+			// mal formado es un error del formulario y no tiene nada que ver con
+			// cartera.
+			const validacion = validarDpi(input.dpi);
+			if (!validacion.valid) {
+				throw new ORPCError("BAD_REQUEST", { message: validacion.error });
+			}
+			const dpiNormalizado = validacion.dpiLimpio;
+
+			// 🔴 El kill switch manda también acá. Con la integración apagada el gate
+			// deja pasar sin consultar (fail-open deliberado), así que si este
+			// preflight respondiera "bloqueado" le estaría anunciando al asesor un
+			// corte que después no ocurre — y al revés, un "no se pudo consultar"
+			// eterno en una pantalla donde nada está fallando. Misma anotación que
+			// usa el gate: mientras la bandera esté abajo entra gente sin validar y
+			// hay que poder saber quiénes.
+			if (!isCarteraBackEnabled()) {
+				auditRecord({
+					entity: "lead",
+					id: null,
+					action: "validar_mora_dpi_apagado",
+					data: {
+						dpi: dpiNormalizado,
+						detalle:
+							"la integración con cartera está desactivada (ENABLE_CARTERA_BACK_INTEGRATION); no se consultó la mora",
+					},
+				});
+				return {
+					puedeContinuar: true,
+					motivo: "SIN_MORA" as const,
+					mensaje: MENSAJE_GATE_APAGADO,
+					consultadoEn: new Date().toISOString(),
+				};
+			}
+
+			const resultado = await resolverValidacionMora(dpiNormalizado, {
+				// Ya se validó arriba; revalidar solo abriría la puerta a que las dos
+				// validaciones se separen.
+				validar: (dpi) => ({ valid: true as const, dpiLimpio: dpi }),
+				consultar: async (dpi) => {
+					// 🔴 Los mismos números que manda el gate, o el preflight miente.
+					// Cartera resuelve el DPI preguntándole a SIFCO, que no conoce los
+					// créditos nacidos acá (`CRM-<uuid>`, `insoluto-N`): preguntando
+					// solo por DPI, a un deudor que solo existe en el CRM este
+					// procedure le contestaba CLIENTE_NO_ENCONTRADO con
+					// `puedeContinuar: true` y el gate lo rechazaba dos pantallas
+					// después. Ver `lib/numeros-sifco-por-dpi.ts`.
+					let numerosConocidos: string[];
+					try {
+						numerosConocidos = await numerosSifcoConocidosPorDpi(dpi);
+					} catch (error) {
+						// Fail-closed igual que el gate, y por el camino que este
+						// procedure ya tiene: sin esos números la consulta vería menos
+						// cartera de la que hay, y un "sin mora" armado sobre media
+						// cartera es peor que un "no se pudo consultar". Lanzarlo así
+						// deja la misma fila `validar_mora_dpi_no_disponible`.
+						throw new ConsultaMoraNoDisponibleError(
+							"no se pudieron reunir los números de crédito que el CRM asocia al DPI",
+							error,
+						);
+					}
+
+					return carteraBackClient.consultarMoraPorDpi(dpi, numerosConocidos);
+				},
 				anotar: auditRecord,
 			});
 

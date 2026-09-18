@@ -405,15 +405,6 @@ export function requiereConsultaDeMora(
 	dpiNuevoNormalizado: string,
 	dpiGuardado: string | null | undefined,
 ): boolean {
-	// 🔴 Borrar el DPI (`dpi: ""`) no es una consulta posible. Cartera no sabe
-	// qué hacer con un DPI vacío: revienta y el fail-closed traduce eso a
-	// SERVICIO_NO_DISPONIBLE, con lo que un borrado perfectamente legítimo
-	// —el candado ya lo dejó pasar— quedaba bloqueado por un error nuestro.
-	// El candado SÍ sigue viendo el borrado; eso no cambia.
-	if (dpiNuevoNormalizado.trim() === "") {
-		return false;
-	}
-
 	if (!dpiGuardado || dpiGuardado.trim() === "") {
 		return true;
 	}

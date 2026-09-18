@@ -238,23 +238,6 @@ describe("gate de mora: ediciones (solo si el DPI es nuevo o cambia)", () => {
 		expect(MENSAJE_DPI_EN_BLANCO).toContain("escribir el correcto");
 	});
 
-	test("🔴 borrar el DPI no consulta: cartera no sabe qué hacer con uno vacío", async () => {
-		// Un `dpi: ""` con el candado abierto (≤30%) es un borrado legítimo. Si se
-		// consultara, cartera revienta con el DPI vacío, el fail-closed lo traduce
-		// a SERVICIO_NO_DISPONIBLE y el borrado queda bloqueado por un error
-		// nuestro. El candado SÍ sigue viendo el borrado; eso no cambia.
-		expect(requiereConsultaDeMora("", DPI)).toBe(false);
-		expect(requiereConsultaDeMora("   ", DPI)).toBe(false);
-
-		const { deps, consultados } = banco(async () => CON_MORA);
-
-		if (requiereConsultaDeMora("", DPI)) {
-			await evaluarGateMoraDpi("", deps);
-		}
-
-		expect(consultados).toEqual([]);
-	});
-
 	test("una edición que no toca el DPI no llega a llamar a cartera", async () => {
 		// La prueba que protege la operación: el gate no se ejecuta, así que el
 		// cliente ni se toca. Un moroso se sigue pudiendo editar.

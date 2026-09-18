@@ -1,6 +1,7 @@
 import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import { leads, opportunities } from "../db/schema/crm";
+import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import { eqDpi } from "./dpi-lookup";
 
 /**
@@ -28,10 +29,47 @@ import { eqDpi } from "./dpi-lookup";
  * espacios ("3460 66638 0101") y un `=` crudo no reconoce a esa persona.
  *
  * Devuelve a lo sumo `TOPE_NUMEROS` (el contrato de cartera acota el arreglo).
- * Quedarse corto degrada la cobertura pero no la corrección: los que sí viajan
- * siguen alcanzando a sus hermanos por la expansión de dueño.
  */
 export const TOPE_NUMEROS_CREDITO_CONOCIDOS = 50;
+
+/**
+ * Se piden TOPE + 1 filas para poder DISTINGUIR "justo el tope" de "hay más".
+ *
+ * 🔴 Con `limit(50)` a secas, el recorte era invisible: la fila 51 se quedaba
+ * en la base sin que nadie se enterara. Y "los que sí viajan alcanzan al resto
+ * por la expansión de dueño" solo vale cuando el que viaja empata con ALGO: si
+ * el único número que mapeaba al crédito moroso era justo el que quedó afuera
+ * —y los 50 que entraron son de créditos cancelados, o de un `usuario_id`
+ * distinto—, cartera contesta SIN_MORA y el moroso pasa. Una cobertura
+ * incompleta que se ve idéntica a una completa es el falso negativo de siempre.
+ */
+export const SONDA_DESBORDE_NUMEROS = TOPE_NUMEROS_CREDITO_CONOCIDOS + 1;
+
+/**
+ * Fail-closed ante el desborde de UNA fuente.
+ *
+ * Si la consulta trajo la fila sonda, ese DPI tiene más créditos de los que el
+ * contrato de cartera admite mandar y no hay forma de preguntar por todos: no
+ * se sabe si debe. Se corta con el error que el gate ya traduce a
+ * SERVICIO_NO_DISPONIBLE y se pide revisión manual, en vez de mandar una lista
+ * recortada que se lee como cartera completa.
+ *
+ * ⚠️ Es distinto del tope de la UNIÓN (`unirNumerosSifco` en las ramas de
+ * arriba): aquel recorta a propósito la suma de dos fuentes que ya vinieron
+ * completas —ahí sí vale que un número que empate alcance al resto por la
+ * expansión de dueño—. Esto detecta que una fuente NUNCA vino completa.
+ */
+export function exigirNumerosCompletos(
+	filas: readonly unknown[],
+	dpi: string,
+): void {
+	if (filas.length <= TOPE_NUMEROS_CREDITO_CONOCIDOS) return;
+
+	throw new ConsultaMoraNoDisponibleError(
+		`El DPI ${dpi} tiene más de ${TOPE_NUMEROS_CREDITO_CONOCIDOS} créditos asociados en el CRM: no se puede consultar la mora de todos y el caso requiere revisión manual.`,
+		null,
+	);
+}
 
 /**
  * La consulta, aparte para poder mirarle el SQL en los tests.
@@ -63,13 +101,17 @@ export function consultaNumerosSifcoPorDpi(
 				ne(numeroLimpio, ""),
 			),
 		)
-		.limit(TOPE_NUMEROS_CREDITO_CONOCIDOS);
+		.limit(SONDA_DESBORDE_NUMEROS);
 }
 
 export async function numerosSifcoConocidosPorDpi(
 	dpi: string,
 ): Promise<string[]> {
 	const filas = await consultaNumerosSifcoPorDpi(db, dpi);
+
+	// Antes de mirar el contenido: si vino la fila sonda, esta lista JAMÁS va a
+	// estar completa. Ver `exigirNumerosCompletos`.
+	exigirNumerosCompletos(filas, dpi);
 
 	// Segunda línea: el SQL ya vino limpio y deduplicado, pero esto cuesta nada
 	// y cubre cualquier motor o vista que devuelva algo inesperado.

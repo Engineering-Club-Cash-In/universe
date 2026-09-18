@@ -2365,20 +2365,32 @@ export const insertPayment = async ({ body, set }: any) => {
         ? disponible_restante
         : new Big(0);
 
-      if (acreditadoASaldo.gt(0)) {
-        const saldoConSobrante = saldoAFavor.plus(acreditadoASaldo);
-        await db
-          .update(usuarios)
-          .set({ saldo_a_favor: saldoConSobrante.toString() })
-          .where(eq(usuarios.usuario_id, credito.usuario_id));
-      }
+      /**
+       * Acreditar y dejar constancia van JUNTOS, en una transacción.
+       *
+       * Sueltos se pueden separar: si el saldo ya subió y el estampado falla por
+       * un error transitorio, el endpoint devuelve error con el cliente ya
+       * acreditado y la fila en NULL. Y NULL significa "no se sabe", así que la
+       * reversa cae en la conducta vieja y le descuenta el `monto_boleta`
+       * completo — justo el descuadre que esta columna existe para cerrar.
+       *
+       * El estampado se escribe SIEMPRE, incluso el cero: es la diferencia entre
+       * "acreditó nada" y "no se sabe" (NULL, las filas anteriores a la 0039).
+       */
+      await db.transaction(async (tx) => {
+        if (acreditadoASaldo.gt(0)) {
+          const saldoConSobrante = saldoAFavor.plus(acreditadoASaldo);
+          await tx
+            .update(usuarios)
+            .set({ saldo_a_favor: saldoConSobrante.toString() })
+            .where(eq(usuarios.usuario_id, credito.usuario_id));
+        }
 
-      // Se escribe SIEMPRE, incluso el cero: es la diferencia entre "acreditó
-      // nada" y "no se sabe" (NULL, las filas anteriores a la 0039).
-      await db
-        .update(pagos_credito)
-        .set({ saldo_a_favor_acreditado: acreditadoASaldo.toString() })
-        .where(eq(pagos_credito.pago_id, pagoInsertado.pago_id));
+        await tx
+          .update(pagos_credito)
+          .set({ saldo_a_favor_acreditado: acreditadoASaldo.toString() })
+          .where(eq(pagos_credito.pago_id, pagoInsertado.pago_id));
+      });
 
       // Ídem rubros: la fila ya existe, así que recién acá se escriben los
       // reclamos y se le suma el cobro a su `otros`.

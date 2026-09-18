@@ -1385,12 +1385,15 @@ async function proxyPagaloSupervisionArchivo(
 		const valor = c.req.query(campo);
 		if (valor !== undefined) query[campo] = valor;
 	}
+	// Va en el body de la request a cartera-back (no en esta query string): un
+	// pool de asesor puede tener cientos/miles de SIFCOs, y esta query solo
+	// sirve para los filtros acotados de arriba. Ver getPagaloSupervisionArchivo.
 	// Presente (aunque sea "") = "acotar a esta lista exacta"; ausente = sin
-	// recorte (supervisor/admin sin filtro de asesor). Ver el mismo criterio en
-	// /api/cartera/pagalo/supervision más arriba.
-	if (scope.sifcosPermitidos !== null) {
-		query.sifcosPermitidos = [...scope.sifcosPermitidos].join(",");
-	}
+	// recorte (supervisor/admin sin filtro de asesor).
+	const sifcosPermitidosBody =
+		scope.sifcosPermitidos !== null
+			? [...scope.sifcosPermitidos].join(",")
+			: undefined;
 
 	try {
 		const { carteraBackClient } = await import(
@@ -1399,6 +1402,7 @@ async function proxyPagaloSupervisionArchivo(
 		const archivo = await carteraBackClient.getPagaloSupervisionArchivo(
 			formato,
 			query,
+			sifcosPermitidosBody,
 		);
 		return new Response(new Uint8Array(archivo.buffer), {
 			headers: {

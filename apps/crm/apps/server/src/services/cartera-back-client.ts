@@ -3705,10 +3705,16 @@ export class CarteraBackClient {
 	 * al navegador (ver /api/pagalo/supervision/{excel,pdf} en index.ts). No usa
 	 * `request<T>` porque ese método siempre hace `.json()` sobre la respuesta;
 	 * acá se necesitan los bytes crudos + los headers para reenviar.
+	 *
+	 * POST (no GET): `sifcosPermitidos` puede ser el pool completo de un asesor
+	 * (cientos/miles de SIFCOs) — mandarlo en la query string arriesgaba superar
+	 * el límite de longitud de URL de proxies/servidores intermedios. El resto
+	 * de filtros son acotados y siguen viajando por query.
 	 */
 	async getPagaloSupervisionArchivo(
 		formato: "excel" | "pdf",
 		query: Record<string, string>,
+		sifcosPermitidos: string | undefined,
 		timeoutMs = 60_000,
 	): Promise<{
 		buffer: Buffer;
@@ -3722,7 +3728,14 @@ export class CarteraBackClient {
 		const url = `${this.config.baseUrl}/pagalo/supervision/${formato}${qs ? `?${qs}` : ""}`;
 		const token = await this.config.accessTokenProvider();
 		const res = await this.config.fetchTransport(url, {
-			headers: { Authorization: `Bearer ${token}` },
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify(
+				sifcosPermitidos !== undefined ? { sifcosPermitidos } : {},
+			),
 			signal: AbortSignal.timeout(timeoutMs),
 		});
 		if (!res.ok) {

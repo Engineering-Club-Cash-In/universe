@@ -277,6 +277,8 @@ function FilaGrupo({
 					)}
 				</div>
 			</TableCell>
+			<TableCell className="text-right">{q(grupo.capitalTotal)}</TableCell>
+			<TableCell className="text-right">{q(grupo.facturableTotal)}</TableCell>
 			<TableCell>{antiguedadLink(grupo.createdAt).etiqueta}</TableCell>
 		</TableRow>
 	);
@@ -646,6 +648,22 @@ function PagaloSupervisionPage() {
 								/>
 								<TableHead>Origen</TableHead>
 								<TableHead>Links</TableHead>
+								<EncabezadoOrdenable
+									label="Total Link Capital"
+									columna="linksAmountCapital"
+									ordenPor={ordenPor}
+									ordenDir={ordenDir}
+									onOrdenar={alternarOrden}
+									className="text-right"
+								/>
+								<EncabezadoOrdenable
+									label="Total Link Interés/Mora"
+									columna="linksAmountMora"
+									ordenPor={ordenPor}
+									ordenDir={ordenDir}
+									onOrdenar={alternarOrden}
+									className="text-right"
+								/>
 								<EncabezadoOrdenable
 									label="Antigüedad"
 									columna="createdAt"

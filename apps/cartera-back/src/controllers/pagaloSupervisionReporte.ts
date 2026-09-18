@@ -80,6 +80,8 @@ const ENCABEZADOS_EXPORT_PAGALO = [
   "Asesor",
   "Estado",
   "Total",
+  "Total Link Capital",
+  "Total Link Interés/Mora",
   "Origen",
   "Fecha de creación",
 ];
@@ -161,7 +163,10 @@ const COLOR_BLANCO = "FFFFFFFF";
 const COLOR_GRIS_TEXTO = "FF6B7280";
 const COLOR_GRIS_BORDE = "FFE5E7EB";
 const COLOR_ZEBRA = "FFFAF5FF";
-const NUM_COLUMNAS_PAGALO = 7;
+const NUM_COLUMNAS_PAGALO = 9;
+// Índices (0-based) de las columnas de monto, para alinear a la derecha —
+// Total, Total Link Capital, Total Link Interés/Mora.
+const COLUMNAS_MONTO_PAGALO = new Set([4, 5, 6]);
 
 const bordeFino = (argb: string) => ({
   top: { style: "thin" as const, color: { argb } },
@@ -191,6 +196,8 @@ export async function buildPagaloSupervisionWorkbook(
     { key: "asesor", width: 24 },
     { key: "estado", width: 18 },
     { key: "total", width: 16 },
+    { key: "totalCapital", width: 18 },
+    { key: "totalMora", width: 20 },
     { key: "origen", width: 12 },
     { key: "fecha", width: 20 },
   ];
@@ -260,7 +267,10 @@ export async function buildPagaloSupervisionWorkbook(
     cell.value = header;
     cell.font = { bold: true, size: 10, color: { argb: COLOR_BLANCO } };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR_MORADO } };
-    cell.alignment = { vertical: "middle", horizontal: i === 4 ? "right" : "left" };
+    cell.alignment = {
+      vertical: "middle",
+      horizontal: COLUMNAS_MONTO_PAGALO.has(i) ? "right" : "left",
+    };
     cell.border = BORDE_TABLA;
   });
   ws.getRow(filaHeader).height = 22;
@@ -277,8 +287,10 @@ export async function buildPagaloSupervisionWorkbook(
       grupo.clienteNombre ?? "—",
       grupo.asesoresNombres.join(", ") || "—",
       etiquetaEstadoGrupo(grupo.status),
-      // Numérico a propósito: como texto con "Q" la columna no suma en la hoja.
+      // Numéricos a propósito: como texto con "Q" la columna no suma en la hoja.
       Number(grupo.totalAmount),
+      Number(grupo.capitalTotal),
+      Number(grupo.facturableTotal),
       grupo.origen,
       fechaHoraGT(grupo.createdAt),
     ];
@@ -287,14 +299,17 @@ export async function buildPagaloSupervisionWorkbook(
       cell.value = valor;
       cell.border = BORDE_TABLA;
       cell.font = { size: 10 };
-      cell.alignment = { vertical: "middle", horizontal: colIdx === 4 ? "right" : "left" };
+      cell.alignment = {
+        vertical: "middle",
+        horizontal: COLUMNAS_MONTO_PAGALO.has(colIdx) ? "right" : "left",
+      };
       if (i % 2 === 1) {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR_ZEBRA } };
       }
     });
     ws.getRow(fila).height = 18;
   });
-  ws.getColumn(5).numFmt = "#,##0.00";
+  for (const col of [5, 6, 7]) ws.getColumn(col).numFmt = "#,##0.00";
 
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);
@@ -334,6 +349,9 @@ export async function buildPagaloSupervisionHTML(
     (h) => `<th>${escaparHtml(h)}</th>`,
   ).join("");
 
+  const qHtml = (valor: unknown) =>
+    `Q${Number(valor).toLocaleString("es-GT", { minimumFractionDigits: 2 })}`;
+
   const cuerpo = filas
     .map((grupo) => {
       const celdas = [
@@ -341,12 +359,17 @@ export async function buildPagaloSupervisionHTML(
         grupo.clienteNombre ?? "—",
         grupo.asesoresNombres.join(", ") || "—",
         etiquetaEstadoGrupo(grupo.status),
-        `Q${Number(grupo.totalAmount).toLocaleString("es-GT", { minimumFractionDigits: 2 })}`,
+        qHtml(grupo.totalAmount),
+        qHtml(grupo.capitalTotal),
+        qHtml(grupo.facturableTotal),
         grupo.origen,
         fechaGT(grupo.createdAt),
       ];
       return `<tr>${celdas
-        .map((celda, i) => `<td class="${i === 4 ? "num" : ""}">${escaparHtml(String(celda))}</td>`)
+        .map(
+          (celda, i) =>
+            `<td class="${COLUMNAS_MONTO_PAGALO.has(i) ? "num" : ""}">${escaparHtml(String(celda))}</td>`,
+        )
         .join("")}</tr>`;
     })
     .join("");

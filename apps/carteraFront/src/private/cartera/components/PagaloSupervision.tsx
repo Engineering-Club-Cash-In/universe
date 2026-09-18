@@ -63,7 +63,12 @@ function LinkMontoCell({
   linkType: "CAPITAL" | "MORA_INTERES";
   monto: string;
 }) {
-  const link = grupo.links.find((l) => l.linkType === linkType);
+  // No hay garantía de orden en la respuesta del backend (sin ORDER BY): si el
+  // link se regeneró, puede haber más de una fila con este linkType, y hay que
+  // quedarse con la vigente (generación más alta), no la primera que aparezca.
+  const link = grupo.links
+    .filter((l) => l.linkType === linkType)
+    .sort((a, b) => b.generation - a.generation)[0];
   return (
     <span className="inline-flex items-center justify-end gap-1.5">
       {fmtQ(monto)}

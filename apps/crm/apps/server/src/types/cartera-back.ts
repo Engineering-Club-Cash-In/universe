@@ -304,6 +304,59 @@ export interface CreditoDirectoResponse {
 	ajusteFechaIdeal?: CarteraAjusteFechaIdeal | null;
 }
 
+// ============================================================================
+// CONSULTA DE MORA POR DPI
+// ============================================================================
+
+/**
+ * Por qué el veredicto es el que es. Los seis valores los define
+ * `POST /clientes/consulta-mora` de cartera-back; `SERVICIO_NO_DISPONIBLE` es
+ * el único que el CRM puede fabricar por su cuenta (ver el procedure
+ * `validarMoraPorDpi`), y significa que NO se pudo saber — nunca "no tiene".
+ *
+ * `CREDITO_INSOLUTO`: el cliente tiene al menos un crédito insoluto en cartera.
+ * Bloquea aunque el insoluto ya esté CANCELADO y aunque no haya mora viva; por
+ * eso viene acompañado de `tieneMoraActiva: false` cuando es el único motivo.
+ */
+export type MotivoConsultaMora =
+	| "SIN_MORA"
+	| "MORA_ACTIVA"
+	| "EN_CONVENIO"
+	| "CREDITO_INSOLUTO"
+	| "CLIENTE_NO_ENCONTRADO"
+	| "SERVICIO_NO_DISPONIBLE";
+
+export interface ConsultaMoraCliente {
+	codigoClienteSifco: string;
+	nombre: string;
+}
+
+export interface ConsultaMoraCredito {
+	numeroCreditoSifco: string;
+	estado: string;
+	/** `null` = ese crédito no tiene mora viva. Montos en string decimal. */
+	moraActiva: { monto: string; cuotasAtrasadas: number } | null;
+}
+
+export interface ConsultaMoraHistorial {
+	fecha: string;
+	monto: string;
+	numeroCreditoSifco: string;
+	evento: string;
+}
+
+export interface ConsultaMoraResponse {
+	encontrado: boolean;
+	tieneMoraActiva: boolean;
+	/** Veredicto de cartera. Con fail-closed, un fallo NUNCA produce `true`. */
+	puedeContinuar: boolean;
+	motivo: MotivoConsultaMora;
+	cliente: ConsultaMoraCliente | null;
+	creditos: ConsultaMoraCredito[];
+	historialMora: ConsultaMoraHistorial[];
+	consultadoEn: string;
+}
+
 export interface UpdateCreditoInput {
 	credito_id: number;
 	capital?: number;
@@ -807,6 +860,34 @@ export interface ResumenGlobalInversionista {
 // ============================================================================
 // ERRORS
 // ============================================================================
+
+/**
+ * No se pudo saber si la persona está en mora.
+ *
+ * Existe para que "el core no contestó" jamás pueda confundirse con "no tiene
+ * mora". `consultarMoraPorDpi` no devuelve NINGÚN valor cuando algo falla:
+ * lanza esto. Así el llamador no tiene forma de leer un veredicto optimista por
+ * accidente — tiene que decidir explícitamente qué hacer con la ignorancia, y
+ * la decisión del producto es fail-closed (no se deja pasar).
+ *
+ * Cubre las tres formas de no saber: cartera respondió con error (HTTP), no
+ * respondió (timeout, red, circuit breaker abierto) o respondió algo que no
+ * tiene la forma del contrato.
+ *
+ * Vive acá y no en `cartera-back-client.ts` a propósito: varios tests reemplazan
+ * el módulo del cliente entero con `mock.module`, y un `instanceof` contra una
+ * clase que vino de un doble parcial no matchea nunca.
+ */
+export class ConsultaMoraNoDisponibleError extends Error {
+	constructor(
+		message: string,
+		/** El fallo original, para el log. No se le muestra al usuario. */
+		public readonly causa: unknown,
+	) {
+		super(message);
+		this.name = "ConsultaMoraNoDisponibleError";
+	}
+}
 
 export class CarteraBackConnectionError extends CarteraBackError {
 	constructor(message: string) {

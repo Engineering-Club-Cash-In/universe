@@ -17,6 +17,7 @@ import type {
 	CarteraPagoCredito,
 	CarteraStatsResponse,
 	CarteraUsuario,
+	ConsultaMoraResponse,
 	CreateBoletaInput,
 	CreateCreditoInput,
 	CreatePagoInput,
@@ -38,6 +39,7 @@ import type {
 	ReversePagoInput,
 	UpdateCreditoInput,
 } from "../types/cartera-back";
+import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import {
 	getCarteraAccessToken,
 	invalidateAndReauth,
@@ -173,6 +175,83 @@ export class CarteraBackHttpError extends Error {
 		this.name = "CarteraBackHttpError";
 	}
 }
+
+/**
+ * Corte de la consulta de mora.
+ *
+ * El gate corre delante de seis puntos donde alguien está esperando en una
+ * pantalla, así que el corte lo manda esa espera y no la suma de los timeouts
+ * de la cadena: cartera-back ya acota a 20s sus llamadas a SIFCO, y si el core
+ * tarda más que esto, para el asesor es una caída — que es exactamente lo que
+ * el fail-closed responde.
+ */
+const CONSULTA_MORA_TIMEOUT_DEFAULT_MS = 12000;
+
+/**
+ * 🔴 Se valida que sea finito y positivo, no solo `parseInt`. Un valor no
+ * numérico en la variable de entorno daba `NaN`, y `AbortSignal.timeout(NaN)`
+ * lanza: una errata en la configuración tumbaba los ocho puntos del gate a la
+ * vez, y lo hacía en el arranque de cada llamada, sin pasar por el fail-closed.
+ */
+export function leerTimeoutConsultaMora(crudo: string | undefined): number {
+	if (crudo === undefined || crudo.trim() === "") {
+		return CONSULTA_MORA_TIMEOUT_DEFAULT_MS;
+	}
+
+	const valor = Number(crudo);
+	if (!Number.isFinite(valor) || valor <= 0) {
+		console.warn(
+			`[cartera-back] CARTERA_BACK_CONSULTA_MORA_TIMEOUT inválido (${crudo}); se usa ${CONSULTA_MORA_TIMEOUT_DEFAULT_MS}ms`,
+		);
+		return CONSULTA_MORA_TIMEOUT_DEFAULT_MS;
+	}
+
+	return valor;
+}
+
+const CONSULTA_MORA_TIMEOUT_MS = leerTimeoutConsultaMora(
+	process.env.CARTERA_BACK_CONSULTA_MORA_TIMEOUT,
+);
+
+/**
+ * Forma exacta de `POST /clientes/consulta-mora`. Se valida en vez de castear
+ * porque un cuerpo incompleto se leería como "sin mora" (ver la nota 3 en
+ * `consultarMoraPorDpi`).
+ */
+const consultaMoraResponseSchema = z.object({
+	encontrado: z.boolean(),
+	tieneMoraActiva: z.boolean(),
+	puedeContinuar: z.boolean(),
+	motivo: z.enum([
+		"SIN_MORA",
+		"MORA_ACTIVA",
+		"EN_CONVENIO",
+		"CREDITO_INSOLUTO",
+		"CLIENTE_NO_ENCONTRADO",
+		"SERVICIO_NO_DISPONIBLE",
+	]),
+	cliente: z
+		.object({ codigoClienteSifco: z.string(), nombre: z.string() })
+		.nullable(),
+	creditos: z.array(
+		z.object({
+			numeroCreditoSifco: z.string(),
+			estado: z.string(),
+			moraActiva: z
+				.object({ monto: z.string(), cuotasAtrasadas: z.number() })
+				.nullable(),
+		}),
+	),
+	historialMora: z.array(
+		z.object({
+			fecha: z.string(),
+			monto: z.string(),
+			numeroCreditoSifco: z.string(),
+			evento: z.string(),
+		}),
+	),
+	consultadoEn: z.string(),
+});
 
 // ============================================================================
 // CIRCUIT BREAKER
@@ -1498,6 +1577,84 @@ export class CarteraBackClient {
 			undefined,
 			true,
 		);
+	}
+
+	// ========================================================================
+	// CONSULTA DE MORA POR DPI
+	// ========================================================================
+
+	/**
+	 * ¿Esta persona ya es cliente y está en mora?
+	 *
+	 * Fail-closed: **nunca** devuelve un veredicto que no venga de cartera. Si
+	 * cartera o SIFCO no contestan, lanza `ConsultaMoraNoDisponibleError` en vez
+	 * de inventar un "sin mora". El llamador (`crm.validarMoraPorDpi`) traduce
+	 * esa excepción a `puedeContinuar: false` con motivo `SERVICIO_NO_DISPONIBLE`.
+	 *
+	 * Tres decisiones que no son obvias:
+	 *
+	 * 1. **Sin caché.** Cachear alivia al core legacy de SIFCO (20s de timeout),
+	 *    pero acá el dato caduca en el peor sentido posible: quien acaba de caer
+	 *    en mora pasaría el filtro durante los cinco minutos del TTL, y ese es
+	 *    justo el caso que el filtro existe para atajar. La caché es en memoria y
+	 *    por proceso, así que ni siquiera hay dónde invalidarla cuando la mora la
+	 *    genera el cron de cartera. Además el volumen no lo pide: es un DPI
+	 *    tecleado por un humano llenando una solicitud, no un barrido. (De hecho
+	 *    `request()` solo cachea GET, así que esto es explícito, no incidental.)
+	 * 2. **Un solo intento.** Es un POST de solo lectura —se podría reintentar
+	 *    sin duplicar nada—, pero cada intento puede tardar los 20s de SIFCO: con
+	 *    reintentos el asesor se queda mirando la pantalla más de un minuto y se
+	 *    le carga la mano al core justo cuando está sufriendo. Bajo fail-closed
+	 *    el costo de no reintentar es un "no se pudo consultar" que se puede
+	 *    volver a pedir, no una respuesta equivocada. Del rebote repetido se
+	 *    encarga el circuit breaker.
+	 * 3. **Se valida la forma.** Un 200 con un cuerpo que no es el contrato es un
+	 *    fallo, no un "sin mora": sin este parseo, un `{}` se leería como
+	 *    `tieneMoraActiva: undefined` y dejaría pasar a cualquiera.
+	 *
+	 * `numerosCreditoConocidos` son los números de crédito que el CRM asocia a
+	 * ese DPI y que SIFCO no sabe devolver (`CRM-<uuid>` de las oportunidades
+	 * ganadas acá, `insoluto-N`). Cartera los suma a los del core antes de
+	 * buscar; sin ellos, el cliente cuyos créditos nacieron todos en el CRM no
+	 * tiene ficha en SIFCO y salía como CLIENTE_NO_ENCONTRADO. Se omiten cuando
+	 * la lista viene vacía: el contrato los tiene como opcionales.
+	 */
+	async consultarMoraPorDpi(
+		dpi: string,
+		numerosCreditoConocidos?: string[],
+	): Promise<ConsultaMoraResponse> {
+		const cuerpo =
+			numerosCreditoConocidos && numerosCreditoConocidos.length > 0
+				? { dpi, numerosCreditoConocidos }
+				: { dpi };
+
+		let crudo: unknown;
+		try {
+			crudo = await this.request<unknown>(
+				"/clientes/consulta-mora",
+				{ method: "POST", body: JSON.stringify(cuerpo) },
+				false, // sin caché (ver arriba)
+				CONSULTA_MORA_TIMEOUT_MS,
+				false, // un solo intento (ver arriba)
+			);
+		} catch (error) {
+			throw new ConsultaMoraNoDisponibleError(
+				`No se pudo consultar la mora en cartera: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+				error,
+			);
+		}
+
+		const parseado = consultaMoraResponseSchema.safeParse(crudo);
+		if (!parseado.success) {
+			throw new ConsultaMoraNoDisponibleError(
+				`Cartera respondió la consulta de mora con una forma inesperada: ${parseado.error.message}`,
+				parseado.error,
+			);
+		}
+
+		return parseado.data;
 	}
 
 	// ========================================================================

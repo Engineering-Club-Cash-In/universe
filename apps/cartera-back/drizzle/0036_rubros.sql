@@ -116,7 +116,13 @@ CREATE INDEX IF NOT EXISTS rubros_credito_activo_idx
 -- rubro anulado seguía ocupando el índice y crear el corregido para el mismo
 -- crédito y tipo fallaba por unicidad. Depender de que el llamador prenda
 -- `completado`, que significa otra cosa, es pedirle que mienta.
-CREATE UNIQUE INDEX IF NOT EXISTS rubros_uq_credito_tipo_vivo
+-- DROP + CREATE, no `IF NOT EXISTS`: esta migración ya corrió en DEV y en
+-- producción con el predicado viejo (sólo `completado`), y un `IF NOT EXISTS`
+-- sobre un índice que YA existe con ese nombre no hace nada — dejaría el
+-- predicado equivocado exactamente donde importa. Volver a correrla tiene que
+-- corregirlo, que es lo que este archivo promete al declararse re-ejecutable.
+DROP INDEX IF EXISTS cartera.rubros_uq_credito_tipo_vivo;
+CREATE UNIQUE INDEX rubros_uq_credito_tipo_vivo
   ON cartera.rubros (credito_id, tipo_id)
   WHERE completado = false AND anulado = false;
 

@@ -2256,12 +2256,18 @@
     (t) => [
       index("rubros_credito_activo_idx").on(t.credito_id, t.activo),
       // Un solo rubro VIVO por crédito y tipo: dos "tarjeta de circulación"
-      // pendientes a la vez son un cobro duplicado. El filtro por `completado`
-      // es lo que permite volver a cobrar el mismo concepto más adelante —
-      // cuando el anterior ya se saldó, deja de estorbar el índice.
+      // pendientes a la vez son un cobro duplicado. El filtro es lo que permite
+      // volver a cobrar el mismo concepto más adelante: el que sale de
+      // circulación deja de estorbar el índice.
+      //
+      // "Vivo" son las DOS condiciones. `completado` sola dejaba a un rubro
+      // ANULADO ocupando el índice —anular no prende `completado`—, así que
+      // crear el corregido para el mismo crédito y tipo fallaba por unicidad.
+      // Tiene que decir lo mismo que la migración 0036, o la próxima generación
+      // de esquema restauraría el predicado equivocado.
       uniqueIndex("rubros_uq_credito_tipo_vivo")
         .on(t.credito_id, t.tipo_id)
-        .where(sql`${t.completado} = false`),
+        .where(sql`${t.completado} = false AND ${t.anulado} = false`),
     ]
   );
 

@@ -743,6 +743,19 @@ export interface ContractGenerationResponse {
   signing_links?: string[];
   /** Proveedor de firma electrónica usado (weetrust | documenso) */
   signingProvider?: 'weetrust' | 'documenso';
+  /**
+   * ID del documento en WeeTrust. Hace falta para consultar el estado de firma
+   * y para reintentar la verificación de un firmante desde el CRM.
+   */
+  documentID?: string;
+  /** Firmantes efectivamente enviados, con su rol y su link. */
+  signatories?: Array<{
+    role: SignerRole;
+    email: string;
+    name: string;
+    signatoryID?: string;
+    signingUrl?: string;
+  }>;
   message: string;
   error?: string;
   generatedAt?: string;
@@ -814,6 +827,46 @@ export interface DeudorAdicional {
 }
 
 /**
+ * Rol de un firmante dentro de un contrato.
+ *
+ * El rol es lo que decide en qué línea de firma del PDF cae cada persona. Antes
+ * los firmantes viajaban como una lista plana de emails y se asignaban por
+ * índice, lo que cruzaba los links cuando el template no ponía al titular
+ * primero (ver `signaturePatterns.ts`).
+ */
+export enum SignerRole {
+  /** Deudor principal de la oportunidad. */
+  TITULAR = 'TITULAR',
+  /** Cofirmante / codeudor. Puede haber varios. */
+  COFIRMANTE = 'COFIRMANTE',
+  /** Representante legal de la entidad. Su nombre viene impreso en el template. */
+  REP_LEGAL = 'REP_LEGAL',
+  /** Vendedor del vehículo. */
+  VENDEDOR = 'VENDEDOR',
+}
+
+/**
+ * Tipo de verificación de identidad que WeeTrust le exige al firmante.
+ * - `id` / `ocr`: validación del documento de identidad (DPI).
+ * - `face`: biometría facial con prueba de vida.
+ */
+export type IdentificationMode = 'id' | 'face' | 'ocr' | 'face_login';
+
+/**
+ * Un firmante concreto de un contrato.
+ */
+export interface ContractSigner {
+  role: SignerRole;
+  email: string;
+  /** Nombre real de la persona. WeeTrust exige entre 4 y 100 caracteres. */
+  name: string;
+  /** DPI, cuando lo conocemos. Se usa para verificar el calce con el PDF. */
+  dpi?: string;
+  /** Número de WhatsApp, en formato internacional sin `+`. */
+  phone?: string;
+}
+
+/**
  * Request para generación de contrato
  */
 export interface GenerateContractRequest {
@@ -823,8 +876,23 @@ export interface GenerateContractRequest {
   /** Datos específicos del contrato */
   data: Record<string, any>;
 
-  /** Emails de los firmantes (número depende del tipo de contrato) */
+  /**
+   * Firmantes con su rol. Es la forma preferida: permite ubicar a cada persona
+   * en la línea de firma que le toca según el layout del template.
+   */
+  signers?: ContractSigner[];
+
+  /**
+   * Emails de los firmantes, en orden posicional.
+   * @deprecated Usar `signers`. Se mantiene para los llamadores que todavía no
+   * mandan roles; se interpreta como `[TITULAR, COFIRMANTE...]`.
+   */
   emails?: string[];
+
+  /**
+   * Observadores: reciben copia del flujo de firma en WeeTrust pero no firman.
+   */
+  observers?: string[];
 
   /** Opciones adicionales */
   options?: {

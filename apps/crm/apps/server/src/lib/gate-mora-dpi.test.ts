@@ -1,0 +1,619 @@
+import { describe, expect, test } from "bun:test";
+import {
+	ConsultaMoraNoDisponibleError,
+	type ConsultaMoraResponse,
+} from "../types/cartera-back";
+import type { AuditEntry } from "./audit";
+import {
+	evaluarGateMoraDpi,
+	MENSAJE_CORRECCION_POR_ADMINISTRADOR,
+	MENSAJE_GATE_APAGADO,
+	mensajeRechazoGateMora,
+	requiereConsultaDeMora,
+	resolverEdicionConMora,
+} from "./gate-mora-dpi";
+
+/**
+ * El gate de mora aplicado a los seis puntos de alta y edición por DPI.
+ *
+ * Lo que se prueba acá es lo que decide si una persona entra o no: el rechazo
+ * de quien está en mora, el fail-closed por los dos caminos que tiene, y —la
+ * parte más fácil de romper— que una edición que NO toca el DPI ni siquiera
+ * llame a cartera. Si se consultara en toda edición, los clientes morosos
+ * quedarían imposibles de editar y cobranza no podría ni corregirles el
+ * teléfono.
+ *
+ * Sin `mock.module` a propósito: en bun reemplazar un módulo es global al
+ * proceso y envenena a los otros setenta archivos de test. Las dependencias
+ * entran por parámetro, así que alcanzan funciones comunes.
+ */
+
+const DPI = "3460666380101";
+
+const SIN_MORA: ConsultaMoraResponse = {
+	encontrado: true,
+	tieneMoraActiva: false,
+	puedeContinuar: true,
+	motivo: "SIN_MORA",
+	cliente: { codigoClienteSifco: "CL-1", nombre: "Ana López" },
+	creditos: [],
+	historialMora: [],
+	consultadoEn: "2026-09-17T10:00:00.000Z",
+};
+
+const CON_MORA: ConsultaMoraResponse = {
+	...SIN_MORA,
+	tieneMoraActiva: true,
+	puedeContinuar: false,
+	motivo: "MORA_ACTIVA",
+	creditos: [
+		{
+			numeroCreditoSifco: "0101",
+			estado: "MOROSO",
+			moraActiva: { monto: "1200.00", cuotasAtrasadas: 3 },
+		},
+	],
+};
+
+const EN_CONVENIO: ConsultaMoraResponse = {
+	...SIN_MORA,
+	puedeContinuar: false,
+	motivo: "EN_CONVENIO",
+};
+
+/**
+ * Cartera contesta 200 —el HTTP salió bien— pero avisa en el cuerpo que no
+ * pudo averiguarlo. Ojo `tieneMoraActiva: false`: acá significa "no consta",
+ * no "está al día".
+ */
+const SERVICIO_CAIDO_200: ConsultaMoraResponse = {
+	encontrado: false,
+	tieneMoraActiva: false,
+	puedeContinuar: false,
+	motivo: "SERVICIO_NO_DISPONIBLE",
+	cliente: null,
+	creditos: [],
+	historialMora: [],
+	consultadoEn: "2026-09-17T10:00:00.000Z",
+};
+
+/** Banco de pruebas: registra a quién se consultó y qué quedó anotado. */
+function banco(responder: (dpi: string) => Promise<ConsultaMoraResponse>) {
+	const consultados: string[] = [];
+	const anotaciones: AuditEntry[] = [];
+	return {
+		consultados,
+		anotaciones,
+		deps: {
+			consultar: (dpi: string) => {
+				consultados.push(dpi);
+				return responder(dpi);
+			},
+			anotar: (entrada: AuditEntry) => {
+				anotaciones.push(entrada);
+			},
+		},
+	};
+}
+
+describe("gate de mora: altas", () => {
+	test("un DPI con mora activa no pasa, y el mensaje dice que no se puede continuar", async () => {
+		const { deps, consultados } = banco(async () => CON_MORA);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(veredicto.motivo).toBe("MORA_ACTIVA");
+		expect(veredicto.mensaje).toContain("saldo en mora");
+		expect(veredicto.mensaje).toContain("No se puede continuar");
+		expect(consultados).toEqual([DPI]);
+	});
+
+	test("un DPI sin mora pasa", async () => {
+		const { deps, consultados } = banco(async () => SIN_MORA);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(false);
+		expect(consultados).toEqual([DPI]);
+	});
+
+	test("un convenio vigente bloquea con su propio mensaje, distinto al de mora", async () => {
+		const conConvenio = await evaluarGateMoraDpi(
+			DPI,
+			banco(async () => EN_CONVENIO).deps,
+		);
+		const conMora = await evaluarGateMoraDpi(
+			DPI,
+			banco(async () => CON_MORA).deps,
+		);
+
+		expect(conConvenio.rechazado).toBe(true);
+		expect(conConvenio.motivo).toBe("EN_CONVENIO");
+		expect(conConvenio.mensaje).toContain("convenio de pago vigente");
+		// El asesor tiene que poder distinguir un caso del otro por el texto.
+		expect(conConvenio.mensaje).not.toBe(conMora.mensaje);
+	});
+});
+
+describe("gate de mora: fail-closed", () => {
+	test("si el cliente lanza ConsultaMoraNoDisponibleError, no pasa nadie", async () => {
+		const { deps } = banco(async () => {
+			throw new ConsultaMoraNoDisponibleError(
+				"timeout de SIFCO",
+				new Error("ETIMEDOUT"),
+			);
+		});
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(veredicto.motivo).toBe("SERVICIO_NO_DISPONIBLE");
+	});
+
+	test("un HTTP 200 con motivo SERVICIO_NO_DISPONIBLE también bloquea", async () => {
+		// El camino que se pierde si uno mira solo el status: cartera contestó
+		// bien, pero lo que contestó es "no sé".
+		const { deps } = banco(async () => SERVICIO_CAIDO_200);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(veredicto.motivo).toBe("SERVICIO_NO_DISPONIBLE");
+	});
+
+	test("el servicio caído se lee distinto de un rechazo real: dice que no se pudo verificar", async () => {
+		const caido = await evaluarGateMoraDpi(
+			DPI,
+			banco(async () => SERVICIO_CAIDO_200).deps,
+		);
+		const moroso = await evaluarGateMoraDpi(
+			DPI,
+			banco(async () => CON_MORA).deps,
+		);
+
+		expect(caido.mensaje).toContain("No se pudo verificar");
+		expect(caido.mensaje).toContain("intenta de nuevo");
+		// Y sobre todo: no acusa al cliente de tener mora.
+		expect(caido.mensaje).not.toContain("saldo en mora");
+		expect(caido.mensaje).not.toBe(moroso.mensaje);
+	});
+});
+
+describe("gate de mora: ediciones (solo si el DPI es nuevo o cambia)", () => {
+	test("el mismo DPI guardado no se vuelve a consultar", () => {
+		expect(requiereConsultaDeMora(DPI, DPI)).toBe(false);
+	});
+
+	test("el mismo DPI guardado con espacios tampoco se consulta", () => {
+		// Los DPI viejos quedaron con espacios; comparar en crudo vería un cambio
+		// donde no lo hay y trabaría la edición de un moroso.
+		expect(requiereConsultaDeMora(DPI, "3460 66638 0101")).toBe(false);
+	});
+
+	test("cambiar el DPI sí se consulta, y si está en mora se rechaza", async () => {
+		const OTRO = "1234567890101";
+		expect(requiereConsultaDeMora(OTRO, DPI)).toBe(true);
+
+		const { deps, consultados } = banco(async () => CON_MORA);
+		const veredicto = await evaluarGateMoraDpi(OTRO, deps);
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(consultados).toEqual([OTRO]);
+	});
+
+	test("un registro sin DPI al que se le pone uno cuenta como nuevo", () => {
+		expect(requiereConsultaDeMora(DPI, null)).toBe(true);
+		expect(requiereConsultaDeMora(DPI, undefined)).toBe(true);
+		expect(requiereConsultaDeMora(DPI, "")).toBe(true);
+		expect(requiereConsultaDeMora(DPI, "   ")).toBe(true);
+	});
+
+	test("una edición que no toca el DPI no llega a llamar a cartera", async () => {
+		// La prueba que protege la operación: el gate no se ejecuta, así que el
+		// cliente ni se toca. Un moroso se sigue pudiendo editar.
+		const { deps, consultados } = banco(async () => CON_MORA);
+
+		if (requiereConsultaDeMora(DPI, "3460 66638 0101")) {
+			await evaluarGateMoraDpi(DPI, deps);
+		}
+
+		expect(consultados).toEqual([]);
+	});
+});
+
+describe("gate de mora: bitácora", () => {
+	test("el bloqueo, el paso limpio y el servicio caído quedan en filas distintas", async () => {
+		const bloqueado = banco(async () => CON_MORA);
+		await evaluarGateMoraDpi(DPI, bloqueado.deps);
+
+		const limpio = banco(async () => SIN_MORA);
+		await evaluarGateMoraDpi(DPI, limpio.deps);
+
+		const caido = banco(async () => SERVICIO_CAIDO_200);
+		await evaluarGateMoraDpi(DPI, caido.deps);
+
+		expect(bloqueado.anotaciones[0]?.action).toBe("validar_mora_dpi_bloqueado");
+		expect(limpio.anotaciones[0]?.action).toBe("validar_mora_dpi_sin_bloqueo");
+		// Media hora de SIFCO caído no puede verse como cuarenta clientes morosos.
+		expect(caido.anotaciones[0]?.action).toBe("validar_mora_dpi_no_disponible");
+		expect(caido.anotaciones[0]?.ok).toBe(false);
+	});
+});
+
+describe("gate de mora: crédito insoluto", () => {
+	const CON_INSOLUTO: ConsultaMoraResponse = {
+		...SIN_MORA,
+		// Ojo: cartera bloquea SIN mora activa. Leer `tieneMoraActiva` para decidir
+		// dejaría pasar justamente a este.
+		tieneMoraActiva: false,
+		puedeContinuar: false,
+		motivo: "CREDITO_INSOLUTO",
+		creditos: [
+			{
+				numeroCreditoSifco: "insoluto-3",
+				estado: "CANCELADO",
+				moraActiva: null,
+			},
+		],
+	};
+
+	test("🔴 rechaza aunque no haya mora activa y el insoluto esté CANCELADO", async () => {
+		const { deps } = banco(async () => CON_INSOLUTO);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(veredicto.motivo).toBe("CREDITO_INSOLUTO");
+	});
+
+	test("el mensaje nombra al insoluto y no promete ponerse al día", async () => {
+		const { deps } = banco(async () => CON_INSOLUTO);
+
+		const { mensaje } = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(mensaje).toBe(
+			"El DPI corresponde a un cliente con un crédito insoluto en cartera. No se puede continuar.",
+		);
+		// Distinto del de mora: el insoluto no se arregla pagando la mora, así que
+		// mandar al asesor a pedir eso sería mandarlo a una gestión imposible.
+		expect(mensaje).not.toContain("se ponga al día");
+	});
+
+	test("queda en la bitácora como bloqueo, con su motivo", async () => {
+		const bloqueado = banco(async () => CON_INSOLUTO);
+
+		await evaluarGateMoraDpi(DPI, bloqueado.deps);
+
+		expect(bloqueado.anotaciones[0]?.action).toBe("validar_mora_dpi_bloqueado");
+		expect(
+			(bloqueado.anotaciones[0]?.data as { motivo?: string } | undefined)
+				?.motivo,
+		).toBe("CREDITO_INSOLUTO");
+	});
+});
+
+describe("gate de mora: números de crédito que aporta el CRM", () => {
+	/**
+	 * El caso que el gate no veía: los créditos nacidos en el CRM
+	 * (`CRM-<uuid>`) y los insolutos (`insoluto-N`) no tienen número de SIFCO,
+	 * así que preguntar solo por el DPI dejaba fuera cartera entera.
+	 */
+	function bancoConNumeros(
+		responder: (
+			dpi: string,
+			numeros?: string[],
+		) => Promise<ConsultaMoraResponse>,
+		numerosCreditoConocidos?: (dpi: string) => Promise<string[]>,
+	) {
+		const recibidos: Array<{ dpi: string; numeros?: string[] }> = [];
+		const anotaciones: AuditEntry[] = [];
+		return {
+			recibidos,
+			anotaciones,
+			deps: {
+				consultar: (dpi: string, numeros?: string[]) => {
+					recibidos.push({ dpi, numeros });
+					return responder(dpi, numeros);
+				},
+				numerosCreditoConocidos,
+				anotar: (entrada: AuditEntry) => {
+					anotaciones.push(entrada);
+				},
+			},
+		};
+	}
+
+	test("los números que el CRM conoce viajan a cartera junto al DPI", async () => {
+		const { deps, recibidos } = bancoConNumeros(
+			async () => SIN_MORA,
+			async () => ["CRM-abc", "insoluto-3"],
+		);
+
+		await evaluarGateMoraDpi(DPI, deps);
+
+		expect(recibidos).toEqual([
+			{ dpi: DPI, numeros: ["CRM-abc", "insoluto-3"] },
+		]);
+	});
+
+	test("sin la dependencia el gate sigue funcionando sobre lo que SIFCO ve", async () => {
+		const { deps, recibidos } = bancoConNumeros(async () => CON_MORA);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(recibidos).toEqual([{ dpi: DPI, numeros: [] }]);
+	});
+
+	test("🔴 si la búsqueda de números falla, el gate corta y NO consulta a medias", async () => {
+		// Fail-closed: consultar sin esos números vería menos cartera de la que
+		// hay, y un "sin mora" armado sobre media cartera es el falso negativo que
+		// este gate existe para evitar.
+		const { deps, recibidos, anotaciones } = bancoConNumeros(
+			async () => SIN_MORA,
+			async () => {
+				throw new Error("la base del CRM no respondió");
+			},
+		);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(veredicto.motivo).toBe("SERVICIO_NO_DISPONIBLE");
+		expect(recibidos).toEqual([]);
+		expect(anotaciones[0]?.action).toBe("validar_mora_dpi_no_disponible");
+		expect(anotaciones[0]?.ok).toBe(false);
+	});
+
+	test("el veredicto que llega gracias a esos números bloquea igual", async () => {
+		// Cliente sin ficha en SIFCO: cartera lo encuentra SOLO por los números del
+		// CRM, y por eso `cliente` viene en null pero `encontrado` en true.
+		const { deps } = bancoConNumeros(
+			async (_dpi, numeros) =>
+				numeros?.includes("insoluto-3")
+					? {
+							...SIN_MORA,
+							cliente: null,
+							puedeContinuar: false,
+							motivo: "CREDITO_INSOLUTO",
+						}
+					: SIN_MORA,
+			async () => ["insoluto-3"],
+		);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(veredicto.motivo).toBe("CREDITO_INSOLUTO");
+	});
+});
+
+describe("gate de mora: kill switch (ENABLE_CARTERA_BACK_INTEGRATION)", () => {
+	test("apagado, deja pasar SIN consultar a cartera", async () => {
+		// Fail-OPEN deliberado, y el único del gate: lo activa una persona tocando
+		// una variable de entorno, no una excepción. Si SIFCO queda caído horas,
+		// sin esta palanca no habría cómo seguir dando de alta clientes salvo
+		// desplegando código.
+		const { deps, consultados } = banco(async () => CON_MORA);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, {
+			...deps,
+			habilitado: () => false,
+		});
+
+		expect(veredicto.rechazado).toBe(false);
+		expect(veredicto.motivo).toBe("SIN_MORA");
+		// La prueba que importa: ni siquiera se preguntó. Un cliente CON mora pasa.
+		expect(consultados).toEqual([]);
+	});
+
+	test("apagado, ni la búsqueda de números del CRM llega a salir", async () => {
+		// El corto va ANTES que todo: `numerosCreditoConocidos` toca la base y no
+		// tiene sentido pagarlo si no se va a consultar nada.
+		let busquedas = 0;
+		const { deps } = banco(async () => SIN_MORA);
+
+		await evaluarGateMoraDpi(DPI, {
+			...deps,
+			numerosCreditoConocidos: async () => {
+				busquedas += 1;
+				return [];
+			},
+			habilitado: () => false,
+		});
+
+		expect(busquedas).toBe(0);
+	});
+
+	test("apagado, queda su propia fila en la bitácora", async () => {
+		// Mientras la bandera esté abajo entra gente sin validar; después hay que
+		// poder saber quiénes fueron, y que NO se confunda con un paso limpio.
+		const { deps, anotaciones } = banco(async () => CON_MORA);
+
+		await evaluarGateMoraDpi(DPI, { ...deps, habilitado: () => false });
+
+		expect(anotaciones).toHaveLength(1);
+		expect(anotaciones[0]?.action).toBe("validar_mora_dpi_apagado");
+		expect(anotaciones[0]?.action).not.toBe("validar_mora_dpi_sin_bloqueo");
+		expect(anotaciones[0]?.data).toMatchObject({ dpi: DPI });
+	});
+
+	test("el mensaje dice que no se consultó, no que el cliente esté limpio", async () => {
+		const { deps } = banco(async () => CON_MORA);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, {
+			...deps,
+			habilitado: () => false,
+		});
+
+		expect(veredicto.mensaje).toBe(MENSAJE_GATE_APAGADO);
+		expect(veredicto.mensaje).toContain("desactivada por configuración");
+		expect(veredicto.mensaje).toContain("no se consultó");
+	});
+
+	test("prendido, todo sigue exactamente igual que antes", async () => {
+		const bloqueado = banco(async () => CON_MORA);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, {
+			...bloqueado.deps,
+			habilitado: () => true,
+		});
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(veredicto.motivo).toBe("MORA_ACTIVA");
+		expect(bloqueado.consultados).toEqual([DPI]);
+		expect(bloqueado.anotaciones[0]?.action).toBe("validar_mora_dpi_bloqueado");
+	});
+
+	test("sin la dependencia el gate consulta siempre", async () => {
+		// Omitirla no puede significar "apagado": los seis puntos de producción la
+		// cablean, pero un llamador nuevo que la olvide tiene que quedar validando.
+		const { deps, consultados } = banco(async () => CON_MORA);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(consultados).toEqual([DPI]);
+	});
+});
+
+describe("gate de mora: corrección de un DPI mal capturado (solo ediciones)", () => {
+	const RECHAZO = {
+		rechazado: true as const,
+		motivo: "MORA_ACTIVA" as const,
+		mensaje: mensajeRechazoGateMora("MORA_ACTIVA"),
+	};
+
+	function bitacora() {
+		const anotaciones: AuditEntry[] = [];
+		return {
+			anotaciones,
+			anotar: (entrada: AuditEntry) => {
+				anotaciones.push(entrada);
+			},
+		};
+	}
+
+	test("un asesor de ventas sigue bloqueado", () => {
+		const { anotaciones, anotar } = bitacora();
+
+		const resolucion = resolverEdicionConMora(
+			RECHAZO,
+			"sales",
+			{ entity: "lead", id: "lead-1", dpi: DPI },
+			anotar,
+		);
+
+		expect(resolucion.permitir).toBe(false);
+		// Bloqueado no deja rastro de override: no hubo ninguno.
+		expect(anotaciones).toEqual([]);
+	});
+
+	test("el mensaje del bloqueado le dice a dónde ir: a un administrador", () => {
+		const { anotar } = bitacora();
+
+		const resolucion = resolverEdicionConMora(
+			RECHAZO,
+			"sales",
+			{ entity: "lead", id: "lead-1", dpi: DPI },
+			anotar,
+		);
+
+		expect(resolucion.permitir).toBe(false);
+		if (resolucion.permitir) return;
+		// Sigue diciendo POR QUÉ se bloqueó...
+		expect(resolucion.mensaje).toContain("saldo en mora");
+		// ...y ahora también qué hacer si el DPI simplemente estaba mal tecleado.
+		expect(resolucion.mensaje).toContain("administrador");
+		expect(resolucion.mensaje).toContain(MENSAJE_CORRECCION_POR_ADMINISTRADOR);
+	});
+
+	test("los roles intermedios NO abren la válvula, aunque editen cualquier lead", () => {
+		// `canUpdateAnyLead` es `!== "sales"`, así que estos tres pueden editar el
+		// lead de cualquiera. Saltarse el gate de mora es otra cosa: es exactamente
+		// el favor que un asesor con presión de cuota le pediría a su supervisor.
+		for (const rol of ["sales_supervisor", "analyst", "juridico"]) {
+			const { anotaciones, anotar } = bitacora();
+
+			const resolucion = resolverEdicionConMora(
+				RECHAZO,
+				rol,
+				{ entity: "lead", id: "lead-1", dpi: DPI },
+				anotar,
+			);
+
+			expect(resolucion.permitir, `${rol} no debería poder`).toBe(false);
+			expect(anotaciones).toEqual([]);
+		}
+	});
+
+	test("un administrador sí puede corregir, y deja rastro con el motivo del gate", () => {
+		const { anotaciones, anotar } = bitacora();
+
+		const resolucion = resolverEdicionConMora(
+			RECHAZO,
+			"admin",
+			{ entity: "lead", id: "lead-1", dpi: DPI },
+			anotar,
+		);
+
+		expect(resolucion.permitir).toBe(true);
+		expect(anotaciones).toHaveLength(1);
+		expect(anotaciones[0]?.action).toBe("validar_mora_dpi_override_admin");
+		expect(anotaciones[0]?.id).toBe("lead-1");
+		// Sin el motivo, la fila diría que alguien pasó pero no por encima de qué.
+		expect(anotaciones[0]?.data).toMatchObject({
+			dpi: DPI,
+			motivo: "MORA_ACTIVA",
+		});
+	});
+
+	test("el co-deudor viaja en el detalle porque la bitácora no conoce esa entidad", () => {
+		const { anotaciones, anotar } = bitacora();
+
+		resolverEdicionConMora(
+			RECHAZO,
+			"admin",
+			{
+				entity: "lead",
+				id: null,
+				dpi: DPI,
+				datosExtra: { coDebtorId: "codeudor-9" },
+			},
+			anotar,
+		);
+
+		expect(anotaciones[0]?.id).toBeNull();
+		expect(anotaciones[0]?.data).toMatchObject({ coDebtorId: "codeudor-9" });
+	});
+
+	test("si el gate no rechazó, no se anota override de nadie", () => {
+		const { anotaciones, anotar } = bitacora();
+
+		const resolucion = resolverEdicionConMora(
+			{ rechazado: false, motivo: "SIN_MORA", mensaje: "" },
+			"admin",
+			{ entity: "lead", id: "lead-1", dpi: DPI },
+			anotar,
+		);
+
+		expect(resolucion.permitir).toBe(true);
+		expect(anotaciones).toEqual([]);
+	});
+
+	test("un rol ausente no abre la válvula", () => {
+		const { anotar } = bitacora();
+
+		for (const rol of [undefined, null, ""]) {
+			expect(
+				resolverEdicionConMora(
+					RECHAZO,
+					rol,
+					{ entity: "lead", id: "lead-1", dpi: DPI },
+					anotar,
+				).permitir,
+			).toBe(false);
+		}
+	});
+});

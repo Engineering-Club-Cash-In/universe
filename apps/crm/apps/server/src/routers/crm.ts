@@ -20,10 +20,6 @@ import {
 import { z } from "zod";
 import { db } from "../db";
 import {
-	isReservedBankCoverageDescription,
-	redactBankStatementCoverageEvidence,
-} from "../lib/bank-statement-documents";
-import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
 	vehicleInspections,
@@ -65,6 +61,10 @@ import {
 } from "../lib/analysis-checklist";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
+	isReservedBankCoverageDescription,
+	redactBankStatementCoverageEvidence,
+} from "../lib/bank-statement-documents";
+import {
 	rebuildClientDocumentChecklistInTransaction,
 	refreshChecklistForClientDocuments,
 	updateChecklistForClientDocument,
@@ -93,7 +93,9 @@ import {
 	aplicarDeltaMontosInversionistas,
 } from "../lib/fecha-ideal-cotizacion";
 import {
+	esDpiEnBlanco,
 	evaluarGateMoraDpi,
+	MENSAJE_DPI_EN_BLANCO,
 	MENSAJE_GATE_APAGADO,
 	requiereConsultaDeMora,
 	resolverEdicionConMora,
@@ -938,10 +940,9 @@ export const crmRouter = {
 			const { id, ...updateData } = input;
 
 			// Supervisors can update the complete sales directory.
-			const whereClause =
-				PERMISSIONS.canManageAllCompanies(context.userRole)
-					? eq(companies.id, id)
-					: and(eq(companies.id, id), eq(companies.createdBy, context.userId));
+			const whereClause = PERMISSIONS.canManageAllCompanies(context.userRole)
+				? eq(companies.id, id)
+				: and(eq(companies.id, id), eq(companies.createdBy, context.userId));
 
 			const updatedCompany = await db
 				.update(companies)
@@ -1403,6 +1404,14 @@ export const crmRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const { id, assignedTo, ...updateData } = input;
+
+			// 🔴 El DPI en blanco se rechaza ANTES que nada: sin esto, `dpi: ""` se
+			// saltaba la validación y el gate por falsy y el `.set` lo escribía
+			// igual, dejando al moroso invisible para siempre. Ver
+			// `MENSAJE_DPI_EN_BLANCO`.
+			if (esDpiEnBlanco(updateData.dpi)) {
+				throw new ORPCError("BAD_REQUEST", { message: MENSAJE_DPI_EN_BLANCO });
+			}
 
 			// Validar DPI si se envía
 			if (updateData.dpi) {
@@ -2002,9 +2011,10 @@ export const crmRouter = {
 				.groupBy(opportunityStageHistory.opportunityId)
 				.as("latest_stage_history");
 
-			const closedAtExpression = sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`.mapWith(
-				opportunities.actualCloseDate,
-			);
+			const closedAtExpression =
+				sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`.mapWith(
+					opportunities.actualCloseDate,
+				);
 
 			const selectFields = {
 				id: opportunities.id,
@@ -2567,74 +2577,76 @@ export const crmRouter = {
 	updateOpportunity: crmProcedure
 		.meta({ audit: { entity: "opportunity", action: "update" } })
 		.input(
-			z.object({
-				id: z.string().uuid(),
-				title: z.string().min(1, "Title is required").optional(),
-				leadId: z.string().uuid().nullable().optional(),
-				companyId: z.string().uuid().nullable().optional(),
-				vehicleId: z.string().uuid().nullable().optional(),
-				creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
-				source: z.enum(leadSourceEnum.enumValues).optional(),
-				campaign: z.string().min(1).optional(),
-				value: z.string().optional(),
-				stageId: z.string().uuid().optional(),
-				probability: z.number().min(0).max(100).optional(),
-				expectedCloseDate: z.string().optional(),
-				status: z.enum(["open", "won", "lost", "on_hold"]).optional(),
-				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
-				notes: z.string().optional(),
-				stageChangeReason: z.string().optional(),
-				// Vehicle vendor. Sigue siendo opcional: null lo desasigna, y
-				// permite corregirlo cuando no se eligió al crear la oportunidad.
-				vendorId: z.string().uuid().nullable().optional(),
-				// Credit terms
-				numeroCuotas: z.number().int().positive().optional(),
-				tasaInteres: z.string().optional(),
-				cuotaMensual: z.string().optional(),
-				fechaInicio: z.string().optional(),
-				diaPagoMensual: z.number().int().min(1).max(31).optional(),
-				// Marca si el día viene de la opción "recomendado por IA" del select,
-				// aunque coincida numéricamente con 15/30. Se revalida server-side
-				// contra suggestedPaymentDays. Requerido cuando se envía diaPagoMensual
-				// (ver .refine() abajo). No es columna de opportunities — se destructura
-				// fuera de updateData más abajo.
-				elegidoDesdeRecomendacionIA: z.boolean().optional(),
-				// Additional fields
-				seguro: z.number().optional(),
-				gps: z.number().optional(),
-				categoria: z
-					.enum([
-						"Contraseña",
-						"CV Vehículo",
-						"CV Vehículo nuevo",
-						"Fiduciario",
-						"Hipotecario",
-						"Vehículo",
-					])
-					.optional(),
-				nit: z.string().optional(),
-				royalti: z.number().optional(),
-				porcentajeRoyalti: z.string().optional(),
-				reserva: z.number().optional(),
-				membresiaPago: z.number().optional(),
-				inversionistas: z.string().optional(), // JSON string
-				asesorId: z.number().optional(),
-				direccion: z.string().optional(),
-				rubros: z.string().optional(), // JSON string with expense items
-				gastosAdministrativos: z.number().optional(), // Administrative expenses for cartera "otros"
-				loanPurpose: z.enum(["personal", "business"]).optional(),
-				// Optimistic locking - prevents race conditions on concurrent updates
-				expectedUpdatedAt: z.string().datetime().optional(),
-			}).refine(
-				(data) =>
-					data.diaPagoMensual === undefined ||
-					data.elegidoDesdeRecomendacionIA !== undefined,
-				{
-					message:
-						"elegidoDesdeRecomendacionIA es requerido cuando se envía diaPagoMensual",
-					path: ["elegidoDesdeRecomendacionIA"],
-				},
-			),
+			z
+				.object({
+					id: z.string().uuid(),
+					title: z.string().min(1, "Title is required").optional(),
+					leadId: z.string().uuid().nullable().optional(),
+					companyId: z.string().uuid().nullable().optional(),
+					vehicleId: z.string().uuid().nullable().optional(),
+					creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
+					source: z.enum(leadSourceEnum.enumValues).optional(),
+					campaign: z.string().min(1).optional(),
+					value: z.string().optional(),
+					stageId: z.string().uuid().optional(),
+					probability: z.number().min(0).max(100).optional(),
+					expectedCloseDate: z.string().optional(),
+					status: z.enum(["open", "won", "lost", "on_hold"]).optional(),
+					assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
+					notes: z.string().optional(),
+					stageChangeReason: z.string().optional(),
+					// Vehicle vendor. Sigue siendo opcional: null lo desasigna, y
+					// permite corregirlo cuando no se eligió al crear la oportunidad.
+					vendorId: z.string().uuid().nullable().optional(),
+					// Credit terms
+					numeroCuotas: z.number().int().positive().optional(),
+					tasaInteres: z.string().optional(),
+					cuotaMensual: z.string().optional(),
+					fechaInicio: z.string().optional(),
+					diaPagoMensual: z.number().int().min(1).max(31).optional(),
+					// Marca si el día viene de la opción "recomendado por IA" del select,
+					// aunque coincida numéricamente con 15/30. Se revalida server-side
+					// contra suggestedPaymentDays. Requerido cuando se envía diaPagoMensual
+					// (ver .refine() abajo). No es columna de opportunities — se destructura
+					// fuera de updateData más abajo.
+					elegidoDesdeRecomendacionIA: z.boolean().optional(),
+					// Additional fields
+					seguro: z.number().optional(),
+					gps: z.number().optional(),
+					categoria: z
+						.enum([
+							"Contraseña",
+							"CV Vehículo",
+							"CV Vehículo nuevo",
+							"Fiduciario",
+							"Hipotecario",
+							"Vehículo",
+						])
+						.optional(),
+					nit: z.string().optional(),
+					royalti: z.number().optional(),
+					porcentajeRoyalti: z.string().optional(),
+					reserva: z.number().optional(),
+					membresiaPago: z.number().optional(),
+					inversionistas: z.string().optional(), // JSON string
+					asesorId: z.number().optional(),
+					direccion: z.string().optional(),
+					rubros: z.string().optional(), // JSON string with expense items
+					gastosAdministrativos: z.number().optional(), // Administrative expenses for cartera "otros"
+					loanPurpose: z.enum(["personal", "business"]).optional(),
+					// Optimistic locking - prevents race conditions on concurrent updates
+					expectedUpdatedAt: z.string().datetime().optional(),
+				})
+				.refine(
+					(data) =>
+						data.diaPagoMensual === undefined ||
+						data.elegidoDesdeRecomendacionIA !== undefined,
+					{
+						message:
+							"elegidoDesdeRecomendacionIA es requerido cuando se envía diaPagoMensual",
+						path: ["elegidoDesdeRecomendacionIA"],
+					},
+				),
 		)
 		.handler(async ({ input, context }) => {
 			const {
@@ -5376,9 +5388,7 @@ export const crmRouter = {
 					const url = await getFileUrl(doc.filePath);
 					return {
 						...doc,
-						description: isManualBankDocumentCleanupDescription(
-							doc.description,
-						)
+						description: isManualBankDocumentCleanupDescription(doc.description)
 							? null
 							: doc.description,
 						url,
@@ -5472,14 +5482,8 @@ export const crmRouter = {
 								.from(opportunityDocuments)
 								.where(
 									and(
-										eq(
-											opportunityDocuments.opportunityId,
-											input.opportunityId,
-										),
-										eq(
-											opportunityDocuments.documentType,
-											input.documentType,
-										),
+										eq(opportunityDocuments.opportunityId, input.opportunityId),
+										eq(opportunityDocuments.documentType, input.documentType),
 									),
 								)
 								.limit(1);
@@ -5514,17 +5518,13 @@ export const crmRouter = {
 						},
 						deleteUploadedFile: deleteFileFromR2,
 						persistCleanupDebt: async (debt) => {
-							const description =
-								getManualBankUploadCleanupDescription(debt);
+							const description = getManualBankUploadCleanupDescription(debt);
 							const [existing] = await db
 								.select({ id: opportunityDocuments.id })
 								.from(opportunityDocuments)
 								.where(
 									and(
-										eq(
-											opportunityDocuments.opportunityId,
-											debt.opportunityId,
-										),
+										eq(opportunityDocuments.opportunityId, debt.opportunityId),
 										eq(opportunityDocuments.filePath, debt.key),
 									),
 								)
@@ -5655,9 +5655,8 @@ export const crmRouter = {
 							documentType: document.documentType,
 							description: document.description,
 							withOpportunityLock: withOpportunityDocumentMutationLock,
-							runTransaction: <R>(
-								operation: (tx: Transaction) => Promise<R>,
-							) => db.transaction(operation),
+							runTransaction: <R>(operation: (tx: Transaction) => Promise<R>) =>
+								db.transaction(operation),
 							readDocument: async (tx) => {
 								const [current] = await tx
 									.select()
@@ -5752,13 +5751,14 @@ export const crmRouter = {
 				// Si el archivo es la evidencia inmutable de una validación de
 				// integridad documental, no se borra de R2: esa misma ruta queda
 				// referenciada por document_integrity_validations para auditoría.
-				const isDocumentIntegrityEvidence = isImmutableDocumentIntegrityEvidencePath({
-					filePath: document.filePath,
-					bankStatementPrefix: buildUploadPrefix(
-						"bank_statement",
-						document.opportunityId,
-					),
-				});
+				const isDocumentIntegrityEvidence =
+					isImmutableDocumentIntegrityEvidencePath({
+						filePath: document.filePath,
+						bankStatementPrefix: buildUploadPrefix(
+							"bank_statement",
+							document.opportunityId,
+						),
+					});
 
 				if (!isDocumentIntegrityEvidence) {
 					// Eliminar de R2
@@ -8352,7 +8352,10 @@ export const crmRouter = {
 					.string()
 					.min(1, "El nombre completo es requerido")
 					.optional(),
-				dpi: z.string().min(1, "El DPI es requerido").optional(),
+				// 🔴 El `min(1)` NO es cosmético: es lo que impide dejar el DPI en
+				// blanco, que en `updateLead` hubo que rechazar a mano. Blanquearlo
+				// vuelve invisible al moroso para siempre (ver `MENSAJE_DPI_EN_BLANCO`).
+				dpi: z.string().min(1, MENSAJE_DPI_EN_BLANCO).optional(),
 				age: z.number().int().positive().nullable().optional(),
 				gender: z.enum(["male", "female"]).nullable().optional(),
 				maritalStatus: z
@@ -8372,6 +8375,13 @@ export const crmRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const { id, ...updateData } = input;
+
+			// El mismo rechazo que en `updateLead`. El `min(1)` del schema ya para el
+			// `""`, pero no el `"   "`, y los dos son el mismo intento: dejar sin DPI
+			// a alguien para que el gate no lo vuelva a encontrar.
+			if (esDpiEnBlanco(updateData.dpi)) {
+				throw new ORPCError("BAD_REQUEST", { message: MENSAJE_DPI_EN_BLANCO });
+			}
 
 			// Validar DPI si se envía
 			if (updateData.dpi) {

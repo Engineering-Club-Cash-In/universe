@@ -10,7 +10,9 @@ import { auditRecord } from "../lib/audit";
 import { eqDpi } from "../lib/dpi-lookup";
 import { eqEmail } from "../lib/email-lookup";
 import {
+	esDpiEnBlanco,
 	evaluarGateMoraDpi,
+	MENSAJE_DPI_EN_BLANCO,
 	requiereConsultaDeMora,
 } from "../lib/gate-mora-dpi";
 import {
@@ -251,14 +253,19 @@ export async function updateLeadByEmail(c: Context) {
 
 		const existingLead = result.lead;
 
+		// 🔴 El DPI en blanco se rechaza, no se guarda. Sin esto, `dpi: ""` se
+		// saltaba la validación y el gate por el `trim() !== ""` de abajo y el
+		// `.set` lo escribía igual: blanquear el DPI de un moroso lo volvía
+		// invisible para siempre. Ver `MENSAJE_DPI_EN_BLANCO`.
+		if (esDpiEnBlanco(dpi)) {
+			return c.json({ success: false, error: MENSAJE_DPI_EN_BLANCO }, 400);
+		}
+
 		// Validar DPI si se envía
 		if (dpi !== undefined && dpi.trim() !== "") {
 			const resultadoDpi = validarDpi(dpi);
 			if (!resultadoDpi.valid) {
-				return c.json(
-					{ success: false, error: resultadoDpi.error },
-					400,
-				);
+				return c.json({ success: false, error: resultadoDpi.error }, 400);
 			}
 			dpi = resultadoDpi.dpiLimpio;
 
@@ -729,10 +736,7 @@ export async function createPortalRegisterLead(c: Context) {
 		// Validar DPI
 		const resultadoDpi = validarDpi(dpiRaw);
 		if (!resultadoDpi.valid) {
-			return c.json(
-				{ success: false, error: resultadoDpi.error },
-				400,
-			);
+			return c.json({ success: false, error: resultadoDpi.error }, 400);
 		}
 		const dpi = resultadoDpi.dpiLimpio;
 

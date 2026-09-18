@@ -274,6 +274,58 @@ export function noExisteOportunidadCandantePorId(opportunityId: string): SQL {
 	return sql`not ${existeOportunidadCandantePorId(opportunityId)}`;
 }
 
+/**
+ * 🔴 Borrar el co-deudor es la otra forma de reemplazar una identidad candada.
+ *
+ * El candado de `updateCoDebtor` impide cambiarle el DPI a un co-deudor de una
+ * oportunidad avanzada, pero no impedía BORRARLO y crear otro con otro DPI: dos
+ * llamadas y el expediente queda respaldado por una persona distinta de la que
+ * pasó por RENAP, buró y documentos. El resultado es el mismo que el candado
+ * existe para evitar.
+ *
+ * Se cierra por el lado del borrado, no del alta. `createCoDebtor` NO lleva
+ * candado a propósito: agregar un co-deudor tarde es un flujo legítimo y
+ * frecuente —el analista pide refuerzo justo cuando la solicitud ya avanzó—.
+ * El REEMPLAZO, en cambio, exige borrar primero, y con el borrado candado la
+ * maniobra completa queda cerrada sin romper el flujo bueno.
+ */
+export function mensajeCandadoBorradoCoDeudor(
+	etapa: OportunidadParaCandadoDpi,
+): string {
+	const altura = Math.max(
+		etapa.closurePercentage,
+		etapa.maxHistoricoClosurePercentage ?? 0,
+	);
+	return `No se puede eliminar al co-deudor: la solicitud ya pasó del ${PORCENTAJE_CANDADO_DPI}% (llegó al ${altura}%). Su identidad quedó fija porque las validaciones de RENAP y buró y los documentos del expediente están atadas a ella, y borrarlo para dar de alta a otro cambiaría al responsable del crédito por la puerta de atrás. Si de verdad hay que reemplazarlo, un administrador puede hacerlo.`;
+}
+
+export async function evaluarCandadoBorradoCoDeudor(input: {
+	opportunityId: string;
+	esAdmin?: boolean;
+}): Promise<ResultadoCandadoDpi> {
+	const oportunidades = await obtenerOportunidadesParaCandadoDpi({
+		opportunityId: input.opportunityId,
+	});
+
+	const etapa = etapaQueCanda(oportunidades);
+	if (!etapa) {
+		return { bloqueado: false };
+	}
+
+	// Misma válvula que el candado del DPI y por la misma razón: un co-deudor
+	// cargado por error tiene que poder salir. Sale marcada para que el llamador
+	// la anote.
+	if (input.esAdmin) {
+		return { bloqueado: false, overrideAdmin: true, candantes: [etapa] };
+	}
+
+	return {
+		bloqueado: true,
+		message: mensajeCandadoBorradoCoDeudor(etapa),
+		candantes: [etapa],
+	};
+}
+
 export async function evaluarCandadoDpi(input: {
 	dpiActual: string | null | undefined;
 	dpiNuevo: string | null | undefined;

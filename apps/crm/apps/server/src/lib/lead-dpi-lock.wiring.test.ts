@@ -124,6 +124,43 @@ describe("cableado del candado de DPI", () => {
 		}
 	});
 
+	/**
+	 * 🔴 `deleteCoDebtor` entra al cableado del candado aunque no escriba ningún
+	 * DPI: borrar al co-deudor y crear otro con otro DPI reemplaza la identidad
+	 * que respalda el crédito sin tocar una sola columna `dpi`. Los tests que
+	 * miran `update(...)` con `dpi:` no lo ven, y por eso se declara acá.
+	 *
+	 * `createCoDebtor` queda FUERA a propósito: agregar un co-deudor tarde es un
+	 * flujo legítimo. El reemplazo exige borrar primero, y eso ya está cerrado.
+	 */
+	test("deleteCoDebtor pasa por el candado; createCoDebtor no, a propósito", () => {
+		const texto = readFileSync(join(SRC, "routers/crm.ts"), "utf8");
+
+		const desdeDelete = texto.indexOf("deleteCoDebtor: crmProcedure");
+		expect(desdeDelete).toBeGreaterThan(-1);
+		const bloqueDelete = texto.slice(desdeDelete, desdeDelete + 3000);
+
+		expect(
+			bloqueDelete.includes("evaluarCandadoBorradoCoDeudor("),
+			"deleteCoDebtor debería candar: borrarlo y crear otro con otro DPI cambia " +
+				"al responsable del crédito por la puerta de atrás.",
+		).toBe(true);
+
+		const desdeCreate = texto.indexOf("createCoDebtor: crmProcedure");
+		expect(desdeCreate).toBeGreaterThan(-1);
+		const bloqueCreate = texto.slice(
+			desdeCreate,
+			texto.indexOf("updateCoDebtor: crmProcedure"),
+		);
+
+		expect(
+			bloqueCreate.includes("evaluarCandadoBorradoCoDeudor("),
+			"createCoDebtor NO debe candar: agregar un co-deudor tarde es legítimo. " +
+				"Si se cierra acá, se rompe el flujo bueno sin cerrar nada que el " +
+				"borrado candado no cierre ya.",
+		).toBe(false);
+	});
+
 	test("en el portal el candado NO vive dentro de la guarda que descarta los vacíos", () => {
 		const texto = readFileSync(
 			join(SRC, "controllers/portal-lead.ts"),

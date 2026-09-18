@@ -81,6 +81,36 @@ function cotaODesistir(
 }
 
 /**
+ * La misma cota, aplicada a una promesa ya en vuelo. El pool de la base de
+ * cartera se configura sin timeout propio (`database/index.ts`): una query
+ * colgada dejaba la request pendiente para siempre y el presupuesto de 15s
+ * solo cubria la resolucion de numeros contra SIFCO. El throw sale por el
+ * catch como SERVICIO_NO_DISPONIBLE, fail-closed.
+ */
+async function bajoPlazo<T>(
+  promesa: Promise<T>,
+  venceEnMs: number,
+  paso: string
+): Promise<T> {
+  const ms = cotaODesistir(PRESUPUESTO_NUMEROS_GATE_MS, venceEnMs, paso);
+  let temporizador: ReturnType<typeof setTimeout> | undefined;
+  const corte = new Promise<never>((_, rechazar) => {
+    temporizador = setTimeout(() => {
+      rechazar(
+        new Error(
+          `El presupuesto de ${PRESUPUESTO_NUMEROS_GATE_MS}ms de la consulta de mora vencio durante ${paso}`
+        )
+      );
+    }, ms);
+  });
+  try {
+    return await Promise.race([promesa, corte]);
+  } finally {
+    clearTimeout(temporizador);
+  }
+}
+
+/**
  * Responde si el dueño de un DPI ya es cliente y si está en mora, para el gate
  * del CRM antes de dejar avanzar una solicitud.
  *
@@ -166,7 +196,11 @@ export async function consultarMoraPorDpi(
     // buscar y el cliente sale como lo que es, conocido y sin créditos.
     const creditosCliente =
       paso === "BUSCAR_CREDITOS"
-        ? await obtenerCreditosConMora(numerosPrestamo)
+        ? await bajoPlazo(
+            obtenerCreditosConMora(numerosPrestamo),
+            venceEn,
+            "la lectura de creditos y moras"
+          )
         : [];
 
     // Ni ficha ni crédito: el DPI no le consta a nadie.
@@ -199,7 +233,11 @@ export async function consultarMoraPorDpi(
           }
         : null,
       creditos: creditosRespuesta,
-      historialMora: await obtenerHistorialMora(numeroPorCreditoId),
+      historialMora: await bajoPlazo(
+        obtenerHistorialMora(numeroPorCreditoId),
+        venceEn,
+        "la lectura del historial de mora"
+      ),
       consultadoEn,
     });
   } catch (error) {

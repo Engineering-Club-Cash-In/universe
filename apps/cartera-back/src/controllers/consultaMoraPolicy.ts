@@ -573,7 +573,14 @@ export function montoDeMorasCerradas(
   const ultimo = new Map<number, { fecha: string; monto: string }>();
 
   for (const fila of eventos) {
-    if (fila.tipo_evento !== "DESACTIVACION") continue;
+    // La condonación individual también cierra la mora dejando monto_mora en
+    // "0", pero su rastro va en un evento CONDONACION (latefee.ts ~1227), no
+    // en DESACTIVACION: sin esta línea, la mora condonada salía cerrada en 0.
+    if (
+      fila.tipo_evento !== "DESACTIVACION" &&
+      fila.tipo_evento !== "CONDONACION"
+    )
+      continue;
     if (fila.mora_id === null || fila.mora_id === undefined) continue;
 
     const fecha = aISO(fila.fecha);
@@ -607,7 +614,14 @@ export function construirHistorialMora(
   const eventos: EventoHistorialMora[] = [
     ...fuentes.eventos.map((fila) => ({
       fecha: aISO(fila.fecha),
-      monto: aMonto(fila.monto_nuevo),
+      // En la CONDONACION el monto que importa es lo condonado: latefee deja
+      // monto_nuevo en 0 y el original viaja en monto_anterior. Con
+      // monto_nuevo, la fila decía "condonación de 0".
+      monto: aMonto(
+        fila.tipo_evento === "CONDONACION" && fila.monto_anterior != null
+          ? fila.monto_anterior
+          : fila.monto_nuevo
+      ),
       numeroCreditoSifco: fila.numeroCreditoSifco,
       evento: fila.tipo_evento,
     })),

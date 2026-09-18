@@ -282,7 +282,28 @@ export type ResolucionEdicionConMora =
  * El paso NO es silencioso: deja `validar_mora_dpi_override_admin` con el
  * motivo que el gate había dado, para que la revisión pueda preguntar después
  * por qué ese DPI entró pese a la mora.
+ *
+ * 🔴 La válvula abre SOLO ante los motivos de NEGOCIO (`MORA_ACTIVA`,
+ * `EN_CONVENIO`, `CREDITO_INSOLUTO`). Con `SERVICIO_NO_DISPONIBLE` —o cualquier
+ * motivo nuevo que estrene cartera— se bloquea a todos, administradores
+ * incluidos. La diferencia es qué sabe quien decide: ante la mora, el admin
+ * decide con el dato en la mano y se hace cargo; ante una caída, NADIE sabe si
+ * ese DPI tiene mora, y dejar entrar a ciegas mientras cartera está caída
+ * convierte el fail-closed en una recomendación. Para las emergencias existe el
+ * kill switch (`ENABLE_CARTERA_BACK_INTEGRATION`), que es explícito, lo baja
+ * alguien a propósito y deja su propia fila en la bitácora.
  */
+
+/**
+ * Los motivos ante los cuales un administrador SÍ puede corregir un DPI: los
+ * que son un hecho conocido del cliente. Ver la nota de
+ * `resolverEdicionConMora`.
+ */
+const MOTIVOS_DE_NEGOCIO: ReadonlySet<ConsultaMoraResponse["motivo"]> = new Set([
+	"MORA_ACTIVA",
+	"EN_CONVENIO",
+	"CREDITO_INSOLUTO",
+]);
 export function resolverEdicionConMora(
 	gate: VeredictoGateMora,
 	userRole: string | null | undefined,
@@ -298,6 +319,14 @@ export function resolverEdicionConMora(
 ): ResolucionEdicionConMora {
 	if (!gate.rechazado) {
 		return { permitir: true };
+	}
+
+	// La caída no se negocia: sin dato no hay corrección informada que valga, y
+	// el admin queda bloqueado igual que todos. El mensaje es el del servicio
+	// caído a secas —"pedile a un administrador" no ayuda a quien YA es
+	// administrador, y mandaría a buscar a alguien que tampoco puede.
+	if (!MOTIVOS_DE_NEGOCIO.has(gate.motivo)) {
+		return { permitir: false, mensaje: gate.mensaje };
 	}
 
 	if (userRole !== "admin") {

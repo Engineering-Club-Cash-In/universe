@@ -200,6 +200,30 @@ export function validarDpiConsulta(valor: string): ValidacionDpi {
 }
 
 /**
+ * Cota de un paso bajo el presupuesto GLOBAL de la consulta.
+ *
+ * 🔴 Los presupuestos por paso eran ADITIVOS: identificación + espejo + API por
+ * cada ficha, todo secuencial. Una sola ficha ya podía tardar ~25s y cada ficha
+ * extra sumaba lo suyo, así que el techo real era "depende de cuántas fichas
+ * tenga el DPI" — y del otro lado hay un asesor esperando en pantalla. Ahora el
+ * presupuesto lo fija la CONSULTA entera y cada paso se acota contra lo que
+ * queda; los tiempos por paso sobreviven solo como cotas internas.
+ *
+ * Devuelve `null` cuando ya no queda presupuesto: el llamador corta
+ * fail-closed, porque una lista de créditos a medias no alcanza para firmar un
+ * "sin mora".
+ */
+export function cotaDelPresupuesto(
+  cotaDelPasoMs: number,
+  venceEnMs: number,
+  ahoraMs: number
+): number | null {
+  const restante = venceEnMs - ahoraMs;
+  if (restante <= 0) return null;
+  return Math.min(cotaDelPasoMs, restante);
+}
+
+/**
  * ¿El código de la ficha sirve para pedirle los créditos al core?
  *
  * 🔴 `CodigoCliente` viene tipado `number | string | null` porque el core lo

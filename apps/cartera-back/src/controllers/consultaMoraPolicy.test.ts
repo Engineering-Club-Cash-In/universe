@@ -3,6 +3,7 @@ import {
   construirHistorialMora,
   construirRespuesta,
   construirVeredicto,
+  cotaDelPresupuesto,
   esCreditoInsoluto,
   fichasDelDpi,
   seleccionarFichasDelDpi,
@@ -663,6 +664,54 @@ describe("presupuesto del espejo de SIFCO", () => {
 
     expect(numeros).toEqual([]);
     expect((avisos[0] as Error).message).toBe("pool agotado");
+  });
+});
+
+describe("presupuesto global de la consulta", () => {
+  const VENCE_EN = 1_000_000;
+
+  it("un paso no puede pedir más de lo que queda del presupuesto", () => {
+    // Quedan 3s y el paso pediría 10s: se queda con los 3s. Antes los topes
+    // eran aditivos y el paso arrancaba sus 10s completos por más que el
+    // presupuesto de la consulta ya estuviera casi consumido.
+    expect(cotaDelPresupuesto(10000, VENCE_EN, VENCE_EN - 3000)).toBe(3000);
+  });
+
+  it("con presupuesto de sobra manda la cota interna del paso", () => {
+    // El espejo no se come el presupuesto entero por el hecho de que sobre.
+    expect(cotaDelPresupuesto(5000, VENCE_EN, VENCE_EN - 15000)).toBe(5000);
+  });
+
+  it("presupuesto agotado devuelve null: el llamador corta fail-closed", () => {
+    expect(cotaDelPresupuesto(10000, VENCE_EN, VENCE_EN)).toBeNull();
+    expect(cotaDelPresupuesto(10000, VENCE_EN, VENCE_EN + 1)).toBeNull();
+  });
+
+  it("🔴 la suma de los pasos deja de crecer con cada ficha", () => {
+    // Simulación del camino real: identificación (10s) + espejo (5s) + API
+    // (10s) por cada ficha, secuencial, con un presupuesto global de 15s. Antes
+    // esto daba 25s con una ficha y 40s con dos; ahora el total está acotado.
+    const PRESUPUESTO = 15000;
+    let ahora = 0;
+    const venceEn = PRESUPUESTO;
+
+    const correr = (cota: number) => {
+      const ms = cotaDelPresupuesto(cota, venceEn, ahora);
+      if (ms === null) return false;
+      // Peor caso: el paso consume toda su cota.
+      ahora += ms;
+      return true;
+    };
+
+    correr(10000); // identificación
+    for (const _ficha of [1, 2, 3]) {
+      correr(5000); // espejo
+      correr(10000); // API
+    }
+
+    expect(ahora).toBeLessThanOrEqual(PRESUPUESTO);
+    // Y el paso siguiente ya no arranca: fail-closed en vez de seguir sumando.
+    expect(cotaDelPresupuesto(10000, venceEn, ahora)).toBeNull();
   });
 });
 

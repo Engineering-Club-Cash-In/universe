@@ -10,9 +10,28 @@ import {
 import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { crmProcedure, publicProcedure } from "../lib/orpc";
+import { validarDpi } from "../utils/cui-validation";
 
 const formPersonTypeSchema = z.enum(["lead", "coDebtor"]);
 type FormPersonType = z.infer<typeof formPersonTypeSchema>;
+
+/**
+ * El resto del formulario se valida relajado a propósito, pero el DPI no puede
+ * entrar crudo: es la llave con la que se cruza la identidad contra RENAP, buró
+ * y cartera. Un CUI inválido guardado acá reaparece después como una validación
+ * que no corresponde a nadie. Mismo criterio que el resto de las rutas que
+ * escriben un DPI (`createLead`, `updateLead`, portal, bot, co-deudores).
+ */
+function normalizarDpiDelFormulario<T extends { dpi?: string }>(datos: T): T {
+	if (datos.dpi === undefined || datos.dpi.trim() === "") return datos;
+
+	const resultado = validarDpi(datos.dpi);
+	if (!resultado.valid) {
+		throw new ORPCError("BAD_REQUEST", { message: resultado.error });
+	}
+
+	return { ...datos, dpi: resultado.dpiLimpio };
+}
 
 // Relaxed server-side validation schemas (all fields optional, only validates types)
 const referenciaCrediticiaServerSchema = z.object({
@@ -666,6 +685,8 @@ export const clientFormsRouter = {
 				});
 			}
 
+			const datos = normalizarDpiDelFormulario(parsed.data);
+
 			const values = {
 				opportunityId: tokenRow.opportunityId,
 				...(participantRef
@@ -674,7 +695,7 @@ export const clientFormsRouter = {
 							personId: participantRef.personId,
 						}
 					: {}),
-				...sanitizeFormData(parsed.data as Record<string, unknown>),
+				...sanitizeFormData(datos as Record<string, unknown>),
 				updatedAt: new Date(),
 			};
 
@@ -796,6 +817,8 @@ export const clientFormsRouter = {
 				});
 			}
 
+			const datos = normalizarDpiDelFormulario(parsed.data);
+
 			const values = {
 				opportunityId: tokenRow.opportunityId,
 				...(participantRef
@@ -804,7 +827,7 @@ export const clientFormsRouter = {
 							personId: participantRef.personId,
 						}
 					: {}),
-				...sanitizeFormData(parsed.data as Record<string, unknown>),
+				...sanitizeFormData(datos as Record<string, unknown>),
 				updatedAt: new Date(),
 			};
 

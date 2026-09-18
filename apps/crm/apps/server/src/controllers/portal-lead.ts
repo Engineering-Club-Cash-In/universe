@@ -15,6 +15,7 @@ import {
 	MENSAJE_DPI_EN_BLANCO,
 	requiereConsultaDeMora,
 } from "../lib/gate-mora-dpi";
+import { evaluarCandadoDpi } from "../lib/lead-dpi-lock";
 import {
 	numerosSifcoConocidosPorDpi,
 	numerosSifcoDelDpiYDelLead,
@@ -268,24 +269,46 @@ export async function updateLeadByEmail(c: Context) {
 				return c.json({ success: false, error: resultadoDpi.error }, 400);
 			}
 			dpi = resultadoDpi.dpiLimpio;
+		}
 
-			// 🔴 Solo si el DPI es nuevo o cambia. El portal reenvía la ficha
-			// completa en cada guardado, así que con el mismo DPI de siempre esto
-			// es una edición común —dirección, teléfono— y no puede quedar trabada
-			// porque la persona esté en mora.
-			if (requiereConsultaDeMora(dpi, existingLead.dpi)) {
-				// 🔴 Igual que en `updateLead` del CRM: la pregunta lleva los números
-				// del DPI NUEVO **y** los del lead que se está editando. Buscando solo
-				// por el DPI nuevo, el lead con su propio crédito moroso —invisible
-				// para SIFCO— se sacaba el gate de encima tecleando un DPI virgen.
-				const gate = await evaluarGateMoraDpi(dpi, {
-					...depsGateMora,
-					numerosCreditoConocidos: (dpiConsultado) =>
-						numerosSifcoDelDpiYDelLead(dpiConsultado, existingLead.id),
-				});
-				if (gate.rechazado) {
-					return c.json({ success: false, error: gate.mensaje }, 400);
-				}
+		// El candado va ANTES que el gate de mora a propósito: es una consulta
+		// local barata, y si el DPI ya no se puede cambiar no tiene sentido pagar
+		// el viaje a SIFCO para un cambio que igual se rechaza. Y va fuera de la
+		// validación de formato: un `dpi: ""` no se valida pero SÍ se escribe más
+		// abajo, y sin el candado acá borraba el DPI del expediente y dejaba la
+		// puerta abierta para escribir otro en la llamada siguiente.
+		if (dpi !== undefined) {
+			const candado = await evaluarCandadoDpi({
+				dpiActual: existingLead.dpi,
+				dpiNuevo: dpi,
+				sujeto: "portal",
+				leadId: existingLead.id,
+			});
+			if (candado.bloqueado) {
+				return c.json({ success: false, error: candado.message }, 400);
+			}
+		}
+
+		// 🔴 Solo si el DPI es nuevo o cambia. El portal reenvía la ficha
+		// completa en cada guardado, así que con el mismo DPI de siempre esto
+		// es una edición común —dirección, teléfono— y no puede quedar trabada
+		// porque la persona esté en mora.
+		if (
+			dpi !== undefined &&
+			dpi.trim() !== "" &&
+			requiereConsultaDeMora(dpi, existingLead.dpi)
+		) {
+			// 🔴 Igual que en `updateLead` del CRM: la pregunta lleva los números
+			// del DPI NUEVO **y** los del lead que se está editando. Buscando solo
+			// por el DPI nuevo, el lead con su propio crédito moroso —invisible
+			// para SIFCO— se sacaba el gate de encima tecleando un DPI virgen.
+			const gate = await evaluarGateMoraDpi(dpi, {
+				...depsGateMora,
+				numerosCreditoConocidos: (dpiConsultado) =>
+					numerosSifcoDelDpiYDelLead(dpiConsultado, existingLead.id),
+			});
+			if (gate.rechazado) {
+				return c.json({ success: false, error: gate.mensaje }, 400);
 			}
 		}
 

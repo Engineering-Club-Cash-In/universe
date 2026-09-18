@@ -21,7 +21,9 @@
 
 /**
  * Estados que por política NO devengan mora. Espejo de `STATUS_EXCLUIDOS_MORA`
- * en `cartera-back/src/controllers/latefee.ts`.
+ * en `cartera-back/src/constants/creditStatus.ts`, que es donde vive la lista
+ * desde que dejó de estar dentro de `latefee.ts` (aquél la re-exporta, así que
+ * el puntero viejo llevaba a un archivo que ya no la define).
  */
 export const STATUS_EXCLUIDOS_MORA = [
   "EN_CONVENIO",

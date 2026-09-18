@@ -104,6 +104,7 @@ import {
 	getGuatemalaMonthWindow,
 	toDateStrGT,
 } from "../lib/guatemala-month-window";
+import { evaluarCandadoDpi } from "../lib/lead-dpi-lock";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
@@ -1439,18 +1440,58 @@ export const crmRouter = {
 					});
 				}
 				updateData.dpi = resultado.dpiLimpio;
+			}
 
-				// 🔴 Solo se consulta si el DPI es nuevo o cambia. Si se consultara en
-				// toda edición, un cliente que ya está en mora quedaría imposible de
-				// editar y nadie podría corregirle el teléfono ni la dirección — y son
-				// justamente las fichas que cobranza toca todos los días.
-				const [leadGuardado] = await db
-					.select({ dpi: leads.dpi })
-					.from(leads)
-					.where(eq(leads.id, id))
-					.limit(1);
+			// Admin and juridico can update any lead, others only their own
+			const canUpdateAnyLead = context.userRole !== "sales";
+			const whereClause = canUpdateAnyLead
+				? eq(leads.id, id)
+				: and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
 
-				if (requiereConsultaDeMora(updateData.dpi, leadGuardado?.dpi)) {
+			// Sales users cannot reassign leads
+			if (
+				context.userRole === "sales" &&
+				assignedTo &&
+				assignedTo !== context.userId
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "Los usuarios de ventas no pueden reasignar leads",
+				});
+			}
+
+			// El NIT y el DPI que el lead tenía ANTES de esta edición. El NIT es la
+			// referencia para distinguir las oportunidades que siguen con la copia de
+			// las que alguien corrigió a mano; el DPI, para saber si esta edición lo
+			// cambia de verdad. Hay que leerlos antes del UPDATE.
+			const [leadAntesDelUpdate] =
+				updateData.nit !== undefined || updateData.dpi !== undefined
+					? await db
+							.select({ nit: leads.nit, dpi: leads.dpi })
+							.from(leads)
+							.where(eq(leads.id, id))
+							.limit(1)
+					: [];
+
+			if (updateData.dpi !== undefined) {
+				// El candado va ANTES que el gate de mora: es una consulta local
+				// barata, y si el DPI ya no se puede cambiar (solicitud pasada del
+				// 30%) no tiene sentido pagar el viaje a SIFCO.
+				const candado = await evaluarCandadoDpi({
+					dpiActual: leadAntesDelUpdate?.dpi,
+					dpiNuevo: updateData.dpi,
+					sujeto: "lead",
+					esAdmin: context.userRole === "admin",
+					leadId: id,
+				});
+				if (candado.bloqueado) {
+					throw new ORPCError("BAD_REQUEST", { message: candado.message });
+				}
+
+				// 🔴 Solo se consulta la mora si el DPI es nuevo o cambia. Si se
+				// consultara en toda edición, un cliente que ya está en mora quedaría
+				// imposible de editar y nadie podría corregirle el teléfono ni la
+				// dirección — y son justamente las fichas que cobranza toca a diario.
+				if (requiereConsultaDeMora(updateData.dpi, leadAntesDelUpdate?.dpi)) {
 					// 🔴 La pregunta lleva los números del DPI NUEVO **y** los del lead
 					// que se está editando. Con solo los del DPI nuevo, el lead que
 					// tiene su propio crédito moroso —un `CRM-<uuid>` o un `insoluto-N`,
@@ -1478,35 +1519,6 @@ export const crmRouter = {
 					overrideDeMora = resolucion.anotacionPendiente;
 				}
 			}
-
-			// Admin and juridico can update any lead, others only their own
-			const canUpdateAnyLead = context.userRole !== "sales";
-			const whereClause = canUpdateAnyLead
-				? eq(leads.id, id)
-				: and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
-
-			// Sales users cannot reassign leads
-			if (
-				context.userRole === "sales" &&
-				assignedTo &&
-				assignedTo !== context.userId
-			) {
-				throw new ORPCError("FORBIDDEN", {
-					message: "Los usuarios de ventas no pueden reasignar leads",
-				});
-			}
-
-			// El NIT que el lead tenía ANTES de esta edición: es la referencia para
-			// distinguir las oportunidades que siguen con la copia de las que
-			// alguien corrigió a mano. Hay que leerlo antes del UPDATE.
-			const [leadAntesDelUpdate] =
-				updateData.nit !== undefined
-					? await db
-							.select({ nit: leads.nit })
-							.from(leads)
-							.where(eq(leads.id, id))
-							.limit(1)
-					: [];
 
 			const updatedLead = await db
 				.update(leads)
@@ -8422,10 +8434,10 @@ export const crmRouter = {
 					});
 				}
 				updateData.dpi = resultadoDpi.dpiLimpio;
+			}
 
-				// Igual que en `updateLead`: solo si el DPI es nuevo o cambia, para no
-				// dejar congelada la ficha de un co-deudor que ya está en mora.
-				const [coDeudorGuardado] = await db
+			if (updateData.dpi !== undefined) {
+				const [coDebtorAntesDelUpdate] = await db
 					.select({
 						dpi: coDebtors.dpi,
 						opportunityId: coDebtors.opportunityId,
@@ -8434,11 +8446,33 @@ export const crmRouter = {
 					.where(eq(coDebtors.id, id))
 					.limit(1);
 
-				if (requiereConsultaDeMora(updateData.dpi, coDeudorGuardado?.dpi)) {
+				if (coDebtorAntesDelUpdate) {
+					// El candado va ANTES que el gate de mora: consulta local barata
+					// contra el viaje a SIFCO. El co-deudor cuelga de una oportunidad:
+					// el candado se evalúa sobre ESA, no sobre las demás del lead.
+					const candado = await evaluarCandadoDpi({
+						dpiActual: coDebtorAntesDelUpdate.dpi,
+						dpiNuevo: updateData.dpi,
+						sujeto: "codeudor",
+						esAdmin: context.userRole === "admin",
+						opportunityId: coDebtorAntesDelUpdate.opportunityId,
+					});
+					if (candado.bloqueado) {
+						throw new ORPCError("BAD_REQUEST", { message: candado.message });
+					}
+				}
+
+				// Igual que en `updateLead`: la mora solo se consulta si el DPI es
+				// nuevo o cambia, para no dejar congelada la ficha de un co-deudor que
+				// ya está en mora.
+				if (
+					requiereConsultaDeMora(updateData.dpi, coDebtorAntesDelUpdate?.dpi)
+				) {
 					// Mismo agujero que en `updateLead`, con el equivalente del
 					// co-deudor: su cartera propia no es la de un lead sino la de su
 					// oportunidad (una sola). Ver `numerosSifcoDelDpiYDeLaOportunidad`.
-					const oportunidadDelCoDeudor = coDeudorGuardado?.opportunityId;
+					const oportunidadDelCoDeudor =
+						coDebtorAntesDelUpdate?.opportunityId;
 					const gate = await evaluarGateMoraDpi(updateData.dpi, {
 						...depsGateMora,
 						numerosCreditoConocidos: (dpiConsultado) =>

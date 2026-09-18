@@ -727,11 +727,34 @@ describe("validación del DPI antes de tocar SIFCO", () => {
     // `minLength: 1` los dejaba pasar: se normalizaban a "" y el fallo aguas
     // abajo volvía como 200 SERVICIO_NO_DISPONIBLE, que le dice al asesor
     // "reintentá" cuando lo que hay que hacer es corregir el dato.
-    for (const basura of ["   ", "---", "abc", " - "]) {
+    for (const basura of ["   ", "---", " - "]) {
       const resultado = validarDpiConsulta(basura);
       expect(resultado.valido).toBeFalse();
       expect(resultado.valido === false && resultado.mensaje).toContain("13");
     }
+  });
+
+  it("🔴 rechaza la forma antes de normalizar: el strip disimulaba la basura", () => {
+    // `abc1234567890123xyz` pasaba: normalizar borra la evidencia y lo que
+    // quedaba eran 13 dígitos impecables. El DPI se escribe con dígitos y, a lo
+    // sumo, espacios o guiones; cualquier otra cosa es un campo a corregir.
+    for (const forma of [
+      "abc1234567890123xyz",
+      "2543-87621-0101'",
+      "2543/87621/0101",
+      "abc",
+    ]) {
+      const resultado = validarDpiConsulta(forma);
+      expect(resultado.valido).toBeFalse();
+      expect(resultado.valido === false && resultado.mensaje).toContain(
+        "dígitos, espacios y guiones"
+      );
+    }
+  });
+
+  it("sigue aceptando los separadores con que la gente escribe el DPI", () => {
+    expect(validarDpiConsulta("2543-87621-0101").valido).toBeTrue();
+    expect(validarDpiConsulta("2543 87621 0101").valido).toBeTrue();
   });
 
   it("exige el largo exacto: ni de más ni de menos", () => {

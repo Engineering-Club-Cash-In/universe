@@ -161,6 +161,12 @@ export function normalizarIdentificacion(valor: string): string {
 /** Dígitos del DPI (CUI) guatemalteco. */
 export const LARGO_DPI = 13;
 
+/**
+ * Lo único que puede traer el campo de DPI: dígitos y los separadores con que
+ * la gente lo escribe. Se mira ANTES de normalizar; ver `validarDpiConsulta`.
+ */
+const FORMA_DPI_ACEPTADA = /^[\d\s-]*$/;
+
 export type ValidacionDpi =
   | { valido: true; dpi: string }
   | { valido: false; mensaje: string };
@@ -178,9 +184,26 @@ export type ValidacionDpi =
  * Se exige el largo EXACTO porque es un DPI, no una identificación cualquiera:
  * un valor de 7 dígitos no es un DPI mal escrito que el core podría reconocer,
  * es otra cosa.
+ *
+ * 🔴 Y se valida la FORMA antes de normalizar. Normalizar primero es borrar la
+ * evidencia: `normalizarIdentificacion` tira todo lo que no sea dígito, así que
+ * `abc1234567890123xyz` quedaba en 13 dígitos y pasaba como DPI legítimo. El
+ * que escribe un DPI lo separa con espacios o guiones y nada más; cualquier
+ * otro carácter significa que el campo trae otra cosa —texto pegado, un
+ * intento de inyectar—, y eso es un dato a corregir, no un DPI a consultar.
  */
 export function validarDpiConsulta(valor: string): ValidacionDpi {
-  const dpi = normalizarIdentificacion(String(valor ?? ""));
+  const crudo = String(valor ?? "");
+
+  if (!FORMA_DPI_ACEPTADA.test(crudo)) {
+    return {
+      valido: false,
+      mensaje:
+        "El DPI solo puede traer dígitos, espacios y guiones: revisá lo que se escribió en el campo.",
+    };
+  }
+
+  const dpi = normalizarIdentificacion(crudo);
 
   if (!dpi) {
     return {

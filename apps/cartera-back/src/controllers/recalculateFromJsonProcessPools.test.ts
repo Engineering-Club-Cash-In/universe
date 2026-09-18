@@ -4,6 +4,8 @@ import { createCarteraStructuredLogger } from "../utils/structuredLogger";
 let selectResults: unknown[][] = [];
 let deleteCalls = 0;
 let quotaPersistenceMode: "success" | "persisted_then_failed" | "noop_then_failed" = "success";
+/** Cuántas veces se intentó tocar el plan de pagos del crédito principal. */
+let marcarCuotasCalls = 0;
 
 const dbMock = {
   select: mock(() => ({
@@ -26,6 +28,12 @@ const dbMock = {
 };
 
 mock.module("../database", () => ({ db: dbMock, client: {}, lockPool: {} }));
+// El borrado de créditos corre bajo el advisory lock del crédito (cierra el
+// TOCTOU contra `crearRubro`). Acá no hay concurrencia que serializar y el real
+// abriría conexión al `lockPool`, así que se pasa de largo.
+mock.module("../utils/paymentAdvisoryLock", () => ({
+  withPaymentAdvisoryLock: (_creditoId: number, fn: () => Promise<unknown>) => fn(),
+}));
 mock.module("./investor", () => ({
   findOrCreateInvestor: mock(() => Promise.resolve({ inversionista_id: 1 })),
 }));
@@ -34,6 +42,7 @@ mock.module("./updateCredit", () => ({
 }));
 mock.module("./migratePayments", () => ({
   marcarCuotasPagadasHastaNumero: mock(async (input: { onPersisted?: () => void }) => {
+    marcarCuotasCalls += 1;
     if (quotaPersistenceMode === "persisted_then_failed") input.onPersisted?.();
     if (quotaPersistenceMode !== "success") throw new Error("schedule update failed");
   }),
@@ -49,6 +58,7 @@ beforeEach(() => {
   ];
   deleteCalls = 0;
   quotaPersistenceMode = "success";
+  marcarCuotasCalls = 0;
 });
 
 test("process pools normal return retains nested persistence evidence after a later nested failure", async () => {
@@ -62,11 +72,26 @@ test("process pools normal return retains nested persistence evidence after a la
     nombre: "pool",
     numeroCredito: "POOL_1",
     numeroCuota: "0",
-    creditos: [{
-      numeroCredito: "DELETE_1",
-      inversionista: "Investor",
-      capitalRestante: "100",
-    }],
+    creditos: [
+      // Este SÍ es del pool, así que se recalcula pase lo que pase con el otro.
+      // Antes el pool traía sólo el traspaso, y el test daba por buena una
+      // conducta que era el defecto: que el recálculo corriera igual sobre un
+      // crédito cuyo borrado había FALLADO, sumándole al principal tenencias de
+      // un crédito que quedaba en pie. Ahora ese traspaso se excluye, así que
+      // hace falta un crédito propio para que el recálculo tenga qué hacer y el
+      // test siga midiendo lo suyo: que la evidencia de escritura sobreviva a un
+      // fallo posterior.
+      {
+        numeroCredito: "POOL_1",
+        inversionista: "Investor",
+        capitalRestante: "100",
+      },
+      {
+        numeroCredito: "DELETE_1",
+        inversionista: "Investor",
+        capitalRestante: "100",
+      },
+    ],
   }], { logger, startedAt: Date.now() });
 
   expect(result.eliminacion).toMatchObject({ exitosos: 0, errores: 1 });
@@ -133,4 +158,80 @@ test("process pools does not report persistence when quota marking confirms no d
     failed_count: 1,
     manual_action_required: false,
   });
+});
+
+test("un traspaso cuyo borrado rechaza el guard de rubros NO se recalcula", async () => {
+  // El agujero que esto fija: `/pools-raros` borra el crédito que no coincide
+  // con el número del pool y le pasa su inversionista y su capital al crédito
+  // principal. Son dos pasos, y mientras el borrado era incondicional dar por
+  // hecho el segundo funcionaba.
+  //
+  // El guard de rubros lo rompió: ahora el borrado puede RECHAZARSE —crédito con
+  // un cobro adicional con deuda viva— y el rechazo quedaba anotado en el
+  // detalle y nada más. El recálculo le sumaba igual al principal las tenencias
+  // de un crédito que quedaba en pie: el mismo capital contado DOS veces, con el
+  // inversionista cobrando interés y cuota por los dos lados.
+  //
+  // La cola de `selectResults` es posicional: primero la búsqueda del crédito
+  // por número, después la consulta de rubros del guard. Devolver una fila acá es
+  // lo que lo hace disparar.
+  selectResults = [
+    [{ credito_id: 77 }],
+    [{ rubro_id: 1, descripcion: "GPS" }],
+  ];
+
+  const result = await processPoolsRaros([{
+    nombre: "pool",
+    numeroCredito: "POOL_1",
+    numeroCuota: "0",
+    creditos: [{
+      numeroCredito: "DELETE_1",
+      inversionista: "Investor",
+      capitalRestante: "100",
+    }],
+  }], { startedAt: Date.now() });
+
+  // El borrado se rechaza, nombrando el rubro.
+  expect(result.eliminacion).toMatchObject({ exitosos: 0, errores: 1 });
+  expect(result.eliminacion?.detalles?.[0]?.message ?? "").toContain("GPS");
+
+  // Y el recálculo no tiene NADA que hacer: el único crédito del pool era el
+  // traspaso, y se excluyó. Sin el filtro, acá llegaría 1 y el capital quedaría
+  // duplicado.
+  expect(result.recalculo).toMatchObject({ total: 0, exitosos: 0 });
+});
+
+test("un pool con traspaso rechazado tampoco toca el plan de pagos", async () => {
+  // `/pools-raros` tiene DOS pasos que consumen la lista de pools, y el arreglo
+  // anterior sólo cubrió el primero: el recálculo de capital. El segundo recorre
+  // los pools y le marca cuotas pagadas y le sobrescribe el monto al crédito
+  // PRINCIPAL con el `numeroCuota` y la `cuota` del pool — datos que asumen que
+  // los traspasos entraron. Con uno rechazado, ese paso aplicaba una foto que no
+  // ocurrió mientras el capital seguía en el crédito origen, que quedó vivo.
+  //
+  // El test anterior no lo cubría porque su pool traía `numeroCuota: "0"` y el
+  // loop sale antes con su propio `continue`. Acá va en 3 para que llegue al
+  // guard: sin el filtro, `marcarCuotasPagadasHastaNumero` se llama.
+  selectResults = [
+    [{ credito_id: 77 }],
+    [{ rubro_id: 1, descripcion: "GPS" }],
+  ];
+
+  const result = await processPoolsRaros([{
+    nombre: "pool",
+    numeroCredito: "POOL_1",
+    numeroCuota: "3",
+    creditos: [{
+      numeroCredito: "DELETE_1",
+      inversionista: "Investor",
+      capitalRestante: "100",
+    }],
+  }], { startedAt: Date.now() });
+
+  expect(result.eliminacion).toMatchObject({ exitosos: 0, errores: 1 });
+  // El plan de pagos NO se tocó...
+  expect(marcarCuotasCalls).toBe(0);
+  // ...y el salteo SALE en el resultado, no se pierde en un contador: un pool a
+  // medio aplicar leído como "todo bien" es peor que el defecto.
+  expect(result.cuotas).toMatchObject({ marcadas: 0, salteadas_por_rubros: 1 });
 });

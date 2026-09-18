@@ -29,7 +29,12 @@ const INVENTARIO: Record<
 	// registran decisiones sin escritura propia —el override del gate de mora, el
 	// del candado al borrar un co-deudor, y la revalidación al reabrir una
 	// oportunidad perdida que ya había cruzado el 30%—.
-	"routers/crm.ts": { escrituras: 16, anotaciones: 19, estado: "listo" },
+	//
+	// +1 escritura y +1 anotación al volver atómico el borrado del co-deudor: el
+	// delete de `coDebtors` pasó a hacerse dentro de una transacción y con el
+	// candado en el WHERE, y el override del admin sobre ese borrado ahora
+	// también revalida la oportunidad (antes solo dejaba la fila de bitácora).
+	"routers/crm.ts": { escrituras: 17, anotaciones: 20, estado: "listo" },
 	// Manda oportunidades de vuelta a análisis cuando su validación de identidad
 	// quedó vieja: al reabrir una perdida avanzada, y cuando un admin abre el
 	// candado del DPI.

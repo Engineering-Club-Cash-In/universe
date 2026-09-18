@@ -152,6 +152,24 @@ export interface DocumentResult {
 	 * vendedor) vuelven sin `signing_links` a propósito: se firman en papel.
 	 */
 	signatureMode?: SignatureMode;
+	/** Proveedor de firma usado ("weetrust" | "documenso"). */
+	signingProvider?: string;
+	/**
+	 * ID del documento en WeeTrust. Sin esto no se puede consultar el estado de
+	 * firma ni reintentarle a un firmante sin regenerar todo.
+	 */
+	documentID?: string;
+	/**
+	 * Quiénes quedaron efectivamente enviados a firmar, con su rol y su link.
+	 * Es lo que reemplaza al reparto por posición de `signing_links`.
+	 */
+	signatories?: Array<{
+		role: SignerRole;
+		email: string;
+		name: string;
+		signatoryID?: string;
+		signingUrl?: string;
+	}>;
 	error?: string;
 }
 

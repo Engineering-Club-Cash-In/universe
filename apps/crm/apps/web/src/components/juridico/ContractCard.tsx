@@ -30,6 +30,10 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
+import {
+	type FirmanteDeContrato,
+	firmantesEnFicha,
+} from "@/lib/contract-signers-display";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { OpportunitySelector } from "./OpportunitySelector";
@@ -65,6 +69,11 @@ interface ContractCardProps {
 		opportunityId: string | null;
 		leadId: string;
 	};
+	/**
+	 * Firmantes con su rol. Los contratos generados antes de que se guardara el
+	 * rol no los tienen: para esos se cae a las columnas por posición.
+	 */
+	signatories?: FirmanteDeContrato[];
 	opportunity?: {
 		id: string;
 		title: string;
@@ -95,6 +104,7 @@ const statusConfig = {
 
 export function ContractCard({
 	contract,
+	signatories,
 	opportunity,
 	onUpdate,
 	onEdit,
@@ -107,6 +117,11 @@ export function ContractCard({
 	// Este contrato se imprime y se firma a mano: que no tenga links no es que
 	// haya fallado, y mostrarlo como "Pendiente" hacía que jurídico lo buscara.
 	const firmaEnPapel = esFirmaFisica(contract.contractType);
+
+	// Cada firmante trae su rol. El bloque anterior leía tres columnas fijas y
+	// rotulaba como "Representante" al que estuviera segundo, que con cofirmante
+	// era el cofirmante.
+	const firmantes = firmantesEnFicha(signatories, contract);
 
 	const copyToClipboard = (text: string, label: string) => {
 		navigator.clipboard.writeText(text);
@@ -210,100 +225,36 @@ export function ContractCard({
 					</div>
 				)}
 
-				{/* Links de documentos - más compacto */}
-				{!firmaEnPapel &&
-					(contract.clientSigningLink ||
-					contract.representativeSigningLink ||
-					(contract.additionalSigningLinks &&
-						contract.additionalSigningLinks.length > 0)) && (
+				{/* Enlaces de firma, uno por firmante y con su rol real */}
+				{!firmaEnPapel && firmantes.length > 0 && (
 					<div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
 						<p className="font-medium text-muted-foreground text-xs">
 							Enlaces de firma
 						</p>
 
-						{/* Link del cliente */}
-						{contract.clientSigningLink && (
-							<div className="flex items-center justify-between gap-2 rounded border-blue-500 border-l-2 bg-blue-500/10 px-2 py-1.5">
-								<p className="shrink-0 font-medium text-blue-600 text-xs dark:text-blue-400">
-									👤 Cliente
-								</p>
-								<div className="flex gap-1">
-									<Button
-										size="sm"
-										variant="ghost"
-										className="h-6 px-2"
-										onClick={() => openLink(contract.clientSigningLink!)}
-									>
-										<ExternalLink className="h-3 w-3" />
-									</Button>
-									<Button
-										size="sm"
-										variant="ghost"
-										className="h-6 px-2"
-										onClick={() =>
-											copyToClipboard(
-												contract.clientSigningLink!,
-												"Link del cliente",
-											)
-										}
-									>
-										<Copy className="h-3 w-3" />
-									</Button>
-								</div>
-							</div>
-						)}
-
-						{/* Link del representante */}
-						{contract.representativeSigningLink && (
-							<div className="flex items-center justify-between gap-2 rounded border-green-500 border-l-2 bg-green-500/10 px-2 py-1.5">
-								<p className="shrink-0 font-medium text-green-600 text-xs dark:text-green-400">
-									🏢 Representante
-								</p>
-								<div className="flex gap-1">
-									<Button
-										size="sm"
-										variant="ghost"
-										className="h-6 px-2"
-										onClick={() =>
-											openLink(contract.representativeSigningLink!)
-										}
-									>
-										<ExternalLink className="h-3 w-3" />
-									</Button>
-									<Button
-										size="sm"
-										variant="ghost"
-										className="h-6 px-2"
-										onClick={() =>
-											copyToClipboard(
-												contract.representativeSigningLink!,
-												"Link del representante",
-											)
-										}
-									>
-										<Copy className="h-3 w-3" />
-									</Button>
-								</div>
-							</div>
-						)}
-
-						{/* Links adicionales */}
-						{contract.additionalSigningLinks &&
-							contract.additionalSigningLinks.length > 0 &&
-							contract.additionalSigningLinks.map((link, index) => (
-								<div
-									key={index}
-									className="flex items-center justify-between gap-2 rounded border-purple-500 border-l-2 bg-purple-500/10 px-2 py-1.5"
-								>
-									<p className="shrink-0 font-medium text-purple-600 text-xs dark:text-purple-400">
-										👥 Adicional {index + 1}
+						{firmantes.map((firmante) => (
+							<div
+								key={firmante.clave}
+								className="flex items-center justify-between gap-2 rounded border-blue-500 border-l-2 bg-blue-500/10 px-2 py-1.5"
+							>
+								<div className="min-w-0">
+									<p className="font-medium text-blue-600 text-xs dark:text-blue-400">
+										{firmante.etiqueta}
+										{firmante.estado === "signed" && " · firmado"}
 									</p>
-									<div className="flex gap-1">
+									{firmante.nombre && (
+										<p className="truncate text-muted-foreground text-xs">
+											{firmante.nombre}
+										</p>
+									)}
+								</div>
+								{firmante.url ? (
+									<div className="flex shrink-0 gap-1">
 										<Button
 											size="sm"
 											variant="ghost"
 											className="h-6 px-2"
-											onClick={() => openLink(link)}
+											onClick={() => openLink(firmante.url as string)}
 										>
 											<ExternalLink className="h-3 w-3" />
 										</Button>
@@ -312,14 +263,22 @@ export function ContractCard({
 											variant="ghost"
 											className="h-6 px-2"
 											onClick={() =>
-												copyToClipboard(link, `Link adicional ${index + 1}`)
+												copyToClipboard(
+													firmante.url as string,
+													`Link de ${firmante.etiqueta}`,
+												)
 											}
 										>
 											<Copy className="h-3 w-3" />
 										</Button>
 									</div>
-								</div>
-							))}
+								) : (
+									<span className="shrink-0 text-muted-foreground text-xs">
+										sin link
+									</span>
+								)}
+							</div>
+						))}
 					</div>
 				)}
 

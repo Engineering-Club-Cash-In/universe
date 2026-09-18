@@ -5,44 +5,48 @@ import type { TipoRubro } from "../services/rubros.services";
 /** Clave raíz de las queries de tipos; las variantes cuelgan de acá. */
 export const QK_TIPOS = "rubrosTipos";
 
-/** Lo que el formulario de edición de tipos puede cambiar. */
+/**
+ * Lo que el formulario de edición de tipos puede cambiar.
+ *
+ * Ya no es lo que se siembra —para eso va la fila COMPLETA que devuelve el PUT—,
+ * pero sigue nombrando el patch que el formulario arma.
+ */
 export type EdicionTipo = Pick<TipoRubro, "nombre" | "descripcion" | "obligatorio">;
 
 /**
- * Aplica sobre una lista en caché la edición que el backend YA guardó.
+ * Aplica sobre una lista en caché la fila que el backend YA guardó.
  *
- * Parcha la fila existente en vez de construir una nueva: el formulario de
- * edición no toca `activo` —eso lo mueve el botón de activar/desactivar del
- * listado—, así que reemplazar la fila entera perdería ese estado. Reordena
- * por nombre porque el backend devuelve los tipos con `ORDER BY nombre` y un
- * renombrado que se queda en su lugar viejo hace saltar la lista cuando entra
- * el refetch.
+ * Se siembra la fila AUTORITATIVA completa, no una proyección del formulario.
+ * Antes se parchaban sólo `nombre`, `descripcion` y `obligatorio` y se conservaba
+ * el `activo` de la caché, con el argumento de que el formulario no lo toca. El
+ * argumento fallaba en el caso que importa: si OTRO administrador desactiva el
+ * tipo mientras este formulario está abierto, el PUT contesta `activo: false` y
+ * la siembra volvía a pintarlo activo. Con el refetch pausado o caído, el
+ * desplegable de creación —que es de sólo activos— seguía ofreciendo un tipo que
+ * el backend rechaza.
+ *
+ * Por eso `soloActivos`: en la variante `[QK_TIPOS, false]` un tipo que volvió
+ * inactivo no se parcha, se SACA. Dejarlo ahí con `activo: false` sería el mismo
+ * problema con otra forma, porque esa lista no filtra al pintar — filtra al pedir.
+ *
+ * Reordena por nombre porque el backend devuelve los tipos con `ORDER BY nombre`
+ * y un renombrado que se queda en su lugar viejo hace saltar la lista cuando
+ * entra el refetch.
  */
 export function aplicarEdicionTipo(
   actuales: TipoRubro[] | undefined,
   tipoId: number,
-  cambios: EdicionTipo
+  tipo: TipoRubro,
+  opciones: { soloActivos: boolean }
 ): TipoRubro[] | undefined {
   if (!actuales) return actuales;
+
+  if (opciones.soloActivos && !tipo.activo) {
+    return actuales.filter((t) => t.tipo_id !== tipoId);
+  }
+
   return actuales
-    .map((t) =>
-      t.tipo_id === tipoId
-        ? {
-            ...t,
-            nombre: cambios.nombre,
-            // Se siembra TAL CUAL lo que va en el PUT, sin convertir la cadena
-            // vacía a null. Es lo que el backend va a tener: `actualizarTipo`
-            // copia `descripcion` del patch sin normalizar, y el router tampoco
-            // la toca, así que vaciar la descripción guarda "" y el refetch
-            // devuelve "". Convertirla acá a null fabricaría justo la
-            // diferencia entre siembra y refetch que esta función existe para
-            // no tener. (El null sí aparece por otro lado: un tipo creado sin
-            // descripción nace con null, porque el alta sí hace `?? null`.)
-            descripcion: cambios.descripcion,
-            obligatorio: cambios.obligatorio,
-          }
-        : t
-    )
+    .map((t) => (t.tipo_id === tipoId ? { ...t, ...tipo } : t))
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
 }
 
@@ -63,10 +67,11 @@ export function aplicarEdicionTipo(
  *  - la siembra sostiene el dato correcto aunque el refetch falle (la red se
  *    cayó justo después del PUT), que es el caso en el que perder la edición
  *    dolería más;
- *  - el refetch —`refetchType: "all"`, que sí alcanza a las inactivas— trae lo
- *    que el backend haya normalizado, que es lo que la siembra no puede
- *    adivinar: `editarTipoRubro` responde `void`, no la fila guardada, así que
- *    sembrar y quedarse ahí sería creerle al formulario y no al servidor.
+ *  - el refetch —`refetchType: "all"`, que sí alcanza a las inactivas— confirma
+ *    contra el servidor y trae de paso lo que haya cambiado en OTRAS filas.
+ *
+ * (`editarTipoRubro` ya devuelve la fila guardada, así que la siembra le cree al
+ * servidor y no al formulario. Antes respondía `void` y había que adivinarla.)
  *
  * El `await` es parte del contrato: quien llama vuelve al listado recién
  * cuando el dato nuevo ya está en caché.
@@ -74,12 +79,15 @@ export function aplicarEdicionTipo(
 export async function sincronizarTipoEditado(
   queryClient: QueryClient,
   tipoId: number,
-  cambios: EdicionTipo
+  /** La fila que DEVOLVIÓ el PUT, que es la única versión autoritativa. */
+  tipo: TipoRubro
 ): Promise<void> {
-  const aplicar = (actuales: TipoRubro[] | undefined) =>
-    aplicarEdicionTipo(actuales, tipoId, cambios);
-  queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, false], aplicar);
-  queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, true], aplicar);
+  queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, false], (a) =>
+    aplicarEdicionTipo(a, tipoId, tipo, { soloActivos: true })
+  );
+  queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, true], (a) =>
+    aplicarEdicionTipo(a, tipoId, tipo, { soloActivos: false })
+  );
   await queryClient.invalidateQueries({
     queryKey: [QK_TIPOS],
     refetchType: "all",

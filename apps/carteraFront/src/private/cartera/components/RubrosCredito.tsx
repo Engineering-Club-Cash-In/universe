@@ -2045,11 +2045,10 @@ function VistaEditarTipo({
       // pintar el valor viejo de los campos que no se tocaron, y el admin ve un
       // `obligatorio` que la base ya no tiene. La respuesta del endpoint es la
       // única versión autoritativa.
-      await sincronizarTipoEditado(queryClient, tipo.tipo_id, {
-        nombre: guardado.nombre,
-        descripcion: guardado.descripcion ?? "",
-        obligatorio: guardado.obligatorio,
-      });
+      // Va la fila ENTERA, no una proyección de tres campos: el PUT también
+      // contesta el `activo`, y si otro administrador desactivó el tipo mientras
+      // este formulario estaba abierto, proyectarlo lo volvía a pintar activo.
+      await sincronizarTipoEditado(queryClient, tipo.tipo_id, guardado);
       onGuardado();
     },
     onError: (e) => {

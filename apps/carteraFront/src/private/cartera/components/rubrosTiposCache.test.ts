@@ -69,11 +69,11 @@ describe("sincronizarTipoEditado", () => {
     expect(c.refetches()).toBe(0);
 
     guardado = true;
-    await sincronizarTipoEditado(c.queryClient, 1, {
-      nombre: "Tarjeta de circulación",
-      descripcion: "",
-      obligatorio: false,
-    });
+    await sincronizarTipoEditado(
+      c.queryClient,
+      1,
+      tipo({ tipo_id: 1, nombre: "Tarjeta de circulación", descripcion: "", obligatorio: false })
+    );
 
     // Las dos variantes, no sólo la que estaba montada al crear.
     expect(c.refetches()).toBe(2);
@@ -88,11 +88,11 @@ describe("sincronizarTipoEditado", () => {
       tipo({ nombre: "Tarjeta de circulación", descripcion: "anual", obligatorio: true }),
     ]);
 
-    await sincronizarTipoEditado(c.queryClient, 1, {
-      nombre: "Tarjeta de circulación",
-      descripcion: "anual",
-      obligatorio: true,
-    });
+    await sincronizarTipoEditado(
+      c.queryClient,
+      1,
+      tipo({ tipo_id: 1, nombre: "Tarjeta de circulación", descripcion: "anual", obligatorio: true })
+    );
 
     for (const variante of [false, true]) {
       const fila = c.lista(variante)[0]!;
@@ -119,11 +119,11 @@ describe("sincronizarTipoEditado", () => {
     });
     servidorRespondio = false;
 
-    await sincronizarTipoEditado(queryClient, 1, {
-      nombre: "Placa",
-      descripcion: "",
-      obligatorio: false,
-    });
+    await sincronizarTipoEditado(
+      queryClient,
+      1,
+      tipo({ tipo_id: 1, nombre: "Placa", descripcion: "", obligatorio: false })
+    );
 
     expect(servidorRespondio).toBe(true);
   });
@@ -148,11 +148,11 @@ describe("sincronizarTipoEditado", () => {
     }
     primera = false;
 
-    await sincronizarTipoEditado(queryClient, 1, {
-      nombre: "Tarjeta de circulación",
-      descripcion: "anual",
-      obligatorio: true,
-    });
+    await sincronizarTipoEditado(
+      queryClient,
+      1,
+      tipo({ tipo_id: 1, nombre: "Tarjeta de circulación", descripcion: "anual", obligatorio: true })
+    );
 
     for (const variante of [false, true]) {
       const fila =
@@ -163,28 +163,72 @@ describe("sincronizarTipoEditado", () => {
     }
   });
 
-  it("la siembra no toca los campos que el formulario no edita", async () => {
-    // `activo` no está en el formulario de edición: lo mueve el botón de
-    // activar/desactivar del listado. Sembrar una fila "nueva" en vez de
-    // parchar la existente lo perdería.
+  it("🔴 manda el `activo` que devolvió el PUT, no el que había en caché", async () => {
+    // El formulario de edición no toca `activo` —lo mueve el botón del listado—,
+    // y por eso antes se conservaba el de la caché. El argumento fallaba en el
+    // caso que importa: si OTRO administrador desactiva el tipo mientras este
+    // formulario está abierto, el PUT contesta `activo: false`, y conservar el
+    // `true` de la caché deja al desplegable de creación ofreciendo un tipo que
+    // el backend rechaza.
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, gcTime: Infinity } },
     });
     queryClient.setQueryData<TipoRubro[]>(
       [QK_TIPOS, true],
-      [tipo({ tipo_id: 7, nombre: "Placa", activo: false })]
+      [tipo({ tipo_id: 7, nombre: "Placa", activo: true })]
     );
 
-    await sincronizarTipoEditado(queryClient, 7, {
-      nombre: "Placa nueva",
-      descripcion: "",
-      obligatorio: false,
-    });
+    await sincronizarTipoEditado(
+      queryClient,
+      7,
+      tipo({ tipo_id: 7, nombre: "Placa nueva", descripcion: "", obligatorio: false, activo: false })
+    );
 
     const fila = queryClient.getQueryData<TipoRubro[]>([QK_TIPOS, true])![0]!;
     expect(fila.nombre).toBe("Placa nueva");
     expect(fila.activo).toBe(false);
     expect(fila.tipo_id).toBe(7);
+  });
+
+  it("🔴 y de la lista de SÓLO ACTIVOS, un tipo que volvió inactivo se SACA", async () => {
+    // Esa lista no filtra al pintar: filtra al pedir. Dejar la fila con
+    // `activo: false` sería el mismo defecto con otra forma.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    queryClient.setQueryData<TipoRubro[]>(
+      [QK_TIPOS, false],
+      [tipo({ tipo_id: 7, nombre: "Placa" }), tipo({ tipo_id: 8, nombre: "Otro" })]
+    );
+
+    await sincronizarTipoEditado(
+      queryClient,
+      7,
+      tipo({ tipo_id: 7, nombre: "Placa", activo: false })
+    );
+
+    const lista = queryClient.getQueryData<TipoRubro[]>([QK_TIPOS, false])!;
+    expect(lista.map((t) => t.tipo_id)).toEqual([8]);
+  });
+
+  it("si sigue activa, la fila se queda en la lista de sólo activos", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    queryClient.setQueryData<TipoRubro[]>(
+      [QK_TIPOS, false],
+      [tipo({ tipo_id: 7, nombre: "Placa" })]
+    );
+
+    await sincronizarTipoEditado(
+      queryClient,
+      7,
+      tipo({ tipo_id: 7, nombre: "Placa nueva", activo: true })
+    );
+
+    const lista = queryClient.getQueryData<TipoRubro[]>([QK_TIPOS, false])!;
+    expect(lista).toHaveLength(1);
+    expect(lista[0]!.nombre).toBe("Placa nueva");
   });
 
   it("renombrar reordena la lista como la ordena el backend", async () => {
@@ -202,11 +246,11 @@ describe("sincronizarTipoEditado", () => {
       ]
     );
 
-    await sincronizarTipoEditado(queryClient, 1, {
-      nombre: "Tarjeta de circulación",
-      descripcion: "",
-      obligatorio: false,
-    });
+    await sincronizarTipoEditado(
+      queryClient,
+      1,
+      tipo({ tipo_id: 1, nombre: "Tarjeta de circulación", descripcion: "", obligatorio: false })
+    );
 
     expect(
       queryClient
@@ -228,11 +272,11 @@ describe("sincronizarTipoEditado", () => {
       [tipo({ tipo_id: 4, descripcion: "vieja" })]
     );
 
-    await sincronizarTipoEditado(queryClient, 4, {
-      nombre: "Calcomanía",
-      descripcion: "",
-      obligatorio: false,
-    });
+    await sincronizarTipoEditado(
+      queryClient,
+      4,
+      tipo({ tipo_id: 4, nombre: "Calcomanía", descripcion: "", obligatorio: false })
+    );
 
     expect(
       queryClient.getQueryData<TipoRubro[]>([QK_TIPOS, true])![0]!.descripcion

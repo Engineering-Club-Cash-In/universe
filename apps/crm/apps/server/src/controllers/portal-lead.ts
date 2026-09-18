@@ -404,21 +404,34 @@ export async function updateLeadByEmail(c: Context) {
 				)
 			: eq(leads.id, existingLead.id);
 
-		// Update the lead
-		const [updatedLead] = await db
-			.update(leads)
-			.set(updateData)
-			.where(whereDelUpdate)
-			.returning({
-				id: leads.id,
-				firstName: leads.firstName,
-				lastName: leads.lastName,
-				email: leads.email,
-				phone: leads.phone,
-				dpi: leads.dpi,
-				direccion: leads.direccion,
-				updatedAt: leads.updatedAt,
-			});
+		// Update the lead.
+		// 🔴 En transacción y con lock de las oportunidades: el NOT EXISTS del
+		// candado lee bajo snapshot MVCC y no bloquea la fila — una aprobación
+		// 30→40 en vuelo podía commitear después de esta escritura. El FOR UPDATE
+		// serializa las dos.
+		const [updatedLead] = await db.transaction(async (tx) => {
+			if (candadoEnElPredicado) {
+				await tx
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(eq(opportunities.leadId, existingLead.id))
+					.for("update");
+			}
+			return tx
+				.update(leads)
+				.set(updateData)
+				.where(whereDelUpdate)
+				.returning({
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+					phone: leads.phone,
+					dpi: leads.dpi,
+					direccion: leads.direccion,
+					updatedAt: leads.updatedAt,
+				});
+		});
 		if (!updatedLead && candadoEnElPredicado) {
 			// Cero filas con la condición puesta: el candado se cerró en el medio.
 			// Se contesta como el candado, con su mismo mensaje.

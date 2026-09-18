@@ -279,8 +279,20 @@ export function esDpiEnBlanco(valor: unknown): boolean {
 	return typeof valor === "string" && valor.trim() === "";
 }
 
+/**
+ * 🔴 `anotacionPendiente` es una INTENCIÓN, no una anotación hecha.
+ *
+ * Antes esta función escribía la bitácora ella misma, y la escribía ANTES del
+ * UPDATE. Con un lead inexistente —o con cualquier fallo posterior— quedaba una
+ * fila `validar_mora_dpi_override_admin` de un override que NUNCA ocurrió: el
+ * DPI seguía siendo el viejo y la revisión leía que un administrador había
+ * forzado un cambio que no existe. Justo al revés de para qué está esa fila.
+ *
+ * El llamador la anota SOLO después de confirmar que el UPDATE afectó filas.
+ * Va en `null` cuando no hubo override que contar.
+ */
 export type ResolucionEdicionConMora =
-	| { permitir: true }
+	| { permitir: true; anotacionPendiente: AuditEntry | null }
 	| { permitir: false; mensaje: string };
 
 /**
@@ -303,9 +315,11 @@ export type ResolucionEdicionConMora =
  * operaciones necesita que jurídico también corrija DPIs, se amplía acá, con
  * la misma fila de bitácora.
  *
- * El paso NO es silencioso: deja `validar_mora_dpi_override_admin` con el
- * motivo que el gate había dado, para que la revisión pueda preguntar después
- * por qué ese DPI entró pese a la mora.
+ * El paso NO es silencioso: devuelve la fila `validar_mora_dpi_override_admin`
+ * con el motivo que el gate había dado, para que la revisión pueda preguntar
+ * después por qué ese DPI entró pese a la mora. Se DEVUELVE en vez de
+ * escribirse: ver `anotacionPendiente`, porque anotarla acá dejaba en la
+ * bitácora overrides que nunca llegaron a ocurrir.
  *
  * 🔴 La válvula abre SOLO ante los motivos de NEGOCIO (`MORA_ACTIVA`,
  * `EN_CONVENIO`, `CREDITO_INSOLUTO`). Con `SERVICIO_NO_DISPONIBLE` —o cualquier
@@ -337,10 +351,9 @@ export function resolverEdicionConMora(
 		/** Contexto extra para la bitácora (p. ej. `{ coDebtorId }`). */
 		datosExtra?: Record<string, unknown>;
 	},
-	anotar: (entrada: AuditEntry) => void,
 ): ResolucionEdicionConMora {
 	if (!gate.rechazado) {
-		return { permitir: true };
+		return { permitir: true, anotacionPendiente: null };
 	}
 
 	// La caída no se negocia: sin dato no hay corrección informada que valga, y
@@ -358,21 +371,23 @@ export function resolverEdicionConMora(
 		};
 	}
 
-	anotar({
-		entity: destino.entity,
-		id: destino.id,
-		action: "validar_mora_dpi_override_admin",
-		data: {
-			dpi: destino.dpi,
-			motivo: gate.motivo,
-			mensajeDelGate: gate.mensaje,
-			detalle:
-				"un administrador corrigió el DPI pese al rechazo del gate de mora",
-			...destino.datosExtra,
+	return {
+		permitir: true,
+		// La escribe el llamador, y solo si el UPDATE de verdad tocó una fila.
+		anotacionPendiente: {
+			entity: destino.entity,
+			id: destino.id,
+			action: "validar_mora_dpi_override_admin",
+			data: {
+				dpi: destino.dpi,
+				motivo: gate.motivo,
+				mensajeDelGate: gate.mensaje,
+				detalle:
+					"un administrador corrigió el DPI pese al rechazo del gate de mora",
+				...destino.datosExtra,
+			},
 		},
-	});
-
-	return { permitir: true };
+	};
 }
 
 export function requiereConsultaDeMora(

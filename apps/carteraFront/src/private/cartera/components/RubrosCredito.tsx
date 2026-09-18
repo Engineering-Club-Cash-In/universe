@@ -57,6 +57,7 @@ import {
 import { ajustarApertura, type SesionRubros } from "./rubrosApertura";
 import { motivoTipoNoCobrable } from "./rubrosTiposOfrecibles";
 import { motivoMontoNoEditable, montoQuedaEnCeroAlCentavo } from "./rubrosEdicionMonto";
+import { camposRealmenteEditados } from "./rubrosCamposEditados";
 import {
   QK_RUBROS,
   sincronizarRubroAnulado,
@@ -1076,13 +1077,31 @@ function VistaEditar({
   // sub-centavo los dos lados no coincidían y el formulario dejaba pasar un
   // guardado que el backend rechazaba. Sin esa deducción no hay discrepancia.
 
+  /**
+   * Sólo viaja lo que el editor TOCÓ, no el formulario entero.
+   *
+   * Mandando los tres campos siempre se pierden ediciones ajenas: A abre el
+   * rubro en Q500, B lo sube a Q800, y A cambia sólo la descripción. A reenvía
+   * el Q500 que tenía cargado, el backend lo compara con su fila actual, ve una
+   * diferencia real y la guarda como edición de monto. Lo de B se deshace sin
+   * que nadie se entere, y el historial registra un cambio que A nunca pidió.
+   *
+   * Verificado contra una copia de producción que el backend acepta el patch
+   * parcial: con `monto` ausente guarda la descripción, deja el monto intacto y
+   * el historial anota la `edicion` sin cambio de monto.
+   *
+   * ⚠️ Esto NO cierra el conflicto sobre el MISMO campo: si los dos editan el
+   * monto, sigue ganando el último. Para eso haría falta un chequeo de versión
+   * optimista, que es una decisión de contrato del endpoint.
+   */
+  const patch = camposRealmenteEditados(
+    { monto, descripcion },
+    { monto: rubro.monto_original ?? 0, descripcion: rubro.descripcion ?? "" }
+  );
+
   const editar = useMutation({
     mutationFn: () =>
-      editarRubro(rubro.rubro_id, {
-        monto: Number(monto),
-        descripcion: descripcion.trim(),
-        motivo: motivo.trim(),
-      }),
+      editarRubro(rubro.rubro_id, { ...patch, motivo: motivo.trim() }),
     onSuccess: (guardado) => {
       toast.success("Rubro actualizado");
       // Se DEVUELVE la promesa (ver el mismo comentario en `VistaCrear`): es lo
@@ -1115,6 +1134,11 @@ function VistaEditar({
     if (!descripcion.trim()) return setError("La descripción es obligatoria");
     if (!motivo.trim()) {
       return setError("El motivo es obligatorio: queda en el historial del rubro");
+    }
+    // Sin cambios no se manda nada: un PUT vacío sólo ensuciaría el historial
+    // con una `edicion` que no editó nada.
+    if (patch.monto === undefined && patch.descripcion === undefined) {
+      return setError("No cambiaste nada: modificá el monto o la descripción");
     }
     editar.mutate();
   };

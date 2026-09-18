@@ -1110,7 +1110,13 @@ export async function anularRubro(
 
     if (!actual) throw new RubroError(404, "El rubro no existe.");
 
-    const veredicto = puedeAnularRubro({ completado: actual.completado });
+    // Los montos van al veredicto: sin ellos no puede ver el abono parcial, y
+    // anular con plata encima la borra de la vista sin dejar constancia.
+    const veredicto = puedeAnularRubro({
+      completado: actual.completado,
+      montoOriginal: actual.monto_original,
+      saldoPendiente: actual.saldo_pendiente,
+    });
     if (!veredicto.permitido) {
       throw new RubroError(
         veredicto.status ?? 409,

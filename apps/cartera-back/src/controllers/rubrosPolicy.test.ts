@@ -350,6 +350,40 @@ describe("puedeAnularRubro", () => {
     expect(r.motivo).toBeString();
     expect(r.motivo?.length).toBeGreaterThan(0);
   });
+
+  it("🔴 con un abono PARCIAL encima no se puede anular: la plata desaparecería", () => {
+    // Medido contra una copia de producción: `completado` sigue false con un abono
+    // parcial, así que la anulación pasaba, ponía `saldo_pendiente` en 0 sin
+    // registrar devolución, y el listado mostraba `abonado: 0.00` para un rubro
+    // que el cliente había pagado en Q200. La plata dejaba de existir en pantalla.
+    const v = puedeAnularRubro({
+      completado: false,
+      montoOriginal: "500.00",
+      saldoPendiente: "300.00",
+    });
+    expect(v.permitido).toBe(false);
+    expect(v.status).toBe(409);
+    expect(v.motivo).toContain("200");
+  });
+
+  it("sin nada abonado sí se puede anular", () => {
+    const v = puedeAnularRubro({
+      completado: false,
+      montoOriginal: "500.00",
+      saldoPendiente: "500.00",
+    });
+    expect(v.permitido).toBe(true);
+  });
+
+  it("la comparación va al centavo, no por texto", () => {
+    // El backend guarda `numeric(18,2)`: "500" y "500.00" son el mismo saldo.
+    const v = puedeAnularRubro({
+      completado: false,
+      montoOriginal: "500",
+      saldoPendiente: "500.00",
+    });
+    expect(v.permitido).toBe(true);
+  });
 });
 
 describe("puedeEditarRubro", () => {

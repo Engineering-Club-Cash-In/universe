@@ -305,8 +305,14 @@ export const puedeActuar = (usuario_id?: number | null): Veredicto => {
  */
 export const puedeAnularRubro = ({
   completado,
+  montoOriginal,
+  saldoPendiente,
 }: {
   completado: boolean;
+  /** `rubros.monto_original`. Si no llega, no se evalúa el abono parcial. */
+  montoOriginal?: BigInput | null;
+  /** `rubros.saldo_pendiente`. Ídem. */
+  saldoPendiente?: BigInput | null;
 }): Veredicto => {
   if (completado) {
     return {
@@ -316,6 +322,35 @@ export const puedeAnularRubro = ({
         "El rubro ya está completado (saldado o anulado): no hay nada que anular.",
     };
   }
+
+  /**
+   * Y tampoco se anula un rubro con un abono PARCIAL encima.
+   *
+   * `completado` sólo se prende cuando el saldo llega a cero, así que un rubro
+   * pagado a medias lo tenía en false y la anulación pasaba. El daño no era el
+   * estado sino la plata: la anulación pone `saldo_pendiente` en 0 sin registrar
+   * ninguna devolución, y el listado informa `abonado: 0` para las filas
+   * anuladas. Medido contra una copia de producción, un rubro de Q500 con Q200
+   * ya pagados quedaba mostrando `abonado 0.00` — el pago del cliente dejaba de
+   * existir en pantalla, sin rastro de a dónde fue.
+   *
+   * Anular es "dejar de cobrar lo que falta", y eso sólo tiene sentido cuando no
+   * se cobró nada. Lo parcialmente pagado necesita una devolución, que es otra
+   * operación y deja su propia evidencia.
+   */
+  if (montoOriginal != null && saldoPendiente != null) {
+    const abonado = new Big(montoOriginal).minus(new Big(saldoPendiente));
+    if (abonado.gt(0)) {
+      return {
+        permitido: false,
+        status: 409,
+        motivo:
+          `Este rubro ya tiene Q${abonado.toFixed(2)} abonados: anularlo borraría ese pago ` +
+          `sin dejar constancia. Para dejar de cobrar lo que falta hay que revertir o devolver el abono.`,
+      };
+    }
+  }
+
   return { permitido: true };
 };
 

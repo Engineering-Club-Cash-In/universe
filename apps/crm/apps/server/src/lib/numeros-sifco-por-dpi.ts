@@ -68,6 +68,7 @@ export function exigirNumerosCompletos(
 	throw new ConsultaMoraNoDisponibleError(
 		`El DPI ${dpi} tiene más de ${TOPE_NUMEROS_CREDITO_CONOCIDOS} créditos asociados en el CRM: no se puede consultar la mora de todos y el caso requiere revisión manual.`,
 		null,
+		true, // definitivo: reintentar no lo arregla
 	);
 }
 

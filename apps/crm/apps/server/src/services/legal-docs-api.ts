@@ -441,3 +441,49 @@ export async function reenviarCorreoDeFirma(
 		"No se pudo reenviar el correo de firma",
 	);
 }
+
+/**
+ * Manda a firmar un PDF que jurídico subió a mano.
+ *
+ * El tipo de contrato tiene que ser uno de los mapeados: el generador ubica las
+ * líneas de firma por el layout de ese tipo y, si el PDF no las trae, no manda
+ * nada a firmar y devuelve el error.
+ */
+export async function subirContratoParaFirma(payload: {
+	contractType: string;
+	pdfBase64: string;
+	filenamePrefix?: string;
+	signers?: ContractSigner[];
+	observers?: string[];
+}): Promise<DocumentResult & { message?: string }> {
+	const response = await fetch(
+		`${LEGAL_DOCS_API_URL}/contracts/upload-for-signing`,
+		{
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+			},
+			body: JSON.stringify(payload),
+		},
+	);
+
+	const cuerpo = await response.text();
+	let parsed: (DocumentResult & { message?: string }) | null = null;
+	try {
+		parsed = JSON.parse(cuerpo);
+	} catch {
+		parsed = null;
+	}
+
+	// El generador devuelve 400 con el motivo adentro (p. ej. que el PDF no trae
+	// las líneas de firma del contrato). Ese motivo es justo lo que jurídico
+	// necesita leer, así que se devuelve en vez de reventar con el status.
+	if (!parsed) {
+		throw new Error(
+			`No se pudo subir el contrato a firma: ${response.status} - ${cuerpo}`,
+		);
+	}
+
+	return parsed;
+}

@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	ArrowLeft,
 	CheckCircle,
+	FileUp,
 	Loader2,
 	Plus,
 	RefreshCw,
@@ -16,6 +17,7 @@ import { ApproveOpportunityModal } from "@/components/juridico/ApproveOpportunit
 import { ContractsList } from "@/components/juridico/ContractsList";
 import { CreateContractModal } from "@/components/juridico/CreateContractModal";
 import { RegenerateContractsModal } from "@/components/juridico/RegenerateContractsModal";
+import { UploadContractModal } from "@/components/juridico/UploadContractModal";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -56,6 +58,7 @@ function RouteComponent() {
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
 	const [isRegenerateModalOpen, setIsRegenerateModalOpen] = useState(false);
+	const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 	const [deletingContractId, setDeletingContractId] = useState<string | null>(
 		null,
 	);
@@ -173,7 +176,7 @@ function RouteComponent() {
 					contractType: string;
 					data: Record<string, string>;
 					signers?: ContractSigner[];
-			emails?: string[];
+					emails?: string[];
 					options: {
 						gender: "male" | "female";
 						generatePdf: boolean;
@@ -340,6 +343,15 @@ function RouteComponent() {
 									Regenerar con nueva fecha
 								</Button>
 							)}
+						{canCreateLegal && opportunityId && (
+							<Button
+								variant="outline"
+								onClick={() => setIsUploadModalOpen(true)}
+							>
+								<FileUp className="mr-2 h-4 w-4" />
+								Subir contrato
+							</Button>
+						)}
 						{canCreateLegal && (
 							<Button onClick={() => setIsCreateModalOpen(true)}>
 								<Plus className="mr-2 h-4 w-4" />
@@ -470,6 +482,16 @@ function RouteComponent() {
 				isLoading={approveMutation.isPending}
 				opportunityTitle={opportunityData?.title}
 			/>
+
+			{/* Subida manual: el contrato lo arma una persona, la firma va igual */}
+			{opportunityId && (
+				<UploadContractModal
+					opportunityId={opportunityId}
+					open={isUploadModalOpen}
+					onOpenChange={setIsUploadModalOpen}
+					onUploaded={refetch}
+				/>
+			)}
 
 			{/* Modal para regenerar contratos */}
 			{contracts && (

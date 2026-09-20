@@ -137,13 +137,16 @@ export class ClientesService extends BaseService {
       // indistinguibles y el consumidor (la consulta de mora de cartera) leía
       // el fallo como "no es cliente" — fail-open. El DPI desconocido legítimo
       // viene como Result OK con ConsultaResultados vacío.
+      // Se exige OK explícito, no "cualquier cosa que no sea un no-OK": un
+      // cuerpo 200 sin `Result` —schema corrido, respuesta truncada— volvía a
+      // publicarse como éxito con lista vacía, que es el mismo fail-open.
       const resultado = response.data.Result;
-      if (resultado !== undefined && resultado !== "OK") {
+      if (resultado !== "OK") {
         return {
           success: false,
           error:
             response.data.Messages?.[0]?.Description ||
-            `SIFCO respondió Result=${resultado} al buscar por identificación`,
+            `SIFCO respondió Result=${resultado ?? "(ausente)"} al buscar por identificación`,
           statusCode: response.statusCode,
         } as any;
       }

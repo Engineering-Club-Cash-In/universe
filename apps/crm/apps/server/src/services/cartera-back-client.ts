@@ -1234,6 +1234,10 @@ export class CarteraBackClient {
 		useCache = false,
 		timeoutMs?: number | (() => number),
 		retryOnFailure?: boolean,
+		// Corre DENTRO del execute del breaker: un 200 con cuerpo que viola el
+		// contrato (p. ej. {}) tiene que contar como fallo, no como éxito que
+		// resetea el conteo. Debe LANZAR si el crudo no cumple.
+		validarDentroDelBreaker?: (crudo: unknown) => void,
 	): Promise<T> {
 		const url = `${this.config.baseUrl}${endpoint}`;
 		const cacheKey = `${options.method || "GET"}:${url}:${JSON.stringify(options.body || {})}`;
@@ -1315,7 +1319,11 @@ export class CarteraBackClient {
 										url,
 										retryOptions,
 									);
-									if (retryRes.ok) return (await retryRes.json()) as T;
+									if (retryRes.ok) {
+										const crudoRetry = await retryRes.json();
+										validarDentroDelBreaker?.(crudoRetry);
+										return crudoRetry as T;
+									}
 									const retryText = await retryRes.text();
 									let retryData: { error?: string; message?: string } = {};
 									try {
@@ -1351,7 +1359,9 @@ export class CarteraBackClient {
 							);
 						}
 
-						return (await res.json()) as T;
+						const crudo = await res.json();
+						validarDentroDelBreaker?.(crudo);
+						return crudo as T;
 					},
 					// La señal del llamador no es cartera fallando: ver
 					// `esCancelacionDelLlamador`.
@@ -1851,6 +1861,20 @@ export class CarteraBackClient {
 						// `cotaFetchConsultaMora`.
 						() => cotaFetchConsultaMora(restanteMs()),
 						false, // un solo intento (ver arriba)
+						// El contrato se valida DENTRO del breaker: un 200 con cuerpo
+						// que no cumple el schema (p. ej. `{}`) es el endpoint
+						// enfermo, y contarlo como éxito reseteaba el breaker en cada
+						// llamada mientras el gate seguía viajando al servicio roto.
+						(crudoSinValidar) => {
+							const previo =
+								consultaMoraResponseSchema.safeParse(crudoSinValidar);
+							if (!previo.success) {
+								throw new ConsultaMoraNoDisponibleError(
+									`Cartera respondió la consulta de mora con una forma inesperada: ${previo.error.message}`,
+									previo.error,
+								);
+							}
+						},
 					),
 			);
 		} catch (error) {

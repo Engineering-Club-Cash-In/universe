@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "../database";
 import {
   convenios_pago,
@@ -130,11 +130,18 @@ async function conRelojDePostgres<T>(
 ): Promise<T> {
   const ms = cotaODesistir(PRESUPUESTO_NUMEROS_GATE_MS, venceEnMs, paso);
   return db.transaction(async (tx) => {
-    await tx.execute(
-      sql.raw(`SET LOCAL statement_timeout = ${Math.max(1, Math.floor(ms))}`)
-    );
+    await tx.execute(relojDe(ms));
     return correr(tx);
   });
+}
+
+/**
+ * El `SET LOCAL` que hace cancelable la query desde el servidor. Va dentro de
+ * una transacción a propósito: así el ajuste muere con ella y no ensucia la
+ * conexión que vuelve al pool compartido.
+ */
+function relojDe(ms: number): SQL {
+  return sql.raw(`SET LOCAL statement_timeout = ${Math.max(1, Math.floor(ms))}`);
 }
 
 /**
@@ -369,12 +376,20 @@ async function obtenerNumerosPrestamo(
   // —con varias fichas, la segunda ya no tiene 5s propios que gastar—.
   const filasEspejo = sifcoDb
     ? await numerosEspejoConPresupuesto(
-        () =>
-          sifcoDb!
-            .select({ pre_numero: prestamos.pre_numero })
-            .from(prestamos)
-            .where(eq(prestamos.pre_cli_cod, codigoClienteSifco))
-            .then((filas) => filas.map((fila) => fila.pre_numero ?? "")),
+        (cotaMs) =>
+          // Con reloj también del lado de Postgres: la carrera de 5s soltaba
+          // la espera pero la query seguía viva en el servidor, y este pool
+          // (`SIFCO_DB_URL`) tampoco tiene statement_timeout propio — las
+          // consultas abandonadas se acumulaban reteniendo conexiones aunque
+          // el API en vivo respondiera.
+          sifcoDb!.transaction(async (tx) => {
+            await tx.execute(relojDe(cotaMs));
+            const filas = await tx
+              .select({ pre_numero: prestamos.pre_numero })
+              .from(prestamos)
+              .where(eq(prestamos.pre_cli_cod, codigoClienteSifco));
+            return filas.map((fila) => fila.pre_numero ?? "");
+          }),
         cotaODesistir(
           TIMEOUT_ESPEJO_GATE_MS,
           venceEn,

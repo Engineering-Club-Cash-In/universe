@@ -637,6 +637,26 @@ describe("presupuesto del espejo de SIFCO", () => {
     expect(numeros).toEqual(["01010214124060"]);
   });
 
+  it("le pasa la cota a quien consulta, para que Postgres también la respete", async () => {
+    // Soltar la espera acá no cancela nada: la query sigue viva ocupando su
+    // conexión del pool del espejo. Quien consulta necesita el número para
+    // ponerle `statement_timeout` del lado del servidor.
+    let cotaRecibida: number | undefined;
+
+    await numerosEspejoConPresupuesto(
+      async (cotaMs) => {
+        cotaRecibida = cotaMs;
+        return [];
+      },
+      1234,
+      () => {
+        throw new Error("no debía avisar");
+      }
+    );
+
+    expect(cotaRecibida).toBe(1234);
+  });
+
   it("⚠️ al vencerse sigue con el API: lista vacía y aviso, NO fail-closed", async () => {
     // El espejo es un cache del core; el API es la fuente autoritativa viva, así
     // que seguir sin él deja la lista completa, no media lista.

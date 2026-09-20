@@ -428,7 +428,9 @@ export function unirNumerosCredito(
  * (no hay cómo cancelarla); lo que no sigue es la espera.
  */
 export async function numerosEspejoConPresupuesto(
-  consultarEspejo: () => Promise<string[]>,
+  // Recibe la cota para que quien consulte pueda ponerle reloj también del
+  // lado del servidor: soltar la espera acá no cancela la query en Postgres.
+  consultarEspejo: (presupuestoMs: number) => Promise<string[]>,
   presupuestoMs: number,
   avisar: (detalle: unknown) => void
 ): Promise<string[]> {
@@ -445,7 +447,7 @@ export async function numerosEspejoConPresupuesto(
   });
 
   try {
-    return await Promise.race([consultarEspejo(), vencimiento]);
+    return await Promise.race([consultarEspejo(presupuestoMs), vencimiento]);
   } catch (error) {
     avisar(error);
     return [];

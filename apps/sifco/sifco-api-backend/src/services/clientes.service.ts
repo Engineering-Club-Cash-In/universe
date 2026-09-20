@@ -132,6 +132,22 @@ export class ClientesService extends BaseService {
     );
 
     if (response.success && response.data) {
+      // Un Result distinto de "OK" es un fallo LÓGICO del core, no un "DPI
+      // desconocido": devolverlo como success con lista vacía los hacía
+      // indistinguibles y el consumidor (la consulta de mora de cartera) leía
+      // el fallo como "no es cliente" — fail-open. El DPI desconocido legítimo
+      // viene como Result OK con ConsultaResultados vacío.
+      const resultado = response.data.Result;
+      if (resultado !== undefined && resultado !== "OK") {
+        return {
+          success: false,
+          error:
+            response.data.Messages?.[0]?.Description ||
+            `SIFCO respondió Result=${resultado} al buscar por identificación`,
+          statusCode: response.statusCode,
+        } as any;
+      }
+
       return {
         success: true,
         data: response.data.ConsultaResultados || [],

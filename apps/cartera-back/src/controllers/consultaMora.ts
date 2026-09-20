@@ -284,8 +284,15 @@ export async function consultarMoraPorDpi(
   }
 }
 
-/** El SELECT de créditos + mora viva, compartido por las dos pasadas. */
-function selectCreditosConMora(ejecutor: EjecutorCartera = db) {
+/**
+ * El SELECT de créditos + mora viva, compartido por las dos pasadas.
+ *
+ * El ejecutor es OBLIGATORIO, sin `= db` por defecto: la única forma legítima
+ * de leer acá es dentro de la transacción con `statement_timeout` de
+ * `conRelojDePostgres`. Con un default, olvidarse de pasarlo compilaba y se
+ * salía del reloj en silencio; sin él, no compila.
+ */
+function selectCreditosConMora(ejecutor: EjecutorCartera) {
   return ejecutor
     .select({
       credito_id: creditos.credito_id,
@@ -311,7 +318,7 @@ function selectCreditosConMora(ejecutor: EjecutorCartera = db) {
  */
 async function obtenerCreditosConMora(
   numerosPrestamo: string[],
-  ejecutor: EjecutorCartera = db
+  ejecutor: EjecutorCartera
 ): Promise<FilaCreditoMora[]> {
   const porNumero = await selectCreditosConMora(ejecutor).where(
     inArray(creditos.numero_credito_sifco, numerosPrestamo)
@@ -427,7 +434,7 @@ async function obtenerNumerosPrestamo(
 
 async function obtenerHistorialMora(
   numeroPorCreditoId: Map<number, string>,
-  ejecutor: EjecutorCartera = db
+  ejecutor: EjecutorCartera
 ): Promise<ReturnType<typeof construirHistorialMora>> {
   const creditoIds = [...numeroPorCreditoId.keys()];
 

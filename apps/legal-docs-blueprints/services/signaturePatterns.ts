@@ -429,6 +429,12 @@ export function resolveSignerOrder(
             `El contrato "${contractType}" no recibió ningún deudor que firme.`,
           );
         }
+        // Sin titular, el primer cofirmante ocuparía la línea del cliente.
+        if (contractType !== ContractType.DECLARACION_DE_VENDEDOR && !titular) {
+          throw new SignatureLayoutError(
+            `El contrato "${contractType}" no recibió al titular (${SignerRole.TITULAR}).`,
+          );
+        }
         secuencia.push(...deudores);
       }
     }

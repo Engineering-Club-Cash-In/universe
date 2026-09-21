@@ -25,7 +25,7 @@ const INVENTARIO: Record<
 	string,
 	{ escrituras: number; anotaciones: number; estado: Estado; nota?: string }
 > = {
-	"routers/crm.ts": { escrituras: 17, anotaciones: 17, estado: "listo" },
+	"routers/crm.ts": { escrituras: 17, anotaciones: 20, estado: "listo" },
 	"routers/vehicles.ts": { escrituras: 10, anotaciones: 10, estado: "listo" },
 	// Anota una vez más de lo que escribe: el rollback descarta las anotaciones
 	// de la transacción revertida y deja en su lugar el intento fallido.

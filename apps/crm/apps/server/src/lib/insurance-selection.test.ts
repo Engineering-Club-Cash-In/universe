@@ -33,7 +33,7 @@ describe("selectInsuranceProvider", () => {
 		});
 
 		expect(result.provider).toBe("gyt");
-		expect(result.customerInsuranceCost).toBe(585.86);
+		expect(result.customerInsuranceCost).toBe(584.96);
 		expect(result.internalInsuranceCost).toBe(584.96);
 		expect(result.insuranceSavingsToMembership).toBeCloseTo(0.9, 2);
 		expect(result.effectiveMembershipCost).toBeCloseTo(100.9, 2);
@@ -49,13 +49,29 @@ describe("selectInsuranceProvider", () => {
 		});
 
 		expect(result.provider).toBe("gyt");
-		expect(result.customerInsuranceCost).toBe(715.28);
+		expect(result.customerInsuranceCost).toBe(714.37);
 		expect(result.internalInsuranceCost).toBe(714.37);
 		expect(result.insuranceSavingsToMembership).toBe(0.91);
 		expect(result.effectiveMembershipCost).toBe(1037.1);
 		expect(
 			result.customerInsuranceCost + result.effectiveMembershipCost,
-		).toBeCloseTo(1752.38, 2);
+		).toBeCloseTo(1751.47, 2);
+	});
+
+	test("charges GyT while moving the Universales difference into membership", () => {
+		const result = selectInsuranceProvider({
+			insuredAmount: 505000,
+			vehicleType: "nuevo",
+			universalesCost: 1360.98,
+			gytCost: 1125.8,
+			membershipCost: 1476.99,
+		});
+
+		expect(result.provider).toBe("gyt");
+		expect(result.customerInsuranceCost).toBe(1125.8);
+		expect(result.internalInsuranceCost).toBe(1125.8);
+		expect(result.insuranceSavingsToMembership).toBe(235.18);
+		expect(result.effectiveMembershipCost).toBe(1712.17);
 	});
 
 	test.each([
@@ -136,7 +152,7 @@ describe("normalizeInsuranceBreakdown", () => {
 		});
 
 		expect(result.insuranceProvider).toBe("gyt");
-		expect(result.seguro).toBe("585.86");
+		expect(result.seguro).toBe("584.96");
 		expect(result.membresiaPago).toBe("100.90");
 	});
 
@@ -164,9 +180,9 @@ describe("buildServerInsurancePersistence", () => {
 			vehicleType: "particular",
 			universalesCost: 600,
 			gytCost: 580,
-			// The web quoter already adjusted the base + GyT saving for the
-			// condition/origin/credit type, then subtracted GPS for the net
-			// membership that is shown and saved.
+			// The web quoter already adjusted the base membership for
+			// condition/origin/credit type, added the GyT saving afterward, then
+			// subtracted GPS for the net membership that is shown and saved.
 			membershipCost: 691.8,
 			customerInsuranceCost: 1291.8,
 		});
@@ -192,8 +208,8 @@ describe("buildServerInsurancePersistence", () => {
 		});
 
 		expect(result.insuranceProvider).toBe("gyt");
-		expect(result.seguro).toBe("585.86");
-		expect(result.customerInsuranceCost).toBe("585.86");
+		expect(result.seguro).toBe("584.96");
+		expect(result.customerInsuranceCost).toBe("584.96");
 		expect(result.internalInsuranceCost).toBe("584.96");
 		expect(result.insuranceSavingsToMembership).toBe("0.90");
 		expect(result.membresiaPago).toBe("100.90");

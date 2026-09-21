@@ -881,6 +881,9 @@ export class ContractGeneratorService {
       // Los firmantes pueden venir con rol (`signers`) o como lista plana de
       // emails (`emails`, el camino viejo). La lista plana se interpreta como
       // titular seguido de cofirmantes, que es como la armaba el CRM.
+      // Quien manda `signers` usa el reparto por rol. Quien sólo manda `emails`
+      // (la app legal-documents) sigue con el comportamiento de siempre.
+      const firmaPorRol = Boolean(options.signers && options.signers.length > 0);
       const signers: ContractSigner[] =
         options.signers && options.signers.length > 0
           ? options.signers
@@ -905,6 +908,7 @@ export class ContractGeneratorService {
             contractType,
             signers,
             options.observers,
+            firmaPorRol ? 'rol' : 'legado',
           );
 
           signingLinks = signing.signs ?? [];
@@ -934,7 +938,10 @@ export class ContractGeneratorService {
                 // Documenso reparte por posición: tiene que recibirlos en el
                 // orden de las líneas de firma, igual que WeeTrust, o el
                 // representante termina firmando en la línea del cliente.
-                firmantesEnOrdenDeFirma(contractType, signers).map((s) => s.email)
+                (firmaPorRol
+                  ? firmantesEnOrdenDeFirma(contractType, signers)
+                  : signers
+                ).map((s) => s.email)
               );
 
               signingLinks = signing.signs ?? [];

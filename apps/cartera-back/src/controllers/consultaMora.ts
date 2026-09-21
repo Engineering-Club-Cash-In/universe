@@ -269,13 +269,20 @@ export async function consultarMoraPorDpi(
           }
         : null,
       creditos: creditosRespuesta,
-      historialMora: await bajoPlazo(
-        conRelojDePostgres(venceEn, "la lectura del historial de mora", (ej) =>
-          obtenerHistorialMora(numeroPorCreditoId, ej)
-        ),
-        venceEn,
-        "la lectura del historial de mora"
-      ),
+      // Sin créditos no hay historial que leer, y abrir la transacción igual
+      // solo agregaba una forma de fallar: con el pool ocupado o el
+      // presupuesto agotado, un cliente que YA quedó establecido como sin
+      // deuda se volvía SERVICIO_NO_DISPONIBLE por una consulta cuyo
+      // resultado ya se sabe vacío.
+      historialMora: numeroPorCreditoId.size
+        ? await bajoPlazo(
+            conRelojDePostgres(venceEn, "la lectura del historial de mora", (ej) =>
+              obtenerHistorialMora(numeroPorCreditoId, ej)
+            ),
+            venceEn,
+            "la lectura del historial de mora"
+          )
+        : [],
       consultadoEn,
     });
   } catch (error) {

@@ -312,7 +312,7 @@ async function exigirEtapaQuePermiteReemplazo(
 		!ETAPAS_POR_ACCION.reemplazar.includes(porcentaje as never)
 	) {
 		throw new ORPCError("BAD_REQUEST", {
-			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: jurídico sólo puede subir o reemplazar contratos en 80%. Para cambiarlo, hay que devolverla a esa etapa.`,
+			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: jurídico sólo puede generar, subir o reemplazar contratos en 80%. Para cambiarlo, hay que devolverla a esa etapa.`,
 		});
 	}
 }
@@ -479,11 +479,22 @@ async function retirarAnterioresSiSigueVigente(params: {
 		);
 
 		const [oportunidad] = await tx
-			.select({ stageId: opportunities.stageId })
+			.select({
+				stageId: opportunities.stageId,
+				porcentaje: salesStages.closurePercentage,
+			})
 			.from(opportunities)
+			.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 			.where(eq(opportunities.id, opportunityId))
 			.for("no key update", { of: opportunities });
-		if (!oportunidad || oportunidad.stageId !== etapaInicial) {
+		// Además de no haber cambiado, tiene que ser la de jurídico (80%): una
+		// oportunidad que ya estaba en 85% cuando empezó el pedido también
+		// pasaría el "no cambió", y sus enlaces ya salieron por WhatsApp.
+		if (
+			!oportunidad ||
+			oportunidad.stageId !== etapaInicial ||
+			!ETAPAS_POR_ACCION.reemplazar.includes(oportunidad.porcentaje as never)
+		) {
 			return "cambio-de-etapa" as const;
 		}
 
@@ -1148,6 +1159,27 @@ export const contractGenerationRouter = {
 			try {
 				const savedContracts: Array<{ id: string; contractType: string }> = [];
 				const descartados: string[] = [];
+
+				// Enlazar es de jurídico y sólo en 80%. Si la oportunidad ya pasó (la
+				// aprobaron entre generar y enlazar), los documentos recién generados
+				// no se instalan: se borran en WeeTrust para que no queden vivos sin
+				// registro, con las invitaciones mandadas.
+				try {
+					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+				} catch (error) {
+					for (const contract of input.contracts) {
+						const { documentID } = firmaDelGenerador(contract.apiResponse);
+						if (documentID) {
+							await borrarDocumentoDeWeeTrust(documentID).catch((e) =>
+								console.error(
+									`[linkContractsToOpportunity] no se pudo borrar ${documentID}:`,
+									e,
+								),
+							);
+						}
+					}
+					throw error;
+				}
 				const etapaInicial = await etapaActual(input.opportunityId);
 
 				for (const contract of input.contracts) {
@@ -1317,6 +1349,10 @@ export const contractGenerationRouter = {
 			);
 
 			try {
+				// Regenerar es de jurídico y sólo en 80%, igual que subir o reemplazar.
+				// Se corta antes de generar nada.
+				await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+
 				// La etapa al empezar: si cambia mientras se generan, los nuevos no
 				// reemplazan a los que ya salieron (ver retirarAnterioresSiSigueVigente).
 				const etapaInicial = await etapaActual(input.opportunityId);

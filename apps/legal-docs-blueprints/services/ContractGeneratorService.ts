@@ -1144,6 +1144,12 @@ export class ContractGeneratorService {
       filenamePrefix?: string;
       signers?: ContractSigner[];
       observers?: string[];
+      /**
+       * El PDF ya está en R2 con esta key (reemisión): no se vuelve a subir.
+       * Si no, cada regeneración dejaba una copia más del mismo contrato que
+       * nadie referencia.
+       */
+      r2KeyExistente?: string;
     } = {},
   ): Promise<ContractGenerationResponse> {
     const config = this.templateRegistry.get(contractType);
@@ -1230,7 +1236,9 @@ export class ContractGeneratorService {
       // PDF guardado el CRM no lo registra, y quedaría vivo sin dueño.
       let r2Key: string;
       try {
-        ({ r2Key } = await uploadPdfToR2(pdfBuffer, baseFilename));
+        r2Key =
+          options.r2KeyExistente ??
+          (await uploadPdfToR2(pdfBuffer, baseFilename)).r2Key;
       } catch (error) {
         await weeTrustService.deleteDocument(signing.documentID).catch(() => {});
         throw error;

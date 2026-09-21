@@ -312,7 +312,7 @@ async function exigirEtapaQuePermiteReemplazo(
 		!ETAPAS_POR_ACCION.reemplazar.includes(porcentaje as never)
 	) {
 		throw new ORPCError("BAD_REQUEST", {
-			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: jurídico sólo puede reemplazar contratos en 80%. Para cambiarlo, hay que devolverla a esa etapa.`,
+			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: jurídico sólo puede subir o reemplazar contratos en 80%. Para cambiarlo, hay que devolverla a esa etapa.`,
 		});
 	}
 }
@@ -1656,10 +1656,10 @@ export const contractGenerationRouter = {
 				});
 			}
 
-			// Reemplazar sólo mientras la oportunidad está en firma.
-			if (input.replaceContractId) {
-				await exigirEtapaQuePermiteReemplazo(input.opportunityId);
-			}
+			// Subir o reemplazar, sólo mientras la oportunidad está en 80%: es la
+			// etapa de jurídico, y es lo que ya hace la pantalla al esconder los
+			// botones. Se vuelve a mirar, bloqueada, antes de guardar.
+			await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 
 			// Sólo los tipos con layout auditado: el generador ubica las líneas de
 			// firma por ese layout, y sin él no hay forma de repartir por rol.
@@ -1825,26 +1825,26 @@ export const contractGenerationRouter = {
 						});
 					}
 
-					if (input.replaceContractId) {
-						// La etapa se vuelve a mirar acá, con la oportunidad bloqueada:
-						// mientras WeeTrust recibía el documento alguien pudo pasarla a
-						// 85% (y mandar el WhatsApp con los enlaces viejos) o cerrarla.
-						const [etapa] = await tx
-							.select({ porcentaje: salesStages.closurePercentage })
-							.from(opportunities)
-							.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-							.where(eq(opportunities.id, input.opportunityId))
-							.for("update", { of: opportunities });
-						if (
-							!etapa?.porcentaje ||
-							!ETAPAS_POR_ACCION.reemplazar.includes(etapa.porcentaje as never)
-						) {
-							throw new ORPCError("CONFLICT", {
-								message:
-									"La oportunidad cambió de etapa mientras se subía el contrato. Ya no se puede reemplazar.",
-							});
-						}
+					// La etapa se vuelve a mirar acá, con la oportunidad bloqueada, para
+					// toda subida: mientras WeeTrust recibía el documento alguien pudo
+					// pasarla a 85% (y mandar el WhatsApp sin este contrato) o cerrarla.
+					const [etapa] = await tx
+						.select({ porcentaje: salesStages.closurePercentage })
+						.from(opportunities)
+						.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+						.where(eq(opportunities.id, input.opportunityId))
+						.for("update", { of: opportunities });
+					if (
+						!etapa?.porcentaje ||
+						!ETAPAS_POR_ACCION.reemplazar.includes(etapa.porcentaje as never)
+					) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La oportunidad cambió de etapa mientras se subía el contrato. Ya no se puede subir.",
+						});
+					}
 
+					if (input.replaceContractId) {
 						const [original] = await tx
 							.select({
 								status: generatedLegalContracts.status,

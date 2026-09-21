@@ -502,10 +502,11 @@ const app = new Elysia()
 
       const pdfBuffer = await downloadPdfFromR2(r2Key);
 
+      // Es el mismo PDF que ya está en R2: se firma sin volver a subirlo.
       const result = await contractGenerator.signExistingPdf(
         contractType,
         pdfBuffer,
-        { filenamePrefix, signers, observers }
+        { filenamePrefix, signers, observers, r2KeyExistente: r2Key }
       );
 
       set.status = result.success ? 200 : 400;

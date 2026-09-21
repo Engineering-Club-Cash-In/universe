@@ -9,7 +9,9 @@ import {
   generarPDFBuffer,
   generarYSubirExcelInversionista
 } from "../utils/functions/generalFunctions";
-import { db } from "../database/index";
+import { db, lockPool } from "../database/index";
+import { drizzle } from "drizzle-orm/node-postgres";
+import * as schema from "../database/db/schema";
 import {
   bancos,
   boletasPagoInversionista,
@@ -46,7 +48,6 @@ import {
   type PermisoProvisionamiento,
 } from "../utils/functions/provisionamientoPortal";
 import { buscarRepresentanteEnCartera } from "../utils/functions/buscarRepresentante";
-import { normalizarDpiParaComparar } from "../utils/functions/normalizarDpi";
 import {
   destinatarioDeLiquidacion,
   type RepresentanteLiquidacion,
@@ -6913,11 +6914,26 @@ export class GuardRechazadoError extends Error {
   }
 }
 
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+let lockDbInstance: typeof db | null = null;
+function getLockDbRunner(): typeof db {
+  if (!lockDbInstance) {
+    const isRealLockPool =
+      Boolean(lockPool) &&
+      typeof (lockPool as any).connect === "function" &&
+      typeof (lockPool as any).totalCount === "number";
+    lockDbInstance = isRealLockPool ? (drizzle(lockPool, { schema }) as unknown as typeof db) : db;
+  }
+  return lockDbInstance;
+}
+
 export const exitInvestor = async (
   { body, set, request }: any,
   opts: {
     skipStatusAndEmail?: boolean;
-    revalidarGuard?: (tx: any) => Promise<RevalidarGuardResult>;
+    revalidarGuard?: (tx: DbTransaction) => Promise<RevalidarGuardResult>;
+    dbRunner?: typeof db;
   } = {}
 ) => {
   const skipStatusAndEmail = opts.skipStatusAndEmail === true;
@@ -7009,8 +7025,17 @@ export const exitInvestor = async (
     // Todo el trabajo (padre + espejo + bandera + status final) va en una
     // sola transacción. Si algo falla, ROLLBACK total: ni cambia el status
     // del inversionista, ni queda nada a medias en los créditos.
+    //
+    // ⚠️ P1 (pool starvation): La transacción se ejecuta sobre `lockPool`
+    // (el pool dedicado a locks). Quien espera el `FOR NO KEY UPDATE` lo
+    // hace ocupando una conexión de `lockPool`, NUNCA del pool de trabajo
+    // `db`/`client`. Esto evita que N exits esperando un crédito bloqueado
+    // por `withPendingReturnCreditLocks` agoten el pool de trabajo,
+    // garantizando que el callback de pagos siempre encuentre conexiones en
+    // `db` para completar su trabajo y liberar el row lock.
     log("🔒 Abriendo transacción...");
-    await db.transaction(async (tx) => {
+    const dbRunner: typeof db = opts.dbRunner ?? getLockDbRunner();
+    await dbRunner.transaction(async (tx: DbTransaction) => {
       // ── Paso 4.0: Lock ordenado de créditos (P1: serialización con pagos) ──
       // Mismo patrón que `withPendingReturnCreditLocks` (payments.ts) y
       // status → pendiente_devolucion (investor.ts:6649). Toma FOR NO KEY UPDATE,

@@ -127,9 +127,13 @@ export function buildProjectedInvestorFlow(rows: ProjectionSourceRow[]): {
   const byInvestor = new Map<number, Accumulator>();
   const remainingByPosition = new Map<string, Big>();
 
-  const orderedRows = [...rows].sort((left, right) =>
-    (left.fecha_vencimiento ?? "").localeCompare(right.fecha_vencimiento ?? ""),
-  );
+  const orderedRows = rows
+    .filter((row) => row.status_posicion !== "cancelado")
+    .sort((left, right) =>
+      (left.fecha_vencimiento ?? "").localeCompare(
+        right.fecha_vencimiento ?? "",
+      ),
+    );
   const rowsByPayment = new Map<string, ProjectionSourceRow[]>();
   for (const row of orderedRows) {
     const key = getPaymentKey(row);

@@ -928,6 +928,41 @@ describe("buildProjectedInvestorFlow", () => {
     });
   });
 
+  test("excluye posiciones canceladas aunque conserven capital", () => {
+    const result = buildProjectedInvestorFlow([
+      {
+        inversionista_id: 2,
+        nombre: "Posición cancelada",
+        tipo_reinv_efectivo: "sin_reinversion",
+        monto_reinversion: null,
+        descuenta_impuestos: false,
+        emite_factura: true,
+        credito_id: 10,
+        fecha_vencimiento: "2026-10-01",
+        en_periodo: true,
+        status_credito: "ACTIVO",
+        status_posicion: "cancelado",
+        capital_credito: "100.00",
+        cuota_credito: "111.20",
+        porcentaje_interes: "100.00",
+        porcentaje_inversionista: "100.00",
+        porcentaje_cube: "0.00",
+        monto_pendiente: "0.00",
+        cuota: "111.20",
+        monto_aportado: "100.00",
+        interes_inversionista: "10.00",
+        interes_cube: "0.00",
+        iva_inversionista: "1.20",
+        iva_cube: "0.00",
+        cargos: "0.00",
+        es_mayor_participacion: true,
+      },
+    ]);
+
+    expect(result.porInversionista).toEqual([]);
+    expect(result.totales.total).toBe("0.00");
+  });
+
   test("resta capital pagado pendiente de liquidar antes de proyectar", () => {
     const result = buildProjectedInvestorFlow([
       {

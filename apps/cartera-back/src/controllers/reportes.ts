@@ -992,6 +992,7 @@ export async function getFlujoCuotasPorInversionista({
     JOIN cartera.inversionistas i ON ce.inversionista_id = i.inversionista_id
     LEFT JOIN cartera.inversionistas cube_i ON cube_i.inversionista_id = 86
     WHERE cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
+      AND ce.status::text IS DISTINCT FROM 'cancelado'
       AND ce.fecha_inicio_participacion <= p.fecha_corte
       AND ce.monto_aportado::numeric
         - COALESCE(cp.monto_pendiente, 0)

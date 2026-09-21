@@ -5,23 +5,11 @@ import type {
 } from "./types";
 
 export const LLM_WEIGHT_CAP = 8;
-export const REJECTION_SCORE_THRESHOLD = 7;
-export const MIN_AI_REJECTION_CONFIDENCE = 70;
+export const MIN_SYNTHETIC_REJECTION_CONFIDENCE = 90;
+export const MIN_DOCUMENT_TYPE_REJECTION_CONFIDENCE = 95;
 
 const REJECTION_ELIGIBLE_SIGNAL_CODES = new Set([
-	"titular_no_coincide_fuerte",
 	"documento_declarado_sintetico_o_sin_validez",
-]);
-
-const REJECTION_SCORE_EXCLUDED_SIGNAL_CODES = new Set([
-	"desalineacion_columnas",
-	"montos_sobrepuestos",
-	"formato_no_corresponde_al_emisor",
-	"tipografia_inconsistente",
-	"sha256_duplicado_oportunidad_ganada",
-	"errores_ortograficos",
-	"ortografia_en_descripcion_movimiento",
-	"captura_impide_verificar_alineacion",
 ]);
 
 export function isRejectionEligibleSignal(
@@ -34,29 +22,13 @@ export function isRejectionEligibleSignal(
 		signal.severity === "alta" &&
 		REJECTION_ELIGIBLE_SIGNAL_CODES.has(signal.code);
 	if (!eligible) return false;
-	if (
-		signal.source === "ia" &&
-		(signal.confidence ?? 0) < MIN_AI_REJECTION_CONFIDENCE
-	)
-		return false;
-	if (signal.code !== "documento_declarado_sintetico_o_sin_validez")
-		return true;
-
 	return (
-		(signal.confidence ?? 0) >= 90 &&
+		(signal.confidence ?? 0) >= MIN_SYNTHETIC_REJECTION_CONFIDENCE &&
 		typeof signal.page === "number" &&
 		signal.page > 0 &&
 		typeof signal.evidence?.textoDetectado === "string" &&
 		signal.evidence.textoDetectado.trim().length > 0
 	);
-}
-
-function contributesToRejectionScore(signal: Signal): boolean {
-	if (REJECTION_SCORE_EXCLUDED_SIGNAL_CODES.has(signal.code)) return false;
-	if (signal.source !== "ia") return true;
-	if (signal.code === "documento_declarado_sintetico_o_sin_validez")
-		return isRejectionEligibleSignal(signal);
-	return (signal.confidence ?? 0) >= MIN_AI_REJECTION_CONFIDENCE;
 }
 
 export const SIGNAL_WEIGHTS: Record<string, number> = {
@@ -182,13 +154,15 @@ export function applyRuleset(params: {
 	pipelineError?: string | null;
 }): ValidationOutcome {
 	const { signals, llm } = params;
-	const isCapture = signals.some((signal) =>
-		[
-			"todas_las_paginas_rasterizadas",
-			"paginas_mixtas_texto_e_imagen",
-			"documento_fotografiado_o_escaneado",
-		].includes(signal.code),
-	);
+	if (signals.some((signal) => signal.code === "pdf_protegido_no_abre")) {
+		return {
+			result: "rechazado",
+			score: 0,
+			reason:
+				"El PDF está protegido y no se puede inspeccionar. Solicita una copia sin contraseña ni protección.",
+			signals,
+		};
+	}
 	if (params.pipelineError) {
 		return { result: "error", score: 0, reason: params.pipelineError, signals };
 	}
@@ -203,19 +177,27 @@ export function applyRuleset(params: {
 		};
 	}
 
-	if (llm?.es_legible === false && !isCapture) {
+	if (
+		!llm ||
+		signals.some((signal) =>
+			[
+				"ia_no_disponible",
+				"inspeccion_tecnica_incompleta",
+			].includes(signal.code),
+		)
+	) {
 		return {
-			result: "rechazado",
+			result: "error",
 			score: 0,
 			reason:
-				"El archivo no se puede leer correctamente. Vuelve a cargar una copia legible del estado de cuenta.",
+				"No se pudo completar la inspección documental. Intenta nuevamente con un PDF que pueda inspeccionarse.",
 			signals,
 		};
 	}
 
 	if (
 		llm?.corresponde_al_tipo_declarado === false &&
-		llm.confianza_tipo_documento >= MIN_AI_REJECTION_CONFIDENCE
+		llm.confianza_tipo_documento >= MIN_DOCUMENT_TYPE_REJECTION_CONFIDENCE
 	) {
 		const detected = llm?.tipo_documento_detectado || "archivo no reconocible";
 		return {
@@ -226,7 +208,9 @@ export function applyRuleset(params: {
 		};
 	}
 	const evaluatedSignals =
-		llm && llm.confianza_tipo_documento < MIN_AI_REJECTION_CONFIDENCE
+		llm &&
+		(llm.corresponde_al_tipo_declarado === false ||
+			llm.confianza_tipo_documento < MIN_DOCUMENT_TYPE_REJECTION_CONFIDENCE)
 			? [
 					...signals,
 					makeSignal("tipo_documento_incierto", 0, "media", "ia", {
@@ -236,7 +220,6 @@ export function applyRuleset(params: {
 				]
 			: [...signals];
 	if (
-		isCapture &&
 		llm?.es_legible === false &&
 		!signals.some(
 			(signal) =>
@@ -247,11 +230,6 @@ export function applyRuleset(params: {
 		evaluatedSignals.push(
 			makeSignal("captura_con_legibilidad_insuficiente", 0, "media", "ia"),
 		);
-	const rejectionSignals = evaluatedSignals.filter(
-		(signal) =>
-			!(isCapture && signal.code === "titular_no_coincide_fuerte") &&
-			contributesToRejectionScore(signal),
-	);
 
 	const calculateScore = (scoredSignals: Signal[]) => {
 		const deterministicScore = scoredSignals
@@ -266,37 +244,16 @@ export function applyRuleset(params: {
 		return Math.max(0, deterministicScore + aiScore);
 	};
 	const score = calculateScore(evaluatedSignals);
-	const rejectionScore = calculateScore(rejectionSignals);
-	const requiresManual = evaluatedSignals.some((signal) =>
-		[
-			"ia_no_disponible",
-			"pdf_protegido_no_abre",
-			"inspeccion_tecnica_incompleta",
-			"tipo_documento_incierto",
-			"captura_con_legibilidad_insuficiente",
-		].includes(signal.code),
-	);
-	const mustRejectByScore =
-		rejectionScore >= REJECTION_SCORE_THRESHOLD &&
-		rejectionSignals.some(isRejectionEligibleSignal);
-
-	const result = requiresManual
-		? "revision_manual"
-		: mustRejectByScore
-			? "rechazado"
-			: score === 0
-				? "valido"
-				: score <= 3
-					? "observacion"
-					: "revision_manual";
+	// El score se conserva como evidencia; no determina el veredicto.
+	const result = evaluatedSignals.some(isRejectionEligibleSignal)
+		? "rechazado"
+		: "valido";
 	const reason =
 		result === "valido"
-			? "No se detectaron señales de alteración."
-			: result === "observacion"
-				? "Se detectaron observaciones menores que conviene verificar."
-				: result === "rechazado"
-					? "Se detectó evidencia de alto riesgo. El documento debe reemplazarse antes de continuar."
-					: "Se detectaron señales que requieren revisión humana.";
+			? score > 0 || llm.es_legible === false
+				? "El documento puede continuar con las alertas informativas indicadas."
+				: "No se detectaron señales de alteración."
+			: "El documento se identifica explícitamente como sintético, de prueba o sin validez. Solicita un estado de cuenta válido.";
 
 	return { result, score, reason, signals: evaluatedSignals };
 }

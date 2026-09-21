@@ -9,6 +9,20 @@ export const VALIDATION_RESULTS = [
 ] as const;
 export type ValidationResult = (typeof VALIDATION_RESULTS)[number];
 
+// Los resultados históricos se conservan y se exponen sin reinterpretarlos.
+export function currentValidationResult(
+	result: ValidationResult,
+): ValidationResult {
+	return result;
+}
+
+export function currentValidationReason(
+	result: ValidationResult,
+	reason: string,
+): string {
+	return reason;
+}
+
 export const SIGNAL_SEVERITIES = ["baja", "media", "alta"] as const;
 export type SignalSeverity = (typeof SIGNAL_SEVERITIES)[number];
 export type SignalSource =

@@ -83,7 +83,7 @@ export function selectInsuranceProvider(
 
 		return {
 			provider: "gyt",
-			customerInsuranceCost: universalesCost,
+			customerInsuranceCost: gytCost,
 			internalInsuranceCost: gytCost,
 			insuranceSavingsToMembership: savings,
 			effectiveMembershipCost: roundMoney(input.membershipCost + savings),

@@ -16,7 +16,7 @@ import {
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
 import { documensoService } from './DocumensoService';
 import { WeeTrustService } from './WeeTrustService';
-import { SignatureLayoutError } from './signaturePatterns';
+import { firmantesEnOrdenDeFirma, SignatureLayoutError } from './signaturePatterns';
 import { crmApiService } from './CrmApiService';
 import { uploadPdfToR2 } from './R2Service';
 
@@ -931,7 +931,10 @@ export class ContractGeneratorService {
                 baseFilename,
                 pdfBuffer,
                 contractType,
-                signers.map((s) => s.email)
+                // Documenso reparte por posición: tiene que recibirlos en el
+                // orden de las líneas de firma, igual que WeeTrust, o el
+                // representante termina firmando en la línea del cliente.
+                firmantesEnOrdenDeFirma(contractType, signers).map((s) => s.email)
               );
 
               signingLinks = signing.signs ?? [];

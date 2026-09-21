@@ -29,7 +29,10 @@ async function prepareDatabase(pool: Pool) {
       asesor_id integer PRIMARY KEY,
       nombre text NOT NULL
     );
-    INSERT INTO cartera.asesores VALUES (7, 'Asesora Uno');
+    INSERT INTO cartera.asesores VALUES
+      (1, 'Asesora 1'),
+      (2, 'Asesora 2'),
+      (7, 'Asesora Uno');
   `);
 	const migration = await Bun.file(migrationUrl).text();
 	const rateMigration = await Bun.file(rateMigrationUrl).text();
@@ -200,6 +203,50 @@ integrationTest("rechaza una fecha de corte fuera del período", async () => {
 				],
 			}),
 		).rejects.toThrow("fecha de corte");
+	} finally {
+		await pool.query("DROP SCHEMA IF EXISTS cartera CASCADE");
+		await pool.end();
+	}
+});
+
+integrationTest("conserva el centavo oficial al filtrar asesores", async () => {
+	const pool = createTestPool();
+	try {
+		await prepareDatabase(pool);
+		await saveOfficialClosure(pool, {
+			periodo: "2026-08-01",
+			fechaCorte: "2026-08-31T23:59:59-06:00",
+			reglaVersion: "finanzas-v1",
+			porcentajeMora: "1.00",
+			fuente: "fixture.xlsx",
+			fuenteHash: "a".repeat(64),
+			rows: [1, 2].map((asesorId) => ({
+				asesorId,
+				asesorNombre: `Asesora ${asesorId}`,
+				capital: "0.45",
+				mora30: "0.45",
+				mora60: "0.00",
+				mora90: "0.00",
+				mora120: "0.00",
+				cantidadMora30: 1,
+				cantidadMora60: 0,
+				cantidadMora90: 0,
+				cantidadMora120: 0,
+			})),
+		});
+
+		await expect(
+			getOfficialClosure(pool, "2026-08-01", [1]),
+		).resolves.toMatchObject({
+			capitalCartera: {
+				total: "0.45",
+				porAsesor: [{ asesorId: 1 }],
+			},
+			moraMensual: {
+				esperado: "0.01",
+				porAsesor: [{ asesorId: 1, esperado: "0.01" }],
+			},
+		});
 	} finally {
 		await pool.query("DROP SCHEMA IF EXISTS cartera CASCADE");
 		await pool.end();

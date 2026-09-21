@@ -272,6 +272,21 @@ describe("summarizeOfficialAdvisorClosure", () => {
 			{ asesorId: 1, nombre: "Asesora 1", esperado: "0.01" },
 			{ asesorId: 2, nombre: "Asesora 2", esperado: "0.00" },
 		]);
+
+		const filtered = summarizeOfficialAdvisorClosure(
+			"2026-08-01",
+			rows,
+			"1.00",
+			[1],
+		);
+		expect(filtered.capitalCartera.total).toBe("0.45");
+		expect(filtered.moraMensual).toEqual({
+			porcentaje: "1.00",
+			esperado: "0.01",
+			porAsesor: [
+				{ asesorId: 1, nombre: "Asesora 1", esperado: "0.01" },
+			],
+		});
 	});
 });
 

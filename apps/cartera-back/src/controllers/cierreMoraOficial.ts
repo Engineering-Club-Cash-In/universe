@@ -199,6 +199,7 @@ export function summarizeOfficialAdvisorClosure(
 	periodo: string,
 	rows: OfficialAdvisorClosureRow[],
 	porcentajeMora: string,
+	asesores?: number[],
 ) {
 	const porcentajeMoraCanonico = parseOfficialMoraRate(porcentajeMora);
 	const sumMoney = (select: (row: OfficialAdvisorClosureRow) => string) =>
@@ -213,11 +214,11 @@ export function summarizeOfficialAdvisorClosure(
 			.plus(row.mora120)
 			.times(rate)
 			.div(100);
-	const expectedTotal = rows.reduce(
+	const globalExpectedTotal = rows.reduce(
 		(sum, row) => sum.plus(expectedFor(row)),
 		new Big(0),
 	);
-	const expectedTotalCents = expectedTotal
+	const expectedTotalCents = globalExpectedTotal
 		.times(100)
 		.round(0, Big.roundHalfUp);
 	const allocations = rows.map((row) => {
@@ -247,6 +248,15 @@ export function summarizeOfficialAdvisorClosure(
 	const expectedCentsByAdvisor = new Map(
 		allocations.map((allocation) => [allocation.asesorId, allocation.cents]),
 	);
+	if (asesores?.length) {
+		const selectedAdvisors = new Set(asesores);
+		rows = rows.filter((row) => selectedAdvisors.has(row.asesorId));
+	}
+	const expectedTotal = rows.reduce(
+		(sum, row) =>
+			sum.plus(expectedCentsByAdvisor.get(row.asesorId) ?? new Big(0)),
+		new Big(0),
+	).div(100);
 
 	return {
 		periodo,
@@ -342,9 +352,8 @@ export async function getOfficialClosure(
          cierre.porcentaje_mora::text
        FROM cartera.cierre_mora_oficial cierre
        WHERE cierre.periodo = $1
-         AND ($2::integer[] IS NULL OR cierre.asesor_id = ANY($2))
        ORDER BY cierre.asesor_nombre`,
-			[periodo, asesores?.length ? asesores : null],
+			[periodo],
 		);
 		if (result.rows.length === 0) return null;
 		return summarizeOfficialAdvisorClosure(
@@ -363,6 +372,7 @@ export async function getOfficialClosure(
 				cantidadMora120: row.cantidad_mora_120,
 			})),
 			result.rows[0].porcentaje_mora,
+			asesores,
 		);
 	} finally {
 		connection.release();

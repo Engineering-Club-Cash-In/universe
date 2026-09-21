@@ -16,7 +16,7 @@ import {
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
 import { documensoService } from './DocumensoService';
 import { WeeTrustService } from './WeeTrustService';
-import { getSignatureMode, SignatureLayoutError } from './signaturePatterns';
+import { firmantesEnOrdenDeFirma, getSignatureMode, SignatureLayoutError } from './signaturePatterns';
 import { crmApiService } from './CrmApiService';
 import { uploadPdfToR2 } from './R2Service';
 
@@ -942,7 +942,10 @@ export class ContractGeneratorService {
                 baseFilename,
                 pdfBuffer,
                 contractType,
-                signers.map((s) => s.email)
+                // Documenso reparte por posición: tiene que recibirlos en el
+                // orden de las líneas de firma, igual que WeeTrust, o el
+                // representante termina firmando en la línea del cliente.
+                firmantesEnOrdenDeFirma(contractType, signers).map((s) => s.email)
               );
 
               signingLinks = signing.signs ?? [];
@@ -1134,6 +1137,25 @@ export class ContractGeneratorService {
 
     try {
       const signatureMode = getSignatureMode(contractType);
+
+      // Los contratos en papel no tienen líneas que contrastar (y el archivo
+      // puede ser un escaneo, sin texto), pero por lo menos tiene que abrir:
+      // si no, un archivo roto quedaba registrado como el contrato.
+      if (signatureMode === 'fisica') {
+        try {
+          const paginas = await WeeTrustService.contarPaginas(pdfBuffer);
+          if (paginas === 0) throw new Error('el PDF no tiene páginas');
+        } catch (error) {
+          return {
+            ...respuestaBase,
+            success: false,
+            linkDocument: '',
+            signatureMode,
+            message: 'El archivo no es un PDF válido',
+            error: `No se pudo abrir el PDF: ${errorMessage(error)}`,
+          };
+        }
+      }
 
       // El PDF se guarda siempre, aunque después falle la firma: es el
       // documento que jurídico acaba de subir y perderlo no ayuda a nadie.

@@ -144,12 +144,15 @@ export async function sendContractLinksToLead(params: {
 				)
 		: [];
 
-	/** contractId → (email en minúsculas → link) */
-	const linksPorContrato = new Map<string, Map<string, string>>();
+	/**
+	 * contractId → (email en minúsculas → link). El link puede ser null: la
+	 * persona firma ese contrato pero WeeTrust no devolvió su enlace. Se guarda
+	 * igual para que el contrato aparezca en el envío manual y se pueda pegar.
+	 */
+	const linksPorContrato = new Map<string, Map<string, string | null>>();
 	for (const f of firmantes) {
-		if (!f.signingUrl) continue;
 		const porEmail = linksPorContrato.get(f.contractId) ?? new Map();
-		porEmail.set(f.email.toLowerCase(), f.signingUrl);
+		porEmail.set(f.email.toLowerCase(), f.signingUrl ?? null);
 		linksPorContrato.set(f.contractId, porEmail);
 	}
 
@@ -221,23 +224,28 @@ export async function sendContractLinksToLead(params: {
 		const susContratos = contratosDeFirma
 			.map((c) => {
 				const porEmail = linksPorContrato.get(c.id);
-				const propio = destinatario.email
-					? (porEmail?.get(destinatario.email.toLowerCase()) ?? null)
-					: null;
-				const link =
-					propio ??
-					(!porEmail && destinatario.leadId ? c.clientSigningLink : null);
+				const clave = destinatario.email?.toLowerCase();
+				const firmaEste = Boolean(clave && porEmail?.has(clave));
+				const legado =
+					!porEmail && destinatario.leadId ? c.clientSigningLink : null;
 
 				return {
 					contractName: c.contractName,
-					link,
+					link: firmaEste ? (porEmail?.get(clave as string) ?? null) : legado,
 					pdfLink: pdfResueltos.get(c.id) ?? null,
+					esSuyo: firmaEste || Boolean(legado),
 				};
 			})
-			.filter((c) => c.link);
+			.filter((c) => c.esSuyo)
+			.map(({ esSuyo: _, ...c }) => c);
 
+		// Si a alguno de SUS contratos le falta el enlace, no se manda nada: un
+		// mensaje con la mitad de los contratos queda marcado como enviado y el
+		// que falta no lo vuelve a buscar nadie. Queda pendiente para mandarlo a
+		// mano, con el hueco a la vista.
+		const sinEnlace = susContratos.filter((c) => !c.link);
 		const mensaje =
-			susContratos.length > 0
+			susContratos.length > 0 && sinEnlace.length === 0
 				? buildContractLinksMessage(
 						destinatario.nombre,
 						susContratos as ContractLink[],
@@ -257,6 +265,8 @@ export async function sendContractLinksToLead(params: {
 			motivo = "Servicio de mensajería no configurado";
 		} else if (contratosDeFirma.length === 0) {
 			motivo = "No hay contratos con firma electrónica";
+		} else if (sinEnlace.length > 0) {
+			motivo = `Falta el enlace de firma de: ${sinEnlace.map((c) => c.contractName).join(", ")}`;
 		} else if (!mensaje) {
 			motivo = destinatario.email
 				? "No tiene links de firma en estos contratos"
@@ -294,7 +304,11 @@ export async function sendContractLinksToLead(params: {
 			leadId: destinatario.leadId,
 			coDebtorId: destinatario.coDebtorId,
 			recipientName: destinatario.nombre,
-			phone: telefonoDestino,
+			// El teléfono REAL, también en modo prueba. El envío manual arranca con
+			// este número y lo guarda en el lead o el codeudor: si acá quedara el de
+			// prueba, reintentar sin tocarlo le pisaba el teléfono al cliente con
+			// uno nuestro. El desvío queda anotado en `reason`.
+			phone: destinatario.phone,
 			message: mensaje,
 			contracts: susContratos,
 			status,
@@ -550,11 +564,15 @@ export const messagingRouter = {
 				completeContracts,
 			);
 
-			// Enviar por WhatsApp
+			// Enviar por WhatsApp. TEST_MESSAGE rige también el envío manual: si
+			// no, reintentar desde la ficha en modo prueba le escribía al cliente.
+			const modoPrueba = isTestModeEnabled();
 			const sendResult = await sendWhatsappTemplate({
-				phone: input.phone,
+				phone: modoPrueba ? getTestPhone() : input.phone,
 				message,
-				logPrefix: "[SimpleTech][manual]",
+				logPrefix: modoPrueba
+					? "[SimpleTech][manual][TEST]"
+					: "[SimpleTech][manual]",
 			});
 			const status: "sent" | "failed" = sendResult.success ? "sent" : "failed";
 			const reason: string | null = sendResult.success

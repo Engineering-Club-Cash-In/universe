@@ -22,6 +22,7 @@ import {
 import {
 	SignatureLayoutError,
 	getSignaturePattern,
+	firmantesEnOrdenDeFirma,
 	resolveSignerOrder,
 } from "./signaturePatterns";
 
@@ -886,8 +887,8 @@ export class WeeTrustService {
 		// Mandar a alguien sin línea de firma asignada hace que WeeTrust rechace
 		// el envío entero con "<email> undefined".
 		const porEmail = new Map<string, ContractSigner>();
-		for (const s of resolveSignerOrder(contractType, signers)) {
-			if (!porEmail.has(s.email)) porEmail.set(s.email, s);
+		for (const s of firmantesEnOrdenDeFirma(contractType, signers)) {
+			porEmail.set(s.email, s);
 		}
 
 		const signatory: WeeTrustSignatory[] = [...porEmail.values()].map(
@@ -1157,6 +1158,19 @@ export class WeeTrustService {
 				viewport: { width: linea.pageWidth, height: linea.pageHeight },
 			};
 		});
+	}
+
+	/**
+	 * Cuántas páginas tiene el PDF. Lanza si el archivo no se puede abrir.
+	 *
+	 * Sirve para rechazar un archivo roto aunque no haya líneas de firma que
+	 * revisar, como en los contratos que se firman en papel.
+	 */
+	static async contarPaginas(pdfBuffer: Buffer): Promise<number> {
+		const pdfDocument = await pdfjsLib.getDocument({
+			data: new Uint8Array(pdfBuffer),
+		}).promise;
+		return pdfDocument.numPages;
 	}
 
 	/**

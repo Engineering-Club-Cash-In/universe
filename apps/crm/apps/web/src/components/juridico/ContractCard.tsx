@@ -69,6 +69,8 @@ interface ContractCardProps {
 		representativeSigningLink: string | null;
 		additionalSigningLinks: string[] | null;
 		pdfLink?: string | null;
+		/** `documenso` cuando WeeTrust falló y se usó el fallback. */
+		signingProvider?: string | null;
 		status: "pending" | "signed" | "cancelled";
 		generatedAt: Date | string;
 		opportunityId: string | null;
@@ -123,6 +125,9 @@ export function ContractCard({
 	// Este contrato se imprime y se firma a mano: que no tenga links no es que
 	// haya fallado, y mostrarlo como "Pendiente" hacía que jurídico lo buscara.
 	const firmaEnPapel = esFirmaFisica(contract.contractType);
+	// Los contratos que cayeron al fallback de Documenso no tienen documento en
+	// WeeTrust: consultar o reenviar sólo devolvería un error.
+	const enWeeTrust = contract.signingProvider !== "documenso";
 
 	// Cada firmante trae su rol. El bloque anterior leía tres columnas fijas y
 	// rotulaba como "Representante" al que estuviera segundo, que con cofirmante
@@ -329,7 +334,7 @@ export function ContractCard({
 				)}
 
 				{/* Estado de firma y reintentos, sin salir del CRM */}
-				{!firmaEnPapel && firmantes.length > 0 && (
+				{!firmaEnPapel && enWeeTrust && firmantes.length > 0 && (
 					<div className="space-y-2 rounded-lg border border-border p-3">
 						<div className="flex flex-wrap gap-2">
 							<Button

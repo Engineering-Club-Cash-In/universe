@@ -1,8 +1,12 @@
 import {
 	isRejectionEligibleSignal,
-	MIN_AI_REJECTION_CONFIDENCE,
+	MIN_DOCUMENT_TYPE_REJECTION_CONFIDENCE,
 } from "./ruleset";
-import type { Signal, ValidationResult } from "./types";
+import {
+	currentValidationResult,
+	type Signal,
+	type ValidationResult,
+} from "./types";
 
 const ISSUER_LABELS: Record<string, string> = {
 	banrural: "Banrural",
@@ -37,74 +41,63 @@ export function buildDocumentRecommendedAction(params: {
 		| "evidence"
 	>[];
 }): string {
-	const pageSignals =
-		params.result === "rechazado"
-			? params.signals.filter(isRejectionEligibleSignal)
-			: params.signals.filter((signal) => signal.weight > 0);
-	const pages = [
-		...new Set(
-			pageSignals
-				.filter((signal) => typeof signal.page === "number" && signal.page > 0)
-				.map((signal) => signal.page as number),
-		),
-	].sort((left, right) => left - right);
-	const pageText =
-		pages.length > 0
-			? ` la${pages.length === 1 ? "" : "s"} página${pages.length === 1 ? "" : "s"} ${pages.join(", ")}`
+	const result = currentValidationResult(params.result);
+	const pageTextFor = (signals: typeof params.signals) => {
+		const pages = [
+			...new Set(
+				signals
+					.filter(
+						(signal) => typeof signal.page === "number" && signal.page > 0,
+					)
+					.map((signal) => signal.page as number),
+			),
+		].sort((a, b) => a - b);
+		return pages.length
+			? `la${pages.length === 1 ? "" : "s"} página${pages.length === 1 ? "" : "s"} ${pages.join(", ")}`
 			: null;
-
-	switch (params.result) {
-		case "valido":
-			return "El documento puede continuar al análisis de capacidad de pago.";
-		case "observacion":
-			return pageText
-				? `Verifica${pageText} antes de continuar.`
-				: "Puedes continuar, tomando en cuenta las observaciones indicadas.";
-		case "revision_manual":
-			if (
-				params.signals.some(
-					(signal) => signal.code === "captura_con_legibilidad_insuficiente",
-				)
-			)
-				return "Solicita el PDF original o una foto frontal y nítida para comprobar el contenido ilegible y revisa las demás alertas; solo un supervisor puede aprobarlo con justificación.";
-			if (
-				params.signals.some(
-					(signal) => signal.code === "captura_impide_verificar_alineacion",
-				)
-			) {
-				const alignmentPages = [
-					...new Set(
-						params.signals
-							.filter(
-								(signal) =>
-									signal.code === "captura_impide_verificar_alineacion" &&
-									typeof signal.page === "number" &&
-									signal.page > 0,
-							)
-							.map((signal) => signal.page as number),
-					),
-				].sort((left, right) => left - right);
-				const alignmentPageText =
-					alignmentPages.length > 0
-						? ` de la${alignmentPages.length === 1 ? "" : "s"} página${alignmentPages.length === 1 ? "" : "s"} ${alignmentPages.join(", ")}`
-						: "";
-				return `${pageText ? `Revisa${pageText}. ` : "Revisa las señales del documento completo. "}Solicita el PDF original o una foto frontal y nítida para comprobar la alineación${alignmentPageText} y revisa las demás alertas, si existen; solo un supervisor puede aprobarlo con justificación.${params.signals.some((signal) => signal.code === "errores_ortograficos") ? " Verifica también con el banco las faltas de ortografía." : ""}`;
-			}
-			if (
-				params.signals.some((signal) => signal.code === "errores_ortograficos")
-			) {
-				return `${pageText ? `Revisa${pageText}. ` : "Revisa las señales del documento completo. "}Verifica con el banco si las faltas de ortografía provienen del documento original y revisa las demás alertas, si existen; solo un supervisor puede aprobarlo con justificación.`;
-			}
-			return pageText
-				? `Revisa${pageText}. Si no puedes confirmar su legitimidad, solicita un nuevo estado de cuenta; solo un supervisor puede aprobarlo con justificación.`
-				: "Revisa las señales del documento completo. Si no puedes confirmar su legitimidad, solicita un nuevo estado de cuenta; solo un supervisor puede aprobarlo con justificación.";
-		case "rechazado":
-			return pageText
-				? `Solicita un nuevo estado de cuenta que reemplace el contenido inválido de${pageText} y realiza una nueva validación documental.`
-				: "Solicita un nuevo estado de cuenta válido y realiza una nueva validación documental antes de continuar.";
-		case "error":
-			return "Vuelve a intentar la validación. Si el error persiste, solicita un nuevo archivo PDF.";
+	};
+	if (result === "error")
+		return "Vuelve a intentar la validación. Si el error persiste, solicita un archivo PDF que pueda inspeccionarse.";
+	if (result === "rechazado") {
+		const pages = pageTextFor(params.signals.filter(isRejectionEligibleSignal));
+		return pages
+			? `Solicita un nuevo estado de cuenta que reemplace el contenido inválido de ${pages} y realiza una nueva validación documental.`
+			: "Solicita un nuevo estado de cuenta válido y realiza una nueva validación documental antes de continuar.";
 	}
+	if (result === "revision_manual")
+		return "Esta validación histórica requiere volver a cargar los documentos y realizar una nueva validación antes de continuar.";
+	const advice = ["Puedes continuar al análisis de capacidad de pago."];
+	const weightedPages = pageTextFor(
+		params.signals.filter((signal) => signal.weight > 0),
+	);
+	if (weightedPages)
+		advice.push(
+			`Revisa ${weightedPages} tomando en cuenta las alertas informativas.`,
+		);
+	else if (params.signals.some((signal) => signal.weight > 0))
+		advice.push("Revisa las alertas informativas del documento completo.");
+	const alignmentSignals = params.signals.filter(
+		(signal) => signal.code === "captura_impide_verificar_alineacion",
+	);
+	if (alignmentSignals.length) {
+		const pages = pageTextFor(alignmentSignals);
+		advice.push(
+			`Se recomienda solicitar el PDF original o una foto frontal y nítida para comprobar la alineación${pages ? ` de ${pages}` : ""}.`,
+		);
+	}
+	if (
+		params.signals.some(
+			(signal) => signal.code === "captura_con_legibilidad_insuficiente",
+		)
+	)
+		advice.push(
+			"Se recomienda solicitar el PDF original o una foto frontal y nítida para revisar el contenido ilegible.",
+		);
+	if (params.signals.some((signal) => signal.code === "errores_ortograficos"))
+		advice.push(
+			"Verifica con el banco si las faltas de ortografía provienen del documento original.",
+		);
+	return advice.join(" ");
 }
 
 export function buildDocumentPositiveChecks(params: {
@@ -123,7 +116,7 @@ export function buildDocumentPositiveChecks(params: {
 	if (
 		ai?.corresponde_al_tipo_declarado === true &&
 		typeof ai.confianza_tipo_documento === "number" &&
-		ai.confianza_tipo_documento >= MIN_AI_REJECTION_CONFIDENCE
+		ai.confianza_tipo_documento >= MIN_DOCUMENT_TYPE_REJECTION_CONFIDENCE
 	) {
 		checks.push({
 			code: "tipo_documento_confirmado",

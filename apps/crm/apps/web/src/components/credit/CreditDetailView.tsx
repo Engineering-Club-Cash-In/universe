@@ -60,7 +60,10 @@ import {
 	generateAmortizationTable,
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
-import { DISBURSEMENT_SALE_LABEL } from "@/lib/quotation-display";
+import {
+	DISBURSEMENT_SALE_LABEL,
+	getQuotationInsuranceDisplay,
+} from "@/lib/quotation-display";
 import type { IOpportunity } from "@/routes/crm/opportunities";
 import { client } from "@/utils/orpc";
 
@@ -154,6 +157,8 @@ interface CreditDetailViewProps {
 		extraInsuranceCost?: string | null;
 		extraMembershipCost?: string | null;
 		extraAdminCost?: string | null;
+		idealPaymentDateAdjustment?: string | null;
+		idealPaymentDateAdjustmentDays?: number | null;
 		interestCost?: string | null;
 		rcdpCost?: string | null;
 		vehicleTransferCost?: string | null;
@@ -679,10 +684,26 @@ export function CreditDetailView({
 	// Usar los campos extra* que se guardaron desde el cotizador
 	const gps = Number.parseFloat(quotation?.extraGpsCost || "0");
 	const seguro = Number.parseFloat(quotation?.extraInsuranceCost || "0");
+	const insuranceDisplay = getQuotationInsuranceDisplay({
+		insuranceProvider: quotation?.insuranceProvider,
+		insuranceCost: quotation?.insuranceCost,
+		membershipCost: quotation?.membershipCost,
+		extraInsuranceCost: quotation?.extraInsuranceCost,
+		extraMembershipCost: quotation?.extraMembershipCost,
+	});
 	const insuranceProviderLabel =
-		quotation?.insuranceProvider === "gyt" ? "GyT" : "Universales";
+		insuranceDisplay.insuranceProvider === "gyt" ? "GyT" : "Universales";
 	const membresia = Number.parseFloat(quotation?.extraMembershipCost || "0");
-	const gastosAdminBase = Number.parseFloat(quotation?.extraAdminCost || "600");
+	const gastosAdminTotal = Number.parseFloat(
+		quotation?.extraAdminCost || "600",
+	);
+	const ajusteFechaIdealFinanciado = Number.parseFloat(
+		quotation?.idealPaymentDateAdjustment || "0",
+	);
+	const gastosAdminBase = Math.max(
+		0,
+		gastosAdminTotal - ajusteFechaIdealFinanciado,
+	);
 	const interesAnticipado = Number.parseFloat(quotation?.interestCost || "0");
 	const rcdpTrimestre = Number.parseFloat(quotation?.rcdpCost || "0");
 
@@ -729,6 +750,7 @@ export function CreditDetailView({
 		seguro +
 		membresia +
 		gastosAdminBase +
+		ajusteFechaIdealFinanciado +
 		interesAnticipado +
 		rcdpTrimestre;
 
@@ -1764,6 +1786,25 @@ export function CreditDetailView({
 														: "Q -"}
 												</TableCell>
 											</TableRow>
+											{ajusteFechaIdealFinanciado > 0 && (
+												<TableRow>
+													<TableCell>
+														Ajuste por fecha ideal
+														{quotation?.idealPaymentDateAdjustmentDays
+															? ` (${quotation.idealPaymentDateAdjustmentDays} días)`
+															: ""}
+													</TableCell>
+													<TableCell className="text-center">
+														<Badge variant="default" className="text-xs">
+															SI
+														</Badge>
+													</TableCell>
+													<TableCell className="text-right">-</TableCell>
+													<TableCell className="text-right">
+														{formatCurrency(ajusteFechaIdealFinanciado)}
+													</TableCell>
+												</TableRow>
+											)}
 											<TableRow>
 												<TableCell>Intereses</TableCell>
 												<TableCell className="text-center">
@@ -2323,6 +2364,20 @@ export function CreditDetailView({
 											</TableCell>
 											<TableCell />
 										</TableRow>
+										{ajusteFechaIdealFinanciado > 0 && (
+											<TableRow>
+												<TableCell className="py-2">
+													Ajuste por fecha ideal
+													{quotation?.idealPaymentDateAdjustmentDays
+														? ` (${quotation.idealPaymentDateAdjustmentDays} días)`
+														: ""}
+												</TableCell>
+												<TableCell className="py-2 text-right">
+													{formatCurrency(ajusteFechaIdealFinanciado)}
+												</TableCell>
+												<TableCell />
+											</TableRow>
+										)}
 										<TableRow>
 											<TableCell className="py-2">
 												<div className="flex items-center gap-2">
@@ -2368,6 +2423,7 @@ export function CreditDetailView({
 														rcdpTrimestre +
 														royalty +
 														gastosCombinados +
+														ajusteFechaIdealFinanciado +
 														seguro +
 														gps +
 														subtotalGastosAbogado,
@@ -2388,6 +2444,7 @@ export function CreditDetailView({
 												rcdpTrimestre +
 												royalty +
 												gastosCombinados +
+												ajusteFechaIdealFinanciado +
 												seguro +
 												gps +
 												subtotalGastosAbogado),
@@ -2884,6 +2941,7 @@ export function CreditDetailView({
 													);
 													generateQuotationPdf({
 														creditType: quotation.creditType,
+														insuranceProvider: insuranceDisplay.insuranceProvider,
 														vehicleBrand: quotation.vehicleBrand,
 														vehicleLine: quotation.vehicleLine,
 														vehicleModel: quotation.vehicleModel,
@@ -2897,11 +2955,11 @@ export function CreditDetailView({
 														monthlyPayment: Number(quotation.monthlyPayment),
 														termMonths: quotation.termMonths,
 														interestRate: Number(quotation.interestRate),
-														insuranceCost: Number(quotation.insuranceCost),
+														insuranceCost: insuranceDisplay.insuranceCost,
 														gpsCost: Number(quotation.gpsCost),
 														transferCost: Number(quotation.transferCost),
 														adminCost: Number(quotation.adminCost),
-														membershipCost: Number(quotation.membershipCost),
+														membershipCost: insuranceDisplay.membershipCost,
 														extraCosts: quotation,
 														amortizationTable,
 													});
@@ -3059,10 +3117,10 @@ export function CreditDetailView({
 										<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
 											<div>
 												<Label className="text-muted-foreground text-xs">
-													Seguro
+													Seguro {insuranceProviderLabel}
 												</Label>
 												<p className="font-medium">
-													{formatCurrency(quotation.insuranceCost)}
+													{formatCurrency(insuranceDisplay.insuranceCost)}
 												</p>
 											</div>
 											<div>
@@ -3094,7 +3152,7 @@ export function CreditDetailView({
 													Membresía
 												</Label>
 												<p className="font-medium">
-													{formatCurrency(quotation.membershipCost)}
+													{formatCurrency(insuranceDisplay.membershipCost)}
 												</p>
 											</div>
 										</div>
@@ -3271,7 +3329,7 @@ export function CreditDetailView({
 															0 && (
 															<div>
 																<Label className="text-muted-foreground text-xs">
-																	Seguro (Inicial)
+																	Seguro {insuranceProviderLabel} (Inicial)
 																</Label>
 																<p className="font-medium">
 																	{formatCurrency(quotation.extraInsuranceCost)}

@@ -87,16 +87,13 @@ function firmantesDelContrato(
 	if (esFirmaFisica(contractType)) return undefined;
 	if (!signers || signers.length === 0) return signers;
 
-	const conRepLegal = signers.some((s) => s.role === "REP_LEGAL")
-		? signers
-		: [
-				...signers,
-				{
-					role: "REP_LEGAL" as const,
-					email: REP_LEGAL_EMAIL,
-					name: REP_LEGAL_NOMBRE,
-				},
-			];
+	// El representante legal lo pone siempre el servidor. Si viniera del
+	// navegador, cualquiera podría mandar su propio correo con ese rol y
+	// quedarse con el link de firma de la entidad.
+	const conRepLegal: ContractSigner[] = [
+		...signers.filter((s) => s.role !== "REP_LEGAL"),
+		{ role: "REP_LEGAL", email: REP_LEGAL_EMAIL, name: REP_LEGAL_NOMBRE },
+	];
 
 	// Mismo criterio que usa el envío de WhatsApp para saber a quién le toca cada
 	// enlace. Si no coincidieran, los links quedarían guardados con un correo y se

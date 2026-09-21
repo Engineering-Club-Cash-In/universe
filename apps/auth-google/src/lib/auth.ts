@@ -191,6 +191,31 @@ export const auth = betterAuth({
     cookies: {
       sameSite: env.NODE_ENV === "production" ? "none" : "lax" as const,
     },
+    ipAddress: {
+      // El origen está detrás de Traefik directo, no de Cloudflare. Traefik
+      // sobrescribe esta cabecera; aceptar `cf-connecting-ip` del cliente le
+      // permitiría elegir una cubeta distinta en cada intento.
+      ipAddressHeaders: ["x-forwarded-for"],
+    },
+  },
+  /**
+   * El límite de intentos, explícito y no el default de la librería.
+   *
+   * Better Auth lo prende solo en producción y trae una regla especial para
+   * `/sign-in*`: TRES peticiones por cada 10 segundos por IP, contando también
+   * las que salen bien. Con eso, una oficina detrás de una sola IP pública se
+   * queda sin login en cuanto tres personas entran seguidas —y el cuarto ve un
+   * "Too many requests" que no tiene nada que ver con lo que él hizo.
+   *
+   * Los números de abajo siguen frenando una prueba de contraseñas a fuerza
+   * bruta (20 por minuto no rompe nada) sin castigar a quien solo quiere
+   * entrar. El resto de rutas conserva el default de la librería.
+   */
+  rateLimit: {
+    customRules: {
+      "/sign-in/email": { window: 60, max: 20 },
+      "/sign-in/social": { window: 60, max: 20 },
+    },
   },
   hooks: {
     /**

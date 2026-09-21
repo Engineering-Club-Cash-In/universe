@@ -17,9 +17,10 @@ export type ResetAvailability =
 	| { allowed: false; reason: "processing" | "quota_available" };
 
 export function canApproveDocumentIntegrityValidation(
-	userRole: string,
+	_userRole: string,
 ): boolean {
-	return userRole === "admin" || userRole === "sales_supervisor";
+	// Se conservan los registros de aprobación históricos, sin nuevas aprobaciones.
+	return false;
 }
 
 export function canViewDocumentIntegrityValidationDetail(
@@ -117,7 +118,10 @@ export function isCompleteValidationRun(
 		results.length === expectedDocuments &&
 		results.every(
 			(result) =>
-				!!result.validation && result.validation.autoResult !== "error",
+				!!result.validation &&
+				result.validation.autoResult !== "error" &&
+				result.validation.autoResult !== "revision_manual" &&
+				result.validation.autoResult !== "observacion",
 		)
 	);
 }
@@ -169,16 +173,12 @@ export function uploadedValidationPairsMatch(params: {
 }
 
 export function getPendingManualApprovalCount(
-	validations: Array<{
+	_validations: Array<{
 		autoResult: string;
 		manualApprovalId?: string | null;
 	}>,
 ): number {
-	return validations.filter(
-		(validation) =>
-			validation.autoResult === "revision_manual" &&
-			!validation.manualApprovalId,
-	).length;
+	return 0;
 }
 
 export function getRejectedDocumentCount(
@@ -209,5 +209,5 @@ export function getManualApprovalAvailability(params: {
 		params.latestRunStatus !== "completed"
 	)
 		return { allowed: false, reason: "stale_run" };
-	return { allowed: true };
+	return { allowed: false, reason: "wrong_result" };
 }

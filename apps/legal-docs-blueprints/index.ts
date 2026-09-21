@@ -11,6 +11,32 @@ const weeTrustService = new WeeTrustService();
 
 const PORT = Number(process.env.PORT) || 4000;
 
+/**
+ * Los endpoints que mandan a firmar, borran o reemiten documentos en WeeTrust
+ * sólo los puede llamar el CRM. El generador está en una URL pública y el
+ * `documentID` viaja dentro de cada link de firma: sin esto, cualquier firmante
+ * podía borrar el documento o leer los links de los demás.
+ *
+ * Usa el mismo secreto que el relay del webhook (WEETRUST_RELAY_SECRET), que ya
+ * es compartido entre los dos servicios. Sin configurar, se rechaza todo.
+ */
+function rechazoSinSecretoDelCrm(
+  headers: Record<string, string | undefined>,
+  set: { status?: number | string },
+): { success: false; error: string } | null {
+  const esperado = process.env.WEETRUST_RELAY_SECRET;
+  if (!esperado) {
+    console.error('[auth] WEETRUST_RELAY_SECRET no configurado: se rechaza la llamada');
+    set.status = 503;
+    return { success: false, error: 'No configurado' };
+  }
+  if (headers['x-weetrust-relay-secret'] !== esperado) {
+    set.status = 401;
+    return { success: false, error: 'No autorizado' };
+  }
+  return null;
+}
+
 // ===== ENDPOINTS =====
 
 const app = new Elysia()
@@ -345,7 +371,9 @@ const app = new Elysia()
    *
    * Body: { contractType, pdfBase64, filenamePrefix?, signers?, observers? }
    */
-  .post('/contracts/upload-for-signing', async ({ body, set }) => {
+  .post('/contracts/upload-for-signing', async ({ body, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
     try {
       const { contractType, pdfBase64, filenamePrefix, signers, observers } =
         body as {
@@ -407,7 +435,9 @@ const app = new Elysia()
    * permite eliminarlo ni anularlo. Para esos, lo único posible es dejarlos sin
    * efecto del lado del CRM.
    */
-  .delete('/contracts/document/:documentID', async ({ params, set }) => {
+  .delete('/contracts/document/:documentID', async ({ params, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
     try {
       await weeTrustService.deleteDocument(params.documentID);
       return { success: true, documentID: params.documentID };
@@ -431,7 +461,9 @@ const app = new Elysia()
    *
    * Body: { r2Key, contractType, filenamePrefix?, signers, observers? }
    */
-  .post('/contracts/reissue', async ({ body, set }) => {
+  .post('/contracts/reissue', async ({ body, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
     try {
       const { r2Key, contractType, filenamePrefix, signers, observers } =
         body as {
@@ -478,7 +510,9 @@ const app = new Elysia()
    * Estado de firma de un documento, firmante por firmante. Es un pull: no
    * depende de que los webhooks estén registrados, que hoy no lo están.
    */
-  .get('/contracts/signing-status/:documentID', async ({ params, set }) => {
+  .get('/contracts/signing-status/:documentID', async ({ params, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
     try {
       const documento = await weeTrustService.getDocument(params.documentID);
 
@@ -511,7 +545,9 @@ const app = new Elysia()
    * cuando alguien necesita volver a entrar a verificarse; los firmantes que ya
    * firmaron no se tocan.
    */
-  .put('/contracts/refresh-signing-links/:documentID', async ({ params, set }) => {
+  .put('/contracts/refresh-signing-links/:documentID', async ({ params, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
     try {
       await weeTrustService.refreshSignatureUrls(params.documentID);
 
@@ -545,7 +581,9 @@ const app = new Elysia()
    *
    * Reenvía el correo de invitación a los firmantes pendientes.
    */
-  .put('/contracts/resend-email/:documentID', async ({ params, set }) => {
+  .put('/contracts/resend-email/:documentID', async ({ params, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
     try {
       await weeTrustService.resendEmailToSignatories(params.documentID);
       return { success: true, documentID: params.documentID };

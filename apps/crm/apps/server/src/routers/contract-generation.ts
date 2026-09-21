@@ -32,7 +32,10 @@ import {
 	etiquetaDeMotivo,
 	MOTIVOS_DE_ANULACION_KEYS,
 } from "../lib/contratos-anulacion";
-import { aplicarCorreosDePrueba } from "../lib/contratos-correos-prueba";
+import {
+	aplicarCorreosDePrueba,
+	correosDePruebaFaltantes,
+} from "../lib/contratos-correos-prueba";
 import { REP_LEGAL_EMAIL, REP_LEGAL_NOMBRE } from "../lib/contratos-rep-legal";
 import { esContratoVentaMapeado } from "../lib/contratos-venta";
 import { eqDpi } from "../lib/dpi-lookup";
@@ -82,9 +85,36 @@ const CONTRATOS_OBSERVADORES = (process.env.CONTRATOS_OBSERVADORES || "")
  */
 function firmantesDelContrato(
 	contractType: string,
-	signers: ContractSigner[] | undefined,
+	signersDelFront: ContractSigner[] | undefined,
+	legado?: {
+		emails?: string[];
+		data?: {
+			nombreCompleto?: unknown;
+			deudoresAdicionales?: { nombreCompleto?: string }[];
+		};
+	},
 ): ContractSigner[] | undefined {
 	if (esFirmaFisica(contractType)) return undefined;
+
+	// Los snapshots viejos sólo guardaron `emails`. Se convierten acá, igual que
+	// lo hacía el generador (titular y después cofirmantes), para que pasen por
+	// lo mismo que los nuevos: rep legal del servidor y correos de prueba. Si se
+	// le mandaban crudos al generador, en modo prueba salían con los correos
+	// reales del cliente.
+	const signers: ContractSigner[] | undefined = signersDelFront?.length
+		? signersDelFront
+		: legado?.emails?.map((email, i) => {
+				const nombre =
+					i === 0
+						? legado.data?.nombreCompleto
+						: legado.data?.deudoresAdicionales?.[i - 1]?.nombreCompleto;
+				return {
+					role: i === 0 ? ("TITULAR" as const) : ("COFIRMANTE" as const),
+					email,
+					name: typeof nombre === "string" && nombre ? nombre : email,
+				};
+			});
+
 	if (!signers || signers.length === 0) return signers;
 
 	// El representante legal lo pone siempre el servidor. Si viniera del
@@ -98,9 +128,17 @@ function firmantesDelContrato(
 	// Mismo criterio que usa el envío de WhatsApp para saber a quién le toca cada
 	// enlace. Si no coincidieran, los links quedarían guardados con un correo y se
 	// buscarían con otro, y nadie recibiría el suyo. Ya pasó.
-	return isTestModeEnabled()
-		? aplicarCorreosDePrueba(conRepLegal)
-		: conRepLegal;
+	if (!isTestModeEnabled()) return conRepLegal;
+
+	// En modo prueba se corta si algún firmante externo se quedaría con su
+	// correo real: es preferible un error a mandarle el contrato al cliente.
+	const faltan = correosDePruebaFaltantes(conRepLegal);
+	if (faltan.length > 0) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `TEST_MESSAGE=true pero falta configurar ${faltan.join(" y ")}: los enlaces de firma saldrían a los correos reales del cliente.`,
+		});
+	}
+	return aplicarCorreosDePrueba(conRepLegal);
 }
 
 /**
@@ -260,6 +298,9 @@ async function exigirEtapaQuePermiteReemplazo(
  * - **Nadie lo firmó**: se borra en WeeTrust y se borra la fila. Dejarlo vivo
  *   allá significa que alguien todavía puede entrar por el link viejo y firmar
  *   un documento que ya descartamos.
+ * - **No se pudo borrar allá** (WeeTrust falló): la fila se conserva anulada,
+ *   con el aviso en el motivo. Es lo único que dice cuál es el documento viejo,
+ *   que sigue vivo con sus links hasta que alguien lo borre a mano.
  * - **Ya lo firmaron**: WeeTrust NO permite borrarlo (queda en su blockchain y
  *   su API no tiene endpoint para anular). La fila se conserva marcada como
  *   anulada, con el motivo: ese PDF firmado existe para siempre y borrar su
@@ -284,13 +325,16 @@ async function anularContratoReemplazado(
 	if (!viejo) return null;
 
 	const tieneFirmas = viejo.status === "signed";
+	let borradoAlla = !viejo.weetrustDocumentId;
 
 	if (!tieneFirmas && viejo.weetrustDocumentId) {
 		try {
 			await borrarDocumentoDeWeeTrust(viejo.weetrustDocumentId);
+			borradoAlla = true;
 		} catch (error) {
-			// Que no se pueda borrar allá no debe frenar el reemplazo: el documento
-			// nuevo ya está enviado y es el bueno. Queda en el log.
+			// Que no se pueda borrar allá no frena el reemplazo: el documento nuevo
+			// ya está enviado y es el bueno. Pero la fila NO se borra: es lo único
+			// que dice cuál es el documento viejo, que sigue vivo con sus links.
 			console.error(
 				`[anularContratoReemplazado] no se pudo borrar ${viejo.weetrustDocumentId} en WeeTrust:`,
 				error,
@@ -298,12 +342,14 @@ async function anularContratoReemplazado(
 		}
 	}
 
-	if (tieneFirmas) {
+	if (tieneFirmas || !borradoAlla) {
 		await db
 			.update(generatedLegalContracts)
 			.set({
 				status: "cancelled",
-				cancellationReason: etiquetaDeMotivo(motivo),
+				cancellationReason: borradoAlla
+					? etiquetaDeMotivo(motivo)
+					: `${etiquetaDeMotivo(motivo)} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`,
 				cancelledAt: new Date(),
 				updatedAt: new Date(),
 			})
@@ -786,7 +832,10 @@ export const contractGenerationRouter = {
 					signers: firmantesDelContrato(
 						contract.contractType,
 						contract.signers,
+						contract,
 					),
+					// Ya van convertidos en `signers`.
+					emails: undefined,
 					observers: esFirmaFisica(contract.contractType)
 						? undefined
 						: CONTRATOS_OBSERVADORES,
@@ -1248,13 +1297,14 @@ export const contractGenerationRouter = {
 					return {
 						...contract,
 						data: newData,
-						// Los snapshots viejos sólo guardaron `emails`; el generador los
-						// sigue aceptando, pero los que ya traen roles se regeneran con
-						// el reparto correcto.
+						// Los snapshots viejos sólo guardaron `emails`: se convierten a
+						// firmantes con rol para que pasen por el mismo camino.
 						signers: firmantesDelContrato(
 							contract.contractType,
 							contract.signers,
+							{ emails: contract.emails, data: newData },
 						),
+						emails: undefined,
 						observers: esFirmaFisica(contract.contractType)
 							? undefined
 							: CONTRATOS_OBSERVADORES,

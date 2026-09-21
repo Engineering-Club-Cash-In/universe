@@ -32,6 +32,32 @@ export function hayCorreosDePrueba(): boolean {
 }
 
 /**
+ * Qué variables faltan para cubrir a TODOS los firmantes externos.
+ *
+ * Con una sola configurada, el rol de la otra se quedaba con su correo real y
+ * le llegaba una invitación de WeeTrust de producción. Quien arma los firmantes
+ * usa esto para cortar antes de mandar nada.
+ */
+export function correosDePruebaFaltantes(
+	personas: { role: string }[],
+): string[] {
+	const faltan: string[] = [];
+	if (
+		personas.some((p) => p.role === "TITULAR") &&
+		!CONTRATOS_TEST_EMAIL_TITULAR
+	) {
+		faltan.push("CONTRATOS_TEST_EMAIL_TITULAR");
+	}
+	if (
+		personas.some((p) => p.role === "COFIRMANTE") &&
+		CONTRATOS_TEST_EMAIL_COFIRMANTES.length === 0
+	) {
+		faltan.push("CONTRATOS_TEST_EMAIL_COFIRMANTES");
+	}
+	return faltan;
+}
+
+/**
  * Cambia los correos por los de prueba, respetando el rol.
  *
  * El representante legal no se toca: su correo ya sale de una env

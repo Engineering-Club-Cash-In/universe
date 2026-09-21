@@ -510,6 +510,10 @@ export function OpportunityDetailModal({
 							<OpportunityContractsCard
 								contracts={opportunityContractsQuery.data}
 								isLoading={opportunityContractsQuery.isLoading}
+								puedeRegenerar={
+									!!userRole &&
+									PERMISSIONS.canRegenerateContractLinks(userRole)
+								}
 								onUpdate={() => opportunityContractsQuery.refetch()}
 							/>
 						)}

@@ -2784,6 +2784,9 @@ function RouteComponent() {
 										<OpportunityContractsCard
 											contracts={opportunityContractsQuery.data}
 											isLoading={opportunityContractsQuery.isLoading}
+											puedeRegenerar={PERMISSIONS.canRegenerateContractLinks(
+												userProfile.data.role,
+											)}
 											onUpdate={() => opportunityContractsQuery.refetch()}
 										/>
 									)}

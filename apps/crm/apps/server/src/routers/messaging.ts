@@ -121,7 +121,13 @@ export async function sendContractLinksToLead(params: {
 			pdfLink: generatedLegalContracts.pdfLink,
 		})
 		.from(generatedLegalContracts)
-		.where(eq(generatedLegalContracts.opportunityId, params.opportunityId));
+		.where(
+			and(
+				eq(generatedLegalContracts.opportunityId, params.opportunityId),
+				// Un anulado quedó reemplazado: sus enlaces no se mandan.
+				ne(generatedLegalContracts.status, "cancelled"),
+			),
+		);
 
 	// Los contratos de papel no llevan link: mandarlos sólo confunde.
 	const contratosDeFirma = contracts.filter(
@@ -411,6 +417,7 @@ export const messagingRouter = {
 						// Los de papel no llevan link: incluirlos hacía que
 						// `allContractsHaveLink` fuera siempre falso.
 						ne(generatedLegalContracts.signatureMode, "fisica"),
+						ne(generatedLegalContracts.status, "cancelled"),
 					),
 				);
 

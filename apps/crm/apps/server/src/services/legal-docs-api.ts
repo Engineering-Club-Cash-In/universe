@@ -380,6 +380,17 @@ export interface EstadoDocumentoFirma {
 	error?: string;
 }
 
+/**
+ * Cabecera que exige el generador en los endpoints que mandan a firmar, borran
+ * o reemiten documentos en WeeTrust. Es el mismo secreto que usa el generador
+ * para avisarnos el estado de firma (`WEETRUST_RELAY_SECRET`).
+ */
+function secretoParaElGenerador(): Record<string, string> {
+	return {
+		"x-weetrust-relay-secret": process.env.WEETRUST_RELAY_SECRET || "",
+	};
+}
+
 async function pedirAlGenerador<T>(
 	ruta: string,
 	method: "GET" | "PUT",
@@ -390,6 +401,7 @@ async function pedirAlGenerador<T>(
 		headers: {
 			"Content-Type": "application/json",
 			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+			...secretoParaElGenerador(),
 		},
 	});
 
@@ -451,6 +463,7 @@ export async function subirContratoParaFirma(payload: {
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+				...secretoParaElGenerador(),
 			},
 			body: JSON.stringify(payload),
 		},
@@ -492,6 +505,7 @@ export async function borrarDocumentoDeWeeTrust(
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+				...secretoParaElGenerador(),
 			},
 		},
 	);
@@ -523,6 +537,7 @@ export async function reemitirContratoEnWeeTrust(payload: {
 		headers: {
 			"Content-Type": "application/json",
 			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+			...secretoParaElGenerador(),
 		},
 		body: JSON.stringify(payload),
 	});

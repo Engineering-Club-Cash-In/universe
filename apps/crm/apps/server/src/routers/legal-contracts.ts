@@ -1239,7 +1239,16 @@ export const legalContractsRouter = {
 				motivo: z.enum(MOTIVOS_DE_ANULACION_KEYS),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// Ver los contratos lo puede hacer ventas o contabilidad; regenerar no:
+			// crea otro documento en WeeTrust y deja sin efecto los enlaces que la
+			// gente ya tenía. Es de análisis.
+			if (!PERMISSIONS.canRegenerateContractLinks(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "Sólo análisis puede regenerar los enlaces de firma",
+				});
+			}
+
 			const [contract] = await db
 				.select()
 				.from(generatedLegalContracts)
@@ -1252,6 +1261,14 @@ export const legalContractsRouter = {
 			if (contract.signatureMode === "fisica") {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "Este contrato se firma en papel: no tiene enlaces.",
+				});
+			}
+
+			// Un contrato anulado quedó reemplazado por otro. Reemitirlo lo
+			// resucitaría con enlaces nuevos al lado del que lo reemplazó.
+			if (contract.status === "cancelled") {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Este contrato está anulado: no se puede regenerar.",
 				});
 			}
 

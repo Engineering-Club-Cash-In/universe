@@ -48,6 +48,8 @@ interface ContratoDeOportunidad {
 	signingStatusCheckedAt?: Date | string | null;
 	/** Enlace de observador: ver el documento y su avance sin poder firmar. */
 	observerUrl?: string | null;
+	/** `documenso` cuando WeeTrust falló y se usó el fallback. */
+	signingProvider?: string | null;
 }
 
 export interface FilaDeContrato {
@@ -58,6 +60,11 @@ export interface FilaDeContrato {
 interface OpportunityContractsCardProps {
 	contracts: FilaDeContrato[] | undefined;
 	isLoading?: boolean;
+	/**
+	 * Si quien mira puede regenerar enlaces. Es de análisis: ventas y
+	 * contabilidad ven la card pero no ese botón.
+	 */
+	puedeRegenerar?: boolean;
 	/** Se llama cuando cambia el estado, para refrescar la lista. */
 	onUpdate?: () => void;
 }
@@ -82,6 +89,7 @@ const ESTADO = {
 export function OpportunityContractsCard({
 	contracts,
 	isLoading = false,
+	puedeRegenerar = false,
 	onUpdate,
 }: OpportunityContractsCardProps) {
 	return (
@@ -110,6 +118,7 @@ export function OpportunityContractsCard({
 						<ContratoFila
 							key={fila.contract.id}
 							fila={fila}
+							puedeRegenerar={puedeRegenerar}
 							onUpdate={onUpdate}
 						/>
 					))}
@@ -128,9 +137,11 @@ export function OpportunityContractsCard({
  */
 function ContratoFila({
 	fila,
+	puedeRegenerar: tienePermiso,
 	onUpdate,
 }: {
 	fila: FilaDeContrato;
+	puedeRegenerar: boolean;
 	onUpdate?: () => void;
 }) {
 	const { contract, signatories } = fila;
@@ -146,7 +157,15 @@ function ContratoFila({
 	// es el caso en que la firma existe pero no sirve (por ejemplo, una
 	// identificación que no era la del cliente). También si algún enlace venció,
 	// que si no dejaría a esa persona sin forma de firmar.
-	const puedeRegenerar = alguienFirmo || hayVencidos;
+	// Los que cayeron al fallback de Documenso no tienen documento en WeeTrust:
+	// consultar o regenerar sólo devolvería un error.
+	const enWeeTrust = contract.signingProvider !== "documenso";
+	// Un anulado ya fue reemplazado por otro: reemitirlo lo resucitaría.
+	const puedeRegenerar =
+		tienePermiso &&
+		enWeeTrust &&
+		contract.status !== "cancelled" &&
+		(alguienFirmo || hayVencidos);
 
 	const actualizarEstado = useMutation({
 		mutationFn: () =>
@@ -325,7 +344,7 @@ function ContratoFila({
 						    el documento está cerrado. Acá sólo se regeneran enlaces del
 						    MISMO documento; reemplazarlo por otro es de jurídico y vive
 						    en su ficha. */}
-						{!todosFirmaron && (
+						{enWeeTrust && !todosFirmaron && (
 							<Button
 								variant="ghost"
 								size="sm"

@@ -254,6 +254,11 @@ export const PERMISSIONS = {
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 
 	// Confirm contracts have been signed (85% → 90%)
+	// Regenerar los enlaces de firma crea otro documento en WeeTrust y deja sin
+	// efecto los enlaces anteriores. Es de análisis, no de quien sólo los mira.
+	canRegenerateContractLinks: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST,
+
 	canConfirmContractsSigning: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||

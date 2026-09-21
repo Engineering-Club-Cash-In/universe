@@ -19,7 +19,6 @@ import {
 	resolveLegacyContractGender,
 } from "../lib/contract-generation-gender";
 import {
-	alguienFirmo,
 	type FirmanteEnviado,
 	filasDeFirmantes,
 	linksPorRol,
@@ -33,6 +32,7 @@ import {
 	etiquetaDeMotivo,
 	MOTIVOS_DE_ANULACION_KEYS,
 } from "../lib/contratos-anulacion";
+import { tieneFirmas } from "../lib/contrato-estado-firma";
 import {
 	aplicarCorreosDePrueba,
 	correosDePruebaFaltantes,
@@ -358,7 +358,8 @@ async function anularContratoReemplazado(
 	// se borra igual (si no, los que faltan seguirían pudiendo firmar un
 	// documento reemplazado), pero la fila se conserva: dice quién ya firmó.
 	const completo = viejo.status === "signed";
-	const tieneFirmas = completo || (await alguienFirmo(contractId));
+	const conFirmas =
+		completo || (await tieneFirmas(contractId, viejo.weetrustDocumentId));
 	let borradoAlla = !viejo.weetrustDocumentId;
 
 	if (!completo && viejo.weetrustDocumentId) {
@@ -376,14 +377,14 @@ async function anularContratoReemplazado(
 		}
 	}
 
-	if (tieneFirmas || !borradoAlla) {
+	if (conFirmas || !borradoAlla) {
 		await db
 			.update(generatedLegalContracts)
 			.set({
 				status: "cancelled",
 				cancellationReason: !borradoAlla
 					? `${etiquetaDeMotivo(motivo)} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`
-					: tieneFirmas && !completo
+					: conFirmas && !completo
 						? `${etiquetaDeMotivo(motivo)} (tenía firmas parciales; el documento se borró en WeeTrust)`
 						: etiquetaDeMotivo(motivo),
 				cancelledAt: new Date(),

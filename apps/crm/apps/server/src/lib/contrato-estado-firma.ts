@@ -4,7 +4,11 @@ import {
 	contractSignatories,
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
-import type { EstadoDocumentoFirma } from "../services/legal-docs-api";
+import {
+	consultarEstadoFirma,
+	type EstadoDocumentoFirma,
+} from "../services/legal-docs-api";
+import { alguienFirmo } from "./contract-signatories";
 
 /**
  * Baja a la base lo que WeeTrust dice de un documento.
@@ -122,4 +126,35 @@ export async function contratoPorDocumentID(documentID: string) {
 		.limit(1);
 
 	return contrato ?? null;
+}
+
+/**
+ * Si alguien ya firmó, preguntándole a WeeTrust y no sólo a la base.
+ *
+ * Los webhooks pueden no estar registrados y nadie tiene por qué haber
+ * apretado "Actualizar estado": la base puede decir que nadie firmó cuando
+ * en WeeTrust ya hay una firma. Antes de borrar la fila de un contrato (lo
+ * único que dice quién firmó) se consulta en vivo. Si WeeTrust no responde,
+ * se asume que sí firmaron: conservar una fila de más es mejor que perder el
+ * registro de una firma.
+ */
+export async function tieneFirmas(
+	contractId: string,
+	documentID: string | null,
+): Promise<boolean> {
+	if (await alguienFirmo(contractId)) return true;
+	if (!documentID) return false;
+	try {
+		const estado = await consultarEstadoFirma(documentID);
+		return (
+			estado.status === "COMPLETED" ||
+			estado.signatories.some((f) => f.isSigned)
+		);
+	} catch (error) {
+		console.warn(
+			`[tieneFirmas] no se pudo consultar ${documentID}; se conserva la fila por las dudas:`,
+			error,
+		);
+		return true;
+	}
 }

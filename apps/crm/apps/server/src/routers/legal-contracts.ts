@@ -16,13 +16,15 @@ import {
 import { vehicles } from "../db/schema/vehicles";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
-	alguienFirmo,
 	documentIdDesdeLink,
 	filasDeFirmantes,
 	linksPorRol,
 } from "../lib/contract-signatories";
 import { getSignatureMode } from "../lib/contract-signature-mode";
-import { sincronizarEstadoDeFirma } from "../lib/contrato-estado-firma";
+import {
+	sincronizarEstadoDeFirma,
+	tieneFirmas,
+} from "../lib/contrato-estado-firma";
 import {
 	type AccionSobreContrato,
 	ETAPAS_POR_ACCION,
@@ -1521,7 +1523,8 @@ export const legalContractsRouter = {
 			// - Si el borrado falla: fila anulada, con el aviso de borrarlo a mano.
 			const completo = contract.status === "signed";
 			const conFirmasParciales =
-				!completo && (await alguienFirmo(input.contractId));
+				!completo &&
+				(await tieneFirmas(input.contractId, contract.weetrustDocumentId));
 			let conservado = completo;
 			if (!completo) {
 				try {

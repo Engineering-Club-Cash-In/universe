@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { auditRecord } from "../lib/audit";
@@ -495,7 +495,15 @@ export async function getLeadLegalContracts(c: Context) {
 				opportunities,
 				eq(generatedLegalContracts.opportunityId, opportunities.id),
 			)
-			.where(eq(generatedLegalContracts.leadId, lead.id))
+			.where(
+				and(
+					eq(generatedLegalContracts.leadId, lead.id),
+					// Un contrato reemplazado (o reclamado por un reemplazo que no
+					// terminó) no es el vigente: si se muestra, el cliente puede
+					// firmar el documento descartado.
+					isNull(generatedLegalContracts.replacedByContractId),
+				),
+			)
 			.orderBy(generatedLegalContracts.generatedAt);
 
 		// Generar URLs firmadas temporales para los PDFs

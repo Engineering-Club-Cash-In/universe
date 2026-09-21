@@ -401,17 +401,16 @@ export function resolveSignerOrder(
   }
 
   // El bloque de deudores es el titular seguido de los cofirmantes, en orden.
-  // La declaración de vendedor la firma el vendedor, pero de él sólo tenemos
-  // nombre y DPI: no hay correo al que mandarle un link, así que se firma en
-  // papel. Mientras tanto se cae al comportamiento anterior en vez de romper.
-  const deudoresDelCredito = [
-    ...(titular ? [titular] : []),
-    ...cofirmantes,
-  ];
+  // La declaración de vendedor la firma el vendedor, y de él sólo tenemos
+  // nombre y DPI: se firma en papel y el generador ni siquiera llega acá. Si
+  // igual la mandan a firmar sin vendedor, se corta: darle esa línea al
+  // comprador es ponerlo a declarar algo que no le toca.
   const deudores =
-    contractType === ContractType.DECLARACION_DE_VENDEDOR && vendedor
-      ? [vendedor]
-      : deudoresDelCredito;
+    contractType === ContractType.DECLARACION_DE_VENDEDOR
+      ? vendedor
+        ? [vendedor]
+        : []
+      : [...(titular ? [titular] : []), ...cofirmantes];
 
   const secuencia: ContractSigner[] = [];
   for (let rep = 0; rep < (config.repeticiones ?? 1); rep++) {

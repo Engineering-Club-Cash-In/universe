@@ -1395,6 +1395,27 @@ export const legalContractsRouter = {
 					// abajo borra en WeeTrust el documento que acaba de emitir.
 					// También si jurídico ya lo reclamó para reemplazarlo y todavía no
 					// terminó de anularlo: si no, quedaban dos reemisiones vigentes.
+					// La etapa se vuelve a mirar acá, con la oportunidad bloqueada: la
+					// reemisión en WeeTrust tarda, y si mientras tanto alguien la pasó
+					// a 90% se colaba un contrato pendiente en una oportunidad cerrada.
+					if (contract.opportunityId) {
+						const [etapa] = await tx
+							.select({ porcentaje: salesStages.closurePercentage })
+							.from(opportunities)
+							.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+							.where(eq(opportunities.id, contract.opportunityId))
+							.for("update", { of: opportunities });
+						if (
+							!etapa?.porcentaje ||
+							!ETAPAS_POR_ACCION.regenerar.includes(etapa.porcentaje as never)
+						) {
+							throw new ORPCError("CONFLICT", {
+								message:
+									"La oportunidad cambió de etapa mientras se regeneraba. Ya no se puede regenerar.",
+							});
+						}
+					}
+
 					const [original] = await tx
 						.select({
 							status: generatedLegalContracts.status,

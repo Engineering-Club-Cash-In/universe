@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { coDebtors, leads } from "../db/schema/crm";
@@ -128,6 +128,9 @@ export async function sendContractLinksToLead(params: {
 				// Un anulado (a mano o por reemplazo) no se manda: su documento en
 				// WeeTrust puede seguir vivo y el cliente firmaría uno sin efecto.
 				ne(generatedLegalContracts.status, "cancelled"),
+				// Reclamado por un reemplazo que todavía no terminó de anularlo: ya
+				// no es el vigente, aunque su estado aún no lo diga.
+				isNull(generatedLegalContracts.replacedByContractId),
 			),
 		);
 
@@ -256,7 +259,11 @@ export async function sendContractLinksToLead(params: {
 	// Primero se decide qué le toca a cada uno, sin tocar la red.
 	const planes: Array<{
 		destinatario: DestinatarioDeFirma;
-		susContratos: { contractName: string; link: string | null; pdfLink: string | null }[];
+		susContratos: {
+			contractName: string;
+			link: string | null;
+			pdfLink: string | null;
+		}[];
 		mensaje: string | null;
 		telefonoDestino: string | null;
 		/** Por qué no se le manda. Sin motivo, se le manda. */
@@ -331,7 +338,13 @@ export async function sendContractLinksToLead(params: {
 			motivo = "No tiene teléfono registrado";
 		}
 
-		planes.push({ destinatario, susContratos, mensaje, telefonoDestino, motivo });
+		planes.push({
+			destinatario,
+			susContratos,
+			mensaje,
+			telefonoDestino,
+			motivo,
+		});
 	}
 
 	// Todas las filas se guardan como pendientes ANTES de mandar nada. La
@@ -504,6 +517,7 @@ export const messagingRouter = {
 						// `allContractsHaveLink` fuera siempre falso.
 						ne(generatedLegalContracts.signatureMode, "fisica"),
 						ne(generatedLegalContracts.status, "cancelled"),
+						isNull(generatedLegalContracts.replacedByContractId),
 					),
 				);
 

@@ -9,7 +9,12 @@
 -- Las columnas viejas se dejan: son el único registro de los contratos que ya
 -- están firmándose. Las nuevas se llenan de aquí en adelante.
 
-CREATE TYPE "public"."contract_signatory_status" AS ENUM('pending', 'signed', 'declined');
+-- Todo es idempotente: en dev ya se corrió a mano, y así `db:migrate` puede
+-- pasar por encima sin romper.
+DO $$ BEGIN
+	CREATE TYPE "public"."contract_signatory_status" AS ENUM('pending', 'signed', 'declined');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 --> statement-breakpoint
 ALTER TABLE "public"."generated_legal_contracts" ADD COLUMN IF NOT EXISTS "signing_provider" text;
 --> statement-breakpoint
@@ -33,7 +38,10 @@ CREATE TABLE IF NOT EXISTS "public"."contract_signatories" (
 	CONSTRAINT "contract_signatories_role_valid" CHECK ("role" IN ('TITULAR', 'COFIRMANTE', 'REP_LEGAL', 'VENDEDOR'))
 );
 --> statement-breakpoint
-ALTER TABLE "public"."contract_signatories" ADD CONSTRAINT "contract_signatories_contract_id_fk" FOREIGN KEY ("contract_id") REFERENCES "public"."generated_legal_contracts"("id") ON DELETE cascade ON UPDATE no action;
+DO $$ BEGIN
+	ALTER TABLE "public"."contract_signatories" ADD CONSTRAINT "contract_signatories_contract_id_fk" FOREIGN KEY ("contract_id") REFERENCES "public"."generated_legal_contracts"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "contract_signatories_contract_idx" ON "public"."contract_signatories" USING btree ("contract_id");
 --> statement-breakpoint

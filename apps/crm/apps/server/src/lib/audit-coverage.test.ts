@@ -25,7 +25,7 @@ const INVENTARIO: Record<
 	string,
 	{ escrituras: number; anotaciones: number; estado: Estado; nota?: string }
 > = {
-	"routers/crm.ts": { escrituras: 18, anotaciones: 18, estado: "listo" },
+	"routers/crm.ts": { escrituras: 16, anotaciones: 16, estado: "listo" },
 	"routers/vehicles.ts": { escrituras: 10, anotaciones: 10, estado: "listo" },
 	// Anota una vez más de lo que escribe: el rollback descarta las anotaciones
 	// de la transacción revertida y deja en su lugar el intento fallido.
@@ -41,8 +41,8 @@ const INVENTARIO: Record<
 	},
 	"controllers/bot.ts": { escrituras: 6, anotaciones: 6, estado: "listo" },
 	"controllers/portal-lead.ts": {
-		escrituras: 3,
-		anotaciones: 3,
+		escrituras: 2,
+		anotaciones: 2,
 		estado: "listo",
 	},
 	"routers/auctionVehicles.ts": {
@@ -52,8 +52,8 @@ const INVENTARIO: Record<
 	},
 	"routers/cobros.ts": { escrituras: 3, anotaciones: 3, estado: "listo" },
 	"services/close-opportunity.ts": {
-		escrituras: 3,
-		anotaciones: 3,
+		escrituras: 4,
+		anotaciones: 4,
 		estado: "listo",
 	},
 	"routers/legal-contracts.ts": {

@@ -123,7 +123,8 @@ integrationTest(
 				gps numeric, membresias_pago numeric, usuario_id integer, asesor_id integer
 			);
 			CREATE TABLE cartera.cuotas_credito (
-				cuota_id integer PRIMARY KEY, credito_id integer, fecha_vencimiento date
+				cuota_id integer PRIMARY KEY, credito_id integer, numero_cuota integer,
+				fecha_vencimiento date
 			);
 			CREATE TABLE cartera.pagos_credito (
 				pago_id integer PRIMARY KEY, credito_id integer, cuota_id integer,
@@ -152,14 +153,15 @@ integrationTest(
 				(4, 'MOROSO', 600, 1, 100, 3, 4, 5, 1, 1),
 				(5, 'MOROSO', 600, 1, 100, 3, 4, 5, 1, 1);
 			INSERT INTO cartera.cuotas_credito VALUES
-				(11, 1, '2026-09-15'),
-				(21, 2, '2026-07-15'),
-				(22, 2, '2026-08-15'),
-				(24, 2, '2026-09-05'),
-				(23, 2, '2026-09-15'),
-				(31, 3, '2026-06-15'),
-				(41, 4, '2026-05-15'),
-				(51, 5, '2026-04-15');
+				(11, 1, 1, '2026-09-15'),
+				(21, 2, 1, '2026-07-15'),
+				(22, 2, 2, '2026-08-15'),
+				(24, 2, 3, '2026-09-05'),
+				(23, 2, 4, '2026-09-15'),
+				(31, 3, 1, '2026-06-15'),
+				(40, 4, 1, '2026-05-10'),
+				(41, 4, 1, '2026-05-15'),
+				(51, 5, 1, '2026-04-15');
 			INSERT INTO cartera.pagos_credito VALUES
 				(11, 1, 11, '2026-09-15', 76.80, 0, 10, 0, 1.20, 0, 3, 0, 4, 0, 5, 0, 0, false, false, 'pending', NULL, NULL, 1000),
 				(21, 2, 21, '2026-07-15', 50, 0, 7, 0, 0.84, 0, 2, 0, 1, 0, 3, 0, 0, false, false, 'pending', NULL, NULL, 950),

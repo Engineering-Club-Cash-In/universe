@@ -147,6 +147,27 @@ describe("parseOfficialAdvisorSummaryMatrix", () => {
 			},
 		]);
 	});
+
+	test("rechaza columnas de mora reordenadas", () => {
+		expect(() =>
+			parseOfficialAdvisorSummaryMatrix(
+				[
+					[null, "Datos sin ajustes"],
+					[
+						null,
+						"Asesor",
+						"Capital",
+						"Mora 60",
+						"Mora 30",
+						"Mora 90",
+						"Mora 120",
+					],
+				],
+				[],
+				resolveAdvisorId,
+			),
+		).toThrow("no tiene el formato esperado");
+	});
 });
 
 describe("summarizeOfficialAdvisorClosure", () => {

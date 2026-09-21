@@ -115,6 +115,23 @@ export function parseOfficialAdvisorSummaryMatrix(
 	const advisorColumn = (matrix[headerIndex] ?? []).findIndex(
 		(cell) => String(cell ?? "").trim() === "Asesor",
 	);
+	const expectedHeaders = [
+		"Asesor",
+		"Capital",
+		"Mora 30",
+		"Mora 60",
+		"Mora 90",
+		"Mora 120",
+	];
+	if (
+		expectedHeaders.some(
+			(header, offset) =>
+				String(matrix[headerIndex]?.[advisorColumn + offset] ?? "").trim() !==
+				header,
+		)
+	) {
+		throw new Error("El cuadro Datos sin ajustes no tiene el formato esperado");
+	}
 	const counts = new Map<
 		number,
 		Pick<

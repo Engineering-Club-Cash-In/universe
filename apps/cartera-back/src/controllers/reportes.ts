@@ -147,6 +147,12 @@ export function buildMontoACobrarPeriodoQuery({
         ${pgInterval}
       ) AS bucket
     ),
+    cuotas_autoritativas AS (
+      SELECT DISTINCT ON (q.credito_id, q.numero_cuota)
+        q.cuota_id, q.credito_id, q.numero_cuota, q.fecha_vencimiento
+      FROM cartera.cuotas_credito q
+      ORDER BY q.credito_id, q.numero_cuota, q.cuota_id DESC
+    ),
     pagos_en_rango_base AS (
       SELECT
         pc.credito_id,
@@ -312,7 +318,7 @@ export function buildMontoACobrarPeriodoQuery({
       ) cap_anterior ON true
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS cuotas_atrasadas
-        FROM cartera.cuotas_credito qc_mora
+        FROM cuotas_autoritativas qc_mora
         WHERE qc_mora.credito_id = c.credito_id
           AND qc_mora.fecha_vencimiento::date < GREATEST(DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date, ${fechaInicio}::date)
           AND NOT EXISTS (
@@ -386,7 +392,7 @@ export function buildMontoACobrarPeriodoQuery({
             COALESCE(MIN(pc_a.seguro_restante::numeric), calc.seguro_contractual) AS seguro_restante,
             COALESCE(MIN(pc_a.gps_restante::numeric), calc.gps_contractual) AS gps_restante,
             COALESCE(MIN(pc_a.membresias::numeric), calc.mem_contractual) AS membresias
-          FROM cartera.cuotas_credito q_a
+          FROM cuotas_autoritativas q_a
           LEFT JOIN cartera.pagos_credito pc_a
             ON pc_a.cuota_id = q_a.cuota_id
             AND pc_a."paymentFalse" = false

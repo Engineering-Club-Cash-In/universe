@@ -109,7 +109,14 @@ export async function sendContractLinksToLead(params: {
 			pdfLink: generatedLegalContracts.pdfLink,
 		})
 		.from(generatedLegalContracts)
-		.where(eq(generatedLegalContracts.opportunityId, params.opportunityId));
+		.where(
+			and(
+				eq(generatedLegalContracts.opportunityId, params.opportunityId),
+				// Un anulado (a mano o por reemplazo) no se manda: su documento en
+				// WeeTrust puede seguir vivo y el cliente firmaría uno sin efecto.
+				ne(generatedLegalContracts.status, "cancelled"),
+			),
+		);
 
 	// Los contratos de papel no llevan link: mandarlos sólo confunde.
 	const contratosDeFirma = contracts.filter(
@@ -378,6 +385,7 @@ export const messagingRouter = {
 						// Los de papel no llevan link: incluirlos hacía que
 						// `allContractsHaveLink` fuera siempre falso.
 						ne(generatedLegalContracts.signatureMode, "fisica"),
+						ne(generatedLegalContracts.status, "cancelled"),
 					),
 				);
 

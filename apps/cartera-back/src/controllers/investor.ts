@@ -6898,9 +6898,27 @@ const CUBE_INVESTMENT_ID = 86;
 // las llamadas internas (ver liquidateByInvestorId). El router pasa únicamente
 // el contexto de Elysia, así que un caller HTTP nunca puede setear
 // skipStatusAndEmail, sin importar props extra en el body.
+export type RevalidarGuardResult = {
+  ok: boolean;
+  message?: string;
+  creditos_invalidos?: number[];
+};
+
+export class GuardRechazadoError extends Error {
+  creditosInvalidos: number[];
+  constructor(message: string, creditosInvalidos: number[] = []) {
+    super(message);
+    this.name = "GuardRechazadoError";
+    this.creditosInvalidos = creditosInvalidos;
+  }
+}
+
 export const exitInvestor = async (
   { body, set, request }: any,
-  opts: { skipStatusAndEmail?: boolean } = {}
+  opts: {
+    skipStatusAndEmail?: boolean;
+    revalidarGuard?: (tx: any) => Promise<RevalidarGuardResult>;
+  } = {}
 ) => {
   const skipStatusAndEmail = opts.skipStatusAndEmail === true;
   // ── Helper de logging con prefijo único por request ──
@@ -6993,6 +7011,37 @@ export const exitInvestor = async (
     // del inversionista, ni queda nada a medias en los créditos.
     log("🔒 Abriendo transacción...");
     await db.transaction(async (tx) => {
+      // ── Paso 4.0: Lock ordenado de créditos (P1: serialización con pagos) ──
+      // Mismo patrón que `withPendingReturnCreditLocks` (payments.ts) y
+      // status → pendiente_devolucion (investor.ts:6649). Toma FOR NO KEY UPDATE,
+      // ordenado por credito_id ascendente, sobre TODOS los créditos pedidos.
+      // Quien llegue primero entre exitInvestor y la generación de pagos bloquea
+      // al otro hasta commit/rollback, evitando que se creen abonos/pagos mientras
+      // se transfiere el inversionista a CUBE.
+      const idsValidos = (Array.isArray(creditoIds) ? creditoIds : []).filter(
+        (id): id is number => typeof id === "number" && Number.isInteger(id) && id > 0
+      );
+      const idsOrdenados = [...new Set(idsValidos)].sort((a, b) => a - b);
+      if (idsOrdenados.length > 0) {
+        await tx
+          .select({ credito_id: creditos.credito_id })
+          .from(creditos)
+          .where(inArray(creditos.credito_id, idsOrdenados))
+          .orderBy(asc(creditos.credito_id))
+          .for("no key update");
+      }
+
+      // ── Paso 4.0.1: Revalidar guard bajo el lock dentro de la transacción ──
+      if (opts.revalidarGuard) {
+        const guardRes = await opts.revalidarGuard(tx);
+        if (!guardRes.ok) {
+          throw new GuardRechazadoError(
+            guardRes.message ?? "Guard de devolución rechazó la operación",
+            guardRes.creditos_invalidos ?? []
+          );
+        }
+      }
+
       for (const [idx, credito_id] of creditoIds.entries()) {
         log(`─────────────────────────────────────────────────────────`);
         log(`📂 [${idx + 1}/${creditoIds.length}] Procesando crédito_id=${credito_id}`);
@@ -7622,6 +7671,15 @@ export const exitInvestor = async (
       total_destinatarios: INVESTOR_STATUS_CHANGE_RECIPIENTS.length,
     };
   } catch (error) {
+    if (error instanceof GuardRechazadoError) {
+      warn("⚠️  Guard de devolución rechazó la operación dentro de la transacción:", error.message);
+      set.status = 400;
+      return {
+        success: false,
+        message: error.message,
+        creditos_invalidos: error.creditosInvalidos,
+      };
+    }
     err("💥 Error fatal:", error);
     err(`⏱️  Duración hasta el error: ${Date.now() - t0}ms`);
     err("═══════════════════════════════════════════════════════════");

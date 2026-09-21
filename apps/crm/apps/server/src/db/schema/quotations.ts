@@ -1,5 +1,6 @@
 import {
 	boolean,
+	date,
 	decimal,
 	integer,
 	pgEnum,
@@ -183,7 +184,19 @@ export const quotations = pgTable("quotations", {
 	extraAdminCost: decimal("extra_admin_cost", {
 		precision: 14,
 		scale: 2,
-	}).default("600"), // Gastos administrativos base (Q600)
+	}).default("600"), // Gastos administrativos base + ajuste financiado por fecha ideal
+	idealPaymentDateAdjustment: decimal("ideal_payment_date_adjustment", {
+		precision: 14,
+		scale: 2,
+	})
+		.notNull()
+		.default("0"),
+	idealPaymentDateAdjustmentDays: integer("ideal_payment_date_adjustment_days")
+		.notNull()
+		.default(0),
+	idealPaymentDateAdjustmentReferenceDate: date(
+		"ideal_payment_date_adjustment_reference_date",
+	),
 	interestCost: decimal("interest_cost", {
 		precision: 16,
 		scale: 8,

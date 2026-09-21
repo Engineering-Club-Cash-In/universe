@@ -103,14 +103,15 @@ const RESULT_META: Record<
 		Icon: CheckCircle2,
 	},
 	observacion: {
-		label: "Con observación",
+		label: "Observación",
 		className:
 			"bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
 		Icon: AlertTriangle,
 	},
 	revision_manual: {
 		label: "Revisión manual",
-		className: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
+		className:
+			"bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
 		Icon: HelpCircle,
 	},
 	rechazado: {
@@ -638,7 +639,9 @@ function NewValidationDialog({
 							size="sm"
 							variant="outline"
 						>
-							{attemptStatusQuery.isFetching ? "Consultando…" : "Reintentar consulta"}
+							{attemptStatusQuery.isFetching
+								? "Consultando…"
+								: "Reintentar consulta"}
 						</Button>
 					</div>
 				)}
@@ -1084,7 +1087,7 @@ export function ValidationDetailsView({
 						<p className="font-semibold">Acción recomendada</p>
 						<p className="mt-1">{result.recommendedAction}</p>
 					</div>
-					{result.manualApproval && result.autoResult === "revision_manual" && (
+					{result.manualApproval && result.autoResult !== "rechazado" && (
 						<div className="rounded-md border border-green-200 bg-green-50 p-3 text-green-900 text-sm dark:border-green-900 dark:bg-green-950/30 dark:text-green-200">
 							<p className="font-semibold">Aprobado manualmente</p>
 							<p className="mt-1 text-xs">

@@ -79,9 +79,11 @@ function firmantesDelContrato(
 ): ContractSigner[] | undefined {
 	if (esFirmaFisica(contractType)) return undefined;
 	if (!signers || signers.length === 0) return signers;
-	if (signers.some((s) => s.role === "REP_LEGAL")) return signers;
+	// El representante legal lo pone siempre el servidor. Si viniera del
+	// navegador, cualquiera podría mandar su propio correo con ese rol y
+	// quedarse con el link de firma de la entidad.
 	return [
-		...signers,
+		...signers.filter((s) => s.role !== "REP_LEGAL"),
 		{ role: "REP_LEGAL", email: REP_LEGAL_EMAIL, name: REP_LEGAL_NOMBRE },
 	];
 }

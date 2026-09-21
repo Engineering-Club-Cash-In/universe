@@ -629,6 +629,29 @@ describe("ficha basura: indeterminado, no cliente inexistente", () => {
     expect(seleccion.indeterminado).toBe(true);
   });
 
+  it("🔴 la identificación de puro cero es un campo sin llenar, no la de otra persona", () => {
+    // Con el relleno tratado como número de verdad, la ficha no coincidía con
+    // el DPI buscado y se caía en silencio: si era la única, el moroso salía
+    // como cliente nuevo y pasaba.
+    for (const relleno of ["0", "0000000000000", "0000-00000-0000"]) {
+      const seleccion = seleccionarFichasDelDpi(
+        [{ CodigoCliente: 22, NumeroIdentificacion: relleno }],
+        DPI
+      );
+
+      expect(seleccion.fichas.map((f) => f.CodigoCliente)).toEqual([22]);
+    }
+  });
+
+  it("una identificación de otra persona SÍ se descarta", () => {
+    const seleccion = seleccionarFichasDelDpi(
+      [{ CodigoCliente: 22, NumeroIdentificacion: "9999999999999" }],
+      DPI
+    );
+
+    expect(seleccion.fichas).toEqual([]);
+  });
+
   it("mezcla útil + basura: indeterminado aunque queden fichas consultables", () => {
     // Media lista no alcanza para firmar un "sin mora".
     const seleccion = seleccionarFichasDelDpi(

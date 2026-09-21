@@ -234,7 +234,12 @@ export function seleccionarFichasDelDpi<T extends FichaClienteSifco>(
 
   const delDpi = clientes.filter((cliente) => {
     const propia = normalizarIdentificacion(cliente.NumeroIdentificacion ?? "");
-    if (!propia) return true;
+    // Sin identificación NO se descarta: no se puede afirmar que sea de otro.
+    // Los rellenos de todo ceros —"0", "0000000000000"— son eso mismo escrito
+    // de otra forma; tratarlos como un número de verdad los hacía "de otra
+    // persona", la ficha se caía en silencio y un DPI cuya única ficha tiene
+    // relleno salía como cliente nuevo, con su deuda sin mirar.
+    if (!propia || esRellenoDeCeros(propia)) return true;
 
     return propia === buscado;
   });
@@ -244,6 +249,11 @@ export function seleccionarFichasDelDpi<T extends FichaClienteSifco>(
   );
 
   return { fichas, indeterminado: fichas.length < delDpi.length };
+}
+
+/** Un identificador de puro cero no identifica a nadie: es un campo sin llenar. */
+function esRellenoDeCeros(identificacionNormalizada: string): boolean {
+  return /^0+$/.test(identificacionNormalizada);
 }
 
 /** Solo las fichas consultables. Ver `seleccionarFichasDelDpi`. */

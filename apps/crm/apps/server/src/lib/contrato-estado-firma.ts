@@ -28,7 +28,10 @@ export async function sincronizarEstadoDeFirma(
 	// fila y pisaba los enlaces nuevos.
 	await db.transaction(async (tx) => {
 		const [actual] = await tx
-			.select({ documentID: generatedLegalContracts.weetrustDocumentId })
+			.select({
+				documentID: generatedLegalContracts.weetrustDocumentId,
+				status: generatedLegalContracts.status,
+			})
 			.from(generatedLegalContracts)
 			.where(eq(generatedLegalContracts.id, contractId))
 			.for("update")
@@ -38,7 +41,14 @@ export async function sincronizarEstadoDeFirma(
 		// viejos no tienen ID guardado.
 		if (actual.documentID && actual.documentID !== estado.documentID) return;
 
+		// Con el contrato ya cerrado (confirmado a mano, o anulado) no se le baja
+		// a nadie de "firmado" a "pendiente": WeeTrust puede seguir diciendo
+		// pending y el contrato quedaba firmado con firmantes pendientes.
+		const sePuedeBajar = actual.status === "pending";
+
 		for (const firmante of estado.signatories) {
+			if (!firmante.isSigned && !sePuedeBajar) continue;
+
 			await tx
 				.update(contractSignatories)
 				.set({

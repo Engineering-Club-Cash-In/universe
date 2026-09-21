@@ -1375,6 +1375,22 @@ export const legalContractsRouter = {
 			let nuevoId: string;
 			try {
 				nuevoId = await db.transaction(async (tx) => {
+					// Dos regeneraciones a la vez del mismo contrato emitían dos
+					// documentos y dejaban los dos vigentes. Se bloquea la fila y se
+					// vuelve a mirar: si otra ya lo anuló, ésta pierde, y el catch de
+					// abajo borra en WeeTrust el documento que acaba de emitir.
+					const [original] = await tx
+						.select({ status: generatedLegalContracts.status })
+						.from(generatedLegalContracts)
+						.where(eq(generatedLegalContracts.id, input.contractId))
+						.for("update");
+					if (!original || original.status === "cancelled") {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Otra persona acaba de regenerar este contrato. Recargá para ver el nuevo.",
+						});
+					}
+
 					const [nuevo] = await tx
 						.insert(generatedLegalContracts)
 						.values({

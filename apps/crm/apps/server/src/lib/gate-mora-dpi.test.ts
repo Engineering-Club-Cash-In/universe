@@ -346,6 +346,45 @@ describe("gate de mora: números de crédito que aporta el CRM", () => {
 		expect(recibidos).toEqual([{ dpi: DPI, numeros: [] }]);
 	});
 
+	test("🔴 un fallo DEFINITIVO conserva su mensaje, no el de 'intentá en unos minutos'", async () => {
+		// El desborde de más de 50 créditos pide revisión manual: ningún
+		// reintento lo arregla. Taparlo con el texto de caída temporal dejaba
+		// al asesor reintentando para siempre un caso que sólo se destraba a
+		// mano.
+		const mensajePropio =
+			"Este DPI tiene demasiados créditos para validarlo automáticamente; pedí revisión manual.";
+		const { deps } = bancoConNumeros(
+			async () => SIN_MORA,
+			async () => {
+				throw new ConsultaMoraNoDisponibleError(
+					mensajePropio,
+					"desborde",
+					true,
+				);
+			},
+		);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(veredicto.mensaje).toBe(mensajePropio);
+	});
+
+	test("un fallo pasajero SÍ usa el texto de caída temporal", async () => {
+		const { deps } = bancoConNumeros(
+			async () => SIN_MORA,
+			async () => {
+				throw new ConsultaMoraNoDisponibleError("se cayó la base", "red");
+			},
+		);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(true);
+		expect(veredicto.mensaje).not.toBe("se cayó la base");
+		expect(veredicto.mensaje).toContain("minutos");
+	});
+
 	test("🔴 si la búsqueda de números falla, el gate corta y NO consulta a medias", async () => {
 		// Fail-closed: consultar sin esos números vería menos cartera de la que
 		// hay, y un "sin mora" armado sobre media cartera es el falso negativo que

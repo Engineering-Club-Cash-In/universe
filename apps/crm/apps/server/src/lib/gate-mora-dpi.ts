@@ -1,4 +1,7 @@
-import type { ConsultaMoraResponse } from "../types/cartera-back";
+import {
+	ConsultaMoraNoDisponibleError,
+	type ConsultaMoraResponse,
+} from "../types/cartera-back";
 import { normalizarDpi } from "../utils/cui-validation";
 import type { AuditEntry } from "./audit";
 import { resolverValidacionMora } from "./validacion-mora";
@@ -186,7 +189,15 @@ export async function evaluarGateMoraDpi(
 			return {
 				rechazado: true,
 				motivo: "SERVICIO_NO_DISPONIBLE",
-				mensaje: mensajeRechazoGateMora("SERVICIO_NO_DISPONIBLE"),
+				// El fallo DEFINITIVO trae su propio texto —p. ej. el desborde de
+				// más de 50 créditos, que pide revisión manual—. Taparlo con el
+				// "intentá en unos minutos" mandaba al asesor a reintentar para
+				// siempre algo que ningún reintento arregla. Misma regla que ya
+				// aplica `resolverValidacionMora`.
+				mensaje:
+					error instanceof ConsultaMoraNoDisponibleError && error.definitivo
+						? error.message
+						: mensajeRechazoGateMora("SERVICIO_NO_DISPONIBLE"),
 			};
 		}
 	}

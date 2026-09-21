@@ -1138,6 +1138,19 @@ export class WeeTrustService {
 	}
 
 	/**
+	 * Cuántas páginas tiene el PDF. Lanza si el archivo no se puede abrir.
+	 *
+	 * Sirve para rechazar un archivo roto aunque no haya líneas de firma que
+	 * revisar, como en los contratos que se firman en papel.
+	 */
+	static async contarPaginas(pdfBuffer: Buffer): Promise<number> {
+		const pdfDocument = await pdfjsLib.getDocument({
+			data: new Uint8Array(pdfBuffer),
+		}).promise;
+		return pdfDocument.numPages;
+	}
+
+	/**
 	 * Lee las líneas de firma de un PDF en orden de lectura: página, luego de
 	 * arriba hacia abajo, luego de izquierda a derecha. Junta además el texto
 	 * inmediatamente debajo de cada una, que es donde los templates imprimen el

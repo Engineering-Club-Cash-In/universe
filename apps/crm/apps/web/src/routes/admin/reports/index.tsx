@@ -1928,9 +1928,10 @@ function RouteComponent() {
 													min={projectionMonthBounds.firstMonth}
 													max={projectionMonthBounds.lastMonth}
 													value={projectionMonth}
-													onChange={(event) =>
-														setProjectionMonth(event.target.value)
-													}
+													onChange={(event) => {
+														if (event.target.value)
+															setProjectionMonth(event.target.value);
+													}}
 												/>
 											)}
 										</div>

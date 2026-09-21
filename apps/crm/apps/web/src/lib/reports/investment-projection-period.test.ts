@@ -12,3 +12,23 @@ test("calcula el siguiente mes desde la fecha vigente en Guatemala", () => {
 		lastMonth: "2027-09",
 	});
 });
+
+test("ignora cuando se limpia el mes proyectado", async () => {
+	const source = await Bun.file(
+		new URL("../../routes/admin/reports/index.tsx", import.meta.url),
+	).text();
+	const labelPosition = source.indexOf('aria-label="Mes proyectado"');
+	const input = source.slice(
+		source.lastIndexOf("<Input", labelPosition),
+		source.indexOf("/>", labelPosition) + 2,
+	);
+
+	expect(labelPosition).toBeGreaterThan(-1);
+	expect(input).toContain('type="month"');
+	expect(input).toContain("min={projectionMonthBounds.firstMonth}");
+	expect(input).toContain("max={projectionMonthBounds.lastMonth}");
+	expect(input).toContain("value={projectionMonth}");
+	expect(input).toMatch(
+		/if \(event\.target\.value\)\s+setProjectionMonth\(event\.target\.value\);/,
+	);
+});

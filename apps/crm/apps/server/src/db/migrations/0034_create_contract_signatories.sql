@@ -51,6 +51,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS "contract_signatories_contract_email_unique" O
 --> statement-breakpoint
 -- La declaración de vendedor se firma en papel; marcarla evita que los
 -- contratos ya generados sigan pareciendo pendientes de un link que no existe.
+-- Las que ya se habían mandado a firma electrónica (tienen links) se quedan
+-- como electrónicas: si no, la ficha las escondería como si fueran de papel.
 UPDATE "public"."generated_legal_contracts"
 SET "signature_mode" = 'fisica'
-WHERE "contract_type" = 'declaracion_vendedor';
+WHERE "contract_type" IN ('declaracion_vendedor', 'declaracion_jurada')
+  AND "client_signing_link" IS NULL
+  AND "representative_signing_link" IS NULL;

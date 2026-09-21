@@ -241,15 +241,7 @@ export async function sendContractLinksToLead(params: {
 		? aplicarCorreosDePrueba(destinatariosReales)
 		: destinatariosReales;
 
-	const [log] = await db
-		.insert(whatsappLogs)
-		.values({ opportunityId: params.opportunityId })
-		.returning();
-
 	const stClient = getSimpletechClient();
-
-	let algunoEnviado = false;
-	let motivoDelLead: string | undefined;
 
 	// Contratos nuevos (tienen documento en el proveedor) que se quedaron sin
 	// firmantes guardados: el guardado es best-effort y pudo fallar. No se
@@ -259,6 +251,16 @@ export async function sendContractLinksToLead(params: {
 		(c) =>
 			(c.weetrustDocumentId || c.signingProvider) && !conFirmantes.has(c.id),
 	);
+
+	// Primero se decide qué le toca a cada uno, sin tocar la red.
+	const planes: Array<{
+		destinatario: DestinatarioDeFirma;
+		susContratos: { contractName: string; link: string | null; pdfLink: string | null }[];
+		mensaje: string | null;
+		telefonoDestino: string | null;
+		/** Por qué no se le manda. Sin motivo, se le manda. */
+		motivo?: string;
+	}> = [];
 
 	for (const [indice, destinatario] of destinatarios.entries()) {
 		// Los contratos de ESTA persona: aquellos donde tiene fila de firmante.
@@ -277,6 +279,18 @@ export async function sendContractLinksToLead(params: {
 				pdfLink: pdfResueltos.get(c.id) ?? null,
 			}));
 
+		// Ya firmó todo lo suyo: no hay nada que mandarle ni que dejar pendiente.
+		if (susContratos.length === 0 && clave && firmaronAlgo.has(clave)) {
+			continue;
+		}
+
+		// El rep legal no firma todos los contratos (la cobertura, por ejemplo,
+		// no lo lleva). Si no le toca ninguno, no se le deja una fila pendiente
+		// que nadie puede cerrar.
+		if (destinatario.role === "REP_LEGAL" && susContratos.length === 0) {
+			continue;
+		}
+
 		// Si a alguno de SUS contratos le falta el enlace, no se manda nada: un
 		// mensaje con la mitad de los contratos queda marcado como enviado y el
 		// que falta no lo vuelve a buscar nadie. Queda pendiente para mandarlo a
@@ -290,24 +304,12 @@ export async function sendContractLinksToLead(params: {
 					)
 				: null;
 
-		// Ya firmó todo lo suyo: no hay nada que mandarle ni que dejar pendiente.
-		if (
-			susContratos.length === 0 &&
-			clave &&
-			firmaronAlgo.has(clave)
-		) {
-			continue;
-		}
-
-		let status: "sent" | "pending" | "failed" = "pending";
-		let motivo: string | undefined;
-		let enviadoEn: Date | undefined;
-
 		// En modo prueba el teléfono del cliente no hace falta: igual no se usa.
 		const telefonoDestino = modoPrueba
 			? getTestPhone(indice)
 			: destinatario.phone;
 
+		let motivo: string | undefined;
 		if (!stClient) {
 			motivo = "Servicio de mensajería no configurado";
 		} else if (sinFirmantesGuardados.length > 0) {
@@ -326,48 +328,85 @@ export async function sendContractLinksToLead(params: {
 				: "No tiene correo registrado, no se le pueden asociar sus links";
 		} else if (!telefonoDestino) {
 			motivo = "No tiene teléfono registrado";
-		} else {
+		}
+
+		planes.push({ destinatario, susContratos, mensaje, telefonoDestino, motivo });
+	}
+
+	// Todas las filas se guardan como pendientes ANTES de mandar nada. La
+	// aprobación dispara esto sin esperarlo: si se fueran guardando a medida que
+	// sale cada mensaje, la ficha podía leer el log a medio llenar y mostrar
+	// "enviado" con codeudores que todavía no tenían fila.
+	const filas = await db.transaction(async (tx) => {
+		const [log] = await tx
+			.insert(whatsappLogs)
+			.values({ opportunityId: params.opportunityId })
+			.returning();
+
+		if (planes.length === 0) return [];
+
+		return tx
+			.insert(whatsappLogRecipients)
+			.values(
+				planes.map((p) => ({
+					whatsappLogId: log.id,
+					leadId: p.destinatario.leadId,
+					coDebtorId: p.destinatario.coDebtorId,
+					recipientName: p.destinatario.nombre,
+					// El teléfono REAL, también en modo prueba. El envío manual arranca
+					// con este número y lo guarda en el lead o el codeudor: si acá
+					// quedara el de prueba, reintentar sin tocarlo le pisaba el teléfono
+					// al cliente con uno nuestro. El desvío queda anotado en `reason`.
+					phone: p.destinatario.phone,
+					message: p.mensaje,
+					contracts: p.susContratos,
+					status: "pending" as const,
+					reason: p.motivo,
+				})),
+			)
+			.returning({ id: whatsappLogRecipients.id });
+	});
+
+	let algunoEnviado = false;
+	let motivoDelLead: string | undefined;
+
+	for (const [i, plan] of planes.entries()) {
+		let motivo = plan.motivo;
+
+		if (!motivo && plan.mensaje && plan.telefonoDestino) {
 			const resultado = await sendWhatsappTemplate({
-				phone: telefonoDestino,
-				message: mensaje,
+				phone: plan.telefonoDestino,
+				message: plan.mensaje,
 				logPrefix: modoPrueba
 					? "[SimpleTech][contratos][TEST]"
 					: "[SimpleTech][contratos]",
+				ocultarEnlacesEnLog: true,
 			});
 
-			if (resultado.success) {
-				status = "sent";
-				enviadoEn = new Date();
+			const enviado = resultado.success;
+			if (enviado) {
 				algunoEnviado = true;
-				if (modoPrueba) {
-					// Queda anotado a quién le habría llegado de verdad, para que la
-					// fila no parezca un envío normal al cliente.
-					motivo = `TEST_MESSAGE: enviado a ${telefonoDestino} en lugar de ${destinatario.phone ?? "sin teléfono"}`;
-				}
+				// En modo prueba queda anotado a quién le habría llegado de verdad,
+				// para que la fila no parezca un envío normal al cliente.
+				motivo = modoPrueba
+					? `TEST_MESSAGE: enviado a ${plan.telefonoDestino} en lugar de ${plan.destinatario.phone ?? "sin teléfono"}`
+					: undefined;
 			} else {
-				status = "failed";
 				motivo = resultado.error ?? "Error enviando el mensaje";
 			}
+
+			await db
+				.update(whatsappLogRecipients)
+				.set({
+					status: enviado ? "sent" : "failed",
+					reason: motivo ?? null,
+					sentAt: enviado ? new Date() : undefined,
+					updatedAt: new Date(),
+				})
+				.where(eq(whatsappLogRecipients.id, filas[i].id));
 		}
 
-		if (destinatario.leadId) motivoDelLead = motivo;
-
-		await db.insert(whatsappLogRecipients).values({
-			whatsappLogId: log.id,
-			leadId: destinatario.leadId,
-			coDebtorId: destinatario.coDebtorId,
-			recipientName: destinatario.nombre,
-			// El teléfono REAL, también en modo prueba. El envío manual arranca con
-			// este número y lo guarda en el lead o el codeudor: si acá quedara el de
-			// prueba, reintentar sin tocarlo le pisaba el teléfono al cliente con
-			// uno nuestro. El desvío queda anotado en `reason`.
-			phone: destinatario.phone,
-			message: mensaje,
-			contracts: susContratos,
-			status,
-			reason: motivo,
-			sentAt: enviadoEn,
-		});
+		if (plan.destinatario.leadId) motivoDelLead = motivo;
 	}
 
 	return { sent: algunoEnviado, reason: motivoDelLead };
@@ -626,6 +665,7 @@ export const messagingRouter = {
 				logPrefix: modoPrueba
 					? "[SimpleTech][manual][TEST]"
 					: "[SimpleTech][manual]",
+				ocultarEnlacesEnLog: true,
 			});
 			const status: "sent" | "failed" = sendResult.success ? "sent" : "failed";
 			const reason: string | null = sendResult.success

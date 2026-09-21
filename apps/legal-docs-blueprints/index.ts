@@ -5,6 +5,7 @@ import { downloadPdfFromR2 } from './services/R2Service';
 import { ContractType, GenerateContractRequest } from './types/contract';
 import { WeeTrustService } from './services/WeeTrustService';
 import { notificarEstadoDeFirmaAlCrm } from './services/CrmApiService';
+import { getSignatureMode, getSignaturePattern } from './services/signaturePatterns';
 
 // Inicializar WeeTrust
 const weeTrustService = new WeeTrustService();
@@ -391,6 +392,20 @@ const app = new Elysia()
           success: false,
           error: `Tipo de contrato inválido: ${contractType}`,
           availableTypes: Object.values(ContractType)
+        };
+      }
+
+      // Sólo los contratos con layout de firmas auditado (o que se firman en
+      // papel). Uno sin layout caería al reparto por orden de llegada y las
+      // firmas de un PDF armado por fuera quedarían donde caigan.
+      if (
+        getSignatureMode(contractType) !== 'fisica' &&
+        !(getSignaturePattern(contractType).bloques?.length)
+      ) {
+        set.status = 400;
+        return {
+          success: false,
+          error: `El contrato "${contractType}" no tiene layout de firmas auditado: no se puede subir a mano`,
         };
       }
 

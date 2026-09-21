@@ -1616,8 +1616,18 @@ export const contractGenerationRouter = {
 				success: true,
 				contractId: saved.id,
 				contractType: input.contractType,
+				// El contrato ya está enviado y guardado: que falle firmar la URL no
+				// puede hacer que la pantalla diga "falló" e invite a subirlo de nuevo.
 				documentLink: resultado.r2Key
-					? await getFileUrlWithBucketInKey(resultado.r2Key)
+					? await getFileUrlWithBucketInKey(resultado.r2Key).catch(
+							(error) => {
+								console.error(
+									"[uploadContractForSigning] no se pudo firmar la URL del PDF:",
+									error,
+								);
+								return null;
+							},
+						)
 					: resultado.linkDocument,
 				signingLinks: resultado.signing_links ?? [],
 				message:

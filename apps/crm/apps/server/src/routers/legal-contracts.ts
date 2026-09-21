@@ -20,6 +20,7 @@ import {
 	guardarFirmantesDelContrato,
 	linksPorRol,
 } from "../lib/contract-signatories";
+import { getSignatureMode } from "../lib/contract-signature-mode";
 import { sincronizarEstadoDeFirma } from "../lib/contrato-estado-firma";
 import {
 	type AccionSobreContrato,
@@ -248,6 +249,7 @@ export const legalContractsRouter = {
 			const [newContract] = await db
 				.insert(generatedLegalContracts)
 				.values({
+					signatureMode: getSignatureMode(input.contractType),
 					...contractData,
 					pdfLink,
 					generatedBy: context.userId,
@@ -320,6 +322,7 @@ export const legalContractsRouter = {
 				.update(generatedLegalContracts)
 				.set({
 					contractType: input.contractType,
+					signatureMode: getSignatureMode(input.contractType),
 					contractName: input.contractName,
 					clientSigningLink: input.clientSigningLink,
 					representativeSigningLink: input.representativeSigningLink,
@@ -1440,7 +1443,17 @@ export const legalContractsRouter = {
 				});
 			}
 
-			const { documentID } = await contratoConDocumentID(input.contractId);
+			const { contract, documentID } = await contratoConDocumentID(
+				input.contractId,
+			);
+
+			// Un anulado se conserva sólo como registro: reenviarle la invitación
+			// sería pedirle al cliente que firme un documento reemplazado.
+			if (contract.status === "cancelled") {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Este contrato está anulado: no se le reenvían correos.",
+				});
+			}
 
 			try {
 				await reenviarCorreoDeFirma(documentID);

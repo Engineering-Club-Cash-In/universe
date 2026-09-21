@@ -50,6 +50,8 @@ interface ContratoDeOportunidad {
 	observerUrl?: string | null;
 	/** `documenso` cuando WeeTrust falló y se usó el fallback. */
 	signingProvider?: string | null;
+	/** Cómo se firma, según quedó guardado al generarlo. */
+	signatureMode?: string | null;
 }
 
 export interface FilaDeContrato {
@@ -145,7 +147,11 @@ function ContratoFila({
 	onUpdate?: () => void;
 }) {
 	const { contract, signatories } = fila;
-	const firmaEnPapel = esFirmaFisica(contract.contractType);
+	// Manda lo guardado: una declaración de vendedor generada antes de que se
+	// firmara en papel ya tiene sus links, y hay que seguir mostrándolos.
+	const firmaEnPapel = contract.signatureMode
+		? contract.signatureMode === "fisica"
+		: esFirmaFisica(contract.contractType);
 	const firmantes = firmaEnPapel ? [] : firmantesEnFicha(signatories, contract);
 	const estado = ESTADO[contract.status];
 	const hayVencidos = firmantes.some((f) => f.vencido);

@@ -1770,11 +1770,17 @@ export function DynamicContractWizard({
 				// representante legal lo agrega el servidor, que es donde vive su correo.
 				const signers: ContractSigner[] = [];
 				if (clientEmail) {
+					// Nombre y DPI de lo que quedó en el formulario, que es lo que se
+					// imprime: si jurídico corrigió el DPI, el viejo no calzaría con el
+					// que aparece bajo la línea de firma y el contrato no se generaría.
 					signers.push({
 						role: "TITULAR",
 						email: clientEmail,
-						name: crmData.cliente.nombreCompleto ?? clientEmail,
-						dpi: crmData.cliente.dpi,
+						name:
+							fieldValues.nombreCompleto?.trim() ||
+							crmData.cliente.nombreCompleto ||
+							clientEmail,
+						dpi: fieldValues.dpi?.trim() || crmData.cliente.dpi,
 					});
 				}
 				coDebtorFields.forEach((cd) => {

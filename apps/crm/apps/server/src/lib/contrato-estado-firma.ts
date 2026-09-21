@@ -22,6 +22,17 @@ export async function sincronizarEstadoDeFirma(
 ): Promise<void> {
 	const ahora = new Date();
 
+	// Si mientras se consultaba alguien regeneró el contrato, la fila ya apunta
+	// a otro documento: aplicar esta foto vieja le devolvería el ID anterior y
+	// pisaría los enlaces nuevos. Los contratos viejos no tienen ID guardado.
+	const [actual] = await db
+		.select({ documentID: generatedLegalContracts.weetrustDocumentId })
+		.from(generatedLegalContracts)
+		.where(eq(generatedLegalContracts.id, contractId))
+		.limit(1);
+	if (!actual) return;
+	if (actual.documentID && actual.documentID !== estado.documentID) return;
+
 	for (const firmante of estado.signatories) {
 		await db
 			.update(contractSignatories)

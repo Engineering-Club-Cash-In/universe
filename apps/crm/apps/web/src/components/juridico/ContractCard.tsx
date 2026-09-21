@@ -71,6 +71,8 @@ interface ContractCardProps {
 		pdfLink?: string | null;
 		/** `documenso` cuando WeeTrust falló y se usó el fallback. */
 		signingProvider?: string | null;
+		/** Cómo se firma, según quedó guardado al generarlo. */
+		signatureMode?: string | null;
 		status: "pending" | "signed" | "cancelled";
 		generatedAt: Date | string;
 		opportunityId: string | null;
@@ -124,7 +126,11 @@ export function ContractCard({
 
 	// Este contrato se imprime y se firma a mano: que no tenga links no es que
 	// haya fallado, y mostrarlo como "Pendiente" hacía que jurídico lo buscara.
-	const firmaEnPapel = esFirmaFisica(contract.contractType);
+	// Manda lo guardado: una declaración de vendedor generada antes de que se
+	// firmara en papel ya tiene sus links, y hay que seguir mostrándolos.
+	const firmaEnPapel = contract.signatureMode
+		? contract.signatureMode === "fisica"
+		: esFirmaFisica(contract.contractType);
 	// Los contratos que cayeron al fallback de Documenso no tienen documento en
 	// WeeTrust: consultar o reenviar sólo devolvería un error.
 	const enWeeTrust = contract.signingProvider !== "documenso";

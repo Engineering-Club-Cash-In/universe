@@ -1520,7 +1520,7 @@ function RouteComponent() {
 																<TableCell className="sticky left-0 z-[1] bg-background">
 																	{formatBucket(row.bucket, montoCobrarPeriodo)}
 																	</TableCell>
-																<TableCell>{row.cuotas_count}</TableCell>
+																<TableCell>{view.cuotas}</TableCell>
 																<TableCell>
 																{formatCurrency(view.capital)}
 															</TableCell>
@@ -1567,9 +1567,7 @@ function RouteComponent() {
 														{(() => {
 													const rows = montoCobrarRows;
 													const a = montoCobrarAcumulado;
-													const lastRow = rows.findLast(
-														(row) => row.cuotas_count > 0,
-													);
+													const lastRow = a ? rows.at(-1) : undefined;
 															const sum = (key: keyof MontoACobrarPeriodoRow) =>
 																rows.reduce(
 																	(acc: number, r: MontoACobrarPeriodoRow) =>
@@ -1602,7 +1600,7 @@ function RouteComponent() {
 															membresiasTotal;
 																	const totalCred =
 																		a && lastRow
-																			? lastRow.cuotas_count
+																			? lastRow.mora_count
 																			: rows.reduce(
 																					(acc, r) => acc + r.cuotas_count,
 																					0,

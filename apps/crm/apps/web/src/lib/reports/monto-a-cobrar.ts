@@ -43,6 +43,7 @@ type ParticipacionTotals = {
 };
 
 export type MontoACobrarViewRow = {
+	cuotas: number;
 	capital: number;
 	interesIva: number;
 	servicios: number;
@@ -150,6 +151,7 @@ export function getMontoACobrarViewRow(
 	);
 
 	return {
+		cuotas: acumulado ? row.mora_count : row.cuotas_count,
 		capital,
 		interesIva,
 		servicios,
@@ -193,7 +195,9 @@ export function getMontoACobrarParticipacionTotals(
 	>,
 	acumulado: boolean,
 ): ParticipacionTotals {
-	const last = rows.findLast((row) => row.cuotas_count > 0);
+	const last = acumulado
+		? rows.at(-1)
+		: rows.findLast((row) => row.cuotas_count > 0);
 	const numeric = (value: string) => Number.parseFloat(value) || 0;
 	const creditosInvalidosRango = rows.find(
 		(row) => row.creditos_participacion_invalida_rango !== undefined,

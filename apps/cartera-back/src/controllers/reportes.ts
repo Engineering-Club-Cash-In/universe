@@ -17,6 +17,7 @@ import {
 } from "./moraCapitalCartera";
 import { snapCte } from "./moraSnapshotSql";
 import {
+  buildAtrasadoOnlySql,
   buildInteresIvaInversionistaSql,
   participacionExternaActualCteSql,
 } from "./monto-a-cobrar-participacion-sql";
@@ -107,7 +108,7 @@ export async function getMontoACobrar({
   return result.rows;
 }
 
-export async function getMontoACobrarPeriodo({
+export function buildMontoACobrarPeriodoQuery({
   periodo,
   fechaInicio,
   fechaFin,
@@ -125,10 +126,28 @@ export async function getMontoACobrarPeriodo({
     dia: "1 day",
   };
   const pgInterval = sql.raw(`interval '${pgIntervalMap[periodo]}'`);
+  const atrasadoCapital = buildAtrasadoOnlySql("acum_capital", "cap_ant");
+  const atrasadoInteres = buildAtrasadoOnlySql("acum_interes");
+  const atrasadoIva = buildAtrasadoOnlySql("acum_iva");
+  const atrasadoSeguro = buildAtrasadoOnlySql("acum_seguro");
+  const atrasadoGps = buildAtrasadoOnlySql("acum_gps");
+  const atrasadoMembresias = buildAtrasadoOnlySql("acum_mem");
+  const atrasadoInteresIvaInversionista = buildInteresIvaInversionistaSql(
+    atrasadoInteres,
+    atrasadoIva,
+    "pbc.credito_id",
+  );
 
-  const result = await db.execute(sql`
+  return sql`
     WITH
-    pagos_en_rango AS (
+    buckets AS (
+      SELECT generate_series(
+        DATE_TRUNC(${pg}, ${fechaInicio}::date),
+        DATE_TRUNC(${pg}, ${fechaFin}::date),
+        ${pgInterval}
+      ) AS bucket
+    ),
+    pagos_en_rango_base AS (
       SELECT
         pc.credito_id,
         pc.cuota_id,
@@ -165,17 +184,90 @@ export async function getMontoACobrarPeriodo({
         AND pc.fecha_vencimiento::date >= ${fechaInicio}::date
         AND pc.fecha_vencimiento::date <= ${fechaFin}::date
     ),
+    pagos_en_rango AS (
+      SELECT base.*, false AS solo_atrasado
+      FROM pagos_en_rango_base base
+
+      UNION ALL
+
+      SELECT
+        c.credito_id,
+        NULL::integer AS cuota_id,
+        b.bucket::date AS fecha_venc,
+        0::numeric AS capital_restante,
+        0::numeric AS interes_restante,
+        0::numeric AS iva_12_restante,
+        0::numeric AS seguro_restante,
+        0::numeric AS gps_restante,
+        0::numeric AS membresias,
+        0::numeric AS monto_boleta,
+        true AS solo_atrasado
+      FROM buckets b
+      JOIN cartera.creditos c ON EXISTS (
+        SELECT 1
+        FROM cartera.cuotas_credito q_atrasada
+        LEFT JOIN cartera.pagos_credito pc_atrasada
+          ON pc_atrasada.cuota_id = q_atrasada.cuota_id
+          AND pc_atrasada."paymentFalse" = false
+          AND (
+            COALESCE(pc_atrasada.fecha_boleta::date, pc_atrasada.fecha_pago::date) IS NULL
+            OR COALESCE(pc_atrasada.fecha_boleta::date, pc_atrasada.fecha_pago::date) <= GREATEST(b.bucket::date, ${fechaInicio}::date)
+          )
+        WHERE q_atrasada.credito_id = c.credito_id
+          AND q_atrasada.fecha_vencimiento::date < GREATEST(b.bucket::date, ${fechaInicio}::date)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM cartera.pagos_credito pc_pagada
+            WHERE pc_pagada.cuota_id = q_atrasada.cuota_id
+              AND pc_pagada."paymentFalse" = false
+              AND pc_pagada.pagado = true
+              AND pc_pagada.validation_status IN ('validated', 'no_required')
+              AND COALESCE(pc_pagada.fecha_boleta::date, pc_pagada.fecha_pago::date) <= GREATEST(b.bucket::date, ${fechaInicio}::date)
+          )
+        GROUP BY q_atrasada.cuota_id
+        HAVING (
+            COALESCE(MIN(pc_atrasada.capital_restante::numeric), 0)
+          + COALESCE(MIN(pc_atrasada.interes_restante::numeric), 0)
+          + COALESCE(MIN(pc_atrasada.iva_12_restante::numeric), 0)
+          + COALESCE(MIN(pc_atrasada.seguro_restante::numeric), 0)
+          + COALESCE(MIN(pc_atrasada.gps_restante::numeric), 0)
+          + COALESCE(MIN(pc_atrasada.membresias::numeric), 0)
+        ) > 0
+        OR COUNT(pc_atrasada.pago_id) = 0
+        OR MIN(pc_atrasada.capital_restante) IS NULL
+      )
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM pagos_en_rango_base actual
+        WHERE actual.credito_id = c.credito_id
+          AND DATE_TRUNC(${pg}, actual.fecha_venc::timestamp) = b.bucket
+          AND (
+              COALESCE(actual.capital_restante, 0)
+            + COALESCE(actual.interes_restante, 0)
+            + COALESCE(actual.iva_12_restante, 0)
+            + COALESCE(actual.seguro_restante, 0)
+            + COALESCE(actual.gps_restante, 0)
+            + COALESCE(actual.membresias, 0)
+            + COALESCE(actual.monto_boleta, 0)
+          ) <> 0
+      )
+    ),
     ${sql.raw(participacionExternaActualCteSql)},
     per_credito AS (
       SELECT
         p.fecha_venc::date                                             AS bucket,
+        GREATEST(DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date, ${fechaInicio}::date) AS period_start,
         c.credito_id,
         c."statusCredit"                                               AS status,
         c.porcentaje_interes::numeric / 100                            AS tasa,
         c.cuota::numeric                                               AS cuota_c,
-        COALESCE(c.seguro_10_cuotas::numeric, 0)                       AS seguro,
-        COALESCE(c.gps::numeric, 0)                                    AS gps,
-        COALESCE(c.membresias_pago::numeric, 0)                        AS mem,
+        COALESCE(c.seguro_10_cuotas::numeric, 0)                       AS seguro_contractual,
+        COALESCE(c.gps::numeric, 0)                                    AS gps_contractual,
+        COALESCE(c.membresias_pago::numeric, 0)                        AS mem_contractual,
+        CASE WHEN BOOL_OR(NOT p.solo_atrasado) THEN COALESCE(c.seguro_10_cuotas::numeric, 0) ELSE 0 END AS seguro,
+        CASE WHEN BOOL_OR(NOT p.solo_atrasado) THEN COALESCE(c.gps::numeric, 0) ELSE 0 END AS gps,
+        CASE WHEN BOOL_OR(NOT p.solo_atrasado) THEN COALESCE(c.membresias_pago::numeric, 0) ELSE 0 END AS mem,
+        BOOL_OR(NOT p.solo_atrasado)                                    AS tiene_cuota_periodo,
         COALESCE(MAX(pea.factor_capital_inversionista), 0)              AS factor_capital_inversionista,
         COALESCE(MAX(pea.factor_interes_iva_inversionista), 0)          AS factor_interes_iva_inversionista,
         COALESCE(BOOL_OR(pea.participacion_invalida), false)            AS participacion_invalida,
@@ -205,19 +297,16 @@ export async function getMontoACobrarPeriodo({
           AND pc_a."paymentFalse" = false
           AND pc_a.total_restante IS NOT NULL
           AND pc_a.total_restante::numeric > 0
-          AND COALESCE(
-            qcc_a.fecha_vencimiento::date,
-            GREATEST(
-              COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
-              COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+          AND (
+            (
+              COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date) IS NULL
+              AND qcc_a.fecha_vencimiento::date < GREATEST(DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date, ${fechaInicio}::date)
             )
-          ) < DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date
-        ORDER BY COALESCE(
-          qcc_a.fecha_vencimiento::date,
-          GREATEST(
-            COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
-            COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+            OR COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date) <= GREATEST(DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date, ${fechaInicio}::date)
           )
+        ORDER BY COALESCE(
+          COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date),
+          qcc_a.fecha_vencimiento::date
         ) DESC, pc_a.pago_id DESC
         LIMIT 1
       ) cap_anterior ON true
@@ -225,14 +314,14 @@ export async function getMontoACobrarPeriodo({
         SELECT COUNT(*)::int AS cuotas_atrasadas
         FROM cartera.cuotas_credito qc_mora
         WHERE qc_mora.credito_id = c.credito_id
-          AND qc_mora.fecha_vencimiento::date < p.fecha_venc::date
+          AND qc_mora.fecha_vencimiento::date < GREATEST(DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date, ${fechaInicio}::date)
           AND NOT EXISTS (
             SELECT 1 FROM cartera.pagos_credito pc_mora
             WHERE pc_mora.cuota_id = qc_mora.cuota_id
               AND pc_mora."paymentFalse" = false
               AND pc_mora.pagado = true
               AND pc_mora.validation_status IN ('validated', 'no_required')
-              AND COALESCE(pc_mora.fecha_boleta::date, pc_mora.fecha_pago::date) <= p.fecha_venc::date
+              AND COALESCE(pc_mora.fecha_boleta::date, pc_mora.fecha_pago::date) <= GREATEST(DATE_TRUNC(${pg}, p.fecha_venc::timestamp)::date, ${fechaInicio}::date)
           )
       ) mora_real ON true
       GROUP BY
@@ -240,7 +329,7 @@ export async function getMontoACobrarPeriodo({
         c.credito_id, c."statusCredit", c.capital, c.porcentaje_interes, c.cuota,
         c.seguro_10_cuotas, c.gps, c.membresias_pago,
         cap_anterior.total_restante, mora_real.cuotas_atrasadas
-      HAVING (
+      HAVING BOOL_OR(p.solo_atrasado) OR (
         SUM(COALESCE(p.capital_restante, 0)) +
         SUM(COALESCE(p.interes_restante, 0)) +
         SUM(COALESCE(p.iva_12_restante, 0))  +
@@ -252,8 +341,10 @@ export async function getMontoACobrarPeriodo({
     ),
     calc AS (
       SELECT *,
-        ROUND(cap_ant * tasa, 2)                   AS interes,
-        ROUND(ROUND(cap_ant * tasa, 2) * 0.12, 2)  AS iva
+        ROUND(cap_ant * tasa, 2) AS interes_contractual,
+        ROUND(ROUND(cap_ant * tasa, 2) * 0.12, 2) AS iva_contractual,
+        CASE WHEN tiene_cuota_periodo THEN ROUND(cap_ant * tasa, 2) ELSE 0 END AS interes,
+        CASE WHEN tiene_cuota_periodo THEN ROUND(ROUND(cap_ant * tasa, 2) * 0.12, 2) ELSE 0 END AS iva
       FROM per_credito
     ),
     calc_acum AS (
@@ -261,7 +352,9 @@ export async function getMontoACobrarPeriodo({
         calc.*,
         (calc.status IN ('EN_CONVENIO', 'INCOBRABLE', 'CANCELADO', 'PENDIENTE_CANCELACION', 'CAIDO')) AS excluido_mora,
         (calc.status IN ('CANCELADO', 'INCOBRABLE', 'PENDIENTE_CANCELACION'))                          AS excluido_factura,
-        LEAST(GREATEST(cuota_c - interes - iva - seguro - gps - mem, 0::numeric), cap_ant)             AS exp_capital,
+        CASE WHEN tiene_cuota_periodo
+             THEN LEAST(GREATEST(cuota_c - interes - iva - seguro - gps - mem, 0::numeric), cap_ant)
+             ELSE 0 END AS exp_capital,
         COALESCE(acum.acum_capital, 0) AS acum_capital,
         COALESCE(acum.acum_interes, 0) AS acum_interes,
         COALESCE(acum.acum_iva,     0) AS acum_iva,
@@ -283,25 +376,33 @@ export async function getMontoACobrarPeriodo({
           COALESCE(SUM(a.membresias),       0) AS acum_mem
         FROM (
           SELECT
-            COALESCE(MIN(pc_a.capital_restante::numeric), 0) AS capital_restante,
-            COALESCE(MIN(pc_a.interes_restante::numeric), 0) AS interes_restante,
-            COALESCE(MIN(pc_a.iva_12_restante::numeric),  0) AS iva_12_restante,
-            COALESCE(MIN(pc_a.seguro_restante::numeric),  0) AS seguro_restante,
-            COALESCE(MIN(pc_a.gps_restante::numeric),     0) AS gps_restante,
-            COALESCE(MIN(pc_a.membresias::numeric),       0) AS membresias
+            COALESCE(
+              MIN(pc_a.capital_restante::numeric),
+              LEAST(GREATEST(calc.cuota_c - calc.interes_contractual - calc.iva_contractual
+                - calc.seguro_contractual - calc.gps_contractual - calc.mem_contractual, 0::numeric), calc.cap_ant)
+            ) AS capital_restante,
+            COALESCE(MIN(pc_a.interes_restante::numeric), calc.interes_contractual) AS interes_restante,
+            COALESCE(MIN(pc_a.iva_12_restante::numeric), calc.iva_contractual) AS iva_12_restante,
+            COALESCE(MIN(pc_a.seguro_restante::numeric), calc.seguro_contractual) AS seguro_restante,
+            COALESCE(MIN(pc_a.gps_restante::numeric), calc.gps_contractual) AS gps_restante,
+            COALESCE(MIN(pc_a.membresias::numeric), calc.mem_contractual) AS membresias
           FROM cartera.cuotas_credito q_a
           LEFT JOIN cartera.pagos_credito pc_a
             ON pc_a.cuota_id = q_a.cuota_id
             AND pc_a."paymentFalse" = false
+            AND (
+              COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date) IS NULL
+              OR COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date) <= calc.period_start
+            )
           WHERE q_a.credito_id = calc.credito_id
-            AND q_a.fecha_vencimiento::date < calc.bucket
+            AND q_a.fecha_vencimiento::date < calc.period_start
             AND NOT EXISTS (
               SELECT 1 FROM cartera.pagos_credito pc2
               WHERE pc2.cuota_id = q_a.cuota_id
                 AND pc2."paymentFalse" = false
                 AND pc2.pagado = true
                 AND pc2.validation_status IN ('validated', 'no_required')
-                AND COALESCE(pc2.fecha_boleta::date, pc2.fecha_pago::date) <= calc.bucket
+                AND COALESCE(pc2.fecha_boleta::date, pc2.fecha_pago::date) <= calc.period_start
             )
           GROUP BY q_a.cuota_id
           HAVING (
@@ -341,7 +442,7 @@ export async function getMontoACobrarPeriodo({
         MAX(factor_capital_inversionista)        AS factor_capital_inversionista,
         MAX(factor_interes_iva_inversionista)    AS factor_interes_iva_inversionista,
         BOOL_OR(participacion_invalida)          AS participacion_invalida,
-        COUNT(*)::int                           AS cuotas_count
+        COUNT(*) FILTER (WHERE tiene_cuota_periodo)::int AS cuotas_count
       FROM calc_acum
       GROUP BY DATE_TRUNC(${pg}, bucket::timestamp), credito_id
     ),
@@ -352,10 +453,10 @@ export async function getMontoACobrarPeriodo({
         CASE WHEN participacion_invalida THEN 0 ELSE (CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) - ROUND((CASE WHEN NOT excluido_factura THEN exp_capital ELSE 0 END) * factor_capital_inversionista, 2) END AS capital_cube_participacion_actual,
         CASE WHEN participacion_invalida THEN 0 ELSE CASE WHEN NOT excluido_factura THEN ${sql.raw(buildInteresIvaInversionistaSql("interes", "iva", "pbc.credito_id"))} ELSE 0 END END AS interes_iva_inv_participacion_actual,
         CASE WHEN participacion_invalida THEN 0 ELSE CASE WHEN NOT excluido_factura THEN interes + iva - ${sql.raw(buildInteresIvaInversionistaSql("interes", "iva", "pbc.credito_id"))} ELSE 0 END END AS interes_iva_cube_participacion_actual,
-        CASE WHEN participacion_invalida THEN 0 ELSE ROUND((CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant) ELSE exp_capital END) * factor_capital_inversionista, 2) END AS acum_capital_inv_participacion_actual,
-        CASE WHEN participacion_invalida THEN 0 ELSE (CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant) ELSE exp_capital END) - ROUND((CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant) ELSE exp_capital END) * factor_capital_inversionista, 2) END AS acum_capital_cube_participacion_actual,
-        CASE WHEN participacion_invalida THEN 0 ELSE ${sql.raw(buildInteresIvaInversionistaSql("CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes ELSE interes END", "CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_iva ELSE iva END", "pbc.credito_id"))} END AS acum_interes_iva_inv_participacion_actual,
-        CASE WHEN participacion_invalida THEN 0 ELSE (CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes + acum_iva ELSE interes + iva END) - ${sql.raw(buildInteresIvaInversionistaSql("CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_interes ELSE interes END", "CASE WHEN excluido_mora THEN 0 WHEN cuotas_atrasadas > 0 THEN acum_iva ELSE iva END", "pbc.credito_id"))} END AS acum_interes_iva_cube_participacion_actual
+        CASE WHEN participacion_invalida THEN 0 ELSE ROUND((${sql.raw(atrasadoCapital)}) * factor_capital_inversionista, 2) END AS acum_capital_inv_participacion_actual,
+        CASE WHEN participacion_invalida THEN 0 ELSE (${sql.raw(atrasadoCapital)}) - ROUND((${sql.raw(atrasadoCapital)}) * factor_capital_inversionista, 2) END AS acum_capital_cube_participacion_actual,
+        CASE WHEN participacion_invalida THEN 0 ELSE ${sql.raw(atrasadoInteresIvaInversionista)} END AS acum_interes_iva_inv_participacion_actual,
+        CASE WHEN participacion_invalida THEN 0 ELSE (${sql.raw(atrasadoInteres)}) + (${sql.raw(atrasadoIva)}) - ${sql.raw(atrasadoInteresIvaInversionista)} END AS acum_interes_iva_cube_participacion_actual
       FROM per_bucket_credit pbc
     ),
     participacion_invalida_rango AS (
@@ -391,30 +492,12 @@ export async function getMontoACobrarPeriodo({
       COALESCE(SUM(cuotas_atrasadas) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora), 0)::int AS mora_count,
       COUNT(credito_id)::int                                                                    AS total_credits,
       COUNT(credito_id) FILTER (WHERE cuotas_atrasadas > 0 AND NOT excluido_mora)::int          AS credits_con_mora,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN LEAST(acum_capital, cap_ant)
-        ELSE exp_capital END), 0)                                                                 AS acum_total_cuota,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN acum_interes
-        ELSE interes END), 0)                                                                     AS acum_total_interes,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN acum_iva
-        ELSE iva END), 0)                                                                         AS acum_total_iva,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN acum_seguro
-        ELSE seguro END), 0)                                                                      AS acum_total_seguro,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN acum_gps
-        ELSE gps END), 0)                                                                         AS acum_total_gps,
-      COALESCE(SUM(CASE
-        WHEN excluido_mora     THEN 0
-        WHEN cuotas_atrasadas > 0 THEN acum_mem
-        ELSE mem END), 0)                                                                         AS acum_total_membresias,
+      COALESCE(SUM(${sql.raw(atrasadoCapital)}), 0)       AS acum_total_cuota,
+      COALESCE(SUM(${sql.raw(atrasadoInteres)}), 0)       AS acum_total_interes,
+      COALESCE(SUM(${sql.raw(atrasadoIva)}), 0)           AS acum_total_iva,
+      COALESCE(SUM(${sql.raw(atrasadoSeguro)}), 0)        AS acum_total_seguro,
+      COALESCE(SUM(${sql.raw(atrasadoGps)}), 0)           AS acum_total_gps,
+      COALESCE(SUM(${sql.raw(atrasadoMembresias)}), 0)    AS acum_total_membresias,
       -- Interés a inversionistas (lo distribuido a externos). Por período: lo pagado en ese
       -- bucket. Acumulado: suma corrida hasta el bucket (el último bucket = gran total).
       COALESCE(MAX(ip.total_interes_inversionista), 0)                                            AS total_interes_inversionista,
@@ -439,8 +522,15 @@ export async function getMontoACobrarPeriodo({
     CROSS JOIN participacion_invalida_rango pir
     GROUP BY COALESCE(split_participacion_actual.bucket, ip.pagos_bucket)
     ORDER BY COALESCE(split_participacion_actual.bucket, ip.pagos_bucket) ASC
-  `);
+  `;
+}
 
+export async function getMontoACobrarPeriodo(input: {
+  periodo: Periodo;
+  fechaInicio: string;
+  fechaFin: string;
+}) {
+  const result = await db.execute(buildMontoACobrarPeriodoQuery(input));
   return result.rows;
 }
 

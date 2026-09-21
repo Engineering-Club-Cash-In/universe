@@ -609,7 +609,9 @@
     monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }).notNull(),
     fecha_aplicado: timestamp("fecha_aplicado"), // Fecha en que se aplicó el pago al crédito
     origen_pago: origenPagoEnum("origen_pago"),
-  });
+  }, (table) => ({
+    cuotaIdx: index("idx_pagos_credito_cuota").on(table.cuota_id),
+  }));
   export const boletas = customSchema.table("boletas", {
     id: serial("id").primaryKey(),
     pago_id: integer("pago_id")

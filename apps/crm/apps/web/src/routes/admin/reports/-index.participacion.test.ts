@@ -137,9 +137,7 @@ test("pantalla y workbook usan las mismas filas de Cobranza con períodos vacío
 	expect(source.match(/fillMissingMontoACobrarPeriods\(/g)?.length).toBe(1);
 	expect(source).not.toContain("function fillMissingPeriods(");
 	expect(source).toContain("const rows = montoCobrarRows;");
-	expect(source).toMatch(
-		/const lastRow = rows\.findLast\(\s*\(row\) => row\.cuotas_count > 0,?\s*\)/,
-	);
+	expect(source).toContain("const lastRow = a ? rows.at(-1) : undefined;");
 });
 
 test("integra la mora oficial en la tabla existente sin tarjeta adicional", async () => {

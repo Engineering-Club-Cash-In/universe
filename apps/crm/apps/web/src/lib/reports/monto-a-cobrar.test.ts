@@ -118,6 +118,7 @@ test("reemplaza solo la mora del mes operativo con el cierre oficial", () => {
 
 test("consolida interés con IVA y seguro con GPS sin alterar el total", () => {
 	expect(getMontoACobrarViewRow(montoRow, false)).toEqual({
+		cuotas: 2,
 		capital: 100,
 		interesIva: 11.2,
 		servicios: 7,
@@ -133,8 +134,9 @@ test("consolida interés con IVA y seguro con GPS sin alterar el total", () => {
 	});
 });
 
-test("conserva la semántica acumulada en los rubros consolidados", () => {
+test("el acumulado muestra solo las cuotas anteriores pendientes", () => {
 	expect(getMontoACobrarViewRow(montoRow, true)).toMatchObject({
+		cuotas: 1,
 		capital: 200,
 		interesIva: 22.4,
 		servicios: 14,
@@ -301,10 +303,11 @@ test("el acumulado usa el último período y no suma valores ya acumulados", () 
 	});
 });
 
-test("el acumulado conserva el split ante un último bucket solo de pagos", () => {
+test("el acumulado usa el último corte exacto aunque haya quedado en cero", () => {
 	const rows = [
 		{
 			cuotas_count: 1,
+			mora_count: 1,
 			capital_inv_participacion_actual: "20",
 			capital_cube_participacion_actual: "180",
 			interes_iva_inv_participacion_actual: "10",
@@ -315,6 +318,18 @@ test("el acumulado conserva el split ante un último bucket solo de pagos", () =
 		},
 		{
 			cuotas_count: 0,
+			mora_count: 2,
+			capital_inv_participacion_actual: "30",
+			capital_cube_participacion_actual: "270",
+			interes_iva_inv_participacion_actual: "15",
+			interes_iva_cube_participacion_actual: "135",
+			creditos_participacion_invalida: 0,
+			creditos_participacion_invalida_rango: 0,
+			cuotas_participacion_invalida: 0,
+		},
+		{
+			cuotas_count: 0,
+			mora_count: 0,
 			capital_inv_participacion_actual: "0",
 			capital_cube_participacion_actual: "0",
 			interes_iva_inv_participacion_actual: "0",
@@ -326,9 +341,9 @@ test("el acumulado conserva el split ante un último bucket solo de pagos", () =
 	];
 
 	expect(getMontoACobrarParticipacionTotals(rows, true)).toMatchObject({
-		capitalInv: 20,
-		capitalCube: 180,
-		interesIvaInv: 10,
-		interesIvaCube: 90,
+		capitalInv: 0,
+		capitalCube: 0,
+		interesIvaInv: 0,
+		interesIvaCube: 0,
 	});
 });

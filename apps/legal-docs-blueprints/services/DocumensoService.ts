@@ -505,7 +505,6 @@ export class DocumensoService {
     emails: string[]
   ): Promise<{
     signs: string[];
-    linksPorEmail?: Array<{ email: string; url: string }>;
     linkDocument: string;
     r2Key?: string;
   }> {
@@ -567,16 +566,8 @@ export class DocumensoService {
       const idDocument = documentResponse?.documentId || documentResponse?.id || '';
       const r2Key = documentResponse?.r2Key;
 
-      // El link de cada correo, para que quien llame no tenga que suponer que
-      // vienen en el mismo orden en que se mandaron.
-      const linksPorEmail = (documentResponse?.recipients ?? []).map((r: any) => ({
-        email: String(r.email ?? ''),
-        url: `${baseUrl}/sign/${r.token}`,
-      }));
-
       return {
         signs: signingLinks,
-        linksPorEmail,
         linkDocument: `${baseUrl}/t/${this.team}/documents/${idDocument}`,
         r2Key,
       };

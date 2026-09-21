@@ -739,6 +739,8 @@ export class WeeTrustService {
 			 * pasa, el posicionamiento "auto" asigna cada widget a su dueño.
 			 */
 			signers?: ContractSigner[];
+			/** false = reparto por orden de llegada, como antes de los roles. */
+			repartoPorRol?: boolean;
 			signaturePositions?: WeeTrustSignaturePosition[];
 			hasOrder?: boolean;
 			page?: number;
@@ -773,7 +775,17 @@ export class WeeTrustService {
 			// Modos "auto" o "fixed": fijar posiciones
 			let positions = options.signaturePositions;
 
-			if (positioningMode === "auto" && options.contractType) {
+			if (
+				positioningMode === "auto" &&
+				options.contractType &&
+				options.repartoPorRol === false
+			) {
+				positions = await WeeTrustService.locateSignatureWidgetsLegacy(
+					pdfBuffer,
+					options.contractType,
+					options.signatory.map((s) => s.emailID),
+				);
+			} else if (positioningMode === "auto" && options.contractType) {
 				// Detectar las líneas de firma del PDF y repartirlas por rol
 				positions = await WeeTrustService.locateSignatureWidgets(
 					pdfBuffer,
@@ -862,6 +874,14 @@ export class WeeTrustService {
 		contractType: ContractType,
 		signers: ContractSigner[],
 		observers: string[] = WEETRUST_OBSERVERS,
+		/**
+		 * `legado` es para quien sólo manda `emails`, sin rol (hoy la app
+		 * legal-documents). Se comporta como antes de la firma por rol: los
+		 * firmantes van en el orden en que llegaron, los widgets se reparten por
+		 * orden de llegada y no se pide verificación de identidad. Sin esto, un
+		 * contrato con línea de rep legal fallaba porque ese caller nunca lo manda.
+		 */
+		modo: "rol" | "legado" = "rol",
 	): Promise<{
 		signs: string[];
 		linkDocument: string;
@@ -887,15 +907,17 @@ export class WeeTrustService {
 		// Mandar a alguien sin línea de firma asignada hace que WeeTrust rechace
 		// el envío entero con "<email> undefined".
 		const porEmail = new Map<string, ContractSigner>();
-		for (const s of firmantesEnOrdenDeFirma(contractType, signers)) {
-			porEmail.set(s.email, s);
+		const ordenados =
+			modo === "rol" ? firmantesEnOrdenDeFirma(contractType, signers) : signers;
+		for (const s of ordenados) {
+			if (!porEmail.has(s.email)) porEmail.set(s.email, s);
 		}
 
 		const signatory: WeeTrustSignatory[] = [...porEmail.values()].map(
 			(s, index) => ({
 				emailID: s.email,
 				name: nombreParaWeeTrust(s.name, index),
-				...identificacionDe(s.role, contractType),
+				...(modo === "rol" ? identificacionDe(s.role, contractType) : {}),
 				...(s.phone ? { phone: s.phone } : {}),
 			}),
 		);
@@ -908,6 +930,7 @@ export class WeeTrustService {
 			contractType,
 			positioningMode: "auto",
 			sharedWith: observers,
+			repartoPorRol: modo === "rol",
 		});
 
 		console.log(`✓ [WeeTrust] ${result.signingLinks.length} link(s) de firma generados`);

@@ -19,9 +19,9 @@ export const satVehiculosRouter = {
 			}),
 		)
 		.meta({ audit: { entity: "vehicle", action: "sat_verification_run" } })
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			const resultado = await verificarVehiculosEnSat({
-				origen: "manual",
+				usuarioId: context.user.id,
 				forzar: input.forzar,
 				intento: input.intento,
 			});

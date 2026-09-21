@@ -37,14 +37,9 @@ import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
-import {
-	verificarSatMensualPendiente,
-	verificarVehiculosEnSat,
-} from "./jobs/sat-verificacion-vehiculos";
 import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
-import { toDateStrGT } from "./lib/guatemala-month-window";
 import {
 	PARTNER_AUTH_BASE_PATH,
 	PARTNER_CHANGE_PASSWORD_PATH,
@@ -1205,7 +1200,6 @@ setTimeout(() => {
 	checkSeguimientosVencidos().catch(console.error);
 	checkCasosSinContacto(3).catch(console.error);
 	procesarSeguimientosRecurrentes().catch(console.error);
-	verificarSatMensualPendiente().catch(console.error);
 }, 10_000);
 
 // Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
@@ -1220,27 +1214,6 @@ function scheduleAtMidnightGT() {
 	}, next.getTime() - now.getTime());
 }
 scheduleAtMidnightGT();
-
-// Verificación de vehículos en SAT: 03:00 GT (09:00 UTC) del día 1 de cada mes.
-// Si el proceso inició después de esa hora, el catch-up de arranque cubre la
-// corrida pendiente; el timer conserva el disparo mensual normal.
-function scheduleVerificacionSatMensual() {
-	const now = new Date();
-	const next = new Date();
-	next.setUTCHours(9, 0, 0, 0);
-	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-
-	setTimeout(async () => {
-		const diaGT = Number(toDateStrGT(new Date()).split("-")[2]);
-
-		if (diaGT === 1) {
-			await verificarVehiculosEnSat({ origen: "cron" }).catch(console.error);
-		}
-		scheduleVerificacionSatMensual();
-	}, next.getTime() - now.getTime());
-}
-scheduleVerificacionSatMensual();
-
 
 export default {
 	port: process.env.PORT || 3000,

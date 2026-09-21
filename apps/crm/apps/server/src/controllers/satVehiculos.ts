@@ -33,7 +33,11 @@ export interface VehiculoSatPropio extends SenalesSatVehiculo {
 	estado: string;
 }
 
-export type EstadoConsultaSat = "OK" | "ERROR" | "CODIGO_REQUERIDO" | "BLOQUEADO";
+export type EstadoConsultaSat =
+	| "OK"
+	| "ERROR"
+	| "CODIGO_REQUERIDO"
+	| "BLOQUEADO";
 
 export interface SatVehiculosPropiosResponse {
 	nit: string;
@@ -41,6 +45,28 @@ export interface SatVehiculosPropiosResponse {
 	vehiculos: VehiculoSatPropio[];
 	/** Solo es true cuando el paginador de SAT quedó agotado. */
 	listadoCompleto: boolean;
+	mensajeError?: string;
+	evidencia?: string;
+}
+
+export interface SatTitularObjetivo {
+	nit: string;
+	nombre: string;
+}
+
+export interface SatVehiculosTitularResponse extends SatTitularObjetivo {
+	estado: EstadoConsultaSat;
+	vehiculos: VehiculoSatPropio[];
+	/** Solo es true cuando se recorrieron todas las páginas del titular. */
+	listadoCompleto: boolean;
+	mensajeError?: string;
+	evidencia?: string;
+}
+
+export interface SatVehiculosDelegadosResponse {
+	cuentaNit: string;
+	estado: EstadoConsultaSat;
+	titulares: SatVehiculosTitularResponse[];
 	mensajeError?: string;
 	evidencia?: string;
 }
@@ -75,11 +101,59 @@ async function visible(page: Page, selector: string): Promise<boolean> {
 	}, selector);
 }
 
+async function marcarPermisosDelegados(page: Page) {
+	const marcado = await page.evaluate(() => {
+		const normalizar = (value: string | null | undefined) =>
+			(value || "")
+				.normalize("NFD")
+				.replace(/[\u0300-\u036f]/g, "")
+				.toLowerCase()
+				.replace(/\s+/g, " ")
+				.trim();
+
+		const candidatos = [
+			...document.querySelectorAll<HTMLInputElement>(
+				"input[type='checkbox'], input[type='radio']",
+			),
+		];
+		const checkbox = candidatos.find((element) => {
+			const etiquetaAria = normalizar(element.getAttribute("aria-label"));
+			if (etiquetaAria.includes("permisos delegados")) return true;
+
+			const etiqueta = element.id
+				? document.querySelector<HTMLLabelElement>(
+						`label[for='${CSS.escape(element.id)}']`,
+					)
+				: null;
+			if (normalizar(etiqueta?.textContent).includes("permisos delegados")) {
+				return true;
+			}
+
+			const contenedor = element.closest(
+				".ui-selectbooleancheckbox, label, fieldset, td, .login-field",
+			);
+			return normalizar(contenedor?.textContent).includes("permisos delegados");
+		});
+
+		if (!checkbox) return false;
+		if (!checkbox.checked) checkbox.click();
+		return checkbox.checked;
+	});
+
+	if (!marcado) {
+		throw new SatLoginError(
+			"No se encontró o no se pudo activar 'Permisos delegados' en el login de SAT.",
+		);
+	}
+}
+
 export async function iniciarSesion(
 	page: Page,
 	credenciales: CredencialesSat,
+	opciones: { permisosDelegados?: boolean } = {},
 ) {
 	await abrirLogin(page);
+	if (opciones.permisosDelegados) await marcarPermisosDelegados(page);
 	await page.type(SEL.usuario, credenciales.usuario, { delay: 60 });
 	await page.type(SEL.password, credenciales.password, { delay: 60 });
 	await page.click(SEL.ingresar);
@@ -110,11 +184,77 @@ export async function iniciarSesion(
 	return url;
 }
 
+export async function seleccionarTitular(
+	page: Page,
+	titular: SatTitularObjetivo,
+) {
+	const nitObjetivo = normalizarNitTitular(titular.nit);
+	await page.waitForSelector("#contribButton", { timeout: 30000 });
+	await page.click("#contribButton");
+	await page.waitForFunction(
+		(nit) =>
+			[
+				...document.querySelectorAll<HTMLElement>(
+					".menu-contrib a.ui-menuitem-link",
+				),
+			].some((element) => {
+				const style = window.getComputedStyle(element);
+				return (
+					(element.textContent || "")
+						.toUpperCase()
+						.replace(/[^A-Z0-9]/g, "")
+						.includes(nit) &&
+					style.display !== "none" &&
+					style.visibility !== "hidden" &&
+					element.offsetParent !== null
+				);
+			}),
+		{ timeout: 30000, polling: 300 },
+		nitObjetivo,
+	);
+
+	const seleccionado = await page.evaluate((nit) => {
+		const enlace = [
+			...document.querySelectorAll<HTMLElement>(
+				".menu-contrib a.ui-menuitem-link",
+			),
+		].find((element) =>
+			(element.textContent || "")
+				.toUpperCase()
+				.replace(/[^A-Z0-9]/g, "")
+				.includes(nit),
+		);
+		if (!enlace) return false;
+		enlace.click();
+		return true;
+	}, nitObjetivo);
+
+	if (!seleccionado) {
+		throw new SatLoginError(
+			`No se encontró el titular delegado ${titular.nit} (${titular.nombre}).`,
+		);
+	}
+
+	await page.waitForFunction(
+		(nit) =>
+			(document.querySelector("#lblUserTop")?.textContent || "")
+				.toUpperCase()
+				.replace(/[^A-Z0-9]/g, "")
+				.includes(nit),
+		{ timeout: 30000, polling: 300 },
+		nitObjetivo,
+	);
+	await esperar(1500);
+}
+
 export async function explorarMenu(page: Page) {
 	return page.evaluate(() =>
 		[...document.querySelectorAll("a, button, span[onclick]")]
 			.map((element) => ({
-				texto: (element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80),
+				texto: (element.textContent || "")
+					.trim()
+					.replace(/\s+/g, " ")
+					.slice(0, 80),
 				id: (element as HTMLElement).id || null,
 				href: (element as HTMLAnchorElement).href || null,
 				onclick: element.getAttribute("onclick") || null,
@@ -123,14 +263,40 @@ export async function explorarMenu(page: Page) {
 	);
 }
 
-async function esperarFrameListado(page: Page, timeout = 90000): Promise<Frame> {
+async function esperarFrameListado(
+	page: Page,
+	timeout = 90000,
+	nitEsperado?: string,
+): Promise<Frame> {
 	const inicio = Date.now();
 	while (Date.now() - inicio < timeout) {
-		const frame = page.frames().find((item) => item.url().includes("listadoVehiculos"));
-		if (frame) return frame;
+		const candidatos = page
+			.frames()
+			.filter((item) => item.url().includes("listadoVehiculos"));
+		for (const frame of candidatos) {
+			if (nitEsperado) {
+				const nitListado = await frame
+					.evaluate(() => {
+						const texto = document.body?.innerText ?? "";
+						return texto.match(/\bNIT\s*:\s*([A-Z0-9-]+)/i)?.[1] ?? null;
+					})
+					.catch(() => null);
+				if (
+					normalizarNitTitular(nitListado ?? "") !==
+					normalizarNitTitular(nitEsperado)
+				) {
+					continue;
+				}
+			}
+			return frame;
+		}
 		await esperar(500);
 	}
-	throw new SatLoginError("No apareció el iframe del listado de vehículos.");
+	throw new SatLoginError(
+		nitEsperado
+			? `No apareció el listado de vehículos del titular ${nitEsperado}.`
+			: "No apareció el iframe del listado de vehículos.",
+	);
 }
 
 export async function irAVehiculosPropios(page: Page): Promise<Frame> {
@@ -139,15 +305,18 @@ export async function irAVehiculosPropios(page: Page): Promise<Frame> {
 			() =>
 				[...document.querySelectorAll("a, span, li, div")].some(
 					(element) =>
-						(element.getAttribute("onclick") || "").includes("listadoVehiculos") ||
-						(element.textContent || "").trim() === "Vehículos Propios",
+						(element.getAttribute("onclick") || "").includes(
+							"listadoVehiculos",
+						) || (element.textContent || "").trim() === "Vehículos Propios",
 				),
 			{ timeout: 30000, polling: 500 },
 		)
 		.catch(() => null);
 
 	const clicado = await page.evaluate(() => {
-		const elementos = [...document.querySelectorAll<HTMLElement>("a, span, li, div")];
+		const elementos = [
+			...document.querySelectorAll<HTMLElement>("a, span, li, div"),
+		];
 		const conHandler = elementos.find((element) =>
 			(element.getAttribute("onclick") || "").includes("listadoVehiculos"),
 		);
@@ -164,11 +333,49 @@ export async function irAVehiculosPropios(page: Page): Promise<Frame> {
 	});
 
 	if (!clicado) {
-		throw new SatLoginError("No se encontró la opción 'Vehículos Propios' en el menú.");
+		throw new SatLoginError(
+			"No se encontró la opción 'Vehículos Propios' en el menú.",
+		);
 	}
 
 	const frame = await esperarFrameListado(page);
-	await frame.waitForSelector(SEL.tablaVehiculos, { timeout: 90000 }).catch(() => null);
+	await frame
+		.waitForSelector(SEL.tablaVehiculos, { timeout: 90000 })
+		.catch(() => null);
+	return frame;
+}
+
+/** Flujo de Agencia Virtual cuando la cuenta inició con permisos delegados. */
+export async function irAListadoVehiculosDelegado(
+	page: Page,
+	nitTitular: string,
+): Promise<Frame> {
+	await page.waitForFunction(
+		() =>
+			[...document.querySelectorAll<HTMLAnchorElement>("a")].some((element) =>
+				(element.getAttribute("onclick") || "").includes(
+					"listadoVehiculos.jsf",
+				),
+			),
+		{ timeout: 30000, polling: 300 },
+	);
+	const clicado = await page.evaluate(() => {
+		const enlace = [...document.querySelectorAll<HTMLAnchorElement>("a")].find(
+			(element) =>
+				(element.getAttribute("onclick") || "").includes(
+					"listadoVehiculos.jsf",
+				),
+		);
+		if (!enlace) return false;
+		enlace.click();
+		return true;
+	});
+	if (!clicado) {
+		throw new SatLoginError("No se encontró la opción 'Listado de Vehículos'.");
+	}
+
+	const frame = await esperarFrameListado(page, 90000, nitTitular);
+	await frame.waitForSelector(SEL.tablaVehiculos, { timeout: 90000 });
 	return frame;
 }
 
@@ -216,11 +423,11 @@ export async function listadoSatCompleto(frame: Frame): Promise<boolean> {
 			document.getElementById(`${tabla.id}_paginator_bottom`),
 		].filter((element): element is HTMLElement => element !== null);
 		const candidatos = paginadores.length
-			? paginadores.flatMap((paginador) =>
-					[...paginador.querySelectorAll<HTMLElement>(
+			? paginadores.flatMap((paginador) => [
+					...paginador.querySelectorAll<HTMLElement>(
 						".ui-paginator-next, [title*='Next'], [title*='Siguiente']",
-					)],
-			  )
+					),
+				])
 			: [];
 		const siguiente = candidatos[0];
 
@@ -233,7 +440,9 @@ export async function listadoSatCompleto(frame: Frame): Promise<boolean> {
 	}, SEL.tablaVehiculos);
 }
 
-export async function leerTablaVehiculos(frame: Frame): Promise<VehiculoSatPropio[]> {
+export async function leerTablaVehiculos(
+	frame: Frame,
+): Promise<VehiculoSatPropio[]> {
 	await frame.waitForSelector(SEL.tablaVehiculos, { timeout: 20000 });
 
 	return frame.evaluate((selector) => {
@@ -242,14 +451,23 @@ export async function leerTablaVehiculos(frame: Frame): Promise<VehiculoSatPropi
 
 		const controlesActivos = (celda: Element | undefined) => {
 			if (!celda) return [];
-			return [...celda.querySelectorAll<HTMLElement>("a, button, input, img")].filter(
-				(element) => {
-					const deshabilitado = element.closest(
-						"[disabled], [aria-disabled='true'], .ui-state-disabled, .disabled",
-					);
-					return !deshabilitado;
-				},
-			);
+			return [
+				...celda.querySelectorAll<HTMLElement>(
+					"a, button, input:not([type='hidden']), span[onclick], img",
+				),
+			].filter((element) => {
+				// Una accion anidada (p. ej. <a><img>) no es otro control.
+				const accionPadre = element.parentElement?.closest(
+					"a, button, input, span[onclick], img[onclick]",
+				);
+				if (accionPadre && celda.contains(accionPadre)) {
+					return false;
+				}
+				const deshabilitado = element.closest(
+					"[disabled], [aria-disabled='true'], .ui-state-disabled, .disabled",
+				);
+				return !deshabilitado;
+			});
 		};
 
 		const leerImpresiones = (celda: Element | undefined) => {
@@ -262,23 +480,26 @@ export async function leerTablaVehiculos(frame: Frame): Promise<VehiculoSatPropi
 			}
 
 			const descripcion = (element: HTMLElement) =>
-				[
-					element.getAttribute("title"),
-					element.getAttribute("alt"),
-					element.getAttribute("src"),
-					element.getAttribute("href"),
-					element.getAttribute("onclick"),
-				]
+				[element, ...element.querySelectorAll<HTMLElement>("img")]
+					.flatMap((item) => [
+						item.getAttribute("title"),
+						item.getAttribute("alt"),
+						item.getAttribute("src"),
+						item.getAttribute("href"),
+						item.getAttribute("onclick"),
+					])
 					.filter(Boolean)
 					.join(" ")
 					.toLowerCase();
-			const tarjeta = controles.filter((element) =>
-				descripcion(element).includes("tarjeta") ||
-				descripcion(element).includes("circulacion"),
+			const tarjeta = controles.filter(
+				(element) =>
+					descripcion(element).includes("tarjeta") ||
+					descripcion(element).includes("circulacion"),
 			);
-			const certificado = controles.filter((element) =>
-				descripcion(element).includes("certificado") ||
-				descripcion(element).includes("propiedad"),
+			const certificado = controles.filter(
+				(element) =>
+					descripcion(element).includes("certificado") ||
+					descripcion(element).includes("propiedad"),
 			);
 
 			if (tarjeta.length > 0 || certificado.length > 0) {
@@ -309,7 +530,9 @@ export async function leerTablaVehiculos(frame: Frame): Promise<VehiculoSatPropi
 					!fila.classList.contains("ui-datatable-empty-message") &&
 					!fila.querySelector(".ui-datatable-empty-message") &&
 					!fila.querySelector("[colspan]") &&
-					!/no se encontraron registros|no hay registros|no records found/i.test(texto)
+					!/no se encontraron registros|no hay registros|no records found/i.test(
+						texto,
+					)
 				);
 			})
 			.map((fila) => {
@@ -317,8 +540,7 @@ export async function leerTablaVehiculos(frame: Frame): Promise<VehiculoSatPropi
 				const textos = celdas.map((celda) =>
 					(celda.textContent || "").trim().replace(/\s+/g, " "),
 				);
-				const puedeAutorizarTraspaso =
-					controlesActivos(celdas[6]).length > 0;
+				const puedeAutorizarTraspaso = controlesActivos(celdas[6]).length > 0;
 				const impresiones = leerImpresiones(celdas[9]);
 				const estado = textos[5] ?? "";
 				const estadoActivo = estado.trim().toLowerCase() === "activo";
@@ -349,6 +571,98 @@ export async function leerTablaVehiculos(frame: Frame): Promise<VehiculoSatPropi
 			})
 			.filter((vehiculo) => vehiculo.placa.length > 0);
 	}, SEL.tablaVehiculos);
+}
+
+function firmaPagina(vehiculos: VehiculoSatPropio[]) {
+	return vehiculos
+		.map(
+			(vehiculo) => `${vehiculo.placa}|${vehiculo.estado}|${vehiculo.modelo}`,
+		)
+		.join(";");
+}
+
+async function hacerClickSiguiente(frame: Frame): Promise<boolean> {
+	return frame.evaluate((selector) => {
+		const tabla = document.querySelector(selector);
+		if (!tabla) return false;
+
+		const paginadores = [
+			document.getElementById(`${tabla.id}_paginator_top`),
+			document.getElementById(`${tabla.id}_paginator_bottom`),
+		].filter((element): element is HTMLElement => element !== null);
+		const selectorSiguiente =
+			".ui-paginator-next, [title*='Next'], [title*='Siguiente'], " +
+			"[aria-label*='next'], [id$=':btnNext'], [name$=':btnNext']";
+		const botones = paginadores.length
+			? paginadores.flatMap((paginador) => [
+					...paginador.querySelectorAll<HTMLElement>(selectorSiguiente),
+				])
+			: [...document.querySelectorAll<HTMLElement>(selectorSiguiente)];
+		const siguiente = botones.find(
+			(element) =>
+				!element.classList.contains("ui-state-disabled") &&
+				element.getAttribute("aria-disabled") !== "true" &&
+				!(element as HTMLButtonElement).disabled,
+		);
+
+		if (!siguiente) return false;
+		siguiente.click();
+		return true;
+	}, SEL.tablaVehiculos);
+}
+
+/** Lee las diez filas visibles y avanza hasta agotar la paginación de SAT. */
+export async function leerTodasLasPaginas(
+	frame: Frame,
+): Promise<{ vehiculos: VehiculoSatPropio[]; listadoCompleto: boolean }> {
+	const MAX_PAGINAS = 500;
+	const vehiculos = new Map<string, VehiculoSatPropio>();
+	const totalRegistros = await frame.evaluate(() => {
+		const texto = document.body?.innerText ?? "";
+		const encontrado = texto.match(/Total\s+Registros\s*:\s*([\d.,]+)/i);
+		return encontrado ? Number(encontrado[1].replace(/[^\d]/g, "")) : null;
+	});
+	let filasLeidas = 0;
+
+	for (let pagina = 0; pagina < MAX_PAGINAS; pagina += 1) {
+		const actuales = await leerTablaVehiculos(frame);
+		filasLeidas += actuales.length;
+		const firmaAnterior = firmaPagina(actuales);
+		for (const vehiculo of actuales) {
+			const clave = vehiculo.placa.toUpperCase().replace(/[^A-Z0-9]/g, "");
+			if (clave) vehiculos.set(clave, vehiculo);
+		}
+
+		const avanzo = await hacerClickSiguiente(frame);
+		if (!avanzo) {
+			return {
+				vehiculos: [...vehiculos.values()],
+				listadoCompleto:
+					totalRegistros !== null && filasLeidas === totalRegistros,
+			};
+		}
+
+		await frame.waitForFunction(
+			(selector, firma) => {
+				const tabla = document.querySelector(selector);
+				if (!tabla) return false;
+				const filas = [...tabla.querySelectorAll("tbody tr")]
+					.map((fila) => {
+						const textos = [...fila.querySelectorAll("td")].map((celda) =>
+							(celda.textContent || "").trim().replace(/\s+/g, " "),
+						);
+						return `${textos[0] ?? ""}|${textos[5] ?? ""}|${textos[3] ?? ""}`;
+					})
+					.join(";");
+				return filas.length > 0 && filas !== firma;
+			},
+			{ timeout: 30000, polling: 300 },
+			SEL.tablaVehiculos,
+			firmaAnterior,
+		);
+	}
+
+	return { vehiculos: [...vehiculos.values()], listadoCompleto: false };
 }
 
 export async function conNavegador<T>(
@@ -390,7 +704,10 @@ function credencialesDelEntorno(): CredencialesSat & { nit: string } {
 	return { usuario, password, nit: usuario };
 }
 
-function clasificarError(error: unknown, evidencia?: string): EstadoConsultaSat {
+function clasificarError(
+	error: unknown,
+	evidencia?: string,
+): EstadoConsultaSat {
 	if (error instanceof SatRequiereCodigoError) return "CODIGO_REQUERIDO";
 
 	const texto = (evidencia || "").toLowerCase();
@@ -402,6 +719,188 @@ function clasificarError(error: unknown, evidencia?: string): EstadoConsultaSat 
 	}
 
 	return "ERROR";
+}
+
+function normalizarNitTitular(nit: string) {
+	return nit.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export function titularesDelegadosDelEntorno(): SatTitularObjetivo[] {
+	const raw = (
+		process.env.SAT_AV_TITULARES ??
+		process.env.SAT_AV_TITULAR_NITS ??
+		""
+	).trim();
+	if (!raw) {
+		throw new Error(
+			"Falta SAT_AV_TITULARES. Debe contener un JSON con los titulares delegados.",
+		);
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = raw.startsWith("[") ? JSON.parse(raw) : raw.split(",");
+	} catch {
+		throw new Error(
+			'SAT_AV_TITULARES no contiene un JSON válido. Usa [{"nit":"...","nombre":"..."}].',
+		);
+	}
+
+	if (!Array.isArray(parsed)) {
+		throw new Error("SAT_AV_TITULARES debe ser un arreglo de titulares.");
+	}
+
+	const titulares = parsed.map((item): SatTitularObjetivo => {
+		if (typeof item === "string") {
+			const nit = item.trim();
+			if (!normalizarNitTitular(nit)) {
+				throw new Error("Cada titular SAT debe incluir un NIT válido.");
+			}
+			return { nit, nombre: nit };
+		}
+
+		if (!item || typeof item !== "object") {
+			throw new Error("Cada titular SAT debe incluir NIT y nombre.");
+		}
+
+		const registro = item as Record<string, unknown>;
+		const nit = String(registro.nit ?? "").trim();
+		const nombre = String(registro.nombre ?? registro.name ?? nit).trim();
+		if (!normalizarNitTitular(nit) || !nombre) {
+			throw new Error("Cada titular SAT debe incluir NIT y nombre.");
+		}
+		return { nit, nombre };
+	});
+
+	const unicos = new Map<string, SatTitularObjetivo>();
+	for (const titular of titulares) {
+		const clave = normalizarNitTitular(titular.nit);
+		if (!unicos.has(clave)) unicos.set(clave, titular);
+	}
+	if (unicos.size === 0) {
+		throw new Error("SAT_AV_TITULARES no contiene titulares configurados.");
+	}
+	return [...unicos.values()];
+}
+
+function titularConError(
+	titular: SatTitularObjetivo,
+	estado: EstadoConsultaSat,
+	mensajeError: string,
+	evidencia?: string,
+): SatVehiculosTitularResponse {
+	return {
+		...titular,
+		estado,
+		vehiculos: [],
+		listadoCompleto: false,
+		mensajeError,
+		evidencia,
+	};
+}
+
+function estadoGeneralDelegado(
+	titulares: SatVehiculosTitularResponse[],
+): EstadoConsultaSat {
+	if (
+		titulares.length > 0 &&
+		titulares.every((titular) => titular.estado === "OK")
+	) {
+		return "OK";
+	}
+	if (titulares.some((titular) => titular.estado === "CODIGO_REQUERIDO")) {
+		return "CODIGO_REQUERIDO";
+	}
+	if (titulares.some((titular) => titular.estado === "BLOQUEADO")) {
+		return "BLOQUEADO";
+	}
+	return "ERROR";
+}
+
+async function consultarTitularDelegado(
+	page: Page,
+	titular: SatTitularObjetivo,
+): Promise<SatVehiculosTitularResponse> {
+	try {
+		await seleccionarTitular(page, titular);
+		const listado = await irAListadoVehiculosDelegado(page, titular.nit);
+		const resultado = await leerTodasLasPaginas(listado);
+
+		if (!resultado.listadoCompleto) {
+			throw new SatScrapeError(
+				"El listado de vehículos quedó incompleto; se cancela la corrida del titular.",
+			);
+		}
+		if (resultado.vehiculos.length === 0) {
+			throw new SatScrapeError(
+				"SAT devolvió un listado vacío; se cancela la corrida del titular para evitar falsos positivos.",
+			);
+		}
+
+		return {
+			...titular,
+			estado: "OK",
+			vehiculos: resultado.vehiculos,
+			listadoCompleto: true,
+		};
+	} catch (error) {
+		const evidencia = await page.content().catch(() => "");
+		return titularConError(
+			titular,
+			clasificarError(error, evidencia),
+			error instanceof Error ? error.message : String(error),
+			evidencia.slice(0, MAX_EVIDENCIA),
+		);
+	}
+}
+
+/** Inicia una sola sesión y consulta todos los titulares delegados configurados. */
+export async function obtenerVehiculosDelegados(): Promise<SatVehiculosDelegadosResponse> {
+	const credenciales = credencialesDelEntorno();
+	const titulares = titularesDelegadosDelEntorno();
+
+	try {
+		const resultados = await conNavegador(async (page) => {
+			await iniciarSesion(page, credenciales, { permisosDelegados: true });
+			const respuestas: SatVehiculosTitularResponse[] = [];
+			for (const titular of titulares) {
+				respuestas.push(await consultarTitularDelegado(page, titular));
+			}
+			return respuestas;
+		});
+
+		const estado = estadoGeneralDelegado(resultados);
+		return {
+			cuentaNit: credenciales.nit,
+			estado: estado,
+			titulares: resultados,
+			mensajeError:
+				estado === "OK"
+					? undefined
+					: resultados
+							.filter((titular) => titular.mensajeError)
+							.map((titular) => `${titular.nit}: ${titular.mensajeError}`)
+							.join(" | "),
+			evidencia: resultados.find((titular) => titular.evidencia)?.evidencia,
+		};
+	} catch (error) {
+		const evidencia = (error as { evidencia?: string }).evidencia;
+		const estado = clasificarError(error, evidencia);
+		return {
+			cuentaNit: credenciales.nit,
+			estado,
+			titulares: titulares.map((titular) =>
+				titularConError(
+					titular,
+					estado,
+					error instanceof Error ? error.message : String(error),
+					evidencia?.slice(0, MAX_EVIDENCIA),
+				),
+			),
+			mensajeError: error instanceof Error ? error.message : String(error),
+			evidencia: evidencia?.slice(0, MAX_EVIDENCIA),
+		};
+	}
 }
 
 export async function obtenerVehiculosPropios(): Promise<SatVehiculosPropiosResponse> {

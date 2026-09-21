@@ -41,7 +41,12 @@ import {
 import { orpc } from "@/utils/orpc";
 
 const PAGE_SIZE = 10;
-type EstadoFiltro = "todos" | "activo" | "inactivo";
+type EstadoSatFiltro = "todos" | "activo" | "inactivo" | "no_encontrado";
+type CruceCrmFiltro =
+	| "todos"
+	| "propio"
+	| "registrado_no_propio"
+	| "sin_registro";
 
 export const Route = createFileRoute("/vehicles/sat-verificacion")({
 	component: SatVerificationPage,
@@ -55,35 +60,59 @@ function formatDate(value: Date | string | null | undefined) {
 	});
 }
 
-function resultadoLabel(resultado: string) {
-	return (
-		{
-			activo_ok: "Activo",
-			inactivo: "Inactivo",
-			no_aparece_en_sat: "No aparece en SAT",
-			no_registrado_interno: "No registrado en CRM",
-		}[resultado] ?? resultado
-	);
-}
-
-function ResultadoBadge({ resultado }: { resultado: string }) {
-	if (resultado === "activo_ok") {
+function EstadoSatBadge({
+	estadoSat,
+	resultado,
+}: {
+	estadoSat: string | null;
+	resultado: string;
+}) {
+	if (resultado === "no_aparece_en_sat") {
+		return (
+			<Badge className="border-red-300 bg-red-100 text-red-800">
+				<XCircle /> No se encontró en SAT
+			</Badge>
+		);
+	}
+	if (estadoSat?.trim().toLowerCase() === "activo") {
 		return (
 			<Badge className="border-green-300 bg-green-100 text-green-800">
 				<CheckCircle2 /> Activo
 			</Badge>
 		);
 	}
-	if (resultado === "no_registrado_interno") {
+	if (estadoSat?.trim().toLowerCase() === "inactivo") {
+		return (
+			<Badge className="border-red-300 bg-red-100 text-red-800">
+				<XCircle /> Inactivo
+			</Badge>
+		);
+	}
+	return (
+		<Badge className="border-slate-300 bg-slate-100 text-slate-800">
+			{estadoSat || "Sin dato SAT"}
+		</Badge>
+	);
+}
+
+function CruceCrmBadge({ cruce }: { cruce: Exclude<CruceCrmFiltro, "todos"> }) {
+	if (cruce === "propio") {
 		return (
 			<Badge className="border-blue-300 bg-blue-100 text-blue-800">
-				<AlertTriangle /> No registrado en CRM
+				<CheckCircle2 /> Propio
+			</Badge>
+		);
+	}
+	if (cruce === "registrado_no_propio") {
+		return (
+			<Badge className="border-amber-300 bg-amber-100 text-amber-800">
+				<AlertTriangle /> Registrado, no propio
 			</Badge>
 		);
 	}
 	return (
 		<Badge className="border-red-300 bg-red-100 text-red-800">
-			<XCircle /> {resultadoLabel(resultado)}
+			<XCircle /> Sin registro
 		</Badge>
 	);
 }
@@ -108,7 +137,9 @@ function normalizeSearch(value: string | null | undefined) {
 
 function SatVerificationPage() {
 	const [vehicleSearch, setVehicleSearch] = useState("");
-	const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro>("todos");
+	const [estadoSatFiltro, setEstadoSatFiltro] =
+		useState<EstadoSatFiltro>("todos");
+	const [cruceCrmFiltro, setCruceCrmFiltro] = useState<CruceCrmFiltro>("todos");
 	const [soloNoPagado, setSoloNoPagado] = useState(false);
 	const [pagina, setPagina] = useState(1);
 	const queryClient = useQueryClient();
@@ -123,6 +154,14 @@ function SatVerificationPage() {
 				});
 				if (resultado.estado === "ok") {
 					toast.success("Verificación SAT completada.");
+				} else if (resultado.estado === "omitida") {
+					toast.info(
+						resultado.omitida ?? "Ya hay una verificación SAT en proceso.",
+					);
+				} else if (resultado.estado === "parcial") {
+					toast.warning(
+						"La verificación SAT se completó solo para algunos titulares.",
+					);
 				} else {
 					toast.error("La verificación SAT no se completó.");
 				}
@@ -132,7 +171,7 @@ function SatVerificationPage() {
 	);
 
 	const data = verificationQuery.data;
-	const corrida = data?.corrida;
+	const lote = data?.lote;
 	const resultados = data?.resultados ?? [];
 	const resultadosFiltrados = useMemo(() => {
 		const vehicleTerm = normalizeSearch(vehicleSearch);
@@ -146,16 +185,27 @@ function SatVerificationPage() {
 			const searchableText = `${vehicleText} ${normalizeSearch(vehiculo.placa)}`;
 			const matchesSearch =
 				!vehicleTerm || searchableText.includes(vehicleTerm);
-			const matchesEstado =
-				estadoFiltro === "todos" ||
-				(estadoFiltro === "activo" && vehiculo.resultado === "activo_ok") ||
-				(estadoFiltro === "inactivo" && vehiculo.resultado === "inactivo");
+			const estadoSat = vehiculo.estadoSat?.trim().toLowerCase();
+			const matchesEstadoSat =
+				estadoSatFiltro === "todos" ||
+				(estadoSatFiltro === "activo" && estadoSat === "activo") ||
+				(estadoSatFiltro === "inactivo" && estadoSat === "inactivo") ||
+				(estadoSatFiltro === "no_encontrado" &&
+					vehiculo.resultado === "no_aparece_en_sat");
+			const matchesCruceCrm =
+				cruceCrmFiltro === "todos" || vehiculo.cruceCrm === cruceCrmFiltro;
 			const matchesTax =
 				!soloNoPagado || vehiculo.impuestoCirculacionPagado === false;
 
-			return matchesSearch && matchesEstado && matchesTax;
+			return matchesSearch && matchesEstadoSat && matchesCruceCrm && matchesTax;
 		});
-	}, [estadoFiltro, resultados, soloNoPagado, vehicleSearch]);
+	}, [
+		cruceCrmFiltro,
+		estadoSatFiltro,
+		resultados,
+		soloNoPagado,
+		vehicleSearch,
+	]);
 
 	const totalPaginas = Math.max(
 		1,
@@ -167,11 +217,15 @@ function SatVerificationPage() {
 		paginaActual * PAGE_SIZE,
 	);
 	const hayFiltros =
-		vehicleSearch.trim() || estadoFiltro !== "todos" || soloNoPagado;
+		vehicleSearch.trim() ||
+		estadoSatFiltro !== "todos" ||
+		cruceCrmFiltro !== "todos" ||
+		soloNoPagado;
 
 	const resetearFiltros = () => {
 		setVehicleSearch("");
-		setEstadoFiltro("todos");
+		setEstadoSatFiltro("todos");
+		setCruceCrmFiltro("todos");
 		setSoloNoPagado(false);
 		setPagina(1);
 	};
@@ -204,18 +258,18 @@ function SatVerificationPage() {
 			<div className="grid gap-4 md:grid-cols-3">
 				<Card>
 					<CardHeader className="pb-2">
-						<CardDescription>Última consulta</CardDescription>
+						<CardDescription>Último intento</CardDescription>
 						<CardTitle className="flex items-center gap-2 text-lg">
 							<Clock3 className="h-4 w-4" />
-							{formatDate(corrida?.finalizadaAt ?? corrida?.iniciadaAt)}
+							{formatDate(lote?.finalizadaAt ?? lote?.iniciadaAt)}
 						</CardTitle>
 					</CardHeader>
 				</Card>
 				<Card>
 					<CardHeader className="pb-2">
-						<CardDescription>Estado de la corrida</CardDescription>
+						<CardDescription>Estado del lote</CardDescription>
 						<CardTitle className="text-lg capitalize">
-							{corrida?.estado ?? "Sin datos"}
+							{lote?.estado ?? "Sin datos"}
 						</CardTitle>
 					</CardHeader>
 				</Card>
@@ -225,6 +279,11 @@ function SatVerificationPage() {
 						<CardTitle className="text-lg">
 							{resultados.length} vehículos
 						</CardTitle>
+						{data?.estadoActual && (
+							<CardDescription>
+								Consulta completa: {formatDate(data.estadoActual.consultadoAt)}
+							</CardDescription>
+						)}
 					</CardHeader>
 				</Card>
 			</div>
@@ -235,6 +294,12 @@ function SatVerificationPage() {
 						No se pudo cargar la última verificación SAT.
 					</CardContent>
 				</Card>
+			)}
+			{lote && lote.estado !== "ok" && resultados.length > 0 && (
+				<p className="text-muted-foreground text-sm">
+					El último intento no se completó. Se muestran los resultados de la
+					última consulta completa, con la fecha de cada vehículo.
+				</p>
 			)}
 
 			<Card>
@@ -249,7 +314,7 @@ function SatVerificationPage() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<div className="mb-6 grid gap-3 md:grid-cols-3">
+					<div className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
 						<div className="space-y-1.5">
 							<label
 								className="font-medium text-sm"
@@ -276,22 +341,52 @@ function SatVerificationPage() {
 								className="font-medium text-sm"
 								htmlFor="sat-status-filter"
 							>
-								Estado
+								Estado SAT
 							</label>
 							<Select
-								value={estadoFiltro}
+								value={estadoSatFiltro}
 								onValueChange={(value) => {
-									setEstadoFiltro(value as EstadoFiltro);
+									setEstadoSatFiltro(value as EstadoSatFiltro);
 									setPagina(1);
 								}}
 							>
 								<SelectTrigger id="sat-status-filter">
-									<SelectValue placeholder="Todos los estados" />
+									<SelectValue placeholder="Todos los estados SAT" />
 								</SelectTrigger>
 								<SelectContent>
 									<SelectItem value="todos">Todos</SelectItem>
 									<SelectItem value="activo">Activo</SelectItem>
 									<SelectItem value="inactivo">Inactivo</SelectItem>
+									<SelectItem value="no_encontrado">
+										No se encontró en SAT
+									</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="space-y-1.5">
+							<label
+								className="font-medium text-sm"
+								htmlFor="sat-crm-match-filter"
+							>
+								Cruce CRM
+							</label>
+							<Select
+								value={cruceCrmFiltro}
+								onValueChange={(value) => {
+									setCruceCrmFiltro(value as CruceCrmFiltro);
+									setPagina(1);
+								}}
+							>
+								<SelectTrigger id="sat-crm-match-filter">
+									<SelectValue placeholder="Todos los cruces" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="todos">Todos</SelectItem>
+									<SelectItem value="propio">Propio</SelectItem>
+									<SelectItem value="registrado_no_propio">
+										Registrado, no propio
+									</SelectItem>
+									<SelectItem value="sin_registro">Sin registro</SelectItem>
 								</SelectContent>
 							</Select>
 						</div>
@@ -346,15 +441,26 @@ function SatVerificationPage() {
 							<Table>
 								<TableHeader>
 									<TableRow>
+										<TableHead>Titular SAT</TableHead>
 										<TableHead>Placa</TableHead>
 										<TableHead>Vehículo SAT</TableHead>
-										<TableHead>Veredicto</TableHead>
+										<TableHead>Estado SAT</TableHead>
+										<TableHead>Cruce CRM</TableHead>
 										<TableHead>Impuesto pagado</TableHead>
+										<TableHead>Consultado</TableHead>
 									</TableRow>
 								</TableHeader>
 								<TableBody>
 									{resultadosVisibles.map((vehiculo) => (
 										<TableRow key={vehiculo.id}>
+											<TableCell>
+												<div className="font-medium">
+													{vehiculo.titularNombre ?? "Sin titular"}
+												</div>
+												<div className="text-muted-foreground text-xs">
+													{vehiculo.titularNit ?? ""}
+												</div>
+											</TableCell>
 											<TableCell className="font-medium">
 												{vehiculo.placa}
 											</TableCell>
@@ -371,11 +477,18 @@ function SatVerificationPage() {
 												</div>
 											</TableCell>
 											<TableCell>
-												<ResultadoBadge resultado={vehiculo.resultado} />
+												<EstadoSatBadge
+													estadoSat={vehiculo.estadoSat}
+													resultado={vehiculo.resultado}
+												/>
+											</TableCell>
+											<TableCell>
+												<CruceCrmBadge cruce={vehiculo.cruceCrm} />
 											</TableCell>
 											<TableCell>
 												<Senal valor={vehiculo.impuestoCirculacionPagado} />
 											</TableCell>
+											<TableCell>{formatDate(vehiculo.consultadoAt)}</TableCell>
 										</TableRow>
 									))}
 								</TableBody>

@@ -1,29 +1,29 @@
 /**
- * Verificación periódica de vehículos propios contra SAT.
+ * Verificación manual de vehículos propios contra SAT.
  *
  * El CRM raspa Agencia Virtual con Puppeteer y devuelve el listado.
  * Acá se guarda, se cruza contra `vehicles` y se emiten las cuatro señales.
  */
-import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
-import { db } from "../db";
-import {
-	satVerificacionCorridas,
-	satVerificacionResultados,
-	vehicles,
-} from "../db/schema";
-import { obtenerVehiculosPropios } from "../controllers/satVehiculos";
+import { and, desc, eq, gte, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import type {
+	SatTitularObjetivo,
+	SatVehiculosDelegadosResponse,
 	SatVehiculosPropiosResponse,
 	VehiculoSatPropio,
 } from "../controllers/satVehiculos";
 import {
-	getGuatemalaMonthWindow,
-	toDateStrGT,
-} from "../lib/guatemala-month-window";
+	obtenerVehiculosDelegados,
+	titularesDelegadosDelEntorno,
+} from "../controllers/satVehiculos";
+import { db } from "../db";
+import {
+	satVerificacionCorridas,
+	satVerificacionLotes,
+	satVerificacionResultados,
+	vehicles,
+} from "../db/schema";
 
 const HORAS_ANTIDUPLICADO = 20;
-const MINUTOS_CORRIDA_EN_PROCESO = 10;
-const MAX_EVIDENCIA = 20000;
 // Namespace 2 queda reservado para la verificación SAT. La conexión que
 // adquiere este candado se mantiene viva durante toda la corrida de Puppeteer.
 const SAT_VERIFICACION_LOCK = [2, 1] as const;
@@ -38,6 +38,8 @@ type Veredicto =
 
 export interface ResumenVerificacion {
 	corridaId: string | null;
+	loteId: string | null;
+	corridaIds: string[];
 	estado: string;
 	totalEsperados: number;
 	totalReportadosSat: number;
@@ -80,6 +82,42 @@ function normalizarPlaca(placa: string): string {
 	return placa.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+function normalizarNit(nit: string): string {
+	return nit.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export type CruceCrm = "propio" | "registrado_no_propio" | "sin_registro";
+
+/** Distingue los vehiculos propios de los registrados sin marca de propiedad. */
+export function agregarCruceCrm<
+	T extends { vehicleId: string | null; placa: string },
+>(
+	filas: T[],
+	vehiculosCrm: { id: string; placa: string | null; isOwned: boolean }[],
+): (T & { cruceCrm: CruceCrm })[] {
+	const porId = new Map<string, CruceCrm>();
+	const porPlaca = new Map<string, CruceCrm>();
+	for (const vehiculo of vehiculosCrm) {
+		const cruce: CruceCrm = vehiculo.isOwned
+			? "propio"
+			: "registrado_no_propio";
+		porId.set(vehiculo.id, cruce);
+		if (!vehiculo.placa) continue;
+		const clave = normalizarPlaca(vehiculo.placa);
+		if (clave && (cruce === "propio" || !porPlaca.has(clave))) {
+			porPlaca.set(clave, cruce);
+		}
+	}
+
+	return filas.map((fila) => ({
+		...fila,
+		cruceCrm:
+			(fila.vehicleId ? porId.get(fila.vehicleId) : undefined) ??
+			porPlaca.get(normalizarPlaca(fila.placa)) ??
+			"sin_registro",
+	}));
+}
+
 function veredictoDeEstadoSat(estadoSat: string): Veredicto {
 	// Comparación exacta, no `includes`: "Inactivo" contiene "activo" y una
 	// coincidencia parcial daba por bueno un vehículo inactivo.
@@ -93,35 +131,17 @@ async function hayCorridaRecienteOk(): Promise<boolean> {
 	const desde = new Date(Date.now() - HORAS_ANTIDUPLICADO * 60 * 60 * 1000);
 
 	const [reciente] = await db
-		.select({ id: satVerificacionCorridas.id })
-		.from(satVerificacionCorridas)
+		.select({ id: satVerificacionLotes.id })
+		.from(satVerificacionLotes)
 		.where(
 			and(
-				eq(satVerificacionCorridas.estado, "ok"),
-				gte(satVerificacionCorridas.iniciadaAt, desde),
+				eq(satVerificacionLotes.estado, "ok"),
+				gte(satVerificacionLotes.iniciadaAt, desde),
 			),
 		)
 		.limit(1);
 
 	return Boolean(reciente);
-}
-
-/** Evita levantar otro Chromium mientras una corrida sigue en proceso. */
-async function hayCorridaEnProceso(): Promise<boolean> {
-	const desde = new Date(Date.now() - MINUTOS_CORRIDA_EN_PROCESO * 60 * 1000);
-
-	const [activa] = await db
-		.select({ id: satVerificacionCorridas.id })
-		.from(satVerificacionCorridas)
-		.where(
-			and(
-				eq(satVerificacionCorridas.estado, "en_proceso"),
-				gte(satVerificacionCorridas.iniciadaAt, desde),
-			),
-		)
-		.limit(1);
-
-	return Boolean(activa);
 }
 
 async function adquirirCandadoDistribuido(): Promise<AdvisoryLockClient | null> {
@@ -147,10 +167,9 @@ async function adquirirCandadoDistribuido(): Promise<AdvisoryLockClient | null> 
 
 async function liberarCandadoDistribuido(client: AdvisoryLockClient) {
 	try {
-		await client.query(
-			"SELECT pg_advisory_unlock($1, $2)",
-			[...SAT_VERIFICACION_LOCK],
-		);
+		await client.query("SELECT pg_advisory_unlock($1, $2)", [
+			...SAT_VERIFICACION_LOCK,
+		]);
 	} finally {
 		client.release();
 	}
@@ -158,10 +177,13 @@ async function liberarCandadoDistribuido(client: AdvisoryLockClient) {
 
 /** Universo esperado: lo que el CRM da por propiedad de Cash In y tiene placa. */
 async function obtenerUniversoEsperado() {
-	return db
+	const candidatos = await db
 		.select({ id: vehicles.id, placa: vehicles.licensePlate })
 		.from(vehicles)
 		.where(and(eq(vehicles.isOwned, true), isNotNull(vehicles.licensePlate)));
+	return candidatos.filter((vehiculo) =>
+		Boolean(vehiculo.placa && normalizarPlaca(vehiculo.placa)),
+	);
 }
 
 export function construirResultados(
@@ -170,7 +192,8 @@ export function construirResultados(
 ) {
 	const porPlacaSat = new Map<string, VehiculoSatPropio>();
 	for (const v of reportados) {
-		porPlacaSat.set(normalizarPlaca(v.placa), v);
+		const clave = normalizarPlaca(v.placa);
+		if (clave) porPlacaSat.set(clave, v);
 	}
 
 	const filas: {
@@ -194,6 +217,7 @@ export function construirResultados(
 	for (const esperado of esperados) {
 		if (!esperado.placa) continue;
 		const clave = normalizarPlaca(esperado.placa);
+		if (!clave) continue;
 		const enSat = porPlacaSat.get(clave);
 
 		if (enSat) {
@@ -260,36 +284,140 @@ export function esAlertaSat(resultado: Veredicto): boolean {
 	return resultado === "inactivo" || resultado === "no_aparece_en_sat";
 }
 
+const camposActualizados = {
+	loteId: sql`excluded.lote_id`,
+	corridaId: sql`excluded.corrida_id`,
+	placa: sql`excluded.placa`,
+	resultado: sql`excluded.resultado`,
+	eraEsperado: sql`excluded.era_esperado`,
+	estadoSat: sql`excluded.estado_sat`,
+	tipo: sql`excluded.tipo`,
+	marca: sql`excluded.marca`,
+	modelo: sql`excluded.modelo`,
+	color: sql`excluded.color`,
+	impuestoCirculacionPagado: sql`excluded.impuesto_circulacion_pagado`,
+	puedeAutorizarTraspaso: sql`excluded.puede_autorizar_traspaso`,
+	puedeImprimirTarjeta: sql`excluded.puede_imprimir_tarjeta`,
+	puedeImprimirCertificado: sql`excluded.puede_imprimir_certificado`,
+	mensajeError: sql`excluded.mensaje_error`,
+	consultadoAt: sql`excluded.consultado_at`,
+};
+
+export type FilaActual = ReturnType<typeof construirResultados>[number] & {
+	loteId: string;
+	corridaId: string | null;
+	consultadoAt: Date;
+};
+
+/** SQL parametrizado para el indice parcial de placas sin vehiculo interno. */
+export function construirUpsertExternos(filas: FilaActual[]) {
+	const valores = filas.map(
+		(fila) => sql`(
+		${fila.loteId}, ${fila.corridaId}, ${fila.placa}, ${fila.resultado},
+		${fila.eraEsperado}, ${fila.estadoSat}, ${fila.tipo}, ${fila.marca},
+		${fila.modelo}, ${fila.color}, ${fila.impuestoCirculacionPagado},
+		${fila.puedeAutorizarTraspaso}, ${fila.puedeImprimirTarjeta},
+		${fila.puedeImprimirCertificado}, ${fila.consultadoAt}
+	)`,
+	);
+	return sql`
+		INSERT INTO public.sat_verificacion_resultados (
+			lote_id, corrida_id, placa, resultado, era_esperado, estado_sat,
+			tipo, marca, modelo, color, impuesto_circulacion_pagado,
+			puede_autorizar_traspaso, puede_imprimir_tarjeta,
+			puede_imprimir_certificado, consultado_at
+		) VALUES ${sql.join(valores, sql`, `)}
+		ON CONFLICT ((regexp_replace(upper(placa), '[^A-Z0-9]', '', 'g')))
+		WHERE vehicle_id IS NULL
+		DO UPDATE SET
+			lote_id = excluded.lote_id,
+			corrida_id = excluded.corrida_id,
+			placa = excluded.placa,
+			resultado = excluded.resultado,
+			era_esperado = excluded.era_esperado,
+			estado_sat = excluded.estado_sat,
+			tipo = excluded.tipo,
+			marca = excluded.marca,
+			modelo = excluded.modelo,
+			color = excluded.color,
+			impuesto_circulacion_pagado = excluded.impuesto_circulacion_pagado,
+			puede_autorizar_traspaso = excluded.puede_autorizar_traspaso,
+			puede_imprimir_tarjeta = excluded.puede_imprimir_tarjeta,
+			puede_imprimir_certificado = excluded.puede_imprimir_certificado,
+			mensaje_error = NULL,
+			consultado_at = excluded.consultado_at
+	`;
+}
+
+/** Publica una foto completa sin dejar resultados de consultas anteriores. */
+async function guardarEstadoActual(loteId: string, filas: FilaActual[]) {
+	await db.transaction(async (tx) => {
+		const internas = filas.filter((fila) => fila.vehicleId !== null);
+		const externas = filas.filter((fila) => fila.vehicleId === null);
+		const tamanoLote = 500;
+
+		for (let i = 0; i < internas.length; i += tamanoLote) {
+			await tx
+				.insert(satVerificacionResultados)
+				.values(internas.slice(i, i + tamanoLote))
+				.onConflictDoUpdate({
+					target: satVerificacionResultados.vehicleId,
+					targetWhere: sql`vehicle_id IS NOT NULL`,
+					set: camposActualizados,
+				});
+		}
+
+		for (let i = 0; i < externas.length; i += tamanoLote) {
+			// Drizzle no genera ON CONFLICT para indices de expresion. La consulta
+			// parametrizada apunta al mismo indice parcial definido en la 0035.
+			await tx.execute(
+				construirUpsertExternos(externas.slice(i, i + tamanoLote)),
+			);
+		}
+
+		// Un listado completo define el universo vigente. Retiramos las filas
+		// externas que ya no aparecen y los vehiculos que salieron del CRM.
+		await tx
+			.delete(satVerificacionResultados)
+			.where(ne(satVerificacionResultados.loteId, loteId));
+		await tx
+			.update(satVerificacionLotes)
+			.set({ estado: "ok", finalizadaAt: new Date() })
+			.where(eq(satVerificacionLotes.id, loteId));
+	});
+}
+
 async function ejecutarVerificacionVehiculosEnSat(
 	opciones: {
-		origen?: "cron" | "manual";
+		usuarioId?: string;
 		forzar?: boolean;
 		intento?: number;
+		titulares?: SatTitularObjetivo[];
 		/** Sustituible para probar el cruce y el guardado sin levantar Puppeteer. */
-		proveedor?: () => Promise<SatVehiculosPropiosResponse>;
+		proveedor?: () => Promise<SatVehiculosDelegadosResponse>;
 	} = {},
 ): Promise<ResumenVerificacion> {
 	const {
-		origen = "cron",
+		usuarioId = "",
 		forzar = false,
 		intento = 1,
-		proveedor = obtenerVehiculosPropios,
+		titulares = titularesDelegadosDelEntorno(),
+		proveedor = obtenerVehiculosDelegados,
 	} = opciones;
-
-	if (await hayCorridaEnProceso()) {
-		return {
-			corridaId: null,
-			estado: "omitida",
-			totalEsperados: 0,
-			totalReportadosSat: 0,
-			totalAlertas: 0,
-			omitida: "Ya hay una verificación SAT en proceso.",
-		};
+	if (!usuarioId) {
+		throw new Error("La verificación SAT requiere un usuario autenticado.");
+	}
+	if (titulares.length === 0) {
+		throw new Error(
+			"La verificación SAT requiere al menos un titular delegado.",
+		);
 	}
 
 	if (!forzar && (await hayCorridaRecienteOk())) {
 		return {
 			corridaId: null,
+			loteId: null,
+			corridaIds: [],
 			estado: "omitida",
 			totalEsperados: 0,
 			totalReportadosSat: 0,
@@ -300,89 +428,201 @@ async function ejecutarVerificacionVehiculosEnSat(
 
 	const esperados = await obtenerUniversoEsperado();
 
-	// La corrida se registra ANTES de consultar: si el proceso muere, queda
-	// constancia del intento en vez de no dejar rastro.
-	const [corrida] = await db
-		.insert(satVerificacionCorridas)
-		.values({
-			nit: "",
-			estado: "en_proceso",
-			origen,
-			intento,
-			totalEsperados: esperados.length,
-		})
-		.returning({ id: satVerificacionCorridas.id });
+	// El lote y sus corridas se registran ANTES de consultar: si el proceso
+	// muere, queda constancia tanto del intento como de cada titular objetivo.
+	const { lote, corridas } = await db.transaction(async (tx) => {
+		const [lote] = await tx
+			.insert(satVerificacionLotes)
+			.values({
+				usuarioId,
+				usuarioNit: process.env.SAT_AV_USUARIO ?? "",
+				estado: "en_proceso",
+				intento,
+			})
+			.returning({ id: satVerificacionLotes.id });
+
+		const corridas = await tx
+			.insert(satVerificacionCorridas)
+			.values(
+				titulares.map((titular) => ({
+					loteId: lote.id,
+					titularNit: titular.nit,
+					titularNombre: titular.nombre,
+					estado: "en_proceso" as const,
+				})),
+			)
+			.returning({
+				id: satVerificacionCorridas.id,
+				titularNit: satVerificacionCorridas.titularNit,
+			});
+
+		return { lote, corridas };
+	});
+
+	const corridaIds = corridas.map((corrida) => corrida.id);
+
+	const actualizarLoteConFallo = async (
+		estado: "error" | "parcial",
+		mensajeError: string,
+	) => {
+		await db
+			.update(satVerificacionCorridas)
+			.set({ estado: "error", mensajeError })
+			.where(inArray(satVerificacionCorridas.id, corridaIds));
+		await db
+			.update(satVerificacionLotes)
+			.set({
+				estado,
+				finalizadaAt: new Date(),
+			})
+			.where(eq(satVerificacionLotes.id, lote.id));
+	};
 
 	try {
 		const respuesta = await proveedor();
+		const respuestasPorNit = new Map(
+			respuesta.titulares.map((titular) => [
+				normalizarNit(titular.nit),
+				titular,
+			]),
+		);
+		const resumenes: {
+			corridaId: string;
+			estado: EstadoCorrida;
+			totalReportadosSat: number;
+			totalAlertas: number;
+			mensajeError?: string;
+		}[] = [];
+		const vehiculosPorCorrida = new Map<string, VehiculoSatPropio[]>();
 
-		const listadoIncompleto =
-			respuesta.estado === "OK" &&
-			(!respuesta.listadoCompleto || respuesta.vehiculos.length === 0);
+		for (const corrida of corridas) {
+			const titular = respuestasPorNit.get(normalizarNit(corrida.titularNit));
+			const listadoIncompleto =
+				titular?.estado === "OK" &&
+				(!titular.listadoCompleto || titular.vehiculos.length === 0);
 
-		if (respuesta.estado !== "OK" || listadoIncompleto) {
-			const estado = respuesta.estado !== "OK" ? estadoCorridaDesdeSat(respuesta.estado) : "error";
-			const mensajeError = listadoIncompleto
-				? "SAT devolvió un listado vacío o incompleto; no se generaron alertas para evitar falsos positivos."
-				: respuesta.mensajeError;
+			if (!titular || titular.estado !== "OK" || listadoIncompleto) {
+				const estado = titular
+					? titular.estado !== "OK"
+						? estadoCorridaDesdeSat(titular.estado)
+						: "error"
+					: "error";
+				const mensajeError =
+					titular?.mensajeError ??
+					(listadoIncompleto
+						? "SAT devolvió un listado vacío o incompleto; no se generaron alertas para evitar falsos positivos."
+						: "SAT no devolvió resultado para el titular configurado.");
+
+				await db
+					.update(satVerificacionCorridas)
+					.set({
+						estado,
+						mensajeError,
+					})
+					.where(eq(satVerificacionCorridas.id, corrida.id));
+				resumenes.push({
+					corridaId: corrida.id,
+					estado,
+					totalReportadosSat: 0,
+					totalAlertas: 0,
+					mensajeError,
+				});
+				continue;
+			}
+
+			vehiculosPorCorrida.set(corrida.id, titular.vehiculos);
+			const totalAlertas = titular.vehiculos.filter(
+				(vehiculo) => veredictoDeEstadoSat(vehiculo.estado) === "inactivo",
+			).length;
 			await db
 				.update(satVerificacionCorridas)
 				.set({
-					nit: respuesta.nit ?? "",
-					estado,
-					mensajeError,
-					evidencia: respuesta.evidencia?.slice(0, MAX_EVIDENCIA),
-					finalizadaAt: new Date(),
+					estado: "ok",
 				})
 				.where(eq(satVerificacionCorridas.id, corrida.id));
-
-			return {
+			resumenes.push({
 				corridaId: corrida.id,
-				estado,
-				totalEsperados: esperados.length,
-				totalReportadosSat: 0,
-				totalAlertas: 0,
-			};
-		}
-
-		const filas = construirResultados(esperados, respuesta.vehiculos);
-
-		if (filas.length > 0) {
-			await db.insert(satVerificacionResultados).values(
-				filas.map((f) => ({ corridaId: corrida.id, ...f })),
-			);
-		}
-
-		const totalAlertas = filas.filter((f) => esAlertaSat(f.resultado)).length;
-
-		await db
-			.update(satVerificacionCorridas)
-			.set({
-				nit: respuesta.nit,
 				estado: "ok",
-				totalReportadosSat: respuesta.vehiculos.length,
+				totalReportadosSat: titular.vehiculos.length,
 				totalAlertas,
-				finalizadaAt: new Date(),
-			})
-			.where(eq(satVerificacionCorridas.id, corrida.id));
+			});
+		}
+
+		const primerTitularPorPlaca = new Map<
+			string,
+			{ corridaId: string; vehiculo: VehiculoSatPropio }
+		>();
+		for (const corrida of corridas) {
+			for (const vehiculo of vehiculosPorCorrida.get(corrida.id) ?? []) {
+				const clave = normalizarPlaca(vehiculo.placa);
+				if (!primerTitularPorPlaca.has(clave)) {
+					primerTitularPorPlaca.set(clave, {
+						corridaId: corrida.id,
+						vehiculo,
+					});
+				}
+			}
+		}
+
+		const filasUnificadas = construirResultados(
+			esperados,
+			[...primerTitularPorPlaca.values()].map((item) => item.vehiculo),
+		);
+		const loteCompleto = resumenes.every((resumen) => resumen.estado === "ok");
+		// Una consulta parcial no reemplaza el ultimo estado completo confiable.
+		const fechaConsulta = new Date();
+		const filasPersistir: FilaActual[] = loteCompleto
+			? filasUnificadas.map((fila) => ({
+					loteId: lote.id,
+					corridaId:
+						primerTitularPorPlaca.get(normalizarPlaca(fila.placa))?.corridaId ??
+						null,
+					consultadoAt: fechaConsulta,
+					...fila,
+				}))
+			: [];
+
+		const exitosas = resumenes.filter((resumen) => resumen.estado === "ok");
+		const estadoLote =
+			exitosas.length === corridas.length
+				? "ok"
+				: exitosas.length > 0
+					? "parcial"
+					: "error";
+		const totalReportadosSat = resumenes.reduce(
+			(total, resumen) => total + resumen.totalReportadosSat,
+			0,
+		);
+		const totalAlertas = filasPersistir.filter((fila) =>
+			esAlertaSat(fila.resultado),
+		).length;
+
+		if (loteCompleto) {
+			await guardarEstadoActual(lote.id, filasPersistir);
+		} else {
+			await db
+				.update(satVerificacionLotes)
+				.set({ estado: estadoLote, finalizadaAt: new Date() })
+				.where(eq(satVerificacionLotes.id, lote.id));
+		}
 
 		return {
-			corridaId: corrida.id,
-			estado: "ok",
+			corridaId: corridas[0]?.id ?? null,
+			loteId: lote.id,
+			corridaIds,
+			estado: estadoLote,
 			totalEsperados: esperados.length,
-			totalReportadosSat: respuesta.vehiculos.length,
+			totalReportadosSat,
 			totalAlertas,
 		};
 	} catch (error) {
 		const mensajeError = error instanceof Error ? error.message : String(error);
-
-		await db
-			.update(satVerificacionCorridas)
-			.set({ estado: "error", mensajeError, finalizadaAt: new Date() })
-			.where(eq(satVerificacionCorridas.id, corrida.id));
+		await actualizarLoteConFallo("error", mensajeError);
 
 		return {
-			corridaId: corrida.id,
+			corridaId: corridas[0]?.id ?? null,
+			loteId: lote.id,
+			corridaIds,
 			estado: "error",
 			totalEsperados: esperados.length,
 			totalReportadosSat: 0,
@@ -391,31 +631,41 @@ async function ejecutarVerificacionVehiculosEnSat(
 	}
 }
 
-/** Última corrida con sus alertas, para exponer en el CRM. */
+/** Ultimo intento y estado actual de los vehiculos para exponerlo en el CRM. */
 export async function obtenerUltimaVerificacion() {
-	const [corrida] = await db
+	const [lote] = await db
 		.select({
-			id: satVerificacionCorridas.id,
-			nit: satVerificacionCorridas.nit,
-			estado: satVerificacionCorridas.estado,
-			origen: satVerificacionCorridas.origen,
-			intento: satVerificacionCorridas.intento,
-			corridaOriginalId: satVerificacionCorridas.corridaOriginalId,
-			totalEsperados: satVerificacionCorridas.totalEsperados,
-			totalReportadosSat: satVerificacionCorridas.totalReportadosSat,
-			totalAlertas: satVerificacionCorridas.totalAlertas,
-			iniciadaAt: satVerificacionCorridas.iniciadaAt,
-			finalizadaAt: satVerificacionCorridas.finalizadaAt,
+			id: satVerificacionLotes.id,
+			usuarioId: satVerificacionLotes.usuarioId,
+			usuarioNit: satVerificacionLotes.usuarioNit,
+			estado: satVerificacionLotes.estado,
+			intento: satVerificacionLotes.intento,
+			iniciadaAt: satVerificacionLotes.iniciadaAt,
+			finalizadaAt: satVerificacionLotes.finalizadaAt,
 		})
-		.from(satVerificacionCorridas)
-		.orderBy(desc(satVerificacionCorridas.iniciadaAt))
+		.from(satVerificacionLotes)
+		.orderBy(desc(satVerificacionLotes.iniciadaAt))
 		.limit(1);
 
-	if (!corrida) return null;
+	if (!lote) return null;
+
+	const corridas = await db
+		.select({
+			id: satVerificacionCorridas.id,
+			loteId: satVerificacionCorridas.loteId,
+			titularNit: satVerificacionCorridas.titularNit,
+			titularNombre: satVerificacionCorridas.titularNombre,
+			estado: satVerificacionCorridas.estado,
+			mensajeError: satVerificacionCorridas.mensajeError,
+		})
+		.from(satVerificacionCorridas)
+		.where(eq(satVerificacionCorridas.loteId, lote.id))
+		.orderBy(satVerificacionCorridas.titularNit);
 
 	const filas = await db
 		.select({
 			id: satVerificacionResultados.id,
+			loteId: satVerificacionResultados.loteId,
 			corridaId: satVerificacionResultados.corridaId,
 			vehicleId: satVerificacionResultados.vehicleId,
 			placa: satVerificacionResultados.placa,
@@ -426,73 +676,94 @@ export async function obtenerUltimaVerificacion() {
 			marca: satVerificacionResultados.marca,
 			modelo: satVerificacionResultados.modelo,
 			color: satVerificacionResultados.color,
-			impuestoCirculacionPagado: satVerificacionResultados.impuestoCirculacionPagado,
+			impuestoCirculacionPagado:
+				satVerificacionResultados.impuestoCirculacionPagado,
 			puedeAutorizarTraspaso: satVerificacionResultados.puedeAutorizarTraspaso,
 			puedeImprimirTarjeta: satVerificacionResultados.puedeImprimirTarjeta,
-			puedeImprimirCertificado: satVerificacionResultados.puedeImprimirCertificado,
-			createdAt: satVerificacionResultados.createdAt,
+			puedeImprimirCertificado:
+				satVerificacionResultados.puedeImprimirCertificado,
+			consultadoAt: satVerificacionResultados.consultadoAt,
+			titularNit: satVerificacionCorridas.titularNit,
+			titularNombre: satVerificacionCorridas.titularNombre,
 		})
 		.from(satVerificacionResultados)
-		.where(
-			eq(satVerificacionResultados.corridaId, corrida.id),
-		);
+		.leftJoin(
+			satVerificacionCorridas,
+			eq(satVerificacionResultados.corridaId, satVerificacionCorridas.id),
+		)
+		.orderBy(satVerificacionResultados.placa);
+	const vehiculosCrm = await db
+		.select({
+			id: vehicles.id,
+			placa: vehicles.licensePlate,
+			isOwned: vehicles.isOwned,
+		})
+		.from(vehicles);
+	const filasConCruce = agregarCruceCrm(filas, vehiculosCrm);
 
-	// Separados a propósito: `no_registrado_interno` es un hallazgo de
-	// reconciliación, no una alarma, y no cuenta en `totalAlertas`.
+	const corridasConResumen = corridas.map((corrida) => ({
+		...corrida,
+		totalReportadosSat: filas.filter(
+			(fila) =>
+				fila.corridaId === corrida.id && fila.resultado !== "no_aparece_en_sat",
+		).length,
+		totalAlertas: filas.filter(
+			(fila) => fila.corridaId === corrida.id && esAlertaSat(fila.resultado),
+		).length,
+	}));
+	const totalEsperados = new Set(
+		filas
+			.filter((fila) => fila.eraEsperado)
+			.map((fila) => fila.vehicleId ?? fila.placa),
+	).size;
+	const totalReportadosSat = filas.filter(
+		(fila) => fila.corridaId !== null && fila.resultado !== "no_aparece_en_sat",
+	).length;
+	const alertas = filas.filter((fila) => esAlertaSat(fila.resultado));
+	const loteEstadoActualId = filas[0]?.loteId ?? null;
+	const ultimoIntentoPublicoResultados = loteEstadoActualId === lote.id;
+	const corrida = corridasConResumen[0] ?? null;
 	return {
-		corrida: {
-			...corrida,
-			// El detalle crudo queda solo en la bitácora de base de datos: puede
-			// contener URLs, HTML y parámetros de sesión del portal.
+		lote: {
+			...lote,
+			totalTitulares: corridas.length,
+			totalCorridas: corridas.length,
+			totalEsperados: ultimoIntentoPublicoResultados ? totalEsperados : 0,
+			totalReportadosSat: ultimoIntentoPublicoResultados
+				? totalReportadosSat
+				: 0,
+			totalAlertas: ultimoIntentoPublicoResultados ? alertas.length : 0,
 			mensajeError:
-				corrida.estado === "ok"
+				lote.estado === "ok"
 					? null
-					: "La consulta contra SAT no pudo completarse.",
+					: "La consulta contra SAT no se completó para todos los titulares.",
 		},
-		resultados: filas,
-		alertas: filas.filter((f) => esAlertaSat(f.resultado)),
-		descubiertos: filas.filter((f) => f.resultado === "no_registrado_interno"),
+		estadoActual: loteEstadoActualId
+			? {
+					loteId: loteEstadoActualId,
+					consultadoAt: filas[0].consultadoAt,
+					totalEsperados,
+					totalReportadosSat,
+					totalAlertas: alertas.length,
+				}
+			: null,
+		// Se conserva esta propiedad para no romper consumidores existentes; ahora
+		// representa la corrida más reciente dentro del lote.
+		corrida,
+		corridas: corridasConResumen,
+		resultados: filasConCruce,
+		alertas: filasConCruce.filter((fila) => esAlertaSat(fila.resultado)),
+		descubiertos: filasConCruce.filter(
+			(fila) => fila.resultado === "no_registrado_interno",
+		),
 	};
 }
 
-/** Momento en que vence la corrida mensual del primer día de cada mes. */
-export function debeEjecutarseVerificacionSatMensual(now: Date): boolean {
-	const [year, month] = toDateStrGT(now).split("-").map(Number);
-	const { startOfMonth } = getGuatemalaMonthWindow(year, month);
-	const vencimiento = new Date(startOfMonth.getTime() + 3 * 60 * 60 * 1000);
-
-	return now >= vencimiento;
-}
-
 /**
- * Recupera la corrida mensual si el servidor arrancó después del horario
- * programado. Solo considera exitosa una corrida automática del mes actual.
- */
-export async function verificarSatMensualPendiente(now = new Date()) {
-	if (!debeEjecutarseVerificacionSatMensual(now)) return null;
-
-	const [year, month] = toDateStrGT(now).split("-").map(Number);
-	const { startOfMonth } = getGuatemalaMonthWindow(year, month);
-	const [corridaExitosa] = await db
-		.select({ id: satVerificacionCorridas.id })
-		.from(satVerificacionCorridas)
-		.where(
-			and(
-				eq(satVerificacionCorridas.estado, "ok"),
-				eq(satVerificacionCorridas.origen, "cron"),
-				gte(satVerificacionCorridas.iniciadaAt, startOfMonth),
-			),
-		)
-		.limit(1);
-
-	if (corridaExitosa) return null;
-
-	return verificarVehiculosEnSat({ origen: "cron" });
-}
-
-/**
- * La guarda en base de datos cubre varias instancias; esta promesa evita la
- * carrera entre dos llamadas simultáneas dentro del mismo proceso.
+ * El advisory lock cubre varias instancias; esta promesa evita la carrera
+ * entre dos llamadas simultáneas dentro del mismo proceso. Las filas
+ * `en_proceso` quedan como auditoría y no se usan como señal de liveness:
+ * una fila puede quedar abandonada si el proceso muere después del insert.
  */
 export function verificarVehiculosEnSat(
 	opciones: Parameters<typeof ejecutarVerificacionVehiculosEnSat>[0] = {},
@@ -500,6 +771,8 @@ export function verificarVehiculosEnSat(
 	if (ejecucionLocalActiva) {
 		return Promise.resolve({
 			corridaId: null,
+			loteId: null,
+			corridaIds: [],
 			estado: "omitida",
 			totalEsperados: 0,
 			totalReportadosSat: 0,
@@ -513,6 +786,8 @@ export function verificarVehiculosEnSat(
 		if (!candado) {
 			return {
 				corridaId: null,
+				loteId: null,
+				corridaIds: [],
 				estado: "omitida",
 				totalEsperados: 0,
 				totalReportadosSat: 0,

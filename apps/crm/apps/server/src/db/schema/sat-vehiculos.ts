@@ -1,15 +1,18 @@
+import { sql } from "drizzle-orm";
 import {
 	boolean,
 	index,
 	integer,
 	pgEnum,
 	pgTable,
+	uniqueIndex,
 	text,
 	timestamp,
 	uuid,
 	varchar,
 } from "drizzle-orm/pg-core";
 import { vehicles } from "./vehicles";
+import { user } from "./auth";
 
 // Estado de una corrida completa contra Agencia Virtual.
 export const satCorridaEstadoEnum = pgEnum("sat_corrida_estado", [
@@ -28,61 +31,74 @@ export const satResultadoEnum = pgEnum("sat_resultado_vehiculo", [
 	"no_registrado_interno", // aparece en SAT pero no está marcado como propio
 ]);
 
-export const satOrigenEjecucionEnum = pgEnum("sat_origen_ejecucion", [
-	"cron",
-	"manual",
+export const satLoteEstadoEnum = pgEnum("sat_lote_estado", [
+	"en_proceso",
+	"ok",
+	"parcial",
+	"error",
 ]);
 
+/** Una consulta manual completa que puede incluir varios titulares delegados. */
+export const satVerificacionLotes = pgTable(
+	"sat_verificacion_lotes",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		usuarioId: text("usuario_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "restrict" }),
+		usuarioNit: varchar("usuario_nit", { length: 20 }).notNull(),
+		estado: satLoteEstadoEnum("estado").notNull().default("en_proceso"),
+		intento: integer("intento").notNull().default(1),
+		iniciadaAt: timestamp("iniciada_at").notNull().defaultNow(),
+		finalizadaAt: timestamp("finalizada_at"),
+	},
+	(t) => [
+		index("ix_sat_lotes_estado_fecha").on(t.estado, t.iniciadaAt),
+		index("ix_sat_lotes_usuario_id").on(t.usuarioId),
+		index("ix_sat_lotes_usuario").on(t.usuarioNit),
+	],
+);
+
 /**
- * Bitácora de ejecución. Una fila por intento de consulta a Agencia Virtual.
- * La fila se crea ANTES de empezar: si el proceso muere de golpe queda
- * constancia del intento en vez de no dejar rastro.
+ * Una fila por titular consultado dentro del lote.
+ * La fila se crea ANTES de empezar para conservar el estado del titular si
+ * el proceso muere durante la navegación.
  */
 export const satVerificacionCorridas = pgTable(
 	"sat_verificacion_corridas",
 	{
 		id: uuid("id").primaryKey().defaultRandom(),
 
-		nit: varchar("nit", { length: 20 }).notNull(),
+		loteId: uuid("lote_id")
+			.notNull()
+			.references(() => satVerificacionLotes.id, { onDelete: "cascade" }),
+
+		titularNit: varchar("titular_nit", { length: 20 }).notNull(),
+		titularNombre: varchar("titular_nombre", { length: 200 }).notNull(),
 		estado: satCorridaEstadoEnum("estado").notNull().default("en_proceso"),
-		origen: satOrigenEjecucionEnum("origen").notNull().default("cron"),
-
-		// Reintentos: número de intento e hilo que los agrupa. Un reintento es de
-		// la corrida completa, no por vehículo: un solo login trae todo el listado.
-		intento: integer("intento").notNull().default(1),
-		corridaOriginalId: uuid("corrida_original_id"),
-
-		// Universo esperado vs lo que SAT devolvió.
-		totalEsperados: integer("total_esperados").notNull().default(0),
-		totalReportadosSat: integer("total_reportados_sat").notNull().default(0),
-		totalAlertas: integer("total_alertas").notNull().default(0),
-
 		mensajeError: text("mensaje_error"),
-		// Evidencia: HTML recortado de la página al fallar. Va en base de datos y
-		// nunca a disco, porque el contenedor es efímero.
-		evidencia: text("evidencia"),
-
-		iniciadaAt: timestamp("iniciada_at").notNull().defaultNow(),
-		finalizadaAt: timestamp("finalizada_at"),
 	},
 	(t) => [
-		index("ix_sat_corridas_estado_fecha").on(t.estado, t.iniciadaAt),
-		index("ix_sat_corridas_nit").on(t.nit),
+		index("ix_sat_corridas_lote").on(t.loteId),
+		index("ix_sat_corridas_estado").on(t.estado),
+		index("ix_sat_corridas_titular").on(t.titularNit),
 	],
 );
 
 /**
- * Resultado por vehículo. Incluye tanto los que esperábamos encontrar
- * (eraEsperado = true, que es el universo consultado en esa corrida) como los
- * que SAT reportó y no teníamos registrados.
+ * Estado actual por vehículo: una fila por vehicle_id interno o por placa
+ * normalizada cuando SAT lo reporta pero no existe en el CRM.
  */
 export const satVerificacionResultados = pgTable(
 	"sat_verificacion_resultados",
 	{
 		id: uuid("id").primaryKey().defaultRandom(),
 
-		corridaId: uuid("corrida_id")
+		loteId: uuid("lote_id")
 			.notNull()
+			.references(() => satVerificacionLotes.id, { onDelete: "cascade" }),
+
+		corridaId: uuid("corrida_id")
 			.references(() => satVerificacionCorridas.id, { onDelete: "cascade" }),
 
 		// Nulo cuando SAT reporta una placa que el CRM no tiene registrada.
@@ -93,8 +109,7 @@ export const satVerificacionResultados = pgTable(
 		placa: varchar("placa", { length: 20 }).notNull(),
 		resultado: satResultadoEnum("resultado").notNull(),
 
-		// true = estaba en el universo de vehículos propios al momento de correr.
-		// El conjunto de filas con true ES la foto del universo de esa corrida.
+		// true = pertenece al universo actual de vehículos propios del CRM.
 		eraEsperado: boolean("era_esperado").notNull(),
 
 		// Datos crudos de SAT. Nulos si la placa no apareció en el listado.
@@ -110,12 +125,21 @@ export const satVerificacionResultados = pgTable(
 
 		mensajeError: text("mensaje_error"),
 
-		createdAt: timestamp("created_at").notNull().defaultNow(),
+		consultadoAt: timestamp("consultado_at", { withTimezone: true })
+			.notNull()
+			.defaultNow(),
 	},
 	(t) => [
+		index("ix_sat_resultados_lote").on(t.loteId),
 		index("ix_sat_resultados_corrida").on(t.corridaId),
 		index("ix_sat_resultados_placa").on(t.placa),
 		index("ix_sat_resultados_veredicto").on(t.resultado),
 		index("ix_sat_resultados_vehiculo").on(t.vehicleId),
+		uniqueIndex("ux_sat_resultados_vehicle_actual")
+			.on(t.vehicleId)
+			.where(sql`${t.vehicleId} IS NOT NULL`),
+		uniqueIndex("ux_sat_resultados_placa_sin_vehicle_actual")
+			.on(sql`regexp_replace(upper(${t.placa}), '[^A-Z0-9]', '', 'g')`)
+			.where(sql`${t.vehicleId} IS NULL`),
 	],
 );

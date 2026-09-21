@@ -16,6 +16,7 @@ import {
 import { vehicles } from "../db/schema/vehicles";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
+	alguienFirmo,
 	documentIdDesdeLink,
 	filasDeFirmantes,
 	linksPorRol,
@@ -1392,12 +1393,21 @@ export const legalContractsRouter = {
 					// documentos y dejaban los dos vigentes. Se bloquea la fila y se
 					// vuelve a mirar: si otra ya lo anuló, ésta pierde, y el catch de
 					// abajo borra en WeeTrust el documento que acaba de emitir.
+					// También si jurídico ya lo reclamó para reemplazarlo y todavía no
+					// terminó de anularlo: si no, quedaban dos reemisiones vigentes.
 					const [original] = await tx
-						.select({ status: generatedLegalContracts.status })
+						.select({
+							status: generatedLegalContracts.status,
+							reemplazadoPor: generatedLegalContracts.replacedByContractId,
+						})
 						.from(generatedLegalContracts)
 						.where(eq(generatedLegalContracts.id, input.contractId))
 						.for("update");
-					if (!original || original.status === "cancelled") {
+					if (
+						!original ||
+						original.status === "cancelled" ||
+						original.reemplazadoPor
+					) {
 						throw new ORPCError("CONFLICT", {
 							message:
 								"Otra persona acaba de regenerar este contrato. Recargá para ver el nuevo.",
@@ -1466,19 +1476,35 @@ export const legalContractsRouter = {
 				throw error;
 			}
 
-			// Recién ahora el documento viejo. Si nadie lo firmó se borra en
-			// WeeTrust y su fila desaparece: no queda nada que conservar. Si ya lo
-			// firmaron, o no se pudo borrar, la fila se queda anulada con su ID y
-			// sus firmantes: es el único registro de un documento que sigue vivo.
-			let conservado = contract.status === "signed";
-			if (!conservado) {
+			// Recién ahora el documento viejo:
+			// - Completo: WeeTrust no deja borrarlo; la fila queda anulada.
+			// - Con firmas parciales: se borra en WeeTrust (si no, los que faltan
+			//   seguirían firmando un documento reemplazado), pero la fila queda
+			//   anulada con sus firmantes: es el registro de quién ya firmó.
+			// - Sin firmas: se borra allá y la fila desaparece.
+			// - Si el borrado falla: fila anulada, con el aviso de borrarlo a mano.
+			const completo = contract.status === "signed";
+			const conFirmasParciales =
+				!completo && (await alguienFirmo(input.contractId));
+			let conservado = completo;
+			if (!completo) {
 				try {
 					if (contract.weetrustDocumentId) {
 						await borrarDocumentoDeWeeTrust(contract.weetrustDocumentId);
 					}
-					await db
-						.delete(generatedLegalContracts)
-						.where(eq(generatedLegalContracts.id, input.contractId));
+					if (conFirmasParciales) {
+						conservado = true;
+						await db
+							.update(generatedLegalContracts)
+							.set({
+								cancellationReason: `Regenerado: ${motivo} (tenía firmas parciales; el documento se borró en WeeTrust)`,
+							})
+							.where(eq(generatedLegalContracts.id, input.contractId));
+					} else {
+						await db
+							.delete(generatedLegalContracts)
+							.where(eq(generatedLegalContracts.id, input.contractId));
+					}
 				} catch (error) {
 					console.error(
 						`[refreshContractSigningLinks] no se pudo borrar ${contract.weetrustDocumentId}:`,

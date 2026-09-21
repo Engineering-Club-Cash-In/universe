@@ -3,7 +3,7 @@
  * Integra con legal-docs-blueprints API y API de documentos legales
  */
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
@@ -19,6 +19,7 @@ import {
 	resolveLegacyContractGender,
 } from "../lib/contract-generation-gender";
 import {
+	alguienFirmo,
 	type FirmanteEnviado,
 	filasDeFirmantes,
 	linksPorRol,
@@ -344,10 +345,14 @@ async function anularContratoReemplazado(
 
 	if (!viejo) return null;
 
-	const tieneFirmas = viejo.status === "signed";
+	// Completo: WeeTrust no deja borrarlo. Con firmas parciales sí se puede, y
+	// se borra igual (si no, los que faltan seguirían pudiendo firmar un
+	// documento reemplazado), pero la fila se conserva: dice quién ya firmó.
+	const completo = viejo.status === "signed";
+	const tieneFirmas = completo || (await alguienFirmo(contractId));
 	let borradoAlla = !viejo.weetrustDocumentId;
 
-	if (!tieneFirmas && viejo.weetrustDocumentId) {
+	if (!completo && viejo.weetrustDocumentId) {
 		try {
 			await borrarDocumentoDeWeeTrust(viejo.weetrustDocumentId);
 			borradoAlla = true;
@@ -367,9 +372,11 @@ async function anularContratoReemplazado(
 			.update(generatedLegalContracts)
 			.set({
 				status: "cancelled",
-				cancellationReason: borradoAlla
-					? etiquetaDeMotivo(motivo)
-					: `${etiquetaDeMotivo(motivo)} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`,
+				cancellationReason: !borradoAlla
+					? `${etiquetaDeMotivo(motivo)} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`
+					: tieneFirmas && !completo
+						? `${etiquetaDeMotivo(motivo)} (tenía firmas parciales; el documento se borró en WeeTrust)`
+						: etiquetaDeMotivo(motivo),
 				cancelledAt: new Date(),
 				updatedAt: new Date(),
 			})
@@ -1582,7 +1589,10 @@ export const contractGenerationRouter = {
 			// documentos activos para el mismo contrato.
 			if (input.replaceContractId) {
 				const [aReemplazar] = await db
-					.select({ status: generatedLegalContracts.status })
+					.select({
+						status: generatedLegalContracts.status,
+						contractType: generatedLegalContracts.contractType,
+					})
 					.from(generatedLegalContracts)
 					.where(
 						and(
@@ -1599,6 +1609,14 @@ export const contractGenerationRouter = {
 				if (aReemplazar.status === "cancelled") {
 					throw new ORPCError("BAD_REQUEST", {
 						message: "Ese contrato ya está anulado: no se puede reemplazar.",
+					});
+				}
+				// Reemplazar es cambiar el documento de ESE contrato. Con otro tipo
+				// se anulaba uno y quedaba otro duplicado del tipo subido.
+				if (aReemplazar.contractType !== input.contractType) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El contrato a reemplazar es de otro tipo. Elegí el mismo tipo de contrato.",
 					});
 				}
 			}
@@ -1642,6 +1660,35 @@ export const contractGenerationRouter = {
 			let saved: { id: string } | undefined;
 			try {
 				saved = await db.transaction(async (tx) => {
+					// Un candado por oportunidad + tipo, que dura lo que la
+					// transacción. Dos subidas del mismo tipo a la vez pasaban las dos
+					// el control de "ya hay uno vigente" (no hay fila que bloquear
+					// todavía) y quedaban dos documentos activos. La segunda espera
+					// acá y, al volver a mirar, ve el de la primera.
+					await tx.execute(
+						sql`select pg_advisory_xact_lock(hashtext(${`contrato:${input.opportunityId}:${input.contractType}`}::text))`,
+					);
+					const [otroVigente] = await tx
+						.select({ id: generatedLegalContracts.id })
+						.from(generatedLegalContracts)
+						.where(
+							and(
+								eq(generatedLegalContracts.opportunityId, input.opportunityId),
+								eq(generatedLegalContracts.contractType, input.contractType),
+								ne(generatedLegalContracts.status, "cancelled"),
+								...(input.replaceContractId
+									? [ne(generatedLegalContracts.id, input.replaceContractId)]
+									: []),
+							),
+						)
+						.limit(1);
+					if (otroVigente) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Otra persona acaba de subir un contrato de este tipo. Recargá para verlo.",
+						});
+					}
+
 					if (input.replaceContractId) {
 						const [original] = await tx
 							.select({

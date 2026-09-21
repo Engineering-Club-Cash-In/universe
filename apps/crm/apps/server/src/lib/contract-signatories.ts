@@ -1,3 +1,4 @@
+import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import { contractSignatories } from "../db/schema/legal-contracts";
 import type { SignerRole } from "../services/legal-docs-api";
@@ -134,4 +135,25 @@ export async function guardarFirmantesDelContrato(
 			error,
 		);
 	}
+}
+
+/**
+ * Si alguna persona ya firmó el documento, aunque WeeTrust todavía no lo dé
+ * por completo (el contrato sigue "pending" hasta que firman todos).
+ *
+ * Al anular o regenerar decide si la fila se conserva: con una firma adentro
+ * es el registro de quién firmó qué, y borrarla lo pierde.
+ */
+export async function alguienFirmo(contractId: string): Promise<boolean> {
+	const [firma] = await db
+		.select({ id: contractSignatories.id })
+		.from(contractSignatories)
+		.where(
+			and(
+				eq(contractSignatories.contractId, contractId),
+				eq(contractSignatories.status, "signed"),
+			),
+		)
+		.limit(1);
+	return Boolean(firma);
 }

@@ -125,7 +125,8 @@ export async function sendContractLinksToLead(params: {
 		.where(
 			and(
 				eq(generatedLegalContracts.opportunityId, params.opportunityId),
-				// Un anulado quedó reemplazado: sus enlaces no se mandan.
+				// Un anulado (a mano o por reemplazo) no se manda: su documento en
+				// WeeTrust puede seguir vivo y el cliente firmaría uno sin efecto.
 				ne(generatedLegalContracts.status, "cancelled"),
 			),
 		);

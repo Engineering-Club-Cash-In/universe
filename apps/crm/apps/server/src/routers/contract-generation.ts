@@ -1147,6 +1147,7 @@ export const contractGenerationRouter = {
 		.handler(async ({ input, context }) => {
 			try {
 				const savedContracts: Array<{ id: string; contractType: string }> = [];
+				const descartados: string[] = [];
 				const etapaInicial = await etapaActual(input.opportunityId);
 
 				for (const contract of input.contracts) {
@@ -1179,6 +1180,7 @@ export const contractGenerationRouter = {
 						// Sin firmantes guardados el nuevo no se puede mandar ni
 						// regenerar: no se retira el anterior por uno así. Quedan los
 						// dos y el WhatsApp frena con el motivo a la vista.
+						let quedoVigente = true;
 						if (
 							await guardarFirmantes(
 								saved.id,
@@ -1186,22 +1188,33 @@ export const contractGenerationRouter = {
 								contract.contractType,
 							)
 						) {
-							await retirarAnterioresSiSigueVigente({
+							quedoVigente = await retirarAnterioresSiSigueVigente({
 								opportunityId: input.opportunityId,
 								contractType: contract.contractType,
 								nuevoId: saved.id,
 								etapaInicial,
 							});
 						}
-						savedContracts.push({
-							id: saved.id,
-							contractType: contract.contractType,
-						});
+						// Descartado (cambió la etapa o ganó otro pedido): esa fila ya no
+						// existe o no es la vigente, no se informa como enlazada.
+						if (quedoVigente) {
+							savedContracts.push({
+								id: saved.id,
+								contractType: contract.contractType,
+							});
+						} else {
+							descartados.push(contract.contractType);
+						}
 					}
 				}
 
-				// Guardar snapshot si se proporcionaron los datos de generación
-				if (input.generationData && input.contractDate) {
+				// Guardar snapshot si se proporcionaron los datos de generación, y sólo
+				// si quedó algún contrato: no tiene sentido para documentos descartados.
+				if (
+					input.generationData &&
+					input.contractDate &&
+					savedContracts.length > 0
+				) {
 					await db.insert(contractGenerationSnapshots).values({
 						opportunityId: input.opportunityId,
 						contractDate: input.contractDate,
@@ -1211,10 +1224,14 @@ export const contractGenerationRouter = {
 				}
 
 				return {
-					success: true,
+					success: descartados.length === 0,
 					linkedCount: savedContracts.length,
 					contracts: savedContracts,
-					message: `Se enlazaron ${savedContracts.length} contrato(s) a la oportunidad exitosamente`,
+					descartados,
+					message:
+						descartados.length === 0
+							? `Se enlazaron ${savedContracts.length} contrato(s) a la oportunidad exitosamente`
+							: `Se enlazaron ${savedContracts.length} contrato(s). Se descartaron ${descartados.join(", ")}: la oportunidad cambió mientras se generaban. Recargá y volvé a intentarlo.`,
 				};
 			} catch (error) {
 				console.error("[linkContractsToOpportunity] Error:", error);
@@ -1546,6 +1563,7 @@ export const contractGenerationRouter = {
 
 						if (saved) {
 							// Sin firmantes guardados no se retira el anterior (ver arriba).
+							let quedoVigente = true;
 							if (
 								await guardarFirmantes(
 									saved.id,
@@ -1553,7 +1571,7 @@ export const contractGenerationRouter = {
 									originalContract.contractType,
 								)
 							) {
-								await retirarAnterioresSiSigueVigente({
+								quedoVigente = await retirarAnterioresSiSigueVigente({
 									opportunityId: input.opportunityId,
 									contractType: originalContract.contractType,
 									nuevoId: saved.id,
@@ -1561,10 +1579,15 @@ export const contractGenerationRouter = {
 									motivo: "Regenerado desde jurídico",
 								});
 							}
-							savedContracts.push({
-								id: saved.id,
-								contractType: originalContract.contractType,
-							});
+							if (quedoVigente) {
+								savedContracts.push({
+									id: saved.id,
+									contractType: originalContract.contractType,
+								});
+							} else {
+								// Descartado: el anterior sigue vigente, como si hubiera fallado.
+								failedContracts.push(originalContract.contractType);
+							}
 						}
 					} else {
 						// Registrar contratos que fallaron (no se borran)

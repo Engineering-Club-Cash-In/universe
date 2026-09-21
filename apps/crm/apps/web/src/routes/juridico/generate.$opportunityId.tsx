@@ -147,6 +147,12 @@ function RouteComponent() {
 			return await client.linkContractsToOpportunity(data);
 		},
 		onSuccess: (data) => {
+			// Con descartados (la oportunidad cambió mientras se generaban) no es
+			// un éxito completo: el mensaje dice cuáles hay que volver a generar.
+			if (!data.success) {
+				toast.warning(data.message);
+				return;
+			}
 			toast.success(
 				data.message || "Contratos enlazados a la oportunidad exitosamente",
 			);

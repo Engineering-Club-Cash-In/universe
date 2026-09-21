@@ -849,6 +849,17 @@ export class WeeTrustService {
 				);
 			}
 
+			// Un firmante sin URL deja un contrato "exitoso" con un link vacío que
+			// nadie puede usar. Se trata como envío incompleto.
+			const sinUrl = options.signatory
+				.filter((_, i) => !enOrden[i]?.signing?.url)
+				.map((s) => s.emailID);
+			if (sinUrl.length > 0) {
+				throw new Error(
+					`WeeTrust no devolvió enlace de firma para: ${sinUrl.join(", ")}`,
+				);
+			}
+
 			return {
 				documentID,
 				signingLinks: enOrden.map((s) => s?.signing?.url ?? ""),

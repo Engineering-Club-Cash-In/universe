@@ -31,6 +31,22 @@ describe("getDiaPagoOriginalSistema", () => {
 });
 
 describe("calcularAjusteFechaIdeal", () => {
+	test("día IA menor al original cae en el mes siguiente", () => {
+		// Primera cuota en octubre (31 días): 15 de octubre → 2 de noviembre = 18 días.
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 15,
+			diaPagoMensualElegido: 2,
+			capital: 10000,
+			porcentajeInteres: 3,
+			membresiaMensual: 90,
+			seguroMensual: 45,
+			gpsMensual: 15,
+			fechaReferencia: new Date("2026-09-16T18:00:00Z"),
+		});
+
+		expect(resultado?.diasDiferencia).toBe(18);
+	});
+
 	test("día IA después del original: prorratea interés, membresía y servicios", () => {
 		// fechaReferencia en marzo (hora Guatemala) → primera cuota cae en abril (30 días)
 		const fechaReferencia = new Date("2026-03-10T18:00:00Z");
@@ -141,7 +157,7 @@ describe("calcularAjusteFechaIdeal", () => {
 		expect(resultado).toBeNull();
 	});
 
-	test("día IA antes del original: no hay ajuste (null), no negativo", () => {
+	test("día IA menor al original conserva el rollover al mes siguiente", () => {
 		const resultado = calcularAjusteFechaIdeal({
 			diaPagoOriginalSistema: 30,
 			diaPagoMensualElegido: 17,
@@ -150,9 +166,10 @@ describe("calcularAjusteFechaIdeal", () => {
 			membresiaMensual: 90,
 			seguroMensual: 45,
 			gpsMensual: 15,
+			fechaReferencia: new Date("2026-03-10T18:00:00Z"),
 		});
 
-		expect(resultado).toBeNull();
+		expect(resultado?.diasDiferencia).toBe(17);
 	});
 
 	test("interpreta la frontera mensual con calendario Guatemala", () => {
@@ -210,5 +227,21 @@ describe("calcularAjusteFechaIdeal", () => {
 		expect(resultado?.diasDelMes).toBe(28);
 		// 28 - 15 = 13, NO 31 - 15 = 16
 		expect(resultado?.diasDiferencia).toBe(13);
+	});
+
+	test("conserva rollover 30→29 cuando la primera cuota cae en febrero", () => {
+		const resultado = calcularAjusteFechaIdeal({
+			diaPagoOriginalSistema: 30,
+			diaPagoMensualElegido: 29,
+			capital: 10000,
+			porcentajeInteres: 3,
+			membresiaMensual: 0,
+			seguroMensual: 0,
+			gpsMensual: 0,
+			fechaReferencia: new Date("2026-01-10T18:00:00Z"),
+		});
+
+		// 30 se clampa a 28/feb; 29 configurado sigue siendo 29/mar.
+		expect(resultado?.diasDiferencia).toBe(29);
 	});
 });

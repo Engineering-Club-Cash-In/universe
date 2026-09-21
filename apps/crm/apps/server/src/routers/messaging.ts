@@ -106,7 +106,6 @@ export async function sendContractLinksToLead(params: {
 			id: generatedLegalContracts.id,
 			contractName: generatedLegalContracts.contractName,
 			signatureMode: generatedLegalContracts.signatureMode,
-			clientSigningLink: generatedLegalContracts.clientSigningLink,
 			pdfLink: generatedLegalContracts.pdfLink,
 		})
 		.from(generatedLegalContracts)
@@ -183,27 +182,24 @@ export async function sendContractLinksToLead(params: {
 	let motivoDelLead: string | undefined;
 
 	for (const [indice, destinatario] of destinatarios.entries()) {
-		// Los contratos de ESTA persona: aquellos donde tiene link propio.
-		// Para los contratos viejos, que no tienen firmantes guardados, se cae al
-		// link del cliente, pero sólo para el titular: ese es el único de quien
-		// sabemos con certeza que la columna decía la verdad.
+		// Los contratos de ESTA persona: aquellos donde tiene fila de firmante.
+		// Los contratos viejos (sin firmantes guardados) NO se mandan: se
+		// emitieron sin la verificación de identidad por rol de ahora, y su
+		// columna `clientSigningLink` no dice de quién es cada link. Sólo salen
+		// por WhatsApp los enlaces generados con el flujo nuevo.
 		const susContratos = contratosDeFirma
-			.map((c) => {
-				const porEmail = linksPorContrato.get(c.id);
+			.filter((c) => {
 				const clave = destinatario.email?.toLowerCase();
-				const firmaEste = Boolean(clave && porEmail?.has(clave));
-				const legado =
-					!porEmail && destinatario.leadId ? c.clientSigningLink : null;
-
-				return {
-					contractName: c.contractName,
-					link: firmaEste ? (porEmail?.get(clave as string) ?? null) : legado,
-					pdfLink: pdfResueltos.get(c.id) ?? null,
-					esSuyo: firmaEste || Boolean(legado),
-				};
+				return Boolean(clave && linksPorContrato.get(c.id)?.has(clave));
 			})
-			.filter((c) => c.esSuyo)
-			.map(({ esSuyo: _, ...c }) => c);
+			.map((c) => ({
+				contractName: c.contractName,
+				link:
+					linksPorContrato
+						.get(c.id)
+						?.get(destinatario.email?.toLowerCase() as string) ?? null,
+				pdfLink: pdfResueltos.get(c.id) ?? null,
+			}));
 
 		// Si a alguno de SUS contratos le falta el enlace, no se manda nada: un
 		// mensaje con la mitad de los contratos queda marcado como enviado y el
@@ -231,6 +227,12 @@ export async function sendContractLinksToLead(params: {
 			motivo = "Servicio de mensajería no configurado";
 		} else if (contratosDeFirma.length === 0) {
 			motivo = "No hay contratos con firma electrónica";
+		} else if (
+			susContratos.length === 0 &&
+			contratosDeFirma.every((c) => !linksPorContrato.has(c.id))
+		) {
+			motivo =
+				"Los contratos son anteriores a la firma por rol: hay que reemplazarlos desde jurídico para mandarlos";
 		} else if (sinEnlace.length > 0) {
 			motivo = `Falta el enlace de firma de: ${sinEnlace.map((c) => c.contractName).join(", ")}`;
 		} else if (!mensaje) {
@@ -354,13 +356,12 @@ export const messagingRouter = {
 				});
 			}
 
-			// El link del titular sale de sus firmantes; `clientSigningLink` sólo
-			// se usa para los contratos viejos, que no los tienen guardados.
+			// El link del titular sale de sus firmantes. Los contratos viejos, sin
+			// firmantes guardados, quedan sin link: no se mandan por WhatsApp.
 			const contracts = await db
 				.select({
 					id: generatedLegalContracts.id,
 					contractName: generatedLegalContracts.contractName,
-					clientSigningLink: generatedLegalContracts.clientSigningLink,
 					titularSigningUrl: contractSignatories.signingUrl,
 				})
 				.from(generatedLegalContracts)
@@ -382,7 +383,7 @@ export const messagingRouter = {
 
 			const mapped = contracts.map((c) => ({
 				contractName: c.contractName,
-				link: c.titularSigningUrl ?? c.clientSigningLink ?? null,
+				link: c.titularSigningUrl ?? null,
 			}));
 
 			const validContracts = mapped.filter(

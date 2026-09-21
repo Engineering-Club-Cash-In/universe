@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, count, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -1148,6 +1148,9 @@ export const legalContractsRouter = {
 						and(
 							eq(generatedLegalContracts.opportunityId, input.opportunityId),
 							eq(generatedLegalContracts.status, "pending"),
+							// Un original reclamado por un reemplazo ya no es el vigente:
+							// confirmarlo le inventaba firmas a un documento descartado.
+							isNull(generatedLegalContracts.replacedByContractId),
 						),
 					)
 					.returning({ id: generatedLegalContracts.id });
@@ -1315,7 +1318,19 @@ export const legalContractsRouter = {
 				});
 			}
 
-			if (!contract.pdfLink) {
+			// La key de R2 del PDF. Hay contratos que guardaron en `pdfLink` una
+			// URL firmada (la que se muestra, que vence) en vez de la key: para
+			// esos se recupera de la respuesta del generador. Con una URL entera
+			// como key, R2 no encuentra nada.
+			const respuesta = contract.apiResponse as { r2Key?: unknown } | null;
+			const r2KeyDelPdf =
+				contract.pdfLink && !/^https?:\/\//i.test(contract.pdfLink)
+					? contract.pdfLink
+					: typeof respuesta?.r2Key === "string"
+						? respuesta.r2Key
+						: null;
+
+			if (!r2KeyDelPdf) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
 						"Este contrato no tiene el PDF guardado, así que no se puede reemitir. Hay que generarlo de nuevo.",
@@ -1366,7 +1381,7 @@ export const legalContractsRouter = {
 			}
 
 			const resultado = await reemitirContratoEnWeeTrust({
-				r2Key: contract.pdfLink,
+				r2Key: r2KeyDelPdf,
 				contractType: contract.contractType,
 				filenamePrefix: contract.contractName,
 				signers,
@@ -1444,7 +1459,7 @@ export const legalContractsRouter = {
 							contractName: contract.contractName,
 							templateId: contract.templateId,
 							apiResponse: resultado,
-							pdfLink: contract.pdfLink,
+							pdfLink: r2KeyDelPdf,
 							signingProvider: resultado.signingProvider ?? "weetrust",
 							signatureMode: contract.signatureMode,
 							generatedBy: context.userId,

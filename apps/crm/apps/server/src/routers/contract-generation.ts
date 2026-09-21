@@ -203,6 +203,7 @@ function firmaDelGenerador(apiResponse: unknown): {
 	signingProvider?: string;
 	documentID?: string;
 	observerUrl?: string;
+	r2Key?: string;
 } {
 	if (!apiResponse || typeof apiResponse !== "object") return {};
 	const r = apiResponse as {
@@ -210,6 +211,7 @@ function firmaDelGenerador(apiResponse: unknown): {
 		signingProvider?: string;
 		documentID?: string;
 		observerUrl?: string;
+		r2Key?: string;
 	};
 	return {
 		signatories: Array.isArray(r.signatories) ? r.signatories : undefined,
@@ -217,6 +219,7 @@ function firmaDelGenerador(apiResponse: unknown): {
 			typeof r.signingProvider === "string" ? r.signingProvider : undefined,
 		documentID: typeof r.documentID === "string" ? r.documentID : undefined,
 		observerUrl: typeof r.observerUrl === "string" ? r.observerUrl : undefined,
+		r2Key: typeof r.r2Key === "string" ? r.r2Key : undefined,
 	};
 }
 
@@ -1201,7 +1204,9 @@ export const contractGenerationRouter = {
 							signatureMode: getSignatureMode(contract.contractType),
 							templateId: contract.templateId,
 							apiResponse: contract.apiResponse,
-							pdfLink: contract.documentLink || null,
+							// La key de R2, no la URL firmada que se muestra (vence en una
+							// hora): regenerar baja el PDF de R2 con esta key.
+							pdfLink: generado.r2Key || contract.documentLink || null,
 							status: "pending",
 							generatedBy: context.userId,
 							generatedAt: new Date(),

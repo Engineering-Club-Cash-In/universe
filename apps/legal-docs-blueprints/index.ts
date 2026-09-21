@@ -151,9 +151,10 @@ const app = new Elysia()
       requestBody.data,
       {
         ...requestBody.options,
-        signers: requestBody.signers,
-        observers: requestBody.observers,
-        emails: requestBody.emails,
+        // Sin pisar lo que ya viniera dentro de `options`.
+        signers: requestBody.signers ?? requestBody.options?.signers,
+        observers: requestBody.observers ?? requestBody.options?.observers,
+        emails: requestBody.emails ?? requestBody.options?.emails,
       }
     );
 

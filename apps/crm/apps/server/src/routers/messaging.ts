@@ -118,6 +118,8 @@ export async function sendContractLinksToLead(params: {
 			contractName: generatedLegalContracts.contractName,
 			signatureMode: generatedLegalContracts.signatureMode,
 			pdfLink: generatedLegalContracts.pdfLink,
+			weetrustDocumentId: generatedLegalContracts.weetrustDocumentId,
+			signingProvider: generatedLegalContracts.signingProvider,
 		})
 		.from(generatedLegalContracts)
 		.where(
@@ -133,12 +135,20 @@ export async function sendContractLinksToLead(params: {
 		(c) => c.signatureMode !== "fisica",
 	);
 
+	// Si todo se firma en papel no hay nada que mandar. No se crea el registro:
+	// quedaría "pendiente" para siempre en la ficha y el envío manual no lo
+	// puede cerrar, porque no tiene ningún contrato que ofrecer.
+	if (contratosDeFirma.length === 0) {
+		return { sent: false, reason: "No hay contratos con firma electrónica" };
+	}
+
 	const firmantes = contratosDeFirma.length
 		? await db
 				.select({
 					contractId: contractSignatories.contractId,
 					email: contractSignatories.email,
 					signingUrl: contractSignatories.signingUrl,
+					status: contractSignatories.status,
 				})
 				.from(contractSignatories)
 				.where(
@@ -155,7 +165,18 @@ export async function sendContractLinksToLead(params: {
 	 * igual para que el contrato aparezca en el envío manual y se pueda pegar.
 	 */
 	const linksPorContrato = new Map<string, Map<string, string | null>>();
+	/** Contratos con firmantes guardados, firmados o no. */
+	const conFirmantes = new Set<string>();
+	/** Correos (en minúsculas) con al menos un contrato firmado. */
+	const firmaronAlgo = new Set<string>();
 	for (const f of firmantes) {
+		conFirmantes.add(f.contractId);
+		// Quien ya firmó ese contrato no recibe su enlace otra vez: le llegaba un
+		// link de un documento cerrado cada vez que se reenviaba por otro motivo.
+		if (f.status === "signed") {
+			firmaronAlgo.add(f.email.toLowerCase());
+			continue;
+		}
 		const porEmail = linksPorContrato.get(f.contractId) ?? new Map();
 		porEmail.set(f.email.toLowerCase(), f.signingUrl ?? null);
 		linksPorContrato.set(f.contractId, porEmail);
@@ -221,6 +242,15 @@ export async function sendContractLinksToLead(params: {
 	let algunoEnviado = false;
 	let motivoDelLead: string | undefined;
 
+	// Contratos nuevos (tienen documento en el proveedor) que se quedaron sin
+	// firmantes guardados: el guardado es best-effort y pudo fallar. No se
+	// confunden con los viejos, y no se manda nada hasta revisarlos: si no, el
+	// resto sale como "enviado" y ese contrato no lo recibe nadie.
+	const sinFirmantesGuardados = contratosDeFirma.filter(
+		(c) =>
+			(c.weetrustDocumentId || c.signingProvider) && !conFirmantes.has(c.id),
+	);
+
 	for (const [indice, destinatario] of destinatarios.entries()) {
 		// Los contratos de ESTA persona: aquellos donde tiene fila de firmante.
 		// Los contratos viejos (sin firmantes guardados) NO se mandan: se
@@ -254,6 +284,15 @@ export async function sendContractLinksToLead(params: {
 					)
 				: null;
 
+		// Ya firmó todo lo suyo: no hay nada que mandarle ni que dejar pendiente.
+		if (
+			susContratos.length === 0 &&
+			destinatario.email &&
+			firmaronAlgo.has(destinatario.email.toLowerCase())
+		) {
+			continue;
+		}
+
 		let status: "sent" | "pending" | "failed" = "pending";
 		let motivo: string | undefined;
 		let enviadoEn: Date | undefined;
@@ -265,11 +304,11 @@ export async function sendContractLinksToLead(params: {
 
 		if (!stClient) {
 			motivo = "Servicio de mensajería no configurado";
-		} else if (contratosDeFirma.length === 0) {
-			motivo = "No hay contratos con firma electrónica";
+		} else if (sinFirmantesGuardados.length > 0) {
+			motivo = `No se guardaron los firmantes de: ${sinFirmantesGuardados.map((c) => c.contractName).join(", ")}. Hay que reemplazarlos desde jurídico antes de mandar.`;
 		} else if (
 			susContratos.length === 0 &&
-			contratosDeFirma.every((c) => !linksPorContrato.has(c.id))
+			contratosDeFirma.every((c) => !conFirmantes.has(c.id))
 		) {
 			motivo =
 				"Los contratos son anteriores a la firma por rol: hay que reemplazarlos desde jurídico para mandarlos";

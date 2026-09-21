@@ -1377,7 +1377,14 @@ export const legalContractsRouter = {
 	 */
 	resendContractLinksWhatsapp: viewOpportunityContractsProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// Ver los contratos no alcanza: esto le escribe al cliente.
+			if (!PERMISSIONS.canResendContractLinks(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tenés permiso para reenviar los enlaces de firma",
+				});
+			}
+
 			const [opportunity] = await db
 				.select({ leadId: opportunities.leadId })
 				.from(opportunities)
@@ -1406,7 +1413,13 @@ export const legalContractsRouter = {
 	/** Reenvía el correo de WeeTrust a los firmantes que todavía no firman. */
 	resendContractSigningEmails: viewOpportunityContractsProcedure
 		.input(z.object({ contractId: z.string().uuid() }))
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			if (!PERMISSIONS.canResendContractLinks(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tenés permiso para reenviar los correos de firma",
+				});
+			}
+
 			const { documentID } = await contratoConDocumentID(input.contractId);
 
 			try {

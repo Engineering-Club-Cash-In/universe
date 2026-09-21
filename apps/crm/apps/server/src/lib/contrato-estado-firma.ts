@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
 	contractSignatories,
@@ -36,7 +36,11 @@ export async function sincronizarEstadoDeFirma(
 				...(firmante.expiry
 					? { signingUrlExpiry: new Date(firmante.expiry) }
 					: {}),
-				...(firmante.isSigned ? { signedAt: ahora } : { signedAt: null }),
+				// La primera vez que se vio firmado. Cada consulta posterior lo
+				// correría hacia adelante y dejaría de decir cuándo firmó.
+				signedAt: firmante.isSigned
+					? sql`coalesce(${contractSignatories.signedAt}, ${ahora})`
+					: null,
 				updatedAt: ahora,
 			})
 			.where(
@@ -47,18 +51,30 @@ export async function sincronizarEstadoDeFirma(
 			);
 	}
 
-	const completado = estado.status === "COMPLETED";
 	await db
 		.update(generatedLegalContracts)
 		.set({
-			// Sólo se avanza a "firmado". Que WeeTrust reporte PENDING no es motivo
-			// para revivir un contrato que alguien ya cerró o canceló a mano.
-			...(completado ? { status: "signed" as const } : {}),
 			weetrustDocumentId: estado.documentID,
 			signingStatusCheckedAt: ahora,
 			updatedAt: ahora,
 		})
 		.where(eq(generatedLegalContracts.id, contractId));
+
+	// Sólo se avanza de "pendiente" a "firmado". Un anulado se queda anulado
+	// aunque su documento viejo termine de firmarse (un webhook atrasado, o uno
+	// que no se pudo borrar): si no, reaparece entre los activos y sus enlaces
+	// se vuelven a mandar.
+	if (estado.status === "COMPLETED") {
+		await db
+			.update(generatedLegalContracts)
+			.set({ status: "signed", updatedAt: ahora })
+			.where(
+				and(
+					eq(generatedLegalContracts.id, contractId),
+					eq(generatedLegalContracts.status, "pending"),
+				),
+			);
+	}
 }
 
 /**

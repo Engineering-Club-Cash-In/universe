@@ -259,6 +259,11 @@ export const PERMISSIONS = {
 	canRegenerateContractLinks: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST,
 
+	// Reenviar enlaces (WhatsApp o correo de WeeTrust) le escribe al cliente.
+	// Lo hacen análisis, después de regenerar, y jurídico, después de reemplazar.
+	canResendContractLinks: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
+
 	canConfirmContractsSigning: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||

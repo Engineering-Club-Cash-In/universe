@@ -120,9 +120,22 @@ function firmantesDelContrato(
 	// El representante legal lo pone siempre el servidor. Si viniera del
 	// navegador, cualquiera podría mandar su propio correo con ese rol y
 	// quedarse con el link de firma de la entidad.
+	//
+	// Y sólo en los contratos de venta con layout auditado: el generador descarta
+	// al rep legal donde no lleva línea, pero en los que no tienen layout
+	// (inversiones, sociedad, cartas poder) reparte a todos por orden de llegada
+	// y le daría una firma que el documento no tiene.
 	const conRepLegal: ContractSigner[] = [
 		...signers.filter((s) => s.role !== "REP_LEGAL"),
-		{ role: "REP_LEGAL", email: REP_LEGAL_EMAIL, name: REP_LEGAL_NOMBRE },
+		...(esContratoVentaMapeado(contractType)
+			? [
+					{
+						role: "REP_LEGAL" as const,
+						email: REP_LEGAL_EMAIL,
+						name: REP_LEGAL_NOMBRE,
+					},
+				]
+			: []),
 	];
 
 	// Mismo criterio que usa el envío de WhatsApp para saber a quién le toca cada
@@ -1483,14 +1496,42 @@ export const contractGenerationRouter = {
 
 			const firmantes = firmantesDelContrato(input.contractType, signers);
 
+			// Hace falta el titular, no cualquier firmante: sin él, el primer
+			// codeudor ocupa el bloque de deudores y termina firmando en la línea
+			// del cliente.
 			if (
 				!esFirmaFisica(input.contractType) &&
-				(!firmantes || firmantes.length === 0)
+				!firmantes?.some((f) => f.role === "TITULAR")
 			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
-						"La oportunidad no tiene ningún firmante con correo. Cargá el correo del cliente antes de subir el contrato.",
+						"El cliente no tiene correo registrado. Cargalo antes de subir el contrato.",
 				});
+			}
+
+			// Un anulado ya fue reemplazado: reemplazarlo otra vez dejaría dos
+			// documentos activos para el mismo contrato.
+			if (input.replaceContractId) {
+				const [aReemplazar] = await db
+					.select({ status: generatedLegalContracts.status })
+					.from(generatedLegalContracts)
+					.where(
+						and(
+							eq(generatedLegalContracts.id, input.replaceContractId),
+							eq(generatedLegalContracts.opportunityId, input.opportunityId),
+						),
+					)
+					.limit(1);
+				if (!aReemplazar) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "El contrato a reemplazar no existe en esta oportunidad",
+					});
+				}
+				if (aReemplazar.status === "cancelled") {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Ese contrato ya está anulado: no se puede reemplazar.",
+					});
+				}
 			}
 
 			const resultado = await subirContratoParaFirma({
@@ -1508,16 +1549,9 @@ export const contractGenerationRouter = {
 				throw new ORPCError("BAD_REQUEST", { message: falla });
 			}
 
-			// El viejo se toca recién ahora: si el envío a firma hubiera fallado,
-			// arriba ya se habría cortado y el contrato original sigue en pie.
-			const anulado = input.replaceContractId
-				? await anularContratoReemplazado(
-						input.replaceContractId,
-						input.opportunityId,
-						input.motivo as string,
-					)
-				: null;
-
+			// Primero se guarda el nuevo y recién después se anula el viejo: si el
+			// guardado fallara con el viejo ya borrado, la oportunidad se quedaba
+			// sin ninguno de los dos y el documento nuevo sin registro.
 			const [saved] = await db
 				.insert(generatedLegalContracts)
 				.values({
@@ -1549,6 +1583,14 @@ export const contractGenerationRouter = {
 			}
 
 			await guardarFirmantes(saved.id, resultado.signatories);
+
+			const anulado = input.replaceContractId
+				? await anularContratoReemplazado(
+						input.replaceContractId,
+						input.opportunityId,
+						input.motivo as string,
+					)
+				: null;
 
 			// Deja el rastro: el anulado apunta al que lo reemplazó.
 			if (anulado?.conservado) {

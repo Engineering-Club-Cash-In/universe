@@ -223,7 +223,8 @@ export function ContractCard({
 								{statusConfig[contract.status].label}
 							</Badge>
 						)}
-						{canCreateLegal && onReplace && (
+						{/* Un anulado ya fue reemplazado: no se reemplaza dos veces. */}
+						{canCreateLegal && onReplace && contract.status !== "cancelled" && (
 							<Button
 								size="sm"
 								variant="outline"

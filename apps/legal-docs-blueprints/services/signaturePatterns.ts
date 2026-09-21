@@ -433,3 +433,30 @@ export function resolveSignerOrder(
 
   return secuencia;
 }
+
+/**
+ * Quiénes firman el documento, una vez cada uno y en el orden en que aparecen
+ * sus líneas de firma. Es el orden en que se le pasan al proveedor.
+ *
+ * Los contratos con layout declarado se resuelven por rol. Los que todavía no
+ * lo tienen (inversiones, sociedad, cartas poder) siguen como siempre: en el
+ * orden en que llegaron. Pedirles el layout acá los hacía fallar a todos antes
+ * de llegar al reparto por orden de llegada, que es el que les corresponde.
+ */
+export function firmantesEnOrdenDeFirma(
+  contractType: ContractType,
+  signers: ContractSigner[],
+): ContractSigner[] {
+  const config = getSignaturePattern(contractType);
+  const orden =
+    config.bloques && config.bloques.length > 0
+      ? resolveSignerOrder(contractType, signers)
+      : signers;
+
+  // La misma persona puede firmar en varias líneas; al proveedor va una vez.
+  const porEmail = new Map<string, ContractSigner>();
+  for (const s of orden) {
+    if (!porEmail.has(s.email)) porEmail.set(s.email, s);
+  }
+  return [...porEmail.values()];
+}

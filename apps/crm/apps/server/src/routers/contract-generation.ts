@@ -172,17 +172,19 @@ function firmantesDelContrato(
 async function guardarFirmantes(
 	contractId: string,
 	signatories: FirmanteEnviado[] | undefined,
-): Promise<void> {
+): Promise<boolean> {
 	const filas = filasDeFirmantes(contractId, signatories);
-	if (filas.length === 0) return;
+	if (filas.length === 0) return true;
 
 	try {
 		await db.insert(contractSignatories).values(filas);
+		return true;
 	} catch (error) {
 		console.error(
 			`[guardarFirmantes] contrato ${contractId}: no se pudieron guardar los firmantes`,
 			error,
 		);
+		return false;
 	}
 }
 
@@ -1087,12 +1089,16 @@ export const contractGenerationRouter = {
 						.returning({ id: generatedLegalContracts.id });
 
 					if (saved) {
-						await guardarFirmantes(saved.id, generado.signatories);
-						await anularAnterioresDelMismoTipo(
-							input.opportunityId,
-							contract.contractType,
-							saved.id,
-						);
+						// Sin firmantes guardados el nuevo no se puede mandar ni
+						// regenerar: no se retira el anterior por uno así. Quedan los
+						// dos y el WhatsApp frena con el motivo a la vista.
+						if (await guardarFirmantes(saved.id, generado.signatories)) {
+							await anularAnterioresDelMismoTipo(
+								input.opportunityId,
+								contract.contractType,
+								saved.id,
+							);
+						}
 						savedContracts.push({
 							id: saved.id,
 							contractType: contract.contractType,
@@ -1441,13 +1447,17 @@ export const contractGenerationRouter = {
 							.returning({ id: generatedLegalContracts.id });
 
 						if (saved) {
-							await guardarFirmantes(saved.id, contractResult.signatories);
-							await anularAnterioresDelMismoTipo(
-								input.opportunityId,
-								originalContract.contractType,
-								saved.id,
-								"Regenerado desde jurídico",
-							);
+							// Sin firmantes guardados no se retira el anterior (ver arriba).
+							if (
+								await guardarFirmantes(saved.id, contractResult.signatories)
+							) {
+								await anularAnterioresDelMismoTipo(
+									input.opportunityId,
+									originalContract.contractType,
+									saved.id,
+									"Regenerado desde jurídico",
+								);
+							}
 							savedContracts.push({
 								id: saved.id,
 								contractType: originalContract.contractType,
@@ -1690,6 +1700,25 @@ export const contractGenerationRouter = {
 					}
 
 					if (input.replaceContractId) {
+						// La etapa se vuelve a mirar acá, con la oportunidad bloqueada:
+						// mientras WeeTrust recibía el documento alguien pudo pasarla a
+						// 85% (y mandar el WhatsApp con los enlaces viejos) o cerrarla.
+						const [etapa] = await tx
+							.select({ porcentaje: salesStages.closurePercentage })
+							.from(opportunities)
+							.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+							.where(eq(opportunities.id, input.opportunityId))
+							.for("update", { of: opportunities });
+						if (
+							!etapa?.porcentaje ||
+							!ETAPAS_POR_ACCION.reemplazar.includes(etapa.porcentaje as never)
+						) {
+							throw new ORPCError("CONFLICT", {
+								message:
+									"La oportunidad cambió de etapa mientras se subía el contrato. Ya no se puede reemplazar.",
+							});
+						}
+
 						const [original] = await tx
 							.select({
 								status: generatedLegalContracts.status,

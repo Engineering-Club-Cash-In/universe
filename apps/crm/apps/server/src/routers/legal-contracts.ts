@@ -1610,7 +1610,9 @@ export const legalContractsRouter = {
 
 			// Un anulado se conserva sólo como registro: reenviarle la invitación
 			// sería pedirle al cliente que firme un documento reemplazado.
-			if (contract.status === "cancelled") {
+			// Tampoco uno ya reclamado por un reemplazo que todavía no terminó de
+			// anularlo: su documento es el que se está dejando sin efecto.
+			if (contract.status === "cancelled" || contract.replacedByContractId) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "Este contrato está anulado: no se le reenvían correos.",
 				});

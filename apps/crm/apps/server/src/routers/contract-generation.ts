@@ -172,9 +172,13 @@ function firmantesDelContrato(
 async function guardarFirmantes(
 	contractId: string,
 	signatories: FirmanteEnviado[] | undefined,
+	contractType: string,
 ): Promise<boolean> {
 	const filas = filasDeFirmantes(contractId, signatories);
-	if (filas.length === 0) return true;
+	// Sin firmantes sólo está bien si se firma en papel. Uno electrónico que
+	// llega sin ellos (respuesta del camino viejo, con sólo `signing_links`) no
+	// se puede mandar ni regenerar: cuenta como guardado fallido.
+	if (filas.length === 0) return esFirmaFisica(contractType);
 
 	try {
 		await db.insert(contractSignatories).values(filas);
@@ -434,6 +438,84 @@ async function anularAnterioresDelMismoTipo(
 				.where(eq(generatedLegalContracts.id, anterior.id));
 		}
 	}
+}
+
+/** La etapa en la que está la oportunidad ahora (su `stageId`). */
+async function etapaActual(opportunityId: string): Promise<string | null> {
+	const [fila] = await db
+		.select({ stageId: opportunities.stageId })
+		.from(opportunities)
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+	return fila?.stageId ?? null;
+}
+
+/**
+ * Retira los contratos anteriores del mismo tipo, pero sólo si el nuevo sigue
+ * siendo el que corresponde. Lo usan generar y regenerar desde jurídico.
+ *
+ * - Toma el mismo candado por oportunidad + tipo que la subida manual: dos
+ *   pedidos a la vez ya no se borran mutuamente el contrato nuevo.
+ * - Bloquea la oportunidad y verifica que siga en la etapa en la que empezó el
+ *   pedido. Si mientras se generaba alguien la aprobó (y mandó el WhatsApp con
+ *   los enlaces de entonces), no se instala el nuevo: se deshace y el anterior
+ *   sigue vigente. `NO KEY UPDATE` para no trabarse con los borrados de
+ *   contratos, que sólo piden `KEY SHARE` sobre la oportunidad.
+ *
+ * Devuelve si el nuevo quedó como vigente.
+ */
+async function retirarAnterioresSiSigueVigente(params: {
+	opportunityId: string;
+	contractType: string;
+	nuevoId: string;
+	etapaInicial: string | null;
+	motivo?: string;
+}): Promise<boolean> {
+	const { opportunityId, contractType, nuevoId, etapaInicial, motivo } = params;
+
+	const resultado = await db.transaction(async (tx) => {
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(hashtext(${`contrato:${opportunityId}:${contractType}`}::text))`,
+		);
+
+		const [oportunidad] = await tx
+			.select({ stageId: opportunities.stageId })
+			.from(opportunities)
+			.where(eq(opportunities.id, opportunityId))
+			.for("no key update", { of: opportunities });
+		if (!oportunidad || oportunidad.stageId !== etapaInicial) {
+			return "cambio-de-etapa" as const;
+		}
+
+		// Otro pedido simultáneo pudo haberlo retirado ya: ése ganó.
+		const [nuevo] = await tx
+			.select({
+				status: generatedLegalContracts.status,
+				reemplazadoPor: generatedLegalContracts.replacedByContractId,
+			})
+			.from(generatedLegalContracts)
+			.where(eq(generatedLegalContracts.id, nuevoId));
+		if (!nuevo || nuevo.status === "cancelled" || nuevo.reemplazadoPor) {
+			return "perdio" as const;
+		}
+
+		await anularAnterioresDelMismoTipo(
+			opportunityId,
+			contractType,
+			nuevoId,
+			motivo,
+		);
+		return "vigente" as const;
+	});
+
+	if (resultado === "cambio-de-etapa") {
+		await anularContratoReemplazado(
+			nuevoId,
+			opportunityId,
+			"La oportunidad cambió de etapa mientras se generaba",
+		);
+	}
+	return resultado === "vigente";
 }
 
 /** Firmante tal como lo manda el front. */
@@ -787,7 +869,11 @@ export const contractGenerationRouter = {
 							.returning();
 
 						if (newContract) {
-							await guardarFirmantes(newContract.id, apiResult.signatories);
+							await guardarFirmantes(
+								newContract.id,
+								apiResult.signatories,
+								contractType,
+							);
 						}
 
 						results.push({
@@ -1061,6 +1147,7 @@ export const contractGenerationRouter = {
 		.handler(async ({ input, context }) => {
 			try {
 				const savedContracts: Array<{ id: string; contractType: string }> = [];
+				const etapaInicial = await etapaActual(input.opportunityId);
 
 				for (const contract of input.contracts) {
 					// El front reenvía tal cual la respuesta del generador; de ahí salen
@@ -1092,12 +1179,19 @@ export const contractGenerationRouter = {
 						// Sin firmantes guardados el nuevo no se puede mandar ni
 						// regenerar: no se retira el anterior por uno así. Quedan los
 						// dos y el WhatsApp frena con el motivo a la vista.
-						if (await guardarFirmantes(saved.id, generado.signatories)) {
-							await anularAnterioresDelMismoTipo(
-								input.opportunityId,
-								contract.contractType,
+						if (
+							await guardarFirmantes(
 								saved.id,
-							);
+								generado.signatories,
+								contract.contractType,
+							)
+						) {
+							await retirarAnterioresSiSigueVigente({
+								opportunityId: input.opportunityId,
+								contractType: contract.contractType,
+								nuevoId: saved.id,
+								etapaInicial,
+							});
 						}
 						savedContracts.push({
 							id: saved.id,
@@ -1206,6 +1300,10 @@ export const contractGenerationRouter = {
 			);
 
 			try {
+				// La etapa al empezar: si cambia mientras se generan, los nuevos no
+				// reemplazan a los que ya salieron (ver retirarAnterioresSiSigueVigente).
+				const etapaInicial = await etapaActual(input.opportunityId);
+
 				// 1. Filtrar solo los contratos de los tipos a regenerar
 				const contractsToRegenerate = input.generationData.filter((c) =>
 					input.contractTypes.includes(c.contractType),
@@ -1449,14 +1547,19 @@ export const contractGenerationRouter = {
 						if (saved) {
 							// Sin firmantes guardados no se retira el anterior (ver arriba).
 							if (
-								await guardarFirmantes(saved.id, contractResult.signatories)
-							) {
-								await anularAnterioresDelMismoTipo(
-									input.opportunityId,
-									originalContract.contractType,
+								await guardarFirmantes(
 									saved.id,
-									"Regenerado desde jurídico",
-								);
+									contractResult.signatories,
+									originalContract.contractType,
+								)
+							) {
+								await retirarAnterioresSiSigueVigente({
+									opportunityId: input.opportunityId,
+									contractType: originalContract.contractType,
+									nuevoId: saved.id,
+									etapaInicial,
+									motivo: "Regenerado desde jurídico",
+								});
 							}
 							savedContracts.push({
 								id: saved.id,

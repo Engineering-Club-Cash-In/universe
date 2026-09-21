@@ -213,7 +213,11 @@ export function UploadContractModal({
 				<DialogFooter>
 					<Button
 						variant="outline"
-						onClick={() => onOpenChange(false)}
+						onClick={() => {
+							// Si no, al reabrir seguía cargado el PDF que se canceló.
+							limpiar();
+							onOpenChange(false);
+						}}
 						disabled={subir.isPending}
 					>
 						Cancelar

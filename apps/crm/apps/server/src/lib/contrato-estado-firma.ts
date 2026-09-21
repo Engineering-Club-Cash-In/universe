@@ -57,7 +57,8 @@ export async function sincronizarEstadoDeFirma(
 			.where(
 				and(
 					eq(contractSignatories.contractId, contractId),
-					eq(contractSignatories.email, firmante.emailID),
+					// WeeTrust puede devolver el correo en minúsculas.
+					sql`lower(${contractSignatories.email}) = lower(${firmante.emailID})`,
 				),
 			);
 	}

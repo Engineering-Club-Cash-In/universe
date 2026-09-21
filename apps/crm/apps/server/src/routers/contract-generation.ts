@@ -1564,7 +1564,21 @@ export const contractGenerationRouter = {
 			// Primero se guarda el nuevo y recién después se anula el viejo: si el
 			// guardado fallara con el viejo ya borrado, la oportunidad se quedaba
 			// sin ninguno de los dos y el documento nuevo sin registro.
-			const [saved] = await db
+			// Si no se puede guardar, el documento ya salió a WeeTrust con sus
+			// invitaciones: se borra allá para que un reintento no deje dos vivos.
+			const deshacerEnvio = async () => {
+				if (!resultado.documentID) return;
+				await borrarDocumentoDeWeeTrust(resultado.documentID).catch((error) =>
+					console.error(
+						`[uploadContractForSigning] no se pudo borrar ${resultado.documentID} tras fallar el guardado:`,
+						error,
+					),
+				);
+			};
+
+			let saved: { id: string } | undefined;
+			try {
+				[saved] = await db
 				.insert(generatedLegalContracts)
 				.values({
 					leadId,
@@ -1586,11 +1600,16 @@ export const contractGenerationRouter = {
 					generatedAt: new Date(),
 				})
 				.returning({ id: generatedLegalContracts.id });
+			} catch (error) {
+				await deshacerEnvio();
+				throw error;
+			}
 
 			if (!saved) {
+				await deshacerEnvio();
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
-						"El contrato se envió a firma pero no se pudo guardar en el CRM",
+						"El contrato no se pudo guardar en el CRM; se canceló el envío a firma. Probá de nuevo.",
 				});
 			}
 

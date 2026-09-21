@@ -950,14 +950,27 @@ export const legalContractsRouter = {
 
 			// Actualizar la oportunidad y registrar historial en una transacción
 			await auditedTransaction(async (tx) => {
-				// Actualizar la oportunidad a 85%
-				await tx
+				// Actualizar la oportunidad a 85%, sólo si sigue en la etapa que se
+				// leyó. Dos aprobaciones a la vez pasaban las dos la validación del
+				// 80% y cada una mandaba su WhatsApp: el cliente recibía todo doble.
+				const movidas = await tx
 					.update(opportunities)
 					.set({
 						stageId: targetStage.id,
 						updatedAt: new Date(),
 					})
-					.where(eq(opportunities.id, input.opportunityId));
+					.where(
+						and(
+							eq(opportunities.id, input.opportunityId),
+							eq(opportunities.stageId, opportunity.stageId),
+						),
+					)
+					.returning({ id: opportunities.id });
+				if (movidas.length === 0) {
+					throw new ORPCError("CONFLICT", {
+						message: "La oportunidad ya fue aprobada por otro usuario.",
+					});
+				}
 				auditRecord({
 					entity: "opportunity",
 					id: input.opportunityId,

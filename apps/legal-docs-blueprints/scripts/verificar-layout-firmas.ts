@@ -24,19 +24,21 @@ const FIRMANTES: ContractSigner[] = [
 	{
 		role: SignerRole.TITULAR,
 		email: "titular@ejemplo.com",
-		name: "ROSELDA BEATRIZ RAXH COC",
-		dpi: "3315845731802",
+		name: "TITULAR DE PRUEBA",
+		// Sin DPI a propósito: no se versionan datos de clientes. Con DPI se
+		// verifica además el calce contra el PDF; pasarlo por env.
+		...(process.env.PRUEBA_DPI_TITULAR ? { dpi: process.env.PRUEBA_DPI_TITULAR } : {}),
 	},
 	{
 		role: SignerRole.COFIRMANTE,
 		email: "cofirmante@ejemplo.com",
-		name: "EDWIN EDILCER SIERRA SAMAYOA",
-		dpi: "2602625872103",
+		name: "COFIRMANTE DE PRUEBA",
+		...(process.env.PRUEBA_DPI_COFIRMANTE ? { dpi: process.env.PRUEBA_DPI_COFIRMANTE } : {}),
 	},
 	{
 		role: SignerRole.REP_LEGAL,
 		email: "replegal@ejemplo.com",
-		name: "LUCRECIA MARISOL CUX TECUN",
+		name: "REPRESENTANTE DE PRUEBA",
 	},
 ];
 

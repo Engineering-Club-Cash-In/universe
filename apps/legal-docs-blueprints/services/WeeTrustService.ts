@@ -767,90 +767,104 @@ export class WeeTrustService {
 		const uploadResult = await this.uploadDocumentFromBuffer(pdfBuffer, fileName);
 		const documentID = uploadResult.documentID;
 
-		// 2. Manejar posiciones según el modo
-		if (positioningMode === "free") {
-			// Modo libre: el firmante elige dónde firmar
-			console.log("[WeeTrust] Modo libre: el firmante elegirá dónde colocar su firma");
-		} else {
-			// Modos "auto" o "fixed": fijar posiciones
-			let positions = options.signaturePositions;
+		// Si algo falla después de subirlo (el layout no calza, WeeTrust rechaza
+		// el envío), el documento queda como borrador huérfano en la cuenta, uno
+		// por cada reintento. Se borra antes de propagar el error.
+		try {
 
-			if (
-				positioningMode === "auto" &&
-				options.contractType &&
-				options.repartoPorRol === false
-			) {
-				positions = await WeeTrustService.locateSignatureWidgetsLegacy(
-					pdfBuffer,
-					options.contractType,
-					options.signatory.map((s) => s.emailID),
-				);
-			} else if (positioningMode === "auto" && options.contractType) {
-				// Detectar las líneas de firma del PDF y repartirlas por rol
-				positions = await WeeTrustService.locateSignatureWidgets(
-					pdfBuffer,
-					options.contractType,
-					options.signers ??
-						options.signatory.map((s) => ({
-							role: SignerRole.TITULAR,
-							email: s.emailID,
-							name: s.name ?? s.emailID,
-						})),
-				);
-			} else if (!positions || positions.length === 0) {
-				// Generar posiciones por defecto
-				const page = options.page ?? 1;
-				const positionTypes: Array<"left" | "right" | "center"> = ["left", "right", "center", "left"];
+			// 2. Manejar posiciones según el modo
+			if (positioningMode === "free") {
+				// Modo libre: el firmante elige dónde firmar
+				console.log("[WeeTrust] Modo libre: el firmante elegirá dónde colocar su firma");
+			} else {
+				// Modos "auto" o "fixed": fijar posiciones
+				let positions = options.signaturePositions;
 
-				positions = options.signatory.map((signer, index) =>
-					WeeTrustService.generateDefaultSignaturePosition(
-						signer.emailID,
-						page,
-						positionTypes[index % positionTypes.length],
-					)
-				);
-				console.log(`[WeeTrust] Generando ${positions.length} posiciones por defecto`);
+				if (
+					positioningMode === "auto" &&
+					options.contractType &&
+					options.repartoPorRol === false
+				) {
+					positions = await WeeTrustService.locateSignatureWidgetsLegacy(
+						pdfBuffer,
+						options.contractType,
+						options.signatory.map((s) => s.emailID),
+					);
+				} else if (positioningMode === "auto" && options.contractType) {
+					// Detectar las líneas de firma del PDF y repartirlas por rol
+					positions = await WeeTrustService.locateSignatureWidgets(
+						pdfBuffer,
+						options.contractType,
+						options.signers ??
+							options.signatory.map((s) => ({
+								role: SignerRole.TITULAR,
+								email: s.emailID,
+								name: s.name ?? s.emailID,
+							})),
+					);
+				} else if (!positions || positions.length === 0) {
+					// Generar posiciones por defecto
+					const page = options.page ?? 1;
+					const positionTypes: Array<"left" | "right" | "center"> = ["left", "right", "center", "left"];
+
+					positions = options.signatory.map((signer, index) =>
+						WeeTrustService.generateDefaultSignaturePosition(
+							signer.emailID,
+							page,
+							positionTypes[index % positionTypes.length],
+						)
+					);
+					console.log(`[WeeTrust] Generando ${positions.length} posiciones por defecto`);
+				}
+
+				await this.setSignaturePositions(documentID, positions);
 			}
 
-			await this.setSignaturePositions(documentID, positions);
-		}
+			// 3. Enviar a firma
+			const signResult = await this.sendToSign(documentID, {
+				title: options.title,
+				message: options.message,
+				signatory: options.signatory,
+				hasOrder: options.hasOrder,
+				sharedWith: options.sharedWith,
+			});
 
-		// 3. Enviar a firma
-		const signResult = await this.sendToSign(documentID, {
-			title: options.title,
-			message: options.message,
-			signatory: options.signatory,
-			hasOrder: options.hasOrder,
-			sharedWith: options.sharedWith,
-		});
-
-		// 4. Extraer signing links respetando el orden en que mandamos los
-		//    firmantes: WeeTrust devuelve su propio arreglo y los links se
-		//    persisten por posición, así que reordenamos por email para no
-		//    entregarle a cada quien el link de otro.
-		const porEmail = new Map(
-			signResult.signatory.map((s) => [s.emailID.toLowerCase(), s]),
-		);
-		const enOrden = options.signatory.map((s) =>
-			porEmail.get(s.emailID.toLowerCase()),
-		);
-
-		const faltantes = options.signatory
-			.filter((s) => !porEmail.has(s.emailID.toLowerCase()))
-			.map((s) => s.emailID);
-		if (faltantes.length > 0) {
-			throw new Error(
-				`WeeTrust no devolvió firmante para: ${faltantes.join(", ")}`,
+			// 4. Extraer signing links respetando el orden en que mandamos los
+			//    firmantes: WeeTrust devuelve su propio arreglo y los links se
+			//    persisten por posición, así que reordenamos por email para no
+			//    entregarle a cada quien el link de otro.
+			const porEmail = new Map(
+				signResult.signatory.map((s) => [s.emailID.toLowerCase(), s]),
 			);
-		}
+			const enOrden = options.signatory.map((s) =>
+				porEmail.get(s.emailID.toLowerCase()),
+			);
 
-		return {
-			documentID,
-			signingLinks: enOrden.map((s) => s?.signing?.url ?? ""),
-			signatoryIDs: enOrden.map((s) => s?.signatoryID ?? ""),
-			documentUrl: signResult.documentFileObj.url,
-			status: signResult.status,
-		};
+			const faltantes = options.signatory
+				.filter((s) => !porEmail.has(s.emailID.toLowerCase()))
+				.map((s) => s.emailID);
+			if (faltantes.length > 0) {
+				throw new Error(
+					`WeeTrust no devolvió firmante para: ${faltantes.join(", ")}`,
+				);
+			}
+
+			return {
+				documentID,
+				signingLinks: enOrden.map((s) => s?.signing?.url ?? ""),
+				signatoryIDs: enOrden.map((s) => s?.signatoryID ?? ""),
+				documentUrl: signResult.documentFileObj.url,
+				status: signResult.status,
+			};
+		} catch (error) {
+			await this.deleteDocument(documentID).catch((e) =>
+				console.warn(
+					`[WeeTrust] No se pudo borrar el borrador ${documentID} tras el error:`,
+					e,
+				),
+			);
+			throw error;
+		}
 	}
 
 	// ==========================================================================

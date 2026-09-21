@@ -6,6 +6,7 @@ import {
 	getMoraSnapshotDate,
 	getOfficialClosurePeriod,
 	getPreviousMonth,
+	normalizeMonthInput,
 } from "./-mora-display";
 
 describe("buildCapitalAging", () => {
@@ -238,10 +239,19 @@ describe("jerarquía del reporte de mora", () => {
 		).text();
 		expect(source).toContain("? getOfficialClosurePeriod(mesAnio)");
 		expect(source).toMatch(
-			/const periodoComparacion = `\$\{mesComparacion\}-01`;/,
+			/const periodoComparacion = `\$\{mesComparacionValido\}-01`;/,
 		);
-		expect(source).toContain("{fmtMonth(mesComparacion)}");
+		expect(source).toContain("{fmtMonth(mesComparacionValido)}");
 		expect(source).toContain("{fmtMonth(mesAnio)}");
+	});
+
+	test("ignora cuando se limpia el mes de comparación", async () => {
+		const source = await Bun.file(
+			new URL("./reportes.tsx", import.meta.url),
+		).text();
+		expect(source).toContain(
+			"if (event.target.value) setMesComparacion(event.target.value);",
+		);
 	});
 });
 
@@ -260,6 +270,14 @@ describe("getMoraSnapshotDate", () => {
 		expect(getMoraSnapshotDate("mes", "2024-02", "2024-03-06")).toBe(
 			"2024-02-29",
 		);
+	});
+});
+
+describe("normalizeMonthInput", () => {
+	test("recupera un mes vacío o inválido persistido", () => {
+		expect(normalizeMonthInput("", "2026-08")).toBe("2026-08");
+		expect(normalizeMonthInput("2026-13", "2026-08")).toBe("2026-08");
+		expect(normalizeMonthInput("2026-07", "2026-08")).toBe("2026-07");
 	});
 });
 

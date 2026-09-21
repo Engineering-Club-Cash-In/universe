@@ -1,10 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import {
 	applyOfficialMonthlyMora,
+	dateRangeIncludesMonth,
 	fillMissingMontoACobrarPeriods,
 	getMontoACobrarParticipacionTotals,
 	getMontoACobrarViewRow,
 } from "./monto-a-cobrar";
+
+describe("dateRangeIncludesMonth", () => {
+	test("solo exige el cierre oficial cuando el rango toca el mes operativo", () => {
+		expect(dateRangeIncludesMonth("2026-08-01", "2026-08-31", "2026-09")).toBe(
+			false,
+		);
+		expect(dateRangeIncludesMonth("2026-08-15", "2026-09-05", "2026-09")).toBe(
+			true,
+		);
+		expect(dateRangeIncludesMonth("2026-09-30", "2026-10-15", "2026-09")).toBe(
+			true,
+		);
+	});
+});
 
 describe("fillMissingMontoACobrarPeriods", () => {
 	test("rellena buckets diarios faltantes incluyendo el split y metadata", () => {

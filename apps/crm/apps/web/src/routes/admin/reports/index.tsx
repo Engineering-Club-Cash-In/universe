@@ -78,6 +78,7 @@ import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { getInvestmentProjectionMonthBounds } from "@/lib/reports/investment-projection-period";
 import {
 	applyOfficialMonthlyMora,
+	dateRangeIncludesMonth,
 	fillMissingMontoACobrarPeriods,
 	getMontoACobrarParticipacionTotals,
 	getMontoACobrarViewRow,
@@ -504,13 +505,19 @@ function RouteComponent() {
 	const officialMoraPeriod = getOfficialClosurePeriod(
 		officialMoraOperationalMonth,
 	);
+	const officialMoraRequired =
+		montoCobrarPeriodo === "mes" &&
+		dateRangeIncludesMonth(
+			montoCobrarRange.fechaInicio,
+			montoCobrarRange.fechaFin,
+			officialMoraOperationalMonth,
+		);
 	const officialMoraQuery = useQuery({
 		...orpc.getCierreMoraOficial.queryOptions({
 			input: { periodo: officialMoraPeriod },
 		}),
-		enabled: canAccessCobranzaReport && montoCobrarPeriodo === "mes",
+		enabled: canAccessCobranzaReport && officialMoraRequired,
 	});
-	const officialMoraRequired = montoCobrarPeriodo === "mes";
 	const officialMoraReady =
 		!officialMoraRequired ||
 		(officialMoraQuery.isSuccess && officialMoraQuery.data !== null);

@@ -150,7 +150,7 @@ test("integra la mora oficial en la tabla existente sin tarjeta adicional", asyn
 test("bloquea tabla y exportación mensual hasta tener la mora oficial", async () => {
 	const source = await Bun.file(new URL("./index.tsx", import.meta.url)).text();
 	expect(source).toContain(
-		'enabled: canAccessCobranzaReport && montoCobrarPeriodo === "mes"',
+		"enabled: canAccessCobranzaReport && officialMoraRequired",
 	);
 	expect(source).toContain("if (!officialMoraReady)");
 	expect(source).toContain("disabled={!officialMoraReady}");

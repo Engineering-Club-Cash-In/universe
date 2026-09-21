@@ -52,6 +52,7 @@ import {
 	getMoraSnapshotDate,
 	getOfficialClosurePeriod,
 	getPreviousMonth,
+	normalizeMonthInput,
 	type MoraBucket,
 	type MoraDisplayAsesor,
 } from "./-mora-display";
@@ -149,6 +150,10 @@ function TabMora({
 		"cobros.mora.mesComparacion",
 		getPreviousMonth(getCurrentOperationalMonth()),
 	);
+	const mesComparacionValido = normalizeMonthInput(
+		mesComparacion,
+		getPreviousMonth(getCurrentOperationalMonth()),
+	);
 	const [asesoresSel, setAsesoresSel] = usePersistedState<number[] | null>(
 		"cobros.mora.asesores",
 		null,
@@ -171,7 +176,7 @@ function TabMora({
 	const periodoOficial = usaCorteAbierto
 		? getOfficialClosurePeriod(mesAnio)
 		: `${mesAnio}-01`;
-	const periodoComparacion = `${mesComparacion}-01`;
+	const periodoComparacion = `${mesComparacionValido}-01`;
 
 	const { data: asesoresData } = useQuery({
 		...orpc.getAsesores.queryOptions({ input: { perPage: 100 } }),
@@ -421,9 +426,11 @@ function TabMora({
 						<Input
 							type="month"
 							className="w-40"
-							value={mesComparacion}
+							value={mesComparacionValido}
 							max={getCurrentOperationalMonth()}
-							onChange={(event) => setMesComparacion(event.target.value)}
+							onChange={(event) => {
+								if (event.target.value) setMesComparacion(event.target.value);
+							}}
 						/>
 					</div>
 				)}
@@ -594,7 +601,7 @@ function TabMora({
 										<TableRow>
 											<TableHead>Indicador</TableHead>
 											<TableHead className="text-right capitalize">
-												{fmtMonth(mesComparacion)}
+												{fmtMonth(mesComparacionValido)}
 											</TableHead>
 											<TableHead className="text-right capitalize">
 												{fmtMonth(mesAnio)}

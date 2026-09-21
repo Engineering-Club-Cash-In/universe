@@ -153,6 +153,10 @@ export function getPreviousMonth(mesAnio: string) {
 	return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, "0")}`;
 }
 
+export function normalizeMonthInput(value: string, fallback: string) {
+	return /^\d{4}-(0[1-9]|1[0-2])$/.test(value) ? value : fallback;
+}
+
 export function getOfficialClosurePeriod(operationalMonth: string) {
 	return `${getPreviousMonth(operationalMonth)}-01`;
 }

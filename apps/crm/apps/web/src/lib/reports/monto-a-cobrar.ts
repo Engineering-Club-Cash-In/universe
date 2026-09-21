@@ -58,6 +58,14 @@ export type MontoACobrarViewRow = {
 	total: number;
 };
 
+export function dateRangeIncludesMonth(
+	fechaInicio: string,
+	fechaFin: string,
+	month: string,
+): boolean {
+	return fechaInicio <= `${month}-31` && fechaFin >= `${month}-01`;
+}
+
 const emptyRow = (bucket: string): MontoACobrarParticipacionRow => ({
 	bucket,
 	cuotas_count: 0,

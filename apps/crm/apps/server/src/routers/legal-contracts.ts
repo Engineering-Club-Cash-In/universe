@@ -17,7 +17,7 @@ import { vehicles } from "../db/schema/vehicles";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
 	documentIdDesdeLink,
-	guardarFirmantesDelContrato,
+	filasDeFirmantes,
 	linksPorRol,
 } from "../lib/contract-signatories";
 import { getSignatureMode } from "../lib/contract-signature-mode";
@@ -1429,6 +1429,18 @@ export const legalContractsRouter = {
 						})
 						.returning({ id: generatedLegalContracts.id });
 
+					// Los firmantes en la misma transacción: sin ellos el contrato
+					// nuevo no se puede sincronizar, regenerar ni mandar por WhatsApp,
+					// y no tiene sentido retirar el viejo por uno así.
+					const filas = filasDeFirmantes(nuevo.id, resultado.signatories);
+					if (filas.length === 0) {
+						throw new ORPCError("INTERNAL_SERVER_ERROR", {
+							message:
+								"WeeTrust no devolvió los firmantes del documento reemitido.",
+						});
+					}
+					await tx.insert(contractSignatories).values(filas);
+
 					await tx
 						.update(generatedLegalContracts)
 						.set({
@@ -1453,8 +1465,6 @@ export const legalContractsRouter = {
 				}
 				throw error;
 			}
-
-			await guardarFirmantesDelContrato(nuevoId, resultado.signatories);
 
 			// Recién ahora el documento viejo. Si nadie lo firmó se borra en
 			// WeeTrust y su fila desaparece: no queda nada que conservar. Si ya lo

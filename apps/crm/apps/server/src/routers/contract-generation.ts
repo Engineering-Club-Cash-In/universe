@@ -66,7 +66,6 @@ const LEGAL_DOCS_API_URL =
 	process.env.LEGAL_DOCS_API_URL ||
 	"https://legal-docs-blueprints.s4.devteamatcci.site";
 
-
 /**
  * Quiénes firman un contrato, completando lo que manda el front con lo que sólo
  * conoce el servidor.
@@ -1574,7 +1573,7 @@ export const contractGenerationRouter = {
 				if (vigente) {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							"Ya hay un contrato de este tipo en la oportunidad. Usá \"Reemplazar\" en ese contrato.",
+							'Ya hay un contrato de este tipo en la oportunidad. Usá "Reemplazar" en ese contrato.',
 					});
 				}
 			}
@@ -1634,30 +1633,74 @@ export const contractGenerationRouter = {
 				);
 			};
 
+			// Todo en una transacción: el contrato nuevo, sus firmantes y, si
+			// reemplaza a otro, el "reclamo" de ese otro. Si dos personas
+			// reemplazan el mismo contrato a la vez, la segunda espera el bloqueo,
+			// ve que ya fue reclamado y pierde: se borra su documento en WeeTrust.
+			// Los firmantes van adentro porque sin ellos el contrato no se puede
+			// mandar por WhatsApp ni regenerar.
 			let saved: { id: string } | undefined;
 			try {
-				[saved] = await db
-				.insert(generatedLegalContracts)
-				.values({
-					leadId,
-					opportunityId: input.opportunityId,
-					contractType: input.contractType,
-					contractName:
-						input.contractName ||
-						resultado.nameDocument?.[0]?.label ||
-						"Contrato subido manualmente",
-					...linksPorRol(resultado.signatories, resultado.signing_links),
-					signingProvider: resultado.signingProvider ?? null,
-					weetrustDocumentId: resultado.documentID ?? null,
-					observerUrl: resultado.observerUrl ?? null,
-					signatureMode: getSignatureMode(input.contractType),
-					apiResponse: resultado,
-					pdfLink: resultado.r2Key || resultado.linkDocument || null,
-					status: "pending",
-					generatedBy: context.userId,
-					generatedAt: new Date(),
-				})
-				.returning({ id: generatedLegalContracts.id });
+				saved = await db.transaction(async (tx) => {
+					if (input.replaceContractId) {
+						const [original] = await tx
+							.select({
+								status: generatedLegalContracts.status,
+								reemplazadoPor: generatedLegalContracts.replacedByContractId,
+							})
+							.from(generatedLegalContracts)
+							.where(eq(generatedLegalContracts.id, input.replaceContractId))
+							.for("update");
+						if (
+							!original ||
+							original.status === "cancelled" ||
+							original.reemplazadoPor
+						) {
+							throw new ORPCError("CONFLICT", {
+								message:
+									"Otra persona acaba de reemplazar este contrato. Recargá para ver el nuevo.",
+							});
+						}
+					}
+
+					const [nuevo] = await tx
+						.insert(generatedLegalContracts)
+						.values({
+							leadId,
+							opportunityId: input.opportunityId,
+							contractType: input.contractType,
+							contractName:
+								input.contractName ||
+								resultado.nameDocument?.[0]?.label ||
+								"Contrato subido manualmente",
+							...linksPorRol(resultado.signatories, resultado.signing_links),
+							signingProvider: resultado.signingProvider ?? null,
+							weetrustDocumentId: resultado.documentID ?? null,
+							observerUrl: resultado.observerUrl ?? null,
+							signatureMode: getSignatureMode(input.contractType),
+							apiResponse: resultado,
+							pdfLink: resultado.r2Key || resultado.linkDocument || null,
+							status: "pending",
+							generatedBy: context.userId,
+							generatedAt: new Date(),
+						})
+						.returning({ id: generatedLegalContracts.id });
+					if (!nuevo) return undefined;
+
+					const filas = filasDeFirmantes(nuevo.id, resultado.signatories);
+					if (filas.length > 0) {
+						await tx.insert(contractSignatories).values(filas);
+					}
+
+					if (input.replaceContractId) {
+						await tx
+							.update(generatedLegalContracts)
+							.set({ replacedByContractId: nuevo.id })
+							.where(eq(generatedLegalContracts.id, input.replaceContractId));
+					}
+
+					return nuevo;
+				});
 			} catch (error) {
 				await deshacerEnvio();
 				throw error;
@@ -1670,8 +1713,6 @@ export const contractGenerationRouter = {
 						"El contrato no se pudo guardar en el CRM; se canceló el envío a firma. Probá de nuevo.",
 				});
 			}
-
-			await guardarFirmantes(saved.id, resultado.signatories);
 
 			const anulado = input.replaceContractId
 				? await anularContratoReemplazado(
@@ -1689,7 +1730,6 @@ export const contractGenerationRouter = {
 					.where(eq(generatedLegalContracts.id, anulado.contractId));
 			}
 
-
 			return {
 				success: true,
 				contractId: saved.id,
@@ -1697,15 +1737,13 @@ export const contractGenerationRouter = {
 				// El contrato ya está enviado y guardado: que falle firmar la URL no
 				// puede hacer que la pantalla diga "falló" e invite a subirlo de nuevo.
 				documentLink: resultado.r2Key
-					? await getFileUrlWithBucketInKey(resultado.r2Key).catch(
-							(error) => {
-								console.error(
-									"[uploadContractForSigning] no se pudo firmar la URL del PDF:",
-									error,
-								);
-								return null;
-							},
-						)
+					? await getFileUrlWithBucketInKey(resultado.r2Key).catch((error) => {
+							console.error(
+								"[uploadContractForSigning] no se pudo firmar la URL del PDF:",
+								error,
+							);
+							return null;
+						})
 					: resultado.linkDocument,
 				signingLinks: resultado.signing_links ?? [],
 				message:

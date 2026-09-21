@@ -27,6 +27,10 @@ import {
 	etiquetaDeMotivo,
 	MOTIVOS_DE_ANULACION_KEYS,
 } from "../lib/contratos-anulacion";
+import {
+	aplicarCorreosDePrueba,
+	correosDePruebaFaltantes,
+} from "../lib/contratos-correos-prueba";
 import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import {
@@ -1302,15 +1306,31 @@ export const legalContractsRouter = {
 			// Documento NUEVO con el mismo PDF. El `update-signatures` de WeeTrust
 			// sólo renueva las URL de quienes no firmaron, y con todos firmados
 			// devuelve "There are no url of signatures to update".
+			const guardados: ContractSigner[] = firmantes.map((f) => ({
+				role: f.role as ContractSigner["role"],
+				email: f.email,
+				name: f.name,
+			}));
+
+			// En modo prueba se redirige igual que al generar: un contrato emitido
+			// con correos reales (por ejemplo, datos copiados de prod) le mandaría
+			// la invitación de WeeTrust al cliente.
+			let signers = guardados;
+			if (isTestModeEnabled()) {
+				const faltan = correosDePruebaFaltantes(guardados);
+				if (faltan.length > 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `TEST_MESSAGE=true pero falta configurar ${faltan.join(" y ")}: los enlaces saldrían a los correos reales.`,
+					});
+				}
+				signers = aplicarCorreosDePrueba(guardados);
+			}
+
 			const resultado = await reemitirContratoEnWeeTrust({
 				r2Key: contract.pdfLink,
 				contractType: contract.contractType,
 				filenamePrefix: contract.contractName,
-				signers: firmantes.map((f) => ({
-					role: f.role as ContractSigner["role"],
-					email: f.email,
-					name: f.name,
-				})),
+				signers,
 				observers: CONTRATOS_OBSERVADORES,
 			});
 

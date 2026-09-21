@@ -146,6 +146,7 @@ export async function sendContractLinksToLead(params: {
 		? await db
 				.select({
 					contractId: contractSignatories.contractId,
+					role: contractSignatories.role,
 					email: contractSignatories.email,
 					signingUrl: contractSignatories.signingUrl,
 					status: contractSignatories.status,
@@ -160,25 +161,33 @@ export async function sendContractLinksToLead(params: {
 		: [];
 
 	/**
-	 * contractId → (email en minúsculas → link). El link puede ser null: la
+	 * La llave es rol + correo, no sólo el correo: si el cliente y un codeudor
+	 * compartieran correo, buscar por correo le daría al codeudor el enlace del
+	 * titular.
+	 */
+	const claveDe = (role: string, email: string) =>
+		`${role}|${email.toLowerCase()}`;
+
+	/**
+	 * contractId → (rol|email → link). El link puede ser null: la
 	 * persona firma ese contrato pero WeeTrust no devolvió su enlace. Se guarda
 	 * igual para que el contrato aparezca en el envío manual y se pueda pegar.
 	 */
 	const linksPorContrato = new Map<string, Map<string, string | null>>();
 	/** Contratos con firmantes guardados, firmados o no. */
 	const conFirmantes = new Set<string>();
-	/** Correos (en minúsculas) con al menos un contrato firmado. */
+	/** Firmantes (rol|email) con al menos un contrato firmado. */
 	const firmaronAlgo = new Set<string>();
 	for (const f of firmantes) {
 		conFirmantes.add(f.contractId);
 		// Quien ya firmó ese contrato no recibe su enlace otra vez: le llegaba un
 		// link de un documento cerrado cada vez que se reenviaba por otro motivo.
 		if (f.status === "signed") {
-			firmaronAlgo.add(f.email.toLowerCase());
+			firmaronAlgo.add(claveDe(f.role, f.email));
 			continue;
 		}
 		const porEmail = linksPorContrato.get(f.contractId) ?? new Map();
-		porEmail.set(f.email.toLowerCase(), f.signingUrl ?? null);
+		porEmail.set(claveDe(f.role, f.email), f.signingUrl ?? null);
 		linksPorContrato.set(f.contractId, porEmail);
 	}
 
@@ -257,17 +266,14 @@ export async function sendContractLinksToLead(params: {
 		// emitieron sin la verificación de identidad por rol de ahora, y su
 		// columna `clientSigningLink` no dice de quién es cada link. Sólo salen
 		// por WhatsApp los enlaces generados con el flujo nuevo.
+		const clave = destinatario.email
+			? claveDe(destinatario.role, destinatario.email)
+			: null;
 		const susContratos = contratosDeFirma
-			.filter((c) => {
-				const clave = destinatario.email?.toLowerCase();
-				return Boolean(clave && linksPorContrato.get(c.id)?.has(clave));
-			})
+			.filter((c) => Boolean(clave && linksPorContrato.get(c.id)?.has(clave)))
 			.map((c) => ({
 				contractName: c.contractName,
-				link:
-					linksPorContrato
-						.get(c.id)
-						?.get(destinatario.email?.toLowerCase() as string) ?? null,
+				link: linksPorContrato.get(c.id)?.get(clave as string) ?? null,
 				pdfLink: pdfResueltos.get(c.id) ?? null,
 			}));
 
@@ -287,8 +293,8 @@ export async function sendContractLinksToLead(params: {
 		// Ya firmó todo lo suyo: no hay nada que mandarle ni que dejar pendiente.
 		if (
 			susContratos.length === 0 &&
-			destinatario.email &&
-			firmaronAlgo.has(destinatario.email.toLowerCase())
+			clave &&
+			firmaronAlgo.has(clave)
 		) {
 			continue;
 		}

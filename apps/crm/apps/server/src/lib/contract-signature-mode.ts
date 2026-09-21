@@ -25,7 +25,12 @@ export type SignatureMode = "electronica" | "fisica";
  * quien tenemos nombre y DPI pero no correo, así que no hay a dónde mandarle un
  * link de firma.
  */
-export const CONTRATOS_FIRMA_FISICA = new Set<string>(["declaracion_vendedor"]);
+export const CONTRATOS_FIRMA_FISICA = new Set<string>([
+	"declaracion_vendedor",
+	// El mismo contrato con el identificador viejo del CRM, que todavía queda
+	// guardado en filas generadas por el endpoint anterior.
+	"declaracion_jurada",
+]);
 
 export function esFirmaFisica(contractType: string): boolean {
 	return CONTRATOS_FIRMA_FISICA.has(contractType);

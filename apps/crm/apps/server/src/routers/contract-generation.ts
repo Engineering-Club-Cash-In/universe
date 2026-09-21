@@ -117,6 +117,18 @@ function firmantesDelContrato(
 
 	if (!signers || signers.length === 0) return signers;
 
+	// Dos deudores con el mismo correo terminan siendo uno solo en WeeTrust: la
+	// misma persona firmaría por los dos. Se corta antes de mandar nada.
+	const correosDeudores = signers
+		.filter((s) => s.role !== "REP_LEGAL")
+		.map((s) => s.email.trim().toLowerCase());
+	if (new Set(correosDeudores).size !== correosDeudores.length) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"El cliente y los codeudores no pueden compartir correo: cada uno firma con el suyo.",
+		});
+	}
+
 	// El representante legal lo pone siempre el servidor. Si viniera del
 	// navegador, cualquiera podría mandar su propio correo con ese rol y
 	// quedarse con el link de firma de la entidad.

@@ -308,7 +308,11 @@ function ContratoFila({
 										{/* Copiar va primero: casi siempre el link se le pasa a
 										    alguien, y abrirlo desde acá te deja firmando en su
 										    nombre. */}
-										{firmante.url && firmante.estado !== "signed" && (
+										{/* Anulado: sus enlaces son de un documento reemplazado. Si
+										    no se pudo borrar, todavía firman; no se ofrecen. */}
+										{firmante.url &&
+											firmante.estado !== "signed" &&
+											contract.status !== "cancelled" && (
 											<>
 												<Button
 													variant="ghost"

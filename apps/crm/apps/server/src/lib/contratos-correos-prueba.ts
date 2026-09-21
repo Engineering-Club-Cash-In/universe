@@ -48,11 +48,18 @@ export function correosDePruebaFaltantes(
 	) {
 		faltan.push("CONTRATOS_TEST_EMAIL_TITULAR");
 	}
-	if (
-		personas.some((p) => p.role === "COFIRMANTE") &&
-		CONTRATOS_TEST_EMAIL_COFIRMANTES.length === 0
-	) {
-		faltan.push("CONTRATOS_TEST_EMAIL_COFIRMANTES");
+	// Un correo DISTINTO por codeudor. Si se repitieran, WeeTrust junta a
+	// quienes comparten correo en un solo firmante y el resto se pierde.
+	const cofirmantes = personas.filter((p) => p.role === "COFIRMANTE").length;
+	const distintos = new Set(
+		CONTRATOS_TEST_EMAIL_COFIRMANTES.map((c) => c.toLowerCase()),
+	);
+	if (cofirmantes > 0 && distintos.size < cofirmantes) {
+		faltan.push(
+			CONTRATOS_TEST_EMAIL_COFIRMANTES.length === 0
+				? "CONTRATOS_TEST_EMAIL_COFIRMANTES"
+				: `CONTRATOS_TEST_EMAIL_COFIRMANTES (hacen falta ${cofirmantes} correos distintos, hay ${distintos.size})`,
+		);
 	}
 	return faltan;
 }

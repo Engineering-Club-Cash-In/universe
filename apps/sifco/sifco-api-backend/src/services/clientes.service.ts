@@ -151,9 +151,25 @@ export class ClientesService extends BaseService {
         } as any;
       }
 
+      // La lista tiene que venir COMO LISTA. Con `|| []`, un OK cuyo
+      // `ConsultaResultados` viene ausente —respuesta truncada, schema
+      // corrido— se publicaba como "DPI desconocido", que es justo el
+      // fail-open que el chequeo de Result acaba de cerrar: el core tiene el
+      // dato pero nosotros dejamos pasar al moroso. Un DPI de verdad
+      // desconocido SÍ trae la lista, vacía (ver arriba).
+      const encontrados = response.data.ConsultaResultados;
+      if (!Array.isArray(encontrados)) {
+        return {
+          success: false,
+          error:
+            "SIFCO respondió OK sin la lista ConsultaResultados al buscar por identificación",
+          statusCode: response.statusCode,
+        } as any;
+      }
+
       return {
         success: true,
-        data: response.data.ConsultaResultados || [],
+        data: encontrados,
         statusCode: response.statusCode,
       };
     }

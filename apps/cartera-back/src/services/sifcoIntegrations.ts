@@ -84,9 +84,21 @@ export async function buscarClientesPorIdentificacion(
     { timeout: 10000 }
   );
 
-  return (
-    exigirRespuestaExitosa(data, "SIFCO no pudo resolver la identificación") ?? []
+  const encontrados = exigirRespuestaExitosa(
+    data,
+    "SIFCO no pudo resolver la identificación"
   );
+
+  // Defensa en profundidad sobre la misma regla del gateway: sin lista no hay
+  // "DPI desconocido", hay respuesta que no se entiende. El `?? []` de antes
+  // convertía eso en cliente nuevo y dejaba pasar la solicitud.
+  if (!Array.isArray(encontrados)) {
+    throw new Error(
+      "SIFCO respondió sin la lista de clientes al resolver la identificación"
+    );
+  }
+
+  return encontrados;
 }
 
 /** ================================

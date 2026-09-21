@@ -369,6 +369,19 @@ export async function getOfficialClosure(
 	}
 }
 
+const GUATEMALA_MONTH = new Intl.DateTimeFormat("en-CA", {
+	timeZone: "America/Guatemala",
+	year: "numeric",
+	month: "2-digit",
+});
+
+function getGuatemalaMonth(date: Date) {
+	const parts = GUATEMALA_MONTH.formatToParts(date);
+	const year = parts.find((part) => part.type === "year")?.value;
+	const month = parts.find((part) => part.type === "month")?.value;
+	return year && month ? `${year}-${month}` : null;
+}
+
 export async function saveOfficialClosure(
 	pool: Pick<Pool, "connect">,
 	input: SaveOfficialClosureInput,
@@ -376,10 +389,11 @@ export async function saveOfficialClosure(
 	if (!/^\d{4}-\d{2}-01$/.test(input.periodo)) {
 		throw new Error("El período debe ser el primer día del mes");
 	}
+	const fechaCorte = new Date(input.fechaCorte);
 	if (
 		!/^\d{4}-\d{2}-\d{2}T/.test(input.fechaCorte) ||
-		Number.isNaN(Date.parse(input.fechaCorte)) ||
-		!input.fechaCorte.startsWith(input.periodo.slice(0, 7))
+		Number.isNaN(fechaCorte.getTime()) ||
+		getGuatemalaMonth(fechaCorte) !== input.periodo.slice(0, 7)
 	) {
 		throw new Error("La fecha de corte debe pertenecer al período oficial");
 	}

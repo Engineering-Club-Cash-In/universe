@@ -3,6 +3,7 @@ import {
 	findOfficialSummarySheetName,
 	parseOfficialAdvisorSummaryMatrix,
 	parseOfficialClosureMatrix,
+	saveOfficialClosure,
 	summarizeOfficialAdvisorClosure,
 } from "./cierreMoraOficial";
 
@@ -272,4 +273,38 @@ describe("summarizeOfficialAdvisorClosure", () => {
 			{ asesorId: 2, nombre: "Asesora 2", esperado: "0.00" },
 		]);
 	});
+});
+
+test("rechaza un corte cuyo instante cae fuera del período en Guatemala", async () => {
+	const unreachablePool = {
+		connect: async () => {
+			throw new Error("no debe conectar");
+		},
+	};
+
+	await expect(
+		saveOfficialClosure(unreachablePool, {
+			periodo: "2026-02-01",
+			fechaCorte: "2026-02-28T23:30:00-08:00",
+			reglaVersion: "finanzas-v1",
+			porcentajeMora: "1.12",
+			fuente: "fixture.xlsx",
+			fuenteHash: "a".repeat(64),
+			rows: [
+				{
+					asesorId: 7,
+					asesorNombre: "Asesora Uno",
+					capital: "100.00",
+					mora30: "0.00",
+					mora60: "0.00",
+					mora90: "0.00",
+					mora120: "0.00",
+					cantidadMora30: 0,
+					cantidadMora60: 0,
+					cantidadMora90: 0,
+					cantidadMora120: 0,
+				},
+			],
+		}),
+	).rejects.toThrow("fecha de corte debe pertenecer");
 });

@@ -63,6 +63,18 @@ integrationTest("crea cierres oficiales inmutables por asesor", async () => {
 		await expect(
 			pool.query(`
         INSERT INTO cartera.cierre_mora_oficial (
+          periodo, asesor_id, asesor_nombre, capital_cierre,
+          fecha_corte, regla_version, fuente, fuente_hash
+        ) VALUES (
+          DATE '2026-02-01', 7, 'Asesora Uno', 150,
+          TIMESTAMPTZ '2026-02-28 23:30:00-08', 'finanzas-v1',
+          'otro-fixture.xlsx', repeat('b', 64)
+        )
+      `),
+		).rejects.toThrow();
+		await expect(
+			pool.query(`
+        INSERT INTO cartera.cierre_mora_oficial (
           periodo, asesor_id, asesor_nombre, capital_cierre, fecha_corte, regla_version, fuente, fuente_hash
         ) VALUES (DATE '2026-08-01', 7, 'Asesora Uno', 150, NOW(), 'finanzas-v1', 'fixture.xlsx', repeat('a', 64))
       `),

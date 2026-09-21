@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS cartera.cierre_mora_oficial (
   CONSTRAINT cierre_mora_oficial_periodo_primer_dia CHECK (periodo = date_trunc('month', periodo)::date),
   CONSTRAINT cierre_mora_oficial_mora_dentro_capital CHECK (
     capital_mora_30 + capital_mora_60 + capital_mora_90 + capital_mora_120 <= capital_cierre
+  ),
+  CONSTRAINT cierre_mora_oficial_corte_en_periodo_gt CHECK (
+    date_trunc('month', fecha_corte AT TIME ZONE 'America/Guatemala')::date = periodo
   )
 );
 

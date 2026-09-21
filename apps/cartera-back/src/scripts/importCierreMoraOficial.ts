@@ -9,6 +9,10 @@ import {
 	saveOfficialClosure,
 	summarizeOfficialAdvisorClosure,
 } from "../controllers/cierreMoraOficial";
+import {
+	databaseSsl,
+	isLocalDatabaseHost,
+} from "./importCierreMoraOficial.ssl";
 
 const [filePath, periodo, fechaCorte, porcentajeMora, mode] = Bun.argv.slice(2);
 if (!filePath || !periodo || !fechaCorte || !porcentajeMora) {
@@ -20,11 +24,10 @@ if (!filePath || !periodo || !fechaCorte || !porcentajeMora) {
 const connectionString = process.env.SUPABASE_DB_URL;
 if (!connectionString) throw new Error("SUPABASE_DB_URL no está configurada");
 const databaseUrl = new URL(connectionString);
-const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
 const write = mode === "--write";
 if (
 	write &&
-	!localHosts.has(databaseUrl.hostname) &&
+	!isLocalDatabaseHost(databaseUrl.hostname) &&
 	process.env.ALLOW_OFFICIAL_CLOSURE_IMPORT !== "YES"
 ) {
 	throw new Error(
@@ -64,9 +67,7 @@ const toMatrix = (sheet: XLSX.WorkSheet) =>
 
 const pool = new Pool({
 	connectionString,
-	ssl: localHosts.has(databaseUrl.hostname)
-		? false
-		: { rejectUnauthorized: false },
+	ssl: databaseSsl(databaseUrl.hostname),
 });
 
 try {

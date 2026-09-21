@@ -6,6 +6,7 @@ import { adminMiniagentRouter } from "./admin-miniagent";
 import { auctionRouter } from "./auctionVehicles";
 import { authRouter } from "./auth";
 import { bankAnalysisRouter } from "./bank-analysis";
+import { buroInternoRouter } from "./buro-interno";
 import { checksRouter } from "./checks";
 import { clientFormsRouter } from "./client-forms";
 import { cobrosRouter } from "./cobros";
@@ -474,6 +475,22 @@ export const partnerTrackerRouter = {
 	getPartnerAgencies: trackerRouter.getPartnerAgencies,
 	getPartnerPasswordStatus: trackerRouter.getPartnerPasswordStatus,
 	changePartnerPassword: trackerRouter.changePartnerPassword,
+};
+
+// Buró interno (lista negra propia). Aparte del appRouter para no empujar TS7056.
+export const buroInternoProcedures = {
+	listBuroInterno: buroInternoRouter.listBuroInterno,
+	buscarCandidatosBuroInterno: buroInternoRouter.buscarCandidatosBuroInterno,
+	crearRegistroBuroInterno: buroInternoRouter.crearRegistroBuroInterno,
+	actualizarRegistroBuroInterno:
+		buroInternoRouter.actualizarRegistroBuroInterno,
+	desactivarRegistroBuroInterno:
+		buroInternoRouter.desactivarRegistroBuroInterno,
+	getHistorialBuroInterno: buroInternoRouter.getHistorialBuroInterno,
+	consultarBuroInterno: buroInternoRouter.consultarBuroInterno,
+	getReglasBuroInterno: buroInternoRouter.getReglasBuroInterno,
+	actualizarReglaBuroInterno: buroInternoRouter.actualizarReglaBuroInterno,
+	getBuroInternoOportunidad: buroInternoRouter.getBuroInternoOportunidad,
 };
 
 export const manualVehicleRouter = {

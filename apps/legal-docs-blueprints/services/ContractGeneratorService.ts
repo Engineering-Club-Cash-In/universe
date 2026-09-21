@@ -16,7 +16,7 @@ import {
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
 import { documensoService } from './DocumensoService';
 import { WeeTrustService } from './WeeTrustService';
-import { firmantesEnOrdenDeFirma, SignatureLayoutError } from './signaturePatterns';
+import { SignatureLayoutError } from './signaturePatterns';
 import { crmApiService } from './CrmApiService';
 import { uploadPdfToR2 } from './R2Service';
 
@@ -928,44 +928,27 @@ export class ContractGeneratorService {
           if (weeTrustError instanceof SignatureLayoutError) {
             signingError = weeTrustError.message;
             console.error(`✗ Layout de firmas inválido: ${weeTrustError.message}`);
+          } else if (firmaPorRol) {
+            // Con roles no se cae a Documenso: no arma las firmas dinámicas (más
+            // codeudores, la cobertura con dos juegos) ni agrega observadores, y
+            // el contrato saldría "bien" con firmas faltantes. Mejor un error a
+            // la vista y reintentar.
+            signingError = `WeeTrust: ${errorMessage(weeTrustError)}`;
+            console.error('✗ Error con WeeTrust (sin fallback para firma por rol):', weeTrustError);
           } else {
             console.error('⚠ Error con WeeTrust, intentando Documenso como fallback:', weeTrustError);
 
-            // Fallback a Documenso
+            // Fallback a Documenso, sólo para quien manda `emails` sin rol
+            // (legal-documents): es el comportamiento de siempre.
             try {
               console.log(`🔗 Creando documento en Documenso (fallback)...`);
 
-              // Documenso reparte por posición: tiene que recibirlos en el
-              // orden de las líneas de firma, igual que WeeTrust, o el
-              // representante termina firmando en la línea del cliente.
-              const ordenDocumenso = firmaPorRol
-                ? firmantesEnOrdenDeFirma(contractType, signers)
-                : signers;
-              const documenso = await documensoService.createDocumentAndGetSigningLinks(
+              signing = await documensoService.createDocumentAndGetSigningLinks(
                 baseFilename,
                 pdfBuffer,
                 contractType,
-                ordenDocumenso.map((s) => s.email)
+                signers.map((s) => s.email)
               );
-
-              // Con roles, se devuelve también quién es quién: si no, el CRM
-              // guarda los links por posición y, en los contratos donde el rep
-              // legal firma primero, el del cliente sería el del representante.
-              signing = {
-                ...documenso,
-                ...(firmaPorRol
-                  ? {
-                      signatories: ordenDocumenso.map((s) => ({
-                        role: s.role,
-                        email: s.email,
-                        name: s.name,
-                        signingUrl: documenso.linksPorEmail?.find(
-                          (l) => l.email.toLowerCase() === s.email.toLowerCase(),
-                        )?.url,
-                      })),
-                    }
-                  : {}),
-              };
 
               signingLinks = signing.signs ?? [];
               signingProvider = 'documenso';

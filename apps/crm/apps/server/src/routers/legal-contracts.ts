@@ -1343,11 +1343,12 @@ export const legalContractsRouter = {
 			}
 
 			// El documento viejo: si nadie lo firmó se borra en WeeTrust, para que
-			// nadie entre por el link anterior. Si ya lo firmaron no se puede
-			// borrar; queda el registro de que se reemitió y por qué.
+			// nadie entre por el link anterior. Si ya lo firmaron no se puede borrar.
+			let borradoAlla = !contract.weetrustDocumentId;
 			if (contract.weetrustDocumentId && contract.status !== "signed") {
 				try {
 					await borrarDocumentoDeWeeTrust(contract.weetrustDocumentId);
+					borradoAlla = true;
 				} catch (error) {
 					console.error(
 						`[refreshContractSigningLinks] no se pudo borrar ${contract.weetrustDocumentId}:`,
@@ -1357,24 +1358,78 @@ export const legalContractsRouter = {
 			}
 
 			const ahora = new Date();
+			const datosDelDocumentoNuevo = {
+				...linksPorRol(resultado.signatories, resultado.signing_links),
+				weetrustDocumentId: resultado.documentID ?? null,
+				observerUrl: resultado.observerUrl ?? null,
+				// Pendiente: los enlaces son nuevos y nadie firmó este documento.
+				status: "pending" as const,
+				lastRegenerationReason: etiquetaDeMotivo(input.motivo),
+				lastRegeneratedAt: ahora,
+				signingStatusCheckedAt: ahora,
+				updatedAt: ahora,
+			};
+
+			// Si el documento viejo sigue existiendo en WeeTrust (ya estaba firmado,
+			// o no se pudo borrar), su fila se conserva ANULADA con su ID y sus
+			// firmantes, y el reemitido va en una fila nueva, igual que al
+			// reemplazar. Pisar la fila hacía que el CRM perdiera el único registro
+			// de un documento que sigue vivo.
+			if (!borradoAlla) {
+				const nuevoId = await db.transaction(async (tx) => {
+					const [nuevo] = await tx
+						.insert(generatedLegalContracts)
+						.values({
+							leadId: contract.leadId,
+							opportunityId: contract.opportunityId,
+							contractType: contract.contractType,
+							contractName: contract.contractName,
+							templateId: contract.templateId,
+							apiResponse: resultado,
+							pdfLink: contract.pdfLink,
+							signingProvider: resultado.signingProvider ?? "weetrust",
+							signatureMode: contract.signatureMode,
+							generatedBy: context.userId,
+							generatedAt: ahora,
+							...datosDelDocumentoNuevo,
+						})
+						.returning({ id: generatedLegalContracts.id });
+
+					await tx
+						.update(generatedLegalContracts)
+						.set({
+							status: "cancelled",
+							cancellationReason:
+								contract.status === "signed"
+									? `Regenerado: ${etiquetaDeMotivo(input.motivo)}`
+									: `Regenerado: ${etiquetaDeMotivo(input.motivo)} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`,
+							cancelledAt: ahora,
+							replacedByContractId: nuevo.id,
+							updatedAt: ahora,
+						})
+						.where(eq(generatedLegalContracts.id, input.contractId));
+
+					return nuevo.id;
+				});
+
+				await guardarFirmantesDelContrato(nuevoId, resultado.signatories);
+
+				return {
+					success: true,
+					message:
+						"Documento reemitido con enlaces nuevos; el anterior queda anulado",
+					contractId: nuevoId,
+					documentID: resultado.documentID,
+					enlaces: resultado.signing_links?.length ?? 0,
+				};
+			}
 
 			await db
 				.update(generatedLegalContracts)
-				.set({
-					...linksPorRol(resultado.signatories, resultado.signing_links),
-					weetrustDocumentId: resultado.documentID ?? null,
-					observerUrl: resultado.observerUrl ?? null,
-					// Vuelve a estar pendiente: los enlaces son nuevos y nadie firmó
-					// todavía sobre este documento.
-					status: "pending",
-					lastRegenerationReason: etiquetaDeMotivo(input.motivo),
-					lastRegeneratedAt: ahora,
-					signingStatusCheckedAt: ahora,
-					updatedAt: ahora,
-				})
+				.set(datosDelDocumentoNuevo)
 				.where(eq(generatedLegalContracts.id, input.contractId));
 
-			// Los firmantes viejos apuntan al documento anterior.
+			// Los firmantes viejos apuntan al documento anterior, que ya no existe.
 			await db
 				.delete(contractSignatories)
 				.where(eq(contractSignatories.contractId, input.contractId));
@@ -1386,6 +1441,7 @@ export const legalContractsRouter = {
 			return {
 				success: true,
 				message: "Documento reemitido con enlaces nuevos",
+				contractId: input.contractId,
 				documentID: resultado.documentID,
 				enlaces: resultado.signing_links?.length ?? 0,
 			};

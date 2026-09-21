@@ -3,7 +3,7 @@
  * Integra con legal-docs-blueprints API y API de documentos legales
  */
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
@@ -388,6 +388,48 @@ async function anularContratoReemplazado(
 		.where(eq(generatedLegalContracts.id, contractId));
 
 	return { contractId, conservado: false };
+}
+
+/**
+ * Deja un solo contrato vigente por tipo en la oportunidad.
+ *
+ * Si jurídico genera otra vez un tipo que ya existía (otra fecha, un dato
+ * corregido), el anterior queda sin efecto con las mismas reglas que al
+ * reemplazar: se borra en WeeTrust si nadie lo firmó, o se conserva anulado. Si
+ * no, al pasar a 85% el WhatsApp mandaba los dos enlaces y el cliente podía
+ * firmar el viejo.
+ */
+async function anularAnterioresDelMismoTipo(
+	opportunityId: string,
+	contractType: string,
+	nuevoId: string,
+	motivo = "Reemplazado por una generación nueva del mismo contrato",
+): Promise<void> {
+	const anteriores = await db
+		.select({ id: generatedLegalContracts.id })
+		.from(generatedLegalContracts)
+		.where(
+			and(
+				eq(generatedLegalContracts.opportunityId, opportunityId),
+				eq(generatedLegalContracts.contractType, contractType),
+				ne(generatedLegalContracts.id, nuevoId),
+				ne(generatedLegalContracts.status, "cancelled"),
+			),
+		);
+
+	for (const anterior of anteriores) {
+		const anulado = await anularContratoReemplazado(
+			anterior.id,
+			opportunityId,
+			motivo,
+		);
+		if (anulado?.conservado) {
+			await db
+				.update(generatedLegalContracts)
+				.set({ replacedByContractId: nuevoId })
+				.where(eq(generatedLegalContracts.id, anterior.id));
+		}
+	}
 }
 
 /** Firmante tal como lo manda el front. */
@@ -1044,6 +1086,11 @@ export const contractGenerationRouter = {
 
 					if (saved) {
 						await guardarFirmantes(saved.id, generado.signatories);
+						await anularAnterioresDelMismoTipo(
+							input.opportunityId,
+							contract.contractType,
+							saved.id,
+						);
 						savedContracts.push({
 							id: saved.id,
 							contractType: contract.contractType,
@@ -1362,23 +1409,9 @@ export const contractGenerationRouter = {
 					// Un contrato sin PDF no puede reemplazar al anterior: se perdería el
 					// documento bueno a cambio de uno que no se puede abrir.
 					if (!motivoDeFalla(contractResult)) {
-						// Solo borrar el contrato anterior si la generación fue exitosa
-						await db
-							.delete(generatedLegalContracts)
-							.where(
-								and(
-									eq(
-										generatedLegalContracts.opportunityId,
-										input.opportunityId,
-									),
-									eq(
-										generatedLegalContracts.contractType,
-										originalContract.contractType,
-									),
-								),
-							);
-
-						// Insertar el nuevo contrato
+						// Insertar el nuevo contrato. El anterior del mismo tipo se anula
+						// recién después: borrarlo acá con un DELETE dejaba su documento
+						// vivo en WeeTrust, con las invitaciones ya mandadas.
 						const [saved] = await db
 							.insert(generatedLegalContracts)
 							.values({
@@ -1407,6 +1440,12 @@ export const contractGenerationRouter = {
 
 						if (saved) {
 							await guardarFirmantes(saved.id, contractResult.signatories);
+							await anularAnterioresDelMismoTipo(
+								input.opportunityId,
+								originalContract.contractType,
+								saved.id,
+								"Regenerado desde jurídico",
+							);
 							savedContracts.push({
 								id: saved.id,
 								contractType: originalContract.contractType,
@@ -1630,6 +1669,13 @@ export const contractGenerationRouter = {
 					.set({ replacedByContractId: saved.id })
 					.where(eq(generatedLegalContracts.id, anulado.contractId));
 			}
+
+			// Cualquier otro vigente del mismo tipo también queda sin efecto.
+			await anularAnterioresDelMismoTipo(
+				input.opportunityId,
+				input.contractType,
+				saved.id,
+			);
 
 			return {
 				success: true,

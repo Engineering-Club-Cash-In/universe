@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import * as moraDisplay from "./-mora-display";
 import {
 	buildMoraDisplayRows,
+	getCurrentOperationalMonth,
 	getMoraSnapshotDate,
+	getOfficialClosurePeriod,
 	getPreviousMonth,
 } from "./-mora-display";
 
@@ -195,6 +197,22 @@ describe("getPreviousMonth", () => {
 	});
 });
 
+describe("getOfficialClosurePeriod", () => {
+	test("usa el cierre del mes anterior al mes operativo", () => {
+		expect(getOfficialClosurePeriod("2026-09")).toBe("2026-08-01");
+		expect(getOfficialClosurePeriod("2026-01")).toBe("2025-12-01");
+	});
+
+	test("obtiene el mes operativo actual en zona Guatemala", () => {
+		expect(getCurrentOperationalMonth(new Date("2026-09-01T05:30:00Z"))).toBe(
+			"2026-08",
+		);
+		expect(getCurrentOperationalMonth(new Date("2026-09-01T06:30:00Z"))).toBe(
+			"2026-09",
+		);
+	});
+});
+
 describe("jerarquía del reporte de mora", () => {
 	test("prioriza cierre y comparación con términos comprensibles", async () => {
 		const source = await Bun.file(
@@ -212,6 +230,18 @@ describe("jerarquía del reporte de mora", () => {
 		expect(source).toContain("verCobrado || porAsesor.length > 0");
 		expect(source).toContain('? "N/D"');
 		expect(source).not.toContain('role="progressbar"');
+	});
+
+	test("compara y etiqueta exactamente los meses seleccionados", async () => {
+		const source = await Bun.file(
+			new URL("./reportes.tsx", import.meta.url),
+		).text();
+		expect(source).toContain("? getOfficialClosurePeriod(mesAnio)");
+		expect(source).toMatch(
+			/const periodoComparacion = `\$\{mesComparacion\}-01`;/,
+		);
+		expect(source).toContain("{fmtMonth(mesComparacion)}");
+		expect(source).toContain("{fmtMonth(mesAnio)}");
 	});
 });
 

@@ -48,7 +48,9 @@ import { orpc } from "@/utils/orpc";
 import {
 	buildCapitalAging,
 	buildMoraDisplayRows,
+	getCurrentOperationalMonth,
 	getMoraSnapshotDate,
+	getOfficialClosurePeriod,
 	getPreviousMonth,
 	type MoraBucket,
 	type MoraDisplayAsesor,
@@ -124,10 +126,6 @@ function todayGTISO() {
 		timeZone: "America/Guatemala",
 	});
 }
-function currentMonthGT() {
-	return todayGTISO().slice(0, 7); // YYYY-MM
-}
-
 function TabMora({
 	session,
 	canSeeAll,
@@ -145,11 +143,11 @@ function TabMora({
 	);
 	const [mesAnio, setMesAnio] = usePersistedState<string>(
 		"cobros.mora.mes",
-		currentMonthGT(),
+		getCurrentOperationalMonth(),
 	);
 	const [mesComparacion, setMesComparacion] = usePersistedState<string>(
 		"cobros.mora.mesComparacion",
-		getPreviousMonth(currentMonthGT()),
+		getPreviousMonth(getCurrentOperationalMonth()),
 	);
 	const [asesoresSel, setAsesoresSel] = usePersistedState<number[] | null>(
 		"cobros.mora.asesores",
@@ -157,18 +155,22 @@ function TabMora({
 	);
 
 	// Avanza/retrocede el mes seleccionado (sin pasar del mes actual).
-	const esMesActual = mesAnio >= currentMonthGT();
+	const esMesActual = mesAnio >= getCurrentOperationalMonth();
 	const shiftMes = (delta: number) => {
 		const [y, m] = mesAnio.split("-").map(Number);
 		const d = new Date(y, m - 1 + delta, 1);
 		const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-		if (next > currentMonthGT()) return;
+		if (next > getCurrentOperationalMonth()) return;
 		setMesAnio(next);
 	};
 
 	const hoy = todayGTISO();
 	const fechaSnapshot = getMoraSnapshotDate(modo, mesAnio, hoy);
-	const periodoOficial = `${mesAnio}-01`;
+	const usaCorteAbierto =
+		modo === "mes" && mesAnio === getCurrentOperationalMonth();
+	const periodoOficial = usaCorteAbierto
+		? getOfficialClosurePeriod(mesAnio)
+		: `${mesAnio}-01`;
 	const periodoComparacion = `${mesComparacion}-01`;
 
 	const { data: asesoresData } = useQuery({
@@ -241,7 +243,8 @@ function TabMora({
 	const dataDisponibleDesde =
 		modo === "hoy" ? data?.dataDisponibleDesde : undefined;
 	const alcance = data?.alcance;
-	const capitalSource = modo === "mes" ? dataCierreOficial : data;
+	const capitalSource =
+		modo === "mes" && !usaCorteAbierto ? dataCierreOficial : data;
 	const capitalAging = buildCapitalAging({
 		totales: capitalSource?.totales ?? {},
 		porAsesor: capitalSource?.porAsesor ?? [],
@@ -255,7 +258,8 @@ function TabMora({
 		capitalCartera: dataComparacion?.capitalCartera,
 		moraMensual: dataComparacion?.moraMensual,
 	});
-	const isLoadingCapital = modo === "mes" ? isLoadingCierreOficial : isLoading;
+	const isLoadingCapital =
+		modo === "mes" && !usaCorteAbierto ? isLoadingCierreOficial : isLoading;
 	const isRefreshing =
 		isFetching ||
 		(modo === "mes" && (isFetchingCierreOficial || isFetchingComparacion));
@@ -392,7 +396,7 @@ function TabMora({
 							type="month"
 							className="w-40"
 							value={mesAnio}
-							max={currentMonthGT()}
+							max={getCurrentOperationalMonth()}
 							disabled={modo !== "mes"}
 							onChange={(e) => setMesAnio(e.target.value)}
 						/>
@@ -418,7 +422,7 @@ function TabMora({
 							type="month"
 							className="w-40"
 							value={mesComparacion}
-							max={currentMonthGT()}
+							max={getCurrentOperationalMonth()}
 							onChange={(event) => setMesComparacion(event.target.value)}
 						/>
 					</div>
@@ -438,7 +442,9 @@ function TabMora({
 				<p className="pb-2 text-muted-foreground text-xs">
 					{modo === "hoy"
 						? "Mora actual en vivo"
-						: dataCierreOficial
+						: usaCorteAbierto
+							? `Corte al ${hoy} para ${fmtMonth(mesAnio)}`
+							: dataCierreOficial
 							? `Cierre oficial importado de ${fmtMonth(mesAnio)}`
 							: `Cierre oficial pendiente para ${fmtMonth(mesAnio)}`}
 				</p>
@@ -580,7 +586,7 @@ function TabMora({
 							<CardTitle className="text-base">Comparar cierres</CardTitle>
 						</CardHeader>
 						<CardContent className="overflow-x-auto">
-							{isLoadingComparacion ? (
+							{isLoadingComparacion || isLoadingCapital ? (
 								<div className="h-28 animate-pulse rounded bg-muted" />
 							) : (
 								<Table>
@@ -635,7 +641,7 @@ function TabMora({
 					</Card>
 				)}
 
-				{modo === "mes" && dataCierreOficial && (
+				{modo === "mes" && !usaCorteAbierto && dataCierreOficial && (
 					<Alert>
 						<AlertDescription>
 							Este bloque usa el cierre oficial importado y conserva los montos
@@ -661,7 +667,7 @@ function TabMora({
 				) : !capitalAging.disponible ? (
 					<Card>
 						<CardContent className="py-8 text-center text-muted-foreground text-sm">
-							{modo === "mes"
+							{modo === "mes" && !usaCorteAbierto
 								? "Este período todavía no tiene un cierre oficial importado."
 								: capitalAging.sinCoberturaHistorica
 									? `No hay datos de capital en mora antes del ${dataDisponibleDesde}.`

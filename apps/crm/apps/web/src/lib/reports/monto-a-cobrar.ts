@@ -116,6 +116,19 @@ export function fillMissingMontoACobrarPeriods(
 	return dates.map((date) => rows.get(toKey(date)) ?? emptyRow(toKey(date)));
 }
 
+export function applyOfficialMonthlyMora(
+	rows: MontoACobrarParticipacionRow[],
+	operationalMonth: string,
+	expected: string | undefined,
+) {
+	if (expected === undefined) return rows;
+	return rows.map((row) =>
+		row.bucket.slice(0, 7) === operationalMonth
+			? { ...row, total_mora: expected }
+			: row,
+	);
+}
+
 export function getMontoACobrarViewRow(
 	row: MontoACobrarParticipacionRow,
 	acumulado: boolean,

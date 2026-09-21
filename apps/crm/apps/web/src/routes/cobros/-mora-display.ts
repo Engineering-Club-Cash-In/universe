@@ -153,6 +153,16 @@ export function getPreviousMonth(mesAnio: string) {
 	return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, "0")}`;
 }
 
+export function getOfficialClosurePeriod(operationalMonth: string) {
+	return `${getPreviousMonth(operationalMonth)}-01`;
+}
+
+export function getCurrentOperationalMonth(date = new Date()) {
+	return date
+		.toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" })
+		.slice(0, 7);
+}
+
 type MoraSnapshotAsesor = {
 	asesorId: number;
 	nombre: string;

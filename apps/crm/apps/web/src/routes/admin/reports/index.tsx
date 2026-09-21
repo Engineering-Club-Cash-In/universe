@@ -77,6 +77,7 @@ import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { getInvestmentProjectionMonthBounds } from "@/lib/reports/investment-projection-period";
 import {
+	applyOfficialMonthlyMora,
 	fillMissingMontoACobrarPeriods,
 	getMontoACobrarParticipacionTotals,
 	getMontoACobrarViewRow,
@@ -87,7 +88,6 @@ import type {
 	FacturacionMesResponse,
 	FacturacionMesRubro,
 	MontoACobrarPeriodoRow,
-	MontoACobrarRow,
 	PuntoEquilibrioRow,
 	ReinversionLiquidacionesResponse,
 } from "@/lib/reports/scenario";
@@ -99,6 +99,10 @@ import {
 } from "@/lib/reports/scenario-configs";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc, queryClient } from "@/utils/orpc";
+import {
+	getCurrentOperationalMonth,
+	getOfficialClosurePeriod,
+} from "../../cobros/-mora-display";
 import { getReportTabs } from "./-tabs";
 
 type SimulacionInversionistaResult = {
@@ -496,14 +500,38 @@ function RouteComponent() {
 		}),
 		enabled: canAccessCobranzaReport,
 	});
+	const officialMoraOperationalMonth = getCurrentOperationalMonth();
+	const officialMoraPeriod = getOfficialClosurePeriod(
+		officialMoraOperationalMonth,
+	);
+	const officialMoraQuery = useQuery({
+		...orpc.getCierreMoraOficial.queryOptions({
+			input: { periodo: officialMoraPeriod },
+		}),
+		enabled: canAccessCobranzaReport && montoCobrarPeriodo === "mes",
+	});
+	const officialMoraRequired = montoCobrarPeriodo === "mes";
+	const officialMoraReady =
+		!officialMoraRequired ||
+		(officialMoraQuery.isSuccess && officialMoraQuery.data !== null);
+	const officialMoraFailed =
+		officialMoraRequired &&
+		(officialMoraQuery.isError ||
+			(officialMoraQuery.isSuccess && officialMoraQuery.data === null));
 	const montoCobrarData = montoCobrarQuery.data as
 		| { data: MontoACobrarPeriodoRow[] }
 		| undefined;
-	const montoCobrarRows = fillMissingMontoACobrarPeriods(
-		montoCobrarData?.data ?? [],
-		montoCobrarPeriodo,
-		montoCobrarRange.fechaInicio,
-		montoCobrarRange.fechaFin,
+	const montoCobrarRows = applyOfficialMonthlyMora(
+		fillMissingMontoACobrarPeriods(
+			montoCobrarData?.data ?? [],
+			montoCobrarPeriodo,
+			montoCobrarRange.fechaInicio,
+			montoCobrarRange.fechaFin,
+		),
+		officialMoraOperationalMonth,
+		montoCobrarPeriodo === "mes"
+			? officialMoraQuery.data?.moraMensual.esperado
+			: undefined,
 	);
 
 	const facturacionMesQuery = useQuery({
@@ -783,6 +811,10 @@ function RouteComponent() {
 		}
 	};
 	const exportAdminReportsExcel = () => {
+		if (!officialMoraReady) {
+			toast.error("Espera a que la mora oficial del mes termine de cargar.");
+			return;
+		}
 		if (!montoCobrarData || !reinversionData) {
 			toast.error("Espera a que Cobranza e Inversión terminen de cargar.");
 			return;
@@ -1281,7 +1313,11 @@ function RouteComponent() {
 										</div>
 									<div className="flex flex-wrap gap-2">
 										{isAdmin && (
-											<Button variant="outline" onClick={exportAdminReportsExcel}>
+											<Button
+												variant="outline"
+												onClick={exportAdminReportsExcel}
+												disabled={!officialMoraReady}
+											>
 												<Download className="mr-2 h-4 w-4" />
 												Exportar Excel
 											</Button>
@@ -1348,18 +1384,28 @@ function RouteComponent() {
 									</div>
 								</CardHeader>
 								<CardContent className="space-y-6">
-									{montoCobrarQuery.isPending && <p>Cargando...</p>}
+									{(montoCobrarQuery.isPending ||
+										(officialMoraRequired && officialMoraQuery.isPending)) && (
+										<p>Cargando...</p>
+									)}
 									{montoCobrarQuery.isError && (
 										<p className="text-destructive">
 											Error al cargar el reporte de monto a cobrarse.
 										</p>
 									)}
-									{montoCobrarData && montoCobrarData.data.length === 0 && (
+									{officialMoraFailed && (
+										<p className="text-destructive">
+											No fue posible cargar la mora oficial del mes. Intenta de nuevo.
+										</p>
+									)}
+									{officialMoraReady &&
+										montoCobrarData &&
+										montoCobrarData.data.length === 0 && (
 										<p className="text-muted-foreground">
 											No hay cuotas pendientes para el rango seleccionado.
 										</p>
 									)}
-									{!!montoCobrarData?.data.length && (
+									{officialMoraReady && !!montoCobrarData?.data.length && (
 										<>
 											{(() => {
 											const totals = getMontoACobrarParticipacionTotals(

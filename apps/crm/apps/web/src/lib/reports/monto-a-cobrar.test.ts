@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	applyOfficialMonthlyMora,
 	fillMissingMontoACobrarPeriods,
 	getMontoACobrarParticipacionTotals,
 	getMontoACobrarViewRow,
@@ -95,6 +96,25 @@ const montoRow = {
 	cuotas_participacion_invalida: 0,
 	participacion_actual: true,
 };
+
+test("reemplaza solo la mora del mes operativo con el cierre oficial", () => {
+	const agosto = { ...montoRow, bucket: "2026-08-01", total_mora: "100.00" };
+	const septiembre = {
+		...montoRow,
+		bucket: "2026-09-01T00:00:00.000Z",
+		total_mora: "2467734.59",
+	};
+
+	const rows = applyOfficialMonthlyMora(
+		[agosto, septiembre],
+		"2026-09",
+		"425169.19",
+	);
+
+	expect(rows[0]?.total_mora).toBe("100.00");
+	expect(rows[1]?.total_mora).toBe("425169.19");
+	expect(septiembre.total_mora).toBe("2467734.59");
+});
 
 test("consolida interés con IVA y seguro con GPS sin alterar el total", () => {
 	expect(getMontoACobrarViewRow(montoRow, false)).toEqual({

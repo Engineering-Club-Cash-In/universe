@@ -927,4 +927,41 @@ describe("buildProjectedInvestorFlow", () => {
       total: "111.20",
     });
   });
+
+  test("resta capital pagado pendiente de liquidar antes de proyectar", () => {
+    const result = buildProjectedInvestorFlow([
+      {
+        inversionista_id: 1,
+        nombre: "Pago pendiente de liquidar",
+        tipo_reinv_efectivo: "sin_reinversion",
+        monto_reinversion: null,
+        descuenta_impuestos: false,
+        emite_factura: true,
+        credito_id: 9,
+        fecha_vencimiento: "2026-10-01",
+        en_periodo: true,
+        capital_credito: "100.00",
+        cuota_credito: "111.20",
+        porcentaje_interes: "10.00",
+        porcentaje_inversionista: "100.00",
+        porcentaje_cube: "0.00",
+        monto_pendiente: "0.00",
+        capital_pagado_pendiente_liquidar: "40.00",
+        cuota: "111.20",
+        monto_aportado: "100.00",
+        interes_inversionista: "10.00",
+        interes_cube: "0.00",
+        iva_inversionista: "1.20",
+        iva_cube: "0.00",
+        cargos: "0.00",
+        es_mayor_participacion: false,
+      },
+    ]).porInversionista[0];
+
+    expect(result).toMatchObject({
+      cash_capital: "60.00",
+      interes_bruto: "6.00",
+      total: "66.72",
+    });
+  });
 });

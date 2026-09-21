@@ -871,6 +871,15 @@ export async function getFlujoCuotasPorInversionista({
         AND compra.revertida_at IS NULL
       GROUP BY compra.credito_id, compra.inversionista_id
     ),
+    capital_pagado_pendiente AS (
+      SELECT
+        pci.credito_id,
+        pci.inversionista_id,
+        SUM(pci.abono_capital::numeric) AS capital
+      FROM cartera.pagos_credito_inversionistas pci
+      WHERE pci.estado_liquidacion = 'NO_LIQUIDADO'
+      GROUP BY pci.credito_id, pci.inversionista_id
+    ),
     cuotas_autoritativas AS (
       SELECT DISTINCT ON (c.credito_id, c.numero_cuota)
         c.credito_id,
@@ -931,6 +940,7 @@ export async function getFlujoCuotasPorInversionista({
       ce.porcentaje_participacion_inversionista AS porcentaje_inversionista,
       ce.porcentaje_cash_in AS porcentaje_cube,
       COALESCE(cp.monto_pendiente, 0) AS monto_pendiente,
+      COALESCE(cpp.capital, 0) AS capital_pagado_pendiente_liquidar,
       COALESCE((
         SELECT SUM(compra.monto_aportado::numeric)
         FROM cartera.compras_credito_inversionista compra
@@ -976,11 +986,16 @@ export async function getFlujoCuotasPorInversionista({
     LEFT JOIN compras_pendientes cp
       ON cp.credito_id = ce.credito_id
       AND cp.inversionista_id = ce.inversionista_id
+    LEFT JOIN capital_pagado_pendiente cpp
+      ON cpp.credito_id = ce.credito_id
+      AND cpp.inversionista_id = ce.inversionista_id
     JOIN cartera.inversionistas i ON ce.inversionista_id = i.inversionista_id
     LEFT JOIN cartera.inversionistas cube_i ON cube_i.inversionista_id = 86
     WHERE cr."statusCredit" IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')
       AND ce.fecha_inicio_participacion <= p.fecha_corte
-      AND ce.monto_aportado::numeric - COALESCE(cp.monto_pendiente, 0) > 0
+      AND ce.monto_aportado::numeric
+        - COALESCE(cp.monto_pendiente, 0)
+        - COALESCE(cpp.capital, 0) > 0
     ORDER BY c.fecha_vencimiento, ce.credito_id, c.numero_cuota, i.nombre
   `);
 
@@ -1028,6 +1043,9 @@ export async function getFlujoCuotasPorInversionista({
     porcentaje_inversionista: String(row.porcentaje_inversionista),
     porcentaje_cube: String(row.porcentaje_cube),
     monto_pendiente: String(row.monto_pendiente),
+    capital_pagado_pendiente_liquidar: String(
+      row.capital_pagado_pendiente_liquidar,
+    ),
     monto_compras_mes_anterior: String(row.monto_compras_mes_anterior),
     monto_compras_mes_actual: String(row.monto_compras_mes_actual),
   }));

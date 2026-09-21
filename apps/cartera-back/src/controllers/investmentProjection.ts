@@ -32,6 +32,7 @@ export type ProjectionSourceRow = {
   porcentaje_inversionista?: string;
   porcentaje_cube?: string;
   monto_pendiente?: string;
+  capital_pagado_pendiente_liquidar?: string;
   monto_compras_mes_anterior?: string;
   monto_compras_mes_actual?: string;
   cube_nombre?: string;
@@ -200,9 +201,9 @@ export function buildProjectedInvestorFlow(rows: ProjectionSourceRow[]): {
         return [];
       }
       const positionKey = `${paymentRow.credito_id}:${paymentRow.inversionista_id}`;
-      const initialPosition = new Big(paymentRow.monto_aportado).minus(
-        paymentRow.monto_pendiente ?? 0,
-      );
+      const initialPosition = new Big(paymentRow.monto_aportado)
+        .minus(paymentRow.monto_pendiente ?? 0)
+        .minus(paymentRow.capital_pagado_pendiente_liquidar ?? 0);
       const remaining =
         remainingByPosition.get(positionKey) ??
         (initialPosition.lt(0) ? zero() : initialPosition);
@@ -318,7 +319,8 @@ export function buildProjectedInvestorFlow(rows: ProjectionSourceRow[]): {
         ? null
         : `${row.credito_id}:${row.inversionista_id}`;
     const initialPosition = new Big(row.monto_aportado)
-      .minus(row.monto_pendiente ?? 0);
+      .minus(row.monto_pendiente ?? 0)
+      .minus(row.capital_pagado_pendiente_liquidar ?? 0);
     const remaining = positionKey
       ? (remainingByPosition.get(positionKey) ??
         (initialPosition.lt(0) ? zero() : initialPosition))

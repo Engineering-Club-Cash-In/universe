@@ -1185,11 +1185,11 @@ export class ContractGeneratorService {
         }
       }
 
-      // El PDF se guarda siempre, aunque después falle la firma: es el
-      // documento que jurídico acaba de subir y perderlo no ayuda a nadie.
-      const { r2Key } = await uploadPdfToR2(pdfBuffer, baseFilename);
-
+      // El PDF va a R2 sólo cuando el contrato quedó bien: si la firma falla,
+      // el CRM no guarda nada y el archivo quedaba en R2 sin nadie que lo
+      // referencie ni forma de borrarlo. Jurídico lo tiene en su máquina.
       if (signatureMode === 'fisica') {
+        const { r2Key } = await uploadPdfToR2(pdfBuffer, baseFilename);
         return {
           ...respuestaBase,
           success: true,
@@ -1205,10 +1205,9 @@ export class ContractGeneratorService {
         return {
           ...respuestaBase,
           success: false,
-          r2Key,
           linkDocument: '',
           signatureMode,
-          message: 'Contrato subido, pero sin firmantes',
+          message: 'Contrato no enviado: sin firmantes',
           error: 'No se recibió ningún firmante para este contrato',
         };
       }
@@ -1217,10 +1216,9 @@ export class ContractGeneratorService {
         return {
           ...respuestaBase,
           success: false,
-          r2Key,
           linkDocument: '',
           signatureMode,
-          message: 'Contrato subido, pero sin firma electrónica',
+          message: 'Contrato no enviado: sin firma electrónica',
           error: 'WeeTrust deshabilitado o no inicializado',
         };
       }
@@ -1232,6 +1230,16 @@ export class ContractGeneratorService {
         signers,
         options.observers,
       );
+
+      // Si R2 falla con el documento ya enviado, se borra en WeeTrust: sin el
+      // PDF guardado el CRM no lo registra, y quedaría vivo sin dueño.
+      let r2Key: string;
+      try {
+        ({ r2Key } = await uploadPdfToR2(pdfBuffer, baseFilename));
+      } catch (error) {
+        await weeTrustService.deleteDocument(signing.documentID).catch(() => {});
+        throw error;
+      }
 
       return {
         ...respuestaBase,

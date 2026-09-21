@@ -86,7 +86,7 @@ export const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 	},
 	{
 		name: "extraInsurance",
-		label: "Seguro INREXSA",
+		label: "Seguro",
 		type: "fixed",
 		valueField: "extraInsuranceCost",
 		creditType: "all",

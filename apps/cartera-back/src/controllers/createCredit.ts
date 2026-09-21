@@ -185,6 +185,8 @@ const creditSchema = z.object({
   plazo: z.number().int().min(1).max(360),
   cuota: z.number().min(0),
   dia_pago_mensual: z.number().int().min(1).max(31),
+  fecha_referencia_calendario: z.string().datetime().optional(),
+  desplazar_primera_cuota_un_mes: z.boolean().optional(),
   membresias_pago: z.number().min(0),
   porcentaje_royalti: z.number().min(0),
   royalti: z.number().min(0),
@@ -256,6 +258,18 @@ const creditSchema = z.object({
       fecha_referencia: z.string().datetime().optional(),
     })
     .optional(),
+}).superRefine((data, context) => {
+  if (
+    data.desplazar_primera_cuota_un_mes === true &&
+    data.fecha_referencia_calendario == null &&
+    data.ajuste_fecha_ideal?.fecha_referencia == null
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["fecha_referencia_calendario"],
+      message: "La fecha de referencia es obligatoria cuando se desplaza la primera cuota",
+    });
+  }
 });
 
 // ========================================
@@ -721,6 +735,7 @@ export const generatePaymentDates = (
   plazo: number,
   diaPagoMensual: number,
   fechaReferencia?: Date,
+  desplazarPrimeraCuotaUnMes = false,
 ): string[] => {
   const fechas: string[] = [];
   const fechaHoy = fechaReferencia ?? new Date();
@@ -732,7 +747,7 @@ export const generatePaymentDates = (
   fechas.push(fechaHoyGuate);
 
   for (let i = 0; i < plazo; i++) {
-    const mesDestino = mesBase + i;
+    const mesDestino = mesBase + i + (desplazarPrimeraCuotaUnMes ? 1 : 0);
     const anio = anioBase + Math.floor(mesDestino / 12);
     const mes = (mesDestino % 12) + 1;
     const ultimoDiaMes = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
@@ -985,13 +1000,16 @@ export const createCreditCore = async (
   // El día de pago ya viene validado (1-31) desde el CRM: 15, 30, o un día
   // recomendado por el análisis de capacidad de pago. generatePaymentDates
   // hace el clamp de fin de mes internamente, así que se usa tal cual.
-  const fechaReferenciaPrimeraCuota = creditData.ajuste_fecha_ideal?.fecha_referencia
-    ? new Date(creditData.ajuste_fecha_ideal.fecha_referencia)
-    : undefined;
+  const fechaReferenciaPrimeraCuota = creditData.fecha_referencia_calendario
+    ? new Date(creditData.fecha_referencia_calendario)
+    : creditData.ajuste_fecha_ideal?.fecha_referencia
+      ? new Date(creditData.ajuste_fecha_ideal.fecha_referencia)
+      : undefined;
   const fechas = generatePaymentDates(
     creditData.plazo,
     creditData.dia_pago_mensual,
-    fechaReferenciaPrimeraCuota
+    fechaReferenciaPrimeraCuota,
+    creditData.desplazar_primera_cuota_un_mes ?? false,
   );
 
   const { cuotaInicial, cuotasInsertadas } = await insertInstallments(

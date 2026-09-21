@@ -891,7 +891,11 @@ export class ContractGeneratorService {
           : (options.emails ?? []).map((email, i) => ({
               role: i === 0 ? SignerRole.TITULAR : SignerRole.COFIRMANTE,
               email,
-              name: data.nombreCompleto ?? email,
+              // Cada cofirmante con su propio nombre, no con el del titular.
+              name:
+                (i === 0
+                  ? data.nombreCompleto
+                  : data.deudoresAdicionales?.[i - 1]?.nombreCompleto) ?? email,
             }));
 
       // Hay contratos que no se firman electrónicamente: se imprimen y se
@@ -942,18 +946,37 @@ export class ContractGeneratorService {
             try {
               console.log(`🔗 Creando documento en Documenso (fallback)...`);
 
-              signing = await documensoService.createDocumentAndGetSigningLinks(
+              // Documenso reparte por posición: tiene que recibirlos en el
+              // orden de las líneas de firma, igual que WeeTrust, o el
+              // representante termina firmando en la línea del cliente.
+              const ordenDocumenso = firmaPorRol
+                ? firmantesEnOrdenDeFirma(contractType, signers)
+                : signers;
+              const documenso = await documensoService.createDocumentAndGetSigningLinks(
                 baseFilename,
                 pdfBuffer,
                 contractType,
-                // Documenso reparte por posición: tiene que recibirlos en el
-                // orden de las líneas de firma, igual que WeeTrust, o el
-                // representante termina firmando en la línea del cliente.
-                (firmaPorRol
-                  ? firmantesEnOrdenDeFirma(contractType, signers)
-                  : signers
-                ).map((s) => s.email)
+                ordenDocumenso.map((s) => s.email)
               );
+
+              // Con roles, se devuelve también quién es quién: si no, el CRM
+              // guarda los links por posición y, en los contratos donde el rep
+              // legal firma primero, el del cliente sería el del representante.
+              signing = {
+                ...documenso,
+                ...(firmaPorRol
+                  ? {
+                      signatories: ordenDocumenso.map((s) => ({
+                        role: s.role,
+                        email: s.email,
+                        name: s.name,
+                        signingUrl: documenso.linksPorEmail?.find(
+                          (l) => l.email.toLowerCase() === s.email.toLowerCase(),
+                        )?.url,
+                      })),
+                    }
+                  : {}),
+              };
 
               signingLinks = signing.signs ?? [];
               signingProvider = 'documenso';

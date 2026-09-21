@@ -3,15 +3,18 @@ import {
 	aggregateIntegrityResult,
 	getReusableBatchSyncAction,
 	hasCompleteIntegrityValidation,
+	requiresDocumentRevalidation,
 	type IntegrityResult,
 } from "./document-integrity-flow";
 
 describe("document integrity UI flow", () => {
+	test("legacy manual review requires revalidation", () => {
+		expect(requiresDocumentRevalidation("revision_manual")).toBe(true);
+		expect(requiresDocumentRevalidation("observacion")).toBe(false);
+		expect(requiresDocumentRevalidation("valido")).toBe(false);
+	});
 	test("habilita capacidad para veredictos que no requieren aprobación manual", () => {
-		for (const result of [
-			"valido",
-			"observacion",
-		] satisfies IntegrityResult[]) {
+		for (const result of ["valido", "observacion"] satisfies IntegrityResult[]) {
 			expect(
 				hasCompleteIntegrityValidation({
 					payloads: [{ key: "a.pdf" }],
@@ -21,7 +24,7 @@ describe("document integrity UI flow", () => {
 		}
 	});
 
-	test("la revisión manual bloquea capacidad hasta aprobarse", () => {
+	test("la revisión manual histórica sigue bloqueando capacidad", () => {
 		expect(
 			hasCompleteIntegrityValidation({
 				payloads: [{ key: "a.pdf" }],
@@ -42,7 +45,7 @@ describe("document integrity UI flow", () => {
 					},
 				],
 			}),
-		).toBe(true);
+		).toBe(false);
 	});
 
 	test("un rechazo bloquea capacidad aunque exista una aprobación histórica", () => {

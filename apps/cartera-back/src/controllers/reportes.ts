@@ -211,7 +211,7 @@ export function buildMontoACobrarPeriodoQuery({
       FROM buckets b
       JOIN cartera.creditos c ON EXISTS (
         SELECT 1
-        FROM cartera.cuotas_credito q_atrasada
+        FROM cuotas_autoritativas q_atrasada
         LEFT JOIN cartera.pagos_credito pc_atrasada
           ON pc_atrasada.cuota_id = q_atrasada.cuota_id
           AND pc_atrasada."paymentFalse" = false

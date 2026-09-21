@@ -32,19 +32,21 @@ function firmantes(): ContractSigner[] {
 		{
 			role: SignerRole.TITULAR,
 			email: PRUEBA_TITULAR,
-			name: "ROSELDA BEATRIZ RAXH COC",
-			dpi: "3315845731802",
+			name: "TITULAR DE PRUEBA",
+			// El DPI sólo sirve para confirmar el calce contra el PDF del snapshot.
+			// No se versiona: se pasa por env si se quiere esa verificación.
+			...(process.env.PRUEBA_DPI_TITULAR ? { dpi: process.env.PRUEBA_DPI_TITULAR } : {}),
 		},
 		{
 			role: SignerRole.COFIRMANTE,
 			email: PRUEBA_COFIRMANTE,
-			name: "EDWIN EDILCER SIERRA SAMAYOA",
-			dpi: "2602625872103",
+			name: "COFIRMANTE DE PRUEBA",
+			...(process.env.PRUEBA_DPI_COFIRMANTE ? { dpi: process.env.PRUEBA_DPI_COFIRMANTE } : {}),
 		},
 		{
 			role: SignerRole.REP_LEGAL,
 			email: PRUEBA_REP_LEGAL,
-			name: "LUCRECIA MARISOL CUX TECUN",
+			name: "REPRESENTANTE DE PRUEBA",
 		},
 	];
 }

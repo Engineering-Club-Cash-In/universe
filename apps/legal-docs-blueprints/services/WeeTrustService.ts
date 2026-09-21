@@ -22,6 +22,7 @@ import {
 import {
 	SignatureLayoutError,
 	getSignaturePattern,
+	firmantesEnOrdenDeFirma,
 	resolveSignerOrder,
 } from "./signaturePatterns";
 
@@ -881,8 +882,8 @@ export class WeeTrustService {
 		// Mandar a alguien sin línea de firma asignada hace que WeeTrust rechace
 		// el envío entero con "<email> undefined".
 		const porEmail = new Map<string, ContractSigner>();
-		for (const s of resolveSignerOrder(contractType, signers)) {
-			if (!porEmail.has(s.email)) porEmail.set(s.email, s);
+		for (const s of firmantesEnOrdenDeFirma(contractType, signers)) {
+			porEmail.set(s.email, s);
 		}
 
 		const signatory: WeeTrustSignatory[] = [...porEmail.values()].map(

@@ -3,6 +3,9 @@ import { z } from "zod";
 import { buildDocumentRecommendedAction } from "../lib/document-integrity/decision-evidence";
 import type { Signal, ValidationResult } from "../lib/document-integrity/types";
 import {
+	currentValidationResult,
+} from "../lib/document-integrity/types";
+import {
 	canRunDocumentIntegrityValidation,
 	canViewDocumentIntegrityValidationDetail,
 } from "../lib/document-integrity/workflow-policy";
@@ -59,7 +62,7 @@ function toPublicValidation(validation: {
 }) {
 	return {
 		id: validation.id,
-		result: validation.autoResult,
+		result: currentValidationResult(validation.autoResult),
 		reason: validation.autoReason,
 		recommendedAction: buildDocumentRecommendedAction({
 			result: validation.autoResult,

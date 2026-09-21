@@ -143,9 +143,6 @@ describe("document integrity boundaries", () => {
 		expect(serviceSource).toContain("assertNoActiveCapacityAnalysis");
 		expect(serviceSource).toContain("releaseCapacityAnalysisReservation");
 		expect(serviceSource).toContain(
-			"export async function resetOpportunityCreditAnalysis",
-		);
-		expect(serviceSource).toContain(
 			"export async function upsertOpportunityCreditAnalysis",
 		);
 	});

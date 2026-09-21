@@ -116,6 +116,9 @@ export const analysisStatusEnum = pgEnum("analysis_status", [
 export const companies = pgTable("companies", {
 	id: uuid("id").primaryKey().defaultRandom(),
 	name: text("name").notNull(),
+	// Nombre legal como va en los contratos ({agencia}): "JAC GUATEMALA,
+	// SOCIEDAD ANÓNIMA". `name` es el nombre comercial y no sirve para eso.
+	razonSocial: text("razon_social"),
 	industry: text("industry"),
 	size: text("size"), // Small, Medium, Large, Enterprise
 	website: text("website"),

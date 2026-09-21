@@ -47,9 +47,9 @@ describe("coincidenciasEnPaso sin período", () => {
 });
 
 describe("coincidenciasEnPaso con período", () => {
-	test("usa el porcentaje de la llegada, no el avance actual", () => {
-		// Llegó al paso 1 en abril con 20% y hoy va en 80%: el filtro de abril
-		// para el paso 1 tiene que ofrecer 20%, no 80%.
+	test("un caso que ya avanzó a otra etapa no cuenta en la etapa donde estuvo ese mes", () => {
+		// Llegó al paso 1 en abril con 20% y hoy va en 80% (paso 3): filtrar
+		// por abril + paso 1 ya no debe mostrarlo — solo importa dónde está hoy.
 		const c = caso({
 			pasoActual: 3,
 			porcentaje: 80,
@@ -59,29 +59,12 @@ describe("coincidenciasEnPaso con período", () => {
 			],
 		});
 
-		expect(coincidenciasEnPaso(c, 1, ABRIL)[0].porcentaje).toBe(20);
+		expect(coincidenciasEnPaso(c, 1, ABRIL)).toEqual([]);
 		expect(coincidenciasEnPaso(c, 3, ABRIL)).toEqual([]);
 		expect(coincidenciasEnPaso(c, 3, JULIO)[0].porcentaje).toBe(80);
 	});
 
-	test("toma la llegada más antigua aunque el historial venga desordenado", () => {
-		// El servidor ordena por porcentaje: un caso creado en 40% que retrocede a
-		// 30% trae primero la entrada más nueva. La llegada real es la de abril.
-		const c = caso({
-			pasoActual: 2,
-			porcentaje: 30,
-			historial: [
-				{ paso: 2, porcentaje: 30, fecha: "2026-07-20T12:00:00.000Z" },
-				{ paso: 2, porcentaje: 40, fecha: "2026-04-05T12:00:00.000Z" },
-			],
-		});
-
-		const enAbril = coincidenciasEnPaso(c, 2, ABRIL)[0];
-		expect(enAbril?.fecha).toBe("2026-04-05T12:00:00.000Z");
-		expect(enAbril?.porcentaje).toBe(40);
-	});
-
-	test("cuenta cualquier llegada dentro del mes, no solo la primera del arreglo", () => {
+	test("cuenta solo si el avance actual llegó dentro del mes filtrado", () => {
 		const c = caso({
 			pasoActual: 2,
 			porcentaje: 40,
@@ -91,13 +74,14 @@ describe("coincidenciasEnPaso con período", () => {
 			],
 		});
 
-		expect(coincidenciasEnPaso(c, 2, ABRIL)[0].porcentaje).toBe(30);
+		// En abril el caso ya no estaba en 30% (ese no es su estado actual).
+		expect(coincidenciasEnPaso(c, 2, ABRIL)).toEqual([]);
 		expect(coincidenciasEnPaso(c, 2, JULIO)[0].porcentaje).toBe(40);
 	});
 
-	test("conserva las dos llegadas cuando ocurren en el mismo mes", () => {
-		// 30% y luego 40% en julio: ambos son avances reales y el filtro por
-		// porcentaje exacto tiene que poder encontrar cualquiera de los dos.
+	test("un caso que pasó por dos porcentajes de la misma etapa el mismo mes solo muestra el actual", () => {
+		// 30% y luego 40% en julio: antes esto devolvía las dos; ahora solo
+		// cuenta el que sigue siendo su estado hoy.
 		const c = caso({
 			pasoActual: 2,
 			porcentaje: 40,
@@ -107,8 +91,8 @@ describe("coincidenciasEnPaso con período", () => {
 			],
 		});
 
-		expect(coincidenciasEnPaso(c, 2, JULIO).map((m) => m.porcentaje)).toEqual([
-			30, 40,
+		expect(coincidenciasEnPaso(c, 2, JULIO)).toEqual([
+			{ porcentaje: 40, fecha: "2026-07-20T12:00:00.000Z" },
 		]);
 	});
 
@@ -126,16 +110,31 @@ describe("coincidenciasEnPaso con período", () => {
 });
 
 describe("tuvoAvanceEn", () => {
-	test("detecta cualquier movimiento dentro del período", () => {
+	test("es true solo si el caso llegó a su estado actual dentro del período", () => {
 		const c = caso({
+			pasoActual: 1,
+			porcentaje: 20,
+			historial: [{ paso: 1, porcentaje: 20, fecha: "2026-04-10T12:00:00.000Z" }],
+		});
+
+		expect(tuvoAvanceEn(c, ABRIL)).toBe(true);
+		expect(tuvoAvanceEn(c, ventanaDelMes(2026, 5))).toBe(false);
+	});
+
+	test("es false si el movimiento del mes fue a una etapa que el caso ya dejó atrás", () => {
+		// El caso pasó por el 20% en abril, pero hoy va en 30%: para el filtro
+		// de abril esto ya no es "avance" del estado actual.
+		const c = caso({
+			pasoActual: 2,
+			porcentaje: 30,
 			historial: [
 				{ paso: 1, porcentaje: 20, fecha: "2026-04-10T12:00:00.000Z" },
 				{ paso: 2, porcentaje: 30, fecha: "2026-07-10T12:00:00.000Z" },
 			],
 		});
 
-		expect(tuvoAvanceEn(c, ABRIL)).toBe(true);
-		expect(tuvoAvanceEn(c, ventanaDelMes(2026, 5))).toBe(false);
+		expect(tuvoAvanceEn(c, ABRIL)).toBe(false);
+		expect(tuvoAvanceEn(c, JULIO)).toBe(true);
 	});
 });
 
@@ -234,8 +233,9 @@ describe("coincidenciaPrincipal", () => {
 });
 
 describe("llegadaEnVentana", () => {
-	test("devuelve la llegada del mes aunque sea de otra etapa", () => {
-		// Entró al listado por su avance de julio en el paso 2, pero hoy va en 4.
+	test("solo cuenta la llegada al estado actual, no la de una etapa ya superada", () => {
+		// Entró al paso 2 en julio, pero hoy va en el paso 4 (llegó en agosto):
+		// julio ya no debe mostrarlo, porque 30% dejó de ser su estado.
 		const c = caso({
 			pasoActual: 4,
 			porcentaje: 85,
@@ -245,7 +245,18 @@ describe("llegadaEnVentana", () => {
 			],
 		});
 
-		expect(llegadaEnVentana(c, JULIO)?.porcentaje).toBe(30);
-		expect(llegadaEnVentana(c, ABRIL)).toBeNull();
+		expect(llegadaEnVentana(c, JULIO)).toBeNull();
+		expect(llegadaEnVentana(c, ventanaDelMes(2026, 8))?.porcentaje).toBe(85);
+	});
+
+	test("devuelve null si el estado actual llegó fuera de la ventana pedida", () => {
+		const c = caso({
+			pasoActual: 1,
+			porcentaje: 20,
+			historial: [{ paso: 1, porcentaje: 20, fecha: "2026-04-10T12:00:00.000Z" }],
+		});
+
+		expect(llegadaEnVentana(c, ABRIL)?.porcentaje).toBe(20);
+		expect(llegadaEnVentana(c, JULIO)).toBeNull();
 	});
 });

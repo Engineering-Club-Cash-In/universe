@@ -23,6 +23,7 @@ import {
 	TrendingUp,
 	UserCircle,
 	Users,
+	Wallet,
 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { logo } from "@/assets";
@@ -47,6 +48,17 @@ import {
 	SheetTrigger,
 } from "./ui/sheet";
 import UserMenu from "./user-menu";
+
+/** Tabs de la página de Análisis, en el mismo orden y con los mismos nombres. */
+const ANALYSIS_TABS = [
+	{ stage: "analysis", label: "Análisis (30% → 40%)", icon: FileText },
+	{
+		stage: "investment",
+		label: "Asignación de Inversión (50% → 80%)",
+		icon: TrendingUp,
+	},
+	{ stage: "disbursement", label: "Desembolso (90% → 100%)", icon: Wallet },
+] as const;
 
 export default function Header() {
 	const { data: session } = authClient.useSession();
@@ -287,18 +299,35 @@ export default function Header() {
 							</DropdownMenu>
 						)}
 
-						{/* Análisis */}
+						{/* Análisis: cada tab de la página como acceso directo */}
 						{session && userRole && PERMISSIONS.canAccessAnalysis(userRole) && (
-							<Button
-								variant={isActive("/crm/analysis") ? "secondary" : "ghost"}
-								size="sm"
-								asChild
-							>
-								<Link to="/crm/analysis">
-									<BarChart3 className="mr-2 h-4 w-4" />
-									Análisis
-								</Link>
-							</Button>
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant={isActive("/crm/analysis") ? "secondary" : "ghost"}
+										size="sm"
+										className="gap-1"
+									>
+										<BarChart3 className="h-4 w-4" />
+										Análisis
+										<ChevronDown className="h-3 w-3 opacity-50" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-64">
+									{ANALYSIS_TABS.map(({ stage, label, icon: Icon }) => (
+										<DropdownMenuItem key={stage} asChild>
+											<Link
+												to="/crm/analysis"
+												search={{ stage }}
+												className="cursor-pointer"
+											>
+												<Icon className="mr-2 h-4 w-4" />
+												{label}
+											</Link>
+										</DropdownMenuItem>
+									))}
+								</DropdownMenuContent>
+							</DropdownMenu>
 						)}
 
 						{/* Jurídico */}
@@ -632,10 +661,19 @@ function MobileNav({
 								)}
 
 								{userRole && PERMISSIONS.canAccessAnalysis(userRole) && (
-									<Link to="/crm/analysis" className={MOBILE_LINK_CLASS}>
-										<BarChart3 />
-										Análisis
-									</Link>
+									<MobileSection label="Análisis">
+										{ANALYSIS_TABS.map(({ stage, label, icon: Icon }) => (
+											<Link
+												key={stage}
+												to="/crm/analysis"
+												search={{ stage }}
+												className={MOBILE_LINK_CLASS}
+											>
+												<Icon />
+												{label}
+											</Link>
+										))}
+									</MobileSection>
 								)}
 
 								{userRole && PERMISSIONS.canAccessJuridico(userRole) && (

@@ -237,12 +237,29 @@ describe("jerarquía del reporte de mora", () => {
 		const source = await Bun.file(
 			new URL("./reportes.tsx", import.meta.url),
 		).text();
-		expect(source).toContain("? getOfficialClosurePeriod(mesAnio)");
+		expect(source).toContain("? getOfficialClosurePeriod(mesAnioValido)");
 		expect(source).toMatch(
 			/const periodoComparacion = `\$\{mesComparacionValido\}-01`;/,
 		);
 		expect(source).toContain("{fmtMonth(mesComparacionValido)}");
-		expect(source).toContain("{fmtMonth(mesAnio)}");
+		expect(source).toContain("{fmtMonth(mesAnioValido)}");
+	});
+
+	test("normaliza el input del mes principal antes de persistirlo", async () => {
+		const source = await Bun.file(
+			new URL("./reportes.tsx", import.meta.url),
+		).text();
+		const valueIndex = source.indexOf("value={mesAnioValido}");
+		expect(valueIndex).toBeGreaterThan(-1);
+		const inputStart = source.lastIndexOf("<Input", valueIndex);
+		const inputEnd = source.indexOf("/>", valueIndex);
+		const input = source.slice(inputStart, inputEnd + 2);
+		expect(input).toContain('type="month"');
+		expect(input).toContain('aria-label="Mes"');
+		expect(input).toContain("max={getCurrentOperationalMonth()}");
+		expect(input).toContain(
+			"setMesAnio(normalizeMonthInput(e.target.value, mesAnioValido))",
+		);
 	});
 
 	test("ignora cuando se limpia el mes de comparación", async () => {

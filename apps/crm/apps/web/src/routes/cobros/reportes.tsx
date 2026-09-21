@@ -150,6 +150,10 @@ function TabMora({
 		"cobros.mora.mesComparacion",
 		getPreviousMonth(getCurrentOperationalMonth()),
 	);
+	const mesAnioValido = normalizeMonthInput(
+		mesAnio,
+		getCurrentOperationalMonth(),
+	);
 	const mesComparacionValido = normalizeMonthInput(
 		mesComparacion,
 		getPreviousMonth(getCurrentOperationalMonth()),
@@ -160,9 +164,9 @@ function TabMora({
 	);
 
 	// Avanza/retrocede el mes seleccionado (sin pasar del mes actual).
-	const esMesActual = mesAnio >= getCurrentOperationalMonth();
+	const esMesActual = mesAnioValido >= getCurrentOperationalMonth();
 	const shiftMes = (delta: number) => {
-		const [y, m] = mesAnio.split("-").map(Number);
+		const [y, m] = mesAnioValido.split("-").map(Number);
 		const d = new Date(y, m - 1 + delta, 1);
 		const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 		if (next > getCurrentOperationalMonth()) return;
@@ -170,12 +174,12 @@ function TabMora({
 	};
 
 	const hoy = todayGTISO();
-	const fechaSnapshot = getMoraSnapshotDate(modo, mesAnio, hoy);
+	const fechaSnapshot = getMoraSnapshotDate(modo, mesAnioValido, hoy);
 	const usaCorteAbierto =
-		modo === "mes" && mesAnio === getCurrentOperationalMonth();
+		modo === "mes" && mesAnioValido === getCurrentOperationalMonth();
 	const periodoOficial = usaCorteAbierto
-		? getOfficialClosurePeriod(mesAnio)
-		: `${mesAnio}-01`;
+		? getOfficialClosurePeriod(mesAnioValido)
+		: `${mesAnioValido}-01`;
 	const periodoComparacion = `${mesComparacionValido}-01`;
 
 	const { data: asesoresData } = useQuery({
@@ -270,8 +274,8 @@ function TabMora({
 		(modo === "mes" && (isFetchingCierreOficial || isFetchingComparacion));
 
 	// Recuperación de mora para el mismo ciclo [día 6, día 6 siguiente).
-	const anioNum = Number(mesAnio.slice(0, 4));
-	const mesNum = Number(mesAnio.slice(5, 7));
+	const anioNum = Number(mesAnioValido.slice(0, 4));
+	const mesNum = Number(mesAnioValido.slice(5, 7));
 	const { data: recuperacion, refetch: refetchRecuperacion } = useQuery({
 		...orpc.getMoraRecuperacionPorAsesor.queryOptions({
 			input: {
@@ -399,11 +403,14 @@ function TabMora({
 						</Button>
 						<Input
 							type="month"
+							aria-label="Mes"
 							className="w-40"
-							value={mesAnio}
+							value={mesAnioValido}
 							max={getCurrentOperationalMonth()}
 							disabled={modo !== "mes"}
-							onChange={(e) => setMesAnio(e.target.value)}
+							onChange={(e) =>
+								setMesAnio(normalizeMonthInput(e.target.value, mesAnioValido))
+							}
 						/>
 						<Button
 							variant="outline"
@@ -450,10 +457,10 @@ function TabMora({
 					{modo === "hoy"
 						? "Mora actual en vivo"
 						: usaCorteAbierto
-							? `Corte al ${hoy} para ${fmtMonth(mesAnio)}`
+							? `Corte al ${hoy} para ${fmtMonth(mesAnioValido)}`
 							: dataCierreOficial
-							? `Cierre oficial importado de ${fmtMonth(mesAnio)}`
-							: `Cierre oficial pendiente para ${fmtMonth(mesAnio)}`}
+							? `Cierre oficial importado de ${fmtMonth(mesAnioValido)}`
+							: `Cierre oficial pendiente para ${fmtMonth(mesAnioValido)}`}
 				</p>
 			</div>
 
@@ -604,7 +611,7 @@ function TabMora({
 												{fmtMonth(mesComparacionValido)}
 											</TableHead>
 											<TableHead className="text-right capitalize">
-												{fmtMonth(mesAnio)}
+												{fmtMonth(mesAnioValido)}
 											</TableHead>
 										</TableRow>
 									</TableHeader>

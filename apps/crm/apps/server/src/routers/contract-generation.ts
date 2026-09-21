@@ -35,6 +35,7 @@ import {
 import { tieneFirmas } from "../lib/contrato-estado-firma";
 import {
 	aplicarCorreosDePrueba,
+	correoRepetido,
 	correosDePruebaFaltantes,
 } from "../lib/contratos-correos-prueba";
 import {
@@ -159,7 +160,14 @@ function firmantesDelContrato(
 			message: `TEST_MESSAGE=true pero falta configurar ${faltan.join(" y ")}: los enlaces de firma saldrían a los correos reales del cliente.`,
 		});
 	}
-	return aplicarCorreosDePrueba(conRepLegal);
+	const conPrueba = aplicarCorreosDePrueba(conRepLegal);
+	const repetido = correoRepetido(conPrueba);
+	if (repetido) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `TEST_MESSAGE=true: el correo de prueba ${repetido} quedaría para dos firmantes. Revisá CONTRATOS_TEST_EMAIL_TITULAR, CONTRATOS_TEST_EMAIL_COFIRMANTES y CONTRATOS_REP_LEGAL_EMAIL.`,
+		});
+	}
+	return conPrueba;
 }
 
 /**
@@ -531,6 +539,29 @@ async function retirarAnterioresSiSigueVigente(params: {
 		);
 	}
 	return resultado === "vigente";
+}
+
+/**
+ * Deshace un contrato recién guardado cuyos firmantes no se pudieron guardar:
+ * sin ellos no se puede mandar por WhatsApp, sincronizar ni regenerar. Se
+ * borra en WeeTrust y en el CRM con las reglas de anular. Siempre devuelve
+ * `false` (no quedó vigente), para usarlo directo como resultado.
+ */
+async function deshacerContratoSinFirmantes(
+	contractId: string,
+	opportunityId: string,
+): Promise<false> {
+	await anularContratoReemplazado(
+		contractId,
+		opportunityId,
+		"No se pudieron guardar los firmantes",
+	).catch((error) =>
+		console.error(
+			`[deshacerContratoSinFirmantes] no se pudo deshacer ${contractId}:`,
+			error,
+		),
+	);
+	return false;
 }
 
 /** Firmante tal como lo manda el front. */
@@ -1216,23 +1247,23 @@ export const contractGenerationRouter = {
 
 					if (saved) {
 						// Sin firmantes guardados el nuevo no se puede mandar ni
-						// regenerar: no se retira el anterior por uno así. Quedan los
-						// dos y el WhatsApp frena con el motivo a la vista.
-						let quedoVigente = true;
-						if (
-							await guardarFirmantes(
-								saved.id,
-								generado.signatories,
-								contract.contractType,
-							)
-						) {
-							quedoVigente = await retirarAnterioresSiSigueVigente({
-								opportunityId: input.opportunityId,
-								contractType: contract.contractType,
-								nuevoId: saved.id,
-								etapaInicial,
-							});
-						}
+						// regenerar: se deshace (se borra en WeeTrust y acá), el
+						// anterior sigue vigente y se informa como descartado.
+						const quedoVigente = (await guardarFirmantes(
+							saved.id,
+							generado.signatories,
+							contract.contractType,
+						))
+							? await retirarAnterioresSiSigueVigente({
+									opportunityId: input.opportunityId,
+									contractType: contract.contractType,
+									nuevoId: saved.id,
+									etapaInicial,
+								})
+							: await deshacerContratoSinFirmantes(
+									saved.id,
+									input.opportunityId,
+								);
 						// Descartado (cambió la etapa o ganó otro pedido): esa fila ya no
 						// existe o no es la vigente, no se informa como enlazada.
 						if (quedoVigente) {
@@ -1604,23 +1635,23 @@ export const contractGenerationRouter = {
 							.returning({ id: generatedLegalContracts.id });
 
 						if (saved) {
-							// Sin firmantes guardados no se retira el anterior (ver arriba).
-							let quedoVigente = true;
-							if (
-								await guardarFirmantes(
-									saved.id,
-									contractResult.signatories,
-									originalContract.contractType,
-								)
-							) {
-								quedoVigente = await retirarAnterioresSiSigueVigente({
-									opportunityId: input.opportunityId,
-									contractType: originalContract.contractType,
-									nuevoId: saved.id,
-									etapaInicial,
-									motivo: "Regenerado desde jurídico",
-								});
-							}
+							// Sin firmantes guardados se deshace el nuevo (ver arriba).
+							const quedoVigente = (await guardarFirmantes(
+								saved.id,
+								contractResult.signatories,
+								originalContract.contractType,
+							))
+								? await retirarAnterioresSiSigueVigente({
+										opportunityId: input.opportunityId,
+										contractType: originalContract.contractType,
+										nuevoId: saved.id,
+										etapaInicial,
+										motivo: "Regenerado desde jurídico",
+									})
+								: await deshacerContratoSinFirmantes(
+										saved.id,
+										input.opportunityId,
+									);
 							if (quedoVigente) {
 								savedContracts.push({
 									id: saved.id,

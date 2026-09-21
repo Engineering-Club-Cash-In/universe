@@ -95,3 +95,24 @@ export function aplicarCorreosDePrueba<
 		return p;
 	});
 }
+
+/**
+ * El primer correo que se repite entre firmantes, o null.
+ *
+ * Se mira la lista completa ya resuelta (titular, codeudores y rep legal): el
+ * correo de prueba del titular puede coincidir con uno de los codeudores o con
+ * el del rep legal, y WeeTrust junta a quienes comparten correo en un solo
+ * firmante.
+ */
+export function correoRepetido(
+	personas: { email: string | null }[],
+): string | null {
+	const vistos = new Set<string>();
+	for (const p of personas) {
+		if (!p.email) continue;
+		const clave = p.email.trim().toLowerCase();
+		if (vistos.has(clave)) return p.email;
+		vistos.add(clave);
+	}
+	return null;
+}

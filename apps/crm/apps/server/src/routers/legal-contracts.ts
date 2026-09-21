@@ -33,6 +33,7 @@ import {
 } from "../lib/contratos-anulacion";
 import {
 	aplicarCorreosDePrueba,
+	correoRepetido,
 	correosDePruebaFaltantes,
 } from "../lib/contratos-correos-prueba";
 import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
@@ -1380,6 +1381,12 @@ export const legalContractsRouter = {
 					});
 				}
 				signers = aplicarCorreosDePrueba(guardados);
+				const repetido = correoRepetido(signers);
+				if (repetido) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `TEST_MESSAGE=true: el correo de prueba ${repetido} quedaría para dos firmantes. Revisá los correos de prueba.`,
+					});
+				}
 			}
 
 			const resultado = await reemitirContratoEnWeeTrust({

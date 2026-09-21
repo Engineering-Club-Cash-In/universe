@@ -22,71 +22,77 @@ export async function sincronizarEstadoDeFirma(
 ): Promise<void> {
 	const ahora = new Date();
 
-	// Si mientras se consultaba alguien regeneró el contrato, la fila ya apunta
-	// a otro documento: aplicar esta foto vieja le devolvería el ID anterior y
-	// pisaría los enlaces nuevos. Los contratos viejos no tienen ID guardado.
-	const [actual] = await db
-		.select({ documentID: generatedLegalContracts.weetrustDocumentId })
-		.from(generatedLegalContracts)
-		.where(eq(generatedLegalContracts.id, contractId))
-		.limit(1);
-	if (!actual) return;
-	if (actual.documentID && actual.documentID !== estado.documentID) return;
+	// Todo en una transacción con la fila del contrato bloqueada: la
+	// verificación de a qué documento apunta y las escrituras van juntas. Si no,
+	// una regeneración que se colara entre las dos le devolvía el ID viejo a la
+	// fila y pisaba los enlaces nuevos.
+	await db.transaction(async (tx) => {
+		const [actual] = await tx
+			.select({ documentID: generatedLegalContracts.weetrustDocumentId })
+			.from(generatedLegalContracts)
+			.where(eq(generatedLegalContracts.id, contractId))
+			.for("update")
+			.limit(1);
+		if (!actual) return;
+		// La fila ya apunta a otro documento: esta foto es vieja. Los contratos
+		// viejos no tienen ID guardado.
+		if (actual.documentID && actual.documentID !== estado.documentID) return;
 
-	for (const firmante of estado.signatories) {
-		await db
-			.update(contractSignatories)
+		for (const firmante of estado.signatories) {
+			await tx
+				.update(contractSignatories)
+				.set({
+					status: firmante.isSigned ? "signed" : "pending",
+					// Un link regenerado reemplaza al anterior; uno vacío no borra el
+					// que ya teníamos, que puede seguir sirviendo.
+					...(firmante.signingUrl ? { signingUrl: firmante.signingUrl } : {}),
+					...(firmante.signatoryID
+						? { weetrustSignatoryId: firmante.signatoryID }
+						: {}),
+					...(firmante.expiry
+						? { signingUrlExpiry: new Date(firmante.expiry) }
+						: {}),
+					// La primera vez que se vio firmado. Cada consulta posterior lo
+					// correría hacia adelante y dejaría de decir cuándo firmó.
+					signedAt: firmante.isSigned
+						? sql`coalesce(${contractSignatories.signedAt}, ${ahora})`
+						: null,
+					updatedAt: ahora,
+				})
+				.where(
+					and(
+						eq(contractSignatories.contractId, contractId),
+						// WeeTrust puede devolver el correo en minúsculas.
+						sql`lower(${contractSignatories.email}) = lower(${firmante.emailID})`,
+					),
+				);
+		}
+
+		await tx
+			.update(generatedLegalContracts)
 			.set({
-				status: firmante.isSigned ? "signed" : "pending",
-				// Un link regenerado reemplaza al anterior; uno vacío no borra el
-				// que ya teníamos, que puede seguir sirviendo.
-				...(firmante.signingUrl ? { signingUrl: firmante.signingUrl } : {}),
-				...(firmante.signatoryID
-					? { weetrustSignatoryId: firmante.signatoryID }
-					: {}),
-				...(firmante.expiry
-					? { signingUrlExpiry: new Date(firmante.expiry) }
-					: {}),
-				// La primera vez que se vio firmado. Cada consulta posterior lo
-				// correría hacia adelante y dejaría de decir cuándo firmó.
-				signedAt: firmante.isSigned
-					? sql`coalesce(${contractSignatories.signedAt}, ${ahora})`
-					: null,
+				weetrustDocumentId: estado.documentID,
+				signingStatusCheckedAt: ahora,
 				updatedAt: ahora,
 			})
-			.where(
-				and(
-					eq(contractSignatories.contractId, contractId),
-					// WeeTrust puede devolver el correo en minúsculas.
-					sql`lower(${contractSignatories.email}) = lower(${firmante.emailID})`,
-				),
-			);
-	}
+			.where(eq(generatedLegalContracts.id, contractId));
 
-	await db
-		.update(generatedLegalContracts)
-		.set({
-			weetrustDocumentId: estado.documentID,
-			signingStatusCheckedAt: ahora,
-			updatedAt: ahora,
-		})
-		.where(eq(generatedLegalContracts.id, contractId));
-
-	// Sólo se avanza de "pendiente" a "firmado". Un anulado se queda anulado
-	// aunque su documento viejo termine de firmarse (un webhook atrasado, o uno
-	// que no se pudo borrar): si no, reaparece entre los activos y sus enlaces
-	// se vuelven a mandar.
-	if (estado.status === "COMPLETED") {
-		await db
-			.update(generatedLegalContracts)
-			.set({ status: "signed", updatedAt: ahora })
-			.where(
-				and(
-					eq(generatedLegalContracts.id, contractId),
-					eq(generatedLegalContracts.status, "pending"),
-				),
-			);
-	}
+		// Sólo se avanza de "pendiente" a "firmado". Un anulado se queda anulado
+		// aunque su documento viejo termine de firmarse (un webhook atrasado, o uno
+		// que no se pudo borrar): si no, reaparece entre los activos y sus enlaces
+		// se vuelven a mandar.
+		if (estado.status === "COMPLETED") {
+			await tx
+				.update(generatedLegalContracts)
+				.set({ status: "signed", updatedAt: ahora })
+				.where(
+					and(
+						eq(generatedLegalContracts.id, contractId),
+						eq(generatedLegalContracts.status, "pending"),
+					),
+				);
+		}
+	});
 }
 
 /**

@@ -18,7 +18,7 @@ import { documensoService } from './DocumensoService';
 import { WeeTrustService } from './WeeTrustService';
 import { getSignatureMode, SignatureLayoutError } from './signaturePatterns';
 import { crmApiService } from './CrmApiService';
-import { uploadPdfToR2 } from './R2Service';
+import { uploadPdfToR2, urlFirmadaDePdf } from './R2Service';
 
 /** Texto legible de un error desconocido, para reportarlo al CRM. */
 function errorMessage(error: unknown): string {
@@ -1061,6 +1061,16 @@ export class ContractGeneratorService {
         // });
       }
 
+      // En papel no hay documento en WeeTrust: el link del documento es el PDF.
+      // Quien sólo lee `linkDocument` (legal-documents) no tenía cómo abrirlo.
+      let linkDelPdfEnPapel: string | undefined;
+      if (signatureMode === 'fisica' && r2KeyDirect) {
+        linkDelPdfEnPapel = await urlFirmadaDePdf(r2KeyDirect).catch((error) => {
+          console.warn('⚠ No se pudo firmar la URL del PDF en papel:', error);
+          return undefined;
+        });
+      }
+
       return {
         templateId: Math.floor(Math.random() * 100000), // ID de template simulado
         // Se pidió firma y no hubo links: el contrato no sirve, aunque el PDF exista.
@@ -1069,7 +1079,7 @@ export class ContractGeneratorService {
         data: submissionData,
         signing_links: signingLinks,
         signatureMode,
-        linkDocument: signing?.linkDocument || '',
+        linkDocument: signing?.linkDocument || linkDelPdfEnPapel || '',
         signingProvider,
         r2Key: r2KeyDirect || signing?.r2Key,
         // Identificadores de WeeTrust: sin ellos no se puede consultar el estado

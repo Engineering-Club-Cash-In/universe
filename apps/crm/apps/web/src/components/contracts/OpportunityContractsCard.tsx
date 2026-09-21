@@ -152,8 +152,18 @@ function ContratoFila({
 	const firmaEnPapel = contract.signatureMode
 		? contract.signatureMode === "fisica"
 		: esFirmaFisica(contract.contractType);
+	// Uno en papel no está "pendiente" de nadie en WeeTrust: se imprime y se
+	// firma a mano. Anulado sí se muestra como anulado.
+	const estado =
+		firmaEnPapel && contract.status === "pending"
+			? {
+					label: "Firma en papel",
+					className:
+						"border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-400",
+				}
+			: ESTADO[contract.status];
 	const firmantes = firmaEnPapel ? [] : firmantesEnFicha(signatories, contract);
-	const estado = ESTADO[contract.status];
+
 	const hayVencidos = firmantes.some((f) => f.vencido);
 	const todosFirmaron =
 		firmantes.length > 0 && firmantes.every((f) => f.estado === "signed");

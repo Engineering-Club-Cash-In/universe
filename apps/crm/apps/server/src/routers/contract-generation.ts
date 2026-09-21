@@ -36,7 +36,11 @@ import {
 	aplicarCorreosDePrueba,
 	correosDePruebaFaltantes,
 } from "../lib/contratos-correos-prueba";
-import { REP_LEGAL_EMAIL, REP_LEGAL_NOMBRE } from "../lib/contratos-rep-legal";
+import {
+	CONTRATOS_OBSERVADORES,
+	REP_LEGAL_EMAIL,
+	REP_LEGAL_NOMBRE,
+} from "../lib/contratos-rep-legal";
 import { esContratoVentaMapeado } from "../lib/contratos-venta";
 import { eqDpi } from "../lib/dpi-lookup";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
@@ -62,14 +66,6 @@ const LEGAL_DOCS_API_URL =
 	process.env.LEGAL_DOCS_API_URL ||
 	"https://legal-docs-blueprints.s4.devteamatcci.site";
 
-/**
- * Observadores: reciben copia del flujo de firma en WeeTrust sin firmar.
- * Lista separada por comas.
- */
-const CONTRATOS_OBSERVADORES = (process.env.CONTRATOS_OBSERVADORES || "")
-	.split(",")
-	.map((email) => email.trim())
-	.filter(Boolean);
 
 /**
  * Quiénes firman un contrato, completando lo que manda el front con lo que sólo
@@ -1560,6 +1556,29 @@ export const contractGenerationRouter = {
 				});
 			}
 
+			// Subir un tipo que ya está vigente es reemplazarlo, y eso tiene sus
+			// reglas: sólo en 80% y con motivo. Sin elegir "Reemplazar" se corta
+			// antes de mandar nada, en vez de anular el anterior por la espalda.
+			if (!input.replaceContractId) {
+				const [vigente] = await db
+					.select({ id: generatedLegalContracts.id })
+					.from(generatedLegalContracts)
+					.where(
+						and(
+							eq(generatedLegalContracts.opportunityId, input.opportunityId),
+							eq(generatedLegalContracts.contractType, input.contractType),
+							ne(generatedLegalContracts.status, "cancelled"),
+						),
+					)
+					.limit(1);
+				if (vigente) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Ya hay un contrato de este tipo en la oportunidad. Usá \"Reemplazar\" en ese contrato.",
+					});
+				}
+			}
+
 			// Un anulado ya fue reemplazado: reemplazarlo otra vez dejaría dos
 			// documentos activos para el mismo contrato.
 			if (input.replaceContractId) {
@@ -1670,12 +1689,6 @@ export const contractGenerationRouter = {
 					.where(eq(generatedLegalContracts.id, anulado.contractId));
 			}
 
-			// Cualquier otro vigente del mismo tipo también queda sin efecto.
-			await anularAnterioresDelMismoTipo(
-				input.opportunityId,
-				input.contractType,
-				saved.id,
-			);
 
 			return {
 				success: true,
@@ -1906,8 +1919,21 @@ async function callLegalDocsApi(
 		const flatData = transformToApiFormat(data, contractType);
 
 		// Extraer email del cliente para los links de firma
+		// En modo prueba, el mismo desvío que en la generación nueva: este camino
+		// arma el correo por su cuenta y le llegaba la invitación al cliente real.
 		const clientEmail = data.cliente?.email;
-		const emails = clientEmail ? [clientEmail] : undefined;
+		let emails = clientEmail ? [clientEmail] : undefined;
+		if (emails && isTestModeEnabled()) {
+			const titular = [{ role: "TITULAR", email: emails[0] }];
+			const faltan = correosDePruebaFaltantes(titular);
+			if (faltan.length > 0) {
+				return {
+					success: false,
+					error: `TEST_MESSAGE=true pero falta configurar ${faltan.join(" y ")}: el enlace saldría al correo real del cliente.`,
+				};
+			}
+			emails = aplicarCorreosDePrueba(titular).map((p) => p.email);
+		}
 
 		// Determinar género para concordancia en documentos
 		const gender = resolveLegacyContractGender({

@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, eq, inArray, ne } from "drizzle-orm";
+import { and, count, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -1124,7 +1124,7 @@ export const legalContractsRouter = {
 				}
 
 				// Marcar todos los contratos pending como signed
-				await tx
+				const confirmados = await tx
 					.update(generatedLegalContracts)
 					.set({
 						status: "signed",
@@ -1135,7 +1135,29 @@ export const legalContractsRouter = {
 							eq(generatedLegalContracts.opportunityId, input.opportunityId),
 							eq(generatedLegalContracts.status, "pending"),
 						),
-					);
+					)
+					.returning({ id: generatedLegalContracts.id });
+
+				// Y a cada firmante: si no, la ficha mostraba el contrato firmado con
+				// todas sus personas todavía "pendiente".
+				if (confirmados.length > 0) {
+					await tx
+						.update(contractSignatories)
+						.set({
+							status: "signed",
+							signedAt: sql`coalesce(${contractSignatories.signedAt}, now())`,
+							updatedAt: new Date(),
+						})
+						.where(
+							and(
+								inArray(
+									contractSignatories.contractId,
+									confirmados.map((c) => c.id),
+								),
+								eq(contractSignatories.status, "pending"),
+							),
+						);
+				}
 
 				// Mover oportunidad a 90% (closeOpportunity ya seteó status "won")
 				await tx
@@ -1342,41 +1364,17 @@ export const legalContractsRouter = {
 				throw new ORPCError("BAD_REQUEST", { message: falla });
 			}
 
-			// El documento viejo: si nadie lo firmó se borra en WeeTrust, para que
-			// nadie entre por el link anterior. Si ya lo firmaron no se puede borrar.
-			let borradoAlla = !contract.weetrustDocumentId;
-			if (contract.weetrustDocumentId && contract.status !== "signed") {
-				try {
-					await borrarDocumentoDeWeeTrust(contract.weetrustDocumentId);
-					borradoAlla = true;
-				} catch (error) {
-					console.error(
-						`[refreshContractSigningLinks] no se pudo borrar ${contract.weetrustDocumentId}:`,
-						error,
-					);
-				}
-			}
-
 			const ahora = new Date();
-			const datosDelDocumentoNuevo = {
-				...linksPorRol(resultado.signatories, resultado.signing_links),
-				weetrustDocumentId: resultado.documentID ?? null,
-				observerUrl: resultado.observerUrl ?? null,
-				// Pendiente: los enlaces son nuevos y nadie firmó este documento.
-				status: "pending" as const,
-				lastRegenerationReason: etiquetaDeMotivo(input.motivo),
-				lastRegeneratedAt: ahora,
-				signingStatusCheckedAt: ahora,
-				updatedAt: ahora,
-			};
+			const motivo = etiquetaDeMotivo(input.motivo);
 
-			// Si el documento viejo sigue existiendo en WeeTrust (ya estaba firmado,
-			// o no se pudo borrar), su fila se conserva ANULADA con su ID y sus
-			// firmantes, y el reemitido va en una fila nueva, igual que al
-			// reemplazar. Pisar la fila hacía que el CRM perdiera el único registro
-			// de un documento que sigue vivo.
-			if (!borradoAlla) {
-				const nuevoId = await db.transaction(async (tx) => {
+			// El reemitido va SIEMPRE en una fila nueva, y se guarda antes de tocar
+			// el documento viejo: si el guardado fallara con el viejo ya borrado, el
+			// CRM quedaba apuntando a un documento inexistente y el nuevo sin
+			// registro. Si falla, se borra el nuevo en WeeTrust para que un
+			// reintento no deje dos vivos.
+			let nuevoId: string;
+			try {
+				nuevoId = await db.transaction(async (tx) => {
 					const [nuevo] = await tx
 						.insert(generatedLegalContracts)
 						.values({
@@ -1391,7 +1389,14 @@ export const legalContractsRouter = {
 							signatureMode: contract.signatureMode,
 							generatedBy: context.userId,
 							generatedAt: ahora,
-							...datosDelDocumentoNuevo,
+							...linksPorRol(resultado.signatories, resultado.signing_links),
+							weetrustDocumentId: resultado.documentID ?? null,
+							observerUrl: resultado.observerUrl ?? null,
+							status: "pending",
+							lastRegenerationReason: motivo,
+							lastRegeneratedAt: ahora,
+							signingStatusCheckedAt: ahora,
+							updatedAt: ahora,
 						})
 						.returning({ id: generatedLegalContracts.id });
 
@@ -1399,10 +1404,7 @@ export const legalContractsRouter = {
 						.update(generatedLegalContracts)
 						.set({
 							status: "cancelled",
-							cancellationReason:
-								contract.status === "signed"
-									? `Regenerado: ${etiquetaDeMotivo(input.motivo)}`
-									: `Regenerado: ${etiquetaDeMotivo(input.motivo)} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`,
+							cancellationReason: `Regenerado: ${motivo}`,
 							cancelledAt: ahora,
 							replacedByContractId: nuevo.id,
 							updatedAt: ahora,
@@ -1411,37 +1413,54 @@ export const legalContractsRouter = {
 
 					return nuevo.id;
 				});
-
-				await guardarFirmantesDelContrato(nuevoId, resultado.signatories);
-
-				return {
-					success: true,
-					message:
-						"Documento reemitido con enlaces nuevos; el anterior queda anulado",
-					contractId: nuevoId,
-					documentID: resultado.documentID,
-					enlaces: resultado.signing_links?.length ?? 0,
-				};
+			} catch (error) {
+				if (resultado.documentID) {
+					await borrarDocumentoDeWeeTrust(resultado.documentID).catch((e) =>
+						console.error(
+							`[refreshContractSigningLinks] no se pudo borrar el reemitido ${resultado.documentID}:`,
+							e,
+						),
+					);
+				}
+				throw error;
 			}
 
-			await db
-				.update(generatedLegalContracts)
-				.set(datosDelDocumentoNuevo)
-				.where(eq(generatedLegalContracts.id, input.contractId));
+			await guardarFirmantesDelContrato(nuevoId, resultado.signatories);
 
-			// Los firmantes viejos apuntan al documento anterior, que ya no existe.
-			await db
-				.delete(contractSignatories)
-				.where(eq(contractSignatories.contractId, input.contractId));
-			await guardarFirmantesDelContrato(
-				input.contractId,
-				resultado.signatories,
-			);
+			// Recién ahora el documento viejo. Si nadie lo firmó se borra en
+			// WeeTrust y su fila desaparece: no queda nada que conservar. Si ya lo
+			// firmaron, o no se pudo borrar, la fila se queda anulada con su ID y
+			// sus firmantes: es el único registro de un documento que sigue vivo.
+			let conservado = contract.status === "signed";
+			if (!conservado) {
+				try {
+					if (contract.weetrustDocumentId) {
+						await borrarDocumentoDeWeeTrust(contract.weetrustDocumentId);
+					}
+					await db
+						.delete(generatedLegalContracts)
+						.where(eq(generatedLegalContracts.id, input.contractId));
+				} catch (error) {
+					console.error(
+						`[refreshContractSigningLinks] no se pudo borrar ${contract.weetrustDocumentId}:`,
+						error,
+					);
+					conservado = true;
+					await db
+						.update(generatedLegalContracts)
+						.set({
+							cancellationReason: `Regenerado: ${motivo} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`,
+						})
+						.where(eq(generatedLegalContracts.id, input.contractId));
+				}
+			}
 
 			return {
 				success: true,
-				message: "Documento reemitido con enlaces nuevos",
-				contractId: input.contractId,
+				message: conservado
+					? "Documento reemitido con enlaces nuevos; el anterior queda anulado"
+					: "Documento reemitido con enlaces nuevos",
+				contractId: nuevoId,
 				documentID: resultado.documentID,
 				enlaces: resultado.signing_links?.length ?? 0,
 			};

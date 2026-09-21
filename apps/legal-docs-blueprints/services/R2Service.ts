@@ -1,4 +1,5 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -83,4 +84,22 @@ export async function downloadPdfFromR2(r2Key: string): Promise<Buffer> {
   }
 
   return Buffer.from(await res.Body.transformToByteArray());
+}
+
+/**
+ * URL firmada para abrir un PDF de R2 desde el navegador.
+ *
+ * La usan los contratos que se firman en papel: no tienen documento en WeeTrust,
+ * así que su "link del documento" es el PDF mismo. Sin esto, la app
+ * legal-documents mostraba la declaración como generada y el botón para
+ * abrirla deshabilitado. Vence a los 7 días, el máximo que permite S3.
+ */
+export async function urlFirmadaDePdf(r2Key: string): Promise<string> {
+  const prefijo = `${R2_BUCKET_LEGAL_DOCS}/`;
+  const key = r2Key.startsWith(prefijo) ? r2Key.slice(prefijo.length) : r2Key;
+  return getSignedUrl(
+    getR2Client(),
+    new GetObjectCommand({ Bucket: R2_BUCKET_LEGAL_DOCS, Key: key }),
+    { expiresIn: 7 * 24 * 60 * 60 },
+  );
 }

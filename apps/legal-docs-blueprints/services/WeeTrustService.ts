@@ -1227,7 +1227,9 @@ export class WeeTrustService {
 	 * inmediatamente debajo de cada una, que es donde los templates imprimen el
 	 * nombre y el DPI del firmante cuando los imprimen.
 	 */
-	private static async readSignatureLines(
+	// Pública para que los scripts de auditoría (inventario-firmas.ts) lean las
+	// líneas con el mismo criterio que producción.
+	static async readSignatureLines(
 		pdfBuffer: Buffer,
 		pattern: string,
 	): Promise<

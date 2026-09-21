@@ -1235,8 +1235,13 @@ export class WeeTrustService {
 			.replace(/\\[).]/g, "[).]")
 			.replace(/\s+/g, "\\s*");
 		const reLineaDeFirma = new RegExp(`^${escapado}\\s*_{3,}`, "i");
+		// Hay patrones que son sólo una etiqueta, sin línea (el anexo de
+		// inversiones dice "Firma del Inversionista"). Esos se reconocen por el
+		// texto, como antes: exigirles guiones bajos los dejaba sin ninguna firma.
+		const soloEtiqueta = !pattern.includes("_");
 		const esLineaDeFirma = (texto: string): boolean =>
-			reLineaDeFirma.test(texto.trim());
+			reLineaDeFirma.test(texto.trim()) ||
+			(soloEtiqueta && texto.includes(pattern.trim()));
 
 		const encontradas: Array<{
 			pageNum: number;

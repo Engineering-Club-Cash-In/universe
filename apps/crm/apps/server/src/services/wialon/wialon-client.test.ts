@@ -1166,6 +1166,34 @@ describe("WialonClient", () => {
 		await expect(client.checkHealth()).rejects.toThrow(WialonClientError);
 	});
 
+	test("checkHealth lanza WIALON_INVALID_RESPONSE si core/search_items devuelve respuesta malformada sin items", async () => {
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(
+					JSON.stringify({ eid: "sid-ok", user: { id: 1, nm: "Admin" } }),
+					{ status: 200 },
+				);
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				// Respuesta 200 con JSON malformado ({}) durante degradación upstream
+				return new Response(JSON.stringify({}), { status: 200 });
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+		try {
+			await client.checkHealth();
+			expect.unreachable(
+				"checkHealth debió lanzar error ante respuesta malformada",
+			);
+		} catch (error) {
+			expect(error).toBeInstanceOf(WialonClientError);
+			expect((error as WialonClientError).code).toBe("WIALON_INVALID_RESPONSE");
+		}
+	});
+
 	test("findIgnitionSensorId prioriza prp.monitoring_sensor_id cuando el sensor tiene nombre/tipo genérico", () => {
 		const genericSensors = {
 			"5": { id: 5, n: "Digital 1", t: "custom" },

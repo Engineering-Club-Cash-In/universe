@@ -773,7 +773,7 @@ export class WialonClient {
 		}
 
 		return this.executeWithSession(async (sid) => {
-			await this.requestRaw(
+			const res = (await this.requestRaw(
 				"core/search_items",
 				{
 					spec: {
@@ -788,7 +788,14 @@ export class WialonClient {
 					to: 0,
 				},
 				sid,
-			);
+			)) as { items?: unknown[] };
+
+			if (!res || typeof res !== "object" || !Array.isArray(res.items)) {
+				throw new WialonClientError(
+					"Respuesta inesperada de Wialon durante health check: se esperaba un objeto con 'items' en 'core/search_items'",
+					"WIALON_INVALID_RESPONSE",
+				);
+			}
 
 			return {
 				status: "connected",

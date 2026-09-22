@@ -329,5 +329,52 @@ describe("wialonRouter", () => {
 				setWialonClient(null);
 			}
 		});
+
+		it("getWialonConnectionStatus arroja BAD_GATEWAY si core/search_items responde con JSON malformado", async () => {
+			const mockFetch = async (_: unknown, init?: RequestInit) => {
+				const bodyStr = String(init?.body || "");
+				if (bodyStr.includes("token%2Flogin")) {
+					return new Response(
+						JSON.stringify({
+							eid: "sid-valid-test",
+							user: { id: 1, nm: "Admin IT" },
+						}),
+						{ status: 200 },
+					);
+				}
+				if (bodyStr.includes("core%2Fsearch_items")) {
+					// Respuesta malformada durante degradación upstream (omite items)
+					return new Response(JSON.stringify({}), { status: 200 });
+				}
+				return new Response(JSON.stringify({}), { status: 200 });
+			};
+
+			const testClient = new WialonClient({ token: "tok-test" }, mockFetch);
+			setWialonClient(testClient);
+
+			try {
+				const mockContext = {
+					headers: new Headers(),
+					session: {
+						user: { id: "user-test-3", email: "agent@example.com" },
+					},
+					user: {
+						id: "user-test-3",
+						email: "agent@example.com",
+						role: "cobros_ejecutivo",
+					},
+					userId: "user-test-3",
+					userRole: "cobros_ejecutivo",
+				};
+
+				await expect(
+					call(wialonRouter.getWialonConnectionStatus, undefined, {
+						context: mockContext as unknown as Context,
+					}),
+				).rejects.toThrow(ORPCError);
+			} finally {
+				setWialonClient(null);
+			}
+		});
 	});
 });

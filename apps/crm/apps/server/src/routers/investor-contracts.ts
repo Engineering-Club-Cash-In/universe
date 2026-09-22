@@ -55,6 +55,35 @@ import {
  * `generated_legal_contracts`.
  */
 
+/**
+ * URL firmada del PDF de un contrato, o null si no se puede armar.
+ *
+ * Hay contratos que guardaron en `pdfLink` una URL firmada (la que se muestra,
+ * que vence) en vez de la key: con una URL entera como key, R2 no encuentra
+ * nada. Para esos se recupera la key de la respuesta del generador.
+ */
+async function urlDelPdf(contrato: {
+	pdfLink: string | null;
+	apiResponse: unknown;
+}): Promise<string | null> {
+	const respuesta = contrato.apiResponse as { r2Key?: unknown } | null;
+	const key =
+		contrato.pdfLink && !/^https?:\/\//i.test(contrato.pdfLink)
+			? contrato.pdfLink
+			: typeof respuesta?.r2Key === "string"
+				? respuesta.r2Key
+				: null;
+
+	if (!key) return null;
+
+	try {
+		return await getFileUrlWithBucketInKey(key);
+	} catch (error) {
+		console.error(`[listInvestorContracts] no se pudo firmar ${key}:`, error);
+		return null;
+	}
+}
+
 /** El nombre del inversionista, servible como nombre de archivo en R2. */
 function prefijoDeArchivo(nombre: string): string {
 	const limpio = nombre
@@ -698,10 +727,19 @@ export const investorContractsRouter = {
 				porContrato.set(firmante.contractId, lista);
 			}
 
-			return contratos.map((contrato) => ({
-				...contrato,
-				firmantes: porContrato.get(contrato.id) ?? [],
-			}));
+			return Promise.all(
+				contratos.map(async (contrato) => ({
+					...contrato,
+					firmantes: porContrato.get(contrato.id) ?? [],
+					// El PDF para abrirlo desde la ficha. Lo guardado es la key de R2;
+					// la URL se firma acá y vence en una hora, así que se arma en cada
+					// consulta en vez de quedar pegada a la fila.
+					//
+					// Es el documento tal como se emitió. El firmado, cuando todos
+					// firman, se copia aparte a la papelería del inversionista.
+					pdfUrl: await urlDelPdf(contrato),
+				})),
+			);
 		}),
 
 	/**

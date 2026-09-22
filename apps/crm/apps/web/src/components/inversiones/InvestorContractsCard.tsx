@@ -7,6 +7,7 @@ import {
 	ExternalLink,
 	Eye,
 	FileSignature,
+	FileText,
 	Loader2,
 	Mail,
 	RefreshCw,
@@ -44,6 +45,8 @@ interface ContratoDeInversionista {
 	representativeSigningLink: string | null;
 	additionalSigningLinks: string[] | null;
 	signingStatusCheckedAt?: Date | string | null;
+	/** URL firmada del PDF tal como se emitió. Vence: se pide en cada consulta. */
+	pdfUrl?: string | null;
 	cancellationReason?: string | null;
 	replacedByContractId?: string | null;
 	firmantes?: FirmanteDeContrato[];
@@ -127,6 +130,23 @@ function FilaDeContrato({
 					<Badge variant="outline" className={`${estado.className} text-xs`}>
 						{estado.label}
 					</Badge>
+					{/* El documento en bruto, para leerlo sin entrar a WeeTrust. Es el
+					    que se emitió; el firmado queda en la papelería del
+					    inversionista cuando terminan de firmar. */}
+					{contrato.pdfUrl && (
+						<Button variant="outline" size="sm" asChild className="h-7">
+							<a
+								href={contrato.pdfUrl}
+								target="_blank"
+								rel="noopener noreferrer"
+								className="flex items-center gap-1"
+								title="Abrir el PDF del contrato"
+							>
+								<FileText className="h-3 w-3" />
+								PDF
+							</a>
+						</Button>
+					)}
 					{/* El de observador es el único que se puede pasar sin riesgo:
 					    muestra el documento y cómo va la firma, sin dejar firmar. */}
 					{contrato.observerUrl && !inactivo && (

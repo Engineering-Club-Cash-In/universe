@@ -799,8 +799,13 @@ describe("WialonClient", () => {
 		expect(callCount).toBe(2);
 	});
 
-	test("getUnitsStatus usa propValueMask con CSV para múltiples IDs", async () => {
-		let capturedMask = "";
+	test("getUnitsStatus usa propValueMask con CSV para múltiples IDs con semántica OR", async () => {
+		let capturedSpec: {
+			propName?: string;
+			propValueMask?: string;
+			propType?: string;
+			or_logic?: number;
+		} = {};
 		const mockFetch: WialonFetch = async (_, init) => {
 			const bodyStr = String(init?.body || "");
 			if (bodyStr.includes("svc=token%2Flogin")) {
@@ -812,7 +817,7 @@ describe("WialonClient", () => {
 				const paramsObj = JSON.parse(
 					new URLSearchParams(bodyStr).get("params") || "{}",
 				);
-				capturedMask = paramsObj?.spec?.propValueMask || "";
+				capturedSpec = paramsObj?.spec || {};
 				return new Response(JSON.stringify({ items: [] }), { status: 200 });
 			}
 			if (bodyStr.includes("svc=unit%2Fcalc_last")) {
@@ -823,7 +828,10 @@ describe("WialonClient", () => {
 
 		const client = new WialonClient({ token: "tok-test" }, mockFetch);
 		await client.getUnitsStatus([101, 102, 103]);
-		expect(capturedMask).toBe("101,102,103");
+		expect(capturedSpec.propName).toBe("sys_id,sys_id,sys_id");
+		expect(capturedSpec.propValueMask).toBe("101,102,103");
+		expect(capturedSpec.propType).toBe("property,property,property");
+		expect(capturedSpec.or_logic).toBe(1);
 	});
 
 	test("login valida token inmediatamente antes de cualquier promesa en vuelo", async () => {

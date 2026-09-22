@@ -452,9 +452,11 @@ export class WialonClient {
 							{
 								spec: {
 									itemsType: "avl_unit",
-									propName: "sys_id",
+									propName: chunk.map(() => "sys_id").join(","),
 									propValueMask: chunk.join(","),
+									propType: chunk.map(() => "property").join(","),
 									sortType: "sys_name",
+									or_logic: 1,
 								},
 								force: 1,
 								flags: 4099, // 1 (base: 0x1) | 2 (custom properties / prp: 0x2) | 4096 (sensors: 0x1000)

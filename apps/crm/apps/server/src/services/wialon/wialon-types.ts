@@ -84,7 +84,7 @@ export const searchUnitsInputSchema = z
 				z.literal(8392707),
 				z.literal(8392713),
 			])
-			.default(8392705),
+			.default(8392707),
 	})
 	.refine((data) => data.to >= data.from, {
 		message: "'to' debe ser mayor o igual que 'from'",

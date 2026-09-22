@@ -928,7 +928,7 @@ describe("WialonClient", () => {
 		const validDefault = searchUnitsInputSchema.safeParse({});
 		expect(validDefault.success).toBe(true);
 		if (validDefault.success) {
-			expect(validDefault.data.flags).toBe(8392705);
+			expect(validDefault.data.flags).toBe(8392707);
 		}
 	});
 
@@ -1266,5 +1266,106 @@ describe("WialonClient", () => {
 			const res = getUnitDetailInputSchema.safeParse({ unitId: 10, flags: f });
 			expect(res.success).toBe(true);
 		}
+	});
+
+	test("searchUnits no aplica negative cache si las propiedades (prp) no fueron solicitadas en flags", async () => {
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				return new Response(
+					JSON.stringify({
+						items: [
+							{
+								id: 999,
+								sens: {
+									"1": { id: 1, n: "Alarma", t: "custom" },
+								},
+							},
+						],
+					}),
+					{ status: 200 },
+				);
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+		// Consulta con flags: 4097 (base + sensors, SIN bit 2 de propiedades)
+		await client.searchUnits({ flags: 4097 });
+
+		const cacheEntry = (
+			client as unknown as {
+				ignitionSensorCache: Map<
+					number,
+					{ sensorId: string | null; expiresAt: number }
+				>;
+			}
+		).ignitionSensorCache.get(999);
+
+		// No debe fijar negative cache (null) porque prp no fue consultado
+		expect(cacheEntry).toBeUndefined();
+	});
+
+	test("getUnitsStatus relanza WIALON_INVALID_SESSION si la sesión expira durante consulta de metadatos y reintenta limpiamente", async () => {
+		let searchCalls = 0;
+		let loginCalls = 0;
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				loginCalls++;
+				return new Response(
+					JSON.stringify({ eid: `sid-session-${loginCalls}` }),
+					{ status: 200 },
+				);
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				searchCalls++;
+				if (searchCalls === 1) {
+					// Simula sesión expirada en la primera llamada de metadatos
+					return new Response(JSON.stringify({ error: 1 }), { status: 200 });
+				}
+				// Segunda llamada con SID renovado: devuelve metadatos autoritativos
+				return new Response(
+					JSON.stringify({
+						items: [
+							{
+								id: 701,
+								prp: { monitoring_sensor_id: "5" },
+								sens: {
+									"5": { id: 5, n: "Ignición", t: "custom" },
+								},
+							},
+						],
+					}),
+					{ status: 200 },
+				);
+			}
+			if (bodyStr.includes("svc=unit%2Fcalc_last")) {
+				return new Response(
+					JSON.stringify([
+						{
+							i: 701,
+							sensors: {
+								"5": { value: 1, format: { value: "Encendido" } },
+							},
+						},
+					]),
+					{ status: 200 },
+				);
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+		const status = await client.getUnitsStatus([701]);
+
+		// Debe haberse recuperado de la sesión expirada, reintentado el login y la búsqueda
+		expect(loginCalls).toBe(2);
+		expect(searchCalls).toBe(2);
+		expect(status.length).toBe(1);
+		expect(status[0].isIgnitionOn).toBe(true);
 	});
 });

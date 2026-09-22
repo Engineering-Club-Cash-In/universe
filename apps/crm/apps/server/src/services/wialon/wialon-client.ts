@@ -400,14 +400,19 @@ export class WialonClient {
 			}
 
 			// Pre-cargar caché de sensores de ignición para unidades devueltas
+			const hasPrpFlag = (parsed.flags & 2) !== 0;
 			for (const item of data.items) {
 				if (item.sens || item.prp) {
 					const sensorId = findIgnitionSensorId(item.sens, item.prp);
-					this.setSensorCache(
-						item.id,
-						sensorId,
-						Date.now() + (sensorId ? SESSION_TTL_MS : NEGATIVE_CACHE_TTL_MS),
-					);
+					// Solo guardar negative cache (null) si las propiedades (prp) fueron consultadas,
+					// evitando descartar prematuramente sensores configurados por prp cuando solo se solicitó sens.
+					if (sensorId || hasPrpFlag) {
+						this.setSensorCache(
+							item.id,
+							sensorId,
+							Date.now() + (sensorId ? SESSION_TTL_MS : NEGATIVE_CACHE_TTL_MS),
+						);
+					}
 				}
 			}
 
@@ -485,8 +490,18 @@ export class WialonClient {
 							}
 						}
 					} catch (error) {
-						// Fallback si upstream falla. Advertir en logs y aplicar negative cache temporal
-						// para evitar sobrecargar a Wialon en cada tick si el endpoint está degradado
+						// Si la sesión expiró upstream (error 1 / WIALON_INVALID_SESSION), relanzar
+						// para que executeWithSession renueve el SID y reintente la operación limpia
+						// sin contaminar el caché con entradas negativas (null).
+						if (
+							error instanceof WialonClientError &&
+							error.code === "WIALON_INVALID_SESSION"
+						) {
+							throw error;
+						}
+
+						// Fallback si upstream falla por otros motivos (timeout, 502, error de red).
+						// Advertir en logs y aplicar negative cache temporal para evitar sobrecargar a Wialon en cada tick
 						console.warn("WIALON_SENSOR_METADATA_FETCH_FAILED", {
 							missingIds: chunk,
 							error: error instanceof Error ? error.message : String(error),

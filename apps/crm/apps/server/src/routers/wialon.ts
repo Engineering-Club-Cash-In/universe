@@ -28,6 +28,7 @@ import {
 	WialonClientError,
 	type WialonDiagnostics,
 	wialonDiagnosticsOutputSchema,
+	wialonUnitsCatalogInputSchema,
 	wialonUnitsCatalogOutputSchema,
 } from "../services/wialon/wialon-types";
 
@@ -311,17 +312,20 @@ export const wialonRouter = {
 		}),
 
 	/**
-	 * Catálogo de unidades para el panel de administración. Mismo handler que
-	 * getWialonUnits, pero resguardado con adminProcedure para no depender del
-	 * rol de cobros en la vista de administración.
+	 * Catálogo de unidades para el panel de administración. Resguardado con
+	 * adminProcedure para no depender del rol de cobros en la vista de
+	 * administración. A diferencia de getWialonUnits, fuerza flags:1 (básico)
+	 * porque el catálogo solo serializa id/nm — el flags pesado por defecto de
+	 * searchUnitsInputSchema traería sensores/posición sin uso y dispararía el
+	 * pre-cacheo de sensores en cada búsqueda.
 	 */
 	getWialonUnitsCatalog: adminProcedure
-		.input(searchUnitsInputSchema.optional())
+		.input(wialonUnitsCatalogInputSchema.optional())
 		.output(wialonUnitsCatalogOutputSchema)
 		.handler(async ({ input }) => {
 			try {
 				const client = getWialonClient();
-				const result = await client.searchUnits(input);
+				const result = await client.searchUnits({ ...input, flags: 1 });
 				return {
 					total: result.totalItemsCount,
 					from: result.indexFrom,

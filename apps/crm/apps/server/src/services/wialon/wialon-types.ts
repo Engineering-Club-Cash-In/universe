@@ -113,6 +113,25 @@ export const wialonUnitsCatalogOutputSchema = z.object({
 	),
 });
 
+// Input reducido para getWialonUnitsCatalog: a propósito NO expone `flags`.
+// El endpoint fuerza flags:1 (básico, sin prp/sens/pos) en el servicio, porque
+// el catálogo solo serializa id/nm — pedir el flag pesado por defecto de
+// searchUnitsInputSchema (8392707) transferiría metadata de sensores/posición
+// sin uso y dispararía el pre-cacheo de sensores de ignición en cada búsqueda.
+export const wialonUnitsCatalogInputSchema = z
+	.object({
+		filterName: z.string().trim().optional(),
+		from: z.number().int().min(0).default(0),
+		to: z.number().int().min(0).default(0xffffffff),
+	})
+	.refine((data) => data.to >= data.from, {
+		message: "'to' debe ser mayor o igual que 'from'",
+		path: ["to"],
+	});
+export type WialonUnitsCatalogInput = z.input<
+	typeof wialonUnitsCatalogInputSchema
+>;
+
 // ── Búsqueda de Unidades (core/search_items) ──────────────────────────────────
 export interface WialonSensorMeta {
 	id: number;

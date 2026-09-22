@@ -724,5 +724,57 @@ describe("wialonRouter", () => {
 				setWialonClient(null);
 			}
 		});
+
+		it("fuerza flags:1 (básico) hacia Wialon, ignorando cualquier flags del input", async () => {
+			const searchCalls: Record<string, unknown>[] = [];
+			const mockFetch = async (_: unknown, init?: RequestInit) => {
+				const bodyStr = String(init?.body || "");
+				if (bodyStr.includes("token%2Flogin")) {
+					return new Response(JSON.stringify({ eid: "sid-flags-test" }), {
+						status: 200,
+					});
+				}
+				const params = new URLSearchParams(bodyStr);
+				const parsedParams = JSON.parse(params.get("params") || "{}");
+				searchCalls.push(parsedParams);
+				return new Response(
+					JSON.stringify({
+						totalItemsCount: 0,
+						indexFrom: 0,
+						indexTo: 0,
+						items: [],
+					}),
+					{ status: 200 },
+				);
+			};
+
+			const testClient = new WialonClient({ token: "tok-flags" }, mockFetch);
+			setWialonClient(testClient);
+
+			try {
+				const mockContext = {
+					headers: new Headers(),
+					session: {
+						user: { id: "user-admin-5", email: "admin5@example.com" },
+					},
+					user: {
+						id: "user-admin-5",
+						email: "admin5@example.com",
+						role: "admin",
+					},
+					userId: "user-admin-5",
+					userRole: "admin",
+				};
+
+				await call(wialonRouter.getWialonUnitsCatalog, undefined, {
+					context: mockContext as unknown as Context,
+				});
+
+				expect(searchCalls).toHaveLength(1);
+				expect(searchCalls[0]?.flags).toBe(1);
+			} finally {
+				setWialonClient(null);
+			}
+		});
 	});
 });

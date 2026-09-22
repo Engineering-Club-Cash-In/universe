@@ -228,6 +228,39 @@ describe("familia", () => {
 	});
 });
 
+describe("campos sueltos en la consulta", () => {
+	const registroIxcot: RegistroParaMatch = {
+		...registroBase,
+		leadId: null,
+		dpi: null,
+		nit: null,
+		telefono: null,
+		nombres: "Rosa",
+		apellidos: "Ixcot Tuy",
+	};
+	const direccion = "5a Avenida 3-45, Zona 1 Mixco";
+
+	test("solo apellidos: no se parten en nombre + apellido", () => {
+		const [coincidencia] = evaluarCoincidencias(
+			[titular({ apellidos: "Ixcot Pérez", direccion })],
+			[registroIxcot],
+			reglasPorDefecto,
+		);
+		expect(coincidencia.reglas.map((r) => r.clave)).toEqual([
+			"apellido_y_direccion",
+		]);
+	});
+
+	test("solo nombres: un nombre no se vuelve apellido", () => {
+		const coincidencias = evaluarCoincidencias(
+			[titular({ nombres: "Juan Tuy", direccion })],
+			[registroIxcot],
+			reglasPorDefecto,
+		);
+		expect(coincidencias).toEqual([]);
+	});
+});
+
 describe("contacto y alcance", () => {
 	test("la referencia de la solicitud es el moroso (mismo teléfono)", () => {
 		const [coincidencia] = evaluarCoincidencias(

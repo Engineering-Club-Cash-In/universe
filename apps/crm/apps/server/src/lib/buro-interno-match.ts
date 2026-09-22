@@ -284,18 +284,18 @@ function normalizarPersona(persona: {
 	telefonos?: (string | null | undefined)[];
 	direccion?: string | null;
 }): PersonaNormalizada {
-	const tieneSeparados = Boolean(
-		normalizarNombre(persona.nombres) && normalizarNombre(persona.apellidos),
-	);
-	const { nombres, apellidos } = tieneSeparados
-		? {
-				nombres: normalizarNombre(persona.nombres).split(" "),
-				apellidos: separarApellidos(persona.apellidos),
-			}
-		: partirNombreCompleto(
-				persona.nombreCompleto ??
-					[persona.nombres, persona.apellidos].filter(Boolean).join(" "),
-			);
+	// Un campo etiquetado se respeta aunque venga solo (la consulta manual
+	// permite cargar únicamente apellidos): partirlo lo convertiría en
+	// nombre + apellido. El partido heurístico queda para `nombreCompleto`.
+	const nombresExplicitos = normalizarNombre(persona.nombres);
+	const apellidosExplicitos = separarApellidos(persona.apellidos);
+	const { nombres, apellidos } =
+		nombresExplicitos || apellidosExplicitos.length > 0
+			? {
+					nombres: nombresExplicitos ? nombresExplicitos.split(" ") : [],
+					apellidos: apellidosExplicitos,
+				}
+			: partirNombreCompleto(persona.nombreCompleto ?? "");
 
 	const palabras = [...nombres, ...apellidos]
 		.join(" ")

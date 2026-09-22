@@ -99,36 +99,17 @@ export async function sendContractLinksToLead(params: {
 }
 
 /**
- * Topes del envío. Existen porque el candado dura lo que dure esta función y
+ * Topes del envío. Existen porque el candado dura lo que dura esta función y
  * Neon corta las transacciones inactivas a los 300s: si el envío se pasara de
  * ahí, el candado se soltaría solo mientras los mensajes siguen saliendo, y una
  * regeneración podría borrar en WeeTrust los documentos de esos enlaces.
  *
- * El cliente de SimpleTech no acepta timeout, así que el tope por mensaje no
- * corta la llamada: deja de esperarla. El mensaje puede llegar igual, y eso es
- * lo que dice el motivo que queda anotado.
+ * El tope por mensaje se le pasa al cliente de SimpleTech, que aborta la
+ * petición: se espera el resultado, no se deja de esperarlo. Soltar el candado
+ * con una petición todavía en vuelo es justo lo que no puede pasar.
  */
 const LIMITE_POR_MENSAJE_MS = 30_000;
 const LIMITE_DEL_ENVIO_MS = 120_000;
-
-/** Lo que devuelva `alVencer` si la tarea no contestó a tiempo. */
-async function conLimite<T>(
-	tarea: Promise<T>,
-	ms: number,
-	alVencer: () => T,
-): Promise<T> {
-	let temporizador: ReturnType<typeof setTimeout> | undefined;
-	try {
-		return await Promise.race([
-			tarea,
-			new Promise<T>((resolve) => {
-				temporizador = setTimeout(() => resolve(alVencer()), ms);
-			}),
-		]);
-	} finally {
-		if (temporizador) clearTimeout(temporizador);
-	}
-}
 
 async function enviarEnlacesDeFirma(params: {
 	leadId: string;
@@ -447,22 +428,15 @@ async function enviarEnlacesDeFirma(params: {
 					.set({ reason: motivo, updatedAt: new Date() })
 					.where(eq(whatsappLogRecipients.id, filas[i].id));
 			} else {
-				const resultado = await conLimite(
-					sendWhatsappTemplate({
-						phone: plan.telefonoDestino,
-						message: plan.mensaje,
-						logPrefix: modoPrueba
-							? "[SimpleTech][contratos][TEST]"
-							: "[SimpleTech][contratos]",
-						ocultarEnlacesEnLog: true,
-					}),
-					LIMITE_POR_MENSAJE_MS,
-					() => ({
-						success: false as const,
-						error:
-							"SimpleTech no respondió en 30s: puede que el mensaje haya llegado igual, revisá antes de reenviar",
-					}),
-				);
+				const resultado = await sendWhatsappTemplate({
+					phone: plan.telefonoDestino,
+					message: plan.mensaje,
+					logPrefix: modoPrueba
+						? "[SimpleTech][contratos][TEST]"
+						: "[SimpleTech][contratos]",
+					ocultarEnlacesEnLog: true,
+					timeoutMs: LIMITE_POR_MENSAJE_MS,
+				});
 
 				const enviado = resultado.success;
 				if (enviado) {
@@ -473,7 +447,11 @@ async function enviarEnlacesDeFirma(params: {
 						? `TEST_MESSAGE: enviado a ${plan.telefonoDestino} en lugar de ${plan.destinatario.phone ?? "sin teléfono"}`
 						: undefined;
 				} else {
-					motivo = resultado.error ?? "Error enviando el mensaje";
+					// La petición se aborta desde acá: SimpleTech pudo haberla recibido
+					// igual, así que el motivo lo dice en vez de invitar a reenviar.
+					motivo = resultado.error?.startsWith("Timeout:")
+						? `${resultado.error} (se canceló desde el CRM; puede haber llegado igual, revisá antes de reenviar)`
+						: (resultado.error ?? "Error enviando el mensaje");
 				}
 
 				await db

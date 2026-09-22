@@ -498,9 +498,12 @@ export async function getLeadLegalContracts(c: Context) {
 			.where(
 				and(
 					eq(generatedLegalContracts.leadId, lead.id),
-					// Un contrato reemplazado (o reclamado por un reemplazo que no
-					// terminó) no es el vigente: si se muestra, el cliente puede
-					// firmar el documento descartado.
+					// Un contrato anulado, o reclamado por un reemplazo que todavía no
+					// terminó de anularlo, no es el vigente: si se muestra, el cliente
+					// puede firmar un documento descartado. Anulado incluye los que se
+					// eliminaron desde jurídico: si su borrado en WeeTrust falló, la
+					// fila conserva enlaces que todavía firman.
+					ne(generatedLegalContracts.status, "cancelled"),
 					isNull(generatedLegalContracts.replacedByContractId),
 				),
 			)

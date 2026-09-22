@@ -199,6 +199,60 @@ export function incrementoDiarioMora(params: {
 }
 
 /**
+ * El TECHO de ese crecimiento: lo MÁXIMO que la mora de este crédito puede
+ * subir en un mes, contado desde hoy.
+ *
+ * Por qué existe: `incrementoDiarioMora` sola promete un ritmo que no dura
+ * para siempre — "aumenta Q16.80 por cada día que pase" es cierto hoy, pero
+ * cada cuota deja de crecer al llegar a su techo de un cargo mensual. Medido
+ * sobre la cartera, el ritmo se sostiene 7 días en el 96 % de los créditos y
+ * en el resto BAJA (nunca sube), así que el mensaje solo puede pasarse. Decir
+ * el techo junto al ritmo —el mismo estándar de la plantilla del día de pago,
+ * "Q… por cada día de atraso, hasta un máximo de Q… al mes"— lo resuelve de
+ * raíz: ya no se promete un crecimiento infinito.
+ *
+ * Por qué se puede calcular EXACTO: toda cuota vencida que aún no llegó a su
+ * tope lo alcanza dentro de los próximos 30 días (le faltan como mucho 30).
+ * Entonces lo que le falta a la mora de hoy para llegar a su techo ES,
+ * exactamente, lo máximo que puede crecer en un mes:
+ *
+ *     máximo mensual = cargoMensual × cuotas_vencidas − mora de hoy
+ *
+ * Las cuotas que ya están topadas entran en los dos lados y se cancelan solas
+ * (aportan un cargo completo al techo y el mismo cargo a la mora de hoy), así
+ * que un crédito viejo con todo topado devuelve 0 — igual que su incremento
+ * diario. Las dos cifras cuentan siempre la misma historia.
+ *
+ * NO puede dar negativo: cada cuota aporta al techo un cargo mensual completo
+ * y a la mora de hoy `cargoMensual × min(1, días/30)`, que nunca lo supera —
+ * por eso no hay clamp a 0 que sería código muerto (ver el test que fija la
+ * invariante).
+ *
+ * Devuelve un Big SIN redondear, igual que sus hermanas: el .toFixed(2) lo
+ * hace el caller.
+ */
+export function incrementoMaximoMensualMora(params: {
+  capital: Big | string | number;
+  diasAtrasadosPorCuota: number[];
+}): Big {
+  const capital = new Big(params.capital || 0);
+  // Mismos guards que calcularMoraProporcional: sin capital (o con capital
+  // negativo) y sin cuotas vencidas no hay nada que pueda crecer.
+  if (capital.lte(0) || params.diasAtrasadosPorCuota.length === 0) {
+    return new Big(0);
+  }
+
+  const techoTotal = capital
+    .times(TASA_MORA_MENSUAL)
+    .times(params.diasAtrasadosPorCuota.length);
+
+  // La mora de hoy se pide al MISMO cálculo que la escribe el cron: si la
+  // fórmula cambia (tasa, base de días, techo por cuota), este máximo la sigue
+  // sin tocar una línea.
+  return techoTotal.minus(calcularMoraProporcional(params));
+}
+
+/**
  * Decisión pura de qué hacer con la mora al ROMPER un convenio de pago
  * (paymentAgreement.updateConvenioStatus con status=false).
  *

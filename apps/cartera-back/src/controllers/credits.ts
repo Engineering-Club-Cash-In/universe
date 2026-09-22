@@ -51,6 +51,7 @@ import {
   diasAtrasoMora,
   hoyGuatemala,
   incrementoDiarioMora,
+  incrementoMaximoMensualMora,
   isOverdueInstallmentForMora,
 } from "./latefee";
 import {
@@ -340,6 +341,17 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       diasAtrasadosPorCuota: diasAtrasoDeCuotasEnMora,
     }).toFixed(2);
 
+    // El TECHO de ese incremento: lo máximo que la mora puede subir en un mes.
+    // Va junto al diario porque el mensaje al cliente dice las dos cifras
+    // ("aumenta Q X por cada día de atraso, hasta un máximo de Q Y al mes"):
+    // el ritmo solo, sin su tope, promete un crecimiento que no dura para
+    // siempre. Sale de las MISMAS cuotas ya consultadas arriba — no hay query
+    // extra — justamente para que las dos cifras no puedan contradecirse.
+    const incrementoMaximoMensualMoraStr = incrementoMaximoMensualMora({
+      capital: currentCredit.creditos.capital ?? 0,
+      diasAtrasadosPorCuota: diasAtrasoDeCuotasEnMora,
+    }).toFixed(2);
+
     const cuotasPendientes = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
@@ -498,6 +510,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         cuotasPagadas,
         moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
         incrementoDiarioMora: incrementoDiarioMoraStr,
+        incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
         mora: moraActual.length > 0 ? moraActual[0] : null,
         convenioActivo: null,
         cuotasEnConvenio: [],
@@ -629,6 +642,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       cuotasPagadas,
       moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
       incrementoDiarioMora: incrementoDiarioMoraStr,
+      incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
       mora: moraActual.length > 0 ? moraActual[0] : null,
       convenioActivo:
         convenioActivo.length > 0

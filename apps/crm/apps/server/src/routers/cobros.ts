@@ -57,9 +57,9 @@ import {
 	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
+	formatearIncrementoMora,
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
-	formatearIncrementoDiarioMora,
 	prepararExpectativaMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
@@ -2323,8 +2323,14 @@ export const cobrosRouter = {
 					// expectativaMoraDiaria (esa es una sola cuota): lo calcula
 					// cartera-back, que es el único que conoce los días de cada cuota.
 					// "" cuando ya no crece (todas topadas) o el estado está excluido.
-					incrementoDiarioMora: formatearIncrementoDiarioMora(
+					incrementoDiarioMora: formatearIncrementoMora(
 						creditoCompleto.incrementoDiarioMora,
+					),
+					// Y su techo: lo máximo que esa mora puede subir en un mes. El
+					// ritmo sin tope promete un crecimiento infinito; las dos
+					// cifras juntas son el estándar de la plantilla del día de pago.
+					incrementoMaximoMensualMora: formatearIncrementoMora(
+						creditoCompleto.incrementoMaximoMensualMora,
 					),
 					// {montoAdeudado} de las plantillas de mora (1 cuota, 2-3 cuotas,
 					// jurídico): saldo real de cada cuota vencida — recibo menos lo ya
@@ -3696,17 +3702,19 @@ export const cobrosRouter = {
 					montoAdeudado: string;
 					cuotasAtraso: number;
 					incrementoDiarioMora: string;
+					incrementoMaximoMensualMora: string;
 				} | null
 			>();
-			// Las dos variables salen del MISMO detalle de cartera-back, así que la
-			// carga se dispara con cualquiera de las dos. {incrementoDiarioMora} se
-			// ofrece como variable insertable por su cuenta en el modal del masivo:
-			// si el gate mirara solo {montoAdeudado}, una plantilla editada que use
-			// únicamente el incremento se quedaría sin detalle y la cláusula
-			// desaparecería en silencio.
+			// Las tres variables salen del MISMO detalle de cartera-back, así que
+			// la carga se dispara con cualquiera de ellas. El incremento diario y
+			// su techo se ofrecen como variables insertables por su cuenta en el
+			// modal del masivo: si el gate mirara solo {montoAdeudado}, una
+			// plantilla editada que use únicamente una de ellas se quedaría sin
+			// detalle y la cláusula desaparecería en silencio.
 			if (
 				cuerpoBase.includes("{montoAdeudado}") ||
-				cuerpoBase.includes("{incrementoDiarioMora}")
+				cuerpoBase.includes("{incrementoDiarioMora}") ||
+				cuerpoBase.includes("{incrementoMaximoMensualMora}")
 			) {
 				const sifcosElegibles = creditosFiltrados
 					.filter(
@@ -3737,8 +3745,11 @@ export const cobrosRouter = {
 										cuotasAtraso: contarCuotasAtrasadasUnicas(cuotasDetalle),
 										// Del MISMO detalle que el monto: lo que ese saldo
 										// crece por día (ver {incrementoDiarioMora}).
-										incrementoDiarioMora: formatearIncrementoDiarioMora(
+										incrementoDiarioMora: formatearIncrementoMora(
 											detalle.incrementoDiarioMora,
+										),
+										incrementoMaximoMensualMora: formatearIncrementoMora(
+											detalle.incrementoMaximoMensualMora,
 										),
 									});
 								} catch (err) {
@@ -3880,6 +3891,10 @@ export const cobrosRouter = {
 					// envío como con montoAdeudado: 0 es un valor legítimo (crédito
 					// con todas sus cuotas ya en el techo de 30 días).
 					incrementoDiarioMora: detalleCartera?.incrementoDiarioMora ?? "",
+					// Su techo, del mismo detalle. Vacío = la frase se queda solo
+					// con el ritmo (no se descarta el envío, igual que arriba).
+					incrementoMaximoMensualMora:
+						detalleCartera?.incrementoMaximoMensualMora ?? "",
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad de cada crédito (Universales o G&T).
 					...seguroPorAseguradora(info?.insuranceProvider),

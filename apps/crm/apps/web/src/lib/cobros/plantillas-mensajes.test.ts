@@ -8,9 +8,10 @@ import {
 	crearUrlWhatsappManual,
 	cuerpoParaValidarNoReply,
 	FRAGMENTO_EXPECTATIVA_MORA,
+	FRAGMENTO_TOPE_INCREMENTO_MORA,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
-	hayIncrementoDiarioMora,
+	hayIncrementoMora,
 	interpolar,
 	mensajeAnunciaExpectativaMora,
 	mensajeAnunciaMontoAdeudado,
@@ -565,7 +566,7 @@ describe("plantillas web de cobros", () => {
 				montoAdeudado: "450.00",
 				cuotasAtraso: 1,
 			}),
-		// Sin incrementoDiarioMora, la oración del aumento no se imprime.
+			// Sin incrementoDiarioMora, la oración del aumento no se imprime.
 		).toContain(
 			"Tienes *1 cuota con atraso por un monto de Q450.00* al día de hoy.",
 		);
@@ -640,13 +641,15 @@ describe("incrementoDiarioMora en las plantillas de mora (front)", () => {
 		expectativaMora: "",
 	};
 
-	test("las tres plantillas de mora lo traen en WhatsApp y en email", () => {
+	test("las tres plantillas traen el ritmo Y su techo, en WhatsApp y en email", () => {
 		for (const id of ["mora_30", "mora_60", "aviso_juridico"]) {
 			const plantilla = porId(id);
-			expect(plantilla?.cuerpo).toContain(CLAUSULA_INCREMENTO_DIARIO_MORA);
-			expect(plantilla?.cuerpoWhastapp).toContain(
-				CLAUSULA_INCREMENTO_DIARIO_MORA,
-			);
+			for (const cuerpo of [plantilla?.cuerpo, plantilla?.cuerpoWhastapp]) {
+				expect(cuerpo).toContain(CLAUSULA_INCREMENTO_DIARIO_MORA);
+				expect(cuerpo).toContain(FRAGMENTO_TOPE_INCREMENTO_MORA);
+				// El ritmo sin techo prometía un crecimiento infinito.
+				expect(cuerpo).not.toContain("por cada día que pase");
+			}
 		}
 	});
 
@@ -657,9 +660,10 @@ describe("incrementoDiarioMora en las plantillas de mora (front)", () => {
 				montoAdeudado: "450.00",
 				cuotasAtraso: 1,
 				incrementoDiarioMora: "3.73",
+				incrementoMaximoMensualMora: "93.33",
 			}),
 		).toContain(
-			"Tienes *1 cuota con atraso por un monto de Q450.00* al día de hoy, y aumenta Q3.73 por cada día que pase.",
+			"Tienes *1 cuota con atraso por un monto de Q450.00* al día de hoy, y aumenta Q3.73 por cada día de atraso, hasta un máximo de Q93.33 al mes.",
 		);
 	});
 
@@ -670,9 +674,10 @@ describe("incrementoDiarioMora en las plantillas de mora (front)", () => {
 				montoAdeudado: "2,100.00",
 				cuotasAtraso: 2,
 				incrementoDiarioMora: "7.47",
+				incrementoMaximoMensualMora: "186.67",
 			}),
 		).toContain(
-			"tienes *2 cuotas en atraso, por un monto total de Q2,100.00* al día de hoy, y aumenta Q7.47 por cada día que pase.",
+			"tienes *2 cuotas en atraso, por un monto total de Q2,100.00* al día de hoy, y aumenta Q7.47 por cada día de atraso, hasta un máximo de Q186.67 al mes.",
 		);
 	});
 
@@ -683,9 +688,10 @@ describe("incrementoDiarioMora en las plantillas de mora (front)", () => {
 				montoAdeudado: "20,150.00",
 				cuotasAtraso: 5,
 				incrementoDiarioMora: "11.20",
+				incrementoMaximoMensualMora: "1,120.00",
 			}),
 		).toContain(
-			"por un monto de 20,150.00 incluyendo moras al día de hoy, y aumenta Q11.20 por cada día que pase.",
+			"por un monto de 20,150.00 incluyendo moras al día de hoy, y aumenta Q11.20 por cada día de atraso, hasta un máximo de Q1,120.00 al mes.",
 		);
 	});
 
@@ -695,13 +701,31 @@ describe("incrementoDiarioMora en las plantillas de mora (front)", () => {
 			montoAdeudado: "450.00",
 			cuotasAtraso: 1,
 			incrementoDiarioMora: "0.00",
+			incrementoMaximoMensualMora: "0.00",
 		});
 		expect(mensaje).toContain(
 			"Tienes *1 cuota con atraso por un monto de Q450.00* al día de hoy.",
 		);
 		expect(mensaje).not.toContain("aumenta");
+		expect(mensaje).not.toContain("máximo");
 		expect(mensaje).not.toContain("Q0.00");
 		expect(mensaje).not.toContain("{incrementoDiarioMora}");
+		expect(mensaje).not.toContain("{incrementoMaximoMensualMora}");
+	});
+
+	test("con ritmo pero sin techo: la frase se corta, no se rompe", () => {
+		const mensaje = interpolar(porId("mora_30")?.cuerpoWhastapp ?? "", {
+			...base,
+			montoAdeudado: "450.00",
+			cuotasAtraso: 1,
+			incrementoDiarioMora: "3.73",
+		});
+		expect(mensaje).toContain(
+			"Tienes *1 cuota con atraso por un monto de Q450.00* al día de hoy, y aumenta Q3.73 por cada día de atraso.",
+		);
+		expect(mensaje).not.toContain("máximo");
+		expect(mensaje).not.toContain("Q al mes");
+		expect(mensaje).not.toContain("{incrementoMaximoMensualMora}");
 	});
 
 	test("el email (cuerpo) se comporta igual que el de WhatsApp", () => {
@@ -710,20 +734,23 @@ describe("incrementoDiarioMora en las plantillas de mora (front)", () => {
 			montoAdeudado: "2,100.00",
 			cuotasAtraso: 2,
 			incrementoDiarioMora: "7.47",
+			incrementoMaximoMensualMora: "186.67",
 		});
 		expect(conAumento).toContain(
-			"por un monto total de Q2,100.00 al día de hoy, y aumenta Q7.47 por cada día que pase.",
+			"por un monto total de Q2,100.00 al día de hoy, y aumenta Q7.47 por cada día de atraso, hasta un máximo de Q186.67 al mes.",
 		);
 		const sinAumento = interpolar(porId("mora_60")?.cuerpo ?? "", {
 			...base,
 			montoAdeudado: "2,100.00",
 			cuotasAtraso: 2,
 			incrementoDiarioMora: "0.00",
+			incrementoMaximoMensualMora: "0.00",
 		});
 		expect(sinAumento).toContain(
 			"por un monto total de Q2,100.00 al día de hoy.",
 		);
 		expect(sinAumento).not.toContain("aumenta");
+		expect(sinAumento).not.toContain("máximo");
 	});
 
 	test("sin el dato (cartera viejo) no queda ni la variable ni un 'Q.' roto", () => {
@@ -744,6 +771,7 @@ describe("incrementoDiarioMora en las plantillas de mora (front)", () => {
 			montoAdeudado: "450.00",
 			cuotasAtraso: 1,
 			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "93.33",
 		});
 		expect(mensajeAnunciaMontoAdeudado(mensaje)).toBe(true);
 		const juridico = interpolar(porId("aviso_juridico")?.cuerpoWhastapp ?? "", {
@@ -751,30 +779,42 @@ describe("incrementoDiarioMora en las plantillas de mora (front)", () => {
 			montoAdeudado: "20,150.00",
 			cuotasAtraso: 5,
 			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "93.33",
 		});
 		expect(mensajeAnunciaMontoAdeudado(juridico)).toBe(true);
 	});
 
-	test("hayIncrementoDiarioMora: 0, vacío y nulo no anuncian nada", () => {
-		expect(hayIncrementoDiarioMora("3.73")).toBe(true);
-		expect(hayIncrementoDiarioMora("1,120.00")).toBe(true);
-		expect(hayIncrementoDiarioMora("0.00")).toBe(false);
-		expect(hayIncrementoDiarioMora("")).toBe(false);
-		expect(hayIncrementoDiarioMora(null)).toBe(false);
-		expect(hayIncrementoDiarioMora(undefined)).toBe(false);
+	test("el mismo predicado decide si hay techo que anunciar", () => {
+		expect(hayIncrementoMora("93.33")).toBe(true);
+		expect(hayIncrementoMora("0.00")).toBe(false);
+	});
+
+	test("hayIncrementoMora: 0, vacío y nulo no anuncian nada", () => {
+		expect(hayIncrementoMora("3.73")).toBe(true);
+		expect(hayIncrementoMora("1,120.00")).toBe(true);
+		expect(hayIncrementoMora("0.00")).toBe(false);
+		expect(hayIncrementoMora("")).toBe(false);
+		expect(hayIncrementoMora(null)).toBe(false);
+		expect(hayIncrementoMora(undefined)).toBe(false);
 	});
 
 	test("no cambia el conteo de bloques de la plantilla aprobada", () => {
 		for (const id of ["mora_30", "mora_60", "aviso_juridico"]) {
 			const cuerpo = porId(id)?.cuerpoWhastapp ?? "";
 			const bloques = cuerpo.split("\n\n").length;
-			for (const inc of ["3.73", "0.00"]) {
+			// Con las dos cifras, sin ninguna, y con el ritmo pero sin su techo.
+			for (const [inc, max] of [
+				["3.73", "93.33"],
+				["0.00", "0.00"],
+				["3.73", ""],
+			]) {
 				expect(
 					interpolar(cuerpo, {
 						...base,
 						montoAdeudado: "100.00",
 						cuotasAtraso: 1,
 						incrementoDiarioMora: inc,
+						incrementoMaximoMensualMora: max,
 					}).split("\n\n").length,
 				).toBe(bloques);
 			}

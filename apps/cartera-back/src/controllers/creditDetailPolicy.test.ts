@@ -666,3 +666,55 @@ describe("reset credit atomic closing payment wiring", () => {
 		);
 	});
 });
+
+describe("el detalle expone el ritmo de la mora Y su techo, en los DOS returns", () => {
+	// El CRM le dice al cliente "aumenta Q X por cada día de atraso, hasta un
+	// máximo de Q Y al mes". Las dos cifras salen de getCreditoByNumero, que
+	// tiene DOS returns (con cuota actual y sin ella): si una rama se queda sin
+	// el techo, la frase pierde el tope justo en los créditos más atrasados y
+	// vuelve a prometer un crecimiento infinito. Es un test de contrato sobre el
+	// fuente porque esa función depende de la base.
+	const leerFuente = () =>
+		Bun.file(resolve(import.meta.dir, "credits.ts")).text();
+
+	it("la rama sin cuota actual devuelve las dos", async () => {
+		const branch = (await leerFuente()).match(
+			/if \(!cuotaActualDataResult[\s\S]*?(?=\n\s*const cuotaActualData)/,
+		)?.[0];
+
+		expect(branch).toContain(
+			"incrementoDiarioMora: incrementoDiarioMoraStr,",
+		);
+		expect(branch).toContain(
+			"incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,",
+		);
+	});
+
+	it("el return normal devuelve las dos", async () => {
+		const source = await leerFuente();
+		const ramaSinCuota =
+			source.match(
+				/if \(!cuotaActualDataResult[\s\S]*?(?=\n\s*const cuotaActualData)/,
+			)?.[0] ?? "";
+		const resto = source.slice(
+			source.indexOf(ramaSinCuota) + ramaSinCuota.length,
+		);
+
+		expect(resto).toContain("incrementoDiarioMora: incrementoDiarioMoraStr,");
+		expect(resto).toContain(
+			"incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,",
+		);
+	});
+
+	it("las dos cifras salen de las MISMAS cuotas, sin una query extra", async () => {
+		const source = await leerFuente();
+
+		// Un solo cálculo de días de atraso alimenta a las dos.
+		expect(
+			source.match(/diasAtrasadosPorCuota: diasAtrasoDeCuotasEnMora,/g),
+		).toHaveLength(2);
+		expect(
+			source.match(/const diasAtrasoDeCuotasEnMora =/g),
+		).toHaveLength(1);
+	});
+});

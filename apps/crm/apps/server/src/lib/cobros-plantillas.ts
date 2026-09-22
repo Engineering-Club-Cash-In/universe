@@ -63,6 +63,18 @@ export interface VariablesPlantilla {
 	 * dejar residuo.
 	 */
 	incrementoDiarioMora?: string;
+	/**
+	 * El TECHO de ese aumento: lo máximo que la mora de este crédito puede
+	 * subir en un mes. Va SIEMPRE junto a `incrementoDiarioMora`, porque el
+	 * ritmo solo ("aumenta Q16.80 por cada día") promete un crecimiento que no
+	 * dura para siempre: cada cuota deja de crecer al llegar a su cargo
+	 * mensual. Decir las dos cifras es el mismo estándar que ya usa la
+	 * plantilla del día de pago ({expectativaMoraDiaria} + {expectativaMora}).
+	 * Lo calcula cartera-back (`incrementoMaximoMensualMora` en latefee.ts) a
+	 * partir de las MISMAS cuotas que el diario, así que las dos no pueden
+	 * contradecirse.
+	 */
+	incrementoMaximoMensualMora?: string;
 	/** Año del impuesto de circulación. Default: año actual en Guatemala. */
 	anioImpuesto?: string;
 	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
@@ -473,39 +485,49 @@ export function calcularExpectativaMoraDiaria(
 }
 
 /**
- * Oración que anuncia cuánto sube el saldo por día en las plantillas de mora.
- * Vive en una constante porque `interpolar` la borra ENTERA cuando no hay
- * aumento que anunciar: un crédito con todas sus cuotas ya en el techo crece
- * Q0.00 por día, y "aumenta Q0.00 por cada día que pase" no se le dice a
- * nadie. Tiene que ser idéntica a la del archivo del front
+ * Oración que anuncia cuánto sube el saldo por día en las plantillas de mora,
+ * CON su techo: "…, y aumenta Q3.73 por cada día de atraso, hasta un máximo de
+ * Q93.33 al mes". El ritmo solo prometía un crecimiento infinito — cada cuota
+ * deja de crecer al llegar a su cargo mensual—, así que se dice igual que en
+ * la plantilla del día de pago: el ritmo Y su tope.
+ *
+ * Vive en constantes porque `interpolar` las borra cuando no hay qué anunciar:
+ * la oración ENTERA si el crédito ya no crece (todas las cuotas en su techo →
+ * Q0.00 por día), y solo el `FRAGMENTO_TOPE_INCREMENTO_MORA` si llegó el ritmo
+ * pero no el techo (cartera-back viejo), que deja la frase corta pero sana.
+ * Tienen que ser idénticas a las del archivo del front
  * (apps/web/src/lib/cobros/plantillas-mensajes.ts) — ver la nota de cabecera.
  *
  * Va DENTRO del párrafo del monto adeudado, así que no cambia el conteo de
  * bloques (`\n\n`) del que depende la selección de template en Meta.
  */
+export const FRAGMENTO_TOPE_INCREMENTO_MORA =
+	", hasta un máximo de Q{incrementoMaximoMensualMora} al mes";
+
 export const CLAUSULA_INCREMENTO_DIARIO_MORA =
-	", y aumenta Q{incrementoDiarioMora} por cada día que pase";
+	", y aumenta Q{incrementoDiarioMora} por cada día de atraso" +
+	FRAGMENTO_TOPE_INCREMENTO_MORA;
 
 /**
- * true si hay un aumento diario REAL que anunciar. "" (cartera no lo mandó,
- * versión vieja del back) y "0.00" son lo mismo para el mensaje: no hay frase.
+ * true si hay un monto de aumento REAL que anunciar — sirve igual para el
+ * ritmo diario y para su techo mensual. "" (cartera no lo mandó, versión vieja
+ * del back) y "0.00" son lo mismo para el mensaje: no hay frase.
  * El valor viene formateado es-GT, así que se le quitan los separadores de
  * miles antes de compararlo.
  */
-export function hayIncrementoDiarioMora(
-	valor: string | null | undefined,
-): boolean {
+export function hayIncrementoMora(valor: string | null | undefined): boolean {
 	if (!valor) return false;
 	return Number(valor.replace(/,/g, "")) > 0;
 }
 
 /**
- * Formatea a es-GT el incremento diario que manda cartera-back (un
+ * Formatea a es-GT un incremento de mora que manda cartera-back —el diario o
+ * su techo mensual— (un
  * `Big.toFixed(2)`, p. ej. "1120.00" → "1,120.00"). "" cuando no hay nada que
  * anunciar: cartera no lo mandó, no es un número, o es 0 (todas las cuotas ya
  * topadas). El "" hace que la oración desaparezca sola en `interpolar`.
  */
-export function formatearIncrementoDiarioMora(
+export function formatearIncrementoMora(
 	valor: string | number | null | undefined,
 ): string {
 	if (valor === null || valor === undefined || valor === "") return "";
@@ -636,12 +658,22 @@ export function interpolar(
 	// "aumenta Q0.00 por cada día que pase" sería ruido, y dejar "aumenta Q."
 	// sería un mensaje roto.
 	const incrementoDiarioMora = variables.incrementoDiarioMora ?? "";
-	const base = hayIncrementoDiarioMora(incrementoDiarioMora)
-		? texto
-		: texto.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
+	const incrementoMaximoMensualMora =
+		variables.incrementoMaximoMensualMora ?? "";
+	let base = texto;
+	if (!hayIncrementoMora(incrementoDiarioMora)) {
+		base = base.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
+	} else if (!hayIncrementoMora(incrementoMaximoMensualMora)) {
+		// Llegó el ritmo pero no su techo (cartera-back sin el dato): en vez de
+		// "hasta un máximo de Q al mes" se borra solo el tope y la frase queda
+		// corta pero coherente. El orden importa: si primero se sacara el tope,
+		// la cláusula entera ya no coincidiría para poder borrarse.
+		base = base.split(FRAGMENTO_TOPE_INCREMENTO_MORA).join("");
+	}
 
 	return base
 		.replace(/{incrementoDiarioMora}/g, v(incrementoDiarioMora))
+		.replace(/{incrementoMaximoMensualMora}/g, v(incrementoMaximoMensualMora))
 		.replace(/{clienteNombre}/g, v(nombre))
 		.replace(/{fechaPago}/g, v(variables.fechaPago))
 		.replace(/{cuotaMensual}/g, v(variables.cuotaMensual))

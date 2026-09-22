@@ -13,6 +13,7 @@ const {
   fechaCalendarioGT,
   hoyGuatemala,
   incrementoDiarioMora,
+  incrementoMaximoMensualMora,
   isOverdueInstallmentForMora,
   maximoMoraSinOverride,
   BASE_DIAS_MORA,
@@ -559,5 +560,149 @@ describe("incrementoDiarioMora — cuánto sube la mora por cada día que pase",
     const manana = calcularMoraProporcional({ capital: 10_000, diasAtrasadosPorCuota: [30] });
     const inc = incrementoDiarioMora({ capital: 10_000, diasAtrasadosPorCuota: [29] });
     expect(hoy.plus(inc).toFixed(2)).toBe(manana.toFixed(2));
+  });
+});
+
+// El TECHO de ese crecimiento: lo máximo que la mora puede subir en un mes.
+// Mismo capital de 10,000 → cargo mensual de Q112.00 por cuota.
+const maximo = (capital: number | string, dias: number[]) =>
+  incrementoMaximoMensualMora({ capital, diasAtrasadosPorCuota: dias }).toFixed(2);
+
+describe("incrementoMaximoMensualMora — el techo que se le anuncia al cliente", () => {
+  it("una cuota fresca puede llegar, como mucho, a un cargo mensual completo", () => {
+    // 5 días ya cobrados (Q18.67) de un cargo de Q112.00 → le faltan Q93.33.
+    expect(maximo(10_000, [5])).toBe("93.33");
+  });
+
+  it("una cuota recién vencida (0 días) puede crecer el cargo entero", () => {
+    expect(maximo(10_000, [0])).toBe("112.00");
+  });
+
+  it("una cuota YA topada no puede crecer nada", () => {
+    expect(maximo(10_000, [30])).toBe("0.00");
+    expect(maximo(10_000, [31])).toBe("0.00");
+    expect(maximo(10_000, [200])).toBe("0.00");
+  });
+
+  it("el borde: a los 29 días le falta exactamente 1/30 del cargo", () => {
+    expect(maximo(10_000, [29])).toBe("3.73");
+  });
+
+  it("cartera vieja con TODAS las cuotas topadas → el saldo ya no puede subir", () => {
+    expect(maximo(10_000, [365, 335, 305, 30])).toBe("0.00");
+  });
+
+  it("mezcla: las topadas se cancelan solas y solo pesa lo que falta", () => {
+    // c7/c8/c9 topadas (95, 65, 35 días) + c10 con 5 días → solo la última
+    // tiene margen: Q112.00 − Q18.67 = Q93.33.
+    expect(maximo(10_000, [95, 65, 35, 5])).toBe("93.33");
+    expect(maximo(10_000, [95, 65, 35, 5])).toBe(maximo(10_000, [5]));
+  });
+
+  it("varias cuotas frescas suman sus faltantes", () => {
+    // 20 días → faltan 10/30; 10 días → faltan 20/30; 5 → faltan 25/30.
+    // (10 + 20 + 25)/30 × 112 = Q205.33.
+    expect(maximo(10_000, [20, 10, 5])).toBe("205.33");
+  });
+
+  it("sin cuotas vencidas no hay techo que anunciar", () => {
+    expect(maximo(10_000, [])).toBe("0.00");
+  });
+
+  it("crédito sin capital (o con capital negativo) devuelve 0", () => {
+    expect(maximo(0, [5, 10])).toBe("0.00");
+    expect(maximo(-1000, [5, 10])).toBe("0.00");
+  });
+
+  it("nunca es negativo, ni con la mezcla más adversa de días", () => {
+    // La invariante: cada cuota aporta al techo un cargo completo y a la mora
+    // de hoy como mucho ese mismo cargo. Por eso no hay clamp a 0 en el
+    // helper — sería código muerto —, y esto es lo que lo fija.
+    for (const dias of [
+      [0], [1], [29], [30], [31], [365], [-5], [-5, 400, 15],
+      [1, 2, 3, 29, 30, 31, 90], Array.from({ length: 30 }, (_, i) => i),
+    ]) {
+      expect(
+        incrementoMaximoMensualMora({ capital: 10_000, diasAtrasadosPorCuota: dias }).lt(0),
+      ).toBe(false);
+    }
+  });
+
+  it("no repite la fórmula: es el techo del módulo menos la mora que ya corre", () => {
+    const capital = 7_777;
+    const dias = [3, 18, 44];
+    const esperado = new Big(capital)
+      .times(TASA_MORA_MENSUAL)
+      .times(dias.length)
+      .minus(calcularMoraProporcional({ capital, diasAtrasadosPorCuota: dias }));
+    expect(maximo(capital, dias)).toBe(esperado.toFixed(2));
+  });
+});
+
+describe("las dos cifras del mensaje cuentan la misma historia", () => {
+  // Lo que el cliente lee es "aumenta Q{diario} por cada día de atraso, hasta
+  // un máximo de Q{máximo} al mes". Las dos tienen que cerrar: si sube ese
+  // diario los días que le faltan, tiene que llegar EXACTAMENTE al máximo.
+  it("N cuotas al mismo día de atraso: el diario × los días que faltan = el máximo", () => {
+    for (const [capital, dias, cuotas] of [
+      [10_000, 5, 1],
+      [10_000, 5, 3],
+      [7_777, 29, 2],
+      [123_456, 0, 4],
+      [50_000, 17, 7],
+    ] as [number, number, number][]) {
+      const diasAtrasadosPorCuota = Array.from({ length: cuotas }, () => dias);
+      const diario = incrementoDiarioMora({ capital, diasAtrasadosPorCuota });
+      const tope = incrementoMaximoMensualMora({ capital, diasAtrasadosPorCuota });
+      const diasQueFaltan = BASE_DIAS_MORA - dias;
+
+      expect(diario.times(diasQueFaltan).toFixed(2)).toBe(tope.toFixed(2));
+    }
+  });
+
+  it("día a día: sumar el incremento de CADA día llega al máximo y ahí se detiene", () => {
+    // Simulación honesta (el incremento se recalcula cada día, como el cron):
+    // tres cuotas con días distintos, una de ellas ya topada.
+    const capital = 10_000;
+    const inicio = [27, 12, 200];
+    const moraInicial = calcularMoraProporcional({ capital, diasAtrasadosPorCuota: inicio });
+    const tope = incrementoMaximoMensualMora({ capital, diasAtrasadosPorCuota: inicio });
+
+    let acumulado = new Big(0);
+    for (let d = 0; d < BASE_DIAS_MORA; d++) {
+      acumulado = acumulado.plus(
+        incrementoDiarioMora({
+          capital,
+          diasAtrasadosPorCuota: inicio.map((x) => x + d),
+        }),
+      );
+    }
+
+    expect(acumulado.toFixed(2)).toBe(tope.toFixed(2));
+    // Y en efecto ese es el techo: a los 30 días la mora dejó de moverse.
+    const moraFinal = calcularMoraProporcional({
+      capital,
+      diasAtrasadosPorCuota: inicio.map((x) => x + BASE_DIAS_MORA),
+    });
+    expect(moraInicial.plus(tope).toFixed(2)).toBe(moraFinal.toFixed(2));
+  });
+
+  it("si ya no hay incremento diario, tampoco hay máximo (y al revés)", () => {
+    const topadas = { capital: 10_000, diasAtrasadosPorCuota: [30, 90, 365] };
+    expect(incrementoDiarioMora(topadas).toFixed(2)).toBe("0.00");
+    expect(incrementoMaximoMensualMora(topadas).toFixed(2)).toBe("0.00");
+  });
+
+  it("el máximo nunca es menor que el incremento de un solo día", () => {
+    // A los dos decimales que ve el cliente, que es la única precisión que el
+    // mensaje promete: el Big crudo puede quedar unas milmillonésimas por
+    // debajo cuando la división días/30 es periódica (29/30 redondea hacia
+    // arriba en el factor y hacia abajo en el faltante).
+    for (const dias of [[0], [5], [29], [1, 15, 28], [2, 2, 2, 2]]) {
+      const args = { capital: 10_000, diasAtrasadosPorCuota: dias };
+      expect(
+        Number(incrementoMaximoMensualMora(args).toFixed(2)),
+      ).toBeGreaterThanOrEqual(Number(incrementoDiarioMora(args).toFixed(2)));
+    }
   });
 });

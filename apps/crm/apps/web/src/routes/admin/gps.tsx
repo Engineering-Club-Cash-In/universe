@@ -118,6 +118,10 @@ function RouteComponent() {
 			toast.error(
 				error.message || "No se pudo verificar la conexión con Wialon",
 			);
+			// Sin esto, el card de estado sigue mostrando "conectado" (dato
+			// cacheado) hasta el próximo poll de 60s, contradiciendo el toast
+			// de error que el admin acaba de ver.
+			diagnostics.refetch();
 		},
 	});
 

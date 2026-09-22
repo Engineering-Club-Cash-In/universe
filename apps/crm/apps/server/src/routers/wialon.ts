@@ -281,20 +281,31 @@ export const wialonRouter = {
 	testWialonConnection: adminProcedure
 		.output(testWialonConnectionOutputSchema)
 		.handler(async ({ context }) => {
+			const auditBase = {
+				userId: context.user?.id,
+				userEmail: context.user?.email || context.session?.user?.email,
+				timestamp: new Date().toISOString(),
+			};
 			try {
 				const client = getWialonClient();
 				const health = await client.checkHealth(true);
 				console.info("WIALON_CONNECTION_TESTED", {
-					userId: context.user?.id,
-					userEmail: context.user?.email || context.session?.user?.email,
+					...auditBase,
 					connected: health.status === "connected",
-					timestamp: new Date().toISOString(),
 				});
 				return {
 					connected: health.status === "connected",
 					unitCount: health.unitCount ?? null,
 				};
 			} catch (error) {
+				// Intento fallido (credenciales inválidas, timeout, etc.) también
+				// queda auditado: sin esto no hay rastro de pruebas de conexión
+				// que fallan, justo el caso que un administrador necesita ver.
+				console.info("WIALON_CONNECTION_TESTED", {
+					...auditBase,
+					connected: false,
+					error: error instanceof WialonClientError ? error.code : "UNKNOWN",
+				});
 				throw mapWialonErrorToOrpc(error);
 			}
 		}),

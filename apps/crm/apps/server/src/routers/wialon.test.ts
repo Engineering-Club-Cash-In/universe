@@ -617,6 +617,60 @@ describe("wialonRouter", () => {
 				setWialonClient(null);
 			}
 		});
+
+		it("audita el intento fallido con connected:false antes de propagar el error", async () => {
+			const infoCalls: unknown[][] = [];
+			const origInfo = console.info;
+			console.info = (...args: unknown[]) => {
+				infoCalls.push(args);
+			};
+
+			const mockFetch = async () =>
+				new Response(
+					JSON.stringify({ error: 8, reason: "Invalid credentials" }),
+					{ status: 200 },
+				);
+
+			const testClient = new WialonClient({ token: "tok-bad" }, mockFetch);
+			setWialonClient(testClient);
+
+			try {
+				const mockContext = {
+					headers: new Headers(),
+					session: {
+						user: { id: "user-admin-4", email: "admin4@example.com" },
+					},
+					user: {
+						id: "user-admin-4",
+						email: "admin4@example.com",
+						role: "admin",
+					},
+					userId: "user-admin-4",
+					userRole: "admin",
+				};
+
+				await expect(
+					call(wialonRouter.testWialonConnection, undefined, {
+						context: mockContext as unknown as Context,
+					}),
+				).rejects.toThrow(ORPCError);
+
+				const auditEntry = infoCalls.find(
+					(c) => c[0] === "WIALON_CONNECTION_TESTED",
+				);
+				expect(auditEntry).toBeDefined();
+				const payload = auditEntry?.[1] as Record<string, unknown>;
+				// adminProcedure (requireAdmin) no inyecta userId propio: el
+				// contexto.user proviene del lookup de db (mockeado en este archivo).
+				expect(payload.userId).toBe("user-test");
+				expect(payload.userEmail).toBe("admin4@example.com");
+				expect(payload.connected).toBe(false);
+				expect(payload.error).toBe("WIALON_API_ERROR");
+			} finally {
+				console.info = origInfo;
+				setWialonClient(null);
+			}
+		});
 	});
 
 	describe("getWialonUnitsCatalog", () => {

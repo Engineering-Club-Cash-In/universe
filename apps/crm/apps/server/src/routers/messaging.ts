@@ -93,13 +93,41 @@ export async function sendContractLinksToLead(params: {
 	// mensajes y mandarlos hay varias llamadas a SimpleTech, y una regeneración
 	// que entrara en ese rato borraba en WeeTrust los documentos de los enlaces
 	// que se estaban mandando. Al cliente le llegaban links ya muertos.
-	// Con tope: si SimpleTech deja de responder, el candado se suelta solo en vez
-	// de dejar la oportunidad sin regenerar ni confirmar.
-	return conCandadoDeFirma(
-		params.opportunityId,
-		() => enviarEnlacesDeFirma(params),
-		{ segundosMaximos: 180 },
+	return conCandadoDeFirma(params.opportunityId, () =>
+		enviarEnlacesDeFirma(params),
 	);
+}
+
+/**
+ * Topes del envío. Existen porque el candado dura lo que dure esta función y
+ * Neon corta las transacciones inactivas a los 300s: si el envío se pasara de
+ * ahí, el candado se soltaría solo mientras los mensajes siguen saliendo, y una
+ * regeneración podría borrar en WeeTrust los documentos de esos enlaces.
+ *
+ * El cliente de SimpleTech no acepta timeout, así que el tope por mensaje no
+ * corta la llamada: deja de esperarla. El mensaje puede llegar igual, y eso es
+ * lo que dice el motivo que queda anotado.
+ */
+const LIMITE_POR_MENSAJE_MS = 30_000;
+const LIMITE_DEL_ENVIO_MS = 120_000;
+
+/** Lo que devuelva `alVencer` si la tarea no contestó a tiempo. */
+async function conLimite<T>(
+	tarea: Promise<T>,
+	ms: number,
+	alVencer: () => T,
+): Promise<T> {
+	let temporizador: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			tarea,
+			new Promise<T>((resolve) => {
+				temporizador = setTimeout(() => resolve(alVencer()), ms);
+			}),
+		]);
+	} finally {
+		if (temporizador) clearTimeout(temporizador);
+	}
 }
 
 async function enviarEnlacesDeFirma(params: {
@@ -401,41 +429,63 @@ async function enviarEnlacesDeFirma(params: {
 
 	let algunoEnviado = false;
 	let motivoDelLead: string | undefined;
+	const finDelEnvio = Date.now() + LIMITE_DEL_ENVIO_MS;
 
 	for (const [i, plan] of planes.entries()) {
 		let motivo = plan.motivo;
 
 		if (!motivo && plan.mensaje && plan.telefonoDestino) {
-			const resultado = await sendWhatsappTemplate({
-				phone: plan.telefonoDestino,
-				message: plan.mensaje,
-				logPrefix: modoPrueba
-					? "[SimpleTech][contratos][TEST]"
-					: "[SimpleTech][contratos]",
-				ocultarEnlacesEnLog: true,
-			});
-
-			const enviado = resultado.success;
-			if (enviado) {
-				algunoEnviado = true;
-				// En modo prueba queda anotado a quién le habría llegado de verdad,
-				// para que la fila no parezca un envío normal al cliente.
-				motivo = modoPrueba
-					? `TEST_MESSAGE: enviado a ${plan.telefonoDestino} en lugar de ${plan.destinatario.phone ?? "sin teléfono"}`
-					: undefined;
+			// Se acabó el tiempo de toda la tanda: los que faltan se quedan
+			// pendientes con el motivo a la vista, para mandarlos desde la ficha.
+			// Seguir sería pasarse del corte de Postgres y soltar el candado con
+			// los mensajes todavía saliendo.
+			if (Date.now() >= finDelEnvio) {
+				motivo =
+					"No dio tiempo en este envío: quedó pendiente para mandarlo desde la ficha";
+				await db
+					.update(whatsappLogRecipients)
+					.set({ reason: motivo, updatedAt: new Date() })
+					.where(eq(whatsappLogRecipients.id, filas[i].id));
 			} else {
-				motivo = resultado.error ?? "Error enviando el mensaje";
-			}
+				const resultado = await conLimite(
+					sendWhatsappTemplate({
+						phone: plan.telefonoDestino,
+						message: plan.mensaje,
+						logPrefix: modoPrueba
+							? "[SimpleTech][contratos][TEST]"
+							: "[SimpleTech][contratos]",
+						ocultarEnlacesEnLog: true,
+					}),
+					LIMITE_POR_MENSAJE_MS,
+					() => ({
+						success: false as const,
+						error:
+							"SimpleTech no respondió en 30s: puede que el mensaje haya llegado igual, revisá antes de reenviar",
+					}),
+				);
 
-			await db
-				.update(whatsappLogRecipients)
-				.set({
-					status: enviado ? "sent" : "failed",
-					reason: motivo ?? null,
-					sentAt: enviado ? new Date() : undefined,
-					updatedAt: new Date(),
-				})
-				.where(eq(whatsappLogRecipients.id, filas[i].id));
+				const enviado = resultado.success;
+				if (enviado) {
+					algunoEnviado = true;
+					// En modo prueba queda anotado a quién le habría llegado de verdad,
+					// para que la fila no parezca un envío normal al cliente.
+					motivo = modoPrueba
+						? `TEST_MESSAGE: enviado a ${plan.telefonoDestino} en lugar de ${plan.destinatario.phone ?? "sin teléfono"}`
+						: undefined;
+				} else {
+					motivo = resultado.error ?? "Error enviando el mensaje";
+				}
+
+				await db
+					.update(whatsappLogRecipients)
+					.set({
+						status: enviado ? "sent" : "failed",
+						reason: motivo ?? null,
+						sentAt: enviado ? new Date() : undefined,
+						updatedAt: new Date(),
+					})
+					.where(eq(whatsappLogRecipients.id, filas[i].id));
+			}
 		}
 
 		if (plan.destinatario.leadId) motivoDelLead = motivo;

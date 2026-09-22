@@ -21,34 +21,22 @@ export function claveDeFirma(opportunityId: string) {
 }
 
 /**
- * Corre `tarea` con el candado tomado, y lo suelta al terminar.
+ * Corre `tarea` con el candado tomado, y lo suelta cuando la tarea terminó.
  *
  * La transacción de afuera sólo lo sostiene: la tarea trabaja con sus propias
  * conexiones, así que puede tardar sin dejar filas bloqueadas de por medio.
+ *
+ * **La tarea tiene que tener su propio tope.** Neon corta las transacciones
+ * inactivas a los 300s (`idle_in_transaction_session_timeout`), y ese corte
+ * suelta el candado sin detener la tarea: seguiría trabajando mientras otro
+ * empieza a tocar los mismos contratos. Quien pase una tarea que habla con
+ * alguien de afuera tiene que garantizar que termina bastante antes de eso.
  */
 export async function conCandadoDeFirma<T>(
 	opportunityId: string,
 	tarea: () => Promise<T>,
-	opciones?: {
-		/**
-		 * Segundos que puede estar tomado el candado mientras la tarea trabaja
-		 * afuera. Si se pasa, Postgres corta la transacción y lo suelta: un
-		 * proveedor que no responde no deja la oportunidad trabada para siempre.
-		 * Sin esto, el candado dura lo que dure la tarea.
-		 */
-		segundosMaximos?: number;
-	},
 ): Promise<T> {
 	return db.transaction(async (candado) => {
-		if (opciones?.segundosMaximos) {
-			// `set local` muere con la transacción, y no acepta parámetros: el valor
-			// va en el texto, por eso es un entero de milisegundos y no lo que
-			// llegue.
-			const ms = Math.round(opciones.segundosMaximos) * 1000;
-			await candado.execute(
-				sql.raw(`set local idle_in_transaction_session_timeout = ${ms}`),
-			);
-		}
 		await candado.execute(
 			sql`select pg_advisory_xact_lock(${claveDeFirma(opportunityId)})`,
 		);

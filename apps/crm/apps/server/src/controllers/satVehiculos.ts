@@ -75,6 +75,36 @@ export class SatLoginError extends Error {}
 export class SatRequiereCodigoError extends SatLoginError {}
 export class SatScrapeError extends Error {}
 
+function esTimeoutSat(error: unknown): boolean {
+	return (
+		error instanceof Error &&
+		(error.name === "TimeoutError" ||
+			/Waiting failed:\s*\d+ms exceeded|waiting for selector .* failed|timed out/i.test(
+				error.message,
+			))
+	);
+}
+
+/** Repite solo la espera: nunca vuelve a pulsar un control ni a iniciar sesión. */
+export async function esperarSatConReintento<T>(
+	etapa: string,
+	esperarCondicion: () => Promise<T>,
+	maxIntentos = 2,
+): Promise<T> {
+	for (let intento = 1; intento <= maxIntentos; intento += 1) {
+		try {
+			return await esperarCondicion();
+		} catch (error) {
+			if (esTimeoutSat(error) && intento < maxIntentos) continue;
+			const detalle = error instanceof Error ? error.message : String(error);
+			throw new SatScrapeError(
+				`${etapa} (espera ${intento}/${maxIntentos}): ${detalle}`,
+			);
+		}
+	}
+	throw new SatScrapeError(`${etapa}: se agotaron las esperas.`);
+}
+
 async function esperar(ms: number) {
 	await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -189,28 +219,33 @@ export async function seleccionarTitular(
 	titular: SatTitularObjetivo,
 ) {
 	const nitObjetivo = normalizarNitTitular(titular.nit);
-	await page.waitForSelector("#contribButton", { timeout: 30000 });
+	await esperarSatConReintento(
+		`Selector de titulares para ${titular.nit}`,
+		() => page.waitForSelector("#contribButton", { timeout: 30000 }),
+	);
 	await page.click("#contribButton");
-	await page.waitForFunction(
-		(nit) =>
-			[
-				...document.querySelectorAll<HTMLElement>(
-					".menu-contrib a.ui-menuitem-link",
-				),
-			].some((element) => {
-				const style = window.getComputedStyle(element);
-				return (
-					(element.textContent || "")
-						.toUpperCase()
-						.replace(/[^A-Z0-9]/g, "")
-						.includes(nit) &&
-					style.display !== "none" &&
-					style.visibility !== "hidden" &&
-					element.offsetParent !== null
-				);
-			}),
-		{ timeout: 30000, polling: 300 },
-		nitObjetivo,
+	await esperarSatConReintento(`Menú del titular ${titular.nit}`, () =>
+		page.waitForFunction(
+			(nit) =>
+				[
+					...document.querySelectorAll<HTMLElement>(
+						".menu-contrib a.ui-menuitem-link",
+					),
+				].some((element) => {
+					const style = window.getComputedStyle(element);
+					return (
+						(element.textContent || "")
+							.toUpperCase()
+							.replace(/[^A-Z0-9]/g, "")
+							.includes(nit) &&
+						style.display !== "none" &&
+						style.visibility !== "hidden" &&
+						element.offsetParent !== null
+					);
+				}),
+			{ timeout: 30000, polling: 300 },
+			nitObjetivo,
+		),
 	);
 
 	const seleccionado = await page.evaluate((nit) => {
@@ -235,14 +270,16 @@ export async function seleccionarTitular(
 		);
 	}
 
-	await page.waitForFunction(
-		(nit) =>
-			(document.querySelector("#lblUserTop")?.textContent || "")
-				.toUpperCase()
-				.replace(/[^A-Z0-9]/g, "")
-				.includes(nit),
-		{ timeout: 30000, polling: 300 },
-		nitObjetivo,
+	await esperarSatConReintento(`Confirmación del titular ${titular.nit}`, () =>
+		page.waitForFunction(
+			(nit) =>
+				(document.querySelector("#lblUserTop")?.textContent || "")
+					.toUpperCase()
+					.replace(/[^A-Z0-9]/g, "")
+					.includes(nit),
+			{ timeout: 30000, polling: 300 },
+			nitObjetivo,
+		),
 	);
 	await esperar(1500);
 }
@@ -350,14 +387,19 @@ export async function irAListadoVehiculosDelegado(
 	page: Page,
 	nitTitular: string,
 ): Promise<Frame> {
-	await page.waitForFunction(
+	await esperarSatConReintento(
+		`Menú de vehículos del titular ${nitTitular}`,
 		() =>
-			[...document.querySelectorAll<HTMLAnchorElement>("a")].some((element) =>
-				(element.getAttribute("onclick") || "").includes(
-					"listadoVehiculos.jsf",
-				),
+			page.waitForFunction(
+				() =>
+					[...document.querySelectorAll<HTMLAnchorElement>("a")].some(
+						(element) =>
+							(element.getAttribute("onclick") || "").includes(
+								"listadoVehiculos.jsf",
+							),
+					),
+				{ timeout: 30000, polling: 300 },
 			),
-		{ timeout: 30000, polling: 300 },
 	);
 	const clicado = await page.evaluate(() => {
 		const enlace = [...document.querySelectorAll<HTMLAnchorElement>("a")].find(
@@ -375,7 +417,11 @@ export async function irAListadoVehiculosDelegado(
 	}
 
 	const frame = await esperarFrameListado(page, 90000, nitTitular);
-	await frame.waitForSelector(SEL.tablaVehiculos, { timeout: 90000 });
+	await esperarSatConReintento(
+		`Tabla de vehículos del titular ${nitTitular}`,
+		() => frame.waitForSelector(SEL.tablaVehiculos, { timeout: 90000 }),
+		1,
+	);
 	return frame;
 }
 
@@ -625,7 +671,10 @@ export async function leerTodasLasPaginas(
 	let filasLeidas = 0;
 
 	for (let pagina = 0; pagina < MAX_PAGINAS; pagina += 1) {
-		const actuales = await leerTablaVehiculos(frame);
+		const actuales = await esperarSatConReintento(
+			`Lectura de la página ${pagina + 1} de SAT`,
+			() => leerTablaVehiculos(frame),
+		);
 		filasLeidas += actuales.length;
 		const firmaAnterior = firmaPagina(actuales);
 		for (const vehiculo of actuales) {
@@ -642,23 +691,27 @@ export async function leerTodasLasPaginas(
 			};
 		}
 
-		await frame.waitForFunction(
-			(selector, firma) => {
-				const tabla = document.querySelector(selector);
-				if (!tabla) return false;
-				const filas = [...tabla.querySelectorAll("tbody tr")]
-					.map((fila) => {
-						const textos = [...fila.querySelectorAll("td")].map((celda) =>
-							(celda.textContent || "").trim().replace(/\s+/g, " "),
-						);
-						return `${textos[0] ?? ""}|${textos[5] ?? ""}|${textos[3] ?? ""}`;
-					})
-					.join(";");
-				return filas.length > 0 && filas !== firma;
-			},
-			{ timeout: 30000, polling: 300 },
-			SEL.tablaVehiculos,
-			firmaAnterior,
+		await esperarSatConReintento(
+			`Avance a la página ${pagina + 2} de SAT`,
+			() =>
+				frame.waitForFunction(
+					(selector, firma) => {
+						const tabla = document.querySelector(selector);
+						if (!tabla) return false;
+						const filas = [...tabla.querySelectorAll("tbody tr")]
+							.map((fila) => {
+								const textos = [...fila.querySelectorAll("td")].map((celda) =>
+									(celda.textContent || "").trim().replace(/\s+/g, " "),
+								);
+								return `${textos[0] ?? ""}|${textos[5] ?? ""}|${textos[3] ?? ""}`;
+							})
+							.join(";");
+						return filas.length > 0 && filas !== firma;
+					},
+					{ timeout: 30000, polling: 300 },
+					SEL.tablaVehiculos,
+					firmaAnterior,
+				),
 		);
 	}
 
@@ -704,7 +757,7 @@ function credencialesDelEntorno(): CredencialesSat & { nit: string } {
 	return { usuario, password, nit: usuario };
 }
 
-function clasificarError(
+export function clasificarError(
 	error: unknown,
 	evidencia?: string,
 ): EstadoConsultaSat {
@@ -719,6 +772,22 @@ function clasificarError(
 	}
 
 	return "ERROR";
+}
+
+/** Conserva el HTML del login antes de cerrar Chromium para clasificar bloqueos. */
+export async function capturarEvidenciaSat<T>(
+	page: { content(): Promise<string> },
+	operacion: () => Promise<T>,
+): Promise<T> {
+	try {
+		return await operacion();
+	} catch (error) {
+		const evidencia = await page.content().catch(() => "");
+		throw Object.assign(
+			error instanceof Error ? error : new Error(String(error)),
+			{ evidencia },
+		);
+	}
 }
 
 function normalizarNitTitular(nit: string) {
@@ -861,7 +930,9 @@ export async function obtenerVehiculosDelegados(): Promise<SatVehiculosDelegados
 
 	try {
 		const resultados = await conNavegador(async (page) => {
-			await iniciarSesion(page, credenciales, { permisosDelegados: true });
+			await capturarEvidenciaSat(page, () =>
+				iniciarSesion(page, credenciales, { permisosDelegados: true }),
+			);
 			const respuestas: SatVehiculosTitularResponse[] = [];
 			for (const titular of titulares) {
 				respuestas.push(await consultarTitularDelegado(page, titular));

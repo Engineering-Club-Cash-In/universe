@@ -2,11 +2,96 @@ import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import puppeteer from "puppeteer";
 import {
+	capturarEvidenciaSat,
+	clasificarError,
+	esperarSatConReintento,
 	irAListadoVehiculosDelegado,
 	leerTablaVehiculos,
 	leerTodasLasPaginas,
 	seleccionarTitular,
 } from "./satVehiculos";
+
+test("conserva evidencia del login delegado cuando SAT bloquea el acceso", async () => {
+	const html = "<title>Just a moment...</title><div>cf-chl-</div>";
+	let capturas = 0;
+	let errorCapturado: (Error & { evidencia?: string }) | undefined;
+	try {
+		await capturarEvidenciaSat(
+			{
+				content: async () => {
+					capturas += 1;
+					return html;
+				},
+			},
+			async () => {
+				throw new Error("Login bloqueado");
+			},
+		);
+	} catch (error) {
+		errorCapturado = error as Error & { evidencia?: string };
+	}
+	expect(errorCapturado?.message).toBe("Login bloqueado");
+	expect(errorCapturado?.evidencia).toBe(html);
+	expect(clasificarError(errorCapturado, errorCapturado?.evidencia)).toBe(
+		"BLOQUEADO",
+	);
+	expect(capturas).toBe(1);
+});
+
+test("un fallo al capturar HTML no oculta el error original del login", async () => {
+	const errorLogin = new Error("SAT no respondió");
+	let errorCapturado: (Error & { evidencia?: string }) | undefined;
+	try {
+		await capturarEvidenciaSat(
+			{
+				content: async () => {
+					throw new Error("Página cerrada");
+				},
+			},
+			async () => {
+				throw errorLogin;
+			},
+		);
+	} catch (error) {
+		errorCapturado = error as Error & { evidencia?: string };
+	}
+	expect(errorCapturado).toBe(errorLogin);
+	expect(errorCapturado?.evidencia).toBe("");
+});
+
+test("reintenta una espera transitoria y conserva el resultado", async () => {
+	let intentos = 0;
+	const resultado = await esperarSatConReintento(
+		"Página 2 de SAT",
+		async () => {
+			intentos += 1;
+			if (intentos === 1) throw new Error("Waiting failed: 30000ms exceeded");
+			return "lista";
+		},
+	);
+	expect(resultado).toBe("lista");
+	expect(intentos).toBe(2);
+});
+
+test("informa la etapa tras agotar esperas y no repite errores no transitorios", async () => {
+	let intentos = 0;
+	await expect(
+		esperarSatConReintento("Página 57 de SAT", async () => {
+			intentos += 1;
+			throw new Error("Waiting failed: 30000ms exceeded");
+		}),
+	).rejects.toThrow("Página 57 de SAT (espera 2/2)");
+	expect(intentos).toBe(2);
+
+	intentos = 0;
+	await expect(
+		esperarSatConReintento("Menú SAT", async () => {
+			intentos += 1;
+			throw new Error("Selector inválido");
+		}),
+	).rejects.toThrow("Menú SAT (espera 1/2)");
+	expect(intentos).toBe(1);
+});
 
 const chromePath =
 	process.env.PUPPETEER_EXECUTABLE_PATH ??

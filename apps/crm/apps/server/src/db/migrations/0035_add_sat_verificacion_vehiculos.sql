@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS public.sat_verificacion_resultados (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   lote_id        uuid NOT NULL REFERENCES public.sat_verificacion_lotes(id) ON DELETE CASCADE,
   corrida_id     uuid REFERENCES public.sat_verificacion_corridas(id) ON DELETE CASCADE,
-  vehicle_id     uuid REFERENCES public.vehicles(id) ON DELETE SET NULL,
+  -- El estado actual del vehículo interno desaparece al borrar el vehículo.
+  vehicle_id     uuid REFERENCES public.vehicles(id) ON DELETE CASCADE,
   placa          varchar(20) NOT NULL,
   resultado      public.sat_resultado_vehiculo NOT NULL,
   era_esperado   boolean NOT NULL,

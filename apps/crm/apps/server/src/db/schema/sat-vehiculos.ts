@@ -102,8 +102,9 @@ export const satVerificacionResultados = pgTable(
 			.references(() => satVerificacionCorridas.id, { onDelete: "cascade" }),
 
 		// Nulo cuando SAT reporta una placa que el CRM no tiene registrada.
+		// Si se borra un vehículo interno, se descarta su estado actual de SAT.
 		vehicleId: uuid("vehicle_id").references(() => vehicles.id, {
-			onDelete: "set null",
+			onDelete: "cascade",
 		}),
 
 		placa: varchar("placa", { length: 20 }).notNull(),

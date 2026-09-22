@@ -155,6 +155,50 @@ export function calcularMoraProporcional(params: {
 }
 
 /**
+ * Cuánto va a CRECER la mora de este crédito en la próxima corrida del cron:
+ * cargoMensual / 30 × (cuotas que todavía no llegaron al techo).
+ *
+ * Por qué existe: con la mora proporcional el monto adeudado ya no es el mismo
+ * del día 5 al día 25 del mes — sube todos los días. Cuando al cliente se le
+ * dice "debés Q4,318.20" ese número es correcto hoy y está corto pasado
+ * mañana: paga lo que se le dijo, queda un residuo y la cuota no se cubre. En
+ * vez de un "al día de hoy" sin más, se le dice cuánto sube por día para que
+ * pueda calcular lo que debe el día que pague.
+ *
+ * Por qué se cuentan solo las cuotas bajo el techo: una cuota con 29 días de
+ * atraso pasa mañana a 30 y suma exactamente 1/30 del cargo; una con 30 o más
+ * ya está topada por el min(1,·) de calcularMoraProporcional y suma 0. Tres
+ * cuotas frescas crecen 3/30 por día; una cuota abandonada hace 200 días
+ * aporta cero. El CRM no puede calcular esto solo porque no conoce los días de
+ * cada cuota — por eso sale de acá.
+ *
+ * Devuelve un Big SIN redondear, igual que calcularMoraProporcional: el
+ * .toFixed(2) lo hace el caller.
+ */
+export function incrementoDiarioMora(params: {
+  capital: Big | string | number;
+  diasAtrasadosPorCuota: number[];
+}): Big {
+  const capital = new Big(params.capital || 0);
+  // Sin capital no hay cargo que crecer; el guard también atrapa un capital
+  // negativo, que si no devolvería un "incremento" en contra.
+  if (capital.lte(0)) return new Big(0);
+
+  // Días negativos (una cuota que aún no vence, si alguna vez se cuela en la
+  // lista) siguen estando bajo el techo, así que no hace falta subirlos a 0
+  // como en calcularMoraProporcional: ahí el valor se MULTIPLICA y acá solo se
+  // COMPARA. Sin cuotas bajo el techo el conteo es 0 y el producto también,
+  // que es justamente lo que se quiere devolver (array vacío incluido).
+  const cuotasBajoElTecho = params.diasAtrasadosPorCuota.filter(
+    (dias) => dias < BASE_DIAS_MORA,
+  ).length;
+
+  const cargoMensual = capital.times(TASA_MORA_MENSUAL);
+
+  return cargoMensual.div(BASE_DIAS_MORA).times(cuotasBajoElTecho);
+}
+
+/**
  * Decisión pura de qué hacer con la mora al ROMPER un convenio de pago
  * (paymentAgreement.updateConvenioStatus con status=false).
  *

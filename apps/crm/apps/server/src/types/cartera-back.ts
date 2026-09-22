@@ -299,6 +299,14 @@ export interface CreditoDirectoResponse {
 	cuotasPendientes: CarteraCuotaCredito[];
 	cuotasAtrasadas: CarteraCuotaCredito[];
 	moraActual: string; // decimal viene como string
+	/**
+	 * Cuánto sube la mora de ESTE crédito por cada día que pase (lo que sumará
+	 * la próxima corrida del cron): 1/30 del cargo mensual por cada cuota
+	 * vencida que todavía no llegó a su techo de 30 días. Lo calcula
+	 * `incrementoDiarioMora` en cartera-back/latefee.ts. Opcional porque un
+	 * cartera-back anterior a ese cambio no lo manda.
+	 */
+	incrementoDiarioMora?: string;
 	mora?: CarteraMoraCredito | null;
 	convenioActivo?: CarteraConvenio | null;
 	ajusteFechaIdeal?: CarteraAjusteFechaIdeal | null;

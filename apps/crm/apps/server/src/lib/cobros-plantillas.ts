@@ -45,6 +45,24 @@ export interface VariablesPlantilla {
 	 * lo que el cron sumará mañana si el cliente no paga hoy.
 	 */
 	expectativaMoraDiaria?: string;
+	/**
+	 * Lo que sube POR DÍA el crédito que YA está en mora — no confundir con
+	 * `expectativaMoraDiaria`:
+	 *  - expectativaMoraDiaria es el recargo de UNA cuota (1/30 de su cargo
+	 *    mensual). Se le dice a un cliente AL DÍA: "si no pagás hoy, empieza a
+	 *    correr esto".
+	 *  - incrementoDiarioMora es lo que crece el crédito COMPLETO: 1/30 por
+	 *    CADA cuota vencida que todavía no llegó a su techo de 30 días. Tres
+	 *    cuotas frescas crecen 3/30 por día; una cuota abandonada hace 200 días
+	 *    ya está congelada y aporta 0, así que un crédito viejo puede traer
+	 *    "0.00" aunque deba mucho.
+	 * Lo calcula cartera-back (`incrementoDiarioMora` en latefee.ts), que es el
+	 * único que conoce los días de cada cuota. Lo usan las plantillas de mora
+	 * (1 cuota, 2-3 cuotas, jurídico) para que el cliente pueda calcular lo que
+	 * debe el día que pague, en vez de pagar el monto de hoy dos días después y
+	 * dejar residuo.
+	 */
+	incrementoDiarioMora?: string;
 	/** Año del impuesto de circulación. Default: año actual en Guatemala. */
 	anioImpuesto?: string;
 	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
@@ -454,6 +472,51 @@ export function calcularExpectativaMoraDiaria(
 	return moraDeUnaCuota(capital, statusCredit, 1);
 }
 
+/**
+ * Oración que anuncia cuánto sube el saldo por día en las plantillas de mora.
+ * Vive en una constante porque `interpolar` la borra ENTERA cuando no hay
+ * aumento que anunciar: un crédito con todas sus cuotas ya en el techo crece
+ * Q0.00 por día, y "aumenta Q0.00 por cada día que pase" no se le dice a
+ * nadie. Tiene que ser idéntica a la del archivo del front
+ * (apps/web/src/lib/cobros/plantillas-mensajes.ts) — ver la nota de cabecera.
+ *
+ * Va DENTRO del párrafo del monto adeudado, así que no cambia el conteo de
+ * bloques (`\n\n`) del que depende la selección de template en Meta.
+ */
+export const CLAUSULA_INCREMENTO_DIARIO_MORA =
+	", y aumenta Q{incrementoDiarioMora} por cada día que pase";
+
+/**
+ * true si hay un aumento diario REAL que anunciar. "" (cartera no lo mandó,
+ * versión vieja del back) y "0.00" son lo mismo para el mensaje: no hay frase.
+ * El valor viene formateado es-GT, así que se le quitan los separadores de
+ * miles antes de compararlo.
+ */
+export function hayIncrementoDiarioMora(
+	valor: string | null | undefined,
+): boolean {
+	if (!valor) return false;
+	return Number(valor.replace(/,/g, "")) > 0;
+}
+
+/**
+ * Formatea a es-GT el incremento diario que manda cartera-back (un
+ * `Big.toFixed(2)`, p. ej. "1120.00" → "1,120.00"). "" cuando no hay nada que
+ * anunciar: cartera no lo mandó, no es un número, o es 0 (todas las cuotas ya
+ * topadas). El "" hace que la oración desaparezca sola en `interpolar`.
+ */
+export function formatearIncrementoDiarioMora(
+	valor: string | number | null | undefined,
+): string {
+	if (valor === null || valor === undefined || valor === "") return "";
+	const numero = Number(valor);
+	if (!Number.isFinite(numero) || numero <= 0) return "";
+	return numero.toLocaleString("es-GT", {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
+	});
+}
+
 export interface PlantillaMensaje {
 	id: string;
 	nombre: string;
@@ -568,7 +631,17 @@ export function interpolar(
 		? toCapitalCase(variables.clienteNombre)
 		: "";
 
-	return texto
+	// Sin aumento que anunciar (crédito con todas las cuotas ya en el techo, o
+	// cartera que no mandó el dato) la oración se borra entera: dejar
+	// "aumenta Q0.00 por cada día que pase" sería ruido, y dejar "aumenta Q."
+	// sería un mensaje roto.
+	const incrementoDiarioMora = variables.incrementoDiarioMora ?? "";
+	const base = hayIncrementoDiarioMora(incrementoDiarioMora)
+		? texto
+		: texto.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
+
+	return base
+		.replace(/{incrementoDiarioMora}/g, v(incrementoDiarioMora))
 		.replace(/{clienteNombre}/g, v(nombre))
 		.replace(/{fechaPago}/g, v(variables.fechaPago))
 		.replace(/{cuotaMensual}/g, v(variables.cuotaMensual))
@@ -695,7 +768,7 @@ ${COBROS_NO_REPLY_WARNING}
 		asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola {clienteNombre} 👋
-Tienes *1 cuota con atraso por un monto de Q{montoAdeudado}*.
+Tienes *1 cuota con atraso por un monto de Q{montoAdeudado}* al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 Es importante que realices tu pago lo antes posible para evitar mayores recargos en tu cuenta.
 
@@ -713,7 +786,7 @@ Es importante que realices tu pago lo antes posible para evitar mayores recargos
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola {clienteNombre},
-Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}*.
+Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}* al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 ⚠️ *En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.*
 
@@ -730,7 +803,7 @@ Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un mo
 		etapa: "mora_90",
 		asunto: "ÚLTIMO AVISO: Proceso jurídico - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
-		cuerpo: `Señor(a) {clienteNombre}, le informamos que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
+		cuerpo: `Señor(a) {clienteNombre}, le informamos que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.
 

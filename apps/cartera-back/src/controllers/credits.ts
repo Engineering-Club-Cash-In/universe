@@ -48,6 +48,12 @@ import {
   filtrarCuotasVencidasSinCobertura,
 } from "./registerPaymentPolicy";
 import {
+  diasAtrasoMora,
+  hoyGuatemala,
+  incrementoDiarioMora,
+  isOverdueInstallmentForMora,
+} from "./latefee";
+import {
   CREDIT_DETAIL_STATUSES,
   RESET_CREDIT_ERRORS,
   canResetCreditByStatus,
@@ -280,6 +286,60 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       currentCredit.creditos.cuota ?? 0
     );
 
+    // Cuánto le sube la mora a este crédito por cada día que pase (lo que
+    // sumará la próxima corrida del cron). El CRM lo usa para decirle al
+    // cliente "tu saldo de hoy es X y aumenta Y por día": con la mora
+    // proporcional el monto adeudado ya no es fijo dentro del mes, y un cliente
+    // que paga dos días después lo que se le cotizó deja residuo y la cuota no
+    // se cubre.
+    //
+    // Se consulta aparte y NO se reusa cuotasVencidasSinCerrar: esa lista trae
+    // una fila por (cuota, pago) y decide la cobertura por montos, mientras que
+    // la mora se cobra con el criterio del cron (isOverdueInstallmentForMora),
+    // que mira el flag `pagado` y la existencia de un pago aplicado. Usar el
+    // otro criterio daría un incremento que no cuadra con lo que el cron va a
+    // escribir. Es UNA sola query por crédito (este endpoint es de detalle, no
+    // corre en loop).
+    const cuotasParaMora = await db
+      .select({
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,
+        hasPaidPayment: sql<boolean>`EXISTS (
+          SELECT 1
+          FROM cartera.pagos_credito pc
+          WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
+            AND pc."paymentFalse" = false
+            AND pc.pagado = true
+            AND pc.validation_status IN ('validated', 'no_required')
+            AND COALESCE(pc.monto_aplicado, 0) > 0
+        )`,
+      })
+      .from(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, creditoId),
+          eq(cuotas_credito.pagado, false)
+        )
+      );
+
+    const hoyGT = hoyGuatemala();
+    const diasAtrasoDeCuotasEnMora = cuotasParaMora
+      .filter((c) =>
+        isOverdueInstallmentForMora(
+          { ...c, statusCredit: currentCredit.creditos.statusCredit },
+          hoyGT
+        )
+      )
+      .map((c) => diasAtrasoMora(c.fecha_vencimiento, hoyGT));
+
+    // String con 2 decimales, igual que el resto de montos del detalle.
+    // "0.00" cuando el crédito está en un estado excluido, sin capital, o no
+    // tiene ninguna cuota vencida por debajo del techo de 30 días.
+    const incrementoDiarioMoraStr = incrementoDiarioMora({
+      capital: currentCredit.creditos.capital ?? 0,
+      diasAtrasadosPorCuota: diasAtrasoDeCuotasEnMora,
+    }).toFixed(2);
+
     const cuotasPendientes = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
@@ -437,6 +497,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         cuotasEnValidacion,
         cuotasPagadas,
         moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
+        incrementoDiarioMora: incrementoDiarioMoraStr,
         mora: moraActual.length > 0 ? moraActual[0] : null,
         convenioActivo: null,
         cuotasEnConvenio: [],
@@ -567,6 +628,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       cuotasEnValidacion,
       cuotasPagadas,
       moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
+      incrementoDiarioMora: incrementoDiarioMoraStr,
       mora: moraActual.length > 0 ? moraActual[0] : null,
       convenioActivo:
         convenioActivo.length > 0

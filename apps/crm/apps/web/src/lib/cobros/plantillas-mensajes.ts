@@ -36,6 +36,18 @@ export interface VariablesPlantilla {
 	 */
 	expectativaMora: string;
 	expectativaMoraDiaria?: string;
+	/**
+	 * Lo que sube POR DÍA el crédito que YA está en mora. NO es lo mismo que
+	 * `expectativaMoraDiaria`: esa es el recargo de UNA cuota (1/30 de su cargo
+	 * mensual) y se le anuncia a un cliente AL DÍA; esta es lo que crece el
+	 * crédito completo, 1/30 por CADA cuota vencida que todavía no llegó a su
+	 * techo de 30 días (tres cuotas frescas crecen 3/30 por día; una cuota
+	 * abandonada hace 200 días ya está congelada y aporta 0). Lo calcula
+	 * cartera-back, que es el único que conoce los días de cada cuota, y llega
+	 * ya formateado del server. Vacío o "0.00" = no hay aumento que anunciar y
+	 * la oración desaparece sola.
+	 */
+	incrementoDiarioMora?: string;
 	/** Año del impuesto de circulación. Default: año actual en Guatemala. */
 	anioImpuesto?: string;
 	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
@@ -132,6 +144,31 @@ export const FRAGMENTO_EXPECTATIVA_MORA = "recargo por mora de Q";
  *  - "incluyendo moras" → aviso jurídico (su monto va sin "Q" delante, y esta
  *    es la parte de la oración que sobrevive a la interpolación).
  */
+/**
+ * Oración que anuncia cuánto sube el saldo por día en las plantillas de mora.
+ * `interpolar` la borra ENTERA cuando no hay aumento que anunciar: un crédito
+ * con todas sus cuotas ya en el techo de 30 días crece Q0.00 por día, y
+ * "aumenta Q0.00 por cada día que pase" no se le dice a nadie. Tiene que ser
+ * idéntica a la del archivo del server (apps/server/src/lib/cobros-plantillas.ts).
+ *
+ * Va DENTRO del párrafo del monto adeudado, así que no cambia el conteo de
+ * bloques (`\n\n`) del que depende la selección de template en Meta.
+ */
+export const CLAUSULA_INCREMENTO_DIARIO_MORA =
+	", y aumenta Q{incrementoDiarioMora} por cada día que pase";
+
+/**
+ * true si hay un aumento diario REAL que anunciar. "" (cartera no lo mandó) y
+ * "0.00" son lo mismo para el mensaje: no hay frase. El valor viene formateado
+ * es-GT, así que se le quitan los separadores de miles antes de compararlo.
+ */
+export function hayIncrementoDiarioMora(
+	valor: string | null | undefined,
+): boolean {
+	if (!valor) return false;
+	return Number(valor.replace(/,/g, "")) > 0;
+}
+
 export const FRAGMENTOS_MONTO_ADEUDADO = [
 	"cuota con atraso por un monto de Q",
 	"por un monto total de Q",
@@ -283,7 +320,19 @@ export function interpolar(
 		? toCapitalCase(variables.clienteNombre)
 		: "";
 
-	return texto
+	// Sin aumento que anunciar (todas las cuotas ya en el techo, o cartera que
+	// no mandó el dato) la oración se borra entera: "aumenta Q0.00 por cada día
+	// que pase" es ruido y "aumenta Q." es un mensaje roto.
+	const incrementoDiarioMora = variables.incrementoDiarioMora ?? "";
+	const base = hayIncrementoDiarioMora(incrementoDiarioMora)
+		? texto
+		: texto.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
+
+	return base
+		.replace(
+			/{incrementoDiarioMora}/g,
+			v(incrementoDiarioMora, "aumento diario de la mora"),
+		)
 		.replace(/{clienteNombre}/g, v(nombre, "nombre cliente"))
 		.replace(/{fechaPago}/g, v(variables.fechaPago, "fecha pago"))
 		.replace(/{cuotaMensual}/g, v(variables.cuotaMensual, "cuota mensual"))
@@ -475,7 +524,7 @@ ${COBROS_NO_REPLY_WARNING}
 		etapa: "mora_30",
 		asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
 		cuerpo: `Hola {clienteNombre} 👋
-Tienes 1 cuota con atraso por un monto de Q{montoAdeudado}.
+Tienes 1 cuota con atraso por un monto de Q{montoAdeudado} al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 Es importante que realices tu pago lo antes posible para evitar mayores recargos en tu cuenta.
 
@@ -485,7 +534,7 @@ Es importante que realices tu pago lo antes posible para evitar mayores recargos
 
 CashIn`,
 		cuerpoWhastapp: `Hola {clienteNombre} 👋
-Tienes *1 cuota con atraso por un monto de Q{montoAdeudado}*.
+Tienes *1 cuota con atraso por un monto de Q{montoAdeudado}* al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 Es importante que realices tu pago lo antes posible para evitar mayores recargos en tu cuenta.
 
@@ -502,7 +551,7 @@ Es importante que realices tu pago lo antes posible para evitar mayores recargos
 		etapa: "mora_60",
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
 		cuerpo: `Hola {clienteNombre},
-Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}.
+Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado} al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 ⚠️ En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.
 
@@ -512,7 +561,7 @@ Te informamos que actualmente tienes {cuotasAtraso} cuotas en atraso, por un mon
 
 CashIn`,
 		cuerpoWhastapp: `Hola {clienteNombre},
-Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}*.
+Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}* al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 ⚠️ *En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.*
 
@@ -528,12 +577,12 @@ Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un mo
 		nombre: "Aviso jurídico",
 		etapa: "mora_90",
 		asunto: "ÚLTIMO AVISO: Proceso jurídico - Vehículo {placa}",
-		cuerpo: `Señor(a) {clienteNombre}, por este medio hacemos de su conocimiento que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
+		cuerpo: `Señor(a) {clienteNombre}, por este medio hacemos de su conocimiento que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.
 
 Favor de comunicarse a los siguientes números: {telefonoAsesor} y 2234-1333. Nuestro horario de atención es de lunes a viernes en horario de 8:00 a 17:00 hrs.`,
-		cuerpoWhastapp: `Señor(a) {clienteNombre}, le informamos que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
+		cuerpoWhastapp: `Señor(a) {clienteNombre}, le informamos que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.
 

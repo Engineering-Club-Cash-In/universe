@@ -59,6 +59,7 @@ import {
 	fechaLimiteImpuestoVencida,
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
+	formatearIncrementoDiarioMora,
 	prepararExpectativaMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
@@ -2316,6 +2317,15 @@ export const cobrosRouter = {
 						creditoCompleto.credito.capital,
 						creditoCompleto.credito.statusCredit,
 					),
+					// {incrementoDiarioMora} de las plantillas de mora: lo que crece
+					// este crédito por día — 1/30 del cargo mensual por CADA cuota
+					// vencida que aún no llegó a su techo de 30 días. No es
+					// expectativaMoraDiaria (esa es una sola cuota): lo calcula
+					// cartera-back, que es el único que conoce los días de cada cuota.
+					// "" cuando ya no crece (todas topadas) o el estado está excluido.
+					incrementoDiarioMora: formatearIncrementoDiarioMora(
+						creditoCompleto.incrementoDiarioMora,
+					),
 					// {montoAdeudado} de las plantillas de mora (1 cuota, 2-3 cuotas,
 					// jurídico): saldo real de cada cuota vencida — recibo menos lo ya
 					// abonado, misma regla de cobertura que cartera — + mora. "" si no
@@ -3682,7 +3692,11 @@ export const cobrosRouter = {
 			// contando — y el mensaje diría "2 cuotas" con el monto de una.
 			const detallePorSifco = new Map<
 				string,
-				{ montoAdeudado: string; cuotasAtraso: number } | null
+				{
+					montoAdeudado: string;
+					cuotasAtraso: number;
+					incrementoDiarioMora: string;
+				} | null
 			>();
 			if (cuerpoBase.includes("{montoAdeudado}")) {
 				const sifcosElegibles = creditosFiltrados
@@ -3712,6 +3726,11 @@ export const cobrosRouter = {
 											detalle.credito.statusCredit,
 										),
 										cuotasAtraso: contarCuotasAtrasadasUnicas(cuotasDetalle),
+										// Del MISMO detalle que el monto: lo que ese saldo
+										// crece por día (ver {incrementoDiarioMora}).
+										incrementoDiarioMora: formatearIncrementoDiarioMora(
+											detalle.incrementoDiarioMora,
+										),
 									});
 								} catch (err) {
 									console.error(
@@ -3846,6 +3865,12 @@ export const cobrosRouter = {
 					nombreAsesor: asesor.nombre ?? "",
 					expectativaMora: expectativaMora.expectativaMora,
 					expectativaMoraDiaria: expectativaMora.expectativaMoraDiaria,
+					// Cuánto crece por día el saldo que el mensaje acaba de anunciar
+					// (mismo detalle, ver 4.b). Vacío = no crece y la oración del
+					// aumento se borra sola al interpolar; por eso NO se descarta el
+					// envío como con montoAdeudado: 0 es un valor legítimo (crédito
+					// con todas sus cuotas ya en el techo de 30 días).
+					incrementoDiarioMora: detalleCartera?.incrementoDiarioMora ?? "",
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad de cada crédito (Universales o G&T).
 					...seguroPorAseguradora(info?.insuranceProvider),

@@ -129,6 +129,7 @@ export function ContactoQuickAction({
 				telefonoAsesor={d.asesor?.telefono || ""}
 				expectativaMora={d.expectativaMora || ""}
 				expectativaMoraDiaria={d.expectativaMoraDiaria || ""}
+				incrementoDiarioMora={d.incrementoDiarioMora || ""}
 				aseguradora={d.aseguradora || ""}
 				cabinaSeguro={d.cabinaSeguro || ""}
 			/>

@@ -63,6 +63,7 @@ import {
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
+import { hayIncrementoDiarioMora } from "@/lib/cobros/plantillas-mensajes";
 import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -661,6 +662,18 @@ function RouteComponent() {
 												Number(caso.cuotaMensual || 0)
 										).toLocaleString()}
 									</p>
+									{/* La mora ya no es un bloque fijo del mes: sube todos los
+									    días. Sin este dato el asesor cotiza por teléfono el
+									    total de HOY, el cliente paga dos días después y queda
+									    un residuo que no cubre la cuota. No se muestra cuando
+									    no crece (todas las cuotas ya en su techo de 30 días). */}
+									{caso.cuotaConvenio == null &&
+										hayIncrementoDiarioMora(caso.incrementoDiarioMora) && (
+											<p className="text-muted-foreground text-xs">
+												Aumenta Q{caso.incrementoDiarioMora} por cada día que
+												pase
+											</p>
+										)}
 								</div>
 							</div>
 
@@ -1115,6 +1128,7 @@ function RouteComponent() {
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
 											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
+											incrementoDiarioMora={caso.incrementoDiarioMora || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
@@ -1149,6 +1163,7 @@ function RouteComponent() {
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
 											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
+											incrementoDiarioMora={caso.incrementoDiarioMora || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
@@ -1186,6 +1201,7 @@ function RouteComponent() {
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
 											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
+											incrementoDiarioMora={caso.incrementoDiarioMora || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>

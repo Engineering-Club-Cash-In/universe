@@ -157,6 +157,42 @@ function contratoVigente() {
 }
 
 /**
+ * Candado por oportunidad que comparten confirmar la firma y regenerar enlaces.
+ *
+ * Confirmar llama a cartera-back antes de pasar a 90%, y eso tarda: sin un
+ * candado común, una regeneración que entraba en ese rato todavía veía 85%,
+ * dejaba un contrato nuevo pendiente, y la confirmación lo marcaba firmado sin
+ * que nadie hubiera firmado ese documento. Es de transacción y no de fila: la
+ * confirmación lo tiene tomado mientras `closeOpportunity` escribe la
+ * oportunidad desde otras conexiones, y un `FOR UPDATE` la trabaría a sí misma.
+ */
+function claveDeFirma(opportunityId: string) {
+	return sql`hashtext(${`firma-oportunidad:${opportunityId}`}::text)`;
+}
+
+/**
+ * Corta antes de emitir nada en WeeTrust si ya hay una confirmación de firma
+ * en curso. Es sólo para avisar a tiempo: lo que garantiza que no se cuele es
+ * que la regeneración vuelve a tomar el candado al guardar.
+ */
+async function exigirQueNoSeEsteConfirmando(
+	opportunityId: string,
+): Promise<void> {
+	const libre = await db.transaction(async (tx) => {
+		const resultado = await tx.execute<{ libre: boolean }>(
+			sql`select pg_try_advisory_xact_lock(${claveDeFirma(opportunityId)}) as libre`,
+		);
+		return resultado.rows[0]?.libre === true;
+	});
+	if (!libre) {
+		throw new ORPCError("CONFLICT", {
+			message:
+				"Se está confirmando la firma de esta oportunidad. Recargá en un momento.",
+		});
+	}
+}
+
+/**
  * Corta si la oportunidad ya no está en una etapa que permita esta acción.
  *
  * Reemplazar es de jurídico y sólo en 80%; regenerar lo hace análisis y va en
@@ -1140,100 +1176,121 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Primero: cerrar la oportunidad (crear crédito en cartera-back, cliente, contrato)
-			// Si falla, la oportunidad se queda en 85% y no se mueve a 90%
-			const closeResult = await closeOpportunity({
-				opportunityId: input.opportunityId,
-				userId: context.userId,
-			});
-
-			if (!closeResult.success) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: closeResult.error || "Error al cerrar la oportunidad",
-				});
-			}
-
-			// Solo si cartera-back respondió OK: marcar contratos + mover a 90%
-			await auditedTransaction(async (tx) => {
-				// Re-verificar que la oportunidad sigue en 85% (previene race condition)
-				const [currentOpp] = await tx
-					.select({ stageId: opportunities.stageId })
+			// Desde acá, con el candado de firma de la oportunidad tomado hasta que
+			// quede en 90%: una regeneración de enlaces que entre mientras tanto espera
+			// y después ve el 90%, en vez de dejar un contrato nuevo que esta
+			// confirmación marcaría firmado. También frena una segunda confirmación
+			// antes de que vuelva a cerrar la oportunidad en cartera-back.
+			await db.transaction(async (candado) => {
+				await candado.execute(
+					sql`select pg_advisory_xact_lock(${claveDeFirma(input.opportunityId)})`,
+				);
+				const [etapaConCandado] = await candado
+					.select({ porcentaje: salesStages.closurePercentage })
 					.from(opportunities)
-					.where(eq(opportunities.id, input.opportunityId))
-					.limit(1);
-
-				const [currentStageInTx] = await tx
-					.select({ closurePercentage: salesStages.closurePercentage })
-					.from(salesStages)
-					.where(eq(salesStages.id, currentOpp.stageId))
-					.limit(1);
-
-				if (currentStageInTx.closurePercentage !== 85) {
-					throw new ORPCError("BAD_REQUEST", {
+					.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+					.where(eq(opportunities.id, input.opportunityId));
+				if (etapaConCandado?.porcentaje !== 85) {
+					throw new ORPCError("CONFLICT", {
 						message: "La oportunidad ya fue procesada por otro usuario.",
 					});
 				}
 
-				// Marcar todos los contratos pending como signed
-				const confirmados = await tx
-					.update(generatedLegalContracts)
-					.set({
-						status: "signed",
-						updatedAt: new Date(),
-					})
-					.where(
-						and(
-							eq(generatedLegalContracts.opportunityId, input.opportunityId),
-							eq(generatedLegalContracts.status, "pending"),
-							// Un original reclamado por un reemplazo ya no es el vigente:
-							// confirmarlo le inventaba firmas a un documento descartado.
-							isNull(generatedLegalContracts.replacedByContractId),
-						),
-					)
-					.returning({ id: generatedLegalContracts.id });
+				// Primero: cerrar la oportunidad (crear crédito en cartera-back, cliente, contrato)
+				// Si falla, la oportunidad se queda en 85% y no se mueve a 90%
+				const closeResult = await closeOpportunity({
+					opportunityId: input.opportunityId,
+					userId: context.userId,
+				});
 
-				// Y a cada firmante: si no, la ficha mostraba el contrato firmado con
-				// todas sus personas todavía "pendiente".
-				if (confirmados.length > 0) {
-					await tx
-						.update(contractSignatories)
+				if (!closeResult.success) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: closeResult.error || "Error al cerrar la oportunidad",
+					});
+				}
+
+				// Solo si cartera-back respondió OK: marcar contratos + mover a 90%
+				await auditedTransaction(async (tx) => {
+					// Re-verificar que la oportunidad sigue en 85% (previene race condition)
+					const [currentOpp] = await tx
+						.select({ stageId: opportunities.stageId })
+						.from(opportunities)
+						.where(eq(opportunities.id, input.opportunityId))
+						.limit(1);
+
+					const [currentStageInTx] = await tx
+						.select({ closurePercentage: salesStages.closurePercentage })
+						.from(salesStages)
+						.where(eq(salesStages.id, currentOpp.stageId))
+						.limit(1);
+
+					if (currentStageInTx.closurePercentage !== 85) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: "La oportunidad ya fue procesada por otro usuario.",
+						});
+					}
+
+					// Marcar todos los contratos pending como signed
+					const confirmados = await tx
+						.update(generatedLegalContracts)
 						.set({
 							status: "signed",
-							signedAt: sql`coalesce(${contractSignatories.signedAt}, now())`,
 							updatedAt: new Date(),
 						})
 						.where(
 							and(
-								inArray(
-									contractSignatories.contractId,
-									confirmados.map((c) => c.id),
-								),
-								eq(contractSignatories.status, "pending"),
+								eq(generatedLegalContracts.opportunityId, input.opportunityId),
+								eq(generatedLegalContracts.status, "pending"),
+								// Un original reclamado por un reemplazo ya no es el vigente:
+								// confirmarlo le inventaba firmas a un documento descartado.
+								isNull(generatedLegalContracts.replacedByContractId),
 							),
-						);
-				}
+						)
+						.returning({ id: generatedLegalContracts.id });
 
-				// Mover oportunidad a 90% (closeOpportunity ya seteó status "won")
-				await tx
-					.update(opportunities)
-					.set({
-						stageId: targetStage.id,
-						updatedAt: new Date(),
-					})
-					.where(eq(opportunities.id, input.opportunityId));
-				auditRecord({
-					entity: "opportunity",
-					id: input.opportunityId,
-					action: "confirm_contracts_signed",
-				});
+					// Y a cada firmante: si no, la ficha mostraba el contrato firmado con
+					// todas sus personas todavía "pendiente".
+					if (confirmados.length > 0) {
+						await tx
+							.update(contractSignatories)
+							.set({
+								status: "signed",
+								signedAt: sql`coalesce(${contractSignatories.signedAt}, now())`,
+								updatedAt: new Date(),
+							})
+							.where(
+								and(
+									inArray(
+										contractSignatories.contractId,
+										confirmados.map((c) => c.id),
+									),
+									eq(contractSignatories.status, "pending"),
+								),
+							);
+					}
 
-				// Registrar en historial
-				await tx.insert(opportunityStageHistory).values({
-					opportunityId: input.opportunityId,
-					fromStageId: opportunity.stageId,
-					toStageId: targetStage.id,
-					changedBy: context.userId,
-					reason: "Contratos firmados confirmados - Avanza a formalización",
+					// Mover oportunidad a 90% (closeOpportunity ya seteó status "won")
+					await tx
+						.update(opportunities)
+						.set({
+							stageId: targetStage.id,
+							updatedAt: new Date(),
+						})
+						.where(eq(opportunities.id, input.opportunityId));
+					auditRecord({
+						entity: "opportunity",
+						id: input.opportunityId,
+						action: "confirm_contracts_signed",
+					});
+
+					// Registrar en historial
+					await tx.insert(opportunityStageHistory).values({
+						opportunityId: input.opportunityId,
+						fromStageId: opportunity.stageId,
+						toStageId: targetStage.id,
+						changedBy: context.userId,
+						reason: "Contratos firmados confirmados - Avanza a formalización",
+					});
 				});
 			});
 
@@ -1376,6 +1433,7 @@ export const legalContractsRouter = {
 
 			if (contract.opportunityId) {
 				await exigirEtapaDeFirma(contract.opportunityId, "regenerar");
+				await exigirQueNoSeEsteConfirmando(contract.opportunityId);
 			}
 
 			// Los mismos firmantes, con su rol. No se recalculan desde la
@@ -1456,7 +1514,12 @@ export const legalContractsRouter = {
 					// La etapa se vuelve a mirar acá, con la oportunidad bloqueada: la
 					// reemisión en WeeTrust tarda, y si mientras tanto alguien la pasó
 					// a 90% se colaba un contrato pendiente en una oportunidad cerrada.
+					// Antes, el candado de firma: si hay una confirmación en curso se
+					// espera a que termine y acá ya se ve el 90%.
 					if (contract.opportunityId) {
+						await tx.execute(
+							sql`select pg_advisory_xact_lock(${claveDeFirma(contract.opportunityId)})`,
+						);
 						const [etapa] = await tx
 							.select({ porcentaje: salesStages.closurePercentage })
 							.from(opportunities)

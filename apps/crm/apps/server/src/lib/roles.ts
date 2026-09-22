@@ -255,6 +255,18 @@ export const PERMISSIONS = {
 		role === ROLES.INVESTMENT_ADVISOR_SR ||
 		role === ROLES.INVESTMENT_MANAGER,
 
+	/**
+	 * Regenerar los enlaces de firma de un contrato de inversionista.
+	 *
+	 * Más restringido que verlos: emite otro documento en WeeTrust y deja
+	 * muertos los enlaces que el inversionista ya tenía. Los asesores ven y
+	 * copian; regenerar es de la gerencia de inversiones o de jurídico.
+	 */
+	canRegenerateInvestorContractLinks: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.INVESTMENT_MANAGER,
+
 	canCreateLegalContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 

@@ -308,6 +308,12 @@ export const legalAppRouter = {
 		investorContractsRouter.countOpenInvestorContractBatches,
 	generateInvestorContracts: investorContractsRouter.generateInvestorContracts,
 	listInvestorContracts: investorContractsRouter.listInvestorContracts,
+	getInvestorContractSigningStatus:
+		investorContractsRouter.getInvestorContractSigningStatus,
+	resendInvestorContractSigningEmails:
+		investorContractsRouter.resendInvestorContractSigningEmails,
+	refreshInvestorContractSigningLinks:
+		investorContractsRouter.refreshInvestorContractSigningLinks,
 };
 
 /**

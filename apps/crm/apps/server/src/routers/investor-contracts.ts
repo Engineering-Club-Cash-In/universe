@@ -9,17 +9,37 @@ import {
 } from "../db/schema/legal-contracts";
 import { filasDeFirmantes, linksPorRol } from "../lib/contract-signatories";
 import { getSignatureMode } from "../lib/contract-signature-mode";
+import {
+	sincronizarEstadoDeFirma,
+	tieneFirmas,
+} from "../lib/contrato-estado-firma";
+import {
+	etiquetaDeMotivo,
+	MOTIVOS_DE_ANULACION_KEYS,
+} from "../lib/contratos-anulacion";
+import {
+	aplicarCorreosDePrueba,
+	correoRepetido,
+	correosDePruebaFaltantes,
+} from "../lib/contratos-correos-prueba";
 import { esContratoDeInversion } from "../lib/contratos-inversiones";
 import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
 import { espejarContratoEnCartera } from "../lib/espejo-contratos-inversionista";
 import { firmantesDeContratoDeInversion } from "../lib/firmantes-inversionista";
+import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import { juridicoProcedure, viewInvestorContractsProcedure } from "../lib/orpc";
+import { PERMISSIONS } from "../lib/roles";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import {
 	borrarDocumentoDeWeeTrust,
+	consultarEstadoFirma,
 	type DocumentResult,
+	type EstadoDocumentoFirma,
 	generateContractsBatch,
 	motivoDeFalla,
+	reemitirContratoEnWeeTrust,
+	reenviarCorreoDeFirma,
+	type SignerRole,
 } from "../services/legal-docs-api";
 
 /**
@@ -70,6 +90,42 @@ async function bateriaAbierta(batchId: string) {
 	}
 
 	return bateria;
+}
+
+/**
+ * El contrato, siempre que sea de un inversionista y tenga documento en WeeTrust.
+ *
+ * Se corta acá y no más adelante para no dejar que un contrato de ventas entre
+ * por las acciones de inversiones: los permisos son de otra gente.
+ */
+async function contratoDeInversionista(contractId: string): Promise<{
+	contrato: typeof generatedLegalContracts.$inferSelect;
+	documentID: string;
+}> {
+	const [contrato] = await db
+		.select()
+		.from(generatedLegalContracts)
+		.where(eq(generatedLegalContracts.id, contractId))
+		.limit(1);
+
+	if (!contrato) {
+		throw new ORPCError("NOT_FOUND", { message: "Contrato no encontrado" });
+	}
+
+	if (!contrato.investorId) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: "Ese contrato no es de un inversionista.",
+		});
+	}
+
+	if (!contrato.weetrustDocumentId) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"Este contrato no tiene documento en WeeTrust. Hay que emitirlo de nuevo.",
+		});
+	}
+
+	return { contrato, documentID: contrato.weetrustDocumentId };
 }
 
 /**
@@ -612,6 +668,319 @@ export const investorContractsRouter = {
 				...contrato,
 				firmantes: porContrato.get(contrato.id) ?? [],
 			}));
+		}),
+
+	/**
+	 * Le pregunta a WeeTrust cómo va la firma y lo baja a la base.
+	 *
+	 * Lo usa inversiones desde la ficha: los webhooks pueden no estar
+	 * registrados, y sin esto la única forma de saber si alguien firmó era entrar
+	 * a WeeTrust.
+	 */
+	getInvestorContractSigningStatus: viewInvestorContractsProcedure
+		.input(z.object({ contractId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const { documentID } = await contratoDeInversionista(input.contractId);
+
+			let estado: EstadoDocumentoFirma;
+			try {
+				estado = await consultarEstadoFirma(documentID);
+			} catch (error) {
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						error instanceof Error
+							? error.message
+							: "No se pudo consultar el estado de firma",
+				});
+			}
+
+			// Escribe el estado y, de paso, lo copia a cartera: es la única puerta.
+			await sincronizarEstadoDeFirma(input.contractId, estado);
+			return estado;
+		}),
+
+	/**
+	 * Reenvía la invitación de firma de WeeTrust.
+	 *
+	 * Para el caso de siempre: al inversionista se le perdió el correo. No
+	 * cambia el documento ni los enlaces, así que quien ya firmó sigue firmado.
+	 */
+	resendInvestorContractSigningEmails: viewInvestorContractsProcedure
+		.input(z.object({ contractId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const { contrato, documentID } = await contratoDeInversionista(
+				input.contractId,
+			);
+
+			if (contrato.status === "cancelled") {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Este contrato está anulado: sus enlaces ya no sirven.",
+				});
+			}
+
+			try {
+				await reenviarCorreoDeFirma(documentID);
+			} catch (error) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						error instanceof Error
+							? error.message
+							: "No se pudo reenviar el correo de firma",
+				});
+			}
+
+			return { success: true, message: "Invitación reenviada" };
+		}),
+
+	/**
+	 * Emite el MISMO contrato con enlaces nuevos.
+	 *
+	 * Es la salida para los dos casos que pasan: el enlace venció, o la persona
+	 * falló la verificación de identidad y necesita volver a entrar. WeeTrust no
+	 * sabe renovar los enlaces de un documento con todos firmados, así que se
+	 * emite un documento nuevo con el mismo PDF y el anterior queda anulado
+	 * apuntando al que lo reemplaza.
+	 *
+	 * La fila vieja NO se borra: es el registro de quién había firmado qué.
+	 */
+	refreshInvestorContractSigningLinks: viewInvestorContractsProcedure
+		.input(
+			z.object({
+				contractId: z.string().uuid(),
+				motivo: z.enum(MOTIVOS_DE_ANULACION_KEYS),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Ver los contratos lo puede hacer cualquiera de inversiones; regenerar
+			// no: emite otro documento y deja muertos los enlaces que el
+			// inversionista ya tenía.
+			if (!PERMISSIONS.canRegenerateInvestorContractLinks(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message:
+						"Sólo la gerencia de inversiones o jurídico pueden regenerar los enlaces",
+				});
+			}
+
+			const { contrato } = await contratoDeInversionista(input.contractId);
+
+			if (contrato.status === "cancelled") {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Este contrato está anulado: no se puede regenerar.",
+				});
+			}
+
+			// La key de R2 del PDF. Hay contratos que guardaron en `pdfLink` una URL
+			// firmada (la que se muestra, que vence) en vez de la key: con una URL
+			// entera como key, R2 no encuentra nada.
+			const respuesta = contrato.apiResponse as { r2Key?: unknown } | null;
+			const r2KeyDelPdf =
+				contrato.pdfLink && !/^https?:\/\//i.test(contrato.pdfLink)
+					? contrato.pdfLink
+					: typeof respuesta?.r2Key === "string"
+						? respuesta.r2Key
+						: null;
+
+			if (!r2KeyDelPdf) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato no tiene el PDF guardado, así que no se puede reemitir. Hay que volver a emitirlo desde jurídico.",
+				});
+			}
+
+			// Los mismos firmantes que tenía, con su rol: el documento es el que es
+			// y tiene que salir con la misma gente, aunque después alguien haya
+			// editado un contacto.
+			const firmantes = await db
+				.select()
+				.from(contractSignatories)
+				.where(eq(contractSignatories.contractId, input.contractId))
+				.orderBy(contractSignatories.position);
+
+			if (firmantes.length === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato no tiene firmantes guardados: hay que emitirlo de nuevo desde jurídico.",
+				});
+			}
+
+			const guardados = firmantes.map((f) => ({
+				role: f.role as SignerRole,
+				email: f.email,
+				name: f.name,
+			}));
+
+			// En modo prueba se redirige igual que al generar: un contrato emitido
+			// con correos reales le mandaría la invitación al inversionista.
+			let signers = guardados;
+			if (isTestModeEnabled()) {
+				const faltan = correosDePruebaFaltantes(guardados);
+				if (faltan.length > 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `TEST_MESSAGE=true pero falta configurar ${faltan.join(" y ")}: los enlaces saldrían a los correos reales.`,
+					});
+				}
+				signers = aplicarCorreosDePrueba(guardados);
+				const repetido = correoRepetido(signers);
+				if (repetido) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `TEST_MESSAGE=true: el correo de prueba ${repetido} quedaría para dos firmantes.`,
+					});
+				}
+			}
+
+			const resultado = await reemitirContratoEnWeeTrust({
+				r2Key: r2KeyDelPdf,
+				contractType: contrato.contractType,
+				filenamePrefix: contrato.contractName,
+				signers,
+				observers: CONTRATOS_OBSERVADORES,
+			});
+
+			const falla = motivoDeFalla(resultado);
+			if (falla) {
+				throw new ORPCError("BAD_REQUEST", { message: falla });
+			}
+
+			const ahora = new Date();
+			const motivo = etiquetaDeMotivo(input.motivo);
+
+			// El reemitido va en una fila NUEVA y se guarda antes de tocar el viejo:
+			// si el guardado fallara con el viejo ya borrado, el CRM apuntaría a un
+			// documento inexistente. Si falla, se borra el nuevo en WeeTrust para
+			// que un reintento no deje dos vivos.
+			let nuevoId: string;
+			try {
+				nuevoId = await db.transaction(async (tx) => {
+					// Dos regeneraciones a la vez emitían dos documentos y dejaban los
+					// dos vigentes. Se bloquea la fila y se vuelve a mirar: si otra ya
+					// lo anuló, ésta pierde y el catch borra el documento que acaba de
+					// emitir.
+					const [original] = await tx
+						.select({
+							status: generatedLegalContracts.status,
+							reemplazadoPor: generatedLegalContracts.replacedByContractId,
+						})
+						.from(generatedLegalContracts)
+						.where(eq(generatedLegalContracts.id, input.contractId))
+						.for("update")
+						.limit(1);
+
+					if (
+						!original ||
+						original.status === "cancelled" ||
+						original.reemplazadoPor
+					) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Otra persona acaba de regenerar este contrato. Recargá para ver el nuevo.",
+						});
+					}
+
+					const [nuevo] = await tx
+						.insert(generatedLegalContracts)
+						.values({
+							investorId: contrato.investorId,
+							batchId: contrato.batchId,
+							contractType: contrato.contractType,
+							contractName: contrato.contractName,
+							templateId: contrato.templateId,
+							apiResponse: resultado,
+							pdfLink: r2KeyDelPdf,
+							signingProvider: resultado.signingProvider ?? "weetrust",
+							signatureMode: contrato.signatureMode,
+							generatedBy: context.userId,
+							generatedAt: ahora,
+							...linksPorRol(resultado.signatories, resultado.signing_links),
+							weetrustDocumentId: resultado.documentID ?? null,
+							observerUrl: resultado.observerUrl ?? null,
+							status: "pending",
+							lastRegenerationReason: motivo,
+							lastRegeneratedAt: ahora,
+							signingStatusCheckedAt: ahora,
+							updatedAt: ahora,
+						})
+						.returning({ id: generatedLegalContracts.id });
+
+					if (!nuevo) {
+						throw new ORPCError("INTERNAL_SERVER_ERROR", {
+							message: "No se pudo guardar el contrato reemitido",
+						});
+					}
+
+					// Los firmantes en la misma transacción: sin ellos el contrato nuevo
+					// no se puede sincronizar ni volver a regenerar.
+					const filas = filasDeFirmantes(nuevo.id, resultado.signatories);
+					if (filas.length === 0) {
+						throw new ORPCError("INTERNAL_SERVER_ERROR", {
+							message:
+								"WeeTrust no devolvió los firmantes del documento reemitido.",
+						});
+					}
+					await tx.insert(contractSignatories).values(filas);
+
+					await tx
+						.update(generatedLegalContracts)
+						.set({
+							status: "cancelled",
+							cancellationReason: `Regenerado: ${motivo}`,
+							cancelledAt: ahora,
+							replacedByContractId: nuevo.id,
+							updatedAt: ahora,
+						})
+						.where(eq(generatedLegalContracts.id, input.contractId));
+
+					return nuevo.id;
+				});
+			} catch (error) {
+				if (resultado.documentID) {
+					await borrarDocumentoDeWeeTrust(resultado.documentID).catch((e) =>
+						console.error(
+							`[refreshInvestorContractSigningLinks] no se pudo borrar el reemitido ${resultado.documentID}:`,
+							e,
+						),
+					);
+				}
+				throw error;
+			}
+
+			// Recién ahora el documento viejo. Su fila ya quedó anulada y se
+			// conserva siempre: lo que diga WeeTrust antes de borrar es una foto, y
+			// alguien puede firmar entre esa consulta y el borrado.
+			if (contrato.status !== "signed" && contrato.weetrustDocumentId) {
+				const conFirmasParciales = await tieneFirmas(
+					input.contractId,
+					contrato.weetrustDocumentId,
+				);
+				let detalle: string;
+				try {
+					await borrarDocumentoDeWeeTrust(contrato.weetrustDocumentId);
+					detalle = conFirmasParciales
+						? "tenía firmas parciales; el documento se borró en WeeTrust"
+						: "el documento se borró en WeeTrust";
+				} catch (error) {
+					console.error(
+						`[refreshInvestorContractSigningLinks] no se pudo borrar ${contrato.weetrustDocumentId}:`,
+						error,
+					);
+					detalle = "no se pudo borrar en WeeTrust: hay que borrarlo a mano";
+				}
+				await db
+					.update(generatedLegalContracts)
+					.set({ cancellationReason: `Regenerado: ${motivo} (${detalle})` })
+					.where(eq(generatedLegalContracts.id, input.contractId));
+			}
+
+			// El espejo de cartera tiene que apuntar al documento nuevo: si no, la
+			// ficha del inversionista seguiría mostrando enlaces muertos.
+			void espejarContratoEnCartera(nuevoId, context.userId);
+
+			return {
+				success: true,
+				message:
+					"Documento reemitido con enlaces nuevos; el anterior queda anulado",
+				contractId: nuevoId,
+				enlaces: resultado.signing_links?.length ?? 0,
+			};
 		}),
 
 	/** Cuántas baterías esperan, para el contador de la pantalla de jurídico. */

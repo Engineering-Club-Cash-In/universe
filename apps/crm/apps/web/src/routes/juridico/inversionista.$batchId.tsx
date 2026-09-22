@@ -95,13 +95,15 @@ function RouteComponent() {
 
 	const bateria = bateriaQuery.data;
 
-	// De quién es el DPI con el que se piden los campos del contrato: en una
-	// sociedad firma su representante legal (`dpi_rep_legal` en cartera), no la
-	// empresa. Jurídico igual puede corregirlo.
+	// De quién es el DPI con el que se piden los campos del contrato.
+	//
+	// Si cartera tiene el del representante legal, es ese: cuando está cargado es
+	// porque hay alguien que firma por el inversionista. Si no, el del
+	// inversionista. No se decide por la categoría: una sociedad puede no tener
+	// cargado el del representante, y el campo quedaría vacío teniendo uno bueno
+	// a mano. Jurídico igual puede corregirlo.
 	const dpiDeCartera =
-		categoria === "sociedad"
-			? (bateria?.investorDpiRepLegal ?? bateria?.investorDpi ?? "")
-			: (bateria?.investorDpi ?? "");
+		bateria?.investorDpiRepLegal?.trim() || bateria?.investorDpi?.trim() || "";
 	const dpiEnUso = dpiTocado ? dpi : dpiDeCartera;
 
 	const documentTypes = contractTypesQuery.data?.data ?? [];
@@ -340,11 +342,11 @@ function RouteComponent() {
 							placeholder="13 dígitos"
 						/>
 						<p className="text-muted-foreground text-xs">
-							{categoria === "sociedad"
-								? bateria.investorDpiRepLegal
-									? "Es el del representante legal, como lo tiene cartera."
-									: "Cartera no tiene el DPI del representante legal: cargalo acá."
-								: "Es el del inversionista, como lo tiene cartera."}
+							{bateria.investorDpiRepLegal?.trim()
+								? "Es el del representante legal, como lo tiene cartera."
+								: dpiDeCartera
+									? "Es el del inversionista: cartera no tiene el de un representante legal."
+									: "Cartera no tiene ningún DPI de esta persona: cargalo acá."}
 						</p>
 					</div>
 					<div className="space-y-1 md:col-span-2">

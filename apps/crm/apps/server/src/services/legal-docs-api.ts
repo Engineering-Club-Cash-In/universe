@@ -271,6 +271,7 @@ export async function generateContractsBatch(
 			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
 		},
 		body: JSON.stringify(payload),
+		signal: AbortSignal.timeout(TOPE_GENERACION_MS),
 	});
 
 	if (!response.ok) {
@@ -395,6 +396,8 @@ export interface EstadoDocumentoFirma {
  */
 const TOPE_CONSULTA_MS = 30_000;
 const TOPE_CON_PDF_MS = 120_000;
+/** Generar convierte a PDF varios documentos; es lo más lento que hace. */
+const TOPE_GENERACION_MS = 180_000;
 
 function secretoParaElGenerador(): Record<string, string> {
 	return {

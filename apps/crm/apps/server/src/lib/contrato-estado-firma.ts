@@ -8,7 +8,6 @@ import {
 	consultarEstadoFirma,
 	type EstadoDocumentoFirma,
 } from "../services/legal-docs-api";
-import { alguienFirmo } from "./contract-signatories";
 
 /**
  * Baja a la base lo que WeeTrust dice de un documento.
@@ -129,33 +128,30 @@ export async function contratoPorDocumentID(documentID: string) {
 }
 
 /**
- * Si alguien ya firmó, preguntándole a WeeTrust y no sólo a la base.
+ * Cómo está el documento en WeeTrust, no en la base.
  *
- * Los webhooks pueden no estar registrados y nadie tiene por qué haber
- * apretado "Actualizar estado": la base puede decir que nadie firmó cuando
- * en WeeTrust ya hay una firma. Al anular un contrato se consulta en vivo
- * para que el motivo diga si tenía firmas parciales. Si WeeTrust no responde,
- * se asume que sí: mejor que alguien lo revise de más a que no sepa de una
- * firma. La fila no depende de esto: la de un documento de WeeTrust se
- * conserva siempre.
+ * El estado local "firmado" no prueba que allá esté completo: lo pone también
+ * la confirmación a mano, que no consulta a WeeTrust. Si se borrara la
+ * distinción, un contrato confirmado a mano —pero pendiente allá— se anularía
+ * sin borrarlo, y sus enlaces seguirían firmando un documento descartado.
+ *
+ * Devuelve `null` si WeeTrust no contesta: quien llame decide qué asumir.
  */
-export async function tieneFirmas(
-	contractId: string,
-	documentID: string | null,
-): Promise<boolean> {
-	if (await alguienFirmo(contractId)) return true;
-	if (!documentID) return false;
+export async function estadoEnWeeTrust(
+	documentID: string,
+): Promise<{ completo: boolean; conFirmas: boolean } | null> {
 	try {
 		const estado = await consultarEstadoFirma(documentID);
-		return (
-			estado.status === "COMPLETED" ||
-			estado.signatories.some((f) => f.isSigned)
-		);
+		const completo = estado.status === "COMPLETED";
+		return {
+			completo,
+			conFirmas: completo || estado.signatories.some((f) => f.isSigned),
+		};
 	} catch (error) {
 		console.warn(
-			`[tieneFirmas] no se pudo consultar ${documentID}; se conserva la fila por las dudas:`,
+			`[estadoEnWeeTrust] no se pudo consultar ${documentID}:`,
 			error,
 		);
-		return true;
+		return null;
 	}
 }

@@ -28,6 +28,7 @@ import {
 	resolveLegacyContractGender,
 } from "../lib/contract-generation-gender";
 import {
+	alguienFirmo,
 	type FirmanteEnviado,
 	filasDeFirmantes,
 	linksPorRol,
@@ -36,7 +37,7 @@ import {
 	esFirmaFisica,
 	getSignatureMode,
 } from "../lib/contract-signature-mode";
-import { tieneFirmas } from "../lib/contrato-estado-firma";
+import { estadoEnWeeTrust } from "../lib/contrato-estado-firma";
 import {
 	ETAPAS_POR_ACCION,
 	etiquetaDeMotivo,
@@ -421,9 +422,19 @@ export async function anularContratoReemplazado(
 	// Completo: WeeTrust no deja borrarlo. Con firmas parciales sí se puede, y
 	// se borra igual (si no, los que faltan seguirían pudiendo firmar un
 	// documento reemplazado). Si hubo firmas sólo cambia lo que dice el motivo.
-	const completo = viejo.status === "signed";
-	const conFirmas =
-		completo || (await tieneFirmas(contractId, viejo.weetrustDocumentId));
+	//
+	// Quién lo dice importa: el estado local "firmado" lo pone también la
+	// confirmación a mano, que no consulta a WeeTrust. Si se le creyera, un
+	// contrato confirmado así —pero pendiente allá— se anularía sin borrarlo y
+	// sus enlaces seguirían firmando. Así que se pregunta, y si WeeTrust no
+	// contesta se intenta borrar igual: fallar es barato, dejarlo vivo no.
+	const estadoAlla = viejo.weetrustDocumentId
+		? await estadoEnWeeTrust(viejo.weetrustDocumentId)
+		: null;
+	const completo = estadoAlla?.completo ?? false;
+	const conFirmas = viejo.weetrustDocumentId
+		? (estadoAlla?.conFirmas ?? true)
+		: await alguienFirmo(contractId);
 	let borradoAlla = !viejo.weetrustDocumentId;
 
 	if (!completo && viejo.weetrustDocumentId) {
@@ -1071,6 +1082,14 @@ export const contractGenerationRouter = {
 	generateContractsDirect: juridicoProcedure
 		.input(
 			z.object({
+				/**
+				 * La oportunidad para la que se generan. Es opcional porque el camino
+				 * viejo no la mandaba, pero con ella se valida la etapa y se toma el
+				 * candado ANTES de crear nada en WeeTrust: si no, los documentos ya
+				 * salían con sus invitaciones y recién al enlazarlos se descubría que
+				 * la oportunidad había cambiado, y había que borrarlos.
+				 */
+				opportunityId: z.string().uuid().optional(),
 				contracts: z.array(
 					z.object({
 						contractType: z.string(),
@@ -1129,10 +1148,20 @@ export const contractGenerationRouter = {
 					},
 				}));
 
-				// Llamar a la API de generación de contratos
-				const apiResult = await generateContractsBatch({
-					contracts: contractsWithPlural,
-				});
+				// Generar con el candado de la oportunidad tomado y la etapa ya
+				// revisada: WeeTrust manda las invitaciones apenas se crea cada
+				// documento, y enterarse después (al enlazar) obligaba a borrarlos
+				// dejando al cliente con correos muertos. La llamada al generador
+				// tiene tope, así que el candado no se queda tomado si se cuelga.
+				const apiResult = await conCandadoDeFirma(
+					input.opportunityId ?? null,
+					async () => {
+						if (input.opportunityId) {
+							await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+						}
+						return generateContractsBatch({ contracts: contractsWithPlural });
+					},
+				);
 
 				// Transformar resultados al formato esperado por el frontend
 				const results: Array<{
@@ -1717,10 +1746,16 @@ export const contractGenerationRouter = {
 					};
 				});
 
-				// 3. Generar los nuevos contratos
-				const apiResult = await generateContractsBatch({
-					contracts: contractsWithNewDate,
-				});
+				// 3. Generar los nuevos contratos, con el candado tomado y la etapa
+				// revisada de nuevo: igual que al generar desde el wizard, WeeTrust
+				// manda las invitaciones apenas crea cada documento.
+				const apiResult = await conCandadoDeFirma(
+					input.opportunityId,
+					async () => {
+						await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+						return generateContractsBatch({ contracts: contractsWithNewDate });
+					},
+				);
 
 				if (!apiResult.results || apiResult.results.length === 0) {
 					throw new ORPCError("INTERNAL_SERVER_ERROR", {

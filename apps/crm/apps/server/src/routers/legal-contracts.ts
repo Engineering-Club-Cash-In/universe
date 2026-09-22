@@ -22,8 +22,8 @@ import {
 } from "../lib/contract-signatories";
 import { getSignatureMode } from "../lib/contract-signature-mode";
 import {
+	estadoEnWeeTrust,
 	sincronizarEstadoDeFirma,
-	tieneFirmas,
 } from "../lib/contrato-estado-firma";
 import {
 	type AccionSobreContrato,
@@ -179,13 +179,25 @@ function estaVigente(contrato: {
 async function eliminarContrato(
 	contrato: typeof generatedLegalContracts.$inferSelect,
 	motivo: string,
+	/**
+	 * Exigir que la oportunidad siga en la etapa de jurídico. Lo pide quien
+	 * borra desde la ficha: la pantalla pudo quedar abierta desde antes y el
+	 * botón escondido no frena un pedido ya cargado.
+	 */
+	exigirEtapa = false,
 ): Promise<{ conservado: boolean }> {
 	// Con el candado de la oportunidad: esto borra el documento en WeeTrust, y
 	// si un envío por WhatsApp está mandando sus enlaces, el cliente recibiría
 	// links que mueren en el acto.
-	return conCandadoDeFirma(contrato.opportunityId, () =>
-		eliminarConCandadoTomado(contrato, motivo),
-	);
+	return conCandadoDeFirma(contrato.opportunityId, async () => {
+		// Ya con el candado, porque esperarlo puede tardar: en 85% los enlaces
+		// están en manos del cliente y borrar el documento se los mata; del 90%
+		// en adelante la oportunidad ya se cerró con esos contratos.
+		if (exigirEtapa && contrato.opportunityId) {
+			await exigirEtapaDeFirma(contrato.opportunityId, "reemplazar");
+		}
+		return eliminarConCandadoTomado(contrato, motivo);
+	});
 }
 
 async function eliminarConCandadoTomado(
@@ -468,6 +480,7 @@ export const legalContractsRouter = {
 			const { conservado } = await eliminarContrato(
 				existingContract,
 				"Eliminado por jurídico",
+				true,
 			);
 
 			return {
@@ -1716,12 +1729,15 @@ export const legalContractsRouter = {
 				// - Si no: se borra allá (si no, los que faltan seguirían firmando un
 				//   documento reemplazado) y el motivo dice cómo quedó.
 				// - Si el borrado falla: el motivo avisa que hay que borrarlo a mano.
-				const completo = contract.status === "signed";
-				if (!completo && contract.weetrustDocumentId) {
-					const conFirmasParciales = await tieneFirmas(
-						input.contractId,
-						contract.weetrustDocumentId,
-					);
+				//
+				// "Completo" lo dice WeeTrust, no la fila: el estado local también lo
+				// pone la confirmación a mano, que no consulta allá, y creerle dejaba
+				// vivo un documento pendiente con sus enlaces.
+				const estadoAlla = contract.weetrustDocumentId
+					? await estadoEnWeeTrust(contract.weetrustDocumentId)
+					: null;
+				if (!estadoAlla?.completo && contract.weetrustDocumentId) {
+					const conFirmasParciales = estadoAlla?.conFirmas ?? true;
 					let detalle: string;
 					try {
 						await borrarDocumentoDeWeeTrust(contract.weetrustDocumentId);

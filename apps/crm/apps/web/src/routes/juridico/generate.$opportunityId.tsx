@@ -105,7 +105,7 @@ function RouteComponent() {
 				contractType: string;
 				data: Record<string, string>;
 				signers?: ContractSigner[];
-			emails?: string[];
+				emails?: string[];
 				options: {
 					gender: "male" | "female";
 					generatePdf: boolean;
@@ -114,7 +114,11 @@ function RouteComponent() {
 				};
 			}>;
 		}) => {
+			// Va la oportunidad: el servidor valida la etapa y toma el candado
+			// antes de crear los documentos en WeeTrust, que mandan invitaciones
+			// apenas se crean.
 			return await client.generateContractsDirect({
+				opportunityId,
 				...data,
 			});
 		},

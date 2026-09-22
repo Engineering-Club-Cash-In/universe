@@ -50,13 +50,16 @@ export function mapWialonErrorToOrpc(error: unknown): never {
 			});
 		}
 		if (error.code === "WIALON_API_ERROR") {
-			const upstreamFaults = [5, 9, 10, 11]; // 5=ejecución, 9=servidor ocupado, 10=límite peticiones, 11=DB no disponible
+			const upstreamFaults = [5, 8, 9, 10, 11, 14]; // 5=ejecución, 8=credenciales inválidas, 9=servidor ocupado, 10=límite peticiones, 11=DB no disponible, 14=facturación
 			if (
 				typeof error.wialonErrorCode === "number" &&
 				upstreamFaults.includes(error.wialonErrorCode)
 			) {
+				const isAuthFault = error.wialonErrorCode === 8;
 				throw new ORPCError("BAD_GATEWAY", {
-					message: `Fallo del servicio de Wialon (código ${error.wialonErrorCode}): ${error.message}`,
+					message: isAuthFault
+						? `Fallo de autenticación con el proveedor de Wialon (credenciales o token inválido): ${error.message}`
+						: `Fallo del servicio de Wialon (código ${error.wialonErrorCode}): ${error.message}`,
 				});
 			}
 			if (error.wialonErrorCode === 7) {

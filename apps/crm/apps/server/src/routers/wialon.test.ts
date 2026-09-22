@@ -90,8 +90,8 @@ describe("wialonRouter", () => {
 			}
 		});
 
-		it("mapea fallos upstream (códigos 5, 9, 10, 11) a BAD_GATEWAY", () => {
-			for (const code of [5, 9, 10, 11]) {
+		it("mapea fallos upstream (códigos 5, 8, 9, 10, 11, 14) a BAD_GATEWAY", () => {
+			for (const code of [5, 8, 9, 10, 11, 14]) {
 				const err = new WialonClientError(
 					`Fallo servidor ${code}`,
 					"WIALON_API_ERROR",

@@ -32,6 +32,7 @@ import {
 	type CoincidenciaBuroInterno,
 	evaluarCoincidencias,
 	normalizarDpiMatch,
+	normalizarNitMatch,
 	type OrigenCandidato,
 	type RegistroParaMatch,
 	type ReglaEfectiva,
@@ -132,6 +133,15 @@ function nombreComparableSql(
 	apellidos: AnyPgColumn | string,
 ): SQL {
 	return sql`regexp_replace(${sinTildesSql(sql`${nombres} || ${apellidos}`)}, '\\s', '', 'g')`;
+}
+
+/**
+ * NIT comparable: sin guiones ni espacios y en mayúsculas. Es la misma
+ * normalización de `normalizarNitMatch` y la del índice
+ * `buro_interno_personas_nit_activo_uq`.
+ */
+function nitComparableSql(nit: AnyPgColumn | SQL): SQL {
+	return sql`upper(regexp_replace(${nit}, '[^0-9A-Za-z]', '', 'g'))`;
 }
 
 // ============================================================================
@@ -311,6 +321,11 @@ export async function buscarCandidatos(
 				WHERE b.activo AND (
 					b.lead_id = l.id
 					OR (l.dpi IS NOT NULL AND b.dpi = regexp_replace(l.dpi, '\\s', '', 'g'))
+					OR (
+						${nitComparableSql(sql`l.nit`)} NOT IN ('', 'CF')
+						AND length(${nitComparableSql(sql`l.nit`)}) >= 3
+						AND ${nitComparableSql(sql`b.nit`)} = ${nitComparableSql(sql`l.nit`)}
+					)
 				)
 			) AS ya_registrado
 		FROM public.leads l
@@ -350,18 +365,26 @@ export async function buscarCandidatos(
 			const credito = await carteraBackClient.getCredito(digitos);
 			const nombre = credito.usuario?.nombre?.trim();
 			if (nombre) {
+				const nitCartera = normalizarNitMatch(credito.usuario.nit);
 				const [yaRegistrado] = await db
 					.select({ id: buroInternoPersonas.id })
 					.from(buroInternoPersonas)
 					.where(
 						and(
 							eq(buroInternoPersonas.activo, true),
-							eq(
-								buroInternoPersonas.numeroCreditoSifco,
-								credito.credito.numero_credito_sifco,
+							or(
+								and(
+									eq(
+										buroInternoPersonas.numeroCreditoSifco,
+										credito.credito.numero_credito_sifco,
+									),
+									sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombre, "")}`,
+								),
+								// El mismo cliente registrado desde otro de sus créditos
+								nitCartera
+									? sql`${nitComparableSql(buroInternoPersonas.nit)} = ${nitCartera}`
+									: undefined,
 							),
-							// El SIFCO es del crédito: solo cuenta si es el mismo cliente
-							sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombre, "")}`,
 						),
 					)
 					.limit(1);
@@ -425,16 +448,16 @@ function limpiarDatos(datos: DatosPersona) {
 }
 
 /**
- * Misma persona activa dos veces: por DPI, por lead, o por SIFCO + nombre.
- * El SIFCO solo no alcanza porque es del crédito, no de la persona: el
- * titular y su codeudor pueden estar registrados con el mismo número. Los
- * clientes que vienen de cartera no traen lead ni DPI, así que para ellos el
- * SIFCO + nombre es lo único que detecta el duplicado.
+ * Misma persona activa dos veces: por DPI, por lead, por NIT o por SIFCO +
+ * nombre. Los clientes que vienen de cartera no traen lead ni DPI: a ellos los
+ * identifica el NIT (el mismo cliente registrado desde dos créditos distintos)
+ * o el SIFCO + nombre cuando no hay NIT útil. "CF" no identifica a nadie.
  */
 async function asegurarSinDuplicado(
 	datos: {
 		dpi: string | null;
 		leadId: string | null;
+		nit: string | null;
 		numeroCreditoSifco: string | null;
 		nombres: string;
 		apellidos: string;
@@ -444,6 +467,9 @@ async function asegurarSinDuplicado(
 	const coincide: SQL[] = [];
 	if (datos.dpi) coincide.push(eq(buroInternoPersonas.dpi, datos.dpi));
 	if (datos.leadId) coincide.push(eq(buroInternoPersonas.leadId, datos.leadId));
+	const nit = normalizarNitMatch(datos.nit);
+	if (nit)
+		coincide.push(sql`${nitComparableSql(buroInternoPersonas.nit)} = ${nit}`);
 	if (datos.numeroCreditoSifco) {
 		coincide.push(
 			and(

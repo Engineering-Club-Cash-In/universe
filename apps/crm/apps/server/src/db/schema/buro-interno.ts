@@ -89,6 +89,12 @@ export const buroInternoPersonas = pgTable(
 				sql`regexp_replace(translate(lower(${table.nombres} || ${table.apellidos}), 'áéíóúüñ', 'aeiouun'), '\\s', '', 'g')`,
 			)
 			.where(sql`${table.activo} AND ${table.numeroCreditoSifco} IS NOT NULL`),
+		// Mismo NIT normalizado que `normalizarNitMatch`; "CF" no identifica a nadie
+		uniqueIndex("buro_interno_personas_nit_activo_uq")
+			.on(sql`upper(regexp_replace(${table.nit}, '[^0-9A-Za-z]', '', 'g'))`)
+			.where(
+				sql`${table.activo} AND ${table.nit} IS NOT NULL AND upper(regexp_replace(${table.nit}, '[^0-9A-Za-z]', '', 'g')) <> 'CF' AND length(regexp_replace(${table.nit}, '[^0-9A-Za-z]', '', 'g')) >= 3`,
+			),
 		index("buro_interno_personas_activo_idx").on(table.activo, table.createdAt),
 	],
 );

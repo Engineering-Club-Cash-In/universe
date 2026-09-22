@@ -22,7 +22,10 @@ import {
 	correoRepetido,
 	correosDePruebaFaltantes,
 } from "../lib/contratos-correos-prueba";
-import { esContratoDeInversion } from "../lib/contratos-inversiones";
+import {
+	contratosDeCategoria,
+	esContratoDeInversion,
+} from "../lib/contratos-inversiones";
 import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
 import { espejarContratoEnCartera } from "../lib/espejo-contratos-inversionista";
 import { firmantesDeContratoDeInversion } from "../lib/firmantes-inversionista";
@@ -36,6 +39,7 @@ import {
 	type DocumentResult,
 	type EstadoDocumentoFirma,
 	generateContractsBatch,
+	getDocumentTypes,
 	motivoDeFalla,
 	reemitirContratoEnWeeTrust,
 	reenviarCorreoDeFirma,
@@ -64,11 +68,11 @@ function prefijoDeArchivo(nombre: string): string {
 }
 
 /**
- * La batería, siempre que todavía se pueda trabajar.
+ * La batería, siempre que todavía se le puedan emitir contratos.
  *
- * Una completada o descartada no recibe contratos nuevos: sería agregarle
- * papelería a un trabajo que alguien ya dio por terminado, y nadie volvería a
- * mirarla.
+ * Una completada sí admite más: se completa sola al emitir el primero, y
+ * después puede faltar uno. La descartada no: alguien dijo que esa compra no
+ * llevaba papelería, y emitirle contratos sería desdecirlo por la espalda.
  */
 async function bateriaAbierta(batchId: string) {
 	const [bateria] = await db
@@ -83,9 +87,10 @@ async function bateriaAbierta(batchId: string) {
 		});
 	}
 
-	if (bateria.status === "completada" || bateria.status === "descartada") {
+	if (bateria.status === "descartada") {
 		throw new ORPCError("BAD_REQUEST", {
-			message: `La batería está ${bateria.status}: no admite contratos nuevos.`,
+			message:
+				"Esta batería se descartó: si hay que hacer contratos, primero hay que decir por qué se descartó mal.",
 		});
 	}
 
@@ -403,6 +408,31 @@ export const investorContractsRouter = {
 		}),
 
 	/**
+	 * Los contratos de inversión que se pueden emitir, por categoría.
+	 *
+	 * El catálogo del generador sólo devuelve los de inversiones si se le pide
+	 * la categoría: sin ella contesta los de ventas, que no son estos. Y de los
+	 * que devuelve se dejan sólo los que tienen layout de firmas auditado,
+	 * porque los demás repartirían las firmas por orden de llegada.
+	 */
+	getInvestmentContractTypes: juridicoProcedure
+		.input(z.object({ categoria: z.enum(["individual", "sociedad"]) }))
+		.handler(async ({ input }) => {
+			const catalogo = await getDocumentTypes(
+				input.categoria === "sociedad" ? "inversiones_sociedad" : "inversiones",
+			);
+
+			const conLayout = new Set(
+				contratosDeCategoria(input.categoria).map((c) => c.tipo),
+			);
+
+			return {
+				success: true,
+				data: (catalogo.data ?? []).filter((tipo) => conLayout.has(tipo.enum)),
+			};
+		}),
+
+	/**
 	 * Emite los contratos que jurídico eligió para una batería.
 	 *
 	 * Genera y guarda en el mismo pedido, a diferencia de ventas, donde el wizard
@@ -579,23 +609,27 @@ export const investorContractsRouter = {
 				}
 			}
 
-			// La batería pasa a "en proceso" en cuanto salió el primer contrato: es
-			// lo que dice que alguien ya la está trabajando.
-			if (emitidos.length > 0 && bateria.status === "pendiente") {
+			// La batería se cierra sola en cuanto salió el primer contrato: el
+			// trabajo que abrió la compra ya se hizo, y dejarla pendiente obligaba a
+			// acordarse de marcarla. Sale de la lista de jurídico, no de la ficha
+			// del inversionista.
+			//
+			// Cerrada no significa cerrada con llave: se le pueden emitir más
+			// contratos después (lo único que no se repite es el mismo tipo), y por
+			// eso se guarda también cuándo empezó.
+			if (emitidos.length > 0) {
+				const ahora = new Date();
 				await db
 					.update(investorContractBatches)
 					.set({
-						status: "en_proceso",
-						startedAt: new Date(),
-						startedBy: context.userId,
-						updatedAt: new Date(),
+						status: "completada",
+						startedAt: bateria.startedAt ?? ahora,
+						startedBy: bateria.startedBy ?? context.userId,
+						completedAt: ahora,
+						completedBy: context.userId,
+						updatedAt: ahora,
 					})
-					.where(
-						and(
-							eq(investorContractBatches.id, input.batchId),
-							eq(investorContractBatches.status, "pendiente"),
-						),
-					);
+					.where(eq(investorContractBatches.id, input.batchId));
 			}
 
 			const successCount = results.filter((r) => r.success).length;

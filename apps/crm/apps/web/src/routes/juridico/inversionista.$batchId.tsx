@@ -1,16 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Ban, CheckCircle2, Loader2, User } from "lucide-react";
+import { ArrowLeft, Ban, Loader2, User } from "lucide-react";
 import { useMemo, useState } from "react";
-import {
-	type CategoriaDeInversion,
-	CONTRATOS_DE_INVERSION,
-} from "server/src/lib/contratos-inversiones";
+import type { CategoriaDeInversion } from "server/src/lib/contratos-inversiones";
 import { toast } from "sonner";
 import {
 	type CRMData,
 	DynamicContractWizard,
 } from "@/components/contracts/DynamicContractWizard";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,15 +61,17 @@ function RouteComponent() {
 	const [dpi, setDpi] = useState("");
 	const [dpiTocado, setDpiTocado] = useState(false);
 	const [motivoDescarte, setMotivoDescarte] = useState("");
+	const [descartando, setDescartando] = useState(false);
 
 	const bateriaQuery = useQuery({
 		...orpc.getInvestorContractBatch.queryOptions({ input: { batchId } }),
 		enabled: canViewLegal,
 	});
 
+	// El catálogo del generador sólo devuelve los de inversiones si se le pide la
+	// categoría, y el servidor ya deja únicamente los que tienen layout auditado.
 	const contractTypesQuery = useQuery({
-		queryKey: ["getContractTypes"],
-		queryFn: () => client.getContractTypes(),
+		...orpc.getInvestmentContractTypes.queryOptions({ input: { categoria } }),
 		enabled: canViewLegal,
 	});
 
@@ -71,20 +81,7 @@ function RouteComponent() {
 	// que firma es su representante, y de él cartera no guarda el DPI.
 	const dpiEnUso = dpiTocado ? dpi : (bateria?.investorDpi ?? "");
 
-	/**
-	 * Sólo los contratos de inversión con layout auditado, de la categoría
-	 * elegida. El nombre de cada uno lo pone el generador; acá sólo se filtra.
-	 */
-	const documentTypes = useMemo(() => {
-		const deLaCategoria = new Set(
-			CONTRATOS_DE_INVERSION.filter((c) => c.categoria === categoria).map(
-				(c) => c.tipo,
-			),
-		);
-		return (contractTypesQuery.data?.data ?? []).filter((tipo) =>
-			deLaCategoria.has(tipo.enum),
-		);
-	}, [categoria, contractTypesQuery.data]);
+	const documentTypes = contractTypesQuery.data?.data ?? [];
 
 	const crmData: CRMData = useMemo(
 		() => ({
@@ -203,8 +200,9 @@ function RouteComponent() {
 		);
 	}
 
-	const cerrada =
-		bateria.status === "completada" || bateria.status === "descartada";
+	// Sólo la descartada deja de admitir contratos: la completada se cerró sola
+	// al emitir el primero y puede necesitar otro después.
+	const cerrada = bateria.status === "descartada";
 
 	return (
 		<div className="space-y-4 p-4 md:p-6">
@@ -226,6 +224,50 @@ function RouteComponent() {
 				<Badge variant={cerrada ? "secondary" : "default"} className="ml-auto">
 					{bateria.status.replace("_", " ")}
 				</Badge>
+
+				{/* La batería se cierra sola al emitir el primer contrato. Descartar es
+				    para la compra que no lleva papelería, y pide motivo. */}
+				{bateria.status !== "descartada" && (
+					<AlertDialog open={descartando} onOpenChange={setDescartando}>
+						<AlertDialogTrigger asChild>
+							<Button variant="ghost" size="sm">
+								<Ban className="mr-2 h-4 w-4" />
+								Descartar
+							</Button>
+						</AlertDialogTrigger>
+						<AlertDialogContent>
+							<AlertDialogHeader>
+								<AlertDialogTitle>¿Descartar esta batería?</AlertDialogTitle>
+								<AlertDialogDescription>
+									Es para la compra que no lleva contratos. Queda registrada con
+									el motivo y no se le pueden emitir contratos después.
+								</AlertDialogDescription>
+							</AlertDialogHeader>
+							<Input
+								value={motivoDescarte}
+								onChange={(e) => setMotivoDescarte(e.target.value)}
+								placeholder="Por qué no hay que hacer estos contratos"
+							/>
+							<AlertDialogFooter>
+								<AlertDialogCancel>Cancelar</AlertDialogCancel>
+								<AlertDialogAction
+									onClick={() =>
+										cerrarMutation.mutate({
+											batchId,
+											resultado: "descartada",
+											motivo: motivoDescarte,
+										})
+									}
+									disabled={
+										cerrarMutation.isPending || motivoDescarte.trim().length < 3
+									}
+								>
+									Descartar
+								</AlertDialogAction>
+							</AlertDialogFooter>
+						</AlertDialogContent>
+					</AlertDialog>
+				)}
 			</div>
 
 			<Card>
@@ -298,9 +340,9 @@ function RouteComponent() {
 			{cerrada ? (
 				<Card>
 					<CardContent className="p-6 text-muted-foreground text-sm">
-						Esta batería está {bateria.status}
+						Esta batería se descartó
 						{bateria.discardReason ? `: ${bateria.discardReason}` : "."} No
-						admite contratos nuevos.
+						admite contratos.
 					</CardContent>
 				</Card>
 			) : (
@@ -313,88 +355,48 @@ function RouteComponent() {
 							quedan en la ficha del inversionista.
 						</CardDescription>
 					</CardHeader>
-					<CardContent className="space-y-4">
-						<div className="flex gap-2">
-							{CATEGORIAS.map((opcion) => (
-								<Button
-									key={opcion.valor}
-									variant={categoria === opcion.valor ? "default" : "outline"}
-									size="sm"
-									onClick={() => setCategoria(opcion.valor)}
-								>
-									{opcion.etiqueta}
-								</Button>
-							))}
-						</div>
-
-						{contractTypesQuery.isLoading ? (
-							<div className="flex items-center gap-2 text-muted-foreground text-sm">
-								<Loader2 className="h-4 w-4 animate-spin" />
-								Cargando contratos disponibles...
-							</div>
-						) : (
-							<DynamicContractWizard
-								documentTypes={documentTypes}
-								crmData={crmData}
-								onGetDocumentsByDpi={traerCampos}
-								onGenerate={generar}
-								onBack={() => navigate({ to: "/juridico" })}
-							/>
-						)}
-					</CardContent>
-				</Card>
-			)}
-
-			{!cerrada && (
-				<Card>
-					<CardHeader>
-						<CardTitle className="text-base">Cerrar la batería</CardTitle>
-						<CardDescription>
-							Cuando la papelería quedó hecha, o cuando no había que hacerla.
-						</CardDescription>
-					</CardHeader>
-					<CardContent className="flex flex-col gap-3 md:flex-row md:items-end">
-						<Button
-							onClick={() =>
-								cerrarMutation.mutate({ batchId, resultado: "completada" })
-							}
-							disabled={cerrarMutation.isPending}
-						>
-							<CheckCircle2 className="mr-2 h-4 w-4" />
-							Marcar como completada
-						</Button>
-						<div className="flex flex-1 items-end gap-2">
-							<div className="flex-1 space-y-1">
-								<Label
-									className="text-muted-foreground text-xs"
-									htmlFor="motivo"
-								>
-									Motivo, si se descarta
-								</Label>
-								<Input
-									id="motivo"
-									value={motivoDescarte}
-									onChange={(e) => setMotivoDescarte(e.target.value)}
-									placeholder="Por qué no hay que hacer estos contratos"
-								/>
-							</div>
-							<Button
-								variant="outline"
-								onClick={() =>
-									cerrarMutation.mutate({
-										batchId,
-										resultado: "descartada",
-										motivo: motivoDescarte,
-									})
-								}
-								disabled={
-									cerrarMutation.isPending || motivoDescarte.trim().length < 3
-								}
-							>
-								<Ban className="mr-2 h-4 w-4" />
-								Descartar
-							</Button>
-						</div>
+					<CardContent>
+						<DynamicContractWizard
+							documentTypes={documentTypes}
+							crmData={crmData}
+							onGetDocumentsByDpi={traerCampos}
+							onGenerate={generar}
+							onBack={() => navigate({ to: "/juridico" })}
+							pasoPrevio={{
+								etiqueta: "Categoría",
+								completo: !contractTypesQuery.isLoading,
+								contenido: (
+									<div className="space-y-3">
+										<p className="text-muted-foreground text-sm">
+											Decide qué contratos hay para elegir en el paso siguiente.
+										</p>
+										<div className="flex gap-2">
+											{CATEGORIAS.map((opcion) => (
+												<Button
+													key={opcion.valor}
+													variant={
+														categoria === opcion.valor ? "default" : "outline"
+													}
+													onClick={() => setCategoria(opcion.valor)}
+												>
+													{opcion.etiqueta}
+												</Button>
+											))}
+										</div>
+										{contractTypesQuery.isLoading ? (
+											<p className="flex items-center gap-2 text-muted-foreground text-sm">
+												<Loader2 className="h-4 w-4 animate-spin" />
+												Cargando contratos disponibles...
+											</p>
+										) : (
+											<p className="text-muted-foreground text-xs">
+												{documentTypes.length} contrato(s) disponibles
+											</p>
+										)}
+									</div>
+								),
+							}}
+						/>
 					</CardContent>
 				</Card>
 			)}

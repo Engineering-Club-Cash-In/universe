@@ -11,7 +11,14 @@ import {
 	Users,
 	UserX,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import { toast } from "sonner";
 import {
@@ -280,6 +287,19 @@ interface DynamicContractWizardProps {
 			};
 		}>;
 	}) => Promise<{ success: boolean; message: string }>;
+	/**
+	 * Un paso propio del área, antes del de selección.
+	 *
+	 * Inversiones lo usa para la categoría: primero individual o sociedad, y
+	 * recién ahí qué contratos, porque la categoría decide cuáles hay. Sin esto,
+	 * el wizard arranca en la selección de documentos, como en ventas.
+	 */
+	pasoPrevio?: {
+		etiqueta: string;
+		contenido: ReactNode;
+		/** Si ya se puede seguir al paso de selección. */
+		completo: boolean;
+	};
 	onBack: () => void;
 	isGenerating?: boolean;
 	isLinking?: boolean;
@@ -655,6 +675,7 @@ export function DynamicContractWizard({
 	crmData,
 	opportunityId,
 	leadId,
+	pasoPrevio,
 	onGetDocumentsByDpi,
 	onGenerate,
 	onLinkContracts,
@@ -662,7 +683,7 @@ export function DynamicContractWizard({
 	isGenerating = false,
 	isLinking = false,
 }: DynamicContractWizardProps) {
-	const [step, setStep] = useState<1 | 2 | 3>(1);
+	const [step, setStep] = useState<0 | 1 | 2 | 3>(pasoPrevio ? 0 : 1);
 	const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
 	const [isLoadingFields, setIsLoadingFields] = useState(false);
 	const [showLinkConfirmDialog, setShowLinkConfirmDialog] = useState(false);
@@ -1705,7 +1726,9 @@ export function DynamicContractWizard({
 		unsupportedDisbursementCount === 0;
 
 	const handleNext = async () => {
-		if (step === 1 && canProceedStep1) {
+		if (step === 0) {
+			setStep(1);
+		} else if (step === 1 && canProceedStep1) {
 			await fetchDocumentsData();
 			setStep(2);
 		} else if (step === 2) {
@@ -1921,7 +1944,9 @@ export function DynamicContractWizard({
 	};
 
 	const handlePrevious = () => {
-		if (step === 2) {
+		if (step === 1 && pasoPrevio) {
+			setStep(0);
+		} else if (step === 2) {
 			setStep(1);
 		} else if (step === 3) {
 			// Volver al paso 2 para corregir campos y regenerar
@@ -1999,7 +2024,11 @@ export function DynamicContractWizard({
 		}
 	};
 
+	// Se numeran por posición y no con el número interno del paso: con un paso
+	// previo, "Seleccionar" es el 2 para quien lo mira aunque adentro siga
+	// siendo el 1.
 	const steps = [
+		...(pasoPrevio ? [{ number: 0, label: pasoPrevio.etiqueta }] : []),
 		{ number: 1, label: "Seleccionar" },
 		{ number: 2, label: "Confirmar" },
 		{ number: 3, label: "Resultados" },
@@ -2022,7 +2051,7 @@ export function DynamicContractWizard({
 								{step > s.number ? (
 									<Check className="h-5 w-5" />
 								) : (
-									<span className="font-medium">{s.number}</span>
+									<span className="font-medium">{index + 1}</span>
 								)}
 							</div>
 							<span
@@ -2048,6 +2077,16 @@ export function DynamicContractWizard({
 
 			{/* Step Content */}
 			<div className="min-h-[400px]">
+				{/* Paso previo del área (en inversiones, la categoría) */}
+				{step === 0 && pasoPrevio && (
+					<Card>
+						<CardHeader>
+							<CardTitle>{pasoPrevio.etiqueta}</CardTitle>
+						</CardHeader>
+						<CardContent>{pasoPrevio.contenido}</CardContent>
+					</Card>
+				)}
+
 				{/* Step 1: Document Selection */}
 				{step === 1 && (
 					<Card>
@@ -2706,14 +2745,16 @@ export function DynamicContractWizard({
 				<Button
 					variant="outline"
 					onClick={
-						step === 1 || (step === 3 && !onLinkContracts)
+						step === 0 ||
+						(step === 1 && !pasoPrevio) ||
+						(step === 3 && !onLinkContracts)
 							? onBack
 							: handlePrevious
 					}
 					disabled={isGenerating || isLoadingFields || isLinking}
 				>
 					<ChevronLeft className="mr-2 h-4 w-4" />
-					{step === 1
+					{step === 0 || (step === 1 && !pasoPrevio)
 						? "Volver"
 						: step === 3
 							? // Sin paso de enlazado los contratos ya quedaron guardados:
@@ -2762,6 +2803,7 @@ export function DynamicContractWizard({
 					<Button
 						onClick={handleNext}
 						disabled={
+							(step === 0 && !pasoPrevio?.completo) ||
 							(step === 1 && !canProceedStep1) ||
 							(step === 2 && !canProceedStep2) ||
 							isGenerating ||

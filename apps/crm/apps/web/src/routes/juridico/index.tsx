@@ -76,14 +76,26 @@ function RouteComponent() {
 		title: string;
 	} | null>(null);
 
-	// Las baterías de contratos de inversionistas que siguen abiertas. Van en su
-	// propia pestaña: son otro flujo, con otra gente y sin oportunidad de venta
-	// detrás.
+	// Las baterías de contratos de inversionistas. Van en su propia pestaña: son
+	// otro flujo, con otra gente y sin oportunidad de venta detrás.
+	//
+	// Por defecto sólo las que esperan. Una batería se cierra sola al emitirle
+	// el primer contrato, así que las cerradas se ven aparte: sirven para mirar
+	// qué se hizo, o para agregarle a una el contrato que faltó.
+	const [verCerradas, setVerCerradas] = useState(false);
 	const bateriasQuery = useQuery({
+		...orpc.listInvestorContractBatches.queryOptions({
+			input: verCerradas
+				? { status: ["completada", "descartada"] as const }
+				: {},
+		}),
+		enabled: canViewLegal,
+	});
+	const bateriasPendientesQuery = useQuery({
 		...orpc.listInvestorContractBatches.queryOptions({ input: {} }),
 		enabled: canViewLegal,
 	});
-	const bateriasAbiertas = bateriasQuery.data?.length ?? 0;
+	const bateriasAbiertas = bateriasPendientesQuery.data?.length ?? 0;
 
 	// Mutación para aprobar oportunidad (mover a 85%)
 	const approveMutation = useMutation({
@@ -375,12 +387,28 @@ function RouteComponent() {
 				<TabsContent value="inversiones">
 					<Card>
 						<CardHeader>
-							<CardTitle>Contratos de inversionistas pendientes</CardTitle>
-							<CardDescription>
-								Cada compra de cartera aceptada abre una batería. Jurídico elige
-								qué contratos hacer y los emite; los enlaces de firma quedan en
-								la ficha del inversionista.
-							</CardDescription>
+							<div className="flex items-start justify-between gap-4">
+								<div>
+									<CardTitle>
+										{verCerradas
+											? "Baterías cerradas"
+											: "Contratos de inversionistas pendientes"}
+									</CardTitle>
+									<CardDescription>
+										Cada compra de cartera aceptada abre una batería. Jurídico
+										elige qué contratos hacer y los emite; los enlaces de firma
+										quedan en la ficha del inversionista, y la batería se cierra
+										sola.
+									</CardDescription>
+								</div>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setVerCerradas((v) => !v)}
+								>
+									{verCerradas ? "Ver pendientes" : "Ver cerradas"}
+								</Button>
+							</div>
 						</CardHeader>
 						<CardContent>
 							{bateriasQuery.isLoading ? (
@@ -391,10 +419,14 @@ function RouteComponent() {
 								<div className="flex flex-col items-center justify-center py-12 text-center">
 									<Landmark className="mb-3 h-12 w-12 text-gray-400" />
 									<h3 className="mb-1 font-semibold text-gray-900 text-lg">
-										No hay contratos de inversión pendientes
+										{verCerradas
+											? "No hay baterías cerradas"
+											: "No hay contratos de inversión pendientes"}
 									</h3>
 									<p className="text-gray-500 text-sm">
-										Aparecen acá en cuanto se acepta una compra de cartera
+										{verCerradas
+											? "Se cierran solas al emitirles el primer contrato"
+											: "Aparecen acá en cuanto se acepta una compra de cartera"}
 									</p>
 								</div>
 							) : (

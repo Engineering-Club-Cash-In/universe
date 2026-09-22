@@ -227,8 +227,20 @@ export interface BatchGenerateResponse {
 /**
  * Obtiene los tipos de documentos disponibles desde la API
  */
-export async function getDocumentTypes(): Promise<DocumentsResponse> {
-	const response = await fetch(`${LEGAL_API_URL}/docuSeal/documents`, {
+/**
+ * El catálogo de documentos disponibles.
+ *
+ * **Sin categoría devuelve sólo los de ventas**, que son los 14 que usa
+ * jurídico desde la oportunidad. Los de inversiones y sociedad sólo vuelven
+ * pidiéndolos por su categoría.
+ */
+export async function getDocumentTypes(
+	categoria?: string,
+): Promise<DocumentsResponse> {
+	const ruta = categoria
+		? `/docuSeal/documents?categoria=${encodeURIComponent(categoria)}`
+		: "/docuSeal/documents";
+	const response = await fetch(`${LEGAL_API_URL}${ruta}`, {
 		method: "GET",
 		headers: {
 			"Content-Type": "application/json",

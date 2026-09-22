@@ -308,6 +308,8 @@ export const legalAppRouter = {
 		investorContractsRouter.countOpenInvestorContractBatches,
 	generateInvestorContracts: investorContractsRouter.generateInvestorContracts,
 	listInvestorContracts: investorContractsRouter.listInvestorContracts,
+	getInvestmentContractTypes:
+		investorContractsRouter.getInvestmentContractTypes,
 	getInvestorContractSigningStatus:
 		investorContractsRouter.getInvestorContractSigningStatus,
 	resendInvestorContractSigningEmails:

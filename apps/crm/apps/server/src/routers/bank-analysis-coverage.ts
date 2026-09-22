@@ -164,9 +164,15 @@ export function buildBankStatementArtifactPlan({
 
 	for (const file of files) {
 		if (representedFiles.has(file.fileIndex)) continue;
-		const documentType = availableDocumentTypes.find(
-			(candidate) => !artifacts.some((artifact) => artifact.documentType === candidate),
-		);
+		const documentType =
+			desiredAssignments.length === 0
+				? availableDocumentTypes.find(
+						(candidate) =>
+							!artifacts.some(
+								(artifact) => artifact.documentType === candidate,
+							),
+					)
+				: undefined;
 		if (documentType) {
 			const tag = `[bank-coverage:${analysisBatchId}:type:${documentType}:file:${file.fileIndex}:unverified]`;
 			artifacts.push({

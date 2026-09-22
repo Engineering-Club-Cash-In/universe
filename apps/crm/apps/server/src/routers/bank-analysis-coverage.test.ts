@@ -74,6 +74,30 @@ describe("bank analysis coverage save lifecycle", () => {
 		]);
 	});
 
+	test("keeps duplicate-month support PDFs out of later checklist slots", () => {
+		const duplicateMonthFiles = files.slice(0, 3);
+		const plan = buildBankStatementArtifactPlan({
+			analysisBatchId: "analysis-duplicate-month",
+			files: duplicateMonthFiles,
+			coverage: resolveBankStatementMonthlyCoverage({
+				uploadedFileCount: duplicateMonthFiles.length,
+				coverageByFile: duplicateMonthFiles.map(({ fileIndex }) => ({
+					indice_archivo: fileIndex,
+					meses: ["2026-01"],
+				})),
+			}),
+			existingDocuments: [],
+		});
+
+		expect(
+			plan.map(({ documentType, fileIndex }) => ({ documentType, fileIndex })),
+		).toEqual([
+			{ documentType: "estados_cuenta_1", fileIndex: 0 },
+			{ documentType: "other", fileIndex: 1 },
+			{ documentType: "other", fileIndex: 2 },
+		]);
+	});
+
 	test("does not overwrite manual adjuntos or checklist documents from another analysis", () => {
 		const plan = buildBankStatementArtifactPlan({
 			analysisBatchId: "analysis-1",

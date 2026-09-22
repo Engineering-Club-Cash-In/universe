@@ -110,6 +110,11 @@ describe("WialonClient", () => {
 					status: 200,
 				});
 			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				return new Response(JSON.stringify({ items: [] }), {
+					status: 200,
+				});
+			}
 			return new Response(
 				JSON.stringify([
 					{
@@ -391,6 +396,9 @@ describe("WialonClient", () => {
 			const bodyStr = String(init?.body || "");
 			if (bodyStr.includes("svc=token%2Flogin")) {
 				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				return new Response(JSON.stringify({ items: [] }), { status: 200 });
 			}
 			return new Response(
 				JSON.stringify([
@@ -689,6 +697,9 @@ describe("WialonClient", () => {
 			if (bodyStr.includes("svc=token%2Flogin")) {
 				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
 			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				return new Response(JSON.stringify({ items: [] }), { status: 200 });
+			}
 			if (bodyStr.includes("svc=unit%2Fcalc_last")) {
 				// Simula que Wialon devuelve unidades no solicitadas (ej. 999) además de las pedidas
 				return new Response(
@@ -713,6 +724,9 @@ describe("WialonClient", () => {
 			const bodyStr = String(init?.body || "");
 			if (bodyStr.includes("svc=token%2Flogin")) {
 				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				return new Response(JSON.stringify({ items: [] }), { status: 200 });
 			}
 			if (bodyStr.includes("svc=unit%2Fcalc_last")) {
 				return new Response(
@@ -1636,5 +1650,57 @@ describe("WialonClient", () => {
 		await client.getUnitDetail(991, 5123);
 		expect(getCache()).toBeDefined();
 		expect(getCache()?.sensorId).toBe("5");
+	});
+
+	test("rechaza respuestas malformadas de core/search_items (ej. objeto vacío {}) enrutándolas a la ruta de fallo y preservando ignición desconocida", async () => {
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				// Respuesta 200 pero malformada: omite la propiedad 'items'
+				return new Response(JSON.stringify({}), { status: 200 });
+			}
+			if (bodyStr.includes("svc=unit%2Fcalc_last")) {
+				return new Response(
+					JSON.stringify([
+						{
+							i: 666,
+							sensors: {
+								"1": { value: 1, format: { value: "Encendido" } },
+							},
+						},
+					]),
+					{ status: 200 },
+				);
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+		const status = await client.getUnitsStatus([666]);
+		expect(status.length).toBe(1);
+
+		// No debe activar la heurística ni clasificar erróneamente como encendido
+		expect(status[0].isIgnitionOn).toBeUndefined();
+
+		// Debe haberse guardado en caché con lookupFailed: true y sensorId: null
+		const cacheEntry = (
+			client as unknown as {
+				ignitionSensorCache: Map<
+					number,
+					{ sensorId: string | null; expiresAt: number; lookupFailed?: boolean }
+				>;
+			}
+		).ignitionSensorCache.get(666);
+
+		expect(cacheEntry).toBeDefined();
+		expect(cacheEntry?.sensorId).toBeNull();
+		expect(cacheEntry?.lookupFailed).toBe(true);
+
+		// Durante el backoff de 5 minutos, llamadas posteriores no deben activar la heurística
+		const statusCached = await client.getUnitsStatus([666]);
+		expect(statusCached[0].isIgnitionOn).toBeUndefined();
 	});
 });

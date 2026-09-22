@@ -470,18 +470,27 @@ export class WialonClient {
 							}>;
 						};
 
+						if (
+							!metaRes ||
+							typeof metaRes !== "object" ||
+							!Array.isArray(metaRes.items)
+						) {
+							throw new WialonClientError(
+								"Respuesta inesperada de Wialon: se esperaba un objeto con 'items' en 'core/search_items'",
+								"WIALON_INVALID_RESPONSE",
+							);
+						}
+
 						const foundIds = new Set<number>();
-						if (Array.isArray(metaRes?.items)) {
-							for (const item of metaRes.items) {
-								foundIds.add(item.id);
-								const sensorId = findIgnitionSensorId(item.sens, item.prp);
-								this.setSensorCache(
-									item.id,
-									sensorId,
-									Date.now() +
-										(sensorId ? SESSION_TTL_MS : NEGATIVE_CACHE_TTL_MS),
-								);
-							}
+						for (const item of metaRes.items) {
+							foundIds.add(item.id);
+							const sensorId = findIgnitionSensorId(item.sens, item.prp);
+							this.setSensorCache(
+								item.id,
+								sensorId,
+								Date.now() +
+									(sensorId ? SESSION_TTL_MS : NEGATIVE_CACHE_TTL_MS),
+							);
 						}
 
 						// Negative caching: si Wialon no devuelve item para una unidad consultada,

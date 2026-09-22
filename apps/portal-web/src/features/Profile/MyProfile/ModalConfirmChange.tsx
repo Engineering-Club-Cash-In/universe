@@ -84,6 +84,10 @@ export const ModalConfirmChange = ({
         dpi?: string;
         phone?: string;
         address?: string;
+        // Simulacro: el CRM corre candado, mora y duplicados y devuelve el
+        // veredicto SIN escribir nada. Es lo que permite saber si el DPI nuevo
+        // pasa antes de tocar la cuenta (ver `aplicarCambioDeDpi`).
+        soloValidar?: boolean;
       }
 
       const payload: UpdateLeadPayload = { email };

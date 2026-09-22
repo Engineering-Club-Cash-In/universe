@@ -2281,6 +2281,7 @@ export async function getMoraRecuperacionPorAsesor({
     asesor_id: number | null;
     nombre: string | null;
     esperado: string;
+    generado_en_periodo: string;
     cobrado_en_snapshot: string;
     cobrado_fuera_snapshot: string;
   }>(buildMoraRecoveryQuery({ ...period, asesores, emailCobrador }));
@@ -2290,6 +2291,7 @@ export async function getMoraRecuperacionPorAsesor({
       asesorId: row.asesor_id,
       nombre: row.nombre ?? "Sin asignar",
       esperado: row.esperado,
+      generadoEnPeriodo: row.generado_en_periodo,
       cobradoEnSnapshot: row.cobrado_en_snapshot,
       cobradoFueraSnapshot: row.cobrado_fuera_snapshot,
     })),

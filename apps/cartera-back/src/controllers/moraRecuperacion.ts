@@ -1,11 +1,20 @@
 import { sql } from "drizzle-orm";
+import { inicioDiaGTComoTimestampUTC } from "../utils/functions/diaGuatemala";
 import { creditosElegiblesMoraSql } from "./moraCapitalCartera";
 import { snapCte } from "./moraSnapshotSql";
 
 export type MoraRecoverySourceRow = {
 	asesorId: number | null;
 	nombre: string;
+	/** Foto de la mora al INICIO del ciclo (día 6). */
 	esperado: string;
+	/**
+	 * Mora GENERADA dentro del ciclo. Con la mora proporcional el monto crece
+	 * todos los días, así que la foto inicial ya no es todo lo que el asesor
+	 * tuvo oportunidad de cobrar; el `esperado` del reporte es la suma de las
+	 * dos (ver `metricFrom`).
+	 */
+	generadoEnPeriodo: string;
 	cobradoEnSnapshot: string;
 	cobradoFueraSnapshot: string;
 };
@@ -110,6 +119,18 @@ export function buildMoraRecoveryQuery({
       FROM mora_activa m
     )`;
 
+	// `moras_historial.fecha` es `timestamp` SIN zona con el instante en UTC. Para
+	// filtrar por día de Guatemala se convierten los LÍMITES a instantes UTC y se
+	// compara contra la columna CRUDA: envolverla en `AT TIME ZONE` (como hace
+	// `snapCte`, que corta por día y no por rango) mataría `moras_historial_fecha_idx`.
+	const inicioUtc = inicioDiaGTComoTimestampUTC(inicio);
+	const finUtc = inicioDiaGTComoTimestampUTC(fin);
+	if (!inicioUtc || !finUtc) {
+		throw new RangeError(
+			`Período de recuperación de mora inválido: ${inicio} → ${fin}`,
+		);
+	}
+
 	return sql`
     WITH ${snapshotCte},
     creditos_con_asesor AS (
@@ -128,23 +149,54 @@ export function buildMoraRecoveryQuery({
         AND pc.fecha_pago < ${fin}::timestamp
         AND COALESCE(pc."paymentFalse", false) = false
       GROUP BY pc.credito_id
+    ),
+    -- Mora generada DENTRO del ciclo. No se recalcula nada: cada evento de
+    -- \`moras_historial\` ya trae monto_anterior/monto_nuevo, así que lo generado
+    -- es la suma de los incrementos.
+    --   * Solo incrementos: una CONDONACION o un DECREMENTO bajan el monto, pero
+    --     eso NO reduce lo que hubo para cobrar — reduce lo cobrable por decisión
+    --     de la empresa, no por el cliente.
+    --   * CREACION cuenta: un crédito que entró al ciclo sin mora y la generó
+    --     adentro sí tuvo mora que cobrar.
+    --   * GREATEST(0, …) por si un evento de esos tipos viniera con delta negativo.
+    -- LIMITACIÓN: el RECALCULO diario solo existe desde el despliegue de la mora
+    -- proporcional. Antes el monto casi no cambiaba y el cron escribía \`sinCambios\`,
+    -- así que para ciclos viejos el historial es escaso y el esperado queda
+    -- APROXIMADO POR LO BAJO. No es un defecto del cálculo: el dato no existe hacia atrás.
+    generado_por_credito AS (
+      SELECT h.credito_id,
+             SUM(GREATEST(0, h.monto_nuevo::numeric - h.monto_anterior::numeric)) AS generado
+      FROM cartera.moras_historial h
+      JOIN creditos_con_asesor ca ON ca.credito_id = h.credito_id
+      WHERE h.tipo_evento IN ('CREACION', 'RECALCULO', 'INCREMENTO')
+        AND h.fecha >= ${inicioUtc}::timestamp
+        AND h.fecha < ${finUtc}::timestamp
+      GROUP BY h.credito_id
     )
     SELECT
       ca.asesor_id,
       COALESCE(ca.nombre, 'Sin asignar') AS nombre,
       COALESCE(s.esperado, 0)::text AS esperado,
-      CASE WHEN s.credito_id IS NOT NULL THEN COALESCE(p.cobrado, 0) ELSE 0 END::text AS cobrado_en_snapshot,
-      CASE WHEN s.credito_id IS NULL THEN COALESCE(p.cobrado, 0) ELSE 0 END::text AS cobrado_fuera_snapshot
+      COALESCE(g.generado, 0)::text AS generado_en_periodo,
+      -- "En snapshot" = el crédito aporta esperado (foto inicial O mora generada
+      -- adentro). Un crédito que entró al ciclo sin mora, la generó y la pagó
+      -- tiene esperado > 0: contar su pago como "fuera" dejaría el pendiente
+      -- inflado por el monto completo.
+      CASE WHEN s.credito_id IS NOT NULL OR g.credito_id IS NOT NULL THEN COALESCE(p.cobrado, 0) ELSE 0 END::text AS cobrado_en_snapshot,
+      CASE WHEN s.credito_id IS NULL AND g.credito_id IS NULL THEN COALESCE(p.cobrado, 0) ELSE 0 END::text AS cobrado_fuera_snapshot
     FROM snapshot_por_credito s
     FULL JOIN pagos_por_credito p ON p.credito_id = s.credito_id
-    JOIN creditos_con_asesor ca ON ca.credito_id = COALESCE(s.credito_id, p.credito_id)
+    FULL JOIN generado_por_credito g ON g.credito_id = COALESCE(s.credito_id, p.credito_id)
+    JOIN creditos_con_asesor ca ON ca.credito_id = COALESCE(s.credito_id, p.credito_id, g.credito_id)
   `;
 }
 
 function metricFrom(
 	row: Omit<MoraRecoverySourceRow, "asesorId" | "nombre">,
 ): MoraRecoveryMetric {
-	const esperado = Number(row.esperado);
+	// El esperado del reporte = foto inicial + lo generado dentro del ciclo, que es
+	// exactamente lo que el asesor tuvo oportunidad de cobrar.
+	const esperado = Number(row.esperado) + Number(row.generadoEnPeriodo);
 	const cobradoEnSnapshot = Number(row.cobradoEnSnapshot);
 	const cobradoFueraSnapshot = Number(row.cobradoFueraSnapshot);
 	return {
@@ -168,6 +220,7 @@ export function buildMoraRecoveryReport(
 			nombre: source.nombre,
 			...metricFrom({
 				esperado: "0",
+				generadoEnPeriodo: "0",
 				cobradoEnSnapshot: "0",
 				cobradoFueraSnapshot: "0",
 			}),

@@ -12,6 +12,7 @@ const rows: MoraRecoverySourceRow[] = [
 		asesorId: 1,
 		nombre: "Ana",
 		esperado: "100.00",
+		generadoEnPeriodo: "0",
 		cobradoEnSnapshot: "120.00",
 		cobradoFueraSnapshot: "30.00",
 	},
@@ -19,6 +20,7 @@ const rows: MoraRecoverySourceRow[] = [
 		asesorId: null,
 		nombre: "Sin asignar",
 		esperado: "50.00",
+		generadoEnPeriodo: "0",
 		cobradoEnSnapshot: "20.00",
 		cobradoFueraSnapshot: "0.00",
 	},
@@ -26,6 +28,7 @@ const rows: MoraRecoverySourceRow[] = [
 		asesorId: 2,
 		nombre: "Beto",
 		esperado: "0.00",
+		generadoEnPeriodo: "0",
 		cobradoEnSnapshot: "0.00",
 		cobradoFueraSnapshot: "40.00",
 	},
@@ -70,6 +73,9 @@ describe("buildMoraRecoveryReport", () => {
 			8,
 			"2026-06-06",
 			"2026-07-06",
+			// Los límites del ciclo como instantes UTC: el día 6 GT empieza a las 06:00Z.
+			"2026-06-06 06:00:00.000",
+			"2026-07-06 06:00:00.000",
 		]);
 	});
 
@@ -102,6 +108,7 @@ describe("buildMoraRecoveryReport", () => {
 					asesorId: 1,
 					nombre: "Ana",
 					esperado: "100",
+					generadoEnPeriodo: "0",
 					cobradoEnSnapshot: "40",
 					cobradoFueraSnapshot: "0",
 				},
@@ -170,6 +177,7 @@ describe("buildMoraRecoveryReport", () => {
 					asesorId: 7,
 					nombre: "Cora",
 					esperado: "100",
+					generadoEnPeriodo: "0",
 					cobradoEnSnapshot: "140",
 					cobradoFueraSnapshot: "0",
 				},
@@ -177,6 +185,7 @@ describe("buildMoraRecoveryReport", () => {
 					asesorId: 7,
 					nombre: "Cora",
 					esperado: "80",
+					generadoEnPeriodo: "0",
 					cobradoEnSnapshot: "20",
 					cobradoFueraSnapshot: "90",
 				},
@@ -224,5 +233,161 @@ describe("buildMoraRecoveryReport", () => {
 		});
 		expect(query.sql).toContain("moras_historial");
 		expect(query.sql).not.toContain("mora_activa");
+	});
+
+	it("suma al esperado la mora generada dentro del ciclo", () => {
+		const report = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: "100",
+					generadoEnPeriodo: "150",
+					cobradoEnSnapshot: "250",
+					cobradoFueraSnapshot: "0",
+				},
+			],
+			{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "historico" },
+		);
+
+		expect(report.totales).toEqual({
+			esperado: "250.00",
+			cobradoEnSnapshot: "250.00",
+			cobradoFueraSnapshot: "0.00",
+			excedenteEnSnapshot: "0.00",
+			pendiente: "0.00",
+		});
+	});
+
+	it("sin la mora generada el mismo cobro fingía un excedente del asesor", () => {
+		const sinGenerado = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: "100",
+					generadoEnPeriodo: "0",
+					cobradoEnSnapshot: "250",
+					cobradoFueraSnapshot: "0",
+				},
+			],
+			{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "historico" },
+		);
+
+		expect(sinGenerado.totales.excedenteEnSnapshot).toBe("150.00");
+	});
+
+	it("acumula lo generado por asesor sin compensar entre créditos", () => {
+		const report = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 7,
+					nombre: "Cora",
+					esperado: "100",
+					generadoEnPeriodo: "40",
+					cobradoEnSnapshot: "140",
+					cobradoFueraSnapshot: "0",
+				},
+				{
+					asesorId: 7,
+					nombre: "Cora",
+					esperado: "0",
+					generadoEnPeriodo: "60",
+					cobradoEnSnapshot: "10",
+					cobradoFueraSnapshot: "0",
+				},
+			],
+			{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "live" },
+		);
+
+		expect(report.porAsesor).toEqual([
+			expect.objectContaining({
+				asesorId: 7,
+				esperado: "200.00",
+				excedenteEnSnapshot: "0.00",
+				pendiente: "50.00",
+			}),
+		]);
+	});
+
+	it("solo suma incrementos: condonaciones y decrementos no bajan el esperado", () => {
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+
+		expect(query.sql).toContain(
+			"h.tipo_evento IN ('CREACION', 'RECALCULO', 'INCREMENTO')",
+		);
+		expect(query.sql).toContain(
+			"SUM(GREATEST(0, h.monto_nuevo::numeric - h.monto_anterior::numeric))",
+		);
+		// El total generado llega al reporte como columna propia: sin esto el
+		// esperado seguiría siendo solo la foto inicial.
+		expect(query.sql).toContain(
+			"COALESCE(g.generado, 0)::text AS generado_en_periodo",
+		);
+		expect(query.sql).not.toContain("'CONDONACION'");
+		expect(query.sql).not.toContain("'DECREMENTO'");
+	});
+
+	it("filtra lo generado por los límites UTC contra la columna cruda y semiabierto", () => {
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+
+		// Columna CRUDA: envolverla en AT TIME ZONE mataría moras_historial_fecha_idx.
+		expect(query.sql).toContain("AND h.fecha >= $4::timestamp");
+		expect(query.sql).toContain("AND h.fecha < $5::timestamp");
+		expect(query.sql).not.toContain(
+			"(h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >=",
+		);
+		expect(query.params.slice(3)).toEqual([
+			"2026-06-06 06:00:00.000",
+			"2026-07-06 06:00:00.000",
+		]);
+	});
+
+	it("un crédito que solo generó mora adentro entra al alcance del esperado", () => {
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+
+		// FULL JOIN: si solo tiene generado no hay fila en snapshot ni en pagos.
+		expect(query.sql).toContain("FULL JOIN generado_por_credito g");
+		expect(query.sql).toContain(
+			"ca.credito_id = COALESCE(s.credito_id, p.credito_id, g.credito_id)",
+		);
+		// Y su cobro cuenta DENTRO del alcance, no fuera.
+		expect(query.sql).toContain(
+			"CASE WHEN s.credito_id IS NOT NULL OR g.credito_id IS NOT NULL THEN COALESCE(p.cobrado, 0) ELSE 0 END::text AS cobrado_en_snapshot",
+		);
+		expect(query.sql).toContain(
+			"CASE WHEN s.credito_id IS NULL AND g.credito_id IS NULL THEN COALESCE(p.cobrado, 0) ELSE 0 END::text AS cobrado_fuera_snapshot",
+		);
+	});
+
+	it("rechaza un ciclo con límites que no son un día real", () => {
+		expect(() =>
+			buildMoraRecoveryQuery({
+				inicio: "2026-02-31",
+				fin: "2026-07-06",
+				fechaSnapshot: "2026-06-06",
+				alcance: "historico",
+			}),
+		).toThrow("Período de recuperación de mora inválido");
+		expect(() =>
+			buildMoraRecoveryQuery({
+				inicio: "2026-06-06",
+				fin: "no-es-fecha",
+				fechaSnapshot: "2026-06-06",
+				alcance: "historico",
+			}),
+		).toThrow("Período de recuperación de mora inválido");
 	});
 });

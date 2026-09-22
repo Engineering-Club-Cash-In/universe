@@ -2557,7 +2557,15 @@ export function DynamicContractWizard({
 													const hasValue = fieldHasValue(field.key);
 													const hasError = !!fieldErrors[field.key];
 													return (
-														<div key={field.key} className="flex flex-col">
+														<div
+															key={field.key}
+															// Las listas ocupan el ancho completo: cada item
+															// trae varias columnas adentro y en media fila
+															// quedan apretadas.
+															className={`flex flex-col ${
+																field.type === "list" ? "md:col-span-2" : ""
+															}`}
+														>
 															{/* Label */}
 															<div className="mb-1.5 flex items-center gap-2">
 																{hasError ? (

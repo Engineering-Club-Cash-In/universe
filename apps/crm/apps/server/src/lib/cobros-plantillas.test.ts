@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	anioImpuestoCirculacion,
+	CLAUSULA_INCREMENTO_DIARIO_MORA,
 	COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
 	COBROS_MOTIVO_SIN_MONTO_ADEUDADO,
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
@@ -11,11 +12,11 @@ import {
 	contarCuotasAtrasadasUnicas,
 	cuerpoUsaFechaLimiteImpuesto,
 	type FilaCuotaAtrasada,
+	FRAGMENTO_TOPE_INCREMENTO_MORA,
 	fechaLimiteImpuestoCirculacion,
-	CLAUSULA_INCREMENTO_DIARIO_MORA,
 	fechaLimiteImpuestoVencida,
-	formatearIncrementoDiarioMora,
-	hayIncrementoDiarioMora,
+	formatearIncrementoMora,
+	hayIncrementoMora,
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
@@ -975,10 +976,14 @@ describe("incrementoDiarioMora en las plantillas de mora", () => {
 		expectativaMora: "",
 	};
 
-	test("las tres plantillas de mora anuncian el aumento por día", () => {
+	test("las tres plantillas de mora anuncian el aumento por día Y su techo", () => {
 		for (const id of ["mora_30", "mora_60", "aviso_juridico"]) {
 			expect(porId(id)).toContain("{incrementoDiarioMora}");
+			expect(porId(id)).toContain("{incrementoMaximoMensualMora}");
 			expect(porId(id)).toContain(CLAUSULA_INCREMENTO_DIARIO_MORA);
+			expect(porId(id)).toContain(FRAGMENTO_TOPE_INCREMENTO_MORA);
+			// Sin el techo, "por cada día" promete un crecimiento infinito.
+			expect(porId(id)).not.toContain("por cada día que pase");
 		}
 	});
 
@@ -988,9 +993,10 @@ describe("incrementoDiarioMora en las plantillas de mora", () => {
 			montoAdeudado: "4,318.20",
 			cuotasAtraso: 1,
 			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "93.33",
 		});
 		expect(mensaje).toContain(
-			"Tienes *1 cuota con atraso por un monto de Q4,318.20* al día de hoy, y aumenta Q3.73 por cada día que pase.",
+			"Tienes *1 cuota con atraso por un monto de Q4,318.20* al día de hoy, y aumenta Q3.73 por cada día de atraso, hasta un máximo de Q93.33 al mes.",
 		);
 	});
 
@@ -1000,9 +1006,10 @@ describe("incrementoDiarioMora en las plantillas de mora", () => {
 			montoAdeudado: "8,600.00",
 			cuotasAtraso: 3,
 			incrementoDiarioMora: "11.20",
+			incrementoMaximoMensualMora: "205.33",
 		});
 		expect(mensaje).toContain(
-			"tienes *3 cuotas en atraso, por un monto total de Q8,600.00* al día de hoy, y aumenta Q11.20 por cada día que pase.",
+			"tienes *3 cuotas en atraso, por un monto total de Q8,600.00* al día de hoy, y aumenta Q11.20 por cada día de atraso, hasta un máximo de Q205.33 al mes.",
 		);
 	});
 
@@ -1012,9 +1019,10 @@ describe("incrementoDiarioMora en las plantillas de mora", () => {
 			montoAdeudado: "20,150.00",
 			cuotasAtraso: 5,
 			incrementoDiarioMora: "7.47",
+			incrementoMaximoMensualMora: "1,120.00",
 		});
 		expect(mensaje).toContain(
-			"por un monto de 20,150.00 incluyendo moras al día de hoy, y aumenta Q7.47 por cada día que pase.",
+			"por un monto de 20,150.00 incluyendo moras al día de hoy, y aumenta Q7.47 por cada día de atraso, hasta un máximo de Q1,120.00 al mes.",
 		);
 	});
 
@@ -1024,13 +1032,34 @@ describe("incrementoDiarioMora en las plantillas de mora", () => {
 			montoAdeudado: "8,600.00",
 			cuotasAtraso: 3,
 			incrementoDiarioMora: "0.00",
+			incrementoMaximoMensualMora: "0.00",
 		});
 		expect(mensaje).toContain(
 			"tienes *3 cuotas en atraso, por un monto total de Q8,600.00* al día de hoy.",
 		);
 		expect(mensaje).not.toContain("aumenta");
+		expect(mensaje).not.toContain("máximo");
 		expect(mensaje).not.toContain("Q0.00");
 		expect(mensaje).not.toContain("{incrementoDiarioMora}");
+		expect(mensaje).not.toContain("{incrementoMaximoMensualMora}");
+	});
+
+	test("con incremento pero SIN techo la frase queda corta, no rota", () => {
+		// Un cartera-back anterior a este cambio manda el diario y no el techo:
+		// se borra solo el tope, no la oración entera — el cliente sigue viendo
+		// el ritmo, que es el dato que evita que pague de menos.
+		const mensaje = interpolar(porId("mora_30"), {
+			...base,
+			montoAdeudado: "4,318.20",
+			cuotasAtraso: 1,
+			incrementoDiarioMora: "3.73",
+		});
+		expect(mensaje).toContain(
+			"Tienes *1 cuota con atraso por un monto de Q4,318.20* al día de hoy, y aumenta Q3.73 por cada día de atraso.",
+		);
+		expect(mensaje).not.toContain("máximo");
+		expect(mensaje).not.toContain("{incrementoMaximoMensualMora}");
+		expect(mensaje).not.toContain("Q al mes");
 	});
 
 	test("sin el dato (cartera viejo) tampoco queda la variable ni un 'Q.' roto", () => {
@@ -1052,27 +1081,34 @@ describe("incrementoDiarioMora en las plantillas de mora", () => {
 			montoAdeudado: "4,318.20",
 			cuotasAtraso: 1,
 			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "93.33",
 		});
 		expect(mensaje).toContain("Q4,318.20");
 	});
 
-	test("hayIncrementoDiarioMora: 0, vacío y basura no anuncian nada", () => {
-		expect(hayIncrementoDiarioMora("3.73")).toBe(true);
-		expect(hayIncrementoDiarioMora("1,120.00")).toBe(true);
-		expect(hayIncrementoDiarioMora("0.00")).toBe(false);
-		expect(hayIncrementoDiarioMora("")).toBe(false);
-		expect(hayIncrementoDiarioMora(null)).toBe(false);
-		expect(hayIncrementoDiarioMora(undefined)).toBe(false);
+	test("hayIncrementoMora: 0, vacío y basura no anuncian nada", () => {
+		expect(hayIncrementoMora("3.73")).toBe(true);
+		expect(hayIncrementoMora("1,120.00")).toBe(true);
+		expect(hayIncrementoMora("0.00")).toBe(false);
+		expect(hayIncrementoMora("")).toBe(false);
+		expect(hayIncrementoMora(null)).toBe(false);
+		expect(hayIncrementoMora(undefined)).toBe(false);
 	});
 
-	test("formatearIncrementoDiarioMora pasa el toFixed de cartera a es-GT", () => {
-		expect(formatearIncrementoDiarioMora("1120.00")).toBe("1,120.00");
-		expect(formatearIncrementoDiarioMora("3.73")).toBe("3.73");
+	test("el mismo formateador sirve para el techo mensual", () => {
+		expect(formatearIncrementoMora("93.33")).toBe("93.33");
+		expect(formatearIncrementoMora("1120")).toBe("1,120.00");
+		expect(formatearIncrementoMora("0.00")).toBe("");
+	});
+
+	test("formatearIncrementoMora pasa el toFixed de cartera a es-GT", () => {
+		expect(formatearIncrementoMora("1120.00")).toBe("1,120.00");
+		expect(formatearIncrementoMora("3.73")).toBe("3.73");
 		// Cartera manda "0.00" cuando todas las cuotas ya están en el techo.
-		expect(formatearIncrementoDiarioMora("0.00")).toBe("");
-		expect(formatearIncrementoDiarioMora(undefined)).toBe("");
-		expect(formatearIncrementoDiarioMora("")).toBe("");
-		expect(formatearIncrementoDiarioMora("abc")).toBe("");
+		expect(formatearIncrementoMora("0.00")).toBe("");
+		expect(formatearIncrementoMora(undefined)).toBe("");
+		expect(formatearIncrementoMora("")).toBe("");
+		expect(formatearIncrementoMora("abc")).toBe("");
 	});
 
 	test("no cambia el conteo de bloques del template aprobado en Meta", () => {
@@ -1085,15 +1121,25 @@ describe("incrementoDiarioMora en las plantillas de mora", () => {
 				montoAdeudado: "100.00",
 				cuotasAtraso: 1,
 				incrementoDiarioMora: "3.73",
+				incrementoMaximoMensualMora: "93.33",
 			}).split("\n\n").length;
 			const sin = interpolar(porId(id), {
 				...base,
 				montoAdeudado: "100.00",
 				cuotasAtraso: 1,
 				incrementoDiarioMora: "0.00",
+				incrementoMaximoMensualMora: "0.00",
+			}).split("\n\n").length;
+			// Y con el ritmo pero sin su techo (se borra solo el tope).
+			const soloRitmo = interpolar(porId(id), {
+				...base,
+				montoAdeudado: "100.00",
+				cuotasAtraso: 1,
+				incrementoDiarioMora: "3.73",
 			}).split("\n\n").length;
 			expect(con).toBe(bloques);
 			expect(sin).toBe(bloques);
+			expect(soloRitmo).toBe(bloques);
 		}
 	});
 });

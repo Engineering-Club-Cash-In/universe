@@ -130,6 +130,7 @@ export function ContactoQuickAction({
 				expectativaMora={d.expectativaMora || ""}
 				expectativaMoraDiaria={d.expectativaMoraDiaria || ""}
 				incrementoDiarioMora={d.incrementoDiarioMora || ""}
+				incrementoMaximoMensualMora={d.incrementoMaximoMensualMora || ""}
 				aseguradora={d.aseguradora || ""}
 				cabinaSeguro={d.cabinaSeguro || ""}
 			/>

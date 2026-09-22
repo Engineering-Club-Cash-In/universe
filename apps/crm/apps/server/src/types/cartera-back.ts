@@ -307,6 +307,14 @@ export interface CreditoDirectoResponse {
 	 * cartera-back anterior a ese cambio no lo manda.
 	 */
 	incrementoDiarioMora?: string;
+	/**
+	 * El TECHO de ese aumento: lo máximo que la mora de este crédito puede
+	 * subir en un mes — el cargo mensual de cada cuota vencida menos la mora
+	 * que ya corre. Lo calcula `incrementoMaximoMensualMora` en
+	 * cartera-back/latefee.ts, de las MISMAS cuotas que el diario. Opcional
+	 * porque un cartera-back anterior a ese cambio no lo manda.
+	 */
+	incrementoMaximoMensualMora?: string;
 	mora?: CarteraMoraCredito | null;
 	convenioActivo?: CarteraConvenio | null;
 	ajusteFechaIdeal?: CarteraAjusteFechaIdeal | null;

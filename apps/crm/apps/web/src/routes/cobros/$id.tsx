@@ -63,7 +63,7 @@ import {
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
-import { hayIncrementoDiarioMora } from "@/lib/cobros/plantillas-mensajes";
+import { hayIncrementoMora } from "@/lib/cobros/plantillas-mensajes";
 import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -668,10 +668,12 @@ function RouteComponent() {
 									    un residuo que no cubre la cuota. No se muestra cuando
 									    no crece (todas las cuotas ya en su techo de 30 días). */}
 									{caso.cuotaConvenio == null &&
-										hayIncrementoDiarioMora(caso.incrementoDiarioMora) && (
+										hayIncrementoMora(caso.incrementoDiarioMora) && (
 											<p className="text-muted-foreground text-xs">
-												Aumenta Q{caso.incrementoDiarioMora} por cada día que
-												pase
+												Aumenta Q{caso.incrementoDiarioMora} por cada día de
+												atraso
+												{hayIncrementoMora(caso.incrementoMaximoMensualMora) &&
+													`, hasta un máximo de Q${caso.incrementoMaximoMensualMora} al mes`}
 											</p>
 										)}
 								</div>
@@ -1129,6 +1131,9 @@ function RouteComponent() {
 											expectativaMora={caso.expectativaMora || ""}
 											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
 											incrementoDiarioMora={caso.incrementoDiarioMora || ""}
+											incrementoMaximoMensualMora={
+												caso.incrementoMaximoMensualMora || ""
+											}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
@@ -1164,6 +1169,9 @@ function RouteComponent() {
 											expectativaMora={caso.expectativaMora || ""}
 											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
 											incrementoDiarioMora={caso.incrementoDiarioMora || ""}
+											incrementoMaximoMensualMora={
+												caso.incrementoMaximoMensualMora || ""
+											}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
@@ -1202,6 +1210,9 @@ function RouteComponent() {
 											expectativaMora={caso.expectativaMora || ""}
 											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
 											incrementoDiarioMora={caso.incrementoDiarioMora || ""}
+											incrementoMaximoMensualMora={
+												caso.incrementoMaximoMensualMora || ""
+											}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>

@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs";
 
 /**
  * El envío masivo solo trae el detalle de cartera-back si la plantilla usa
- * alguna de las variables que salen de ese detalle. Las dos —{montoAdeudado} y
- * {incrementoDiarioMora}— se ofrecen por separado en el modal, así que el gate
- * tiene que mirar las dos: con una sola, una plantilla editada que use nada más
- * el incremento se quedaría sin datos y la cláusula desaparecería en silencio,
- * sin error visible.
+ * alguna de las variables que salen de ese detalle. Las tres —{montoAdeudado},
+ * {incrementoDiarioMora} y {incrementoMaximoMensualMora}— se ofrecen por
+ * separado en el modal, así que el gate tiene que mirar las tres: con menos,
+ * una plantilla editada que use nada más una de ellas se quedaría sin datos y
+ * la cláusula desaparecería en silencio, sin error visible.
  *
  * Es un test de contrato sobre el fuente porque ese camino depende de la base y
  * del cliente HTTP de cartera-back, y no hay forma barata de ejercitarlo.
@@ -37,7 +37,13 @@ describe("envío masivo — el gate que carga el detalle de cartera-back", () =>
     );
   });
 
-  test("las dos condiciones son alternativas, no exigencias simultáneas", () => {
+  test("se dispara también con {incrementoMaximoMensualMora} solo", () => {
+    expect(condicionDelGate()).toContain(
+      'cuerpoBase.includes("{incrementoMaximoMensualMora}")',
+    );
+  });
+
+  test("las condiciones son alternativas, no exigencias simultáneas", () => {
     expect(condicionDelGate()).toContain("||");
   });
 });

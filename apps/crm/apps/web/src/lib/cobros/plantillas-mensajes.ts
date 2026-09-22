@@ -48,6 +48,16 @@ export interface VariablesPlantilla {
 	 * la oración desaparece sola.
 	 */
 	incrementoDiarioMora?: string;
+	/**
+	 * El TECHO de ese aumento: lo máximo que la mora del crédito puede subir en
+	 * un mes. Va SIEMPRE junto a `incrementoDiarioMora`, porque el ritmo solo
+	 * prometía un crecimiento que no dura para siempre (cada cuota deja de
+	 * crecer al llegar a su cargo mensual); decir las dos cifras es el mismo
+	 * estándar de la plantilla del día de pago. Lo calcula cartera-back de las
+	 * MISMAS cuotas que el diario y llega ya formateado del server. Vacío o
+	 * "0.00" = no hay techo que anunciar y la frase se queda solo con el ritmo.
+	 */
+	incrementoMaximoMensualMora?: string;
 	/** Año del impuesto de circulación. Default: año actual en Guatemala. */
 	anioImpuesto?: string;
 	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
@@ -144,36 +154,34 @@ export const FRAGMENTO_EXPECTATIVA_MORA = "recargo por mora de Q";
  *  - "incluyendo moras" → aviso jurídico (su monto va sin "Q" delante, y esta
  *    es la parte de la oración que sobrevive a la interpolación).
  */
-/**
- * Oración que anuncia cuánto sube el saldo por día en las plantillas de mora.
- * `interpolar` la borra ENTERA cuando no hay aumento que anunciar: un crédito
- * con todas sus cuotas ya en el techo de 30 días crece Q0.00 por día, y
- * "aumenta Q0.00 por cada día que pase" no se le dice a nadie. Tiene que ser
- * idéntica a la del archivo del server (apps/server/src/lib/cobros-plantillas.ts).
- *
- * Va DENTRO del párrafo del monto adeudado, así que no cambia el conteo de
- * bloques (`\n\n`) del que depende la selección de template en Meta.
- */
-export const CLAUSULA_INCREMENTO_DIARIO_MORA =
-	", y aumenta Q{incrementoDiarioMora} por cada día que pase";
-
-/**
- * true si hay un aumento diario REAL que anunciar. "" (cartera no lo mandó) y
- * "0.00" son lo mismo para el mensaje: no hay frase. El valor viene formateado
- * es-GT, así que se le quitan los separadores de miles antes de compararlo.
- */
-export function hayIncrementoDiarioMora(
-	valor: string | null | undefined,
-): boolean {
-	if (!valor) return false;
-	return Number(valor.replace(/,/g, "")) > 0;
-}
-
 export const FRAGMENTOS_MONTO_ADEUDADO = [
 	"cuota con atraso por un monto de Q",
 	"por un monto total de Q",
 	"incluyendo moras",
 ] as const;
+
+/**
+ * Oración que anuncia cuánto sube el saldo por día en las plantillas de mora,
+ * CON su techo: "…, y aumenta Q3.73 por cada día de atraso, hasta un máximo de
+ * Q93.33 al mes". El ritmo solo prometía un crecimiento infinito — cada cuota
+ * deja de crecer al llegar a su cargo mensual —, así que se dice igual que en
+ * la plantilla del día de pago: el ritmo Y su tope.
+ *
+ * `interpolar` borra la oración ENTERA cuando el crédito ya no crece (todas
+ * las cuotas en su techo → Q0.00 por día), y solo el
+ * `FRAGMENTO_TOPE_INCREMENTO_MORA` cuando llegó el ritmo pero no el techo, que
+ * deja la frase corta pero sana. Tienen que ser idénticas a las del archivo del
+ * server (apps/server/src/lib/cobros-plantillas.ts).
+ *
+ * Va DENTRO del párrafo del monto adeudado, así que no cambia el conteo de
+ * bloques (`\n\n`) del que depende la selección de template en Meta.
+ */
+export const FRAGMENTO_TOPE_INCREMENTO_MORA =
+	", hasta un máximo de Q{incrementoMaximoMensualMora} al mes";
+
+export const CLAUSULA_INCREMENTO_DIARIO_MORA =
+	", y aumenta Q{incrementoDiarioMora} por cada día de atraso" +
+	FRAGMENTO_TOPE_INCREMENTO_MORA;
 
 /**
  * true si el mensaje que se va a mandar todavía anuncia el monto adeudado (con
@@ -324,14 +332,26 @@ export function interpolar(
 	// no mandó el dato) la oración se borra entera: "aumenta Q0.00 por cada día
 	// que pase" es ruido y "aumenta Q." es un mensaje roto.
 	const incrementoDiarioMora = variables.incrementoDiarioMora ?? "";
-	const base = hayIncrementoDiarioMora(incrementoDiarioMora)
-		? texto
-		: texto.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
+	const incrementoMaximoMensualMora =
+		variables.incrementoMaximoMensualMora ?? "";
+	let base = texto;
+	if (!hayIncrementoMora(incrementoDiarioMora)) {
+		base = base.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
+	} else if (!hayIncrementoMora(incrementoMaximoMensualMora)) {
+		// Llegó el ritmo pero no su techo: se borra solo el tope, no la frase
+		// entera. El orden importa: sacando primero el tope, la cláusula
+		// completa ya no coincidiría para poder borrarse.
+		base = base.split(FRAGMENTO_TOPE_INCREMENTO_MORA).join("");
+	}
 
 	return base
 		.replace(
 			/{incrementoDiarioMora}/g,
 			v(incrementoDiarioMora, "aumento diario de la mora"),
+		)
+		.replace(
+			/{incrementoMaximoMensualMora}/g,
+			v(incrementoMaximoMensualMora, "techo mensual de la mora"),
 		)
 		.replace(/{clienteNombre}/g, v(nombre, "nombre cliente"))
 		.replace(/{fechaPago}/g, v(variables.fechaPago, "fecha pago"))
@@ -591,6 +611,16 @@ ${COBROS_NO_REPLY_WARNING}
 Favor de comunicarse a los siguientes números: {telefonoAsesor} y 2234-1333. Nuestro horario de atención es de lunes a viernes en horario de 8:00 a 17:00 hrs.`,
 	},
 ];
+/**
+ * true si hay un monto de aumento REAL que anunciar — sirve igual para el
+ * ritmo diario y para su techo mensual. "" (cartera no lo mandó) y "0.00" son
+ * lo mismo para el mensaje: no hay frase. El valor viene formateado
+ * es-GT, así que se le quitan los separadores de miles antes de compararlo.
+ */
+export function hayIncrementoMora(valor: string | null | undefined): boolean {
+	if (!valor) return false;
+	return Number(valor.replace(/,/g, "")) > 0;
+}
 
 /** Sugiere una plantilla según el estado de mora y antigüedad del caso */
 export function sugerirPlantilla(

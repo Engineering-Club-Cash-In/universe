@@ -96,6 +96,8 @@ interface ContactoModalProps {
 	expectativaMoraDiaria?: string;
 	/** Cuánto crece por día el crédito que ya está en mora (ver VariablesPlantilla). */
 	incrementoDiarioMora?: string;
+	/** El techo mensual de ese crecimiento (ver VariablesPlantilla). */
+	incrementoMaximoMensualMora?: string;
 	aseguradora?: string;
 	cabinaSeguro?: string;
 }
@@ -123,6 +125,7 @@ export function ContactoModal({
 	expectativaMora = "",
 	expectativaMoraDiaria = "",
 	incrementoDiarioMora = "",
+	incrementoMaximoMensualMora = "",
 	aseguradora = "",
 	cabinaSeguro = "",
 }: ContactoModalProps) {
@@ -174,6 +177,7 @@ export function ContactoModal({
 			expectativaMora,
 			expectativaMoraDiaria,
 			incrementoDiarioMora,
+			incrementoMaximoMensualMora,
 			// Vacíos caen al default de interpolar (Seguros Universales); con
 			// datos, el modal muestra de una vez la variante correcta (p. ej. G&T).
 			aseguradora: aseguradora || undefined,
@@ -192,6 +196,7 @@ export function ContactoModal({
 			expectativaMora,
 			expectativaMoraDiaria,
 			incrementoDiarioMora,
+			incrementoMaximoMensualMora,
 			aseguradora,
 			cabinaSeguro,
 		],

@@ -16,7 +16,10 @@ import {
 } from "../database/db";
 import z from "zod";
 import { sendCompraCarteraAcceptedNotification } from "@cci/email";
-import { getVehicleDetailsBySifco } from "../services/crm.service";
+import {
+  abrirBateriaDeContratosEnCrm,
+  getVehicleDetailsBySifco,
+} from "../services/crm.service";
 import {
   calcularExpiracionCompraCartera,
   formatFechaLargaGT,
@@ -28,6 +31,18 @@ const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
 // ID fijo de CUBE INVESTMENTS S.A. (siempre va primero en el pool)
 const CUBE_INVESTMENT_ID = 86;
+
+// Cómo se lee cada modalidad de reinversión. Lo usan el correo de aceptación y
+// la batería de contratos que se le abre a jurídico.
+const MODALIDAD_LABEL: Record<string, string> = {
+  sin_reinversion: "Sin Reinversión",
+  reinversion_capital: "Reinversión de Capital",
+  reinversion_interes: "Reinversión de Interés",
+  reinversion_total: "Reinversión Total",
+  reinversion_variable: "Reinversión Variable",
+  reinversion_excedente: "Reinversión Excedente",
+  reinversion_combinada: "Reinversión Combinada",
+};
 
 // Destinatarios fijos (compartidos con el correo de expiración): ver
 // src/utils/functions/compraCarteraRecipients.ts
@@ -45,6 +60,130 @@ const extenderCompraCarteraSchema = z.object({
     .min(1, "Debe enviar al menos un crédito"),
   inversionista_id: z.number().int().positive(),
 });
+
+/** Una fila del pool de un crédito, ya normalizada por el controlador. */
+type FilaDePool = {
+  inversionista_id: number;
+  inversionista_nombre: string;
+  monto: Big;
+  porcentajeInversion: Big;
+};
+
+/**
+ * Le abre al CRM una batería de contratos por cada inversionista de la compra.
+ *
+ * Una por inversionista y no una por compra: los contratos se firman con una
+ * persona, y una aceptación puede traer a varios. CUBE no entra (`targetIds` ya
+ * viene sin él): no firma contratos consigo misma.
+ *
+ * Nunca lanza. Cuando esto corre la compra ya está aceptada, así que un CRM
+ * caído tiene que costar el aviso, no la operación.
+ */
+async function abrirBateriasDeContratos(params: {
+  targetIds: number[];
+  creditosRows: Array<{
+    credito_id: number;
+    numero_credito_sifco: string;
+    cliente_nombre: string;
+  }>;
+  rowsPorCredito: Map<number, FilaDePool[]>;
+  montoNuevoPorPar: Map<string, Big>;
+  aceptadaEn: Date;
+  aceptadaPor?: string;
+}): Promise<
+  Array<{ inversionista_id: number; success: boolean; batchId?: string; error?: string }>
+> {
+  const { targetIds, creditosRows, rowsPorCredito, montoNuevoPorPar } = params;
+  if (targetIds.length === 0) return [];
+
+  try {
+    const inversionistasDeLaCompra = await db
+      .select({
+        inversionista_id: inversionistas.inversionista_id,
+        nombre: inversionistas.nombre,
+        dpi: inversionistas.dpi,
+        email: inversionistas.email,
+        celular: inversionistas.celular,
+        tipo_reinversion: inversionistas.tipo_reinversion,
+        emite_factura: inversionistas.emite_factura,
+      })
+      .from(inversionistas)
+      .where(inArray(inversionistas.inversionista_id, targetIds));
+
+    const porId = new Map(
+      inversionistasDeLaCompra.map((inv) => [inv.inversionista_id, inv]),
+    );
+
+    const resultados: Array<{
+      inversionista_id: number;
+      success: boolean;
+      batchId?: string;
+      error?: string;
+    }> = [];
+
+    for (const targetId of targetIds) {
+      const inv = porId.get(targetId);
+      if (!inv) continue;
+
+      // Sólo los créditos donde este inversionista tiene posición, con el monto
+      // de ESTA operación (el delta), no el acumulado que ya tenía.
+      const creditos = creditosRows.flatMap((credito) => {
+        const fila = (rowsPorCredito.get(credito.credito_id) ?? []).find(
+          (r) => r.inversionista_id === targetId,
+        );
+        if (!fila) return [];
+
+        const monto =
+          montoNuevoPorPar.get(`${credito.credito_id}-${targetId}`) ?? fila.monto;
+
+        return [
+          {
+            creditoId: credito.credito_id,
+            numeroCreditoSifco: credito.numero_credito_sifco,
+            clienteNombre: credito.cliente_nombre,
+            monto: monto.toFixed(2),
+          },
+        ];
+      });
+
+      if (creditos.length === 0) continue;
+
+      const montoTotal = creditos.reduce(
+        (acc, credito) => acc.plus(new Big(credito.monto)),
+        new Big(0),
+      );
+
+      const res = await abrirBateriaDeContratosEnCrm({
+        inversionista: {
+          id: targetId,
+          nombre: inv.nombre,
+          dpi: inv.dpi != null ? String(inv.dpi) : null,
+          email: inv.email,
+          celular: inv.celular,
+        },
+        compra: {
+          creditos,
+          montoTotal: montoTotal.toFixed(2),
+          modalidad:
+            MODALIDAD_LABEL[inv.tipo_reinversion] ?? inv.tipo_reinversion,
+          facturacion: inv.emite_factura ? "Propia" : "No emite",
+          aceptadaEn: params.aceptadaEn.toISOString(),
+          aceptadaPor: params.aceptadaPor,
+        },
+      });
+
+      resultados.push({ inversionista_id: targetId, ...res });
+    }
+
+    return resultados;
+  } catch (error) {
+    console.error(
+      "[compraCarteraAceptada] No se pudieron abrir las baterías de contratos:",
+      error,
+    );
+    return [];
+  }
+}
 
 // ================================================================
 // COMPRA DE CARTERA ACEPTADA
@@ -380,21 +519,11 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
         const porcInv = targetInversionPonderada.div(targetMontoTotal);
         const porcCube = new Big(100).minus(porcInv);
 
-        const modalidadMap: Record<string, string> = {
-          sin_reinversion: "Sin Reinversión",
-          reinversion_capital: "Reinversión de Capital",
-          reinversion_interes: "Reinversión de Interés",
-          reinversion_total: "Reinversión Total",
-          reinversion_variable: "Reinversión Variable",
-          reinversion_excedente: "Reinversión Excedente",
-          reinversion_combinada: "Reinversión Combinada",
-        };
-
         operacionInfo = {
           inversionistaNombre: targetInv.nombre,
           monto: targetMontoTotal.toFixed(2),
           modalidad:
-            modalidadMap[targetInv.tipo_reinversion] ??
+            MODALIDAD_LABEL[targetInv.tipo_reinversion] ??
             targetInv.tipo_reinversion,
           factura: targetInv.emite_factura ? "Propia" : "No emite",
           porcentajeInversionista: porcInv.toFixed(2),
@@ -436,10 +565,29 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       },
     });
 
+    // ── 6. Abrirle a jurídico la batería de contratos de cada inversionista ──
+    // El correo avisa, pero no deja anotado en ningún lado qué contratos
+    // faltan: jurídico lo lleva leyendo el hilo. La batería sí queda, y se
+    // cierra cuando la papelería está hecha.
+    //
+    // Va al final y best-effort: a esta altura la compra ya se aceptó y el
+    // espejo ya se movió. Si el CRM no contesta, se pierde el aviso, no la
+    // aceptación. El endpoint del CRM es idempotente por inversionista y juego
+    // de créditos, así que reintentarlo no abre dos baterías.
+    const bateriasAbiertas = await abrirBateriasDeContratos({
+      targetIds,
+      creditosRows,
+      rowsPorCredito,
+      montoNuevoPorPar,
+      aceptadaEn: ahora,
+      aceptadaPor: usuarioEmail,
+    });
+
     set.status = 200;
     return {
       success: true,
       message: `Notificación enviada a ${COMPRA_CARTERA_RECIPIENTS.to.length} destinatario(s) + ${COMPRA_CARTERA_RECIPIENTS.cc.length} en CC`,
+      baterias_contratos: bateriasAbiertas,
       creditos_notificados: creditosRows.length,
       pool_size: pool.length,
       espejo_actualizados: updateRes.length,

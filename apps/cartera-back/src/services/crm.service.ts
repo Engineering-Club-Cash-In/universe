@@ -71,6 +71,81 @@ export async function notifyPayInvestors(
 }
 
 // ============================================
+// 🧾 Abrir en el CRM la batería de contratos de un inversionista
+// ============================================
+export interface CreditoDeLaCompra {
+  creditoId: number;
+  numeroCreditoSifco: string;
+  clienteNombre: string;
+  /** Lo que puso ESTE inversionista en ESTE crédito. */
+  monto: string;
+}
+
+export interface BateriaDeContratosInput {
+  inversionista: {
+    id: number;
+    nombre: string;
+    dpi?: string | null;
+    email?: string | null;
+    celular?: string | null;
+  };
+  compra: {
+    creditos: CreditoDeLaCompra[];
+    montoTotal: string;
+    modalidad?: string | null;
+    facturacion?: string | null;
+    /** Cuándo se aceptó la compra, en ISO. */
+    aceptadaEn: string;
+    aceptadaPor?: string | null;
+  };
+}
+
+/**
+ * Le avisa al CRM que la compra de un inversionista fue aceptada, para que le
+ * abra a jurídico la batería de contratos que le queda pendiente.
+ *
+ * El correo de aceptación sigue saliendo igual: esto es lo que deja el trabajo
+ * anotado en algún lado en vez de sólo en un hilo de correo.
+ *
+ * **Es best-effort a propósito.** Cuando esto corre, la compra ya se aceptó y el
+ * espejo ya se movió: tirar la operación porque el CRM no contestó dejaría la
+ * aceptación a medias. El aviso es idempotente del otro lado (una batería por
+ * inversionista y juego de créditos), así que reintentarlo no duplica nada.
+ */
+export async function abrirBateriaDeContratosEnCrm(
+  input: BateriaDeContratosInput,
+): Promise<{ success: boolean; batchId?: string; error?: string }> {
+  const secreto = process.env.CARTERA_RELAY_SECRET;
+
+  if (!secreto) {
+    console.warn(
+      "[WARN] CARTERA_RELAY_SECRET no está configurado — no se abre la batería de contratos en el CRM",
+    );
+    return { success: false, error: "CARTERA_RELAY_SECRET no configurado" };
+  }
+
+  try {
+    const { data } = await crmApi.post(
+      "/api/investor-contracts/compra-aceptada",
+      input,
+      { headers: { "x-cartera-relay-secret": secreto } },
+    );
+
+    console.log(
+      `   ✅ Batería de contratos abierta en el CRM para ${input.inversionista.nombre}` +
+        (data?.repetida ? " (ya existía)" : ""),
+    );
+    return { success: true, batchId: data?.batchId };
+  } catch (error: any) {
+    const msg = error?.response?.data?.error ?? error?.message ?? "Error desconocido";
+    console.error(
+      `   ❌ No se pudo abrir la batería de contratos de ${input.inversionista.nombre}: ${msg}`,
+    );
+    return { success: false, error: msg };
+  }
+}
+
+// ============================================
 // Obtener placa/chasis por número SIFCO
 // ============================================
 export interface VehicleDetails {

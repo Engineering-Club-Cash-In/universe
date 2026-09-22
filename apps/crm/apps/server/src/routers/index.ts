@@ -16,6 +16,7 @@ import { insuranceRouter } from "./insurance";
 import { investorDocumentsRouter } from "./investor-documents";
 import { juridicoDashboardRouter } from "./juridico-dashboard";
 import { legalContractsRouter } from "./legal-contracts";
+import { investorContractsRouter } from "./investor-contracts";
 import { licenseVerificationRouter } from "./license-verification";
 import { locationsRouter } from "./locations";
 import { messagingRouter } from "./messaging";
@@ -292,6 +293,20 @@ export const legalAppRouter = {
 	regenerateContracts: contractGenerationRouter.regenerateContracts,
 	// Subida manual de jurídico: el PDF lo arma una persona, la firma va igual
 	uploadContractForSigning: contractGenerationRouter.uploadContractForSigning,
+
+	// Baterías de contratos de inversionistas: el trabajo que abre cada compra
+	// de cartera aceptada.
+	listInvestorContractBatches:
+		investorContractsRouter.listInvestorContractBatches,
+	getInvestorContractBatch: investorContractsRouter.getInvestorContractBatch,
+	listInvestorContractBatchesByInvestor:
+		investorContractsRouter.listInvestorContractBatchesByInvestor,
+	startInvestorContractBatch:
+		investorContractsRouter.startInvestorContractBatch,
+	closeInvestorContractBatch:
+		investorContractsRouter.closeInvestorContractBatch,
+	countOpenInvestorContractBatches:
+		investorContractsRouter.countOpenInvestorContractBatches,
 };
 
 /**

@@ -95,9 +95,14 @@ function RouteComponent() {
 
 	const bateria = bateriaQuery.data;
 
-	// El DPI sale de cartera, pero jurídico puede corregirlo: en una sociedad el
-	// que firma es su representante, y de él cartera no guarda el DPI.
-	const dpiEnUso = dpiTocado ? dpi : (bateria?.investorDpi ?? "");
+	// De quién es el DPI con el que se piden los campos del contrato: en una
+	// sociedad firma su representante legal (`dpi_rep_legal` en cartera), no la
+	// empresa. Jurídico igual puede corregirlo.
+	const dpiDeCartera =
+		categoria === "sociedad"
+			? (bateria?.investorDpiRepLegal ?? bateria?.investorDpi ?? "")
+			: (bateria?.investorDpi ?? "");
+	const dpiEnUso = dpiTocado ? dpi : dpiDeCartera;
 
 	const documentTypes = contractTypesQuery.data?.data ?? [];
 
@@ -334,6 +339,13 @@ function RouteComponent() {
 							}}
 							placeholder="13 dígitos"
 						/>
+						<p className="text-muted-foreground text-xs">
+							{categoria === "sociedad"
+								? bateria.investorDpiRepLegal
+									? "Es el del representante legal, como lo tiene cartera."
+									: "Cartera no tiene el DPI del representante legal: cargalo acá."
+								: "Es el del inversionista, como lo tiene cartera."}
+						</p>
 					</div>
 					<div className="space-y-1 md:col-span-2">
 						<Label className="text-muted-foreground text-xs">

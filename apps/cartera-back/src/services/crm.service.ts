@@ -86,6 +86,8 @@ export interface BateriaDeContratosInput {
     id: number;
     nombre: string;
     dpi?: string | null;
+    /** DPI de su representante legal, cuando el inversionista es una sociedad. */
+    dpiRepLegal?: string | null;
     email?: string | null;
     celular?: string | null;
   };

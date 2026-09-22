@@ -218,6 +218,13 @@
 			"when": 1789604700000,
 			"tag": "0040_link_contracts_to_investors",
 			"breakpoints": true
+		},
+		{
+			"idx": 31,
+			"version": "7",
+			"when": 1789604800000,
+			"tag": "0041_add_investor_rep_legal_dpi",
+			"breakpoints": true
 		}
 	]
 }

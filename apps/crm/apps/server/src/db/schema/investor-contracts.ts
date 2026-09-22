@@ -57,6 +57,14 @@ export const investorContractBatches = pgTable(
 		investorId: integer("investor_id").notNull(),
 		investorName: text("investor_name").notNull(),
 		investorDpi: text("investor_dpi"),
+		/**
+		 * DPI del representante legal del inversionista, cuando es una sociedad.
+		 *
+		 * Quien firma los contratos de una sociedad no es "la empresa" sino su
+		 * representante, y el catálogo de campos del contrato se pide por DPI. En
+		 * cartera es `inversionistas.dpi_rep_legal`.
+		 */
+		investorDpiRepLegal: text("investor_dpi_rep_legal"),
 		investorEmail: text("investor_email"),
 		investorPhone: text("investor_phone"),
 

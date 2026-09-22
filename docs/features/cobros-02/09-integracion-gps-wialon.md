@@ -1,7 +1,7 @@
 # 9 · Integración GPS / Wialon (La Legión)
 
-**Estado:** 🟢 Implementado en CRM Server · listo para consumo en Ficha 360 y endpoints REST  
-**Apps que toca:** `apps/crm` (server + tipos para web) · Wialon Remote API (`gps.lalegion.gt`)  
+**Estado:** 🟢 Implementado en CRM Server · CB-117 (panel admin `/admin/gps`) implementado · pendiente Ficha 360 (CB-118), alertas/webhooks (CB-119), corte remoto (CB-120) y bitácora persistente (CB-121)  
+**Apps que toca:** `apps/crm` (server + web) · Wialon Remote API (`gps.lalegion.gt`)  
 
 ---
 
@@ -84,6 +84,15 @@ Su propósito principal dentro del flujo de [Recuperación de vehículo (B4)](./
   - La creación y revocación de enlaces públicos de rastreo (`createWialonTrackingLink`, `deleteWialonTrackingLink`) están restringidos estrictamente a **`cobrosSupervisorProcedure`** (supervisores de cobros y administradores).
   - Toda creación y eliminación de link emite un registro estructurado de auditoría (`WIALON_LOCATOR_LINK_CREATED`, `WIALON_LOCATOR_LINK_DELETED`) con el `userId`, correo, `unitId`, `hash` y fecha de expiración.
 
+### D-09 · Panel de administración de solo lectura (CB-117)
+* **Contexto:** CB-117 pide que un administrador pueda "configurar y monitorear la conexión" GPS desde el CRM (credenciales, ambiente, catálogo, estado de conexión). Exponer una pantalla para editar `WIALON_TOKEN` u otras credenciales desde la UI ampliaría innecesariamente la superficie de secretos (persistencia en BD, cifrado, rotación) para un caso de uso que no lo requiere: hoy solo hay un ambiente y un proveedor (La Legión).
+* **Decisión:**
+  - El panel `/admin/gps` es de **solo lectura y diagnóstico**. Las credenciales (`WIALON_TOKEN`, `WIALON_BASE_URL`, etc.) permanecen exclusivamente en variables de entorno del servidor; `WialonClient.getPublicConfig()` expone la configuración efectiva (ambiente, URLs, timeout, si hay token configurado) sin retornar nunca el token ni el `sid` de sesión.
+  - `getWialonDiagnostics` **no lanza** ante fallo upstream: captura el error y devuelve `connected: false` con el detalle en `error`, para que el panel de monitoreo pueda renderizarse siempre en vez de romperse cuando Wialon está caído — justo el escenario que un administrador necesita ver.
+  - `testWialonConnection` es la única acción mutativa del panel (forzar re-login) y sí propaga el error normalmente, porque es una acción explícita del administrador, no un chequeo pasivo; queda auditada con `WIALON_CONNECTION_TESTED`.
+  - Los tres procedimientos usan `adminProcedure` (no `cobrosProcedure`/`cobrosSupervisorProcedure`) porque la historia es explícitamente "Como administrador".
+  - Se agregó `.output()` explícito (zod) a los tres procedimientos nuevos: sin él, el tipo combinado del cliente en `apps/web` se infería como `{}` por truncamiento de TypeScript (TS7056) al recomponer el `AppRouter` completo tras el rebuild de `apps/crm/apps/server` (mismo motivo documentado en `accounting.ts` para `getReporteNoLiquidados`). **Importante:** el proyecto usa TS project references (`composite: true`); tras cambiar el router de Wialon hace falta correr `bun run build` en `apps/server` (regenera `dist/*.d.ts`) antes de que `apps/web` vea los procedimientos nuevos en su propio `tsc --noEmit`.
+
 ---
 
 ## Mapa de Procedimientos ORPC (Frontend CRM - Protegidos por Rol)
@@ -98,6 +107,9 @@ Disponibles vía `@/utils/orpc` en el cliente web bajo `orpc.wialon.*`:
 | `createWialonTrackingLink` | `cobrosSupervisorProcedure` | Mutation | `{ unitId: number, durationSeconds?: number, note?: string }` | Genera link temporal de Locator en vivo (máx 30 días) con log de auditoría. |
 | `deleteWialonTrackingLink` | `cobrosSupervisorProcedure` | Mutation | `{ hash: string }` | Revoca anticipadamente un link de Locator con log de auditoría. |
 | `getWialonConnectionStatus` | `cobrosProcedure` | Query | `void` | Healthcheck y validación de sesión activa. |
+| `getWialonDiagnostics` | `adminProcedure` | Query | `void` | Diagnóstico enriquecido para el panel `/admin/gps` (CB-117): ambiente, latencia medida, conteo de flota y configuración efectiva sin secretos. No lanza ante fallo upstream — degrada a `connected: false` con el error incluido en la respuesta. |
+| `testWialonConnection` | `adminProcedure` | Mutation | `void` | Fuerza una re-autenticación contra Wialon (`checkHealth(true)`). Acción explícita del administrador; sí propaga el error y queda auditada (`WIALON_CONNECTION_TESTED`). |
+| `getWialonUnitsCatalog` | `adminProcedure` | Query | `{ filterName?: string, from?: number, to?: number }` | Mismo handler que `getWialonUnits`, resguardado con `adminProcedure` para que el panel de administración no dependa del rol de cobros. |
 
 ---
 

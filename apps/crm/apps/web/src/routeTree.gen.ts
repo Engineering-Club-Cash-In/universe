@@ -51,6 +51,7 @@ import { Route as CobrosIdRouteImport } from './routes/cobros/$id'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
 import { Route as AdminImportRouteImport } from './routes/admin/import'
+import { Route as AdminGpsRouteImport } from './routes/admin/gps'
 import { Route as AccountingPayInvestorsRouteImport } from './routes/accounting/pay-investors'
 import { Route as InversionesLiquidacionesIndexRouteImport } from './routes/inversiones/liquidaciones.index'
 import { Route as CrmReportesIndexRouteImport } from './routes/crm/reportes/index'
@@ -277,6 +278,11 @@ const AdminImportRoute = AdminImportRouteImport.update({
   path: '/admin/import',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminGpsRoute = AdminGpsRouteImport.update({
+  id: '/admin/gps',
+  path: '/admin/gps',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AccountingPayInvestorsRoute = AccountingPayInvestorsRouteImport.update({
   id: '/accounting/pay-investors',
   path: '/accounting/pay-investors',
@@ -361,6 +367,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/accounting/pay-investors': typeof AccountingPayInvestorsRoute
+  '/admin/gps': typeof AdminGpsRoute
   '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -419,6 +426,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/accounting/pay-investors': typeof AccountingPayInvestorsRoute
+  '/admin/gps': typeof AdminGpsRoute
   '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -478,6 +486,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/accounting/pay-investors': typeof AccountingPayInvestorsRoute
+  '/admin/gps': typeof AdminGpsRoute
   '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -538,6 +547,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/notifications'
     | '/accounting/pay-investors'
+    | '/admin/gps'
     | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
@@ -596,6 +606,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/notifications'
     | '/accounting/pay-investors'
+    | '/admin/gps'
     | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
@@ -654,6 +665,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/notifications'
     | '/accounting/pay-investors'
+    | '/admin/gps'
     | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
@@ -713,6 +725,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
   AccountingPayInvestorsRoute: typeof AccountingPayInvestorsRoute
+  AdminGpsRoute: typeof AdminGpsRoute
   AdminImportRoute: typeof AdminImportRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
@@ -1062,6 +1075,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminImportRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/gps': {
+      id: '/admin/gps'
+      path: '/admin/gps'
+      fullPath: '/admin/gps'
+      preLoaderRoute: typeof AdminGpsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/accounting/pay-investors': {
       id: '/accounting/pay-investors'
       path: '/accounting/pay-investors'
@@ -1169,6 +1189,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,
   AccountingPayInvestorsRoute: AccountingPayInvestorsRoute,
+  AdminGpsRoute: AdminGpsRoute,
   AdminImportRoute: AdminImportRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,

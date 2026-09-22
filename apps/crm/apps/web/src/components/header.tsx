@@ -21,6 +21,7 @@ import {
 	Layers,
 	LayoutDashboard,
 	ListChecks,
+	MapPin,
 	Menu,
 	MessageSquare,
 	Moon,
@@ -574,6 +575,12 @@ export default function Header() {
 														Usuarios
 													</Link>
 												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link to="/admin/gps" className="cursor-pointer">
+														<MapPin className="mr-2 h-4 w-4" />
+														GPS / Wialon
+													</Link>
+												</DropdownMenuItem>
 												{/* "Importación", "MiniAgent" y "Configuración"
 												    ocultos a propósito. Las rutas y páginas
 												    (/admin/import, /crm/admin/miniagent,
@@ -927,6 +934,12 @@ function MobileNav({
 												<Link to="/admin/users" className={MOBILE_LINK_CLASS}>
 													<Users />
 													Usuarios
+												</Link>
+											)}
+											{PERMISSIONS.canAccessAdmin(userRole) && (
+												<Link to="/admin/gps" className={MOBILE_LINK_CLASS}>
+													<MapPin />
+													GPS / Wialon
 												</Link>
 											)}
 											<Link to="/admin/reports" className={MOBILE_LINK_CLASS}>

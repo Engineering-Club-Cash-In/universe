@@ -23,14 +23,15 @@ import {
 export function mapWialonErrorToOrpc(error: unknown): never {
 	if (error instanceof WialonClientError) {
 		if (error.code === "WIALON_AUTH_REQUIRED") {
-			throw new ORPCError("UNAUTHORIZED", {
+			throw new ORPCError("INTERNAL_SERVER_ERROR", {
 				message:
 					"Token de Wialon no configurado en el servidor (WIALON_TOKEN).",
 			});
 		}
 		if (error.code === "WIALON_INVALID_SESSION") {
-			throw new ORPCError("UNAUTHORIZED", {
-				message: "La sesión con la API de Wialon no es válida o expiró.",
+			throw new ORPCError("BAD_GATEWAY", {
+				message:
+					"Fallo de autenticación con el proveedor de Wialon: credenciales upstream no válidas o expiradas.",
 			});
 		}
 		if (error.code === "WIALON_TIMEOUT") {

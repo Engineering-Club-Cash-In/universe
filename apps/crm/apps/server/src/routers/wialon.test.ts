@@ -31,17 +31,19 @@ describe("wialonRouter", () => {
 	});
 
 	describe("mapWialonErrorToOrpc", () => {
-		it("mapea WIALON_AUTH_REQUIRED a UNAUTHORIZED", () => {
+		it("mapea WIALON_AUTH_REQUIRED a INTERNAL_SERVER_ERROR", () => {
 			const err = new WialonClientError("No token", "WIALON_AUTH_REQUIRED");
 			expect(() => mapWialonErrorToOrpc(err)).toThrow(ORPCError);
 			try {
 				mapWialonErrorToOrpc(err);
 			} catch (e) {
-				expect((e as ORPCError<string, unknown>).code).toBe("UNAUTHORIZED");
+				expect((e as ORPCError<string, unknown>).code).toBe(
+					"INTERNAL_SERVER_ERROR",
+				);
 			}
 		});
 
-		it("mapea WIALON_INVALID_SESSION a UNAUTHORIZED", () => {
+		it("mapea WIALON_INVALID_SESSION a BAD_GATEWAY", () => {
 			const err = new WialonClientError(
 				"Sesión vencida",
 				"WIALON_INVALID_SESSION",
@@ -50,7 +52,7 @@ describe("wialonRouter", () => {
 			try {
 				mapWialonErrorToOrpc(err);
 			} catch (e) {
-				expect((e as ORPCError<string, unknown>).code).toBe("UNAUTHORIZED");
+				expect((e as ORPCError<string, unknown>).code).toBe("BAD_GATEWAY");
 			}
 		});
 
@@ -272,6 +274,58 @@ describe("wialonRouter", () => {
 				expect(payload.hashPrefix).toBe("HASH_A_E...");
 			} finally {
 				console.info = origInfo;
+				setWialonClient(null);
+			}
+		});
+
+		it("getWialonConnectionStatus consulta la salud de la conexión y retorna el estado", async () => {
+			const mockFetch = async (_: unknown, init?: RequestInit) => {
+				const bodyStr = String(init?.body || "");
+				if (bodyStr.includes("token%2Flogin")) {
+					return new Response(
+						JSON.stringify({
+							eid: "sid-status-test",
+							user: { id: 77, nm: "Admin IT" },
+						}),
+						{ status: 200 },
+					);
+				}
+				if (bodyStr.includes("core%2Fsearch_items")) {
+					return new Response(
+						JSON.stringify({ totalItemsCount: 1, items: [] }),
+						{ status: 200 },
+					);
+				}
+				return new Response(JSON.stringify({}), { status: 200 });
+			};
+
+			const testClient = new WialonClient({ token: "tok-test" }, mockFetch);
+			setWialonClient(testClient);
+
+			try {
+				const mockContext = {
+					headers: new Headers(),
+					session: {
+						user: { id: "user-test-3", email: "agent@example.com" },
+					},
+					user: {
+						id: "user-test-3",
+						email: "agent@example.com",
+						role: "cobros_ejecutivo",
+					},
+					userId: "user-test-3",
+					userRole: "cobros_ejecutivo",
+				};
+
+				const res = await call(
+					wialonRouter.getWialonConnectionStatus,
+					undefined,
+					{ context: mockContext as unknown as Context },
+				);
+
+				expect(res.connected).toBe(true);
+				expect(res.user?.nm).toBe("Admin IT");
+			} finally {
 				setWialonClient(null);
 			}
 		});

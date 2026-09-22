@@ -1061,4 +1061,94 @@ describe("WialonClient", () => {
 			WialonClientError,
 		);
 	});
+
+	test("getUnitsStatus preserva estado desconocido si el sensor de ignición identificado por metadatos está ausente de calc_last", async () => {
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			// La unidad 201 tiene sensor de ignición identificado en metadata como "10".
+			// Sin embargo, en calc_last el sensor "10" no viene en la lectura (stale/incompleto).
+			// Solo viene sensor "2" (ej. puerta/alarma) con valor "Encendido".
+			return new Response(
+				JSON.stringify([
+					{
+						i: 201,
+						sensors: {
+							"2": { value: 1, format: { value: "Encendido" } },
+						},
+					},
+				]),
+				{ status: 200 },
+			);
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+		client.setUnitIgnitionSensor(201, "10");
+
+		const status = await client.getUnitsStatus([201]);
+		// Debe preservar isIgnitionOn como undefined en lugar de clasificarlo como true por el sensor "2"
+		expect(status[0].isIgnitionOn).toBeUndefined();
+	});
+
+	test("checkHealth valida activamente la sesión aguas arriba y auto-renueva si la sesión upstream expiró", async () => {
+		let searchCallCount = 0;
+		let loginCallCount = 0;
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				loginCallCount++;
+				return new Response(
+					JSON.stringify({
+						eid: `sid-health-${loginCallCount}`,
+						user: { id: 500, nm: "Fleet User" },
+					}),
+					{ status: 200 },
+				);
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				searchCallCount++;
+				if (searchCallCount === 1) {
+					// Simula que en Wialon la sesión anterior ya fue invalidada (error: 1)
+					return new Response(JSON.stringify({ error: 1 }), { status: 200 });
+				}
+				return new Response(
+					JSON.stringify({ totalItemsCount: 10, items: [] }),
+					{
+						status: 200,
+					},
+				);
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-health" }, mockFetch);
+
+		// Ejecutar primer login para poblar la sesión en caché
+		await client.login();
+		expect(loginCallCount).toBe(1);
+
+		// checkHealth con sesión en caché: debe hacer llamada upstream para validar el SID.
+		// Al recibir error 1 de Wialon, debe auto-renovar y devolver status connected con el nuevo SID.
+		const health = await client.checkHealth();
+		expect(health.status).toBe("connected");
+		expect(health.sid).toBe("sid-health-2");
+		expect(health.user?.nm).toBe("Fleet User");
+		expect(loginCallCount).toBe(2);
+		expect(searchCallCount).toBe(2);
+	});
+
+	test("checkHealth propaga error si Wialon rechaza la conexión con error de API", async () => {
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ error: 7 }), { status: 200 });
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-invalido" }, mockFetch);
+		await expect(client.checkHealth()).rejects.toThrow(WialonClientError);
+	});
 });

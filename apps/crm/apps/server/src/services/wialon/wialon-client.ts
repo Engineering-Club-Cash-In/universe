@@ -539,20 +539,24 @@ export class WialonClient {
 			const cached = this.ignitionSensorCache.get(raw.i);
 			const targetSensorId = cached?.sensorId;
 
-			if (targetSensorId && raw.sensors[targetSensorId]) {
+			if (targetSensorId) {
 				const targetSens = raw.sensors[targetSensorId];
-				const text = targetSens.format?.value?.trim() || "";
-				if (IGNITION_ON_REGEX.test(text)) {
-					isIgnitionOn = true;
-				} else if (IGNITION_OFF_REGEX.test(text)) {
-					isIgnitionOn = false;
-				} else if (typeof targetSens.value === "number") {
-					// Para un sensor de ignición confirmado sin formato de texto: 1 = encendido, 0 = apagado
-					if (targetSens.value === 1) isIgnitionOn = true;
-					else if (targetSens.value === 0) isIgnitionOn = false;
+				if (targetSens) {
+					const text = targetSens.format?.value?.trim() || "";
+					if (IGNITION_ON_REGEX.test(text)) {
+						isIgnitionOn = true;
+					} else if (IGNITION_OFF_REGEX.test(text)) {
+						isIgnitionOn = false;
+					} else if (typeof targetSens.value === "number") {
+						// Para un sensor de ignición confirmado sin formato de texto: 1 = encendido, 0 = apagado
+						if (targetSens.value === 1) isIgnitionOn = true;
+						else if (targetSens.value === 0) isIgnitionOn = false;
+					}
 				}
+				// Si el sensor identificado está ausente en la lectura actual o no reporta un estado reconocido,
+				// el estado permanece indefinido (desconocido) para evitar que otros sensores (puertas, alarma) alteren el estado.
 			} else {
-				// 2. Fallback heurístico estricto: solo si no hay metadatos,
+				// 2. Fallback heurístico estricto: solo si no hay metadatos conocidos para la unidad,
 				// buscamos patrones inequívocos de ignición sin aceptar vocabulario genérico
 				// como 'Conectado', 'Alarma desconectado' o 'GPS off'.
 				// Si algún sensor indica encendido, priorizamos encendido (true) para evitar falsos apagados.
@@ -694,19 +698,43 @@ export class WialonClient {
 	}
 
 	/**
-	 * Diagnóstico y verificación de credenciales de conexión con Wialon
+	 * Diagnóstico y verificación de credenciales de conexión con Wialon.
+	 * Valida activamente la sesión contra la API aguas arriba para garantizar que el SID
+	 * no ha sido revocado por Wialon, ejecutando auto-renovación transparente si expiró.
 	 */
 	public async checkHealth(force = false): Promise<{
 		status: "connected";
 		sid: string;
 		user?: { id: number; nm: string };
 	}> {
-		const sid = await this.login(force);
-		return {
-			status: "connected",
-			sid,
-			user: this.sessionCache?.user,
-		};
+		if (force) {
+			await this.login(true);
+		}
+
+		return this.executeWithSession(async (sid) => {
+			await this.requestRaw(
+				"core/search_items",
+				{
+					spec: {
+						itemsType: "avl_unit",
+						propName: "sys_name",
+						propValueMask: "*",
+						sortType: "sys_name",
+					},
+					force: 1,
+					flags: 1,
+					from: 0,
+					to: 0,
+				},
+				sid,
+			);
+
+			return {
+				status: "connected",
+				sid,
+				user: this.sessionCache?.user,
+			};
+		});
 	}
 }
 

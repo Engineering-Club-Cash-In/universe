@@ -69,26 +69,26 @@ POST https://hst-api.wialon.com/wialon/ajax.html
 Content-Type: application/x-www-form-urlencoded
 
 svc=token/login
-&params={"token":"9aff9d99415abf437673fe432c4b417684A0DD3B89B08D37D00C508926DDAAA962BFD5DE"}
+&params={"token":"<TU_WIALON_ACCESS_TOKEN>"}
 ```
 
 #### Respuesta clave
 ```json
 {
-  "host": "190.111.0.68",
-  "eid": "0282bd4ab38f5d92c27866e62db7c6cd",
-  "gis_sid": "3915e860b98cd831",
-  "au": "Andre IT",
-  "tm": 1738619190,
+  "host": "192.0.2.1",
+  "eid": "abcdef0123456789abcdef0123456789",
+  "gis_sid": "abcdef0123456789",
+  "au": "Usuario Ejemplo",
+  "tm": 1700000000,
   "wsdk_version": "1.799",
   "base_url": "https://hst-api.wialon.com",
   "user": {
-    "nm": "Andre IT",
-    "id": 28989723
+    "nm": "Usuario Ejemplo",
+    "id": 12345678
   }
 }
 ```
-> El valor `"0282bd4ab38f5d92c27866e62db7c6cd"` de **`eid`** es tu **`sid`**.
+> El valor `"abcdef0123456789abcdef0123456789"` de **`eid`** es tu **`sid`**.
 
 ---
 
@@ -109,7 +109,7 @@ POST https://hst-api.wialon.com/wialon/ajax.html
 Content-Type: application/x-www-form-urlencoded
 
 svc=core/search_items
-&sid=0282bd4ab38f5d92c27866e62db7c6cd
+&sid=abcdef0123456789abcdef0123456789
 &params={
   "spec": {
     "itemsType": "avl_unit",
@@ -166,7 +166,7 @@ POST https://hst-api.wialon.com/wialon/ajax.html
 Content-Type: application/x-www-form-urlencoded
 
 svc=token/update
-&sid=02006ff22599213e37512b2530acc64e
+&sid=abcdef0123456789abcdef0123456789
 &params={
   "callMode": "create",
   "app": "locator",
@@ -181,14 +181,14 @@ svc=token/update
 #### Respuesta clave y construcción de URL
 ```json
 {
-  "h": "9aff9d99415abf437673fe432c4b4176CC106C78FC34FBA83C12800CE4D2555B20A882D0",
+  "h": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "app": "locator",
   "dur": 86400,
   "items": [28554757]
 }
 ```
 > Con el valor retornado en **`h`**, construyes el link para el cliente:
-> **`https://gps.lalegion.gt/locator/index.html?t=9aff9d99415abf437673fe432c4b4176CC106C78FC34FBA83C12800CE4D2555B20A882D0`**
+> **`https://gps.lalegion.gt/locator/index.html?t=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef`**
 
 ---
 
@@ -205,8 +205,8 @@ POST https://hst-api.wialon.com/wialon/ajax.html
 Content-Type: application/x-www-form-urlencoded
 
 svc=token/update
-&sid=027418840f594c040467d2a73b3a2c97
-&params={"callMode":"delete","h":"9aff9d99415abf437673fe432c4b4176C27DC7F22F5BFD5435B4615411025196F21B1948"}
+&sid=abcdef0123456789abcdef0123456789
+&params={"callMode":"delete","h":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
 ```
 
 ---
@@ -228,7 +228,7 @@ POST https://hst-api.wialon.com/wialon/ajax.html
 Content-Type: application/x-www-form-urlencoded
 
 svc=core/search_item
-&sid=02e98d26fda9f1e9c6e2e16926a8aa07
+&sid=abcdef0123456789abcdef0123456789
 &params={"id":28233911,"flags":1025}
 ```
 
@@ -273,7 +273,7 @@ POST https://hst-api.wialon.com/wialon/ajax.html
 Content-Type: application/x-www-form-urlencoded
 
 svc=unit/calc_last
-&sid=0210c7e6f1df0de072e750e7c4eff84f
+&sid=abcdef0123456789abcdef0123456789
 &params={
   "itemIds": [20060450]
 }

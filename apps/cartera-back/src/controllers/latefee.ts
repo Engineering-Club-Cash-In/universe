@@ -1271,6 +1271,11 @@ async function desactivarMoraDelCron(
  * convenios. Si el update no devuelve fila, otra ejecución ganó la carrera: no
  * se escribe historial y se reporta `desactivada: false`.
  *
+ * La LECTURA de la mora también va adentro de la transacción, con FOR UPDATE:
+ * los montos que se leen son los que se escriben al historial, así que leerlos
+ * fuera del candado dejaba que /mora/update o el cron cambiaran la fila en el
+ * medio y el evento auditara una cifra que ya no era la que se apagó.
+ *
  * Las dos escrituras van SIEMPRE juntas y atómicas: si el caller no trae
  * `dbClient`, acá se abre una transacción propia. Con `propagarError: true` el
  * fallo del historial revierte la desactivación, en vez de dejar el convenio
@@ -1285,28 +1290,42 @@ export async function desactivarMoraPorConvenio(
     dbClient?: typeof db;
   } = {},
 ): Promise<{ desactivada: boolean; mora_id?: number; monto_anterior?: string }> {
-  const dbi = opts.dbClient ?? db;
+  const apagarYRegistrar = async (
+    tx: typeof db,
+  ): Promise<{ desactivada: boolean; mora_id?: number; monto_anterior?: string }> => {
+    // 🔒 La lectura va DENTRO de la transacción y con FOR UPDATE: los valores
+    // que se leen acá son los que después se escriben al historial, y entre el
+    // SELECT y el UPDATE otra ruta (/mora/update, el cron) puede recalcular la
+    // fila. Sin el candado el UPDATE apagaba el monto NUEVO mientras el evento
+    // DESACTIVACION anotaba el VIEJO: el rastro mentía sobre cuánta mora se
+    // soltó, que es justo la cifra por la que existe este helper.
+    //
+    // Se eligió `SELECT … FOR UPDATE` y no un CTE con el UPDATE adentro porque
+    // así todo sigue en el query builder de drizzle (una sola definición de las
+    // condiciones, sin SQL crudo que repita el filtro `activa`) y porque el
+    // camino ya necesitaba transacción para que la desactivación y el historial
+    // confirmen juntos: el candado no agrega nada que no estuviera.
+    //
+    // El índice único parcial moras_credito_uq_activa garantiza a lo sumo una
+    // mora activa por crédito, así que basta con la primera fila.
+    const [moraActiva] = await tx
+      .select({
+        mora_id: moras_credito.mora_id,
+        monto_mora: moras_credito.monto_mora,
+        cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+        porcentaje_mora: moras_credito.porcentaje_mora,
+      })
+      .from(moras_credito)
+      .where(
+        and(
+          eq(moras_credito.credito_id, credito_id),
+          eq(moras_credito.activa, true),
+        ),
+      )
+      .for("update");
 
-  // El índice único parcial moras_credito_uq_activa garantiza a lo sumo una
-  // mora activa por crédito, así que basta con la primera fila.
-  const [moraActiva] = await dbi
-    .select({
-      mora_id: moras_credito.mora_id,
-      monto_mora: moras_credito.monto_mora,
-      cuotas_atrasadas: moras_credito.cuotas_atrasadas,
-      porcentaje_mora: moras_credito.porcentaje_mora,
-    })
-    .from(moras_credito)
-    .where(
-      and(
-        eq(moras_credito.credito_id, credito_id),
-        eq(moras_credito.activa, true),
-      ),
-    );
+    if (!moraActiva) return { desactivada: false };
 
-  if (!moraActiva) return { desactivada: false };
-
-  const apagarYRegistrar = async (tx: typeof db): Promise<boolean> => {
     const apagadas = await tx
       .update(moras_credito)
       .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
@@ -1315,6 +1334,8 @@ export async function desactivarMoraPorConvenio(
           eq(moras_credito.mora_id, moraActiva.mora_id),
           // 🔒 Sin este filtro, un convenio concurrente que ya la apagó no
           // impide que esta corrida "gane" también y duplique el evento.
+          // (Con el FOR UPDATE de arriba es redundante en el camino normal;
+          // se queda como respaldo duro por si la lectura se relaja.)
           eq(moras_credito.activa, true),
         ),
       )
@@ -1322,7 +1343,7 @@ export async function desactivarMoraPorConvenio(
 
     // Cero filas = otra ejecución la apagó primero. No hay nada que auditar:
     // el evento lo escribió ella.
-    if (apagadas.length === 0) return false;
+    if (apagadas.length === 0) return { desactivada: false };
 
     await registrarHistorialMora({
       credito_id,
@@ -1344,23 +1365,22 @@ export async function desactivarMoraPorConvenio(
       propagarError: true,
     });
 
-    return true;
+    return {
+      desactivada: true,
+      mora_id: moraActiva.mora_id,
+      monto_anterior: moraActiva.monto_mora,
+    };
   };
 
-  const desactivada = opts.dbClient
-    ? // El caller ya corre dentro de su propia transacción: se usa la suya.
+  return opts.dbClient
+    ? // El caller ya corre dentro de su propia transacción: se usa la suya, y
+      // el FOR UPDATE queda cubierto por ESA transacción (es la de
+      // createPaymentAgreement, que así confirma convenio + mora + historial
+      // juntos o no confirma nada).
       await apagarYRegistrar(opts.dbClient)
     : await db.transaction(async (txm) =>
         apagarYRegistrar(txm as unknown as typeof db),
       );
-
-  if (!desactivada) return { desactivada: false };
-
-  return {
-    desactivada: true,
-    mora_id: moraActiva.mora_id,
-    monto_anterior: moraActiva.monto_mora,
-  };
 }
 
 // Clave fija para el advisory lock de procesarMoras (cualquier int estable sirve).
@@ -1605,6 +1625,18 @@ export async function procesarMoras() {
 
     // 6. Procesar créditos que tenían mora activa pero YA NO tienen cuotas vencidas
     //    → se pusieron al día: desactivar mora y bajar status a ACTIVO
+    //
+    // 🕸️ RED DE SEGURIDAD DEL CONVENIO — no romper sin saber qué sostiene.
+    // Si `createPaymentAgreement` no alcanzó a apagar la mora (su transacción
+    // revirtió la desactivación, o el crédito llegó a EN_CONVENIO por otra
+    // vía), el crédito queda EN_CONVENIO y ese status está en
+    // STATUS_EXCLUIDOS_MORA: sus cuotas se caen de
+    // `isOverdueInstallmentForMora`, no entran a `moraPorCredito` y su mora
+    // activa aterriza EN ESTE PASO, que la apaga y escribe su propio evento
+    // DESACTIVACION en moras_historial. O sea que la garantía de auditoría del
+    // convenio se sostiene aunque el camino del convenio falle. Sacar
+    // EN_CONVENIO de STATUS_EXCLUIDOS_MORA, o dejar de escribir historial acá,
+    // quita esa red.
     for (const mora of morasActivas) {
       if (moraPorCredito[mora.credito_id]) continue; // sigue moroso, ya procesado
 

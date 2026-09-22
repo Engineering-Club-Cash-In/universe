@@ -8,7 +8,7 @@
  * SESIÓN. Lo que manda el navegador se ignora.
  */
 
-import { beforeAll, beforeEach, describe, expect, it, mock } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { Hono } from "hono";
 
 // Sesión que devuelve el mock de Better Auth. `null` = petición sin sesión.
@@ -16,7 +16,9 @@ let sessionActual: {
   user: {
     id: string;
     email?: string;
-    dpi?: string;
+    // `null` es un valor real de Better Auth, no un hueco del mock: es la
+    // cuenta que todavía no registró su DPI (la primera captura).
+    dpi?: string | null;
     passwordProvisionadaAt?: string | null;
   };
 } | null = null;
@@ -263,5 +265,262 @@ describe("rutas del CRM: el destinatario sale de la sesión", () => {
 
     expect(res.status).toBe(200);
     expect(argsDe("getCreditByNumeroSifco")?.[0]).toBe("propio-1");
+  });
+});
+
+// ====================================================================
+// SIMULACRO DEL CAMBIO DE DPI (`soloValidar`)
+// ====================================================================
+//
+// El portal valida el DPI NUEVO en el CRM antes de escribirlo en la cuenta
+// (ver `aplicarCambioDeDpi` en portal-web): el contrato obliga a escribir la
+// cuenta primero, así que un rechazo del CRM después dejaría la identidad
+// partida entre los dos servicios.
+//
+// Ese simulacro sólo sirve si el BFF reenvía DOS cosas: la bandera
+// `soloValidar` —sin ella el CRM ESCRIBE— y el DPI del CUERPO, que es el
+// nuevo; el de la sesión es el viejo, y validar el viejo no valida nada.
+//
+// El invariante de la escritura real NO cambia: ahí el DPI sigue saliendo de
+// la sesión.
+describe("/profile/update: simulacro vs escritura real", () => {
+  beforeEach(() => {
+    llamadas = [];
+    sifcoDelLead = [];
+    sessionActual = {
+      user: { id: "user-atacante", email: ATACANTE, dpi: DPI_ATACANTE },
+    };
+  });
+
+  const DPI_NUEVO = "2468013579246";
+
+  // ------------------------------------------------------------------
+  // 1. SIMULACRO: la bandera y el DPI del cuerpo llegan al CRM
+  // ------------------------------------------------------------------
+
+  it("en simulacro reenvía soloValidar y el DPI del CUERPO", async () => {
+    sessionActual = {
+      user: { id: "user-simulacro-1", email: ATACANTE, dpi: DPI_ATACANTE },
+    };
+
+    const res = await postJson("/profile/update", {
+      dpi: DPI_NUEVO,
+      soloValidar: true,
+    });
+
+    expect(res.status).toBe(200);
+    expect(argsDe("updateLead")?.[0]).toMatchObject({
+      email: ATACANTE,
+      dpi: DPI_NUEVO,
+      soloValidar: true,
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // 2. RED DE SEGURIDAD: la escritura real no cambia
+  // ------------------------------------------------------------------
+  //
+  // Estas dos pruebas tienen que estar verdes ANTES y DESPUÉS del arreglo.
+  // Un DPI arbitrario escrito en un lead envenena la resolución de identidad
+  // del portal, que casa leads por DPI.
+
+  it("sin soloValidar, el DPI sigue saliendo de la SESIÓN", async () => {
+    sessionActual = {
+      user: { id: "user-escritura-1", email: ATACANTE, dpi: DPI_ATACANTE },
+    };
+
+    const res = await postJson("/profile/update", { dpi: DPI_VICTIMA });
+
+    expect(res.status).toBe(200);
+    const payload = argsDe("updateLead")?.[0] as Record<string, unknown>;
+    expect(payload.dpi).toBe(DPI_ATACANTE);
+    expect(payload.soloValidar).toBeUndefined();
+  });
+
+  // La comparación es contra `true` estricto: un `"true"` de texto o un `1`
+  // son escritura real, no simulacro. Si no, la puerta del DPI del cuerpo se
+  // abre con cualquier valor que JavaScript considere verdadero.
+  it("un soloValidar que no es `true` estricto es escritura real", async () => {
+    for (const valor of ["true", 1, {}]) {
+      llamadas = [];
+      sessionActual = {
+        user: { id: "user-escritura-2", email: ATACANTE, dpi: DPI_ATACANTE },
+      };
+
+      await postJson("/profile/update", { dpi: DPI_VICTIMA, soloValidar: valor });
+
+      const payload = argsDe("updateLead")?.[0] as Record<string, unknown>;
+      expect(payload.dpi).toBe(DPI_ATACANTE);
+      expect(payload.soloValidar).toBeUndefined();
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // 3. CUENTA SIN DPI PREVIO: la primera captura
+  // ------------------------------------------------------------------
+
+  it("cuenta sin DPI previo: el simulacro llega al CRM con el DPI del cuerpo", async () => {
+    sessionActual = {
+      user: { id: "user-sin-dpi-1", email: ATACANTE, dpi: null },
+    };
+
+    const res = await postJson("/profile/update", {
+      dpi: DPI_NUEVO,
+      soloValidar: true,
+    });
+
+    // Antes contestaba 409 acá y el portal abortaba el cambio ENTERO: quien
+    // no tenía DPI no podía registrarlo nunca.
+    expect(res.status).toBe(200);
+    expect(argsDe("updateLead")?.[0]).toMatchObject({
+      dpi: DPI_NUEVO,
+      soloValidar: true,
+    });
+  });
+
+  it("cuenta sin DPI previo: la escritura real sigue dando 409", async () => {
+    sessionActual = {
+      user: { id: "user-sin-dpi-2", email: ATACANTE, dpi: null },
+    };
+
+    const res = await postJson("/profile/update", { dpi: DPI_NUEVO });
+
+    expect(res.status).toBe(409);
+    expect(argsDe("updateLead")).toBeUndefined();
+  });
+
+  // ------------------------------------------------------------------
+  // 4. LÍMITE DE INTENTOS (enumeración)
+  // ------------------------------------------------------------------
+  //
+  // El simulacro contesta el motivo del rechazo —mora, duplicado, candado—,
+  // así que sin tope cualquier cuenta del portal puede preguntar, DPI por
+  // DPI, quién está en mora. El tope es por CUENTA y sólo sobre el simulacro.
+  //
+  // El número va a mano a propósito (la ruta lo declara en
+  // `LIMITE_SIMULACRO_DPI`): si alguien lo baja, esta prueba avisa.
+  const LIMITE = 15;
+
+  it("el simulacro se corta al pasarse del límite, por cuenta", async () => {
+    sessionActual = {
+      user: { id: "user-limite-1", email: ATACANTE, dpi: DPI_ATACANTE },
+    };
+
+    for (let intento = 0; intento < LIMITE; intento++) {
+      const res = await postJson("/profile/update", {
+        dpi: `111111111111${intento % 10}`,
+        soloValidar: true,
+      });
+      expect(res.status).toBe(200);
+    }
+
+    const cortado = await postJson("/profile/update", {
+      dpi: DPI_VICTIMA,
+      soloValidar: true,
+    });
+
+    expect(cortado.status).toBe(429);
+    expect(llamadas.filter((l) => l.fn === "updateLead")).toHaveLength(LIMITE);
+  });
+
+  // 🔴 Un límite mal calibrado ya tumbó el login una vez. Este no puede
+  // tumbar ni al vecino de cuenta ni al resto del perfil.
+  it("el límite agotado de una cuenta no toca a otra", async () => {
+    sessionActual = {
+      user: { id: "user-limite-2", email: ATACANTE, dpi: DPI_ATACANTE },
+    };
+    for (let intento = 0; intento <= LIMITE; intento++) {
+      await postJson("/profile/update", { dpi: DPI_NUEVO, soloValidar: true });
+    }
+
+    sessionActual = {
+      user: { id: "user-limite-3", email: VICTIMA, dpi: DPI_VICTIMA },
+    };
+    const otra = await postJson("/profile/update", {
+      dpi: DPI_NUEVO,
+      soloValidar: true,
+    });
+
+    expect(otra.status).toBe(200);
+  });
+
+  it("el límite agotado no bloquea la escritura real ni el resto del perfil", async () => {
+    sessionActual = {
+      user: { id: "user-limite-4", email: ATACANTE, dpi: DPI_ATACANTE },
+    };
+    for (let intento = 0; intento <= LIMITE; intento++) {
+      await postJson("/profile/update", { dpi: DPI_NUEVO, soloValidar: true });
+    }
+
+    const escritura = await postJson("/profile/update", {
+      phone: "55555555",
+      address: "una dirección",
+    });
+    const lectura = await pedir("/profile");
+
+    expect(escritura.status).toBe(200);
+    expect(lectura.status).toBe(200);
+  });
+
+  // El uso legítimo es UNA persona cambiando su DPI una vez, con reintentos
+  // por corrección. Tres simulacros seguidos no pueden rozar el tope.
+  it("no corta el uso legítimo: tres simulacros seguidos pasan", async () => {
+    sessionActual = {
+      user: { id: "user-legitimo-1", email: ATACANTE, dpi: DPI_ATACANTE },
+    };
+
+    for (let intento = 0; intento < 3; intento++) {
+      const res = await postJson("/profile/update", {
+        dpi: DPI_NUEVO,
+        soloValidar: true,
+      });
+      expect(res.status).toBe(200);
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // 5. RASTRO
+  // ------------------------------------------------------------------
+
+  it("anota el simulacro cuyo DPI no es el de la sesión", async () => {
+    sessionActual = {
+      user: { id: "user-rastro-1", email: ATACANTE, dpi: DPI_ATACANTE },
+    };
+    const aviso = spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      await postJson("/profile/update", {
+        dpi: DPI_VICTIMA,
+        soloValidar: true,
+      });
+
+      expect(aviso).toHaveBeenCalled();
+      const anotado = aviso.mock.calls.flat().join(" ");
+      expect(anotado).toContain("user-rastro-1");
+      // El DPI ajeno va enmascarado: el rastro sirve para ver el barrido, no
+      // para dejar una lista de DPI de terceros en los logs.
+      expect(anotado).not.toContain(DPI_VICTIMA);
+      expect(anotado).toContain(DPI_VICTIMA.slice(-4));
+    } finally {
+      aviso.mockRestore();
+    }
+  });
+
+  it("no anota nada cuando el simulacro valida el DPI de la propia sesión", async () => {
+    sessionActual = {
+      user: { id: "user-rastro-2", email: ATACANTE, dpi: DPI_ATACANTE },
+    };
+    const aviso = spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      await postJson("/profile/update", {
+        dpi: DPI_ATACANTE,
+        soloValidar: true,
+      });
+
+      expect(aviso).not.toHaveBeenCalled();
+    } finally {
+      aviso.mockRestore();
+    }
   });
 });

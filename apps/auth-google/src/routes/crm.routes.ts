@@ -19,6 +19,7 @@ import {
   type UpdateLeadPayload,
 } from "../services/crm";
 import { requireAuth, type AuthedVariables } from "../middleware/requireAuth";
+import { consumirCupo } from "../middleware/rateLimiter";
 
 const crmRoutes = new Hono<{ Variables: AuthedVariables }>();
 
@@ -122,15 +123,66 @@ crmRoutes.get("/profile", async (c) => {
   }
 });
 
+// ============================================
+// SIMULACRO DEL CAMBIO DE DPI
+// ============================================
+//
+// `soloValidar: true` le pide al CRM que corra candado, gate de mora y
+// duplicados y conteste SIN escribir nada. El portal lo usa como paso previo
+// del cambio de DPI, que está obligado a escribir la CUENTA antes que el lead:
+// sin esa pasada, un rechazo del CRM llegaba con la cuenta ya cambiada y la
+// persona quedaba con una identidad por servicio.
+//
+// Es el ÚNICO modo en el que el DPI del cuerpo se reenvía, y se sostiene sobre
+// dos patas:
+//   1. No escribe. El peligro de aceptar un DPI del cuerpo es que quede
+//      guardado en un lead ajeno; en simulacro no queda guardado en ninguno.
+//   2. El DPI que hay que validar es el NUEVO, y ese sólo existe en el cuerpo:
+//      el de la sesión es el viejo, y validar el viejo no valida nada.
+//
+// Lo que sí abre es ENUMERACIÓN: la respuesta dice por qué se rechaza, así que
+// una cuenta del portal podría preguntar, DPI por DPI, quién está en mora. Se
+// contiene con el tope de abajo y con el rastro, no recortando el motivo (ver
+// el comentario del handler).
+
+/**
+ * Simulacros por cuenta y por hora.
+ *
+ * El uso legítimo es UNA persona cambiando su DPI una vez; con correcciones y
+ * reintentos, tres o cuatro. Quince deja diez veces ese margen y aun así le
+ * pone techo al barrido (un raspado necesitaría cientos de cuentas, y crear
+ * cuentas ya tiene su propio límite: `signUpLimiter`).
+ *
+ * 🔴 El número es generoso a propósito. Un límite mal calibrado ya tumbó el
+ * login una vez. Este ni siquiera puede: sólo cuenta simulacros, así que
+ * agotarlo no toca el login, ni la lectura del perfil, ni la escritura real —
+ * lo único que se posterga es volver a preguntarle al CRM.
+ */
+const LIMITE_SIMULACRO_DPI = 15;
+const VENTANA_SIMULACRO_DPI_MS = 60 * 60 * 1000;
+
+/**
+ * Los últimos 4 dígitos, para el rastro.
+ *
+ * El rastro tiene que dejar ver un barrido (muchos DPI distintos desde una
+ * cuenta) sin convertir el log en una lista de DPI de terceros: el log es un
+ * lugar de menos confianza que la base, y el DPI ajeno es justamente el dato
+ * que la persona no debería estar tocando.
+ */
+const dpiEnmascarado = (dpi: string): string =>
+  dpi.length <= 4 ? "****" : `****${dpi.slice(-4)}`;
+
 /**
  * POST /api/crm/profile/update
  * Actualiza el lead de la sesión.
  *
  * El destino NO se acepta del cuerpo: el `email` que decide sobre qué lead se
  * escribe es el de la sesión. Del cuerpo solo sobreviven los campos editables,
- * y el DPI se toma de la cuenta —nunca el del cuerpo—: escribir un DPI
- * arbitrario en un lead envenena la resolución de identidad del portal (el CRM
- * casa leads por DPI) y deja al dueño legítimo fuera con un 409.
+ * y en la ESCRITURA el DPI se toma de la cuenta —nunca el del cuerpo—:
+ * escribir un DPI arbitrario en un lead envenena la resolución de identidad
+ * del portal (el CRM casa leads por DPI) y deja al dueño legítimo fuera con un
+ * 409. Ese invariante no cambia; el simulacro es la única excepción y no
+ * escribe (ver arriba).
  */
 crmRoutes.post("/profile/update", async (c) => {
   let body: Partial<UpdateLeadPayload> | null;
@@ -153,9 +205,74 @@ crmRoutes.post("/profile/update", async (c) => {
       payload.address = body.address;
     }
 
-    // El cuerpo solo expresa la INTENCIÓN de fijar el DPI; el valor sale de la
-    // cuenta, que es donde el portal ya lo fijó (POST /api/profile/me/dpi).
-    if (body?.dpi !== undefined) {
+    // Contra `true` ESTRICTO. Con un `if (body?.soloValidar)` bastaría mandar
+    // `"false"`, `1` o `{}` para abrir la puerta del DPI del cuerpo: el modo
+    // que relaja una regla de identidad se pide con un valor exacto.
+    const esSimulacro = body?.soloValidar === true;
+
+    if (esSimulacro) {
+      const dpiDelCuerpo = typeof body?.dpi === "string" ? body.dpi.trim() : "";
+
+      // La cubeta es la CUENTA, no la IP: el abuso que interesa acá es una
+      // sesión preguntando por muchos DPI, y varias personas pueden compartir
+      // la IP pública de una oficina.
+      const cupo = consumirCupo({
+        namespace: "crm-dpi-simulacro",
+        llave: user?.id?.trim() || payload.email,
+        windowMs: VENTANA_SIMULACRO_DPI_MS,
+        max: LIMITE_SIMULACRO_DPI,
+      });
+
+      if (!cupo.permitido) {
+        return c.json(
+          {
+            success: false,
+            error: {
+              message:
+                "Demasiadas validaciones de DPI. Intentá de nuevo más tarde.",
+              code: "DPI_VALIDATION_RATE_LIMIT",
+            },
+          },
+          429,
+          {
+            "Retry-After": cupo.faltanSegundos.toString(),
+            "X-RateLimit-Limit": LIMITE_SIMULACRO_DPI.toString(),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": cupo.reiniciaEn.toISOString(),
+          },
+        );
+      }
+
+      // Cuentan TODOS los simulacros, no sólo los de un DPI ajeno. Si sólo
+      // contaran esos, bastaría con autodeclararse el DPI del objetivo en la
+      // cuenta (POST /api/profile/me/dpi no lo contrasta contra nada) para
+      // preguntar gratis. Y un éxito informa tanto como un rechazo —"no tiene
+      // mora" también es la respuesta que se busca—, así que acá no aplica el
+      // `soloFallos` del limitador del login.
+
+      // Rastro del caso sospechoso: preguntar por un DPI que no es el de la
+      // cuenta. En el camino legítimo pasa una vez —el DPI nuevo todavía no
+      // está en la sesión—; el barrido se ve como muchos, y distintos, desde
+      // la misma cuenta.
+      if (dpiDelCuerpo && dpiDelCuerpo !== user?.dpi?.trim()) {
+        console.warn(
+          `[Auditoría] Simulacro de DPI ajeno al de la sesión: usuario=${user?.id} correo=${payload.email} dpi=${dpiEnmascarado(dpiDelCuerpo)} restantes=${cupo.restantes}`,
+        );
+      }
+
+      payload.soloValidar = true;
+
+      // El DPI viaja tal como vino (ya recortado). La validación de formato, el
+      // candado, el gate de mora y los duplicados los corre el CRM, que es
+      // quien tiene el expediente: duplicar acá esas reglas sólo garantiza que
+      // se desincronicen.
+      if (body?.dpi !== undefined) {
+        payload.dpi = dpiDelCuerpo;
+      }
+    } else if (body?.dpi !== undefined) {
+      // ESCRITURA REAL. El cuerpo solo expresa la INTENCIÓN de fijar el DPI; el
+      // valor sale de la cuenta, que es donde el portal ya lo fijó
+      // (POST /api/profile/me/dpi).
       const dpiDeSesion = user?.dpi?.trim();
 
       if (!dpiDeSesion) {
@@ -169,6 +286,16 @@ crmRoutes.post("/profile/update", async (c) => {
     }
 
     const result = await updateLead(payload);
+
+    // El simulacro no escribió nada: decirle "actualizado" al front sería
+    // mentirle justo en el paso cuyo propósito es NO haber tocado nada.
+    if (esSimulacro) {
+      return c.json({
+        success: true,
+        validado: true,
+        message: "El cambio de DPI puede aplicarse",
+      });
+    }
 
     return c.json({
       success: true,

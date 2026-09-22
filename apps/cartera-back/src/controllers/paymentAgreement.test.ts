@@ -18,12 +18,27 @@ const inserts: Array<{ values: unknown }> = [];
 let insertReturnQueue: unknown[][] = [];
 /** Cuántas veces se llamó db.delete() — el convenio ya no debe borrar mora. */
 let deleteCalls = 0;
+/**
+ * Inserts que de verdad QUEDARON: los que corrieron fuera de transacción y los
+ * de una transacción que commiteó. Los de una tx que revienta no entran — es
+ * la diferencia entre "se intentó escribir" (`inserts`) y "quedó escrito".
+ */
+const insertsPersistidos: Array<{ values: unknown }> = [];
+/** Pila de transacciones abiertas; cada una junta sus inserts hasta commitear. */
+let pilaTx: Array<Array<{ values: unknown }>> = [];
+/** Si devuelve true para esos values, ese insert revienta (historial caído). */
+let insertFalla: ((values: Record<string, unknown>) => boolean) | null = null;
+/** Transacciones que commitearon / que revirtieron. */
+let commits = 0;
+let rollbacks = 0;
 
 const makeSelect = () => {
   const rows = selectQueue.shift() ?? [];
-  const conChain = Object.assign(Promise.resolve(rows), {
+  const conChain: any = Object.assign(Promise.resolve(rows), {
     limit: () => Promise.resolve(rows),
     orderBy: () => ({ limit: () => Promise.resolve(rows) }),
+    // `SELECT … FOR UPDATE`: así lee la mora desactivarMoraPorConvenio.
+    for: () => conChain,
   });
   const fromChain: Record<string, unknown> = {
     where: () => conChain,
@@ -50,7 +65,15 @@ const dbMock = {
   })),
   insert: mock(() => ({
     values: (values: unknown) => {
-      inserts.push({ values });
+      const registro = { values };
+      inserts.push(registro);
+      const abierta = pilaTx[pilaTx.length - 1];
+      if (abierta) abierta.push(registro);
+      else insertsPersistidos.push(registro);
+      if (insertFalla?.(values as Record<string, unknown>)) {
+        const caido = Promise.reject(new Error("historial caído simulado"));
+        return Object.assign(caido, { returning: () => caido });
+      }
       const rows = insertReturnQueue.shift() ?? [];
       return Object.assign(Promise.resolve(rows), {
         returning: () => Promise.resolve(rows),
@@ -68,10 +91,29 @@ const dbMock = {
         }),
     };
   }),
-  // La tx del commit reusa el mismo mock: acá solo interesa QUÉ se escribe.
-  transaction: mock((callback: (tx: unknown) => Promise<unknown>) =>
-    callback(dbMock)
-  ),
+  // La tx reusa el mismo mock para las escrituras, pero SÍ modela el rollback:
+  // lo escrito adentro de una transacción que revienta se descarta, igual que
+  // en la base real. Es lo que permite probar que un convenio fallido NO queda
+  // escrito — antes se escribía con `db` suelto y el rollback no lo alcanzaba.
+  transaction: mock(async (callback: (tx: unknown) => Promise<unknown>) => {
+    const propios: Array<{ values: unknown }> = [];
+    pilaTx.push(propios);
+    try {
+      const r = await callback(dbMock);
+      commits++;
+      // Commit: lo de adentro pasa a la tx de afuera, o queda escrito.
+      const padre = pilaTx[pilaTx.length - 2];
+      if (padre) padre.push(...propios);
+      else insertsPersistidos.push(...propios);
+      return r;
+    } catch (e) {
+      // Rollback: nada de lo escrito adentro sobrevive.
+      rollbacks++;
+      throw e;
+    } finally {
+      pilaTx.pop();
+    }
+  }),
 };
 
 mock.module("../database", () => ({
@@ -131,6 +173,12 @@ beforeEach(() => {
   deleteCalls = 0;
   updateAffectsRows = true;
   updateResultQueue = [];
+  insertsPersistidos.length = 0;
+  pilaTx = [];
+  insertFalla = null;
+  commits = 0;
+  rollbacks = 0;
+  dbMock.transaction.mockClear();
 });
 
 describe("prepararConvenioPayment: calcular sin escribir", () => {
@@ -380,6 +428,57 @@ describe("createPaymentAgreement: la mora se desactiva, NO se borra", () => {
         (i) => (i.values as Record<string, unknown>).tipo_evento === "DESACTIVACION"
       )
     ).toBe(false);
+  });
+
+  /** ¿Ese insert es el del convenio? (es el único con monto_total_convenio) */
+  const esConvenio = (i: { values: unknown }) =>
+    "monto_total_convenio" in (i.values as Record<string, unknown>);
+
+  // ── Convenio y desactivación, una sola transacción ───────────────────────
+  it("la desactivación de la mora corre DENTRO de la transacción del convenio", async () => {
+    armarBase();
+
+    const res = await createPaymentAgreement(input);
+
+    expect(res.success).toBe(true);
+    // Una sola: si el helper abriera la suya (porque dejaron de pasarle el
+    // dbClient de la tx del convenio), serían dos — y la desactivación podría
+    // commitear por su cuenta mientras el convenio se revierte.
+    expect(dbMock.transaction).toHaveBeenCalledTimes(1);
+    expect(commits).toBe(1);
+    expect(rollbacks).toBe(0);
+  });
+
+  it("si falla el historial de la mora, el endpoint falla y NO queda convenio escrito", async () => {
+    armarBase();
+    insertFalla = (values) => values.tipo_evento === "DESACTIVACION";
+
+    const res = await createPaymentAgreement(input);
+
+    expect(res.success).toBe(false);
+    expect(rollbacks).toBe(1);
+    expect(commits).toBe(0);
+    // Se INTENTÓ escribir el convenio...
+    expect(inserts.some(esConvenio)).toBe(true);
+    // ...pero la transacción lo revirtió: antes quedaba commiteado y el
+    // endpoint respondía fallo con el convenio ya en la base.
+    expect(insertsPersistidos.some(esConvenio)).toBe(false);
+  });
+
+  it("el reintento después de ese fallo no deja un convenio duplicado", async () => {
+    armarBase();
+    insertFalla = (values) => values.tipo_evento === "DESACTIVACION";
+    expect((await createPaymentAgreement(input)).success).toBe(false);
+
+    // Segundo intento, ya sin el historial caído. El chequeo de convenio
+    // activo lo deja pasar (el primero no dejó fila), así que si el primero
+    // hubiera quedado escrito ahora habría DOS convenios para el crédito 72.
+    insertFalla = null;
+    armarBase();
+    const res = await createPaymentAgreement(input);
+
+    expect(res.success).toBe(true);
+    expect(insertsPersistidos.filter(esConvenio)).toHaveLength(1);
   });
 
   /** Captura lo que el convenio loguea, para revisar qué AFIRMA. */

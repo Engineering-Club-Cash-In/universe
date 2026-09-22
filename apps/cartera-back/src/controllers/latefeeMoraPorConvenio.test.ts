@@ -21,6 +21,10 @@ type Fila = Record<string, unknown>;
 const state: {
   selectQueue: Fila[][];
   selectCalls: number;
+  /** Un registro por SELECT: si corrió dentro de una tx y si pidió FOR UPDATE. */
+  selects: Array<{ enTx: boolean; forUpdate: boolean }>;
+  /** true mientras se ejecuta el callback de `transaction`. */
+  enTx: boolean;
   updates: Array<{ table: unknown; set: Fila; where: unknown }>;
   /** Filas que devuelve cada .returning() del update, en orden. */
   updateReturnQueue: Fila[][];
@@ -32,6 +36,8 @@ const state: {
 } = {
   selectQueue: [],
   selectCalls: 0,
+  selects: [],
+  enTx: false,
   updates: [],
   updateReturnQueue: [],
   inserts: [],
@@ -56,10 +62,23 @@ const mencionaColumna = (nodo: any, columna: unknown): boolean => {
 const makeSelectChain = () => {
   const result = state.selectQueue[state.selectCalls] ?? [];
   state.selectCalls++;
+  // Se anota DÓNDE se leyó: si fue adentro de la transacción y si pidió el
+  // candado de fila. Los montos que se leen son los que se escriben al
+  // historial, así que leerlos fuera del candado deja que otra ruta cambie la
+  // fila entremedio y el evento audite una cifra que ya no es la que se apagó.
+  const registro = { enTx: state.enTx, forUpdate: false };
+  state.selects.push(registro);
   const chain: any = {
     from: () => chain,
     innerJoin: () => chain,
-    where: () => Promise.resolve(result),
+    where: () => {
+      const p: any = Promise.resolve(result);
+      p.for = (fuerza: string) => {
+        registro.forUpdate = fuerza === "update";
+        return p;
+      };
+      return p;
+    },
   };
   return chain;
 };
@@ -91,6 +110,8 @@ const fakeDb: any = {
   // Transacción propia del helper cuando el caller no trae `dbClient`: si el
   // callback lanza, la base real revierte TODO lo escrito adentro.
   transaction: async (cb: (tx: unknown) => Promise<unknown>) => {
+    const anterior = state.enTx;
+    state.enTx = true;
     try {
       const r = await cb(fakeDb);
       state.commits++;
@@ -98,6 +119,8 @@ const fakeDb: any = {
     } catch (e) {
       state.rollbacks++;
       throw e;
+    } finally {
+      state.enTx = anterior;
     }
   },
 };
@@ -121,6 +144,8 @@ const MORA_ACTIVA = {
 beforeEach(() => {
   state.selectQueue = [];
   state.selectCalls = 0;
+  state.selects = [];
+  state.enTx = false;
   state.updates = [];
   state.updateReturnQueue = [];
   state.inserts = [];
@@ -242,6 +267,44 @@ describe("desactivarMoraPorConvenio", () => {
     expect(res).toEqual({ desactivada: false });
     expect(state.inserts).toHaveLength(0);
     expect(state.deletes).toBe(0);
+  });
+
+  // ── El monto auditado se lee BAJO el candado ─────────────────────────────
+  it("lee la mora dentro de la transacción y con FOR UPDATE", async () => {
+    state.selectQueue = [[MORA_ACTIVA]];
+
+    // Camino de producción: sin `dbClient`, el helper abre su propia tx.
+    await desactivarMoraPorConvenio(72, { convenio_id: 102 });
+
+    expect(state.selects).toHaveLength(1);
+    // Si la lectura vuelve a quedar afuera (antes del `db.transaction`), otra
+    // ruta puede recalcular la fila entre el SELECT y el UPDATE: el update
+    // apagaría el monto NUEVO y el historial anotaría el VIEJO.
+    expect(state.selects[0].enTx).toBe(true);
+    // Sin el candado de fila, estar adentro de la tx no alcanza: la fila se
+    // puede mover igual entre las dos sentencias.
+    expect(state.selects[0].forUpdate).toBe(true);
+  });
+
+  it("con dbClient (la tx del convenio) también lee con FOR UPDATE", async () => {
+    state.selectQueue = [[MORA_ACTIVA]];
+
+    await correr({ convenio_id: 102 });
+
+    expect(state.selects).toHaveLength(1);
+    expect(state.selects[0].forUpdate).toBe(true);
+  });
+
+  it("el historial anota el monto de la fila leída bajo el candado", async () => {
+    state.selectQueue = [[MORA_ACTIVA]];
+
+    await desactivarMoraPorConvenio(72, { convenio_id: 102 });
+
+    const hist = state.inserts.find((i) => i.table === moras_historial);
+    expect(hist!.values.monto_anterior).toBe("1286.34");
+    expect(hist!.values.cuotas_atrasadas_anterior).toBe(3);
+    // Y esa lectura pasó adentro del candado, no antes de abrirlo.
+    expect(state.selects[0]).toEqual({ enTx: true, forUpdate: true });
   });
 
   // ── Atomicidad sin `dbClient` (el camino de producción) ──────────────────

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Ban, Loader2, User } from "lucide-react";
+import { ArrowLeft, Ban, Building2, Check, Loader2, User } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { CategoriaDeInversion } from "server/src/lib/contratos-inversiones";
 import { toast } from "sonner";
@@ -37,9 +37,24 @@ export const Route = createFileRoute("/juridico/inversionista/$batchId")({
 	component: RouteComponent,
 });
 
-const CATEGORIAS: Array<{ valor: CategoriaDeInversion; etiqueta: string }> = [
-	{ valor: "individual", etiqueta: "Inversionista individual" },
-	{ valor: "sociedad", etiqueta: "Sociedad" },
+const CATEGORIAS: Array<{
+	valor: CategoriaDeInversion;
+	etiqueta: string;
+	detalle: string;
+	Icono: typeof User;
+}> = [
+	{
+		valor: "individual",
+		etiqueta: "Inversionista individual",
+		detalle: "Invierte una persona y firma con su DPI",
+		Icono: User,
+	},
+	{
+		valor: "sociedad",
+		etiqueta: "Sociedad",
+		detalle: "Invierte una empresa y firma su representante",
+		Icono: Building2,
+	},
 ];
 
 function quetzales(monto: string | number) {
@@ -56,8 +71,9 @@ function RouteComponent() {
 	const { canViewLegal, isLoading: cargandoPermisos } =
 		useJuridicoPermissions();
 
-	const [categoria, setCategoria] =
-		useState<CategoriaDeInversion>("individual");
+	// Sin preselección: elegir mal la categoría emite el juego de contratos
+	// equivocado, así que es una decisión que se toma, no una que se hereda.
+	const [categoria, setCategoria] = useState<CategoriaDeInversion | null>(null);
 	const [dpi, setDpi] = useState("");
 	const [dpiTocado, setDpiTocado] = useState(false);
 	const [motivoDescarte, setMotivoDescarte] = useState("");
@@ -71,8 +87,10 @@ function RouteComponent() {
 	// El catálogo del generador sólo devuelve los de inversiones si se le pide la
 	// categoría, y el servidor ya deja únicamente los que tienen layout auditado.
 	const contractTypesQuery = useQuery({
-		...orpc.getInvestmentContractTypes.queryOptions({ input: { categoria } }),
-		enabled: canViewLegal,
+		...orpc.getInvestmentContractTypes.queryOptions({
+			input: { categoria: categoria ?? "individual" },
+		}),
+		enabled: canViewLegal && categoria !== null,
 	});
 
 	const bateria = bateriaQuery.data;
@@ -364,35 +382,62 @@ function RouteComponent() {
 							onBack={() => navigate({ to: "/juridico" })}
 							pasoPrevio={{
 								etiqueta: "Categoría",
-								completo: !contractTypesQuery.isLoading,
+								completo: categoria !== null && !contractTypesQuery.isLoading,
 								contenido: (
-									<div className="space-y-3">
+									<div className="space-y-4">
 										<p className="text-muted-foreground text-sm">
-											Decide qué contratos hay para elegir en el paso siguiente.
+											Quién invierte decide qué juego de contratos se hace.
 										</p>
-										<div className="flex gap-2">
-											{CATEGORIAS.map((opcion) => (
-												<Button
-													key={opcion.valor}
-													variant={
-														categoria === opcion.valor ? "default" : "outline"
-													}
-													onClick={() => setCategoria(opcion.valor)}
-												>
-													{opcion.etiqueta}
-												</Button>
-											))}
+
+										<div className="grid gap-3 md:grid-cols-2">
+											{CATEGORIAS.map(({ valor, etiqueta, detalle, Icono }) => {
+												const elegida = categoria === valor;
+												return (
+													<button
+														key={valor}
+														type="button"
+														onClick={() => setCategoria(valor)}
+														className={`flex items-start gap-3 rounded-lg border p-4 text-left transition-colors ${
+															elegida
+																? "border-primary bg-primary/5 ring-1 ring-primary"
+																: "hover:border-muted-foreground/40 hover:bg-muted/40"
+														}`}
+													>
+														<Icono
+															className={`mt-0.5 h-5 w-5 shrink-0 ${
+																elegida
+																	? "text-primary"
+																	: "text-muted-foreground"
+															}`}
+														/>
+														<div className="space-y-1">
+															<div className="flex items-center gap-2">
+																<span className="font-medium text-sm">
+																	{etiqueta}
+																</span>
+																{elegida && (
+																	<Check className="h-4 w-4 text-primary" />
+																)}
+															</div>
+															<p className="text-muted-foreground text-xs">
+																{detalle}
+															</p>
+															{elegida &&
+																(contractTypesQuery.isLoading ? (
+																	<p className="flex items-center gap-1 text-muted-foreground text-xs">
+																		<Loader2 className="h-3 w-3 animate-spin" />
+																		Cargando contratos...
+																	</p>
+																) : (
+																	<p className="text-primary text-xs">
+																		{documentTypes.length} contratos disponibles
+																	</p>
+																))}
+														</div>
+													</button>
+												);
+											})}
 										</div>
-										{contractTypesQuery.isLoading ? (
-											<p className="flex items-center gap-2 text-muted-foreground text-sm">
-												<Loader2 className="h-4 w-4 animate-spin" />
-												Cargando contratos disponibles...
-											</p>
-										) : (
-											<p className="text-muted-foreground text-xs">
-												{documentTypes.length} contrato(s) disponibles
-											</p>
-										)}
 									</div>
 								),
 							}}

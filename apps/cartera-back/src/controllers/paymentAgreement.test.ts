@@ -48,7 +48,17 @@ mock.module("../database", () => ({
   db: dbMock,
 }));
 
-mock.module("./latefee", () => ({ createMora: mock(() => Promise.resolve()) }));
+// Se parte del módulo REAL y solo se sustituye `createMora`, que es el único
+// que toca la base. Listar los exports a mano hacía que el test reventara
+// entero —sin un solo fallo con nombre, solo "0 pass / 1 fail"— cada vez que
+// paymentAgreement.ts empezaba a importar algo nuevo de latefee: pasó al
+// traerse TASA_MORA_MENSUAL y decidirMoraTrasRomperConvenio. Los helpers de
+// latefee son puros, así que usar los de verdad además prueba más.
+const latefeeReal = await import("./latefee");
+mock.module("./latefee", () => ({
+  ...latefeeReal,
+  createMora: mock(() => Promise.resolve()),
+}));
 mock.module("./payments", () => ({
   getPagosDelMesActual: mock(() => Promise.resolve("0.00")),
 }));

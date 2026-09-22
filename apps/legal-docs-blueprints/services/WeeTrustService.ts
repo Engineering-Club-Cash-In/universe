@@ -1091,7 +1091,11 @@ export class WeeTrustService {
 				esperados.map((s) => s.role).join(", "),
 		);
 
-		const lineas = await WeeTrustService.readSignatureLines(pdfBuffer, pattern);
+		const lineas = await WeeTrustService.readSignatureLines(
+			pdfBuffer,
+			pattern,
+			config.anclasExactas,
+		);
 
 		if (lineas.length !== esperados.length) {
 			throw new SignatureLayoutError(
@@ -1170,6 +1174,7 @@ export class WeeTrustService {
 		const lineas = await WeeTrustService.readSignatureLines(
 			pdfBuffer,
 			config.pattern,
+			config.anclasExactas,
 		);
 
 		if (lineas.length === 0) {
@@ -1232,6 +1237,7 @@ export class WeeTrustService {
 	static async readSignatureLines(
 		pdfBuffer: Buffer,
 		pattern: string,
+		anclasExactas?: string[],
 	): Promise<
 		Array<{
 			pageNum: number;
@@ -1264,9 +1270,17 @@ export class WeeTrustService {
 		// inversiones dice "Firma del Inversionista"). Esos se reconocen por el
 		// texto, como antes: exigirles guiones bajos los dejaba sin ninguna firma.
 		const soloEtiqueta = !pattern.includes("_");
+		// Anclas de texto exacto, para los bloques de firma que no traen línea
+		// dibujada (el espacio queda en blanco y lo único que lo marca es el
+		// nombre impreso debajo, o una "f)" suelta porque la línea es un borde de
+		// tabla). El calce es exacto a propósito: "EL INVERSIONISTA" aparece
+		// decenas de veces en el cuerpo del contrato y un "contiene" habría puesto
+		// un widget de firma en cada párrafo.
+		const anclas = new Set((anclasExactas ?? []).map((a) => a.trim()));
 		const esLineaDeFirma = (texto: string): boolean =>
 			reLineaDeFirma.test(texto.trim()) ||
-			(soloEtiqueta && texto.includes(pattern.trim()));
+			(soloEtiqueta && texto.includes(pattern.trim())) ||
+			anclas.has(texto.trim());
 
 		const encontradas: Array<{
 			pageNum: number;
@@ -1351,7 +1365,9 @@ function identificacionDe(
 	role: SignerRole,
 	contractType: ContractType,
 ): { identification?: IdentificationMode } {
-	if (role === SignerRole.REP_LEGAL) return {};
+	if (role === SignerRole.REP_LEGAL || role === SignerRole.REP_LEGAL_RDBE) {
+		return {};
+	}
 
 	return {
 		identification:

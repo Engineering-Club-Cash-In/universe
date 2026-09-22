@@ -851,6 +851,16 @@ export enum SignerRole {
   COFIRMANTE = 'COFIRMANTE',
   /** Representante legal de la entidad. Su nombre viene impreso en el template. */
   REP_LEGAL = 'REP_LEGAL',
+  /**
+   * Representante legal de la **segunda** entidad.
+   *
+   * El contrato de servicios de inversiones lo firman dos sociedades (CUBE y
+   * RDBE) además del inversionista, cada una con su línea y su nombre impreso
+   * en el template. Con un solo rol de representante las dos líneas le tocaban
+   * a la misma persona, y WeeTrust junta a los firmantes por correo: una de las
+   * dos firmas desaparecía del documento.
+   */
+  REP_LEGAL_RDBE = 'REP_LEGAL_RDBE',
   /** Vendedor del vehículo. */
   VENDEDOR = 'VENDEDOR',
 }

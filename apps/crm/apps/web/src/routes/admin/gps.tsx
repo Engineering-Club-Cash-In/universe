@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Loader2, MapPin, RefreshCw } from "lucide-react";
+import { Loader2, MapPin, RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DataTable } from "@/components/data-table";
@@ -174,6 +174,30 @@ function RouteComponent() {
 					<CardContent className="flex items-center gap-2 p-6 text-muted-foreground">
 						<Loader2 className="h-4 w-4 animate-spin" />
 						Consultando estado de la conexión...
+					</CardContent>
+				</Card>
+			) : diagnostics.isError ? (
+				// Esto es un fallo de la petición ORPC en sí (servidor caído, DB
+				// inaccesible, output que no valida, etc.), no un problema de
+				// credenciales de Wialon — con d undefined no hay que renderizar
+				// "Token configurado: No" ni ningún otro dato como si lo supiéramos.
+				<Card className="border-red-200 dark:border-red-900/50">
+					<CardContent className="flex items-center justify-between gap-4 p-6">
+						<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
+							<TriangleAlert className="h-4 w-4 shrink-0" />
+							<span>
+								No se pudo consultar el diagnóstico del panel:{" "}
+								{diagnostics.error?.message ||
+									"error desconocido al contactar el servidor del CRM"}
+							</span>
+						</div>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => diagnostics.refetch()}
+						>
+							Reintentar
+						</Button>
 					</CardContent>
 				</Card>
 			) : (

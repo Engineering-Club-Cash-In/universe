@@ -241,6 +241,20 @@ export const PERMISSIONS = {
 		role === ROLES.ANALYST ||
 		role === ROLES.ACCOUNTING,
 
+	/**
+	 * Ver los contratos de un inversionista y sus enlaces de firma.
+	 *
+	 * Los emite jurídico, pero quien los usa es inversiones: son los que le pasan
+	 * los enlaces al cliente y miran si ya firmó. Ventas no entra: sus contratos
+	 * son los de la oportunidad.
+	 */
+	canViewInvestorContracts: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.INVESTMENT_ADVISOR_JR ||
+		role === ROLES.INVESTMENT_ADVISOR_SR ||
+		role === ROLES.INVESTMENT_MANAGER,
+
 	canCreateLegalContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 

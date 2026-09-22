@@ -13,10 +13,10 @@ import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
 import { documentIntegrityProcedures } from "./document-integrity";
 import { insuranceRouter } from "./insurance";
+import { investorContractsRouter } from "./investor-contracts";
 import { investorDocumentsRouter } from "./investor-documents";
 import { juridicoDashboardRouter } from "./juridico-dashboard";
 import { legalContractsRouter } from "./legal-contracts";
-import { investorContractsRouter } from "./investor-contracts";
 import { licenseVerificationRouter } from "./license-verification";
 import { locationsRouter } from "./locations";
 import { messagingRouter } from "./messaging";
@@ -271,8 +271,7 @@ export const legalAppRouter = {
 
 	// Estado de firma y reintentos, para no tener que entrar a WeeTrust
 	getMessagingMode: legalContractsRouter.getMessagingMode,
-	resendContractLinksWhatsapp:
-		legalContractsRouter.resendContractLinksWhatsapp,
+	resendContractLinksWhatsapp: legalContractsRouter.resendContractLinksWhatsapp,
 	getContractSigningStatus: legalContractsRouter.getContractSigningStatus,
 	refreshContractSigningLinks: legalContractsRouter.refreshContractSigningLinks,
 	resendContractSigningEmails: legalContractsRouter.resendContractSigningEmails,
@@ -307,6 +306,8 @@ export const legalAppRouter = {
 		investorContractsRouter.closeInvestorContractBatch,
 	countOpenInvestorContractBatches:
 		investorContractsRouter.countOpenInvestorContractBatches,
+	generateInvestorContracts: investorContractsRouter.generateInvestorContracts,
+	listInvestorContracts: investorContractsRouter.listInvestorContracts,
 };
 
 /**

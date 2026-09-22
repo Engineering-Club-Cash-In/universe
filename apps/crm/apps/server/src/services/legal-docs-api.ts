@@ -101,7 +101,18 @@ export interface DeudorAdicional {
  * porque el orden no es el mismo en todos (en la garantía mobiliaria y el
  * reconocimiento de deuda el representante legal firma primero).
  */
-export type SignerRole = "TITULAR" | "COFIRMANTE" | "REP_LEGAL" | "VENDEDOR";
+export type SignerRole =
+	| "TITULAR"
+	| "COFIRMANTE"
+	| "REP_LEGAL"
+	/**
+	 * La segunda entidad. El contrato de servicios de inversiones lleva una
+	 * línea para CUBE y otra para RDBE, y con un solo rol de representante las
+	 * dos le tocaban a la misma persona: WeeTrust junta a los firmantes por
+	 * correo y una de las dos firmas desaparecía.
+	 */
+	| "REP_LEGAL_RDBE"
+	| "VENDEDOR";
 
 export interface ContractSigner {
 	role: SignerRole;

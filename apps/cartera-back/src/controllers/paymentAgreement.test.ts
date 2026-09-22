@@ -12,13 +12,25 @@ let selectQueue: unknown[][] = [];
 let updateAffectsRows = true;
 let updateResultQueue: boolean[] = [];
 
+/** Inserts registrados: { values } en orden de ejecución. */
+const inserts: Array<{ values: unknown }> = [];
+/** Cola de resultados para cada db.insert().returning(). */
+let insertReturnQueue: unknown[][] = [];
+/** Cuántas veces se llamó db.delete() — el convenio ya no debe borrar mora. */
+let deleteCalls = 0;
+
 const makeSelect = () => {
   const rows = selectQueue.shift() ?? [];
   const conChain = Object.assign(Promise.resolve(rows), {
     limit: () => Promise.resolve(rows),
     orderBy: () => ({ limit: () => Promise.resolve(rows) }),
   });
-  return { from: () => ({ where: () => conChain }) };
+  const fromChain: Record<string, unknown> = {
+    where: () => conChain,
+    innerJoin: () => fromChain,
+    leftJoin: () => fromChain,
+  };
+  return { from: () => fromChain };
 };
 
 const dbMock = {
@@ -36,6 +48,26 @@ const dbMock = {
       },
     }),
   })),
+  insert: mock(() => ({
+    values: (values: unknown) => {
+      inserts.push({ values });
+      const rows = insertReturnQueue.shift() ?? [];
+      return Object.assign(Promise.resolve(rows), {
+        returning: () => Promise.resolve(rows),
+      });
+    },
+  })),
+  // Sigue existiendo para poder DETECTAR que alguien vuelva a usarlo: el
+  // convenio ya no puede borrar filas de moras_credito.
+  delete: mock(() => {
+    deleteCalls++;
+    return {
+      where: () =>
+        Object.assign(Promise.resolve([]), {
+          returning: () => Promise.resolve([]),
+        }),
+    };
+  }),
   // La tx del commit reusa el mismo mock: acá solo interesa QUÉ se escribe.
   transaction: mock((callback: (tx: unknown) => Promise<unknown>) =>
     callback(dbMock)
@@ -64,9 +96,8 @@ mock.module("./payments", () => ({
 }));
 mock.module("../routers", () => ({ creditRouter: {} }));
 
-const { prepararConvenioPayment, processConvenioPayment } = await import(
-  "./paymentAgreement"
-);
+const { prepararConvenioPayment, processConvenioPayment, createPaymentAgreement } =
+  await import("./paymentAgreement");
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 // Números del caso real que motivó el cambio (convenio 102 / crédito 72,
@@ -94,7 +125,10 @@ const paramsBase = {
 
 beforeEach(() => {
   updates.length = 0;
+  inserts.length = 0;
   selectQueue = [];
+  insertReturnQueue = [];
+  deleteCalls = 0;
   updateAffectsRows = true;
   updateResultQueue = [];
 });
@@ -262,5 +296,89 @@ describe("processConvenioPayment: wrapper calcular+commitear (comportamiento his
 
     expect(resultado.success).toBe(false);
     expect(updates).toHaveLength(0);
+  });
+});
+
+describe("createPaymentAgreement: la mora se desactiva, NO se borra", () => {
+  // SELECTs en orden: usuario creador, pagos+cuotas, crédito, convenio activo,
+  // cuotas pendientes del crédito y —ya dentro de desactivarMoraPorConvenio,
+  // que acá corre DE VERDAD contra la base falsa— la mora activa.
+  const armarBase = (moraActiva: unknown[] = [MORA_ACTIVA]) => {
+    selectQueue = [
+      [{ email: "asesor@clubcashin.com" }],
+      [
+        {
+          pago: { pago_id: 401, credito_id: 72, pagado: false, monto_aplicado: "0" },
+          cuota: { cuota_id: 900, credito_id: 72, numero_cuota: 3, pagado: false },
+        },
+      ],
+      [{ credito_id: 72, statusCredit: "MOROSO" }],
+      [],
+      [{ fecha_vencimiento: new Date("2026-10-15T06:00:00.000Z") }],
+      moraActiva,
+    ];
+    insertReturnQueue = [[{ convenio_id: 102, credito_id: 72 }]];
+  };
+
+  const MORA_ACTIVA = {
+    mora_id: 95201,
+    monto_mora: "1286.34",
+    cuotas_atrasadas: 3,
+    porcentaje_mora: "1.12",
+  };
+
+  const input = {
+    credit_id: 72,
+    payment_ids: [401],
+    total_agreement_amount: 3318.45,
+    number_of_months: 1,
+    created_by: 41,
+  };
+
+  it("no ejecuta ningún DELETE contra la base", async () => {
+    armarBase();
+
+    const res = await createPaymentAgreement(input);
+
+    expect(res.success).toBe(true);
+    // Si vuelve el `db.delete(moras_credito)`, este contador sube.
+    expect(deleteCalls).toBe(0);
+  });
+
+  it("apaga la mora y la deja anotada en el historial con el monto soltado", async () => {
+    armarBase();
+
+    await createPaymentAgreement(input);
+
+    const updMora = updates.find((values) => values.activa === false);
+    expect(updMora).toBeDefined();
+    expect(updMora!.monto_mora).toBe("0");
+    expect(updMora!.cuotas_atrasadas).toBe(0);
+
+    const hist = inserts
+      .map((i) => i.values as Record<string, unknown>)
+      .find((values) => values.tipo_evento === "DESACTIVACION");
+    expect(hist).toBeDefined();
+    expect(hist!.credito_id).toBe(72);
+    expect(hist!.monto_anterior).toBe("1286.34");
+    expect(hist!.monto_nuevo).toBe("0");
+    expect(hist!.usuario_id).toBe(41);
+    expect(String(hist!.motivo)).toContain("convenio de pago");
+    expect(String(hist!.motivo)).toContain("102");
+  });
+
+  it("sin mora activa el convenio se crea igual y no anota desactivaciones", async () => {
+    armarBase([]);
+
+    const res = await createPaymentAgreement(input);
+
+    expect(res.success).toBe(true);
+    expect(deleteCalls).toBe(0);
+    expect(updates.some((values) => values.activa === false)).toBe(false);
+    expect(
+      inserts.some(
+        (i) => (i.values as Record<string, unknown>).tipo_evento === "DESACTIVACION"
+      )
+    ).toBe(false);
   });
 });

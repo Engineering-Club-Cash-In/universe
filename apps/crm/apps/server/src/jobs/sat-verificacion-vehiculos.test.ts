@@ -8,6 +8,7 @@ import {
 	agregarCruceCrm,
 	construirResultados,
 	construirUpsertExternos,
+	contarPlacasReportadasSat,
 	desacoplarVerificacionSat,
 	esAlertaSat,
 	estadoCorridaDesdeSat,
@@ -294,6 +295,30 @@ describe("cruce de vehículos contra SAT", () => {
 
 		expect(filas).toHaveLength(2);
 		expect(filas.map((fila) => fila.vehicleId)).toEqual(["veh-1", "veh-2"]);
+	});
+
+	test("cuenta una sola placa SAT aunque el CRM tenga formatos duplicados", () => {
+		const filas = [
+			{
+				corridaId: "corrida-1",
+				resultado: "activo_ok",
+				placa: "P-123ABC",
+			},
+			{
+				corridaId: "corrida-1",
+				resultado: "activo_ok",
+				placa: "P123ABC",
+			},
+			{
+				corridaId: "corrida-2",
+				resultado: "no_aparece_en_sat",
+				placa: "P-999ZZZ",
+			},
+		];
+
+		expect(contarPlacasReportadasSat(filas)).toBe(1);
+		expect(contarPlacasReportadasSat(filas, "corrida-1")).toBe(1);
+		expect(contarPlacasReportadasSat(filas, "corrida-2")).toBe(0);
 	});
 
 	test("separa el cruce CRM del estado reportado por SAT", () => {

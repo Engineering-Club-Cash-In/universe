@@ -112,6 +112,29 @@ function normalizarPlaca(placa: string): string {
 	return placa.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+function contarPlacasUnicas(placas: string[]): number {
+	return new Set(
+		placas.map(normalizarPlaca).filter((placaNormalizada) => placaNormalizada),
+	).size;
+}
+
+/** Cuenta vehículos reportados por SAT, no filas duplicadas del inventario CRM. */
+export function contarPlacasReportadasSat(
+	filas: { corridaId: string | null; resultado: string; placa: string }[],
+	corridaId?: string,
+): number {
+	return contarPlacasUnicas(
+		filas
+			.filter(
+				(fila) =>
+					fila.corridaId !== null &&
+					(corridaId === undefined || fila.corridaId === corridaId) &&
+					fila.resultado !== "no_aparece_en_sat",
+			)
+			.map((fila) => fila.placa),
+	);
+}
+
 function normalizarNit(nit: string): string {
 	return nit.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
@@ -639,7 +662,9 @@ async function ejecutarVerificacionVehiculosEnSat(
 			resumenes.push({
 				corridaId: corrida.id,
 				estado: "ok",
-				totalReportadosSat: titular.vehiculos.length,
+				totalReportadosSat: contarPlacasUnicas(
+					titular.vehiculos.map((vehiculo) => vehiculo.placa),
+				),
 				totalAlertas,
 			});
 		}
@@ -844,10 +869,7 @@ export async function obtenerUltimaVerificacion() {
 
 	const corridasConResumen = corridas.map((corrida) => ({
 		...corrida,
-		totalReportadosSat: filas.filter(
-			(fila) =>
-				fila.corridaId === corrida.id && fila.resultado !== "no_aparece_en_sat",
-		).length,
+		totalReportadosSat: contarPlacasReportadasSat(filas, corrida.id),
 		totalAlertas: filas.filter(
 			(fila) => fila.corridaId === corrida.id && esAlertaSat(fila.resultado),
 		).length,
@@ -857,9 +879,7 @@ export async function obtenerUltimaVerificacion() {
 			.filter((fila) => fila.eraEsperado)
 			.map((fila) => fila.vehicleId ?? fila.placa),
 	).size;
-	const totalReportadosSat = filas.filter(
-		(fila) => fila.corridaId !== null && fila.resultado !== "no_aparece_en_sat",
-	).length;
+	const totalReportadosSat = contarPlacasReportadasSat(filas);
 	const alertas = filas.filter((fila) => esAlertaSat(fila.resultado));
 	const loteEstadoActualId = filas[0]?.loteId ?? null;
 	const ultimoIntentoPublicoResultados = loteEstadoActualId === lote.id;

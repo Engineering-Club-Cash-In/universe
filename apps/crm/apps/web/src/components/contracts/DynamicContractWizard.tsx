@@ -6,6 +6,8 @@ import {
 	ChevronRight,
 	Link2,
 	Loader2,
+	Plus,
+	Trash2,
 	TriangleAlert,
 	User,
 	Users,
@@ -80,6 +82,21 @@ interface Document {
 	count_doble_line: number;
 }
 
+/**
+ * Qué clase de campo es.
+ *
+ * Los contratos de inversiones traen los tres: la cesión pide una lista de
+ * créditos cedidos, el anexo de beneficiarios una lista de personas, y la
+ * modalidad de retorno o la figura fiscal son opciones cerradas. Sin esto se
+ * pintaban todos como una caja de texto y no había forma de cargarlos.
+ */
+type FieldType = "text" | "select" | "list";
+
+interface FieldOption {
+	value: string;
+	label: string;
+}
+
 interface Field {
 	name: string;
 	key: string;
@@ -90,6 +107,53 @@ interface Field {
 	description: string | null;
 	default: string | null;
 	is_double_line: boolean;
+	type?: FieldType;
+	/** En un `select`, las opciones; en una `list`, las columnas de cada item. */
+	options?: FieldOption[] | null;
+}
+
+/** Los items de un campo de lista, que se guardan como JSON en el formulario. */
+function itemsDeLista(valor: string): Array<Record<string, string>> {
+	if (!valor) return [];
+	try {
+		const parsed = JSON.parse(valor);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Los valores como los espera el generador.
+ *
+ * Las listas viajan como arreglo, no como el JSON con el que se editan. Y cada
+ * `select` manda, además de su valor, una marca por opción (`clave_opcion`:
+ * ☒ o ☐): así el template puede marcar la casilla que corresponde en vez de
+ * escribir el texto.
+ */
+function valoresParaElGenerador(
+	fields: Field[],
+	fieldValues: Record<string, string>,
+): Record<string, unknown> {
+	const datos: Record<string, unknown> = { ...fieldValues };
+
+	for (const field of fields) {
+		const valor = fieldValues[field.key] ?? "";
+
+		if (field.type === "list") {
+			datos[field.key] = itemsDeLista(valor);
+			continue;
+		}
+
+		if (field.type === "select" && Array.isArray(field.options)) {
+			for (const opcion of field.options) {
+				datos[`${field.key}_${opcion.value}`] =
+					valor === opcion.value ? "☒" : "☐";
+			}
+		}
+	}
+
+	return datos;
 }
 
 // Co-debtor data from database
@@ -668,6 +732,104 @@ function dpiToWords(dpi: string): string {
 
 	const texto = `${palabras1} ${palabras2} ${palabras3}`.toLowerCase();
 	return `${texto} (${cleanDpi})`;
+}
+
+/**
+ * Un campo de lista: tantos items como haga falta, cada uno con sus columnas.
+ *
+ * Es lo que piden la cesión de créditos (un item por crédito cedido) y el anexo
+ * de beneficiarios (uno por persona designada). Se guarda como JSON en el
+ * formulario y se convierte a arreglo al mandarlo.
+ */
+function CampoDeLista({
+	field,
+	valor,
+	onChange,
+}: {
+	field: Field;
+	valor: string;
+	onChange: (key: string, value: string) => void;
+}) {
+	const items = itemsDeLista(valor);
+	const columnas = field.options ?? [];
+
+	const guardar = (siguientes: Array<Record<string, string>>) =>
+		onChange(field.key, JSON.stringify(siguientes));
+
+	return (
+		<div className="space-y-3">
+			{items.length === 0 && (
+				<p className="text-muted-foreground text-xs italic">
+					Sin items todavía. Agregá el primero.
+				</p>
+			)}
+
+			{items.map((item, idx) => (
+				<div
+					key={`${field.key}-${idx}`}
+					className="space-y-2 rounded-md border bg-muted/20 p-3"
+				>
+					<div className="flex items-center justify-between">
+						<span className="font-medium text-muted-foreground text-xs">
+							Item #{idx + 1}
+						</span>
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							className="text-destructive hover:text-destructive"
+							onClick={() => guardar(items.filter((_, i) => i !== idx))}
+						>
+							<Trash2 className="h-4 w-4" />
+						</Button>
+					</div>
+					<div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+						{columnas.map((columna) => (
+							<div key={columna.value} className="flex flex-col">
+								<label
+									className="mb-1 text-muted-foreground text-xs"
+									htmlFor={`${field.key}-${idx}-${columna.value}`}
+								>
+									{columna.label}
+								</label>
+								<Input
+									id={`${field.key}-${idx}-${columna.value}`}
+									value={item[columna.value] ?? ""}
+									placeholder={columna.label}
+									className="h-9 bg-white text-sm"
+									onChange={(e) =>
+										guardar(
+											items.map((otro, i) =>
+												i === idx
+													? { ...otro, [columna.value]: e.target.value }
+													: otro,
+											),
+										)
+									}
+								/>
+							</div>
+						))}
+					</div>
+				</div>
+			))}
+
+			<Button
+				type="button"
+				variant="outline"
+				size="sm"
+				className="gap-2"
+				onClick={() =>
+					guardar([
+						...items,
+						Object.fromEntries(columnas.map((c) => [c.value, ""])),
+					])
+				}
+			>
+				<Plus className="h-4 w-4" />
+				Agregar
+			</Button>
+		</div>
+	);
 }
 
 export function DynamicContractWizard({
@@ -1515,6 +1677,16 @@ export function DynamicContractWizard({
 	const validateField = useCallback((field: Field, value: string): string => {
 		const strValue = typeof value === "string" ? value : String(value || "");
 
+		// Una lista se guarda como JSON, así que "[]" es texto y pasaría por
+		// llena. Lo que importa es si tiene items, y la regex no aplica: no se
+		// valida el JSON, se validan sus columnas.
+		if (field.type === "list") {
+			if (field.required && itemsDeLista(strValue).length === 0) {
+				return "Agregá al menos un item";
+			}
+			return "";
+		}
+
 		// Validate required field
 		if (field.required && !strValue.trim()) {
 			return "Este campo es obligatorio";
@@ -1639,9 +1811,17 @@ export function DynamicContractWizard({
 	// Check if field has value
 	const fieldHasValue = useCallback(
 		(fieldKey: string): boolean => {
-			return !!fieldValues[fieldKey]?.trim();
+			const valor = fieldValues[fieldKey]?.trim();
+			if (!valor) return false;
+
+			// Una lista vacía se guarda como "[]", que es texto: contarla como
+			// llena dejaba seguir sin haber cargado ningún item.
+			const field = fields.find((f) => f.key === fieldKey);
+			if (field?.type === "list") return itemsDeLista(valor).length > 0;
+
+			return true;
 		},
-		[fieldValues],
+		[fieldValues, fields],
 	);
 
 	// Count filled vs required fields
@@ -1859,7 +2039,8 @@ export function DynamicContractWizard({
 						}
 
 						// Build contract data with deudoresAdicionales
-						const contractData: Record<string, unknown> = { ...fieldValues };
+						const contractData: Record<string, unknown> =
+							valoresParaElGenerador(fields, fieldValues);
 						if (hasCoDebtors && !isVendorDeclaration) {
 							contractData.deudoresAdicionales = deudoresAdicionales;
 						}
@@ -2403,8 +2584,36 @@ export function DynamicContractWizard({
 																)}
 															</div>
 
-															{/* Input o Select según el campo */}
-															{field.key?.toLowerCase() === "gendervendedor" ? (
+															{/* Input, selector o lista, según lo que sea */}
+															{field.type === "list" ? (
+																<CampoDeLista
+																	field={field}
+																	valor={fieldValues[field.key] || ""}
+																	onChange={handleFieldChange}
+																/>
+															) : field.type === "select" &&
+																Array.isArray(field.options) ? (
+																<select
+																	value={fieldValues[field.key] || ""}
+																	onChange={(e) =>
+																		handleFieldChange(field.key, e.target.value)
+																	}
+																	className={`flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${hasError ? "border-red-500" : ""}`}
+																>
+																	<option value="" disabled>
+																		Selecciona {field.name.toLowerCase()}
+																	</option>
+																	{field.options.map((opcion) => (
+																		<option
+																			key={opcion.value}
+																			value={opcion.value}
+																		>
+																			{opcion.label}
+																		</option>
+																	))}
+																</select>
+															) : field.key?.toLowerCase() ===
+																"gendervendedor" ? (
 																<select
 																	value={fieldValues[field.key] || ""}
 																	onChange={(e) =>

@@ -61,6 +61,21 @@ export interface Document {
 	count_doble_line: number;
 }
 
+/**
+ * Qué clase de campo es, para saber con qué pintarlo.
+ *
+ * Los contratos de inversiones traen los tres: listas repetibles (los créditos
+ * cedidos, los beneficiarios designados) y opciones cerradas (la modalidad de
+ * retorno, la figura fiscal). Los de ventas son todos `text`, y por eso esto no
+ * estaba declarado.
+ */
+export type FieldType = "text" | "select" | "list";
+
+export interface FieldOption {
+	value: string;
+	label: string;
+}
+
 export interface Field {
 	name: string;
 	key: string;
@@ -71,6 +86,9 @@ export interface Field {
 	description: string | null;
 	default: string | null;
 	is_double_line: boolean;
+	type?: FieldType;
+	/** En un `select`, las opciones; en una `list`, las columnas de cada item. */
+	options?: FieldOption[] | null;
 }
 
 export interface DocumentByDpiResponse {

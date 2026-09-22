@@ -9,7 +9,7 @@ import {
 	type SQL,
 	sql,
 } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, alias } from "drizzle-orm/pg-core";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
@@ -106,6 +106,18 @@ function paraLike(valor: string): string {
 
 function sinTildesSql(expresion: SQL): SQL {
 	return sql`translate(lower(${expresion}), 'áéíóúüñ', 'aeiouun')`;
+}
+
+/**
+ * Nombre comparable: minúsculas, sin tildes ni espacios. Es la misma
+ * expresión del índice único por SIFCO (`buro_interno_personas_sifco_nombre_activo_uq`),
+ * así que el chequeo previo y la base coinciden en qué es un duplicado.
+ */
+function nombreComparableSql(
+	nombres: AnyPgColumn | string,
+	apellidos: AnyPgColumn | string,
+): SQL {
+	return sql`regexp_replace(${sinTildesSql(sql`${nombres} || ${apellidos}`)}, '\\s', '', 'g')`;
 }
 
 // ============================================================================
@@ -321,6 +333,8 @@ export async function buscarCandidatos(
 								buroInternoPersonas.numeroCreditoSifco,
 								credito.credito.numero_credito_sifco,
 							),
+							// El SIFCO es del crédito: solo cuenta si es el mismo cliente
+							sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(nombre, "")}`,
 						),
 					)
 					.limit(1);
@@ -383,13 +397,34 @@ function limpiarDatos(datos: DatosPersona) {
 	};
 }
 
+/**
+ * Misma persona activa dos veces: por DPI, por lead, o por SIFCO + nombre.
+ * El SIFCO solo no alcanza porque es del crédito, no de la persona: el
+ * titular y su codeudor pueden estar registrados con el mismo número. Los
+ * clientes que vienen de cartera no traen lead ni DPI, así que para ellos el
+ * SIFCO + nombre es lo único que detecta el duplicado.
+ */
 async function asegurarSinDuplicado(
-	datos: { dpi: string | null; leadId: string | null },
+	datos: {
+		dpi: string | null;
+		leadId: string | null;
+		numeroCreditoSifco: string | null;
+		nombres: string;
+		apellidos: string;
+	},
 	excluirId?: string,
 ) {
 	const coincide: SQL[] = [];
 	if (datos.dpi) coincide.push(eq(buroInternoPersonas.dpi, datos.dpi));
 	if (datos.leadId) coincide.push(eq(buroInternoPersonas.leadId, datos.leadId));
+	if (datos.numeroCreditoSifco) {
+		coincide.push(
+			and(
+				eq(buroInternoPersonas.numeroCreditoSifco, datos.numeroCreditoSifco),
+				sql`${nombreComparableSql(buroInternoPersonas.nombres, buroInternoPersonas.apellidos)} = ${nombreComparableSql(datos.nombres, datos.apellidos)}`,
+			) as SQL,
+		);
+	}
 	if (coincide.length === 0) return;
 
 	const [existente] = await db

@@ -81,6 +81,14 @@ export const buroInternoPersonas = pgTable(
 		uniqueIndex("buro_interno_personas_lead_activo_uq")
 			.on(table.leadId)
 			.where(sql`${table.activo} AND ${table.leadId} IS NOT NULL`),
+		// Un cliente de cartera (sin lead ni DPI) solo se distingue por SIFCO +
+		// nombre; misma expresión que `nombreComparableSql` en el servicio
+		uniqueIndex("buro_interno_personas_sifco_nombre_activo_uq")
+			.on(
+				table.numeroCreditoSifco,
+				sql`regexp_replace(translate(lower(${table.nombres} || ${table.apellidos}), 'áéíóúüñ', 'aeiouun'), '\\s', '', 'g')`,
+			)
+			.where(sql`${table.activo} AND ${table.numeroCreditoSifco} IS NOT NULL`),
 		index("buro_interno_personas_activo_idx").on(table.activo, table.createdAt),
 	],
 );

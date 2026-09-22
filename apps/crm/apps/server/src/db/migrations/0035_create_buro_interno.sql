@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS "public"."buro_interno_personas" (
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "buro_interno_personas_dpi_activo_uq" ON "public"."buro_interno_personas" USING btree ("dpi") WHERE "activo" AND "dpi" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "buro_interno_personas_lead_activo_uq" ON "public"."buro_interno_personas" USING btree ("lead_id") WHERE "activo" AND "lead_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "buro_interno_personas_sifco_nombre_activo_uq" ON "public"."buro_interno_personas" USING btree ("numero_credito_sifco", regexp_replace(translate(lower("nombres" || "apellidos"), 'áéíóúüñ', 'aeiouun'), '\s', '', 'g')) WHERE "activo" AND "numero_credito_sifco" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "buro_interno_personas_activo_idx" ON "public"."buro_interno_personas" USING btree ("activo","created_at");--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "public"."buro_interno_reglas" (
 	"clave" text PRIMARY KEY NOT NULL,

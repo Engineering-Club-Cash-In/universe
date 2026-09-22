@@ -254,6 +254,13 @@ function RegistrosTab({ puedeDarDeBaja }: { puedeDarDeBaja: boolean }) {
 	const total = listado.data?.total ?? 0;
 	const paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
 
+	// Si una baja deja vacía la página actual, volver a la última con registros
+	useEffect(() => {
+		if (!listado.data) return;
+		const ultima = Math.max(0, Math.ceil(listado.data.total / POR_PAGINA) - 1);
+		if (pagina > ultima) setPagina(ultima);
+	}, [listado.data, pagina]);
+
 	return (
 		<div className="space-y-4">
 			<div className="flex flex-wrap items-center justify-between gap-3">

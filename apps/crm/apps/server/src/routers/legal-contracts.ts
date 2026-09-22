@@ -1546,6 +1546,23 @@ export const legalContractsRouter = {
 			// Las llamadas al generador tienen tope, así que el candado no se queda
 			// tomado si deja de responder.
 			return conCandadoDeFirma(contract.opportunityId, async () => {
+				// Igual que al subir: esperar el candado pudo tardar, y reemitir manda
+				// las invitaciones en el acto. Se vuelve a mirar la etapa antes de
+				// tocar WeeTrust, en vez de enterarse al guardar y tener que borrar el
+				// documento recién emitido.
+				if (contract.opportunityId) {
+					const etapaAhora = await exigirEtapaDeFirma(
+						contract.opportunityId,
+						"regenerar",
+					);
+					if (etapaAhora !== etapaInicial) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La oportunidad cambió de etapa mientras se esperaba. Recargá y, si todavía hace falta, volvé a regenerar.",
+						});
+					}
+				}
+
 				const resultado = await reemitirContratoEnWeeTrust({
 					r2Key: r2KeyDelPdf,
 					contractType: contract.contractType,
@@ -1791,30 +1808,46 @@ export const legalContractsRouter = {
 				input.contractId,
 			);
 
-			// Un anulado se conserva sólo como registro: reenviarle la invitación
-			// sería pedirle al cliente que firme un documento reemplazado.
-			// Tampoco uno ya reclamado por un reemplazo que todavía no terminó de
-			// anularlo: su documento es el que se está dejando sin efecto.
-			if (contract.status === "cancelled" || contract.replacedByContractId) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Este contrato está anulado: no se le reenvían correos.",
-				});
-			}
+			// Con el candado de la oportunidad: una regeneración, un reemplazo o un
+			// borrado que entraran entre la revisión y el reenvío dejarían al
+			// firmante con una invitación cuyo enlace ya no existe.
+			return conCandadoDeFirma(contract.opportunityId, async () => {
+				// Se vuelve a leer acá, ya con el candado: lo de arriba es de antes
+				// de esperar, y en esa espera pudo anularse.
+				const [vigente] = await db
+					.select({
+						status: generatedLegalContracts.status,
+						replacedByContractId: generatedLegalContracts.replacedByContractId,
+					})
+					.from(generatedLegalContracts)
+					.where(eq(generatedLegalContracts.id, input.contractId))
+					.limit(1);
 
-			try {
-				await reenviarCorreoDeFirma(documentID);
-			} catch (error) {
-				throw new ORPCError("INTERNAL_SERVER_ERROR", {
-					message:
-						error instanceof Error
-							? error.message
-							: "No se pudo reenviar el correo de firma",
-				});
-			}
+				// Un anulado se conserva sólo como registro: reenviarle la invitación
+				// sería pedirle al cliente que firme un documento reemplazado.
+				// Tampoco uno ya reclamado por un reemplazo que todavía no terminó de
+				// anularlo: su documento es el que se está dejando sin efecto.
+				if (!vigente || !estaVigente(vigente)) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Este contrato está anulado: no se le reenvían correos.",
+					});
+				}
 
-			return {
-				success: true,
-				message: "Correo reenviado a los firmantes pendientes",
-			};
+				try {
+					await reenviarCorreoDeFirma(documentID);
+				} catch (error) {
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message:
+							error instanceof Error
+								? error.message
+								: "No se pudo reenviar el correo de firma",
+					});
+				}
+
+				return {
+					success: true,
+					message: "Correo reenviado a los firmantes pendientes",
+				};
+			});
 		}),
 };

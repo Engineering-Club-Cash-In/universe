@@ -1971,6 +1971,13 @@ export const contractGenerationRouter = {
 			// También espera a un envío por WhatsApp en curso, para no borrar el
 			// documento viejo mientras salen sus enlaces.
 			return conCandadoDeFirma(input.opportunityId, async () => {
+				// Esperar el candado puede haber tardado (un envío por WhatsApp de la
+				// aprobación, por ejemplo), y en esa espera la oportunidad pudo pasar
+				// a 85%. Se vuelve a mirar ANTES de subir: WeeTrust manda las
+				// invitaciones en el acto, y descubrirlo después dejaba al cliente con
+				// correos de un documento que se borra enseguida.
+				await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+
 				const resultado = await subirContratoParaFirma({
 					contractType: input.contractType,
 					pdfBase64: input.pdfBase64,

@@ -1,8 +1,8 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { coDebtors, leads } from "../db/schema/crm";
+import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import {
 	contractSignatories,
 	generatedLegalContracts,
@@ -71,6 +71,117 @@ interface DestinatarioDeFirma {
 	phone: string | null;
 	leadId?: string;
 	coDebtorId?: string;
+}
+
+/**
+ * Los enlaces que le tocan HOY a una persona de una oportunidad.
+ *
+ * El reintento manual no puede confiar en los enlaces que trae la pantalla:
+ * pueden ser de un contrato que ya se regeneró, o de otro firmante (pegado a
+ * mano), y mandarle a alguien el enlace de otro lo deja firmando en su nombre.
+ * Así que se resuelven acá, por rol y correo, igual que el envío automático.
+ *
+ * Quien ya firmó no aparece: su enlace es de un documento cerrado.
+ */
+async function enlacesDeLaPersona(
+	opportunityId: string,
+	recipient: { leadId: string | null; coDebtorId: string | null },
+): Promise<{
+	destinatario: DestinatarioDeFirma | null;
+	contratos: { contractName: string; link: string | null }[];
+}> {
+	const [oportunidad] = await db
+		.select({ leadId: opportunities.leadId })
+		.from(opportunities)
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+
+	const [lead] = oportunidad?.leadId
+		? await db
+				.select({
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+					phone: leads.phone,
+				})
+				.from(leads)
+				.where(eq(leads.id, oportunidad.leadId))
+				.limit(1)
+		: [];
+
+	// Mismo orden que al mandar: el reparto de correos de prueba es posicional.
+	const coDebtorsList = await db
+		.select({
+			id: coDebtors.id,
+			fullName: coDebtors.fullName,
+			email: coDebtors.email,
+			phone: coDebtors.phone,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+
+	const reales: DestinatarioDeFirma[] = [
+		{
+			role: "TITULAR",
+			nombre: lead ? `${lead.firstName} ${lead.lastName}` : "Cliente",
+			email: lead?.email ?? null,
+			phone: lead?.phone ?? null,
+			...(lead ? { leadId: lead.id } : {}),
+		},
+		...coDebtorsList.map((cd) => ({
+			role: "COFIRMANTE",
+			nombre: cd.fullName,
+			email: cd.email,
+			phone: cd.phone,
+			coDebtorId: cd.id,
+		})),
+		{
+			role: "REP_LEGAL",
+			nombre: REP_LEGAL_NOMBRE,
+			email: REP_LEGAL_EMAIL,
+			phone: REP_LEGAL_TELEFONO || null,
+		},
+	];
+
+	const lista = isTestModeEnabled() ? aplicarCorreosDePrueba(reales) : reales;
+
+	const destinatario =
+		lista.find((d) =>
+			recipient.leadId
+				? d.leadId === recipient.leadId
+				: recipient.coDebtorId
+					? d.coDebtorId === recipient.coDebtorId
+					: d.role === "REP_LEGAL",
+		) ?? null;
+
+	if (!destinatario?.email) return { destinatario, contratos: [] };
+
+	const filas = await db
+		.select({
+			contractName: generatedLegalContracts.contractName,
+			link: contractSignatories.signingUrl,
+		})
+		.from(contractSignatories)
+		.innerJoin(
+			generatedLegalContracts,
+			eq(contractSignatories.contractId, generatedLegalContracts.id),
+		)
+		.where(
+			and(
+				eq(generatedLegalContracts.opportunityId, opportunityId),
+				ne(generatedLegalContracts.status, "cancelled"),
+				isNull(generatedLegalContracts.replacedByContractId),
+				eq(contractSignatories.role, destinatario.role),
+				// WeeTrust puede devolver el correo en minúsculas.
+				sql`lower(${contractSignatories.email}) = lower(${destinatario.email})`,
+				ne(contractSignatories.status, "signed"),
+			),
+		)
+		.orderBy(generatedLegalContracts.generatedAt);
+
+	return { destinatario, contratos: filas };
 }
 
 /**
@@ -660,12 +771,6 @@ export const messagingRouter = {
 			z.object({
 				recipientId: z.string().uuid(),
 				phone: z.string().min(1),
-				contracts: z.array(
-					z.object({
-						contractName: z.string(),
-						link: z.string().nullable(),
-					}),
-				),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -701,65 +806,55 @@ export const messagingRouter = {
 					.where(eq(coDebtors.id, recipient.coDebtorId));
 			}
 
-			// Buscar los enlaces vigentes y mandar, con el candado de la
-			// oportunidad tomado: si no, una regeneración que entrara entre la
-			// revisión y el envío dejaba pasar un enlace que moría al instante.
-			// El enlace que llega de la pantalla puede ser viejo: si el contrato se
-			// regeneró o se reemplazó después de armarse el log, su documento en
-			// WeeTrust ya no existe y mandarlo deja al cliente con un enlace muerto
-			// marcado como enviado. Sólo se manda lo que hoy sigue siendo el enlace
-			// vigente de un contrato activo de esa oportunidad.
+			// La oportunidad del envío: de ahí salen los enlaces vigentes.
 			const [log] = await db
 				.select({ opportunityId: whatsappLogs.opportunityId })
 				.from(whatsappLogs)
 				.where(eq(whatsappLogs.id, recipient.whatsappLogId))
 				.limit(1);
 
-			return conCandadoDeFirma(log?.opportunityId ?? null, async () => {
-				const enlacesVigentes = log?.opportunityId
-					? await db
-							.select({ url: contractSignatories.signingUrl })
-							.from(contractSignatories)
-							.innerJoin(
-								generatedLegalContracts,
-								eq(contractSignatories.contractId, generatedLegalContracts.id),
-							)
-							.where(
-								and(
-									eq(generatedLegalContracts.opportunityId, log.opportunityId),
-									ne(generatedLegalContracts.status, "cancelled"),
-									isNull(generatedLegalContracts.replacedByContractId),
-								),
-							)
-					: [];
-				const vigentes = new Set(
-					enlacesVigentes
-						.map((e) => e.url)
-						.filter((url): url is string => !!url),
+			if (!log?.opportunityId) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este envío no está asociado a una oportunidad: no se puede reintentar.",
+				});
+			}
+
+			return conCandadoDeFirma(log.opportunityId, async () => {
+				// Los enlaces se resuelven acá, no se toman de la pantalla: los que
+				// ésta tiene pueden ser de un contrato ya regenerado, o de otro
+				// firmante, y mandarle a alguien el enlace de otro lo deja firmando
+				// en su nombre. Con el candado tomado, además, no se cuela una
+				// regeneración entre resolverlos y mandarlos.
+				const { destinatario, contratos } = await enlacesDeLaPersona(
+					log.opportunityId,
+					recipient,
 				);
-				const viejo = input.contracts.find(
-					(c) => c.link && !vigentes.has(c.link),
-				);
-				if (viejo) {
+
+				if (!destinatario) {
 					throw new ORPCError("BAD_REQUEST", {
-						message: `El enlace de "${viejo.contractName}" ya no es el vigente: el contrato se regeneró o se reemplazó. Usá "Reenviar por WhatsApp" desde la oportunidad para mandar los nuevos.`,
+						message:
+							"No se pudo ubicar a esta persona en la oportunidad. Reenviá desde la ficha.",
 					});
 				}
 
-				// Armar mensaje
-				const completeContracts = input.contracts.filter(
-					(c): c is ContractLink => c.link !== null,
-				);
-
-				if (completeContracts.length === 0) {
+				if (contratos.length === 0) {
 					throw new ORPCError("BAD_REQUEST", {
-						message: "Todos los contratos deben tener link de firma",
+						message:
+							"Esta persona no tiene enlaces de firma pendientes: o ya firmó, o sus contratos se reemplazaron. Revisá la ficha.",
+					});
+				}
+
+				const sinEnlace = contratos.filter((c) => !c.link);
+				if (sinEnlace.length > 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Falta el enlace de firma de: ${sinEnlace.map((c) => c.contractName).join(", ")}. Hay que regenerarlo antes de mandarlo.`,
 					});
 				}
 
 				const message = buildContractLinksMessage(
 					recipient.recipientName,
-					completeContracts,
+					contratos as ContractLink[],
 				);
 
 				// Enviar por WhatsApp. TEST_MESSAGE rige también el envío manual: si
@@ -785,7 +880,7 @@ export const messagingRouter = {
 					.set({
 						status,
 						phone: input.phone,
-						contracts: input.contracts,
+						contracts: contratos,
 						message,
 						reason,
 						sentAt: status === "sent" ? new Date() : undefined,

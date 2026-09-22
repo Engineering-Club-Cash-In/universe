@@ -58,6 +58,61 @@ export interface WialonSession {
 	expiresAt: number;
 }
 
+// ── Diagnóstico de conexión (panel de administración) ─────────────────────────
+export interface WialonDiagnostics {
+	connected: boolean;
+	environment: "produccion" | "hosting-wialon" | "personalizado";
+	baseUrl: string;
+	locatorUrl: string;
+	timeoutMs: number;
+	tokenConfigured: boolean;
+	user: { id: number; nm: string } | null;
+	sessionExpiresAt: Date | null;
+	latencyMs: number | null;
+	unitCount: number | null;
+	checkedAt: Date;
+	error: { code: string; message: string } | null;
+}
+
+// Esquema de salida explícito para getWialonDiagnostics: evita que el tipo del
+// cliente (apps/web) se infiera como {} cuando TS trunca el appRouter combinado
+// (TS7056, mismo motivo que en accounting.ts getReporteNoLiquidados).
+export const wialonDiagnosticsOutputSchema = z.object({
+	connected: z.boolean(),
+	environment: z.enum(["produccion", "hosting-wialon", "personalizado"]),
+	baseUrl: z.string(),
+	locatorUrl: z.string(),
+	timeoutMs: z.number(),
+	tokenConfigured: z.boolean(),
+	user: z.object({ id: z.number(), nm: z.string() }).nullable(),
+	sessionExpiresAt: z.date().nullable(),
+	latencyMs: z.number().nullable(),
+	unitCount: z.number().nullable(),
+	checkedAt: z.date(),
+	error: z.object({ code: z.string(), message: z.string() }).nullable(),
+});
+
+export const testWialonConnectionOutputSchema = z.object({
+	connected: z.boolean(),
+	unitCount: z.number().nullable(),
+});
+
+// Solo id/nm van tipados: es lo único que consume el catálogo del panel admin
+// hoy (evita el cast manual en el frontend). El resto de WialonUnitItem (pos,
+// lmsg, sens, prp...) no se serializa para este endpoint; getWialonUnits sigue
+// devolviendo el objeto completo sin output() explícito para quien lo necesite.
+export const wialonUnitsCatalogOutputSchema = z.object({
+	total: z.number(),
+	from: z.number(),
+	to: z.number(),
+	items: z.array(
+		z.object({
+			id: z.number(),
+			nm: z.string(),
+		}),
+	),
+});
+
 // ── Búsqueda de Unidades (core/search_items) ──────────────────────────────────
 export interface WialonSensorMeta {
 	id: number;

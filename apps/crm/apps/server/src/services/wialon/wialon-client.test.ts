@@ -1,5 +1,9 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { findIgnitionSensorId, WialonClient } from "./wialon-client";
+import {
+	findIgnitionSensorId,
+	resolveWialonEnvironment,
+	WialonClient,
+} from "./wialon-client";
 import {
 	createLocatorLinkInputSchema,
 	getUnitDetailInputSchema,
@@ -1157,6 +1161,7 @@ describe("WialonClient", () => {
 		expect(health.status).toBe("connected");
 		expect(health.sid).toBe("sid-health-2");
 		expect(health.user?.nm).toBe("Fleet User");
+		expect(health.unitCount).toBe(10);
 		expect(loginCallCount).toBe(2);
 		expect(searchCallCount).toBe(2);
 	});
@@ -1738,5 +1743,87 @@ describe("WialonClient", () => {
 		// Durante el backoff de 5 minutos, llamadas posteriores no deben activar la heurística
 		const statusCached = await client.getUnitsStatus([666]);
 		expect(statusCached[0].isIgnitionOn).toBeUndefined();
+	});
+
+	describe("resolveWialonEnvironment", () => {
+		test("clasifica hosts *.lalegion.gt como producción", () => {
+			expect(resolveWialonEnvironment("https://gps.lalegion.gt/locator")).toBe(
+				"produccion",
+			);
+		});
+
+		test("clasifica hosts *.wialon.com como hosting-wialon", () => {
+			expect(
+				resolveWialonEnvironment("https://hst-api.wialon.com/wialon/ajax.html"),
+			).toBe("hosting-wialon");
+		});
+
+		test("clasifica cualquier otro host como personalizado", () => {
+			expect(
+				resolveWialonEnvironment("https://otro-proveedor.example.com"),
+			).toBe("personalizado");
+		});
+
+		test("clasifica como personalizado ante una URL inválida sin lanzar", () => {
+			expect(resolveWialonEnvironment("no-es-una-url")).toBe("personalizado");
+		});
+
+		test("no confunde un dominio que solo termina en 'lalegion.gt' sin ser subdominio real", () => {
+			// endsWith("lalegion.gt") matchearía esto incorrectamente como producción
+			expect(
+				resolveWialonEnvironment("https://evil-lalegion.gt/phishing"),
+			).toBe("personalizado");
+			expect(resolveWialonEnvironment("https://maliciouslalegion.gt")).toBe(
+				"personalizado",
+			);
+		});
+
+		test("no confunde un dominio que solo termina en 'wialon.com' sin ser subdominio real", () => {
+			expect(resolveWialonEnvironment("https://fakewialon.com")).toBe(
+				"personalizado",
+			);
+		});
+
+		test("acepta el dominio raíz exacto sin subdominio", () => {
+			expect(resolveWialonEnvironment("https://lalegion.gt")).toBe(
+				"produccion",
+			);
+			expect(resolveWialonEnvironment("https://wialon.com")).toBe(
+				"hosting-wialon",
+			);
+		});
+	});
+
+	describe("getPublicConfig", () => {
+		test("expone baseUrl, locatorUrl, timeoutMs y tokenConfigured sin incluir el token", () => {
+			const client = new WialonClient(
+				{
+					token: "secreto-nunca-expuesto",
+					baseUrl: "https://hst-api.wialon.com/wialon/ajax.html",
+					locatorBaseUrl: "https://gps.lalegion.gt/locator/index.html",
+					timeoutMs: 15000,
+				},
+				async () => new Response("{}", { status: 200 }),
+			);
+
+			const config = client.getPublicConfig();
+
+			expect(config).toEqual({
+				baseUrl: "https://hst-api.wialon.com/wialon/ajax.html",
+				locatorUrl: "https://gps.lalegion.gt/locator/index.html",
+				timeoutMs: 15000,
+				tokenConfigured: true,
+			});
+			expect(Object.values(config)).not.toContain("secreto-nunca-expuesto");
+		});
+
+		test("tokenConfigured es false cuando no hay WIALON_TOKEN configurado", () => {
+			const client = new WialonClient(
+				{ token: undefined },
+				async () => new Response("{}", { status: 200 }),
+			);
+
+			expect(client.getPublicConfig().tokenConfigured).toBe(false);
+		});
 	});
 });

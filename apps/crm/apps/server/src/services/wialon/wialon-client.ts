@@ -30,6 +30,27 @@ const IGNITION_ON_REGEX =
 const IGNITION_OFF_REGEX =
 	/^(?:motor\s+apagado|ignici[oó]n\s+(?:off|apagada?)|apagado|apagada|off|apagado\s*\([^)]*\))$/i;
 
+/**
+ * Deriva el ambiente lógico a partir del host de baseUrl, para mostrar en diagnósticos
+ * sin exponer la URL completa como único indicador.
+ */
+export function resolveWialonEnvironment(
+	baseUrl: string,
+): "produccion" | "hosting-wialon" | "personalizado" {
+	try {
+		const host = new URL(baseUrl).hostname.toLowerCase();
+		if (host === "lalegion.gt" || host.endsWith(".lalegion.gt")) {
+			return "produccion";
+		}
+		if (host === "wialon.com" || host.endsWith(".wialon.com")) {
+			return "hosting-wialon";
+		}
+		return "personalizado";
+	} catch {
+		return "personalizado";
+	}
+}
+
 export function findIgnitionSensorId(
 	sens?: Record<string, WialonSensorMeta>,
 	prp?: Record<string, unknown>,
@@ -180,6 +201,24 @@ export class WialonClient {
 			return this.sessionCache;
 		}
 		return null;
+	}
+
+	/**
+	 * Configuración efectiva del cliente, sin datos sensibles (nunca incluye el token).
+	 * Pensada para paneles de diagnóstico/administración.
+	 */
+	public getPublicConfig(): {
+		baseUrl: string;
+		locatorUrl: string;
+		timeoutMs: number;
+		tokenConfigured: boolean;
+	} {
+		return {
+			baseUrl: this.config.baseUrl,
+			locatorUrl: this.config.locatorBaseUrl,
+			timeoutMs: this.config.timeoutMs,
+			tokenConfigured: Boolean(this.config.token),
+		};
 	}
 
 	/**
@@ -769,6 +808,7 @@ export class WialonClient {
 		status: "connected";
 		sid: string;
 		user?: { id: number; nm: string };
+		unitCount?: number;
 	}> {
 		if (force) {
 			await this.login(true);
@@ -790,7 +830,7 @@ export class WialonClient {
 					to: 0,
 				},
 				sid,
-			)) as { items?: unknown[] };
+			)) as { items?: unknown[]; totalItemsCount?: unknown };
 
 			if (!res || typeof res !== "object" || !Array.isArray(res.items)) {
 				throw new WialonClientError(
@@ -803,6 +843,10 @@ export class WialonClient {
 				status: "connected",
 				sid,
 				user: this.sessionCache?.user,
+				unitCount:
+					typeof res.totalItemsCount === "number"
+						? res.totalItemsCount
+						: undefined,
 			};
 		});
 	}

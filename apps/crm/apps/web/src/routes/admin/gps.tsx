@@ -320,12 +320,35 @@ function RouteComponent() {
 						onChange={(e) => setFilterName(e.target.value)}
 						className="max-w-sm"
 					/>
-					<DataTable
-						columns={UNIT_COLUMNS}
-						data={unitRows}
-						isLoading={units.isPending}
-						hideSearch
-					/>
+					{units.isError ? (
+						// Igual que con diagnostics: sin esto, un fallo del catálogo
+						// (token faltante, Wialon caído) se ve idéntico a una flota
+						// realmente vacía — "No se encontraron resultados" engaña.
+						<div className="flex items-center justify-between gap-4 rounded-md border border-red-200 p-4 dark:border-red-900/50">
+							<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
+								<TriangleAlert className="h-4 w-4 shrink-0" />
+								<span>
+									No se pudo cargar el catálogo de unidades:{" "}
+									{units.error?.message ||
+										"error desconocido al contactar el servidor del CRM"}
+								</span>
+							</div>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => units.refetch()}
+							>
+								Reintentar
+							</Button>
+						</div>
+					) : (
+						<DataTable
+							columns={UNIT_COLUMNS}
+							data={unitRows}
+							isLoading={units.isPending}
+							hideSearch
+						/>
+					)}
 				</CardContent>
 			</Card>
 		</div>

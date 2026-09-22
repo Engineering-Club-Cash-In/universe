@@ -1089,42 +1089,79 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Actualizar la oportunidad y registrar historial en una transacción
-			await auditedTransaction(async (tx) => {
-				// Actualizar la oportunidad a 85%, sólo si sigue en la etapa que se
-				// leyó. Dos aprobaciones a la vez pasaban las dos la validación del
-				// 80% y cada una mandaba su WhatsApp: el cliente recibía todo doble.
-				const movidas = await tx
-					.update(opportunities)
-					.set({
-						stageId: targetStage.id,
-						updatedAt: new Date(),
-					})
-					.where(
-						and(
-							eq(opportunities.id, input.opportunityId),
-							eq(opportunities.stageId, opportunity.stageId),
-						),
-					)
-					.returning({ id: opportunities.id });
-				if (movidas.length === 0) {
+			// Con el candado de la oportunidad: generar y regenerar lo tienen tomado
+			// mientras WeeTrust emite, y mover la etapa por debajo hacía que esos
+			// documentos se descartaran al instalarlos, dejando al cliente con
+			// invitaciones muertas. Acá se espera a que terminen.
+			await conCandadoDeFirma(input.opportunityId, async () => {
+				// Ya con el candado: la etapa y los contratos se leyeron antes de
+				// esperar, y en esa espera una generación pudo instalar o descartar.
+				const [etapaAhora] = await db
+					.select({ porcentaje: salesStages.closurePercentage })
+					.from(opportunities)
+					.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1);
+				if (etapaAhora?.porcentaje !== 80) {
 					throw new ORPCError("CONFLICT", {
 						message: "La oportunidad ya fue aprobada por otro usuario.",
 					});
 				}
-				auditRecord({
-					entity: "opportunity",
-					id: input.opportunityId,
-					action: "approve_legal",
-				});
 
-				// Registrar en el historial de etapas
-				await tx.insert(opportunityStageHistory).values({
-					opportunityId: input.opportunityId,
-					fromStageId: opportunity.stageId,
-					toStageId: targetStage.id,
-					changedBy: context.userId,
-					reason: "Aprobación legal - Contratos generados, pendientes de firma",
+				const [{ count: vigentesAhora }] = await db
+					.select({ count: count() })
+					.from(generatedLegalContracts)
+					.where(
+						and(
+							eq(generatedLegalContracts.opportunityId, input.opportunityId),
+							contratoVigente(),
+						),
+					);
+				if (Number(vigentesAhora) === 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Debe haber al menos un contrato asociado a la oportunidad para aprobarla",
+					});
+				}
+
+				// Actualizar la oportunidad y registrar historial en una transacción
+				await auditedTransaction(async (tx) => {
+					// Actualizar la oportunidad a 85%, sólo si sigue en la etapa que se
+					// leyó. Dos aprobaciones a la vez pasaban las dos la validación del
+					// 80% y cada una mandaba su WhatsApp: el cliente recibía todo doble.
+					const movidas = await tx
+						.update(opportunities)
+						.set({
+							stageId: targetStage.id,
+							updatedAt: new Date(),
+						})
+						.where(
+							and(
+								eq(opportunities.id, input.opportunityId),
+								eq(opportunities.stageId, opportunity.stageId),
+							),
+						)
+						.returning({ id: opportunities.id });
+					if (movidas.length === 0) {
+						throw new ORPCError("CONFLICT", {
+							message: "La oportunidad ya fue aprobada por otro usuario.",
+						});
+					}
+					auditRecord({
+						entity: "opportunity",
+						id: input.opportunityId,
+						action: "approve_legal",
+					});
+
+					// Registrar en el historial de etapas
+					await tx.insert(opportunityStageHistory).values({
+						opportunityId: input.opportunityId,
+						fromStageId: opportunity.stageId,
+						toStageId: targetStage.id,
+						changedBy: context.userId,
+						reason:
+							"Aprobación legal - Contratos generados, pendientes de firma",
+					});
 				});
 			});
 
@@ -1144,14 +1181,15 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Enviar links de contratos por WhatsApp al cliente (si aplica)
+			// Enviar links de contratos por WhatsApp al cliente (si aplica). Va
+			// FUERA del candado: toma el suyo y, adentro, se esperaría a sí mismo.
 			if (opportunity.leadId)
 				sendContractLinksToLead({
 					leadId: opportunity.leadId,
 					opportunityId: input.opportunityId,
 				}).catch((err) => {
 					console.error(
-						"[confirmContractsSigned] Error enviando WhatsApp:",
+						"[approveOpportunityLegal] Error enviando WhatsApp:",
 						err,
 					);
 				});
@@ -1574,6 +1612,25 @@ export const legalContractsRouter = {
 								"La oportunidad cambió de etapa mientras se esperaba. Recargá y, si todavía hace falta, volvé a regenerar.",
 						});
 					}
+				}
+
+				// Y el contrato, por lo mismo: dos personas que regeneran a la vez
+				// leyeron la fila viva antes de esperar. La segunda encontraba acá
+				// todo en orden, emitía (con sus invitaciones) y recién al guardar se
+				// enteraba de que la otra ya lo había reemplazado.
+				const [sigueVigente] = await db
+					.select({
+						status: generatedLegalContracts.status,
+						replacedByContractId: generatedLegalContracts.replacedByContractId,
+					})
+					.from(generatedLegalContracts)
+					.where(eq(generatedLegalContracts.id, input.contractId))
+					.limit(1);
+				if (!sigueVigente || !estaVigente(sigueVigente)) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Otra persona acaba de regenerar o reemplazar este contrato. Recargá para ver el nuevo.",
+					});
 				}
 
 				const resultado = await reemitirContratoEnWeeTrust({

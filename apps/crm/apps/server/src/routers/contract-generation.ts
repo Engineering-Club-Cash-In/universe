@@ -664,6 +664,81 @@ async function deshacerConCandadoTomado(
 	return false;
 }
 
+/**
+ * Las reglas de "qué se puede subir" para una oportunidad y un tipo.
+ *
+ * Se piden dos veces: antes de tomar el candado, para cortar sin esperar, y de
+ * nuevo ya con el candado, antes de tocar WeeTrust. Dos subidas del mismo tipo
+ * a la vez pasaban las dos la primera revisión; la segunda esperaba, subía
+ * igual (con sus invitaciones) y recién al guardar se enteraba de que había
+ * perdido, así que su documento se borraba y el cliente quedaba con enlaces
+ * muertos.
+ */
+async function exigirQueSePuedaSubir(input: {
+	opportunityId: string;
+	contractType: string;
+	replaceContractId?: string;
+}): Promise<void> {
+	// Subir un tipo que ya está vigente es reemplazarlo, y eso tiene sus
+	// reglas: sólo en 80% y con motivo. Sin elegir "Reemplazar" se corta
+	// antes de mandar nada, en vez de anular el anterior por la espalda.
+	if (!input.replaceContractId) {
+		const [vigente] = await db
+			.select({ id: generatedLegalContracts.id })
+			.from(generatedLegalContracts)
+			.where(
+				and(
+					eq(generatedLegalContracts.opportunityId, input.opportunityId),
+					eq(generatedLegalContracts.contractType, input.contractType),
+					ne(generatedLegalContracts.status, "cancelled"),
+				),
+			)
+			.limit(1);
+		if (vigente) {
+			throw new ORPCError("BAD_REQUEST", {
+				message:
+					'Ya hay un contrato de este tipo en la oportunidad. Usá "Reemplazar" en ese contrato.',
+			});
+		}
+	}
+
+	// Un anulado ya fue reemplazado: reemplazarlo otra vez dejaría dos
+	// documentos activos para el mismo contrato.
+	if (input.replaceContractId) {
+		const [aReemplazar] = await db
+			.select({
+				status: generatedLegalContracts.status,
+				contractType: generatedLegalContracts.contractType,
+			})
+			.from(generatedLegalContracts)
+			.where(
+				and(
+					eq(generatedLegalContracts.id, input.replaceContractId),
+					eq(generatedLegalContracts.opportunityId, input.opportunityId),
+				),
+			)
+			.limit(1);
+		if (!aReemplazar) {
+			throw new ORPCError("NOT_FOUND", {
+				message: "El contrato a reemplazar no existe en esta oportunidad",
+			});
+		}
+		if (aReemplazar.status === "cancelled") {
+			throw new ORPCError("BAD_REQUEST", {
+				message: "Ese contrato ya está anulado: no se puede reemplazar.",
+			});
+		}
+		// Reemplazar es cambiar el documento de ESE contrato. Con otro tipo
+		// se anulaba uno y quedaba otro duplicado del tipo subido.
+		if (aReemplazar.contractType !== input.contractType) {
+			throw new ORPCError("BAD_REQUEST", {
+				message:
+					"El contrato a reemplazar es de otro tipo. Elegí el mismo tipo de contrato.",
+			});
+		}
+	}
+}
+
 /** Firmante tal como lo manda el front. */
 const signerSchema = z.object({
 	role: z.enum(["TITULAR", "COFIRMANTE", "REP_LEGAL", "VENDEDOR"]),
@@ -1953,64 +2028,7 @@ export const contractGenerationRouter = {
 				});
 			}
 
-			// Subir un tipo que ya está vigente es reemplazarlo, y eso tiene sus
-			// reglas: sólo en 80% y con motivo. Sin elegir "Reemplazar" se corta
-			// antes de mandar nada, en vez de anular el anterior por la espalda.
-			if (!input.replaceContractId) {
-				const [vigente] = await db
-					.select({ id: generatedLegalContracts.id })
-					.from(generatedLegalContracts)
-					.where(
-						and(
-							eq(generatedLegalContracts.opportunityId, input.opportunityId),
-							eq(generatedLegalContracts.contractType, input.contractType),
-							ne(generatedLegalContracts.status, "cancelled"),
-						),
-					)
-					.limit(1);
-				if (vigente) {
-					throw new ORPCError("BAD_REQUEST", {
-						message:
-							'Ya hay un contrato de este tipo en la oportunidad. Usá "Reemplazar" en ese contrato.',
-					});
-				}
-			}
-
-			// Un anulado ya fue reemplazado: reemplazarlo otra vez dejaría dos
-			// documentos activos para el mismo contrato.
-			if (input.replaceContractId) {
-				const [aReemplazar] = await db
-					.select({
-						status: generatedLegalContracts.status,
-						contractType: generatedLegalContracts.contractType,
-					})
-					.from(generatedLegalContracts)
-					.where(
-						and(
-							eq(generatedLegalContracts.id, input.replaceContractId),
-							eq(generatedLegalContracts.opportunityId, input.opportunityId),
-						),
-					)
-					.limit(1);
-				if (!aReemplazar) {
-					throw new ORPCError("NOT_FOUND", {
-						message: "El contrato a reemplazar no existe en esta oportunidad",
-					});
-				}
-				if (aReemplazar.status === "cancelled") {
-					throw new ORPCError("BAD_REQUEST", {
-						message: "Ese contrato ya está anulado: no se puede reemplazar.",
-					});
-				}
-				// Reemplazar es cambiar el documento de ESE contrato. Con otro tipo
-				// se anulaba uno y quedaba otro duplicado del tipo subido.
-				if (aReemplazar.contractType !== input.contractType) {
-					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"El contrato a reemplazar es de otro tipo. Elegí el mismo tipo de contrato.",
-					});
-				}
-			}
+			await exigirQueSePuedaSubir(input);
 
 			// De acá al final, con el candado de la oportunidad tomado: incluye la
 			// subida a WeeTrust. Dos subidas del mismo tipo a la vez mandaban las dos
@@ -2025,6 +2043,9 @@ export const contractGenerationRouter = {
 				// invitaciones en el acto, y descubrirlo después dejaba al cliente con
 				// correos de un documento que se borra enseguida.
 				await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+				// Y las reglas del tipo: otra subida pudo instalarse mientras se
+				// esperaba el candado.
+				await exigirQueSePuedaSubir(input);
 
 				const resultado = await subirContratoParaFirma({
 					contractType: input.contractType,

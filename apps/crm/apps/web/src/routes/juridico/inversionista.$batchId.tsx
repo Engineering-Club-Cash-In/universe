@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
 	type CRMData,
 	DynamicContractWizard,
+	moneyToWords,
 } from "@/components/contracts/DynamicContractWizard";
 import {
 	AlertDialog,
@@ -31,6 +32,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
+import { fechaEnPalabras } from "@/lib/fechas-en-palabras";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/juridico/inversionista/$batchId")({
@@ -123,6 +125,32 @@ function RouteComponent() {
 		}),
 		[bateria, dpiEnUso],
 	);
+
+	/**
+	 * Lo que ya sabemos de la compra, en las claves que usan los contratos.
+	 *
+	 * Hoy es la lista de créditos cedidos de la cesión: a nombre de quién está
+	 * cada crédito, **cuánto puso el inversionista en él**, cuándo se formalizó
+	 * (la cuota 0) y cuándo vence (la última cuota). Todo eso está en cartera, y
+	 * transcribirlo a mano era copiar cuatro datos por crédito de una pantalla a
+	 * otra.
+	 *
+	 * El monto es el aportado, no el capital del crédito: en un pool la cedente
+	 * cede su parte, que puede ser Q7,634 de un crédito de Q142,000.
+	 */
+	const valoresIniciales = useMemo(() => {
+		const creditos = bateria?.creditos ?? [];
+		if (creditos.length === 0) return undefined;
+
+		const items = creditos.map((credito) => ({
+			nombreDeudor: credito.clienteNombre,
+			cantidadCapitalCredito: `${moneyToWords(Number(credito.monto)).toUpperCase()} (${quetzales(credito.monto)})`,
+			fechaTextoInicioCredito: fechaEnPalabras(credito.fechaInicio),
+			fechaTextoVencimiento: fechaEnPalabras(credito.fechaVencimiento),
+		}));
+
+		return { listaCreditos: JSON.stringify(items) };
+	}, [bateria]);
 
 	const cerrarMutation = useMutation({
 		...orpc.closeInvestorContractBatch.mutationOptions(),
@@ -394,6 +422,7 @@ function RouteComponent() {
 							onGetDocumentsByDpi={traerCampos}
 							onGenerate={generar}
 							onBack={() => navigate({ to: "/juridico" })}
+							valoresIniciales={valoresIniciales}
 							pasoPrevio={{
 								etiqueta: "Categoría",
 								completo: categoria !== null && !contractTypesQuery.isLoading,

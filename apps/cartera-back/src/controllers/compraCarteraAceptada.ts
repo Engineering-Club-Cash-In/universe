@@ -7,6 +7,7 @@ import {
   asesores,
   compras_credito_inversionista,
   creditos,
+  cuotas_credito,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
   inversionistas,
@@ -115,6 +116,60 @@ async function abrirBateriasDeContratos(params: {
       inversionistasDeLaCompra.map((inv) => [inv.inversionista_id, inv]),
     );
 
+    // Las fechas del crédito, que el contrato de cesión necesita: la cuota 0 es
+    // cuando se formalizó y la última cuota es su vencimiento. Se traen todas
+    // las cuotas de estos créditos y se toman los extremos.
+    const cuotas = await db
+      .select({
+        credito_id: cuotas_credito.credito_id,
+        numero_cuota: cuotas_credito.numero_cuota,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+      })
+      .from(cuotas_credito)
+      .where(
+        inArray(
+          cuotas_credito.credito_id,
+          creditosRows.map((c) => c.credito_id),
+        ),
+      );
+
+    // Cuál es la primera y cuál la última de cada crédito. La primera suele ser
+    // la cuota 0, pero hay créditos renumerados donde no: se toman los extremos
+    // que existen en vez de asumir el número.
+    const cuotasExtremas = new Map<
+      number,
+      { primera: number; ultima: number }
+    >();
+    for (const cuota of cuotas) {
+      const actual = cuotasExtremas.get(cuota.credito_id);
+      if (!actual) {
+        cuotasExtremas.set(cuota.credito_id, {
+          primera: cuota.numero_cuota,
+          ultima: cuota.numero_cuota,
+        });
+        continue;
+      }
+      actual.primera = Math.min(actual.primera, cuota.numero_cuota);
+      actual.ultima = Math.max(actual.ultima, cuota.numero_cuota);
+    }
+
+    const fechasPorCredito = new Map<
+      number,
+      { inicio?: string; vencimiento?: string }
+    >();
+    for (const cuota of cuotas) {
+      const actual = fechasPorCredito.get(cuota.credito_id) ?? {};
+      const extremos = cuotasExtremas.get(cuota.credito_id);
+      if (!extremos) continue;
+      if (cuota.numero_cuota === extremos.primera) {
+        actual.inicio = cuota.fecha_vencimiento;
+      }
+      if (cuota.numero_cuota === extremos.ultima) {
+        actual.vencimiento = cuota.fecha_vencimiento;
+      }
+      fechasPorCredito.set(cuota.credito_id, actual);
+    }
+
     const resultados: Array<{
       inversionista_id: number;
       success: boolean;
@@ -137,12 +192,16 @@ async function abrirBateriasDeContratos(params: {
         const monto =
           montoNuevoPorPar.get(`${credito.credito_id}-${targetId}`) ?? fila.monto;
 
+        const fechas = fechasPorCredito.get(credito.credito_id) ?? {};
+
         return [
           {
             creditoId: credito.credito_id,
             numeroCreditoSifco: credito.numero_credito_sifco,
             clienteNombre: credito.cliente_nombre,
             monto: monto.toFixed(2),
+            fechaInicio: fechas.inicio ?? null,
+            fechaVencimiento: fechas.vencimiento ?? null,
           },
         ];
       });

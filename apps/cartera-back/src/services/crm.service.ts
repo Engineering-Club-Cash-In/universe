@@ -79,6 +79,10 @@ export interface CreditoDeLaCompra {
   clienteNombre: string;
   /** Lo que puso ESTE inversionista en ESTE crédito. */
   monto: string;
+  /** Fecha de la cuota 0: cuándo se formalizó el crédito. */
+  fechaInicio?: string | null;
+  /** Fecha de la última cuota: cuándo vence el crédito. */
+  fechaVencimiento?: string | null;
 }
 
 export interface BateriaDeContratosInput {

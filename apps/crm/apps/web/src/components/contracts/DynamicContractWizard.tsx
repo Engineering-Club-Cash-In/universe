@@ -352,6 +352,15 @@ interface DynamicContractWizardProps {
 		}>;
 	}) => Promise<{ success: boolean; message: string }>;
 	/**
+	 * Valores que el área ya conoce, por clave de campo.
+	 *
+	 * En ventas los campos se llenan del lead, la oportunidad y el vehículo, que
+	 * el wizard conoce. En inversiones lo que se sabe viene de cartera —los
+	 * créditos de la compra, con su capital y sus fechas—, y eso lo arma quien
+	 * llama. Lo que ya se editó a mano no se pisa.
+	 */
+	valoresIniciales?: Record<string, string>;
+	/**
 	 * Un paso propio del área, antes del de selección.
 	 *
 	 * Inversiones lo usa para la categoría: primero individual o sociedad, y
@@ -508,7 +517,7 @@ function dpiGroupToWords(numStr: string): string {
 }
 
 // Convert money amount to words in Spanish
-function moneyToWords(amount: number): string {
+export function moneyToWords(amount: number): string {
 	const unidades = [
 		"",
 		"UN",
@@ -838,6 +847,7 @@ export function DynamicContractWizard({
 	opportunityId,
 	leadId,
 	pasoPrevio,
+	valoresIniciales,
 	onGetDocumentsByDpi,
 	onGenerate,
 	onLinkContracts,
@@ -1586,10 +1596,13 @@ export function DynamicContractWizard({
 				for (const key of touchedFieldsRef.current) {
 					if (prev[key] !== undefined) editadosAMano[key] = prev[key];
 				}
-				return { ...initialValues, ...editadosAMano };
+				// Los del área van después de los del CRM y antes de lo editado a
+				// mano: son datos que acá no se saben calcular, pero no le ganan a
+				// quien ya los corrigió.
+				return { ...initialValues, ...valoresIniciales, ...editadosAMano };
 			});
 		},
-		[crmData, numberToText, moneyToText],
+		[crmData, numberToText, moneyToText, valoresIniciales],
 	);
 
 	// Fetch documents and fields when moving to step 2

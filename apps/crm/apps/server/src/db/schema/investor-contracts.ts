@@ -33,6 +33,16 @@ export type CreditoDeLaCompra = {
 	clienteNombre: string;
 	/** Lo que puso ESTE inversionista en ESTE crédito, en quetzales. */
 	monto: string;
+	/**
+	 * Las fechas del crédito: cuándo se formalizó (la cuota 0) y cuándo vence (la
+	 * última cuota). Es lo que dice el contrato de cesión, junto con el monto que
+	 * puso el inversionista.
+	 *
+	 * Opcionales: las baterías abiertas antes de que esto existiera no las
+	 * tienen, y ahí esos campos del contrato se llenan a mano.
+	 */
+	fechaInicio?: string | null;
+	fechaVencimiento?: string | null;
 };
 
 /**

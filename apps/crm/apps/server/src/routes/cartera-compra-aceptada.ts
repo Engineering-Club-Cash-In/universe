@@ -24,6 +24,8 @@ const creditoSchema = z.object({
 	numeroCreditoSifco: z.string().min(1),
 	clienteNombre: z.string().min(1),
 	monto: z.string().min(1),
+	fechaInicio: z.string().nullish(),
+	fechaVencimiento: z.string().nullish(),
 });
 
 const cuerpoSchema = z.object({

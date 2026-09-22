@@ -12,6 +12,7 @@ const {
   decidirMoraTrasRomperConvenio,
   fechaCalendarioGT,
   hoyGuatemala,
+  incrementoDiarioMora,
   isOverdueInstallmentForMora,
   maximoMoraSinOverride,
   BASE_DIAS_MORA,
@@ -473,5 +474,90 @@ describe("decidirMoraDelCron — el cron nunca escribe una mora activa de Q0.00"
     // 13.39 × 1.12% × 1/30 = 0.004998… → Q0.00; 13.40 → Q0.005 → Q0.01.
     expect(decidirMoraDelCron({ capital: 13.39, diasAtrasadosPorCuota: [1] }).accion).toBe("DESACTIVAR");
     expect(decidirMoraDelCron({ capital: 13.4, diasAtrasadosPorCuota: [1] }).accion).toBe("APLICAR");
+  });
+});
+
+// Lo que el CRM le dice al cliente: "tu saldo de hoy es X y aumenta Y por día".
+// Capital 10,000 → cargo mensual de Q112.00 por cuota → 1/30 = Q3.7333… por
+// cada cuota que todavía no llegó al techo de 30 días.
+const incremento = (capital: number | string, dias: number[]) =>
+  incrementoDiarioMora({ capital, diasAtrasadosPorCuota: dias }).toFixed(2);
+
+describe("incrementoDiarioMora — cuánto sube la mora por cada día que pase", () => {
+  it("una sola cuota fresca sube 1/30 del cargo mensual", () => {
+    expect(incremento(10_000, [5])).toBe("3.73");
+  });
+
+  it("tres cuotas frescas suben 3/30, no 1/30", () => {
+    expect(incremento(10_000, [20, 10, 5])).toBe("11.20");
+  });
+
+  it("una cuota abandonada hace 200 días ya está congelada y no aporta nada", () => {
+    expect(incremento(10_000, [200])).toBe("0.00");
+  });
+
+  it("cartera vieja: TODAS las cuotas en el techo → el saldo ya no crece", () => {
+    expect(incremento(10_000, [365, 335, 305, 30])).toBe("0.00");
+  });
+
+  it("mezcla: solo cuentan las que están debajo del techo", () => {
+    // c7 con 95 días + c8 con 65 + c9 con 35 (los tres topados) + c10 con 5.
+    expect(incremento(10_000, [95, 65, 35, 5])).toBe("3.73");
+  });
+
+  it("el borde del techo: 29 días todavía suma, 30 y 31 ya no", () => {
+    expect(incremento(10_000, [29])).toBe("3.73");
+    expect(incremento(10_000, [30])).toBe("0.00");
+    expect(incremento(10_000, [31])).toBe("0.00");
+  });
+
+  it("sin cuotas vencidas no hay nada que crecer", () => {
+    expect(incremento(10_000, [])).toBe("0.00");
+  });
+
+  it("crédito sin capital (o con capital negativo) no genera mora ni incremento", () => {
+    expect(incremento(0, [5, 10])).toBe("0.00");
+    expect(incremento(-1000, [5, 10])).toBe("0.00");
+  });
+
+  it("días negativos no restan: la cuota sigue contando como debajo del techo", () => {
+    expect(incremento(10_000, [-5])).toBe("3.73");
+  });
+
+  it("una cuota que vence hoy (0 días) todavía va a crecer mañana", () => {
+    expect(incremento(10_000, [0])).toBe("3.73");
+  });
+
+  it("usa la misma tasa y la misma base que el resto del módulo", () => {
+    const capital = 7_777;
+    const esperado = new Big(capital)
+      .times(TASA_MORA_MENSUAL)
+      .div(BASE_DIAS_MORA)
+      .times(2);
+    expect(incremento(capital, [1, 2])).toBe(esperado.toFixed(2));
+  });
+
+  it("no redondea por dentro: el Big crudo conserva los decimales", () => {
+    // 10,000 × 1.12% / 30 = 3.7333…; si se redondeara acá, 30 cuotas darían
+    // 111.90 en vez de 112.00.
+    const dias = Array.from({ length: 30 }, () => 1);
+    expect(incrementoDiarioMora({ capital: 10_000, diasAtrasadosPorCuota: dias }).toFixed(2)).toBe(
+      "112.00",
+    );
+  });
+
+  it("cuadra con la mora real: sumarle el incremento hoy da la mora de mañana", () => {
+    // Dos cuotas bajo el techo (10 y 20 días) + una topada (50).
+    const hoy = calcularMoraProporcional({ capital: 10_000, diasAtrasadosPorCuota: [50, 20, 10] });
+    const manana = calcularMoraProporcional({ capital: 10_000, diasAtrasadosPorCuota: [51, 21, 11] });
+    const inc = incrementoDiarioMora({ capital: 10_000, diasAtrasadosPorCuota: [50, 20, 10] });
+    expect(hoy.plus(inc).toFixed(2)).toBe(manana.toFixed(2));
+  });
+
+  it("cuadra también en el salto de 29→30: esa cuota aporta su último 1/30", () => {
+    const hoy = calcularMoraProporcional({ capital: 10_000, diasAtrasadosPorCuota: [29] });
+    const manana = calcularMoraProporcional({ capital: 10_000, diasAtrasadosPorCuota: [30] });
+    const inc = incrementoDiarioMora({ capital: 10_000, diasAtrasadosPorCuota: [29] });
+    expect(hoy.plus(inc).toFixed(2)).toBe(manana.toFixed(2));
   });
 });

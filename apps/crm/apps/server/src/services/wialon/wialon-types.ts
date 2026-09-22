@@ -77,9 +77,11 @@ export const searchUnitsInputSchema = z
 			.union([
 				z.literal(1),
 				z.literal(4097),
+				z.literal(4099),
 				z.literal(4105),
 				z.literal(8388609),
 				z.literal(8392705),
+				z.literal(8392707),
 				z.literal(8392713),
 			])
 			.default(8392705),
@@ -178,8 +180,10 @@ export const getUnitDetailInputSchema = z.object({
 		.union([
 			z.literal(1),
 			z.literal(1025),
+			z.literal(1027),
 			z.literal(1033),
 			z.literal(4097),
+			z.literal(4099),
 			z.literal(4105),
 		])
 		.default(1025),

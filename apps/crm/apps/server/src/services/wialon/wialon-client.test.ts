@@ -1171,12 +1171,22 @@ describe("WialonClient", () => {
 	});
 
 	test("getUnitsStatus carga y honra prp.monitoring_sensor_id evitando falsos positivos de sensores secundarios", async () => {
+		let capturedSearchFlags: number | undefined;
 		const mockFetch: WialonFetch = async (_, init) => {
 			const bodyStr = String(init?.body || "");
 			if (bodyStr.includes("svc=token%2Flogin")) {
 				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
 			}
 			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				const paramsStr = new URLSearchParams(bodyStr).get("params");
+				if (paramsStr) {
+					try {
+						const parsed = JSON.parse(paramsStr);
+						capturedSearchFlags = parsed.flags;
+					} catch {
+						// Ignora si no parsea JSON
+					}
+				}
 				return new Response(
 					JSON.stringify({
 						items: [
@@ -1215,8 +1225,46 @@ describe("WialonClient", () => {
 		const client = new WialonClient({ token: "tok-test" }, mockFetch);
 		const status = await client.getUnitsStatus([501]);
 
+		// Debe usar flag 4099 (base 1 | custom properties 2 | sensors 4096)
+		expect(capturedSearchFlags).toBe(4099);
 		expect(status.length).toBe(1);
 		// Debe honrar el sensor 8 ("Apagado") en lugar del sensor 2 ("Encendido")
 		expect(status[0].isIgnitionOn).toBe(false);
+	});
+
+	test("findIgnitionSensorId degrada limpiamente cuando monitoring_sensor_id es 0, vacío o inexistente en sens", () => {
+		const sens = {
+			"1": { id: 1, n: "Motor", t: "engine operation" },
+			"2": { id: 2, n: "Alarma", t: "custom" },
+		};
+
+		// "0" o 0 o "" deben ser ignorados y pasar a tipo "engine operation"
+		expect(findIgnitionSensorId(sens, { monitoring_sensor_id: "0" })).toBe("1");
+		expect(findIgnitionSensorId(sens, { monitoring_sensor_id: 0 })).toBe("1");
+		expect(findIgnitionSensorId(sens, { monitoring_sensor_id: "" })).toBe("1");
+
+		// Si apunta a un ID inexistente en sens (ej. "99"), debe degradar a engine operation
+		expect(findIgnitionSensorId(sens, { monitoring_sensor_id: "99" })).toBe(
+			"1",
+		);
+
+		// Si prp es undefined, degrada normalmente
+		expect(findIgnitionSensorId(sens, undefined)).toBe("1");
+	});
+
+	test("esquemas de flags aceptan todos los valores válidos de la whitelist incluyendo 4099 y variantes", () => {
+		const searchFlags = [
+			1, 4097, 4099, 4105, 8388609, 8392705, 8392707, 8392713,
+		];
+		for (const f of searchFlags) {
+			const res = searchUnitsInputSchema.safeParse({ flags: f });
+			expect(res.success).toBe(true);
+		}
+
+		const detailFlags = [1, 1025, 1027, 1033, 4097, 4099, 4105];
+		for (const f of detailFlags) {
+			const res = getUnitDetailInputSchema.safeParse({ unitId: 10, flags: f });
+			expect(res.success).toBe(true);
+		}
 	});
 });

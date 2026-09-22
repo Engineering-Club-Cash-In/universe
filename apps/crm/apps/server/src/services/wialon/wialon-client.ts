@@ -446,7 +446,7 @@ export class WialonClient {
 									sortType: "sys_name",
 								},
 								force: 1,
-								flags: 4105, // 1 (base) | 8 (custom props / prp) | 4096 (sensors)
+								flags: 4099, // 1 (base: 0x1) | 2 (custom properties / prp: 0x2) | 4096 (sensors: 0x1000)
 								from: 0,
 								to: 0xffffffff,
 							},

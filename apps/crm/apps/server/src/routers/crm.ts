@@ -152,6 +152,7 @@ import {
 	type OportunidadParaRevalidar,
 	obtenerEtapaDeAnalisis,
 	PORCENTAJE_ETAPA_ANALISIS,
+	parcheDeIdentidadInvalidada,
 	parcheDeRevalidacion,
 	RAZON_TRANSICION_REVALIDACION,
 	revalidarOportunidades,
@@ -3497,6 +3498,58 @@ export const crmRouter = {
 				currentOpportunity[0],
 			);
 
+			/**
+			 * 🔴 Cambiar el lead cuesta revalidar SIEMPRE, no sólo pasado el umbral.
+			 *
+			 * El candado bloquea el cambio de lead a partir del 30%, pero EN el 30%
+			 * lo deja pasar a propósito —la comparación es `> 30`— y hasta ahora
+			 * pasar no invalidaba nada: `leadId` se reemplazaba y `analysisStatus`,
+			 * `creditDetailApproved` e `identityRevalidatedAt` quedaban intactos. La
+			 * maniobra se partía en dos peticiones que, una por una, son legales:
+			 *
+			 * 1. Oportunidad en EXACTAMENTE 30% con `analysisStatus: "approved"`. Se
+			 *    cambia SÓLO el lead → pasa, porque 30 no canda.
+			 * 2. Otra petición mueve SÓLO la etapa al 40% → pasa, porque no se toca
+			 *    el lead.
+			 *
+			 * El lead nuevo heredaba el expediente aprobado del anterior —RENAP,
+			 * buró, documentos y análisis de capacidad de pago de otra persona— y de
+			 * ahí seguía a Formalización con `approveCreditDetail`. Es la tercera
+			 * variante del mismo bypass, después de la del historial y la del
+			 * request único que cambia lead y etapa a la vez.
+			 *
+			 * No se prohíbe el cambio en toda etapa: se le pone precio, igual que a
+			 * reabrir una perdida o al override del admin. Operaciones tiene que
+			 * poder corregir un lead mal asignado en etapas tempranas sin perder la
+			 * oportunidad y reabrirla, y ahí el parche no cuesta nada porque todavía
+			 * no hay nada aprobado que invalidar; sólo pesa cuando de verdad lo hay.
+			 *
+			 * 🔴 Se aplica INCONDICIONALMENTE cuando el lead cambia, y no bajo un
+			 * `if (analysisStatus === "approved" || creditDetailApproved)` de este
+			 * lado, por dos razones. Una, ese `if` miraría la foto leída antes del
+			 * UPDATE: una aprobación que entrara en el medio sobreviviría al cambio
+			 * de lead, que es la misma carrera que el resto del candado cierra
+			 * metiendo la condición en la sentencia. Y dos, `creditDetailApproved`
+			 * admite NULL en las filas viejas, así que un predicado `= false` las
+			 * dejaría justo afuera. Lo que decide qué se degrada es el `case` de
+			 * `parcheDeIdentidadInvalidada`, que lo evalúa la fila VIVA al escribir.
+			 *
+			 * Va en el MISMO `.set()` que escribe `leadId`: es UNA sentencia, así que
+			 * no existe una ventana en la que el cliente nuevo esté puesto y la
+			 * aprobación vieja siga en pie.
+			 *
+			 * ⚠️ SIN el retroceso de etapa de `parcheDeRevalidacion`: acá la
+			 * oportunidad está en 30% o menos —más arriba el candado ya bloqueó—, así
+			 * que mandarla a la etapa de análisis la haría AVANZAR, no retroceder, y
+			 * una de 10% terminaría en la cola del analista sin haber pasado por
+			 * ventas. El único caso que sí llega hasta acá por encima del 30% es la
+			 * oportunidad `lost` (las perdidas no candan, por decisión de producto),
+			 * y ésa paga el retroceso completo al reabrirse, más abajo.
+			 */
+			const invalidacionPorCambioDeLead = cambiaElLeadDeLaOportunidad
+				? parcheDeIdentidadInvalidada()
+				: {};
+
 			// La reapertura y su fila de transición van en UNA transacción: el
 			// timeline no puede quedar sin el retroceso que sí se escribió.
 			const updatedOpportunity = await auditedTransaction(async (tx) => {
@@ -3561,6 +3614,12 @@ export const crmRouter = {
 						...(diaPagoOriginalSistemaUpdate !== undefined && {
 							diaPagoOriginalSistema: diaPagoOriginalSistemaUpdate,
 						}),
+						// El precio de cambiar el lead; ver `invalidacionPorCambioDeLead`.
+						// ⚠️ La línea de abajo va DESPUÉS a propósito: si el mismo request
+						// además manda la oportunidad al 30%, ese valor es el que
+						// corresponde —`pending` o `resubmitted`, nunca `approved`— y pisa
+						// al `case` sin devolverle la aprobación a nadie.
+						...invalidacionPorCambioDeLead,
 						// Update analysisStatus if it changed during stage transition
 						...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
 							analysisStatus: newAnalysisStatus,
@@ -3622,6 +3681,27 @@ export const crmRouter = {
 
 			// Después del chequeo de conflicto: con cero filas no hubo escritura.
 			auditRecord({ entity: "opportunity", id: id, action: "update" });
+
+			// El cambio de lead deja su propia fila. Sin esto, quien encuentre el
+			// expediente de vuelta sin aprobación ve un retroceso sin causa y parece
+			// un error de alguien; y al revés, un cambio de identidad de un
+			// expediente avanzado es exactamente lo que se va a querer buscar
+			// después.
+			if (cambiaElLeadDeLaOportunidad) {
+				auditRecord({
+					entity: "opportunity",
+					id,
+					action: "cambio_de_lead_revalidacion",
+					data: {
+						leadAnterior: currentOpportunity[0].leadId,
+						leadNuevo: input.leadId ?? null,
+						detalle:
+							"se cambió el cliente de la oportunidad; la validación de identidad (RENAP/buró/documentos/análisis) que había era del cliente anterior",
+						resultado:
+							"analysisStatus vuelve a pending si estaba aprobado, detalle de crédito sin aprobar y marca de revalidación puesta (la etapa NO se mueve: está en el umbral o por debajo)",
+					},
+				});
+			}
 
 			// La reapertura deja su propia fila, tanto cuando revalidó como cuando
 			// las salvaguardas lo impidieron: en ese segundo caso el aviso es lo

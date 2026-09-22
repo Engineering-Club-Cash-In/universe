@@ -193,6 +193,51 @@ const sqlDeLaCondicion = (condicion: unknown) =>
 		.where(condicion as SQL)
 		.toSQL();
 
+/**
+ * El texto de un valor que viaja en el `.set()` de un UPDATE. Parte de la
+ * invalidación de identidad no es un literal sino una expresión que resuelve la
+ * fila VIVA al escribir, y desde acá lo único observable es el SQL que sale.
+ */
+const textoSqlDelValor = (valor: unknown) =>
+	renderizador
+		.select({ x: valor as SQL })
+		.from(opportunities)
+		.toSQL()
+		.sql.replace(/\s+/g, " ")
+		.toLowerCase();
+
+/**
+ * La fila como QUEDA después de una escritura.
+ *
+ * 🔴 Existe para que las pruebas de varios pasos encadenen el estado real en vez
+ * de sembrarlo a mano: si el paso 2 se alimentara de una fila escrita por el
+ * test, el test pasaría igual con el guard desconectado, que es justo lo que
+ * esta suite no acepta.
+ *
+ * El doble de la base no ejecuta SQL, así que el único valor no literal que este
+ * handler escribe —el `case` que degrada `approved`— se resuelve acá con la
+ * MISMA regla que la prueba de al lado comprueba que de verdad viaja a Postgres.
+ */
+function aplicarEscritura(fila: Fila, escritura: Escritura | undefined): Fila {
+	const valores: Fila = { ...(escritura?.valores ?? {}) };
+	const analisis = valores.analysisStatus;
+
+	if (analisis !== undefined && typeof analisis !== "string") {
+		const texto = textoSqlDelValor(analisis);
+		const degradaLoAprobado =
+			texto.includes("case when") &&
+			texto.includes("'approved'") &&
+			texto.includes("'pending'");
+
+		valores.analysisStatus =
+			degradaLoAprobado && fila.analysisStatus === "approved"
+				? "pending"
+				: fila.analysisStatus;
+	}
+
+	return { ...fila, ...valores };
+}
+
 beforeEach(async () => {
 	await instalarDbFalso();
 	filasPorTabla.clear();
@@ -481,6 +526,196 @@ describe("updateOpportunity: reasignar el lead no cambia la identidad del expedi
 		expect(escriturasSobreOportunidades()[0]?.valores).toMatchObject({
 			leadId: LEAD_MOROSO,
 		});
+	});
+});
+
+/**
+ * 🔴 La tercera variante del bypass: partir la maniobra en DOS peticiones que,
+ * una por una, son legales.
+ *
+ * El candado bloquea el cambio de lead a partir del 30%, pero EN el 30% lo deja
+ * pasar a propósito (la comparación es `> 30`), y pasar no invalidaba nada. De
+ * ahí salía:
+ *
+ *   1. Oportunidad en EXACTAMENTE 30% con `analysisStatus: "approved"`. Se
+ *      cambia SÓLO el lead → pasa, porque 30 no canda.
+ *   2. Otra petición mueve SÓLO la etapa al 40% → pasa, porque no toca el lead.
+ *
+ * Y el lead nuevo se quedaba con el expediente aprobado del anterior —RENAP,
+ * buró, documentos, análisis de capacidad de pago— listo para que
+ * `approveCreditDetail` lo empujara a Formalización.
+ *
+ * El arreglo no prohíbe el cambio: le pone precio. Cambiar el lead invalida la
+ * validación previa en la MISMA sentencia que escribe el lead.
+ */
+describe("updateOpportunity: cambiar el lead cuesta revalidar, también EN el umbral", () => {
+	const OPORTUNIDAD = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+	const LEAD_A = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+	const LEAD_MOROSO = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+	const ETAPA_ANALISIS_30 = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+	const ETAPA_40 = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+	const ETAPA_FORMALIZACION = "12121212-1212-4121-8121-121212121212";
+	const ETAPA_PROSPECTO_10 = "13131313-1313-4131-8131-131313131313";
+
+	/**
+	 * EXACTAMENTE en el umbral. El análisis ya está aprobado y el detalle de
+	 * crédito todavía no: es el estado justo anterior a `approveCreditDetail`,
+	 * que es el procedure que empuja la solicitud a Formalización (50%).
+	 */
+	const enElUmbralAprobada = {
+		id: OPORTUNIDAD,
+		title: "Crédito aprobado en análisis",
+		leadId: LEAD_A,
+		stageId: ETAPA_ANALISIS_30,
+		status: "open",
+		assignedTo: "vendedor",
+		analysisStatus: "approved",
+		creditDetailApproved: false,
+		identityRevalidatedAt: null,
+		vehicleId: "vehiculo-1",
+		companyId: null,
+		vendorId: null,
+		creditType: "autocompra",
+		diaPagoMensual: 15,
+		diaPagoOriginalSistema: null,
+		insuranceProvider: "universales",
+		updatedAt: new Date("2026-09-20T12:00:00.000Z"),
+		// Vista del candado: 30% hoy y 30% de máximo histórico. No canda.
+		stageName: "Recepción de documentación y traslado a análisis",
+		closurePercentage: 30,
+		maxHistoricoClosurePercentage: 30,
+	};
+
+	test("el lead nuevo ya no hereda la aprobación del anterior", async () => {
+		// ── Paso 1: se cambia SÓLO el lead, y SÍ pasa. El arreglo no lo prohíbe.
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, [enElUmbralAprobada]);
+		filasPorTabla.set(leads, [{ id: LEAD_MOROSO, source: "web" }]);
+		filasPorTabla.set(salesStages, [
+			{
+				id: ETAPA_ANALISIS_30,
+				name: "Recepción de documentación y traslado a análisis",
+				closurePercentage: 30,
+				order: 4,
+			},
+		]);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_MOROSO },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const [cambioDeLead] = escriturasSobreOportunidades();
+		expect(cambioDeLead?.valores.leadId).toBe(LEAD_MOROSO);
+
+		// ── Paso 2: la segunda petición, que mueve SÓLO la etapa al 40%. También
+		// pasa —no toca el lead—, y tiene que seguir pasando.
+		const trasElCambioDeLead = aplicarEscritura(
+			enElUmbralAprobada,
+			cambioDeLead,
+		);
+		expect(trasElCambioDeLead.leadId).toBe(LEAD_MOROSO);
+
+		escrituras.length = 0;
+		filasPorTabla.set(opportunities, [trasElCambioDeLead]);
+		filasPorTabla.set(salesStages, [
+			{
+				id: ETAPA_40,
+				name: "Cierre de propuesta",
+				closurePercentage: 40,
+				order: 5,
+			},
+		]);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, stageId: ETAPA_40 },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const trasSubirDeEtapa = aplicarEscritura(
+			trasElCambioDeLead,
+			escriturasSobreOportunidades()[0],
+		);
+
+		// ── El EFECTO, que es lo único que no se puede satisfacer dejando el guard
+		// desconectado: con la maniobra completa hecha, el lead nuevo no llega a
+		// Formalización con el expediente del anterior. Sin el arreglo,
+		// `analysisStatus` seguía en "approved" acá y `approveCreditDetail`
+		// empujaba la solicitud al 50%.
+		escrituras.length = 0;
+		filasPorTabla.set(user, [{ id: "supervisor", role: "sales_supervisor" }]);
+		filasPorTabla.set(opportunities, [trasSubirDeEtapa]);
+		filasPorTabla.set(salesStages, [{ id: ETAPA_FORMALIZACION, order: 6 }]);
+
+		await expect(
+			invocar(
+				crmRouter.approveCreditDetail,
+				{ opportunityId: OPORTUNIDAD },
+				contextoDe("supervisor", "sales_supervisor"),
+			),
+		).rejects.toThrow(/el análisis de esta oportunidad no está aprobado/);
+
+		expect(escriturasSobreOportunidades()).toEqual([]);
+
+		// ── El mecanismo, ya sabiendo que el efecto es el correcto: el precio viaja
+		// en la MISMA sentencia que escribe el lead, así que no hay una ventana en
+		// la que el cliente nuevo esté puesto y la aprobación vieja siga en pie.
+		expect(cambioDeLead?.valores.creditDetailApproved).toBe(false);
+		expect(cambioDeLead?.valores.identityRevalidatedAt).toBeDefined();
+
+		// Y la etapa NO se toca: está en el umbral, así que mandarla a análisis la
+		// haría avanzar, no retroceder.
+		expect(cambioDeLead?.valores.stageId).toBeUndefined();
+	});
+
+	test("corregir el lead en una etapa temprana no manda la oportunidad a análisis", async () => {
+		// Red de seguridad. Operaciones tiene que poder arreglar un lead mal
+		// asignado en etapas tempranas sin perder la oportunidad y reabrirla, y ahí
+		// el parche no cuesta nada porque no hay nada aprobado que invalidar.
+		//
+		// Las dos afirmaciones de abajo son las que descartan las dos formas
+		// equivocadas de escribir este arreglo: reusar el retroceso de etapa de
+		// `parcheDeRevalidacion` tal cual (subiría una oportunidad de 10% al 30%) y
+		// escribir `analysisStatus: "pending"` literal (la metería en la cola del
+		// analista sin haber pasado por ventas, y en una rechazada borraría el
+		// rastro del rechazo).
+		const temprana = {
+			...enElUmbralAprobada,
+			stageId: ETAPA_PROSPECTO_10,
+			analysisStatus: "not_applicable",
+			// NULL como en las filas viejas, no `false`.
+			creditDetailApproved: null,
+			stageName: "Prospecto",
+			closurePercentage: 10,
+			maxHistoricoClosurePercentage: 10,
+		};
+
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, [temprana]);
+		filasPorTabla.set(leads, [{ id: LEAD_MOROSO, source: "web" }]);
+		filasPorTabla.set(salesStages, [
+			{
+				id: ETAPA_PROSPECTO_10,
+				name: "Prospecto",
+				closurePercentage: 10,
+				order: 2,
+			},
+		]);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_MOROSO },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const [escritura] = escriturasSobreOportunidades();
+		expect(escritura?.valores.leadId).toBe(LEAD_MOROSO);
+
+		const resultante = aplicarEscritura(temprana, escritura);
+		expect(resultante.stageId).toBe(ETAPA_PROSPECTO_10);
+		expect(resultante.analysisStatus).toBe("not_applicable");
 	});
 });
 

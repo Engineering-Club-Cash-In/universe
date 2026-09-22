@@ -194,6 +194,17 @@ describe("qué se le toca a la que se resetea", () => {
 		});
 	});
 
+	test("🔴 sin fecha explícita, la marca la pone el servidor al ejecutar el UPDATE", () => {
+		// Tomarla de este lado antes de entrar a la transacción abría una
+		// ventana: un documento de identidad subido mientras el reset esperaba
+		// el candado quedaba con fecha POSTERIOR a la marca y pasaba por
+		// evidencia de la identidad nueva siendo de la vieja.
+		const marca = parcheDeRevalidacion("etapa-30").identityRevalidatedAt;
+
+		expect(marca).not.toBeInstanceOf(Date);
+		expect(JSON.stringify(marca)).toContain("clock_timestamp()");
+	});
+
 	test("la etapa de análisis es la del 30%, el mismo umbral del candado", () => {
 		expect(PORCENTAJE_ETAPA_ANALISIS).toBe(30);
 	});

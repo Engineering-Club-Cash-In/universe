@@ -150,7 +150,14 @@ export const MOTIVO_AVISO: Record<"won" | "formalizacion_final", string> = {
  */
 export function parcheDeRevalidacion(
 	etapaDeAnalisisId: string,
-	revalidadaEn: Date = new Date(),
+	// 🔴 Por omisión la estampa el SERVIDOR al ejecutar el UPDATE, no nosotros
+	// antes de entrar a la transacción. Con una fecha tomada de este lado, un
+	// documento de identidad subido entre ese instante y el UPDATE —sobre todo
+	// si el reset quedó esperando el candado de otra fila— tenía `uploadedAt`
+	// POSTERIOR a la marca y pasaba por evidencia de la identidad nueva siendo
+	// de la vieja. `clock_timestamp()` y no `now()`: `now()` devuelve el inicio
+	// de la transacción, que es justo el borde que hay que dejar afuera.
+	revalidadaEn: Date | SQL = sql`clock_timestamp()`,
 ) {
 	return {
 		stageId: etapaDeAnalisisId,

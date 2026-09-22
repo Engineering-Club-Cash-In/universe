@@ -168,9 +168,31 @@ const VENTANA_SIMULACRO_DPI_MS = 60 * 60 * 1000;
  * cuenta) sin convertir el log en una lista de DPI de terceros: el log es un
  * lugar de menos confianza que la base, y el DPI ajeno es justamente el dato
  * que la persona no debería estar tocando.
+ *
+ * 🔴 Se filtran los DÍGITOS antes de cortar, no se corta a secas. Este valor
+ * sale del cuerpo y en este punto todavía no pasó por ninguna validación de
+ * formato —la corre el CRM, que es quien tiene el expediente—, así que
+ * `slice(-4)` podía dejar un salto de línea, un retorno de carro o un ESC
+ * dentro de la línea del log: el cuerpo partía el rastro en dos, inventando
+ * una entrada que nadie escribió, o lo ensuciaba con secuencias ANSI. Y el
+ * rastro es justamente lo que queda para reconstruir un barrido de
+ * enumeración, así que envenenarlo vacía de sentido al log.
+ *
+ * `trim()` no alcanzaba: saca espacio en blanco de las PUNTAS, no lo que queda
+ * adentro ni los controles que no son espacio en blanco (ESC, NEL).
+ *
+ * Lista blanca y no escape: un DPI es 13 dígitos, así que quedarse sólo con
+ * `[0-9]` cierra de una vez todo lo que no sea un dígito —controles, marcas de
+ * dirección, separadores de línea Unicode— sin tener que enumerarlos y sin que
+ * el próximo carácter raro abra el agujero de nuevo. Lo que no llega a 5
+ * dígitos sale `****`: no es el DPI de nadie, y de todas formas el CRM lo va a
+ * rechazar por formato.
  */
-const dpiEnmascarado = (dpi: string): string =>
-  dpi.length <= 4 ? "****" : `****${dpi.slice(-4)}`;
+const dpiEnmascarado = (dpi: string): string => {
+  const soloDigitos = dpi.replace(/[^0-9]/g, "");
+
+  return soloDigitos.length <= 4 ? "****" : `****${soloDigitos.slice(-4)}`;
+};
 
 /**
  * POST /api/crm/profile/update

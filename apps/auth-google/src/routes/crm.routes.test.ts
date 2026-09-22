@@ -506,6 +506,53 @@ describe("/profile/update: simulacro vs escritura real", () => {
     }
   });
 
+  // 🔴 El DPI del cuerpo llega al log ANTES de que el CRM valide su formato, y
+  // `trim()` solo saca espacio en blanco de las PUNTAS: un ESC, un NEL o un
+  // salto de línea metido entre los últimos caracteres sobrevivía al recorte y
+  // viajaba entero al `console.warn`. Con eso, el cuerpo parte la línea del
+  // rastro en dos —inventando una entrada que nadie escribió— o la ensucia con
+  // secuencias ANSI; y el rastro es justo lo que queda para reconstruir un
+  // barrido de enumeración.
+  const DPIS_ENVENENADOS = [
+    // Parte la línea: el sufijo de 4 se lleva el salto de línea.
+    { nombre: "salto de línea", dpi: "1234567890123ABC\nX99" },
+    { nombre: "retorno de carro", dpi: "1234567890123ABC\r\rX9" },
+    // Ensucia el flujo: ESC + secuencia ANSI dentro de los últimos 4.
+    { nombre: "escape ANSI", dpi: "1234567890123\u001b[2J" },
+    // No es espacio en blanco para `trim()`, pero muchos lectores de logs lo
+    // tratan como fin de línea.
+    { nombre: "NEL", dpi: "1234567890123AB\u0085X9" },
+  ];
+
+  it.each(DPIS_ENVENENADOS)(
+    "el rastro no se parte ni se ensucia con un DPI del cuerpo que trae $nombre",
+    async ({ dpi }) => {
+      sessionActual = {
+        user: { id: "user-rastro-envenenado", email: ATACANTE, dpi: DPI_ATACANTE },
+      };
+      const aviso = spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        const res = await postJson("/profile/update", { dpi, soloValidar: true });
+        expect(res.status).toBe(200);
+
+        expect(aviso).toHaveBeenCalled();
+        const anotado = aviso.mock.calls.flat().join(" ");
+
+        // El efecto, no la llamada: lo que SALIÓ al log es una sola línea y no
+        // trae ningún carácter de control.
+        expect(anotado.split(/\r|\n|\u0085|\u2028|\u2029/)).toHaveLength(1);
+        expect(anotado).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+
+        // Y sigue siendo un rastro útil: el prefijo enmascarado se conserva.
+        expect(anotado).toContain("dpi=****");
+        expect(anotado).toContain("user-rastro-envenenado");
+      } finally {
+        aviso.mockRestore();
+      }
+    },
+  );
+
   it("no anota nada cuando el simulacro valida el DPI de la propia sesión", async () => {
     sessionActual = {
       user: { id: "user-rastro-2", email: ATACANTE, dpi: DPI_ATACANTE },

@@ -47,13 +47,13 @@ Su propósito principal dentro del flujo de [Recuperación de vehículo (B4)](./
 
 ## Decisiones tomadas
 
-### D-01 · Token permanente como método principal con fallback a credenciales
+### D-01 · Autenticación obligatoria mediante token permanente (Personal Access Token)
 * **Contexto:** Wialon deprecó el endpoint clásico `core/login` (usuario y contraseña en texto plano en cada inicio) a favor de tokens de acceso (`token/login`).
-* **Decisión:** La autenticación se realiza mediante **`WIALON_TOKEN`**, generado desde el portal web con `duration=0` (permanente, equivalente a un Personal Access Token de GitHub). El cliente soporta además `WIALON_USER` y `WIALON_PASSWORD` como mecanismo de contingencia si no se define el token.
+* **Decisión:** La autenticación se realiza de forma exclusiva y obligatoria mediante **`WIALON_TOKEN`**, generado desde el portal web con `duration=0` (permanente, equivalente a un Personal Access Token de GitHub). No se emplean credenciales de usuario/contraseña en texto plano por motivos de seguridad y deprecación de la API de Wialon.
 
-### D-02 · Caché de sesión en memoria y recuperación silenciosa (Self-Healing)
-* **Contexto:** Cada consulta a Wialon requiere un `sid` (Session ID). Abrir una sesión nueva en cada petición HTTP degrada el rendimiento y satura los límites de autenticación del proveedor. Por otro lado, si se abre una sesión paralela desde otra herramienta o Wialon rota la sesión, las peticiones fallan con `error: 1` (*Invalid session*) o `error: 7` (*Access denied*).
-* **Decisión:** El `WialonClient` cachea el `sid` en memoria por 2 horas. Si cualquier petición recibe código `1` o `7`, el cliente **invalida la caché, se re-autentica en silencio y repite la petición original de forma transparente**. La capa superior (UI o controlador) nunca experimenta un fallo por sesión desincronizada.
+### D-02 · Caché de sesión en memoria y auto-renovación silenciosa (Self-Healing)
+* **Contexto:** Cada consulta a Wialon requiere un `sid` (Session ID). Abrir una sesión nueva en cada petición HTTP degrada el rendimiento y satura los límites de autenticación del proveedor. Por otro lado, si se abre una sesión paralela desde otra herramienta o Wialon rota la sesión, las peticiones fallan con `error: 1` (*Invalid session*).
+* **Decisión:** El `WialonClient` cachea el `sid` en memoria por 2 horas. Si cualquier petición recibe código `1`, el cliente **invalida la caché, se re-autentica en silencio y repite la petición original de forma transparente con un reintento único**. Los errores de permisos (código `7`) o parámetros inválidos no se reintentan y se propagan inmediatamente.
 
 ### D-03 · Router ORPC desacoplado para evitar el límite de TypeScript (TS7056)
 * **Contexto:** En `apps/server`, routers gigantescos como `cobrosAppRouter` han rozado el límite del compilador de TypeScript donde TS7056 trunca silenciosamente los tipos inferidos exportados a `apps/web`.

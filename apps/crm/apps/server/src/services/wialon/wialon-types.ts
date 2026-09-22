@@ -77,8 +77,10 @@ export const searchUnitsInputSchema = z
 			.union([
 				z.literal(1),
 				z.literal(4097),
+				z.literal(4105),
 				z.literal(8388609),
 				z.literal(8392705),
+				z.literal(8392713),
 			])
 			.default(8392705),
 	})
@@ -96,6 +98,7 @@ export interface WialonUnitItem {
 	mu?: number;
 	uacl?: number;
 	pflds?: Record<string, unknown>;
+	prp?: Record<string, unknown>;
 	pos?: {
 		t: number;
 		y: number;
@@ -172,7 +175,13 @@ export interface UnitStatusSummary {
 export const getUnitDetailInputSchema = z.object({
 	unitId: z.number().int().positive(),
 	flags: z
-		.union([z.literal(1), z.literal(1025), z.literal(4097)])
+		.union([
+			z.literal(1),
+			z.literal(1025),
+			z.literal(1033),
+			z.literal(4097),
+			z.literal(4105),
+		])
 		.default(1025),
 });
 export type GetUnitDetailInput = z.infer<typeof getUnitDetailInputSchema>;

@@ -32,17 +32,38 @@ const IGNITION_OFF_REGEX =
 
 export function findIgnitionSensorId(
 	sens?: Record<string, WialonSensorMeta>,
+	prp?: Record<string, unknown>,
 ): string | null {
+	// 1. Prioridad máxima: Sensor configurado explícitamente en las propiedades de la unidad (prp.monitoring_sensor_id)
+	const monitoringSensorId = prp?.monitoring_sensor_id;
+	if (
+		(typeof monitoringSensorId === "string" ||
+			typeof monitoringSensorId === "number") &&
+		monitoringSensorId !== "" &&
+		monitoringSensorId !== 0 &&
+		monitoringSensorId !== "0"
+	) {
+		const targetId = String(monitoringSensorId);
+		// Si la lista de sensores está presente, validar que el ID exista como clave o propiedad id
+		if (
+			!sens ||
+			sens[targetId] ||
+			Object.values(sens).some((s) => String(s?.id) === targetId)
+		) {
+			return targetId;
+		}
+	}
+
 	if (!sens || typeof sens !== "object") return null;
 
-	// 1. Tipo estándar de Wialon para ignición / operación de motor
+	// 2. Tipo estándar de Wialon para ignición / operación de motor
 	for (const [id, s] of Object.entries(sens)) {
 		if (s?.t?.toLowerCase() === "engine operation") {
 			return String(s.id ?? id);
 		}
 	}
 
-	// 2. Nombre o medición con "ignición" o "encendido"
+	// 3. Nombre o medición con "ignición" o "encendido"
 	for (const [id, s] of Object.entries(sens)) {
 		const name = s?.n?.toLowerCase() || "";
 		const measurement = s?.m?.toLowerCase() || "";
@@ -380,8 +401,8 @@ export class WialonClient {
 
 			// Pre-cargar caché de sensores de ignición para unidades devueltas
 			for (const item of data.items) {
-				if (item.sens) {
-					const sensorId = findIgnitionSensorId(item.sens);
+				if (item.sens || item.prp) {
+					const sensorId = findIgnitionSensorId(item.sens, item.prp);
 					this.setSensorCache(
 						item.id,
 						sensorId,
@@ -425,7 +446,7 @@ export class WialonClient {
 									sortType: "sys_name",
 								},
 								force: 1,
-								flags: 4097, // 1 (base) | 4096 (sensors)
+								flags: 4105, // 1 (base) | 8 (custom props / prp) | 4096 (sensors)
 								from: 0,
 								to: 0xffffffff,
 							},
@@ -434,6 +455,7 @@ export class WialonClient {
 							items?: Array<{
 								id: number;
 								sens?: Record<string, WialonSensorMeta>;
+								prp?: Record<string, unknown>;
 							}>;
 						};
 
@@ -441,7 +463,7 @@ export class WialonClient {
 						if (Array.isArray(metaRes?.items)) {
 							for (const item of metaRes.items) {
 								foundIds.add(item.id);
-								const sensorId = findIgnitionSensorId(item.sens);
+								const sensorId = findIgnitionSensorId(item.sens, item.prp);
 								this.setSensorCache(
 									item.id,
 									sensorId,
@@ -621,8 +643,8 @@ export class WialonClient {
 				);
 			}
 
-			if (data.item.sens) {
-				const sensorId = findIgnitionSensorId(data.item.sens);
+			if (data.item.sens || data.item.prp) {
+				const sensorId = findIgnitionSensorId(data.item.sens, data.item.prp);
 				this.setSensorCache(
 					data.item.id,
 					sensorId,

@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { WialonClient } from "./wialon-client";
+import { findIgnitionSensorId, WialonClient } from "./wialon-client";
 import {
 	createLocatorLinkInputSchema,
 	getUnitDetailInputSchema,
@@ -1150,5 +1150,73 @@ describe("WialonClient", () => {
 
 		const client = new WialonClient({ token: "tok-invalido" }, mockFetch);
 		await expect(client.checkHealth()).rejects.toThrow(WialonClientError);
+	});
+
+	test("findIgnitionSensorId prioriza prp.monitoring_sensor_id cuando el sensor tiene nombre/tipo genérico", () => {
+		const genericSensors = {
+			"5": { id: 5, n: "Digital 1", t: "custom" },
+			"12": { id: 12, n: "Auxiliar", t: "generic" },
+		};
+
+		// Sin prp.monitoring_sensor_id, no se detecta ignición por nombre genérico
+		expect(findIgnitionSensorId(genericSensors)).toBeNull();
+
+		// Con prp.monitoring_sensor_id configurado en Wialon, debe retornar el sensor configurado
+		expect(
+			findIgnitionSensorId(genericSensors, { monitoring_sensor_id: 12 }),
+		).toBe("12");
+		expect(
+			findIgnitionSensorId(genericSensors, { monitoring_sensor_id: "5" }),
+		).toBe("5");
+	});
+
+	test("getUnitsStatus carga y honra prp.monitoring_sensor_id evitando falsos positivos de sensores secundarios", async () => {
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				return new Response(
+					JSON.stringify({
+						items: [
+							{
+								id: 501,
+								prp: { monitoring_sensor_id: "8" },
+								sens: {
+									"2": { id: 2, n: "Puerta trasera", t: "custom" },
+									"8": { id: 8, n: "Input 1", t: "custom" },
+								},
+							},
+						],
+					}),
+					{ status: 200 },
+				);
+			}
+			if (bodyStr.includes("svc=unit%2Fcalc_last")) {
+				return new Response(
+					JSON.stringify([
+						{
+							i: 501,
+							sensors: {
+								// El sensor 2 de puerta reporta "Encendido"
+								"2": { value: 1, format: { value: "Encendido" } },
+								// El sensor 8 configurado como monitoring_sensor_id reporta "Apagado"
+								"8": { value: 0, format: { value: "Apagado" } },
+							},
+						},
+					]),
+					{ status: 200 },
+				);
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+		const status = await client.getUnitsStatus([501]);
+
+		expect(status.length).toBe(1);
+		// Debe honrar el sensor 8 ("Apagado") en lugar del sensor 2 ("Encendido")
+		expect(status[0].isIgnitionOn).toBe(false);
 	});
 });

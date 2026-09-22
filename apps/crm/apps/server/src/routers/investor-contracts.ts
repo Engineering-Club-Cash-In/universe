@@ -14,6 +14,7 @@ import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
 import { espejarContratoEnCartera } from "../lib/espejo-contratos-inversionista";
 import { firmantesDeContratoDeInversion } from "../lib/firmantes-inversionista";
 import { juridicoProcedure, viewInvestorContractsProcedure } from "../lib/orpc";
+import { getFileUrlWithBucketInKey } from "../lib/storage";
 import {
 	borrarDocumentoDeWeeTrust,
 	type DocumentResult,
@@ -431,16 +432,29 @@ export const investorContractsRouter = {
 
 			const respuesta = await generateContractsBatch({ contracts: aGenerar });
 
+			// El mismo formato que devuelve la generación de ventas: la pantalla de
+			// resultados es la misma para las dos áreas.
+			const results: Array<{
+				contractType: string;
+				contractName: string;
+				success: boolean;
+				contractId?: string;
+				documentLink?: string;
+				signingLinks?: string[];
+				signatories?: unknown[];
+				error?: string;
+			}> = [];
 			const emitidos: Array<{ id: string; contractType: string }> = [];
-			const fallados: Array<{ contractType: string; error: string }> = [];
 
 			for (let i = 0; i < input.contracts.length; i++) {
 				const pedido = input.contracts[i];
 				const resultado = respuesta.results?.[i];
 
 				if (!resultado) {
-					fallados.push({
+					results.push({
 						contractType: pedido.contractType,
+						contractName: pedido.contractName,
+						success: false,
 						error: "El generador no devolvió resultado para este contrato",
 					});
 					continue;
@@ -448,7 +462,12 @@ export const investorContractsRouter = {
 
 				const falla = motivoDeFalla(resultado);
 				if (falla) {
-					fallados.push({ contractType: pedido.contractType, error: falla });
+					results.push({
+						contractType: pedido.contractType,
+						contractName: pedido.contractName,
+						success: false,
+						error: falla,
+					});
 					continue;
 				}
 
@@ -462,6 +481,19 @@ export const investorContractsRouter = {
 						userId: context.userId,
 					});
 					emitidos.push({ id, contractType: pedido.contractType });
+					results.push({
+						contractType: pedido.contractType,
+						contractName: pedido.contractName,
+						success: true,
+						contractId: id,
+						// URL firmada para poder abrir el PDF desde la pantalla. Vence en
+						// una hora; lo que queda guardado es la key.
+						documentLink: resultado.r2Key
+							? await getFileUrlWithBucketInKey(resultado.r2Key)
+							: resultado.linkDocument,
+						signingLinks: resultado.signing_links,
+						signatories: resultado.signatories,
+					});
 
 					// Copiarlo a cartera es lo que lo hace visible en la ficha del
 					// inversionista. Va best-effort y sin bloquear: el contrato ya
@@ -479,8 +511,10 @@ export const investorContractsRouter = {
 							),
 						);
 					}
-					fallados.push({
+					results.push({
 						contractType: pedido.contractType,
+						contractName: pedido.contractName,
+						success: false,
 						error:
 							error instanceof Error
 								? error.message
@@ -508,10 +542,14 @@ export const investorContractsRouter = {
 					);
 			}
 
+			const successCount = results.filter((r) => r.success).length;
+
 			return {
-				success: fallados.length === 0,
-				emitidos,
-				fallados,
+				success: successCount === results.length,
+				totalRequested: input.contracts.length,
+				successCount,
+				failCount: results.length - successCount,
+				results,
 			};
 		}),
 

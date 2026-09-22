@@ -8,6 +8,7 @@ import {
 	FilePlus2,
 	FileSignature,
 	FileText,
+	Landmark,
 	Loader2,
 	MoreHorizontal,
 	Scale,
@@ -74,6 +75,15 @@ function RouteComponent() {
 		id: string;
 		title: string;
 	} | null>(null);
+
+	// Las baterías de contratos de inversionistas que siguen abiertas. Van en su
+	// propia pestaña: son otro flujo, con otra gente y sin oportunidad de venta
+	// detrás.
+	const bateriasQuery = useQuery({
+		...orpc.listInvestorContractBatches.queryOptions({ input: {} }),
+		enabled: canViewLegal,
+	});
+	const bateriasAbiertas = bateriasQuery.data?.length ?? 0;
 
 	// Mutación para aprobar oportunidad (mover a 85%)
 	const approveMutation = useMutation({
@@ -340,19 +350,115 @@ function RouteComponent() {
 
 			{/* Tabs for different views */}
 			<Tabs defaultValue="opportunities" className="w-full">
-				<TabsList className="grid w-full grid-cols-2">
+				<TabsList className="grid w-full grid-cols-3">
 					<TabsTrigger
 						value="opportunities"
 						className="flex items-center gap-2"
 					>
 						<Target className="h-4 w-4" />
-						Oportunidades Listas
+						Ventas
+					</TabsTrigger>
+					<TabsTrigger value="inversiones" className="flex items-center gap-2">
+						<Landmark className="h-4 w-4" />
+						Inversiones
+						{bateriasAbiertas > 0 && (
+							<Badge variant="secondary">{bateriasAbiertas}</Badge>
+						)}
 					</TabsTrigger>
 					<TabsTrigger value="contracts" className="flex items-center gap-2">
 						<FileSignature className="h-4 w-4" />
 						Personas con Contratos
 					</TabsTrigger>
 				</TabsList>
+
+				{/* Inversiones: las baterías que abre cada compra de cartera aceptada */}
+				<TabsContent value="inversiones">
+					<Card>
+						<CardHeader>
+							<CardTitle>Contratos de inversionistas pendientes</CardTitle>
+							<CardDescription>
+								Cada compra de cartera aceptada abre una batería. Jurídico elige
+								qué contratos hacer y los emite; los enlaces de firma quedan en
+								la ficha del inversionista.
+							</CardDescription>
+						</CardHeader>
+						<CardContent>
+							{bateriasQuery.isLoading ? (
+								<div className="flex items-center justify-center py-12">
+									<Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+								</div>
+							) : (bateriasQuery.data?.length ?? 0) === 0 ? (
+								<div className="flex flex-col items-center justify-center py-12 text-center">
+									<Landmark className="mb-3 h-12 w-12 text-gray-400" />
+									<h3 className="mb-1 font-semibold text-gray-900 text-lg">
+										No hay contratos de inversión pendientes
+									</h3>
+									<p className="text-gray-500 text-sm">
+										Aparecen acá en cuanto se acepta una compra de cartera
+									</p>
+								</div>
+							) : (
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>Inversionista</TableHead>
+											<TableHead>Compra</TableHead>
+											<TableHead>Créditos</TableHead>
+											<TableHead>Aceptada</TableHead>
+											<TableHead>Estado</TableHead>
+											<TableHead className="text-right">Acción</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{bateriasQuery.data?.map((bateria) => (
+											<TableRow key={bateria.id}>
+												<TableCell>
+													<div className="font-medium">
+														{bateria.investorName}
+													</div>
+													<div className="text-muted-foreground text-xs">
+														{bateria.investorEmail ?? "Sin correo registrado"}
+													</div>
+												</TableCell>
+												<TableCell>
+													{new Intl.NumberFormat("es-GT", {
+														style: "currency",
+														currency: "GTQ",
+													}).format(Number(bateria.montoTotal))}
+												</TableCell>
+												<TableCell>{bateria.creditos.length}</TableCell>
+												<TableCell>
+													{format(new Date(bateria.acceptedAt), "d MMM yyyy", {
+														locale: es,
+													})}
+												</TableCell>
+												<TableCell>
+													<Badge
+														variant={
+															bateria.status === "pendiente"
+																? "default"
+																: "secondary"
+														}
+													>
+														{bateria.status.replace("_", " ")}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">
+													<Link
+														to="/juridico/inversionista/$batchId"
+														params={{ batchId: bateria.id }}
+													>
+														<Button size="sm">Trabajar</Button>
+													</Link>
+												</TableCell>
+											</TableRow>
+										))}
+									</TableBody>
+								</Table>
+							)}
+						</CardContent>
+					</Card>
+				</TabsContent>
 
 				{/* Oportunidades Listas Tab */}
 				<TabsContent value="opportunities">

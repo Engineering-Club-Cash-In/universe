@@ -12,6 +12,7 @@ import {
 	UserX,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import { toast } from "sonner";
 import {
 	AlertDialog,
@@ -30,7 +31,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import { type ContractResult, ContractResults } from "./ContractResults";
 
 // Types from API
@@ -216,7 +216,13 @@ interface GenerationResultWithData extends GenerationResult {
 interface DynamicContractWizardProps {
 	documentTypes: DocumentType[];
 	crmData: CRMData;
-	opportunityId: string;
+	/**
+	 * La oportunidad de venta, cuando los contratos son de ventas.
+	 *
+	 * En inversiones no hay oportunidad: los contratos son del inversionista y
+	 * `onGenerate` ya los guarda, así que no hay segundo paso que enlazar.
+	 */
+	opportunityId?: string;
 	leadId?: string;
 	onGetDocumentsByDpi: (
 		dpi: string,
@@ -243,7 +249,13 @@ interface DynamicContractWizardProps {
 			};
 		}>;
 	}) => Promise<GenerationResultWithData>;
-	onLinkContracts: (data: {
+	/**
+	 * Guarda en la oportunidad los contratos recién generados.
+	 *
+	 * Sólo en ventas, donde generar y guardar son dos pasos: jurídico revisa los
+	 * PDF antes de instalarlos. Sin esto, el wizard termina al generar.
+	 */
+	onLinkContracts?: (data: {
 		opportunityId: string;
 		leadId: string;
 		contracts: Array<{
@@ -1386,7 +1398,6 @@ export function DynamicContractWizard({
 				}
 			});
 
-			
 			setFieldValues((prev) => {
 				const editadosAMano: Record<string, string> = {};
 				for (const key of touchedFieldsRef.current) {
@@ -1613,7 +1624,7 @@ export function DynamicContractWizard({
 	);
 
 	// Count filled vs required fields
-	// Campos tecnicos que quedaron con guion: se avisan para que juridico los corrija 
+	// Campos tecnicos que quedaron con guion: se avisan para que juridico los corrija
 	// Aviso corto bajo un campo cuando el valor autollenado necesita una
 	// aclaración: dato que el CRM no tiene, o vendedor sin asignar.
 	const avisoDelCampo = (field: Field): string | null => {
@@ -1730,7 +1741,9 @@ export function DynamicContractWizard({
 				);
 				if (hayElectronicos) {
 					const sinCorreo = [
-						...(clientEmail ? [] : [crmData.cliente.nombreCompleto || "El cliente"]),
+						...(clientEmail
+							? []
+							: [crmData.cliente.nombreCompleto || "El cliente"]),
 						...coDebtorFields
 							.filter((cd) => !cd.correoElectronico?.trim())
 							.map((cd) => cd.nombreCompleto || "Un codeudor"),
@@ -1920,6 +1933,9 @@ export function DynamicContractWizard({
 	// Handle linking contracts to opportunity
 	const handleLinkContracts = async () => {
 		if (!generationResult || !leadId || retryingType) return;
+		// En inversiones no hay oportunidad ni paso de enlazado: los contratos se
+		// guardaron al generarlos.
+		if (!onLinkContracts || !opportunityId) return;
 
 		const successfulContracts = generationResult.results.filter(
 			(r) => r.success,
@@ -2110,8 +2126,8 @@ export function DynamicContractWizard({
 										</CardHeader>
 										<CardContent>
 											<p className="text-red-800 text-sm dark:text-red-200">
-												Se encontraron {unsupportedDisbursementCount} cheque(s) en
-												una moneda distinta de GTQ. Esos cheques no pueden
+												Se encontraron {unsupportedDisbursementCount} cheque(s)
+												en una moneda distinta de GTQ. Esos cheques no pueden
 												incluirse correctamente en la carta.
 											</p>
 											<p className="mt-2 text-red-800 text-sm dark:text-red-200">
@@ -2664,11 +2680,18 @@ export function DynamicContractWizard({
 												Si un documento tiene datos equivocados, haz clic en
 												"Corregir y Regenerar" para volver a editarlo
 											</li>
-											<li>
-												Cuando estés satisfecho, haz clic en{" "}
-												<strong>"Finalizar y Enlazar"</strong> para guardar los
-												contratos en la oportunidad
-											</li>
+											{onLinkContracts ? (
+												<li>
+													Cuando estés satisfecho, haz clic en{" "}
+													<strong>"Finalizar y Enlazar"</strong> para guardar
+													los contratos en la oportunidad
+												</li>
+											) : (
+												<li>
+													Los contratos ya quedaron guardados con sus enlaces de
+													firma: aparecen en la ficha del inversionista
+												</li>
+											)}
 										</ul>
 									</div>
 								</div>
@@ -2682,18 +2705,34 @@ export function DynamicContractWizard({
 			<div className="flex justify-between border-t pt-4">
 				<Button
 					variant="outline"
-					onClick={step === 1 ? onBack : handlePrevious}
+					onClick={
+						step === 1 || (step === 3 && !onLinkContracts)
+							? onBack
+							: handlePrevious
+					}
 					disabled={isGenerating || isLoadingFields || isLinking}
 				>
 					<ChevronLeft className="mr-2 h-4 w-4" />
 					{step === 1
 						? "Volver"
 						: step === 3
-							? "Corregir y Regenerar"
+							? // Sin paso de enlazado los contratos ya quedaron guardados:
+								// volver a generarlos chocaría contra los que ya existen.
+								onLinkContracts
+								? "Corregir y Regenerar"
+								: "Volver"
 							: "Anterior"}
 				</Button>
 
-				{step === 3 ? (
+				{step === 3 && !onLinkContracts ? (
+					<Button
+						onClick={onBack}
+						disabled={isGenerating || Boolean(retryingType)}
+						className="bg-green-600 hover:bg-green-700"
+					>
+						Listo
+					</Button>
+				) : step === 3 ? (
 					<Button
 						onClick={() => setShowLinkConfirmDialog(true)}
 						disabled={

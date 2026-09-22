@@ -43,6 +43,7 @@ import { Route as CrmReportesIndexRouteImport } from './routes/crm/reportes/inde
 import { Route as CrmDocumentacionIndexRouteImport } from './routes/crm/documentacion/index'
 import { Route as CrmAnalysisIndexRouteImport } from './routes/crm/analysis/index'
 import { Route as AdminReportsIndexRouteImport } from './routes/admin/reports/index'
+import { Route as JuridicoInversionistaBatchIdRouteImport } from './routes/juridico/inversionista.$batchId'
 import { Route as JuridicoGenerateOpportunityIdRouteImport } from './routes/juridico/generate.$opportunityId'
 import { Route as InversionesLiquidacionesInversionistaIdRouteImport } from './routes/inversiones/liquidaciones.$inversionistaId'
 import { Route as CrmReportesTiempoCierreRouteImport } from './routes/crm/reportes/tiempo-cierre'
@@ -226,6 +227,12 @@ const AdminReportsIndexRoute = AdminReportsIndexRouteImport.update({
   path: '/admin/reports/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JuridicoInversionistaBatchIdRoute =
+  JuridicoInversionistaBatchIdRouteImport.update({
+    id: '/juridico/inversionista/$batchId',
+    path: '/juridico/inversionista/$batchId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const JuridicoGenerateOpportunityIdRoute =
   JuridicoGenerateOpportunityIdRouteImport.update({
     id: '/juridico/generate/$opportunityId',
@@ -325,6 +332,7 @@ export interface FileRoutesByFullPath {
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
+  '/juridico/inversionista/$batchId': typeof JuridicoInversionistaBatchIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
   '/crm/documentacion/': typeof CrmDocumentacionIndexRoute
@@ -371,6 +379,7 @@ export interface FileRoutesByTo {
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
+  '/juridico/inversionista/$batchId': typeof JuridicoInversionistaBatchIdRoute
   '/admin/reports': typeof AdminReportsIndexRoute
   '/crm/analysis': typeof CrmAnalysisIndexRoute
   '/crm/documentacion': typeof CrmDocumentacionIndexRoute
@@ -418,6 +427,7 @@ export interface FileRoutesById {
   '/crm/reportes/tiempo-cierre': typeof CrmReportesTiempoCierreRoute
   '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
+  '/juridico/inversionista/$batchId': typeof JuridicoInversionistaBatchIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
   '/crm/documentacion/': typeof CrmDocumentacionIndexRoute
@@ -466,6 +476,7 @@ export interface FileRouteTypes {
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
+    | '/juridico/inversionista/$batchId'
     | '/admin/reports/'
     | '/crm/analysis/'
     | '/crm/documentacion/'
@@ -512,6 +523,7 @@ export interface FileRouteTypes {
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
+    | '/juridico/inversionista/$batchId'
     | '/admin/reports'
     | '/crm/analysis'
     | '/crm/documentacion'
@@ -558,6 +570,7 @@ export interface FileRouteTypes {
     | '/crm/reportes/tiempo-cierre'
     | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
+    | '/juridico/inversionista/$batchId'
     | '/admin/reports/'
     | '/crm/analysis/'
     | '/crm/documentacion/'
@@ -605,6 +618,7 @@ export interface RootRouteChildren {
   CrmReportesTiempoCierreRoute: typeof CrmReportesTiempoCierreRoute
   InversionesLiquidacionesInversionistaIdRoute: typeof InversionesLiquidacionesInversionistaIdRoute
   JuridicoGenerateOpportunityIdRoute: typeof JuridicoGenerateOpportunityIdRoute
+  JuridicoInversionistaBatchIdRoute: typeof JuridicoInversionistaBatchIdRoute
   AdminReportsIndexRoute: typeof AdminReportsIndexRoute
   CrmAnalysisIndexRoute: typeof CrmAnalysisIndexRoute
   CrmDocumentacionIndexRoute: typeof CrmDocumentacionIndexRoute
@@ -852,6 +866,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminReportsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/juridico/inversionista/$batchId': {
+      id: '/juridico/inversionista/$batchId'
+      path: '/juridico/inversionista/$batchId'
+      fullPath: '/juridico/inversionista/$batchId'
+      preLoaderRoute: typeof JuridicoInversionistaBatchIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/juridico/generate/$opportunityId': {
       id: '/juridico/generate/$opportunityId'
       path: '/juridico/generate/$opportunityId'
@@ -966,6 +987,7 @@ const rootRouteChildren: RootRouteChildren = {
   InversionesLiquidacionesInversionistaIdRoute:
     InversionesLiquidacionesInversionistaIdRoute,
   JuridicoGenerateOpportunityIdRoute: JuridicoGenerateOpportunityIdRoute,
+  JuridicoInversionistaBatchIdRoute: JuridicoInversionistaBatchIdRoute,
   AdminReportsIndexRoute: AdminReportsIndexRoute,
   CrmAnalysisIndexRoute: CrmAnalysisIndexRoute,
   CrmDocumentacionIndexRoute: CrmDocumentacionIndexRoute,

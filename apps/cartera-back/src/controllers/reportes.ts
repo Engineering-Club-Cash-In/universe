@@ -2283,7 +2283,12 @@ export async function getMoraRecuperacionPorAsesor({
     esperado: string;
     // `JSON_BUILD_OBJECT` devuelve los montos como texto a propósito: numeric →
     // número de JSON los haría pasar por el double del driver.
-    eventos: { tipoEvento: string; montoAnterior: string; montoNuevo: string }[];
+    eventos: {
+      tipoEvento: string;
+      montoAnterior: string;
+      montoNuevo: string;
+      previo: boolean;
+    }[];
     cobrado: string;
   }>(buildMoraRecoveryQuery({ ...period, asesores, emailCobrador }));
 
@@ -2296,6 +2301,7 @@ export async function getMoraRecuperacionPorAsesor({
         tipoEvento: evento.tipoEvento,
         montoAnterior: Number(evento.montoAnterior),
         montoNuevo: Number(evento.montoNuevo),
+        previo: evento.previo === true,
       })),
       cobrado: row.cobrado,
     })),

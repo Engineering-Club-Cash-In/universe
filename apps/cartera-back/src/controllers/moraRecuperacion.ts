@@ -11,7 +11,31 @@ export type MoraLevelEvent = {
 	tipoEvento: string;
 	montoAnterior: number;
 	montoNuevo: number;
+	/**
+	 * El evento ocurrió ANTES del inicio del ciclo. Solo SIEMBRA el nivel de
+	 * referencia; nada de lo que traiga cuenta como mora generada en el ciclo.
+	 */
+	previo?: boolean;
 };
+
+/**
+ * Días de historial ANTERIORES al ciclo que se traen para sembrar el nivel.
+ *
+ * La foto inicial no alcanza como nivel de arranque: la condonación masiva corre
+ * casi a diario y el cron repone la mora a la mañana siguiente, así que el corte
+ * del ciclo (día 6) cae con frecuencia ENTRE una condonación y su rebote. Ahí la
+ * foto dice cero, el nivel arrancaba en cero y el rebote de adentro se contaba
+ * entero: el doble conteo que el nivel de referencia existe para evitar, metido
+ * por el borde.
+ *
+ * El estado que hace falta es el de la víspera —entre la condonación y el rebote
+ * pasan horas, no días—, así que con UNO bastaría. Se toman 3 para absorber un
+ * fin de semana, un feriado o una noche en que el cron no corrió, sin volverse
+ * "plegá todo el historial": con el RECALCULO diario son ~3 eventos por crédito
+ * contra los ~31 del ciclo, un 10% más de filas, y el costo queda ACOTADO por el
+ * número de días, no por la edad del crédito.
+ */
+export const DIAS_SIEMBRA_NIVEL = 3;
 
 /**
  * Mora GENERADA dentro del ciclo = lo que el asesor tuvo oportunidad de cobrar
@@ -37,11 +61,56 @@ export type MoraLevelEvent = {
  *   * Un evento que sube pero NO supera el nivel (el rebote del `RECALCULO` de
  *     la mañana siguiente a una condonación) no suma y tampoco mueve el nivel:
  *     si lo bajara, el siguiente rebote volvería a cobrar lo ya contado.
+ *
+ * El nivel NO arranca en la foto a secas: los eventos marcados `previo` —los de
+ * los días anteriores al ciclo— lo SIEMBRAN antes de empezar a contar, para que
+ * una condonación que quedó del lado de afuera del corte no haga que su rebote
+ * de adentro parezca mora nueva. Ver `nivelDeArranque`.
  */
 export function moraGeneradaEnPeriodo(
-	nivelInicial: number,
+	foto: number,
 	eventos: MoraLevelEvent[],
 ): number {
+	const previos = eventos.filter((evento) => evento.previo);
+	const delCiclo = eventos.filter((evento) => !evento.previo);
+	return plegarNivel(nivelDeArranque(foto, previos), delCiclo).generado;
+}
+
+/**
+ * Nivel con el que entra el ciclo, sembrado con el historial de la víspera.
+ *
+ * Sin eventos previos es la foto, que es como se comportaba antes. Con ellos se
+ * pliega el tramo anterior con las MISMAS reglas y el resultado se compara con
+ * la foto:
+ *
+ *   * La semilla del plegado previo es el `montoAnterior` del PRIMER evento de
+ *     la ventana, o sea el monto que el crédito tenía justo antes: es el estado
+ *     anterior a la ventana sin necesidad de una segunda foto en la base.
+ *   * `Math.max` con la foto es una red: el nivel de arranque nunca puede quedar
+ *     POR DEBAJO de la foto, porque la foto ya se cuenta aparte en el esperado y
+ *     un nivel más bajo haría que el primer RECALCULO del ciclo la sumara otra vez.
+ *
+ * El plegado previo respeta el matiz del pago: si lo último antes del corte fue
+ * una baja real, el nivel baja y la mora que nazca adentro sí se cuenta.
+ */
+export function nivelDeArranque(
+	foto: number,
+	previos: MoraLevelEvent[],
+): number {
+	const primero = previos[0];
+	if (!primero) return foto;
+	return Math.max(foto, plegarNivel(primero.montoAnterior, previos).nivel);
+}
+
+/**
+ * El recorrido en sí. Devuelve el nivel con el que queda y lo generado, para
+ * que sembrar (quedarse con el nivel) y medir (quedarse con lo generado) sean
+ * literalmente el mismo código y no dos reglas que puedan separarse.
+ */
+function plegarNivel(
+	nivelInicial: number,
+	eventos: MoraLevelEvent[],
+): { nivel: number; generado: number } {
 	let nivel = nivelInicial;
 	let generado = 0;
 	for (const evento of eventos) {
@@ -57,7 +126,7 @@ export function moraGeneradaEnPeriodo(
 			nivel = evento.montoNuevo;
 		}
 	}
-	return generado;
+	return { nivel, generado };
 }
 
 export type MoraRecoverySourceRow = {
@@ -67,9 +136,10 @@ export type MoraRecoverySourceRow = {
 	esperado: string;
 	/**
 	 * Eventos de `moras_historial` del crédito DENTRO del ciclo, en orden de
-	 * `fecha`. Con la mora proporcional el monto crece todos los días, así que la
-	 * foto inicial ya no es todo lo que el asesor tuvo oportunidad de cobrar: lo
-	 * generado sale de plegar estos eventos con `moraGeneradaEnPeriodo`.
+	 * `fecha`, precedidos por los de la ventana de siembra (`previo: true`). Con
+	 * la mora proporcional el monto crece todos los días, así que la foto inicial
+	 * ya no es todo lo que el asesor tuvo oportunidad de cobrar: lo generado sale
+	 * de plegar estos eventos con `moraGeneradaEnPeriodo`.
 	 */
 	eventos: MoraLevelEvent[];
 	/** Mora cobrada dentro del ciclo. El alcance se decide aquí, no en SQL. */
@@ -182,7 +252,11 @@ export function buildMoraRecoveryQuery({
 	// `snapCte`, que corta por día y no por rango) mataría `moras_historial_fecha_idx`.
 	const inicioUtc = inicioDiaGTComoTimestampUTC(inicio);
 	const finUtc = inicioDiaGTComoTimestampUTC(fin);
-	if (!inicioUtc || !finUtc) {
+	// Arranque de la VENTANA DE SIEMBRA: unos días antes del ciclo. Lo que caiga
+	// entre este instante y el inicio no cuenta como mora generada; solo deja el
+	// nivel de referencia donde estaba al cruzar el corte.
+	const siembraUtc = inicioDiaGTComoTimestampUTC(inicio, -DIAS_SIEMBRA_NIVEL);
+	if (!inicioUtc || !finUtc || !siembraUtc) {
 		throw new RangeError(
 			`Período de recuperación de mora inválido: ${inicio} → ${fin}`,
 		);
@@ -207,7 +281,8 @@ export function buildMoraRecoveryQuery({
         AND COALESCE(pc."paymentFalse", false) = false
       GROUP BY pc.credito_id
     ),
-    -- Eventos crudos del ciclo, en orden, SIN agregar: lo generado no es una
+    -- Eventos crudos del ciclo MÁS los de la ventana de siembra (marcados
+    -- \`previo\`), en orden, SIN agregar: lo generado no es una
     -- suma de deltas sino un recorrido con estado (el "nivel de referencia" de
     -- \`moraGeneradaEnPeriodo\`), porque una condonación y el rebote que la
     -- repone no son deuda nueva mientras que una baja por pago sí reabre la
@@ -218,21 +293,30 @@ export function buildMoraRecoveryQuery({
     -- proporcional. Antes el monto casi no cambiaba y el cron escribía \`sinCambios\`,
     -- así que para ciclos viejos el historial es escaso y el esperado queda
     -- APROXIMADO POR LO BAJO. No es un defecto del cálculo: el dato no existe hacia atrás.
+    -- La ventana de siembra existe porque el nivel de referencia no puede arrancar
+    -- en la foto a secas: si lo último antes del corte fue una CONDONACION, la foto
+    -- dice cero y el rebote del cron de adentro se contaría entero. Ver
+    -- \`DIAS_SIEMBRA_NIVEL\`.
     eventos_por_credito AS (
       SELECT h.credito_id,
              JSON_AGG(
                JSON_BUILD_OBJECT(
                  'tipoEvento', h.tipo_evento,
                  'montoAnterior', h.monto_anterior::numeric::text,
-                 'montoNuevo', h.monto_nuevo::numeric::text
+                 'montoNuevo', h.monto_nuevo::numeric::text,
+                 'previo', h.fecha < ${inicioUtc}::timestamp
                )
                ORDER BY h.fecha, h.historial_id
              ) AS eventos
       FROM cartera.moras_historial h
       JOIN creditos_con_asesor ca ON ca.credito_id = h.credito_id
-      WHERE h.fecha >= ${inicioUtc}::timestamp
+      WHERE h.fecha >= ${siembraUtc}::timestamp
         AND h.fecha < ${finUtc}::timestamp
       GROUP BY h.credito_id
+      -- Un crédito cuyos ÚNICOS eventos son de la siembra no participó del
+      -- ciclo: dejarlo entrar agregaría filas en cero (y asesores enteros en
+      -- cero) que hoy no existen. La siembra acompaña, no amplía el universo.
+      HAVING BOOL_OR(h.fecha >= ${inicioUtc}::timestamp)
     )
     SELECT
       ca.asesor_id,

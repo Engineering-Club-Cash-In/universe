@@ -37,6 +37,7 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 6 | [Ficha 360 del crédito](./06-ficha-360.md) | La pantalla de trabajo del asesor: anatomía, fuentes de datos, registro de contactos, promesa y convenio de pago, estado de cuenta y decisiones |
 | 7 | [Recuperación de vehículo](./07-recuperacion-de-vehiculo.md) | El traslado manual a B4: por qué es la única decisión humana de bucket, y por qué hoy el motor la deshace |
 | 8 | [**Plan** · Convenios y `EN_RECUPERACION`](./08-plan-convenios-y-recuperacion.md) | Lo acordado con el PM el 10-sep: el convenio congela el bucket, el estado nuevo actúa como piso en B4, y las 4 fases pendientes |
+| 9 | [Integración GPS / Wialon (La Legión)](./09-integracion-gps-wialon.md) | Rastreo satelital en vivo, telemetría (odómetro, ignición), generación y revocación de links Locator para recuperación de unidades |
 | — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:

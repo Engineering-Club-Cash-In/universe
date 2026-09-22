@@ -14,6 +14,7 @@ import {
 	hayIncrementoMora,
 	interpolar,
 	mensajeAnunciaExpectativaMora,
+	mensajeAnunciaIncrementoMoraSinDato,
 	mensajeAnunciaMontoAdeudado,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
@@ -819,5 +820,60 @@ describe("incrementoDiarioMora en las plantillas de mora (front)", () => {
 				).toBe(bloques);
 			}
 		}
+	});
+});
+
+// Gemelo del gate del server (prepararIncrementoMoraParaEnvio): el modal
+// ofrece las dos variables sueltas, así que el asesor puede escribir su propia
+// oración y esa no la borra `interpolar`.
+describe("mensajeAnunciaIncrementoMoraSinDato — el hueco que llegaría al cliente", () => {
+	const suelto = "El saldo aumenta Q{incrementoDiarioMora} diario.";
+
+	test("placeholder suelto sin valor: hay que bloquear", () => {
+		expect(mensajeAnunciaIncrementoMoraSinDato(suelto, "", "")).toBe(true);
+		expect(mensajeAnunciaIncrementoMoraSinDato(suelto, "0.00", "0.00")).toBe(
+			true,
+		);
+	});
+
+	test("el techo suelto sin valor también, aunque llegue el ritmo", () => {
+		expect(
+			mensajeAnunciaIncrementoMoraSinDato(
+				"…hasta Q{incrementoMaximoMensualMora}.",
+				"3.73",
+				"",
+			),
+		).toBe(true);
+	});
+
+	test("con el dato no hay nada que bloquear", () => {
+		expect(mensajeAnunciaIncrementoMoraSinDato(suelto, "3.73", "")).toBe(false);
+	});
+
+	test("la cláusula incorporada no bloquea: desaparece sola al interpolar", () => {
+		const cuerpo = `Tienes 1 cuota vencida${CLAUSULA_INCREMENTO_DIARIO_MORA}.`;
+		expect(mensajeAnunciaIncrementoMoraSinDato(cuerpo, "", "")).toBe(false);
+		expect(mensajeAnunciaIncrementoMoraSinDato(cuerpo, "3.73", "")).toBe(false);
+		// Y en efecto el mensaje sale sano: sin "Q" colgando.
+		expect(
+			interpolar(cuerpo, {
+				clienteNombre: "MARIA LOPEZ",
+				fechaPago: "5",
+				cuotaMensual: "2,500.00",
+				placa: "P123ABC",
+				marcaLineaModelo: "Toyota Yaris 2018",
+				montoAdeudado: "4,318.20",
+				cuotasAtraso: 1,
+				telefonoAsesor: "41286630",
+				nombreAsesor: "Carlos Pérez",
+				expectativaMora: "1,382.72",
+			}),
+		).toBe("Tienes 1 cuota vencida.");
+	});
+
+	test("un mensaje sin el tema pasa derecho", () => {
+		expect(mensajeAnunciaIncrementoMoraSinDato("Buenos días.", "", "")).toBe(
+			false,
+		);
 	});
 });

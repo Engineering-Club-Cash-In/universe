@@ -61,6 +61,7 @@ import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
+	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
 	seguroPorAseguradora,
@@ -3856,6 +3857,27 @@ export const cobrosRouter = {
 					continue;
 				}
 
+				// La cláusula incorporada del aumento desaparece sola al interpolar
+				// cuando no hay nada que anunciar, pero el modal ofrece
+				// {incrementoDiarioMora} y {incrementoMaximoMensualMora} como
+				// variables SUELTAS: una plantilla editada a mano ("El saldo aumenta
+				// Q{incrementoDiarioMora} diario") sobrevive al borrado y, sin el
+				// dato, le llegaría al cliente "El saldo aumenta Q diario". Un
+				// mensaje roto es peor que no mandarlo.
+				const incremento = prepararIncrementoMoraParaEnvio(
+					cuerpoBase,
+					detalleCartera?.incrementoDiarioMora,
+					detalleCartera?.incrementoMaximoMensualMora,
+				);
+				if (!incremento.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: incremento.motivo,
+					});
+					continue;
+				}
+
 				// Día de pago: tomar el día del mes de la fecha de vencimiento de la
 				// próxima cuota que devuelve cartera (`proxima_cuota`). Es el mismo
 				// criterio que usa el detalle individual de este router, y la única
@@ -3886,15 +3908,15 @@ export const cobrosRouter = {
 					expectativaMora: expectativaMora.expectativaMora,
 					expectativaMoraDiaria: expectativaMora.expectativaMoraDiaria,
 					// Cuánto crece por día el saldo que el mensaje acaba de anunciar
-					// (mismo detalle, ver 4.b). Vacío = no crece y la oración del
-					// aumento se borra sola al interpolar; por eso NO se descarta el
-					// envío como con montoAdeudado: 0 es un valor legítimo (crédito
-					// con todas sus cuotas ya en el techo de 30 días).
-					incrementoDiarioMora: detalleCartera?.incrementoDiarioMora ?? "",
+					// (mismo detalle, ver 4.b), ya pasado por el gate de arriba.
+					// Vacío es legítimo cuando el crédito no crece (todas sus cuotas
+					// en el techo de 30 días): la cláusula incorporada se borra sola
+					// al interpolar. Lo que el gate no deja pasar es un placeholder
+					// suelto sin dato, que dejaría el hueco a la vista.
+					incrementoDiarioMora: incremento.incrementoDiarioMora,
 					// Su techo, del mismo detalle. Vacío = la frase se queda solo
-					// con el ritmo (no se descarta el envío, igual que arriba).
-					incrementoMaximoMensualMora:
-						detalleCartera?.incrementoMaximoMensualMora ?? "",
+					// con el ritmo, corta pero sana.
+					incrementoMaximoMensualMora: incremento.incrementoMaximoMensualMora,
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad de cada crédito (Universales o G&T).
 					...seguroPorAseguradora(info?.insuranceProvider),

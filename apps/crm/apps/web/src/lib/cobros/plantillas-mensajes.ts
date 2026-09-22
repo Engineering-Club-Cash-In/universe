@@ -315,6 +315,65 @@ function toCapitalCase(str: string): string {
 		.join(" ");
 }
 
+/**
+ * Borra la oración del aumento cuando no hay nada que anunciar: la cláusula
+ * ENTERA si el crédito ya no crece (todas las cuotas en su techo → Q0.00 por
+ * día), y solo el `FRAGMENTO_TOPE_INCREMENTO_MORA` si llegó el ritmo pero no
+ * el techo, que deja la frase corta pero sana. "aumenta Q0.00 por cada día que
+ * pase" es ruido y "aumenta Q." es un mensaje roto.
+ *
+ * El orden importa: sacando primero el tope, la cláusula completa ya no
+ * coincidiría para poder borrarse.
+ *
+ * Idéntica a la del server (apps/server/src/lib/cobros-plantillas.ts): vive
+ * aparte de `interpolar` porque el gate de envío pregunta lo mismo ANTES de
+ * mandar, sobre lo que queda del cuerpo.
+ */
+export function quitarClausulaIncrementoMora(
+	texto: string,
+	incrementoDiarioMora: string,
+	incrementoMaximoMensualMora: string,
+): string {
+	if (!hayIncrementoMora(incrementoDiarioMora)) {
+		return texto.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
+	}
+	if (!hayIncrementoMora(incrementoMaximoMensualMora)) {
+		return texto.split(FRAGMENTO_TOPE_INCREMENTO_MORA).join("");
+	}
+	return texto;
+}
+
+/**
+ * true si el mensaje que se va a mandar TODAVÍA anuncia el aumento de la mora
+ * con un placeholder suelto y sin valor: al cliente le llegaría "El saldo
+ * aumenta Q diario".
+ *
+ * La cláusula incorporada desaparece sola al interpolar, pero el modal del
+ * masivo ofrece las dos variables sueltas y el asesor puede escribir su propia
+ * oración, que no coincide con `CLAUSULA_INCREMENTO_DIARIO_MORA` y sobrevive
+ * al borrado. Mismo criterio que `mensajeAnunciaMontoAdeudado`: se evalúa
+ * sobre el texto real del canal, así que si el asesor borra la oración el
+ * envío se habilita.
+ */
+export function mensajeAnunciaIncrementoMoraSinDato(
+	mensaje: string,
+	incrementoDiarioMora: string,
+	incrementoMaximoMensualMora: string,
+): boolean {
+	const restante = quitarClausulaIncrementoMora(
+		mensaje,
+		incrementoDiarioMora,
+		incrementoMaximoMensualMora,
+	);
+
+	return (
+		(restante.includes("{incrementoDiarioMora}") &&
+			!hayIncrementoMora(incrementoDiarioMora)) ||
+		(restante.includes("{incrementoMaximoMensualMora}") &&
+			!hayIncrementoMora(incrementoMaximoMensualMora))
+	);
+}
+
 export function interpolar(
 	texto: string,
 	variables: VariablesPlantilla,
@@ -328,21 +387,14 @@ export function interpolar(
 		? toCapitalCase(variables.clienteNombre)
 		: "";
 
-	// Sin aumento que anunciar (todas las cuotas ya en el techo, o cartera que
-	// no mandó el dato) la oración se borra entera: "aumenta Q0.00 por cada día
-	// que pase" es ruido y "aumenta Q." es un mensaje roto.
 	const incrementoDiarioMora = variables.incrementoDiarioMora ?? "";
 	const incrementoMaximoMensualMora =
 		variables.incrementoMaximoMensualMora ?? "";
-	let base = texto;
-	if (!hayIncrementoMora(incrementoDiarioMora)) {
-		base = base.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
-	} else if (!hayIncrementoMora(incrementoMaximoMensualMora)) {
-		// Llegó el ritmo pero no su techo: se borra solo el tope, no la frase
-		// entera. El orden importa: sacando primero el tope, la cláusula
-		// completa ya no coincidiría para poder borrarse.
-		base = base.split(FRAGMENTO_TOPE_INCREMENTO_MORA).join("");
-	}
+	const base = quitarClausulaIncrementoMora(
+		texto,
+		incrementoDiarioMora,
+		incrementoMaximoMensualMora,
+	);
 
 	return base
 		.replace(

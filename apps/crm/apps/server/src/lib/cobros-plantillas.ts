@@ -640,6 +640,85 @@ function toCapitalCase(str: string): string {
 		.join(" ");
 }
 
+/**
+ * Borra la oración del aumento cuando no hay nada que anunciar: la cláusula
+ * ENTERA si el crédito ya no crece (todas las cuotas en su techo → Q0.00 por
+ * día), y solo el `FRAGMENTO_TOPE_INCREMENTO_MORA` si llegó el ritmo pero no
+ * el techo (cartera-back viejo), que deja la frase corta pero sana. Dejar
+ * "aumenta Q0.00 por cada día que pase" sería ruido, y dejar "aumenta Q."
+ * sería un mensaje roto.
+ *
+ * El orden importa: si primero se sacara el tope, la cláusula entera ya no
+ * coincidiría para poder borrarse.
+ *
+ * Vive aparte de `interpolar` porque el gate de envío necesita preguntar lo
+ * mismo ANTES de mandar: qué queda del cuerpo una vez borrada la cláusula.
+ */
+export function quitarClausulaIncrementoMora(
+	texto: string,
+	incrementoDiarioMora: string,
+	incrementoMaximoMensualMora: string,
+): string {
+	if (!hayIncrementoMora(incrementoDiarioMora)) {
+		return texto.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
+	}
+	if (!hayIncrementoMora(incrementoMaximoMensualMora)) {
+		return texto.split(FRAGMENTO_TOPE_INCREMENTO_MORA).join("");
+	}
+	return texto;
+}
+
+export const COBROS_MOTIVO_SIN_INCREMENTO_MORA =
+	"la plantilla anuncia el aumento de la mora y cartera no lo pudo calcular";
+
+/**
+ * Un cuerpo que TODAVÍA menciona {incrementoDiarioMora} o
+ * {incrementoMaximoMensualMora} después de borrar la cláusula incorporada no
+ * se puede enviar si el valor correspondiente viene vacío: al cliente le
+ * llegaría "El saldo aumenta Q diario".
+ *
+ * Por qué no alcanza con borrar la cláusula: el modal del masivo ofrece las
+ * dos como variables insertables SUELTAS, así que un asesor puede escribir su
+ * propia oración ("El saldo aumenta Q{incrementoDiarioMora} diario") que no
+ * coincide con `CLAUSULA_INCREMENTO_DIARIO_MORA` y sobrevive al borrado. Un
+ * mensaje roto al cliente es peor que no mandarlo, así que se descarta con
+ * motivo — mismo patrón que prepararMontoAdeudadoParaEnvio.
+ *
+ * Lo que NO bloquea: el crédito que legítimamente no crece (todas las cuotas
+ * en su techo) usando la cláusula incorporada, que desaparece sola y deja el
+ * mensaje sano.
+ */
+export function prepararIncrementoMoraParaEnvio(
+	cuerpo: string,
+	incrementoDiarioMora: string | null | undefined,
+	incrementoMaximoMensualMora: string | null | undefined,
+):
+	| {
+			enviar: true;
+			incrementoDiarioMora: string;
+			incrementoMaximoMensualMora: string;
+	  }
+	| { enviar: false; motivo: string } {
+	const diario = incrementoDiarioMora ?? "";
+	const maximo = incrementoMaximoMensualMora ?? "";
+	const restante = quitarClausulaIncrementoMora(cuerpo, diario, maximo);
+
+	if (
+		(restante.includes("{incrementoDiarioMora}") &&
+			!hayIncrementoMora(diario)) ||
+		(restante.includes("{incrementoMaximoMensualMora}") &&
+			!hayIncrementoMora(maximo))
+	) {
+		return { enviar: false, motivo: COBROS_MOTIVO_SIN_INCREMENTO_MORA };
+	}
+
+	return {
+		enviar: true,
+		incrementoDiarioMora: diario,
+		incrementoMaximoMensualMora: maximo,
+	};
+}
+
 export function interpolar(
 	texto: string,
 	variables: VariablesPlantilla,
@@ -653,23 +732,14 @@ export function interpolar(
 		? toCapitalCase(variables.clienteNombre)
 		: "";
 
-	// Sin aumento que anunciar (crédito con todas las cuotas ya en el techo, o
-	// cartera que no mandó el dato) la oración se borra entera: dejar
-	// "aumenta Q0.00 por cada día que pase" sería ruido, y dejar "aumenta Q."
-	// sería un mensaje roto.
 	const incrementoDiarioMora = variables.incrementoDiarioMora ?? "";
 	const incrementoMaximoMensualMora =
 		variables.incrementoMaximoMensualMora ?? "";
-	let base = texto;
-	if (!hayIncrementoMora(incrementoDiarioMora)) {
-		base = base.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
-	} else if (!hayIncrementoMora(incrementoMaximoMensualMora)) {
-		// Llegó el ritmo pero no su techo (cartera-back sin el dato): en vez de
-		// "hasta un máximo de Q al mes" se borra solo el tope y la frase queda
-		// corta pero coherente. El orden importa: si primero se sacara el tope,
-		// la cláusula entera ya no coincidiría para poder borrarse.
-		base = base.split(FRAGMENTO_TOPE_INCREMENTO_MORA).join("");
-	}
+	const base = quitarClausulaIncrementoMora(
+		texto,
+		incrementoDiarioMora,
+		incrementoMaximoMensualMora,
+	);
 
 	return base
 		.replace(/{incrementoDiarioMora}/g, v(incrementoDiarioMora))

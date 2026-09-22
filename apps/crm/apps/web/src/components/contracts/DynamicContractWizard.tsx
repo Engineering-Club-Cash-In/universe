@@ -2917,6 +2917,38 @@ export function DynamicContractWizard({
 				{/* Step 3: Results */}
 				{step === 3 && generationResult && (
 					<div className="space-y-4">
+						{/* Sin paso de enlazado, "Listo" es lo único que queda por hacer y
+						    hay que verlo sin bajar hasta el final de los resultados. */}
+						{!onLinkContracts && (
+							<Card className="border-green-200 bg-green-50">
+								<CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+									<div className="flex items-start gap-3">
+										<div className="rounded-full bg-green-100 p-2">
+											<CheckCircle className="h-5 w-5 text-green-600" />
+										</div>
+										<div>
+											<h4 className="font-semibold text-green-800">
+												Contratos emitidos y enlazados
+											</h4>
+											<p className="text-green-700 text-sm">
+												Ya están en la ficha del inversionista, con sus enlaces
+												de firma. Revisá los PDF y dale Listo.
+											</p>
+										</div>
+									</div>
+									<Button
+										size="lg"
+										onClick={onBack}
+										disabled={isGenerating || Boolean(retryingType)}
+										className="bg-green-600 hover:bg-green-700"
+									>
+										<Check className="mr-2 h-5 w-5" />
+										Listo
+									</Button>
+								</CardContent>
+							</Card>
+						)}
+
 						<ContractResults
 							results={generationResult.results}
 							totalRequested={generationResult.totalRequested}
@@ -2997,10 +3029,12 @@ export function DynamicContractWizard({
 
 				{step === 3 && !onLinkContracts ? (
 					<Button
+						size="lg"
 						onClick={onBack}
 						disabled={isGenerating || Boolean(retryingType)}
 						className="bg-green-600 hover:bg-green-700"
 					>
+						<Check className="mr-2 h-5 w-5" />
 						Listo
 					</Button>
 				) : step === 3 ? (

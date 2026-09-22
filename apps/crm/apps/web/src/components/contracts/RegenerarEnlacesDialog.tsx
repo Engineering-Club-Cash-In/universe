@@ -36,6 +36,7 @@ export function RegenerarEnlacesDialog({
 	open,
 	onOpenChange,
 	onRegenerado,
+	regenerar: regenerarDelArea,
 }: {
 	contractId: string;
 	contractName: string;
@@ -43,15 +44,24 @@ export function RegenerarEnlacesDialog({
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onRegenerado: () => void;
+	/**
+	 * Qué hacer con el motivo elegido. Por defecto reemite un contrato de venta;
+	 * inversiones pasa el suyo, que no mira etapas de oportunidad.
+	 */
+	regenerar?: (
+		motivo: keyof typeof MOTIVOS_DE_ANULACION,
+	) => Promise<{ message: string; enlaces: number }>;
 }) {
 	const [motivo, setMotivo] = useState<string>("");
 
 	const regenerar = useMutation({
 		mutationFn: () => {
 			if (!motivo) throw new Error("Elegí el motivo");
+			const elegido = motivo as keyof typeof MOTIVOS_DE_ANULACION;
+			if (regenerarDelArea) return regenerarDelArea(elegido);
 			return client.refreshContractSigningLinks({
 				contractId,
-				motivo: motivo as keyof typeof MOTIVOS_DE_ANULACION,
+				motivo: elegido,
 			});
 		},
 		onSuccess: (data) => {

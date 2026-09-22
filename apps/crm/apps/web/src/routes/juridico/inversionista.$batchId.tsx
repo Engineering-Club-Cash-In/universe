@@ -169,46 +169,50 @@ function RouteComponent() {
 		onError: (error: Error) => toast.error(error.message),
 	});
 
-	const generar = async (data: {
-		contracts: Array<{
-			contractType: string;
-			data: Record<string, string>;
-			options: {
-				gender: "male" | "female";
-				generatePdf: boolean;
-				isPlural?: boolean;
-				filenamePrefix: string;
-			};
-		}>;
-	}) => {
-		const nombrePorTipo = new Map(
-			documentTypes.map((tipo) => [tipo.enum, tipo.label]),
-		);
+	// Va como mutación y no como función suelta para que el wizard sepa que está
+	// trabajando: emitir tarda —habla con el generador y con WeeTrust— y sin eso
+	// el botón se quedaba quieto y la gente lo apretaba de nuevo.
+	const generarMutation = useMutation({
+		mutationFn: (data: {
+			contracts: Array<{
+				contractType: string;
+				data: Record<string, string>;
+				options: {
+					gender: "male" | "female";
+					generatePdf: boolean;
+					isPlural?: boolean;
+					filenamePrefix: string;
+				};
+			}>;
+		}) => {
+			const nombrePorTipo = new Map(
+				documentTypes.map((tipo) => [tipo.enum, tipo.label]),
+			);
 
-		const resultado = await client.generateInvestorContracts({
-			batchId,
-			contracts: data.contracts.map((contrato) => ({
-				contractType: contrato.contractType,
-				contractName:
-					nombrePorTipo.get(contrato.contractType) ?? contrato.contractType,
-				data: contrato.data,
-				gender: contrato.options.gender,
-			})),
-		});
-
-		if (resultado.success) {
-			toast.success("Contratos emitidos y enlazados al inversionista");
-		} else {
-			toast.warning("Algunos contratos no se pudieron emitir");
-		}
-
-		queryClient.invalidateQueries({
-			predicate: (query) =>
-				JSON.stringify(query.queryKey).includes("InvestorContract"),
-		});
-
-		return resultado;
-	};
+			return client.generateInvestorContracts({
+				batchId,
+				contracts: data.contracts.map((contrato) => ({
+					contractType: contrato.contractType,
+					contractName:
+						nombrePorTipo.get(contrato.contractType) ?? contrato.contractType,
+					data: contrato.data,
+					gender: contrato.options.gender,
+				})),
+			});
+		},
+		onSuccess: (resultado) => {
+			if (resultado.success) {
+				toast.success("Contratos emitidos y enlazados al inversionista");
+			} else {
+				toast.warning("Algunos contratos no se pudieron emitir");
+			}
+			queryClient.invalidateQueries({
+				predicate: (query) =>
+					JSON.stringify(query.queryKey).includes("InvestorContract"),
+			});
+		},
+		onError: (error: Error) => toast.error(error.message),
+	});
 
 	const traerCampos = async (
 		dpiConsultado: string,
@@ -420,7 +424,8 @@ function RouteComponent() {
 							documentTypes={documentTypes}
 							crmData={crmData}
 							onGetDocumentsByDpi={traerCampos}
-							onGenerate={generar}
+							onGenerate={(data) => generarMutation.mutateAsync(data)}
+							isGenerating={generarMutation.isPending}
 							onBack={() => navigate({ to: "/juridico" })}
 							valoresIniciales={valoresIniciales}
 							pasoPrevio={{

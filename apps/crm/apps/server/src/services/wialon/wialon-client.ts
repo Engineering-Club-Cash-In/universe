@@ -112,7 +112,7 @@ export class WialonClient {
 	private loginPromise: Promise<string> | null = null;
 	private ignitionSensorCache = new Map<
 		number,
-		{ sensorId: string | null; expiresAt: number }
+		{ sensorId: string | null; expiresAt: number; lookupFailed?: boolean }
 	>();
 
 	constructor(config?: Partial<WialonConfig>, customFetch?: WialonFetch) {
@@ -146,6 +146,7 @@ export class WialonClient {
 		unitId: number,
 		sensorId: string | null,
 		expiresAt: number,
+		lookupFailed = false,
 	): void {
 		if (this.ignitionSensorCache.size >= MAX_SENSOR_CACHE_SIZE) {
 			const now = Date.now();
@@ -161,7 +162,7 @@ export class WialonClient {
 				}
 			}
 		}
-		this.ignitionSensorCache.set(unitId, { sensorId, expiresAt });
+		this.ignitionSensorCache.set(unitId, { sensorId, expiresAt, lookupFailed });
 	}
 
 	/**
@@ -518,6 +519,7 @@ export class WialonClient {
 									id,
 									null,
 									Date.now() + NEGATIVE_CACHE_TTL_MS,
+									true,
 								);
 							}
 						}
@@ -577,14 +579,17 @@ export class WialonClient {
 				formattedSensors[id] = sens.format?.value || "";
 			}
 
-			// 1. Si identificamos el sensor de ignición por metadatos (tipo 'engine operation' o nombre explícito),
-			// evaluamos EXCLUSIVAMENTE ese sensor para evitar que sensores de alarma o GPS alteren el estado.
 			const cached = this.ignitionSensorCache.get(raw.i);
-			const targetSensorId =
-				cached && cached.expiresAt > Date.now() ? cached.sensorId : undefined;
+			const isCacheValid = Boolean(cached && cached.expiresAt > Date.now());
 
-			if (targetSensorId) {
-				const targetSens = raw.sensors[targetSensorId];
+			if (isCacheValid && cached?.lookupFailed) {
+				// La búsqueda de metadatos aguas arriba falló (timeout, red o error de API).
+				// Preservar la ignición como desconocida (undefined) durante el periodo de backoff
+				// para evitar que el fallback heurístico reporte un sensor binario no relacionado como ignición.
+			} else if (isCacheValid && cached?.sensorId) {
+				// 1. Si identificamos el sensor de ignición por metadatos (tipo 'engine operation' o nombre explícito),
+				// evaluamos EXCLUSIVAMENTE ese sensor para evitar que sensores de alarma o GPS alteren el estado.
+				const targetSens = raw.sensors[cached.sensorId];
 				if (targetSens) {
 					const text = targetSens.format?.value?.trim() || "";
 					if (IGNITION_ON_REGEX.test(text)) {

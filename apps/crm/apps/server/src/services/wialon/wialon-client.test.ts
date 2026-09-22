@@ -1484,26 +1484,68 @@ describe("WialonClient", () => {
 		expect(searchCalls).toBe(1);
 		expect(status.length).toBe(1);
 
-		// Verificamos que la entrada expirada fue SOBRESCRITA con negative cache (null)
+		// Verificamos que la entrada expirada fue SOBRESCRITA con negative cache (null) y lookupFailed: true
 		const cacheEntry = (
 			client as unknown as {
 				ignitionSensorCache: Map<
 					number,
-					{ sensorId: string | null; expiresAt: number }
+					{ sensorId: string | null; expiresAt: number; lookupFailed?: boolean }
 				>;
 			}
 		).ignitionSensorCache.get(333);
 
 		expect(cacheEntry).toBeDefined();
 		expect(cacheEntry?.sensorId).toBeNull();
+		expect(cacheEntry?.lookupFailed).toBe(true);
+		expect(status[0].isIgnitionOn).toBeUndefined();
 		const remainingTtl = (cacheEntry?.expiresAt ?? 0) - Date.now();
 		// Debe tener ~5 minutos de TTL
 		expect(remainingTtl).toBeGreaterThan(4 * 60 * 1000);
 		expect(remainingTtl).toBeLessThanOrEqual(5 * 60 * 1000);
 
 		// En la siguiente llamada inmediata, NO debe reintentar la búsqueda de metadatos (respeta backoff)
-		await client.getUnitsStatus([333]);
+		// y continúa preservando isIgnitionOn como undefined
+		const statusSecond = await client.getUnitsStatus([333]);
 		expect(searchCalls).toBe(1); // Sigue siendo 1 llamada
+		expect(statusSecond[0].isIgnitionOn).toBeUndefined();
+	});
+
+	test("preserva ignición desconocida (undefined) tras fallo de búsqueda de metadatos incluso si calc_last tiene sensores con texto encendido", async () => {
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				// Falla con timeout simulado / error upstream
+				return new Response(JSON.stringify({ error: 5 }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=unit%2Fcalc_last")) {
+				return new Response(
+					JSON.stringify([
+						{
+							i: 555,
+							sensors: {
+								// Sensor no relacionado (ej. alarma o botón) con texto "Encendido"
+								"9": { value: 1, format: { value: "Encendido" } },
+							},
+						},
+					]),
+					{ status: 200 },
+				);
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+		const status = await client.getUnitsStatus([555]);
+		expect(status.length).toBe(1);
+		// No debe activar el fallback heurístico ni clasificar la alarma como ignición: debe ser undefined
+		expect(status[0].isIgnitionOn).toBeUndefined();
+
+		// Segunda llamada en el periodo de backoff de 5 minutos
+		const statusCached = await client.getUnitsStatus([555]);
+		expect(statusCached[0].isIgnitionOn).toBeUndefined();
 	});
 
 	test("searchUnits no cachea coincidencias heurísticas de sensor si flags omite propiedades personalizadas (prp)", async () => {

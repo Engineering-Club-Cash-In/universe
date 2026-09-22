@@ -589,11 +589,25 @@ export async function actualizarPersona(
 
 	try {
 		return await db.transaction(async (tx) => {
+			// `activo` va en el mismo UPDATE: si alguien lo retiró después de la
+			// lectura de arriba, no se toca la fila ni se anota una edición
+			// posterior a su baja
 			const [persona] = await tx
 				.update(buroInternoPersonas)
 				.set({ ...cambios, updatedAt: new Date() })
-				.where(eq(buroInternoPersonas.id, id))
+				.where(
+					and(
+						eq(buroInternoPersonas.id, id),
+						eq(buroInternoPersonas.activo, true),
+					),
+				)
 				.returning();
+
+			if (!persona) {
+				throw new BuroInternoValidacionError(
+					"Un registro retirado del buró interno no se puede editar",
+				);
+			}
 
 			await registrarEvento(tx, {
 				accion: "edicion",

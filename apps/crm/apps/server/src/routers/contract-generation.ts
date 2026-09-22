@@ -3,7 +3,16 @@
  * Integra con legal-docs-blueprints API y API de documentos legales
  */
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	inArray,
+	isNotNull,
+	isNull,
+	ne,
+	sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
@@ -150,7 +159,19 @@ function firmantesDelContrato(
 	// Mismo criterio que usa el envío de WhatsApp para saber a quién le toca cada
 	// enlace. Si no coincidieran, los links quedarían guardados con un correo y se
 	// buscarían con otro, y nadie recibiría el suyo. Ya pasó.
-	if (!isTestModeEnabled()) return conRepLegal;
+	if (!isTestModeEnabled()) {
+		// Los deudores ya se revisaron entre sí; lo que falta es el representante
+		// legal. Un cliente cargado con ese correo (alguien de la casa, un dato
+		// copiado) se fundiría con él en WeeTrust, que junta a los firmantes por
+		// correo, y una de las dos firmas desaparecería del documento.
+		const repetido = correoRepetido(conRepLegal);
+		if (repetido) {
+			throw new ORPCError("BAD_REQUEST", {
+				message: `El correo ${repetido} es el del representante legal: el cliente y los codeudores tienen que firmar con uno propio.`,
+			});
+		}
+		return conRepLegal;
+	}
 
 	// En modo prueba se corta si algún firmante externo se quedaría con su
 	// correo real: es preferible un error a mandarle el contrato al cliente.
@@ -349,9 +370,9 @@ async function exigirEtapaQuePermiteReemplazo(
  * nadie firmó (ahí no hay nada allá que pueda cambiar mientras tanto), o la de
  * un duplicado de otra fila con el mismo documento, que sigue vivo.
  */
-async function anularContratoReemplazado(
+export async function anularContratoReemplazado(
 	contractId: string,
-	opportunityId: string,
+	opportunityId: string | null,
 	motivo: string,
 ): Promise<{ contractId: string; conservado: boolean } | null> {
 	const [viejo] = await db
@@ -360,7 +381,10 @@ async function anularContratoReemplazado(
 		.where(
 			and(
 				eq(generatedLegalContracts.id, contractId),
-				eq(generatedLegalContracts.opportunityId, opportunityId),
+				// Los contratos cargados a mano pueden no tener oportunidad.
+				opportunityId === null
+					? isNull(generatedLegalContracts.opportunityId)
+					: eq(generatedLegalContracts.opportunityId, opportunityId),
 			),
 		)
 		.limit(1);

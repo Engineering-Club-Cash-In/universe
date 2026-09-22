@@ -468,7 +468,9 @@ export function ContractCard({
 						<AlertDialogTitle>¿Eliminar contrato?</AlertDialogTitle>
 						<AlertDialogDescription>
 							Estás a punto de eliminar el contrato "{contract.contractName}".
-							Esta acción no se puede deshacer.
+							Si se mandó a firma, se borra también en WeeTrust y sus enlaces
+							dejan de servir; queda en «Ver anulados» como registro. Esta
+							acción no se puede deshacer.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

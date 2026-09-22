@@ -60,6 +60,7 @@ import {
 	reemitirContratoEnWeeTrust,
 	reenviarCorreoDeFirma,
 } from "../services/legal-docs-api";
+import { anularContratoReemplazado } from "./contract-generation";
 import { sendContractLinksToLead } from "./messaging";
 import { createNotification } from "./notifications";
 
@@ -162,6 +163,46 @@ function estaVigente(contrato: {
 	replacedByContractId: string | null;
 }): boolean {
 	return contrato.status !== "cancelled" && !contrato.replacedByContractId;
+}
+
+/**
+ * Lo que hace "Eliminar" con un contrato vigente.
+ *
+ * Borrar sólo la fila dejaba el documento vivo en WeeTrust: los enlaces que ya
+ * salieron por correo seguían sirviendo y el webhook ya no encontraba de quién
+ * era. Pasa por las mismas reglas que anular: se borra allá (uno completo no se
+ * puede) y la fila queda anulada, como registro de lo que se descartó y de
+ * quién lo había firmado. Sólo desaparece la fila de uno que nunca estuvo en
+ * WeeTrust (en papel, o del fallback de Documenso) y que nadie firmó.
+ */
+async function eliminarContrato(
+	contrato: typeof generatedLegalContracts.$inferSelect,
+	motivo: string,
+): Promise<{ conservado: boolean }> {
+	// Los generados antes de que se guardara el `documentID` lo llevan en el
+	// link. Se guarda en la fila para que anular lo borre allá también.
+	if (
+		!contrato.weetrustDocumentId &&
+		contrato.signingProvider !== "documenso"
+	) {
+		const documentID =
+			documentIdDesdeLink(contrato.clientSigningLink) ??
+			documentIdDesdeLink(contrato.representativeSigningLink) ??
+			documentIdDesdeLink(contrato.additionalSigningLinks?.[0] ?? null);
+		if (documentID) {
+			await db
+				.update(generatedLegalContracts)
+				.set({ weetrustDocumentId: documentID })
+				.where(eq(generatedLegalContracts.id, contrato.id));
+		}
+	}
+
+	const anulado = await anularContratoReemplazado(
+		contrato.id,
+		contrato.opportunityId,
+		motivo,
+	);
+	return { conservado: anulado?.conservado ?? false };
 }
 
 /**
@@ -437,14 +478,17 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Eliminar el contrato
-			await db
-				.delete(generatedLegalContracts)
-				.where(eq(generatedLegalContracts.id, input.contractId));
+			const { conservado } = await eliminarContrato(
+				existingContract,
+				"Eliminado por jurídico",
+			);
 
 			return {
 				success: true,
-				message: "Contrato eliminado exitosamente",
+				conservado,
+				message: conservado
+					? "Contrato anulado: queda en «Ver anulados» como registro, con el detalle de cómo quedó en WeeTrust"
+					: "Contrato eliminado exitosamente",
 			};
 		}),
 
@@ -751,11 +795,13 @@ export const legalContractsRouter = {
 			}),
 		)
 		.handler(async ({ input, context: _ }) => {
-			// Mismo criterio que `deleteLegalContract`: los anulados son registro.
+			// Mismo criterio que `deleteLegalContract`: los anulados son registro, y
+			// los vigentes pasan por WeeTrust antes de soltar la fila.
 			const [deletedContract] = await db
-				.delete(generatedLegalContracts)
+				.select()
+				.from(generatedLegalContracts)
 				.where(and(eq(generatedLegalContracts.id, input.id), contratoVigente()))
-				.returning();
+				.limit(1);
 
 			if (!deletedContract) {
 				throw new ORPCError("NOT_FOUND", {
@@ -764,7 +810,12 @@ export const legalContractsRouter = {
 				});
 			}
 
-			return { success: true, deletedContract };
+			const { conservado } = await eliminarContrato(
+				deletedContract,
+				"Eliminado por un administrador",
+			);
+
+			return { success: true, deletedContract, conservado };
 		}),
 
 	// Obtener oportunidades de un lead (para el combobox)

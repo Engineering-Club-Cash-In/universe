@@ -93,8 +93,9 @@ function RouteComponent() {
 		mutationFn: async (contractId: string) => {
 			return await client.deleteLegalContract({ contractId });
 		},
-		onSuccess: () => {
-			toast.success("Contrato eliminado correctamente");
+		// Si estaba en WeeTrust no desaparece: queda anulado, y el mensaje lo dice.
+		onSuccess: (data) => {
+			toast.success(data.message);
 			refetch();
 		},
 		onError: (error: Error) => {

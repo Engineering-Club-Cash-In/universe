@@ -180,6 +180,18 @@ async function eliminarContrato(
 	contrato: typeof generatedLegalContracts.$inferSelect,
 	motivo: string,
 ): Promise<{ conservado: boolean }> {
+	// Con el candado de la oportunidad: esto borra el documento en WeeTrust, y
+	// si un envío por WhatsApp está mandando sus enlaces, el cliente recibiría
+	// links que mueren en el acto.
+	return conCandadoDeFirma(contrato.opportunityId, () =>
+		eliminarConCandadoTomado(contrato, motivo),
+	);
+}
+
+async function eliminarConCandadoTomado(
+	contrato: typeof generatedLegalContracts.$inferSelect,
+	motivo: string,
+): Promise<{ conservado: boolean }> {
 	// Los generados antes de que se guardara el `documentID` lo llevan en el
 	// link. Se guarda en la fila para que anular lo borre allá también.
 	if (

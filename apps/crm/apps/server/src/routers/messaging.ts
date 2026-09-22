@@ -701,6 +701,9 @@ export const messagingRouter = {
 					.where(eq(coDebtors.id, recipient.coDebtorId));
 			}
 
+			// Buscar los enlaces vigentes y mandar, con el candado de la
+			// oportunidad tomado: si no, una regeneración que entrara entre la
+			// revisión y el envío dejaba pasar un enlace que moría al instante.
 			// El enlace que llega de la pantalla puede ser viejo: si el contrato se
 			// regeneró o se reemplazó después de armarse el log, su documento en
 			// WeeTrust ya no existe y mandarlo deja al cliente con un enlace muerto
@@ -712,80 +715,86 @@ export const messagingRouter = {
 				.where(eq(whatsappLogs.id, recipient.whatsappLogId))
 				.limit(1);
 
-			const enlacesVigentes = log?.opportunityId
-				? await db
-						.select({ url: contractSignatories.signingUrl })
-						.from(contractSignatories)
-						.innerJoin(
-							generatedLegalContracts,
-							eq(contractSignatories.contractId, generatedLegalContracts.id),
-						)
-						.where(
-							and(
-								eq(generatedLegalContracts.opportunityId, log.opportunityId),
-								ne(generatedLegalContracts.status, "cancelled"),
-								isNull(generatedLegalContracts.replacedByContractId),
-							),
-						)
-				: [];
-			const vigentes = new Set(
-				enlacesVigentes.map((e) => e.url).filter((url): url is string => !!url),
-			);
-			const viejo = input.contracts.find(
-				(c) => c.link && !vigentes.has(c.link),
-			);
-			if (viejo) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: `El enlace de "${viejo.contractName}" ya no es el vigente: el contrato se regeneró o se reemplazó. Usá "Reenviar por WhatsApp" desde la oportunidad para mandar los nuevos.`,
-				});
-			}
+			return conCandadoDeFirma(log?.opportunityId ?? null, async () => {
+				const enlacesVigentes = log?.opportunityId
+					? await db
+							.select({ url: contractSignatories.signingUrl })
+							.from(contractSignatories)
+							.innerJoin(
+								generatedLegalContracts,
+								eq(contractSignatories.contractId, generatedLegalContracts.id),
+							)
+							.where(
+								and(
+									eq(generatedLegalContracts.opportunityId, log.opportunityId),
+									ne(generatedLegalContracts.status, "cancelled"),
+									isNull(generatedLegalContracts.replacedByContractId),
+								),
+							)
+					: [];
+				const vigentes = new Set(
+					enlacesVigentes
+						.map((e) => e.url)
+						.filter((url): url is string => !!url),
+				);
+				const viejo = input.contracts.find(
+					(c) => c.link && !vigentes.has(c.link),
+				);
+				if (viejo) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `El enlace de "${viejo.contractName}" ya no es el vigente: el contrato se regeneró o se reemplazó. Usá "Reenviar por WhatsApp" desde la oportunidad para mandar los nuevos.`,
+					});
+				}
 
-			// Armar mensaje
-			const completeContracts = input.contracts.filter(
-				(c): c is ContractLink => c.link !== null,
-			);
+				// Armar mensaje
+				const completeContracts = input.contracts.filter(
+					(c): c is ContractLink => c.link !== null,
+				);
 
-			if (completeContracts.length === 0) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Todos los contratos deben tener link de firma",
-				});
-			}
+				if (completeContracts.length === 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Todos los contratos deben tener link de firma",
+					});
+				}
 
-			const message = buildContractLinksMessage(
-				recipient.recipientName,
-				completeContracts,
-			);
+				const message = buildContractLinksMessage(
+					recipient.recipientName,
+					completeContracts,
+				);
 
-			// Enviar por WhatsApp. TEST_MESSAGE rige también el envío manual: si
-			// no, reintentar desde la ficha en modo prueba le escribía al cliente.
-			const modoPrueba = isTestModeEnabled();
-			const sendResult = await sendWhatsappTemplate({
-				phone: modoPrueba ? getTestPhone() : input.phone,
-				message,
-				logPrefix: modoPrueba
-					? "[SimpleTech][manual][TEST]"
-					: "[SimpleTech][manual]",
-				ocultarEnlacesEnLog: true,
-			});
-			const status: "sent" | "failed" = sendResult.success ? "sent" : "failed";
-			const reason: string | null = sendResult.success
-				? null
-				: (sendResult.error ?? "Error desconocido al enviar");
-
-			const [updated] = await db
-				.update(whatsappLogRecipients)
-				.set({
-					status,
-					phone: input.phone,
-					contracts: input.contracts,
+				// Enviar por WhatsApp. TEST_MESSAGE rige también el envío manual: si
+				// no, reintentar desde la ficha en modo prueba le escribía al cliente.
+				const modoPrueba = isTestModeEnabled();
+				const sendResult = await sendWhatsappTemplate({
+					phone: modoPrueba ? getTestPhone() : input.phone,
 					message,
-					reason,
-					sentAt: status === "sent" ? new Date() : undefined,
-					updatedAt: new Date(),
-				})
-				.where(eq(whatsappLogRecipients.id, input.recipientId))
-				.returning();
+					logPrefix: modoPrueba
+						? "[SimpleTech][manual][TEST]"
+						: "[SimpleTech][manual]",
+					ocultarEnlacesEnLog: true,
+				});
+				const status: "sent" | "failed" = sendResult.success
+					? "sent"
+					: "failed";
+				const reason: string | null = sendResult.success
+					? null
+					: (sendResult.error ?? "Error desconocido al enviar");
 
-			return updated;
+				const [updated] = await db
+					.update(whatsappLogRecipients)
+					.set({
+						status,
+						phone: input.phone,
+						contracts: input.contracts,
+						message,
+						reason,
+						sentAt: status === "sent" ? new Date() : undefined,
+						updatedAt: new Date(),
+					})
+					.where(eq(whatsappLogRecipients.id, input.recipientId))
+					.returning();
+
+				return updated;
+			});
 		}),
 };

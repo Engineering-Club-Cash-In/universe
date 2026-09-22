@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
  * contra el endpoint de verdad y sin base de datos.
  */
 
+/** Cola de respuestas: la primera es el universo, después va una por lote. */
 let respuestas: unknown[][] = [];
 
 mock.module("../database", () => ({
@@ -38,6 +39,7 @@ describe("getMoraRecuperacionPorAsesor — el mapeo de la fila cruda", () => {
 		// queda en 100 y el RECALCULO no lo supera: esperado = la foto.
 		// Sin mapearlo el nivel baja a 0 y el rebote del cron se cobra entero.
 		respuestas = [
+			[{ credito_id: 1 }],
 			[
 				{
 					asesor_id: 7,

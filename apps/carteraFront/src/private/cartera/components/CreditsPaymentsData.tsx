@@ -53,6 +53,7 @@ import { Switch } from "@/components/ui/switch";
 import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
 import { toast } from "sonner";
 import { ModalCaidoCredit } from "./ModalCaidoCredit";
+import { construirMoraTarjeta } from "@/lib/moraTarjeta";
 
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
@@ -1572,7 +1573,13 @@ function MobileView({
               )}
 
               {/* Mora */}
-              {item?.mora?.activa && <MoraInfo mora={item.mora} />}
+              {item?.mora?.activa && (
+                <MoraInfo
+                  mora={item.mora}
+                  incrementoDiarioMora={item.incrementoDiarioMora}
+                  incrementoMaximoMensualMora={item.incrementoMaximoMensualMora}
+                />
+              )}
 
               {/* Incobrable */}
               {item.incobrable && (
@@ -1984,7 +1991,13 @@ function DesktopView({
 
                       {item?.mora?.activa && (
                         <div className="col-span-full">
-                          <MoraInfo mora={item.mora} />
+                          <MoraInfo
+                            mora={item.mora}
+                            incrementoDiarioMora={item.incrementoDiarioMora}
+                            incrementoMaximoMensualMora={
+                              item.incrementoMaximoMensualMora
+                            }
+                          />
                         </div>
                       )}
 
@@ -2120,7 +2133,25 @@ function DetallesCredito({
   );
 }
 
-function MoraInfo({ mora }: { mora: any }) {
+function MoraInfo({
+  mora,
+  incrementoDiarioMora,
+  incrementoMaximoMensualMora,
+}: {
+  mora: any;
+  incrementoDiarioMora?: unknown;
+  incrementoMaximoMensualMora?: unknown;
+}) {
+  // Qué decir lo decide `construirMoraTarjeta` (src/lib/moraTarjeta.ts), donde
+  // se puede probar sin montar la pantalla. Acá solo se pinta.
+  const tarjeta = construirMoraTarjeta({
+    montoMora: mora?.monto_mora,
+    cuotasAtrasadas: mora?.cuotas_atrasadas,
+    porcentajeMora: mora?.porcentaje_mora,
+    incrementoDiarioMora,
+    incrementoMaximoMensualMora,
+  });
+
   return (
     <div className="bg-yellow-50 rounded-2xl p-4">
       <h4 className="text-lg font-extrabold text-yellow-800 mb-3 text-center">
@@ -2128,29 +2159,28 @@ function MoraInfo({ mora }: { mora: any }) {
       </h4>
       <div className="grid grid-cols-2 gap-3 text-center">
         <div className="p-3 bg-white border rounded-lg shadow-sm">
-          <span className="font-bold text-yellow-700 block">Monto Mora</span>
-          <span className="text-gray-900 font-semibold">
-            Q
-            {Number(mora?.monto_mora || 0).toLocaleString("es-GT", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+          <span className="font-bold text-yellow-700 block">
+            {tarjeta.rotuloMonto}
           </span>
+          <span className="text-gray-900 font-semibold">{tarjeta.monto}</span>
         </div>
         <div className="p-3 bg-white border rounded-lg shadow-sm">
-          <span className="font-bold text-yellow-700 block">% Mora</span>
-          <span className="text-gray-900 font-semibold">
-            {mora?.porcentaje_mora}%
-          </span>
-        </div>
-        <div className="p-3 bg-white border rounded-lg shadow-sm col-span-2">
           <span className="font-bold text-yellow-700 block">
             Cuotas atrasadas
           </span>
-          <span className="text-gray-900 font-semibold">
-            {mora?.cuotas_atrasadas}
-          </span>
+          <span className="text-gray-900 font-semibold">{tarjeta.cuotas}</span>
         </div>
+        {tarjeta.ritmo && (
+          <div className="p-3 bg-white border rounded-lg shadow-sm col-span-2">
+            <span className="text-gray-900 font-semibold">{tarjeta.ritmo}</span>
+            {tarjeta.techo && (
+              <span className="text-gray-700 block">{tarjeta.techo}</span>
+            )}
+          </div>
+        )}
+        <p className="col-span-2 text-xs text-gray-600 text-left leading-relaxed">
+          {tarjeta.explicacion}
+        </p>
       </div>
     </div>
   );

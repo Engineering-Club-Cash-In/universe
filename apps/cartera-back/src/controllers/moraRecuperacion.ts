@@ -393,6 +393,78 @@ export function getMoraRecoveryPeriod({
 	};
 }
 
+/**
+ * Créditos que se piden por lote al reporte de recuperación.
+ *
+ * El plegado del nivel de referencia necesita los eventos CRUDOS del ciclo, y
+ * con el `RECALCULO` diario de la mora proporcional eso es ~31 eventos por
+ * crédito por ciclo (más pagos y condonaciones: digamos ~40 como techo). Traer
+ * el ciclo entero de una eran 7.977 eventos antes de la mora proporcional y
+ * pasarían a ~45.000, creciendo con la cartera sin techo.
+ *
+ * Se parte por CRÉDITOS y no por página de respuesta —la respuesta ya es chica,
+ * una fila por asesor— porque el plegado es por crédito: partir ahí no puede
+ * cambiar el agregado. 500 créditos acotan cada lote a ~20.000 eventos sea cual
+ * sea el tamaño de la cartera, y el NÚMERO de lotes depende solo de cuántos
+ * créditos elegibles hay, nunca de cuántos eventos tenga cada uno.
+ */
+export const CREDITOS_POR_LOTE = 500;
+
+/**
+ * Parte una lista en trozos de `tamano`. Lista vacía → cero lotes (el reporte
+ * sale vacío sin tocar la base).
+ */
+export function partirEnLotes<T>(
+	items: T[],
+	tamano: number = CREDITOS_POR_LOTE,
+): T[][] {
+	if (!Number.isInteger(tamano) || tamano < 1) {
+		throw new RangeError(`Tamaño de lote inválido: ${tamano}`);
+	}
+	const lotes: T[][] = [];
+	for (let i = 0; i < items.length; i += tamano) {
+		lotes.push(items.slice(i, i + tamano));
+	}
+	return lotes;
+}
+
+/**
+ * Universo de créditos del reporte: exactamente el mismo `creditos_con_asesor`
+ * que usa `buildMoraRecoveryQuery`, para que la partición en lotes cubra todas
+ * las filas que el reporte podría devolver y ni una más. Va ordenado por
+ * `credito_id` para que los lotes sean estables entre llamadas.
+ */
+export function buildMoraRecoveryCreditosQuery({
+	asesores,
+	emailCobrador,
+}: {
+	asesores?: number[];
+	emailCobrador?: string;
+}) {
+	return sql`
+    SELECT c.credito_id
+    FROM cartera.creditos c
+    LEFT JOIN cartera.asesores a ON a.asesor_id = c.asesor_id
+    WHERE c."statusCredit" IN (${creditosElegiblesMoraSql})
+      ${filtroEmailAsesor(emailCobrador)}
+      ${filtroAsesores(asesores)}
+    ORDER BY c.credito_id
+  `;
+}
+
+const filtroEmailAsesor = (emailCobrador?: string) =>
+	emailCobrador
+		? sql`AND LOWER(a.email_cash_in) = LOWER(TRIM(${emailCobrador}))`
+		: sql``;
+
+const filtroAsesores = (asesores?: number[]) =>
+	asesores?.length
+		? sql`AND a.asesor_id IN (${sql.join(
+				asesores.map((id) => sql`${id}`),
+				sql`, `,
+			)})`
+		: sql``;
+
 export function buildMoraRecoveryQuery({
 	inicio,
 	fin,
@@ -400,16 +472,23 @@ export function buildMoraRecoveryQuery({
 	alcance,
 	asesores,
 	emailCobrador,
+	creditos,
 }: MoraRecoveryPeriod & {
 	asesores?: number[];
 	emailCobrador?: string;
+	/**
+	 * Lote de créditos a procesar. Sin él la consulta abarca toda la cartera
+	 * elegible (es lo que hacen los tests de forma de la consulta).
+	 */
+	creditos?: number[];
 }) {
-	const emailFilter = emailCobrador
-		? sql`AND LOWER(a.email_cash_in) = LOWER(TRIM(${emailCobrador}))`
-		: sql``;
-	const asesoresFilter = asesores?.length
-		? sql`AND a.asesor_id IN (${sql.join(
-				asesores.map((id) => sql`${id}`),
+	const emailFilter = filtroEmailAsesor(emailCobrador);
+	const asesoresFilter = filtroAsesores(asesores);
+	// El lote acota `creditos_con_asesor`, que es de donde cuelgan los eventos,
+	// los pagos y el JOIN final: acotarlo acá acota TODA la consulta.
+	const creditosFilter = creditos?.length
+		? sql`AND c.credito_id IN (${sql.join(
+				creditos.map((id) => sql`${id}`),
 				sql`, `,
 			)})`
 		: sql``;
@@ -453,6 +532,7 @@ export function buildMoraRecoveryQuery({
       WHERE c."statusCredit" IN (${creditosElegiblesMoraSql})
         ${emailFilter}
         ${asesoresFilter}
+        ${creditosFilter}
     ),
     pagos_por_credito AS (
       SELECT pc.credito_id, COALESCE(SUM(pc.mora::numeric), 0) AS cobrado
@@ -604,11 +684,24 @@ function metricFrom(
 	};
 }
 
-export function buildMoraRecoveryReport(
+/**
+ * Acumulador del reporte: un asesor por clave, ya plegado.
+ *
+ * Existe para que el reporte se pueda armar POR LOTES de créditos sin tener
+ * nunca todos los eventos del ciclo en memoria: cada lote se pliega acá y los
+ * eventos crudos se sueltan. Como el plegado del nivel de referencia es POR
+ * CRÉDITO y la suma por asesor es asociativa, el resultado es el mismo que en
+ * una sola pasada.
+ */
+export type MoraRecoveryAccumulator = Map<string, MoraRecoveryRow>;
+
+export const nuevoMoraRecoveryAccumulator = (): MoraRecoveryAccumulator =>
+	new Map();
+
+export function acumularMoraRecoveryRows(
+	byAsesor: MoraRecoveryAccumulator,
 	rows: MoraRecoverySourceRow[],
-	periodo: { inicio: string; fin: string; alcance: "live" | "historico" },
-): MoraRecoveryReport {
-	const byAsesor = new Map<string, MoraRecoveryRow>();
+): MoraRecoveryAccumulator {
 	for (const source of rows) {
 		const key = String(source.asesorId);
 		const current = byAsesor.get(key) ?? {
@@ -636,6 +729,13 @@ export function buildMoraRecoveryReport(
 			),
 		});
 	}
+	return byAsesor;
+}
+
+export function finalizarMoraRecoveryReport(
+	byAsesor: MoraRecoveryAccumulator,
+	periodo: { inicio: string; fin: string; alcance: "live" | "historico" },
+): MoraRecoveryReport {
 	const porAsesor = [...byAsesor.values()];
 	const sum = (field: keyof MoraRecoveryMetric) =>
 		porAsesor.reduce((total, row) => total + Number(row[field]), 0).toFixed(2);
@@ -652,4 +752,18 @@ export function buildMoraRecoveryReport(
 		},
 		porAsesor,
 	};
+}
+
+/**
+ * Una sola pasada: sigue siendo la forma natural de probar el plegado sin base.
+ * El endpoint usa el acumulador por lotes, que da lo mismo.
+ */
+export function buildMoraRecoveryReport(
+	rows: MoraRecoverySourceRow[],
+	periodo: { inicio: string; fin: string; alcance: "live" | "historico" },
+): MoraRecoveryReport {
+	return finalizarMoraRecoveryReport(
+		acumularMoraRecoveryRows(nuevoMoraRecoveryAccumulator(), rows),
+		periodo,
+	);
 }

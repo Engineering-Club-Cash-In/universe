@@ -154,6 +154,55 @@ export function calcularMoraProporcional(params: {
   }, new Big(0));
 }
 
+export const MOTIVO_MORA_SIN_CAPITAL = "Crédito sin capital — no aplica mora";
+export const MOTIVO_MORA_MENOR_A_UN_CENTAVO = "Mora proporcional menor a un centavo";
+
+/**
+ * Decisión pura del paso 5 del cron (`procesarMoras`) para UN crédito con
+ * cuotas vencidas: ¿hay mora que cobrar, o hay que apagar la que tuviera?
+ *
+ * Dos casos caen en "no hay mora que cobrar":
+ *  - capital ≤ 0 (el caso viejo: sin capital no hay base sobre la cual cobrar);
+ *  - la mora proporcional redondea a Q0.00 (capital positivo pero chico + pocos
+ *    días de atraso, p. ej. Q10 con 1 día → 10 × 1.12% × 1/30 ≈ Q0.0037).
+ *
+ * El segundo caso NO se puede insertar: `createMora` rechaza explícitamente los
+ * montos ≤ 0 ("Monto de mora debe ser mayor a 0"), y
+ * `decidirMoraTrasRomperConvenio` ya decide dejar ACTIVO ese mismo crédito — si
+ * el cron lo marcara MOROSO con una mora de Q0.00 el crédito se mecería entre
+ * MOROSO y ACTIVO noche tras noche, y el cliente aparecería moroso por cero.
+ *
+ * El monto va como string ya redondeado porque es exactamente lo que se
+ * escribe en `moras_credito.monto_mora`: decidir sobre el número redondeado es
+ * lo único que garantiza que nunca se guarde un "0.00" activo.
+ */
+export function decidirMoraDelCron(params: {
+  capital: Big | string | number | null;
+  diasAtrasadosPorCuota: number[];
+}): { accion: "APLICAR"; montoStr: string } | { accion: "DESACTIVAR"; motivo: string } {
+  let capital: Big;
+  try {
+    capital = new Big(params.capital || 0);
+  } catch {
+    capital = new Big(0);
+  }
+
+  if (capital.lte(0)) {
+    return { accion: "DESACTIVAR", motivo: MOTIVO_MORA_SIN_CAPITAL };
+  }
+
+  const montoStr = calcularMoraProporcional({
+    capital,
+    diasAtrasadosPorCuota: params.diasAtrasadosPorCuota,
+  }).toFixed(2);
+
+  if (!(Number(montoStr) > 0)) {
+    return { accion: "DESACTIVAR", motivo: MOTIVO_MORA_MENOR_A_UN_CENTAVO };
+  }
+
+  return { accion: "APLICAR", montoStr };
+}
+
 /**
  * Inserta un evento en moras_historial. No lanza si falla — el historial
  * no debe romper la operación principal, solo loguea.
@@ -893,6 +942,55 @@ export async function updateMora({
  *    - Update the credit status to "MOROSO".
  * 5. Log every step for debugging and monitoring.
  */
+/**
+ * Apaga la mora activa de un crédito dentro de la corrida del cron y deja el
+ * rastro en `moras_historial`. Lo usan los tres caminos del cron que llegan al
+ * mismo final —sin capital, mora que redondea a Q0.00 y crédito al día—, que
+ * solo se diferencian en el `motivo`.
+ *
+ * El UPDATE del crédito es CONDICIONAL sobre MOROSO a propósito: bajar a
+ * ACTIVO sin esa condición des-castigaría un EN_CONVENIO/CAIDO/INCOBRABLE.
+ */
+async function desactivarMoraDelCron(
+  creditoId: number,
+  moraPrevia: {
+    mora_id: number;
+    monto_mora: string;
+    cuotas_atrasadas: number;
+    porcentaje_mora: string | null;
+  },
+  motivo: string,
+) {
+  await db
+    .update(moras_credito)
+    .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
+    .where(eq(moras_credito.mora_id, moraPrevia.mora_id));
+
+  // Solo bajar a ACTIVO si seguía MOROSO — preservar EN_CONVENIO, CAIDO, etc.
+  await db
+    .update(creditos)
+    .set({ statusCredit: "ACTIVO" })
+    .where(
+      and(
+        eq(creditos.credito_id, creditoId),
+        eq(creditos.statusCredit, "MOROSO")
+      )
+    );
+
+  await registrarHistorialMora({
+    credito_id: creditoId,
+    mora_id: moraPrevia.mora_id,
+    tipo_evento: "DESACTIVACION",
+    origen: "PROCESO_AUTO",
+    monto_anterior: moraPrevia.monto_mora,
+    monto_nuevo: "0",
+    cuotas_atrasadas_anterior: moraPrevia.cuotas_atrasadas,
+    cuotas_atrasadas_nuevas: 0,
+    porcentaje_mora: moraPrevia.porcentaje_mora,
+    motivo,
+  });
+}
+
 // Clave fija para el advisory lock de procesarMoras (cualquier int estable sirve).
 const PROCESAR_MORAS_LOCK_KEY = 728193;
 
@@ -911,7 +1009,7 @@ export async function procesarMoras() {
     lockHeld = _lk.rows[0]?.ok === true;
     if (!lockHeld) {
       emitCreditLateFee({ outcome: "skipped", operation: "process", durationMs: elapsedMilliseconds(startedAt), reasonCode: "concurrent_run" });
-      return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0 };
+      return { skipped: true, creadas: 0, recalculadas: 0, sinCambios: 0, desactivadas: 0, sinCapital: 0, moraCero: 0 };
     }
 
     const hoy = hoyGuatemala();
@@ -961,9 +1059,15 @@ export async function procesarMoras() {
     //    ya traído en el JOIN para evitar un SELECT por crédito dentro del loop).
     const moraPorCredito: Record<number, number> = {};
     const capitalPorCredito = new Map<number, string>();
+    // Los días de atraso van POR CUOTA: la mora ya no es un bloque fijo por cuota
+    // sino proporcional al tiempo real de atraso de cada una (con techo mensual).
+    const diasPorCredito = new Map<number, number[]>();
     for (const cuota of cuotasVencidas) {
       moraPorCredito[cuota.credito_id] = (moraPorCredito[cuota.credito_id] ?? 0) + 1;
       capitalPorCredito.set(cuota.credito_id, cuota.capital);
+      const dias = diasPorCredito.get(cuota.credito_id) ?? [];
+      dias.push(diasAtrasoMora(cuota.fecha_vencimiento, hoy));
+      diasPorCredito.set(cuota.credito_id, dias);
     }
 
 
@@ -991,6 +1095,10 @@ export async function procesarMoras() {
     let desactivadas = 0;
     let sinCapital = 0;
     let desactivadasSinCapital = 0;
+    // Créditos con capital positivo cuya mora proporcional redondea a Q0.00:
+    // no se les crea mora (createMora prohíbe montos ≤ 0) ni se los marca MOROSO.
+    let moraCero = 0;
+    let desactivadasMoraCero = 0;
     let skippedInternally = 0;
 
     // 5. Procesar créditos CON cuotas vencidas → crear o recalcular
@@ -1003,51 +1111,32 @@ export async function procesarMoras() {
         continue;
       }
 
-      const capital = new Big(capitalStr);
+      // ¿Hay mora que cobrar? Dos casos dicen que no: capital ≤ 0 (nunca hubo
+      // base) y mora proporcional que redondea a Q0.00 (capital chico + pocos
+      // días). Ambos terminan igual: no se crea mora, se apaga la que hubiera y
+      // el crédito NO se marca MOROSO.
+      const decision = decidirMoraDelCron({
+        capital: capitalStr,
+        diasAtrasadosPorCuota: diasPorCredito.get(creditoId) ?? [],
+      });
 
-      // Sin capital no aplica mora. Si tenía una mora activa, se le quita (desactiva).
-      if (capital.lte(0)) {
-        sinCapital++;
+      if (decision.accion === "DESACTIVAR") {
+        const esSinCapital = decision.motivo === MOTIVO_MORA_SIN_CAPITAL;
+        if (esSinCapital) sinCapital++;
+        else moraCero++;
+
         const moraPrevia = morasActivasPorCredito.get(creditoId);
         if (moraPrevia) {
-          await db
-            .update(moras_credito)
-            .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
-            .where(eq(moras_credito.mora_id, moraPrevia.mora_id));
-
-          // Solo bajar a ACTIVO si seguía MOROSO — preservar EN_CONVENIO, CAIDO, etc.
-          await db
-            .update(creditos)
-            .set({ statusCredit: "ACTIVO" })
-            .where(
-              and(
-                eq(creditos.credito_id, creditoId),
-                eq(creditos.statusCredit, "MOROSO")
-              )
-            );
-
-          await registrarHistorialMora({
-            credito_id: creditoId,
-            mora_id: moraPrevia.mora_id,
-            tipo_evento: "DESACTIVACION",
-            origen: "PROCESO_AUTO",
-            monto_anterior: moraPrevia.monto_mora,
-            monto_nuevo: "0",
-            cuotas_atrasadas_anterior: moraPrevia.cuotas_atrasadas,
-            cuotas_atrasadas_nuevas: 0,
-            porcentaje_mora: moraPrevia.porcentaje_mora,
-            motivo: "Crédito sin capital — no aplica mora",
-          });
+          await desactivarMoraDelCron(creditoId, moraPrevia, decision.motivo);
           desactivadas++;
-          desactivadasSinCapital++;
+          if (esSinCapital) desactivadasSinCapital++;
+          else desactivadasMoraCero++;
         }
 
         continue;
       }
 
-      const porcentaje = new Big("0.0112");
-      const moraNueva = capital.times(porcentaje).times(cuotasAtrasadas);
-      const moraNuevaStr = moraNueva.toFixed(2);
+      const moraNuevaStr = decision.montoStr;
 
       const moraActual = morasActivasPorCredito.get(creditoId);
 
@@ -1142,39 +1231,11 @@ export async function procesarMoras() {
     for (const mora of morasActivas) {
       if (moraPorCredito[mora.credito_id]) continue; // sigue moroso, ya procesado
 
-      await db
-        .update(moras_credito)
-        .set({
-          monto_mora: "0",
-          cuotas_atrasadas: 0,
-          activa: false,
-          updated_at: new Date(),
-        })
-        .where(eq(moras_credito.mora_id, mora.mora_id));
-
-      // Solo bajar a ACTIVO si seguía MOROSO — preservar EN_CONVENIO, CAIDO, etc.
-      await db
-        .update(creditos)
-        .set({ statusCredit: "ACTIVO" })
-        .where(
-          and(
-            eq(creditos.credito_id, mora.credito_id),
-            eq(creditos.statusCredit, "MOROSO")
-          )
-        );
-
-      await registrarHistorialMora({
-        credito_id: mora.credito_id,
-        mora_id: mora.mora_id,
-        tipo_evento: "DESACTIVACION",
-        origen: "PROCESO_AUTO",
-        monto_anterior: mora.monto_mora,
-        monto_nuevo: "0",
-        cuotas_atrasadas_anterior: mora.cuotas_atrasadas,
-        cuotas_atrasadas_nuevas: 0,
-        porcentaje_mora: mora.porcentaje_mora,
-        motivo: "Crédito se puso al día (sin cuotas vencidas)",
-      });
+      await desactivarMoraDelCron(
+        mora.credito_id,
+        mora,
+        "Crédito se puso al día (sin cuotas vencidas)",
+      );
 
       desactivadas++;
 
@@ -1190,7 +1251,13 @@ export async function procesarMoras() {
 
 
     const succeededCount = creadas + recalculadas + sinCambios + desactivadas;
-    const skippedCount = (sinCapital - desactivadasSinCapital) + skippedInternally;
+    // Un crédito "omitido" es el que no terminó en creación/recálculo/sin-cambios/
+    // desactivación: los sin capital y los de mora Q0.00 que NO tenían mora previa
+    // (los que sí la tenían ya se contaron en `desactivadas`, dentro de succeeded).
+    const skippedCount =
+      (sinCapital - desactivadasSinCapital) +
+      (moraCero - desactivadasMoraCero) +
+      skippedInternally;
     emitCreditLateFee({
       outcome: "completed",
       operation: "process",
@@ -1200,7 +1267,7 @@ export async function procesarMoras() {
       failedCount: 0,
       skippedCount,
     });
-    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital };
+    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital, moraCero };
 
   } catch (error: any) {
     emitCreditLateFee({ outcome: "failed", operation: "process", durationMs: elapsedMilliseconds(startedAt), errorCode: "unknown" });

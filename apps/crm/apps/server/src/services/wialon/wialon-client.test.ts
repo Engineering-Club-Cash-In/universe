@@ -1505,4 +1505,94 @@ describe("WialonClient", () => {
 		await client.getUnitsStatus([333]);
 		expect(searchCalls).toBe(1); // Sigue siendo 1 llamada
 	});
+
+	test("searchUnits no cachea coincidencias heurísticas de sensor si flags omite propiedades personalizadas (prp)", async () => {
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				return new Response(
+					JSON.stringify({
+						items: [
+							{
+								id: 888,
+								sens: {
+									"1": { id: 1, n: "Motor encendido", t: "engine operation" },
+								},
+							},
+						],
+					}),
+					{ status: 200 },
+				);
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+		// Consulta con flags: 4097 (sensores, pero sin bit 2 de prp)
+		await client.searchUnits({ flags: 4097 });
+
+		const cacheEntry = (
+			client as unknown as {
+				ignitionSensorCache: Map<
+					number,
+					{ sensorId: string | null; expiresAt: number }
+				>;
+			}
+		).ignitionSensorCache.get(888);
+
+		// No debe poblar el caché con "1" porque prp fue omitido y el match es no-autoritativo
+		expect(cacheEntry).toBeUndefined();
+	});
+
+	test("getUnitDetail no actualiza caché de ignición ante máscaras parciales (1027 o 4097) pero sí con 5123", async () => {
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_item")) {
+				return new Response(
+					JSON.stringify({
+						item: {
+							id: 991,
+							nm: "Unidad Test",
+							cls: 2,
+							prp: { monitoring_sensor_id: "5" },
+							sens: { "5": { id: 5, n: "Ignición", t: "engine operation" } },
+						},
+						flags: 5123,
+					}),
+					{ status: 200 },
+				);
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+		const getCache = () =>
+			(
+				client as unknown as {
+					ignitionSensorCache: Map<
+						number,
+						{ sensorId: string | null; expiresAt: number }
+					>;
+				}
+			).ignitionSensorCache.get(991);
+
+		// 1. Con máscara parcial 1027 (sin sens): no debe cachear
+		await client.getUnitDetail(991, 1027);
+		expect(getCache()).toBeUndefined();
+
+		// 2. Con máscara parcial 4097 (sin prp): no debe cachear
+		await client.getUnitDetail(991, 4097);
+		expect(getCache()).toBeUndefined();
+
+		// 3. Con máscara completa 5123 (prp + sens): sí debe cachear de forma autoritativa
+		await client.getUnitDetail(991, 5123);
+		expect(getCache()).toBeDefined();
+		expect(getCache()?.sensorId).toBe("5");
+	});
 });

@@ -404,14 +404,14 @@ export class WialonClient {
 				);
 			}
 
-			// Pre-cargar caché de sensores de ignición para unidades devueltas
+			// Pre-cargar caché de sensores de ignición para unidades devueltas solo si
+			// la consulta incluyó tanto propiedades (prp) como sensores (sens) para garantizar autoritatividad
 			const hasPrpFlag = (parsed.flags & 2) !== 0;
-			for (const item of data.items) {
-				if (item.sens || item.prp) {
-					const sensorId = findIgnitionSensorId(item.sens, item.prp);
-					// Solo guardar negative cache (null) si las propiedades (prp) fueron consultadas,
-					// evitando descartar prematuramente sensores configurados por prp cuando solo se solicitó sens.
-					if (sensorId || hasPrpFlag) {
+			const hasSensFlag = (parsed.flags & 4096) !== 0;
+			if (hasPrpFlag && hasSensFlag) {
+				for (const item of data.items) {
+					if (item.sens || item.prp) {
+						const sensorId = findIgnitionSensorId(item.sens, item.prp);
 						this.setSensorCache(
 							item.id,
 							sensorId,
@@ -665,7 +665,10 @@ export class WialonClient {
 				);
 			}
 
-			if (data.item.sens || data.item.prp) {
+			// Pre-cargar caché de sensores solo si la consulta incluyó metadatos completos (prp y sens)
+			const hasPrp = (flags & 2) !== 0;
+			const hasSens = (flags & 4096) !== 0;
+			if (hasPrp && hasSens && (data.item.sens || data.item.prp)) {
 				const sensorId = findIgnitionSensorId(data.item.sens, data.item.prp);
 				this.setSensorCache(
 					data.item.id,

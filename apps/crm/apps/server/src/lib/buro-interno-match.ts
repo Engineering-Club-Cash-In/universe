@@ -32,6 +32,8 @@ export type CandidatoBuroInterno = {
 	apellidos?: string | null;
 	/** Cuando el nombre viene en un solo campo (codeudores, referencias) */
 	nombreCompleto?: string | null;
+	/** Solo el titular: el lead del CRM de la solicitud */
+	leadId?: string | null;
 	dpi?: string | null;
 	nit?: string | null;
 	telefonos?: (string | null | undefined)[];
@@ -40,6 +42,8 @@ export type CandidatoBuroInterno = {
 
 export type RegistroParaMatch = {
 	id: string;
+	/** Lead del CRM desde el que se registró, si se eligió uno */
+	leadId: string | null;
 	nombres: string;
 	apellidos: string;
 	dpi: string | null;
@@ -238,6 +242,7 @@ export function sugerirNombresApellidos(nombreCompleto: string): {
 }
 
 type PersonaNormalizada = {
+	leadId: string | null;
 	dpi: string | null;
 	nit: string | null;
 	telefonos: string[];
@@ -273,6 +278,7 @@ function normalizarPersona(persona: {
 	nombres?: string | null;
 	apellidos?: string | null;
 	nombreCompleto?: string | null;
+	leadId?: string | null;
 	dpi?: string | null;
 	nit?: string | null;
 	telefonos?: (string | null | undefined)[];
@@ -298,6 +304,7 @@ function normalizarPersona(persona: {
 	const direccion = normalizarTexto(persona.direccion);
 
 	return {
+		leadId: persona.leadId ?? null,
 		dpi: normalizarDpiMatch(persona.dpi),
 		nit: normalizarNitMatch(persona.nit),
 		telefonos: [
@@ -430,6 +437,22 @@ function porcentaje(valor: number): string {
 }
 
 export const DEFINICIONES_REGLAS: DefinicionRegla[] = [
+	{
+		clave: "lead_igual",
+		nombre: "Mismo lead del CRM",
+		descripcion:
+			"La solicitud es del mismo lead que se registró en el buró, aunque después le hayan cambiado el teléfono, el DPI o el nombre.",
+		tipo: "identidad",
+		activaPorDefecto: true,
+		severidadPorDefecto: "alta",
+		// Solo el titular tiene lead: codeudores y referencias no se comparan
+		parametrosPorDefecto: { aplica_a: ["titular"] },
+		parametros: [],
+		evaluar: (c, r) =>
+			c.leadId && r.leadId && c.leadId === r.leadId
+				? "Es el lead registrado en el buró"
+				: null,
+	},
 	{
 		clave: "dpi_igual",
 		nombre: "Mismo DPI",
@@ -812,6 +835,7 @@ export function evaluarCoincidencias(
 		persona: normalizarPersona({
 			nombres: r.nombres,
 			apellidos: r.apellidos,
+			leadId: r.leadId,
 			dpi: r.dpi,
 			nit: r.nit,
 			telefonos: [r.telefono],

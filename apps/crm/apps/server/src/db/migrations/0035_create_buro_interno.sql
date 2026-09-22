@@ -50,6 +50,7 @@ CREATE INDEX IF NOT EXISTS "buro_interno_eventos_persona_idx" ON "public"."buro_
 CREATE INDEX IF NOT EXISTS "buro_interno_eventos_created_at_idx" ON "public"."buro_interno_eventos" USING btree ("created_at");--> statement-breakpoint
 -- Parámetros en '{}': toman los valores por defecto definidos en lib/buro-interno-match.ts hasta que alguien los edite
 INSERT INTO "public"."buro_interno_reglas" ("clave", "activa", "severidad", "orden") VALUES
+	('lead_igual', true, 'alta', 0),
 	('dpi_igual', true, 'alta', 1),
 	('nit_igual', true, 'alta', 2),
 	('nombre_completo_igual', true, 'alta', 3),

@@ -242,6 +242,11 @@ function ReglaCard({
 							</div>
 						)}
 						{otros.map(editorDe)}
+						{regla.descriptoresParametros.length === 0 && (
+							<p className="text-sm">
+								No tiene nada que ajustar: la coincidencia es exacta.
+							</p>
+						)}
 					</section>
 
 					<section className="space-y-3 rounded-lg border bg-muted/30 p-4">

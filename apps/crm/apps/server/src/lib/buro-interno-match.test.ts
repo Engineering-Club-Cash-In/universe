@@ -12,6 +12,7 @@ import {
 
 const registroBase: RegistroParaMatch = {
 	id: "reg-1",
+	leadId: "lead-1",
 	nombres: "Juan Carlos",
 	apellidos: "Pérez Ixcot",
 	dpi: "1234 56789 0101",
@@ -71,6 +72,39 @@ describe("normalización", () => {
 });
 
 describe("identidad", () => {
+	test("el mismo lead sigue saliendo aunque le cambien teléfono, DPI y nombre", () => {
+		const [coincidencia] = evaluarCoincidencias(
+			[
+				titular({
+					leadId: "lead-1",
+					nombres: "Juanca",
+					apellidos: "Ixcot",
+					telefonos: ["4444 0000"],
+				}),
+			],
+			[registroBase],
+			reglasPorDefecto,
+		);
+		expect(coincidencia.severidad).toBe("alta");
+		expect(coincidencia.reglas.map((r) => r.clave)).toEqual(["lead_igual"]);
+	});
+
+	test("el lead solo se compara en el titular", () => {
+		const coincidencias = evaluarCoincidencias(
+			[
+				{
+					origen: "codeudor",
+					etiqueta: "Codeudor",
+					leadId: "lead-1",
+					nombreCompleto: "Otro Nombre",
+				},
+			],
+			[registroBase],
+			reglasPorDefecto,
+		);
+		expect(coincidencias).toEqual([]);
+	});
+
 	test("mismo DPI con otro nombre es la misma persona y calla las reglas de familia", () => {
 		const [coincidencia] = evaluarCoincidencias(
 			[

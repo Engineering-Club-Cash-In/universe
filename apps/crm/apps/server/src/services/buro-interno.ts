@@ -942,6 +942,7 @@ export async function evaluarOportunidad(opportunityId: string) {
 			origen: "titular",
 			etiqueta: "Titular",
 			...nombresTitular,
+			leadId: fila.leadId,
 			dpi: fila.dpi,
 			nit: fila.nit,
 			telefonos: [fila.phone],

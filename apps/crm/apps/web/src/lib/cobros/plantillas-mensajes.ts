@@ -27,11 +27,15 @@ export interface VariablesPlantilla {
 	telefonoAsesor: string;
 	nombreAsesor: string;
 	/**
-	 * Recargo de UNA cuota vencida más (capital × 1.12%), misma fórmula que el
-	 * job `procesarMoras` de cartera-back. Viene ya formateado del server
-	 * (getDetallesCreditoCarteraBack).
+	 * Mora proporcional, misma fórmula que el job `procesarMoras` de
+	 * cartera-back: cada cuota vencida suma 1/30 de su cargo mensual por día de
+	 * atraso y se congela en el cargo completo al día 30. Ambos vienen ya
+	 * formateados del server (getDetallesCreditoCarteraBack).
+	 *  - expectativaMora: tope de la cuota = cargo mensual (capital × 1.12%).
+	 *  - expectativaMoraDiaria: lo que suma cada día de atraso (1/30 del cargo).
 	 */
 	expectativaMora: string;
+	expectativaMoraDiaria?: string;
 	/** Año del impuesto de circulación. Default: año actual en Guatemala. */
 	anioImpuesto?: string;
 	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
@@ -110,7 +114,8 @@ export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
 
 /**
  * Fragmento fijo de la oración de mora del recordatorio del día de pago
- * ("…se agregará un recargo por mora de Q{expectativaMora}."). Sirve para
+ * ("…se agregará un recargo por mora de Q{expectativaMoraDiaria} por cada día
+ * de atraso, hasta un máximo de Q{expectativaMora} al mes."). Sirve para
  * detectar, en el mensaje YA interpolado que el asesor editó, si la oración
  * sigue presente: si la borró, no hay nada que bloquear.
  */
@@ -155,6 +160,7 @@ export function mensajeAnunciaMontoAdeudado(mensaje: string): boolean {
 export function mensajeAnunciaExpectativaMora(mensaje: string): boolean {
 	return (
 		mensaje.includes("{expectativaMora}") ||
+		mensaje.includes("{expectativaMoraDiaria}") ||
 		mensaje.includes(FRAGMENTO_EXPECTATIVA_MORA)
 	);
 }
@@ -298,6 +304,10 @@ export function interpolar(
 			v(variables.expectativaMora, "expectativa de mora"),
 		)
 		.replace(
+			/{expectativaMoraDiaria}/g,
+			v(variables.expectativaMoraDiaria ?? "", "mora por día de atraso"),
+		)
+		.replace(
 			/{anioImpuesto}/g,
 			v(variables.anioImpuesto ?? anioImpuestoCirculacion(), "año impuesto"),
 		)
@@ -384,7 +394,7 @@ Si tienes alguna consulta, con gusto estamos para apoyarte. Agradeceremos confir
 		cuerpo: `Hola {clienteNombre} 👋
 Te recordamos que hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
 
-🛑 Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMora}.
+🛑 Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMoraDiaria} por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.
 
 📞 Si necesitas apoyo, comunícate con tu asesor:
 {nombreAsesor} - Asesor de Cobros
@@ -395,7 +405,7 @@ CashIn`,
 		cuerpoWhastapp: `Hola {clienteNombre} 👋
 Te recordamos que *hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}*. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
 
-🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMora}.*
+🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMoraDiaria} por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.*
 
 📞 Si necesitas apoyo, comunícate con tu asesor:
 *{nombreAsesor} - Asesor de Cobros*

@@ -136,19 +136,43 @@ describe("plantillas web de cobros", () => {
 		expect(bienvenida?.cuerpoWhastapp).toMatch(/confirmar la recepción/i);
 	});
 
-	test("el recordatorio del día de pago usa la expectativa de mora del server", () => {
+	test("el recordatorio del día de pago anuncia la mora proporcional del server", () => {
 		const alDia = PLANTILLAS_MENSAJES.find(
 			(plantilla) => plantilla.id === "al_dia",
 		);
+		const oracion =
+			"se agregará un recargo por mora de Q{expectativaMoraDiaria} por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.";
 
-		// El monto lo calcula el server (capital × 1.12%, misma fórmula que
-		// procesarMoras en cartera-back) y llega por getDetallesCreditoCarteraBack.
+		// Los dos montos los calcula el server con la misma fórmula proporcional
+		// que procesarMoras en cartera-back y llegan por
+		// getDetallesCreditoCarteraBack: lo que suma cada día y el tope de la
+		// cuota. WhatsApp lleva la oración entera en negrita (como el deck); el
+		// email, la misma oración sin asteriscos.
 		expect(alDia?.cuerpoWhastapp).toContain(
-			"se agregará un recargo por mora de Q{expectativaMora}.",
+			`🛑 *Si no realizas tu pago hoy, ${oracion}*`,
 		);
 		expect(alDia?.cuerpo).toContain(
-			"se agregará un recargo por mora de Q{expectativaMora}.",
+			`🛑 Si no realizas tu pago hoy, ${oracion}`,
 		);
+		expect(alDia?.cuerpo).not.toContain("*");
+
+		const mensaje = interpolar(alDia?.cuerpoWhastapp ?? "", {
+			clienteNombre: "MARIA LOPEZ",
+			fechaPago: "5",
+			cuotaMensual: "2,500.00",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+			expectativaMora: "504.00",
+			expectativaMoraDiaria: "16.80",
+		});
+		expect(mensaje).toContain(
+			"recargo por mora de Q16.80 por cada día de atraso, hasta un máximo de Q504.00 al mes.",
+		);
+		expect(mensaje).not.toContain("{expectativaMora");
 	});
 
 	test("crea links manuales de WhatsApp con el cuerpo de WhatsApp", () => {
@@ -329,8 +353,8 @@ describe("plantillas web de cobros", () => {
 		expect(alDia).toContain(FRAGMENTO_EXPECTATIVA_MORA);
 		expect(mensajeAnunciaExpectativaMora(alDia)).toBe(true);
 
-		// Interpolado sin expectativa queda "recargo por mora de Q." → sigue
-		// bloqueando…
+		// Interpolado sin montos quedan los huecos ("recargo por mora de Q por
+		// cada día…, hasta un máximo de Q al mes") → sigue bloqueando…
 		const interpolado = interpolar(alDia, {
 			clienteNombre: "MARIA LOPEZ",
 			fechaPago: "5",
@@ -342,9 +366,20 @@ describe("plantillas web de cobros", () => {
 			telefonoAsesor: "41286630",
 			nombreAsesor: "Carlos Pérez",
 			expectativaMora: "",
+			expectativaMoraDiaria: "",
 		});
-		expect(interpolado).toContain("recargo por mora de Q.");
+		expect(interpolado).toContain(
+			"recargo por mora de Q por cada día de atraso, hasta un máximo de Q al mes.",
+		);
 		expect(mensajeAnunciaExpectativaMora(interpolado)).toBe(true);
+
+		// El modal bloquea si falta CUALQUIERA de los dos montos: el guard detecta
+		// la oración y el modal revisa los dos valores. Con uno solo el texto
+		// igual sale con un hueco.
+		expect(mensajeAnunciaExpectativaMora("Q{expectativaMoraDiaria}")).toBe(
+			true,
+		);
+		expect(mensajeAnunciaExpectativaMora("Q{expectativaMora}")).toBe(true);
 
 		// …pero si el asesor borra esa oración, el mensaje se puede enviar.
 		const sinOracion = interpolado

@@ -1114,6 +1114,7 @@ function RouteComponent() {
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
+											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
@@ -1147,6 +1148,7 @@ function RouteComponent() {
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
+											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
@@ -1183,6 +1185,7 @@ function RouteComponent() {
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
+											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>

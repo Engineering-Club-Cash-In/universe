@@ -706,15 +706,41 @@ describe("el detalle expone el ritmo de la mora Y su techo, en los DOS returns",
 		);
 	});
 
+	it("la proyección mira hasta hoy + 30 días, no solo lo ya vencido", async () => {
+		// El defecto que esto fija: con el filtro en "vencidas" la cuota que vence
+		// HOY quedaba fuera, y mañana el cron ya le cobra 1/30 — el ritmo
+		// anunciado salía por DEBAJO del real y el cliente pagaba de menos.
+		const source = await leerFuente();
+		const query = source.slice(
+			source.indexOf("const cuotasParaMora = await db"),
+			source.indexOf("const diasDeCuotasEnHorizonteDeMora ="),
+		);
+
+		// La ventana de la query es el horizonte, no "hoy".
+		expect(query).toContain(
+			"lte(cuotas_credito.fecha_vencimiento, limiteHorizonteMora)",
+		);
+		expect(source).toContain("hoyGT.getDate() + BASE_DIAS_MORA");
+
+		// Y el filtro en memoria usa el MISMO horizonte, con días CON SIGNO: con
+		// `diasAtrasoMora` (que aplasta a 0) una cuota futura cobraría desde hoy.
+		const filtro = source.slice(
+			source.indexOf("const diasDeCuotasEnHorizonteDeMora ="),
+			source.indexOf("const incrementoDiarioMoraStr"),
+		);
+		expect(filtro).toContain("isInstallmentWithinMoraHorizon(");
+		expect(filtro).toContain("diasAtrasoMoraConSigno(c.fecha_vencimiento, hoyGT)");
+	});
+
 	it("las dos cifras salen de las MISMAS cuotas, sin una query extra", async () => {
 		const source = await leerFuente();
 
 		// Un solo cálculo de días de atraso alimenta a las dos.
 		expect(
-			source.match(/diasAtrasadosPorCuota: diasAtrasoDeCuotasEnMora,/g),
+			source.match(/diasAtrasadosPorCuota: diasDeCuotasEnHorizonteDeMora,/g),
 		).toHaveLength(2);
 		expect(
-			source.match(/const diasAtrasoDeCuotasEnMora =/g),
+			source.match(/const diasDeCuotasEnHorizonteDeMora =/g),
 		).toHaveLength(1);
 	});
 });

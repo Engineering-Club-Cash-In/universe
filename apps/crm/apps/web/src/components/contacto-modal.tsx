@@ -57,6 +57,7 @@ import {
 	cuerpoParaValidarNoReply,
 	interpolar,
 	mensajeAnunciaExpectativaMora,
+	mensajeAnunciaIncrementoMoraSinDato,
 	mensajeAnunciaMontoAdeudado,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
@@ -414,6 +415,24 @@ export function ContactoModal({
 		) {
 			toast.error(
 				'No se pudo calcular el monto adeudado de este crédito. Quitá la oración del monto en "Editar mensaje" o elegí otra plantilla.',
+			);
+			return;
+		}
+		// El aumento de la mora: la oración incorporada se borra sola al
+		// interpolar, pero si el asesor escribió {incrementoDiarioMora} suelto y
+		// cartera no mandó el dato, el mensaje sale con el hueco ("El saldo
+		// aumenta Q diario"). Mismo criterio que el masivo, que en ese caso
+		// descarta el crédito con motivo.
+		if (
+			accionUsaCuerpoNoReply(metodo) &&
+			mensajeAnunciaIncrementoMoraSinDato(
+				cuerpoNoReply,
+				incrementoDiarioMora,
+				incrementoMaximoMensualMora,
+			)
+		) {
+			toast.error(
+				'No se pudo calcular cuánto aumenta la mora de este crédito. Quitá la oración del aumento en "Editar mensaje" o elegí otra plantilla.',
 			);
 			return;
 		}

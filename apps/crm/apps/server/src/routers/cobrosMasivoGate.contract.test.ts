@@ -47,3 +47,43 @@ describe("envío masivo — el gate que carga el detalle de cartera-back", () =>
     expect(condicionDelGate()).toContain("||");
   });
 });
+
+/**
+ * Traer el detalle no alcanza: si cartera no pudo calcular el aumento y la
+ * plantilla lo menciona con un placeholder suelto, el mensaje sale con el
+ * hueco ("El saldo aumenta Q diario"). El envío tiene que descartarse con
+ * motivo, igual que con {montoAdeudado}.
+ */
+describe("envío masivo — el gate que descarta el aumento de mora sin dato", () => {
+  /** El bloque del gate, desde la llamada. */
+  function bloqueDelGate(largo: number): string {
+    const inicio = fuente.indexOf(
+      "const incremento = prepararIncrementoMoraParaEnvio(",
+    );
+    expect(inicio).toBeGreaterThan(-1);
+    return fuente.slice(inicio, inicio + largo);
+  }
+
+  test("pasa las dos cifras del detalle de cartera", () => {
+    expect(bloqueDelGate(400)).toContain("detalleCartera?.incrementoDiarioMora");
+    expect(bloqueDelGate(400)).toContain(
+      "detalleCartera?.incrementoMaximoMensualMora",
+    );
+  });
+
+  test("si no se puede enviar, el crédito se descarta con su motivo", () => {
+    const bloque = bloqueDelGate(700);
+    expect(bloque).toContain("if (!incremento.enviar)");
+    expect(bloque).toContain("motivo: incremento.motivo,");
+    expect(bloque).toContain("continue;");
+  });
+
+  test("el mensaje usa las cifras que pasaron por el gate, no las crudas", () => {
+    expect(fuente).toContain(
+      "incrementoDiarioMora: incremento.incrementoDiarioMora,",
+    );
+    expect(fuente).toContain(
+      "incrementoMaximoMensualMora: incremento.incrementoMaximoMensualMora,",
+    );
+  });
+});

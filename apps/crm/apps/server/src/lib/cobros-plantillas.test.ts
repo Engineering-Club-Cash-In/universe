@@ -3,6 +3,7 @@ import {
 	anioImpuestoCirculacion,
 	CLAUSULA_INCREMENTO_DIARIO_MORA,
 	COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
+	COBROS_MOTIVO_SIN_INCREMENTO_MORA,
 	COBROS_MOTIVO_SIN_MONTO_ADEUDADO,
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	COBROS_NO_REPLY_WARNING,
@@ -20,6 +21,7 @@ import {
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
+	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
 	seguroPorAseguradora,
@@ -1141,5 +1143,84 @@ describe("incrementoDiarioMora en las plantillas de mora", () => {
 			expect(sin).toBe(bloques);
 			expect(soloRitmo).toBe(bloques);
 		}
+	});
+});
+
+// El modal del masivo ofrece {incrementoDiarioMora} y
+// {incrementoMaximoMensualMora} como variables insertables SUELTAS: la
+// cláusula incorporada se borra sola, pero una oración escrita a mano por el
+// asesor no, y sin el dato le llega al cliente "El saldo aumenta Q diario".
+describe("prepararIncrementoMoraParaEnvio — el placeholder suelto sin dato bloquea", () => {
+	const porId = (id: string) =>
+		PLANTILLAS_MENSAJES.find((p) => p.id === id)?.cuerpo ?? "";
+	const suelto = "El saldo aumenta Q{incrementoDiarioMora} diario.";
+	const sueltoTope =
+		"El saldo aumenta Q{incrementoDiarioMora} diario, hasta Q{incrementoMaximoMensualMora}.";
+
+	test("placeholder suelto del ritmo sin valor → no se envía", () => {
+		expect(prepararIncrementoMoraParaEnvio(suelto, "", "")).toEqual({
+			enviar: false,
+			motivo: COBROS_MOTIVO_SIN_INCREMENTO_MORA,
+		});
+	});
+
+	test("cartera manda 0.00 (crédito topado) y el asesor lo escribió suelto → tampoco", () => {
+		// "0.00" y "" son lo mismo para el mensaje: no hay frase que armar.
+		expect(prepararIncrementoMoraParaEnvio(suelto, "0.00", "0.00")).toEqual({
+			enviar: false,
+			motivo: COBROS_MOTIVO_SIN_INCREMENTO_MORA,
+		});
+	});
+
+	test("el techo suelto sin valor también bloquea, aunque llegue el ritmo", () => {
+		expect(prepararIncrementoMoraParaEnvio(sueltoTope, "3.73", "")).toEqual({
+			enviar: false,
+			motivo: COBROS_MOTIVO_SIN_INCREMENTO_MORA,
+		});
+	});
+
+	test("con los dos valores se envía y los devuelve", () => {
+		expect(
+			prepararIncrementoMoraParaEnvio(sueltoTope, "3.73", "93.33"),
+		).toEqual({
+			enviar: true,
+			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "93.33",
+		});
+	});
+
+	test("la cláusula incorporada sin dato NO bloquea: desaparece sola", () => {
+		// Es el caso legítimo del crédito que ya no crece; bloquearlo dejaría sin
+		// enviar la plantilla de mora más usada.
+		const plantilla = porId("mora_30");
+		expect(plantilla).toContain("{incrementoDiarioMora}");
+		expect(prepararIncrementoMoraParaEnvio(plantilla, "", "")).toEqual({
+			enviar: true,
+			incrementoDiarioMora: "",
+			incrementoMaximoMensualMora: "",
+		});
+		expect(prepararIncrementoMoraParaEnvio(plantilla, "3.73", "")).toEqual({
+			enviar: true,
+			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "",
+		});
+	});
+
+	test("una plantilla que no habla del aumento pasa derecho", () => {
+		expect(
+			prepararIncrementoMoraParaEnvio("Buenos días {clienteNombre}.", "", ""),
+		).toEqual({
+			enviar: true,
+			incrementoDiarioMora: "",
+			incrementoMaximoMensualMora: "",
+		});
+	});
+
+	test("lo que bloquea es el hueco, no el placeholder: con dato se envía", () => {
+		expect(prepararIncrementoMoraParaEnvio(suelto, "3.73", "0.00")).toEqual({
+			enviar: true,
+			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "0.00",
+		});
 	});
 });

@@ -182,6 +182,31 @@ testConChrome(
 	},
 );
 
+testConChrome("no confunde un NIT con otro que lo contiene", async () => {
+	const browser = await puppeteer.launch({
+		executablePath: chromePath,
+		headless: true,
+		args: ["--no-sandbox", "--disable-setuid-sandbox"],
+	});
+	try {
+		const page = await browser.newPage();
+		await page.setContent(`
+			<button id="contribButton" onclick="document.querySelector('.menu-contrib').style.display = 'block'">Titulares</button>
+			<div id="lblUserTop">Cuenta personal</div>
+			<div class="menu-contrib" style="display:none">
+				<a class="ui-menuitem-link" href="#" onclick="document.querySelector('#lblUserTop').textContent = '1234 - TITULAR LARGO'">1234 - TITULAR LARGO</a>
+				<a class="ui-menuitem-link" href="#" onclick="document.querySelector('#lblUserTop').textContent = '123 - TITULAR EXACTO'">123 - TITULAR EXACTO</a>
+			</div>
+		`);
+		await seleccionarTitular(page, { nit: "123", nombre: "TITULAR EXACTO" });
+		expect(
+			await page.$eval("#lblUserTop", (element) => element.textContent),
+		).toBe("123 - TITULAR EXACTO");
+	} finally {
+		await browser.close();
+	}
+});
+
 testConChrome(
 	"no publica una pagina SAT incompleta como listado completo",
 	async () => {

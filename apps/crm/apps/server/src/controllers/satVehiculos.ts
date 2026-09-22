@@ -233,11 +233,12 @@ export async function seleccionarTitular(
 					),
 				].some((element) => {
 					const style = window.getComputedStyle(element);
+					const nitEnTexto = (element.textContent || "")
+						.match(/(?:^|\s)([A-Z0-9-]+)\s*-/i)?.[1]
+						?.toUpperCase()
+						.replace(/[^A-Z0-9]/g, "");
 					return (
-						(element.textContent || "")
-							.toUpperCase()
-							.replace(/[^A-Z0-9]/g, "")
-							.includes(nit) &&
+						nitEnTexto === nit &&
 						style.display !== "none" &&
 						style.visibility !== "hidden" &&
 						element.offsetParent !== null
@@ -253,11 +254,12 @@ export async function seleccionarTitular(
 			...document.querySelectorAll<HTMLElement>(
 				".menu-contrib a.ui-menuitem-link",
 			),
-		].find((element) =>
-			(element.textContent || "")
-				.toUpperCase()
-				.replace(/[^A-Z0-9]/g, "")
-				.includes(nit),
+		].find(
+			(element) =>
+				(element.textContent || "")
+					.match(/(?:^|\s)([A-Z0-9-]+)\s*-/i)?.[1]
+					?.toUpperCase()
+					.replace(/[^A-Z0-9]/g, "") === nit,
 		);
 		if (!enlace) return false;
 		enlace.click();
@@ -274,9 +276,9 @@ export async function seleccionarTitular(
 		page.waitForFunction(
 			(nit) =>
 				(document.querySelector("#lblUserTop")?.textContent || "")
-					.toUpperCase()
-					.replace(/[^A-Z0-9]/g, "")
-					.includes(nit),
+					.match(/(?:^|\s)([A-Z0-9-]+)\s*-/i)?.[1]
+					?.toUpperCase()
+					.replace(/[^A-Z0-9]/g, "") === nit,
 			{ timeout: 30000, polling: 300 },
 			nitObjetivo,
 		),

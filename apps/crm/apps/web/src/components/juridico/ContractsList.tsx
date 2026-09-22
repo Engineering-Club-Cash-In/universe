@@ -1,5 +1,10 @@
-import { FileX } from "lucide-react";
-import type { FirmanteDeContrato } from "@/lib/contract-signers-display";
+import { ChevronDown, ChevronRight, FileX } from "lucide-react";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+	estaAnulado,
+	type FirmanteDeContrato,
+} from "@/lib/contract-signers-display";
 import { ContractCard } from "./ContractCard";
 
 interface Contract {
@@ -11,6 +16,8 @@ interface Contract {
 	additionalSigningLinks: string[] | null;
 	pdfLink?: string | null;
 	status: "pending" | "signed" | "cancelled";
+	/** El contrato que lo reemplaza; puede estar puesto aún en `pending`. */
+	replacedByContractId?: string | null;
 	generatedAt: Date | string;
 	opportunityId: string | null;
 	leadId: string;
@@ -43,6 +50,10 @@ export function ContractsList({
 	onDelete,
 	deletingContractId,
 }: ContractsListProps) {
+	// Los anulados se conservan (dicen qué se descartó y si alguien lo había
+	// firmado), pero van aparte: cada reemplazo deja uno y taparían los vigentes.
+	const [verAnulados, setVerAnulados] = useState(false);
+
 	if (contracts.length === 0) {
 		return (
 			<div className="flex flex-col items-center justify-center rounded-lg border border-gray-300 border-dashed py-12 text-center">
@@ -57,20 +68,58 @@ export function ContractsList({
 		);
 	}
 
+	const vigentes = contracts.filter((c) => !estaAnulado(c.contract));
+	const anulados = contracts.filter((c) => estaAnulado(c.contract));
+
+	const tarjeta = ({
+		contract,
+		opportunity,
+		signatories,
+	}: ContractsListProps["contracts"][number]) => (
+		<ContractCard
+			key={contract.id}
+			contract={contract}
+			signatories={signatories}
+			opportunity={opportunity}
+			onUpdate={onUpdate}
+			onReplace={onReplace ? () => onReplace(contract) : undefined}
+			onDelete={onDelete}
+			isDeleting={deletingContractId === contract.id}
+		/>
+	);
+
 	return (
 		<div className="space-y-4">
-			{contracts.map(({ contract, opportunity, signatories }) => (
-				<ContractCard
-					key={contract.id}
-					contract={contract}
-					signatories={signatories}
-					opportunity={opportunity}
-					onUpdate={onUpdate}
-					onReplace={onReplace ? () => onReplace(contract) : undefined}
-					onDelete={onDelete}
-					isDeleting={deletingContractId === contract.id}
-				/>
-			))}
+			{vigentes.length > 0 ? (
+				vigentes.map(tarjeta)
+			) : (
+				<p className="text-muted-foreground text-sm">
+					No hay contratos vigentes: todos fueron anulados o reemplazados.
+				</p>
+			)}
+
+			{anulados.length > 0 && (
+				<div className="space-y-4">
+					<Button
+						variant="ghost"
+						size="sm"
+						className="text-muted-foreground"
+						onClick={() => setVerAnulados((v) => !v)}
+					>
+						{verAnulados ? (
+							<ChevronDown className="mr-1 h-4 w-4" />
+						) : (
+							<ChevronRight className="mr-1 h-4 w-4" />
+						)}
+						{verAnulados
+							? "Ocultar anulados"
+							: `Ver anulados (${anulados.length})`}
+					</Button>
+					{verAnulados && (
+						<div className="space-y-4 opacity-75">{anulados.map(tarjeta)}</div>
+					)}
+				</div>
+			)}
 		</div>
 	);
 }

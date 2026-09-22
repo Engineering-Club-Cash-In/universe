@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/card";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import {
+	estaAnulado,
 	type FirmanteDeContrato,
 	firmantesEnFicha,
 } from "@/lib/contract-signers-display";
@@ -73,6 +74,8 @@ interface ContractCardProps {
 		signingProvider?: string | null;
 		/** Cómo se firma, según quedó guardado al generarlo. */
 		signatureMode?: string | null;
+		/** El contrato que lo reemplaza; puede estar puesto aún en `pending`. */
+		replacedByContractId?: string | null;
 		status: "pending" | "signed" | "cancelled";
 		generatedAt: Date | string;
 		opportunityId: string | null;
@@ -134,6 +137,15 @@ export function ContractCard({
 	// Los contratos que cayeron al fallback de Documenso no tienen documento en
 	// WeeTrust: consultar o reenviar sólo devolvería un error.
 	const enWeeTrust = contract.signingProvider !== "documenso";
+	// Sus enlaces son de un documento descartado y, si no se pudo borrar en
+	// WeeTrust, todavía firman: no se ofrecen, no se reenvían ni se consultan
+	// (allá casi siempre ya no existe).
+	const reemplazado = !!contract.replacedByContractId;
+	const inactivo = estaAnulado(contract);
+	const estado =
+		reemplazado && contract.status === "pending"
+			? { label: "Reemplazado", color: statusConfig.cancelled.color }
+			: statusConfig[contract.status];
 
 	// Cada firmante trae su rol. El bloque anterior leía tres columnas fijas y
 	// rotulaba como "Representante" al que estuviera segundo, que con cofirmante
@@ -222,15 +234,12 @@ export function ContractCard({
 							</Badge>
 						)}
 						{!firmaEnPapel && contract.clientSigningLink && (
-							<Badge
-								variant="outline"
-								className={statusConfig[contract.status].color}
-							>
-								{statusConfig[contract.status].label}
+							<Badge variant="outline" className={estado.color}>
+								{estado.label}
 							</Badge>
 						)}
 						{/* Un anulado ya fue reemplazado: no se reemplaza dos veces. */}
-						{canCreateLegal && onReplace && contract.status !== "cancelled" && (
+						{canCreateLegal && onReplace && !inactivo && (
 							<Button
 								size="sm"
 								variant="outline"
@@ -306,7 +315,11 @@ export function ContractCard({
 										</p>
 									)}
 								</div>
-								{firmante.url ? (
+								{inactivo ? (
+									<span className="shrink-0 text-muted-foreground text-xs">
+										{estado.label.toLowerCase()}
+									</span>
+								) : firmante.url ? (
 									<div className="flex shrink-0 gap-1">
 										<Button
 											size="sm"
@@ -341,7 +354,7 @@ export function ContractCard({
 				)}
 
 				{/* Estado de firma y reintentos, sin salir del CRM */}
-				{!firmaEnPapel && enWeeTrust && firmantes.length > 0 && (
+				{!firmaEnPapel && enWeeTrust && !inactivo && firmantes.length > 0 && (
 					<div className="space-y-2 rounded-lg border border-border p-3">
 						<div className="flex flex-wrap gap-2">
 							<Button
@@ -359,7 +372,7 @@ export function ContractCard({
 								Ver estado
 							</Button>
 
-							{canCreateLegal && (
+							{canCreateLegal && !inactivo && (
 								<>
 									<Button
 										size="sm"

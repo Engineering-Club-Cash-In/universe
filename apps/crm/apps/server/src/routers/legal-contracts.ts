@@ -141,6 +141,21 @@ async function contratoConDocumentID(contractId: string): Promise<{
 
 	return { contract, documentID };
 }
+
+/**
+ * Condición de contrato vigente: ni anulado ni reclamado por su reemplazo.
+ *
+ * Los anulados se conservan (dicen qué se descartó y quién lo había firmado),
+ * así que "tiene contratos" no puede contarlos: una oportunidad con todo
+ * anulado pasaría a aprobarse sin nada que firmar.
+ */
+function contratoVigente() {
+	return and(
+		ne(generatedLegalContracts.status, "cancelled"),
+		isNull(generatedLegalContracts.replacedByContractId),
+	);
+}
+
 /**
  * Corta si la oportunidad ya no está en una etapa que permita esta acción.
  *
@@ -754,7 +769,9 @@ export const legalContractsRouter = {
 				const [{ count: contractCount }] = await db
 					.select({ count: count() })
 					.from(generatedLegalContracts)
-					.where(eq(generatedLegalContracts.leadId, lead.id));
+					.where(
+						and(eq(generatedLegalContracts.leadId, lead.id), contratoVigente()),
+					);
 
 				// Obtener el contrato más reciente
 				const [latestContract] = await db
@@ -855,7 +872,12 @@ export const legalContractsRouter = {
 					const [{ count: contractCount }] = await db
 						.select({ count: count() })
 						.from(generatedLegalContracts)
-						.where(eq(generatedLegalContracts.opportunityId, opp.id));
+						.where(
+							and(
+								eq(generatedLegalContracts.opportunityId, opp.id),
+								contratoVigente(),
+							),
+						);
 
 					// Obtener el contrato más reciente
 					const [latestContract] = await db
@@ -928,11 +950,17 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Verificar que hay al menos un contrato asociado a la oportunidad
+			// Verificar que hay al menos un contrato vigente en la oportunidad: los
+			// anulados se conservan, pero no son contratos de la oportunidad.
 			const [{ count: contractCount }] = await db
 				.select({ count: count() })
 				.from(generatedLegalContracts)
-				.where(eq(generatedLegalContracts.opportunityId, input.opportunityId));
+				.where(
+					and(
+						eq(generatedLegalContracts.opportunityId, input.opportunityId),
+						contratoVigente(),
+					),
+				);
 
 			if (Number(contractCount) === 0) {
 				throw new ORPCError("BAD_REQUEST", {
@@ -1080,11 +1108,17 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Verificar que hay contratos asociados a la oportunidad
+			// Verificar que hay contratos vigentes en la oportunidad (los anulados
+			// se conservan y no cuentan)
 			const [{ count: contractCount }] = await db
 				.select({ count: count() })
 				.from(generatedLegalContracts)
-				.where(eq(generatedLegalContracts.opportunityId, input.opportunityId));
+				.where(
+					and(
+						eq(generatedLegalContracts.opportunityId, input.opportunityId),
+						contratoVigente(),
+					),
+				);
 
 			if (Number(contractCount) === 0) {
 				throw new ORPCError("BAD_REQUEST", {
@@ -1521,56 +1555,43 @@ export const legalContractsRouter = {
 				throw error;
 			}
 
-			// Recién ahora el documento viejo:
-			// - Completo: WeeTrust no deja borrarlo; la fila queda anulada.
-			// - Con firmas parciales: se borra en WeeTrust (si no, los que faltan
-			//   seguirían firmando un documento reemplazado), pero la fila queda
-			//   anulada con sus firmantes: es el registro de quién ya firmó.
-			// - Sin firmas: se borra allá y la fila desaparece.
-			// - Si el borrado falla: fila anulada, con el aviso de borrarlo a mano.
+			// Recién ahora el documento viejo. Su fila ya quedó anulada arriba y se
+			// conserva siempre: lo que diga WeeTrust antes de borrar es una foto, y
+			// alguien puede firmar entre esa consulta y el borrado. Borrar la fila
+			// por esa foto perdía el único registro de esa firma.
+			// - Completo: WeeTrust no deja borrarlo.
+			// - Si no: se borra allá (si no, los que faltan seguirían firmando un
+			//   documento reemplazado) y el motivo dice cómo quedó.
+			// - Si el borrado falla: el motivo avisa que hay que borrarlo a mano.
 			const completo = contract.status === "signed";
-			const conFirmasParciales =
-				!completo &&
-				(await tieneFirmas(input.contractId, contract.weetrustDocumentId));
-			let conservado = completo;
-			if (!completo) {
+			if (!completo && contract.weetrustDocumentId) {
+				const conFirmasParciales = await tieneFirmas(
+					input.contractId,
+					contract.weetrustDocumentId,
+				);
+				let detalle: string;
 				try {
-					if (contract.weetrustDocumentId) {
-						await borrarDocumentoDeWeeTrust(contract.weetrustDocumentId);
-					}
-					if (conFirmasParciales) {
-						conservado = true;
-						await db
-							.update(generatedLegalContracts)
-							.set({
-								cancellationReason: `Regenerado: ${motivo} (tenía firmas parciales; el documento se borró en WeeTrust)`,
-							})
-							.where(eq(generatedLegalContracts.id, input.contractId));
-					} else {
-						await db
-							.delete(generatedLegalContracts)
-							.where(eq(generatedLegalContracts.id, input.contractId));
-					}
+					await borrarDocumentoDeWeeTrust(contract.weetrustDocumentId);
+					detalle = conFirmasParciales
+						? "tenía firmas parciales; el documento se borró en WeeTrust"
+						: "el documento se borró en WeeTrust";
 				} catch (error) {
 					console.error(
 						`[refreshContractSigningLinks] no se pudo borrar ${contract.weetrustDocumentId}:`,
 						error,
 					);
-					conservado = true;
-					await db
-						.update(generatedLegalContracts)
-						.set({
-							cancellationReason: `Regenerado: ${motivo} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`,
-						})
-						.where(eq(generatedLegalContracts.id, input.contractId));
+					detalle = "no se pudo borrar en WeeTrust: hay que borrarlo a mano";
 				}
+				await db
+					.update(generatedLegalContracts)
+					.set({ cancellationReason: `Regenerado: ${motivo} (${detalle})` })
+					.where(eq(generatedLegalContracts.id, input.contractId));
 			}
 
 			return {
 				success: true,
-				message: conservado
-					? "Documento reemitido con enlaces nuevos; el anterior queda anulado"
-					: "Documento reemitido con enlaces nuevos",
+				message:
+					"Documento reemitido con enlaces nuevos; el anterior queda anulado",
 				contractId: nuevoId,
 				documentID: resultado.documentID,
 				enlaces: resultado.signing_links?.length ?? 0,

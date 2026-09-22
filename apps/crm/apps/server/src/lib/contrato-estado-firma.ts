@@ -133,10 +133,11 @@ export async function contratoPorDocumentID(documentID: string) {
  *
  * Los webhooks pueden no estar registrados y nadie tiene por qué haber
  * apretado "Actualizar estado": la base puede decir que nadie firmó cuando
- * en WeeTrust ya hay una firma. Antes de borrar la fila de un contrato (lo
- * único que dice quién firmó) se consulta en vivo. Si WeeTrust no responde,
- * se asume que sí firmaron: conservar una fila de más es mejor que perder el
- * registro de una firma.
+ * en WeeTrust ya hay una firma. Al anular un contrato se consulta en vivo
+ * para que el motivo diga si tenía firmas parciales. Si WeeTrust no responde,
+ * se asume que sí: mejor que alguien lo revise de más a que no sepa de una
+ * firma. La fila no depende de esto: la de un documento de WeeTrust se
+ * conserva siempre.
  */
 export async function tieneFirmas(
 	contractId: string,

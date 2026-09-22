@@ -331,18 +331,22 @@ async function exigirEtapaQuePermiteReemplazo(
 /**
  * Deja sin efecto el contrato que se está reemplazando.
  *
- * Hay dos caminos, y la diferencia no es un capricho:
+ * Si estuvo en WeeTrust, la fila se conserva SIEMPRE, anulada y con el motivo.
+ * Saber si alguien firmó es una foto: el cliente puede firmar entre esa
+ * consulta y el borrado, y borrar la fila por esa foto perdía el único
+ * registro de esa firma (el documento allá ya no existe para volver a leerlo).
+ * En la ficha los anulados van aparte, así que no ensucian la lista.
  *
- * - **Nadie lo firmó**: se borra en WeeTrust y se borra la fila. Dejarlo vivo
+ * - **Nadie lo firmó, o firmas parciales**: se borra en WeeTrust. Dejarlo vivo
  *   allá significa que alguien todavía puede entrar por el link viejo y firmar
  *   un documento que ya descartamos.
- * - **No se pudo borrar allá** (WeeTrust falló): la fila se conserva anulada,
- *   con el aviso en el motivo. Es lo único que dice cuál es el documento viejo,
- *   que sigue vivo con sus links hasta que alguien lo borre a mano.
- * - **Ya lo firmaron**: WeeTrust NO permite borrarlo (queda en su blockchain y
- *   su API no tiene endpoint para anular). La fila se conserva marcada como
- *   anulada, con el motivo: ese PDF firmado existe para siempre y borrar su
- *   registro acá sería perder el rastro de algo que sigue estando.
+ * - **No se pudo borrar allá** (WeeTrust falló): el motivo lo avisa. Sigue vivo
+ *   con sus links hasta que alguien lo borre a mano.
+ * - **Ya lo firmaron todos**: WeeTrust NO permite borrarlo (queda en su
+ *   blockchain y su API no tiene endpoint para anular).
+ *
+ * Sólo se borra la fila de uno que nunca tuvo documento en WeeTrust y que
+ * nadie firmó: ahí no hay nada allá que pueda cambiar mientras tanto.
  */
 async function anularContratoReemplazado(
 	contractId: string,
@@ -364,7 +368,7 @@ async function anularContratoReemplazado(
 
 	// Completo: WeeTrust no deja borrarlo. Con firmas parciales sí se puede, y
 	// se borra igual (si no, los que faltan seguirían pudiendo firmar un
-	// documento reemplazado), pero la fila se conserva: dice quién ya firmó.
+	// documento reemplazado). Si hubo firmas sólo cambia lo que dice el motivo.
 	const completo = viejo.status === "signed";
 	const conFirmas =
 		completo || (await tieneFirmas(contractId, viejo.weetrustDocumentId));
@@ -385,16 +389,18 @@ async function anularContratoReemplazado(
 		}
 	}
 
-	if (conFirmas || !borradoAlla) {
+	if (viejo.weetrustDocumentId || conFirmas) {
 		await db
 			.update(generatedLegalContracts)
 			.set({
 				status: "cancelled",
 				cancellationReason: !borradoAlla
 					? `${etiquetaDeMotivo(motivo)} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`
-					: conFirmas && !completo
-						? `${etiquetaDeMotivo(motivo)} (tenía firmas parciales; el documento se borró en WeeTrust)`
-						: etiquetaDeMotivo(motivo),
+					: completo || !viejo.weetrustDocumentId
+						? etiquetaDeMotivo(motivo)
+						: conFirmas
+							? `${etiquetaDeMotivo(motivo)} (tenía firmas parciales; el documento se borró en WeeTrust)`
+							: `${etiquetaDeMotivo(motivo)} (el documento se borró en WeeTrust)`,
 				cancelledAt: new Date(),
 				updatedAt: new Date(),
 			})
@@ -415,7 +421,7 @@ async function anularContratoReemplazado(
  *
  * Si jurídico genera otra vez un tipo que ya existía (otra fecha, un dato
  * corregido), el anterior queda sin efecto con las mismas reglas que al
- * reemplazar: se borra en WeeTrust si nadie lo firmó, o se conserva anulado. Si
+ * reemplazar: se borra en WeeTrust si se puede y la fila queda anulada. Si
  * no, al pasar a 85% el WhatsApp mandaba los dos enlaces y el cliente podía
  * firmar el viejo.
  */
@@ -544,8 +550,9 @@ async function retirarAnterioresSiSigueVigente(params: {
 /**
  * Deshace un contrato recién guardado cuyos firmantes no se pudieron guardar:
  * sin ellos no se puede mandar por WhatsApp, sincronizar ni regenerar. Se
- * borra en WeeTrust y en el CRM con las reglas de anular. Siempre devuelve
- * `false` (no quedó vigente), para usarlo directo como resultado.
+ * borra en WeeTrust y la fila queda anulada, con las reglas de anular.
+ * Siempre devuelve `false` (no quedó vigente), para usarlo directo como
+ * resultado.
  */
 async function deshacerContratoSinFirmantes(
 	contractId: string,

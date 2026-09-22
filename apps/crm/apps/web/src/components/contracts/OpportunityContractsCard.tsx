@@ -1,6 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
 import {
 	CheckCircle2,
+	ChevronDown,
+	ChevronRight,
 	Clock,
 	Copy,
 	ExternalLink,
@@ -18,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
+	estaAnulado,
 	type FirmanteDeContrato,
 	firmantesEnFicha,
 } from "@/lib/contract-signers-display";
@@ -52,6 +55,12 @@ interface ContratoDeOportunidad {
 	signingProvider?: string | null;
 	/** Cómo se firma, según quedó guardado al generarlo. */
 	signatureMode?: string | null;
+	/**
+	 * El contrato que lo reemplaza. Puede estar puesto con el estado todavía en
+	 * `pending`: el reemplazo lo reclama al confirmar y el anulado en WeeTrust
+	 * viene después.
+	 */
+	replacedByContractId?: string | null;
 }
 
 export interface FilaDeContrato {
@@ -94,6 +103,21 @@ export function OpportunityContractsCard({
 	puedeRegenerar = false,
 	onUpdate,
 }: OpportunityContractsCardProps) {
+	// Los anulados se conservan (dicen qué se descartó y si alguien lo había
+	// firmado), pero van aparte: cada reemplazo deja uno y taparían los vigentes.
+	const [verAnulados, setVerAnulados] = useState(false);
+	const vigentes = contracts?.filter((f) => !estaAnulado(f.contract)) ?? [];
+	const anulados = contracts?.filter((f) => estaAnulado(f.contract)) ?? [];
+
+	const fila = (f: FilaDeContrato) => (
+		<ContratoFila
+			key={f.contract.id}
+			fila={f}
+			puedeRegenerar={puedeRegenerar}
+			onUpdate={onUpdate}
+		/>
+	);
+
 	return (
 		<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
 			<div className="flex items-center gap-2">
@@ -101,9 +125,9 @@ export function OpportunityContractsCard({
 				<Label className="font-semibold text-muted-foreground text-sm">
 					Contratos Legales
 				</Label>
-				{contracts && contracts.length > 0 && (
+				{vigentes.length > 0 && (
 					<span className="text-muted-foreground text-xs">
-						{contracts.length}
+						{vigentes.length}
 					</span>
 				)}
 			</div>
@@ -115,16 +139,38 @@ export function OpportunityContractsCard({
 					No hay contratos asociados a esta oportunidad
 				</p>
 			) : (
-				<div className="space-y-2">
-					{contracts.map((fila) => (
-						<ContratoFila
-							key={fila.contract.id}
-							fila={fila}
-							puedeRegenerar={puedeRegenerar}
-							onUpdate={onUpdate}
-						/>
-					))}
-				</div>
+				<>
+					{vigentes.length > 0 ? (
+						<div className="space-y-2">{vigentes.map(fila)}</div>
+					) : (
+						<p className="text-muted-foreground text-sm">
+							No hay contratos vigentes en esta oportunidad
+						</p>
+					)}
+
+					{anulados.length > 0 && (
+						<div className="space-y-2">
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-6 px-1.5 text-muted-foreground text-xs hover:text-foreground"
+								onClick={() => setVerAnulados((v) => !v)}
+							>
+								{verAnulados ? (
+									<ChevronDown className="mr-1 h-3 w-3" />
+								) : (
+									<ChevronRight className="mr-1 h-3 w-3" />
+								)}
+								{verAnulados
+									? "Ocultar anulados"
+									: `Ver anulados (${anulados.length})`}
+							</Button>
+							{verAnulados && (
+								<div className="space-y-2 opacity-75">{anulados.map(fila)}</div>
+							)}
+						</div>
+					)}
+				</>
 			)}
 		</div>
 	);
@@ -152,16 +198,20 @@ function ContratoFila({
 	const firmaEnPapel = contract.signatureMode
 		? contract.signatureMode === "fisica"
 		: esFirmaFisica(contract.contractType);
+	const reemplazado = !!contract.replacedByContractId;
+	const inactivo = estaAnulado(contract);
 	// Uno en papel no está "pendiente" de nadie en WeeTrust: se imprime y se
 	// firma a mano. Anulado sí se muestra como anulado.
 	const estado =
-		firmaEnPapel && contract.status === "pending"
-			? {
-					label: "Firma en papel",
-					className:
-						"border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-400",
-				}
-			: ESTADO[contract.status];
+		reemplazado && contract.status === "pending"
+			? { label: "Reemplazado", className: ESTADO.cancelled.className }
+			: firmaEnPapel && contract.status === "pending"
+				? {
+						label: "Firma en papel",
+						className:
+							"border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-400",
+					}
+				: ESTADO[contract.status];
 	const firmantes = firmaEnPapel ? [] : firmantesEnFicha(signatories, contract);
 
 	const hayVencidos = firmantes.some((f) => f.vencido);
@@ -178,10 +228,7 @@ function ContratoFila({
 	const enWeeTrust = contract.signingProvider !== "documenso";
 	// Un anulado ya fue reemplazado por otro: reemitirlo lo resucitaría.
 	const puedeRegenerar =
-		tienePermiso &&
-		enWeeTrust &&
-		contract.status !== "cancelled" &&
-		(alguienFirmo || hayVencidos);
+		tienePermiso && enWeeTrust && !inactivo && (alguienFirmo || hayVencidos);
 
 	const actualizarEstado = useMutation({
 		mutationFn: () =>
@@ -312,41 +359,41 @@ function ContratoFila({
 										    no se pudo borrar, todavía firman; no se ofrecen. */}
 										{firmante.url &&
 											firmante.estado !== "signed" &&
-											contract.status !== "cancelled" && (
-											<>
-												<Button
-													variant="ghost"
-													size="sm"
-													className="ml-1 h-6 w-6 p-0"
-													title={`Copiar el enlace de ${firmante.etiqueta}`}
-													onClick={() => {
-														navigator.clipboard.writeText(
-															firmante.url as string,
-														);
-														toast.success(
-															`Enlace de ${firmante.etiqueta} copiado`,
-														);
-													}}
-												>
-													<Copy className="h-3 w-3" />
-												</Button>
-												<Button
-													variant="ghost"
-													size="sm"
-													asChild
-													className="h-6 w-6 p-0"
-												>
-													<a
-														href={firmante.url}
-														target="_blank"
-														rel="noopener noreferrer"
-														title={`Abrir el enlace de ${firmante.etiqueta}`}
+											!inactivo && (
+												<>
+													<Button
+														variant="ghost"
+														size="sm"
+														className="ml-1 h-6 w-6 p-0"
+														title={`Copiar el enlace de ${firmante.etiqueta}`}
+														onClick={() => {
+															navigator.clipboard.writeText(
+																firmante.url as string,
+															);
+															toast.success(
+																`Enlace de ${firmante.etiqueta} copiado`,
+															);
+														}}
 													>
-														<ExternalLink className="h-3 w-3" />
-													</a>
-												</Button>
-											</>
-										)}
+														<Copy className="h-3 w-3" />
+													</Button>
+													<Button
+														variant="ghost"
+														size="sm"
+														asChild
+														className="h-6 w-6 p-0"
+													>
+														<a
+															href={firmante.url}
+															target="_blank"
+															rel="noopener noreferrer"
+															title={`Abrir el enlace de ${firmante.etiqueta}`}
+														>
+															<ExternalLink className="h-3 w-3" />
+														</a>
+													</Button>
+												</>
+											)}
 									</div>
 								</div>
 							))}
@@ -364,7 +411,7 @@ function ContratoFila({
 						    el documento está cerrado. Acá sólo se regeneran enlaces del
 						    MISMO documento; reemplazarlo por otro es de jurídico y vive
 						    en su ficha. */}
-						{enWeeTrust && !todosFirmaron && (
+						{enWeeTrust && !todosFirmaron && !inactivo && (
 							<Button
 								variant="ghost"
 								size="sm"

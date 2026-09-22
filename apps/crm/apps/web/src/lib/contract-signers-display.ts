@@ -116,3 +116,16 @@ export function firmantesEnFicha(
 	}
 	return viejos;
 }
+
+/**
+ * Si un contrato ya no está vigente: anulado, o reclamado por su reemplazo
+ * aunque siga en "pendiente" (entre que se confirma el nuevo y se anula este, o
+ * para siempre si ese paso no llegó). Cuenta como anulado, igual que para el
+ * portal y el WhatsApp: sus enlaces son de un documento descartado.
+ */
+export function estaAnulado(contract: {
+	status: string;
+	replacedByContractId?: string | null;
+}): boolean {
+	return contract.status === "cancelled" || !!contract.replacedByContractId;
+}

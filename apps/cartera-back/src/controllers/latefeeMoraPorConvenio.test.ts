@@ -5,11 +5,15 @@ import { describe, expect, it, mock, beforeEach } from "bun:test";
 //
 // El helper hace (en orden):
 //   1. db.select(...).from(moras_credito).where(...)  → la mora activa (0 o 1)
-//   2. db.update(moras_credito).set(...).where(...)   → apagarla
+//   2. db.update(moras_credito).set(...).where(...).returning() → apagarla
 //   3. db.insert(moras_historial).values(...)         → evento DESACTIVACION
 //
+// (2) y (3) van dentro de una transacción: la del caller si trae `dbClient`,
+// una propia si no. Por eso la base falsa expone `transaction`.
+//
 // Lo que se prueba es justamente lo que el DELETE duro del convenio NO hacía:
-// que quede fila y quede rastro con el monto que se soltó.
+// que quede fila y quede rastro con el monto que se soltó — más que ese rastro
+// no se duplique ni se pierda.
 // ============================================================================
 
 type Fila = Record<string, unknown>;
@@ -17,10 +21,37 @@ type Fila = Record<string, unknown>;
 const state: {
   selectQueue: Fila[][];
   selectCalls: number;
-  updates: Array<{ table: unknown; set: Fila }>;
+  updates: Array<{ table: unknown; set: Fila; where: unknown }>;
+  /** Filas que devuelve cada .returning() del update, en orden. */
+  updateReturnQueue: Fila[][];
   inserts: Array<{ table: unknown; values: Fila }>;
   deletes: number;
-} = { selectQueue: [], selectCalls: 0, updates: [], inserts: [], deletes: 0 };
+  /** Transacciones propias que terminaron en excepción (= rollback). */
+  rollbacks: number;
+  commits: number;
+} = {
+  selectQueue: [],
+  selectCalls: 0,
+  updates: [],
+  updateReturnQueue: [],
+  inserts: [],
+  deletes: 0,
+  rollbacks: 0,
+  commits: 0,
+};
+
+/**
+ * ¿La condición `where` de drizzle menciona esta columna? Recorre los
+ * `queryChunks` del SQL armado por `and(eq(...), eq(...))`. Sirve para que un
+ * test FALLE si alguien le quita el filtro `activa` al update.
+ */
+const mencionaColumna = (nodo: any, columna: unknown): boolean => {
+  if (!nodo) return false;
+  if (nodo === columna) return true;
+  const chunks = Array.isArray(nodo) ? nodo : nodo.queryChunks;
+  if (!Array.isArray(chunks)) return false;
+  return chunks.some((c) => mencionaColumna(c, columna));
+};
 
 const makeSelectChain = () => {
   const result = state.selectQueue[state.selectCalls] ?? [];
@@ -33,13 +64,17 @@ const makeSelectChain = () => {
   return chain;
 };
 
-const fakeDb = {
+const fakeDb: any = {
   select: () => makeSelectChain(),
   update: (table: unknown) => ({
     set: (setValues: Fila) => ({
-      where: () => {
-        state.updates.push({ table, set: setValues });
-        return Promise.resolve([]);
+      where: (condicion: unknown) => {
+        state.updates.push({ table, set: setValues, where: condicion });
+        // Por defecto el update SÍ afecta la fila (nadie compitió).
+        const filas = state.updateReturnQueue.shift() ?? [{ mora_id: 95201 }];
+        return {
+          returning: () => Promise.resolve(filas),
+        };
       },
     }),
   }),
@@ -53,9 +88,23 @@ const fakeDb = {
     state.deletes++;
     return { where: () => ({ returning: () => Promise.resolve([]) }) };
   },
+  // Transacción propia del helper cuando el caller no trae `dbClient`: si el
+  // callback lanza, la base real revierte TODO lo escrito adentro.
+  transaction: async (cb: (tx: unknown) => Promise<unknown>) => {
+    try {
+      const r = await cb(fakeDb);
+      state.commits++;
+      return r;
+    } catch (e) {
+      state.rollbacks++;
+      throw e;
+    }
+  },
 };
 
-mock.module("../database", () => ({ db: {}, client: {} }));
+// `db` es la base falsa para poder ejercitar también el camino SIN `dbClient`,
+// que es el que usa producción (createPaymentAgreement).
+mock.module("../database", () => ({ db: fakeDb, client: {} }));
 
 const { desactivarMoraPorConvenio } = await import("./latefee");
 const { moras_credito, moras_historial } = await import(
@@ -73,8 +122,11 @@ beforeEach(() => {
   state.selectQueue = [];
   state.selectCalls = 0;
   state.updates = [];
+  state.updateReturnQueue = [];
   state.inserts = [];
   state.deletes = 0;
+  state.rollbacks = 0;
+  state.commits = 0;
 });
 
 const correr = (opts: Record<string, unknown> = {}) =>
@@ -165,5 +217,64 @@ describe("desactivarMoraPorConvenio", () => {
     await expect(
       desactivarMoraPorConvenio(72, { dbClient: txFallado as any })
     ).rejects.toThrow("historial caído simulado");
+  });
+
+  // ── Carrera entre dos convenios del mismo crédito ────────────────────────
+  it("el update filtra por activa=true, no solo por mora_id", async () => {
+    state.selectQueue = [[MORA_ACTIVA]];
+
+    await correr();
+
+    const upd = state.updates.find((u) => u.table === moras_credito);
+    expect(upd).toBeDefined();
+    // Sin este filtro, dos convenios simultáneos apagan los dos "con éxito"
+    // y los dos anotan un DESACTIVACION por el mismo monto.
+    expect(mencionaColumna(upd!.where, moras_credito.activa)).toBe(true);
+    expect(mencionaColumna(upd!.where, moras_credito.mora_id)).toBe(true);
+  });
+
+  it("si otra ejecución ganó la carrera (0 filas): no anota historial y lo reporta", async () => {
+    state.selectQueue = [[MORA_ACTIVA]];
+    state.updateReturnQueue = [[]]; // el update condicional no afectó nada
+
+    const res = await correr({ convenio_id: 102 });
+
+    expect(res).toEqual({ desactivada: false });
+    expect(state.inserts).toHaveLength(0);
+    expect(state.deletes).toBe(0);
+  });
+
+  // ── Atomicidad sin `dbClient` (el camino de producción) ──────────────────
+  it("sin dbClient abre transacción propia y mete adentro las DOS escrituras", async () => {
+    state.selectQueue = [[MORA_ACTIVA]];
+
+    const res = await desactivarMoraPorConvenio(72, { convenio_id: 102 });
+
+    expect(res.desactivada).toBe(true);
+    expect(state.commits).toBe(1);
+    expect(state.rollbacks).toBe(0);
+    expect(state.updates.some((u) => u.table === moras_credito)).toBe(true);
+    expect(state.inserts.some((i) => i.table === moras_historial)).toBe(true);
+  });
+
+  it("sin dbClient, si el historial falla la desactivación se revierte y el error sale", async () => {
+    state.selectQueue = [[MORA_ACTIVA]];
+    const insertOk = fakeDb.insert;
+    fakeDb.insert = () => ({
+      values: () => Promise.reject(new Error("historial caído simulado")),
+    });
+
+    try {
+      // El caller de producción NO pasa dbClient: antes el fallo se tragaba y
+      // el convenio devolvía éxito con la mora fuera del saldo y sin rastro.
+      await expect(
+        desactivarMoraPorConvenio(72, { convenio_id: 102 })
+      ).rejects.toThrow("historial caído simulado");
+    } finally {
+      fakeDb.insert = insertOk;
+    }
+
+    expect(state.rollbacks).toBe(1);
+    expect(state.commits).toBe(0);
   });
 });

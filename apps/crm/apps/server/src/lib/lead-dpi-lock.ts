@@ -121,6 +121,45 @@ function alturaAlcanzada(o: OportunidadParaCandadoDpi): number {
 	return Math.max(o.closurePercentage, o.maxHistoricoClosurePercentage ?? 0);
 }
 
+/**
+ * 🔴 La oportunidad como QUEDARÍA si este request se aplicara: con la etapa a
+ * la que la quiere mover, no sólo con la que tiene guardada.
+ *
+ * El candado del cambio de lead miraba nada más el estado persistido, y eso
+ * dejaba pasar la maniobra entera en UN solo request. Una oportunidad en el 30%
+ * con el análisis aprobado para el lead A todavía no canda; mandando
+ * `{ leadId: B, stageId: <etapa 40%> }` el chequeo veía 30 —el que la sube por
+ * encima del umbral es ese mismo UPDATE— y la sentencia reemplazaba al cliente
+ * Y cruzaba el umbral de una, conservando la aprobación y la evidencia (RENAP,
+ * buró, documentos) de A. Es la maniobra en dos pasos que este candado cerró,
+ * comprimida en uno.
+ *
+ * `Math.max` y no reemplazo: la etapa de destino SUMA, nunca resta. Si pisara a
+ * la actual, `{ leadId: B, stageId: <etapa 20%> }` descandaría a una
+ * oportunidad parada hoy en el 40% sin historial —la que nació ahí—, que es
+ * exactamente el agujero que `cruzoElCandado` ya existe para tapar.
+ */
+export function conLaEtapaDeDestino(
+	oportunidad: OportunidadParaCandadoDpi,
+	etapaDestino:
+		| { name?: string | null; closurePercentage: number }
+		| null
+		| undefined,
+): OportunidadParaCandadoDpi {
+	if (
+		!etapaDestino ||
+		etapaDestino.closurePercentage <= oportunidad.closurePercentage
+	) {
+		return oportunidad;
+	}
+
+	return {
+		...oportunidad,
+		stageName: etapaDestino.name ?? oportunidad.stageName,
+		closurePercentage: etapaDestino.closurePercentage,
+	};
+}
+
 function mensajeCandado(
 	sujeto: Exclude<SujetoCandadoDpi, "portal">,
 	etapa: OportunidadParaCandadoDpi,
@@ -282,7 +321,22 @@ export async function obtenerOportunidadesParaCandadoDpi(filtro: {
  * historial: `HISTORIAL_CON_LAS_DOS_PUNTAS` + `ALTURA_DE_LA_TRANSICION` son un
  * solo texto usado por las dos, porque ahí es donde ya se habían separado.
  */
-function sqlCandanteDeLaOportunidad(): SQL {
+function sqlCandanteDeLaOportunidad(etapaDestino?: string): SQL {
+	// La contraparte SQL de `conLaEtapaDeDestino`: se SUMA a las otras dos
+	// señales en el mismo OR, así que sólo puede candar de más, nunca de menos.
+	// Va dentro de la sentencia y no como un `if` previo por lo mismo que el
+	// resto del predicado: entre la lectura y la escritura la fila puede
+	// moverse, y lo que decide es lo que la base ve al escribir.
+	const porLaEtapaDestino = etapaDestino
+		? sql`
+			or exists (
+				select 1
+				from ${salesStages} as ed
+				where ed.id = ${etapaDestino}
+					and ed.closure_percentage > ${PORCENTAJE_CANDADO_DPI}
+			)`
+		: sql``;
+
 	return sql`
 		${opportunities.status} <> 'lost'
 		and (
@@ -292,7 +346,7 @@ function sqlCandanteDeLaOportunidad(): SQL {
 				${HISTORIAL_CON_LAS_DOS_PUNTAS}
 				where h.opportunity_id = ${opportunities.id}
 					and ${ALTURA_DE_LA_TRANSICION} > ${PORCENTAJE_CANDADO_DPI}
-			)
+			)${porLaEtapaDestino}
 		)
 	`;
 }
@@ -308,14 +362,24 @@ export function existeOportunidadCandanteDelLead(leadId: string): SQL {
 	)`;
 }
 
-/** Lo mismo para UNA oportunidad: el caso del co-deudor. */
-export function existeOportunidadCandantePorId(opportunityId: string): SQL {
+/**
+ * Lo mismo para UNA oportunidad: el caso del co-deudor.
+ *
+ * `etapaDestino` es opcional y sólo lo manda quien, en el MISMO UPDATE, también
+ * mueve la etapa (hoy: el cambio de `leadId` en `updateOpportunity`). Sin él el
+ * predicado sale idéntico a como estaba, que es lo que necesitan el borrado del
+ * co-deudor y la escritura del DPI.
+ */
+export function existeOportunidadCandantePorId(
+	opportunityId: string,
+	etapaDestino?: string,
+): SQL {
 	return sql`exists (
 		select 1
 		from ${opportunities}
 		inner join ${salesStages} on ${salesStages.id} = ${opportunities.stageId}
 		where ${opportunities.id} = ${opportunityId}
-			and ${sqlCandanteDeLaOportunidad()}
+			and ${sqlCandanteDeLaOportunidad(etapaDestino)}
 	)`;
 }
 
@@ -323,8 +387,11 @@ export function noExisteOportunidadCandanteDelLead(leadId: string): SQL {
 	return sql`not ${existeOportunidadCandanteDelLead(leadId)}`;
 }
 
-export function noExisteOportunidadCandantePorId(opportunityId: string): SQL {
-	return sql`not ${existeOportunidadCandantePorId(opportunityId)}`;
+export function noExisteOportunidadCandantePorId(
+	opportunityId: string,
+	etapaDestino?: string,
+): SQL {
+	return sql`not ${existeOportunidadCandantePorId(opportunityId, etapaDestino)}`;
 }
 
 /**

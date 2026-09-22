@@ -105,6 +105,7 @@ import {
 	toDateStrGT,
 } from "../lib/guatemala-month-window";
 import {
+	conLaEtapaDeDestino,
 	dpiCambia,
 	etapaQueCanda,
 	evaluarCandadoBorradoCoDeudor,
@@ -2952,12 +2953,39 @@ export const crmRouter = {
 				input.leadId !== currentOpportunity[0].leadId;
 
 			if (cambiaElLeadDeLaOportunidad) {
+				// 🔴 Lo que decide es la etapa EFECTIVA de destino —`input.stageId` si
+				// viene, y si no la guardada—, no sólo el estado persistido.
+				//
+				// Mirando nada más lo guardado, un SOLO request que cambiara `leadId`
+				// Y `stageId` a la vez cruzaba el candado entero: una oportunidad en el
+				// 30% con el análisis aprobado para el lead A recibía
+				// `{ leadId: B, stageId: <etapa 40%> }`, el chequeo veía 30 —el que la
+				// sube por encima del umbral es ESTE MISMO UPDATE— y la sentencia
+				// reemplazaba al cliente y cruzaba el umbral de una, conservando la
+				// aprobación y la evidencia (RENAP, buró, documentos) de A. Es la
+				// maniobra en dos pasos que este candado cerró, comprimida en uno.
+				//
+				// La consulta extra sólo la paga el request que ADEMÁS mueve la etapa
+				// mientras cambia el lead, que es el caso raro.
+				const [etapaDestino] = input.stageId
+					? await db
+							.select({
+								name: salesStages.name,
+								closurePercentage: salesStages.closurePercentage,
+							})
+							.from(salesStages)
+							.where(eq(salesStages.id, input.stageId))
+							.limit(1)
+					: [];
+
 				// La misma consulta y el mismo predicado que usa el candado del DPI:
 				// una sola fila, la de esta oportunidad. `etapaQueCanda` ya deja
 				// pasar a las `lost` —que no candan por decisión de producto— y esas
 				// pagan su costo al reabrirse, con `parcheDeRevalidacion`.
 				const candante = etapaQueCanda(
-					await obtenerOportunidadesParaCandadoDpi({ opportunityId: id }),
+					(await obtenerOportunidadesParaCandadoDpi({ opportunityId: id })).map(
+						(oportunidad) => conLaEtapaDeDestino(oportunidad, etapaDestino),
+					),
 				);
 
 				if (candante) {
@@ -3299,8 +3327,17 @@ export const crmRouter = {
 			// después de esperar a la escritura rival, así que la condición viaja
 			// dentro de la misma sentencia. Solo cuando el lead cambia: ninguna otra
 			// edición tiene por qué pagarlo.
+			//
+			// 🔴 La etapa de destino viaja ADENTRO del predicado, no sólo en el
+			// chequeo de arriba. Sin ella, el `not exists` leía el estado persistido
+			// —todavía por debajo del umbral, porque el que lo cruza es esta misma
+			// sentencia— y dejaba pasar el cambio de lead que sube de etapa en el
+			// mismo viaje. Es la contraparte SQL de `conLaEtapaDeDestino`.
 			const leadSwapWhereClause = cambiaElLeadDeLaOportunidad
-				? and(wonLockWhereClause, noExisteOportunidadCandantePorId(id))
+				? and(
+						wonLockWhereClause,
+						noExisteOportunidadCandantePorId(id, input.stageId),
+					)
 				: wonLockWhereClause;
 			const whereClause = expectedUpdatedAt
 				? and(

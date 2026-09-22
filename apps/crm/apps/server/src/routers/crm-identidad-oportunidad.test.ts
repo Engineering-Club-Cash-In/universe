@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { type SQL, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
 
 import { user } from "../db/schema/auth";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
+import { PORCENTAJE_CANDADO_DPI } from "../lib/lead-dpi-lock";
 
 /**
  * Los dos caminos por los que una oportunidad avanzada podía quedar respaldada
@@ -21,7 +24,18 @@ type Fila = Record<string, unknown>;
 /** Lo que devuelve un SELECT, por tabla. La proyección de columnas se ignora. */
 const filasPorTabla = new Map<unknown, Fila[]>();
 
-type Escritura = { tipo: "update" | "insert"; tabla: unknown; valores: Fila };
+type Escritura = {
+	tipo: "update" | "insert";
+	tabla: unknown;
+	valores: Fila;
+	/**
+	 * El WHERE con el que salió el UPDATE. Se guarda porque parte del candado no
+	 * vive en un `if` sino DENTRO de la sentencia que escribe —Postgres lo
+	 * re-evalúa después de esperar a la escritura rival—, y un test que sólo
+	 * mire los `if` no lo ve.
+	 */
+	condicion?: unknown;
+};
 const escrituras: Escritura[] = [];
 
 /** Lo que devuelve el `returning()` de un UPDATE, para que el handler siga. */
@@ -60,8 +74,8 @@ function constructorUpdate(tabla: unknown) {
 		},
 		// El registro va en `where` porque los dos usos —con `returning()` y
 		// esperando el builder— pasan por acá.
-		where() {
-			escrituras.push({ tipo: "update", tabla, valores });
+		where(condicion: unknown) {
+			escrituras.push({ tipo: "update", tabla, valores, condicion });
 			return b;
 		},
 		returning: () => Promise.resolve(filasDevueltasPorUpdate),
@@ -150,6 +164,34 @@ const contextoDe = (userId: string, userRole: string) => ({
 
 const escriturasSobreOportunidades = () =>
 	escrituras.filter((e) => e.tabla === opportunities);
+
+/**
+ * El WHERE del UPDATE, renderizado como se lo manda a Postgres.
+ *
+ * Es el mismo recurso que usa `lib/lead-dpi-lock.test.ts`: esta suite no tiene
+ * un Postgres contra el cual ejecutar el predicado, así que se afirma sobre el
+ * TEXTO y los parámetros que de verdad viajan, no sobre el fuente del handler.
+ */
+const renderizador = drizzle.mock();
+
+/**
+ * Lo que las escrituras sobre `opportunities` cambiaron de identidad, proyectado.
+ * `escriturasSobreOportunidades()` entero arrastra el objeto de tabla de Drizzle
+ * y un fallo se vuelve ilegible.
+ */
+const identidadEscrita = () =>
+	escriturasSobreOportunidades().map((e) => ({
+		tipo: e.tipo,
+		leadId: e.valores.leadId,
+		stageId: e.valores.stageId,
+	}));
+
+const sqlDeLaCondicion = (condicion: unknown) =>
+	renderizador
+		.select({ x: sql`1` })
+		.from(opportunities)
+		.where(condicion as SQL)
+		.toSQL();
 
 beforeEach(async () => {
 	await instalarDbFalso();
@@ -277,6 +319,139 @@ describe("updateOpportunity: reasignar el lead no cambia la identidad del expedi
 
 		// El moroso no entró: la oportunidad sigue apuntando al lead original.
 		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+
+	/**
+	 * 🔴 La maniobra de dos pasos, comprimida en UNO.
+	 *
+	 * El candado de arriba mira el estado PERSISTIDO: una oportunidad en 30% con
+	 * el análisis aprobado para el lead A no canda todavía. Un solo request que
+	 * mande `{ leadId: B, stageId: <etapa 40%> }` pasaba entero: el chequeo en
+	 * memoria leía 30, el predicado atómico del UPDATE también leía 30 —porque
+	 * el que la sube por encima del umbral es ESTE MISMO UPDATE—, y la misma
+	 * sentencia reemplazaba al cliente Y cruzaba el umbral, dejando pegados la
+	 * aprobación y toda la evidencia (RENAP, buró, documentos) del lead A.
+	 */
+	const ETAPA_40 = "99999999-9999-4999-8999-999999999999";
+	const ETAPA_20 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+	/** En el 30%: hoy NO canda, y por eso el destino es lo único que decide. */
+	const enAnalisisAl30 = {
+		...aprobadaAl40,
+		stageId: "etapa-analisis",
+		vehicleId: "vehiculo-1",
+		stageName: "Análisis",
+		closurePercentage: 30,
+		maxHistoricoClosurePercentage: 30,
+	};
+
+	test("cambiar el lead Y cruzar el umbral en el mismo request queda rechazado", async () => {
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, [enAnalisisAl30]);
+		filasPorTabla.set(leads, [{ id: LEAD_MOROSO, source: "web" }]);
+		// El doble ignora el WHERE: la etapa que devuelve es la de DESTINO, que es
+		// la que este request quiere aplicar.
+		filasPorTabla.set(salesStages, [
+			{
+				id: ETAPA_40,
+				name: "Cierre de propuesta",
+				closurePercentage: 40,
+				order: 5,
+			},
+		]);
+
+		const salida = await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_MOROSO, stageId: ETAPA_40 },
+			contextoDe("vendedor", "sales"),
+		).then(
+			() => null,
+			(e: unknown) => e,
+		);
+
+		// Lo que de verdad importa, y lo primero que se afirma: el moroso no entró
+		// y la oportunidad no se movió. Sin el arreglo acá hay UNA escritura con
+		// `leadId: LEAD_MOROSO` y `stageId: ETAPA_40`.
+		expect(identidadEscrita()).toEqual([]);
+		expect((salida as Error | null)?.message).toMatch(
+			/No se puede cambiar el cliente de esta oportunidad/,
+		);
+	});
+
+	test("mover SOLO la etapa por encima del umbral no queda bloqueado", async () => {
+		// Red de seguridad: el candado protege la identidad del expediente, no el
+		// avance. Sin el lead de por medio, subir de etapa es el flujo normal.
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, [enAnalisisAl30]);
+		filasPorTabla.set(leads, []);
+		filasPorTabla.set(salesStages, [
+			{
+				id: ETAPA_40,
+				name: "Cierre de propuesta",
+				closurePercentage: 40,
+				order: 5,
+			},
+		]);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, stageId: ETAPA_40 },
+			contextoDe("vendedor", "sales"),
+		);
+
+		expect(escriturasSobreOportunidades()[0]?.valores).toMatchObject({
+			stageId: ETAPA_40,
+		});
+	});
+
+	test("el UPDATE que cambia el lead lleva la etapa de DESTINO en su propio WHERE", async () => {
+		// 🔴 El chequeo en memoria leyó la fila ANTES del UPDATE. Entre la lectura
+		// y la escritura otra transacción puede mover la oportunidad, así que la
+		// condición tiene que viajar dentro de la misma sentencia —Postgres la
+		// re-evalúa tras esperar a la escritura rival— y con la etapa de destino
+		// adentro, no sólo con el estado guardado.
+		//
+		// Se ejercita con un destino que NO canda (20%), porque es el único caso
+		// en que el UPDATE llega a salir y se le puede mirar el WHERE.
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, [
+			{
+				...aprobadaAl40,
+				stageId: "etapa-calificacion",
+				analysisStatus: "not_applicable",
+				creditDetailApproved: false,
+				stageName: "Calificación",
+				closurePercentage: 20,
+				maxHistoricoClosurePercentage: 20,
+			},
+		]);
+		filasPorTabla.set(leads, [{ id: LEAD_MOROSO, source: "web" }]);
+		filasPorTabla.set(salesStages, [
+			{ id: ETAPA_20, name: "Calificación", closurePercentage: 20, order: 3 },
+		]);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_MOROSO, stageId: ETAPA_20 },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const [escritura] = escriturasSobreOportunidades();
+		expect(escritura?.valores).toMatchObject({ leadId: LEAD_MOROSO });
+
+		const { sql: texto, params } = sqlDeLaCondicion(escritura?.condicion);
+
+		// La rama de la etapa de destino existe en la sentencia que escribe.
+		expect(texto.replace(/\s+/g, " ").toLowerCase()).toContain(
+			"ed.closure_percentage >",
+		);
+
+		// Y usa el MISMO umbral que el resto del candado, no un 30 suelto: tres
+		// veces —etapa actual, historial y destino— contra las dos de antes.
+		expect(params.filter((p) => p === PORCENTAJE_CANDADO_DPI)).toHaveLength(3);
+
+		// El destino que viaja es el del request, no el guardado.
+		expect(params).toContain(ETAPA_20);
 	});
 
 	test("por debajo del 30% el lead todavía se puede corregir", async () => {

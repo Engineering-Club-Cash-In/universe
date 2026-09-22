@@ -3,7 +3,9 @@ import { eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { opportunities, salesStages } from "../db/schema";
 import {
+	conLaEtapaDeDestino,
 	dpiCambia,
+	etapaQueCanda,
 	existeOportunidadCandanteDelLead,
 	existeOportunidadCandantePorId,
 	MAX_HISTORICO,
@@ -428,6 +430,44 @@ describe("las dos formas de la señal dicen lo mismo", () => {
 		expect(texto).not.toContain('"opportunities"."lead_id" =');
 	});
 
+	/**
+	 * 🔴 La etapa a la que el UPDATE MUEVE la oportunidad, dentro del predicado.
+	 *
+	 * Sin esta rama, un solo request con `{ leadId: B, stageId: <etapa 40%> }`
+	 * pasaba: tanto el chequeo en memoria como este `not exists` leían el estado
+	 * persistido —todavía en 30%, porque el que lo cruza es esa misma sentencia—
+	 * y el UPDATE reemplazaba al cliente Y cruzaba el umbral de una.
+	 */
+	test("con etapa de destino, el SQL agrega la rama del destino", () => {
+		const texto = sqlComoTexto(
+			existeOportunidadCandantePorId("una-oportunidad", "una-etapa"),
+		);
+
+		expect(texto).toContain("ed.closure_percentage >");
+		// Se SUMA a las otras dos señales: la etapa de hoy y el historial siguen.
+		expect(texto).toContain("opportunity_stage_history");
+	});
+
+	test("sin etapa de destino, el SQL sale exactamente como antes", () => {
+		// El borrado del co-deudor y la escritura del DPI usan la misma envoltura
+		// y no mueven ninguna etapa: no pueden empezar a candar por este cambio.
+		expect(sqlComoTexto(existeOportunidadCandantePorId("x"))).not.toContain(
+			"ed.closure_percentage",
+		);
+	});
+
+	test("la rama del destino usa el MISMO umbral, y no un 30 suelto", () => {
+		const { params } = base
+			.select({ x: sql`1` })
+			.from(opportunities)
+			.where(existeOportunidadCandantePorId("una-oportunidad", "una-etapa"))
+			.toSQL();
+
+		// Tres: etapa actual, historial y destino.
+		expect(params.filter((p) => p === PORCENTAJE_CANDADO_DPI)).toHaveLength(3);
+		expect(params).toContain("una-etapa");
+	});
+
 	test("la negada es la negación de la afirmativa", () => {
 		expect(sqlComoTexto(noExisteOportunidadCandanteDelLead("x"))).toContain(
 			"not exists",
@@ -435,6 +475,73 @@ describe("las dos formas de la señal dicen lo mismo", () => {
 		expect(sqlComoTexto(noExisteOportunidadCandantePorId("x"))).toContain(
 			"not exists",
 		);
+	});
+});
+
+/**
+ * 🔴 La contraparte en memoria de la rama del destino.
+ *
+ * `conLaEtapaDeDestino` responde "¿cómo quedaría esta oportunidad si el request
+ * se aplicara?", y de ahí sale la decisión del candado del cambio de lead.
+ */
+describe("conLaEtapaDeDestino", () => {
+	const enAnalisis = oportunidad(30, "open", "Análisis");
+
+	test("el destino que cruza el umbral canda aunque lo guardado no cande", () => {
+		const efectiva = conLaEtapaDeDestino(enAnalisis, {
+			name: "Cierre de propuesta",
+			closurePercentage: 40,
+		});
+
+		expect(etapaQueCanda([enAnalisis])).toBeNull();
+		expect(etapaQueCanda([efectiva])).not.toBeNull();
+	});
+
+	test("un destino por debajo del umbral no canda nada", () => {
+		const efectiva = conLaEtapaDeDestino(enAnalisis, {
+			name: "Calificación",
+			closurePercentage: 20,
+		});
+
+		expect(etapaQueCanda([efectiva])).toBeNull();
+	});
+
+	/**
+	 * 🔴 El destino SUMA, nunca resta. Si pisara a la etapa actual, mandar
+	 * `{ leadId: B, stageId: <etapa 20%> }` descandaría a una oportunidad parada
+	 * hoy en el 40% sin historial —la que nació ahí—, rearmando el agujero por la
+	 * puerta de al lado.
+	 */
+	test("bajar de etapa en el mismo request NO descanda", () => {
+		const parada40SinHistorial = oportunidad(40, "open", "Cierre de propuesta");
+
+		const efectiva = conLaEtapaDeDestino(parada40SinHistorial, {
+			name: "Calificación",
+			closurePercentage: 20,
+		});
+
+		expect(efectiva.closurePercentage).toBe(40);
+		expect(etapaQueCanda([efectiva])).not.toBeNull();
+	});
+
+	test("sin etapa de destino la oportunidad sale intacta", () => {
+		expect(conLaEtapaDeDestino(enAnalisis, null)).toBe(enAnalisis);
+		expect(conLaEtapaDeDestino(enAnalisis, undefined)).toBe(enAnalisis);
+	});
+
+	test("una perdida sigue sin candar, aunque el destino cruce", () => {
+		// Decisión de producto vigente: un crédito que no se dio no deja al
+		// cliente con la identidad fija para siempre.
+		const perdida = oportunidad(30, "lost", "Análisis");
+
+		expect(
+			etapaQueCanda([
+				conLaEtapaDeDestino(perdida, {
+					name: "Cierre de propuesta",
+					closurePercentage: 40,
+				}),
+			]),
+		).toBeNull();
 	});
 });
 

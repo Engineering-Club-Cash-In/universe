@@ -11,14 +11,17 @@ import {
   creditos_inversionistas,
   boletas,
   convenio_cuotas,
-  moras_credito,
 } from "../database/db";
 import Big from "big.js";
 import {
   calcularAplicacionConvenio,
   calcularCuotasConvenioCompletadas,
 } from "./registerPaymentPolicy";
-import { createMora, decidirMoraTrasRomperConvenio } from "./latefee";
+import {
+  createMora,
+  decidirMoraTrasRomperConvenio,
+  desactivarMoraPorConvenio,
+} from "./latefee";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { getPagosDelMesActual } from "./payments";
 import { creditRouter } from "../routers";
@@ -352,24 +355,25 @@ export async function createPaymentAgreement(
     console.log("🔥 Estado nuevo: EN_CONVENIO");
     console.log("🔥 Convenio ID:", agreement.convenio_id);
   // ============================================
-    // 💸 ELIMINAR MORA ACTIVA (si existe)
+    // 💸 DESACTIVAR MORA ACTIVA (si existe)
     // ============================================
-    console.log("✅ Paso 13: Eliminando mora activa del crédito (si existe)...");
+    // Antes acá había un DELETE duro sobre moras_credito: era la única ruta del
+    // módulo que hacía desaparecer un monto de mora sin dejar constancia, y por
+    // eso no se podía responder cuánta mora se perdona vía convenios. Ahora se
+    // desactiva y se anota el evento en moras_historial, igual que el cron.
+    console.log("✅ Paso 13: Desactivando mora activa del crédito (si existe)...");
 
-    const morasEliminadas = await db
-      .delete(moras_credito)
-      .where(
-        and(
-          eq(moras_credito.credito_id, credit_id),
-          eq(moras_credito.activa, true)
-        )
-      )
-      .returning();
+    const moraDesactivada = await desactivarMoraPorConvenio(credit_id, {
+      convenio_id: agreement.convenio_id,
+      usuario_id: created_by,
+    });
 
-    if (morasEliminadas.length > 0) {
-      console.log(`✅ Se eliminaron ${morasEliminadas.length} mora(s) activa(s)`);
+    if (moraDesactivada.desactivada) {
+      console.log(
+        `✅ Se desactivó la mora ${moraDesactivada.mora_id} (Q${moraDesactivada.monto_anterior}) y quedó registrada en el historial`
+      );
     } else {
-      console.log("ℹ️ No había moras activas para eliminar");
+      console.log("ℹ️ No había moras activas para desactivar");
     }
     const resultadoUpdate = await db
       .update(creditos)

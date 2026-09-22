@@ -1224,6 +1224,84 @@ async function desactivarMoraDelCron(
   });
 }
 
+/**
+ * Apaga la mora activa de un crédito al abrirle un convenio de pago, DEJANDO
+ * RASTRO en `moras_historial`.
+ *
+ * Existe porque el convenio era la ÚNICA ruta del módulo que hacía desaparecer
+ * un monto de mora con un DELETE duro: la fila se iba y con ella la respuesta a
+ * "cuánta mora perdonamos vía convenios". La regla del módulo es que
+ * `moras_credito` es el monto de HOY y `moras_historial` la auditoría, que solo
+ * se inserta — así que acá se desactiva, igual que hacen el cron
+ * (`desactivarMoraDelCron`) y la limpieza tras aplicar un pago.
+ *
+ * NO toca `creditos.statusCredit`: el caller lo deja en EN_CONVENIO justo
+ * después, y bajarlo a ACTIVO acá lo des-castigaría.
+ *
+ * El UPDATE es condicional sobre `activa=true` (vía el `mora_id` que se acaba de
+ * leer con ese filtro); si no hay mora activa no escribe nada y lo reporta.
+ */
+export async function desactivarMoraPorConvenio(
+  credito_id: number,
+  opts: {
+    convenio_id?: number | null;
+    usuario_id?: number | null;
+    dbClient?: typeof db;
+  } = {},
+): Promise<{ desactivada: boolean; mora_id?: number; monto_anterior?: string }> {
+  const dbi = opts.dbClient ?? db;
+
+  // El índice único parcial moras_credito_uq_activa garantiza a lo sumo una
+  // mora activa por crédito, así que basta con la primera fila.
+  const [moraActiva] = await dbi
+    .select({
+      mora_id: moras_credito.mora_id,
+      monto_mora: moras_credito.monto_mora,
+      cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+      porcentaje_mora: moras_credito.porcentaje_mora,
+    })
+    .from(moras_credito)
+    .where(
+      and(
+        eq(moras_credito.credito_id, credito_id),
+        eq(moras_credito.activa, true),
+      ),
+    );
+
+  if (!moraActiva) return { desactivada: false };
+
+  await dbi
+    .update(moras_credito)
+    .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
+    .where(eq(moras_credito.mora_id, moraActiva.mora_id));
+
+  await registrarHistorialMora({
+    credito_id,
+    mora_id: moraActiva.mora_id,
+    tipo_evento: "DESACTIVACION",
+    origen: "API_MANUAL",
+    monto_anterior: moraActiva.monto_mora,
+    monto_nuevo: "0",
+    cuotas_atrasadas_anterior: moraActiva.cuotas_atrasadas,
+    cuotas_atrasadas_nuevas: 0,
+    porcentaje_mora: moraActiva.porcentaje_mora,
+    usuario_id: opts.usuario_id ?? null,
+    motivo:
+      opts.convenio_id != null
+        ? `Mora desactivada por convenio de pago (convenio ${opts.convenio_id})`
+        : "Mora desactivada por convenio de pago",
+    dbClient: opts.dbClient,
+    // Dentro de una transacción del caller el swallow sería mentiroso.
+    propagarError: opts.dbClient !== undefined,
+  });
+
+  return {
+    desactivada: true,
+    mora_id: moraActiva.mora_id,
+    monto_anterior: moraActiva.monto_mora,
+  };
+}
+
 // Clave fija para el advisory lock de procesarMoras (cualquier int estable sirve).
 const PROCESAR_MORAS_LOCK_KEY = 728193;
 

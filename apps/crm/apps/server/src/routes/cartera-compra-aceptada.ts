@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db";
@@ -134,22 +134,58 @@ app.post("/", async (c) => {
 	// Sin fila devuelta, el aviso ya había entrado: se contesta con la batería
 	// que ya existe y no se vuelve a notificar. Un reintento no puede hacerle
 	// sonar la campana a jurídico dos veces por el mismo trabajo.
+	//
+	// Sí se refresca la foto mientras la batería siga abierta: el aviso se
+	// reintenta cuando el CRM no contestó, y en el medio pudieron completar en
+	// cartera un dato que faltaba (el DPI del representante, el correo). Una
+	// batería ya cerrada no se toca: sus contratos salieron con lo que había.
 	if (!creada) {
 		const [existente] = await db
-			.select({ id: investorContractBatches.id })
-			.from(investorContractBatches)
+			.update(investorContractBatches)
+			.set({
+				investorName: inversionista.nombre,
+				investorDpi: inversionista.dpi ?? null,
+				investorDpiRepLegal: inversionista.dpiRepLegal ?? null,
+				investorEmail: inversionista.email ?? null,
+				investorPhone: inversionista.celular ?? null,
+				creditos: compra.creditos,
+				montoTotal: compra.montoTotal,
+				modalidad: compra.modalidad ?? null,
+				facturacion: compra.facturacion ?? null,
+				updatedAt: new Date(),
+			})
 			.where(
 				and(
 					eq(investorContractBatches.investorId, inversionista.id),
 					eq(investorContractBatches.purchaseKey, purchaseKey),
+					inArray(investorContractBatches.status, ["pendiente", "en_proceso"]),
 				),
 			)
-			.limit(1);
+			.returning({ id: investorContractBatches.id });
+
+		// Si no se actualizó ninguna, la batería existe pero ya está cerrada: se
+		// devuelve igual, para que cartera sepa que el aviso llegó.
+		const [cerrada] = existente
+			? []
+			: await db
+					.select({ id: investorContractBatches.id })
+					.from(investorContractBatches)
+					.where(
+						and(
+							eq(investorContractBatches.investorId, inversionista.id),
+							eq(investorContractBatches.purchaseKey, purchaseKey),
+						),
+					)
+					.limit(1);
 
 		console.log(
 			`[cartera-compra-aceptada] batería repetida para ${inversionista.nombre} (${purchaseKey})`,
 		);
-		return c.json({ success: true, batchId: existente?.id, repetida: true });
+		return c.json({
+			success: true,
+			batchId: existente?.id ?? cerrada?.id,
+			repetida: true,
+		});
 	}
 
 	const autor = await autorDeLaNotificacion();

@@ -6,7 +6,10 @@ process.env.CARTERA_RELAY_SECRET = "secreto-de-prueba";
 let filaInsertada: Array<{ id: string }> = [];
 /** Cola de resultados para los `select(...).limit()`, en orden de llamada. */
 let resultadosDeSelect: unknown[][] = [];
+/** Lo que devuelve el `update(...).returning()` del refresco de la foto. */
+let filaRefrescada: Array<{ id: string }> = [];
 const valoresInsertados: Record<string, unknown>[] = [];
+const valoresRefrescados: Record<string, unknown>[] = [];
 
 const createNotification = mock(async (_datos: Record<string, unknown>) => ({
 	id: "notificacion-1",
@@ -31,6 +34,14 @@ mock.module("../db", () => ({
 					limit: async () => resultadosDeSelect.shift() ?? [],
 				}),
 			}),
+		}),
+		update: () => ({
+			set: (valores: Record<string, unknown>) => {
+				valoresRefrescados.push(valores);
+				return {
+					where: () => ({ returning: async () => filaRefrescada }),
+				};
+			},
 		}),
 	},
 }));
@@ -81,8 +92,10 @@ function pedir(cuerpo: unknown, secreto = "secreto-de-prueba") {
 
 beforeEach(() => {
 	filaInsertada = [];
+	filaRefrescada = [];
 	resultadosDeSelect = [];
 	valoresInsertados.length = 0;
+	valoresRefrescados.length = 0;
 	createNotification.mockClear();
 });
 
@@ -135,7 +148,7 @@ describe("aviso de compra aceptada", () => {
 	test("un reintento no abre otra batería ni vuelve a notificar", async () => {
 		// Sin fila devuelta: el índice único la rechazó porque ya existía.
 		filaInsertada = [];
-		resultadosDeSelect = [[{ id: "bateria-1" }]];
+		filaRefrescada = [{ id: "bateria-1" }];
 
 		const res = await pedir(CUERPO);
 
@@ -145,6 +158,33 @@ describe("aviso de compra aceptada", () => {
 			repetida: true,
 		});
 		expect(createNotification).not.toHaveBeenCalled();
+	});
+
+	test("el reintento refresca la foto de la batería abierta", async () => {
+		filaInsertada = [];
+		filaRefrescada = [{ id: "bateria-1" }];
+
+		await pedir(CUERPO);
+
+		// Lo que pudo haberse completado en cartera entre un aviso y el otro.
+		expect(valoresRefrescados[0]).toMatchObject({
+			investorEmail: "ana@ejemplo.com",
+			montoTotal: "150000.00",
+		});
+	});
+
+	test("una batería ya cerrada no se refresca, pero el aviso se acepta", async () => {
+		filaInsertada = [];
+		// El update no alcanza ninguna fila: la batería está completada.
+		filaRefrescada = [];
+		resultadosDeSelect = [[{ id: "bateria-cerrada" }]];
+
+		const res = await pedir(CUERPO);
+
+		expect(await res.json()).toMatchObject({
+			batchId: "bateria-cerrada",
+			repetida: true,
+		});
 	});
 
 	test("sin usuario de jurídico ni admin, la batería igual queda abierta", async () => {

@@ -156,6 +156,14 @@ function contratoVigente() {
 	);
 }
 
+/** Lo mismo que `contratoVigente`, sobre una fila ya leída. */
+function estaVigente(contrato: {
+	status: string;
+	replacedByContractId: string | null;
+}): boolean {
+	return contrato.status !== "cancelled" && !contrato.replacedByContractId;
+}
+
 /**
  * Candado por oportunidad que comparten confirmar la firma y regenerar enlaces.
  *
@@ -416,6 +424,16 @@ export const legalContractsRouter = {
 			if (!existingContract) {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Contrato no encontrado",
+				});
+			}
+
+			// Un anulado se conserva como registro: dice qué documento se descartó y
+			// quién lo había firmado. Borrar la fila no lo borra en WeeTrust (uno
+			// completo ni siquiera se puede), así que quedaría allá sin rastro acá.
+			if (!estaVigente(existingContract)) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato está anulado: se conserva como registro y no se puede eliminar.",
 				});
 			}
 
@@ -733,14 +751,16 @@ export const legalContractsRouter = {
 			}),
 		)
 		.handler(async ({ input, context: _ }) => {
+			// Mismo criterio que `deleteLegalContract`: los anulados son registro.
 			const [deletedContract] = await db
 				.delete(generatedLegalContracts)
-				.where(eq(generatedLegalContracts.id, input.id))
+				.where(and(eq(generatedLegalContracts.id, input.id), contratoVigente()))
 				.returning();
 
 			if (!deletedContract) {
 				throw new ORPCError("NOT_FOUND", {
-					message: "Contrato no encontrado",
+					message:
+						"Contrato no encontrado, o anulado (los anulados se conservan como registro)",
 				});
 			}
 

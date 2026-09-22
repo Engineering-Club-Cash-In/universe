@@ -255,7 +255,9 @@ export function ContractCard({
 								Reemplazar
 							</Button>
 						)}
-						{canCreateLegal && onDelete && (
+						{/* Un anulado se conserva como registro de lo descartado (y de quién lo
+						    firmó): borrarlo acá no lo borra en WeeTrust y pierde ese rastro. */}
+						{canCreateLegal && onDelete && !inactivo && (
 							<Button
 								size="sm"
 								variant="outline"

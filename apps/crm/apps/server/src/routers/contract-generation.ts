@@ -3,7 +3,7 @@
  * Integra con legal-docs-blueprints API y API de documentos legales
  */
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
@@ -346,7 +346,8 @@ async function exigirEtapaQuePermiteReemplazo(
  *   blockchain y su API no tiene endpoint para anular).
  *
  * Sólo se borra la fila de uno que nunca tuvo documento en WeeTrust y que
- * nadie firmó: ahí no hay nada allá que pueda cambiar mientras tanto.
+ * nadie firmó (ahí no hay nada allá que pueda cambiar mientras tanto), o la de
+ * un duplicado de otra fila con el mismo documento, que sigue vivo.
  */
 async function anularContratoReemplazado(
 	contractId: string,
@@ -365,6 +366,32 @@ async function anularContratoReemplazado(
 		.limit(1);
 
 	if (!viejo) return null;
+
+	// El mismo documento de WeeTrust en otra fila: ésta es un duplicado (un
+	// reintento que volvió a enlazar el mismo resultado). Borrarlo allá dejaría
+	// sin enlaces a la otra, que lo sigue usando; sólo se quita esta fila. El
+	// documento sigue vivo, así que nada de lo firmado se pierde.
+	if (viejo.weetrustDocumentId) {
+		const [otra] = await db
+			.select({ id: generatedLegalContracts.id })
+			.from(generatedLegalContracts)
+			.where(
+				and(
+					eq(
+						generatedLegalContracts.weetrustDocumentId,
+						viejo.weetrustDocumentId,
+					),
+					ne(generatedLegalContracts.id, contractId),
+				),
+			)
+			.limit(1);
+		if (otra) {
+			await db
+				.delete(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.id, contractId));
+			return { contractId, conservado: false };
+		}
+	}
 
 	// Completo: WeeTrust no deja borrarlo. Con firmas parciales sí se puede, y
 	// se borra igual (si no, los que faltan seguirían pudiendo firmar un
@@ -1202,16 +1229,48 @@ export const contractGenerationRouter = {
 				const savedContracts: Array<{ id: string; contractType: string }> = [];
 				const descartados: string[] = [];
 
+				// Documentos que ya están enlazados: pasa cuando se reintenta un pedido
+				// que sí se guardó (se perdió la respuesta, doble click). No se vuelven
+				// a insertar ni, sobre todo, se borran: la fila que ya existe es la
+				// que los usa, y un duplicado retiraba a la otra borrando el documento
+				// que compartían.
+				const idsDeDocumento = input.contracts
+					.map((c) => firmaDelGenerador(c.apiResponse).documentID)
+					.filter((id): id is string => !!id);
+				const filasYaEnlazadas =
+					idsDeDocumento.length === 0
+						? []
+						: await db
+								.select({
+									id: generatedLegalContracts.id,
+									documentID: generatedLegalContracts.weetrustDocumentId,
+									opportunityId: generatedLegalContracts.opportunityId,
+									status: generatedLegalContracts.status,
+									replacedByContractId:
+										generatedLegalContracts.replacedByContractId,
+								})
+								.from(generatedLegalContracts)
+								.where(
+									inArray(
+										generatedLegalContracts.weetrustDocumentId,
+										idsDeDocumento,
+									),
+								);
+				const yaEnlazados = new Map(
+					filasYaEnlazadas.map((fila) => [fila.documentID, fila]),
+				);
+
 				// Enlazar es de jurídico y sólo en 80%. Si la oportunidad ya pasó (la
 				// aprobaron entre generar y enlazar), los documentos recién generados
 				// no se instalan: se borran en WeeTrust para que no queden vivos sin
-				// registro, con las invitaciones mandadas.
+				// registro, con las invitaciones mandadas. Los ya enlazados no: son
+				// los vigentes.
 				try {
 					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 				} catch (error) {
 					for (const contract of input.contracts) {
 						const { documentID } = firmaDelGenerador(contract.apiResponse);
-						if (documentID) {
+						if (documentID && !yaEnlazados.has(documentID)) {
 							await borrarDocumentoDeWeeTrust(documentID).catch((e) =>
 								console.error(
 									`[linkContractsToOpportunity] no se pudo borrar ${documentID}:`,
@@ -1228,6 +1287,27 @@ export const contractGenerationRouter = {
 					// El front reenvía tal cual la respuesta del generador; de ahí salen
 					// los roles y los identificadores de WeeTrust.
 					const generado = firmaDelGenerador(contract.apiResponse);
+
+					const previo = generado.documentID
+						? yaEnlazados.get(generado.documentID)
+						: undefined;
+					if (previo) {
+						// Ya quedó enlazado en un pedido anterior: se informa como tal si
+						// sigue siendo el vigente de esta oportunidad, sin tocar nada.
+						if (
+							previo.opportunityId === input.opportunityId &&
+							previo.status !== "cancelled" &&
+							!previo.replacedByContractId
+						) {
+							savedContracts.push({
+								id: previo.id,
+								contractType: contract.contractType,
+							});
+						} else {
+							descartados.push(contract.contractType);
+						}
+						continue;
+					}
 
 					const [saved] = await db
 						.insert(generatedLegalContracts)

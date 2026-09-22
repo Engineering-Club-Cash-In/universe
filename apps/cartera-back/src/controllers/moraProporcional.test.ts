@@ -9,9 +9,11 @@ const {
   calcularMoraProporcional,
   diasAtrasoMora,
   decidirMoraDelCron,
+  decidirMoraTrasRomperConvenio,
   fechaCalendarioGT,
   hoyGuatemala,
   isOverdueInstallmentForMora,
+  maximoMoraSinOverride,
   BASE_DIAS_MORA,
   TASA_MORA_MENSUAL,
 } = await import("./latefee");
@@ -287,6 +289,108 @@ describe("invariancia de zona horaria (prod corre en UTC, dev en America/Guatema
       // SÍ se corría de día con `toZonedTime` en un proceso UTC.
       expect(r["string con zona ayer"]).toEqual({ dias: 1, vencida: true, cal: Date.UTC(2026, 8, 20) });
       expect(r["string con zona vence hoy"].vencida).toBe(false);
+    }
+  });
+});
+
+// Guard de cordura de montos MANUALES (createMora). Se extrajo a función pura
+// porque el guard vive detrás de dos queries; lo que importa acá es la BASE del
+// umbral: anclarlo a la fórmula proporcional lo encogía ~30× con 1 día de atraso.
+describe("maximoMoraSinOverride — el guard no puede estrecharse con la mora proporcional", () => {
+  const capital = 10_000;
+  const cargoMensual = new Big(capital).times(TASA_MORA_MENSUAL); // Q112.00
+
+  it("una mora manual por el CARGO MENSUAL completo con 1 día de atraso ya NO se rechaza", () => {
+    // Con el umbral anclado a la proporcional (112 × 1/30 = Q3.73), el máximo
+    // sin override caía a Q37.33 y Q112.00 se rechazaba.
+    const maximo = maximoMoraSinOverride(capital, 1);
+    expect(maximo.toFixed(2)).toBe("1120.00");
+    expect(new Big(cargoMensual.toFixed(2)).gt(maximo)).toBe(false);
+  });
+
+  it("es 10× la cota superior (capital × 1.12% × cuotas vencidas)", () => {
+    expect(maximoMoraSinOverride(capital, 1).toFixed(2)).toBe("1120.00");
+    expect(maximoMoraSinOverride(capital, 3).toFixed(2)).toBe("3360.00");
+  });
+
+  it("no depende de los días de atraso: la cota superior es la fórmula de bloque completo", () => {
+    // Misma cuota, 1 día o 300 días: el techo del guard es el mismo.
+    expect(maximoMoraSinOverride(capital, 2).toFixed(2)).toBe(
+      new Big(capital).times(TASA_MORA_MENSUAL).times(2).times(10).toFixed(2),
+    );
+  });
+
+  it("sigue atrapando el absurdo histórico: Q27,953.44 sobre Q40k y 1 cuota", () => {
+    const maximo = maximoMoraSinOverride(40_000, 1); // Q4,480.00
+    expect(new Big(27_953.44).gt(maximo)).toBe(true);
+  });
+
+  it("la mora proporcional SIEMPRE cabe bajo el máximo (el guard nunca rechaza la fórmula)", () => {
+    for (const dias of [[1], [15], [30], [90, 30, 10, 3], [400, 370, 340]]) {
+      const propuesta = calcularMoraProporcional({ capital, diasAtrasadosPorCuota: dias });
+      expect(propuesta.gt(maximoMoraSinOverride(capital, dias.length))).toBe(false);
+    }
+  });
+
+  it("sin base creíble (capital 0 o cero cuotas vencidas) devuelve 0 → todo exige override", () => {
+    expect(maximoMoraSinOverride(0, 3).toFixed(2)).toBe("0.00");
+    expect(maximoMoraSinOverride(-100, 3).toFixed(2)).toBe("0.00");
+    expect(maximoMoraSinOverride(capital, 0).toFixed(2)).toBe("0.00");
+  });
+});
+
+// Romper un convenio es destructivo y SIN rollback: borra el convenio, pone el
+// crédito MOROSO y recrea la mora. Si createMora rechaza, el crédito queda sin
+// convenio, sin mora y nunca MOROSO — una ventana huérfana.
+describe("decidirMoraTrasRomperConvenio — nunca deja el crédito en tierra de nadie", () => {
+  it("con mora cobrable pide CREAR_MORA con el monto redondeado", () => {
+    // 10,000 × 1.12% × 1 cuota topada = Q112.00
+    const d = decidirMoraTrasRomperConvenio({ capital: 10_000, factorDias: 1, numCuotasAtrasadas: 1 });
+    expect(d.accion).toBe("CREAR_MORA");
+    expect(d.accion === "CREAR_MORA" && d.montoMora).toBe(112);
+  });
+
+  it("capital chico con 1 día de atraso: la mora redondea a Q0.00 → ACTIVAR, no createMora", () => {
+    // 13 × 1.12% × 1/30 = Q0.00485 → redondea a 0. createMora lo rechazaría
+    // ("Monto de mora debe ser mayor a 0") con el convenio ya destruido.
+    const factor = new Big(1).div(30);
+    const d = decidirMoraTrasRomperConvenio({ capital: 13, factorDias: factor, numCuotasAtrasadas: 1 });
+    expect(d.accion).toBe("ACTIVAR");
+    expect(d.accion === "ACTIVAR" && d.motivo).toContain("redondea a Q0.00");
+  });
+
+  it("el borde está en medio centavo: Q0.005 redondea hacia arriba y sí crea mora", () => {
+    const factor = new Big(1).div(30);
+    // 14 × 1.12% × 1/30 = 0.005226… → Q0.01
+    const sube = decidirMoraTrasRomperConvenio({ capital: 14, factorDias: factor, numCuotasAtrasadas: 1 });
+    expect(sube.accion).toBe("CREAR_MORA");
+    expect(sube.accion === "CREAR_MORA" && sube.montoMora).toBe(0.01);
+    // 13.39 × 1.12% × 1/30 = 0.004998… → Q0.00
+    const baja = decidirMoraTrasRomperConvenio({ capital: 13.39, factorDias: factor, numCuotasAtrasadas: 1 });
+    expect(baja.accion).toBe("ACTIVAR");
+  });
+
+  it("sin cuotas atrasadas → ACTIVAR (camino de siempre)", () => {
+    const d = decidirMoraTrasRomperConvenio({ capital: 10_000, factorDias: 0, numCuotasAtrasadas: 0 });
+    expect(d.accion).toBe("ACTIVAR");
+    expect(d.accion === "ACTIVAR" && d.motivo).toBe("sin cuotas atrasadas");
+  });
+
+  it("capital nulo, 0 o negativo → ACTIVAR, nunca una mora sin base", () => {
+    const factor = new Big(1);
+    for (const capital of [null, 0, -500]) {
+      const d = decidirMoraTrasRomperConvenio({ capital, factorDias: factor, numCuotasAtrasadas: 2 });
+      expect(d.accion).toBe("ACTIVAR");
+    }
+  });
+
+  it("el monto que propone SIEMPRE pasa el guard de createMora (no se autorechaza)", () => {
+    for (const cuotas of [1, 3, 12]) {
+      const d = decidirMoraTrasRomperConvenio({ capital: 10_000, factorDias: cuotas, numCuotasAtrasadas: cuotas });
+      expect(d.accion).toBe("CREAR_MORA");
+      if (d.accion !== "CREAR_MORA") continue;
+      expect(d.montoMora).toBeGreaterThan(0);
+      expect(new Big(d.montoMora).gt(maximoMoraSinOverride(10_000, cuotas))).toBe(false);
     }
   });
 });

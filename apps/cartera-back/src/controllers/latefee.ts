@@ -154,6 +154,42 @@ export function calcularMoraProporcional(params: {
   }, new Big(0));
 }
 
+/**
+ * Decisión pura de qué hacer con la mora al ROMPER un convenio de pago
+ * (paymentAgreement.updateConvenioStatus con status=false).
+ *
+ * El orden de operaciones de esa función es: borra el convenio, pone el
+ * crédito MOROSO y recrea la mora — sin rollback. Si el monto de mora redondea
+ * a Q0.00, `createMora` lo rechaza ("Monto de mora debe ser mayor a 0") y el
+ * crédito queda en tierra de nadie: sin convenio, sin mora y nunca MOROSO. Con
+ * la mora proporcional eso pasa de verdad: un capital chico con 1 solo día de
+ * atraso (capital ≲ Q13.40 → 13.40 × 1.12% × 1/30 ≈ Q0.005) redondea a 0.
+ *
+ * Con monto 0 no hay mora que cobrar, así que se toma el MISMO camino que "no
+ * hay cuotas atrasadas": crédito ACTIVO y coherente.
+ */
+export function decidirMoraTrasRomperConvenio(params: {
+  capital: Big | string | number | null;
+  factorDias: Big | string | number;
+  numCuotasAtrasadas: number;
+}): { accion: "CREAR_MORA"; montoMora: number } | { accion: "ACTIVAR"; motivo: string } {
+  const capital = new Big(params.capital || 0);
+  const factor = new Big(params.factorDias || 0);
+  const montoMora = capital.lte(0) ? new Big(0) : capital.times(TASA_MORA_MENSUAL).times(factor);
+  const montoRedondeado = Number(montoMora.toFixed(2));
+
+  if (params.numCuotasAtrasadas <= 0) {
+    return { accion: "ACTIVAR", motivo: "sin cuotas atrasadas" };
+  }
+  if (!(montoRedondeado > 0)) {
+    return {
+      accion: "ACTIVAR",
+      motivo: `mora proporcional de ${params.numCuotasAtrasadas} cuota(s) redondea a Q0.00 (capital Q${capital.toFixed(2)} × 1.12% × factor ${factor.toFixed(4)})`,
+    };
+  }
+  return { accion: "CREAR_MORA", montoMora: montoRedondeado };
+}
+
 export const MOTIVO_MORA_SIN_CAPITAL = "Crédito sin capital — no aplica mora";
 export const MOTIVO_MORA_MENOR_A_UN_CENTAVO = "Mora proporcional menor a un centavo";
 
@@ -201,6 +237,30 @@ export function decidirMoraDelCron(params: {
   }
 
   return { accion: "APLICAR", montoStr };
+}
+
+/**
+ * Techo del guard de cordura de montos de mora MANUALES: 10× la COTA SUPERIOR
+ * de la mora de ese crédito, `capital × 1.12% × cuotas vencidas` (un cargo
+ * mensual completo por cuota, la fórmula vieja).
+ *
+ * Se ancla a la cota superior y NO a la fórmula proporcional a propósito: la
+ * proporcional siempre es ≤ cota superior, así que usarla como base encogía el
+ * umbral hasta ~30× con 1 día de atraso (10× de 1/30 de cargo = 1/3 de cargo)
+ * y rechazaba sin override una mora manual por el cargo mensual normal. El
+ * guard existe para atrapar montos ABSURDOS (Q27,953.44 sobre un capital de
+ * Q40k/1 cuota), no para clavar el monto exacto.
+ *
+ * Devuelve 0 cuando no hay base creíble (capital ≤ 0 o cero cuotas vencidas):
+ * ahí cualquier monto exige override.
+ */
+export function maximoMoraSinOverride(
+  capital: Big | string | number,
+  cuotasVencidas: number,
+): Big {
+  const cap = new Big(capital || 0);
+  if (cap.lte(0) || !(cuotasVencidas > 0)) return new Big(0);
+  return cap.times(TASA_MORA_MENSUAL).times(cuotasVencidas).times(10);
 }
 
 /**
@@ -535,8 +595,13 @@ export async function createMora({
     // del request. Confiar en el valor enviado permitía inflarlo para esquivar el guard de
     // cordura: p.ej. Q27,953.44 pasaba con cuotas_atrasadas: 7 porque el umbral se volvía
     // 10× la fórmula de 7 cuotas. Misma lógica que procesarMoras (isOverdueInstallmentForMora).
+    // El `factor` es la suma de min(1, días/30) de esas mismas cuotas: la mora ya
+    // no es un bloque por cuota sino proporcional a los días de atraso (con techo
+    // de un cargo mensual). Va en el MISMO query para no pagar un segundo viaje ni
+    // arriesgar que los dos vean fotos distintas de las cuotas.
     const ovRes = await db.execute<any>(sql`
-      SELECT COUNT(*)::int AS n
+      SELECT COUNT(*)::int AS n,
+             COALESCE(SUM(LEAST(1.0, GREATEST(0, ((now() AT TIME ZONE 'America/Guatemala')::date - cu.fecha_vencimiento::date))::numeric / 30.0)), 0)::numeric AS factor
       FROM cartera.cuotas_credito cu
       WHERE cu.credito_id = ${credito_id}
         AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
@@ -547,6 +612,7 @@ export async function createMora({
             AND pc.validation_status IN ('validated', 'no_required')
             AND COALESCE(pc.monto_aplicado, 0) > 0)`);
     const cuotasReales = Number(ovRes.rows?.[0]?.n ?? 0);
+    const factorDias = new Big(ovRes.rows?.[0]?.factor ?? 0);
 
     // Si el cuotas_atrasadas enviado NO coincide con las cuotas vencidas reales, exigir override
     // (el caller no puede inflar el conteo para disparar el umbral del guard).
@@ -559,7 +625,9 @@ export async function createMora({
     }
 
     // La fórmula y el guard usan SIEMPRE las cuotas reales (no el valor no confiable del request).
-    const esperado = capitalBig.times(0.0112).times(cuotasReales); // capital × 1.12% × cuotas reales
+    // `esperado` es lo que da HOY la fórmula proporcional (capital × 1.12% × Σ min(1, días/30)):
+    // sirve de referencia informativa en el mensaje, pero NO como base del umbral.
+    const esperado = capitalBig.times(TASA_MORA_MENSUAL).times(factorDias);
 
     // 🔥 VALIDACIÓN 3: NUNCA escribir mora sobre créditos en estado excluido (EN_CONVENIO/
     // INCOBRABLE/CANCELADO/PENDIENTE_CANCELACION/CAIDO) — ni con override. Castigados/cancelados
@@ -575,19 +643,19 @@ export async function createMora({
       };
     }
 
-    // 🔥 VALIDACIÓN 4: guard de cordura del monto. "Absurdo" = mayor al capital total o
-    // más de 10× la fórmula (atrapa errores tipo Q27,953.44 sobre un capital de Q40k/1 cuota).
+    // 🔥 VALIDACIÓN 4: guard de cordura del monto. "Absurdo" = más de 10× la COTA SUPERIOR
+    // (atrapa errores tipo Q27,953.44 sobre un capital de Q40k/1 cuota).
     const montoBig = new Big(monto_mora);
-    // Absurdo = más de 10× la fórmula (atrapa errores tipo Q27,953.44 sobre Q453.55 esperado).
-    // No se compara contra el capital directo: la fórmula correcta de un crédito con 90+ cuotas
-    // vencidas ya supera el capital y sería un falso positivo. Si la fórmula da 0 (capital 0),
-    // cualquier monto exige override.
-    const esAbsurdo = esperado.gt(0) ? montoBig.gt(esperado.times(10)) : true;
+    // No se compara contra el capital directo: la mora correcta de un crédito con 90+ cuotas
+    // vencidas ya supera el capital y sería un falso positivo. Si la cota superior da 0
+    // (capital 0 o cero cuotas vencidas), cualquier monto exige override.
+    const maximoSinOverride = maximoMoraSinOverride(capitalBig, cuotasReales);
+    const esAbsurdo = maximoSinOverride.gt(0) ? montoBig.gt(maximoSinOverride) : true;
     if (esAbsurdo && !override) {
       emitCreditLateFee({ outcome: "rejected", operation: "create", durationMs: elapsedMilliseconds(startedAt), reasonCode: "amount_out_of_range" });
       return {
         success: false,
-        message: `[ERROR] Monto Q${monto_mora} fuera de rango: la fórmula da Q${esperado.toFixed(2)} (capital Q${capitalBig.toFixed(2)} × 1.12% × ${cuotasReales} cuotas reales). Envía override:true + motivo si es intencional.`,
+        message: `[ERROR] Monto Q${monto_mora} fuera de rango: la fórmula proporcional da hoy Q${esperado.toFixed(2)} (capital Q${capitalBig.toFixed(2)} × 1.12% × factor de días ${factorDias.toFixed(4)}, sobre ${cuotasReales} cuotas vencidas reales con techo de 1 cargo mensual por cuota) y el máximo que se acepta sin override es Q${maximoSinOverride.toFixed(2)} (10× la cota superior capital × 1.12% × ${cuotasReales} cuotas). Envía override:true + motivo si es intencional.`,
       };
     }
 

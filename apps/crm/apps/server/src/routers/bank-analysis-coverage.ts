@@ -164,6 +164,21 @@ export function buildBankStatementArtifactPlan({
 
 	for (const file of files) {
 		if (representedFiles.has(file.fileIndex)) continue;
+		const documentType = availableDocumentTypes.find(
+			(candidate) => !artifacts.some((artifact) => artifact.documentType === candidate),
+		);
+		if (documentType) {
+			const tag = `[bank-coverage:${analysisBatchId}:type:${documentType}:file:${file.fileIndex}:unverified]`;
+			artifacts.push({
+				tag,
+				description: artifactDescription(tag),
+				analysisBatchId,
+				fileIndex: file.fileIndex,
+				file,
+				documentType,
+			});
+			continue;
+		}
 		const tag = `[bank-coverage:${analysisBatchId}:type:other:file:${file.fileIndex}:support]`;
 		artifacts.push({
 			tag,

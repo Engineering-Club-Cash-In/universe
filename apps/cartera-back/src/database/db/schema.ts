@@ -1900,8 +1900,43 @@
     visible: boolean("visible").notNull().default(false),
     created_at: timestamp("created_at").defaultNow().notNull(),
     created_by: varchar("created_by", { length: 250 }),
+
+    // ── Contratos de inversión emitidos desde el CRM ──
+    // Nulas en toda la papelería que se sube a mano, que es casi todo lo que hay
+    // acá. Sólo las llena el CRM cuando la fila ES un contrato: así el portal y
+    // la ficha siguen leyendo la misma tabla de siempre, y la pantalla de
+    // contratos filtra por `contrato_id`.
+
+    /** Id del contrato en el CRM. Sin FK: es otra base. */
+    contrato_id: varchar("contrato_id", { length: 64 }),
+    tipo_contrato: varchar("tipo_contrato", { length: 120 }),
+    weetrust_document_id: varchar("weetrust_document_id", { length: 120 }),
+    /**
+     * Enlace de observador: muestra el documento y cómo va la firma, sin dejar
+     * firmar. Es el único que se le puede pasar a alguien para que mire.
+     */
+    observer_url: text("observer_url"),
+    /**
+     * Quién firma, con su rol, su enlace y su estado.
+     *
+     * Va como JSON y no en columnas fijas (cliente / representante) porque el
+     * reparto por posición ya falló: en cuanto hay un firmante más, el enlace
+     * rotulado "representante" es el de otra persona.
+     */
+    firmantes: jsonb("firmantes"),
+    /** "pending" | "signed" | "cancelled", como lo dice el CRM. */
+    estado_firma: varchar("estado_firma", { length: 20 }),
+    /** Cuándo el CRM actualizó por última vez el estado de firma. */
+    actualizado_at: timestamp("actualizado_at"),
   }, (table) => ({
     inversionistaIdx: index("idx_docs_inversionista").on(table.inversionista_id),
+    // Un contrato del CRM ocupa una sola fila: el espejo se vuelve a mandar cada
+    // vez que alguien firma y no puede ir dejando copias.
+    contratoUx: uniqueIndex("ux_docs_inversionista_contrato")
+      .on(table.contrato_id)
+      // Parcial: la papelería que se sube a mano no tiene contrato, y sin esto
+      // sólo podría haber una fila sin contrato en toda la tabla.
+      .where(sql`${table.contrato_id} is not null`),
   }));
 
   // ========================================

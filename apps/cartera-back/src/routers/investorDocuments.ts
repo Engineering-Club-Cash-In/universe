@@ -319,4 +319,195 @@ export const investorDocumentsRouter = new Elysia()
         documentoId: t.String(),
       }),
     }
+  )
+
+  // ============================================================
+  // ESPEJO DE CONTRATOS DEL CRM
+  // Los contratos de inversión se emiten en el CRM (que habla con WeeTrust) y
+  // se copian acá para que la ficha del inversionista y el portal los vean
+  // como un documento más. El CRM es el dueño del estado de firma; esto es la
+  // copia con la que trabaja inversiones.
+  // ============================================================
+
+  // POST - Crear o reemplazar el documento de un contrato del CRM
+  .post(
+    "/investor-documents/contrato",
+    async ({ body, set }) => {
+      try {
+        const {
+          file,
+          inversionista_id,
+          contrato_id,
+          nombre,
+          tipo_contrato,
+          weetrust_document_id,
+          observer_url,
+          firmantes,
+          estado_firma,
+          created_by,
+        } = body;
+
+        const [investor] = await db
+          .select()
+          .from(inversionistas)
+          .where(eq(inversionistas.inversionista_id, inversionista_id));
+
+        if (!investor) {
+          set.status = 404;
+          return { success: false, message: "Inversionista no encontrado" };
+        }
+
+        const firmantesParsed = firmantes ? JSON.parse(firmantes) : null;
+        const ahora = new Date();
+
+        // ¿Ya teníamos este contrato? El espejo se vuelve a mandar cada vez que
+        // se reemite el documento, y tiene que ocupar la misma fila.
+        const [existente] = await db
+          .select()
+          .from(documentos_inversionista)
+          .where(eq(documentos_inversionista.contrato_id, contrato_id));
+
+        const key = await uploadDocumentoInversionista(file, inversionista_id);
+
+        if (existente) {
+          const [actualizado] = await db
+            .update(documentos_inversionista)
+            .set({
+              key,
+              nombre,
+              tipo_contrato,
+              weetrust_document_id: weetrust_document_id ?? null,
+              observer_url: observer_url ?? null,
+              firmantes: firmantesParsed,
+              estado_firma: estado_firma ?? null,
+              actualizado_at: ahora,
+            })
+            .where(eq(documentos_inversionista.documento_id, existente.documento_id))
+            .returning();
+
+          // El archivo viejo ya no lo apunta nadie. Si falla el borrado queda
+          // huérfano en R2, que es molesto pero no rompe nada.
+          if (existente.key !== key) {
+            await deleteDocumentoFromR2(existente.key).catch((error) =>
+              console.warn(
+                `[espejo-contrato] no se pudo borrar ${existente.key}:`,
+                error
+              )
+            );
+          }
+
+          return {
+            success: true,
+            message: "Contrato actualizado",
+            data: { ...actualizado, url: await getSignedDocumentUrl(key) },
+          };
+        }
+
+        const [documento] = await db
+          .insert(documentos_inversionista)
+          .values({
+            inversionista_id,
+            key,
+            nombre,
+            // Oculto como el resto de la papelería: que el inversionista lo vea
+            // en el portal es una decisión de negocio, no algo automático.
+            visible: false,
+            created_by: created_by || null,
+            contrato_id,
+            tipo_contrato,
+            weetrust_document_id: weetrust_document_id ?? null,
+            observer_url: observer_url ?? null,
+            firmantes: firmantesParsed,
+            estado_firma: estado_firma ?? null,
+            actualizado_at: ahora,
+          })
+          .returning();
+
+        return {
+          success: true,
+          message: "Contrato guardado",
+          data: { ...documento, url: await getSignedDocumentUrl(key) },
+        };
+      } catch (error) {
+        console.error("Error al guardar el contrato del CRM:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al guardar el contrato",
+          error: error instanceof Error ? error.message : "Error desconocido",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        file: t.File(),
+        inversionista_id: t.Numeric(),
+        contrato_id: t.String(),
+        nombre: t.String(),
+        tipo_contrato: t.String(),
+        weetrust_document_id: t.Optional(t.String()),
+        observer_url: t.Optional(t.String()),
+        /** JSON con los firmantes, su rol, su enlace y su estado. */
+        firmantes: t.Optional(t.String()),
+        estado_firma: t.Optional(t.String()),
+        created_by: t.Optional(t.String()),
+      }),
+    }
+  )
+
+  // PATCH - Actualizar sólo el estado de firma de un contrato ya espejado
+  .patch(
+    "/investor-documents/contrato/:contratoId",
+    async ({ params, body, set }) => {
+      try {
+        // Cómo estaba antes: el CRM lo usa para saber si esta es la primera vez
+        // que el contrato queda firmado y toca reemplazar el PDF por el firmado.
+        // Sin esto, cada consulta de estado de un contrato ya cerrado volvía a
+        // pasear el archivo entero.
+        const [previo] = await db
+          .select({ estado_firma: documentos_inversionista.estado_firma })
+          .from(documentos_inversionista)
+          .where(eq(documentos_inversionista.contrato_id, params.contratoId));
+
+        const [actualizado] = await db
+          .update(documentos_inversionista)
+          .set({
+            observer_url: body.observer_url ?? null,
+            firmantes: body.firmantes ?? null,
+            estado_firma: body.estado_firma ?? null,
+            actualizado_at: new Date(),
+          })
+          .where(eq(documentos_inversionista.contrato_id, params.contratoId))
+          .returning();
+
+        // No es un error: el contrato puede no haberse espejado todavía (el CRM
+        // guarda primero y copia después). Quien llama decide si reintenta.
+        if (!actualizado) {
+          return { success: true, espejado: false };
+        }
+
+        return {
+          success: true,
+          espejado: true,
+          estadoAnterior: previo?.estado_firma ?? null,
+          data: actualizado,
+        };
+      } catch (error) {
+        console.error("Error al actualizar el estado del contrato:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al actualizar el estado del contrato",
+          error: error instanceof Error ? error.message : "Error desconocido",
+        };
+      }
+    },
+    {
+      params: t.Object({ contratoId: t.String() }),
+      body: t.Object({
+        observer_url: t.Optional(t.String()),
+        firmantes: t.Optional(t.Any()),
+        estado_firma: t.Optional(t.String()),
+      }),
+    }
   );

@@ -9,6 +9,7 @@ import {
 	type EstadoDocumentoFirma,
 } from "../services/legal-docs-api";
 import { alguienFirmo } from "./contract-signatories";
+import { espejarEstadoDeFirmaEnCartera } from "./espejo-contratos-inversionista";
 
 /**
  * Baja a la base lo que WeeTrust dice de un documento.
@@ -107,6 +108,12 @@ export async function sincronizarEstadoDeFirma(
 				);
 		}
 	});
+
+	// Los contratos de inversión se copian en cartera, que es donde inversiones
+	// y el portal los miran. Va afuera de la transacción y best-effort: habla
+	// con otro servicio, y si no contesta no se puede perder por eso el estado
+	// que WeeTrust acaba de contarnos. Se reintenta en la próxima consulta.
+	await espejarEstadoDeFirmaEnCartera(contractId);
 }
 
 /**

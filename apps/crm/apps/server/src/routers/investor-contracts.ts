@@ -11,6 +11,7 @@ import { filasDeFirmantes, linksPorRol } from "../lib/contract-signatories";
 import { getSignatureMode } from "../lib/contract-signature-mode";
 import { esContratoDeInversion } from "../lib/contratos-inversiones";
 import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
+import { espejarContratoEnCartera } from "../lib/espejo-contratos-inversionista";
 import { firmantesDeContratoDeInversion } from "../lib/firmantes-inversionista";
 import { juridicoProcedure, viewInvestorContractsProcedure } from "../lib/orpc";
 import {
@@ -461,6 +462,12 @@ export const investorContractsRouter = {
 						userId: context.userId,
 					});
 					emitidos.push({ id, contractType: pedido.contractType });
+
+					// Copiarlo a cartera es lo que lo hace visible en la ficha del
+					// inversionista. Va best-effort y sin bloquear: el contrato ya
+					// existe acá y en WeeTrust, y el espejo se reintenta solo en la
+					// próxima firma o consulta de estado.
+					void espejarContratoEnCartera(id, context.userId);
 				} catch (error) {
 					// El documento ya salió a WeeTrust con sus invitaciones: se borra
 					// allá para que un reintento no deje dos vivos del mismo contrato.

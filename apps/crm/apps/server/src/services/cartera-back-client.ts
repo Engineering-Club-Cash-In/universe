@@ -1868,6 +1868,96 @@ export class CarteraBackClient {
 		return response.json();
 	}
 
+	/**
+	 * Copia en cartera el contrato de inversión que emitió el CRM.
+	 *
+	 * Es la MISMA tabla de documentos del inversionista, con las columnas de
+	 * contrato llenas: así la ficha y el portal lo ven como un documento más, sin
+	 * pantallas nuevas del lado de cartera. Entra oculto, como el resto de la
+	 * papelería.
+	 *
+	 * Vuelve a llamarse cada vez que se reemite el documento: cartera lo reconoce
+	 * por `contrato_id` y reemplaza la fila en vez de dejar copias.
+	 */
+	async upsertInvestorContractDocument(input: {
+		file: Blob;
+		inversionista_id: number;
+		contrato_id: string;
+		nombre: string;
+		tipo_contrato: string;
+		weetrust_document_id?: string | null;
+		observer_url?: string | null;
+		firmantes?: unknown;
+		estado_firma?: string | null;
+		created_by?: string;
+	}): Promise<{ success: boolean; message?: string }> {
+		const url = `${this.config.baseUrl}/investor-documents/contrato`;
+		const formData = new FormData();
+		formData.append("file", input.file, `${input.nombre}.pdf`);
+		formData.append("inversionista_id", String(input.inversionista_id));
+		formData.append("contrato_id", input.contrato_id);
+		formData.append("nombre", input.nombre);
+		formData.append("tipo_contrato", input.tipo_contrato);
+		if (input.weetrust_document_id) {
+			formData.append("weetrust_document_id", input.weetrust_document_id);
+		}
+		if (input.observer_url) formData.append("observer_url", input.observer_url);
+		if (input.firmantes) {
+			formData.append("firmantes", JSON.stringify(input.firmantes));
+		}
+		if (input.estado_firma) {
+			formData.append("estado_firma", input.estado_firma);
+		}
+		if (input.created_by) formData.append("created_by", input.created_by);
+
+		const token = await getCarteraAccessToken();
+		const response = await fetch(url, {
+			method: "POST",
+			body: formData,
+			headers: { Authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(this.config.timeout),
+		});
+
+		if (!response.ok) {
+			throw new Error(
+				`Error al copiar el contrato en cartera: ${response.status} ${await response.text()}`,
+			);
+		}
+
+		return response.json();
+	}
+
+	/**
+	 * Actualiza en cartera cómo va la firma de un contrato ya copiado.
+	 *
+	 * Sin mover el PDF: es lo que se manda cada vez que alguien firma o se
+	 * renuevan los enlaces. Si el contrato todavía no está copiado, cartera
+	 * responde `espejado: false` y no es un error.
+	 */
+	async updateInvestorContractDocumentState(input: {
+		contrato_id: string;
+		observer_url?: string | null;
+		firmantes?: unknown;
+		estado_firma?: string | null;
+	}): Promise<{
+		success: boolean;
+		espejado?: boolean;
+		/** Cómo estaba el estado de firma ANTES de este cambio. */
+		estadoAnterior?: string | null;
+	}> {
+		return this.request(
+			`/investor-documents/contrato/${encodeURIComponent(input.contrato_id)}`,
+			{
+				method: "PATCH",
+				body: JSON.stringify({
+					observer_url: input.observer_url ?? undefined,
+					firmantes: input.firmantes ?? undefined,
+					estado_firma: input.estado_firma ?? undefined,
+				}),
+			},
+		);
+	}
+
 	async getInvestorDocumentsAdmin(
 		inversionistaId: number,
 	): Promise<{ success: boolean; data: Record<string, any>[] }> {

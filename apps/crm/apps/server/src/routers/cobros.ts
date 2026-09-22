@@ -3698,7 +3698,16 @@ export const cobrosRouter = {
 					incrementoDiarioMora: string;
 				} | null
 			>();
-			if (cuerpoBase.includes("{montoAdeudado}")) {
+			// Las dos variables salen del MISMO detalle de cartera-back, así que la
+			// carga se dispara con cualquiera de las dos. {incrementoDiarioMora} se
+			// ofrece como variable insertable por su cuenta en el modal del masivo:
+			// si el gate mirara solo {montoAdeudado}, una plantilla editada que use
+			// únicamente el incremento se quedaría sin detalle y la cláusula
+			// desaparecería en silencio.
+			if (
+				cuerpoBase.includes("{montoAdeudado}") ||
+				cuerpoBase.includes("{incrementoDiarioMora}")
+			) {
 				const sifcosElegibles = creditosFiltrados
 					.filter(
 						(c) =>

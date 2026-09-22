@@ -1183,6 +1183,17 @@ export async function updateMora({
  *
  * El UPDATE del crédito es CONDICIONAL sobre MOROSO a propósito: bajar a
  * ACTIVO sin esa condición des-castigaría un EN_CONVENIO/CAIDO/INCOBRABLE.
+ *
+ * El UPDATE de la mora es CONDICIONAL sobre `activa=true` y usa `.returning()`,
+ * igual que `desactivarMoraPorConvenio` y `desactivarMoraSiCreditoAlDia`: el
+ * cron lee las moras activas al arrancar y las apaga al final de la corrida, y
+ * el advisory lock de `procesarMoras` solo lo protege de OTRA corrida del cron
+ * — no de un convenio (u otra ruta) que apague la misma fila en el medio. Sin
+ * el filtro, el cron la apagaría "otra vez" y escribiría un segundo evento
+ * DESACTIVACION por el mismo monto, duplicando justo la cifra que sirve para
+ * auditar cuánta mora se perdona. Cero filas = alguien más ya la apagó: no se
+ * escribe historial, no se toca el status y se devuelve `false` para que el
+ * caller no cuente una desactivación que no hizo.
  */
 async function desactivarMoraDelCron(
   creditoId: number,
@@ -1193,11 +1204,23 @@ async function desactivarMoraDelCron(
     porcentaje_mora: string | null;
   },
   motivo: string,
-) {
-  await db
+): Promise<boolean> {
+  const apagadas = await db
     .update(moras_credito)
     .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
-    .where(eq(moras_credito.mora_id, moraPrevia.mora_id));
+    .where(
+      and(
+        eq(moras_credito.mora_id, moraPrevia.mora_id),
+        // 🔒 Sin este filtro, una ruta concurrente que ya la apagó no impide
+        // que el cron "gane" también y duplique el evento DESACTIVACION.
+        eq(moras_credito.activa, true),
+      ),
+    )
+    .returning({ mora_id: moras_credito.mora_id });
+
+  // Cero filas = otra ruta la apagó primero. No hay nada que auditar ni que
+  // corregir en el status: el evento lo escribió ella.
+  if (apagadas.length === 0) return false;
 
   // Solo bajar a ACTIVO si seguía MOROSO — preservar EN_CONVENIO, CAIDO, etc.
   await db
@@ -1222,6 +1245,8 @@ async function desactivarMoraDelCron(
     porcentaje_mora: moraPrevia.porcentaje_mora,
     motivo,
   });
+
+  return true;
 }
 
 /**
@@ -1474,10 +1499,15 @@ export async function procesarMoras() {
 
         const moraPrevia = morasActivasPorCredito.get(creditoId);
         if (moraPrevia) {
-          await desactivarMoraDelCron(creditoId, moraPrevia, decision.motivo);
-          desactivadas++;
-          if (esSinCapital) desactivadasSinCapital++;
-          else desactivadasMoraCero++;
+          // Si otra ruta la apagó a media corrida no hubo desactivación NUESTRA:
+          // el crédito ya viene contado en sinCapital/moraCero y, al no sumarse
+          // acá, cae solo en `skippedCount` — sin inflar `desactivadas`.
+          const desactivo = await desactivarMoraDelCron(creditoId, moraPrevia, decision.motivo);
+          if (desactivo) {
+            desactivadas++;
+            if (esSinCapital) desactivadasSinCapital++;
+            else desactivadasMoraCero++;
+          }
         }
 
         continue;
@@ -1578,13 +1608,17 @@ export async function procesarMoras() {
     for (const mora of morasActivas) {
       if (moraPorCredito[mora.credito_id]) continue; // sigue moroso, ya procesado
 
-      await desactivarMoraDelCron(
+      const desactivo = await desactivarMoraDelCron(
         mora.credito_id,
         mora,
         "Crédito se puso al día (sin cuotas vencidas)",
       );
 
-      desactivadas++;
+      // Acá no hay contador sinCapital/moraCero que lo recoja: si otra ruta
+      // ganó la carrera, el crédito va a `skippedInternally` (el mismo balde de
+      // los omitidos por concurrencia) para que processedCount no lo pierda.
+      if (desactivo) desactivadas++;
+      else skippedInternally++;
 
     }
 

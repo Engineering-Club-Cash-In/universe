@@ -1,15 +1,16 @@
 import { z } from "zod";
 import {
+	iniciarVerificacionVehiculosEnSat,
+	obtenerEstadoUltimaVerificacion,
 	obtenerUltimaVerificacion,
-	verificarVehiculosEnSat,
 } from "../jobs/sat-verificacion-vehiculos";
 import { auditRecord } from "../lib/audit";
 import { adminProcedure } from "../lib/orpc";
 
 export const satVehiculosRouter = {
 	/**
-	 * Dispara la verificación a mano. `forzar` salta la guarda anti-duplicado,
-	 * necesario cuando se quiere reintentar el mismo día tras un fallo.
+	 * Registra y dispara la verificación manual en segundo plano. `forzar` salta
+	 * la guarda anti-duplicado al reintentar el mismo día tras un fallo.
 	 */
 	ejecutarVerificacionSat: adminProcedure
 		.input(
@@ -20,7 +21,7 @@ export const satVehiculosRouter = {
 		)
 		.meta({ audit: { entity: "vehicle", action: "sat_verification_run" } })
 		.handler(async ({ input, context }) => {
-			const resultado = await verificarVehiculosEnSat({
+			const resultado = await iniciarVerificacionVehiculosEnSat({
 				usuarioId: context.user.id,
 				forzar: input.forzar,
 				intento: input.intento,
@@ -29,8 +30,11 @@ export const satVehiculosRouter = {
 				entity: "vehicle",
 				action: "sat_verification_run",
 				data: resultado,
-				ok: resultado.estado === "ok" || resultado.estado === "omitida",
-				errorCode: resultado.estado === "ok" ? null : resultado.estado,
+				ok:
+					resultado.estado === "en_proceso" ||
+					resultado.estado === "ok" ||
+					resultado.estado === "omitida",
+				errorCode: resultado.estado === "error" ? resultado.estado : null,
 			});
 			return resultado;
 		}),
@@ -38,5 +42,10 @@ export const satVehiculosRouter = {
 	/** Última corrida con sus alertas (vehículos inactivos o que ya no aparecen). */
 	obtenerUltimaVerificacionSat: adminProcedure.handler(async () =>
 		obtenerUltimaVerificacion(),
+	),
+
+	/** Estado liviano para seguir una ejecución que continúa en segundo plano. */
+	obtenerEstadoVerificacionSat: adminProcedure.handler(async () =>
+		obtenerEstadoUltimaVerificacion(),
 	),
 };

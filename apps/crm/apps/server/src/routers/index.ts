@@ -20,12 +20,12 @@ import { licenseVerificationRouter } from "./license-verification";
 import { locationsRouter } from "./locations";
 import { messagingRouter } from "./messaging";
 import { miniagentRouter } from "./miniagent";
-import { satVehiculosRouter } from "./sat-vehiculos";
 import { notesRouter } from "./notes";
 import { notificationsRouter } from "./notifications";
 import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
+import { satVehiculosRouter } from "./sat-vehiculos";
 import { seguimientosRouter } from "./seguimientos";
 import { trackerRouter } from "./tracker";
 import { uploadRouter } from "./upload";
@@ -389,6 +389,8 @@ export const reportsAppRouter = {
 
 	// Verificación de vehículos en SAT
 	ejecutarVerificacionSat: satVehiculosRouter.ejecutarVerificacionSat,
+	obtenerEstadoVerificacionSat:
+		satVehiculosRouter.obtenerEstadoVerificacionSat,
 	obtenerUltimaVerificacionSat: satVehiculosRouter.obtenerUltimaVerificacionSat,
 
 	// Admin MiniAgent routes

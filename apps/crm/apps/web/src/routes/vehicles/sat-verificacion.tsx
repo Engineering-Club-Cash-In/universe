@@ -11,7 +11,7 @@ import {
 	ShieldCheck,
 	XCircle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,13 @@ function formatDate(value: Date | string | null | undefined) {
 		dateStyle: "medium",
 		timeStyle: "short",
 	});
+}
+
+function formatRunStatus(status: string | null | undefined) {
+	if (status === "en_proceso") return "En proceso";
+	if (status === "ok") return "Completado";
+	if (status) return "Error";
+	return "Sin datos";
 }
 
 function EstadoSatBadge({
@@ -146,21 +153,33 @@ function SatVerificationPage() {
 	const verificationQuery = useQuery(
 		orpc.obtenerUltimaVerificacionSat.queryOptions(),
 	);
+	const statusQuery = useQuery({
+		...orpc.obtenerEstadoVerificacionSat.queryOptions(),
+		// Al volver a la pantalla, el estado persistido debe prevalecer sobre
+		// cualquier valor que React Query conserve en memoria.
+		refetchOnMount: "always",
+		refetchInterval: (query) =>
+			query.state.data?.estado === "en_proceso" ? 5000 : false,
+		refetchIntervalInBackground: true,
+	});
 	const verificationMutation = useMutation(
 		orpc.ejecutarVerificacionSat.mutationOptions({
 			onSuccess: (resultado) => {
 				queryClient.invalidateQueries({
 					queryKey: orpc.obtenerUltimaVerificacionSat.queryKey(),
 				});
-				if (resultado.estado === "ok") {
+				queryClient.invalidateQueries({
+					queryKey: orpc.obtenerEstadoVerificacionSat.queryKey(),
+				});
+				if (resultado.estado === "en_proceso") {
+					toast.info(
+						"La verificación SAT inició y continuará en segundo plano.",
+					);
+				} else if (resultado.estado === "ok") {
 					toast.success("Verificación SAT completada.");
 				} else if (resultado.estado === "omitida") {
 					toast.info(
 						resultado.omitida ?? "Ya hay una verificación SAT en proceso.",
-					);
-				} else if (resultado.estado === "parcial") {
-					toast.warning(
-						"La verificación SAT se completó solo para algunos titulares.",
 					);
 				} else {
 					toast.error("La verificación SAT no se completó.");
@@ -172,6 +191,29 @@ function SatVerificationPage() {
 
 	const data = verificationQuery.data;
 	const lote = data?.lote;
+	const estadoLote = statusQuery.data?.estado ?? lote?.estado ?? null;
+	const consultaEnProceso =
+		estadoLote === "en_proceso" ||
+		statusQuery.isPending ||
+		statusQuery.isFetching;
+	const estadoAnterior = useRef<string | null>(null);
+	useEffect(() => {
+		if (estadoAnterior.current === "en_proceso" && estadoLote === "ok") {
+			toast.success("Verificación SAT completada.");
+			queryClient.invalidateQueries({
+				queryKey: orpc.obtenerUltimaVerificacionSat.queryKey(),
+			});
+		} else if (
+			estadoAnterior.current === "en_proceso" &&
+			estadoLote === "error"
+		) {
+			toast.error("La verificación SAT terminó con error.");
+			queryClient.invalidateQueries({
+				queryKey: orpc.obtenerUltimaVerificacionSat.queryKey(),
+			});
+		}
+		estadoAnterior.current = estadoLote;
+	}, [estadoLote, queryClient]);
 	const resultados = data?.resultados ?? [];
 	const resultadosFiltrados = useMemo(() => {
 		const vehicleTerm = normalizeSearch(vehicleSearch);
@@ -244,14 +286,20 @@ function SatVerificationPage() {
 				</div>
 				<Button
 					onClick={() => verificationMutation.mutate({ forzar: true })}
-					disabled={verificationMutation.isPending}
+					disabled={verificationMutation.isPending || consultaEnProceso}
 				>
 					<RefreshCw
-						className={verificationMutation.isPending ? "animate-spin" : ""}
+						className={
+							verificationMutation.isPending || consultaEnProceso
+								? "animate-spin"
+								: ""
+						}
 					/>
 					{verificationMutation.isPending
-						? "Consultando SAT..."
-						: "Consultar vehículos"}
+						? "Iniciando consulta..."
+						: consultaEnProceso
+							? "Consultando SAT..."
+							: "Consultar vehículos"}
 				</Button>
 			</div>
 
@@ -261,15 +309,20 @@ function SatVerificationPage() {
 						<CardDescription>Último intento</CardDescription>
 						<CardTitle className="flex items-center gap-2 text-lg">
 							<Clock3 className="h-4 w-4" />
-							{formatDate(lote?.finalizadaAt ?? lote?.iniciadaAt)}
+							{formatDate(
+								statusQuery.data?.finalizadaAt ??
+									statusQuery.data?.iniciadaAt ??
+									lote?.finalizadaAt ??
+									lote?.iniciadaAt,
+							)}
 						</CardTitle>
 					</CardHeader>
 				</Card>
 				<Card>
 					<CardHeader className="pb-2">
 						<CardDescription>Estado del lote</CardDescription>
-						<CardTitle className="text-lg capitalize">
-							{lote?.estado ?? "Sin datos"}
+						<CardTitle className="text-lg">
+							{formatRunStatus(estadoLote)}
 						</CardTitle>
 					</CardHeader>
 				</Card>
@@ -295,10 +348,18 @@ function SatVerificationPage() {
 					</CardContent>
 				</Card>
 			)}
-			{lote && lote.estado !== "ok" && resultados.length > 0 && (
+			{consultaEnProceso && (
 				<p className="text-muted-foreground text-sm">
-					El último intento no se completó. Se muestran los resultados de la
-					última consulta completa, con la fecha de cada vehículo.
+					La consulta continúa en segundo plano. Mientras termina, se muestran
+					los resultados de la última consulta completa disponible.
+				</p>
+			)}
+			{estadoLote === "error" && (
+				<p className="text-red-700 text-sm">
+					La última consulta terminó con error y no actualizó ningún resultado.
+					{resultados.length > 0
+						? " Se mantiene la última consulta completa."
+						: " Todavía no existe una consulta completa anterior."}
 				</p>
 			)}
 
@@ -430,7 +491,9 @@ function SatVerificationPage() {
 						</p>
 					) : resultados.length === 0 ? (
 						<p className="py-8 text-center text-muted-foreground">
-							Todavía no hay resultados. Ejecuta una consulta para comenzar.
+							{consultaEnProceso
+								? "La consulta está en proceso. Los resultados aparecerán al completarse."
+								: "Todavía no hay resultados. Ejecuta una consulta para comenzar."}
 						</p>
 					) : resultadosFiltrados.length === 0 ? (
 						<p className="py-8 text-center text-muted-foreground">

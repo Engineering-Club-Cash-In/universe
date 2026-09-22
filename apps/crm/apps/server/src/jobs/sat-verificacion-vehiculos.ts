@@ -40,7 +40,7 @@ export interface ResumenVerificacion {
 	corridaId: string | null;
 	loteId: string | null;
 	corridaIds: string[];
-	estado: string;
+	estado: "en_proceso" | "ok" | "error" | "omitida";
 	totalEsperados: number;
 	totalReportadosSat: number;
 	totalAlertas: number;
@@ -48,6 +48,18 @@ export interface ResumenVerificacion {
 }
 
 type EstadoCorrida = "ok" | "error" | "codigo_requerido" | "bloqueado";
+type EstadoLotePersistido = "en_proceso" | "ok" | "parcial" | "error";
+
+interface OpcionesVerificacion {
+	usuarioId?: string;
+	forzar?: boolean;
+	intento?: number;
+	titulares?: SatTitularObjetivo[];
+	/** Sustituible para probar el cruce y el guardado sin levantar Puppeteer. */
+	proveedor?: () => Promise<SatVehiculosDelegadosResponse>;
+	/** Se notifica únicamente después de crear el lote y todas sus corridas. */
+	alRegistrar?: (resumen: ResumenVerificacion) => void;
+}
 
 interface AdvisoryLockClient {
 	query<T extends object>(
@@ -75,6 +87,24 @@ export function estadoCorridaDesdeSat(
 		default:
 			return "error";
 	}
+}
+
+/** El lote solo es exitoso cuando todos sus titulares se leyeron completos. */
+export function estadoLoteDesdeCorridas(
+	estados: EstadoCorrida[],
+): "ok" | "error" {
+	return estados.length > 0 && estados.every((estado) => estado === "ok")
+		? "ok"
+		: "error";
+}
+
+/** La interfaz solo expone los tres estados que puede accionar el usuario. */
+export function estadoLoteParaUsuario(
+	estado: string,
+): "en_proceso" | "ok" | "error" {
+	if (estado === "en_proceso") return "en_proceso";
+	if (estado === "ok") return "ok";
+	return "error";
 }
 
 /** SAT devuelve la placa con guion; en el CRM el formato puede variar. */
@@ -173,6 +203,72 @@ async function liberarCandadoDistribuido(client: AdvisoryLockClient) {
 	} finally {
 		client.release();
 	}
+}
+
+/** El advisory lock, no una fila persistida, define si el proceso sigue vivo. */
+async function hayCandadoDistribuidoActivo(): Promise<boolean> {
+	const client = (await db.$client.connect()) as AdvisoryLockClient;
+	try {
+		const { rows } = await client.query<{ active: boolean }>(
+			`SELECT EXISTS (
+				SELECT 1
+				FROM pg_locks
+				WHERE locktype = 'advisory'
+					AND classid = $1::oid
+					AND objid = $2::oid
+					AND objsubid = 2
+					AND granted
+			) AS active`,
+			[...SAT_VERIFICACION_LOCK],
+		);
+		return rows[0]?.active === true;
+	} finally {
+		client.release();
+	}
+}
+
+async function marcarLoteInterrumpido(loteId: string): Promise<{
+	estado: EstadoLotePersistido;
+	finalizadaAt: Date | null;
+}> {
+	const finalizadaAt = new Date();
+	const mensajeError =
+		"La verificación fue interrumpida antes de completar todos los titulares.";
+	return db.transaction(async (tx) => {
+		await tx
+			.update(satVerificacionCorridas)
+			.set({ estado: "error", mensajeError })
+			.where(
+				and(
+					eq(satVerificacionCorridas.loteId, loteId),
+					eq(satVerificacionCorridas.estado, "en_proceso"),
+				),
+			);
+		const [actualizado] = await tx
+			.update(satVerificacionLotes)
+			.set({ estado: "error", finalizadaAt })
+			.where(
+				and(
+					eq(satVerificacionLotes.id, loteId),
+					eq(satVerificacionLotes.estado, "en_proceso"),
+				),
+			)
+			.returning({
+				estado: satVerificacionLotes.estado,
+				finalizadaAt: satVerificacionLotes.finalizadaAt,
+			});
+		if (actualizado) return actualizado;
+
+		const [actual] = await tx
+			.select({
+				estado: satVerificacionLotes.estado,
+				finalizadaAt: satVerificacionLotes.finalizadaAt,
+			})
+			.from(satVerificacionLotes)
+			.where(eq(satVerificacionLotes.id, loteId))
+			.limit(1);
+		return actual ?? { estado: "error", finalizadaAt };
+	});
 }
 
 /** Universo esperado: lo que el CRM da por propiedad de Cash In y tiene placa. */
@@ -388,14 +484,7 @@ async function guardarEstadoActual(loteId: string, filas: FilaActual[]) {
 }
 
 async function ejecutarVerificacionVehiculosEnSat(
-	opciones: {
-		usuarioId?: string;
-		forzar?: boolean;
-		intento?: number;
-		titulares?: SatTitularObjetivo[];
-		/** Sustituible para probar el cruce y el guardado sin levantar Puppeteer. */
-		proveedor?: () => Promise<SatVehiculosDelegadosResponse>;
-	} = {},
+	opciones: OpcionesVerificacion = {},
 ): Promise<ResumenVerificacion> {
 	const {
 		usuarioId = "",
@@ -403,6 +492,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 		intento = 1,
 		titulares = titularesDelegadosDelEntorno(),
 		proveedor = obtenerVehiculosDelegados,
+		alRegistrar,
 	} = opciones;
 	if (!usuarioId) {
 		throw new Error("La verificación SAT requiere un usuario autenticado.");
@@ -460,11 +550,17 @@ async function ejecutarVerificacionVehiculosEnSat(
 	});
 
 	const corridaIds = corridas.map((corrida) => corrida.id);
+	alRegistrar?.({
+		corridaId: corridas[0]?.id ?? null,
+		loteId: lote.id,
+		corridaIds,
+		estado: "en_proceso",
+		totalEsperados: esperados.length,
+		totalReportadosSat: 0,
+		totalAlertas: 0,
+	});
 
-	const actualizarLoteConFallo = async (
-		estado: "error" | "parcial",
-		mensajeError: string,
-	) => {
+	const actualizarLoteConFallo = async (mensajeError: string) => {
 		await db
 			.update(satVerificacionCorridas)
 			.set({ estado: "error", mensajeError })
@@ -472,7 +568,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 		await db
 			.update(satVerificacionLotes)
 			.set({
-				estado,
+				estado: "error",
 				finalizadaAt: new Date(),
 			})
 			.where(eq(satVerificacionLotes.id, lote.id));
@@ -568,8 +664,11 @@ async function ejecutarVerificacionVehiculosEnSat(
 			esperados,
 			[...primerTitularPorPlaca.values()].map((item) => item.vehiculo),
 		);
-		const loteCompleto = resumenes.every((resumen) => resumen.estado === "ok");
-		// Una consulta parcial no reemplaza el ultimo estado completo confiable.
+		const estadoLote = estadoLoteDesdeCorridas(
+			resumenes.map((resumen) => resumen.estado),
+		);
+		const loteCompleto = estadoLote === "ok";
+		// Una consulta incompleta no reemplaza el ultimo estado completo confiable.
 		const fechaConsulta = new Date();
 		const filasPersistir: FilaActual[] = loteCompleto
 			? filasUnificadas.map((fila) => ({
@@ -582,17 +681,12 @@ async function ejecutarVerificacionVehiculosEnSat(
 				}))
 			: [];
 
-		const exitosas = resumenes.filter((resumen) => resumen.estado === "ok");
-		const estadoLote =
-			exitosas.length === corridas.length
-				? "ok"
-				: exitosas.length > 0
-					? "parcial"
-					: "error";
-		const totalReportadosSat = resumenes.reduce(
-			(total, resumen) => total + resumen.totalReportadosSat,
-			0,
-		);
+		const totalReportadosSat = loteCompleto
+			? resumenes.reduce(
+					(total, resumen) => total + resumen.totalReportadosSat,
+					0,
+				)
+			: 0;
 		const totalAlertas = filasPersistir.filter((fila) =>
 			esAlertaSat(fila.resultado),
 		).length;
@@ -617,7 +711,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 		};
 	} catch (error) {
 		const mensajeError = error instanceof Error ? error.message : String(error);
-		await actualizarLoteConFallo("error", mensajeError);
+		await actualizarLoteConFallo(mensajeError);
 
 		return {
 			corridaId: corridas[0]?.id ?? null,
@@ -629,6 +723,53 @@ async function ejecutarVerificacionVehiculosEnSat(
 			totalAlertas: 0,
 		};
 	}
+}
+
+/** Estado liviano para que el frontend siga la ejecución sin descargar resultados. */
+export async function obtenerEstadoUltimaVerificacion() {
+	const [lote] = await db
+		.select({
+			id: satVerificacionLotes.id,
+			estado: satVerificacionLotes.estado,
+			iniciadaAt: satVerificacionLotes.iniciadaAt,
+			finalizadaAt: satVerificacionLotes.finalizadaAt,
+		})
+		.from(satVerificacionLotes)
+		.orderBy(desc(satVerificacionLotes.iniciadaAt))
+		.limit(1);
+
+	if (!lote) return null;
+
+	let estadoPersistido = lote.estado;
+	let finalizadaAt = lote.finalizadaAt;
+	if (
+		estadoPersistido === "en_proceso" &&
+		!(await hayCandadoDistribuidoActivo())
+	) {
+		const reconciliado = await marcarLoteInterrumpido(lote.id);
+		finalizadaAt = reconciliado.finalizadaAt;
+		estadoPersistido = reconciliado.estado;
+	}
+
+	const estado = estadoLoteParaUsuario(estadoPersistido);
+	let mensajeError: string | null = null;
+	if (estado === "error") {
+		const [corridaFallida] = await db
+			.select({ mensajeError: satVerificacionCorridas.mensajeError })
+			.from(satVerificacionCorridas)
+			.where(
+				and(
+					eq(satVerificacionCorridas.loteId, lote.id),
+					ne(satVerificacionCorridas.estado, "ok"),
+				),
+			)
+			.limit(1);
+		mensajeError =
+			corridaFallida?.mensajeError ??
+			"La consulta contra SAT no se completó para todos los titulares.";
+	}
+
+	return { ...lote, estado, finalizadaAt, mensajeError };
 }
 
 /** Ultimo intento y estado actual de los vehiculos para exponerlo en el CRM. */
@@ -723,9 +864,13 @@ export async function obtenerUltimaVerificacion() {
 	const loteEstadoActualId = filas[0]?.loteId ?? null;
 	const ultimoIntentoPublicoResultados = loteEstadoActualId === lote.id;
 	const corrida = corridasConResumen[0] ?? null;
+	// `parcial` puede existir en datos de desarrollo anteriores. Para el usuario,
+	// cualquier lote que no haya completado todos los titulares es un error.
+	const estadoLotePublico = estadoLoteParaUsuario(lote.estado);
 	return {
 		lote: {
 			...lote,
+			estado: estadoLotePublico,
 			totalTitulares: corridas.length,
 			totalCorridas: corridas.length,
 			totalEsperados: ultimoIntentoPublicoResultados ? totalEsperados : 0,
@@ -734,9 +879,9 @@ export async function obtenerUltimaVerificacion() {
 				: 0,
 			totalAlertas: ultimoIntentoPublicoResultados ? alertas.length : 0,
 			mensajeError:
-				lote.estado === "ok"
-					? null
-					: "La consulta contra SAT no se completó para todos los titulares.",
+				estadoLotePublico === "error"
+					? "La consulta contra SAT no se completó para todos los titulares."
+					: null,
 		},
 		estadoActual: loteEstadoActualId
 			? {
@@ -762,11 +907,11 @@ export async function obtenerUltimaVerificacion() {
 /**
  * El advisory lock cubre varias instancias; esta promesa evita la carrera
  * entre dos llamadas simultáneas dentro del mismo proceso. Las filas
- * `en_proceso` quedan como auditoría y no se usan como señal de liveness:
- * una fila puede quedar abandonada si el proceso muere después del insert.
+ * `en_proceso` quedan como auditoría; el endpoint de estado las contrasta con
+ * este candado para detectar una ejecución abandonada tras un reinicio.
  */
 export function verificarVehiculosEnSat(
-	opciones: Parameters<typeof ejecutarVerificacionVehiculosEnSat>[0] = {},
+	opciones: OpcionesVerificacion = {},
 ): Promise<ResumenVerificacion> {
 	if (ejecucionLocalActiva) {
 		return Promise.resolve({
@@ -781,7 +926,7 @@ export function verificarVehiculosEnSat(
 		});
 	}
 
-	const ejecucion = (async () => {
+	const ejecucion: Promise<ResumenVerificacion> = (async () => {
 		const candado = await adquirirCandadoDistribuido();
 		if (!candado) {
 			return {
@@ -806,4 +951,45 @@ export function verificarVehiculosEnSat(
 	return ejecucion.finally(() => {
 		if (ejecucionLocalActiva === ejecucion) ejecucionLocalActiva = null;
 	});
+}
+
+/**
+ * Espera solo hasta que el trabajo haya registrado su lote. La promesa larga
+ * conserva un manejador de error, pero ya no forma parte de la respuesta HTTP.
+ */
+export function desacoplarVerificacionSat(
+	crearEjecucion: (
+		alRegistrar: (resumen: ResumenVerificacion) => void,
+	) => Promise<ResumenVerificacion>,
+	registrarError: (error: unknown) => void = (error) =>
+		console.error("[SAT] La verificación en segundo plano falló:", error),
+): Promise<ResumenVerificacion> {
+	let resolverInicio!: (resumen: ResumenVerificacion) => void;
+	let rechazarInicio!: (error: unknown) => void;
+	const inicioRegistrado = new Promise<ResumenVerificacion>(
+		(resolve, reject) => {
+			resolverInicio = resolve;
+			rechazarInicio = reject;
+		},
+	);
+
+	const ejecucion = Promise.resolve().then(() =>
+		crearEjecucion(resolverInicio),
+	);
+	void ejecucion.catch((error) => {
+		rechazarInicio(error);
+		registrarError(error);
+	});
+
+	// Si la ejecución se omite antes de crear un lote, devuelve ese resultado.
+	return Promise.race([inicioRegistrado, ejecucion]);
+}
+
+/** Inicia la consulta manual y responde cuando el lote ya puede ser consultado. */
+export function iniciarVerificacionVehiculosEnSat(
+	opciones: Omit<OpcionesVerificacion, "alRegistrar"> = {},
+): Promise<ResumenVerificacion> {
+	return desacoplarVerificacionSat((alRegistrar) =>
+		verificarVehiculosEnSat({ ...opciones, alRegistrar }),
+	);
 }

@@ -8,8 +8,12 @@ import {
 	agregarCruceCrm,
 	construirResultados,
 	construirUpsertExternos,
+	desacoplarVerificacionSat,
 	esAlertaSat,
 	estadoCorridaDesdeSat,
+	estadoLoteDesdeCorridas,
+	estadoLoteParaUsuario,
+	type ResumenVerificacion,
 } from "./sat-verificacion-vehiculos";
 
 function vehiculoSat(
@@ -167,6 +171,52 @@ describe("cruce de vehículos contra SAT", () => {
 				"ALGO_NUEVO" as Parameters<typeof estadoCorridaDesdeSat>[0],
 			),
 		).toBe("error");
+	});
+
+	test("el lote solo queda completado cuando todos los titulares terminan bien", () => {
+		expect(estadoLoteDesdeCorridas(["ok", "ok"])).toBe("ok");
+		expect(estadoLoteDesdeCorridas(["ok", "error"])).toBe("error");
+		expect(estadoLoteDesdeCorridas(["error", "bloqueado"])).toBe("error");
+		expect(estadoLoteDesdeCorridas([])).toBe("error");
+	});
+
+	test("la interfaz reduce los estados del lote a proceso, completado o error", () => {
+		expect(estadoLoteParaUsuario("en_proceso")).toBe("en_proceso");
+		expect(estadoLoteParaUsuario("ok")).toBe("ok");
+		expect(estadoLoteParaUsuario("parcial")).toBe("error");
+		expect(estadoLoteParaUsuario("error")).toBe("error");
+	});
+
+	test("responde al registrar el lote sin esperar que termine el trabajo", async () => {
+		let resolverTrabajo!: (resumen: ResumenVerificacion) => void;
+		let trabajoTerminado = false;
+		const trabajo = new Promise<ResumenVerificacion>((resolve) => {
+			resolverTrabajo = resolve;
+		}).then((resumen) => {
+			trabajoTerminado = true;
+			return resumen;
+		});
+		const enProceso: ResumenVerificacion = {
+			corridaId: "corrida-1",
+			loteId: "lote-1",
+			corridaIds: ["corrida-1", "corrida-2"],
+			estado: "en_proceso",
+			totalEsperados: 100,
+			totalReportadosSat: 0,
+			totalAlertas: 0,
+		};
+
+		const inicio = await desacoplarVerificacionSat(async (alRegistrar) => {
+			alRegistrar(enProceso);
+			return trabajo;
+		});
+
+		expect(inicio).toEqual(enProceso);
+		expect(trabajoTerminado).toBe(false);
+
+		resolverTrabajo({ ...enProceso, estado: "ok" });
+		await trabajo;
+		expect(trabajoTerminado).toBe(true);
 	});
 
 	test("no reporta alertas cuando todo está en orden", () => {

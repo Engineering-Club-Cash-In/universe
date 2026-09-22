@@ -207,6 +207,49 @@ testConChrome(
 );
 
 testConChrome(
+	"espera las filas reales al avanzar paginas con un estado de carga intermedio",
+	async () => {
+		const browser = await puppeteer.launch({
+			executablePath: chromePath,
+			headless: true,
+			args: ["--no-sandbox", "--disable-setuid-sandbox"],
+		});
+		try {
+			const page = await browser.newPage();
+			await page.setContent(`
+				<div>Total Registros: 3</div>
+				<table id="frmAcciones:dtListadoVehiculos"><tbody></tbody></table>
+				<input id="frmAcciones:btnNext" type="button" value="Siguiente" onclick="avanzar()">
+				<script>
+					let pagina = 0;
+					const placas = ["P-111AAA", "P-222BBB", "P-333CCC"];
+					const cuerpo = document.querySelector("tbody");
+					function mostrarFila() {
+						cuerpo.innerHTML = "<tr><td>" + placas[pagina] + "</td><td>Automovil</td><td>Honda</td><td>2020</td><td>Blanco</td><td>Activo</td><td></td><td></td><td></td><td></td></tr>";
+						if (pagina === placas.length - 1) document.getElementById("frmAcciones:btnNext").disabled = true;
+					}
+					function avanzar() {
+						pagina += 1;
+						cuerpo.innerHTML = '<tr><td colspan="10">Cargando...</td></tr>';
+						setTimeout(mostrarFila, pagina === 1 ? 180 : 70);
+					}
+					mostrarFila();
+				</script>
+			`);
+			const resultado = await leerTodasLasPaginas(page.mainFrame());
+			expect(resultado.listadoCompleto).toBe(true);
+			expect(resultado.vehiculos.map((vehiculo) => vehiculo.placa)).toEqual([
+				"P-111AAA",
+				"P-222BBB",
+				"P-333CCC",
+			]);
+		} finally {
+			await browser.close();
+		}
+	},
+);
+
+testConChrome(
 	"ignora el iframe del titular anterior al abrir el siguiente",
 	async () => {
 		const browser = await puppeteer.launch({

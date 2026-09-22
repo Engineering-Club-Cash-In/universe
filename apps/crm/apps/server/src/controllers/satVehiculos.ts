@@ -699,6 +699,11 @@ export async function leerTodasLasPaginas(
 						const tabla = document.querySelector(selector);
 						if (!tabla) return false;
 						const filas = [...tabla.querySelectorAll("tbody tr")]
+							.filter(
+								(fila) =>
+									fila.querySelectorAll("td").length >= 10 &&
+									!fila.querySelector("[colspan]"),
+							)
 							.map((fila) => {
 								const textos = [...fila.querySelectorAll("td")].map((celda) =>
 									(celda.textContent || "").trim().replace(/\s+/g, " "),
@@ -708,7 +713,7 @@ export async function leerTodasLasPaginas(
 							.join(";");
 						return filas.length > 0 && filas !== firma;
 					},
-					{ timeout: 30000, polling: 300 },
+					{ timeout: 30000, polling: 100 },
 					SEL.tablaVehiculos,
 					firmaAnterior,
 				),

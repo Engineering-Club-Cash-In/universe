@@ -381,4 +381,50 @@ describe("createPaymentAgreement: la mora se desactiva, NO se borra", () => {
       )
     ).toBe(false);
   });
+
+  /** Captura lo que el convenio loguea, para revisar qué AFIRMA. */
+  const capturarLogs = async (fn: () => Promise<unknown>) => {
+    const real = console.log;
+    const lineas: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lineas.push(args.map((a) => String(a)).join(" "));
+    };
+    try {
+      await fn();
+    } finally {
+      console.log = real;
+    }
+    return lineas.join("\n");
+  };
+
+  it("el log solo dice 'registrada en el historial' cuando de verdad se anotó", async () => {
+    armarBase();
+
+    const salida = await capturarLogs(() => createPaymentAgreement(input));
+
+    expect(
+      inserts.some(
+        (i) => (i.values as Record<string, unknown>).tipo_evento === "DESACTIVACION"
+      )
+    ).toBe(true);
+    expect(salida).toContain("registrada en el historial");
+  });
+
+  it("si otro convenio ganó la carrera, el log NO afirma que quedó registrada", async () => {
+    armarBase();
+    // El primer db.update() del flujo es el de moras_credito: que devuelva 0
+    // filas = otra ejecución concurrente ya la apagó (y anotó ella el evento).
+    updateResultQueue = [false];
+
+    const salida = await capturarLogs(() => createPaymentAgreement(input));
+
+    expect(
+      inserts.some(
+        (i) => (i.values as Record<string, unknown>).tipo_evento === "DESACTIVACION"
+      )
+    ).toBe(false);
+    expect(salida).not.toContain("registrada en el historial");
+    // Y tampoco puede afirmar la causa que no verificó.
+    expect(salida).not.toContain("No había moras activas para desactivar");
+  });
 });

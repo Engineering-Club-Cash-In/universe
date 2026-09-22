@@ -1238,8 +1238,19 @@ async function desactivarMoraDelCron(
  * NO toca `creditos.statusCredit`: el caller lo deja en EN_CONVENIO justo
  * después, y bajarlo a ACTIVO acá lo des-castigaría.
  *
- * El UPDATE es condicional sobre `activa=true` (vía el `mora_id` que se acaba de
- * leer con ese filtro); si no hay mora activa no escribe nada y lo reporta.
+ * El UPDATE es CONDICIONAL sobre `activa=true` y usa `.returning()`, igual que
+ * `desactivarMoraSiCreditoAlDia`: dos solicitudes de convenio del mismo crédito
+ * que se solapen leen la MISMA fila activa, y sin ese filtro las dos apagarían
+ * "con éxito" y las dos insertarían un DESACTIVACION por el mismo monto —
+ * duplicando justo la cifra que sirve para auditar cuánta mora perdonan los
+ * convenios. Si el update no devuelve fila, otra ejecución ganó la carrera: no
+ * se escribe historial y se reporta `desactivada: false`.
+ *
+ * Las dos escrituras van SIEMPRE juntas y atómicas: si el caller no trae
+ * `dbClient`, acá se abre una transacción propia. Con `propagarError: true` el
+ * fallo del historial revierte la desactivación, en vez de dejar el convenio
+ * "exitoso" con la mora fuera del saldo y sin constancia — que es exactamente
+ * el defecto que este helper vino a cerrar.
  */
 export async function desactivarMoraPorConvenio(
   credito_id: number,
@@ -1270,30 +1281,55 @@ export async function desactivarMoraPorConvenio(
 
   if (!moraActiva) return { desactivada: false };
 
-  await dbi
-    .update(moras_credito)
-    .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
-    .where(eq(moras_credito.mora_id, moraActiva.mora_id));
+  const apagarYRegistrar = async (tx: typeof db): Promise<boolean> => {
+    const apagadas = await tx
+      .update(moras_credito)
+      .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
+      .where(
+        and(
+          eq(moras_credito.mora_id, moraActiva.mora_id),
+          // 🔒 Sin este filtro, un convenio concurrente que ya la apagó no
+          // impide que esta corrida "gane" también y duplique el evento.
+          eq(moras_credito.activa, true),
+        ),
+      )
+      .returning({ mora_id: moras_credito.mora_id });
 
-  await registrarHistorialMora({
-    credito_id,
-    mora_id: moraActiva.mora_id,
-    tipo_evento: "DESACTIVACION",
-    origen: "API_MANUAL",
-    monto_anterior: moraActiva.monto_mora,
-    monto_nuevo: "0",
-    cuotas_atrasadas_anterior: moraActiva.cuotas_atrasadas,
-    cuotas_atrasadas_nuevas: 0,
-    porcentaje_mora: moraActiva.porcentaje_mora,
-    usuario_id: opts.usuario_id ?? null,
-    motivo:
-      opts.convenio_id != null
-        ? `Mora desactivada por convenio de pago (convenio ${opts.convenio_id})`
-        : "Mora desactivada por convenio de pago",
-    dbClient: opts.dbClient,
-    // Dentro de una transacción del caller el swallow sería mentiroso.
-    propagarError: opts.dbClient !== undefined,
-  });
+    // Cero filas = otra ejecución la apagó primero. No hay nada que auditar:
+    // el evento lo escribió ella.
+    if (apagadas.length === 0) return false;
+
+    await registrarHistorialMora({
+      credito_id,
+      mora_id: moraActiva.mora_id,
+      tipo_evento: "DESACTIVACION",
+      origen: "API_MANUAL",
+      monto_anterior: moraActiva.monto_mora,
+      monto_nuevo: "0",
+      cuotas_atrasadas_anterior: moraActiva.cuotas_atrasadas,
+      cuotas_atrasadas_nuevas: 0,
+      porcentaje_mora: moraActiva.porcentaje_mora,
+      usuario_id: opts.usuario_id ?? null,
+      motivo:
+        opts.convenio_id != null
+          ? `Mora desactivada por convenio de pago (convenio ${opts.convenio_id})`
+          : "Mora desactivada por convenio de pago",
+      dbClient: tx,
+      // Nunca se traga: apagar la mora sin dejar el evento es el defecto original.
+      propagarError: true,
+    });
+
+    return true;
+  };
+
+  const desactivada = opts.dbClient
+    ? // El caller ya corre dentro de su propia transacción: se usa la suya.
+      await apagarYRegistrar(opts.dbClient)
+    : await db.transaction(async (txm) =>
+        apagarYRegistrar(txm as unknown as typeof db),
+      );
+
+  if (!desactivada) return { desactivada: false };
 
   return {
     desactivada: true,

@@ -373,7 +373,12 @@ export async function createPaymentAgreement(
         `✅ Se desactivó la mora ${moraDesactivada.mora_id} (Q${moraDesactivada.monto_anterior}) y quedó registrada en el historial`
       );
     } else {
-      console.log("ℹ️ No había moras activas para desactivar");
+      // Ojo: `desactivada: false` NO prueba que no hubiera mora. También pasa
+      // cuando otra ejecución concurrente la apagó primero (y anotó ella el
+      // evento). El log no puede afirmar una causa que no verificó.
+      console.log(
+        "ℹ️ No se desactivó ninguna mora en este convenio (no había activa, o ya la había apagado otra ejecución)"
+      );
     }
     const resultadoUpdate = await db
       .update(creditos)

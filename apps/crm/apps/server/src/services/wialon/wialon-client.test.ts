@@ -942,7 +942,7 @@ describe("WialonClient", () => {
 		const validDefault = getUnitDetailInputSchema.safeParse({ unitId: 1 });
 		expect(validDefault.success).toBe(true);
 		if (validDefault.success) {
-			expect(validDefault.data.flags).toBe(1025);
+			expect(validDefault.data.flags).toBe(5123);
 		}
 	});
 
@@ -1261,7 +1261,7 @@ describe("WialonClient", () => {
 			expect(res.success).toBe(true);
 		}
 
-		const detailFlags = [1, 1025, 1027, 1033, 4097, 4099, 4105];
+		const detailFlags = [1, 1025, 1027, 1033, 4097, 4099, 4105, 5123];
 		for (const f of detailFlags) {
 			const res = getUnitDetailInputSchema.safeParse({ unitId: 10, flags: f });
 			expect(res.success).toBe(true);
@@ -1367,5 +1367,77 @@ describe("WialonClient", () => {
 		expect(searchCalls).toBe(2);
 		expect(status.length).toBe(1);
 		expect(status[0].isIgnitionOn).toBe(true);
+	});
+
+	test("clearSession con failingSid preserva una sesión que ya fue renovada por otra solicitud", async () => {
+		let loginCount = 0;
+		const mockFetch: WialonFetch = async () => {
+			loginCount++;
+			return new Response(JSON.stringify({ eid: `sid-v${loginCount}` }), {
+				status: 200,
+			});
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+		await client.login(); // login 1 -> sid-v1
+
+		// Supongamos que otra petición ya renovó la sesión a sid-v2
+		await client.login(true); // forzar login -> sid-v2
+		expect(loginCount).toBe(2);
+
+		// Una petición lenta rezagada que falló con sid-v1 llama a clearSession("sid-v1")
+		client.clearSession("sid-v1");
+
+		// No debió haber limpiado la sesión porque la actual es sid-v2
+		const currentSid = await client.login();
+		expect(currentSid).toBe("sid-v2");
+		expect(loginCount).toBe(2); // No debió disparar otro login
+
+		// Si falla con la sesión actual sid-v2, sí debe invalidar
+		client.clearSession("sid-v2");
+		const nextSid = await client.login();
+		expect(nextSid).toBe("sid-v3");
+		expect(loginCount).toBe(3);
+	});
+
+	test("getUnitDetail utiliza flags: 5123 por defecto (base + prp + lmsg + sens)", async () => {
+		let capturedFlags: number | undefined;
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_item")) {
+				const paramsStr = new URLSearchParams(bodyStr).get("params");
+				if (paramsStr) {
+					const parsed = JSON.parse(paramsStr);
+					capturedFlags = parsed.flags;
+				}
+				return new Response(
+					JSON.stringify({
+						item: {
+							id: 123,
+							nm: "Camión 1",
+							cls: 2,
+							prp: { monitoring_sensor_id: "1" },
+							sens: { "1": { id: 1, n: "Motor", t: "engine operation" } },
+							lmsg: { t: 1700000000, p: { io_1: 1 } },
+						},
+						flags: 5123,
+					}),
+					{ status: 200 },
+				);
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+		const detail = await client.getUnitDetail(123);
+
+		// flags debe ser 5123 (1 | 2 | 1024 | 4096)
+		expect(capturedFlags).toBe(5123);
+		expect(detail.item.id).toBe(123);
+		expect(detail.item.prp?.monitoring_sensor_id).toBe("1");
+		expect(detail.item.sens?.["1"].n).toBe("Motor");
 	});
 });

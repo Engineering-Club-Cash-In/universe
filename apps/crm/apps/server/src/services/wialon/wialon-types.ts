@@ -185,8 +185,9 @@ export const getUnitDetailInputSchema = z.object({
 			z.literal(4097),
 			z.literal(4099),
 			z.literal(4105),
+			z.literal(5123),
 		])
-		.default(1025),
+		.default(5123),
 });
 export type GetUnitDetailInput = z.infer<typeof getUnitDetailInputSchema>;
 

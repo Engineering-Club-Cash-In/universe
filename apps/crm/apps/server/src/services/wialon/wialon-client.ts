@@ -121,10 +121,14 @@ export class WialonClient {
 	}
 
 	/**
-	 * Limpia la sesión de autenticación en caché manualmente
+	 * Limpia la sesión de autenticación en caché manualmente.
+	 * Si se proporciona failingSid, solo invalida si la sesión en caché coincide con el SID fallido,
+	 * preservando una sesión que ya fue renovada por otra petición concurrente.
 	 */
-	public clearSession(): void {
-		this.sessionCache = null;
+	public clearSession(failingSid?: string): void {
+		if (!failingSid || this.sessionCache?.eid === failingSid) {
+			this.sessionCache = null;
+		}
 	}
 
 	/**
@@ -354,8 +358,9 @@ export class WialonClient {
 				error instanceof WialonClientError &&
 				error.code === "WIALON_INVALID_SESSION"
 			) {
-				// Sesión expirada en Wialon (código 1): invalidamos y reintentamos 1 única vez
-				this.clearSession();
+				// Sesión expirada en Wialon (código 1): invalidamos solo si el SID fallido sigue siendo el actual
+				// para no descartar una sesión ya renovada por otra petición concurrente.
+				this.clearSession(sid);
 				return await this.executeWithSession(operation, true);
 			}
 			throw error;
@@ -637,7 +642,7 @@ export class WialonClient {
 	 */
 	public async getUnitDetail(
 		unitId: number,
-		flags = 1025,
+		flags = 5123,
 	): Promise<WialonSearchItemResponse> {
 		return this.executeWithSession(async (sid) => {
 			const data = (await this.requestRaw(

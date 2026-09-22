@@ -21,8 +21,11 @@ export type OportunidadParaCandadoDpi = {
 	stageName: string;
 	closurePercentage: number;
 	/**
-	 * El porcentaje MÁS ALTO por el que esta oportunidad pasó alguna vez, según
-	 * `opportunityStageHistory`. `null` cuando no tiene historial: una
+	 * El porcentaje MÁS ALTO que esta oportunidad tocó alguna vez, según
+	 * `opportunityStageHistory`. Se mide sobre las DOS puntas de cada
+	 * transición —origen y destino— porque el origen es la única prueba que
+	 * queda de una etapa por la que pasó sin dejar fila propia (ver
+	 * `ALTURA_DE_LA_TRANSICION`). `null` cuando no tiene historial: una
 	 * oportunidad recién creada no registró ningún movimiento todavía, y por eso
 	 * la etapa ACTUAL sigue contando aparte (ver `etapaQueCanda`).
 	 */
@@ -178,15 +181,60 @@ export function resolverCandadoDpi(input: {
 }
 
 /**
+ * 🔴 El historial de UNA oportunidad con las DOS puntas de cada transición
+ * resueltas: la etapa de destino (`hs`) y la de origen (`fs`).
+ *
+ * ⚠️ El origen va por `left join` y no por `inner join` a propósito.
+ * `from_stage_id` es NULL en toda fila que no tenga origen registrado —la
+ * primera transición de las oportunidades viejas, y cualquier hueco del
+ * historial—; con un `inner join` esas filas desaparecerían y el máximo
+ * histórico pasaría de un número a NULL justo donde hoy da un número.
+ */
+const HISTORIAL_CON_LAS_DOS_PUNTAS = sql`
+	from ${opportunityStageHistory} as h
+	inner join ${salesStages} as hs on hs.id = h.to_stage_id
+	left join ${salesStages} as fs on fs.id = h.from_stage_id
+`;
+
+/**
+ * 🔴 La ALTURA de una transición: lo más alto que la oportunidad tocó al
+ * moverse. `greatest(destino, origen)`, NO solo el destino.
+ *
+ * Por qué mirar también el origen. El candado se abría con una maniobra que no
+ * dejaba ninguna fila con `to` alto: crear la oportunidad directamente en una
+ * etapa candante (40%), armar ahí todo el expediente, y bajarla al 30% —lo que
+ * escribe UNA sola fila, `from=40, to=30`—. Con `max(to)` el máximo histórico
+ * daba 30, el candado se abría y el `leadId` (o el DPI) se podía reemplazar con
+ * RENAP, buró y documentos ya atados a la identidad vieja; después se volvía a
+ * subir. El `from_stage_id` de esa fila es la ÚNICA prueba que queda de que la
+ * oportunidad estuvo en el 40%, porque la subida no dejó fila propia.
+ *
+ * No congela de más: `from_stage_id` se escribe con la etapa en la que la
+ * oportunidad estaba parada al momento del cambio, así que un origen > umbral
+ * significa que de verdad estuvo ahí. Cuando la subida SÍ dejó fila (el caso
+ * normal), esa fila ya tenía `to` alto y el resultado no cambia.
+ *
+ * `coalesce(fs.closure_percentage, 0)`: sin origen registrado, la transición
+ * vale lo que vale su destino, que es exactamente lo que valía antes de este
+ * cambio. (Postgres ya ignora los NULL en `greatest`, pero dejarlo explícito es
+ * lo que hace evidente que las filas viejas no cambian de valor.)
+ */
+const ALTURA_DE_LA_TRANSICION = sql`greatest(hs.closure_percentage, coalesce(fs.closure_percentage, 0))`;
+
+/**
  * El máximo histórico, como subconsulta correlacionada y no como una consulta
  * por oportunidad: una oportunidad puede tener decenas de filas de historial y
  * traerlas aparte sería un N+1 en el camino caliente de cada edición.
+ *
+ * ⚠️ Comparte `HISTORIAL_CON_LAS_DOS_PUNTAS` y `ALTURA_DE_LA_TRANSICION` con la
+ * forma SQL de más abajo (`sqlCandanteDeLaOportunidad`) a propósito: son la
+ * MISMA regla y así no hay dos textos que puedan separarse en silencio, que es
+ * justo como se abrió este agujero.
  */
-const MAX_HISTORICO = sql<number | null>`(
-	select max(${salesStages.closurePercentage})
-	from ${opportunityStageHistory}
-	inner join ${salesStages} on ${salesStages.id} = ${opportunityStageHistory.toStageId}
-	where ${opportunityStageHistory.opportunityId} = ${opportunities.id}
+export const MAX_HISTORICO = sql<number | null>`(
+	select max(${ALTURA_DE_LA_TRANSICION})
+	${HISTORIAL_CON_LAS_DOS_PUNTAS}
+	where h.opportunity_id = ${opportunities.id}
 )`;
 
 export async function obtenerOportunidadesParaCandadoDpi(filtro: {
@@ -229,7 +277,10 @@ export async function obtenerOportunidadesParaCandadoDpi(filtro: {
  * ⚠️ Las dos formas tienen que decir lo mismo. Si tocás una, tocá la otra: el
  * test "las dos formas de la señal dicen lo mismo" existe para que no se
  * separen en silencio. Drizzle no permite reusar literalmente el predicado de
- * JS dentro del SQL, así que viven una al lado de la otra a propósito.
+ * JS dentro del SQL, así que viven una al lado de la otra a propósito. Lo que
+ * SÍ se comparte —y por eso está factorizado arriba— es la lectura del
+ * historial: `HISTORIAL_CON_LAS_DOS_PUNTAS` + `ALTURA_DE_LA_TRANSICION` son un
+ * solo texto usado por las dos, porque ahí es donde ya se habían separado.
  */
 function sqlCandanteDeLaOportunidad(): SQL {
 	return sql`
@@ -238,10 +289,9 @@ function sqlCandanteDeLaOportunidad(): SQL {
 			${salesStages.closurePercentage} > ${PORCENTAJE_CANDADO_DPI}
 			or exists (
 				select 1
-				from ${opportunityStageHistory} as h
-				inner join ${salesStages} as hs on hs.id = h.to_stage_id
+				${HISTORIAL_CON_LAS_DOS_PUNTAS}
 				where h.opportunity_id = ${opportunities.id}
-					and hs.closure_percentage > ${PORCENTAJE_CANDADO_DPI}
+					and ${ALTURA_DE_LA_TRANSICION} > ${PORCENTAJE_CANDADO_DPI}
 			)
 		)
 	`;
@@ -300,6 +350,41 @@ export function mensajeCandadoBorradoCoDeudor(
 		etapa.maxHistoricoClosurePercentage ?? 0,
 	);
 	return `No se puede eliminar al co-deudor: la solicitud ya pasó del ${PORCENTAJE_CANDADO_DPI}% (llegó al ${altura}%). Su identidad quedó fija porque las validaciones de RENAP y buró y los documentos del expediente están atadas a ella, y borrarlo para dar de alta a otro cambiaría al responsable del crédito por la puerta de atrás. Si de verdad hay que reemplazarlo, un administrador puede hacerlo.`;
+}
+
+/**
+ * 🔴 Reasignar `leadId` es la tercera forma de cambiarle la identidad a un
+ * expediente, y era la más barata de todas.
+ *
+ * El candado del DPI protege al lead: no deja cambiarle el número a la persona
+ * que está colgada de una solicitud avanzada. Pero `updateOpportunity` acepta
+ * `leadId`, y cambiarlo no toca ningún DPI: cuelga la solicitud de OTRA persona
+ * entera, dejando pegados el `analysisStatus: "approved"`, el detalle de crédito
+ * aprobado y toda la evidencia (RENAP, buró, documentos, `creditAnalysis`) del
+ * lead anterior. Un moroso entraba así a una solicitud ya aprobada sin cruzarse
+ * ni una vez con el gate de mora, que no se llama desde acá.
+ *
+ * Se resuelve como el borrado del co-deudor: a partir del umbral del candado, la
+ * identidad del expediente deja de ser editable. Por debajo se sigue corrigiendo
+ * libremente, que es donde de verdad hace falta.
+ *
+ * `reassignOpportunityAndLead` NO cubre esto, aunque se le parezca: lo que ese
+ * procedure cambia es `assignedTo` —el asesor—, no el `leadId`, y su tope del
+ * 30% mira solo la etapa de HOY (`current.closurePercentage`), sin histórico.
+ *
+ * Se usa la señal completa del candado —`etapaQueCanda`, o sea hoy O alguna
+ * vez— y no el porcentaje de hoy: si mirara solo la etapa actual, bajar la
+ * oportunidad a 20%, cambiar el lead y volver a subirla rearmaría el agujero,
+ * que es el mismo motivo por el que existe `cruzoElCandado`.
+ */
+export function mensajeCandadoCambioDeLead(
+	etapa: OportunidadParaCandadoDpi,
+): string {
+	const altura = Math.max(
+		etapa.closurePercentage,
+		etapa.maxHistoricoClosurePercentage ?? 0,
+	);
+	return `No se puede cambiar el cliente de esta oportunidad: la solicitud ya pasó del ${PORCENTAJE_CANDADO_DPI}% (llegó al ${altura}%). El expediente —RENAP, buró, documentos y análisis— está atado a la persona que hoy tiene asignada, y colgarlo de otra dejaría esas validaciones respaldando a alguien que nunca las pasó. Si el cliente está equivocado, creá la oportunidad con el cliente correcto.`;
 }
 
 export async function evaluarCandadoBorradoCoDeudor(input: {

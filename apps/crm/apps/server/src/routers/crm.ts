@@ -106,11 +106,14 @@ import {
 } from "../lib/guatemala-month-window";
 import {
 	dpiCambia,
+	etapaQueCanda,
 	evaluarCandadoBorradoCoDeudor,
 	evaluarCandadoDpi,
+	mensajeCandadoCambioDeLead,
 	noExisteOportunidadCandanteDelLead,
 	noExisteOportunidadCandantePorId,
 	obtenerOportunidadesParaCandadoDpi,
+	PORCENTAJE_CANDADO_DPI,
 	type ResultadoCandadoDpi,
 } from "../lib/lead-dpi-lock";
 import {
@@ -2651,6 +2654,47 @@ export const crmRouter = {
 				});
 			}
 
+			// 🔴 Una oportunidad no puede NACER por encima del umbral del candado.
+			//
+			// El candado de identidad —el del DPI y el del `leadId`— se apoya en dos
+			// señales: la etapa de hoy y la más alta que la oportunidad tocó, según
+			// `opportunity_stage_history`. Nacer directamente en una etapa candante
+			// dejaba el expediente arriba del umbral SIN la fila de historial que lo
+			// prueba: bastaba bajarlo al 30% —una sola fila `from=40, to=30`— para
+			// que el máximo histórico diera 30, el candado se abriera, se colgara
+			// otro lead, y volver a subir. `ALTURA_DE_LA_TRANSICION` arregla la
+			// lectura de esa fila; este tope saca la precondición, para que por esta
+			// puerta el expediente no llegue a existir arriba del umbral.
+			//
+			// El tope no rompe ningún flujo vivo: el selector "Etapa Inicial" del CRM
+			// solo ofrece etapas de 1% a 20% y la conversión desde leads crea siempre
+			// en el 1%. Los nacimientos legítimos por encima del umbral —la migración
+			// automática de créditos de Cartera-Back, que nace en la última etapa, y
+			// los seeds— insertan directo en la base y no pasan por este procedure.
+			//
+			// De paso, buscar la etapa da un 400 claro cuando el `stageId` no existe,
+			// que hasta ahora reventaba recién contra la foreign key.
+			const [etapaInicial] = await db
+				.select({
+					name: salesStages.name,
+					closurePercentage: salesStages.closurePercentage,
+				})
+				.from(salesStages)
+				.where(eq(salesStages.id, input.stageId))
+				.limit(1);
+
+			if (!etapaInicial) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "La etapa inicial seleccionada no existe.",
+				});
+			}
+
+			if (etapaInicial.closurePercentage > PORCENTAJE_CANDADO_DPI) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `No se puede crear una oportunidad directamente en ${etapaInicial.name} (${etapaInicial.closurePercentage}%): a partir del ${PORCENTAJE_CANDADO_DPI}% el expediente queda con la identidad congelada, y nacer ahí lo dejaría sin el rastro de por dónde pasó. Creála en una etapa inicial y avanzála.`,
+				});
+			}
+
 			// Check for recent opportunity with same lead (within 1 hour)
 			if (input.leadId && !input.force) {
 				const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -2889,6 +2933,40 @@ export const crmRouter = {
 				}
 			}
 
+			// 🔴 Cambiar `leadId` cambia la identidad del expediente sin tocar
+			// ningún DPI, así que no lo veía ni el candado (que protege al lead) ni
+			// el gate de mora (que no se llama desde acá). Ver
+			// `mensajeCandadoCambioDeLead` para el agujero completo.
+			//
+			// Desasignar (`null`) también cuenta: es la primera mitad de la maniobra
+			// en dos pasos —soltar el lead ahora, colgar otro después—, y por sí
+			// sola ya deja el expediente avanzado sin dueño. Cualquier valor
+			// distinto del actual paga lo mismo.
+			//
+			// `!== undefined` y no `"leadId" in input`: los formularios reenvían el
+			// objeto entero y un `leadId: undefined` significa "no lo toqué", no
+			// "desasignalo". Es el mismo criterio que ya usaba `leadIdCambio` más
+			// abajo, que ahora se lee de acá para que no se separen.
+			const cambiaElLeadDeLaOportunidad =
+				input.leadId !== undefined &&
+				input.leadId !== currentOpportunity[0].leadId;
+
+			if (cambiaElLeadDeLaOportunidad) {
+				// La misma consulta y el mismo predicado que usa el candado del DPI:
+				// una sola fila, la de esta oportunidad. `etapaQueCanda` ya deja
+				// pasar a las `lost` —que no candan por decisión de producto— y esas
+				// pagan su costo al reabrirse, con `parcheDeRevalidacion`.
+				const candante = etapaQueCanda(
+					await obtenerOportunidadesParaCandadoDpi({ opportunityId: id }),
+				);
+
+				if (candante) {
+					throw new ORPCError("FORBIDDEN", {
+						message: mensajeCandadoCambioDeLead(candante),
+					});
+				}
+			}
+
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
 			// por el análisis de esta oportunidad Y del lead que quedará asignado
 			// (si leadId también cambia, el análisis del lead anterior ya no aplica).
@@ -2906,9 +2984,7 @@ export const crmRouter = {
 				input.elegidoDesdeRecomendacionIA !==
 					(currentOpportunity[0].diaPagoOriginalSistema != null);
 			// Si leadId cambia, revalidar aunque día/flag no cambien (analisis del lead anterior ya no aplica).
-			const leadIdCambio =
-				input.leadId !== undefined &&
-				input.leadId !== currentOpportunity[0].leadId;
+			const leadIdCambio = cambiaElLeadDeLaOportunidad;
 			const requiereCongelarEtapa =
 				input.diaPagoMensual !== undefined &&
 				requiereCongelarEtapaParaCambioDia(
@@ -3217,12 +3293,21 @@ export const crmRouter = {
 			const wonLockWhereClause = enforceNotWonInPredicate
 				? and(invariantWhereClause, not(eq(opportunities.status, "won")))
 				: invariantWhereClause;
+			// El chequeo de arriba leyó la fila antes del UPDATE: entre la lectura y
+			// la escritura otra transacción puede subir la oportunidad por encima del
+			// 30% y el lead nuevo entraría igual. Postgres re-evalúa el predicado
+			// después de esperar a la escritura rival, así que la condición viaja
+			// dentro de la misma sentencia. Solo cuando el lead cambia: ninguna otra
+			// edición tiene por qué pagarlo.
+			const leadSwapWhereClause = cambiaElLeadDeLaOportunidad
+				? and(wonLockWhereClause, noExisteOportunidadCandantePorId(id))
+				: wonLockWhereClause;
 			const whereClause = expectedUpdatedAt
 				? and(
-						wonLockWhereClause,
+						leadSwapWhereClause,
 						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
 					)
-				: wonLockWhereClause;
+				: leadSwapWhereClause;
 
 			// Sales users cannot reassign opportunities
 			if (

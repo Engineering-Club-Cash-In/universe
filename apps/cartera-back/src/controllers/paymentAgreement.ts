@@ -18,7 +18,7 @@ import {
   calcularAplicacionConvenio,
   calcularCuotasConvenioCompletadas,
 } from "./registerPaymentPolicy";
-import { createMora } from "./latefee";
+import { createMora, decidirMoraTrasRomperConvenio } from "./latefee";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { getPagosDelMesActual } from "./payments";
 import { creditRouter } from "../routers";
@@ -1613,8 +1613,12 @@ export const updateConvenioStatus = async (
       // (< hoy GT, impaga, sin pago cubriente validated/no_required CON plata real
       // aplicada — monto_aplicado > 0, igual que el guard cuotasReales) para que el
       // conteo coincida con el que recalcula createMora y no lo rechace por mismatch.
+      // El `factor` (Σ min(1, días/30)) replica el guard de createMora: si acá
+      // recreáramos la mora con el bloque fijo por cuota, createMora la vería
+      // fuera de rango o la escribiría por un monto que el cron corrige esa noche.
       const ovRes = await db.execute<any>(sql`
-        SELECT COUNT(*)::int AS n
+        SELECT COUNT(*)::int AS n,
+               COALESCE(SUM(LEAST(1.0, GREATEST(0, ((now() AT TIME ZONE 'America/Guatemala')::date - cu.fecha_vencimiento::date))::numeric / 30.0)), 0)::numeric AS factor
         FROM cartera.cuotas_credito cu
         WHERE cu.credito_id = ${creditoId}
           AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
@@ -1625,17 +1629,22 @@ export const updateConvenioStatus = async (
               AND pc.validation_status IN ('validated', 'no_required')
               AND COALESCE(pc.monto_aplicado, 0) > 0)`);
       const numCuotasAtrasadas = Number(ovRes.rows?.[0]?.n ?? 0);
+      const factorDiasMora = new Big(ovRes.rows?.[0]?.factor ?? 0);
 
       console.log(`📊 Cuotas atrasadas encontradas: ${numCuotasAtrasadas}`);
 
-      if (numCuotasAtrasadas > 0) {
-        // Calcular mora: capital * 1.12% * cuotas_atrasadas
-        const capital = new Big(credito.capital);
-        const porcentaje = new Big("0.0112");
-        const montoMora = capital.times(porcentaje).times(numCuotasAtrasadas);
+      // Mora = capital × 1.12% × Σ min(1, días/30) de las cuotas vencidas, con
+      // la decisión de crear-o-no extraída a un helper puro (ver su doc: un
+      // monto que redondea a Q0.00 haría que createMora rechace y el crédito
+      // quedaría sin convenio, sin mora y nunca MOROSO).
+      const decision = decidirMoraTrasRomperConvenio({
+        capital: credito.capital,
+        factorDias: factorDiasMora,
+        numCuotasAtrasadas,
+      });
 
-        console.log(`💰 Monto mora calculado: Q${montoMora.toFixed(2)}`);
-
+      if (decision.accion === "CREAR_MORA") {
+        console.log(`💰 Monto mora calculado: Q${decision.montoMora.toFixed(2)}`);
         // El convenio se eliminó: sacar el crédito de EN_CONVENIO ANTES de recrear la mora.
         // createMora ya NO escribe mora sobre estados excluidos (no des-castiga); si dejáramos
         // EN_CONVENIO rechazaría la operación y el crédito quedaría huérfano (sin convenio,
@@ -1645,10 +1654,10 @@ export const updateConvenioStatus = async (
           .set({ statusCredit: "MOROSO" })
           .where(eq(creditos.credito_id, creditoId));
 
-        // Recrear la mora (monto = fórmula capital × 1.12% × cuotas). createMora reconfirma MOROSO.
+        // Recrear la mora (monto = fórmula capital × 1.12% × factor de días). createMora reconfirma MOROSO.
         const resultMora = await createMora({
           credito_id: creditoId,
-          monto_mora: Number(montoMora.toFixed(2)),
+          monto_mora: decision.montoMora,
           cuotas_atrasadas: numCuotasAtrasadas,
         });
         if (!resultMora.success) {
@@ -1663,13 +1672,14 @@ export const updateConvenioStatus = async (
 
         console.log("✅ Resultado createMora:", resultMora);
       } else {
-        // Si no hay cuotas atrasadas, solo cambiar a ACTIVO
+        // Sin cuotas atrasadas — o con cuotas atrasadas cuya mora proporcional
+        // redondea a Q0.00 — no hay mora que crear: solo cambiar a ACTIVO.
         await db
           .update(creditos)
           .set({ statusCredit: "ACTIVO" })
           .where(eq(creditos.credito_id, creditoId));
 
-        console.log("✅ Crédito actualizado a ACTIVO (sin cuotas atrasadas)");
+        console.log(`✅ Crédito actualizado a ACTIVO (${decision.motivo})`);
       }
 
       return { success: true, message: "Convenio eliminado exitosamente" };

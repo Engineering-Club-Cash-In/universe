@@ -33,9 +33,12 @@ export function claveDeFirma(opportunityId: string) {
  * alguien de afuera tiene que garantizar que termina bastante antes de eso.
  */
 export async function conCandadoDeFirma<T>(
-	opportunityId: string,
+	opportunityId: string | null,
 	tarea: () => Promise<T>,
 ): Promise<T> {
+	// Un contrato suelto, sin oportunidad, no comparte nada con nadie.
+	if (!opportunityId) return tarea();
+
 	return db.transaction(async (candado) => {
 		await candado.execute(
 			sql`select pg_advisory_xact_lock(${claveDeFirma(opportunityId)})`,

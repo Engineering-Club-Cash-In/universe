@@ -385,6 +385,17 @@ export interface EstadoDocumentoFirma {
  * o reemiten documentos en WeeTrust. Es el mismo secreto que usa el generador
  * para avisarnos el estado de firma (`WEETRUST_RELAY_SECRET`).
  */
+/**
+ * Topes de las llamadas al generador.
+ *
+ * Quien regenera o manda enlaces las hace con el candado de la oportunidad
+ * tomado, y ese candado sólo sirve si la tarea termina: una petición sin tope
+ * lo dejaría tomado hasta que Postgres corte la transacción, que lo suelta sin
+ * detener nada. Subir y reemitir mueven un PDF, así que van más holgados.
+ */
+const TOPE_CONSULTA_MS = 30_000;
+const TOPE_CON_PDF_MS = 120_000;
+
 function secretoParaElGenerador(): Record<string, string> {
 	return {
 		"x-weetrust-relay-secret": process.env.WEETRUST_RELAY_SECRET || "",
@@ -403,6 +414,7 @@ async function pedirAlGenerador<T>(
 			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
 			...secretoParaElGenerador(),
 		},
+		signal: AbortSignal.timeout(TOPE_CONSULTA_MS),
 	});
 
 	const cuerpo = await response.text();
@@ -466,6 +478,7 @@ export async function subirContratoParaFirma(payload: {
 				...secretoParaElGenerador(),
 			},
 			body: JSON.stringify(payload),
+			signal: AbortSignal.timeout(TOPE_CON_PDF_MS),
 		},
 	);
 
@@ -507,6 +520,7 @@ export async function borrarDocumentoDeWeeTrust(
 				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
 				...secretoParaElGenerador(),
 			},
+			signal: AbortSignal.timeout(TOPE_CONSULTA_MS),
 		},
 	);
 
@@ -540,6 +554,7 @@ export async function reemitirContratoEnWeeTrust(payload: {
 			...secretoParaElGenerador(),
 		},
 		body: JSON.stringify(payload),
+		signal: AbortSignal.timeout(TOPE_CON_PDF_MS),
 	});
 
 	const cuerpo = await response.text();

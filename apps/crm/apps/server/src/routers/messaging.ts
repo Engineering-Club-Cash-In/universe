@@ -701,6 +701,45 @@ export const messagingRouter = {
 					.where(eq(coDebtors.id, recipient.coDebtorId));
 			}
 
+			// El enlace que llega de la pantalla puede ser viejo: si el contrato se
+			// regeneró o se reemplazó después de armarse el log, su documento en
+			// WeeTrust ya no existe y mandarlo deja al cliente con un enlace muerto
+			// marcado como enviado. Sólo se manda lo que hoy sigue siendo el enlace
+			// vigente de un contrato activo de esa oportunidad.
+			const [log] = await db
+				.select({ opportunityId: whatsappLogs.opportunityId })
+				.from(whatsappLogs)
+				.where(eq(whatsappLogs.id, recipient.whatsappLogId))
+				.limit(1);
+
+			const enlacesVigentes = log?.opportunityId
+				? await db
+						.select({ url: contractSignatories.signingUrl })
+						.from(contractSignatories)
+						.innerJoin(
+							generatedLegalContracts,
+							eq(contractSignatories.contractId, generatedLegalContracts.id),
+						)
+						.where(
+							and(
+								eq(generatedLegalContracts.opportunityId, log.opportunityId),
+								ne(generatedLegalContracts.status, "cancelled"),
+								isNull(generatedLegalContracts.replacedByContractId),
+							),
+						)
+				: [];
+			const vigentes = new Set(
+				enlacesVigentes.map((e) => e.url).filter((url): url is string => !!url),
+			);
+			const viejo = input.contracts.find(
+				(c) => c.link && !vigentes.has(c.link),
+			);
+			if (viejo) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `El enlace de "${viejo.contractName}" ya no es el vigente: el contrato se regeneró o se reemplazó. Usá "Reenviar por WhatsApp" desde la oportunidad para mandar los nuevos.`,
+				});
+			}
+
 			// Armar mensaje
 			const completeContracts = input.contracts.filter(
 				(c): c is ContractLink => c.link !== null,

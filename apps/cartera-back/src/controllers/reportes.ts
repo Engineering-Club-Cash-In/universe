@@ -2281,9 +2281,10 @@ export async function getMoraRecuperacionPorAsesor({
     asesor_id: number | null;
     nombre: string | null;
     esperado: string;
-    generado_en_periodo: string;
-    cobrado_en_snapshot: string;
-    cobrado_fuera_snapshot: string;
+    // `JSON_BUILD_OBJECT` devuelve los montos como texto a propósito: numeric →
+    // número de JSON los haría pasar por el double del driver.
+    eventos: { tipoEvento: string; montoAnterior: string; montoNuevo: string }[];
+    cobrado: string;
   }>(buildMoraRecoveryQuery({ ...period, asesores, emailCobrador }));
 
   return buildMoraRecoveryReport(
@@ -2291,9 +2292,12 @@ export async function getMoraRecuperacionPorAsesor({
       asesorId: row.asesor_id,
       nombre: row.nombre ?? "Sin asignar",
       esperado: row.esperado,
-      generadoEnPeriodo: row.generado_en_periodo,
-      cobradoEnSnapshot: row.cobrado_en_snapshot,
-      cobradoFueraSnapshot: row.cobrado_fuera_snapshot,
+      eventos: (row.eventos ?? []).map((evento) => ({
+        tipoEvento: evento.tipoEvento,
+        montoAnterior: Number(evento.montoAnterior),
+        montoNuevo: Number(evento.montoNuevo),
+      })),
+      cobrado: row.cobrado,
     })),
     period,
   );

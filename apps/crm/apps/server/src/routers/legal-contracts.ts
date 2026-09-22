@@ -251,9 +251,12 @@ async function exigirQueNoSeEsteConfirmando(
 async function exigirEtapaDeFirma(
 	opportunityId: string,
 	accion: AccionSobreContrato,
-): Promise<void> {
+): Promise<string> {
 	const [etapa] = await db
-		.select({ porcentaje: salesStages.closurePercentage })
+		.select({
+			stageId: opportunities.stageId,
+			porcentaje: salesStages.closurePercentage,
+		})
 		.from(opportunities)
 		.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 		.where(eq(opportunities.id, opportunityId))
@@ -262,11 +265,18 @@ async function exigirEtapaDeFirma(
 	const porcentaje = etapa?.porcentaje ?? null;
 	const permitidas = ETAPAS_POR_ACCION[accion];
 
-	if (porcentaje === null || !permitidas.includes(porcentaje as never)) {
+	if (
+		!etapa ||
+		porcentaje === null ||
+		!permitidas.includes(porcentaje as never)
+	) {
 		throw new ORPCError("BAD_REQUEST", {
 			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: no se puede ${accion}. Sólo se puede en ${permitidas.join("% u ")}%.`,
 		});
 	}
+	// La etapa con la que arrancó el pedido: quien lo guarde tiene que exigir
+	// que siga siendo ésa, no sólo que esté entre las permitidas.
+	return etapa.stageId;
 }
 
 export const legalContractsRouter = {
@@ -1502,8 +1512,12 @@ export const legalContractsRouter = {
 				});
 			}
 
+			let etapaInicial: string | null = null;
 			if (contract.opportunityId) {
-				await exigirEtapaDeFirma(contract.opportunityId, "regenerar");
+				etapaInicial = await exigirEtapaDeFirma(
+					contract.opportunityId,
+					"regenerar",
+				);
 				await exigirQueNoSeEsteConfirmando(contract.opportunityId);
 			}
 
@@ -1592,18 +1606,26 @@ export const legalContractsRouter = {
 							sql`select pg_advisory_xact_lock(${claveDeFirma(contract.opportunityId)})`,
 						);
 						const [etapa] = await tx
-							.select({ porcentaje: salesStages.closurePercentage })
+							.select({
+								stageId: opportunities.stageId,
+								porcentaje: salesStages.closurePercentage,
+							})
 							.from(opportunities)
 							.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 							.where(eq(opportunities.id, contract.opportunityId))
 							.for("update", { of: opportunities });
+						// Tiene que seguir en la MISMA etapa, no sólo en una permitida:
+						// si la aprobaron de 80 a 85 mientras se reemitía, el WhatsApp de
+						// la aprobación ya salió con los enlaces viejos, y guardar ésta
+						// los dejaba muertos. Lo mismo si la devolvieron de 85 a 80.
 						if (
 							!etapa?.porcentaje ||
+							etapa.stageId !== etapaInicial ||
 							!ETAPAS_POR_ACCION.regenerar.includes(etapa.porcentaje as never)
 						) {
 							throw new ORPCError("CONFLICT", {
 								message:
-									"La oportunidad cambió de etapa mientras se regeneraba. Ya no se puede regenerar.",
+									"La oportunidad cambió de etapa mientras se regeneraba, así que no se guardó. Recargá y, si todavía hace falta, volvé a regenerar.",
 							});
 						}
 					}

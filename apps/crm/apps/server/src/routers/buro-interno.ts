@@ -4,6 +4,7 @@ import {
 	BURO_INTERNO_CATEGORIAS,
 	BURO_INTERNO_SEVERIDADES,
 } from "../db/schema/buro-interno";
+import { resolveUserRole } from "../lib/audit";
 import { analystProcedure, cobrosProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -56,13 +57,16 @@ type ContextoConRol = {
 
 /**
  * Bajo suplantación responde el admin que la inició, no el usuario suplantado
- * (mismo criterio que `marcarValidacionManual`).
+ * (mismo criterio que `marcarValidacionManual`). El rol también tiene que ser
+ * el del admin: con el del suplantado la bitácora quedaría con un id de admin
+ * y rol "cobros" (igual que resuelve `auditMiddleware`).
  */
-function actorDe(context: ContextoConRol): ActorBuroInterno {
-	return {
-		id: context.session?.session?.impersonatedBy ?? context.userId,
-		rol: context.userRole ?? null,
-	};
+async function actorDe(context: ContextoConRol): Promise<ActorBuroInterno> {
+	const impersonatedBy = context.session?.session?.impersonatedBy ?? null;
+	if (!impersonatedBy) {
+		return { id: context.userId, rol: context.userRole ?? null };
+	}
+	return { id: impersonatedBy, rol: await resolveUserRole(impersonatedBy) };
 }
 
 function exigirSupervision(rol: string | null | undefined, accion: string) {
@@ -109,7 +113,7 @@ export const buroInternoRouter = {
 		.input(datosPersonaSchema.extend({ leadId: z.string().uuid().nullish() }))
 		.handler(async ({ input, context }) => {
 			try {
-				return await crearPersona(input, actorDe(context));
+				return await crearPersona(input, await actorDe(context));
 			} catch (error) {
 				traducirError(error);
 			}
@@ -120,7 +124,7 @@ export const buroInternoRouter = {
 		.handler(async ({ input, context }) => {
 			const { id, ...datos } = input;
 			try {
-				return await actualizarPersona(id, datos, actorDe(context));
+				return await actualizarPersona(id, datos, await actorDe(context));
 			} catch (error) {
 				traducirError(error);
 			}
@@ -146,7 +150,7 @@ export const buroInternoRouter = {
 				return await desactivarPersona(
 					input.id,
 					input.motivo,
-					actorDe(context),
+					await actorDe(context),
 				);
 			} catch (error) {
 				traducirError(error);
@@ -174,7 +178,7 @@ export const buroInternoRouter = {
 				),
 		)
 		.handler(async ({ input, context }) =>
-			consultarPersona(input, actorDe(context)),
+			consultarPersona(input, await actorDe(context)),
 		),
 
 	getReglasBuroInterno: cobrosProcedure.handler(async () => obtenerReglas()),
@@ -192,7 +196,7 @@ export const buroInternoRouter = {
 			exigirSupervision(context.userRole, "cambiar las reglas de coincidencia");
 			const { clave, ...cambios } = input;
 			try {
-				return await actualizarRegla(clave, cambios, actorDe(context));
+				return await actualizarRegla(clave, cambios, await actorDe(context));
 			} catch (error) {
 				traducirError(error);
 			}

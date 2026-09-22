@@ -31,6 +31,7 @@ import {
 	etiquetaDeMotivo,
 	MOTIVOS_DE_ANULACION_KEYS,
 } from "../lib/contratos-anulacion";
+import { claveDeFirma, conCandadoDeFirma } from "../lib/contratos-candado";
 import {
 	aplicarCorreosDePrueba,
 	correoRepetido,
@@ -203,20 +204,6 @@ async function eliminarContrato(
 		motivo,
 	);
 	return { conservado: anulado?.conservado ?? false };
-}
-
-/**
- * Candado por oportunidad que comparten confirmar la firma y regenerar enlaces.
- *
- * Confirmar llama a cartera-back antes de pasar a 90%, y eso tarda: sin un
- * candado común, una regeneración que entraba en ese rato todavía veía 85%,
- * dejaba un contrato nuevo pendiente, y la confirmación lo marcaba firmado sin
- * que nadie hubiera firmado ese documento. Es de transacción y no de fila: la
- * confirmación lo tiene tomado mientras `closeOpportunity` escribe la
- * oportunidad desde otras conexiones, y un `FOR UPDATE` la trabaría a sí misma.
- */
-function claveDeFirma(opportunityId: string) {
-	return sql`hashtext(${`firma-oportunidad:${opportunityId}`}::text)`;
 }
 
 /**
@@ -1258,15 +1245,12 @@ export const legalContractsRouter = {
 			}
 
 			// Desde acá, con el candado de firma de la oportunidad tomado hasta que
-			// quede en 90%: una regeneración de enlaces que entre mientras tanto espera
-			// y después ve el 90%, en vez de dejar un contrato nuevo que esta
-			// confirmación marcaría firmado. También frena una segunda confirmación
-			// antes de que vuelva a cerrar la oportunidad en cartera-back.
-			await db.transaction(async (candado) => {
-				await candado.execute(
-					sql`select pg_advisory_xact_lock(${claveDeFirma(input.opportunityId)})`,
-				);
-				const [etapaConCandado] = await candado
+			// quede en 90%: una regeneración de enlaces o un envío por WhatsApp que
+			// entren mientras tanto esperan, en vez de dejar un contrato nuevo que
+			// esta confirmación marcaría firmado. También frena una segunda
+			// confirmación antes de que vuelva a cerrar la oportunidad en cartera-back.
+			await conCandadoDeFirma(input.opportunityId, async () => {
+				const [etapaConCandado] = await db
 					.select({ porcentaje: salesStages.closurePercentage })
 					.from(opportunities)
 					.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))

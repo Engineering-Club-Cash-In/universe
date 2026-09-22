@@ -12,6 +12,7 @@ import {
 	whatsappLogs,
 } from "../db/schema/whatsapp-logs";
 import { auditRecord } from "../lib/audit";
+import { conCandadoDeFirma } from "../lib/contratos-candado";
 import { aplicarCorreosDePrueba } from "../lib/contratos-correos-prueba";
 import {
 	REP_LEGAL_EMAIL,
@@ -85,6 +86,23 @@ interface DestinatarioDeFirma {
  * contrato (porque no firma ese documento) simplemente no lo recibe.
  */
 export async function sendContractLinksToLead(params: {
+	leadId: string;
+	opportunityId: string;
+}): Promise<{ sent: boolean; reason?: string }> {
+	// Con el candado de la oportunidad tomado de punta a punta: entre armar los
+	// mensajes y mandarlos hay varias llamadas a SimpleTech, y una regeneración
+	// que entrara en ese rato borraba en WeeTrust los documentos de los enlaces
+	// que se estaban mandando. Al cliente le llegaban links ya muertos.
+	// Con tope: si SimpleTech deja de responder, el candado se suelta solo en vez
+	// de dejar la oportunidad sin regenerar ni confirmar.
+	return conCandadoDeFirma(
+		params.opportunityId,
+		() => enviarEnlacesDeFirma(params),
+		{ segundosMaximos: 180 },
+	);
+}
+
+async function enviarEnlacesDeFirma(params: {
 	leadId: string;
 	opportunityId: string;
 }): Promise<{ sent: boolean; reason?: string }> {

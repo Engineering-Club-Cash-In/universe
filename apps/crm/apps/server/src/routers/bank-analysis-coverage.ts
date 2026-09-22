@@ -165,7 +165,7 @@ export function buildBankStatementArtifactPlan({
 	for (const file of files) {
 		if (representedFiles.has(file.fileIndex)) continue;
 		const documentType =
-			desiredAssignments.length === 0
+			coverage.months.length === 0
 				? availableDocumentTypes.find(
 						(candidate) =>
 							!artifacts.some(

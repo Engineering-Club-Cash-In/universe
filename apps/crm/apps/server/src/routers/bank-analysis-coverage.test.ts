@@ -98,6 +98,30 @@ describe("bank analysis coverage save lifecycle", () => {
 		]);
 	});
 
+	test("does not fill checklist slots when partial coverage includes a reliable month", () => {
+		const partiallyDetectedFiles = files.slice(0, 3);
+		const plan = buildBankStatementArtifactPlan({
+			analysisBatchId: "analysis-partial-coverage",
+			files: partiallyDetectedFiles,
+			coverage: resolveBankStatementMonthlyCoverage({
+				uploadedFileCount: partiallyDetectedFiles.length,
+				coverageByFile: [
+					{ indice_archivo: 0, meses: ["2026-01"] },
+					{ indice_archivo: 1, meses: ["2026-01"] },
+				],
+			}),
+			existingDocuments: [],
+		});
+
+		expect(
+			plan.map(({ documentType, fileIndex }) => ({ documentType, fileIndex })),
+		).toEqual([
+			{ documentType: "other", fileIndex: 0 },
+			{ documentType: "other", fileIndex: 1 },
+			{ documentType: "other", fileIndex: 2 },
+		]);
+	});
+
 	test("does not overwrite manual adjuntos or checklist documents from another analysis", () => {
 		const plan = buildBankStatementArtifactPlan({
 			analysisBatchId: "analysis-1",

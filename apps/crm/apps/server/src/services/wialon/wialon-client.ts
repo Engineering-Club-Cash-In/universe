@@ -512,7 +512,8 @@ export class WialonClient {
 							error: error instanceof Error ? error.message : String(error),
 						});
 						for (const id of chunk) {
-							if (!this.ignitionSensorCache.has(id)) {
+							const cached = this.ignitionSensorCache.get(id);
+							if (!cached || cached.expiresAt <= Date.now()) {
 								this.setSensorCache(
 									id,
 									null,
@@ -579,7 +580,8 @@ export class WialonClient {
 			// 1. Si identificamos el sensor de ignición por metadatos (tipo 'engine operation' o nombre explícito),
 			// evaluamos EXCLUSIVAMENTE ese sensor para evitar que sensores de alarma o GPS alteren el estado.
 			const cached = this.ignitionSensorCache.get(raw.i);
-			const targetSensorId = cached?.sensorId;
+			const targetSensorId =
+				cached && cached.expiresAt > Date.now() ? cached.sensorId : undefined;
 
 			if (targetSensorId) {
 				const targetSens = raw.sensors[targetSensorId];

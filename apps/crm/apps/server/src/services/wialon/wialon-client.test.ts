@@ -1440,4 +1440,69 @@ describe("WialonClient", () => {
 		expect(detail.item.prp?.monitoring_sensor_id).toBe("1");
 		expect(detail.item.sens?.["1"].n).toBe("Motor");
 	});
+
+	test("reemplaza entradas expiradas de sensor con negative cache tras fallo en búsqueda de metadatos", async () => {
+		let searchCalls = 0;
+		const mockFetch: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=core%2Fsearch_items")) {
+				searchCalls++;
+				// Falla con error 5 (error de ejecución en el servidor upstream)
+				return new Response(JSON.stringify({ error: 5 }), { status: 200 });
+			}
+			if (bodyStr.includes("svc=unit%2Fcalc_last")) {
+				return new Response(
+					JSON.stringify([
+						{
+							i: 333,
+							sensors: {
+								// El sensor obsoleto 10 no existe o está apagado; sensor 2 reporta ignición off
+								"2": { value: 0, format: { value: "Apagado" } },
+							},
+						},
+					]),
+					{ status: 200 },
+				);
+			}
+			return new Response(JSON.stringify({}), { status: 200 });
+		};
+
+		const client = new WialonClient({ token: "tok-test" }, mockFetch);
+
+		// Simulamos que la unidad 333 tenía en caché un sensor '10' que YA expiró hace 10 segundos
+		(
+			client as unknown as {
+				setSensorCache: (id: number, s: string | null, exp: number) => void;
+			}
+		).setSensorCache(333, "10", Date.now() - 10_000);
+
+		// Ejecutamos getUnitsStatus: la búsqueda de metadatos fallará
+		const status = await client.getUnitsStatus([333]);
+		expect(searchCalls).toBe(1);
+		expect(status.length).toBe(1);
+
+		// Verificamos que la entrada expirada fue SOBRESCRITA con negative cache (null)
+		const cacheEntry = (
+			client as unknown as {
+				ignitionSensorCache: Map<
+					number,
+					{ sensorId: string | null; expiresAt: number }
+				>;
+			}
+		).ignitionSensorCache.get(333);
+
+		expect(cacheEntry).toBeDefined();
+		expect(cacheEntry?.sensorId).toBeNull();
+		const remainingTtl = (cacheEntry?.expiresAt ?? 0) - Date.now();
+		// Debe tener ~5 minutos de TTL
+		expect(remainingTtl).toBeGreaterThan(4 * 60 * 1000);
+		expect(remainingTtl).toBeLessThanOrEqual(5 * 60 * 1000);
+
+		// En la siguiente llamada inmediata, NO debe reintentar la búsqueda de metadatos (respeta backoff)
+		await client.getUnitsStatus([333]);
+		expect(searchCalls).toBe(1); // Sigue siendo 1 llamada
+	});
 });

@@ -2,7 +2,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
 	Check,
 	Clock,
-	Copy,
 	ExternalLink,
 	Loader2,
 	Phone,
@@ -188,14 +187,11 @@ function RecipientCard({ recipient }: { recipient: Recipient }) {
 		pdfLink?: string | null;
 	}[];
 
-	// Los enlaces ya no se pegan acá: el servidor resuelve los que le tocan a
-	// esta persona hoy. Pegarlos a mano permitía mandarle a alguien el enlace de
-	// otro firmante, que lo dejaba firmando en su nombre, y reenviar uno viejo de
-	// un contrato ya reemplazado.
-	const previewMessage =
-		recipientContracts.length > 0
-			? `Hola ${recipient.recipientName}, tus contratos están listos para firmar. Por favor ingresa a los siguientes enlaces:\n\n${recipientContracts.map((c) => `📄 ${c.contractName}:\n(su enlace vigente)`).join("\n\n")}\n\nSi tienes alguna duda, no dudes en contactarnos.`
-			: null;
+	// Los enlaces ya no se pegan acá ni se muestran: el servidor resuelve los que
+	// le tocan a esta persona hoy y arma el mensaje. Pegarlos a mano permitía
+	// mandarle a alguien el enlace de otro firmante, que lo dejaba firmando en su
+	// nombre. Tampoco hay vista previa: sin los enlaces sería un mensaje que no
+	// sirve para copiar y mandar por fuera.
 
 	const updateMutation = useMutation({
 		mutationFn: async () => {
@@ -310,27 +306,6 @@ function RecipientCard({ recipient }: { recipient: Recipient }) {
 							Se mandan los enlaces de firma vigentes de esta persona.
 						</p>
 					</div>
-
-					{previewMessage && (
-						<div className="space-y-1">
-							<Label className="text-xs">Vista previa del mensaje</Label>
-							<div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs">
-								{previewMessage}
-							</div>
-							<Button
-								size="sm"
-								variant="outline"
-								className="w-full"
-								onClick={() => {
-									navigator.clipboard.writeText(previewMessage);
-									toast.success("Mensaje copiado al portapapeles");
-								}}
-							>
-								<Copy className="mr-1 h-3 w-3" />
-								Copiar mensaje
-							</Button>
-						</div>
-					)}
 
 					<div className="flex gap-2">
 						<Button

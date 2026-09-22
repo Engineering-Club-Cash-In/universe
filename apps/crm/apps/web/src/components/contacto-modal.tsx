@@ -93,6 +93,7 @@ interface ContactoModalProps {
 	nombreAsesor?: string;
 	telefonoAsesor?: string;
 	expectativaMora?: string;
+	expectativaMoraDiaria?: string;
 	aseguradora?: string;
 	cabinaSeguro?: string;
 }
@@ -118,6 +119,7 @@ export function ContactoModal({
 	nombreAsesor = "",
 	telefonoAsesor = "",
 	expectativaMora = "",
+	expectativaMoraDiaria = "",
 	aseguradora = "",
 	cabinaSeguro = "",
 }: ContactoModalProps) {
@@ -167,6 +169,7 @@ export function ContactoModal({
 			telefonoAsesor: telefonoAsesorLimpio,
 			nombreAsesor,
 			expectativaMora,
+			expectativaMoraDiaria,
 			// Vacíos caen al default de interpolar (Seguros Universales); con
 			// datos, el modal muestra de una vez la variante correcta (p. ej. G&T).
 			aseguradora: aseguradora || undefined,
@@ -183,6 +186,7 @@ export function ContactoModal({
 			telefonoAsesorLimpio,
 			nombreAsesor,
 			expectativaMora,
+			expectativaMoraDiaria,
 			aseguradora,
 			cabinaSeguro,
 		],
@@ -378,10 +382,11 @@ export function ContactoModal({
 		if (
 			accionUsaCuerpoNoReply(metodo) &&
 			mensajeAnunciaExpectativaMora(cuerpoNoReply) &&
-			!expectativaMora.trim()
+			// La oración dice los dos montos juntos: el recargo por día y su tope.
+			(!expectativaMora.trim() || !expectativaMoraDiaria.trim())
 		) {
 			toast.error(
-				'El crédito no genera mora (estado excluido o sin capital). Borrá la oración del recargo en "Editar mensaje" o elegí otra plantilla.',
+				'El crédito no genera mora (estado excluido o sin capital suficiente). Borrá la oración del recargo en "Editar mensaje" o elegí otra plantilla.',
 			);
 			return;
 		}

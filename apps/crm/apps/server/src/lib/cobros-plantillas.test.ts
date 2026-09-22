@@ -6,6 +6,7 @@ import {
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	COBROS_NO_REPLY_WARNING,
 	calcularExpectativaMora,
+	calcularExpectativaMoraDiaria,
 	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
 	cuerpoUsaFechaLimiteImpuesto,
@@ -287,25 +288,46 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		expect(mensaje.match(/notificaciones automáticas/g)?.length).toBe(1);
 	});
 
-	test("calcula la expectativa de mora con la fórmula de procesarMoras (capital × 1.12%)", () => {
-		// Mismos números que el job de cartera-back: capital × 0.0112, half-up a
-		// 2 decimales. 45000 × 0.0112 = 504.00; 123456.78 × 0.0112 = 1382.72.
+	test("calcula la mora proporcional con la fórmula de procesarMoras", () => {
+		// Mora proporcional de cartera-back (calcularMoraProporcional): cada
+		// cuota suma capital × 1.12% × min(1, días/30), half-up a 2 decimales al
+		// final. El TOPE de una cuota es su cargo mensual completo:
+		// 45000 × 0.0112 = 504.00; 123456.78 × 0.0112 = 1382.72.
 		expect(calcularExpectativaMora("45000.00")).toBe("504.00");
 		expect(calcularExpectativaMora("123456.78")).toBe("1,382.72");
+		// Y cada día de atraso suma 1/30 de ese cargo: 504 / 30 = 16.80;
+		// 1382.7159 / 30 = 46.0905 → 46.09.
+		expect(calcularExpectativaMoraDiaria("45000.00")).toBe("16.80");
+		expect(calcularExpectativaMoraDiaria("123456.78")).toBe("46.09");
+
+		// Paridad con la tabla que publica el PR del cron (#1691) para un capital
+		// de Q10,000: 1 día de atraso = Q3.73, 30 días en adelante = Q112.00.
+		expect(calcularExpectativaMoraDiaria("10000")).toBe("3.73");
+		expect(calcularExpectativaMora("10000")).toBe("112.00");
+
 		// Sin capital no aplica mora (igual que el job) → sin monto.
-		expect(calcularExpectativaMora("0.00")).toBe("");
-		expect(calcularExpectativaMora(null)).toBe("");
-		expect(calcularExpectativaMora(undefined)).toBe("");
-		expect(calcularExpectativaMora("no-numerico")).toBe("");
+		for (const capital of ["0.00", null, undefined, "no-numerico"]) {
+			expect(calcularExpectativaMora(capital)).toBe("");
+			expect(calcularExpectativaMoraDiaria(capital)).toBe("");
+		}
+
+		// Capital tan chico que UN día redondea a Q0.00 (10 × 1.12% / 30 ≈
+		// 0.0037): el cron no crea mora en ese caso (decidirMoraDelCron →
+		// "menor a un centavo"), así que no hay recargo diario que anunciar.
+		expect(calcularExpectativaMoraDiaria("10.00")).toBe("");
+		expect(calcularExpectativaMora("10.00")).toBe("0.11");
 	});
 
-	test("el recordatorio del día de pago interpola la expectativa de mora", () => {
+	test("el recordatorio del día de pago anuncia el recargo diario y su tope", () => {
 		const alDia = PLANTILLAS_MENSAJES.find(
 			(plantilla) => plantilla.id === "al_dia",
 		);
 
+		// Con la mora proporcional ya NO se anuncia el cargo mensual completo
+		// como el recargo de mañana (sería ~30× lo que cobra el cron el primer
+		// día): se anuncia lo que suma cada día y hasta dónde llega.
 		expect(alDia?.cuerpo).toContain(
-			"se agregará un recargo por mora de Q{expectativaMora}.",
+			"🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMoraDiaria} por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.*",
 		);
 
 		const mensaje = interpolar(alDia?.cuerpo ?? "", {
@@ -319,9 +341,16 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 			telefonoAsesor: "41286630",
 			nombreAsesor: "Carlos Pérez",
 			expectativaMora: calcularExpectativaMora("45000.00"),
+			expectativaMoraDiaria: calcularExpectativaMoraDiaria("45000.00"),
 		});
 
-		expect(mensaje).toContain("un recargo por mora de Q504.00.");
+		expect(mensaje).toContain(
+			"un recargo por mora de Q16.80 por cada día de atraso, hasta un máximo de Q504.00 al mes.",
+		);
+		// {expectativaMora} no se come el prefijo de {expectativaMoraDiaria}.
+		expect(mensaje).not.toContain("{expectativaMora");
+		// Sigue en 4 bloques → mismo template de SimpleTech (mensaje4parametro).
+		expect(bloques(alDia?.cuerpo ?? "")).toHaveLength(4);
 	});
 
 	test("descarta el envío que usa expectativa de mora cuando el capital no la genera", () => {
@@ -339,18 +368,44 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 			});
 		}
 
-		// Con capital sí, y entrega el monto ya calculado.
+		// Capital tan chico que el recargo de un día redondea a Q0.00: el cron no
+		// cobraría mañana, así que la oración ("Q… por cada día") no se puede
+		// armar → tampoco se envía.
+		expect(
+			prepararExpectativaMoraParaEnvio(alDia?.cuerpo ?? "", "10.00"),
+		).toEqual({
+			enviar: false,
+			motivo: COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
+		});
+
+		// Con capital sí, y entrega los dos montos ya calculados.
 		expect(
 			prepararExpectativaMoraParaEnvio(alDia?.cuerpo ?? "", "45000.00"),
-		).toEqual({ enviar: true, expectativaMora: "504.00" });
+		).toEqual({
+			enviar: true,
+			expectativaMora: "504.00",
+			expectativaMoraDiaria: "16.80",
+		});
 
-		// Una plantilla que no usa la variable se envía aunque no haya capital.
+		// Basta con que el cuerpo use UNA de las dos variables para exigir ambas
+		// (el asesor puede editar el mensaje en el masivo).
+		expect(
+			prepararExpectativaMoraParaEnvio(
+				"Recargo diario: Q{expectativaMoraDiaria}",
+				null,
+			),
+		).toEqual({
+			enviar: false,
+			motivo: COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
+		});
+
+		// Una plantilla que no usa las variables se envía aunque no haya capital.
 		const mora30 = PLANTILLAS_MENSAJES.find(
 			(plantilla) => plantilla.id === "mora_30",
 		);
 		expect(
 			prepararExpectativaMoraParaEnvio(mora30?.cuerpo ?? "", null),
-		).toEqual({ enviar: true, expectativaMora: "" });
+		).toEqual({ enviar: true, expectativaMora: "", expectativaMoraDiaria: "" });
 	});
 
 	test("los estados que el job excluye de mora tampoco generan expectativa", () => {
@@ -369,6 +424,7 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 
 		for (const status of excluidos) {
 			expect(calcularExpectativaMora("45000.00", status)).toBe("");
+			expect(calcularExpectativaMoraDiaria("45000.00", status)).toBe("");
 			expect(
 				prepararExpectativaMoraParaEnvio(
 					alDia?.cuerpo ?? "",
@@ -384,6 +440,7 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		// Estados que sí generan mora siguen calculando normal.
 		for (const status of ["ACTIVO", "MOROSO", null, undefined]) {
 			expect(calcularExpectativaMora("45000.00", status)).toBe("504.00");
+			expect(calcularExpectativaMoraDiaria("45000.00", status)).toBe("16.80");
 		}
 	});
 

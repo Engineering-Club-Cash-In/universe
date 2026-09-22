@@ -51,6 +51,7 @@ import {
 } from "../lib/cobros-credit-detail";
 import {
 	calcularExpectativaMora,
+	calcularExpectativaMoraDiaria,
 	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
 	cuerpoUsaFechaLimiteImpuesto,
@@ -2301,11 +2302,17 @@ export const cobrosRouter = {
 					// Datos de mora / convenio
 					estadoMora,
 					montoEnMora: montoEnMora.toFixed(2),
-					// Recargo de UNA cuota vencida más (capital × 1.12%, misma fórmula
-					// que procesarMoras en cartera-back) para el {expectativaMora} de
-					// las plantillas. Vacío si el estado está excluido de mora
+					// Mora proporcional (misma fórmula que procesarMoras en cartera-back)
+					// para el recordatorio del día de pago: {expectativaMoraDiaria} es lo
+					// que suma cada día de atraso (1/30 del cargo mensual) y
+					// {expectativaMora} el tope de la cuota (el cargo mensual completo,
+					// capital × 1.12%). Vacíos si el estado está excluido de mora
 					// (EN_CONVENIO, INCOBRABLE, etc.) o no hay capital, igual que el job.
 					expectativaMora: calcularExpectativaMora(
+						creditoCompleto.credito.capital,
+						creditoCompleto.credito.statusCredit,
+					),
+					expectativaMoraDiaria: calcularExpectativaMoraDiaria(
 						creditoCompleto.credito.capital,
 						creditoCompleto.credito.statusCredit,
 					),
@@ -3774,10 +3781,10 @@ export const cobrosRouter = {
 					continue;
 				}
 
-				// Si el cuerpo usa {expectativaMora} y el crédito no genera mora
-				// (sin capital válido, o en estado que el job excluye: EN_CONVENIO,
-				// INCOBRABLE, etc.), se descarta en vez de anunciar un recargo que
-				// jamás se va a asignar.
+				// Si el cuerpo usa {expectativaMoraDiaria} o {expectativaMora} y el
+				// crédito no genera mora (sin capital válido, o en estado que el job
+				// excluye: EN_CONVENIO, INCOBRABLE, etc.), se descarta en vez de
+				// anunciar un recargo que jamás se va a asignar.
 				const expectativaMora = prepararExpectativaMoraParaEnvio(
 					cuerpoBase,
 					credito.creditos.capital,
@@ -3838,6 +3845,7 @@ export const cobrosRouter = {
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
 					expectativaMora: expectativaMora.expectativaMora,
+					expectativaMoraDiaria: expectativaMora.expectativaMoraDiaria,
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad de cada crédito (Universales o G&T).
 					...seguroPorAseguradora(info?.insuranceProvider),

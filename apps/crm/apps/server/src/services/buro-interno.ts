@@ -104,6 +104,20 @@ function paraLike(valor: string): string {
 		.replace(/[%_\\]/g, "\\$&");
 }
 
+/** Patrón `%texto%` para ILIKE, con los comodines del usuario escapados */
+function patronContiene(valor: string): string {
+	return `%${valor.replace(/[%_\\]/g, "\\$&")}%`;
+}
+
+/**
+ * Los SIFCO no son solo números: los créditos que nacen en el CRM llevan
+ * `CRM-<uuid>` (ver `close-opportunity.ts`). Una sola palabra sin espacios
+ * puede ser uno de esos, así que se busca también como SIFCO.
+ */
+function puedeSerSifco(termino: string): boolean {
+	return !/\s/.test(termino);
+}
+
 function sinTildesSql(expresion: SQL): SQL {
 	return sql`translate(lower(${expresion}), 'áéíóúüñ', 'aeiouun')`;
 }
@@ -155,6 +169,11 @@ export async function listarPersonas(parametros: {
 			sql` AND `,
 		);
 		const alternativas: SQL[] = [sql`(${porNombre})`];
+		if (puedeSerSifco(busqueda)) {
+			alternativas.push(
+				sql`coalesce(${buroInternoPersonas.numeroCreditoSifco}, '') ILIKE ${patronContiene(busqueda)}`,
+			);
+		}
 		if (digitos.length >= 4) {
 			alternativas.push(
 				sql`regexp_replace(coalesce(${buroInternoPersonas.dpi}, ''), '\\D', '', 'g') LIKE ${`%${digitos}%`}`,
@@ -227,15 +246,19 @@ export async function buscarCandidatos(
 	const esNumero = /^[\d\s-]+$/.test(limpio);
 	const digitos = limpio.replace(/\D/g, "");
 
+	// Leads con alguna oportunidad cuyo SIFCO contiene el patrón, ya sea en la
+	// oportunidad o en el enlace con cartera
+	const leadsConSifco = (patron: string) => sql`l.id IN (
+		SELECT o.lead_id FROM public.opportunities o
+		LEFT JOIN public.cartera_back_references c ON c.opportunity_id = o.id
+		WHERE o.numero_sifco ILIKE ${patron} OR c.numero_credito_sifco ILIKE ${patron}
+	)`;
+
 	let condicion: SQL;
 	if (esNumero) {
 		const patron = `%${digitos}%`;
 		condicion = sql`(
-			l.id IN (
-				SELECT o.lead_id FROM public.opportunities o
-				LEFT JOIN public.cartera_back_references c ON c.opportunity_id = o.id
-				WHERE o.numero_sifco LIKE ${patron} OR c.numero_credito_sifco LIKE ${patron}
-			)
+			${leadsConSifco(patron)}
 			OR regexp_replace(coalesce(l.dpi, ''), '\\D', '', 'g') LIKE ${patron}
 			OR regexp_replace(coalesce(l.phone, ''), '\\D', '', 'g') LIKE ${patron}
 		)`;
@@ -244,13 +267,17 @@ export async function buscarCandidatos(
 			.split(/\s+/)
 			.filter((p) => p.length >= 2);
 		if (palabras.length === 0) return [];
-		condicion = sql.join(
+		const porNombre = sql.join(
 			palabras.map(
 				(p) =>
 					sql`${sinTildesSql(sql`concat_ws(' ', l.first_name, l.middle_name, l.last_name, l.second_last_name)`)} LIKE ${`%${p}%`}`,
 			),
 			sql` AND `,
 		);
+		// "CRM-550e8400-..." no es un nombre: también se prueba como SIFCO
+		condicion = puedeSerSifco(limpio)
+			? sql`((${porNombre}) OR ${leadsConSifco(patronContiene(limpio))})`
+			: porNombre;
 	}
 
 	const resultado = await db.execute<{

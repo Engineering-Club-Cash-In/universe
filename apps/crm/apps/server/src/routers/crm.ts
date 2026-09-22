@@ -4383,6 +4383,40 @@ export const crmRouter = {
 				});
 			}
 
+			// 🔴 Este procedure empuja la solicitud a Formalización (50%), y hasta
+			// acá el único requisito era que el detalle no estuviera aprobado
+			// todavía. Eso deja abierto justo lo que `parcheDeRevalidacion` acababa
+			// de cerrar: cuando una oportunidad revalida su identidad —se corrigió
+			// el DPI con el override del admin, o se reabrió una perdida— vuelve al
+			// 30% con `analysisStatus: "pending"` y `creditDetailApproved: false`, y
+			// ese `false` era precisamente el permiso para llamar acá. La solicitud
+			// llegaba al 50% con la identidad NUEVA y sin un documento de DPI nuevo,
+			// sin RENAP y sin buró.
+			//
+			// El criterio no se inventa acá: `analysisStatus === "approved"` es la
+			// señal que el propio stack usa para decir "el análisis está hecho y es
+			// de ESTA identidad". El único que la escribe es
+			// `approveOpportunityAnalysis`, que en el camino normal exige etapa de
+			// análisis, documentos de identidad POSTERIORES a
+			// `identityRevalidatedAt` (ver `documentosDeIdentidadVigentes`) y
+			// RENAP/buró contra el DPI vigente. Y el reset la devuelve a `pending`.
+			// Por eso alcanza con exigir `approved`: releer los documentos contra la
+			// marca sería repetir de este lado una comprobación que el estado ya
+			// resume.
+			//
+			// ⚠️ Con una salvedad conocida y FUERA del alcance de este cambio: en
+			// `approveOpportunityAnalysis` el `bypassValidation` de un admin saltea
+			// el bloque entero de documentos —`documentosDeIdentidadVigentes`
+			// incluido— y también el de RENAP/buró. O sea que un `approved` puede
+			// existir sin documento de identidad nuevo, y este guard lo va a aceptar.
+			// Cerrar eso es decisión del dueño del flujo, no de este guard.
+			if (opportunity.analysisStatus !== "approved") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"No se puede aprobar el detalle de crédito: el análisis de esta oportunidad no está aprobado (o se invalidó al revalidarse la identidad). Tiene que volver a pasar por análisis antes de avanzar a Formalización.",
+				});
+			}
+
 			const nextStage = await db
 				.select()
 				.from(salesStages)
@@ -4396,7 +4430,16 @@ export const crmRouter = {
 			}
 
 			// Update opportunity with approval
-			await db
+			//
+			// 🔴 El estado se releyó arriba y el UPDATE corre después: en el medio
+			// una revalidación puede dejar el análisis en `pending` y este UPDATE la
+			// empujaría igual al 50%. El predicado lo vuelve a exigir en la misma
+			// sentencia —Postgres lo re-evalúa tras esperar a la escritura rival—,
+			// que es el mismo patrón de `sqlCandanteDeLaOportunidad` y
+			// `sqlResetPermitido`. `creditDetailApproved` NO va en el predicado a
+			// propósito: la columna admite NULL en filas viejas y un `= false`
+			// dejaría fuera a las que sí hay que aprobar.
+			const aprobadas = await db
 				.update(opportunities)
 				.set({
 					stageId: nextStage[0].id,
@@ -4405,7 +4448,20 @@ export const crmRouter = {
 					creditDetailApprovedAt: new Date(),
 					updatedAt: new Date(),
 				})
-				.where(eq(opportunities.id, input.opportunityId));
+				.where(
+					and(
+						eq(opportunities.id, input.opportunityId),
+						eq(opportunities.analysisStatus, "approved"),
+					),
+				)
+				.returning({ id: opportunities.id });
+
+			if (aprobadas.length === 0) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"La oportunidad cambió mientras se aprobaba el detalle de crédito y su análisis ya no está aprobado. Recarga la página e intenta de nuevo.",
+				});
+			}
 			auditRecord({
 				entity: "opportunity",
 				id: input.opportunityId,

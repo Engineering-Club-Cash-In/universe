@@ -190,7 +190,16 @@ export function GpsVehiculoCard({
 				{motivoConfirmado != null && (
 					<div className="mt-4 flex items-center justify-between border-t pt-3">
 						<p className="text-muted-foreground text-xs">
-							Consulta registrada — motivo: "{motivoConfirmado}"
+							{/* Sin auditoría (falló el registro o no hubo acceso al caso) el
+							    servidor no muestra ubicación: no decir que quedó registrada. */}
+							{gps.isError ||
+							(gps.data?.estado === "no_disponible" &&
+								gps.data.error.code === "AUDITORIA_NO_DISPONIBLE")
+								? "Consulta no registrada"
+								: gps.isLoading
+									? "Registrando consulta"
+									: "Consulta registrada"}{" "}
+							— motivo: "{motivoConfirmado}"
 						</p>
 						<Button
 							onClick={() => {

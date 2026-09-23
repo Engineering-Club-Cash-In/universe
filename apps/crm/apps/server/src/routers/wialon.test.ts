@@ -30,6 +30,8 @@ let accesoCasoMock = true;
 let unidadAsignadaAOtroMock = false;
 // Cuántas veces se tomó el lock por unidad (pg_advisory_xact_lock vía execute).
 let locksUnidad = 0;
+// Simula que el INSERT de la bitácora falla (ej. tabla sin migrar).
+let errorInsertAuditoria: Error | null = null;
 let casoGpsMock: Record<string, unknown> | null = {
 	casoSifco: "01010214100000",
 	vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
@@ -172,6 +174,7 @@ function mockDbAdmin() {
 		// Se captura en insertsGpsAuditoria para poder aserir motivo/usuario.
 		insert: () => ({
 			values: async (data: Record<string, unknown>) => {
+				if (errorInsertAuditoria) throw errorInsertAuditoria;
 				insertsGpsAuditoria.push(data);
 			},
 		}),
@@ -1424,6 +1427,43 @@ describe("wialonRouter", () => {
 				{ context: cobrosContext as unknown as Context },
 			);
 			expect(locksUnidad).toBe(1);
+		});
+
+		it("si la auditoría falla no muestra la ubicación (fail closed)", async () => {
+			errorInsertAuditoria = new Error(
+				'relation "gps_consulta_logs" does not exist',
+			);
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+			};
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					return new Response("[]", { status: 200 });
+				}),
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("no_disponible");
+				if (res.estado !== "no_disponible")
+					throw new Error("estado inesperado");
+				expect(res.error.code).toBe("AUDITORIA_NO_DISPONIBLE");
+				// Ni siquiera se pidió la telemetría a Wialon.
+				expect(svcs).not.toContain("unit/calc_last");
+			} finally {
+				errorInsertAuditoria = null;
+			}
 		});
 
 		it("un vínculo guardado por deducción de placa se sigue mostrando como deducción", async () => {

@@ -133,8 +133,10 @@ export function mapWialonErrorToOrpc(error: unknown): never {
  * aplicada todavía en el ambiente donde corre esto. Mientras no lo esté, un
  * SELECT que nombre `wialon_unit_id` falla con "column does not exist", así que
  * el fallback reintenta pidiendo solo las columnas viejas: la ficha pierde el
- * vínculo persistido pero sigue resolviendo por placa, que es lo que más se usa.
- * Cuando 0057 esté aplicada en todos los ambientes, este catch sobra.
+ * vínculo persistido pero sigue resolviendo por placa. Ojo: sin la 0057 tampoco
+ * existe gps_consulta_logs, y sin auditoría no se muestra ubicación (fail
+ * closed), así que en ese ambiente la tarjeta solo informa estados sin
+ * ubicación. Cuando 0057 esté aplicada en todos los ambientes, este catch sobra.
  */
 async function leerVehiculoParaGps(vehicleId: string): Promise<{
 	licensePlate: string | null;
@@ -727,13 +729,18 @@ export const wialonRouter = {
 			// Ver el motivo de alguien que buscó y no encontró unidad importa igual.
 			// Una sola fila por consulta: si la resolución ya quedó auditada y
 			// después falla la telemetría, el catch no debe registrar otra.
-			let auditado = false;
+			//
+			// Devuelve si la consulta quedó registrada. Las rutas que devuelven
+			// UBICACIÓN no la muestran si es false (fail closed): la historia exige
+			// auditar cada consulta, y la tarjeta además dice "Consulta registrada".
+			// Sin la 0057 la tabla no existe, así que tampoco se muestra ubicación.
+			let auditado: boolean | null = null;
 			const registrarAuditoria = async (
 				unitId: number | null,
 				unitName: string | null,
-			) => {
-				if (auditado) return;
-				auditado = true;
+			): Promise<boolean> => {
+				if (auditado !== null) return auditado;
+				auditado = false;
 				const userId = context.userId ?? context.user?.id;
 				if (!userId) {
 					// cobrosProcedure garantiza sesión; si aun así no hay usuario, un
@@ -741,7 +748,7 @@ export const wialonRouter = {
 					console.error("GPS_CONSULTA_LOG_SIN_USUARIO", {
 						vehicleId: input.vehicleId,
 					});
-					return;
+					return false;
 				}
 				try {
 					await db.insert(gpsConsultaLogs).values({
@@ -752,17 +759,23 @@ export const wialonRouter = {
 						unitName,
 						userId,
 					});
+					auditado = true;
 				} catch (error) {
-					// Un fallo de auditoría no puede tumbar la consulta real — el
-					// asesor sigue gestionando aunque el insert falle (ej. columna
-					// nueva sin migrar todavía, mismo criterio que leerVehiculoParaGps).
-					// console.error y no warn: una consulta sin auditar es justo lo
-					// que la historia pide evitar, tiene que resaltar en los logs.
 					console.error("GPS_CONSULTA_LOG_FALLIDO", {
 						vehicleId: input.vehicleId,
 						message: error instanceof Error ? error.message : String(error),
 					});
 				}
+				return auditado;
+			};
+
+			const sinAuditoria = {
+				estado: "no_disponible" as const,
+				error: {
+					code: "AUDITORIA_NO_DISPONIBLE",
+					message:
+						"No se pudo registrar la consulta; por seguridad no se muestra la ubicación. Intente de nuevo.",
+				},
 			};
 
 			try {
@@ -790,7 +803,9 @@ export const wialonRouter = {
 					licensePlate: string | null;
 				}) => {
 					const unitName = v.wialonUnitName ?? String(v.wialonUnitId);
-					await registrarAuditoria(v.wialonUnitId, unitName);
+					if (!(await registrarAuditoria(v.wialonUnitId, unitName))) {
+						return sinAuditoria;
+					}
 					return await construirRespuestaVinculada(
 						client,
 						v.wialonUnitId,
@@ -881,7 +896,9 @@ export const wialonRouter = {
 					}
 				}
 
-				await registrarAuditoria(unidad.id, unidad.nm);
+				if (!(await registrarAuditoria(unidad.id, unidad.nm))) {
+					return sinAuditoria;
+				}
 				return await construirRespuestaVinculada(
 					client,
 					unidad.id,

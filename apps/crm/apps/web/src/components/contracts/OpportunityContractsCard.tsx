@@ -32,6 +32,7 @@ import { CartasDelPaquete } from "./CartasDelPaquete";
 import { DescargarFirmadoButton } from "./DescargarFirmadoButton";
 import { ReenviarWhatsappDialog } from "./ReenviarWhatsappDialog";
 import { RegenerarEnlacesDialog } from "./RegenerarEnlacesDialog";
+import { EtiquetaSubidoAMano, RevisarSubidoAMano } from "./SubidoAMano";
 
 /**
  * La card de "Contratos Legales" que aparece en el detalle de una oportunidad.
@@ -327,6 +328,7 @@ function ContratoFila({
 					/>
 				</div>
 				<div className="flex shrink-0 items-center gap-2">
+					<EtiquetaSubidoAMano apiResponse={contract.apiResponse} />
 					<Badge variant="outline" className={`${estado.className} text-xs`}>
 						{estado.label}
 					</Badge>
@@ -387,6 +389,12 @@ function ContratoFila({
 				</div>
 			) : (
 				<div className="mt-3 space-y-2 border-t pt-2">
+					{!inactivo && contract.status === "pending" && (
+						<RevisarSubidoAMano
+							apiResponse={contract.apiResponse}
+							observerUrl={contract.observerUrl}
+						/>
+					)}
 					{/* Una fila por firmante: el estado es de cada link, no del
 					    contrato. Puede haber uno firmado y otro con el link vencido. */}
 					{firmantes.length > 0 ? (

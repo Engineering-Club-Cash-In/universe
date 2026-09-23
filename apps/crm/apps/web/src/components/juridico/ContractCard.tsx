@@ -19,6 +19,10 @@ import { toast } from "sonner";
 import { CartasDelPaquete } from "@/components/contracts/CartasDelPaquete";
 import { DescargarFirmadoButton } from "@/components/contracts/DescargarFirmadoButton";
 import {
+	EtiquetaSubidoAMano,
+	RevisarSubidoAMano,
+} from "@/components/contracts/SubidoAMano";
+import {
 	AlertDialog,
 	AlertDialogAction,
 	AlertDialogCancel,
@@ -84,6 +88,8 @@ interface ContractCardProps {
 		 * trae un paquete de cartas.
 		 */
 		apiResponse?: unknown;
+		/** El enlace de observador: muestra el documento sin firmar por nadie. */
+		observerUrl?: string | null;
 		status: "pending" | "signed" | "cancelled";
 		generatedAt: Date | string;
 		opportunityId: string | null;
@@ -238,6 +244,7 @@ export function ContractCard({
 						</div>
 					</div>
 					<div className="flex shrink-0 items-center gap-2">
+						<EtiquetaSubidoAMano apiResponse={contract.apiResponse} />
 						{firmaEnPapel && (
 							<Badge
 								variant="outline"
@@ -306,6 +313,13 @@ export function ContractCard({
 						Se firma en papel. Imprimí el PDF y que lo firme el vendedor: este
 						documento no se sube a firma electrónica.
 					</div>
+				)}
+
+				{!firmaEnPapel && !inactivo && contract.status === "pending" && (
+					<RevisarSubidoAMano
+						apiResponse={contract.apiResponse}
+						observerUrl={contract.observerUrl}
+					/>
 				)}
 
 				{/* Enlaces de firma, uno por firmante y con su rol real */}

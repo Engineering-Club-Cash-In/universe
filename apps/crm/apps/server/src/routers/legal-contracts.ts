@@ -26,6 +26,10 @@ import {
 	sincronizarEstadoDeFirma,
 } from "../lib/contrato-estado-firma";
 import {
+	conMarcaDeSubidoAMano,
+	fueSubidoAMano,
+} from "../lib/contrato-subido-a-mano";
+import {
 	type AccionSobreContrato,
 	ETAPAS_POR_ACCION,
 	etiquetaDeMotivo,
@@ -1892,7 +1896,10 @@ export const legalContractsRouter = {
 								contractType: contract.contractType,
 								contractName: contract.contractName,
 								templateId: contract.templateId,
-								apiResponse: resultado,
+								// Regenerado sigue siendo el documento que se subió a mano.
+								apiResponse: fueSubidoAMano(contract.apiResponse)
+									? conMarcaDeSubidoAMano(resultado)
+									: resultado,
 								pdfLink: r2KeyDelPdf,
 								signingProvider: resultado.signingProvider ?? "weetrust",
 								signatureMode: contract.signatureMode,

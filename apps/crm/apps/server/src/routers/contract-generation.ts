@@ -38,6 +38,7 @@ import {
 	getSignatureMode,
 } from "../lib/contract-signature-mode";
 import { estadoEnWeeTrust } from "../lib/contrato-estado-firma";
+import { conMarcaDeSubidoAMano } from "../lib/contrato-subido-a-mano";
 import {
 	ETAPAS_POR_ACCION,
 	etiquetaDeMotivo,
@@ -2537,7 +2538,9 @@ export const contractGenerationRouter = {
 								weetrustDocumentId: resultado.documentID ?? null,
 								observerUrl: resultado.observerUrl ?? null,
 								signatureMode: getSignatureMode(input.contractType),
-								apiResponse: resultado,
+								// Para que la ficha pida mirar dónde quedaron las firmas: el
+								// documento lo armó una persona, no la plantilla.
+								apiResponse: conMarcaDeSubidoAMano(resultado),
 								pdfLink: resultado.r2Key || resultado.linkDocument || null,
 								status: "pending",
 								generatedBy: context.userId,

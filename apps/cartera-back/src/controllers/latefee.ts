@@ -509,8 +509,25 @@ export function maximoMoraSinOverride(
 }
 
 /**
- * Inserta un evento en moras_historial. No lanza si falla — el historial
- * no debe romper la operación principal, solo loguea.
+ * Inserta un evento en moras_historial.
+ *
+ * Adentro de una transacción el swallow sería MENTIROSO: Postgres ya abortó la
+ * tx, el COMMIT posterior es un rollback silencioso (devuelve el tag ROLLBACK
+ * sin levantar error), así que tragarse el fallo devolvería `success: true`
+ * con NADA escrito. Por eso todos los callers transaccionales pasan
+ * `propagarError: true`.
+ *
+ * Quedan TRES sitios que todavía se lo tragan, y no son todos iguales:
+ *
+ *  - `createMora` y `condonarTodasLasMoras` escriben SUELTOS, fuera de toda
+ *    transacción: cada statement autocommitea, así que el swallow no miente
+ *    sobre una mutación perdida. Solo deja el evento sin escribir.
+ *  - `condonarMora` (individual) es OTRA cosa y es el que conviene mirar: su
+ *    mutación SÍ va en `db.transaction`, y el INSERT del historial queda
+ *    afuera, después del COMMIT. Es exactamente el patrón que esta función
+ *    dejó de tener en `updateMora` — mismo hueco sin candado, por el que la
+ *    misma carrera del convenio se puede colar. No se arregló acá para no
+ *    arrastrar alcance; queda señalado a propósito.
  *
  * Devuelve el `historial_id` del evento escrito, o `null` si no se pudo
  * escribir. Quien lo necesita es `registerPayment`: para poder ligar el
@@ -1287,13 +1304,67 @@ export async function updateMora({
 
       }
 
+      // 🧾 El evento de la bitácora va ADENTRO de esta transacción, escrito por
+      // el MISMO ejecutor que acaba de mover la plata.
+      //
+      // Antes se escribía DESPUÉS de que `cuerpo` terminara. Cuando el caller no
+      // trae su `dbClient` —el camino de los pagos: `registerPayment` y
+      // `payments`, el más ancho de todos— eso significaba salir por OTRA
+      // conexión del pool con la mutación ya commiteada. Entre ese COMMIT y el
+      // INSERT no queda ningún candado: si en ese hueco entra un convenio y
+      // desactiva la mora, el convenio anota su DESACTIVACION primero y nuestro
+      // evento —más viejo— cae DESPUÉS. Como `snapCte` reconstruye el saldo con
+      // el ÚLTIMO evento por crédito (`ORDER BY h.fecha DESC, h.historial_id
+      // DESC`), Mora Histórica mostraba mora viva sobre un crédito cuyo convenio
+      // ya la había apagado. El desempate por `historial_id` no salva: el serial
+      // se asigna al EJECUTAR el INSERT, así que el evento tardío gana por las
+      // dos columnas. Adentro de la transacción el orden de los eventos vuelve a
+      // ser el orden de las mutaciones, que es lo único que el reporte sabe leer.
+      //
+      // ⚖️ Y por eso el fallo del INSERT ya NO se traga —`propagarError` SIEMPRE,
+      // no solo con la tx del caller—. La decisión no es "auditoría por encima
+      // del pago": es que adentro de una transacción el swallow es MENTIROSO. En
+      // Postgres un statement fallido aborta la transacción entera, así que el
+      // UPDATE de la mora se pierde igual; tragarse el error devolvería
+      // `success: true` con NADA escrito y `registerPayment` daría por cobrada
+      // una mora que sigue viva — un error de plata, silencioso. Las opciones
+      // reales eran propagar o dejar el INSERT fuera de la tx (la carrera de
+      // arriba), y entre las dos se eligió propagar.
+      //
+      // El precio, dicho: un pago que antes salía bien con la auditoría faltante
+      // ahora falla. Se acepta porque falla RUIDOSO y reintentable
+      // (`registerPayment` tira sobre `success: false`), mientras que lo otro
+      // desaparece sin rastro; y porque los modos de fallo realistas de este
+      // INSERT de una fila —conexión caída, disco, esquema— se llevaban puesta la
+      // transacción de todas formas. Tampoco se usó un SAVEPOINT (el patrón de la
+      // rama CREACION): ahí existe para distinguir un 23505 ESPERADO y benigno de
+      // un fallo real, y acá no hay ningún fallo benigno que aislar — dejar la
+      // mutación sin evento es justo el agujero que Mora Histórica no puede ver.
+      const historial_id = await registrarHistorialMora({
+        credito_id: targetCreditoId,
+        mora_id: updated.mora_id,
+        tipo_evento: tipo,
+        origen: "API_MANUAL",
+        monto_anterior: moraActual.monto,
+        monto_nuevo: newMonto.toString(),
+        cuotas_atrasadas_anterior: moraActual.cuotas_atrasadas,
+        // Si el llamador NO mandó cuotas_atrasadas (los flujos de pago y de
+        // reversa solo ajustan el monto), la fila conservó su valor: registrar 0
+        // inventaba un "3 → 0" que el modal de Historial de mora mostraba en cada
+        // pago como si las cuotas atrasadas se hubieran limpiado.
+        cuotas_atrasadas_nuevas: cuotas_atrasadas ?? updated.cuotas_atrasadas ?? moraActual.cuotas_atrasadas,
+        porcentaje_mora: updated.porcentaje_mora,
+        usuario_id: usuarioId,
+        motivo,
+        dbClient: tx,
+        propagarError: true,
+      });
+
       return {
         kind: "ok" as const,
         updated,
         newStatus,
-        montoAnterior: moraActual.monto,
-        montoNuevo: newMonto.toString(),
-        cuotasAnteriores: moraActual.cuotas_atrasadas,
+        historial_id,
       };
     };
 
@@ -1306,30 +1377,6 @@ export async function updateMora({
       return { success: false, message: "[ERROR] Mora activa no encontrada para este crédito" };
     }
 
-    const historial_id = await registrarHistorialMora({
-      credito_id: targetCreditoId,
-      mora_id: result.updated.mora_id,
-      tipo_evento: tipo,
-      origen: "API_MANUAL",
-      monto_anterior: result.montoAnterior,
-      monto_nuevo: result.montoNuevo,
-      cuotas_atrasadas_anterior: result.cuotasAnteriores,
-      // Si el llamador NO mandó cuotas_atrasadas (los flujos de pago y de
-      // reversa solo ajustan el monto), la fila conservó su valor: registrar 0
-      // inventaba un "3 → 0" que el modal de Historial de mora mostraba en cada
-      // pago como si las cuotas atrasadas se hubieran limpiado.
-      cuotas_atrasadas_nuevas: cuotas_atrasadas ?? result.updated.cuotas_atrasadas ?? result.cuotasAnteriores,
-      porcentaje_mora: result.updated.porcentaje_mora,
-      usuario_id: usuarioId,
-      motivo,
-      // Adentro de la tx del caller el evento va por la MISMA conexión (si
-      // fuera por otra leería filas candadas y se bloquearía contra sí mismo)
-      // y el swallow deja de valer: un insert fallido aborta esa tx y el
-      // COMMIT del caller sería un rollback silencioso mientras acá se
-      // devuelve success:true.
-      dbClient,
-      propagarError: dbClient !== undefined,
-    });
 
     emitCreditLateFee({ outcome: "completed", operation: "update", durationMs: elapsedMilliseconds(startedAt) });
 
@@ -1343,7 +1390,7 @@ export async function updateMora({
        * en cuanto la fila del pago exista: cuando el decremento se escribe, el
        * pago todavía no tiene id.
        */
-      historial_id,
+      historial_id: result.historial_id,
     };
 
   } catch (error) {

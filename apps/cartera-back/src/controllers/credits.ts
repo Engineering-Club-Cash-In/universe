@@ -288,103 +288,23 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       currentCredit.creditos.cuota ?? 0
     );
 
-    // Cuánto le sube la mora a este crédito por cada día que pase (lo que
-    // sumará la próxima corrida del cron). El CRM lo usa para decirle al
-    // cliente "tu saldo de hoy es X y aumenta Y por día": con la mora
-    // proporcional el monto adeudado ya no es fijo dentro del mes, y un cliente
-    // que paga dos días después lo que se le cotizó deja residuo y la cuota no
-    // se cubre.
-    //
-    // Se consulta aparte y NO se reusa cuotasVencidasSinCerrar: esa lista trae
-    // una fila por (cuota, pago) y decide la cobertura por montos, mientras que
-    // la mora se cobra con el criterio del cron (esCuotaElegibleParaMora), que
-    // mira el flag `pagado` y la existencia de un pago aplicado. Usar el otro
-    // criterio daría un incremento que no cuadra con lo que el cron va a
-    // escribir. Es UNA sola query por crédito (este endpoint es de detalle, no
-    // corre en loop).
-    //
-    // Trae las cuotas impagas que vencen DENTRO DEL HORIZONTE de la proyección
-    // (hasta hoy + 30 días), no solo las ya vencidas: la que vence hoy mañana
-    // ya suma 1/30 al saldo, y dejarla fuera anunciaba un ritmo menor al que el
-    // cron cobra. Las que vencen más allá de 30 días no pueden mover la mora
-    // dentro de la ventana que se le anuncia al cliente, así que no se traen.
-    const hoyGT = hoyGuatemala();
-    // Hasta dónde mira la proyección: hoy + 30 días, en fecha de calendario de
-    // Guatemala (misma fecha que usa el cron), para que el filtro de la query y
-    // el de `isInstallmentWithinMoraHorizon` hablen del mismo día.
-    const finHorizonte = new Date(
-      hoyGT.getFullYear(),
-      hoyGT.getMonth(),
-      hoyGT.getDate() + BASE_DIAS_MORA
-    );
-    const limiteHorizonteMora = [
-      String(finHorizonte.getFullYear()).padStart(4, "0"),
-      String(finHorizonte.getMonth() + 1).padStart(2, "0"),
-      String(finHorizonte.getDate()).padStart(2, "0"),
-    ].join("-");
-
-    const cuotasParaMora = await db
-      .select({
-        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-        pagado: cuotas_credito.pagado,
-        // ⚠️ La columna de la cuota va con su nombre COMPLETO y no por
-        // `${cuotas_credito.cuota_id}`: drizzle lo renderiza sin calificar
-        // (`"cuota_id"` pelado) y adentro del EXISTS gana el alcance INTERNO, o
-        // sea `pc.cuota_id`. La condición se volvía `pc.cuota_id = pc.cuota_id`
-        // —siempre cierta— y el EXISTS respondía "¿existe ALGÚN pago aplicado en
-        // toda la tabla?": true para todas las cuotas. Con eso ninguna cuota era
-        // elegible y el incremento salía "0.00" SIEMPRE.
-        hasPaidPayment: sql<boolean>`EXISTS (
-          SELECT 1
-          FROM cartera.pagos_credito pc
-          WHERE pc.cuota_id = "cartera"."cuotas_credito"."cuota_id"
-            AND pc."paymentFalse" = false
-            AND pc.pagado = true
-            AND pc.validation_status IN ('validated', 'no_required')
-            AND COALESCE(pc.monto_aplicado, 0) > 0
-        )`,
-      })
-      .from(cuotas_credito)
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, creditoId),
-          eq(cuotas_credito.pagado, false),
-          lte(cuotas_credito.fecha_vencimiento, limiteHorizonteMora)
-        )
-      );
-
-    // Días CON SIGNO: la que vence hoy entra con 0 y la que vence en 10 días
-    // con −10. La proyección los desplaza y cada cuota empieza a cobrar sola el
-    // día que le toca; aplastarlos a 0 las haría cobrar desde hoy.
-    const diasDeCuotasEnHorizonteDeMora = cuotasParaMora
-      .filter((c) =>
-        isInstallmentWithinMoraHorizon(
-          { ...c, statusCredit: currentCredit.creditos.statusCredit },
-          hoyGT
-        )
-      )
-      .map((c) => diasAtrasoMoraConSigno(c.fecha_vencimiento, hoyGT));
-
-    // String con 2 decimales, igual que el resto de montos del detalle.
-    // "0.00" cuando el crédito está en un estado excluido, sin capital, o
-    // cuando ninguna cuota del horizonte mueve el saldo mañana (todas topadas,
-    // o todavía lejos de vencer). NO toca `moraActual`, que sigue saliendo de
-    // moras_credito: acá solo se proyecta hacia adelante.
-    const incrementoDiarioMoraStr = incrementoDiarioMora({
-      capital: currentCredit.creditos.capital ?? 0,
-      diasAtrasadosPorCuota: diasDeCuotasEnHorizonteDeMora,
-    }).toFixed(2);
-
-    // El TECHO de ese incremento: lo máximo que la mora puede subir en un mes.
-    // Va junto al diario porque el mensaje al cliente dice las dos cifras
-    // ("aumenta Q X por cada día de atraso, hasta un máximo de Q Y al mes"):
-    // el ritmo solo, sin su tope, promete un crecimiento que no dura para
-    // siempre. Sale de las MISMAS cuotas ya consultadas arriba — no hay query
-    // extra — justamente para que las dos cifras no puedan contradecirse.
-    const incrementoMaximoMensualMoraStr = incrementoMaximoMensualMora({
-      capital: currentCredit.creditos.capital ?? 0,
-      diasAtrasadosPorCuota: diasDeCuotasEnHorizonteDeMora,
-    }).toFixed(2);
+    // Cuánto le sube la mora a este crédito por cada día que pase, y su techo
+    // mensual. Sale del MISMO helper que alimenta al listado, de una sola
+    // consulta: el criterio de elegibilidad y la fórmula viven en un solo lugar
+    // (ver `incrementosMoraPorCredito`).
+    const incrementosMora = await incrementosMoraPorCredito([
+      {
+        credito_id: creditoId,
+        capital: currentCredit.creditos.capital ?? 0,
+        statusCredit: currentCredit.creditos.statusCredit,
+      },
+    ]);
+    // `!`: el mapa trae SIEMPRE una entrada por cada crédito que se le pasa
+    // —incluso sin cuotas, con "0.00"— y acá se le pasó este. Un `??` sería
+    // una rama que ningún caso puede alcanzar.
+    const { incrementoDiarioMora: incrementoDiarioMoraStr,
+      incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr } =
+      incrementosMora.get(creditoId)!;
 
     const cuotasPendientes = await db
       .select({
@@ -730,6 +650,136 @@ interface ProximaCuota {
 }
 
 // 🔥 Interface actualizada
+export type IncrementoMora = {
+  /** Lo que la mora sube mañana, con 2 decimales. */
+  incrementoDiarioMora: string;
+  /** Lo MÁXIMO que puede subir de aquí a 30 días, con 2 decimales. */
+  incrementoMaximoMensualMora: string;
+};
+
+/**
+ * Último día que la proyección de mora mira: hoy + 30, en fecha de CALENDARIO
+ * de Guatemala (la misma que usa el cron), para que el filtro de la consulta y
+ * el de `isInstallmentWithinMoraHorizon` hablen del mismo día.
+ */
+export function limiteHorizonteMora(hoyGT: Date): string {
+  const fin = new Date(
+    hoyGT.getFullYear(),
+    hoyGT.getMonth(),
+    hoyGT.getDate() + BASE_DIAS_MORA
+  );
+  return [
+    String(fin.getFullYear()).padStart(4, "0"),
+    String(fin.getMonth() + 1).padStart(2, "0"),
+    String(fin.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+/**
+ * Ritmo diario y techo mensual de la mora para VARIOS créditos, en UNA sola
+ * consulta.
+ *
+ * Por qué en conjunto y no por crédito: el detalle (`getCreditoByNumero`) mira
+ * un crédito, pero el LISTADO devuelve una página entera. Calcularlo dentro del
+ * loop sería una consulta por fila —el patrón N+1 que el resto de este archivo
+ * evita con `inArray` + plegado en memoria—, y sin estos dos campos la tarjeta
+ * de mora del listado no puede decir ni el ritmo ni el techo. Una consulta para
+ * toda la página cuesta lo mismo que la del detalle.
+ *
+ * Por qué se consulta aparte y no se reusan las cuotas que el listado ya trae:
+ * la mora se cobra con el criterio del cron (`esCuotaElegibleParaMora`), que
+ * mira el flag `pagado` y la existencia de un pago APLICADO, mientras que las
+ * otras listas deciden la cobertura por montos. Usar el otro criterio daría un
+ * ritmo que no cuadra con lo que el cron va a escribir.
+ *
+ * Trae las cuotas impagas que vencen DENTRO DEL HORIZONTE (hasta hoy + 30
+ * días), no solo las ya vencidas: la que vence hoy mañana ya suma 1/30, y
+ * dejarla fuera anunciaría un ritmo menor al que el cron cobra.
+ *
+ * Un crédito sin cuotas que muevan la mora —o en un estado excluido, donde
+ * `isInstallmentWithinMoraHorizon` descarta todas— sale con "0.00" en ambos,
+ * nunca ausente: el que llama no tiene que distinguir "cero" de "no calculado".
+ */
+export async function incrementosMoraPorCredito(
+  creditosDeLaPagina: {
+    credito_id: number;
+    capital: Big | string | number | null;
+    statusCredit: string | null;
+  }[],
+  hoyGT: Date = hoyGuatemala()
+): Promise<Map<number, IncrementoMora>> {
+  const resultado = new Map<number, IncrementoMora>();
+  if (creditosDeLaPagina.length === 0) return resultado;
+
+  const ids = [...new Set(creditosDeLaPagina.map((c) => c.credito_id))];
+
+  // UNA consulta para toda la página. El EXISTS es el mismo predicado de pago
+  // aplicado que usa el cron.
+  const cuotasParaMora = await db
+    .select({
+      credito_id: cuotas_credito.credito_id,
+      fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+      pagado: cuotas_credito.pagado,
+      // ⚠️ La columna de la cuota va con su nombre COMPLETO y no por
+      // `${cuotas_credito.cuota_id}`: drizzle lo renderiza sin calificar
+      // (`"cuota_id"` pelado) y adentro del EXISTS gana el alcance INTERNO, o
+      // sea `pc.cuota_id`. La condición se volvía `pc.cuota_id = pc.cuota_id`
+      // —siempre cierta— y el EXISTS respondía "¿existe ALGÚN pago aplicado en
+      // toda la tabla?": true para todas las cuotas. Con eso ninguna cuota era
+      // elegible y el incremento salía "0.00" SIEMPRE.
+      hasPaidPayment: sql<boolean>`EXISTS (
+        SELECT 1
+        FROM cartera.pagos_credito pc
+        WHERE pc.cuota_id = "cartera"."cuotas_credito"."cuota_id"
+          AND pc."paymentFalse" = false
+          AND pc.pagado = true
+          AND pc.validation_status IN ('validated', 'no_required')
+          AND COALESCE(pc.monto_aplicado, 0) > 0
+      )`,
+    })
+    .from(cuotas_credito)
+    .where(
+      and(
+        inArray(cuotas_credito.credito_id, ids),
+        eq(cuotas_credito.pagado, false),
+        lte(cuotas_credito.fecha_vencimiento, limiteHorizonteMora(hoyGT))
+      )
+    );
+
+  // Plegado en memoria: una lista de cuotas por crédito.
+  const cuotasPorCredito = new Map<number, typeof cuotasParaMora>();
+  for (const cuota of cuotasParaMora) {
+    const lista = cuotasPorCredito.get(cuota.credito_id);
+    if (lista) lista.push(cuota);
+    else cuotasPorCredito.set(cuota.credito_id, [cuota]);
+  }
+
+  for (const credito of creditosDeLaPagina) {
+    // Días CON SIGNO: la que vence hoy entra con 0 y la que vence en 10 días
+    // con −10. Cada cuota empieza a cobrar sola el día que le toca; aplastarlos
+    // a 0 las haría cobrar desde hoy.
+    const diasAtrasadosPorCuota = (cuotasPorCredito.get(credito.credito_id) ?? [])
+      .filter((c) =>
+        isInstallmentWithinMoraHorizon(
+          { ...c, statusCredit: credito.statusCredit },
+          hoyGT
+        )
+      )
+      .map((c) => diasAtrasoMoraConSigno(c.fecha_vencimiento, hoyGT));
+
+    const params = {
+      capital: credito.capital ?? 0,
+      diasAtrasadosPorCuota,
+    };
+    resultado.set(credito.credito_id, {
+      incrementoDiarioMora: incrementoDiarioMora(params).toFixed(2),
+      incrementoMaximoMensualMora: incrementoMaximoMensualMora(params).toFixed(2),
+    });
+  }
+
+  return resultado;
+}
+
 export interface CreditoConInfo {
   creditos: typeof creditos.$inferSelect;
   usuarios: typeof usuarios.$inferSelect;
@@ -779,6 +829,15 @@ export interface CreditoConInfo {
   aseguradora?: string | null;
   /** Hay filas en el espejo de pagos aún sin liquidar → no puede entrar a devolución a CUBE. */
   tiene_pagos_sin_liquidar?: boolean;
+  /**
+   * Lo que la mora sube mañana y su techo mensual, con 2 decimales. Los mismos
+   * dos campos que devuelve el detalle: la tarjeta de mora del listado los
+   * recibe por `item`, y sin ellos llegaba `undefined` y no decía ni el ritmo
+   * ni el techo. Se calculan para TODA la página de una vez
+   * (`incrementosMoraPorCredito`), no por crédito.
+   */
+  incrementoDiarioMora?: string;
+  incrementoMaximoMensualMora?: string;
 }
 
 // 🔥 Función auxiliar para calcular proximidad (con zona horaria de Guatemala)
@@ -1422,6 +1481,34 @@ export async function getCreditosWithUserByMesAnio(
     console.error("❌ Error consultando incobrables:", err);
   }
 
+  // 6.5 Ritmo y techo del crecimiento de la mora, para TODA la página de una
+  // vez. La tarjeta de mora del listado los muestra igual que el detalle, así
+  // que tienen que viajar en cada fila; calcularlos crédito por crédito sería
+  // una consulta por fila.
+  let incrementosMoraMap = new Map<number, IncrementoMora>();
+  try {
+    const creditosUnicosParaMora = new Map<
+      number,
+      { credito_id: number; capital: string | null; statusCredit: string | null }
+    >();
+    rows.forEach((row) => {
+      if (!creditosUnicosParaMora.has(row.creditos.credito_id)) {
+        creditosUnicosParaMora.set(row.creditos.credito_id, {
+          credito_id: row.creditos.credito_id,
+          capital: row.creditos.capital ?? null,
+          statusCredit: row.creditos.statusCredit,
+        });
+      }
+    });
+    incrementosMoraMap = await incrementosMoraPorCredito([
+      ...creditosUnicosParaMora.values(),
+    ]);
+  } catch (err) {
+    // Fail-open: el listado no puede caerse porque la proyección de mora falle.
+    // Los campos quedan ausentes y la tarjeta vuelve a no decir el ritmo.
+    console.error("❌ Error calculando incrementos de mora:", err);
+  }
+
   // 7️⃣ 🔥 MAP FINAL - Sin duplicados
   let data: CreditoConInfo[] = [];
   try {
@@ -1475,6 +1562,10 @@ export async function getCreditosWithUserByMesAnio(
           fecha_inicio,
           aseguradora: row.aseguradora_nombre ?? null,
           tiene_pagos_sin_liquidar: creditosConBorradores.has(creditoId),
+          incrementoDiarioMora:
+            incrementosMoraMap.get(creditoId)?.incrementoDiarioMora,
+          incrementoMaximoMensualMora:
+            incrementosMoraMap.get(creditoId)?.incrementoMaximoMensualMora,
         });
       }
     });

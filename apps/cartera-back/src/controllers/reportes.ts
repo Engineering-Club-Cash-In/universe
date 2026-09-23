@@ -6,7 +6,7 @@ import {
   type ProjectionSourceRow,
 } from "./investmentProjection";
 import {
-	type MoraRecoverySourceRow,
+	type MoraRecoveryFilaCruda,
 	acumularMoraRecoveryRows,
 	buildMoraRecoveryCreditosQuery,
 	buildMoraRecoveryQuery,
@@ -14,6 +14,7 @@ import {
 	getMoraRecoveryPeriod,
 	nuevoMoraRecoveryAccumulator,
 	partirEnLotes,
+	traducirFilaMoraRecovery,
 } from "./moraRecuperacion";
 import {
   buildCapitalCarteraQuery,
@@ -2304,26 +2305,12 @@ export async function getMoraRecuperacionPorAsesor({
       const acumulador = nuevoMoraRecoveryAccumulator();
 
       for (const lote of partirEnLotes(creditos.rows.map((c) => c.credito_id))) {
-        const result = await tx.execute<{
-          asesor_id: number | null;
-          nombre: string | null;
-          esperado: string;
-          // `JSON_BUILD_OBJECT` devuelve los montos como texto a propósito: numeric →
-          // número de JSON los haría pasar por el double del driver.
-          eventos: {
-            tipoEvento: string;
-            montoAnterior: string;
-            montoNuevo: string;
-            reverso: boolean;
-            // El DECREMENTO cuyo pago se cayó. Viaja en el JSON desde
-            // `esDecrementoAnuladoSql`; si no se mapea, `plegarNivel` no lo
-            // saltea y la reposición del cron se cuenta como mora NUEVA.
-            anulado: boolean;
-          }[];
-          // Techo sembrado con el historial ANTERIOR al ciclo, ya agregado en SQL.
-          nivel_sembrado: string;
-          cobrado: string;
-        }>(
+        // La forma de la fila NO se escribe acá: se importa de donde vive la
+        // consulta (`MoraRecoveryFilaCruda`), y la traducción a lo que consume
+        // el plegado la hace `traducirFilaMoraRecovery`, que el compilador
+        // obliga a cubrir TODAS las columnas. Copiar campo por campo acá fue lo
+        // que perdió en silencio `nivel_sembrado`, `reverso` y `anulado`.
+        const result = await tx.execute<MoraRecoveryFilaCruda>(
           buildMoraRecoveryQuery({
             ...period,
             asesores,
@@ -2334,20 +2321,7 @@ export async function getMoraRecuperacionPorAsesor({
 
         acumularMoraRecoveryRows(
           acumulador,
-          result.rows.map((row): MoraRecoverySourceRow => ({
-            asesorId: row.asesor_id,
-            nombre: row.nombre ?? "Sin asignar",
-            esperado: row.esperado,
-            eventos: (row.eventos ?? []).map((evento) => ({
-              tipoEvento: evento.tipoEvento,
-              montoAnterior: Number(evento.montoAnterior),
-              montoNuevo: Number(evento.montoNuevo),
-              reverso: evento.reverso === true,
-              anulado: evento.anulado === true,
-            })),
-            nivelSembrado: row.nivel_sembrado,
-            cobrado: row.cobrado,
-          })),
+          result.rows.map(traducirFilaMoraRecovery),
         );
       }
 

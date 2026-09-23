@@ -64,6 +64,80 @@ describe("construirMoraTarjeta — la tarjeta vuelve a reconciliar", () => {
     expect(t.techo).toContain("30 días");
   });
 
+  // ------------------------------------------------------------------
+  // EL DEFECTO: el texto se contradecía con su propio techo.
+  //
+  // `incrementoMaximoMensualMora` incluye a propósito las cuotas que VENCEN
+  // dentro de los próximos 30 días, pero `cuotas` es el conteo de las YA
+  // vencidas que viene de `moras_credito`. Con 1 cuota atrasada la explicación
+  // anunciaba que el cargo completo de esa cuota es capital × % × 1, y el techo
+  // prometía un número MAYOR, porque ya contaba una segunda cuota que todavía
+  // no vencía. Quien sumaba encontraba exactamente la contradicción que esta
+  // tarjeta existe para resolver.
+  // ------------------------------------------------------------------
+
+  // 1 cuota vencida ya topada (Q112 = su cargo completo) y otra que vence
+  // dentro del mes: el máximo mensual trae los Q112 de ESA segunda cuota.
+  const UNA_VENCIDA_Y_OTRA_POR_VENCER = {
+    montoMora: "112.00",
+    cuotasAtrasadas: 1,
+    porcentajeMora: "1.12",
+    incrementoDiarioMora: "0.00",
+    incrementoMaximoMensualMora: "112.00",
+  };
+
+  it("con 1 cuota vencida y otra por vencer, el techo declara que la proyección la incluye", () => {
+    const t = construirMoraTarjeta(UNA_VENCIDA_Y_OTRA_POR_VENCER);
+
+    // El techo sigue siendo el número real: 112 + 112.
+    expect(t.techo).toContain("Q 224.00");
+    // …y ahora dice POR QUÉ pasa del cargo completo de la única cuota vencida.
+    expect(t.techo).toContain("venzan dentro de esos 30 días");
+    expect(t.techo).toContain("no solo las 1 ya vencidas");
+  });
+
+  it("el usuario que suma los números no encuentra una contradicción", () => {
+    const t = construirMoraTarjeta(UNA_VENCIDA_Y_OTRA_POR_VENCER);
+
+    // La explicación acota su techo a las cuotas YA VENCIDAS…
+    expect(t.explicacion).toContain("capital × 1.12% × 1");
+    expect(t.explicacion).toContain("YA VENCIDAS");
+    expect(t.explicacion).toContain("no el de la proyección");
+    // …y el techo acota el suyo a la ventana de 30 días. Los dos números
+    // distintos quedan explicados: ninguno desmiente al otro.
+    expect(t.techo).toContain("Q 224.00");
+    expect(t.techo).toContain("venzan");
+  });
+
+  it("MUTACIÓN: con el texto anterior —el techo a secas— vuelve la contradicción", () => {
+    const t = construirMoraTarjeta(UNA_VENCIDA_Y_OTRA_POR_VENCER);
+
+    // El texto viejo era exactamente "Si no se paga, en 30 días llega a Q 224.00."
+    // y nada más: un techo que pasa del cargo completo de la única cuota
+    // vencida, sin decir que ya cuenta la siguiente. Si alguien vuelve a eso,
+    // `techo` termina en el punto del monto y este assert falla.
+    expect(t.techo).not.toBe("Si no se paga, en 30 días llega a Q 224.00.");
+    expect(t.techo?.endsWith("llega a Q 224.00.")).toBe(false);
+    // Y la explicación no puede volver a hablar del cargo completo sin acotarlo.
+    expect(t.explicacion).not.toContain(
+      "recién cuando cada una de las 1 cuotas cumple 30 días de atraso."
+    );
+  });
+
+  it("sin cuotas vencidas el techo se explica sin hablar de \"las 0 ya vencidas\"", () => {
+    // Borde del texto nuevo: la coletilla que nombra el conteo solo aparece
+    // cuando hay algo que contar.
+    const t = construirMoraTarjeta({
+      montoMora: "0",
+      cuotasAtrasadas: 0,
+      incrementoDiarioMora: "0.00",
+      incrementoMaximoMensualMora: "112.00",
+    });
+    expect(t.techo).toContain("venzan dentro de esos 30 días");
+    expect(t.techo).not.toContain("ya vencidas");
+    expect(t.techo).not.toContain("las 0");
+  });
+
   it("MUTACIÓN: si el techo volviera a colgar de `diario > 0` se perdería el aviso", () => {
     // La mutación es calcular el techo solo dentro de la rama del diario
     // positivo, que es como estaba: con diario 0 el techo quedaba en null y el

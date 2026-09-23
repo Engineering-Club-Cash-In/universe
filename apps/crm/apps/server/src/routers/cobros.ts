@@ -67,6 +67,11 @@ import {
 	seguroPorAseguradora,
 } from "../lib/cobros-plantillas";
 import { filterCobrosSearchResults } from "../lib/cobros-search";
+import {
+	devengaMora,
+	etapaCobrable,
+	STATUS_CREDITO_COBRABLES,
+} from "../lib/estados-cobranza";
 import { toDateStrGT } from "../lib/guatemala-month-window";
 import {
 	getTestPhone,
@@ -141,6 +146,14 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		page: params.page,
 		perPage: params.perPage,
 		estado: estado,
+		// La cobranza sólo gestiona créditos a los que se les devenga mora. Va
+		// acá, en el único embudo por el que pasan TODAS las consultas de
+		// cobranza (listado, búsqueda por placa, filtro por etiquetas y envío
+		// masivo), y viaja hasta el WHERE de cartera-back: filtrar en memoria
+		// después de paginar dejaría páginas de tamaño irregular y un total
+		// inflado. Se intersecta con `estado`, así que un filtro por un estado
+		// sin mora simplemente no devuelve nada.
+		estados_credito: STATUS_CREDITO_COBRABLES,
 		...(params.cuotasAtrasadas !== undefined && {
 			cuotas_atrasadas: params.cuotasAtrasadas,
 		}),
@@ -506,22 +519,11 @@ export const cobrosRouter = {
 							porcentaje:
 								statsResponse.porCuotasAtrasadas["4"]?.porcentaje || "0",
 						},
-						{
-							estadoMora: "completado",
-							totalCases: statsResponse.porEstado.cancelado?.cantidad || 0,
-							montoTotal: statsResponse.porEstado.cancelado?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porEstado.cancelado?.sumaCapital || "0",
-							porcentaje: statsResponse.porEstado.cancelado?.porcentaje || "0",
-						},
-						{
-							estadoMora: "incobrable",
-							totalCases: statsResponse.porEstado.incobrable?.cantidad || 0,
-							montoTotal: statsResponse.porEstado.incobrable?.sumaMora || "0",
-							sumaCapital:
-								statsResponse.porEstado.incobrable?.sumaCapital || "0",
-							porcentaje: statsResponse.porEstado.incobrable?.porcentaje || "0",
-						},
+						// Cancelados e incobrables ya NO son filas del embudo: sus
+						// listas están vacías por decisión de producto, y un número
+						// que al hacerle clic no muestra nada es peor que no estar.
+						// Las barras activas no se mueven: su porcentaje se calcula
+						// sólo entre al_dia..mora_120 (recalculateCobrosCapitalPercentages).
 					]);
 
 					console.log(
@@ -712,6 +714,21 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
+			// Etapa que apunta a un estado sin mora (convenio, incobrable,
+			// cancelado, pendiente de cancelación): la cobranza ya no los
+			// gestiona. El front dejó de ofrecerlas, pero el filtro se guarda en
+			// el navegador y puede llegar una vieja; se contesta vacío en vez de
+			// caer al default y mostrar créditos activos que nadie pidió.
+			if (!etapaCobrable(input.estadoMora)) {
+				return {
+					data: [],
+					total: 0,
+					page: 1,
+					perPage: input.limit || 50,
+					totalPages: 0,
+				};
+			}
+
 			// Si la integración con Cartera-Back está habilitada, obtener datos directamente
 			if (isCarteraBackEnabled()) {
 				try {
@@ -2175,9 +2192,13 @@ export const cobrosRouter = {
 						),
 					)
 					.limit(1);
+				// Sólo se abre caso de cobranza a un crédito que devengue mora. Antes
+				// el corte era únicamente CANCELADO, así que entrar al detalle de un
+				// incobrable, un convenio, un caído o un pendiente de cancelación le
+				// creaba un caso que nadie iba a gestionar.
 				if (
 					casosResult.length === 0 &&
-					creditoCompleto.credito.statusCredit !== "CANCELADO"
+					devengaMora(creditoCompleto.credito.statusCredit)
 				) {
 					// Crear caso de cobros automáticamente
 					if (!context.user?.id) {

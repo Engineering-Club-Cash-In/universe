@@ -1589,6 +1589,10 @@ export class CarteraBackClient {
 						...(params.numeros_credito_sifco && {
 							numeros_credito_sifco: params.numeros_credito_sifco,
 						}),
+						...(params.estados_credito &&
+							params.estados_credito.length > 0 && {
+								estados_credito: params.estados_credito,
+							}),
 						...(params.email_cobrador && {
 							email_asesor: params.email_cobrador,
 						}),
@@ -1638,6 +1642,10 @@ export class CarteraBackClient {
 				...(params.numeros_credito_sifco &&
 					params.numeros_credito_sifco.length > 0 && {
 						numeros_credito_sifco: params.numeros_credito_sifco.join(","),
+					}),
+				...(params.estados_credito &&
+					params.estados_credito.length > 0 && {
+						estados_credito: params.estados_credito.join(","),
 					}),
 				...(params.email_cobrador && { email_asesor: params.email_cobrador }),
 				...(params.fecha_desde && { fecha_desde: params.fecha_desde }),

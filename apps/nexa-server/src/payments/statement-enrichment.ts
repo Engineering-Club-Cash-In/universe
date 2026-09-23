@@ -9,7 +9,10 @@ type EnrichmentOptions = {
   nexa: { getPaymentTokenStatement(date: string): Promise<{ transactions: TokenTransaction[] }> };
 };
 
-export async function runStatementEnrichmentOnce(options: EnrichmentOptions) {
+export async function runStatementEnrichmentOnce(options: EnrichmentOptions, now = new Date()) {
+  const bankToday = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Guatemala", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(now);
   const receipts = await options.repository.listMissingDateReceipts();
   const references = new Set(receipts.map((row) => row.reference));
   const dates = new Set<string>();
@@ -17,7 +20,7 @@ export async function runStatementEnrichmentOnce(options: EnrichmentOptions) {
     // UTC and bank-local day boundaries can differ; never invent a payment date.
     for (const offset of [-1, 0, 1]) {
       const date = new Date(receipt.createdAt.getTime() + offset * 86_400_000).toISOString().slice(0, 10);
-      if (date <= new Date().toISOString().slice(0, 10)) dates.add(date);
+      if (date <= bankToday) dates.add(date);
     }
   }
   const matches = new Map<string, TokenTransaction[]>();

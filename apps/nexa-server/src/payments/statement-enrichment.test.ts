@@ -27,6 +27,15 @@ test("enrichment automatically looks up missing receipts across the date boundar
   expect(enriched).toEqual([transaction]);
 });
 
+test("UTC midnight does not query the bank-local tomorrow", async () => {
+  const dates: string[] = [];
+  await runStatementEnrichmentOnce({
+    repository: { listMissingDateReceipts: async () => [receipt], enrichIncomingStatement: async () => false },
+    nexa: { getPaymentTokenStatement: async (date) => { dates.push(date); return { transactions: [] }; } },
+  }, new Date("2026-05-05T01:00:00Z"));
+  expect(dates).toEqual(["2026-05-04"]);
+});
+
 test("does not query future bank dates", async () => {
   const dates: string[] = [];
   const createdAt = new Date();

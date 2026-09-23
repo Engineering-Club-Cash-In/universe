@@ -26,7 +26,7 @@ import {
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
-import { restitucionMoraDePagoAnulado } from "../utils/restitucionMoraPagoAnulado";
+import { anularPagoYRestituirMora } from "./anularPagoMora";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
 import { calcularVentanaProporcional } from "../utils/functions/diasParticipacion";
@@ -1955,79 +1955,22 @@ export async function falsePayment(pago_id: number, credito_id: number) {
     await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
   });
 
-  // La mora que ESTE pago había cubierto, leída ANTES de marcarlo falso: es lo
-  // único que hay que restituir (no el monto de la boleta, que también trae
-  // capital, interés e IVA). `paymentFalse` se lee en la misma consulta para no
-  // restituir dos veces si la boleta ya estaba anulada: el UPDATE de abajo pasa
-  // igual sobre una fila ya falsa y su `rowCount` no distingue los dos casos.
-  const [pagoPrevio] = await db
-    .select({
-      mora: pagos_credito.mora,
-      paymentFalse: pagos_credito.paymentFalse,
-    })
-    .from(pagos_credito)
-    .where(
-      and(
-        eq(pagos_credito.pago_id, pago_id),
-        eq(pagos_credito.credito_id, credito_id)
-      )
-    )
-    .limit(1);
-
-  // Actualizar el estado del pago a falso
-  const result = await db
-    .update(pagos_credito)
-    .set({
-      pagado: false,
-      paymentFalse: true,
-    })
-    .where(
-      and(
-        eq(pagos_credito.pago_id, pago_id),
-        eq(pagos_credito.credito_id, credito_id)
-      )
-    );
-
-  // 🚨 Si no se actualizó ningún registro, lanza error controlado
-  if (!result.rowCount || result.rowCount === 0) {
-    throw new Error(
-      "No payment found to mark as false with the given criteria"
-    );
-  }
-
-  // ── RESTITUIR LA MORA QUE LA BOLETA FALSA HABÍA COBRADO ───────────────────
-  // Anular un pago significa que el cliente NO pagó: la mora que esa boleta
-  // cubrió le vuelve a deberse. Sin esto el crédito se quedaba sin esa mora y,
-  // peor, el `DECREMENTO` del pago quedaba huérfano en `moras_historial`: el
-  // reporte de recuperación veía una bajada sin contrapartida y contaba la
-  // reposición del cron de la mañana siguiente como mora NUEVA (Q100 de foto
-  // terminaban en Q200 de esperado). Mismo patrón que `reversePayment`, con su
-  // propio prefijo de motivo —anular no es revertir— para que el historial no
-  // confunda los dos hechos. `updateMora` abre su propia transacción con row
-  // lock; `falsePayment` no corre dentro de ninguna, así que no hay cliente que
-  // pasarle.
-  const restitucionMora = restitucionMoraDePagoAnulado(pagoPrevio, pago_id);
-  if (restitucionMora) {
-    const resultadoMora = await updateMora({
-      credito_id,
-      tipo: "INCREMENTO",
-      activa: true,
-      ...restitucionMora,
-    });
-    if (!resultadoMora.success) {
-      throw new Error(
-        "Error al restituir la mora del pago anulado: " + resultadoMora.message
-      );
-    }
-  }
-
-  // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo
-  // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad.
-  await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
+  // Marcar la boleta como falsa y restituir su mora son UN SOLO HECHO, así que
+  // van en UNA transacción: si la restitución falla, el pago NO queda marcado y
+  // el reintento vuelve a intentar las dos cosas. Sueltos como estaban, una
+  // restitución fallida dejaba la anulación firme y el reintento la SALTEABA
+  // para siempre (leía `paymentFalse = true` y la regla devolvía `null`).
+  //
+  // El cuerpo vive en `anularPagoMora.ts` —no acá— para poder ejercerse en una
+  // prueba: varios tests registran un `mock.module("./payments")` global y este
+  // módulo desaparece en la corrida completa.
+  const updatedCount = await db.transaction((tx) =>
+    anularPagoYRestituirMora(tx as unknown as typeof db, { pago_id, credito_id })
+  );
 
   return {
     message: "Payment marked as false successfully",
-    updatedCount: result.rowCount ?? 0,
+    updatedCount,
   };
 }
 

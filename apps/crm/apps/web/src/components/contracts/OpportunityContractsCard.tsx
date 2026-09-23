@@ -106,6 +106,16 @@ export function OpportunityContractsCard({
 	// Los anulados se conservan (dicen qué se descartó y si alguien lo había
 	// firmado), pero van aparte: cada reemplazo deja uno y taparían los vigentes.
 	const [verAnulados, setVerAnulados] = useState(false);
+	// Con qué oportunidad se abre la pregunta de reenviar por WhatsApp.
+	//
+	// Vive acá y no en la fila que la dispara: regenerar crea un contrato NUEVO
+	// y manda el viejo a "Ver anulados", que viene colapsado. Como cada fila se
+	// monta con su propio `id`, la que abrió el diálogo desaparecía de la lista
+	// un instante después y se llevaba el diálogo puesto: alcanzaba a verse un
+	// segundo y se cerraba solo, como si la página se hubiera recargado.
+	const [reenviarDeOportunidad, setReenviarDeOportunidad] = useState<
+		string | null
+	>(null);
 	const vigentes = contracts?.filter((f) => !estaAnulado(f.contract)) ?? [];
 	const anulados = contracts?.filter((f) => estaAnulado(f.contract)) ?? [];
 
@@ -115,6 +125,7 @@ export function OpportunityContractsCard({
 			fila={f}
 			puedeRegenerar={puedeRegenerar}
 			onUpdate={onUpdate}
+			onPreguntarReenvio={setReenviarDeOportunidad}
 		/>
 	);
 
@@ -172,6 +183,14 @@ export function OpportunityContractsCard({
 					)}
 				</>
 			)}
+
+			<ReenviarWhatsappDialog
+				opportunityId={reenviarDeOportunidad}
+				open={reenviarDeOportunidad !== null}
+				onOpenChange={(abierto) => {
+					if (!abierto) setReenviarDeOportunidad(null);
+				}}
+			/>
 		</div>
 	);
 }
@@ -187,10 +206,16 @@ function ContratoFila({
 	fila,
 	puedeRegenerar: tienePermiso,
 	onUpdate,
+	onPreguntarReenvio,
 }: {
 	fila: FilaDeContrato;
 	puedeRegenerar: boolean;
 	onUpdate?: () => void;
+	/**
+	 * Avisa que hay que preguntar si se reenvían los enlaces. Lo resuelve la
+	 * card, no la fila: después de regenerar, esta fila deja de existir.
+	 */
+	onPreguntarReenvio: (opportunityId: string | null) => void;
 }) {
 	const { contract, signatories } = fila;
 	// Manda lo guardado: una declaración de vendedor generada antes de que se
@@ -242,8 +267,6 @@ function ContratoFila({
 		},
 		onError: (error: Error) => toast.error(error.message),
 	});
-
-	const [preguntarReenvio, setPreguntarReenvio] = useState(false);
 
 	const [regenerando, setRegenerando] = useState(false);
 
@@ -456,15 +479,9 @@ function ContratoFila({
 				open={regenerando}
 				onOpenChange={setRegenerando}
 				onRegenerado={() => {
+					onPreguntarReenvio(contract.opportunityId ?? null);
 					onUpdate?.();
-					setPreguntarReenvio(true);
 				}}
-			/>
-
-			<ReenviarWhatsappDialog
-				opportunityId={contract.opportunityId ?? null}
-				open={preguntarReenvio}
-				onOpenChange={setPreguntarReenvio}
 			/>
 		</div>
 	);

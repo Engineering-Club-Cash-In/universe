@@ -45,6 +45,58 @@ describe("construirMoraTarjeta — la tarjeta vuelve a reconciliar", () => {
     expect(t.techo).toBeNull();
   });
 
+  it("con el diario en 0 pero techo positivo NO dice que ya no sube", () => {
+    // El backend mete en el máximo mensual las cuotas que VENCEN dentro de los
+    // próximos 30 días; el diario mide solo mañana. Este crédito tiene sus
+    // cuotas vencidas ya topadas y la siguiente por vencer: la mora sí va a
+    // volver a subir, y la tarjeta no puede decir lo contrario.
+    const t = construirMoraTarjeta({
+      ...CASO,
+      incrementoDiarioMora: "0.00",
+      incrementoMaximoMensualMora: "112.00",
+    });
+    expect(t.ritmo).not.toContain("Ya no sube");
+    expect(t.ritmo).toContain("Hoy no sube");
+    expect(t.ritmo).toContain("próxima cuota");
+    // Y anuncia el techo, que es el número que el usuario necesita: 37.33 + 112.
+    expect(t.techo).not.toBeNull();
+    expect(t.techo).toContain("Q 149.33");
+    expect(t.techo).toContain("30 días");
+  });
+
+  it("MUTACIÓN: si el techo volviera a colgar de `diario > 0` se perdería el aviso", () => {
+    // La mutación es calcular el techo solo dentro de la rama del diario
+    // positivo, que es como estaba: con diario 0 el techo quedaba en null y el
+    // usuario no veía a cuánto puede llegar.
+    const topado = construirMoraTarjeta({
+      ...CASO,
+      incrementoDiarioMora: "0.00",
+      incrementoMaximoMensualMora: "112.00",
+    });
+    const subiendo = construirMoraTarjeta({
+      ...CASO,
+      incrementoDiarioMora: "0.56",
+      incrementoMaximoMensualMora: "112.00",
+    });
+    // MISMO techo con el mismo máximo, suba hoy o no: el techo no depende del
+    // diario. Si alguien lo vuelve a atar, este par deja de coincidir.
+    expect(topado.techo).toBe(subiendo.techo);
+  });
+
+  it("MUTACIÓN: con el máximo en 0 el mensaje tajante SÍ es el correcto", () => {
+    // El espejo del caso anterior: arreglar el mensaje no puede costar el
+    // "Ya no sube" de verdad, que es el único momento en que es cierto.
+    const t = construirMoraTarjeta({
+      ...CASO,
+      incrementoDiarioMora: "0.00",
+      incrementoMaximoMensualMora: "0.00",
+    });
+    expect(t.ritmo).toContain("Ya no sube");
+    expect(t.ritmo).not.toContain("Hoy no sube");
+    expect(t.ritmo).not.toContain("próxima cuota");
+    expect(t.techo).toBeNull();
+  });
+
   it("sin los campos nuevos no se inventa un ritmo", () => {
     // Backend viejo: `incrementoDiarioMora` no viene. Antes que mentir con una
     // cifra deducida de monto/cuotas —que sería volver a la fórmula vieja—, se

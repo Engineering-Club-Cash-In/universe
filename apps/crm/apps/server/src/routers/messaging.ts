@@ -1,19 +1,20 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord } from "../lib/audit";
 import { coDebtors, leads } from "../db/schema/crm";
-import { generatedLegalContracts } from "../db/schema/legal-contracts";
+import {
+	contractSignatories,
+	generatedLegalContracts,
+} from "../db/schema/legal-contracts";
 import {
 	whatsappLogRecipients,
 	whatsappLogs,
 } from "../db/schema/whatsapp-logs";
+import { auditRecord } from "../lib/audit";
+import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
 import { crmProcedure } from "../lib/orpc";
-import {
-	getSimpletechClient,
-	sendWhatsappTemplate,
-} from "../lib/simpletech";
+import { getSimpletechClient, sendWhatsappTemplate } from "../lib/simpletech";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 
 const R2_LEGAL_DOCS_BUCKET_NAME =
@@ -21,9 +22,7 @@ const R2_LEGAL_DOCS_BUCKET_NAME =
 	process.env.R2_BUCKET_NAME_LEGAL_DOCS ||
 	"legal-documents";
 
-async function resolvePdfUrl(
-	pdfLink: string | null,
-): Promise<string | null> {
+async function resolvePdfUrl(pdfLink: string | null): Promise<string | null> {
 	if (!pdfLink) return null;
 	if (pdfLink.startsWith("http")) return pdfLink;
 	try {
@@ -56,148 +55,245 @@ export function buildContractLinksMessage(
 	return `Hola ${clientName}, tus contratos están listos para firmar. Por favor ingresa a los siguientes enlaces:\n\n${linksText}\n\nSi tienes alguna duda, no dudes en contactarnos.`;
 }
 
+interface DestinatarioDeFirma {
+	nombre: string;
+	/** Con el que se emparejan los links: WeeTrust identifica por correo. */
+	email: string | null;
+	phone: string | null;
+	leadId?: string;
+	coDebtorId?: string;
+}
+
 /**
- * Crea el log padre + destinatarios (lead + cofirmantes).
- * Envía automáticamente solo al lead si se cumplen las condiciones.
- * Cofirmantes siempre quedan como "pending" (por ahora).
+ * Manda por WhatsApp los links de firma, uno por persona.
+ *
+ * Hasta ahora esto estaba apagado, y por una buena razón: los links se
+ * guardaban por posición, así que con cofirmante el que se mandaba como "del
+ * cliente" podía ser el del cofirmante. El código se protegía cortando el envío
+ * en cuanto había cofirmantes, que es justo el caso en que más falta hace.
+ *
+ * Ahora cada firmante tiene su propio link guardado con su rol, así que a cada
+ * uno se le manda EL SUYO, emparejado por correo. Quien no tiene link en un
+ * contrato (porque no firma ese documento) simplemente no lo recibe.
  */
 export async function sendContractLinksToLead(params: {
 	leadId: string;
 	opportunityId: string;
 }): Promise<{ sent: boolean; reason?: string }> {
-	// Obtener datos del lead
 	const [lead] = await db
 		.select({
 			firstName: leads.firstName,
 			lastName: leads.lastName,
+			email: leads.email,
 			phone: leads.phone,
 		})
 		.from(leads)
 		.where(eq(leads.id, params.leadId))
 		.limit(1);
 
-	// Obtener cofirmantes
 	const coDebtorsList = await db
 		.select({
 			id: coDebtors.id,
 			fullName: coDebtors.fullName,
+			email: coDebtors.email,
 			phone: coDebtors.phone,
 		})
 		.from(coDebtors)
 		.where(eq(coDebtors.opportunityId, params.opportunityId));
 
-	const hasCoDebtors = coDebtorsList.length > 0;
-
-	// Obtener contratos
 	const contracts = await db
 		.select({
+			id: generatedLegalContracts.id,
 			contractName: generatedLegalContracts.contractName,
-			clientSigningLink: generatedLegalContracts.clientSigningLink,
+			signatureMode: generatedLegalContracts.signatureMode,
 			pdfLink: generatedLegalContracts.pdfLink,
 		})
 		.from(generatedLegalContracts)
 		.where(
-			eq(generatedLegalContracts.opportunityId, params.opportunityId),
+			and(
+				eq(generatedLegalContracts.opportunityId, params.opportunityId),
+				// Un anulado (a mano o por reemplazo) no se manda: su documento en
+				// WeeTrust puede seguir vivo y el cliente firmaría uno sin efecto.
+				ne(generatedLegalContracts.status, "cancelled"),
+			),
 		);
 
-	const leadName = lead
-		? `${lead.firstName} ${lead.lastName}`
-		: "Cliente";
-
-	// Resolver URLs firmadas de los PDFs
-	const resolvedPdfLinks = await Promise.all(
-		contracts.map((c) => resolvePdfUrl(c.pdfLink)),
+	// Los contratos de papel no llevan link: mandarlos sólo confunde.
+	const contratosDeFirma = contracts.filter(
+		(c) => c.signatureMode !== "fisica",
 	);
 
-	// Cuando hay cofirmantes, los links no son confiables → todos null
-	// Cuando NO hay cofirmantes, usar los links disponibles
-	const recipientContracts = contracts.map((c, i) => ({
-		contractName: c.contractName,
-		link: hasCoDebtors ? null : (c.clientSigningLink ?? null),
-		pdfLink: resolvedPdfLinks[i],
-	}));
+	const firmantes = contratosDeFirma.length
+		? await db
+				.select({
+					contractId: contractSignatories.contractId,
+					email: contractSignatories.email,
+					signingUrl: contractSignatories.signingUrl,
+				})
+				.from(contractSignatories)
+				.where(
+					inArray(
+						contractSignatories.contractId,
+						contratosDeFirma.map((c) => c.id),
+					),
+				)
+		: [];
 
-	const allLinksReady =
-		!hasCoDebtors &&
-		recipientContracts.length > 0 &&
-		recipientContracts.every((c) => c.link);
+	/**
+	 * contractId → (email en minúsculas → link). El link puede ser null: la
+	 * persona firma ese contrato pero WeeTrust no devolvió su enlace. Se guarda
+	 * igual para que el contrato aparezca en el envío manual y se pueda pegar.
+	 */
+	const linksPorContrato = new Map<string, Map<string, string | null>>();
+	for (const f of firmantes) {
+		const porEmail = linksPorContrato.get(f.contractId) ?? new Map();
+		porEmail.set(f.email.toLowerCase(), f.signingUrl ?? null);
+		linksPorContrato.set(f.contractId, porEmail);
+	}
 
-	const leadMessage = allLinksReady
-		? buildContractLinksMessage(
-				leadName,
-				recipientContracts as ContractLink[],
-			)
-		: null;
+	const pdfResueltos = new Map<string, string | null>();
+	for (const c of contratosDeFirma) {
+		pdfResueltos.set(c.id, await resolvePdfUrl(c.pdfLink));
+	}
 
-	// Crear log padre
+	const leadName = lead ? `${lead.firstName} ${lead.lastName}` : "Cliente";
+
+	const destinatarios: DestinatarioDeFirma[] = [
+		{
+			nombre: leadName,
+			email: lead?.email ?? null,
+			phone: lead?.phone ?? null,
+			leadId: params.leadId,
+		},
+		...coDebtorsList.map((cd) => ({
+			nombre: cd.fullName,
+			email: cd.email,
+			phone: cd.phone,
+			coDebtorId: cd.id,
+		})),
+	];
+
 	const [log] = await db
 		.insert(whatsappLogs)
-		.values({
-			opportunityId: params.opportunityId,
-		})
+		.values({ opportunityId: params.opportunityId })
 		.returning();
-
-	// Determinar estado del lead
-	let leadStatus: "sent" | "pending" | "failed" = "pending";
-	let leadReason: string | undefined;
 
 	const stClient = getSimpletechClient();
 
-	if (!stClient) {
-		leadReason = "Servicio de mensajería no configurado";
-	} else if (hasCoDebtors) {
-		leadReason = "La oportunidad tiene cofirmantes";
-	} else if (contracts.length === 0) {
-		leadReason = "No hay contratos asociados";
-	} else if (!allLinksReady) {
-		leadReason =
-			"No todos los contratos tienen link de firma para el cliente";
-	} else if (!lead?.phone) {
-		leadReason = "El lead no tiene teléfono registrado";
-	} else {
-		// Todo OK — intentar enviar
-		leadStatus = "failed";
-		leadReason = "No enviado por el momento";
+	// Con TEST_MESSAGE=true los mensajes van a nuestros números en vez de a los
+	// del cliente. Es el mismo interruptor que usa cobros, y es lo que permite
+	// probar el flujo completo con datos reales sin escribirle a nadie de afuera.
+	// Cada destinatario rota por la lista para que no lleguen todos al mismo.
+	const modoPrueba = isTestModeEnabled();
+	let algunoEnviado = false;
+	let motivoDelLead: string | undefined;
 
-	}
+	for (const [indice, destinatario] of destinatarios.entries()) {
+		// Los contratos de ESTA persona: aquellos donde tiene fila de firmante.
+		// Los contratos viejos (sin firmantes guardados) NO se mandan: se
+		// emitieron sin la verificación de identidad por rol de ahora, y su
+		// columna `clientSigningLink` no dice de quién es cada link. Sólo salen
+		// por WhatsApp los enlaces generados con el flujo nuevo.
+		const susContratos = contratosDeFirma
+			.filter((c) => {
+				const clave = destinatario.email?.toLowerCase();
+				return Boolean(clave && linksPorContrato.get(c.id)?.has(clave));
+			})
+			.map((c) => ({
+				contractName: c.contractName,
+				link:
+					linksPorContrato
+						.get(c.id)
+						?.get(destinatario.email?.toLowerCase() as string) ?? null,
+				pdfLink: pdfResueltos.get(c.id) ?? null,
+			}));
 
-	// Insertar destinatario lead
-	await db.insert(whatsappLogRecipients).values({
-		whatsappLogId: log.id,
-		leadId: params.leadId,
-		recipientName: leadName,
-		phone: lead?.phone,
-		message: leadMessage,
-		contracts: recipientContracts,
-		status: leadStatus,
-		reason: leadReason,
-		sentAt:  undefined,
-	});
+		// Si a alguno de SUS contratos le falta el enlace, no se manda nada: un
+		// mensaje con la mitad de los contratos queda marcado como enviado y el
+		// que falta no lo vuelve a buscar nadie. Queda pendiente para mandarlo a
+		// mano, con el hueco a la vista.
+		const sinEnlace = susContratos.filter((c) => !c.link);
+		const mensaje =
+			susContratos.length > 0 && sinEnlace.length === 0
+				? buildContractLinksMessage(
+						destinatario.nombre,
+						susContratos as ContractLink[],
+					)
+				: null;
 
-	// Cofirmantes: mismos contratos pero siempre sin links
-	const coDebtorContracts = contracts.map((c, i) => ({
-		contractName: c.contractName,
-		link: null,
-		pdfLink: resolvedPdfLinks[i],
-	}));
+		let status: "sent" | "pending" | "failed" = "pending";
+		let motivo: string | undefined;
+		let enviadoEn: Date | undefined;
 
-	for (const coDebtor of coDebtorsList) {
+		// En modo prueba el teléfono del cliente no hace falta: igual no se usa.
+		const telefonoDestino = modoPrueba
+			? getTestPhone(indice)
+			: destinatario.phone;
+
+		if (!stClient) {
+			motivo = "Servicio de mensajería no configurado";
+		} else if (contratosDeFirma.length === 0) {
+			motivo = "No hay contratos con firma electrónica";
+		} else if (
+			susContratos.length === 0 &&
+			contratosDeFirma.every((c) => !linksPorContrato.has(c.id))
+		) {
+			motivo =
+				"Los contratos son anteriores a la firma por rol: hay que reemplazarlos desde jurídico para mandarlos";
+		} else if (sinEnlace.length > 0) {
+			motivo = `Falta el enlace de firma de: ${sinEnlace.map((c) => c.contractName).join(", ")}`;
+		} else if (!mensaje) {
+			motivo = destinatario.email
+				? "No tiene links de firma en estos contratos"
+				: "No tiene correo registrado, no se le pueden asociar sus links";
+		} else if (!telefonoDestino) {
+			motivo = "No tiene teléfono registrado";
+		} else {
+			const resultado = await sendWhatsappTemplate({
+				phone: telefonoDestino,
+				message: mensaje,
+				logPrefix: modoPrueba
+					? "[SimpleTech][contratos][TEST]"
+					: "[SimpleTech][contratos]",
+				ocultarEnlacesEnLog: true,
+			});
+
+			if (resultado.success) {
+				status = "sent";
+				enviadoEn = new Date();
+				algunoEnviado = true;
+				if (modoPrueba) {
+					// Queda anotado a quién le habría llegado de verdad, para que la
+					// fila no parezca un envío normal al cliente.
+					motivo = `TEST_MESSAGE: enviado a ${telefonoDestino} en lugar de ${destinatario.phone ?? "sin teléfono"}`;
+				}
+			} else {
+				status = "failed";
+				motivo = resultado.error ?? "Error enviando el mensaje";
+			}
+		}
+
+		if (destinatario.leadId) motivoDelLead = motivo;
+
 		await db.insert(whatsappLogRecipients).values({
 			whatsappLogId: log.id,
-			coDebtorId: coDebtor.id,
-			recipientName: coDebtor.fullName,
-			phone: coDebtor.phone,
-			message: null,
-			contracts: coDebtorContracts,
-			status: "pending",
-			reason: "Links de firma pendientes",
+			leadId: destinatario.leadId,
+			coDebtorId: destinatario.coDebtorId,
+			recipientName: destinatario.nombre,
+			// El teléfono REAL, también en modo prueba. El envío manual arranca con
+			// este número y lo guarda en el lead o el codeudor: si acá quedara el de
+			// prueba, reintentar sin tocarlo le pisaba el teléfono al cliente con
+			// uno nuestro. El desvío queda anotado en `reason`.
+			phone: destinatario.phone,
+			message: mensaje,
+			contracts: susContratos,
+			status,
+			reason: motivo,
+			sentAt: enviadoEn,
 		});
 	}
 
-	return {
-		sent: false,
-		reason: leadReason,
-	};
+	return { sent: algunoEnviado, reason: motivoDelLead };
 }
 
 export const messagingRouter = {
@@ -268,23 +364,35 @@ export const messagingRouter = {
 				});
 			}
 
+			// El link del titular sale de sus firmantes. Los contratos viejos, sin
+			// firmantes guardados, quedan sin link: no se mandan por WhatsApp.
 			const contracts = await db
 				.select({
+					id: generatedLegalContracts.id,
 					contractName: generatedLegalContracts.contractName,
-					clientSigningLink:
-						generatedLegalContracts.clientSigningLink,
+					titularSigningUrl: contractSignatories.signingUrl,
 				})
 				.from(generatedLegalContracts)
+				.leftJoin(
+					contractSignatories,
+					and(
+						eq(contractSignatories.contractId, generatedLegalContracts.id),
+						eq(contractSignatories.role, "TITULAR"),
+					),
+				)
 				.where(
-					eq(
-						generatedLegalContracts.opportunityId,
-						input.opportunityId,
+					and(
+						eq(generatedLegalContracts.opportunityId, input.opportunityId),
+						// Los de papel no llevan link: incluirlos hacía que
+						// `allContractsHaveLink` fuera siempre falso.
+						ne(generatedLegalContracts.signatureMode, "fisica"),
+						ne(generatedLegalContracts.status, "cancelled"),
 					),
 				);
 
 			const mapped = contracts.map((c) => ({
 				contractName: c.contractName,
-				link: c.clientSigningLink ?? null,
+				link: c.titularSigningUrl ?? null,
 			}));
 
 			const validContracts = mapped.filter(
@@ -300,8 +408,7 @@ export const messagingRouter = {
 					validContracts.length > 0
 						? buildContractLinksMessage(clientName, validContracts)
 						: null,
-				allContractsHaveLink:
-					validContracts.length === contracts.length,
+				allContractsHaveLink: validContracts.length === contracts.length,
 			};
 		}),
 
@@ -318,12 +425,10 @@ export const messagingRouter = {
 			const logs = await db
 				.select()
 				.from(whatsappLogs)
-				.where(
-					eq(whatsappLogs.opportunityId, input.opportunityId),
-				);
+				.where(eq(whatsappLogs.opportunityId, input.opportunityId));
 
 			if (logs.length === 0) {
-				return null; 
+				return null;
 			}
 
 			const log = logs[0];
@@ -337,7 +442,11 @@ export const messagingRouter = {
 			const recipientsWithUrls = await Promise.all(
 				recipients.map(async (r) => {
 					const contracts = r.contracts as
-						| { contractName: string; link: string | null; pdfLink?: string | null }[]
+						| {
+								contractName: string;
+								link: string | null;
+								pdfLink?: string | null;
+						  }[]
 						| null;
 					if (!contracts) return r;
 
@@ -425,15 +534,18 @@ export const messagingRouter = {
 				completeContracts,
 			);
 
-			// Enviar por WhatsApp
+			// Enviar por WhatsApp. TEST_MESSAGE rige también el envío manual: si
+			// no, reintentar desde la ficha en modo prueba le escribía al cliente.
+			const modoPrueba = isTestModeEnabled();
 			const sendResult = await sendWhatsappTemplate({
-				phone: input.phone,
+				phone: modoPrueba ? getTestPhone() : input.phone,
 				message,
-				logPrefix: "[SimpleTech][manual]",
+				logPrefix: modoPrueba
+					? "[SimpleTech][manual][TEST]"
+					: "[SimpleTech][manual]",
+				ocultarEnlacesEnLog: true,
 			});
-			const status: "sent" | "failed" = sendResult.success
-				? "sent"
-				: "failed";
+			const status: "sent" | "failed" = sendResult.success ? "sent" : "failed";
 			const reason: string | null = sendResult.success
 				? null
 				: (sendResult.error ?? "Error desconocido al enviar");

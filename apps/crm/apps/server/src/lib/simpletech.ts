@@ -173,6 +173,12 @@ export async function sendWhatsappTemplate(params: {
 	phone: string;
 	message: string;
 	logPrefix?: string;
+	/**
+	 * No escribir las URL del mensaje en el log. Los enlaces de firma de
+	 * contratos firman en nombre de la persona: quien tenga acceso a los logs
+	 * no debería poder usarlos.
+	 */
+	ocultarEnlacesEnLog?: boolean;
 }): Promise<WhatsappSendResult> {
 	const prefix = params.logPrefix ?? "[SimpleTech]";
 	const client = getSimpletechClient();
@@ -198,7 +204,13 @@ export async function sendWhatsappTemplate(params: {
 	};
 
 	console.log(`${prefix} Enviando template a:`, phoneNormalized);
-	console.log(`${prefix} Request:`, JSON.stringify(templateRequest, null, 2));
+	const requestParaLog = JSON.stringify(templateRequest, null, 2);
+	console.log(
+		`${prefix} Request:`,
+		params.ocultarEnlacesEnLog
+			? requestParaLog.replace(/https?:\/\/[^\s"\\]+/g, "[enlace]")
+			: requestParaLog,
+	);
 
 	try {
 		const result = await client.sendTemplate(templateRequest);

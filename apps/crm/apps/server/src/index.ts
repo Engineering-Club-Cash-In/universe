@@ -49,6 +49,7 @@ import { partnerAuthLimiter } from "./lib/rate-limit";
 import { PERMISSIONS } from "./lib/roles";
 import {
 	appRouter,
+	buroInternoProcedures,
 	disbursementRouter,
 	manualVehicleRouter,
 	partnerTrackerRouter,
@@ -214,6 +215,7 @@ const handler = new RPCHandler(
 		disbursementRouter,
 		proyeccionRouter,
 		partnerTrackerRouter,
+		buroInternoProcedures,
 	),
 );
 app.use("/rpc/*", async (c, next) => {

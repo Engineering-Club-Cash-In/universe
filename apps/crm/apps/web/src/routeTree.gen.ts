@@ -33,6 +33,7 @@ import { Route as CrmCompaniesRouteImport } from './routes/crm/companies'
 import { Route as CrmClientsRouteImport } from './routes/crm/clients'
 import { Route as CobrosReportesRouteImport } from './routes/cobros/reportes'
 import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
+import { Route as CobrosBuroInternoRouteImport } from './routes/cobros/buro-interno'
 import { Route as CobrosIdRouteImport } from './routes/cobros/$id'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
@@ -175,6 +176,11 @@ const CobrosMetasRoute = CobrosMetasRouteImport.update({
   path: '/cobros/metas',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosBuroInternoRoute = CobrosBuroInternoRouteImport.update({
+  id: '/cobros/buro-interno',
+  path: '/cobros/buro-interno',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosIdRoute = CobrosIdRouteImport.update({
   id: '/cobros/$id',
   path: '/cobros/$id',
@@ -295,6 +301,7 @@ export interface FileRoutesByFullPath {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
+  '/cobros/buro-interno': typeof CobrosBuroInternoRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reportes': typeof CobrosReportesRoute
   '/crm/clients': typeof CrmClientsRoute
@@ -341,6 +348,7 @@ export interface FileRoutesByTo {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
+  '/cobros/buro-interno': typeof CobrosBuroInternoRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reportes': typeof CobrosReportesRoute
   '/crm/clients': typeof CrmClientsRoute
@@ -388,6 +396,7 @@ export interface FileRoutesById {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
+  '/cobros/buro-interno': typeof CobrosBuroInternoRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/reportes': typeof CobrosReportesRoute
   '/crm/clients': typeof CrmClientsRoute
@@ -436,6 +445,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
+    | '/cobros/buro-interno'
     | '/cobros/metas'
     | '/cobros/reportes'
     | '/crm/clients'
@@ -482,6 +492,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
+    | '/cobros/buro-interno'
     | '/cobros/metas'
     | '/cobros/reportes'
     | '/crm/clients'
@@ -528,6 +539,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
+    | '/cobros/buro-interno'
     | '/cobros/metas'
     | '/cobros/reportes'
     | '/crm/clients'
@@ -575,6 +587,7 @@ export interface RootRouteChildren {
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
   CobrosIdRoute: typeof CobrosIdRoute
+  CobrosBuroInternoRoute: typeof CobrosBuroInternoRoute
   CobrosMetasRoute: typeof CobrosMetasRoute
   CobrosReportesRoute: typeof CobrosReportesRoute
   CrmClientsRoute: typeof CrmClientsRoute
@@ -782,6 +795,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosMetasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/buro-interno': {
+      id: '/cobros/buro-interno'
+      path: '/cobros/buro-interno'
+      fullPath: '/cobros/buro-interno'
+      preLoaderRoute: typeof CobrosBuroInternoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/$id': {
       id: '/cobros/$id'
       path: '/cobros/$id'
@@ -935,6 +955,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
   CobrosIdRoute: CobrosIdRoute,
+  CobrosBuroInternoRoute: CobrosBuroInternoRoute,
   CobrosMetasRoute: CobrosMetasRoute,
   CobrosReportesRoute: CobrosReportesRoute,
   CrmClientsRoute: CrmClientsRoute,

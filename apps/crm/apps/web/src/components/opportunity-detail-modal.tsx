@@ -21,6 +21,7 @@ import {
 	Users,
 } from "lucide-react";
 import { useState } from "react";
+import { etapaPermite } from "server/src/lib/contratos-anulacion";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
@@ -514,8 +515,12 @@ export function OpportunityDetailModal({
 									!!userRole &&
 									PERMISSIONS.canRegenerateContractLinks(userRole)
 								}
+								// El rol no alcanza: fuera de 80% y 85% el servidor lo
+								// rechaza, y no hay que ofrecerlo.
 								puedeAnular={
-									!!userRole && PERMISSIONS.canAnnulContracts(userRole)
+									!!userRole &&
+									PERMISSIONS.canAnnulContracts(userRole) &&
+									etapaPermite("anular", opportunity.stage?.closurePercentage)
 								}
 								onUpdate={() => opportunityContractsQuery.refetch()}
 							/>

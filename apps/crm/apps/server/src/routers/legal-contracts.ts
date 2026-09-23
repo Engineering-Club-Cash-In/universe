@@ -187,6 +187,8 @@ async function eliminarContrato(
 	 * frena un pedido que ya salió.
 	 */
 	exigirEtapa: AccionSobreContrato | null = null,
+	/** Ver `anularContratoReemplazado`. */
+	opciones: { conservarSiHayFirmas?: boolean } = {},
 ): Promise<{ conservado: boolean }> {
 	// Con el candado de la oportunidad: esto borra el documento en WeeTrust, y
 	// si un envío por WhatsApp está mandando sus enlaces, el cliente recibiría
@@ -198,13 +200,14 @@ async function eliminarContrato(
 		if (exigirEtapa && contrato.opportunityId) {
 			await exigirEtapaDeFirma(contrato.opportunityId, exigirEtapa);
 		}
-		return eliminarConCandadoTomado(contrato, motivo);
+		return eliminarConCandadoTomado(contrato, motivo, opciones);
 	});
 }
 
 async function eliminarConCandadoTomado(
 	contrato: typeof generatedLegalContracts.$inferSelect,
 	motivo: string,
+	opciones: { conservarSiHayFirmas?: boolean } = {},
 ): Promise<{ conservado: boolean }> {
 	// Los generados antes de que se guardara el `documentID` lo llevan en el
 	// link. Se guarda en la fila para que anular lo borre allá también.
@@ -228,6 +231,7 @@ async function eliminarConCandadoTomado(
 		contrato.id,
 		contrato.opportunityId,
 		motivo,
+		opciones,
 	);
 	return { conservado: anulado?.conservado ?? false };
 }
@@ -1522,10 +1526,14 @@ export const legalContractsRouter = {
 			}
 
 			const quien = context.session?.user?.name ?? "alguien del CRM";
+			// Sin reemplazo, un documento que ya tiene alguna firma se queda en
+			// WeeTrust: borrarlo tiraría firmas que son de alguien, y no hay un
+			// documento nuevo que ocupe su lugar.
 			const { conservado } = await eliminarContrato(
 				contrato,
 				`${etiquetaDeMotivo(input.motivo)} (anulado por ${quien})`,
 				"anular",
+				{ conservarSiHayFirmas: true },
 			);
 
 			return {

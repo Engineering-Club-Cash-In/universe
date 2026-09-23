@@ -101,9 +101,9 @@ export function AnularContratoDialog({
 					{hayFirmas && (
 						<p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
 							Este contrato ya tiene firmas, así que{" "}
-							<strong>no se puede borrar de la plataforma de firma</strong> y
-							allá va a seguir apareciendo. Acá queda anulado y deja de contar,
-							pero quien firmó ya firmó.
+							<strong>se conserva en la plataforma de firma</strong> y allá va a
+							seguir apareciendo: borrarlo tiraría las firmas. Acá queda anulado
+							y deja de contar.
 						</p>
 					)}
 

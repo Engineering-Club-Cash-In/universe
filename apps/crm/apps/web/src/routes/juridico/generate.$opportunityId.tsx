@@ -10,6 +10,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import {
+	type ContractSigner,
 	type CRMData,
 	DynamicContractWizard,
 } from "@/components/contracts/DynamicContractWizard";
@@ -103,7 +104,8 @@ function RouteComponent() {
 			contracts: Array<{
 				contractType: string;
 				data: Record<string, string>;
-				emails?: string[];
+				signers?: ContractSigner[];
+			emails?: string[];
 				options: {
 					gender: "male" | "female";
 					generatePdf: boolean;
@@ -341,6 +343,7 @@ function RouteComponent() {
 		generationData?: Array<{
 			contractType: string;
 			data: Record<string, string>;
+			signers?: ContractSigner[];
 			emails?: string[];
 			options: {
 				gender: "male" | "female";

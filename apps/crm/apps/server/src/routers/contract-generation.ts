@@ -27,6 +27,7 @@ import {
 	validateOpportunityForContracts,
 } from "../services/contract-data-mapper";
 import {
+	type ContractSigner,
 	getDocumentsByDpi,
 	getDocumentTypes,
 	motivoDeFalla,
@@ -36,6 +37,57 @@ import {
 const LEGAL_DOCS_API_URL =
 	process.env.LEGAL_DOCS_API_URL ||
 	"https://legal-docs-blueprints.s4.devteamatcci.site";
+
+/**
+ * Representante legal que firma por la entidad.
+ *
+ * El nombre y el cargo vienen impresos en el template (la garantía mobiliaria
+ * trae a LUCRECIA MARISOL CUX TECÚN por CUBE INVESTMENTS), pero el correo hace
+ * falta para que WeeTrust le mande su link. Va por entorno para poder cambiarlo
+ * sin desplegar; cuando cada entidad tenga su firmante, esto pasa a ser un mapa.
+ */
+const REP_LEGAL_EMAIL =
+	process.env.CONTRATOS_REP_LEGAL_EMAIL || "juridico2@sepresta.com";
+const REP_LEGAL_NOMBRE =
+	process.env.CONTRATOS_REP_LEGAL_NOMBRE || "Representante Legal";
+
+/**
+ * Observadores: reciben copia del flujo de firma en WeeTrust sin firmar.
+ * Lista separada por comas.
+ */
+const CONTRATOS_OBSERVADORES = (process.env.CONTRATOS_OBSERVADORES || "")
+	.split(",")
+	.map((email) => email.trim())
+	.filter(Boolean);
+
+/**
+ * Completa los firmantes que manda el front con los que sólo conoce el servidor.
+ *
+ * El representante legal se agrega siempre: el generador sabe qué contratos lo
+ * llevan (lo dice el layout de cada template) y descarta al firmante que no
+ * corresponde, así que mandarlo de más no lo mete donde no va.
+ */
+function conRepresentanteLegal(
+	signers: ContractSigner[] | undefined,
+): ContractSigner[] | undefined {
+	if (!signers || signers.length === 0) return signers;
+	// El representante legal lo pone siempre el servidor. Si viniera del
+	// navegador, cualquiera podría mandar su propio correo con ese rol y
+	// quedarse con el link de firma de la entidad.
+	return [
+		...signers.filter((s) => s.role !== "REP_LEGAL"),
+		{ role: "REP_LEGAL", email: REP_LEGAL_EMAIL, name: REP_LEGAL_NOMBRE },
+	];
+}
+
+/** Firmante tal como lo manda el front. */
+const signerSchema = z.object({
+	role: z.enum(["TITULAR", "COFIRMANTE", "REP_LEGAL", "VENDEDOR"]),
+	email: z.string().email(),
+	name: z.string().min(1),
+	dpi: z.string().optional(),
+	phone: z.string().optional(),
+});
 
 export const contractGenerationRouter = {
 	/**
@@ -467,6 +519,8 @@ export const contractGenerationRouter = {
 									.optional(),
 							}),
 						),
+						signers: z.array(signerSchema).optional(),
+						// Camino viejo: se reparte por índice y con cofirmantes cruza los links.
 						emails: z.array(z.string()).optional(),
 						options: z.object({
 							gender: z.enum(["male", "female"]),
@@ -487,6 +541,8 @@ export const contractGenerationRouter = {
 				// Derivar isPlural automáticamente desde deudoresAdicionales
 				const contractsWithPlural = input.contracts.map((contract) => ({
 					...contract,
+					signers: conRepresentanteLegal(contract.signers),
+					observers: CONTRATOS_OBSERVADORES,
 					options: {
 						...contract.options,
 						isPlural: (contract.data.deudoresAdicionales?.length ?? 0) > 0,
@@ -618,7 +674,9 @@ export const contractGenerationRouter = {
 										.optional(),
 								}),
 							),
-							emails: z.array(z.string()).optional(),
+							signers: z.array(signerSchema).optional(),
+						// Camino viejo: se reparte por índice y con cofirmantes cruza los links.
+						emails: z.array(z.string()).optional(),
 							options: z.object({
 								gender: z.enum(["male", "female"]),
 								generatePdf: z.boolean(),
@@ -743,6 +801,8 @@ export const contractGenerationRouter = {
 									.optional(),
 							}),
 						),
+						signers: z.array(signerSchema).optional(),
+						// Camino viejo: se reparte por índice y con cofirmantes cruza los links.
 						emails: z.array(z.string()).optional(),
 						options: z.object({
 							gender: z.enum(["male", "female"]),
@@ -930,6 +990,11 @@ export const contractGenerationRouter = {
 					return {
 						...contract,
 						data: newData,
+						// Los snapshots viejos sólo guardaron `emails`; el generador los
+						// sigue aceptando, pero los que ya traen roles se regeneran con
+						// el reparto correcto.
+						signers: conRepresentanteLegal(contract.signers),
+						observers: CONTRATOS_OBSERVADORES,
 						options: {
 							...contract.options,
 							isPlural:

@@ -93,12 +93,38 @@ export interface DeudorAdicional {
 	nacionalidad?: string;
 }
 
+/**
+ * Rol de un firmante. Define en qué línea de firma del documento cae cada
+ * persona: el generador conoce el layout de cada template y reparte por rol,
+ * porque el orden no es el mismo en todos (en la garantía mobiliaria y el
+ * reconocimiento de deuda el representante legal firma primero).
+ */
+export type SignerRole = "TITULAR" | "COFIRMANTE" | "REP_LEGAL" | "VENDEDOR";
+
+export interface ContractSigner {
+	role: SignerRole;
+	email: string;
+	/** Nombre real de la persona, tal como debe verse en el documento. */
+	name: string;
+	dpi?: string;
+	phone?: string;
+}
+
 export interface GenerateContractPayload {
 	contractType: string;
 	data: Record<string, unknown> & {
 		deudoresAdicionales?: DeudorAdicional[];
 	};
+	/** Firmantes con su rol. Es la forma preferida sobre `emails`. */
+	signers?: ContractSigner[];
+	/**
+	 * Emails en orden posicional.
+	 * @deprecated Usar `signers`: una lista plana se reparte por índice y con
+	 * cofirmantes termina cruzando los links.
+	 */
 	emails?: string[];
+	/** Reciben copia del flujo de firma sin firmar. */
+	observers?: string[];
 	options: {
 		gender: "male" | "female";
 		generatePdf: boolean;

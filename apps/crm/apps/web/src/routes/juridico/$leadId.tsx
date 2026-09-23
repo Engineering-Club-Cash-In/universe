@@ -11,6 +11,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import type { ContractSigner } from "@/components/contracts/DynamicContractWizard";
 import { ApproveOpportunityModal } from "@/components/juridico/ApproveOpportunityModal";
 import { ContractsList } from "@/components/juridico/ContractsList";
 import { CreateContractModal } from "@/components/juridico/CreateContractModal";
@@ -171,7 +172,8 @@ function RouteComponent() {
 				generationData: generationSnapshot.data as Array<{
 					contractType: string;
 					data: Record<string, string>;
-					emails?: string[];
+					signers?: ContractSigner[];
+			emails?: string[];
 					options: {
 						gender: "male" | "female";
 						generatePdf: boolean;

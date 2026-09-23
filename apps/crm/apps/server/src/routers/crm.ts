@@ -19,11 +19,6 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord, auditedTransaction } from "../lib/audit";
-import {
-	isReservedBankCoverageDescription,
-	redactBankStatementCoverageEvidence,
-} from "../lib/bank-statement-documents";
 import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
@@ -64,6 +59,11 @@ import {
 	hasStaleAnalysisChecklistDocumentState,
 	hasStaleAnalysisChecklistVehicleState,
 } from "../lib/analysis-checklist";
+import { type AuditEntry, auditedTransaction, auditRecord } from "../lib/audit";
+import {
+	isReservedBankCoverageDescription,
+	redactBankStatementCoverageEvidence,
+} from "../lib/bank-statement-documents";
 import {
 	rebuildClientDocumentChecklistInTransaction,
 	refreshChecklistForClientDocuments,
@@ -71,13 +71,14 @@ import {
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
 import { mergeCompanyRelationshipStats } from "../lib/company-relationship-stats";
-import { conCandadoDeFirma } from "../lib/contratos-candado";
+import { claveDeFirma } from "../lib/contratos-candado";
 import {
 	assertOpportunityBelongsToLead,
 	canWriteOpportunityCreditAnalysis,
 	getCreditAnalysisOwnerCondition,
 } from "../lib/credit-analysis-ownership";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
+import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { eqDpi } from "../lib/dpi-lookup";
 import {
 	calcularAjusteFechaIdeal,
@@ -93,16 +94,44 @@ import {
 	aplicarDeltaMontosInversionistas,
 } from "../lib/fecha-ideal-cotizacion";
 import {
+	esDpiEnBlanco,
+	evaluarGateMoraDpi,
+	MENSAJE_DPI_EN_BLANCO,
+	MENSAJE_GATE_APAGADO,
+	requiereConsultaDeMora,
+	resolverEdicionConMora,
+} from "../lib/gate-mora-dpi";
+import {
 	getGuatemalaMonthWindow,
 	toDateStrGT,
 } from "../lib/guatemala-month-window";
+import {
+	conLaEtapaDeDestino,
+	dpiCambia,
+	elExpedienteNoAcumulaEvidencia,
+	etapaQueCanda,
+	evaluarCandadoBorradoCoDeudor,
+	evaluarCandadoDpi,
+	evidenciaAcumuladaDelExpediente,
+	mensajeCambioDeLeadConEvidencia,
+	mensajeCandadoCambioDeLead,
+	noExisteOportunidadCandanteDelLead,
+	noExisteOportunidadCandantePorId,
+	obtenerOportunidadesParaCandadoDpi,
+	PORCENTAJE_CANDADO_DPI,
+	type ResultadoCandadoDpi,
+} from "../lib/lead-dpi-lock";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
-import { buildLeadDuplicateConflict } from "./lead-duplicate-conflict";
 import { getLeadSourceLabel } from "../lib/lead-sources";
+import {
+	numerosSifcoConocidosPorDpi,
+	numerosSifcoDelDpiYDeLaOportunidad,
+	numerosSifcoDelDpiYDelLead,
+} from "../lib/numeros-sifco-por-dpi";
 import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
 	buildOpportunityRelationshipInvariantCondition,
@@ -115,8 +144,24 @@ import {
 	stripUnchangedFrozenFields,
 	type WonOpportunityFrozenField,
 } from "../lib/opportunity-stage-guard";
-import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
+import {
+	type DecisionRevalidacion,
+	decidirRevalidacion,
+	documentosDeIdentidadVigentes,
+	ErrorRevalidacionIncompleta,
+	faltaPorIdentidadRevalidada,
+	MENSAJE_DPI_DESACTUALIZADO,
+	MOTIVO_AVISO,
+	type OportunidadParaRevalidar,
+	obtenerEtapaDeAnalisis,
+	PORCENTAJE_ETAPA_ANALISIS,
+	parcheDeIdentidadInvalidada,
+	parcheDeRevalidacion,
+	RAZON_TRANSICION_REVALIDACION,
+	revalidarOportunidades,
+	saleDeLaPerdida,
+} from "../lib/revalidacion-oportunidad";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	buildUploadPrefix,
@@ -124,12 +169,14 @@ import {
 	getFileUrl,
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
+import { resolverValidacionMora } from "../lib/validacion-mora";
 import {
 	formatMissingFields,
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
 import { carteraBackClient } from "../services/cartera-back-client";
+import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import {
 	DocumentIntegrityError,
 	upsertOpportunityCreditAnalysis,
@@ -140,10 +187,14 @@ import {
 	ejecutarValidaciones,
 	resolverExencionPorBot,
 } from "../services/opportunity-validations";
-import type { StatusCreditEnum } from "../types/cartera-back";
+import {
+	ConsultaMoraNoDisponibleError,
+	type StatusCreditEnum,
+} from "../types/cartera-back";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { resetBankStatementCreditAnalysis } from "./bank-analysis";
 import { BankStatementCoverageSaveError } from "./bank-analysis-coverage";
+import { buildLeadDuplicateConflict } from "./lead-duplicate-conflict";
 import { createNotification } from "./notifications";
 import {
 	getManualBankUploadCleanupDescription,
@@ -326,6 +377,22 @@ export async function getCurrentClientCreditsFromCartera(
 ) {
 	return getClientCreditsFromCartera(fetchCredits, { mes: 0, anio: 0 });
 }
+
+/**
+ * Las dependencias de producción del gate de mora. La regla vive en
+ * `lib/gate-mora-dpi.ts` sin saber de HTTP ni de bitácora; acá se le enchufan.
+ */
+const depsGateMora = {
+	consultar: (dpi: string, numerosCreditoConocidos?: string[]) =>
+		carteraBackClient.consultarMoraPorDpi(dpi, numerosCreditoConocidos),
+	numerosCreditoConocidos: numerosSifcoConocidosPorDpi,
+	// La palanca de emergencia de siempre: la misma bandera con la que el resto
+	// del CRM degrada cuando cartera no está. Apagarla deja pasar sin consultar
+	// —fail-open deliberado, ver `habilitado` en `lib/gate-mora-dpi.ts`— y cada
+	// paso así queda en la bitácora.
+	habilitado: isCarteraBackEnabled,
+	anotar: auditRecord,
+};
 
 const CARTERA_PAGE_FETCH_SIZE = 100;
 
@@ -907,10 +974,9 @@ export const crmRouter = {
 			const { id, ...updateData } = input;
 
 			// Supervisors can update the complete sales directory.
-			const whereClause =
-				PERMISSIONS.canManageAllCompanies(context.userRole)
-					? eq(companies.id, id)
-					: and(eq(companies.id, id), eq(companies.createdBy, context.userId));
+			const whereClause = PERMISSIONS.canManageAllCompanies(context.userRole)
+				? eq(companies.id, id)
+				: and(eq(companies.id, id), eq(companies.createdBy, context.userId));
 
 			const updatedCompany = await db
 				.update(companies)
@@ -1247,6 +1313,14 @@ export const crmRouter = {
 				normalizedDpi = resultado.dpiLimpio;
 			}
 
+			// 🔴 El duplicado se revisa ANTES del gate, y el orden importa. Si el DPI
+			// ya es de un lead existente que está en mora, correr el gate primero
+			// devolvía el error del gate ("cliente con saldo en mora") en vez del
+			// CONFLICT con el payload que el front usa para mostrar el lead
+			// existente y ofrecer ir a su ficha: el asesor quedaba sin la salida que
+			// esa pantalla ya tiene resuelta. Y de paso se pagaba un viaje a SIFCO
+			// para averiguar algo que no iba a cambiar el resultado — acá no se está
+			// dando de alta a nadie, ya está adentro.
 			// Validar DPI duplicado
 			if (normalizedDpi) {
 				// Se traen todos los leads del DPI, no uno solo: mientras queden
@@ -1296,6 +1370,16 @@ export const crmRouter = {
 							context.userId,
 						),
 					});
+				}
+			}
+
+			// El gate, ya con el alta decidida: es un DPI que de verdad va a entrar
+			// al sistema por primera vez. Siempre se consulta y es fail-closed — si
+			// cartera no contesta, no entra nadie.
+			if (normalizedDpi) {
+				const gate = await evaluarGateMoraDpi(normalizedDpi, depsGateMora);
+				if (gate.rechazado) {
+					throw new ORPCError("BAD_REQUEST", { message: gate.mensaje });
 				}
 			}
 
@@ -1366,6 +1450,20 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const { id, assignedTo, ...updateData } = input;
 
+			// La fila de bitácora del override de admin, si lo hubo. Se escribe
+			// DESPUÉS de confirmar que el UPDATE tocó una fila: anotarla antes
+			// dejaba overrides `ok: true` de cambios que nunca ocurrieron (lead
+			// inexistente, o sin permiso sobre él). Ver `resolverEdicionConMora`.
+			let overrideDeMora: AuditEntry | null = null;
+
+			// 🔴 El DPI en blanco se rechaza ANTES que nada: sin esto, `dpi: ""` se
+			// saltaba la validación y el gate por falsy y el `.set` lo escribía
+			// igual, dejando al moroso invisible para siempre. Ver
+			// `MENSAJE_DPI_EN_BLANCO`.
+			if (esDpiEnBlanco(updateData.dpi)) {
+				throw new ORPCError("BAD_REQUEST", { message: MENSAJE_DPI_EN_BLANCO });
+			}
+
 			// Validar DPI si se envía
 			if (updateData.dpi) {
 				const resultado = validarDpi(updateData.dpi);
@@ -1394,32 +1492,184 @@ export const crmRouter = {
 				});
 			}
 
-			// El NIT que el lead tenía ANTES de esta edición: es la referencia para
-			// distinguir las oportunidades que siguen con la copia de las que
-			// alguien corrigió a mano. Hay que leerlo antes del UPDATE.
+			// El NIT y el DPI que el lead tenía ANTES de esta edición. El NIT es la
+			// referencia para distinguir las oportunidades que siguen con la copia de
+			// las que alguien corrigió a mano; el DPI, para saber si esta edición lo
+			// cambia de verdad. Hay que leerlos antes del UPDATE.
 			const [leadAntesDelUpdate] =
-				updateData.nit !== undefined
+				updateData.nit !== undefined || updateData.dpi !== undefined
 					? await db
-							.select({ nit: leads.nit })
+							.select({ nit: leads.nit, dpi: leads.dpi })
 							.from(leads)
 							.where(eq(leads.id, id))
 							.limit(1)
 					: [];
 
-			const updatedLead = await db
-				.update(leads)
-				.set({
-					...updateData,
-					monthlyIncome: updateData.monthlyIncome?.toString(),
-					loanAmount: updateData.loanAmount?.toString(),
-					score: updateData.score?.toString(),
-					...(assignedTo && { assignedTo }),
-					...(updateData.score !== undefined && { scoredAt: new Date() }),
-					updatedAt: new Date(),
-				})
-				.where(whereClause)
-				.returning();
+			const editaAdmin = context.userRole === "admin";
+			// ¿Esta edición cambia el DPI de verdad? Lo decide el mismo predicado
+			// que usa el candado: el formulario manda `dpi` en toda edición, también
+			// cuando el usuario solo tocó el teléfono.
+			const elDpiCambia =
+				updateData.dpi !== undefined &&
+				dpiCambia(leadAntesDelUpdate?.dpi, updateData.dpi);
+
+			// El veredicto del candado sobrevive al bloque: si el admin usó la
+			// válvula hay que cobrarle el costo DESPUÉS del UPDATE (ver F9 abajo).
+			let candadoDpi: ResultadoCandadoDpi | null = null;
+
+			if (updateData.dpi !== undefined) {
+				// El candado va ANTES que el gate de mora: es una consulta local
+				// barata, y si el DPI ya no se puede cambiar (solicitud pasada del
+				// 30%) no tiene sentido pagar el viaje a SIFCO.
+				candadoDpi = await evaluarCandadoDpi({
+					dpiActual: leadAntesDelUpdate?.dpi,
+					dpiNuevo: updateData.dpi,
+					sujeto: "lead",
+					esAdmin: editaAdmin,
+					leadId: id,
+				});
+				if (candadoDpi.bloqueado) {
+					throw new ORPCError("BAD_REQUEST", { message: candadoDpi.message });
+				}
+
+				// 🔴 Solo se consulta la mora si el DPI es nuevo o cambia. Si se
+				// consultara en toda edición, un cliente que ya está en mora quedaría
+				// imposible de editar y nadie podría corregirle el teléfono ni la
+				// dirección — y son justamente las fichas que cobranza toca a diario.
+				// El borrado (`dpi: ""`) no llega hasta acá: se rechaza con 400 al
+				// entrar al handler. Ver `MENSAJE_DPI_EN_BLANCO`.
+				if (requiereConsultaDeMora(updateData.dpi, leadAntesDelUpdate?.dpi)) {
+					// 🔴 La pregunta lleva los números del DPI NUEVO **y** los del lead
+					// que se está editando. Con solo los del DPI nuevo, el lead que
+					// tiene su propio crédito moroso —un `CRM-<uuid>` o un `insoluto-N`,
+					// invisibles para SIFCO— salía del gate tecleando un DPI virgen:
+					// cartera contestaba CLIENTE_NO_ENCONTRADO y el cambio pasaba para
+					// cualquiera. Su propia deuda quedaba fuera de su propia evaluación.
+					const gate = await evaluarGateMoraDpi(updateData.dpi, {
+						...depsGateMora,
+						numerosCreditoConocidos: (dpiConsultado) =>
+							numerosSifcoDelDpiYDelLead(dpiConsultado, id),
+					});
+					// Válvula de corrección: un DPI mal tecleado cuyo valor correcto
+					// pertenece a alguien con mora sería incorregible para siempre. Solo
+					// admin, y queda anotado. Ver `resolverEdicionConMora`.
+					const resolucion = resolverEdicionConMora(gate, context.userRole, {
+						entity: "lead",
+						id,
+						dpi: updateData.dpi,
+					});
+					if (!resolucion.permitir) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: resolucion.mensaje,
+						});
+					}
+					overrideDeMora = resolucion.anotacionPendiente;
+				}
+			}
+
+			// 🔴 El candado de arriba y este UPDATE no son atómicos: entre los dos,
+			// otra transacción puede aprobar el análisis (30 → 40) y el DPI se
+			// escribiría igual sobre un expediente que acaba de quedar atado a la
+			// identidad vieja. Postgres re-evalúa el predicado tras esperar a la
+			// escritura rival, así que la condición viaja DENTRO de la sentencia.
+			// Mismo patrón que `approveOpportunityAnalysis`.
+			//
+			// Solo cuando el DPI cambia de verdad: este UPDATE escribe también
+			// teléfono, dirección y demás cuando `dpi` ni siquiera viene, y esas
+			// ediciones no tienen por qué trabarse por una solicitud avanzada.
+			// El admin queda fuera: su válvula sigue abierta (y sale marcada).
+			const candadoEnElPredicado = elDpiCambia && !editaAdmin;
+			const whereDelUpdate = candadoEnElPredicado
+				? and(whereClause, noExisteOportunidadCandanteDelLead(id))
+				: whereClause;
+
+			// 🔴 El cambio de DPI y su revalidación van en UNA transacción.
+			//
+			// En dos transacciones separadas, una revalidación que falle dejaba el
+			// DPI nuevo COMMITEADO con las oportunidades todavía aprobadas contra la
+			// identidad vieja: el expediente sobreviviente afirma cosas sobre una
+			// persona que ya no es la del DPI. Es exactamente el estado que el reset
+			// existe para impedir, y se alcanzaba con que la revalidación se cayera.
+			//
+			// Ahora o entran las dos escrituras o no entra ninguna. `auditedTransaction`
+			// descarta además las anotaciones de lo que el rollback se llevó.
+			const updatedLead = await auditedTransaction(async (tx) => {
+				// 🔴 Lock ANTES del predicado. El NOT EXISTS del candado lee
+				// `opportunities` bajo el snapshot MVCC del UPDATE a `leads`: no
+				// bloquea la fila de la oportunidad, así que podía ver 30%, escribir
+				// el DPI, y dejar que una aprobación 30→40 ya en vuelo commiteara
+				// después. Con el FOR UPDATE, la escritura del DPI espera a que esa
+				// aprobación termine (o viceversa) y el predicado decide sobre el
+				// estado real, no sobre una foto.
+				if (elDpiCambia) {
+					await tx
+						.select({ id: opportunities.id })
+						.from(opportunities)
+						.where(eq(opportunities.leadId, id))
+						.for("update");
+				}
+
+				const filas = await tx
+					.update(leads)
+					.set({
+						...updateData,
+						monthlyIncome: updateData.monthlyIncome?.toString(),
+						loanAmount: updateData.loanAmount?.toString(),
+						score: updateData.score?.toString(),
+						...(assignedTo && { assignedTo }),
+						...(updateData.score !== undefined && { scoredAt: new Date() }),
+						updatedAt: new Date(),
+					})
+					.where(whereDelUpdate)
+					.returning();
+
+				// Cero filas se resuelve afuera (necesita leer el candado ya
+				// comprometido); acá solo se sale sin escribir nada más.
+				if (filas.length === 0) return filas;
+
+				// 🔴 El override del admin sobre el candado no es gratis. La válvula
+				// existe para corregir un DPI mal tecleado, pero cuando se usa, RENAP,
+				// buró y los documentos de las oportunidades candantes quedaron hechos
+				// contra el DPI VIEJO. Se las manda de vuelta a análisis: corregir el
+				// DPI a esta altura cuesta re-validar.
+				//
+				// Las salvaguardas (won y ≥90% no se tocan, solo se avisa) viven dentro
+				// de `revalidarOportunidades`. Si no puede completarse, lanza y este
+				// mismo `tx` revierte el DPI que se acaba de escribir.
+				if (candadoDpi?.overrideAdmin && candadoDpi.candantes?.length) {
+					await revalidarOportunidades({
+						oportunidades: candadoDpi.candantes,
+						accion: "candado_override_revalidacion",
+						detalle:
+							"un administrador cambió el DPI del lead pese al candado; la validación de identidad de esta oportunidad se hizo contra el DPI anterior",
+						datosExtra: { leadId: id, dpiNuevo: updateData.dpi },
+						anotar: auditRecord,
+						cambiadaPor: context.userId,
+						database: tx,
+					});
+				}
+
+				return filas;
+			});
 			if (updatedLead.length === 0) {
+				// Con la condición puesta, cero filas puede significar que el candado
+				// se cerró en el medio. Responder NOT_FOUND ahí mandaría a buscar un
+				// lead que existe; se contesta como el candado, con su mismo mensaje.
+				if (candadoEnElPredicado) {
+					const candadoAhora = await evaluarCandadoDpi({
+						dpiActual: leadAntesDelUpdate?.dpi,
+						dpiNuevo: updateData.dpi,
+						sujeto: "lead",
+						esAdmin: false,
+						leadId: id,
+					});
+					if (candadoAhora.bloqueado) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: candadoAhora.message,
+						});
+					}
+				}
+
 				throw new ORPCError("NOT_FOUND", {
 					message: "Lead no encontrado o no tienes permiso para actualizarlo",
 				});
@@ -1427,6 +1677,12 @@ export const crmRouter = {
 
 			// Después del chequeo: con cero filas no hubo escritura que anotar.
 			auditRecord({ entity: "lead", id: id, action: "update" });
+
+			// El override recién existe si el cambio existió. Va después del
+			// `auditRecord` del update por el mismo motivo: son la misma escritura.
+			if (overrideDeMora) {
+				auditRecord(overrideDeMora);
+			}
 
 			// Sync NIT to associated opportunities.
 			// Solo a las que siguen con la copia del NIT del lead: el que viaja a
@@ -1926,9 +2182,10 @@ export const crmRouter = {
 				.groupBy(opportunityStageHistory.opportunityId)
 				.as("latest_stage_history");
 
-			const closedAtExpression = sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`.mapWith(
-				opportunities.actualCloseDate,
-			);
+			const closedAtExpression =
+				sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`.mapWith(
+					opportunities.actualCloseDate,
+				);
 
 			const selectFields = {
 				id: opportunities.id,
@@ -2403,6 +2660,47 @@ export const crmRouter = {
 				});
 			}
 
+			// 🔴 Una oportunidad no puede NACER por encima del umbral del candado.
+			//
+			// El candado de identidad —el del DPI y el del `leadId`— se apoya en dos
+			// señales: la etapa de hoy y la más alta que la oportunidad tocó, según
+			// `opportunity_stage_history`. Nacer directamente en una etapa candante
+			// dejaba el expediente arriba del umbral SIN la fila de historial que lo
+			// prueba: bastaba bajarlo al 30% —una sola fila `from=40, to=30`— para
+			// que el máximo histórico diera 30, el candado se abriera, se colgara
+			// otro lead, y volver a subir. `ALTURA_DE_LA_TRANSICION` arregla la
+			// lectura de esa fila; este tope saca la precondición, para que por esta
+			// puerta el expediente no llegue a existir arriba del umbral.
+			//
+			// El tope no rompe ningún flujo vivo: el selector "Etapa Inicial" del CRM
+			// solo ofrece etapas de 1% a 20% y la conversión desde leads crea siempre
+			// en el 1%. Los nacimientos legítimos por encima del umbral —la migración
+			// automática de créditos de Cartera-Back, que nace en la última etapa, y
+			// los seeds— insertan directo en la base y no pasan por este procedure.
+			//
+			// De paso, buscar la etapa da un 400 claro cuando el `stageId` no existe,
+			// que hasta ahora reventaba recién contra la foreign key.
+			const [etapaInicial] = await db
+				.select({
+					name: salesStages.name,
+					closurePercentage: salesStages.closurePercentage,
+				})
+				.from(salesStages)
+				.where(eq(salesStages.id, input.stageId))
+				.limit(1);
+
+			if (!etapaInicial) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "La etapa inicial seleccionada no existe.",
+				});
+			}
+
+			if (etapaInicial.closurePercentage > PORCENTAJE_CANDADO_DPI) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `No se puede crear una oportunidad directamente en ${etapaInicial.name} (${etapaInicial.closurePercentage}%): a partir del ${PORCENTAJE_CANDADO_DPI}% el expediente queda con la identidad congelada, y nacer ahí lo dejaría sin el rastro de por dónde pasó. Creála en una etapa inicial y avanzála.`,
+				});
+			}
+
 			// Check for recent opportunity with same lead (within 1 hour)
 			if (input.leadId && !input.force) {
 				const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -2491,74 +2789,76 @@ export const crmRouter = {
 	updateOpportunity: crmProcedure
 		.meta({ audit: { entity: "opportunity", action: "update" } })
 		.input(
-			z.object({
-				id: z.string().uuid(),
-				title: z.string().min(1, "Title is required").optional(),
-				leadId: z.string().uuid().nullable().optional(),
-				companyId: z.string().uuid().nullable().optional(),
-				vehicleId: z.string().uuid().nullable().optional(),
-				creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
-				source: z.enum(leadSourceEnum.enumValues).optional(),
-				campaign: z.string().min(1).optional(),
-				value: z.string().optional(),
-				stageId: z.string().uuid().optional(),
-				probability: z.number().min(0).max(100).optional(),
-				expectedCloseDate: z.string().optional(),
-				status: z.enum(["open", "won", "lost", "on_hold"]).optional(),
-				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
-				notes: z.string().optional(),
-				stageChangeReason: z.string().optional(),
-				// Vehicle vendor. Sigue siendo opcional: null lo desasigna, y
-				// permite corregirlo cuando no se eligió al crear la oportunidad.
-				vendorId: z.string().uuid().nullable().optional(),
-				// Credit terms
-				numeroCuotas: z.number().int().positive().optional(),
-				tasaInteres: z.string().optional(),
-				cuotaMensual: z.string().optional(),
-				fechaInicio: z.string().optional(),
-				diaPagoMensual: z.number().int().min(1).max(31).optional(),
-				// Marca si el día viene de la opción "recomendado por IA" del select,
-				// aunque coincida numéricamente con 15/30. Se revalida server-side
-				// contra suggestedPaymentDays. Requerido cuando se envía diaPagoMensual
-				// (ver .refine() abajo). No es columna de opportunities — se destructura
-				// fuera de updateData más abajo.
-				elegidoDesdeRecomendacionIA: z.boolean().optional(),
-				// Additional fields
-				seguro: z.number().optional(),
-				gps: z.number().optional(),
-				categoria: z
-					.enum([
-						"Contraseña",
-						"CV Vehículo",
-						"CV Vehículo nuevo",
-						"Fiduciario",
-						"Hipotecario",
-						"Vehículo",
-					])
-					.optional(),
-				nit: z.string().optional(),
-				royalti: z.number().optional(),
-				porcentajeRoyalti: z.string().optional(),
-				reserva: z.number().optional(),
-				membresiaPago: z.number().optional(),
-				inversionistas: z.string().optional(), // JSON string
-				asesorId: z.number().optional(),
-				direccion: z.string().optional(),
-				rubros: z.string().optional(), // JSON string with expense items
-				gastosAdministrativos: z.number().optional(), // Administrative expenses for cartera "otros"
-				loanPurpose: z.enum(["personal", "business"]).optional(),
-				// Optimistic locking - prevents race conditions on concurrent updates
-				expectedUpdatedAt: z.string().datetime().optional(),
-			}).refine(
-				(data) =>
-					data.diaPagoMensual === undefined ||
-					data.elegidoDesdeRecomendacionIA !== undefined,
-				{
-					message:
-						"elegidoDesdeRecomendacionIA es requerido cuando se envía diaPagoMensual",
-					path: ["elegidoDesdeRecomendacionIA"],
-				},
-			),
+			z
+				.object({
+					id: z.string().uuid(),
+					title: z.string().min(1, "Title is required").optional(),
+					leadId: z.string().uuid().nullable().optional(),
+					companyId: z.string().uuid().nullable().optional(),
+					vehicleId: z.string().uuid().nullable().optional(),
+					creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
+					source: z.enum(leadSourceEnum.enumValues).optional(),
+					campaign: z.string().min(1).optional(),
+					value: z.string().optional(),
+					stageId: z.string().uuid().optional(),
+					probability: z.number().min(0).max(100).optional(),
+					expectedCloseDate: z.string().optional(),
+					status: z.enum(["open", "won", "lost", "on_hold"]).optional(),
+					assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
+					notes: z.string().optional(),
+					stageChangeReason: z.string().optional(),
+					// Vehicle vendor. Sigue siendo opcional: null lo desasigna, y
+					// permite corregirlo cuando no se eligió al crear la oportunidad.
+					vendorId: z.string().uuid().nullable().optional(),
+					// Credit terms
+					numeroCuotas: z.number().int().positive().optional(),
+					tasaInteres: z.string().optional(),
+					cuotaMensual: z.string().optional(),
+					fechaInicio: z.string().optional(),
+					diaPagoMensual: z.number().int().min(1).max(31).optional(),
+					// Marca si el día viene de la opción "recomendado por IA" del select,
+					// aunque coincida numéricamente con 15/30. Se revalida server-side
+					// contra suggestedPaymentDays. Requerido cuando se envía diaPagoMensual
+					// (ver .refine() abajo). No es columna de opportunities — se destructura
+					// fuera de updateData más abajo.
+					elegidoDesdeRecomendacionIA: z.boolean().optional(),
+					// Additional fields
+					seguro: z.number().optional(),
+					gps: z.number().optional(),
+					categoria: z
+						.enum([
+							"Contraseña",
+							"CV Vehículo",
+							"CV Vehículo nuevo",
+							"Fiduciario",
+							"Hipotecario",
+							"Vehículo",
+						])
+						.optional(),
+					nit: z.string().optional(),
+					royalti: z.number().optional(),
+					porcentajeRoyalti: z.string().optional(),
+					reserva: z.number().optional(),
+					membresiaPago: z.number().optional(),
+					inversionistas: z.string().optional(), // JSON string
+					asesorId: z.number().optional(),
+					direccion: z.string().optional(),
+					rubros: z.string().optional(), // JSON string with expense items
+					gastosAdministrativos: z.number().optional(), // Administrative expenses for cartera "otros"
+					loanPurpose: z.enum(["personal", "business"]).optional(),
+					// Optimistic locking - prevents race conditions on concurrent updates
+					expectedUpdatedAt: z.string().datetime().optional(),
+				})
+				.refine(
+					(data) =>
+						data.diaPagoMensual === undefined ||
+						data.elegidoDesdeRecomendacionIA !== undefined,
+					{
+						message:
+							"elegidoDesdeRecomendacionIA es requerido cuando se envía diaPagoMensual",
+						path: ["elegidoDesdeRecomendacionIA"],
+					},
+				),
 		)
 		.handler(async ({ input, context }) => {
 			const {
@@ -2639,6 +2939,120 @@ export const crmRouter = {
 				}
 			}
 
+			// 🔴 Cambiar `leadId` cambia la identidad del expediente sin tocar
+			// ningún DPI, así que no lo veía ni el candado (que protege al lead) ni
+			// el gate de mora (que no se llama desde acá). Ver
+			// `mensajeCandadoCambioDeLead` para el agujero completo.
+			//
+			// Desasignar (`null`) también cuenta: es la primera mitad de la maniobra
+			// en dos pasos —soltar el lead ahora, colgar otro después—, y por sí
+			// sola ya deja el expediente avanzado sin dueño. Cualquier valor
+			// distinto del actual paga lo mismo.
+			//
+			// `!== undefined` y no `"leadId" in input`: los formularios reenvían el
+			// objeto entero y un `leadId: undefined` significa "no lo toqué", no
+			// "desasignalo". Es el mismo criterio que ya usaba `leadIdCambio` más
+			// abajo, que ahora se lee de acá para que no se separen.
+			const cambiaElLeadDeLaOportunidad =
+				input.leadId !== undefined &&
+				input.leadId !== currentOpportunity[0].leadId;
+
+			/**
+			 * El formulario reenvía el `leadId` que la oportunidad YA tenía.
+			 *
+			 * `cambiaElLeadDeLaOportunidad` compara contra la fila LEÍDA, así que ese
+			 * request da falso y no corre nada del candado: ni la etapa, ni la
+			 * evidencia, ni la invalidación de identidad. Si además el campo viajara
+			 * en el `SET`, sería el rebote: el request A lee la oportunidad con el
+			 * lead X, el request B se la cambia a Y pagando todas las guardas, y
+			 * después A aterriza y reescribe `lead = X` por un camino sin candado,
+			 * deshaciendo el cambio de B y dejando pegada la invalidación que B pagó.
+			 * `expectedUpdatedAt` es opcional, así que tampoco lo frena.
+			 *
+			 * ⚠️ Hoy ese campo NO llega al `SET`, pero por prestado:
+			 * `stripUnchangedFrozenFields` lo saca porque `leadId` está en
+			 * `WON_OPPORTUNITY_FROZEN_FIELD_LABELS`, o sea por ser dato congelado de
+			 * una oportunidad ganada, no por ser la identidad del expediente. El día
+			 * que alguien saque al cliente de esa lista —no es un término del
+			 * contrato, es un argumento razonable— el rebote se abre solo y sin que
+			 * nada lo señale. Por eso la bandera existe y se aplica acá también: la
+			 * protección de la identidad no puede depender de la lista de otro guard.
+			 *
+			 * Se saca del `SET` en vez de exigirlo en el WHERE: escribir el mismo
+			 * valor que se leyó no aporta nada, y un predicado sobre el lead vivo
+			 * para CUALQUIER request que traiga el campo le haría fallar el guardado
+			 * al asesor cada vez que otro corrigiera el cliente en paralelo —los
+			 * formularios de este CRM reenvían el objeto entero, así que lo pagarían
+			 * todas las ediciones, no las que cambian el cliente—. El predicado sí
+			 * va, pero sólo en el camino donde el lead de verdad cambia: ver
+			 * `elLeadVivoSigueSiendoElLeido`.
+			 */
+			const reenvioDelMismoLead =
+				input.leadId !== undefined && !cambiaElLeadDeLaOportunidad;
+
+			if (cambiaElLeadDeLaOportunidad) {
+				// 🔴 Lo que decide es la etapa EFECTIVA de destino —`input.stageId` si
+				// viene, y si no la guardada—, no sólo el estado persistido.
+				//
+				// Mirando nada más lo guardado, un SOLO request que cambiara `leadId`
+				// Y `stageId` a la vez cruzaba el candado entero: una oportunidad en el
+				// 30% con el análisis aprobado para el lead A recibía
+				// `{ leadId: B, stageId: <etapa 40%> }`, el chequeo veía 30 —el que la
+				// sube por encima del umbral es ESTE MISMO UPDATE— y la sentencia
+				// reemplazaba al cliente y cruzaba el umbral de una, conservando la
+				// aprobación y la evidencia (RENAP, buró, documentos) de A. Es la
+				// maniobra en dos pasos que este candado cerró, comprimida en uno.
+				//
+				// La consulta extra sólo la paga el request que ADEMÁS mueve la etapa
+				// mientras cambia el lead, que es el caso raro.
+				const [etapaDestino] = input.stageId
+					? await db
+							.select({
+								name: salesStages.name,
+								closurePercentage: salesStages.closurePercentage,
+							})
+							.from(salesStages)
+							.where(eq(salesStages.id, input.stageId))
+							.limit(1)
+					: [];
+
+				// La misma consulta y el mismo predicado que usa el candado del DPI:
+				// una sola fila, la de esta oportunidad. `etapaQueCanda` ya deja
+				// pasar a las `lost` —que no candan por decisión de producto— y esas
+				// pagan su costo al reabrirse, con `parcheDeRevalidacion`.
+				const candante = etapaQueCanda(
+					(await obtenerOportunidadesParaCandadoDpi({ opportunityId: id })).map(
+						(oportunidad) => conLaEtapaDeDestino(oportunidad, etapaDestino),
+					),
+				);
+
+				if (candante) {
+					throw new ORPCError("FORBIDDEN", {
+						message: mensajeCandadoCambioDeLead(candante),
+					});
+				}
+
+				// 🔴 El candado de arriba mira la ETAPA, y por debajo del umbral deja
+				// pasar el cambio cobrando `parcheDeIdentidadInvalidada`. Ese parche
+				// invalida la aprobación y los documentos de identidad, pero NO los
+				// comprobantes de ingresos, estados de cuenta, recibos ni formularios
+				// del cliente anterior, que sobreviven y vuelven a aprobar el
+				// expediente bajo otra persona. Ver `evidenciaAcumuladaDelExpediente`.
+				//
+				// Las perdidas NO están exceptuadas: la marca de revalidación que
+				// cobra la reapertura sólo caduca los documentos de identidad, así que
+				// «perder y reabrir» era el mismo agujero en tres pasos.
+				const evidenciaDelExpediente = await evidenciaAcumuladaDelExpediente({
+					opportunityId: id,
+				});
+
+				if (evidenciaDelExpediente.length > 0) {
+					throw new ORPCError("FORBIDDEN", {
+						message: mensajeCambioDeLeadConEvidencia(evidenciaDelExpediente),
+					});
+				}
+			}
+
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
 			// por el análisis de esta oportunidad Y del lead que quedará asignado
 			// (si leadId también cambia, el análisis del lead anterior ya no aplica).
@@ -2656,9 +3070,7 @@ export const crmRouter = {
 				input.elegidoDesdeRecomendacionIA !==
 					(currentOpportunity[0].diaPagoOriginalSistema != null);
 			// Si leadId cambia, revalidar aunque día/flag no cambien (analisis del lead anterior ya no aplica).
-			const leadIdCambio =
-				input.leadId !== undefined &&
-				input.leadId !== currentOpportunity[0].leadId;
+			const leadIdCambio = cambiaElLeadDeLaOportunidad;
 			const requiereCongelarEtapa =
 				input.diaPagoMensual !== undefined &&
 				requiereCongelarEtapaParaCambioDia(
@@ -2952,10 +3364,22 @@ export const crmRouter = {
 
 			// PostgreSQL re-evaluates this predicate after waiting for a concurrent
 			// row update, so lead/stage edits cannot jointly persist an invalid state.
+			//
+			// 🔴 El `leadId` entra al invariante sólo si de verdad viaja en el `SET`.
+			// Cuando es el reenvío del mismo valor no viaja (ver
+			// `reenvioDelMismoLead`), y evaluar el invariante contra el literal del
+			// formulario mientras la columna queda como está era dar por bueno lo que
+			// no se iba a escribir: si otro request dejó la oportunidad sin cliente,
+			// el `$1::uuid IS NOT NULL` pasaba igual y la misma sentencia la subía a
+			// 80% o más sin cliente, que es justo lo que este invariante prohíbe.
+			// Omitiéndolo, el predicado mira la columna VIVA, que es el valor con el
+			// que la fila va a quedar.
 			const relationshipInvariantCondition =
 				buildOpportunityRelationshipInvariantCondition({
 					...(input.stageId ? { stageId: input.stageId } : {}),
-					...("leadId" in input ? { leadId: input.leadId } : {}),
+					...("leadId" in input && !reenvioDelMismoLead
+						? { leadId: input.leadId }
+						: {}),
 				});
 			const invariantWhereClause = requiereCongelarEtapa
 				? and(
@@ -2967,12 +3391,49 @@ export const crmRouter = {
 			const wonLockWhereClause = enforceNotWonInPredicate
 				? and(invariantWhereClause, not(eq(opportunities.status, "won")))
 				: invariantWhereClause;
-			const whereClause = expectedUpdatedAt
+			// El chequeo de arriba leyó la fila antes del UPDATE: entre la lectura y
+			// la escritura otra transacción puede subir la oportunidad por encima del
+			// 30% y el lead nuevo entraría igual. Postgres re-evalúa el predicado
+			// después de esperar a la escritura rival, así que la condición viaja
+			// dentro de la misma sentencia. Solo cuando el lead cambia: ninguna otra
+			// edición tiene por qué pagarlo.
+			//
+			// 🔴 La etapa de destino viaja ADENTRO del predicado, no sólo en el
+			// chequeo de arriba. Sin ella, el `not exists` leía el estado persistido
+			// —todavía por debajo del umbral, porque el que lo cruza es esta misma
+			// sentencia— y dejaba pasar el cambio de lead que sube de etapa en el
+			// mismo viaje. Es la contraparte SQL de `conLaEtapaDeDestino`.
+			//
+			// Lo mismo vale para la evidencia acumulada: el chequeo de arriba la
+			// leyó antes del UPDATE, y entre la lectura y la escritura el analista
+			// puede subir un documento o terminar el formulario. La condición viaja
+			// también adentro (`elExpedienteNoAcumulaEvidencia`).
+			//
+			// 🔴 Y el cambio se aplica sobre el lead que SE LEYÓ, no sobre el que
+			// haya quedado. Entre la lectura y la escritura otro request pudo
+			// cambiar el cliente: sin esto el segundo lo pisa sin que sus guardas
+			// hayan visto ese estado, y la bitácora anota un `leadAnterior` que ya
+			// no era el real. Cero filas ⇒ CONFLICT, que es exactamente lo que
+			// pasó. Sólo en este camino: la edición que no cambia el cliente no
+			// paga nada, porque ya ni siquiera escribe el campo.
+			const elLeadVivoSigueSiendoElLeido =
+				currentOpportunity[0].leadId === null
+					? isNull(opportunities.leadId)
+					: eq(opportunities.leadId, currentOpportunity[0].leadId);
+			const leadSwapWhereClause = cambiaElLeadDeLaOportunidad
 				? and(
 						wonLockWhereClause,
-						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
+						elLeadVivoSigueSiendoElLeido,
+						noExisteOportunidadCandantePorId(id, input.stageId),
+						elExpedienteNoAcumulaEvidencia(id),
 					)
 				: wonLockWhereClause;
+			const whereClause = expectedUpdatedAt
+				? and(
+						leadSwapWhereClause,
+						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
+					)
+				: leadSwapWhereClause;
 
 			// Sales users cannot reassign opportunities
 			if (
@@ -3052,19 +3513,186 @@ export const crmRouter = {
 			// campo congelado con el mismo valor que se acaba de leer no aporta
 			// nada, y si en el medio la oportunidad se gana y alguien lo corrige,
 			// esta sentencia le pisaría la corrección con un dato ya viejo.
+			// 🔴 Reabrir una perdida avanzada vuelve a mandarla a análisis.
+			//
+			// Las oportunidades `lost` NO candan el DPI, y eso es deliberado: un
+			// crédito que no se dio no puede dejar al cliente con el DPI fijo para
+			// siempre. Pero entonces, mientras está perdida, el DPI se puede
+			// cambiar. Reabrirla con la etapa avanzada intacta dejaba RENAP, buró y
+			// los documentos pegados a lo que se validó ANTES de perderse: si el DPI
+			// cambió en el medio, el expediente miente. La escapatoria completa era
+			// perder la oportunidad, cambiar el DPI y reabrirla.
+			//
+			// No se prohíbe reabrir: se le pone precio. Reabrir cuesta re-validar, y
+			// así la maniobra deja de pagar.
+			//
+			// El reset viaja en ESTE MISMO UPDATE, junto al cambio de status: en dos
+			// sentencias quedaría una ventana con la oportunidad ya reabierta y
+			// todavía marcada como validada.
+			// 🔴 CUALQUIER salida de `lost`, no solo `lost → open`: el schema admite
+			// `on_hold` y en dos saltos (`lost → on_hold → open`) la revalidación no
+			// se disparaba nunca. Ver `saleDeLaPerdida`.
+			const reabreUnaPerdida = saleDeLaPerdida(
+				currentOpportunity[0].status,
+				updateData.status,
+			);
+
+			let parcheRevalidacion: ReturnType<typeof parcheDeRevalidacion> | null =
+				null;
+			/** La etapa a la que vuelve, para la fila de `opportunityStageHistory`. */
+			let etapaDeAnalisisId: string | null = null;
+			let decisionRevalidacion: DecisionRevalidacion = { tipo: "nada" };
+			let oportunidadRevalidada: OportunidadParaRevalidar | null = null;
+
+			if (reabreUnaPerdida) {
+				// La señal del candado: ¿cruzó el 30% hoy o alguna vez? Se pregunta
+				// por la oportunidad concreta, así que trae una sola fila.
+				const [comoEsta] = await obtenerOportunidadesParaCandadoDpi({
+					opportunityId: id,
+				});
+
+				if (comoEsta) {
+					// La decisión se toma sobre el status al que VUELVE, no sobre el
+					// "lost" del que sale: es el estado con el que va a quedar. Y es el
+					// status REAL de la request, no un "open" fijo — con `lost → won`
+					// la salvaguarda de las ganadas tiene que poder reconocerla.
+					oportunidadRevalidada = {
+						...comoEsta,
+						status: updateData.status ?? comoEsta.status,
+					};
+					decisionRevalidacion = decidirRevalidacion(oportunidadRevalidada);
+
+					if (decisionRevalidacion.tipo === "resetear") {
+						const etapaDeAnalisis = await obtenerEtapaDeAnalisis();
+						if (etapaDeAnalisis) {
+							parcheRevalidacion = parcheDeRevalidacion(etapaDeAnalisis.id);
+							etapaDeAnalisisId = etapaDeAnalisis.id;
+						} else {
+							// 🔴 Sin etapa de análisis no hay a dónde mandarla, y eso es un
+							// FALLO: seguir dejaba la perdida REABIERTA con su validación
+							// vieja intacta, que es justo la escapatoria que este reset
+							// existe para cerrar. Mismo criterio que
+							// `revalidarOportunidades`: o se revalida, o no se cambia.
+							throw new ErrorRevalidacionIncompleta(
+								`No se pudo revalidar la identidad al reabrir la oportunidad: no existe la etapa de análisis (closurePercentage=${PORCENTAJE_ETAPA_ANALISIS}). La reapertura no se aplicó.`,
+							);
+						}
+					}
+				}
+			}
+
 			const safeUpdateData = stripUnchangedFrozenFields(
 				updateData,
 				currentOpportunity[0],
 			);
+			// Ver `reenvioDelMismoLead`: el valor que reenvió el formulario es el
+			// mismo que se leyó, así que escribirlo no cambia nada de esta fila y lo
+			// único que podría lograr es pisar el cambio de al lado por un camino sin
+			// candado. Hoy la línea es redundante —`stripUnchangedFrozenFields` ya lo
+			// sacó, por estar `leadId` en la lista de campos congelados— y es a
+			// propósito: acá se saca por identidad, y así sigue saliendo aunque esa
+			// lista cambie por razones de contratos, que no son éstas.
+			if (reenvioDelMismoLead) delete safeUpdateData.leadId;
 
-			// Un cambio de etapa espera a que termine lo que se esté haciendo con
-			// los contratos de la oportunidad (generar, regenerar, subir, enlazar,
-			// anular), que toman este mismo candado. Si la etapa cambiaba mientras
-			// WeeTrust mandaba las invitaciones, el paso siguiente veía otra etapa y
-			// borraba esos documentos: los destinatarios quedaban con correos que no
-			// abren. Casi nunca hay nadie esperando, así que no demora nada.
-			const escribir = () =>
-				db
+			/**
+			 * 🔴 Cambiar el lead cuesta revalidar SIEMPRE, no sólo pasado el umbral.
+			 *
+			 * El candado bloquea el cambio de lead a partir del 30%, pero EN el 30%
+			 * lo deja pasar a propósito —la comparación es `> 30`— y hasta ahora
+			 * pasar no invalidaba nada: `leadId` se reemplazaba y `analysisStatus`,
+			 * `creditDetailApproved` e `identityRevalidatedAt` quedaban intactos. La
+			 * maniobra se partía en dos peticiones que, una por una, son legales:
+			 *
+			 * 1. Oportunidad en EXACTAMENTE 30% con `analysisStatus: "approved"`. Se
+			 *    cambia SÓLO el lead → pasa, porque 30 no canda.
+			 * 2. Otra petición mueve SÓLO la etapa al 40% → pasa, porque no se toca
+			 *    el lead.
+			 *
+			 * El lead nuevo heredaba el expediente aprobado del anterior —RENAP,
+			 * buró, documentos y análisis de capacidad de pago de otra persona— y de
+			 * ahí seguía a Formalización con `approveCreditDetail`. Es la tercera
+			 * variante del mismo bypass, después de la del historial y la del
+			 * request único que cambia lead y etapa a la vez.
+			 *
+			 * No se prohíbe el cambio en toda etapa: se le pone precio, igual que a
+			 * reabrir una perdida o al override del admin. Operaciones tiene que
+			 * poder corregir un lead mal asignado en etapas tempranas sin perder la
+			 * oportunidad y reabrirla, y ahí el parche no cuesta nada porque todavía
+			 * no hay nada aprobado que invalidar; sólo pesa cuando de verdad lo hay.
+			 *
+			 * 🔴 Se aplica INCONDICIONALMENTE cuando el lead cambia, y no bajo un
+			 * `if (analysisStatus === "approved" || creditDetailApproved)` de este
+			 * lado, por dos razones. Una, ese `if` miraría la foto leída antes del
+			 * UPDATE: una aprobación que entrara en el medio sobreviviría al cambio
+			 * de lead, que es la misma carrera que el resto del candado cierra
+			 * metiendo la condición en la sentencia. Y dos, `creditDetailApproved`
+			 * admite NULL en las filas viejas, así que un predicado `= false` las
+			 * dejaría justo afuera. Lo que decide qué se degrada es el `case` de
+			 * `parcheDeIdentidadInvalidada`, que lo evalúa la fila VIVA al escribir.
+			 *
+			 * Va en el MISMO `.set()` que escribe `leadId`: es UNA sentencia, así que
+			 * no existe una ventana en la que el cliente nuevo esté puesto y la
+			 * aprobación vieja siga en pie.
+			 *
+			 * ⚠️ SIN el retroceso de etapa de `parcheDeRevalidacion`: acá la
+			 * oportunidad está en 30% o menos —más arriba el candado ya bloqueó—, así
+			 * que mandarla a la etapa de análisis la haría AVANZAR, no retroceder, y
+			 * una de 10% terminaría en la cola del analista sin haber pasado por
+			 * ventas. El único caso que sí llega hasta acá por encima del 30% es la
+			 * oportunidad `lost` (las perdidas no candan, por decisión de producto),
+			 * y ésa paga el retroceso completo al reabrirse, más abajo.
+			 */
+			const invalidacionPorCambioDeLead = cambiaElLeadDeLaOportunidad
+				? parcheDeIdentidadInvalidada()
+				: {};
+
+			// La reapertura y su fila de transición van en UNA transacción: el
+			// timeline no puede quedar sin el retroceso que sí se escribió.
+			const updatedOpportunity = await auditedTransaction(async (tx) => {
+				// Si cambia la etapa, primero el candado de firma: la escritura espera a
+				// que termine lo que se esté haciendo con los contratos de la
+				// oportunidad (generar, regenerar, subir, enlazar, anular), que lo
+				// toman. Si la etapa cambiaba mientras WeeTrust mandaba invitaciones,
+				// el paso siguiente veía otra etapa y borraba esos documentos, y los
+				// destinatarios quedaban con correos que no abren. Va antes que
+				// cualquier lock de fila (como el FOR UPDATE de abajo): quien tiene el
+				// candado escribe la oportunidad desde otras conexiones, y tomarlo
+				// después de bloquear la fila los dejaría esperándose sin que Postgres
+				// lo detecte.
+				if (isStageChange) {
+					await tx.execute(
+						sql`select pg_advisory_xact_lock(${claveDeFirma(id)})`,
+					);
+				}
+				// 🔴 La reapertura no puede aplicar un parche calculado sobre una foto
+				// vieja: sin `expectedUpdatedAt`, entre el cálculo y este UPDATE otra
+				// transacción pudo reabrir y avanzar la misma fila (≥90% o won), y el
+				// reset la regresaría igual — con la fila de historial registrando un
+				// `fromStageId` que ya no era el real. Lock + relectura bajo el lock:
+				// si la premisa murió, se falla claro en vez de escribir sobre viejo.
+				let etapaRealAntesDelReset = currentOpportunity[0].stageId;
+				if (parcheRevalidacion) {
+					const [bajoLock] = await tx
+						.select({
+							status: opportunities.status,
+							stageId: opportunities.stageId,
+							pct: salesStages.closurePercentage,
+						})
+						.from(opportunities)
+						.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
+						.where(eq(opportunities.id, id))
+						.for("update", { of: opportunities });
+
+					if (!bajoLock || bajoLock.status !== "lost" || bajoLock.pct >= 90) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La oportunidad cambió mientras se editaba y la reapertura ya no aplica tal como se calculó. Recarga y volvé a intentar.",
+						});
+					}
+					etapaRealAntesDelReset = bajoLock.stageId;
+				}
+
+				const filas = await tx
 					.update(opportunities)
 					.set({
 						...safeUpdateData,
@@ -3097,18 +3725,44 @@ export const crmRouter = {
 						...(diaPagoOriginalSistemaUpdate !== undefined && {
 							diaPagoOriginalSistema: diaPagoOriginalSistemaUpdate,
 						}),
+						// El precio de cambiar el lead; ver `invalidacionPorCambioDeLead`.
+						// ⚠️ La línea de abajo va DESPUÉS a propósito: si el mismo request
+						// además manda la oportunidad al 30%, ese valor es el que
+						// corresponde —`pending` o `resubmitted`, nunca `approved`— y pisa
+						// al `case` sin devolverle la aprobación a nadie.
+						...invalidacionPorCambioDeLead,
 						// Update analysisStatus if it changed during stage transition
 						...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
 							analysisStatus: newAnalysisStatus,
 						}),
 						...(updateData.status === "won" && { actualCloseDate: new Date() }),
+						// Va al final a propósito: si la reapertura manda a análisis, eso
+						// gana sobre cualquier `stageId` que venga en la misma request. La
+						// revalidación no es negociable en el mismo viaje que la dispara.
+						...(parcheRevalidacion ?? {}),
 						updatedAt: new Date(),
 					})
 					.where(whereClause)
 					.returning();
-			const updatedOpportunity = isStageChange
-				? await conCandadoDeFirma(id, escribir)
-				: await escribir();
+
+				// 🔴 El reset cambiaba `stageId` sin dejar la transición: para los
+				// timelines y para `latestStageChangedAt` la oportunidad seguía en la
+				// etapa avanzada, así que el retroceso era invisible y el tiempo en
+				// etapa se seguía contando desde una transición que ya no era la real.
+				if (parcheRevalidacion && etapaDeAnalisisId && filas.length > 0) {
+					await tx.insert(opportunityStageHistory).values({
+						opportunityId: id,
+						// La etapa leída BAJO el lock, no la del snapshot de la request.
+						fromStageId: etapaRealAntesDelReset,
+						toStageId: etapaDeAnalisisId,
+						changedBy: context.userId,
+						reason: `${RAZON_TRANSICION_REVALIDACION}: se reabrió una oportunidad perdida que ya había cruzado el 30%`,
+						isOverride: false,
+					});
+				}
+
+				return filas;
+			});
 			if (updatedOpportunity.length === 0) {
 				if (enforceNotWonInPredicate) {
 					// Pudo ser la carrera con closeOpportunity: distinguirlo del
@@ -3139,6 +3793,52 @@ export const crmRouter = {
 			// Después del chequeo de conflicto: con cero filas no hubo escritura.
 			auditRecord({ entity: "opportunity", id: id, action: "update" });
 
+			// El cambio de lead deja su propia fila. Sin esto, quien encuentre el
+			// expediente de vuelta sin aprobación ve un retroceso sin causa y parece
+			// un error de alguien; y al revés, un cambio de identidad de un
+			// expediente avanzado es exactamente lo que se va a querer buscar
+			// después.
+			if (cambiaElLeadDeLaOportunidad) {
+				auditRecord({
+					entity: "opportunity",
+					id,
+					action: "cambio_de_lead_revalidacion",
+					data: {
+						leadAnterior: currentOpportunity[0].leadId,
+						leadNuevo: input.leadId ?? null,
+						detalle:
+							"se cambió el cliente de la oportunidad; la validación de identidad (RENAP/buró/documentos/análisis) que había era del cliente anterior",
+						resultado:
+							"analysisStatus vuelve a pending si estaba aprobado, detalle de crédito sin aprobar y marca de revalidación puesta (la etapa NO se mueve: está en el umbral o por debajo)",
+					},
+				});
+			}
+
+			// La reapertura deja su propia fila, tanto cuando revalidó como cuando
+			// las salvaguardas lo impidieron: en ese segundo caso el aviso es lo
+			// único que queda para saber que la validación es vieja.
+			if (reabreUnaPerdida && decisionRevalidacion.tipo !== "nada") {
+				const detalle =
+					"se reabrió una oportunidad que ya había cruzado el 30%; su validación de identidad (RENAP/buró/documentos) es anterior a la pérdida y el DPI pudo cambiar mientras estuvo perdida";
+
+				auditRecord({
+					entity: "opportunity",
+					id,
+					action: "reabrir_oportunidad_revalidacion",
+					data: {
+						porcentajeActual: oportunidadRevalidada?.closurePercentage,
+						porcentajeMaximoHistorico:
+							oportunidadRevalidada?.maxHistoricoClosurePercentage,
+						detalle,
+						resultado:
+							decisionRevalidacion.tipo === "resetear"
+								? "vuelve a la etapa de análisis (30%), analysisStatus pending y detalle de crédito sin aprobar"
+								: `NO se revalidó: ${MOTIVO_AVISO[decisionRevalidacion.razon]}`,
+					},
+					...(decisionRevalidacion.tipo === "solo_aviso" ? { ok: false } : {}),
+				});
+			}
+
 			// Si viene direccion, actualizar en el lead en lugar de la oportunidad
 			if (direccion !== undefined && currentOpportunity[0].leadId) {
 				await db
@@ -3162,8 +3862,13 @@ export const crmRouter = {
 					.where(eq(analysisChecklists.opportunityId, id));
 			}
 
-			// Record stage history if stage changed
-			if (isStageChange && input.stageId) {
+			// Record stage history if stage changed.
+			// ⚠️ No cuando la revalidación se llevó puesto el `stageId` pedido: el
+			// parche va al final del `.set()`, así que la etapa con la que quedó la
+			// oportunidad es la de análisis y no la de la request. Esta fila diría
+			// que fue a una etapa a la que nunca llegó; la transición real ya la
+			// escribió la transacción de arriba.
+			if (isStageChange && input.stageId && !parcheRevalidacion) {
 				await db.insert(opportunityStageHistory).values({
 					opportunityId: id,
 					fromStageId: currentOpportunity[0].stageId,
@@ -3487,6 +4192,9 @@ export const crmRouter = {
 					clientType: leads.clientType,
 					analysisStatus: opportunities.analysisStatus,
 					analysisRejectionCount: opportunities.analysisRejectionCount,
+					// Para no dar por válido el DPI de la identidad anterior: ver
+					// `documentosDeIdentidadVigentes`.
+					identityRevalidatedAt: opportunities.identityRevalidatedAt,
 				})
 				.from(opportunities)
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -3564,9 +4272,35 @@ export const crmRouter = {
 					.from(opportunityDocuments)
 					.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
 
-				const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
+				// 🔴 El DPI de la identidad VIEJA no cuenta. Si la oportunidad se
+				// revalidó (reapertura u override del candado), el documento de
+				// identidad subido antes de esa marca es de la persona anterior: sigue
+				// en el expediente pero deja de satisfacer el requisito. Sin esto, el
+				// reset se deshacía aprobando otra vez con el mismo escaneo.
+				const docsDeIdentidadVigentes = documentosDeIdentidadVigentes(
+					uploadedDocs,
+					opportunity[0].identityRevalidatedAt,
+				);
+
+				const uploadedTypes = new Set(
+					docsDeIdentidadVigentes.map((d) => d.documentType),
+				);
 				const requiredTypes = requiredDocs.map((r) => r.documentType);
 				const missingDocs = requiredTypes.filter((t) => !uploadedTypes.has(t));
+
+				// Falta el DPI pero SÍ hay uno subido: quedó viejo por la
+				// revalidación. El mensaje genérico ("faltan documentos") mandaría al
+				// analista a buscar un archivo que está ahí.
+				if (
+					faltaPorIdentidadRevalidada(
+						missingDocs,
+						uploadedDocs.map((d) => d.documentType),
+					)
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: MENSAJE_DPI_DESACTUALIZADO,
+					});
+				}
 
 				if (missingDocs.length > 0) {
 					const docLabels: Record<string, string> = {
@@ -3962,6 +4696,40 @@ export const crmRouter = {
 				});
 			}
 
+			// 🔴 Este procedure empuja la solicitud a Formalización (50%), y hasta
+			// acá el único requisito era que el detalle no estuviera aprobado
+			// todavía. Eso deja abierto justo lo que `parcheDeRevalidacion` acababa
+			// de cerrar: cuando una oportunidad revalida su identidad —se corrigió
+			// el DPI con el override del admin, o se reabrió una perdida— vuelve al
+			// 30% con `analysisStatus: "pending"` y `creditDetailApproved: false`, y
+			// ese `false` era precisamente el permiso para llamar acá. La solicitud
+			// llegaba al 50% con la identidad NUEVA y sin un documento de DPI nuevo,
+			// sin RENAP y sin buró.
+			//
+			// El criterio no se inventa acá: `analysisStatus === "approved"` es la
+			// señal que el propio stack usa para decir "el análisis está hecho y es
+			// de ESTA identidad". El único que la escribe es
+			// `approveOpportunityAnalysis`, que en el camino normal exige etapa de
+			// análisis, documentos de identidad POSTERIORES a
+			// `identityRevalidatedAt` (ver `documentosDeIdentidadVigentes`) y
+			// RENAP/buró contra el DPI vigente. Y el reset la devuelve a `pending`.
+			// Por eso alcanza con exigir `approved`: releer los documentos contra la
+			// marca sería repetir de este lado una comprobación que el estado ya
+			// resume.
+			//
+			// ⚠️ Con una salvedad conocida y FUERA del alcance de este cambio: en
+			// `approveOpportunityAnalysis` el `bypassValidation` de un admin saltea
+			// el bloque entero de documentos —`documentosDeIdentidadVigentes`
+			// incluido— y también el de RENAP/buró. O sea que un `approved` puede
+			// existir sin documento de identidad nuevo, y este guard lo va a aceptar.
+			// Cerrar eso es decisión del dueño del flujo, no de este guard.
+			if (opportunity.analysisStatus !== "approved") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"No se puede aprobar el detalle de crédito: el análisis de esta oportunidad no está aprobado (o se invalidó al revalidarse la identidad). Tiene que volver a pasar por análisis antes de avanzar a Formalización.",
+				});
+			}
+
 			const nextStage = await db
 				.select()
 				.from(salesStages)
@@ -3975,7 +4743,16 @@ export const crmRouter = {
 			}
 
 			// Update opportunity with approval
-			await db
+			//
+			// 🔴 El estado se releyó arriba y el UPDATE corre después: en el medio
+			// una revalidación puede dejar el análisis en `pending` y este UPDATE la
+			// empujaría igual al 50%. El predicado lo vuelve a exigir en la misma
+			// sentencia —Postgres lo re-evalúa tras esperar a la escritura rival—,
+			// que es el mismo patrón de `sqlCandanteDeLaOportunidad` y
+			// `sqlResetPermitido`. `creditDetailApproved` NO va en el predicado a
+			// propósito: la columna admite NULL en filas viejas y un `= false`
+			// dejaría fuera a las que sí hay que aprobar.
+			const aprobadas = await db
 				.update(opportunities)
 				.set({
 					stageId: nextStage[0].id,
@@ -3984,7 +4761,20 @@ export const crmRouter = {
 					creditDetailApprovedAt: new Date(),
 					updatedAt: new Date(),
 				})
-				.where(eq(opportunities.id, input.opportunityId));
+				.where(
+					and(
+						eq(opportunities.id, input.opportunityId),
+						eq(opportunities.analysisStatus, "approved"),
+					),
+				)
+				.returning({ id: opportunities.id });
+
+			if (aprobadas.length === 0) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"La oportunidad cambió mientras se aprobaba el detalle de crédito y su análisis ya no está aprobado. Recarga la página e intenta de nuevo.",
+				});
+			}
 			auditRecord({
 				entity: "opportunity",
 				id: input.opportunityId,
@@ -5310,9 +6100,7 @@ export const crmRouter = {
 					const url = await getFileUrl(doc.filePath);
 					return {
 						...doc,
-						description: isManualBankDocumentCleanupDescription(
-							doc.description,
-						)
+						description: isManualBankDocumentCleanupDescription(doc.description)
 							? null
 							: doc.description,
 						url,
@@ -5406,14 +6194,8 @@ export const crmRouter = {
 								.from(opportunityDocuments)
 								.where(
 									and(
-										eq(
-											opportunityDocuments.opportunityId,
-											input.opportunityId,
-										),
-										eq(
-											opportunityDocuments.documentType,
-											input.documentType,
-										),
+										eq(opportunityDocuments.opportunityId, input.opportunityId),
+										eq(opportunityDocuments.documentType, input.documentType),
 									),
 								)
 								.limit(1);
@@ -5448,17 +6230,13 @@ export const crmRouter = {
 						},
 						deleteUploadedFile: deleteFileFromR2,
 						persistCleanupDebt: async (debt) => {
-							const description =
-								getManualBankUploadCleanupDescription(debt);
+							const description = getManualBankUploadCleanupDescription(debt);
 							const [existing] = await db
 								.select({ id: opportunityDocuments.id })
 								.from(opportunityDocuments)
 								.where(
 									and(
-										eq(
-											opportunityDocuments.opportunityId,
-											debt.opportunityId,
-										),
+										eq(opportunityDocuments.opportunityId, debt.opportunityId),
 										eq(opportunityDocuments.filePath, debt.key),
 									),
 								)
@@ -5589,9 +6367,8 @@ export const crmRouter = {
 							documentType: document.documentType,
 							description: document.description,
 							withOpportunityLock: withOpportunityDocumentMutationLock,
-							runTransaction: <R>(
-								operation: (tx: Transaction) => Promise<R>,
-							) => db.transaction(operation),
+							runTransaction: <R>(operation: (tx: Transaction) => Promise<R>) =>
+								db.transaction(operation),
 							readDocument: async (tx) => {
 								const [current] = await tx
 									.select()
@@ -5686,13 +6463,14 @@ export const crmRouter = {
 				// Si el archivo es la evidencia inmutable de una validación de
 				// integridad documental, no se borra de R2: esa misma ruta queda
 				// referenciada por document_integrity_validations para auditoría.
-				const isDocumentIntegrityEvidence = isImmutableDocumentIntegrityEvidencePath({
-					filePath: document.filePath,
-					bankStatementPrefix: buildUploadPrefix(
-						"bank_statement",
-						document.opportunityId,
-					),
-				});
+				const isDocumentIntegrityEvidence =
+					isImmutableDocumentIntegrityEvidencePath({
+						filePath: document.filePath,
+						bankStatementPrefix: buildUploadPrefix(
+							"bank_statement",
+							document.opportunityId,
+						),
+					});
 
 				if (!isDocumentIntegrityEvidence) {
 					// Eliminar de R2
@@ -8234,7 +9012,10 @@ export const crmRouter = {
 				});
 			}
 
-			// Verificar que la oportunidad existe
+			// La oportunidad se verifica ANTES del gate: con un id inexistente no
+			// hay alta posible, y correr el gate primero convertía el NOT_FOUND en
+			// un rechazo por mora (o en "no disponible" si cartera estaba caída),
+			// gastando además el viaje a SIFCO y una fila de bitácora por nada.
 			const [opportunity] = await db
 				.select({ id: opportunities.id })
 				.from(opportunities)
@@ -8245,6 +9026,16 @@ export const crmRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Oportunidad no encontrada",
 				});
+			}
+
+			// Alta de co-deudor: siempre se consulta. Un co-deudor moroso respalda
+			// el crédito igual de mal que un titular moroso.
+			const gateCoDeudor = await evaluarGateMoraDpi(
+				resultadoDpi.dpiLimpio,
+				depsGateMora,
+			);
+			if (gateCoDeudor.rechazado) {
+				throw new ORPCError("BAD_REQUEST", { message: gateCoDeudor.mensaje });
 			}
 
 			const [newCoDebtor] = await db
@@ -8276,7 +9067,10 @@ export const crmRouter = {
 					.string()
 					.min(1, "El nombre completo es requerido")
 					.optional(),
-				dpi: z.string().min(1, "El DPI es requerido").optional(),
+				// 🔴 El `min(1)` NO es cosmético: es lo que impide dejar el DPI en
+				// blanco, que en `updateLead` hubo que rechazar a mano. Blanquearlo
+				// vuelve invisible al moroso para siempre (ver `MENSAJE_DPI_EN_BLANCO`).
+				dpi: z.string().min(1, MENSAJE_DPI_EN_BLANCO).optional(),
 				age: z.number().int().positive().nullable().optional(),
 				gender: z.enum(["male", "female"]).nullable().optional(),
 				maritalStatus: z
@@ -8294,8 +9088,19 @@ export const crmRouter = {
 				scoredAt: z.date().nullable().optional(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			const { id, ...updateData } = input;
+
+			// Igual que en `updateLead`: el override se anota después de confirmar
+			// que el UPDATE tocó una fila. Ver `resolverEdicionConMora`.
+			let overrideDeMora: AuditEntry | null = null;
+
+			// El mismo rechazo que en `updateLead`. El `min(1)` del schema ya para el
+			// `""`, pero no el `"   "`, y los dos son el mismo intento: dejar sin DPI
+			// a alguien para que el gate no lo vuelva a encontrar.
+			if (esDpiEnBlanco(updateData.dpi)) {
+				throw new ORPCError("BAD_REQUEST", { message: MENSAJE_DPI_EN_BLANCO });
+			}
 
 			// Validar DPI si se envía
 			if (updateData.dpi) {
@@ -8308,19 +9113,178 @@ export const crmRouter = {
 				updateData.dpi = resultadoDpi.dpiLimpio;
 			}
 
-			const [updatedCoDebtor] = await db
-				.update(coDebtors)
-				.set({
-					...updateData,
-					updatedAt: new Date(),
-				})
-				.where(eq(coDebtors.id, id))
-				.returning();
+			const editaAdmin = context.userRole === "admin";
+			let coDebtorAntesDelUpdate:
+				| { dpi: string | null; opportunityId: string }
+				| undefined;
+			// Igual que en `updateLead`: el veredicto sobrevive al bloque porque el
+			// override del admin se cobra DESPUÉS del UPDATE.
+			let candadoDpi: ResultadoCandadoDpi | null = null;
+
+			if (updateData.dpi !== undefined) {
+				[coDebtorAntesDelUpdate] = await db
+					.select({
+						dpi: coDebtors.dpi,
+						opportunityId: coDebtors.opportunityId,
+					})
+					.from(coDebtors)
+					.where(eq(coDebtors.id, id))
+					.limit(1);
+
+				if (coDebtorAntesDelUpdate) {
+					// El candado va ANTES que el gate de mora: consulta local barata
+					// contra el viaje a SIFCO. El co-deudor cuelga de una oportunidad:
+					// el candado se evalúa sobre ESA, no sobre las demás del lead.
+					candadoDpi = await evaluarCandadoDpi({
+						dpiActual: coDebtorAntesDelUpdate.dpi,
+						dpiNuevo: updateData.dpi,
+						sujeto: "codeudor",
+						esAdmin: editaAdmin,
+						opportunityId: coDebtorAntesDelUpdate.opportunityId,
+					});
+					if (candadoDpi.bloqueado) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: candadoDpi.message,
+						});
+					}
+				}
+
+				// Igual que en `updateLead`: la mora solo se consulta si el DPI es
+				// nuevo o cambia, para no dejar congelada la ficha de un co-deudor que
+				// ya está en mora.
+				if (
+					requiereConsultaDeMora(updateData.dpi, coDebtorAntesDelUpdate?.dpi)
+				) {
+					// Mismo agujero que en `updateLead`, con el equivalente del
+					// co-deudor: su cartera propia no es la de un lead sino la de su
+					// oportunidad (una sola). Ver `numerosSifcoDelDpiYDeLaOportunidad`.
+					const oportunidadDelCoDeudor = coDebtorAntesDelUpdate?.opportunityId;
+					const gate = await evaluarGateMoraDpi(updateData.dpi, {
+						...depsGateMora,
+						numerosCreditoConocidos: (dpiConsultado) =>
+							oportunidadDelCoDeudor
+								? numerosSifcoDelDpiYDeLaOportunidad(
+										dpiConsultado,
+										oportunidadDelCoDeudor,
+									)
+								: numerosSifcoConocidosPorDpi(dpiConsultado),
+					});
+					// Misma válvula que en `updateLead`: el DPI del co-deudor también se
+					// tipea mal y también hay que poder corregirlo. `id` va en `null`
+					// porque la bitácora solo conoce lead/opportunity/vehicle y este es
+					// un co-deudor; su uuid viaja en el detalle.
+					const resolucion = resolverEdicionConMora(gate, context.userRole, {
+						entity: "lead",
+						id: null,
+						dpi: updateData.dpi,
+						datosExtra: { coDebtorId: id },
+					});
+					if (!resolucion.permitir) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: resolucion.mensaje,
+						});
+					}
+					overrideDeMora = resolucion.anotacionPendiente;
+				}
+			}
+
+			// Misma carrera que en `updateLead`: entre el candado y esta sentencia,
+			// otra transacción puede aprobar el análisis de la oportunidad que
+			// respalda y el DPI del co-deudor se escribiría igual. La condición
+			// viaja adentro; Postgres la re-evalúa tras esperar a la escritura
+			// rival. El admin queda fuera: su válvula sigue abierta.
+			const candadoEnElPredicado =
+				coDebtorAntesDelUpdate !== undefined &&
+				!editaAdmin &&
+				dpiCambia(coDebtorAntesDelUpdate.dpi, updateData.dpi);
+			const whereDelUpdate =
+				candadoEnElPredicado && coDebtorAntesDelUpdate
+					? and(
+							eq(coDebtors.id, id),
+							noExisteOportunidadCandantePorId(
+								coDebtorAntesDelUpdate.opportunityId,
+							),
+						)
+					: eq(coDebtors.id, id);
+
+			// Igual que en `updateLead`: el cambio de DPI del co-deudor y la
+			// revalidación que cuesta van en UNA transacción. Separadas, una
+			// revalidación caída dejaba el DPI nuevo commiteado con la oportunidad
+			// aprobada contra la identidad vieja.
+			const [updatedCoDebtor] = await auditedTransaction(async (tx) => {
+				// 🔴 Mismo lock que en `updateLead`: el NOT EXISTS lee bajo snapshot
+				// y no frena una aprobación 30→40 en vuelo. FOR UPDATE sobre SU
+				// oportunidad serializa las dos escrituras.
+				if (
+					coDebtorAntesDelUpdate &&
+					updateData.dpi !== undefined &&
+					dpiCambia(coDebtorAntesDelUpdate.dpi, updateData.dpi)
+				) {
+					await tx
+						.select({ id: opportunities.id })
+						.from(opportunities)
+						.where(eq(opportunities.id, coDebtorAntesDelUpdate.opportunityId))
+						.for("update");
+				}
+
+				const filas = await tx
+					.update(coDebtors)
+					.set({
+						...updateData,
+						updatedAt: new Date(),
+					})
+					.where(whereDelUpdate)
+					.returning();
+
+				if (filas.length === 0) return filas;
+
+				// Mismo costo que en `updateLead`: si el admin abrió el candado, la
+				// oportunidad que respalda vuelve a análisis, porque su validación de
+				// identidad se hizo contra el DPI anterior del co-deudor. Es una sola
+				// oportunidad: el co-deudor cuelga de una, no de un lead. Si no puede
+				// completarse, lanza y este `tx` revierte el DPI recién escrito.
+				if (candadoDpi?.overrideAdmin && candadoDpi.candantes?.length) {
+					await revalidarOportunidades({
+						oportunidades: candadoDpi.candantes,
+						accion: "candado_override_revalidacion",
+						detalle:
+							"un administrador cambió el DPI del co-deudor pese al candado; la validación de identidad de esta oportunidad se hizo contra el DPI anterior",
+						datosExtra: { coDebtorId: id, dpiNuevo: updateData.dpi },
+						anotar: auditRecord,
+						cambiadaPor: context.userId,
+						database: tx,
+					});
+				}
+
+				return filas;
+			});
 
 			if (!updatedCoDebtor) {
+				// Cero filas con la condición puesta puede ser el candado cerrándose
+				// en el medio: se contesta como el candado y no como NOT_FOUND.
+				if (candadoEnElPredicado && coDebtorAntesDelUpdate) {
+					const candadoAhora = await evaluarCandadoDpi({
+						dpiActual: coDebtorAntesDelUpdate.dpi,
+						dpiNuevo: updateData.dpi,
+						sujeto: "codeudor",
+						esAdmin: false,
+						opportunityId: coDebtorAntesDelUpdate.opportunityId,
+					});
+					if (candadoAhora.bloqueado) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: candadoAhora.message,
+						});
+					}
+				}
+
 				throw new ORPCError("NOT_FOUND", {
 					message: "Co-deudor no encontrado",
 				});
+			}
+
+			// Recién acá: el override existe si el cambio existió.
+			if (overrideDeMora) {
+				auditRecord(overrideDeMora);
 			}
 
 			return updatedCoDebtor;
@@ -8332,27 +9296,164 @@ export const crmRouter = {
 				id: z.string().uuid(),
 			}),
 		)
-		.handler(async ({ input }) => {
-			// Eliminar el credit analysis asociado al co-deudor si existe
-			await db
-				.delete(creditAnalysis)
-				.where(eq(creditAnalysis.coDebtorId, input.id));
-
-			// Mismo motivo: FK NO ACTION, sin esto el borrado de abajo revienta.
-			await db
-				.delete(licenseQrVerifications)
-				.where(eq(licenseQrVerifications.coDebtorId, input.id));
-
-			const [deletedCoDebtor] = await db
-				.delete(coDebtors)
+		.handler(async ({ input, context }) => {
+			// 🔴 Borrar al co-deudor es la otra forma de reemplazar una identidad
+			// candada: el candado de `updateCoDebtor` impide cambiarle el DPI, pero
+			// borrarlo y crear otro con otro DPI dejaba el expediente respaldado por
+			// alguien distinto de quien pasó por RENAP, buró y documentos.
+			//
+			// Se cierra por acá y no en `createCoDebtor`: agregar un co-deudor tarde
+			// es un flujo legítimo —el analista pide refuerzo justo cuando la
+			// solicitud ya avanzó—. El REEMPLAZO exige borrar primero, así que con
+			// el borrado candado la maniobra queda cerrada sin romper el flujo bueno.
+			const [coDeudorABorrar] = await db
+				.select({ opportunityId: coDebtors.opportunityId })
+				.from(coDebtors)
 				.where(eq(coDebtors.id, input.id))
-				.returning();
+				.limit(1);
 
-			if (!deletedCoDebtor) {
+			const esAdmin = context.userRole === "admin";
+			const candado = coDeudorABorrar
+				? await evaluarCandadoBorradoCoDeudor({
+						opportunityId: coDeudorABorrar.opportunityId,
+						esAdmin,
+					})
+				: null;
+
+			if (candado?.bloqueado) {
+				throw new ORPCError("BAD_REQUEST", { message: candado.message });
+			}
+
+			// 🔴 Todo el borrado en UNA transacción, con el candado DENTRO del WHERE.
+			//
+			// Antes el chequeo del candado vivía fuera de la escritura y la evidencia
+			// (análisis y verificación de licencia) se borraba sin transacción: una
+			// aprobación concurrente podía candar la oportunidad entre el chequeo y
+			// los deletes, y el co-deudor se iba igual — o peor, se quedaba en el
+			// expediente pero SIN su análisis ni su QR, que ya estaban borrados.
+			//
+			// Ahora el candado viaja en el WHERE del delete de `coDebtors`: Postgres
+			// re-evalúa el predicado tras esperar a la escritura rival, así que la
+			// carrera se cierra. Y cero filas por el predicado aborta la transacción:
+			// la evidencia vuelve, el expediente queda entero.
+			//
+			// ⚠️ La evidencia se borra ANTES que el co-deudor y no después, aunque la
+			// decisión sea del co-deudor: `creditAnalysis.co_debtor_id` y
+			// `licenseQrVerifications.co_debtor_id` son FK NO ACTION y NO deferidas,
+			// así que Postgres las verifica al final de CADA sentencia — borrar al
+			// padre primero revienta en el acto cuando tiene análisis. Lo que hace que
+			// el orden ya no importe es la transacción: si el predicado no deja borrar
+			// al co-deudor, el throw de adentro revierte también estos dos deletes.
+			// `auditedTransaction` y no `db.transaction`: ahora se anota DENTRO de la
+			// transacción (el override del admin y su revalidación), así que si algo
+			// revierte, esas anotaciones tienen que irse con la escritura.
+			await auditedTransaction(async (tx) => {
+				// 🔴 Lock de SU oportunidad antes de tocar nada: el predicado del
+				// candado lee bajo snapshot y no frena una aprobación 30→40 en vuelo.
+				if (coDeudorABorrar) {
+					await tx
+						.select({ id: opportunities.id })
+						.from(opportunities)
+						.where(eq(opportunities.id, coDeudorABorrar.opportunityId))
+						.for("update");
+				}
+
+				await tx
+					.delete(creditAnalysis)
+					.where(eq(creditAnalysis.coDebtorId, input.id));
+
+				await tx
+					.delete(licenseQrVerifications)
+					.where(eq(licenseQrVerifications.coDebtorId, input.id));
+
+				// El admin conserva su válvula: sin predicado. El costo se cobra
+				// abajo, revalidando la oportunidad.
+				const where =
+					!esAdmin && coDeudorABorrar
+						? and(
+								eq(coDebtors.id, input.id),
+								noExisteOportunidadCandantePorId(coDeudorABorrar.opportunityId),
+							)
+						: eq(coDebtors.id, input.id);
+
+				const [deletedCoDebtor] = await tx
+					.delete(coDebtors)
+					.where(where)
+					.returning();
+
+				if (deletedCoDebtor) {
+					// El paso del admin no es silencioso, igual que el del gate de mora:
+					// después hay que poder preguntar por qué salió ese co-deudor.
+					if (candado?.overrideAdmin && coDeudorABorrar) {
+						auditRecord({
+							entity: "opportunity",
+							id: coDeudorABorrar.opportunityId,
+							action: "candado_dpi_override_admin",
+							data: {
+								coDebtorId: input.id,
+								detalle:
+									"un administrador eliminó al co-deudor de una solicitud que ya pasó del 30%",
+							},
+						});
+
+						// 🔴 Y cuesta lo mismo que corregir el DPI: la oportunidad vuelve
+						// a análisis. Antes del override solo quedaba la bitácora y la
+						// solicitud seguía aprobada, con la evidencia de identidad
+						// producida contra un respaldo que ya no existe. Borrar al
+						// co-deudor analizado es el mismo costo que cambiarle el DPI
+						// (decisión del dueño del producto).
+						//
+						// 🔴 Va DENTRO de esta transacción —antes corría después de que
+						// cerrara—: si la revalidación no puede completarse, el borrado
+						// del co-deudor se revierte con ella. Si no, el respaldo
+						// desaparecía y la solicitud quedaba viva y aprobada sin él.
+						if (candado.candantes?.length) {
+							await revalidarOportunidades({
+								oportunidades: candado.candantes,
+								accion: "candado_override_revalidacion",
+								detalle:
+									"un administrador eliminó al co-deudor pese al candado; la validación de identidad de esta oportunidad se hizo con ese respaldo",
+								datosExtra: { coDebtorId: input.id },
+								anotar: auditRecord,
+								cambiadaPor: context.userId,
+								database: tx,
+							});
+						}
+					}
+
+					return;
+				}
+
+				// Cero filas con la condición puesta puede ser el candado cerrándose
+				// en el medio: se distingue del NOT_FOUND preguntando si la fila sigue
+				// ahí. Cualquiera de los dos throws revierte los deletes de arriba.
+				const [sigueVivo] = await tx
+					.select({ id: coDebtors.id })
+					.from(coDebtors)
+					.where(eq(coDebtors.id, input.id))
+					.limit(1);
+
+				if (sigueVivo && coDeudorABorrar) {
+					// Lee por fuera de la transacción a propósito: pregunta por el
+					// estado ya comprometido de la oportunidad, que es el que ganó la
+					// carrera. Solo se consultan `opportunities` y `salesStages`, que
+					// esta transacción no escribió.
+					const candadoAhora = await evaluarCandadoBorradoCoDeudor({
+						opportunityId: coDeudorABorrar.opportunityId,
+						esAdmin: false,
+					});
+
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							candadoAhora.message ??
+							"No se pudo eliminar al co-deudor: la solicitud cambió de estado mientras se procesaba. Volvé a intentarlo.",
+					});
+				}
+
 				throw new ORPCError("NOT_FOUND", {
 					message: "Co-deudor no encontrado",
 				});
-			}
+			});
 
 			return { success: true, message: "Co-deudor eliminado correctamente" };
 		}),
@@ -8784,5 +9885,145 @@ export const crmRouter = {
 			);
 
 			return { pipeline, ranking, activity, byTipoCredito, byMarca, byMedio };
+		}),
+
+	/**
+	 * ¿Este DPI ya es cliente y está en mora?
+	 *
+	 * Consulta de solo lectura contra cartera, para que la pantalla pueda avisar
+	 * antes de que alguien llene un formulario entero. NO es el gate: el corte
+	 * duro vive en `evaluarGateMoraDpi` (`lib/gate-mora-dpi.ts`) y ya está
+	 * enganchado en los puntos donde el CRM da de alta o cambia el DPI de una
+	 * persona. Este procedure existe aparte porque informa sin bloquear.
+	 *
+	 * 🔴 **Pero tiene que contestar lo MISMO que va a contestar el gate**, o el
+	 * aviso es peor que no avisar: anticipar "todo bien" y que el formulario
+	 * reviente al guardar es exactamente el trabajo perdido que esta pantalla
+	 * existe para ahorrar. De ahí las dos cosas que copia del gate: manda los
+	 * números de crédito que el CRM conoce del DPI (sin ellos, un deudor que solo
+	 * existe en el CRM salía CLIENTE_NO_ENCONTRADO → "seguí"), y respeta el kill
+	 * switch (con la integración apagada el gate deja pasar, así que anunciar un
+	 * bloqueo acá sería inventarlo).
+	 *
+	 * **Fail-closed.** Si cartera o SIFCO no contestan, la respuesta es
+	 * `puedeContinuar: false` con motivo `SERVICIO_NO_DISPONIBLE`. Nunca se
+	 * traduce un fallo a "sin mora": el cliente HTTP lanza
+	 * `ConsultaMoraNoDisponibleError` justamente para que acá no haya forma de
+	 * confundir las dos cosas.
+	 *
+	 * **Las tres salidas quedan en la bitácora, no dos.** Bloqueado, limpio y
+	 * —la importante— no se pudo consultar. Con fail-closed una caída del core
+	 * frena TODAS las solicitudes, y sin esa tercera fila la auditoría no podría
+	 * distinguir "hubo 40 morosos esta mañana" de "SIFCO estuvo caído media
+	 * hora". La fila de servicio caído va con `ok: false`, así que además se
+	 * cuenta aparte de los bloqueos legítimos.
+	 *
+	 * La decisión vive en `lib/validacion-mora.ts` y acá solo se la cablea; de
+	 * ahí que las anotaciones de este procedure no salgan de este archivo.
+	 *
+	 * 🔴 **La respuesta se recorta por rol.** El veredicto completo trae el
+	 * expediente crediticio de un tercero: nombre, código de cliente SIFCO,
+	 * cada crédito con su estado, su monto en mora y sus cuotas atrasadas, y el
+	 * historial. `crmProcedure` deja entrar a `canAccessClients` —ventas,
+	 * analista, contabilidad, jurídico…—, así que sin recorte cualquier asesor
+	 * tecleando un DPI ajeno se lleva la ficha de deuda de esa persona, sin que
+	 * medie ninguna relación con un lead suyo.
+	 *
+	 * El criterio es `PERMISSIONS.canAccessCobros` (admin, cobros y supervisor
+	 * de cobros): es el predicado que el repo ya usa para "esta gente gestiona
+	 * la deuda en cartera", y son quienes tienen motivo para ver el detalle.
+	 * Los demás reciben solo el veredicto —`puedeContinuar`, `motivo`,
+	 * `mensaje`, `consultadoEn`—, que es exactamente lo que necesitan: la
+	 * pregunta que este procedure contesta es "¿sigo con este formulario?", y
+	 * para eso el detalle no aporta nada. `mensaje` ya dice "tiene mora activa
+	 * en 2 créditos" sin nombrar ni un número de crédito.
+	 */
+	validarMoraPorDpi: crmProcedure
+		.meta({ audit: { entity: "lead", action: "validar_mora_dpi" } })
+		.input(z.object({ dpi: z.string().min(1, "El DPI es requerido") }))
+		.handler(async ({ input, context }) => {
+			// El DPI se valida SIEMPRE, incluso con la integración apagada: un DPI
+			// mal formado es un error del formulario y no tiene nada que ver con
+			// cartera.
+			const validacion = validarDpi(input.dpi);
+			if (!validacion.valid) {
+				throw new ORPCError("BAD_REQUEST", { message: validacion.error });
+			}
+			const dpiNormalizado = validacion.dpiLimpio;
+
+			// 🔴 El kill switch manda también acá. Con la integración apagada el gate
+			// deja pasar sin consultar (fail-open deliberado), así que si este
+			// preflight respondiera "bloqueado" le estaría anunciando al asesor un
+			// corte que después no ocurre — y al revés, un "no se pudo consultar"
+			// eterno en una pantalla donde nada está fallando. Misma anotación que
+			// usa el gate: mientras la bandera esté abajo entra gente sin validar y
+			// hay que poder saber quiénes.
+			if (!isCarteraBackEnabled()) {
+				auditRecord({
+					entity: "lead",
+					id: null,
+					action: "validar_mora_dpi_apagado",
+					data: {
+						dpi: dpiNormalizado,
+						detalle:
+							"la integración con cartera está desactivada (ENABLE_CARTERA_BACK_INTEGRATION); no se consultó la mora",
+					},
+				});
+				return {
+					puedeContinuar: true,
+					motivo: "SIN_MORA" as const,
+					mensaje: MENSAJE_GATE_APAGADO,
+					consultadoEn: new Date().toISOString(),
+				};
+			}
+
+			const resultado = await resolverValidacionMora(dpiNormalizado, {
+				// Ya se validó arriba; revalidar solo abriría la puerta a que las dos
+				// validaciones se separen.
+				validar: (dpi) => ({ valid: true as const, dpiLimpio: dpi }),
+				consultar: async (dpi) => {
+					// 🔴 Los mismos números que manda el gate, o el preflight miente.
+					// Cartera resuelve el DPI preguntándole a SIFCO, que no conoce los
+					// créditos nacidos acá (`CRM-<uuid>`, `insoluto-N`): preguntando
+					// solo por DPI, a un deudor que solo existe en el CRM este
+					// procedure le contestaba CLIENTE_NO_ENCONTRADO con
+					// `puedeContinuar: true` y el gate lo rechazaba dos pantallas
+					// después. Ver `lib/numeros-sifco-por-dpi.ts`.
+					let numerosConocidos: string[];
+					try {
+						numerosConocidos = await numerosSifcoConocidosPorDpi(dpi);
+					} catch (error) {
+						// Fail-closed igual que el gate, y por el camino que este
+						// procedure ya tiene: sin esos números la consulta vería menos
+						// cartera de la que hay, y un "sin mora" armado sobre media
+						// cartera es peor que un "no se pudo consultar". Lanzarlo así
+						// deja la misma fila `validar_mora_dpi_no_disponible`.
+						throw new ConsultaMoraNoDisponibleError(
+							"no se pudieron reunir los números de crédito que el CRM asocia al DPI",
+							error,
+						);
+					}
+
+					return carteraBackClient.consultarMoraPorDpi(dpi, numerosConocidos);
+				},
+				anotar: auditRecord,
+			});
+
+			if (resultado.tipo === "dpi_invalido") {
+				throw new ORPCError("BAD_REQUEST", { message: resultado.error });
+			}
+
+			const { veredicto } = resultado;
+
+			if (!PERMISSIONS.canAccessCobros(context.userRole ?? "")) {
+				return {
+					puedeContinuar: veredicto.puedeContinuar,
+					motivo: veredicto.motivo,
+					mensaje: veredicto.mensaje,
+					consultadoEn: veredicto.consultadoEn,
+				};
+			}
+
+			return veredicto;
 		}),
 };

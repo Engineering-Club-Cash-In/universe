@@ -8,7 +8,10 @@ type BigInput = number | string | Big;
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
-  monto_boleta: z.number().min(0),
+  monto_boleta: z.union([
+    z.number().min(0),
+    z.string().regex(/^\d{1,16}\.\d{2}$/),
+  ]),
   fecha_pago: z.string(),
   llamada: z.string().optional(),
   renuevo_o_nuevo: z.string().optional(),
@@ -20,10 +23,44 @@ export const pagoSchema = z.object({
   url_boletas: z.array(z.string()),
   banco_id: z.number().int().positive().optional(),
   numeroAutorizacion: z.string().optional(),
-  registerBy: z.string().min(1),
+  registerBy: z.string().min(1).refine((value) => {
+    const normalized = value.trim().toUpperCase();
+    return normalized !== "NEXA" && !normalized.startsWith("NEXA:");
+  }),
   fecha_boleta: z.string(),
   origen_pago: z.enum(["transferencia", "cheque", "boleta"]).optional().default("transferencia"),
 });
+
+export const internalNexaPagoSchema = pagoSchema.extend({
+  fecha_pago: z.string().datetime({ offset: true })
+    .refine((value) => !Number.isNaN(Date.parse(value)), "Invalid payment date"),
+  fecha_boleta: z.string().date(),
+  registerBy: z.literal("NEXA"),
+});
+
+export const getInternalNexaPaymentDate = (fechaPago: string, eventId?: number) => {
+  if (eventId === undefined) return null;
+  const date = new Date(fechaPago);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Guatemala",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date).map(({ type, value }) => [type, value]));
+  return new Date(Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+    date.getUTCMilliseconds(),
+  ));
+};
 
 export const CREDIT_PENDING_CANCELLATION_ERROR = {
   code: "CREDIT_PENDING_CANCELLATION",
@@ -41,6 +78,17 @@ export const getCuotaIdForPaymentInsert = (
 ) => cuotaId ?? null;
 
 export const getRequestedInstallmentFloor = (_requestedInstallment: number) => 1;
+
+export const shouldApplyFinalSmallRemainderAsOther = ({
+  availableRemaining,
+  hasInsertedPayment,
+}: {
+  availableRemaining: BigInput;
+  hasInsertedPayment: boolean;
+}) =>
+  hasInsertedPayment &&
+  new Big(availableRemaining).gt(0) &&
+  new Big(availableRemaining).lte(25);
 
 export const shouldMarkInstallmentPaymentPaid = ({
   allRemainingZero,

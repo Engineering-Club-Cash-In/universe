@@ -1,9 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import {
+	applyOfficialMonthlyMora,
+	dateRangeIncludesMonth,
 	fillMissingMontoACobrarPeriods,
 	getMontoACobrarParticipacionTotals,
 	getMontoACobrarViewRow,
 } from "./monto-a-cobrar";
+
+describe("dateRangeIncludesMonth", () => {
+	test("solo exige el cierre oficial cuando el rango toca el mes operativo", () => {
+		expect(dateRangeIncludesMonth("2026-08-01", "2026-08-31", "2026-09")).toBe(
+			false,
+		);
+		expect(dateRangeIncludesMonth("2026-08-15", "2026-09-05", "2026-09")).toBe(
+			true,
+		);
+		expect(dateRangeIncludesMonth("2026-09-30", "2026-10-15", "2026-09")).toBe(
+			true,
+		);
+	});
+});
 
 describe("fillMissingMontoACobrarPeriods", () => {
 	test("rellena buckets diarios faltantes incluyendo el split y metadata", () => {
@@ -96,8 +112,28 @@ const montoRow = {
 	participacion_actual: true,
 };
 
+test("reemplaza solo la mora del mes operativo con el cierre oficial", () => {
+	const agosto = { ...montoRow, bucket: "2026-08-01", total_mora: "100.00" };
+	const septiembre = {
+		...montoRow,
+		bucket: "2026-09-01T00:00:00.000Z",
+		total_mora: "2467734.59",
+	};
+
+	const rows = applyOfficialMonthlyMora(
+		[agosto, septiembre],
+		"2026-09",
+		"425169.19",
+	);
+
+	expect(rows[0]?.total_mora).toBe("100.00");
+	expect(rows[1]?.total_mora).toBe("425169.19");
+	expect(septiembre.total_mora).toBe("2467734.59");
+});
+
 test("consolida interés con IVA y seguro con GPS sin alterar el total", () => {
 	expect(getMontoACobrarViewRow(montoRow, false)).toEqual({
+		cuotas: 2,
 		capital: 100,
 		interesIva: 11.2,
 		servicios: 7,
@@ -113,8 +149,9 @@ test("consolida interés con IVA y seguro con GPS sin alterar el total", () => {
 	});
 });
 
-test("conserva la semántica acumulada en los rubros consolidados", () => {
+test("el acumulado muestra solo las cuotas anteriores pendientes", () => {
 	expect(getMontoACobrarViewRow(montoRow, true)).toMatchObject({
+		cuotas: 1,
 		capital: 200,
 		interesIva: 22.4,
 		servicios: 14,
@@ -281,10 +318,11 @@ test("el acumulado usa el último período y no suma valores ya acumulados", () 
 	});
 });
 
-test("el acumulado conserva el split ante un último bucket solo de pagos", () => {
+test("el acumulado usa el último corte exacto aunque haya quedado en cero", () => {
 	const rows = [
 		{
 			cuotas_count: 1,
+			mora_count: 1,
 			capital_inv_participacion_actual: "20",
 			capital_cube_participacion_actual: "180",
 			interes_iva_inv_participacion_actual: "10",
@@ -295,6 +333,18 @@ test("el acumulado conserva el split ante un último bucket solo de pagos", () =
 		},
 		{
 			cuotas_count: 0,
+			mora_count: 2,
+			capital_inv_participacion_actual: "30",
+			capital_cube_participacion_actual: "270",
+			interes_iva_inv_participacion_actual: "15",
+			interes_iva_cube_participacion_actual: "135",
+			creditos_participacion_invalida: 0,
+			creditos_participacion_invalida_rango: 0,
+			cuotas_participacion_invalida: 0,
+		},
+		{
+			cuotas_count: 0,
+			mora_count: 0,
 			capital_inv_participacion_actual: "0",
 			capital_cube_participacion_actual: "0",
 			interes_iva_inv_participacion_actual: "0",
@@ -306,9 +356,9 @@ test("el acumulado conserva el split ante un último bucket solo de pagos", () =
 	];
 
 	expect(getMontoACobrarParticipacionTotals(rows, true)).toMatchObject({
-		capitalInv: 20,
-		capitalCube: 180,
-		interesIvaInv: 10,
-		interesIvaCube: 90,
+		capitalInv: 0,
+		capitalCube: 0,
+		interesIvaInv: 0,
+		interesIvaCube: 0,
 	});
 });

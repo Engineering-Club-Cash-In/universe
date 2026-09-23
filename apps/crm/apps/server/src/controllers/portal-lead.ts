@@ -1,16 +1,33 @@
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
-import { auditRecord } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import { leads, opportunities } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
+import { auditRecord } from "../lib/audit";
 import { eqDpi } from "../lib/dpi-lookup";
 import { eqEmail } from "../lib/email-lookup";
+import {
+	esDpiEnBlanco,
+	evaluarGateMoraDpi,
+	MENSAJE_DPI_EN_BLANCO,
+	requiereConsultaDeMora,
+} from "../lib/gate-mora-dpi";
+import {
+	dpiCambia,
+	evaluarCandadoDpi,
+	noExisteOportunidadCandanteDelLead,
+} from "../lib/lead-dpi-lock";
+import {
+	numerosSifcoConocidosPorDpi,
+	numerosSifcoDelDpiYDelLead,
+} from "../lib/numeros-sifco-por-dpi";
 import { extractBearerToken, secretsMatch } from "../lib/service-token";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
+import { carteraBackClient } from "../services/cartera-back-client";
+import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 import {
@@ -22,6 +39,22 @@ import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
 } from "./public-lead";
+
+/**
+ * Las dependencias de producción del gate de mora. La regla vive en
+ * `lib/gate-mora-dpi.ts` sin saber de HTTP ni de bitácora; acá se le enchufan.
+ */
+const depsGateMora = {
+	consultar: (dpi: string, numerosCreditoConocidos?: string[]) =>
+		carteraBackClient.consultarMoraPorDpi(dpi, numerosCreditoConocidos),
+	numerosCreditoConocidos: numerosSifcoConocidosPorDpi,
+	// La palanca de emergencia de siempre: la misma bandera con la que el resto
+	// del CRM degrada cuando cartera no está. Apagarla deja pasar sin consultar
+	// —fail-open deliberado, ver `habilitado` en `lib/gate-mora-dpi.ts`— y cada
+	// paso así queda en la bitácora.
+	habilitado: isCarteraBackEnabled,
+	anotar: auditRecord,
+};
 
 /**
  * Función auxiliar para encontrar un lead por email o DPI
@@ -204,7 +237,7 @@ export async function getLeadByEmail(c: Context) {
 export async function updateLeadByEmail(c: Context) {
 	try {
 		const body = await c.req.json();
-		const { email, dpi: dpiRaw, address, phone } = body;
+		const { email, dpi: dpiRaw, address, phone, soloValidar } = body;
 		// Se guarda siempre normalizado; si no, el mismo DPI escrito con espacios
 		// queda como un registro distinto y deja de detectarse como duplicado.
 		let dpi: string | undefined = dpiRaw;
@@ -225,16 +258,62 @@ export async function updateLeadByEmail(c: Context) {
 
 		const existingLead = result.lead;
 
+		// 🔴 El DPI en blanco se rechaza, no se guarda. Sin esto, `dpi: ""` se
+		// saltaba la validación y el gate por el `trim() !== ""` de abajo y el
+		// `.set` lo escribía igual: blanquear el DPI de un moroso lo volvía
+		// invisible para siempre. Ver `MENSAJE_DPI_EN_BLANCO`.
+		if (esDpiEnBlanco(dpi)) {
+			return c.json({ success: false, error: MENSAJE_DPI_EN_BLANCO }, 400);
+		}
+
 		// Validar DPI si se envía
 		if (dpi !== undefined && dpi.trim() !== "") {
 			const resultadoDpi = validarDpi(dpi);
 			if (!resultadoDpi.valid) {
-				return c.json(
-					{ success: false, error: resultadoDpi.error },
-					400,
-				);
+				return c.json({ success: false, error: resultadoDpi.error }, 400);
 			}
 			dpi = resultadoDpi.dpiLimpio;
+		}
+
+		// El candado va ANTES que el gate de mora a propósito: es una consulta
+		// local barata, y si el DPI ya no se puede cambiar no tiene sentido pagar
+		// el viaje a SIFCO para un cambio que igual se rechaza. Y va fuera de la
+		// validación de formato: un `dpi: ""` no se valida pero SÍ se escribe más
+		// abajo, y sin el candado acá borraba el DPI del expediente y dejaba la
+		// puerta abierta para escribir otro en la llamada siguiente.
+		if (dpi !== undefined) {
+			const candado = await evaluarCandadoDpi({
+				dpiActual: existingLead.dpi,
+				dpiNuevo: dpi,
+				sujeto: "portal",
+				leadId: existingLead.id,
+			});
+			if (candado.bloqueado) {
+				return c.json({ success: false, error: candado.message }, 400);
+			}
+		}
+
+		// 🔴 Solo si el DPI es nuevo o cambia. El portal reenvía la ficha
+		// completa en cada guardado, así que con el mismo DPI de siempre esto
+		// es una edición común —dirección, teléfono— y no puede quedar trabada
+		// porque la persona esté en mora.
+		if (
+			dpi !== undefined &&
+			dpi.trim() !== "" &&
+			requiereConsultaDeMora(dpi, existingLead.dpi)
+		) {
+			// 🔴 Igual que en `updateLead` del CRM: la pregunta lleva los números
+			// del DPI NUEVO **y** los del lead que se está editando. Buscando solo
+			// por el DPI nuevo, el lead con su propio crédito moroso —invisible
+			// para SIFCO— se sacaba el gate de encima tecleando un DPI virgen.
+			const gate = await evaluarGateMoraDpi(dpi, {
+				...depsGateMora,
+				numerosCreditoConocidos: (dpiConsultado) =>
+					numerosSifcoDelDpiYDelLead(dpiConsultado, existingLead.id),
+			});
+			if (gate.rechazado) {
+				return c.json({ success: false, error: gate.mensaje }, 400);
+			}
 		}
 
 		// Check if new DPI or phone already exists in another lead
@@ -282,6 +361,15 @@ export async function updateLeadByEmail(c: Context) {
 			}
 		}
 
+		// 🔴 Modo solo-validar: el portal necesita saber si el cambio de DPI va a
+		// pasar ANTES de escribirlo en la cuenta (auth-google), porque el contrato
+		// obliga a escribir la cuenta primero y un rechazo del CRM dejaba la
+		// identidad partida entre servicios. Acá ya corrieron candado, gate y
+		// duplicados: si llegó hasta esta línea, el cambio real va a entrar.
+		if (soloValidar === true) {
+			return c.json({ success: true, validado: true });
+		}
+
 		// Build update object with only provided fields
 		const updateData: any = {
 			updatedAt: new Date(),
@@ -299,21 +387,66 @@ export async function updateLeadByEmail(c: Context) {
 			updateData.phone = phone;
 		}
 
-		// Update the lead
-		const [updatedLead] = await db
-			.update(leads)
-			.set(updateData)
-			.where(eq(leads.id, existingLead.id))
-			.returning({
-				id: leads.id,
-				firstName: leads.firstName,
-				lastName: leads.lastName,
-				email: leads.email,
-				phone: leads.phone,
-				dpi: leads.dpi,
-				direccion: leads.direccion,
-				updatedAt: leads.updatedAt,
+		// 🔴 Misma carrera que en el CRM: entre el candado de arriba y esta
+		// sentencia, otra transacción puede aprobar el análisis (30 → 40) y el DPI
+		// se escribiría igual sobre un expediente ya atado a la identidad vieja.
+		// Postgres re-evalúa el predicado tras esperar a la escritura rival, así
+		// que la condición viaja DENTRO del UPDATE.
+		//
+		// Solo cuando el DPI cambia de verdad: este update escribe también
+		// dirección y teléfono, y esas ediciones no tienen por qué trabarse. Acá
+		// no hay válvula de admin que valga: el portal es público.
+		const candadoEnElPredicado = dpiCambia(existingLead.dpi, dpi);
+		const whereDelUpdate = candadoEnElPredicado
+			? and(
+					eq(leads.id, existingLead.id),
+					noExisteOportunidadCandanteDelLead(existingLead.id),
+				)
+			: eq(leads.id, existingLead.id);
+
+		// Update the lead.
+		// 🔴 En transacción y con lock de las oportunidades: el NOT EXISTS del
+		// candado lee bajo snapshot MVCC y no bloquea la fila — una aprobación
+		// 30→40 en vuelo podía commitear después de esta escritura. El FOR UPDATE
+		// serializa las dos.
+		const [updatedLead] = await db.transaction(async (tx) => {
+			if (candadoEnElPredicado) {
+				await tx
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(eq(opportunities.leadId, existingLead.id))
+					.for("update");
+			}
+			return tx
+				.update(leads)
+				.set(updateData)
+				.where(whereDelUpdate)
+				.returning({
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+					phone: leads.phone,
+					dpi: leads.dpi,
+					direccion: leads.direccion,
+					updatedAt: leads.updatedAt,
+				});
+		});
+		if (!updatedLead && candadoEnElPredicado) {
+			// Cero filas con la condición puesta: el candado se cerró en el medio.
+			// Se contesta como el candado, con su mismo mensaje.
+			const candadoAhora = await evaluarCandadoDpi({
+				dpiActual: existingLead.dpi,
+				dpiNuevo: dpi,
+				sujeto: "portal",
+				leadId: existingLead.id,
 			});
+			if (candadoAhora.bloqueado) {
+				return c.json({ success: false, error: candadoAhora.message }, 400);
+			}
+		}
+
+		// Después del chequeo: con cero filas no hubo escritura que anotar.
 		auditRecord({
 			entity: "lead",
 			id: existingLead.id,
@@ -695,10 +828,7 @@ export async function createPortalRegisterLead(c: Context) {
 		// Validar DPI
 		const resultadoDpi = validarDpi(dpiRaw);
 		if (!resultadoDpi.valid) {
-			return c.json(
-				{ success: false, error: resultadoDpi.error },
-				400,
-			);
+			return c.json({ success: false, error: resultadoDpi.error }, 400);
 		}
 		const dpi = resultadoDpi.dpiLimpio;
 
@@ -848,6 +978,25 @@ export async function createPortalRegisterLead(c: Context) {
 		}
 
 		// Lead no existe → registro nuevo: crear lead + oportunidad
+
+		// 🔴 El gate de mora va ACÁ y no arriba, aunque arriba se vea "antes de
+		// tocar la base": este endpoint hace dos cosas distintas según si la ficha
+		// existe. Si existe, la persona solo está entrando al portal —no se crea
+		// nada— y ese es justamente el lugar donde un cliente en mora tiene que
+		// poder entrar a ver y pagar su saldo. Con el gate arriba se llevaba un
+		// 400 y quedaba fuera del portal por estar atrasado, que es al revés de lo
+		// que queremos. El corte solo aplica al alta de verdad, que es lo de abajo.
+		//
+		// La idempotencia del reintento tampoco se rompe: el camino que devuelve
+		// la ficha existente ya retornó más arriba sin pasar por acá, así que un
+		// reintento de un alta que sí se completó nunca vuelve a consultar mora.
+		//
+		// Fail-closed: si cartera no contesta, el alta no sigue.
+		const gate = await evaluarGateMoraDpi(dpi, depsGateMora);
+		if (gate.rechazado) {
+			return c.json({ success: false, error: gate.mensaje }, 400);
+		}
+
 		const salesUserForLead = await getSalesUserWithLeastLeads();
 		if (!salesUserForLead) {
 			return c.json(

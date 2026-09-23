@@ -3,13 +3,14 @@
  *
  * Se prueban contra un PDF armado acá, no contra un template: lo que interesa
  * es dónde caen los widgets y a quién le tocan, no cómo se ve un contrato. Un
- * PDF sintético además deja mover las firmas reales a la esquina para verificar
- * que la rúbrica se aparta, que con los templates reales no se puede.
+ * PDF sintético además deja mover las firmas reales a la franja de las rúbricas
+ * para verificar que se apartan, que con los templates reales no se puede.
  *
  *   bun test services/rubricas.test.ts
  */
 import { describe, expect, test } from "bun:test";
 import { PDFDocument, StandardFonts } from "pdf-lib";
+import { getRubrica } from "./signaturePatterns";
 import { WeeTrustService } from "./WeeTrustService";
 import { ContractType, SignerRole, type ContractSigner } from "../types/contract";
 
@@ -24,7 +25,7 @@ const FIRMANTES: ContractSigner[] = [
 /**
  * Un PDF de `paginas` hojas con las tres líneas de firma en la última.
  *
- * `tercera` permite bajar la línea del codeudor a la esquina donde van las
+ * `tercera` permite bajar la línea del codeudor a la franja donde van las
  * rúbricas, para los casos en que se estorbarían.
  */
 async function pdfDePrueba(
@@ -52,6 +53,53 @@ async function pdfDePrueba(
 
 /** Las rúbricas son más chicas que una firma (100×50). */
 const esRubrica = (p: { imageSize: { width: number } }) => p.imageSize.width < 100;
+
+/** Rep legal, titular y `codeudores` codeudores, en el orden en que firman. */
+function firmantesDePrueba(codeudores: number): ContractSigner[] {
+	return [
+		{ role: SignerRole.REP_LEGAL, email: "replegal@test", name: "Rep Legal" },
+		{ role: SignerRole.TITULAR, email: "titular@test", name: "Titular" },
+		...Array.from({ length: codeudores }, (_, i) => ({
+			role: SignerRole.COFIRMANTE,
+			email: `codeudor${i}@test`,
+			name: `Codeudor ${i}`,
+		})),
+	];
+}
+
+/**
+ * Dos hojas, con una línea de firma por firmante en la segunda: el rep legal
+ * arriba y los deudores en filas de dos.
+ */
+async function pdfConFirmantes(cuantos: number): Promise<Buffer> {
+	const doc = await PDFDocument.create();
+	const fuente = await doc.embedFont(StandardFonts.Helvetica);
+	for (let i = 1; i <= 2; i++) {
+		const pagina = doc.addPage([612, 792]);
+		pagina.drawText(`Pagina ${i}`, { x: 72, y: 720, size: 11, font: fuente });
+		if (i === 2) {
+			pagina.drawText(LINEA, { x: 72, y: 600, size: 10, font: fuente });
+			for (let d = 0; d < cuantos - 1; d++) {
+				pagina.drawText(LINEA, {
+					x: d % 2 === 0 ? 72 : 320,
+					y: 520 - Math.floor(d / 2) * 60,
+					size: 10,
+					font: fuente,
+				});
+			}
+		}
+	}
+	return Buffer.from(await doc.save());
+}
+
+/** Las rúbricas de una página, de izquierda a derecha. */
+const rubricasDeLaPagina = (
+	posiciones: Awaited<ReturnType<typeof WeeTrustService.locateSignatureWidgets>>,
+	pagina: number,
+) =>
+	posiciones
+		.filter((p) => esRubrica(p) && p.page === pagina)
+		.sort((a, b) => a.coordinates.x - b.coordinates.x);
 
 describe("rúbricas de páginas impares", () => {
 	test("pone una por firmante en cada página impar, y ninguna en las pares", async () => {
@@ -88,10 +136,10 @@ describe("rúbricas de páginas impares", () => {
 	});
 
 	test("si pisaría la firma de otra persona, el grupo sube hasta no pisar ninguna", async () => {
-		// La firma real del codeudor, abajo a la derecha: la rúbrica del titular
-		// caería encima.
+		// La firma real del codeudor, en la franja de abajo, justo donde va la
+		// rúbrica del titular.
 		const posiciones = await WeeTrustService.locateSignatureWidgets(
-			await pdfDePrueba(7, { x: 500, y: 40 }),
+			await pdfDePrueba(7, { x: 280, y: 60 }),
 			ContractType.GARANTIA_MOBILIARIA,
 			FIRMANTES,
 		);
@@ -115,7 +163,7 @@ describe("rúbricas de páginas impares", () => {
 	test("sobre la firma real de la misma persona, su rúbrica no va", async () => {
 		// La firma del codeudor ocupa sólo el lugar de su propia rúbrica.
 		const posiciones = await WeeTrustService.locateSignatureWidgets(
-			await pdfDePrueba(7, { x: 512, y: 40 }),
+			await pdfDePrueba(7, { x: 430, y: 60 }),
 			ContractType.GARANTIA_MOBILIARIA,
 			FIRMANTES,
 		);
@@ -148,39 +196,9 @@ describe("rúbricas de páginas impares", () => {
 	});
 
 	test("con muchos firmantes pasan a otra fila en vez de salirse de la hoja", async () => {
-		// Rep legal + titular + seis codeudores: ocho rúbricas por página, que
-		// en una sola fila empezarían en x negativo.
-		const muchos: ContractSigner[] = [
-			{ role: SignerRole.TITULAR, email: "titular@test", name: "Titular" },
-			...Array.from({ length: 6 }, (_, i) => ({
-				role: SignerRole.COFIRMANTE,
-				email: `codeudor${i}@test`,
-				name: `Codeudor ${i}`,
-			})),
-			{ role: SignerRole.REP_LEGAL, email: "replegal@test", name: "Rep Legal" },
-		];
-
-		const doc = await PDFDocument.create();
-		const fuente = await doc.embedFont(StandardFonts.Helvetica);
-		for (let i = 1; i <= 2; i++) {
-			const pagina = doc.addPage([612, 792]);
-			pagina.drawText(`Pagina ${i}`, { x: 72, y: 720, size: 11, font: fuente });
-			if (i === 2) {
-				// Rep legal arriba; los siete deudores en filas de dos.
-				pagina.drawText(LINEA, { x: 72, y: 600, size: 10, font: fuente });
-				for (let d = 0; d < 7; d++) {
-					pagina.drawText(LINEA, {
-						x: d % 2 === 0 ? 72 : 320,
-						y: 520 - Math.floor(d / 2) * 60,
-						size: 10,
-						font: fuente,
-					});
-				}
-			}
-		}
-
+		const muchos = firmantesDePrueba(6);
 		const posiciones = await WeeTrustService.locateSignatureWidgets(
-			Buffer.from(await doc.save()),
+			await pdfConFirmantes(muchos.length),
 			ContractType.GARANTIA_MOBILIARIA,
 			muchos,
 		);
@@ -191,8 +209,88 @@ describe("rúbricas de páginas impares", () => {
 			expect(r.coordinates.x).toBeGreaterThanOrEqual(0);
 			expect(r.coordinates.x + r.imageSize.width).toBeLessThanOrEqual(612);
 		}
-		// Dos filas: las que no entraron en la primera quedan más arriba.
+		// Dos filas: las que no entraron en la primera quedan en otra.
 		expect(new Set(rubricas.map((r) => r.coordinates.y)).size).toBe(2);
+	});
+
+	test("si no entran en el alto de la franja, crecen hacia el borde y no hacia el texto", async () => {
+		// El reconocimiento de deuda tiene poco aire entre el pie y el texto: dos
+		// filas no entran, y la de más no puede subir sobre el contrato.
+		const muchos = firmantesDePrueba(6);
+		const posiciones = await WeeTrustService.locateSignatureWidgets(
+			await pdfConFirmantes(muchos.length),
+			ContractType.RECONOCIMIENTO_DEUDA,
+			muchos,
+		);
+		const { franja } = getRubrica(ContractType.RECONOCIMIENTO_DEUDA)!;
+
+		for (const r of posiciones.filter(esRubrica)) {
+			// Borde de arriba en coordenadas del PDF (origen abajo).
+			const arriba = r.viewport.height - r.coordinates.y;
+			expect(arriba).toBeLessThanOrEqual(franja.arriba);
+		}
+	});
+
+	test("se reparten a lo ancho de la franja, en el orden en que firman", async () => {
+		const posiciones = await WeeTrustService.locateSignatureWidgets(
+			await pdfDePrueba(8),
+			ContractType.GARANTIA_MOBILIARIA,
+			FIRMANTES,
+		);
+		const { franja } = getRubrica(ContractType.GARANTIA_MOBILIARIA)!;
+		const fila = rubricasDeLaPagina(posiciones, 1);
+
+		expect(fila.map((r) => r.user.email)).toEqual([
+			"replegal@test",
+			"titular@test",
+			"codeudor@test",
+		]);
+		// Una sola fila, dentro de la franja: ni sobre el pie ni sobre el texto.
+		expect(new Set(fila.map((r) => r.coordinates.y)).size).toBe(1);
+		for (const r of fila) {
+			const abajo = r.viewport.height - r.coordinates.y - r.imageSize.height;
+			expect(abajo).toBeGreaterThanOrEqual(franja.abajo);
+			expect(abajo + r.imageSize.height).toBeLessThanOrEqual(franja.arriba);
+			expect(r.coordinates.x).toBeGreaterThanOrEqual(franja.izquierda);
+			expect(r.coordinates.x + r.imageSize.width).toBeLessThanOrEqual(
+				franja.derecha,
+			);
+		}
+		// Repartidas, no juntas en un rincón: ocupan casi todo el ancho, con la
+		// misma separación entre cada una.
+		const primera = fila[0];
+		const ultima = fila[fila.length - 1];
+		const ocupado =
+			ultima.coordinates.x + ultima.imageSize.width - primera.coordinates.x;
+		expect(ocupado).toBeGreaterThan((franja.derecha - franja.izquierda) * 0.75);
+		const huecos = fila
+			.slice(1)
+			.map((r, i) => r.coordinates.x - (fila[i].coordinates.x + fila[i].imageSize.width));
+		for (const hueco of huecos) expect(hueco).toBeCloseTo(huecos[0], 5);
+	});
+
+	test("con menos firmantes, rúbricas más grandes", async () => {
+		const pocos = firmantesDePrueba(0);
+		const hastaTres = firmantesDePrueba(3);
+		const [conDos, conCinco] = await Promise.all([
+			WeeTrustService.locateSignatureWidgets(
+				await pdfConFirmantes(pocos.length),
+				ContractType.GARANTIA_MOBILIARIA,
+				pocos,
+			),
+			WeeTrustService.locateSignatureWidgets(
+				await pdfConFirmantes(hastaTres.length),
+				ContractType.GARANTIA_MOBILIARIA,
+				hastaTres,
+			),
+		]);
+
+		const anchoCon = (p: typeof conDos) => rubricasDeLaPagina(p, 1)[0].imageSize.width;
+		expect(anchoCon(conDos)).toBeGreaterThan(anchoCon(conCinco));
+		// El caso más grande de todos los días (tres codeudores) entra en una fila.
+		expect(
+			new Set(rubricasDeLaPagina(conCinco, 1).map((r) => r.coordinates.y)).size,
+		).toBe(1);
 	});
 
 	test("caben dentro de la hoja", async () => {

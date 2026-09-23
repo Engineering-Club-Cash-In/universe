@@ -1176,10 +1176,13 @@ export class WeeTrustService {
 	 * - **Quiénes.** Los mismos que firman el documento, una vez cada uno. Si el
 	 *   bloque de deudores se expande a titular + dos codeudores, las tres
 	 *   personas rubrican cada hoja impar.
-	 * - **Dónde.** En la esquina que declara el tipo, separadas entre sí para
-	 *   que dos firmantes no queden encimados.
-	 * - **Cuándo no.** Si en esa página ya hay un widget de esa persona cerca de
-	 *   la esquina, no se agrega: quedaría la rúbrica encima de la firma real.
+	 * - **Dónde.** En fila, repartidas a lo ancho de la franja que declara el
+	 *   tipo (el aire de abajo de la hoja, entre el pie y el texto). Cada
+	 *   firmante tiene su parte del ancho y su rúbrica va centrada en ella: con
+	 *   pocos firmantes quedan grandes y separadas, y con muchos se achican
+	 *   hasta un mínimo legible; de ahí en más pasan a otra fila.
+	 * - **Cuándo no.** Si en esa página ya hay un widget de esa persona donde
+	 *   caería, no se agrega: quedaría la rúbrica encima de la firma real.
 	 */
 	private static async rubricasDePaginasImpares(
 		pdfBuffer: Buffer,
@@ -1197,10 +1200,42 @@ export class WeeTrustService {
 		const unicos = [...porEmail.values()];
 		if (unicos.length === 0) return [];
 
-		const margen = rubrica.margen ?? 28;
-		const ancho = rubrica.ancho ?? 70;
-		const alto = rubrica.alto ?? 28;
-		const separacion = 6;
+		const { franja } = rubrica;
+		const anchoDeLaFranja = franja.derecha - franja.izquierda;
+
+		// Tamaño de cada rúbrica. Por debajo de 100×50, que es una firma, para
+		// que se distingan; y nunca más chica que 60 de ancho, que ya cuesta
+		// firmar ahí. El alto sigue al ancho para que la proporción sea siempre
+		// la misma.
+		const ANCHO_MAXIMO = 90;
+		const ANCHO_MINIMO = 60;
+		const PROPORCION = 0.4;
+		const separacion = 12;
+
+		const porFila = Math.max(
+			1,
+			Math.floor((anchoDeLaFranja + separacion) / (ANCHO_MINIMO + separacion)),
+		);
+		const enLaFilaMasLlena = Math.min(unicos.length, porFila);
+		const ancho = Math.floor(
+			Math.min(
+				ANCHO_MAXIMO,
+				(anchoDeLaFranja - (enLaFilaMasLlena - 1) * separacion) /
+					enLaFilaMasLlena,
+			),
+		);
+		const alto = Math.round(ancho * PROPORCION);
+		const pasoY = alto + separacion;
+
+		// Las filas van centradas en el alto de la franja. Si son tantas que no
+		// entran, se cuelgan del borde de arriba de la franja y crecen hacia el
+		// borde de la hoja, porque arriba está el texto del contrato: sin tope de
+		// firmantes, pero sin salirse de la hoja (eso se verifica abajo).
+		const filas = Math.ceil(unicos.length / porFila);
+		const altoDelBloque = filas * alto + (filas - 1) * separacion;
+		const sobra = franja.arriba - franja.abajo - altoDelBloque;
+		const baseDelBloque =
+			sobra >= 0 ? franja.abajo + sobra / 2 : franja.arriba - altoDelBloque;
 
 		const paginas = await WeeTrustService.dimensionesDePaginas(pdfBuffer);
 		const extra: WeeTrustSignaturePosition[] = [];
@@ -1208,56 +1243,21 @@ export class WeeTrustService {
 		for (const { pageNum, width, height } of paginas) {
 			if (pageNum % 2 === 0) continue;
 
-			// Cuántas caben seguidas antes de salirse de la hoja: a lo ancho si van
-			// abajo, a lo alto (de la mitad para abajo) si van en un margen. Con
-			// muchos codeudores no entran en un solo tramo, y un widget con
-			// coordenadas fuera de la página WeeTrust lo rechaza o lo pone donde
-			// nadie lo ve. Los que no caben pasan a otro tramo, hacia adentro.
-			const horizontal =
-				rubrica.esquina === 'inferior-derecha' ||
-				rubrica.esquina === 'inferior-izquierda';
-			const pasoX = ancho + separacion;
-			const pasoY = alto + separacion;
-			const porTramo = horizontal
-				? Math.floor((width - 2 * margen + separacion) / pasoX)
-				: Math.floor((height / 2 - margen + separacion) / pasoY);
-			if (porTramo < 1) {
-				throw new SignatureLayoutError(
-					`${contractType}: la página ${pageNum} (${width}x${height}) no tiene lugar para una rúbrica de ${ancho}x${alto} con margen ${margen}.`,
-				);
-			}
-
 			// Dónde va cada rúbrica, con el grupo corrido `hacia` puntos para arriba.
+			// Se leen en el orden declarado: de izquierda a derecha, y de la fila
+			// de arriba a la de abajo.
 			const ubicar = (hacia: number) =>
 				unicos.map((firmante, i) => {
-					const tramo = Math.floor(i / porTramo);
-					const enElTramo = i % porTramo;
-					const cuantosEnElTramo = Math.min(
-						porTramo,
-						unicos.length - tramo * porTramo,
-					);
+					const fila = Math.floor(i / porFila);
+					const enLaFila = i % porFila;
+					const cuantosEnLaFila = Math.min(porFila, unicos.length - fila * porFila);
+					const lugar = anchoDeLaFranja / cuantosEnLaFila;
 
-					// Coordenadas en el sistema de WeeTrust: origen arriba a la
-					// izquierda, a diferencia del PDF. Dentro de cada tramo se leen
-					// en el orden declarado; los tramos siguientes van hacia adentro
-					// de la hoja (arriba si están abajo, al centro si van en un margen).
-					let x: number;
-					let y: number;
-					if (rubrica.esquina === 'inferior-derecha') {
-						// Anclado a la derecha, pero leído de izquierda a derecha.
-						const desdeElBorde = cuantosEnElTramo - 1 - enElTramo;
-						x = width - margen - ancho - desdeElBorde * pasoX;
-						y = height - margen - alto - tramo * pasoY;
-					} else if (rubrica.esquina === 'inferior-izquierda') {
-						x = margen + enElTramo * pasoX;
-						y = height - margen - alto - tramo * pasoY;
-					} else if (rubrica.esquina === 'margen-derecho') {
-						x = width - margen - ancho - tramo * pasoX;
-						y = height / 2 + enElTramo * pasoY;
-					} else {
-						x = margen + tramo * pasoX;
-						y = height / 2 + enElTramo * pasoY;
-					}
+					const x = franja.izquierda + enLaFila * lugar + (lugar - ancho) / 2;
+					// Base de la fila en el PDF (origen abajo), pasada al sistema de
+					// WeeTrust (origen arriba, y la posición es la del borde de arriba).
+					const baseEnPdf = baseDelBloque + (filas - 1 - fila) * pasoY;
+					const y = height - baseEnPdf - alto;
 					return { firmante, x, y: y - hacia };
 				});
 
@@ -1287,12 +1287,13 @@ export class WeeTrustService {
 			}
 
 			for (const { firmante, x, y } of ubicadas) {
-				// Si aun así no entra (tantos firmantes que los tramos se comen la
-				// hoja), se corta: mejor un error a la vista que una rúbrica
-				// obligatoria fuera de la página.
+				// Si aun así no entra (tantos firmantes que las filas se comen la
+				// hoja, o una franja que no es de este tamaño de hoja), se corta:
+				// mejor un error a la vista que una rúbrica obligatoria fuera de la
+				// página.
 				if (x < 0 || y < 0 || x + ancho > width || y + alto > height) {
 					throw new SignatureLayoutError(
-						`${contractType}: las rúbricas de ${unicos.length} firmantes no caben en la página ${pageNum}.`,
+						`${contractType}: las rúbricas de ${unicos.length} firmantes no caben en la página ${pageNum} (${width}x${height}).`,
 					);
 				}
 
@@ -1323,7 +1324,7 @@ export class WeeTrustService {
 		if (extra.length > 0) {
 			console.log(
 				`[WeeTrust] ${contractType}: ${extra.length} rúbrica(s) en páginas impares ` +
-					`(${unicos.length} firmante(s), esquina ${rubrica.esquina})`,
+					`(${unicos.length} firmante(s), ${ancho}x${alto} en ${filas} fila(s))`,
 			);
 		}
 		return extra;

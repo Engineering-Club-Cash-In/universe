@@ -52,8 +52,9 @@ export interface SignaturePatternConfig {
    * del bloque de firma del final.
    *
    * Es lo que pidió gerencia para los contratos (no para las cartas): que
-   * ninguna hoja pueda cambiarse sin que se note. La esquina no es la misma en
-   * todos —depende de dónde tenga margen el template—, así que se declara por
+   * ninguna hoja pueda cambiarse sin que se note. Van en fila a lo ancho del
+   * texto, en el aire que queda abajo de la hoja; ese aire no es el mismo en
+   * todos —depende del template y de su pie de página—, así que se declara por
    * tipo y se calibra mirando el PDF.
    *
    * Sólo va en los contratos con layout auditado (`bloques`). Un tipo sin esto
@@ -61,22 +62,18 @@ export interface SignaturePatternConfig {
    */
   rubrica?: {
     /**
-     * Dónde cae, en la página. El origen es la esquina inferior izquierda de
-     * la hoja, como en el PDF.
+     * Franja de la hoja donde va la fila de rúbricas, en puntos y con el
+     * origen abajo a la izquierda, como en el PDF.
+     *
+     * De izquierda a derecha es el ancho del texto, para que la fila quede
+     * alineada con él. De abajo a arriba es el aire entre el pie de página (o
+     * el borde, si no tiene) y la última línea que alcanza una hoja llena. La
+     * fila va centrada en ese alto y repartida en todo ese ancho: cada
+     * firmante tiene su lugar, en vez de quedar todas juntas en un rincón.
+     *
+     * Se mide sobre un PDF real con `scripts/previsualizar-rubricas.ts`.
      */
-    esquina:
-      | 'inferior-derecha'
-      | 'inferior-izquierda'
-      | 'margen-izquierdo'
-      | 'margen-derecho';
-    /** Separación del borde, en puntos. Por defecto 28 (un centímetro). */
-    margen?: number;
-    /**
-     * Tamaño del recuadro. Más chico que una firma normal (100×50): es una
-     * rúbrica, no una firma completa, y varias tienen que caber en el borde.
-     */
-    ancho?: number;
-    alto?: number;
+    franja: { izquierda: number; derecha: number; abajo: number; arriba: number };
   };
   /**
    * Número de firmantes esperados para este contrato.
@@ -163,7 +160,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.CONTRATO_PRIVADO_USO]: {
     pattern: 'f)_____________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
-    rubrica: { esquina: 'inferior-derecha' },
+    // Hoja de 612×936 sin pie: el texto de una hoja llena baja hasta y≈124.
+    rubrica: { franja: { izquierda: 139, derecha: 568, abajo: 24, arriba: 116 } },
     signerCount: 2,
     signers: ['Deudor', 'Richard/CCI'],
     xOffset: 1.5,  // Un punto y medio a la derecha
@@ -173,7 +171,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.USO_CARRO_USADO]: {
     pattern: 'f)_____________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
-    rubrica: { esquina: 'inferior-derecha' },
+    // Mismo template que el de carro nuevo: sin pie, el texto baja hasta y≈129.
+    rubrica: { franja: { izquierda: 139, derecha: 568, abajo: 24, arriba: 116 } },
     signerCount: 2,
     signers: ['Deudor', 'Richard/CCI'],
     yOffset: -1.5,  // Subir 1.5 puntos
@@ -203,7 +202,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.GARANTIA_MOBILIARIA]: {
     pattern: 'f)_______________________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
-    rubrica: { esquina: 'inferior-derecha' },
+    // "Página X de Y" abajo a la derecha llega a y≈61; el texto baja hasta y≈151.
+    rubrica: { franja: { izquierda: 71, derecha: 541, abajo: 66, arriba: 144 } },
     signerCount: 2,
     signers: ['Andrés', 'Deudor'],
     yOffset: -6,  // Bajar un punto más (era -7, ahora -6)
@@ -213,7 +213,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.PAGARE_UNICO_LIBRE_PROTESTO]: {
     pattern: 'f. _______________________________',
     bloques: ['DEUDORES'],
-    rubrica: { esquina: 'inferior-derecha' },
+    // Una sola hoja: debajo de los nombres de quienes firman (y≈137) no hay nada.
+    rubrica: { franja: { izquierda: 43, derecha: 570, abajo: 24, arriba: 130 } },
     signerCount: 1,
     signers: ['Deudor']
   },
@@ -221,7 +222,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.RECONOCIMIENTO_DEUDA]: {
     pattern: 'f)___________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
-    rubrica: { esquina: 'inferior-derecha' },
+    // "Página X de Y" abajo a la derecha llega a y≈86; el texto baja hasta y≈144.
+    rubrica: { franja: { izquierda: 113, derecha: 571, abajo: 92, arriba: 138 } },
     signerCount: 2,
     signers: ['Andrés', 'Deudor'],
     yOffset: -3.5,  // Subir 3.5 puntos,

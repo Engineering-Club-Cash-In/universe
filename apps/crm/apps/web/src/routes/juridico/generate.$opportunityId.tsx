@@ -8,6 +8,7 @@ import {
 	Loader2,
 } from "lucide-react";
 import { useRef, useState } from "react";
+import { ETAPA_EN_FIRMA } from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import {
 	type ContractSigner,
@@ -30,12 +31,6 @@ import {
 } from "@/components/ui/card";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { client, orpc } from "@/utils/orpc";
-
-/**
- * "Contratos en Firma": la etapa en la que los enlaces ya salieron por WhatsApp.
- * Rehacer contratos acá deja al cliente con links muertos si no se reenvían.
- */
-const ETAPA_EN_FIRMA = 85;
 
 export const Route = createFileRoute("/juridico/generate/$opportunityId")({
 	component: RouteComponent,
@@ -391,10 +386,9 @@ function RouteComponent() {
 		// En 85% los enlaces ya le llegaron al cliente al aprobar, y los que se
 		// acaban de enlazar dejaron sin efecto a los anteriores del mismo tipo.
 		// En 80% todavía no salió nada: los manda la aprobación.
-		if (
-			result.linkedCount > 0 &&
-			opportunity?.stage?.closurePercentage === ETAPA_EN_FIRMA
-		) {
+		// La etapa con la que enlazó el servidor, no la de esta pantalla: si la
+		// aprobaron mientras el wizard estaba abierto, acá seguiría diciendo 80%.
+		if (result.linkedCount > 0 && result.porcentajeEtapa === ETAPA_EN_FIRMA) {
 			ofrecerReenvioAlSalir.current = true;
 		}
 		return result;

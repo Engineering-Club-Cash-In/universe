@@ -1,6 +1,9 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import {
+	extraerNucleoPlaca,
+	extraerUltimaSenal,
 	findIgnitionSensorId,
+	matchUnidadPorPlaca,
 	resolveWialonEnvironment,
 	WialonClient,
 } from "./wialon-client";
@@ -1825,5 +1828,196 @@ describe("WialonClient", () => {
 
 			expect(client.getPublicConfig().tokenConfigured).toBe(false);
 		});
+	});
+});
+
+describe("matchUnidadPorPlaca (CB-118)", () => {
+	const catalogo = [
+		{ id: 28554757, nm: "Bidgar Yatz - C-629BNC" },
+		{ id: 28233911, nm: "A-04" },
+		{ id: 28233912, nm: "Maria Lopez - P-123ABC" },
+	];
+
+	test("encuentra la unidad cuando la placa viene dentro del nombre", () => {
+		const { unidad, motivo } = matchUnidadPorPlaca("C-629BNC", catalogo);
+
+		expect(motivo).toBe("ok");
+		expect(unidad?.id).toBe(28554757);
+	});
+
+	test("ignora guiones, espacios y mayúsculas al comparar", () => {
+		// La misma placa escrita por tres personas distintas.
+		for (const placa of ["c 629 bnc", "C629BNC", " c-629-bnc "]) {
+			expect(matchUnidadPorPlaca(placa, catalogo).unidad?.id).toBe(28554757);
+		}
+	});
+
+	test("una unidad sin placa en el nombre no se adivina", () => {
+		const { unidad, motivo } = matchUnidadPorPlaca("Z-999ZZZ", catalogo);
+
+		expect(unidad).toBeNull();
+		expect(motivo).toBe("sin_coincidencia");
+	});
+
+	test("dos unidades con la misma placa devuelven ambiguo, no la primera", () => {
+		// Elegir cualquiera mandaría al gestor de campo al vehículo equivocado.
+		const duplicado = [
+			{ id: 1, nm: "Juan Perez - C-629BNC" },
+			{ id: 2, nm: "C-629BNC (repuesto)" },
+		];
+		const { unidad, motivo } = matchUnidadPorPlaca("C-629BNC", duplicado);
+
+		expect(unidad).toBeNull();
+		expect(motivo).toBe("ambiguo");
+	});
+
+	test("una placa vacía o de menos de 3 caracteres no busca nada", () => {
+		// "A" haría match con medio catálogo.
+		for (const placa of ["", "  ", "A", "A-"]) {
+			const { unidad, motivo } = matchUnidadPorPlaca(placa, catalogo);
+			expect(unidad).toBeNull();
+			expect(motivo).toBe("sin_placa");
+		}
+	});
+
+	test("catálogo vacío devuelve sin_coincidencia", () => {
+		expect(matchUnidadPorPlaca("C-629BNC", []).motivo).toBe("sin_coincidencia");
+	});
+
+	test("encuentra la unidad aunque el CRM tenga el prefijo mal tipeado (P0-) o sin prefijo", () => {
+		// ~10% de las placas del CRM vienen como "P0-720GVH" y otras sin "P-":
+		// el núcleo 720GVH es lo único que coincide con "P-720GVH SIN APAGADO".
+		const unidades = [{ id: 7, nm: "P-720GVH SIN APAGADO" }];
+		for (const placa of ["P0-720GVH", "P0 - 720GVH", "P0720GVH", "720GVH"]) {
+			expect(matchUnidadPorPlaca(placa, unidades).unidad?.id).toBe(7);
+		}
+	});
+
+	test("exige el núcleo completo: una placa incompleta o más larga no coincide", () => {
+		// Con subcadena suelta, "P-123A" elegía "P-123ABC" y la deducción se
+		// guardaba: el error quedaba fijado.
+		const unidades = [
+			{ id: 1, nm: "P-123ABCD" },
+			{ id: 2, nm: "P-1720GVH" },
+		];
+		expect(matchUnidadPorPlaca("P-123ABC", unidades).motivo).toBe(
+			"sin_coincidencia",
+		);
+		expect(matchUnidadPorPlaca("P-720GVH", unidades).motivo).toBe(
+			"sin_coincidencia",
+		);
+		expect(matchUnidadPorPlaca("P-123A", unidades).motivo).toBe("sin_placa");
+	});
+
+	test("mismo núcleo con distinto prefijo es ambiguo, no se adivina", () => {
+		const unidades = [
+			{ id: 1, nm: "P-720GVH" },
+			{ id: 2, nm: "C-720GVH - CON APAGADO" },
+		];
+		const { unidad, motivo, coincidencias } = matchUnidadPorPlaca(
+			"P-720GVH",
+			unidades,
+		);
+		expect(unidad).toBeNull();
+		expect(motivo).toBe("ambiguo");
+		expect(coincidencias.map((u) => u.id)).toEqual([1, 2]);
+	});
+
+	test("valores de relleno del CRM se tratan como sin placa", () => {
+		for (const placa of ["NUEVO", "P-NUEVO", "N/A", "EJEMPLO", "0"]) {
+			expect(
+				matchUnidadPorPlaca(placa, [{ id: 1, nm: "NUEVO EJEMPLO N/A" }]).motivo,
+			).toBe("sin_placa");
+		}
+	});
+});
+
+describe("extraerNucleoPlaca (CB-118)", () => {
+	test("extrae 3 dígitos + 3 letras sin importar prefijo ni separadores", () => {
+		expect(extraerNucleoPlaca("P - 278KJQ")).toEqual({
+			digitos: "278",
+			letras: "KJQ",
+		});
+		expect(extraerNucleoPlaca("p0-720gvh")).toEqual({
+			digitos: "720",
+			letras: "GVH",
+		});
+	});
+
+	test("devuelve null sin forma de placa", () => {
+		for (const valor of [null, undefined, "", "NUEVO", "N/A", "12AB"]) {
+			expect(extraerNucleoPlaca(valor)).toBeNull();
+		}
+	});
+});
+
+describe("extraerUltimaSenal (CB-118)", () => {
+	test("convierte el epoch en SEGUNDOS de Wialon a fecha real", () => {
+		// Sin multiplicar por 1000 esto daría enero de 1970.
+		const fecha = extraerUltimaSenal({ item: { lmsg: { t: 1773704628 } } });
+
+		expect(fecha?.getTime()).toBe(1773704628 * 1000);
+		expect(fecha?.getUTCFullYear()).toBeGreaterThan(2020);
+	});
+
+	test("prefiere lmsg.t sobre pos.t", () => {
+		// Una unidad puede reportar sin fix de GPS: el mensaje es más reciente.
+		const fecha = extraerUltimaSenal({
+			item: { pos: { t: 1000 }, lmsg: { t: 2000 } },
+		});
+
+		expect(fecha?.getTime()).toBe(2000 * 1000);
+	});
+
+	test("un lmsg.t inválido (0) no tapa un pos.t válido", () => {
+		expect(
+			extraerUltimaSenal({
+				item: { lmsg: { t: 0 }, pos: { t: 1773704628 } },
+			})?.getTime(),
+		).toBe(1773704628 * 1000);
+	});
+
+	test("usa pos.t cuando no hay lmsg", () => {
+		expect(
+			extraerUltimaSenal({ item: { pos: { t: 1773704628 } } })?.getTime(),
+		).toBe(1773704628 * 1000);
+	});
+
+	test("devuelve null cuando no hay timestamp o es inválido", () => {
+		expect(extraerUltimaSenal({ item: {} })).toBeNull();
+		expect(extraerUltimaSenal({})).toBeNull();
+		expect(extraerUltimaSenal({ item: { pos: { t: 0 } } })).toBeNull();
+		expect(extraerUltimaSenal({ item: { pos: { t: -5 } } })).toBeNull();
+		expect(
+			extraerUltimaSenal({
+				item: { pos: { t: Number.NaN } },
+			}),
+		).toBeNull();
+	});
+});
+
+describe("getUnitLastSignal (CB-118)", () => {
+	test("lee la última señal desde core/search_item", async () => {
+		const fetchMock: WialonFetch = async (_url, init) => {
+			const bodyStr = String(init?.body ?? "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(
+					JSON.stringify({ eid: "sid-123", user: { id: 1, nm: "test" } }),
+					{ status: 200 },
+				);
+			}
+			return new Response(
+				JSON.stringify({
+					item: { id: 28233911, nm: "A-04", lmsg: { t: 1773704628 } },
+					flags: 1025,
+				}),
+				{ status: 200 },
+			);
+		};
+
+		const client = new WialonClient({ token: "tok" }, fetchMock);
+		const fecha = await client.getUnitLastSignal(28233911);
+
+		expect(fecha?.getTime()).toBe(1773704628 * 1000);
 	});
 });

@@ -138,6 +138,19 @@ export const vehicles = pgTable("vehicles", {
 	ubicacionActualGPS: text("ubicacion_actual_gps"), // JSON con coordenadas actuales
 	ultimaSeñalGPS: timestamp("ultima_señal_gps"),
 
+	// Vínculo con la unidad de Wialon / La Legión (CB-118). Se resuelve solo
+	// buscando la placa dentro del nombre de la unidad ("Bidgar Yatz - C-629BNC")
+	// y queda fijado; un supervisor lo corrige desde la ficha cuando el nombre no
+	// contiene la placa (ej. "A-04") o cuando varias unidades coinciden.
+	// Sin UNIQUE a propósito: tras una recuperación la misma unidad puede pasar a
+	// otro vehículo, y un índice único volvería eso un error en vez de un cambio.
+	wialonUnitId: integer("wialon_unit_id"),
+	wialonUnitName: text("wialon_unit_name"),
+	wialonVinculadoAt: timestamp("wialon_vinculado_at"),
+	// Email del supervisor que lo fijó, o "auto:placa" cuando lo dedujo el
+	// sistema (la ficha lo sigue marcando como deducción y ofrece corregirlo).
+	wialonVinculadoPor: text("wialon_vinculado_por"),
+
 	// Insurance Information
 	seguroVigente: boolean("seguro_vigente").notNull().default(false),
 	numeroPoliza: text("numero_poliza"),

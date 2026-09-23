@@ -11,7 +11,8 @@ export function formatLatency(ms: number | null): string {
 	return `${ms} ms`;
 }
 
-export function formatSessionExpiry(date: Date | null): string {
+/** Fecha y hora cortas en es-GT ("22 sept 2026, 14:05"); "—" si no hay fecha. */
+export function formatFechaHora(date: Date | null): string {
 	if (!date || Number.isNaN(date.getTime())) return "—";
 	return date.toLocaleString("es-GT", {
 		day: "2-digit",

@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-	formatLatency,
-	formatSessionExpiry,
-	resolveEstado,
-} from "./-gps-format";
+import { formatFechaHora, formatLatency, resolveEstado } from "./-gps-format";
 
 describe("formatLatency", () => {
 	test("formatea milisegundos", () => {
@@ -17,20 +13,20 @@ describe("formatLatency", () => {
 	});
 });
 
-describe("formatSessionExpiry", () => {
+describe("formatFechaHora", () => {
 	test("retorna guión largo cuando no hay fecha", () => {
-		expect(formatSessionExpiry(null)).toBe("—");
+		expect(formatFechaHora(null)).toBe("—");
 	});
 
 	test("formatea una fecha válida en es-GT", () => {
-		const result = formatSessionExpiry(new Date("2026-09-22T18:30:00Z"));
+		const result = formatFechaHora(new Date("2026-09-22T18:30:00Z"));
 		expect(result).not.toBe("—");
 		expect(typeof result).toBe("string");
 		expect(result.length).toBeGreaterThan(0);
 	});
 
 	test("retorna guión largo ante una fecha inválida sin lanzar", () => {
-		expect(formatSessionExpiry(new Date(Number.NaN))).toBe("—");
+		expect(formatFechaHora(new Date(Number.NaN))).toBe("—");
 	});
 });
 

@@ -710,23 +710,33 @@ describe("el detalle expone el ritmo de la mora Y su techo, en los DOS returns",
 		// El defecto que esto fija: con el filtro en "vencidas" la cuota que vence
 		// HOY quedaba fuera, y mañana el cron ya le cobra 1/30 — el ritmo
 		// anunciado salía por DEBAJO del real y el cliente pagaba de menos.
+		//
+		// El cálculo ya no vive inline en getCreditoByNumero: lo comparte con el
+		// LISTADO en `incrementosMoraPorCredito`, que lo hace para toda una página
+		// en una sola consulta. Las garantías son las mismas, en el nuevo lugar.
 		const source = await leerFuente();
-		const query = source.slice(
-			source.indexOf("const cuotasParaMora = await db"),
-			source.indexOf("const diasDeCuotasEnHorizonteDeMora ="),
+		const desde = source.indexOf(
+			"export async function incrementosMoraPorCredito",
+		);
+		// Acotado a ESA función: lo que sigue (la interfaz y el resto del archivo)
+		// no es parte del cálculo y ensuciaría los conteos.
+		const helper = source.slice(desde, source.indexOf("\nexport ", desde + 1));
+		const query = helper.slice(
+			helper.indexOf("const cuotasParaMora = await db"),
+			helper.indexOf("const cuotasPorCredito ="),
 		);
 
 		// La ventana de la query es el horizonte, no "hoy".
 		expect(query).toContain(
-			"lte(cuotas_credito.fecha_vencimiento, limiteHorizonteMora)",
+			"lte(cuotas_credito.fecha_vencimiento, limiteHorizonteMora(hoyGT))",
 		);
 		expect(source).toContain("hoyGT.getDate() + BASE_DIAS_MORA");
 
 		// Y el filtro en memoria usa el MISMO horizonte, con días CON SIGNO: con
 		// `diasAtrasoMora` (que aplasta a 0) una cuota futura cobraría desde hoy.
-		const filtro = source.slice(
-			source.indexOf("const diasDeCuotasEnHorizonteDeMora ="),
-			source.indexOf("const incrementoDiarioMoraStr"),
+		const filtro = helper.slice(
+			helper.indexOf("const diasAtrasadosPorCuota ="),
+			helper.indexOf("resultado.set("),
 		);
 		expect(filtro).toContain("isInstallmentWithinMoraHorizon(");
 		expect(filtro).toContain("diasAtrasoMoraConSigno(c.fecha_vencimiento, hoyGT)");
@@ -734,13 +744,22 @@ describe("el detalle expone el ritmo de la mora Y su techo, en los DOS returns",
 
 	it("las dos cifras salen de las MISMAS cuotas, sin una query extra", async () => {
 		const source = await leerFuente();
+		const desde = source.indexOf(
+			"export async function incrementosMoraPorCredito",
+		);
+		// Acotado a ESA función: lo que sigue (la interfaz y el resto del archivo)
+		// no es parte del cálculo y ensuciaría los conteos.
+		const helper = source.slice(desde, source.indexOf("\nexport ", desde + 1));
 
 		// Un solo cálculo de días de atraso alimenta a las dos.
-		expect(
-			source.match(/diasAtrasadosPorCuota: diasDeCuotasEnHorizonteDeMora,/g),
-		).toHaveLength(2);
-		expect(
-			source.match(/const diasDeCuotasEnHorizonteDeMora =/g),
-		).toHaveLength(1);
+		expect(helper.match(/const diasAtrasadosPorCuota =/g)).toHaveLength(1);
+		expect(helper).toContain("incrementoDiarioMora: incrementoDiarioMora(params)");
+		expect(helper).toContain(
+			"incrementoMaximoMensualMora: incrementoMaximoMensualMora(params)",
+		);
+
+		// Y UNA sola consulta en todo el helper: si alguien la metiera adentro del
+		// `for (const credito ...)` volvería a ser una por crédito.
+		expect(helper.match(/await db\s*\n\s*\.select\(/g)).toHaveLength(1);
 	});
 });

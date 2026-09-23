@@ -15,6 +15,7 @@ import {
 import { useState } from "react";
 import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import { toast } from "sonner";
+import { DescargarFirmadoButton } from "@/components/contracts/DescargarFirmadoButton";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -373,6 +374,12 @@ export function ContractCard({
 								)}
 								Ver estado
 							</Button>
+
+							{/* El documento con las firmas puestas, no el borrador que
+							    abre el botón "PDF" de más abajo. */}
+							{contract.status === "signed" && (
+								<DescargarFirmadoButton contractId={contract.id} />
+							)}
 
 							{canCreateLegal && !inactivo && (
 								<>

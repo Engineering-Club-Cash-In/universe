@@ -558,6 +558,59 @@ const app = new Elysia()
   })
 
   /**
+   * GET /contracts/signed-pdf/:documentID
+   *
+   * Devuelve el PDF **firmado** de un documento ya completado.
+   *
+   * El CRM lo usa para que ventas y jurídico puedan bajarse el contrato de
+   * verdad, no el borrador que se generó. Va por acá y no directo a WeeTrust
+   * porque las credenciales las tiene este servicio.
+   *
+   * Sólo con el documento COMPLETED: antes de eso el archivo que WeeTrust
+   * guarda es el mismo que le subimos, y publicarlo como "firmado" sería decir
+   * que alguien firmó cuando no.
+   */
+  .get('/contracts/signed-pdf/:documentID', async ({ params, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
+    try {
+      const documento = await weeTrustService.getDocument(params.documentID);
+
+      if (documento.status !== 'COMPLETED') {
+        set.status = 409;
+        return {
+          success: false,
+          error: `El documento está en ${documento.status}: todavía no hay PDF firmado`,
+        };
+      }
+
+      const url = documento.documentFileObj?.url;
+      if (!url) {
+        set.status = 502;
+        return { success: false, error: 'WeeTrust no devolvió el archivo del documento' };
+      }
+
+      const archivo = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+      if (!archivo.ok) {
+        set.status = 502;
+        return {
+          success: false,
+          error: `No se pudo bajar el PDF firmado (${archivo.status})`,
+        };
+      }
+
+      set.headers['content-type'] = 'application/pdf';
+      return new Response(await archivo.arrayBuffer(), {
+        headers: { 'content-type': 'application/pdf' },
+      });
+    } catch (error: any) {
+      console.error('[signed-pdf] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
    * PUT /contracts/refresh-signing-links/:documentID
    *
    * Regenera los enlaces de firma. Es lo que se usa cuando un link venció o
@@ -631,6 +684,7 @@ const app = new Elysia()
       reissue: 'POST /contracts/reissue',
       deleteDocument: 'DELETE /contracts/document/:documentID',
       signingStatus: 'GET /contracts/signing-status/:documentID',
+      signedPdf: 'GET /contracts/signed-pdf/:documentID',
       refreshSigningLinks: 'PUT /contracts/refresh-signing-links/:documentID',
       resendSigningEmail: 'PUT /contracts/resend-email/:documentID',
       webhooks: {

@@ -28,6 +28,7 @@ import {
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client } from "@/utils/orpc";
 import { AnularContratoDialog } from "./AnularContratoDialog";
+import { DescargarFirmadoButton } from "./DescargarFirmadoButton";
 import { ReenviarWhatsappDialog } from "./ReenviarWhatsappDialog";
 import { RegenerarEnlacesDialog } from "./RegenerarEnlacesDialog";
 
@@ -323,6 +324,13 @@ function ContratoFila({
 							</a>
 						</Button>
 					)}
+					{/* El documento con las firmas puestas. Sólo existe cuando lo
+					    firmaron todos: antes de eso WeeTrust todavía guarda el mismo
+					    archivo que le subimos. Los de papel no tienen: su firma está en
+					    la hoja impresa, no en ninguna plataforma. */}
+					{contract.status === "signed" && !firmaEnPapel && (
+						<DescargarFirmadoButton contractId={contract.id} />
+					)}
 					{contract.pdfLink && (
 						<Button variant="outline" size="sm" asChild className="h-7">
 							<a
@@ -332,7 +340,9 @@ function ContratoFila({
 								className="flex items-center gap-1"
 							>
 								<FileText className="h-3 w-3" />
-								PDF
+								{/* Ya firmado, decir sólo "PDF" hacía creer que éste era el
+								    documento con las firmas. Es el borrador. */}
+								{contract.status === "signed" ? "Sin firmas" : "PDF"}
 							</a>
 						</Button>
 					)}

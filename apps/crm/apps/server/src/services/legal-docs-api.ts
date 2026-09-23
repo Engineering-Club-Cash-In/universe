@@ -519,6 +519,36 @@ export async function subirContratoParaFirma(payload: {
  * Sólo se puede con documentos que nadie terminó de firmar. Uno completado
  * queda en su blockchain y no hay forma de eliminarlo ni anularlo.
  */
+/**
+ * Baja el PDF **firmado** de un documento ya completado.
+ *
+ * El que se guardó al generarlo es el borrador: no tiene las firmas. Éste es el
+ * que vale como contrato, y es el que ventas y jurídico necesitan poder
+ * descargar sin salir del CRM.
+ *
+ * Pasa por el generador porque las credenciales de WeeTrust las tiene él.
+ */
+export async function descargarPdfFirmado(documentID: string): Promise<Blob> {
+	const response = await fetch(
+		`${LEGAL_DOCS_API_URL}/contracts/signed-pdf/${encodeURIComponent(documentID)}`,
+		{
+			method: "GET",
+			headers: secretoParaElGenerador(),
+			// Un PDF firmado pesa poco, pero viaja desde WeeTrust: se le da aire.
+			signal: AbortSignal.timeout(120_000),
+		},
+	);
+
+	if (!response.ok) {
+		const detalle = await response.text().catch(() => "");
+		throw new Error(
+			`No se pudo bajar el PDF firmado de ${documentID}: ${response.status} ${detalle}`,
+		);
+	}
+
+	return response.blob();
+}
+
 export async function borrarDocumentoDeWeeTrust(
 	documentID: string,
 ): Promise<void> {

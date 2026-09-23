@@ -56,6 +56,7 @@ import {
 	borrarDocumentoDeWeeTrust,
 	type ContractSigner,
 	consultarEstadoFirma,
+	descargarPdfFirmado,
 	type EstadoDocumentoFirma,
 	motivoDeFalla,
 	reemitirContratoEnWeeTrust,
@@ -1533,6 +1534,58 @@ export const legalContractsRouter = {
 				message: conservado
 					? "Contrato anulado. Queda en «Ver anulados» con el detalle de cómo quedó en WeeTrust."
 					: "Contrato anulado y borrado de la plataforma de firma.",
+			};
+		}),
+
+	/**
+	 * El PDF **firmado**, para bajarlo sin salir del CRM.
+	 *
+	 * El PDF que la ficha muestra como "PDF" es el borrador que se generó: no
+	 * tiene ninguna firma. Hasta acá, para conseguir el documento que vale había
+	 * que entrar al portal de WeeTrust, y ventas no tiene cuenta.
+	 *
+	 * Va con el permiso de ver contratos, igual que el estado de firma: el
+	 * vendedor y el analista son los que lo necesitan.
+	 *
+	 * Se pide en el momento en vez de guardarse: es un archivo chico, se baja en
+	 * un par de segundos y así no hay una copia que pueda quedar vieja respecto
+	 * de lo que WeeTrust tiene. Si algún día se quiere una copia propia que
+	 * sobreviva a WeeTrust, el lugar es el webhook de documento completado.
+	 */
+	getSignedContractPdf: viewOpportunityContractsProcedure
+		.input(z.object({ contractId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const { contract, documentID } = await contratoConDocumentID(
+				input.contractId,
+			);
+
+			// El generador también lo verifica contra WeeTrust, que es la fuente de
+			// verdad. Acá se corta antes para no gastar el viaje y para poder decir
+			// algo que se entienda: "todavía falta firmar" y no un 409.
+			if (contract.status !== "signed") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato todavía no está firmado por todos: no hay PDF firmado que bajar.",
+				});
+			}
+
+			let pdf: Blob;
+			try {
+				pdf = await descargarPdfFirmado(documentID);
+			} catch (error) {
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						error instanceof Error
+							? error.message
+							: "No se pudo bajar el PDF firmado",
+				});
+			}
+
+			// Base64 y no una URL: el archivo vive en WeeTrust detrás de sus
+			// credenciales, así que no hay link que se le pueda pasar al navegador.
+			return {
+				nombre: `${contract.contractName} (firmado).pdf`,
+				pdfBase64: Buffer.from(await pdf.arrayBuffer()).toString("base64"),
 			};
 		}),
 

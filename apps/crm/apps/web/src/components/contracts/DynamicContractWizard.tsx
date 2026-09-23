@@ -269,6 +269,14 @@ interface DynamicContractWizardProps {
 		}>;
 	}) => Promise<{ success: boolean; message: string }>;
 	onBack: () => void;
+	/**
+	 * Borra en WeeTrust lo que se generó y no se va a enlazar. Los contratos se
+	 * crean (y WeeTrust manda las invitaciones) antes de "Finalizar y Enlazar":
+	 * si jurídico vuelve a corregir o se va, quedaban vivos sin fila en el CRM.
+	 */
+	onDescartarSinEnlazar?: (
+		documentos: Array<{ documentID: string; descarte: string }>,
+	) => void;
 	isGenerating?: boolean;
 	isLinking?: boolean;
 }
@@ -647,10 +655,36 @@ export function DynamicContractWizard({
 	onGenerate,
 	onLinkContracts,
 	onBack,
+	onDescartarSinEnlazar,
 	isGenerating = false,
 	isLinking = false,
 }: DynamicContractWizardProps) {
 	const [step, setStep] = useState<1 | 2 | 3>(1);
+
+	// Lo generado que todavía no se enlazó: documento -> comprobante. Ref y no
+	// estado porque lo lee la limpieza al desmontar, que ve la última versión.
+	const sinEnlazarRef = useRef(new Map<string, string>());
+	const descartarRef = useRef(onDescartarSinEnlazar);
+	descartarRef.current = onDescartarSinEnlazar;
+
+	const anotarGenerados = (resultados: ContractResult[]) => {
+		for (const r of resultados) {
+			if (r.documentID && r.descarte) {
+				sinEnlazarRef.current.set(r.documentID, r.descarte);
+			}
+		}
+	};
+	const descartarSinEnlazar = useCallback(() => {
+		const documentos = [...sinEnlazarRef.current].map(
+			([documentID, descarte]) => ({ documentID, descarte }),
+		);
+		sinEnlazarRef.current.clear();
+		if (documentos.length > 0) descartarRef.current?.(documentos);
+	}, []);
+
+	// Irse sin enlazar (la flecha de atrás, otra ruta) deja lo generado sin
+	// dueño: se descarta al desmontar. Cerrar la pestaña no pasa por acá.
+	useEffect(() => descartarSinEnlazar, [descartarSinEnlazar]);
 	const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
 	const [isLoadingFields, setIsLoadingFields] = useState(false);
 	const [showLinkConfirmDialog, setShowLinkConfirmDialog] = useState(false);
@@ -1856,6 +1890,7 @@ export function DynamicContractWizard({
 				generationDataRef.current = contracts;
 
 				const result = await onGenerate({ contracts });
+				anotarGenerados(result.results);
 				setGenerationResult(result);
 				setStep(3);
 			} catch (error) {
@@ -1879,6 +1914,7 @@ export function DynamicContractWizard({
 		setRetryingType(contractType);
 		try {
 			const retryResult = await onGenerate({ contracts: [contrato] });
+			anotarGenerados(retryResult.results);
 			const nuevo = retryResult.results[0];
 			if (!nuevo) return;
 
@@ -1917,7 +1953,10 @@ export function DynamicContractWizard({
 		if (step === 2) {
 			setStep(1);
 		} else if (step === 3) {
-			// Volver al paso 2 para corregir campos y regenerar
+			// Volver al paso 2 para corregir campos y regenerar. Lo que se generó
+			// no se va a enlazar: se borra en WeeTrust, o el cliente tendría
+			// invitaciones de documentos que nadie sigue.
+			descartarSinEnlazar();
 			setGenerationResult(null);
 			setStep(2);
 		}
@@ -1982,6 +2021,9 @@ export function DynamicContractWizard({
 						? generationDataRef.current
 						: undefined,
 			});
+			// Ya tienen fila: no son descartes. (Los que el servidor descartó al
+			// enlazar, por cambio de etapa, ya los borró él.)
+			sinEnlazarRef.current.clear();
 			setShowLinkConfirmDialog(false);
 			onBack(); // Volver a la pantalla anterior después de enlazar
 		} catch (error) {

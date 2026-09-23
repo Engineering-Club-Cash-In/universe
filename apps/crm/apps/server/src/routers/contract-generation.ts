@@ -49,6 +49,7 @@ import {
 	correoRepetido,
 	correosDePruebaFaltantes,
 } from "../lib/contratos-correos-prueba";
+import { descarteValido, firmarDescarte } from "../lib/contratos-descarte";
 import {
 	CONTRATOS_OBSERVADORES,
 	REP_LEGAL_EMAIL,
@@ -1316,6 +1317,12 @@ export const contractGenerationRouter = {
 					r2Key?: string;
 					/** Firmantes con su rol, para etiquetar los links sin adivinar. */
 					signatories?: FirmanteEnviado[];
+					/**
+					 * El documento en WeeTrust y el comprobante para descartarlo si
+					 * nunca se enlaza (ver `descartarContratosSinEnlazar`).
+					 */
+					documentID?: string;
+					descarte?: string;
 					error?: string;
 				}> = [];
 
@@ -1346,6 +1353,14 @@ export const contractGenerationRouter = {
 								signatories: contractResult.signatories,
 								templateId: contractResult.templateId,
 								apiResponse: contractResult,
+								documentID: contractResult.documentID,
+								descarte:
+									contractResult.documentID && input.opportunityId
+										? firmarDescarte(
+												input.opportunityId,
+												contractResult.documentID,
+											)
+										: undefined,
 							});
 						} else {
 							failCount++;
@@ -1389,6 +1404,74 @@ export const contractGenerationRouter = {
 	 * Enlaza contratos generados previamente a una oportunidad/lead
 	 * Este endpoint guarda los contratos en la base de datos
 	 */
+	/**
+	 * Borra en WeeTrust los documentos que el wizard generó y nunca se enlazaron.
+	 *
+	 * El wizard genera los contratos —y WeeTrust manda las invitaciones— antes de
+	 * que jurídico apriete "Finalizar y Enlazar". Si en vez de enlazar vuelve a
+	 * corregir o se va, esos documentos quedaban vivos sin fila en el CRM, al
+	 * lado de los vigentes: en 85% el cliente, que ya está firmando, podía firmar
+	 * uno que nadie sigue. El wizard llama a esto al volver a corregir y al irse
+	 * sin enlazar.
+	 *
+	 * Sólo borra lo que cumple las dos cosas:
+	 * - trae el comprobante de que lo generó el CRM para esta oportunidad (en la
+	 *   misma cuenta de WeeTrust viven los de inversiones y los de la app de
+	 *   jurídico, que tampoco tienen fila acá);
+	 * - ninguna fila lo usa: uno que llegó a enlazarse es un contrato, no un
+	 *   descarte.
+	 *
+	 * Con el candado de la oportunidad, como todo lo que borra en WeeTrust: si un
+	 * enlace está en curso, se espera a que termine y recién ahí se mira.
+	 */
+	descartarContratosSinEnlazar: juridicoProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				documentos: z
+					.array(
+						z.object({
+							documentID: z.string().min(1),
+							descarte: z.string().min(1),
+						}),
+					)
+					.max(50),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const validos = input.documentos
+				.filter((d) =>
+					descarteValido(input.opportunityId, d.documentID, d.descarte),
+				)
+				.map((d) => d.documentID);
+			if (validos.length === 0) return { descartados: 0 };
+
+			return conCandadoDeFirma(input.opportunityId, async () => {
+				const enlazados = await db
+					.select({ documentID: generatedLegalContracts.weetrustDocumentId })
+					.from(generatedLegalContracts)
+					.where(inArray(generatedLegalContracts.weetrustDocumentId, validos));
+				const conFila = new Set(enlazados.map((e) => e.documentID));
+
+				let descartados = 0;
+				for (const documentID of validos) {
+					if (conFila.has(documentID)) continue;
+					try {
+						await borrarDocumentoDeWeeTrust(documentID);
+						descartados++;
+					} catch (error) {
+						// Uno que ya se firmó entero no se puede borrar, y otro que falla
+						// no tiene por qué frenar al resto.
+						console.error(
+							`[descartarContratosSinEnlazar] no se pudo borrar ${documentID}:`,
+							error,
+						);
+					}
+				}
+				return { descartados };
+			});
+		}),
+
 	linkContractsToOpportunity: juridicoProcedure
 		.input(
 			z.object({

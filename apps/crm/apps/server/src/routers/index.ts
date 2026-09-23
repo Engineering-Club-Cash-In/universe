@@ -290,6 +290,9 @@ export const legalAppRouter = {
 	generateContractsDirect: contractGenerationRouter.generateContractsDirect,
 	linkContractsToOpportunity:
 		contractGenerationRouter.linkContractsToOpportunity,
+	// Borrar lo que el wizard generó y nunca se enlazó
+	descartarContratosSinEnlazar:
+		contractGenerationRouter.descartarContratosSinEnlazar,
 	getGeneratedContracts: contractGenerationRouter.getGeneratedContracts,
 	getGenerationSnapshot: contractGenerationRouter.getGenerationSnapshot,
 	regenerateContracts: contractGenerationRouter.regenerateContracts,

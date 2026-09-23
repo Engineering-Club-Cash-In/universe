@@ -672,6 +672,141 @@ export function buildMoraRecoveryQuery({
   `;
 }
 
+/**
+ * La forma CRUDA de un evento tal como lo emite el `JSON_BUILD_OBJECT` de
+ * `buildMoraRecoveryQuery`. Los montos son texto a propósito: `numeric` →
+ * número de JSON los haría pasar por el `double` del driver.
+ *
+ * Vive acá, pegado a la consulta que lo produce, y no en el llamador: quien
+ * agregue una clave al `JSON_BUILD_OBJECT` la agrega también acá, y a partir
+ * de ese momento el compilador exige traducirla (ver `TRADUCTORES_EVENTO`).
+ */
+export type MoraRecoveryEventoCrudo = {
+	tipoEvento: string;
+	montoAnterior: string;
+	montoNuevo: string;
+	reverso: boolean;
+	anulado: boolean;
+};
+
+/**
+ * La fila CRUDA que devuelve el `SELECT` final de `buildMoraRecoveryQuery`,
+ * con los nombres de columna tal cual salen de Postgres.
+ */
+export type MoraRecoveryFilaCruda = {
+	asesor_id: number | null;
+	nombre: string | null;
+	esperado: string;
+	eventos: MoraRecoveryEventoCrudo[] | null;
+	nivel_sembrado: string;
+	cobrado: string;
+};
+
+/**
+ * A qué campo de `MoraRecoverySourceRow` corresponde cada columna cruda.
+ *
+ * Existe solo porque el SQL sale en `snake_case` y el plegado consume
+ * `camelCase`. Es el primero de los dos candados: una columna nueva que no
+ * figure acá hace fallar el tipo de `TRADUCTORES_FILA` (`CampoDestino[K]` no
+ * existe), así que ni siquiera se llega a discutir si alguien "se acordó" de
+ * mapearla.
+ */
+type CampoDestino = {
+	asesor_id: "asesorId";
+	nombre: "nombre";
+	esperado: "esperado";
+	eventos: "eventos";
+	nivel_sembrado: "nivelSembrado";
+	cobrado: "cobrado";
+};
+
+/**
+ * POR QUÉ ESTA TABLA Y NO UN OBJETO A MANO.
+ *
+ * Tres veces seguidas se perdió un campo en este mismo punto —`nivel_sembrado`,
+ * `reverso` y `anulado`—: la consulta lo emitía, el objeto literal del llamador
+ * no lo copiaba, el campo llegaba `undefined` y el plegado lo ignoraba EN
+ * SILENCIO. Compilaba, pasaba los tests, y el reporte decía otra cosa.
+ *
+ * El defecto no era el campo: era que se PUDIERA olvidar uno. Un objeto literal
+ * que omite una propiedad opcional es código válido, así que ninguna revisión
+ * ni ningún tipo lo detenía.
+ *
+ * Acá la traducción deja de ser un objeto literal y pasa a ser una tabla
+ * INDEXADA POR LAS COLUMNAS DE LA CONSULTA: el tipo obliga a que haya una
+ * entrada por cada clave de `MoraRecoveryFilaCruda`, ni una menos. Agregar una
+ * columna a la consulta y no traducirla ya no compila.
+ *
+ * `Required<Pick<…>>` cierra el segundo agujero: sin él, la entrada de un campo
+ * OPCIONAL del destino (como `nivelSembrado`) podía devolver `{}` y volvíamos al
+ * mismo silencio, pero con más ceremonia.
+ *
+ * Los tests de "MUTACIÓN: perder X en el mapeo" siguen vivos y siguen haciendo
+ * falta: el tipo obliga a ESCRIBIR la entrada, los tests obligan a que lo que
+ * escribió sea lo correcto.
+ */
+const TRADUCTORES_FILA: {
+	[K in keyof MoraRecoveryFilaCruda]-?: (
+		fila: MoraRecoveryFilaCruda,
+	) => Required<Pick<MoraRecoverySourceRow, CampoDestino[K]>>;
+} = {
+	asesor_id: (fila) => ({ asesorId: fila.asesor_id }),
+	// Sin asesor asignado el reporte igual tiene que mostrar la fila: el crédito
+	// generó mora aunque nadie la esté cobrando.
+	nombre: (fila) => ({ nombre: fila.nombre ?? "Sin asignar" }),
+	esperado: (fila) => ({ esperado: fila.esperado }),
+	eventos: (fila) => ({
+		eventos: (fila.eventos ?? []).map(traducirEventoMoraRecovery),
+	}),
+	nivel_sembrado: (fila) => ({ nivelSembrado: fila.nivel_sembrado }),
+	cobrado: (fila) => ({ cobrado: fila.cobrado }),
+};
+
+/**
+ * Igual que `TRADUCTORES_FILA` pero para cada evento del JSON. Acá los nombres
+ * ya coinciden con los de `MoraLevelEvent`, así que el candado es más directo:
+ * `Pick<MoraLevelEvent, K>` exige que la clave cruda EXISTA en el evento del
+ * plegado, y una clave nueva que no exista ahí tampoco compila.
+ */
+const TRADUCTORES_EVENTO: {
+	[K in keyof MoraRecoveryEventoCrudo]-?: (
+		crudo: MoraRecoveryEventoCrudo,
+	) => Required<Pick<MoraLevelEvent, K>>;
+} = {
+	tipoEvento: (crudo) => ({ tipoEvento: crudo.tipoEvento }),
+	montoAnterior: (crudo) => ({ montoAnterior: Number(crudo.montoAnterior) }),
+	montoNuevo: (crudo) => ({ montoNuevo: Number(crudo.montoNuevo) }),
+	// `=== true` y no un cast: el driver puede devolver el booleano de Postgres
+	// como texto dentro del JSON, y `"false"` es verdadero en JavaScript.
+	reverso: (crudo) => ({ reverso: crudo.reverso === true }),
+	anulado: (crudo) => ({ anulado: crudo.anulado === true }),
+};
+
+/** Arma el evento del plegado aplicando TODAS las entradas de la tabla. */
+export function traducirEventoMoraRecovery(
+	crudo: MoraRecoveryEventoCrudo,
+): MoraLevelEvent {
+	const evento = {} as MoraLevelEvent;
+	for (const traducir of Object.values(TRADUCTORES_EVENTO)) {
+		Object.assign(evento, traducir(crudo));
+	}
+	return evento;
+}
+
+/**
+ * Arma la fila que consume el acumulador aplicando TODAS las entradas de la
+ * tabla. El llamador ya no copia campo por campo: le pasa la fila cruda.
+ */
+export function traducirFilaMoraRecovery(
+	fila: MoraRecoveryFilaCruda,
+): MoraRecoverySourceRow {
+	const row = {} as MoraRecoverySourceRow;
+	for (const traducir of Object.values(TRADUCTORES_FILA)) {
+		Object.assign(row, traducir(fila));
+	}
+	return row;
+}
+
 function metricFrom(
 	row: Omit<MoraRecoverySourceRow, "asesorId" | "nombre">,
 ): MoraRecoveryMetric {

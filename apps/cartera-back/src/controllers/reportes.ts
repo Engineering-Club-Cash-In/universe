@@ -2288,6 +2288,10 @@ export async function getMoraRecuperacionPorAsesor({
       montoAnterior: string;
       montoNuevo: string;
       reverso: boolean;
+      // El DECREMENTO cuyo pago se cayó. Viaja en el JSON desde
+      // `esDecrementoAnuladoSql`; si no se mapea, `plegarNivel` no lo
+      // saltea y la reposición del cron se cuenta como mora NUEVA.
+      anulado: boolean;
     }[];
     // Techo sembrado con el historial ANTERIOR al ciclo, ya agregado en SQL.
     nivel_sembrado: string;
@@ -2304,6 +2308,7 @@ export async function getMoraRecuperacionPorAsesor({
         montoAnterior: Number(evento.montoAnterior),
         montoNuevo: Number(evento.montoNuevo),
         reverso: evento.reverso === true,
+        anulado: evento.anulado === true,
       })),
       nivelSembrado: row.nivel_sembrado,
       cobrado: row.cobrado,

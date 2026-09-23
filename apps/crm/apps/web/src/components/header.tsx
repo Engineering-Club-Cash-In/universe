@@ -19,6 +19,7 @@ import {
 	MessageSquare,
 	Scale,
 	Settings,
+	ShieldBan,
 	Target,
 	TrendingUp,
 	UserCircle,
@@ -281,6 +282,17 @@ export default function Header() {
 											<Link to="/cobros/metas" className="cursor-pointer">
 												<Target className="mr-2 h-4 w-4" />
 												Metas de Mora
+											</Link>
+										</DropdownMenuItem>
+									)}
+									{PERMISSIONS.canAccessBuroInterno(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link
+												to="/cobros/buro-interno"
+												className="cursor-pointer"
+											>
+												<ShieldBan className="mr-2 h-4 w-4" />
+												Buró interno
 											</Link>
 										</DropdownMenuItem>
 									)}
@@ -649,6 +661,15 @@ function MobileNav({
 											<Link to="/cobros/metas" className={MOBILE_LINK_CLASS}>
 												<Target />
 												Metas de Mora
+											</Link>
+										)}
+										{PERMISSIONS.canAccessBuroInterno(userRole) && (
+											<Link
+												to="/cobros/buro-interno"
+												className={MOBILE_LINK_CLASS}
+											>
+												<ShieldBan />
+												Buró interno
 											</Link>
 										)}
 										{PERMISSIONS.canAssignCobros(userRole) && (

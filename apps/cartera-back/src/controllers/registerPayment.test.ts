@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import Big from "big.js";
+import * as ts from "typescript";
 import {
   applyCapitalPaymentAndBuildResponse,
   calcularAplicacionConvenio,
@@ -17,15 +18,68 @@ import {
   getSpecialPaymentCuotaId,
   getSpecialPaymentInstallmentFields,
   pagoSchema,
+  internalNexaPagoSchema,
   shouldApplyStaleZeroRestanteAdjustment,
   shouldRejectZeroAppliedNormalValidation,
   shouldMarkInstallmentPaymentPaid,
   sumarAplicadoACuota,
   calcularCoberturaCuota,
   getCreditPaymentBlock,
+  getInternalNexaPaymentDate,
 } from "./registerPaymentPolicy";
 
 describe("register payment", () => {
+  it("acepta monto_boleta decimal como string sin perder centavos", () => {
+    expect(
+      pagoSchema.safeParse({
+        credito_id: 10,
+        usuario_id: 5,
+        monto_boleta: "90071992547409.91",
+        fecha_pago: "2026-09-08",
+        cuotaApagar: 1,
+        url_boletas: [],
+        registerBy: "test@clubcashin.com",
+        fecha_boleta: "2026-09-08",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("reserva registerBy NEXA para el flujo interno", () => {
+    const body = {
+      credito_id: 10,
+      usuario_id: 5,
+      monto_boleta: "10.00",
+      fecha_pago: "2026-09-08",
+      cuotaApagar: 1,
+      url_boletas: [],
+      fecha_boleta: "2026-09-08",
+    };
+
+    expect(pagoSchema.safeParse({ ...body, registerBy: "  nexa  " }).success).toBe(false);
+    expect(pagoSchema.safeParse({ ...body, registerBy: "NEXA:7" }).success).toBe(false);
+    expect(pagoSchema.safeParse({ ...body, registerBy: "  nexa:forged" }).success).toBe(false);
+  });
+
+  it("el registro interno Nexa exige fecha de transferencia ISO y fecha de boleta", () => {
+    const body = {
+      credito_id: 10,
+      usuario_id: 5,
+      monto_boleta: "10.00",
+      fecha_pago: "2026-09-08T23:30:00-06:00",
+      cuotaApagar: 1,
+      url_boletas: [],
+      fecha_boleta: "2026-09-08",
+      registerBy: "NEXA",
+    };
+
+    expect(internalNexaPagoSchema.safeParse(body).success).toBe(true);
+    expect(internalNexaPagoSchema.safeParse({ ...body, fecha_pago: "not-a-date" }).success).toBe(false);
+    expect(internalNexaPagoSchema.safeParse({ ...body, fecha_boleta: "not-a-date" }).success).toBe(false);
+    expect(getInternalNexaPaymentDate(body.fecha_pago, 7)?.toISOString())
+      .toBe("2026-09-08T23:30:00.000Z");
+    expect(getInternalNexaPaymentDate(body.fecha_pago)).toBeNull();
+  });
+
   it("clasifica un crédito pendiente de cancelación con un mensaje descriptivo", () => {
     expect(getCreditPaymentBlock("PENDIENTE_CANCELACION")).toEqual({
       code: "CREDIT_PENDING_CANCELLATION",
@@ -184,6 +238,92 @@ describe("register payment", () => {
       montoAplicado: 0,
       pagado: true,
     });
+  });
+});
+
+describe("QA-03: sobrantes pequeños entre cuotas", () => {
+  const distribuir = async (
+    monto: string,
+    mora: string,
+    cuotas: Array<string | null>,
+  ) => {
+    const policy = await import("./registerPaymentPolicy");
+    const usarComoOtros = Reflect.get(policy, "shouldApplyFinalSmallRemainderAsOther");
+    expect(usarComoOtros).toBeFunction();
+    if (typeof usarComoOtros !== "function") {
+      return { aplicado: [], otros: new Big(0), restante: new Big(monto) };
+    }
+
+    let restante = new Big(monto).minus(mora);
+    let otros = new Big(0);
+    const aplicado: Big[] = [];
+    for (const cuota of cuotas) {
+      if (cuota === null) continue;
+      const pendiente = new Big(cuota);
+      const abono = restante.lt(pendiente) ? restante : pendiente;
+      aplicado.push(abono);
+      restante = restante.minus(abono);
+      if (restante.lte(0)) break;
+    }
+    if (usarComoOtros({
+      availableRemaining: restante,
+      hasInsertedPayment: aplicado.length > 0,
+    })) {
+      otros = otros.plus(restante);
+      restante = new Big(0);
+    }
+    return { aplicado, otros, restante };
+  };
+
+  it("distribuye Q35.38 en mora Q5.38 y dos cuotas Q15 sin otros", async () => {
+    const result = await distribuir("35.38", "5.38", ["15.00", "15.00"]);
+    expect(result.aplicado.map((amount) => amount.toFixed(2))).toEqual(["15.00", "15.00"]);
+    expect(result.otros.toFixed(2)).toBe("0.00");
+    expect(new Big("5.38").plus(result.aplicado[0]!).plus(result.aplicado[1]!).toFixed(2))
+      .toBe("35.38");
+  });
+
+  it("continúa un sobrante de hasta Q25 cuando queda otra cuota pagable", async () => {
+    const result = await distribuir("30.00", "0", ["15.00", "15.00"]);
+    expect(result.aplicado.map((amount) => amount.toFixed(2))).toEqual(["15.00", "15.00"]);
+    expect(result.otros.toFixed(2)).toBe("0.00");
+  });
+
+  it("conserva otros para el sobrante final legítimo", async () => {
+    const result = await distribuir("40.00", "0", ["15.00"]);
+    expect(result.aplicado[0]?.toFixed(2)).toBe("15.00");
+    expect(result.otros.toFixed(2)).toBe("25.00");
+  });
+
+  it("trata como final el sobrante si las cuotas posteriores no son pagables", async () => {
+    const result = await distribuir("35.00", "0", ["15.00", null]);
+    expect(result.aplicado.map((amount) => amount.toFixed(2))).toEqual(["15.00"]);
+    expect(result.otros.toFixed(2)).toBe("20.00");
+  });
+
+  it("mantiene parcial un monto menor que la cuota", async () => {
+    const result = await distribuir("10.00", "0", ["15.00", "15.00"]);
+    expect(result.aplicado.map((amount) => amount.toFixed(2))).toEqual(["10.00"]);
+    expect(result.otros.toFixed(2)).toBe("0.00");
+  });
+
+  it("aplica la regla final fuera del loop real de cuotas", () => {
+    const source = readFileSync(new URL("./registerPayment.ts", import.meta.url), "utf8");
+    const file = ts.createSourceFile("registerPayment.ts", source, ts.ScriptTarget.Latest, true);
+    let call: ts.CallExpression | undefined;
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isCallExpression(node) &&
+        node.expression.getText(file) === "shouldApplyFinalSmallRemainderAsOther"
+      ) call = node;
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+
+    expect(call).toBeDefined();
+    let parent = call?.parent;
+    while (parent && !ts.isForOfStatement(parent)) parent = parent.parent;
+    expect(parent).toBeUndefined();
   });
 });
 
@@ -1288,6 +1428,20 @@ function extraerObjetoPagoDataPendiente(source: string): string {
   }
   return source.slice(inicio, fin);
 }
+
+describe("fecha del pago interno Nexa", () => {
+  it("estampa la fecha transferida en escritores normales y especiales", () => {
+    const specialWriters = [...registerPaymentSource.matchAll(
+      /await insertarPago\(\{([\s\S]*?)\n\s*\}\);/g,
+    )];
+    expect(specialWriters).toHaveLength(5);
+    for (const [, body] of specialWriters) {
+      expect(body).toContain("fecha_pago: paymentRegistrationDate()");
+    }
+    expect(registerPaymentSource).toContain("const fechaGuatemala = paymentRegistrationDate()");
+    expect(registerPaymentSource).toContain("fecha_pago,\n\n      renuevo_o_nuevo");
+  });
+});
 
 describe("fecha_aplicado del pago pendiente", () => {
   it("el payload del pago pendiente limpia fecha_aplicado", () => {

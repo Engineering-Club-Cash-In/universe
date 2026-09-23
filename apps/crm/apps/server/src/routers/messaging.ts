@@ -50,6 +50,10 @@ export interface ContractLink {
 /**
  * Arma el mensaje de WhatsApp con los links de firma de contratos.
  * Exportable para reutilizar desde el front u otros routers.
+ *
+ * Sin saludo: va dentro de la plantilla de SimpleTech, que ya empieza con
+ * "Hola, te compartimos la siguiente información importante:". Con el nuestro
+ * al cliente le llegaban dos "Hola" seguidos.
  */
 export function buildContractLinksMessage(
 	clientName: string,
@@ -59,7 +63,7 @@ export function buildContractLinksMessage(
 		.map((c) => `📄 ${c.contractName}:\n${c.link}`)
 		.join("\n\n");
 
-	return `Hola ${clientName}, tus contratos están listos para firmar. Por favor ingresa a los siguientes enlaces:\n\n${linksText}\n\nSi tienes alguna duda, no dudes en contactarnos.`;
+	return `${clientName}, tus contratos están listos para firmar. Por favor ingresa a los siguientes enlaces:\n\n${linksText}\n\nSi tienes alguna duda, no dudes en contactarnos.`;
 }
 
 interface DestinatarioDeFirma {

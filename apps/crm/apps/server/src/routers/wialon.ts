@@ -623,12 +623,17 @@ export const wialonRouter = {
 	/**
 	 * Busca y lista las unidades de rastreo GPS (svc: core/search_items)
 	 */
-	getWialonUnits: cobrosProcedure
+	//
+	// Solo supervisores y con flags:1 forzado (id/nm, SIN posición): su único
+	// uso es el selector de unidad de la ficha. Con el flags pesado por
+	// defecto, cualquier asesor veía la ubicación de cualquier unidad sin
+	// caso, motivo ni bitácora — la ubicación solo sale por getGpsVehiculo.
+	getWialonUnits: cobrosSupervisorProcedure
 		.input(searchUnitsInputSchema.optional())
 		.handler(async ({ input }) => {
 			try {
 				const client = getWialonClient();
-				const result = await client.searchUnits(input);
+				const result = await client.searchUnits({ ...input, flags: 1 });
 				return {
 					total: result.totalItemsCount,
 					from: result.indexFrom,
@@ -644,7 +649,11 @@ export const wialonRouter = {
 	 * Obtiene el estado telemático consolidado de una o más unidades en tiempo real:
 	 * kilometraje, horas de motor, velocidad, coordenadas y sensores formateados (svc: unit/calc_last)
 	 */
-	getWialonUnitsStatus: cobrosProcedure
+	//
+	// Solo admin: devuelve telemetría (coordenadas) de unidades arbitrarias sin
+	// el gate de caso/motivo/bitácora de getGpsVehiculo. Hoy no lo usa ninguna
+	// pantalla; queda para diagnóstico administrativo.
+	getWialonUnitsStatus: adminProcedure
 		.input(getUnitsStatusInputSchema)
 		.handler(async ({ input }) => {
 			try {
@@ -658,7 +667,10 @@ export const wialonRouter = {
 	/**
 	 * Consulta los detalles completos y mensajes crudos de una unidad (svc: core/search_item)
 	 */
-	getWialonUnitDetail: cobrosProcedure
+	//
+	// Solo admin, mismo motivo que getWialonUnitsStatus (incluye posición y
+	// mensajes crudos).
+	getWialonUnitDetail: adminProcedure
 		.input(getUnitDetailInputSchema)
 		.handler(async ({ input }) => {
 			try {

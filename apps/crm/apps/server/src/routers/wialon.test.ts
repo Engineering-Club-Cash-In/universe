@@ -17,6 +17,8 @@ import { mapWialonErrorToOrpc, wialonRouter } from "./wialon";
 // falla Postgres cuando la migración 0057 no está aplicada. Estas dos variables
 // dejan que cada test decida sin montar un mock por caso.
 let filaVehiculoMock: Record<string, unknown> | null = null;
+// Rol del usuario que devuelve el select del middleware de auth.
+let rolUsuarioMock = "admin";
 let errorSelectVehiculo: Error | null = null;
 let insertsGpsAuditoria: Record<string, unknown>[] = [];
 let bitacoraFilasMock: Record<string, unknown>[] = [];
@@ -149,7 +151,8 @@ function mockDbAdmin() {
 				from: () => ({
 					where: () => ({
 						limit: async () => {
-							if (!esVehiculo) return [{ id: "user-test", role: "admin" }];
+							if (!esVehiculo)
+								return [{ id: "user-test", role: rolUsuarioMock }];
 							// Simula "column wialon_unit_id does not exist": solo revienta
 							// el SELECT que nombra las columnas nuevas.
 							if (pideVinculo && errorSelectVehiculo) {
@@ -1257,6 +1260,83 @@ describe("wialonRouter", () => {
 				} as unknown as Context,
 			});
 			expect(res.items[0]?.creditos).toEqual([]);
+		});
+	});
+
+	describe("endpoints crudos de telemetría (CB-118)", () => {
+		const contexto = (rol: string) =>
+			({
+				headers: new Headers(),
+				session: { user: { id: "u-1", email: "u@example.com" } },
+				user: { id: "u-1", email: "u@example.com", role: rol },
+				userId: "u-1",
+				userRole: rol,
+			}) as unknown as Context;
+
+		afterEach(() => {
+			rolUsuarioMock = "admin";
+			setWialonClient(null);
+		});
+
+		it("un asesor de cobros no puede leer telemetría cruda de unidades arbitrarias", async () => {
+			rolUsuarioMock = "cobros";
+			await expect(
+				call(
+					wialonRouter.getWialonUnitsStatus,
+					{ unitIds: [1] },
+					{
+						context: contexto("cobros"),
+					},
+				),
+			).rejects.toBeInstanceOf(ORPCError);
+			await expect(
+				call(
+					wialonRouter.getWialonUnitDetail,
+					{ unitId: 1 },
+					{
+						context: contexto("cobros"),
+					},
+				),
+			).rejects.toBeInstanceOf(ORPCError);
+			await expect(
+				call(wialonRouter.getWialonUnits, undefined, {
+					context: contexto("cobros"),
+				}),
+			).rejects.toBeInstanceOf(ORPCError);
+		});
+
+		it("el buscador del supervisor fuerza flags:1 (sin posición)", async () => {
+			rolUsuarioMock = "cobros_supervisor";
+			const flags: unknown[] = [];
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-sel" }), {
+							status: 200,
+						});
+					}
+					flags.push(
+						JSON.parse(new URLSearchParams(bodyStr).get("params") || "{}")
+							.flags,
+					);
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 0,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			await call(
+				wialonRouter.getWialonUnits,
+				{ filterName: "629", flags: 8392707 },
+				{ context: contexto("cobros_supervisor") },
+			);
+			expect(flags).toEqual([1]);
 		});
 	});
 

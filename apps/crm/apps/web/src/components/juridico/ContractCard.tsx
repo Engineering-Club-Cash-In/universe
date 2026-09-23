@@ -14,8 +14,14 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
+import { PAQUETE_CARTAS } from "server/src/lib/paquete-cartas";
 import { toast } from "sonner";
+import { CartasDelPaquete } from "@/components/contracts/CartasDelPaquete";
 import { DescargarFirmadoButton } from "@/components/contracts/DescargarFirmadoButton";
+import {
+	EtiquetaSubidoAMano,
+	RevisarSubidoAMano,
+} from "@/components/contracts/SubidoAMano";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -77,6 +83,13 @@ interface ContractCardProps {
 		signatureMode?: string | null;
 		/** El contrato que lo reemplaza; puede estar puesto aún en `pending`. */
 		replacedByContractId?: string | null;
+		/**
+		 * La respuesta del generador tal como se guardó. De ahí sale qué cartas
+		 * trae un paquete de cartas.
+		 */
+		apiResponse?: unknown;
+		/** El enlace de observador: muestra el documento sin firmar por nadie. */
+		observerUrl?: string | null;
 		status: "pending" | "signed" | "cancelled";
 		generatedAt: Date | string;
 		opportunityId: string | null;
@@ -132,6 +145,7 @@ export function ContractCard({
 	// haya fallado, y mostrarlo como "Pendiente" hacía que jurídico lo buscara.
 	// Manda lo guardado: una declaración de vendedor generada antes de que se
 	// firmara en papel ya tiene sus links, y hay que seguir mostrándolos.
+	const esPaquete = contract.contractType === PAQUETE_CARTAS;
 	const firmaEnPapel = contract.signatureMode
 		? contract.signatureMode === "fisica"
 		: esFirmaFisica(contract.contractType);
@@ -223,9 +237,14 @@ export function ContractCard({
 							<CardDescription className="mt-1">
 								{formattedDate}
 							</CardDescription>
+							<CartasDelPaquete
+								contractType={contract.contractType}
+								apiResponse={contract.apiResponse}
+							/>
 						</div>
 					</div>
 					<div className="flex shrink-0 items-center gap-2">
+						<EtiquetaSubidoAMano apiResponse={contract.apiResponse} />
 						{firmaEnPapel && (
 							<Badge
 								variant="outline"
@@ -239,8 +258,9 @@ export function ContractCard({
 								{estado.label}
 							</Badge>
 						)}
-						{/* Un anulado ya fue reemplazado: no se reemplaza dos veces. */}
-						{canCreateLegal && onReplace && !inactivo && (
+						{/* Un anulado ya fue reemplazado: no se reemplaza dos veces. Y las
+						    cartas unidas no se suben a mano: se regeneran. */}
+						{canCreateLegal && onReplace && !inactivo && !esPaquete && (
 							<Button
 								size="sm"
 								variant="outline"
@@ -293,6 +313,13 @@ export function ContractCard({
 						Se firma en papel. Imprimí el PDF y que lo firme el vendedor: este
 						documento no se sube a firma electrónica.
 					</div>
+				)}
+
+				{!firmaEnPapel && !inactivo && contract.status === "pending" && (
+					<RevisarSubidoAMano
+						apiResponse={contract.apiResponse}
+						observerUrl={contract.observerUrl}
+					/>
 				)}
 
 				{/* Enlaces de firma, uno por firmante y con su rol real */}

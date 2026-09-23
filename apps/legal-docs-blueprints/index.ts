@@ -161,6 +161,16 @@ const app = new Elysia()
       };
     }
 
+    // El paquete de cartas no tiene plantilla propia: se arma con las cartas
+    // que trae, y sólo por /contracts/batch. Acá daba un 500.
+    if (requestBody.contractType === ContractType.PAQUETE_CARTAS) {
+      set.status = 400;
+      return {
+        success: false,
+        error: 'El paquete de cartas se genera por /contracts/batch, con las cartas que lleva',
+      };
+    }
+
     // Validar que se enviaron datos
     if (!requestBody.data || Object.keys(requestBody.data).length === 0) {
       set.status = 400;
@@ -272,6 +282,18 @@ const app = new Elysia()
         };
       }
 
+      // Las cartas unidas no traen datos propios: cada carta trae los suyos.
+      if (contract.contractType === ContractType.PAQUETE_CARTAS) {
+        if (!Array.isArray(contract.cartas) || contract.cartas.length === 0) {
+          set.status = 400;
+          return {
+            success: false,
+            error: `Contrato en posición ${i}: las cartas unidas no traen ninguna carta`
+          };
+        }
+        continue;
+      }
+
       if (!contract.data || Object.keys(contract.data).length === 0) {
         set.status = 400;
         return {
@@ -330,6 +352,14 @@ const app = new Elysia()
         success: false,
         error: `Tipo de contrato inválido: ${contractType}`,
         availableTypes: Object.values(ContractType)
+      };
+    }
+
+    if (contractType === ContractType.PAQUETE_CARTAS) {
+      set.status = 400;
+      return {
+        success: false,
+        error: 'El paquete de cartas se genera por /contracts/batch, con las cartas que lleva',
       };
     }
 
@@ -393,6 +423,18 @@ const app = new Elysia()
           success: false,
           error: `Tipo de contrato inválido: ${contractType}`,
           availableTypes: Object.values(ContractType)
+        };
+      }
+
+      // Las cartas unidas no se suben a mano: sus firmas se ubican carta por
+      // carta, y eso sólo se puede con un paquete que armó este servicio y que
+      // dice en sus metadatos qué cartas trae. Un PDF unido por fuera no lo dice.
+      if (contractType === ContractType.PAQUETE_CARTAS) {
+        set.status = 400;
+        return {
+          success: false,
+          error:
+            'Las cartas unidas no se pueden subir a mano: se generan desde el CRM. Para cambiar una, regenerá las cartas.',
         };
       }
 

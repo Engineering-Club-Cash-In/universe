@@ -38,6 +38,7 @@ import {
 	getSignatureMode,
 } from "../lib/contract-signature-mode";
 import { estadoEnWeeTrust } from "../lib/contrato-estado-firma";
+import { conMarcaDeSubidoAMano } from "../lib/contrato-subido-a-mano";
 import {
 	ETAPAS_POR_ACCION,
 	etiquetaDeMotivo,
@@ -59,6 +60,13 @@ import { esContratoVentaMapeado } from "../lib/contratos-venta";
 import { eqDpi } from "../lib/dpi-lookup";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import { juridicoProcedure } from "../lib/orpc";
+import {
+	agruparCartas,
+	cartasDelPaquete,
+	esCartaUnificable,
+	PAQUETE_CARTAS,
+	tiposQueReemplaza,
+} from "../lib/paquete-cartas";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import {
 	enrichLeadFromRenap,
@@ -553,7 +561,12 @@ export async function anularContratoReemplazado(
  */
 async function anularAnterioresDelMismoTipo(
 	opportunityId: string,
-	contractType: string,
+	/**
+	 * Los tipos que el nuevo deja sin efecto. Casi siempre es sólo el suyo; el
+	 * paquete de cartas se lleva además las cartas sueltas que trae (ver
+	 * `tiposQueReemplaza`).
+	 */
+	tipos: string[],
 	nuevoId: string,
 	motivo = "Reemplazado por una generación nueva del mismo contrato",
 ): Promise<void> {
@@ -563,7 +576,7 @@ async function anularAnterioresDelMismoTipo(
 		.where(
 			and(
 				eq(generatedLegalContracts.opportunityId, opportunityId),
-				eq(generatedLegalContracts.contractType, contractType),
+				inArray(generatedLegalContracts.contractType, tipos),
 				ne(generatedLegalContracts.id, nuevoId),
 				ne(generatedLegalContracts.status, "cancelled"),
 			),
@@ -604,6 +617,8 @@ async function anularAnterioresDelMismoTipo(
 async function retirarConCandadoTomado(params: {
 	opportunityId: string;
 	contractType: string;
+	/** Sólo el paquete: qué cartas trae, que también deja sin efecto. */
+	cartasQueTrae?: string[];
 	nuevoId: string;
 	etapaInicial: string | null;
 	motivo?: string;
@@ -647,9 +662,23 @@ async function retirarConCandadoTomado(params: {
 			return "perdio" as const;
 		}
 
+		// El paquete nuevo reemplaza entero al vigente: si deja afuera alguna de
+		// sus cartas, no se instala. Ya se revisó antes de generar, pero ésta es
+		// la que cuenta: con el candado tomado no puede colarse otro paquete
+		// entre la revisión y el retiro (dos enlaces a la vez pasaban los dos la
+		// de afuera, y el segundo anulaba al primero con cartas que no traía).
+		if (contractType === PAQUETE_CARTAS) {
+			const faltan = await cartasVigentesQueFaltan(
+				opportunityId,
+				params.cartasQueTrae ?? [],
+				{ excluirId: nuevoId, ejecutor: tx },
+			);
+			if (faltan.size > 0) return "deja-cartas-afuera" as const;
+		}
+
 		await anularAnterioresDelMismoTipo(
 			opportunityId,
-			contractType,
+			tiposQueReemplaza(contractType, params.cartasQueTrae),
 			nuevoId,
 			motivo,
 		);
@@ -661,6 +690,13 @@ async function retirarConCandadoTomado(params: {
 			nuevoId,
 			opportunityId,
 			"La oportunidad cambió de etapa mientras se generaba",
+		);
+	}
+	if (resultado === "deja-cartas-afuera") {
+		await anularContratoReemplazado(
+			nuevoId,
+			opportunityId,
+			"Dejaba afuera cartas del paquete vigente",
 		);
 	}
 	return resultado === "vigente";
@@ -691,6 +727,86 @@ async function deshacerConCandadoTomado(
 }
 
 /**
+ * Corta si un paquete de cartas nuevo deja afuera alguna carta del vigente.
+ *
+ * El paquete nuevo reemplaza entero al anterior: es un solo documento y no se
+ * puede anular a medias. Si la oportunidad tiene uno con A y B y se genera
+ * otro sólo con C, A y B se quedaban sin documento vigente (y con ellas, las
+ * firmas que tuvieran). Así que el nuevo tiene que traer todas las que ya
+ * estaban. Si alguna ya no va, se anula primero el paquete.
+ *
+ * No mira las cartas sueltas de antes de unirlas: a ésas el paquete sólo las
+ * reemplaza si las trae (ver `tiposQueReemplaza`), así que no se pierde nada.
+ */
+async function exigirQueElPaqueteTraigaLasVigentes(
+	opportunityId: string,
+	cartasNuevas: readonly string[],
+	/** Qué puede hacer quien lo pidió para destrabarlo. */
+	comoSeArregla: string,
+): Promise<void> {
+	if (cartasNuevas.length === 0) return;
+
+	const faltan = await cartasVigentesQueFaltan(opportunityId, cartasNuevas);
+	if (faltan.size > 0) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `Esta oportunidad ya tiene cartas unidas que incluyen: ${[...faltan.values()].join(", ")}. Las cartas van todas en un solo documento y el nuevo reemplaza entero al anterior, así que tiene que traerlas también. ${comoSeArregla}`,
+		});
+	}
+}
+
+/**
+ * Las cartas de los paquetes vigentes que `cartasNuevas` deja afuera, con su
+ * etiqueta. Vacío si no falta ninguna.
+ *
+ * Recibe con qué consultar para poder correr dentro de la transacción del
+ * retiro, que es donde se decide de verdad (ver `retirarConCandadoTomado`).
+ */
+async function cartasVigentesQueFaltan(
+	opportunityId: string,
+	cartasNuevas: readonly string[],
+	opciones: {
+		/** El paquete recién guardado, que todavía no reemplazó a nadie. */
+		excluirId?: string;
+		ejecutor?: Pick<typeof db, "select">;
+	} = {},
+): Promise<Map<string, string>> {
+	const { excluirId, ejecutor = db } = opciones;
+	const paquetes = await ejecutor
+		.select({ apiResponse: generatedLegalContracts.apiResponse })
+		.from(generatedLegalContracts)
+		.where(
+			and(
+				eq(generatedLegalContracts.opportunityId, opportunityId),
+				eq(generatedLegalContracts.contractType, PAQUETE_CARTAS),
+				ne(generatedLegalContracts.status, "cancelled"),
+				isNull(generatedLegalContracts.replacedByContractId),
+				...(excluirId ? [ne(generatedLegalContracts.id, excluirId)] : []),
+			),
+		);
+
+	const faltan = new Map<string, string>();
+	for (const paquete of paquetes) {
+		for (const carta of cartasDelPaquete(paquete.apiResponse)) {
+			if (!cartasNuevas.includes(carta.contractType)) {
+				faltan.set(carta.contractType, carta.label);
+			}
+		}
+	}
+	return faltan;
+}
+
+/** Las cartas que trae el paquete de una lista ya agrupada, si lo hay. */
+function cartasDelPedido(
+	contratos: ReadonlyArray<{ contractType: string; cartas?: unknown }>,
+): string[] {
+	const paquete = contratos.find((c) => c.contractType === PAQUETE_CARTAS);
+	if (!paquete || !Array.isArray(paquete.cartas)) return [];
+	return paquete.cartas
+		.map((c: { contractType?: unknown }) => c.contractType)
+		.filter((t): t is string => typeof t === "string");
+}
+
+/**
  * Las reglas de "qué se puede subir" para una oportunidad y un tipo.
  *
  * Se piden dos veces: antes de tomar el candado, para cortar sin esperar, y de
@@ -705,6 +821,34 @@ async function exigirQueSePuedaSubir(input: {
 	contractType: string;
 	replaceContractId?: string;
 }): Promise<void> {
+	// Una carta que ya va dentro de las cartas unidas no se sube suelta: el
+	// cliente la tendría dos veces, con dos enlaces, que es justo lo que se
+	// quiso evitar al unirlas. Para cambiarla se regeneran las cartas.
+	if (esCartaUnificable(input.contractType)) {
+		const paquetes = await db
+			.select({ apiResponse: generatedLegalContracts.apiResponse })
+			.from(generatedLegalContracts)
+			.where(
+				and(
+					eq(generatedLegalContracts.opportunityId, input.opportunityId),
+					eq(generatedLegalContracts.contractType, PAQUETE_CARTAS),
+					ne(generatedLegalContracts.status, "cancelled"),
+					isNull(generatedLegalContracts.replacedByContractId),
+				),
+			);
+		const yaLaTrae = paquetes.some((p) =>
+			cartasDelPaquete(p.apiResponse).some(
+				(c) => c.contractType === input.contractType,
+			),
+		);
+		if (yaLaTrae) {
+			throw new ORPCError("BAD_REQUEST", {
+				message:
+					"Esta carta ya va dentro de las cartas unidas de la oportunidad. Para cambiarla, regenerá las cartas en vez de subirla suelta.",
+			});
+		}
+	}
+
 	// Subir un tipo que ya está vigente es reemplazarlo, y eso tiene sus
 	// reglas: sólo en 80% y con motivo. Sin elegir "Reemplazar" se corta
 	// antes de mandar nada, en vez de anular el anterior por la espalda.
@@ -1261,6 +1405,12 @@ export const contractGenerationRouter = {
 					};
 				});
 
+				// Las cartas van en un solo documento. Se agrupa acá, antes de pedir
+				// nada, y los resultados se emparejan contra ESTA lista: el
+				// generador devuelve uno por pedido, en orden, y con las cartas ya
+				// juntas son menos que los que mandó el front.
+				const aGenerar = agruparCartas(contractsWithPlural);
+
 				// Generar con el candado de la oportunidad tomado y la etapa ya
 				// revisada: WeeTrust manda las invitaciones apenas se crea cada
 				// documento, y enterarse después (al enlazar) obligaba a borrarlos
@@ -1271,8 +1421,13 @@ export const contractGenerationRouter = {
 					async () => {
 						if (input.opportunityId) {
 							await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+							await exigirQueElPaqueteTraigaLasVigentes(
+								input.opportunityId,
+								cartasDelPedido(aGenerar),
+								"Seleccioná también esas, o anulá primero las cartas unidas si alguna ya no va.",
+							);
 						}
-						return generateContractsBatch({ contracts: contractsWithPlural });
+						return generateContractsBatch({ contracts: aGenerar });
 					},
 				);
 
@@ -1303,7 +1458,7 @@ export const contractGenerationRouter = {
 				if (apiResult.results) {
 					for (let i = 0; i < apiResult.results.length; i++) {
 						const contractResult = apiResult.results[i];
-						const originalContract = input.contracts[i];
+						const originalContract = aGenerar[i];
 
 						const falla = motivoDeFalla(contractResult);
 
@@ -1361,6 +1516,10 @@ export const contractGenerationRouter = {
 							: `Se generaron ${successCount} documento(s), ${failCount} fallaron`,
 				};
 			} catch (error) {
+				// Los errores esperados (una selección que deja cartas afuera, la
+				// etapa que cambió, otra persona que ganó) salen como son. Envueltos
+				// en 500 parecían una falla del servidor.
+				if (error instanceof ORPCError) throw error;
 				console.error("[generateContractsDirect] Error:", error);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
@@ -1541,14 +1700,25 @@ export const contractGenerationRouter = {
 						filasYaEnlazadas.map((fila) => [fila.documentID, fila]),
 					);
 
-					// Enlazar es de jurídico y sólo en 80%. Si la oportunidad ya pasó (la
-					// aprobaron entre generar y enlazar), los documentos recién generados
+					// Enlazar es de jurídico, en 80% u 85%. Si la oportunidad ya pasó (la
+					// cerraron entre generar y enlazar), los documentos recién generados
 					// no se instalan: se borran en WeeTrust para que no queden vivos sin
 					// registro, con las invitaciones mandadas. Los ya enlazados no: son
 					// los vigentes.
 					let etapa: Awaited<ReturnType<typeof exigirEtapaQuePermiteReemplazo>>;
 					try {
 						etapa = await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+						// Entre generar y enlazar pudo instalarse otro paquete (otra
+						// pestaña, otra persona). Se revisa de nuevo antes de retirar nada.
+						await exigirQueElPaqueteTraigaLasVigentes(
+							input.opportunityId,
+							input.contracts.flatMap((c) =>
+								c.contractType === PAQUETE_CARTAS
+									? cartasDelPaquete(c.apiResponse).map((x) => x.contractType)
+									: [],
+							),
+							"Volvé a generar las cartas con todas.",
+						);
 					} catch (error) {
 						for (const contract of input.contracts) {
 							const { documentID } = firmaDelGenerador(contract.apiResponse);
@@ -1630,6 +1800,10 @@ export const contractGenerationRouter = {
 								? await retirarConCandadoTomado({
 										opportunityId: input.opportunityId,
 										contractType: contract.contractType,
+										// Lo que de verdad quedó adentro del PDF, según el generador.
+										cartasQueTrae: cartasDelPaquete(contract.apiResponse).map(
+											(c) => c.contractType,
+										),
 										nuevoId: saved.id,
 										etapaInicial,
 									})
@@ -1676,6 +1850,10 @@ export const contractGenerationRouter = {
 					};
 				});
 			} catch (error) {
+				// Los errores esperados (una selección que deja cartas afuera, la
+				// etapa que cambió, otra persona que ganó) salen como son. Envueltos
+				// en 500 parecían una falla del servidor.
+				if (error instanceof ORPCError) throw error;
 				console.error("[linkContractsToOpportunity] Error:", error);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
@@ -1763,9 +1941,20 @@ export const contractGenerationRouter = {
 				// Se corta antes de generar nada; con el candado se vuelve a mirar.
 				await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 
-				// 1. Filtrar solo los contratos de los tipos a regenerar
-				const contractsToRegenerate = input.generationData.filter((c) =>
-					input.contractTypes.includes(c.contractType),
+				// 1. Filtrar solo los contratos de los tipos a regenerar.
+				//
+				// Las cartas van todas o ninguna. Van en un solo documento, y el
+				// paquete nuevo reemplaza entero al anterior: regenerar una sola
+				// carta armaría un paquete con esa sola y se llevaría puestas las
+				// demás. Así que pedir cualquiera de ellas —o el paquete, que es
+				// como aparece en la ficha— regenera todas las de la foto.
+				const pideCartas = input.contractTypes.some(
+					(t) => t === PAQUETE_CARTAS || esCartaUnificable(t),
+				);
+				const contractsToRegenerate = input.generationData.filter(
+					(c) =>
+						input.contractTypes.includes(c.contractType) ||
+						(pideCartas && esCartaUnificable(c.contractType)),
 				);
 
 				if (contractsToRegenerate.length === 0) {
@@ -1963,17 +2152,27 @@ export const contractGenerationRouter = {
 				// los vigentes, mandaría sus enlaces, y el retiro los mataría enseguida.
 				// La etapa se revisa adentro, antes de crear nada en WeeTrust.
 				return conCandadoDeFirma(input.opportunityId, async () => {
-					// 3. Generar los nuevos contratos. La etapa se lee acá, ya con el
-					// candado: si cambia mientras se generan, los nuevos no reemplazan a
-					// los que ya salieron (ver retirarConCandadoTomado), y el porcentaje
-					// que se contesta sale de esta misma lectura.
+					// 3. Generar los nuevos contratos, con las cartas ya juntas en un
+					// documento; los resultados se emparejan contra esta misma lista. La
+					// etapa se lee acá, ya con el candado: si cambia mientras se generan,
+					// los nuevos no reemplazan a los que ya salieron (ver
+					// retirarConCandadoTomado), y el porcentaje que se contesta sale de
+					// esta misma lectura.
 					const etapa = await exigirEtapaQuePermiteReemplazo(
 						input.opportunityId,
 					);
 					const etapaInicial = etapa.stageId;
 					const porcentajeEtapa = etapa.porcentaje;
+					const aGenerar = agruparCartas(contractsWithNewDate);
+					// Las cartas salen de la última generación: si no tiene alguna
+					// del paquete vigente, regenerar lo dejaría sin ella.
+					await exigirQueElPaqueteTraigaLasVigentes(
+						input.opportunityId,
+						cartasDelPedido(aGenerar),
+						"La última generación no tiene los datos de esas cartas: generá las cartas desde el wizard con todas.",
+					);
 					const apiResult = await generateContractsBatch({
-						contracts: contractsWithNewDate,
+						contracts: aGenerar,
 					});
 
 					if (!apiResult.results || apiResult.results.length === 0) {
@@ -1989,7 +2188,7 @@ export const contractGenerationRouter = {
 
 					for (let i = 0; i < apiResult.results.length; i++) {
 						const contractResult = apiResult.results[i];
-						const originalContract = contractsWithNewDate[i];
+						const originalContract = aGenerar[i];
 
 						// Un contrato sin PDF no puede reemplazar al anterior: se perdería el
 						// documento bueno a cambio de uno que no se puede abrir.
@@ -2035,6 +2234,9 @@ export const contractGenerationRouter = {
 									? await retirarConCandadoTomado({
 											opportunityId: input.opportunityId,
 											contractType: originalContract.contractType,
+											cartasQueTrae: cartasDelPaquete(contractResult).map(
+												(c) => c.contractType,
+											),
 											nuevoId: saved.id,
 											etapaInicial,
 											motivo: "Regenerado desde jurídico",
@@ -2077,6 +2279,10 @@ export const contractGenerationRouter = {
 					};
 				});
 			} catch (error) {
+				// Los errores esperados (una selección que deja cartas afuera, la
+				// etapa que cambió, otra persona que ganó) salen como son. Envueltos
+				// en 500 parecían una falla del servidor.
+				if (error instanceof ORPCError) throw error;
 				console.error("[regenerateContracts] Error:", error);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
@@ -2127,6 +2333,16 @@ export const contractGenerationRouter = {
 			// etapa de jurídico, y es lo que ya hace la pantalla al esconder los
 			// botones. Se vuelve a mirar, bloqueada, antes de guardar.
 			await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+
+			// Las cartas unidas no se suben a mano: sus firmas se ubican carta por
+			// carta, y eso sólo se puede con un paquete que armó el generador (el
+			// PDF dice qué cartas trae). Uno unido por fuera no lo dice.
+			if (input.contractType === PAQUETE_CARTAS) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Las cartas unidas no se pueden subir a mano: se generan desde el CRM. Para cambiar una, regenerá las cartas.",
+				});
+			}
 
 			// Sólo los tipos con layout auditado: el generador ubica las líneas de
 			// firma por ese layout, y sin él no hay forma de repartir por rol.
@@ -2317,7 +2533,9 @@ export const contractGenerationRouter = {
 								weetrustDocumentId: resultado.documentID ?? null,
 								observerUrl: resultado.observerUrl ?? null,
 								signatureMode: getSignatureMode(input.contractType),
-								apiResponse: resultado,
+								// Para que la ficha pida mirar dónde quedaron las firmas: el
+								// documento lo armó una persona, no la plantilla.
+								apiResponse: conMarcaDeSubidoAMano(resultado),
 								pdfLink: resultado.r2Key || resultado.linkDocument || null,
 								status: "pending",
 								generatedBy: context.userId,

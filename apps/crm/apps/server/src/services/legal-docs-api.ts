@@ -139,6 +139,15 @@ export interface GenerateContractPayload {
 		 */
 		documentName?: string;
 	};
+	/**
+	 * Sólo en un `paquete_cartas`: las cartas que lo forman, en orden, cada una
+	 * con sus datos. Lo arma `agruparCartas`.
+	 */
+	cartas?: Array<{
+		contractType: string;
+		data: Record<string, unknown>;
+		options: Record<string, unknown>;
+	}>;
 }
 
 export interface BatchGeneratePayload {
@@ -170,6 +179,11 @@ export interface DocumentResult {
 	 * firmar. Es el único que se le puede pasar a alguien para que mire.
 	 */
 	observerUrl?: string;
+	/**
+	 * Sólo en un `paquete_cartas`: qué cartas quedaron en el PDF y cuántas
+	 * páginas ocupa cada una, en orden.
+	 */
+	cartas?: Array<{ contractType: string; label: string; paginas: number }>;
 	/**
 	 * Quiénes quedaron efectivamente enviados a firmar, con su rol y su link.
 	 * Es lo que reemplaza al reparto por posición de `signing_links`.

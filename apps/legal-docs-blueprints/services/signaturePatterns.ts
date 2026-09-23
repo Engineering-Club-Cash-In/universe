@@ -237,6 +237,21 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     signers: ['Cliente']
   },
 
+  // Las cartas unidas en un solo documento. Firman los mismos que en cada carta
+  // (titular y codeudores), así que el bloque es el de deudores: eso es lo que
+  // ordena a los firmantes para WeeTrust.
+  //
+  // El patrón NO se usa. Cada carta tiene su propia línea de firma ("F)___",
+  // "Firma:___"), así que las posiciones del paquete se calculan carta por
+  // carta sobre sus propias páginas (`posicionesDelPaquete`) y viajan ya
+  // resueltas. Buscar un solo patrón en el PDF unido no encontraría la mitad.
+  [ContractType.PAQUETE_CARTAS]: {
+    pattern: '(las posiciones se calculan por carta)',
+    bloques: ['DEUDORES'],
+    signerCount: 1,
+    signers: ['Cliente']
+  },
+
   [ContractType.ACUERDO_INVERSION_CASH_IN]: {
     pattern: 'F_________________________________________________',
     signerCount: 1,
@@ -390,6 +405,35 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     signers: ['Cliente']
   }
 };
+
+/**
+ * Las cartas que se unen en un solo documento para firmar.
+ *
+ * Gerencia lo pidió porque a los clientes les llegaban once enlaces y no los
+ * firmaban. Las cartas son lo que se puede juntar: sólo las firman el cliente y
+ * sus codeudores, y casi todas son de una hoja (la cobertura es de dos).
+ *
+ * Los contratos NO van acá: llevan al representante legal y la rúbrica por
+ * página, y cada uno tiene que poder anularse o regenerarse por separado. El
+ * descargo de responsabilidades tampoco, aunque sea de una hoja: no es una
+ * carta. Y la declaración de vendedor se firma en papel.
+ *
+ * El CRM repite esta lista en `lib/paquete-cartas.ts`: si se cambia acá, hay
+ * que cambiarla allá.
+ */
+export const CARTAS_UNIFICABLES: readonly ContractType[] = [
+  ContractType.CARTA_EMISION_CHEQUES,
+  ContractType.CARTA_CARRO_NUEVO,
+  ContractType.CARTA_ACEPTACION_INSTALACION_GPS,
+  ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO,
+  ContractType.SOLICITUD_COMPRA_VEHICULO,
+  ContractType.COBERTURA_INREXSA,
+  ContractType.COBERTURA_INREXSA_COMERCIAL,
+];
+
+export function esCartaUnificable(contractType: string): boolean {
+  return (CARTAS_UNIFICABLES as readonly string[]).includes(contractType);
+}
 
 /**
  * Dónde va la rúbrica de cada página impar, o `undefined` si ese tipo no lleva.

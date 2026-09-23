@@ -19,6 +19,13 @@ export enum ContractType {
   SOLICITUD_COMPRA_VEHICULO = 'solicitud_compra_vehiculo_tercero',
   CARTA_ACEPTACION_INSTALACION_GPS = 'carta_aceptacion_instalacion_gps',
 
+  /**
+   * Las cartas de una venta unidas en un solo documento, con un solo enlace
+   * por firmante. No tiene template: se arma con las cartas que se pidan
+   * (ver `services/paqueteCartas.ts`).
+   */
+  PAQUETE_CARTAS = 'paquete_cartas',
+
   // ===== INVERSIONES =====
   ACUERDO_INVERSION_CASH_IN = 'acuerdo_inversion_cash_in',
   CARTA_CONFIRMACION_INVERSION_INICIAL = 'carta_confirmacion_inversion_inicial',
@@ -766,10 +773,28 @@ export interface ContractGenerationResponse {
     signatoryID?: string;
     signingUrl?: string;
   }>;
+  /**
+   * Qué cartas trae un `paquete_cartas`, en el orden en que aparecen en el PDF.
+   * Sólo lo llevan los paquetes.
+   */
+  cartas?: ComposicionDelPaquete;
   message: string;
   error?: string;
   generatedAt?: string;
 }
+
+/**
+ * Qué cartas trae un paquete y cuántas páginas ocupa cada una, en orden.
+ *
+ * Es lo que permite volver a ubicar las firmas de un paquete ya armado: cada
+ * carta tiene su propio patrón de línea de firma, así que hay que saber en qué
+ * páginas está cada una para buscarlo donde corresponde.
+ */
+export type ComposicionDelPaquete = Array<{
+  contractType: ContractType;
+  label: string;
+  paginas: number;
+}>;
 
 /**
  * Opciones de configuración para el generador de contratos

@@ -51,6 +51,30 @@ async function pdfDePrueba(
 	return Buffer.from(await doc.save());
 }
 
+/**
+ * Ocho hojas: el rep legal firma en la 7 (impar, donde van rúbricas) y los
+ * deudores en la 8. Es el caso de una hoja donde firma uno y los demás no.
+ */
+async function pdfConRepLegalEnLaSeptima(repLegal: {
+	x: number;
+	y: number;
+}): Promise<Buffer> {
+	const doc = await PDFDocument.create();
+	const fuente = await doc.embedFont(StandardFonts.Helvetica);
+	for (let i = 1; i <= 8; i++) {
+		const pagina = doc.addPage([612, 792]);
+		pagina.drawText(`Pagina ${i}`, { x: 72, y: 720, size: 11, font: fuente });
+		if (i === 7) {
+			pagina.drawText(LINEA, { ...repLegal, size: 10, font: fuente });
+		}
+		if (i === 8) {
+			pagina.drawText(LINEA, { x: 72, y: 380, size: 10, font: fuente });
+			pagina.drawText(LINEA, { x: 320, y: 380, size: 10, font: fuente });
+		}
+	}
+	return Buffer.from(await doc.save());
+}
+
 /** Las rúbricas son más chicas que una firma (100×50). */
 const esRubrica = (p: { imageSize: { width: number } }) => p.imageSize.width < 100;
 
@@ -135,21 +159,69 @@ describe("rúbricas de páginas impares", () => {
 		expect(reales.every((p) => p.page === 8)).toBe(true);
 	});
 
-	test("si pisaría la firma de otra persona, el grupo sube hasta no pisar ninguna", async () => {
-		// La firma real del codeudor, en la franja de abajo, justo donde va la
-		// rúbrica del titular.
+	test("en la hoja de las firmas finales no va ninguna rúbrica", async () => {
+		// Los tres firman en la 7, que es impar: su firma ya marca esa hoja.
 		const posiciones = await WeeTrustService.locateSignatureWidgets(
-			await pdfDePrueba(7, { x: 280, y: 60 }),
+			await pdfDePrueba(7),
 			ContractType.GARANTIA_MOBILIARIA,
 			FIRMANTES,
 		);
-		const reales = posiciones.filter((p) => !esRubrica(p));
-		const enLaSeptima = posiciones.filter((p) => p.page === 7 && esRubrica(p));
+		const rubricas = posiciones.filter(esRubrica);
 
-		// Los tres rubrican igual: nadie se queda sin la suya por la firma de otro.
-		expect(enLaSeptima).toHaveLength(3);
+		expect(rubricas.filter((r) => r.page === 7)).toHaveLength(0);
+		for (const pagina of [1, 3, 5]) {
+			expect(rubricas.filter((r) => r.page === pagina)).toHaveLength(3);
+		}
+	});
+
+	test("un documento de una sola hoja no lleva rúbricas", async () => {
+		// Como el pagaré: la única hoja es la de las firmas.
+		const posiciones = await WeeTrustService.locateSignatureWidgets(
+			await pdfDePrueba(1),
+			ContractType.GARANTIA_MOBILIARIA,
+			FIRMANTES,
+		);
+
+		expect(posiciones.filter(esRubrica)).toHaveLength(0);
+		expect(posiciones).toHaveLength(3);
+	});
+
+	test("en la hoja donde firma una persona, esa persona no rubrica y los demás sí", async () => {
+		// El rep legal firma arriba de la 7; los deudores, en la 8.
+		const posiciones = await WeeTrustService.locateSignatureWidgets(
+			await pdfConRepLegalEnLaSeptima({ x: 72, y: 600 }),
+			ContractType.GARANTIA_MOBILIARIA,
+			FIRMANTES,
+		);
+		const enLaSeptima = rubricasDeLaPagina(posiciones, 7);
+
+		expect(enLaSeptima.map((r) => r.user.email)).toEqual([
+			"titular@test",
+			"codeudor@test",
+		]);
+		// Las dos se reparten el ancho entero: sin el hueco del que no rubrica.
+		const { franja } = getRubrica(ContractType.GARANTIA_MOBILIARIA)!;
+		const ultima = enLaSeptima[enLaSeptima.length - 1];
+		expect(
+			ultima.coordinates.x + ultima.imageSize.width - enLaSeptima[0].coordinates.x,
+		).toBeGreaterThan((franja.derecha - franja.izquierda) * 0.6);
+	});
+
+	test("si pisaría la firma de otra persona, el grupo sube hasta no pisar ninguna", async () => {
+		// La firma del rep legal, en la franja de la 7, justo donde va la rúbrica
+		// del titular.
+		const posiciones = await WeeTrustService.locateSignatureWidgets(
+			await pdfConRepLegalEnLaSeptima({ x: 150, y: 60 }),
+			ContractType.GARANTIA_MOBILIARIA,
+			FIRMANTES,
+		);
+		const reales = posiciones.filter((p) => !esRubrica(p) && p.page === 7);
+		const enLaSeptima = rubricasDeLaPagina(posiciones, 7);
+
+		// Los dos rubrican igual: nadie se queda sin la suya por la firma de otro.
+		expect(enLaSeptima).toHaveLength(2);
 		for (const r of enLaSeptima) {
-			for (const f of reales.filter((f) => f.page === 7)) {
+			for (const f of reales) {
 				const seSolapan =
 					r.coordinates.x < f.coordinates.x + f.imageSize.width &&
 					f.coordinates.x < r.coordinates.x + r.imageSize.width &&
@@ -158,19 +230,10 @@ describe("rúbricas de páginas impares", () => {
 				expect(seSolapan).toBe(false);
 			}
 		}
-	});
-
-	test("sobre la firma real de la misma persona, su rúbrica no va", async () => {
-		// La firma del codeudor ocupa sólo el lugar de su propia rúbrica.
-		const posiciones = await WeeTrustService.locateSignatureWidgets(
-			await pdfDePrueba(7, { x: 430, y: 60 }),
-			ContractType.GARANTIA_MOBILIARIA,
-			FIRMANTES,
-		);
-		const enLaSeptima = posiciones.filter((p) => p.page === 7 && esRubrica(p));
-
-		expect(enLaSeptima).toHaveLength(2);
-		expect(enLaSeptima.map((r) => r.user.email)).not.toContain("codeudor@test");
+		// Y subieron: quedan más arriba que en una hoja sin firmas (en WeeTrust
+		// la Y crece hacia abajo).
+		const enLaQuinta = rubricasDeLaPagina(posiciones, 5);
+		expect(enLaSeptima[0].coordinates.y).toBeLessThan(enLaQuinta[0].coordinates.y);
 	});
 
 	test("las cartas no llevan rúbrica", async () => {

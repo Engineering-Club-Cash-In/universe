@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import {
+	extraerNucleoDeNombreUnidad,
 	extraerNucleoPlaca,
 	extraerUltimaSenal,
 	findIgnitionSensorId,
@@ -1947,6 +1948,52 @@ describe("extraerNucleoPlaca (CB-118)", () => {
 	test("devuelve null sin forma de placa", () => {
 		for (const valor of [null, undefined, "", "NUEVO", "N/A", "12AB"]) {
 			expect(extraerNucleoPlaca(valor)).toBeNull();
+		}
+	});
+
+	test("rechaza placas mal cargadas en vez de reducirlas a otro núcleo", () => {
+		// "P-1720GVH" o "P-720GVHX" se reducían a 720GVH y vinculaban solas la
+		// unidad P-720GVH de otro cliente.
+		for (const valor of [
+			"P-1720GVH",
+			"P-720GVHX",
+			"P-720GVH-2",
+			"X P-720GVH",
+		]) {
+			expect(extraerNucleoPlaca(valor)).toBeNull();
+		}
+	});
+
+	test("acepta las formas reales del CRM", () => {
+		for (const [valor, nucleo] of [
+			["P0619LTS", "619LTS"],
+			["C0-856CBP", "856CBP"],
+			["263LBM", "263LBM"],
+			["P0 - 822LMW", "822LMW"],
+			[" c-629-bnc ", "629BNC"],
+		] as const) {
+			const n = extraerNucleoPlaca(valor);
+			expect(n ? n.digitos + n.letras : null).toBe(nucleo);
+		}
+	});
+});
+
+describe("extraerNucleoDeNombreUnidad (CB-118)", () => {
+	test("encuentra la placa dentro del nombre de la unidad", () => {
+		const n = extraerNucleoDeNombreUnidad("Bidgar Yatz - C-629BNC");
+		expect(n ? n.digitos + n.letras : null).toBe("629BNC");
+		const m = extraerNucleoDeNombreUnidad("P-720GVH SIN APAGADO");
+		expect(m ? m.digitos + m.letras : null).toBe("720GVH");
+	});
+
+	test("respeta los bordes: no toma un núcleo dentro de algo más largo", () => {
+		for (const nombre of [
+			"P-1720GVH",
+			"P-720GVHX",
+			"HFC1037D5K2TSTT9",
+			"A-04",
+		]) {
+			expect(extraerNucleoDeNombreUnidad(nombre)).toBeNull();
 		}
 	});
 });

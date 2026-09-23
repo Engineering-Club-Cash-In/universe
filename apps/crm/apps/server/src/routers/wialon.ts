@@ -19,6 +19,7 @@ import {
 	isNull,
 	ne,
 	notLike,
+	sql,
 } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -32,6 +33,7 @@ import {
 	cobrosSupervisorProcedure,
 } from "../lib/orpc";
 import {
+	extraerNucleoDeNombreUnidad,
 	extraerNucleoPlaca,
 	getWialonClient,
 	matchUnidadPorPlaca,
@@ -139,6 +141,9 @@ async function leerVehiculoParaGps(vehicleId: string): Promise<{
 	wialonUnitId: number | null;
 	wialonUnitName: string | null;
 	wialonVinculadoPor: string | null;
+	// false = se leyó por el fallback (0057 sin aplicar): nada que toque las
+	// columnas de vínculo puede correr después en esta consulta.
+	columnasVinculo: boolean;
 } | null> {
 	try {
 		const filas = await db
@@ -151,7 +156,7 @@ async function leerVehiculoParaGps(vehicleId: string): Promise<{
 			.from(vehicles)
 			.where(eq(vehicles.id, vehicleId))
 			.limit(1);
-		return filas[0] ?? null;
+		return filas[0] ? { ...filas[0], columnasVinculo: true } : null;
 	} catch (error) {
 		console.warn("WIALON_VINCULO_COLUMNAS_NO_DISPONIBLES", {
 			vehicleId,
@@ -169,6 +174,7 @@ async function leerVehiculoParaGps(vehicleId: string): Promise<{
 					wialonUnitId: null,
 					wialonUnitName: null,
 					wialonVinculadoPor: null,
+					columnasVinculo: false,
 				}
 			: null;
 	}
@@ -182,37 +188,74 @@ async function leerVehiculoParaGps(vehicleId: string): Promise<{
  */
 export const WIALON_VINCULO_AUTO_PLACA = "auto:placa";
 
+type TransaccionDb = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Serializa, dentro de una transacción, todo lo que asigna una unidad de
+ * Wialon a un vehículo. Sin UNIQUE en wialon_unit_id (a propósito, ver 0057),
+ * dos asignaciones simultáneas de la MISMA unidad a vehículos distintos
+ * podían hacer commit las dos. El lock es por unidad (asignar unidades
+ * distintas no se bloquea entre sí) y se libera solo al cerrar la transacción.
+ */
+async function bloquearUnidadWialon(tx: TransaccionDb, unitId: number) {
+	await tx.execute(
+		sql`select pg_advisory_xact_lock(hashtextextended(${`wialon_unit:${unitId}`}, 0))`,
+	);
+}
+
 /**
  * Fija el vínculo deducido por placa para que las próximas consultas no
- * vuelvan a recorrer el catálogo. Best-effort: si el UPDATE falla (ej. 0057
- * sin aplicar) la consulta en curso igual responde con la unidad resuelta.
- *
- * Solo escribe si el vehículo SIGUE sin vínculo: entre leer el vehículo y
- * terminar de recorrer el catálogo de Wialon pueden pasar segundos, y si en
- * ese lapso un supervisor lo vinculó a mano, su decisión manda sobre la
- * deducción. En ese caso el UPDATE no toca ninguna fila y no pasa nada más.
+ * vuelvan a recorrer el catálogo. Devuelve qué pasó, porque el handler
+ * responde distinto en cada caso:
+ *   - "guardado": quedó fijado.
+ *   - "asignada_a_otro": la unidad ya está guardada en OTRO vehículo (un
+ *     supervisor reasignó el GPS). No se toca: deducir de nuevo desharía la
+ *     reasignación y este crédito mostraría la ubicación del otro carro.
+ *   - "ya_vinculado": entre leer el vehículo y terminar de recorrer el
+ *     catálogo (segundos), un supervisor lo vinculó a mano. Su decisión manda
+ *     y el handler tiene que mostrar ESA unidad, no la deducida.
+ *   - "error": best-effort, la consulta sigue con la unidad deducida.
+ * Chequeo y escritura van en la misma transacción, con el lock de la unidad.
  */
 async function fijarVinculoPorPlaca(
 	vehicleId: string,
 	unitId: number,
 	unitName: string,
-): Promise<void> {
+): Promise<"guardado" | "asignada_a_otro" | "ya_vinculado" | "error"> {
 	try {
-		await db
-			.update(vehicles)
-			.set({
-				wialonUnitId: unitId,
-				wialonUnitName: unitName,
-				wialonVinculadoAt: new Date(),
-				wialonVinculadoPor: WIALON_VINCULO_AUTO_PLACA,
-			})
-			.where(and(eq(vehicles.id, vehicleId), isNull(vehicles.wialonUnitId)));
+		return await db.transaction(async (tx) => {
+			await bloquearUnidadWialon(tx, unitId);
+
+			const [otro] = await tx
+				.select({ vehiculoConUnidad: vehicles.id })
+				.from(vehicles)
+				.where(
+					and(eq(vehicles.wialonUnitId, unitId), ne(vehicles.id, vehicleId)),
+				)
+				.limit(1);
+			if (otro) return "asignada_a_otro" as const;
+
+			const guardados = await tx
+				.update(vehicles)
+				.set({
+					wialonUnitId: unitId,
+					wialonUnitName: unitName,
+					wialonVinculadoAt: new Date(),
+					wialonVinculadoPor: WIALON_VINCULO_AUTO_PLACA,
+				})
+				.where(and(eq(vehicles.id, vehicleId), isNull(vehicles.wialonUnitId)))
+				.returning({ id: vehicles.id });
+			return guardados.length > 0
+				? ("guardado" as const)
+				: ("ya_vinculado" as const);
+		});
 	} catch (error) {
 		console.warn("WIALON_VINCULO_AUTO_NO_GUARDADO", {
 			vehicleId,
 			unitId,
 			message: error instanceof Error ? error.message : String(error),
 		});
+		return "error";
 	}
 }
 
@@ -336,7 +379,7 @@ async function creditosPorUnidad(
 
 		for (const unidad of unidades) {
 			if (resultado.has(unidad.id)) continue;
-			const nucleo = extraerNucleoPlaca(unidad.nm);
+			const nucleo = extraerNucleoDeNombreUnidad(unidad.nm);
 			if (!nucleo) continue;
 			for (const sifco of porNucleo.get(nucleo.digitos + nucleo.letras) ?? []) {
 				agregar(unidad.id, sifco, "placa");
@@ -738,20 +781,33 @@ export const wialonRouter = {
 
 				const client = getWialonClient();
 
-				// 1. Vínculo ya fijado: es la ruta normal y no toca el catálogo.
-				if (vehiculo.wialonUnitId) {
-					const unitName =
-						vehiculo.wialonUnitName ?? String(vehiculo.wialonUnitId);
-					await registrarAuditoria(vehiculo.wialonUnitId, unitName);
+				// Respuesta con el vínculo guardado en el vehículo (ruta normal, y
+				// también cuando un supervisor lo fijó durante esta consulta).
+				const responderVinculoGuardado = async (v: {
+					wialonUnitId: number;
+					wialonUnitName: string | null;
+					wialonVinculadoPor: string | null;
+					licensePlate: string | null;
+				}) => {
+					const unitName = v.wialonUnitName ?? String(v.wialonUnitId);
+					await registrarAuditoria(v.wialonUnitId, unitName);
 					return await construirRespuestaVinculada(
 						client,
-						vehiculo.wialonUnitId,
+						v.wialonUnitId,
 						unitName,
-						vehiculo.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA
+						v.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA
 							? "placa"
 							: "persistido",
-						vehiculo.licensePlate?.trim() || null,
+						v.licensePlate?.trim() || null,
 					);
+				};
+
+				// 1. Vínculo ya fijado: es la ruta normal y no toca el catálogo.
+				if (vehiculo.wialonUnitId) {
+					return await responderVinculoGuardado({
+						...vehiculo,
+						wialonUnitId: vehiculo.wialonUnitId,
+					});
 				}
 
 				// 2. Sin vínculo: se deduce buscando la placa en el catálogo.
@@ -799,22 +855,13 @@ export const wialonRouter = {
 					};
 				}
 
-				// La unidad deducida ya está guardada en OTRO vehículo: pasa cuando
-				// un supervisor reasignó el GPS a otro carro (vincularUnidadWialon
-				// se la quita a este). El nombre de la unidad todavía tiene esta
-				// placa, así que deducir de nuevo desharía la reasignación y este
-				// crédito mostraría la ubicación del otro carro. Decide un supervisor.
-				const [asignadaAOtro] = await db
-					.select({ vehiculoConUnidad: vehicles.id })
-					.from(vehicles)
-					.where(
-						and(
-							eq(vehicles.wialonUnitId, unidad.id),
-							ne(vehicles.id, input.vehicleId),
-						),
-					)
-					.limit(1);
-				if (asignadaAOtro) {
+				// Sin las columnas de la 0057 no se puede guardar ni chequear
+				// vínculos: se responde con la deducción, como documenta el fallback.
+				const auto = vehiculo.columnasVinculo
+					? await fijarVinculoPorPlaca(input.vehicleId, unidad.id, unidad.nm)
+					: "sin_columnas";
+
+				if (auto === "asignada_a_otro") {
 					await registrarAuditoria(null, null);
 					return {
 						estado: "sin_vinculo" as const,
@@ -824,8 +871,17 @@ export const wialonRouter = {
 					};
 				}
 
+				if (auto === "ya_vinculado") {
+					const actual = await leerVehiculoParaGps(input.vehicleId);
+					if (actual?.wialonUnitId) {
+						return await responderVinculoGuardado({
+							...actual,
+							wialonUnitId: actual.wialonUnitId,
+						});
+					}
+				}
+
 				await registrarAuditoria(unidad.id, unidad.nm);
-				await fijarVinculoPorPlaca(input.vehicleId, unidad.id, unidad.nm);
 				return await construirRespuestaVinculada(
 					client,
 					unidad.id,
@@ -865,6 +921,8 @@ export const wialonRouter = {
 			// del carro nuevo. En una transacción: si el vehículo destino no
 			// existe, tampoco se desvincula el anterior.
 			const { liberados } = await db.transaction(async (tx) => {
+				await bloquearUnidadWialon(tx, input.unitId);
+
 				const liberados = await tx
 					.update(vehicles)
 					.set({

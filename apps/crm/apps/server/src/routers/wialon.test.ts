@@ -28,6 +28,8 @@ let filasAfectadasUpdate = 1;
 let accesoCasoMock = true;
 // Si la unidad deducida por placa ya está guardada en otro vehículo.
 let unidadAsignadaAOtroMock = false;
+// Cuántas veces se tomó el lock por unidad (pg_advisory_xact_lock vía execute).
+let locksUnidad = 0;
 let casoGpsMock: Record<string, unknown> | null = {
 	casoSifco: "01010214100000",
 	vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
@@ -42,6 +44,10 @@ function mockDbAdmin() {
 		// vincularUnidadWialon desvincula y vincula en una transacción: el mock
 		// corre el callback con el mismo objeto (sin rollback real).
 		transaction: async <T>(fn: (tx: unknown) => Promise<T>) => fn(mockDb),
+		execute: async () => {
+			locksUnidad++;
+			return [];
+		},
 		select: (campos?: Record<string, unknown>) => {
 			// El select del middleware de auth no pasa proyección; los de
 			// leerVehiculoParaGps sí, y son los únicos que piden licensePlate.
@@ -69,8 +75,14 @@ function mockDbAdmin() {
 				return {
 					from: () => ({
 						where: () => ({
-							limit: async () =>
-								unidadAsignadaAOtroMock ? [{ vehiculoConUnidad: "otro" }] : [],
+							limit: async () => {
+								// Sin la 0057 esta consulta también revienta: el handler
+								// no debe llegar a correrla en ese caso.
+								if (errorSelectVehiculo) throw errorSelectVehiculo;
+								return unidadAsignadaAOtroMock
+									? [{ vehiculoConUnidad: "otro" }]
+									: [];
+							},
 						}),
 					}),
 				};
@@ -1316,6 +1328,104 @@ describe("wialonRouter", () => {
 			}
 		});
 
+		it("si un supervisor vinculó a mano durante la consulta, muestra SU unidad y no la deducida", async () => {
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: null,
+				wialonUnitName: null,
+				wialonVinculadoPor: null,
+			};
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					if (bodyStr.includes("core%2Fsearch_items")) {
+						// El supervisor fija la unidad 555 mientras se recorre el
+						// catálogo: el UPDATE condicional ya no encuentra la fila.
+						filasAfectadasUpdate = 0;
+						filaVehiculoMock = {
+							licensePlate: "C-629BNC",
+							wialonUnitId: 555,
+							wialonUnitName: "Unidad elegida por supervisor",
+							wialonVinculadoPor: "sup@example.com",
+						};
+						return new Response(
+							JSON.stringify({
+								totalItemsCount: 1,
+								indexFrom: 0,
+								indexTo: 0,
+								items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+							}),
+							{ status: 200 },
+						);
+					}
+					if (bodyStr.includes("unit%2Fcalc_last")) {
+						return new Response(JSON.stringify([{ i: 555 }]), { status: 200 });
+					}
+					return new Response(
+						JSON.stringify({ item: { id: 555, nm: "u" }, flags: 1025 }),
+						{ status: 200 },
+					);
+				}),
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("vinculado");
+				if (res.estado !== "vinculado") throw new Error("estado inesperado");
+				expect(res.unitId).toBe(555);
+				expect(res.vinculoOrigen).toBe("persistido");
+				expect(insertsGpsAuditoria).toHaveLength(1);
+				expect(insertsGpsAuditoria[0]).toMatchObject({ unitId: "555" });
+			} finally {
+				filasAfectadasUpdate = 1;
+			}
+		});
+
+		it("el guardado automático toma el lock de la unidad", async () => {
+			locksUnidad = 0;
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(
+				clienteWialon((bodyStr) =>
+					bodyStr.includes("core%2Fsearch_items")
+						? new Response(
+								JSON.stringify({
+									totalItemsCount: 1,
+									indexFrom: 0,
+									indexTo: 0,
+									items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+								}),
+								{ status: 200 },
+							)
+						: bodyStr.includes("unit%2Fcalc_last")
+							? new Response(JSON.stringify([{ i: 999 }]), { status: 200 })
+							: new Response(
+									JSON.stringify({ item: { id: 999, nm: "u" }, flags: 1025 }),
+									{ status: 200 },
+								),
+				),
+			);
+			await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(locksUnidad).toBe(1);
+		});
+
 		it("un vínculo guardado por deducción de placa se sigue mostrando como deducción", async () => {
 			filaVehiculoMock = {
 				licensePlate: "C-629BNC",
@@ -1780,6 +1890,8 @@ describe("wialonRouter", () => {
 				wialonVinculadoPor: null,
 			});
 			expect(updatesVehiculo[1]).toMatchObject({ wialonUnitId: 28554757 });
+			// Serializado contra otra asignación simultánea de la misma unidad.
+			expect(locksUnidad).toBeGreaterThan(0);
 			const auditoria = logs.find((l) => l[0] === "WIALON_UNIDAD_VINCULADA");
 			expect(
 				(auditoria?.[1] as Record<string, unknown>).vehiculosDesvinculados,

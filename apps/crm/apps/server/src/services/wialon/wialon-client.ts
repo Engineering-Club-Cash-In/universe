@@ -107,19 +107,41 @@ export function findIgnitionSensorId(
  * la unidad en Wialon. El prefijo varía ("P-", "C-", sin prefijo, y ~10% de las
  * placas del CRM vienen como "P0-720GVH", con un cero tipeado de más) y los
  * separadores también ("P - 278KJQ" vs "P-278KJQ SIN APAGADO").
+ *
+ * Para la placa del CRM la forma se valida COMPLETA (anclada): un valor mal
+ * cargado como "P-1720GVH" o "P-720GVHX" no tiene núcleo, en vez de reducirse
+ * a "720GVH" y vincular sola la unidad P-720GVH de otro cliente. Contra las
+ * 1376 placas de la base de desarrollo, anclar no deja afuera ninguna placa
+ * válida.
  */
-const NUCLEO_PLACA = /(\d{3})\s*-?\s*([A-Z]{3})/;
+const PLACA_CRM = /^\s*(?:[A-Z]{1,2}0?\s*-?\s*)?(\d{3})\s*-?\s*([A-Z]{3})\s*$/;
 
 /**
- * Extrae el núcleo de la placa, o null si no tiene forma de placa. Los valores
- * de relleno que existen en el CRM ("NUEVO", "N/A", "EJEMPLO", "0") no tienen
- * núcleo: se tratan como "sin placa" en vez de buscarlos en el catálogo, donde
- * coincidirían con cualquier unidad cuyo nombre los contenga.
+ * En el NOMBRE de una unidad la placa viene con texto alrededor ("Bidgar Yatz
+ * - C-629BNC", "P-720GVH SIN APAGADO"): se busca dentro, pero con bordes (sin
+ * dígito antes ni letra/dígito después) por el mismo motivo.
+ */
+const PLACA_EN_NOMBRE = /(?:^|[^0-9])(\d{3})[\s-]*([A-Z]{3})(?![A-Z0-9])/;
+
+/**
+ * Extrae el núcleo de una placa del CRM, o null si no tiene forma de placa.
+ * Los valores de relleno que existen en el CRM ("NUEVO", "N/A", "EJEMPLO",
+ * "0") y las placas mal cargadas no tienen núcleo: se tratan como "sin placa"
+ * en vez de buscarlos en el catálogo.
  */
 export function extraerNucleoPlaca(
 	valor: string | null | undefined,
 ): { digitos: string; letras: string } | null {
-	const match = (valor ?? "").toUpperCase().match(NUCLEO_PLACA);
+	const match = (valor ?? "").toUpperCase().match(PLACA_CRM);
+	if (!match?.[1] || !match[2]) return null;
+	return { digitos: match[1], letras: match[2] };
+}
+
+/** Núcleo de placa dentro del nombre de una unidad de Wialon, o null. */
+export function extraerNucleoDeNombreUnidad(
+	nombre: string | null | undefined,
+): { digitos: string; letras: string } | null {
+	const match = (nombre ?? "").toUpperCase().match(PLACA_EN_NOMBRE);
 	if (!match?.[1] || !match[2]) return null;
 	return { digitos: match[1], letras: match[2] };
 }

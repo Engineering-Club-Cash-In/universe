@@ -44,15 +44,23 @@ export const ETAPAS_QUE_PERMITEN_REEMPLAZO = [80, 85];
  *   jurídico pueda hacerlo durante su etapa.
  * - **anular** (descartar el contrato sin reemplazarlo) lo hacen los dos,
  *   cuando el documento no va: datos equivocados, la identificación que
- *   WeeTrust dejó pasar, o simplemente se subió otro.
+ *   WeeTrust dejó pasar, o simplemente se subió otro. Va también en 85% porque
+ *   es una decisión explícita, con motivo, y conserva en WeeTrust lo que ya
+ *   tenga firmas.
+ * - **eliminar** (el "Eliminar" de jurídico: descarta el contrato y lo borra
+ *   en WeeTrust sin poner otro en su lugar) sólo en 80%. En 85% los enlaces ya
+ *   le llegaron al cliente por WhatsApp: borrarlo se los deja muertos, sin un
+ *   contrato que lo reemplace ni nada que reenviar. Para cambiar un contrato en
+ *   firma está reemplazar, que sí deja uno nuevo, o anular, que pide motivo.
  *
  * Del 90% en adelante los contratos ya son parte de una decisión tomada y no
- * se tocan, para ninguna de las tres.
+ * se tocan, para ninguna.
  */
 export const ETAPAS_POR_ACCION = {
 	reemplazar: [80, 85],
 	regenerar: [80, 85],
 	anular: [80, 85],
+	eliminar: [80],
 } as const;
 
 export type AccionSobreContrato = keyof typeof ETAPAS_POR_ACCION;

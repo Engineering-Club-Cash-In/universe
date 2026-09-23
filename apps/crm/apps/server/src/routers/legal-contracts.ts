@@ -188,7 +188,7 @@ async function eliminarContrato(
 	 */
 	exigirEtapa: AccionSobreContrato | null = null,
 	/** Ver `anularContratoReemplazado`. */
-	opciones: { conservarSiHayFirmas?: boolean } = {},
+	opciones: { conservarSiHayFirmas?: boolean; conservarFila?: boolean } = {},
 ): Promise<{ conservado: boolean }> {
 	// Con el candado de la oportunidad: esto borra el documento en WeeTrust, y
 	// si un envío por WhatsApp está mandando sus enlaces, el cliente recibiría
@@ -207,7 +207,7 @@ async function eliminarContrato(
 async function eliminarConCandadoTomado(
 	contrato: typeof generatedLegalContracts.$inferSelect,
 	motivo: string,
-	opciones: { conservarSiHayFirmas?: boolean } = {},
+	opciones: { conservarSiHayFirmas?: boolean; conservarFila?: boolean } = {},
 ): Promise<{ conservado: boolean }> {
 	// Los generados antes de que se guardara el `documentID` lo llevan en el
 	// link. Se guarda en la fila para que anular lo borre allá también.
@@ -239,9 +239,9 @@ async function eliminarConCandadoTomado(
 /**
  * Corta si la oportunidad ya no está en una etapa que permita esta acción.
  *
- * Reemplazar es de jurídico y sólo en 80%; regenerar lo hace análisis y va en
- * 80% u 85%. Del 90% en adelante los contratos ya son parte de una decisión
- * tomada y no se tocan.
+ * Qué etapas admite cada acción está en `ETAPAS_POR_ACCION`: reemplazar y
+ * regenerar van en 80% y 85%, eliminar sólo en 80%. Del 90% en adelante los
+ * contratos ya son parte de una decisión tomada y no se tocan.
  */
 async function exigirEtapaDeFirma(
 	opportunityId: string,
@@ -486,7 +486,7 @@ export const legalContractsRouter = {
 			const { conservado } = await eliminarContrato(
 				existingContract,
 				"Eliminado por jurídico",
-				"reemplazar",
+				"eliminar",
 			);
 
 			return {
@@ -1528,20 +1528,23 @@ export const legalContractsRouter = {
 			const quien = context.session?.user?.name ?? "alguien del CRM";
 			// Sin reemplazo, un documento que ya tiene alguna firma se queda en
 			// WeeTrust: borrarlo tiraría firmas que son de alguien, y no hay un
-			// documento nuevo que ocupe su lugar.
+			// documento nuevo que ocupe su lugar. Y la fila queda siempre, aunque
+			// no haya documento (uno en papel sin firmar): el diálogo promete que
+			// va a estar en «Ver anulados» con su motivo.
 			const { conservado } = await eliminarContrato(
 				contrato,
 				`${etiquetaDeMotivo(input.motivo)} (anulado por ${quien})`,
 				"anular",
-				{ conservarSiHayFirmas: true },
+				{ conservarSiHayFirmas: true, conservarFila: true },
 			);
 
 			return {
 				success: true,
 				conservado,
-				message: conservado
-					? "Contrato anulado. Queda en «Ver anulados» con el detalle de cómo quedó en WeeTrust."
-					: "Contrato anulado y borrado de la plataforma de firma.",
+				// La fila queda siempre (`conservarFila`): el detalle de qué pasó
+				// con el documento en WeeTrust está en su motivo.
+				message:
+					"Contrato anulado. Queda en «Ver anulados» con el motivo y cómo quedó en la plataforma de firma.",
 			};
 		}),
 

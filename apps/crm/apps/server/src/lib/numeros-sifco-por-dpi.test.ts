@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import {
+	consultaNumerosSifcoDeLead,
 	consultaNumerosSifcoPorDpi,
 	exigirNumerosCompletos,
 	SONDA_DESBORDE_NUMEROS,
 	TOPE_NUMEROS_CREDITO_CONOCIDOS,
+	unirNumerosSifco,
 } from "./numeros-sifco-por-dpi";
 
 const sqlDe = (dpi: string) =>
@@ -13,6 +15,15 @@ const sqlDe = (dpi: string) =>
 		.toSQL()
 		.sql.replace(/\s+/g, " ")
 		.toLowerCase();
+
+const consultaDelLead = consultaNumerosSifcoDeLead(
+	drizzle.mock(),
+	"8f14e45f-ceea-467a-9f07-6c0b6e0a1c33",
+);
+const sqlDelLead = consultaDelLead
+	.toSQL()
+	.sql.replace(/\s+/g, " ")
+	.toLowerCase();
 
 describe("números de SIFCO que el CRM conoce para un DPI", () => {
 	/**
@@ -114,5 +125,86 @@ describe("desborde de una fuente: fail-closed, no cobertura recortada", () => {
 				String(TOPE_NUMEROS_CREDITO_CONOCIDOS),
 			);
 		}
+	});
+});
+
+/**
+ * 🔴 La consulta hermana. Buscando SOLO por el DPI nuevo, el lead que tiene su
+ * propio crédito moroso —un `CRM-<uuid>` o un `insoluto-N`, que SIFCO nunca
+ * devuelve— se sacaba el gate de encima tecleando un DPI virgen: cartera
+ * contestaba CLIENTE_NO_ENCONTRADO y el cambio pasaba para un no-admin. Su
+ * propia deuda quedaba fuera de su propia evaluación.
+ */
+describe("números de SIFCO del lead que se está editando", () => {
+	test("busca por leadId y NO por dpi: el dpi es justo lo que está cambiando", () => {
+		expect(sqlDelLead).toContain('"opportunities"."lead_id" =');
+		expect(sqlDelLead).not.toContain("regexp_replace");
+		// Sin join a `leads`: el lead ya viene identificado por id.
+		expect(sqlDelLead).not.toContain("inner join");
+	});
+
+	test("reusa el MISMO saneo: distinct + trim antes del limit", () => {
+		expect(sqlDelLead).toContain("select distinct");
+		expect(sqlDelLead).toContain("trim(");
+		expect(sqlDelLead).toContain("is not null");
+		expect(sqlDelLead).toContain('trim("opportunities"."numero_sifco") <>');
+		expect(sqlDelLead.indexOf("distinct")).toBeLessThan(
+			sqlDelLead.indexOf("limit"),
+		);
+	});
+
+	test("pide la fila sonda, igual que las consultas por DPI", () => {
+		expect(sqlDelLead).toContain(
+			`limit $${consultaDelLead.toSQL().params.length}`,
+		);
+		// Sonda y no tope: el desborde del lead editado se detecta y falla
+		// cerrado en `numerosSifcoDeLead`, no se recorta en silencio.
+		expect(consultaDelLead.toSQL().params).toContain(SONDA_DESBORDE_NUMEROS);
+	});
+});
+
+describe("unión de las dos fuentes", () => {
+	test("junta los del DPI nuevo con los del lead editado", () => {
+		expect(unirNumerosSifco(["01010214124060"], ["insoluto-3"]).sort()).toEqual(
+			["01010214124060", "insoluto-3"],
+		);
+	});
+
+	test("no repite el número que ambas fuentes conocen", () => {
+		expect(unirNumerosSifco(["01010214124060"], ["01010214124060"])).toEqual([
+			"01010214124060",
+		]);
+	});
+
+	test("descarta vacíos y espacios, y tolera una fuente vacía", () => {
+		expect(unirNumerosSifco(["", "   "], [])).toEqual([]);
+		expect(unirNumerosSifco([], [" insoluto-3 "])).toEqual(["insoluto-3"]);
+	});
+
+	/**
+	 * 🔴 Cada consulta acota SU lado en 50, pero la unión de dos lados llenos
+	 * llegaba a 100 y cartera rechaza el cuerpo por `maxItems: 50`. El CRM leía
+	 * ese rechazo como una caída y el gate bloqueaba una corrección válida sin
+	 * que nadie estuviera caído.
+	 */
+	test("la unión no puede pasarse del tope que cartera admite", () => {
+		const cincuenta = Array.from({ length: 50 }, (_, i) => `entidad-${i}`);
+		const otrosCincuenta = Array.from({ length: 50 }, (_, i) => `dpi-${i}`);
+
+		expect(unirNumerosSifco(cincuenta, otrosCincuenta)).toHaveLength(
+			TOPE_NUMEROS_CREDITO_CONOCIDOS,
+		);
+	});
+
+	test("al cortar sobreviven los de la entidad editada, que van primero", () => {
+		// Son los números que su propio expediente exige mirar: el DPI nuevo no
+		// los puede aportar y son justo los que el editor intenta esquivar.
+		const delLead = ["insoluto-3", "CRM-8f14e45f"];
+		const porDpi = Array.from({ length: 60 }, (_, i) => `dpi-${i}`);
+
+		const unidos = unirNumerosSifco(delLead, porDpi);
+
+		expect(unidos).toHaveLength(TOPE_NUMEROS_CREDITO_CONOCIDOS);
+		expect(unidos.slice(0, 2)).toEqual(delLead);
 	});
 });

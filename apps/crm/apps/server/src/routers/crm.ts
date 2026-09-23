@@ -19,11 +19,6 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord, auditedTransaction } from "../lib/audit";
-import {
-	isReservedBankCoverageDescription,
-	redactBankStatementCoverageEvidence,
-} from "../lib/bank-statement-documents";
 import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
@@ -64,6 +59,11 @@ import {
 	hasStaleAnalysisChecklistDocumentState,
 	hasStaleAnalysisChecklistVehicleState,
 } from "../lib/analysis-checklist";
+import { type AuditEntry, auditedTransaction, auditRecord } from "../lib/audit";
+import {
+	isReservedBankCoverageDescription,
+	redactBankStatementCoverageEvidence,
+} from "../lib/bank-statement-documents";
 import {
 	rebuildClientDocumentChecklistInTransaction,
 	refreshChecklistForClientDocuments,
@@ -77,6 +77,7 @@ import {
 	getCreditAnalysisOwnerCondition,
 } from "../lib/credit-analysis-ownership";
 import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
+import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { eqDpi } from "../lib/dpi-lookup";
 import {
 	calcularAjusteFechaIdeal,
@@ -92,6 +93,14 @@ import {
 	aplicarDeltaMontosInversionistas,
 } from "../lib/fecha-ideal-cotizacion";
 import {
+	esDpiEnBlanco,
+	evaluarGateMoraDpi,
+	MENSAJE_DPI_EN_BLANCO,
+	MENSAJE_GATE_APAGADO,
+	requiereConsultaDeMora,
+	resolverEdicionConMora,
+} from "../lib/gate-mora-dpi";
+import {
 	getGuatemalaMonthWindow,
 	toDateStrGT,
 } from "../lib/guatemala-month-window";
@@ -100,8 +109,12 @@ import {
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
 import { canSyncNitToOpportunity } from "../lib/lead-nit-sync";
-import { buildLeadDuplicateConflict } from "./lead-duplicate-conflict";
 import { getLeadSourceLabel } from "../lib/lead-sources";
+import {
+	numerosSifcoConocidosPorDpi,
+	numerosSifcoDelDpiYDeLaOportunidad,
+	numerosSifcoDelDpiYDelLead,
+} from "../lib/numeros-sifco-por-dpi";
 import { buildOpportunityCompanyPatch } from "../lib/opportunity-company-patch";
 import {
 	buildOpportunityRelationshipInvariantCondition,
@@ -114,7 +127,6 @@ import {
 	stripUnchangedFrozenFields,
 	type WonOpportunityFrozenField,
 } from "../lib/opportunity-stage-guard";
-import { isImmutableDocumentIntegrityEvidencePath } from "../lib/document-integrity/evidence-path";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -123,12 +135,14 @@ import {
 	getFileUrl,
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
+import { resolverValidacionMora } from "../lib/validacion-mora";
 import {
 	formatMissingFields,
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
 import { carteraBackClient } from "../services/cartera-back-client";
+import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import {
 	DocumentIntegrityError,
 	upsertOpportunityCreditAnalysis,
@@ -139,10 +153,14 @@ import {
 	ejecutarValidaciones,
 	resolverExencionPorBot,
 } from "../services/opportunity-validations";
-import type { StatusCreditEnum } from "../types/cartera-back";
+import {
+	ConsultaMoraNoDisponibleError,
+	type StatusCreditEnum,
+} from "../types/cartera-back";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 import { resetBankStatementCreditAnalysis } from "./bank-analysis";
 import { BankStatementCoverageSaveError } from "./bank-analysis-coverage";
+import { buildLeadDuplicateConflict } from "./lead-duplicate-conflict";
 import { createNotification } from "./notifications";
 import {
 	getManualBankUploadCleanupDescription,
@@ -325,6 +343,22 @@ export async function getCurrentClientCreditsFromCartera(
 ) {
 	return getClientCreditsFromCartera(fetchCredits, { mes: 0, anio: 0 });
 }
+
+/**
+ * Las dependencias de producción del gate de mora. La regla vive en
+ * `lib/gate-mora-dpi.ts` sin saber de HTTP ni de bitácora; acá se le enchufan.
+ */
+const depsGateMora = {
+	consultar: (dpi: string, numerosCreditoConocidos?: string[]) =>
+		carteraBackClient.consultarMoraPorDpi(dpi, numerosCreditoConocidos),
+	numerosCreditoConocidos: numerosSifcoConocidosPorDpi,
+	// La palanca de emergencia de siempre: la misma bandera con la que el resto
+	// del CRM degrada cuando cartera no está. Apagarla deja pasar sin consultar
+	// —fail-open deliberado, ver `habilitado` en `lib/gate-mora-dpi.ts`— y cada
+	// paso así queda en la bitácora.
+	habilitado: isCarteraBackEnabled,
+	anotar: auditRecord,
+};
 
 const CARTERA_PAGE_FETCH_SIZE = 100;
 
@@ -906,10 +940,9 @@ export const crmRouter = {
 			const { id, ...updateData } = input;
 
 			// Supervisors can update the complete sales directory.
-			const whereClause =
-				PERMISSIONS.canManageAllCompanies(context.userRole)
-					? eq(companies.id, id)
-					: and(eq(companies.id, id), eq(companies.createdBy, context.userId));
+			const whereClause = PERMISSIONS.canManageAllCompanies(context.userRole)
+				? eq(companies.id, id)
+				: and(eq(companies.id, id), eq(companies.createdBy, context.userId));
 
 			const updatedCompany = await db
 				.update(companies)
@@ -1246,6 +1279,14 @@ export const crmRouter = {
 				normalizedDpi = resultado.dpiLimpio;
 			}
 
+			// 🔴 El duplicado se revisa ANTES del gate, y el orden importa. Si el DPI
+			// ya es de un lead existente que está en mora, correr el gate primero
+			// devolvía el error del gate ("cliente con saldo en mora") en vez del
+			// CONFLICT con el payload que el front usa para mostrar el lead
+			// existente y ofrecer ir a su ficha: el asesor quedaba sin la salida que
+			// esa pantalla ya tiene resuelta. Y de paso se pagaba un viaje a SIFCO
+			// para averiguar algo que no iba a cambiar el resultado — acá no se está
+			// dando de alta a nadie, ya está adentro.
 			// Validar DPI duplicado
 			if (normalizedDpi) {
 				// Se traen todos los leads del DPI, no uno solo: mientras queden
@@ -1295,6 +1336,16 @@ export const crmRouter = {
 							context.userId,
 						),
 					});
+				}
+			}
+
+			// El gate, ya con el alta decidida: es un DPI que de verdad va a entrar
+			// al sistema por primera vez. Siempre se consulta y es fail-closed — si
+			// cartera no contesta, no entra nadie.
+			if (normalizedDpi) {
+				const gate = await evaluarGateMoraDpi(normalizedDpi, depsGateMora);
+				if (gate.rechazado) {
+					throw new ORPCError("BAD_REQUEST", { message: gate.mensaje });
 				}
 			}
 
@@ -1365,6 +1416,20 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const { id, assignedTo, ...updateData } = input;
 
+			// La fila de bitácora del override de admin, si lo hubo. Se escribe
+			// DESPUÉS de confirmar que el UPDATE tocó una fila: anotarla antes
+			// dejaba overrides `ok: true` de cambios que nunca ocurrieron (lead
+			// inexistente, o sin permiso sobre él). Ver `resolverEdicionConMora`.
+			let overrideDeMora: AuditEntry | null = null;
+
+			// 🔴 El DPI en blanco se rechaza ANTES que nada: sin esto, `dpi: ""` se
+			// saltaba la validación y el gate por falsy y el `.set` lo escribía
+			// igual, dejando al moroso invisible para siempre. Ver
+			// `MENSAJE_DPI_EN_BLANCO`.
+			if (esDpiEnBlanco(updateData.dpi)) {
+				throw new ORPCError("BAD_REQUEST", { message: MENSAJE_DPI_EN_BLANCO });
+			}
+
 			// Validar DPI si se envía
 			if (updateData.dpi) {
 				const resultado = validarDpi(updateData.dpi);
@@ -1374,6 +1439,44 @@ export const crmRouter = {
 					});
 				}
 				updateData.dpi = resultado.dpiLimpio;
+
+				// 🔴 Solo se consulta si el DPI es nuevo o cambia. Si se consultara en
+				// toda edición, un cliente que ya está en mora quedaría imposible de
+				// editar y nadie podría corregirle el teléfono ni la dirección — y son
+				// justamente las fichas que cobranza toca todos los días.
+				const [leadGuardado] = await db
+					.select({ dpi: leads.dpi })
+					.from(leads)
+					.where(eq(leads.id, id))
+					.limit(1);
+
+				if (requiereConsultaDeMora(updateData.dpi, leadGuardado?.dpi)) {
+					// 🔴 La pregunta lleva los números del DPI NUEVO **y** los del lead
+					// que se está editando. Con solo los del DPI nuevo, el lead que
+					// tiene su propio crédito moroso —un `CRM-<uuid>` o un `insoluto-N`,
+					// invisibles para SIFCO— salía del gate tecleando un DPI virgen:
+					// cartera contestaba CLIENTE_NO_ENCONTRADO y el cambio pasaba para
+					// cualquiera. Su propia deuda quedaba fuera de su propia evaluación.
+					const gate = await evaluarGateMoraDpi(updateData.dpi, {
+						...depsGateMora,
+						numerosCreditoConocidos: (dpiConsultado) =>
+							numerosSifcoDelDpiYDelLead(dpiConsultado, id),
+					});
+					// Válvula de corrección: un DPI mal tecleado cuyo valor correcto
+					// pertenece a alguien con mora sería incorregible para siempre. Solo
+					// admin, y queda anotado. Ver `resolverEdicionConMora`.
+					const resolucion = resolverEdicionConMora(gate, context.userRole, {
+						entity: "lead",
+						id,
+						dpi: updateData.dpi,
+					});
+					if (!resolucion.permitir) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: resolucion.mensaje,
+						});
+					}
+					overrideDeMora = resolucion.anotacionPendiente;
+				}
 			}
 
 			// Admin and juridico can update any lead, others only their own
@@ -1426,6 +1529,12 @@ export const crmRouter = {
 
 			// Después del chequeo: con cero filas no hubo escritura que anotar.
 			auditRecord({ entity: "lead", id: id, action: "update" });
+
+			// El override recién existe si el cambio existió. Va después del
+			// `auditRecord` del update por el mismo motivo: son la misma escritura.
+			if (overrideDeMora) {
+				auditRecord(overrideDeMora);
+			}
 
 			// Sync NIT to associated opportunities.
 			// Solo a las que siguen con la copia del NIT del lead: el que viaja a
@@ -1925,9 +2034,10 @@ export const crmRouter = {
 				.groupBy(opportunityStageHistory.opportunityId)
 				.as("latest_stage_history");
 
-			const closedAtExpression = sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`.mapWith(
-				opportunities.actualCloseDate,
-			);
+			const closedAtExpression =
+				sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`.mapWith(
+					opportunities.actualCloseDate,
+				);
 
 			const selectFields = {
 				id: opportunities.id,
@@ -2490,74 +2600,76 @@ export const crmRouter = {
 	updateOpportunity: crmProcedure
 		.meta({ audit: { entity: "opportunity", action: "update" } })
 		.input(
-			z.object({
-				id: z.string().uuid(),
-				title: z.string().min(1, "Title is required").optional(),
-				leadId: z.string().uuid().nullable().optional(),
-				companyId: z.string().uuid().nullable().optional(),
-				vehicleId: z.string().uuid().nullable().optional(),
-				creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
-				source: z.enum(leadSourceEnum.enumValues).optional(),
-				campaign: z.string().min(1).optional(),
-				value: z.string().optional(),
-				stageId: z.string().uuid().optional(),
-				probability: z.number().min(0).max(100).optional(),
-				expectedCloseDate: z.string().optional(),
-				status: z.enum(["open", "won", "lost", "on_hold"]).optional(),
-				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
-				notes: z.string().optional(),
-				stageChangeReason: z.string().optional(),
-				// Vehicle vendor. Sigue siendo opcional: null lo desasigna, y
-				// permite corregirlo cuando no se eligió al crear la oportunidad.
-				vendorId: z.string().uuid().nullable().optional(),
-				// Credit terms
-				numeroCuotas: z.number().int().positive().optional(),
-				tasaInteres: z.string().optional(),
-				cuotaMensual: z.string().optional(),
-				fechaInicio: z.string().optional(),
-				diaPagoMensual: z.number().int().min(1).max(31).optional(),
-				// Marca si el día viene de la opción "recomendado por IA" del select,
-				// aunque coincida numéricamente con 15/30. Se revalida server-side
-				// contra suggestedPaymentDays. Requerido cuando se envía diaPagoMensual
-				// (ver .refine() abajo). No es columna de opportunities — se destructura
-				// fuera de updateData más abajo.
-				elegidoDesdeRecomendacionIA: z.boolean().optional(),
-				// Additional fields
-				seguro: z.number().optional(),
-				gps: z.number().optional(),
-				categoria: z
-					.enum([
-						"Contraseña",
-						"CV Vehículo",
-						"CV Vehículo nuevo",
-						"Fiduciario",
-						"Hipotecario",
-						"Vehículo",
-					])
-					.optional(),
-				nit: z.string().optional(),
-				royalti: z.number().optional(),
-				porcentajeRoyalti: z.string().optional(),
-				reserva: z.number().optional(),
-				membresiaPago: z.number().optional(),
-				inversionistas: z.string().optional(), // JSON string
-				asesorId: z.number().optional(),
-				direccion: z.string().optional(),
-				rubros: z.string().optional(), // JSON string with expense items
-				gastosAdministrativos: z.number().optional(), // Administrative expenses for cartera "otros"
-				loanPurpose: z.enum(["personal", "business"]).optional(),
-				// Optimistic locking - prevents race conditions on concurrent updates
-				expectedUpdatedAt: z.string().datetime().optional(),
-			}).refine(
-				(data) =>
-					data.diaPagoMensual === undefined ||
-					data.elegidoDesdeRecomendacionIA !== undefined,
-				{
-					message:
-						"elegidoDesdeRecomendacionIA es requerido cuando se envía diaPagoMensual",
-					path: ["elegidoDesdeRecomendacionIA"],
-				},
-			),
+			z
+				.object({
+					id: z.string().uuid(),
+					title: z.string().min(1, "Title is required").optional(),
+					leadId: z.string().uuid().nullable().optional(),
+					companyId: z.string().uuid().nullable().optional(),
+					vehicleId: z.string().uuid().nullable().optional(),
+					creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
+					source: z.enum(leadSourceEnum.enumValues).optional(),
+					campaign: z.string().min(1).optional(),
+					value: z.string().optional(),
+					stageId: z.string().uuid().optional(),
+					probability: z.number().min(0).max(100).optional(),
+					expectedCloseDate: z.string().optional(),
+					status: z.enum(["open", "won", "lost", "on_hold"]).optional(),
+					assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
+					notes: z.string().optional(),
+					stageChangeReason: z.string().optional(),
+					// Vehicle vendor. Sigue siendo opcional: null lo desasigna, y
+					// permite corregirlo cuando no se eligió al crear la oportunidad.
+					vendorId: z.string().uuid().nullable().optional(),
+					// Credit terms
+					numeroCuotas: z.number().int().positive().optional(),
+					tasaInteres: z.string().optional(),
+					cuotaMensual: z.string().optional(),
+					fechaInicio: z.string().optional(),
+					diaPagoMensual: z.number().int().min(1).max(31).optional(),
+					// Marca si el día viene de la opción "recomendado por IA" del select,
+					// aunque coincida numéricamente con 15/30. Se revalida server-side
+					// contra suggestedPaymentDays. Requerido cuando se envía diaPagoMensual
+					// (ver .refine() abajo). No es columna de opportunities — se destructura
+					// fuera de updateData más abajo.
+					elegidoDesdeRecomendacionIA: z.boolean().optional(),
+					// Additional fields
+					seguro: z.number().optional(),
+					gps: z.number().optional(),
+					categoria: z
+						.enum([
+							"Contraseña",
+							"CV Vehículo",
+							"CV Vehículo nuevo",
+							"Fiduciario",
+							"Hipotecario",
+							"Vehículo",
+						])
+						.optional(),
+					nit: z.string().optional(),
+					royalti: z.number().optional(),
+					porcentajeRoyalti: z.string().optional(),
+					reserva: z.number().optional(),
+					membresiaPago: z.number().optional(),
+					inversionistas: z.string().optional(), // JSON string
+					asesorId: z.number().optional(),
+					direccion: z.string().optional(),
+					rubros: z.string().optional(), // JSON string with expense items
+					gastosAdministrativos: z.number().optional(), // Administrative expenses for cartera "otros"
+					loanPurpose: z.enum(["personal", "business"]).optional(),
+					// Optimistic locking - prevents race conditions on concurrent updates
+					expectedUpdatedAt: z.string().datetime().optional(),
+				})
+				.refine(
+					(data) =>
+						data.diaPagoMensual === undefined ||
+						data.elegidoDesdeRecomendacionIA !== undefined,
+					{
+						message:
+							"elegidoDesdeRecomendacionIA es requerido cuando se envía diaPagoMensual",
+						path: ["elegidoDesdeRecomendacionIA"],
+					},
+				),
 		)
 		.handler(async ({ input, context }) => {
 			const {
@@ -5299,9 +5411,7 @@ export const crmRouter = {
 					const url = await getFileUrl(doc.filePath);
 					return {
 						...doc,
-						description: isManualBankDocumentCleanupDescription(
-							doc.description,
-						)
+						description: isManualBankDocumentCleanupDescription(doc.description)
 							? null
 							: doc.description,
 						url,
@@ -5395,14 +5505,8 @@ export const crmRouter = {
 								.from(opportunityDocuments)
 								.where(
 									and(
-										eq(
-											opportunityDocuments.opportunityId,
-											input.opportunityId,
-										),
-										eq(
-											opportunityDocuments.documentType,
-											input.documentType,
-										),
+										eq(opportunityDocuments.opportunityId, input.opportunityId),
+										eq(opportunityDocuments.documentType, input.documentType),
 									),
 								)
 								.limit(1);
@@ -5437,17 +5541,13 @@ export const crmRouter = {
 						},
 						deleteUploadedFile: deleteFileFromR2,
 						persistCleanupDebt: async (debt) => {
-							const description =
-								getManualBankUploadCleanupDescription(debt);
+							const description = getManualBankUploadCleanupDescription(debt);
 							const [existing] = await db
 								.select({ id: opportunityDocuments.id })
 								.from(opportunityDocuments)
 								.where(
 									and(
-										eq(
-											opportunityDocuments.opportunityId,
-											debt.opportunityId,
-										),
+										eq(opportunityDocuments.opportunityId, debt.opportunityId),
 										eq(opportunityDocuments.filePath, debt.key),
 									),
 								)
@@ -5578,9 +5678,8 @@ export const crmRouter = {
 							documentType: document.documentType,
 							description: document.description,
 							withOpportunityLock: withOpportunityDocumentMutationLock,
-							runTransaction: <R>(
-								operation: (tx: Transaction) => Promise<R>,
-							) => db.transaction(operation),
+							runTransaction: <R>(operation: (tx: Transaction) => Promise<R>) =>
+								db.transaction(operation),
 							readDocument: async (tx) => {
 								const [current] = await tx
 									.select()
@@ -5675,13 +5774,14 @@ export const crmRouter = {
 				// Si el archivo es la evidencia inmutable de una validación de
 				// integridad documental, no se borra de R2: esa misma ruta queda
 				// referenciada por document_integrity_validations para auditoría.
-				const isDocumentIntegrityEvidence = isImmutableDocumentIntegrityEvidencePath({
-					filePath: document.filePath,
-					bankStatementPrefix: buildUploadPrefix(
-						"bank_statement",
-						document.opportunityId,
-					),
-				});
+				const isDocumentIntegrityEvidence =
+					isImmutableDocumentIntegrityEvidencePath({
+						filePath: document.filePath,
+						bankStatementPrefix: buildUploadPrefix(
+							"bank_statement",
+							document.opportunityId,
+						),
+					});
 
 				if (!isDocumentIntegrityEvidence) {
 					// Eliminar de R2
@@ -8223,7 +8323,10 @@ export const crmRouter = {
 				});
 			}
 
-			// Verificar que la oportunidad existe
+			// La oportunidad se verifica ANTES del gate: con un id inexistente no
+			// hay alta posible, y correr el gate primero convertía el NOT_FOUND en
+			// un rechazo por mora (o en "no disponible" si cartera estaba caída),
+			// gastando además el viaje a SIFCO y una fila de bitácora por nada.
 			const [opportunity] = await db
 				.select({ id: opportunities.id })
 				.from(opportunities)
@@ -8234,6 +8337,16 @@ export const crmRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Oportunidad no encontrada",
 				});
+			}
+
+			// Alta de co-deudor: siempre se consulta. Un co-deudor moroso respalda
+			// el crédito igual de mal que un titular moroso.
+			const gateCoDeudor = await evaluarGateMoraDpi(
+				resultadoDpi.dpiLimpio,
+				depsGateMora,
+			);
+			if (gateCoDeudor.rechazado) {
+				throw new ORPCError("BAD_REQUEST", { message: gateCoDeudor.mensaje });
 			}
 
 			const [newCoDebtor] = await db
@@ -8265,7 +8378,10 @@ export const crmRouter = {
 					.string()
 					.min(1, "El nombre completo es requerido")
 					.optional(),
-				dpi: z.string().min(1, "El DPI es requerido").optional(),
+				// 🔴 El `min(1)` NO es cosmético: es lo que impide dejar el DPI en
+				// blanco, que en `updateLead` hubo que rechazar a mano. Blanquearlo
+				// vuelve invisible al moroso para siempre (ver `MENSAJE_DPI_EN_BLANCO`).
+				dpi: z.string().min(1, MENSAJE_DPI_EN_BLANCO).optional(),
 				age: z.number().int().positive().nullable().optional(),
 				gender: z.enum(["male", "female"]).nullable().optional(),
 				maritalStatus: z
@@ -8283,8 +8399,19 @@ export const crmRouter = {
 				scoredAt: z.date().nullable().optional(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			const { id, ...updateData } = input;
+
+			// Igual que en `updateLead`: el override se anota después de confirmar
+			// que el UPDATE tocó una fila. Ver `resolverEdicionConMora`.
+			let overrideDeMora: AuditEntry | null = null;
+
+			// El mismo rechazo que en `updateLead`. El `min(1)` del schema ya para el
+			// `""`, pero no el `"   "`, y los dos son el mismo intento: dejar sin DPI
+			// a alguien para que el gate no lo vuelva a encontrar.
+			if (esDpiEnBlanco(updateData.dpi)) {
+				throw new ORPCError("BAD_REQUEST", { message: MENSAJE_DPI_EN_BLANCO });
+			}
 
 			// Validar DPI si se envía
 			if (updateData.dpi) {
@@ -8295,6 +8422,50 @@ export const crmRouter = {
 					});
 				}
 				updateData.dpi = resultadoDpi.dpiLimpio;
+
+				// Igual que en `updateLead`: solo si el DPI es nuevo o cambia, para no
+				// dejar congelada la ficha de un co-deudor que ya está en mora.
+				const [coDeudorGuardado] = await db
+					.select({
+						dpi: coDebtors.dpi,
+						opportunityId: coDebtors.opportunityId,
+					})
+					.from(coDebtors)
+					.where(eq(coDebtors.id, id))
+					.limit(1);
+
+				if (requiereConsultaDeMora(updateData.dpi, coDeudorGuardado?.dpi)) {
+					// Mismo agujero que en `updateLead`, con el equivalente del
+					// co-deudor: su cartera propia no es la de un lead sino la de su
+					// oportunidad (una sola). Ver `numerosSifcoDelDpiYDeLaOportunidad`.
+					const oportunidadDelCoDeudor = coDeudorGuardado?.opportunityId;
+					const gate = await evaluarGateMoraDpi(updateData.dpi, {
+						...depsGateMora,
+						numerosCreditoConocidos: (dpiConsultado) =>
+							oportunidadDelCoDeudor
+								? numerosSifcoDelDpiYDeLaOportunidad(
+										dpiConsultado,
+										oportunidadDelCoDeudor,
+									)
+								: numerosSifcoConocidosPorDpi(dpiConsultado),
+					});
+					// Misma válvula que en `updateLead`: el DPI del co-deudor también se
+					// tipea mal y también hay que poder corregirlo. `id` va en `null`
+					// porque la bitácora solo conoce lead/opportunity/vehicle y este es
+					// un co-deudor; su uuid viaja en el detalle.
+					const resolucion = resolverEdicionConMora(gate, context.userRole, {
+						entity: "lead",
+						id: null,
+						dpi: updateData.dpi,
+						datosExtra: { coDebtorId: id },
+					});
+					if (!resolucion.permitir) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: resolucion.mensaje,
+						});
+					}
+					overrideDeMora = resolucion.anotacionPendiente;
+				}
 			}
 
 			const [updatedCoDebtor] = await db
@@ -8310,6 +8481,11 @@ export const crmRouter = {
 				throw new ORPCError("NOT_FOUND", {
 					message: "Co-deudor no encontrado",
 				});
+			}
+
+			// Recién acá: el override existe si el cambio existió.
+			if (overrideDeMora) {
+				auditRecord(overrideDeMora);
 			}
 
 			return updatedCoDebtor;
@@ -8773,5 +8949,145 @@ export const crmRouter = {
 			);
 
 			return { pipeline, ranking, activity, byTipoCredito, byMarca, byMedio };
+		}),
+
+	/**
+	 * ¿Este DPI ya es cliente y está en mora?
+	 *
+	 * Consulta de solo lectura contra cartera, para que la pantalla pueda avisar
+	 * antes de que alguien llene un formulario entero. NO es el gate: el corte
+	 * duro vive en `evaluarGateMoraDpi` (`lib/gate-mora-dpi.ts`) y ya está
+	 * enganchado en los puntos donde el CRM da de alta o cambia el DPI de una
+	 * persona. Este procedure existe aparte porque informa sin bloquear.
+	 *
+	 * 🔴 **Pero tiene que contestar lo MISMO que va a contestar el gate**, o el
+	 * aviso es peor que no avisar: anticipar "todo bien" y que el formulario
+	 * reviente al guardar es exactamente el trabajo perdido que esta pantalla
+	 * existe para ahorrar. De ahí las dos cosas que copia del gate: manda los
+	 * números de crédito que el CRM conoce del DPI (sin ellos, un deudor que solo
+	 * existe en el CRM salía CLIENTE_NO_ENCONTRADO → "seguí"), y respeta el kill
+	 * switch (con la integración apagada el gate deja pasar, así que anunciar un
+	 * bloqueo acá sería inventarlo).
+	 *
+	 * **Fail-closed.** Si cartera o SIFCO no contestan, la respuesta es
+	 * `puedeContinuar: false` con motivo `SERVICIO_NO_DISPONIBLE`. Nunca se
+	 * traduce un fallo a "sin mora": el cliente HTTP lanza
+	 * `ConsultaMoraNoDisponibleError` justamente para que acá no haya forma de
+	 * confundir las dos cosas.
+	 *
+	 * **Las tres salidas quedan en la bitácora, no dos.** Bloqueado, limpio y
+	 * —la importante— no se pudo consultar. Con fail-closed una caída del core
+	 * frena TODAS las solicitudes, y sin esa tercera fila la auditoría no podría
+	 * distinguir "hubo 40 morosos esta mañana" de "SIFCO estuvo caído media
+	 * hora". La fila de servicio caído va con `ok: false`, así que además se
+	 * cuenta aparte de los bloqueos legítimos.
+	 *
+	 * La decisión vive en `lib/validacion-mora.ts` y acá solo se la cablea; de
+	 * ahí que las anotaciones de este procedure no salgan de este archivo.
+	 *
+	 * 🔴 **La respuesta se recorta por rol.** El veredicto completo trae el
+	 * expediente crediticio de un tercero: nombre, código de cliente SIFCO,
+	 * cada crédito con su estado, su monto en mora y sus cuotas atrasadas, y el
+	 * historial. `crmProcedure` deja entrar a `canAccessClients` —ventas,
+	 * analista, contabilidad, jurídico…—, así que sin recorte cualquier asesor
+	 * tecleando un DPI ajeno se lleva la ficha de deuda de esa persona, sin que
+	 * medie ninguna relación con un lead suyo.
+	 *
+	 * El criterio es `PERMISSIONS.canAccessCobros` (admin, cobros y supervisor
+	 * de cobros): es el predicado que el repo ya usa para "esta gente gestiona
+	 * la deuda en cartera", y son quienes tienen motivo para ver el detalle.
+	 * Los demás reciben solo el veredicto —`puedeContinuar`, `motivo`,
+	 * `mensaje`, `consultadoEn`—, que es exactamente lo que necesitan: la
+	 * pregunta que este procedure contesta es "¿sigo con este formulario?", y
+	 * para eso el detalle no aporta nada. `mensaje` ya dice "tiene mora activa
+	 * en 2 créditos" sin nombrar ni un número de crédito.
+	 */
+	validarMoraPorDpi: crmProcedure
+		.meta({ audit: { entity: "lead", action: "validar_mora_dpi" } })
+		.input(z.object({ dpi: z.string().min(1, "El DPI es requerido") }))
+		.handler(async ({ input, context }) => {
+			// El DPI se valida SIEMPRE, incluso con la integración apagada: un DPI
+			// mal formado es un error del formulario y no tiene nada que ver con
+			// cartera.
+			const validacion = validarDpi(input.dpi);
+			if (!validacion.valid) {
+				throw new ORPCError("BAD_REQUEST", { message: validacion.error });
+			}
+			const dpiNormalizado = validacion.dpiLimpio;
+
+			// 🔴 El kill switch manda también acá. Con la integración apagada el gate
+			// deja pasar sin consultar (fail-open deliberado), así que si este
+			// preflight respondiera "bloqueado" le estaría anunciando al asesor un
+			// corte que después no ocurre — y al revés, un "no se pudo consultar"
+			// eterno en una pantalla donde nada está fallando. Misma anotación que
+			// usa el gate: mientras la bandera esté abajo entra gente sin validar y
+			// hay que poder saber quiénes.
+			if (!isCarteraBackEnabled()) {
+				auditRecord({
+					entity: "lead",
+					id: null,
+					action: "validar_mora_dpi_apagado",
+					data: {
+						dpi: dpiNormalizado,
+						detalle:
+							"la integración con cartera está desactivada (ENABLE_CARTERA_BACK_INTEGRATION); no se consultó la mora",
+					},
+				});
+				return {
+					puedeContinuar: true,
+					motivo: "SIN_MORA" as const,
+					mensaje: MENSAJE_GATE_APAGADO,
+					consultadoEn: new Date().toISOString(),
+				};
+			}
+
+			const resultado = await resolverValidacionMora(dpiNormalizado, {
+				// Ya se validó arriba; revalidar solo abriría la puerta a que las dos
+				// validaciones se separen.
+				validar: (dpi) => ({ valid: true as const, dpiLimpio: dpi }),
+				consultar: async (dpi) => {
+					// 🔴 Los mismos números que manda el gate, o el preflight miente.
+					// Cartera resuelve el DPI preguntándole a SIFCO, que no conoce los
+					// créditos nacidos acá (`CRM-<uuid>`, `insoluto-N`): preguntando
+					// solo por DPI, a un deudor que solo existe en el CRM este
+					// procedure le contestaba CLIENTE_NO_ENCONTRADO con
+					// `puedeContinuar: true` y el gate lo rechazaba dos pantallas
+					// después. Ver `lib/numeros-sifco-por-dpi.ts`.
+					let numerosConocidos: string[];
+					try {
+						numerosConocidos = await numerosSifcoConocidosPorDpi(dpi);
+					} catch (error) {
+						// Fail-closed igual que el gate, y por el camino que este
+						// procedure ya tiene: sin esos números la consulta vería menos
+						// cartera de la que hay, y un "sin mora" armado sobre media
+						// cartera es peor que un "no se pudo consultar". Lanzarlo así
+						// deja la misma fila `validar_mora_dpi_no_disponible`.
+						throw new ConsultaMoraNoDisponibleError(
+							"no se pudieron reunir los números de crédito que el CRM asocia al DPI",
+							error,
+						);
+					}
+
+					return carteraBackClient.consultarMoraPorDpi(dpi, numerosConocidos);
+				},
+				anotar: auditRecord,
+			});
+
+			if (resultado.tipo === "dpi_invalido") {
+				throw new ORPCError("BAD_REQUEST", { message: resultado.error });
+			}
+
+			const { veredicto } = resultado;
+
+			if (!PERMISSIONS.canAccessCobros(context.userRole ?? "")) {
+				return {
+					puedeContinuar: veredicto.puedeContinuar,
+					motivo: veredicto.motivo,
+					mensaje: veredicto.mensaje,
+					consultadoEn: veredicto.consultadoEn,
+				};
+			}
+
+			return veredicto;
 		}),
 };

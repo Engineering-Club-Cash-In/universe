@@ -105,6 +105,10 @@ export const crmAppRouter = {
 	updateCoDebtor: crmRouter.updateCoDebtor,
 	deleteCoDebtor: crmRouter.deleteCoDebtor,
 	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
+	// Consulta de mora por DPI contra cartera (fail-closed). Es la versión
+	// informativa para la pantalla: el gate que bloquea es `evaluarGateMoraDpi`
+	// y se aplica en los puntos de alta/cambio de DPI, no acá.
+	validarMoraPorDpi: crmRouter.validarMoraPorDpi,
 	// Verificación de QR del reverso de licencia contra Tránsito (Maicon)
 	verifyLicenseQr: licenseVerificationRouter.verifyLicenseQr,
 	listLicenseVerifications: licenseVerificationRouter.listLicenseVerifications,

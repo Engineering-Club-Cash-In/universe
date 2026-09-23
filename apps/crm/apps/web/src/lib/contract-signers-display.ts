@@ -19,6 +19,8 @@ export interface FirmanteDeContrato {
 	email: string;
 	signingUrl?: string | null;
 	status?: "pending" | "signed" | "declined";
+	/** Cuándo vence el link de esta persona. */
+	signingUrlExpiry?: Date | string | null;
 }
 
 export interface LinksLegacyDeContrato {
@@ -36,6 +38,15 @@ export interface FirmanteEnFicha {
 	nombre: string | null;
 	url: string | null;
 	estado: "pending" | "signed" | "declined";
+	/** El link ya venció y hay que regenerarlo para que esa persona pueda firmar. */
+	vencido: boolean;
+}
+
+/** Un link vencido ya no deja firmar: hay que regenerarlo. */
+function linkVencido(expiry: Date | string | null | undefined): boolean {
+	if (!expiry) return false;
+	const vence = expiry instanceof Date ? expiry : new Date(expiry);
+	return !Number.isNaN(vence.getTime()) && vence.getTime() < Date.now();
 }
 
 const ETIQUETA_POR_ROL: Record<string, string> = {
@@ -68,12 +79,15 @@ export function firmantesEnFicha(
 				nCodeudor += 1;
 				etiqueta = `Codeudor ${nCodeudor}`;
 			}
+			const estado = s.status ?? "pending";
 			return {
 				clave: `${s.role}-${s.email}-${i}`,
 				etiqueta,
 				nombre: s.name || null,
 				url: s.signingUrl ?? null,
-				estado: s.status ?? "pending",
+				estado,
+				// A quien ya firmó no le importa que el link haya vencido.
+				vencido: estado === "pending" && linkVencido(s.signingUrlExpiry),
 			};
 		});
 	}
@@ -97,7 +111,21 @@ export function firmantesEnFicha(
 			nombre: null,
 			url,
 			estado: "pending",
+			vencido: false,
 		});
 	}
 	return viejos;
+}
+
+/**
+ * Si un contrato ya no está vigente: anulado, o reclamado por su reemplazo
+ * aunque siga en "pendiente" (entre que se confirma el nuevo y se anula este, o
+ * para siempre si ese paso no llegó). Cuenta como anulado, igual que para el
+ * portal y el WhatsApp: sus enlaces son de un documento descartado.
+ */
+export function estaAnulado(contract: {
+	status: string;
+	replacedByContractId?: string | null;
+}): boolean {
+	return contract.status === "cancelled" || !!contract.replacedByContractId;
 }

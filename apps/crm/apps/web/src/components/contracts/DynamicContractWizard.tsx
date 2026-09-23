@@ -1720,6 +1720,39 @@ export function DynamicContractWizard({
 				const clientEmail = crmData.cliente.correo;
 				const hasCoDebtors = coDebtorFields.length > 0;
 
+				// Cada deudor que sale en el documento tiene su línea de firma y
+				// necesita su propio correo para recibir su enlace. Si falta uno, el
+				// reparto por rol no calza con el PDF y fallan TODOS los contratos
+				// electrónicos; y si dos comparten correo, WeeTrust los junta en uno
+				// solo y la misma persona firmaría por los dos.
+				const hayElectronicos = selectedDocuments.some(
+					(doc) => !esFirmaFisica(doc),
+				);
+				if (hayElectronicos) {
+					const sinCorreo = [
+						...(clientEmail ? [] : [crmData.cliente.nombreCompleto || "El cliente"]),
+						...coDebtorFields
+							.filter((cd) => !cd.correoElectronico?.trim())
+							.map((cd) => cd.nombreCompleto || "Un codeudor"),
+					];
+					if (sinCorreo.length > 0) {
+						toast.error(
+							`Falta el correo de: ${sinCorreo.join(", ")}. Cada firmante necesita el suyo para recibir su enlace.`,
+						);
+						return;
+					}
+					const correos = [
+						clientEmail,
+						...coDebtorFields.map((cd) => cd.correoElectronico),
+					].map((c) => (c ?? "").trim().toLowerCase());
+					if (new Set(correos).size !== correos.length) {
+						toast.error(
+							"El cliente y los codeudores no pueden compartir correo: cada uno firma con el suyo.",
+						);
+						return;
+					}
+				}
+
 				// Build deudoresAdicionales array from editable co-debtor fields
 				const deudoresAdicionales = coDebtorFields.map((cd) => ({
 					nombreCompleto: cd.nombreCompleto,
@@ -1737,11 +1770,17 @@ export function DynamicContractWizard({
 				// representante legal lo agrega el servidor, que es donde vive su correo.
 				const signers: ContractSigner[] = [];
 				if (clientEmail) {
+					// Nombre y DPI de lo que quedó en el formulario, que es lo que se
+					// imprime: si jurídico corrigió el DPI, el viejo no calzaría con el
+					// que aparece bajo la línea de firma y el contrato no se generaría.
 					signers.push({
 						role: "TITULAR",
 						email: clientEmail,
-						name: crmData.cliente.nombreCompleto ?? clientEmail,
-						dpi: crmData.cliente.dpi,
+						name:
+							fieldValues.nombreCompleto?.trim() ||
+							crmData.cliente.nombreCompleto ||
+							clientEmail,
+						dpi: fieldValues.dpi?.trim() || crmData.cliente.dpi,
 					});
 				}
 				coDebtorFields.forEach((cd) => {

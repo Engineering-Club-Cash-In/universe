@@ -190,6 +190,34 @@
 			"when": 1790089386602,
 			"tag": "0034_create_contract_signatories",
 			"breakpoints": true
+		},
+		{
+			"idx": 27,
+			"version": "7",
+			"when": 1790089486602,
+			"tag": "0035_add_signing_status_tracking",
+			"breakpoints": true
+		},
+		{
+			"idx": 28,
+			"version": "7",
+			"when": 1790089586602,
+			"tag": "0036_add_contract_observer_url",
+			"breakpoints": true
+		},
+		{
+			"idx": 29,
+			"version": "7",
+			"when": 1790089686602,
+			"tag": "0037_add_contract_cancellation",
+			"breakpoints": true
+		},
+		{
+			"idx": 30,
+			"version": "7",
+			"when": 1790089786602,
+			"tag": "0038_add_contract_regeneration_reason",
+			"breakpoints": true
 		}
 	]
 }

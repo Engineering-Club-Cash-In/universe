@@ -17,8 +17,8 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { getSignaturePattern } from "../services/signaturePatterns";
+import { WeeTrustService } from "../services/WeeTrustService";
 import type { ContractType } from "../types/contract";
 
 /** Una línea de firma detectada, con el texto que la acompaña debajo. */
@@ -29,7 +29,6 @@ interface Widget {
 	debajo: string[];
 }
 
-const ES_FIRMA = /([fF][).]\s*_{3,}|Firma:\s*_{3,})/;
 
 function r2(): S3Client {
 	const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = process.env;
@@ -55,41 +54,24 @@ async function descargar(client: S3Client, r2Key: string): Promise<Buffer> {
 	return Buffer.from(await res.Body!.transformToByteArray());
 }
 
-async function widgetsDelPdf(buffer: Buffer): Promise<Widget[]> {
-	const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
-	const widgets: Widget[] = [];
-
-	for (let p = 1; p <= doc.numPages; p++) {
-		const page = await doc.getPage(p);
-		const items = (await page.getTextContent()).items as Array<{
-			str: string;
-			transform: number[];
-		}>;
-		const pos = items
-			.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }))
-			.filter((it) => it.str.trim());
-
-		for (const it of pos) {
-			if (!ES_FIRMA.test(it.str)) continue;
-			// Texto inmediatamente debajo y en la misma columna: es lo que
-			// identifica al firmante (nombre/DPI) cuando el template lo imprime.
-			const debajo = pos
-				.filter(
-					(o) =>
-						o.y < it.y &&
-						o.y > it.y - 42 &&
-						Math.abs(o.x - it.x) < 130 &&
-						!ES_FIRMA.test(o.str),
-				)
-				.sort((a, b) => b.y - a.y)
-				.slice(0, 3)
-				.map((o) => o.str.trim());
-			widgets.push({ page: p, x: it.x, y: it.y, debajo });
-		}
-	}
-
-	// Orden de lectura: página, luego de arriba hacia abajo, luego izq. a der.
-	return widgets.sort((a, b) => a.page - b.page || b.y - a.y || a.x - b.x);
+/**
+ * Las líneas de firma del PDF, reconocidas con el MISMO criterio que usa
+ * producción para colocar los widgets. Una regex propia acá se desfasaba (no
+ * veía "F_____", líneas sueltas ni etiquetas como "Firma del Inversionista") y
+ * el inventario reportaba cero justo en los contratos que había que auditar.
+ */
+async function widgetsDelPdf(
+	buffer: Buffer,
+	contractType: ContractType,
+): Promise<Widget[]> {
+	const { pattern } = getSignaturePattern(contractType);
+	const lineas = await WeeTrustService.readSignatureLines(buffer, pattern);
+	return lineas.map((l) => ({
+		page: l.pageNum,
+		x: l.pdfX,
+		y: l.pdfY,
+		debajo: l.debajo,
+	}));
 }
 
 async function main() {
@@ -127,7 +109,7 @@ async function main() {
 		try {
 			const buffer = await descargar(client, r2Key);
 			await fs.writeFile(path.join(outDir, `${contractType}.pdf`), buffer);
-			const widgets = await widgetsDelPdf(buffer);
+			const widgets = await widgetsDelPdf(buffer, contractType);
 			console.log(`  PDF real: ${widgets.length} widget(s)`);
 			widgets.forEach((w, i) => {
 				const etiqueta = w.debajo.length

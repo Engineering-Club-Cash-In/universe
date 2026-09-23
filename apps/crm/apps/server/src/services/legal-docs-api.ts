@@ -160,6 +160,11 @@ export interface DocumentResult {
 	 */
 	documentID?: string;
 	/**
+	 * Enlace de observador: muestra el documento y cómo va la firma sin dejar
+	 * firmar. Es el único que se le puede pasar a alguien para que mire.
+	 */
+	observerUrl?: string;
+	/**
 	 * Quiénes quedaron efectivamente enviados a firmar, con su rol y su link.
 	 * Es lo que reemplaza al reparto por posición de `signing_links`.
 	 */
@@ -266,6 +271,7 @@ export async function generateContractsBatch(
 			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
 		},
 		body: JSON.stringify(payload),
+		signal: AbortSignal.timeout(TOPE_GENERACION_MS),
 	});
 
 	if (!response.ok) {
@@ -375,6 +381,30 @@ export interface EstadoDocumentoFirma {
 	error?: string;
 }
 
+/**
+ * Cabecera que exige el generador en los endpoints que mandan a firmar, borran
+ * o reemiten documentos en WeeTrust. Es el mismo secreto que usa el generador
+ * para avisarnos el estado de firma (`WEETRUST_RELAY_SECRET`).
+ */
+/**
+ * Topes de las llamadas al generador.
+ *
+ * Quien regenera o manda enlaces las hace con el candado de la oportunidad
+ * tomado, y ese candado sólo sirve si la tarea termina: una petición sin tope
+ * lo dejaría tomado hasta que Postgres corte la transacción, que lo suelta sin
+ * detener nada. Subir y reemitir mueven un PDF, así que van más holgados.
+ */
+const TOPE_CONSULTA_MS = 30_000;
+const TOPE_CON_PDF_MS = 120_000;
+/** Generar convierte a PDF varios documentos; es lo más lento que hace. */
+const TOPE_GENERACION_MS = 180_000;
+
+function secretoParaElGenerador(): Record<string, string> {
+	return {
+		"x-weetrust-relay-secret": process.env.WEETRUST_RELAY_SECRET || "",
+	};
+}
+
 async function pedirAlGenerador<T>(
 	ruta: string,
 	method: "GET" | "PUT",
@@ -385,7 +415,9 @@ async function pedirAlGenerador<T>(
 		headers: {
 			"Content-Type": "application/json",
 			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+			...secretoParaElGenerador(),
 		},
+		signal: AbortSignal.timeout(TOPE_CONSULTA_MS),
 	});
 
 	const cuerpo = await response.text();
@@ -411,23 +443,6 @@ export async function consultarEstadoFirma(
 		`/contracts/signing-status/${encodeURIComponent(documentID)}`,
 		"GET",
 		"No se pudo consultar el estado de firma",
-	);
-}
-
-/**
- * Regenera los enlaces de firma de un documento.
- *
- * Sirve para los dos casos que pasan seguido: el link venció, o la persona
- * necesita volver a entrar porque falló la verificación. Los que ya firmaron no
- * se tocan.
- */
-export async function regenerarEnlacesDeFirma(
-	documentID: string,
-): Promise<EstadoDocumentoFirma> {
-	return pedirAlGenerador<EstadoDocumentoFirma>(
-		`/contracts/refresh-signing-links/${encodeURIComponent(documentID)}`,
-		"PUT",
-		"No se pudieron regenerar los enlaces de firma",
 	);
 }
 
@@ -463,8 +478,10 @@ export async function subirContratoParaFirma(payload: {
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+				...secretoParaElGenerador(),
 			},
 			body: JSON.stringify(payload),
+			signal: AbortSignal.timeout(TOPE_CON_PDF_MS),
 		},
 	);
 
@@ -486,4 +503,69 @@ export async function subirContratoParaFirma(payload: {
 	}
 
 	return parsed;
+}
+
+/**
+ * Borra el documento en WeeTrust.
+ *
+ * Sólo se puede con documentos que nadie terminó de firmar. Uno completado
+ * queda en su blockchain y no hay forma de eliminarlo ni anularlo.
+ */
+export async function borrarDocumentoDeWeeTrust(
+	documentID: string,
+): Promise<void> {
+	const response = await fetch(
+		`${LEGAL_DOCS_API_URL}/contracts/document/${encodeURIComponent(documentID)}`,
+		{
+			method: "DELETE",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+				...secretoParaElGenerador(),
+			},
+			signal: AbortSignal.timeout(TOPE_CONSULTA_MS),
+		},
+	);
+
+	if (!response.ok) {
+		throw new Error(
+			`No se pudo borrar el documento en WeeTrust: ${response.status} - ${await response.text()}`,
+		);
+	}
+}
+
+/**
+ * Vuelve a emitir un contrato en WeeTrust con el PDF que ya está en R2.
+ *
+ * Es lo que hace "Regenerar": no cambia el documento, crea uno nuevo con el
+ * mismo PDF y enlaces nuevos para todos. A diferencia de `update-signatures` de
+ * WeeTrust —que sólo renueva las URL de quienes no firmaron y falla si ya
+ * firmaron todos— esto sirve también cuando la firma existe pero no vale.
+ */
+export async function reemitirContratoEnWeeTrust(payload: {
+	r2Key: string;
+	contractType: string;
+	filenamePrefix?: string;
+	signers?: ContractSigner[];
+	observers?: string[];
+}): Promise<DocumentResult & { message?: string }> {
+	const response = await fetch(`${LEGAL_DOCS_API_URL}/contracts/reissue`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+			...secretoParaElGenerador(),
+		},
+		body: JSON.stringify(payload),
+		signal: AbortSignal.timeout(TOPE_CON_PDF_MS),
+	});
+
+	const cuerpo = await response.text();
+	try {
+		return JSON.parse(cuerpo);
+	} catch {
+		throw new Error(
+			`No se pudo reemitir el contrato: ${response.status} - ${cuerpo}`,
+		);
+	}
 }

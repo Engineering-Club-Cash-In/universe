@@ -52,6 +52,7 @@ import invariant from "tiny-invariant";
 import { z } from "zod";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
+import { OpportunityContractsCard } from "@/components/contracts/OpportunityContractsCard";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
@@ -2780,95 +2781,14 @@ function RouteComponent() {
 									PERMISSIONS.canViewOpportunityContracts(
 										userProfile.data.role,
 									) && (
-										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-											<div className="flex items-center gap-2">
-												<FileSignature className="h-5 w-5 text-muted-foreground" />
-												<Label className="font-semibold text-muted-foreground text-sm">
-													Contratos Legales
-												</Label>
-											</div>
-											{opportunityContractsQuery.isLoading ? (
-												<p className="text-muted-foreground text-sm">
-													Cargando contratos...
-												</p>
-											) : opportunityContractsQuery.data &&
-												opportunityContractsQuery.data.length > 0 ? (
-												<div className="space-y-2">
-													{opportunityContractsQuery.data.map(
-														({ contract }) => (
-															<div
-																key={contract.id}
-																className="flex items-center justify-between rounded-md border bg-background p-3"
-															>
-																<div className="flex flex-col gap-1">
-																	<span className="font-medium text-sm">
-																		{contract.contractName}
-																	</span>
-																	<span className="text-muted-foreground text-xs">
-																		{getContractTypeLabel(
-																			contract.contractType,
-																		)}{" "}
-																		•{" "}
-																		{contract.status === "pending"
-																			? "Pendiente"
-																			: contract.status === "signed"
-																				? "Firmado"
-																				: "Cancelado"}
-																	</span>
-																</div>
-																<div className="flex gap-2">
-																	{contract.pdfLink && (
-																		<Button variant="outline" size="sm" asChild>
-																			<a
-																				href={contract.pdfLink}
-																				target="_blank"
-																				rel="noopener noreferrer"
-																				className="flex items-center gap-1"
-																			>
-																				<FileText className="h-3 w-3" />
-																				PDF
-																			</a>
-																		</Button>
-																	)}
-																	{contract.clientSigningLink && (
-																		<Button variant="outline" size="sm" asChild>
-																			<a
-																				href={contract.clientSigningLink}
-																				target="_blank"
-																				rel="noopener noreferrer"
-																				className="flex items-center gap-1"
-																			>
-																				<ExternalLink className="h-3 w-3" />
-																				Cliente
-																			</a>
-																		</Button>
-																	)}
-																	{contract.representativeSigningLink && (
-																		<Button variant="outline" size="sm" asChild>
-																			<a
-																				href={
-																					contract.representativeSigningLink
-																				}
-																				target="_blank"
-																				rel="noopener noreferrer"
-																				className="flex items-center gap-1"
-																			>
-																				<ExternalLink className="h-3 w-3" />
-																				Rep. Legal
-																			</a>
-																		</Button>
-																	)}
-																</div>
-															</div>
-														),
-													)}
-												</div>
-											) : (
-												<p className="text-muted-foreground text-sm">
-													No hay contratos asociados a esta oportunidad
-												</p>
+										<OpportunityContractsCard
+											contracts={opportunityContractsQuery.data}
+											isLoading={opportunityContractsQuery.isLoading}
+											puedeRegenerar={PERMISSIONS.canRegenerateContractLinks(
+												userProfile.data.role,
 											)}
-										</div>
+											onUpdate={() => opportunityContractsQuery.refetch()}
+										/>
 									)}
 
 								{/* Quotations Section */}

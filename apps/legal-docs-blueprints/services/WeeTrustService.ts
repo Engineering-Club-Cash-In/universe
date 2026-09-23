@@ -911,6 +911,11 @@ export class WeeTrustService {
 		signs: string[];
 		linkDocument: string;
 		documentID: string;
+		/**
+		 * Enlace de observador: muestra el documento y cómo va la firma sin dejar
+		 * firmar. Es el único que se le puede pasar a alguien para que mire.
+		 */
+		observerUrl?: string;
 		/** Un registro por firmante, en el mismo orden que `signs`. */
 		signatories: Array<{
 			role: SignerRole;
@@ -965,10 +970,28 @@ export class WeeTrustService {
 
 		// Retornar en formato compatible con Documenso, más lo que hace falta
 		// para consultar estado y reintentar después (documentID/signatoryID).
+		// El link de observador sólo existe si se mandaron observadores. Se lee del
+		// documento porque `sendToSign` no lo devuelve.
+		let observerUrl: string | undefined;
+		if (observers.length > 0) {
+			try {
+				const documento = await this.getDocument(result.documentID);
+				observerUrl = documento.sharedWith?.find((o) => o.url)?.url;
+			} catch (error) {
+				// Que no se pueda leer el link de observador no invalida el documento,
+				// que ya quedó creado y enviado a firmar.
+				console.warn(
+					"[WeeTrust] No se pudo leer el enlace de observador:",
+					error,
+				);
+			}
+		}
+
 		return {
 			signs: result.signingLinks,
 			linkDocument: result.documentUrl,
 			documentID: result.documentID,
+			observerUrl,
 			signatories,
 		};
 	}
@@ -1204,7 +1227,9 @@ export class WeeTrustService {
 	 * inmediatamente debajo de cada una, que es donde los templates imprimen el
 	 * nombre y el DPI del firmante cuando los imprimen.
 	 */
-	private static async readSignatureLines(
+	// Pública para que los scripts de auditoría (inventario-firmas.ts) lean las
+	// líneas con el mismo criterio que producción.
+	static async readSignatureLines(
 		pdfBuffer: Buffer,
 		pattern: string,
 	): Promise<

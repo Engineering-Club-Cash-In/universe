@@ -3,9 +3,9 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
 	Copy,
-	Edit,
 	ExternalLink,
 	FileText,
+	FileUp,
 	Loader2,
 	Mail,
 	RefreshCw,
@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/card";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import {
+	estaAnulado,
 	type FirmanteDeContrato,
 	firmantesEnFicha,
 } from "@/lib/contract-signers-display";
@@ -71,6 +72,10 @@ interface ContractCardProps {
 		pdfLink?: string | null;
 		/** `documenso` cuando WeeTrust falló y se usó el fallback. */
 		signingProvider?: string | null;
+		/** Cómo se firma, según quedó guardado al generarlo. */
+		signatureMode?: string | null;
+		/** El contrato que lo reemplaza; puede estar puesto aún en `pending`. */
+		replacedByContractId?: string | null;
 		status: "pending" | "signed" | "cancelled";
 		generatedAt: Date | string;
 		opportunityId: string | null;
@@ -87,7 +92,8 @@ interface ContractCardProps {
 		value: string | null;
 	} | null;
 	onUpdate?: () => void;
-	onEdit?: () => void;
+	/** Abre la subida para reemplazar el documento de este contrato. */
+	onReplace?: () => void;
 	onDelete?: (contractId: string) => Promise<void>;
 	isDeleting?: boolean;
 }
@@ -114,7 +120,7 @@ export function ContractCard({
 	signatories,
 	opportunity,
 	onUpdate,
-	onEdit,
+	onReplace,
 	onDelete,
 	isDeleting = false,
 }: ContractCardProps) {
@@ -123,10 +129,23 @@ export function ContractCard({
 
 	// Este contrato se imprime y se firma a mano: que no tenga links no es que
 	// haya fallado, y mostrarlo como "Pendiente" hacía que jurídico lo buscara.
-	const firmaEnPapel = esFirmaFisica(contract.contractType);
+	// Manda lo guardado: una declaración de vendedor generada antes de que se
+	// firmara en papel ya tiene sus links, y hay que seguir mostrándolos.
+	const firmaEnPapel = contract.signatureMode
+		? contract.signatureMode === "fisica"
+		: esFirmaFisica(contract.contractType);
 	// Los contratos que cayeron al fallback de Documenso no tienen documento en
 	// WeeTrust: consultar o reenviar sólo devolvería un error.
 	const enWeeTrust = contract.signingProvider !== "documenso";
+	// Sus enlaces son de un documento descartado y, si no se pudo borrar en
+	// WeeTrust, todavía firman: no se ofrecen, no se reenvían ni se consultan
+	// (allá casi siempre ya no existe).
+	const reemplazado = !!contract.replacedByContractId;
+	const inactivo = estaAnulado(contract);
+	const estado =
+		reemplazado && contract.status === "pending"
+			? { label: "Reemplazado", color: statusConfig.cancelled.color }
+			: statusConfig[contract.status];
 
 	// Cada firmante trae su rol. El bloque anterior leía tres columnas fijas y
 	// rotulaba como "Representante" al que estuviera segundo, que con cofirmante
@@ -159,17 +178,6 @@ export function ContractCard({
 		onError: (error: Error) => toast.error(error.message),
 	});
 
-	const regenerarEnlaces = useMutation({
-		mutationFn: () =>
-			client.refreshContractSigningLinks({ contractId: contract.id }),
-		onSuccess: (data) => {
-			setEstadoWeeTrust(data);
-			toast.success(data.message);
-			onUpdate?.();
-		},
-		onError: (error: Error) => toast.error(error.message),
-	});
-
 	const reenviarCorreo = useMutation({
 		mutationFn: () =>
 			client.resendContractSigningEmails({ contractId: contract.id }),
@@ -177,10 +185,7 @@ export function ContractCard({
 		onError: (error: Error) => toast.error(error.message),
 	});
 
-	const ocupado =
-		consultarEstado.isPending ||
-		regenerarEnlaces.isPending ||
-		reenviarCorreo.isPending;
+	const ocupado = consultarEstado.isPending || reenviarCorreo.isPending;
 
 	const copyToClipboard = (text: string, label: string) => {
 		navigator.clipboard.writeText(text);
@@ -229,25 +234,30 @@ export function ContractCard({
 							</Badge>
 						)}
 						{!firmaEnPapel && contract.clientSigningLink && (
-							<Badge
-								variant="outline"
-								className={statusConfig[contract.status].color}
-							>
-								{statusConfig[contract.status].label}
+							<Badge variant="outline" className={estado.color}>
+								{estado.label}
 							</Badge>
 						)}
-						{canCreateLegal && onEdit && (
+						{/* Un anulado ya fue reemplazado: no se reemplaza dos veces. */}
+						{canCreateLegal && onReplace && !inactivo && (
 							<Button
 								size="sm"
 								variant="outline"
-								onClick={onEdit}
+								onClick={onReplace}
 								className="h-8"
+								title={
+									firmaEnPapel
+										? "Subí el PDF corregido: reemplaza a este."
+										: "Subí el PDF corregido: reemplaza a este y emite enlaces de firma nuevos."
+								}
 							>
-								<Edit className="mr-1 h-3 w-3" />
-								Editar
+								<FileUp className="mr-1 h-3 w-3" />
+								Reemplazar
 							</Button>
 						)}
-						{canCreateLegal && onDelete && (
+						{/* Un anulado se conserva como registro de lo descartado (y de quién lo
+						    firmó): borrarlo acá no lo borra en WeeTrust y pierde ese rastro. */}
+						{canCreateLegal && onDelete && !inactivo && (
 							<Button
 								size="sm"
 								variant="outline"
@@ -307,7 +317,11 @@ export function ContractCard({
 										</p>
 									)}
 								</div>
-								{firmante.url ? (
+								{inactivo ? (
+									<span className="shrink-0 text-muted-foreground text-xs">
+										{estado.label.toLowerCase()}
+									</span>
+								) : firmante.url ? (
 									<div className="flex shrink-0 gap-1">
 										<Button
 											size="sm"
@@ -342,7 +356,7 @@ export function ContractCard({
 				)}
 
 				{/* Estado de firma y reintentos, sin salir del CRM */}
-				{!firmaEnPapel && enWeeTrust && firmantes.length > 0 && (
+				{!firmaEnPapel && enWeeTrust && !inactivo && firmantes.length > 0 && (
 					<div className="space-y-2 rounded-lg border border-border p-3">
 						<div className="flex flex-wrap gap-2">
 							<Button
@@ -360,31 +374,15 @@ export function ContractCard({
 								Ver estado
 							</Button>
 
-							{canCreateLegal && (
+							{canCreateLegal && !inactivo && (
 								<>
 									<Button
 										size="sm"
 										variant="outline"
 										className="h-7"
 										disabled={ocupado}
-										onClick={() => regenerarEnlaces.mutate()}
-										title="Emite enlaces nuevos para quienes aún no firman. Es el mismo documento; quien ya firmó sigue firmado."
-									>
-										{regenerarEnlaces.isPending ? (
-											<Loader2 className="mr-1 h-3 w-3 animate-spin" />
-										) : (
-											<RefreshCw className="mr-1 h-3 w-3" />
-										)}
-										Regenerar enlaces
-									</Button>
-
-									<Button
-										size="sm"
-										variant="outline"
-										className="h-7"
-										disabled={ocupado}
 										onClick={() => reenviarCorreo.mutate()}
-										title="Reenvía el correo de WeeTrust a los firmantes pendientes."
+										title="Reenvía el correo de firma a los firmantes pendientes."
 									>
 										{reenviarCorreo.isPending ? (
 											<Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -400,7 +398,7 @@ export function ContractCard({
 						{estadoWeeTrust && (
 							<div className="space-y-1">
 								<p className="text-muted-foreground text-xs">
-									Estado en WeeTrust: {estadoWeeTrust.status}
+									Estado de la firma: {estadoWeeTrust.status}
 								</p>
 								{estadoWeeTrust.signatories.map((firmante) => (
 									<p
@@ -470,7 +468,9 @@ export function ContractCard({
 						<AlertDialogTitle>¿Eliminar contrato?</AlertDialogTitle>
 						<AlertDialogDescription>
 							Estás a punto de eliminar el contrato "{contract.contractName}".
-							Esta acción no se puede deshacer.
+							Si se mandó a firma, se borra también en WeeTrust y sus enlaces
+							dejan de servir; queda en «Ver anulados» como registro. Esta
+							acción no se puede deshacer.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

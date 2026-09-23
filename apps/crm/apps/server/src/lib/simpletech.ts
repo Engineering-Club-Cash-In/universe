@@ -67,7 +67,15 @@ function normalizeParamsForTemplate(
 	return [...params, ...new Array(templateParamCount - params.length).fill("")];
 }
 
-export function getSimpletechClient(): SimpleTechClient | null {
+export function getSimpletechClient(opciones?: {
+	/**
+	 * Cuánto espera cada petición antes de abortarla. El cliente ya trae 30s por
+	 * defecto; se pasa cuando quien llama necesita que el tope sea explícito
+	 * porque está esperando el resultado con algo tomado (por ejemplo, el
+	 * candado de firma de una oportunidad).
+	 */
+	timeoutMs?: number;
+}): SimpleTechClient | null {
 	if (
 		!process.env.SIMPLETECH_BASE_URL ||
 		!process.env.SIMPLETECH_USERNAME ||
@@ -82,6 +90,7 @@ export function getSimpletechClient(): SimpleTechClient | null {
 			password: process.env.SIMPLETECH_PASSWORD,
 		},
 		baseUrl: process.env.SIMPLETECH_BASE_URL,
+		...(opciones?.timeoutMs ? { timeout: opciones.timeoutMs } : {}),
 	});
 }
 
@@ -179,9 +188,11 @@ export async function sendWhatsappTemplate(params: {
 	 * no debería poder usarlos.
 	 */
 	ocultarEnlacesEnLog?: boolean;
+	/** Tope de la petición; sin esto rige el del cliente (30s). */
+	timeoutMs?: number;
 }): Promise<WhatsappSendResult> {
 	const prefix = params.logPrefix ?? "[SimpleTech]";
-	const client = getSimpletechClient();
+	const client = getSimpletechClient({ timeoutMs: params.timeoutMs });
 	if (!client) {
 		return { success: false, error: "Servicio de mensajería no configurado" };
 	}

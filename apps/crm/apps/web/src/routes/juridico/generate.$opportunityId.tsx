@@ -105,7 +105,7 @@ function RouteComponent() {
 				contractType: string;
 				data: Record<string, string>;
 				signers?: ContractSigner[];
-			emails?: string[];
+				emails?: string[];
 				options: {
 					gender: "male" | "female";
 					generatePdf: boolean;
@@ -114,7 +114,11 @@ function RouteComponent() {
 				};
 			}>;
 		}) => {
+			// Va la oportunidad: el servidor valida la etapa y toma el candado
+			// antes de crear los documentos en WeeTrust, que mandan invitaciones
+			// apenas se crean.
 			return await client.generateContractsDirect({
+				opportunityId,
 				...data,
 			});
 		},
@@ -147,6 +151,12 @@ function RouteComponent() {
 			return await client.linkContractsToOpportunity(data);
 		},
 		onSuccess: (data) => {
+			// Con descartados (la oportunidad cambió mientras se generaban) no es
+			// un éxito completo: el mensaje dice cuáles hay que volver a generar.
+			if (!data.success) {
+				toast.warning(data.message);
+				return;
+			}
 			toast.success(
 				data.message || "Contratos enlazados a la oportunidad exitosamente",
 			);

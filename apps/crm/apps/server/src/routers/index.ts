@@ -275,6 +275,9 @@ export const legalAppRouter = {
 	confirmContractsSigned: legalContractsRouter.confirmContractsSigned,
 
 	// Estado de firma y reintentos, para no tener que entrar a WeeTrust
+	getMessagingMode: legalContractsRouter.getMessagingMode,
+	resendContractLinksWhatsapp:
+		legalContractsRouter.resendContractLinksWhatsapp,
 	getContractSigningStatus: legalContractsRouter.getContractSigningStatus,
 	refreshContractSigningLinks: legalContractsRouter.refreshContractSigningLinks,
 	resendContractSigningEmails: legalContractsRouter.resendContractSigningEmails,

@@ -1,3 +1,6 @@
+import { and, eq } from "drizzle-orm";
+import { db } from "../db";
+import { contractSignatories } from "../db/schema/legal-contracts";
 import type { SignerRole } from "../services/legal-docs-api";
 
 /**
@@ -108,4 +111,49 @@ export function documentIdDesdeLink(link: string | null): string | null {
 	if (!link) return null;
 	const m = link.match(/\/signatory\/([^/?#]+)/);
 	return m?.[1] ?? null;
+}
+
+/**
+ * Guarda quién firma un contrato, con su rol y su enlace.
+ *
+ * Es best-effort a propósito: el contrato y su PDF ya quedaron guardados, y
+ * perderlos porque falló el detalle de los firmantes sería peor que quedarse
+ * con las columnas viejas de enlaces. El error queda en el log.
+ */
+export async function guardarFirmantesDelContrato(
+	contractId: string,
+	signatories: FirmanteEnviado[] | undefined,
+): Promise<void> {
+	const filas = filasDeFirmantes(contractId, signatories);
+	if (filas.length === 0) return;
+
+	try {
+		await db.insert(contractSignatories).values(filas);
+	} catch (error) {
+		console.error(
+			`[guardarFirmantesDelContrato] contrato ${contractId}: no se pudieron guardar los firmantes`,
+			error,
+		);
+	}
+}
+
+/**
+ * Si alguna persona ya firmó el documento, aunque WeeTrust todavía no lo dé
+ * por completo (el contrato sigue "pending" hasta que firman todos).
+ *
+ * Al anular o regenerar decide si la fila se conserva: con una firma adentro
+ * es el registro de quién firmó qué, y borrarla lo pierde.
+ */
+export async function alguienFirmo(contractId: string): Promise<boolean> {
+	const [firma] = await db
+		.select({ id: contractSignatories.id })
+		.from(contractSignatories)
+		.where(
+			and(
+				eq(contractSignatories.contractId, contractId),
+				eq(contractSignatories.status, "signed"),
+			),
+		)
+		.limit(1);
+	return Boolean(firma);
 }

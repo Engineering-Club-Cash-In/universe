@@ -71,6 +71,7 @@ import {
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
 import { mergeCompanyRelationshipStats } from "../lib/company-relationship-stats";
+import { claveDeFirma } from "../lib/contratos-candado";
 import {
 	assertOpportunityBelongsToLead,
 	canWriteOpportunityCreditAnalysis,
@@ -3648,6 +3649,21 @@ export const crmRouter = {
 			// La reapertura y su fila de transición van en UNA transacción: el
 			// timeline no puede quedar sin el retroceso que sí se escribió.
 			const updatedOpportunity = await auditedTransaction(async (tx) => {
+				// Si cambia la etapa, primero el candado de firma: la escritura espera a
+				// que termine lo que se esté haciendo con los contratos de la
+				// oportunidad (generar, regenerar, subir, enlazar, anular), que lo
+				// toman. Si la etapa cambiaba mientras WeeTrust mandaba invitaciones,
+				// el paso siguiente veía otra etapa y borraba esos documentos, y los
+				// destinatarios quedaban con correos que no abren. Va antes que
+				// cualquier lock de fila (como el FOR UPDATE de abajo): quien tiene el
+				// candado escribe la oportunidad desde otras conexiones, y tomarlo
+				// después de bloquear la fila los dejaría esperándose sin que Postgres
+				// lo detecte.
+				if (isStageChange) {
+					await tx.execute(
+						sql`select pg_advisory_xact_lock(${claveDeFirma(id)})`,
+					);
+				}
 				// 🔴 La reapertura no puede aplicar un parche calculado sobre una foto
 				// vieja: sin `expectedUpdatedAt`, entre el cálculo y este UPDATE otra
 				// transacción pudo reabrir y avanzar la misma fila (≥90% o won), y el

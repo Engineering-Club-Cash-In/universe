@@ -73,7 +73,11 @@ import {
 	isTestModeEnabled,
 	TEST_EMAIL,
 } from "../lib/messaging-test-mode";
-import { calcularDiasMoraExactos } from "../lib/mora-utils";
+import {
+	calcularDiasMoraExactos,
+	diasMoraDeListado,
+	estadoMoraPorCuotasAtrasadas,
+} from "../lib/mora-utils";
 import {
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
@@ -1073,10 +1077,12 @@ export const cobrosRouter = {
 							const statusCredit = credito.creditos.statusCredit;
 							const cuotasAtrasadas = credito.mora?.cuotas_atrasadas ?? 0;
 
-							// NOTA: Usamos aproximación (30 días por cuota) porque /getAllCredits
-							// NO retorna las fechas de vencimiento de las cuotas individuales.
-							// Solo /credito retorna el array completo con fechas para cálculo exacto.
-							const diasMora = cuotasAtrasadas * 30;
+							// Días REALES de atraso: los de la cuota vencida más antigua.
+							// Los manda cartera-back en `diasAtrasoMoraMaximo`, calculados en
+							// el mismo paso y con el mismo filtro de elegibilidad que el monto
+							// proporcional, así que el número y la plata no se contradicen.
+							// Este es además el que ordena la lista de cobranza.
+							const diasMora = diasMoraDeListado(credito.diasAtrasoMoraMaximo);
 
 							// Monto en mora REAL: usamos moras_credito.monto_mora (capital × 1.12% ×
 							// cuotas) que /getAllCredits ya trae en `mora`, para que coincida con el
@@ -1084,15 +1090,14 @@ export const cobrosRouter = {
 							// `cuota × cuotas`, dando un número distinto al del detalle para el mismo crédito.
 							const montoEnMora = Number(credito.mora?.monto_mora ?? 0);
 
-							// Determinar estado de mora según statusCredit y días de mora
-							let estadoMora: string | null = null;
-							if (statusCredit === "EN_CONVENIO") estadoMora = "en_convenio";
-							else if (diasMora === 0) estadoMora = "al_dia";
-							else if (diasMora <= 30) estadoMora = "mora_30";
-							else if (diasMora <= 60) estadoMora = "mora_60";
-							else if (diasMora <= 90) estadoMora = "mora_90";
-							else if (diasMora <= 120) estadoMora = "mora_120";
-							else estadoMora = "mora_120_plus";
+							// Bucket de aging: sale de las CUOTAS vencidas, no de los días.
+							// Antes se derivaba del mismo `cuotasAtrasadas × 30`, así que
+							// arreglar los días lo habría movido; el mapeo resultante es
+							// idéntico al de antes (1 cuota → mora_30, 2 → mora_60, …).
+							const estadoMora: string | null = estadoMoraPorCuotasAtrasadas(
+								cuotasAtrasadas,
+								statusCredit,
+							);
 
 							// Determinar estado del contrato según statusCredit
 							let estadoContrato = "activo";
@@ -2612,9 +2617,10 @@ export const cobrosRouter = {
 					capitalRestante: null, // No disponible en endpoint /credito
 					interesRestante: null, // No disponible en endpoint /credito
 					totalRestante: null, // No disponible en endpoint /credito
-					diasMora: creditoData.cuotasAtrasadas?.length
-						? creditoData.cuotasAtrasadas.length * 30
-						: 0,
+					// Días REALES de atraso (cuota vencida más antigua). Acá SÍ vienen
+					// las fechas de vencimiento, así que se calculan exactos en vez de
+					// aproximar a 30 por cuota, que contradice al monto proporcional.
+					diasMora: calcularDiasMoraExactos(creditoData.cuotasAtrasadas || []),
 					montoMora: creditoData.moraActual, // ya es string
 					cuotasAtrasadas: creditoData.cuotasAtrasadas?.length || 0,
 				};

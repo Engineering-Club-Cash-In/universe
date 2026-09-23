@@ -1107,6 +1107,7 @@ export async function updateMora({
   activa,
   usuario_email,
   motivo,
+  dbClient,
 }: {
   credito_id?: number;
   numero_credito_sifco?: string;
@@ -1121,8 +1122,27 @@ export async function updateMora({
    * ruta POST /mora/update, la única puerta de entrada desde la interfaz.
    */
   motivo?: string;
+  /**
+   * Transacción del CALLER. Sin esto, `updateMora` abre la suya y commitea
+   * sola: el ajuste de mora quedaba firme aunque el caller fallara un paso
+   * después (o al revés). Quien necesita que su cambio de estado y el ajuste
+   * de mora vivan o mueran juntos —`falsePayment`— pasa su `tx` acá y todo
+   * —el UPDATE de la mora, el del crédito y el evento de `moras_historial`—
+   * corre adentro de ella.
+   *
+   * 🔒 El orden de candados NO cambia por venir de afuera: este cuerpo sigue
+   * tomando `creditos` (SELECT … FOR UPDATE) antes que `moras_credito`. El
+   * caller que ya tenga `creditos` candado no paga nada por re-pedirlo; el
+   * que traiga `moras_credito` candado ANTES de llamar acá rompería la regla,
+   * y por eso no hay ninguno.
+   */
+  dbClient?: typeof db;
 }) {
   const startedAt = safeNow();
+  // Ejecutor de las lecturas previas a la transacción: si el caller trajo la
+  // suya, van por ahí (leer con OTRA conexión mientras su tx tiene filas
+  // candadas es pedir un bloqueo contra uno mismo).
+  const executor = dbClient ?? db;
   try {
     if (monto_cambio < 0) {
     emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "invalid_late_fee_amount" });
@@ -1132,7 +1152,7 @@ export async function updateMora({
   // Resolver credito_id desde numero_credito_sifco si solo vino ese
   let targetCreditoId = credito_id;
   if (!targetCreditoId && numero_credito_sifco) {
-    const [credito] = await db
+    const [credito] = await executor
       .select({ credito_id: creditos.credito_id })
       .from(creditos)
       .where(eq(creditos.numero_credito_sifco, numero_credito_sifco));
@@ -1154,7 +1174,7 @@ export async function updateMora({
     // Resolver usuario que ejecuta la acción (si vino email)
     let usuarioId: number | undefined;
     if (usuario_email) {
-      const [user] = await db
+      const [user] = await executor
         .select({ id: platform_users.id })
         .from(platform_users)
         .where(eq(platform_users.email, usuario_email));
@@ -1165,8 +1185,11 @@ export async function updateMora({
       usuarioId = user.id;
     }
 
-    // Toda la operación dentro de una transacción con row lock para evitar races
-    const result = await db.transaction(async (tx) => {
+    // Toda la operación dentro de una transacción con row lock para evitar races.
+    // Si el caller trajo la suya (`dbClient`), se corre ADENTRO de esa —no se
+    // abre una segunda que commitearía por su cuenta: es lo que permite que
+    // anular el pago y restituir su mora sean un solo hecho.
+    const cuerpo = async (tx: typeof db) => {
       // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
       // la regla al inicio del archivo). Acá el UPDATE de `creditos` no puede
       // ir primero —el estado a escribir depende del monto que resulte de la
@@ -1264,7 +1287,11 @@ export async function updateMora({
         montoNuevo: newMonto.toString(),
         cuotasAnteriores: moraActual.cuotas_atrasadas,
       };
-    });
+    };
+
+    const result = dbClient
+      ? await cuerpo(dbClient)
+      : await db.transaction((tx) => cuerpo(tx as unknown as typeof db));
 
     if (result.kind === "not_found") {
       emitCreditLateFee({ outcome: "rejected", operation: "update", durationMs: elapsedMilliseconds(startedAt), reasonCode: "active_late_fee_not_found" });
@@ -1287,6 +1314,13 @@ export async function updateMora({
       porcentaje_mora: result.updated.porcentaje_mora,
       usuario_id: usuarioId,
       motivo,
+      // Adentro de la tx del caller el evento va por la MISMA conexión (si
+      // fuera por otra leería filas candadas y se bloquearía contra sí mismo)
+      // y el swallow deja de valer: un insert fallido aborta esa tx y el
+      // COMMIT del caller sería un rollback silencioso mientras acá se
+      // devuelve success:true.
+      dbClient,
+      propagarError: dbClient !== undefined,
     });
 
     emitCreditLateFee({ outcome: "completed", operation: "update", durationMs: elapsedMilliseconds(startedAt) });

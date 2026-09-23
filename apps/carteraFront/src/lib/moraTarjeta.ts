@@ -87,9 +87,28 @@ export function construirMoraTarjeta(datos: MoraTarjetaDatos): MoraTarjeta {
     // cuota está por vencer y la mora va a volver a subir. El techo positivo
     // vale en los dos casos, así que se calcula antes de elegir el texto.
     if (maximo !== null && maximo > 0) {
-      techo = `Si no se paga, en ${DIAS_CARGO_COMPLETO} días llega a ${fmtQ(
-        monto + maximo
-      )}.`;
+      // EL ALCANCE DE LA PROYECCIÓN, dicho en voz alta. Sin esta segunda frase
+      // la tarjeta se contradecía sola: la explicación llama a
+      // `capital × % × cuotas` "el cargo completo de esas cuotas" —o sea, su
+      // techo— y acá se anunciaba un techo a 30 días MAYOR que ese número,
+      // porque `incrementoMaximoMensualMora` ya cuenta las cuotas que vencen
+      // dentro de la ventana. Con 1 cuota atrasada el usuario leía "el cargo
+      // completo es Q112" y debajo "en 30 días llega a Q149": justo la
+      // contradicción que esta tarjeta vino a resolver.
+      //
+      // No se puede reconciliar contra un conteo PROYECTADO porque el payload
+      // no trae el capital: `capital × % × N` se muestra simbólicamente, nunca
+      // se calcula. Así que se nombra el alcance, que además es lo que el
+      // usuario necesita para no negociar sobre el número equivocado.
+      techo =
+        `Si no se paga, en ${DIAS_CARGO_COMPLETO} días llega a ${fmtQ(
+          monto + maximo
+        )}. Esa proyección incluye las cuotas que venzan dentro de esos ` +
+        `${DIAS_CARGO_COMPLETO} días` +
+        (cuotas > 0
+          ? `, no solo las ${cuotas} ya vencidas: por eso puede pasar del cargo ` +
+            `completo de esas ${cuotas}.`
+          : `.`);
     }
     if (diario > 0) {
       ritmo = `Sube ${fmtQ(diario)} por cada día que pase sin pagar.`;
@@ -111,7 +130,8 @@ export function construirMoraTarjeta(datos: MoraTarjetaDatos): MoraTarjeta {
       ? `La mora se acumula por día: cada cuota atrasada devenga su cargo de ${porcentaje}% ` +
         `del capital en partes de 1/${DIAS_CARGO_COMPLETO} por día. Por eso NO es ` +
         `capital × ${porcentaje}% × ${cuotas}: eso es el cargo completo, el que se alcanza ` +
-        `recién cuando cada una de las ${cuotas} cuotas cumple ${DIAS_CARGO_COMPLETO} días de atraso.`
+        `recién cuando cada una de las ${cuotas} cuotas YA VENCIDAS cumple ${DIAS_CARGO_COMPLETO} días ` +
+        `de atraso. Es el techo de esas ${cuotas}, no el de la proyección a ${DIAS_CARGO_COMPLETO} días.`
       : `La mora se acumula por día: cada cuota atrasada devenga su cargo mensual en partes ` +
         `de 1/${DIAS_CARGO_COMPLETO} por día, no completo desde el primer día.`;
 

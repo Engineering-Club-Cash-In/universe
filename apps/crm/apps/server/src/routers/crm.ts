@@ -105,12 +105,19 @@ import {
 	toDateStrGT,
 } from "../lib/guatemala-month-window";
 import {
+	conLaEtapaDeDestino,
 	dpiCambia,
+	elExpedienteNoAcumulaEvidencia,
+	etapaQueCanda,
 	evaluarCandadoBorradoCoDeudor,
 	evaluarCandadoDpi,
+	evidenciaAcumuladaDelExpediente,
+	mensajeCambioDeLeadConEvidencia,
+	mensajeCandadoCambioDeLead,
 	noExisteOportunidadCandanteDelLead,
 	noExisteOportunidadCandantePorId,
 	obtenerOportunidadesParaCandadoDpi,
+	PORCENTAJE_CANDADO_DPI,
 	type ResultadoCandadoDpi,
 } from "../lib/lead-dpi-lock";
 import {
@@ -148,6 +155,7 @@ import {
 	type OportunidadParaRevalidar,
 	obtenerEtapaDeAnalisis,
 	PORCENTAJE_ETAPA_ANALISIS,
+	parcheDeIdentidadInvalidada,
 	parcheDeRevalidacion,
 	RAZON_TRANSICION_REVALIDACION,
 	revalidarOportunidades,
@@ -2651,6 +2659,47 @@ export const crmRouter = {
 				});
 			}
 
+			// 🔴 Una oportunidad no puede NACER por encima del umbral del candado.
+			//
+			// El candado de identidad —el del DPI y el del `leadId`— se apoya en dos
+			// señales: la etapa de hoy y la más alta que la oportunidad tocó, según
+			// `opportunity_stage_history`. Nacer directamente en una etapa candante
+			// dejaba el expediente arriba del umbral SIN la fila de historial que lo
+			// prueba: bastaba bajarlo al 30% —una sola fila `from=40, to=30`— para
+			// que el máximo histórico diera 30, el candado se abriera, se colgara
+			// otro lead, y volver a subir. `ALTURA_DE_LA_TRANSICION` arregla la
+			// lectura de esa fila; este tope saca la precondición, para que por esta
+			// puerta el expediente no llegue a existir arriba del umbral.
+			//
+			// El tope no rompe ningún flujo vivo: el selector "Etapa Inicial" del CRM
+			// solo ofrece etapas de 1% a 20% y la conversión desde leads crea siempre
+			// en el 1%. Los nacimientos legítimos por encima del umbral —la migración
+			// automática de créditos de Cartera-Back, que nace en la última etapa, y
+			// los seeds— insertan directo en la base y no pasan por este procedure.
+			//
+			// De paso, buscar la etapa da un 400 claro cuando el `stageId` no existe,
+			// que hasta ahora reventaba recién contra la foreign key.
+			const [etapaInicial] = await db
+				.select({
+					name: salesStages.name,
+					closurePercentage: salesStages.closurePercentage,
+				})
+				.from(salesStages)
+				.where(eq(salesStages.id, input.stageId))
+				.limit(1);
+
+			if (!etapaInicial) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "La etapa inicial seleccionada no existe.",
+				});
+			}
+
+			if (etapaInicial.closurePercentage > PORCENTAJE_CANDADO_DPI) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `No se puede crear una oportunidad directamente en ${etapaInicial.name} (${etapaInicial.closurePercentage}%): a partir del ${PORCENTAJE_CANDADO_DPI}% el expediente queda con la identidad congelada, y nacer ahí lo dejaría sin el rastro de por dónde pasó. Creála en una etapa inicial y avanzála.`,
+				});
+			}
+
 			// Check for recent opportunity with same lead (within 1 hour)
 			if (input.leadId && !input.force) {
 				const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -2889,6 +2938,120 @@ export const crmRouter = {
 				}
 			}
 
+			// 🔴 Cambiar `leadId` cambia la identidad del expediente sin tocar
+			// ningún DPI, así que no lo veía ni el candado (que protege al lead) ni
+			// el gate de mora (que no se llama desde acá). Ver
+			// `mensajeCandadoCambioDeLead` para el agujero completo.
+			//
+			// Desasignar (`null`) también cuenta: es la primera mitad de la maniobra
+			// en dos pasos —soltar el lead ahora, colgar otro después—, y por sí
+			// sola ya deja el expediente avanzado sin dueño. Cualquier valor
+			// distinto del actual paga lo mismo.
+			//
+			// `!== undefined` y no `"leadId" in input`: los formularios reenvían el
+			// objeto entero y un `leadId: undefined` significa "no lo toqué", no
+			// "desasignalo". Es el mismo criterio que ya usaba `leadIdCambio` más
+			// abajo, que ahora se lee de acá para que no se separen.
+			const cambiaElLeadDeLaOportunidad =
+				input.leadId !== undefined &&
+				input.leadId !== currentOpportunity[0].leadId;
+
+			/**
+			 * El formulario reenvía el `leadId` que la oportunidad YA tenía.
+			 *
+			 * `cambiaElLeadDeLaOportunidad` compara contra la fila LEÍDA, así que ese
+			 * request da falso y no corre nada del candado: ni la etapa, ni la
+			 * evidencia, ni la invalidación de identidad. Si además el campo viajara
+			 * en el `SET`, sería el rebote: el request A lee la oportunidad con el
+			 * lead X, el request B se la cambia a Y pagando todas las guardas, y
+			 * después A aterriza y reescribe `lead = X` por un camino sin candado,
+			 * deshaciendo el cambio de B y dejando pegada la invalidación que B pagó.
+			 * `expectedUpdatedAt` es opcional, así que tampoco lo frena.
+			 *
+			 * ⚠️ Hoy ese campo NO llega al `SET`, pero por prestado:
+			 * `stripUnchangedFrozenFields` lo saca porque `leadId` está en
+			 * `WON_OPPORTUNITY_FROZEN_FIELD_LABELS`, o sea por ser dato congelado de
+			 * una oportunidad ganada, no por ser la identidad del expediente. El día
+			 * que alguien saque al cliente de esa lista —no es un término del
+			 * contrato, es un argumento razonable— el rebote se abre solo y sin que
+			 * nada lo señale. Por eso la bandera existe y se aplica acá también: la
+			 * protección de la identidad no puede depender de la lista de otro guard.
+			 *
+			 * Se saca del `SET` en vez de exigirlo en el WHERE: escribir el mismo
+			 * valor que se leyó no aporta nada, y un predicado sobre el lead vivo
+			 * para CUALQUIER request que traiga el campo le haría fallar el guardado
+			 * al asesor cada vez que otro corrigiera el cliente en paralelo —los
+			 * formularios de este CRM reenvían el objeto entero, así que lo pagarían
+			 * todas las ediciones, no las que cambian el cliente—. El predicado sí
+			 * va, pero sólo en el camino donde el lead de verdad cambia: ver
+			 * `elLeadVivoSigueSiendoElLeido`.
+			 */
+			const reenvioDelMismoLead =
+				input.leadId !== undefined && !cambiaElLeadDeLaOportunidad;
+
+			if (cambiaElLeadDeLaOportunidad) {
+				// 🔴 Lo que decide es la etapa EFECTIVA de destino —`input.stageId` si
+				// viene, y si no la guardada—, no sólo el estado persistido.
+				//
+				// Mirando nada más lo guardado, un SOLO request que cambiara `leadId`
+				// Y `stageId` a la vez cruzaba el candado entero: una oportunidad en el
+				// 30% con el análisis aprobado para el lead A recibía
+				// `{ leadId: B, stageId: <etapa 40%> }`, el chequeo veía 30 —el que la
+				// sube por encima del umbral es ESTE MISMO UPDATE— y la sentencia
+				// reemplazaba al cliente y cruzaba el umbral de una, conservando la
+				// aprobación y la evidencia (RENAP, buró, documentos) de A. Es la
+				// maniobra en dos pasos que este candado cerró, comprimida en uno.
+				//
+				// La consulta extra sólo la paga el request que ADEMÁS mueve la etapa
+				// mientras cambia el lead, que es el caso raro.
+				const [etapaDestino] = input.stageId
+					? await db
+							.select({
+								name: salesStages.name,
+								closurePercentage: salesStages.closurePercentage,
+							})
+							.from(salesStages)
+							.where(eq(salesStages.id, input.stageId))
+							.limit(1)
+					: [];
+
+				// La misma consulta y el mismo predicado que usa el candado del DPI:
+				// una sola fila, la de esta oportunidad. `etapaQueCanda` ya deja
+				// pasar a las `lost` —que no candan por decisión de producto— y esas
+				// pagan su costo al reabrirse, con `parcheDeRevalidacion`.
+				const candante = etapaQueCanda(
+					(await obtenerOportunidadesParaCandadoDpi({ opportunityId: id })).map(
+						(oportunidad) => conLaEtapaDeDestino(oportunidad, etapaDestino),
+					),
+				);
+
+				if (candante) {
+					throw new ORPCError("FORBIDDEN", {
+						message: mensajeCandadoCambioDeLead(candante),
+					});
+				}
+
+				// 🔴 El candado de arriba mira la ETAPA, y por debajo del umbral deja
+				// pasar el cambio cobrando `parcheDeIdentidadInvalidada`. Ese parche
+				// invalida la aprobación y los documentos de identidad, pero NO los
+				// comprobantes de ingresos, estados de cuenta, recibos ni formularios
+				// del cliente anterior, que sobreviven y vuelven a aprobar el
+				// expediente bajo otra persona. Ver `evidenciaAcumuladaDelExpediente`.
+				//
+				// Las perdidas NO están exceptuadas: la marca de revalidación que
+				// cobra la reapertura sólo caduca los documentos de identidad, así que
+				// «perder y reabrir» era el mismo agujero en tres pasos.
+				const evidenciaDelExpediente = await evidenciaAcumuladaDelExpediente({
+					opportunityId: id,
+				});
+
+				if (evidenciaDelExpediente.length > 0) {
+					throw new ORPCError("FORBIDDEN", {
+						message: mensajeCambioDeLeadConEvidencia(evidenciaDelExpediente),
+					});
+				}
+			}
+
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
 			// por el análisis de esta oportunidad Y del lead que quedará asignado
 			// (si leadId también cambia, el análisis del lead anterior ya no aplica).
@@ -2906,9 +3069,7 @@ export const crmRouter = {
 				input.elegidoDesdeRecomendacionIA !==
 					(currentOpportunity[0].diaPagoOriginalSistema != null);
 			// Si leadId cambia, revalidar aunque día/flag no cambien (analisis del lead anterior ya no aplica).
-			const leadIdCambio =
-				input.leadId !== undefined &&
-				input.leadId !== currentOpportunity[0].leadId;
+			const leadIdCambio = cambiaElLeadDeLaOportunidad;
 			const requiereCongelarEtapa =
 				input.diaPagoMensual !== undefined &&
 				requiereCongelarEtapaParaCambioDia(
@@ -3202,10 +3363,22 @@ export const crmRouter = {
 
 			// PostgreSQL re-evaluates this predicate after waiting for a concurrent
 			// row update, so lead/stage edits cannot jointly persist an invalid state.
+			//
+			// 🔴 El `leadId` entra al invariante sólo si de verdad viaja en el `SET`.
+			// Cuando es el reenvío del mismo valor no viaja (ver
+			// `reenvioDelMismoLead`), y evaluar el invariante contra el literal del
+			// formulario mientras la columna queda como está era dar por bueno lo que
+			// no se iba a escribir: si otro request dejó la oportunidad sin cliente,
+			// el `$1::uuid IS NOT NULL` pasaba igual y la misma sentencia la subía a
+			// 80% o más sin cliente, que es justo lo que este invariante prohíbe.
+			// Omitiéndolo, el predicado mira la columna VIVA, que es el valor con el
+			// que la fila va a quedar.
 			const relationshipInvariantCondition =
 				buildOpportunityRelationshipInvariantCondition({
 					...(input.stageId ? { stageId: input.stageId } : {}),
-					...("leadId" in input ? { leadId: input.leadId } : {}),
+					...("leadId" in input && !reenvioDelMismoLead
+						? { leadId: input.leadId }
+						: {}),
 				});
 			const invariantWhereClause = requiereCongelarEtapa
 				? and(
@@ -3217,12 +3390,49 @@ export const crmRouter = {
 			const wonLockWhereClause = enforceNotWonInPredicate
 				? and(invariantWhereClause, not(eq(opportunities.status, "won")))
 				: invariantWhereClause;
-			const whereClause = expectedUpdatedAt
+			// El chequeo de arriba leyó la fila antes del UPDATE: entre la lectura y
+			// la escritura otra transacción puede subir la oportunidad por encima del
+			// 30% y el lead nuevo entraría igual. Postgres re-evalúa el predicado
+			// después de esperar a la escritura rival, así que la condición viaja
+			// dentro de la misma sentencia. Solo cuando el lead cambia: ninguna otra
+			// edición tiene por qué pagarlo.
+			//
+			// 🔴 La etapa de destino viaja ADENTRO del predicado, no sólo en el
+			// chequeo de arriba. Sin ella, el `not exists` leía el estado persistido
+			// —todavía por debajo del umbral, porque el que lo cruza es esta misma
+			// sentencia— y dejaba pasar el cambio de lead que sube de etapa en el
+			// mismo viaje. Es la contraparte SQL de `conLaEtapaDeDestino`.
+			//
+			// Lo mismo vale para la evidencia acumulada: el chequeo de arriba la
+			// leyó antes del UPDATE, y entre la lectura y la escritura el analista
+			// puede subir un documento o terminar el formulario. La condición viaja
+			// también adentro (`elExpedienteNoAcumulaEvidencia`).
+			//
+			// 🔴 Y el cambio se aplica sobre el lead que SE LEYÓ, no sobre el que
+			// haya quedado. Entre la lectura y la escritura otro request pudo
+			// cambiar el cliente: sin esto el segundo lo pisa sin que sus guardas
+			// hayan visto ese estado, y la bitácora anota un `leadAnterior` que ya
+			// no era el real. Cero filas ⇒ CONFLICT, que es exactamente lo que
+			// pasó. Sólo en este camino: la edición que no cambia el cliente no
+			// paga nada, porque ya ni siquiera escribe el campo.
+			const elLeadVivoSigueSiendoElLeido =
+				currentOpportunity[0].leadId === null
+					? isNull(opportunities.leadId)
+					: eq(opportunities.leadId, currentOpportunity[0].leadId);
+			const leadSwapWhereClause = cambiaElLeadDeLaOportunidad
 				? and(
 						wonLockWhereClause,
-						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
+						elLeadVivoSigueSiendoElLeido,
+						noExisteOportunidadCandantePorId(id, input.stageId),
+						elExpedienteNoAcumulaEvidencia(id),
 					)
 				: wonLockWhereClause;
+			const whereClause = expectedUpdatedAt
+				? and(
+						leadSwapWhereClause,
+						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
+					)
+				: leadSwapWhereClause;
 
 			// Sales users cannot reassign opportunities
 			if (
@@ -3374,6 +3584,66 @@ export const crmRouter = {
 				updateData,
 				currentOpportunity[0],
 			);
+			// Ver `reenvioDelMismoLead`: el valor que reenvió el formulario es el
+			// mismo que se leyó, así que escribirlo no cambia nada de esta fila y lo
+			// único que podría lograr es pisar el cambio de al lado por un camino sin
+			// candado. Hoy la línea es redundante —`stripUnchangedFrozenFields` ya lo
+			// sacó, por estar `leadId` en la lista de campos congelados— y es a
+			// propósito: acá se saca por identidad, y así sigue saliendo aunque esa
+			// lista cambie por razones de contratos, que no son éstas.
+			if (reenvioDelMismoLead) delete safeUpdateData.leadId;
+
+			/**
+			 * 🔴 Cambiar el lead cuesta revalidar SIEMPRE, no sólo pasado el umbral.
+			 *
+			 * El candado bloquea el cambio de lead a partir del 30%, pero EN el 30%
+			 * lo deja pasar a propósito —la comparación es `> 30`— y hasta ahora
+			 * pasar no invalidaba nada: `leadId` se reemplazaba y `analysisStatus`,
+			 * `creditDetailApproved` e `identityRevalidatedAt` quedaban intactos. La
+			 * maniobra se partía en dos peticiones que, una por una, son legales:
+			 *
+			 * 1. Oportunidad en EXACTAMENTE 30% con `analysisStatus: "approved"`. Se
+			 *    cambia SÓLO el lead → pasa, porque 30 no canda.
+			 * 2. Otra petición mueve SÓLO la etapa al 40% → pasa, porque no se toca
+			 *    el lead.
+			 *
+			 * El lead nuevo heredaba el expediente aprobado del anterior —RENAP,
+			 * buró, documentos y análisis de capacidad de pago de otra persona— y de
+			 * ahí seguía a Formalización con `approveCreditDetail`. Es la tercera
+			 * variante del mismo bypass, después de la del historial y la del
+			 * request único que cambia lead y etapa a la vez.
+			 *
+			 * No se prohíbe el cambio en toda etapa: se le pone precio, igual que a
+			 * reabrir una perdida o al override del admin. Operaciones tiene que
+			 * poder corregir un lead mal asignado en etapas tempranas sin perder la
+			 * oportunidad y reabrirla, y ahí el parche no cuesta nada porque todavía
+			 * no hay nada aprobado que invalidar; sólo pesa cuando de verdad lo hay.
+			 *
+			 * 🔴 Se aplica INCONDICIONALMENTE cuando el lead cambia, y no bajo un
+			 * `if (analysisStatus === "approved" || creditDetailApproved)` de este
+			 * lado, por dos razones. Una, ese `if` miraría la foto leída antes del
+			 * UPDATE: una aprobación que entrara en el medio sobreviviría al cambio
+			 * de lead, que es la misma carrera que el resto del candado cierra
+			 * metiendo la condición en la sentencia. Y dos, `creditDetailApproved`
+			 * admite NULL en las filas viejas, así que un predicado `= false` las
+			 * dejaría justo afuera. Lo que decide qué se degrada es el `case` de
+			 * `parcheDeIdentidadInvalidada`, que lo evalúa la fila VIVA al escribir.
+			 *
+			 * Va en el MISMO `.set()` que escribe `leadId`: es UNA sentencia, así que
+			 * no existe una ventana en la que el cliente nuevo esté puesto y la
+			 * aprobación vieja siga en pie.
+			 *
+			 * ⚠️ SIN el retroceso de etapa de `parcheDeRevalidacion`: acá la
+			 * oportunidad está en 30% o menos —más arriba el candado ya bloqueó—, así
+			 * que mandarla a la etapa de análisis la haría AVANZAR, no retroceder, y
+			 * una de 10% terminaría en la cola del analista sin haber pasado por
+			 * ventas. El único caso que sí llega hasta acá por encima del 30% es la
+			 * oportunidad `lost` (las perdidas no candan, por decisión de producto),
+			 * y ésa paga el retroceso completo al reabrirse, más abajo.
+			 */
+			const invalidacionPorCambioDeLead = cambiaElLeadDeLaOportunidad
+				? parcheDeIdentidadInvalidada()
+				: {};
 
 			// La reapertura y su fila de transición van en UNA transacción: el
 			// timeline no puede quedar sin el retroceso que sí se escribió.
@@ -3439,6 +3709,12 @@ export const crmRouter = {
 						...(diaPagoOriginalSistemaUpdate !== undefined && {
 							diaPagoOriginalSistema: diaPagoOriginalSistemaUpdate,
 						}),
+						// El precio de cambiar el lead; ver `invalidacionPorCambioDeLead`.
+						// ⚠️ La línea de abajo va DESPUÉS a propósito: si el mismo request
+						// además manda la oportunidad al 30%, ese valor es el que
+						// corresponde —`pending` o `resubmitted`, nunca `approved`— y pisa
+						// al `case` sin devolverle la aprobación a nadie.
+						...invalidacionPorCambioDeLead,
 						// Update analysisStatus if it changed during stage transition
 						...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
 							analysisStatus: newAnalysisStatus,
@@ -3500,6 +3776,27 @@ export const crmRouter = {
 
 			// Después del chequeo de conflicto: con cero filas no hubo escritura.
 			auditRecord({ entity: "opportunity", id: id, action: "update" });
+
+			// El cambio de lead deja su propia fila. Sin esto, quien encuentre el
+			// expediente de vuelta sin aprobación ve un retroceso sin causa y parece
+			// un error de alguien; y al revés, un cambio de identidad de un
+			// expediente avanzado es exactamente lo que se va a querer buscar
+			// después.
+			if (cambiaElLeadDeLaOportunidad) {
+				auditRecord({
+					entity: "opportunity",
+					id,
+					action: "cambio_de_lead_revalidacion",
+					data: {
+						leadAnterior: currentOpportunity[0].leadId,
+						leadNuevo: input.leadId ?? null,
+						detalle:
+							"se cambió el cliente de la oportunidad; la validación de identidad (RENAP/buró/documentos/análisis) que había era del cliente anterior",
+						resultado:
+							"analysisStatus vuelve a pending si estaba aprobado, detalle de crédito sin aprobar y marca de revalidación puesta (la etapa NO se mueve: está en el umbral o por debajo)",
+					},
+				});
+			}
 
 			// La reapertura deja su propia fila, tanto cuando revalidó como cuando
 			// las salvaguardas lo impidieron: en ese segundo caso el aviso es lo

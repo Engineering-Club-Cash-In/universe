@@ -160,8 +160,58 @@ export function parcheDeRevalidacion(
 	revalidadaEn: Date | SQL = sql`clock_timestamp()`,
 ) {
 	return {
+		...parcheDeIdentidadInvalidada(revalidadaEn),
 		stageId: etapaDeAnalisisId,
+		// ⚠️ Va DESPUÉS del spread a propósito, y es literal y no la degradación
+		// condicional de `parcheDeIdentidadInvalidada`: este camino SÍ retrocede la
+		// etapa a análisis, así que el análisis se rehace desde cero y el estado
+		// con el que la oportunidad tiene que quedar es `pending`, venga de donde
+		// venga.
 		analysisStatus: "pending" as const,
+	};
+}
+
+/**
+ * 🔴 La mitad del parche que INVALIDA lo que se había validado, sin el retroceso
+ * de etapa.
+ *
+ * Es la misma pieza de `parcheDeRevalidacion` —de hecho `parcheDeRevalidacion`
+ * está escrito encima de esta, para que no puedan separarse—, expuesta aparte
+ * porque hay un camino donde el retroceso NO corresponde: el cambio de `leadId`
+ * por debajo o EN el umbral del candado (ver `updateOpportunity`). Ahí la
+ * oportunidad está en 30% o menos —más arriba el candado ya bloqueó—, así que
+ * mandarla a la etapa de análisis no la haría retroceder sino AVANZAR: una
+ * oportunidad en 10% terminaría en la cola del analista sin haber pasado por
+ * ventas. Lo que sí hay que cobrar es la invalidación, que es esto.
+ *
+ * ⚠️ `analysisStatus` sale como un `case` y no como `'pending'` literal por la
+ * misma razón. `pending` significa "en el 30%, esperando revisión" y es lo que
+ * habilita a `reviewOpportunityAnalysis`; escribirlo sobre una oportunidad en
+ * `not_applicable` (nunca llegó a análisis) o `rejected` (rechazada, esperando
+ * corrección) inventaría un estado que no ocurrió y borraría el rastro del
+ * rechazo. La degradación solo tiene sentido sobre lo que de verdad estaba
+ * aprobado, y va DENTRO de la sentencia —no en un `if` sobre la foto leída
+ * antes— para que la decida la fila viva al momento de escribir: el mismo
+ * patrón que el resto del candado. Con un `if` de este lado, una aprobación que
+ * entrara entre la lectura y el UPDATE sobreviviría al cambio de lead.
+ *
+ * `creditDetailApproved` va incondicional: `false` es lo mismo que el `NULL` de
+ * las filas viejas ("no aprobado"), así que escribirlo siempre no cambia nada
+ * donde no había nada, y evita el predicado `= false` que dejaría fuera justo a
+ * esas filas.
+ */
+export function parcheDeIdentidadInvalidada(
+	// 🔴 Por omisión la estampa el SERVIDOR al ejecutar el UPDATE, no nosotros
+	// antes de entrar a la transacción. Con una fecha tomada de este lado, un
+	// documento de identidad subido entre ese instante y el UPDATE —sobre todo
+	// si el reset quedó esperando el candado de otra fila— tenía `uploadedAt`
+	// POSTERIOR a la marca y pasaba por evidencia de la identidad nueva siendo
+	// de la vieja. `clock_timestamp()` y no `now()`: `now()` devuelve el inicio
+	// de la transacción, que es justo el borde que hay que dejar afuera.
+	revalidadaEn: Date | SQL = sql`clock_timestamp()`,
+) {
+	return {
+		analysisStatus: sql`case when ${opportunities.analysisStatus} = 'approved' then 'pending' else ${opportunities.analysisStatus} end`,
 		creditDetailApproved: false,
 		// 🔴 La marca viaja en el MISMO UPDATE que el reset y solo alcanza a las
 		// oportunidades que de verdad se resetearon. Es la mitad que le faltaba al

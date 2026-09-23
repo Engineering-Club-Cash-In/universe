@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { type SQL, sql } from "drizzle-orm";
+import { eq, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { opportunities } from "../db/schema";
+import { opportunities, salesStages } from "../db/schema";
 import {
+	conLaEtapaDeDestino,
 	dpiCambia,
+	etapaQueCanda,
 	existeOportunidadCandanteDelLead,
 	existeOportunidadCandantePorId,
+	MAX_HISTORICO,
 	MENSAJE_CANDADO_DPI_PORTAL,
 	mensajeCandadoBorradoCoDeudor,
 	noExisteOportunidadCandanteDelLead,
@@ -427,6 +430,44 @@ describe("las dos formas de la señal dicen lo mismo", () => {
 		expect(texto).not.toContain('"opportunities"."lead_id" =');
 	});
 
+	/**
+	 * 🔴 La etapa a la que el UPDATE MUEVE la oportunidad, dentro del predicado.
+	 *
+	 * Sin esta rama, un solo request con `{ leadId: B, stageId: <etapa 40%> }`
+	 * pasaba: tanto el chequeo en memoria como este `not exists` leían el estado
+	 * persistido —todavía en 30%, porque el que lo cruza es esa misma sentencia—
+	 * y el UPDATE reemplazaba al cliente Y cruzaba el umbral de una.
+	 */
+	test("con etapa de destino, el SQL agrega la rama del destino", () => {
+		const texto = sqlComoTexto(
+			existeOportunidadCandantePorId("una-oportunidad", "una-etapa"),
+		);
+
+		expect(texto).toContain("ed.closure_percentage >");
+		// Se SUMA a las otras dos señales: la etapa de hoy y el historial siguen.
+		expect(texto).toContain("opportunity_stage_history");
+	});
+
+	test("sin etapa de destino, el SQL sale exactamente como antes", () => {
+		// El borrado del co-deudor y la escritura del DPI usan la misma envoltura
+		// y no mueven ninguna etapa: no pueden empezar a candar por este cambio.
+		expect(sqlComoTexto(existeOportunidadCandantePorId("x"))).not.toContain(
+			"ed.closure_percentage",
+		);
+	});
+
+	test("la rama del destino usa el MISMO umbral, y no un 30 suelto", () => {
+		const { params } = base
+			.select({ x: sql`1` })
+			.from(opportunities)
+			.where(existeOportunidadCandantePorId("una-oportunidad", "una-etapa"))
+			.toSQL();
+
+		// Tres: etapa actual, historial y destino.
+		expect(params.filter((p) => p === PORCENTAJE_CANDADO_DPI)).toHaveLength(3);
+		expect(params).toContain("una-etapa");
+	});
+
 	test("la negada es la negación de la afirmativa", () => {
 		expect(sqlComoTexto(noExisteOportunidadCandanteDelLead("x"))).toContain(
 			"not exists",
@@ -434,5 +475,205 @@ describe("las dos formas de la señal dicen lo mismo", () => {
 		expect(sqlComoTexto(noExisteOportunidadCandantePorId("x"))).toContain(
 			"not exists",
 		);
+	});
+});
+
+/**
+ * 🔴 La contraparte en memoria de la rama del destino.
+ *
+ * `conLaEtapaDeDestino` responde "¿cómo quedaría esta oportunidad si el request
+ * se aplicara?", y de ahí sale la decisión del candado del cambio de lead.
+ */
+describe("conLaEtapaDeDestino", () => {
+	const enAnalisis = oportunidad(30, "open", "Análisis");
+
+	test("el destino que cruza el umbral canda aunque lo guardado no cande", () => {
+		const efectiva = conLaEtapaDeDestino(enAnalisis, {
+			name: "Cierre de propuesta",
+			closurePercentage: 40,
+		});
+
+		expect(etapaQueCanda([enAnalisis])).toBeNull();
+		expect(etapaQueCanda([efectiva])).not.toBeNull();
+	});
+
+	test("un destino por debajo del umbral no canda nada", () => {
+		const efectiva = conLaEtapaDeDestino(enAnalisis, {
+			name: "Calificación",
+			closurePercentage: 20,
+		});
+
+		expect(etapaQueCanda([efectiva])).toBeNull();
+	});
+
+	/**
+	 * 🔴 El destino SUMA, nunca resta. Si pisara a la etapa actual, mandar
+	 * `{ leadId: B, stageId: <etapa 20%> }` descandaría a una oportunidad parada
+	 * hoy en el 40% sin historial —la que nació ahí—, rearmando el agujero por la
+	 * puerta de al lado.
+	 */
+	test("bajar de etapa en el mismo request NO descanda", () => {
+		const parada40SinHistorial = oportunidad(40, "open", "Cierre de propuesta");
+
+		const efectiva = conLaEtapaDeDestino(parada40SinHistorial, {
+			name: "Calificación",
+			closurePercentage: 20,
+		});
+
+		expect(efectiva.closurePercentage).toBe(40);
+		expect(etapaQueCanda([efectiva])).not.toBeNull();
+	});
+
+	test("sin etapa de destino la oportunidad sale intacta", () => {
+		expect(conLaEtapaDeDestino(enAnalisis, null)).toBe(enAnalisis);
+		expect(conLaEtapaDeDestino(enAnalisis, undefined)).toBe(enAnalisis);
+	});
+
+	test("una perdida sigue sin candar, aunque el destino cruce", () => {
+		// Decisión de producto vigente: un crédito que no se dio no deja al
+		// cliente con la identidad fija para siempre.
+		const perdida = oportunidad(30, "lost", "Análisis");
+
+		expect(
+			etapaQueCanda([
+				conLaEtapaDeDestino(perdida, {
+					name: "Cierre de propuesta",
+					closurePercentage: 40,
+				}),
+			]),
+		).toBeNull();
+	});
+});
+
+/**
+ * 🔴 El bypass del candado por el lado de la LECTURA del historial.
+ *
+ * Una oportunidad creada directamente en el 40% y bajada al 30% deja UNA sola
+ * fila, `from=40, to=30`. Leyendo solo `to`, el máximo histórico daba 30, el
+ * candado se abría y se podía reemplazar el `leadId` (o el DPI) sobre un
+ * expediente con RENAP, buró y documentos ya atados a la identidad vieja.
+ *
+ * ⚠️ Por qué estas pruebas miran el SQL renderizado y no el resultado. El
+ * máximo histórico se calcula en Postgres —a propósito: traer el historial
+ * aparte sería un N+1 en el camino caliente de cada edición— y esta suite no
+ * tiene un Postgres contra el cual ejecutarlo. Lo que se afirma acá es sobre el
+ * texto que de verdad se le manda a la base (`toSQL()`), no sobre el fuente:
+ * que lee las dos puntas, que no pierde las filas sin origen, y que las dos
+ * formas de la señal leen el historial IGUAL. La prueba de efecto de este
+ * agujero —que la oportunidad no llega a nacer arriba del umbral— vive en
+ * `routers/crm-identidad-oportunidad.test.ts`.
+ */
+describe("el máximo histórico mira las DOS puntas de cada transición", () => {
+	// Se renderiza en el MISMO contexto que la consulta de producción
+	// (`obtenerOportunidadesParaCandadoDpi`): con el join a `sales_stages`, para
+	// que la correlación con la oportunidad de afuera salga calificada igual que
+	// en la consulta real.
+	const textoDelMaximo = base
+		.select({ maxHistoricoClosurePercentage: MAX_HISTORICO })
+		.from(opportunities)
+		.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
+		.toSQL()
+		.sql.replace(/\s+/g, " ")
+		.toLowerCase();
+	const textoDelExiste = base
+		.select({ x: sql`1` })
+		.from(opportunities)
+		.where(
+			existeOportunidadCandanteDelLead("8f14e45f-ceea-467a-9f07-6c0b6e0a1c33"),
+		)
+		.toSQL()
+		.sql.replace(/\s+/g, " ")
+		.toLowerCase();
+
+	/** La lectura del historial, tal como tiene que quedar en las dos formas. */
+	const LECTURA_DEL_HISTORIAL =
+		'from "opportunity_stage_history" as h inner join "sales_stages" as hs on hs.id = h.to_stage_id left join "sales_stages" as fs on fs.id = h.from_stage_id';
+	const ALTURA =
+		"greatest(hs.closure_percentage, coalesce(fs.closure_percentage, 0))";
+
+	test("el máximo toma la altura de la transición, no solo el destino", () => {
+		// Esto es lo que salva el caso `from=40, to=30`: sin `from_stage_id` en la
+		// cuenta, esa fila valía 30 y el candado se abría.
+		expect(textoDelMaximo).toContain(ALTURA);
+		expect(textoDelMaximo).toContain("h.from_stage_id");
+	});
+
+	test("la etapa de origen entra por LEFT JOIN, para no perder las filas viejas", () => {
+		// 🔴 `from_stage_id` es NULL en la primera transición de cada oportunidad.
+		// Con un inner join esas filas desaparecerían y el máximo pasaría de un
+		// número a NULL justo en las oportunidades más comunes: el candado se
+		// abriría MÁS, no menos.
+		expect(textoDelMaximo).toContain(
+			'left join "sales_stages" as fs on fs.id = h.from_stage_id',
+		);
+		expect(textoDelMaximo).not.toContain(
+			'inner join "sales_stages" as fs on fs.id = h.from_stage_id',
+		);
+		// Y la fila sin origen sigue valiendo lo que vale su destino.
+		expect(textoDelMaximo).toContain("coalesce(fs.closure_percentage, 0)");
+	});
+
+	test("las dos formas leen el historial con el MISMO texto", () => {
+		// No es una coincidencia: las dos comparten los mismos fragmentos. Este
+		// test existe para que nadie las vuelva a separar, que es exactamente como
+		// se abrió este agujero.
+		expect(textoDelMaximo).toContain(LECTURA_DEL_HISTORIAL);
+		expect(textoDelExiste).toContain(LECTURA_DEL_HISTORIAL);
+		expect(textoDelMaximo).toContain(ALTURA);
+		expect(textoDelExiste).toContain(ALTURA);
+	});
+
+	test("el máximo sigue correlacionado con la oportunidad de afuera", () => {
+		// Si se pierde la correlación, el máximo se calcula sobre TODO el
+		// historial de la base y el candado se cierra sobre todo el mundo.
+		expect(textoDelMaximo).toContain('h.opportunity_id = "opportunities"."id"');
+	});
+});
+
+/**
+ * La otra mitad de la misma regla, sobre el valor ya calculado: con el máximo
+ * corregido (40, por el `from` de la fila `from=40, to=30`), el candado cierra.
+ */
+describe("con la altura corregida, la oportunidad que nació arriba vuelve a candar", () => {
+	test("hoy en 30% pero con una transición que salió del 40%: canda", () => {
+		const resultado = resolverCandadoDpi({
+			dpiActual: DPI_ACTUAL,
+			dpiNuevo: DPI_NUEVO,
+			oportunidades: [
+				{
+					status: "open",
+					stageName: "Recepción de documentación",
+					closurePercentage: 30,
+					// Lo que devuelve la consulta arreglada para un historial de una
+					// sola fila `from=40, to=30`: greatest(30, 40) = 40.
+					maxHistoricoClosurePercentage: 40,
+				},
+			],
+			sujeto: "lead",
+		});
+
+		expect(resultado.bloqueado).toBe(true);
+		expect(resultado.message).toContain("ya pasó por el 40%");
+	});
+
+	test("la que de verdad nunca pasó del 30 sigue abierta", () => {
+		// Red de seguridad: `greatest(from, to)` no puede congelar a quien nunca
+		// estuvo arriba. Un historial 20 → 30 da greatest(20, 30) = 30, que no
+		// cruza el umbral.
+		expect(
+			resolverCandadoDpi({
+				dpiActual: DPI_ACTUAL,
+				dpiNuevo: DPI_NUEVO,
+				oportunidades: [
+					{
+						status: "open",
+						stageName: "Recepción de documentación",
+						closurePercentage: 30,
+						maxHistoricoClosurePercentage: 30,
+					},
+				],
+				sujeto: "lead",
+			}),
+		).toEqual({ bloqueado: false });
 	});
 });

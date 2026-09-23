@@ -51,7 +51,10 @@ export interface MoraTarjeta {
    * no mandó el dato (payload viejo): nunca se inventa un ritmo.
    */
   ritmo: string | null;
-  /** A cuánto llega en 30 días si nadie paga. `null` si ya no sube. */
+  /**
+   * A cuánto llega en 30 días si nadie paga. `null` solo cuando el techo del
+   * mes es cero, o sea cuando la mora de verdad ya no puede subir.
+   */
   techo: string | null;
   /** Por qué el monto no es `capital × % × cuotas`. Siempre se muestra. */
   explicacion: string;
@@ -77,13 +80,25 @@ export function construirMoraTarjeta(datos: MoraTarjetaDatos): MoraTarjeta {
   let ritmo: string | null = null;
   let techo: string | null = null;
   if (diario !== null) {
+    // El techo del mes y el incremento diario NO miden lo mismo: el diario mide
+    // solo MAÑANA, mientras que el máximo incluye además las cuotas que VENCEN
+    // dentro de los próximos 30 días. Por eso existe el caso `diario = 0` con
+    // `máximo > 0`: las cuotas ya vencidas topearon su cargo, pero la próxima
+    // cuota está por vencer y la mora va a volver a subir. El techo positivo
+    // vale en los dos casos, así que se calcula antes de elegir el texto.
+    if (maximo !== null && maximo > 0) {
+      techo = `Si no se paga, en ${DIAS_CARGO_COMPLETO} días llega a ${fmtQ(
+        monto + maximo
+      )}.`;
+    }
     if (diario > 0) {
       ritmo = `Sube ${fmtQ(diario)} por cada día que pase sin pagar.`;
-      if (maximo !== null && maximo > 0) {
-        techo = `Si no se paga, en ${DIAS_CARGO_COMPLETO} días llega a ${fmtQ(
-          monto + maximo
-        )}.`;
-      }
+    } else if (techo !== null) {
+      // "Ya no sube" acá sería falso: es "hoy no sube". Decir que nunca más va
+      // a subir manda al usuario a negociar sobre un número que mañana cambia.
+      ritmo =
+        `Hoy no sube: estas cuotas atrasadas llegaron a su cargo completo. ` +
+        `Vuelve a subir cuando venza la próxima cuota.`;
     } else {
       ritmo = `Ya no sube: estas cuotas atrasadas llegaron a su cargo completo.`;
     }

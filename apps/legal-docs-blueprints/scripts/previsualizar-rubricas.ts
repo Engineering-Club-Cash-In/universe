@@ -6,7 +6,7 @@
  * con un recuadro dibujado en cada una: las firmas reales en amarillo y las
  * rúbricas en azul, cada una con el nombre de quien firma ahí.
  *
- * Es para calibrar. La esquina y el margen no son los mismos en todos los
+ * Es para calibrar. La franja donde van no es la misma en todos los
  * contratos —depende de dónde tenga aire cada template—, y la única forma de
  * saber si una rúbrica cae sobre el texto es verla puesta. Mandar un documento
  * a WeeTrust para averiguarlo cuesta un documento de la cuota y le manda

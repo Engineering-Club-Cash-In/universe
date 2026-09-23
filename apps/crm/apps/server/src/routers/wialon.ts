@@ -207,6 +207,19 @@ function vinculoAutoVigente(
 }
 
 /**
+ * Nombre actual de la unidad en Wialon (flags 1: solo id/nm, liviano). Null si
+ * la unidad ya no existe o no es visible para la cuenta: en ese caso el
+ * vínculo automático tampoco puede considerarse vigente.
+ */
+async function nombreActualUnidad(
+	client: WialonClient,
+	unitId: number,
+): Promise<string | null> {
+	const detalle = await client.getUnitDetail(unitId, 1);
+	return detalle?.item?.nm ?? null;
+}
+
+/**
  * Suelta un vínculo auto:placa que dejó de valer. Condicionado a que siga
  * siendo ese mismo vínculo automático: si entretanto un supervisor lo cambió,
  * no se toca. Best-effort: si falla, la consulta sigue como sin vínculo.
@@ -430,16 +443,22 @@ async function creditosPorUnidad(
 		// corregida después) no cuenta: mismo criterio que getGpsVehiculo, que
 		// lo libera al consultar. Esa fila vuelve al pool de deducción.
 		const nombrePorUnidad = new Map(unidades.map((u) => [u.id, u.nm]));
-		const filas = [...filasOportunidad, ...filasContrato].map((fila) =>
-			fila.wialonUnitId != null &&
-			fila.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA &&
-			!vinculoAutoVigente(
-				fila.licensePlate,
-				nombrePorUnidad.get(fila.wialonUnitId) ?? null,
-			)
+		// Solo se invalida si el nombre actual de la unidad se conoce: con un
+		// filtro aplicado, la unidad vinculada puede no estar en esta página
+		// del catálogo y eso no dice nada sobre el vínculo.
+		const filas = [...filasOportunidad, ...filasContrato].map((fila) => {
+			if (
+				fila.wialonUnitId == null ||
+				fila.wialonVinculadoPor !== WIALON_VINCULO_AUTO_PLACA
+			) {
+				return fila;
+			}
+			const nombreActual = nombrePorUnidad.get(fila.wialonUnitId);
+			return nombreActual !== undefined &&
+				!vinculoAutoVigente(fila.licensePlate, nombreActual)
 				? { ...fila, wialonUnitId: null }
-				: fila,
-		);
+				: fila;
+		});
 
 		const agregar = (
 			unitId: number,
@@ -909,15 +928,20 @@ export const wialonRouter = {
 						);
 					};
 
-					// Un vínculo DEDUCIDO se basa en la placa: si la placa se corrigió
-					// después (updateVehicle no toca el vínculo), ya no vale y seguir
-					// usándolo mostraría la ubicación de otro carro. Se libera y se
-					// vuelve a deducir con la placa actual. Los vínculos que fijó un
-					// supervisor no se revalidan: esa decisión es explícita.
+					// Un vínculo DEDUCIDO se basa en que la placa del vehículo aparezca en
+					// el nombre de la unidad. Deja de valer si la placa se corrigió
+					// (updateVehicle no toca el vínculo) o si el GPS se pasó a otro carro y
+					// lo renombraron en Wialon. Por eso se compara contra el nombre ACTUAL
+					// en Wialon, no contra el guardado al vincular. Si ya no coincide, se
+					// libera y se vuelve a deducir. Los vínculos que fijó un supervisor no
+					// se revalidan: esa decisión es explícita.
 					if (
 						vehiculo.wialonUnitId &&
 						vehiculo.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA &&
-						!vinculoAutoVigente(vehiculo.licensePlate, vehiculo.wialonUnitName)
+						!vinculoAutoVigente(
+							vehiculo.licensePlate,
+							await nombreActualUnidad(client, vehiculo.wialonUnitId),
+						)
 					) {
 						await liberarVinculoAuto(input.vehicleId, vehiculo.wialonUnitId);
 						vehiculo = {

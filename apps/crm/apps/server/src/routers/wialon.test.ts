@@ -1057,6 +1057,53 @@ describe("wialonRouter", () => {
 			]);
 		});
 
+		it("con filtro, no invalida un vínculo automático cuya unidad no está en el resultado", async () => {
+			// El filtro trae solo la unidad 6 (mismo núcleo). La 5, vinculada al
+			// vehículo, no está en la lista: eso no la vuelve inválida, y el
+			// crédito no debe pasar a la unidad 6 "por placa".
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 1,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [{ id: 6, nm: "C-629BNC repuesto" }],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: 5,
+					wialonVinculadoPor: "auto:placa",
+					licensePlate: "C-629BNC",
+					numeroSifco: "01010214100009",
+				},
+			];
+			const res = await call(
+				wialonRouter.getWialonUnitsCatalog,
+				{ filterName: "repuesto" },
+				{
+					context: {
+						headers: new Headers(),
+						session: { user: { id: "admin-c", email: "a@example.com" } },
+						user: { id: "admin-c", email: "a@example.com", role: "admin" },
+						userId: "admin-c",
+						userRole: "admin",
+					} as unknown as Context,
+				},
+			);
+			expect(res.items[0]?.creditos).toEqual([]);
+		});
+
 		it("no cuenta como vinculado un vínculo automático que ya no coincide con la placa", async () => {
 			setWialonClient(
 				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
@@ -1596,17 +1643,24 @@ describe("wialonRouter", () => {
 				wialonVinculadoPor: "auto:placa",
 			};
 			setWialonClient(
-				clienteWialon(
-					() =>
-						new Response(
-							JSON.stringify({
-								totalItemsCount: 0,
-								indexFrom: 0,
-								indexTo: 0,
-								items: [],
-							}),
-							{ status: 200 },
-						),
+				clienteWialon((bodyStr) =>
+					bodyStr.includes("core%2Fsearch_item&")
+						? new Response(
+								JSON.stringify({
+									item: { id: 28554757, nm: "Bidgar Yatz - C-629BNC" },
+									flags: 1,
+								}),
+								{ status: 200 },
+							)
+						: new Response(
+								JSON.stringify({
+									totalItemsCount: 0,
+									indexFrom: 0,
+									indexTo: 0,
+									items: [],
+								}),
+								{ status: 200 },
+							),
 				),
 			);
 			const res = await call(
@@ -1625,6 +1679,54 @@ describe("wialonRouter", () => {
 				wialonUnitId: null,
 				wialonVinculadoPor: null,
 			});
+		});
+
+		it("libera un vínculo automático si la unidad se renombró en Wialon a otra placa", async () => {
+			// El GPS se pasó a otro carro y lo renombraron en Wialon: el nombre
+			// guardado al vincular todavía coincide, el actual ya no.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					if (bodyStr.includes("core%2Fsearch_item&")) {
+						return new Response(
+							JSON.stringify({
+								item: { id: 28554757, nm: "Otro Cliente - P-111AAA" },
+								flags: 1,
+							}),
+							{ status: 200 },
+						);
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 0,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("sin_vinculo");
+			expect(updatesVehiculo[0]).toMatchObject({ wialonUnitId: null });
+			// No se pidió la telemetría de la unidad vieja.
+			expect(svcs).not.toContain("unit/calc_last");
 		});
 
 		it("no revalida contra la placa un vínculo que fijó un supervisor", async () => {
@@ -1675,7 +1777,10 @@ describe("wialonRouter", () => {
 					bodyStr.includes("unit%2Fcalc_last")
 						? new Response(JSON.stringify([{ i: 999 }]), { status: 200 })
 						: new Response(
-								JSON.stringify({ item: { id: 999, nm: "u" }, flags: 1025 }),
+								JSON.stringify({
+									item: { id: 999, nm: "Bidgar Yatz - C-629BNC" },
+									flags: 1025,
+								}),
 								{ status: 200 },
 							),
 				),

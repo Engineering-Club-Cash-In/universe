@@ -41,8 +41,20 @@ function errorMessage(error: unknown): string {
 function nombreDeDocumento(
   nombrePersona: string | undefined,
   descripcion: string,
+  /**
+   * El identificador técnico del tipo. Las fotos de generación guardadas antes
+   * de separar los nombres traen el prefijo como `<nombre>_<tipo>`, y al
+   * regenerarlas el tipo se colaba en lo que lee el cliente: compararlo con la
+   * descripción no lo detecta ("pagare_unico_libre_protesto" no contiene
+   * "Pagaré único libre de protesto", por las tildes y el "de").
+   */
+  contractType?: string,
 ): string {
-  const persona = (nombrePersona ?? '')
+  const sinTipo =
+    contractType && nombrePersona
+      ? nombrePersona.split(contractType).join(' ')
+      : nombrePersona;
+  const persona = (sinTipo ?? '')
     .replace(/\.pdf$/i, '')
     .replace(/[_]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -855,6 +867,7 @@ export class ContractGeneratorService {
       const documentName = nombreDeDocumento(
         options.documentName?.trim() || data.client_name || prefix,
         config.description,
+        contractType,
       );
 
       // 9. Asegurar que el directorio de salida existe
@@ -1211,6 +1224,7 @@ export class ContractGeneratorService {
     const documentName = nombreDeDocumento(
       options.documentName?.trim() || options.filenamePrefix,
       descripcion,
+      contractType,
     );
 
     const respuestaBase = {

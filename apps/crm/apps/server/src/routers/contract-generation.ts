@@ -91,6 +91,16 @@ const LEGAL_DOCS_API_URL =
  * Los contratos que se firman en papel no llevan firmantes: el entregable es el
  * PDF, y mandar correos de gente que no va a recibir ningún link sólo ensucia.
  */
+/**
+ * El nombre del titular, para el nombre del documento en WeeTrust. Va el real y
+ * no el de prueba: en modo prueba sólo se redirigen los correos.
+ */
+function nombreDelTitular(
+	signers: ContractSigner[] | undefined,
+): string | undefined {
+	return signers?.find((s) => s.role === "TITULAR")?.name;
+}
+
 function firmantesDelContrato(
 	contractType: string,
 	signersDelFront: ContractSigner[] | undefined,
@@ -1212,23 +1222,27 @@ export const contractGenerationRouter = {
 
 			try {
 				// Derivar isPlural automáticamente desde deudoresAdicionales
-				const contractsWithPlural = input.contracts.map((contract) => ({
-					...contract,
-					signers: firmantesDelContrato(
+				const contractsWithPlural = input.contracts.map((contract) => {
+					const signers = firmantesDelContrato(
 						contract.contractType,
 						contract.signers,
 						contract,
-					),
-					// Ya van convertidos en `signers`.
-					emails: undefined,
-					observers: esFirmaFisica(contract.contractType)
-						? undefined
-						: CONTRATOS_OBSERVADORES,
-					options: {
-						...contract.options,
-						isPlural: (contract.data.deudoresAdicionales?.length ?? 0) > 0,
-					},
-				}));
+					);
+					return {
+						...contract,
+						signers,
+						// Ya van convertidos en `signers`.
+						emails: undefined,
+						observers: esFirmaFisica(contract.contractType)
+							? undefined
+							: CONTRATOS_OBSERVADORES,
+						options: {
+							...contract.options,
+							isPlural: (contract.data.deudoresAdicionales?.length ?? 0) > 0,
+							documentName: nombreDelTitular(signers),
+						},
+					};
+				});
 
 				// Generar con el candado de la oportunidad tomado y la etapa ya
 				// revisada: WeeTrust manda las invitaciones apenas se crea cada
@@ -1807,16 +1821,17 @@ export const contractGenerationRouter = {
 							Number.parseInt(anioVencShort),
 						);
 
+					// Los snapshots viejos sólo guardaron `emails`: se convierten a
+					// firmantes con rol para que pasen por el mismo camino.
+					const signers = firmantesDelContrato(
+						contract.contractType,
+						contract.signers,
+						{ emails: contract.emails, data: newData },
+					);
 					return {
 						...contract,
 						data: newData,
-						// Los snapshots viejos sólo guardaron `emails`: se convierten a
-						// firmantes con rol para que pasen por el mismo camino.
-						signers: firmantesDelContrato(
-							contract.contractType,
-							contract.signers,
-							{ emails: contract.emails, data: newData },
-						),
+						signers,
 						emails: undefined,
 						observers: esFirmaFisica(contract.contractType)
 							? undefined
@@ -1824,6 +1839,10 @@ export const contractGenerationRouter = {
 						options: {
 							...contract.options,
 							isPlural: (newData.deudoresAdicionales?.length ?? 0) > 0,
+							// Las fotos viejas guardaron el prefijo como `<nombre>_<tipo>`:
+							// sin el nombre explícito, el tipo técnico se colaba en lo que
+							// lee el cliente en WeeTrust.
+							documentName: nombreDelTitular(signers),
 						},
 					};
 				});

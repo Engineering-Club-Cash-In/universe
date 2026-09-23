@@ -368,7 +368,7 @@ export type AuditMeta = {
 };
 
 /** Rol del usuario que inició la suplantación. `null` si no se puede resolver. */
-async function resolveUserRole(userId: string): Promise<string | null> {
+export async function resolveUserRole(userId: string): Promise<string | null> {
 	try {
 		const [fila] = await db
 			.select({ role: user.role })

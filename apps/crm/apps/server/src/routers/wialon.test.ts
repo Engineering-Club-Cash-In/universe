@@ -1298,6 +1298,50 @@ describe("wialonRouter", () => {
 			]);
 		});
 
+		it("no cuenta como vinculado un vínculo automático cuya placa hoy es ambigua", async () => {
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 2,
+							indexFrom: 0,
+							indexTo: 1,
+							items: [
+								{ id: 5, nm: "C-629BNC" },
+								{ id: 6, nm: "C-629BNC repuesto" },
+							],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: 5,
+					wialonVinculadoPor: "auto:placa",
+					licensePlate: "C-629BNC",
+					numeroSifco: "01010214100009",
+				},
+			];
+			const res = await call(wialonRouter.getWialonUnitsCatalog, undefined, {
+				context: {
+					headers: new Headers(),
+					session: { user: { id: "admin-c", email: "a@example.com" } },
+					user: { id: "admin-c", email: "a@example.com", role: "admin" },
+					userId: "admin-c",
+					userRole: "admin",
+				} as unknown as Context,
+			});
+			// Ni vinculado (placa ambigua) ni deducido (dos unidades).
+			expect(res.items.map((u) => u.creditos)).toEqual([[], []]);
+		});
+
 		it("no cuenta como vinculado un vínculo automático que ya no coincide con la placa", async () => {
 			setWialonClient(
 				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
@@ -2119,10 +2163,13 @@ describe("wialonRouter", () => {
 			setWialonClient(
 				clienteWialon((bodyStr) => {
 					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					// Catálogo actual: ninguna unidad con la placa P-999ZZZ.
 					return new Response(
 						JSON.stringify({
-							item: { id: 28554757, nm: "Bidgar Yatz - C-629BNC" },
-							flags: 1,
+							totalItemsCount: 0,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [],
 						}),
 						{ status: 200 },
 					);
@@ -2293,6 +2340,50 @@ describe("wialonRouter", () => {
 			expect(updatesVehiculo).toHaveLength(0);
 		});
 
+		it("libera un vínculo automático si aparece otra unidad con la misma placa (ahora ambiguo)", async () => {
+			// Al vincular la placa era única; hoy hay dos unidades que coinciden:
+			// la deducción diría "ambiguo", así que el vínculo guardado no vale.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 999,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 2,
+							indexFrom: 0,
+							indexTo: 1,
+							items: [
+								{ id: 999, nm: "Bidgar Yatz - C-629BNC" },
+								{ id: 1000, nm: "C-629BNC repuesto" },
+							],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("sin_vinculo");
+			if (res.estado !== "sin_vinculo") throw new Error("estado inesperado");
+			expect(res.motivo).toBe("ambiguo");
+			expect(res.candidatos.map((c) => c.id)).toEqual([999, 1000]);
+			expect(updatesVehiculo[0]).toMatchObject({ wialonUnitId: null });
+			expect(svcs).not.toContain("unit/calc_last");
+		});
+
 		it("no revalida contra la placa un vínculo que fijó un supervisor", async () => {
 			filaVehiculoMock = {
 				licensePlate: "P-999ZZZ",
@@ -2337,17 +2428,29 @@ describe("wialonRouter", () => {
 				wialonVinculadoPor: "auto:placa",
 			};
 			setWialonClient(
-				clienteWialon((bodyStr) =>
-					bodyStr.includes("unit%2Fcalc_last")
-						? new Response(JSON.stringify([{ i: 999 }]), { status: 200 })
-						: new Response(
-								JSON.stringify({
-									item: { id: 999, nm: "Bidgar Yatz - C-629BNC" },
-									flags: 1025,
-								}),
-								{ status: 200 },
-							),
-				),
+				clienteWialon((bodyStr) => {
+					if (bodyStr.includes("core%2Fsearch_items")) {
+						return new Response(
+							JSON.stringify({
+								totalItemsCount: 1,
+								indexFrom: 0,
+								indexTo: 0,
+								items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+							}),
+							{ status: 200 },
+						);
+					}
+					if (bodyStr.includes("unit%2Fcalc_last")) {
+						return new Response(JSON.stringify([{ i: 999 }]), { status: 200 });
+					}
+					return new Response(
+						JSON.stringify({
+							item: { id: 999, nm: "Bidgar Yatz - C-629BNC" },
+							flags: 1025,
+						}),
+						{ status: 200 },
+					);
+				}),
 			);
 
 			const res = await call(

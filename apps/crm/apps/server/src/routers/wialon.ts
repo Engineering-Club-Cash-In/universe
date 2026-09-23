@@ -284,6 +284,29 @@ async function nombreActualUnidad(
 }
 
 /**
+ * ¿Un vínculo auto:placa sigue siendo lo que la deducción elegiría HOY?
+ * Se repite la misma deducción (buscar por el núcleo en el catálogo actual +
+ * matchUnidadPorPlaca) y la unidad guardada tiene que ser el ÚNICO resultado.
+ * Cubre: placa corregida en el CRM, unidad renombrada o pasada a otro carro,
+ * unidad borrada, y una unidad NUEVA con la misma placa (antes la deducción
+ * era única y ahora sería ambigua). Errores de Wialon se propagan: no dicen
+ * nada sobre el vínculo y no deben liberarlo.
+ */
+async function vinculoAutoSigueUnico(
+	client: WialonClient,
+	placa: string | null,
+	unitId: number,
+): Promise<boolean> {
+	const nucleo = extraerNucleoPlaca(placa);
+	if (!placa || !nucleo) return false;
+	const catalogo = await client.searchUnits({
+		filterName: nucleo.digitos,
+		flags: 1,
+	});
+	return matchUnidadPorPlaca(placa, catalogo.items).unidad?.id === unitId;
+}
+
+/**
  * Suelta un vínculo auto:placa que dejó de valer. Condicionado a que siga
  * siendo ese mismo vínculo automático: si entretanto un supervisor lo cambió,
  * no se toca. Devuelve si pudo escribir: si falla, el vínculo vencido sigue en
@@ -512,18 +535,24 @@ async function creditosPorUnidad(
 					),
 				),
 		]);
-		// Un vínculo auto:placa que ya no coincide con la placa actual (placa
-		// corregida después) no cuenta: mismo criterio que getGpsVehiculo, que
-		// lo libera al consultar. Esa fila vuelve al pool de deducción.
-		// Con el catálogo completo (siempre que se pudo obtener) se conoce el
-		// nombre actual de cualquier unidad vinculada, aunque el filtro la deje
-		// afuera; sin él, solo las del resultado (criterio conservador).
+		// Unidades por núcleo en el catálogo COMPLETO: una placa con más de una
+		// unidad es ambigua, igual que en la ficha (matchUnidadPorPlaca).
+		const unidadesPorNucleo = new Map<string, number>();
+		for (const unidad of catalogoCompleto ?? []) {
+			const nucleo = extraerNucleoDeNombreUnidad(unidad.nm);
+			if (!nucleo) continue;
+			const clave = nucleo.digitos + nucleo.letras;
+			unidadesPorNucleo.set(clave, (unidadesPorNucleo.get(clave) ?? 0) + 1);
+		}
+
+		// Un vínculo auto:placa cuenta solo si la deducción lo elegiría HOY:
+		// el nombre actual coincide con la placa y la placa no es ambigua. Con
+		// el catálogo completo (siempre que se pudo obtener) se conoce el nombre
+		// de cualquier unidad vinculada aunque el filtro la deje afuera; sin él,
+		// solo las del resultado, y no se invalida lo que no se ve (conservador).
 		const nombrePorUnidad = new Map(
 			(catalogoCompleto ?? unidades).map((u) => [u.id, u.nm]),
 		);
-		// Solo se invalida si el nombre actual de la unidad se conoce: con un
-		// filtro aplicado, la unidad vinculada puede no estar en esta página
-		// del catálogo y eso no dice nada sobre el vínculo.
 		const filas = [...filasOportunidad, ...filasContrato].map((fila) => {
 			if (
 				fila.wialonUnitId == null ||
@@ -532,8 +561,13 @@ async function creditosPorUnidad(
 				return fila;
 			}
 			const nombreActual = nombrePorUnidad.get(fila.wialonUnitId);
-			return nombreActual !== undefined &&
-				!vinculoAutoVigente(fila.licensePlate, nombreActual)
+			if (nombreActual === undefined) return fila;
+			const nucleo = extraerNucleoPlaca(fila.licensePlate);
+			const ambiguo =
+				catalogoCompleto != null &&
+				nucleo != null &&
+				(unidadesPorNucleo.get(nucleo.digitos + nucleo.letras) ?? 0) > 1;
+			return !vinculoAutoVigente(fila.licensePlate, nombreActual) || ambiguo
 				? { ...fila, wialonUnitId: null }
 				: fila;
 		});
@@ -570,16 +604,8 @@ async function creditosPorUnidad(
 		// Mismo criterio que la ficha (matchUnidadPorPlaca → "ambiguo"): si
 		// más de una unidad del catálogo COMPLETO tiene el mismo núcleo, no se
 		// deduce ninguna — mostrar el SIFCO en ambas sugeriría que las dos son
-		// el carro del crédito. Se cuenta sobre el catálogo sin filtro porque
-		// con un filtro la otra unidad puede no estar en la página.
-		const unidadesPorNucleo = new Map<string, number>();
-		for (const unidad of catalogoCompleto ?? []) {
-			const nucleo = extraerNucleoDeNombreUnidad(unidad.nm);
-			if (!nucleo) continue;
-			const clave = nucleo.digitos + nucleo.letras;
-			unidadesPorNucleo.set(clave, (unidadesPorNucleo.get(clave) ?? 0) + 1);
-		}
-
+		// el carro del crédito. El conteo (unidadesPorNucleo, arriba) es sobre
+		// el catálogo sin filtro: con filtro la otra unidad puede no verse.
 		for (const unidad of unidades) {
 			if (resultado.has(unidad.id)) continue;
 			const nucleo = extraerNucleoDeNombreUnidad(unidad.nm);
@@ -1070,10 +1096,11 @@ export const wialonRouter = {
 					if (
 						vehiculo.wialonUnitId &&
 						vehiculo.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA &&
-						!vinculoAutoVigente(
+						!(await vinculoAutoSigueUnico(
+							client,
 							vehiculo.licensePlate,
-							await nombreActualUnidad(client, vehiculo.wialonUnitId),
-						)
+							vehiculo.wialonUnitId,
+						))
 					) {
 						const liberado = await liberarVinculoAuto(
 							input.vehicleId,

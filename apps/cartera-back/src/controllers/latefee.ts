@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, ilike, inArray, sql, sum } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, notInArray, sql, sum } from "drizzle-orm";
 import { client, db } from "../database";
 import { asesores, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, platform_users, usuarios } from "../database/db/schema";
 import Big from "big.js";
@@ -42,6 +42,15 @@ type MoraEventoOrigen =
   | "CONDONACION_MASIVA";
 
 export const STATUS_EXCLUIDOS_MORA = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION", "CAIDO"];
+
+/**
+ * La MISMA lista, tipada como la columna, para poder usarla dentro de una
+ * condición SQL (`notInArray`). Se declara acá al lado y no se duplica: si
+ * alguien agrega un estado arriba, la condición de los UPDATE lo hereda sola.
+ */
+const STATUS_EXCLUIDOS_MORA_SQL = STATUS_EXCLUIDOS_MORA as Array<
+  (typeof creditos.$inferSelect)["statusCredit"]
+>;
 
 /**
  * Fecha de CALENDARIO (año/mes/día) de un vencimiento, como número comparable
@@ -1539,6 +1548,42 @@ export async function procesarMoras() {
 
       if (!moraActual) {
         // CREACION
+        //
+        // 🔒 El cambio de status va PRIMERO y es CONDICIONAL: hace de candado y
+        // de escritura a la vez. El cron leyó el estado del crédito al arrancar
+        // (paso 1) y escribe acá, al final del recorrido; si en el medio se
+        // confirmó un convenio, la foto vieja decía "moroso sin mora" y el cron
+        // le insertaba una mora NUEVA a un crédito EN_CONVENIO y lo marcaba
+        // MOROSO. El índice único parcial no lo frena: justamente NO hay mora
+        // activa que chocar. Con `notInArray` el UPDATE no matchea ningún
+        // estado de STATUS_EXCLUIDOS_MORA (EN_CONVENIO, INCOBRABLE, CANCELADO,
+        // PENDIENTE_CANCELACION, CAIDO) y `.returning()` nos dice si el crédito
+        // sigue siendo elegible: cero filas = ya no lo es → no se inserta mora,
+        // no se escribe historial y el crédito cae en los omitidos.
+        //
+        // Se eligió el UPDATE condicional y no un SELECT de re-verificación
+        // porque el SELECT deja abierto el hueco entre leer y escribir — que es
+        // exactamente el defecto que se está cerrando — mientras que acá la
+        // condición se evalúa dentro del mismo write. (`statusCredit` es NOT
+        // NULL en el esquema, así que el `NOT IN` nunca cae en el NULL de SQL.)
+        const marcadoMoroso = await db
+          .update(creditos)
+          .set({ statusCredit: "MOROSO" })
+          .where(
+            and(
+              eq(creditos.credito_id, creditoId),
+              notInArray(creditos.statusCredit, STATUS_EXCLUIDOS_MORA_SQL),
+            ),
+          )
+          .returning({ credito_id: creditos.credito_id });
+
+        if (marcadoMoroso.length === 0) {
+          // Convenio (u otra ruta) cambió el estado a media corrida: este
+          // crédito ya no lleva mora. No se crea nada.
+          skippedInternally++;
+          continue;
+        }
+
         let insertada;
         try {
           [insertada] = await db
@@ -1554,17 +1599,14 @@ export async function procesarMoras() {
         } catch (e: any) {
           // Índice único parcial moras_credito_uq_activa: otra corrida concurrente
           // ya creó la mora activa de este crédito → omitir (no duplicar).
+          // El MOROSO que acabamos de dejar sigue siendo el estado correcto:
+          // hay una mora activa sobre un crédito que no estaba excluido.
           if (e?.code === "23505") {
             skippedInternally++;
             continue;
           }
           throw e;
         }
-
-        await db
-          .update(creditos)
-          .set({ statusCredit: "MOROSO" })
-          .where(eq(creditos.credito_id, creditoId));
 
         await registrarHistorialMora({
           credito_id: creditoId,
@@ -1591,19 +1633,51 @@ export async function procesarMoras() {
         }
 
         // RECALCULO
-        await db
+        //
+        // 🔒 CONDICIONAL sobre `activa=true` + `.returning()`, igual que las
+        // tres rutas de desactivación del módulo. El cron leyó esta mora activa
+        // al arrancar; si un convenio la apagó en el medio, la fila sigue ahí
+        // con activa=false y un update por `mora_id` solo la REVIVIRÍA con el
+        // monto recalculado — deshaciendo el perdón del convenio y anotando un
+        // RECALCULO después del DESACTIVACION. (Antes esto no se veía porque el
+        // convenio BORRABA la fila y el update no encontraba nada que pisar.)
+        // Cero filas = otra ruta ya la apagó: no se toca el status, no se
+        // escribe historial y el crédito cae en los omitidos — no se cuenta un
+        // recálculo que no ocurrió.
+        const recalculadasFilas = await db
           .update(moras_credito)
           .set({
             monto_mora: moraNuevaStr,
             cuotas_atrasadas: cuotasAtrasadas,
             updated_at: new Date(),
           })
-          .where(eq(moras_credito.mora_id, moraActual.mora_id));
+          .where(
+            and(
+              eq(moras_credito.mora_id, moraActual.mora_id),
+              eq(moras_credito.activa, true),
+            ),
+          )
+          .returning({ mora_id: moras_credito.mora_id });
 
+        if (recalculadasFilas.length === 0) {
+          skippedInternally++;
+          continue;
+        }
+
+        // Subir a MOROSO tampoco puede pisar un estado excluido: es el mismo
+        // cuidado que ya tienen los UPDATE que BAJAN a ACTIVO (condicionados a
+        // MOROSO para no des-castigar), en el sentido contrario. Sin la
+        // condición, un crédito que pasó a EN_CONVENIO/INCOBRABLE a media
+        // corrida volvía a MOROSO por la foto vieja del paso 1.
         await db
           .update(creditos)
           .set({ statusCredit: "MOROSO" })
-          .where(eq(creditos.credito_id, creditoId));
+          .where(
+            and(
+              eq(creditos.credito_id, creditoId),
+              notInArray(creditos.statusCredit, STATUS_EXCLUIDOS_MORA_SQL),
+            ),
+          );
 
         await registrarHistorialMora({
           credito_id: creditoId,

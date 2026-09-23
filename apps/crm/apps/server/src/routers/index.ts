@@ -276,10 +276,8 @@ export const legalAppRouter = {
 
 	// Estado de firma y reintentos, para no tener que entrar a WeeTrust
 	getContractSigningStatus: legalContractsRouter.getContractSigningStatus,
-	refreshContractSigningLinks:
-		legalContractsRouter.refreshContractSigningLinks,
-	resendContractSigningEmails:
-		legalContractsRouter.resendContractSigningEmails,
+	refreshContractSigningLinks: legalContractsRouter.refreshContractSigningLinks,
+	resendContractSigningEmails: legalContractsRouter.resendContractSigningEmails,
 
 	// Contract Generation routes (Generación automática de contratos)
 	getContractTypes: contractGenerationRouter.getContractTypes,
@@ -295,6 +293,8 @@ export const legalAppRouter = {
 	getGeneratedContracts: contractGenerationRouter.getGeneratedContracts,
 	getGenerationSnapshot: contractGenerationRouter.getGenerationSnapshot,
 	regenerateContracts: contractGenerationRouter.regenerateContracts,
+	// Subida manual de jurídico: el PDF lo arma una persona, la firma va igual
+	uploadContractForSigning: contractGenerationRouter.uploadContractForSigning,
 };
 
 /**

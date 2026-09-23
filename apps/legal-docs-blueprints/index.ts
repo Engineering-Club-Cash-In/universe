@@ -330,6 +330,74 @@ const app = new Elysia()
   }
 })
 
+  /**
+   * POST /contracts/upload-for-signing
+   *
+   * Manda a firmar un PDF que jurídico subió a mano, en vez de generarlo desde
+   * el template. El tipo de contrato tiene que ser uno de los mapeados: así las
+   * líneas de firma están donde el layout dice y se reparten por rol igual que
+   * en el camino automático.
+   *
+   * Si el PDF no trae esas líneas, no se manda nada a firmar y se devuelve el
+   * error: un documento que no es el contrato que dice ser se detecta acá y no
+   * cuando alguien vaya a firmarlo.
+   *
+   * Body: { contractType, pdfBase64, filenamePrefix?, signers?, observers? }
+   */
+  .post('/contracts/upload-for-signing', async ({ body, set }) => {
+    try {
+      const { contractType, pdfBase64, filenamePrefix, signers, observers } =
+        body as {
+          contractType?: ContractType;
+          pdfBase64?: string;
+          filenamePrefix?: string;
+          signers?: GenerateContractRequest['signers'];
+          observers?: string[];
+        };
+
+      if (!contractType || !Object.values(ContractType).includes(contractType)) {
+        set.status = 400;
+        return {
+          success: false,
+          error: `Tipo de contrato inválido: ${contractType}`,
+          availableTypes: Object.values(ContractType)
+        };
+      }
+
+      if (!pdfBase64) {
+        set.status = 400;
+        return { success: false, error: 'El campo "pdfBase64" es requerido' };
+      }
+
+      const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+
+      // Un base64 que no era un PDF llegaba hasta WeeTrust y fallaba allá con un
+      // mensaje que no dice nada.
+      if (pdfBuffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
+        set.status = 400;
+        return { success: false, error: 'El archivo subido no es un PDF' };
+      }
+
+      const result = await contractGenerator.signExistingPdf(
+        contractType,
+        pdfBuffer,
+        { filenamePrefix, signers, observers }
+      );
+
+      set.status = result.success ? 200 : 400;
+      return result;
+
+    } catch (error: any) {
+      console.error('Error en /contracts/upload-for-signing:', error);
+      set.status = 500;
+      return {
+        success: false,
+        error: 'Error interno del servidor',
+        message: error.message
+      };
+    }
+  })
+
   // ===== ESTADO Y REINTENTOS DE FIRMA =====
 
   /**
@@ -430,6 +498,7 @@ const app = new Elysia()
       generateContract: 'POST /generatecontrato',
       generateBatch: 'POST /contracts/batch',
       generateByType: 'POST /contracts/:type',
+      uploadForSigning: 'POST /contracts/upload-for-signing',
       signingStatus: 'GET /contracts/signing-status/:documentID',
       refreshSigningLinks: 'PUT /contracts/refresh-signing-links/:documentID',
       resendSigningEmail: 'PUT /contracts/resend-email/:documentID',

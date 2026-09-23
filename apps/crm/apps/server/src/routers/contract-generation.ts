@@ -6,7 +6,7 @@ import { ORPCError } from "@orpc/server";
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { leads, opportunities, salesStages } from "../db/schema/crm";
+import { coDebtors, leads, opportunities, salesStages } from "../db/schema/crm";
 import {
 	contractGenerationSnapshots,
 	contractSignatories,
@@ -15,18 +15,22 @@ import {
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
 import {
-	filasDeFirmantes,
-	type FirmanteEnviado,
-	linksPorRol,
-} from "../lib/contract-signatories";
-import { esFirmaFisica, getSignatureMode } from "../lib/contract-signature-mode";
-import { eqDpi } from "../lib/dpi-lookup";
-import { juridicoProcedure } from "../lib/orpc";
-import { getFileUrlWithBucketInKey } from "../lib/storage";
-import {
 	LEGACY_VENDOR_GENDER_REQUIRED_MESSAGE,
 	resolveLegacyContractGender,
 } from "../lib/contract-generation-gender";
+import {
+	type FirmanteEnviado,
+	filasDeFirmantes,
+	linksPorRol,
+} from "../lib/contract-signatories";
+import {
+	esFirmaFisica,
+	getSignatureMode,
+} from "../lib/contract-signature-mode";
+import { esContratoVentaMapeado } from "../lib/contratos-venta";
+import { eqDpi } from "../lib/dpi-lookup";
+import { juridicoProcedure } from "../lib/orpc";
+import { getFileUrlWithBucketInKey } from "../lib/storage";
 import {
 	enrichLeadFromRenap,
 	mapOpportunityToContractData,
@@ -38,6 +42,7 @@ import {
 	getDocumentsByDpi,
 	getDocumentTypes,
 	motivoDeFalla,
+	subirContratoParaFirma,
 } from "../services/legal-docs-api";
 
 // URL de la API de generación de contratos (legal-docs-blueprints)
@@ -143,6 +148,68 @@ function firmaDelGenerador(apiResponse: unknown): {
 	};
 }
 
+/**
+ * Quiénes firman los contratos de una oportunidad, según lo que hay en la base.
+ *
+ * El wizard arma esta lista en el navegador con los datos que ya tiene a mano;
+ * para la subida manual se arma acá, porque lo único que manda jurídico es el
+ * archivo y el tipo de contrato.
+ *
+ * Los cofirmantes sin correo se omiten: no hay a dónde mandarles el link, y
+ * meterlos igual hace que WeeTrust rechace el envío entero.
+ */
+async function firmantesDeLaOportunidad(
+	opportunityId: string,
+): Promise<{ leadId: string; signers: ContractSigner[] }> {
+	const [datos] = await db
+		.select({ opportunity: opportunities, lead: leads })
+		.from(opportunities)
+		.innerJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+
+	if (!datos) {
+		throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
+	}
+
+	const { lead } = datos;
+	const nombreTitular = [
+		lead.firstName,
+		lead.middleName,
+		lead.lastName,
+		lead.secondLastName,
+	]
+		.filter(Boolean)
+		.join(" ");
+
+	const signers: ContractSigner[] = [];
+	if (lead.email) {
+		signers.push({
+			role: "TITULAR",
+			email: lead.email,
+			name: nombreTitular || lead.email,
+			...(lead.dpi ? { dpi: lead.dpi } : {}),
+		});
+	}
+
+	const cofirmantes = await db
+		.select()
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId));
+
+	for (const cd of cofirmantes) {
+		if (!cd.email) continue;
+		signers.push({
+			role: "COFIRMANTE",
+			email: cd.email,
+			name: cd.fullName || cd.email,
+			...(cd.dpi ? { dpi: cd.dpi } : {}),
+		});
+	}
+
+	return { leadId: lead.id, signers };
+}
+
 /** Firmante tal como lo manda el front. */
 const signerSchema = z.object({
 	role: z.enum(["TITULAR", "COFIRMANTE", "REP_LEGAL", "VENDEDOR"]),
@@ -217,9 +284,7 @@ export const contractGenerationRouter = {
 					: await db
 							.select({ gender: leads.gender })
 							.from(leads)
-							.where(
-								and(eqDpi(leads.dpi, input.dpi), isNotNull(leads.gender)),
-							)
+							.where(and(eqDpi(leads.dpi, input.dpi), isNotNull(leads.gender)))
 							.limit(1);
 
 				const gender = leadDeLaOportunidad?.gender ?? leadPorDpi?.gender;
@@ -750,8 +815,8 @@ export const contractGenerationRouter = {
 								}),
 							),
 							signers: z.array(signerSchema).optional(),
-						// Camino viejo: se reparte por índice y con cofirmantes cruza los links.
-						emails: z.array(z.string()).optional(),
+							// Camino viejo: se reparte por índice y con cofirmantes cruza los links.
+							emails: z.array(z.string()).optional(),
 							options: z.object({
 								gender: z.enum(["male", "female"]),
 								generatePdf: z.boolean(),
@@ -953,7 +1018,8 @@ export const contractGenerationRouter = {
 					// Obligatorio hacerlo aquí: más abajo se sobreescriben mesTexto/ano
 					// con la fecha nueva, y compararlos después siempre daba "no cambió".
 					const mesContratoOriginal = monthNames.findIndex(
-						(m) => m === (newData.mesTexto as string | undefined)?.toLowerCase(),
+						(m) =>
+							m === (newData.mesTexto as string | undefined)?.toLowerCase(),
 					);
 					const anioContratoOriginal = normalizarAnio(newData.ano);
 
@@ -1083,8 +1149,7 @@ export const contractGenerationRouter = {
 							: CONTRATOS_OBSERVADORES,
 						options: {
 							...contract.options,
-							isPlural:
-								(newData.deudoresAdicionales?.length ?? 0) > 0,
+							isPlural: (newData.deudoresAdicionales?.length ?? 0) > 0,
 						},
 					};
 				});
@@ -1189,6 +1254,124 @@ export const contractGenerationRouter = {
 							: "Error al regenerar contratos",
 				});
 			}
+		}),
+
+	/**
+	 * Sube un contrato que jurídico armó por fuera y lo manda a firmar.
+	 *
+	 * El tipo tiene que ser uno de los que tenemos mapeados: así el generador
+	 * ubica las líneas de firma por el layout de ese tipo y reparte por rol
+	 * igual que en el camino automático. Si el PDF no trae esas líneas no se
+	 * manda nada a firmar; es preferible a colocar las firmas a ojo.
+	 *
+	 * Los firmantes salen de la oportunidad (titular + cofirmantes con correo) y
+	 * el representante legal lo agrega el servidor, como en el wizard.
+	 */
+	uploadContractForSigning: juridicoProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				contractType: z.string().min(1),
+				contractName: z.string().min(1).optional(),
+				filename: z.string().min(1),
+				/** PDF en base64, sin el prefijo `data:`. */
+				pdfBase64: z.string().min(1),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Sólo los tipos con layout auditado: el generador ubica las líneas de
+			// firma por ese layout, y sin él no hay forma de repartir por rol.
+			if (!esContratoVentaMapeado(input.contractType)) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Ese tipo de contrato no está mapeado para firma por rol. Sólo se pueden subir los contratos de venta.",
+				});
+			}
+
+			// ~15 MB de PDF. Un contrato pesa bastante menos; lo que pasa de ahí es
+			// un escaneo sin comprimir y conviene frenarlo antes de pasearlo.
+			const bytes = Math.floor((input.pdfBase64.length * 3) / 4);
+			if (bytes > 15 * 1024 * 1024) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El PDF pesa más de 15 MB. Comprimilo antes de subirlo.",
+				});
+			}
+
+			const { leadId, signers } = await firmantesDeLaOportunidad(
+				input.opportunityId,
+			);
+
+			const firmantes = firmantesDelContrato(input.contractType, signers);
+
+			if (
+				!esFirmaFisica(input.contractType) &&
+				(!firmantes || firmantes.length === 0)
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"La oportunidad no tiene ningún firmante con correo. Cargá el correo del cliente antes de subir el contrato.",
+				});
+			}
+
+			const resultado = await subirContratoParaFirma({
+				contractType: input.contractType,
+				pdfBase64: input.pdfBase64,
+				filenamePrefix: input.filename.replace(/\.pdf$/i, ""),
+				signers: firmantes,
+				observers: esFirmaFisica(input.contractType)
+					? undefined
+					: CONTRATOS_OBSERVADORES,
+			});
+
+			const falla = motivoDeFalla(resultado);
+			if (falla) {
+				throw new ORPCError("BAD_REQUEST", { message: falla });
+			}
+
+			const [saved] = await db
+				.insert(generatedLegalContracts)
+				.values({
+					leadId,
+					opportunityId: input.opportunityId,
+					contractType: input.contractType,
+					contractName:
+						input.contractName ||
+						resultado.nameDocument?.[0]?.label ||
+						"Contrato subido manualmente",
+					...linksPorRol(resultado.signatories, resultado.signing_links),
+					signingProvider: resultado.signingProvider ?? null,
+					weetrustDocumentId: resultado.documentID ?? null,
+					signatureMode: getSignatureMode(input.contractType),
+					apiResponse: resultado,
+					pdfLink: resultado.r2Key || resultado.linkDocument || null,
+					status: "pending",
+					generatedBy: context.userId,
+					generatedAt: new Date(),
+				})
+				.returning({ id: generatedLegalContracts.id });
+
+			if (!saved) {
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						"El contrato se envió a firma pero no se pudo guardar en el CRM",
+				});
+			}
+
+			await guardarFirmantes(saved.id, resultado.signatories);
+
+			return {
+				success: true,
+				contractId: saved.id,
+				contractType: input.contractType,
+				documentLink: resultado.r2Key
+					? await getFileUrlWithBucketInKey(resultado.r2Key)
+					: resultado.linkDocument,
+				signingLinks: resultado.signing_links ?? [],
+				message:
+					getSignatureMode(input.contractType) === "fisica"
+						? "Contrato subido. Se firma en papel."
+						: `Contrato subido y enviado a firma (${resultado.signing_links?.length ?? 0} enlace(s))`,
+			};
 		}),
 };
 

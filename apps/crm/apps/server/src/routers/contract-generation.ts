@@ -337,7 +337,7 @@ async function firmantesDeLaOportunidad(
  */
 async function exigirEtapaQuePermiteReemplazo(
 	opportunityId: string,
-): Promise<void> {
+): Promise<number> {
 	const [fila] = await db
 		.select({ porcentaje: salesStages.closurePercentage })
 		.from(opportunities)
@@ -358,6 +358,10 @@ async function exigirEtapaQuePermiteReemplazo(
 			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: jurídico sólo puede generar, subir o reemplazar contratos en ${ETAPAS_POR_ACCION.reemplazar.join("% u ")}%. Para cambiarlo, hay que devolverla a esa etapa.`,
 		});
 	}
+	// Con qué etapa se aprobó. Quien llama se la devuelve al front para decidir
+	// si ofrecer el reenvío por WhatsApp: la que tiene la pantalla puede ser
+	// vieja (la aprobaron mientras estaba abierta) y los enlaces ya salieron.
+	return porcentaje;
 }
 
 /**
@@ -1468,8 +1472,11 @@ export const contractGenerationRouter = {
 				// no se instalan: se borran en WeeTrust para que no queden vivos sin
 				// registro, con las invitaciones mandadas. Los ya enlazados no: son
 				// los vigentes.
+				let porcentajeEtapa: number;
 				try {
-					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+					porcentajeEtapa = await exigirEtapaQuePermiteReemplazo(
+						input.opportunityId,
+					);
 				} catch (error) {
 					for (const contract of input.contracts) {
 						const { documentID } = firmaDelGenerador(contract.apiResponse);
@@ -1587,6 +1594,8 @@ export const contractGenerationRouter = {
 					linkedCount: savedContracts.length,
 					contracts: savedContracts,
 					descartados,
+					// La etapa con la que se enlazó, no la que tenía la pantalla.
+					porcentajeEtapa,
 					message:
 						descartados.length === 0
 							? `Se enlazaron ${savedContracts.length} contrato(s) a la oportunidad exitosamente`
@@ -1885,7 +1894,9 @@ export const contractGenerationRouter = {
 				// La etapa se revisa adentro, antes de crear nada en WeeTrust.
 				return conCandadoDeFirma(input.opportunityId, async () => {
 					// 3. Generar los nuevos contratos.
-					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+					const porcentajeEtapa = await exigirEtapaQuePermiteReemplazo(
+						input.opportunityId,
+					);
 					const apiResult = await generateContractsBatch({
 						contracts: contractsWithNewDate,
 					});
@@ -1986,6 +1997,8 @@ export const contractGenerationRouter = {
 						contracts: savedContracts,
 						failedContracts,
 						message,
+						// La etapa con la que se regeneró, no la que tenía la pantalla.
+						porcentajeEtapa,
 					};
 				});
 			} catch (error) {
@@ -2091,7 +2104,9 @@ export const contractGenerationRouter = {
 				// a 85%. Se vuelve a mirar ANTES de subir: WeeTrust manda las
 				// invitaciones en el acto, y descubrirlo después dejaba al cliente con
 				// correos de un documento que se borra enseguida.
-				await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+				const porcentajeEtapa = await exigirEtapaQuePermiteReemplazo(
+					input.opportunityId,
+				);
 				// Y las reglas del tipo: otra subida pudo instalarse mientras se
 				// esperaba el candado.
 				await exigirQueSePuedaSubir(input);
@@ -2284,6 +2299,8 @@ export const contractGenerationRouter = {
 					success: true,
 					contractId: saved.id,
 					contractType: input.contractType,
+					// La etapa con la que se subió, no la que tenía la pantalla.
+					porcentajeEtapa,
 					// El contrato ya está enviado y guardado: que falle firmar la URL no
 					// puede hacer que la pantalla diga "falló" e invite a subirlo de nuevo.
 					documentLink: resultado.r2Key

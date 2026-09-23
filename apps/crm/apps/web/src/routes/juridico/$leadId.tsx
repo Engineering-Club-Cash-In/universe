@@ -9,7 +9,10 @@ import {
 	User,
 } from "lucide-react";
 import { useState } from "react";
-import { etapaPermite } from "server/src/lib/contratos-anulacion";
+import {
+	ETAPA_EN_FIRMA,
+	etapaPermite,
+} from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import { z } from "zod";
 import type { ContractSigner } from "@/components/contracts/DynamicContractWizard";
@@ -32,12 +35,6 @@ import {
 } from "@/components/ui/card";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { client, orpc } from "@/utils/orpc";
-
-/**
- * "Contratos en Firma": la etapa en la que los enlaces ya salieron por WhatsApp.
- * Rehacer contratos acá deja al cliente con links muertos si no se reenvían.
- */
-const ETAPA_EN_FIRMA = 85;
 
 export const Route = createFileRoute("/juridico/$leadId")({
 	validateSearch: z
@@ -192,9 +189,11 @@ function RouteComponent() {
 			// y regenerar acaba de borrar esos documentos: si nadie le manda los
 			// nuevos, se queda firmando sobre links muertos. En 80% todavía no
 			// salió nada; los manda la aprobación.
+			// La etapa con la que regeneró el servidor: la de la pantalla puede ser
+			// vieja si la aprobaron mientras estaba abierta.
 			if (
 				data.regeneratedCount > 0 &&
-				opportunityData?.stage?.closurePercentage === ETAPA_EN_FIRMA
+				data.porcentajeEtapa === ETAPA_EN_FIRMA
 			) {
 				setPreguntarReenvio(true);
 			}
@@ -504,11 +503,15 @@ function RouteComponent() {
 						setIsUploadModalOpen(abierto);
 						if (!abierto) setContratoAReemplazar(null);
 					}}
-					onUploaded={() => {
+					onUploaded={({ porcentajeEtapa }) => {
 						refetch();
-						// Sólo al reemplazar: ahí los enlaces viejos dejaron de servir.
-						// Una subida nueva ya avisa por el envío normal al aprobar.
-						if (contratoAReemplazar) setPreguntarReenvio(true);
+						// Al reemplazar, siempre: los enlaces viejos dejaron de servir.
+						// Una subida nueva en 80% no hace falta, sale con el envío al
+						// aprobar; en 85% sí, porque ese envío ya pasó y el cliente
+						// nunca recibiría el enlace del contrato nuevo.
+						if (contratoAReemplazar || porcentajeEtapa === ETAPA_EN_FIRMA) {
+							setPreguntarReenvio(true);
+						}
 					}}
 					reemplaza={contratoAReemplazar}
 				/>

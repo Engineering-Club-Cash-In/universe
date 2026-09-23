@@ -93,7 +93,13 @@ async function main() {
 			},
 		);
 
-		if (res.success && res.signing_links?.length) {
+		if (res.success && res.signatureMode === "fisica") {
+			resumen.push({
+				tipo: entry.contractType,
+				ok: true,
+				detalle: "firma en papel (no va a WeeTrust)",
+			});
+		} else if (res.success && res.signing_links?.length) {
 			resumen.push({
 				tipo: entry.contractType,
 				ok: true,

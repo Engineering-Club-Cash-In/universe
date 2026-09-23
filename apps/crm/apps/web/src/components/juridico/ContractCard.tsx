@@ -29,6 +29,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { OpportunitySelector } from "./OpportunitySelector";
@@ -103,6 +104,10 @@ export function ContractCard({
 	const { canAssignLegal, canCreateLegal } = useJuridicoPermissions();
 	const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
+	// Este contrato se imprime y se firma a mano: que no tenga links no es que
+	// haya fallado, y mostrarlo como "Pendiente" hacía que jurídico lo buscara.
+	const firmaEnPapel = esFirmaFisica(contract.contractType);
+
 	const copyToClipboard = (text: string, label: string) => {
 		navigator.clipboard.writeText(text);
 		toast.success(`${label} copiado al portapapeles`);
@@ -141,7 +146,15 @@ export function ContractCard({
 						</div>
 					</div>
 					<div className="flex shrink-0 items-center gap-2">
-						{contract.clientSigningLink && (
+						{firmaEnPapel && (
+							<Badge
+								variant="outline"
+								className="border-amber-500/50 bg-amber-500/20 text-amber-700 dark:text-amber-400"
+							>
+								Firma en papel
+							</Badge>
+						)}
+						{!firmaEnPapel && contract.clientSigningLink && (
 							<Badge
 								variant="outline"
 								className={statusConfig[contract.status].color}
@@ -190,8 +203,16 @@ export function ContractCard({
 					</p>
 				</div>
 
+				{firmaEnPapel && (
+					<div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-700 text-sm dark:text-amber-400">
+						Se firma en papel. Imprimí el PDF y que lo firme el vendedor: este
+						documento no se sube a firma electrónica.
+					</div>
+				)}
+
 				{/* Links de documentos - más compacto */}
-				{(contract.clientSigningLink ||
+				{!firmaEnPapel &&
+					(contract.clientSigningLink ||
 					contract.representativeSigningLink ||
 					(contract.additionalSigningLinks &&
 						contract.additionalSigningLinks.length > 0)) && (

@@ -2287,9 +2287,10 @@ export async function getMoraRecuperacionPorAsesor({
       tipoEvento: string;
       montoAnterior: string;
       montoNuevo: string;
-      previo: boolean;
       reverso: boolean;
     }[];
+    // Techo sembrado con el historial ANTERIOR al ciclo, ya agregado en SQL.
+    nivel_sembrado: string;
     cobrado: string;
   }>(buildMoraRecoveryQuery({ ...period, asesores, emailCobrador }));
 
@@ -2302,9 +2303,9 @@ export async function getMoraRecuperacionPorAsesor({
         tipoEvento: evento.tipoEvento,
         montoAnterior: Number(evento.montoAnterior),
         montoNuevo: Number(evento.montoNuevo),
-        previo: evento.previo === true,
         reverso: evento.reverso === true,
       })),
+      nivelSembrado: row.nivel_sembrado,
       cobrado: row.cobrado,
     })),
     period,

@@ -31,6 +31,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
+import {
+	esCartaUnificable,
+	PAQUETE_CARTAS,
+} from "server/src/lib/paquete-cartas";
 import { type ContractResult, ContractResults } from "./ContractResults";
 
 // Types from API
@@ -1871,14 +1875,21 @@ export function DynamicContractWizard({
 	 * su PDF y sus links, así que no hay que esperar a que se regenere todo el lote.
 	 */
 	const handleRetryContract = async (contractType: string) => {
-		const contrato = generationDataRef.current.find(
-			(c) => c.contractType === contractType,
-		);
-		if (!contrato || retryingType) return;
+		// Las cartas salieron unidas: reintentarlas es mandar todas otra vez, que
+		// el servidor vuelve a juntar en un solo documento.
+		const contratos =
+			contractType === PAQUETE_CARTAS
+				? generationDataRef.current.filter((c) =>
+						esCartaUnificable(c.contractType),
+					)
+				: generationDataRef.current.filter(
+						(c) => c.contractType === contractType,
+					);
+		if (contratos.length === 0 || retryingType) return;
 
 		setRetryingType(contractType);
 		try {
-			const retryResult = await onGenerate({ contracts: [contrato] });
+			const retryResult = await onGenerate({ contracts: contratos });
 			const nuevo = retryResult.results[0];
 			if (!nuevo) return;
 
@@ -2088,6 +2099,16 @@ export function DynamicContractWizard({
 							{documentTypes.length === 0 && (
 								<p className="text-center text-muted-foreground">
 									No hay tipos de documento disponibles
+								</p>
+							)}
+							{/* Las cartas no salen cada una por su lado: el servidor las junta
+							    en un documento, y es bueno saberlo antes de generar. */}
+							{selectedDocuments.filter(esCartaUnificable).length > 1 && (
+								<p className="mt-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-blue-900 text-sm dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-300">
+									Las {selectedDocuments.filter(esCartaUnificable).length} cartas
+									seleccionadas salen en un solo documento, con un enlace por
+									firmante. Si la oportunidad ya tiene cartas unidas, éstas las
+									reemplazan: incluí todas las que tengan que ir.
 								</p>
 							)}
 						</CardContent>

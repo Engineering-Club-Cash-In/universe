@@ -58,6 +58,13 @@ import { esContratoVentaMapeado } from "../lib/contratos-venta";
 import { eqDpi } from "../lib/dpi-lookup";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import { juridicoProcedure } from "../lib/orpc";
+import {
+	agruparCartas,
+	cartasDelPaquete,
+	esCartaUnificable,
+	PAQUETE_CARTAS,
+	tiposQueReemplaza,
+} from "../lib/paquete-cartas";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import {
 	enrichLeadFromRenap,
@@ -489,7 +496,12 @@ export async function anularContratoReemplazado(
  */
 async function anularAnterioresDelMismoTipo(
 	opportunityId: string,
-	contractType: string,
+	/**
+	 * Los tipos que el nuevo deja sin efecto. Casi siempre es sólo el suyo; el
+	 * paquete de cartas se lleva además las cartas sueltas que trae (ver
+	 * `tiposQueReemplaza`).
+	 */
+	tipos: string[],
 	nuevoId: string,
 	motivo = "Reemplazado por una generación nueva del mismo contrato",
 ): Promise<void> {
@@ -499,7 +511,7 @@ async function anularAnterioresDelMismoTipo(
 		.where(
 			and(
 				eq(generatedLegalContracts.opportunityId, opportunityId),
-				eq(generatedLegalContracts.contractType, contractType),
+				inArray(generatedLegalContracts.contractType, tipos),
 				ne(generatedLegalContracts.id, nuevoId),
 				ne(generatedLegalContracts.status, "cancelled"),
 			),
@@ -547,6 +559,8 @@ async function etapaActual(opportunityId: string): Promise<string | null> {
 async function retirarAnterioresSiSigueVigente(params: {
 	opportunityId: string;
 	contractType: string;
+	/** Sólo el paquete: qué cartas trae, que también deja sin efecto. */
+	cartasQueTrae?: string[];
 	nuevoId: string;
 	etapaInicial: string | null;
 	motivo?: string;
@@ -564,6 +578,8 @@ async function retirarAnterioresSiSigueVigente(params: {
 async function retirarConCandadoTomado(params: {
 	opportunityId: string;
 	contractType: string;
+	/** Sólo el paquete: qué cartas trae, que también deja sin efecto. */
+	cartasQueTrae?: string[];
 	nuevoId: string;
 	etapaInicial: string | null;
 	motivo?: string;
@@ -609,7 +625,7 @@ async function retirarConCandadoTomado(params: {
 
 		await anularAnterioresDelMismoTipo(
 			opportunityId,
-			contractType,
+			tiposQueReemplaza(contractType, params.cartasQueTrae),
 			nuevoId,
 			motivo,
 		);
@@ -678,6 +694,34 @@ async function exigirQueSePuedaSubir(input: {
 	contractType: string;
 	replaceContractId?: string;
 }): Promise<void> {
+	// Una carta que ya va dentro de las cartas unidas no se sube suelta: el
+	// cliente la tendría dos veces, con dos enlaces, que es justo lo que se
+	// quiso evitar al unirlas. Para cambiarla se regeneran las cartas.
+	if (esCartaUnificable(input.contractType)) {
+		const paquetes = await db
+			.select({ apiResponse: generatedLegalContracts.apiResponse })
+			.from(generatedLegalContracts)
+			.where(
+				and(
+					eq(generatedLegalContracts.opportunityId, input.opportunityId),
+					eq(generatedLegalContracts.contractType, PAQUETE_CARTAS),
+					ne(generatedLegalContracts.status, "cancelled"),
+					isNull(generatedLegalContracts.replacedByContractId),
+				),
+			);
+		const yaLaTrae = paquetes.some((p) =>
+			cartasDelPaquete(p.apiResponse).some(
+				(c) => c.contractType === input.contractType,
+			),
+		);
+		if (yaLaTrae) {
+			throw new ORPCError("BAD_REQUEST", {
+				message:
+					"Esta carta ya va dentro de las cartas unidas de la oportunidad. Para cambiarla, regenerá las cartas en vez de subirla suelta.",
+			});
+		}
+	}
+
 	// Subir un tipo que ya está vigente es reemplazarlo, y eso tiene sus
 	// reglas: sólo en 80% y con motivo. Sin elegir "Reemplazar" se corta
 	// antes de mandar nada, en vez de anular el anterior por la espalda.
@@ -1230,6 +1274,12 @@ export const contractGenerationRouter = {
 					},
 				}));
 
+				// Las cartas van en un solo documento. Se agrupa acá, antes de pedir
+				// nada, y los resultados se emparejan contra ESTA lista: el
+				// generador devuelve uno por pedido, en orden, y con las cartas ya
+				// juntas son menos que los que mandó el front.
+				const aGenerar = agruparCartas(contractsWithPlural);
+
 				// Generar con el candado de la oportunidad tomado y la etapa ya
 				// revisada: WeeTrust manda las invitaciones apenas se crea cada
 				// documento, y enterarse después (al enlazar) obligaba a borrarlos
@@ -1241,7 +1291,7 @@ export const contractGenerationRouter = {
 						if (input.opportunityId) {
 							await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 						}
-						return generateContractsBatch({ contracts: contractsWithPlural });
+						return generateContractsBatch({ contracts: aGenerar });
 					},
 				);
 
@@ -1266,7 +1316,7 @@ export const contractGenerationRouter = {
 				if (apiResult.results) {
 					for (let i = 0; i < apiResult.results.length; i++) {
 						const contractResult = apiResult.results[i];
-						const originalContract = input.contracts[i];
+						const originalContract = aGenerar[i];
 
 						const falla = motivoDeFalla(contractResult);
 
@@ -1502,6 +1552,10 @@ export const contractGenerationRouter = {
 							? await retirarAnterioresSiSigueVigente({
 									opportunityId: input.opportunityId,
 									contractType: contract.contractType,
+									// Lo que de verdad quedó adentro del PDF, según el generador.
+									cartasQueTrae: cartasDelPaquete(contract.apiResponse).map(
+										(c) => c.contractType,
+									),
 									nuevoId: saved.id,
 									etapaInicial,
 								})
@@ -1639,9 +1693,20 @@ export const contractGenerationRouter = {
 				// reemplazan a los que ya salieron (ver retirarAnterioresSiSigueVigente).
 				const etapaInicial = await etapaActual(input.opportunityId);
 
-				// 1. Filtrar solo los contratos de los tipos a regenerar
-				const contractsToRegenerate = input.generationData.filter((c) =>
-					input.contractTypes.includes(c.contractType),
+				// 1. Filtrar solo los contratos de los tipos a regenerar.
+				//
+				// Las cartas van todas o ninguna. Van en un solo documento, y el
+				// paquete nuevo reemplaza entero al anterior: regenerar una sola
+				// carta armaría un paquete con esa sola y se llevaría puestas las
+				// demás. Así que pedir cualquiera de ellas —o el paquete, que es
+				// como aparece en la ficha— regenera todas las de la foto.
+				const pideCartas = input.contractTypes.some(
+					(t) => t === PAQUETE_CARTAS || esCartaUnificable(t),
+				);
+				const contractsToRegenerate = input.generationData.filter(
+					(c) =>
+						input.contractTypes.includes(c.contractType) ||
+						(pideCartas && esCartaUnificable(c.contractType)),
 				);
 
 				if (contractsToRegenerate.length === 0) {
@@ -1834,10 +1899,12 @@ export const contractGenerationRouter = {
 				// los vigentes, mandaría sus enlaces, y el retiro los mataría enseguida.
 				// La etapa se revisa adentro, antes de crear nada en WeeTrust.
 				return conCandadoDeFirma(input.opportunityId, async () => {
-					// 3. Generar los nuevos contratos.
+					// 3. Generar los nuevos contratos, con las cartas ya juntas en un
+					// documento. Los resultados se emparejan contra esta misma lista.
 					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+					const aGenerar = agruparCartas(contractsWithNewDate);
 					const apiResult = await generateContractsBatch({
-						contracts: contractsWithNewDate,
+						contracts: aGenerar,
 					});
 
 					if (!apiResult.results || apiResult.results.length === 0) {
@@ -1853,7 +1920,7 @@ export const contractGenerationRouter = {
 
 					for (let i = 0; i < apiResult.results.length; i++) {
 						const contractResult = apiResult.results[i];
-						const originalContract = contractsWithNewDate[i];
+						const originalContract = aGenerar[i];
 
 						// Un contrato sin PDF no puede reemplazar al anterior: se perdería el
 						// documento bueno a cambio de uno que no se puede abrir.
@@ -1899,6 +1966,9 @@ export const contractGenerationRouter = {
 									? await retirarConCandadoTomado({
 											opportunityId: input.opportunityId,
 											contractType: originalContract.contractType,
+											cartasQueTrae: cartasDelPaquete(contractResult).map(
+												(c) => c.contractType,
+											),
 											nuevoId: saved.id,
 											etapaInicial,
 											motivo: "Regenerado desde jurídico",
@@ -1989,6 +2059,16 @@ export const contractGenerationRouter = {
 			// etapa de jurídico, y es lo que ya hace la pantalla al esconder los
 			// botones. Se vuelve a mirar, bloqueada, antes de guardar.
 			await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+
+			// Las cartas unidas no se suben a mano: sus firmas se ubican carta por
+			// carta, y eso sólo se puede con un paquete que armó el generador (el
+			// PDF dice qué cartas trae). Uno unido por fuera no lo dice.
+			if (input.contractType === PAQUETE_CARTAS) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Las cartas unidas no se pueden subir a mano: se generan desde el CRM. Para cambiar una, regenerá las cartas.",
+				});
+			}
 
 			// Sólo los tipos con layout auditado: el generador ubica las líneas de
 			// firma por ese layout, y sin él no hay forma de repartir por rol.

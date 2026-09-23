@@ -28,6 +28,7 @@ import {
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client } from "@/utils/orpc";
 import { AnularContratoDialog } from "./AnularContratoDialog";
+import { CartasDelPaquete } from "./CartasDelPaquete";
 import { DescargarFirmadoButton } from "./DescargarFirmadoButton";
 import { ReenviarWhatsappDialog } from "./ReenviarWhatsappDialog";
 import { RegenerarEnlacesDialog } from "./RegenerarEnlacesDialog";
@@ -58,6 +59,11 @@ interface ContratoDeOportunidad {
 	signingProvider?: string | null;
 	/** Cómo se firma, según quedó guardado al generarlo. */
 	signatureMode?: string | null;
+	/**
+	 * La respuesta del generador tal como se guardó. De ahí sale qué cartas trae
+	 * un paquete de cartas.
+	 */
+	apiResponse?: unknown;
 	/**
 	 * El contrato que lo reemplaza. Puede estar puesto con el estado todavía en
 	 * `pending`: el reemplazo lo reclama al confirmar y el anulado en WeeTrust
@@ -297,6 +303,10 @@ function ContratoFila({
 					<p className="truncate text-muted-foreground text-xs">
 						{getContractTypeLabel(contract.contractType)}
 					</p>
+					<CartasDelPaquete
+						contractType={contract.contractType}
+						apiResponse={contract.apiResponse}
+					/>
 				</div>
 				<div className="flex shrink-0 items-center gap-2">
 					<Badge variant="outline" className={`${estado.className} text-xs`}>

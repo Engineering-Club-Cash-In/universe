@@ -397,13 +397,6 @@ export async function anularContratoReemplazado(
 	motivo: string,
 	opciones: {
 		/**
-		 * No borrar en WeeTrust un documento que ya tiene alguna firma. Lo pide
-		 * anular sin reemplazo: ahí no hay un documento nuevo que ocupe su lugar,
-		 * y borrarlo tiraría firmas que son de alguien. Reemplazar sí lo borra,
-		 * para que los que faltan no sigan firmando uno que ya no vale.
-		 */
-		conservarSiHayFirmas?: boolean;
-		/**
 		 * Dejar la fila anulada aunque no haya nada que conservar (ni documento
 		 * en WeeTrust ni firmas), en vez de borrarla. También lo pide anular sin
 		 * reemplazo: el motivo es lo único que dice por qué se descartó, y un
@@ -487,11 +480,8 @@ export async function anularContratoReemplazado(
 		? (estadoAlla?.conFirmas ?? true)
 		: await alguienFirmo(contractId);
 	let borradoAlla = !viejo.weetrustDocumentId;
-	// Anulando sin reemplazo, un documento con firmas se queda allá. Si WeeTrust
-	// no contestó, `conFirmas` ya viene en true: sin saber, no se destruye nada.
-	const seConserva = opciones.conservarSiHayFirmas === true && conFirmas;
 
-	if (!completo && !seConserva && viejo.weetrustDocumentId) {
+	if (!completo && viejo.weetrustDocumentId) {
 		try {
 			await borrarDocumentoDeWeeTrust(viejo.weetrustDocumentId);
 			borradoAlla = true;
@@ -512,10 +502,10 @@ export async function anularContratoReemplazado(
 		// (WeeTrust no deja), así que no es un "no se pudo".
 		const base = etiquetaDeMotivo(motivo);
 		let cancellationReason: string;
-		if (completo || !viejo.weetrustDocumentId) {
+		if (!viejo.weetrustDocumentId) {
 			cancellationReason = base;
-		} else if (seConserva) {
-			cancellationReason = `${base} (tenía firmas: el documento se conserva en WeeTrust)`;
+		} else if (completo) {
+			cancellationReason = `${base} (ya lo habían firmado todos: queda en WeeTrust, que no deja borrarlo)`;
 		} else if (!borradoAlla) {
 			cancellationReason = `${base} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`;
 		} else if (conFirmas) {

@@ -297,7 +297,7 @@ function ContratoFila({
 			className="h-6 px-1.5 text-destructive text-xs hover:text-destructive"
 			disabled={ocupado}
 			onClick={() => setAnulando(true)}
-			title="Descarta el contrato sin reemplazarlo. Queda en «Ver anulados» con el motivo; lo que ya tenga firmas se conserva en la plataforma de firma."
+			title="Descarta el contrato sin reemplazarlo: se borra de la plataforma de firma salvo que ya lo hayan firmado todos. Queda en «Ver anulados» con el motivo."
 		>
 			<Trash2 className="mr-1 h-3 w-3" />
 			Anular

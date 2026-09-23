@@ -6,6 +6,7 @@ import { adminMiniagentRouter } from "./admin-miniagent";
 import { auctionRouter } from "./auctionVehicles";
 import { authRouter } from "./auth";
 import { bankAnalysisRouter } from "./bank-analysis";
+import { buroInternoRouter } from "./buro-interno";
 import { checksRouter } from "./checks";
 import { clientFormsRouter } from "./client-forms";
 import { cobrosRouter } from "./cobros";
@@ -104,6 +105,10 @@ export const crmAppRouter = {
 	updateCoDebtor: crmRouter.updateCoDebtor,
 	deleteCoDebtor: crmRouter.deleteCoDebtor,
 	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
+	// Consulta de mora por DPI contra cartera (fail-closed). Es la versión
+	// informativa para la pantalla: el gate que bloquea es `evaluarGateMoraDpi`
+	// y se aplica en los puntos de alta/cambio de DPI, no acá.
+	validarMoraPorDpi: crmRouter.validarMoraPorDpi,
 	// Verificación de QR del reverso de licencia contra Tránsito (Maicon)
 	verifyLicenseQr: licenseVerificationRouter.verifyLicenseQr,
 	listLicenseVerifications: licenseVerificationRouter.listLicenseVerifications,
@@ -192,6 +197,7 @@ export const cobrosAppRouter = {
 
 	// CRM Cobros — nuevas vistas
 	getMoraByEtapaYAsesor: cobrosRouter.getMoraByEtapaYAsesor,
+	getCierreMoraOficial: cobrosRouter.getCierreMoraOficial,
 	getMoraCobradaPorAsesor: cobrosRouter.getMoraCobradaPorAsesor,
 	getMoraRecuperacionPorAsesor: cobrosRouter.getMoraRecuperacionPorAsesor,
 	getCuotasPorFecha: cobrosRouter.getCuotasPorFecha,
@@ -490,6 +496,22 @@ export const partnerTrackerRouter = {
 	getPartnerAgencies: trackerRouter.getPartnerAgencies,
 	getPartnerPasswordStatus: trackerRouter.getPartnerPasswordStatus,
 	changePartnerPassword: trackerRouter.changePartnerPassword,
+};
+
+// Buró interno (lista negra propia). Aparte del appRouter para no empujar TS7056.
+export const buroInternoProcedures = {
+	listBuroInterno: buroInternoRouter.listBuroInterno,
+	buscarCandidatosBuroInterno: buroInternoRouter.buscarCandidatosBuroInterno,
+	crearRegistroBuroInterno: buroInternoRouter.crearRegistroBuroInterno,
+	actualizarRegistroBuroInterno:
+		buroInternoRouter.actualizarRegistroBuroInterno,
+	desactivarRegistroBuroInterno:
+		buroInternoRouter.desactivarRegistroBuroInterno,
+	getHistorialBuroInterno: buroInternoRouter.getHistorialBuroInterno,
+	consultarBuroInterno: buroInternoRouter.consultarBuroInterno,
+	getReglasBuroInterno: buroInternoRouter.getReglasBuroInterno,
+	actualizarReglaBuroInterno: buroInternoRouter.actualizarReglaBuroInterno,
+	getBuroInternoOportunidad: buroInternoRouter.getBuroInternoOportunidad,
 };
 
 export const manualVehicleRouter = {

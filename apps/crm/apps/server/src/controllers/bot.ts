@@ -368,6 +368,25 @@ function findLeadWithActiveOpportunityByPhone(phone: string) {
 /**
  * @param dpi - The DPI (unique identifier for the person).
  * @returns An object with the RENAP data and the operation status.
+ *
+ * 🔴 Acá NO va el gate de mora por DPI, y no es un olvido.
+ *
+ * Este controller cuelga de `POST /info/renap`, que es anónimo a propósito: lo
+ * llama el bot de WhatsApp y no pide credenciales. Consultar la mora acá
+ * convertiría la ruta en un oráculo público de situación crediticia —
+ * cualquiera manda el DPI de un tercero y la respuesta le dice si esa persona
+ * es cliente y si está en mora o en convenio.
+ *
+ * ⚠️ Y que no lleve gate NO significa que el filtro corra después. Los leads
+ * que crea el bot nacen con el DPI ya puesto, así que `createLead` nunca corre
+ * para ellos y `updateLead` solo consulta cuando el DPI cambia (ver
+ * `requiereConsultaDeMora`): si nadie se lo toca, no se consulta nunca.
+ *
+ * Lo que sí los alcanza es indirecto y parcial: cuando el gate corre para ese
+ * DPI en cualquiera de los seis puntos, el CRM aporta los `numeroSifco` de las
+ * oportunidades de sus leads (`lib/numeros-sifco-por-dpi.ts`), y eso hace
+ * visibles los créditos que SIFCO no sabe devolver. El corte en el avance de la
+ * oportunidad es una decisión aparte y todavía no está construido.
  */
 export const getRenapInfoController = async (
 	dpiRecibido: string,

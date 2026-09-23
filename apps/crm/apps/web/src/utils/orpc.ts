@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { logAuthDiagnostic } from "@/lib/auth-session";
 import type {
 	AppRouter,
+	buroInternoProcedures,
 	disbursementRouter,
 	manualVehicleRouter,
 	proyeccionRouter,
@@ -78,7 +79,8 @@ type MergedRouter = AppRouter &
 	typeof manualVehicleRouter &
 	InvestmentsRouter &
 	typeof disbursementRouter &
-	typeof proyeccionRouter;
+	typeof proyeccionRouter &
+	typeof buroInternoProcedures;
 
 export const client: RouterClient<MergedRouter> = createORPCClient(link);
 

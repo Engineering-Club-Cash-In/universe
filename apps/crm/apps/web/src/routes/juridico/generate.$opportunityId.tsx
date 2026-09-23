@@ -7,13 +7,14 @@ import {
 	FileSignature,
 	Loader2,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import {
 	type ContractSigner,
 	type CRMData,
 	DynamicContractWizard,
 } from "@/components/contracts/DynamicContractWizard";
+import { ReenviarWhatsappDialog } from "@/components/contracts/ReenviarWhatsappDialog";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -30,6 +31,12 @@ import {
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { client, orpc } from "@/utils/orpc";
 
+/**
+ * "Contratos en Firma": la etapa en la que los enlaces ya salieron por WhatsApp.
+ * Rehacer contratos acá deja al cliente con links muertos si no se reenvían.
+ */
+const ETAPA_EN_FIRMA = 85;
+
 export const Route = createFileRoute("/juridico/generate/$opportunityId")({
 	component: RouteComponent,
 });
@@ -40,6 +47,10 @@ function RouteComponent() {
 	const { canViewLegal, isLoading: isLoadingPermissions } =
 		useJuridicoPermissions();
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+	const [preguntarReenvio, setPreguntarReenvio] = useState(false);
+	// Ref y no estado: lo marca el enlace y lo lee `handleBack` en el mismo
+	// tick, antes de que un estado nuevo llegue a renderizarse.
+	const ofrecerReenvioAlSalir = useRef(false);
 
 	// Get contract types from API (dynamic)
 	const contractTypesQuery = useQuery({
@@ -299,7 +310,7 @@ function RouteComponent() {
 			}
 		: null;
 
-	const handleBack = () => {
+	const irALaFicha = () => {
 		if (opportunity?.lead?.id) {
 			navigate({
 				to: "/juridico/$leadId",
@@ -309,6 +320,19 @@ function RouteComponent() {
 		} else {
 			navigate({ to: "/juridico" });
 		}
+	};
+
+	// El wizard vuelve atrás apenas enlaza. Si acaba de rehacer contratos de
+	// una oportunidad en 85%, antes de irse se pregunta si se reenvían: los
+	// enlaces que el cliente recibió al aprobar ya no sirven. La navegación
+	// queda para cuando se cierre la pregunta.
+	const handleBack = () => {
+		if (ofrecerReenvioAlSalir.current) {
+			ofrecerReenvioAlSalir.current = false;
+			setPreguntarReenvio(true);
+			return;
+		}
+		irALaFicha();
 	};
 
 	const handleGetDocumentsByDpi = async (
@@ -364,6 +388,15 @@ function RouteComponent() {
 		}>;
 	}) => {
 		const result = await linkContractsMutation.mutateAsync(data);
+		// En 85% los enlaces ya le llegaron al cliente al aprobar, y los que se
+		// acaban de enlazar dejaron sin efecto a los anteriores del mismo tipo.
+		// En 80% todavía no salió nada: los manda la aprobación.
+		if (
+			result.linkedCount > 0 &&
+			opportunity?.stage?.closurePercentage === ETAPA_EN_FIRMA
+		) {
+			ofrecerReenvioAlSalir.current = true;
+		}
 		return result;
 	};
 
@@ -522,6 +555,17 @@ function RouteComponent() {
 						/>
 					</CardContent>
 				</Card>
+			)}
+
+			{opportunityId && (
+				<ReenviarWhatsappDialog
+					opportunityId={opportunityId}
+					open={preguntarReenvio}
+					onOpenChange={(abierto) => {
+						setPreguntarReenvio(abierto);
+						if (!abierto) irALaFicha();
+					}}
+				/>
 			)}
 
 			{/* Modal de detalle de oportunidad */}

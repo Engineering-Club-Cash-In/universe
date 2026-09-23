@@ -33,6 +33,12 @@ import {
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { client, orpc } from "@/utils/orpc";
 
+/**
+ * "Contratos en Firma": la etapa en la que los enlaces ya salieron por WhatsApp.
+ * Rehacer contratos acá deja al cliente con links muertos si no se reenvían.
+ */
+const ETAPA_EN_FIRMA = 85;
+
 export const Route = createFileRoute("/juridico/$leadId")({
 	validateSearch: z
 		.object({
@@ -182,6 +188,16 @@ function RouteComponent() {
 			queryClient.invalidateQueries({
 				queryKey: ["getGenerationSnapshot"],
 			});
+			// En 85% los enlaces ya le llegaron al cliente por WhatsApp al aprobar,
+			// y regenerar acaba de borrar esos documentos: si nadie le manda los
+			// nuevos, se queda firmando sobre links muertos. En 80% todavía no
+			// salió nada; los manda la aprobación.
+			if (
+				data.regeneratedCount > 0 &&
+				opportunityData?.stage?.closurePercentage === ETAPA_EN_FIRMA
+			) {
+				setPreguntarReenvio(true);
+			}
 		},
 		onError: (error: Error) => {
 			toast.error(error.message || "Error al regenerar contratos");

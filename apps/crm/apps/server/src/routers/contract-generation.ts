@@ -437,6 +437,11 @@ export async function anularContratoReemplazado(
 						viejo.weetrustDocumentId,
 					),
 					ne(generatedLegalContracts.id, contractId),
+					// Sólo otra fila vigente lo sigue usando. Una ya anulada (la
+					// primera de dos duplicadas, conservada como registro) no: si
+					// frenara el borrado, anular la segunda dejaba vivos en WeeTrust
+					// enlaces que ninguna fila del CRM sigue.
+					ne(generatedLegalContracts.status, "cancelled"),
 				),
 			)
 			.limit(1);

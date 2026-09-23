@@ -1208,31 +1208,62 @@ export class WeeTrustService {
 		for (const { pageNum, width, height } of paginas) {
 			if (pageNum % 2 === 0) continue;
 
+			// Cuántas caben seguidas antes de salirse de la hoja: a lo ancho si van
+			// abajo, a lo alto (de la mitad para abajo) si van en un margen. Con
+			// muchos codeudores no entran en un solo tramo, y un widget con
+			// coordenadas fuera de la página WeeTrust lo rechaza o lo pone donde
+			// nadie lo ve. Los que no caben pasan a otro tramo, hacia adentro.
+			const horizontal =
+				rubrica.esquina === 'inferior-derecha' ||
+				rubrica.esquina === 'inferior-izquierda';
+			const pasoX = ancho + separacion;
+			const pasoY = alto + separacion;
+			const porTramo = horizontal
+				? Math.floor((width - 2 * margen + separacion) / pasoX)
+				: Math.floor((height / 2 - margen + separacion) / pasoY);
+			if (porTramo < 1) {
+				throw new SignatureLayoutError(
+					`${contractType}: la página ${pageNum} (${width}x${height}) no tiene lugar para una rúbrica de ${ancho}x${alto} con margen ${margen}.`,
+				);
+			}
+
 			unicos.forEach((firmante, i) => {
-				// Se leen de izquierda a derecha en el orden declarado, aunque el
-				// grupo se ancle a la derecha.
-				const desdeElBorde =
-					rubrica.esquina === 'inferior-derecha'
-						? unicos.length - 1 - i
-						: i;
-				const corrimiento = desdeElBorde * (ancho + separacion);
+				const tramo = Math.floor(i / porTramo);
+				const enElTramo = i % porTramo;
+				const cuantosEnElTramo = Math.min(
+					porTramo,
+					unicos.length - tramo * porTramo,
+				);
 
 				// Coordenadas en el sistema de WeeTrust: origen arriba a la
-				// izquierda, a diferencia del PDF.
+				// izquierda, a diferencia del PDF. Dentro de cada tramo se leen en
+				// el orden declarado; los tramos siguientes van hacia adentro de la
+				// hoja (arriba si están abajo, al centro si están en un margen).
 				let x: number;
 				let y: number;
 				if (rubrica.esquina === 'inferior-derecha') {
-					x = width - margen - ancho - corrimiento;
-					y = height - margen - alto;
+					// Anclado a la derecha, pero leído de izquierda a derecha.
+					const desdeElBorde = cuantosEnElTramo - 1 - enElTramo;
+					x = width - margen - ancho - desdeElBorde * pasoX;
+					y = height - margen - alto - tramo * pasoY;
 				} else if (rubrica.esquina === 'inferior-izquierda') {
-					x = margen + corrimiento;
-					y = height - margen - alto;
+					x = margen + enElTramo * pasoX;
+					y = height - margen - alto - tramo * pasoY;
 				} else if (rubrica.esquina === 'margen-derecho') {
-					x = width - margen - ancho;
-					y = height / 2 + corrimiento;
+					x = width - margen - ancho - tramo * pasoX;
+					y = height / 2 + enElTramo * pasoY;
 				} else {
-					x = margen;
-					y = height / 2 + corrimiento;
+					x = margen + tramo * pasoX;
+					y = height / 2 + enElTramo * pasoY;
+				}
+
+				// Si aun así no entra (tantos firmantes que los tramos se comen la
+				// hoja), se corta: mejor un error a la vista que una rúbrica
+				// obligatoria fuera de la página.
+				if (x < 0 || y < 0 || x + ancho > width || y + alto > height) {
+					throw new SignatureLayoutError(
+						`${contractType}: las rúbricas de ${unicos.length} firmantes no caben en la página ${pageNum}.`,
+					);
 				}
 
 				// La firma real de esta persona en esta página, si la hay. Una

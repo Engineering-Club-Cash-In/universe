@@ -442,6 +442,21 @@ export async function anularContratoReemplazado(
 			)
 			.limit(1);
 		if (otra) {
+			// Anulando sin reemplazo la fila se queda, anulada, con su motivo: es
+			// lo que promete «Ver anulados». El documento no se toca igual, porque
+			// la otra fila lo sigue usando.
+			if (opciones.conservarFila) {
+				await db
+					.update(generatedLegalContracts)
+					.set({
+						status: "cancelled",
+						cancellationReason: `${etiquetaDeMotivo(motivo)} (era un duplicado: el documento sigue vigente en la otra fila)`,
+						cancelledAt: new Date(),
+						updatedAt: new Date(),
+					})
+					.where(eq(generatedLegalContracts.id, contractId));
+				return { contractId, conservado: true };
+			}
 			await db
 				.delete(generatedLegalContracts)
 				.where(eq(generatedLegalContracts.id, contractId));

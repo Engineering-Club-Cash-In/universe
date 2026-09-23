@@ -32,6 +32,12 @@ export interface ContractResult {
 	signatories?: FirmanteDeContrato[];
 	templateId?: number;
 	apiResponse?: unknown;
+	/**
+	 * El documento en WeeTrust y el comprobante que firma el servidor para poder
+	 * descartarlo si nunca se enlaza.
+	 */
+	documentID?: string;
+	descarte?: string;
 	error?: string;
 }
 

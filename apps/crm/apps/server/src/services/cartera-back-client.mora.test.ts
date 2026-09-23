@@ -102,6 +102,44 @@ test("manda el DPI en el body y va autenticado", async () => {
 });
 
 /**
+ * 🔴 Los afianzados viajan por su PROPIO campo. Mezclarlos con
+ * `numerosCreditoConocidos` hacía que cartera expandiera por dueño con ellos:
+ * el fiador de un crédito SANO quedaba bloqueado porque el titular tenía otra
+ * deuda, y la respuesta traía la historia crediticia completa de ese tercero.
+ */
+test("los créditos garantizados no se mezclan con los propios", async () => {
+	let cuerpo: unknown;
+	const client = cliente(async (_url, init) => {
+		cuerpo = JSON.parse(String((init as RequestInit).body));
+		return Response.json(RESPUESTA_SIN_MORA);
+	});
+
+	await client.consultarMoraPorDpi(
+		"3460666380101",
+		["CRM-propio"],
+		["CRM-afianzado"],
+	);
+
+	expect(cuerpo).toEqual({
+		dpi: "3460666380101",
+		numerosCreditoConocidos: ["CRM-propio"],
+		numerosCreditoGarantizados: ["CRM-afianzado"],
+	});
+});
+
+test("las listas vacías no engordan el cuerpo", async () => {
+	let cuerpo: unknown;
+	const client = cliente(async (_url, init) => {
+		cuerpo = JSON.parse(String((init as RequestInit).body));
+		return Response.json(RESPUESTA_SIN_MORA);
+	});
+
+	await client.consultarMoraPorDpi("3460666380101", [], []);
+
+	expect(cuerpo).toEqual({ dpi: "3460666380101" });
+});
+
+/**
  * Fail-closed, camino 1: cartera no contesta. El método NO puede devolver un
  * objeto —cualquier objeto se leería como veredicto— sino lanzar un error que
  * el llamador está obligado a mirar.

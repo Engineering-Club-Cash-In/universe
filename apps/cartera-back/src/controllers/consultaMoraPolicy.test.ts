@@ -16,6 +16,7 @@ import {
   respuestaServicioNoDisponible,
   siguientePasoConsulta,
   unirNumerosCredito,
+  usuariosParaExpandir,
   validarDpiConsulta,
   type CreditoConsultaMora,
   type FilaCreditoMora,
@@ -266,6 +267,15 @@ describe("unión de números de crédito", () => {
       "insoluto-9",
     ]);
   });
+
+  it("une cuantos grupos le den: propios, aportados y garantizados", () => {
+    // Los garantizados son un tercer grupo y también hay que mirarlos; lo que
+    // NO hacen es expandir por dueño (ver `usuariosParaExpandir`).
+    expect(
+      unirNumerosCredito(["AAA"], ["BBB"], ["GARANTIZADO-1", "AAA"]).sort()
+    ).toEqual(["AAA", "BBB", "GARANTIZADO-1"]);
+    expect(unirNumerosCredito(undefined)).toEqual([]);
+  });
 });
 
 describe("siguiente paso de la consulta", () => {
@@ -365,6 +375,103 @@ describe("expansión de créditos por dueño", () => {
     const huerfano = fila({ credito_id: 9, usuario_id: null });
 
     expect(fusionarCreditosPorId([huerfano], [])).toEqual([huerfano]);
+  });
+
+  it("expande por los dueños de los créditos propios del DPI", () => {
+    const filas = [
+      fila({ credito_id: 1, usuario_id: 500, numeroCreditoSifco: "AAA" }),
+      fila({ credito_id: 2, usuario_id: 700, numeroCreditoSifco: "BBB" }),
+    ];
+
+    expect(usuariosParaExpandir(filas, ["AAA", "BBB"]).sort()).toEqual([500, 700]);
+  });
+
+  it("ignora al dueño sin id y no repite al que aparece dos veces", () => {
+    const filas = [
+      fila({ credito_id: 1, usuario_id: 500, numeroCreditoSifco: "AAA" }),
+      fila({ credito_id: 2, usuario_id: 500, numeroCreditoSifco: "BBB" }),
+      fila({ credito_id: 3, usuario_id: null, numeroCreditoSifco: "CCC" }),
+    ];
+
+    expect(usuariosParaExpandir(filas, ["AAA", "BBB", "CCC"])).toEqual([500]);
+  });
+});
+
+describe("🔴 el fiador responde por lo que garantizó, no por el titular", () => {
+  const fila = (parcial: Partial<FilaCreditoMora> = {}): FilaCreditoMora => ({
+    credito_id: 1,
+    usuario_id: 500,
+    numeroCreditoSifco: "01010214124060",
+    estado: "ACTIVO",
+    moraMonto: null,
+    moraCuotas: null,
+    ...parcial,
+  });
+
+  const aCredito = (f: FilaCreditoMora): CreditoConsultaMora => ({
+    numeroCreditoSifco: f.numeroCreditoSifco,
+    estado: f.estado,
+    moraActiva:
+      f.moraMonto !== null
+        ? { monto: f.moraMonto, cuotasAtrasadas: f.moraCuotas ?? 0 }
+        : null,
+  });
+
+  /** El crédito afianzado, sano, del titular 700. */
+  const GARANTIZADO = fila({
+    credito_id: 10,
+    usuario_id: 700,
+    numeroCreditoSifco: "GARANTIZADO-1",
+  });
+
+  /** Otra deuda del MISMO titular, ajena a lo que el fiador firmó. */
+  const OTRO_DEL_TITULAR = fila({
+    credito_id: 11,
+    usuario_id: 700,
+    numeroCreditoSifco: "OTRO-DEL-TITULAR",
+    estado: "MOROSO",
+    moraMonto: "3000.00",
+    moraCuotas: 4,
+  });
+
+  it("el crédito garantizado NO arrastra al dueño a la expansión", () => {
+    // Con el dueño adentro, la segunda pasada traía `OTRO_DEL_TITULAR` y el
+    // fiador quedaba bloqueado por una deuda que nunca firmó — y el CRM veía
+    // la historia crediticia completa de ese tercero.
+    expect(usuariosParaExpandir([GARANTIZADO], [])).toEqual([]);
+  });
+
+  it("un titular moroso por OTRO crédito no bloquea al fiador", () => {
+    // Lo que el veredicto llega a mirar es solo lo afianzado.
+    expect(construirVeredicto([GARANTIZADO].map(aCredito))).toEqual({
+      tieneMoraActiva: false,
+      puedeContinuar: true,
+      motivo: "SIN_MORA",
+    });
+    // Y la deuda ajena existe: lo que cambia es que no llega hasta acá.
+    expect(
+      construirVeredicto([OTRO_DEL_TITULAR].map(aCredito)).puedeContinuar
+    ).toBeFalse();
+  });
+
+  it("el garantizado EN MORA sí bloquea: para eso firmó", () => {
+    const enMora = {
+      ...GARANTIZADO,
+      estado: "MOROSO",
+      moraMonto: "1500.00",
+      moraCuotas: 2,
+    };
+
+    const veredicto = construirVeredicto([enMora].map(aCredito));
+
+    expect(veredicto.puedeContinuar).toBeFalse();
+    expect(veredicto.motivo).toBe("MORA_ACTIVA");
+  });
+
+  it("el mismo número como propio Y como garantizado sí expande", () => {
+    // Si el DPI además es titular de ese crédito, la relación de dueño está
+    // probada por el otro canal y la expansión vuelve a corresponder.
+    expect(usuariosParaExpandir([GARANTIZADO], ["GARANTIZADO-1"])).toEqual([700]);
   });
 });
 

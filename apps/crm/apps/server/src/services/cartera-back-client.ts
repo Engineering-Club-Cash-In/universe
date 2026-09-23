@@ -17,6 +17,7 @@ import type {
 	CarteraPagoCredito,
 	CarteraStatsResponse,
 	CarteraUsuario,
+	ConsultaMoraRequest,
 	ConsultaMoraResponse,
 	CreateBoletaInput,
 	CreateCreditoInput,
@@ -1829,15 +1830,29 @@ export class CarteraBackClient {
 	 * buscar; sin ellos, el cliente cuyos créditos nacieron todos en el CRM no
 	 * tiene ficha en SIFCO y salía como CLIENTE_NO_ENCONTRADO. Se omiten cuando
 	 * la lista viene vacía: el contrato los tiene como opcionales.
+	 *
+	 * 🔴 `numerosCreditoGarantizados` viaja APARTE y no mezclado con los
+	 * anteriores: son los créditos que este DPI AFIANZÓ (figura como co-deudor).
+	 * Cartera los mira uno por uno —si lo garantizado está en mora, bloquea—
+	 * pero no expande por dueño con ellos. Mandarlos por el otro campo bloqueaba
+	 * al fiador de un crédito SANO porque el titular tenía otra deuda, y traía
+	 * de vuelta la historia crediticia completa de ese tercero. Ver
+	 * `ConsultaMoraRequest`.
 	 */
 	async consultarMoraPorDpi(
 		dpi: string,
 		numerosCreditoConocidos?: string[],
+		numerosCreditoGarantizados?: string[],
 	): Promise<ConsultaMoraResponse> {
-		const cuerpo =
-			numerosCreditoConocidos && numerosCreditoConocidos.length > 0
-				? { dpi, numerosCreditoConocidos }
-				: { dpi };
+		// Los arreglos vacíos no se mandan: el contrato los tiene como opcionales
+		// y un `[]` solo agranda el cuerpo.
+		const cuerpo: ConsultaMoraRequest = { dpi };
+		if (numerosCreditoConocidos?.length) {
+			cuerpo.numerosCreditoConocidos = numerosCreditoConocidos;
+		}
+		if (numerosCreditoGarantizados?.length) {
+			cuerpo.numerosCreditoGarantizados = numerosCreditoGarantizados;
+		}
 
 		let crudo: unknown;
 		try {

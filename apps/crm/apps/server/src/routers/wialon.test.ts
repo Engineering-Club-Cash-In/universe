@@ -2326,7 +2326,11 @@ describe("wialonRouter", () => {
 				wialonUnitId: 28554757,
 				wialonUnitName: "u",
 			};
-			errorSelectVehiculo = new Error('column "wialon_unit_id" does not exist');
+			// Forma real del error (DrizzleQueryError con el de pg en `cause`).
+			errorSelectVehiculo = Object.assign(
+				new Error('column "wialon_unit_id" does not exist'),
+				{ cause: { code: "42703" } },
+			);
 			setWialonClient(
 				clienteWialon((bodyStr) => {
 					if (bodyStr.includes("core%2Fsearch_items")) {
@@ -2364,6 +2368,42 @@ describe("wialonRouter", () => {
 			expect(res.estado).toBe("vinculado");
 			if (res.estado !== "vinculado") throw new Error("estado inesperado");
 			expect(res.vinculoOrigen).toBe("placa");
+		});
+
+		it("un error de base que no es de columna inexistente no entra al fallback", async () => {
+			// Un timeout no dice nada sobre la migración: el fallback se saltaría
+			// el chequeo de unidad asignada a otro vehículo. Se responde sin
+			// ubicación y sin consultar Wialon.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "u",
+			};
+			errorSelectVehiculo = Object.assign(new Error("canceling statement"), {
+				cause: { code: "57014" },
+			});
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					return new Response("{}", { status: 200 });
+				}),
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("no_disponible");
+				expect(svcs.filter((x) => x !== "token/login")).toEqual([]);
+			} finally {
+				errorSelectVehiculo = null;
+			}
 		});
 	});
 

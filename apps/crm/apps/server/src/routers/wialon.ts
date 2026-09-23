@@ -127,6 +127,23 @@ export function mapWialonErrorToOrpc(error: unknown): never {
 }
 
 /**
+ * ¿El error es de Postgres "undefined_column" (42703)? Drizzle 0.44 lo envuelve
+ * en DrizzleQueryError y deja el error de pg en `cause` (confirmado contra la
+ * base real); se revisan los dos por si cambia el envoltorio.
+ */
+function esColumnaInexistente(error: unknown): boolean {
+	const codigo = (e: unknown) =>
+		typeof e === "object" && e !== null && "code" in e
+			? (e as { code?: unknown }).code
+			: undefined;
+	const causa =
+		typeof error === "object" && error !== null && "cause" in error
+			? (error as { cause?: unknown }).cause
+			: undefined;
+	return codigo(error) === "42703" || codigo(causa) === "42703";
+}
+
+/**
  * Lee el vehículo con las columnas de vínculo Wialon (CB-118).
  *
  * OJO — deuda temporal: la migración 0057 está commiteada pero puede no estar
@@ -160,6 +177,11 @@ async function leerVehiculoParaGps(vehicleId: string): Promise<{
 			.limit(1);
 		return filas[0] ? { ...filas[0], columnasVinculo: true } : null;
 	} catch (error) {
+		// Solo "columna inexistente" (0057 sin aplicar) entra al fallback.
+		// Cualquier otra falla (timeout, cancelación) se propaga: el fallback
+		// se salta el chequeo de unidad asignada a otro vehículo, así que
+		// usarlo ante un error transitorio podría mostrar el carro equivocado.
+		if (!esColumnaInexistente(error)) throw error;
 		console.warn("WIALON_VINCULO_COLUMNAS_NO_DISPONIBLES", {
 			vehicleId,
 			message: error instanceof Error ? error.message : String(error),

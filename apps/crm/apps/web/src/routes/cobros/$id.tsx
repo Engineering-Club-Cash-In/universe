@@ -584,18 +584,13 @@ function RouteComponent() {
 										<CalendarClock className="h-4 w-4 text-muted-foreground" />
 										<span className="font-medium">Días de Mora:</span>
 									</div>
-									<p>
-										{caso.estadoMora === "mora_30"
-											? "30"
-											: caso.estadoMora === "mora_60"
-												? "60"
-												: caso.estadoMora === "mora_90"
-													? "90"
-													: caso.estadoMora === "mora_120"
-														? "120+"
-														: "0"}{" "}
-										días
-									</p>
+									{/*
+									 * Días REALES de atraso (los de la cuota vencida más
+									 * antigua), no la etiqueta del bucket de aging: la mora se
+									 * cobra por día, así que anunciar "30 días" al lado de un
+									 * monto de 3 días es una contradicción frente al cliente.
+									 */}
+									<p>{caso.diasMoraMaximo ?? 0} días</p>
 								</div>
 								<div className="space-y-2">
 									<div className="flex items-center gap-2 text-sm">

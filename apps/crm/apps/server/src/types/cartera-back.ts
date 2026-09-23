@@ -204,6 +204,13 @@ export interface CreditoDetailResponse {
 	mora: CarteraMoraCredito | null;
 	deuda_total_con_mora: string;
 	proxima_cuota?: CarteraCuotaCredito | null;
+	/**
+	 * Días REALES de atraso del crédito: los de la cuota vencida MÁS ANTIGUA
+	 * entre las que mueven la mora. cartera-back los calcula junto con el monto
+	 * proporcional (`incrementosMoraPorCredito`), así que cuadran con él.
+	 * Ausente si la proyección de mora falló (cartera-back responde igual).
+	 */
+	diasAtrasoMoraMaximo?: number;
 }
 
 /**

@@ -255,6 +255,7 @@ export async function sendContractLinksToLead(params: {
 				logPrefix: modoPrueba
 					? "[SimpleTech][contratos][TEST]"
 					: "[SimpleTech][contratos]",
+				ocultarEnlacesEnLog: true,
 			});
 
 			if (resultado.success) {
@@ -542,6 +543,7 @@ export const messagingRouter = {
 				logPrefix: modoPrueba
 					? "[SimpleTech][manual][TEST]"
 					: "[SimpleTech][manual]",
+				ocultarEnlacesEnLog: true,
 			});
 			const status: "sent" | "failed" = sendResult.success ? "sent" : "failed";
 			const reason: string | null = sendResult.success

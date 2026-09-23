@@ -164,6 +164,29 @@ export async function createPublicLead(c: Context) {
 		const creditType = body.creditType || "autocompra";
 		const hasDpi = !!(body.dpi && body.dpi.trim() !== "");
 
+		// 🔴 Acá NO va el gate de mora por DPI, y no es un olvido.
+		//
+		// Esta ruta es anónima a propósito: `POST /api/public/lead` no pide
+		// credenciales. Consultar la mora acá convertiría el endpoint en un oráculo
+		// público de situación crediticia — cualquiera manda el DPI de un tercero
+		// y el 400 le dice que esa persona es cliente y está en mora o en convenio.
+		//
+		// Y tampoco filtraría nada: mirá el `hasDpi` de arriba, el DPI es OPCIONAL.
+		// Quien quisiera esquivar el gate solo tendría que no mandarlo, y el lead
+		// entra igual. Bloquea al honesto e informa al malicioso.
+		//
+		// ⚠️ Un lead creado por acá NO pasa por el gate después. El lead nace con
+		// el DPI ya puesto, así que `createLead` nunca corre para él y `updateLead`
+		// solo consulta cuando el DPI cambia (ver `requiereConsultaDeMora`): si
+		// nadie se lo toca, no se consulta nunca. O sea que este lead entra sin que
+		// su mora se haya mirado, y así queda.
+		//
+		// Lo que sí lo alcanza es indirecto y parcial: cuando el gate corre para
+		// este DPI en cualquiera de los seis puntos, el CRM aporta los
+		// `numeroSifco` de las oportunidades de sus leads
+		// (`lib/numeros-sifco-por-dpi.ts`), y eso hace visibles los créditos que
+		// SIFCO no sabe devolver. El corte en el avance de la oportunidad es una
+		// decisión aparte y todavía no está construido: no lo des por hecho.
 		if (hasDpi) {
 			const resultadoDpi = validarDpi(body.dpi);
 			if (!resultadoDpi.valid) {

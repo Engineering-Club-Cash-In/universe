@@ -595,7 +595,10 @@ async function resolverCasoParaGps(
 ): Promise<{ numeroCreditoSifco: string | null }> {
 	await assertAccesoCasoCobro(casoCobroId, userId, userRole);
 
-	const [fila] = await db
+	// TODAS las oportunidades con el SIFCO del caso, sin filtrar por el
+	// vehicleId del input: numero_sifco no es único, y filtrar por el input
+	// dejaba que cualquier oportunidad duplicada autorizara su vehículo.
+	const filas = await db
 		.select({
 			casoSifco: casosCobros.numeroCreditoSifco,
 			vehiculoOportunidad: opportunities.vehicleId,
@@ -605,18 +608,31 @@ async function resolverCasoParaGps(
 			opportunities,
 			and(
 				eq(opportunities.numeroSifco, casosCobros.numeroCreditoSifco),
-				eq(opportunities.vehicleId, vehicleId),
+				isNotNull(opportunities.vehicleId),
 			),
 		)
-		.where(eq(casosCobros.id, casoCobroId))
-		.limit(1);
+		.where(eq(casosCobros.id, casoCobroId));
 
-	if (!fila || fila.vehiculoOportunidad !== vehicleId) {
+	const vehiculosDelCaso = new Set(
+		filas
+			.map((f) => f.vehiculoOportunidad)
+			.filter((v): v is string => v != null),
+	);
+	if (filas.length === 0 || !vehiculosDelCaso.has(vehicleId)) {
 		throw new ORPCError("NOT_FOUND", {
 			message: "Caso de cobro no encontrado o sin acceso.",
 		});
 	}
-	return { numeroCreditoSifco: fila.casoSifco ?? null };
+	// Varias oportunidades con vehículos DISTINTOS: la ficha toma una sin orden
+	// determinista, así que no hay forma de saber cuál es el carro del crédito.
+	// Fail closed hasta que se corrijan los datos.
+	if (vehiculosDelCaso.size > 1) {
+		throw new ORPCError("CONFLICT", {
+			message:
+				"El crédito tiene más de un vehículo registrado; no se puede determinar cuál consultar. Hay que corregir las oportunidades del SIFCO.",
+		});
+	}
+	return { numeroCreditoSifco: filas[0]?.casoSifco ?? null };
 }
 
 export const wialonRouter = {

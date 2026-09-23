@@ -29,6 +29,8 @@ let filasAfectadasUpdate = 1;
 // Gate de la ficha (resolverCasoParaGps): si el asesor tiene acceso al caso y
 // qué vehículo/SIFCO devuelve el join caso ⨝ oportunidad ⨝ contrato.
 let accesoCasoMock = true;
+// Si se define, reemplaza a casoGpsMock con varias filas (SIFCO duplicado).
+let casoGpsFilasMock: Record<string, unknown>[] | null = null;
 // Si la unidad deducida por placa ya está guardada en otro vehículo.
 let unidadAsignadaAOtroMock = false;
 // Cuántas veces se tomó el lock por unidad (pg_advisory_xact_lock vía execute).
@@ -97,12 +99,12 @@ function mockDbAdmin() {
 				};
 			}
 
-			// resolverCasoParaGps: caso ⨝ oportunidad ⨝ contrato.
+			// resolverCasoParaGps: caso ⨝ oportunidades con su SIFCO (todas).
 			if (campos && "casoSifco" in campos) {
 				const encadenable = {
 					leftJoin: () => encadenable,
-					where: () => encadenable,
-					limit: async () => (casoGpsMock ? [casoGpsMock] : []),
+					where: async () =>
+						casoGpsFilasMock ?? (casoGpsMock ? [casoGpsMock] : []),
 				};
 				return { from: () => encadenable };
 			}
@@ -1536,6 +1538,70 @@ describe("wialonRouter", () => {
 					vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
 					vehiculoContrato: null,
 				};
+			}
+		});
+
+		it("con el SIFCO duplicado en oportunidades de vehículos distintos, no devuelve ubicación", async () => {
+			// El input coincide con UNA de las oportunidades, pero la ficha no
+			// elige de forma determinista: no se puede saber cuál es el carro.
+			casoGpsFilasMock = [
+				{
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+				},
+				{
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "22222222-2222-2222-2222-222222222222",
+				},
+			];
+			try {
+				await expect(
+					call(
+						wialonRouter.getGpsVehiculo,
+						{
+							casoCobroId: "33333333-3333-3333-3333-333333333333",
+							vehicleId: "11111111-1111-1111-1111-111111111111",
+							motivo: "Verificar ubicación para gestión de cobro",
+						},
+						{ context: cobrosContext as unknown as Context },
+					),
+				).rejects.toMatchObject({ code: "CONFLICT" });
+				expect(insertsGpsAuditoria).toHaveLength(0);
+			} finally {
+				casoGpsFilasMock = null;
+			}
+		});
+
+		it("oportunidades duplicadas con el MISMO vehículo no bloquean la consulta", async () => {
+			casoGpsFilasMock = [
+				{
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+				},
+				{
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+				},
+			];
+			filaVehiculoMock = {
+				licensePlate: null,
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(clienteWialon(() => new Response("{}", { status: 200 })));
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("sin_vinculo");
+			} finally {
+				casoGpsFilasMock = null;
 			}
 		});
 

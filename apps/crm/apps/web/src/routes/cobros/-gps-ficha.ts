@@ -191,7 +191,7 @@ export function limpiarPlacaParaBusqueda(valor: string): string {
 
 /** Texto para cada motivo por el que un vehículo no tiene unidad vinculada. */
 export const MOTIVO_SIN_VINCULO: Record<
-	"sin_placa" | "sin_coincidencia" | "ambiguo",
+	"sin_placa" | "sin_coincidencia" | "ambiguo" | "asignada_a_otro",
 	string
 > = {
 	sin_placa:
@@ -200,4 +200,6 @@ export const MOTIVO_SIN_VINCULO: Record<
 		"Ninguna unidad del catálogo de La Legión coincide con la placa de este vehículo.",
 	ambiguo:
 		"Varias unidades coinciden con esta placa. Hay que elegir cuál corresponde.",
+	asignada_a_otro:
+		"La unidad GPS que coincide con esta placa está vinculada a otro vehículo. Un supervisor debe confirmar a cuál corresponde.",
 };

@@ -143,17 +143,15 @@ export type WialonUnitsCatalogInput = z.input<
 // ── GPS del vehículo en la Ficha 360 (CB-118) ─────────────────────────────────
 
 export const gpsVehiculoInputSchema = z.object({
+	// El caso da el gate de acceso (asesor asignado) y el SIFCO de la bitácora;
+	// el servidor verifica que vehicleId sea el vehículo de ese caso.
+	casoCobroId: z.string().uuid(),
 	vehicleId: z.string().uuid(),
 	// La historia exige motivo obligatorio para CADA consulta de ubicación —
 	// no es metadata opcional, es la condición para que el handler siquiera
 	// llame a Wialon. Min 5: un motivo de una palabra suelta ("sí", "ver") no
 	// deja rastro útil en la auditoría.
 	motivo: z.string().trim().min(5).max(300),
-	// Denormalizado desde el caso para que la auditoría diga "para qué cuenta"
-	// sin tener que resolverlo de nuevo desde vehicleId en el momento de leer
-	// el log, meses después. Opcional: la ficha puede no tener el SIFCO a mano
-	// en todos los casos (vehículo migrado).
-	numeroCreditoSifco: z.string().trim().optional(),
 });
 export type GpsVehiculoInput = z.infer<typeof gpsVehiculoInputSchema>;
 
@@ -192,7 +190,14 @@ export const gpsVehiculoOutputSchema = z.discriminatedUnion("estado", [
 	}),
 	z.object({
 		estado: z.literal("sin_vinculo"),
-		motivo: z.enum(["sin_placa", "sin_coincidencia", "ambiguo"]),
+		motivo: z.enum([
+			"sin_placa",
+			"sin_coincidencia",
+			"ambiguo",
+			// La unidad que coincide con la placa ya está guardada en otro
+			// vehículo (el GPS se reasignó): no se deduce, confirma un supervisor.
+			"asignada_a_otro",
+		]),
 		placa: z.string().nullable(),
 		// Solo se llenan cuando el motivo es "ambiguo": son las unidades entre las
 		// que el supervisor tiene que elegir.

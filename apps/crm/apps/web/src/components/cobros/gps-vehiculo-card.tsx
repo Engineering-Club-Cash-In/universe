@@ -63,13 +63,15 @@ const MOTIVO_MIN_LENGTH = 5;
  * de nuevo por este mismo gate.
  */
 export function GpsVehiculoCard({
+	casoCobroId,
 	vehicleId,
 	esSupervisor,
-	numeroCreditoSifco,
 }: {
+	// El servidor valida acceso al caso y que el vehículo sea el suyo, y toma
+	// de ahí el SIFCO de la bitácora (no se manda desde el cliente).
+	casoCobroId: string;
 	vehicleId: string;
 	esSupervisor: boolean;
-	numeroCreditoSifco?: string | null;
 }) {
 	const [motivo, setMotivo] = useState("");
 	const [motivoConfirmado, setMotivoConfirmado] = useState<string | null>(null);
@@ -83,11 +85,7 @@ export function GpsVehiculoCard({
 			input:
 				motivoConfirmado == null
 					? skipToken
-					: {
-							vehicleId,
-							motivo: motivoConfirmado,
-							...(numeroCreditoSifco ? { numeroCreditoSifco } : {}),
-						},
+					: { casoCobroId, vehicleId, motivo: motivoConfirmado },
 		}),
 		// Cada fetch inserta una fila de auditoría en el servidor: ningún
 		// refetch implícito (foco de ventana, reconexión, dato "stale", reintento)
@@ -98,6 +96,9 @@ export function GpsVehiculoCard({
 		// queda auditado, en vez de servir la ubicación vieja desde caché.
 		staleTime: Number.POSITIVE_INFINITY,
 		gcTime: 0,
+		// El "retry" del toast global de errores invalida todas las queries;
+		// esta marca la excluye (ver utils/orpc.ts).
+		meta: { auditada: true },
 		refetchOnWindowFocus: false,
 		refetchOnReconnect: false,
 		refetchOnMount: false,
@@ -181,7 +182,9 @@ export function GpsVehiculoCard({
 						No se pudo consultar el GPS en este momento
 						{gps.data?.estado === "no_disponible" && gps.data.error.message
 							? `: ${gps.data.error.message}`
-							: "."}
+							: gps.error?.message
+								? `: ${gps.error.message}`
+								: "."}
 					</p>
 				)}
 				{motivoConfirmado != null && (

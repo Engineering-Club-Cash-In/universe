@@ -4375,12 +4375,14 @@ function RouteComponent() {
 						    ruta no se re-monta al cambiar $id, y sin él el motivo ya
 						    confirmado en un crédito dispararía una consulta auditada en el
 						    siguiente. Va el crédito y no solo el vehículo porque un mismo
-						    vehículo puede estar en dos créditos (refinanciamiento). */}
-						{caso.vehicleId && (
+						    vehículo puede estar en dos créditos (refinanciamiento).
+						    Requiere caso.id: el servidor valida el acceso por caso (asesor
+						    asignado) antes de devolver la ubicación. */}
+						{caso.id && caso.vehicleId && (
 							<GpsVehiculoCard
-								key={`${id}:${caso.vehicleId}`}
+								casoCobroId={caso.id}
 								esSupervisor={esSupervisorCobros}
-								numeroCreditoSifco={caso.numeroCreditoSifco ?? null}
+								key={`${id}:${caso.vehicleId}`}
 								vehicleId={caso.vehicleId}
 							/>
 						)}

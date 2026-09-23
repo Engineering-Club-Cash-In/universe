@@ -23,12 +23,25 @@ let bitacoraFilasMock: Record<string, unknown>[] = [];
 // "afecta" el mock: 0 simula un vehicleId inexistente.
 let updatesVehiculo: Record<string, unknown>[] = [];
 let filasAfectadasUpdate = 1;
+// Gate de la ficha (resolverCasoParaGps): si el asesor tiene acceso al caso y
+// qué vehículo/SIFCO devuelve el join caso ⨝ oportunidad ⨝ contrato.
+let accesoCasoMock = true;
+// Si la unidad deducida por placa ya está guardada en otro vehículo.
+let unidadAsignadaAOtroMock = false;
+let casoGpsMock: Record<string, unknown> | null = {
+	casoSifco: "01010214100000",
+	vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+	vehiculoContrato: null,
+};
 // Filas vehicles ⨝ opportunities que lee creditosPorUnidad (catálogo admin).
 let catalogoCreditosMock: Record<string, unknown>[] = [];
 let bitacoraTotalMock = 0;
 
 function mockDbAdmin() {
-	return {
+	const mockDb = {
+		// vincularUnidadWialon desvincula y vincula en una transacción: el mock
+		// corre el callback con el mismo objeto (sin rollback real).
+		transaction: async <T>(fn: (tx: unknown) => Promise<T>) => fn(mockDb),
 		select: (campos?: Record<string, unknown>) => {
 			// El select del middleware de auth no pasa proyección; los de
 			// leerVehiculoParaGps sí, y son los únicos que piden licensePlate.
@@ -39,6 +52,39 @@ function mockDbAdmin() {
 			const esConteoBitacora = Boolean(
 				campos && "total" in campos && Object.keys(campos).length === 1,
 			);
+
+			// assertAccesoCasoCobro: select({ id }) a casos_cobros.
+			if (campos && Object.keys(campos).length === 1 && "id" in campos) {
+				return {
+					from: () => ({
+						where: () => ({
+							limit: async () => (accesoCasoMock ? [{ id: "caso" }] : []),
+						}),
+					}),
+				};
+			}
+
+			// getGpsVehiculo: ¿la unidad deducida ya está en otro vehículo?
+			if (campos && "vehiculoConUnidad" in campos) {
+				return {
+					from: () => ({
+						where: () => ({
+							limit: async () =>
+								unidadAsignadaAOtroMock ? [{ vehiculoConUnidad: "otro" }] : [],
+						}),
+					}),
+				};
+			}
+
+			// resolverCasoParaGps: caso ⨝ oportunidad ⨝ contrato.
+			if (campos && "casoSifco" in campos) {
+				const encadenable = {
+					leftJoin: () => encadenable,
+					where: () => encadenable,
+					limit: async () => (casoGpsMock ? [casoGpsMock] : []),
+				};
+				return { from: () => encadenable };
+			}
 
 			// creditosPorUnidad es el único select que pide numeroSifco: from →
 			// innerJoin → where, que resuelve con las filas del mock.
@@ -118,6 +164,7 @@ function mockDbAdmin() {
 			},
 		}),
 	};
+	return mockDb;
 }
 
 mock.module("../db", () => ({ db: mockDbAdmin() }));
@@ -1008,6 +1055,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Verificar ubicación para gestión de cobro",
 				},
@@ -1024,7 +1072,9 @@ describe("wialonRouter", () => {
 
 			// CB-118: "cada consulta queda auditada con usuario, motivo y cuenta".
 			expect(insertsGpsAuditoria).toHaveLength(1);
+			// El SIFCO de la bitácora sale del caso, no de lo que mande el cliente.
 			expect(insertsGpsAuditoria[0]).toMatchObject({
+				numeroCreditoSifco: "01010214100000",
 				vehicleId: "11111111-1111-1111-1111-111111111111",
 				motivo: "Verificar ubicación para gestión de cobro",
 				unitId: "28554757",
@@ -1043,6 +1093,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Cliente en mora crítica, ubicar para recuperación",
 				},
@@ -1061,12 +1112,108 @@ describe("wialonRouter", () => {
 			await expect(
 				call(
 					wialonRouter.getGpsVehiculo,
-					{ vehicleId: "11111111-1111-1111-1111-111111111111", motivo: "ok" },
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "ok",
+					},
 					{ context: cobrosContext as unknown as Context },
 				),
 			).rejects.toThrow();
 			// Ni siquiera llegó a intentar auditar: la validación de zod corta antes.
 			expect(insertsGpsAuditoria).toHaveLength(0);
+		});
+
+		it("rechaza un caso al que el asesor no tiene acceso, sin consultar ni auditar", async () => {
+			accesoCasoMock = false;
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "u",
+			};
+			try {
+				await expect(
+					call(
+						wialonRouter.getGpsVehiculo,
+						{
+							casoCobroId: "33333333-3333-3333-3333-333333333333",
+							vehicleId: "11111111-1111-1111-1111-111111111111",
+							motivo: "Verificar ubicación para gestión de cobro",
+						},
+						{ context: cobrosContext as unknown as Context },
+					),
+				).rejects.toMatchObject({ code: "NOT_FOUND" });
+				expect(insertsGpsAuditoria).toHaveLength(0);
+			} finally {
+				accesoCasoMock = true;
+			}
+		});
+
+		it("rechaza un vehículo que no es el del caso (caso propio + vehículo ajeno)", async () => {
+			// Sin esta validación el gate de acceso se saltaba pasando el UUID de
+			// un caso asignado junto con el vehículo de otro cliente.
+			casoGpsMock = {
+				casoSifco: "01010214100000",
+				vehiculoOportunidad: null,
+				vehiculoContrato: "99999999-9999-9999-9999-999999999999",
+			};
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "u",
+			};
+			try {
+				await expect(
+					call(
+						wialonRouter.getGpsVehiculo,
+						{
+							casoCobroId: "33333333-3333-3333-3333-333333333333",
+							vehicleId: "11111111-1111-1111-1111-111111111111",
+							motivo: "Verificar ubicación para gestión de cobro",
+						},
+						{ context: cobrosContext as unknown as Context },
+					),
+				).rejects.toMatchObject({ code: "NOT_FOUND" });
+				expect(insertsGpsAuditoria).toHaveLength(0);
+			} finally {
+				casoGpsMock = {
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+					vehiculoContrato: null,
+				};
+			}
+		});
+
+		it("acepta el vehículo del contrato del caso aunque la oportunidad no lo tenga", async () => {
+			casoGpsMock = {
+				casoSifco: "01010214100000",
+				vehiculoOportunidad: null,
+				vehiculoContrato: "11111111-1111-1111-1111-111111111111",
+			};
+			filaVehiculoMock = {
+				licensePlate: null,
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(clienteWialon(() => new Response("{}", { status: 200 })));
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("sin_vinculo");
+			} finally {
+				casoGpsMock = {
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+					vehiculoContrato: null,
+				};
+			}
 		});
 
 		it("resuelve por placa cuando no hay vínculo fijado", async () => {
@@ -1101,6 +1248,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Verificar ubicación para gestión de cobro",
 				},
@@ -1119,6 +1267,53 @@ describe("wialonRouter", () => {
 				wialonUnitName: "Bidgar Yatz - C-629BNC",
 				wialonVinculadoPor: "auto:placa",
 			});
+		});
+
+		it("no re-deduce una unidad que un supervisor reasignó a otro vehículo", async () => {
+			// Tras reasignar el GPS al vehículo B, el A queda sin vínculo pero el
+			// nombre de la unidad sigue con su placa: deducir de nuevo desharía la
+			// reasignación y el crédito de A mostraría el carro B.
+			unidadAsignadaAOtroMock = true;
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(
+				clienteWialon(
+					() =>
+						new Response(
+							JSON.stringify({
+								totalItemsCount: 1,
+								indexFrom: 0,
+								indexTo: 0,
+								items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+							}),
+							{ status: 200 },
+						),
+				),
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("sin_vinculo");
+				if (res.estado !== "sin_vinculo") throw new Error("estado inesperado");
+				expect(res.motivo).toBe("asignada_a_otro");
+				expect(res.candidatos).toEqual([
+					{ id: 999, nm: "Bidgar Yatz - C-629BNC" },
+				]);
+				expect(updatesVehiculo).toHaveLength(0);
+				expect(insertsGpsAuditoria).toHaveLength(1);
+			} finally {
+				unidadAsignadaAOtroMock = false;
+			}
 		});
 
 		it("un vínculo guardado por deducción de placa se sigue mostrando como deducción", async () => {
@@ -1142,6 +1337,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Verificar ubicación para gestión de cobro",
 				},
@@ -1183,6 +1379,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Verificar ubicación para gestión de cobro",
 				},
@@ -1206,6 +1403,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Verificar ubicación para gestión de cobro",
 				},
@@ -1234,6 +1432,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Verificar ubicación para gestión de cobro",
 				},
@@ -1260,6 +1459,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Verificar ubicación para gestión de cobro",
 				},
@@ -1318,6 +1518,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Verificar ubicación para gestión de cobro",
 				},
@@ -1347,6 +1548,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Verificar ubicación para gestión de cobro",
 				},
@@ -1391,6 +1593,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Verificar ubicación para gestión de cobro",
 				},
@@ -1437,6 +1640,7 @@ describe("wialonRouter", () => {
 			const res = await call(
 				wialonRouter.getGpsVehiculo,
 				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
 					vehicleId: "11111111-1111-1111-1111-111111111111",
 					motivo: "Verificar ubicación para gestión de cobro",
 				},
@@ -1531,6 +1735,55 @@ describe("wialonRouter", () => {
 					},
 				),
 			).rejects.toMatchObject({ code: "NOT_FOUND" });
+		});
+
+		it("al reasignar una unidad se la quita al vehículo que la tenía", async () => {
+			// Si no, el crédito anterior seguiría mostrando la ubicación del
+			// carro al que se pasó el GPS.
+			const logs: unknown[][] = [];
+			const originalInfo = console.info;
+			console.info = (...args: unknown[]) => {
+				logs.push(args);
+			};
+			try {
+				await call(
+					wialonRouter.vincularUnidadWialon,
+					{
+						vehicleId: "22222222-2222-2222-2222-222222222222",
+						unitId: 28554757,
+						unitName: "Bidgar Yatz - C-629BNC",
+					},
+					{
+						context: {
+							headers: new Headers(),
+							session: {
+								user: { id: "user-sup", email: "sup@example.com" },
+							},
+							user: {
+								id: "user-sup",
+								email: "sup@example.com",
+								role: "admin",
+							},
+							userId: "user-sup",
+							userRole: "admin",
+						} as unknown as Context,
+					},
+				);
+			} finally {
+				console.info = originalInfo;
+			}
+
+			// Primero se libera la unidad en los demás vehículos, después se fija.
+			expect(updatesVehiculo).toHaveLength(2);
+			expect(updatesVehiculo[0]).toMatchObject({
+				wialonUnitId: null,
+				wialonVinculadoPor: null,
+			});
+			expect(updatesVehiculo[1]).toMatchObject({ wialonUnitId: 28554757 });
+			const auditoria = logs.find((l) => l[0] === "WIALON_UNIDAD_VINCULADA");
+			expect(
+				(auditoria?.[1] as Record<string, unknown>).vehiculosDesvinculados,
+			).toBeDefined();
 		});
 	});
 

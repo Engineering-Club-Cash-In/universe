@@ -17,10 +17,12 @@ import {
 	ilike,
 	isNotNull,
 	isNull,
+	ne,
 	notLike,
 } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { opportunities } from "../db/schema/crm";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import { vehicles } from "../db/schema/vehicles";
@@ -56,6 +58,7 @@ import {
 	wialonUnitsCatalogInputSchema,
 	wialonUnitsCatalogOutputSchema,
 } from "../services/wialon/wialon-types";
+import { assertAccesoCasoCobro } from "./cobros";
 
 export function mapWialonErrorToOrpc(error: unknown): never {
 	if (error instanceof WialonClientError) {
@@ -349,6 +352,62 @@ async function creditosPorUnidad(
 	return resultado;
 }
 
+/**
+ * Gate de la Ficha 360 antes de consultar el GPS (CB-118).
+ *
+ * 1. Acceso al caso: el mismo `assertAccesoCasoCobro` que usan los demás
+ *    procedures de la ficha — un asesor regular solo ve sus casos asignados.
+ *    Sin esto, cualquier usuario de cobros con el UUID de un vehículo ajeno
+ *    obtenía su ubicación en vivo.
+ * 2. El vehículo tiene que ser EL del caso, resuelto igual que la ficha
+ *    (oportunidad con el SIFCO del caso, o el contrato del caso). Si no, el
+ *    gate del paso 1 se saltaría pasando un caso propio con un vehículo ajeno.
+ * 3. El SIFCO para la bitácora sale del caso, no del cliente: antes venía en
+ *    el input y podía omitirse o falsearse.
+ *
+ * Lanza NOT_FOUND (mismo mensaje en ambos casos, para no revelar si el caso o
+ * el vehículo existen) y no deja fila de auditoría: no se mostró nada.
+ */
+async function resolverCasoParaGps(
+	casoCobroId: string,
+	vehicleId: string,
+	userId: string,
+	userRole: string,
+): Promise<{ numeroCreditoSifco: string | null }> {
+	await assertAccesoCasoCobro(casoCobroId, userId, userRole);
+
+	const [fila] = await db
+		.select({
+			casoSifco: casosCobros.numeroCreditoSifco,
+			vehiculoOportunidad: opportunities.vehicleId,
+			vehiculoContrato: contratosFinanciamiento.vehicleId,
+		})
+		.from(casosCobros)
+		.leftJoin(
+			opportunities,
+			and(
+				eq(opportunities.numeroSifco, casosCobros.numeroCreditoSifco),
+				eq(opportunities.vehicleId, vehicleId),
+			),
+		)
+		.leftJoin(
+			contratosFinanciamiento,
+			eq(contratosFinanciamiento.id, casosCobros.contratoId),
+		)
+		.where(eq(casosCobros.id, casoCobroId))
+		.limit(1);
+
+	const vehiculoDelCaso =
+		fila?.vehiculoOportunidad === vehicleId ||
+		fila?.vehiculoContrato === vehicleId;
+	if (!fila || !vehiculoDelCaso) {
+		throw new ORPCError("NOT_FOUND", {
+			message: "Caso de cobro no encontrado o sin acceso.",
+		});
+	}
+	return { numeroCreditoSifco: fila.casoSifco ?? null };
+}
+
 export const wialonRouter = {
 	/**
 	 * Busca y lista las unidades de rastreo GPS (svc: core/search_items)
@@ -610,6 +669,15 @@ export const wialonRouter = {
 		.input(gpsVehiculoInputSchema)
 		.output(gpsVehiculoOutputSchema)
 		.handler(async ({ input, context }) => {
+			// Fuera del try/catch a propósito: sin acceso al caso se responde
+			// error, no "no_disponible" — no es una falla de Wialon.
+			const { numeroCreditoSifco } = await resolverCasoParaGps(
+				input.casoCobroId,
+				input.vehicleId,
+				context.userId,
+				context.userRole,
+			);
+
 			// La auditoría se registra ANTES de resolver la unidad y NUNCA aborta
 			// la respuesta: la historia pide dejar rastro de que alguien consultó
 			// con tal motivo, no solo de las consultas que resultaron en datos.
@@ -635,7 +703,7 @@ export const wialonRouter = {
 				try {
 					await db.insert(gpsConsultaLogs).values({
 						vehicleId: input.vehicleId,
-						numeroCreditoSifco: input.numeroCreditoSifco ?? null,
+						numeroCreditoSifco,
 						motivo: input.motivo,
 						unitId: unitId != null ? String(unitId) : null,
 						unitName,
@@ -731,6 +799,31 @@ export const wialonRouter = {
 					};
 				}
 
+				// La unidad deducida ya está guardada en OTRO vehículo: pasa cuando
+				// un supervisor reasignó el GPS a otro carro (vincularUnidadWialon
+				// se la quita a este). El nombre de la unidad todavía tiene esta
+				// placa, así que deducir de nuevo desharía la reasignación y este
+				// crédito mostraría la ubicación del otro carro. Decide un supervisor.
+				const [asignadaAOtro] = await db
+					.select({ vehiculoConUnidad: vehicles.id })
+					.from(vehicles)
+					.where(
+						and(
+							eq(vehicles.wialonUnitId, unidad.id),
+							ne(vehicles.id, input.vehicleId),
+						),
+					)
+					.limit(1);
+				if (asignadaAOtro) {
+					await registrarAuditoria(null, null);
+					return {
+						estado: "sin_vinculo" as const,
+						motivo: "asignada_a_otro" as const,
+						placa,
+						candidatos: [{ id: unidad.id, nm: unidad.nm }],
+					};
+				}
+
 				await registrarAuditoria(unidad.id, unidad.nm);
 				await fijarVinculoPorPlaca(input.vehicleId, unidad.id, unidad.nm);
 				return await construirRespuestaVinculada(
@@ -766,24 +859,48 @@ export const wialonRouter = {
 			const vinculadoAt = new Date();
 			const userEmail = context.user?.email || context.session?.user?.email;
 
-			const actualizados = await db
-				.update(vehicles)
-				.set({
-					wialonUnitId: input.unitId,
-					wialonUnitName: input.unitName,
-					wialonVinculadoAt: vinculadoAt,
-					wialonVinculadoPor: userEmail ?? context.userId ?? null,
-				})
-				.where(eq(vehicles.id, input.vehicleId))
-				.returning({ id: vehicles.id });
+			// Reasignar una unidad (ej. el GPS se pasó a otro carro tras una
+			// recuperación) la MUEVE: se le quita a cualquier otro vehículo que la
+			// tuviera. Si no, el crédito anterior seguiría mostrando la ubicación
+			// del carro nuevo. En una transacción: si el vehículo destino no
+			// existe, tampoco se desvincula el anterior.
+			const { liberados } = await db.transaction(async (tx) => {
+				const liberados = await tx
+					.update(vehicles)
+					.set({
+						wialonUnitId: null,
+						wialonUnitName: null,
+						wialonVinculadoAt: null,
+						wialonVinculadoPor: null,
+					})
+					.where(
+						and(
+							eq(vehicles.wialonUnitId, input.unitId),
+							ne(vehicles.id, input.vehicleId),
+						),
+					)
+					.returning({ id: vehicles.id });
 
-			// Sin esto un vehicleId inexistente respondía success y el supervisor
-			// creía haber vinculado algo que no quedó guardado en ningún lado.
-			if (actualizados.length === 0) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "No se encontró el vehículo a vincular",
-				});
-			}
+				const actualizados = await tx
+					.update(vehicles)
+					.set({
+						wialonUnitId: input.unitId,
+						wialonUnitName: input.unitName,
+						wialonVinculadoAt: vinculadoAt,
+						wialonVinculadoPor: userEmail ?? context.userId ?? null,
+					})
+					.where(eq(vehicles.id, input.vehicleId))
+					.returning({ id: vehicles.id });
+
+				// Sin esto un vehicleId inexistente respondía success y el
+				// supervisor creía haber vinculado algo que no quedó guardado.
+				if (actualizados.length === 0) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "No se encontró el vehículo a vincular",
+					});
+				}
+				return { liberados };
+			});
 
 			console.info("WIALON_UNIDAD_VINCULADA", {
 				userId: context.userId,
@@ -791,6 +908,8 @@ export const wialonRouter = {
 				vehicleId: input.vehicleId,
 				unitId: input.unitId,
 				unitName: input.unitName,
+				// Vehículos a los que se les quitó la unidad al reasignarla.
+				vehiculosDesvinculados: liberados.map((v) => v.id),
 				timestamp: vinculadoAt.toISOString(),
 			});
 

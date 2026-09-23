@@ -1684,53 +1684,79 @@ export async function procesarMoras() {
         // Cero filas = otra ruta ya la apagó: no se toca el status, no se
         // escribe historial y el crédito cae en los omitidos — no se cuenta un
         // recálculo que no ocurrió.
-        const recalculadasFilas = await db
-          .update(moras_credito)
-          .set({
-            monto_mora: moraNuevaStr,
-            cuotas_atrasadas: cuotasAtrasadas,
-            updated_at: new Date(),
-          })
-          .where(
-            and(
-              eq(moras_credito.mora_id, moraActual.mora_id),
-              eq(moras_credito.activa, true),
-            ),
-          )
-          .returning({ mora_id: moras_credito.mora_id });
+        //
+        // 🧾 Los tres writes van JUNTOS en una transacción, por lo mismo que la
+        // rama CREACION de acá arriba: sueltos y autocommiteados, un fallo en
+        // el update de status o en el historial dejaba el monto de la mora ya
+        // cambiado sin el estado que le corresponde y, peor, SIN RASTRO en
+        // moras_historial — y el rastro es justo lo que esta rama vino a
+        // garantizar. Además el saldo de la mora y su evento son lo que le
+        // cobramos al cliente: no pueden discrepar. Adentro de la transacción
+        // cualquier fallo revierte también el recálculo.
+        // (Acá no hace falta el SAVEPOINT de la CREACION: no hay ninguna
+        // violación de restricción esperada que haya que absorber. Cualquier
+        // error revierte todo, que es lo correcto.)
+        let recalculoOk = false;
+        await db.transaction(async (txm) => {
+          const recalculadasFilas = await txm
+            .update(moras_credito)
+            .set({
+              monto_mora: moraNuevaStr,
+              cuotas_atrasadas: cuotasAtrasadas,
+              updated_at: new Date(),
+            })
+            .where(
+              and(
+                eq(moras_credito.mora_id, moraActual.mora_id),
+                eq(moras_credito.activa, true),
+              ),
+            )
+            .returning({ mora_id: moras_credito.mora_id });
 
-        if (recalculadasFilas.length === 0) {
+          if (recalculadasFilas.length === 0) return;
+
+          // Subir a MOROSO tampoco puede pisar un estado excluido: es el mismo
+          // cuidado que ya tienen los UPDATE que BAJAN a ACTIVO (condicionados a
+          // MOROSO para no des-castigar), en el sentido contrario. Sin la
+          // condición, un crédito que pasó a EN_CONVENIO/INCOBRABLE a media
+          // corrida volvía a MOROSO por la foto vieja del paso 1.
+          await txm
+            .update(creditos)
+            .set({ statusCredit: "MOROSO" })
+            .where(
+              and(
+                eq(creditos.credito_id, creditoId),
+                notInArray(creditos.statusCredit, STATUS_EXCLUIDOS_MORA_SQL),
+              ),
+            );
+
+          await registrarHistorialMora({
+            credito_id: creditoId,
+            mora_id: moraActual.mora_id,
+            tipo_evento: "RECALCULO",
+            origen: "PROCESO_AUTO",
+            monto_anterior: moraActual.monto_mora,
+            monto_nuevo: moraNuevaStr,
+            cuotas_atrasadas_anterior: moraActual.cuotas_atrasadas,
+            cuotas_atrasadas_nuevas: cuotasAtrasadas,
+            capital_credito: capitalStr,
+            porcentaje_mora: moraActual.porcentaje_mora,
+            dbClient: txm as unknown as typeof db,
+            // Dentro de la tx el swallow es mentiroso: sin esto, un historial
+            // fallido dejaría la tx abortada y el COMMIT sería un rollback
+            // silencioso mientras el contador dice "recalculada".
+            propagarError: true,
+          });
+
+          recalculoOk = true;
+        });
+
+        // El candado con cero filas sigue cayendo en el mismo balde de omitidos
+        // que antes: los contadores dicen lo que de verdad pasó.
+        if (!recalculoOk) {
           skippedInternally++;
           continue;
         }
-
-        // Subir a MOROSO tampoco puede pisar un estado excluido: es el mismo
-        // cuidado que ya tienen los UPDATE que BAJAN a ACTIVO (condicionados a
-        // MOROSO para no des-castigar), en el sentido contrario. Sin la
-        // condición, un crédito que pasó a EN_CONVENIO/INCOBRABLE a media
-        // corrida volvía a MOROSO por la foto vieja del paso 1.
-        await db
-          .update(creditos)
-          .set({ statusCredit: "MOROSO" })
-          .where(
-            and(
-              eq(creditos.credito_id, creditoId),
-              notInArray(creditos.statusCredit, STATUS_EXCLUIDOS_MORA_SQL),
-            ),
-          );
-
-        await registrarHistorialMora({
-          credito_id: creditoId,
-          mora_id: moraActual.mora_id,
-          tipo_evento: "RECALCULO",
-          origen: "PROCESO_AUTO",
-          monto_anterior: moraActual.monto_mora,
-          monto_nuevo: moraNuevaStr,
-          cuotas_atrasadas_anterior: moraActual.cuotas_atrasadas,
-          cuotas_atrasadas_nuevas: cuotasAtrasadas,
-          capital_credito: capitalStr,
-          porcentaje_mora: moraActual.porcentaje_mora,
-        });
 
         recalculadas++;
 

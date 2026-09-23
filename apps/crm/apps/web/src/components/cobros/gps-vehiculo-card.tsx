@@ -190,15 +190,14 @@ export function GpsVehiculoCard({
 				{motivoConfirmado != null && (
 					<div className="mt-4 flex items-center justify-between border-t pt-3">
 						<p className="text-muted-foreground text-xs">
-							{/* Sin auditoría (falló el registro o no hubo acceso al caso) el
-							    servidor no muestra ubicación: no decir que quedó registrada. */}
-							{gps.isError ||
-							(gps.data?.estado === "no_disponible" &&
-								gps.data.error.code === "AUDITORIA_NO_DISPONIBLE")
-								? "Consulta no registrada"
-								: gps.isLoading
-									? "Registrando consulta"
-									: "Consulta registrada"}{" "}
+							{/* El servidor informa si la consulta quedó en la bitácora
+							    (`auditada`), en todas las respuestas. Sin acceso al caso
+							    (error) tampoco se registró. */}
+							{gps.isLoading
+								? "Registrando consulta"
+								: gps.data?.auditada
+									? "Consulta registrada"
+									: "Consulta no registrada"}{" "}
 							— motivo: "{motivoConfirmado}"
 						</p>
 						<Button

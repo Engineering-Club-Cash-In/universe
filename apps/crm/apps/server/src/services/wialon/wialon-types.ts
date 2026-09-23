@@ -166,6 +166,9 @@ export type GpsVehiculoInput = z.infer<typeof gpsVehiculoInputSchema>;
 export const gpsVehiculoOutputSchema = z.discriminatedUnion("estado", [
 	z.object({
 		estado: z.literal("vinculado"),
+		// Si la consulta quedó en la bitácora. Con ubicación siempre es true
+		// (sin auditoría no se muestra ubicación).
+		auditada: z.boolean(),
 		unitId: z.number(),
 		unitName: z.string(),
 		// "persistido" = lo fijó un supervisor; "placa" = lo dedujo el sistema
@@ -190,6 +193,7 @@ export const gpsVehiculoOutputSchema = z.discriminatedUnion("estado", [
 	}),
 	z.object({
 		estado: z.literal("sin_vinculo"),
+		auditada: z.boolean(),
 		motivo: z.enum([
 			"sin_placa",
 			"sin_coincidencia",
@@ -205,6 +209,7 @@ export const gpsVehiculoOutputSchema = z.discriminatedUnion("estado", [
 	}),
 	z.object({
 		estado: z.literal("no_disponible"),
+		auditada: z.boolean(),
 		error: z.object({ code: z.string(), message: z.string() }),
 	}),
 ]);

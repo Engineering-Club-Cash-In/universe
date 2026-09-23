@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import { call, ORPCError } from "@orpc/server";
+import { casosCobros } from "../db/schema/cobros";
 import type { Context } from "../lib/context";
 import {
 	setWialonClient,
@@ -39,6 +40,8 @@ let casoGpsMock: Record<string, unknown> | null = {
 };
 // Filas vehicles ⨝ opportunities que lee creditosPorUnidad (catálogo admin).
 let catalogoCreditosMock: Record<string, unknown>[] = [];
+// Filas caso ⨝ contrato ⨝ vehículo (segunda fuente de creditosPorUnidad).
+let catalogoCreditosContratoMock: Record<string, unknown>[] = [];
 let bitacoraTotalMock = 0;
 
 function mockDbAdmin() {
@@ -104,9 +107,17 @@ function mockDbAdmin() {
 			// innerJoin → where, que resuelve con las filas del mock.
 			if (campos && "numeroSifco" in campos) {
 				return {
-					from: () => ({
-						innerJoin: () => ({ where: async () => catalogoCreditosMock }),
-					}),
+					from: (tabla: unknown) => {
+						const filas =
+							tabla === casosCobros
+								? catalogoCreditosContratoMock
+								: catalogoCreditosMock;
+						const encadenable = {
+							innerJoin: () => encadenable,
+							where: async () => filas,
+						};
+						return encadenable;
+					},
 				};
 			}
 
@@ -934,6 +945,7 @@ describe("wialonRouter", () => {
 	describe("getWialonUnitsCatalog — créditos por unidad (CB-118)", () => {
 		afterEach(() => {
 			catalogoCreditosMock = [];
+			catalogoCreditosContratoMock = [];
 			setWialonClient(null);
 		});
 
@@ -1000,6 +1012,49 @@ describe("wialonRouter", () => {
 				{ numeroSifco: "01010214100002", origen: "vinculado" },
 			]);
 			expect(porId.get(3)).toEqual([]);
+		});
+
+		it("toma también el crédito cuyo vehículo viene del contrato del caso", async () => {
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 1,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [{ id: 1, nm: "P-720GVH SIN APAGADO" }],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosContratoMock = [
+				{
+					wialonUnitId: null,
+					licensePlate: "P-720GVH",
+					numeroSifco: "01010214100003",
+				},
+			];
+
+			const res = await call(wialonRouter.getWialonUnitsCatalog, undefined, {
+				context: {
+					headers: new Headers(),
+					session: { user: { id: "admin-c", email: "a@example.com" } },
+					user: { id: "admin-c", email: "a@example.com", role: "admin" },
+					userId: "admin-c",
+					userRole: "admin",
+				} as unknown as Context,
+			});
+
+			expect(res.items[0]?.creditos).toEqual([
+				{ numeroSifco: "01010214100003", origen: "placa" },
+			]);
 		});
 	});
 
@@ -1081,6 +1136,7 @@ describe("wialonRouter", () => {
 			if (res.estado !== "vinculado") throw new Error("estado inesperado");
 			expect(res.unitId).toBe(28554757);
 			expect(res.vinculoOrigen).toBe("persistido");
+			expect(res.auditada).toBe(true);
 			expect(res.placa).toBe("C-629BNC");
 			expect(res.telemetria.latitude).toBe(14.6);
 			expect(res.telemetria.ultimaSenalAt?.getTime()).toBe(1773704628 * 1000);
@@ -1427,6 +1483,33 @@ describe("wialonRouter", () => {
 				{ context: cobrosContext as unknown as Context },
 			);
 			expect(locksUnidad).toBe(1);
+		});
+
+		it("informa auditada:false también en respuestas sin ubicación", async () => {
+			// Sin esto la tarjeta decía "Consulta registrada" aunque la bitácora
+			// no tuviera la fila (ej. vehículo sin placa + insert fallido).
+			errorInsertAuditoria = new Error("db caída");
+			filaVehiculoMock = {
+				licensePlate: null,
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(clienteWialon(() => new Response("{}", { status: 200 })));
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("sin_vinculo");
+				expect(res.auditada).toBe(false);
+			} finally {
+				errorInsertAuditoria = null;
+			}
 		});
 
 		it("si la auditoría falla no muestra la ubicación (fail closed)", async () => {

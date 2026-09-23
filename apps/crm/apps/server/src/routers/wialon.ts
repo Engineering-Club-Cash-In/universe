@@ -190,6 +190,9 @@ async function leerVehiculoParaGps(vehicleId: string): Promise<{
  */
 export const WIALON_VINCULO_AUTO_PLACA = "auto:placa";
 
+/** Respuesta de getGpsVehiculo antes de agregarle `auditada` (se calcula al final). */
+type SinAuditada<T> = T extends unknown ? Omit<T, "auditada"> : never;
+
 type TransaccionDb = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
@@ -277,7 +280,7 @@ async function construirRespuestaVinculada(
 	unitName: string,
 	vinculoOrigen: "persistido" | "placa",
 	placa: string | null,
-): Promise<GpsVehiculoOutput> {
+): Promise<SinAuditada<GpsVehiculoOutput>> {
 	const [statusList, ultimaSenalAt] = await Promise.all([
 		client.getUnitsStatus([unitId]),
 		client.getUnitLastSignal(unitId).catch(() => null),
@@ -335,20 +338,44 @@ async function creditosPorUnidad(
 	if (unidades.length === 0) return resultado;
 
 	try {
-		const filas = await db
-			.select({
-				wialonUnitId: vehicles.wialonUnitId,
-				licensePlate: vehicles.licensePlate,
-				numeroSifco: opportunities.numeroSifco,
-			})
-			.from(vehicles)
-			.innerJoin(opportunities, eq(opportunities.vehicleId, vehicles.id))
-			.where(
-				and(
-					isNotNull(opportunities.numeroSifco),
-					notLike(opportunities.numeroSifco, "CRM-%"),
+		// Mismas dos fuentes que el gate de la ficha (resolverCasoParaGps): el
+		// vehículo de la oportunidad con ese SIFCO, o el del contrato del caso.
+		// Los duplicados entre ambas se descartan al agregar.
+		const [filasOportunidad, filasContrato] = await Promise.all([
+			db
+				.select({
+					wialonUnitId: vehicles.wialonUnitId,
+					licensePlate: vehicles.licensePlate,
+					numeroSifco: opportunities.numeroSifco,
+				})
+				.from(vehicles)
+				.innerJoin(opportunities, eq(opportunities.vehicleId, vehicles.id))
+				.where(
+					and(
+						isNotNull(opportunities.numeroSifco),
+						notLike(opportunities.numeroSifco, "CRM-%"),
+					),
 				),
-			);
+			db
+				.select({
+					wialonUnitId: vehicles.wialonUnitId,
+					licensePlate: vehicles.licensePlate,
+					numeroSifco: casosCobros.numeroCreditoSifco,
+				})
+				.from(casosCobros)
+				.innerJoin(
+					contratosFinanciamiento,
+					eq(contratosFinanciamiento.id, casosCobros.contratoId),
+				)
+				.innerJoin(vehicles, eq(vehicles.id, contratosFinanciamiento.vehicleId))
+				.where(
+					and(
+						isNotNull(casosCobros.numeroCreditoSifco),
+						notLike(casosCobros.numeroCreditoSifco, "CRM-%"),
+					),
+				),
+		]);
+		const filas = [...filasOportunidad, ...filasContrato];
 
 		const agregar = (
 			unitId: number,
@@ -778,144 +805,154 @@ export const wialonRouter = {
 				},
 			};
 
-			try {
-				const vehiculo = await leerVehiculoParaGps(input.vehicleId);
+			// Todas las rutas registran la auditoría antes de responder; la
+			// respuesta lleva si quedó registrada para que la UI no diga
+			// "Consulta registrada" cuando no fue así (incluidas las rutas sin
+			// ubicación, que no se bloquean).
+			const respuesta = await (async (): Promise<
+				SinAuditada<GpsVehiculoOutput>
+			> => {
+				try {
+					const vehiculo = await leerVehiculoParaGps(input.vehicleId);
 
-				if (!vehiculo) {
-					await registrarAuditoria(null, null);
-					return {
-						estado: "no_disponible" as const,
-						error: {
-							code: "VEHICULO_NO_ENCONTRADO",
-							message: "No se encontró el vehículo del crédito",
-						},
+					if (!vehiculo) {
+						await registrarAuditoria(null, null);
+						return {
+							estado: "no_disponible" as const,
+							error: {
+								code: "VEHICULO_NO_ENCONTRADO",
+								message: "No se encontró el vehículo del crédito",
+							},
+						};
+					}
+
+					const client = getWialonClient();
+
+					// Respuesta con el vínculo guardado en el vehículo (ruta normal, y
+					// también cuando un supervisor lo fijó durante esta consulta).
+					const responderVinculoGuardado = async (v: {
+						wialonUnitId: number;
+						wialonUnitName: string | null;
+						wialonVinculadoPor: string | null;
+						licensePlate: string | null;
+					}) => {
+						const unitName = v.wialonUnitName ?? String(v.wialonUnitId);
+						if (!(await registrarAuditoria(v.wialonUnitId, unitName))) {
+							return sinAuditoria;
+						}
+						return await construirRespuestaVinculada(
+							client,
+							v.wialonUnitId,
+							unitName,
+							v.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA
+								? "placa"
+								: "persistido",
+							v.licensePlate?.trim() || null,
+						);
 					};
-				}
 
-				const client = getWialonClient();
+					// 1. Vínculo ya fijado: es la ruta normal y no toca el catálogo.
+					if (vehiculo.wialonUnitId) {
+						return await responderVinculoGuardado({
+							...vehiculo,
+							wialonUnitId: vehiculo.wialonUnitId,
+						});
+					}
 
-				// Respuesta con el vínculo guardado en el vehículo (ruta normal, y
-				// también cuando un supervisor lo fijó durante esta consulta).
-				const responderVinculoGuardado = async (v: {
-					wialonUnitId: number;
-					wialonUnitName: string | null;
-					wialonVinculadoPor: string | null;
-					licensePlate: string | null;
-				}) => {
-					const unitName = v.wialonUnitName ?? String(v.wialonUnitId);
-					if (!(await registrarAuditoria(v.wialonUnitId, unitName))) {
+					// 2. Sin vínculo: se deduce buscando la placa en el catálogo.
+					const placa = vehiculo.licensePlate?.trim() || null;
+					// Sin núcleo de placa (vacía o de relleno: "NUEVO", "N/A") no hay
+					// nada confiable que buscar: cualquier resultado sería adivinar.
+					const nucleo = extraerNucleoPlaca(placa);
+					if (!placa || !nucleo) {
+						await registrarAuditoria(null, null);
+						return {
+							estado: "sin_vinculo" as const,
+							motivo: "sin_placa" as const,
+							placa,
+							candidatos: [],
+						};
+					}
+
+					// Wialon filtra por subcadena LITERAL de sys_name, así que la placa
+					// cruda del CRM ("P - 278KJQ", "P0-720GVH") no trae la unidad
+					// "P-278KJQ ..." / "P-720GVH ...". Se prefiltra solo por los 3
+					// dígitos del núcleo (mismo criterio que el selector de la ficha) y
+					// matchUnidadPorPlaca descarta lo que no coincide completo.
+					// flags:1 = solo id/nm, que es todo lo que el match necesita.
+					const catalogo = await client.searchUnits({
+						filterName: nucleo.digitos,
+						flags: 1,
+					});
+					const { unidad, motivo, coincidencias } = matchUnidadPorPlaca(
+						placa,
+						catalogo.items,
+					);
+
+					if (!unidad) {
+						await registrarAuditoria(null, null);
+						return {
+							estado: "sin_vinculo" as const,
+							motivo: motivo === "ok" ? "sin_coincidencia" : motivo,
+							placa,
+							// Solo tiene sentido ofrecer candidatos cuando hay de dónde
+							// elegir; con cero coincidencias la lista sería ruido.
+							candidatos:
+								motivo === "ambiguo"
+									? coincidencias.map((u) => ({ id: u.id, nm: u.nm }))
+									: [],
+						};
+					}
+
+					// Sin las columnas de la 0057 no se puede guardar ni chequear
+					// vínculos: se responde con la deducción, como documenta el fallback.
+					const auto = vehiculo.columnasVinculo
+						? await fijarVinculoPorPlaca(input.vehicleId, unidad.id, unidad.nm)
+						: "sin_columnas";
+
+					if (auto === "asignada_a_otro") {
+						await registrarAuditoria(null, null);
+						return {
+							estado: "sin_vinculo" as const,
+							motivo: "asignada_a_otro" as const,
+							placa,
+							candidatos: [{ id: unidad.id, nm: unidad.nm }],
+						};
+					}
+
+					if (auto === "ya_vinculado") {
+						const actual = await leerVehiculoParaGps(input.vehicleId);
+						if (actual?.wialonUnitId) {
+							return await responderVinculoGuardado({
+								...actual,
+								wialonUnitId: actual.wialonUnitId,
+							});
+						}
+					}
+
+					if (!(await registrarAuditoria(unidad.id, unidad.nm))) {
 						return sinAuditoria;
 					}
 					return await construirRespuestaVinculada(
 						client,
-						v.wialonUnitId,
-						unitName,
-						v.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA
-							? "placa"
-							: "persistido",
-						v.licensePlate?.trim() || null,
+						unidad.id,
+						unidad.nm,
+						"placa",
+						placa,
 					);
-				};
-
-				// 1. Vínculo ya fijado: es la ruta normal y no toca el catálogo.
-				if (vehiculo.wialonUnitId) {
-					return await responderVinculoGuardado({
-						...vehiculo,
-						wialonUnitId: vehiculo.wialonUnitId,
-					});
-				}
-
-				// 2. Sin vínculo: se deduce buscando la placa en el catálogo.
-				const placa = vehiculo.licensePlate?.trim() || null;
-				// Sin núcleo de placa (vacía o de relleno: "NUEVO", "N/A") no hay
-				// nada confiable que buscar: cualquier resultado sería adivinar.
-				const nucleo = extraerNucleoPlaca(placa);
-				if (!placa || !nucleo) {
+				} catch (error) {
 					await registrarAuditoria(null, null);
-					return {
-						estado: "sin_vinculo" as const,
-						motivo: "sin_placa" as const,
-						placa,
-						candidatos: [],
-					};
+					const code =
+						error instanceof WialonClientError ? error.code : "UNKNOWN";
+					const message =
+						error instanceof Error
+							? error.message
+							: "Error desconocido al consultar el GPS del vehículo";
+					return { estado: "no_disponible" as const, error: { code, message } };
 				}
+			})();
 
-				// Wialon filtra por subcadena LITERAL de sys_name, así que la placa
-				// cruda del CRM ("P - 278KJQ", "P0-720GVH") no trae la unidad
-				// "P-278KJQ ..." / "P-720GVH ...". Se prefiltra solo por los 3
-				// dígitos del núcleo (mismo criterio que el selector de la ficha) y
-				// matchUnidadPorPlaca descarta lo que no coincide completo.
-				// flags:1 = solo id/nm, que es todo lo que el match necesita.
-				const catalogo = await client.searchUnits({
-					filterName: nucleo.digitos,
-					flags: 1,
-				});
-				const { unidad, motivo, coincidencias } = matchUnidadPorPlaca(
-					placa,
-					catalogo.items,
-				);
-
-				if (!unidad) {
-					await registrarAuditoria(null, null);
-					return {
-						estado: "sin_vinculo" as const,
-						motivo: motivo === "ok" ? "sin_coincidencia" : motivo,
-						placa,
-						// Solo tiene sentido ofrecer candidatos cuando hay de dónde
-						// elegir; con cero coincidencias la lista sería ruido.
-						candidatos:
-							motivo === "ambiguo"
-								? coincidencias.map((u) => ({ id: u.id, nm: u.nm }))
-								: [],
-					};
-				}
-
-				// Sin las columnas de la 0057 no se puede guardar ni chequear
-				// vínculos: se responde con la deducción, como documenta el fallback.
-				const auto = vehiculo.columnasVinculo
-					? await fijarVinculoPorPlaca(input.vehicleId, unidad.id, unidad.nm)
-					: "sin_columnas";
-
-				if (auto === "asignada_a_otro") {
-					await registrarAuditoria(null, null);
-					return {
-						estado: "sin_vinculo" as const,
-						motivo: "asignada_a_otro" as const,
-						placa,
-						candidatos: [{ id: unidad.id, nm: unidad.nm }],
-					};
-				}
-
-				if (auto === "ya_vinculado") {
-					const actual = await leerVehiculoParaGps(input.vehicleId);
-					if (actual?.wialonUnitId) {
-						return await responderVinculoGuardado({
-							...actual,
-							wialonUnitId: actual.wialonUnitId,
-						});
-					}
-				}
-
-				if (!(await registrarAuditoria(unidad.id, unidad.nm))) {
-					return sinAuditoria;
-				}
-				return await construirRespuestaVinculada(
-					client,
-					unidad.id,
-					unidad.nm,
-					"placa",
-					placa,
-				);
-			} catch (error) {
-				await registrarAuditoria(null, null);
-				const code =
-					error instanceof WialonClientError ? error.code : "UNKNOWN";
-				const message =
-					error instanceof Error
-						? error.message
-						: "Error desconocido al consultar el GPS del vehículo";
-				return { estado: "no_disponible" as const, error: { code, message } };
-			}
+			return { ...respuesta, auditada: auditado === true };
 		}),
 
 	/**

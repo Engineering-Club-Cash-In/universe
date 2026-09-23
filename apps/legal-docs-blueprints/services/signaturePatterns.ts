@@ -48,6 +48,37 @@ export interface SignaturePatternConfig {
    */
   repeticiones?: number;
   /**
+   * Rúbrica: una firma chica de cada firmante en **cada página impar**, aparte
+   * del bloque de firma del final.
+   *
+   * Es lo que pidió gerencia para los contratos (no para las cartas): que
+   * ninguna hoja pueda cambiarse sin que se note. La esquina no es la misma en
+   * todos —depende de dónde tenga margen el template—, así que se declara por
+   * tipo y se calibra mirando el PDF.
+   *
+   * Sólo va en los contratos con layout auditado (`bloques`). Un tipo sin esto
+   * no lleva rúbrica, que es lo correcto para las cartas de una hoja.
+   */
+  rubrica?: {
+    /**
+     * Dónde cae, en la página. El origen es la esquina inferior izquierda de
+     * la hoja, como en el PDF.
+     */
+    esquina:
+      | 'inferior-derecha'
+      | 'inferior-izquierda'
+      | 'margen-izquierdo'
+      | 'margen-derecho';
+    /** Separación del borde, en puntos. Por defecto 28 (un centímetro). */
+    margen?: number;
+    /**
+     * Tamaño del recuadro. Más chico que una firma normal (100×50): es una
+     * rúbrica, no una firma completa, y varias tienen que caber en el borde.
+     */
+    ancho?: number;
+    alto?: number;
+  };
+  /**
    * Número de firmantes esperados para este contrato.
    * @deprecated No describe la realidad cuando hay cofirmantes: el template
    * plural expande la fila de deudores y el PDF termina con más widgets que
@@ -132,6 +163,7 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.CONTRATO_PRIVADO_USO]: {
     pattern: 'f)_____________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
+    rubrica: { esquina: 'inferior-derecha' },
     signerCount: 2,
     signers: ['Deudor', 'Richard/CCI'],
     xOffset: 1.5,  // Un punto y medio a la derecha
@@ -141,6 +173,7 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.USO_CARRO_USADO]: {
     pattern: 'f)_____________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
+    rubrica: { esquina: 'inferior-derecha' },
     signerCount: 2,
     signers: ['Deudor', 'Richard/CCI'],
     yOffset: -1.5,  // Subir 1.5 puntos
@@ -170,6 +203,7 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.GARANTIA_MOBILIARIA]: {
     pattern: 'f)_______________________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
+    rubrica: { esquina: 'inferior-derecha' },
     signerCount: 2,
     signers: ['Andrés', 'Deudor'],
     yOffset: -6,  // Bajar un punto más (era -7, ahora -6)
@@ -179,6 +213,7 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.PAGARE_UNICO_LIBRE_PROTESTO]: {
     pattern: 'f. _______________________________',
     bloques: ['DEUDORES'],
+    rubrica: { esquina: 'inferior-derecha' },
     signerCount: 1,
     signers: ['Deudor']
   },
@@ -186,6 +221,7 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.RECONOCIMIENTO_DEUDA]: {
     pattern: 'f)___________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
+    rubrica: { esquina: 'inferior-derecha' },
     signerCount: 2,
     signers: ['Andrés', 'Deudor'],
     yOffset: -3.5,  // Subir 3.5 puntos,
@@ -352,6 +388,18 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     signers: ['Cliente']
   }
 };
+
+/**
+ * Dónde va la rúbrica de cada página impar, o `undefined` si ese tipo no lleva.
+ *
+ * Es su propia función para que el CRM y los scripts de calibración puedan
+ * preguntarlo sin depender de la forma interna de `signaturePatterns`.
+ */
+export function getRubrica(
+  contractType: ContractType,
+): SignaturePatternConfig['rubrica'] | undefined {
+  return signaturePatterns[contractType]?.rubrica;
+}
 
 /**
  * Obtiene la configuración de patrón de firma para un tipo de contrato

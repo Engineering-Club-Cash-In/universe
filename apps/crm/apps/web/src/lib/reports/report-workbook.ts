@@ -41,7 +41,7 @@ export function buildAdminReportsWorkbook(input: {
 		const view = getMontoACobrarViewRow(row, input.cobranza.acumulado);
 		return {
 			Período: row.bucket,
-			"Cantidad de cuotas": row.cuotas_count,
+			"Cantidad de cuotas": view.cuotas,
 			Capital: view.capital,
 			"Interés + IVA": view.interesIva,
 			Servicios: view.servicios,
@@ -54,15 +54,11 @@ export function buildAdminReportsWorkbook(input: {
 		};
 	});
 	if (cobranzaRows.length > 0) {
-		const last =
-			cobranzaRows.findLast((row) => row["Cantidad de cuotas"] > 0) ??
-			cobranzaRows.at(-1);
+		const last = cobranzaRows.at(-1);
 		if (!last) throw new Error("No fue posible totalizar Cobranza.");
 		const total = { Período: "Total" } as Record<string, string | number>;
 		for (const key of Object.keys(last).slice(1)) {
-			const debeSumar =
-				!input.cobranza.acumulado || key === "Cantidad de cuotas";
-			total[key] = debeSumar
+			total[key] = !input.cobranza.acumulado
 				? Math.round(
 						cobranzaRows.reduce(
 							(sum, row) => sum + Number(row[key as keyof typeof row]),

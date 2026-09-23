@@ -11,11 +11,51 @@ import {
 import { eqDpi } from "@/lib/dpi-lookup";
 import { normalizarDpi } from "@/utils/cui-validation";
 
-// 🔥 Instanciar el cliente con las credenciales del .env
-const infornetClient = new InfornetClient({
-	username: process.env.INFORNET_USERNAME!,
-	password: process.env.INFORNET_PASSWORD!,
-});
+// 🔴 Faltar las credenciales de Infornet tiene que TUMBAR el arranque.
+//
+// Sin buró el proceso no se degrada de forma visible: `busquedaPersona` y
+// `estudioPersona` capturan todo y devuelven `null`, la consulta termina en
+// "Persona no encontrada en Infornet", el pipeline la clasifica como
+// `sin_registro` con `errorTecnico: false` —o sea que NO bloquea la aprobación—
+// y encima cachea ese veredicto 30 días. Un despliegue mal configurado
+// aprobaría créditos sin buró y dejaría el rastro envenenado. Por eso se
+// comprueba acá, al cargar el módulo, y no cuando ya es tarde.
+const CREDENCIALES_INFORNET = [
+	"INFORNET_USERNAME",
+	"INFORNET_PASSWORD",
+] as const;
+
+// Las pruebas importan `routers/crm.ts`, que cuelga de este archivo, y corren
+// sin `.env`. El chequeo se saltea solo ahí: en test nadie llega a consultar a
+// Infornet de verdad, y si llegara, el constructor sigue lanzando igual.
+if (process.env.NODE_ENV !== "test") {
+	const faltantes = CREDENCIALES_INFORNET.filter((v) => !process.env[v]);
+
+	if (faltantes.length > 0) {
+		throw new Error(
+			`Faltan las credenciales de Infornet (${faltantes.join(", ")}). Sin ellas las consultas de buró fallan en silencio y las solicitudes se aprueban como si la persona no tuviera registro.`,
+		);
+	}
+}
+
+// El cliente sí se arma en la PRIMERA consulta, no al importar.
+//
+// Construirlo arriba hacía que `import` de este archivo lanzara, y este archivo
+// cuelga de `routers/crm.ts`: el router entero dejaba de poder importarse fuera
+// de un entorno con `.env` completo —ninguna prueba podía tocar un procedure del
+// CRM—. La validación de arriba conserva el fail-fast sin construir nada.
+let infornetClient: InfornetClient | null = null;
+
+function getInfornetClient(): InfornetClient {
+	if (!infornetClient) {
+		infornetClient = new InfornetClient({
+			username: process.env.INFORNET_USERNAME!,
+			password: process.env.INFORNET_PASSWORD!,
+		});
+	}
+
+	return infornetClient;
+}
 
 export class InfornetController {
 	/**
@@ -152,7 +192,7 @@ export class InfornetController {
 			console.log(`      🔍 Buscando persona con DPI: ${dpi}`);
 
 			// 🔥 Llamar directamente al cliente SOAP
-			const personas = await infornetClient.busquedaPersona({
+			const personas = await getInfornetClient().busquedaPersona({
 				orden: "DPI",
 				registro: dpi,
 				pais: "GT",
@@ -185,7 +225,7 @@ export class InfornetController {
 			);
 
 			// 🔥 Llamar directamente al cliente SOAP
-			const estudio = await infornetClient.estudioPersona(codigoPersona);
+			const estudio = await getInfornetClient().estudioPersona(codigoPersona);
 
 			console.log("      ✅ Estudio obtenido correctamente");
 			return estudio as EstudioPersonaJSON;

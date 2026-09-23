@@ -485,16 +485,28 @@ export function buildMoraRecoveryQuery({
 	const emailFilter = filtroEmailAsesor(emailCobrador);
 	const asesoresFilter = filtroAsesores(asesores);
 	// El lote acota `creditos_con_asesor`, que es de donde cuelgan los eventos,
-	// los pagos y el JOIN final: acotarlo acá acota TODA la consulta.
+	// los pagos y el JOIN final.
 	const creditosFilter = creditos?.length
 		? sql`AND c.credito_id IN (${sql.join(
 				creditos.map((id) => sql`${id}`),
 				sql`, `,
 			)})`
 		: sql``;
+	// …pero la FOTO inicial va ANTES de `creditos_con_asesor` y no cuelga de
+	// ella: sin este segundo filtro cada lote reconstruía la foto de la cartera
+	// COMPLETA y recién descartaba los créditos ajenos en el JOIN final. Con N
+	// lotes eso es N veces la foto entera: el batching dejaba de pagar. El lote
+	// tiene que entrar TAMBIÉN acá —y en la rama `live`, que tiene su propia
+	// foto— para que cada consulta reconstruya solo sus créditos.
+	const moraActivaFiltro = creditos?.length
+		? sql`AND credito_id = ANY (ARRAY[${sql.join(
+				creditos.map((id) => sql`${id}`),
+				sql`, `,
+			)}]::int[])`
+		: sql``;
 	const snapshotCte =
 		alcance === "historico"
-			? sql`${snapCte(fechaSnapshot, false)}, snapshot_por_credito AS (
+			? sql`${snapCte(fechaSnapshot, false, creditos)}, snapshot_por_credito AS (
       SELECT s.credito_id, s.monto::numeric AS esperado
       FROM snap s
       WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 AND s.cuotas > 0
@@ -503,6 +515,7 @@ export function buildMoraRecoveryQuery({
       SELECT DISTINCT ON (credito_id) credito_id, monto_mora::numeric AS esperado
       FROM cartera.moras_credito
       WHERE activa = true AND cuotas_atrasadas > 0
+        ${moraActivaFiltro}
       ORDER BY credito_id, mora_id DESC
     ), snapshot_por_credito AS (
       SELECT m.credito_id, m.esperado

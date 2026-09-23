@@ -7,6 +7,11 @@ import { inicioDiaGTComoTimestampUTC } from "../utils/functions/diaGuatemala";
 const render = (fecha: string, incluirFecha?: boolean) =>
 	new PgDialect().sqlToQuery(sql`WITH ${snapCte(fecha, incluirFecha)} SELECT 1`);
 
+const render2 = (fecha: string, incluirFecha?: boolean, creditos?: number[]) =>
+	new PgDialect().sqlToQuery(
+		sql`WITH ${snapCte(fecha, incluirFecha, creditos)} SELECT 1`,
+	);
+
 describe("snapCte — el corte de fecha es sargable", () => {
 	// EL CONTRATO. El filtro anterior era
 	//   (h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= $1
@@ -74,6 +79,94 @@ describe("snapCte — el carry-forward de las cuotas sigue vivo", () => {
 				/ORDER BY h\.credito_id, h\.fecha DESC, h\.historial_id DESC/g,
 			),
 		).toHaveLength(2);
+	});
+});
+
+describe("snapCte — el lote acota la foto", () => {
+	// EL DEFECTO que este parámetro cierra: el reporte de recuperación corre por
+	// lotes de 500 créditos, pero la foto se reconstruía SIEMPRE sobre la cartera
+	// entera y los créditos ajenos se descartaban recién en el JOIN final. N
+	// lotes = N fotos completas.
+	it("con lote, cada CTE se ata al crédito por LATERAL", () => {
+		const { sql: texto, params } = render2("2026-08-06", false, [7, 9]);
+		expect(texto).toMatch(/snap_ultimo AS \([\s\S]*?unnest\(ARRAY\[/);
+		expect(texto).toMatch(/snap_cuotas AS \([\s\S]*?unnest\(ARRAY\[/);
+		// Dos veces: una por CTE. Es lo que ata la lectura al crédito del lote.
+		expect(texto.match(/h\.credito_id = l\.credito_id/g)).toHaveLength(2);
+		expect(params).toContain(7);
+		expect(params).toContain(9);
+	});
+
+	// NO es el DISTINCT ON con un `credito_id = ANY (...)` pegado: medido contra
+	// el dump inflado a 164.000 filas, esa forma le hace elegir al planner
+	// Seq Scan + Sort externo A DISCO, que es justo el modo de falla que la 0041
+	// existe para eliminar. Si alguien "simplifica" a esa forma, este test cae.
+	it("con lote NO usa DISTINCT ON (que a escala se va a Seq Scan + Sort)", () => {
+		const { sql: texto } = render2("2026-08-06", false, [7, 9]);
+		expect(texto).not.toContain("DISTINCT ON");
+	});
+
+	it("el LATERAL pide UNA fila por crédito, la más reciente", () => {
+		const { sql: texto } = render2("2026-08-06", false, [7, 9]);
+		// Sin el LIMIT 1 el LATERAL devolvería el historial entero del crédito.
+		expect(texto.match(/LIMIT 1/g)).toHaveLength(2);
+		expect(
+			texto.match(/ORDER BY h\.fecha DESC, h\.historial_id DESC/g),
+		).toHaveLength(2);
+	});
+
+	it("el corte por día de Guatemala sigue siendo sargable con lote", () => {
+		const { sql: texto } = render2("2026-08-06", false, [7, 9]);
+		expect(texto).not.toMatch(/h\.fecha\s+AT TIME ZONE/i);
+		expect(texto.match(/h\.fecha < \$\d+::timestamp/g)).toHaveLength(2);
+	});
+
+	it("de-duplica: un id repetido no duplica el crédito en la foto", () => {
+		// El LATERAL emite una fila por ENTRADA de la lista; el DISTINCT ON no
+		// podía tener este problema. Duplicar un crédito lo contaría dos veces.
+		const { params } = render2("2026-08-06", false, [7, 7, 9, 7]);
+		expect(params.filter((p) => p === 7)).toHaveLength(2); // uno por CTE
+	});
+});
+
+describe("snapCte — los otros llamadores siguen funcionando sin el parámetro", () => {
+	// `moraHistorial.ts` (Mora Histórica) y `reportes.ts` (mora por etapa/asesor)
+	// piden la foto de TODA la cartera y no tienen lista de créditos que pasar.
+	// El parámetro nuevo es opcional y sin él la CTE tiene que ser byte por byte
+	// la de antes.
+	it("sin el parámetro, el SQL es EXACTAMENTE el mismo que con `undefined`", () => {
+		for (const incluir of [true, false]) {
+			const a = render("2026-08-06", incluir);
+			const b = render2("2026-08-06", incluir, undefined);
+			expect(b.sql).toBe(a.sql);
+			expect(b.params).toEqual(a.params);
+		}
+	});
+
+	it("sin lote sigue siendo el DISTINCT ON de siempre, sin unnest", () => {
+		const { sql: texto } = render("2026-08-06");
+		expect(texto.match(/DISTINCT ON \(h\.credito_id\)/g)).toHaveLength(2);
+		expect(texto).not.toContain("unnest(");
+		expect(texto).not.toContain("LATERAL");
+	});
+
+	it("una lista VACÍA es 'sin filtro', no 'ningún crédito'", () => {
+		// Un lote vacío que se interpretara como `IN ()` volvería vacío un
+		// reporte completo. `partirEnLotes` no produce lotes vacíos, pero el
+		// parámetro es público.
+		const a = render("2026-08-06");
+		const b = render2("2026-08-06", true, []);
+		expect(b.sql).toBe(a.sql);
+	});
+
+	it("`snap` expone las mismas columnas con y sin lote", () => {
+		// Los llamadores hacen `SELECT ... FROM snap s`: si el lote cambiara las
+		// columnas, romperían.
+		const columnas = (texto: string) =>
+			texto.slice(texto.indexOf("snap AS (")).match(/u\.\w+|COALESCE\([^)]*\) AS \w+/g);
+		expect(columnas(render2("2026-08-06", true, [7]).sql)).toEqual(
+			columnas(render("2026-08-06").sql),
+		);
 	});
 });
 
@@ -148,6 +241,88 @@ if (!process.env.SUPABASE_DB_URL) {
         `),
 			);
 			expect(Number(filas[0].n)).toBeGreaterThan(0);
+		});
+
+		// La forma CON lote y la forma SIN lote tienen que dar la MISMA foto para
+		// los créditos del lote: es lo único que autoriza a usar una por la otra.
+		it("la foto acotada al lote es fila por fila la de la cartera entera", async () => {
+			const creditos = rowsOf(
+				await db.execute<any>(sql`
+          SELECT DISTINCT credito_id FROM cartera.moras_historial
+          ORDER BY credito_id LIMIT 500
+        `),
+			).map((c: any): number => Number(c.credito_id));
+			expect(creditos.length).toBeGreaterThan(100);
+
+			const foto = async (lote?: number[]) =>
+				rowsOf(
+					await db.execute<any>(sql`
+            WITH ${snapCte("2026-08-06", true, lote)}
+            SELECT credito_id, tipo_evento, monto::text AS monto, cuotas, fecha
+            FROM snap
+            ${
+							lote
+								? sql``
+								: sql`WHERE credito_id = ANY (ARRAY[${sql.join(
+										creditos.map((id: number) => sql`${id}`),
+										sql`, `,
+									)}]::int[])`
+						}
+            ORDER BY credito_id
+          `),
+				).map((r: any) => JSON.stringify(r));
+
+			const entera = await foto();
+			const porLote = await foto(creditos);
+			expect(porLote.length).toBe(entera.length);
+			expect(porLote).toEqual(entera);
+		});
+
+		it("el plan de la foto ACOTADA no ordena ni barre la tabla", async () => {
+			// El mismo contrato que abajo, pero para la rama del lote. Con
+			// `DISTINCT ON` + `credito_id = ANY (...)` este test cae: medido contra
+			// el dump inflado, el planner elige Seq Scan + Sort externo a disco.
+			const migracion = await Bun.file(
+				new URL(
+					"../../drizzle/0041_idx_moras_historial_snapshot.sql",
+					import.meta.url,
+				).pathname,
+			).text();
+			const creditos = rowsOf(
+				await db.execute<any>(sql`
+          SELECT DISTINCT credito_id FROM cartera.moras_historial
+          ORDER BY credito_id LIMIT 500
+        `),
+			).map((c: any) => Number(c.credito_id));
+
+			let plan = "";
+			await db
+				.transaction(async (tx) => {
+					await tx.execute(sql.raw(migracion));
+					await tx.execute(sql.raw("ANALYZE cartera.moras_historial"));
+					plan = rowsOf(
+						await tx.execute<any>(sql`
+              EXPLAIN (ANALYZE, COSTS OFF)
+              WITH ${snapCte("2026-08-06", true, creditos)}
+              SELECT COUNT(*), SUM(cuotas) FROM snap
+            `),
+					)
+						.map((r: any) => r["QUERY PLAN"])
+						.join("\n");
+					throw new Error("ROLLBACK_INTENCIONAL");
+				})
+				.catch((e) => {
+					if (String(e?.message) !== "ROLLBACK_INTENCIONAL") throw e;
+				});
+
+			expect(plan).toContain("ix_moras_historial_snapshot");
+			expect(plan).toContain("ix_moras_historial_snapshot_cuotas");
+			expect(plan).not.toContain("Sort Method");
+			expect(plan).not.toContain("Seq Scan");
+			// Un descenso de índice por crédito, no un barrido: el LATERAL corre
+			// una vez por entrada del lote.
+			expect(plan).toContain(`loops=${creditos.length}`);
+			expect(plan.match(/Heap Fetches: 0/g)).toHaveLength(2);
 		});
 
 		it("el plan del snapshot ya no ordena el historial completo", async () => {

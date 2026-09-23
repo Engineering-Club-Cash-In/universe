@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { inicioDiaGTComoTimestampUTC } from "../utils/functions/diaGuatemala";
+import { MOTIVO_REVERSA_MORA_PREFIJO } from "../utils/motivoReversaMora";
 import { creditosElegiblesMoraSql } from "./moraCapitalCartera";
 import { snapCte } from "./moraSnapshotSql";
 
@@ -16,10 +17,19 @@ export type MoraLevelEvent = {
 	 * referencia; nada de lo que traiga cuenta como mora generada en el ciclo.
 	 */
 	previo?: boolean;
+	/**
+	 * El evento es la RESTITUCIÓN de una reversa de pago, no mora nueva: el
+	 * pago que había bajado la mora se anuló y `reversePayment` le devuelve al
+	 * crédito el saldo que ese pago cubría. Ver `MOTIVO_REVERSA_MORA_PREFIJO`.
+	 */
+	reverso?: boolean;
 };
 
 /**
- * Días de historial ANTERIORES al ciclo que se traen para sembrar el nivel.
+ * TOPE de días hacia atrás para la siembra del nivel. NO es la ventana: la
+ * ventana la marca el último RESETEO (ver `eventos_por_credito`); esto es solo
+ * el freno para que el crédito que nunca tuvo uno no arrastre su historial
+ * entero.
  *
  * La foto inicial no alcanza como nivel de arranque: la condonación masiva corre
  * casi a diario y el cron repone la mora a la mañana siguiente, así que el corte
@@ -28,14 +38,20 @@ export type MoraLevelEvent = {
  * entero: el doble conteo que el nivel de referencia existe para evitar, metido
  * por el borde.
  *
- * El estado que hace falta es el de la víspera —entre la condonación y el rebote
- * pasan horas, no días—, así que con UNO bastaría. Se toman 3 para absorber un
- * fin de semana, un feriado o una noche en que el cron no corrió, sin volverse
- * "plegá todo el historial": con el RECALCULO diario son ~3 eventos por crédito
- * contra los ~31 del ciclo, un 10% más de filas, y el costo queda ACOTADO por el
- * número de días, no por la edad del crédito.
+ * Una ventana FIJA de pocos días era una apuesta a que la condonación masiva
+ * corriera todos los días: si la última condonación quedaba más vieja que la
+ * ventana, se perdía el techo que había dejado y su rebote de adentro se contaba
+ * como mora nueva. Por eso la siembra ahora arranca en el último evento que de
+ * verdad BAJÓ el techo (un pago o una `DESACTIVACION`), que es donde el techo
+ * vigente se estableció, y este tope solo acota el caso sin reseteo.
+ *
+ * 31 días = un ciclo completo. Sirve porque el historial es una CADENA: el
+ * `monto_anterior` de la primera fila de la ventana ES el nivel que el crédito
+ * tenía al entrar, así que truncar no pierde el nivel vigente —pierde, a lo
+ * sumo, un pico que se condonó hace más de un mes y que desde entonces nunca se
+ * repuso—. Y acota el costo por DÍAS, no por la edad del crédito.
  */
-export const DIAS_SIEMBRA_NIVEL = 3;
+export const DIAS_TOPE_SIEMBRA = 31;
 
 /**
  * Mora GENERADA dentro del ciclo = lo que el asesor tuvo oportunidad de cobrar
@@ -58,6 +74,14 @@ export const DIAS_SIEMBRA_NIVEL = 3;
  *     cuente la mora nueva.
  *   * `DESACTIVACION`: el nivel vuelve a 0 —el crédito se puso al día o salió
  *     del universo de mora—; si vuelve a entrar, empieza de cero.
+ *   * Una RESTITUCIÓN por reversa de pago (`reverso`): sube el nivel hasta el
+ *     monto restituido pero NO genera. Es el espejo del caso del pago: el
+ *     `DECREMENTO` del pago bajó el nivel porque el cliente había saldado, y
+ *     revertir ese pago deshace exactamente eso. Sin la marca, el plegado veía
+ *     "bajó y volvió a subir" y cobraba la deuda dos veces: un crédito con Q100
+ *     de foto que pagó y se revirtió terminaba con Q200 de esperado. Que el
+ *     nivel suba (y no solo que no genere) es lo que impide que el `RECALCULO`
+ *     de la mañana siguiente vuelva a cobrar lo mismo.
  *   * Un evento que sube pero NO supera el nivel (el rebote del `RECALCULO` de
  *     la mañana siguiente a una condonación) no suma y tampoco mueve el nivel:
  *     si lo bajara, el siguiente rebote volvería a cobrar lo ya contado.
@@ -85,7 +109,10 @@ export function moraGeneradaEnPeriodo(
  *
  *   * La semilla del plegado previo es el `montoAnterior` del PRIMER evento de
  *     la ventana, o sea el monto que el crédito tenía justo antes: es el estado
- *     anterior a la ventana sin necesidad de una segunda foto en la base.
+ *     anterior a la ventana sin necesidad de una segunda foto en la base. Como
+ *     la ventana arranca en el último RESETEO, ese primer evento suele ser el
+ *     pago mismo y el plegado lo baja a cero, igual que si estuviera adentro
+ *     del ciclo.
  *   * `Math.max` con la foto es una red: el nivel de arranque nunca puede quedar
  *     POR DEBAJO de la foto, porque la foto ya se cuenta aparte en el esperado y
  *     un nivel más bajo haría que el primer RECALCULO del ciclo la sumara otra vez.
@@ -119,6 +146,12 @@ function plegarNivel(
 			continue;
 		}
 		if (evento.tipoEvento === "CONDONACION") continue;
+		if (evento.reverso) {
+			// Restitución de una reversa: devuelve el techo que el pago anulado
+			// había bajado, pero no es oportunidad de cobro nueva.
+			if (evento.montoNuevo > nivel) nivel = evento.montoNuevo;
+			continue;
+		}
 		if (evento.montoNuevo > nivel) {
 			generado += evento.montoNuevo - nivel;
 			nivel = evento.montoNuevo;
@@ -252,10 +285,10 @@ export function buildMoraRecoveryQuery({
 	// `snapCte`, que corta por día y no por rango) mataría `moras_historial_fecha_idx`.
 	const inicioUtc = inicioDiaGTComoTimestampUTC(inicio);
 	const finUtc = inicioDiaGTComoTimestampUTC(fin);
-	// Arranque de la VENTANA DE SIEMBRA: unos días antes del ciclo. Lo que caiga
+	// TOPE de la siembra: nada anterior a este instante se mira. Lo que caiga
 	// entre este instante y el inicio no cuenta como mora generada; solo deja el
 	// nivel de referencia donde estaba al cruzar el corte.
-	const siembraUtc = inicioDiaGTComoTimestampUTC(inicio, -DIAS_SIEMBRA_NIVEL);
+	const siembraUtc = inicioDiaGTComoTimestampUTC(inicio, -DIAS_TOPE_SIEMBRA);
 	if (!inicioUtc || !finUtc || !siembraUtc) {
 		throw new RangeError(
 			`Período de recuperación de mora inválido: ${inicio} → ${fin}`,
@@ -281,8 +314,42 @@ export function buildMoraRecoveryQuery({
         AND COALESCE(pc."paymentFalse", false) = false
       GROUP BY pc.credito_id
     ),
-    -- Eventos crudos del ciclo MÁS los de la ventana de siembra (marcados
-    -- \`previo\`), en orden, SIN agregar: lo generado no es una
+    -- La siembra existe porque el nivel de referencia no puede arrancar en la
+    -- foto a secas: si lo último antes del corte fue una CONDONACION, la foto
+    -- dice cero y el rebote del cron de adentro se contaría entero.
+    -- No se siembra con una ventana fija de días —eso era apostar a que la
+    -- condonación masiva corriera todos los días— sino desde el último RESETEO:
+    -- el último evento anterior al ciclo que de verdad bajó el techo. Un pago
+    -- (o cualquier baja real) y la \`DESACTIVACION\` resetean; la CONDONACION NO,
+    -- porque la deuda perdonada ya se contó y su rebote no es oportunidad nueva.
+    -- Desde el reseteo hacia adelante el plegado de TypeScript se encarga; acá
+    -- solo se ELIGEN las filas, para no tener dos implementaciones de la regla.
+    -- Ver \`DIAS_TOPE_SIEMBRA\` para el crédito que no tuvo ningún reseteo.
+    eventos_crudos AS (
+      SELECT h.credito_id, h.fecha, h.historial_id, h.tipo_evento,
+             h.monto_anterior::numeric::text AS monto_anterior,
+             h.monto_nuevo::numeric::text AS monto_nuevo,
+             (h.fecha < ${inicioUtc}::timestamp) AS previo,
+             -- La restitución de una reversa de pago entra como INCREMENTO
+             -- manual, idéntica a un ajuste a mano: el \`motivo\` es la única
+             -- marca que las separa. Ver \`MOTIVO_REVERSA_MORA_PREFIJO\`.
+             (h.tipo_evento = 'INCREMENTO' AND h.motivo LIKE ${`${MOTIVO_REVERSA_MORA_PREFIJO}%`}) AS reverso,
+             (h.tipo_evento = 'DESACTIVACION'
+              OR (h.tipo_evento <> 'CONDONACION' AND h.monto_nuevo < h.monto_anterior)) AS reseteo,
+             ROW_NUMBER() OVER (PARTITION BY h.credito_id ORDER BY h.fecha, h.historial_id) AS orden
+      FROM cartera.moras_historial h
+      JOIN creditos_con_asesor ca ON ca.credito_id = h.credito_id
+      WHERE h.fecha >= ${siembraUtc}::timestamp
+        AND h.fecha < ${finUtc}::timestamp
+    ),
+    eventos_anclados AS (
+      SELECT e.*,
+             MAX(CASE WHEN e.previo AND e.reseteo THEN e.orden END)
+               OVER (PARTITION BY e.credito_id) AS orden_ancla
+      FROM eventos_crudos e
+    ),
+    -- Eventos crudos del ciclo MÁS los de la siembra (marcados \`previo\`), en
+    -- orden, SIN agregar: lo generado no es una
     -- suma de deltas sino un recorrido con estado (el "nivel de referencia" de
     -- \`moraGeneradaEnPeriodo\`), porque una condonación y el rebote que la
     -- repone no son deuda nueva mientras que una baja por pago sí reabre la
@@ -293,30 +360,33 @@ export function buildMoraRecoveryQuery({
     -- proporcional. Antes el monto casi no cambiaba y el cron escribía \`sinCambios\`,
     -- así que para ciclos viejos el historial es escaso y el esperado queda
     -- APROXIMADO POR LO BAJO. No es un defecto del cálculo: el dato no existe hacia atrás.
-    -- La ventana de siembra existe porque el nivel de referencia no puede arrancar
-    -- en la foto a secas: si lo último antes del corte fue una CONDONACION, la foto
-    -- dice cero y el rebote del cron de adentro se contaría entero. Ver
-    -- \`DIAS_SIEMBRA_NIVEL\`.
     eventos_por_credito AS (
-      SELECT h.credito_id,
+      SELECT e.credito_id,
              JSON_AGG(
                JSON_BUILD_OBJECT(
-                 'tipoEvento', h.tipo_evento,
-                 'montoAnterior', h.monto_anterior::numeric::text,
-                 'montoNuevo', h.monto_nuevo::numeric::text,
-                 'previo', h.fecha < ${inicioUtc}::timestamp
+                 'tipoEvento', e.tipo_evento,
+                 'montoAnterior', e.monto_anterior,
+                 'montoNuevo', e.monto_nuevo,
+                 'previo', e.previo,
+                 'reverso', e.reverso
                )
-               ORDER BY h.fecha, h.historial_id
+               ORDER BY e.fecha, e.historial_id
              ) AS eventos
-      FROM cartera.moras_historial h
-      JOIN creditos_con_asesor ca ON ca.credito_id = h.credito_id
-      WHERE h.fecha >= ${siembraUtc}::timestamp
-        AND h.fecha < ${finUtc}::timestamp
-      GROUP BY h.credito_id
+      FROM eventos_anclados e
+      -- Del tramo previo solo sobrevive lo que va DESDE el último reseteo: lo
+      -- anterior ya no dice nada del techo vigente. Sin reseteo se conserva el
+      -- tope de días completo, y ahí el \`monto_anterior\` de la primera fila
+      -- hace de estado inicial.
+      -- Este recorte NO cambia el resultado —el plegado borra el nivel al pasar
+      -- por el reseteo, así que arrancar antes da lo mismo—: es lo que hace
+      -- ASEQUIBLE mirar un ciclo entero hacia atrás en vez de tres días, porque
+      -- el crédito que sí pagó viaja con un puñado de filas y no con el mes.
+      WHERE NOT e.previo OR e.orden_ancla IS NULL OR e.orden >= e.orden_ancla
+      GROUP BY e.credito_id
       -- Un crédito cuyos ÚNICOS eventos son de la siembra no participó del
       -- ciclo: dejarlo entrar agregaría filas en cero (y asesores enteros en
       -- cero) que hoy no existen. La siembra acompaña, no amplía el universo.
-      HAVING BOOL_OR(h.fecha >= ${inicioUtc}::timestamp)
+      HAVING BOOL_OR(NOT e.previo)
     )
     SELECT
       ca.asesor_id,

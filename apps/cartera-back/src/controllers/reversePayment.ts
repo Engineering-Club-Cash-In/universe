@@ -19,6 +19,7 @@ import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
+import { motivoReversaMora } from "../utils/motivoReversaMora";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT";
@@ -339,7 +340,9 @@ export function createReversePayment(
           monto_cambio: Number(pago.mora),
           tipo: "INCREMENTO",
           activa: true,
-          motivo: `Reversa de pago #${pago_id}: se restituye la mora que ese pago había cubierto`,
+          // El texto NO es decorativo: el reporte de recuperación lo lee para
+          // distinguir esta RESTITUCIÓN de una mora genuinamente nueva.
+          motivo: motivoReversaMora(pago_id),
         });
 
         if (!reverseMoraResult.success) {

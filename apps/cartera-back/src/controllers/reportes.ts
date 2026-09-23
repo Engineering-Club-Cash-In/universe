@@ -2288,6 +2288,7 @@ export async function getMoraRecuperacionPorAsesor({
       montoAnterior: string;
       montoNuevo: string;
       previo: boolean;
+      reverso: boolean;
     }[];
     cobrado: string;
   }>(buildMoraRecoveryQuery({ ...period, asesores, emailCobrador }));
@@ -2302,6 +2303,7 @@ export async function getMoraRecuperacionPorAsesor({
         montoAnterior: Number(evento.montoAnterior),
         montoNuevo: Number(evento.montoNuevo),
         previo: evento.previo === true,
+        reverso: evento.reverso === true,
       })),
       cobrado: row.cobrado,
     })),

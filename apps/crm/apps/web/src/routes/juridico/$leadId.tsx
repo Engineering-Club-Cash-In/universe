@@ -456,8 +456,8 @@ function RouteComponent() {
 						onReplace={
 							canCreateLegal && enEtapaDeJuridico ? handleReplace : undefined
 						}
-						// Eliminar tiene su propia regla: sólo en 80%. En 85% los
-						// enlaces ya salieron, y borrar sin reemplazo los deja muertos.
+						// Eliminar va en 80% y 85%, como reemplazar, pero con su propia
+						// regla para que el servidor y el botón no se separen si cambia.
 						onDelete={
 							canCreateLegal &&
 							etapaPermite(

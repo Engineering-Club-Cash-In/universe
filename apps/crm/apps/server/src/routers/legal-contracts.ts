@@ -233,9 +233,9 @@ async function eliminarConCandadoTomado(
 /**
  * Corta si la oportunidad ya no está en una etapa que permita esta acción.
  *
- * Qué etapas admite cada acción está en `ETAPAS_POR_ACCION`: reemplazar y
- * regenerar van en 80% y 85%, eliminar sólo en 80%. Del 90% en adelante los
- * contratos ya son parte de una decisión tomada y no se tocan.
+ * Qué etapas admite cada acción está en `ETAPAS_POR_ACCION`: hoy todas van en
+ * 80% y 85%. Del 90% en adelante los contratos ya son parte de una decisión
+ * tomada y no se tocan.
  */
 async function exigirEtapaDeFirma(
 	opportunityId: string,

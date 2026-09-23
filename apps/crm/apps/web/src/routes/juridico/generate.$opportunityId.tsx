@@ -357,16 +357,38 @@ function RouteComponent() {
 		return result;
 	};
 
-	// Lo que el wizard generó y no se va a enlazar. Sin esperar la respuesta:
-	// se llama también al irse de la pantalla, y no hay nada que mostrar. Si
-	// falla queda en el log; el documento huérfano es lo que había antes.
+	// Lo que el wizard generó y no se va a enlazar ("Corregir y Regenerar", o
+	// irse de la pantalla). No se espera la respuesta para seguir, pero se avisa
+	// cómo quedó: sin el aviso no había forma de saber que se borró en WeeTrust,
+	// ni de enterarse si alguno quedó vivo y el cliente todavía podía firmarlo.
 	const handleDescartarSinEnlazar = (
 		documentos: Array<{ documentID: string; descarte: string }>,
 	) => {
 		if (!opportunityId) return;
 		client
 			.descartarContratosSinEnlazar({ opportunityId, documentos })
-			.catch((error) => console.error("[descartarContratosSinEnlazar]", error));
+			.then(({ descartados, noBorrados }) => {
+				if (descartados > 0) {
+					toast.info(
+						descartados === 1
+							? "Se borró en WeeTrust el documento que no se enlazó"
+							: `Se borraron en WeeTrust los ${descartados} documentos que no se enlazaron`,
+					);
+				}
+				if (noBorrados > 0) {
+					toast.warning(
+						noBorrados === 1
+							? "Un documento no se pudo borrar en WeeTrust: revisalo allá, el cliente todavía puede firmarlo"
+							: `${noBorrados} documentos no se pudieron borrar en WeeTrust: revisalos allá, el cliente todavía puede firmarlos`,
+					);
+				}
+			})
+			.catch((error) => {
+				console.error("[descartarContratosSinEnlazar]", error);
+				toast.error(
+					"No se pudieron borrar en WeeTrust los documentos que no se enlazaron",
+				);
+			});
 	};
 
 	const handleLinkContracts = async (data: {

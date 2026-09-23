@@ -1914,9 +1914,9 @@ export function DynamicContractWizard({
 		setRetryingType(contractType);
 		try {
 			const retryResult = await onGenerate({ contracts: [contrato] });
-			anotarGenerados(retryResult.results);
 			const nuevo = retryResult.results[0];
 			if (!nuevo) return;
+			anotarGenerados(retryResult.results);
 
 			setGenerationResult((prev) => {
 				if (!prev) return prev;

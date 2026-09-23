@@ -107,9 +107,12 @@ import {
 import {
 	conLaEtapaDeDestino,
 	dpiCambia,
+	elExpedienteNoAcumulaEvidencia,
 	etapaQueCanda,
 	evaluarCandadoBorradoCoDeudor,
 	evaluarCandadoDpi,
+	evidenciaAcumuladaDelExpediente,
+	mensajeCambioDeLeadConEvidencia,
 	mensajeCandadoCambioDeLead,
 	noExisteOportunidadCandanteDelLead,
 	noExisteOportunidadCandantePorId,
@@ -2994,6 +2997,23 @@ export const crmRouter = {
 						message: mensajeCandadoCambioDeLead(candante),
 					});
 				}
+
+				// 🔴 El candado de arriba mira la ETAPA, y por debajo del umbral deja
+				// pasar el cambio cobrando `parcheDeIdentidadInvalidada`. Ese parche
+				// invalida la aprobación y los documentos de identidad, pero NO los
+				// comprobantes de ingresos, estados de cuenta, recibos ni formularios
+				// del cliente anterior, que sobreviven y vuelven a aprobar el
+				// expediente bajo otra persona. Ver `evidenciaAcumuladaDelExpediente`.
+				const evidenciaDelExpediente = await evidenciaAcumuladaDelExpediente({
+					opportunityId: id,
+					status: currentOpportunity[0].status,
+				});
+
+				if (evidenciaDelExpediente.length > 0) {
+					throw new ORPCError("FORBIDDEN", {
+						message: mensajeCambioDeLeadConEvidencia(evidenciaDelExpediente),
+					});
+				}
 			}
 
 			// diaPagoMensual solo puede ser 15, 30, o uno de los días recomendados
@@ -3334,10 +3354,16 @@ export const crmRouter = {
 			// —todavía por debajo del umbral, porque el que lo cruza es esta misma
 			// sentencia— y dejaba pasar el cambio de lead que sube de etapa en el
 			// mismo viaje. Es la contraparte SQL de `conLaEtapaDeDestino`.
+			//
+			// Lo mismo vale para la evidencia acumulada: el chequeo de arriba la
+			// leyó antes del UPDATE, y entre la lectura y la escritura el analista
+			// puede subir un documento o terminar el formulario. La condición viaja
+			// también adentro (`elExpedienteNoAcumulaEvidencia`).
 			const leadSwapWhereClause = cambiaElLeadDeLaOportunidad
 				? and(
 						wonLockWhereClause,
 						noExisteOportunidadCandantePorId(id, input.stageId),
+						elExpedienteNoAcumulaEvidencia(id),
 					)
 				: wonLockWhereClause;
 			const whereClause = expectedUpdatedAt

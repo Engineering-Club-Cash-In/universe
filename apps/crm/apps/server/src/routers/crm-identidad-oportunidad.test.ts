@@ -3,7 +3,9 @@ import { type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 
 import { user } from "../db/schema/auth";
+import { creditApplications } from "../db/schema/client-forms";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
+import { opportunityDocuments } from "../db/schema/documents";
 import { PORCENTAJE_CANDADO_DPI } from "../lib/lead-dpi-lock";
 
 /**
@@ -803,6 +805,215 @@ describe("createOpportunity: una oportunidad no nace arriba del umbral del canda
 			title: "Crédito normal",
 			leadId: LEAD,
 			stageId: ETAPA_PROSPECTO,
+		});
+	});
+});
+
+/**
+ * 🔴 La cuarta variante, y la que el arreglo de la invalidación NO cubría.
+ *
+ * `parcheDeIdentidadInvalidada` invalida la APROBACIÓN, y por el lado de los
+ * documentos sólo cuenta como caducados los dos tipos de
+ * `TIPOS_DOCUMENTO_IDENTIDAD` (`dpi` e `identification`). El recibo de luz, los
+ * estados de cuenta, los comprobantes de ingresos, los formularios y el
+ * consentimiento sobreviven.
+ *
+ * Entonces: se cambia el lead A por el B, se sube SÓLO el DPI de B, y
+ * `approveOpportunityAnalysis` vuelve a aprobar con los ingresos y los estados
+ * de cuenta de A. El expediente de una persona queda aprobado con la evidencia
+ * financiera de otra.
+ *
+ * El arreglo acotado: el cliente sólo se corrige mientras el expediente está
+ * vacío. Estas pruebas afirman sobre el EFECTO —que la escritura del `leadId`
+ * NO ocurre—, no sobre que la llamada al guard exista: en esta suite está
+ * comprobado que un test de cableado se traga un `if (false && ...)`.
+ */
+describe("updateOpportunity: con evidencia cargada, el cliente ya no se cambia", () => {
+	const OPORTUNIDAD = "14141414-1414-4141-8141-141414141414";
+	const LEAD_A = "15151515-1515-4151-8151-151515151515";
+	const LEAD_B = "16161616-1616-4161-8161-161616161616";
+	const ETAPA_ANALISIS_30 = "17171717-1717-4171-8171-171717171717";
+
+	/**
+	 * EN el umbral (30%), que es donde el candado de etapa deja pasar el cambio a
+	 * propósito (la comparación es `> 30`). O sea: el camino que quedaba abierto.
+	 */
+	const enElUmbral = {
+		id: OPORTUNIDAD,
+		title: "Crédito con expediente armado",
+		leadId: LEAD_A,
+		stageId: ETAPA_ANALISIS_30,
+		status: "open",
+		assignedTo: "vendedor",
+		analysisStatus: "approved",
+		creditDetailApproved: false,
+		identityRevalidatedAt: null,
+		vehicleId: "vehiculo-1",
+		companyId: null,
+		vendorId: null,
+		creditType: "autocompra",
+		diaPagoMensual: 15,
+		diaPagoOriginalSistema: null,
+		insuranceProvider: "universales",
+		updatedAt: new Date("2026-09-20T12:00:00.000Z"),
+		stageName: "Recepción de documentación y traslado a análisis",
+		closurePercentage: 30,
+		maxHistoricoClosurePercentage: 30,
+	};
+
+	const sembrarElExpediente = (oportunidad: Fila) => {
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, [oportunidad]);
+		filasPorTabla.set(leads, [{ id: LEAD_B, source: "web" }]);
+		filasPorTabla.set(salesStages, [
+			{
+				id: ETAPA_ANALISIS_30,
+				name: "Recepción de documentación y traslado a análisis",
+				closurePercentage: 30,
+				order: 4,
+			},
+		]);
+	};
+
+	test("el expediente con estados de cuenta del cliente anterior rechaza el cambio", async () => {
+		sembrarElExpediente(enElUmbral);
+		// La evidencia que `parcheDeIdentidadInvalidada` NO caduca, y que por eso
+		// volvería a aprobar el expediente bajo otra persona.
+		filasPorTabla.set(opportunityDocuments, [
+			{
+				id: "doc-1",
+				opportunityId: OPORTUNIDAD,
+				documentType: "estados_cuenta_1",
+			},
+			{ id: "doc-2", opportunityId: OPORTUNIDAD, documentType: "recibo_luz" },
+		]);
+
+		const salida = await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_B },
+			contextoDe("vendedor", "sales"),
+		).then(
+			() => null,
+			(e: unknown) => e,
+		);
+
+		// El EFECTO, primero: el `leadId` no se escribió. Sin el arreglo acá hay
+		// UNA escritura con `leadId: LEAD_B`.
+		expect(identidadEscrita()).toEqual([]);
+		expect((salida as Error | null)?.message).toMatch(
+			/el expediente ya tiene evidencia cargada/,
+		);
+		// El mensaje dice qué hacer, no sólo que no se puede.
+		expect((salida as Error | null)?.message).toMatch(/por perdida/);
+	});
+
+	test("el formulario de solicitud también cuenta como evidencia", async () => {
+		sembrarElExpediente(enElUmbral);
+		filasPorTabla.set(creditApplications, [
+			{ id: "form-1", opportunityId: OPORTUNIDAD },
+		]);
+
+		const salida = await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_B },
+			contextoDe("vendedor", "sales"),
+		).then(
+			() => null,
+			(e: unknown) => e,
+		);
+
+		expect(identidadEscrita()).toEqual([]);
+		expect((salida as Error | null)?.message).toMatch(
+			/formulario de solicitud de crédito/,
+		);
+	});
+
+	test("una oportunidad recién creada, sin nada colgado, se sigue pudiendo corregir", async () => {
+		// 🔴 Red de seguridad. Éste es el caso real de operaciones —un lead mal
+		// asignado en una oportunidad que todavía no tiene nada— y no se puede
+		// romper. Verde antes y después del arreglo.
+		sembrarElExpediente({
+			...enElUmbral,
+			analysisStatus: "not_applicable",
+			creditDetailApproved: null,
+			vehicleId: null,
+		});
+		filasPorTabla.set(opportunityDocuments, []);
+		filasPorTabla.set(creditApplications, []);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_B },
+			contextoDe("vendedor", "sales"),
+		);
+
+		expect(escriturasSobreOportunidades()[0]?.valores).toMatchObject({
+			leadId: LEAD_B,
+		});
+	});
+
+	test("la condición viaja DENTRO del WHERE del UPDATE, no sólo como chequeo previo", async () => {
+		// Entre la lectura del expediente y la escritura, el analista puede subir
+		// un documento: si la condición viviera sólo en el `if`, el cambio entraría
+		// igual sobre un expediente que ya dejó de estar vacío.
+		sembrarElExpediente({
+			...enElUmbral,
+			analysisStatus: "not_applicable",
+			creditDetailApproved: null,
+			vehicleId: null,
+		});
+		filasPorTabla.set(opportunityDocuments, []);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_B },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const [escritura] = escriturasSobreOportunidades();
+		expect(escritura?.valores).toMatchObject({ leadId: LEAD_B });
+
+		const { sql: texto, params } = sqlDeLaCondicion(escritura?.condicion);
+		const plano = texto.replace(/\s+/g, " ").toLowerCase();
+
+		// Las cinco fuentes de evidencia, cada una como su propio `not exists`.
+		for (const tabla of [
+			"opportunity_documents",
+			"credit_applications",
+			"financial_statements",
+			"credit_analysis",
+			"opportunity_validations",
+		]) {
+			expect(plano).toContain(tabla);
+		}
+		expect(plano.match(/not exists/g)?.length).toBeGreaterThanOrEqual(6);
+
+		// Y el id que se consulta es el de ESTA oportunidad.
+		expect(params.filter((p) => p === OPORTUNIDAD).length).toBeGreaterThan(0);
+	});
+
+	test("una oportunidad perdida queda exceptuada: ése es el camino que el mensaje indica", async () => {
+		// Decisión de producto ya vigente en el resto del candado (`etapaQueCanda`
+		// filtra `lost`): perder la oportunidad, corregir ahí el cliente y volver a
+		// abrirla cobra la revalidación completa y deja bitácora. Sin esta
+		// excepción el mensaje mandaría a un camino cerrado.
+		sembrarElExpediente({ ...enElUmbral, status: "lost" });
+		filasPorTabla.set(opportunityDocuments, [
+			{
+				id: "doc-1",
+				opportunityId: OPORTUNIDAD,
+				documentType: "estados_cuenta_1",
+			},
+		]);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_B },
+			contextoDe("vendedor", "sales"),
+		);
+
+		expect(escriturasSobreOportunidades()[0]?.valores).toMatchObject({
+			leadId: LEAD_B,
 		});
 	});
 });

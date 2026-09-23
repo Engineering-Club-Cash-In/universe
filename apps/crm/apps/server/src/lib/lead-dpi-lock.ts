@@ -1,8 +1,14 @@
 import { eq, type SQL, sql } from "drizzle-orm";
+import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { db } from "../db";
 import {
+	creditAnalysis,
+	creditApplications,
+	financialStatements,
 	opportunities,
+	opportunityDocuments,
 	opportunityStageHistory,
+	opportunityValidations,
 	salesStages,
 } from "../db/schema";
 import { normalizarDpi } from "../utils/cui-validation";
@@ -452,6 +458,174 @@ export function mensajeCandadoCambioDeLead(
 		etapa.maxHistoricoClosurePercentage ?? 0,
 	);
 	return `No se puede cambiar el cliente de esta oportunidad: la solicitud ya pasó del ${PORCENTAJE_CANDADO_DPI}% (llegó al ${altura}%). El expediente —RENAP, buró, documentos y análisis— está atado a la persona que hoy tiene asignada, y colgarlo de otra dejaría esas validaciones respaldando a alguien que nunca las pasó. Si el cliente está equivocado, creá la oportunidad con el cliente correcto.`;
+}
+
+/**
+ * 🔴 Por qué el candado de etapa NO alcanza, y esto se le SUMA.
+ *
+ * Cambiar el `leadId` por debajo del umbral se paga con
+ * `parcheDeIdentidadInvalidada`: marca de revalidación, detalle de crédito sin
+ * aprobar y `analysisStatus` de vuelta a `pending`. Esa marca invalida la
+ * APROBACIÓN, pero no la EVIDENCIA: `documentosDeIdentidadVigentes` sólo mira
+ * los dos tipos de `TIPOS_DOCUMENTO_IDENTIDAD` (`dpi` e `identification`), así
+ * que el recibo de luz, los estados de cuenta, los comprobantes de ingresos,
+ * los formularios y el consentimiento del cliente ANTERIOR sobreviven intactos.
+ *
+ * El resultado, confirmado: se cambia el lead A por el B, se sube SÓLO el DPI
+ * de B, y `approveOpportunityAnalysis` vuelve a aprobar con los ingresos y los
+ * estados de cuenta de A. El expediente de una persona queda aprobado con la
+ * evidencia financiera de otra.
+ *
+ * Arreglar eso por el lado de los documentos exige clasificar el catálogo
+ * entero de `documentTypeEnum` entre lo que pertenece al SOLICITANTE y lo que
+ * pertenece a la OPORTUNIDAD, y esa taxonomía es una decisión de producto. Lo
+ * que se hace acá es fallar cerrado sin tener que tomarla: el cliente sólo se
+ * puede corregir mientras el expediente está prácticamente vacío, que es el
+ * caso real de operaciones —un lead mal asignado recién creado—. En cuanto hay
+ * evidencia acumulada, el camino es perder la oportunidad, que es el que sí
+ * cobra la revalidación completa.
+ *
+ * ⚠️ NO reemplaza a `parcheDeIdentidadInvalidada`: los cambios que sí quedan
+ * permitidos lo siguen pagando. Es defensa en profundidad, no un recambio.
+ */
+type FuenteDeEvidencia = {
+	/** Cómo se nombra en el mensaje al asesor. */
+	etiqueta: string;
+	tabla: PgTable;
+	columna: PgColumn;
+};
+
+/**
+ * Lo que cuenta como «evidencia acumulada» del expediente.
+ *
+ * La MISMA lista alimenta las dos formas de la señal —la de memoria, que arma
+ * el mensaje, y la SQL, que viaja dentro del WHERE del UPDATE—, así que no
+ * pueden separarse en silencio como se separaron las dos lecturas del
+ * historial. Todas son tablas colgadas de `opportunity_id`, o sea evidencia de
+ * ESTE expediente y no del lead en general.
+ *
+ * 🔴 `opportunityDocuments` entra ENTERA, sin exceptuar `VEHICLE_DOCUMENT_TYPES`.
+ * Tentaba exceptuarlos —el vehículo no cambia porque cambie el cliente—, pero
+ * esa lista es una clasificación de SINCRONIZACIÓN (qué documento se espeja a
+ * `vehicleDocuments`), no de propiedad: en `sobre_vehiculo` el dueño del
+ * vehículo ES el solicitante, y entonces `dpi_dueno`, `consulta_sat`,
+ * `rtu_propietario`, `omisos_incumplimientos_propietario` y
+ * `garantia_mobiliaria_dpi` son evidencia del solicitante con etiqueta de
+ * vehículo. Distinguirlo es justamente la taxonomía que este arreglo evita
+ * tener que decidir. El costo: una oportunidad que sólo tiene papeles del
+ * vehículo y ninguno del cliente también queda bloqueada, y ésa tal vez no
+ * haría falta bloquearla.
+ */
+const FUENTES_DE_EVIDENCIA: readonly FuenteDeEvidencia[] = [
+	{
+		etiqueta: "documentos",
+		tabla: opportunityDocuments,
+		columna: opportunityDocuments.opportunityId,
+	},
+	{
+		etiqueta: "formulario de solicitud de crédito",
+		tabla: creditApplications,
+		columna: creditApplications.opportunityId,
+	},
+	{
+		etiqueta: "estado patrimonial",
+		tabla: financialStatements,
+		columna: financialStatements.opportunityId,
+	},
+	{
+		etiqueta: "análisis de capacidad de pago",
+		tabla: creditAnalysis,
+		columna: creditAnalysis.opportunityId,
+	},
+	{
+		etiqueta: "validaciones de RENAP/buró",
+		tabla: opportunityValidations,
+		columna: opportunityValidations.opportunityId,
+	},
+];
+
+/**
+ * Las perdidas quedan afuera, igual que en `etapaQueCanda` y en
+ * `sqlCandanteDeLaOportunidad`.
+ *
+ * No es una grieta olvidada: es EL camino que le queda al asesor, y el que el
+ * mensaje le indica. Dar por perdida la oportunidad, corregir ahí el cliente y
+ * volver a abrirla manda el expediente de vuelta a análisis
+ * (`parcheDeRevalidacion`) y deja las dos filas de bitácora correspondientes,
+ * o sea que la maniobra existe pero es explícita, cara y rastreable, en vez de
+ * un reemplazo silencioso en su lugar.
+ *
+ * ⚠️ Ese camino sigue arrastrando el agujero de la evidencia financiera —los
+ * estados de cuenta de A siguen colgados cuando vuelve a análisis con B—, que
+ * es el que la taxonomía pendiente tiene que cerrar.
+ */
+const ESTADO_QUE_NO_ACUMULA_EVIDENCIA = "lost";
+
+/**
+ * Qué evidencia tiene hoy colgada el expediente. Vacío = se puede corregir el
+ * cliente.
+ *
+ * Es la forma en memoria de la señal, y existe SÓLO para poder decirle al
+ * asesor qué lo está bloqueando. Lo que de verdad decide es la forma SQL, que
+ * va adentro de la sentencia que escribe.
+ */
+export async function evidenciaAcumuladaDelExpediente(input: {
+	opportunityId: string;
+	status: string;
+}): Promise<string[]> {
+	if (input.status === ESTADO_QUE_NO_ACUMULA_EVIDENCIA) {
+		return [];
+	}
+
+	const presencias = await Promise.all(
+		FUENTES_DE_EVIDENCIA.map(async (fuente) => {
+			const filas = await db
+				.select({ hay: sql<number>`1` })
+				.from(fuente.tabla)
+				.where(eq(fuente.columna, input.opportunityId))
+				.limit(1);
+			return filas.length > 0;
+		}),
+	);
+
+	return FUENTES_DE_EVIDENCIA.filter((_, i) => presencias[i]).map(
+		(fuente) => fuente.etiqueta,
+	);
+}
+
+/**
+ * 🔴 La MISMA señal, en SQL, para el WHERE del UPDATE que escribe el `leadId`.
+ *
+ * El chequeo de memoria leyó el expediente ANTES del UPDATE: entre esa lectura
+ * y la escritura, el analista puede subir un documento o terminar el
+ * formulario, y el cambio de cliente entraría igual sobre un expediente que ya
+ * dejó de estar vacío. Postgres re-evalúa el predicado después de esperar a la
+ * escritura rival, así que la condición viaja adentro de la misma sentencia.
+ * Es el mismo patrón de `sqlCandanteDeLaOportunidad` y
+ * `noExisteOportunidadCandantePorId`.
+ *
+ * La comparación de `status` se resuelve contra la fila GUARDADA, no contra el
+ * `set` de este UPDATE, así que un solo request que mande
+ * `{ status: "lost", leadId: B }` no se auto-habilita la excepción.
+ */
+export function elExpedienteNoAcumulaEvidencia(opportunityId: string): SQL {
+	const sinFilas = FUENTES_DE_EVIDENCIA.map(
+		(fuente) => sql`not exists (
+			select 1 from ${fuente.tabla} where ${fuente.columna} = ${opportunityId}
+		)`,
+	);
+
+	// `::text` y no la comparación directa contra el enum: el estado viaja como
+	// parámetro (una sola fuente de verdad con la forma en memoria) y así no
+	// depende de que Postgres infiera el tipo del parámetro sin ayuda.
+	return sql`(
+		${opportunities.status}::text = ${ESTADO_QUE_NO_ACUMULA_EVIDENCIA}
+		or (${sql.join(sinFilas, sql` and `)})
+	)`;
+}
+
+export function mensajeCambioDeLeadConEvidencia(evidencia: string[]): string {
+	return `No se puede cambiar el cliente de esta oportunidad: el expediente ya tiene evidencia cargada (${evidencia.join(", ")}). Esa evidencia se levantó para el cliente que hoy tiene asignado y quedaría respaldando a otro: cambiar el cliente invalida la aprobación y los documentos de identidad, pero no los comprobantes de ingresos, los estados de cuenta ni los formularios, que seguirían siendo los de la persona anterior. El cliente sólo se puede corregir mientras el expediente todavía está vacío. Si el cliente está equivocado, dá la oportunidad por perdida y corregí el cliente ahí antes de volver a abrirla —ese camino manda el expediente de vuelta a análisis y cobra la revalidación completa—, o creá una oportunidad nueva con el cliente correcto.`;
 }
 
 export async function evaluarCandadoBorradoCoDeudor(input: {

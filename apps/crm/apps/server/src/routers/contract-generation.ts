@@ -29,6 +29,7 @@ import {
 } from "../lib/contract-signature-mode";
 import { esContratoVentaMapeado } from "../lib/contratos-venta";
 import { eqDpi } from "../lib/dpi-lookup";
+import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import { juridicoProcedure } from "../lib/orpc";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import {
@@ -64,6 +65,31 @@ const REP_LEGAL_NOMBRE =
 	process.env.CONTRATOS_REP_LEGAL_NOMBRE || "Representante Legal";
 
 /**
+ * Correos de prueba para los firmantes.
+ *
+ * Con `TEST_MESSAGE=true` los contratos se siguen generando con los datos
+ * reales del cliente (nombre, DPI, vehículo), pero los links de firma se emiten
+ * contra ESTOS correos y no contra los suyos. Hace falta porque WeeTrust apunta
+ * a producción: sin esto, probar el flujo le manda un contrato a firmar a
+ * alguien de verdad.
+ *
+ * Viven acá y no en `contract-signature-mode.ts` porque ese módulo lo importa
+ * también el navegador, donde `process` no existe.
+ *
+ * `CONTRATOS_TEST_EMAIL_COFIRMANTES` va separado por comas y se reparte en
+ * orden entre los codeudores; si hay más codeudores que correos, rota.
+ */
+const CONTRATOS_TEST_EMAIL_TITULAR =
+	process.env.CONTRATOS_TEST_EMAIL_TITULAR?.trim() || "";
+
+const CONTRATOS_TEST_EMAIL_COFIRMANTES = (
+	process.env.CONTRATOS_TEST_EMAIL_COFIRMANTES || ""
+)
+	.split(",")
+	.map((email) => email.trim())
+	.filter(Boolean);
+
+/**
  * Observadores: reciben copia del flujo de firma en WeeTrust sin firmar.
  * Lista separada por comas.
  */
@@ -90,13 +116,62 @@ function firmantesDelContrato(
 ): ContractSigner[] | undefined {
 	if (esFirmaFisica(contractType)) return undefined;
 	if (!signers || signers.length === 0) return signers;
+
 	// El representante legal lo pone siempre el servidor. Si viniera del
 	// navegador, cualquiera podría mandar su propio correo con ese rol y
 	// quedarse con el link de firma de la entidad.
-	return [
+	const conRepLegal: ContractSigner[] = [
 		...signers.filter((s) => s.role !== "REP_LEGAL"),
 		{ role: "REP_LEGAL", email: REP_LEGAL_EMAIL, name: REP_LEGAL_NOMBRE },
 	];
+
+	return conCorreosDePrueba(conRepLegal);
+}
+
+/**
+ * En modo de prueba, cambia los correos de los firmantes por los de las envs.
+ *
+ * El contrato se sigue armando con los datos reales del cliente (nombre, DPI,
+ * vehículo): lo único que se reemplaza es a dónde llega el link de firma. Sin
+ * esto, probar contra WeeTrust de producción le manda un contrato a firmar a un
+ * cliente de verdad.
+ *
+ * El representante legal no se toca: su correo ya sale de una env
+ * (`CONTRATOS_REP_LEGAL_EMAIL`).
+ */
+function conCorreosDePrueba(signers: ContractSigner[]): ContractSigner[] {
+	if (!isTestModeEnabled()) return signers;
+
+	if (
+		!CONTRATOS_TEST_EMAIL_TITULAR &&
+		!CONTRATOS_TEST_EMAIL_COFIRMANTES.length
+	) {
+		console.warn(
+			"[contratos] TEST_MESSAGE=true pero no hay CONTRATOS_TEST_EMAIL_TITULAR " +
+				"ni CONTRATOS_TEST_EMAIL_COFIRMANTES: los links de firma van a salir " +
+				"a los correos REALES del cliente.",
+		);
+		return signers;
+	}
+
+	let nCofirmante = 0;
+
+	return signers.map((s) => {
+		if (s.role === "TITULAR" && CONTRATOS_TEST_EMAIL_TITULAR) {
+			return { ...s, email: CONTRATOS_TEST_EMAIL_TITULAR };
+		}
+		if (s.role === "COFIRMANTE" && CONTRATOS_TEST_EMAIL_COFIRMANTES.length) {
+			// Si hay más codeudores que correos de prueba, rota: es preferible a
+			// dejar a uno con su correo real.
+			const email =
+				CONTRATOS_TEST_EMAIL_COFIRMANTES[
+					nCofirmante % CONTRATOS_TEST_EMAIL_COFIRMANTES.length
+				];
+			nCofirmante += 1;
+			return { ...s, email };
+		}
+		return s;
+	});
 }
 
 /**

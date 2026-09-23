@@ -1603,6 +1603,51 @@ describe("buildMoraRecoveryQuery — el filtro de lote", () => {
 		expect(texto).not.toContain("c.credito_id IN (");
 	});
 
+	// EL DEFECTO. El lote acotaba `creditos_con_asesor`, pero la FOTO inicial
+	// —`snapCte`, y la CTE de mora viva de la rama `live`— va ANTES y no cuelga
+	// de ella: cada lote reconstruía la foto de la cartera COMPLETA y recién
+	// descartaba los créditos ajenos en el JOIN final. Con N lotes eso es N veces
+	// la foto entera, o sea el batching pagando de más en vez de de menos.
+	it("acota TAMBIÉN la foto del snapshot, no solo `creditos_con_asesor`", () => {
+		const { sql: texto } = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery({ ...periodo, creditos: [7, 9] }),
+		);
+		// La foto entra por el lote: un LATERAL por crédito sobre la lista.
+		expect(texto).toMatch(/snap_ultimo AS \([\s\S]*?unnest\(/);
+		expect(texto).toMatch(/snap_cuotas AS \([\s\S]*?unnest\(/);
+		// Y lo que NO puede volver: un barrido de la tabla sin atarse al crédito.
+		const snapshot = texto.slice(
+			texto.indexOf("snap_ultimo AS ("),
+			texto.indexOf("creditos_con_asesor AS ("),
+		);
+		expect(snapshot).toContain("h.credito_id = l.credito_id");
+		expect(snapshot).not.toContain("DISTINCT ON");
+	});
+
+	it("la rama `live` acota su propia foto de mora activa", () => {
+		// `mora_activa` es la foto de la rama viva y tiene el mismo problema.
+		const vivo = getMoraRecoveryPeriod({ mes: 9, anio: 2026, hoy: "2026-09-03" });
+		expect(vivo.alcance).toBe("live");
+		const { sql: texto, params } = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery({ ...vivo, creditos: [7, 9] }),
+		);
+		expect(texto).toMatch(
+			/mora_activa AS \([\s\S]*?credito_id = ANY \(ARRAY\[/,
+		);
+		expect(params).toContain(7);
+		expect(params).toContain(9);
+	});
+
+	it("sin lote la foto sigue siendo la de toda la cartera", () => {
+		// Los otros llamadores de `snapCte` dependen de esto.
+		const { sql: texto } = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(periodo),
+		);
+		expect(texto).toContain("snap_ultimo AS (");
+		expect(texto).toContain("DISTINCT ON (h.credito_id)");
+		expect(texto).not.toContain("unnest(");
+	});
+
 	it("el universo de créditos usa los MISMOS filtros que el reporte", () => {
 		// Si divergieran, la partición dejaría créditos afuera del reporte.
 		const { sql: universo } = new PgDialect().sqlToQuery(

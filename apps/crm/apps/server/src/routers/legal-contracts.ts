@@ -180,11 +180,12 @@ async function eliminarContrato(
 	contrato: typeof generatedLegalContracts.$inferSelect,
 	motivo: string,
 	/**
-	 * Exigir que la oportunidad siga en la etapa de jurídico. Lo pide quien
-	 * borra desde la ficha: la pantalla pudo quedar abierta desde antes y el
-	 * botón escondido no frena un pedido ya cargado.
+	 * Con qué acción se revisa la etapa de la oportunidad, o `null` para no
+	 * revisarla (sólo el administrador). La pide quien borra desde una ficha:
+	 * la pantalla pudo quedar abierta desde antes, y un botón escondido no
+	 * frena un pedido que ya salió.
 	 */
-	exigirEtapa = false,
+	exigirEtapa: AccionSobreContrato | null = null,
 ): Promise<{ conservado: boolean }> {
 	// Con el candado de la oportunidad: esto borra el documento en WeeTrust, y
 	// si un envío por WhatsApp está mandando sus enlaces, el cliente recibiría
@@ -194,7 +195,7 @@ async function eliminarContrato(
 		// están en manos del cliente y borrar el documento se los mata; del 90%
 		// en adelante la oportunidad ya se cerró con esos contratos.
 		if (exigirEtapa && contrato.opportunityId) {
-			await exigirEtapaDeFirma(contrato.opportunityId, "reemplazar");
+			await exigirEtapaDeFirma(contrato.opportunityId, exigirEtapa);
 		}
 		return eliminarConCandadoTomado(contrato, motivo);
 	});
@@ -480,7 +481,7 @@ export const legalContractsRouter = {
 			const { conservado } = await eliminarContrato(
 				existingContract,
 				"Eliminado por jurídico",
-				true,
+				"reemplazar",
 			);
 
 			return {
@@ -1464,6 +1465,75 @@ export const legalContractsRouter = {
 
 			await sincronizarEstadoDeFirma(input.contractId, estado);
 			return estado;
+		}),
+
+	/**
+	 * Anula un contrato desde la ficha de la oportunidad, sin reemplazarlo.
+	 *
+	 * Es para cuando el documento no va y punto: datos equivocados, una
+	 * identificación que WeeTrust dejó pasar, o se subió el que no era. Hasta
+	 * acá sólo jurídico podía descartarlo, y análisis —que es quien lleva la
+	 * oportunidad en 85%— tenía que pedírselo.
+	 *
+	 * Qué pasa del lado de WeeTrust lo decide `eliminarContrato`:
+	 *
+	 * - si nadie firmó, el documento se borra allá y los enlaces mueren;
+	 * - si ya firmó alguien, **allá queda**. WeeTrust no deja borrar un
+	 *   documento completado, y uno a medio firmar tiene firmas que son de
+	 *   alguien. La fila se conserva anulada, diciendo qué se descartó y cómo
+	 *   quedó del otro lado.
+	 *
+	 * La fila anulada no se borra nunca: es el registro de lo que se descartó, y
+	 * sin ella un documento que quedó vivo en WeeTrust no tendría rastro acá.
+	 */
+	anularContrato: viewOpportunityContractsProcedure
+		.input(
+			z.object({
+				contractId: z.string().uuid(),
+				motivo: z.enum(MOTIVOS_DE_ANULACION_KEYS),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Ver los contratos lo puede hacer ventas o contabilidad; anularlos no.
+			if (!PERMISSIONS.canAnnulContracts(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "Sólo jurídico o análisis pueden anular un contrato",
+				});
+			}
+
+			const [contrato] = await db
+				.select()
+				.from(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.id, input.contractId))
+				.limit(1);
+
+			if (!contrato) {
+				throw new ORPCError("NOT_FOUND", { message: "Contrato no encontrado" });
+			}
+
+			// Anular lo ya anulado no hace nada y confunde: la fila que se ve en
+			// "Ver anulados" es registro, no un contrato que se pueda volver a
+			// descartar.
+			if (!estaVigente(contrato)) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Este contrato ya está anulado.",
+				});
+			}
+
+			const quien = context.session?.user?.name ?? "alguien del CRM";
+			const { conservado } = await eliminarContrato(
+				contrato,
+				`${etiquetaDeMotivo(input.motivo)} (anulado por ${quien})`,
+				"anular",
+			);
+
+			return {
+				success: true,
+				conservado,
+				message: conservado
+					? "Contrato anulado. Queda en «Ver anulados» con el detalle de cómo quedó en WeeTrust."
+					: "Contrato anulado y borrado de la plataforma de firma.",
+			};
 		}),
 
 	/**

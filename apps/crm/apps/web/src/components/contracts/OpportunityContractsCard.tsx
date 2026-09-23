@@ -11,6 +11,7 @@ import {
 	FileText,
 	Loader2,
 	RefreshCw,
+	Trash2,
 	TriangleAlert,
 } from "lucide-react";
 import { useState } from "react";
@@ -26,6 +27,7 @@ import {
 } from "@/lib/contract-signers-display";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client } from "@/utils/orpc";
+import { AnularContratoDialog } from "./AnularContratoDialog";
 import { ReenviarWhatsappDialog } from "./ReenviarWhatsappDialog";
 import { RegenerarEnlacesDialog } from "./RegenerarEnlacesDialog";
 
@@ -76,6 +78,12 @@ interface OpportunityContractsCardProps {
 	 * contabilidad ven la card pero no ese botón.
 	 */
 	puedeRegenerar?: boolean;
+	/**
+	 * Si quien mira puede anular un contrato. Va aparte de `puedeRegenerar`:
+	 * anular lo descarta sin reemplazarlo, y lo pueden hacer tanto análisis como
+	 * jurídico, mientras que regenerar es sólo de análisis.
+	 */
+	puedeAnular?: boolean;
 	/** Se llama cuando cambia el estado, para refrescar la lista. */
 	onUpdate?: () => void;
 }
@@ -101,6 +109,7 @@ export function OpportunityContractsCard({
 	contracts,
 	isLoading = false,
 	puedeRegenerar = false,
+	puedeAnular = false,
 	onUpdate,
 }: OpportunityContractsCardProps) {
 	// Los anulados se conservan (dicen qué se descartó y si alguien lo había
@@ -124,6 +133,7 @@ export function OpportunityContractsCard({
 			key={f.contract.id}
 			fila={f}
 			puedeRegenerar={puedeRegenerar}
+			puedeAnular={puedeAnular}
 			onUpdate={onUpdate}
 			onPreguntarReenvio={setReenviarDeOportunidad}
 		/>
@@ -205,11 +215,13 @@ export function OpportunityContractsCard({
 function ContratoFila({
 	fila,
 	puedeRegenerar: tienePermiso,
+	puedeAnular,
 	onUpdate,
 	onPreguntarReenvio,
 }: {
 	fila: FilaDeContrato;
 	puedeRegenerar: boolean;
+	puedeAnular: boolean;
 	onUpdate?: () => void;
 	/**
 	 * Avisa que hay que preguntar si se reenvían los enlaces. Lo resuelve la
@@ -269,6 +281,7 @@ function ContratoFila({
 	});
 
 	const [regenerando, setRegenerando] = useState(false);
+	const [anulando, setAnulando] = useState(false);
 
 	const ocupado = actualizarEstado.isPending;
 
@@ -468,9 +481,33 @@ function ContratoFila({
 								{hayVencidos ? "Regenerar (hay vencidos)" : "Regenerar enlaces"}
 							</Button>
 						)}
+
+						{/* Descartar el documento sin reemplazarlo. */}
+						{puedeAnular && !inactivo && (
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-6 px-1.5 text-destructive text-xs hover:text-destructive"
+								disabled={ocupado}
+								onClick={() => setAnulando(true)}
+								title="Descarta el contrato. Si nadie firmó, se borra de la plataforma de firma; si ya firmaron, allá queda."
+							>
+								<Trash2 className="mr-1 h-3 w-3" />
+								Anular
+							</Button>
+						)}
 					</div>
 				</div>
 			)}
+
+			<AnularContratoDialog
+				contractId={contract.id}
+				contractName={contract.contractName}
+				hayFirmas={alguienFirmo}
+				open={anulando}
+				onOpenChange={setAnulando}
+				onAnulado={() => onUpdate?.()}
+			/>
 
 			<RegenerarEnlacesDialog
 				contractId={contract.id}

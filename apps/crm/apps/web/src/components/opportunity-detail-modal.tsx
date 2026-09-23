@@ -514,6 +514,9 @@ export function OpportunityDetailModal({
 									!!userRole &&
 									PERMISSIONS.canRegenerateContractLinks(userRole)
 								}
+								puedeAnular={
+									!!userRole && PERMISSIONS.canAnnulContracts(userRole)
+								}
 								onUpdate={() => opportunityContractsQuery.refetch()}
 							/>
 						)}

@@ -42,13 +42,17 @@ export const ETAPAS_QUE_PERMITEN_REEMPLAZO = [80, 85];
  * - **regenerar** (mismo documento, enlaces nuevos) lo hace análisis, que es
  *   quien lleva la oportunidad en 85%. Se permite también en 80% para que
  *   jurídico pueda hacerlo durante su etapa.
+ * - **anular** (descartar el contrato sin reemplazarlo) lo hacen los dos,
+ *   cuando el documento no va: datos equivocados, la identificación que
+ *   WeeTrust dejó pasar, o simplemente se subió otro.
  *
  * Del 90% en adelante los contratos ya son parte de una decisión tomada y no
- * se tocan, para ninguna de las dos.
+ * se tocan, para ninguna de las tres.
  */
 export const ETAPAS_POR_ACCION = {
 	reemplazar: [80, 85],
 	regenerar: [80, 85],
+	anular: [80, 85],
 } as const;
 
 export type AccionSobreContrato = keyof typeof ETAPAS_POR_ACCION;

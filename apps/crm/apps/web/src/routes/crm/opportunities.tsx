@@ -2787,6 +2787,9 @@ function RouteComponent() {
 											puedeRegenerar={PERMISSIONS.canRegenerateContractLinks(
 												userProfile.data.role,
 											)}
+											puedeAnular={PERMISSIONS.canAnnulContracts(
+												userProfile.data.role,
+											)}
 											onUpdate={() => opportunityContractsQuery.refetch()}
 										/>
 									)}

@@ -2,7 +2,6 @@ import { ORPCError } from "@orpc/server";
 import { and, count, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { auditRecord, auditedTransaction } from "../lib/audit";
 import { user } from "../db/schema/auth";
 import {
 	leads,
@@ -15,6 +14,8 @@ import {
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
 import { vehicles } from "../db/schema/vehicles";
+import { auditedTransaction, auditRecord } from "../lib/audit";
+import { documentIdDesdeLink } from "../lib/contract-signatories";
 import {
 	adminProcedure,
 	juridicoProcedure,
@@ -28,6 +29,12 @@ import {
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import { closeOpportunity } from "../services/close-opportunity";
+import {
+	consultarEstadoFirma,
+	type EstadoDocumentoFirma,
+	reenviarCorreoDeFirma,
+	regenerarEnlacesDeFirma,
+} from "../services/legal-docs-api";
 import { sendContractLinksToLead } from "./messaging";
 import { createNotification } from "./notifications";
 
@@ -65,6 +72,97 @@ async function firmantesPorContrato(
 		porContrato.set(fila.contractId, lista);
 	}
 	return porContrato;
+}
+
+/**
+ * Un contrato listo para hablar con WeeTrust, o el motivo por el que no se
+ * puede.
+ *
+ * El `documentID` de los contratos viejos no se guardó, pero viaja dentro del
+ * link de firma, así que se recupera de ahí antes de darse por vencido.
+ */
+async function contratoConDocumentID(contractId: string): Promise<{
+	contract: typeof generatedLegalContracts.$inferSelect;
+	documentID: string;
+}> {
+	const [contract] = await db
+		.select()
+		.from(generatedLegalContracts)
+		.where(eq(generatedLegalContracts.id, contractId));
+
+	if (!contract) {
+		throw new ORPCError("NOT_FOUND", { message: "Contrato no encontrado" });
+	}
+
+	if (contract.signatureMode === "fisica") {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"Este contrato se firma en papel: no tiene firma electrónica que consultar.",
+		});
+	}
+
+	const documentID =
+		contract.weetrustDocumentId ??
+		documentIdDesdeLink(contract.clientSigningLink) ??
+		documentIdDesdeLink(contract.representativeSigningLink) ??
+		documentIdDesdeLink(contract.additionalSigningLinks?.[0] ?? null);
+
+	if (!documentID) {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"Este contrato no tiene documento en WeeTrust. Hay que regenerarlo.",
+		});
+	}
+
+	return { contract, documentID };
+}
+
+/**
+ * Baja a la base lo que WeeTrust dice del documento.
+ *
+ * Actualiza el link y el estado de cada firmante, y marca el contrato como
+ * firmado cuando WeeTrust lo da por completado. Los firmantes se emparejan por
+ * correo, que es la llave que usa WeeTrust.
+ */
+async function sincronizarEstadoDeFirma(
+	contractId: string,
+	estado: EstadoDocumentoFirma,
+): Promise<void> {
+	const ahora = new Date();
+
+	for (const firmante of estado.signatories) {
+		await db
+			.update(contractSignatories)
+			.set({
+				status: firmante.isSigned ? "signed" : "pending",
+				// Un link regenerado reemplaza al anterior; uno vacío no borra el
+				// que ya teníamos, que puede seguir sirviendo.
+				...(firmante.signingUrl ? { signingUrl: firmante.signingUrl } : {}),
+				...(firmante.signatoryID
+					? { weetrustSignatoryId: firmante.signatoryID }
+					: {}),
+				...(firmante.isSigned ? { signedAt: ahora } : { signedAt: null }),
+				updatedAt: ahora,
+			})
+			.where(
+				and(
+					eq(contractSignatories.contractId, contractId),
+					eq(contractSignatories.email, firmante.emailID),
+				),
+			);
+	}
+
+	const completado = estado.status === "COMPLETED";
+	await db
+		.update(generatedLegalContracts)
+		.set({
+			// Sólo se avanza a "firmado". Que WeeTrust reporte PENDING no es motivo
+			// para revivir un contrato que alguien ya cerró o canceló a mano.
+			...(completado ? { status: "signed" as const } : {}),
+			weetrustDocumentId: estado.documentID,
+			updatedAt: ahora,
+		})
+		.where(eq(generatedLegalContracts.id, contractId));
 }
 
 export const legalContractsRouter = {
@@ -893,12 +991,16 @@ export const legalContractsRouter = {
 			}
 
 			// Enviar links de contratos por WhatsApp al cliente (si aplica)
-			if (opportunity.leadId) sendContractLinksToLead({
-				leadId: opportunity.leadId,
-				opportunityId: input.opportunityId,
-			}).catch((err) => {
-				console.error("[confirmContractsSigned] Error enviando WhatsApp:", err);
-			});
+			if (opportunity.leadId)
+				sendContractLinksToLead({
+					leadId: opportunity.leadId,
+					opportunityId: input.opportunityId,
+				}).catch((err) => {
+					console.error(
+						"[confirmContractsSigned] Error enviando WhatsApp:",
+						err,
+					);
+				});
 
 			return {
 				success: true,
@@ -1076,6 +1178,92 @@ export const legalContractsRouter = {
 					"Contratos confirmados como firmados. Oportunidad movida a la etapa del 90%",
 				newStageId: targetStage.id,
 				newStageName: targetStage.name,
+			};
+		}),
+
+	/**
+	 * Estado de firma de un contrato, firmante por firmante, preguntándole a
+	 * WeeTrust en el momento.
+	 *
+	 * Es un pull a propósito: los webhooks de WeeTrust no están registrados, así
+	 * que el estado guardado no se movía solo y jurídico tenía que entrar al
+	 * portal de WeeTrust a ver quién firmó.
+	 */
+	getContractSigningStatus: juridicoProcedure
+		.input(z.object({ contractId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const { documentID } = await contratoConDocumentID(input.contractId);
+
+			let estado: EstadoDocumentoFirma;
+			try {
+				estado = await consultarEstadoFirma(documentID);
+			} catch (error) {
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						error instanceof Error
+							? error.message
+							: "No se pudo consultar el estado de firma",
+				});
+			}
+
+			await sincronizarEstadoDeFirma(input.contractId, estado);
+			return estado;
+		}),
+
+	/**
+	 * Regenera los enlaces de firma del contrato.
+	 *
+	 * Es la salida para los dos casos que pasan seguido: el link venció, o la
+	 * persona falló la verificación y necesita volver a entrar. No regenera el
+	 * documento: es el mismo PDF, con links nuevos, y quien ya firmó sigue
+	 * firmado.
+	 */
+	refreshContractSigningLinks: juridicoProcedure
+		.input(z.object({ contractId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const { documentID } = await contratoConDocumentID(input.contractId);
+
+			let estado: EstadoDocumentoFirma;
+			try {
+				estado = await regenerarEnlacesDeFirma(documentID);
+			} catch (error) {
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						error instanceof Error
+							? error.message
+							: "No se pudieron regenerar los enlaces de firma",
+				});
+			}
+
+			await sincronizarEstadoDeFirma(input.contractId, estado);
+
+			return {
+				...estado,
+				success: true,
+				message: "Enlaces de firma regenerados",
+			};
+		}),
+
+	/** Reenvía el correo de WeeTrust a los firmantes que todavía no firman. */
+	resendContractSigningEmails: juridicoProcedure
+		.input(z.object({ contractId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const { documentID } = await contratoConDocumentID(input.contractId);
+
+			try {
+				await reenviarCorreoDeFirma(documentID);
+			} catch (error) {
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						error instanceof Error
+							? error.message
+							: "No se pudo reenviar el correo de firma",
+				});
+			}
+
+			return {
+				success: true,
+				message: "Correo reenviado a los firmantes pendientes",
 			};
 		}),
 };

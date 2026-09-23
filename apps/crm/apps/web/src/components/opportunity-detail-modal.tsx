@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { firmantesEnFicha } from "@/lib/contract-signers-display";
 import {
 	formatGuatemalaCalendarDate,
 	formatGuatemalaDate,
@@ -47,10 +48,8 @@ import {
 	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
-import { firmantesEnFicha } from "@/lib/contract-signers-display";
 import { getRoleLabel, PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
-
 
 // Type for the opportunity data
 export type OpportunityForModal = {
@@ -111,7 +110,6 @@ export type OpportunityForModal = {
 		isOwned?: boolean;
 	} | null;
 };
-
 
 function formatLeadFullName(lead: {
 	firstName?: string | null;
@@ -259,7 +257,7 @@ export function OpportunityDetailModal({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-h-[90vh] w-fit min-w-[320px] md:min-w-[850px] max-w-[95vw] overflow-y-auto overflow-x-hidden">
+			<DialogContent className="max-h-[90vh] w-fit min-w-[320px] max-w-[95vw] overflow-y-auto overflow-x-hidden md:min-w-[850px]">
 				<DialogHeader>
 					<DialogTitle>Detalles de la Oportunidad</DialogTitle>
 				</DialogHeader>
@@ -272,7 +270,7 @@ export function OpportunityDetailModal({
 						}
 					}}
 				>
-					<TabsList className="flex w-full overflow-x-auto gap-2 p-1 mb-4">
+					<TabsList className="mb-4 flex w-full gap-2 overflow-x-auto p-1">
 						<TabsTrigger value="details">Detalles</TabsTrigger>
 						<TabsTrigger value="documents">Documentos</TabsTrigger>
 						<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
@@ -408,7 +406,9 @@ export function OpportunityDetailModal({
 									<div className="flex items-center gap-3">
 										<Calendar className="h-5 w-5 text-muted-foreground" />
 										<span className="font-medium">
-											{formatGuatemalaCalendarDate(opportunity.expectedCloseDate)}
+											{formatGuatemalaCalendarDate(
+												opportunity.expectedCloseDate,
+											)}
 										</span>
 									</div>
 								</div>
@@ -530,61 +530,61 @@ export function OpportunityDetailModal({
 												contract,
 											);
 											return (
-											<div
-												key={contract.id}
-												className="flex items-center justify-between rounded-md border bg-background p-3"
-											>
-												<div className="flex flex-col gap-1">
-													<span className="font-medium text-sm">
-														{contract.contractName}
-													</span>
-													<span className="text-muted-foreground text-xs">
-														{getContractTypeLabel(contract.contractType)} •{" "}
-														{contract.status === "pending"
-															? "Pendiente"
-															: contract.status === "signed"
-																? "Firmado"
-																: "Cancelado"}
-													</span>
-												</div>
+												<div
+													key={contract.id}
+													className="flex items-center justify-between rounded-md border bg-background p-3"
+												>
+													<div className="flex flex-col gap-1">
+														<span className="font-medium text-sm">
+															{contract.contractName}
+														</span>
+														<span className="text-muted-foreground text-xs">
+															{getContractTypeLabel(contract.contractType)} •{" "}
+															{contract.status === "pending"
+																? "Pendiente"
+																: contract.status === "signed"
+																	? "Firmado"
+																	: "Cancelado"}
+														</span>
+													</div>
 
-												<div className="flex gap-2">
-													{contract.pdfLink && (
-														<Button variant="outline" size="sm" asChild>
-															<a
-																href={contract.pdfLink}
-																target="_blank"
-																rel="noopener noreferrer"
-																className="flex items-center gap-1"
-															>
-																<FileText className="h-3 w-3" />
-																PDF
-															</a>
-														</Button>
-													)}
-													{firmantes.map((firmante) =>
-														firmante.url ? (
-															<Button
-																key={firmante.clave}
-																variant="outline"
-																size="sm"
-																asChild
-															>
+													<div className="flex gap-2">
+														{contract.pdfLink && (
+															<Button variant="outline" size="sm" asChild>
 																<a
-																	href={firmante.url}
+																	href={contract.pdfLink}
 																	target="_blank"
 																	rel="noopener noreferrer"
 																	className="flex items-center gap-1"
-																	title={firmante.nombre ?? undefined}
 																>
-																	<ExternalLink className="h-3 w-3" />
-																	{firmante.etiqueta}
+																	<FileText className="h-3 w-3" />
+																	PDF
 																</a>
 															</Button>
-														) : null,
-													)}
+														)}
+														{firmantes.map((firmante) =>
+															firmante.url ? (
+																<Button
+																	key={firmante.clave}
+																	variant="outline"
+																	size="sm"
+																	asChild
+																>
+																	<a
+																		href={firmante.url}
+																		target="_blank"
+																		rel="noopener noreferrer"
+																		className="flex items-center gap-1"
+																		title={firmante.nombre ?? undefined}
+																	>
+																		<ExternalLink className="h-3 w-3" />
+																		{firmante.etiqueta}
+																	</a>
+																</Button>
+															) : null,
+														)}
+													</div>
 												</div>
-											</div>
 											);
 										})}
 									</div>
@@ -639,8 +639,15 @@ export function OpportunityDetailModal({
 														</span>
 													)}
 													<span className="text-muted-foreground text-xs">
-														Q{Number(quotation.vehicleValue).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} •{" "}
-														{quotation.termMonths} meses •{" "}
+														Q
+														{Number(quotation.vehicleValue).toLocaleString(
+															"es-GT",
+															{
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															},
+														)}{" "}
+														• {quotation.termMonths} meses •{" "}
 														{quotation.status === "draft"
 															? "Borrador"
 															: quotation.status === "sent"
@@ -652,7 +659,14 @@ export function OpportunityDetailModal({
 												</div>
 												<div className="text-right">
 													<p className="font-bold text-green-600">
-														Q{Number(quotation.monthlyPayment).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+														Q
+														{Number(quotation.monthlyPayment).toLocaleString(
+															"es-GT",
+															{
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															},
+														)}
 													</p>
 													<p className="text-muted-foreground text-xs">
 														cuota mensual

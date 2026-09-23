@@ -274,6 +274,13 @@ export const legalAppRouter = {
 	approveOpportunityLegal: legalContractsRouter.approveOpportunityLegal,
 	confirmContractsSigned: legalContractsRouter.confirmContractsSigned,
 
+	// Estado de firma y reintentos, para no tener que entrar a WeeTrust
+	getContractSigningStatus: legalContractsRouter.getContractSigningStatus,
+	refreshContractSigningLinks:
+		legalContractsRouter.refreshContractSigningLinks,
+	resendContractSigningEmails:
+		legalContractsRouter.resendContractSigningEmails,
+
 	// Contract Generation routes (Generación automática de contratos)
 	getContractTypes: contractGenerationRouter.getContractTypes,
 	getDocumentsByDpi: contractGenerationRouter.getDocumentsByDpi,

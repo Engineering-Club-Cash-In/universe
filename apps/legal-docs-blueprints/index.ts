@@ -330,6 +330,92 @@ const app = new Elysia()
   }
 })
 
+  // ===== ESTADO Y REINTENTOS DE FIRMA =====
+
+  /**
+   * GET /contracts/signing-status/:documentID
+   *
+   * Estado de firma de un documento, firmante por firmante. Es un pull: no
+   * depende de que los webhooks estén registrados, que hoy no lo están.
+   */
+  .get('/contracts/signing-status/:documentID', async ({ params, set }) => {
+    try {
+      const documento = await weeTrustService.getDocument(params.documentID);
+
+      return {
+        success: true,
+        documentID: documento.documentID,
+        status: documento.status,
+        signatories: (documento.signatory ?? []).map((s) => ({
+          emailID: s.emailID,
+          name: s.name,
+          signatoryID: s.signatoryID,
+          // WeeTrust manda 0/1; se normaliza para no pasear el número.
+          isSigned: Boolean(Number(s.isSigned)),
+          signingUrl: s.signing?.url ?? null,
+          // Epoch en milisegundos, o null si nunca vence.
+          expiry: s.signing?.expiry ?? null,
+        })),
+      };
+    } catch (error: any) {
+      console.error('[signing-status] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
+   * PUT /contracts/refresh-signing-links/:documentID
+   *
+   * Regenera los enlaces de firma. Es lo que se usa cuando un link venció o
+   * cuando alguien necesita volver a entrar a verificarse; los firmantes que ya
+   * firmaron no se tocan.
+   */
+  .put('/contracts/refresh-signing-links/:documentID', async ({ params, set }) => {
+    try {
+      await weeTrustService.refreshSignatureUrls(params.documentID);
+
+      // La respuesta de update-signatures no siempre trae a todos los
+      // firmantes, así que el estado se vuelve a leer del documento: es la
+      // única fuente que devuelve el juego completo de links vigentes.
+      const documento = await weeTrustService.getDocument(params.documentID);
+
+      return {
+        success: true,
+        documentID: documento.documentID,
+        status: documento.status,
+        signatories: (documento.signatory ?? []).map((s) => ({
+          emailID: s.emailID,
+          name: s.name,
+          signatoryID: s.signatoryID,
+          isSigned: Boolean(Number(s.isSigned)),
+          signingUrl: s.signing?.url ?? null,
+          expiry: s.signing?.expiry ?? null,
+        })),
+      };
+    } catch (error: any) {
+      console.error('[refresh-signing-links] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
+   * PUT /contracts/resend-email/:documentID
+   *
+   * Reenvía el correo de invitación a los firmantes pendientes.
+   */
+  .put('/contracts/resend-email/:documentID', async ({ params, set }) => {
+    try {
+      await weeTrustService.resendEmailToSignatories(params.documentID);
+      return { success: true, documentID: params.documentID };
+    } catch (error: any) {
+      console.error('[resend-email] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
   /**
    * GET / - Documentación básica de la API
    */
@@ -344,6 +430,9 @@ const app = new Elysia()
       generateContract: 'POST /generatecontrato',
       generateBatch: 'POST /contracts/batch',
       generateByType: 'POST /contracts/:type',
+      signingStatus: 'GET /contracts/signing-status/:documentID',
+      refreshSigningLinks: 'PUT /contracts/refresh-signing-links/:documentID',
+      resendSigningEmail: 'PUT /contracts/resend-email/:documentID',
       webhooks: {
         receive: 'POST /webhooks/weetrust/:secret',
         status: 'GET /webhooks/weetrust/status',

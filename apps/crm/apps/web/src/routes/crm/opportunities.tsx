@@ -69,6 +69,9 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { CompanyQuickCreateDialog } from "@/components/contract-parties/CompanyQuickCreateDialog";
+import { OpportunityContractPartyCard } from "@/components/contract-parties/OpportunityContractPartyCard";
+import { VendorQuickCreateDialog } from "@/components/contract-parties/VendorQuickCreateDialog";
 import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
@@ -243,7 +246,6 @@ function DraggableOpportunityCard({
 						vehicleIsNew: opportunity.vehicle?.isNew,
 						companyId: opportunity.company?.id,
 						vendorId: opportunity.vendorId,
-						vehicleVendorId: opportunity.vehicle?.vendorId,
 					});
 					const mensaje = formatMissingAssignmentsMessage(faltan);
 					if (!mensaje) return null;
@@ -433,6 +435,11 @@ function RouteComponent() {
 	const [selectedOpportunity, setSelectedOpportunity] =
 		useState<Opportunity | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
+	// Alta rápida de vendedor o empresa desde los modales de la oportunidad
+	const [quickCreate, setQuickCreate] = useState<{
+		tipo: "vendedor" | "empresa";
+		form: "create" | "edit";
+	} | null>(null);
 	const [stageFilter, setStageFilter] = usePersistedState<string>("crm/opportunities/stageFilter", "all");
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -998,6 +1005,17 @@ function RouteComponent() {
 			!!session?.user?.id,
 	});
 
+	// Catálogo completo de agencias para la ficha del contrato: getCompanies
+	// filtra por creador, así que ahí no aparecerían las demás empresas ya
+	// registradas y la agencia no se podría corregir.
+	const companiesForContractsQuery = useQuery({
+		...orpc.getCompaniesForContracts.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+	});
+
 	// Query for inversionistas
 	const inversionistasQuery = useQuery({
 		...orpc.getInversionistas.queryOptions({
@@ -1051,6 +1069,12 @@ function RouteComponent() {
 			userProfile.data?.role,
 		],
 	});
+	const contractualQuotation =
+		opportunityQuotationsQuery.data?.find(
+			(quotation) => quotation.status === "accepted",
+		) ??
+		opportunityQuotationsQuery.data?.[0] ??
+		null;
 
 	const createOpportunityForm = useForm({
 		defaultValues: {
@@ -1419,6 +1443,103 @@ function RouteComponent() {
 			});
 		},
 	});
+
+	// La razón social vive en la empresa: al guardarla queda para las próximas
+	// oportunidades de esa agencia, y {agencia} deja de salir vacío.
+	const saveRazonSocialMutation = useMutation({
+		mutationFn: (input: { id: string; razonSocial: string }) =>
+			client.setCompanyRazonSocial(input),
+		onSuccess: async (_data, variables) => {
+			queryClient.invalidateQueries({
+				queryKey: orpc.getCompaniesForContracts.key(),
+			});
+			const frescas = await client.getOpportunities();
+			const actualizada = frescas.find(
+				(opp) => opp.id === selectedOpportunity?.id,
+			);
+			if (actualizada) setSelectedOpportunity(actualizada);
+			queryClient.setQueryData(
+				["getOpportunities", session?.user?.id, userProfile.data?.role],
+				frescas,
+			);
+			toast.success("Razón social guardada");
+			return variables;
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "No se pudo guardar la razón social");
+		},
+	});
+
+	// Las partes del contrato se guardan con su propio endpoint:
+	// updateOpportunity limita la edición al asesor asignado y quien prepara
+	// los datos para jurídico suele ser el analista.
+	const saveContractPartyMutation = useMutation({
+		mutationFn: (input: {
+			opportunityId: string;
+			vendorId?: string | null;
+			companyId?: string | null;
+		}) => client.setOpportunityContractParty(input),
+		onSuccess: async () => {
+			const frescas = await client.getOpportunities();
+			const actualizada = frescas.find(
+				(opp) => opp.id === selectedOpportunity?.id,
+			);
+			if (actualizada) setSelectedOpportunity(actualizada);
+			queryClient.setQueryData(
+				["getOpportunities", session?.user?.id, userProfile.data?.role],
+				frescas,
+			);
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "No se pudo guardar el dato del contrato");
+		},
+	});
+
+	// Quien no puede guardar tampoco debería poder tocar los selectores
+	const puedeEditarPartesContrato =
+		!!userProfile.data?.role &&
+		(PERMISSIONS.canAccessAnalysis(userProfile.data.role) ||
+			selectedOpportunity?.assignedTo === session?.user?.id);
+
+	// Parte del contrato en el detalle: agencia si el carro es nuevo, vendedor
+	// (dueño) si es usado. Se guarda al elegir o crear. El vendedor sale solo
+	// de la oportunidad, igual que en la generación de contratos.
+	const contractPartyCard = selectedOpportunity?.vehicle ? (
+		<OpportunityContractPartyCard
+			vehicleIsNew={selectedOpportunity.vehicle.isNew}
+			vendorId={selectedOpportunity.vendorId}
+			company={selectedOpportunity.company}
+			vendors={vendorsQuery.data ?? []}
+			companies={companiesForContractsQuery.data ?? []}
+			cargandoCatalogo={
+				vendorsQuery.isLoading || companiesForContractsQuery.isLoading
+			}
+			puedeGestionarEmpresa={
+				!!userProfile.data?.role &&
+				PERMISSIONS.canCreateCompanies(userProfile.data.role)
+			}
+			disabled={isWonLocked || !puedeEditarPartesContrato}
+			isSaving={
+				saveContractPartyMutation.isPending ||
+				saveRazonSocialMutation.isPending
+			}
+			onAssignVendor={(vendorId) =>
+				saveContractPartyMutation.mutate({
+					opportunityId: selectedOpportunity.id,
+					vendorId,
+				})
+			}
+			onAssignCompany={(companyId) =>
+				saveContractPartyMutation.mutate({
+					opportunityId: selectedOpportunity.id,
+					companyId,
+				})
+			}
+			onSaveRazonSocial={(companyId, razonSocial) =>
+				saveRazonSocialMutation.mutate({ id: companyId, razonSocial })
+			}
+		/>
+	) : null;
 
 	useEffect(() => {
 		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
@@ -2245,6 +2366,12 @@ function RouteComponent() {
 											placeholder="Seleccionar vendedor"
 											width="full"
 										/>
+										<QuickCreateLink
+											label="Crear vendedor"
+											onClick={() =>
+												setQuickCreate({ tipo: "vendedor", form: "create" })
+											}
+										/>
 									</div>
 								)}
 							</createOpportunityForm.Field>
@@ -2449,8 +2576,13 @@ function RouteComponent() {
 										</div>
 									)}
 
+									{/* Carro nuevo: la empresa es la agencia, se asigna aquí mismo */}
+									{selectedOpportunity.vehicle?.isNew === true &&
+										contractPartyCard}
+
 									{/* Company Information */}
-									{selectedOpportunity.company && (
+									{selectedOpportunity.company &&
+										selectedOpportunity.vehicle?.isNew !== true && (
 										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
 											<Label className="font-semibold text-muted-foreground text-sm">
 												Empresa
@@ -2631,6 +2763,11 @@ function RouteComponent() {
 												)}
 										</div>
 									)}
+
+									{/* Carro usado: el vendedor (dueño) va junto al vehículo */}
+									{selectedOpportunity.vehicle &&
+										selectedOpportunity.vehicle.isNew !== true &&
+										contractPartyCard}
 								</div>
 
 								{/* Consolidated Credit Analysis Summary */}
@@ -2998,12 +3135,8 @@ function RouteComponent() {
 										);
 									}
 
-									// Obtener la cotización más reciente
-									const latestQuotation =
-										opportunityQuotationsQuery.data?.[0] || null;
-
 									// Si no hay cotización, mostrar mensaje para crear una
-									if (!latestQuotation) {
+									if (!contractualQuotation) {
 										return (
 											<div className="rounded-lg border border-orange-300 border-dashed bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
 												<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
@@ -3037,7 +3170,7 @@ function RouteComponent() {
 											opportunityId={selectedOpportunity.id}
 											userRole={userProfile.data?.role}
 											opportunity={selectedOpportunity}
-											quotation={latestQuotation}
+											quotation={contractualQuotation}
 										/>
 									);
 								})()}
@@ -3186,6 +3319,14 @@ function RouteComponent() {
 													width="full"
 													disabled={isWonLocked}
 												/>
+												{!isWonLocked && (
+													<QuickCreateLink
+														label="Crear empresa"
+														onClick={() =>
+															setQuickCreate({ tipo: "empresa", form: "edit" })
+														}
+													/>
+												)}
 											</div>
 										)}
 								</editOpportunityForm.Field>
@@ -3326,6 +3467,14 @@ function RouteComponent() {
 												width="full"
 												disabled={isWonLocked}
 											/>
+											{!isWonLocked && (
+												<QuickCreateLink
+													label="Crear vendedor"
+													onClick={() =>
+														setQuickCreate({ tipo: "vendedor", form: "edit" })
+													}
+												/>
+											)}
 										</div>
 									)}
 								</editOpportunityForm.Field>
@@ -3908,7 +4057,46 @@ function RouteComponent() {
 					vehicleLabel={`${selectedOpportunity.vehicle.year} ${selectedOpportunity.vehicle.make} ${selectedOpportunity.vehicle.model}${selectedOpportunity.vehicle.licensePlate ? ` • ${selectedOpportunity.vehicle.licensePlate}` : ""}`}
 				/>
 			)}
+
+			<VendorQuickCreateDialog
+				open={quickCreate?.tipo === "vendedor"}
+				onOpenChange={(open) => !open && setQuickCreate(null)}
+				onSaved={(vendor) => {
+					if (quickCreate?.form === "edit") {
+						editOpportunityForm.setFieldValue("vendorId", vendor.id);
+					} else {
+						createOpportunityForm.setFieldValue("vendorId", vendor.id);
+					}
+				}}
+			/>
+			<CompanyQuickCreateDialog
+				open={quickCreate?.tipo === "empresa"}
+				onOpenChange={(open) => !open && setQuickCreate(null)}
+				onSaved={(company) =>
+					editOpportunityForm.setFieldValue("companyId", company.id)
+				}
+			/>
 		</div>
+	);
+}
+
+/** Acceso directo bajo un selector para crear el registro sin salir del modal. */
+function QuickCreateLink({
+	label,
+	onClick,
+}: {
+	label: string;
+	onClick: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			className="inline-flex items-center gap-1 text-primary text-xs hover:underline"
+		>
+			<Plus className="h-3 w-3" />
+			{label}
+		</button>
 	);
 }
 
@@ -3952,9 +4140,9 @@ const DOCUMENT_INTEGRITY_STATUS_META: Record<
 		Icon: CheckCircle2,
 	},
 	observacion: {
-		label: "Con observación",
+		label: "Observación",
 		rowClassName: "border-amber-200 bg-amber-50 text-amber-800",
-		Icon: AlertTriangle,
+		Icon: AlertCircle,
 	},
 	revision_manual: {
 		label: "Revisión manual",

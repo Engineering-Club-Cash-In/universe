@@ -4445,7 +4445,16 @@ export type EstadoDevolucion =
   | "NO_APLICA"
   | "PENDIENTE_AUTORIZACION"
   | "VERIFICADO"
-  | "RECHAZADO";
+  | "RECHAZADO"
+  | "COMPLETADO";
+
+// Solo viene poblado cuando se consulta con status=HISTORIAL y el crédito
+// está en VERIFICADO: por qué todavía no cerró (ver
+// utils/devolucionCompletada.ts::MotivoDiferido en el backend).
+export type PendienteCierre =
+  | { motivo: "inversionistas_en_padre"; restantes: number }
+  | { motivo: "saldo_en_espejo" }
+  | null;
 
 export interface DevolucionCreditoItem {
   credito_id: number;
@@ -4456,6 +4465,7 @@ export interface DevolucionCreditoItem {
   fecha_creacion: string;
   estado_devolucion: EstadoDevolucion;
   motivo_contextual?: string | null;
+  pendiente_cierre?: PendienteCierre;
 }
 
 export interface DevolucionHistorialItem {

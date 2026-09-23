@@ -29,6 +29,7 @@ import {
 	documentIntegrityValidations,
 } from "../db/schema/document-integrity-validations";
 import { opportunityDocuments } from "../db/schema/documents";
+import { isReservedBankCoverageDescription } from "../lib/bank-statement-documents";
 import { canWriteOpportunityCreditAnalysis } from "../lib/credit-analysis-ownership";
 import {
 	executeBatchWithFallback,
@@ -55,12 +56,14 @@ import {
 } from "../lib/document-integrity/pdf-forensics";
 import type { DocumentIntegrityAiResult } from "../lib/document-integrity/types";
 import {
+	currentValidationResult,
+} from "../lib/document-integrity/types";
+import {
 	canApproveDocumentIntegrityValidation,
 	canRunDocumentIntegrityValidation,
 	getAttemptAvailability,
 	getAttemptStatus,
 	getManualApprovalAvailability,
-	getPendingManualApprovalCount,
 	getRejectedDocumentCount,
 	getResetAvailability,
 	isCompleteValidationRun,
@@ -192,6 +195,115 @@ async function assertNoActiveCapacityAnalysis(
 			"Hay un análisis de capacidad en proceso. Espera a que finalice antes de validar, editar o reiniciar.",
 		);
 	}
+}
+
+export interface CreditAnalysisResetReservation {
+	analysisId: string;
+	token: string;
+}
+
+export async function runCreditAnalysisResetReservationCore<TTx>({
+	runTransaction,
+	lockOpportunity,
+	clearStaleReservation,
+	readAnalysis,
+	reserveAnalysis,
+	createToken,
+}: {
+	runTransaction: <T>(operation: (tx: TTx) => Promise<T>) => Promise<T>;
+	lockOpportunity: (tx: TTx) => Promise<void>;
+	clearStaleReservation: (tx: TTx) => Promise<void>;
+	readAnalysis: (
+		tx: TTx,
+	) => Promise<{ id: string; reservationToken: string | null } | null>;
+	reserveAnalysis: (
+		tx: TTx,
+		analysisId: string,
+		token: string,
+	) => Promise<boolean>;
+	createToken: () => string;
+}): Promise<CreditAnalysisResetReservation | null> {
+	return runTransaction(async (tx) => {
+		await lockOpportunity(tx);
+		await clearStaleReservation(tx);
+		const analysis = await readAnalysis(tx);
+		if (!analysis) return null;
+		if (analysis.reservationToken) {
+			throw new DocumentIntegrityError(
+				"TOO_MANY_REQUESTS",
+				"Hay un análisis de capacidad en proceso. Espera a que finalice antes de validar, editar o reiniciar.",
+			);
+		}
+		const token = createToken();
+		if (!(await reserveAnalysis(tx, analysis.id, token))) {
+			throw new DocumentIntegrityError(
+				"TOO_MANY_REQUESTS",
+				"No se pudo reservar el restablecimiento. Actualiza la pantalla e inténtalo nuevamente.",
+			);
+		}
+		return { analysisId: analysis.id, token };
+	});
+}
+
+export async function reserveCreditAnalysisReset(params: {
+	opportunityId: string;
+	leadId: string;
+}) {
+	return runCreditAnalysisResetReservationCore<Transaction>({
+		runTransaction: (operation) => db.transaction(operation),
+		lockOpportunity: async (tx) => {
+			await tx.execute(lockOpportunity(params.opportunityId));
+		},
+		clearStaleReservation: (tx) =>
+			clearStaleCapacityAnalysisReservation(tx, params.opportunityId),
+		readAnalysis: async (tx) => {
+			const [analysis] = await tx
+				.select({
+					id: creditAnalysis.id,
+					reservationToken: creditAnalysis.analysisReservationToken,
+				})
+				.from(creditAnalysis)
+				.where(
+					and(
+						eq(creditAnalysis.opportunityId, params.opportunityId),
+						eq(creditAnalysis.leadId, params.leadId),
+					),
+				)
+				.limit(1);
+			return analysis ?? null;
+		},
+		reserveAnalysis: async (tx, analysisId, token) => {
+			const [reserved] = await tx
+				.update(creditAnalysis)
+				.set({
+					analysisReservationToken: token,
+					analysisReservationStartedAt: new Date(),
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(creditAnalysis.id, analysisId),
+						eq(creditAnalysis.opportunityId, params.opportunityId),
+						eq(creditAnalysis.leadId, params.leadId),
+						isNull(creditAnalysis.analysisReservationToken),
+					),
+				)
+				.returning({ id: creditAnalysis.id });
+			return !!reserved;
+		},
+		createToken: randomUUID,
+	});
+}
+
+export async function withOpportunityDocumentMutationLock<T>(
+	opportunityId: string,
+	operation: (tx: Transaction) => Promise<T>,
+): Promise<T> {
+	return db.transaction(async (tx) => {
+		await tx.execute(lockOpportunity(opportunityId));
+		await assertNoActiveCapacityAnalysis(tx, opportunityId);
+		return operation(tx);
+	});
 }
 
 async function createValidationRun(params: {
@@ -699,7 +811,9 @@ function buildValidationEvidenceFilePath(params: {
 	contentSha256: string;
 	sourceFilePath: string;
 }) {
-	const sourceName = originalNameFromDocumentIntegrityPath(params.sourceFilePath);
+	const sourceName = originalNameFromDocumentIntegrityPath(
+		params.sourceFilePath,
+	);
 	const safeName = encodeDocumentIntegrityEvidenceName(sourceName);
 	return `${buildUploadPrefix("bank_statement", params.opportunityId)}/validated/${params.validationId}/${params.contentSha256}-${safeName}`;
 }
@@ -717,12 +831,15 @@ async function freezeCompletedValidationEvidence(params: {
 	// corrida termina en error solo después de preservar todo lo preservable.
 	let freezeFailure: string | null = null;
 	for (const [index, result] of params.results.entries()) {
-		if (!result.validation || result.validation.autoResult === "error") continue;
+		if (!result.validation || result.validation.autoResult === "error")
+			continue;
 		const document = params.documents[index];
 		const validation = result.validation;
 		try {
 			if (!document?.buffer)
-				throw new Error("Missing source bytes for completed validation evidence");
+				throw new Error(
+					"Missing source bytes for completed validation evidence",
+				);
 			const sourceFilePath = document.filePath;
 			const opportunityDocumentId = document.opportunityDocumentId;
 			const filePath = buildValidationEvidenceFilePath({
@@ -1289,18 +1406,20 @@ async function assertUploadedBankStatementsValidatedWithTransaction(
 			"Los archivos del análisis no coinciden con la validación documental realizada.",
 		);
 	}
+	const legacyValidationCount = validations.filter(
+		(validation) => validation.autoResult === "revision_manual",
+	).length;
+	if (legacyValidationCount > 0) {
+		throw new DocumentIntegrityError(
+			"BAD_REQUEST",
+			"Estos documentos tienen una validación histórica que requiere volver a validar antes de analizar la capacidad de pago.",
+		);
+	}
 	const rejectedDocumentCount = getRejectedDocumentCount(validations);
 	if (rejectedDocumentCount > 0) {
 		throw new DocumentIntegrityError(
 			"BAD_REQUEST",
 			`${rejectedDocumentCount} documento${rejectedDocumentCount === 1 ? " fue rechazado" : "s fueron rechazados"}. Solicita documentos válidos y realiza una nueva validación documental antes de analizar la capacidad de pago.`,
-		);
-	}
-	const pendingManualApprovalCount = getPendingManualApprovalCount(validations);
-	if (pendingManualApprovalCount > 0) {
-		throw new DocumentIntegrityError(
-			"BAD_REQUEST",
-			`${pendingManualApprovalCount} documento${pendingManualApprovalCount === 1 ? " requiere" : "s requieren"} aprobación manual antes de analizar la capacidad de pago.`,
 		);
 	}
 }
@@ -1381,6 +1500,92 @@ export async function reserveCapacityAnalysis(params: {
 	});
 }
 
+export async function reserveBankStatementCoverageMutation(params: {
+	opportunityId: string;
+	leadId: string;
+	analysisId: string;
+}) {
+	return db.transaction(async (tx) => {
+		await tx.execute(lockOpportunity(params.opportunityId));
+		await assertNoActiveCapacityAnalysis(tx, params.opportunityId);
+		const [analysis] = await tx
+			.select({ id: creditAnalysis.id })
+			.from(creditAnalysis)
+			.where(
+				and(
+					eq(creditAnalysis.id, params.analysisId),
+					eq(creditAnalysis.opportunityId, params.opportunityId),
+					eq(creditAnalysis.leadId, params.leadId),
+					isNotNull(creditAnalysis.analyzedAt),
+				),
+			)
+			.limit(1);
+		if (!analysis) {
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				"El análisis ya no corresponde a esta oportunidad.",
+			);
+		}
+		const token = randomUUID();
+		const [reserved] = await tx
+			.update(creditAnalysis)
+			.set({
+				analysisReservationToken: token,
+				analysisReservationStartedAt: new Date(),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(creditAnalysis.id, analysis.id),
+					isNull(creditAnalysis.analysisReservationToken),
+				),
+			)
+			.returning({ id: creditAnalysis.id });
+		if (!reserved) {
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				"La cobertura está siendo actualizada. Intenta nuevamente.",
+			);
+		}
+		return { opportunityId: params.opportunityId, token };
+	});
+}
+
+export async function assertBankStatementCoverageReservationCurrent(params: {
+	opportunityId: string;
+	leadId: string;
+	analysisId: string;
+	token: string;
+	validationIds: string[];
+	files: Array<{ filePath: string; contentSha256: string }>;
+}) {
+	return db.transaction(async (tx) => {
+		const [renewed] = await tx
+			.update(creditAnalysis)
+			.set({
+				analysisReservationStartedAt: new Date(),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(creditAnalysis.id, params.analysisId),
+					eq(creditAnalysis.opportunityId, params.opportunityId),
+					eq(creditAnalysis.leadId, params.leadId),
+					eq(creditAnalysis.analysisReservationToken, params.token),
+					isNotNull(creditAnalysis.analyzedAt),
+				),
+			)
+			.returning({ id: creditAnalysis.id });
+		if (!renewed) {
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				"La reserva de cobertura ya no está vigente.",
+			);
+		}
+		await assertUploadedBankStatementsValidatedWithTransaction(tx, params);
+	});
+}
+
 export async function releaseCapacityAnalysisReservation(params: {
 	opportunityId: string;
 	token: string;
@@ -1398,26 +1603,6 @@ export async function releaseCapacityAnalysisReservation(params: {
 				eq(creditAnalysis.analysisReservationToken, params.token),
 			),
 		);
-}
-
-export async function resetOpportunityCreditAnalysis(params: {
-	opportunityId: string;
-	leadId: string;
-}) {
-	return db.transaction(async (tx) => {
-		await tx.execute(lockOpportunity(params.opportunityId));
-		await assertNoActiveCapacityAnalysis(tx, params.opportunityId);
-		const [deleted] = await tx
-			.delete(creditAnalysis)
-			.where(
-				and(
-					eq(creditAnalysis.opportunityId, params.opportunityId),
-					eq(creditAnalysis.leadId, params.leadId),
-				),
-			)
-			.returning({ id: creditAnalysis.id });
-		return deleted ?? null;
-	});
 }
 
 export async function upsertOpportunityCreditAnalysis(params: {
@@ -1633,14 +1818,61 @@ export async function approveDocumentIntegrityValidation(params: {
 
 export async function linkUploadedValidationsToDocuments(params: {
 	opportunityId: string;
+	reservationToken: string;
 	links: Array<{
 		documentId: string;
 		documentFilePath: string;
 		sourceFilePath: string;
 		buffer: Buffer;
+		validationId: string;
 	}>;
 }) {
 	return db.transaction(async (tx) => {
+		await tx.execute(lockOpportunity(params.opportunityId));
+		const [analysis] = await tx
+			.select({ token: creditAnalysis.analysisReservationToken })
+			.from(creditAnalysis)
+			.where(eq(creditAnalysis.opportunityId, params.opportunityId))
+			.limit(1);
+		if (analysis?.token !== params.reservationToken) {
+			throw new DocumentIntegrityError(
+				"BAD_REQUEST",
+				"La reserva de guardado ya no está vigente.",
+			);
+		}
+		const uniqueLinks = [
+			...new Map(
+				params.links.map((link) => [link.sourceFilePath, link]),
+			).values(),
+		];
+		await assertUploadedBankStatementsValidatedWithTransaction(tx, {
+			opportunityId: params.opportunityId,
+			validationIds: uniqueLinks.map((link) => link.validationId),
+			files: uniqueLinks.map((link) => ({
+				filePath: link.sourceFilePath,
+				contentSha256: scanPdfBytes(link.buffer).sha256,
+			})),
+		});
+		const documentIds = [
+			...new Set(params.links.map((link) => link.documentId)),
+		];
+		if (documentIds.length > 0) {
+			const ownedDocuments = await tx
+				.select({ id: opportunityDocuments.id })
+				.from(opportunityDocuments)
+				.where(
+					and(
+						eq(opportunityDocuments.opportunityId, params.opportunityId),
+						inArray(opportunityDocuments.id, documentIds),
+					),
+				);
+			if (ownedDocuments.length !== documentIds.length) {
+				throw new DocumentIntegrityError(
+					"BAD_REQUEST",
+					"Los documentos no pertenecen a la oportunidad analizada.",
+				);
+			}
+		}
 		const sourceFilePathsToDelete = new Set<string>();
 		const bankStatementPrefix = buildUploadPrefix(
 			"bank_statement",
@@ -1675,11 +1907,17 @@ export async function linkUploadedValidationsToDocuments(params: {
 						eq(documentIntegrityValidations.contentSha256, sha256),
 						eq(documentIntegrityValidations.documentFilePath, sourceFilePath),
 						eq(documentIntegrityValidationRuns.status, "completed"),
+						eq(documentIntegrityValidations.id, primaryLink.validationId),
 					),
 				)
 				.orderBy(desc(documentIntegrityValidationRuns.attemptNumber))
 				.limit(1);
-			if (!candidate) continue;
+			if (!candidate) {
+				throw new DocumentIntegrityError(
+					"BAD_REQUEST",
+					"No se encontró la validación vigente para un documento.",
+				);
+			}
 			const preserveEvidence = isImmutableDocumentIntegrityEvidencePath({
 				filePath: sourceFilePath,
 				bankStatementPrefix,
@@ -1695,13 +1933,16 @@ export async function linkUploadedValidationsToDocuments(params: {
 					})
 					.where(eq(documentIntegrityValidations.id, candidate.id));
 			}
-			await tx.insert(documentIntegrityValidationDocuments).values(
-				links.map((link) => ({
-					validationId: candidate.id,
-					opportunityDocumentId: link.documentId,
-					linkedFilePath: link.documentFilePath,
-				})),
-			);
+			await tx
+				.insert(documentIntegrityValidationDocuments)
+				.values(
+					links.map((link) => ({
+						validationId: candidate.id,
+						opportunityDocumentId: link.documentId,
+						linkedFilePath: link.documentFilePath,
+					})),
+				)
+				.onConflictDoNothing();
 			if (!preserveEvidence) sourceFilePathsToDelete.add(sourceFilePath);
 		}
 		return [...sourceFilePathsToDelete];
@@ -1739,7 +1980,8 @@ export async function getDocumentIntegrityStatuses(params: {
 				"bank_statement",
 			].includes(document.documentType) ||
 			(document.documentType === "other" &&
-				document.description?.startsWith("Estado de cuenta")),
+				(document.description?.startsWith("Estado de cuenta") ||
+					isReservedBankCoverageDescription(document.description))),
 	);
 	if (bankDocuments.length === 0) return [];
 
@@ -1814,11 +2056,11 @@ export async function getDocumentIntegrityStatuses(params: {
 	return rows.map((row) => ({
 		opportunityDocumentId: row.opportunityDocumentId,
 		documentType: row.documentType,
-		result: row.autoResult,
-		manuallyApproved:
-			row.autoResult === "revision_manual" && !!row.manualApprovalId,
+		result: currentValidationResult(row.autoResult),
+		manuallyApproved: false,
 		validatedAt: row.validatedAt,
 		isStale:
+			row.autoResult === "revision_manual" ||
 			!row.isCurrentCompletedRun ||
 			currentPaths.get(row.opportunityDocumentId) !== row.linkedFilePath,
 		signalCount: row.signalCount,
@@ -1962,7 +2204,7 @@ export async function getLatestReusableDocumentIntegrityRun(params: {
 			file: originalNameFromDocumentIntegrityPath(validation.filePath),
 			validation: {
 				id: validation.id,
-				result: validation.result,
+				result: currentValidationResult(validation.result),
 				reason: validation.reason,
 				recommendedAction: buildDocumentRecommendedAction({
 					result: validation.result,
@@ -2012,10 +2254,7 @@ export async function listDocumentIntegrityValidations(params: {
 				${documentIntegrityValidationRuns.status} = 'error'
 					or ${documentIntegrityValidations.autoResult} = 'error'
 					or ${documentIntegrityValidations.autoResult} = 'rechazado'
-					or (
-						${documentIntegrityValidations.autoResult} = 'revision_manual'
-							and ${documentIntegrityValidationApprovals.id} is null
-					)
+					or ${documentIntegrityValidations.autoResult} = 'revision_manual'
 			)`,
 		);
 	if (params.search) {
@@ -2307,6 +2546,8 @@ export async function getDocumentIntegrityValidationGroup(params: {
 				: (linkedDocumentFilePath ?? documentFilePath);
 			return {
 				...details,
+				autoResult: currentValidationResult(row.autoResult),
+				autoReason: row.autoReason,
 				signals: details.signals.filter(
 					(signal) => signal.code !== "identidad_comparada",
 				),
@@ -2344,14 +2585,7 @@ export async function getDocumentIntegrityValidationGroup(params: {
 			]
 		: [];
 	const latestReset = resets.at(-1);
-	const canApproveManual =
-		canApproveDocumentIntegrityValidation(params.userRole) &&
-		latestFinalizedRun?.status === "completed" &&
-		latestRun?.status === "completed" &&
-		latestRun.id === latestFinalizedRun.id &&
-		latestFinalizedRun.attemptNumber >
-			(latestReset?.resetAfterAttemptNumber ?? 0) &&
-		!currentAttemptStatus.hasProcessingRun;
+	const canApproveManual = false;
 
 	return {
 		...opportunity,

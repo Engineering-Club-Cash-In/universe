@@ -28,6 +28,8 @@ import {
   applyCapitalPaymentAndBuildResponse,
   calcularSaldoNetoCuota,
   crearEstampadorPagoConvenio,
+  crearEstampadorOtros,
+  resolverOtrosDeLaFila,
   esDestinoSobrescribible,
   getAjusteFechaIdealADeducir,
   getCuotaIdForPaymentInsert,
@@ -67,6 +69,7 @@ import {
 } from "../utils/paymentAdvisoryLock";
 import { emitRecoveredDuplicatePendingInstallment } from "../utils/structuredLogger";
 import { claimAjusteFechaIdealPago } from "./ajusteFechaIdealPago";
+import { condicionUltimaCuotaPagada } from "./registerPaymentQueries";
 
 const CUOTA_INTEGRITY_ERROR_PREFIX = "Inconsistencia de integridad:";
 
@@ -1017,6 +1020,9 @@ export const insertPayment = async (
     // cuotas lo estampa en su primera fila (siempre corre, porque el convenio
     // ya no consume disponible).
     const estamparPagoConvenio = crearEstampadorPagoConvenio(montoConvenio);
+    // El `otros` de la boleta también se estampa una sola vez, pero en la
+    // primera fila que se escriba, no en la primera cuota recorrida.
+    const estamparOtros = crearEstampadorOtros(otrosBig);
 
     let cuotas_completas = 0;
     let cuotas_parciales = 0;
@@ -1521,20 +1527,45 @@ export const insertPayment = async (
           : false;
         const fechaGuatemala = paymentRegistrationDate();
 
-        // Mora y otros solo van en la primera cuota (si ya hubo completas antes, no se repiten)
+        // La mora sigue yendo en la primera cuota RECORRIDA: un recibo de sólo
+        // mora es legítimo y debe escribir su fila aunque ninguna cuota absorba.
         const esPrimeraCuota = cuotas_completas === 0 && cuotas_parciales === 0;
         const moraParaPago = esPrimeraCuota ? moraBig : new Big(0);
-        // El ajuste solo se suma en la cuota 1 (no en "la primera que se
-        // procese en este pago"). Comparte el campo "otros" con lo que el
-        // operador tipeó a mano; para aislar el ajuste, ver
+        // El ajuste por fecha ideal solo se cobra en la cuota 1 (no en "la
+        // primera que se procese en este pago"). Comparte el campo `otros` con
+        // lo que el operador tipeó a mano; para aislarlo, ver
         // ajuste_fecha_ideal_pago.fecha_cobro.
-        const otrosParaPago = esPrimeraCuota
-          ? otrosBig.plus(
-              cuota.cuotas_credito.numero_cuota === 1
-                ? ajusteFechaIdealMonto
-                : 0
-            )
-          : new Big(0);
+        const ajusteFechaIdealParaFila =
+          esPrimeraCuota && cuota.cuotas_credito.numero_cuota === 1
+            ? ajusteFechaIdealMonto
+            : new Big(0);
+        // `otros`, en cambio, viaja hasta la primera fila que la boleta va a
+        // escribir DE TODOS MODOS (ver `crearEstampadorOtros`). Si se estampa
+        // en la primera cuota recorrida y esa cuota ya está cubierta por un
+        // pago sin validar, el `otros` la obliga a escribir una fila con
+        // `monto_aplicado = 0` —la que `debeInsertarFilaParcialCuota` existe
+        // para evitar— y queda colgado de una cuota que no cobró nada (crédito
+        // 8674: los Q10.32 se quedaron en la cuota 6 y la 7, que sí cobró los
+        // Q2,989.68, salió sin ellos).
+        //
+        // El ajuste SÍ entra en la pregunta: su monto ya se descontó de
+        // `disponible_restante` antes del loop, así que si la cuota 1 se
+        // saltara, ese dinero quedaría sin fila que lo registre y el ajuste sin
+        // marcar como cobrado (`claimAjusteFechaIdealPago` corre con la
+        // escritura de la fila) — se volvería a cobrar en el siguiente pago.
+        // Lo único que no puede forzar la fila es el `otros` tipeado a mano.
+        const filaSeEscribeSinOtrosManual = debeInsertarFilaParcialCuota({
+          totalPagado,
+          mora: moraParaPago,
+          otros: ajusteFechaIdealParaFila,
+          // Peek NO consumidor, igual que abajo.
+          pagoConvenio: estamparPagoConvenio.pendiente(),
+        });
+        const otrosParaPago = resolverOtrosDeLaFila({
+          filaSeEscribeSinOtrosManual,
+          estamparOtros,
+          ajusteFechaIdeal: ajusteFechaIdealParaFila,
+        });
 
         const pagoData = {
           credito_id: credito.credito_id,
@@ -2039,7 +2070,12 @@ export const insertPayment = async (
       disponible_restante = new Big(0);
     }
 
-    // Jalar la última cuota pagada
+    // Jalar la última cuota con plata aplicada (ver `condicionUltimaCuotaPagada`
+    // para el criterio y por qué NO se exige `cuotas_credito.pagado`). El
+    // resultado tiene DOS consumidores: su `fecha_vencimiento` es el ancla de
+    // `estaAlDia` — que abre la compuerta del abono directo a capital sin
+    // `permite_abono_capital` — y la fila misma es la primera opción de
+    // `cuotaReferencia`, o sea de qué cuota queda colgado el abono.
     const hoy = new Date().toISOString().slice(0, 10);
     const [ultimaCuotaPagada] = await db
       .select({
@@ -2049,13 +2085,7 @@ export const insertPayment = async (
       })
       .from(cuotas_credito)
       .innerJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, credito_id),
-          gt(cuotas_credito.numero_cuota, 0),
-          eq(pagos_credito.pagado, true)
-        )
-      )
+      .where(condicionUltimaCuotaPagada(credito_id))
       .orderBy(desc(cuotas_credito.numero_cuota))
       .limit(1);
 

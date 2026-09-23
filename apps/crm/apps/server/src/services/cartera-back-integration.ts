@@ -154,6 +154,8 @@ export interface CreateCreditoParams {
 	codigo_postal?: string | null;
 	pais?: string | null;
 	dia_pago_mensual?: number;
+	fecha_referencia_calendario?: string;
+	desplazar_primera_cuota_un_mes?: boolean;
 	ajuste_fecha_ideal?: AjusteFechaIdealPayload;
 	// Campos para el correo de notificación
 	vehiculo_marca?: string;
@@ -162,6 +164,51 @@ export interface CreateCreditoParams {
 	vehiculo_placa?: string;
 	vehiculo_vin?: string;
 	monto_asegurado?: number;
+}
+
+export function buildCreateCreditoInput(
+	params: CreateCreditoParams,
+): CreateCreditoInput {
+	return {
+		usuario: String(params.usuario_id),
+		numero_credito_sifco: params.numero_credito_sifco,
+		capital: params.capital,
+		porcentaje_interes: params.porcentaje_interes,
+		plazo: params.plazo,
+		cuota: params.cuota,
+		seguro_10_cuotas: params.seguro_10_cuotas,
+		gps: params.gps ?? 0,
+		observaciones: params.observaciones,
+		no_poliza: params.no_poliza || "",
+		aseguradora: params.aseguradora,
+		direccion: params.direccion || "",
+		categoria: params.categoria,
+		nit: params.nit,
+		dia_pago_mensual: params.dia_pago_mensual,
+		fecha_referencia_calendario: params.fecha_referencia_calendario,
+		desplazar_primera_cuota_un_mes: params.desplazar_primera_cuota_un_mes,
+		ajuste_fecha_ideal: params.ajuste_fecha_ideal,
+		royalti: params.royalti ?? 0,
+		porcentaje_royalti: params.porcentaje_royalti ?? 0,
+		inversionistas: params.inversionistas,
+		rubros: params.rubros,
+		membresias_pago: params.membresias_pago ?? 0,
+		como_se_entero: "",
+		otros: params.otros ?? 0,
+		reserva: params.reserva ?? 0,
+		is_vehiculo_propio: params.is_vehiculo_propio ?? false,
+		municipio: params.municipio || "",
+		departamento: params.departamento || "",
+		codigo_postal: params.codigo_postal || "",
+		pais: params.pais || "",
+		vehiculo_marca: params.vehiculo_marca,
+		vehiculo_linea: params.vehiculo_linea,
+		vehiculo_modelo: params.vehiculo_modelo,
+		vehiculo_placa: params.vehiculo_placa,
+		vehiculo_vin: params.vehiculo_vin,
+		monto_asegurado: params.monto_asegurado,
+		opportunity_id: params.opportunityId,
+	};
 }
 
 export interface CreateCreditoResult {
@@ -186,47 +233,7 @@ export async function createCreditoInCarteraBack(
 
 	try {
 		// Create credit in cartera-back
-		const creditoInput: CreateCreditoInput = {
-			usuario: String(params.usuario_id),
-			numero_credito_sifco: params.numero_credito_sifco,
-			capital: params.capital,
-			porcentaje_interes: params.porcentaje_interes,
-			plazo: params.plazo,
-			cuota: params.cuota,
-			// asesor: params.asesor_id,
-			seguro_10_cuotas: params.seguro_10_cuotas,
-			gps: params.gps ?? 0,
-			observaciones: params.observaciones,
-			no_poliza: params.no_poliza || "",
-			aseguradora: params.aseguradora,
-			direccion: params.direccion || "",
-			// Nuevos campos adicionales
-			categoria: params.categoria,
-			nit: params.nit,
-			dia_pago_mensual: params.dia_pago_mensual,
-			ajuste_fecha_ideal: params.ajuste_fecha_ideal,
-			royalti: params.royalti ?? 0,
-			porcentaje_royalti: params.porcentaje_royalti ?? 0,
-			inversionistas: params.inversionistas,
-			rubros: params.rubros,
-			membresias_pago: params.membresias_pago ?? 0,
-			como_se_entero: "",
-			otros: params.otros ?? 0,
-			reserva: params.reserva ?? 0,
-			is_vehiculo_propio: params.is_vehiculo_propio ?? false,
-			municipio: params.municipio || "",
-			departamento: params.departamento || "",
-			codigo_postal: params.codigo_postal || "",
-			pais: params.pais || "",
-			// Campos para el correo de notificación
-			vehiculo_marca: params.vehiculo_marca,
-			vehiculo_linea: params.vehiculo_linea,
-			vehiculo_modelo: params.vehiculo_modelo,
-			vehiculo_placa: params.vehiculo_placa,
-			vehiculo_vin: params.vehiculo_vin,
-			monto_asegurado: params.monto_asegurado,
-			opportunity_id: params.opportunityId,
-		};
+		const creditoInput = buildCreateCreditoInput(params);
 
 		console.log(
 			"[CarteraBackSync] Creating credit with data:",

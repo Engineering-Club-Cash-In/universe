@@ -1,8 +1,9 @@
-import { eq, and, sql } from "drizzle-orm";
-import { abonos_capital, creditos_inversionistas_espejo, inversionistas } from "../database/db";
+import { eq, and, sql, inArray, ne } from "drizzle-orm";
+import { abonos_capital, creditos_inversionistas_espejo, inversionistas, pagos_credito_inversionistas_espejo } from "../database/db";
 import { db } from "../database";
 import Big from "big.js";
 import { obtenerSumaComprasPendientes } from "../utils/comprasAjuste";
+import { esCube } from "../utils/devolucionCompletada";
 import {
   emitCreditCapitalContributionCompleted,
   emitCreditCapitalContributionFailed,
@@ -317,10 +318,24 @@ export async function revertirAbonoCapitalEspejo(
  *   global (no participaría en la transacción) y suma sobre filas no-liquidadas
  *   existentes sin discriminar por tipo, con lo que podría fusionar la
  *   cancelación dentro de un abono CAPITAL previo.
+ * - CUBE (id 86) se excluye siempre: CUBE es quien absorbe la cartera cuando
+ *   los demás inversionistas salen, nunca "sale" él mismo del crédito. Sin
+ *   este filtro, un crédito donde CUBE es el único que quedó en el espejo
+ *   generaba una CANCELACION a su propio nombre —como si CUBE se estuviera
+ *   devolviendo su propio capital—, que además nunca llega a liquidarse
+ *   porque CUBE no pasa por el flujo de liquidación (confirmado en
+ *   producción: decenas de estas filas, todas con liquidado=false).
  */
 export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
-  // 1. Inversionistas del espejo con su capital aportado
-  const invsEspejo = await tx
+  // 1. Inversionistas del espejo con su capital aportado (nunca CUBE).
+  //    El filtro de CUBE se aplica en JS con `esCube` (por ID con el nombre
+  //    como respaldo), no en el WHERE: un `ne(inversionista_id, CUBE_ID)` en
+  //    SQL solo excluiría el ID 86 exacto, dejando pasar una fila histórica
+  //    de CUBE con otro ID — que payments.ts sí reconocería como CUBE por
+  //    nombre (vía esCube) y excluiría de todo cálculo, recreando el mismo
+  //    dato fantasma que este guard existe para evitar. Debe ser
+  //    exactamente el mismo criterio en ambos archivos.
+  const invsEspejoCrudo = await tx
     .select({
       inversionista_id: creditos_inversionistas_espejo.inversionista_id,
       monto_aportado: creditos_inversionistas_espejo.monto_aportado,
@@ -334,12 +349,67 @@ export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
     .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
 
   // Sin espejo → no hay capital de inversionistas que cancelar. No es error.
-  if (invsEspejo.length === 0) {
+  if (invsEspejoCrudo.length === 0) {
     return { insertados: 0, detalle: [] as any[] };
   }
 
-  // 2. Idempotencia: reemplazar las cancelaciones ABIERTAS previas del crédito
-  //    (una re-aceptación no debe acumular). Solo las no-liquidadas.
+  const invsEspejo = invsEspejoCrudo.filter((inv: { inversionista_id: number; nombre: string }) => !esCube(inv));
+
+  // 2. Idempotencia y reconciliación: reemplazar las cancelaciones ABIERTAS previas
+  //    del crédito (una re-aceptación no debe acumular). Solo las no-liquidadas.
+  //    Portero financiero: si alguna cancelación abierta ya entró en un cálculo
+  //    de pagos activo (pago_espejo_id apunta a un snapshot no liquidado que existe),
+  //    borrarla y re-insertarla causaría un doble pago al inversionista. Se debe liquidar
+  //    o descartar el cálculo primero.
+  //    Si el snapshot ya fue eliminado/descartado (p. ej. vía /deletePagosEspejoNoLiquidados),
+  //    el ID huérfano no debe bloquear la re-aceptación.
+  //    Esta reconciliación debe correr aun si en el espejo solo queda CUBE, para
+  //    limpiar cancelaciones abiertas previas o proteger aquellas ya en cálculo.
+  const cancelacionesAbiertas = await tx
+    .select({
+      abono_id: abonos_capital.abono_id,
+      pago_espejo_id: abonos_capital.pago_espejo_id,
+    })
+    .from(abonos_capital)
+    .where(
+      and(
+        eq(abonos_capital.credito_id, credito_id),
+        eq(abonos_capital.tipo, "CANCELACION"),
+        eq(abonos_capital.liquidado, false)
+      )
+    );
+
+  const idsEspejoCandidatos = cancelacionesAbiertas
+    .map((f: { abono_id: number; pago_espejo_id: number | null }) => f.pago_espejo_id)
+    .filter((id: number | null | undefined): id is number => id != null);
+
+  let enEspejo: typeof cancelacionesAbiertas = [];
+  if (idsEspejoCandidatos.length > 0) {
+    const snapshotsActivos = await tx
+      .select({ id: pagos_credito_inversionistas_espejo.id })
+      .from(pagos_credito_inversionistas_espejo)
+      .where(
+        and(
+          inArray(pagos_credito_inversionistas_espejo.id, idsEspejoCandidatos),
+          ne(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO")
+        )
+      );
+
+    const idsActivos = new Set(snapshotsActivos.map((s: { id: number }) => s.id));
+    enEspejo = cancelacionesAbiertas.filter(
+      (f: { abono_id: number; pago_espejo_id: number | null }) =>
+        f.pago_espejo_id != null && idsActivos.has(f.pago_espejo_id)
+    );
+  }
+
+  if (enEspejo.length > 0) {
+    throw new Error(
+      `[CANCELACION_EN_CALCULO_PENDIENTE] El crédito ${credito_id} tiene ${enEspejo.length} cancelación(es) que ya entraron ` +
+        `en un cálculo de pagos (espejo id: ${enEspejo.map((f: { pago_espejo_id: number | null }) => f.pago_espejo_id).join(", ")}). ` +
+        `Ese monto ya quedó congelado para liquidar: hay que liquidar o descartar el espejo antes de re-aceptar la devolución.`
+    );
+  }
+
   await tx
     .delete(abonos_capital)
     .where(
@@ -349,6 +419,12 @@ export async function registrarCancelacionEspejo(tx: any, credito_id: number) {
         eq(abonos_capital.liquidado, false)
       )
     );
+
+  // Si en el espejo solo queda CUBE (o ningún inversionista con saldo a cancelar),
+  // ya se limpiaron y verificaron las cancelaciones previas; no hay nuevas que insertar.
+  if (invsEspejo.length === 0) {
+    return { insertados: 0, detalle: [] as any[] };
+  }
 
   // 3. Una fila CANCELACION por inversionista con su capital REAL
   //    (monto_aportado del espejo menos sus compras pendientes).

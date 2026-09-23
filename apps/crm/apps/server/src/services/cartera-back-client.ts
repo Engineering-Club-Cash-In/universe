@@ -734,6 +734,9 @@ export type FlujoPorInversionistaRow = {
 	cash_capital: string;
 	cash_interes: string;
 	cash_total: string;
+	interes_bruto: string;
+	iva: string;
+	isr: string;
 	total: string;
 };
 
@@ -742,9 +745,81 @@ export type FlujoCuotasPorInversionistaResponse = {
 	totales: {
 		reinversion_total: string;
 		cash_total: string;
+		interes_bruto: string;
+		iva: string;
+		isr: string;
 		total: string;
+		externos: {
+			reinversion_total: string;
+			cash_total: string;
+			total: string;
+		};
+		cube: {
+			reinversion_total: string;
+			cash_total: string;
+			total: string;
+		};
+	};
+	contexto: {
+		cancelaciones_pendientes: {
+			cantidad_creditos: number;
+			monto_bruto: string;
+			capital_externo_asociado: string;
+		};
+		cierres_naturales_periodo: {
+			cantidad_creditos: number;
+			capital_externo_asociado: string;
+		};
 	};
 };
+
+const flujoCuotasPorInversionistaSchema = z.object({
+	porInversionista: z.array(
+		z.object({
+			inversionista_id: idSchema,
+			nombre: z.string().min(1),
+			reinversion_capital: moneySchema,
+			reinversion_interes: moneySchema,
+			reinversion_total: moneySchema,
+			cash_capital: moneySchema,
+			cash_interes: moneySchema,
+			cash_total: moneySchema,
+			interes_bruto: moneySchema,
+			iva: moneySchema,
+			isr: moneySchema,
+			total: moneySchema,
+		}),
+	),
+	totales: z.object({
+		reinversion_total: moneySchema,
+		cash_total: moneySchema,
+		interes_bruto: moneySchema,
+		iva: moneySchema,
+		isr: moneySchema,
+		total: moneySchema,
+		externos: z.object({
+			reinversion_total: moneySchema,
+			cash_total: moneySchema,
+			total: moneySchema,
+		}),
+		cube: z.object({
+			reinversion_total: moneySchema,
+			cash_total: moneySchema,
+			total: moneySchema,
+		}),
+	}),
+	contexto: z.object({
+		cancelaciones_pendientes: z.object({
+			cantidad_creditos: z.number().int().nonnegative(),
+			monto_bruto: moneySchema,
+			capital_externo_asociado: moneySchema,
+		}),
+		cierres_naturales_periodo: z.object({
+			cantidad_creditos: z.number().int().nonnegative(),
+			capital_externo_asociado: moneySchema,
+		}),
+	}),
+});
 
 export type ColocacionPeriodoRow = {
 	bucket: string;
@@ -802,6 +877,36 @@ export type MoraByEtapaYAsesorResponse = {
 	fecha?: string;
 	alcance?: "live" | "historico";
 	dataDisponibleDesde?: string;
+};
+
+export type MoraOfficialClosureResponse = {
+	periodo: string;
+	totales: Record<
+		"mora_30" | "mora_60" | "mora_90" | "mora_120_plus",
+		MoraBucketResult
+	>;
+	porAsesor: ({ asesorId: number; nombre: string } & Record<
+		"mora_30" | "mora_60" | "mora_90" | "mora_120_plus",
+		MoraBucketResult
+	>)[];
+	capitalCartera: {
+		total: string;
+		porAsesor: {
+			asesorId: number;
+			nombre: string;
+			capital: string;
+		}[];
+	};
+	moraMensual: {
+		porcentaje: string;
+		esperado: string;
+		porAsesor: {
+			asesorId: number;
+			nombre: string;
+			esperado: string;
+		}[];
+	};
+	metadata: { fuente: "oficial"; inmutable: true };
 };
 
 export type MoraCobradaPorAsesorResponse = {
@@ -2255,11 +2360,14 @@ export class CarteraBackClient {
 			fechaInicio: params.fechaInicio,
 			fechaFin: params.fechaFin,
 		});
-		return this.request<FlujoCuotasPorInversionistaResponse>(
+		const data = await this.request<unknown>(
 			`/reportes/flujo-cuotas-inversiones/por-inversionista?${qp}`,
 			{ method: "GET" },
-			true,
+			false,
 		);
+		const parsed = flujoCuotasPorInversionistaSchema.safeParse(data);
+		if (!parsed.success) throw new Error("Contrato de proyección inválido");
+		return parsed.data;
 	}
 
 	// ========================================================================
@@ -2280,6 +2388,20 @@ export class CarteraBackClient {
 		const qs = queryParams.size > 0 ? `?${queryParams}` : "";
 		return this.request<MoraByEtapaYAsesorResponse>(
 			`/reportes/mora-por-etapa-asesor${qs}`,
+			{ method: "GET" },
+			true,
+		);
+	}
+
+	async getCierreMoraOficial(params: {
+		periodo: string;
+		asesores?: number[];
+	}) {
+		const queryParams = new URLSearchParams({ periodo: params.periodo });
+		if (params.asesores?.length)
+			queryParams.set("asesores", params.asesores.join(","));
+		return this.request<MoraOfficialClosureResponse | null>(
+			`/reportes/cierre-mora-oficial?${queryParams}`,
 			{ method: "GET" },
 			true,
 		);

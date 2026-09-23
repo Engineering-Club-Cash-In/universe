@@ -116,6 +116,7 @@ export interface CRMData {
 		nombreMayusculas?: string;
 		dpi?: string;
 		dpiLetras?: string;
+		genero?: string;
 	};
 	// Filas de la Carta de Emisión de Cheques, ya formateadas por el servidor
 	// {agencia}: la empresa que vende el carro nuevo
@@ -1270,7 +1271,11 @@ export function DynamicContractWizard({
 						}
 						break;
 					case "gendervendedor":
-						// No se puede inferir el género del vendedor desde su registro.
+						// Se captura al asignar la inversión (DPI + RENAP).
+						if (vendedor?.genero === "male" || vendedor?.genero === "female") {
+							initialValues[field.key] = vendedor.genero;
+							return;
+						}
 						break;
 				}
 

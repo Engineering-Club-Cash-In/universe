@@ -14,6 +14,11 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
+import {
+	BankStatementCoverage,
+	type BankStatementCoverageViewModel,
+} from "@/components/credit/BankStatementCoverage";
 import type { ManualDocumentApproval } from "@/components/credit/ManualDocumentApprovalButton";
 import {
 	AlertDialog,
@@ -41,12 +46,53 @@ import {
 	getReusableBatchSyncAction,
 	hasCompleteIntegrityValidation,
 	type IntegrityResult,
+	requiresDocumentRevalidation,
 	requiresManualApproval,
 } from "@/lib/document-integrity-flow";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client, orpc } from "@/utils/orpc";
 
 const MAX_AI_ATTEMPTS = 2;
+
+const coverageViewSchema = z.object({
+	version: z.literal(1),
+	analysisBatchId: z.string().uuid(),
+	status: z.enum(["detected", "needs_confirmation"]),
+	saveStatus: z.enum(["pending", "saved", "failed", "not_applicable"]),
+	saveError: z.string().optional(),
+	months: z.array(
+		z.object({
+			month: z.string(),
+			sourceFileIndexes: z.array(z.number()),
+		}),
+	),
+	files: z.array(
+		z.object({
+			fileIndex: z.number(),
+			name: z.string(),
+			status: z.enum(["detected", "confirmed", "needs_confirmation"]),
+			detectedMonths: z.array(z.string()),
+			effectiveMonths: z.array(z.string()),
+		}),
+	),
+	manualDeclarations: z.array(z.unknown()),
+});
+
+function readCoverage(
+	fullAnalysis: string | null | undefined,
+): BankStatementCoverageViewModel | null {
+	if (!fullAnalysis) return null;
+	try {
+		const parsed: unknown = JSON.parse(fullAnalysis);
+		if (!parsed || typeof parsed !== "object") return null;
+		const result = coverageViewSchema.safeParse(
+			(parsed as Record<string, unknown>).cobertura_mensual,
+		);
+		return result.success ? result.data : null;
+	} catch {
+		return null;
+	}
+}
 
 function isPdfFile(file: File) {
 	return (
@@ -83,7 +129,7 @@ const INTEGRITY_META: Record<
 > = {
 	valido: { label: "Válido", className: "bg-green-100 text-green-800" },
 	observacion: {
-		label: "Con observación",
+		label: "Observación",
 		className: "bg-amber-100 text-amber-800",
 	},
 	revision_manual: {
@@ -135,6 +181,7 @@ export function BankStatementAnalysis({
 	// Verificar si hay un análisis exitoso (analyzedAt debe existir y no ser null)
 	const hasSuccessfulAnalysis =
 		existingAnalysis != null && existingAnalysis.analyzedAt != null;
+	const monthlyCoverage = readCoverage(existingAnalysis?.fullAnalysis);
 	const attemptCount = existingAnalysis?.attemptCount ?? 0;
 	const canAnalyze = !hasSuccessfulAnalysis && attemptCount < MAX_AI_ATTEMPTS;
 	const integrityAttemptQuery = useQuery({
@@ -358,8 +405,16 @@ export function BankStatementAnalysis({
 				maxVariableDebtRatio: Number.parseFloat(maxVariableDebtRatio),
 			});
 		},
-		onSuccess: () => {
-			toast.success("Análisis completado exitosamente");
+		onSuccess: (result) => {
+			if (result.coverage.saveStatus === "saved") {
+				toast.success("Análisis y documentos guardados exitosamente");
+			} else if (result.coverage.saveStatus === "not_applicable") {
+				toast.success("Análisis guardado exitosamente");
+			} else {
+				toast.warning(
+					"El análisis financiero terminó, pero falta guardar sus documentos.",
+				);
+			}
 			setFiles([]);
 			setValidatedBatch(null);
 			// Invalidar query para obtener estado actualizado del servidor
@@ -385,6 +440,73 @@ export function BankStatementAnalysis({
 			// Invalidar query para obtener el contador actualizado
 			queryClient.invalidateQueries({ queryKey });
 		},
+	});
+
+	const refreshCoverageQueries = () => {
+		queryClient.invalidateQueries({ queryKey });
+		if (opportunityId) {
+			queryClient.invalidateQueries({
+				queryKey: ["getAnalysisChecklist", opportunityId],
+			});
+			queryClient.invalidateQueries({
+				queryKey: ["getOpportunityDocuments", opportunityId],
+			});
+		}
+	};
+	const retryCoverageMutation = useMutation({
+		mutationFn: () => {
+			if (!(leadId && opportunityId && existingAnalysis && monthlyCoverage)) {
+				throw new Error("No hay una cobertura vigente para reintentar.");
+			}
+			return client.retryBankStatementCoverageSave({
+				leadId,
+				opportunityId,
+				analysisId: existingAnalysis.id,
+				analysisBatchId: monthlyCoverage.analysisBatchId,
+			});
+		},
+		onSuccess: (result) => {
+			if (result.coverage.saveStatus === "saved") {
+				toast.success("Documentos guardados exitosamente");
+			} else {
+				toast.error(
+					result.coverage.saveError ?? "No se pudieron guardar los documentos.",
+				);
+			}
+			refreshCoverageQueries();
+		},
+		onError: (error) => toast.error(`Error al reintentar: ${error.message}`),
+	});
+	const confirmCoverageMutation = useMutation({
+		mutationFn: ({
+			fileIndex,
+			months,
+		}: {
+			fileIndex: number;
+			months: string[];
+		}) => {
+			if (!(leadId && opportunityId && existingAnalysis && monthlyCoverage)) {
+				throw new Error("No hay una cobertura vigente para confirmar.");
+			}
+			return client.confirmBankStatementCoverage({
+				leadId,
+				opportunityId,
+				analysisId: existingAnalysis.id,
+				analysisBatchId: monthlyCoverage.analysisBatchId,
+				fileIndex,
+				months,
+			});
+		},
+		onSuccess: (result) => {
+			if (result.coverage.status === "detected") {
+				toast.success("Meses confirmados");
+			} else {
+				toast.success("Meses guardados; quedan documentos por revisar");
+			}
+			refreshCoverageQueries();
+		},
+		onError: (error) =>
+			toast.error(`Error al confirmar meses: ${error.message}`),
 	});
 
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -424,6 +546,11 @@ export function BankStatementAnalysis({
 			requiresManualApproval(result.validation.result) &&
 			!result.validation.manualApproval,
 	);
+	const hasHistoricalManualReview = validatedBatch?.results.some(
+		(result) =>
+			!!result.validation &&
+			requiresDocumentRevalidation(result.validation.result),
+	);
 	const hasIncompleteValidation = !!validatedBatch && !allDocumentsValidated;
 	const activeFileCount = validatedBatch?.payloads.length ?? files.length;
 	const isBusy =
@@ -452,7 +579,10 @@ export function BankStatementAnalysis({
 					{leadId && !hasSuccessfulAnalysis && !validatedBatch
 						? "Suba de 1 a 9 estados de cuenta bancarios en PDF para evaluar su legitimidad y legibilidad."
 						: hasSuccessfulAnalysis
-							? "El análisis de capacidad de pago ya fue completado."
+							? monthlyCoverage?.saveStatus === "failed" ||
+								monthlyCoverage?.saveStatus === "pending"
+								? "El análisis financiero terminó, pero falta guardar sus documentos."
+								: "El análisis de capacidad de pago ya fue completado."
 							: "Los documentos ya fueron validados. Revise el resultado y decida si desea continuar con el análisis de capacidad de pago."}
 				</CardDescription>
 			</CardHeader>
@@ -479,8 +609,8 @@ export function BankStatementAnalysis({
 							<div className="flex gap-2">
 								<AlertTriangle className="h-4 w-4 shrink-0" />
 								<span>
-									No se pudo consultar la validación documental vigente. Reintenta
-									antes de cargar o validar documentos nuevos.
+									No se pudo consultar la validación documental vigente.
+									Reintenta antes de cargar o validar documentos nuevos.
 								</span>
 							</div>
 							<Button
@@ -761,6 +891,8 @@ export function BankStatementAnalysis({
 						<p className="text-muted-foreground text-xs">
 							{hasRejectedDocument
 								? "Hay documentos rechazados. Reemplázalos y realiza una nueva validación documental."
+								: hasHistoricalManualReview
+									? "Estos documentos provienen de una validación manual histórica. Vuelve a cargarlos y realiza una nueva validación antes de continuar."
 								: hasPendingManualApproval
 									? "Hay documentos pendientes de aprobación manual."
 									: "La validación documental terminó. Puede continuar con estos archivos o solicitar documentos nuevos."}
@@ -868,9 +1000,37 @@ export function BankStatementAnalysis({
 				)}
 				{hasSuccessfulAnalysis && (
 					<div className="space-y-2">
-						<p className="text-center text-green-600 text-xs">
-							Análisis completado exitosamente.
-						</p>
+						<BankStatementCoverage
+							coverage={monthlyCoverage}
+							onRetry={
+								leadId &&
+								opportunityId &&
+								(monthlyCoverage?.saveStatus === "pending" ||
+									monthlyCoverage?.saveStatus === "failed")
+									? () => retryCoverageMutation.mutate()
+									: undefined
+							}
+							onConfirm={
+								leadId &&
+								opportunityId &&
+								monthlyCoverage?.saveStatus !== "not_applicable"
+									? (fileIndex, months) =>
+											confirmCoverageMutation.mutate({ fileIndex, months })
+									: undefined
+							}
+							isRetrying={retryCoverageMutation.isPending}
+							isConfirming={confirmCoverageMutation.isPending}
+						/>
+						{monthlyCoverage?.saveStatus === "saved" && (
+							<p className="text-center text-green-600 text-xs">
+								Análisis financiero y documentos guardados.
+							</p>
+						)}
+						{monthlyCoverage?.saveStatus === "not_applicable" && (
+							<p className="text-center text-green-600 text-xs">
+								Análisis financiero guardado.
+							</p>
+						)}
 						{canReset && (
 							<Button
 								type="button"

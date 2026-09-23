@@ -33,9 +33,13 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
+import {
+	InvestmentProjection,
+	type InvestmentProjectionData,
+} from "@/components/reports/investment-projection";
 import { PeriodDatePicker } from "@/components/reports/period-date-picker";
-import { ReportCard } from "@/components/reports/report-card";
 import { ReinvestmentReport } from "@/components/reports/reinvestment-report";
+import { ReportCard } from "@/components/reports/report-card";
 import { ScenarioModal } from "@/components/reports/scenario-modal";
 import { Button } from "@/components/ui/button";
 import {
@@ -71,7 +75,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
+import { getInvestmentProjectionMonthBounds } from "@/lib/reports/investment-projection-period";
 import {
+	applyOfficialMonthlyMora,
+	dateRangeIncludesMonth,
 	fillMissingMontoACobrarPeriods,
 	getMontoACobrarParticipacionTotals,
 	getMontoACobrarViewRow,
@@ -82,7 +89,6 @@ import type {
 	FacturacionMesResponse,
 	FacturacionMesRubro,
 	MontoACobrarPeriodoRow,
-	MontoACobrarRow,
 	PuntoEquilibrioRow,
 	ReinversionLiquidacionesResponse,
 } from "@/lib/reports/scenario";
@@ -94,7 +100,12 @@ import {
 } from "@/lib/reports/scenario-configs";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc, queryClient } from "@/utils/orpc";
+import {
+	getCurrentOperationalMonth,
+	getOfficialClosurePeriod,
+} from "../../cobros/-mora-display";
 import { getReportTabs } from "./-tabs";
+
 type SimulacionInversionistaResult = {
 	success: boolean;
 	data: {
@@ -358,6 +369,15 @@ function RouteComponent() {
 		anio: new Date().getFullYear(),
 	}));
 	const [flujoMes, setFlujoMes] = useState(getDefaultFlujoMes);
+	const [investmentView, setInvestmentView] = useState<
+		"realizado" | "proyeccion"
+	>("realizado");
+	const [projectionMonthBounds] = useState(() =>
+		getInvestmentProjectionMonthBounds(new Date()),
+	);
+	const [projectionMonth, setProjectionMonth] = useState(
+		projectionMonthBounds.defaultMonth,
+	);
 	const [flujoAnioStr, flujoMesStr] = flujoMes.split("-");
 	const flujoMesNum = Number(flujoMesStr);
 	const flujoAnioNum = Number(flujoAnioStr);
@@ -365,6 +385,22 @@ function RouteComponent() {
 	const flujoHoy = new Date();
 	const flujoAnioActual = flujoHoy.getFullYear();
 	const flujoMesActual = flujoHoy.getMonth() + 1;
+	const [projectionYearString, projectionMonthString] =
+		projectionMonth.split("-");
+	const projectionYear = Number(projectionYearString);
+	const projectionMonthNumber = Number(projectionMonthString);
+	const projectionLastDay = new Date(
+		Date.UTC(projectionYear, projectionMonthNumber, 0),
+	).getUTCDate();
+	const projectionRange = {
+		fechaInicio: `${projectionMonth}-01`,
+		fechaFin: `${projectionMonth}-${String(projectionLastDay).padStart(2, "0")}`,
+	};
+	const projectionPeriodLabel = `${MESES[projectionMonthNumber - 1]} de ${projectionYear}`;
+	const projectionAsOfLabel = new Intl.DateTimeFormat("es-GT", {
+		dateStyle: "long",
+		timeZone: "America/Guatemala",
+	}).format(flujoHoy);
 	const aniosDisponibles = [
 		flujoAnioActual,
 		flujoAnioActual - 1,
@@ -465,14 +501,44 @@ function RouteComponent() {
 		}),
 		enabled: canAccessCobranzaReport,
 	});
+	const officialMoraOperationalMonth = getCurrentOperationalMonth();
+	const officialMoraPeriod = getOfficialClosurePeriod(
+		officialMoraOperationalMonth,
+	);
+	const officialMoraRequired =
+		montoCobrarPeriodo === "mes" &&
+		dateRangeIncludesMonth(
+			montoCobrarRange.fechaInicio,
+			montoCobrarRange.fechaFin,
+			officialMoraOperationalMonth,
+		);
+	const officialMoraQuery = useQuery({
+		...orpc.getCierreMoraOficial.queryOptions({
+			input: { periodo: officialMoraPeriod },
+		}),
+		enabled: canAccessCobranzaReport && officialMoraRequired,
+	});
+	const officialMoraReady =
+		!officialMoraRequired ||
+		(officialMoraQuery.isSuccess && officialMoraQuery.data !== null);
+	const officialMoraFailed =
+		officialMoraRequired &&
+		(officialMoraQuery.isError ||
+			(officialMoraQuery.isSuccess && officialMoraQuery.data === null));
 	const montoCobrarData = montoCobrarQuery.data as
 		| { data: MontoACobrarPeriodoRow[] }
 		| undefined;
-	const montoCobrarRows = fillMissingMontoACobrarPeriods(
-		montoCobrarData?.data ?? [],
-		montoCobrarPeriodo,
-		montoCobrarRange.fechaInicio,
-		montoCobrarRange.fechaFin,
+	const montoCobrarRows = applyOfficialMonthlyMora(
+		fillMissingMontoACobrarPeriods(
+			montoCobrarData?.data ?? [],
+			montoCobrarPeriodo,
+			montoCobrarRange.fechaInicio,
+			montoCobrarRange.fechaFin,
+		),
+		officialMoraOperationalMonth,
+		montoCobrarPeriodo === "mes"
+			? officialMoraQuery.data?.moraMensual.esperado
+			: undefined,
 	);
 
 	const facturacionMesQuery = useQuery({
@@ -490,10 +556,19 @@ function RouteComponent() {
 		...orpc.getReinversionLiquidaciones.queryOptions({
 			input: { mes: flujoMesNum, anio: flujoAnioNum },
 		}),
-		enabled: isAdmin,
+		enabled: isAdmin && investmentView === "realizado",
 	});
 	const reinversionData = reinversionLiquidacionesQuery.data as
 		| ReinversionLiquidacionesResponse
+		| undefined;
+	const investmentProjectionQuery = useQuery({
+		...orpc.getFlujoCuotasPorInversionista.queryOptions({
+			input: projectionRange,
+		}),
+		enabled: isAdmin && investmentView === "proyeccion",
+	});
+	const investmentProjectionData = investmentProjectionQuery.data as
+		| InvestmentProjectionData
 		| undefined;
 
 	const investorsCarteraQuery = useQuery({
@@ -743,6 +818,10 @@ function RouteComponent() {
 		}
 	};
 	const exportAdminReportsExcel = () => {
+		if (!officialMoraReady) {
+			toast.error("Espera a que la mora oficial del mes termine de cargar.");
+			return;
+		}
 		if (!montoCobrarData || !reinversionData) {
 			toast.error("Espera a que Cobranza e Inversión terminen de cargar.");
 			return;
@@ -1241,7 +1320,11 @@ function RouteComponent() {
 										</div>
 									<div className="flex flex-wrap gap-2">
 										{isAdmin && (
-											<Button variant="outline" onClick={exportAdminReportsExcel}>
+											<Button
+												variant="outline"
+												onClick={exportAdminReportsExcel}
+												disabled={!officialMoraReady}
+											>
 												<Download className="mr-2 h-4 w-4" />
 												Exportar Excel
 											</Button>
@@ -1308,18 +1391,28 @@ function RouteComponent() {
 									</div>
 								</CardHeader>
 								<CardContent className="space-y-6">
-									{montoCobrarQuery.isPending && <p>Cargando...</p>}
+									{(montoCobrarQuery.isPending ||
+										(officialMoraRequired && officialMoraQuery.isPending)) && (
+										<p>Cargando...</p>
+									)}
 									{montoCobrarQuery.isError && (
 										<p className="text-destructive">
 											Error al cargar el reporte de monto a cobrarse.
 										</p>
 									)}
-									{montoCobrarData && montoCobrarData.data.length === 0 && (
+									{officialMoraFailed && (
+										<p className="text-destructive">
+											No fue posible cargar la mora oficial del mes. Intenta de nuevo.
+										</p>
+									)}
+									{officialMoraReady &&
+										montoCobrarData &&
+										montoCobrarData.data.length === 0 && (
 										<p className="text-muted-foreground">
 											No hay cuotas pendientes para el rango seleccionado.
 										</p>
 									)}
-									{!!montoCobrarData?.data.length && (
+									{officialMoraReady && !!montoCobrarData?.data.length && (
 										<>
 											{(() => {
 											const totals = getMontoACobrarParticipacionTotals(
@@ -1434,7 +1527,7 @@ function RouteComponent() {
 																<TableCell className="sticky left-0 z-[1] bg-background">
 																	{formatBucket(row.bucket, montoCobrarPeriodo)}
 																	</TableCell>
-																<TableCell>{row.cuotas_count}</TableCell>
+																<TableCell>{view.cuotas}</TableCell>
 																<TableCell>
 																{formatCurrency(view.capital)}
 															</TableCell>
@@ -1481,9 +1574,7 @@ function RouteComponent() {
 														{(() => {
 													const rows = montoCobrarRows;
 													const a = montoCobrarAcumulado;
-													const lastRow = rows.findLast(
-														(row) => row.cuotas_count > 0,
-													);
+													const lastRow = a ? rows.at(-1) : undefined;
 															const sum = (key: keyof MontoACobrarPeriodoRow) =>
 																rows.reduce(
 																	(acc: number, r: MontoACobrarPeriodoRow) =>
@@ -1516,7 +1607,7 @@ function RouteComponent() {
 															membresiasTotal;
 																	const totalCred =
 																		a && lastRow
-																			? lastRow.cuotas_count
+																			? lastRow.mora_count
 																			: rows.reduce(
 																					(acc, r) => acc + r.cuotas_count,
 																					0,
@@ -1766,63 +1857,106 @@ function RouteComponent() {
 						<TabsContent value="inversiones" className="space-y-6">
 							<Card>
 								<CardHeader>
-									<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-										<div>
-											<CardTitle>Inversión y reinversión</CardTitle>
-											<CardDescription>
-												Capital liquidado, distribución y posición activa.
-											</CardDescription>
-										</div>
-										<div className="flex items-center gap-2">
-											<Select
-												value={String(flujoMesNum)}
-												onValueChange={(value) =>
-													setFlujoMesAnio(flujoAnioNum, Number(value))
+									<div className="flex flex-col gap-4">
+										<Tabs
+											value={investmentView}
+											onValueChange={(value) => {
+												if (value === "realizado" || value === "proyeccion") {
+													setInvestmentView(value);
 												}
-											>
-												<SelectTrigger className="w-36" aria-label="Mes">
-													<SelectValue />
-												</SelectTrigger>
-												<SelectContent>
-													{mesesDisponibles.map((month) => (
-														<SelectItem
-															key={month.num}
-															value={String(month.num)}
-														>
-															{month.nombre}
-														</SelectItem>
-													))}
-												</SelectContent>
-											</Select>
-											<Select
-												value={String(flujoAnioNum)}
-												onValueChange={(value) =>
-													setFlujoMesAnio(Number(value), flujoMesNum)
-												}
-											>
-												<SelectTrigger className="w-24" aria-label="Año">
-													<SelectValue />
-												</SelectTrigger>
-												<SelectContent>
-													{aniosDisponibles.map((year) => (
-														<SelectItem key={year} value={String(year)}>
-															{year}
-														</SelectItem>
-													))}
-												</SelectContent>
-											</Select>
+											}}
+										>
+											<TabsList aria-label="Vista del reporte de inversiones">
+												<TabsTrigger value="realizado">Realizado</TabsTrigger>
+												<TabsTrigger value="proyeccion">Proyección</TabsTrigger>
+											</TabsList>
+										</Tabs>
+										<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+											<div>
+												<CardTitle>Inversión y reinversión</CardTitle>
+												<CardDescription>
+													{investmentView === "realizado"
+														? "Capital liquidado, distribución y posición activa."
+														: "Estimación de pago y reinversión con la posición vigente al corte."}
+												</CardDescription>
+											</div>
+											{investmentView === "realizado" ? (
+												<div className="flex items-center gap-2">
+													<Select
+														value={String(flujoMesNum)}
+														onValueChange={(value) =>
+															setFlujoMesAnio(flujoAnioNum, Number(value))
+														}
+													>
+														<SelectTrigger className="w-36" aria-label="Mes">
+															<SelectValue />
+														</SelectTrigger>
+														<SelectContent>
+															{mesesDisponibles.map((month) => (
+																<SelectItem
+																	key={month.num}
+																	value={String(month.num)}
+																>
+																	{month.nombre}
+																</SelectItem>
+															))}
+														</SelectContent>
+													</Select>
+													<Select
+														value={String(flujoAnioNum)}
+														onValueChange={(value) =>
+															setFlujoMesAnio(Number(value), flujoMesNum)
+														}
+													>
+														<SelectTrigger className="w-24" aria-label="Año">
+															<SelectValue />
+														</SelectTrigger>
+														<SelectContent>
+															{aniosDisponibles.map((year) => (
+																<SelectItem key={year} value={String(year)}>
+																	{year}
+																</SelectItem>
+															))}
+														</SelectContent>
+													</Select>
+												</div>
+											) : (
+												<Input
+													type="month"
+													aria-label="Mes proyectado"
+													className="w-44"
+													min={projectionMonthBounds.firstMonth}
+													max={projectionMonthBounds.lastMonth}
+													value={projectionMonth}
+													onChange={(event) => {
+														if (event.target.value)
+															setProjectionMonth(event.target.value);
+													}}
+												/>
+											)}
 										</div>
 									</div>
 								</CardHeader>
 								<CardContent className="pt-6">
-									<ReinvestmentReport
-										data={reinversionData}
-										isPending={reinversionLiquidacionesQuery.isPending}
-										isError={reinversionLiquidacionesQuery.isError}
-										periodLabel={`${MESES[flujoMesNum - 1]} de ${flujoAnioNum}`}
-										onRetry={() => reinversionLiquidacionesQuery.refetch()}
-										onExportInvestors={exportAdminReportsExcel}
-									/>
+									{investmentView === "realizado" ? (
+										<ReinvestmentReport
+											data={reinversionData}
+											isPending={reinversionLiquidacionesQuery.isPending}
+											isError={reinversionLiquidacionesQuery.isError}
+											periodLabel={`${MESES[flujoMesNum - 1]} de ${flujoAnioNum}`}
+											onRetry={() => reinversionLiquidacionesQuery.refetch()}
+											onExportInvestors={exportAdminReportsExcel}
+										/>
+									) : (
+										<InvestmentProjection
+											data={investmentProjectionData}
+											isPending={investmentProjectionQuery.isPending}
+											isError={investmentProjectionQuery.isError}
+											periodLabel={projectionPeriodLabel}
+											asOfLabel={projectionAsOfLabel}
+											onRetry={() => investmentProjectionQuery.refetch()}
+										/>
+									)}
 								</CardContent>
 							</Card>
 						</TabsContent>

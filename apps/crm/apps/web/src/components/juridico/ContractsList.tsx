@@ -1,4 +1,5 @@
 import { FileX } from "lucide-react";
+import type { FirmanteDeContrato } from "@/lib/contract-signers-display";
 import { ContractCard } from "./ContractCard";
 
 interface Contract {
@@ -25,6 +26,8 @@ interface ContractsListProps {
 	contracts: Array<{
 		contract: Contract;
 		opportunity?: Opportunity | null;
+		/** Firmantes con su rol; vacío en los contratos generados antes. */
+		signatories?: FirmanteDeContrato[];
 	}>;
 	onUpdate?: () => void;
 	onEdit?: (contract: Contract, opportunity?: Opportunity | null) => void;
@@ -55,10 +58,11 @@ export function ContractsList({
 
 	return (
 		<div className="space-y-4">
-			{contracts.map(({ contract, opportunity }) => (
+			{contracts.map(({ contract, opportunity, signatories }) => (
 				<ContractCard
 					key={contract.id}
 					contract={contract}
+					signatories={signatories}
 					opportunity={opportunity}
 					onUpdate={onUpdate}
 					onEdit={onEdit ? () => onEdit(contract, opportunity) : undefined}

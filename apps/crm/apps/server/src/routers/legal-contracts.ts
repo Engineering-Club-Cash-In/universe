@@ -10,7 +10,10 @@ import {
 	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
-import { generatedLegalContracts } from "../db/schema/legal-contracts";
+import {
+	contractSignatories,
+	generatedLegalContracts,
+} from "../db/schema/legal-contracts";
 import { vehicles } from "../db/schema/vehicles";
 import {
 	adminProcedure,
@@ -33,6 +36,36 @@ const R2_LEGAL_DOCS_BUCKET_NAME =
 	process.env.R2_BUCKET_LEGAL_DOCS ||
 	process.env.R2_BUCKET_NAME_LEGAL_DOCS ||
 	"legal-documents";
+
+/**
+ * Los firmantes de cada contrato, con su rol y su link.
+ *
+ * Los contratos generados antes de que se guardaran los roles no tienen filas
+ * acá: para esos siguen valiendo las columnas por posición del contrato, que es
+ * lo único que quedó registrado.
+ */
+async function firmantesPorContrato(
+	contractIds: string[],
+): Promise<Map<string, (typeof contractSignatories.$inferSelect)[]>> {
+	const porContrato = new Map<
+		string,
+		(typeof contractSignatories.$inferSelect)[]
+	>();
+	if (contractIds.length === 0) return porContrato;
+
+	const filas = await db
+		.select()
+		.from(contractSignatories)
+		.where(inArray(contractSignatories.contractId, contractIds))
+		.orderBy(contractSignatories.position);
+
+	for (const fila of filas) {
+		const lista = porContrato.get(fila.contractId) ?? [];
+		lista.push(fila);
+		porContrato.set(fila.contractId, lista);
+	}
+	return porContrato;
+}
 
 export const legalContractsRouter = {
 	// Crear nuevo contrato legal
@@ -276,7 +309,14 @@ export const legalContractsRouter = {
 				.where(eq(generatedLegalContracts.leadId, input.leadId))
 				.orderBy(generatedLegalContracts.generatedAt);
 
-			return contracts;
+			const firmantes = await firmantesPorContrato(
+				contracts.map((c) => c.contract.id),
+			);
+
+			return contracts.map((c) => ({
+				...c,
+				signatories: firmantes.get(c.contract.id) ?? [],
+			}));
 		}),
 
 	// Listar contratos por oportunidad (accesible por CRM y Juridico)
@@ -380,7 +420,14 @@ export const legalContractsRouter = {
 				}),
 			);
 
-			return contractsWithUpdatedStatus;
+			const firmantes = await firmantesPorContrato(
+				contractsWithUpdatedStatus.map((c) => c.contract.id),
+			);
+
+			return contractsWithUpdatedStatus.map((c) => ({
+				...c,
+				signatories: firmantes.get(c.contract.id) ?? [],
+			}));
 		}),
 
 	// Obtener detalle de un contrato

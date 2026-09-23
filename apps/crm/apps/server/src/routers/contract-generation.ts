@@ -9,11 +9,17 @@ import { db } from "../db";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
 import {
 	contractGenerationSnapshots,
+	contractSignatories,
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
-import { esFirmaFisica } from "../lib/contract-signature-mode";
+import {
+	filasDeFirmantes,
+	type FirmanteEnviado,
+	linksPorRol,
+} from "../lib/contract-signatories";
+import { esFirmaFisica, getSignatureMode } from "../lib/contract-signature-mode";
 import { eqDpi } from "../lib/dpi-lookup";
 import { juridicoProcedure } from "../lib/orpc";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
@@ -86,6 +92,55 @@ function firmantesDelContrato(
 		...signers.filter((s) => s.role !== "REP_LEGAL"),
 		{ role: "REP_LEGAL", email: REP_LEGAL_EMAIL, name: REP_LEGAL_NOMBRE },
 	];
+}
+
+/**
+ * Guarda quién firma un contrato, con su rol y su link.
+ *
+ * Es best-effort a propósito: el contrato y su PDF ya quedaron guardados, y
+ * perderlos porque falló el detalle de los firmantes sería peor que quedarse
+ * con las columnas viejas de links. El error queda en el log.
+ */
+async function guardarFirmantes(
+	contractId: string,
+	signatories: FirmanteEnviado[] | undefined,
+): Promise<void> {
+	const filas = filasDeFirmantes(contractId, signatories);
+	if (filas.length === 0) return;
+
+	try {
+		await db.insert(contractSignatories).values(filas);
+	} catch (error) {
+		console.error(
+			`[guardarFirmantes] contrato ${contractId}: no se pudieron guardar los firmantes`,
+			error,
+		);
+	}
+}
+
+/**
+ * Saca los datos de firma de la respuesta cruda del generador.
+ *
+ * `linkContractsToOpportunity` recibe del front el `apiResponse` tal como se lo
+ * devolvió el generador, sin tipar. Los contratos viejos no traen nada de esto.
+ */
+function firmaDelGenerador(apiResponse: unknown): {
+	signatories?: FirmanteEnviado[];
+	signingProvider?: string;
+	documentID?: string;
+} {
+	if (!apiResponse || typeof apiResponse !== "object") return {};
+	const r = apiResponse as {
+		signatories?: FirmanteEnviado[];
+		signingProvider?: string;
+		documentID?: string;
+	};
+	return {
+		signatories: Array.isArray(r.signatories) ? r.signatories : undefined,
+		signingProvider:
+			typeof r.signingProvider === "string" ? r.signingProvider : undefined,
+		documentID: typeof r.documentID === "string" ? r.documentID : undefined,
+	};
 }
 
 /** Firmante tal como lo manda el front. */
@@ -426,10 +481,10 @@ export const contractGenerationRouter = {
 								opportunityId: input.opportunityId,
 								contractType,
 								contractName,
-								clientSigningLink: apiResult.signingLinks?.[0] || null,
-								representativeSigningLink: apiResult.signingLinks?.[1] || null,
-								additionalSigningLinks:
-									apiResult.signingLinks?.slice(2) || null,
+								...linksPorRol(apiResult.signatories, apiResult.signingLinks),
+								signingProvider: apiResult.signingProvider ?? null,
+								weetrustDocumentId: apiResult.documentID ?? null,
+								signatureMode: getSignatureMode(contractType),
 								templateId: apiResult.templateId,
 								apiResponse: apiResult.rawResponse,
 								pdfLink: apiResult.pdfUrl || null,
@@ -438,6 +493,10 @@ export const contractGenerationRouter = {
 								generatedAt: new Date(),
 							})
 							.returning();
+
+						if (newContract) {
+							await guardarFirmantes(newContract.id, apiResult.signatories);
+						}
 
 						results.push({
 							contractType,
@@ -577,6 +636,8 @@ export const contractGenerationRouter = {
 					templateId?: number;
 					apiResponse?: unknown;
 					r2Key?: string;
+					/** Firmantes con su rol, para etiquetar los links sin adivinar. */
+					signatories?: FirmanteEnviado[];
 					error?: string;
 				}> = [];
 
@@ -604,6 +665,7 @@ export const contractGenerationRouter = {
 									: contractResult.linkDocument,
 								r2Key: contractResult.r2Key ?? undefined,
 								signingLinks: contractResult.signing_links,
+								signatories: contractResult.signatories,
 								templateId: contractResult.templateId,
 								apiResponse: contractResult,
 							});
@@ -706,6 +768,10 @@ export const contractGenerationRouter = {
 				const savedContracts: Array<{ id: string; contractType: string }> = [];
 
 				for (const contract of input.contracts) {
+					// El front reenvía tal cual la respuesta del generador; de ahí salen
+					// los roles y los identificadores de WeeTrust.
+					const generado = firmaDelGenerador(contract.apiResponse);
+
 					const [saved] = await db
 						.insert(generatedLegalContracts)
 						.values({
@@ -713,9 +779,10 @@ export const contractGenerationRouter = {
 							opportunityId: input.opportunityId,
 							contractType: contract.contractType,
 							contractName: contract.contractName,
-							clientSigningLink: contract.signingLinks?.[0] || null,
-							representativeSigningLink: contract.signingLinks?.[1] || null,
-							additionalSigningLinks: contract.signingLinks?.slice(2) || null,
+							...linksPorRol(generado.signatories, contract.signingLinks),
+							signingProvider: generado.signingProvider ?? null,
+							weetrustDocumentId: generado.documentID ?? null,
+							signatureMode: getSignatureMode(contract.contractType),
 							templateId: contract.templateId,
 							apiResponse: contract.apiResponse,
 							pdfLink: contract.documentLink || null,
@@ -726,6 +793,7 @@ export const contractGenerationRouter = {
 						.returning({ id: generatedLegalContracts.id });
 
 					if (saved) {
+						await guardarFirmantes(saved.id, generado.signatories);
 						savedContracts.push({
 							id: saved.id,
 							contractType: contract.contractType,
@@ -1068,11 +1136,13 @@ export const contractGenerationRouter = {
 								contractType: originalContract.contractType,
 								contractName:
 									contractResult.nameDocument?.[0]?.label || "Contrato",
-								clientSigningLink: contractResult.signing_links?.[0] || null,
-								representativeSigningLink:
-									contractResult.signing_links?.[1] || null,
-								additionalSigningLinks:
-									contractResult.signing_links?.slice(2) || null,
+								...linksPorRol(
+									contractResult.signatories,
+									contractResult.signing_links,
+								),
+								signingProvider: contractResult.signingProvider ?? null,
+								weetrustDocumentId: contractResult.documentID ?? null,
+								signatureMode: getSignatureMode(originalContract.contractType),
 								templateId: contractResult.templateId,
 								apiResponse: contractResult,
 								pdfLink:
@@ -1084,6 +1154,7 @@ export const contractGenerationRouter = {
 							.returning({ id: generatedLegalContracts.id });
 
 						if (saved) {
+							await guardarFirmantes(saved.id, contractResult.signatories);
 							savedContracts.push({
 								id: saved.id,
 								contractType: originalContract.contractType,
@@ -1265,6 +1336,10 @@ interface LegalDocsApiResult {
 	success: boolean;
 	templateId?: number;
 	signingLinks?: string[];
+	/** Firmantes con su rol y su link, cuando el generador los reporta. */
+	signatories?: FirmanteEnviado[];
+	signingProvider?: string;
+	documentID?: string;
 	pdfUrl?: string;
 	rawResponse?: unknown;
 	error?: string;
@@ -1365,6 +1440,7 @@ async function callLegalDocsApi(
 			success: true,
 			templateId: result.templateId,
 			signingLinks: result.signing_links || result.signingLinks || [],
+			...firmaDelGenerador(result),
 			pdfUrl: result.pdf_url || result.pdfUrl,
 			rawResponse: result,
 		};

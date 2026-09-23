@@ -47,6 +47,7 @@ import {
 	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
+import { firmantesEnFicha } from "@/lib/contract-signers-display";
 import { getRoleLabel, PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
@@ -520,7 +521,15 @@ export function OpportunityDetailModal({
 								) : opportunityContractsQuery.data &&
 									opportunityContractsQuery.data.length > 0 ? (
 									<div className="space-y-2">
-										{opportunityContractsQuery.data.map(({ contract }) => (
+										{opportunityContractsQuery.data.map((fila) => {
+											const contract = fila.contract;
+											// Cada firmante viene con su rol: el segundo link ya no se
+											// rotula "Rep. Legal" por estar segundo.
+											const firmantes = firmantesEnFicha(
+												fila.signatories,
+												contract,
+											);
+											return (
 											<div
 												key={contract.id}
 												className="flex items-center justify-between rounded-md border bg-background p-3"
@@ -553,35 +562,31 @@ export function OpportunityDetailModal({
 															</a>
 														</Button>
 													)}
-													{contract.clientSigningLink && (
-														<Button variant="outline" size="sm" asChild>
-															<a
-																href={contract.clientSigningLink}
-																target="_blank"
-																rel="noopener noreferrer"
-																className="flex items-center gap-1"
+													{firmantes.map((firmante) =>
+														firmante.url ? (
+															<Button
+																key={firmante.clave}
+																variant="outline"
+																size="sm"
+																asChild
 															>
-																<ExternalLink className="h-3 w-3" />
-																Cliente
-															</a>
-														</Button>
-													)}
-													{contract.representativeSigningLink && (
-														<Button variant="outline" size="sm" asChild>
-															<a
-																href={contract.representativeSigningLink}
-																target="_blank"
-																rel="noopener noreferrer"
-																className="flex items-center gap-1"
-															>
-																<ExternalLink className="h-3 w-3" />
-																Rep. Legal
-															</a>
-														</Button>
+																<a
+																	href={firmante.url}
+																	target="_blank"
+																	rel="noopener noreferrer"
+																	className="flex items-center gap-1"
+																	title={firmante.nombre ?? undefined}
+																>
+																	<ExternalLink className="h-3 w-3" />
+																	{firmante.etiqueta}
+																</a>
+															</Button>
+														) : null,
 													)}
 												</div>
 											</div>
-										))}
+											);
+										})}
 									</div>
 								) : (
 									<p className="text-muted-foreground text-sm">

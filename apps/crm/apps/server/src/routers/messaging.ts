@@ -63,7 +63,15 @@ export function buildContractLinksMessage(
 		.map((c) => `📄 ${c.contractName}:\n${c.link}`)
 		.join("\n\n");
 
-	return `${clientName}, tus contratos están listos para firmar. Por favor ingresa a los siguientes enlaces:\n\n${linksText}\n\nSi tienes alguna duda, no dudes en contactarnos.`;
+	// En singular cuando va uno solo: pasa al reenviar el contrato que se acaba
+	// de renovar o reemplazar. La batería entera (al aprobar, o rehecha con
+	// otra fecha) va en plural.
+	const encabezado =
+		contracts.length === 1
+			? "tu contrato está listo para firmar. Por favor ingresa al siguiente enlace"
+			: "tus contratos están listos para firmar. Por favor ingresa a los siguientes enlaces";
+
+	return `${clientName}, ${encabezado}:\n\n${linksText}\n\nSi tienes alguna duda, no dudes en contactarnos.`;
 }
 
 interface DestinatarioDeFirma {
@@ -203,6 +211,13 @@ async function enlacesDeLaPersona(
 export async function sendContractLinksToLead(params: {
 	leadId: string;
 	opportunityId: string;
+	/**
+	 * Mandar sólo estos contratos (ids). Es para el reenvío después de renovar
+	 * o reemplazar uno: los enlaces de los demás siguen sirviendo, y mandarle
+	 * al cliente la batería entera por un solo contrato lo confunde. Sin esto se
+	 * mandan todos los vigentes, como al aprobar.
+	 */
+	soloContratos?: string[];
 }): Promise<{ sent: boolean; reason?: string }> {
 	// Con el candado de la oportunidad tomado de punta a punta: entre armar los
 	// mensajes y mandarlos hay varias llamadas a SimpleTech, y una regeneración
@@ -229,6 +244,7 @@ const LIMITE_DEL_ENVIO_MS = 120_000;
 async function enviarEnlacesDeFirma(params: {
 	leadId: string;
 	opportunityId: string;
+	soloContratos?: string[];
 }): Promise<{ sent: boolean; reason?: string }> {
 	const [lead] = await db
 		.select({
@@ -273,6 +289,9 @@ async function enviarEnlacesDeFirma(params: {
 				// Reclamado por un reemplazo que todavía no terminó de anularlo: ya
 				// no es el vigente, aunque su estado aún no lo diga.
 				isNull(generatedLegalContracts.replacedByContractId),
+				params.soloContratos
+					? inArray(generatedLegalContracts.id, params.soloContratos)
+					: undefined,
 			),
 		);
 
@@ -438,6 +457,14 @@ async function enviarEnlacesDeFirma(params: {
 		// no lo lleva). Si no le toca ninguno, no se le deja una fila pendiente
 		// que nadie puede cerrar.
 		if (destinatario.role === "REP_LEGAL" && susContratos.length === 0) {
+			continue;
+		}
+
+		// Lo mismo en un reenvío de sólo algunos contratos: quien no firma
+		// ninguno de ellos no tiene nada nuevo que recibir, y una fila
+		// "pendiente" suya confundiría la ficha. Sin correo sí se anota: ahí no
+		// se sabe si le tocaba.
+		if (params.soloContratos && clave && susContratos.length === 0) {
 			continue;
 		}
 

@@ -34,6 +34,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
+import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/juridico/$leadId")({
@@ -65,6 +66,10 @@ function RouteComponent() {
 		null,
 	);
 	const [preguntarReenvio, setPreguntarReenvio] = useState(false);
+	// Lo que se acaba de rehacer o subir: sólo eso se reenvía, no la batería.
+	const [contratosAReenviar, setContratosAReenviar] = useState<
+		Array<{ id: string; nombre: string }> | undefined
+	>(undefined);
 	const [contratoAReemplazar, setContratoAReemplazar] = useState<{
 		id: string;
 		contractType: string;
@@ -195,6 +200,12 @@ function RouteComponent() {
 				data.regeneratedCount > 0 &&
 				data.porcentajeEtapa === ETAPA_EN_FIRMA
 			) {
+				setContratosAReenviar(
+					data.contracts.map((c) => ({
+						id: c.id,
+						nombre: getContractTypeLabel(c.contractType),
+					})),
+				);
 				setPreguntarReenvio(true);
 			}
 		},
@@ -503,13 +514,16 @@ function RouteComponent() {
 						setIsUploadModalOpen(abierto);
 						if (!abierto) setContratoAReemplazar(null);
 					}}
-					onUploaded={({ porcentajeEtapa }) => {
+					onUploaded={({ porcentajeEtapa, contractId, contractType }) => {
 						refetch();
-						// Al reemplazar, siempre: los enlaces viejos dejaron de servir.
-						// Una subida nueva en 80% no hace falta, sale con el envío al
-						// aprobar; en 85% sí, porque ese envío ya pasó y el cliente
-						// nunca recibiría el enlace del contrato nuevo.
-						if (contratoAReemplazar || porcentajeEtapa === ETAPA_EN_FIRMA) {
+						// Sólo en 85%, sea subida nueva o reemplazo: ahí el envío de la
+						// aprobación ya pasó, y el cliente se quedaría con un enlace muerto
+						// o sin el del contrato nuevo. En 80% todavía no le llegó nada: lo
+						// que se suba o reemplace sale con el envío al aprobar.
+						if (porcentajeEtapa === ETAPA_EN_FIRMA) {
+							setContratosAReenviar([
+								{ id: contractId, nombre: getContractTypeLabel(contractType) },
+							]);
 							setPreguntarReenvio(true);
 						}
 					}}
@@ -520,6 +534,7 @@ function RouteComponent() {
 			{opportunityId && (
 				<ReenviarWhatsappDialog
 					opportunityId={opportunityId}
+					contratos={contratosAReenviar}
 					open={preguntarReenvio}
 					onOpenChange={setPreguntarReenvio}
 				/>

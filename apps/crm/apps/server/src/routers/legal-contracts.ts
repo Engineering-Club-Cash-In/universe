@@ -1654,7 +1654,7 @@ export const legalContractsRouter = {
 			// gente ya tenía. Es de análisis.
 			if (!PERMISSIONS.canRegenerateContractLinks(context.userRole)) {
 				throw new ORPCError("FORBIDDEN", {
-					message: "Sólo análisis puede regenerar los enlaces de firma",
+					message: "Sólo análisis puede renovar los enlaces de firma",
 				});
 			}
 
@@ -1677,7 +1677,8 @@ export const legalContractsRouter = {
 			// resucitaría con enlaces nuevos al lado del que lo reemplazó.
 			if (contract.status === "cancelled") {
 				throw new ORPCError("BAD_REQUEST", {
-					message: "Este contrato está anulado: no se puede regenerar.",
+					message:
+						"Este contrato está anulado: no se pueden renovar sus enlaces.",
 				});
 			}
 
@@ -1696,7 +1697,7 @@ export const legalContractsRouter = {
 			if (!r2KeyDelPdf) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
-						"Este contrato no tiene el PDF guardado, así que no se puede reemitir. Hay que generarlo de nuevo.",
+						"Este contrato no tiene el PDF guardado, así que no se pueden renovar sus enlaces. Hay que generarlo de nuevo.",
 				});
 			}
 
@@ -1772,7 +1773,7 @@ export const legalContractsRouter = {
 					if (etapaAhora !== etapaInicial) {
 						throw new ORPCError("CONFLICT", {
 							message:
-								"La oportunidad cambió de etapa mientras se esperaba. Recargá y, si todavía hace falta, volvé a regenerar.",
+								"La oportunidad cambió de etapa mientras se esperaba. Recargá y, si todavía hace falta, volvé a renovar los enlaces.",
 						});
 					}
 				}
@@ -1792,7 +1793,7 @@ export const legalContractsRouter = {
 				if (!sigueVigente || !estaVigente(sigueVigente)) {
 					throw new ORPCError("CONFLICT", {
 						message:
-							"Otra persona acaba de regenerar o reemplazar este contrato. Recargá para ver el nuevo.",
+							"Otra persona acaba de renovar los enlaces de este contrato o de reemplazarlo. Recargá para ver el nuevo.",
 					});
 				}
 
@@ -1827,6 +1828,9 @@ export const legalContractsRouter = {
 				// registro. Si falla, se borra el nuevo en WeeTrust para que un
 				// reintento no deje dos vivos.
 				let nuevoId: string;
+				// La etapa con la que se guardó: la ficha pregunta si reenviar sólo en
+				// 85%, y la de la pantalla puede ser vieja.
+				let porcentajeEtapa: number | null = null;
 				try {
 					nuevoId = await db.transaction(async (tx) => {
 						// Dos regeneraciones a la vez del mismo contrato emitían dos
@@ -1864,9 +1868,10 @@ export const legalContractsRouter = {
 							) {
 								throw new ORPCError("CONFLICT", {
 									message:
-										"La oportunidad cambió de etapa mientras se regeneraba, así que no se guardó. Recargá y, si todavía hace falta, volvé a regenerar.",
+										"La oportunidad cambió de etapa mientras se renovaban los enlaces, así que no se guardó. Recargá y, si todavía hace falta, volvé a renovarlos.",
 								});
 							}
+							porcentajeEtapa = etapa.porcentaje;
 						}
 
 						const [original] = await tx
@@ -1884,7 +1889,7 @@ export const legalContractsRouter = {
 						) {
 							throw new ORPCError("CONFLICT", {
 								message:
-									"Otra persona acaba de regenerar este contrato. Recargá para ver el nuevo.",
+									"Otra persona acaba de renovar los enlaces de este contrato. Recargá para ver el nuevo.",
 							});
 						}
 
@@ -1932,7 +1937,7 @@ export const legalContractsRouter = {
 							.update(generatedLegalContracts)
 							.set({
 								status: "cancelled",
-								cancellationReason: `Regenerado: ${motivo}`,
+								cancellationReason: `Enlaces renovados: ${motivo}`,
 								cancelledAt: ahora,
 								replacedByContractId: nuevo.id,
 								updatedAt: ahora,
@@ -1985,15 +1990,17 @@ export const legalContractsRouter = {
 					}
 					await db
 						.update(generatedLegalContracts)
-						.set({ cancellationReason: `Regenerado: ${motivo} (${detalle})` })
+						.set({
+							cancellationReason: `Enlaces renovados: ${motivo} (${detalle})`,
+						})
 						.where(eq(generatedLegalContracts.id, input.contractId));
 				}
 
 				return {
 					success: true,
-					message:
-						"Documento reemitido con enlaces nuevos; el anterior queda anulado",
+					message: "Enlaces renovados: los anteriores ya no sirven",
 					contractId: nuevoId,
+					porcentajeEtapa,
 					documentID: resultado.documentID,
 					enlaces: resultado.signing_links?.length ?? 0,
 				};
@@ -2006,9 +2013,18 @@ export const legalContractsRouter = {
 	 * Después de reemplazar un contrato o regenerar sus enlaces, los que tenía la
 	 * gente en el teléfono dejaron de servir. Sin esto habría que mover la
 	 * oportunidad de etapa para que el envío automático se dispare otra vez.
+	 *
+	 * Con `contratos` se manda sólo esos: los que se acaban de renovar o
+	 * reemplazar. Los demás siguen con sus enlaces vivos, y al cliente no tiene
+	 * por qué llegarle la batería entera por uno solo.
 	 */
 	resendContractLinksWhatsapp: viewOpportunityContractsProcedure
-		.input(z.object({ opportunityId: z.string().uuid() }))
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				contratos: z.array(z.string().uuid()).min(1).max(50).optional(),
+			}),
+		)
 		.handler(async ({ input, context }) => {
 			// Ver los contratos no alcanza: esto le escribe al cliente.
 			if (!PERMISSIONS.canResendContractLinks(context.userRole)) {
@@ -2032,6 +2048,7 @@ export const legalContractsRouter = {
 			const resultado = await sendContractLinksToLead({
 				leadId: opportunity.leadId,
 				opportunityId: input.opportunityId,
+				soloContratos: input.contratos,
 			});
 
 			return {

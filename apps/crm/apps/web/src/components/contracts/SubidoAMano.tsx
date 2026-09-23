@@ -26,9 +26,9 @@ export function EtiquetaSubidoAMano({
 /**
  * Pide mirar dónde quedaron las firmas de un contrato subido a mano.
  *
- * Está escrito para que se lea como lo que es: el documento lo armó una
- * persona, no la plantilla, así que vale la pena confirmar que cada firma cayó
- * en la línea de quien corresponde. No como una duda sobre el sistema.
+ * Sólo pide mirar, sin explicar por qué: la etiqueta "Subido a mano" ya dice
+ * que el documento no salió de la plantilla, y repetirlo sonaba a que el
+ * sistema no las ubica bien.
  *
  * Quien lo usa lo muestra sólo mientras falta firmar: después ya no hay nada
  * que corregir. Manda a "Seguimiento" (el enlace de observador) porque es el
@@ -45,8 +45,8 @@ export function RevisarSubidoAMano({
 	return (
 		<div className="flex items-start justify-between gap-2 rounded-md border border-sky-500/30 bg-sky-500/5 p-2 text-sky-800 text-xs dark:text-sky-300">
 			<p>
-				Este documento lo armó una persona, no la plantilla: dale un vistazo
-				para confirmar que cada firma quedó en la línea de quien le toca.
+				Dale un vistazo para confirmar que cada firma quedó en la línea de quien
+				le toca.
 			</p>
 			{observerUrl && (
 				<a

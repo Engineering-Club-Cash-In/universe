@@ -30,6 +30,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
+import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/juridico/generate/$opportunityId")({
@@ -43,9 +44,17 @@ function RouteComponent() {
 		useJuridicoPermissions();
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [preguntarReenvio, setPreguntarReenvio] = useState(false);
+	// Lo que se acaba de enlazar: sólo eso se reenvía, no la batería entera.
+	const [contratosAReenviar, setContratosAReenviar] = useState<
+		Array<{ id: string; nombre: string }> | undefined
+	>(undefined);
 	// Ref y no estado: lo marca el enlace y lo lee `handleBack` en el mismo
-	// tick, antes de que un estado nuevo llegue a renderizarse.
-	const ofrecerReenvioAlSalir = useRef(false);
+	// tick, antes de que un estado nuevo llegue a renderizarse. Null si no hay
+	// que ofrecer el reenvío.
+	const ofrecerReenvioAlSalir = useRef<Array<{
+		id: string;
+		nombre: string;
+	}> | null>(null);
 
 	// Get contract types from API (dynamic)
 	const contractTypesQuery = useQuery({
@@ -323,7 +332,8 @@ function RouteComponent() {
 	// queda para cuando se cierre la pregunta.
 	const handleBack = () => {
 		if (ofrecerReenvioAlSalir.current) {
-			ofrecerReenvioAlSalir.current = false;
+			setContratosAReenviar(ofrecerReenvioAlSalir.current);
+			ofrecerReenvioAlSalir.current = null;
 			setPreguntarReenvio(true);
 			return;
 		}
@@ -423,7 +433,13 @@ function RouteComponent() {
 		// La etapa con la que enlazó el servidor, no la de esta pantalla: si la
 		// aprobaron mientras el wizard estaba abierto, acá seguiría diciendo 80%.
 		if (result.linkedCount > 0 && result.porcentajeEtapa === ETAPA_EN_FIRMA) {
-			ofrecerReenvioAlSalir.current = true;
+			ofrecerReenvioAlSalir.current = [
+				...(ofrecerReenvioAlSalir.current ?? []),
+				...result.contracts.map((c) => ({
+					id: c.id,
+					nombre: getContractTypeLabel(c.contractType),
+				})),
+			];
 		}
 		return result;
 	};
@@ -589,6 +605,7 @@ function RouteComponent() {
 			{opportunityId && (
 				<ReenviarWhatsappDialog
 					opportunityId={opportunityId}
+					contratos={contratosAReenviar}
 					open={preguntarReenvio}
 					onOpenChange={(abierto) => {
 						setPreguntarReenvio(abierto);

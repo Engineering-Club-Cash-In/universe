@@ -42,7 +42,14 @@ export function RegenerarEnlacesDialog({
 	hayFirmas: boolean;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onRegenerado: () => void;
+	/**
+	 * Con el id del contrato nuevo, que es el que hay que reenviar, y la etapa
+	 * con la que lo guardó el servidor.
+	 */
+	onRegenerado: (
+		nuevoContractId: string,
+		porcentajeEtapa: number | null,
+	) => void;
 }) {
 	const [motivo, setMotivo] = useState<string>("");
 
@@ -58,7 +65,7 @@ export function RegenerarEnlacesDialog({
 			toast.success(`${data.message} (${data.enlaces} enlace(s))`);
 			setMotivo("");
 			onOpenChange(false);
-			onRegenerado();
+			onRegenerado(data.contractId, data.porcentajeEtapa);
 		},
 		onError: (error: Error) => toast.error(error.message),
 	});
@@ -73,10 +80,10 @@ export function RegenerarEnlacesDialog({
 		>
 			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
-					<DialogTitle>Regenerar enlaces de firma</DialogTitle>
+					<DialogTitle>Renovar enlaces de firma</DialogTitle>
 					<DialogDescription>
-						Se emite otra vez "{contractName}" con el mismo documento y enlaces
-						nuevos para todos.
+						Se manda otra vez "{contractName}" a firmar, con el mismo documento
+						y enlaces nuevos para todos.
 					</DialogDescription>
 				</DialogHeader>
 
@@ -85,7 +92,7 @@ export function RegenerarEnlacesDialog({
 						<Label htmlFor="motivo-regeneracion">Motivo</Label>
 						<Select value={motivo} onValueChange={setMotivo}>
 							<SelectTrigger id="motivo-regeneracion" className="w-full">
-								<SelectValue placeholder="¿Por qué hay que volver a emitirlo?" />
+								<SelectValue placeholder="¿Por qué hay que renovarlos?" />
 							</SelectTrigger>
 							<SelectContent>
 								{Object.entries(MOTIVOS_DE_ANULACION).map(
@@ -101,9 +108,9 @@ export function RegenerarEnlacesDialog({
 
 					{hayFirmas && (
 						<p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
-							Este contrato ya tiene firmas. Al reemitirlo quedan sin efecto y
-							todos tendrán que firmar de nuevo. El documento anterior no se
-							puede borrar de la plataforma de firma, pero deja de ser el
+							Este contrato ya tiene firmas. Al renovar los enlaces quedan sin
+							efecto y todos tendrán que firmar de nuevo. El documento anterior
+							no se puede borrar de la plataforma de firma, pero deja de ser el
 							válido.
 						</p>
 					)}
@@ -131,7 +138,7 @@ export function RegenerarEnlacesDialog({
 						) : (
 							<RefreshCw className="mr-2 h-4 w-4" />
 						)}
-						Regenerar
+						Renovar
 					</Button>
 				</DialogFooter>
 			</DialogContent>

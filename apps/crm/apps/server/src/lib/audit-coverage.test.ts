@@ -25,7 +25,42 @@ const INVENTARIO: Record<
 	string,
 	{ escrituras: number; anotaciones: number; estado: Estado; nota?: string }
 > = {
-	"routers/crm.ts": { escrituras: 17, anotaciones: 20, estado: "listo" },
+	// Anota más de lo que escribe: además de la fila por escritura hay tres que
+	// registran decisiones sin escritura propia —el override del gate de mora, el
+	// del candado al borrar un co-deudor, y la revalidación al reabrir una
+	// oportunidad perdida que ya había cruzado el 30%—.
+	//
+	// +1 escritura y +1 anotación al volver atómico el borrado del co-deudor: el
+	// delete de `coDebtors` pasó a hacerse dentro de una transacción y con el
+	// candado en el WHERE, y el override del admin sobre ese borrado ahora
+	// también revalida la oportunidad (antes solo dejaba la fila de bitácora).
+	//
+	// +2 anotaciones (20 → 22) sin escrituras nuevas: el override de admin del
+	// gate de mora dejó de anotarse dentro de `resolverEdicionConMora` —que lo
+	// escribía ANTES del UPDATE, dejando en la bitácora overrides que nunca
+	// ocurrían— y ahora lo anota cada llamador después de confirmar sus filas.
+	// Son los mismos dos sitios de siempre (`updateLead` y `updateCoDebtor`),
+	// solo que el literal `auditRecord(` ahora vive acá y el escáner lo ve.
+	"routers/crm.ts": { escrituras: 17, anotaciones: 22, estado: "listo" },
+	// Manda oportunidades de vuelta a análisis cuando su validación de identidad
+	// quedó vieja: al reabrir una perdida avanzada, y cuando un admin abre el
+	// candado del DPI.
+	//
+	// `exento` de la regla de proximidad, NO de anotar: SÍ deja bitácora por cada
+	// oportunidad —también por las que las salvaguardas dejan intactas, con
+	// `ok: false`—, pero la escribe a través de `anotar`, que entra por
+	// parámetro. Es la misma convención de `gate-mora-dpi.ts`: en bun,
+	// reemplazar un módulo con `mock.module` es global al proceso, así que las
+	// dependencias viajan por parámetro y quedan testeables. El escáner busca el
+	// literal `auditRecord(` y por eso no las ve; los dos llamadores
+	// (`updateLead` y `updateCoDebtor`, en `routers/crm.ts`) le pasan
+	// `auditRecord` de verdad.
+	"lib/revalidacion-oportunidad.ts": {
+		escrituras: 1,
+		anotaciones: 0,
+		estado: "exento",
+		nota: "anota por `anotar` inyectado, no con el literal `auditRecord(`; ver comentario arriba",
+	},
 	"routers/vehicles.ts": { escrituras: 10, anotaciones: 10, estado: "listo" },
 	// Anota una vez más de lo que escribe: el rollback descarta las anotaciones
 	// de la transacción revertida y deja en su lugar el intento fallido.
@@ -103,11 +138,17 @@ const ANOTACION = /auditRecord\(/;
 
 /**
  * Margen entre una escritura y su anotación. Hoy la distancia real máxima es
- * de 62 líneas, en `crm.updateOpportunity`: la anotación va después del
+ * de 91 líneas, en `crm.updateOpportunity`: la anotación va después del
  * chequeo de cero filas —que además relee el estado para distinguir la carrera
  * con el cierre—, porque con cero filas no hubo escritura que anotar.
+ *
+ * Subió de 75 a 100 al meter la reapertura en una transacción: entre el UPDATE
+ * y su anotación ahora viven también la fila de `opportunityStageHistory` del
+ * retroceso a análisis y el cierre de la transacción. El margen es una heurística
+ * de proximidad, no un límite de diseño; lo que protege es que no desaparezca la
+ * anotación, y eso se sigue cumpliendo.
  */
-const LINEAS_DE_MARGEN = 75;
+const LINEAS_DE_MARGEN = 100;
 
 function archivosFuente(dir: string, out: string[] = []): string[] {
 	for (const entrada of readdirSync(dir)) {

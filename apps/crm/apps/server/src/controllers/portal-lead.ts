@@ -16,6 +16,11 @@ import {
 	requiereConsultaDeMora,
 } from "../lib/gate-mora-dpi";
 import {
+	dpiCambia,
+	evaluarCandadoDpi,
+	noExisteOportunidadCandanteDelLead,
+} from "../lib/lead-dpi-lock";
+import {
 	numerosSifcoConocidosPorDpi,
 	numerosSifcoDelDpiYDelLead,
 } from "../lib/numeros-sifco-por-dpi";
@@ -268,24 +273,46 @@ export async function updateLeadByEmail(c: Context) {
 				return c.json({ success: false, error: resultadoDpi.error }, 400);
 			}
 			dpi = resultadoDpi.dpiLimpio;
+		}
 
-			// 🔴 Solo si el DPI es nuevo o cambia. El portal reenvía la ficha
-			// completa en cada guardado, así que con el mismo DPI de siempre esto
-			// es una edición común —dirección, teléfono— y no puede quedar trabada
-			// porque la persona esté en mora.
-			if (requiereConsultaDeMora(dpi, existingLead.dpi)) {
-				// 🔴 Igual que en `updateLead` del CRM: la pregunta lleva los números
-				// del DPI NUEVO **y** los del lead que se está editando. Buscando solo
-				// por el DPI nuevo, el lead con su propio crédito moroso —invisible
-				// para SIFCO— se sacaba el gate de encima tecleando un DPI virgen.
-				const gate = await evaluarGateMoraDpi(dpi, {
-					...depsGateMora,
-					numerosCreditoConocidos: (dpiConsultado) =>
-						numerosSifcoDelDpiYDelLead(dpiConsultado, existingLead.id),
-				});
-				if (gate.rechazado) {
-					return c.json({ success: false, error: gate.mensaje }, 400);
-				}
+		// El candado va ANTES que el gate de mora a propósito: es una consulta
+		// local barata, y si el DPI ya no se puede cambiar no tiene sentido pagar
+		// el viaje a SIFCO para un cambio que igual se rechaza. Y va fuera de la
+		// validación de formato: un `dpi: ""` no se valida pero SÍ se escribe más
+		// abajo, y sin el candado acá borraba el DPI del expediente y dejaba la
+		// puerta abierta para escribir otro en la llamada siguiente.
+		if (dpi !== undefined) {
+			const candado = await evaluarCandadoDpi({
+				dpiActual: existingLead.dpi,
+				dpiNuevo: dpi,
+				sujeto: "portal",
+				leadId: existingLead.id,
+			});
+			if (candado.bloqueado) {
+				return c.json({ success: false, error: candado.message }, 400);
+			}
+		}
+
+		// 🔴 Solo si el DPI es nuevo o cambia. El portal reenvía la ficha
+		// completa en cada guardado, así que con el mismo DPI de siempre esto
+		// es una edición común —dirección, teléfono— y no puede quedar trabada
+		// porque la persona esté en mora.
+		if (
+			dpi !== undefined &&
+			dpi.trim() !== "" &&
+			requiereConsultaDeMora(dpi, existingLead.dpi)
+		) {
+			// 🔴 Igual que en `updateLead` del CRM: la pregunta lleva los números
+			// del DPI NUEVO **y** los del lead que se está editando. Buscando solo
+			// por el DPI nuevo, el lead con su propio crédito moroso —invisible
+			// para SIFCO— se sacaba el gate de encima tecleando un DPI virgen.
+			const gate = await evaluarGateMoraDpi(dpi, {
+				...depsGateMora,
+				numerosCreditoConocidos: (dpiConsultado) =>
+					numerosSifcoDelDpiYDelLead(dpiConsultado, existingLead.id),
+			});
+			if (gate.rechazado) {
+				return c.json({ success: false, error: gate.mensaje }, 400);
 			}
 		}
 
@@ -360,21 +387,66 @@ export async function updateLeadByEmail(c: Context) {
 			updateData.phone = phone;
 		}
 
-		// Update the lead
-		const [updatedLead] = await db
-			.update(leads)
-			.set(updateData)
-			.where(eq(leads.id, existingLead.id))
-			.returning({
-				id: leads.id,
-				firstName: leads.firstName,
-				lastName: leads.lastName,
-				email: leads.email,
-				phone: leads.phone,
-				dpi: leads.dpi,
-				direccion: leads.direccion,
-				updatedAt: leads.updatedAt,
+		// 🔴 Misma carrera que en el CRM: entre el candado de arriba y esta
+		// sentencia, otra transacción puede aprobar el análisis (30 → 40) y el DPI
+		// se escribiría igual sobre un expediente ya atado a la identidad vieja.
+		// Postgres re-evalúa el predicado tras esperar a la escritura rival, así
+		// que la condición viaja DENTRO del UPDATE.
+		//
+		// Solo cuando el DPI cambia de verdad: este update escribe también
+		// dirección y teléfono, y esas ediciones no tienen por qué trabarse. Acá
+		// no hay válvula de admin que valga: el portal es público.
+		const candadoEnElPredicado = dpiCambia(existingLead.dpi, dpi);
+		const whereDelUpdate = candadoEnElPredicado
+			? and(
+					eq(leads.id, existingLead.id),
+					noExisteOportunidadCandanteDelLead(existingLead.id),
+				)
+			: eq(leads.id, existingLead.id);
+
+		// Update the lead.
+		// 🔴 En transacción y con lock de las oportunidades: el NOT EXISTS del
+		// candado lee bajo snapshot MVCC y no bloquea la fila — una aprobación
+		// 30→40 en vuelo podía commitear después de esta escritura. El FOR UPDATE
+		// serializa las dos.
+		const [updatedLead] = await db.transaction(async (tx) => {
+			if (candadoEnElPredicado) {
+				await tx
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(eq(opportunities.leadId, existingLead.id))
+					.for("update");
+			}
+			return tx
+				.update(leads)
+				.set(updateData)
+				.where(whereDelUpdate)
+				.returning({
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+					phone: leads.phone,
+					dpi: leads.dpi,
+					direccion: leads.direccion,
+					updatedAt: leads.updatedAt,
+				});
+		});
+		if (!updatedLead && candadoEnElPredicado) {
+			// Cero filas con la condición puesta: el candado se cerró en el medio.
+			// Se contesta como el candado, con su mismo mensaje.
+			const candadoAhora = await evaluarCandadoDpi({
+				dpiActual: existingLead.dpi,
+				dpiNuevo: dpi,
+				sujeto: "portal",
+				leadId: existingLead.id,
 			});
+			if (candadoAhora.bloqueado) {
+				return c.json({ success: false, error: candadoAhora.message }, 400);
+			}
+		}
+
+		// Después del chequeo: con cero filas no hubo escritura que anotar.
 		auditRecord({
 			entity: "lead",
 			id: existingLead.id,

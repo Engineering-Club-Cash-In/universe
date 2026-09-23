@@ -11,6 +11,7 @@ import {
 	FileText,
 	Loader2,
 	RefreshCw,
+	Trash2,
 	TriangleAlert,
 } from "lucide-react";
 import { useState } from "react";
@@ -26,6 +27,8 @@ import {
 } from "@/lib/contract-signers-display";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client } from "@/utils/orpc";
+import { AnularContratoDialog } from "./AnularContratoDialog";
+import { DescargarFirmadoButton } from "./DescargarFirmadoButton";
 import { ReenviarWhatsappDialog } from "./ReenviarWhatsappDialog";
 import { RegenerarEnlacesDialog } from "./RegenerarEnlacesDialog";
 
@@ -76,6 +79,12 @@ interface OpportunityContractsCardProps {
 	 * contabilidad ven la card pero no ese botón.
 	 */
 	puedeRegenerar?: boolean;
+	/**
+	 * Si quien mira puede anular un contrato. Va aparte de `puedeRegenerar`:
+	 * anular lo descarta sin reemplazarlo, y lo pueden hacer tanto análisis como
+	 * jurídico, mientras que regenerar es sólo de análisis.
+	 */
+	puedeAnular?: boolean;
 	/** Se llama cuando cambia el estado, para refrescar la lista. */
 	onUpdate?: () => void;
 }
@@ -101,6 +110,7 @@ export function OpportunityContractsCard({
 	contracts,
 	isLoading = false,
 	puedeRegenerar = false,
+	puedeAnular = false,
 	onUpdate,
 }: OpportunityContractsCardProps) {
 	// Los anulados se conservan (dicen qué se descartó y si alguien lo había
@@ -124,6 +134,7 @@ export function OpportunityContractsCard({
 			key={f.contract.id}
 			fila={f}
 			puedeRegenerar={puedeRegenerar}
+			puedeAnular={puedeAnular}
 			onUpdate={onUpdate}
 			onPreguntarReenvio={setReenviarDeOportunidad}
 		/>
@@ -205,11 +216,13 @@ export function OpportunityContractsCard({
 function ContratoFila({
 	fila,
 	puedeRegenerar: tienePermiso,
+	puedeAnular,
 	onUpdate,
 	onPreguntarReenvio,
 }: {
 	fila: FilaDeContrato;
 	puedeRegenerar: boolean;
+	puedeAnular: boolean;
 	onUpdate?: () => void;
 	/**
 	 * Avisa que hay que preguntar si se reenvían los enlaces. Lo resuelve la
@@ -269,8 +282,27 @@ function ContratoFila({
 	});
 
 	const [regenerando, setRegenerando] = useState(false);
+	const [anulando, setAnulando] = useState(false);
 
 	const ocupado = actualizarEstado.isPending;
+
+	// Descartar el documento sin reemplazarlo. Va también en los de papel: un
+	// contrato impreso equivocado se anula igual, y la fila queda con su motivo.
+	// No para los del respaldo de Documenso: anularlo acá no cancela sus enlaces
+	// allá, y el cliente podría seguir firmando uno que el CRM da por anulado.
+	const botonAnular = puedeAnular && !inactivo && enWeeTrust && (
+		<Button
+			variant="ghost"
+			size="sm"
+			className="h-6 px-1.5 text-destructive text-xs hover:text-destructive"
+			disabled={ocupado}
+			onClick={() => setAnulando(true)}
+			title="Descarta el contrato sin reemplazarlo: se borra de la plataforma de firma salvo que ya lo hayan firmado todos. Queda en «Ver anulados» con el motivo."
+		>
+			<Trash2 className="mr-1 h-3 w-3" />
+			Anular
+		</Button>
+	);
 
 	return (
 		<div className="rounded-md border bg-background p-3">
@@ -310,6 +342,14 @@ function ContratoFila({
 							</a>
 						</Button>
 					)}
+					{/* El documento con las firmas puestas. Sólo existe cuando lo
+					    firmaron todos: antes de eso WeeTrust todavía guarda el mismo
+					    archivo que le subimos. Los de papel no tienen: su firma está en
+					    la hoja impresa. Y los del respaldo de Documenso tampoco: el PDF
+					    firmado se baja de WeeTrust. */}
+					{contract.status === "signed" && !firmaEnPapel && enWeeTrust && (
+						<DescargarFirmadoButton contractId={contract.id} />
+					)}
 					{contract.pdfLink && (
 						<Button variant="outline" size="sm" asChild className="h-7">
 							<a
@@ -319,7 +359,9 @@ function ContratoFila({
 								className="flex items-center gap-1"
 							>
 								<FileText className="h-3 w-3" />
-								PDF
+								{/* Ya firmado, decir sólo "PDF" hacía creer que éste era el
+								    documento con las firmas. Es el borrador. */}
+								{contract.status === "signed" ? "Sin firmas" : "PDF"}
 							</a>
 						</Button>
 					)}
@@ -327,9 +369,12 @@ function ContratoFila({
 			</div>
 
 			{firmaEnPapel ? (
-				<p className="mt-3 border-t pt-2 text-amber-700 text-xs dark:text-amber-400">
-					Se firma en papel. No lleva enlace de firma.
-				</p>
+				<div className="mt-3 flex items-center justify-between gap-2 border-t pt-2">
+					<p className="text-amber-700 text-xs dark:text-amber-400">
+						Se firma en papel. No lleva enlace de firma.
+					</p>
+					{botonAnular}
+				</div>
 			) : (
 				<div className="mt-3 space-y-2 border-t pt-2">
 					{/* Una fila por firmante: el estado es de cada link, no del
@@ -468,9 +513,20 @@ function ContratoFila({
 								{hayVencidos ? "Regenerar (hay vencidos)" : "Regenerar enlaces"}
 							</Button>
 						)}
+
+						{botonAnular}
 					</div>
 				</div>
 			)}
+
+			<AnularContratoDialog
+				contractId={contract.id}
+				contractName={contract.contractName}
+				hayFirmas={alguienFirmo}
+				open={anulando}
+				onOpenChange={setAnulando}
+				onAnulado={() => onUpdate?.()}
+			/>
 
 			<RegenerarEnlacesDialog
 				contractId={contract.id}

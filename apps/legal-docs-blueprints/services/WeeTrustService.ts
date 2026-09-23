@@ -21,6 +21,7 @@ import {
 } from "../types/contract";
 import {
 	SignatureLayoutError,
+	getRubrica,
 	getSignaturePattern,
 	firmantesEnOrdenDeFirma,
 	resolveSignerOrder,
@@ -1125,7 +1126,7 @@ export class WeeTrustService {
 		});
 
 		const SIGNATURE_HEIGHT = 50;
-		return lineas.map((linea, i) => {
+		const posiciones: WeeTrustSignaturePosition[] = lineas.map((linea, i) => {
 			// WeeTrust mide Y desde arriba y el PDF desde abajo. Restamos la altura
 			// de la firma para que quede SOBRE la línea y no a partir de ella.
 			const x = linea.pdfX;
@@ -1147,6 +1148,213 @@ export class WeeTrustService {
 				viewport: { width: linea.pageWidth, height: linea.pageHeight },
 			};
 		});
+
+		// Las rúbricas van DESPUÉS del conteo de líneas: son widgets que se
+		// agregan, no líneas que haya que encontrar en el PDF, así que no pueden
+		// desbalancear la verificación de arriba.
+		posiciones.push(
+			...(await WeeTrustService.rubricasDePaginasImpares(
+				pdfBuffer,
+				contractType,
+				esperados,
+				posiciones,
+			)),
+		);
+
+		return posiciones;
+	}
+
+	/**
+	 * Una rúbrica de cada firmante en cada página impar.
+	 *
+	 * Gerencia lo pidió para los contratos: que ninguna hoja pueda cambiarse sin
+	 * que se note. Las cartas no llevan (no declaran `rubrica`), que es lo
+	 * correcto para un documento de una hoja cuyo final ya va firmado.
+	 *
+	 * Tres cosas que decide esta función:
+	 *
+	 * - **Quiénes.** Los mismos que firman el documento, una vez cada uno. Si el
+	 *   bloque de deudores se expande a titular + dos codeudores, las tres
+	 *   personas rubrican cada hoja impar.
+	 * - **Dónde.** En fila, repartidas a lo ancho de la franja que declara el
+	 *   tipo (el aire de abajo de la hoja, entre el pie y el texto). Cada
+	 *   firmante tiene su parte del ancho y su rúbrica va centrada en ella: con
+	 *   pocos firmantes quedan grandes y separadas, y con muchos se achican
+	 *   hasta un mínimo legible; de ahí en más pasan a otra fila.
+	 * - **Cuándo no.** Si en esa página ya hay un widget de esa persona donde
+	 *   caería, no se agrega: quedaría la rúbrica encima de la firma real.
+	 */
+	private static async rubricasDePaginasImpares(
+		pdfBuffer: Buffer,
+		contractType: ContractType,
+		firmantes: ContractSigner[],
+		yaPuestas: WeeTrustSignaturePosition[],
+	): Promise<WeeTrustSignaturePosition[]> {
+		const rubrica = getRubrica(contractType);
+		if (!rubrica) return [];
+
+		// Una vez cada uno: el bloque de deudores repetido (cobertura) trae a la
+		// misma persona varias veces, y no tiene que rubricar dos veces por hoja.
+		const porEmail = new Map<string, ContractSigner>();
+		for (const f of firmantes) if (!porEmail.has(f.email)) porEmail.set(f.email, f);
+		const unicos = [...porEmail.values()];
+		if (unicos.length === 0) return [];
+
+		const { franja } = rubrica;
+		const anchoDeLaFranja = franja.derecha - franja.izquierda;
+
+		// Tamaño de cada rúbrica. Por debajo de 100×50, que es una firma, para
+		// que se distingan; y nunca más chica que 60 de ancho, que ya cuesta
+		// firmar ahí. El alto sigue al ancho para que la proporción sea siempre
+		// la misma.
+		const ANCHO_MAXIMO = 90;
+		const ANCHO_MINIMO = 60;
+		const PROPORCION = 0.4;
+		const separacion = 12;
+
+		const porFila = Math.max(
+			1,
+			Math.floor((anchoDeLaFranja + separacion) / (ANCHO_MINIMO + separacion)),
+		);
+		const enLaFilaMasLlena = Math.min(unicos.length, porFila);
+		const ancho = Math.floor(
+			Math.min(
+				ANCHO_MAXIMO,
+				(anchoDeLaFranja - (enLaFilaMasLlena - 1) * separacion) /
+					enLaFilaMasLlena,
+			),
+		);
+		const alto = Math.round(ancho * PROPORCION);
+		const pasoY = alto + separacion;
+
+		// Las filas van centradas en el alto de la franja. Si son tantas que no
+		// entran, se cuelgan del borde de arriba de la franja y crecen hacia el
+		// borde de la hoja, porque arriba está el texto del contrato: sin tope de
+		// firmantes, pero sin salirse de la hoja (eso se verifica abajo).
+		const filas = Math.ceil(unicos.length / porFila);
+		const altoDelBloque = filas * alto + (filas - 1) * separacion;
+		const sobra = franja.arriba - franja.abajo - altoDelBloque;
+		const baseDelBloque =
+			sobra >= 0 ? franja.abajo + sobra / 2 : franja.arriba - altoDelBloque;
+
+		const paginas = await WeeTrustService.dimensionesDePaginas(pdfBuffer);
+		const extra: WeeTrustSignaturePosition[] = [];
+
+		for (const { pageNum, width, height } of paginas) {
+			if (pageNum % 2 === 0) continue;
+
+			// Dónde va cada rúbrica, con el grupo corrido `hacia` puntos para arriba.
+			// Se leen en el orden declarado: de izquierda a derecha, y de la fila
+			// de arriba a la de abajo.
+			const ubicar = (hacia: number) =>
+				unicos.map((firmante, i) => {
+					const fila = Math.floor(i / porFila);
+					const enLaFila = i % porFila;
+					const cuantosEnLaFila = Math.min(porFila, unicos.length - fila * porFila);
+					const lugar = anchoDeLaFranja / cuantosEnLaFila;
+
+					const x = franja.izquierda + enLaFila * lugar + (lugar - ancho) / 2;
+					// Base de la fila en el PDF (origen abajo), pasada al sistema de
+					// WeeTrust (origen arriba, y la posición es la del borde de arriba).
+					const baseEnPdf = baseDelBloque + (filas - 1 - fila) * pasoY;
+					const y = height - baseEnPdf - alto;
+					return { firmante, x, y: y - hacia };
+				});
+
+			// Si una rúbrica cae sobre la firma real de OTRA persona, el grupo
+			// entero sube de a una fila hasta no pisar ninguna: saltearla dejaría
+			// esa hoja sin la rúbrica de alguien, y encimarla deja dos widgets
+			// obligatorios uno arriba del otro.
+			let hacia = 0;
+			let ubicadas = ubicar(hacia);
+			while (
+				ubicadas.some(({ firmante, x, y }) =>
+					yaPuestas.some(
+						(p) =>
+							p.page === pageNum &&
+							p.user.email !== firmante.email &&
+							seSolapan({ x, y, ancho, alto }, p),
+					),
+				)
+			) {
+				hacia += pasoY;
+				ubicadas = ubicar(hacia);
+				if (ubicadas.some(({ y }) => y < 0)) {
+					throw new SignatureLayoutError(
+						`${contractType}: no hay lugar en la página ${pageNum} para las rúbricas sin pisar las firmas.`,
+					);
+				}
+			}
+
+			for (const { firmante, x, y } of ubicadas) {
+				// Si aun así no entra (tantos firmantes que las filas se comen la
+				// hoja, o una franja que no es de este tamaño de hoja), se corta:
+				// mejor un error a la vista que una rúbrica obligatoria fuera de la
+				// página.
+				if (x < 0 || y < 0 || x + ancho > width || y + alto > height) {
+					throw new SignatureLayoutError(
+						`${contractType}: las rúbricas de ${unicos.length} firmantes no caben en la página ${pageNum} (${width}x${height}).`,
+					);
+				}
+
+				// Sobre la firma real de la misma persona no va: su firma ya está en
+				// esa hoja, y una rúbrica encima sería ilegible y ambigua.
+				const pisaSuFirma = yaPuestas.some(
+					(p) =>
+						p.page === pageNum &&
+						p.user.email === firmante.email &&
+						seSolapan({ x, y, ancho, alto }, p),
+				);
+				if (pisaSuFirma) continue;
+
+				extra.push({
+					user: { email: firmante.email },
+					coordinates: { x, y },
+					page: pageNum,
+					pageY: y,
+					pageYv2: y,
+					color: "#FFD247",
+					imageSize: { width: ancho, height: alto },
+					parentImageSize: { width, height },
+					viewport: { width, height },
+				});
+			}
+		}
+
+		if (extra.length > 0) {
+			console.log(
+				`[WeeTrust] ${contractType}: ${extra.length} rúbrica(s) en páginas impares ` +
+					`(${unicos.length} firmante(s), ${ancho}x${alto} en ${filas} fila(s))`,
+			);
+		}
+		return extra;
+	}
+
+	/**
+	 * Tamaño de cada página del PDF, en puntos.
+	 *
+	 * `readSignatureLines` sólo devuelve el tamaño de las páginas donde encontró
+	 * una línea de firma, y las rúbricas van en todas las impares, tengan línea
+	 * o no.
+	 */
+	static async dimensionesDePaginas(
+		pdfBuffer: Buffer,
+	): Promise<Array<{ pageNum: number; width: number; height: number }>> {
+		const pdfDocument = await pdfjsLib.getDocument({
+			data: new Uint8Array(pdfBuffer),
+		}).promise;
+
+		const paginas: Array<{ pageNum: number; width: number; height: number }> = [];
+		for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+			const page = await pdfDocument.getPage(pageNum);
+			const viewport = page.getViewport({ scale: 1.0 });
+			paginas.push({
+				pageNum,
+				width: viewport.width,
+				height: viewport.height,
+			});
+		}
+		return paginas;
 	}
 
 	/**
@@ -1347,6 +1555,22 @@ function nombreParaWeeTrust(nombre: string, index: number): string {
  * `identification` es opcional en WeeTrust: omitirlo deja la firma electrónica
  * sin verificación de identidad.
  */
+/**
+ * Si un recuadro se solapa con un widget ya puesto (en el sistema de WeeTrust,
+ * origen arriba a la izquierda). Tocarse en el borde no cuenta.
+ */
+function seSolapan(
+	r: { x: number; y: number; ancho: number; alto: number },
+	w: WeeTrustSignaturePosition,
+): boolean {
+	return (
+		r.x < w.coordinates.x + w.imageSize.width &&
+		w.coordinates.x < r.x + r.ancho &&
+		r.y < w.coordinates.y + w.imageSize.height &&
+		w.coordinates.y < r.y + r.alto
+	);
+}
+
 function identificacionDe(
 	role: SignerRole,
 	contractType: ContractType,

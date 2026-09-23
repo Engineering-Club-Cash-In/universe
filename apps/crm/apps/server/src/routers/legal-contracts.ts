@@ -56,6 +56,7 @@ import {
 	borrarDocumentoDeWeeTrust,
 	type ContractSigner,
 	consultarEstadoFirma,
+	descargarPdfFirmado,
 	type EstadoDocumentoFirma,
 	motivoDeFalla,
 	reemitirContratoEnWeeTrust,
@@ -180,11 +181,14 @@ async function eliminarContrato(
 	contrato: typeof generatedLegalContracts.$inferSelect,
 	motivo: string,
 	/**
-	 * Exigir que la oportunidad siga en la etapa de jurídico. Lo pide quien
-	 * borra desde la ficha: la pantalla pudo quedar abierta desde antes y el
-	 * botón escondido no frena un pedido ya cargado.
+	 * Con qué acción se revisa la etapa de la oportunidad, o `null` para no
+	 * revisarla (sólo el administrador). La pide quien borra desde una ficha:
+	 * la pantalla pudo quedar abierta desde antes, y un botón escondido no
+	 * frena un pedido que ya salió.
 	 */
-	exigirEtapa = false,
+	exigirEtapa: AccionSobreContrato | null = null,
+	/** Ver `anularContratoReemplazado`. */
+	opciones: { conservarFila?: boolean } = {},
 ): Promise<{ conservado: boolean }> {
 	// Con el candado de la oportunidad: esto borra el documento en WeeTrust, y
 	// si un envío por WhatsApp está mandando sus enlaces, el cliente recibiría
@@ -194,15 +198,31 @@ async function eliminarContrato(
 		// están en manos del cliente y borrar el documento se los mata; del 90%
 		// en adelante la oportunidad ya se cerró con esos contratos.
 		if (exigirEtapa && contrato.opportunityId) {
-			await exigirEtapaDeFirma(contrato.opportunityId, "eliminar");
+			await exigirEtapaDeFirma(contrato.opportunityId, exigirEtapa);
 		}
-		return eliminarConCandadoTomado(contrato, motivo);
+		// Y el contrato mismo, que se leyó antes de esperar: mientras tanto otro
+		// pedido pudo reemplazarlo, anularlo o borrarlo. Seguir con la foto de
+		// antes pisaba el motivo de ese otro pedido, o contestaba que la fila
+		// quedó en «Ver anulados» cuando ya no existía.
+		const [actual] = await db
+			.select()
+			.from(generatedLegalContracts)
+			.where(eq(generatedLegalContracts.id, contrato.id))
+			.limit(1);
+		if (!actual || !estaVigente(actual)) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Otra persona acaba de anular o reemplazar este contrato. Recargá para ver cómo quedó.",
+			});
+		}
+		return eliminarConCandadoTomado(actual, motivo, opciones);
 	});
 }
 
 async function eliminarConCandadoTomado(
 	contrato: typeof generatedLegalContracts.$inferSelect,
 	motivo: string,
+	opciones: { conservarFila?: boolean } = {},
 ): Promise<{ conservado: boolean }> {
 	// Los generados antes de que se guardara el `documentID` lo llevan en el
 	// link. Se guarda en la fila para que anular lo borre allá también.
@@ -226,6 +246,7 @@ async function eliminarConCandadoTomado(
 		contrato.id,
 		contrato.opportunityId,
 		motivo,
+		opciones,
 	);
 	return { conservado: anulado?.conservado ?? false };
 }
@@ -480,7 +501,7 @@ export const legalContractsRouter = {
 			const { conservado } = await eliminarContrato(
 				existingContract,
 				"Eliminado por jurídico",
-				true,
+				"eliminar",
 			);
 
 			return {
@@ -1464,6 +1485,144 @@ export const legalContractsRouter = {
 
 			await sincronizarEstadoDeFirma(input.contractId, estado);
 			return estado;
+		}),
+
+	/**
+	 * Anula un contrato desde la ficha de la oportunidad, sin reemplazarlo.
+	 *
+	 * Es para cuando el documento no va y punto: datos equivocados, una
+	 * identificación que WeeTrust dejó pasar, o se subió el que no era. Hasta
+	 * acá sólo jurídico podía descartarlo, y análisis —que es quien lleva la
+	 * oportunidad en 85%— tenía que pedírselo.
+	 *
+	 * Qué pasa del lado de WeeTrust:
+	 *
+	 * - si falta firmar alguien —haya firmado otro o nadie—, el documento se
+	 *   borra allá y los enlaces mueren: un contrato anulado no tiene que seguir
+	 *   recibiendo firmas;
+	 * - si ya lo firmaron todos, **allá queda**, porque WeeTrust no deja borrar
+	 *   un documento completado. Acá se ve anulado igual.
+	 *
+	 * La fila anulada no se borra nunca: es el registro de lo que se descartó, y
+	 * sin ella un documento que quedó vivo en WeeTrust no tendría rastro acá.
+	 */
+	anularContrato: viewOpportunityContractsProcedure
+		.input(
+			z.object({
+				contractId: z.string().uuid(),
+				motivo: z.enum(MOTIVOS_DE_ANULACION_KEYS),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Ver los contratos lo puede hacer ventas o contabilidad; anularlos no.
+			if (!PERMISSIONS.canAnnulContracts(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "Sólo jurídico o análisis pueden anular un contrato",
+				});
+			}
+
+			const [contrato] = await db
+				.select()
+				.from(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.id, input.contractId))
+				.limit(1);
+
+			if (!contrato) {
+				throw new ORPCError("NOT_FOUND", { message: "Contrato no encontrado" });
+			}
+
+			// Los del respaldo de Documenso no se anulan desde acá: el CRM sólo sabe
+			// borrar en WeeTrust, así que la fila quedaría anulada con los enlaces
+			// de Documenso vivos, y el cliente podría seguir firmando.
+			if (contrato.signingProvider === "documenso") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato salió por Documenso: anularlo acá no cancelaría sus enlaces. Hay que cancelarlo en Documenso.",
+				});
+			}
+
+			// Anular lo ya anulado no hace nada y confunde: la fila que se ve en
+			// "Ver anulados" es registro, no un contrato que se pueda volver a
+			// descartar.
+			if (!estaVigente(contrato)) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Este contrato ya está anulado.",
+				});
+			}
+
+			const quien = context.session?.user?.name ?? "alguien del CRM";
+			// En WeeTrust se borra aunque alguien ya haya firmado: un contrato
+			// anulado no tiene que seguir recibiendo firmas. Sólo queda allá el que
+			// firmaron todos, porque WeeTrust no deja borrarlo. La fila queda
+			// siempre, aunque no haya documento (uno en papel sin firmar): el
+			// diálogo promete que va a estar en «Ver anulados» con su motivo.
+			const { conservado } = await eliminarContrato(
+				contrato,
+				`${etiquetaDeMotivo(input.motivo)} (anulado por ${quien})`,
+				"anular",
+				{ conservarFila: true },
+			);
+
+			return {
+				success: true,
+				conservado,
+				// La fila queda siempre (`conservarFila`): el detalle de qué pasó
+				// con el documento en WeeTrust está en su motivo.
+				message:
+					"Contrato anulado. Queda en «Ver anulados» con el motivo y cómo quedó en la plataforma de firma.",
+			};
+		}),
+
+	/**
+	 * El PDF **firmado**, para bajarlo sin salir del CRM.
+	 *
+	 * El PDF que la ficha muestra como "PDF" es el borrador que se generó: no
+	 * tiene ninguna firma. Hasta acá, para conseguir el documento que vale había
+	 * que entrar al portal de WeeTrust, y ventas no tiene cuenta.
+	 *
+	 * Va con el permiso de ver contratos, igual que el estado de firma: el
+	 * vendedor y el analista son los que lo necesitan.
+	 *
+	 * Se pide en el momento en vez de guardarse: es un archivo chico, se baja en
+	 * un par de segundos y así no hay una copia que pueda quedar vieja respecto
+	 * de lo que WeeTrust tiene. Si algún día se quiere una copia propia que
+	 * sobreviva a WeeTrust, el lugar es el webhook de documento completado.
+	 */
+	getSignedContractPdf: viewOpportunityContractsProcedure
+		.input(z.object({ contractId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const { contract, documentID } = await contratoConDocumentID(
+				input.contractId,
+			);
+
+			// El generador también lo verifica contra WeeTrust, que es la fuente de
+			// verdad. Acá se corta antes para no gastar el viaje y para poder decir
+			// algo que se entienda: "todavía falta firmar" y no un 409.
+			if (contract.status !== "signed") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato todavía no está firmado por todos: no hay PDF firmado que bajar.",
+				});
+			}
+
+			let pdf: Blob;
+			try {
+				pdf = await descargarPdfFirmado(documentID);
+			} catch (error) {
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						error instanceof Error
+							? error.message
+							: "No se pudo bajar el PDF firmado",
+				});
+			}
+
+			// Base64 y no una URL: el archivo vive en WeeTrust detrás de sus
+			// credenciales, así que no hay link que se le pueda pasar al navegador.
+			return {
+				nombre: `${contract.contractName} (firmado).pdf`,
+				pdfBase64: Buffer.from(await pdf.arrayBuffer()).toString("base64"),
+			};
 		}),
 
 	/**

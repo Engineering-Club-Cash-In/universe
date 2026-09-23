@@ -42,6 +42,11 @@ export const ETAPAS_QUE_PERMITEN_REEMPLAZO = [80, 85];
  * - **regenerar** (mismo documento, enlaces nuevos) lo hace análisis, que es
  *   quien lleva la oportunidad en 85%. Se permite también en 80% para que
  *   jurídico pueda hacerlo durante su etapa.
+ * - **anular** (descartar el contrato sin reemplazarlo) lo hacen los dos,
+ *   cuando el documento no va: datos equivocados, la identificación que
+ *   WeeTrust dejó pasar, o simplemente se subió otro. Va también en 85% porque
+ *   es una decisión explícita, con motivo. Lo borra en WeeTrust aunque tenga
+ *   firmas parciales; sólo queda allá lo que ya firmaron todos.
  * - **eliminar** (el "Eliminar" de jurídico: descarta el contrato y lo borra
  *   en WeeTrust sin poner otro en su lugar) también en 80% y 85%. En 85% los
  *   enlaces ya le llegaron al cliente por WhatsApp y dejan de servir, pero un
@@ -54,6 +59,7 @@ export const ETAPAS_QUE_PERMITEN_REEMPLAZO = [80, 85];
 export const ETAPAS_POR_ACCION = {
 	reemplazar: [80, 85],
 	regenerar: [80, 85],
+	anular: [80, 85],
 	eliminar: [80, 85],
 } as const;
 

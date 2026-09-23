@@ -281,6 +281,9 @@ export const legalAppRouter = {
 	getContractSigningStatus: legalContractsRouter.getContractSigningStatus,
 	refreshContractSigningLinks: legalContractsRouter.refreshContractSigningLinks,
 	resendContractSigningEmails: legalContractsRouter.resendContractSigningEmails,
+	// Anular sin reemplazar, y bajar el PDF ya firmado sin entrar a WeeTrust
+	anularContrato: legalContractsRouter.anularContrato,
+	getSignedContractPdf: legalContractsRouter.getSignedContractPdf,
 
 	// Contract Generation routes (Generación automática de contratos)
 	getContractTypes: contractGenerationRouter.getContractTypes,

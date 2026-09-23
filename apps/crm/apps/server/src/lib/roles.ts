@@ -275,6 +275,13 @@ export const PERMISSIONS = {
 	canResendContractLinks: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
 
+	// Anular un contrato lo descarta sin reemplazarlo: la oportunidad se queda
+	// sin ese documento hasta que se genere o suba otro. Lo deciden los dos que
+	// trabajan la papelería —jurídico en 80% y análisis en 85%—, no quien sólo
+	// la mira.
+	canAnnulContracts: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
+
 	canConfirmContractsSigning: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||

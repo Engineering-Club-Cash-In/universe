@@ -395,6 +395,16 @@ export async function anularContratoReemplazado(
 	contractId: string,
 	opportunityId: string | null,
 	motivo: string,
+	opciones: {
+		/**
+		 * Dejar la fila anulada aunque no haya nada que conservar (ni documento
+		 * en WeeTrust ni firmas), en vez de borrarla. También lo pide anular sin
+		 * reemplazo: el motivo es lo único que dice por qué se descartó, y un
+		 * contrato en papel sin firmar nunca tiene documento. Reemplazar no lo
+		 * necesita: el contrato nuevo es el rastro.
+		 */
+		conservarFila?: boolean;
+	} = {},
 ): Promise<{ contractId: string; conservado: boolean } | null> {
 	const [viejo] = await db
 		.select()
@@ -427,10 +437,33 @@ export async function anularContratoReemplazado(
 						viejo.weetrustDocumentId,
 					),
 					ne(generatedLegalContracts.id, contractId),
+					// Sólo otra fila vigente lo sigue usando. Una ya anulada (la
+					// primera de dos duplicadas, conservada como registro) no: si
+					// frenara el borrado, anular la segunda dejaba vivos en WeeTrust
+					// enlaces que ninguna fila del CRM sigue. Tampoco una ya
+					// reclamada por un reemplazo cuyo anulado quedó a medias: es el
+					// mismo criterio de `estaVigente`.
+					ne(generatedLegalContracts.status, "cancelled"),
+					isNull(generatedLegalContracts.replacedByContractId),
 				),
 			)
 			.limit(1);
 		if (otra) {
+			// Anulando sin reemplazo la fila se queda, anulada, con su motivo: es
+			// lo que promete «Ver anulados». El documento no se toca igual, porque
+			// la otra fila lo sigue usando.
+			if (opciones.conservarFila) {
+				await db
+					.update(generatedLegalContracts)
+					.set({
+						status: "cancelled",
+						cancellationReason: `${etiquetaDeMotivo(motivo)} (era un duplicado: el documento sigue vigente en la otra fila)`,
+						cancelledAt: new Date(),
+						updatedAt: new Date(),
+					})
+					.where(eq(generatedLegalContracts.id, contractId));
+				return { contractId, conservado: true };
+			}
 			await db
 				.delete(generatedLegalContracts)
 				.where(eq(generatedLegalContracts.id, contractId));
@@ -471,18 +504,29 @@ export async function anularContratoReemplazado(
 		}
 	}
 
-	if (viejo.weetrustDocumentId || conFirmas) {
+	if (viejo.weetrustDocumentId || conFirmas || opciones.conservarFila) {
+		// Qué pasó con el documento allá, para que quien mire la fila anulada lo
+		// sepa sin entrar a WeeTrust. Uno completo nunca se intenta borrar
+		// (WeeTrust no deja), así que no es un "no se pudo".
+		const base = etiquetaDeMotivo(motivo);
+		let cancellationReason: string;
+		if (!viejo.weetrustDocumentId) {
+			cancellationReason = base;
+		} else if (completo) {
+			cancellationReason = `${base} (ya lo habían firmado todos: queda en WeeTrust, que no deja borrarlo)`;
+		} else if (!borradoAlla) {
+			cancellationReason = `${base} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`;
+		} else if (conFirmas) {
+			cancellationReason = `${base} (tenía firmas parciales; el documento se borró en WeeTrust)`;
+		} else {
+			cancellationReason = `${base} (el documento se borró en WeeTrust)`;
+		}
+
 		await db
 			.update(generatedLegalContracts)
 			.set({
 				status: "cancelled",
-				cancellationReason: !borradoAlla
-					? `${etiquetaDeMotivo(motivo)} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`
-					: completo || !viejo.weetrustDocumentId
-						? etiquetaDeMotivo(motivo)
-						: conFirmas
-							? `${etiquetaDeMotivo(motivo)} (tenía firmas parciales; el documento se borró en WeeTrust)`
-							: `${etiquetaDeMotivo(motivo)} (el documento se borró en WeeTrust)`,
+				cancellationReason,
 				cancelledAt: new Date(),
 				updatedAt: new Date(),
 			})

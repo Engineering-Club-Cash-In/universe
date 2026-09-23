@@ -210,21 +210,41 @@ function vinculoAutoVigente(
  * Nombre actual de la unidad en Wialon (flags 1: solo id/nm, liviano). Null si
  * la unidad ya no existe o no es visible para la cuenta: en ese caso el
  * vínculo automático tampoco puede considerarse vigente.
+ *
+ * Wialon responde a una unidad borrada o invisible con error 7 (acceso
+ * denegado), confirmado contra la API real con IDs inexistentes; una
+ * respuesta sin `item` se trata igual. Cualquier otro error (caída, timeout)
+ * se propaga: es transitorio y no dice nada sobre la unidad.
  */
 async function nombreActualUnidad(
 	client: WialonClient,
 	unitId: number,
 ): Promise<string | null> {
-	const detalle = await client.getUnitDetail(unitId, 1);
-	return detalle?.item?.nm ?? null;
+	try {
+		const detalle = await client.getUnitDetail(unitId, 1);
+		return detalle?.item?.nm ?? null;
+	} catch (error) {
+		if (
+			error instanceof WialonClientError &&
+			(error.code === "WIALON_INVALID_RESPONSE" ||
+				(error.code === "WIALON_API_ERROR" && error.wialonErrorCode === 7))
+		) {
+			return null;
+		}
+		throw error;
+	}
 }
 
 /**
  * Suelta un vínculo auto:placa que dejó de valer. Condicionado a que siga
  * siendo ese mismo vínculo automático: si entretanto un supervisor lo cambió,
- * no se toca. Best-effort: si falla, la consulta sigue como sin vínculo.
+ * no se toca. Devuelve si pudo escribir: si falla, el vínculo vencido sigue en
+ * la base y el handler no puede devolver ubicación (se re-leería esa unidad).
  */
-async function liberarVinculoAuto(vehicleId: string, unitId: number) {
+async function liberarVinculoAuto(
+	vehicleId: string,
+	unitId: number,
+): Promise<boolean> {
 	try {
 		await db
 			.update(vehicles)
@@ -242,12 +262,14 @@ async function liberarVinculoAuto(vehicleId: string, unitId: number) {
 				),
 			);
 		console.info("WIALON_VINCULO_AUTO_LIBERADO", { vehicleId, unitId });
+		return true;
 	} catch (error) {
-		console.warn("WIALON_VINCULO_AUTO_NO_LIBERADO", {
+		console.error("WIALON_VINCULO_AUTO_NO_LIBERADO", {
 			vehicleId,
 			unitId,
 			message: error instanceof Error ? error.message : String(error),
 		});
+		return false;
 	}
 }
 
@@ -943,7 +965,23 @@ export const wialonRouter = {
 							await nombreActualUnidad(client, vehiculo.wialonUnitId),
 						)
 					) {
-						await liberarVinculoAuto(input.vehicleId, vehiculo.wialonUnitId);
+						const liberado = await liberarVinculoAuto(
+							input.vehicleId,
+							vehiculo.wialonUnitId,
+						);
+						if (!liberado) {
+							// Fail closed: el vínculo vencido sigue en la base y cualquier
+							// camino siguiente podría terminar mostrando esa unidad.
+							await registrarAuditoria(null, null);
+							return {
+								estado: "no_disponible" as const,
+								error: {
+									code: "VINCULO_NO_ACTUALIZADO",
+									message:
+										"La unidad GPS vinculada ya no corresponde a este vehículo y no se pudo actualizar el vínculo. Intente de nuevo.",
+								},
+							};
+						}
 						vehiculo = {
 							...vehiculo,
 							wialonUnitId: null,

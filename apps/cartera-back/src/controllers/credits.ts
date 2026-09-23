@@ -327,10 +327,17 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       .select({
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         pagado: cuotas_credito.pagado,
+        // ⚠️ La columna de la cuota va con su nombre COMPLETO y no por
+        // `${cuotas_credito.cuota_id}`: drizzle lo renderiza sin calificar
+        // (`"cuota_id"` pelado) y adentro del EXISTS gana el alcance INTERNO, o
+        // sea `pc.cuota_id`. La condición se volvía `pc.cuota_id = pc.cuota_id`
+        // —siempre cierta— y el EXISTS respondía "¿existe ALGÚN pago aplicado en
+        // toda la tabla?": true para todas las cuotas. Con eso ninguna cuota era
+        // elegible y el incremento salía "0.00" SIEMPRE.
         hasPaidPayment: sql<boolean>`EXISTS (
           SELECT 1
           FROM cartera.pagos_credito pc
-          WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
+          WHERE pc.cuota_id = "cartera"."cuotas_credito"."cuota_id"
             AND pc."paymentFalse" = false
             AND pc.pagado = true
             AND pc.validation_status IN ('validated', 'no_required')

@@ -3079,13 +3079,13 @@ interface CreditStatsResponse {
 
 export const getCreditStats = async (email?: string): Promise<CreditStatsResponse> => {
   console.log(`📊 Obteniendo estadísticas de créditos...`);
-  if (email) {
+  if (email !== undefined) {
     console.log(`   🔍 Filtrando por asesor con email: ${email}`);
   }
 
   // Obtener el asesor_id si se proporciona email
   let asesorId: number | null = null;
-  if (email) {
+  if (email !== undefined) {
     const platformUser = await db
       .select({ asesor_id: asesores.asesor_id })
       .from(asesores)
@@ -3098,6 +3098,13 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
       console.log(`   ✅ Asesor encontrado con ID: ${asesorId}`);
     } else {
       console.log(`   ⚠️ No se encontró asesor con email: ${email}`);
+      const empty: CreditStats = { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" };
+      return {
+        totalCreditos: 0,
+        efectividad: "0",
+        porCuotasAtrasadas: { "0": empty, "1": empty, "2": empty, "3": empty, "4": empty },
+        porEstado: { cancelado: empty, incobrable: empty },
+      };
     }
   }
 

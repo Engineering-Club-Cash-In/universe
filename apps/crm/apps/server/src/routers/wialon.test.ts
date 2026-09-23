@@ -174,11 +174,20 @@ function mockDbAdmin() {
 				// .returning() (vincularUnidadWialon), igual que drizzle.
 				where: () => {
 					if (errorUpdateVehiculo) {
-						return Object.assign(Promise.reject(errorUpdateVehiculo), {
+						// Rechazo perezoso: solo se crea si alguien lo await-ea o
+						// encadena .returning() (un Promise.reject ansioso quedaría
+						// sin manejar en el camino que usa .returning()).
+						const error = errorUpdateVehiculo;
+						return {
+							// biome-ignore lint/suspicious/noThenProperty: imita el query builder thenable de drizzle
+							then: (
+								ok: (v: unknown) => unknown,
+								fallo: (e: unknown) => unknown,
+							) => Promise.reject(error).then(ok, fallo),
 							returning: async () => {
-								throw errorUpdateVehiculo;
+								throw error;
 							},
-						});
+						};
 					}
 					updatesVehiculo.push(data);
 					const filas = Array.from({ length: filasAfectadasUpdate }, () => ({
@@ -1633,6 +1642,49 @@ describe("wialonRouter", () => {
 				expect(insertsGpsAuditoria[0]).toMatchObject({ unitId: "555" });
 			} finally {
 				filasAfectadasUpdate = 1;
+			}
+		});
+
+		it("si falla el guardado automático, no devuelve la unidad deducida (fail closed)", async () => {
+			// Sin la transacción no se sabe si la unidad ya es de otro vehículo.
+			errorUpdateVehiculo = new Error("db caída");
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 1,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("no_disponible");
+				if (res.estado !== "no_disponible")
+					throw new Error("estado inesperado");
+				expect(res.error.code).toBe("VINCULO_NO_VERIFICADO");
+				expect(svcs).not.toContain("unit/calc_last");
+			} finally {
+				errorUpdateVehiculo = null;
 			}
 		});
 

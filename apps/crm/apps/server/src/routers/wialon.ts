@@ -1078,6 +1078,21 @@ export const wialonRouter = {
 						? await fijarVinculoPorPlaca(input.vehicleId, unidad.id, unidad.nm)
 						: "sin_columnas";
 
+					// No se pudo confirmar que la unidad no esté asignada a otro vehículo
+					// (falló el lock o la consulta): fail closed. Devolver la deducción
+					// podría mostrar la ubicación del carro al que se reasignó el GPS.
+					if (auto === "error") {
+						await registrarAuditoria(null, null);
+						return {
+							estado: "no_disponible" as const,
+							error: {
+								code: "VINCULO_NO_VERIFICADO",
+								message:
+									"No se pudo verificar la unidad GPS de este vehículo. Intente de nuevo.",
+							},
+						};
+					}
+
 					if (auto === "asignada_a_otro") {
 						await registrarAuditoria(null, null);
 						return {

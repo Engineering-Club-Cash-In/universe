@@ -288,7 +288,9 @@ function ContratoFila({
 
 	// Descartar el documento sin reemplazarlo. Va también en los de papel: un
 	// contrato impreso equivocado se anula igual, y la fila queda con su motivo.
-	const botonAnular = puedeAnular && !inactivo && (
+	// No para los del respaldo de Documenso: anularlo acá no cancela sus enlaces
+	// allá, y el cliente podría seguir firmando uno que el CRM da por anulado.
+	const botonAnular = puedeAnular && !inactivo && enWeeTrust && (
 		<Button
 			variant="ghost"
 			size="sm"
@@ -343,8 +345,9 @@ function ContratoFila({
 					{/* El documento con las firmas puestas. Sólo existe cuando lo
 					    firmaron todos: antes de eso WeeTrust todavía guarda el mismo
 					    archivo que le subimos. Los de papel no tienen: su firma está en
-					    la hoja impresa, no en ninguna plataforma. */}
-					{contract.status === "signed" && !firmaEnPapel && (
+					    la hoja impresa. Y los del respaldo de Documenso tampoco: el PDF
+					    firmado se baja de WeeTrust. */}
+					{contract.status === "signed" && !firmaEnPapel && enWeeTrust && (
 						<DescargarFirmadoButton contractId={contract.id} />
 					)}
 					{contract.pdfLink && (

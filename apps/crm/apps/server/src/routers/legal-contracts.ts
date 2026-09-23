@@ -1531,6 +1531,16 @@ export const legalContractsRouter = {
 				throw new ORPCError("NOT_FOUND", { message: "Contrato no encontrado" });
 			}
 
+			// Los del respaldo de Documenso no se anulan desde acá: el CRM sólo sabe
+			// borrar en WeeTrust, así que la fila quedaría anulada con los enlaces
+			// de Documenso vivos, y el cliente podría seguir firmando.
+			if (contrato.signingProvider === "documenso") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato salió por Documenso: anularlo acá no cancelaría sus enlaces. Hay que cancelarlo en Documenso.",
+				});
+			}
+
 			// Anular lo ya anulado no hace nada y confunde: la fila que se ve en
 			// "Ver anulados" es registro, no un contrato que se pueda volver a
 			// descartar.

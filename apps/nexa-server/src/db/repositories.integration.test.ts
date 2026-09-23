@@ -240,6 +240,19 @@ integrationTest("incoming statement enriches once and preserves the webhook noti
   expect((await db.select().from(nexaPaymentTransactions))[0]?.processingStatus).toBe("COMPLETED");
 });
 
+integrationTest("missing-date batches rotate past unmatched receipts and wrap for retries", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  for (let n = 0; n < 101; n++) {
+    await repository.upsertReceived({ ...transaction, reference: `batch-${n}`, tokenDate: undefined });
+  }
+  const first = await repository.listMissingDateReceipts();
+  const second = await repository.listMissingDateReceipts();
+  expect(first).toHaveLength(100);
+  expect(second.map((row) => row.reference)).toEqual(["batch-100"]);
+  expect(await repository.listMissingDateReceipts()).toEqual(first);
+});
+
 integrationTest("statement enrichment cannot import unrelated funds or bypass correlation", async () => {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const repository = new DbPaymentTransactionRepository(db);

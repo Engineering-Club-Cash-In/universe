@@ -55,6 +55,8 @@ export class DbTokenUserRepository implements TokenUserRepository, TokenUserCrea
 }
 
 export class DbPaymentTransactionRepository implements PaymentTransactionRepository {
+  private missingDateCursor = 0;
+
   constructor(private readonly db: NexaDb) {}
 
   async upsertReceived(input: ReceivedTokenTransaction) {
@@ -153,14 +155,22 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
   }
 
   async listMissingDateReceipts() {
-    // Bounded live recovery; older/unmatched receipts stay visible for reconciliation.
-    return this.db.select({ reference: nexaPaymentTransactions.reference, createdAt: nexaPaymentTransactions.createdAt })
+    // Rotate bounded batches; unmatched older receipts must not block newer ones.
+    const loadBatch = () => this.db.select({ id: nexaPaymentTransactions.id, reference: nexaPaymentTransactions.reference, createdAt: nexaPaymentTransactions.createdAt })
       .from(nexaPaymentTransactions).where(and(
         eq(nexaPaymentTransactions.processingStatus, "MANUAL_REVIEW"),
         eq(nexaPaymentTransactions.failureReason, "missing_token_date"),
         eq(nexaPaymentTransactions.tokenDate, ""),
         sql`${nexaPaymentTransactions.createdAt} >= NOW() - INTERVAL '48 hours'`,
+        sql`${nexaPaymentTransactions.id} > ${this.missingDateCursor}`,
       )).orderBy(nexaPaymentTransactions.id).limit(100);
+    let rows = await loadBatch();
+    if (rows.length === 0 && this.missingDateCursor !== 0) {
+      this.missingDateCursor = 0;
+      rows = await loadBatch();
+    }
+    this.missingDateCursor = rows.at(-1)?.id ?? 0;
+    return rows.map(({ reference, createdAt }) => ({ reference, createdAt }));
   }
 
   // Incoming statement transactionId is blank; the webhook ID belongs to review.

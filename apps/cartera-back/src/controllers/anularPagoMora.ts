@@ -4,7 +4,10 @@ import { creditos, pagos_credito } from "../database/db/schema";
 import { updateMora } from "./latefee";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
-import { elCronYaRepusoLaMora } from "./moraRepuestaPorElCron";
+import {
+  estadoMoraTrasElPago,
+  marcarDecrementoAnulado,
+} from "./moraDecrementoDePago";
 
 /**
  * El cuerpo de `falsePayment`: marcar la boleta como falsa Y devolverle al
@@ -92,12 +95,15 @@ export async function anularPagoYRestituirMora(
     .limit(1)
     .for("update");
 
-  // ¿El cron ya repuso esta mora por su cuenta? La pregunta —y su ancla— viven
-  // en `moraRepuestaPorElCron.ts`, compartidas con la reversa de pagos: si el
-  // criterio se duplicara, el camino que quedara atrás volvería a sobrecobrar.
-  const moraRepuestaPorElCron = await elCronYaRepusoLaMora(tx, {
+  // ¿Qué queda por restituir de la mora que este pago bajó? La pregunta —y su
+  // ancla— viven en `moraDecrementoDePago.ts`, compartidas con la reversa de
+  // pagos: si el criterio se duplicara, el camino que quedara atrás volvería a
+  // cobrar de más (o de menos). Ancla en el EVENTO del decremento cuando lleva
+  // su marca; si no la lleva —decremento viejo— cae al proxy por `createdat`.
+  const { estado: estadoMora, decremento } = await estadoMoraTrasElPago(tx, {
     credito_id,
-    desde: pagoPrevio?.created_at,
+    pago_id,
+    createdAt: pagoPrevio?.created_at,
   });
 
   // Actualizar el estado del pago a falso
@@ -127,9 +133,25 @@ export async function anularPagoYRestituirMora(
   // reposición del cron de la mañana siguiente como mora NUEVA. Mismo patrón
   // que `reversePayment`, con su propio prefijo de motivo —anular no es
   // revertir— para que el historial no confunda los dos hechos.
-  const restitucionMora = restitucionMoraDePago(pagoPrevio, pago_id, "ANULACION", {
-    moraRepuestaPorElCron,
-  });
+  const restitucionMora = restitucionMoraDePago(
+    pagoPrevio,
+    pago_id,
+    "ANULACION",
+    estadoMora,
+  );
+
+  // La MARCA va aunque no haya nada que restituir, y por eso no vive adentro
+  // del `if` de abajo: si el cron ya repuso la mora el monto es 0, pero el
+  // hecho —este decremento ya no vale— tiene que quedar escrito igual. Sin
+  // ella el reporte de recuperación seguía viendo la bajada sin contrapartida
+  // y contaba la reposición del cron como mora NUEVA. Va DENTRO de la misma
+  // transacción que marca la boleta falsa: son el mismo hecho.
+  //
+  // Una boleta que ya estaba falsa no llega acá con nada que restituir, pero
+  // la marca es idempotente, así que tampoco hace daño.
+  if (decremento && !pagoPrevio?.paymentFalse) {
+    await marcarDecrementoAnulado(tx, decremento.historial_id);
+  }
 
   if (restitucionMora) {
     const resultadoMora = await deps.updateMora({

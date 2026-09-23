@@ -20,7 +20,10 @@ import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
-import { elCronYaRepusoLaMora } from "./moraRepuestaPorElCron";
+import {
+  estadoMoraTrasElPago,
+  marcarDecrementoAnulado,
+} from "./moraDecrementoDePago";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT";
@@ -366,14 +369,27 @@ export function createReversePayment(
         //
         // La lectura va por `tx` (es una lectura, no toma candados: no
         // participa del orden `creditos` → `moras_credito` del módulo).
-        const moraRepuestaPorElCron = await elCronYaRepusoLaMora(tx, {
-          credito_id,
-          desde: pago.createdAt,
-        });
+        const { estado: estadoMora, decremento } = await estadoMoraTrasElPago(
+          tx,
+          { credito_id, pago_id, createdAt: pago.createdAt },
+        );
 
-        const restitucion = restitucionMoraDePago(pago, pago_id, "REVERSA", {
-          moraRepuestaPorElCron,
-        });
+        const restitucion = restitucionMoraDePago(
+          pago,
+          pago_id,
+          "REVERSA",
+          estadoMora,
+        );
+
+        // La marca del decremento va SIEMPRE que se lo haya podido identificar,
+        // restituya o no: aunque el cron ya hubiera repuesto la mora —y por eso
+        // el monto sea 0— el reporte de recuperación necesita saber que esa
+        // bajada dejó de valer, o cuenta la reposición del cron como mora
+        // NUEVA. Y va por `tx`, no por el `db` global como la restitución: es
+        // una anotación que solo tiene sentido si la reversa commitea.
+        if (decremento) {
+          await marcarDecrementoAnulado(tx, decremento.historial_id);
+        }
 
         if (restitucion) {
           mayHaveGlobalPersistence = true;

@@ -848,9 +848,16 @@ describe("buildMoraRecoveryReport", () => {
 			// siembra no tiene fecha propia.
 			"Reversa de pago #%",
 			"Anulación de pago #%",
+			// La marca del decremento cuyo pago se cayó: el reporte la lee para no
+			// contar como mora nueva lo que el cron repuso después de una bajada
+			// que ya no vale.
+			"% [decremento anulado]%",
 			"2026-06-06 06:00:00.000",
 			"2026-07-06 06:00:00.000",
 			"2026-06-06 06:00:00.000",
+			// La misma marca otra vez: un decremento anulado tampoco puede ser el
+			// ancla de la siembra.
+			"% [decremento anulado]%",
 			"Reversa de pago #%",
 			"Anulación de pago #%",
 			"2026-06-06 06:00:00.000",
@@ -1168,8 +1175,8 @@ describe("buildMoraRecoveryReport", () => {
 
 		// Columna CRUDA: envolverla en AT TIME ZONE mataría moras_historial_fecha_idx.
 		// El rango de eventos es EL CICLO, semiabierto por la derecha.
-		expect(query.sql).toContain("WHERE h.fecha >= $6::timestamp");
-		expect(query.sql).toContain("AND h.fecha < $7::timestamp");
+		expect(query.sql).toContain("WHERE h.fecha >= $7::timestamp");
+		expect(query.sql).toContain("AND h.fecha < $8::timestamp");
 		expect(query.sql).not.toContain(
 			"(h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >=",
 		);
@@ -1177,11 +1184,14 @@ describe("buildMoraRecoveryReport", () => {
 			// los prefijos con los que un pago caído firma su restitución
 			"Reversa de pago #%",
 			"Anulación de pago #%",
+			// y la marca del decremento que ese pago caído invalidó
+			"% [decremento anulado]%",
 			// el ciclo
 			"2026-06-06 06:00:00.000",
 			"2026-07-06 06:00:00.000",
-			// la siembra: corte del ancla, prefijos, corte del máximo
+			// la siembra: corte del ancla, la marca de anulado, prefijos, corte del máximo
 			"2026-06-06 06:00:00.000",
+			"% [decremento anulado]%",
 			"Reversa de pago #%",
 			"Anulación de pago #%",
 			"2026-06-06 06:00:00.000",
@@ -1424,7 +1434,7 @@ describe("buildMoraRecoveryReport", () => {
 		// Y el ancla las excluye EXPLÍCITAMENTE, igual que `esReseteoDeNivel`: una
 		// restitución repone un techo, nunca lo baja.
 		expect(query.sql).toContain(
-			"AND NOT (h.tipo_evento = 'INCREMENTO'\n                            AND (COALESCE(h.motivo, '') LIKE $9 OR COALESCE(h.motivo, '') LIKE $10))",
+			"AND NOT (h.tipo_evento = 'INCREMENTO'\n                            AND (COALESCE(h.motivo, '') LIKE $11 OR COALESCE(h.motivo, '') LIKE $12))",
 		);
 		expect(
 			esReseteoDeNivel({

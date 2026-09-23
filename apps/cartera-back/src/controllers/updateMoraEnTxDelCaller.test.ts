@@ -75,7 +75,10 @@ const clienteFalso = (marca: string): any => {
           if (estado.insertQueFalla === tabla) {
             throw new Error("insert reventado a propósito");
           }
-          return [{ mora_id: 999, porcentaje_mora: "1.12" }];
+          // El INSERT de `moras_historial` ahora devuelve su `historial_id`:
+          // es lo que `registerPayment` necesita para volver sobre el
+          // DECREMENTO y ligarlo a su pago.
+          return [{ mora_id: 999, porcentaje_mora: "1.12", historial_id: 6001 }];
         };
         const b: any = {
           returning: () => ejecutar(),
@@ -200,6 +203,21 @@ describe("updateMora con la transacción del caller", () => {
     const eventos = estado.inserts.filter((i) => i.tabla === moras_historial);
     expect(eventos.length).toBe(1);
     expect(eventos[0]?.values.tipo_evento).toBe("INCREMENTO");
+  });
+
+  it("devuelve el `historial_id` del evento que escribió", async () => {
+    // Es el hilo del que cuelga todo el lazo entre el DECREMENTO de mora y su
+    // pago: `registerPayment` guarda este id y, en cuanto la fila del pago
+    // existe, vuelve sobre ESE evento a estamparle el `pago_id`. Devolver
+    // `null` acá deja todos los decrementos nuevos sin marca y la
+    // reconciliación vuelve a adivinar por fecha.
+    prepararSelects();
+    const tx = clienteFalso("tx-del-caller");
+
+    const resultado: any = await restituir(tx);
+
+    expect(resultado.success).toBe(true);
+    expect(resultado.historial_id).toBe(6001);
   });
 
   it("un fallo adentro NO se traga: devuelve success:false para que el caller aborte", async () => {

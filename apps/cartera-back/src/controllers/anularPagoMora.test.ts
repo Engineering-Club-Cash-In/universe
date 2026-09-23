@@ -74,6 +74,7 @@ const txFalso: any = {
       from: (t: any) => ((tabla = t), b),
       where: (cond: any) => (estado.wheres.push(cond), b),
       limit: () => b,
+      orderBy: () => b,
       for: () => ((candado = true), b),
       then: (res: any, rej: any) => {
         estado.llamadas.push({
@@ -121,19 +122,30 @@ const anular = () =>
   );
 
 /**
- * Los SELECT que consume el camino, en orden: el crédito (candado), el pago y
+ * Los SELECT que consume el camino, EN ORDEN: el crédito (candado), el pago,
+ * el `DECREMENTO` marcado con este pago y —solo si no hay decremento marcado—
  * los eventos automáticos del cron posteriores al pago.
+ *
+ * `decremento: []` es el caso de los decrementos VIEJOS, los que se escribieron
+ * antes de que la marca existiera: ahí el camino cae al criterio de antes, y es
+ * por eso que los casos del cron de más abajo siguen valiendo tal cual.
  */
 const prepararBase = ({
   pago,
+  decremento = [],
+  posteriores = [],
   eventosDelCron = [],
   credito = [{ credito_id: CREDITO_ID }],
 }: {
   pago: any[];
+  decremento?: any[];
+  posteriores?: any[];
   eventosDelCron?: any[];
   credito?: any[];
 }) => {
-  estado.selects = [credito, pago, eventosDelCron];
+  estado.selects = decremento.length
+    ? [credito, pago, decremento, posteriores]
+    : [credito, pago, decremento, eventosDelCron];
 };
 
 const PAGO_CON_MORA = [
@@ -294,9 +306,15 @@ describe("el pago pendiente que sobrevivió una corrida del cron", () => {
     expect(estado.updateMoraArgs[0].monto_cambio).toBe(100);
   });
 
-  it("sin fecha en la fila del pago no se reconcilia: se restituye", async () => {
-    // No se puede saber qué pasó después: el sobrecobro lo corrige el cron en
-    // su próxima corrida, perderle la mora al crédito no lo corrige nadie.
+  it("sin fecha en la fila del pago y sin marca no se reconcilia: se restituye", async () => {
+    // Doblemente a ciegas: el decremento no lleva marca y la fila del pago
+    // tampoco tiene `createdat`, así que no se puede saber qué pasó después.
+    // Se restituye: el sobrecobro lo corrige el cron en su próxima corrida,
+    // perderle la mora al crédito no lo corrige nadie.
+    //
+    // Lo que ya NO vale es la afirmación vieja de "ni siquiera se consulta el
+    // historial": la búsqueda del decremento marcado NO depende de la fecha, y
+    // por eso se hace igual. Esa independencia es justamente el arreglo.
     prepararBase({
       pago: [{ mora: "100.00", paymentFalse: false, created_at: null }],
       eventosDelCron: [{ historial_id: 9001 }],
@@ -305,9 +323,89 @@ describe("el pago pendiente que sobrevivió una corrida del cron", () => {
     await anular();
 
     expect(estado.updateMoraArgs.length).toBe(1);
-    // Y ni siquiera se consulta el historial: sin ancla, la consulta no
-    // significaría nada.
-    expect(estado.llamadas.some((l) => l.tabla === moras_historial)).toBe(false);
+    expect(estado.updateMoraArgs[0].monto_cambio).toBe(100);
+  });
+
+  it("si el cron ya repuso, NO restituye pero DEJA EL DECREMENTO MARCADO", async () => {
+    // El tercer defecto: la regla devolvía `null` y la anulación no dejaba
+    // ningún rastro. El reporte seguía viendo la bajada sin contrapartida y
+    // contaba la reposición del cron como mora NUEVA (Q100 de foto terminaban
+    // en Q200 de esperado). No hacía falta un monto: hacía falta que el HECHO
+    // quedara escrito.
+    prepararBase({
+      pago: PAGO_CON_MORA,
+      decremento: [
+        {
+          historial_id: 7001,
+          fecha: AYER,
+          monto_anterior: "100.00",
+          monto_nuevo: "0.00",
+          motivo: `Pago aplicado a mora (crédito 4242) [pago #${PAGO_ID}]`,
+        },
+      ],
+      posteriores: [{ monto_anterior: "0.00", monto_nuevo: "100.00" }],
+    });
+
+    await anular();
+
+    expect(estado.updateMoraArgs.length).toBe(0);
+    expect(
+      estado.llamadas.filter(
+        (l) => l.tabla === moras_historial && l.via === "update",
+      ).length,
+    ).toBe(1);
+  });
+
+  it("restituye la DIFERENCIA cuando el cron repuso solo una parte", async () => {
+    prepararBase({
+      pago: PAGO_CON_MORA,
+      decremento: [
+        {
+          historial_id: 7001,
+          fecha: AYER,
+          monto_anterior: "100.00",
+          monto_nuevo: "0.00",
+          motivo: `Pago aplicado a mora (crédito 4242) [pago #${PAGO_ID}]`,
+        },
+      ],
+      posteriores: [{ monto_anterior: "0.00", monto_nuevo: "60.00" }],
+    });
+
+    await anular();
+
+    expect(estado.updateMoraArgs.length).toBe(1);
+    expect(estado.updateMoraArgs[0].monto_cambio).toBe(40);
+    // Y la marca va igual: el monto y el rastro son cosas distintas.
+    expect(
+      estado.llamadas.some(
+        (l) => l.tabla === moras_historial && l.via === "update",
+      ),
+    ).toBe(true);
+  });
+
+  it("una boleta YA falsa no vuelve a marcar el decremento", async () => {
+    prepararBase({
+      pago: [{ mora: "100.00", paymentFalse: true, created_at: AYER }],
+      decremento: [
+        {
+          historial_id: 7001,
+          fecha: AYER,
+          monto_anterior: "100.00",
+          monto_nuevo: "0.00",
+          motivo: `Pago aplicado a mora (crédito 4242) [pago #${PAGO_ID}]`,
+        },
+      ],
+      posteriores: [],
+    });
+
+    await anular();
+
+    expect(estado.updateMoraArgs.length).toBe(0);
+    expect(
+      estado.llamadas.some(
+        (l) => l.tabla === moras_historial && l.via === "update",
+      ),
+    ).toBe(false);
   });
 
   it("consulta el historial del cron con candado del crédito ya tomado", async () => {

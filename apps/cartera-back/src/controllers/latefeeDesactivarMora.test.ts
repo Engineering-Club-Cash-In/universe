@@ -89,10 +89,19 @@ const fakeDb = {
     values: (values: any) => {
       if (state.failNextInsert) {
         state.failNextInsert = false;
-        return Promise.reject(new Error("historial caído simulado"));
+        const caido: any = Promise.reject(new Error("historial caído simulado"));
+        caido.catch(() => {});
+        caido.returning = () =>
+          Promise.reject(new Error("historial caído simulado"));
+        return caido;
       }
       state.inserts.push({ table, values });
-      return Promise.resolve([]);
+      // `registrarHistorialMora` pide `.returning({ historial_id })`: el id del
+      // evento es lo que `registerPayment` necesita para ligar el DECREMENTO de
+      // mora con su pago.
+      return Object.assign(Promise.resolve([]), {
+        returning: () => Promise.resolve([{ historial_id: 6101 }]),
+      });
     },
   }),
 };

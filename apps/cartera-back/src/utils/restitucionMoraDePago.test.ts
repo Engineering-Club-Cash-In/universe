@@ -271,11 +271,18 @@ describe("UNA SOLA DEFINICIÓN para los dos caminos", () => {
 				new URL(`../controllers/${archivo}`, import.meta.url).pathname,
 			).text();
 			expect(texto).toContain("restitucionMoraDePago(");
-			expect(texto).toContain("elCronYaRepusoLaMora(");
+			expect(texto).toContain("estadoMoraTrasElPago(");
+			// Y la marca del decremento anulado tampoco puede quedar en uno solo
+			// de los dos caminos: sin ella el reporte cuenta lo repuesto por el
+			// cron como mora nueva.
+			expect(texto).toContain("marcarDecrementoAnulado(");
 			// La suma a ciegas que tenía `reversePayment`.
 			expect(texto).not.toContain("monto_cambio: Number(pago.mora)");
 			// Y la consulta del historial vive en un solo módulo.
 			expect(texto).not.toContain("PROCESO_AUTO");
+			// Tampoco el ancla vieja: anclar en `createdat` es el defecto que la
+			// marca del decremento vino a arreglar.
+			expect(texto).not.toContain("elCronYaRepusoLaMora(");
 		}
 	});
 });

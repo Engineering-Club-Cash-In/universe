@@ -511,6 +511,12 @@ export function maximoMoraSinOverride(
 /**
  * Inserta un evento en moras_historial. No lanza si falla — el historial
  * no debe romper la operación principal, solo loguea.
+ *
+ * Devuelve el `historial_id` del evento escrito, o `null` si no se pudo
+ * escribir. Quien lo necesita es `registerPayment`: para poder ligar el
+ * `DECREMENTO` de mora con el pago que lo causó tiene que volver sobre ESE
+ * evento una vez que la fila del pago existe, y sin el id tendría que volver a
+ * adivinar cuál era (ver `marcaPagoDelDecremento`).
  */
 async function registrarHistorialMora(params: {
   credito_id: number;
@@ -534,7 +540,7 @@ async function registrarHistorialMora(params: {
 }) {
   const startedAt = safeNow();
   try {
-    await (params.dbClient ?? db).insert(moras_historial).values({
+    const [evento] = await (params.dbClient ?? db).insert(moras_historial).values({
       credito_id: params.credito_id,
       mora_id: params.mora_id,
       tipo_evento: params.tipo_evento,
@@ -586,10 +592,12 @@ async function registrarHistorialMora(params: {
       // El desempate por `historial_id DESC` sigue haciendo falta: dos eventos
       // pueden caer en la misma marca.
       fecha: sql`clock_timestamp()::timestamp`,
-    });
+    }).returning({ historial_id: moras_historial.historial_id });
+    return evento?.historial_id ?? null;
   } catch (err) {
     emitCreditLateFee({ outcome: "degraded", operation: "history", durationMs: elapsedMilliseconds(startedAt), errorCode: "persistence_failed" });
     if (params.propagarError) throw err;
+    return null;
   }
 }
 
@@ -1298,7 +1306,7 @@ export async function updateMora({
       return { success: false, message: "[ERROR] Mora activa no encontrada para este crédito" };
     }
 
-    await registrarHistorialMora({
+    const historial_id = await registrarHistorialMora({
       credito_id: targetCreditoId,
       mora_id: result.updated.mora_id,
       tipo_evento: tipo,
@@ -1329,6 +1337,13 @@ export async function updateMora({
       success: true,
       mora: result.updated,
       newStatus: result.newStatus,
+      /**
+       * El evento que este ajuste dejó en `moras_historial`. `registerPayment`
+       * lo guarda para volver sobre el `DECREMENTO` y estamparle el `pago_id`
+       * en cuanto la fila del pago exista: cuando el decremento se escribe, el
+       * pago todavía no tiene id.
+       */
+      historial_id,
     };
 
   } catch (error) {

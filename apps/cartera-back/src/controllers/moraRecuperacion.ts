@@ -1,6 +1,9 @@
 import { sql } from "drizzle-orm";
 import { inicioDiaGTComoTimestampUTC } from "../utils/functions/diaGuatemala";
-import { MOTIVOS_RESTITUCION_MORA_PREFIJOS } from "../utils/motivoReversaMora";
+import {
+	MARCA_DECREMENTO_ANULADO,
+	MOTIVOS_RESTITUCION_MORA_PREFIJOS,
+} from "../utils/motivoReversaMora";
 import { creditosElegiblesMoraSql } from "./moraCapitalCartera";
 import { snapCte } from "./moraSnapshotSql";
 
@@ -23,6 +26,18 @@ function esRestitucionSql(columnaMotivo: ReturnType<typeof sql.raw>) {
 		),
 		sql` OR `,
 	)})`;
+}
+
+/**
+ * ¿Este `motivo` declara que el `DECREMENTO` ya no vale porque su pago se cayó?
+ *
+ * La marca la escribe `marcarDecrementoAnulado` cuando se anula la boleta o se
+ * revierte el pago, sobre el MISMO evento del decremento (no sobre uno nuevo):
+ * es la única forma de que el reporte sepa que esa bajada dejó de valer incluso
+ * cuando no hubo nada que restituir.
+ */
+function esDecrementoAnuladoSql(columnaMotivo: ReturnType<typeof sql.raw>) {
+	return sql`(COALESCE(${columnaMotivo}, '') LIKE ${`%${MARCA_DECREMENTO_ANULADO}%`})`;
 }
 
 /**
@@ -51,6 +66,19 @@ export type MoraLevelEvent = {
 	 * `MOTIVOS_RESTITUCION_MORA_PREFIJOS`.
 	 */
 	reverso?: boolean;
+	/**
+	 * El evento es un `DECREMENTO` cuyo pago SE CAYÓ (se anuló la boleta o se
+	 * revirtió el pago), así que esa bajada NUNCA DEBIÓ EXISTIR.
+	 *
+	 * El plegado lo salta entero: el nivel no baja y no aporta a
+	 * `bajadoAdentro`. Sin esto, el reporte veía la bajada y contaba la
+	 * reposición del cron de la mañana siguiente como mora NUEVA —una foto de
+	 * Q100 terminaba en Q200 de esperado— incluso cuando la reconciliación
+	 * había decidido, con razón, no restituir nada porque el cron ya lo había
+	 * hecho. El monto no alcanzaba: hacía falta el HECHO. Quien lo escribe es
+	 * `marcarDecrementoAnulado`; ver `MARCA_DECREMENTO_ANULADO`.
+	 */
+	anulado?: boolean;
 };
 
 /**
@@ -71,6 +99,10 @@ export type MoraLevelEvent = {
  *     como "solo sube".
  */
 export function esReseteoDeNivel(evento: MoraLevelEvent): boolean {
+	// Un decremento anulado no bajó nada: el pago que lo causó se cayó. No
+	// puede ser el ancla de la siembra, o el techo vigente se calcularía a
+	// partir de una bajada que no ocurrió.
+	if (evento.anulado) return false;
 	if (evento.tipoEvento === "DESACTIVACION") return true;
 	if (evento.tipoEvento === "CONDONACION") return false;
 	if (evento.reverso) return false;
@@ -242,6 +274,10 @@ export function plegarNivel(
 	// oportunidad nueva. Ver la regla del reverso más abajo.
 	let bajadoAdentro = 0;
 	for (const evento of eventos) {
+		// Decremento anulado: ese pago se cayó, así que la bajada no ocurrió.
+		// Saltarlo deja el nivel donde estaba, y la reposición del cron que
+		// venga después no supera ese nivel y no se cuenta como mora nueva.
+		if (evento.anulado) continue;
 		if (evento.tipoEvento === "DESACTIVACION") {
 			nivel = 0;
 			continue;
@@ -445,7 +481,10 @@ export function buildMoraRecoveryQuery({
              -- La restitución de una reversa de pago entra como INCREMENTO
              -- manual, idéntica a un ajuste a mano: el \`motivo\` es la única
              -- marca que las separa. Ver \`esRestitucionSql\`.
-             (h.tipo_evento = 'INCREMENTO' AND ${esRestitucionSql(sql.raw("h.motivo"))}) AS reverso
+             (h.tipo_evento = 'INCREMENTO' AND ${esRestitucionSql(sql.raw("h.motivo"))}) AS reverso,
+             -- El decremento de un pago que se cayó: la bajada no ocurrió. Ver
+             -- \`esDecrementoAnuladoSql\`.
+             ${esDecrementoAnuladoSql(sql.raw("h.motivo"))} AS anulado
       FROM cartera.moras_historial h
       JOIN creditos_con_asesor ca ON ca.credito_id = h.credito_id
       WHERE h.fecha >= ${inicioUtc}::timestamp
@@ -458,7 +497,8 @@ export function buildMoraRecoveryQuery({
                  'tipoEvento', e.tipo_evento,
                  'montoAnterior', e.monto_anterior,
                  'montoNuevo', e.monto_nuevo,
-                 'reverso', e.reverso
+                 'reverso', e.reverso,
+                 'anulado', e.anulado
                )
                ORDER BY e.fecha, e.historial_id
              ) AS eventos
@@ -490,6 +530,10 @@ export function buildMoraRecoveryQuery({
         FROM cartera.moras_historial h
         WHERE h.credito_id = e.credito_id
           AND h.fecha < ${inicioUtc}::timestamp
+          -- Un decremento ANULADO tampoco puede ser el ancla: su bajada no
+          -- ocurrió, y tomarla como reseteo dejaría el techo vigente en el
+          -- monto de un pago que se cayó. Espejo de \`esReseteoDeNivel\`.
+          AND NOT ${esDecrementoAnuladoSql(sql.raw("h.motivo"))}
           AND (h.tipo_evento = 'DESACTIVACION'
                OR (h.tipo_evento <> 'CONDONACION'
                    AND NOT (h.tipo_evento = 'INCREMENTO'

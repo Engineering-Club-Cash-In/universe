@@ -111,6 +111,7 @@ function crearTxFalso(
   pago: Record<string, unknown>,
   eventosDelCron: unknown[],
   tablasConsultadas: unknown[],
+  tablasActualizadas: unknown[] = [],
 ) {
   const filasPorTabla = new Map<unknown, unknown[]>([
     [pagos_credito, [pago]],
@@ -122,9 +123,13 @@ function crearTxFalso(
     let tabla: unknown = null;
     const filas = () => {
       const resultado = filasPorTabla.get(tabla) ?? [];
-      return Object.assign(Promise.resolve(resultado), {
-        limit: () => Promise.resolve(resultado),
+      const promesa: any = Object.assign(Promise.resolve(resultado), {
+        limit: () => promesa,
+        // La búsqueda del DECREMENTO marcado ordena por `(fecha, historial_id)`
+        // para quedarse con el más reciente.
+        orderBy: () => promesa,
       });
+      return promesa;
     };
     const b: any = {
       from: (t: unknown) => (
@@ -139,12 +144,14 @@ function crearTxFalso(
   };
   return {
     select: mock(select),
-    update: mock(() => ({
+    update: mock((tabla: unknown) => ({
       set: () => ({
-        where: () =>
-          Object.assign(Promise.resolve([]), {
+        where: () => {
+          tablasActualizadas.push(tabla);
+          return Object.assign(Promise.resolve([]), {
             returning: () => Promise.resolve([]),
-          }),
+          });
+        },
       }),
     })),
     delete: mock(() => ({
@@ -163,7 +170,8 @@ async function revertir({
 } = {}) {
   const restituciones: any[] = [];
   const tablasConsultadas: unknown[] = [];
-  const tx = crearTxFalso(pago, eventosDelCron, tablasConsultadas);
+  const tablasActualizadas: unknown[] = [];
+  const tx = crearTxFalso(pago, eventosDelCron, tablasConsultadas, tablasActualizadas);
   const handler = createReversePayment({
     runTransaction: (async (callback: (value: typeof tx) => Promise<unknown>) =>
       callback(tx)) as unknown as ReversePaymentDependencies["runTransaction"],
@@ -190,7 +198,7 @@ async function revertir({
     telemetryLogger: createCarteraStructuredLogger({ sink: () => {} }),
   });
 
-  return { restituciones, tablasConsultadas };
+  return { restituciones, tablasConsultadas, tablasActualizadas };
 }
 
 describe("la reversa restituye la mora que de verdad falta", () => {
@@ -219,20 +227,43 @@ describe("la reversa restituye la mora que de verdad falta", () => {
     expect(String(restituciones[0].motivo)).toContain(String(PAGO_ID));
   });
 
-  test("sin ancla no se reconcilia: restituye (el comportamiento seguro)", async () => {
-    // Sin `createdat` no se puede saber qué pasó después del pago. El
+  test("sin marca y sin ancla no se reconcilia: restituye (el comportamiento seguro)", async () => {
+    // El decremento no lleva marca (decremento viejo) y la fila del pago
+    // tampoco tiene `createdat`: no se puede saber qué pasó después. El
     // sobrecobro lo corrige el cron en su próxima corrida; perderle la mora al
     // crédito no lo corrige nadie.
-    const { restituciones, tablasConsultadas } = await revertir({
+    //
+    // Lo que YA NO vale es "ni siquiera se consulta el historial": la búsqueda
+    // del decremento marcado no depende de la fecha y por eso se hace igual.
+    // Esa independencia es el arreglo.
+    const { restituciones } = await revertir({
       pago: { ...pagoConMora, createdAt: null },
       eventosDelCron: [{ historial_id: 9001 }],
     });
 
     expect(restituciones).toHaveLength(1);
     expect(restituciones[0].monto_cambio).toBe(333.95);
-    // Y ni siquiera se consulta el historial: sin ancla la consulta no
-    // significaría nada.
-    expect(tablasConsultadas).not.toContain(moras_historial);
+  });
+
+  test("con el decremento identificado, la reversa lo MARCA como anulado", async () => {
+    // El tercer defecto, del lado de la reversa: sin la marca el reporte de
+    // recuperación sigue viendo la bajada del pago revertido y cuenta la
+    // reposición del cron como mora NUEVA. La marca va por `tx` —es una
+    // anotación que solo vale si la reversa commitea— y va aunque el monto a
+    // restituir sea 0.
+    const { tablasActualizadas } = await revertir({
+      eventosDelCron: [
+        {
+          historial_id: 7001,
+          fecha: new Date("2026-08-05T20:09:00.000Z"),
+          monto_anterior: "333.95",
+          monto_nuevo: "0.00",
+          motivo: `Pago aplicado a mora (crédito 980) [pago #${PAGO_ID}]`,
+        },
+      ],
+    });
+
+    expect(tablasActualizadas).toContain(moras_historial);
   });
 
   test("un pago sin mora no consulta el historial ni toca la mora", async () => {

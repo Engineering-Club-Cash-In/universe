@@ -34,13 +34,35 @@ const MOTIVO_POR_CAUSA: Record<
 /**
  * Lo que pasó con la mora del crédito DESPUÉS de que este pago la bajara.
  *
- * `moraRepuestaPorElCron` es cierto cuando, desde que el pago aplicó su
- * DECREMENTO, el cron volvió a fijar la mora desde cero (un `CREACION` o un
- * `RECALCULO` con `origen: "PROCESO_AUTO"` en `moras_historial`). Quien lo
- * averigua es `elCronYaRepusoLaMora` (`controllers/moraRepuestaPorElCron.ts`),
- * también una sola vez para los dos caminos.
+ * Tiene DOS formas porque hay dos mundos, y no se pueden mezclar:
+ *
+ *   * `decrementoIdentificado: true` — el `DECREMENTO` del pago lleva su marca
+ *     (`marcaPagoDelDecremento`) y se pudo encontrar. Entonces se sabe con
+ *     exactitud cuánto bajó (`bajadoPorElPago`) y cuánto de eso ya se repuso
+ *     DESPUÉS de ese evento (`yaRepuesto`), y la restitución es la DIFERENCIA.
+ *     Sin esto la pregunta era "¿hubo algún evento del cron después?", que
+ *     decía que sí aunque el cron hubiera repuesto la mitad —o hubiera
+ *     recalculado por otras cuotas y no repuesto nada de esto—, y la
+ *     restitución legítima quedaba salteada: el error CONTRARIO al sobrecobro.
+ *
+ *   * `decrementoIdentificado: false` — decremento VIEJO, anterior a la marca,
+ *     o un pago que nunca bajó mora. No hay nada que comparar, así que se cae
+ *     al criterio de antes: `moraRepuestaPorElCron`, el proxy grueso anclado en
+ *     `pagos_credito.createdat`. Se conserva TAL CUAL y no se endurece: es el
+ *     comportamiento que ya se midió contra el dump (crédito 980, pago 152172)
+ *     y el único que no le devuelve el doble a un crédito cuyo decremento no se
+ *     puede ubicar. Los decrementos viejos se van agotando solos; los nuevos
+ *     nacen todos marcados.
  */
-export type EstadoMoraTrasElPago = { moraRepuestaPorElCron: boolean };
+export type EstadoMoraTrasElPago =
+	| {
+			decrementoIdentificado: true;
+			/** Cuánto bajó la mora ESE decremento (`monto_anterior - monto_nuevo`). */
+			bajadoPorElPago: number;
+			/** Cuánto de esa bajada ya volvió a subir DESPUÉS de ese evento. */
+			yaRepuesto: number;
+	  }
+	| { decrementoIdentificado?: false; moraRepuestaPorElCron: boolean };
 
 /**
  * ¿Qué mora hay que devolverle al crédito cuando su pago deja de valer?
@@ -57,7 +79,12 @@ export type EstadoMoraTrasElPago = { moraRepuestaPorElCron: boolean };
  *   * Se restituye la MORA del pago, no el monto de la boleta: la boleta traía
  *     capital, interés e IVA además de la mora, y devolver el total le
  *     inventaría al cliente una deuda de mora que nunca tuvo.
- *   * Si el cron ya repuso la mora, no se restituye NADA. La cadena del
+ *   * Se restituye lo que FALTA, no todo. Si el cron ya repuso la bajada de
+ *     este pago, no se restituye nada; si repuso solo una parte, se restituye
+ *     la diferencia. Cuánto se repuso sale de comparar contra el `DECREMENTO`
+ *     de ESTE pago, identificado por su marca (ver `moraDecrementoDePago.ts`);
+ *     para los decrementos viejos, sin marca, sigue valiendo el criterio de
+ *     todo-o-nada de abajo. La cadena del
  *     sobrecobro: registrar un pago baja la mora en el acto, pero el criterio
  *     de cobertura del cron solo cuenta pagos `validated`/`no_required`
  *     (`procesarMoras`, el EXISTS de `hasPaidPayment`), así que un pago
@@ -88,10 +115,40 @@ export function restitucionMoraDePago(
 ): RestitucionMora | null {
 	if (!pago) return null;
 	if (pago.paymentFalse) return null;
-	// El cron ya repuso la mora entera: restituir encima sería cobrarla dos
-	// veces (ver el bloque de arriba).
-	if (estado.moraRepuestaPorElCron) return null;
 	const mora = Number(pago.mora ?? 0);
 	if (!Number.isFinite(mora) || mora <= 0) return null;
-	return { monto_cambio: mora, motivo: MOTIVO_POR_CAUSA[causa](pagoId) };
+
+	const monto = estado.decrementoIdentificado
+		? // Se sabe qué bajó y cuánto volvió: se restituye la DIFERENCIA.
+			//
+			// El tope es `bajadoPorElPago` y no `pago.mora` a secas porque son
+			// cosas distintas: `pago.mora` es lo que la boleta COBRÓ, y el
+			// decremento es lo que de verdad se le bajó al saldo (`updateMora`
+			// nunca deja la mora bajo cero, así que un cobro mayor que el saldo
+			// baja menos). Devolver el cobro entero le inventaría al crédito una
+			// mora que nunca tuvo.
+			Math.max(
+				0,
+				Math.min(mora, estado.bajadoPorElPago) - estado.yaRepuesto,
+			)
+		: // Decremento no identificable: el criterio viejo, todo o nada.
+			estado.moraRepuestaPorElCron
+			? 0
+			: mora;
+
+	if (!(monto > 0)) return null;
+	return {
+		monto_cambio: redondearCentavos(monto),
+		motivo: MOTIVO_POR_CAUSA[causa](pagoId),
+	};
+}
+
+/**
+ * La resta de dos montos con decimales binarios deja colas
+ * (`333.95 - 333.94999999` → `1.0000000287e-8`). El saldo de mora vive en
+ * `numeric(18,2)`, así que cualquier cola por debajo del centavo es ruido: se
+ * corta acá, en el único lugar donde nace el monto a restituir.
+ */
+function redondearCentavos(monto: number): number {
+	return Math.round(monto * 100) / 100;
 }

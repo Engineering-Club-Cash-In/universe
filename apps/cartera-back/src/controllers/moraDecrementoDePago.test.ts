@@ -10,7 +10,7 @@
  */
 import { beforeEach, describe, expect, it } from "bun:test";
 import { moras_historial } from "../database/db/schema";
-import { elCronYaRepusoLaMora } from "./moraRepuestaPorElCron";
+import { elCronYaRepusoLaMora } from "./moraDecrementoDePago";
 
 const CREDITO_ID = 980;
 const CREADO = new Date("2026-08-05T20:09:00.000Z");

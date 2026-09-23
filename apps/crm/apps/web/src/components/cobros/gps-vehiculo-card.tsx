@@ -451,7 +451,12 @@ function SelectorUnidad({
 
 	const unidades = useQuery({
 		...orpc.getWialonUnits.queryOptions({
-			input: filtroDebounced ? { filterName: filtroDebounced } : {},
+			// flags:1 = solo id/nm, que es lo único que usa el selector. Sin esto
+			// Wialon aplica el default pesado (sensores, posición, mensajes) por
+			// cada unidad que coincide y puede topar sus límites de paquete.
+			input: filtroDebounced
+				? { filterName: filtroDebounced, flags: 1 }
+				: { flags: 1 },
 		}),
 		enabled: !usarCandidatos && filtroDebounced.length >= 3,
 		placeholderData: keepPreviousData,

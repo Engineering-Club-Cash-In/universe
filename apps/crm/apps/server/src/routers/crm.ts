@@ -3004,9 +3004,12 @@ export const crmRouter = {
 				// comprobantes de ingresos, estados de cuenta, recibos ni formularios
 				// del cliente anterior, que sobreviven y vuelven a aprobar el
 				// expediente bajo otra persona. Ver `evidenciaAcumuladaDelExpediente`.
+				//
+				// Las perdidas NO están exceptuadas: la marca de revalidación que
+				// cobra la reapertura sólo caduca los documentos de identidad, así que
+				// «perder y reabrir» era el mismo agujero en tres pasos.
 				const evidenciaDelExpediente = await evidenciaAcumuladaDelExpediente({
 					opportunityId: id,
-					status: currentOpportunity[0].status,
 				});
 
 				if (evidenciaDelExpediente.length > 0) {

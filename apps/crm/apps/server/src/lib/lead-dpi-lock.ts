@@ -482,8 +482,9 @@ export function mensajeCandadoCambioDeLead(
  * que se hace acá es fallar cerrado sin tener que tomarla: el cliente sólo se
  * puede corregir mientras el expediente está prácticamente vacío, que es el
  * caso real de operaciones —un lead mal asignado recién creado—. En cuanto hay
- * evidencia acumulada, el camino es perder la oportunidad, que es el que sí
- * cobra la revalidación completa.
+ * evidencia acumulada, el camino es crear una oportunidad nueva para el otro
+ * cliente, que arranca sin evidencia de nadie; perder ésta y reabrirla NO sirve
+ * de salida, porque al volver a análisis se lleva la evidencia puesta.
  *
  * ⚠️ NO reemplaza a `parcheDeIdentidadInvalidada`: los cambios que sí quedan
  * permitidos lo siguen pagando. Es defensa en profundidad, no un recambio.
@@ -545,23 +546,25 @@ const FUENTES_DE_EVIDENCIA: readonly FuenteDeEvidencia[] = [
 ];
 
 /**
- * Las perdidas quedan afuera, igual que en `etapaQueCanda` y en
- * `sqlCandanteDeLaOportunidad`.
+ * 🔴 Las perdidas NO quedan afuera de este chequeo, a diferencia del candado por
+ * ETAPA (`etapaQueCanda` / `sqlCandanteDeLaOportunidad`), que sí las deja pasar
+ * por una decisión de producto que sigue vigente y que esto no toca.
  *
- * No es una grieta olvidada: es EL camino que le queda al asesor, y el que el
- * mensaje le indica. Dar por perdida la oportunidad, corregir ahí el cliente y
- * volver a abrirla manda el expediente de vuelta a análisis
- * (`parcheDeRevalidacion`) y deja las dos filas de bitácora correspondientes,
- * o sea que la maniobra existe pero es explícita, cara y rastreable, en vez de
- * un reemplazo silencioso en su lugar.
+ * Exceptuarlas acá dejaba vivo el mismo agujero en tres pasos: dar por perdida,
+ * cambiar el cliente, reabrir. La oportunidad vuelve a análisis con la marca de
+ * revalidación, pero esa marca sólo caduca `dpi` e `identification`, así que los
+ * estados de cuenta, los comprobantes de ingresos, los formularios y los recibos
+ * del cliente ANTERIOR quedan colgando bajo el nuevo —que es exactamente lo que
+ * este chequeo existe para impedir—.
  *
- * ⚠️ Ese camino sigue arrastrando el agujero de la evidencia financiera —los
- * estados de cuenta de A siguen colgados cuando vuelve a análisis con B—, que
- * es el que la taxonomía pendiente tiene que cerrar.
- */
-const ESTADO_QUE_NO_ACUMULA_EVIDENCIA = "lost";
-
-/**
+ * La excepción se había puesto porque la salida que el mensaje le ofrecía al
+ * asesor era «perdela y reabrila». Esa salida era una vuelta de más: con la
+ * oportunidad ya perdida y otro cliente enfrente, lo limpio es CREAR UNA
+ * OPORTUNIDAD NUEVA, que arranca sin evidencia de nadie. Es lo que dice ahora
+ * `mensajeCambioDeLeadConEvidencia`.
+ *
+ * ---
+ *
  * Qué evidencia tiene hoy colgada el expediente. Vacío = se puede corregir el
  * cliente.
  *
@@ -571,12 +574,7 @@ const ESTADO_QUE_NO_ACUMULA_EVIDENCIA = "lost";
  */
 export async function evidenciaAcumuladaDelExpediente(input: {
 	opportunityId: string;
-	status: string;
 }): Promise<string[]> {
-	if (input.status === ESTADO_QUE_NO_ACUMULA_EVIDENCIA) {
-		return [];
-	}
-
 	const presencias = await Promise.all(
 		FUENTES_DE_EVIDENCIA.map(async (fuente) => {
 			const filas = await db
@@ -604,9 +602,10 @@ export async function evidenciaAcumuladaDelExpediente(input: {
  * Es el mismo patrón de `sqlCandanteDeLaOportunidad` y
  * `noExisteOportunidadCandantePorId`.
  *
- * La comparación de `status` se resuelve contra la fila GUARDADA, no contra el
- * `set` de este UPDATE, así que un solo request que mande
- * `{ status: "lost", leadId: B }` no se auto-habilita la excepción.
+ * ⚠️ No mira `status`: el expediente acumula evidencia esté la oportunidad
+ * abierta, ganada o perdida, y por eso no hay nada que este predicado tenga que
+ * exceptuar (ver el bloque de arriba). El filtro de `lost` que sí existe vive en
+ * `sqlCandanteDeLaOportunidad`, que es otro candado —el de ETAPA— y no cambia.
  */
 export function elExpedienteNoAcumulaEvidencia(opportunityId: string): SQL {
 	const sinFilas = FUENTES_DE_EVIDENCIA.map(
@@ -615,17 +614,11 @@ export function elExpedienteNoAcumulaEvidencia(opportunityId: string): SQL {
 		)`,
 	);
 
-	// `::text` y no la comparación directa contra el enum: el estado viaja como
-	// parámetro (una sola fuente de verdad con la forma en memoria) y así no
-	// depende de que Postgres infiera el tipo del parámetro sin ayuda.
-	return sql`(
-		${opportunities.status}::text = ${ESTADO_QUE_NO_ACUMULA_EVIDENCIA}
-		or (${sql.join(sinFilas, sql` and `)})
-	)`;
+	return sql`(${sql.join(sinFilas, sql` and `)})`;
 }
 
 export function mensajeCambioDeLeadConEvidencia(evidencia: string[]): string {
-	return `No se puede cambiar el cliente de esta oportunidad: el expediente ya tiene evidencia cargada (${evidencia.join(", ")}). Esa evidencia se levantó para el cliente que hoy tiene asignado y quedaría respaldando a otro: cambiar el cliente invalida la aprobación y los documentos de identidad, pero no los comprobantes de ingresos, los estados de cuenta ni los formularios, que seguirían siendo los de la persona anterior. El cliente sólo se puede corregir mientras el expediente todavía está vacío. Si el cliente está equivocado, dá la oportunidad por perdida y corregí el cliente ahí antes de volver a abrirla —ese camino manda el expediente de vuelta a análisis y cobra la revalidación completa—, o creá una oportunidad nueva con el cliente correcto.`;
+	return `No se puede cambiar el cliente de esta oportunidad: el expediente ya tiene evidencia cargada (${evidencia.join(", ")}). Esa evidencia se levantó para el cliente que hoy tiene asignado y quedaría respaldando a otro: cambiar el cliente invalida la aprobación y los documentos de identidad, pero no los comprobantes de ingresos, los estados de cuenta ni los formularios, que seguirían siendo los de la persona anterior. El cliente sólo se puede corregir mientras el expediente todavía está vacío. Si el cliente está equivocado, creá una oportunidad nueva con el cliente correcto: arranca con el expediente limpio, y ésta se queda con la evidencia de la persona que la levantó.`;
 }
 
 export async function evaluarCandadoBorradoCoDeudor(input: {

@@ -903,8 +903,12 @@ describe("updateOpportunity: con evidencia cargada, el cliente ya no se cambia",
 		expect((salida as Error | null)?.message).toMatch(
 			/el expediente ya tiene evidencia cargada/,
 		);
-		// El mensaje dice qué hacer, no sólo que no se puede.
-		expect((salida as Error | null)?.message).toMatch(/por perdida/);
+		// El mensaje dice qué hacer, no sólo que no se puede: y el camino ya no es
+		// perder la oportunidad y reabrirla, sino crear una nueva.
+		expect((salida as Error | null)?.message).toMatch(
+			/creá una oportunidad nueva/,
+		);
+		expect((salida as Error | null)?.message).not.toMatch(/por perdida/);
 	});
 
 	test("el formulario de solicitud también cuenta como evidencia", async () => {
@@ -992,11 +996,18 @@ describe("updateOpportunity: con evidencia cargada, el cliente ya no se cambia",
 		expect(params.filter((p) => p === OPORTUNIDAD).length).toBeGreaterThan(0);
 	});
 
-	test("una oportunidad perdida queda exceptuada: ése es el camino que el mensaje indica", async () => {
-		// Decisión de producto ya vigente en el resto del candado (`etapaQueCanda`
-		// filtra `lost`): perder la oportunidad, corregir ahí el cliente y volver a
-		// abrirla cobra la revalidación completa y deja bitácora. Sin esta
-		// excepción el mensaje mandaría a un camino cerrado.
+	test("una perdida con evidencia TAMBIÉN queda bloqueada", async () => {
+		// 🔴 Esta prueba afirmaba lo contrario —que una perdida quedaba exceptuada—
+		// y se invirtió a propósito: la excepción dejaba vivo el mismo agujero en
+		// tres pasos. Dar por perdida, cambiar el cliente, reabrir: cuando la
+		// oportunidad vuelve a análisis, los estados de cuenta, los comprobantes de
+		// ingresos y los recibos del cliente anterior siguen colgados bajo el
+		// nuevo, porque la marca de revalidación sólo caduca `dpi` e
+		// `identification`. Si la oportunidad ya está perdida, lo limpio es crear
+		// una nueva, que no arrastra la evidencia de nadie.
+		//
+		// ⚠️ Esto NO toca el candado por ETAPA, que sigue dejando pasar a las
+		// perdidas: lo que cambia es sólo el chequeo de evidencia.
 		sembrarElExpediente({ ...enElUmbral, status: "lost" });
 		filasPorTabla.set(opportunityDocuments, [
 			{
@@ -1005,6 +1016,36 @@ describe("updateOpportunity: con evidencia cargada, el cliente ya no se cambia",
 				documentType: "estados_cuenta_1",
 			},
 		]);
+
+		const salida = await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_B },
+			contextoDe("vendedor", "sales"),
+		).then(
+			() => null,
+			(e: unknown) => e,
+		);
+
+		// El EFECTO: el `leadId` no se escribió.
+		expect(identidadEscrita()).toEqual([]);
+		expect((salida as Error | null)?.message).toMatch(
+			/el expediente ya tiene evidencia cargada/,
+		);
+	});
+
+	test("una perdida VACÍA se sigue pudiendo corregir", async () => {
+		// 🔴 Red de seguridad, verde antes y después: lo que bloquea es la
+		// evidencia, no el estado. Una perdida sin nada colgado sigue siendo el
+		// caso real de operaciones —el lead mal asignado— y no se puede romper.
+		sembrarElExpediente({
+			...enElUmbral,
+			status: "lost",
+			analysisStatus: "not_applicable",
+			creditDetailApproved: null,
+			vehicleId: null,
+		});
+		filasPorTabla.set(opportunityDocuments, []);
+		filasPorTabla.set(creditApplications, []);
 
 		await invocar(
 			crmRouter.updateOpportunity,

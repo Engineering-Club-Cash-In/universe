@@ -40,6 +40,7 @@ import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
+import { GpsVehiculoCard } from "@/components/cobros/gps-vehiculo-card";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { Pagination } from "@/components/cobros/pagination";
@@ -791,6 +792,14 @@ function RouteComponent() {
 	// sabe que la unidad ya no se recupera por teléfono. Va separada y en rojo
 	// en el menú para que no se apriete de pasada.
 	const puedeRecuperarVehiculo = PERMISSIONS.canAccessCobros(
+		userProfile.data?.role ?? "",
+	);
+
+	// CB-118: generar enlaces públicos de rastreo y fijar qué unidad GPS
+	// corresponde al vehículo son decisiones de supervisor — un enlace mal
+	// emitido expone la ubicación del vehículo de un cliente, y un vínculo
+	// equivocado manda al gestor de campo al carro de otra persona.
+	const esSupervisorCobros = PERMISSIONS.canAssignCobros(
 		userProfile.data?.role ?? "",
 	);
 
@@ -4359,6 +4368,24 @@ function RouteComponent() {
 								)}
 							</CardContent>
 						</Card>
+						{/* GPS / Wialon (CB-118): va junto a los datos del activo y antes
+						    de recuperación, que es el desenlace. Query propia para que una
+						    consulta al proveedor externo no retrase el resto de la ficha.
+						    El key fuerza un componente nuevo al cambiar de crédito: esta
+						    ruta no se re-monta al cambiar $id, y sin él el motivo ya
+						    confirmado en un crédito dispararía una consulta auditada en el
+						    siguiente. Va el crédito y no solo el vehículo porque un mismo
+						    vehículo puede estar en dos créditos (refinanciamiento).
+						    Requiere caso.id: el servidor valida el acceso por caso (asesor
+						    asignado) antes de devolver la ubicación. */}
+						{caso.id && caso.vehicleId && (
+							<GpsVehiculoCard
+								casoCobroId={caso.id}
+								esSupervisor={esSupervisorCobros}
+								key={`${id}:${caso.vehicleId}`}
+								vehicleId={caso.vehicleId}
+							/>
+						)}
 						{/* Información de Recuperación - Solo para casos incobrables */}
 						{caso.estadoMora === "incobrable" && recuperacion && (
 							<Card>

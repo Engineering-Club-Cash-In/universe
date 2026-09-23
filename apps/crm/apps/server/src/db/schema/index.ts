@@ -11,6 +11,7 @@ export * from "./cobros";
 export * from "./cobros-send-logs";
 export * from "./crm";
 export * from "./documents";
+export * from "./gps-consulta-logs";
 export * from "./insurance";
 export * from "./investments";
 export * from "./juridico-dashboard";

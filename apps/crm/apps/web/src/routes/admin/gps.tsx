@@ -1,7 +1,13 @@
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Loader2, MapPin, RefreshCw, TriangleAlert } from "lucide-react";
+import {
+	ClipboardList,
+	Loader2,
+	MapPin,
+	RefreshCw,
+	TriangleAlert,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DataTable } from "@/components/data-table";
@@ -20,8 +26,8 @@ import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { orpc } from "@/utils/orpc";
 import {
 	ESTADO_CONEXION_CONFIG,
+	formatFechaHora,
 	formatLatency,
-	formatSessionExpiry,
 	resolveEstado,
 } from "./-gps-format";
 
@@ -32,6 +38,7 @@ export const Route = createFileRoute("/admin/gps")({
 interface UnidadCatalogo {
 	id: number;
 	nm: string;
+	creditos: { numeroSifco: string; origen: "vinculado" | "placa" }[];
 }
 
 const UNIT_COLUMNS: ColumnDef<UnidadCatalogo>[] = [
@@ -42,6 +49,94 @@ const UNIT_COLUMNS: ColumnDef<UnidadCatalogo>[] = [
 	{
 		accessorKey: "nm",
 		header: "Nombre de la unidad",
+	},
+	{
+		id: "creditos",
+		header: "Crédito (SIFCO)",
+		// "vinculado" = la unidad está guardada en el vehículo; "por placa" =
+		// deducción por núcleo de placa, todavía sin confirmar (CB-118).
+		cell: ({ row }) => {
+			const { creditos } = row.original;
+			if (creditos.length === 0) return "—";
+			return (
+				<div className="flex flex-col gap-0.5">
+					{creditos.map((c) => (
+						<div className="flex items-center gap-2" key={c.numeroSifco}>
+							<Link
+								className="font-mono text-blue-600 hover:underline"
+								params={{ id: c.numeroSifco }}
+								search={{ tipo: "contrato" }}
+								to="/cobros/$id"
+							>
+								{c.numeroSifco}
+							</Link>
+							{c.origen === "placa" && (
+								<span className="text-muted-foreground text-xs">por placa</span>
+							)}
+						</div>
+					))}
+				</div>
+			);
+		},
+	},
+];
+
+interface BitacoraFila {
+	id: string;
+	numeroCreditoSifco: string | null;
+	motivo: string;
+	unitName: string | null;
+	userNombre: string | null;
+	userEmail: string | null;
+	createdAt: Date;
+}
+
+const BITACORA_COLUMNS: ColumnDef<BitacoraFila>[] = [
+	{
+		accessorKey: "createdAt",
+		header: "Fecha",
+		cell: ({ row }) => formatFechaHora(row.original.createdAt),
+	},
+	{
+		accessorKey: "userNombre",
+		header: "Usuario",
+		cell: ({ row }) => (
+			<div>
+				<div>{row.original.userNombre ?? "—"}</div>
+				<div className="text-muted-foreground text-xs">
+					{row.original.userEmail ?? ""}
+				</div>
+			</div>
+		),
+	},
+	{
+		accessorKey: "numeroCreditoSifco",
+		header: "Cuenta (SIFCO)",
+		// Lleva a la Ficha 360 del crédito (mismo patrón que cobros/reportes):
+		// quien fiscaliza la bitácora quiere ver el caso que se consultó.
+		cell: ({ row }) => {
+			const sifco = row.original.numeroCreditoSifco;
+			if (!sifco) return "—";
+			return (
+				<Link
+					className="font-mono text-blue-600 hover:underline"
+					params={{ id: sifco }}
+					search={{ tipo: "contrato" }}
+					to="/cobros/$id"
+				>
+					{sifco}
+				</Link>
+			);
+		},
+	},
+	{
+		accessorKey: "unitName",
+		header: "Unidad consultada",
+		cell: ({ row }) => row.original.unitName ?? "—",
+	},
+	{
+		accessorKey: "motivo",
+		header: "Motivo",
 	},
 ];
 
@@ -126,8 +221,49 @@ function RouteComponent() {
 	});
 
 	const unitRows: UnidadCatalogo[] = useMemo(
-		() => units.data?.items.map((u) => ({ id: u.id, nm: u.nm })) ?? [],
+		() =>
+			units.data?.items.map((u) => ({
+				id: u.id,
+				nm: u.nm,
+				creditos: u.creditos,
+			})) ?? [],
 		[units.data],
+	);
+
+	const [bitacoraPage, setBitacoraPage] = useState(1);
+	const [bitacoraPageSize, setBitacoraPageSize] = useState(25);
+	const [bitacoraSifco, setBitacoraSifco] = useState("");
+	const [bitacoraSifcoDebounced, setBitacoraSifcoDebounced] = useState("");
+
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setBitacoraSifcoDebounced(bitacoraSifco.trim());
+			setBitacoraPage(1);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [bitacoraSifco]);
+
+	const bitacora = useQuery({
+		...orpc.getGpsBitacora.queryOptions({
+			input: {
+				page: bitacoraPage,
+				perPage: bitacoraPageSize,
+				...(bitacoraSifcoDebounced
+					? { numeroCreditoSifco: bitacoraSifcoDebounced }
+					: {}),
+			},
+		}),
+		enabled: !!session && isAdmin,
+		placeholderData: keepPreviousData,
+	});
+
+	const bitacoraRows: BitacoraFila[] = useMemo(
+		() =>
+			bitacora.data?.items.map((i) => ({
+				...i,
+				createdAt: new Date(i.createdAt),
+			})) ?? [],
+		[bitacora.data],
 	);
 
 	if (isPending || userProfile.isPending) {
@@ -293,7 +429,7 @@ function RouteComponent() {
 									Caché de sesión interna válida hasta
 								</div>
 								<div className="font-medium">
-									{formatSessionExpiry(d?.sessionExpiresAt ?? null)}
+									{formatFechaHora(d?.sessionExpiresAt ?? null)}
 								</div>
 								<div className="text-muted-foreground text-xs">
 									El token de Wialon es permanente; esto es solo el sid en
@@ -347,6 +483,68 @@ function RouteComponent() {
 							data={unitRows}
 							isLoading={units.isPending}
 							hideSearch
+						/>
+					)}
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle className="flex items-center gap-2">
+						<ClipboardList className="h-5 w-5" />
+						Bitácora de consultas GPS
+					</CardTitle>
+					<CardDescription>
+						Cada vez que un asesor confirma un motivo y ve la ubicación de una
+						unidad en la Ficha 360 queda registrado aquí (CB-118). Vincular una
+						unidad o generar un enlace de rastreo se auditan por separado en los
+						logs del servidor.
+					</CardDescription>
+				</CardHeader>
+				<CardContent className="space-y-4">
+					<Input
+						className="max-w-sm"
+						onChange={(e) => setBitacoraSifco(e.target.value)}
+						placeholder="Filtrar por número SIFCO..."
+						value={bitacoraSifco}
+					/>
+					{bitacora.isError ? (
+						<div className="flex items-center justify-between gap-4 rounded-md border border-red-200 p-4 dark:border-red-900/50">
+							<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
+								<TriangleAlert className="h-4 w-4 shrink-0" />
+								<span>
+									No se pudo cargar la bitácora:{" "}
+									{bitacora.error?.message || "error desconocido"}
+								</span>
+							</div>
+							<Button
+								onClick={() => bitacora.refetch()}
+								size="sm"
+								variant="outline"
+							>
+								Reintentar
+							</Button>
+						</div>
+					) : (
+						<DataTable
+							columns={BITACORA_COLUMNS}
+							data={bitacoraRows}
+							hideSearch
+							isLoading={bitacora.isPending}
+							serverPagination={{
+								onPageChange: setBitacoraPage,
+								onPageSizeChange: (size) => {
+									setBitacoraPageSize(size);
+									setBitacoraPage(1);
+								},
+								page: bitacoraPage,
+								pageSize: bitacoraPageSize,
+								totalItems: bitacora.data?.total ?? 0,
+								totalPages: Math.max(
+									1,
+									Math.ceil((bitacora.data?.total ?? 0) / bitacoraPageSize),
+								),
+							}}
 						/>
 					)}
 				</CardContent>

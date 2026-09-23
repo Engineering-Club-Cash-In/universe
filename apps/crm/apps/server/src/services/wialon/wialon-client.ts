@@ -100,6 +100,145 @@ export function findIgnitionSensorId(
 	return null;
 }
 
+/**
+ * Núcleo de una placa guatemalteca: 3 dígitos + 3 letras ("720GVH").
+ *
+ * Es lo único estable entre cómo se escribe la placa en el CRM y cómo se llama
+ * la unidad en Wialon. El prefijo varía ("P-", "C-", sin prefijo, y ~10% de las
+ * placas del CRM vienen como "P0-720GVH", con un cero tipeado de más) y los
+ * separadores también ("P - 278KJQ" vs "P-278KJQ SIN APAGADO").
+ *
+ * Para la placa del CRM la forma se valida COMPLETA (anclada): un valor mal
+ * cargado como "P-1720GVH" o "P-720GVHX" no tiene núcleo, en vez de reducirse
+ * a "720GVH" y vincular sola la unidad P-720GVH de otro cliente. Contra las
+ * 1376 placas de la base de desarrollo, anclar no deja afuera ninguna placa
+ * válida.
+ */
+const PLACA_CRM = /^\s*(?:[A-Z]{1,2}0?\s*-?\s*)?(\d{3})\s*-?\s*([A-Z]{3})\s*$/;
+
+/**
+ * En el NOMBRE de una unidad la placa viene con texto alrededor ("Bidgar Yatz
+ * - C-629BNC", "P-720GVH SIN APAGADO"): se busca dentro, pero con bordes (sin
+ * dígito antes ni letra/dígito después) por el mismo motivo.
+ */
+const PLACA_EN_NOMBRE = /(?:^|[^0-9])(\d{3})[\s-]*([A-Z]{3})(?![A-Z0-9])/;
+
+/**
+ * Extrae el núcleo de una placa del CRM, o null si no tiene forma de placa.
+ * Los valores de relleno que existen en el CRM ("NUEVO", "N/A", "EJEMPLO",
+ * "0") y las placas mal cargadas no tienen núcleo: se tratan como "sin placa"
+ * en vez de buscarlos en el catálogo.
+ */
+export function extraerNucleoPlaca(
+	valor: string | null | undefined,
+): { digitos: string; letras: string } | null {
+	const match = (valor ?? "").toUpperCase().match(PLACA_CRM);
+	if (!match?.[1] || !match[2]) return null;
+	return { digitos: match[1], letras: match[2] };
+}
+
+/** Núcleo de placa dentro del nombre de una unidad de Wialon, o null. */
+export function extraerNucleoDeNombreUnidad(
+	nombre: string | null | undefined,
+): { digitos: string; letras: string } | null {
+	const match = (nombre ?? "").toUpperCase().match(PLACA_EN_NOMBRE);
+	if (!match?.[1] || !match[2]) return null;
+	return { digitos: match[1], letras: match[2] };
+}
+
+/**
+ * Resuelve qué unidad de Wialon corresponde a una placa, buscando su núcleo
+ * dentro del nombre de la unidad ("Bidgar Yatz - C-629BNC" → 629BNC).
+ *
+ * El núcleo tiene que aparecer COMPLETO y con bordes: sin un dígito antes ni
+ * una letra/dígito después. Con una subcadena suelta, una placa incompleta
+ * ("P-123A") o un núcleo más largo ("1720GVH") elegían una unidad ajena, y
+ * como la deducción se guarda, el error quedaba fijado hasta que alguien lo
+ * notara. El prefijo se ignora a propósito: si P-720GVH y C-720GVH existen
+ * las dos, el resultado es "ambiguo" y decide un supervisor.
+ *
+ * Devuelve null cuando hay CERO o MÁS DE UNA coincidencia: una unidad llamada
+ * "A-04" no trae placa y no se puede adivinar, y si dos unidades comparten la
+ * placa elegir cualquiera mandaría al gestor de campo al vehículo equivocado.
+ * En ambos casos decide un supervisor desde la ficha.
+ */
+export function matchUnidadPorPlaca<T extends { id: number; nm: string }>(
+	placa: string,
+	items: T[],
+): {
+	unidad: T | null;
+	motivo: "ok" | "sin_placa" | "sin_coincidencia" | "ambiguo";
+	// Las unidades que coincidieron: con "ambiguo" son las opciones entre las
+	// que elige el supervisor (el catálogo de entrada puede traer más, porque
+	// la búsqueda en Wialon se prefiltra solo por los dígitos de la placa).
+	coincidencias: T[];
+} {
+	const nucleo = extraerNucleoPlaca(placa);
+	if (!nucleo) {
+		return { unidad: null, motivo: "sin_placa", coincidencias: [] };
+	}
+
+	const patron = new RegExp(
+		`(^|[^0-9])${nucleo.digitos}[\\s-]*${nucleo.letras}([^A-Z0-9]|$)`,
+	);
+	const coincidencias = items.filter((item) =>
+		patron.test((item?.nm ?? "").toUpperCase()),
+	);
+
+	if (coincidencias.length === 0) {
+		return { unidad: null, motivo: "sin_coincidencia", coincidencias };
+	}
+	if (coincidencias.length > 1) {
+		return { unidad: null, motivo: "ambiguo", coincidencias };
+	}
+	return { unidad: coincidencias[0], motivo: "ok", coincidencias };
+}
+
+/**
+ * Extrae la fecha del último paquete recibido de una respuesta de
+ * `core/search_item`. Wialon entrega epoch en SEGUNDOS (no milisegundos):
+ * pasarlo directo a `new Date()` daría 1970.
+ *
+ * Prefiere `lmsg.t` (el mensaje en sí) sobre `pos.t` (la posición dentro del
+ * mensaje); normalmente coinciden, pero una unidad puede reportar sin fix de
+ * GPS y entonces solo hay lmsg.
+ */
+export function extraerUltimaSenal(detail: {
+	item?: { pos?: { t?: number }; lmsg?: { t?: number } };
+}): Date | null {
+	// Cada candidato se valida por separado: con `lmsg.t ?? pos.t`, un lmsg con
+	// t: 0 (o basura) tapaba un pos.t válido, porque 0 no es null/undefined.
+	const valido = (t: unknown): number | null =>
+		typeof t === "number" && Number.isFinite(t) && t > 0 ? t : null;
+	const epochSegundos =
+		valido(detail?.item?.lmsg?.t) ?? valido(detail?.item?.pos?.t);
+	if (epochSegundos == null) return null;
+
+	const fecha = new Date(epochSegundos * 1000);
+	return Number.isNaN(fecha.getTime()) ? null : fecha;
+}
+
+/**
+ * Fechas del último MENSAJE (`lmsg.t`) y de la última POSICIÓN (`pos.t`) de
+ * una unidad, por separado. No son lo mismo: un rastreador puede seguir
+ * mandando mensajes sin fix de GPS, y entonces lmsg.t es reciente mientras
+ * las coordenadas (pos) son viejas. Para decir qué tan confiable es la
+ * UBICACIÓN que se muestra hay que usar pos.t; lmsg.t solo dice que el equipo
+ * sigue vivo. Epoch en segundos, igual que extraerUltimaSenal.
+ */
+export function extraerFechasUnidad(detail: {
+	item?: { pos?: { t?: number } | null; lmsg?: { t?: number } | null };
+}): { ultimoMensajeAt: Date | null; ultimaPosicionAt: Date | null } {
+	const aFecha = (t: unknown): Date | null =>
+		typeof t === "number" && Number.isFinite(t) && t > 0
+			? new Date(t * 1000)
+			: null;
+	return {
+		ultimoMensajeAt: aFecha(detail?.item?.lmsg?.t),
+		ultimaPosicionAt: aFecha(detail?.item?.pos?.t),
+	};
+}
+
 function parsePositiveInt(val: unknown, fallback: number): number {
 	const num =
 		typeof val === "number" ? val : Number.parseInt(String(val ?? ""), 10);
@@ -691,6 +830,39 @@ export class WialonClient {
 			longitude: raw.pos?.x,
 			isIgnitionOn,
 			sensorsFormatted: formattedSensors,
+		};
+	}
+
+	/**
+	 * Fecha y hora del último paquete telemático recibido de una unidad.
+	 *
+	 * `unit/calc_last` (la fuente de getUnitsStatus) entrega la telemetría ya
+	 * calculada pero NO cuándo se recibió, y para cobros ese dato es la mitad de
+	 * la historia: una posición de hace tres días no dice dónde está el vehículo,
+	 * dice que el GPS dejó de reportar. Se lee de `core/search_item`, que sí trae
+	 * `pos.t` / `lmsg.t`.
+	 */
+	public async getUnitLastSignal(unitId: number): Promise<Date | null> {
+		return (await this.getUnitLastTimes(unitId)).ultimoMensajeAt;
+	}
+
+	/**
+	 * Último mensaje y última posición de la unidad, por separado (ver
+	 * extraerFechasUnidad): la frescura de la ubicación se mide con la posición.
+	 */
+	public async getUnitLastTimes(
+		unitId: number,
+	): Promise<{ ultimoMensajeAt: Date | null; ultimaPosicionAt: Date | null }> {
+		// flags 1025 = datos básicos + último mensaje y posición; es lo que la
+		// colección de La Legión usa para leer lmsg, y evita pedir sensores y
+		// propiedades que aquí no se ocupan.
+		const detail = await this.getUnitDetail(unitId, 1025);
+		const fechas = extraerFechasUnidad(detail);
+		// Mismo criterio que extraerUltimaSenal para el mensaje: sin lmsg, la
+		// posición es lo último que se sabe del equipo.
+		return {
+			ultimoMensajeAt: fechas.ultimoMensajeAt ?? fechas.ultimaPosicionAt,
+			ultimaPosicionAt: fechas.ultimaPosicionAt,
 		};
 	}
 

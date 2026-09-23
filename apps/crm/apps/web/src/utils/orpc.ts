@@ -61,7 +61,12 @@ export const queryClient = new QueryClient({
 				action: {
 					label: "retry",
 					onClick: () => {
-						queryClient.invalidateQueries();
+						// Las queries con meta.auditada (GPS de la Ficha 360, CB-118)
+						// registran una fila de auditoría por fetch: reintentar "todo"
+						// no puede re-consultarlas con un motivo viejo.
+						queryClient.invalidateQueries({
+							predicate: (query) => query.meta?.auditada !== true,
+						});
 					},
 				},
 			});

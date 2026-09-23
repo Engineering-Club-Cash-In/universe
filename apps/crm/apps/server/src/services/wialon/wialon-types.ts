@@ -109,6 +109,14 @@ export const wialonUnitsCatalogOutputSchema = z.object({
 		z.object({
 			id: z.number(),
 			nm: z.string(),
+			// Créditos del vehículo de la unidad (CB-118): "vinculado" = unidad
+			// guardada en el vehículo; "placa" = deducido por núcleo de placa.
+			creditos: z.array(
+				z.object({
+					numeroSifco: z.string(),
+					origen: z.enum(["vinculado", "placa"]),
+				}),
+			),
 		}),
 	),
 });
@@ -131,6 +139,133 @@ export const wialonUnitsCatalogInputSchema = z
 export type WialonUnitsCatalogInput = z.input<
 	typeof wialonUnitsCatalogInputSchema
 >;
+
+// ── GPS del vehículo en la Ficha 360 (CB-118) ─────────────────────────────────
+
+export const gpsVehiculoInputSchema = z.object({
+	// El caso da el gate de acceso (asesor asignado) y el SIFCO de la bitácora;
+	// el servidor verifica que vehicleId sea el vehículo de ese caso.
+	casoCobroId: z.string().uuid(),
+	vehicleId: z.string().uuid(),
+	// La historia exige motivo obligatorio para CADA consulta de ubicación —
+	// no es metadata opcional, es la condición para que el handler siquiera
+	// llame a Wialon. Min 5: un motivo de una palabra suelta ("sí", "ver") no
+	// deja rastro útil en la auditoría.
+	motivo: z.string().trim().min(5).max(300),
+});
+export type GpsVehiculoInput = z.infer<typeof gpsVehiculoInputSchema>;
+
+/**
+ * Respuesta de getGpsVehiculo como unión discriminada por `estado`.
+ *
+ * El frontend no debe inferir nada: "no hay unidad vinculada" y "Wialon está
+ * caído" se ven parecido si solo se devuelve null, pero para el asesor son
+ * situaciones distintas y se muestran distinto. Por eso cada caso viaja con su
+ * propio estado y su motivo.
+ */
+export const gpsVehiculoOutputSchema = z.discriminatedUnion("estado", [
+	z.object({
+		estado: z.literal("vinculado"),
+		// Si la consulta quedó en la bitácora. Con ubicación siempre es true
+		// (sin auditoría no se muestra ubicación).
+		auditada: z.boolean(),
+		unitId: z.number(),
+		unitName: z.string(),
+		// "persistido" = lo fijó un supervisor; "placa" = lo dedujo el sistema
+		// por coincidencia de placa (en esta consulta o en una anterior, ya
+		// guardado con wialon_vinculado_por = "auto:placa"). Se muestra en la
+		// ficha para que el supervisor sepa si el vínculo es una deducción.
+		vinculoOrigen: z.enum(["persistido", "placa"]),
+		// Placa del vehículo en el CRM: precarga el buscador cuando el
+		// supervisor corrige una unidad deducida ("¿No es esta la unidad?").
+		placa: z.string().nullable(),
+		telemetria: z.object({
+			mileageKm: z.number().optional(),
+			mileageFormatted: z.string().optional(),
+			engineHours: z.number().optional(),
+			engineHoursFormatted: z.string().optional(),
+			speedKmh: z.number().optional(),
+			latitude: z.number().optional(),
+			longitude: z.number().optional(),
+			isIgnitionOn: z.boolean().optional(),
+			// Último mensaje del equipo (lmsg.t): dice que el GPS sigue vivo.
+			ultimaSenalAt: z.date().nullable(),
+			// Última posición (pos.t): de cuándo son latitude/longitude. La
+			// frescura de la UBICACIÓN se mide con esta, no con ultimaSenalAt.
+			ultimaPosicionAt: z.date().nullable(),
+		}),
+	}),
+	z.object({
+		estado: z.literal("sin_vinculo"),
+		auditada: z.boolean(),
+		motivo: z.enum([
+			"sin_placa",
+			"sin_coincidencia",
+			"ambiguo",
+			// La unidad que coincide con la placa ya está guardada en otro
+			// vehículo (el GPS se reasignó): no se deduce, confirma un supervisor.
+			"asignada_a_otro",
+		]),
+		placa: z.string().nullable(),
+		// Solo se llenan cuando el motivo es "ambiguo": son las unidades entre las
+		// que el supervisor tiene que elegir.
+		candidatos: z.array(z.object({ id: z.number(), nm: z.string() })),
+	}),
+	z.object({
+		estado: z.literal("no_disponible"),
+		auditada: z.boolean(),
+		error: z.object({ code: z.string(), message: z.string() }),
+	}),
+]);
+export type GpsVehiculoOutput = z.infer<typeof gpsVehiculoOutputSchema>;
+
+export const vincularUnidadInputSchema = z.object({
+	vehicleId: z.string().uuid(),
+	unitId: z.number().int().positive(),
+	unitName: z.string().trim().min(1).max(200),
+});
+export type VincularUnidadInput = z.infer<typeof vincularUnidadInputSchema>;
+
+export const vincularUnidadOutputSchema = z.object({
+	success: z.boolean(),
+	unitId: z.number(),
+	unitName: z.string(),
+	vinculadoAt: z.date(),
+});
+
+// ── Bitácora de consultas GPS (CB-118) ────────────────────────────────────────
+// Solo admin (D-08/D-09: /admin/gps es exclusivamente administrativo, no
+// depende del rol de cobros). Un supervisor de cobros ve el motivo de SU
+// PROPIA consulta en la ficha; esto es la vista global de TODOS los asesores.
+
+export const gpsBitacoraInputSchema = z.object({
+	page: z.number().int().min(1).default(1),
+	perPage: z.number().int().min(1).max(100).default(25),
+	// Filtro por SIFCO: el admin investiga "¿quién consultó este crédito?".
+	numeroCreditoSifco: z.string().trim().optional(),
+});
+export type GpsBitacoraInput = z.infer<typeof gpsBitacoraInputSchema>;
+
+export const gpsBitacoraOutputSchema = z.object({
+	total: z.number(),
+	page: z.number(),
+	perPage: z.number(),
+	items: z.array(
+		z.object({
+			id: z.string(),
+			vehicleId: z.string(),
+			numeroCreditoSifco: z.string().nullable(),
+			motivo: z.string(),
+			unitId: z.string().nullable(),
+			unitName: z.string().nullable(),
+			userId: z.string(),
+			userNombre: z.string().nullable(),
+			userEmail: z.string().nullable(),
+			createdAt: z.date(),
+		}),
+	),
+});
+export type GpsBitacoraOutput = z.infer<typeof gpsBitacoraOutputSchema>;
 
 // ── Búsqueda de Unidades (core/search_items) ──────────────────────────────────
 export interface WialonSensorMeta {

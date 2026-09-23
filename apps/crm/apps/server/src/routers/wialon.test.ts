@@ -1,6 +1,16 @@
-import { describe, expect, it, mock } from "bun:test";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	mock,
+	spyOn,
+} from "bun:test";
 import { call, ORPCError } from "@orpc/server";
+import { casosCobros } from "../db/schema/cobros";
 import type { Context } from "../lib/context";
+import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	setWialonClient,
 	WialonClient,
@@ -11,17 +21,227 @@ import { mapWialonErrorToOrpc, wialonRouter } from "./wialon";
 // Rol "admin" satisface también canAccessCobros/canAssignCobros/canAccessAdmin,
 // así que un único mock de db sirve para todas las variantes de procedimiento
 // (cobrosProcedure, cobrosSupervisorProcedure, adminProcedure) usadas en este archivo.
-mock.module("../db", () => ({
-	db: {
-		select: () => ({
-			from: () => ({
-				where: () => ({
-					limit: async () => [{ id: "user-test", role: "admin" }],
+// Los tests de CB-118 (getGpsVehiculo) necesitan que el mismo mock devuelva a
+// veces el usuario y a veces la fila del vehículo, y que a veces falle como
+// falla Postgres cuando la migración 0057 no está aplicada. Estas dos variables
+// dejan que cada test decida sin montar un mock por caso.
+let filaVehiculoMock: Record<string, unknown> | null = null;
+// Rol del usuario que devuelve el select del middleware de auth.
+let rolUsuarioMock = "admin";
+let errorSelectVehiculo: Error | null = null;
+let insertsGpsAuditoria: Record<string, unknown>[] = [];
+let bitacoraFilasMock: Record<string, unknown>[] = [];
+// UPDATEs sobre vehicles (vínculo manual o deducido por placa) y cuántas filas
+// "afecta" el mock: 0 simula un vehicleId inexistente.
+let updatesVehiculo: Record<string, unknown>[] = [];
+let filasAfectadasUpdate = 1;
+// Gate de la ficha (resolverCasoParaGps): si el asesor tiene acceso al caso y
+// qué vehículo/SIFCO devuelve el join caso ⨝ oportunidad ⨝ contrato.
+let accesoCasoMock = true;
+// Si se define, reemplaza a casoGpsMock con varias filas (SIFCO duplicado).
+let casoGpsFilasMock: Record<string, unknown>[] | null = null;
+// Si la unidad deducida por placa ya está guardada en otro vehículo.
+let unidadAsignadaAOtroMock = false;
+// Cuántas veces se tomó el lock por unidad (pg_advisory_xact_lock vía execute).
+let locksUnidad = 0;
+// Simula que el INSERT de la bitácora falla (ej. tabla sin migrar).
+let errorInsertAuditoria: Error | null = null;
+// Simula que un UPDATE sobre vehicles falla (liberar un vínculo vencido).
+let errorUpdateVehiculo: Error | null = null;
+let casoGpsMock: Record<string, unknown> | null = {
+	casoSifco: "01010214100000",
+	vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+	vehiculoContrato: null,
+};
+// Filas vehicles ⨝ opportunities que lee creditosPorUnidad (catálogo admin).
+let catalogoCreditosMock: Record<string, unknown>[] = [];
+// Filas caso ⨝ contrato ⨝ vehículo (segunda fuente de creditosPorUnidad).
+let catalogoCreditosContratoMock: Record<string, unknown>[] = [];
+let bitacoraTotalMock = 0;
+
+function mockDbAdmin() {
+	const mockDb = {
+		// vincularUnidadWialon desvincula y vincula en una transacción: el mock
+		// corre el callback con el mismo objeto (sin rollback real).
+		transaction: async <T>(fn: (tx: unknown) => Promise<T>) => fn(mockDb),
+		execute: async () => {
+			locksUnidad++;
+			return [];
+		},
+		select: (campos?: Record<string, unknown>) => {
+			// El select del middleware de auth no pasa proyección; los de
+			// leerVehiculoParaGps sí, y son los únicos que piden licensePlate.
+			// getGpsBitacora es el único que pide userNombre (join con user).
+			const esVehiculo = Boolean(campos && "licensePlate" in campos);
+			const pideVinculo = Boolean(campos && "wialonUnitId" in campos);
+			const esBitacora = Boolean(campos && "userNombre" in campos);
+			const esConteoBitacora = Boolean(
+				campos && "total" in campos && Object.keys(campos).length === 1,
+			);
+
+			// assertAccesoCasoCobro: select({ id }) a casos_cobros.
+			if (campos && Object.keys(campos).length === 1 && "id" in campos) {
+				return {
+					from: () => ({
+						where: () => ({
+							limit: async () => (accesoCasoMock ? [{ id: "caso" }] : []),
+						}),
+					}),
+				};
+			}
+
+			// getGpsVehiculo: ¿la unidad deducida ya está en otro vehículo?
+			if (campos && "vehiculoConUnidad" in campos) {
+				return {
+					from: () => ({
+						where: () => ({
+							limit: async () => {
+								// Sin la 0057 esta consulta también revienta: el handler
+								// no debe llegar a correrla en ese caso.
+								if (errorSelectVehiculo) throw errorSelectVehiculo;
+								return unidadAsignadaAOtroMock
+									? [{ vehiculoConUnidad: "otro" }]
+									: [];
+							},
+						}),
+					}),
+				};
+			}
+
+			// resolverCasoParaGps: caso ⨝ oportunidades con su SIFCO (todas).
+			if (campos && "casoSifco" in campos) {
+				const encadenable = {
+					leftJoin: () => encadenable,
+					where: async () =>
+						casoGpsFilasMock ?? (casoGpsMock ? [casoGpsMock] : []),
+				};
+				return { from: () => encadenable };
+			}
+
+			// creditosPorUnidad es el único select que pide numeroSifco: from →
+			// innerJoin → where, que resuelve con las filas del mock.
+			if (campos && "numeroSifco" in campos) {
+				return {
+					from: (tabla: unknown) => {
+						const filas =
+							tabla === casosCobros
+								? catalogoCreditosContratoMock
+								: catalogoCreditosMock;
+						const encadenable = {
+							innerJoin: () => encadenable,
+							where: async () => filas,
+						};
+						return encadenable;
+					},
+				};
+			}
+
+			if (esBitacora) {
+				// Cadena completa que usa getGpsBitacora: from → leftJoin → where →
+				// orderBy → limit → offset. Cada eslabón devuelve el mismo objeto
+				// encadenable hasta el final, que resuelve async con las filas mock.
+				const encadenable = {
+					leftJoin: () => encadenable,
+					where: () => encadenable,
+					orderBy: () => encadenable,
+					limit: () => encadenable,
+					offset: async () => bitacoraFilasMock,
+				};
+				return { from: () => encadenable };
+			}
+
+			if (esConteoBitacora) {
+				return {
+					from: () => ({
+						where: async () => [{ total: bitacoraTotalMock }],
+					}),
+				};
+			}
+
+			return {
+				from: () => ({
+					where: () => ({
+						limit: async () => {
+							if (!esVehiculo)
+								return [{ id: "user-test", role: rolUsuarioMock }];
+							// Simula "column wialon_unit_id does not exist": solo revienta
+							// el SELECT que nombra las columnas nuevas.
+							if (pideVinculo && errorSelectVehiculo) {
+								throw errorSelectVehiculo;
+							}
+							if (!filaVehiculoMock) return [];
+							const { wialonUnitId, wialonUnitName, ...resto } =
+								filaVehiculoMock;
+							return [
+								pideVinculo
+									? filaVehiculoMock
+									: { ...resto, licensePlate: filaVehiculoMock.licensePlate },
+							];
+						},
+					}),
 				}),
+			};
+		},
+		update: () => ({
+			set: (data: Record<string, unknown>) => ({
+				// Se puede await-ear directo (fijarVinculoPorPlaca) o encadenar
+				// .returning() (vincularUnidadWialon), igual que drizzle.
+				where: () => {
+					if (errorUpdateVehiculo) {
+						// Rechazo perezoso: solo se crea si alguien lo await-ea o
+						// encadena .returning() (un Promise.reject ansioso quedaría
+						// sin manejar en el camino que usa .returning()).
+						const error = errorUpdateVehiculo;
+						return {
+							// biome-ignore lint/suspicious/noThenProperty: imita el query builder thenable de drizzle
+							then: (
+								ok: (v: unknown) => unknown,
+								fallo: (e: unknown) => unknown,
+							) => Promise.reject(error).then(ok, fallo),
+							returning: async () => {
+								throw error;
+							},
+						};
+					}
+					updatesVehiculo.push(data);
+					const filas = Array.from({ length: filasAfectadasUpdate }, () => ({
+						id: "11111111-1111-1111-1111-111111111111",
+					}));
+					return Object.assign(Promise.resolve(undefined), {
+						returning: async () => filas,
+					});
+				},
 			}),
 		}),
-	},
-}));
+		// getGpsVehiculo audita cada consulta en gps_consulta_logs (CB-118).
+		// Se captura en insertsGpsAuditoria para poder aserir motivo/usuario.
+		insert: () => ({
+			values: async (data: Record<string, unknown>) => {
+				if (errorInsertAuditoria) throw errorInsertAuditoria;
+				insertsGpsAuditoria.push(data);
+			},
+		}),
+	};
+	return mockDb;
+}
+
+mock.module("../db", () => ({ db: mockDbAdmin() }));
+
+/** Wialon que responde core/search_item con el nombre dado (o error 7). */
+function wialonConNombre(nm: string | null) {
+	return new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+		const bodyStr = String(init?.body || "");
+		if (bodyStr.includes("token%2Flogin")) {
+			return new Response(JSON.stringify({ eid: "sid-v" }), { status: 200 });
+		}
+		return new Response(
+			JSON.stringify(
+				nm ? { item: { id: 28554757, nm }, flags: 1 } : { error: 7 },
+			),
+			{ status: 200 },
+		);
+	});
+}
 
 describe("wialonRouter", () => {
 	it("expone todos los procedimientos requeridos", () => {
@@ -505,18 +725,10 @@ describe("wialonRouter", () => {
 					}),
 				).rejects.toThrow(ORPCError);
 			} finally {
-				// Restaurar el mock global (rol admin) para el resto de la suite
-				mock.module("../db", () => ({
-					db: {
-						select: () => ({
-							from: () => ({
-								where: () => ({
-									limit: async () => [{ id: "user-test", role: "admin" }],
-								}),
-							}),
-						}),
-					},
-				}));
+				// Restaurar el mock global (rol admin) para el resto de la suite.
+				// Reusa mockDbAdmin para no perder `update` ni el select de vehículos
+				// que necesitan los tests de CB-118 más abajo.
+				mock.module("../db", () => ({ db: mockDbAdmin() }));
 			}
 		});
 	});
@@ -775,6 +987,2172 @@ describe("wialonRouter", () => {
 			} finally {
 				setWialonClient(null);
 			}
+		});
+	});
+
+	describe("getWialonUnitsCatalog — créditos por unidad (CB-118)", () => {
+		afterEach(() => {
+			catalogoCreditosMock = [];
+			catalogoCreditosContratoMock = [];
+			setWialonClient(null);
+		});
+
+		it("muestra el SIFCO vinculado o deducido por placa de cada unidad", async () => {
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 3,
+							indexFrom: 0,
+							indexTo: 2,
+							items: [
+								{ id: 1, nm: "P-720GVH SIN APAGADO" },
+								{ id: 2, nm: "C-629BNC" },
+								{ id: 3, nm: "A-04" },
+							],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				// Vínculo guardado: manda sobre cualquier deducción.
+				{
+					wialonUnitId: 2,
+					licensePlate: "C-629BNC",
+					numeroSifco: "01010214100002",
+				},
+				// Sin vínculo, placa con "P0-": se deduce por núcleo.
+				{
+					wialonUnitId: null,
+					licensePlate: "P0-720GVH",
+					numeroSifco: "01010214100001",
+				},
+				// Mismo núcleo pero YA vinculado a otra unidad: no se deduce aquí.
+				{
+					wialonUnitId: 99,
+					licensePlate: "P-720GVH",
+					numeroSifco: "01010214199999",
+				},
+			];
+
+			const res = await call(wialonRouter.getWialonUnitsCatalog, undefined, {
+				context: {
+					headers: new Headers(),
+					session: { user: { id: "admin-c", email: "a@example.com" } },
+					user: { id: "admin-c", email: "a@example.com", role: "admin" },
+					userId: "admin-c",
+					userRole: "admin",
+				} as unknown as Context,
+			});
+
+			const porId = new Map(res.items.map((u) => [u.id, u.creditos]));
+			expect(porId.get(1)).toEqual([
+				{ numeroSifco: "01010214100001", origen: "placa" },
+			]);
+			expect(porId.get(2)).toEqual([
+				{ numeroSifco: "01010214100002", origen: "vinculado" },
+			]);
+			expect(porId.get(3)).toEqual([]);
+		});
+
+		it("no deduce el SIFCO cuando dos unidades comparten la placa (ambiguo, igual que la ficha)", async () => {
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 2,
+							indexFrom: 0,
+							indexTo: 1,
+							items: [
+								{ id: 1, nm: "P-720GVH SIN APAGADO" },
+								{ id: 2, nm: "C-720GVH - CON APAGADO" },
+							],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: null,
+					licensePlate: "P-720GVH",
+					numeroSifco: "01010214100001",
+				},
+			];
+			const res = await call(wialonRouter.getWialonUnitsCatalog, undefined, {
+				context: {
+					headers: new Headers(),
+					session: { user: { id: "admin-c", email: "a@example.com" } },
+					user: { id: "admin-c", email: "a@example.com", role: "admin" },
+					userId: "admin-c",
+					userRole: "admin",
+				} as unknown as Context,
+			});
+			expect(res.items.map((u) => u.creditos)).toEqual([[], []]);
+		});
+
+		it("con filtro, detecta la ambigüedad contra el catálogo completo", async () => {
+			// El filtro devuelve una sola unidad, pero el catálogo completo tiene
+			// otra con el mismo núcleo: no se deduce.
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					const params = JSON.parse(
+						new URLSearchParams(bodyStr).get("params") || "{}",
+					);
+					const filtrado = params.spec?.propValueMask !== "*";
+					const items = filtrado
+						? [{ id: 1, nm: "P-720GVH SIN APAGADO" }]
+						: [
+								{ id: 1, nm: "P-720GVH SIN APAGADO" },
+								{ id: 2, nm: "C-720GVH - CON APAGADO" },
+							];
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: items.length,
+							indexFrom: 0,
+							indexTo: items.length - 1,
+							items,
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: null,
+					licensePlate: "P-720GVH",
+					numeroSifco: "01010214100001",
+				},
+			];
+			const res = await call(
+				wialonRouter.getWialonUnitsCatalog,
+				{ filterName: "SIN APAGADO" },
+				{
+					context: {
+						headers: new Headers(),
+						session: { user: { id: "admin-c", email: "a@example.com" } },
+						user: { id: "admin-c", email: "a@example.com", role: "admin" },
+						userId: "admin-c",
+						userRole: "admin",
+					} as unknown as Context,
+				},
+			);
+			expect(res.items[0]?.creditos).toEqual([]);
+		});
+
+		it("toma también el crédito cuyo vehículo viene del contrato del caso", async () => {
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 1,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [{ id: 1, nm: "P-720GVH SIN APAGADO" }],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosContratoMock = [
+				{
+					wialonUnitId: null,
+					licensePlate: "P-720GVH",
+					numeroSifco: "01010214100003",
+				},
+			];
+
+			const res = await call(wialonRouter.getWialonUnitsCatalog, undefined, {
+				context: {
+					headers: new Headers(),
+					session: { user: { id: "admin-c", email: "a@example.com" } },
+					user: { id: "admin-c", email: "a@example.com", role: "admin" },
+					userId: "admin-c",
+					userRole: "admin",
+				} as unknown as Context,
+			});
+
+			expect(res.items[0]?.creditos).toEqual([
+				{ numeroSifco: "01010214100003", origen: "placa" },
+			]);
+		});
+
+		it("con filtro, no invalida un vínculo automático cuya unidad no está en el resultado", async () => {
+			// El filtro trae solo la unidad 6 (mismo núcleo). La 5, vinculada al
+			// vehículo, no está en la lista: eso no la vuelve inválida, y el
+			// crédito no debe pasar a la unidad 6 "por placa".
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 1,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [{ id: 6, nm: "C-629BNC repuesto" }],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: 5,
+					wialonVinculadoPor: "auto:placa",
+					licensePlate: "C-629BNC",
+					numeroSifco: "01010214100009",
+				},
+			];
+			const res = await call(
+				wialonRouter.getWialonUnitsCatalog,
+				{ filterName: "repuesto" },
+				{
+					context: {
+						headers: new Headers(),
+						session: { user: { id: "admin-c", email: "a@example.com" } },
+						user: { id: "admin-c", email: "a@example.com", role: "admin" },
+						userId: "admin-c",
+						userRole: "admin",
+					} as unknown as Context,
+				},
+			);
+			expect(res.items[0]?.creditos).toEqual([]);
+		});
+
+		it("con filtro, revalida el vínculo vencido contra el catálogo completo", async () => {
+			// La unidad 5 (vinculada) se renombró y el filtro la deja afuera; la
+			// 6, visible, ahora tiene la placa del vehículo: el SIFCO va a la 6.
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					const params = JSON.parse(
+						new URLSearchParams(bodyStr).get("params") || "{}",
+					);
+					const items =
+						params.spec?.propValueMask !== "*"
+							? [{ id: 6, nm: "C-629BNC CON APAGADO" }]
+							: [
+									{ id: 5, nm: "Otro Cliente - P-111AAA" },
+									{ id: 6, nm: "C-629BNC CON APAGADO" },
+								];
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: items.length,
+							indexFrom: 0,
+							indexTo: items.length - 1,
+							items,
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: 5,
+					wialonVinculadoPor: "auto:placa",
+					licensePlate: "C-629BNC",
+					numeroSifco: "01010214100009",
+				},
+			];
+			const res = await call(
+				wialonRouter.getWialonUnitsCatalog,
+				{ filterName: "CON APAGADO" },
+				{
+					context: {
+						headers: new Headers(),
+						session: { user: { id: "admin-c", email: "a@example.com" } },
+						user: { id: "admin-c", email: "a@example.com", role: "admin" },
+						userId: "admin-c",
+						userRole: "admin",
+					} as unknown as Context,
+				},
+			);
+			expect(res.items[0]?.creditos).toEqual([
+				{ numeroSifco: "01010214100009", origen: "placa" },
+			]);
+		});
+
+		it("no cuenta como vinculado un vínculo automático cuya placa hoy es ambigua", async () => {
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 2,
+							indexFrom: 0,
+							indexTo: 1,
+							items: [
+								{ id: 5, nm: "C-629BNC" },
+								{ id: 6, nm: "C-629BNC repuesto" },
+							],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: 5,
+					wialonVinculadoPor: "auto:placa",
+					licensePlate: "C-629BNC",
+					numeroSifco: "01010214100009",
+				},
+			];
+			const res = await call(wialonRouter.getWialonUnitsCatalog, undefined, {
+				context: {
+					headers: new Headers(),
+					session: { user: { id: "admin-c", email: "a@example.com" } },
+					user: { id: "admin-c", email: "a@example.com", role: "admin" },
+					userId: "admin-c",
+					userRole: "admin",
+				} as unknown as Context,
+			});
+			// Ni vinculado (placa ambigua) ni deducido (dos unidades).
+			expect(res.items.map((u) => u.creditos)).toEqual([[], []]);
+		});
+
+		it("no cuenta como vinculado un vínculo automático que ya no coincide con la placa", async () => {
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 1,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [{ id: 5, nm: "C-629BNC" }],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: 5,
+					wialonVinculadoPor: "auto:placa",
+					licensePlate: "P-999ZZZ",
+					numeroSifco: "01010214100009",
+				},
+			];
+			const res = await call(wialonRouter.getWialonUnitsCatalog, undefined, {
+				context: {
+					headers: new Headers(),
+					session: { user: { id: "admin-c", email: "a@example.com" } },
+					user: { id: "admin-c", email: "a@example.com", role: "admin" },
+					userId: "admin-c",
+					userRole: "admin",
+				} as unknown as Context,
+			});
+			expect(res.items[0]?.creditos).toEqual([]);
+		});
+	});
+
+	describe("endpoints crudos de telemetría (CB-118)", () => {
+		const contexto = (rol: string) =>
+			({
+				headers: new Headers(),
+				session: { user: { id: "u-1", email: "u@example.com" } },
+				user: { id: "u-1", email: "u@example.com", role: rol },
+				userId: "u-1",
+				userRole: rol,
+			}) as unknown as Context;
+
+		afterEach(() => {
+			rolUsuarioMock = "admin";
+			setWialonClient(null);
+		});
+
+		it("un asesor de cobros no puede leer telemetría cruda de unidades arbitrarias", async () => {
+			rolUsuarioMock = "cobros";
+			await expect(
+				call(
+					wialonRouter.getWialonUnitsStatus,
+					{ unitIds: [1] },
+					{
+						context: contexto("cobros"),
+					},
+				),
+			).rejects.toBeInstanceOf(ORPCError);
+			await expect(
+				call(
+					wialonRouter.getWialonUnitDetail,
+					{ unitId: 1 },
+					{
+						context: contexto("cobros"),
+					},
+				),
+			).rejects.toBeInstanceOf(ORPCError);
+			await expect(
+				call(wialonRouter.getWialonUnits, undefined, {
+					context: contexto("cobros"),
+				}),
+			).rejects.toBeInstanceOf(ORPCError);
+		});
+
+		it("el buscador del supervisor fuerza flags:1 (sin posición)", async () => {
+			rolUsuarioMock = "cobros_supervisor";
+			const flags: unknown[] = [];
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-sel" }), {
+							status: 200,
+						});
+					}
+					flags.push(
+						JSON.parse(new URLSearchParams(bodyStr).get("params") || "{}")
+							.flags,
+					);
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 0,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			await call(
+				wialonRouter.getWialonUnits,
+				{ filterName: "629", flags: 8392707 },
+				{ context: contexto("cobros_supervisor") },
+			);
+			expect(flags).toEqual([1]);
+		});
+	});
+
+	describe("getGpsVehiculo (CB-118)", () => {
+		const cobrosContext = {
+			headers: new Headers(),
+			session: { user: { id: "user-cob-1", email: "asesor@example.com" } },
+			user: { id: "user-cob-1", email: "asesor@example.com", role: "admin" },
+			userId: "user-cob-1",
+			userRole: "admin",
+		};
+
+		const loginOk = (bodyStr: string) =>
+			bodyStr.includes("token%2Flogin")
+				? new Response(
+						JSON.stringify({ eid: "sid-gps", user: { id: 1, nm: "GPS" } }),
+						{ status: 200 },
+					)
+				: null;
+
+		function clienteWialon(handler: (bodyStr: string) => Response) {
+			return new WialonClient(
+				{ token: "tok-gps" },
+				async (_: unknown, init?: RequestInit) => {
+					const bodyStr = String(init?.body || "");
+					return loginOk(bodyStr) ?? handler(bodyStr);
+				},
+			);
+		}
+
+		afterEach(() => {
+			filaVehiculoMock = null;
+			errorSelectVehiculo = null;
+			insertsGpsAuditoria = [];
+			updatesVehiculo = [];
+			setWialonClient(null);
+		});
+
+		it("devuelve telemetría y última señal cuando el vínculo ya está fijado", async () => {
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+			};
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					if (bodyStr.includes("unit%2Fcalc_last")) {
+						return new Response(
+							JSON.stringify([
+								{ i: 28554757, pos: { y: 14.6, x: -90.5, s: 12 } },
+							]),
+							{ status: 200 },
+						);
+					}
+					if (bodyStr.includes("core%2Fsearch_item&")) {
+						return new Response(
+							JSON.stringify({
+								item: { id: 28554757, nm: "u", lmsg: { t: 1773704628 } },
+								flags: 1025,
+							}),
+							{ status: 200 },
+						);
+					}
+					return new Response(JSON.stringify({}), { status: 200 });
+				}),
+			);
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			expect(res.estado).toBe("vinculado");
+			if (res.estado !== "vinculado") throw new Error("estado inesperado");
+			expect(res.unitId).toBe(28554757);
+			expect(res.vinculoOrigen).toBe("persistido");
+			expect(res.auditada).toBe(true);
+			expect(res.placa).toBe("C-629BNC");
+			expect(res.telemetria.latitude).toBe(14.6);
+			expect(res.telemetria.ultimaSenalAt?.getTime()).toBe(1773704628 * 1000);
+			// Sin pos.t no hay fecha de posición: la UI no puede decir "reciente".
+			expect(res.telemetria.ultimaPosicionAt).toBeNull();
+
+			// CB-118: "cada consulta queda auditada con usuario, motivo y cuenta".
+			expect(insertsGpsAuditoria).toHaveLength(1);
+			// El SIFCO de la bitácora sale del caso, no de lo que mande el cliente.
+			expect(insertsGpsAuditoria[0]).toMatchObject({
+				numeroCreditoSifco: "01010214100000",
+				vehicleId: "11111111-1111-1111-1111-111111111111",
+				motivo: "Verificar ubicación para gestión de cobro",
+				unitId: "28554757",
+				userId: "user-cob-1",
+			});
+		});
+
+		it("audita la consulta aunque no encuentre unidad (motivo importa igual)", async () => {
+			filaVehiculoMock = {
+				licensePlate: null,
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(clienteWialon(() => new Response("{}", { status: 200 })));
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Cliente en mora crítica, ubicar para recuperación",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			expect(res.estado).toBe("sin_vinculo");
+			expect(insertsGpsAuditoria).toHaveLength(1);
+			expect(insertsGpsAuditoria[0]).toMatchObject({
+				motivo: "Cliente en mora crítica, ubicar para recuperación",
+				unitId: null,
+			});
+		});
+
+		it("rechaza un motivo demasiado corto sin llegar a consultar Wialon", async () => {
+			await expect(
+				call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "ok",
+					},
+					{ context: cobrosContext as unknown as Context },
+				),
+			).rejects.toThrow();
+			// Ni siquiera llegó a intentar auditar: la validación de zod corta antes.
+			expect(insertsGpsAuditoria).toHaveLength(0);
+		});
+
+		describe("asignación en cartera (el caso no basta)", () => {
+			const contextoAsesor = {
+				headers: new Headers(),
+				session: { user: { id: "user-ase", email: "Asesor@Example.com" } },
+				user: { id: "user-ase", email: "Asesor@Example.com", role: "cobros" },
+				userId: "user-ase",
+				userRole: "cobros",
+			} as unknown as Context;
+
+			let spyCredito: { mockRestore: () => void } | null = null;
+			afterEach(() => {
+				rolUsuarioMock = "admin";
+				spyCredito?.mockRestore();
+				spyCredito = null;
+			});
+
+			it("un asesor con el crédito asignado en cartera consulta normal (lectura sin cache)", async () => {
+				rolUsuarioMock = "cobros";
+				const getCredito = spyOn(
+					carteraBackClient,
+					"getCredito",
+				).mockResolvedValue({
+					asesor: { emailCashIn: "asesor@example.com" },
+				} as never);
+				spyCredito = getCredito;
+				filaVehiculoMock = {
+					licensePlate: null,
+					wialonUnitId: null,
+					wialonUnitName: null,
+				};
+				setWialonClient(
+					clienteWialon(() => new Response("{}", { status: 200 })),
+				);
+
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: contextoAsesor },
+				);
+				expect(res.estado).toBe("sin_vinculo");
+				expect(getCredito).toHaveBeenCalledWith("01010214100000", false);
+			});
+
+			it("un asesor con un caso auto-creado sobre un crédito de OTRO asesor queda afuera", async () => {
+				rolUsuarioMock = "cobros";
+				spyCredito = spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+					asesor: { emailCashIn: "otro.asesor@example.com" },
+				} as never);
+				const svcs: string[] = [];
+				setWialonClient(
+					clienteWialon((bodyStr) => {
+						svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+						return new Response("{}", { status: 200 });
+					}),
+				);
+
+				await expect(
+					call(
+						wialonRouter.getGpsVehiculo,
+						{
+							casoCobroId: "33333333-3333-3333-3333-333333333333",
+							vehicleId: "11111111-1111-1111-1111-111111111111",
+							motivo: "Verificar ubicación para gestión de cobro",
+						},
+						{ context: contextoAsesor },
+					),
+				).rejects.toMatchObject({ code: "FORBIDDEN" });
+				expect(insertsGpsAuditoria).toHaveLength(0);
+				expect(svcs).toEqual([]);
+			});
+		});
+
+		it("rechaza un caso al que el asesor no tiene acceso, sin consultar ni auditar", async () => {
+			accesoCasoMock = false;
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "u",
+			};
+			try {
+				await expect(
+					call(
+						wialonRouter.getGpsVehiculo,
+						{
+							casoCobroId: "33333333-3333-3333-3333-333333333333",
+							vehicleId: "11111111-1111-1111-1111-111111111111",
+							motivo: "Verificar ubicación para gestión de cobro",
+						},
+						{ context: cobrosContext as unknown as Context },
+					),
+				).rejects.toMatchObject({ code: "NOT_FOUND" });
+				expect(insertsGpsAuditoria).toHaveLength(0);
+			} finally {
+				accesoCasoMock = true;
+			}
+		});
+
+		it("rechaza un vehículo que no es el del caso (caso propio + vehículo ajeno)", async () => {
+			// Sin esta validación el gate de acceso se saltaba pasando el UUID de
+			// un caso asignado junto con el vehículo de otro cliente.
+			casoGpsMock = {
+				casoSifco: "01010214100000",
+				vehiculoOportunidad: null,
+				vehiculoContrato: "99999999-9999-9999-9999-999999999999",
+			};
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "u",
+			};
+			try {
+				await expect(
+					call(
+						wialonRouter.getGpsVehiculo,
+						{
+							casoCobroId: "33333333-3333-3333-3333-333333333333",
+							vehicleId: "11111111-1111-1111-1111-111111111111",
+							motivo: "Verificar ubicación para gestión de cobro",
+						},
+						{ context: cobrosContext as unknown as Context },
+					),
+				).rejects.toMatchObject({ code: "NOT_FOUND" });
+				expect(insertsGpsAuditoria).toHaveLength(0);
+			} finally {
+				casoGpsMock = {
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+					vehiculoContrato: null,
+				};
+			}
+		});
+
+		it("con el SIFCO duplicado en oportunidades de vehículos distintos, no devuelve ubicación", async () => {
+			// El input coincide con UNA de las oportunidades, pero la ficha no
+			// elige de forma determinista: no se puede saber cuál es el carro.
+			casoGpsFilasMock = [
+				{
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+				},
+				{
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "22222222-2222-2222-2222-222222222222",
+				},
+			];
+			try {
+				await expect(
+					call(
+						wialonRouter.getGpsVehiculo,
+						{
+							casoCobroId: "33333333-3333-3333-3333-333333333333",
+							vehicleId: "11111111-1111-1111-1111-111111111111",
+							motivo: "Verificar ubicación para gestión de cobro",
+						},
+						{ context: cobrosContext as unknown as Context },
+					),
+				).rejects.toMatchObject({ code: "CONFLICT" });
+				expect(insertsGpsAuditoria).toHaveLength(0);
+			} finally {
+				casoGpsFilasMock = null;
+			}
+		});
+
+		it("oportunidades duplicadas con el MISMO vehículo no bloquean la consulta", async () => {
+			casoGpsFilasMock = [
+				{
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+				},
+				{
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+				},
+			];
+			filaVehiculoMock = {
+				licensePlate: null,
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(clienteWialon(() => new Response("{}", { status: 200 })));
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("sin_vinculo");
+			} finally {
+				casoGpsFilasMock = null;
+			}
+		});
+
+		it("no acepta el vehículo del contrato si no es el de la oportunidad (misma fuente que la ficha)", async () => {
+			casoGpsMock = {
+				casoSifco: "01010214100000",
+				vehiculoOportunidad: null,
+			};
+			try {
+				await expect(
+					call(
+						wialonRouter.getGpsVehiculo,
+						{
+							casoCobroId: "33333333-3333-3333-3333-333333333333",
+							vehicleId: "11111111-1111-1111-1111-111111111111",
+							motivo: "Verificar ubicación para gestión de cobro",
+						},
+						{ context: cobrosContext as unknown as Context },
+					),
+				).rejects.toMatchObject({ code: "NOT_FOUND" });
+				expect(insertsGpsAuditoria).toHaveLength(0);
+			} finally {
+				casoGpsMock = {
+					casoSifco: "01010214100000",
+					vehiculoOportunidad: "11111111-1111-1111-1111-111111111111",
+					vehiculoContrato: null,
+				};
+			}
+		});
+
+		it("resuelve por placa cuando no hay vínculo fijado", async () => {
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					if (bodyStr.includes("core%2Fsearch_items")) {
+						return new Response(
+							JSON.stringify({
+								totalItemsCount: 1,
+								indexFrom: 0,
+								indexTo: 0,
+								items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+							}),
+							{ status: 200 },
+						);
+					}
+					if (bodyStr.includes("unit%2Fcalc_last")) {
+						return new Response(JSON.stringify([{ i: 999 }]), { status: 200 });
+					}
+					return new Response(
+						JSON.stringify({ item: { id: 999, nm: "u" }, flags: 1025 }),
+						{ status: 200 },
+					);
+				}),
+			);
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			expect(res.estado).toBe("vinculado");
+			if (res.estado !== "vinculado") throw new Error("estado inesperado");
+			expect(res.unitId).toBe(999);
+			expect(res.vinculoOrigen).toBe("placa");
+			// Queda fijado para que la próxima consulta no recorra el catálogo,
+			// marcado como deducción del sistema y no como decisión de un supervisor.
+			expect(updatesVehiculo).toHaveLength(1);
+			expect(updatesVehiculo[0]).toMatchObject({
+				wialonUnitId: 999,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			});
+		});
+
+		it("no re-deduce una unidad que un supervisor reasignó a otro vehículo", async () => {
+			// Tras reasignar el GPS al vehículo B, el A queda sin vínculo pero el
+			// nombre de la unidad sigue con su placa: deducir de nuevo desharía la
+			// reasignación y el crédito de A mostraría el carro B.
+			unidadAsignadaAOtroMock = true;
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(
+				clienteWialon(
+					() =>
+						new Response(
+							JSON.stringify({
+								totalItemsCount: 1,
+								indexFrom: 0,
+								indexTo: 0,
+								items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+							}),
+							{ status: 200 },
+						),
+				),
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("sin_vinculo");
+				if (res.estado !== "sin_vinculo") throw new Error("estado inesperado");
+				expect(res.motivo).toBe("asignada_a_otro");
+				expect(res.candidatos).toEqual([
+					{ id: 999, nm: "Bidgar Yatz - C-629BNC" },
+				]);
+				expect(updatesVehiculo).toHaveLength(0);
+				expect(insertsGpsAuditoria).toHaveLength(1);
+			} finally {
+				unidadAsignadaAOtroMock = false;
+			}
+		});
+
+		it("si un supervisor vinculó a mano durante la consulta, muestra SU unidad y no la deducida", async () => {
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: null,
+				wialonUnitName: null,
+				wialonVinculadoPor: null,
+			};
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					if (bodyStr.includes("core%2Fsearch_items")) {
+						// El supervisor fija la unidad 555 mientras se recorre el
+						// catálogo: el UPDATE condicional ya no encuentra la fila.
+						filasAfectadasUpdate = 0;
+						filaVehiculoMock = {
+							licensePlate: "C-629BNC",
+							wialonUnitId: 555,
+							wialonUnitName: "Unidad elegida por supervisor",
+							wialonVinculadoPor: "sup@example.com",
+						};
+						return new Response(
+							JSON.stringify({
+								totalItemsCount: 1,
+								indexFrom: 0,
+								indexTo: 0,
+								items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+							}),
+							{ status: 200 },
+						);
+					}
+					if (bodyStr.includes("unit%2Fcalc_last")) {
+						return new Response(JSON.stringify([{ i: 555 }]), { status: 200 });
+					}
+					return new Response(
+						JSON.stringify({ item: { id: 555, nm: "u" }, flags: 1025 }),
+						{ status: 200 },
+					);
+				}),
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("vinculado");
+				if (res.estado !== "vinculado") throw new Error("estado inesperado");
+				expect(res.unitId).toBe(555);
+				expect(res.vinculoOrigen).toBe("persistido");
+				expect(insertsGpsAuditoria).toHaveLength(1);
+				expect(insertsGpsAuditoria[0]).toMatchObject({ unitId: "555" });
+			} finally {
+				filasAfectadasUpdate = 1;
+			}
+		});
+
+		it("si falla el guardado automático, no devuelve la unidad deducida (fail closed)", async () => {
+			// Sin la transacción no se sabe si la unidad ya es de otro vehículo.
+			errorUpdateVehiculo = new Error("db caída");
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 1,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("no_disponible");
+				if (res.estado !== "no_disponible")
+					throw new Error("estado inesperado");
+				expect(res.error.code).toBe("VINCULO_NO_VERIFICADO");
+				expect(svcs).not.toContain("unit/calc_last");
+			} finally {
+				errorUpdateVehiculo = null;
+			}
+		});
+
+		it("el guardado automático toma el lock de la unidad", async () => {
+			locksUnidad = 0;
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(
+				clienteWialon((bodyStr) =>
+					bodyStr.includes("core%2Fsearch_items")
+						? new Response(
+								JSON.stringify({
+									totalItemsCount: 1,
+									indexFrom: 0,
+									indexTo: 0,
+									items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+								}),
+								{ status: 200 },
+							)
+						: bodyStr.includes("unit%2Fcalc_last")
+							? new Response(JSON.stringify([{ i: 999 }]), { status: 200 })
+							: new Response(
+									JSON.stringify({ item: { id: 999, nm: "u" }, flags: 1025 }),
+									{ status: 200 },
+								),
+				),
+			);
+			await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(locksUnidad).toBe(1);
+		});
+
+		it("informa auditada:false también en respuestas sin ubicación", async () => {
+			// Sin esto la tarjeta decía "Consulta registrada" aunque la bitácora
+			// no tuviera la fila (ej. vehículo sin placa + insert fallido).
+			errorInsertAuditoria = new Error("db caída");
+			filaVehiculoMock = {
+				licensePlate: null,
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(clienteWialon(() => new Response("{}", { status: 200 })));
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("sin_vinculo");
+				expect(res.auditada).toBe(false);
+			} finally {
+				errorInsertAuditoria = null;
+			}
+		});
+
+		it("si la auditoría falla no muestra la ubicación (fail closed)", async () => {
+			errorInsertAuditoria = new Error(
+				'relation "gps_consulta_logs" does not exist',
+			);
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+			};
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					return new Response("[]", { status: 200 });
+				}),
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("no_disponible");
+				if (res.estado !== "no_disponible")
+					throw new Error("estado inesperado");
+				expect(res.error.code).toBe("AUDITORIA_NO_DISPONIBLE");
+				// Ni siquiera se pidió la telemetría a Wialon.
+				expect(svcs).not.toContain("unit/calc_last");
+			} finally {
+				errorInsertAuditoria = null;
+			}
+		});
+
+		it("libera un vínculo automático si la placa ya no coincide y vuelve a deducir", async () => {
+			// La placa se corrigió después de vincular (updateVehicle no toca el
+			// vínculo): seguir usando la unidad vieja mostraría otro carro.
+			filaVehiculoMock = {
+				licensePlate: "P-999ZZZ",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			setWialonClient(
+				clienteWialon((bodyStr) =>
+					bodyStr.includes("core%2Fsearch_item&")
+						? new Response(
+								JSON.stringify({
+									item: { id: 28554757, nm: "Bidgar Yatz - C-629BNC" },
+									flags: 1,
+								}),
+								{ status: 200 },
+							)
+						: new Response(
+								JSON.stringify({
+									totalItemsCount: 0,
+									indexFrom: 0,
+									indexTo: 0,
+									items: [],
+								}),
+								{ status: 200 },
+							),
+				),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("sin_vinculo");
+			if (res.estado !== "sin_vinculo") throw new Error("estado inesperado");
+			expect(res.motivo).toBe("sin_coincidencia");
+			expect(updatesVehiculo[0]).toMatchObject({
+				wialonUnitId: null,
+				wialonVinculadoPor: null,
+			});
+		});
+
+		it("libera un vínculo automático si la unidad se renombró en Wialon a otra placa", async () => {
+			// El GPS se pasó a otro carro y lo renombraron en Wialon: el nombre
+			// guardado al vincular todavía coincide, el actual ya no.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					if (bodyStr.includes("core%2Fsearch_item&")) {
+						return new Response(
+							JSON.stringify({
+								item: { id: 28554757, nm: "Otro Cliente - P-111AAA" },
+								flags: 1,
+							}),
+							{ status: 200 },
+						);
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 0,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("sin_vinculo");
+			expect(updatesVehiculo[0]).toMatchObject({ wialonUnitId: null });
+			// No se pidió la telemetría de la unidad vieja.
+			expect(svcs).not.toContain("unit/calc_last");
+		});
+
+		it("si no puede liberar un vínculo vencido, no devuelve ubicación (fail closed)", async () => {
+			errorUpdateVehiculo = new Error("db caída");
+			filaVehiculoMock = {
+				licensePlate: "P-999ZZZ",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					// Catálogo actual: ninguna unidad con la placa P-999ZZZ.
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 0,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("no_disponible");
+				if (res.estado !== "no_disponible")
+					throw new Error("estado inesperado");
+				expect(res.error.code).toBe("VINCULO_NO_ACTUALIZADO");
+				expect(svcs).not.toContain("unit/calc_last");
+			} finally {
+				errorUpdateVehiculo = null;
+			}
+		});
+
+		it("una respuesta malformada de Wialon no libera el vínculo automático", async () => {
+			// Un cuerpo corrupto es transitorio, no prueba que la unidad no existe.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			setWialonClient(
+				clienteWialon(() => new Response("<html>502</html>", { status: 200 })),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("no_disponible");
+			expect(updatesVehiculo).toHaveLength(0);
+		});
+
+		it("un error inesperado de base no llega crudo a la UI", async () => {
+			// El mensaje de drizzle puede traer el SQL y sus parámetros.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "u",
+			};
+			errorSelectVehiculo = Object.assign(
+				new Error(
+					'Failed query: select "license_plate" from "vehicles" where "id" = $1 params: 1111',
+				),
+				{ cause: { code: "57014" } },
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("no_disponible");
+				if (res.estado !== "no_disponible")
+					throw new Error("estado inesperado");
+				expect(res.error.code).toBe("ERROR_INTERNO");
+				expect(res.error.message).not.toContain("select");
+			} finally {
+				errorSelectVehiculo = null;
+			}
+		});
+
+		it("un error de red de Wialon no expone el mensaje crudo del fetch", async () => {
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "sup@example.com",
+			};
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async () => {
+					throw new Error("connect ECONNREFUSED 10.0.0.12:443");
+				}),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("no_disponible");
+			if (res.estado !== "no_disponible") throw new Error("estado inesperado");
+			expect(res.error.message).not.toContain("10.0.0.12");
+		});
+
+		it("una unidad borrada o invisible en Wialon (error 7) libera el vínculo automático", async () => {
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			setWialonClient(
+				clienteWialon((bodyStr) =>
+					bodyStr.includes("core%2Fsearch_item&")
+						? new Response(JSON.stringify({ error: 7 }), { status: 200 })
+						: new Response(
+								JSON.stringify({
+									totalItemsCount: 0,
+									indexFrom: 0,
+									indexTo: 0,
+									items: [],
+								}),
+								{ status: 200 },
+							),
+				),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			// Queda sin vínculo (con selector para el supervisor), no trabado en
+			// no_disponible con la unidad que ya no existe.
+			expect(res.estado).toBe("sin_vinculo");
+			expect(updatesVehiculo[0]).toMatchObject({ wialonUnitId: null });
+		});
+
+		it("un error transitorio de Wialon no libera el vínculo automático", async () => {
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async () => {
+					throw new WialonClientError("Upstream caído", "WIALON_NETWORK_ERROR");
+				}),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("no_disponible");
+			expect(updatesVehiculo).toHaveLength(0);
+		});
+
+		it("libera un vínculo automático si aparece otra unidad con la misma placa (ahora ambiguo)", async () => {
+			// Al vincular la placa era única; hoy hay dos unidades que coinciden:
+			// la deducción diría "ambiguo", así que el vínculo guardado no vale.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 999,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 2,
+							indexFrom: 0,
+							indexTo: 1,
+							items: [
+								{ id: 999, nm: "Bidgar Yatz - C-629BNC" },
+								{ id: 1000, nm: "C-629BNC repuesto" },
+							],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("sin_vinculo");
+			if (res.estado !== "sin_vinculo") throw new Error("estado inesperado");
+			expect(res.motivo).toBe("ambiguo");
+			expect(res.candidatos.map((c) => c.id)).toEqual([999, 1000]);
+			expect(updatesVehiculo[0]).toMatchObject({ wialonUnitId: null });
+			expect(svcs).not.toContain("unit/calc_last");
+		});
+
+		it("no revalida contra la placa un vínculo que fijó un supervisor", async () => {
+			filaVehiculoMock = {
+				licensePlate: "P-999ZZZ",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "sup@example.com",
+			};
+			setWialonClient(
+				clienteWialon((bodyStr) =>
+					bodyStr.includes("unit%2Fcalc_last")
+						? new Response(JSON.stringify([{ i: 28554757 }]), { status: 200 })
+						: new Response(
+								JSON.stringify({
+									item: { id: 28554757, nm: "u" },
+									flags: 1025,
+								}),
+								{ status: 200 },
+							),
+				),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("vinculado");
+			if (res.estado !== "vinculado") throw new Error("estado inesperado");
+			expect(res.unitId).toBe(28554757);
+			expect(res.vinculoOrigen).toBe("persistido");
+			expect(updatesVehiculo).toHaveLength(0);
+		});
+
+		it("un vínculo guardado por deducción de placa se sigue mostrando como deducción", async () => {
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 999,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					if (bodyStr.includes("core%2Fsearch_items")) {
+						return new Response(
+							JSON.stringify({
+								totalItemsCount: 1,
+								indexFrom: 0,
+								indexTo: 0,
+								items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+							}),
+							{ status: 200 },
+						);
+					}
+					if (bodyStr.includes("unit%2Fcalc_last")) {
+						return new Response(JSON.stringify([{ i: 999 }]), { status: 200 });
+					}
+					return new Response(
+						JSON.stringify({
+							item: { id: 999, nm: "Bidgar Yatz - C-629BNC" },
+							flags: 1025,
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			expect(res.estado).toBe("vinculado");
+			if (res.estado !== "vinculado") throw new Error("estado inesperado");
+			// Sin esto el supervisor perdería el atajo "¿No es esta la unidad?".
+			expect(res.vinculoOrigen).toBe("placa");
+			// Ya estaba fijado: no se vuelve a escribir.
+			expect(updatesVehiculo).toHaveLength(0);
+		});
+
+		it("no adivina cuando varias unidades comparten la placa: devuelve candidatos", async () => {
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(
+				clienteWialon(
+					() =>
+						new Response(
+							JSON.stringify({
+								totalItemsCount: 2,
+								indexFrom: 0,
+								indexTo: 1,
+								items: [
+									{ id: 1, nm: "Juan - C-629BNC" },
+									{ id: 2, nm: "C-629BNC repuesto" },
+								],
+							}),
+							{ status: 200 },
+						),
+				),
+			);
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			expect(res.estado).toBe("sin_vinculo");
+			if (res.estado !== "sin_vinculo") throw new Error("estado inesperado");
+			expect(res.motivo).toBe("ambiguo");
+			expect(res.candidatos).toHaveLength(2);
+		});
+
+		it("reporta sin_placa cuando el vehículo no tiene placa registrada", async () => {
+			filaVehiculoMock = {
+				licensePlate: null,
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(clienteWialon(() => new Response("{}", { status: 200 })));
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			expect(res.estado).toBe("sin_vinculo");
+			if (res.estado !== "sin_vinculo") throw new Error("estado inesperado");
+			expect(res.motivo).toBe("sin_placa");
+		});
+
+		it("degrada a no_disponible con Wialon caído en vez de lanzar", async () => {
+			// El tab Vehículo de la ficha no puede romperse porque el proveedor
+			// esté caído: el resto de los datos del vehículo siguen sirviendo.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "u",
+			};
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async () => {
+					throw new WialonClientError("Upstream caído", "WIALON_NETWORK_ERROR");
+				}),
+			);
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			expect(res.estado).toBe("no_disponible");
+		});
+
+		it("registra una sola fila de auditoría si la telemetría falla tras resolver la unidad", async () => {
+			// La resolución ya quedó auditada con la unidad; el catch no debe
+			// sumar una segunda fila (con unitId null) por la misma consulta.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+			};
+			setWialonClient(
+				clienteWialon(() => {
+					throw new WialonClientError("Upstream caído", "WIALON_NETWORK_ERROR");
+				}),
+			);
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			expect(res.estado).toBe("no_disponible");
+			expect(insertsGpsAuditoria).toHaveLength(1);
+			expect(insertsGpsAuditoria[0]).toMatchObject({ unitId: "28554757" });
+		});
+
+		it("busca por los dígitos de la placa para encontrarla aunque el CRM la guarde con espacios", async () => {
+			// Wialon filtra por subcadena literal: "*P - 278KJQ*" no trae
+			// "P-278KJQ SIN APAGADO". El prefiltro va por dígitos y el match
+			// normalizado descarta las unidades que solo comparten números.
+			filaVehiculoMock = {
+				licensePlate: "P - 278KJQ",
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			const filtros: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					if (bodyStr.includes("core%2Fsearch_items")) {
+						const params = JSON.parse(
+							new URLSearchParams(bodyStr).get("params") || "{}",
+						);
+						// getUnitsStatus también usa search_items (metadatos de
+						// sensores por id); solo interesa la búsqueda por nombre.
+						if (params.spec?.propName === "sys_name") {
+							filtros.push(params.spec.propValueMask);
+						}
+						return new Response(
+							JSON.stringify({
+								totalItemsCount: 2,
+								indexFrom: 0,
+								indexTo: 1,
+								items: [
+									{ id: 501, nm: "P-278KJQ SIN APAGADO" },
+									{ id: 502, nm: "C-278ABC" },
+								],
+							}),
+							{ status: 200 },
+						);
+					}
+					if (bodyStr.includes("unit%2Fcalc_last")) {
+						return new Response(JSON.stringify([{ i: 501 }]), { status: 200 });
+					}
+					return new Response(
+						JSON.stringify({ item: { id: 501, nm: "u" }, flags: 1025 }),
+						{ status: 200 },
+					);
+				}),
+			);
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			expect(filtros).toEqual(["*278*"]);
+			expect(res.estado).toBe("vinculado");
+			if (res.estado !== "vinculado") throw new Error("estado inesperado");
+			expect(res.unitId).toBe(501);
+		});
+
+		it('una placa de relleno ("NUEVO") es sin_placa y no recorre el catálogo', async () => {
+			filaVehiculoMock = {
+				licensePlate: "NUEVO",
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					return new Response("{}", { status: 200 });
+				}),
+			);
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			expect(res.estado).toBe("sin_vinculo");
+			if (res.estado !== "sin_vinculo") throw new Error("estado inesperado");
+			expect(res.motivo).toBe("sin_placa");
+			expect(svcs).not.toContain("core/search_items");
+			// La consulta igual queda auditada: el motivo importa aunque no haya unidad.
+			expect(insertsGpsAuditoria).toHaveLength(1);
+		});
+
+		it("en caso ambiguo solo ofrece como candidatos las unidades que coinciden con la placa", async () => {
+			// El prefiltro por dígitos trae unidades de otras placas; no deben
+			// aparecer como opción para el supervisor.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: null,
+				wialonUnitName: null,
+			};
+			setWialonClient(
+				clienteWialon(
+					() =>
+						new Response(
+							JSON.stringify({
+								totalItemsCount: 3,
+								indexFrom: 0,
+								indexTo: 2,
+								items: [
+									{ id: 1, nm: "Juan - C-629BNC" },
+									{ id: 2, nm: "C-629BNC repuesto" },
+									{ id: 3, nm: "P-629XYZ" },
+								],
+							}),
+							{ status: 200 },
+						),
+				),
+			);
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			expect(res.estado).toBe("sin_vinculo");
+			if (res.estado !== "sin_vinculo") throw new Error("estado inesperado");
+			expect(res.motivo).toBe("ambiguo");
+			expect(res.candidatos.map((c) => c.id)).toEqual([1, 2]);
+		});
+
+		it("sigue resolviendo por placa si las columnas de la migración 0057 no existen", async () => {
+			// Deuda temporal: la 0057 está commiteada pero puede no estar aplicada.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "u",
+			};
+			// Forma real del error (DrizzleQueryError con el de pg en `cause`).
+			errorSelectVehiculo = Object.assign(
+				new Error('column "wialon_unit_id" does not exist'),
+				{ cause: { code: "42703" } },
+			);
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					if (bodyStr.includes("core%2Fsearch_items")) {
+						return new Response(
+							JSON.stringify({
+								totalItemsCount: 1,
+								indexFrom: 0,
+								indexTo: 0,
+								items: [{ id: 999, nm: "Bidgar Yatz - C-629BNC" }],
+							}),
+							{ status: 200 },
+						);
+					}
+					if (bodyStr.includes("unit%2Fcalc_last")) {
+						return new Response(JSON.stringify([{ i: 999 }]), { status: 200 });
+					}
+					return new Response(
+						JSON.stringify({ item: { id: 999, nm: "u" }, flags: 1025 }),
+						{ status: 200 },
+					);
+				}),
+			);
+
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+
+			// No lanza: cae al fallback y deduce por placa.
+			expect(res.estado).toBe("vinculado");
+			if (res.estado !== "vinculado") throw new Error("estado inesperado");
+			expect(res.vinculoOrigen).toBe("placa");
+		});
+
+		it("un error de base que no es de columna inexistente no entra al fallback", async () => {
+			// Un timeout no dice nada sobre la migración: el fallback se saltaría
+			// el chequeo de unidad asignada a otro vehículo. Se responde sin
+			// ubicación y sin consultar Wialon.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "u",
+			};
+			errorSelectVehiculo = Object.assign(new Error("canceling statement"), {
+				cause: { code: "57014" },
+			});
+			const svcs: string[] = [];
+			setWialonClient(
+				clienteWialon((bodyStr) => {
+					svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+					return new Response("{}", { status: 200 });
+				}),
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("no_disponible");
+				expect(svcs.filter((x) => x !== "token/login")).toEqual([]);
+			} finally {
+				errorSelectVehiculo = null;
+			}
+		});
+	});
+
+	describe("vincularUnidadWialon (CB-118)", () => {
+		beforeEach(() => {
+			setWialonClient(wialonConNombre("Bidgar Yatz - C-629BNC"));
+		});
+		afterEach(() => {
+			setWialonClient(null);
+		});
+
+		it("guarda el vínculo y deja registro de auditoría con el usuario", async () => {
+			const logs: unknown[][] = [];
+			const originalInfo = console.info;
+			console.info = (...args: unknown[]) => {
+				logs.push(args);
+			};
+
+			try {
+				const res = await call(
+					wialonRouter.vincularUnidadWialon,
+					{
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						unitId: 28554757,
+						unitName: "Bidgar Yatz - C-629BNC",
+					},
+					{
+						context: {
+							headers: new Headers(),
+							session: {
+								user: { id: "user-sup", email: "sup@example.com" },
+							},
+							user: {
+								id: "user-sup",
+								email: "sup@example.com",
+								role: "admin",
+							},
+							userId: "user-sup",
+							userRole: "admin",
+						} as unknown as Context,
+					},
+				);
+
+				expect(res.success).toBe(true);
+				expect(res.unitId).toBe(28554757);
+
+				const auditoria = logs.find((l) => l[0] === "WIALON_UNIDAD_VINCULADA");
+				expect(auditoria).toBeDefined();
+				expect((auditoria?.[1] as Record<string, unknown>).userEmail).toBe(
+					"sup@example.com",
+				);
+			} finally {
+				console.info = originalInfo;
+			}
+		});
+	});
+
+	describe("vincularUnidadWialon — vehículo inexistente (CB-118)", () => {
+		beforeEach(() => {
+			setWialonClient(wialonConNombre("Bidgar Yatz - C-629BNC"));
+		});
+		afterEach(() => {
+			setWialonClient(null);
+		});
+
+		afterEach(() => {
+			filasAfectadasUpdate = 1;
+			updatesVehiculo = [];
+		});
+
+		it("responde NOT_FOUND en vez de success cuando el vehicleId no existe", async () => {
+			filasAfectadasUpdate = 0;
+
+			await expect(
+				call(
+					wialonRouter.vincularUnidadWialon,
+					{
+						vehicleId: "22222222-2222-2222-2222-222222222222",
+						unitId: 28554757,
+						unitName: "Bidgar Yatz - C-629BNC",
+					},
+					{
+						context: {
+							headers: new Headers(),
+							session: {
+								user: { id: "user-sup", email: "sup@example.com" },
+							},
+							user: {
+								id: "user-sup",
+								email: "sup@example.com",
+								role: "admin",
+							},
+							userId: "user-sup",
+							userRole: "admin",
+						} as unknown as Context,
+					},
+				),
+			).rejects.toMatchObject({ code: "NOT_FOUND" });
+		});
+
+		it("guarda el nombre actual de Wialon, no el que manda el cliente", async () => {
+			updatesVehiculo = [];
+			await call(
+				wialonRouter.vincularUnidadWialon,
+				{
+					vehicleId: "22222222-2222-2222-2222-222222222222",
+					unitId: 28554757,
+					unitName: "Nombre inventado",
+				},
+				{
+					context: {
+						headers: new Headers(),
+						session: { user: { id: "user-sup", email: "sup@example.com" } },
+						user: { id: "user-sup", email: "sup@example.com", role: "admin" },
+						userId: "user-sup",
+						userRole: "admin",
+					} as unknown as Context,
+				},
+			);
+			expect(updatesVehiculo.at(-1)).toMatchObject({
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+			});
+		});
+
+		it("responde NOT_FOUND si la unidad no existe en Wialon (error 7), sin tocar vehículos", async () => {
+			updatesVehiculo = [];
+			setWialonClient(wialonConNombre(null));
+			await expect(
+				call(
+					wialonRouter.vincularUnidadWialon,
+					{
+						vehicleId: "22222222-2222-2222-2222-222222222222",
+						unitId: 28554757,
+						unitName: "x",
+					},
+					{
+						context: {
+							headers: new Headers(),
+							session: { user: { id: "user-sup", email: "sup@example.com" } },
+							user: { id: "user-sup", email: "sup@example.com", role: "admin" },
+							userId: "user-sup",
+							userRole: "admin",
+						} as unknown as Context,
+					},
+				),
+			).rejects.toMatchObject({ code: "NOT_FOUND" });
+			expect(updatesVehiculo).toHaveLength(0);
+		});
+
+		it("al reasignar una unidad se la quita al vehículo que la tenía", async () => {
+			// Si no, el crédito anterior seguiría mostrando la ubicación del
+			// carro al que se pasó el GPS.
+			const logs: unknown[][] = [];
+			const originalInfo = console.info;
+			console.info = (...args: unknown[]) => {
+				logs.push(args);
+			};
+			try {
+				await call(
+					wialonRouter.vincularUnidadWialon,
+					{
+						vehicleId: "22222222-2222-2222-2222-222222222222",
+						unitId: 28554757,
+						unitName: "Bidgar Yatz - C-629BNC",
+					},
+					{
+						context: {
+							headers: new Headers(),
+							session: {
+								user: { id: "user-sup", email: "sup@example.com" },
+							},
+							user: {
+								id: "user-sup",
+								email: "sup@example.com",
+								role: "admin",
+							},
+							userId: "user-sup",
+							userRole: "admin",
+						} as unknown as Context,
+					},
+				);
+			} finally {
+				console.info = originalInfo;
+			}
+
+			// Primero se libera la unidad en los demás vehículos, después se fija.
+			expect(updatesVehiculo).toHaveLength(2);
+			expect(updatesVehiculo[0]).toMatchObject({
+				wialonUnitId: null,
+				wialonVinculadoPor: null,
+			});
+			expect(updatesVehiculo[1]).toMatchObject({ wialonUnitId: 28554757 });
+			// Serializado contra otra asignación simultánea de la misma unidad.
+			expect(locksUnidad).toBeGreaterThan(0);
+			const auditoria = logs.find((l) => l[0] === "WIALON_UNIDAD_VINCULADA");
+			expect(
+				(auditoria?.[1] as Record<string, unknown>).vehiculosDesvinculados,
+			).toBeDefined();
+		});
+	});
+
+	describe("getGpsBitacora (CB-118)", () => {
+		const adminContext = {
+			headers: new Headers(),
+			session: { user: { id: "admin-1", email: "admin@example.com" } },
+			user: { id: "admin-1", email: "admin@example.com", role: "admin" },
+			userId: "admin-1",
+			userRole: "admin",
+		};
+
+		afterEach(() => {
+			bitacoraFilasMock = [];
+			bitacoraTotalMock = 0;
+		});
+
+		it("lista la bitácora con paginación y datos del usuario que consultó", async () => {
+			bitacoraFilasMock = [
+				{
+					id: "log-1",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					numeroCreditoSifco: "01010214106660",
+					motivo: "Cliente en mora crítica, ubicar para recuperación",
+					unitId: "999",
+					unitName: "P-278KJQ",
+					userId: "user-cob-1",
+					userNombre: "Wilson Gómez",
+					userEmail: "wilson@example.com",
+					createdAt: new Date("2026-09-23T10:00:00Z"),
+				},
+			];
+			bitacoraTotalMock = 1;
+
+			const res = await call(
+				wialonRouter.getGpsBitacora,
+				{ page: 1, perPage: 25 },
+				{ context: adminContext as unknown as Context },
+			);
+
+			expect(res.total).toBe(1);
+			expect(res.items).toHaveLength(1);
+			expect(res.items[0]).toMatchObject({
+				numeroCreditoSifco: "01010214106660",
+				userNombre: "Wilson Gómez",
+			});
+		});
+
+		it("devuelve página vacía sin explotar cuando no hay registros", async () => {
+			bitacoraFilasMock = [];
+			bitacoraTotalMock = 0;
+
+			const res = await call(
+				wialonRouter.getGpsBitacora,
+				{ page: 1, perPage: 25 },
+				{ context: adminContext as unknown as Context },
+			);
+
+			expect(res.total).toBe(0);
+			expect(res.items).toHaveLength(0);
 		});
 	});
 });

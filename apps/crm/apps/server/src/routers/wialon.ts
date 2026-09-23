@@ -82,8 +82,10 @@ export function mapWialonErrorToOrpc(error: unknown): never {
 			});
 		}
 		if (error.code === "WIALON_NETWORK_ERROR") {
+			// El mensaje original del fetch puede traer host/IP: solo al log.
+			console.error("WIALON_NETWORK_ERROR", { message: error.message });
 			throw new ORPCError("BAD_GATEWAY", {
-				message: `Error al conectar con la API de Wialon: ${error.message}`,
+				message: "Error al conectar con la API de Wialon.",
 			});
 		}
 		if (error.code === "WIALON_INVALID_RESPONSE") {
@@ -118,11 +120,13 @@ export function mapWialonErrorToOrpc(error: unknown): never {
 		});
 	}
 
+	// Un error que no es de Wialon (ej. de base de datos) puede traer SQL o
+	// datos internos: se loguea y se responde con un texto fijo.
+	console.error("WIALON_ERROR_INTERNO", {
+		message: error instanceof Error ? error.message : String(error),
+	});
 	throw new ORPCError("INTERNAL_SERVER_ERROR", {
-		message:
-			error instanceof Error
-				? error.message
-				: "Error interno procesando solicitud de Wialon",
+		message: "Error interno procesando solicitud de Wialon",
 	});
 }
 
@@ -229,14 +233,36 @@ function vinculoAutoVigente(
 }
 
 /**
+ * Texto para el usuario ante un error de Wialon en la ficha. Fijo por código:
+ * el mensaje original puede traer detalles de red (host/IP) o del servicio.
+ * Los de la API (WIALON_API_ERROR) ya vienen de la tabla fija
+ * WIALON_ERROR_MESSAGES y se muestran tal cual.
+ */
+function mensajeUsuarioWialon(error: WialonClientError): string {
+	switch (error.code) {
+		case "WIALON_API_ERROR":
+			return error.message;
+		case "WIALON_TIMEOUT":
+			return "Wialon tardó demasiado en responder. Intente de nuevo.";
+		case "WIALON_NETWORK_ERROR":
+			return "No se pudo conectar con Wialon. Intente de nuevo.";
+		case "WIALON_INVALID_RESPONSE":
+			return "Wialon respondió con datos inesperados. Intente de nuevo.";
+		default:
+			return "No se pudo autenticar con Wialon.";
+	}
+}
+
+/**
  * Nombre actual de la unidad en Wialon (flags 1: solo id/nm, liviano). Null si
  * la unidad ya no existe o no es visible para la cuenta: en ese caso el
  * vínculo automático tampoco puede considerarse vigente.
  *
  * Wialon responde a una unidad borrada o invisible con error 7 (acceso
- * denegado), confirmado contra la API real con IDs inexistentes; una
- * respuesta sin `item` se trata igual. Cualquier otro error (caída, timeout)
- * se propaga: es transitorio y no dice nada sobre la unidad.
+ * denegado), confirmado contra la API real con IDs inexistentes. SOLO eso
+ * cuenta como "ya no está". Cualquier otro error se propaga como transitorio,
+ * incluida una respuesta malformada (WIALON_INVALID_RESPONSE): liberar el
+ * vínculo por un cuerpo corrupto borraría un vínculo válido.
  */
 async function nombreActualUnidad(
 	client: WialonClient,
@@ -248,8 +274,8 @@ async function nombreActualUnidad(
 	} catch (error) {
 		if (
 			error instanceof WialonClientError &&
-			(error.code === "WIALON_INVALID_RESPONSE" ||
-				(error.code === "WIALON_API_ERROR" && error.wialonErrorCode === 7))
+			error.code === "WIALON_API_ERROR" &&
+			error.wialonErrorCode === 7
 		) {
 			return null;
 		}
@@ -1166,6 +1192,17 @@ export const wialonRouter = {
 								wialonUnitId: actual.wialonUnitId,
 							});
 						}
+						// El UPDATE no escribió porque había un vínculo, pero al releer ya no
+						// está (lo cambiaron entre medio): no se sabe cuál vale, fail closed.
+						await registrarAuditoria(null, null);
+						return {
+							estado: "no_disponible" as const,
+							error: {
+								code: "VINCULO_NO_VERIFICADO",
+								message:
+									"No se pudo verificar la unidad GPS de este vehículo. Intente de nuevo.",
+							},
+						};
 					}
 
 					if (!(await registrarAuditoria(unidad.id, unidad.nm))) {
@@ -1180,13 +1217,31 @@ export const wialonRouter = {
 					);
 				} catch (error) {
 					await registrarAuditoria(null, null);
-					const code =
-						error instanceof WialonClientError ? error.code : "UNKNOWN";
-					const message =
-						error instanceof Error
-							? error.message
-							: "Error desconocido al consultar el GPS del vehículo";
-					return { estado: "no_disponible" as const, error: { code, message } };
+					// A la UI solo llegan textos fijos: el error original (un
+					// DrizzleQueryError trae el SQL y sus parámetros; un error de red,
+					// host/IP) se loguea completo en el servidor.
+					console.error("GPS_VEHICULO_ERROR", {
+						vehicleId: input.vehicleId,
+						code: error instanceof WialonClientError ? error.code : undefined,
+						message: error instanceof Error ? error.message : String(error),
+					});
+					if (error instanceof WialonClientError) {
+						return {
+							estado: "no_disponible" as const,
+							error: {
+								code: error.code,
+								message: mensajeUsuarioWialon(error),
+							},
+						};
+					}
+					return {
+						estado: "no_disponible" as const,
+						error: {
+							code: "ERROR_INTERNO",
+							message:
+								"No se pudo consultar el GPS del vehículo. Intente de nuevo.",
+						},
+					};
 				}
 			})();
 
@@ -1206,6 +1261,21 @@ export const wialonRouter = {
 		.handler(async ({ input, context }) => {
 			const vinculadoAt = new Date();
 			const userEmail = context.user?.email || context.session?.user?.email;
+
+			// El nombre que se guarda (y se muestra en la ficha y la bitácora) se
+			// lee de Wialon, no del cliente: `input.unitName` es solo lo que vio
+			// el supervisor. También confirma que la unidad existe y es visible.
+			let unitName: string | null;
+			try {
+				unitName = await nombreActualUnidad(getWialonClient(), input.unitId);
+			} catch (error) {
+				throw mapWialonErrorToOrpc(error);
+			}
+			if (!unitName) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "La unidad GPS no existe o no es visible en Wialon.",
+				});
+			}
 
 			// Reasignar una unidad (ej. el GPS se pasó a otro carro tras una
 			// recuperación) la MUEVE: se le quita a cualquier otro vehículo que la
@@ -1235,7 +1305,7 @@ export const wialonRouter = {
 					.update(vehicles)
 					.set({
 						wialonUnitId: input.unitId,
-						wialonUnitName: input.unitName,
+						wialonUnitName: unitName,
 						wialonVinculadoAt: vinculadoAt,
 						wialonVinculadoPor: userEmail ?? context.userId ?? null,
 					})
@@ -1257,7 +1327,7 @@ export const wialonRouter = {
 				userEmail,
 				vehicleId: input.vehicleId,
 				unitId: input.unitId,
-				unitName: input.unitName,
+				unitName,
 				// Vehículos a los que se les quitó la unidad al reasignarla.
 				vehiculosDesvinculados: liberados.map((v) => v.id),
 				timestamp: vinculadoAt.toISOString(),
@@ -1266,7 +1336,7 @@ export const wialonRouter = {
 			return {
 				success: true,
 				unitId: input.unitId,
-				unitName: input.unitName,
+				unitName,
 				vinculadoAt,
 			};
 		}),

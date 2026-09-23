@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { call, ORPCError } from "@orpc/server";
 import { casosCobros } from "../db/schema/cobros";
 import type { Context } from "../lib/context";
@@ -217,6 +217,22 @@ function mockDbAdmin() {
 }
 
 mock.module("../db", () => ({ db: mockDbAdmin() }));
+
+/** Wialon que responde core/search_item con el nombre dado (o error 7). */
+function wialonConNombre(nm: string | null) {
+	return new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+		const bodyStr = String(init?.body || "");
+		if (bodyStr.includes("token%2Flogin")) {
+			return new Response(JSON.stringify({ eid: "sid-v" }), { status: 200 });
+		}
+		return new Response(
+			JSON.stringify(
+				nm ? { item: { id: 28554757, nm }, flags: 1 } : { error: 7 },
+			),
+			{ status: 200 },
+		);
+	});
+}
 
 describe("wialonRouter", () => {
 	it("expone todos los procedimientos requeridos", () => {
@@ -2132,6 +2148,89 @@ describe("wialonRouter", () => {
 			}
 		});
 
+		it("una respuesta malformada de Wialon no libera el vínculo automático", async () => {
+			// Un cuerpo corrupto es transitorio, no prueba que la unidad no existe.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			setWialonClient(
+				clienteWialon(() => new Response("<html>502</html>", { status: 200 })),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("no_disponible");
+			expect(updatesVehiculo).toHaveLength(0);
+		});
+
+		it("un error inesperado de base no llega crudo a la UI", async () => {
+			// El mensaje de drizzle puede traer el SQL y sus parámetros.
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "u",
+			};
+			errorSelectVehiculo = Object.assign(
+				new Error(
+					'Failed query: select "license_plate" from "vehicles" where "id" = $1 params: 1111',
+				),
+				{ cause: { code: "57014" } },
+			);
+			try {
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: cobrosContext as unknown as Context },
+				);
+				expect(res.estado).toBe("no_disponible");
+				if (res.estado !== "no_disponible")
+					throw new Error("estado inesperado");
+				expect(res.error.code).toBe("ERROR_INTERNO");
+				expect(res.error.message).not.toContain("select");
+			} finally {
+				errorSelectVehiculo = null;
+			}
+		});
+
+		it("un error de red de Wialon no expone el mensaje crudo del fetch", async () => {
+			filaVehiculoMock = {
+				licensePlate: "C-629BNC",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "sup@example.com",
+			};
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async () => {
+					throw new Error("connect ECONNREFUSED 10.0.0.12:443");
+				}),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("no_disponible");
+			if (res.estado !== "no_disponible") throw new Error("estado inesperado");
+			expect(res.error.message).not.toContain("10.0.0.12");
+		});
+
 		it("una unidad borrada o invisible en Wialon (error 7) libera el vínculo automático", async () => {
 			filaVehiculoMock = {
 				licensePlate: "C-629BNC",
@@ -2612,6 +2711,13 @@ describe("wialonRouter", () => {
 	});
 
 	describe("vincularUnidadWialon (CB-118)", () => {
+		beforeEach(() => {
+			setWialonClient(wialonConNombre("Bidgar Yatz - C-629BNC"));
+		});
+		afterEach(() => {
+			setWialonClient(null);
+		});
+
 		it("guarda el vínculo y deja registro de auditoría con el usuario", async () => {
 			const logs: unknown[][] = [];
 			const originalInfo = console.info;
@@ -2659,6 +2765,13 @@ describe("wialonRouter", () => {
 	});
 
 	describe("vincularUnidadWialon — vehículo inexistente (CB-118)", () => {
+		beforeEach(() => {
+			setWialonClient(wialonConNombre("Bidgar Yatz - C-629BNC"));
+		});
+		afterEach(() => {
+			setWialonClient(null);
+		});
+
 		afterEach(() => {
 			filasAfectadasUpdate = 1;
 			updatesVehiculo = [];
@@ -2692,6 +2805,55 @@ describe("wialonRouter", () => {
 					},
 				),
 			).rejects.toMatchObject({ code: "NOT_FOUND" });
+		});
+
+		it("guarda el nombre actual de Wialon, no el que manda el cliente", async () => {
+			updatesVehiculo = [];
+			await call(
+				wialonRouter.vincularUnidadWialon,
+				{
+					vehicleId: "22222222-2222-2222-2222-222222222222",
+					unitId: 28554757,
+					unitName: "Nombre inventado",
+				},
+				{
+					context: {
+						headers: new Headers(),
+						session: { user: { id: "user-sup", email: "sup@example.com" } },
+						user: { id: "user-sup", email: "sup@example.com", role: "admin" },
+						userId: "user-sup",
+						userRole: "admin",
+					} as unknown as Context,
+				},
+			);
+			expect(updatesVehiculo.at(-1)).toMatchObject({
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+			});
+		});
+
+		it("responde NOT_FOUND si la unidad no existe en Wialon (error 7), sin tocar vehículos", async () => {
+			updatesVehiculo = [];
+			setWialonClient(wialonConNombre(null));
+			await expect(
+				call(
+					wialonRouter.vincularUnidadWialon,
+					{
+						vehicleId: "22222222-2222-2222-2222-222222222222",
+						unitId: 28554757,
+						unitName: "x",
+					},
+					{
+						context: {
+							headers: new Headers(),
+							session: { user: { id: "user-sup", email: "sup@example.com" } },
+							user: { id: "user-sup", email: "sup@example.com", role: "admin" },
+							userId: "user-sup",
+							userRole: "admin",
+						} as unknown as Context,
+					},
+				),
+			).rejects.toMatchObject({ code: "NOT_FOUND" });
+			expect(updatesVehiculo).toHaveLength(0);
 		});
 
 		it("al reasignar una unidad se la quita al vehículo que la tenía", async () => {

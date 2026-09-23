@@ -48,6 +48,19 @@ export const STATUS_EXCLUIDOS_MORA = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", 
  * condición SQL (`notInArray`). Se declara acá al lado y no se duplica: si
  * alguien agrega un estado arriba, la condición de los UPDATE lo hereda sola.
  */
+/**
+ * Señal interna para abortar la transacción de un crédito que dejó de ser
+ * elegible para mora a media corrida. No es un error del cron: se usa para
+ * forzar el ROLLBACK (la única forma de deshacer un write ya hecho dentro de
+ * la transacción) y se absorbe en el `catch` de la rama que la tira.
+ */
+class CreditoYaNoElegible extends Error {
+  constructor() {
+    super("El crédito dejó de ser elegible para mora a media corrida");
+    this.name = "CreditoYaNoElegible";
+  }
+}
+
 const STATUS_EXCLUIDOS_MORA_SQL = STATUS_EXCLUIDOS_MORA as Array<
   (typeof creditos.$inferSelect)["statusCredit"]
 >;
@@ -1720,7 +1733,21 @@ export async function procesarMoras() {
           // MOROSO para no des-castigar), en el sentido contrario. Sin la
           // condición, un crédito que pasó a EN_CONVENIO/INCOBRABLE a media
           // corrida volvía a MOROSO por la foto vieja del paso 1.
-          await txm
+          //
+          // 🔒 Y el `.returning()` no es decorativo: es la ÚNICA señal de que
+          // el crédito sigue siendo elegible. El candado de la mora de acá
+          // arriba solo detecta a quien toca `moras_credito`; una transición de
+          // estado que no la toca —`marcarCreditoComoCaido`, por ejemplo— pasa
+          // por debajo de él, y sin mirar las filas afectadas la transacción
+          // confirmaba una mora recalculada y un evento RECALCULO sobre un
+          // crédito CAIDO. El paso 6 tampoco lo recoge después: su mapa
+          // `moraPorCredito` viene de la foto vieja y todavía lo contiene.
+          //
+          // Cero filas ⇒ se aborta la transacción (no alcanza con `return`:
+          // el monto de la mora YA se actualizó unas líneas más arriba y
+          // commitear lo dejaría cobrado). El crédito cae en los omitidos, el
+          // mismo balde que los otros candados de este archivo.
+          const sigueElegible = await txm
             .update(creditos)
             .set({ statusCredit: "MOROSO" })
             .where(
@@ -1728,7 +1755,10 @@ export async function procesarMoras() {
                 eq(creditos.credito_id, creditoId),
                 notInArray(creditos.statusCredit, STATUS_EXCLUIDOS_MORA_SQL),
               ),
-            );
+            )
+            .returning({ credito_id: creditos.credito_id });
+
+          if (sigueElegible.length === 0) throw new CreditoYaNoElegible();
 
           await registrarHistorialMora({
             credito_id: creditoId,
@@ -1749,6 +1779,12 @@ export async function procesarMoras() {
           });
 
           recalculoOk = true;
+        }).catch((e) => {
+          // El aborto por crédito no elegible es una omisión esperada, no un
+          // fallo del cron: la transacción ya revirtió TODO (monto de la mora
+          // incluido) y la corrida sigue con el resto de los créditos.
+          // Cualquier otro error sí se propaga, como antes.
+          if (!(e instanceof CreditoYaNoElegible)) throw e;
         });
 
         // El candado con cero filas sigue cayendo en el mismo balde de omitidos

@@ -335,4 +335,35 @@ describe("procesarMoras — RECALCULO atómico (mora + status + historial)", () 
     expect(succeededCount()).toBe(0);
     expect(skippedCount()).toBe(1);
   });
+
+  // ── El crédito dejó de ser elegible a media corrida ──────────────────────
+  // El candado de la mora solo ve a quien toca `moras_credito`. Una transición
+  // de estado que NO la toca —`marcarCreditoComoCaido`, por ejemplo— se le pasa
+  // por debajo: la mora seguía activa, el update de la mora devolvía su fila y
+  // la transacción confirmaba un monto recalculado y un evento RECALCULO sobre
+  // un crédito CAIDO. El paso 6 tampoco lo recoge: su mapa `moraPorCredito`
+  // viene de la foto vieja y todavía contiene el crédito.
+  it("si el crédito dejó de ser elegible (cero filas en el update de status), NO queda la mora recalculada ni el historial", async () => {
+    estado.updateCreditosReturns = [[]];
+
+    const r = await correr(true);
+
+    // 🔴 Lo que el defecto dejaba escrito: el monto nuevo cobrándose sobre un
+    // crédito excluido de la mora, con su RECALCULO en el historial.
+    expect(confirmados(moras_credito)).toEqual([]);
+    expect(confirmados(moras_historial)).toEqual([]);
+    expect(confirmados(creditos)).toEqual([]);
+    expect(r.recalculadas).toBe(0);
+  });
+
+  it("ese crédito cuenta como omitido y el cron NO falla: la corrida sigue", async () => {
+    estado.updateCreditosReturns = [[]];
+
+    await correr(true);
+
+    expect(succeededCount()).toBe(0);
+    expect(skippedCount()).toBe(1);
+    // El aborto es una omisión esperada, no un fallo del cron.
+    expect(estado.emitidos.some((e) => e.outcome === "failed")).toBe(false);
+  });
 });

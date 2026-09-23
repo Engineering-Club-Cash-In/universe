@@ -373,6 +373,39 @@ export async function createPaymentAgreement(
       console.log("🔥 Estado actual:", creditExists.statusCredit);
       console.log("🔥 Estado nuevo: EN_CONVENIO");
       console.log("🔥 Convenio ID:", agreement.convenio_id);
+
+      // 🔒 El cambio de estado va ANTES de mirar la mora, y no es solo
+      // prolijidad: es el candado. Postgres toma el row lock del crédito en
+      // este UPDATE y no lo suelta hasta el commit, así que a partir de acá el
+      // cron no puede colarse.
+      //
+      // Con el orden viejo (mora primero, estado después) quedaba una ventana
+      // con la fila del crédito LIBRE: si el crédito no tenía mora activa, el
+      // `SELECT … FOR UPDATE` de `desactivarMoraPorConvenio` no bloqueaba
+      // ninguna fila —no hay nada que bloquear— y el cron entraba en el medio
+      // por su rama CREACION: tomaba el crédito, le insertaba una mora activa,
+      // commiteaba y soltaba; después este convenio lo marcaba EN_CONVENIO.
+      // Resultado: un crédito excluido de la mora con un cargo activo encima.
+      //
+      // Es el MISMO patrón que usa el cron (la condición se evalúa dentro del
+      // write, que de paso hace de candado) y no un `SELECT … FOR UPDATE`
+      // aparte sobre `creditos`: el UPDATE ya hay que hacerlo igual, así que
+      // tomar el lock con él no agrega ni un viaje a la base ni una segunda
+      // forma de candar la misma fila.
+      //
+      // Nada entre medio depende de que el crédito TODAVÍA no esté
+      // EN_CONVENIO: las validaciones (pasos 1 a 9, incluido el chequeo de
+      // convenio activo) ya corrieron antes de abrir la transacción, y lo que
+      // queda adentro —el pivot de pagos, las cuotas del convenio y la
+      // desactivación de la mora— no lee `statusCredit`.
+      const resultadoUpdate = await tx
+        .update(creditos)
+        .set({
+          statusCredit: "EN_CONVENIO",
+        })
+        .where(eq(creditos.credito_id, credit_id))
+        .returning();
+
     // ============================================
       // 💸 DESACTIVAR MORA ACTIVA (si existe)
       // ============================================
@@ -409,13 +442,6 @@ export async function createPaymentAgreement(
           "ℹ️ No se desactivó ninguna mora en este convenio (no había activa, o ya la había apagado otra ejecución)"
         );
       }
-      const resultadoUpdate = await tx
-        .update(creditos)
-        .set({
-          statusCredit: "EN_CONVENIO",
-        })
-        .where(eq(creditos.credito_id, credit_id))
-        .returning();
       return { agreement, resultadoUpdate };
     });
 

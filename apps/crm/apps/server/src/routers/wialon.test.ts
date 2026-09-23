@@ -1255,29 +1255,24 @@ describe("wialonRouter", () => {
 			}
 		});
 
-		it("acepta el vehículo del contrato del caso aunque la oportunidad no lo tenga", async () => {
+		it("no acepta el vehículo del contrato si no es el de la oportunidad (misma fuente que la ficha)", async () => {
 			casoGpsMock = {
 				casoSifco: "01010214100000",
 				vehiculoOportunidad: null,
-				vehiculoContrato: "11111111-1111-1111-1111-111111111111",
 			};
-			filaVehiculoMock = {
-				licensePlate: null,
-				wialonUnitId: null,
-				wialonUnitName: null,
-			};
-			setWialonClient(clienteWialon(() => new Response("{}", { status: 200 })));
 			try {
-				const res = await call(
-					wialonRouter.getGpsVehiculo,
-					{
-						casoCobroId: "33333333-3333-3333-3333-333333333333",
-						vehicleId: "11111111-1111-1111-1111-111111111111",
-						motivo: "Verificar ubicación para gestión de cobro",
-					},
-					{ context: cobrosContext as unknown as Context },
-				);
-				expect(res.estado).toBe("sin_vinculo");
+				await expect(
+					call(
+						wialonRouter.getGpsVehiculo,
+						{
+							casoCobroId: "33333333-3333-3333-3333-333333333333",
+							vehicleId: "11111111-1111-1111-1111-111111111111",
+							motivo: "Verificar ubicación para gestión de cobro",
+						},
+						{ context: cobrosContext as unknown as Context },
+					),
+				).rejects.toMatchObject({ code: "NOT_FOUND" });
+				expect(insertsGpsAuditoria).toHaveLength(0);
 			} finally {
 				casoGpsMock = {
 					casoSifco: "01010214100000",

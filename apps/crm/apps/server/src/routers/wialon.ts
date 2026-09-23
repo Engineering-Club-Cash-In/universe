@@ -338,9 +338,10 @@ async function creditosPorUnidad(
 	if (unidades.length === 0) return resultado;
 
 	try {
-		// Mismas dos fuentes que el gate de la ficha (resolverCasoParaGps): el
-		// vehículo de la oportunidad con ese SIFCO, o el del contrato del caso.
-		// Los duplicados entre ambas se descartan al agregar.
+		// Dos fuentes para responder "qué crédito tiene esta unidad": el
+		// vehículo de la oportunidad con ese SIFCO y el del contrato del caso.
+		// (La ficha y su GPS usan solo la oportunidad; acá el contrato suma
+		// porque el SIFCO igual es correcto.) Duplicados se descartan al agregar.
 		const [filasOportunidad, filasContrato] = await Promise.all([
 			db
 				.select({
@@ -432,8 +433,10 @@ async function creditosPorUnidad(
  *    Sin esto, cualquier usuario de cobros con el UUID de un vehículo ajeno
  *    obtenía su ubicación en vivo.
  * 2. El vehículo tiene que ser EL del caso, resuelto igual que la ficha
- *    (oportunidad con el SIFCO del caso, o el contrato del caso). Si no, el
- *    gate del paso 1 se saltaría pasando un caso propio con un vehículo ajeno.
+ *    (getDetallesCreditoCarteraBack): la oportunidad con el SIFCO del caso.
+ *    Si no, el gate del paso 1 se saltaría pasando un caso propio con un
+ *    vehículo ajeno. No se acepta el vehículo del contrato: la ficha nunca lo
+ *    manda, y una sola fuente evita que ficha y GPS discrepen.
  * 3. El SIFCO para la bitácora sale del caso, no del cliente: antes venía en
  *    el input y podía omitirse o falsearse.
  *
@@ -452,7 +455,6 @@ async function resolverCasoParaGps(
 		.select({
 			casoSifco: casosCobros.numeroCreditoSifco,
 			vehiculoOportunidad: opportunities.vehicleId,
-			vehiculoContrato: contratosFinanciamiento.vehicleId,
 		})
 		.from(casosCobros)
 		.leftJoin(
@@ -462,17 +464,10 @@ async function resolverCasoParaGps(
 				eq(opportunities.vehicleId, vehicleId),
 			),
 		)
-		.leftJoin(
-			contratosFinanciamiento,
-			eq(contratosFinanciamiento.id, casosCobros.contratoId),
-		)
 		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
 
-	const vehiculoDelCaso =
-		fila?.vehiculoOportunidad === vehicleId ||
-		fila?.vehiculoContrato === vehicleId;
-	if (!fila || !vehiculoDelCaso) {
+	if (!fila || fila.vehiculoOportunidad !== vehicleId) {
 		throw new ORPCError("NOT_FOUND", {
 			message: "Caso de cobro no encontrado o sin acceso.",
 		});

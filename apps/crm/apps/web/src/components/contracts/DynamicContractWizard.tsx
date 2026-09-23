@@ -2103,12 +2103,11 @@ export function DynamicContractWizard({
 							)}
 							{/* Las cartas no salen cada una por su lado: el servidor las junta
 							    en un documento, y es bueno saberlo antes de generar. */}
-							{selectedDocuments.filter(esCartaUnificable).length > 1 && (
+							{selectedDocuments.some(esCartaUnificable) && (
 								<p className="mt-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-blue-900 text-sm dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-300">
-									Las {selectedDocuments.filter(esCartaUnificable).length} cartas
-									seleccionadas salen en un solo documento, con un enlace por
+									Las cartas salen en un solo documento, con un enlace por
 									firmante. Si la oportunidad ya tiene cartas unidas, éstas las
-									reemplazan: incluí todas las que tengan que ir.
+									reemplazan enteras: tienen que venir todas las que ya estaban.
 								</p>
 							)}
 						</CardContent>

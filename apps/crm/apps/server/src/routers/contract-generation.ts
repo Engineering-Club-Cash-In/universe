@@ -721,6 +721,65 @@ async function deshacerConCandadoTomado(
 }
 
 /**
+ * Corta si un paquete de cartas nuevo deja afuera alguna carta del vigente.
+ *
+ * El paquete nuevo reemplaza entero al anterior: es un solo documento y no se
+ * puede anular a medias. Si la oportunidad tiene uno con A y B y se genera
+ * otro sólo con C, A y B se quedaban sin documento vigente (y con ellas, las
+ * firmas que tuvieran). Así que el nuevo tiene que traer todas las que ya
+ * estaban. Si alguna ya no va, se anula primero el paquete.
+ *
+ * No mira las cartas sueltas de antes de unirlas: a ésas el paquete sólo las
+ * reemplaza si las trae (ver `tiposQueReemplaza`), así que no se pierde nada.
+ */
+async function exigirQueElPaqueteTraigaLasVigentes(
+	opportunityId: string,
+	cartasNuevas: readonly string[],
+	/** Qué puede hacer quien lo pidió para destrabarlo. */
+	comoSeArregla: string,
+): Promise<void> {
+	if (cartasNuevas.length === 0) return;
+
+	const paquetes = await db
+		.select({ apiResponse: generatedLegalContracts.apiResponse })
+		.from(generatedLegalContracts)
+		.where(
+			and(
+				eq(generatedLegalContracts.opportunityId, opportunityId),
+				eq(generatedLegalContracts.contractType, PAQUETE_CARTAS),
+				ne(generatedLegalContracts.status, "cancelled"),
+				isNull(generatedLegalContracts.replacedByContractId),
+			),
+		);
+
+	const faltan = new Map<string, string>();
+	for (const paquete of paquetes) {
+		for (const carta of cartasDelPaquete(paquete.apiResponse)) {
+			if (!cartasNuevas.includes(carta.contractType)) {
+				faltan.set(carta.contractType, carta.label);
+			}
+		}
+	}
+
+	if (faltan.size > 0) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `Esta oportunidad ya tiene cartas unidas que incluyen: ${[...faltan.values()].join(", ")}. Las cartas van todas en un solo documento y el nuevo reemplaza entero al anterior, así que tiene que traerlas también. ${comoSeArregla}`,
+		});
+	}
+}
+
+/** Las cartas que trae el paquete de una lista ya agrupada, si lo hay. */
+function cartasDelPedido(
+	contratos: ReadonlyArray<{ contractType: string; cartas?: unknown }>,
+): string[] {
+	const paquete = contratos.find((c) => c.contractType === PAQUETE_CARTAS);
+	if (!paquete || !Array.isArray(paquete.cartas)) return [];
+	return paquete.cartas
+		.map((c: { contractType?: unknown }) => c.contractType)
+		.filter((t): t is string => typeof t === "string");
+}
+
+/**
  * Las reglas de "qué se puede subir" para una oportunidad y un tipo.
  *
  * Se piden dos veces: antes de tomar el candado, para cortar sin esperar, y de
@@ -1335,6 +1394,11 @@ export const contractGenerationRouter = {
 					async () => {
 						if (input.opportunityId) {
 							await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+							await exigirQueElPaqueteTraigaLasVigentes(
+								input.opportunityId,
+								cartasDelPedido(aGenerar),
+								"Seleccioná también esas, o anulá primero las cartas unidas si alguna ya no va.",
+							);
 						}
 						return generateContractsBatch({ contracts: aGenerar });
 					},
@@ -1520,6 +1584,17 @@ export const contractGenerationRouter = {
 				// los vigentes.
 				try {
 					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+					// Entre generar y enlazar pudo instalarse otro paquete (otra
+					// pestaña, otra persona). Se revisa de nuevo antes de retirar nada.
+					await exigirQueElPaqueteTraigaLasVigentes(
+						input.opportunityId,
+						input.contracts.flatMap((c) =>
+							c.contractType === PAQUETE_CARTAS
+								? cartasDelPaquete(c.apiResponse).map((x) => x.contractType)
+								: [],
+						),
+						"Volvé a generar las cartas con todas.",
+					);
 				} catch (error) {
 					for (const contract of input.contracts) {
 						const { documentID } = firmaDelGenerador(contract.apiResponse);
@@ -1953,6 +2028,13 @@ export const contractGenerationRouter = {
 					// documento. Los resultados se emparejan contra esta misma lista.
 					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 					const aGenerar = agruparCartas(contractsWithNewDate);
+					// Las cartas salen de la última generación: si no tiene alguna
+					// del paquete vigente, regenerar lo dejaría sin ella.
+					await exigirQueElPaqueteTraigaLasVigentes(
+						input.opportunityId,
+						cartasDelPedido(aGenerar),
+						"La última generación no tiene los datos de esas cartas: generá las cartas desde el wizard con todas.",
+					);
 					const apiResult = await generateContractsBatch({
 						contracts: aGenerar,
 					});

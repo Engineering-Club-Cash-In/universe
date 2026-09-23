@@ -400,6 +400,14 @@ export async function anularContratoReemplazado(
 		 * para que los que faltan no sigan firmando uno que ya no vale.
 		 */
 		conservarSiHayFirmas?: boolean;
+		/**
+		 * Dejar la fila anulada aunque no haya nada que conservar (ni documento
+		 * en WeeTrust ni firmas), en vez de borrarla. También lo pide anular sin
+		 * reemplazo: el motivo es lo único que dice por qué se descartó, y un
+		 * contrato en papel sin firmar nunca tiene documento. Reemplazar no lo
+		 * necesita: el contrato nuevo es el rastro.
+		 */
+		conservarFila?: boolean;
 	} = {},
 ): Promise<{ contractId: string; conservado: boolean } | null> {
 	const [viejo] = await db
@@ -480,7 +488,7 @@ export async function anularContratoReemplazado(
 		}
 	}
 
-	if (viejo.weetrustDocumentId || conFirmas) {
+	if (viejo.weetrustDocumentId || conFirmas || opciones.conservarFila) {
 		// Qué pasó con el documento allá, para que quien mire la fila anulada lo
 		// sepa sin entrar a WeeTrust. Uno completo nunca se intenta borrar
 		// (WeeTrust no deja), así que no es un "no se pudo".

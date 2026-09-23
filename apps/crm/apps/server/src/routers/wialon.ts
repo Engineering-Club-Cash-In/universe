@@ -27,11 +27,13 @@ import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { opportunities } from "../db/schema/crm";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import { vehicles } from "../db/schema/vehicles";
+import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import {
 	adminProcedure,
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
 } from "../lib/orpc";
+import { PERMISSIONS } from "../lib/roles";
 import {
 	extraerNucleoDeNombreUnidad,
 	extraerNucleoPlaca,
@@ -649,6 +651,7 @@ async function resolverCasoParaGps(
 	vehicleId: string,
 	userId: string,
 	userRole: string,
+	emailUsuario: string | null | undefined,
 ): Promise<{ numeroCreditoSifco: string | null }> {
 	await assertAccesoCasoCobro(casoCobroId, userId, userRole);
 
@@ -689,7 +692,29 @@ async function resolverCasoParaGps(
 				"El crédito tiene más de un vehículo registrado; no se puede determinar cuál consultar. Hay que corregir las oportunidades del SIFCO.",
 		});
 	}
-	return { numeroCreditoSifco: filas[0]?.casoSifco ?? null };
+	const numeroCreditoSifco = filas[0]?.casoSifco ?? null;
+
+	// El caso NO basta como autorización: getDetallesCreditoCarteraBack
+	// auto-crea uno con responsableCobros = quien consulta, así que un asesor
+	// podría fabricarse acceso abriendo el SIFCO de otro (ver
+	// credito-cartera-ownership.ts). La fuente es CARTERA, leída sin cache.
+	// Admin / supervisor pasan sin consulta. Sin SIFCO no hay cómo verificar.
+	if (!numeroCreditoSifco) {
+		if (!PERMISSIONS.canViewAllCasosCobros(userRole)) {
+			throw new ORPCError("FORBIDDEN", {
+				message: "No se pudo verificar la asignación del crédito en cartera.",
+			});
+		}
+	} else {
+		await assertCreditoAsignadoEnCarteraPorSifco({
+			numeroSifco: numeroCreditoSifco,
+			emailUsuario,
+			userRole,
+			accion: "ver la ubicación GPS de este vehículo",
+		});
+	}
+
+	return { numeroCreditoSifco };
 }
 
 export const wialonRouter = {
@@ -983,6 +1008,7 @@ export const wialonRouter = {
 				input.vehicleId,
 				context.userId,
 				context.userRole,
+				context.user?.email || context.session?.user?.email,
 			);
 
 			// La auditoría se registra ANTES de resolver la unidad y NUNCA aborta

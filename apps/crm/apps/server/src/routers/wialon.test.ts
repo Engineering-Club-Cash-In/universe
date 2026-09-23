@@ -1,7 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	mock,
+	spyOn,
+} from "bun:test";
 import { call, ORPCError } from "@orpc/server";
 import { casosCobros } from "../db/schema/cobros";
 import type { Context } from "../lib/context";
+import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	setWialonClient,
 	WialonClient,
@@ -1597,6 +1606,82 @@ describe("wialonRouter", () => {
 			).rejects.toThrow();
 			// Ni siquiera llegó a intentar auditar: la validación de zod corta antes.
 			expect(insertsGpsAuditoria).toHaveLength(0);
+		});
+
+		describe("asignación en cartera (el caso no basta)", () => {
+			const contextoAsesor = {
+				headers: new Headers(),
+				session: { user: { id: "user-ase", email: "Asesor@Example.com" } },
+				user: { id: "user-ase", email: "Asesor@Example.com", role: "cobros" },
+				userId: "user-ase",
+				userRole: "cobros",
+			} as unknown as Context;
+
+			let spyCredito: { mockRestore: () => void } | null = null;
+			afterEach(() => {
+				rolUsuarioMock = "admin";
+				spyCredito?.mockRestore();
+				spyCredito = null;
+			});
+
+			it("un asesor con el crédito asignado en cartera consulta normal (lectura sin cache)", async () => {
+				rolUsuarioMock = "cobros";
+				const getCredito = spyOn(
+					carteraBackClient,
+					"getCredito",
+				).mockResolvedValue({
+					asesor: { emailCashIn: "asesor@example.com" },
+				} as never);
+				spyCredito = getCredito;
+				filaVehiculoMock = {
+					licensePlate: null,
+					wialonUnitId: null,
+					wialonUnitName: null,
+				};
+				setWialonClient(
+					clienteWialon(() => new Response("{}", { status: 200 })),
+				);
+
+				const res = await call(
+					wialonRouter.getGpsVehiculo,
+					{
+						casoCobroId: "33333333-3333-3333-3333-333333333333",
+						vehicleId: "11111111-1111-1111-1111-111111111111",
+						motivo: "Verificar ubicación para gestión de cobro",
+					},
+					{ context: contextoAsesor },
+				);
+				expect(res.estado).toBe("sin_vinculo");
+				expect(getCredito).toHaveBeenCalledWith("01010214100000", false);
+			});
+
+			it("un asesor con un caso auto-creado sobre un crédito de OTRO asesor queda afuera", async () => {
+				rolUsuarioMock = "cobros";
+				spyCredito = spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+					asesor: { emailCashIn: "otro.asesor@example.com" },
+				} as never);
+				const svcs: string[] = [];
+				setWialonClient(
+					clienteWialon((bodyStr) => {
+						svcs.push(new URLSearchParams(bodyStr).get("svc") ?? "");
+						return new Response("{}", { status: 200 });
+					}),
+				);
+
+				await expect(
+					call(
+						wialonRouter.getGpsVehiculo,
+						{
+							casoCobroId: "33333333-3333-3333-3333-333333333333",
+							vehicleId: "11111111-1111-1111-1111-111111111111",
+							motivo: "Verificar ubicación para gestión de cobro",
+						},
+						{ context: contextoAsesor },
+					),
+				).rejects.toMatchObject({ code: "FORBIDDEN" });
+				expect(insertsGpsAuditoria).toHaveLength(0);
+				expect(svcs).toEqual([]);
+			});
 		});
 
 		it("rechaza un caso al que el asesor no tiene acceso, sin consultar ni auditar", async () => {

@@ -1,5 +1,5 @@
 /**
- * ORDEN DE CANDADOS del módulo de mora.
+ * ORDEN DE CANDADOS del módulo de mora — y la FECHA de los eventos.
  *
  * ── Por qué existe este archivo ─────────────────────────────────────────────
  * Las rutas del módulo tocan las mismas dos filas: la del crédito y la de su
@@ -24,6 +24,14 @@
  * agregar un escenario a `ESCENARIOS` para que una ruta nueva quede cubierta, y
  * una ruta existente que invierta el orden revienta sin que nadie tenga que
  * acordarse de escribirle su prueba.
+ *
+ * ── Y la fecha ──────────────────────────────────────────────────────────────
+ * Sobre el mismo barrido se verifica que TODO evento de `moras_historial` se
+ * escriba con `clock_timestamp()` y no con el `DEFAULT now()` de la columna:
+ * `now()` es `transaction_timestamp()` —la hora del BEGIN—, y con la
+ * transacción larga del convenio eso fechaba su DESACTIVACION ANTES de
+ * mutaciones que en realidad ocurrieron primero, dejando que el reporte
+ * histórico mostrara mora activa después de que el convenio la apagó.
  */
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -159,7 +167,9 @@ const {
   updateMora,
   condonarMora,
 } = await import("./latefee");
-const { creditos, moras_credito } = await import("../database/db/schema");
+const { creditos, moras_credito, moras_historial } = await import(
+  "../database/db/schema"
+);
 
 const CREDITO_ID = 4242;
 
@@ -202,6 +212,8 @@ const ESCENARIOS: Array<{
   /** Deja listos los SELECT que va a consumir el camino. */
   preparar: () => void;
   correr: () => Promise<unknown>;
+  /** ¿Este camino debe dejar un evento en moras_historial? */
+  escribeHistorial: boolean;
 }> = [
   {
     nombre: "procesarMoras — rama CREACION",
@@ -209,6 +221,7 @@ const ESCENARIOS: Array<{
       estado.selects = [[cuotaDeAyer()], []];
     },
     correr: () => procesarMoras(),
+    escribeHistorial: true,
   },
   {
     nombre: "procesarMoras — rama RECALCULO",
@@ -216,6 +229,7 @@ const ESCENARIOS: Array<{
       estado.selects = [[cuotaDeAyer()], [MORA_ACTIVA]];
     },
     correr: () => procesarMoras(),
+    escribeHistorial: true,
   },
   {
     nombre: "procesarMoras — paso 5, mora que redondea a Q0.00 (desactivarMoraDelCron)",
@@ -224,6 +238,7 @@ const ESCENARIOS: Array<{
       estado.selects = [[cuotaDeAyer("10")], [MORA_ACTIVA]];
     },
     correr: () => procesarMoras(),
+    escribeHistorial: true,
   },
   {
     nombre: "procesarMoras — paso 6, crédito al día (desactivarMoraDelCron)",
@@ -231,6 +246,7 @@ const ESCENARIOS: Array<{
       estado.selects = [[], [MORA_ACTIVA]];
     },
     correr: () => procesarMoras(),
+    escribeHistorial: true,
   },
   {
     nombre: "desactivarMoraSiCreditoAlDia",
@@ -242,6 +258,7 @@ const ESCENARIOS: Array<{
       ];
     },
     correr: () => desactivarMoraSiCreditoAlDia(CREDITO_ID),
+    escribeHistorial: true,
   },
   {
     nombre: "updateMora (/mora/update)",
@@ -259,6 +276,7 @@ const ESCENARIOS: Array<{
         monto_cambio: 50,
         motivo: "prueba de orden de candados",
       }),
+    escribeHistorial: true,
   },
   {
     nombre: "condonarMora",
@@ -275,6 +293,7 @@ const ESCENARIOS: Array<{
         motivo: "prueba de orden de candados",
         usuario_email: "quien@sea.com",
       }),
+    escribeHistorial: true,
   },
   {
     nombre: "desactivarMoraPorConvenio (transacción propia)",
@@ -282,6 +301,7 @@ const ESCENARIOS: Array<{
       estado.selects = [[MORA_ACTIVA]];
     },
     correr: () => desactivarMoraPorConvenio(CREDITO_ID, { convenio_id: 1 }),
+    escribeHistorial: true,
   },
 ];
 
@@ -378,4 +398,25 @@ describe("orden de candados: creditos ANTES que moras_credito", () => {
     expect(desactiva).toBeGreaterThan(-1);
     expect(update).toBeLessThan(desactiva);
   });
+});
+
+describe("moras_historial.fecha: la hora de la ESCRITURA, no la del BEGIN", () => {
+  for (const escenario of ESCENARIOS.filter((e) => e.escribeHistorial)) {
+    it(`${escenario.nombre}: el evento se fecha con clock_timestamp()`, async () => {
+      escenario.preparar();
+      await escenario.correr();
+
+      const eventos = estado.inserts.filter((i) => i.tabla === moras_historial);
+      expect(eventos.length).toBeGreaterThan(0);
+
+      for (const evento of eventos) {
+        // Con el DEFAULT now() la columna no viene en el INSERT y se llena con
+        // transaction_timestamp(): la hora del BEGIN.
+        expect(evento.values.fecha).toBeDefined();
+        const sql = JSON.stringify(evento.values.fecha);
+        expect(sql).toContain("clock_timestamp()");
+        expect(sql).not.toContain("now()");
+      }
+    });
+  }
 });

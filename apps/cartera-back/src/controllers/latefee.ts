@@ -553,6 +553,39 @@ async function registrarHistorialMora(params: {
           : null,
       usuario_id: params.usuario_id ?? null,
       motivo: params.motivo ?? null,
+      // 🕐 La hora REAL de esta escritura, no la del BEGIN.
+      //
+      // La columna tiene `DEFAULT now()`, y en Postgres `now()` es
+      // `transaction_timestamp()`: la hora en que arrancó la transacción. Con
+      // las transacciones cortas de antes daba lo mismo, pero el convenio
+      // ahora abre una transacción larga (valida, arma cuotas, mueve pagos) y
+      // recién al final escribe su DESACTIVACION. Si en el medio otra mutación
+      // de mora (/mora/update, por ejemplo) COMMITEA, su evento lleva una
+      // `fecha` POSTERIOR a la del convenio aunque haya ocurrido ANTES de que
+      // el convenio escribiera el suyo. Y como `snapCte` elige el último
+      // evento con `ORDER BY fecha DESC, historial_id DESC`, ese ajuste previo
+      // gana y el reporte histórico muestra mora activa después de que el
+      // convenio la desactivó.
+      //
+      // `clock_timestamp()` es la hora de pared del momento del INSERT, así
+      // que el orden de las `fecha` vuelve a ser el orden real de las
+      // escrituras. Se prefirió esto a "ordenar solo por historial_id" porque
+      // el `historial_id` de un serial se asigna al ejecutar el INSERT pero
+      // NADA garantiza que ese orden sea el de los commits, y sobre todo
+      // porque `fecha` no es solo un desempate: es la columna con la que el
+      // reporte corta por día de Guatemala y la que el usuario ve. Una fecha
+      // que miente sobre cuándo pasó el evento seguiría mintiendo aunque el
+      // orden se arreglara por otro lado.
+      //
+      // El `::timestamp` es el mismo cast implícito que ya aplicaba el
+      // `DEFAULT now()` sobre esta columna `timestamp` sin zona (la sesión
+      // corre en UTC), así que las filas nuevas son homogéneas con las viejas
+      // y el filtro por día de `snapCte` —que compara contra la columna
+      // CRUDA, para no perder `moras_historial_fecha_idx`— sigue igual.
+      //
+      // El desempate por `historial_id DESC` sigue haciendo falta: dos eventos
+      // pueden caer en la misma marca.
+      fecha: sql`clock_timestamp()::timestamp`,
     });
   } catch (err) {
     emitCreditLateFee({ outcome: "degraded", operation: "history", durationMs: elapsedMilliseconds(startedAt), errorCode: "persistence_failed" });

@@ -543,25 +543,11 @@ async function etapaActual(opportunityId: string): Promise<string | null> {
  *   sigue vigente. `NO KEY UPDATE` para no trabarse con los borrados de
  *   contratos, que sólo piden `KEY SHARE` sobre la oportunidad.
  *
- * Devuelve si el nuevo quedó como vigente.
+ * Devuelve si el nuevo quedó como vigente. Quien la llama ya tiene el candado
+ * de la oportunidad (pedirlo de nuevo se trabaría): retirar el anterior lo
+ * borra en WeeTrust, y un WhatsApp mandando sus enlaces en paralelo le
+ * dejaría al cliente links muertos.
  */
-async function retirarAnterioresSiSigueVigente(params: {
-	opportunityId: string;
-	contractType: string;
-	nuevoId: string;
-	etapaInicial: string | null;
-	motivo?: string;
-}): Promise<boolean> {
-	// Todo con el candado de la oportunidad: retirar el anterior lo borra en
-	// WeeTrust, y si un envío por WhatsApp está mandando sus enlaces, el cliente
-	// recibiría links que mueren en el acto. El candado por tipo sigue adentro,
-	// siempre después de éste: si se tomaran en otro orden, dos pedidos podrían
-	// quedarse esperándose.
-	return conCandadoDeFirma(params.opportunityId, () =>
-		retirarConCandadoTomado(params),
-	);
-}
-
 async function retirarConCandadoTomado(params: {
 	opportunityId: string;
 	contractType: string;
@@ -632,21 +618,8 @@ async function retirarConCandadoTomado(params: {
  * sin ellos no se puede mandar por WhatsApp, sincronizar ni regenerar. Se
  * borra en WeeTrust y la fila queda anulada, con las reglas de anular.
  * Siempre devuelve `false` (no quedó vigente), para usarlo directo como
- * resultado.
+ * resultado. Quien la llama ya tiene el candado de la oportunidad.
  */
-async function deshacerContratoSinFirmantes(
-	contractId: string,
-	opportunityId: string,
-): Promise<false> {
-	// Con el candado, como el resto de lo que borra en WeeTrust. Sus enlaces no
-	// salieron por WhatsApp (el contrato ni siquiera llegó a tener firmantes),
-	// pero el camino de anular es uno solo y se toma siempre igual.
-	return conCandadoDeFirma(opportunityId, () =>
-		deshacerConCandadoTomado(contractId, opportunityId),
-	);
-}
-
-/** Lo mismo, para quien ya tiene el candado: pedirlo de nuevo se trabaría. */
 async function deshacerConCandadoTomado(
 	contractId: string,
 	opportunityId: string,
@@ -1385,169 +1358,173 @@ export const contractGenerationRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			try {
-				const savedContracts: Array<{ id: string; contractType: string }> = [];
-				const descartados: string[] = [];
+				// Todo con el candado de la oportunidad, desde antes de guardar la
+				// primera fila: si no, una aprobación que entrara entre el guardado y el
+				// retiro de los anteriores contaba una fila a medio instalar, pasaba a
+				// 85% y mandaba el WhatsApp con enlaces que este pedido después borraba.
+				return await conCandadoDeFirma(input.opportunityId, async () => {
+					const savedContracts: Array<{ id: string; contractType: string }> =
+						[];
+					const descartados: string[] = [];
 
-				// Documentos que ya están enlazados: pasa cuando se reintenta un pedido
-				// que sí se guardó (se perdió la respuesta, doble click). No se vuelven
-				// a insertar ni, sobre todo, se borran: la fila que ya existe es la
-				// que los usa, y un duplicado retiraba a la otra borrando el documento
-				// que compartían.
-				const idsDeDocumento = input.contracts
-					.map((c) => firmaDelGenerador(c.apiResponse).documentID)
-					.filter((id): id is string => !!id);
-				const filasYaEnlazadas =
-					idsDeDocumento.length === 0
-						? []
-						: await db
-								.select({
-									id: generatedLegalContracts.id,
-									documentID: generatedLegalContracts.weetrustDocumentId,
-									opportunityId: generatedLegalContracts.opportunityId,
-									status: generatedLegalContracts.status,
-									replacedByContractId:
-										generatedLegalContracts.replacedByContractId,
-								})
-								.from(generatedLegalContracts)
-								.where(
-									inArray(
-										generatedLegalContracts.weetrustDocumentId,
-										idsDeDocumento,
+					// Documentos que ya están enlazados: pasa cuando se reintenta un pedido
+					// que sí se guardó (se perdió la respuesta, doble click). No se vuelven
+					// a insertar ni, sobre todo, se borran: la fila que ya existe es la
+					// que los usa, y un duplicado retiraba a la otra borrando el documento
+					// que compartían.
+					const idsDeDocumento = input.contracts
+						.map((c) => firmaDelGenerador(c.apiResponse).documentID)
+						.filter((id): id is string => !!id);
+					const filasYaEnlazadas =
+						idsDeDocumento.length === 0
+							? []
+							: await db
+									.select({
+										id: generatedLegalContracts.id,
+										documentID: generatedLegalContracts.weetrustDocumentId,
+										opportunityId: generatedLegalContracts.opportunityId,
+										status: generatedLegalContracts.status,
+										replacedByContractId:
+											generatedLegalContracts.replacedByContractId,
+									})
+									.from(generatedLegalContracts)
+									.where(
+										inArray(
+											generatedLegalContracts.weetrustDocumentId,
+											idsDeDocumento,
+										),
+									);
+					const yaEnlazados = new Map(
+						filasYaEnlazadas.map((fila) => [fila.documentID, fila]),
+					);
+
+					// Enlazar es de jurídico y sólo en 80%. Si la oportunidad ya pasó (la
+					// aprobaron entre generar y enlazar), los documentos recién generados
+					// no se instalan: se borran en WeeTrust para que no queden vivos sin
+					// registro, con las invitaciones mandadas. Los ya enlazados no: son
+					// los vigentes.
+					try {
+						await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+					} catch (error) {
+						for (const contract of input.contracts) {
+							const { documentID } = firmaDelGenerador(contract.apiResponse);
+							if (documentID && !yaEnlazados.has(documentID)) {
+								await borrarDocumentoDeWeeTrust(documentID).catch((e) =>
+									console.error(
+										`[linkContractsToOpportunity] no se pudo borrar ${documentID}:`,
+										e,
 									),
 								);
-				const yaEnlazados = new Map(
-					filasYaEnlazadas.map((fila) => [fila.documentID, fila]),
-				);
+							}
+						}
+						throw error;
+					}
+					const etapaInicial = await etapaActual(input.opportunityId);
 
-				// Enlazar es de jurídico y sólo en 80%. Si la oportunidad ya pasó (la
-				// aprobaron entre generar y enlazar), los documentos recién generados
-				// no se instalan: se borran en WeeTrust para que no queden vivos sin
-				// registro, con las invitaciones mandadas. Los ya enlazados no: son
-				// los vigentes.
-				try {
-					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
-				} catch (error) {
 					for (const contract of input.contracts) {
-						const { documentID } = firmaDelGenerador(contract.apiResponse);
-						if (documentID && !yaEnlazados.has(documentID)) {
-							await borrarDocumentoDeWeeTrust(documentID).catch((e) =>
-								console.error(
-									`[linkContractsToOpportunity] no se pudo borrar ${documentID}:`,
-									e,
-								),
-							);
-						}
-					}
-					throw error;
-				}
-				const etapaInicial = await etapaActual(input.opportunityId);
+						// El front reenvía tal cual la respuesta del generador; de ahí salen
+						// los roles y los identificadores de WeeTrust.
+						const generado = firmaDelGenerador(contract.apiResponse);
 
-				for (const contract of input.contracts) {
-					// El front reenvía tal cual la respuesta del generador; de ahí salen
-					// los roles y los identificadores de WeeTrust.
-					const generado = firmaDelGenerador(contract.apiResponse);
-
-					const previo = generado.documentID
-						? yaEnlazados.get(generado.documentID)
-						: undefined;
-					if (previo) {
-						// Ya quedó enlazado en un pedido anterior: se informa como tal si
-						// sigue siendo el vigente de esta oportunidad, sin tocar nada.
-						if (
-							previo.opportunityId === input.opportunityId &&
-							previo.status !== "cancelled" &&
-							!previo.replacedByContractId
-						) {
-							savedContracts.push({
-								id: previo.id,
-								contractType: contract.contractType,
-							});
-						} else {
-							descartados.push(contract.contractType);
-						}
-						continue;
-					}
-
-					const [saved] = await db
-						.insert(generatedLegalContracts)
-						.values({
-							leadId: input.leadId,
-							opportunityId: input.opportunityId,
-							contractType: contract.contractType,
-							contractName: contract.contractName,
-							...linksPorRol(generado.signatories, contract.signingLinks),
-							signingProvider: generado.signingProvider ?? null,
-							weetrustDocumentId: generado.documentID ?? null,
-							observerUrl: generado.observerUrl ?? null,
-							signatureMode: getSignatureMode(contract.contractType),
-							templateId: contract.templateId,
-							apiResponse: contract.apiResponse,
-							// La key de R2, no la URL firmada que se muestra (vence en una
-							// hora): regenerar baja el PDF de R2 con esta key.
-							pdfLink: generado.r2Key || contract.documentLink || null,
-							status: "pending",
-							generatedBy: context.userId,
-							generatedAt: new Date(),
-						})
-						.returning({ id: generatedLegalContracts.id });
-
-					if (saved) {
-						// Sin firmantes guardados el nuevo no se puede mandar ni
-						// regenerar: se deshace (se borra en WeeTrust y acá), el
-						// anterior sigue vigente y se informa como descartado.
-						const quedoVigente = (await guardarFirmantes(
-							saved.id,
-							generado.signatories,
-							contract.contractType,
-						))
-							? await retirarAnterioresSiSigueVigente({
-									opportunityId: input.opportunityId,
+						const previo = generado.documentID
+							? yaEnlazados.get(generado.documentID)
+							: undefined;
+						if (previo) {
+							// Ya quedó enlazado en un pedido anterior: se informa como tal si
+							// sigue siendo el vigente de esta oportunidad, sin tocar nada.
+							if (
+								previo.opportunityId === input.opportunityId &&
+								previo.status !== "cancelled" &&
+								!previo.replacedByContractId
+							) {
+								savedContracts.push({
+									id: previo.id,
 									contractType: contract.contractType,
-									nuevoId: saved.id,
-									etapaInicial,
-								})
-							: await deshacerContratoSinFirmantes(
-									saved.id,
-									input.opportunityId,
-								);
-						// Descartado (cambió la etapa o ganó otro pedido): esa fila ya no
-						// existe o no es la vigente, no se informa como enlazada.
-						if (quedoVigente) {
-							savedContracts.push({
-								id: saved.id,
+								});
+							} else {
+								descartados.push(contract.contractType);
+							}
+							continue;
+						}
+
+						const [saved] = await db
+							.insert(generatedLegalContracts)
+							.values({
+								leadId: input.leadId,
+								opportunityId: input.opportunityId,
 								contractType: contract.contractType,
-							});
-						} else {
-							descartados.push(contract.contractType);
+								contractName: contract.contractName,
+								...linksPorRol(generado.signatories, contract.signingLinks),
+								signingProvider: generado.signingProvider ?? null,
+								weetrustDocumentId: generado.documentID ?? null,
+								observerUrl: generado.observerUrl ?? null,
+								signatureMode: getSignatureMode(contract.contractType),
+								templateId: contract.templateId,
+								apiResponse: contract.apiResponse,
+								// La key de R2, no la URL firmada que se muestra (vence en una
+								// hora): regenerar baja el PDF de R2 con esta key.
+								pdfLink: generado.r2Key || contract.documentLink || null,
+								status: "pending",
+								generatedBy: context.userId,
+								generatedAt: new Date(),
+							})
+							.returning({ id: generatedLegalContracts.id });
+
+						if (saved) {
+							// Sin firmantes guardados el nuevo no se puede mandar ni
+							// regenerar: se deshace (se borra en WeeTrust y acá), el
+							// anterior sigue vigente y se informa como descartado.
+							const quedoVigente = (await guardarFirmantes(
+								saved.id,
+								generado.signatories,
+								contract.contractType,
+							))
+								? await retirarConCandadoTomado({
+										opportunityId: input.opportunityId,
+										contractType: contract.contractType,
+										nuevoId: saved.id,
+										etapaInicial,
+									})
+								: await deshacerConCandadoTomado(saved.id, input.opportunityId);
+							// Descartado (cambió la etapa o ganó otro pedido): esa fila ya no
+							// existe o no es la vigente, no se informa como enlazada.
+							if (quedoVigente) {
+								savedContracts.push({
+									id: saved.id,
+									contractType: contract.contractType,
+								});
+							} else {
+								descartados.push(contract.contractType);
+							}
 						}
 					}
-				}
 
-				// Guardar snapshot si se proporcionaron los datos de generación, y sólo
-				// si quedó algún contrato: no tiene sentido para documentos descartados.
-				if (
-					input.generationData &&
-					input.contractDate &&
-					savedContracts.length > 0
-				) {
-					await db.insert(contractGenerationSnapshots).values({
-						opportunityId: input.opportunityId,
-						contractDate: input.contractDate,
-						data: input.generationData,
-						createdBy: context.userId,
-					});
-				}
+					// Guardar snapshot si se proporcionaron los datos de generación, y sólo
+					// si quedó algún contrato: no tiene sentido para documentos descartados.
+					if (
+						input.generationData &&
+						input.contractDate &&
+						savedContracts.length > 0
+					) {
+						await db.insert(contractGenerationSnapshots).values({
+							opportunityId: input.opportunityId,
+							contractDate: input.contractDate,
+							data: input.generationData,
+							createdBy: context.userId,
+						});
+					}
 
-				return {
-					success: descartados.length === 0,
-					linkedCount: savedContracts.length,
-					contracts: savedContracts,
-					descartados,
-					message:
-						descartados.length === 0
-							? `Se enlazaron ${savedContracts.length} contrato(s) a la oportunidad exitosamente`
-							: `Se enlazaron ${savedContracts.length} contrato(s). Se descartaron ${descartados.join(", ")}: la oportunidad cambió mientras se generaban. Recargá y volvé a intentarlo.`,
-				};
+					return {
+						success: descartados.length === 0,
+						linkedCount: savedContracts.length,
+						contracts: savedContracts,
+						descartados,
+						message:
+							descartados.length === 0
+								? `Se enlazaron ${savedContracts.length} contrato(s) a la oportunidad exitosamente`
+								: `Se enlazaron ${savedContracts.length} contrato(s). Se descartaron ${descartados.join(", ")}: la oportunidad cambió mientras se generaban. Recargá y volvé a intentarlo.`,
+					};
+				});
 			} catch (error) {
 				console.error("[linkContractsToOpportunity] Error:", error);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
@@ -1637,7 +1614,7 @@ export const contractGenerationRouter = {
 				await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 
 				// La etapa al empezar: si cambia mientras se generan, los nuevos no
-				// reemplazan a los que ya salieron (ver retirarAnterioresSiSigueVigente).
+				// reemplazan a los que ya salieron (ver retirarConCandadoTomado).
 				const etapaInicial = await etapaActual(input.opportunityId);
 
 				// 1. Filtrar solo los contratos de los tipos a regenerar

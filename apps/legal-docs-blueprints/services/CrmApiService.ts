@@ -227,6 +227,9 @@ export async function notificarEstadoDeFirmaAlCrm(estado: {
       'x-weetrust-relay-secret': secret,
     },
     body: JSON.stringify(estado),
+    // Sin tope, un CRM que acepta la conexión y no responde deja colgado el
+    // webhook de WeeTrust, y los siguientes se acumulan detrás.
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!response.ok) {

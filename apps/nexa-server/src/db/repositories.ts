@@ -169,7 +169,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       this.missingDateCursor = 0;
       rows = await loadBatch();
     }
-    this.missingDateCursor = rows.at(-1)?.id ?? 0;
+    this.missingDateCursor = rows.length === 100 ? rows.at(-1)?.id ?? 0 : 0;
     return rows.map(({ reference, createdAt }) => ({ reference, createdAt }));
   }
 

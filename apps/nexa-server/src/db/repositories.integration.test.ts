@@ -255,6 +255,15 @@ integrationTest("missing-date batches rotate past unmatched receipts and wrap fo
   expect(await repository.listMissingDateReceipts()).toEqual(first);
 });
 
+integrationTest("partial missing-date batches retry older receipts under new arrivals", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await repository.upsertReceived({ ...transaction, reference: "old-unmatched", tokenDate: undefined });
+  expect(await repository.listMissingDateReceipts()).toHaveLength(1);
+  await repository.upsertReceived({ ...transaction, reference: "new-arrival", tokenDate: undefined });
+  expect((await repository.listMissingDateReceipts()).map((row) => row.reference)).toEqual(["old-unmatched", "new-arrival"]);
+});
+
 integrationTest("statement enrichment cannot import unrelated funds or bypass correlation", async () => {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const repository = new DbPaymentTransactionRepository(db);

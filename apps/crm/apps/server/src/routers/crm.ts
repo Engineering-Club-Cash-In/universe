@@ -71,6 +71,7 @@ import {
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
 import { mergeCompanyRelationshipStats } from "../lib/company-relationship-stats";
+import { conCandadoDeFirma } from "../lib/contratos-candado";
 import {
 	assertOpportunityBelongsToLead,
 	canWriteOpportunityCreditAnalysis,
@@ -3056,48 +3057,58 @@ export const crmRouter = {
 				currentOpportunity[0],
 			);
 
-			const updatedOpportunity = await db
-				.update(opportunities)
-				.set({
-					...safeUpdateData,
-					...(assignedTo && { assignedTo }),
-					...(expectedCloseDate && {
-						expectedCloseDate: new Date(expectedCloseDate),
-					}),
-					// `fechaInicio` se destructura fuera de `updateData`, así que
-					// `stripUnchangedFrozenFields` no la ve: se omite acá cuando no
-					// cambia, para no reescribir un campo congelado con el mismo valor.
-					...(fechaInicio &&
-						frozenFieldChanges.includes("fechaInicio") && {
-							fechaInicio: new Date(fechaInicio),
+			// Un cambio de etapa espera a que termine lo que se esté haciendo con
+			// los contratos de la oportunidad (generar, regenerar, subir, enlazar,
+			// anular), que toman este mismo candado. Si la etapa cambiaba mientras
+			// WeeTrust mandaba las invitaciones, el paso siguiente veía otra etapa y
+			// borraba esos documentos: los destinatarios quedaban con correos que no
+			// abren. Casi nunca hay nadie esperando, así que no demora nada.
+			const escribir = () =>
+				db
+					.update(opportunities)
+					.set({
+						...safeUpdateData,
+						...(assignedTo && { assignedTo }),
+						...(expectedCloseDate && {
+							expectedCloseDate: new Date(expectedCloseDate),
 						}),
-					// Convert numeric fields to strings for decimal columns
-					...(seguro !== undefined && { seguro: String(seguro) }),
-					...insuranceFallback,
-					...(gps !== undefined && { gps: String(gps) }),
-					...(royalti !== undefined && { royalti: String(royalti) }),
-					...(porcentajeRoyalti !== undefined && {
-						porcentajeRoyalti: String(porcentajeRoyalti),
-					}),
-					...(reserva !== undefined && { reserva: String(reserva) }),
-					...(membresiaPago !== undefined && {
-						membresiaPago: String(membresiaPago),
-					}),
-					...(gastosAdministrativos !== undefined && {
-						gastosAdministrativos: String(gastosAdministrativos),
-					}),
-					...(diaPagoOriginalSistemaUpdate !== undefined && {
-						diaPagoOriginalSistema: diaPagoOriginalSistemaUpdate,
-					}),
-					// Update analysisStatus if it changed during stage transition
-					...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
-						analysisStatus: newAnalysisStatus,
-					}),
-					...(updateData.status === "won" && { actualCloseDate: new Date() }),
-					updatedAt: new Date(),
-				})
-				.where(whereClause)
-				.returning();
+						// `fechaInicio` se destructura fuera de `updateData`, así que
+						// `stripUnchangedFrozenFields` no la ve: se omite acá cuando no
+						// cambia, para no reescribir un campo congelado con el mismo valor.
+						...(fechaInicio &&
+							frozenFieldChanges.includes("fechaInicio") && {
+								fechaInicio: new Date(fechaInicio),
+							}),
+						// Convert numeric fields to strings for decimal columns
+						...(seguro !== undefined && { seguro: String(seguro) }),
+						...insuranceFallback,
+						...(gps !== undefined && { gps: String(gps) }),
+						...(royalti !== undefined && { royalti: String(royalti) }),
+						...(porcentajeRoyalti !== undefined && {
+							porcentajeRoyalti: String(porcentajeRoyalti),
+						}),
+						...(reserva !== undefined && { reserva: String(reserva) }),
+						...(membresiaPago !== undefined && {
+							membresiaPago: String(membresiaPago),
+						}),
+						...(gastosAdministrativos !== undefined && {
+							gastosAdministrativos: String(gastosAdministrativos),
+						}),
+						...(diaPagoOriginalSistemaUpdate !== undefined && {
+							diaPagoOriginalSistema: diaPagoOriginalSistemaUpdate,
+						}),
+						// Update analysisStatus if it changed during stage transition
+						...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
+							analysisStatus: newAnalysisStatus,
+						}),
+						...(updateData.status === "won" && { actualCloseDate: new Date() }),
+						updatedAt: new Date(),
+					})
+					.where(whereClause)
+					.returning();
+			const updatedOpportunity = isStageChange
+				? await conCandadoDeFirma(id, escribir)
+				: await escribir();
 			if (updatedOpportunity.length === 0) {
 				if (enforceNotWonInPredicate) {
 					// Pudo ser la carrera con closeOpportunity: distinguirlo del

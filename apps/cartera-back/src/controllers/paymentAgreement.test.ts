@@ -6,6 +6,15 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 
 /** Updates registrados: { tabla implícita por orden, values } */
 const updates: Array<Record<string, unknown>> = [];
+/**
+ * Línea de tiempo de los statements que importan para el ORDEN: los UPDATE y
+ * las lecturas con `FOR UPDATE` (la única del flujo es la de la mora, dentro de
+ * `desactivarMoraPorConvenio`). Sirve para probar QUÉ fila se toma primero.
+ */
+const eventos: Array<
+  | { tipo: "update" | "insert"; values: Record<string, unknown> }
+  | { tipo: "select-for-update" }
+> = [];
 /** Cola de resultados para cada db.select() en orden de ejecución. */
 let selectQueue: unknown[][] = [];
 /** Simula el update guardado del commit: false = 0 filas afectadas. */
@@ -38,7 +47,10 @@ const makeSelect = () => {
     limit: () => Promise.resolve(rows),
     orderBy: () => ({ limit: () => Promise.resolve(rows) }),
     // `SELECT … FOR UPDATE`: así lee la mora desactivarMoraPorConvenio.
-    for: () => conChain,
+    for: () => {
+      eventos.push({ tipo: "select-for-update" });
+      return conChain;
+    },
   });
   const fromChain: Record<string, unknown> = {
     where: () => conChain,
@@ -54,6 +66,7 @@ const dbMock = {
     set: (values: Record<string, unknown>) => ({
       where: () => {
         updates.push(values);
+        eventos.push({ tipo: "update", values });
         return Object.assign(Promise.resolve(), {
           returning: () =>
             Promise.resolve(
@@ -67,6 +80,7 @@ const dbMock = {
     values: (values: unknown) => {
       const registro = { values };
       inserts.push(registro);
+      eventos.push({ tipo: "insert", values: values as Record<string, unknown> });
       const abierta = pilaTx[pilaTx.length - 1];
       if (abierta) abierta.push(registro);
       else insertsPersistidos.push(registro);
@@ -167,6 +181,7 @@ const paramsBase = {
 
 beforeEach(() => {
   updates.length = 0;
+  eventos.length = 0;
   inserts.length = 0;
   selectQueue = [];
   insertReturnQueue = [];
@@ -449,6 +464,76 @@ describe("createPaymentAgreement: la mora se desactiva, NO se borra", () => {
     expect(rollbacks).toBe(0);
   });
 
+  // ── El crédito se toma ANTES de mirar la mora ────────────────────────────
+  // Si el UPDATE de EN_CONVENIO vuelve a quedar DESPUÉS de la desactivación,
+  // entre las dos la fila del crédito está libre: con el crédito sin mora
+  // activa el `SELECT … FOR UPDATE` no bloquea ninguna fila y el cron puede
+  // meterse por su rama CREACION, insertar una mora activa y commitear antes
+  // de que el convenio marque EN_CONVENIO. Queda un crédito excluido de la
+  // mora con un cargo activo encima.
+  const indiceUpdateEstado = () =>
+    eventos.findIndex(
+      (e) => e.tipo === "update" && e.values.statusCredit === "EN_CONVENIO"
+    );
+  const indiceLecturaMora = () => eventos.findIndex((e) => e.tipo === "select-for-update");
+
+  it("marca EN_CONVENIO (y con eso toma la fila del crédito) ANTES de leer la mora", async () => {
+    armarBase();
+
+    const res = await createPaymentAgreement(input);
+
+    expect(res.success).toBe(true);
+    expect(indiceUpdateEstado()).toBeGreaterThanOrEqual(0);
+    expect(indiceLecturaMora()).toBeGreaterThanOrEqual(0);
+    expect(indiceUpdateEstado()).toBeLessThan(indiceLecturaMora());
+  });
+
+  it("también lo toma primero cuando el crédito NO tiene mora activa (el caso que abría la ventana)", async () => {
+    // Sin mora activa el FOR UPDATE no bloquea NADA: acá el orden es lo único
+    // que impide que el cron se cuele.
+    armarBase([]);
+
+    const res = await createPaymentAgreement(input);
+
+    expect(res.success).toBe(true);
+    expect(indiceUpdateEstado()).toBeGreaterThanOrEqual(0);
+    expect(indiceUpdateEstado()).toBeLessThan(indiceLecturaMora());
+  });
+
+  it("el candado se toma DENTRO de la transacción del convenio, no antes ni suelto", async () => {
+    armarBase();
+
+    const res = await createPaymentAgreement(input);
+
+    expect(res.success).toBe(true);
+    // Una sola transacción: si el UPDATE se hubiera adelantado FUERA de ella,
+    // el estado quedaría commiteado aunque el convenio revierta.
+    expect(dbMock.transaction).toHaveBeenCalledTimes(1);
+    expect(commits).toBe(1);
+    // Y adentro va DESPUÉS del insert del convenio: adelantarlo a antes de
+    // abrir la transacción lo sacaría del alcance del rollback.
+    const iConvenio = eventos.findIndex(
+      (e) => e.tipo === "insert" && "monto_total_convenio" in e.values
+    );
+    expect(iConvenio).toBeGreaterThanOrEqual(0);
+    expect(indiceUpdateEstado()).toBeGreaterThan(iConvenio);
+  });
+
+  it("si la transacción revienta, el EN_CONVENIO adelantado tampoco queda escrito", async () => {
+    armarBase();
+    insertFalla = (values) => values.tipo_evento === "DESACTIVACION";
+
+    const res = await createPaymentAgreement(input);
+
+    expect(res.success).toBe(false);
+    // Se intentó...
+    expect(updates.some((values) => values.statusCredit === "EN_CONVENIO")).toBe(true);
+    // ...y el rollback se lo llevó junto con el convenio.
+    expect(rollbacks).toBe(1);
+    expect(commits).toBe(0);
+    expect(insertsPersistidos.some(esConvenio)).toBe(false);
+  });
+
   it("si falla el historial de la mora, el endpoint falla y NO queda convenio escrito", async () => {
     armarBase();
     insertFalla = (values) => values.tipo_evento === "DESACTIVACION";
@@ -511,9 +596,11 @@ describe("createPaymentAgreement: la mora se desactiva, NO se borra", () => {
 
   it("si otro convenio ganó la carrera, el log NO afirma que quedó registrada", async () => {
     armarBase();
-    // El primer db.update() del flujo es el de moras_credito: que devuelva 0
-    // filas = otra ejecución concurrente ya la apagó (y anotó ella el evento).
-    updateResultQueue = [false];
+    // Los updates del flujo, en orden: 1) el status del crédito a EN_CONVENIO
+    // (que además hace de candado) y 2) el de moras_credito. Que el SEGUNDO
+    // devuelva 0 filas = otra ejecución concurrente ya la apagó (y anotó ella
+    // el evento).
+    updateResultQueue = [true, false];
 
     const salida = await capturarLogs(() => createPaymentAgreement(input));
 

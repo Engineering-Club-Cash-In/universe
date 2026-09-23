@@ -98,20 +98,22 @@ export function AnularContratoDialog({
 						</Select>
 					</div>
 
-					{hayFirmas && (
-						<p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
-							Este contrato ya tiene firmas. Si falta firmar alguien, se{" "}
-							<strong>borra de la plataforma de firma</strong> y esas firmas se
-							pierden (acá queda el registro de quién había firmado). Si ya lo
-							firmaron todos, allá queda, porque no se puede borrar; acá se ve
-							anulado igual.
-						</p>
-					)}
+					{/* Siempre, no sólo con firmas a la vista: el estado de la ficha puede
+					    estar atrasado respecto de WeeTrust, y anular consulta el vivo. */}
+					<p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
+						{hayFirmas
+							? "Este contrato ya tiene firmas. "
+							: "Alguien pudo haber firmado desde la última vez que se actualizó el estado. "}
+						Si falta firmar alguien, se{" "}
+						<strong>borra de la plataforma de firma</strong> y las firmas que
+						tenga se pierden (acá queda el registro de quién había firmado). Si
+						ya lo firmaron todos, allá queda, porque no se puede borrar; acá se
+						ve anulado igual.
+					</p>
 
 					<p className="text-muted-foreground text-xs">
-						La oportunidad se queda sin este documento: hasta que se genere uno
-						nuevo no se va a poder aprobar ni confirmar la firma. Queda en «Ver
-						anulados» como registro.
+						La oportunidad se queda sin este documento: si hace falta, hay que
+						generar o subir uno nuevo. Queda en «Ver anulados» como registro.
 					</p>
 				</div>
 

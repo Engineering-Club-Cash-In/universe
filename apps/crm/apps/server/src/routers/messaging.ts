@@ -21,6 +21,7 @@ import {
 } from "../lib/contratos-rep-legal";
 import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
 import { crmProcedure } from "../lib/orpc";
+import { PERMISSIONS } from "../lib/roles";
 import { getSimpletechClient, sendWhatsappTemplate } from "../lib/simpletech";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 
@@ -804,7 +805,16 @@ export const messagingRouter = {
 				phone: z.string().min(1),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// Le escribe al cliente con sus enlaces de firma, al teléfono que diga
+			// quien llama: la misma regla que el reenvío desde la ficha. Si no,
+			// ventas podía mandar los enlaces de otro a un número suyo.
+			if (!PERMISSIONS.canResendContractLinks(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tenés permiso para reenviar los enlaces de firma",
+				});
+			}
+
 			const [recipient] = await db
 				.select()
 				.from(whatsappLogRecipients)

@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
 	contractSignatories,
@@ -77,6 +77,13 @@ export async function sincronizarEstadoDeFirma(
 						eq(contractSignatories.contractId, contractId),
 						// WeeTrust puede devolver el correo en minúsculas.
 						sql`lower(${contractSignatories.email}) = lower(${firmante.emailID})`,
+						// En el mismo documento una firma no se deshace. Si dice
+						// "pendiente" para alguien que ya figura firmado, es una
+						// consulta vieja que terminó después de otra más nueva: no se
+						// le baja el estado ni se le pisa el enlace.
+						firmante.isSigned
+							? undefined
+							: ne(contractSignatories.status, "signed"),
 					),
 				);
 		}

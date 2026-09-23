@@ -1434,7 +1434,7 @@ export const contractGenerationRouter = {
 					descarteValido(input.opportunityId, d.documentID, d.descarte),
 				)
 				.map((d) => d.documentID);
-			if (validos.length === 0) return { descartados: 0 };
+			if (validos.length === 0) return { descartados: 0, noBorrados: 0 };
 
 			return conCandadoDeFirma(input.opportunityId, async () => {
 				const enlazados = await db
@@ -1443,7 +1443,10 @@ export const contractGenerationRouter = {
 					.where(inArray(generatedLegalContracts.weetrustDocumentId, validos));
 				const conFila = new Set(enlazados.map((e) => e.documentID));
 
+				// Cuántos se borraron y cuántos no, para que jurídico lo vea: si uno
+				// queda vivo en WeeTrust, el cliente todavía puede firmarlo.
 				let descartados = 0;
+				let noBorrados = 0;
 				for (const documentID of validos) {
 					if (conFila.has(documentID)) continue;
 					try {
@@ -1452,13 +1455,14 @@ export const contractGenerationRouter = {
 					} catch (error) {
 						// Uno que ya se firmó entero no se puede borrar, y otro que falla
 						// no tiene por qué frenar al resto.
+						noBorrados++;
 						console.error(
 							`[descartarContratosSinEnlazar] no se pudo borrar ${documentID}:`,
 							error,
 						);
 					}
 				}
-				return { descartados };
+				return { descartados, noBorrados };
 			});
 		}),
 

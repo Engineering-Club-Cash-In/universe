@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
 import { RenapBuroValidation } from "@/components/analysis/RenapBuroValidation";
+import { BuroInternoAnalisis } from "@/components/buro-interno/BuroInternoAnalisis";
 import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import {
 	LeadDetailModal,
@@ -523,6 +524,9 @@ function OpportunityDocumentsPage() {
 				onEjecucionChange={setValidandoBuroRenap}
 				currentUserRole={userProfile.data?.role}
 			/>
+
+			{/* Buró interno: coincidencias con personas marcadas por cobros (informativo) */}
+			<BuroInternoAnalisis opportunityId={opportunityId} />
 
 			{/* Asignaciones pendientes: informativo, no bloquea la aprobación */}
 			{(() => {

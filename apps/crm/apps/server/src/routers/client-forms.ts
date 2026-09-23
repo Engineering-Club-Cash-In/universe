@@ -9,10 +9,30 @@ import {
 } from "../db/schema/client-forms";
 import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
+import { verificarDpiDelFormulario } from "../lib/client-form-dpi";
 import { crmProcedure, publicProcedure } from "../lib/orpc";
+import { validarDpi } from "../utils/cui-validation";
 
 const formPersonTypeSchema = z.enum(["lead", "coDebtor"]);
 type FormPersonType = z.infer<typeof formPersonTypeSchema>;
+
+/**
+ * El resto del formulario se valida relajado a propósito, pero el DPI no puede
+ * entrar crudo: es la llave con la que se cruza la identidad contra RENAP, buró
+ * y cartera. Un CUI inválido guardado acá reaparece después como una validación
+ * que no corresponde a nadie. Mismo criterio que el resto de las rutas que
+ * escriben un DPI (`createLead`, `updateLead`, portal, bot, co-deudores).
+ */
+function normalizarDpiDelFormulario<T extends { dpi?: string }>(datos: T): T {
+	if (datos.dpi === undefined || datos.dpi.trim() === "") return datos;
+
+	const resultado = validarDpi(datos.dpi);
+	if (!resultado.valid) {
+		throw new ORPCError("BAD_REQUEST", { message: resultado.error });
+	}
+
+	return { ...datos, dpi: resultado.dpiLimpio };
+}
 
 // Relaxed server-side validation schemas (all fields optional, only validates types)
 const referenciaCrediticiaServerSchema = z.object({
@@ -424,6 +444,54 @@ async function resolveTokenParticipant(tokenRow: TokenRow): Promise<{
 	};
 }
 
+/**
+ * El DPI que el CRM ya tiene guardado para el participante del token.
+ *
+ * `null` cuando todavía no tiene ninguno: ese es el caso de captura legítima y
+ * el formulario lo puede traer. Ver `verificarDpiDelFormulario`.
+ */
+async function dpiGuardadoDelParticipante(
+	participantRef: { personType: FormPersonType; personId: string } | null,
+): Promise<string | null> {
+	if (!participantRef) return null;
+
+	if (participantRef.personType === "coDebtor") {
+		const [fila] = await db
+			.select({ dpi: coDebtors.dpi })
+			.from(coDebtors)
+			.where(eq(coDebtors.id, participantRef.personId))
+			.limit(1);
+		return fila?.dpi ?? null;
+	}
+
+	const [fila] = await db
+		.select({ dpi: leads.dpi })
+		.from(leads)
+		.where(eq(leads.id, participantRef.personId))
+		.limit(1);
+	return fila?.dpi ?? null;
+}
+
+/**
+ * Corta el submit si el DPI del formulario no es el del dueño del enlace.
+ *
+ * 🔴 Estas rutas son públicas: la única credencial es el token, que identifica
+ * a UNA persona. Sin este cruce, con un enlace vigente se podía firmar una
+ * solicitud a nombre de otro DPI —puenteando de paso el invariante del candado,
+ * que existe para que la identidad de un expediente no se mueva—.
+ */
+async function exigirDpiDelParticipante(
+	participantRef: { personType: FormPersonType; personId: string } | null,
+	datos: { dpi?: string },
+): Promise<void> {
+	const guardado = await dpiGuardadoDelParticipante(participantRef);
+	const resultado = verificarDpiDelFormulario(guardado, datos.dpi);
+
+	if (!resultado.coincide) {
+		throw new ORPCError("BAD_REQUEST", { message: resultado.mensaje });
+	}
+}
+
 async function getVehicleForOpportunity(opportunityId: string) {
 	const [opp] = await db
 		.select({ vehicleId: opportunities.vehicleId })
@@ -666,6 +734,12 @@ export const clientFormsRouter = {
 				});
 			}
 
+			const datos = normalizarDpiDelFormulario(parsed.data);
+
+			// El enlace identifica a UNA persona: el DPI que llega no puede ser el
+			// de otra. Ver `exigirDpiDelParticipante`.
+			await exigirDpiDelParticipante(participantRef, datos);
+
 			const values = {
 				opportunityId: tokenRow.opportunityId,
 				...(participantRef
@@ -674,7 +748,7 @@ export const clientFormsRouter = {
 							personId: participantRef.personId,
 						}
 					: {}),
-				...sanitizeFormData(parsed.data as Record<string, unknown>),
+				...sanitizeFormData(datos as Record<string, unknown>),
 				updatedAt: new Date(),
 			};
 
@@ -796,6 +870,12 @@ export const clientFormsRouter = {
 				});
 			}
 
+			const datos = normalizarDpiDelFormulario(parsed.data);
+
+			// El enlace identifica a UNA persona: el DPI que llega no puede ser el
+			// de otra. Ver `exigirDpiDelParticipante`.
+			await exigirDpiDelParticipante(participantRef, datos);
+
 			const values = {
 				opportunityId: tokenRow.opportunityId,
 				...(participantRef
@@ -804,7 +884,7 @@ export const clientFormsRouter = {
 							personId: participantRef.personId,
 						}
 					: {}),
-				...sanitizeFormData(parsed.data as Record<string, unknown>),
+				...sanitizeFormData(datos as Record<string, unknown>),
 				updatedAt: new Date(),
 			};
 

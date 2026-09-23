@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
+	MOTIVOS_RESTITUCION_MORA_PREFIJOS,
+	MOTIVO_ANULACION_MORA_PREFIJO,
 	MOTIVO_REVERSA_MORA_PREFIJO,
+	motivoAnulacionMora,
 	motivoReversaMora,
 } from "../utils/motivoReversaMora";
 import {
@@ -79,6 +82,75 @@ describe("marca de la reversa de pago", () => {
 			`^${MOTIVO_REVERSA_MORA_PREFIJO.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
 		);
 		expect(patron.test(motivo)).toBe(true);
+	});
+
+	it("la anulación firma con su PROPIO prefijo, y el lector reconoce a los dos", () => {
+		// Anular no es revertir: son hechos distintos y el historial tiene que
+		// poder distinguirlos. Pero para la mora los dos son una RESTITUCIÓN, así
+		// que los dos tienen que estar en la lista que lee el reporte.
+		const motivo = motivoAnulacionMora(4321);
+		expect(motivo.startsWith(MOTIVO_ANULACION_MORA_PREFIJO)).toBe(true);
+		expect(motivo).toContain("4321");
+		expect(motivo.startsWith(MOTIVO_REVERSA_MORA_PREFIJO)).toBe(false);
+		expect(MOTIVOS_RESTITUCION_MORA_PREFIJOS).toContain(
+			MOTIVO_ANULACION_MORA_PREFIJO,
+		);
+		expect(MOTIVOS_RESTITUCION_MORA_PREFIJOS).toContain(
+			MOTIVO_REVERSA_MORA_PREFIJO,
+		);
+		for (const prefijo of MOTIVOS_RESTITUCION_MORA_PREFIJOS) {
+			expect(prefijo.length).toBeGreaterThan(0);
+		}
+	});
+});
+
+describe("el pago anulado y su restitución, de punta a punta", () => {
+	it("foto Q100 + pago falseado + RECALCULO → esperado Q100, no Q200", () => {
+		// El defecto completo: `falsePayment` dejaba el DECREMENTO huérfano y el
+		// RECALCULO de la mañana siguiente entraba como mora nueva. Ahora la
+		// anulación escribe su restitución marcada, el plegado la reconoce, y el
+		// RECALCULO que la sigue ya no supera el nivel.
+		const reporte = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: "100",
+					eventos: [
+						evento("DECREMENTO", 100, 0),
+						reverso(0, 100),
+						evento("RECALCULO", 100, 100),
+					],
+					cobrado: "0",
+				},
+			],
+			{ inicio: "2026-07-06", fin: "2026-08-06", alcance: "historico" },
+		);
+		expect(reporte.totales.esperado).toBe("100.00");
+		expect(reporte.totales.esperado).not.toBe("200.00");
+	});
+
+	it("la reversa de un pago ANTERIOR al ciclo genera, y el cobro cae DENTRO del alcance", () => {
+		// Foto 0 porque el pago ya la había bajado antes del corte. La reversa
+		// revive Q100 que el asesor tiene vivos hoy; si el esperado quedara en 0,
+		// el cobro de esos Q100 se contaría como "fuera del alcance" y el reporte
+		// premiaría un cobro que ni siquiera esperaba.
+		const reporte = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: "0",
+					eventos: [reverso(0, 100)],
+					cobrado: "100",
+				},
+			],
+			{ inicio: "2026-07-06", fin: "2026-08-06", alcance: "historico" },
+		);
+		expect(reporte.totales.esperado).toBe("100.00");
+		expect(reporte.totales.cobradoEnSnapshot).toBe("100.00");
+		expect(reporte.totales.cobradoFueraSnapshot).toBe("0.00");
+		expect(reporte.totales.pendiente).toBe("0.00");
 	});
 });
 
@@ -315,6 +387,78 @@ describe("moraGeneradaEnPeriodo", () => {
 		]);
 		expect(conReversa).toBe(0);
 		expect(pagoDeVerdad).toBe(100);
+	});
+
+	it("la reversa de un pago ANTERIOR al ciclo SÍ es oportunidad", () => {
+		// El pago fue antes del día 6, así que su DECREMENTO ya bajó la foto: la
+		// foto dice 0 y la siembra dice 0. La reversa de adentro deja al cliente
+		// debiendo Q100 que NUNCA se contaron y que el asesor tiene vivos hoy;
+		// suprimirla hacía desaparecer una oportunidad real.
+		expect(moraGeneradaEnPeriodo(0, [reverso(0, 100)])).toBe(100);
+	});
+
+	it("la restitución parcial: suprime lo que bajó ADENTRO y genera el resto", () => {
+		// Adentro del ciclo el cliente pagó Q40 (100 → 60). Después se revierte un
+		// pago de Q100 —Q40 de adentro y Q60 de un pago anterior al corte—: solo
+		// los Q40 estaban contados, los otros Q60 son oportunidad nueva.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 60),
+				reverso(60, 160),
+			]),
+		).toBe(60);
+	});
+
+	it("la restitución no puede suprimir más de una vez lo que bajó adentro", () => {
+		// Un solo DECREMENTO de Q100 adentro y DOS restituciones: la primera
+		// consume el crédito de supresión, la segunda genera entera.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 0),
+				reverso(0, 100),
+				evento("DECREMENTO", 100, 100),
+				reverso(100, 200),
+			]),
+		).toBe(100);
+	});
+
+	it("MUTACIÓN: suprimir SIEMPRE borra la oportunidad del pago anterior al ciclo", () => {
+		// La regla vieja —`if (reverso) { subir el nivel; continue; }`— aplicada
+		// al caso de afuera del ciclo.
+		const suprimirSiempre = (foto: number, eventos: MoraLevelEvent[]) => {
+			let nivel = foto;
+			let generado = 0;
+			for (const e of eventos) {
+				if (e.reverso) {
+					if (e.montoNuevo > nivel) nivel = e.montoNuevo;
+					continue;
+				}
+				if (e.montoNuevo > nivel) {
+					generado += e.montoNuevo - nivel;
+					nivel = e.montoNuevo;
+				} else if (e.montoNuevo < e.montoAnterior) nivel = e.montoNuevo;
+			}
+			return generado;
+		};
+		const eventos = [reverso(0, 100)];
+		expect(moraGeneradaEnPeriodo(0, eventos)).toBe(100);
+		expect(suprimirSiempre(0, eventos)).toBe(0);
+	});
+
+	it("MUTACIÓN: generar SIEMPRE duplica la deuda del pago del MISMO ciclo", () => {
+		// El lado que no se puede romper al arreglar el otro: tratar la
+		// restitución como un INCREMENTO cualquiera.
+		const eventos: MoraLevelEvent[] = [
+			evento("DECREMENTO", 100, 0),
+			reverso(0, 100),
+		];
+		expect(moraGeneradaEnPeriodo(100, eventos)).toBe(0);
+		expect(
+			moraGeneradaEnPeriodo(
+				100,
+				eventos.map(({ reverso: _, ...resto }) => resto),
+			),
+		).toBe(100);
 	});
 
 	it("MUTACIÓN: si la restitución de la reversa contara como mora nueva, la deuda se duplicaría", () => {
@@ -697,15 +841,18 @@ describe("buildMoraRecoveryReport", () => {
 			"2026-06-06",
 			"2026-07-06",
 			// Los límites del ciclo como instantes UTC: el día 6 GT empieza a las 06:00Z.
-			// El prefijo con el que la reversa de pago firma su restitución, el rango
-			// de eventos DEL CICLO, y después la siembra: el corte del ancla, el mismo
-			// prefijo (la reversa nunca ancla) y el corte del máximo. Todas las fechas
-			// son el inicio o el fin del ciclo: la siembra no tiene fecha propia.
+			// Los prefijos con los que un pago caído firma su restitución —reversa y
+			// anulación—, el rango de eventos DEL CICLO, y después la siembra: el
+			// corte del ancla, los mismos prefijos (una restitución nunca ancla) y el
+			// corte del máximo. Todas las fechas son el inicio o el fin del ciclo: la
+			// siembra no tiene fecha propia.
 			"Reversa de pago #%",
+			"Anulación de pago #%",
 			"2026-06-06 06:00:00.000",
 			"2026-07-06 06:00:00.000",
 			"2026-06-06 06:00:00.000",
 			"Reversa de pago #%",
+			"Anulación de pago #%",
 			"2026-06-06 06:00:00.000",
 		]);
 	});
@@ -1021,20 +1168,22 @@ describe("buildMoraRecoveryReport", () => {
 
 		// Columna CRUDA: envolverla en AT TIME ZONE mataría moras_historial_fecha_idx.
 		// El rango de eventos es EL CICLO, semiabierto por la derecha.
-		expect(query.sql).toContain("WHERE h.fecha >= $5::timestamp");
-		expect(query.sql).toContain("AND h.fecha < $6::timestamp");
+		expect(query.sql).toContain("WHERE h.fecha >= $6::timestamp");
+		expect(query.sql).toContain("AND h.fecha < $7::timestamp");
 		expect(query.sql).not.toContain(
 			"(h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >=",
 		);
 		expect(query.params.slice(3)).toEqual([
-			// el prefijo con el que la reversa de pago firma su restitución
+			// los prefijos con los que un pago caído firma su restitución
 			"Reversa de pago #%",
+			"Anulación de pago #%",
 			// el ciclo
 			"2026-06-06 06:00:00.000",
 			"2026-07-06 06:00:00.000",
-			// la siembra: corte del ancla, prefijo, corte del máximo
+			// la siembra: corte del ancla, prefijos, corte del máximo
 			"2026-06-06 06:00:00.000",
 			"Reversa de pago #%",
+			"Anulación de pago #%",
 			"2026-06-06 06:00:00.000",
 		]);
 	});
@@ -1260,16 +1409,22 @@ describe("buildMoraRecoveryReport", () => {
 			),
 		);
 
-		// La marca la escribe reversePayment y la lee el reporte: MISMA constante.
+		// Las marcas las escriben reversePayment (reversa) y falsePayment
+		// (anulación), y las lee el reporte: MISMAS constantes, una por escritor.
 		expect(query.params).toContain(`${MOTIVO_REVERSA_MORA_PREFIJO}%`);
+		expect(query.params).toContain(`${MOTIVO_ANULACION_MORA_PREFIJO}%`);
+		// Ninguna se puede quedar afuera del lector: la lista es la fuente.
+		for (const prefijo of MOTIVOS_RESTITUCION_MORA_PREFIJOS) {
+			expect(query.params).toContain(`${prefijo}%`);
+		}
 		expect(query.sql).toContain(
-			"(h.tipo_evento = 'INCREMENTO' AND h.motivo LIKE $4) AS reverso",
+			"(h.tipo_evento = 'INCREMENTO' AND (COALESCE(h.motivo, '') LIKE $4 OR COALESCE(h.motivo, '') LIKE $5)) AS reverso",
 		);
 		expect(query.sql).toContain("'reverso', e.reverso");
-		// Y el ancla la excluye EXPLÍCITAMENTE, igual que `esReseteoDeNivel`: una
+		// Y el ancla las excluye EXPLÍCITAMENTE, igual que `esReseteoDeNivel`: una
 		// restitución repone un techo, nunca lo baja.
 		expect(query.sql).toContain(
-			"AND NOT (h.tipo_evento = 'INCREMENTO'\n                            AND COALESCE(h.motivo, '') LIKE $8)",
+			"AND NOT (h.tipo_evento = 'INCREMENTO'\n                            AND (COALESCE(h.motivo, '') LIKE $9 OR COALESCE(h.motivo, '') LIKE $10))",
 		);
 		expect(
 			esReseteoDeNivel({

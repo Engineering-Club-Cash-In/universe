@@ -1,8 +1,29 @@
 import { sql } from "drizzle-orm";
 import { inicioDiaGTComoTimestampUTC } from "../utils/functions/diaGuatemala";
-import { MOTIVO_REVERSA_MORA_PREFIJO } from "../utils/motivoReversaMora";
+import { MOTIVOS_RESTITUCION_MORA_PREFIJOS } from "../utils/motivoReversaMora";
 import { creditosElegiblesMoraSql } from "./moraCapitalCartera";
 import { snapCte } from "./moraSnapshotSql";
+
+/**
+ * ¿Este `motivo` marca una RESTITUCIÓN de mora (reversa o anulación de pago)?
+ *
+ * La restitución entra a `moras_historial` como un `INCREMENTO` de origen
+ * `API_MANUAL`, idéntico a un ajuste hecho a mano por un analista: el `motivo`
+ * es la única marca que las separa. Los prefijos NO se enumeran acá sino en
+ * `MOTIVOS_RESTITUCION_MORA_PREFIJOS`, junto a las constantes que los escriben,
+ * para que no se pueda agregar un escritor nuevo sin que el lector lo reconozca.
+ *
+ * `COALESCE`: sin él, una fila con `motivo` NULL daría NULL en el LIKE, y NULL
+ * no es `false` —en el `NOT (...)` del ancla la fila quedaría fuera—.
+ */
+function esRestitucionSql(columnaMotivo: ReturnType<typeof sql.raw>) {
+	return sql`(${sql.join(
+		MOTIVOS_RESTITUCION_MORA_PREFIJOS.map(
+			(prefijo) => sql`COALESCE(${columnaMotivo}, '') LIKE ${`${prefijo}%`}`,
+		),
+		sql` OR `,
+	)})`;
+}
 
 /**
  * Un evento de `moras_historial` reducido a lo que el nivel de referencia
@@ -25,7 +46,9 @@ export type MoraLevelEvent = {
 	/**
 	 * El evento es la RESTITUCIÓN de una reversa de pago, no mora nueva: el
 	 * pago que había bajado la mora se anuló y `reversePayment` le devuelve al
-	 * crédito el saldo que ese pago cubría. Ver `MOTIVO_REVERSA_MORA_PREFIJO`.
+	 * crédito el saldo que ese pago cubría. Lo mismo vale para una ANULACIÓN
+	 * (`falsePayment`), que escribe su propio prefijo. Ver
+	 * `MOTIVOS_RESTITUCION_MORA_PREFIJOS`.
 	 */
 	reverso?: boolean;
 };
@@ -133,14 +156,18 @@ export function nivelSembrado(previos: MoraLevelEvent[]): number {
  *     cuente la mora nueva.
  *   * `DESACTIVACION`: el nivel vuelve a 0 —el crédito se puso al día o salió
  *     del universo de mora—; si vuelve a entrar, empieza de cero.
- *   * Una RESTITUCIÓN por reversa de pago (`reverso`): sube el nivel hasta el
- *     monto restituido pero NO genera. Es el espejo del caso del pago: el
- *     `DECREMENTO` del pago bajó el nivel porque el cliente había saldado, y
- *     revertir ese pago deshace exactamente eso. Sin la marca, el plegado veía
- *     "bajó y volvió a subir" y cobraba la deuda dos veces: un crédito con Q100
- *     de foto que pagó y se revirtió terminaba con Q200 de esperado. Que el
- *     nivel suba (y no solo que no genere) es lo que impide que el `RECALCULO`
- *     de la mañana siguiente vuelva a cobrar lo mismo.
+ *   * Una RESTITUCIÓN por pago caído (`reverso`: reversa o anulación): sube el
+ *     nivel hasta el monto restituido, y genera SOLO la parte que el ciclo no
+ *     vio bajar. Es el espejo del caso del pago: si el `DECREMENTO` cayó DENTRO
+ *     del ciclo, el plegado ya bajó el nivel por él y reponerlo es deshacer ese
+ *     paso, no deuda nueva —sin esto, un crédito con Q100 de foto que pagó y se
+ *     revirtió terminaba con Q200 de esperado—. Pero si el pago fue ANTES del
+ *     corte, su decremento ya está descontado de la foto inicial: esa mora
+ *     nunca se contó y el asesor la tiene viva hoy, así que suprimirla borraba
+ *     una oportunidad REAL. Por eso el recorrido lleva la cuenta de lo que bajó
+ *     adentro por pagos (`bajadoAdentro`) y la restitución suprime hasta ese
+ *     monto y genera el resto. Que el nivel suba (y no solo que no genere) es
+ *     lo que impide que el `RECALCULO` de la mañana siguiente cobre lo mismo.
  *   * Un evento que sube pero NO supera el nivel (el rebote del `RECALCULO` de
  *     la mañana siguiente a una condonación) no suma y tampoco mueve el nivel:
  *     si lo bajara, el siguiente rebote volvería a cobrar lo ya contado.
@@ -209,6 +236,11 @@ export function plegarNivel(
 ): { nivel: number; generado: number } {
 	let nivel = nivelInicial;
 	let generado = 0;
+	// Cuánto BAJÓ el nivel dentro de este recorrido por bajas reales (pagos).
+	// Es el saldo de "deuda que ya estaba contada y que el ciclo vio
+	// desaparecer": exactamente lo que una restitución puede reponer sin que sea
+	// oportunidad nueva. Ver la regla del reverso más abajo.
+	let bajadoAdentro = 0;
 	for (const evento of eventos) {
 		if (evento.tipoEvento === "DESACTIVACION") {
 			nivel = 0;
@@ -216,8 +248,15 @@ export function plegarNivel(
 		}
 		if (evento.tipoEvento === "CONDONACION") continue;
 		if (evento.reverso) {
-			// Restitución de una reversa: devuelve el techo que el pago anulado
-			// había bajado, pero no es oportunidad de cobro nueva.
+			// Restitución (reversa o anulación de pago): devuelve el techo que el
+			// pago caído había bajado. Suprime la generación SOLO hasta lo que ese
+			// mismo recorrido vio bajar por pagos; el resto SÍ genera, porque
+			// corresponde a un pago ANTERIOR al ciclo cuyo decremento ya estaba
+			// descontado de la foto inicial y que por lo tanto nunca se contó.
+			const subida = Math.max(0, evento.montoNuevo - nivel);
+			const suprimido = Math.min(subida, bajadoAdentro);
+			generado += subida - suprimido;
+			bajadoAdentro -= suprimido;
 			if (evento.montoNuevo > nivel) nivel = evento.montoNuevo;
 			continue;
 		}
@@ -225,6 +264,7 @@ export function plegarNivel(
 			generado += evento.montoNuevo - nivel;
 			nivel = evento.montoNuevo;
 		} else if (evento.montoNuevo < evento.montoAnterior) {
+			bajadoAdentro += nivel - evento.montoNuevo;
 			nivel = evento.montoNuevo;
 		}
 	}
@@ -404,8 +444,8 @@ export function buildMoraRecoveryQuery({
              h.monto_nuevo::numeric::text AS monto_nuevo,
              -- La restitución de una reversa de pago entra como INCREMENTO
              -- manual, idéntica a un ajuste a mano: el \`motivo\` es la única
-             -- marca que las separa. Ver \`MOTIVO_REVERSA_MORA_PREFIJO\`.
-             (h.tipo_evento = 'INCREMENTO' AND h.motivo LIKE ${`${MOTIVO_REVERSA_MORA_PREFIJO}%`}) AS reverso
+             -- marca que las separa. Ver \`esRestitucionSql\`.
+             (h.tipo_evento = 'INCREMENTO' AND ${esRestitucionSql(sql.raw("h.motivo"))}) AS reverso
       FROM cartera.moras_historial h
       JOIN creditos_con_asesor ca ON ca.credito_id = h.credito_id
       WHERE h.fecha >= ${inicioUtc}::timestamp
@@ -452,10 +492,8 @@ export function buildMoraRecoveryQuery({
           AND h.fecha < ${inicioUtc}::timestamp
           AND (h.tipo_evento = 'DESACTIVACION'
                OR (h.tipo_evento <> 'CONDONACION'
-                   -- COALESCE: sin él, un INCREMENTO con \`motivo\` NULL daría
-                   -- NULL en el LIKE y la fila quedaría fuera del ancla.
                    AND NOT (h.tipo_evento = 'INCREMENTO'
-                            AND COALESCE(h.motivo, '') LIKE ${`${MOTIVO_REVERSA_MORA_PREFIJO}%`})
+                            AND ${esRestitucionSql(sql.raw("h.motivo"))})
                    AND h.monto_nuevo < h.monto_anterior))
         ORDER BY h.fecha DESC, h.historial_id DESC
         LIMIT 1

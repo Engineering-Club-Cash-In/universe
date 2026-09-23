@@ -23,7 +23,7 @@
  * `falsePayment` mismo no se puede importar: varios tests de la suite
  * registran `mock.module("./payments")` global y el módulo real desaparece en
  * la corrida completa. El cableado se verifica sobre el texto de la función en
- * `utils/restitucionMoraPagoAnulado.test.ts`; lo que se ejerce acá es el
+ * `utils/restitucionMoraDePago.test.ts`; lo que se ejerce acá es el
  * mecanismo del que ese cableado depende.
  */
 import { beforeEach, describe, expect, it, mock } from "bun:test";

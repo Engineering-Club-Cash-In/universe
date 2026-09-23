@@ -1,13 +1,10 @@
-import { and, eq, gt, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { db } from "../database/index";
-import {
-  creditos,
-  moras_historial,
-  pagos_credito,
-} from "../database/db/schema";
+import { creditos, pagos_credito } from "../database/db/schema";
 import { updateMora } from "./latefee";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
-import { restitucionMoraDePagoAnulado } from "../utils/restitucionMoraPagoAnulado";
+import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
+import { elCronYaRepusoLaMora } from "./moraRepuestaPorElCron";
 
 /**
  * El cuerpo de `falsePayment`: marcar la boleta como falsa Y devolverle al
@@ -95,41 +92,13 @@ export async function anularPagoYRestituirMora(
     .limit(1)
     .for("update");
 
-  // ¿El cron ya repuso esta mora por su cuenta?
-  //
-  // Registrar un pago baja la mora EN EL ACTO, pero el criterio de cobertura
-  // del cron solo cuenta pagos `validated`/`no_required`: un pago que amanece
-  // `pending` deja su cuota contada como vencida y `procesarMoras` vuelve a
-  // FIJAR la mora completa desde la fórmula —REEMPLAZA el monto, no lo suma—.
-  // Después de esa corrida la bajada del pago ya está deshecha, y volver a
-  // sumarle `pagos_credito.mora` al anular dejaba al cliente con el doble
-  // (Q100 → Q0 → Q100 del cron → Q200). Por eso la restitución se reconcilia
-  // contra lo que de verdad falta: si hubo un CREACION/RECALCULO automático
-  // posterior al pago, no falta nada.
-  //
-  // Solo cuentan CREACION y RECALCULO: son los dos eventos con los que el cron
-  // FIJA el monto desde la fórmula. Una DESACTIVACION es lo contrario —apagó la
-  // mora— y no repone nada.
-  //
-  // El ancla es `createdat` del pago (el momento en que se escribió la fila y
-  // se aplicó el DECREMENTO), no `fecha_pago`, que se puede retrofechar. Si la
-  // fila no lo trae, no se reconcilia y se restituye como antes: el sobrecobro
-  // lo corrige el cron en su próxima corrida, perderle la mora al crédito no lo
-  // corrige nadie.
-  const eventosDelCron = pagoPrevio?.created_at
-    ? await tx
-        .select({ historial_id: moras_historial.historial_id })
-        .from(moras_historial)
-        .where(
-          and(
-            eq(moras_historial.credito_id, credito_id),
-            eq(moras_historial.origen, "PROCESO_AUTO"),
-            inArray(moras_historial.tipo_evento, ["CREACION", "RECALCULO"]),
-            gt(moras_historial.fecha, pagoPrevio.created_at),
-          ),
-        )
-        .limit(1)
-    : [];
+  // ¿El cron ya repuso esta mora por su cuenta? La pregunta —y su ancla— viven
+  // en `moraRepuestaPorElCron.ts`, compartidas con la reversa de pagos: si el
+  // criterio se duplicara, el camino que quedara atrás volvería a sobrecobrar.
+  const moraRepuestaPorElCron = await elCronYaRepusoLaMora(tx, {
+    credito_id,
+    desde: pagoPrevio?.created_at,
+  });
 
   // Actualizar el estado del pago a falso
   const actualizado = await tx
@@ -158,8 +127,8 @@ export async function anularPagoYRestituirMora(
   // reposición del cron de la mañana siguiente como mora NUEVA. Mismo patrón
   // que `reversePayment`, con su propio prefijo de motivo —anular no es
   // revertir— para que el historial no confunda los dos hechos.
-  const restitucionMora = restitucionMoraDePagoAnulado(pagoPrevio, pago_id, {
-    moraRepuestaPorElCron: eventosDelCron.length > 0,
+  const restitucionMora = restitucionMoraDePago(pagoPrevio, pago_id, "ANULACION", {
+    moraRepuestaPorElCron,
   });
 
   if (restitucionMora) {

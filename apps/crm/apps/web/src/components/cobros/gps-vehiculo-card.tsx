@@ -315,7 +315,13 @@ function TelemetriaVinculada({
 					</Button>
 				)}
 				{esSupervisor && (
-					<TrackingLinkDialog unitId={datos.unitId} unitName={datos.unitName} />
+					<TrackingLinkDialog
+						// key: al corregir el vínculo cambia la unidad y el diálogo se
+						// reutilizaría con la URL de rastreo de la unidad ANTERIOR.
+						key={datos.unitId}
+						unitId={datos.unitId}
+						unitName={datos.unitName}
+					/>
 				)}
 			</div>
 

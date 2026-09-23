@@ -489,7 +489,12 @@ async function creditosPorUnidad(
 		// Un vínculo auto:placa que ya no coincide con la placa actual (placa
 		// corregida después) no cuenta: mismo criterio que getGpsVehiculo, que
 		// lo libera al consultar. Esa fila vuelve al pool de deducción.
-		const nombrePorUnidad = new Map(unidades.map((u) => [u.id, u.nm]));
+		// Con el catálogo completo (siempre que se pudo obtener) se conoce el
+		// nombre actual de cualquier unidad vinculada, aunque el filtro la deje
+		// afuera; sin él, solo las del resultado (criterio conservador).
+		const nombrePorUnidad = new Map(
+			(catalogoCompleto ?? unidades).map((u) => [u.id, u.nm]),
+		);
 		// Solo se invalida si el nombre actual de la unidad se conoce: con un
 		// filtro aplicado, la unidad vinculada puede no estar en esta página
 		// del catálogo y eso no dice nada sobre el vínculo.

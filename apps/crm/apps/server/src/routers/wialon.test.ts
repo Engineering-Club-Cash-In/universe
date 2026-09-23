@@ -1224,6 +1224,64 @@ describe("wialonRouter", () => {
 			expect(res.items[0]?.creditos).toEqual([]);
 		});
 
+		it("con filtro, revalida el vínculo vencido contra el catálogo completo", async () => {
+			// La unidad 5 (vinculada) se renombró y el filtro la deja afuera; la
+			// 6, visible, ahora tiene la placa del vehículo: el SIFCO va a la 6.
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					const params = JSON.parse(
+						new URLSearchParams(bodyStr).get("params") || "{}",
+					);
+					const items =
+						params.spec?.propValueMask !== "*"
+							? [{ id: 6, nm: "C-629BNC CON APAGADO" }]
+							: [
+									{ id: 5, nm: "Otro Cliente - P-111AAA" },
+									{ id: 6, nm: "C-629BNC CON APAGADO" },
+								];
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: items.length,
+							indexFrom: 0,
+							indexTo: items.length - 1,
+							items,
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: 5,
+					wialonVinculadoPor: "auto:placa",
+					licensePlate: "C-629BNC",
+					numeroSifco: "01010214100009",
+				},
+			];
+			const res = await call(
+				wialonRouter.getWialonUnitsCatalog,
+				{ filterName: "CON APAGADO" },
+				{
+					context: {
+						headers: new Headers(),
+						session: { user: { id: "admin-c", email: "a@example.com" } },
+						user: { id: "admin-c", email: "a@example.com", role: "admin" },
+						userId: "admin-c",
+						userRole: "admin",
+					} as unknown as Context,
+				},
+			);
+			expect(res.items[0]?.creditos).toEqual([
+				{ numeroSifco: "01010214100009", origen: "placa" },
+			]);
+		});
+
 		it("no cuenta como vinculado un vínculo automático que ya no coincide con la placa", async () => {
 			setWialonClient(
 				new WialonClient({ token: "tok" }, async (_: unknown, init) => {

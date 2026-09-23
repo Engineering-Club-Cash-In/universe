@@ -193,6 +193,51 @@ export const WIALON_VINCULO_AUTO_PLACA = "auto:placa";
 /** Respuesta de getGpsVehiculo antes de agregarle `auditada` (se calcula al final). */
 type SinAuditada<T> = T extends unknown ? Omit<T, "auditada"> : never;
 
+/**
+ * ¿Un vínculo auto:placa sigue correspondiendo a la placa actual? Mismo
+ * criterio con el que se dedujo (matchUnidadPorPlaca) contra el nombre de la
+ * unidad guardado al vincular.
+ */
+function vinculoAutoVigente(
+	placa: string | null,
+	unitName: string | null,
+): boolean {
+	if (!placa || !unitName) return false;
+	return matchUnidadPorPlaca(placa, [{ id: 0, nm: unitName }]).motivo === "ok";
+}
+
+/**
+ * Suelta un vínculo auto:placa que dejó de valer. Condicionado a que siga
+ * siendo ese mismo vínculo automático: si entretanto un supervisor lo cambió,
+ * no se toca. Best-effort: si falla, la consulta sigue como sin vínculo.
+ */
+async function liberarVinculoAuto(vehicleId: string, unitId: number) {
+	try {
+		await db
+			.update(vehicles)
+			.set({
+				wialonUnitId: null,
+				wialonUnitName: null,
+				wialonVinculadoAt: null,
+				wialonVinculadoPor: null,
+			})
+			.where(
+				and(
+					eq(vehicles.id, vehicleId),
+					eq(vehicles.wialonUnitId, unitId),
+					eq(vehicles.wialonVinculadoPor, WIALON_VINCULO_AUTO_PLACA),
+				),
+			);
+		console.info("WIALON_VINCULO_AUTO_LIBERADO", { vehicleId, unitId });
+	} catch (error) {
+		console.warn("WIALON_VINCULO_AUTO_NO_LIBERADO", {
+			vehicleId,
+			unitId,
+			message: error instanceof Error ? error.message : String(error),
+		});
+	}
+}
+
 type TransaccionDb = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
@@ -271,7 +316,7 @@ async function fijarVinculoPorPlaca(
  * La última señal va en su propia llamada (`core/search_item`) porque
  * `unit/calc_last` no la trae, y se pide en paralelo: son dos viajes a Wialon
  * independientes y encadenarlos duplicaría la espera de la ficha. Si esa
- * segunda llamada falla, la telemetría igual se muestra con `ultimaSenalAt` en
+ * segunda llamada falla, la telemetría igual se muestra con las fechas en
  * null — media respuesta útil es mejor que ninguna.
  */
 async function construirRespuestaVinculada(
@@ -281,9 +326,11 @@ async function construirRespuestaVinculada(
 	vinculoOrigen: "persistido" | "placa",
 	placa: string | null,
 ): Promise<SinAuditada<GpsVehiculoOutput>> {
-	const [statusList, ultimaSenalAt] = await Promise.all([
+	const [statusList, fechas] = await Promise.all([
 		client.getUnitsStatus([unitId]),
-		client.getUnitLastSignal(unitId).catch(() => null),
+		client
+			.getUnitLastTimes(unitId)
+			.catch(() => ({ ultimoMensajeAt: null, ultimaPosicionAt: null })),
 	]);
 
 	const status = statusList[0];
@@ -303,7 +350,8 @@ async function construirRespuestaVinculada(
 			latitude: status?.latitude,
 			longitude: status?.longitude,
 			isIgnitionOn: status?.isIgnitionOn,
-			ultimaSenalAt,
+			ultimaSenalAt: fechas.ultimoMensajeAt,
+			ultimaPosicionAt: fechas.ultimaPosicionAt,
 		},
 	};
 }
@@ -346,6 +394,7 @@ async function creditosPorUnidad(
 			db
 				.select({
 					wialonUnitId: vehicles.wialonUnitId,
+					wialonVinculadoPor: vehicles.wialonVinculadoPor,
 					licensePlate: vehicles.licensePlate,
 					numeroSifco: opportunities.numeroSifco,
 				})
@@ -360,6 +409,7 @@ async function creditosPorUnidad(
 			db
 				.select({
 					wialonUnitId: vehicles.wialonUnitId,
+					wialonVinculadoPor: vehicles.wialonVinculadoPor,
 					licensePlate: vehicles.licensePlate,
 					numeroSifco: casosCobros.numeroCreditoSifco,
 				})
@@ -376,7 +426,20 @@ async function creditosPorUnidad(
 					),
 				),
 		]);
-		const filas = [...filasOportunidad, ...filasContrato];
+		// Un vínculo auto:placa que ya no coincide con la placa actual (placa
+		// corregida después) no cuenta: mismo criterio que getGpsVehiculo, que
+		// lo libera al consultar. Esa fila vuelve al pool de deducción.
+		const nombrePorUnidad = new Map(unidades.map((u) => [u.id, u.nm]));
+		const filas = [...filasOportunidad, ...filasContrato].map((fila) =>
+			fila.wialonUnitId != null &&
+			fila.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA &&
+			!vinculoAutoVigente(
+				fila.licensePlate,
+				nombrePorUnidad.get(fila.wialonUnitId) ?? null,
+			)
+				? { ...fila, wialonUnitId: null }
+				: fila,
+		);
 
 		const agregar = (
 			unitId: number,
@@ -808,7 +871,7 @@ export const wialonRouter = {
 				SinAuditada<GpsVehiculoOutput>
 			> => {
 				try {
-					const vehiculo = await leerVehiculoParaGps(input.vehicleId);
+					let vehiculo = await leerVehiculoParaGps(input.vehicleId);
 
 					if (!vehiculo) {
 						await registrarAuditoria(null, null);
@@ -845,6 +908,25 @@ export const wialonRouter = {
 							v.licensePlate?.trim() || null,
 						);
 					};
+
+					// Un vínculo DEDUCIDO se basa en la placa: si la placa se corrigió
+					// después (updateVehicle no toca el vínculo), ya no vale y seguir
+					// usándolo mostraría la ubicación de otro carro. Se libera y se
+					// vuelve a deducir con la placa actual. Los vínculos que fijó un
+					// supervisor no se revalidan: esa decisión es explícita.
+					if (
+						vehiculo.wialonUnitId &&
+						vehiculo.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA &&
+						!vinculoAutoVigente(vehiculo.licensePlate, vehiculo.wialonUnitName)
+					) {
+						await liberarVinculoAuto(input.vehicleId, vehiculo.wialonUnitId);
+						vehiculo = {
+							...vehiculo,
+							wialonUnitId: null,
+							wialonUnitName: null,
+							wialonVinculadoPor: null,
+						};
+					}
 
 					// 1. Vínculo ya fijado: es la ruta normal y no toca el catálogo.
 					if (vehiculo.wialonUnitId) {

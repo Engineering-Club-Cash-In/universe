@@ -239,7 +239,14 @@ function TelemetriaVinculada({
 	const { telemetria } = datos;
 	const ignicion = formatIgnicion(telemetria.isIgnitionOn);
 	const IgnicionIcon = ignicion.icon;
-	const estadoSenal = resolveEstadoSenal(telemetria.ultimaSenalAt);
+	// La frescura que se muestra es la de la UBICACIÓN (pos.t), no la del
+	// último mensaje: un equipo puede seguir reportando sin fix de GPS y las
+	// coordenadas quedarse viejas. Marcarlas "reciente" mandaría a un gestor
+	// a un lugar desactualizado.
+	const estadoSenal = resolveEstadoSenal(telemetria.ultimaPosicionAt);
+	const sinFixReciente =
+		resolveEstadoSenal(telemetria.ultimaSenalAt) === "fresca" &&
+		estadoSenal !== "fresca";
 	const configSenal = ESTADO_SENAL_CONFIG[estadoSenal];
 	const mapsUrl = googleMapsUrl(telemetria.latitude, telemetria.longitude);
 
@@ -254,6 +261,12 @@ function TelemetriaVinculada({
 					<span className={ignicion.className}>{ignicion.label}</span>
 				</span>
 			</div>
+			{sinFixReciente && (
+				<p className="text-amber-700 text-xs dark:text-amber-400">
+					El GPS sigue reportando, pero sin posición nueva: la ubicación es de{" "}
+					{formatFechaSenal(telemetria.ultimaPosicionAt)}.
+				</p>
+			)}
 
 			<div className="grid gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
 				<Dato
@@ -265,6 +278,11 @@ function TelemetriaVinculada({
 				<Dato
 					label="Ubicación"
 					value={formatCoordenadas(telemetria.latitude, telemetria.longitude)}
+					hint={
+						telemetria.ultimaPosicionAt
+							? `Posición de ${formatUltimaSenal(telemetria.ultimaPosicionAt)}`
+							: "Sin fecha de posición"
+					}
 				/>
 				<Dato
 					label="Odómetro"
@@ -301,7 +319,9 @@ function TelemetriaVinculada({
 				)}
 			</div>
 
-			{esSupervisor && datos.vinculoOrigen === "placa" && (
+			{/* También para vínculos que fijó un supervisor: si eligió mal, esta
+			    es la única forma de corregirlo desde la UI. */}
+			{esSupervisor && (
 				<CorregirVinculo
 					onVinculado={onVinculado}
 					placa={datos.placa}

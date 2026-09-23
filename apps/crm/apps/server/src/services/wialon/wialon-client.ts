@@ -218,6 +218,27 @@ export function extraerUltimaSenal(detail: {
 	return Number.isNaN(fecha.getTime()) ? null : fecha;
 }
 
+/**
+ * Fechas del último MENSAJE (`lmsg.t`) y de la última POSICIÓN (`pos.t`) de
+ * una unidad, por separado. No son lo mismo: un rastreador puede seguir
+ * mandando mensajes sin fix de GPS, y entonces lmsg.t es reciente mientras
+ * las coordenadas (pos) son viejas. Para decir qué tan confiable es la
+ * UBICACIÓN que se muestra hay que usar pos.t; lmsg.t solo dice que el equipo
+ * sigue vivo. Epoch en segundos, igual que extraerUltimaSenal.
+ */
+export function extraerFechasUnidad(detail: {
+	item?: { pos?: { t?: number } | null; lmsg?: { t?: number } | null };
+}): { ultimoMensajeAt: Date | null; ultimaPosicionAt: Date | null } {
+	const aFecha = (t: unknown): Date | null =>
+		typeof t === "number" && Number.isFinite(t) && t > 0
+			? new Date(t * 1000)
+			: null;
+	return {
+		ultimoMensajeAt: aFecha(detail?.item?.lmsg?.t),
+		ultimaPosicionAt: aFecha(detail?.item?.pos?.t),
+	};
+}
+
 function parsePositiveInt(val: unknown, fallback: number): number {
 	const num =
 		typeof val === "number" ? val : Number.parseInt(String(val ?? ""), 10);
@@ -822,11 +843,27 @@ export class WialonClient {
 	 * `pos.t` / `lmsg.t`.
 	 */
 	public async getUnitLastSignal(unitId: number): Promise<Date | null> {
-		// flags 1025 = datos básicos + último mensaje; es lo que la colección de
-		// La Legión usa para leer lmsg, y evita pedir sensores y propiedades que
-		// aquí no se ocupan.
+		return (await this.getUnitLastTimes(unitId)).ultimoMensajeAt;
+	}
+
+	/**
+	 * Último mensaje y última posición de la unidad, por separado (ver
+	 * extraerFechasUnidad): la frescura de la ubicación se mide con la posición.
+	 */
+	public async getUnitLastTimes(
+		unitId: number,
+	): Promise<{ ultimoMensajeAt: Date | null; ultimaPosicionAt: Date | null }> {
+		// flags 1025 = datos básicos + último mensaje y posición; es lo que la
+		// colección de La Legión usa para leer lmsg, y evita pedir sensores y
+		// propiedades que aquí no se ocupan.
 		const detail = await this.getUnitDetail(unitId, 1025);
-		return extraerUltimaSenal(detail);
+		const fechas = extraerFechasUnidad(detail);
+		// Mismo criterio que extraerUltimaSenal para el mensaje: sin lmsg, la
+		// posición es lo último que se sabe del equipo.
+		return {
+			ultimoMensajeAt: fechas.ultimoMensajeAt ?? fechas.ultimaPosicionAt,
+			ultimaPosicionAt: fechas.ultimaPosicionAt,
+		};
 	}
 
 	/**

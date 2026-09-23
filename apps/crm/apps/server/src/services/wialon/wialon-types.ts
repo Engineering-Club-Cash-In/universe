@@ -188,7 +188,11 @@ export const gpsVehiculoOutputSchema = z.discriminatedUnion("estado", [
 			latitude: z.number().optional(),
 			longitude: z.number().optional(),
 			isIgnitionOn: z.boolean().optional(),
+			// Último mensaje del equipo (lmsg.t): dice que el GPS sigue vivo.
 			ultimaSenalAt: z.date().nullable(),
+			// Última posición (pos.t): de cuándo son latitude/longitude. La
+			// frescura de la UBICACIÓN se mide con esta, no con ultimaSenalAt.
+			ultimaPosicionAt: z.date().nullable(),
 		}),
 	}),
 	z.object({

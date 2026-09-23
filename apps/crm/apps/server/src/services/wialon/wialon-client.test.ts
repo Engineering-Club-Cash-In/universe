@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import {
+	extraerFechasUnidad,
 	extraerNucleoDeNombreUnidad,
 	extraerNucleoPlaca,
 	extraerUltimaSenal,
@@ -2040,6 +2041,24 @@ describe("extraerUltimaSenal (CB-118)", () => {
 				item: { pos: { t: Number.NaN } },
 			}),
 		).toBeNull();
+	});
+});
+
+describe("extraerFechasUnidad (CB-118)", () => {
+	test("separa el último mensaje de la última posición", () => {
+		// Equipo que sigue reportando sin fix de GPS: el mensaje es de ahora,
+		// las coordenadas son viejas. La ubicación no puede verse "reciente".
+		const f = extraerFechasUnidad({
+			item: { lmsg: { t: 2000 }, pos: { t: 1000 } },
+		});
+		expect(f.ultimoMensajeAt?.getTime()).toBe(2000 * 1000);
+		expect(f.ultimaPosicionAt?.getTime()).toBe(1000 * 1000);
+	});
+
+	test("null cuando falta o es inválido", () => {
+		const f = extraerFechasUnidad({ item: { lmsg: { t: 0 }, pos: null } });
+		expect(f.ultimoMensajeAt).toBeNull();
+		expect(f.ultimaPosicionAt).toBeNull();
 	});
 });
 

@@ -1056,6 +1056,46 @@ describe("wialonRouter", () => {
 				{ numeroSifco: "01010214100003", origen: "placa" },
 			]);
 		});
+
+		it("no cuenta como vinculado un vínculo automático que ya no coincide con la placa", async () => {
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 1,
+							indexFrom: 0,
+							indexTo: 0,
+							items: [{ id: 5, nm: "C-629BNC" }],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: 5,
+					wialonVinculadoPor: "auto:placa",
+					licensePlate: "P-999ZZZ",
+					numeroSifco: "01010214100009",
+				},
+			];
+			const res = await call(wialonRouter.getWialonUnitsCatalog, undefined, {
+				context: {
+					headers: new Headers(),
+					session: { user: { id: "admin-c", email: "a@example.com" } },
+					user: { id: "admin-c", email: "a@example.com", role: "admin" },
+					userId: "admin-c",
+					userRole: "admin",
+				} as unknown as Context,
+			});
+			expect(res.items[0]?.creditos).toEqual([]);
+		});
 	});
 
 	describe("getGpsVehiculo (CB-118)", () => {
@@ -1140,6 +1180,8 @@ describe("wialonRouter", () => {
 			expect(res.placa).toBe("C-629BNC");
 			expect(res.telemetria.latitude).toBe(14.6);
 			expect(res.telemetria.ultimaSenalAt?.getTime()).toBe(1773704628 * 1000);
+			// Sin pos.t no hay fecha de posición: la UI no puede decir "reciente".
+			expect(res.telemetria.ultimaPosicionAt).toBeNull();
 
 			// CB-118: "cada consulta queda auditada con usuario, motivo y cuenta".
 			expect(insertsGpsAuditoria).toHaveLength(1);
@@ -1542,6 +1584,83 @@ describe("wialonRouter", () => {
 			} finally {
 				errorInsertAuditoria = null;
 			}
+		});
+
+		it("libera un vínculo automático si la placa ya no coincide y vuelve a deducir", async () => {
+			// La placa se corrigió después de vincular (updateVehicle no toca el
+			// vínculo): seguir usando la unidad vieja mostraría otro carro.
+			filaVehiculoMock = {
+				licensePlate: "P-999ZZZ",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "auto:placa",
+			};
+			setWialonClient(
+				clienteWialon(
+					() =>
+						new Response(
+							JSON.stringify({
+								totalItemsCount: 0,
+								indexFrom: 0,
+								indexTo: 0,
+								items: [],
+							}),
+							{ status: 200 },
+						),
+				),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("sin_vinculo");
+			if (res.estado !== "sin_vinculo") throw new Error("estado inesperado");
+			expect(res.motivo).toBe("sin_coincidencia");
+			expect(updatesVehiculo[0]).toMatchObject({
+				wialonUnitId: null,
+				wialonVinculadoPor: null,
+			});
+		});
+
+		it("no revalida contra la placa un vínculo que fijó un supervisor", async () => {
+			filaVehiculoMock = {
+				licensePlate: "P-999ZZZ",
+				wialonUnitId: 28554757,
+				wialonUnitName: "Bidgar Yatz - C-629BNC",
+				wialonVinculadoPor: "sup@example.com",
+			};
+			setWialonClient(
+				clienteWialon((bodyStr) =>
+					bodyStr.includes("unit%2Fcalc_last")
+						? new Response(JSON.stringify([{ i: 28554757 }]), { status: 200 })
+						: new Response(
+								JSON.stringify({
+									item: { id: 28554757, nm: "u" },
+									flags: 1025,
+								}),
+								{ status: 200 },
+							),
+				),
+			);
+			const res = await call(
+				wialonRouter.getGpsVehiculo,
+				{
+					casoCobroId: "33333333-3333-3333-3333-333333333333",
+					vehicleId: "11111111-1111-1111-1111-111111111111",
+					motivo: "Verificar ubicación para gestión de cobro",
+				},
+				{ context: cobrosContext as unknown as Context },
+			);
+			expect(res.estado).toBe("vinculado");
+			if (res.estado !== "vinculado") throw new Error("estado inesperado");
+			expect(res.unitId).toBe(28554757);
+			expect(res.vinculoOrigen).toBe("persistido");
+			expect(updatesVehiculo).toHaveLength(0);
 		});
 
 		it("un vínculo guardado por deducción de placa se sigue mostrando como deducción", async () => {

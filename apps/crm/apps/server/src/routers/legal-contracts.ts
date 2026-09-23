@@ -194,7 +194,7 @@ async function eliminarContrato(
 		// están en manos del cliente y borrar el documento se los mata; del 90%
 		// en adelante la oportunidad ya se cerró con esos contratos.
 		if (exigirEtapa && contrato.opportunityId) {
-			await exigirEtapaDeFirma(contrato.opportunityId, "reemplazar");
+			await exigirEtapaDeFirma(contrato.opportunityId, "eliminar");
 		}
 		return eliminarConCandadoTomado(contrato, motivo);
 	});
@@ -233,9 +233,9 @@ async function eliminarConCandadoTomado(
 /**
  * Corta si la oportunidad ya no está en una etapa que permita esta acción.
  *
- * Reemplazar es de jurídico y sólo en 80%; regenerar lo hace análisis y va en
- * 80% u 85%. Del 90% en adelante los contratos ya son parte de una decisión
- * tomada y no se tocan.
+ * Qué etapas admite cada acción está en `ETAPAS_POR_ACCION`: reemplazar y
+ * regenerar van en 80% y 85%, eliminar sólo en 80%. Del 90% en adelante los
+ * contratos ya son parte de una decisión tomada y no se tocan.
  */
 async function exigirEtapaDeFirma(
 	opportunityId: string,

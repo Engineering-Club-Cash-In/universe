@@ -43,12 +43,19 @@ export const ETAPAS_QUE_PERMITEN_REEMPLAZO = [80, 85];
  *   quien lleva la oportunidad en 85%. Se permite también en 80% para que
  *   jurídico pueda hacerlo durante su etapa.
  *
+ * - **eliminar** (el "Eliminar" de jurídico: descarta el contrato y lo borra
+ *   en WeeTrust sin poner otro en su lugar) sólo en 80%. En 85% los enlaces ya
+ *   le llegaron al cliente por WhatsApp: borrarlo se los deja muertos, sin un
+ *   contrato que lo reemplace ni nada que reenviar. Para cambiar un contrato en
+ *   firma está reemplazar, que sí deja uno nuevo.
+ *
  * Del 90% en adelante los contratos ya son parte de una decisión tomada y no
- * se tocan, para ninguna de las dos.
+ * se tocan, para ninguna.
  */
 export const ETAPAS_POR_ACCION = {
 	reemplazar: [80, 85],
 	regenerar: [80, 85],
+	eliminar: [80],
 } as const;
 
 export type AccionSobreContrato = keyof typeof ETAPAS_POR_ACCION;

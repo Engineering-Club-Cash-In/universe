@@ -161,6 +161,16 @@ const app = new Elysia()
       };
     }
 
+    // El paquete de cartas no tiene plantilla propia: se arma con las cartas
+    // que trae, y sólo por /contracts/batch. Acá daba un 500.
+    if (requestBody.contractType === ContractType.PAQUETE_CARTAS) {
+      set.status = 400;
+      return {
+        success: false,
+        error: 'El paquete de cartas se genera por /contracts/batch, con las cartas que lleva',
+      };
+    }
+
     // Validar que se enviaron datos
     if (!requestBody.data || Object.keys(requestBody.data).length === 0) {
       set.status = 400;
@@ -342,6 +352,14 @@ const app = new Elysia()
         success: false,
         error: `Tipo de contrato inválido: ${contractType}`,
         availableTypes: Object.values(ContractType)
+      };
+    }
+
+    if (contractType === ContractType.PAQUETE_CARTAS) {
+      set.status = 400;
+      return {
+        success: false,
+        error: 'El paquete de cartas se genera por /contracts/batch, con las cartas que lleva',
       };
     }
 

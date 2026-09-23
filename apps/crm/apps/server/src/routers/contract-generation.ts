@@ -1542,6 +1542,10 @@ export const contractGenerationRouter = {
 							: `Se generaron ${successCount} documento(s), ${failCount} fallaron`,
 				};
 			} catch (error) {
+				// Los errores esperados (una selección que deja cartas afuera, la
+				// etapa que cambió, otra persona que ganó) salen como son. Envueltos
+				// en 500 parecían una falla del servidor.
+				if (error instanceof ORPCError) throw error;
 				console.error("[generateContractsDirect] Error:", error);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
@@ -1868,6 +1872,10 @@ export const contractGenerationRouter = {
 							: `Se enlazaron ${savedContracts.length} contrato(s). Se descartaron ${descartados.join(", ")}: la oportunidad cambió mientras se generaban. Recargá y volvé a intentarlo.`,
 				};
 			} catch (error) {
+				// Los errores esperados (una selección que deja cartas afuera, la
+				// etapa que cambió, otra persona que ganó) salen como son. Envueltos
+				// en 500 parecían una falla del servidor.
+				if (error instanceof ORPCError) throw error;
 				console.error("[linkContractsToOpportunity] Error:", error);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
@@ -2293,6 +2301,10 @@ export const contractGenerationRouter = {
 					};
 				});
 			} catch (error) {
+				// Los errores esperados (una selección que deja cartas afuera, la
+				// etapa que cambió, otra persona que ganó) salen como son. Envueltos
+				// en 500 parecían una falla del servidor.
+				if (error instanceof ORPCError) throw error;
 				console.error("[regenerateContracts] Error:", error);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:

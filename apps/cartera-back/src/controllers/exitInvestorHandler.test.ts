@@ -22,12 +22,96 @@ function makeDeps(exitInvestorResultado: any) {
       if (marcarDebeFallar) throw new Error("fallo simulado del cierre");
       return { completados: creditoIds, diferidos: [] };
     },
+    // body.inversionista_id/creditos vienen vacíos en la mayoría de estos
+    // tests (prueban solo el wrapper de cierre), pero cuando no lo están
+    // el guard igual consulta esto — sin stub cae al real y pega contra la DB.
+    obtenerEstadosDevolucion: async (creditoIds: number[]) => new Map(creditoIds.map((id) => [id, null])),
   };
 }
 
 beforeEach(() => {
   marcarLlamadoCon = null;
   marcarDebeFallar = false;
+});
+
+describe("exitInvestorHandler — lock de créditos y revalidación (P1: race con pagos)", () => {
+  it("pasa revalidarGuard a exitInvestor para serializarse bajo el lock FOR NO KEY UPDATE", async () => {
+    marcarDebeFallar = false;
+    let revalidarGuardRecibido: any = null;
+    const deps = {
+      ...makeDeps({
+        success: true,
+        inversionista: { inversionista_id: 13 },
+        creditos_procesados: [{ credito_id: 78 }, { credito_id: 141 }],
+      }),
+      exitInvestor: async (_ctx: any, opts: any) => {
+        revalidarGuardRecibido = opts?.revalidarGuard;
+        return {
+          success: true,
+          inversionista: { inversionista_id: 13 },
+          creditos_procesados: [{ credito_id: 78 }, { credito_id: 141 }],
+        };
+      },
+    };
+
+    const res = await exitInvestorHandler(
+      { body: { inversionista_id: 13, creditos: [141, 78] }, set: { status: 200 } },
+      deps as any
+    );
+
+    expect(res.success).toBe(true);
+    expect(typeof revalidarGuardRecibido).toBe("function");
+  });
+
+  it("revalidarGuard bajo la transacción detecta abonos/pagos creados concurrentemente y aborta", async () => {
+    let ejecutorUsadoEnRevalidacion: any = null;
+    const fakeTx = { id: "fake-tx", select: () => {} };
+
+    const deps = {
+      ...makeDeps({ success: true }),
+      exitInvestor: async (_ctx: any, opts: any) => {
+        // Simula que exitInvestor corre revalidarGuard dentro de su transacción con tx
+        const guardRes = await opts.revalidarGuard(fakeTx);
+        if (!guardRes.ok) {
+          return {
+            success: false,
+            message: guardRes.message,
+            creditos_invalidos: guardRes.creditos_invalidos,
+          };
+        }
+        return { success: true, creditos_procesados: [{ credito_id: 78 }] };
+      },
+      obtenerEstadosDevolucion: async (ids: number[], ejecutor?: any) => {
+        ejecutorUsadoEnRevalidacion = ejecutor;
+        return new Map(ids.map((id) => [id, "VERIFICADO"]));
+      },
+      obtenerMontoAportadoEspejo: async () => new Map([[78, 0]]),
+      tienePendientesLiquidacion: async (_inv: number, _ids: number[], ejecutor?: any) => {
+        // Durante el pre-check (sin fakeTx) no había pendientes, pero bajo fakeTx (concurrencia) sí hay
+        if (ejecutor === fakeTx) {
+          return new Set([78]);
+        }
+        return new Set();
+      },
+    };
+
+    const res = await exitInvestorHandler(
+      { body: { inversionista_id: 13, creditos: [78] }, set: { status: 200 } },
+      deps as any
+    );
+
+    expect(res.success).toBe(false);
+    expect(res.creditos_invalidos).toEqual([78]);
+    expect(ejecutorUsadoEnRevalidacion).toBe(fakeTx);
+  });
+
+  it("GuardRechazadoError encapsula el mensaje y la lista de créditos inválidos", async () => {
+    const { GuardRechazadoError } = await import("./investor");
+    const error = new GuardRechazadoError("devolucion pendiente", [78, 99]);
+    expect(error.name).toBe("GuardRechazadoError");
+    expect(error.message).toBe("devolucion pendiente");
+    expect(error.creditosInvalidos).toEqual([78, 99]);
+  });
 });
 
 describe("exitInvestorHandler", () => {

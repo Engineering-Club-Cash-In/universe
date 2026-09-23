@@ -188,7 +188,7 @@ async function eliminarContrato(
 	 */
 	exigirEtapa: AccionSobreContrato | null = null,
 	/** Ver `anularContratoReemplazado`. */
-	opciones: { conservarSiHayFirmas?: boolean; conservarFila?: boolean } = {},
+	opciones: { conservarFila?: boolean } = {},
 ): Promise<{ conservado: boolean }> {
 	// Con el candado de la oportunidad: esto borra el documento en WeeTrust, y
 	// si un envío por WhatsApp está mandando sus enlaces, el cliente recibiría
@@ -222,7 +222,7 @@ async function eliminarContrato(
 async function eliminarConCandadoTomado(
 	contrato: typeof generatedLegalContracts.$inferSelect,
 	motivo: string,
-	opciones: { conservarSiHayFirmas?: boolean; conservarFila?: boolean } = {},
+	opciones: { conservarFila?: boolean } = {},
 ): Promise<{ conservado: boolean }> {
 	// Los generados antes de que se guardara el `documentID` lo llevan en el
 	// link. Se guarda en la fila para que anular lo borre allá también.
@@ -1495,13 +1495,13 @@ export const legalContractsRouter = {
 	 * acá sólo jurídico podía descartarlo, y análisis —que es quien lleva la
 	 * oportunidad en 85%— tenía que pedírselo.
 	 *
-	 * Qué pasa del lado de WeeTrust lo decide `eliminarContrato`:
+	 * Qué pasa del lado de WeeTrust:
 	 *
-	 * - si nadie firmó, el documento se borra allá y los enlaces mueren;
-	 * - si ya firmó alguien, **allá queda**. WeeTrust no deja borrar un
-	 *   documento completado, y uno a medio firmar tiene firmas que son de
-	 *   alguien. La fila se conserva anulada, diciendo qué se descartó y cómo
-	 *   quedó del otro lado.
+	 * - si falta firmar alguien —haya firmado otro o nadie—, el documento se
+	 *   borra allá y los enlaces mueren: un contrato anulado no tiene que seguir
+	 *   recibiendo firmas;
+	 * - si ya lo firmaron todos, **allá queda**, porque WeeTrust no deja borrar
+	 *   un documento completado. Acá se ve anulado igual.
 	 *
 	 * La fila anulada no se borra nunca: es el registro de lo que se descartó, y
 	 * sin ella un documento que quedó vivo en WeeTrust no tendría rastro acá.
@@ -1531,6 +1531,16 @@ export const legalContractsRouter = {
 				throw new ORPCError("NOT_FOUND", { message: "Contrato no encontrado" });
 			}
 
+			// Los del respaldo de Documenso no se anulan desde acá: el CRM sólo sabe
+			// borrar en WeeTrust, así que la fila quedaría anulada con los enlaces
+			// de Documenso vivos, y el cliente podría seguir firmando.
+			if (contrato.signingProvider === "documenso") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato salió por Documenso: anularlo acá no cancelaría sus enlaces. Hay que cancelarlo en Documenso.",
+				});
+			}
+
 			// Anular lo ya anulado no hace nada y confunde: la fila que se ve en
 			// "Ver anulados" es registro, no un contrato que se pueda volver a
 			// descartar.
@@ -1541,16 +1551,16 @@ export const legalContractsRouter = {
 			}
 
 			const quien = context.session?.user?.name ?? "alguien del CRM";
-			// Sin reemplazo, un documento que ya tiene alguna firma se queda en
-			// WeeTrust: borrarlo tiraría firmas que son de alguien, y no hay un
-			// documento nuevo que ocupe su lugar. Y la fila queda siempre, aunque
-			// no haya documento (uno en papel sin firmar): el diálogo promete que
-			// va a estar en «Ver anulados» con su motivo.
+			// En WeeTrust se borra aunque alguien ya haya firmado: un contrato
+			// anulado no tiene que seguir recibiendo firmas. Sólo queda allá el que
+			// firmaron todos, porque WeeTrust no deja borrarlo. La fila queda
+			// siempre, aunque no haya documento (uno en papel sin firmar): el
+			// diálogo promete que va a estar en «Ver anulados» con su motivo.
 			const { conservado } = await eliminarContrato(
 				contrato,
 				`${etiquetaDeMotivo(input.motivo)} (anulado por ${quien})`,
 				"anular",
-				{ conservarSiHayFirmas: true, conservarFila: true },
+				{ conservarFila: true },
 			);
 
 			return {

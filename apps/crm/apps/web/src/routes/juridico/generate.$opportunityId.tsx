@@ -357,6 +357,18 @@ function RouteComponent() {
 		return result;
 	};
 
+	// Lo que el wizard generó y no se va a enlazar. Sin esperar la respuesta:
+	// se llama también al irse de la pantalla, y no hay nada que mostrar. Si
+	// falla queda en el log; el documento huérfano es lo que había antes.
+	const handleDescartarSinEnlazar = (
+		documentos: Array<{ documentID: string; descarte: string }>,
+	) => {
+		if (!opportunityId) return;
+		client
+			.descartarContratosSinEnlazar({ opportunityId, documentos })
+			.catch((error) => console.error("[descartarContratosSinEnlazar]", error));
+	};
+
 	const handleLinkContracts = async (data: {
 		opportunityId: string;
 		leadId: string;
@@ -544,6 +556,7 @@ function RouteComponent() {
 							onGenerate={handleGenerate}
 							onLinkContracts={handleLinkContracts}
 							onBack={handleBack}
+							onDescartarSinEnlazar={handleDescartarSinEnlazar}
 							isGenerating={generateMutation.isPending}
 							isLinking={linkContractsMutation.isPending}
 						/>

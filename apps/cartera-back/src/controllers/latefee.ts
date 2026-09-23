@@ -49,6 +49,44 @@ export const STATUS_EXCLUIDOS_MORA = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", 
  * alguien agrega un estado arriba, la condición de los UPDATE lo hereda sola.
  */
 /**
+ * 🔒🔒 ORDEN DE CANDADOS DEL MÓDULO DE MORA — REGLA, NO ESTILO 🔒🔒
+ *
+ *      Dentro de UNA MISMA TRANSACCIÓN, primero se toma la fila de
+ *      `creditos` y DESPUÉS la de `moras_credito`. NUNCA al revés.
+ *
+ * Por qué: las dos filas se tocan juntas en casi todos los caminos del módulo
+ * (convenio, cron, limpieza al validar un pago, /mora/update, condonación). Si
+ * una transacción toma `creditos` → `moras_credito` y otra toma
+ * `moras_credito` → `creditos`, cada una queda esperando el candado que tiene
+ * la otra: eso es un ciclo de deadlock y Postgres lo corta matando una con
+ * 40P01. Nadie maneja el 40P01 acá, así que el precio es o un convenio que
+ * falla, o —peor— la corrida nocturna entera de `procesarMoras` abortada antes
+ * de procesar el resto de los créditos.
+ *
+ * El orden elegido es el que ya usaban el convenio (`createPaymentAgreement`
+ * marca EN_CONVENIO y recién después llama a `desactivarMoraPorConvenio`) y la
+ * rama CREACION del cron; el resto se alineó a ellos.
+ *
+ * Cómo se respeta en la práctica:
+ *  - si la transacción ESCRIBE `creditos`, ese UPDATE va primero y de paso
+ *    toma el candado (no hace falta un SELECT … FOR UPDATE aparte);
+ *  - si el UPDATE de `creditos` no puede ir primero porque depende de leer la
+ *    mora (condonación, /mora/update), se toma el candado con un
+ *    `SELECT … FOR UPDATE` sobre `creditos` al abrir la transacción;
+ *  - un UPDATE condicional de `creditos` que no matchea filas no deja candado,
+ *    pero tampoco rompe la regla: lo prohibido es PEDIR `creditos` DESPUÉS de
+ *    tener `moras_credito`, y en ese camino ya no se vuelve a pedir.
+ *
+ * Fuera de la regla quedan los caminos NO transaccionales (`createMora`,
+ * `condonarTodasLasMoras`): cada statement autocommitea y suelta su candado
+ * antes del siguiente, así que no pueden sostener un ciclo. Si alguien los
+ * envuelve en una transacción, pasan a deberle el orden a esta regla.
+ *
+ * Los tests de `moraOrdenDeCandados.test.ts` fallan si alguna de estas
+ * transacciones vuelve a pedir `moras_credito` antes que `creditos`.
+ */
+
+/**
  * Señal interna para abortar la transacción de un crédito que dejó de ser
  * elegible para mora a media corrida. No es un error del cron: se usa para
  * forzar el ROLLBACK (la única forma de deshacer un write ya hecho dentro de
@@ -58,6 +96,26 @@ class CreditoYaNoElegible extends Error {
   constructor() {
     super("El crédito dejó de ser elegible para mora a media corrida");
     this.name = "CreditoYaNoElegible";
+  }
+}
+
+/**
+ * Señal interna para abortar la transacción cuando el UPDATE condicional sobre
+ * `moras_credito` (`activa = true` + `.returning()`) no afecta filas: otra ruta
+ * ya apagó esa mora.
+ *
+ * Antes alcanzaba con un `return`, porque el candado de la mora era el PRIMER
+ * write de la transacción y no había nada escrito que deshacer. Al invertir el
+ * orden (ver la regla de arriba) el UPDATE de `creditos` ya corrió, así que un
+ * `return` COMMITEARÍA ese cambio de estado sin haber apagado la mora — por
+ * ejemplo bajando a ACTIVO un crédito cuya mora la apagó un convenio, que a
+ * continuación lo deja EN_CONVENIO. Tirar revierte todo y el crédito cae en el
+ * balde de omitidos, exactamente como antes.
+ */
+class MoraYaApagada extends Error {
+  constructor() {
+    super("La mora ya fue apagada por otra ruta");
+    this.name = "MoraYaApagada";
   }
 }
 
@@ -648,6 +706,22 @@ export async function desactivarMoraSiCreditoAlDia(
     // duplica historial y no se toca el status.
     let apagada = false;
     await dbi.transaction(async (txm) => {
+      // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
+      // la regla al inicio del archivo). El convenio toma el crédito y después
+      // la mora; si acá lo hiciéramos al revés, las dos transacciones se
+      // esperarían en cruz y Postgres mataría una con 40P01.
+      if (decision.bajarStatusAActivo) {
+        await txm
+          .update(creditos)
+          .set({ statusCredit: "ACTIVO" })
+          .where(
+            and(
+              eq(creditos.credito_id, credito_id),
+              eq(creditos.statusCredit, "MOROSO"),
+            ),
+          );
+      }
+
       const apagadas = await txm
         .update(moras_credito)
         .set({
@@ -664,20 +738,12 @@ export async function desactivarMoraSiCreditoAlDia(
         )
         .returning({ mora_id: moras_credito.mora_id });
 
-      if (apagadas.length === 0) return;
+      // 🔒 El candado sigue vivo: cero filas = otra ruta la apagó primero. Pero
+      // ya NO alcanza con `return`, porque el cambio de estado de arriba se
+      // commitearía: se aborta la transacción para que el crédito quede como
+      // estaba (ver `MoraYaApagada`).
+      if (apagadas.length === 0) throw new MoraYaApagada();
       apagada = true;
-
-      if (decision.bajarStatusAActivo) {
-        await txm
-          .update(creditos)
-          .set({ statusCredit: "ACTIVO" })
-          .where(
-            and(
-              eq(creditos.credito_id, credito_id),
-              eq(creditos.statusCredit, "MOROSO"),
-            ),
-          );
-      }
 
       await registrarHistorialMora({
         credito_id,
@@ -697,6 +763,12 @@ export async function desactivarMoraSiCreditoAlDia(
         dbClient: txm as unknown as typeof db,
         propagarError: true,
       });
+    }).catch((e) => {
+      // La carrera perdida es una omisión esperada, no un fallo: la
+      // transacción ya revirtió todo. Cualquier otro error sí se propaga al
+      // catch de afuera, como antes.
+      if (!(e instanceof MoraYaApagada)) throw e;
+      apagada = false;
     });
 
     if (apagada) {
@@ -926,6 +998,13 @@ export async function createMora({
 
     // Actualizar status a MOROSO. Llegar aquí implica que el crédito NO está en estado
     // excluido (V3 ya los rechaza), así que es seguro marcarlo MOROSO.
+    //
+    // 🔒 Esta función NO es transaccional: cada statement autocommitea y suelta
+    // su candado antes del siguiente, así que no puede sostener el ciclo que
+    // previene la regla de orden del inicio del archivo (por eso el status
+    // puede quedar después del write de la mora). Si alguien la envuelve en una
+    // transacción, el UPDATE de `creditos` tiene que pasar ARRIBA del write de
+    // `moras_credito`.
 
     await db
       .update(creditos)
@@ -1055,6 +1134,22 @@ export async function updateMora({
 
     // Toda la operación dentro de una transacción con row lock para evitar races
     const result = await db.transaction(async (tx) => {
+      // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
+      // la regla al inicio del archivo). Acá el UPDATE de `creditos` no puede
+      // ir primero —el estado a escribir depende del monto que resulte de la
+      // mora—, así que el candado se toma con este `SELECT … FOR UPDATE`, que
+      // además es la lectura de `statusCredit` que esta transacción ya
+      // necesitaba más abajo: no agrega un viaje a la base, solo lo adelanta.
+      // Con el orden viejo (mora FOR UPDATE y después el UPDATE del crédito)
+      // esta ruta y la del convenio se pedían los candados en cruz: ciclo de
+      // deadlock y 40P01 sin manejar.
+      const [creditoActual] = await tx
+        .select({ statusCredit: creditos.statusCredit })
+        .from(creditos)
+        .where(eq(creditos.credito_id, targetCreditoId))
+        .limit(1)
+        .for("update");
+
       const shouldReactivateMora = tipo === "INCREMENTO" && activa === true;
       const moraWhere = shouldReactivateMora
         ? eq(moras_credito.credito_id, targetCreditoId)
@@ -1112,12 +1207,9 @@ export async function updateMora({
       // crédito NO está en STATUS_EXCLUIDOS_MORA.
       const newStatus = (newMonto.gt(0) && newActiva) ? "MOROSO" : "ACTIVO";
 
-      const [creditoActual] = await tx
-        .select({ statusCredit: creditos.statusCredit })
-        .from(creditos)
-        .where(eq(creditos.credito_id, targetCreditoId))
-        .limit(1);
-
+      // `creditoActual` se leyó al abrir la transacción, con FOR UPDATE: la
+      // fila está candada desde entonces, así que este estado no puede haber
+      // cambiado bajo nuestros pies.
       const estadoProtegido = STATUS_EXCLUIDOS_MORA.includes(
         creditoActual?.statusCredit ?? "",
       );
@@ -1227,48 +1319,78 @@ async function desactivarMoraDelCron(
   },
   motivo: string,
 ): Promise<boolean> {
-  const apagadas = await db
-    .update(moras_credito)
-    .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
-    .where(
-      and(
-        eq(moras_credito.mora_id, moraPrevia.mora_id),
-        // 🔒 Sin este filtro, una ruta concurrente que ya la apagó no impide
-        // que el cron "gane" también y duplique el evento DESACTIVACION.
-        eq(moras_credito.activa, true),
-      ),
-    )
-    .returning({ mora_id: moras_credito.mora_id });
+  // 🧾 Los tres writes van JUNTOS en una transacción, igual que las ramas
+  // CREACION y RECALCULO del cron. Sueltos y autocommiteados, un corte entre
+  // el primero y el último dejaba el crédito ACTIVO con la mora todavía viva,
+  // o la mora apagada sin su evento en `moras_historial`. Y la transacción es
+  // además lo que hace exigible el orden de candados: sin ella cada statement
+  // soltaba su candado antes del siguiente.
+  return await db
+    .transaction(async (tx) => {
+      // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
+      // la regla al inicio del archivo). Este UPDATE es además la escritura
+      // que igual había que hacer, así que toma el candado sin costo.
+      //
+      // Es CONDICIONAL sobre MOROSO a propósito: bajar a ACTIVO sin esa
+      // condición des-castigaría un EN_CONVENIO/CAIDO/INCOBRABLE. Que no
+      // matchee filas es un desenlace legítimo (el crédito no estaba MOROSO),
+      // no un error: no aborta nada. Tampoco rompe la regla del orden —
+      // después de acá esta transacción ya no vuelve a pedir `creditos`.
+      await tx
+        .update(creditos)
+        .set({ statusCredit: "ACTIVO" })
+        .where(
+          and(
+            eq(creditos.credito_id, creditoId),
+            eq(creditos.statusCredit, "MOROSO")
+          )
+        );
 
-  // Cero filas = otra ruta la apagó primero. No hay nada que auditar ni que
-  // corregir en el status: el evento lo escribió ella.
-  if (apagadas.length === 0) return false;
+      const apagadas = await tx
+        .update(moras_credito)
+        .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
+        .where(
+          and(
+            eq(moras_credito.mora_id, moraPrevia.mora_id),
+            // 🔒 Sin este filtro, una ruta concurrente que ya la apagó no impide
+            // que el cron "gane" también y duplique el evento DESACTIVACION.
+            eq(moras_credito.activa, true),
+          ),
+        )
+        .returning({ mora_id: moras_credito.mora_id });
 
-  // Solo bajar a ACTIVO si seguía MOROSO — preservar EN_CONVENIO, CAIDO, etc.
-  await db
-    .update(creditos)
-    .set({ statusCredit: "ACTIVO" })
-    .where(
-      and(
-        eq(creditos.credito_id, creditoId),
-        eq(creditos.statusCredit, "MOROSO")
-      )
-    );
+      // Cero filas = otra ruta la apagó primero. No hay nada que auditar: el
+      // evento lo escribió ella. Se ABORTA (no `return`) porque el UPDATE de
+      // `creditos` de arriba ya corrió y commitearlo bajaría a ACTIVO un
+      // crédito cuya mora apagó, por ejemplo, un convenio que enseguida lo
+      // deja EN_CONVENIO.
+      if (apagadas.length === 0) throw new MoraYaApagada();
 
-  await registrarHistorialMora({
-    credito_id: creditoId,
-    mora_id: moraPrevia.mora_id,
-    tipo_evento: "DESACTIVACION",
-    origen: "PROCESO_AUTO",
-    monto_anterior: moraPrevia.monto_mora,
-    monto_nuevo: "0",
-    cuotas_atrasadas_anterior: moraPrevia.cuotas_atrasadas,
-    cuotas_atrasadas_nuevas: 0,
-    porcentaje_mora: moraPrevia.porcentaje_mora,
-    motivo,
-  });
+      await registrarHistorialMora({
+        credito_id: creditoId,
+        mora_id: moraPrevia.mora_id,
+        tipo_evento: "DESACTIVACION",
+        origen: "PROCESO_AUTO",
+        monto_anterior: moraPrevia.monto_mora,
+        monto_nuevo: "0",
+        cuotas_atrasadas_anterior: moraPrevia.cuotas_atrasadas,
+        cuotas_atrasadas_nuevas: 0,
+        porcentaje_mora: moraPrevia.porcentaje_mora,
+        motivo,
+        dbClient: tx as unknown as typeof db,
+        // Dentro de la tx el swallow es mentiroso: un historial fallido deja la
+        // tx abortada y el COMMIT es un rollback silencioso, mientras el cron
+        // contaría una desactivación que no quedó.
+        propagarError: true,
+      });
 
-  return true;
+      return true;
+    })
+    .catch((e) => {
+      // La carrera perdida es una omisión esperada, no un fallo del cron.
+      if (e instanceof MoraYaApagada) return false;
+      throw e;
+    });
 }
 
 /**
@@ -1284,6 +1406,12 @@ async function desactivarMoraDelCron(
  *
  * NO toca `creditos.statusCredit`: el caller lo deja en EN_CONVENIO justo
  * después, y bajarlo a ACTIVO acá lo des-castigaría.
+ *
+ * 🔒 ORDEN DE CANDADOS (ver la regla al inicio del archivo): esta función solo
+ * toca `moras_credito`, pero corre DENTRO de la transacción del convenio, que
+ * ya tomó la fila de `creditos` con su UPDATE a EN_CONVENIO. O sea que el orden
+ * compuesto es `creditos` → `moras_credito`, el canónico del módulo. Mover el
+ * UPDATE del crédito para después de esta llamada lo invertiría.
  *
  * El UPDATE es CONDICIONAL sobre `activa=true` y usa `.returning()`, igual que
  * `desactivarMoraSiCreditoAlDia`: dos solicitudes de convenio del mismo crédito
@@ -1711,6 +1839,44 @@ export async function procesarMoras() {
         // error revierte todo, que es lo correcto.)
         let recalculoOk = false;
         await db.transaction(async (txm) => {
+          // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después
+          // (ver la regla al inicio del archivo). Esta rama tomaba la mora
+          // primero mientras el convenio tomaba el crédito primero: órdenes
+          // opuestos sobre las mismas dos filas = ciclo de deadlock. El 40P01
+          // no está manejado, así que se llevaba puesta la corrida entera.
+          //
+          // Subir a MOROSO tampoco puede pisar un estado excluido: es el mismo
+          // cuidado que ya tienen los UPDATE que BAJAN a ACTIVO (condicionados a
+          // MOROSO para no des-castigar), en el sentido contrario. Sin la
+          // condición, un crédito que pasó a EN_CONVENIO/INCOBRABLE a media
+          // corrida volvía a MOROSO por la foto vieja del paso 1.
+          //
+          // 🔒 Y el `.returning()` no es decorativo: es la ÚNICA señal de que
+          // el crédito sigue siendo elegible. El candado de la mora de acá
+          // abajo solo detecta a quien toca `moras_credito`; una transición de
+          // estado que no la toca —`marcarCreditoComoCaido`, por ejemplo— pasa
+          // por debajo de él, y sin mirar las filas afectadas la transacción
+          // confirmaba una mora recalculada y un evento RECALCULO sobre un
+          // crédito CAIDO. El paso 6 tampoco lo recoge después: su mapa
+          // `moraPorCredito` viene de la foto vieja y todavía lo contiene.
+          //
+          // Cero filas ⇒ se aborta la transacción. Acá todavía no hay nada
+          // escrito, pero se tira igual (y no `return`) para no tener dos
+          // formas de salir de esta transacción: el `catch` de abajo cuenta el
+          // omitido en un solo lugar.
+          const sigueElegible = await txm
+            .update(creditos)
+            .set({ statusCredit: "MOROSO" })
+            .where(
+              and(
+                eq(creditos.credito_id, creditoId),
+                notInArray(creditos.statusCredit, STATUS_EXCLUIDOS_MORA_SQL),
+              ),
+            )
+            .returning({ credito_id: creditos.credito_id });
+
+          if (sigueElegible.length === 0) throw new CreditoYaNoElegible();
+
           const recalculadasFilas = await txm
             .update(moras_credito)
             .set({
@@ -1726,39 +1892,10 @@ export async function procesarMoras() {
             )
             .returning({ mora_id: moras_credito.mora_id });
 
-          if (recalculadasFilas.length === 0) return;
-
-          // Subir a MOROSO tampoco puede pisar un estado excluido: es el mismo
-          // cuidado que ya tienen los UPDATE que BAJAN a ACTIVO (condicionados a
-          // MOROSO para no des-castigar), en el sentido contrario. Sin la
-          // condición, un crédito que pasó a EN_CONVENIO/INCOBRABLE a media
-          // corrida volvía a MOROSO por la foto vieja del paso 1.
-          //
-          // 🔒 Y el `.returning()` no es decorativo: es la ÚNICA señal de que
-          // el crédito sigue siendo elegible. El candado de la mora de acá
-          // arriba solo detecta a quien toca `moras_credito`; una transición de
-          // estado que no la toca —`marcarCreditoComoCaido`, por ejemplo— pasa
-          // por debajo de él, y sin mirar las filas afectadas la transacción
-          // confirmaba una mora recalculada y un evento RECALCULO sobre un
-          // crédito CAIDO. El paso 6 tampoco lo recoge después: su mapa
-          // `moraPorCredito` viene de la foto vieja y todavía lo contiene.
-          //
-          // Cero filas ⇒ se aborta la transacción (no alcanza con `return`:
-          // el monto de la mora YA se actualizó unas líneas más arriba y
-          // commitear lo dejaría cobrado). El crédito cae en los omitidos, el
-          // mismo balde que los otros candados de este archivo.
-          const sigueElegible = await txm
-            .update(creditos)
-            .set({ statusCredit: "MOROSO" })
-            .where(
-              and(
-                eq(creditos.credito_id, creditoId),
-                notInArray(creditos.statusCredit, STATUS_EXCLUIDOS_MORA_SQL),
-              ),
-            )
-            .returning({ credito_id: creditos.credito_id });
-
-          if (sigueElegible.length === 0) throw new CreditoYaNoElegible();
+          // 🔒 Cero filas = otra ruta ya apagó la mora. Se ABORTA (no `return`):
+          // el UPDATE de `creditos` de arriba ya corrió y commitearlo dejaría
+          // MOROSO a un crédito al que el convenio le acaba de perdonar la mora.
+          if (recalculadasFilas.length === 0) throw new MoraYaApagada();
 
           await registrarHistorialMora({
             credito_id: creditoId,
@@ -1780,11 +1917,12 @@ export async function procesarMoras() {
 
           recalculoOk = true;
         }).catch((e) => {
-          // El aborto por crédito no elegible es una omisión esperada, no un
-          // fallo del cron: la transacción ya revirtió TODO (monto de la mora
-          // incluido) y la corrida sigue con el resto de los créditos.
-          // Cualquier otro error sí se propaga, como antes.
-          if (!(e instanceof CreditoYaNoElegible)) throw e;
+          // Los dos abortos —crédito no elegible y mora ya apagada por otra
+          // ruta— son omisiones esperadas, no fallos del cron: la transacción
+          // ya revirtió TODO (monto de la mora y status incluidos) y la corrida
+          // sigue con el resto de los créditos. Cualquier otro error sí se
+          // propaga, como antes.
+          if (!(e instanceof CreditoYaNoElegible) && !(e instanceof MoraYaApagada)) throw e;
         });
 
         // El candado con cero filas sigue cayendo en el mismo balde de omitidos
@@ -1908,6 +2046,19 @@ export async function condonarMora({
     // 2-5. Toda la operación en una sola transacción con row lock para evitar
     //      condonaciones duplicadas si dos requests llegan en paralelo.
     const result = await db.transaction(async (tx) => {
+      // 🔒 ORDEN DE CANDADOS: `creditos` PRIMERO, `moras_credito` después (ver
+      // la regla al inicio del archivo). El UPDATE del crédito no puede ir
+      // primero —si no hay mora activa esta ruta se va sin tocar el status—,
+      // así que el candado se toma con un `SELECT … FOR UPDATE`. Con el orden
+      // viejo (mora FOR UPDATE y después el UPDATE del crédito) esta ruta y la
+      // del convenio se pedían los candados en cruz: ciclo de deadlock.
+      await tx
+        .select({ credito_id: creditos.credito_id })
+        .from(creditos)
+        .where(eq(creditos.credito_id, credito_id))
+        .limit(1)
+        .for("update");
+
       const [moraActual] = await tx
         .select({
           id: moras_credito.mora_id,

@@ -12,16 +12,21 @@
  */
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 
-type Call = { tabla: any; set?: any; values?: any; where?: any };
+type Call = { tabla: any; kind: "insert" | "update"; set?: any; values?: any; where?: any };
 
 const estado: {
   resultados: any[];
-  inserts: Call[];
-  updates: Call[];
+  /**
+   * Writes que sobrevivieron al COMMIT. Desde que `desactivarMoraDelCron` es
+   * transaccional (para poder tomar `creditos` antes que `moras_credito` sin
+   * dejar el status cambiado a medias), mirar la mera secuencia de llamadas
+   * mentiría: el UPDATE de `creditos` SÍ se ejecuta y después se revierte.
+   */
+  confirmados: Call[];
   /** Filas que devuelve cada `.returning()` de un update, en orden. */
   updateReturns: any[][];
   emitidos: any[];
-} = { resultados: [], inserts: [], updates: [], updateReturns: [], emitidos: [] };
+} = { resultados: [], confirmados: [], updateReturns: [], emitidos: [] };
 
 /**
  * ¿La condición `where` de drizzle menciona esta columna? Recorre los
@@ -49,35 +54,63 @@ const selectChain = () => {
   return b;
 };
 
-const dbFalsa = {
+/** Writes pendientes de una transacción abierta. */
+type Scope = { writes: Call[] };
+
+/**
+ * Cliente falso que MODELA EL COMMIT: los writes de una transacción se guardan
+ * aparte y solo se vuelcan al scope padre si el callback termina bien. Si tira
+ * (el aborto por "otra ruta ya apagó la mora"), se descartan igual que un
+ * ROLLBACK.
+ */
+const clienteFalso = (scope: Scope): any => ({
   select: () => selectChain(),
   insert: (tabla: any) => ({
     values: (values: any) => {
-      estado.inserts.push({ tabla, values });
+      const ejecutar = () => {
+        scope.writes.push({ tabla, kind: "insert", values });
+        return Promise.resolve([{ mora_id: 999, porcentaje_mora: "1.12" }]);
+      };
       const b: any = {
-        returning: () => Promise.resolve([{ mora_id: 999, porcentaje_mora: "1.12" }]),
-        then: (res: any, rej: any) => Promise.resolve([]).then(res, rej),
+        returning: () => ejecutar(),
+        then: (res: any, rej: any) => ejecutar().then(() => []).then(res, rej),
       };
       return b;
     },
   }),
   update: (tabla: any) => ({
     set: (set: any) => {
-      const call: Call = { tabla, set };
-      estado.updates.push(call);
+      const call: Call = { tabla, kind: "update", set };
       const b: any = {
         where: (w: any) => {
           call.where = w;
           return b;
         },
         // Por defecto el update SÍ afecta la fila (nadie compitió).
-        returning: () => Promise.resolve(estado.updateReturns.shift() ?? [{ mora_id: 77 }]),
-        then: (res: any, rej: any) => Promise.resolve({ rowCount: 1 }).then(res, rej),
+        returning: () => {
+          scope.writes.push(call);
+          return Promise.resolve(estado.updateReturns.shift() ?? [{ mora_id: 77 }]);
+        },
+        then: (res: any, rej: any) => {
+          scope.writes.push(call);
+          return Promise.resolve({ rowCount: 1 }).then(res, rej);
+        },
       };
       return b;
     },
   }),
-};
+  transaction: async (cb: any) => {
+    const hijo: Scope = { writes: [] };
+    // Si el callback tira, el error sale de acá y los writes del hijo se
+    // pierden con él (ROLLBACK); el padre queda intacto.
+    const resultado = await cb(clienteFalso(hijo));
+    scope.writes.push(...hijo.writes);
+    return resultado;
+  },
+});
+
+const scopeRaiz: Scope = { writes: estado.confirmados };
+const dbFalsa = clienteFalso(scopeRaiz);
 
 const clientFalso = {
   connect: async () => ({
@@ -128,8 +161,8 @@ const SIN_CUOTAS: any[] = [];
 
 const correr = async (cuotas: any[], gano: boolean) => {
   estado.resultados = [cuotas, [MORA_ACTIVA]];
-  estado.inserts = [];
-  estado.updates = [];
+  // Se vacía EN EL LUGAR: el cliente falso raíz cerró sobre este array.
+  estado.confirmados.length = 0;
   estado.emitidos = [];
   // `gano = false` simula que otra ruta apagó la fila a media corrida: el
   // UPDATE condicional no afecta ninguna fila.
@@ -137,16 +170,18 @@ const correr = async (cuotas: any[], gano: boolean) => {
   return (await procesarMoras()) as any;
 };
 
-const apagadosDeMora = () => estado.updates.filter((c) => c.tabla === moras_credito);
-const updatesDeCredito = () => estado.updates.filter((c) => c.tabla === creditos);
-const historial = () => estado.inserts.filter((c) => c.tabla === moras_historial);
+const apagadosDeMora = () =>
+  estado.confirmados.filter((c) => c.kind === "update" && c.tabla === moras_credito);
+const updatesDeCredito = () =>
+  estado.confirmados.filter((c) => c.kind === "update" && c.tabla === creditos);
+const historial = () =>
+  estado.confirmados.filter((c) => c.kind === "insert" && c.tabla === moras_historial);
 const skippedCount = () =>
   estado.emitidos.find((e) => e.operation === "process" && e.outcome === "completed")?.skippedCount;
 
 beforeEach(() => {
   estado.resultados = [];
-  estado.inserts = [];
-  estado.updates = [];
+  estado.confirmados.length = 0;
   estado.updateReturns = [];
   estado.emitidos = [];
 });

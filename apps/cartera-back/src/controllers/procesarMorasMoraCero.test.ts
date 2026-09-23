@@ -37,7 +37,12 @@ const thenable = (obtener: () => any) => {
   return builder;
 };
 
-const dbFalsa = {
+const dbFalsa: any = {
+  // Las escrituras del cron van en transacciones; acá se ejecutan inline sobre
+  // la misma fake. Alcanza: estas pruebas miran QUÉ writes salen en el camino
+  // feliz, no el commit/rollback (eso lo cubren
+  // procesarMorasCronEscriturasAtomicas.test.ts y ...CronCarrera.test.ts).
+  transaction: async (cb: any) => cb(dbFalsa),
   select: () => thenable(() => estado.resultados.shift() ?? []),
   insert: (tabla: any) => ({
     values: (values: any) => {

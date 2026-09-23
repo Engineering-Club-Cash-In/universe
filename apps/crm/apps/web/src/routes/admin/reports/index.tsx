@@ -75,6 +75,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
+import { getLeadSourceLabel } from "@/lib/crm-formatters";
+import { buildClosedCreditsWorksheet } from "@/lib/reports/closed-credits-export";
 import { getInvestmentProjectionMonthBounds } from "@/lib/reports/investment-projection-period";
 import {
 	applyOfficialMonthlyMora,
@@ -782,25 +784,7 @@ function RouteComponent() {
 				anio: closedCreditsMes.anio,
 				mes: closedCreditsMes.mes,
 			});
-			const headers = [
-				"Fecha de Cierre",
-				"Nombre del Cliente",
-				"SIFCO",
-				"Cuota de Seguro",
-				"Monto del Crédito",
-				"Cuota del Crédito",
-				"Día de Pago",
-			];
-			const data = res.rows.map((row) => [
-				row.fechaCierre ? formatFechaCorta(row.fechaCierre) : "",
-				row.clienteNombre || "",
-				row.numeroSifco || "",
-				Number(row.cuotaSeguro ?? 0),
-				Number(row.montoCredito ?? 0),
-				Number(row.cuotaCredito ?? 0),
-				row.diaPago ?? "",
-			]);
-			const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+			const worksheet = buildClosedCreditsWorksheet(res.rows, formatFechaCorta);
 			const workbook = XLSX.utils.book_new();
 			XLSX.utils.book_append_sheet(workbook, worksheet, "Créditos cerrados");
 			XLSX.writeFile(
@@ -942,6 +926,11 @@ function RouteComponent() {
 											Cuota del Crédito
 										</TableHead>
 										<TableHead className="text-right">Día de Pago</TableHead>
+										<TableHead>Marca del Vehículo</TableHead>
+										<TableHead>Modelo</TableHead>
+										<TableHead>Asesor</TableHead>
+										<TableHead>Canal de Venta</TableHead>
+										<TableHead>Fuente del Lead</TableHead>
 									</TableRow>
 								</TableHeader>
 								<TableBody>
@@ -970,6 +959,15 @@ function RouteComponent() {
 											<TableCell className="text-right">
 												{row.diaPago ?? "-"}
 											</TableCell>
+											<TableCell>{row.marca || "-"}</TableCell>
+											<TableCell>{row.modelo || "-"}</TableCell>
+											<TableCell>{row.asesor || "-"}</TableCell>
+											<TableCell>
+												{row.canalVenta === "sobre_vehiculo"
+													? "Sobre vehículo"
+													: "Autocompra"}
+											</TableCell>
+											<TableCell>{getLeadSourceLabel(row.fuenteLead)}</TableCell>
 										</TableRow>
 									))}
 								</TableBody>

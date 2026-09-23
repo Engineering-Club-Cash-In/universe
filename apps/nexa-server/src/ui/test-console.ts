@@ -35,7 +35,7 @@ export function renderTestConsole() {
     <section>
       <h2>Configuracion</h2>
       <label>Base URL <input id="baseUrl" value="http://localhost:7010" /></label>
-      <label>INTERNAL_API_KEY <input id="internalApiKey" type="password" value="" autocomplete="off" /></label>
+      <label>NEXA_ADMIN_API_KEY <input id="adminApiKey" type="password" value="" autocomplete="off" /></label>
       <label>Webhook flowId <input id="flowId" value="" autocomplete="off" /></label>
       <label>Webhook bearer <input id="webhookBearer" type="password" value="" autocomplete="off" /></label>
     </section>
@@ -115,7 +115,7 @@ export function renderTestConsole() {
     function config() {
       return {
         baseUrl: $('baseUrl').value.replace(/\\\/$/, ''),
-        internalApiKey: $('internalApiKey').value,
+        adminApiKey: $('adminApiKey').value,
         flowId: $('flowId').value,
         webhookBearer: $('webhookBearer').value,
       };
@@ -132,7 +132,7 @@ export function renderTestConsole() {
 
     async function loadTokens() {
       const result = await call('GET /admin/token-users', '/admin/token-users', {
-        headers: { Authorization: 'Bearer ' + config().internalApiKey },
+        headers: { Authorization: 'Bearer ' + config().adminApiKey },
       });
       const rows = result.json?.tokenUsers ?? [];
       $('tokenRows').innerHTML = rows.map((row) => '<tr data-token="' + row.token + '"><td>' + row.creditoId + '</td><td>' + row.identifier + '</td><td>' + row.token + '</td><td><button data-action="selectToken" data-token="' + row.token + '">Seleccionar</button></td></tr>').join('');
@@ -140,7 +140,7 @@ export function renderTestConsole() {
 
     async function loadTransactions() {
       const result = await call('GET /admin/transactions', '/admin/transactions', {
-        headers: { Authorization: 'Bearer ' + config().internalApiKey },
+        headers: { Authorization: 'Bearer ' + config().adminApiKey },
       });
       const rows = result.json?.transactions ?? [];
       $('transactionRows').innerHTML = rows.map((row) => '<tr><td>' + row.reference + '</td><td>' + row.amount + '</td><td>' + row.token + '</td><td>' + row.processingStatus + '</td><td>' + (row.carteraPaymentId ?? '') + '</td><td>' + (row.failureReason ?? '') + '</td></tr>').join('');
@@ -149,7 +149,7 @@ export function renderTestConsole() {
 
     async function loadMockCredits() {
       const result = await call('GET /admin/mock-credits', '/admin/mock-credits', {
-        headers: { Authorization: 'Bearer ' + config().internalApiKey },
+        headers: { Authorization: 'Bearer ' + config().adminApiKey },
       });
       const rows = result.json?.credits ?? [];
       $('creditRows').innerHTML = rows.map((row) => '<tr><td>' + row.creditoId + '</td><td>' + row.borrowerName + '</td><td>' + row.installmentAmount + '</td><td>' + row.initialBalance + '</td><td>' + row.totalPaid + '</td><td>' + row.currentBalance + '</td></tr>').join('');
@@ -175,17 +175,17 @@ export function renderTestConsole() {
         if (action === 'loadTransactions') await loadTransactions();
         if (action === 'mockCredit') await call('POST /admin/mock-credits', '/admin/mock-credits', {
           method: 'POST',
-          headers: { Authorization: 'Bearer ' + config().internalApiKey, 'Content-Type': 'application/json' },
+          headers: { Authorization: 'Bearer ' + config().adminApiKey, 'Content-Type': 'application/json' },
           body: JSON.stringify({ creditoId: Number($('mockCreditoId').value), borrowerName: $('borrowerName').value, initialBalance: Number($('initialBalance').value), installmentAmount: Number($('installmentAmount').value) }),
         });
         if (action === 'selectToken') selectToken(event.target.dataset.token);
         if (action === 'health') await call('GET /health', '/health');
         if (action === 'bootstrap') await call('POST /admin/tokens/bootstrap', '/admin/tokens/bootstrap', {
-          method: 'POST', headers: { Authorization: 'Bearer ' + config().internalApiKey },
+          method: 'POST', headers: { Authorization: 'Bearer ' + config().adminApiKey },
         });
         if (action === 'tokenUser') await call('POST /admin/token-users', '/admin/token-users', {
           method: 'POST',
-          headers: { Authorization: 'Bearer ' + config().internalApiKey, 'Content-Type': 'application/json' },
+          headers: { Authorization: 'Bearer ' + config().adminApiKey, 'Content-Type': 'application/json' },
           body: JSON.stringify({ creditoId: Number($('creditoId').value), description: $('description').value, nationalId: $('nationalId').value }),
         });
         if (action === 'tokenUser') await loadTokens();
@@ -201,7 +201,7 @@ export function renderTestConsole() {
           $('reference').value = nextReference();
         }
         if (action === 'poll') await call('POST /admin/poll/:date', '/admin/poll/' + $('pollDate').value, {
-          method: 'POST', headers: { Authorization: 'Bearer ' + config().internalApiKey },
+          method: 'POST', headers: { Authorization: 'Bearer ' + config().adminApiKey },
         });
       } catch (error) {
         output.textContent = String(error?.stack ?? error);

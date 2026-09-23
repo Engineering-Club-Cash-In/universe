@@ -71,25 +71,31 @@ type Deps = {
   marcarDevolucionCompletadaSiCorresponde: typeof marcarDevolucionCompletadaSiCorresponde;
   obtenerMontoAportadoEspejo?: (
     inversionista_id: number,
-    creditoIds: number[]
+    creditoIds: number[],
+    ejecutor?: any
   ) => Promise<Map<number, number>>;
   tienePendientesLiquidacion?: (
     inversionista_id: number,
-    creditoIds: number[]
+    creditoIds: number[],
+    ejecutor?: any
   ) => Promise<Set<number>>;
   obtenerEstadosDevolucion?: (
-    creditoIds: number[]
+    creditoIds: number[],
+    ejecutor?: any
   ) => Promise<Map<number, string | null>>;
 };
 
-// Por defecto usa `db` real; inyectable para los tests del guard.
+// Por defecto usa `db` real; inyectable para los tests del guard y
+// permite pasar `tx` para correr dentro de la transacción de exitInvestor.
 const obtenerMontoAportadoEspejoReal = async (
   inversionista_id: number,
-  creditoIds: number[]
+  creditoIds: number[],
+  ejecutor?: any
 ): Promise<Map<number, number>> => {
   if (creditoIds.length === 0) return new Map();
 
-  const filas = await db
+  const cliente = ejecutor && typeof ejecutor.select === "function" ? ejecutor : db;
+  const filas = await cliente
     .select({
       credito_id: creditos_inversionistas_espejo.credito_id,
       monto_aportado: creditos_inversionistas_espejo.monto_aportado,
@@ -108,11 +114,13 @@ const obtenerMontoAportadoEspejoReal = async (
 };
 
 const obtenerEstadosDevolucionReal = async (
-  creditoIds: number[]
+  creditoIds: number[],
+  ejecutor?: any
 ): Promise<Map<number, string | null>> => {
   if (creditoIds.length === 0) return new Map();
 
-  const filas = await db
+  const cliente = ejecutor && typeof ejecutor.select === "function" ? ejecutor : db;
+  const filas = await cliente
     .select({
       credito_id: creditos.credito_id,
       estado_devolucion: creditos.estado_devolucion,
@@ -134,12 +142,14 @@ const obtenerEstadosDevolucionReal = async (
 // salida en esa ventana dejaría las filas huérfanas al desaparecer el inversionista.
 const tienePendientesLiquidacionReal = async (
   inversionista_id: number,
-  creditoIds: number[]
+  creditoIds: number[],
+  ejecutor?: any
 ): Promise<Set<number>> => {
   if (creditoIds.length === 0) return new Set();
 
+  const cliente = ejecutor && typeof ejecutor.select === "function" ? ejecutor : db;
   const [abonosAbiertos, pagosNoLiquidados] = await Promise.all([
-    db
+    cliente
       .select({ credito_id: abonos_capital.credito_id })
       .from(abonos_capital)
       .where(
@@ -149,7 +159,7 @@ const tienePendientesLiquidacionReal = async (
           eq(abonos_capital.liquidado, false)
         )
       ),
-    db
+    cliente
       .select({ credito_id: pagos_credito_inversionistas_espejo.credito_id })
       .from(pagos_credito_inversionistas_espejo)
       .where(
@@ -185,71 +195,96 @@ export const exitInvestorHandler = async (ctx: any, deps?: Deps) => {
 
   const { inversionista_id, creditos: creditoIds, motivo } = ctx?.body ?? {};
 
-  if (
-    typeof inversionista_id === "number" &&
-    Array.isArray(creditoIds) &&
-    creditoIds.length > 0
-  ) {
-    const estadosDevolucion = await obtenerEstadosDevolucion(creditoIds);
-    const creditosVerificados = creditoIds.filter(
-      (id: number) => estadosDevolucion.get(id) === "VERIFICADO"
-    );
-    const tieneCreditoVerificado = creditosVerificados.length > 0;
+  // Validador del guard reutilizable tanto para el pre-check rápido como para
+  // la revalidación bajo el lock FOR NO KEY UPDATE dentro de la transacción de exitInvestor.
+  const verificarGuard = async (ejecutor?: any): Promise<{
+    ok: boolean;
+    message?: string;
+    creditos_invalidos?: number[];
+  }> => {
+    if (
+      typeof inversionista_id === "number" &&
+      Array.isArray(creditoIds) &&
+      creditoIds.length > 0
+    ) {
+      const estadosDevolucion = await obtenerEstadosDevolucion(creditoIds, ejecutor);
+      const creditosVerificados = creditoIds.filter(
+        (id: number) => estadosDevolucion.get(id) === "VERIFICADO"
+      );
+      const tieneCreditoVerificado = creditosVerificados.length > 0;
 
-    if (motivo === "devolucion_verificado" || tieneCreditoVerificado) {
-      // Cuando motivo === "devolucion_verificado", el llamador declara explícitamente que el lote
-      // entero es de devolución, por lo que se valida todo el lote.
-      // Cuando el guard se activa automáticamente (sin motivo), solo se valida que los créditos
-      // en estado VERIFICADO tengan su devolución completa (saldo en 0 y sin pendientes),
-      // permitiendo que los créditos ordinarios transfieran legítimamente su capital a CUBE.
-      const creditosAValidar =
-        motivo === "devolucion_verificado" ? creditoIds : creditosVerificados;
+      if (motivo === "devolucion_verificado" || tieneCreditoVerificado) {
+        // Cuando motivo === "devolucion_verificado", el llamador declara explícitamente que el lote
+        // entero es de devolución, por lo que se valida todo el lote.
+        // Cuando el guard se activa automáticamente (sin motivo), solo se valida que los créditos
+        // en estado VERIFICADO tengan su devolución completa (saldo en 0 y sin pendientes),
+        // permitiendo que los créditos ordinarios transfieran legítimamente su capital a CUBE.
+        const creditosAValidar =
+          motivo === "devolucion_verificado" ? creditoIds : creditosVerificados;
 
-      const [montoPorCredito, creditosConPendientes] = await Promise.all([
-        obtenerMontoAportadoEspejo(inversionista_id, creditosAValidar),
-        tienePendientesLiquidacion(inversionista_id, creditosAValidar),
-      ]);
+        const [montoPorCredito, creditosConPendientes] = await Promise.all([
+          obtenerMontoAportadoEspejo(inversionista_id, creditosAValidar, ejecutor),
+          tienePendientesLiquidacion(inversionista_id, creditosAValidar, ejecutor),
+        ]);
 
-      const creditoIdsInvalidos = creditosAValidar.filter((id: number) => {
-        if (creditosConPendientes.has(id)) return true;
-        const saldo = montoPorCredito.get(id);
-        // P1 guard: un crédito en devolución solo es válido si tiene fila en el espejo
-        // Y su saldo es exactamente 0. Si no tiene fila espejo (saldo === undefined)
-        // o su saldo es distinto de 0, queda en revisión manual (igual que investor.ts:5653).
-        if (saldo !== 0) return true;
-        return false;
-      });
+        const creditoIdsInvalidos = creditosAValidar.filter((id: number) => {
+          if (creditosConPendientes.has(id)) return true;
+          const saldo = montoPorCredito.get(id);
+          // P1 guard: un crédito en devolución solo es válido si tiene fila en el espejo
+          // Y su saldo es exactamente 0. Si no tiene fila espejo (saldo === undefined)
+          // o su saldo es distinto de 0, queda en revisión manual (igual que investor.ts:5653).
+          if (saldo !== 0) return true;
+          return false;
+        });
 
-      // Todo o nada: nunca se llama a exitInvestor con un subconjunto. Ver
-      // comentario de arriba sobre por qué filtrar dejaba al inversionista
-      // inactivo con posiciones pendientes a su nombre.
-      if (creditoIdsInvalidos.length > 0) {
-        console.warn(
-          `  ⚠️  [POST /investor/exit guard devolución] inversionista ${inversionista_id}: ` +
-            `lote rechazado, ${creditoIdsInvalidos.length}/${creditoIds.length} crédito(s) inválidos ` +
-            `(saldo != 0 o abonos/pagos sin liquidar) — ` +
-            creditoIdsInvalidos
-              .map((id) => {
-                const saldo = montoPorCredito.get(id);
-                const saldoDesc = saldo === undefined ? "SIN_FILA_ESPEJO" : `monto_aportado=${saldo}`;
-                const pendDesc = creditosConPendientes.has(id) ? "TIENE_PENDIENTES_LIQUIDACION" : null;
-                const detalle = [saldoDesc, pendDesc].filter(Boolean).join(" ");
-                return `credito_id=${id} (${detalle})`;
-              })
-              .join(", ")
-        );
-        if (ctx?.set) ctx.set.status = 400;
-        return {
-          success: false,
-          message:
-            "Lote rechazado: al menos un crédito en devolución tiene capital pendiente o abonos/pagos pendientes de liquidación. No se movió nada.",
-          creditos_invalidos: creditoIdsInvalidos,
-        };
+        // Todo o nada: nunca se llama a exitInvestor con un subconjunto. Ver
+        // comentario de arriba sobre por qué filtrar dejaba al inversionista
+        // inactivo con posiciones pendientes a su nombre.
+        if (creditoIdsInvalidos.length > 0) {
+          console.warn(
+            `  ⚠️  [POST /investor/exit guard devolución] inversionista ${inversionista_id}: ` +
+              `lote rechazado, ${creditoIdsInvalidos.length}/${creditoIds.length} crédito(s) inválidos ` +
+              `(saldo != 0 o abonos/pagos sin liquidar) — ` +
+              creditoIdsInvalidos
+                .map((id) => {
+                  const saldo = montoPorCredito.get(id);
+                  const saldoDesc = saldo === undefined ? "SIN_FILA_ESPEJO" : `monto_aportado=${saldo}`;
+                  const pendDesc = creditosConPendientes.has(id) ? "TIENE_PENDIENTES_LIQUIDACION" : null;
+                  const detalle = [saldoDesc, pendDesc].filter(Boolean).join(" ");
+                  return `credito_id=${id} (${detalle})`;
+                })
+                .join(", ")
+          );
+          return {
+            ok: false,
+            message:
+              "Lote rechazado: al menos un crédito en devolución tiene capital pendiente o abonos/pagos pendientes de liquidación. No se movió nada.",
+            creditos_invalidos: creditoIdsInvalidos,
+          };
+        }
       }
     }
+    return { ok: true };
+  };
+
+  // Pre-check antes de abrir la transacción de exitInvestor:
+  const preCheck = await verificarGuard();
+  if (!preCheck.ok) {
+    if (ctx?.set) ctx.set.status = 400;
+    return {
+      success: false,
+      message: preCheck.message,
+      creditos_invalidos: preCheck.creditos_invalidos,
+    };
   }
 
-  const resultado: any = await resolved.exitInvestor(ctx);
+  // Se ejecuta exitInvestor pasando `revalidarGuard`.
+  // exitInvestor adquiere el lock FOR NO KEY UPDATE ordenado por credito_id
+  // sobre TODOS los créditos del lote DENTRO de su transacción y revalida este
+  // mismo guard bajo el lock (P1: serialización con payments.ts sin deadlock).
+  const resultado: any = await resolved.exitInvestor(ctx, {
+    revalidarGuard: async (tx: any) => verificarGuard(tx),
+  });
 
   if (resultado?.success) {
     // En su propio try/catch, igual que el barrido de liquidateByInvestorId:

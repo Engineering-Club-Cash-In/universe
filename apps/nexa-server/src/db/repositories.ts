@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, eq, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
-import { receivedTokenTransactionSchema, type ReceivedTokenTransaction } from "../nexa/schemas";
+import { receivedTokenTransactionSchema, tokenTransactionSchema, type TokenTransaction, type ReceivedTokenTransaction } from "../nexa/schemas";
 import type { ApplicationClaim } from "../payments/application-worker";
 import type { MockCreditLedger } from "../payments/mock-ledger";
 import type { ReviewClaim, ReviewWorkerRepository } from "../payments/review-worker";
@@ -150,6 +150,46 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       processingStatus: stored.processingStatus,
       created: stored.created,
     };
+  }
+
+  async listMissingDateReceipts() {
+    // Bounded live recovery; older/unmatched receipts stay visible for reconciliation.
+    return this.db.select({ reference: nexaPaymentTransactions.reference, createdAt: nexaPaymentTransactions.createdAt })
+      .from(nexaPaymentTransactions).where(and(
+        eq(nexaPaymentTransactions.processingStatus, "MANUAL_REVIEW"),
+        eq(nexaPaymentTransactions.failureReason, "missing_token_date"),
+        eq(nexaPaymentTransactions.tokenDate, ""),
+        sql`${nexaPaymentTransactions.createdAt} >= NOW() - INTERVAL '48 hours'`,
+      )).orderBy(nexaPaymentTransactions.id).limit(100);
+  }
+
+  // Incoming statement transactionId is blank; the webhook ID belongs to review.
+  // Enrich existing receipts only. Never ingest unrelated statement funds here.
+  async enrichIncomingStatement(input: TokenTransaction) {
+    const incoming = tokenTransactionSchema.parse(input);
+    if (incoming.transactionId.trim() !== "" || incoming.amount <= 0 || incoming.wasReturn !== 0 ||
+        incoming.token !== incoming.tokenPrefix + incoming.tokenIdentifier) return false;
+    const reference = String(incoming.reference);
+    return this.db.transaction(async (tx) => {
+      const [stored] = await tx.select().from(nexaPaymentTransactions)
+        .where(eq(nexaPaymentTransactions.reference, reference)).for("update");
+      if (!stored || stored.tokenDate !== "" || stored.processingStatus !== "MANUAL_REVIEW" ||
+          stored.failureReason !== "missing_token_date" || !/^\d+$/.test(stored.transactionId)) return false;
+      const matches = stored.amount === incoming.amount.toFixed(2) && stored.currency === incoming.currency &&
+        stored.tokenIdentifier === incoming.tokenIdentifier && stored.tokenPrefix === incoming.tokenPrefix &&
+        stored.wasReturn === incoming.wasReturn;
+      if (!matches) return false;
+      const payload = {
+        reference, amount: incoming.amount, currency: incoming.currency, tokenDate: incoming.tokenDate,
+        tokenIdentifier: incoming.tokenIdentifier, tokenPrefix: incoming.tokenPrefix,
+        wasReturn: incoming.wasReturn, transactionId: stored.transactionId,
+      };
+      await tx.update(nexaPaymentTransactions).set({
+        tokenDate: incoming.tokenDate, processingStatus: "RECEIVED", failureReason: null,
+        rawPayload: payload, payloadFingerprint: fingerprint(payload), updatedAt: new Date(),
+      }).where(eq(nexaPaymentTransactions.id, stored.id));
+      return true;
+    });
   }
 
   async markApplied(id: number, paymentId: number) {

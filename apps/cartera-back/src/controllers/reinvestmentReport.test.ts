@@ -819,6 +819,19 @@ test("peso de flujo mixto usa capital más interés neto con IVA o ISR", async (
   expect(query).toContain("-(pe.abono_interes::numeric * 0.07)");
 });
 
+test("la proyección filtra pagado después de elegir la versión autoritativa de la cuota", async () => {
+  const source = await Bun.file(new URL("./reportes.ts", import.meta.url)).text();
+  const query = source.slice(
+    source.indexOf("cuotas_autoritativas AS"),
+    source.indexOf("SELECT\n      CASE", source.indexOf("cuotas_autoritativas AS")),
+  );
+  const authoritativeRow = query.indexOf("ORDER BY c.credito_id, c.numero_cuota, c.cuota_id DESC");
+  const unpaidFilter = query.lastIndexOf("pagado = false");
+
+  expect(authoritativeRow).toBeGreaterThan(-1);
+  expect(unpaidFilter).toBeGreaterThan(authoritativeRow);
+});
+
 test("consulta de interés no deja una coma antes de FROM", async () => {
   const source = await Bun.file(new URL("./reportes.ts", import.meta.url)).text();
   const query = source.slice(

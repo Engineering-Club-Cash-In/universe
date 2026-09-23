@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import Big from "big.js";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { Pool } from "pg";
 import {
 	buildInteresIvaInversionistaSql,
@@ -102,3 +103,127 @@ integrationTest("ejecuta la CTE real contra PostgreSQL desechable", async () => 
 		await pool.end();
 	}
 });
+
+integrationTest(
+	"separa las cuotas del período de las cuotas anteriores pendientes",
+	async () => {
+		if (!testDatabaseUrl) throw new Error("TEST_DATABASE_URL es requerida");
+		process.env.SUPABASE_DB_URL = testDatabaseUrl;
+		const { buildMontoACobrarPeriodoQuery } = await import("./reportes");
+		const pool = new Pool(parseTestDatabaseUrl(testDatabaseUrl));
+		try {
+			await pool.query("DROP SCHEMA IF EXISTS cartera CASCADE");
+			await pool.query("CREATE SCHEMA cartera");
+			await pool.query(`
+			CREATE TABLE cartera.usuarios (usuario_id integer PRIMARY KEY);
+			CREATE TABLE cartera.asesores (asesor_id integer PRIMARY KEY);
+			CREATE TABLE cartera.creditos (
+				credito_id integer PRIMARY KEY, "statusCredit" text, capital numeric,
+				porcentaje_interes numeric, cuota numeric, seguro_10_cuotas numeric,
+				gps numeric, membresias_pago numeric, usuario_id integer, asesor_id integer
+			);
+			CREATE TABLE cartera.cuotas_credito (
+				cuota_id integer PRIMARY KEY, credito_id integer, numero_cuota integer,
+				fecha_vencimiento date
+			);
+			CREATE TABLE cartera.pagos_credito (
+				pago_id integer PRIMARY KEY, credito_id integer, cuota_id integer,
+				fecha_vencimiento date, capital_restante numeric, abono_capital numeric,
+				interes_restante numeric, abono_interes numeric, iva_12_restante numeric,
+				abono_iva_12 numeric, seguro_restante numeric, abono_seguro numeric,
+				gps_restante numeric, abono_gps numeric, membresias numeric,
+				membresias_pago numeric, monto_boleta numeric, "paymentFalse" boolean,
+				pagado boolean, validation_status text, fecha_boleta date, fecha_pago date,
+				total_restante numeric
+			);
+			CREATE TABLE cartera.moras_historial (credito_id integer, monto_nuevo numeric, fecha timestamptz);
+			CREATE TABLE cartera.inversionistas (inversionista_id integer PRIMARY KEY, permite_distribucion boolean NOT NULL);
+			CREATE TABLE cartera.creditos_inversionistas (credito_id integer, inversionista_id integer, monto_aportado numeric, porcentaje_participacion_inversionista numeric);
+			CREATE TABLE cartera.creditos_inversionistas_espejo (credito_id integer, inversionista_id integer, modalidad_facturacion_spread_id integer);
+			CREATE TABLE cartera.modalidad_facturacion_spread (id integer PRIMARY KEY, spread numeric);
+			CREATE TABLE cartera.pagos_credito_inversionistas (inversionista_id integer, fecha_pago timestamptz, abono_interes numeric, abono_iva_12 numeric);
+			`);
+			await pool.query(`
+			INSERT INTO cartera.usuarios VALUES (1);
+			INSERT INTO cartera.asesores VALUES (1);
+			INSERT INTO cartera.creditos VALUES
+				(1, 'ACTIVO', 1000, 1, 100, 3, 4, 5, 1, 1),
+				(2, 'MOROSO', 900, 1, 100, 3, 4, 5, 1, 1),
+				(3, 'MOROSO', 500, 1, 100, 3, 4, 5, 1, 1),
+				(4, 'MOROSO', 600, 1, 100, 3, 4, 5, 1, 1),
+				(5, 'MOROSO', 600, 1, 100, 3, 4, 5, 1, 1),
+				(6, 'MOROSO', 100, 1, 100, 3, 4, 5, 1, 1);
+			INSERT INTO cartera.cuotas_credito VALUES
+				(11, 1, 1, '2026-09-15'),
+				(21, 2, 1, '2026-07-15'),
+				(22, 2, 2, '2026-08-15'),
+				(24, 2, 3, '2026-09-05'),
+				(23, 2, 4, '2026-09-15'),
+				(31, 3, 1, '2026-06-15'),
+				(40, 4, 1, '2026-05-10'),
+				(41, 4, 1, '2026-05-15'),
+				(51, 5, 1, '2026-04-15'),
+				(60, 6, 1, '2026-07-10'),
+				(61, 6, 1, '2026-07-15');
+			INSERT INTO cartera.pagos_credito VALUES
+				(11, 1, 11, '2026-09-15', 76.80, 0, 10, 0, 1.20, 0, 3, 0, 4, 0, 5, 0, 0, false, false, 'pending', NULL, NULL, 1000),
+				(21, 2, 21, '2026-07-15', 50, 0, 7, 0, 0.84, 0, 2, 0, 1, 0, 3, 0, 0, false, false, 'pending', NULL, NULL, 950),
+				(22, 2, 22, '2026-08-15', 40, 0, 5, 0, 0.60, 0, 1, 0, 0.50, 0, 2, 0, 0, false, false, 'pending', NULL, NULL, 900),
+				(24, 2, 24, '2026-09-05', 75.92, 0, 9, 0, 1.08, 0, 3, 0, 4, 0, 5, 0, 0, false, false, 'pending', NULL, NULL, 900),
+				(23, 2, 23, '2026-09-15', 75.92, 0, 9, 0, 1.08, 0, 3, 0, 4, 0, 5, 0, 0, false, false, 'pending', NULL, NULL, 900),
+				(31, 3, 31, '2026-06-15', 30, 0, 4, 0, 0.48, 0, 1, 0, 1, 0, 1, 0, 0, false, false, 'pending', NULL, NULL, 500),
+				(51, 5, 51, '2026-04-15', 0, 81.28, 0, 6, 0, 0.72, 0, 3, 0, 4, 0, 5, 100, false, true, 'validated', '2026-10-15', '2026-10-15', 500),
+				(61, 6, 61, '2026-07-15', 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, false, true, 'validated', '2026-08-20', '2026-08-20', 0);
+
+			`);
+
+			const query = new PgDialect().sqlToQuery(
+				buildMontoACobrarPeriodoQuery({
+					periodo: "mes",
+					fechaInicio: "2026-09-01",
+					fechaFin: "2026-09-30",
+				}),
+			);
+			const { rows } = await pool.query(query.sql, query.params);
+			expect(rows).toHaveLength(1);
+			expect(rows[0]).toMatchObject({
+				cuotas_count: 3,
+				mora_count: 5,
+				total_credits: 5,
+				acum_total_cuota: "282.56",
+				acum_total_interes: "28.00",
+				acum_total_iva: "3.36",
+				acum_total_seguro: "10",
+				acum_total_gps: "10.50",
+				acum_total_membresias: "16",
+			});
+
+			const partialFirstPeriod = new PgDialect().sqlToQuery(
+				buildMontoACobrarPeriodoQuery({
+					periodo: "mes",
+					fechaInicio: "2026-09-10",
+					fechaFin: "2026-09-30",
+				}),
+			);
+			const partialRows = await pool.query(
+				partialFirstPeriod.sql,
+				partialFirstPeriod.params,
+			);
+			expect(partialRows.rows).toHaveLength(1);
+			expect(partialRows.rows[0]).toMatchObject({
+				cuotas_count: 2,
+				mora_count: 6,
+				acum_total_cuota: "358.48",
+				acum_total_interes: "37.00",
+				acum_total_iva: "4.44",
+				acum_total_seguro: "13",
+				acum_total_gps: "14.50",
+				acum_total_membresias: "21",
+			});
+		} finally {
+			await pool.query("DROP SCHEMA IF EXISTS cartera CASCADE");
+			await pool.end();
+		}
+	},
+	15_000,
+);

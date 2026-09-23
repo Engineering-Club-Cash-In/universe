@@ -200,7 +200,22 @@ async function eliminarContrato(
 		if (exigirEtapa && contrato.opportunityId) {
 			await exigirEtapaDeFirma(contrato.opportunityId, exigirEtapa);
 		}
-		return eliminarConCandadoTomado(contrato, motivo, opciones);
+		// Y el contrato mismo, que se leyó antes de esperar: mientras tanto otro
+		// pedido pudo reemplazarlo, anularlo o borrarlo. Seguir con la foto de
+		// antes pisaba el motivo de ese otro pedido, o contestaba que la fila
+		// quedó en «Ver anulados» cuando ya no existía.
+		const [actual] = await db
+			.select()
+			.from(generatedLegalContracts)
+			.where(eq(generatedLegalContracts.id, contrato.id))
+			.limit(1);
+		if (!actual || !estaVigente(actual)) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Otra persona acaba de anular o reemplazar este contrato. Recargá para ver cómo quedó.",
+			});
+		}
+		return eliminarConCandadoTomado(actual, motivo, opciones);
 	});
 }
 

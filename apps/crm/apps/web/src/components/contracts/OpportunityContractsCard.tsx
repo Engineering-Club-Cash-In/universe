@@ -286,6 +286,22 @@ function ContratoFila({
 
 	const ocupado = actualizarEstado.isPending;
 
+	// Descartar el documento sin reemplazarlo. Va también en los de papel: un
+	// contrato impreso equivocado se anula igual, y la fila queda con su motivo.
+	const botonAnular = puedeAnular && !inactivo && (
+		<Button
+			variant="ghost"
+			size="sm"
+			className="h-6 px-1.5 text-destructive text-xs hover:text-destructive"
+			disabled={ocupado}
+			onClick={() => setAnulando(true)}
+			title="Descarta el contrato sin reemplazarlo. Queda en «Ver anulados» con el motivo; lo que ya tenga firmas se conserva en la plataforma de firma."
+		>
+			<Trash2 className="mr-1 h-3 w-3" />
+			Anular
+		</Button>
+	);
+
 	return (
 		<div className="rounded-md border bg-background p-3">
 			{/* Encabezado: qué contrato es y cómo va */}
@@ -350,9 +366,12 @@ function ContratoFila({
 			</div>
 
 			{firmaEnPapel ? (
-				<p className="mt-3 border-t pt-2 text-amber-700 text-xs dark:text-amber-400">
-					Se firma en papel. No lleva enlace de firma.
-				</p>
+				<div className="mt-3 flex items-center justify-between gap-2 border-t pt-2">
+					<p className="text-amber-700 text-xs dark:text-amber-400">
+						Se firma en papel. No lleva enlace de firma.
+					</p>
+					{botonAnular}
+				</div>
 			) : (
 				<div className="mt-3 space-y-2 border-t pt-2">
 					{/* Una fila por firmante: el estado es de cada link, no del
@@ -492,20 +511,7 @@ function ContratoFila({
 							</Button>
 						)}
 
-						{/* Descartar el documento sin reemplazarlo. */}
-						{puedeAnular && !inactivo && (
-							<Button
-								variant="ghost"
-								size="sm"
-								className="h-6 px-1.5 text-destructive text-xs hover:text-destructive"
-								disabled={ocupado}
-								onClick={() => setAnulando(true)}
-								title="Descarta el contrato. Si nadie firmó, se borra de la plataforma de firma; si ya firmaron, allá queda."
-							>
-								<Trash2 className="mr-1 h-3 w-3" />
-								Anular
-							</Button>
-						)}
+						{botonAnular}
 					</div>
 				</div>
 			)}

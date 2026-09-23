@@ -1841,7 +1841,13 @@ export function DynamicContractWizard({
 								gender,
 								generatePdf: true,
 								isPlural,
-								filenamePrefix: `${crmData.cliente.nombreCompleto}_${doc.nombre_documento}`,
+								// Sólo el nombre de la persona. El generador le pega el tipo
+								// y el timestamp para el archivo en R2; mandárselo acá
+								// también producía nombres con el tipo repetido
+								// ("..._pagare_unico_libre_protesto_pagare_unico_libre_protesto_...").
+								// Cómo se ve en WeeTrust lo arma el generador con la
+								// descripción de su propio registro de plantillas.
+								filenamePrefix: crmData.cliente.nombreCompleto || "contrato",
 							},
 						};
 					});

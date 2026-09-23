@@ -132,6 +132,12 @@ export interface GenerateContractPayload {
 		generatePdf: boolean;
 		isPlural?: boolean;
 		filenamePrefix: string;
+		/**
+		 * Nombre con el que el documento se ve en WeeTrust y en el correo de
+		 * firma. Es lo que lee el cliente, así que va sin timestamp y sin el
+		 * identificador técnico del tipo.
+		 */
+		documentName?: string;
 	};
 }
 
@@ -468,6 +474,8 @@ export async function subirContratoParaFirma(payload: {
 	contractType: string;
 	pdfBase64: string;
 	filenamePrefix?: string;
+	/** Ver `GenerateContractPayload.options.documentName`. */
+	documentName?: string;
 	signers?: ContractSigner[];
 	observers?: string[];
 }): Promise<DocumentResult & { message?: string }> {
@@ -546,6 +554,8 @@ export async function reemitirContratoEnWeeTrust(payload: {
 	r2Key: string;
 	contractType: string;
 	filenamePrefix?: string;
+	/** Ver `GenerateContractPayload.options.documentName`. */
+	documentName?: string;
 	signers?: ContractSigner[];
 	observers?: string[];
 }): Promise<DocumentResult & { message?: string }> {

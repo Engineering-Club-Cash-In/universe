@@ -1633,10 +1633,19 @@ export const legalContractsRouter = {
 					});
 				}
 
+				// Cómo se va a ver en WeeTrust: el nombre de quien firma, que el
+				// generador completa con la descripción del documento. Antes se
+				// mandaba `contractName` como prefijo —que ES la descripción—, y
+				// el reemitido quedaba allá sin la persona, imposible de ubicar
+				// entre decenas de pagarés iguales. Va el titular real y no el de
+				// prueba: en WeeTrust se ve el nombre, no el correo redirigido.
+				const titular = guardados.find((f) => f.role === "TITULAR");
+
 				const resultado = await reemitirContratoEnWeeTrust({
 					r2Key: r2KeyDelPdf,
 					contractType: contract.contractType,
 					filenamePrefix: contract.contractName,
+					documentName: titular?.name,
 					signers,
 					observers: CONTRATOS_OBSERVADORES,
 				});

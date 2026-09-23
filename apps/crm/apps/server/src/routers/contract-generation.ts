@@ -337,16 +337,15 @@ async function exigirEtapaQuePermiteReemplazo(
 
 	const porcentaje = fila?.porcentaje ?? null;
 
-	// Reemplazar es de jurídico y sólo mientras la oportunidad está en 80%. En
-	// 85% ya salió de su operación y pasó a análisis, que maneja esa parte
-	// regenerando. Si hace falta que jurídico intervenga, primero hay que
-	// devolver la oportunidad al 80%.
+	// Jurídico arma la papelería en 80% y la sigue trabajando en 85%, mientras
+	// está en firma: rehacer la batería con otra fecha cuando venció es parte
+	// de su operación. Del 90% en adelante ya no se toca.
 	if (
 		porcentaje === null ||
 		!ETAPAS_POR_ACCION.reemplazar.includes(porcentaje as never)
 	) {
 		throw new ORPCError("BAD_REQUEST", {
-			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: jurídico sólo puede generar, subir o reemplazar contratos en 80%. Para cambiarlo, hay que devolverla a esa etapa.`,
+			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: jurídico sólo puede generar, subir o reemplazar contratos en ${ETAPAS_POR_ACCION.reemplazar.join("% u ")}%. Para cambiarlo, hay que devolverla a esa etapa.`,
 		});
 	}
 }
@@ -2047,10 +2046,16 @@ export const contractGenerationRouter = {
 				// esperaba el candado.
 				await exigirQueSePuedaSubir(input);
 
+				// En WeeTrust se ve quién firma y qué firma, no el nombre con el
+				// que quedó guardado el archivo en la computadora de jurídico
+				// ("escaneo_final_v2.pdf" no le dice nada al cliente).
+				const titularQueSube = firmantes?.find((f) => f.role === "TITULAR");
+
 				const resultado = await subirContratoParaFirma({
 					contractType: input.contractType,
 					pdfBase64: input.pdfBase64,
 					filenamePrefix: input.filename.replace(/\.pdf$/i, ""),
+					documentName: titularQueSube?.name,
 					signers: firmantes,
 					observers: esFirmaFisica(input.contractType)
 						? undefined

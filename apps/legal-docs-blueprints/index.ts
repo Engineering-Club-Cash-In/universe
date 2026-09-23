@@ -377,11 +377,12 @@ const app = new Elysia()
     const rechazo = rechazoSinSecretoDelCrm(headers, set);
     if (rechazo) return rechazo;
     try {
-      const { contractType, pdfBase64, filenamePrefix, signers, observers } =
+      const { contractType, pdfBase64, filenamePrefix, documentName, signers, observers } =
         body as {
           contractType?: ContractType;
           pdfBase64?: string;
           filenamePrefix?: string;
+          documentName?: string;
           signers?: GenerateContractRequest['signers'];
           observers?: string[];
         };
@@ -426,7 +427,7 @@ const app = new Elysia()
       const result = await contractGenerator.signExistingPdf(
         contractType,
         pdfBuffer,
-        { filenamePrefix, signers, observers }
+        { filenamePrefix, documentName, signers, observers }
       );
 
       set.status = result.success ? 200 : 400;
@@ -481,11 +482,12 @@ const app = new Elysia()
     const rechazo = rechazoSinSecretoDelCrm(headers, set);
     if (rechazo) return rechazo;
     try {
-      const { r2Key, contractType, filenamePrefix, signers, observers } =
+      const { r2Key, contractType, filenamePrefix, documentName, signers, observers } =
         body as {
           r2Key?: string;
           contractType?: ContractType;
           filenamePrefix?: string;
+          documentName?: string;
           signers?: GenerateContractRequest['signers'];
           observers?: string[];
         };
@@ -506,7 +508,7 @@ const app = new Elysia()
       const result = await contractGenerator.signExistingPdf(
         contractType,
         pdfBuffer,
-        { filenamePrefix, signers, observers, r2KeyExistente: r2Key }
+        { filenamePrefix, documentName, signers, observers, r2KeyExistente: r2Key }
       );
 
       set.status = result.success ? 200 : 400;

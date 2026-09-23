@@ -49,6 +49,7 @@ import {
 	correoRepetido,
 	correosDePruebaFaltantes,
 } from "../lib/contratos-correos-prueba";
+import { descarteValido, firmarDescarte } from "../lib/contratos-descarte";
 import {
 	CONTRATOS_OBSERVADORES,
 	REP_LEGAL_EMAIL,
@@ -91,6 +92,16 @@ const LEGAL_DOCS_API_URL =
  * Los contratos que se firman en papel no llevan firmantes: el entregable es el
  * PDF, y mandar correos de gente que no va a recibir ningún link sólo ensucia.
  */
+/**
+ * El nombre del titular, para el nombre del documento en WeeTrust. Va el real y
+ * no el de prueba: en modo prueba sólo se redirigen los correos.
+ */
+function nombreDelTitular(
+	signers: ContractSigner[] | undefined,
+): string | undefined {
+	return signers?.find((s) => s.role === "TITULAR")?.name;
+}
+
 function firmantesDelContrato(
 	contractType: string,
 	signersDelFront: ContractSigner[] | undefined,
@@ -327,9 +338,12 @@ async function firmantesDeLaOportunidad(
  */
 async function exigirEtapaQuePermiteReemplazo(
 	opportunityId: string,
-): Promise<void> {
+): Promise<{ stageId: string | null; porcentaje: number }> {
 	const [fila] = await db
-		.select({ porcentaje: salesStages.closurePercentage })
+		.select({
+			stageId: opportunities.stageId,
+			porcentaje: salesStages.closurePercentage,
+		})
 		.from(opportunities)
 		.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 		.where(eq(opportunities.id, opportunityId))
@@ -337,18 +351,23 @@ async function exigirEtapaQuePermiteReemplazo(
 
 	const porcentaje = fila?.porcentaje ?? null;
 
-	// Reemplazar es de jurídico y sólo mientras la oportunidad está en 80%. En
-	// 85% ya salió de su operación y pasó a análisis, que maneja esa parte
-	// regenerando. Si hace falta que jurídico intervenga, primero hay que
-	// devolver la oportunidad al 80%.
+	// Jurídico arma la papelería en 80% y la sigue trabajando en 85%, mientras
+	// está en firma: rehacer la batería con otra fecha cuando venció es parte
+	// de su operación. Del 90% en adelante ya no se toca.
 	if (
 		porcentaje === null ||
 		!ETAPAS_POR_ACCION.reemplazar.includes(porcentaje as never)
 	) {
 		throw new ORPCError("BAD_REQUEST", {
-			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: jurídico sólo puede generar, subir o reemplazar contratos en 80%. Para cambiarlo, hay que devolverla a esa etapa.`,
+			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: jurídico sólo puede generar, subir o reemplazar contratos en ${ETAPAS_POR_ACCION.reemplazar.join("% u ")}%. Para cambiarlo, hay que devolverla a esa etapa.`,
 		});
 	}
+	// Con qué etapa se aprobó, y las dos cosas de la MISMA lectura. La etapa
+	// (`stageId`) es contra la que después se revalida al retirar los
+	// anteriores; el porcentaje se le devuelve al front para decidir si ofrecer
+	// el reenvío. Si salieran de dos lecturas, una aprobación en el medio
+	// instalaba en 85% y contestaba 80%, y no se ofrecía reenviar.
+	return { stageId: fila?.stageId ?? null, porcentaje };
 }
 
 /**
@@ -519,16 +538,6 @@ async function anularAnterioresDelMismoTipo(
 				.where(eq(generatedLegalContracts.id, anterior.id));
 		}
 	}
-}
-
-/** La etapa en la que está la oportunidad ahora (su `stageId`). */
-async function etapaActual(opportunityId: string): Promise<string | null> {
-	const [fila] = await db
-		.select({ stageId: opportunities.stageId })
-		.from(opportunities)
-		.where(eq(opportunities.id, opportunityId))
-		.limit(1);
-	return fila?.stageId ?? null;
 }
 
 /**
@@ -1186,23 +1195,27 @@ export const contractGenerationRouter = {
 
 			try {
 				// Derivar isPlural automáticamente desde deudoresAdicionales
-				const contractsWithPlural = input.contracts.map((contract) => ({
-					...contract,
-					signers: firmantesDelContrato(
+				const contractsWithPlural = input.contracts.map((contract) => {
+					const signers = firmantesDelContrato(
 						contract.contractType,
 						contract.signers,
 						contract,
-					),
-					// Ya van convertidos en `signers`.
-					emails: undefined,
-					observers: esFirmaFisica(contract.contractType)
-						? undefined
-						: CONTRATOS_OBSERVADORES,
-					options: {
-						...contract.options,
-						isPlural: (contract.data.deudoresAdicionales?.length ?? 0) > 0,
-					},
-				}));
+					);
+					return {
+						...contract,
+						signers,
+						// Ya van convertidos en `signers`.
+						emails: undefined,
+						observers: esFirmaFisica(contract.contractType)
+							? undefined
+							: CONTRATOS_OBSERVADORES,
+						options: {
+							...contract.options,
+							isPlural: (contract.data.deudoresAdicionales?.length ?? 0) > 0,
+							documentName: nombreDelTitular(signers),
+						},
+					};
+				});
 
 				// Generar con el candado de la oportunidad tomado y la etapa ya
 				// revisada: WeeTrust manda las invitaciones apenas se crea cada
@@ -1231,6 +1244,12 @@ export const contractGenerationRouter = {
 					r2Key?: string;
 					/** Firmantes con su rol, para etiquetar los links sin adivinar. */
 					signatories?: FirmanteEnviado[];
+					/**
+					 * El documento en WeeTrust y el comprobante para descartarlo si
+					 * nunca se enlaza (ver `descartarContratosSinEnlazar`).
+					 */
+					documentID?: string;
+					descarte?: string;
 					error?: string;
 				}> = [];
 
@@ -1261,6 +1280,14 @@ export const contractGenerationRouter = {
 								signatories: contractResult.signatories,
 								templateId: contractResult.templateId,
 								apiResponse: contractResult,
+								documentID: contractResult.documentID,
+								descarte:
+									contractResult.documentID && input.opportunityId
+										? firmarDescarte(
+												input.opportunityId,
+												contractResult.documentID,
+											)
+										: undefined,
 							});
 						} else {
 							failCount++;
@@ -1304,6 +1331,78 @@ export const contractGenerationRouter = {
 	 * Enlaza contratos generados previamente a una oportunidad/lead
 	 * Este endpoint guarda los contratos en la base de datos
 	 */
+	/**
+	 * Borra en WeeTrust los documentos que el wizard generó y nunca se enlazaron.
+	 *
+	 * El wizard genera los contratos —y WeeTrust manda las invitaciones— antes de
+	 * que jurídico apriete "Finalizar y Enlazar". Si en vez de enlazar vuelve a
+	 * corregir o se va, esos documentos quedaban vivos sin fila en el CRM, al
+	 * lado de los vigentes: en 85% el cliente, que ya está firmando, podía firmar
+	 * uno que nadie sigue. El wizard llama a esto al volver a corregir y al irse
+	 * sin enlazar.
+	 *
+	 * Sólo borra lo que cumple las dos cosas:
+	 * - trae el comprobante de que lo generó el CRM para esta oportunidad (en la
+	 *   misma cuenta de WeeTrust viven los de inversiones y los de la app de
+	 *   jurídico, que tampoco tienen fila acá);
+	 * - ninguna fila lo usa: uno que llegó a enlazarse es un contrato, no un
+	 *   descarte.
+	 *
+	 * Con el candado de la oportunidad, como todo lo que borra en WeeTrust: si un
+	 * enlace está en curso, se espera a que termine y recién ahí se mira.
+	 */
+	descartarContratosSinEnlazar: juridicoProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				documentos: z
+					.array(
+						z.object({
+							documentID: z.string().min(1),
+							descarte: z.string().min(1),
+						}),
+					)
+					.max(50),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const validos = input.documentos
+				.filter((d) =>
+					descarteValido(input.opportunityId, d.documentID, d.descarte),
+				)
+				.map((d) => d.documentID);
+			if (validos.length === 0) return { descartados: 0, noBorrados: 0 };
+
+			return conCandadoDeFirma(input.opportunityId, async () => {
+				const enlazados = await db
+					.select({ documentID: generatedLegalContracts.weetrustDocumentId })
+					.from(generatedLegalContracts)
+					.where(inArray(generatedLegalContracts.weetrustDocumentId, validos));
+				const conFila = new Set(enlazados.map((e) => e.documentID));
+
+				// Cuántos se borraron y cuántos no, para que jurídico lo vea: si uno
+				// queda vivo en WeeTrust, el cliente todavía puede firmarlo.
+				let descartados = 0;
+				let noBorrados = 0;
+				for (const documentID of validos) {
+					if (conFila.has(documentID)) continue;
+					try {
+						await borrarDocumentoDeWeeTrust(documentID);
+						descartados++;
+					} catch (error) {
+						// Uno que ya se firmó entero no se puede borrar, y otro que falla
+						// no tiene por qué frenar al resto.
+						noBorrados++;
+						console.error(
+							`[descartarContratosSinEnlazar] no se pudo borrar ${documentID}:`,
+							error,
+						);
+					}
+				}
+				return { descartados, noBorrados };
+			});
+		}),
+
 	linkContractsToOpportunity: juridicoProcedure
 		.input(
 			z.object({
@@ -1403,8 +1502,9 @@ export const contractGenerationRouter = {
 					// no se instalan: se borran en WeeTrust para que no queden vivos sin
 					// registro, con las invitaciones mandadas. Los ya enlazados no: son
 					// los vigentes.
+					let etapa: Awaited<ReturnType<typeof exigirEtapaQuePermiteReemplazo>>;
 					try {
-						await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+						etapa = await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 					} catch (error) {
 						for (const contract of input.contracts) {
 							const { documentID } = firmaDelGenerador(contract.apiResponse);
@@ -1419,7 +1519,11 @@ export const contractGenerationRouter = {
 						}
 						throw error;
 					}
-					const etapaInicial = await etapaActual(input.opportunityId);
+					// La etapa contra la que se revalida al retirar los anteriores: la
+					// misma lectura que se validó, así lo que se contesta y lo que se
+					// instala no pueden diferir.
+					const etapaInicial = etapa.stageId;
+					const porcentajeEtapa = etapa.porcentaje;
 
 					for (const contract of input.contracts) {
 						// El front reenvía tal cual la respuesta del generador; de ahí salen
@@ -1519,6 +1623,8 @@ export const contractGenerationRouter = {
 						linkedCount: savedContracts.length,
 						contracts: savedContracts,
 						descartados,
+						// La etapa con la que se enlazó, no la que tenía la pantalla.
+						porcentajeEtapa,
 						message:
 							descartados.length === 0
 								? `Se enlazaron ${savedContracts.length} contrato(s) a la oportunidad exitosamente`
@@ -1609,13 +1715,9 @@ export const contractGenerationRouter = {
 			);
 
 			try {
-				// Regenerar es de jurídico y sólo en 80%, igual que subir o reemplazar.
-				// Se corta antes de generar nada.
+				// Regenerar es de jurídico, en 80% u 85%, igual que subir o reemplazar.
+				// Se corta antes de generar nada; con el candado se vuelve a mirar.
 				await exigirEtapaQuePermiteReemplazo(input.opportunityId);
-
-				// La etapa al empezar: si cambia mientras se generan, los nuevos no
-				// reemplazan a los que ya salieron (ver retirarConCandadoTomado).
-				const etapaInicial = await etapaActual(input.opportunityId);
 
 				// 1. Filtrar solo los contratos de los tipos a regenerar
 				const contractsToRegenerate = input.generationData.filter((c) =>
@@ -1785,16 +1887,17 @@ export const contractGenerationRouter = {
 							Number.parseInt(anioVencShort),
 						);
 
+					// Los snapshots viejos sólo guardaron `emails`: se convierten a
+					// firmantes con rol para que pasen por el mismo camino.
+					const signers = firmantesDelContrato(
+						contract.contractType,
+						contract.signers,
+						{ emails: contract.emails, data: newData },
+					);
 					return {
 						...contract,
 						data: newData,
-						// Los snapshots viejos sólo guardaron `emails`: se convierten a
-						// firmantes con rol para que pasen por el mismo camino.
-						signers: firmantesDelContrato(
-							contract.contractType,
-							contract.signers,
-							{ emails: contract.emails, data: newData },
-						),
+						signers,
 						emails: undefined,
 						observers: esFirmaFisica(contract.contractType)
 							? undefined
@@ -1802,6 +1905,10 @@ export const contractGenerationRouter = {
 						options: {
 							...contract.options,
 							isPlural: (newData.deudoresAdicionales?.length ?? 0) > 0,
+							// Las fotos viejas guardaron el prefijo como `<nombre>_<tipo>`:
+							// sin el nombre explícito, el tipo técnico se colaba en lo que
+							// lee el cliente en WeeTrust.
+							documentName: nombreDelTitular(signers),
 						},
 					};
 				});
@@ -1812,8 +1919,15 @@ export const contractGenerationRouter = {
 				// los vigentes, mandaría sus enlaces, y el retiro los mataría enseguida.
 				// La etapa se revisa adentro, antes de crear nada en WeeTrust.
 				return conCandadoDeFirma(input.opportunityId, async () => {
-					// 3. Generar los nuevos contratos.
-					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+					// 3. Generar los nuevos contratos. La etapa se lee acá, ya con el
+					// candado: si cambia mientras se generan, los nuevos no reemplazan a
+					// los que ya salieron (ver retirarConCandadoTomado), y el porcentaje
+					// que se contesta sale de esta misma lectura.
+					const etapa = await exigirEtapaQuePermiteReemplazo(
+						input.opportunityId,
+					);
+					const etapaInicial = etapa.stageId;
+					const porcentajeEtapa = etapa.porcentaje;
 					const apiResult = await generateContractsBatch({
 						contracts: contractsWithNewDate,
 					});
@@ -1914,6 +2028,8 @@ export const contractGenerationRouter = {
 						contracts: savedContracts,
 						failedContracts,
 						message,
+						// La etapa con la que se regeneró, no la que tenía la pantalla.
+						porcentajeEtapa,
 					};
 				});
 			} catch (error) {
@@ -2019,15 +2135,22 @@ export const contractGenerationRouter = {
 				// a 85%. Se vuelve a mirar ANTES de subir: WeeTrust manda las
 				// invitaciones en el acto, y descubrirlo después dejaba al cliente con
 				// correos de un documento que se borra enseguida.
-				await exigirEtapaQuePermiteReemplazo(input.opportunityId);
+				const { porcentaje: porcentajeEtapa } =
+					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 				// Y las reglas del tipo: otra subida pudo instalarse mientras se
 				// esperaba el candado.
 				await exigirQueSePuedaSubir(input);
+
+				// En WeeTrust se ve quién firma y qué firma, no el nombre con el
+				// que quedó guardado el archivo en la computadora de jurídico
+				// ("escaneo_final_v2.pdf" no le dice nada al cliente).
+				const titularQueSube = firmantes?.find((f) => f.role === "TITULAR");
 
 				const resultado = await subirContratoParaFirma({
 					contractType: input.contractType,
 					pdfBase64: input.pdfBase64,
 					filenamePrefix: input.filename.replace(/\.pdf$/i, ""),
+					documentName: titularQueSube?.name,
 					signers: firmantes,
 					observers: esFirmaFisica(input.contractType)
 						? undefined
@@ -2206,6 +2329,8 @@ export const contractGenerationRouter = {
 					success: true,
 					contractId: saved.id,
 					contractType: input.contractType,
+					// La etapa con la que se subió, no la que tenía la pantalla.
+					porcentajeEtapa,
 					// El contrato ya está enviado y guardado: que falle firmar la URL no
 					// puede hacer que la pantalla diga "falló" e invite a subirlo de nuevo.
 					documentLink: resultado.r2Key

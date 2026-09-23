@@ -798,6 +798,16 @@ export interface ContractGeneratorOptions {
 
   /** Prefijo para nombres de archivos */
   filenamePrefix?: string;
+
+  /**
+   * Nombre con el que el documento se ve en WeeTrust y en el correo de firma.
+   *
+   * Va aparte del nombre de archivo porque son dos cosas distintas: el de
+   * archivo lleva timestamp para no pisarse en R2, y ese timestamp no tiene
+   * por qué salir en lo que lee el cliente. Si no se manda, el generador lo
+   * arma con el nombre de quien firma y la descripción del documento.
+   */
+  documentName?: string;
 }
 
 /**
@@ -919,6 +929,8 @@ export interface GenerateContractRequest {
   options?: {
     generatePdf?: boolean;
     filenamePrefix?: string;
+    /** Ver `ContractGenerationOptions.documentName`. */
+    documentName?: string;
     gender?: "male" | "female";
     /** Si hay múltiples deudores, usar template plural */
     isPlural?: boolean;

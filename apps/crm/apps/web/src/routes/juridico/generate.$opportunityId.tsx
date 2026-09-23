@@ -7,13 +7,15 @@ import {
 	FileSignature,
 	Loader2,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { ETAPA_EN_FIRMA } from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import {
 	type ContractSigner,
 	type CRMData,
 	DynamicContractWizard,
 } from "@/components/contracts/DynamicContractWizard";
+import { ReenviarWhatsappDialog } from "@/components/contracts/ReenviarWhatsappDialog";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -40,6 +42,10 @@ function RouteComponent() {
 	const { canViewLegal, isLoading: isLoadingPermissions } =
 		useJuridicoPermissions();
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+	const [preguntarReenvio, setPreguntarReenvio] = useState(false);
+	// Ref y no estado: lo marca el enlace y lo lee `handleBack` en el mismo
+	// tick, antes de que un estado nuevo llegue a renderizarse.
+	const ofrecerReenvioAlSalir = useRef(false);
 
 	// Get contract types from API (dynamic)
 	const contractTypesQuery = useQuery({
@@ -299,7 +305,7 @@ function RouteComponent() {
 			}
 		: null;
 
-	const handleBack = () => {
+	const irALaFicha = () => {
 		if (opportunity?.lead?.id) {
 			navigate({
 				to: "/juridico/$leadId",
@@ -309,6 +315,19 @@ function RouteComponent() {
 		} else {
 			navigate({ to: "/juridico" });
 		}
+	};
+
+	// El wizard vuelve atrás apenas enlaza. Si acaba de rehacer contratos de
+	// una oportunidad en 85%, antes de irse se pregunta si se reenvían: los
+	// enlaces que el cliente recibió al aprobar ya no sirven. La navegación
+	// queda para cuando se cierre la pregunta.
+	const handleBack = () => {
+		if (ofrecerReenvioAlSalir.current) {
+			ofrecerReenvioAlSalir.current = false;
+			setPreguntarReenvio(true);
+			return;
+		}
+		irALaFicha();
 	};
 
 	const handleGetDocumentsByDpi = async (
@@ -338,6 +357,40 @@ function RouteComponent() {
 		return result;
 	};
 
+	// Lo que el wizard generó y no se va a enlazar ("Corregir y Regenerar", o
+	// irse de la pantalla). No se espera la respuesta para seguir, pero se avisa
+	// cómo quedó: sin el aviso no había forma de saber que se borró en WeeTrust,
+	// ni de enterarse si alguno quedó vivo y el cliente todavía podía firmarlo.
+	const handleDescartarSinEnlazar = (
+		documentos: Array<{ documentID: string; descarte: string }>,
+	) => {
+		if (!opportunityId) return;
+		client
+			.descartarContratosSinEnlazar({ opportunityId, documentos })
+			.then(({ descartados, noBorrados }) => {
+				if (descartados > 0) {
+					toast.info(
+						descartados === 1
+							? "Se borró en WeeTrust el documento que no se enlazó"
+							: `Se borraron en WeeTrust los ${descartados} documentos que no se enlazaron`,
+					);
+				}
+				if (noBorrados > 0) {
+					toast.warning(
+						noBorrados === 1
+							? "Un documento no se pudo borrar en WeeTrust: revisalo allá, el cliente todavía puede firmarlo"
+							: `${noBorrados} documentos no se pudieron borrar en WeeTrust: revisalos allá, el cliente todavía puede firmarlos`,
+					);
+				}
+			})
+			.catch((error) => {
+				console.error("[descartarContratosSinEnlazar]", error);
+				toast.error(
+					"No se pudieron borrar en WeeTrust los documentos que no se enlazaron",
+				);
+			});
+	};
+
 	const handleLinkContracts = async (data: {
 		opportunityId: string;
 		leadId: string;
@@ -364,6 +417,14 @@ function RouteComponent() {
 		}>;
 	}) => {
 		const result = await linkContractsMutation.mutateAsync(data);
+		// En 85% los enlaces ya le llegaron al cliente al aprobar, y los que se
+		// acaban de enlazar dejaron sin efecto a los anteriores del mismo tipo.
+		// En 80% todavía no salió nada: los manda la aprobación.
+		// La etapa con la que enlazó el servidor, no la de esta pantalla: si la
+		// aprobaron mientras el wizard estaba abierto, acá seguiría diciendo 80%.
+		if (result.linkedCount > 0 && result.porcentajeEtapa === ETAPA_EN_FIRMA) {
+			ofrecerReenvioAlSalir.current = true;
+		}
 		return result;
 	};
 
@@ -517,11 +578,23 @@ function RouteComponent() {
 							onGenerate={handleGenerate}
 							onLinkContracts={handleLinkContracts}
 							onBack={handleBack}
+							onDescartarSinEnlazar={handleDescartarSinEnlazar}
 							isGenerating={generateMutation.isPending}
 							isLinking={linkContractsMutation.isPending}
 						/>
 					</CardContent>
 				</Card>
+			)}
+
+			{opportunityId && (
+				<ReenviarWhatsappDialog
+					opportunityId={opportunityId}
+					open={preguntarReenvio}
+					onOpenChange={(abierto) => {
+						setPreguntarReenvio(abierto);
+						if (!abierto) irALaFicha();
+					}}
+				/>
 			)}
 
 			{/* Modal de detalle de oportunidad */}

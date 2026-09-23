@@ -25,6 +25,57 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Nombre con el que el documento se ve en WeeTrust y en el correo de firma.
+ *
+ * Es lo que lee el cliente, así que dice quién firma y qué está firmando:
+ * "Albertsond Gabriel Velásquez Ramírez - Pagaré único libre de protesto".
+ *
+ * No es el nombre de archivo. El de archivo lleva el tipo de contrato y un
+ * timestamp porque tiene que ser único en R2; arrastrar eso hasta WeeTrust
+ * producía nombres como
+ * `Albertsond_Gabriel_..._pagare_unico_libre_protesto_pagare_unico_libre_protesto_2026-09-23T16-21-33`,
+ * con el tipo repetido (el CRM ya lo mandaba en el prefijo y acá se volvía a
+ * pegar) y el timestamp a la vista.
+ */
+function nombreDeDocumento(
+  nombrePersona: string | undefined,
+  descripcion: string,
+  /**
+   * El identificador técnico del tipo. Las fotos de generación guardadas antes
+   * de separar los nombres traen el prefijo como `<nombre>_<tipo>`, y al
+   * regenerarlas el tipo se colaba en lo que lee el cliente: compararlo con la
+   * descripción no lo detecta ("pagare_unico_libre_protesto" no contiene
+   * "Pagaré único libre de protesto", por las tildes y el "de").
+   */
+  contractType?: string,
+): string {
+  const sinTipo =
+    contractType && nombrePersona
+      ? nombrePersona.split(contractType).join(' ')
+      : nombrePersona;
+  const persona = (sinTipo ?? '')
+    .replace(/\.pdf$/i, '')
+    // Timestamps que algunos llamadores meten en el prefijo para que el archivo
+    // sea único: `Date.now()` (legal-documents) o una fecha ISO. Son para el
+    // archivo, no para lo que lee el cliente.
+    .replace(/\d{4}-\d{2}-\d{2}T[\d-]+Z?/g, ' ')
+    .replace(/\d{10,}/g, ' ')
+    .replace(/[_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Sin nombre de persona queda la descripción sola: es preferible a inventar
+  // un nombre o a dejar el identificador técnico del tipo de contrato.
+  //
+  // Y si lo que llegó como "persona" ya es la descripción (o la contiene),
+  // tampoco se pega dos veces: de ahí salían los nombres con el tipo repetido.
+  const normalizar = (t: string) => t.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+  const yaLaDice = normalizar(persona).includes(normalizar(descripcion));
+  const completo = persona && !yaLaDice ? `${persona} - ${descripcion}` : persona || descripcion;
+  return completo.slice(0, 150);
+}
+
 // Instancia de WeeTrust (servicio principal de firma)
 // Si WEETRUST_DISABLED=true o faltan credenciales, queda como null y se usa Documenso directo.
 const weeTrustService: WeeTrustService | null = (() => {
@@ -595,7 +646,7 @@ export class ContractGeneratorService {
       /** Observadores: ven el flujo de firma sin firmar. */
       observers?: string[];
       emails?: string[];
-      options?: { generatePdf?: boolean; filenamePrefix?: string; gender?: "male" | "female"; isPlural?: boolean };
+      options?: { generatePdf?: boolean; filenamePrefix?: string; documentName?: string; gender?: "male" | "female"; isPlural?: boolean };
     }>
   ): Promise<{
     success: boolean;
@@ -693,6 +744,8 @@ export class ContractGeneratorService {
       gender?: "male" | "female";
       generatePdf?: boolean;
       filenamePrefix?: string;
+      /** Ver `nombreDeDocumento`: cómo se ve en WeeTrust, no el nombre de archivo. */
+      documentName?: string;
       /** @deprecated Usar `signers`, que lleva el rol de cada firmante. */
       emails?: string[];
       signers?: ContractSigner[];
@@ -812,6 +865,22 @@ export class ContractGeneratorService {
       const prefix = options.filenamePrefix || data.client_name?.replace(/\s+/g, '_') || 'contract';
       const baseFilename = `${prefix}_${contractType}_${timestamp}`;
 
+      // Lo que ve el cliente en WeeTrust, que no es el nombre de archivo.
+      // Al CRM le basta con mandar el nombre de quien firma: la descripción la
+      // pone el generador desde su propio registro de plantillas, que es el
+      // que manda.
+      // El nombre de la persona tal como vino en los datos, antes que el prefijo:
+      // `apps/legal-documents` no manda `documentName` y arma el prefijo pegando
+      // nombre, tipo y `Date.now()`.
+      const documentName = nombreDeDocumento(
+        options.documentName?.trim() ||
+          data.client_name ||
+          data.nombreCompleto ||
+          prefix,
+        config.description,
+        contractType,
+      );
+
       // 9. Asegurar que el directorio de salida existe
       await fs.mkdir(this.outputDir, { recursive: true });
 
@@ -918,7 +987,7 @@ export class ContractGeneratorService {
           console.log(`🔗 Creando documento en WeeTrust para firma...`);
 
           signing = await weeTrustService.createDocumentForSigning(
-            baseFilename,
+            documentName,
             pdfBuffer,
             contractType,
             signers,
@@ -955,7 +1024,7 @@ export class ContractGeneratorService {
               console.log(`🔗 Creando documento en Documenso (fallback)...`);
 
               signing = await documensoService.createDocumentAndGetSigningLinks(
-                baseFilename,
+                documentName,
                 pdfBuffer,
                 contractType,
                 signers.map((s) => s.email)
@@ -1142,6 +1211,14 @@ export class ContractGeneratorService {
     pdfBuffer: Buffer,
     options: {
       filenamePrefix?: string;
+      /**
+       * Nombre con el que se ve en WeeTrust. Sin esto, la reemisión mandaba el
+       * `filenamePrefix` que le pasaba el CRM, que era la descripción del
+       * documento ("Pagaré único libre de protesto"): el documento reemitido
+       * perdía el nombre de la persona y quedaba imposible de ubicar entre
+       * decenas de pagarés.
+       */
+      documentName?: string;
       signers?: ContractSigner[];
       observers?: string[];
       /**
@@ -1155,6 +1232,11 @@ export class ContractGeneratorService {
     const config = this.templateRegistry.get(contractType);
     const descripcion = config?.description ?? contractType;
     const baseFilename = options.filenamePrefix || `manual_${contractType}`;
+    const documentName = nombreDeDocumento(
+      options.documentName?.trim() || options.filenamePrefix,
+      descripcion,
+      contractType,
+    );
 
     const respuestaBase = {
       templateId: 0,
@@ -1225,7 +1307,7 @@ export class ContractGeneratorService {
       }
 
       const signing = await weeTrustService.createDocumentForSigning(
-        baseFilename,
+        documentName,
         pdfBuffer,
         contractType,
         signers,

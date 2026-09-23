@@ -194,7 +194,7 @@ async function eliminarContrato(
 		// están en manos del cliente y borrar el documento se los mata; del 90%
 		// en adelante la oportunidad ya se cerró con esos contratos.
 		if (exigirEtapa && contrato.opportunityId) {
-			await exigirEtapaDeFirma(contrato.opportunityId, "reemplazar");
+			await exigirEtapaDeFirma(contrato.opportunityId, "eliminar");
 		}
 		return eliminarConCandadoTomado(contrato, motivo);
 	});
@@ -233,8 +233,8 @@ async function eliminarConCandadoTomado(
 /**
  * Corta si la oportunidad ya no está en una etapa que permita esta acción.
  *
- * Reemplazar es de jurídico y sólo en 80%; regenerar lo hace análisis y va en
- * 80% u 85%. Del 90% en adelante los contratos ya son parte de una decisión
+ * Qué etapas admite cada acción está en `ETAPAS_POR_ACCION`: hoy todas van en
+ * 80% y 85%. Del 90% en adelante los contratos ya son parte de una decisión
  * tomada y no se tocan.
  */
 async function exigirEtapaDeFirma(
@@ -1633,10 +1633,19 @@ export const legalContractsRouter = {
 					});
 				}
 
+				// Cómo se va a ver en WeeTrust: el nombre de quien firma, que el
+				// generador completa con la descripción del documento. Antes se
+				// mandaba `contractName` como prefijo —que ES la descripción—, y
+				// el reemitido quedaba allá sin la persona, imposible de ubicar
+				// entre decenas de pagarés iguales. Va el titular real y no el de
+				// prueba: en WeeTrust se ve el nombre, no el correo redirigido.
+				const titular = guardados.find((f) => f.role === "TITULAR");
+
 				const resultado = await reemitirContratoEnWeeTrust({
 					r2Key: r2KeyDelPdf,
 					contractType: contract.contractType,
 					filenamePrefix: contract.contractName,
+					documentName: titular?.name,
 					signers,
 					observers: CONTRATOS_OBSERVADORES,
 				});

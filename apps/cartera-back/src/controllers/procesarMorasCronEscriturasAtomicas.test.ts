@@ -1,5 +1,5 @@
 /**
- * La CREACION del cron no puede dejar un MOROSO sin mora.
+ * Las escrituras del cron (CREACION y RECALCULO) son todo o nada.
  *
  * Para que el cron no le pisara el estado a un convenio recién confirmado, la
  * rama puso el `UPDATE creditos SET statusCredit='MOROSO' … RETURNING` PRIMERO:
@@ -9,6 +9,11 @@
  * restricción), `procesarMoras` salía con error y el crédito quedaba MOROSO sin
  * mora activa ni evento de CREACION — un estado que ni el cron ni una segunda
  * pasada corrigen, porque los dos parten de "hay mora activa".
+ *
+ * La rama RECALCULO tenía el mismo hermano: update de la mora, update del
+ * status e historial sueltos. Si el status o el historial fallaban, el monto de
+ * la mora ya había cambiado y quedaba SIN RASTRO en moras_historial — justo la
+ * garantía que esta rama vino a dar, y encima lo que se le cobra al cliente.
  *
  * Acá el fake de la base MODELA EL COMMIT: los writes de una transacción se
  * guardan aparte y solo se vuelven "confirmados" si el callback termina bien;
@@ -30,6 +35,8 @@ const estado: {
   insertHistorialThrows: any;
   /** Filas que devuelve el `.returning()` de un update de `creditos`, en orden. */
   updateCreditosReturns: any[][];
+  /** Filas que devuelve el `.returning()` de un update de `moras_credito`. */
+  updateMorasReturns: any[][];
   emitidos: any[];
 } = {
   resultados: [],
@@ -37,6 +44,7 @@ const estado: {
   insertMoraThrows: undefined,
   insertHistorialThrows: undefined,
   updateCreditosReturns: [],
+  updateMorasReturns: [],
   emitidos: [],
 };
 
@@ -105,7 +113,7 @@ const clienteFalso = (scope: Scope): any => {
             const filas =
               tabla === creditos
                 ? estado.updateCreditosReturns.shift() ?? [{ credito_id: CREDITO_ID }]
-                : [{ mora_id: 77 }];
+                : estado.updateMorasReturns.shift() ?? [{ mora_id: MORA_ID }];
             // El update se registra igual cuando afecta 0 filas: el write se
             // ejecutó, simplemente no matcheó nada.
             buffer.push({ tabla, kind: "update", set });
@@ -171,6 +179,19 @@ const cuotaDeAyer = () => {
   };
 };
 
+/**
+ * Mora activa cuyo monto NO coincide con el recalculado → el cron entra a
+ * RECALCULO (si coincidiera, saldría por `sinCambios`).
+ */
+const MORA_ID = 77;
+const MORA_ACTIVA = {
+  mora_id: MORA_ID,
+  credito_id: CREDITO_ID,
+  monto_mora: "1.00",
+  cuotas_atrasadas: 9,
+  porcentaje_mora: "1.12",
+};
+
 const reset = () => {
   estado.resultados = [];
   // Se vacía EN EL LUGAR: el cliente falso raíz cerró sobre este array.
@@ -179,11 +200,13 @@ const reset = () => {
   estado.insertMoraThrows = undefined;
   estado.insertHistorialThrows = undefined;
   estado.updateCreditosReturns = [];
+  estado.updateMorasReturns = [];
   estado.emitidos = [];
 };
 
-const correr = async () => {
-  estado.resultados = [[cuotaDeAyer()], []]; // cuotas vencidas, sin mora activa
+/** `moraPrevia: false` → rama CREACION; `true` → rama RECALCULO. */
+const correr = async (moraPrevia = false) => {
+  estado.resultados = [[cuotaDeAyer()], moraPrevia ? [MORA_ACTIVA] : []];
   return (await procesarMoras()) as any;
 };
 
@@ -263,6 +286,52 @@ describe("procesarMoras — CREACION atómica (status + mora + historial)", () =
     expect(confirmados(moras_credito)).toEqual([]);
     expect(confirmados(moras_historial)).toEqual([]);
     expect(r.creadas).toBe(0);
+    expect(succeededCount()).toBe(0);
+    expect(skippedCount()).toBe(1);
+  });
+});
+
+describe("procesarMoras — RECALCULO atómico (mora + status + historial)", () => {
+  it("camino feliz: confirma el monto nuevo, el MOROSO y el historial, y cuenta el recálculo", async () => {
+    const r = await correr(true);
+
+    expect(confirmados(moras_credito, "update").length).toBe(1);
+    expect(confirmados(moras_credito, "update")[0].set).toMatchObject({
+      cuotas_atrasadas: 1,
+    });
+    expect(confirmados(creditos, "update").map((w) => w.set)).toEqual([
+      { statusCredit: "MOROSO" },
+    ]);
+    expect(confirmados(moras_historial, "insert").length).toBe(1);
+    expect(confirmados(moras_historial, "insert")[0].values).toMatchObject({
+      tipo_evento: "RECALCULO",
+      monto_anterior: "1.00",
+    });
+    expect(r.recalculadas).toBe(1);
+    expect(succeededCount()).toBe(1);
+    expect(skippedCount()).toBe(0);
+  });
+
+  it("si el historial falla, no queda ni la mora recalculada ni el cambio de estado", async () => {
+    estado.insertHistorialThrows = new Error("historial caído");
+
+    await expect(correr(true)).rejects.toThrow("historial caído");
+
+    // 🔴 Lo que el defecto dejaba escrito: el monto nuevo cobrándose sin rastro.
+    expect(confirmados(moras_credito)).toEqual([]);
+    expect(confirmados(creditos)).toEqual([]);
+    expect(confirmados(moras_historial)).toEqual([]);
+    expect(estado.emitidos.some((e) => e.outcome === "failed" && e.operation === "process")).toBe(true);
+  });
+
+  it("el candado sigue vivo: cero filas del RETURNING → no se toca el status ni el historial y cuenta como omitido", async () => {
+    estado.updateMorasReturns = [[]];
+
+    const r = await correr(true);
+
+    expect(confirmados(creditos)).toEqual([]);
+    expect(confirmados(moras_historial)).toEqual([]);
+    expect(r.recalculadas).toBe(0);
     expect(succeededCount()).toBe(0);
     expect(skippedCount()).toBe(1);
   });

@@ -40,6 +40,8 @@ interface ContratoDeInversionista {
 	contractName: string;
 	contractType: string;
 	status: "pending" | "signed" | "cancelled";
+	/** Cuándo se emitió: es lo que distingue una compra de la siguiente. */
+	generatedAt?: Date | string | null;
 	observerUrl?: string | null;
 	clientSigningLink: string | null;
 	representativeSigningLink: string | null;
@@ -66,6 +68,24 @@ const ESTADO: Record<string, { label: string; className: string }> = {
 		className: "border-muted text-muted-foreground",
 	},
 };
+
+/**
+ * La fecha de emisión, corta.
+ *
+ * Va en cada fila porque el inversionista hace varias compras de cartera con
+ * los meses y cada una emite los mismos contratos: sin esto la ficha muestra
+ * tres "Contrato de Participación" iguales y no se sabe cuál es de cuál.
+ */
+function emitidoEl(fecha: Date | string | null | undefined): string | null {
+	if (!fecha) return null;
+	const d = fecha instanceof Date ? fecha : new Date(fecha);
+	if (Number.isNaN(d.getTime())) return null;
+	return d.toLocaleDateString("es-GT", {
+		day: "2-digit",
+		month: "short",
+		year: "numeric",
+	});
+}
 
 function copiar(url: string, etiqueta: string) {
 	navigator.clipboard.writeText(url);
@@ -122,9 +142,11 @@ function FilaDeContrato({
 					<p className="truncate font-medium text-sm">
 						{contrato.contractName}
 					</p>
-					<p className="truncate text-muted-foreground text-xs">
-						{contrato.contractType}
-					</p>
+					{emitidoEl(contrato.generatedAt) && (
+						<p className="truncate text-muted-foreground text-xs">
+							Emitido {emitidoEl(contrato.generatedAt)}
+						</p>
+					)}
 				</div>
 				<div className="flex shrink-0 items-center gap-2">
 					<Badge variant="outline" className={`${estado.className} text-xs`}>

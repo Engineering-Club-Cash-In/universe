@@ -80,6 +80,7 @@ const CONTRATO_DE_INVERSION = {
 	observerUrl: "https://app.weetrust.mx/observer/doc-1",
 	pdfLink: "legal-docs/contratos/acuerdo.pdf",
 	status: "pending",
+	generatedAt: new Date("2026-09-23T15:00:00.000Z"),
 };
 
 beforeEach(() => {
@@ -116,6 +117,23 @@ describe("espejo de contratos en cartera", () => {
 				firmadoEl: null,
 			},
 		]);
+	});
+
+	test("el nombre lleva la fecha, para distinguir una compra de la otra", async () => {
+		await espejarContratoEnCartera("contrato-1");
+
+		expect(upsertInvestorContractDocument.mock.calls[0][0].nombre).toBe(
+			"Acuerdo de Inversión Cash In — 23/09/2026",
+		);
+	});
+
+	test("un contrato sin fecha se copia igual, con el nombre pelado", async () => {
+		contrato = { ...CONTRATO_DE_INVERSION, generatedAt: null };
+
+		expect(await espejarContratoEnCartera("contrato-1")).toBe(true);
+		expect(upsertInvestorContractDocument.mock.calls[0][0].nombre).toBe(
+			"Acuerdo de Inversión Cash In",
+		);
 	});
 
 	test("un contrato de ventas no se copia a cartera", async () => {

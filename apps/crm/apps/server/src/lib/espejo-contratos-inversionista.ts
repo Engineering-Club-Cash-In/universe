@@ -78,6 +78,39 @@ async function contratoConDueno(contractId: string) {
 }
 
 /**
+ * Cómo se llama el contrato en la papelería del inversionista.
+ *
+ * Con la fecha de emisión pegada al nombre porque un inversionista compra
+ * cartera varias veces con los meses, y cada compra emite los mismos tipos de
+ * contrato. Sin la fecha, la papelería termina con tres filas idénticas
+ * llamadas "Contrato de Participación" y nadie sabe cuál es de cuál.
+ *
+ * Se arma acá y no en cartera para que la copia sea siempre la misma: el
+ * espejo se vuelve a mandar en cada firma, y un nombre que cambiara entre
+ * envíos renombraría el documento a media vida.
+ */
+function nombreEnLaPapeleria(contrato: {
+	contractName: string;
+	generatedAt: Date | string | null;
+}): string {
+	// Sin fecha se manda el nombre pelado: todo esto es best-effort y un error
+	// acá no se ve en ninguna pantalla, así que no se arriesga la copia por el
+	// nombre.
+	const emitido = contrato.generatedAt
+		? new Date(contrato.generatedAt)
+		: null;
+	if (!emitido || Number.isNaN(emitido.getTime())) return contrato.contractName;
+
+	const fecha = emitido.toLocaleDateString("es-GT", {
+		day: "2-digit",
+		month: "2-digit",
+		year: "numeric",
+		timeZone: "America/Guatemala",
+	});
+	return `${contrato.contractName} — ${fecha}`;
+}
+
+/**
  * Copia el contrato entero en cartera: el PDF y sus enlaces.
  *
  * Se llama al emitirlo y cada vez que se reemite, porque ahí cambia el
@@ -107,7 +140,7 @@ export async function espejarContratoEnCartera(
 			file: archivo,
 			inversionista_id: contrato.investorId as number,
 			contrato_id: contrato.id,
-			nombre: contrato.contractName,
+			nombre: nombreEnLaPapeleria(contrato),
 			tipo_contrato: contrato.contractType,
 			weetrust_document_id: contrato.weetrustDocumentId,
 			observer_url: contrato.observerUrl,

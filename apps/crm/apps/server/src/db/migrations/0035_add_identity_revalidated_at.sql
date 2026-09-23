@@ -1,0 +1,13 @@
+-- Marca de cuándo se invalidó la identidad del expediente: la deja el reset de
+-- `lib/revalidacion-oportunidad.ts` (reapertura de una oportunidad perdida u
+-- override del candado de DPI).
+--
+-- Sin ella, el reset devolvía la oportunidad a análisis pero los DOCUMENTOS de
+-- la identidad vieja seguían satisfaciendo el requisito: se podía volver a
+-- aprobar con el DPI escaneado de otra persona. `approveOpportunityAnalysis`
+-- compara contra esta marca y deja de contar el documento de identidad subido
+-- antes de ella. El documento viejo no se toca: sigue en el expediente.
+--
+-- Aditiva y retrocompatible: columna nullable, las oportunidades existentes
+-- quedan en NULL (nunca se revalidaron) y se comportan como siempre.
+ALTER TABLE "opportunities" ADD COLUMN IF NOT EXISTS "identity_revalidated_at" timestamp;

@@ -21,7 +21,14 @@ export const snapCte = (fecha: string, incluirFecha = true) => {
         ORDER BY (h.cuotas_atrasadas_nuevas > 0) DESC, h.fecha DESC, h.historial_id DESC
       ) AS cuotas
     FROM cartera.moras_historial h
-    -- Corte por DÍA Guatemala: fecha es timestamp UTC (defaultNow, session UTC) y el cron
+    -- La columna fecha la escribe registrarHistorialMora (latefee.ts) con clock_timestamp()::timestamp:
+    -- la hora REAL del insert, no la del BEGIN. Con el DEFAULT now() —que es
+    -- transaction_timestamp()— una transacción larga (el convenio) fechaba su evento con la
+    -- hora en que arrancó, y un ajuste de mora commiteado en el medio quedaba "después":
+    -- este ORDER BY fecha DESC lo elegía y el reporte mostraba mora activa después de que el
+    -- convenio la desactivó. El desempate por historial_id DESC sigue haciendo falta para
+    -- eventos que caen en la misma marca.
+    -- Corte por DÍA Guatemala: fecha es timestamp UTC (session UTC) y el cron
     -- corre ~23:59 GT (≈06:00 UTC del día siguiente); comparar en GT evita correr esos
     -- eventos al día siguiente.
     WHERE (h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date ${comparador} ${fecha}::date

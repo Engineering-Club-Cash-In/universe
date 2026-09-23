@@ -1946,14 +1946,41 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   console.log(
     `Falsificando pago con ID: ${pago_id} para crédito ID: ${credito_id}`
   );
-  // Mismo guard que obtenerCreditosConPagosPendientes/calcularYRegistrarPagosEspejo:
-  // un crédito en PENDIENTE_AUTORIZACION no debe generar pagos espejo, ni siquiera
-  // "falsos", mientras la devolución a CUBE sigue sin resolver.
-  await withPendingReturnCreditLocks([credito_id], async () => {
-    // updateCredito=false → NO actualiza creditos_inversionistas_espejo (monto_aportado).
-    // Falsear un pago no debe descontar el aporte del crédito/espejo.
-    await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
-  });
+
+  // ── EL ORDEN ES LO QUE HACE ESTO REINTENTABLE ──────────────────────────────
+  //
+  // Antes los espejos de inversionistas se escribían PRIMERO y la anulación
+  // después. Si la anulación fallaba —la restitución de mora tira a propósito
+  // para abortar su transacción— el caller reintentaba `falsePayment` entera y
+  // los espejos se volvían a escribir: `pagos_credito_inversionistas_espejo` NO
+  // tiene restricción de unicidad por pago e inversionista (verificado contra
+  // el esquema: solo la PK por `id`, `idx_pagos_liquidacion_espejo` y los dos
+  // parciales por `no liquidado`; la que sí existe, `uk_pago_inversionista`, es
+  // de la tabla vieja `pagos_credito_inversionistas`), así que quedaban filas
+  // DUPLICADAS sin liquidar, que aguas abajo duplican montos.
+  //
+  // Y no se puede juntar todo en UNA transacción, que sería lo natural:
+  // `withPendingReturnCreditLocks` abre su PROPIA conexión (`lockPool`) y toma
+  // `FOR NO KEY UPDATE` sobre la fila de `cartera.creditos` mientras corre su
+  // callback. `anularPagoYRestituirMora` pide `FOR UPDATE` sobre esa MISMA fila
+  // —el candado que abre el orden del módulo de mora— desde la conexión de la
+  // transacción: los dos modos entran en conflicto, así que meter la anulación
+  // adentro del callback la dejaría esperando un candado que solo se suelta
+  // cuando el callback termine. Bloqueo contra uno mismo.
+  //
+  // Invertir el orden resuelve las dos cosas sin tocar esa arquitectura:
+  //
+  //   * si la ANULACIÓN falla, su transacción no dejó nada y los espejos ni
+  //     siquiera se intentaron: el reintento arranca limpio;
+  //   * si fallan los ESPEJOS, su propia transacción (la de
+  //     `insertPagosCreditoInversionistas`) hace rollback entera, y el
+  //     reintento vuelve a pasar por la anulación —que sobre un pago ya
+  //     `paymentFalse` no restituye mora de nuevo ni re-marca su decremento— y
+  //     escribe los espejos UNA sola vez.
+  //
+  // El resultado del espejo no depende del orden: solo lee la cuota del pago,
+  // el espejo del crédito y los abonos no liquidados; nada de eso lo toca la
+  // anulación.
 
   // Marcar la boleta como falsa y restituir su mora son UN SOLO HECHO, así que
   // van en UNA transacción: si la restitución falla, el pago NO queda marcado y
@@ -1967,6 +1994,15 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   const updatedCount = await db.transaction((tx) =>
     anularPagoYRestituirMora(tx as unknown as typeof db, { pago_id, credito_id })
   );
+
+  // Mismo guard que obtenerCreditosConPagosPendientes/calcularYRegistrarPagosEspejo:
+  // un crédito en PENDIENTE_AUTORIZACION no debe generar pagos espejo, ni siquiera
+  // "falsos", mientras la devolución a CUBE sigue sin resolver.
+  await withPendingReturnCreditLocks([credito_id], async () => {
+    // updateCredito=false → NO actualiza creditos_inversionistas_espejo (monto_aportado).
+    // Falsear un pago no debe descontar el aporte del crédito/espejo.
+    await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
+  });
 
   return {
     message: "Payment marked as false successfully",

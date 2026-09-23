@@ -2274,7 +2274,12 @@ export const insertPayment = async (
         pagoConvenioPagoId = pagoInsertado.pago_id;
       }
 
-
+      // 🔗 Esta fila se llevó la mora (`mora: moraBig` en `pagoData`) y es la
+      // ÚNICA que escribe esta rama: si el pago cobró mora y no se estampa acá,
+      // el decremento nace sin marca y anular o revertir el pago cae al camino
+      // de reserva —"¿el cron tocó la mora después?"—, que casi siempre dice
+      // que sí y restituye CERO: el capital vuelve y la mora no.
+      await estamparDecrementoMora(pagoInsertado.pago_id);
 
       // 3️⃣ Insertar boletas si existen
       if (urlCompletas && urlCompletas.length > 0) {

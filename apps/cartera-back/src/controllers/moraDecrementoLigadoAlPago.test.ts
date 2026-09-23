@@ -379,10 +379,11 @@ describe("registerPayment deja el decremento ligado a su pago", () => {
 		).text();
 
 		expect(texto).toContain("crearEstampadorDecrementoMora(");
-		// Las tres ramas de "solo mora", la fila de la cuota y el pago especial.
+		// Las tres ramas de "solo mora", la fila de la cuota, el pago especial y
+		// la fila del abono directo a capital.
 		expect(
 			texto.split("await estamparDecrementoMora(").length - 1,
-		).toBeGreaterThanOrEqual(5);
+		).toBeGreaterThanOrEqual(6);
 		// Y el de la fila de la cuota cuelga de que ESA fila se haya llevado la
 		// mora, no de otra condición: es la única rama que escribe varias filas.
 		expect(texto).toContain(
@@ -394,5 +395,37 @@ describe("registerPayment deja el decremento ligado a su pago", () => {
 		expect(texto).toContain(
 			"historialIdDecremento: resultadoMora.historial_id ?? null",
 		);
+	});
+
+	it("la rama del abono directo a capital estampa la fila que se llevó la mora", async () => {
+		// Esa rama es la única salida de `registerPayment` que escribe UNA sola
+		// fila y retorna sin pasar por el loop de cuotas ni por el else final: si
+		// no estampa, el decremento de ese pago nace sin marca y anular o
+		// revertir el pago cae al camino de reserva, que ve que el cron tocó la
+		// mora después (la toca todas las noches) y restituye CERO. El capital
+		// vuelve, la mora no.
+		const texto = await Bun.file(
+			new URL("./registerPayment.ts", import.meta.url).pathname,
+		).text();
+
+		const inicio = texto.indexOf(
+			"if ((estaAlDia || permiteAbonoCapital) && abonoCapital.gt(0))",
+		);
+		const fin = texto.indexOf(
+			"Abono directo a capital registrado exitosamente",
+		);
+		expect(inicio).toBeGreaterThan(0);
+		expect(fin).toBeGreaterThan(inicio);
+		const rama = texto.slice(inicio, fin);
+
+		// Premisa: esta fila ES la que carga la mora cobrada por la boleta.
+		expect(rama).toContain("mora: moraBig");
+		// Y el estampado cuelga del `pago_id` recién insertado, no de otra cosa.
+		const insercion = rama.indexOf("const [pagoInsertado] = await db");
+		const estampado = rama.indexOf(
+			"await estamparDecrementoMora(pagoInsertado.pago_id)",
+		);
+		expect(insercion).toBeGreaterThan(-1);
+		expect(estampado).toBeGreaterThan(insercion);
 	});
 });

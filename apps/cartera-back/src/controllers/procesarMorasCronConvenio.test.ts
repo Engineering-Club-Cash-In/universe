@@ -110,6 +110,11 @@ const dbFalsa = {
       return b;
     },
   }),
+  // La CREACION corre dentro de una transacción (status + mora + historial
+  // juntos) con un savepoint alrededor del insert. Este fake NO modela
+  // commit/rollback — de eso se encarga procesarMorasCronCreacionAtomica.test.ts;
+  // acá solo interesa QUÉ writes se emiten, así que la tx es transparente.
+  transaction: async (cb: any) => cb(dbFalsa),
 };
 
 const clientFalso = {

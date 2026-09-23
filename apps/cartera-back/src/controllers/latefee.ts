@@ -1566,60 +1566,100 @@ export async function procesarMoras() {
         // exactamente el defecto que se está cerrando — mientras que acá la
         // condición se evalúa dentro del mismo write. (`statusCredit` es NOT
         // NULL en el esquema, así que el `NOT IN` nunca cae en el NULL de SQL.)
-        const marcadoMoroso = await db
-          .update(creditos)
-          .set({ statusCredit: "MOROSO" })
-          .where(
-            and(
-              eq(creditos.credito_id, creditoId),
-              notInArray(creditos.statusCredit, STATUS_EXCLUIDOS_MORA_SQL),
-            ),
-          )
-          .returning({ credito_id: creditos.credito_id });
+        //
+        // 🧾 Y los tres writes van JUNTOS en una transacción (el mismo patrón
+        // de `desactivarMoraPorConvenio` y `desactivarMoraDelCron`): con el
+        // update suelto, autocommiteado, si el INSERT de la mora fallaba por
+        // cualquier motivo distinto del 23505 ya contemplado, `procesarMoras`
+        // salía con error y el crédito quedaba MOROSO sin mora activa ni evento
+        // de CREACION — un estado que ni el cron ni una segunda pasada
+        // corrigen, porque ambos parten de "hay mora activa". Adentro de la
+        // transacción ese fallo revierte también el cambio de estado.
+        // Beneficio extra: el UPDATE deja el row lock del crédito tomado hasta
+        // el commit, así que el candado ya no es solo lógico.
+        let creacionOk = false;
+        await db.transaction(async (txm) => {
+          const marcadoMoroso = await txm
+            .update(creditos)
+            .set({ statusCredit: "MOROSO" })
+            .where(
+              and(
+                eq(creditos.credito_id, creditoId),
+                notInArray(creditos.statusCredit, STATUS_EXCLUIDOS_MORA_SQL),
+              ),
+            )
+            .returning({ credito_id: creditos.credito_id });
 
-        if (marcadoMoroso.length === 0) {
-          // Convenio (u otra ruta) cambió el estado a media corrida: este
-          // crédito ya no lleva mora. No se crea nada.
+          if (marcadoMoroso.length === 0) {
+            // Convenio (u otra ruta) cambió el estado a media corrida: este
+            // crédito ya no lleva mora. No se crea nada (el update no afectó
+            // filas, así que la tx commitea vacía).
+            return;
+          }
+
+          let insertada;
+          try {
+            // 💾 SAVEPOINT (transacción anidada de drizzle) alrededor del
+            // insert. En Postgres un error de statement aborta la transacción
+            // entera: sin el savepoint, el 23505 se llevaría puesto el MOROSO
+            // que SÍ queremos conservar. El savepoint es justo lo que separa
+            // los dos casos, y la distinción es de fondo, no de forma:
+            //   - 23505 → existe una mora ACTIVA de este crédito (la creó otra
+            //     corrida) y el UPDATE ya probó que el crédito no está en un
+            //     estado excluido: MOROSO es el estado correcto → rollback
+            //     solo hasta el savepoint y la tx commitea el status.
+            //   - cualquier otro error → NO quedó mora: MOROSO sería mentira →
+            //     se propaga y la tx entera revierte el status.
+            insertada = await txm.transaction(async (sp) => {
+              const [fila] = await sp
+                .insert(moras_credito)
+                .values({
+                  credito_id: creditoId,
+                  monto_mora: moraNuevaStr,
+                  cuotas_atrasadas: cuotasAtrasadas,
+                  activa: true,
+                  porcentaje_mora: "1.12",
+                })
+                .returning();
+              return fila;
+            });
+          } catch (e: any) {
+            // Índice único parcial moras_credito_uq_activa: otra corrida concurrente
+            // ya creó la mora activa de este crédito → omitir (no duplicar).
+            // El MOROSO que acabamos de dejar sigue siendo el estado correcto:
+            // hay una mora activa sobre un crédito que no estaba excluido.
+            if (e?.code === "23505") return;
+            throw e;
+          }
+
+          await registrarHistorialMora({
+            credito_id: creditoId,
+            mora_id: insertada.mora_id,
+            tipo_evento: "CREACION",
+            origen: "PROCESO_AUTO",
+            monto_anterior: "0",
+            monto_nuevo: moraNuevaStr,
+            cuotas_atrasadas_anterior: 0,
+            cuotas_atrasadas_nuevas: cuotasAtrasadas,
+            capital_credito: capitalStr,
+            porcentaje_mora: insertada.porcentaje_mora,
+            dbClient: txm as unknown as typeof db,
+            // Dentro de la tx el swallow es mentiroso: sin esto, un historial
+            // fallido dejaría la tx abortada y el COMMIT sería un rollback
+            // silencioso mientras el contador dice "creada".
+            propagarError: true,
+          });
+
+          creacionOk = true;
+        });
+
+        // Los dos caminos que no crearon nada (candado con cero filas y 23505)
+        // caen en el mismo balde de omitidos que antes: los contadores siguen
+        // diciendo lo que de verdad pasó.
+        if (!creacionOk) {
           skippedInternally++;
           continue;
         }
-
-        let insertada;
-        try {
-          [insertada] = await db
-            .insert(moras_credito)
-            .values({
-              credito_id: creditoId,
-              monto_mora: moraNuevaStr,
-              cuotas_atrasadas: cuotasAtrasadas,
-              activa: true,
-              porcentaje_mora: "1.12",
-            })
-            .returning();
-        } catch (e: any) {
-          // Índice único parcial moras_credito_uq_activa: otra corrida concurrente
-          // ya creó la mora activa de este crédito → omitir (no duplicar).
-          // El MOROSO que acabamos de dejar sigue siendo el estado correcto:
-          // hay una mora activa sobre un crédito que no estaba excluido.
-          if (e?.code === "23505") {
-            skippedInternally++;
-            continue;
-          }
-          throw e;
-        }
-
-        await registrarHistorialMora({
-          credito_id: creditoId,
-          mora_id: insertada.mora_id,
-          tipo_evento: "CREACION",
-          origen: "PROCESO_AUTO",
-          monto_anterior: "0",
-          monto_nuevo: moraNuevaStr,
-          cuotas_atrasadas_anterior: 0,
-          cuotas_atrasadas_nuevas: cuotasAtrasadas,
-          capital_credito: capitalStr,
-          porcentaje_mora: insertada.porcentaje_mora,
-        });
 
         creadas++;
 

@@ -815,11 +815,14 @@ test("serializa referencias distintas del mismo crédito", async () => {
   expect(maxActive).toBe(1);
 });
 
-test("calcula la fecha de pago en Guatemala", async () => {
-  const module = await import("./nexaPayments");
-  const formatDate = Reflect.get(module, "formatNexaPaymentDate");
-
-  expect(formatDate).toBeFunction();
-  if (typeof formatDate !== "function") return;
-  expect(formatDate(new Date("2026-09-09T02:00:00Z"))).toBe("2026-09-08");
+test("conserva el día bancario y usa la referencia cuando la entrada no tiene autorización", async () => {
+  const { getNexaReceiptFields } = await import("./nexaPayments");
+  expect(getNexaReceiptFields({ ...paymentBody("bank-reference"), tokenDate: "2026-09-23T00:00:00.000Z" })).toEqual({
+    fecha_pago: "2026-09-23T00:00:00.000Z",
+    fecha_boleta: "2026-09-23",
+    numeroAutorizacion: "bank-reference",
+  });
+  expect(getNexaReceiptFields({ ...paymentBody("bank-reference"), tokenDate: "2026-09-08T23:30:00-06:00", transactionId: "bank-authorization" })).toMatchObject({
+    fecha_boleta: "2026-09-08", numeroAutorizacion: "bank-authorization",
+  });
 });

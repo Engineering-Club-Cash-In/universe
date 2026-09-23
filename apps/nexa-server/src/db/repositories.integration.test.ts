@@ -217,14 +217,15 @@ integrationTest("incoming statement enriches once and preserves the webhook noti
   expect(results.filter(Boolean)).toHaveLength(1);
   const [row] = await db.select().from(nexaPaymentTransactions);
   expect(row).toMatchObject({ id: stored.id, transactionId: "7293", tokenDate: incoming.tokenDate, processingStatus: "RECEIVED", failureReason: null });
-  expect(row?.rawPayload).toMatchObject({ transactionId: "7293", tokenDate: incoming.tokenDate });
+  expect(row?.rawPayload).toMatchObject({ transactionId: "7293", bankTransactionId: "", tokenDate: incoming.tokenDate });
   expect(await repository.upsertReceived({ ...incoming, tokenDate: undefined })).toMatchObject({ id: stored.id, created: false });
   expect(await repository.listMissingDateReceipts()).toEqual([]);
   await associateToken(incoming.tokenIdentifier, incoming.tokenPrefix, 42);
   let applied = 0;
+  let ledgerTransactionId: unknown;
   const workerOptions = { leaseSeconds: 60, maxAttempts: 1, backoffSeconds: 1, maxBackoffSeconds: 10 };
   const apply = () => runApplicationWorkerOnce({ repository, ...workerOptions,
-    cartera: { applyNexaPayment: async () => { applied++; return { status: "APPLIED", paymentId: 707 }; } },
+    cartera: { applyNexaPayment: async ({ transaction }) => { applied++; ledgerTransactionId = transaction.transactionId; return { status: "APPLIED", paymentId: 707 }; } },
   });
   expect(await apply()).toBe(true);
   expect(await apply()).toBe(false);
@@ -235,6 +236,7 @@ integrationTest("incoming statement enriches once and preserves the webhook noti
   expect(await review()).toBe(true);
   expect(await review()).toBe(false);
   expect(applied).toBe(1);
+  expect(ledgerTransactionId).toBe("");
   expect(approvals).toEqual([{ id: 7293, reference: 4617307, status: "APPROVED" }]);
   expect(await repository.enrichIncomingStatement(statement)).toBe(false);
   expect((await db.select().from(nexaPaymentTransactions))[0]?.processingStatus).toBe("COMPLETED");

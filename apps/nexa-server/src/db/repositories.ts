@@ -193,6 +193,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         reference, amount: incoming.amount, currency: incoming.currency, tokenDate: incoming.tokenDate,
         tokenIdentifier: incoming.tokenIdentifier, tokenPrefix: incoming.tokenPrefix,
         wasReturn: incoming.wasReturn, transactionId: stored.transactionId,
+        bankTransactionId: incoming.transactionId.trim(),
       };
       await tx.update(nexaPaymentTransactions).set({
         tokenDate: incoming.tokenDate, processingStatus: "RECEIVED", failureReason: null,
@@ -246,7 +247,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         payment.token_date AS "tokenDate",
         payment.token_identifier AS "tokenIdentifier",
         payment.token_prefix AS "tokenPrefix",
-        payment.transaction_id AS "transactionId",
+        COALESCE(payment.raw_payload->>'bankTransactionId', payment.transaction_id) AS "transactionId",
         payment.was_return AS "wasReturn",
         payment.attempt_count AS "attemptCount"
     `);

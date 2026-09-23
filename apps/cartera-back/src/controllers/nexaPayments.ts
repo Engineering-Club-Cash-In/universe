@@ -92,16 +92,15 @@ export const classifyNexaClaim = (
 
 type NexaPaymentResult = { paymentId: number; idempotent: boolean };
 
-export const formatNexaPaymentDate = (date: Date) => {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Guatemala",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(date).map(({ type, value }) => [type, value]),
-  );
-  return `${parts.year}-${parts.month}-${parts.day}`;
+export const getNexaReceiptFields = (body: NexaPaymentBody) => {
+  if (!body.tokenDate) throw new NexaPaymentError("payment_date_required", 503);
+  // Nexa statements supply a banking calendar date, not a local receipt time.
+  // Keep the original bank value for audit; do not shift the statement day.
+  return {
+    fecha_pago: body.tokenDate,
+    fecha_boleta: body.tokenDate.slice(0, 10),
+    numeroAutorizacion: body.transactionId || body.externalReference,
+  };
 };
 
 export type NexaPaymentDependencies = {

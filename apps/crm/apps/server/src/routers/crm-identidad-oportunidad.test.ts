@@ -1058,3 +1058,252 @@ describe("updateOpportunity: con evidencia cargada, el cliente ya no se cambia",
 		});
 	});
 });
+
+/**
+ * 🔴 La quinta variante: el `leadId` que llega en el input sin cambiar nada.
+ *
+ * `cambiaElLeadDeLaOportunidad` compara el input contra la fila LEÍDA, así que
+ * un request que manda el mismo `leadId` da falso y no corre ninguna de las
+ * guardas —ni la de etapa, ni la de evidencia, ni la invalidación de
+ * identidad—. Si ese campo llegara al `SET`, sería el rebote:
+ *
+ *   1. El request A lee la oportunidad con el lead X.
+ *   2. El request B se la cambia a Y pagando todas las guardas, y de paso
+ *      invalida la identidad o suma evidencia.
+ *   3. A aterriza y reescribe `lead = X` por un camino sin candado, sin
+ *      predicado de evidencia y sin invalidación: deshace el cambio de B y deja
+ *      pegada la invalidación que B pagó.
+ *
+ * `expectedUpdatedAt` es opcional, así que tampoco lo frena.
+ *
+ * ⚠️ Al escribir estas pruebas resultó que el paso 3 hoy NO ocurre, pero por
+ * casualidad: `stripUnchangedFrozenFields` saca el `leadId` que no cambió
+ * porque el cliente está en la lista de campos congelados de una oportunidad
+ * GANADA, o sea por una razón de contratos, no de identidad. Lo que sí estaba
+ * abierto —y es lo que estas pruebas ponen en rojo— son las dos caras del mismo
+ * descuido: el invariante del 80% evaluándose contra el valor reenviado en vez
+ * de contra la columna que de verdad va a quedar, y el cambio de cliente de
+ * verdad aplicándose sobre el lead que hubiera quedado en vez de sobre el que
+ * se leyó. Las afirmaciones sobre el `SET` se quedan como red: son la que
+ * avisará si algún día sacan al cliente de la lista de congelados.
+ *
+ * Las pruebas afirman sobre el EFECTO —qué columnas viajan en el `SET` y qué
+ * condiciones en el WHERE— y no sobre que el `if` exista: en esta suite está
+ * comprobado que un test de cableado se traga un `if (false && ...)`.
+ */
+describe("updateOpportunity: reenviar el mismo cliente no lo reescribe", () => {
+	const OPORTUNIDAD = "18181818-1818-4181-8181-181818181818";
+	const LEAD_A = "19191919-1919-4191-8191-191919191919";
+	const LEAD_B = "20202020-2020-4202-8202-202020202020";
+	const ETAPA_CIERRE_40 = "21212121-2121-4212-8212-212121212121";
+	const ETAPA_CALIFICACION_20 = "23232323-2323-4232-8232-232323232323";
+
+	const conElLeadA = {
+		id: OPORTUNIDAD,
+		title: "Crédito del lead A",
+		leadId: LEAD_A,
+		stageId: ETAPA_CIERRE_40,
+		status: "open",
+		assignedTo: "vendedor",
+		analysisStatus: "approved",
+		creditDetailApproved: true,
+		identityRevalidatedAt: null,
+		vehicleId: "vehiculo-1",
+		companyId: null,
+		vendorId: null,
+		creditType: "autocompra",
+		diaPagoMensual: 15,
+		diaPagoOriginalSistema: null,
+		insuranceProvider: "universales",
+		updatedAt: new Date("2026-09-20T12:00:00.000Z"),
+		stageName: "Cierre de propuesta",
+		closurePercentage: 40,
+		maxHistoricoClosurePercentage: 40,
+	};
+
+	const sembrar = (oportunidad: Fila, etapa: Fila) => {
+		filasPorTabla.set(user, [{ id: "vendedor", role: "sales" }]);
+		filasPorTabla.set(opportunities, [oportunidad]);
+		filasPorTabla.set(leads, [
+			{ id: LEAD_A, source: "web" },
+			{ id: LEAD_B, source: "web" },
+		]);
+		filasPorTabla.set(salesStages, [etapa]);
+		filasPorTabla.set(opportunityDocuments, []);
+		filasPorTabla.set(creditApplications, []);
+	};
+
+	/** Las columnas que el `SET` de un UPDATE declara escribir. */
+	const columnasEscritas = (escritura: Escritura | undefined) =>
+		Object.keys(escritura?.valores ?? {});
+
+	test("el `SET` no lleva `leadId` cuando el input reenvía el que ya tenía", async () => {
+		// El caso de todos los días: el formulario reenvía el objeto entero, con el
+		// mismo cliente adentro, para cambiar otra cosa.
+		sembrar(conElLeadA, {
+			id: ETAPA_CIERRE_40,
+			name: "Cierre de propuesta",
+			closurePercentage: 40,
+			order: 5,
+		});
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_A, notes: "llamar el martes" },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const [escritura] = escriturasSobreOportunidades();
+
+		// La edición sí se aplica: lo que se saca es el campo que no cambia.
+		expect(escritura?.valores).toMatchObject({ notes: "llamar el martes" });
+
+		// 🔴 El EFECTO: el campo no viaja en el `SET`, así que no puede pisar al
+		// cliente que otro request acaba de poner por un camino donde no corrió ni
+		// el candado, ni el predicado de evidencia, ni la invalidación.
+		//
+		// ⚠️ Esta afirmación ya pasaba antes del arreglo, y por eso se queda: hoy
+		// quien lo saca es `stripUnchangedFrozenFields` —`leadId` está en
+		// `WON_OPPORTUNITY_FROZEN_FIELD_LABELS`, así que el campo se cae por ser
+		// dato congelado, no por ser identidad—. Es protección prestada: el día que
+		// alguien saque el cliente de esa lista (no es un término del contrato) el
+		// hueco se abre solo. Ahora el handler lo saca además por su cuenta y este
+		// test es el que lo mantiene cerrado pase lo que pase con la lista.
+		expect(columnasEscritas(escritura)).not.toContain("leadId");
+
+		// 🔴 Y la otra mitad: el invariante del 80% tiene que mirar la columna
+		// VIVA, no el valor reenviado. Si la sentencia no escribe el campo, el
+		// `leadId` con el que la fila queda es el de la base; evaluarlo contra el
+		// literal del formulario daba por bueno un `stage >= 80%` sobre una
+		// oportunidad que otro request acababa de dejar sin cliente.
+		const { sql: texto, params } = sqlDeLaCondicion(escritura?.condicion);
+		expect(texto.replace(/\s+/g, " ").toLowerCase()).toContain(
+			'"opportunities"."lead_id" is not null',
+		);
+		expect(params).not.toContain(LEAD_A);
+	});
+
+	test("desasignado que sigue desasignado tampoco viaja en el `SET`", async () => {
+		// El mismo caso con `null` de los dos lados, que es el que se escapa de las
+		// comparaciones sueltas: `null !== undefined`, así que el campo entra al
+		// input igual. Un `lead = NULL` escrito por acá borraría al cliente que
+		// otro request acaba de colgar, sin pasar por ninguna guarda.
+		sembrar(
+			{
+				...conElLeadA,
+				leadId: null,
+				stageId: ETAPA_CALIFICACION_20,
+				analysisStatus: "not_applicable",
+				creditDetailApproved: null,
+				stageName: "Calificación",
+				closurePercentage: 20,
+				maxHistoricoClosurePercentage: 20,
+			},
+			{
+				id: ETAPA_CALIFICACION_20,
+				name: "Calificación",
+				closurePercentage: 20,
+				order: 3,
+			},
+		);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: null, notes: "sin cliente todavía" },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const [escritura] = escriturasSobreOportunidades();
+		expect(escritura?.valores).toMatchObject({ notes: "sin cliente todavía" });
+		expect(columnasEscritas(escritura)).not.toContain("leadId");
+	});
+
+	test("el cambio de verdad se aplica SOBRE el lead que se leyó, no sobre el que quedó", async () => {
+		// Red de seguridad y la otra mitad del arreglo. Un cambio real sigue
+		// pasando por todas las guardas y sigue escribiendo el campo, pero el
+		// UPDATE exige en su propio WHERE que el cliente vivo siga siendo el que se
+		// leyó: si otro request lo cambió en el medio, son cero filas (CONFLICT) y
+		// no un pisotón silencioso con una bitácora que miente sobre el anterior.
+		sembrar(
+			{
+				...conElLeadA,
+				stageId: ETAPA_CALIFICACION_20,
+				analysisStatus: "not_applicable",
+				creditDetailApproved: null,
+				stageName: "Calificación",
+				closurePercentage: 20,
+				maxHistoricoClosurePercentage: 20,
+			},
+			{
+				id: ETAPA_CALIFICACION_20,
+				name: "Calificación",
+				closurePercentage: 20,
+				order: 3,
+			},
+		);
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, leadId: LEAD_B },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const [escritura] = escriturasSobreOportunidades();
+		// Cambiar el cliente de verdad sigue escribiendo el campo...
+		expect(escritura?.valores).toMatchObject({ leadId: LEAD_B });
+		// ...y sigue pagando la invalidación de identidad.
+		expect(escritura?.valores.creditDetailApproved).toBe(false);
+
+		// ...y la premisa viaja DENTRO de la sentencia: `lead_id = <el leído>`.
+		const { sql: texto, params } = sqlDeLaCondicion(escritura?.condicion);
+		expect(texto.replace(/\s+/g, " ").toLowerCase()).toContain('lead_id" =');
+		expect(params).toContain(LEAD_A);
+	});
+
+	test("un update que no manda `leadId` no paga ninguna condición nueva", async () => {
+		// Red de seguridad: el flujo normal. Sin el campo en el input no hay nada
+		// que sacar del `SET` ni nada que exigir en el WHERE.
+		sembrar(conElLeadA, {
+			id: ETAPA_CIERRE_40,
+			name: "Cierre de propuesta",
+			closurePercentage: 40,
+			order: 5,
+		});
+
+		await invocar(
+			crmRouter.updateOpportunity,
+			{ id: OPORTUNIDAD, notes: "solo una nota" },
+			contextoDe("vendedor", "sales"),
+		);
+
+		const [escritura] = escriturasSobreOportunidades();
+		expect(escritura?.valores).toMatchObject({ notes: "solo una nota" });
+		expect(columnasEscritas(escritura)).not.toContain("leadId");
+
+		// El WHERE no pinea el cliente: una edición que no toca la identidad no
+		// tiene por qué fallar porque otro la haya corregido en paralelo.
+		const { params } = sqlDeLaCondicion(escritura?.condicion);
+		expect(params).not.toContain(LEAD_A);
+	});
+
+	test("cambiar el cliente arriba del umbral sigue bloqueado", async () => {
+		// Red de seguridad: sacar el campo del `SET` no puede aflojar el candado
+		// para el cambio de verdad.
+		sembrar(conElLeadA, {
+			id: ETAPA_CIERRE_40,
+			name: "Cierre de propuesta",
+			closurePercentage: 40,
+			order: 5,
+		});
+
+		await expect(
+			invocar(
+				crmRouter.updateOpportunity,
+				{ id: OPORTUNIDAD, leadId: LEAD_B },
+				contextoDe("vendedor", "sales"),
+			),
+		).rejects.toThrow(/No se puede cambiar el cliente de esta oportunidad/);
+
+		expect(escriturasSobreOportunidades()).toEqual([]);
+	});
+});

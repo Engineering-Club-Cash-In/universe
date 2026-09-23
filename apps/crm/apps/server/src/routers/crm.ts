@@ -2956,6 +2956,39 @@ export const crmRouter = {
 				input.leadId !== undefined &&
 				input.leadId !== currentOpportunity[0].leadId;
 
+			/**
+			 * El formulario reenvía el `leadId` que la oportunidad YA tenía.
+			 *
+			 * `cambiaElLeadDeLaOportunidad` compara contra la fila LEÍDA, así que ese
+			 * request da falso y no corre nada del candado: ni la etapa, ni la
+			 * evidencia, ni la invalidación de identidad. Si además el campo viajara
+			 * en el `SET`, sería el rebote: el request A lee la oportunidad con el
+			 * lead X, el request B se la cambia a Y pagando todas las guardas, y
+			 * después A aterriza y reescribe `lead = X` por un camino sin candado,
+			 * deshaciendo el cambio de B y dejando pegada la invalidación que B pagó.
+			 * `expectedUpdatedAt` es opcional, así que tampoco lo frena.
+			 *
+			 * ⚠️ Hoy ese campo NO llega al `SET`, pero por prestado:
+			 * `stripUnchangedFrozenFields` lo saca porque `leadId` está en
+			 * `WON_OPPORTUNITY_FROZEN_FIELD_LABELS`, o sea por ser dato congelado de
+			 * una oportunidad ganada, no por ser la identidad del expediente. El día
+			 * que alguien saque al cliente de esa lista —no es un término del
+			 * contrato, es un argumento razonable— el rebote se abre solo y sin que
+			 * nada lo señale. Por eso la bandera existe y se aplica acá también: la
+			 * protección de la identidad no puede depender de la lista de otro guard.
+			 *
+			 * Se saca del `SET` en vez de exigirlo en el WHERE: escribir el mismo
+			 * valor que se leyó no aporta nada, y un predicado sobre el lead vivo
+			 * para CUALQUIER request que traiga el campo le haría fallar el guardado
+			 * al asesor cada vez que otro corrigiera el cliente en paralelo —los
+			 * formularios de este CRM reenvían el objeto entero, así que lo pagarían
+			 * todas las ediciones, no las que cambian el cliente—. El predicado sí
+			 * va, pero sólo en el camino donde el lead de verdad cambia: ver
+			 * `elLeadVivoSigueSiendoElLeido`.
+			 */
+			const reenvioDelMismoLead =
+				input.leadId !== undefined && !cambiaElLeadDeLaOportunidad;
+
 			if (cambiaElLeadDeLaOportunidad) {
 				// 🔴 Lo que decide es la etapa EFECTIVA de destino —`input.stageId` si
 				// viene, y si no la guardada—, no sólo el estado persistido.
@@ -3330,10 +3363,22 @@ export const crmRouter = {
 
 			// PostgreSQL re-evaluates this predicate after waiting for a concurrent
 			// row update, so lead/stage edits cannot jointly persist an invalid state.
+			//
+			// 🔴 El `leadId` entra al invariante sólo si de verdad viaja en el `SET`.
+			// Cuando es el reenvío del mismo valor no viaja (ver
+			// `reenvioDelMismoLead`), y evaluar el invariante contra el literal del
+			// formulario mientras la columna queda como está era dar por bueno lo que
+			// no se iba a escribir: si otro request dejó la oportunidad sin cliente,
+			// el `$1::uuid IS NOT NULL` pasaba igual y la misma sentencia la subía a
+			// 80% o más sin cliente, que es justo lo que este invariante prohíbe.
+			// Omitiéndolo, el predicado mira la columna VIVA, que es el valor con el
+			// que la fila va a quedar.
 			const relationshipInvariantCondition =
 				buildOpportunityRelationshipInvariantCondition({
 					...(input.stageId ? { stageId: input.stageId } : {}),
-					...("leadId" in input ? { leadId: input.leadId } : {}),
+					...("leadId" in input && !reenvioDelMismoLead
+						? { leadId: input.leadId }
+						: {}),
 				});
 			const invariantWhereClause = requiereCongelarEtapa
 				? and(
@@ -3362,9 +3407,22 @@ export const crmRouter = {
 			// leyó antes del UPDATE, y entre la lectura y la escritura el analista
 			// puede subir un documento o terminar el formulario. La condición viaja
 			// también adentro (`elExpedienteNoAcumulaEvidencia`).
+			//
+			// 🔴 Y el cambio se aplica sobre el lead que SE LEYÓ, no sobre el que
+			// haya quedado. Entre la lectura y la escritura otro request pudo
+			// cambiar el cliente: sin esto el segundo lo pisa sin que sus guardas
+			// hayan visto ese estado, y la bitácora anota un `leadAnterior` que ya
+			// no era el real. Cero filas ⇒ CONFLICT, que es exactamente lo que
+			// pasó. Sólo en este camino: la edición que no cambia el cliente no
+			// paga nada, porque ya ni siquiera escribe el campo.
+			const elLeadVivoSigueSiendoElLeido =
+				currentOpportunity[0].leadId === null
+					? isNull(opportunities.leadId)
+					: eq(opportunities.leadId, currentOpportunity[0].leadId);
 			const leadSwapWhereClause = cambiaElLeadDeLaOportunidad
 				? and(
 						wonLockWhereClause,
+						elLeadVivoSigueSiendoElLeido,
 						noExisteOportunidadCandantePorId(id, input.stageId),
 						elExpedienteNoAcumulaEvidencia(id),
 					)
@@ -3526,6 +3584,14 @@ export const crmRouter = {
 				updateData,
 				currentOpportunity[0],
 			);
+			// Ver `reenvioDelMismoLead`: el valor que reenvió el formulario es el
+			// mismo que se leyó, así que escribirlo no cambia nada de esta fila y lo
+			// único que podría lograr es pisar el cambio de al lado por un camino sin
+			// candado. Hoy la línea es redundante —`stripUnchangedFrozenFields` ya lo
+			// sacó, por estar `leadId` en la lista de campos congelados— y es a
+			// propósito: acá se saca por identidad, y así sigue saliendo aunque esa
+			// lista cambie por razones de contratos, que no son éstas.
+			if (reenvioDelMismoLead) delete safeUpdateData.leadId;
 
 			/**
 			 * 🔴 Cambiar el lead cuesta revalidar SIEMPRE, no sólo pasado el umbral.

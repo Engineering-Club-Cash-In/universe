@@ -7,9 +7,14 @@ import { describe, expect, it, mock, beforeEach } from "bun:test";
 //   1. db.select(...).from(moras_credito).where(...)            → moras activas
 //   2. db.select(...).from(creditos).where(...)                 → status del crédito
 //   3. db.select(...).from(cuotas_credito).innerJoin(...).where → cuotas + hasPaidPayment
-//   4. db.update(moras_credito).set(...).where(...).returning() → apagar mora
-//   5. db.update(creditos).set(...).where(...)                  → MOROSO → ACTIVO
+//   4. db.update(creditos).set(...).where(...)                  → MOROSO → ACTIVO
+//   5. db.update(moras_credito).set(...).where(...).returning() → apagar mora
 //   6. db.insert(moras_historial).values(...)                   → evento DESACTIVACION
+//
+// 🔒 El 4 va antes que el 5 por la regla de orden de candados del módulo
+// (`creditos` antes que `moras_credito`); ver latefee.ts. Por eso la cola
+// `updateReturningQueue` la consume SOLO el update de `moras_credito`: es el
+// único con `.returning()`, y atarla al orden de llamada la haría frágil.
 //
 // La fake alimenta los SELECT por orden de llamada y graba todos los writes.
 // ============================================================================
@@ -55,14 +60,22 @@ const fakeDb = {
       where: () => {
         if (state.failNextUpdate) {
           state.failNextUpdate = false;
-          const failing: any = Promise.resolve([]);
+          // Revienta lo mismo si se espera el update directo (el de `creditos`)
+          // o su `.returning()` (el de `moras_credito`).
+          const failing: any = Promise.reject(new Error("db caída simulada"));
+          // Sin esto bun reporta un rechazo no manejado cuando el camino usa
+          // `.returning()` en vez de esperar la promesa de arriba.
+          failing.catch(() => {});
           failing.returning = () =>
             Promise.reject(new Error("db caída simulada"));
           return failing;
         }
         const entry = { table, set: setValues, returning: false };
         state.updates.push(entry);
-        const rows = state.updateReturningQueue.shift() ?? [];
+        // Solo el update de la mora usa `.returning()`; el del crédito no debe
+        // comerse la fila que la prueba preparó para aquél.
+        const rows =
+          table === moras_credito ? state.updateReturningQueue.shift() ?? [] : [];
         const promise: any = Promise.resolve(rows);
         promise.returning = () => {
           entry.returning = true;

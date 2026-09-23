@@ -22,20 +22,26 @@
  */
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 
-type Call = { tabla: any; set?: any; values?: any; where?: any };
+type Call = { tabla: any; kind: "insert" | "update"; set?: any; values?: any; where?: any };
 
 const estado: {
   resultados: any[];
-  inserts: Call[];
-  updates: Call[];
+  /**
+   * Writes CONFIRMADOS (los de una transacción que revirtió no están). Desde
+   * que las ramas del cron toman `creditos` ANTES que `moras_credito` —la
+   * regla de orden de candados de latefee.ts—, el UPDATE del crédito se
+   * ejecuta aunque después la transacción aborte: mirar la secuencia de
+   * llamadas en vez del commit haría que estas pruebas dieran por escrito algo
+   * que Postgres revierte.
+   */
+  confirmados: Call[];
   /** Filas que devuelve el `.returning()` de un update, por tabla y en orden. */
   updateReturns: Map<any, any[][]>;
   insertThrows: any;
   emitidos: any[];
 } = {
   resultados: [],
-  inserts: [],
-  updates: [],
+  confirmados: [],
   updateReturns: new Map(),
   insertThrows: undefined,
   emitidos: [],
@@ -74,48 +80,67 @@ const selectChain = () => {
   return b;
 };
 
-const dbFalsa = {
+/** Writes pendientes de una transacción abierta. */
+type Scope = { writes: Call[] };
+
+/**
+ * Cliente falso con COMMIT: los writes de una transacción se guardan aparte y
+ * solo se vuelcan al scope padre si el callback termina bien; si tira, se
+ * descartan (ROLLBACK / ROLLBACK TO SAVEPOINT). No modela el "statement
+ * fallido aborta la transacción" de Postgres — de eso se encarga
+ * procesarMorasCronEscriturasAtomicas.test.ts.
+ */
+const clienteFalso = (scope: Scope): any => ({
   select: () => selectChain(),
   insert: (tabla: any) => ({
     values: (values: any) => {
-      estado.inserts.push({ tabla, values });
+      const ejecutar = () => {
+        if (estado.insertThrows && tabla === moras_credito) {
+          return Promise.reject(estado.insertThrows);
+        }
+        scope.writes.push({ tabla, kind: "insert", values });
+        return Promise.resolve([{ mora_id: 999, porcentaje_mora: "1.12" }]);
+      };
       const b: any = {
-        returning: () => {
-          if (estado.insertThrows && tabla === moras_credito) {
-            return Promise.reject(estado.insertThrows);
-          }
-          return Promise.resolve([{ mora_id: 999, porcentaje_mora: "1.12" }]);
-        },
-        then: (res: any, rej: any) => Promise.resolve([]).then(res, rej),
+        returning: () => ejecutar(),
+        then: (res: any, rej: any) => ejecutar().then(() => []).then(res, rej),
       };
       return b;
     },
   }),
   update: (tabla: any) => ({
     set: (set: any) => {
-      const call: Call = { tabla, set };
-      estado.updates.push(call);
+      const call: Call = { tabla, kind: "update", set };
       const b: any = {
         where: (w: any) => {
           call.where = w;
           return b;
         },
         // Por defecto el update SÍ afecta la fila (nadie compitió).
-        returning: () =>
-          Promise.resolve(
+        returning: () => {
+          scope.writes.push(call);
+          return Promise.resolve(
             estado.updateReturns.get(tabla)?.shift() ?? [{ mora_id: 77, credito_id: 4242 }],
-          ),
-        then: (res: any, rej: any) => Promise.resolve({ rowCount: 1 }).then(res, rej),
+          );
+        },
+        then: (res: any, rej: any) => {
+          scope.writes.push(call);
+          return Promise.resolve({ rowCount: 1 }).then(res, rej);
+        },
       };
       return b;
     },
   }),
-  // La CREACION corre dentro de una transacción (status + mora + historial
-  // juntos) con un savepoint alrededor del insert. Este fake NO modela
-  // commit/rollback — de eso se encarga procesarMorasCronCreacionAtomica.test.ts;
-  // acá solo interesa QUÉ writes se emiten, así que la tx es transparente.
-  transaction: async (cb: any) => cb(dbFalsa),
-};
+  transaction: async (cb: any) => {
+    const hijo: Scope = { writes: [] };
+    const resultado = await cb(clienteFalso(hijo));
+    scope.writes.push(...hijo.writes);
+    return resultado;
+  },
+});
+
+const scopeRaiz: Scope = { writes: estado.confirmados };
+const dbFalsa = clienteFalso(scopeRaiz);
 
 const clientFalso = {
   connect: async () => ({
@@ -161,8 +186,8 @@ const cuotaDeAyer = () => {
 
 const reset = () => {
   estado.resultados = [];
-  estado.inserts = [];
-  estado.updates = [];
+  // Se vacía EN EL LUGAR: el cliente falso raíz cerró sobre este array.
+  estado.confirmados.length = 0;
   estado.updateReturns = new Map();
   estado.insertThrows = undefined;
   estado.emitidos = [];
@@ -180,10 +205,12 @@ const correr = async (opts: {
   return (await procesarMoras()) as any;
 };
 
-const updatesDeMora = () => estado.updates.filter((c) => c.tabla === moras_credito);
-const updatesDeCredito = () => estado.updates.filter((c) => c.tabla === creditos);
-const insertsDeMora = () => estado.inserts.filter((c) => c.tabla === moras_credito);
-const historial = () => estado.inserts.filter((c) => c.tabla === moras_historial);
+const confirmados = (tabla: any, kind: "insert" | "update") =>
+  estado.confirmados.filter((c) => c.kind === kind && c.tabla === tabla);
+const updatesDeMora = () => confirmados(moras_credito, "update");
+const updatesDeCredito = () => confirmados(creditos, "update");
+const insertsDeMora = () => confirmados(moras_credito, "insert");
+const historial = () => confirmados(moras_historial, "insert");
 const skippedCount = () =>
   estado.emitidos.find((e) => e.operation === "process" && e.outcome === "completed")?.skippedCount;
 const succeededCount = () =>

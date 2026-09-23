@@ -411,6 +411,9 @@ async function construirRespuestaVinculada(
  */
 async function creditosPorUnidad(
 	unidades: { id: number; nm: string }[],
+	// Catálogo SIN filtro, para detectar placas ambiguas (null = no se pudo
+	// obtener: no se muestran deducciones, solo vínculos guardados).
+	catalogoCompleto: { id: number; nm: string }[] | null,
 ): Promise<
 	Map<number, { numeroSifco: string; origen: "vinculado" | "placa" }[]>
 > {
@@ -511,11 +514,26 @@ async function creditosPorUnidad(
 			porNucleo.set(clave, [...(porNucleo.get(clave) ?? []), fila.numeroSifco]);
 		}
 
+		// Mismo criterio que la ficha (matchUnidadPorPlaca → "ambiguo"): si
+		// más de una unidad del catálogo COMPLETO tiene el mismo núcleo, no se
+		// deduce ninguna — mostrar el SIFCO en ambas sugeriría que las dos son
+		// el carro del crédito. Se cuenta sobre el catálogo sin filtro porque
+		// con un filtro la otra unidad puede no estar en la página.
+		const unidadesPorNucleo = new Map<string, number>();
+		for (const unidad of catalogoCompleto ?? []) {
+			const nucleo = extraerNucleoDeNombreUnidad(unidad.nm);
+			if (!nucleo) continue;
+			const clave = nucleo.digitos + nucleo.letras;
+			unidadesPorNucleo.set(clave, (unidadesPorNucleo.get(clave) ?? 0) + 1);
+		}
+
 		for (const unidad of unidades) {
 			if (resultado.has(unidad.id)) continue;
 			const nucleo = extraerNucleoDeNombreUnidad(unidad.nm);
 			if (!nucleo) continue;
-			for (const sifco of porNucleo.get(nucleo.digitos + nucleo.letras) ?? []) {
+			const clave = nucleo.digitos + nucleo.letras;
+			if (unidadesPorNucleo.get(clave) !== 1) continue;
+			for (const sifco of porNucleo.get(clave) ?? []) {
 				agregar(unidad.id, sifco, "placa");
 			}
 		}
@@ -809,7 +827,18 @@ export const wialonRouter = {
 			try {
 				const client = getWialonClient();
 				const result = await client.searchUnits({ ...input, flags: 1 });
-				const creditos = await creditosPorUnidad(result.items);
+				// Con filtro hace falta el catálogo completo para saber si una
+				// placa es ambigua. Best-effort: si falla, sin deducciones.
+				const catalogoCompleto = input?.filterName
+					? await client
+							.searchUnits({ flags: 1 })
+							.then((r) => r.items)
+							.catch(() => null)
+					: result.items;
+				const creditos = await creditosPorUnidad(
+					result.items,
+					catalogoCompleto,
+				);
 				return {
 					total: result.totalItemsCount,
 					from: result.indexFrom,

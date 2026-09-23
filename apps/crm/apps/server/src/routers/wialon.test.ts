@@ -1023,6 +1023,103 @@ describe("wialonRouter", () => {
 			expect(porId.get(3)).toEqual([]);
 		});
 
+		it("no deduce el SIFCO cuando dos unidades comparten la placa (ambiguo, igual que la ficha)", async () => {
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: 2,
+							indexFrom: 0,
+							indexTo: 1,
+							items: [
+								{ id: 1, nm: "P-720GVH SIN APAGADO" },
+								{ id: 2, nm: "C-720GVH - CON APAGADO" },
+							],
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: null,
+					licensePlate: "P-720GVH",
+					numeroSifco: "01010214100001",
+				},
+			];
+			const res = await call(wialonRouter.getWialonUnitsCatalog, undefined, {
+				context: {
+					headers: new Headers(),
+					session: { user: { id: "admin-c", email: "a@example.com" } },
+					user: { id: "admin-c", email: "a@example.com", role: "admin" },
+					userId: "admin-c",
+					userRole: "admin",
+				} as unknown as Context,
+			});
+			expect(res.items.map((u) => u.creditos)).toEqual([[], []]);
+		});
+
+		it("con filtro, detecta la ambigüedad contra el catálogo completo", async () => {
+			// El filtro devuelve una sola unidad, pero el catálogo completo tiene
+			// otra con el mismo núcleo: no se deduce.
+			setWialonClient(
+				new WialonClient({ token: "tok" }, async (_: unknown, init) => {
+					const bodyStr = String(init?.body || "");
+					if (bodyStr.includes("token%2Flogin")) {
+						return new Response(JSON.stringify({ eid: "sid-cat" }), {
+							status: 200,
+						});
+					}
+					const params = JSON.parse(
+						new URLSearchParams(bodyStr).get("params") || "{}",
+					);
+					const filtrado = params.spec?.propValueMask !== "*";
+					const items = filtrado
+						? [{ id: 1, nm: "P-720GVH SIN APAGADO" }]
+						: [
+								{ id: 1, nm: "P-720GVH SIN APAGADO" },
+								{ id: 2, nm: "C-720GVH - CON APAGADO" },
+							];
+					return new Response(
+						JSON.stringify({
+							totalItemsCount: items.length,
+							indexFrom: 0,
+							indexTo: items.length - 1,
+							items,
+						}),
+						{ status: 200 },
+					);
+				}),
+			);
+			catalogoCreditosMock = [
+				{
+					wialonUnitId: null,
+					licensePlate: "P-720GVH",
+					numeroSifco: "01010214100001",
+				},
+			];
+			const res = await call(
+				wialonRouter.getWialonUnitsCatalog,
+				{ filterName: "SIN APAGADO" },
+				{
+					context: {
+						headers: new Headers(),
+						session: { user: { id: "admin-c", email: "a@example.com" } },
+						user: { id: "admin-c", email: "a@example.com", role: "admin" },
+						userId: "admin-c",
+						userRole: "admin",
+					} as unknown as Context,
+				},
+			);
+			expect(res.items[0]?.creditos).toEqual([]);
+		});
+
 		it("toma también el crédito cuyo vehículo viene del contrato del caso", async () => {
 			setWialonClient(
 				new WialonClient({ token: "tok" }, async (_: unknown, init) => {

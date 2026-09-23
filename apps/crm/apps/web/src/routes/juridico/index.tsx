@@ -17,6 +17,10 @@ import {
 	User,
 } from "lucide-react";
 import { useState } from "react";
+import {
+	ETAPAS_POR_ACCION,
+	etapaPermite,
+} from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import { ApproveOpportunityModal } from "@/components/juridico/ApproveOpportunityModal";
 import {
@@ -108,10 +112,15 @@ function RouteComponent() {
 		enabled: canViewLegal,
 	});
 
-	// Obtener oportunidades listas para contratos (80%+)
+	// Las oportunidades que jurídico todavía puede trabajar: 80% armando la
+	// papelería y 85% en firma, donde rehace la batería con otra fecha si los
+	// contratos vencieron. Con sólo 80% las de 85% no aparecían en esta
+	// pestaña, y el menú de generar no tenía dónde mostrarse.
 	const { data: opportunitiesForContracts, isLoading: isLoadingOpportunities } =
 		useQuery({
-			...orpc.getOpportunitiesForContracts.queryOptions({ input: {} }),
+			...orpc.getOpportunitiesForContracts.queryOptions({
+				input: { closurePercentages: [...ETAPAS_POR_ACCION.reemplazar] },
+			}),
 			enabled: canViewLegal,
 		});
 
@@ -277,7 +286,9 @@ function RouteComponent() {
 						<div className="font-bold text-2xl">
 							{opportunitiesForContracts?.length || 0}
 						</div>
-						<p className="text-muted-foreground text-xs">Al 80%+ de cierre</p>
+						<p className="text-muted-foreground text-xs">
+							En 80% y 85% de cierre
+						</p>
 					</CardContent>
 				</Card>
 
@@ -360,8 +371,8 @@ function RouteComponent() {
 						<CardHeader>
 							<CardTitle>Oportunidades Listas para Contratos</CardTitle>
 							<CardDescription>
-								Oportunidades al 80% o más de cierre que requieren contratos
-								legales
+								Oportunidades en 80% (armando la papelería) y en 85% (en firma),
+								que son las que jurídico todavía puede trabajar
 							</CardDescription>
 
 							{/* Barra de búsqueda */}
@@ -490,7 +501,13 @@ function RouteComponent() {
 																	Gestionar
 																</Link>
 															</DropdownMenuItem>
-															{opp.stage.closurePercentage === 80 && (
+															{/* Generar va en 80% y también en 85%: jurídico rehace la
+															    batería con otra fecha cuando los contratos vencieron
+															    mientras la oportunidad está en firma. */}
+															{etapaPermite(
+																"reemplazar",
+																opp.stage.closurePercentage,
+															) && (
 																<DropdownMenuItem asChild>
 																	<Link
 																		to="/juridico/generate/$opportunityId"

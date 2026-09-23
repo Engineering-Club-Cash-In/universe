@@ -9,6 +9,7 @@ import {
 	User,
 } from "lucide-react";
 import { useState } from "react";
+import { etapaPermite } from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import { z } from "zod";
 import type { ContractSigner } from "@/components/contracts/DynamicContractWizard";
@@ -232,12 +233,15 @@ function RouteComponent() {
 			: null;
 
 	/**
-	 * Jurídico sólo maneja los contratos mientras la oportunidad está en 80%.
-	 * En 85% ya pasó a análisis, que los regenera desde su ficha; para que
-	 * jurídico intervenga hay que devolverla a esta etapa. Los botones ni
-	 * aparecen para no ofrecer algo que el servidor va a rechazar.
+	 * Jurídico maneja los contratos en 80% y sigue en 85%, mientras están en
+	 * firma: rehacer la batería con otra fecha cuando venció, o subir uno a
+	 * mano, es parte de su operación. Del 90% en adelante los botones ni
+	 * aparecen, para no ofrecer algo que el servidor va a rechazar.
 	 */
-	const enEtapaDeJuridico = opportunityData?.stage?.closurePercentage === 80;
+	const enEtapaDeJuridico = etapaPermite(
+		"reemplazar",
+		opportunityData?.stage?.closurePercentage,
+	);
 
 	// Transformar datos de oportunidad para el modal
 	const selectedOpportunity: OpportunityForModal | null = opportunityData

@@ -337,9 +337,12 @@ async function firmantesDeLaOportunidad(
  */
 async function exigirEtapaQuePermiteReemplazo(
 	opportunityId: string,
-): Promise<number> {
+): Promise<{ stageId: string | null; porcentaje: number }> {
 	const [fila] = await db
-		.select({ porcentaje: salesStages.closurePercentage })
+		.select({
+			stageId: opportunities.stageId,
+			porcentaje: salesStages.closurePercentage,
+		})
 		.from(opportunities)
 		.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 		.where(eq(opportunities.id, opportunityId))
@@ -358,10 +361,12 @@ async function exigirEtapaQuePermiteReemplazo(
 			message: `La oportunidad está en ${porcentaje ?? "una etapa desconocida"}%: jurídico sólo puede generar, subir o reemplazar contratos en ${ETAPAS_POR_ACCION.reemplazar.join("% u ")}%. Para cambiarlo, hay que devolverla a esa etapa.`,
 		});
 	}
-	// Con qué etapa se aprobó. Quien llama se la devuelve al front para decidir
-	// si ofrecer el reenvío por WhatsApp: la que tiene la pantalla puede ser
-	// vieja (la aprobaron mientras estaba abierta) y los enlaces ya salieron.
-	return porcentaje;
+	// Con qué etapa se aprobó, y las dos cosas de la MISMA lectura. La etapa
+	// (`stageId`) es contra la que después se revalida al retirar los
+	// anteriores; el porcentaje se le devuelve al front para decidir si ofrecer
+	// el reenvío. Si salieran de dos lecturas, una aprobación en el medio
+	// instalaba en 85% y contestaba 80%, y no se ofrecía reenviar.
+	return { stageId: fila?.stageId ?? null, porcentaje };
 }
 
 /**
@@ -578,16 +583,6 @@ async function anularAnterioresDelMismoTipo(
 				.where(eq(generatedLegalContracts.id, anterior.id));
 		}
 	}
-}
-
-/** La etapa en la que está la oportunidad ahora (su `stageId`). */
-async function etapaActual(opportunityId: string): Promise<string | null> {
-	const [fila] = await db
-		.select({ stageId: opportunities.stageId })
-		.from(opportunities)
-		.where(eq(opportunities.id, opportunityId))
-		.limit(1);
-	return fila?.stageId ?? null;
 }
 
 /**
@@ -1487,11 +1482,9 @@ export const contractGenerationRouter = {
 				// no se instalan: se borran en WeeTrust para que no queden vivos sin
 				// registro, con las invitaciones mandadas. Los ya enlazados no: son
 				// los vigentes.
-				let porcentajeEtapa: number;
+				let etapa: Awaited<ReturnType<typeof exigirEtapaQuePermiteReemplazo>>;
 				try {
-					porcentajeEtapa = await exigirEtapaQuePermiteReemplazo(
-						input.opportunityId,
-					);
+					etapa = await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 				} catch (error) {
 					for (const contract of input.contracts) {
 						const { documentID } = firmaDelGenerador(contract.apiResponse);
@@ -1506,7 +1499,11 @@ export const contractGenerationRouter = {
 					}
 					throw error;
 				}
-				const etapaInicial = await etapaActual(input.opportunityId);
+				// La etapa contra la que se revalida al retirar los anteriores: la
+				// misma lectura que se validó, así lo que se contesta y lo que se
+				// instala no pueden diferir.
+				const etapaInicial = etapa.stageId;
+				const porcentajeEtapa = etapa.porcentaje;
 
 				for (const contract of input.contracts) {
 					// El front reenvía tal cual la respuesta del generador; de ahí salen
@@ -1700,13 +1697,9 @@ export const contractGenerationRouter = {
 			);
 
 			try {
-				// Regenerar es de jurídico y sólo en 80%, igual que subir o reemplazar.
-				// Se corta antes de generar nada.
+				// Regenerar es de jurídico, en 80% u 85%, igual que subir o reemplazar.
+				// Se corta antes de generar nada; con el candado se vuelve a mirar.
 				await exigirEtapaQuePermiteReemplazo(input.opportunityId);
-
-				// La etapa al empezar: si cambia mientras se generan, los nuevos no
-				// reemplazan a los que ya salieron (ver retirarAnterioresSiSigueVigente).
-				const etapaInicial = await etapaActual(input.opportunityId);
 
 				// 1. Filtrar solo los contratos de los tipos a regenerar
 				const contractsToRegenerate = input.generationData.filter((c) =>
@@ -1908,10 +1901,15 @@ export const contractGenerationRouter = {
 				// los vigentes, mandaría sus enlaces, y el retiro los mataría enseguida.
 				// La etapa se revisa adentro, antes de crear nada en WeeTrust.
 				return conCandadoDeFirma(input.opportunityId, async () => {
-					// 3. Generar los nuevos contratos.
-					const porcentajeEtapa = await exigirEtapaQuePermiteReemplazo(
+					// 3. Generar los nuevos contratos. La etapa se lee acá, ya con el
+					// candado: si cambia mientras se generan, los nuevos no reemplazan a
+					// los que ya salieron (ver retirarConCandadoTomado), y el porcentaje
+					// que se contesta sale de esta misma lectura.
+					const etapa = await exigirEtapaQuePermiteReemplazo(
 						input.opportunityId,
 					);
+					const etapaInicial = etapa.stageId;
+					const porcentajeEtapa = etapa.porcentaje;
 					const apiResult = await generateContractsBatch({
 						contracts: contractsWithNewDate,
 					});
@@ -2119,9 +2117,8 @@ export const contractGenerationRouter = {
 				// a 85%. Se vuelve a mirar ANTES de subir: WeeTrust manda las
 				// invitaciones en el acto, y descubrirlo después dejaba al cliente con
 				// correos de un documento que se borra enseguida.
-				const porcentajeEtapa = await exigirEtapaQuePermiteReemplazo(
-					input.opportunityId,
-				);
+				const { porcentaje: porcentajeEtapa } =
+					await exigirEtapaQuePermiteReemplazo(input.opportunityId);
 				// Y las reglas del tipo: otra subida pudo instalarse mientras se
 				// esperaba el candado.
 				await exigirQueSePuedaSubir(input);

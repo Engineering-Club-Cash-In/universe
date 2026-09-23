@@ -69,6 +69,11 @@ function nombreDeDocumento(
       : nombrePersona;
   const persona = (sinTipo ?? '')
     .replace(/\.pdf$/i, '')
+    // Timestamps que algunos llamadores meten en el prefijo para que el archivo
+    // sea único: `Date.now()` (legal-documents) o una fecha ISO. Son para el
+    // archivo, no para lo que lee el cliente.
+    .replace(/\d{4}-\d{2}-\d{2}T[\d-]+Z?/g, ' ')
+    .replace(/\d{10,}/g, ' ')
     .replace(/[_]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -1047,8 +1052,14 @@ export class ContractGeneratorService {
       // Al CRM le basta con mandar el nombre de quien firma: la descripción la
       // pone el generador desde su propio registro de plantillas, que es el
       // que manda.
+      // El nombre de la persona tal como vino en los datos, antes que el prefijo:
+      // `apps/legal-documents` no manda `documentName` y arma el prefijo pegando
+      // nombre, tipo y `Date.now()`.
       const documentName = nombreDeDocumento(
-        options.documentName?.trim() || data.client_name || prefix,
+        options.documentName?.trim() ||
+          data.client_name ||
+          data.nombreCompleto ||
+          prefix,
         config.description,
         contractType,
       );

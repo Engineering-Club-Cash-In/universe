@@ -24,12 +24,13 @@ const FIRMANTES: ContractSigner[] = [
 /**
  * Un PDF de `paginas` hojas con las tres líneas de firma en la última.
  *
- * `firmaEnLaEsquina` las pone abajo a la derecha, que es donde van las
- * rúbricas: sirve para el caso en que se estorbarían.
+ * `tercera` permite bajar la línea del codeudor a la esquina donde van las
+ * rúbricas, para los casos en que se estorbarían.
  */
 async function pdfDePrueba(
 	paginas: number,
-	firmaEnLaEsquina = false,
+	/** Dónde va la tercera línea (la del codeudor), en coordenadas del PDF. */
+	tercera: { x: number; y: number } = { x: 72, y: 300 },
 ): Promise<Buffer> {
 	const doc = await PDFDocument.create();
 	const fuente = await doc.embedFont(StandardFonts.Helvetica);
@@ -42,12 +43,7 @@ async function pdfDePrueba(
 			// Orden de lectura: arriba hacia abajo, luego izquierda a derecha.
 			pagina.drawText(LINEA, { x: 72, y: 380, size: 10, font: fuente });
 			pagina.drawText(LINEA, { x: 320, y: 380, size: 10, font: fuente });
-			pagina.drawText(LINEA, {
-				x: firmaEnLaEsquina ? 500 : 72,
-				y: firmaEnLaEsquina ? 60 : 300,
-				size: 10,
-				font: fuente,
-			});
+			pagina.drawText(LINEA, { ...tercera, size: 10, font: fuente });
 		}
 	}
 
@@ -91,15 +87,40 @@ describe("rúbricas de páginas impares", () => {
 		expect(reales.every((p) => p.page === 8)).toBe(true);
 	});
 
-	test("se aparta cuando la firma real ocupa la esquina", async () => {
+	test("si pisaría la firma de otra persona, el grupo sube hasta no pisar ninguna", async () => {
+		// La firma real del codeudor, abajo a la derecha: la rúbrica del titular
+		// caería encima.
 		const posiciones = await WeeTrustService.locateSignatureWidgets(
-			await pdfDePrueba(7, true),
+			await pdfDePrueba(7, { x: 500, y: 40 }),
 			ContractType.GARANTIA_MOBILIARIA,
 			FIRMANTES,
 		);
-
+		const reales = posiciones.filter((p) => !esRubrica(p));
 		const enLaSeptima = posiciones.filter((p) => p.page === 7 && esRubrica(p));
-		// El tercer firmante firma de verdad en esa esquina: su rúbrica no va.
+
+		// Los tres rubrican igual: nadie se queda sin la suya por la firma de otro.
+		expect(enLaSeptima).toHaveLength(3);
+		for (const r of enLaSeptima) {
+			for (const f of reales.filter((f) => f.page === 7)) {
+				const seSolapan =
+					r.coordinates.x < f.coordinates.x + f.imageSize.width &&
+					f.coordinates.x < r.coordinates.x + r.imageSize.width &&
+					r.coordinates.y < f.coordinates.y + f.imageSize.height &&
+					f.coordinates.y < r.coordinates.y + r.imageSize.height;
+				expect(seSolapan).toBe(false);
+			}
+		}
+	});
+
+	test("sobre la firma real de la misma persona, su rúbrica no va", async () => {
+		// La firma del codeudor ocupa sólo el lugar de su propia rúbrica.
+		const posiciones = await WeeTrustService.locateSignatureWidgets(
+			await pdfDePrueba(7, { x: 512, y: 40 }),
+			ContractType.GARANTIA_MOBILIARIA,
+			FIRMANTES,
+		);
+		const enLaSeptima = posiciones.filter((p) => p.page === 7 && esRubrica(p));
+
 		expect(enLaSeptima).toHaveLength(2);
 		expect(enLaSeptima.map((r) => r.user.email)).not.toContain("codeudor@test");
 	});

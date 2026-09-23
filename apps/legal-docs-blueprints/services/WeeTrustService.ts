@@ -1244,36 +1244,66 @@ export class WeeTrustService {
 				);
 			}
 
-			unicos.forEach((firmante, i) => {
-				const tramo = Math.floor(i / porTramo);
-				const enElTramo = i % porTramo;
-				const cuantosEnElTramo = Math.min(
-					porTramo,
-					unicos.length - tramo * porTramo,
-				);
+			// Dónde va cada rúbrica, con el grupo corrido `hacia` puntos para arriba.
+			const ubicar = (hacia: number) =>
+				unicos.map((firmante, i) => {
+					const tramo = Math.floor(i / porTramo);
+					const enElTramo = i % porTramo;
+					const cuantosEnElTramo = Math.min(
+						porTramo,
+						unicos.length - tramo * porTramo,
+					);
 
-				// Coordenadas en el sistema de WeeTrust: origen arriba a la
-				// izquierda, a diferencia del PDF. Dentro de cada tramo se leen en
-				// el orden declarado; los tramos siguientes van hacia adentro de la
-				// hoja (arriba si están abajo, al centro si están en un margen).
-				let x: number;
-				let y: number;
-				if (rubrica.esquina === 'inferior-derecha') {
-					// Anclado a la derecha, pero leído de izquierda a derecha.
-					const desdeElBorde = cuantosEnElTramo - 1 - enElTramo;
-					x = width - margen - ancho - desdeElBorde * pasoX;
-					y = height - margen - alto - tramo * pasoY;
-				} else if (rubrica.esquina === 'inferior-izquierda') {
-					x = margen + enElTramo * pasoX;
-					y = height - margen - alto - tramo * pasoY;
-				} else if (rubrica.esquina === 'margen-derecho') {
-					x = width - margen - ancho - tramo * pasoX;
-					y = height / 2 + enElTramo * pasoY;
-				} else {
-					x = margen + tramo * pasoX;
-					y = height / 2 + enElTramo * pasoY;
+					// Coordenadas en el sistema de WeeTrust: origen arriba a la
+					// izquierda, a diferencia del PDF. Dentro de cada tramo se leen
+					// en el orden declarado; los tramos siguientes van hacia adentro
+					// de la hoja (arriba si están abajo, al centro si van en un margen).
+					let x: number;
+					let y: number;
+					if (rubrica.esquina === 'inferior-derecha') {
+						// Anclado a la derecha, pero leído de izquierda a derecha.
+						const desdeElBorde = cuantosEnElTramo - 1 - enElTramo;
+						x = width - margen - ancho - desdeElBorde * pasoX;
+						y = height - margen - alto - tramo * pasoY;
+					} else if (rubrica.esquina === 'inferior-izquierda') {
+						x = margen + enElTramo * pasoX;
+						y = height - margen - alto - tramo * pasoY;
+					} else if (rubrica.esquina === 'margen-derecho') {
+						x = width - margen - ancho - tramo * pasoX;
+						y = height / 2 + enElTramo * pasoY;
+					} else {
+						x = margen + tramo * pasoX;
+						y = height / 2 + enElTramo * pasoY;
+					}
+					return { firmante, x, y: y - hacia };
+				});
+
+			// Si una rúbrica cae sobre la firma real de OTRA persona, el grupo
+			// entero sube de a una fila hasta no pisar ninguna: saltearla dejaría
+			// esa hoja sin la rúbrica de alguien, y encimarla deja dos widgets
+			// obligatorios uno arriba del otro.
+			let hacia = 0;
+			let ubicadas = ubicar(hacia);
+			while (
+				ubicadas.some(({ firmante, x, y }) =>
+					yaPuestas.some(
+						(p) =>
+							p.page === pageNum &&
+							p.user.email !== firmante.email &&
+							seSolapan({ x, y, ancho, alto }, p),
+					),
+				)
+			) {
+				hacia += pasoY;
+				ubicadas = ubicar(hacia);
+				if (ubicadas.some(({ y }) => y < 0)) {
+					throw new SignatureLayoutError(
+						`${contractType}: no hay lugar en la página ${pageNum} para las rúbricas sin pisar las firmas.`,
+					);
 				}
+			}
 
+			for (const { firmante, x, y } of ubicadas) {
 				// Si aun así no entra (tantos firmantes que los tramos se comen la
 				// hoja), se corta: mejor un error a la vista que una rúbrica
 				// obligatoria fuera de la página.
@@ -1283,16 +1313,15 @@ export class WeeTrustService {
 					);
 				}
 
-				// La firma real de esta persona en esta página, si la hay. Una
-				// rúbrica encima de ella sería ilegible y, peor, ambigua.
-				const chocaConSuFirma = yaPuestas.some(
+				// Sobre la firma real de la misma persona no va: su firma ya está en
+				// esa hoja, y una rúbrica encima sería ilegible y ambigua.
+				const pisaSuFirma = yaPuestas.some(
 					(p) =>
 						p.page === pageNum &&
 						p.user.email === firmante.email &&
-						Math.abs(p.coordinates.x - x) < ancho + p.imageSize.width &&
-						Math.abs(p.coordinates.y - y) < alto + p.imageSize.height,
+						seSolapan({ x, y, ancho, alto }, p),
 				);
-				if (chocaConSuFirma) return;
+				if (pisaSuFirma) continue;
 
 				extra.push({
 					user: { email: firmante.email },
@@ -1305,7 +1334,7 @@ export class WeeTrustService {
 					parentImageSize: { width, height },
 					viewport: { width, height },
 				});
-			});
+			}
 		}
 
 		if (extra.length > 0) {
@@ -1542,6 +1571,22 @@ function nombreParaWeeTrust(nombre: string, index: number): string {
  * `identification` es opcional en WeeTrust: omitirlo deja la firma electrónica
  * sin verificación de identidad.
  */
+/**
+ * Si un recuadro se solapa con un widget ya puesto (en el sistema de WeeTrust,
+ * origen arriba a la izquierda). Tocarse en el borde no cuenta.
+ */
+function seSolapan(
+	r: { x: number; y: number; ancho: number; alto: number },
+	w: WeeTrustSignaturePosition,
+): boolean {
+	return (
+		r.x < w.coordinates.x + w.imageSize.width &&
+		w.coordinates.x < r.x + r.ancho &&
+		r.y < w.coordinates.y + w.imageSize.height &&
+		w.coordinates.y < r.y + r.alto
+	);
+}
+
 function identificacionDe(
 	role: SignerRole,
 	contractType: ContractType,

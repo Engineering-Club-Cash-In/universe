@@ -61,6 +61,13 @@ export const ETAPAS_POR_ACCION = {
 export type AccionSobreContrato = keyof typeof ETAPAS_POR_ACCION;
 
 /**
+ * "Contratos en Firma": la etapa en la que los enlaces ya le llegaron al
+ * cliente por WhatsApp, al aprobar. Rehacer o agregar contratos acá lo deja con
+ * links muertos (o sin el nuevo) si no se le reenvían.
+ */
+export const ETAPA_EN_FIRMA = 85;
+
+/**
  * Si una oportunidad en ese porcentaje admite la acción.
  *
  * La usa el front para no ofrecer botones que el servidor va a rechazar, y el

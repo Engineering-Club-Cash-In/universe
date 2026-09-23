@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, eq, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
-import { receivedTokenTransactionSchema, type ReceivedTokenTransaction } from "../nexa/schemas";
+import { receivedTokenTransactionSchema, tokenTransactionSchema, type TokenTransaction, type ReceivedTokenTransaction } from "../nexa/schemas";
 import type { ApplicationClaim } from "../payments/application-worker";
 import type { MockCreditLedger } from "../payments/mock-ledger";
 import type { ReviewClaim, ReviewWorkerRepository } from "../payments/review-worker";
@@ -55,6 +55,8 @@ export class DbTokenUserRepository implements TokenUserRepository, TokenUserCrea
 }
 
 export class DbPaymentTransactionRepository implements PaymentTransactionRepository {
+  private missingDateCursor = 0;
+
   constructor(private readonly db: NexaDb) {}
 
   async upsertReceived(input: ReceivedTokenTransaction) {
@@ -152,6 +154,55 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
     };
   }
 
+  async listMissingDateReceipts() {
+    // Rotate bounded batches; unmatched older receipts must not block newer ones.
+    const loadBatch = () => this.db.select({ id: nexaPaymentTransactions.id, reference: nexaPaymentTransactions.reference, createdAt: nexaPaymentTransactions.createdAt })
+      .from(nexaPaymentTransactions).where(and(
+        eq(nexaPaymentTransactions.processingStatus, "MANUAL_REVIEW"),
+        eq(nexaPaymentTransactions.failureReason, "missing_token_date"),
+        eq(nexaPaymentTransactions.tokenDate, ""),
+        sql`${nexaPaymentTransactions.createdAt} >= NOW() - INTERVAL '48 hours'`,
+        sql`${nexaPaymentTransactions.id} > ${this.missingDateCursor}`,
+      )).orderBy(nexaPaymentTransactions.id).limit(100);
+    let rows = await loadBatch();
+    if (rows.length === 0 && this.missingDateCursor !== 0) {
+      this.missingDateCursor = 0;
+      rows = await loadBatch();
+    }
+    this.missingDateCursor = rows.length === 100 ? rows.at(-1)?.id ?? 0 : 0;
+    return rows.map(({ reference, createdAt }) => ({ reference, createdAt }));
+  }
+
+  // Incoming statement transactionId is blank; the webhook ID belongs to review.
+  // Enrich existing receipts only. Never ingest unrelated statement funds here.
+  async enrichIncomingStatement(input: TokenTransaction) {
+    const incoming = tokenTransactionSchema.parse(input);
+    if (incoming.transactionId.trim() !== "" || incoming.amount <= 0 || incoming.wasReturn !== 0 ||
+        incoming.token !== incoming.tokenPrefix + incoming.tokenIdentifier) return false;
+    const reference = String(incoming.reference);
+    return this.db.transaction(async (tx) => {
+      const [stored] = await tx.select().from(nexaPaymentTransactions)
+        .where(eq(nexaPaymentTransactions.reference, reference)).for("update");
+      if (!stored || stored.tokenDate !== "" || stored.processingStatus !== "MANUAL_REVIEW" ||
+          stored.failureReason !== "missing_token_date" || !/^\d+$/.test(stored.transactionId)) return false;
+      const matches = stored.amount === incoming.amount.toFixed(2) && stored.currency === incoming.currency &&
+        stored.tokenIdentifier === incoming.tokenIdentifier && stored.tokenPrefix === incoming.tokenPrefix &&
+        stored.wasReturn === incoming.wasReturn;
+      if (!matches) return false;
+      const payload = {
+        reference, amount: incoming.amount, currency: incoming.currency, tokenDate: incoming.tokenDate,
+        tokenIdentifier: incoming.tokenIdentifier, tokenPrefix: incoming.tokenPrefix,
+        wasReturn: incoming.wasReturn, transactionId: stored.transactionId,
+        bankTransactionId: incoming.transactionId.trim(),
+      };
+      await tx.update(nexaPaymentTransactions).set({
+        tokenDate: incoming.tokenDate, processingStatus: "RECEIVED", failureReason: null,
+        rawPayload: payload, payloadFingerprint: fingerprint(payload), updatedAt: new Date(),
+      }).where(eq(nexaPaymentTransactions.id, stored.id));
+      return true;
+    });
+  }
+
   async markApplied(id: number, paymentId: number) {
     await this.db.update(nexaPaymentTransactions).set({ processingStatus: "APPLIED", carteraPaymentId: paymentId, updatedAt: new Date() }).where(eq(nexaPaymentTransactions.id, id));
   }
@@ -196,7 +247,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         payment.token_date AS "tokenDate",
         payment.token_identifier AS "tokenIdentifier",
         payment.token_prefix AS "tokenPrefix",
-        payment.transaction_id AS "transactionId",
+        COALESCE(payment.raw_payload->>'bankTransactionId', payment.transaction_id) AS "transactionId",
         payment.was_return AS "wasReturn",
         payment.attempt_count AS "attemptCount"
     `);

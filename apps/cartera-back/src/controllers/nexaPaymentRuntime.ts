@@ -14,7 +14,7 @@ import {
 import { claimNexaPaymentEvent } from "./nexaPaymentRepository";
 import {
   createNexaPaymentHandler,
-  formatNexaPaymentDate,
+  getNexaReceiptFields,
   NexaPaymentError,
   type NexaPaymentDependencies,
 } from "./nexaPayments";
@@ -102,19 +102,16 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
       throw error;
     }
 
-    const date = formatNexaPaymentDate(new Date(body.tokenDate));
     const set = { status: 200 };
     const result = await insertPayment({
       body: {
         credito_id: body.creditoId,
         usuario_id: usuarioId,
         monto_boleta: body.amount,
-        fecha_pago: body.tokenDate,
+        ...getNexaReceiptFields(body),
         cuotaApagar: 1,
         url_boletas: [],
-        numeroAutorizacion: body.transactionId,
         registerBy: "NEXA",
-        fecha_boleta: date,
         renuevo_o_nuevo: "NEXA",
         origen_pago: "transferencia",
       },

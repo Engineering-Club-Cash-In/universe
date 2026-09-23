@@ -203,6 +203,83 @@ integrationTest("upsertReceived is concurrent, idempotent, fail-closed and keeps
 
 });
 
+integrationTest("incoming statement enriches once and preserves the webhook notification ID", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  const incoming = { ...transaction, token: transaction.tokenPrefix + transaction.tokenIdentifier };
+  const stored = await repository.upsertReceived({ ...incoming, tokenDate: undefined });
+  expect(await repository.listMissingDateReceipts()).toHaveLength(1);
+  const statement = { ...incoming, transactionId: " " };
+  const results = await Promise.all([
+    repository.enrichIncomingStatement(statement),
+    repository.enrichIncomingStatement(statement),
+  ]);
+  expect(results.filter(Boolean)).toHaveLength(1);
+  const [row] = await db.select().from(nexaPaymentTransactions);
+  expect(row).toMatchObject({ id: stored.id, transactionId: "7293", tokenDate: incoming.tokenDate, processingStatus: "RECEIVED", failureReason: null });
+  expect(row?.rawPayload).toMatchObject({ transactionId: "7293", bankTransactionId: "", tokenDate: incoming.tokenDate });
+  expect(await repository.upsertReceived({ ...incoming, tokenDate: undefined })).toMatchObject({ id: stored.id, created: false });
+  expect(await repository.listMissingDateReceipts()).toEqual([]);
+  await associateToken(incoming.tokenIdentifier, incoming.tokenPrefix, 42);
+  let applied = 0;
+  let ledgerTransactionId: unknown;
+  const workerOptions = { leaseSeconds: 60, maxAttempts: 1, backoffSeconds: 1, maxBackoffSeconds: 10 };
+  const apply = () => runApplicationWorkerOnce({ repository, ...workerOptions,
+    cartera: { applyNexaPayment: async ({ transaction }) => { applied++; ledgerTransactionId = transaction.transactionId; return { status: "APPLIED", paymentId: 707 }; } },
+  });
+  expect(await apply()).toBe(true);
+  expect(await apply()).toBe(false);
+  const approvals: Array<{ id: number; reference: number; status: ReviewTransferStatus }> = [];
+  const review = () => runReviewWorkerOnce({ repository: new DbReviewRepository(db), ...workerOptions,
+    nexa: { reviewTransfer: async (payload) => { approvals.push(payload); return payload; } },
+  });
+  expect(await review()).toBe(true);
+  expect(await review()).toBe(false);
+  expect(applied).toBe(1);
+  expect(ledgerTransactionId).toBe("");
+  expect(approvals).toEqual([{ id: 7293, reference: 4617307, status: "APPROVED" }]);
+  expect(await repository.enrichIncomingStatement(statement)).toBe(false);
+  expect((await db.select().from(nexaPaymentTransactions))[0]?.processingStatus).toBe("COMPLETED");
+});
+
+integrationTest("missing-date batches rotate past unmatched receipts and wrap for retries", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  for (let n = 0; n < 101; n++) {
+    await repository.upsertReceived({ ...transaction, reference: `batch-${n}`, tokenDate: undefined });
+  }
+  const first = await repository.listMissingDateReceipts();
+  const second = await repository.listMissingDateReceipts();
+  expect(first).toHaveLength(100);
+  expect(second.map((row) => row.reference)).toEqual(["batch-100"]);
+  expect(await repository.listMissingDateReceipts()).toEqual(first);
+});
+
+integrationTest("partial missing-date batches retry older receipts under new arrivals", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await repository.upsertReceived({ ...transaction, reference: "old-unmatched", tokenDate: undefined });
+  expect(await repository.listMissingDateReceipts()).toHaveLength(1);
+  await repository.upsertReceived({ ...transaction, reference: "new-arrival", tokenDate: undefined });
+  expect((await repository.listMissingDateReceipts()).map((row) => row.reference)).toEqual(["old-unmatched", "new-arrival"]);
+});
+
+integrationTest("statement enrichment cannot import unrelated funds or bypass correlation", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  const incoming = { ...transaction, token: transaction.tokenPrefix + transaction.tokenIdentifier };
+  await repository.upsertReceived({ ...incoming, tokenDate: undefined });
+  const before = await db.select().from(nexaPaymentTransactions);
+  for (const override of [
+    { reference: "unknown" }, { amount: 51 }, { currency: "USD" as const },
+    { tokenPrefix: "7654321" }, { tokenIdentifier: "99999999" },
+    { token: "wrong-token" }, { wasReturn: 1 as const }, { transactionId: "outgoing-id" },
+  ]) {
+    expect(await repository.enrichIncomingStatement({ ...incoming, transactionId: "", ...override })).toBe(false);
+    expect(await db.select().from(nexaPaymentTransactions)).toEqual(before);
+  }
+});
+
 integrationTest("date-less webhook rows wait visibly for authoritative statement enrichment before application", async () => {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const repository = new DbPaymentTransactionRepository(db);

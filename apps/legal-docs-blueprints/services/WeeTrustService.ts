@@ -908,6 +908,13 @@ export class WeeTrustService {
 		 * contrato con línea de rep legal fallaba porque ese caller nunca lo manda.
 		 */
 		modo: "rol" | "legado" = "rol",
+		/**
+		 * Dónde va cada firma, ya calculado. Lo manda el paquete de cartas: cada
+		 * carta tiene su propio patrón de línea, así que no se puede buscar uno
+		 * solo en el PDF unido (ver `posicionesDelPaquete`). Sin esto, las
+		 * posiciones se detectan en el PDF por el layout del tipo.
+		 */
+		posiciones?: WeeTrustSignaturePosition[],
 	): Promise<{
 		signs: string[];
 		linkDocument: string;
@@ -948,13 +955,23 @@ export class WeeTrustService {
 			}),
 		);
 
+		// El paquete no tiene un patrón propio que buscar: sin las posiciones
+		// calculadas carta por carta, "auto" buscaría una línea que no existe y
+		// las firmas caerían en cualquier lado.
+		if (contractType === ContractType.PAQUETE_CARTAS && !posiciones?.length) {
+			throw new SignatureLayoutError(
+				"Las cartas unidas necesitan las posiciones calculadas carta por carta.",
+			);
+		}
+
 		const result = await this.createDocumentAndGetSigningLinks(pdfBuffer, title, {
 			title,
 			message: `Por favor firme el documento: ${title}`,
 			signatory,
 			signers,
 			contractType,
-			positioningMode: "auto",
+			positioningMode: posiciones?.length ? "fixed" : "auto",
+			signaturePositions: posiciones,
 			sharedWith: observers,
 			repartoPorRol: modo === "rol",
 		});

@@ -17,6 +17,10 @@ import {
 } from "../controllers/satVehiculos";
 import { db } from "../db";
 import {
+	clients,
+	contratosFinanciamiento,
+	leads,
+	opportunities,
 	satVerificacionCorridas,
 	satVerificacionLotes,
 	satVerificacionResultados,
@@ -112,6 +116,18 @@ function normalizarPlaca(placa: string): string {
 	return placa.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+/**
+ * SAT y el CRM pueden conservar un prefijo distinto antes del guion
+ * (`C0-661CDJ` vs `C-661CDJ`). Se usa únicamente como fallback después de
+ * intentar la placa completa.
+ */
+function normalizarSufijoPlaca(placa: string): string {
+	const indiceGuion = placa.indexOf("-");
+	return normalizarPlaca(
+		indiceGuion >= 0 ? placa.slice(indiceGuion + 1) : placa,
+	);
+}
+
 function contarPlacasUnicas(placas: string[]): number {
 	return new Set(
 		placas.map(normalizarPlaca).filter((placaNormalizada) => placaNormalizada),
@@ -141,34 +157,76 @@ function normalizarNit(nit: string): string {
 
 export type CruceCrm = "propio" | "registrado_no_propio" | "sin_registro";
 
-/** Distingue los vehiculos propios de los registrados sin marca de propiedad. */
+type VehiculoCrmParaCruce = {
+	id: string;
+	placa: string | null;
+	isOwned: boolean;
+	titularNombre?: string | null;
+};
+
+type MarcaCruceCrm = {
+	cruceCrm: CruceCrm;
+	titularCrmNombre: string | null;
+};
+
+function titularCrmParaVehiculo(vehiculo: VehiculoCrmParaCruce): string | null {
+	if (vehiculo.isOwned) return "CUBE/RDBE";
+	return vehiculo.titularNombre?.trim() || null;
+}
+
+function prioridadMarcaCruce(marca: MarcaCruceCrm): number {
+	if (marca.cruceCrm === "propio") return 2;
+	return marca.titularCrmNombre ? 1 : 0;
+}
+
+function guardarMarcaCruce(
+	mapa: Map<string, MarcaCruceCrm>,
+	clave: string,
+	marca: MarcaCruceCrm,
+) {
+	if (!clave) return;
+	const existente = mapa.get(clave);
+	if (
+		!existente ||
+		prioridadMarcaCruce(marca) > prioridadMarcaCruce(existente)
+	) {
+		mapa.set(clave, marca);
+	}
+}
+
+/** Distingue el control operativo del CRM sin usarlo como titularidad legal. */
 export function agregarCruceCrm<
 	T extends { vehicleId: string | null; placa: string },
->(
-	filas: T[],
-	vehiculosCrm: { id: string; placa: string | null; isOwned: boolean }[],
-): (T & { cruceCrm: CruceCrm })[] {
-	const porId = new Map<string, CruceCrm>();
-	const porPlaca = new Map<string, CruceCrm>();
+>(filas: T[], vehiculosCrm: VehiculoCrmParaCruce[]): (T & MarcaCruceCrm)[] {
+	const porId = new Map<string, MarcaCruceCrm>();
+	const porPlaca = new Map<string, MarcaCruceCrm>();
+	const porSufijoPlaca = new Map<string, MarcaCruceCrm>();
 	for (const vehiculo of vehiculosCrm) {
-		const cruce: CruceCrm = vehiculo.isOwned
-			? "propio"
-			: "registrado_no_propio";
-		porId.set(vehiculo.id, cruce);
+		const marca: MarcaCruceCrm = {
+			cruceCrm: vehiculo.isOwned ? "propio" : "registrado_no_propio",
+			titularCrmNombre: titularCrmParaVehiculo(vehiculo),
+		};
+		porId.set(vehiculo.id, marca);
 		if (!vehiculo.placa) continue;
-		const clave = normalizarPlaca(vehiculo.placa);
-		if (clave && (cruce === "propio" || !porPlaca.has(clave))) {
-			porPlaca.set(clave, cruce);
-		}
+		guardarMarcaCruce(porPlaca, normalizarPlaca(vehiculo.placa), marca);
+		guardarMarcaCruce(
+			porSufijoPlaca,
+			normalizarSufijoPlaca(vehiculo.placa),
+			marca,
+		);
 	}
 
-	return filas.map((fila) => ({
-		...fila,
-		cruceCrm:
+	return filas.map((fila) => {
+		const marca =
 			(fila.vehicleId ? porId.get(fila.vehicleId) : undefined) ??
 			porPlaca.get(normalizarPlaca(fila.placa)) ??
-			"sin_registro",
-	}));
+			porSufijoPlaca.get(normalizarSufijoPlaca(fila.placa));
+		return {
+			...fila,
+			cruceCrm: marca?.cruceCrm ?? "sin_registro",
+			titularCrmNombre: marca?.titularCrmNombre ?? null,
+		};
+	});
 }
 
 function veredictoDeEstadoSat(estadoSat: string): Veredicto {
@@ -310,9 +368,17 @@ export function construirResultados(
 	reportados: VehiculoSatPropio[],
 ) {
 	const porPlacaSat = new Map<string, VehiculoSatPropio>();
+	const porSufijoPlacaSat = new Map<string, VehiculoSatPropio[]>();
 	for (const v of reportados) {
 		const clave = normalizarPlaca(v.placa);
-		if (clave) porPlacaSat.set(clave, v);
+		if (!clave) continue;
+		porPlacaSat.set(clave, v);
+
+		const sufijo = normalizarSufijoPlaca(v.placa);
+		if (!sufijo) continue;
+		const reportes = porSufijoPlacaSat.get(sufijo) ?? [];
+		reportes.push(v);
+		porSufijoPlacaSat.set(sufijo, reportes);
 	}
 
 	const filas: {
@@ -331,16 +397,36 @@ export function construirResultados(
 		puedeImprimirCertificado: boolean | null;
 	}[] = [];
 
+	const coincidenciasPorVehiculo = new Map<string, VehiculoSatPropio>();
+	// La placa completa siempre tiene prioridad sobre el sufijo.
+	for (const esperado of esperados) {
+		if (!esperado.placa) continue;
+		const clave = normalizarPlaca(esperado.placa);
+		const enSat = clave ? porPlacaSat.get(clave) : undefined;
+		if (enSat) coincidenciasPorVehiculo.set(esperado.id, enSat);
+	}
+	// Si la placa completa cambió de prefijo, tomamos el primer resultado SAT
+	// que comparta el sufijo. La consulta de SAT ya devuelve una sola fila por
+	// placa y no dejamos el vehículo en revisión manual.
+	for (const esperado of esperados) {
+		if (!esperado.placa || coincidenciasPorVehiculo.has(esperado.id)) {
+			continue;
+		}
+		const sufijo = normalizarSufijoPlaca(esperado.placa);
+		const [enSat] = porSufijoPlacaSat.get(sufijo) ?? [];
+		if (enSat) coincidenciasPorVehiculo.set(esperado.id, enSat);
+	}
+
 	const emparejadas = new Set<string>();
 
 	for (const esperado of esperados) {
 		if (!esperado.placa) continue;
 		const clave = normalizarPlaca(esperado.placa);
 		if (!clave) continue;
-		const enSat = porPlacaSat.get(clave);
+		const enSat = coincidenciasPorVehiculo.get(esperado.id);
 
 		if (enSat) {
-			emparejadas.add(clave);
+			emparejadas.add(normalizarPlaca(enSat.placa));
 			filas.push({
 				vehicleId: esperado.id,
 				placa: esperado.placa,
@@ -673,14 +759,23 @@ async function ejecutarVerificacionVehiculosEnSat(
 			string,
 			{ corridaId: string; vehiculo: VehiculoSatPropio }
 		>();
+		const primerTitularPorSufijo = new Map<
+			string,
+			{ corridaId: string; vehiculo: VehiculoSatPropio }
+		>();
 		for (const corrida of corridas) {
 			for (const vehiculo of vehiculosPorCorrida.get(corrida.id) ?? []) {
 				const clave = normalizarPlaca(vehiculo.placa);
+				const referencia = {
+					corridaId: corrida.id,
+					vehiculo,
+				};
 				if (!primerTitularPorPlaca.has(clave)) {
-					primerTitularPorPlaca.set(clave, {
-						corridaId: corrida.id,
-						vehiculo,
-					});
+					primerTitularPorPlaca.set(clave, referencia);
+				}
+				const sufijo = normalizarSufijoPlaca(vehiculo.placa);
+				if (sufijo && !primerTitularPorSufijo.has(sufijo)) {
+					primerTitularPorSufijo.set(sufijo, referencia);
 				}
 			}
 		}
@@ -700,6 +795,8 @@ async function ejecutarVerificacionVehiculosEnSat(
 					loteId: lote.id,
 					corridaId:
 						primerTitularPorPlaca.get(normalizarPlaca(fila.placa))?.corridaId ??
+						primerTitularPorSufijo.get(normalizarSufijoPlaca(fila.placa))
+							?.corridaId ??
 						null,
 					consultadoAt: fechaConsulta,
 					...fila,
@@ -797,6 +894,58 @@ export async function obtenerEstadoUltimaVerificacion() {
 	return { ...lote, estado, finalizadaAt, mensajeError };
 }
 
+async function obtenerTitularesCrmPorVehiculo(): Promise<Map<string, string>> {
+	const titulares = new Map<string, string>();
+
+	const contratos = await db
+		.select({
+			vehicleId: contratosFinanciamiento.vehicleId,
+			nombre: clients.contactPerson,
+		})
+		.from(contratosFinanciamiento)
+		.innerJoin(clients, eq(clients.id, contratosFinanciamiento.clientId))
+		.orderBy(desc(contratosFinanciamiento.updatedAt), desc(clients.updatedAt));
+
+	const oportunidades = await db
+		.select({
+			vehicleId: opportunities.vehicleId,
+			nombreCliente: clients.contactPerson,
+			primerNombre: leads.firstName,
+			segundoNombre: leads.middleName,
+			apellido: leads.lastName,
+			segundoApellido: leads.secondLastName,
+		})
+		.from(opportunities)
+		.leftJoin(leads, eq(leads.id, opportunities.leadId))
+		.leftJoin(clients, eq(clients.opportunityId, opportunities.id))
+		.where(isNotNull(opportunities.vehicleId))
+		.orderBy(desc(opportunities.updatedAt), desc(clients.updatedAt));
+
+	const registrar = (vehicleId: string | null, nombre: string | null) => {
+		const nombreLimpio = nombre?.trim();
+		if (vehicleId && nombreLimpio && !titulares.has(vehicleId)) {
+			titulares.set(vehicleId, nombreLimpio);
+		}
+	};
+
+	for (const contrato of contratos) {
+		registrar(contrato.vehicleId, contrato.nombre);
+	}
+	for (const oportunidad of oportunidades) {
+		const nombreLead = [
+			oportunidad.primerNombre,
+			oportunidad.segundoNombre,
+			oportunidad.apellido,
+			oportunidad.segundoApellido,
+		]
+			.filter(Boolean)
+			.join(" ");
+		registrar(oportunidad.vehicleId, oportunidad.nombreCliente ?? nombreLead);
+	}
+
+	return titulares;
+}
+
 /** Ultimo intento y estado actual de los vehiculos para exponerlo en el CRM. */
 export async function obtenerUltimaVerificacion() {
 	const [lote] = await db
@@ -858,13 +1007,20 @@ export async function obtenerUltimaVerificacion() {
 			eq(satVerificacionResultados.corridaId, satVerificacionCorridas.id),
 		)
 		.orderBy(satVerificacionResultados.placa);
+	const titularesCrm = await obtenerTitularesCrmPorVehiculo();
 	const vehiculosCrm = await db
 		.select({
 			id: vehicles.id,
 			placa: vehicles.licensePlate,
 			isOwned: vehicles.isOwned,
 		})
-		.from(vehicles);
+		.from(vehicles)
+		.then((vehiculos) =>
+			vehiculos.map((vehiculo) => ({
+				...vehiculo,
+				titularNombre: titularesCrm.get(vehiculo.id) ?? null,
+			})),
+		);
 	const filasConCruce = agregarCruceCrm(filas, vehiculosCrm);
 
 	const corridasConResumen = corridas.map((corrida) => ({

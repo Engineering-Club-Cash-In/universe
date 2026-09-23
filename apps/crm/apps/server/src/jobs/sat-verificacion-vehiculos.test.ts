@@ -121,6 +121,18 @@ describe("cruce de vehículos contra SAT", () => {
 		expect(filas.map((f) => f.placa).sort()).toEqual(["P 456 DEF", "m999zzz"]);
 	});
 
+	test("usa el sufijo cuando SAT y CRM tienen distinto prefijo", () => {
+		const filas = construirResultados(
+			[{ id: "veh-1", placa: "C0-661CDJ" }],
+			[vehiculoSat("C-661CDJ", "Activo", { marca: "Foton" })],
+		);
+
+		expect(filas).toHaveLength(1);
+		expect(filas[0].vehicleId).toBe("veh-1");
+		expect(filas[0].resultado).toBe("activo_ok");
+		expect(filas[0].placa).toBe("C0-661CDJ");
+	});
+
 	test("ignora vehículos propios sin placa registrada", () => {
 		const filas = construirResultados(
 			[
@@ -341,6 +353,35 @@ describe("cruce de vehículos contra SAT", () => {
 		]);
 	});
 
+	test("expone el control CRM y el titular asociado sin usar el titular SAT", () => {
+		const filas = agregarCruceCrm(
+			[
+				{ vehicleId: "veh-empresa", placa: "P-111AAA" },
+				{ vehicleId: "veh-cliente", placa: "P-222BBB" },
+				{ vehicleId: null, placa: "P-333CCC" },
+			],
+			[
+				{
+					id: "veh-empresa",
+					placa: "P111AAA",
+					isOwned: true,
+				},
+				{
+					id: "veh-cliente",
+					placa: "P222BBB",
+					isOwned: false,
+					titularNombre: "Ana Cliente",
+				},
+			],
+		);
+
+		expect(filas.map((fila) => fila.titularCrmNombre)).toEqual([
+			"CUBE/RDBE",
+			"Ana Cliente",
+			null,
+		]);
+	});
+
 	test("prioriza el ID y la marca de propiedad ante placas duplicadas", () => {
 		const filas = agregarCruceCrm(
 			[
@@ -355,6 +396,15 @@ describe("cruce de vehículos contra SAT", () => {
 
 		expect(filas[0].cruceCrm).toBe("registrado_no_propio");
 		expect(filas[1].cruceCrm).toBe("propio");
+	});
+
+	test("usa el sufijo para cruzar un resultado SAT con el CRM", () => {
+		const filas = agregarCruceCrm(
+			[{ vehicleId: null, placa: "C-661CDJ" }],
+			[{ id: "veh-1", placa: "C0-661CDJ", isOwned: true }],
+		);
+
+		expect(filas[0].cruceCrm).toBe("propio");
 	});
 
 	test("el upsert externo usa el indice parcial y parámetros", () => {

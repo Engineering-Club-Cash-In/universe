@@ -38,6 +38,11 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { orpc } from "@/utils/orpc";
 
 const PAGE_SIZE = 10;
@@ -102,7 +107,13 @@ function EstadoSatBadge({
 	);
 }
 
-function CruceCrmBadge({ cruce }: { cruce: Exclude<CruceCrmFiltro, "todos"> }) {
+function CruceCrmBadge({
+	cruce,
+	titularCrmNombre,
+}: {
+	cruce: Exclude<CruceCrmFiltro, "todos">;
+	titularCrmNombre: string | null;
+}) {
 	if (cruce === "propio") {
 		return (
 			<Badge className="border-blue-300 bg-blue-100 text-blue-800">
@@ -111,10 +122,23 @@ function CruceCrmBadge({ cruce }: { cruce: Exclude<CruceCrmFiltro, "todos"> }) {
 		);
 	}
 	if (cruce === "registrado_no_propio") {
+		const descripcion = titularCrmNombre
+			? `Vehículo registrado en CRM bajo control del cliente ${titularCrmNombre}.`
+			: "Vehículo registrado en CRM bajo control del cliente, pero sin una persona asociada.";
+
 		return (
-			<Badge className="border-amber-300 bg-amber-100 text-amber-800">
-				<AlertTriangle /> Registrado, no propio
-			</Badge>
+			<Tooltip>
+				<TooltipTrigger asChild>
+					<span className="inline-flex cursor-help rounded-md">
+						<Badge className="border-amber-300 bg-amber-100 text-amber-800">
+							<AlertTriangle /> Registrado, no propio
+						</Badge>
+					</span>
+				</TooltipTrigger>
+				<TooltipContent className="max-w-xs text-center">
+					{descripcion}
+				</TooltipContent>
+			</Tooltip>
 		);
 	}
 	return (
@@ -122,6 +146,28 @@ function CruceCrmBadge({ cruce }: { cruce: Exclude<CruceCrmFiltro, "todos"> }) {
 			<XCircle /> Sin registro
 		</Badge>
 	);
+}
+
+function TitularCell({
+	cruce,
+	titularCrmNombre,
+	titularSatNombre,
+}: {
+	cruce: Exclude<CruceCrmFiltro, "todos">;
+	titularCrmNombre: string | null;
+	titularSatNombre: string | null;
+}) {
+	if (cruce === "propio") {
+		return <span>{titularSatNombre?.trim() || "No identificado en CRM"}</span>;
+	}
+	if (cruce === "registrado_no_propio") {
+		return (
+			<span>
+				{titularCrmNombre ?? "Titular no identificado (no es CUBE/RDBE)"}
+			</span>
+		);
+	}
+	return <span>No identificado en CRM</span>;
 }
 
 function Senal({ valor }: { valor: boolean | null }) {
@@ -280,8 +326,8 @@ function SatVerificationPage() {
 						Verificación en SAT
 					</h1>
 					<p className="text-muted-foreground">
-						Consulta el estado de los vehículos propios y sus documentos en
-						Agencia Virtual.
+						Consulta el estado de los vehículos y sus documentos en Agencia
+						Virtual.
 					</p>
 				</div>
 				<Button
@@ -429,7 +475,7 @@ function SatVerificationPage() {
 								className="font-medium text-sm"
 								htmlFor="sat-crm-match-filter"
 							>
-								Cruce CRM
+								Está en CRM
 							</label>
 							<Select
 								value={cruceCrmFiltro}
@@ -504,11 +550,11 @@ function SatVerificationPage() {
 							<Table>
 								<TableHeader>
 									<TableRow>
-										<TableHead>Titular SAT</TableHead>
+										<TableHead>Titular</TableHead>
 										<TableHead>Placa</TableHead>
 										<TableHead>Vehículo SAT</TableHead>
 										<TableHead>Estado SAT</TableHead>
-										<TableHead>Cruce CRM</TableHead>
+										<TableHead>Está en CRM</TableHead>
 										<TableHead>Impuesto pagado</TableHead>
 										<TableHead>Consultado</TableHead>
 									</TableRow>
@@ -518,10 +564,11 @@ function SatVerificationPage() {
 										<TableRow key={vehiculo.id}>
 											<TableCell>
 												<div className="font-medium">
-													{vehiculo.titularNombre ?? "Sin titular"}
-												</div>
-												<div className="text-muted-foreground text-xs">
-													{vehiculo.titularNit ?? ""}
+													<TitularCell
+														cruce={vehiculo.cruceCrm}
+														titularCrmNombre={vehiculo.titularCrmNombre}
+														titularSatNombre={vehiculo.titularNombre}
+													/>
 												</div>
 											</TableCell>
 											<TableCell className="font-medium">
@@ -546,7 +593,10 @@ function SatVerificationPage() {
 												/>
 											</TableCell>
 											<TableCell>
-												<CruceCrmBadge cruce={vehiculo.cruceCrm} />
+												<CruceCrmBadge
+													cruce={vehiculo.cruceCrm}
+													titularCrmNombre={vehiculo.titularCrmNombre}
+												/>
 											</TableCell>
 											<TableCell>
 												<Senal valor={vehiculo.impuestoCirculacionPagado} />

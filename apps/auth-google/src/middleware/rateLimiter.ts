@@ -39,6 +39,71 @@ function ipDelCliente(c: Context): string | null {
   return null;
 }
 
+/**
+ * La cubeta de la ventana vigente para una llave, creándola o reiniciándola.
+ *
+ * Extraída para que el contador por CUENTA (`consumirCupo`) y el middleware por
+ * IP compartan store, ventana y limpieza periódica en lugar de llevar cada uno
+ * su propia versión de la misma aritmética.
+ */
+function cubeta(key: string, windowMs: number, now: number) {
+  let record = store.get(key);
+
+  if (!record || now > record.resetTime) {
+    record = { count: 0, resetTime: now + windowMs };
+    store.set(key, record);
+  }
+
+  return record;
+}
+
+export interface CupoConsumido {
+  permitido: boolean;
+  restantes: number;
+  reiniciaEn: Date;
+  /** Para el `Retry-After`. Nunca menos de 1: un `0` invita a reintentar ya. */
+  faltanSegundos: number;
+}
+
+/**
+ * Consume un intento de una cubeta identificada por algo que NO es la IP.
+ *
+ * El middleware de arriba limita por IP y por eso tiene que fallar abierto
+ * cuando el proxy no manda la cabecera. Acá la llave es la identidad de la
+ * SESIÓN, que siempre existe cuando se llama desde una ruta con `requireAuth`,
+ * así que no hay cubeta compartida "unknown" que pueda apagarle la función a
+ * todo el portal de un solo golpe.
+ *
+ * Tampoco se desactiva en desarrollo, a diferencia del middleware: es un tope
+ * por cuenta sobre UNA operación concreta, no un freno al login, y que corra
+ * igual en todos los entornos es lo que hace que se pruebe antes de producción
+ * (y que no dependa de un `NODE_ENV` que el contenedor podría no traer).
+ */
+export function consumirCupo(config: {
+  namespace: string;
+  llave: string;
+  windowMs: number;
+  max: number;
+}): CupoConsumido {
+  const now = Date.now();
+  const record = cubeta(`${config.namespace}:${config.llave}`, config.windowMs, now);
+  const faltanSegundos = Math.max(1, Math.ceil((record.resetTime - now) / 1000));
+  const reiniciaEn = new Date(record.resetTime);
+
+  if (record.count >= config.max) {
+    return { permitido: false, restantes: 0, reiniciaEn, faltanSegundos };
+  }
+
+  record.count++;
+
+  return {
+    permitido: true,
+    restantes: Math.max(0, config.max - record.count),
+    reiniciaEn,
+    faltanSegundos,
+  };
+}
+
 export function createRateLimiter(config: RateLimitConfig) {
   return async (c: Context, next: Next) => {
     // En desarrollo, no aplicar rate limiting
@@ -53,18 +118,8 @@ export function createRateLimiter(config: RateLimitConfig) {
       return;
     }
 
-    const key = `${config.namespace}:${ip}`;
     const now = Date.now();
-
-    let record = store.get(key);
-
-    if (!record || now > record.resetTime) {
-      record = {
-        count: 0,
-        resetTime: now + config.windowMs,
-      };
-      store.set(key, record);
-    }
+    const record = cubeta(`${config.namespace}:${ip}`, config.windowMs, now);
 
     if (record.count >= config.max) {
       const faltan = Math.max(1, Math.ceil((record.resetTime - now) / 1000));

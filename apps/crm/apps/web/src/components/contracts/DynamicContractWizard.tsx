@@ -667,13 +667,6 @@ export function DynamicContractWizard({
 	const descartarRef = useRef(onDescartarSinEnlazar);
 	descartarRef.current = onDescartarSinEnlazar;
 
-	const anotarGenerados = (resultados: ContractResult[]) => {
-		for (const r of resultados) {
-			if (r.documentID && r.descarte) {
-				sinEnlazarRef.current.set(r.documentID, r.descarte);
-			}
-		}
-	};
 	const descartarSinEnlazar = useCallback(() => {
 		const documentos = [...sinEnlazarRef.current].map(
 			([documentID, descarte]) => ({ documentID, descarte }),
@@ -684,7 +677,26 @@ export function DynamicContractWizard({
 
 	// Irse sin enlazar (la flecha de atrás, otra ruta) deja lo generado sin
 	// dueño: se descarta al desmontar. Cerrar la pestaña no pasa por acá.
-	useEffect(() => descartarSinEnlazar, [descartarSinEnlazar]);
+	const montadoRef = useRef(true);
+	useEffect(() => {
+		montadoRef.current = true;
+		return () => {
+			montadoRef.current = false;
+			descartarSinEnlazar();
+		};
+	}, [descartarSinEnlazar]);
+
+	const anotarGenerados = (resultados: ContractResult[]) => {
+		for (const r of resultados) {
+			if (r.documentID && r.descarte) {
+				sinEnlazarRef.current.set(r.documentID, r.descarte);
+			}
+		}
+		// La generación terminó después de que se fueron de la pantalla: la
+		// limpieza al desmontar ya pasó con la lista vacía, así que se descarta
+		// ahora. Si no, esos documentos quedaban vivos en WeeTrust sin dueño.
+		if (!montadoRef.current) descartarSinEnlazar();
+	};
 	const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
 	const [isLoadingFields, setIsLoadingFields] = useState(false);
 	const [showLinkConfirmDialog, setShowLinkConfirmDialog] = useState(false);
@@ -2003,6 +2015,13 @@ export function DynamicContractWizard({
 			}
 		}
 
+		// Mientras se enlaza, lo generado ya no es un descarte: si se van de la
+		// pantalla a mitad del pedido, la limpieza al desmontar no puede borrar en
+		// WeeTrust los documentos que el servidor está guardando. Si el enlace
+		// falla, vuelven a la lista.
+		const enVuelo = new Map(sinEnlazarRef.current);
+		sinEnlazarRef.current.clear();
+
 		try {
 			await onLinkContracts({
 				opportunityId,
@@ -2023,11 +2042,16 @@ export function DynamicContractWizard({
 			});
 			// Ya tienen fila: no son descartes. (Los que el servidor descartó al
 			// enlazar, por cambio de etapa, ya los borró él.)
-			sinEnlazarRef.current.clear();
 			setShowLinkConfirmDialog(false);
 			onBack(); // Volver a la pantalla anterior después de enlazar
 		} catch (error) {
 			console.error("Error linking contracts:", error);
+			for (const [documentID, descarte] of enVuelo) {
+				sinEnlazarRef.current.set(documentID, descarte);
+			}
+			// Ya se fueron: nadie más los va a descartar. El servidor no borra los
+			// que alcanzaron a quedar con fila.
+			if (!montadoRef.current) descartarSinEnlazar();
 		}
 	};
 

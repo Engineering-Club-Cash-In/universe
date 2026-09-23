@@ -132,6 +132,44 @@ describe("construirMoraTarjeta — la tarjeta vuelve a reconciliar", () => {
   });
 });
 
+describe("la tarjeta con el `item` del LISTADO", () => {
+  // Las tarjetas de escritorio y móvil reciben su `item` de
+  // `getCreditosWithUserByMesAnio`, no del detalle. Mientras ese endpoint no
+  // mandó los dos campos, este era exactamente el caso "sin los campos nuevos":
+  // `ritmo` y `techo` en null y NINGÚN mensaje mostrado. Ahora el listado los
+  // provee y la tarjeta dice lo mismo que en el detalle.
+  const itemDelListado = {
+    mora: { monto_mora: "37.33", cuotas_atrasadas: 1, porcentaje_mora: "1.12" },
+    incrementoDiarioMora: "3.74",
+    incrementoMaximoMensualMora: "74.67",
+  };
+
+  const desdeItem = (item: typeof itemDelListado) =>
+    construirMoraTarjeta({
+      montoMora: item.mora?.monto_mora,
+      cuotasAtrasadas: item.mora?.cuotas_atrasadas,
+      porcentajeMora: item.mora?.porcentaje_mora,
+      incrementoDiarioMora: item.incrementoDiarioMora,
+      incrementoMaximoMensualMora: item.incrementoMaximoMensualMora,
+    });
+
+  it("muestra el ritmo y el techo", () => {
+    const t = desdeItem(itemDelListado);
+    expect(t.ritmo).toContain("Q 3.74");
+    expect(t.techo).toContain("Q 112.00");
+  });
+
+  it("MUTACIÓN: si el listado dejara de mandarlos, no se muestra NADA", () => {
+    const t = desdeItem({
+      ...itemDelListado,
+      incrementoDiarioMora: undefined as never,
+      incrementoMaximoMensualMora: undefined as never,
+    });
+    expect(t.ritmo).toBeNull();
+    expect(t.techo).toBeNull();
+  });
+});
+
 describe("la tarjeta está cableada a construirMoraTarjeta", () => {
   // carteraFront no tiene DOM ni testing-library: el cableado se prueba sobre el
   // fuente, acotado a la región de MoraInfo y afirmando en POSITIVO lo que tiene

@@ -537,9 +537,9 @@ export class WialonClient {
 		this.circuitoAbiertoHasta = null;
 	}
 
-	// Solo los fallos de lectura reintentables cuentan. Cualquier otro fallo
-	// (escritura, error de contrato) no dice que Wialon se recuperó, así que
-	// tampoco cierra el circuito ni reinicia el contador.
+	// Solo los fallos transitorios (timeout, red, 5xx) cuentan, de lecturas o
+	// escrituras. Un error de contrato o de negocio no dice que Wialon se
+	// recuperó, así que tampoco cierra el circuito ni reinicia el contador.
 	private registrarFalloCircuito(): void {
 		this.fallosConsecutivos += 1;
 		if (this.fallosConsecutivos >= CIRCUITO_UMBRAL_FALLOS) {
@@ -633,7 +633,9 @@ export class WialonClient {
 
 				const quedanIntentos =
 					idempotente && reintentable && intento < maxIntentos;
-				if (idempotente && reintentable) this.registrarFalloCircuito();
+				// Cuenta cualquier falla transitoria, también de escrituras: aunque
+				// no se reintenten solas, un timeout dice igual que Wialon no responde.
+				if (reintentable) this.registrarFalloCircuito();
 
 				// Se registra el desenlace final, no un "error" genérico:
 				// - escritura con falla transitoria → "incierto" (pide verificar a mano).

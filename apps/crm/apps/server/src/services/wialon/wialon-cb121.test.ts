@@ -403,6 +403,31 @@ describe("CB-121 — circuit breaker", () => {
 		expect(llamadasUpdate).toBe(0);
 	}, 15_000);
 
+	test("5 escrituras con timeout abren el circuito y la siguiente falla sin llamar a Wialon", async () => {
+		let llamadasUpdate = 0;
+		const fetchMock: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			llamadasUpdate++;
+			throw new DOMException("aborted", "AbortError");
+		};
+
+		const client = new WialonClient({ token: "tok", timeoutMs: 5 }, fetchMock);
+		for (let i = 0; i < 5; i++) {
+			await expect(
+				client.createLocatorLink({ unitId: 1, durationSeconds: 60 }),
+			).rejects.toThrow(/No se pudo confirmar/);
+		}
+		expect(client.getEstadoCircuito().abierto).toBe(true);
+
+		await expect(
+			client.createLocatorLink({ unitId: 1, durationSeconds: 60 }),
+		).rejects.toThrow(/temporalmente deshabilitada/);
+		expect(llamadasUpdate).toBe(5);
+	});
+
 	test("una escritura fallida no reinicia el contador de fallos del circuito", async () => {
 		let llamadasSearch = 0;
 		const fetchMock: WialonFetch = async (_, init) => {

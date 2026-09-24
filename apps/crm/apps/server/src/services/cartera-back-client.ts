@@ -2585,6 +2585,91 @@ export class CarteraBackClient {
 		return response;
 	}
 
+	// ========================================================================
+	// ACCESO AL PORTAL DEL INVERSIONISTA
+	// ========================================================================
+
+	/**
+	 * Abre el acceso al Portal del Inversionista: crea la cuenta y le manda la
+	 * contraseña por correo. Es un acto humano de back office —la
+	 * reconciliación diaria de cartera detecta a quién le falta acceso pero NO
+	 * lo abre sola (cartera-back: controllers/otorgarAccesoPortal.ts)—, así que
+	 * el disparo vive detrás de un procedure del CRM, no de un cron.
+	 *
+	 * Sin `retryOnFailure`: es un POST con efecto, y cada reintento le mandaría
+	 * OTRA contraseña al inversionista. La política por defecto de `request()`
+	 * (solo reintenta GET/HEAD) es la correcta acá y se deja tal cual.
+	 */
+	async otorgarAccesoPortal(inversionistaIds: number[]): Promise<{
+		message: string;
+		resultados: {
+			inversionistaId: number;
+			estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+			usuarioEmail: string | null;
+			correo: {
+				enviado: boolean;
+				plantilla: string | null;
+				redirigido: boolean;
+				destinatarioReal: string | null;
+			};
+			advertencias: string[];
+			motivo: string | null;
+		}[];
+	}> {
+		const response = await this.request<{
+			message: string;
+			resultados: {
+				inversionistaId: number;
+				estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+				usuarioEmail: string | null;
+				correo: {
+					enviado: boolean;
+					plantilla: string | null;
+					redirigido: boolean;
+					destinatarioReal: string | null;
+				};
+				advertencias: string[];
+				motivo: string | null;
+			}[];
+		}>("/investor/portal-access", {
+			method: "POST",
+			// Cartera espera un ARREGLO (`t.Array(t.Number(), { minItems: 1 })`).
+			body: JSON.stringify({ inversionista_ids: inversionistaIds }),
+		});
+		return response;
+	}
+
+	/**
+	 * ¿Este inversionista YA tiene cuenta del portal? SOLO LECTURA.
+	 *
+	 * Es la consulta que deja deshabilitar el botón de arriba sin apretarlo:
+	 * hasta que existió, la única forma de averiguarlo era disparar el acto que
+	 * crea la cuenta y manda la contraseña.
+	 *
+	 * Aquí SÍ se reintenta, al revés que `otorgarAccesoPortal`: no hay efecto
+	 * que duplicar, y un tropiezo de red que se propagara dejaría la pantalla
+	 * sin saber nada. La política por defecto de `request()` ya reintenta GET,
+	 * así que no se fuerza `retryOnFailure`.
+	 *
+	 * Sin caché a propósito (`useCache` se deja en su default): una respuesta
+	 * vieja pondría el botón en gris sobre una cuenta que se rompió después, o
+	 * lo activaría sobre una que ya se abrió.
+	 */
+	async consultarAccesoPortal(inversionistaId: number): Promise<{
+		estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "candidata" | "fallo";
+		usuarioEmail: string | null;
+		resueltoPor: "dpi" | "email" | null;
+		advertencias: string[];
+		motivo: string | null;
+	}> {
+		return await this.request(
+			`/investor/portal-access-status?inversionista_id=${encodeURIComponent(
+				inversionistaId,
+			)}`,
+			{ method: "GET" },
+		);
+	}
+
 	/**
 	 * Resuelve, para un monto dado, las 3 filas del catálogo (una por
 	 * modalidad) del bracket correspondiente — fuente única de verdad en SQL,

@@ -1656,6 +1656,35 @@ describe("cableado del corte en cascada: la plata no aplicada no se evapora", ()
   });
 });
 
+describe("cableado de monto_aplicado: que no reporte la boleta a secas tras un corte", () => {
+  // Chequeo de CABLEADO: la conservación (aplicado + no-aplicado == boleta)
+  // vive en `calcularMontoAplicadoReportado` (registerPaymentPolicy.test.ts).
+  // Lo que el helper no puede probar es que el return de éxito del pago
+  // normal use ese cálculo en vez de `montoBoleta.toString()` a pelo — que es
+  // justamente el defecto: cuando la cascada se corta, la parte repuesta a
+  // saldo a favor seguía apareciendo como "aplicada" en `detalle.monto_aplicado`
+  // y en la frase del `resumen`.
+  it("calcula montoTotal con el helper puro, no con montoBoleta.toString()", () => {
+    expect(registerPaymentSource).toContain(
+      "const montoTotal = calcularMontoAplicadoReportado({",
+    );
+    expect(registerPaymentSource).toContain("montoBoleta,\n        montoNoAplicadoPorCorte,");
+  });
+
+  it("no queda ningún montoBoleta.toString() suelto para el return de éxito del pago normal", () => {
+    expect(registerPaymentSource).not.toContain(
+      "const montoTotal = montoBoleta.toString();",
+    );
+  });
+
+  it("detalle.monto_aplicado y el resumen usan el montoTotal ya corregido", () => {
+    expect(registerPaymentSource).toContain("monto_aplicado: montoTotal,");
+    expect(registerPaymentSource).toContain(
+      "Monto total aplicado: Q${montoTotal}.",
+    );
+  });
+});
+
 describe("el aviso del corte también sale por el camino de abono a capital", () => {
   // `insertPayment` tiene DOS returns de éxito alcanzables después del loop: el
   // del abono directo a capital (sección 7) y el del pago normal. El campo y la

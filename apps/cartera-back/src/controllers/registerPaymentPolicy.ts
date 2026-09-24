@@ -1656,3 +1656,32 @@ export const decidirCierrePorRestantesEnCero = ({
   hayHermanoPendiente
     ? { cuotaCompleta: false, cierreDiferido: filaPagada }
     : { cuotaCompleta: true, cierreDiferido: false };
+
+/**
+ * `detalle.monto_aplicado` y la frase del `resumen` del pago normal
+ * históricamente reportan `montoBoleta` completo, porque en el caso normal
+ * eso SÍ es lo que se aplicó. El corte en cascada (`decidirCierreCortoEnCascada`
+ * + `restaurarDisponibleTrasCorteEnCascada`) rompe esa igualdad: una parte de
+ * la boleta se repone a `disponible_restante` y termina en saldo a favor, no
+ * en las cuotas — así que reportar la boleta entera ahí es una regresión
+ * nuestra, no el contrato viejo. Esta función corrige SOLO ese caso: resta de
+ * `montoBoleta` lo que el corte dejó sin aplicar (`montoNoAplicadoPorCorte`),
+ * y sin corte devuelve la boleta tal cual.
+ *
+ * A propósito NO toca el caso preexistente de `capitalDevuelto > 0` (abono a
+ * capital rechazado por el crédito): ese sigue reportando la boleta completa
+ * a propósito, porque el `resumen` ya explica en palabras que ese monto quedó
+ * en saldo a favor. Cambiarlo sería tocar contrato viejo fuera de alcance de
+ * este arreglo.
+ */
+export const calcularMontoAplicadoReportado = ({
+  montoBoleta,
+  montoNoAplicadoPorCorte,
+}: {
+  montoBoleta: BigInput;
+  montoNoAplicadoPorCorte: BigInput | undefined;
+}): Big => {
+  if (montoNoAplicadoPorCorte === undefined) return new Big(montoBoleta);
+  const reportado = new Big(montoBoleta).minus(montoNoAplicadoPorCorte);
+  return reportado.lt(0) ? new Big(0) : reportado;
+};

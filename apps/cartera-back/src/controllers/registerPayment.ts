@@ -64,6 +64,7 @@ import {
   decidirCierreCortoEnCascada,
   restaurarDisponibleTrasCorteEnCascada,
   evaluarRubrosPlanosCuota,
+  calcularMontoAplicadoReportado,
 } from "./registerPaymentPolicy";
 import {
   holdsPaymentAdvisoryLock,
@@ -2582,7 +2583,13 @@ export const insertPayment = async (
         }
       }
 
-      const montoTotal = montoBoleta.toString();
+      // Reporta lo que de verdad se aplicó, no la boleta a secas: si la
+      // cascada se cortó, la parte que se repuso a saldo a favor no cuenta
+      // como aplicada (ver doc de `calcularMontoAplicadoReportado`).
+      const montoTotal = calcularMontoAplicadoReportado({
+        montoBoleta,
+        montoNoAplicadoPorCorte,
+      }).toString();
 
       return {
         success: true,

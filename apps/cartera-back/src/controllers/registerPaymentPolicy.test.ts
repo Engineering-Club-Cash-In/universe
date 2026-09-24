@@ -2162,3 +2162,58 @@ describe("restaurarDisponibleTrasCorteEnCascada (que el corte no evapore la plat
     ).toBe("0.3");
   });
 });
+
+describe("calcularMontoAplicadoReportado (que monto_aplicado no mienta tras un corte)", () => {
+  const { calcularMontoAplicadoReportado } = registerPaymentPolicy;
+
+  it("sin corte devuelve la boleta íntegra", () => {
+    // El caso normal: nada se cortó, lo aplicado es la boleta completa.
+    expect(
+      calcularMontoAplicadoReportado({
+        montoBoleta: "1000.00",
+        montoNoAplicadoPorCorte: undefined,
+      }).toFixed(2),
+    ).toBe("1000.00");
+  });
+
+  it("con corte devuelve la boleta menos lo que se repuso a saldo a favor", () => {
+    // De los Q1,000 de la boleta, Q300 iban a la cuota que se cortó y
+    // volvieron a `disponible_restante` (y de ahí a saldo a favor). Lo
+    // reportado como aplicado tiene que ser sólo los Q700 que sí llegaron a
+    // cuotas.
+    expect(
+      calcularMontoAplicadoReportado({
+        montoBoleta: "1000.00",
+        montoNoAplicadoPorCorte: new Big("300.00"),
+      }).toFixed(2),
+    ).toBe("700.00");
+  });
+
+  it("conservación: aplicado reportado + no aplicado por corte == boleta", () => {
+    // Este es el que importa: nada de la boleta se puede evaporar entre las
+    // dos cifras que la respuesta expone.
+    const montoBoleta = new Big("1543.27");
+    const montoNoAplicadoPorCorte = new Big("612.10");
+
+    const montoAplicadoReportado = calcularMontoAplicadoReportado({
+      montoBoleta,
+      montoNoAplicadoPorCorte,
+    });
+
+    expect(
+      montoAplicadoReportado.plus(montoNoAplicadoPorCorte).toFixed(2),
+    ).toBe(montoBoleta.toFixed(2));
+  });
+
+  it("nunca negativo cuando el corte defensivamente excede la boleta", () => {
+    // No debería pasar en la práctica (el corte nunca descuenta más de lo
+    // que la boleta trae), pero si pasara, mejor 0 que un monto negativo en
+    // la respuesta.
+    expect(
+      calcularMontoAplicadoReportado({
+        montoBoleta: "100.00",
+        montoNoAplicadoPorCorte: new Big("150.00"),
+      }).toFixed(2),
+    ).toBe("0.00");
+  });
+});

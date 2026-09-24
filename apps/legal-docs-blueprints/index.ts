@@ -590,6 +590,17 @@ const app = new Elysia()
           signingUrl: s.signing?.url ?? null,
           // Epoch en milisegundos, o null si nunca vence.
           expiry: s.signing?.expiry ?? null,
+          // Sólo en quien lleva verificación facial. Es lo que explica el
+          // documento que se queda en PENDING con todos firmados: si la
+          // verificación terminó y salió inválida, WeeTrust no lo cierra.
+          biometric: s.biometricResultInfo
+            ? {
+                logID: s.biometricResultInfo.biometricLogID ?? null,
+                finished: Boolean(s.biometricResultInfo.hasFinished),
+                valid: Boolean(s.biometricResultInfo.isValid),
+                resultUrl: s.biometricResultInfo.biometricResultUrl ?? null,
+              }
+            : null,
         })),
       };
     } catch (error: any) {
@@ -710,6 +721,52 @@ const app = new Elysia()
   })
 
   /**
+   * PUT /contracts/retry-biometric/:documentID
+   *
+   * Repite o salta la verificación facial de un firmante que no la pasó.
+   *
+   * Es el caso del documento que se queda en PENDING con todas las firmas: la
+   * persona firmó, pero WeeTrust no le validó la identidad y no cierra el
+   * documento. Con `biometricRetry` vuelve a pedírsela sobre el MISMO documento
+   * —los enlaces de firma siguen sirviendo, no hay que reemitir nada— y con
+   * `biometricSkipped` el documento cierra con la firma tal como está.
+   *
+   * El `biometricLogID` es el del intento fallido y viene en la consulta de
+   * estado, dentro del `biometric` de ese firmante.
+   */
+  .put('/contracts/retry-biometric/:documentID', async ({ params, body, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
+
+    const { biometricLogID, action } = (body ?? {}) as {
+      biometricLogID?: string;
+      action?: string;
+    };
+
+    if (!biometricLogID) {
+      set.status = 400;
+      return { success: false, error: 'Falta biometricLogID' };
+    }
+
+    if (action !== 'biometricRetry' && action !== 'biometricSkipped') {
+      set.status = 400;
+      return {
+        success: false,
+        error: "action tiene que ser 'biometricRetry' o 'biometricSkipped'",
+      };
+    }
+
+    try {
+      await weeTrustService.retryBiometric(params.documentID, biometricLogID, action);
+      return { success: true, documentID: params.documentID, action };
+    } catch (error: any) {
+      console.error('[retry-biometric] Error:', error);
+      set.status = 502;
+      return { success: false, error: error.message };
+    }
+  })
+
+  /**
    * GET / - Documentación básica de la API
    */
   .get('/', () => {
@@ -730,6 +787,7 @@ const app = new Elysia()
       signedPdf: 'GET /contracts/signed-pdf/:documentID',
       refreshSigningLinks: 'PUT /contracts/refresh-signing-links/:documentID',
       resendSigningEmail: 'PUT /contracts/resend-email/:documentID',
+      retryBiometric: 'PUT /contracts/retry-biometric/:documentID',
       webhooks: {
         receive: 'POST /webhooks/weetrust/:secret',
         status: 'GET /webhooks/weetrust/status',
@@ -882,8 +940,14 @@ const app = new Elysia()
 
   /**
    * GET /webhooks/weetrust/status - Ver webhooks registrados
+   *
+   * Pide el secreto del CRM: las URLs registradas llevan adentro el
+   * WEETRUST_WEBHOOK_SECRET, y con él cualquiera podría hacerse pasar por
+   * WeeTrust.
    */
-  .get('/webhooks/weetrust/status', async ({ set }) => {
+  .get('/webhooks/weetrust/status', async ({ set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
     try {
       const webhooks = await weeTrustService.listWebhooks();
       return {
@@ -900,8 +964,15 @@ const app = new Elysia()
   /**
    * POST /webhooks/weetrust/register - Registrar webhook en WeeTrust
    * Body: { url: string, type: 'sendDocument' | 'signDocument' | 'completedDocument' }
+   *
+   * Pide el secreto del CRM. Los webhooks son de la cuenta entera de WeeTrust:
+   * abierto, cualquiera que conozca esta URL podía registrar el suyo y recibir
+   * el aviso de cada contrato que se firma, con los correos y nombres de quien
+   * firma.
    */
-  .post('/webhooks/weetrust/register', async ({ body, set }) => {
+  .post('/webhooks/weetrust/register', async ({ body, set, headers }) => {
+    const rechazo = rechazoSinSecretoDelCrm(headers, set);
+    if (rechazo) return rechazo;
     try {
       const { url, type } = body as { url: string; type: string };
 

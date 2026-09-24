@@ -2450,6 +2450,14 @@ export const insertPayment = async (
         .insert(pagos_credito)
         .values(pagoData)
         .returning();
+      // Esta fila lleva `mora: moraBig`, y el único camino que llega acá con
+      // el flag prendido es el de mora cubierta completa (`pagoCompleto &&
+      // moraPagada`), que es justo donde `moraBig` quedó igualada a
+      // `resultadoMora.montoAplicadoMora`: la mora ya está respaldada. Igual
+      // que en la fila-rastro, el reset va ANTES del `commitConvenio` de unas
+      // líneas más abajo, que puede tirar y caer al `catch` — restituir ahí
+      // sería doble cobro.
+      moraAplicadaSinRegistrar = 0;
       if (new Big(pagoConvenioParaFila).gt(0)) {
         pagoConvenioPagoId = pagoInsertado.pago_id;
       }
@@ -2631,6 +2639,14 @@ export const insertPayment = async (
           observaciones,
           nexaPaymentEventId,
         });
+        // La fila-rastro ya está escrita CON la mora (`mora:
+        // resultadoMora.montoAplicadoMora`): desde acá la mora descontada está
+        // respaldada por un pago y restituirla en el `catch` sería cobrársela
+        // dos veces al cliente. Importa que el reset quede ANTES del
+        // `commitConvenio` de unas líneas más abajo, que puede tirar (convenio
+        // sin fila persistida, o convenio que cambió y no pudo acreditarse) y
+        // llevar el flujo directo al `catch`.
+        moraAplicadaSinRegistrar = 0;
         if (new Big(pagoConvenioParaFila).gt(0)) {
           pagoConvenioPagoId = pagoEspecialInsertado.pago_id;
         }

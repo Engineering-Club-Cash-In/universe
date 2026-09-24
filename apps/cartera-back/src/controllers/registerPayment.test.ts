@@ -1894,12 +1894,75 @@ describe("cableado de la restitución de mora (que un rechazo no le regale la mo
       )];
       expect(pegadoAlIncremento.length).toBe(0);
     }
-    // Los returns de éxito tempranos de sólo-mora: ahí la mora SÍ quedó
-    // registrada en la fila que `insertarPago` acaba de escribir.
+    // CANDADO sobre el fuente: TODA escritura que persista la mora en la fila
+    // (`mora: resultadoMora.montoAplicadoMora`) tiene que apagar el flag justo
+    // después. No se enumeran los sitios a mano a propósito: así fue como se
+    // colaron los returns de sólo-mora y, después, la fila-rastro del convenio
+    // —que registraba la mora y dejaba el flag prendido, de modo que el
+    // `commitConvenio` de unas líneas más abajo caía al catch y le reactivaba
+    // al cliente una mora ya cobrada (doble cobro)—. Si aparece una ruta nueva
+    // sin reset, este test la caza sin que haya que acordarse de agregarla.
+    const sitiosQueEscribenMora = [...cuerpoInsertPayment.matchAll(
+      /mora: resultadoMora\.montoAplicadoMora,/g,
+    )];
+    expect(sitiosQueEscribenMora.length).toBeGreaterThan(0);
     const escritoresMora = [...cuerpoInsertPayment.matchAll(
       /mora: resultadoMora\.montoAplicadoMora,[\s\S]{0,700}?\}\);\n(?:\s*\/\/[^\n]*\n)*\s*moraAplicadaSinRegistrar = 0;/g,
     )];
-    expect(escritoresMora).toHaveLength(3);
+    expect(escritoresMora).toHaveLength(sitiosQueEscribenMora.length);
+  });
+
+  it("la fila-rastro del convenio apaga el flag, y ANTES del commitConvenio que puede tirar", () => {
+    // El caso concreto: crédito EN_CONVENIO sin cuotas abiertas. El loop no
+    // escribe nada, así que el flag sigue prendido cuando `insertarPago`
+    // persiste la fila-rastro CON la mora. Si el reset no estuviera acá, el
+    // `commitConvenio` de abajo (tira si el convenio cambió o si no hay fila
+    // persistida) llevaría al catch con el flag prendido y el INCREMENTO le
+    // reactivaría al cliente una mora que esa fila ya registró como cobrada.
+    const inicioFila = cuerpoInsertPayment.indexOf(
+      "const pagoEspecialInsertado = await insertarPago({",
+    );
+    expect(inicioFila).toBeGreaterThan(-1);
+    const reset = cuerpoInsertPayment.indexOf(
+      "moraAplicadaSinRegistrar = 0;",
+      inicioFila,
+    );
+    expect(reset).toBeGreaterThan(inicioFila);
+    // Entre el insert y el reset no puede haber otro `insertarPago(` ni el
+    // commit: el reset es del insert de la fila-rastro y va antes del commit.
+    const commit = cuerpoInsertPayment.indexOf(
+      "const convenioAcreditado = await commitConvenio(",
+      inicioFila,
+    );
+    expect(commit).toBeGreaterThan(-1);
+    expect(reset).toBeLessThan(commit);
+    // Y pegado al cierre del insert, no suelto más abajo.
+    const anclaFila = "const pagoEspecialInsertado = await insertarPago({";
+    expect(
+      cuerpoInsertPayment.slice(inicioFila + anclaFila.length, reset),
+    ).not.toContain("await insertarPago({");
+  });
+
+  it("el abono directo a capital apaga el flag tras escribir su fila (su commitConvenio también tira)", () => {
+    // Esa fila lleva `mora: moraBig`, y el único camino que llega ahí con el
+    // flag prendido es el de mora cubierta completa, donde `moraBig` quedó
+    // igualada a `resultadoMora.montoAplicadoMora`. O sea: la fila respalda la
+    // mora entera, y su `commitConvenio` puede tirar igual que el otro.
+    const inicioFila = cuerpoInsertPayment.indexOf(
+      "      const [pagoInsertado] = await db\n        .insert(pagos_credito)\n        .values(pagoData)\n        .returning();",
+    );
+    expect(inicioFila).toBeGreaterThan(-1);
+    const reset = cuerpoInsertPayment.indexOf(
+      "moraAplicadaSinRegistrar = 0;",
+      inicioFila,
+    );
+    const commit = cuerpoInsertPayment.indexOf(
+      "const convenioAcreditado = await commitConvenio(",
+      inicioFila,
+    );
+    expect(reset).toBeGreaterThan(inicioFila);
+    expect(commit).toBeGreaterThan(-1);
+    expect(reset).toBeLessThan(commit);
   });
 
   it("el catch restituye con el INVERSO exacto del DECREMENTO y reactiva la fila", () => {

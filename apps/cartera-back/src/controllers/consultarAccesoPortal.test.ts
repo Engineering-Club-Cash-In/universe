@@ -70,6 +70,32 @@ const dbFalsa = () => {
   };
 };
 
+/**
+ * LA BASE PREVIA SE CAPTURA ACÁ, ANTES DEL MOCK DE ABAJO.
+ *
+ * Tomarla dentro de `beforeAll` —que corre DESPUÉS de este top-level— hacía que
+ * "lo previo" fuera nuestra propia base falsa, así que el `afterAll` la
+ * republicaba para todo el proceso en vez de devolver la real: una suite que
+ * corriera después importaba `../database/index` y recibía este doble. Lo
+ * comprobamos: un archivo que solo lee la base pasa solo y falla cuando estas
+ * suites van delante.
+ *
+ * Se guarda en el objeto COMPARTIDO y una sola vez, porque los dos archivos del
+ * acceso al portal publican el mismo mock: el segundo en cargar ya vería la
+ * falsa del primero, y encadenarlo devolvería la falsa igual.
+ *
+ * Si el módulo real no se puede importar (sin `SUPABASE_DB_URL` tira al
+ * cargarse), queda `null` y el `afterAll` publica algo que TIRA. Dejar la falsa
+ * puesta sería peor que no tener base: volvería verde a la suite ajena que sí
+ * escribe.
+ */
+if (!("previa" in estadoDb)) {
+  estadoDb.previa = await import("../database/index")
+    .then((modulo) => ({ ...modulo }) as Record<string, unknown>)
+    .catch(() => null);
+}
+const dbPrevia = estadoDb.previa as Record<string, unknown> | null;
+
 mock.module("../database/index", () => dbFalsa());
 
 const { consultarAccesoPortal } = await import("./consultarAccesoPortal");
@@ -85,9 +111,10 @@ const { consultarAccesoPortal } = await import("./consultarAccesoPortal");
  * con SUS dobles, y la frase "el envoltorio es el REAL" era falsa.
  *
  * Acá se publica lo nuestro en `beforeAll` y en `afterAll` se DEVUELVE lo que
- * hubiera antes, con las mismas funciones (los espías de la otra suite son los
- * mismos objetos, así que sus pruebas siguen viéndolos). Cada archivo manda
- * dentro de sus pruebas y sale sin dejar nada puesto. Republicar sí reenlaza a
+ * hubiera antes —capturado ANTES de cualquier mock nuestro, ver el bloque de la
+ * base—, con las mismas funciones (los espías de la otra suite son los mismos
+ * objetos, así que sus pruebas siguen viéndolos). Cada archivo manda dentro de
+ * sus pruebas y sale sin dejar puesto ningún doble nuestro. Republicar sí reenlaza a
  * quien ya importó: `mock.module` actualiza el namespace en vivo.
  */
 const provisioningReal = (await import(
@@ -95,25 +122,33 @@ const provisioningReal = (await import(
 )) as typeof import("../services/portalProvisioning");
 
 let provisioningPrevio: Record<string, unknown> | null = null;
-let dbPrevia: Record<string, unknown> | null = null;
 
 beforeAll(async () => {
   provisioningPrevio = { ...(await import("../services/portalProvisioning")) };
-  dbPrevia = { ...(await import("../database/index")) };
 
   mock.module("../services/portalProvisioning", () => ({ ...provisioningReal }));
   mock.module("../database/index", () => dbFalsa());
 
   // El encabezado AFIRMA que el envoltorio que corre es el real. Esto lo
-  // comprueba en vez de confiar: si algún día otro archivo lograra dejar su
-  // doble puesto, sale un rojo que lo nombra.
+  // comprueba POR COMPORTAMIENTO, no por identidad: comparar el namespace
+  // publicado contra `provisioningReal` no podía fallar nunca, porque dos
+  // líneas antes se publicó `{ ...provisioningReal }` y son la misma referencia
+  // por construcción. Leía como candado y no cerraba nada.
+  //
+  // Una sociedad se corta en `omitida/es_empresa` SIN salir a la red, y eso
+  // solo lo hace `decidirProvisionamiento` de verdad: un doble contesta lo que
+  // le programaron o nada. Es barato (ni base ni fetch) y muerde.
   const publicado: any = await import("../services/portalProvisioning");
-  if (
-    publicado.consultarAccesoInversionista !==
-    provisioningReal.consultarAccesoInversionista
-  ) {
+  const sonda = await publicado.consultarAccesoInversionista({
+    inversionista_id: -1,
+    nombre: "Sonda S.A.",
+    email: "sonda@ejemplo.invalid",
+    dpi: null,
+    dpi_rep_legal: "1573661970101",
+  });
+  if (sonda?.estado !== "omitida" || sonda?.motivo !== "es_empresa") {
     throw new Error(
-      "portalProvisioning no es el real durante estas pruebas: otra suite dejó su doble publicado.",
+      `el portalProvisioning que corre no se comporta como el real (¿otra suite dejó su doble publicado?): la sonda de empresa contestó ${JSON.stringify(sonda)}.`,
     );
   }
 });
@@ -126,6 +161,12 @@ afterAll(() => {
   if (dbPrevia) {
     const previa = dbPrevia;
     mock.module("../database/index", () => previa);
+  } else {
+    mock.module("../database/index", () => {
+      throw new Error(
+        "la base real no se pudo importar en esta corrida; el doble de consultarAccesoPortal NO se queda publicado",
+      );
+    });
   }
 });
 
@@ -405,6 +446,88 @@ describe("consultarAccesoPortal", () => {
     const { respuesta } = await llamar({ inversionista_id: "7" });
 
     expect(respuesta.motivo).toBe("no_reconocido");
+    expect(JSON.stringify(respuesta)).not.toContain("/srv/");
+  });
+
+  it("el motivo que SÍ produce la consulta de auth-google viaja tal cual", async () => {
+    // `consultarCuentaInversionista` (auth-google,
+    // ensureInvestorAccount.ts:694-704) contesta esto sobre quien YA tiene
+    // cuenta, pero bajo otro correo. Es el único motivo no nulo de esa ruta, y
+    // colapsarlo borraba el único diagnóstico del camino de lectura: el CRM
+    // enseñaba el botón encendido sobre alguien que ya entró, sin decir por qué.
+    estadoDb.filas = [fila()];
+    cuerpoDeAuth = {
+      ...respuestaDeAuth(),
+      estado: "candidata",
+      motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+    };
+
+    const { respuesta } = await llamar({ inversionista_id: "7" });
+
+    expect(respuesta.motivo).toBe("correo_de_cartera_distinto_al_de_la_cuenta");
+  });
+
+  // ─── Las `advertencias` que se publican ─────────────────────────────────
+  //
+  // Mismo embudo que el `motivo`, y por lo mismo: el arreglo viene del cuerpo
+  // de auth-google y `llamar` solo comprueba `Array.isArray`, nunca los
+  // valores. Antes salía verbatim.
+
+  it("las advertencias del camino de lectura viajan tal cual", async () => {
+    estadoDb.filas = [fila()];
+    cuerpoDeAuth = {
+      ...respuestaDeAuth(),
+      advertencias: [
+        "cuenta_sin_rol_de_inversionista",
+        "correo_de_cartera_distinto_al_de_la_cuenta",
+        "cuenta_anclada_solo_por_correo",
+      ],
+    };
+
+    const { respuesta } = await llamar({ inversionista_id: "7" });
+
+    expect(respuesta.advertencias).toEqual([
+      "cuenta_sin_rol_de_inversionista",
+      "correo_de_cartera_distinto_al_de_la_cuenta",
+      "cuenta_anclada_solo_por_correo",
+    ]);
+  });
+
+  it("una advertencia que cartera no nombra NO sale con su texto", async () => {
+    estadoDb.filas = [fila()];
+    cuerpoDeAuth = {
+      ...respuestaDeAuth(),
+      advertencias: [
+        "cuenta_sin_rol_de_inversionista",
+        'error: relation "public.users" does not exist en auth-google.internal',
+      ],
+    };
+
+    const { respuesta } = await llamar({ inversionista_id: "7" });
+
+    expect(respuesta.advertencias).toEqual([
+      "cuenta_sin_rol_de_inversionista",
+      "advertencia_no_reconocida",
+    ]);
+    expect(JSON.stringify(respuesta)).not.toContain("public.users");
+    expect(JSON.stringify(respuesta)).not.toContain("auth-google.internal");
+  });
+
+  it("varias desconocidas —y las que ni son texto— se colapsan en una sola", async () => {
+    estadoDb.filas = [fila()];
+    cuerpoDeAuth = {
+      ...respuestaDeAuth(),
+      advertencias: [
+        "algo_nuevo",
+        "otra_cosa",
+        { stack: "en /srv/cartera-back/src/services/portalProvisioning.ts" },
+        null,
+      ],
+    };
+
+    const { respuesta } = await llamar({ inversionista_id: "7" });
+
+    expect(respuesta.advertencias).toEqual(["advertencia_no_reconocida"]);
     expect(JSON.stringify(respuesta)).not.toContain("/srv/");
   });
 

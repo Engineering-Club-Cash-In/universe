@@ -4,10 +4,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, mock } from "bun
  * La empresa NO se consulta contra sí misma.
  *
  * Aquí el envoltorio de solo lectura es el REAL —lo único sustituido es la base
- * y `fetch`— EN CUALQUIER ORDEN DE CARGA: ninguna suite de este repo publica un
- * `mock.module("../services/portalProvisioning")`, que es global al proceso y
- * volvía falsa esta misma frase cuando `consultarAccesoPortal.test.ts` corría
- * antes. Se prueba así porque lo que hay que probar es justo lo que el mock taparía: que
+ * y `fetch`— EN CUALQUIER ORDEN DE CARGA. No es gratis: `otorgarAccesoPortal.test.ts`
+ * y `provisionarCuentasPortal.test.ts` SÍ publican un
+ * `mock.module("../services/portalProvisioning")` de espías, que es global al
+ * proceso, así que esta suite republica el real en su `beforeAll`, lo devuelve
+ * en el `afterAll` y lo COMPRUEBA con una sonda de comportamiento antes de
+ * correr nada. Se prueba así porque lo que hay que probar es justo lo que el mock taparía: que
  * la decisión empresa-vs-persona sale de `decidirProvisionamiento` y NO se
  * reescribió en este controlador. Para una sociedad la cuenta del portal es la
  * de su REPRESENTANTE LEGAL, así que preguntar "¿tiene cuenta esta sociedad?"
@@ -54,6 +56,22 @@ const dbFalsa = () => {
   };
 };
 
+/**
+ * LA BASE PREVIA SE CAPTURA ACÁ, ANTES DEL MOCK DE ABAJO (misma explicación
+ * larga que en `consultarAccesoPortal.test.ts`).
+ *
+ * Capturarla en `beforeAll` era capturar nuestra propia falsa, y entonces el
+ * `afterAll` la publicaba para el resto del proceso. Va contra el objeto
+ * COMPARTIDO y una sola vez: el segundo de los dos archivos en cargar ya vería
+ * la falsa del primero.
+ */
+if (!("previa" in estadoDb)) {
+  estadoDb.previa = await import("../database/index")
+    .then((modulo) => ({ ...modulo }) as Record<string, unknown>)
+    .catch(() => null);
+}
+const dbPrevia = estadoDb.previa as Record<string, unknown> | null;
+
 mock.module("../database/index", () => dbFalsa());
 
 const { consultarAccesoPortal } = await import("./consultarAccesoPortal");
@@ -68,30 +86,37 @@ const { consultarAccesoPortal } = await import("./consultarAccesoPortal");
  * —que publican un `portalProvisioning` de espías— dejaban a este archivo
  * hablando con SUS dobles y el encabezado de arriba mentía en la corrida por
  * directorio. Acá se publica lo nuestro en `beforeAll` y se devuelve en
- * `afterAll` lo que hubiera antes.
+ * `afterAll` lo que hubiera antes, capturado ANTES de cualquier mock nuestro.
  */
 const provisioningReal = (await import(
 	`${"../services/portalProvisioning.ts"}?real`
 )) as typeof import("../services/portalProvisioning");
 
 let provisioningPrevio: Record<string, unknown> | null = null;
-let dbPrevia: Record<string, unknown> | null = null;
 
 beforeAll(async () => {
   provisioningPrevio = { ...(await import("../services/portalProvisioning")) };
-  dbPrevia = { ...(await import("../database/index")) };
 
   mock.module("../services/portalProvisioning", () => ({ ...provisioningReal }));
   mock.module("../database/index", () => dbFalsa());
 
-  // La afirmación del encabezado, comprobada en vez de prometida.
+  // La afirmación del encabezado, comprobada en vez de prometida, y POR
+  // COMPORTAMIENTO: comparar el namespace publicado contra `provisioningReal`
+  // era imposible de fallar —dos líneas antes se publicó
+  // `{ ...provisioningReal }`, la misma referencia—. Una sociedad se corta en
+  // `omitida/es_empresa` sin salir a la red, y eso solo lo hace
+  // `decidirProvisionamiento` de verdad.
   const publicado: any = await import("../services/portalProvisioning");
-  if (
-    publicado.consultarAccesoInversionista !==
-    provisioningReal.consultarAccesoInversionista
-  ) {
+  const sonda = await publicado.consultarAccesoInversionista({
+    inversionista_id: -1,
+    nombre: "Sonda S.A.",
+    email: "sonda@ejemplo.invalid",
+    dpi: null,
+    dpi_rep_legal: "1573661970101",
+  });
+  if (sonda?.estado !== "omitida" || sonda?.motivo !== "es_empresa") {
     throw new Error(
-      "portalProvisioning no es el real durante estas pruebas: otra suite dejó su doble publicado.",
+      `el portalProvisioning que corre no se comporta como el real (¿otra suite dejó su doble publicado?): la sonda de empresa contestó ${JSON.stringify(sonda)}.`,
     );
   }
 });
@@ -124,6 +149,12 @@ afterAll(() => {
   if (dbPrevia) {
     const previa = dbPrevia;
     mock.module("../database/index", () => previa);
+  } else {
+    mock.module("../database/index", () => {
+      throw new Error(
+        "la base real no se pudo importar en esta corrida; el doble de consultarAccesoPortal NO se queda publicado",
+      );
+    });
   }
   globalThis.fetch = fetchOriginal;
   process.env.AUTH_GOOGLE_URL = urlOriginal;

@@ -45,7 +45,8 @@ const respuestaDeError = (motivo: string, mensaje: string) => ({
 });
 
 /**
- * Los códigos de `motivo` que ESTE repo produce, y los únicos que salen de acá.
+ * Los únicos códigos de `motivo` que salen de acá: los que produce cartera MÁS
+ * los que produce el camino de CONSULTA de auth-google.
  *
  * POR QUÉ NO SE DEVUELVE EL `motivo` TAL CUAL
  * -------------------------------------------
@@ -69,6 +70,17 @@ const respuestaDeError = (motivo: string, mensaje: string) => ({
  *  - `es_empresa` (services/portalProvisioning.ts, rama del representante legal)
  *  - `provisionamiento_no_configurado` (idem, antes de salir a la red)
  *  - `timeout` (idem, el AbortError de los 15 s)
+ *  - `correo_de_cartera_distinto_al_de_la_cuenta` — este NO es de cartera: lo
+ *    devuelve auth-google en `consultarCuentaInversionista`
+ *    (services/provisioning/ensureInvestorAccount.ts:657-704), y es el ÚNICO
+ *    motivo no nulo que puede salir de `check-investor-account`. Es además el
+ *    que más falta hace en esta pantalla: dice que la persona SÍ tiene cuenta,
+ *    pero bajo un correo que cartera no reconoce, que es justo por qué el botón
+ *    sigue encendido sobre alguien que ya entró. Colapsarlo en `no_reconocido`
+ *    borraba el único diagnóstico del camino de lectura.
+ *    (El otro motivo de esa ruta, `payload_incompleto`, no llega nunca hasta
+ *    acá: viaja con HTTP 400 y `llamar` lo convierte antes en `http_400`
+ *    —portalProvisioning.ts:139-145—.)
  * Y `http_<status>` por patrón, porque el status es del propio `llamar` y son
  * tres dígitos: dice que auth-google contestó y con qué, sin nombrar nada de
  * adentro.
@@ -83,6 +95,7 @@ const MOTIVOS_PUBLICABLES: readonly string[] = [
   "es_empresa",
   "provisionamiento_no_configurado",
   "timeout",
+  "correo_de_cartera_distinto_al_de_la_cuenta",
 ];
 
 const MOTIVO_HTTP = /^http_\d{3}$/;
@@ -93,6 +106,62 @@ const MOTIVO_HTTP = /^http_\d{3}$/;
  * nuestros", que es la verdad y además se puede buscar en los logs.
  */
 const MOTIVO_NO_RECONOCIDO = "no_reconocido";
+
+/**
+ * Las `advertencias` pasan por la MISMA lista blanca que el `motivo`, y por la
+ * misma razón: ese arreglo también viene del cuerpo de auth-google y `llamar`
+ * solo comprueba `Array.isArray` (portalProvisioning.ts:155), nunca los
+ * valores. O sea que hoy lo que venga ahí sale verbatim en CADA carga de la
+ * pantalla del inversionista del CRM, que es exactamente lo que el embudo de
+ * arriba dejó de hacer con el `motivo`. Media regla no es la regla.
+ *
+ * Son las tres que produce el camino de LECTURA
+ * (`consultarCuentaInversionista` y `anotarIdentidad`,
+ * ensureInvestorAccount.ts:509-544 y 691):
+ *  - `cuenta_sin_rol_de_inversionista`
+ *  - `correo_de_cartera_distinto_al_de_la_cuenta`
+ *  - `cuenta_anclada_solo_por_correo`
+ *
+ * Las demás advertencias del módulo (`rol_no_promovido`, `correo_no_enviado`,
+ * `correo_redirigido_por_modo_no_prod`, `cuenta_creada_sin_*`,
+ * `parece_sociedad_con_cuenta_propia`) son del camino que CREA, y ese no pasa
+ * por acá: `consultarAccesoInversionista` nunca devuelve `creada`. Si alguna
+ * apareciera igual, sale nombrada como desconocida en vez de en silencio.
+ */
+const ADVERTENCIAS_PUBLICABLES: readonly string[] = [
+  "cuenta_sin_rol_de_inversionista",
+  "correo_de_cartera_distinto_al_de_la_cuenta",
+  "cuenta_anclada_solo_por_correo",
+];
+
+const ADVERTENCIA_NO_RECONOCIDA = "advertencia_no_reconocida";
+
+/**
+ * Se COLAPSA, igual que el motivo, en vez de descartarse: un arreglo vacío
+ * diría "esta cuenta no tiene nada raro", y sobre una que sí tiene algo que
+ * todavía no sabemos nombrar eso es mentira.
+ *
+ * Y se deduplica porque el colapso genera repeticiones: veinte advertencias
+ * desconocidas son veinte veces el mismo `advertencia_no_reconocida`, y
+ * repetirlo no agrega información.
+ */
+const advertenciasPublicables = (
+  // Que SEA un arreglo ya lo garantiza `llamar`
+  // (`Array.isArray(datos?.advertencias) ? … : []`, portalProvisioning.ts:155);
+  // lo que no mira son los VALORES, y eso es lo de acá.
+  advertencias: readonly unknown[],
+): string[] => {
+  const salida: string[] = [];
+  for (const advertencia of advertencias) {
+    const codigo =
+      typeof advertencia === "string" &&
+      ADVERTENCIAS_PUBLICABLES.includes(advertencia)
+        ? advertencia
+        : ADVERTENCIA_NO_RECONOCIDA;
+    if (!salida.includes(codigo)) salida.push(codigo);
+  }
+  return salida;
+};
 
 const motivoPublicable = (motivo: unknown): string | null => {
   if (motivo === null || motivo === undefined) return null;
@@ -166,7 +235,9 @@ export const consultarAccesoPortal = async ({
     estado: resultado.estado,
     usuarioEmail: resultado.usuarioEmail,
     resueltoPor: resultado.resueltoPor,
-    advertencias: resultado.advertencias,
+    // Por la lista blanca de advertencias: tampoco por acá sale texto que
+    // cartera no nombre.
+    advertencias: advertenciasPublicables(resultado.advertencias),
     // Por la lista blanca de arriba: nunca un mensaje de excepción crudo.
     motivo: motivoPublicable(resultado.motivo),
   };

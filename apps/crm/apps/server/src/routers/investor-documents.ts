@@ -6,6 +6,7 @@ import { investorActivityLog } from "../db/schema";
 import {
 	crmCobrosOrInvestmentsProcedure,
 	investmentManagerProcedure,
+	investmentProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -679,7 +680,23 @@ export const investorDocumentsRouter = {
 	// Abrir el acceso al Portal del Inversionista: cartera crea la cuenta y le
 	// manda la contraseña por correo. El acto lo dispara una persona desde acá
 	// (cartera-back no lo automatiza a propósito: controllers/otorgarAccesoPortal.ts).
-	darAccesoPortal: crmCobrosOrInvestmentsProcedure
+	//
+	// GUARD: `investmentProcedure` (`PERMISSIONS.canAccessInvestments`), o sea
+	// ADMIN, INVESTMENT_ADVISOR_JR, INVESTMENT_ADVISOR_SR e INVESTMENT_MANAGER.
+	// NO el `crmCobrosOrInvestmentsProcedure` del resto del archivo, que es la
+	// unión de `canAccessCRM`, `canAccessCobros`, `canAccessInvestments` y
+	// `canAccessAccounting`. Son once familias de rol: las cuatro de arriba más
+	// ventas, supervisor de ventas, analista, jurídico, cobros, supervisor de
+	// cobros y contabilidad.
+	//
+	// La razón no es el conteo: es que ese guard ancho cubre TAMBIÉN
+	// `editarInversionista` (más arriba en este mismo archivo), que cambia el
+	// `email` del inversionista. Con los dos bajo el mismo permiso, cualquiera de
+	// las once familias podía poner su propia dirección y apretar este botón: la
+	// contraseña del portal salía hacia el buzón que acabara de escribir. Cerrar
+	// solo este procedure no arregla `editarInversionista`, pero sí corta el
+	// segundo paso, que es el que convierte una edición en una credencial.
+	darAccesoPortal: investmentProcedure
 		.input(
 			z.object({
 				inversionistaId: z.number().int().positive(),
@@ -790,7 +807,13 @@ export const investorDocumentsRouter = {
 	// de la pantalla del inversionista: anotarlo inundaría la bitácora y taparía
 	// los actos REALES —quién autorizó mandar una contraseña—, que es lo único
 	// que esa tabla existe para conservar.
-	estadoAccesoPortal: crmCobrosOrInvestmentsProcedure
+	//
+	// GUARD: el MISMO que `darAccesoPortal` (`investmentProcedure`), y no uno más
+	// flojo por ser de lectura. Una consulta más abierta que el acto es
+	// reconocimiento previo: contesta, por cada id que le pasen, si esa persona ya
+	// tiene cuenta en el portal. Quien no puede abrir el acceso tampoco necesita
+	// saber quién lo tiene.
+	estadoAccesoPortal: investmentProcedure
 		.input(
 			z.object({
 				inversionistaId: z.number().int().positive(),
@@ -818,10 +841,27 @@ export const investorDocumentsRouter = {
 			// pantalla. La regla —una lista blanca de advertencias inocuas, para
 			// que lo que todavía no existe caiga del lado barato— vive en
 			// `lib/salud-cuenta-portal.ts`.
+			//
+			// `usuarioEmail` NO viaja por acá, a propósito, aunque cartera lo
+			// devuelva. Esto corre en CADA carga de la pantalla del inversionista,
+			// con un id que elige quien llama y sin ninguna cota: devolver el correo
+			// de la cuenta del portal convierte un barrido de ids en una cosecha de
+			// "quién tiene cuenta y en qué buzón". El booleano y el motivo también
+			// se cosechan, pero son lo que la pantalla necesita para no encerrar a
+			// nadie detrás de un botón gris; el correo no lo es.
+			//
+			// El camino de ESCRITURA sí lo devuelve y debe seguir haciéndolo:
+			// `darAccesoPortal` entrega el crudo de cartera porque el front traduce
+			// con él el desenlace (`correo_de_cartera_distinto_al_de_la_cuenta`
+			// nombra la dirección), y el insert en `investor_activity_log` lo guarda
+			// porque es la constancia de a dónde salió la contraseña. Ahí hay un
+			// acto detrás; acá no hay más que abrir una pantalla.
+			//
+			// Y el correo que el diálogo enseña antes de apretar tampoco sale de
+			// acá: sale de `identidadInversionista`, que lo trae fresco.
 			return {
 				tieneCuentaSana: tieneCuentaSana(acceso),
 				estado: acceso.estado,
-				usuarioEmail: acceso.usuarioEmail,
 				// Las advertencias VIAJAN aunque el booleano ya esté resuelto: sin
 				// ellas la pantalla no tiene con qué explicar por qué el botón
 				// sigue activo sobre alguien que "ya tenía" cuenta.

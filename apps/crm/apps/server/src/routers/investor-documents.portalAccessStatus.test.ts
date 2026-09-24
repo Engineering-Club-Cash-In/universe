@@ -6,7 +6,7 @@ import { call, os } from "@orpc/server";
 /**
  * `estadoAccesoPortal`: la CONSULTA que decide si el botón va en gris.
  *
- * Dos cosas la separan de `darAccesoPortal`, y las dos se prueban aquí:
+ * Tres cosas la separan de `darAccesoPortal`, y las tres se prueban aquí:
  *
  *  1. NO deja rastro en `investor_activity_log`. Corre en cada carga de la
  *     pantalla del inversionista; registrarla inundaría la bitácora y taparía
@@ -16,6 +16,11 @@ import { call, os } from "@orpc/server";
  *  2. Devuelve `tieneCuentaSana` ya calculado. Si ese booleano dijera `true`
  *     sobre una cuenta rota, la persona quedaría con el botón gris y sin
  *     ninguna forma de arreglarlo desde la pantalla.
+ *
+ *  3. NO devuelve `usuarioEmail`, aunque cartera se lo dé y aunque el camino de
+ *     ESCRITURA sí lo devuelva. Corre en cada carga de pantalla con un id que
+ *     elige quien llama: sacar por ahí el correo de la cuenta del portal
+ *     convierte un barrido de ids en una cosecha de buzones.
  */
 
 const inserts: { tabla: unknown; valores: Record<string, any> }[] = [];
@@ -24,7 +29,7 @@ let responderCartera: () => Promise<unknown> = async () => ({});
 
 const procedure = os.$context<any>();
 
-// `../lib/orpc` se publica ENTERO, con SOLO los dos procedures que este router
+// `../lib/orpc` se publica ENTERO, con SOLO los tres procedures que este router
 // usa sustituidos por uno permisivo.
 //
 // Publicar un recorte —2 de 25 exports— congela la lista de exports del módulo
@@ -36,7 +41,7 @@ const procedure = os.$context<any>();
 // El spread sale del módulo REAL (sufijo `?real`, que resuelve al mismo archivo
 // saltándose el registro de mocks) y no de lo publicado, para no reexportar el
 // recorte de otra suite. Los guards reales de las otras suites del directorio
-// quedan en pie: lo único sustituido son los dos procedures de este router.
+// quedan en pie: lo único sustituido son los tres procedures de este router.
 const orpcReal = (await import(
 	`${"../lib/orpc.ts"}?real`
 )) as typeof import("../lib/orpc");
@@ -45,6 +50,11 @@ mock.module("../lib/orpc", () => ({
 	...orpcReal,
 	crmCobrosOrInvestmentsProcedure: procedure,
 	investmentManagerProcedure: procedure,
+	// El guard REAL de `estadoAccesoPortal` desde que dejó de colgar del ancho.
+	// Se sustituye por el permisivo para que la suite pueda llamar al handler
+	// sin sesión; quién puede llamarlo de verdad lo prueba, leyendo el fuente,
+	// "el procedure cuelga del guard de inversiones".
+	investmentProcedure: procedure,
 }));
 
 // CANARIO de `../lib/orpc` (el hermano del de `cartera-back-client`, más abajo):
@@ -54,8 +64,11 @@ const orpcPublicado: any = await import("../lib/orpc");
 // Se chequean exports que NINGÚN mock de este repo sustituye y que el recorte
 // histórico de `cobros.moraRecuperacion.test.ts` omitía: si el canario mirara
 // los que el recorte sí traía, pasaría en verde sobre una lista rota.
+// `investmentProcedure` YA NO sirve de canario: esta suite lo mockea. Se lo
+// reemplaza por `cobranzaReportProcedure`, que el recorte histórico también
+// omitía y que ningún mock de este repo sustituye.
 for (const exportFaltante of [
-	"investmentProcedure",
+	"cobranzaReportProcedure",
 	"accountingProcedure",
 	"crmOnlyProcedure",
 ]) {
@@ -181,10 +194,27 @@ describe("estadoAccesoPortal", () => {
 		expect(actual).toEqual({
 			tieneCuentaSana: true,
 			estado: "ya_tenia",
-			usuarioEmail: "ana@ejemplo.com",
 			advertencias: [],
 			motivo: null,
 		});
+	});
+
+	// LA OTRA PRUEBA QUE IMPORTA: esto corre en cada carga de pantalla, con un
+	// id que elige quien llama y sin cota. Si el correo de la cuenta del portal
+	// saliera por acá, recorrer ids sería cosechar, por inversionista, si tiene
+	// cuenta y en qué buzón.
+	//
+	// El `toEqual` de arriba ya muerde, pero solo mientras nadie lo afloje a un
+	// `toMatchObject`. Esta lo dice sola y con el correo PRESENTE en lo que
+	// cartera contestó, que es el único caso en que se puede filtrar.
+	test("el correo de la cuenta del portal NO sale por la consulta", async () => {
+		responderCartera = async () =>
+			respuesta({ usuarioEmail: "ana@ejemplo.com" });
+
+		const actual = await consultar(7);
+
+		expect(actual).not.toHaveProperty("usuarioEmail");
+		expect(JSON.stringify(actual)).not.toContain("ana@ejemplo.com");
 	});
 
 	// LA PRUEBA QUE IMPORTA: la que impide encerrar a alguien tras un botón
@@ -270,12 +300,21 @@ describe("estadoAccesoPortal", () => {
 
 	// El guard se mockea arriba, así que la suite no puede verlo. Esto lee el
 	// código: sin ello, cambiar el procedure por uno público pasaría en verde.
-	test("el procedure sigue colgado del guard de back office", () => {
+	//
+	// Y exige el ESTRECHO. La consulta no puede quedar más abierta que el acto:
+	// si lo estuviera, serviría de reconocimiento previo —por cada id, si esa
+	// persona ya tiene cuenta en el portal— para quien ni siquiera puede
+	// abrirle el acceso.
+	test("el procedure cuelga del guard de inversiones, no del de back office", () => {
 		const fuente = readFileSync(
 			join(import.meta.dir, "investor-documents.ts"),
 			"utf8",
 		);
-		expect(fuente).toContain(
+		expect(fuente).toContain("estadoAccesoPortal: investmentProcedure");
+		// El negativo NO es redundante: sin él, agregar una segunda definición
+		// con el guard ancho —o volver atrás dejando la línea nueva en un
+		// comentario— seguiría pasando.
+		expect(fuente).not.toContain(
 			"estadoAccesoPortal: crmCobrosOrInvestmentsProcedure",
 		);
 	});

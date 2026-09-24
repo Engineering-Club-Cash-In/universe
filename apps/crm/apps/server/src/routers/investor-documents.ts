@@ -8,6 +8,7 @@ import {
 	investmentManagerProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
+import { exigeConstancia, tieneCuentaSana } from "../lib/salud-cuenta-portal";
 import {
 	CarteraBackHttpError,
 	carteraBackClient,
@@ -626,6 +627,120 @@ export const investorDocumentsRouter = {
 			});
 
 			return result;
+		}),
+
+	// Abrir el acceso al Portal del Inversionista: cartera crea la cuenta y le
+	// manda la contraseña por correo. El acto lo dispara una persona desde acá
+	// (cartera-back no lo automatiza a propósito: controllers/otorgarAccesoPortal.ts).
+	darAccesoPortal: crmCobrosOrInvestmentsProcedure
+		.input(
+			z.object({
+				inversionistaId: z.number().int().positive(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// 1. Llamar a cartera-back (el contrato pide un arreglo de ids)
+			//
+			// El try/catch es el mismo de `crearInversionista`/`editarInversionista`
+			// y por la misma razón: oRPC solo conserva el mensaje de los
+			// ORPCError, así que sin él el 403 "Solo un ADMIN puede abrir accesos
+			// al portal" —un estado real y documentado, `cartera-back/DEPLOYMENT.md`—
+			// llegaba al navegador como "Internal server error".
+			let result: Awaited<
+				ReturnType<typeof carteraBackClient.otorgarAccesoPortal>
+			>;
+			try {
+				result = await carteraBackClient.otorgarAccesoPortal([
+					input.inversionistaId,
+				]);
+			} catch (error) {
+				throw toCarteraOrpcError(error, "Dar acceso al portal");
+			}
+
+			const detalle = result.resultados?.[0] ?? null;
+
+			// 2. Registrar QUIÉN lo autorizó, cuando hubo algo que autorizar.
+			// `cartera.audit_logs` graba el "quién" decodificándolo del JWT, y el
+			// CRM llama con un token de servicio que pertenece a una persona
+			// real: allá este acto aparece firmado por ESA persona, lo apriete
+			// quien lo apriete. Este insert es la única constancia veraz de quién
+			// mandó la contraseña, así que no es opcional ni decorativo.
+			//
+			// Por eso mismo NO se escribe en los apretones que cartera resuelve
+			// sin tocar nada: una fila por apretón diluye esa constancia hasta
+			// taparla. El caso que lo obliga es la empresa —el camino de lectura
+			// contesta `omitida/es_empresa` para siempre, así que el botón nunca
+			// se apaga y cada apretón vuelve sin crear nada y sin mandar ningún
+			// correo—. Qué cuenta como acto, y por qué la duda SIEMPRE cuenta,
+			// vive en `lib/salud-cuenta-portal.ts`.
+			if (exigeConstancia(detalle)) {
+				await db.insert(investorActivityLog).values({
+					inversionistaId: input.inversionistaId,
+					action: "acceso_portal",
+					details: {
+						estado: detalle?.estado ?? null,
+						usuarioEmail: detalle?.usuarioEmail ?? null,
+						advertencias: detalle?.advertencias ?? [],
+						motivo: detalle?.motivo ?? null,
+						// Si el correo se desvió por SERVER != PROD, la cuenta existe y
+						// su dueño no puede entrar; sin este rastro nadie se entera.
+						correo: detalle?.correo ?? null,
+					},
+					performedBy: context.session.user.id,
+					performedByName:
+						context.session.user.name ?? context.session.user.email,
+				});
+			}
+
+			// El front necesita el resultado crudo para mostrar el estado.
+			return result;
+		}),
+
+	// ¿Ya tiene cuenta en el portal? SOLO LECTURA: sirve para poner en gris el
+	// botón de arriba sin tener que apretarlo para averiguarlo.
+	//
+	// NO registra en `investorActivityLog` a propósito. Esto corre en cada carga
+	// de la pantalla del inversionista: anotarlo inundaría la bitácora y taparía
+	// los actos REALES —quién autorizó mandar una contraseña—, que es lo único
+	// que esa tabla existe para conservar.
+	estadoAccesoPortal: crmCobrosOrInvestmentsProcedure
+		.input(
+			z.object({
+				inversionistaId: z.number().int().positive(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			// Mismo try/catch que los demás procedures que salen a cartera: sin
+			// él, el 403 "Solo un ADMIN puede consultar accesos al portal" y el
+			// 404 "No existe ese inversionista" llegaban al navegador como
+			// "Internal server error", y los dos son estados accionables.
+			let acceso: Awaited<
+				ReturnType<typeof carteraBackClient.consultarAccesoPortal>
+			>;
+			try {
+				acceso = await carteraBackClient.consultarAccesoPortal(
+					input.inversionistaId,
+				);
+			} catch (error) {
+				throw toCarteraOrpcError(error, "Consultar acceso al portal");
+			}
+
+			// El booleano se calcula AQUÍ y no en el front: es el valor que
+			// deshabilita el botón, y marcar sana una cuenta rota dejaría a esa
+			// persona con el botón en gris y sin forma de arreglarlo desde la
+			// pantalla. La regla —una lista blanca de advertencias inocuas, para
+			// que lo que todavía no existe caiga del lado barato— vive en
+			// `lib/salud-cuenta-portal.ts`.
+			return {
+				tieneCuentaSana: tieneCuentaSana(acceso),
+				estado: acceso.estado,
+				usuarioEmail: acceso.usuarioEmail,
+				// Las advertencias VIAJAN aunque el booleano ya esté resuelto: sin
+				// ellas la pantalla no tiene con qué explicar por qué el botón
+				// sigue activo sobre alguien que "ya tenía" cuenta.
+				advertencias: acceso.advertencias,
+				motivo: acceso.motivo,
+			};
 		}),
 
 	getInvestorsCartera: investmentManagerProcedure.handler(async () => {

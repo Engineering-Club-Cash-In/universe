@@ -531,6 +531,29 @@ export const investorContractsRouter = {
 				});
 			}
 
+			// Descartar es para la compra que NO lleva papelería. Con contratos ya
+			// emitidos deja de ser cierto: sus documentos siguen vivos en WeeTrust
+			// pidiendo firma, y la batería descartada ni se recalcula ni vuelve a
+			// la lista, así que nadie se acuerda de ellos. Se anulan primero.
+			if (input.resultado === "descartada") {
+				const [vigente] = await db
+					.select({ contractName: generatedLegalContracts.contractName })
+					.from(generatedLegalContracts)
+					.where(
+						and(
+							eq(generatedLegalContracts.batchId, input.batchId),
+							ne(generatedLegalContracts.status, "cancelled"),
+						),
+					)
+					.limit(1);
+
+				if (vigente) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Esta batería ya tiene contratos emitidos («${vigente.contractName}»). Anulalos antes de descartarla.`,
+					});
+				}
+			}
+
 			const ahora = new Date();
 			const [actualizada] = await db
 				.update(investorContractBatches)
@@ -1247,35 +1270,52 @@ export const investorContractsRouter = {
 					.where(eq(investorContractBatches.id, input.batchId));
 			}
 
-			const [yaAvisado] = await db
-				.select({ id: notifications.id })
-				.from(notifications)
-				.where(
-					and(
-						eq(notifications.relatedEntityId, input.batchId),
-						eq(notifications.relatedEntityType, "contract"),
-						inArray(notifications.assignedToRole, ROLES_DE_INVERSIONES),
-					),
-				)
-				.limit(1);
+			// Mirar si ya se avisó y avisar van en la misma transacción, con un
+			// candado por batería: dos clics a la vez veían los dos que no había
+			// aviso y mandaban seis notificaciones. El segundo espera, vuelve a
+			// mirar y encuentra el del primero.
+			const avisado = await db.transaction(async (tx) => {
+				await tx.execute(
+					sql`select pg_advisory_xact_lock(hashtext(${`bateria-lista:${input.batchId}`}::text))`,
+				);
 
-			if (yaAvisado) {
+				const [yaAvisado] = await tx
+					.select({ id: notifications.id })
+					.from(notifications)
+					.where(
+						and(
+							eq(notifications.relatedEntityId, input.batchId),
+							eq(notifications.relatedEntityType, "contract"),
+							inArray(notifications.assignedToRole, ROLES_DE_INVERSIONES),
+						),
+					)
+					.limit(1);
+
+				if (yaAvisado) return false;
+
+				for (const rol of ROLES_DE_INVERSIONES) {
+					await createNotification(
+						{
+							titulo: `Contratos listos: ${bateria.investorName}`,
+							descripcion:
+								`Jurídico terminó de emitir ${vigentes.length} contrato(s). ` +
+								"Los enlaces de firma están en la ficha del inversionista.",
+							type: "aviso",
+							createdBy: context.userId,
+							createdByRole: context.userRole,
+							assignedToRole: rol,
+							relatedEntityType: "contract",
+							relatedEntityId: input.batchId,
+						},
+						tx,
+					);
+				}
+
+				return true;
+			});
+
+			if (!avisado) {
 				return { avisado: false, cerrada: true, motivo: "ya_avisado" as const };
-			}
-
-			for (const rol of ROLES_DE_INVERSIONES) {
-				await createNotification({
-					titulo: `Contratos listos: ${bateria.investorName}`,
-					descripcion:
-						`Jurídico terminó de emitir ${vigentes.length} contrato(s). ` +
-						"Los enlaces de firma están en la ficha del inversionista.",
-					type: "aviso",
-					createdBy: context.userId,
-					createdByRole: context.userRole,
-					assignedToRole: rol,
-					relatedEntityType: "contract",
-					relatedEntityId: input.batchId,
-				});
 			}
 
 			return { avisado: true, cerrada: true, contratos: vigentes.length };

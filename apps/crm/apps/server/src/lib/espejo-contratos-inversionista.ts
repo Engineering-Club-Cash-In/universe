@@ -81,6 +81,22 @@ async function contratoConDueno(contractId: string) {
 }
 
 /**
+ * Si el inversionista ve el contrato en su portal.
+ *
+ * - Firmado por todos: sí. Es el documento que vale.
+ * - Anulado: no. Sus enlaces ya no sirven y el reemplazo va aparte; dejarlo
+ *   visible es ofrecerle un contrato que se descartó.
+ * - Mientras se firma: `undefined`, que es "no opino". Lo que hay es el
+ *   borrador, así que no se enciende solo, pero si alguien decidió mostrárselo
+ *   desde la ficha, esa decisión se respeta.
+ */
+function visibilidadEnElPortal(status: string | null): boolean | undefined {
+	if (status === "signed") return true;
+	if (status === "cancelled") return false;
+	return undefined;
+}
+
+/**
  * Cómo se llama el contrato en la papelería del inversionista.
  *
  * Con la fecha de emisión pegada al nombre porque un inversionista compra
@@ -155,10 +171,12 @@ export async function espejarContratoEnCartera(
 			firmantes: await firmantesDelContrato(contractId),
 			estado_firma: contrato.status,
 			created_by: createdBy,
-			// El inversionista lo ve en su portal recién cuando está firmado por
-			// todos: antes, lo que hay es el borrador, y enseñárselo es mostrarle
-			// como suyo un documento que nadie firmó.
-			visible: contrato.status === "signed",
+			// Qué ve el inversionista en su portal: el firmado sí, el anulado no, y
+			// mientras se firma no se toca. Antes de firmarse lo que hay es el
+			// borrador —enseñárselo es mostrarle como suyo un documento que nadie
+			// firmó— pero si alguien decidió mostrárselo desde la ficha, esa
+			// decisión se respeta.
+			visible: visibilidadEnElPortal(contrato.status),
 		});
 
 		return true;
@@ -248,8 +266,7 @@ export async function espejarEstadoDeFirmaEnCartera(
 				observer_url: contrato.observerUrl,
 				firmantes: await firmantesDelContrato(contractId),
 				estado_firma: contrato.status,
-				// Firmado por todos, el inversionista ya puede verlo en su portal.
-				visible: contrato.status === "signed",
+				visible: visibilidadEnElPortal(contrato.status),
 			});
 
 		// Todavía no estaba copiado (el CRM guarda primero y copia después, y esa

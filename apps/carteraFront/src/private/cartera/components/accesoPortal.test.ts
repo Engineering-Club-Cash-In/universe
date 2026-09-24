@@ -208,3 +208,100 @@ describe("avisoAccesoPortal — el botón sobre una empresa", () => {
     expect(aviso.texto).toContain("representante legal");
   });
 });
+
+/**
+ * El aviso leído DESDE el botón del menú de la fila (`tableInvestors.tsx`), no
+ * desde el alta del modal.
+ *
+ * Los dos defectos que se arreglan aquí: el consejo en bucle —mandar a apretar
+ * el botón que la persona acaba de apretar— y afirmar un alta que desde este
+ * camino nunca ocurrió: el botón no crea ningún inversionista, la fila ya
+ * existía.
+ */
+describe("avisoAccesoPortal — leído desde el botón del menú de la fila", () => {
+  it("no afirma un alta que no pasó ni manda al botón que ya se apretó", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "fallo", motivo: "http_500", advertencias: [] }),
+      "boton",
+    )!;
+
+    expect(aviso.tono).toBe("advertencia");
+    expect(aviso.texto).not.toContain("sí quedó creado");
+    expect(aviso.texto).not.toContain("no lo vuelvas a crear");
+    expect(aviso.texto).not.toContain("Dar acceso al portal");
+    expect(aviso.texto).toContain("esta misma opción del menú de su fila");
+  });
+
+  it("con la cuenta a medias NO aconseja reintentar: la advertencia ya dice que no sirve", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "http_500",
+        advertencias: ["cuenta_creada_sin_marca_de_password"],
+      }),
+      "boton",
+    )!;
+
+    expect(aviso.texto).not.toContain("volvé a intentarlo");
+    expect(aviso.texto).toContain("Volver a intentarlo NO la arregla");
+  });
+
+  it("sin correo capturado manda a capturarlo y volver a ESTA misma opción", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "omitida", motivo: "sin_correo", advertencias: [] }),
+      "boton",
+    )!;
+
+    expect(aviso.texto).toContain("correo");
+    expect(aviso.texto).toContain("esta misma opción del menú de su fila");
+    expect(aviso.texto).not.toContain("Dar acceso al portal");
+  });
+
+  it("el permiso que le falta al servidor no se arregla reintentando", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "omitida", motivo: "origen_no_autorizado", advertencias: [] }),
+      "boton",
+    )!;
+
+    expect(aviso.texto).toContain("Volver a intentarlo no lo arregla");
+    expect(aviso.texto).not.toContain("Dar acceso al portal");
+  });
+
+  it("el pedido perdido no le habla de un alta que quien lee no hizo", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "omitida", motivo: "no_solicitado", advertencias: [] }),
+      "boton",
+    )!;
+
+    expect(aviso.texto).not.toContain("Este alta");
+    expect(aviso.texto).toContain("no registró el pedido");
+  });
+
+  it("el timeout y la empresa no cambian: su texto ya no manda al botón", () => {
+    const timeout = avisoAccesoPortal(
+      acceso({ estado: "fallo", motivo: "timeout", advertencias: [] }),
+      "boton",
+    )!;
+    const empresa = avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "es_empresa_el_acceso_es_del_representante",
+      }),
+      "boton",
+    )!;
+
+    expect(timeout.texto).toContain("NO le des acceso de nuevo");
+    expect(empresa.texto).toContain("Abrile el acceso desde la fila del representante");
+  });
+
+  // El default es `alta`: el llamador del alta (`modalInvestor.tsx`) no pasa
+  // origen y tiene que seguir leyendo exactamente lo mismo de antes.
+  it("sin origen explícito sigue hablando como el alta", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "fallo", motivo: "http_500", advertencias: [] }),
+    )!;
+
+    expect(aviso.texto).toContain("sí quedó creado");
+    expect(aviso.texto).toContain("Dar acceso al portal");
+  });
+});

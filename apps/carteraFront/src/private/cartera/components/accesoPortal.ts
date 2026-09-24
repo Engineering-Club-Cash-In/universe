@@ -15,6 +15,13 @@
  * `apps/web/src/lib/acceso-portal.ts`. Son dos apps sin paquete común (mismo
  * caso que repLegalEmpresa.ts); si cambian los códigos del backend hay que
  * tocar los dos.
+ *
+ * Pero NO son idénticos ni deben serlo: el consejo de cómo arreglarlo depende
+ * de DESDE DÓNDE se lee el aviso, y el lugar no es el mismo en las dos apps.
+ * Aquí el botón "Dar acceso al portal" vive en el menú de tres puntos de cada
+ * fila de la tabla de inversionistas (`tableInvestors.tsx`); en el CRM vive en
+ * la pantalla de detalle del inversionista. Copiar la redacción del gemelo a
+ * ciegas manda al operador a una pantalla que en cartera no existe.
  */
 
 export interface AccesoPortal {
@@ -36,6 +43,21 @@ export interface AvisoAccesoPortal {
 }
 
 /**
+ * Desde dónde se está leyendo el aviso. NO es cosmético: cambia qué se puede
+ * aconsejar.
+ *
+ * - `alta`: se acaba de crear el inversionista desde el modal y el acceso al
+ *   portal fue un paso más de ese alta. Ahí "no lo vuelvas a crear" y "abrile
+ *   el acceso desde el menú del inversionista" son las dos instrucciones
+ *   correctas: el inversionista existe, y el botón está en otro lado —el menú
+ *   de su fila en la tabla—, al que hay que mandar a quien lee.
+ * - `boton`: quien lee YA está en ese menú y acaba de apretar esa opción. Nada
+ *   se creó, así que "no lo vuelvas a crear" habla de algo que no pasó, y
+ *   mandarlo al botón que acaba de fallar es un círculo.
+ */
+export type OrigenAviso = "alta" | "boton";
+
+/**
  * A dónde se manda a quien quedó sin acceso.
  *
  * ANTES esto decía "mañana a las 7:00 a.m.": la reconciliación diaria creaba
@@ -47,9 +69,15 @@ export interface AvisoAccesoPortal {
  * Seguir prometiendo el automatismo sería peor que callar: conta cerraría el
  * modal tranquila, nadie apretaría el botón, y la persona se quedaría sin
  * portal esperando algo que no va a pasar.
+ *
+ * Y desde ESE botón el texto cambia: quien lee ya tiene el menú de la fila
+ * abierto y acaba de usar esa opción, así que mandarla al menú del
+ * inversionista sería mandarla donde ya está.
  */
-const COMO_SE_ARREGLA =
-  'abrile el acceso desde el menú del inversionista, opción "Dar acceso al portal"';
+const COMO_SE_ARREGLA: Record<OrigenAviso, string> = {
+  alta: 'abrile el acceso desde el menú del inversionista, opción "Dar acceso al portal"',
+  boton: "volvé a intentarlo con esta misma opción del menú de su fila",
+};
 
 /**
  * Por qué no se pudo, en palabras. Lo que no está en la lista se calla en vez de
@@ -135,6 +163,7 @@ const texto = (
  */
 const mensajeDeFallo = (
   acceso: AccesoPortal,
+  origen: OrigenAviso,
 ): AvisoAccesoPortal | null => {
   // El botón apretado sobre una fila de EMPRESA.
   //
@@ -168,16 +197,37 @@ const mensajeDeFallo = (
     };
   }
 
+  // Desde el botón no se creó ningún inversionista: la fila ya existía y sigue
+  // igual. Decirle "no lo vuelvas a crear" sería hablarle de un alta que nunca
+  // ocurrió.
+  if (origen === "boton") {
+    // Con la cuenta a medias el reintento no arregla nada, y la advertencia que
+    // viene pegada abajo ya lo dice y ya manda a sistemas. Aconsejar reintentar
+    // acá sería contradecirla en la misma línea.
+    const reintentarNoSirve = acceso.advertencias.includes(
+      "cuenta_creada_sin_marca_de_password",
+    );
+    return {
+      tono: "advertencia",
+      texto: reintentarNoSirve
+        ? `No se le pudo dar acceso al portal${causa(acceso.motivo)}.`
+        : `No se le pudo dar acceso al portal${causa(acceso.motivo)}. Si querés, ${COMO_SE_ARREGLA.boton}; si vuelve a fallar, avisa a sistemas.`,
+    };
+  }
+
   // El alta SÍ salió: decirlo es lo que evita que lo vuelvan a crear y se
   // estrellen contra el guard de duplicados.
   return {
     tono: "advertencia",
-    texto: `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado: no lo vuelvas a crear. Cuando quieras, ${COMO_SE_ARREGLA}.`,
+    texto: `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado: no lo vuelvas a crear. Cuando quieras, ${COMO_SE_ARREGLA.alta}.`,
   };
 };
 
 export const avisoAccesoPortal = (
   acceso: AccesoPortal | null | undefined,
+  // Por omisión, el alta: es el camino que ya existía (`modalInvestor.tsx`) y
+  // el que no debe cambiar de redacción. Quien lo llame desde el botón lo dice.
+  origen: OrigenAviso = "alta",
 ): AvisoAccesoPortal | null => {
   if (!acceso) return null;
 
@@ -191,7 +241,8 @@ export const avisoAccesoPortal = (
   // advertencia de vínculo frágil— y el operador se quedaba leyendo el detalle
   // sin enterarse de que esa persona no puede entrar. Primero el desenlace,
   // después el detalle.
-  const fallo = acceso.estado === "fallo" ? mensajeDeFallo(acceso) : null;
+  const fallo =
+    acceso.estado === "fallo" ? mensajeDeFallo(acceso, origen) : null;
 
   if (fallo) {
     return avisos.length > 0
@@ -207,13 +258,13 @@ export const avisoAccesoPortal = (
     if (acceso.motivo === "sin_correo") {
       return {
         tono: "advertencia",
-        texto: `Quedó sin acceso al portal porque no tiene correo capturado. Agrégaselo y después ${COMO_SE_ARREGLA}.`,
+        texto: `Quedó sin acceso al portal porque no tiene correo capturado. Agrégaselo y después ${COMO_SE_ARREGLA[origen]}.`,
       };
     }
     if (acceso.motivo === "sin_nombre") {
       return {
         tono: "advertencia",
-        texto: `Quedó sin acceso al portal porque no tiene nombre capturado. Agrégaselo y después ${COMO_SE_ARREGLA}.`,
+        texto: `Quedó sin acceso al portal porque no tiene nombre capturado. Agrégaselo y después ${COMO_SE_ARREGLA[origen]}.`,
       };
     }
     // El servicio no es ADMIN, así que cartera ni lo intentó. Es un fallo de
@@ -223,13 +274,25 @@ export const avisoAccesoPortal = (
     if (acceso.motivo === "origen_no_autorizado") {
       return {
         tono: "advertencia",
-        texto: `Quedó sin acceso al portal: este servicio no tiene permiso para abrirlo. Avisa a sistemas, y mientras tanto ${COMO_SE_ARREGLA}.`,
+        // Falta un permiso del servidor, no un dato de la fila: volver a usar
+        // la opción del menú le pega al mismo muro. Por eso desde el botón NO
+        // se aconseja reintentar — solo avisar.
+        texto:
+          origen === "boton"
+            ? "Quedó sin acceso al portal: este servicio no tiene permiso para abrirlo. Volver a intentarlo no lo arregla; avisa a sistemas."
+            : `Quedó sin acceso al portal: este servicio no tiene permiso para abrirlo. Avisa a sistemas, y mientras tanto ${COMO_SE_ARREGLA.alta}.`,
       };
     }
     if (acceso.motivo === "no_solicitado") {
       return {
         tono: "advertencia",
-        texto: `Este alta no pidió abrirle acceso al portal. Si le toca tenerlo, ${COMO_SE_ARREGLA}.`,
+        // Desde el botón esto no debería pasar: el botón SIEMPRE pide el
+        // acceso. Si aparece, el pedido se perdió en el camino — y hablar de
+        // "este alta" sería hablarle de un alta que quien lee no hizo.
+        texto:
+          origen === "boton"
+            ? "El portal no registró el pedido de acceso. Volvé a intentarlo con esta misma opción del menú y, si se repite, avisa a sistemas."
+            : `Este alta no pidió abrirle acceso al portal. Si le toca tenerlo, ${COMO_SE_ARREGLA.alta}.`,
       };
     }
     if (acceso.motivo === "es_empresa") {

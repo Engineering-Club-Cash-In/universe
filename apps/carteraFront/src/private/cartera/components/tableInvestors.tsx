@@ -458,8 +458,23 @@ export function TableInvestors() {
       // Se reusa el mismo traductor del alta: los códigos son los mismos y las
       // advertencias que importan —contraseña no entregada, correo desviado—
       // tienen que leerse igual vengan de donde vengan.
-      const aviso = avisoAccesoPortal(respuesta?.resultados?.[0]);
-      if (!aviso) toast.success("Listo.");
+      //
+      // `"boton"`: quien lee ya tiene abierto el menú de esta fila y acaba de
+      // usar esta opción. Sin ese dato el traductor le diría "el inversionista
+      // sí quedó creado: no lo vuelvas a crear" —acá no se creó nada— y la
+      // mandaría al mismo menú en el que está.
+      const aviso = avisoAccesoPortal(respuesta?.resultados?.[0], "boton");
+      // El `null` del traductor NO es "salió bien": es "no sé qué pasó". Vuelve
+      // en `null` cuando `resultados` viene vacío o con otra forma, cuando el
+      // estado es `omitida` con un motivo que no está en la lista, y ante
+      // cualquier estado fuera de los cinco conocidos. En verde eso es el mismo
+      // bug que este traductor existe para cerrar: quien lee cuelga el teléfono
+      // prometiendo una contraseña que no salió.
+      if (!aviso)
+        toast.warning(
+          "No se pudo confirmar si le quedó el acceso al portal. NO le digas todavía que le va a llegar su contraseña: avisa a sistemas para que confirmen si la cuenta quedó creada y si el correo salió.",
+          { duration: 15000 },
+        );
       else if (aviso.tono === "advertencia") toast.warning(aviso.texto, { duration: 15000 });
       else toast.success(aviso.texto);
       setAccesoPortalTarget(null);

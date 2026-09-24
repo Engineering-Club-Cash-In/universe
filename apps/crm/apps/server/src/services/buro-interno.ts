@@ -16,6 +16,7 @@ import {
 	type BuroInternoCategoria,
 	type BuroInternoPersona,
 	type BuroInternoSeveridad,
+	buroInternoAutorizaciones,
 	buroInternoEventos,
 	buroInternoPersonas,
 	buroInternoReglas,
@@ -36,6 +37,7 @@ import {
 	type OrigenCandidato,
 	type RegistroParaMatch,
 	type ReglaEfectiva,
+	registrosQueBloquean,
 	resolverReglas,
 	sugerirNombresApellidos,
 	validarParametrosRegla,
@@ -983,9 +985,104 @@ export async function evaluarOportunidad(opportunityId: string) {
 		referencia: referencias.length,
 	};
 
+	const [coincidencias, autorizaciones] = await Promise.all([
+		evaluar(candidatos),
+		cargarAutorizaciones(opportunityId),
+	]);
+
+	const bloqueantes = registrosQueBloquean(
+		coincidencias,
+		new Set(autorizaciones.map((a) => a.personaId)),
+	);
+
 	return {
 		evaluadoEn: new Date(),
 		evaluados,
-		coincidencias: await evaluar(candidatos),
+		coincidencias,
+		autorizaciones,
+		bloqueantes: bloqueantes.map((c) => ({
+			registroId: c.registroId,
+			nombreCompleto: c.registro.nombreCompleto,
+			etiqueta: c.etiqueta,
+		})),
+		bloqueaAprobacion: bloqueantes.length > 0,
 	};
+}
+
+/** Autorizaciones ya dadas para esta oportunidad, con quién las dio */
+async function cargarAutorizaciones(opportunityId: string) {
+	return db
+		.select({
+			personaId: buroInternoAutorizaciones.personaId,
+			motivo: buroInternoAutorizaciones.motivo,
+			autorizadoPorNombre: user.name,
+			createdAt: buroInternoAutorizaciones.createdAt,
+		})
+		.from(buroInternoAutorizaciones)
+		.leftJoin(user, eq(user.id, buroInternoAutorizaciones.autorizadoPor))
+		.where(eq(buroInternoAutorizaciones.opportunityId, opportunityId))
+		.orderBy(desc(buroInternoAutorizaciones.createdAt));
+}
+
+/**
+ * El analista levanta el bloqueo con una justificación. Vale solo para las
+ * personas que están frenando hoy esta oportunidad: si mañana cobros registra
+ * a otra que también coincide, vuelve a frenar.
+ */
+export async function autorizarOportunidad(
+	opportunityId: string,
+	motivo: string,
+	actor: ActorBuroInterno,
+) {
+	const evaluacion = await evaluarOportunidad(opportunityId);
+
+	if (evaluacion.bloqueantes.length === 0) {
+		throw new BuroInternoValidacionError(
+			"No hay coincidencias del buró interno frenando esta oportunidad",
+		);
+	}
+
+	await db.transaction(async (tx) => {
+		for (const bloqueante of evaluacion.bloqueantes) {
+			await tx
+				.insert(buroInternoAutorizaciones)
+				.values({
+					opportunityId,
+					personaId: bloqueante.registroId,
+					motivo: motivo.trim(),
+					autorizadoPor: actor.id,
+				})
+				.onConflictDoNothing();
+
+			await registrarEvento(tx, {
+				accion: "autorizacion_analisis",
+				actor,
+				personaId: bloqueante.registroId,
+				detalle: { opportunityId, motivo: motivo.trim() },
+			});
+		}
+	});
+
+	return evaluarOportunidad(opportunityId);
+}
+
+/**
+ * Para el gate de aprobación del análisis. Una oportunidad sin lead no tiene a
+ * quién comparar, así que no frena.
+ */
+export async function bloqueoBuroInterno(
+	opportunityId: string,
+): Promise<{ bloquea: boolean; nombres: string[] }> {
+	try {
+		const evaluacion = await evaluarOportunidad(opportunityId);
+		return {
+			bloquea: evaluacion.bloqueaAprobacion,
+			nombres: evaluacion.bloqueantes.map((b) => b.nombreCompleto),
+		};
+	} catch (error) {
+		if (error instanceof OportunidadSinLeadError) {
+			return { bloquea: false, nombres: [] };
+		}
+		throw error;
+	}
 }

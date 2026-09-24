@@ -65,6 +65,7 @@ export const ETIQUETA_ACCION: Record<string, string> = {
 	edicion: "Edición",
 	baja: "Retirado del buró",
 	regla_actualizada: "Regla actualizada",
+	autorizacion_analisis: "Autorizado en un análisis",
 	consulta: "Consulta",
 };
 

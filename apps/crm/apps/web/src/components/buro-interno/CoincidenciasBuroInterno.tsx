@@ -17,14 +17,30 @@ export function SeveridadBadge({ severidad }: { severidad: Severidad }) {
 	);
 }
 
+export type AutorizacionBuroInterno = {
+	personaId: string;
+	motivo: string;
+	autorizadoPorNombre: string | null;
+	createdAt: Date | string;
+};
+
 /** Lista de coincidencias: a quién de la solicitud se parece y por qué reglas */
 export function CoincidenciasBuroInterno({
 	coincidencias,
 	mostrarOrigen = true,
+	autorizaciones = [],
+	marcarBloqueo = false,
 }: {
 	coincidencias: CoincidenciaBuroInterno[];
 	mostrarOrigen?: boolean;
+	/** Bloqueos ya levantados por análisis, para esta oportunidad */
+	autorizaciones?: AutorizacionBuroInterno[];
+	/** En el análisis se marca cuáles frenan la aprobación */
+	marcarBloqueo?: boolean;
 }) {
+	const autorizacionPorRegistro = new Map(
+		autorizaciones.map((a) => [a.personaId, a]),
+	);
 	return (
 		<ul className="space-y-3">
 			{coincidencias.map((coincidencia) => (
@@ -53,6 +69,18 @@ export function CoincidenciasBuroInterno({
 								<Badge variant="secondary">{coincidencia.etiqueta}</Badge>
 							)}
 							<SeveridadBadge severidad={coincidencia.severidad} />
+							{marcarBloqueo &&
+								coincidencia.severidad === "alta" &&
+								(autorizacionPorRegistro.has(coincidencia.registroId) ? (
+									<Badge
+										variant="outline"
+										className="border-green-300 bg-green-100 text-green-800 hover:bg-green-100"
+									>
+										Autorizado
+									</Badge>
+								) : (
+									<Badge variant="destructive">Frena la aprobación</Badge>
+								))}
 						</div>
 					</div>
 
@@ -73,6 +101,19 @@ export function CoincidenciasBuroInterno({
 						Registrado por {coincidencia.registro.creadoPorNombre ?? "—"} el{" "}
 						{formatearFecha(coincidencia.registro.createdAt)}
 					</p>
+
+					{(() => {
+						const autorizacion = autorizacionPorRegistro.get(
+							coincidencia.registroId,
+						);
+						if (!marcarBloqueo || !autorizacion) return null;
+						return (
+							<p className="mt-2 rounded-md border border-green-200 bg-green-50 p-2 text-green-900 text-xs">
+								Autorizado por {autorizacion.autorizadoPorNombre ?? "—"} el{" "}
+								{formatearFecha(autorizacion.createdAt)}: {autorizacion.motivo}
+							</p>
+						);
+					})()}
 				</li>
 			))}
 		</ul>

@@ -12,7 +12,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
-import { leads } from "./crm";
+import { leads, opportunities } from "./crm";
 
 /**
  * Buró interno: personas que la empresa marcó como mal pagadoras (o con otro
@@ -128,6 +128,38 @@ export const buroInternoReglas = pgTable(
 	],
 );
 
+/**
+ * Autorizaciones para aprobar un análisis pese al buró interno. Una coincidencia
+ * de severidad alta frena la aprobación; el analista la levanta con un motivo,
+ * y la autorización vale solo para esa oportunidad y esa persona: si después
+ * aparece otra coincidencia alta, vuelve a frenar.
+ */
+export const buroInternoAutorizaciones = pgTable(
+	"buro_interno_autorizaciones",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		opportunityId: uuid("opportunity_id")
+			.notNull()
+			.references(() => opportunities.id, { onDelete: "cascade" }),
+		personaId: uuid("persona_id")
+			.notNull()
+			.references(() => buroInternoPersonas.id, { onDelete: "cascade" }),
+		motivo: text("motivo").notNull(),
+		autorizadoPor: text("autorizado_por")
+			.notNull()
+			.references(() => user.id),
+		createdAt: timestamp("created_at", { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+	},
+	(table) => [
+		uniqueIndex("buro_interno_autorizaciones_uq").on(
+			table.opportunityId,
+			table.personaId,
+		),
+	],
+);
+
 /** Bitácora append-only: altas, bajas, ediciones, cambios de reglas y consultas */
 export const buroInternoEventos = pgTable(
 	"buro_interno_eventos",
@@ -155,5 +187,7 @@ export const buroInternoEventos = pgTable(
 	],
 );
 
+export type BuroInternoAutorizacion =
+	typeof buroInternoAutorizaciones.$inferSelect;
 export type BuroInternoPersona = typeof buroInternoPersonas.$inferSelect;
 export type BuroInternoRegla = typeof buroInternoReglas.$inferSelect;

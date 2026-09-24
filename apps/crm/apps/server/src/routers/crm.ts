@@ -174,6 +174,7 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import { bloqueoBuroInterno } from "../services/buro-interno";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import {
@@ -4461,6 +4462,19 @@ export const crmRouter = {
 					// Ni el rechazo del buró ni la ausencia de registro bloquean:
 					// quedan en la bitácora y visibles en la página de análisis
 					// para que el analista decida bajo su criterio
+				}
+
+				// Buró interno: corre también en las oportunidades exentas del bot,
+				// porque es una lista propia y no depende de fuentes externas. Solo
+				// frenan las coincidencias de severidad alta sin autorizar (ver
+				// `registrosQueBloquean`); el analista las levanta con un motivo
+				// desde la tarjeta "Buró interno" del análisis.
+				const buroInterno = await bloqueoBuroInterno(input.opportunityId);
+
+				if (buroInterno.bloquea) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `El buró interno bloquea la aprobación: ${buroInterno.nombres.join(", ")}. Revisá la tarjeta "Buró interno" en el análisis y autorizá con una justificación si no corresponde.`,
+					});
 				}
 			}
 

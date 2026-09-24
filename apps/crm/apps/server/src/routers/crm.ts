@@ -1287,24 +1287,9 @@ export const crmRouter = {
 						.orderBy(desc(opportunities.createdAt))
 						.limit(1);
 
-					// Solo se libera el cliente si TODAS sus oportunidades están cerradas
-					// (ganadas o perdidas). Cualquier otro estado —open, on_hold, o un
-					// crédito migrado— lo sigue atendiendo su asesor.
-					const [procesoNoCerrado] = await db
-						.select({ id: opportunities.id })
-						.from(opportunities)
-						.where(
-							and(
-								inArray(
-									opportunities.leadId,
-									matchingLeads.map((lead) => lead.id),
-								),
-								not(inArray(opportunities.status, ["won", "lost"])),
-							),
-						)
-						.limit(1);
-
-					if (activeOpportunity || procesoNoCerrado) {
+					// Con un proceso vivo (open u on_hold) el cliente lo sigue atendiendo
+					// su asesor. Ganadas, perdidas y migradas cuentan como cerradas.
+					if (activeOpportunity) {
 						throw new ORPCError("CONFLICT", {
 							message: "Ya existe un lead con este DPI",
 							data: buildLeadDuplicateConflict(
@@ -1317,16 +1302,20 @@ export const crmRouter = {
 
 					// Todas sus oportunidades cerradas: se reusa el más antiguo, que
 					// arrastra el historial, y se reasigna al asesor que lo está creando.
+					// Los datos se pisan con los del formulario: el cliente puede volver
+					// años después y lo que trae el asesor es lo vigente.
 					const existingLead = matchingLeads[0];
 
 					return await auditedTransaction(async (tx) => {
 						const [lead] = await tx
 							.update(leads)
 							.set({
+								...input,
+								dpi: normalizedDpi,
+								monthlyIncome: input.monthlyIncome?.toString(),
+								loanAmount: input.loanAmount?.toString(),
 								assignedTo,
 								status: "new",
-								source: input.source,
-								campaign: input.campaign,
 								updatedAt: new Date(),
 							})
 							.where(eq(leads.id, existingLead.id))

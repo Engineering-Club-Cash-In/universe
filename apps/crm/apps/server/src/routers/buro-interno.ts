@@ -11,6 +11,7 @@ import {
 	type ActorBuroInterno,
 	actualizarPersona,
 	actualizarRegla,
+	autorizarOportunidad,
 	BuroInternoDuplicadoError,
 	BuroInternoNoEncontradoError,
 	BuroInternoValidacionError,
@@ -202,7 +203,44 @@ export const buroInternoRouter = {
 			}
 		}),
 
-	/** Para la pantalla de análisis: no bloquea la aprobación, solo avisa */
+	/**
+	 * Levanta el bloqueo del buró interno para esta oportunidad, con un motivo
+	 * que queda en la bitácora. Mismo permiso que el override manual de
+	 * RENAP/Buró: solo admin o análisis responden por esa decisión.
+	 */
+	autorizarBuroInternoOportunidad: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				motivo: z
+					.string()
+					.trim()
+					.min(
+						MOTIVO_MIN,
+						`El motivo debe tener al menos ${MOTIVO_MIN} caracteres`,
+					)
+					.max(2000),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (!PERMISSIONS.canOverrideValidacionManual(context.userRole ?? "")) {
+				throw new ORPCError("FORBIDDEN", {
+					message:
+						"No tenés permisos para aprobar pese a una coincidencia del buró interno",
+				});
+			}
+			try {
+				return await autorizarOportunidad(
+					input.opportunityId,
+					input.motivo,
+					await actorDe(context),
+				);
+			} catch (error) {
+				traducirError(error);
+			}
+		}),
+
+	/** Para la pantalla de análisis: las coincidencias altas frenan la aprobación */
 	getBuroInternoOportunidad: analystProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input }) => {

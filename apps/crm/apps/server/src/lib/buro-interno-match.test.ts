@@ -4,6 +4,7 @@ import {
 	evaluarCoincidencias,
 	normalizarTelefonoMatch,
 	type RegistroParaMatch,
+	registrosQueBloquean,
 	resolverReglas,
 	separarApellidos,
 	similitud,
@@ -354,5 +355,40 @@ describe("validarParametrosRegla", () => {
 			ok: true,
 			parametros: { apellidos_ignorados: ["LOPEZ", "GARCIA"] },
 		});
+	});
+});
+
+describe("qué frena la aprobación", () => {
+	const coincidencia = (
+		registroId: string,
+		severidad: "alta" | "media" | "baja",
+	) => ({
+		registroId,
+		severidad,
+	});
+
+	test("solo las de severidad alta", () => {
+		const bloquean = registrosQueBloquean([
+			coincidencia("a", "alta"),
+			coincidencia("b", "media"),
+			coincidencia("c", "baja"),
+		]);
+		expect(bloquean.map((c) => c.registroId)).toEqual(["a"]);
+	});
+
+	test("una persona con varias coincidencias cuenta una vez", () => {
+		const bloquean = registrosQueBloquean([
+			coincidencia("a", "alta"),
+			coincidencia("a", "alta"),
+		]);
+		expect(bloquean).toHaveLength(1);
+	});
+
+	test("las autorizadas dejan de frenar", () => {
+		const bloquean = registrosQueBloquean(
+			[coincidencia("a", "alta"), coincidencia("b", "alta")],
+			new Set(["a"]),
+		);
+		expect(bloquean.map((c) => c.registroId)).toEqual(["b"]);
 	});
 });

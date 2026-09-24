@@ -18,6 +18,8 @@ import {
 	DynamicContractWizard,
 	moneyToWords,
 } from "@/components/contracts/DynamicContractWizard";
+import { ContratosDeLaBateria } from "@/components/inversiones/ContratosDeLaBateria";
+import { UploadInvestorContractModal } from "@/components/inversiones/UploadInvestorContractModal";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -29,8 +31,6 @@ import {
 	AlertDialogTitle,
 	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ContratosDeLaBateria } from "@/components/inversiones/ContratosDeLaBateria";
-import { UploadInvestorContractModal } from "@/components/inversiones/UploadInvestorContractModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,8 +47,8 @@ import { fechaEnPalabras } from "@/lib/fechas-en-palabras";
 import { client, orpc } from "@/utils/orpc";
 
 /**
- * Qué dice el estado de la batería: sin contratos, con contratos emitidos que
- * todavía se pueden corregir, o cerrada porque jurídico le dio "Listo".
+ * Qué dice el estado de la batería: sin contratos, en firma desde el primer
+ * contrato —y todavía se puede corregir—, o cerrada porque se firmó todo.
  */
 const ESTADO_DE_BATERIA: Record<string, string> = {
 	pendiente: "Sin contratos",
@@ -235,29 +235,10 @@ function RouteComponent() {
 		};
 	}, [bateria]);
 
-	/**
-	 * El "Listo" de jurídico avisa a inversiones que la batería quedó lista.
-	 *
-	 * Es el momento en que jurídico dice que terminó; hasta ahora inversiones se
-	 * enteraba entrando a la ficha a ver si ya había algo. Si el aviso falla, se
-	 * sale igual: el trabajo ya está hecho y el aviso se puede repetir.
-	 */
-	const avisarMutation = useMutation({
-		mutationFn: () => client.marcarBateriaLista({ batchId }),
-		onSuccess: (resultado) => {
-			if (resultado.avisado) toast.success("Inversiones ya fue avisado");
-		},
-		onError: (error: Error) => toast.error(error.message),
-	});
-
 	const cerrarMutation = useMutation({
 		...orpc.closeInvestorContractBatch.mutationOptions(),
-		onSuccess: (_, variables) => {
-			toast.success(
-				variables.resultado === "completada"
-					? "Batería marcada como completada"
-					: "Batería descartada",
-			);
+		onSuccess: () => {
+			toast.success("Batería descartada");
 			queryClient.invalidateQueries({
 				predicate: (query) =>
 					JSON.stringify(query.queryKey).includes("InvestorContractBatch"),
@@ -357,7 +338,9 @@ function RouteComponent() {
 
 	// Sólo la descartada deja de admitir contratos: la completada se cerró sola
 	// al emitir el primero y puede necesitar otro después.
-	const cerrada = bateria.status === "descartada";
+	// Descartada o firmada entera: ninguna de las dos admite cambios.
+	const cerrada =
+		bateria.status === "descartada" || bateria.status === "completada";
 
 	/**
 	 * El contrato que se armó por fuera entra por acá y termina igual que los
@@ -414,9 +397,9 @@ function RouteComponent() {
 						bateria.status.replace("_", " ")}
 				</Badge>
 
-				{/* La batería se cierra sola al emitir el primer contrato. Descartar es
-				    para la compra que no lleva papelería, y pide motivo. */}
-				{bateria.status !== "descartada" && (
+				{/* La batería se cierra sola cuando se firma todo. Descartar es para la
+				    compra que no lleva papelería, y pide motivo. */}
+				{!cerrada && (
 					<AlertDialog open={descartando} onOpenChange={setDescartando}>
 						<AlertDialogTrigger asChild>
 							<Button variant="ghost" size="sm">
@@ -536,9 +519,18 @@ function RouteComponent() {
 			{cerrada ? (
 				<Card>
 					<CardContent className="p-6 text-muted-foreground text-sm">
-						Esta batería se descartó
-						{bateria.discardReason ? `: ${bateria.discardReason}` : "."} No
-						admite contratos.
+						{bateria.status === "completada" ? (
+							<>
+								Esta batería está cerrada: todos sus contratos están firmados y
+								ya no admite cambios.
+							</>
+						) : (
+							<>
+								Esta batería se descartó
+								{bateria.discardReason ? `: ${bateria.discardReason}` : "."} No
+								admite contratos.
+							</>
+						)}
 					</CardContent>
 				</Card>
 			) : (
@@ -564,9 +556,8 @@ function RouteComponent() {
 							isGenerating={generarMutation.isPending}
 							onBack={() => navigate({ to: "/juridico" })}
 							accionesDeResultados={barraDeSubida}
-							// Reemplazar acá y no sólo desde la ficha porque al darle
-							// "Listo" la batería sale de la lista de jurídico: esta pantalla
-							// es la última oportunidad de corregir un documento.
+							// Reemplazar acá mismo, sin ir a buscarlo a la lista de abajo:
+							// es donde se ve el PDF que acaba de salir.
 							accionPorContrato={(resultado) =>
 								resultado.success ? (
 									<Button
@@ -583,15 +574,6 @@ function RouteComponent() {
 									</Button>
 								) : null
 							}
-							onFinish={async () => {
-								// Si el aviso falla no se sale: el error ya se ve en el
-								// toast y acá se puede reintentar. Yéndose, la única forma
-								// de volver a intentarlo sería emitir otro contrato.
-								const resultado = await avisarMutation
-									.mutateAsync()
-									.catch(() => null);
-								if (resultado) navigate({ to: "/juridico" });
-							}}
 							valoresIniciales={valoresIniciales}
 							pasoPrevio={{
 								etiqueta: "Categoría",
@@ -662,19 +644,14 @@ function RouteComponent() {
 			{/* Lo que la batería ya tiene. Sin esto, volver a una batería de otro
 			    día no daba desde dónde corregir un contrato: los resultados del
 			    wizard son sólo de la sesión en que se emitieron. */}
-			{!cerrada && (
+			{/* También cerrada: ahí sólo muestra los firmados con su PDF, sin
+			    acciones, que es lo que jurídico viene a buscar. */}
+			{bateria.status !== "descartada" && (
 				<ContratosDeLaBateria
 					batchId={batchId}
 					onReemplazar={(contractType) => {
 						setTipoASubir(contractType);
 						setSubiendo(true);
-					}}
-					avisando={avisarMutation.isPending}
-					onListo={async () => {
-						const resultado = await avisarMutation
-							.mutateAsync()
-							.catch(() => null);
-						if (resultado) navigate({ to: "/juridico" });
 					}}
 				/>
 			)}

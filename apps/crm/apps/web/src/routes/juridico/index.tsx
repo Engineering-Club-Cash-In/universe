@@ -120,7 +120,7 @@ function RouteComponent() {
 		useState<EstadoDeBateria>("pendiente");
 	const bateriasQuery = useQuery({
 		...orpc.listInvestorContractBatches.queryOptions({
-			input: { status: ESTADOS_DE_BATERIA },
+			input: { status: [...ESTADOS_DE_BATERIA] },
 		}),
 		enabled: canViewLegal,
 	});
@@ -428,9 +428,9 @@ function RouteComponent() {
 						<CardHeader>
 							<CardTitle>Contratos de inversionistas</CardTitle>
 							<CardDescription>
-								Cada compra de cartera aceptada abre una batería. En «En firma»
-								están las que ya tienen contratos y todavía se pueden corregir;
-								salen de acá cuando jurídico les da «Listo».
+								Cada compra de cartera aceptada abre una batería. Con el primer
+								contrato pasa a «En firma», donde se puede seguir agregando y
+								corrigiendo; pasa sola a «Cerradas» cuando se firma todo.
 							</CardDescription>
 
 							{/* Filtro por estado, como el de etapas en ventas */}
@@ -750,7 +750,6 @@ function RouteComponent() {
 						</CardContent>
 					</Card>
 				</TabsContent>
-
 			</Tabs>
 
 			{/* Opportunity Detail Modal */}

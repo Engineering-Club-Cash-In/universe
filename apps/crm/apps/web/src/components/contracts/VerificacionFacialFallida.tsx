@@ -16,6 +16,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
+import { PERMISSIONS } from "@/lib/roles";
 
 /** Un firmante al que WeeTrust no le validó la identidad. */
 export interface FirmanteSinIdentidad {
@@ -30,9 +31,13 @@ export interface FirmanteSinIdentidad {
  * porque la verificación facial de alguien no pasó.
  *
  * Hay dos salidas y las dos son sobre el MISMO documento, sin reemitir nada:
- * pedirle a esa persona que se identifique de nuevo —sigue usando el enlace que
- * ya tiene— u omitir la verificación, que cierra el contrato con la identidad
- * sin validar. Lo segundo es de jurídico y queda marcado en la ficha.
+ * pedirle a esa persona que se identifique de nuevo —le deshace la firma y le
+ * cambia el enlace— u omitir la verificación, que cierra el contrato con la
+ * identidad sin validar y queda marcado en la ficha.
+ *
+ * Es de inversiones, que le da seguimiento a la firma. Quien no puede
+ * resolverlo —jurídico, que entrega los contratos pero no los sigue— no ve
+ * nada: le basta el badge de "Identidad fallida".
  *
  * Antes de esto la única salida era reemplazar el contrato: documento nuevo,
  * enlaces nuevos, firmar todo otra vez y un anulado colgando.
@@ -41,13 +46,16 @@ export function VerificacionFacialFallida({
 	firmantes,
 	resolver,
 	onResuelto,
+	className,
 }: {
 	firmantes: FirmanteSinIdentidad[];
+	className?: string;
 	/** Llama al servidor. Lo pone quien la usa: inversiones y ventas tienen su propia procedure. */
 	resolver: (accion: "repetir" | "omitir") => Promise<unknown>;
 	onResuelto: () => void;
 }) {
-	const { canCreateLegal } = useJuridicoPermissions();
+	const { userRole } = useJuridicoPermissions();
+	const puedeResolver = PERMISSIONS.canResolveInvestorIdentity(userRole);
 	const [confirmandoOmitir, setConfirmandoOmitir] = useState(false);
 
 	const nombres = firmantes
@@ -71,8 +79,10 @@ export function VerificacionFacialFallida({
 
 	const ocupado = accionar.isPending;
 
+	if (!puedeResolver) return null;
+
 	return (
-		<div className="space-y-1.5">
+		<div className={`space-y-1.5 ${className ?? ""}`}>
 			<p className="text-[11px] text-muted-foreground">
 				<span className="font-medium text-foreground">
 					La verificación facial de {nombres} no pasó.
@@ -109,20 +119,18 @@ export function VerificacionFacialFallida({
 						),
 				)}
 
-				{/* Omitir cierra un contrato con la identidad sin validar: sólo
-				    jurídico, y con la advertencia por delante. */}
-				{canCreateLegal && (
-					<Button
-						variant="outline"
-						size="sm"
-						className="h-6 text-[11px]"
-						disabled={ocupado}
-						onClick={() => setConfirmandoOmitir(true)}
-					>
-						<ShieldOff className="mr-1 h-3 w-3" />
-						Omitir y cerrar
-					</Button>
-				)}
+				{/* Omitir cierra un contrato con la identidad sin validar: con la
+				    advertencia por delante. */}
+				<Button
+					variant="outline"
+					size="sm"
+					className="h-6 text-[11px]"
+					disabled={ocupado}
+					onClick={() => setConfirmandoOmitir(true)}
+				>
+					<ShieldOff className="mr-1 h-3 w-3" />
+					Omitir y cerrar
+				</Button>
 
 				<Button
 					variant="ghost"

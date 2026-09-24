@@ -341,12 +341,6 @@ interface DynamicContractWizardProps {
 	 * fuera, para tenerlo a mano sin bajar hasta el final de la pantalla.
 	 */
 	accionesDeResultados?: ReactNode;
-	/**
-	 * Qué hacer cuando le dan "Listo" en los resultados, si no hay paso de
-	 * enlazado. Por defecto se sale de la pantalla, como el botón de volver;
-	 * inversiones aprovecha para avisarle a quien sigue.
-	 */
-	onFinish?: () => void | Promise<void>;
 	onLinkContracts?: (data: {
 		opportunityId: string;
 		leadId: string;
@@ -881,7 +875,6 @@ export function DynamicContractWizard({
 	onGenerate,
 	accionPorContrato,
 	accionesDeResultados,
-	onFinish,
 	onLinkContracts,
 	onBack,
 	onDescartarSinEnlazar,
@@ -1680,7 +1673,8 @@ export function DynamicContractWizard({
 	 * trabajo: la batería saldría de la lista de jurídico con un contrato de
 	 * menos y nadie se enteraría.
 	 */
-	const fallidos = generationResult?.results.filter((r) => !r.success).length ?? 0;
+	const fallidos =
+		generationResult?.results.filter((r) => !r.success).length ?? 0;
 	const hayFallidos = fallidos > 0;
 
 	// Fetch documents and fields when moving to step 2
@@ -3037,8 +3031,8 @@ export function DynamicContractWizard({
 				{/* Step 3: Results */}
 				{step === 3 && generationResult && (
 					<div className="space-y-4">
-						{/* Sin paso de enlazado, "Listo" es lo único que queda por hacer y
-						    hay que verlo sin bajar hasta el final de los resultados. */}
+						{/* Sin paso de enlazado, cómo salió todo va arriba, sin bajar hasta
+						    el final de los resultados. */}
 						{!onLinkContracts && (
 							<Card
 								className={
@@ -3064,9 +3058,7 @@ export function DynamicContractWizard({
 													Falta {fallidos} contrato(s)
 												</h4>
 												<p className="text-amber-700 text-sm">
-													Reintentá el que salió en rojo o subilo a mano. Con
-													algo fallido no se puede dar Listo: la batería
-													saldría de tu lista con un contrato de menos.
+													Reintentá el que salió en rojo o subilo a mano.
 												</p>
 											</div>
 										) : (
@@ -3076,27 +3068,12 @@ export function DynamicContractWizard({
 												</h4>
 												<p className="text-green-700 text-sm">
 													Ya están en la ficha del inversionista, con sus
-													enlaces de firma. Revisá los PDF y dale Listo.
+													enlaces de firma. Revisá los PDF: mientras falte
+													firmar se pueden corregir desde la batería.
 												</p>
 											</div>
 										)}
 									</div>
-									<Button
-										size="lg"
-										onClick={() => (onFinish ?? onBack)()}
-										disabled={
-											isGenerating || Boolean(retryingType) || hayFallidos
-										}
-										title={
-											hayFallidos
-												? "Hay contratos que no salieron: reintentalos o subilos a mano"
-												: undefined
-										}
-										className="bg-green-600 hover:bg-green-700"
-									>
-										<Check className="mr-2 h-5 w-5" />
-										Listo
-									</Button>
 								</CardContent>
 							</Card>
 						)}
@@ -3182,22 +3159,9 @@ export function DynamicContractWizard({
 							: "Anterior"}
 				</Button>
 
-				{step === 3 && !onLinkContracts ? (
-					<Button
-						size="lg"
-						onClick={() => (onFinish ?? onBack)()}
-						disabled={isGenerating || Boolean(retryingType) || hayFallidos}
-						title={
-							hayFallidos
-								? "Hay contratos que no salieron: reintentalos o subilos a mano"
-								: undefined
-						}
-						className="bg-green-600 hover:bg-green-700"
-					>
-						<Check className="mr-2 h-5 w-5" />
-						Listo
-					</Button>
-				) : step === 3 ? (
+				{/* Sin enlazado no hay nada que confirmar: los contratos ya quedaron
+				    guardados en firma, y "Volver" ya está a la izquierda. */}
+				{step === 3 && !onLinkContracts ? null : step === 3 ? (
 					<Button
 						onClick={() => setShowLinkConfirmDialog(true)}
 						disabled={

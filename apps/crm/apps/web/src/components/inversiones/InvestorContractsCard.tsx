@@ -289,21 +289,20 @@ function FilaDeContrato({
 			    forma de saber que lo que falta no es que alguien firme, sino que
 			    WeeTrust no le creyó la identidad. */}
 			{fallaronIdentidad.length > 0 && !inactivo && (
-				<div className="mt-2">
-					<VerificacionFacialFallida
-						firmantes={fallaronIdentidad}
-						resolver={(accion) =>
-							client.retryInvestorContractBiometric({
-								contractId: contrato.id,
-								accion,
-							})
-						}
-						onResuelto={() => {
-							cierreQuery.refetch();
-							onCambio();
-						}}
-					/>
-				</div>
+				<VerificacionFacialFallida
+					className="mt-2"
+					firmantes={fallaronIdentidad}
+					resolver={(accion) =>
+						client.retryInvestorContractBiometric({
+							contractId: contrato.id,
+							accion,
+						})
+					}
+					onResuelto={() => {
+						cierreQuery.refetch();
+						onCambio();
+					}}
+				/>
 			)}
 
 			{/* Mientras falta firmar, el subido a mano pide un vistazo: después ya no

@@ -328,6 +328,9 @@ export const legalAppRouter = {
 		investorContractsRouter.resendInvestorContractSigningEmails,
 	refreshInvestorContractSigningLinks:
 		investorContractsRouter.refreshInvestorContractSigningLinks,
+	uploadInvestorContract: investorContractsRouter.uploadInvestorContract,
+	cancelInvestorContract: investorContractsRouter.cancelInvestorContract,
+	marcarBateriaLista: investorContractsRouter.marcarBateriaLista,
 };
 
 /**

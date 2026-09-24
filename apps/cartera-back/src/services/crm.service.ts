@@ -111,6 +111,12 @@ export interface BateriaDeContratosInput {
     /** Cuándo se aceptó la compra, en ISO. */
     aceptadaEn: string;
     aceptadaPor?: string | null;
+    /**
+     * El id de Resend del correo de "Compra de Cartera aceptada". Con él, el
+     * "Listo" de jurídico contesta dentro de ese hilo con los contratos y los
+     * enlaces. Falta si el correo no salió: el CRM manda igual, fuera del hilo.
+     */
+    correoId?: string | null;
   };
 }
 

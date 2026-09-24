@@ -1,10 +1,9 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { investorContractBatches } from "../db/schema/investor-contracts";
-import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { createNotification } from "../lib/notificaciones";
 import { ROLES } from "../lib/roles";
 
@@ -47,6 +46,8 @@ const cuerpoSchema = z.object({
 		facturacion: z.string().nullish(),
 		aceptadaEn: z.string().min(1),
 		aceptadaPor: z.string().nullish(),
+		/** El id de Resend del correo de aceptación: el hilo de la compra. */
+		correoId: z.string().nullish(),
 	}),
 });
 
@@ -125,6 +126,7 @@ app.post("/", async (c) => {
 			facturacion: compra.facturacion ?? null,
 			acceptedAt: aceptadaEn,
 			acceptedByEmail: compra.aceptadaPor ?? null,
+			emailThreadId: compra.correoId ?? null,
 		})
 		.onConflictDoNothing({
 			target: [
@@ -158,6 +160,7 @@ app.post("/", async (c) => {
 				id: investorContractBatches.id,
 				status: investorContractBatches.status,
 				acceptedAt: investorContractBatches.acceptedAt,
+				emailThreadId: investorContractBatches.emailThreadId,
 			})
 			.from(investorContractBatches)
 			.where(
@@ -186,19 +189,6 @@ app.post("/", async (c) => {
 			// La batería vuelve a ser trabajo sólo si esto es otra compra: si es
 			// el mismo aviso, la que estaba abierta sigue abierta y la cerrada
 			// sigue cerrada.
-			const [tieneContratos] = otraCompra
-				? await db
-						.select({ id: generatedLegalContracts.id })
-						.from(generatedLegalContracts)
-						.where(
-							and(
-								eq(generatedLegalContracts.batchId, existente.id),
-								ne(generatedLegalContracts.status, "cancelled"),
-							),
-						)
-						.limit(1)
-				: [];
-
 			await db
 				.update(investorContractBatches)
 				.set({
@@ -216,11 +206,21 @@ app.post("/", async (c) => {
 						? {
 								acceptedAt: aceptadaEn,
 								acceptedByEmail: compra.aceptadaPor ?? null,
-								status: tieneContratos ? "en_proceso" : "pendiente",
+								// Otra compra es otro correo: los contratos de ésta se
+								// contestan en su hilo, no en el de la anterior. Y vuelve a
+								// ser trabajo de jurídico hasta que le dé "Listo".
+								emailThreadId: compra.correoId ?? null,
+								status: "pendiente",
+								startedAt: null,
+								startedBy: null,
 								completedAt: null,
 								completedBy: null,
 							}
-						: {}),
+						: // El mismo aviso repetido no cambia de hilo; sólo lo completa si
+							// la primera vez llegó sin él.
+							!existente.emailThreadId && compra.correoId
+							? { emailThreadId: compra.correoId }
+							: {}),
 				})
 				.where(eq(investorContractBatches.id, existente.id));
 		}

@@ -99,6 +99,8 @@ async function abrirBateriasDeContratos(params: {
   modalidadFacturacionPorCredito: Map<number, string | null>;
   aceptadaEn: Date;
   aceptadaPor?: string;
+  /** El id de Resend del correo de aceptación: es el hilo de la compra. */
+  correoId?: string;
 }): Promise<
   Array<{ inversionista_id: number; success: boolean; batchId?: string; error?: string }>
 > {
@@ -249,6 +251,7 @@ async function abrirBateriasDeContratos(params: {
           facturacion: inv.emite_factura ? "Propia" : "No emite",
           aceptadaEn: params.aceptadaEn.toISOString(),
           aceptadaPor: params.aceptadaPor,
+          correoId: params.correoId ?? null,
         },
       });
 
@@ -663,6 +666,9 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       modalidadFacturacionPorCredito: modalidadFactPorCredito,
       aceptadaEn: ahora,
       aceptadaPor: usuarioEmail,
+      // El hilo donde jurídico va a contestar con los contratos. Por eso la
+      // batería se abre DESPUÉS del correo.
+      correoId: mailRes.success ? mailRes.data?.id : undefined,
     });
 
     set.status = 200;

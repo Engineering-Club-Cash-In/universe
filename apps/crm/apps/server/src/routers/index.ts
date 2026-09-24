@@ -279,6 +279,7 @@ export const legalAppRouter = {
 	getMessagingMode: legalContractsRouter.getMessagingMode,
 	resendContractLinksWhatsapp: legalContractsRouter.resendContractLinksWhatsapp,
 	getContractSigningStatus: legalContractsRouter.getContractSigningStatus,
+	retryContractBiometric: legalContractsRouter.retryContractBiometric,
 	refreshContractSigningLinks: legalContractsRouter.refreshContractSigningLinks,
 	resendContractSigningEmails: legalContractsRouter.resendContractSigningEmails,
 	// Anular sin reemplazar, y bajar el PDF ya firmado sin entrar a WeeTrust

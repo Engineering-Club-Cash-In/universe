@@ -61,6 +61,21 @@ export interface Document {
 	count_doble_line: number;
 }
 
+/**
+ * Qué clase de campo es, para saber con qué pintarlo.
+ *
+ * Los contratos de inversiones traen los tres: listas repetibles (los créditos
+ * cedidos, los beneficiarios designados) y opciones cerradas (la modalidad de
+ * retorno, la figura fiscal). Los de ventas son todos `text`, y por eso esto no
+ * estaba declarado.
+ */
+export type FieldType = "text" | "select" | "list";
+
+export interface FieldOption {
+	value: string;
+	label: string;
+}
+
 export interface Field {
 	name: string;
 	key: string;
@@ -71,6 +86,9 @@ export interface Field {
 	description: string | null;
 	default: string | null;
 	is_double_line: boolean;
+	type?: FieldType;
+	/** En un `select`, las opciones; en una `list`, las columnas de cada item. */
+	options?: FieldOption[] | null;
 }
 
 export interface DocumentByDpiResponse {
@@ -101,7 +119,18 @@ export interface DeudorAdicional {
  * porque el orden no es el mismo en todos (en la garantía mobiliaria y el
  * reconocimiento de deuda el representante legal firma primero).
  */
-export type SignerRole = "TITULAR" | "COFIRMANTE" | "REP_LEGAL" | "VENDEDOR";
+export type SignerRole =
+	| "TITULAR"
+	| "COFIRMANTE"
+	| "REP_LEGAL"
+	/**
+	 * La segunda entidad. El contrato de servicios de inversiones lleva una
+	 * línea para CUBE y otra para RDBE, y con un solo rol de representante las
+	 * dos le tocaban a la misma persona: WeeTrust junta a los firmantes por
+	 * correo y una de las dos firmas desaparecía.
+	 */
+	| "REP_LEGAL_RDBE"
+	| "VENDEDOR";
 
 export interface ContractSigner {
 	role: SignerRole;
@@ -236,8 +265,20 @@ export interface BatchGenerateResponse {
 /**
  * Obtiene los tipos de documentos disponibles desde la API
  */
-export async function getDocumentTypes(): Promise<DocumentsResponse> {
-	const response = await fetch(`${LEGAL_API_URL}/docuSeal/documents`, {
+/**
+ * El catálogo de documentos disponibles.
+ *
+ * **Sin categoría devuelve sólo los de ventas**, que son los 14 que usa
+ * jurídico desde la oportunidad. Los de inversiones y sociedad sólo vuelven
+ * pidiéndolos por su categoría.
+ */
+export async function getDocumentTypes(
+	categoria?: string,
+): Promise<DocumentsResponse> {
+	const ruta = categoria
+		? `/docuSeal/documents?categoria=${encodeURIComponent(categoria)}`
+		: "/docuSeal/documents";
+	const response = await fetch(`${LEGAL_API_URL}${ruta}`, {
 		method: "GET",
 		headers: {
 			"Content-Type": "application/json",
@@ -537,8 +578,8 @@ export async function subirContratoParaFirma(payload: {
  * Baja el PDF **firmado** de un documento ya completado.
  *
  * El que se guardó al generarlo es el borrador: no tiene las firmas. Éste es el
- * que vale como contrato, y es el que ventas y jurídico necesitan poder
- * descargar sin salir del CRM.
+ * que vale como contrato: el que ventas y jurídico bajan sin salir del CRM, y
+ * el que termina en la papelería del inversionista.
  *
  * Pasa por el generador porque las credenciales de WeeTrust las tiene él.
  */

@@ -432,12 +432,24 @@ export const legalContractsRouter = {
 			// Guardar key del PDF si se proporciono (ya subido a R2 via presigned URL)
 			let pdfLink: string | undefined;
 			if (input.pdfFile) {
+				// De quién es el contrato: oportunidad, lead o —en inversiones, que no
+				// tiene ninguno de los dos— el inversionista. Sin dueño no hay prefijo
+				// contra el que validar la subida, así que se corta.
+				const dueno =
+					existingContract.opportunityId ||
+					existingContract.leadId ||
+					(existingContract.investorId
+						? `inversionista-${existingContract.investorId}`
+						: null);
+				if (!dueno) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "El contrato no tiene dueño: no se puede subir su PDF.",
+					});
+				}
+
 				const uploadedFile = await verifyUploadedDocumentInR2({
 					key: input.pdfFile.key,
-					expectedPrefix: buildUploadPrefix(
-						"legal_contract_pdf",
-						existingContract.opportunityId || existingContract.leadId,
-					),
+					expectedPrefix: buildUploadPrefix("legal_contract_pdf", dueno),
 					filename: input.pdfFile.name,
 					mimeType: input.pdfFile.type,
 				});
@@ -747,6 +759,15 @@ export const legalContractsRouter = {
 
 			// Si se proporciona opportunityId, verificar que pertenece al lead del contrato
 			if (input.opportunityId) {
+				// Los contratos de inversiones no tienen lead ni oportunidad: son del
+				// inversionista. Asignarles una es cruzar dos mundos distintos.
+				if (!contract.leadId) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Este contrato no es de un lead: no se le puede asignar una oportunidad.",
+					});
+				}
+
 				const [opportunity] = await db
 					.select()
 					.from(opportunities)

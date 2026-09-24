@@ -2434,9 +2434,11 @@ export class CarteraBackClient {
 			formData.append("estado_firma", input.estado_firma);
 		}
 		if (input.created_by) formData.append("created_by", input.created_by);
-		// Sólo se manda para encenderlo: cartera no lo apaga si alguien ya había
-		// decidido mostrarle el documento al inversionista.
-		if (input.visible) formData.append("visible", "true");
+		// Se manda sólo cuando hay una decisión que tomar: encenderlo al firmarse
+		// o apagarlo al anularse. Sin el campo, cartera deja como está lo que
+		// alguien haya decidido desde la ficha.
+		if (input.visible !== undefined)
+			formData.append("visible", String(input.visible));
 
 		const token = await getCarteraAccessToken();
 		const response = await fetch(url, {

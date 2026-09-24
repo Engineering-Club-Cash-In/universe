@@ -387,10 +387,10 @@ export const investorDocumentsRouter = new Elysia()
               firmantes: firmantesParsed,
               estado_firma: estado_firma ?? null,
               actualizado_at: ahora,
-              // `visible` sólo se enciende, nunca se apaga: si alguien decidió
-              // mostrarle un documento al inversionista desde la ficha, una
-              // copia posterior no tiene por qué escondérselo otra vez.
-              ...(visible ? { visible: true } : {}),
+              // Sólo cuando el CRM opina: lo enciende al firmarse y lo apaga al
+              // anularse. Sin el campo no se toca, para no pisar a quien haya
+              // decidido mostrárselo al inversionista desde la ficha.
+              ...(visible !== undefined ? { visible } : {}),
             })
             .where(eq(documentos_inversionista.documento_id, existente.documento_id))
             .returning();
@@ -495,8 +495,8 @@ export const investorDocumentsRouter = new Elysia()
             firmantes: body.firmantes ?? null,
             estado_firma: body.estado_firma ?? null,
             actualizado_at: new Date(),
-            // Igual que en la copia: sólo se enciende, nunca se apaga.
-            ...(body.visible ? { visible: true } : {}),
+            // Igual que en la copia: sólo cuando el CRM opina.
+            ...(body.visible !== undefined ? { visible: body.visible } : {}),
           })
           .where(eq(documentos_inversionista.contrato_id, params.contratoId))
           .returning();

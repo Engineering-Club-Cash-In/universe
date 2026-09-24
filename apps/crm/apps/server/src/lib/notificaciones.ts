@@ -14,8 +14,14 @@ import { notifications } from "../db/schema/notifications";
  */
 export async function createNotification(
 	data: Omit<NewNotification, "id" | "createdAt" | "updatedAt" | "status">,
+	/**
+	 * Con qué conexión se escribe. Por defecto la de siempre; quien necesite que
+	 * el aviso entre en su misma transacción —para que un candado lo serialice—
+	 * le pasa la suya.
+	 */
+	ejecutor: Pick<typeof db, "insert"> = db,
 ) {
-	const [notification] = await db
+	const [notification] = await ejecutor
 		.insert(notifications)
 		.values({
 			...data,

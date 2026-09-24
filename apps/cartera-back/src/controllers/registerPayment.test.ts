@@ -1511,3 +1511,21 @@ describe("otros: se estampa en la fila que la boleta escribe, no en la primera c
     expect(bloque).toContain("estamparPagoConvenio.pendiente()");
   });
 });
+
+describe("cableado del cierre en aplicar-pago (que la alerta no se vuelva bloqueo)", () => {
+  // Chequeo de CABLEADO, no de conducta: la conducta vive en
+  // `decidirCierrePorRestantesEnCero` (probada con números en
+  // registerPaymentPolicy.test.ts). Lo único que no se puede afirmar desde el
+  // helper es que el call-site lo respete, y ese fue justamente el defecto de
+  // la versión anterior: un `else if (planosCuota.cubiertos)` que dejaba la
+  // cuota abierta para siempre.
+  it("cuotaCompleta sale del helper y los planos no lo condicionan", () => {
+    expect(registerPaymentSource).toContain(
+      "cuotaCompleta = decisionCierre.cuotaCompleta;",
+    );
+    expect(registerPaymentSource).not.toContain(
+      "} else if (planosCuota.cubiertos) {",
+    );
+    expect(registerPaymentSource).not.toContain("cerrariaCuotaPorDebajo");
+  });
+});

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import Big from "big.js";
 import {
   getAjusteFechaIdealADeducir,
   recomputeCreditAfterCapital,
@@ -1762,5 +1763,283 @@ describe("esReciboSaldado vía filtrar — pagos exactos por la vía stale-zero"
       }),
     ];
     expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+});
+
+describe("evaluarRubrosPlanosCuota (qué puede cerrar el fallback de aplicar-pago)", () => {
+  const { evaluarRubrosPlanosCuota } = registerPaymentPolicy;
+
+  it("bloquea el cierre del crédito 9234: seguro 0.00 de 245.00 y membresías 107.16 de 743.24", () => {
+    // Los planos no se topan nunca: se cobran enteros en cada cuota. Que la fila
+    // del pago tenga sus restantes en 0 no significa que estén cobrados.
+    const evaluacion = evaluarRubrosPlanosCuota({
+      cobrado: { seguro: "0", gps: "0", membresias: "107.16" },
+      objetivo: { seguro: "245.00", gps: "0", membresias: "743.24" },
+    });
+
+    expect(evaluacion.cubiertos).toBe(false);
+    expect(evaluacion.faltanteSeguro.toFixed(2)).toBe("245.00");
+    expect(evaluacion.faltanteMembresias.toFixed(2)).toBe("636.08");
+    expect(evaluacion.faltanteGps.toFixed(2)).toBe("0.00");
+  });
+
+  it("deja cerrar el recibo de cola legítimo: capital topado pero planos completos", () => {
+    // Éste es el caso por el que el fallback existe: tras un abono grande el
+    // recibo vale menos que `credito.cuota`, pero seguro/GPS/membresías se
+    // cobraron enteros.
+    const evaluacion = evaluarRubrosPlanosCuota({
+      cobrado: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+      objetivo: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+    });
+
+    expect(evaluacion.cubiertos).toBe(true);
+  });
+
+  it("un crédito sin rubros planos no queda bloqueado", () => {
+    expect(
+      evaluarRubrosPlanosCuota({
+        cobrado: { seguro: "0", gps: "0", membresias: "0" },
+        objetivo: { seguro: "0", gps: "0", membresias: "0" },
+      }).cubiertos,
+    ).toBe(true);
+  });
+
+  it("tolera el centavo y no se queja de un sobre-cobro", () => {
+    expect(
+      evaluarRubrosPlanosCuota({
+        cobrado: { seguro: "244.99", gps: "150.01", membresias: "743.24" },
+        objetivo: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+      }).cubiertos,
+    ).toBe(true);
+  });
+});
+
+describe("evaluarCierreCuotaPorPlanos (la compuerta que RECHAZA al registrar)", () => {
+  const { evaluarCierreCuotaPorPlanos, cuentaComoHermanoVivo } =
+    registerPaymentPolicy;
+  const TOLERANCIA = 0.01;
+
+  /**
+   * Arma el `cobrado` igual que `insertPayment`: Σ de los planos de los
+   * hermanos VIVOS (los que pasan `cuentaComoHermanoVivo`) más lo que aplica el
+   * pago en vuelo.
+   */
+  const cobradoDe = (
+    hermanos: any[],
+    enVuelo: { seguro: string; gps: string; membresias: string },
+  ): { seguro: string; gps: string; membresias: string } =>
+    hermanos.filter((h) => cuentaComoHermanoVivo(h)).reduce(
+      (acc, h) => ({
+        seguro: new Big(acc.seguro).plus(h.abono_seguro ?? 0).toString(),
+        gps: new Big(acc.gps).plus(h.abono_gps ?? 0).toString(),
+        membresias: new Big(acc.membresias)
+          .plus(h.membresias_pago ?? 0)
+          .toString(),
+      }),
+      enVuelo,
+    );
+
+  it("RECHAZA el caso real del crédito 9234: seguro 0.00 de 245.00 y membresías 107.16 de 743.24", () => {
+    const decision = evaluarCierreCuotaPorPlanos({
+      todosRestantesEnCero: true,
+      cobrado: { seguro: "0", gps: "0", membresias: "107.16" },
+      objetivo: { seguro: "245.00", gps: "0", membresias: "743.24" },
+      tolerancia: TOLERANCIA,
+    });
+
+    expect(decision.rechazar).toBe(true);
+    expect(decision.cortos.map((c) => c.rubro)).toEqual([
+      "seguro",
+      "membresías",
+    ]);
+    expect(decision.cortos[0]?.faltante.toFixed(2)).toBe("245.00");
+    expect(decision.cortos[1]?.faltante.toFixed(2)).toBe("636.08");
+    // El GPS estaba en 0 de 0: no se reporta como corto.
+    expect(decision.cortos.map((c) => c.rubro)).not.toContain("GPS");
+  });
+
+  it("NO rechaza el recibo de cola con capital topado: vale menos que la cuota pero los planos están enteros", () => {
+    // NO-REGRESIÓN. Un piso medido contra `credito.cuota` (2,998.48) rechazaba
+    // este pago de 1,301.68, que es exactamente lo que el crédito pide después
+    // de un abono grande a capital: `recalcularPagosCredito` topa el capital
+    // proyectado del recibo de cola. Los planos, en cambio, no se topan nunca y
+    // acá están completos, así que el pago tiene que pasar.
+    const decision = evaluarCierreCuotaPorPlanos({
+      todosRestantesEnCero: true,
+      cobrado: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+      objetivo: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+      tolerancia: TOLERANCIA,
+    });
+
+    expect(decision.rechazar).toBe(false);
+    expect(decision.cortos).toEqual([]);
+  });
+
+  it("NO rechaza cuando los planos los cubrió una fila hermana `no_required` con plata", () => {
+    // Crédito 890 / cuota 12: una `no_required` que lleva plata aplicada y
+    // facturada es hermana VIVA. Filtrarla por status (validated/pending)
+    // dejaría los planos en cero y bloquearía la cuota para siempre.
+    const hermanaNoRequiredConPlata = {
+      validationStatus: "no_required",
+      monto_aplicado: "988.24",
+      abono_capital: "0",
+      abono_interes: "0",
+      abono_iva_12: "0",
+      abono_seguro: "245.00",
+      abono_gps: "0",
+      membresias_pago: "743.24",
+      abono_interes_ci: "0",
+      abono_iva_ci: "0",
+      mora: "0",
+      pagoConvenio: "0",
+      otros: null,
+    };
+    // Y una semilla virgen de SIFCO, que NO cuenta (no aporta nada).
+    const semillaSifco = {
+      validationStatus: "no_required",
+      monto_aplicado: "0",
+      abono_seguro: "0",
+      membresias_pago: "0",
+      otros: null,
+    };
+
+    expect(cuentaComoHermanoVivo(hermanaNoRequiredConPlata)).toBe(true);
+    expect(cuentaComoHermanoVivo(semillaSifco)).toBe(false);
+
+    const decision = evaluarCierreCuotaPorPlanos({
+      todosRestantesEnCero: true,
+      cobrado: cobradoDe([hermanaNoRequiredConPlata, semillaSifco], {
+        seguro: "0",
+        gps: "0",
+        membresias: "0",
+      }),
+      objetivo: { seguro: "245.00", gps: "0", membresias: "743.24" },
+      tolerancia: TOLERANCIA,
+    });
+
+    expect(decision.rechazar).toBe(false);
+  });
+
+  it("NO rechaza cuando el ajuste de restantes stale-cero ya consumió la cuota entera", () => {
+    // Ese ajuste (`shouldApplyStaleZeroRestanteAdjustment`) sólo dispara con el
+    // monto EXACTO de una cuota, sin hermanos validados y sin parcial con
+    // restante: la cuota SÍ quedó cobrada completa, lo que falta es la
+    // itemización por rubro. `insertPayment` le pasa entonces
+    // `todosRestantesEnCero: false` para no rechazar un pago correcto.
+    const staleZeroDisparo = registerPaymentPolicy.shouldApplyStaleZeroRestanteAdjustment(
+      {
+        hasExistingPayment: true,
+        isFirstProcessedInstallment: true,
+        isExactSingleInstallmentPayment: true,
+        hasValidatedPayments: false,
+        hasLastPartialPaymentWithRemaining: false,
+        allRemainingZero: true,
+        missingAgainstInstallment: "2998.48",
+        availableRemaining: "2998.48",
+      },
+    );
+    expect(staleZeroDisparo).toBe(true);
+
+    expect(
+      evaluarCierreCuotaPorPlanos({
+        todosRestantesEnCero: true && !staleZeroDisparo,
+        cobrado: { seguro: "0", gps: "0", membresias: "0" },
+        objetivo: { seguro: "245.00", gps: "0", membresias: "743.24" },
+        tolerancia: TOLERANCIA,
+      }).rechazar,
+    ).toBe(false);
+
+    // Y el caso 9234 NO pasa por esa puerta: Q1,000.00 contra una cuota de
+    // Q2,998.48 no es el monto exacto de una cuota.
+    expect(
+      registerPaymentPolicy.shouldApplyStaleZeroRestanteAdjustment({
+        hasExistingPayment: true,
+        isFirstProcessedInstallment: true,
+        isExactSingleInstallmentPayment: false,
+        hasValidatedPayments: false,
+        hasLastPartialPaymentWithRemaining: false,
+        allRemainingZero: true,
+        missingAgainstInstallment: "1998.48",
+        availableRemaining: "1998.48",
+      }),
+    ).toBe(false);
+  });
+
+  it("no se mete cuando la cuota queda parcial (quedan restantes vivos)", () => {
+    // Un parcial cobra de menos A PROPÓSITO: la cuota sigue abierta y el
+    // faltante se puede seguir cobrando.
+    expect(
+      evaluarCierreCuotaPorPlanos({
+        todosRestantesEnCero: false,
+        cobrado: { seguro: "0", gps: "0", membresias: "0" },
+        objetivo: { seguro: "245.00", gps: "0", membresias: "743.24" },
+        tolerancia: TOLERANCIA,
+      }).rechazar,
+    ).toBe(false);
+  });
+
+  it("un crédito sin rubros planos nunca queda bloqueado", () => {
+    expect(
+      evaluarCierreCuotaPorPlanos({
+        todosRestantesEnCero: true,
+        cobrado: { seguro: "0", gps: "0", membresias: "0" },
+        objetivo: { seguro: "0", gps: "0", membresias: "0" },
+        tolerancia: TOLERANCIA,
+      }).rechazar,
+    ).toBe(false);
+  });
+
+  it("tolera el centavo de redondeo y no se queja de un sobre-cobro", () => {
+    expect(
+      evaluarCierreCuotaPorPlanos({
+        todosRestantesEnCero: true,
+        cobrado: { seguro: "244.99", gps: "150.01", membresias: "743.24" },
+        objetivo: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+        tolerancia: TOLERANCIA,
+      }).rechazar,
+    ).toBe(false);
+  });
+});
+
+describe("decidirCierrePorRestantesEnCero (la validación NO se traba por planos)", () => {
+  const { decidirCierrePorRestantesEnCero } = registerPaymentPolicy;
+
+  it("cierra la cuota cuando no queda ningún hermano pendiente", () => {
+    expect(
+      decidirCierrePorRestantesEnCero({
+        hayHermanoPendiente: false,
+        filaPagada: true,
+      }),
+    ).toEqual({ cuotaCompleta: true, cierreDiferido: false });
+  });
+
+  it("difiere el cierre al hermano que falta validar, sin cerrar la cuota", () => {
+    expect(
+      decidirCierrePorRestantesEnCero({
+        hayHermanoPendiente: true,
+        filaPagada: true,
+      }),
+    ).toEqual({ cuotaCompleta: false, cierreDiferido: true });
+    expect(
+      decidirCierrePorRestantesEnCero({
+        hayHermanoPendiente: true,
+        filaPagada: false,
+      }),
+    ).toEqual({ cuotaCompleta: false, cierreDiferido: false });
+  });
+
+  it("la cobertura de los planos NO es una entrada de esta decisión", () => {
+    // Es el invariante que la versión anterior rompió: si los planos cortos
+    // pudieran impedir el cierre, la cuota de un recibo de cola quedaría
+    // abierta para siempre (por RAMA A no se reescriben restantes ni se
+    // distribuye a inversionistas). Los planos sólo dejan rastro.
+    expect(
+      decidirCierrePorRestantesEnCero({
+        hayHermanoPendiente: false,
+        filaPagada: false,
+        // Aunque se le grite que los planos están cortos, cierra igual.
+        planosCubiertos: false,
+      } as any),
+    ).toEqual({ cuotaCompleta: true, cierreDiferido: false });
   });
 });

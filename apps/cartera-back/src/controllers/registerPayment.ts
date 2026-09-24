@@ -59,6 +59,9 @@ import {
   internalNexaPagoSchema,
   getInternalNexaPaymentDate,
   cuentaComoHermanoVivo,
+  decidirCierrePorRestantesEnCero,
+  evaluarCierreCuotaPorPlanos,
+  evaluarRubrosPlanosCuota,
 } from "./registerPaymentPolicy";
 import {
   holdsPaymentAdvisoryLock,
@@ -1457,18 +1460,18 @@ export const insertPayment = async (
         const pagoExactoDeUnaCuota = montoEfectivo.eq(montoCuota);
         const faltanteContraCuota = montoCuota.minus(totalPagado);
 
-        if (
-          shouldApplyStaleZeroRestanteAdjustment({
-            hasExistingPayment: !!existingPago,
-            isFirstProcessedInstallment: esPrimeraCuotaProcesada,
-            isExactSingleInstallmentPayment: pagoExactoDeUnaCuota,
-            hasValidatedPayments: tienePagosValidados,
-            hasLastPartialPaymentWithRemaining: !!ultimoPagoParcialConRestante,
-            allRemainingZero: todosRestantesEnCero,
-            missingAgainstInstallment: faltanteContraCuota,
-            availableRemaining: disponible_restante,
-          })
-        ) {
+        const ajusteStaleZeroAplicado = shouldApplyStaleZeroRestanteAdjustment({
+          hasExistingPayment: !!existingPago,
+          isFirstProcessedInstallment: esPrimeraCuotaProcesada,
+          isExactSingleInstallmentPayment: pagoExactoDeUnaCuota,
+          hasValidatedPayments: tienePagosValidados,
+          hasLastPartialPaymentWithRemaining: !!ultimoPagoParcialConRestante,
+          allRemainingZero: todosRestantesEnCero,
+          missingAgainstInstallment: faltanteContraCuota,
+          availableRemaining: disponible_restante,
+        });
+
+        if (ajusteStaleZeroAplicado) {
 
           totalPagado = totalPagado.plus(faltanteContraCuota);
           disponible_restante = disponible_restante.minus(faltanteContraCuota);
@@ -1495,6 +1498,67 @@ export const insertPayment = async (
               `${interesPrevioCuota.toFixed(2)}); este pago intentaría aplicar ` +
               `${totalPagado.toFixed(2)} más. Revisar los pagos previos de la cuota ` +
               `antes de registrar.`
+          );
+        }
+
+
+        // ─────────────────────────────────────────────────────────────────
+        // 🛡️ RED DE SEGURIDAD ANTI-CIERRE POR DEBAJO (la simétrica de arriba)
+        //
+        // La distribución dice "ya no queda nada por cobrar en esta cuota"
+        // (todos los restantes en 0) pero los rubros PLANOS —seguro, GPS,
+        // membresías— no se juntaron completos. Eso NO es un redondeo: es una
+        // fila con los `*_restante` subestimados, y la cuota se cerraría con
+        // plata que nadie va a volver a cobrar (crédito 9234, cuota 1: seguro
+        // Q0.00 de Q245.00 y membresías Q107.16 de Q743.24).
+        //
+        // La medida va contra los planos y NO contra `montoCuota`: un recibo de
+        // cola vale legítimamente menos que `credito.cuota` cuando un abono
+        // grande a capital topó su capital proyectado (`recalcularPagosCredito`),
+        // así que un piso por monto de cuota rechazaría pagos correctos. Los
+        // planos salen de la cabecera del crédito, se siembran iguales en todas
+        // las cuotas y no se topan nunca.
+        //
+        // `*PrevioCuota` son Σ sobre `pagosHermanos`, que es el MISMO set que
+        // usó la distribución (incluye las `no_required` con plata vía
+        // `cuentaComoHermanoVivo`), así que no hay falso positivo por ahí.
+        // ─────────────────────────────────────────────────────────────────
+        const cierrePorDebajo = evaluarCierreCuotaPorPlanos({
+          // Excepción: el ajuste de restantes stale-cero ya consumió el monto
+          // EXACTO de una cuota entera del `disponible` (y sólo dispara sin
+          // hermanos validados ni parciales con restante). La cuota SÍ quedó
+          // cobrada completa; lo que no hay es itemización por rubro, así que
+          // medir los planos ahí daría un falso rechazo. No debilita el caso
+          // 9234: ese pago era de Q1,000 contra una cuota de Q2,998.48, o sea
+          // `isExactSingleInstallmentPayment` falso y el ajuste nunca corrió.
+          todosRestantesEnCero: todosRestantesEnCero && !ajusteStaleZeroAplicado,
+          cobrado: {
+            seguro: seguroPrevioCuota.plus(abono_seguro),
+            gps: gpsPrevioCuota.plus(abono_gps),
+            membresias: membresiasPrevioCuota.plus(abono_membresias),
+          },
+          objetivo: {
+            seguro: credito.seguro_10_cuotas ?? 0,
+            gps: credito.gps ?? 0,
+            membresias: credito.membresias_pago ?? 0,
+          },
+          tolerancia: TOLERANCIA_CENTAVO,
+        });
+
+        if (cierrePorDebajo.rechazar) {
+          const detalle = cierrePorDebajo.cortos
+            .map(
+              (corto) =>
+                `${corto.rubro}: se cobró ${corto.cobrado.toFixed(2)} de ` +
+                `${corto.objetivo.toFixed(2)} (faltan ${corto.faltante.toFixed(2)})`
+            )
+            .join("; ");
+
+          throw new Error(
+            `Pago rechazado: la cuota #${cuota.cuotas_credito.numero_cuota} se ` +
+              `cerraría con rubros fijos cobrados de menos — ${detalle}. Los ` +
+              `saldos de la cuota vienen subestimados: revisar los saldos de los ` +
+              `pagos previos de esa cuota antes de registrar.`
           );
         }
 
@@ -3021,19 +3085,139 @@ async function aplicarPagoNormalEnTx(
               )
             )
             .limit(1);
-          if (hermanoPendiente) {
-            // La fila de cierre viene marcada pagado=true desde el registro
-            // (dejó su recibo en 0). Si se queda así ya validada, la mora
-            // tomaría la cuota como satisfecha aunque el hermano nunca se
-            // valide (latefee/procesarMoras excluyen cuotas con una fila viva
-            // pagado=true validated/no_required con monto>0). Mientras el
-            // cierre esté diferido, la fila viaja como parcial (pagado=false);
-            // cuotas_credito.pagado lo pone el hermano que cierra en RAMA B.
-            cierreDiferido = pago.pagado === true;
+          // La fila de cierre viene marcada pagado=true desde el registro (dejó
+          // su recibo en 0). Si se queda así ya validada, la mora tomaría la
+          // cuota como satisfecha aunque el hermano nunca se valide
+          // (latefee/procesarMoras excluyen cuotas con una fila viva
+          // pagado=true validated/no_required con monto>0). Mientras el cierre
+          // esté diferido, la fila viaja como parcial (pagado=false);
+          // cuotas_credito.pagado lo pone el hermano que cierra en RAMA B.
+          const decisionCierre = decidirCierrePorRestantesEnCero({
+            hayHermanoPendiente: !!hermanoPendiente,
+            filaPagada: pago.pagado === true,
+          });
+          cuotaCompleta = decisionCierre.cuotaCompleta;
+          cierreDiferido = decisionCierre.cierreDiferido;
 
-          } else {
-            cuotaCompleta = true;
+          if (decisionCierre.cuotaCompleta) {
+            // ─────────────────────────────────────────────────────────────
+            // ALERTA (no bloqueo): ¿los rubros PLANOS quedaron a medias?
+            //
+            // Este camino cierra la cuota porque la fila quedó con todos sus
+            // `*_restante` en ~0, lo cual es legítimo para el capital TOPADO
+            // (tras un abono grande el recibo de cola vale menos que
+            // `credito.cuota`). Pero el seguro, el GPS y las membresías no se
+            // topan nunca, así que si quedaron cortos es señal de restantes
+            // subestimados (crédito 9234, cuota 1: seguro Q0.00 de Q245.00 y
+            // membresías Q107.16 de Q743.24).
+            //
+            // Sólo ALERTA, a propósito: bloquear acá dejaría la cuota sin
+            // salida —el camino de la suma de validados nunca alcanza para un
+            // recibo de cola, y por RAMA A no se reescriben restantes ni se
+            // distribuye a inversionistas— o sea cuota abierta para siempre,
+            // que es peor que el cierre corto. La compuerta que RECHAZA está en
+            // el registro (`evaluarCierreCuotaPorPlanos` en `insertPayment`),
+            // donde la boleta todavía se puede corregir.
+            //
+            // El set de hermanas tiene que ser el MISMO que usa el registro:
+            // trae también las `no_required` y las filtra con
+            // `cuentaComoHermanoVivo`. Con el filtro por status solamente, una
+            // cuota cuyos planos los pagó una fila `no_required` con plata
+            // (crédito 890 / cuota 12) gritaría en falso.
+            const hermanasVivasCuota = (
+              await tx
+                .select({
+                  validationStatus: pagos_credito.validationStatus,
+                  monto_aplicado: pagos_credito.monto_aplicado,
+                  abono_capital: pagos_credito.abono_capital,
+                  abono_interes: pagos_credito.abono_interes,
+                  abono_iva_12: pagos_credito.abono_iva_12,
+                  abono_seguro: pagos_credito.abono_seguro,
+                  abono_gps: pagos_credito.abono_gps,
+                  membresias_pago: pagos_credito.membresias_pago,
+                  abono_interes_ci: pagos_credito.abono_interes_ci,
+                  abono_iva_ci: pagos_credito.abono_iva_ci,
+                  mora: pagos_credito.mora,
+                  pagoConvenio: pagos_credito.pagoConvenio,
+                  otros: pagos_credito.otros,
+                })
+                .from(pagos_credito)
+                .where(
+                  and(
+                    eq(pagos_credito.cuota_id, pago.cuota_id),
+                    eq(pagos_credito.credito_id, pago.credito_id),
+                    eq(pagos_credito.paymentFalse, false),
+                    inArray(pagos_credito.validationStatus, [
+                      "validated",
+                      "pending",
+                      "no_required",
+                    ]),
+                    ne(pagos_credito.pago_id, pago_id)
+                  )
+                )
+            ).filter(cuentaComoHermanoVivo);
 
+            // La fila en vuelo se suma aparte: en la BD todavía está `pending`
+            // y no queremos depender de su status.
+            const cobradoPlanos = hermanasVivasCuota.reduce(
+              (acc, fila) => ({
+                seguro: acc.seguro.plus(new Big(fila.abono_seguro ?? 0)),
+                gps: acc.gps.plus(new Big(fila.abono_gps ?? 0)),
+                membresias: acc.membresias.plus(
+                  new Big(fila.membresias_pago ?? 0)
+                ),
+              }),
+              {
+                seguro: new Big(pago.abono_seguro ?? 0),
+                gps: new Big(pago.abono_gps ?? 0),
+                membresias: new Big(pago.membresias_pago ?? 0),
+              }
+            );
+            const objetivoPlanos = {
+              seguro: credito.seguro_10_cuotas ?? 0,
+              gps: credito.gps ?? 0,
+              membresias: credito.membresias_pago ?? 0,
+            };
+            const planosCuota = evaluarRubrosPlanosCuota({
+              cobrado: cobradoPlanos,
+              objetivo: objetivoPlanos,
+            });
+
+            if (!planosCuota.cubiertos) {
+              // `console.warn` y no el logger estructurado a propósito: el
+              // logger del paquete tiene una denylist que prohíbe emitir
+              // `credito_id`/`cuota_id`/montos, que es justamente lo único que
+              // hace accionable este rastro. Cambiar esa denylist queda fuera
+              // del alcance de este fix.
+              //
+              // Sin `numero_cuota`: no está en `pago` y no vale una consulta
+              // extra dentro de la transacción sólo para un log; el `cuota_id`
+              // alcanza para encontrarla.
+              console.warn(
+                `⚠️ Cierre de cuota con rubros fijos cobrados de menos: la ` +
+                  `cuota cierra igual (no hay otra vía de cierre), pero hay ` +
+                  `saldos subestimados que revisar.`,
+                {
+                  credito_id: pago.credito_id,
+                  cuota_id: pago.cuota_id,
+                  seguro: {
+                    cobrado: cobradoPlanos.seguro.toFixed(2),
+                    objetivo: new Big(objetivoPlanos.seguro).toFixed(2),
+                    faltante: planosCuota.faltanteSeguro.toFixed(2),
+                  },
+                  gps: {
+                    cobrado: cobradoPlanos.gps.toFixed(2),
+                    objetivo: new Big(objetivoPlanos.gps).toFixed(2),
+                    faltante: planosCuota.faltanteGps.toFixed(2),
+                  },
+                  membresias: {
+                    cobrado: cobradoPlanos.membresias.toFixed(2),
+                    objetivo: new Big(objetivoPlanos.membresias).toFixed(2),
+                    faltante: planosCuota.faltanteMembresias.toFixed(2),
+                  },
+                }
+              );
+            }
           }
         }
       }

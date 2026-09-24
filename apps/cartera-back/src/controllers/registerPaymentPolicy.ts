@@ -1417,3 +1417,171 @@ export const debeInsertarFilaParcialCuota = ({
   new Big(mora ?? 0).gt(0) ||
   new Big(otros ?? 0).gt(0) ||
   new Big(pagoConvenio ?? 0).gt(0);
+
+export type RubrosPlanosCuota = {
+  seguro: BigInput;
+  gps: BigInput;
+  membresias: BigInput;
+};
+
+export type EvaluacionRubrosPlanos = {
+  cubiertos: boolean;
+  faltanteSeguro: Big;
+  faltanteGps: Big;
+  faltanteMembresias: Big;
+};
+
+/**
+ * ¿Los rubros PLANOS (seguro / GPS / membresías) de la cuota están cobrados
+ * completos?
+ *
+ * Son planos porque su objetivo sale de la cabecera del crédito y no varía por
+ * cuota — es el mismo criterio que ya usa `calcularSaldoNetoCuota`
+ * (`objetivoSeguro: credito.seguro_10_cuotas`, `objetivoGps: credito.gps`,
+ * `objetivoMembresias: credito.membresias_pago`).
+ *
+ * Lo usa el fallback de `aplicarPagoNormalEnTx` que da una cuota por completa
+ * cuando la fila del pago quedó con todos sus `*_restante` en ~0 (recibos de
+ * cola que valen menos que `credito.cuota` tras un abono a capital). Ese
+ * fallback es legítimo para el capital topado, pero NO para los planos: el
+ * seguro, el GPS y las membresías se siguen cobrando enteros. Sin esta
+ * restricción, una fila con restantes subestimados cerraba la cuota habiendo
+ * cobrado Q0.00 de Q245.00 de seguro y Q107.16 de Q743.24 de membresías
+ * (crédito 9234, cuota 1).
+ */
+export const evaluarRubrosPlanosCuota = ({
+  cobrado,
+  objetivo,
+  tolerancia = 0.01,
+}: {
+  cobrado: RubrosPlanosCuota;
+  objetivo: RubrosPlanosCuota;
+  tolerancia?: BigInput;
+}): EvaluacionRubrosPlanos => {
+  const toleranciaBig = new Big(tolerancia);
+  const faltante = (obj: BigInput, cob: BigInput) => {
+    const diferencia = new Big(obj).minus(cob);
+    return diferencia.gt(0) ? diferencia : new Big(0);
+  };
+
+  const faltanteSeguro = faltante(objetivo.seguro, cobrado.seguro);
+  const faltanteGps = faltante(objetivo.gps, cobrado.gps);
+  const faltanteMembresias = faltante(objetivo.membresias, cobrado.membresias);
+
+  return {
+    cubiertos:
+      faltanteSeguro.lte(toleranciaBig) &&
+      faltanteGps.lte(toleranciaBig) &&
+      faltanteMembresias.lte(toleranciaBig),
+    faltanteSeguro,
+    faltanteGps,
+    faltanteMembresias,
+  };
+};
+
+export type RubroPlanoCorto = {
+  /** Nombre del rubro tal como se le muestra a quien registra la boleta. */
+  rubro: "seguro" | "GPS" | "membresías";
+  cobrado: Big;
+  objetivo: Big;
+  faltante: Big;
+};
+
+/**
+ * ¿Hay que RECHAZAR este pago porque cerraría la cuota con rubros planos a
+ * medias?
+ *
+ * La red dura anti-SOBREaplicación (`registerPayment`, guard de
+ * `totalProyectadoCuota`) impide que una cuota reciba más plata de la que vale.
+ * Faltaba la simétrica por abajo, y por ahí se perdió ingreso real: si los
+ * `*_restante` de la fila vigente vienen SUBESTIMADOS —lo que pasa cuando una
+ * reversa restaura los restantes sólo en la fila revertida y deja a las
+ * hermanas con el saldo POSTERIOR al pago revertido— la distribución llega a
+ * cero en todos los rubros habiendo cobrado de menos, la cuota se marca pagada
+ * y el faltante ya no se cobra nunca (crédito 9234, cuota 1: seguro Q0.00 de
+ * Q245.00 y membresías Q107.16 de Q743.24).
+ *
+ * La medida es contra los rubros PLANOS, NO contra `credito.cuota`. Un recibo
+ * puede valer legítimamente MENOS que `credito.cuota`: tras un abono grande a
+ * capital, `recalcularPagosCredito` topa el capital proyectado de los recibos de
+ * cola (`updateCredit.ts`, `if (abonoCapital.gt(capitalEnMemoria))`), así que un
+ * piso basado en `credito.cuota` rechazaría pagos correctos. El seguro, el GPS y
+ * las membresías, en cambio, salen de la cabecera del crédito, se siembran
+ * iguales en TODAS las cuotas (`createCredit`) y no se topan nunca: son la única
+ * referencia que no depende ni de `credito.cuota` ni de los `*_restante`
+ * posiblemente corruptos.
+ *
+ * `todosRestantesEnCero` es la condición de cierre: sólo importa cuando la
+ * distribución dice "ya no queda nada por cobrar en esta cuota". Si la fila deja
+ * restantes, la cuota queda parcial y el faltante se puede seguir cobrando.
+ */
+export const evaluarCierreCuotaPorPlanos = ({
+  todosRestantesEnCero,
+  cobrado,
+  objetivo,
+  tolerancia = 0.01,
+}: {
+  todosRestantesEnCero: boolean;
+  /** Σ de los planos de los hermanos vivos MÁS lo que aplica este pago. */
+  cobrado: RubrosPlanosCuota;
+  objetivo: RubrosPlanosCuota;
+  tolerancia?: BigInput;
+}): { rechazar: boolean; cortos: RubroPlanoCorto[] } => {
+  if (!todosRestantesEnCero) return { rechazar: false, cortos: [] };
+
+  const evaluacion = evaluarRubrosPlanosCuota({ cobrado, objetivo, tolerancia });
+  if (evaluacion.cubiertos) return { rechazar: false, cortos: [] };
+
+  const toleranciaBig = new Big(tolerancia);
+  const candidatos: RubroPlanoCorto[] = [
+    {
+      rubro: "seguro" as const,
+      cobrado: new Big(cobrado.seguro),
+      objetivo: new Big(objetivo.seguro),
+      faltante: evaluacion.faltanteSeguro,
+    },
+    {
+      rubro: "GPS" as const,
+      cobrado: new Big(cobrado.gps),
+      objetivo: new Big(objetivo.gps),
+      faltante: evaluacion.faltanteGps,
+    },
+    {
+      rubro: "membresías" as const,
+      cobrado: new Big(cobrado.membresias),
+      objetivo: new Big(objetivo.membresias),
+      faltante: evaluacion.faltanteMembresias,
+    },
+  ];
+
+  return {
+    rechazar: true,
+    cortos: candidatos.filter((c) => c.faltante.gt(toleranciaBig)),
+  };
+};
+
+/**
+ * Con el recibo en cero (todos los `*_restante` de la fila en ~0), ¿la cuota
+ * cierra ya, o el cierre queda diferido al hermano que falta validar?
+ *
+ * Vive acá, como decisión PURA y con estas dos únicas entradas, para que quede
+ * garantizado lo que importa: la cobertura de los rubros planos NO participa.
+ * Bloquear el cierre por planos cortos dejaría la cuota sin salida —el camino
+ * de la suma de validados nunca alcanza para un recibo de cola con capital
+ * topado, y por RAMA A no se reescriben restantes ni se distribuye a
+ * inversionistas—, o sea cuota abierta para siempre, peor que el cierre corto.
+ * La compuerta que RECHAZA es `evaluarCierreCuotaPorPlanos`, en el registro,
+ * donde la boleta todavía se puede corregir; en la validación los planos sólo
+ * dejan rastro.
+ */
+export const decidirCierrePorRestantesEnCero = ({
+  hayHermanoPendiente,
+  filaPagada,
+}: {
+  hayHermanoPendiente: boolean;
+  /** `pagos_credito.pagado` de la fila que se está validando. */
+  filaPagada: boolean;
+}): { cuotaCompleta: boolean; cierreDiferido: boolean } =>
+  hayHermanoPendiente
+    ? { cuotaCompleta: false, cierreDiferido: filaPagada }
+    : { cuotaCompleta: true, cierreDiferido: false };

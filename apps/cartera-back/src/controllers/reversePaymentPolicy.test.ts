@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  buildInstallmentRemainderReplication,
   getRemainingPaymentPaidStatusAfterReversal,
   isCreditStatusReversible,
   isReversibleIncobrablePayment,
@@ -141,5 +142,101 @@ describe("isReversibleIncobrablePayment", () => {
         registerBy: "caren.r@sepresta.com",
       }),
     ).toBeFalse();
+  });
+});
+
+describe("buildInstallmentRemainderReplication", () => {
+  it("arma el saldo a replicar en TODAS las filas vivas de la cuota", () => {
+    // Los restantes restaurados son "restante de la fila + su abono": es el
+    // saldo que la cuota tenía ANTES del pago que se revierte, y ese saldo vale
+    // para todas sus filas porque insertPayment lo replica en todas.
+    const replica = buildInstallmentRemainderReplication({
+      cuotaId: 55,
+      creditoId: 9234,
+      restantes: {
+        capital: "1998.48",
+        interes: "80",
+        iva: "9.6",
+        seguro: "245",
+        gps: "0",
+        membresias: "743.24",
+      },
+      aplicadoALaCuota: "2000",
+    });
+
+    expect(replica).toEqual({
+      cuotaId: 55,
+      creditoId: 9234,
+      payload: {
+        capital_restante: "1998.48",
+        interes_restante: "80",
+        iva_12_restante: "9.6",
+        seguro_restante: "245",
+        gps_restante: "0",
+        membresias: "743.24",
+      },
+    });
+  });
+
+  it("no replica nada cuando el pago no cuelga de ninguna cuota", () => {
+    // Un abono directo a capital / fila suelta no tiene cuota: sin `cuota_id` el
+    // UPDATE no tendría con qué acotarse y pisaría filas de otras cuotas.
+    expect(
+      buildInstallmentRemainderReplication({
+        cuotaId: null,
+        creditoId: 9234,
+        restantes: {
+          capital: "10",
+          interes: "0",
+          iva: "0",
+          seguro: "0",
+          gps: "0",
+          membresias: "0",
+        },
+        aplicadoALaCuota: "10",
+      }),
+    ).toBeNull();
+  });
+
+  it("tampoco replica si falta el crédito (el filtro quedaría abierto a otros créditos)", () => {
+    expect(
+      buildInstallmentRemainderReplication({
+        cuotaId: 55,
+        creditoId: null,
+        restantes: {
+          capital: "10",
+          interes: "0",
+          iva: "0",
+          seguro: "0",
+          gps: "0",
+          membresias: "0",
+        },
+        aplicadoALaCuota: "10",
+      }),
+    ).toBeNull();
+  });
+
+  it("no replica cuando la fila revertida no le aportó nada a la cuota (SOLO MORA / SOLO OTROS)", () => {
+    // `insertarPago` (registerPayment.ts) inserta los pagos de SOLO MORA / SOLO
+    // OTROS / SOLO CONVENIO con los seis abonos en cero y los engancha a la
+    // primera cuota PENDIENTE vía `getSpecialPaymentCuotaId` — no a una cuota
+    // que ellos hayan pagado. Si se replicara igual, el saldo restaurado
+    // (restante + abono(0) = restante original) pisaría con CERO todas las
+    // filas vivas de esa cuota abierta con la que el pago no tiene relación.
+    expect(
+      buildInstallmentRemainderReplication({
+        cuotaId: 55,
+        creditoId: 9234,
+        restantes: {
+          capital: "0",
+          interes: "0",
+          iva: "0",
+          seguro: "0",
+          gps: "0",
+          membresias: "0",
+        },
+        aplicadoALaCuota: "0",
+      }),
+    ).toBeNull();
   });
 });

@@ -141,6 +141,10 @@ function FilaDeContrato({
 
 	const ocupado = actualizarEstado.isPending;
 
+	const alguienFirmo = firmantes.some((f) => f.estado === "signed");
+	const hayVencidos = firmantes.some((f) => f.vencido);
+	const puedeRegenerar = alguienFirmo || hayVencidos;
+
 	return (
 		<div className="rounded-md border bg-background p-2.5">
 			{/* Encabezado: qué contrato es, cómo va y el enlace de seguimiento */}
@@ -321,16 +325,24 @@ function FilaDeContrato({
 						Actualizar estado
 					</Button>
 
-					<Button
-						variant="ghost"
-						size="sm"
-						className="h-6 text-[11px]"
-						disabled={ocupado}
-						onClick={() => setRegenerando(true)}
-					>
-						<RotateCcw className="mr-1 h-3 w-3" />
-						Regenerar enlaces
-					</Button>
+					{/* Con la misma regla que en ventas: aparece una vez que alguien
+					    firmó —incluso si firmaron todos, que es el caso en que la firma
+					    existe pero no sirve— o si algún enlace venció, que si no
+					    dejaría a esa persona sin forma de firmar. Antes de eso no hay
+					    nada que renovar y el botón sólo sirve para tirar abajo los
+					    enlaces que acaban de salir. */}
+					{puedeRegenerar && (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-6 text-[11px]"
+							disabled={ocupado}
+							onClick={() => setRegenerando(true)}
+						>
+							<RotateCcw className="mr-1 h-3 w-3" />
+							Regenerar enlaces
+						</Button>
+					)}
 
 					{contrato.signingStatusCheckedAt && (
 						<span className="ml-auto text-muted-foreground text-xs">

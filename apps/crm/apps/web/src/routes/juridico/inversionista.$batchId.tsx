@@ -584,8 +584,13 @@ function RouteComponent() {
 								) : null
 							}
 							onFinish={async () => {
-								await avisarMutation.mutateAsync().catch(() => undefined);
-								navigate({ to: "/juridico" });
+								// Si el aviso falla no se sale: el error ya se ve en el
+								// toast y acá se puede reintentar. Yéndose, la única forma
+								// de volver a intentarlo sería emitir otro contrato.
+								const resultado = await avisarMutation
+									.mutateAsync()
+									.catch(() => null);
+								if (resultado) navigate({ to: "/juridico" });
 							}}
 							valoresIniciales={valoresIniciales}
 							pasoPrevio={{
@@ -663,6 +668,13 @@ function RouteComponent() {
 					onReemplazar={(contractType) => {
 						setTipoASubir(contractType);
 						setSubiendo(true);
+					}}
+					avisando={avisarMutation.isPending}
+					onListo={async () => {
+						const resultado = await avisarMutation
+							.mutateAsync()
+							.catch(() => null);
+						if (resultado) navigate({ to: "/juridico" });
 					}}
 				/>
 			)}

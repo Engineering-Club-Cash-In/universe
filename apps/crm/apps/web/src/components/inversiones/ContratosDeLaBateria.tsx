@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	Ban,
+	Check,
 	ExternalLink,
 	FileSignature,
 	FileText,
@@ -53,10 +54,23 @@ const ESTADO: Record<string, { label: string; className: string }> = {
 export function ContratosDeLaBateria({
 	batchId,
 	onReemplazar,
+	onListo,
+	avisando = false,
 }: {
 	batchId: string;
 	/** Abre la subida con ese tipo ya elegido, que es lo que reemplaza. */
 	onReemplazar: (contractType: string) => void;
+	/**
+	 * Cierra la batería y le avisa a inversiones.
+	 *
+	 * Vive acá y no sólo en los resultados del wizard porque hay baterías que se
+	 * arman entera con contratos subidos a mano —ahí no hay pantalla de
+	 * resultados— y porque un contrato que falló se puede resolver subiéndolo,
+	 * y entonces el "Listo" de allá ya no sirve.
+	 */
+	onListo?: () => void;
+	/** Si el aviso está en curso, para no mandarlo dos veces. */
+	avisando?: boolean;
 }) {
 	const queryClient = useQueryClient();
 	const [anulando, setAnulando] = useState<{
@@ -185,6 +199,30 @@ export function ContratosDeLaBateria({
 					);
 				})}
 			</CardContent>
+
+			{/* Lo que cierra el trabajo de jurídico. Sale de acá, que es lo que de
+			    verdad tiene la batería, y no de lo que haya pasado en la sesión del
+			    wizard. */}
+			{onListo && vigentes.length > 0 && (
+				<CardContent className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+					<p className="text-muted-foreground text-sm">
+						¿Ya está toda la papelería? Se cierra la batería y se le avisa a
+						inversiones.
+					</p>
+					<Button
+						onClick={onListo}
+						disabled={avisando}
+						className="bg-green-600 hover:bg-green-700"
+					>
+						{avisando ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : (
+							<Check className="mr-2 h-4 w-4" />
+						)}
+						Listo
+					</Button>
+				</CardContent>
+			)}
 
 			{anulando && (
 				<AnularContratoDialog

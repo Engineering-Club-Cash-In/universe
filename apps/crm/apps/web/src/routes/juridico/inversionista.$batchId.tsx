@@ -112,6 +112,14 @@ function quetzales(monto: string | number) {
 	}).format(Number(monto));
 }
 
+/** El monto sin símbolo: "25,000.00". Hay campos que piden sólo el número. */
+function soloElNumero(monto: string | number) {
+	return new Intl.NumberFormat("es-GT", {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
+	}).format(Number(monto));
+}
+
 function RouteComponent() {
 	const { batchId } = Route.useParams();
 	const navigate = useNavigate();
@@ -203,8 +211,18 @@ function RouteComponent() {
 		// solo y va igual en todos.
 		const primero = creditos[0];
 
+		// Lo que el inversionista puso en esta compra, que es la suma de lo suyo
+		// en cada crédito. Los contratos lo piden en tres formas distintas —en
+		// letras con el número entre paréntesis, sólo en número, y sólo en
+		// letras— y cada una tiene que pasar su propia validación.
+		const monto = bateria?.montoTotal ?? "0";
+		const enLetras = moneyToWords(Number(monto)).toUpperCase();
+
 		return {
 			listaCreditos: JSON.stringify(items),
+			montoTotal: `${enLetras} (${quetzales(monto)})`,
+			montoNumero: soloElNumero(monto),
+			montoLetras: enLetras,
 			...(MODALIDAD_DE_RETORNO[primero?.tipoReinversion ?? ""]
 				? {
 						modalidadRetorno:

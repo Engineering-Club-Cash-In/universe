@@ -28,7 +28,7 @@ let responderCartera: () => Promise<unknown> = async () => ({
 
 const procedure = os.$context<any>();
 
-// `../lib/orpc` se publica ENTERO, con SOLO los dos procedures que este router
+// `../lib/orpc` se publica ENTERO, con SOLO los tres procedures que este router
 // usa sustituidos por uno permisivo.
 //
 // Publicar un recorte —2 de 25 exports— congela la lista de exports del módulo
@@ -40,7 +40,7 @@ const procedure = os.$context<any>();
 // El spread sale del módulo REAL (sufijo `?real`, que resuelve al mismo archivo
 // saltándose el registro de mocks) y no de lo publicado, para no reexportar el
 // recorte de otra suite. Los guards reales de las otras suites del directorio
-// quedan en pie: lo único sustituido son los dos procedures de este router.
+// quedan en pie: lo único sustituido son los tres procedures de este router.
 const orpcReal = (await import(
 	`${"../lib/orpc.ts"}?real`
 )) as typeof import("../lib/orpc");
@@ -49,6 +49,11 @@ mock.module("../lib/orpc", () => ({
 	...orpcReal,
 	crmCobrosOrInvestmentsProcedure: procedure,
 	investmentManagerProcedure: procedure,
+	// El guard REAL de `darAccesoPortal` desde que dejó de colgar del ancho. Se
+	// sustituye por el permisivo para que la suite pueda llamar al handler sin
+	// sesión; quién puede llamarlo de verdad lo prueba, leyendo el fuente, "el
+	// procedure cuelga del guard de inversiones".
+	investmentProcedure: procedure,
 }));
 
 // CANARIO de `../lib/orpc` (el hermano del de `cartera-back-client`, más abajo):
@@ -58,8 +63,11 @@ const orpcPublicado: any = await import("../lib/orpc");
 // Se chequean exports que NINGÚN mock de este repo sustituye y que el recorte
 // histórico de `cobros.moraRecuperacion.test.ts` omitía: si el canario mirara
 // los que el recorte sí traía, pasaría en verde sobre una lista rota.
+// `investmentProcedure` YA NO sirve de canario: esta suite lo mockea. Se lo
+// reemplaza por `cobranzaReportProcedure`, que el recorte histórico también
+// omitía y que ningún mock de este repo sustituye.
 for (const exportFaltante of [
-	"investmentProcedure",
+	"cobranzaReportProcedure",
 	"accountingProcedure",
 	"crmOnlyProcedure",
 ]) {
@@ -497,12 +505,23 @@ describe("darAccesoPortal", () => {
 	// El guard se mockea arriba (si no, cada test tendría que montar la sesión
 	// contra la base), así que la suite no puede verlo. Esta verificación lee el
 	// código: sin ella, cambiar el procedure por uno público pasaría en verde.
-	test("el procedure sigue colgado del guard de back office", () => {
+	//
+	// Y exige el ESTRECHO (`investmentProcedure` →
+	// `PERMISSIONS.canAccessInvestments`: ADMIN y los tres roles de
+	// inversiones). Con el ancho de antes, las once familias que cubre
+	// `crmCobrosOrInvestmentsProcedure` podían hacer salir una contraseña del
+	// portal, y como el mismo guard cubre `editarInversionista` —que cambia el
+	// `email` del inversionista— podían además elegir a qué buzón llegaba.
+	test("el procedure cuelga del guard de inversiones, no del de back office", () => {
 		const fuente = readFileSync(
 			join(import.meta.dir, "investor-documents.ts"),
 			"utf8",
 		);
-		expect(fuente).toContain(
+		expect(fuente).toContain("darAccesoPortal: investmentProcedure");
+		// El negativo NO es redundante: sin él, agregar una segunda definición
+		// con el guard ancho —o volver atrás dejando la línea nueva en un
+		// comentario— seguiría pasando.
+		expect(fuente).not.toContain(
 			"darAccesoPortal: crmCobrosOrInvestmentsProcedure",
 		);
 	});

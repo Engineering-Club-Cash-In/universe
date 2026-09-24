@@ -53,7 +53,22 @@ const ETIQUETA_POR_ROL: Record<string, string> = {
 	TITULAR: "Cliente",
 	COFIRMANTE: "Codeudor",
 	REP_LEGAL: "Rep. Legal",
+	REP_LEGAL_RDBE: "Rep. Legal RDBE",
 	VENDEDOR: "Vendedor",
+};
+
+/**
+ * Los mismos roles, leídos desde inversiones.
+ *
+ * El titular de un contrato de inversión no es "el cliente" sino el
+ * inversionista, y las dos entidades que firman el contrato de servicios
+ * tienen que distinguirse: si las dos dicen "Rep. Legal", quien copia enlaces
+ * no sabe cuál le toca a cada una.
+ */
+export const ETIQUETAS_DE_INVERSIONES: Record<string, string> = {
+	...ETIQUETA_POR_ROL,
+	TITULAR: "Inversionista",
+	REP_LEGAL: "Rep. Legal CUBE",
 };
 
 /**
@@ -67,6 +82,8 @@ const ETIQUETA_POR_ROL: Record<string, string> = {
 export function firmantesEnFicha(
 	signatories: FirmanteDeContrato[] | undefined,
 	legacy: LinksLegacyDeContrato,
+	/** Cómo se lee cada rol. Inversiones usa los suyos. */
+	etiquetasPorRol: Record<string, string> = ETIQUETA_POR_ROL,
 ): FirmanteEnFicha[] {
 	if (signatories && signatories.length > 0) {
 		// Los codeudores van numerados aunque sea uno solo: "Codeudor 1" deja
@@ -74,7 +91,7 @@ export function firmantesEnFicha(
 		let nCodeudor = 0;
 
 		return signatories.map((s, i) => {
-			let etiqueta = ETIQUETA_POR_ROL[s.role] ?? s.role;
+			let etiqueta = etiquetasPorRol[s.role] ?? s.role;
 			if (s.role === "COFIRMANTE") {
 				nCodeudor += 1;
 				etiqueta = `Codeudor ${nCodeudor}`;

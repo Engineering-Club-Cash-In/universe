@@ -36,6 +36,7 @@ export function AnularContratoDialog({
 	open,
 	onOpenChange,
 	onAnulado,
+	anular: anularDelArea,
 }: {
 	contractId: string;
 	contractName: string;
@@ -43,16 +44,22 @@ export function AnularContratoDialog({
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onAnulado: () => void;
+	/**
+	 * Qué hacer con el motivo elegido. Por defecto anula un contrato de venta;
+	 * inversiones pasa el suyo, que no mira etapas de oportunidad.
+	 */
+	anular?: (
+		motivo: keyof typeof MOTIVOS_DE_ANULACION,
+	) => Promise<{ message: string }>;
 }) {
 	const [motivo, setMotivo] = useState<string>("");
 
 	const anular = useMutation({
 		mutationFn: () => {
 			if (!motivo) throw new Error("Elegí el motivo");
-			return client.anularContrato({
-				contractId,
-				motivo: motivo as keyof typeof MOTIVOS_DE_ANULACION,
-			});
+			const elegido = motivo as keyof typeof MOTIVOS_DE_ANULACION;
+			if (anularDelArea) return anularDelArea(elegido);
+			return client.anularContrato({ contractId, motivo: elegido });
 		},
 		onSuccess: (data) => {
 			toast.success(data.message);

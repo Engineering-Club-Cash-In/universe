@@ -55,6 +55,7 @@ import {
 	getFileUrlWithBucketInKey,
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
+import { resolverVerificacionFacial } from "../lib/verificacion-facial";
 import { closeOpportunity } from "../services/close-opportunity";
 import {
 	borrarDocumentoDeWeeTrust,
@@ -1510,6 +1511,57 @@ export const legalContractsRouter = {
 
 			await sincronizarEstadoDeFirma(input.contractId, estado);
 			return estado;
+		}),
+
+	/**
+	 * Resuelve una verificación de identidad que WeeTrust no validó: la repite
+	 * o la omite.
+	 *
+	 * Es el documento que se queda abierto con todas las firmas porque
+	 * WeeTrust no le creyó el DPI o la selfie a alguien. Antes la única salida
+	 * era renovar los enlaces, que reemite el documento y tumba todas las
+	 * firmas; esto trabaja sobre el mismo documento (ver
+	 * `resolverVerificacionFacial`).
+	 *
+	 * Es de análisis, que le da seguimiento a la firma en ventas: el mismo
+	 * permiso que renovar enlaces.
+	 */
+	retryContractBiometric: viewOpportunityContractsProcedure
+		.input(
+			z.object({
+				contractId: z.string().uuid(),
+				accion: z.enum(["repetir", "omitir"]),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (!PERMISSIONS.canRegenerateContractLinks(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "Sólo análisis puede resolver la verificación de identidad",
+				});
+			}
+
+			const { contract, documentID } = await contratoConDocumentID(
+				input.contractId,
+			);
+
+			if (contract.status === "cancelled" || contract.replacedByContractId) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Este contrato está anulado o fue reemplazado.",
+				});
+			}
+
+			const resultado = await resolverVerificacionFacial({
+				contrato: contract,
+				documentID,
+				accion: input.accion,
+				quien:
+					context.session?.user?.name ||
+					context.session?.user?.email ||
+					"alguien del CRM",
+				origen: "retryContractBiometric",
+			});
+
+			return { success: true, accion: input.accion, ...resultado };
 		}),
 
 	/**

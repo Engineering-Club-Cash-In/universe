@@ -47,15 +47,23 @@ export function VerificacionFacialFallida({
 	resolver,
 	onResuelto,
 	className,
+	puedeResolver,
 }: {
 	firmantes: FirmanteSinIdentidad[];
 	className?: string;
+	/**
+	 * Quién puede repetir u omitir. Cada área decide: en inversiones es
+	 * inversiones (por defecto), en ventas es análisis. Sin permiso no se ve
+	 * nada: alcanza con el badge de "Identidad fallida".
+	 */
+	puedeResolver?: boolean;
 	/** Llama al servidor. Lo pone quien la usa: inversiones y ventas tienen su propia procedure. */
 	resolver: (accion: "repetir" | "omitir") => Promise<unknown>;
 	onResuelto: () => void;
 }) {
 	const { userRole } = useJuridicoPermissions();
-	const puedeResolver = PERMISSIONS.canResolveInvestorIdentity(userRole);
+	const permitido =
+		puedeResolver ?? PERMISSIONS.canResolveInvestorIdentity(userRole);
 	const [confirmandoOmitir, setConfirmandoOmitir] = useState(false);
 
 	const nombres = firmantes
@@ -79,7 +87,7 @@ export function VerificacionFacialFallida({
 
 	const ocupado = accionar.isPending;
 
-	if (!puedeResolver) return null;
+	if (!permitido) return null;
 
 	return (
 		<div className={`space-y-1.5 ${className ?? ""}`}>

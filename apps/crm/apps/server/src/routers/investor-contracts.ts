@@ -18,7 +18,6 @@ import {
 	linksPorRol,
 } from "../lib/contract-signatories";
 import { getSignatureMode } from "../lib/contract-signature-mode";
-import { conMarcaDeBiometriaOmitida } from "../lib/contrato-biometria";
 import {
 	estadoEnWeeTrust,
 	sincronizarEstadoDeFirma,
@@ -49,6 +48,7 @@ import { createNotification } from "../lib/notificaciones";
 import { juridicoProcedure, viewInvestorContractsProcedure } from "../lib/orpc";
 import { PERMISSIONS, ROLES } from "../lib/roles";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
+import { resolverVerificacionFacial } from "../lib/verificacion-facial";
 import {
 	borrarDocumentoDeWeeTrust,
 	consultarEstadoFirma,
@@ -59,7 +59,6 @@ import {
 	motivoDeFalla,
 	reemitirContratoEnWeeTrust,
 	reenviarCorreoDeFirma,
-	reintentarBiometria,
 	type SignerRole,
 	subirContratoParaFirma,
 } from "../services/legal-docs-api";
@@ -157,48 +156,6 @@ async function bateriaAbierta(batchId: string) {
  * Se corta acá y no más adelante para no dejar que un contrato de ventas entre
  * por las acciones de inversiones: los permisos son de otra gente.
  */
-/**
- * Deja pendientes a los firmantes que WeeTrust ya no da por firmados.
- *
- * Pedir de nuevo la verificación facial **deshace la firma** de esa persona y
- * le da un enlace nuevo: el documento y las demás firmas quedan, pero ella
- * tiene que volver a entrar. El sincronizador no lo escribe porque nunca baja a
- * nadie de "firmado" —protege contra consultas y webhooks que llegan tarde— y
- * sin esto la ficha la seguía mostrando firmada, con el enlace viejo y sin nada
- * que hacer. Acá sí se sabe que se deshizo: es lo que se acaba de pedir.
- */
-async function devolverAFirmar(
-	contractId: string,
-	estado: EstadoDocumentoFirma,
-): Promise<void> {
-	const ahora = new Date();
-
-	for (const firmante of estado.signatories) {
-		if (firmante.isSigned) continue;
-
-		await db
-			.update(contractSignatories)
-			.set({
-				status: "pending",
-				signedAt: null,
-				...(firmante.signingUrl ? { signingUrl: firmante.signingUrl } : {}),
-				...(firmante.signatoryID
-					? { weetrustSignatoryId: firmante.signatoryID }
-					: {}),
-				...(firmante.expiry
-					? { signingUrlExpiry: new Date(firmante.expiry) }
-					: {}),
-				updatedAt: ahora,
-			})
-			.where(
-				and(
-					eq(contractSignatories.contractId, contractId),
-					sql`lower(${contractSignatories.email}) = lower(${firmante.emailID})`,
-				),
-			);
-	}
-}
-
 async function contratoDeInversionista(contractId: string): Promise<{
 	contrato: typeof generatedLegalContracts.$inferSelect;
 	documentID: string;
@@ -1764,86 +1721,15 @@ export const investorContractsRouter = {
 				});
 			}
 
-			// El intento fallido se busca acá y no se recibe del navegador: el
-			// `biometricLogID` cambia con cada intento, y uno viejo haría que
-			// WeeTrust conteste que no encuentra nada.
-			let estado: EstadoDocumentoFirma;
-			try {
-				estado = await consultarEstadoFirma(documentID);
-			} catch (error) {
-				throw new ORPCError("INTERNAL_SERVER_ERROR", {
-					message:
-						error instanceof Error
-							? error.message
-							: "No se pudo consultar el estado de firma",
-				});
-			}
-
-			const fallidas = estado.signatories.filter(
-				(f) => f.biometric?.finished && !f.biometric.valid && f.biometric.logID,
-			);
-
-			if (fallidas.length === 0) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						estado.status === "COMPLETED"
-							? "Este documento ya cerró: no hay ninguna verificación pendiente."
-							: "Este documento no tiene ninguna verificación de identidad fallida.",
-				});
-			}
-
-			for (const firmante of fallidas) {
-				await reintentarBiometria({
-					documentID,
-					biometricLogID: firmante.biometric?.logID as string,
-					action:
-						input.accion === "omitir" ? "biometricSkipped" : "biometricRetry",
-				});
-			}
-
-			// Omitir cierra el documento: queda dicho en la fila quién lo decidió,
-			// porque ese contrato vale con una identidad que nadie verificó.
-			if (input.accion === "omitir") {
-				await db
-					.update(generatedLegalContracts)
-					.set({
-						apiResponse: conMarcaDeBiometriaOmitida(
-							(contrato.apiResponse as object | null) ?? {},
-							{
-								por: context.session.user.name || context.session.user.email,
-								cuando: new Date().toISOString(),
-								firmantes: fallidas.map((f) => f.name),
-							},
-						),
-						updatedAt: new Date(),
-					})
-					.where(eq(generatedLegalContracts.id, input.contractId));
-			}
-
-			// Y se baja el estado nuevo: después de omitir, el documento suele
-			// quedar cerrado, y con eso se guardan el PDF firmado y la batería.
-			let despues: EstadoDocumentoFirma | null = null;
-			try {
-				despues = await consultarEstadoFirma(documentID);
-				await sincronizarEstadoDeFirma(input.contractId, despues);
-				if (input.accion === "repetir") {
-					await devolverAFirmar(input.contractId, despues);
-				}
-			} catch (error) {
-				// La acción en WeeTrust ya se hizo; el estado se vuelve a consultar
-				// solo desde la ficha.
-				console.warn(
-					"[retryInvestorContractBiometric] no se pudo releer el estado:",
-					error,
-				);
-			}
-
-			return {
-				success: true,
+			const resultado = await resolverVerificacionFacial({
+				contrato,
+				documentID,
 				accion: input.accion,
-				firmantes: fallidas.map((f) => f.name),
-				status: despues?.status ?? estado.status,
-			};
+				quien: context.session.user.name || context.session.user.email,
+				origen: "retryInvestorContractBiometric",
+			});
+
+			return { success: true, accion: input.accion, ...resultado };
 		}),
 
 	/**

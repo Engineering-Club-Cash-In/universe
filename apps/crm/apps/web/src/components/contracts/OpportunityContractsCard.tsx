@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
 	CheckCircle2,
 	ChevronDown,
@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
+	ETIQUETA_IDENTIDAD_FALLIDA,
 	ETIQUETA_SIN_CERRAR,
 	estaAnulado,
 	type FirmanteDeContrato,
@@ -37,6 +38,10 @@ import { DescargarFirmadoButton } from "./DescargarFirmadoButton";
 import { ReenviarWhatsappDialog } from "./ReenviarWhatsappDialog";
 import { RegenerarEnlacesDialog } from "./RegenerarEnlacesDialog";
 import { EtiquetaSubidoAMano, RevisarSubidoAMano } from "./SubidoAMano";
+import {
+	EtiquetaIdentidadOmitida,
+	VerificacionFacialFallida,
+} from "./VerificacionFacialFallida";
 
 /**
  * La card de "Contratos Legales" que aparece en el detalle de una oportunidad.
@@ -275,7 +280,38 @@ function ContratoFila({
 	const sinCerrar =
 		!reemplazado &&
 		!firmaEnPapel &&
+		contract.signingProvider !== "documenso" &&
 		firmadoSinCerrar(contract.status, signatories);
+
+	// Con todo firmado y el contrato en pendiente, la ficha le pregunta sola a
+	// WeeTrust: o el documento acaba de cerrar —y hay que refrescar— o no va a
+	// cerrar nunca porque no le creyó la identidad a alguien, y hay que decir
+	// quién. Se apaga en los dos casos.
+	const cierreQuery = useQuery({
+		queryKey: ["cierre-de-contrato-de-venta", contract.id],
+		queryFn: async () => {
+			const respuesta = await client.getContractSigningStatus({
+				contractId: contract.id,
+			});
+			if (respuesta.status === "COMPLETED") onUpdate?.();
+			return respuesta;
+		},
+		enabled: sinCerrar,
+		refetchInterval: (query) => {
+			const datos = query.state.data;
+			if (!datos) return 20_000;
+			if (datos.status === "COMPLETED") return false;
+			return identidadesFallidas(datos.signatories).length > 0 ? false : 20_000;
+		},
+		// Sólo con la ficha a la vista: cada consulta llega hasta WeeTrust.
+		refetchIntervalInBackground: false,
+		retry: false,
+	});
+	// Sólo mientras siga sin cerrar: la respuesta se queda en caché después.
+	const fallaronIdentidad = sinCerrar
+		? identidadesFallidas(cierreQuery.data?.signatories)
+		: [];
+
 	const estado =
 		reemplazado && contract.status === "pending"
 			? { label: "Reemplazado", className: ESTADO.cancelled.className }
@@ -286,7 +322,9 @@ function ContratoFila({
 							"border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-400",
 					}
 				: sinCerrar
-					? ETIQUETA_SIN_CERRAR
+					? fallaronIdentidad.length > 0
+						? ETIQUETA_IDENTIDAD_FALLIDA
+						: ETIQUETA_SIN_CERRAR
 					: ESTADO[contract.status];
 	const firmantes = firmaEnPapel ? [] : firmantesEnFicha(signatories, contract);
 
@@ -374,6 +412,7 @@ function ContratoFila({
 				</div>
 				<div className="flex shrink-0 items-center gap-2">
 					<EtiquetaSubidoAMano apiResponse={contract.apiResponse} />
+					<EtiquetaIdentidadOmitida apiResponse={contract.apiResponse} />
 					<Badge
 						variant="outline"
 						className={`${estado.className} text-xs`}
@@ -438,6 +477,25 @@ function ContratoFila({
 				</div>
 			) : (
 				<div className="mt-3 space-y-2 border-t pt-2">
+					{/* Por qué un contrato con todas las firmas no cierra, y las dos
+					    salidas, sobre el mismo documento. Antes sólo había "Renovar
+					    enlaces", que reemite y tumba todas las firmas. */}
+					{fallaronIdentidad.length > 0 && !inactivo && (
+						<VerificacionFacialFallida
+							firmantes={fallaronIdentidad}
+							puedeResolver={tienePermiso}
+							resolver={(accion) =>
+								client.retryContractBiometric({
+									contractId: contract.id,
+									accion,
+								})
+							}
+							onResuelto={() => {
+								cierreQuery.refetch();
+								onUpdate?.();
+							}}
+						/>
+					)}
 					{!inactivo && contract.status === "pending" && (
 						<RevisarSubidoAMano
 							apiResponse={contract.apiResponse}

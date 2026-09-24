@@ -9,7 +9,6 @@ import {
 	FileSignature,
 	FileText,
 	Loader2,
-	Mail,
 	RefreshCw,
 	RotateCcw,
 	TriangleAlert,
@@ -57,6 +56,12 @@ interface ContratoDeInversionista {
 	pdfFirmado?: boolean;
 	/** La respuesta del generador. De acá sale si lo subieron a mano. */
 	apiResponse?: unknown;
+	/** De qué compra salió. Es lo que agrupa la ficha. */
+	bateria?: {
+		id: string;
+		acceptedAt: Date | string;
+		montoTotal: string;
+	} | null;
 	cancellationReason?: string | null;
 	replacedByContractId?: string | null;
 	firmantes?: FirmanteDeContrato[];
@@ -133,30 +138,23 @@ function FilaDeContrato({
 		onError: (error: Error) => toast.error(error.message),
 	});
 
-	const reenviarCorreo = useMutation({
-		mutationFn: () =>
-			client.resendInvestorContractSigningEmails({ contractId: contrato.id }),
-		onSuccess: () => toast.success("Invitación reenviada"),
-		onError: (error: Error) => toast.error(error.message),
-	});
-
-	const ocupado = actualizarEstado.isPending || reenviarCorreo.isPending;
+	const ocupado = actualizarEstado.isPending;
 
 	return (
-		<div className="rounded-md border bg-background p-3">
+		<div className="rounded-md border bg-background p-2.5">
 			{/* Encabezado: qué contrato es, cómo va y el enlace de seguimiento */}
-			<div className="flex items-start justify-between gap-3">
-				<div className="min-w-0">
+			<div className="flex flex-wrap items-start justify-between gap-2">
+				<div className="min-w-0 flex-1">
 					<p className="truncate font-medium text-sm">
 						{contrato.contractName}
 					</p>
 					{emitidoEl(contrato.generatedAt) && (
-						<p className="truncate text-muted-foreground text-xs">
-							Emitido {emitidoEl(contrato.generatedAt)}
+						<p className="truncate text-[11px] text-muted-foreground">
+							{emitidoEl(contrato.generatedAt)}
 						</p>
 					)}
 				</div>
-				<div className="flex shrink-0 items-center gap-2">
+				<div className="flex flex-wrap items-center justify-end gap-1">
 					<EtiquetaSubidoAMano apiResponse={contrato.apiResponse} />
 					<Badge variant="outline" className={`${estado.className} text-xs`}>
 						{estado.label}
@@ -165,7 +163,7 @@ function FilaDeContrato({
 					    borrador que se emitió; cuando terminan de firmar es el firmado,
 					    que se baja una sola vez y queda guardado. */}
 					{contrato.pdfUrl && (
-						<Button variant="outline" size="sm" asChild className="h-7">
+						<Button variant="outline" size="sm" asChild className="h-6 px-2 text-xs">
 							<a
 								href={contrato.pdfUrl}
 								target="_blank"
@@ -218,7 +216,7 @@ function FilaDeContrato({
 			)}
 
 			{/* Una fila por firmante: el estado es de cada enlace, no del contrato */}
-			<div className="mt-3 space-y-1 border-t pt-2">
+			<div className="mt-2 space-y-0.5 border-t pt-1.5">
 				{firmantes.length === 0 ? (
 					<p className="text-muted-foreground text-xs">
 						Sin firmantes guardados.
@@ -306,11 +304,11 @@ function FilaDeContrato({
 
 			{/* Acciones */}
 			{!inactivo && (
-				<div className="mt-3 flex flex-wrap items-center gap-1 border-t pt-2">
+				<div className="mt-2 flex flex-wrap items-center gap-1 border-t pt-1.5">
 					<Button
 						variant="ghost"
 						size="sm"
-						className="h-7 text-xs"
+						className="h-6 text-[11px]"
 						disabled={ocupado}
 						onClick={() => actualizarEstado.mutate()}
 					>
@@ -322,27 +320,10 @@ function FilaDeContrato({
 						Actualizar estado
 					</Button>
 
-					{contrato.status !== "signed" && (
-						<Button
-							variant="ghost"
-							size="sm"
-							className="h-7 text-xs"
-							disabled={ocupado}
-							onClick={() => reenviarCorreo.mutate()}
-						>
-							{reenviarCorreo.isPending ? (
-								<Loader2 className="mr-1 h-3 w-3 animate-spin" />
-							) : (
-								<Mail className="mr-1 h-3 w-3" />
-							)}
-							Reenviar correo
-						</Button>
-					)}
-
 					<Button
 						variant="ghost"
 						size="sm"
-						className="h-7 text-xs"
+						className="h-6 text-[11px]"
 						disabled={ocupado}
 						onClick={() => setRegenerando(true)}
 					>
@@ -381,6 +362,44 @@ function FilaDeContrato({
 			/>
 		</div>
 	);
+}
+
+/** Cómo se lee una compra: la fecha en que se aceptó y lo que puso. */
+function tituloDeLaCompra(bateria: ContratoDeInversionista["bateria"]): string {
+	if (!bateria) return "Sin compra asociada";
+	const fecha = new Date(bateria.acceptedAt).toLocaleDateString("es-GT", {
+		day: "2-digit",
+		month: "short",
+		year: "numeric",
+	});
+	const monto = new Intl.NumberFormat("es-GT", {
+		style: "currency",
+		currency: "GTQ",
+	}).format(Number(bateria.montoTotal));
+	return `Compra del ${fecha} · ${monto}`;
+}
+
+/**
+ * Los contratos agrupados por la compra que los originó, de la más nueva a la
+ * más vieja.
+ *
+ * Un inversionista que compra cartera tres veces termina con los mismos
+ * contratos repetidos: sin agrupar, la ficha es una lista de nombres iguales.
+ */
+function porCompra(contratos: ContratoDeInversionista[]) {
+	const grupos = new Map<string, ContratoDeInversionista[]>();
+	for (const contrato of contratos) {
+		const clave = contrato.bateria?.id ?? "sin-bateria";
+		grupos.set(clave, [...(grupos.get(clave) ?? []), contrato]);
+	}
+
+	return [...grupos.values()].sort((a, b) => {
+		const fechaA = a[0]?.bateria?.acceptedAt;
+		const fechaB = b[0]?.bateria?.acceptedAt;
+		if (!fechaA) return 1;
+		if (!fechaB) return -1;
+		return new Date(fechaB).getTime() - new Date(fechaA).getTime();
+	});
 }
 
 /**
@@ -441,7 +460,7 @@ export function InvestorContractsCard({
 				</div>
 			</CardHeader>
 
-			<CardContent className="space-y-2">
+			<CardContent className="space-y-4">
 				{contratosQuery.isLoading ? (
 					<div className="flex items-center gap-2 py-6 text-muted-foreground text-sm">
 						<Loader2 className="h-4 w-4 animate-spin" />
@@ -453,12 +472,29 @@ export function InvestorContractsCard({
 					</p>
 				) : (
 					<>
-						{vigentes.map((contrato) => (
-							<FilaDeContrato
-								key={contrato.id}
-								contrato={contrato}
-								onCambio={refrescar}
-							/>
+						{porCompra(vigentes).map((grupo) => (
+							<div key={grupo[0]?.bateria?.id ?? "sin-bateria"}>
+								<div className="mb-2 flex items-center gap-2 border-b pb-1">
+									<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+										{tituloDeLaCompra(grupo[0]?.bateria)}
+									</p>
+									<Badge variant="secondary" className="text-xs">
+										{grupo.length}
+									</Badge>
+								</div>
+
+								{/* En rejilla: a lo ancho, una fila por contrato hacía una
+								    pantalla larguísima con seis documentos. */}
+								<div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+									{grupo.map((contrato) => (
+										<FilaDeContrato
+											key={contrato.id}
+											contrato={contrato}
+											onCambio={refrescar}
+										/>
+									))}
+								</div>
+							</div>
 						))}
 
 						{anulados.length > 0 && (
@@ -476,7 +512,7 @@ export function InvestorContractsCard({
 								</Button>
 
 								{verAnulados && (
-									<div className="mt-2 space-y-2">
+									<div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
 										{anulados.map((contrato) => (
 											<FilaDeContrato
 												key={contrato.id}

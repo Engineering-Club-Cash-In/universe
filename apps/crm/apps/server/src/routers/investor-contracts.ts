@@ -1329,6 +1329,25 @@ export const investorContractsRouter = {
 				)
 				.orderBy(contractSignatories.position);
 
+			// De qué compra salió cada contrato. La ficha los agrupa por ahí: un
+			// inversionista que compra tres veces termina con los mismos contratos
+			// repetidos, y sin la compra no se distingue cuál es de cuál.
+			const bateriasIds = [
+				...new Set(contratos.map((c) => c.batchId).filter(Boolean)),
+			] as string[];
+			const baterias =
+				bateriasIds.length > 0
+					? await db
+							.select({
+								id: investorContractBatches.id,
+								acceptedAt: investorContractBatches.acceptedAt,
+								montoTotal: investorContractBatches.montoTotal,
+							})
+							.from(investorContractBatches)
+							.where(inArray(investorContractBatches.id, bateriasIds))
+					: [];
+			const bateriaPorId = new Map(baterias.map((b) => [b.id, b]));
+
 			const porContrato = new Map<string, typeof firmantes>();
 			for (const firmante of firmantes) {
 				const lista = porContrato.get(firmante.contractId) ?? [];
@@ -1349,6 +1368,9 @@ export const investorContractsRouter = {
 					// que la ficha no prometa firmas que el archivo no tiene.
 					pdfUrl: await urlDelPdf(contrato),
 					pdfFirmado: Boolean(contrato.signedPdfLink),
+					bateria: contrato.batchId
+						? (bateriaPorId.get(contrato.batchId) ?? null)
+						: null,
 				})),
 			);
 		}),

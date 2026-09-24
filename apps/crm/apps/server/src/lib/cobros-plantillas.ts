@@ -485,28 +485,48 @@ export function calcularExpectativaMoraDiaria(
 }
 
 /**
- * Oración que anuncia cuánto sube el saldo por día en las plantillas de mora,
- * CON su techo: "…, y aumenta Q3.73 por cada día de atraso, hasta un máximo de
- * Q93.33 al mes". El ritmo solo prometía un crecimiento infinito — cada cuota
- * deja de crecer al llegar a su cargo mensual—, así que se dice igual que en
- * la plantilla del día de pago: el ritmo Y su tope.
+ * Oración que anuncia cuánto va a subir el saldo en las plantillas de mora.
+ * Son DOS fragmentos independientes, y el que manda es el TECHO:
  *
- * Vive en constantes porque `interpolar` las borra cuando no hay qué anunciar:
- * la oración ENTERA si el crédito ya no crece (todas las cuotas en su techo →
- * Q0.00 por día), y solo el `FRAGMENTO_TOPE_INCREMENTO_MORA` si llegó el ritmo
- * pero no el techo (cartera-back viejo), que deja la frase corta pero sana.
+ *   "…al día de hoy, que sube alrededor de Q3.73 por día, y puede aumentar
+ *    hasta Q108.27 más en los próximos 30 días."
+ *
+ * Por qué el techo va primero en importancia y el ritmo es secundario: el
+ * ritmo diario (`incrementoDiarioMora`) es el delta de UN solo día, y el
+ * calendario lo rompe. La víspera del siguiente vencimiento la cuota vieja ya
+ * tocó su techo y la nueva todavía no vence, así que ese día el delta da
+ * Q0.00 — pero la mora SÍ va a seguir creciendo (mañana vence la cuota nueva).
+ * Eso pasa siempre que el mes trae 31 días, o sea ~7 veces al año en cualquier
+ * crédito mensual. El techo a 30 días, en cambio, nunca es cero mientras haya
+ * mora devengándose, así que es la única cifra que siempre es verdadera.
+ *
+ * Por eso los fragmentos se borran por SEPARADO (ver
+ * `quitarClausulaIncrementoMora`): el día que el ritmo no es informativo
+ * desaparece SOLO el ritmo y el mensaje sigue anunciando el techo, en vez de
+ * quedarse mudo justo cuando el cliente está por pagar.
+ *
+ * Por qué "alrededor de" y "hasta": los dos números NO se multiplican entre
+ * sí. El ritmo es 1/30 de un cargo redondeado a centavos, así que 30 días de
+ * ritmo no dan el cargo mensual exacto (30 × Q3.73 = Q111.90, no Q112.00), y
+ * además el ritmo varía de un día para otro según qué cuotas están bajo su
+ * techo. "Alrededor de" no promete exactitud y "hasta" es una cota superior
+ * cierta, así que la oración no puede contradecirse a sí misma ni prometer un
+ * ritmo constante que el calendario no sostiene.
+ *
  * Tienen que ser idénticas a las del archivo del front
  * (apps/web/src/lib/cobros/plantillas-mensajes.ts) — ver la nota de cabecera.
  *
- * Va DENTRO del párrafo del monto adeudado, así que no cambia el conteo de
+ * Van DENTRO del párrafo del monto adeudado, así que no cambian el conteo de
  * bloques (`\n\n`) del que depende la selección de template en Meta.
  */
+export const FRAGMENTO_RITMO_INCREMENTO_MORA =
+	", que sube alrededor de Q{incrementoDiarioMora} por día";
+
 export const FRAGMENTO_TOPE_INCREMENTO_MORA =
-	", hasta un máximo de Q{incrementoMaximoMensualMora} al mes";
+	", y puede aumentar hasta Q{incrementoMaximoMensualMora} más en los próximos 30 días";
 
 export const CLAUSULA_INCREMENTO_DIARIO_MORA =
-	", y aumenta Q{incrementoDiarioMora} por cada día de atraso" +
-	FRAGMENTO_TOPE_INCREMENTO_MORA;
+	FRAGMENTO_RITMO_INCREMENTO_MORA + FRAGMENTO_TOPE_INCREMENTO_MORA;
 
 /**
  * true si hay un monto de aumento REAL que anunciar — sirve igual para el
@@ -641,15 +661,22 @@ function toCapitalCase(str: string): string {
 }
 
 /**
- * Borra la oración del aumento cuando no hay nada que anunciar: la cláusula
- * ENTERA si el crédito ya no crece (todas las cuotas en su techo → Q0.00 por
- * día), y solo el `FRAGMENTO_TOPE_INCREMENTO_MORA` si llegó el ritmo pero no
- * el techo (cartera-back viejo), que deja la frase corta pero sana. Dejar
- * "aumenta Q0.00 por cada día que pase" sería ruido, y dejar "aumenta Q."
- * sería un mensaje roto.
+ * Borra de la oración del aumento solo lo que ese día no se puede anunciar.
+ * Cada fragmento se evalúa por su cuenta, y los tres resultados son frases
+ * sanas en español:
+ *  - sin ritmo pero con techo (la víspera del próximo vencimiento, cuando el
+ *    delta de un día da Q0.00 y la mora igual va a crecer): se va SOLO el
+ *    ritmo y queda "…al día de hoy, y puede aumentar hasta Q108.27 más en los
+ *    próximos 30 días". Antes se borraba la cláusula entera, techo incluido, y
+ *    el mensaje no anunciaba ningún aumento el día previo al vencimiento — el
+ *    cliente pagaba lo anunciado y quedaba corto.
+ *  - con ritmo pero sin techo (cartera-back viejo que no lo manda): se va solo
+ *    el techo y queda "…al día de hoy, que sube alrededor de Q3.73 por día".
+ *  - sin ninguno de los dos (crédito con TODAS las cuotas en su techo, que ya
+ *    no crece): se va la cláusula entera. Ahí el silencio es la verdad.
  *
- * El orden importa: si primero se sacara el tope, la cláusula entera ya no
- * coincidiría para poder borrarse.
+ * El orden importa: la cláusula completa se busca ANTES que sus partes, porque
+ * sacando primero un fragmento ya no coincidiría para poder borrarse.
  *
  * Vive aparte de `interpolar` porque el gate de envío necesita preguntar lo
  * mismo ANTES de mandar: qué queda del cuerpo una vez borrada la cláusula.
@@ -659,13 +686,17 @@ export function quitarClausulaIncrementoMora(
 	incrementoDiarioMora: string,
 	incrementoMaximoMensualMora: string,
 ): string {
-	if (!hayIncrementoMora(incrementoDiarioMora)) {
+	const hayRitmo = hayIncrementoMora(incrementoDiarioMora);
+	const hayTecho = hayIncrementoMora(incrementoMaximoMensualMora);
+
+	if (hayRitmo && hayTecho) return texto;
+	if (!hayRitmo && !hayTecho) {
 		return texto.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
 	}
-	if (!hayIncrementoMora(incrementoMaximoMensualMora)) {
-		return texto.split(FRAGMENTO_TOPE_INCREMENTO_MORA).join("");
+	if (!hayRitmo) {
+		return texto.split(FRAGMENTO_RITMO_INCREMENTO_MORA).join("");
 	}
-	return texto;
+	return texto.split(FRAGMENTO_TOPE_INCREMENTO_MORA).join("");
 }
 
 export const COBROS_MOTIVO_SIN_INCREMENTO_MORA =
@@ -817,7 +848,7 @@ Si tienes alguna consulta, con gusto estamos para apoyarte. Agradeceremos confir
 		cuerpo: `Hola {clienteNombre} 👋
 Te recordamos que *hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}*. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
 
-🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMoraDiaria} por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.*
+🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de alrededor de Q{expectativaMoraDiaria} por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.*
 
 📞 Si necesitas apoyo, comunícate con tu asesor:
 *{nombreAsesor} - Asesor de Cobros*

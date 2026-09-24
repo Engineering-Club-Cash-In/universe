@@ -6,9 +6,11 @@ import {
 	ClipboardList,
 	Loader2,
 	MapPin,
+	Plug,
 	RefreshCw,
 	ShieldAlert,
 	TriangleAlert,
+	Truck,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -31,6 +33,7 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
@@ -453,8 +456,8 @@ function RouteComponent() {
 						Integración GPS (Wialon / La Legión)
 					</h1>
 					<p className="text-muted-foreground">
-						Estado de conexión, configuración y catálogo de unidades
-						sincronizadas
+						Estado de conexión, catálogo de unidades, bitácora de consultas y
+						salud de la integración
 					</p>
 				</div>
 				<Button
@@ -470,464 +473,506 @@ function RouteComponent() {
 				</Button>
 			</div>
 
-			{diagnostics.isPending ? (
-				<Card>
-					<CardContent className="flex items-center gap-2 p-6 text-muted-foreground">
-						<Loader2 className="h-4 w-4 animate-spin" />
-						Consultando estado de la conexión...
-					</CardContent>
-				</Card>
-			) : diagnostics.isError ? (
-				// Esto es un fallo de la petición ORPC en sí (servidor caído, DB
-				// inaccesible, output que no valida, etc.), no un problema de
-				// credenciales de Wialon — con d undefined no hay que renderizar
-				// "Token configurado: No" ni ningún otro dato como si lo supiéramos.
-				<Card className="border-red-200 dark:border-red-900/50">
-					<CardContent className="flex items-center justify-between gap-4 p-6">
-						<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
-							<TriangleAlert className="h-4 w-4 shrink-0" />
-							<span>
-								No se pudo consultar el diagnóstico del panel:{" "}
-								{diagnostics.error?.message ||
-									"error desconocido al contactar el servidor del CRM"}
-							</span>
-						</div>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => diagnostics.refetch()}
-						>
-							Reintentar
-						</Button>
-					</CardContent>
-				</Card>
-			) : (
-				<>
-					<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-						<Card className={estadoConfig?.cardClass}>
-							<CardHeader className="pb-2">
-								<CardDescription>Estado de conexión</CardDescription>
-							</CardHeader>
-							<CardContent>
-								<Badge className={estadoConfig?.badgeClass}>
-									{EstadoIcon && <EstadoIcon className="mr-1 h-3 w-3" />}
-									{estadoConfig?.label}
-								</Badge>
-							</CardContent>
-						</Card>
-						<Card>
-							<CardHeader className="pb-2">
-								<CardDescription>Latencia</CardDescription>
-							</CardHeader>
-							<CardContent className="font-semibold text-2xl">
-								{formatLatency(d?.latencyMs ?? null)}
-							</CardContent>
-						</Card>
-						<Card>
-							<CardHeader className="pb-2">
-								<CardDescription>Unidades sincronizadas</CardDescription>
-							</CardHeader>
-							<CardContent className="font-semibold text-2xl">
-								{d?.unitCount ?? "—"}
-							</CardContent>
-						</Card>
-						<Card>
-							<CardHeader className="pb-2">
-								<CardDescription>Usuario Wialon</CardDescription>
-							</CardHeader>
-							<CardContent className="font-semibold text-lg">
-								{d?.user?.nm ?? "—"}
-							</CardContent>
-						</Card>
-					</div>
+			<Tabs className="gap-4" defaultValue="conexion">
+				<TabsList className="h-auto w-full flex-wrap justify-start sm:w-fit">
+					<TabsTrigger className="gap-2 px-3" value="conexion">
+						<Plug className="h-4 w-4" />
+						Conexión
+					</TabsTrigger>
+					<TabsTrigger className="gap-2 px-3" value="catalogo">
+						<Truck className="h-4 w-4" />
+						Catálogo de unidades
+					</TabsTrigger>
+					<TabsTrigger className="gap-2 px-3" value="bitacora">
+						<ClipboardList className="h-4 w-4" />
+						Bitácora de consultas
+					</TabsTrigger>
+					<TabsTrigger className="gap-2 px-3" value="fallas">
+						<ShieldAlert className="h-4 w-4" />
+						Fallas y salud
+						{(salud.data?.alertasAbiertas ?? 0) > 0 && (
+							<Badge className="h-5 min-w-5 rounded-full bg-amber-500 px-1.5 text-white hover:bg-amber-500">
+								{salud.data?.alertasAbiertas}
+							</Badge>
+						)}
+					</TabsTrigger>
+				</TabsList>
 
-					{d && !d.connected && d.error && (
+				<TabsContent className="space-y-6" value="conexion">
+					{diagnostics.isPending ? (
+						<Card>
+							<CardContent className="flex items-center gap-2 p-6 text-muted-foreground">
+								<Loader2 className="h-4 w-4 animate-spin" />
+								Consultando estado de la conexión...
+							</CardContent>
+						</Card>
+					) : diagnostics.isError ? (
+						// Esto es un fallo de la petición ORPC en sí (servidor caído, DB
+						// inaccesible, output que no valida, etc.), no un problema de
+						// credenciales de Wialon — con d undefined no hay que renderizar
+						// "Token configurado: No" ni ningún otro dato como si lo supiéramos.
 						<Card className="border-red-200 dark:border-red-900/50">
-							<CardContent className="p-4 text-red-600 text-sm dark:text-red-400">
-								<span className="font-semibold">{d.error.code}:</span>{" "}
-								{d.error.message}
+							<CardContent className="flex items-center justify-between gap-4 p-6">
+								<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
+									<TriangleAlert className="h-4 w-4 shrink-0" />
+									<span>
+										No se pudo consultar el diagnóstico del panel:{" "}
+										{diagnostics.error?.message ||
+											"error desconocido al contactar el servidor del CRM"}
+									</span>
+								</div>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => diagnostics.refetch()}
+								>
+									Reintentar
+								</Button>
 							</CardContent>
 						</Card>
-					)}
+					) : (
+						<>
+							<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+								<Card className={estadoConfig?.cardClass}>
+									<CardHeader className="pb-2">
+										<CardDescription>Estado de conexión</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<Badge className={estadoConfig?.badgeClass}>
+											{EstadoIcon && <EstadoIcon className="mr-1 h-3 w-3" />}
+											{estadoConfig?.label}
+										</Badge>
+									</CardContent>
+								</Card>
+								<Card>
+									<CardHeader className="pb-2">
+										<CardDescription>Latencia</CardDescription>
+									</CardHeader>
+									<CardContent className="font-semibold text-2xl">
+										{formatLatency(d?.latencyMs ?? null)}
+									</CardContent>
+								</Card>
+								<Card>
+									<CardHeader className="pb-2">
+										<CardDescription>Unidades sincronizadas</CardDescription>
+									</CardHeader>
+									<CardContent className="font-semibold text-2xl">
+										{d?.unitCount ?? "—"}
+									</CardContent>
+								</Card>
+								<Card>
+									<CardHeader className="pb-2">
+										<CardDescription>Usuario Wialon</CardDescription>
+									</CardHeader>
+									<CardContent className="font-semibold text-lg">
+										{d?.user?.nm ?? "—"}
+									</CardContent>
+								</Card>
+							</div>
 
+							{d && !d.connected && d.error && (
+								<Card className="border-red-200 dark:border-red-900/50">
+									<CardContent className="p-4 text-red-600 text-sm dark:text-red-400">
+										<span className="font-semibold">{d.error.code}:</span>{" "}
+										{d.error.message}
+									</CardContent>
+								</Card>
+							)}
+
+							<Card>
+								<CardHeader>
+									<CardTitle>Configuración del proveedor</CardTitle>
+									<CardDescription>
+										Las credenciales se administran mediante variables de
+										entorno del servidor y no son editables desde el CRM.
+									</CardDescription>
+								</CardHeader>
+								<CardContent className="grid gap-3 sm:grid-cols-2">
+									<div>
+										<div className="text-muted-foreground text-xs">
+											Ambiente
+										</div>
+										<div className="font-medium capitalize">
+											{d?.environment ?? "—"}
+										</div>
+									</div>
+									<div>
+										<div className="text-muted-foreground text-xs">
+											Token configurado
+										</div>
+										<Badge
+											variant={d?.tokenConfigured ? "default" : "destructive"}
+										>
+											{d?.tokenConfigured ? "Sí" : "No"}
+										</Badge>
+									</div>
+									<div>
+										<div className="text-muted-foreground text-xs">
+											Base URL
+										</div>
+										<div className="break-all font-mono text-sm">
+											{d?.baseUrl ?? "—"}
+										</div>
+									</div>
+									<div>
+										<div className="text-muted-foreground text-xs">
+											Locator URL
+										</div>
+										<div className="break-all font-mono text-sm">
+											{d?.locatorUrl ?? "—"}
+										</div>
+									</div>
+									<div>
+										<div className="text-muted-foreground text-xs">Timeout</div>
+										<div className="font-medium">{d?.timeoutMs ?? "—"} ms</div>
+									</div>
+									<div>
+										<div className="text-muted-foreground text-xs">
+											Caché de sesión interna válida hasta
+										</div>
+										<div className="font-medium">
+											{formatFechaHora(d?.sessionExpiresAt ?? null)}
+										</div>
+										<div className="text-muted-foreground text-xs">
+											El token de Wialon es permanente; esto es solo el sid en
+											memoria del servidor (se renueva solo cada 2h, sin acción
+											requerida).
+										</div>
+									</div>
+								</CardContent>
+							</Card>
+						</>
+					)}
+				</TabsContent>
+
+				<TabsContent value="catalogo">
 					<Card>
 						<CardHeader>
-							<CardTitle>Configuración del proveedor</CardTitle>
+							<CardTitle>Catálogo de unidades</CardTitle>
 							<CardDescription>
-								Las credenciales se administran mediante variables de entorno
-								del servidor y no son editables desde el CRM.
+								Flota sincronizada desde Wialon / La Legión
 							</CardDescription>
 						</CardHeader>
-						<CardContent className="grid gap-3 sm:grid-cols-2">
-							<div>
-								<div className="text-muted-foreground text-xs">Ambiente</div>
-								<div className="font-medium capitalize">
-									{d?.environment ?? "—"}
-								</div>
-							</div>
-							<div>
-								<div className="text-muted-foreground text-xs">
-									Token configurado
-								</div>
-								<Badge variant={d?.tokenConfigured ? "default" : "destructive"}>
-									{d?.tokenConfigured ? "Sí" : "No"}
-								</Badge>
-							</div>
-							<div>
-								<div className="text-muted-foreground text-xs">Base URL</div>
-								<div className="break-all font-mono text-sm">
-									{d?.baseUrl ?? "—"}
-								</div>
-							</div>
-							<div>
-								<div className="text-muted-foreground text-xs">Locator URL</div>
-								<div className="break-all font-mono text-sm">
-									{d?.locatorUrl ?? "—"}
-								</div>
-							</div>
-							<div>
-								<div className="text-muted-foreground text-xs">Timeout</div>
-								<div className="font-medium">{d?.timeoutMs ?? "—"} ms</div>
-							</div>
-							<div>
-								<div className="text-muted-foreground text-xs">
-									Caché de sesión interna válida hasta
-								</div>
-								<div className="font-medium">
-									{formatFechaHora(d?.sessionExpiresAt ?? null)}
-								</div>
-								<div className="text-muted-foreground text-xs">
-									El token de Wialon es permanente; esto es solo el sid en
-									memoria del servidor (se renueva solo cada 2h, sin acción
-									requerida).
-								</div>
-							</div>
-						</CardContent>
-					</Card>
-				</>
-			)}
-
-			<Card>
-				<CardHeader>
-					<CardTitle>Catálogo de unidades</CardTitle>
-					<CardDescription>
-						Flota sincronizada desde Wialon / La Legión
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-4">
-					<Input
-						placeholder="Buscar por nombre de unidad..."
-						value={filterName}
-						onChange={(e) => setFilterName(e.target.value)}
-						className="max-w-sm"
-					/>
-					{units.isError ? (
-						// Igual que con diagnostics: sin esto, un fallo del catálogo
-						// (token faltante, Wialon caído) se ve idéntico a una flota
-						// realmente vacía — "No se encontraron resultados" engaña.
-						<div className="flex items-center justify-between gap-4 rounded-md border border-red-200 p-4 dark:border-red-900/50">
-							<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
-								<TriangleAlert className="h-4 w-4 shrink-0" />
-								<span>
-									No se pudo cargar el catálogo de unidades:{" "}
-									{units.error?.message ||
-										"error desconocido al contactar el servidor del CRM"}
-								</span>
-							</div>
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => units.refetch()}
-							>
-								Reintentar
-							</Button>
-						</div>
-					) : (
-						<DataTable
-							columns={UNIT_COLUMNS}
-							data={unitRows}
-							isLoading={units.isPending}
-							hideSearch
-						/>
-					)}
-				</CardContent>
-			</Card>
-
-			<Card>
-				<CardHeader>
-					<CardTitle className="flex items-center gap-2">
-						<ClipboardList className="h-5 w-5" />
-						Bitácora de consultas GPS
-					</CardTitle>
-					<CardDescription>
-						Cada vez que un asesor confirma un motivo y ve la ubicación de una
-						unidad en la Ficha 360 queda registrado aquí (CB-118). Vincular una
-						unidad o generar un enlace de rastreo se auditan por separado en los
-						logs del servidor.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-4">
-					<Input
-						className="max-w-sm"
-						onChange={(e) => setBitacoraSifco(e.target.value)}
-						placeholder="Filtrar por número SIFCO..."
-						value={bitacoraSifco}
-					/>
-					{bitacora.isError ? (
-						<div className="flex items-center justify-between gap-4 rounded-md border border-red-200 p-4 dark:border-red-900/50">
-							<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
-								<TriangleAlert className="h-4 w-4 shrink-0" />
-								<span>
-									No se pudo cargar la bitácora:{" "}
-									{bitacora.error?.message || "error desconocido"}
-								</span>
-							</div>
-							<Button
-								onClick={() => bitacora.refetch()}
-								size="sm"
-								variant="outline"
-							>
-								Reintentar
-							</Button>
-						</div>
-					) : (
-						<DataTable
-							columns={BITACORA_COLUMNS}
-							data={bitacoraRows}
-							hideSearch
-							isLoading={bitacora.isPending}
-							serverPagination={{
-								onPageChange: setBitacoraPage,
-								onPageSizeChange: (size) => {
-									setBitacoraPageSize(size);
-									setBitacoraPage(1);
-								},
-								page: bitacoraPage,
-								pageSize: bitacoraPageSize,
-								totalItems: bitacora.data?.total ?? 0,
-								totalPages: Math.max(
-									1,
-									Math.ceil((bitacora.data?.total ?? 0) / bitacoraPageSize),
-								),
-							}}
-						/>
-					)}
-				</CardContent>
-			</Card>
-
-			<div className="border-t pt-2">
-				<h2 className="flex items-center gap-2 font-semibold text-2xl">
-					<ShieldAlert className="h-6 w-6" />
-					Fallas y salud (CB-121)
-				</h2>
-				<p className="text-muted-foreground text-sm">
-					Trazabilidad técnica de cada llamada a Wialon (solicitudes, errores,
-					reintentos y tiempos de respuesta) y alertas cuando la integración se
-					degrada.
-				</p>
-			</div>
-
-			<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-				<Card>
-					<CardHeader className="pb-2">
-						<CardDescription>Tasa de error (última hora)</CardDescription>
-					</CardHeader>
-					<CardContent className="font-semibold text-2xl">
-						{formatPorcentaje(salud.data?.ventana.tasaError ?? null)}
-					</CardContent>
-				</Card>
-				<Card>
-					<CardHeader className="pb-2">
-						<CardDescription>Latencia p95 (última hora)</CardDescription>
-					</CardHeader>
-					<CardContent className="font-semibold text-2xl">
-						{formatDuracion(salud.data?.ventana.p95Ms ?? null)}
-					</CardContent>
-				</Card>
-				<Card
-					className={
-						salud.data?.circuito.abierto
-							? "border-red-200 dark:border-red-900/50"
-							: undefined
-					}
-				>
-					<CardHeader className="pb-2">
-						<CardDescription>Circuito (reintentos)</CardDescription>
-					</CardHeader>
-					<CardContent className="flex items-center gap-2 font-semibold text-lg">
-						{salud.isPending ? (
-							<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-						) : !salud.data ? (
-							<span className="text-muted-foreground">Sin datos</span>
-						) : salud.data.circuito.abierto ? (
-							<>
-								<TriangleAlert className="h-4 w-4 text-red-600 dark:text-red-400" />
-								Abierto (contingencia)
-							</>
-						) : (
-							<>
-								<CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-								Cerrado
-							</>
-						)}
-					</CardContent>
-				</Card>
-				<Card
-					className={
-						(salud.data?.alertasAbiertas ?? 0) > 0
-							? "border-amber-200 dark:border-amber-900/50"
-							: undefined
-					}
-				>
-					<CardHeader className="pb-2">
-						<CardDescription>Alertas abiertas</CardDescription>
-					</CardHeader>
-					<CardContent className="font-semibold text-2xl">
-						{salud.data?.alertasAbiertas ?? "—"}
-					</CardContent>
-				</Card>
-			</div>
-
-			<Card>
-				<CardHeader>
-					<CardTitle className="flex items-center gap-2">
-						<TriangleAlert className="h-5 w-5" />
-						Alertas de la integración
-					</CardTitle>
-					<CardDescription>
-						Se abren solas cuando la tasa de error, la latencia o los fallos
-						consecutivos superan el SLA, o ante un error crítico (credenciales,
-						acceso denegado). Las de umbral se cierran solas al normalizarse;
-						las críticas requieren resolución manual.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-3">
-					{alertas.isPending ? (
-						<div className="flex items-center gap-2 text-muted-foreground text-sm">
-							<Loader2 className="h-4 w-4 animate-spin" />
-							Cargando alertas...
-						</div>
-					) : alertas.data?.items.length === 0 ? (
-						<div className="flex items-center gap-2 text-muted-foreground text-sm">
-							<CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-							Sin alertas registradas.
-						</div>
-					) : (
-						alertas.data?.items.map((a) => (
-							<div
-								className={`flex items-start justify-between gap-4 rounded-md border p-3 ${
-									a.estado === "abierta"
-										? "border-amber-200 dark:border-amber-900/50"
-										: "opacity-60"
-								}`}
-								key={a.id}
-							>
-								<div className="space-y-1">
-									<div className="flex items-center gap-2">
-										<Badge
-											variant={a.estado === "abierta" ? "default" : "outline"}
-										>
-											{a.estado === "abierta" ? "Abierta" : "Resuelta"}
-										</Badge>
-										<span className="font-medium text-sm">
-											{TIPO_ALERTA_LABEL[a.tipo]}
-										</span>
-										<span className="text-muted-foreground text-xs">
-											× {a.ocurrencias}
+						<CardContent className="space-y-4">
+							<Input
+								placeholder="Buscar por nombre de unidad..."
+								value={filterName}
+								onChange={(e) => setFilterName(e.target.value)}
+								className="max-w-sm"
+							/>
+							{units.isError ? (
+								// Igual que con diagnostics: sin esto, un fallo del catálogo
+								// (token faltante, Wialon caído) se ve idéntico a una flota
+								// realmente vacía — "No se encontraron resultados" engaña.
+								<div className="flex items-center justify-between gap-4 rounded-md border border-red-200 p-4 dark:border-red-900/50">
+									<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
+										<TriangleAlert className="h-4 w-4 shrink-0" />
+										<span>
+											No se pudo cargar el catálogo de unidades:{" "}
+											{units.error?.message ||
+												"error desconocido al contactar el servidor del CRM"}
 										</span>
 									</div>
-									<p className="text-sm">{a.detalle}</p>
-									<p className="text-muted-foreground text-xs">
-										Desde {formatFechaHora(new Date(a.primeraVez))} · última vez{" "}
-										{formatFechaHora(new Date(a.ultimaVez))}
-										{a.notaResolucion ? ` · Nota: ${a.notaResolucion}` : ""}
-									</p>
-								</div>
-								{a.estado === "abierta" && (
 									<Button
-										onClick={() =>
-											setAlertaAResolver({ id: a.id, tipo: a.tipo })
-										}
+										variant="outline"
+										size="sm"
+										onClick={() => units.refetch()}
+									>
+										Reintentar
+									</Button>
+								</div>
+							) : (
+								<DataTable
+									columns={UNIT_COLUMNS}
+									data={unitRows}
+									isLoading={units.isPending}
+									hideSearch
+								/>
+							)}
+						</CardContent>
+					</Card>
+				</TabsContent>
+
+				<TabsContent value="bitacora">
+					<Card>
+						<CardHeader>
+							<CardTitle className="flex items-center gap-2">
+								<ClipboardList className="h-5 w-5" />
+								Bitácora de consultas GPS
+							</CardTitle>
+							<CardDescription>
+								Cada vez que un asesor confirma un motivo y ve la ubicación de
+								una unidad en la Ficha 360 queda registrado aquí (CB-118).
+								Vincular una unidad o generar un enlace de rastreo se auditan
+								por separado en los logs del servidor.
+							</CardDescription>
+						</CardHeader>
+						<CardContent className="space-y-4">
+							<Input
+								className="max-w-sm"
+								onChange={(e) => setBitacoraSifco(e.target.value)}
+								placeholder="Filtrar por número SIFCO..."
+								value={bitacoraSifco}
+							/>
+							{bitacora.isError ? (
+								<div className="flex items-center justify-between gap-4 rounded-md border border-red-200 p-4 dark:border-red-900/50">
+									<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
+										<TriangleAlert className="h-4 w-4 shrink-0" />
+										<span>
+											No se pudo cargar la bitácora:{" "}
+											{bitacora.error?.message || "error desconocido"}
+										</span>
+									</div>
+									<Button
+										onClick={() => bitacora.refetch()}
 										size="sm"
 										variant="outline"
 									>
-										Resolver
+										Reintentar
 									</Button>
+								</div>
+							) : (
+								<DataTable
+									columns={BITACORA_COLUMNS}
+									data={bitacoraRows}
+									hideSearch
+									isLoading={bitacora.isPending}
+									serverPagination={{
+										onPageChange: setBitacoraPage,
+										onPageSizeChange: (size) => {
+											setBitacoraPageSize(size);
+											setBitacoraPage(1);
+										},
+										page: bitacoraPage,
+										pageSize: bitacoraPageSize,
+										totalItems: bitacora.data?.total ?? 0,
+										totalPages: Math.max(
+											1,
+											Math.ceil((bitacora.data?.total ?? 0) / bitacoraPageSize),
+										),
+									}}
+								/>
+							)}
+						</CardContent>
+					</Card>
+				</TabsContent>
+
+				<TabsContent className="space-y-6" value="fallas">
+					<div>
+						<p className="text-muted-foreground text-sm">
+							Trazabilidad técnica de cada llamada a Wialon (solicitudes,
+							errores, reintentos y tiempos de respuesta) y alertas cuando la
+							integración se degrada.
+						</p>
+					</div>
+
+					<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+						<Card>
+							<CardHeader className="pb-2">
+								<CardDescription>Tasa de error (última hora)</CardDescription>
+							</CardHeader>
+							<CardContent className="font-semibold text-2xl">
+								{formatPorcentaje(salud.data?.ventana.tasaError ?? null)}
+							</CardContent>
+						</Card>
+						<Card>
+							<CardHeader className="pb-2">
+								<CardDescription>Latencia p95 (última hora)</CardDescription>
+							</CardHeader>
+							<CardContent className="font-semibold text-2xl">
+								{formatDuracion(salud.data?.ventana.p95Ms ?? null)}
+							</CardContent>
+						</Card>
+						<Card
+							className={
+								salud.data?.circuito.abierto
+									? "border-red-200 dark:border-red-900/50"
+									: undefined
+							}
+						>
+							<CardHeader className="pb-2">
+								<CardDescription>Circuito (reintentos)</CardDescription>
+							</CardHeader>
+							<CardContent className="flex items-center gap-2 font-semibold text-lg">
+								{salud.isPending ? (
+									<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+								) : !salud.data ? (
+									<span className="text-muted-foreground">Sin datos</span>
+								) : salud.data.circuito.abierto ? (
+									<>
+										<TriangleAlert className="h-4 w-4 text-red-600 dark:text-red-400" />
+										Abierto (contingencia)
+									</>
+								) : (
+									<>
+										<CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+										Cerrado
+									</>
+								)}
+							</CardContent>
+						</Card>
+						<Card
+							className={
+								(salud.data?.alertasAbiertas ?? 0) > 0
+									? "border-amber-200 dark:border-amber-900/50"
+									: undefined
+							}
+						>
+							<CardHeader className="pb-2">
+								<CardDescription>Alertas abiertas</CardDescription>
+							</CardHeader>
+							<CardContent className="font-semibold text-2xl">
+								{salud.data?.alertasAbiertas ?? "—"}
+							</CardContent>
+						</Card>
+					</div>
+
+					<Card>
+						<CardHeader>
+							<CardTitle className="flex items-center gap-2">
+								<TriangleAlert className="h-5 w-5" />
+								Alertas de la integración
+							</CardTitle>
+							<CardDescription>
+								Se abren solas cuando la tasa de error, la latencia o los fallos
+								consecutivos superan el SLA, o ante un error crítico
+								(credenciales, acceso denegado). Las de umbral se cierran solas
+								al normalizarse; las críticas requieren resolución manual.
+							</CardDescription>
+						</CardHeader>
+						<CardContent className="space-y-3">
+							{alertas.isPending ? (
+								<div className="flex items-center gap-2 text-muted-foreground text-sm">
+									<Loader2 className="h-4 w-4 animate-spin" />
+									Cargando alertas...
+								</div>
+							) : alertas.data?.items.length === 0 ? (
+								<div className="flex items-center gap-2 text-muted-foreground text-sm">
+									<CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+									Sin alertas registradas.
+								</div>
+							) : (
+								alertas.data?.items.map((a) => (
+									<div
+										className={`flex items-start justify-between gap-4 rounded-md border p-3 ${
+											a.estado === "abierta"
+												? "border-amber-200 dark:border-amber-900/50"
+												: "opacity-60"
+										}`}
+										key={a.id}
+									>
+										<div className="space-y-1">
+											<div className="flex items-center gap-2">
+												<Badge
+													variant={
+														a.estado === "abierta" ? "default" : "outline"
+													}
+												>
+													{a.estado === "abierta" ? "Abierta" : "Resuelta"}
+												</Badge>
+												<span className="font-medium text-sm">
+													{TIPO_ALERTA_LABEL[a.tipo]}
+												</span>
+												<span className="text-muted-foreground text-xs">
+													× {a.ocurrencias}
+												</span>
+											</div>
+											<p className="text-sm">{a.detalle}</p>
+											<p className="text-muted-foreground text-xs">
+												Desde {formatFechaHora(new Date(a.primeraVez))} · última
+												vez {formatFechaHora(new Date(a.ultimaVez))}
+												{a.notaResolucion ? ` · Nota: ${a.notaResolucion}` : ""}
+											</p>
+										</div>
+										{a.estado === "abierta" && (
+											<Button
+												onClick={() =>
+													setAlertaAResolver({ id: a.id, tipo: a.tipo })
+												}
+												size="sm"
+												variant="outline"
+											>
+												Resolver
+											</Button>
+										)}
+									</div>
+								))
+							)}
+						</CardContent>
+					</Card>
+
+					<Card>
+						<CardHeader>
+							<CardTitle>Bitácora técnica de la integración</CardTitle>
+							<CardDescription>
+								Cada intento HTTP a Wialon (login, catálogo, telemetría, links
+								de rastreo), con su resultado, duración y si se reintentó. Para
+								ver quién consultó qué unidad y por qué, use la pestaña
+								"Bitácora de consultas".
+							</CardDescription>
+						</CardHeader>
+						<CardContent className="space-y-4">
+							<div className="space-y-1">
+								<Input
+									className="max-w-sm font-mono"
+									onChange={(e) => {
+										setLogsReferencia(e.target.value);
+										setLogsPage(1);
+									}}
+									placeholder="Buscar por referencia de la consulta..."
+									value={logsReferencia}
+								/>
+								{referenciaBuscada && !referenciaValida && (
+									<p className="text-muted-foreground text-xs">
+										Pegue la referencia completa que ve el asesor en la ficha.
+									</p>
 								)}
 							</div>
-						))
-					)}
-				</CardContent>
-			</Card>
-
-			<Card>
-				<CardHeader>
-					<CardTitle>Bitácora técnica de la integración</CardTitle>
-					<CardDescription>
-						Cada intento HTTP a Wialon (login, catálogo, telemetría, links de
-						rastreo), con su resultado, duración y si se reintentó. Para ver
-						quién consultó qué unidad y por qué, use la bitácora de consultas
-						arriba.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-4">
-					<div className="space-y-1">
-						<Input
-							className="max-w-sm font-mono"
-							onChange={(e) => {
-								setLogsReferencia(e.target.value);
-								setLogsPage(1);
-							}}
-							placeholder="Buscar por referencia de la consulta..."
-							value={logsReferencia}
-						/>
-						{referenciaBuscada && !referenciaValida && (
-							<p className="text-muted-foreground text-xs">
-								Pegue la referencia completa que ve el asesor en la ficha.
-							</p>
-						)}
-					</div>
-					{integracionLogs.isError ? (
-						<div className="flex items-center justify-between gap-4 rounded-md border border-red-200 p-4 dark:border-red-900/50">
-							<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
-								<TriangleAlert className="h-4 w-4 shrink-0" />
-								<span>
-									No se pudo cargar la bitácora técnica:{" "}
-									{integracionLogs.error?.message || "error desconocido"}
-								</span>
-							</div>
-							<Button
-								onClick={() => integracionLogs.refetch()}
-								size="sm"
-								variant="outline"
-							>
-								Reintentar
-							</Button>
-						</div>
-					) : (
-						<DataTable
-							columns={INTEGRACION_LOGS_COLUMNS}
-							data={integracionLogsRows}
-							hideSearch
-							isLoading={integracionLogs.isPending}
-							serverPagination={{
-								onPageChange: setLogsPage,
-								onPageSizeChange: (size) => {
-									setLogsPageSize(size);
-									setLogsPage(1);
-								},
-								page: logsPage,
-								pageSize: logsPageSize,
-								totalItems: integracionLogs.data?.total ?? 0,
-								totalPages: Math.max(
-									1,
-									Math.ceil((integracionLogs.data?.total ?? 0) / logsPageSize),
-								),
-							}}
-						/>
-					)}
-				</CardContent>
-			</Card>
+							{integracionLogs.isError ? (
+								<div className="flex items-center justify-between gap-4 rounded-md border border-red-200 p-4 dark:border-red-900/50">
+									<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
+										<TriangleAlert className="h-4 w-4 shrink-0" />
+										<span>
+											No se pudo cargar la bitácora técnica:{" "}
+											{integracionLogs.error?.message || "error desconocido"}
+										</span>
+									</div>
+									<Button
+										onClick={() => integracionLogs.refetch()}
+										size="sm"
+										variant="outline"
+									>
+										Reintentar
+									</Button>
+								</div>
+							) : (
+								<DataTable
+									columns={INTEGRACION_LOGS_COLUMNS}
+									data={integracionLogsRows}
+									hideSearch
+									isLoading={integracionLogs.isPending}
+									serverPagination={{
+										onPageChange: setLogsPage,
+										onPageSizeChange: (size) => {
+											setLogsPageSize(size);
+											setLogsPage(1);
+										},
+										page: logsPage,
+										pageSize: logsPageSize,
+										totalItems: integracionLogs.data?.total ?? 0,
+										totalPages: Math.max(
+											1,
+											Math.ceil(
+												(integracionLogs.data?.total ?? 0) / logsPageSize,
+											),
+										),
+									}}
+								/>
+							)}
+						</CardContent>
+					</Card>
+				</TabsContent>
+			</Tabs>
 
 			<Dialog
 				onOpenChange={(open) => {

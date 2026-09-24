@@ -16,11 +16,14 @@ import {
  * - `REP_LEGAL`: una sola línea, la del representante legal. Su nombre viene
  *   impreso en el template (ej. garantía mobiliaria trae a LUCRECIA MARISOL
  *   CUX TECÚN), así que siempre ocupa exactamente un widget.
+ * - `REP_LEGAL_RDBE`: la línea de la segunda entidad. Sólo la usa el contrato
+ *   de servicios de inversiones, que lleva una firma por CUBE y otra por RDBE
+ *   además de la del inversionista.
  * - `DEUDORES`: la fila de deudores, que se expande a titular + N cofirmantes.
  *   Los templates plural la generan con un loop `{#firmantesFilas}`, de modo
  *   que la cantidad de widgets depende de los datos, no del template.
  */
-export type SignatureBlock = 'REP_LEGAL' | 'DEUDORES';
+export type SignatureBlock = 'REP_LEGAL' | 'REP_LEGAL_RDBE' | 'DEUDORES';
 
 export interface SignaturePatternConfig {
   /** Patrón de texto a buscar en el PDF para ubicar la línea de firma */
@@ -34,6 +37,20 @@ export interface SignaturePatternConfig {
    * de inspeccionar los PDF generados (`scripts/inventario-firmas.ts`).
    */
   bloques?: SignatureBlock[];
+  /**
+   * Textos que marcan una línea de firma **sin línea dibujada**.
+   *
+   * El reconocimiento normal busca un prefijo seguido de guiones bajos
+   * (`f)____`). Hay contratos de inversión cuyo bloque de firma no tiene
+   * guiones: el espacio para firmar queda en blanco y lo único que lo marca es
+   * el nombre impreso debajo ("EL INVERSIONISTA", "CUBE INVESTMENTS, S.A.") o
+   * una "f)" suelta, porque la línea es un borde de tabla y no texto.
+   *
+   * El calce es **exacto** contra el texto del item, no "contiene": "EL
+   * INVERSIONISTA" aparece decenas de veces dentro del cuerpo del contrato, y
+   * un calce parcial habría puesto un widget de firma en cada párrafo.
+   */
+  anclasExactas?: string[];
   /**
    * Cómo se firma este contrato. Por defecto `electronica`.
    *
@@ -252,129 +269,178 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     signers: ['Cliente']
   },
 
+  // Las dos firmas van en la misma línea del final: el inversionista a la
+  // izquierda y CUBE a la derecha.
   [ContractType.ACUERDO_INVERSION_CASH_IN]: {
     pattern: 'F_________________________________________________',
+    bloques: ['DEUDORES', 'REP_LEGAL'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL]: {
     pattern: 'Firma: ____________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION]: {
     pattern: 'Firma: __________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
+  // El representante legal firma arriba y el inversionista debajo, no al revés.
   [ContractType.CESION_CREDITOS]: {
     pattern: '________________________________',
+    bloques: ['REP_LEGAL', 'DEUDORES'],
     signerCount: 1,
     signers: ['Cedente']
   },
 
   [ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA]: {
     pattern: 'Firma: _________________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.CARTA_INCREMENTO_INVERSION]: {
     pattern: 'Firma: __________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO]: {
     pattern: 'Firma: ____________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
+  // Tres firmas en la última página: arriba, lado a lado, CUBE y RDBE; abajo,
+  // el inversionista. Sólo la del inversionista tiene línea de guiones: las de
+  // las dos sociedades las marca una "f)" suelta, así que se anclan por texto
+  // exacto.
   [ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL]: {
     pattern: 'f) __________________________________',
+    anclasExactas: ['f)'],
+    bloques: ['REP_LEGAL', 'REP_LEGAL_RDBE', 'DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.DESIGNACION_BENEFICIARIO]: {
     pattern: 'Firma: __________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   // Contrato de Participación y Administración de Cartera (inversionista individual)
+  //
+  // Su bloque de firma no tiene línea dibujada: son dos columnas con el nombre
+  // impreso debajo del espacio en blanco (CUBE a la izquierda, el inversionista
+  // a la derecha). El patrón declarado no existía en el PDF, así que hasta acá
+  // se le encontraban cero líneas y las firmas caían en la posición por defecto
+  // de la página 1.
   [ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA]: {
     pattern: 'EL INVERSIONISTA___________________________________',
+    anclasExactas: ['CUBE INVESTMENTS, S.A.', 'EL INVERSIONISTA'],
+    bloques: ['REP_LEGAL', 'DEUDORES'],
+    // Único contrato de inversión con rúbrica por hoja: es el que arma la
+    // relación entera, así que gerencia pide lo mismo que en los de ventas.
+    //
+    // Va DEBAJO del pie de página, no encima. Medido sobre el PDF real (hoja
+    // de 612x1008): el texto del pie queda en y≈38, su línea en y≈50 y el
+    // cuerpo baja hasta y≈61, así que arriba del pie quedan 11 puntos, que no
+    // alcanzan para una rúbrica. Debajo hay 36, y ahí entra sin tocar nada.
+    rubrica: { franja: { izquierda: 63, derecha: 550, abajo: 6, arriba: 34 } },
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   // Anexos 1 y 2 - el bloque de firma no usa línea de guiones, ancla en la etiqueta.
-  // Aparece 2 veces (una por anexo), ambas del MISMO firmante: 1 solo email
-  // (signerCount) pero 2 widgets de firma (signatureFieldCount).
+  //
+  // Cada anexo lleva DOS líneas, lado a lado: la del inversionista a la
+  // izquierda y la de quien recibe por Cube a la derecha. La de Cube se ancla
+  // por su etiqueta exacta, porque tampoco trae guiones. Son 2 anexos, así que
+  // el par se repite dos veces: 2 firmantes, 4 widgets.
   [ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO]: {
     pattern: 'Firma del Inversionista',
-    signerCount: 1,
-    signatureFieldCount: 2,
-    signers: ['Inversionista']
+    anclasExactas: ['Recibido por Cube Investments, S.A.'],
+    bloques: ['DEUDORES', 'REP_LEGAL'],
+    repeticiones: 2,
+    signerCount: 2,
+    signatureFieldCount: 4,
+    signers: ['Inversionista', 'Rep. Legal']
   },
 
   // ===== INVERSIONES SOCIEDAD =====
   // Mismos patrones de firma que sus equivalentes de inversiones individuales
   [ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD]: {
     pattern: 'F_________________________________________________',
+    bloques: ['DEUDORES', 'REP_LEGAL'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL_SOCIEDAD]: {
     pattern: 'Firma: ____________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION_SOCIEDAD]: {
     pattern: 'Firma: __________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA_SOCIEDAD]: {
     pattern: 'Firma: _________________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.CARTA_INCREMENTO_INVERSION_SOCIEDAD]: {
     pattern: 'Firma: __________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO_SOCIEDAD]: {
     pattern: 'Firma: ____________________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.CESION_CREDITOS_SOCIEDAD]: {
     pattern: '________________________________',
+    bloques: ['REP_LEGAL', 'DEUDORES'],
     signerCount: 1,
     signers: ['Cedente']
   },
 
   [ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD]: {
     pattern: 'f) __________________________________',
+    anclasExactas: ['f)'],
+    bloques: ['REP_LEGAL', 'REP_LEGAL_RDBE', 'DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
 
   [ContractType.DESIGNACION_BENEFICIARIO_SOCIEDAD]: {
     pattern: 'Firma: __________________________',
+    bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Inversionista']
   },
@@ -517,6 +583,9 @@ export function resolveSignerOrder(
   const titular = signers.find((s) => s.role === SignerRole.TITULAR);
   const cofirmantes = signers.filter((s) => s.role === SignerRole.COFIRMANTE);
   const repLegal = signers.find((s) => s.role === SignerRole.REP_LEGAL);
+  const repLegalRdbe = signers.find(
+    (s) => s.role === SignerRole.REP_LEGAL_RDBE,
+  );
   const vendedor = signers.find((s) => s.role === SignerRole.VENDEDOR);
 
   // Sin layout declarado no podemos ubicar a nadie de forma confiable.
@@ -550,6 +619,14 @@ export function resolveSignerOrder(
           );
         }
         secuencia.push(repLegal);
+      } else if (bloque === 'REP_LEGAL_RDBE') {
+        if (!repLegalRdbe) {
+          throw new SignatureLayoutError(
+            `El contrato "${contractType}" lleva firma de la segunda entidad, ` +
+              `pero no se recibió ningún firmante con rol ${SignerRole.REP_LEGAL_RDBE}.`,
+          );
+        }
+        secuencia.push(repLegalRdbe);
       } else {
         if (deudores.length === 0) {
           throw new SignatureLayoutError(

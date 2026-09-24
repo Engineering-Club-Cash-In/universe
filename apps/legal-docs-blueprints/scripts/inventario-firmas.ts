@@ -1,18 +1,21 @@
 /**
- * Inventario de firmas: descarga de R2 los PDFs ya generados de una oportunidad
- * y reporta, por contrato, cuántos widgets de firma tiene el PDF **renderizado**
- * y qué texto los acompaña.
+ * Inventario de firmas: reporta, por contrato, cuántos widgets de firma tiene
+ * el PDF **renderizado** y qué texto los acompaña.
  *
  * Existe porque el orden de los widgets no se puede deducir del DOCX: los
  * bloques de firma viven en tablas, y el texto plano del XML no refleja la
  * disposición visual. Sólo el PDF renderizado dice la verdad.
  *
- * Es sólo lectura: descarga de R2 y analiza. No genera ni sube nada.
+ * Es sólo lectura: descarga (o lee) y analiza. No genera ni sube nada.
  *
  *   bun scripts/inventario-firmas.ts <claves.txt> [dirSalida]
+ *   bun scripts/inventario-firmas.ts <dirConPdfs>
  *
- * donde <claves.txt> tiene una línea por contrato con el formato
- * `contractType|bucket/key`.
+ * En la primera forma, <claves.txt> tiene una línea por contrato con el formato
+ * `contractType|bucket/key` y los PDF se bajan de R2. En la segunda se leen de
+ * un directorio local, donde cada archivo se llama `<contractType>.pdf`: es lo
+ * que deja `pdfs-para-inventario.ts` para los contratos que todavía no tienen
+ * ningún PDF nuestro en R2.
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -64,8 +67,15 @@ async function widgetsDelPdf(
 	buffer: Buffer,
 	contractType: ContractType,
 ): Promise<Widget[]> {
-	const { pattern } = getSignaturePattern(contractType);
-	const lineas = await WeeTrustService.readSignatureLines(buffer, pattern);
+	const { pattern, anclasExactas } = getSignaturePattern(contractType);
+	// Con las anclas declaradas, igual que producción: sin ellas el inventario
+	// no veía las líneas que no traen guiones y reportaba de menos justo en los
+	// contratos que hay que auditar.
+	const lineas = await WeeTrustService.readSignatureLines(
+		buffer,
+		pattern,
+		anclasExactas,
+	);
 	return lineas.map((l) => ({
 		page: l.pageNum,
 		x: l.pdfX,
@@ -74,25 +84,59 @@ async function widgetsDelPdf(
 	}));
 }
 
+/** Qué contratos inventariar y de dónde sacar el PDF de cada uno. */
+type Fuente =
+	| { contractType: ContractType; r2Key: string }
+	| { contractType: ContractType; archivo: string };
+
+/**
+ * Lee el listado de R2 (`contractType|bucket/key` por línea) o, si lo que se
+ * pasó es un directorio, toma sus `<contractType>.pdf`.
+ */
+async function fuentes(entrada: string): Promise<Fuente[]> {
+	const stat = await fs.stat(entrada);
+
+	if (stat.isDirectory()) {
+		const archivos = (await fs.readdir(entrada))
+			.filter((f) => f.toLowerCase().endsWith(".pdf"))
+			.sort();
+		return archivos.map((f) => ({
+			contractType: path.basename(f, path.extname(f)) as ContractType,
+			archivo: path.join(entrada, f),
+		}));
+	}
+
+	return (await fs.readFile(entrada, "utf8"))
+		.split("\n")
+		.map((l) => l.trim())
+		.filter(Boolean)
+		.map((linea) => {
+			const sep = linea.indexOf("|");
+			return {
+				contractType: linea.slice(0, sep) as ContractType,
+				r2Key: linea.slice(sep + 1),
+			};
+		});
+}
+
 async function main() {
-	const [clavesPath, outDir = "/tmp/inventario-firmas"] = process.argv.slice(2);
-	if (!clavesPath) {
-		console.error("uso: bun scripts/inventario-firmas.ts <claves.txt> [dirSalida]");
+	const [entrada, outDir = "/tmp/inventario-firmas"] = process.argv.slice(2);
+	if (!entrada) {
+		console.error(
+			"uso: bun scripts/inventario-firmas.ts <claves.txt|dirConPdfs> [dirSalida]",
+		);
 		process.exit(1);
 	}
 
-	const lineas = (await fs.readFile(clavesPath, "utf8"))
-		.split("\n")
-		.map((l) => l.trim())
-		.filter(Boolean);
+	const aInventariar = await fuentes(entrada);
+	// El cliente de R2 sólo se arma si hace falta: en modo local no hay
+	// credenciales que exigir.
+	const client = aInventariar.some((f) => "r2Key" in f) ? r2() : undefined;
+	const guardarCopia = aInventariar.some((f) => "r2Key" in f);
+	if (guardarCopia) await fs.mkdir(outDir, { recursive: true });
 
-	await fs.mkdir(outDir, { recursive: true });
-	const client = r2();
-
-	for (const linea of lineas) {
-		const sep = linea.indexOf("|");
-		const contractType = linea.slice(0, sep) as ContractType;
-		const r2Key = linea.slice(sep + 1);
+	for (const fuente of aInventariar) {
+		const { contractType } = fuente;
 
 		console.log("=".repeat(80));
 		console.log(contractType);
@@ -100,15 +144,21 @@ async function main() {
 		try {
 			const p = getSignaturePattern(contractType);
 			console.log(
-				`  declarado: signerCount=${p.signerCount} fieldCount=${p.signatureFieldCount ?? "-"} signers=${JSON.stringify(p.signers ?? [])}`,
+				`  declarado: bloques=${JSON.stringify(p.bloques ?? [])} repeticiones=${p.repeticiones ?? 1} patrón=${JSON.stringify(p.pattern)}`,
 			);
 		} catch {
 			console.log("  declarado: (sin patrón)");
 		}
 
 		try {
-			const buffer = await descargar(client, r2Key);
-			await fs.writeFile(path.join(outDir, `${contractType}.pdf`), buffer);
+			let buffer: Buffer;
+			if ("r2Key" in fuente) {
+				buffer = await descargar(client!, fuente.r2Key);
+				await fs.writeFile(path.join(outDir, `${contractType}.pdf`), buffer);
+			} else {
+				buffer = await fs.readFile(fuente.archivo);
+			}
+
 			const widgets = await widgetsDelPdf(buffer, contractType);
 			console.log(`  PDF real: ${widgets.length} widget(s)`);
 			widgets.forEach((w, i) => {
@@ -124,7 +174,7 @@ async function main() {
 		}
 	}
 
-	console.log(`\nPDFs en ${outDir}`);
+	if (guardarCopia) console.log(`\nPDFs en ${outDir}`);
 }
 
 main().catch((err) => {

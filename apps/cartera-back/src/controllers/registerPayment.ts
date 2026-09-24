@@ -1503,6 +1503,10 @@ export const insertPayment = async (
         // ─────────────────────────────────────────────────────────────────
         const totalProyectadoCuota = aplicadoPrevioCuota.plus(totalPagado);
 
+        // NO se le agrega el CUOTA_INTEGRITY_ERROR_PREFIX: este guard es
+        // preexistente y sigue saliendo como 500. Cambiarle el status es
+        // contrato que el front puede estar leyendo; queda fuera de alcance
+        // de este fix (que solo toca el rechazo por cierre corto de rubros).
         if (totalProyectadoCuota.gt(montoCuota.plus(TOLERANCIA_CENTAVO))) {
           throw new Error(
             `Pago rechazado: la cuota #${cuota.cuotas_credito.numero_cuota} quedaría ` +
@@ -1585,8 +1589,12 @@ export const insertPayment = async (
             .join("; ");
 
           if (accionCierreCorto === "rechazar") {
+            // Es un rechazo de negocio, no una falla del servidor: se prefija
+            // con CUOTA_INTEGRITY_ERROR_PREFIX para que el catch genérico lo
+            // mapee a 409 (igual que los otros dos usos del prefijo), en vez
+            // de dejarlo caer como 500 "Internal server error".
             throw new Error(
-              `Pago rechazado: la cuota #${cuota.cuotas_credito.numero_cuota} se ` +
+              `${CUOTA_INTEGRITY_ERROR_PREFIX} Pago rechazado: la cuota #${cuota.cuotas_credito.numero_cuota} se ` +
                 `cerraría con rubros fijos cobrados de menos — ${detalle}. Los ` +
                 `saldos de la cuota vienen subestimados: revisar los saldos de los ` +
                 `pagos previos de esa cuota antes de registrar.`
@@ -1614,7 +1622,14 @@ export const insertPayment = async (
             disponible: disponible_restante,
             totalPagado,
           });
-          montoNoAplicadoPorCorte = totalPagado;
+          // OJO: `montoNoAplicadoPorCorte` se toma de `disponible_restante`
+          // (ya repuesto), NO de `totalPagado`. El `break` de abajo no solo
+          // frena lo que esta cuota iba a cobrar: frena TODA la cascada, así
+          // que todo lo que quede en `disponible_restante` (incluyendo lo que
+          // habría ido a cuotas posteriores) termina en saldo a favor por el
+          // post-loop. `totalPagado` solo mide la porción de esta cuota y
+          // subestimaría lo no aplicado, inflando el aplicado reportado.
+          montoNoAplicadoPorCorte = disponible_restante;
           cuotaCortadaPorPlanosCortos = cuota.cuotas_credito.numero_cuota;
           break;
         }
@@ -2205,7 +2220,7 @@ export const insertPayment = async (
       montoNoAplicadoPorCorte?.toFixed(2) ?? null;
     const fraseCorteEnCascada =
       cuotaCortadaPorPlanosCortos !== undefined
-        ? `La cuota #${cuotaCortadaPorPlanosCortos} no se cobró: sus rubros fijos (seguro, GPS, membresías) vienen cortos y cerrarla dejaría de cobrarlos.${montoNoAplicadoPorCorteTexto ? ` Los Q${montoNoAplicadoPorCorteTexto} que iban a esa cuota no se aplicaron y quedaron en saldo a favor.` : ""} Revisar sus saldos antes de reintentar.`
+        ? `La cuota #${cuotaCortadaPorPlanosCortos} no se cobró: sus rubros fijos (seguro, GPS, membresías) vienen cortos y cerrarla dejaría de cobrarlos.${montoNoAplicadoPorCorteTexto ? ` Los Q${montoNoAplicadoPorCorteTexto} que quedaban por aplicar no se aplicaron y quedaron en saldo a favor.` : ""} Revisar sus saldos antes de reintentar.`
         : "";
 
     // Jalar la última cuota con plata aplicada (ver `condicionUltimaCuotaPagada`

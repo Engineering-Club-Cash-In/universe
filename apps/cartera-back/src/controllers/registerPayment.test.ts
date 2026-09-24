@@ -26,6 +26,8 @@ import {
   calcularCoberturaCuota,
   getCreditPaymentBlock,
   getInternalNexaPaymentDate,
+  restaurarDisponibleTrasCorteEnCascada,
+  calcularMontoAplicadoReportado,
 } from "./registerPaymentPolicy";
 
 describe("register payment", () => {
@@ -1560,6 +1562,15 @@ describe("cableado del cierre corto en cascada (que un throw no deje la boleta a
     );
   });
 
+  it("el throw de la rama `rechazar` lleva el prefijo de integridad (para que mapee a 409, no 500)", () => {
+    // Es un rechazo de negocio, no una falla del servidor: sin el prefijo el
+    // catch genérico lo deja caer como 500 "Internal server error" en vez de
+    // 409 con el mensaje que le pide al asesor revisar los saldos.
+    expect(bloqueCierreCorto).toContain(
+      "throw new Error(\n              `${CUOTA_INTEGRITY_ERROR_PREFIX}",
+    );
+  });
+
   it("sólo la rama `rechazar` tira; la rama `cortar` corta el loop", () => {
     expect(bloqueCierreCorto).toContain('if (accionCierreCorto === "rechazar") {');
     expect(bloqueCierreCorto).toContain("throw new Error(");
@@ -1626,8 +1637,26 @@ describe("cableado del corte en cascada: la plata no aplicada no se evapora", ()
     expect(corte).toBeGreaterThan(reposicion);
   });
 
-  it("guarda el monto no aplicado para poder reportarlo", () => {
-    expect(bloqueCierreCorto).toContain("montoNoAplicadoPorCorte = totalPagado;");
+  it("guarda el monto no aplicado desde el disponible YA REPUESTO, no desde totalPagado", () => {
+    // El `break` frena TODA la cascada, no solo la porción de esta cuota: lo
+    // no aplicado es todo lo que queda en `disponible_restante` tras reponer,
+    // no `totalPagado` (que subestimaría lo no aplicado e infla el aplicado
+    // reportado). Ver también registerPaymentPolicy.test.ts.
+    expect(bloqueCierreCorto).toContain(
+      "montoNoAplicadoPorCorte = disponible_restante;",
+    );
+    expect(bloqueCierreCorto).not.toContain(
+      "montoNoAplicadoPorCorte = totalPagado;",
+    );
+    // Y la asignación va DESPUÉS de la reposición, no antes.
+    const reposicion = bloqueCierreCorto.indexOf(
+      "disponible_restante = restaurarDisponibleTrasCorteEnCascada({",
+    );
+    const asignacion = bloqueCierreCorto.indexOf(
+      "montoNoAplicadoPorCorte = disponible_restante;",
+    );
+    expect(reposicion).toBeGreaterThan(-1);
+    expect(asignacion).toBeGreaterThan(reposicion);
   });
 
   it("la regla legacy de ≤Q25 no corre cuando hubo corte", () => {
@@ -1649,9 +1678,45 @@ describe("cableado del corte en cascada: la plata no aplicada no se evapora", ()
     expect(registerPaymentSource).toContain(
       "const montoNoAplicadoPorCorteTexto =\n      montoNoAplicadoPorCorte?.toFixed(2) ?? null;",
     );
-    // Y la cifra se menciona en la frase del resumen.
+    // Y la cifra se menciona en la frase del resumen. El texto ya no dice
+    // "que iban a esa cuota" porque el monto incluye TODO lo que quedaba por
+    // aplicar (no solo la porción de esta cuota).
     expect(registerPaymentSource).toContain(
-      "Los Q${montoNoAplicadoPorCorteTexto} que iban a esa cuota no se aplicaron",
+      "Los Q${montoNoAplicadoPorCorteTexto} que quedaban por aplicar no se aplicaron",
+    );
+  });
+});
+
+describe("conservación del monto no aplicado por corte con el disponible completo", () => {
+  // Atrapa el defecto 1: si el corte llega con `disponible_restante` MAYOR
+  // que `totalPagado` (por ejemplo, porque venían cuotas posteriores por
+  // cobrar), lo NO aplicado tiene que ser el disponible repuesto completo,
+  // no solo la porción que esta cuota había consumido. Si se deja
+  // `montoNoAplicadoPorCorte = totalPagado`, lo reportado como aplicado
+  // (boleta - noAplicado) queda inflado y aplicado+noAplicado != boleta.
+  it("aplicado reportado + no aplicado == boleta cuando disponible > totalPagado al cortar", () => {
+    // La boleta completa es 600: esta cuota consumió 100 de disponible
+    // (quedando en 500) antes de que el corte disparara la reposición. Tras
+    // reponer, el disponible vuelve a 600 y ESO es lo no aplicado — nada de
+    // los 600 llegó a aplicarse a ninguna cuota en este escenario.
+    const disponibleAlCortar = new Big("500.00");
+    const totalPagado = new Big("100.00");
+    const montoBoleta = new Big("600.00");
+
+    // Simula el bloque del corte: reponer y ASIGNAR DESDE disponible_restante.
+    const disponibleRepuesto = restaurarDisponibleTrasCorteEnCascada({
+      disponible: disponibleAlCortar,
+      totalPagado,
+    });
+    const montoNoAplicadoPorCorte = disponibleRepuesto;
+
+    const montoTotal = calcularMontoAplicadoReportado({
+      montoBoleta,
+      montoNoAplicadoPorCorte,
+    });
+
+    expect(new Big(montoTotal).plus(montoNoAplicadoPorCorte).toString()).toBe(
+      montoBoleta.toString(),
     );
   });
 });

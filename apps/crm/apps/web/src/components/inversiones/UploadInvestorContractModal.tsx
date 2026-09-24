@@ -226,7 +226,13 @@ export function UploadInvestorContractModal({
 				<DialogFooter>
 					<Button
 						variant="outline"
-						onClick={() => onOpenChange(false)}
+						// Limpia acá también: este botón no pasa por el `onOpenChange`
+						// del diálogo, y el PDF elegido sobrevivía hasta la próxima vez
+						// que se abriera —con otro contrato— y se subía ese.
+						onClick={() => {
+							limpiar();
+							onOpenChange(false);
+						}}
 						disabled={subir.isPending}
 					>
 						Cancelar

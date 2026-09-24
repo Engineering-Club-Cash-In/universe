@@ -1675,6 +1675,14 @@ export function DynamicContractWizard({
 		[crmData, numberToText, moneyToText, valoresIniciales],
 	);
 
+	/**
+	 * Contratos que no salieron. Con alguno así, "Listo" no puede cerrar el
+	 * trabajo: la batería saldría de la lista de jurídico con un contrato de
+	 * menos y nadie se enteraría.
+	 */
+	const fallidos = generationResult?.results.filter((r) => !r.success).length ?? 0;
+	const hayFallidos = fallidos > 0;
+
 	// Fetch documents and fields when moving to step 2
 	const fetchDocumentsData = async () => {
 		if (selectedDocuments.length === 0 || !crmData.cliente.dpi) return;
@@ -3032,26 +3040,58 @@ export function DynamicContractWizard({
 						{/* Sin paso de enlazado, "Listo" es lo único que queda por hacer y
 						    hay que verlo sin bajar hasta el final de los resultados. */}
 						{!onLinkContracts && (
-							<Card className="border-green-200 bg-green-50">
+							<Card
+								className={
+									hayFallidos
+										? "border-amber-200 bg-amber-50"
+										: "border-green-200 bg-green-50"
+								}
+							>
 								<CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
 									<div className="flex items-start gap-3">
-										<div className="rounded-full bg-green-100 p-2">
-											<CheckCircle className="h-5 w-5 text-green-600" />
+										<div
+											className={`rounded-full p-2 ${hayFallidos ? "bg-amber-100" : "bg-green-100"}`}
+										>
+											{hayFallidos ? (
+												<AlertCircle className="h-5 w-5 text-amber-600" />
+											) : (
+												<CheckCircle className="h-5 w-5 text-green-600" />
+											)}
 										</div>
-										<div>
-											<h4 className="font-semibold text-green-800">
-												Contratos emitidos y enlazados
-											</h4>
-											<p className="text-green-700 text-sm">
-												Ya están en la ficha del inversionista, con sus enlaces
-												de firma. Revisá los PDF y dale Listo.
-											</p>
-										</div>
+										{hayFallidos ? (
+											<div>
+												<h4 className="font-semibold text-amber-800">
+													Falta {fallidos} contrato(s)
+												</h4>
+												<p className="text-amber-700 text-sm">
+													Reintentá el que salió en rojo o subilo a mano. Con
+													algo fallido no se puede dar Listo: la batería
+													saldría de tu lista con un contrato de menos.
+												</p>
+											</div>
+										) : (
+											<div>
+												<h4 className="font-semibold text-green-800">
+													Contratos emitidos y enlazados
+												</h4>
+												<p className="text-green-700 text-sm">
+													Ya están en la ficha del inversionista, con sus
+													enlaces de firma. Revisá los PDF y dale Listo.
+												</p>
+											</div>
+										)}
 									</div>
 									<Button
 										size="lg"
 										onClick={() => (onFinish ?? onBack)()}
-										disabled={isGenerating || Boolean(retryingType)}
+										disabled={
+											isGenerating || Boolean(retryingType) || hayFallidos
+										}
+										title={
+											hayFallidos
+												? "Hay contratos que no salieron: reintentalos o subilos a mano"
+												: undefined
+										}
 										className="bg-green-600 hover:bg-green-700"
 									>
 										<Check className="mr-2 h-5 w-5" />
@@ -3146,7 +3186,12 @@ export function DynamicContractWizard({
 					<Button
 						size="lg"
 						onClick={() => (onFinish ?? onBack)()}
-						disabled={isGenerating || Boolean(retryingType)}
+						disabled={isGenerating || Boolean(retryingType) || hayFallidos}
+						title={
+							hayFallidos
+								? "Hay contratos que no salieron: reintentalos o subilos a mano"
+								: undefined
+						}
 						className="bg-green-600 hover:bg-green-700"
 					>
 						<Check className="mr-2 h-5 w-5" />

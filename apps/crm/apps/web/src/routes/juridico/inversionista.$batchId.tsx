@@ -553,6 +553,10 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<DynamicContractWizard
+							// Cambiar de categoría arranca de cero: si no, los contratos
+							// elegidos de la otra siguen seleccionados —y ocultos, porque
+							// el catálogo cambió— y se emitirían igual.
+							key={categoria ?? "sin-categoria"}
 							documentTypes={documentTypes}
 							crmData={crmData}
 							onGetDocumentsByDpi={traerCampos}

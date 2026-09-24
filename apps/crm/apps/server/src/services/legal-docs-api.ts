@@ -432,6 +432,21 @@ export interface EstadoFirmante {
 	signingUrl: string | null;
 	/** Epoch en milisegundos, o null si el link no vence. */
 	expiry: number | null;
+	/**
+	 * Cómo le fue a la verificación facial, en quien la lleva (el inversionista
+	 * en los contratos de inversión, el deudor en el reconocimiento de deuda).
+	 *
+	 * Es lo que explica un documento con todas las firmas que WeeTrust no cierra:
+	 * si la verificación terminó (`finished`) y salió inválida (`valid: false`),
+	 * el documento se queda en PENDING y no avanza solo. `null` en quien firma
+	 * sin verificación facial.
+	 */
+	biometric?: {
+		logID: string | null;
+		finished: boolean;
+		valid: boolean;
+		resultUrl: string | null;
+	} | null;
 }
 
 export interface EstadoDocumentoFirma {
@@ -602,6 +617,46 @@ export async function descargarPdfFirmado(documentID: string): Promise<Blob> {
 	}
 
 	return response.blob();
+}
+
+/**
+ * Repite o salta la verificación facial de un firmante que no la pasó.
+ *
+ * Es la salida del documento que se queda abierto con todas las firmas puestas:
+ * la persona firmó, WeeTrust no le validó la identidad y así no cierra. Con
+ * `biometricRetry` se le vuelve a pedir sobre el MISMO documento —los enlaces
+ * que ya tiene siguen sirviendo, no hay que reemitir nada— y con
+ * `biometricSkipped` el documento cierra con la firma tal como está, sin
+ * validación de identidad.
+ */
+export async function reintentarBiometria(payload: {
+	documentID: string;
+	/** El del intento fallido: viene en el `biometric` del firmante. */
+	biometricLogID: string;
+	action: "biometricRetry" | "biometricSkipped";
+}): Promise<void> {
+	const response = await fetch(
+		`${LEGAL_DOCS_API_URL}/contracts/retry-biometric/${encodeURIComponent(payload.documentID)}`,
+		{
+			method: "PUT",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
+				...secretoParaElGenerador(),
+			},
+			body: JSON.stringify({
+				biometricLogID: payload.biometricLogID,
+				action: payload.action,
+			}),
+			signal: AbortSignal.timeout(TOPE_CONSULTA_MS),
+		},
+	);
+
+	if (!response.ok) {
+		throw new Error(
+			`No se pudo ${payload.action === "biometricRetry" ? "pedir de nuevo la verificación facial" : "omitir la verificación facial"}: ${response.status} - ${await response.text()}`,
+		);
+	}
 }
 
 export async function borrarDocumentoDeWeeTrust(

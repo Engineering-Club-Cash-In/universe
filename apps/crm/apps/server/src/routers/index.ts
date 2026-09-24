@@ -324,6 +324,8 @@ export const legalAppRouter = {
 		investorContractsRouter.getInvestmentContractTypes,
 	getInvestorContractSigningStatus:
 		investorContractsRouter.getInvestorContractSigningStatus,
+	retryInvestorContractBiometric:
+		investorContractsRouter.retryInvestorContractBiometric,
 	resendInvestorContractSigningEmails:
 		investorContractsRouter.resendInvestorContractSigningEmails,
 	refreshInvestorContractSigningLinks:

@@ -1047,16 +1047,39 @@ async function cargarAutorizaciones(
 }
 
 /**
- * Foto del catálogo activo. El gate de aprobación la compara dentro del mismo
- * UPDATE: si cobros agregó o editó a alguien mientras se aprobaba, la huella
- * cambia y la aprobación falla en vez de pasar sin revisar al nuevo registro.
+ * Foto de todo lo que entra en una evaluación: el catálogo activo, las reglas
+ * de coincidencia y la gente de la solicitud (lead, codeudores y referencias).
+ *
+ * El gate de aprobación compara esta misma expresión dentro del UPDATE que
+ * aprueba: si algo de eso cambió entre la revisión y la escritura —cobros
+ * registró a alguien, supervisión encendió una regla, ventas agregó un
+ * codeudor— la huella no coincide, no se afecta ninguna fila y la aprobación
+ * falla en vez de pasar sin haber evaluado lo nuevo.
  */
-export async function huellaBuroInterno(): Promise<string> {
-	const { rows } = await db.execute<{ huella: string }>(
-		sql`SELECT count(*)::text || ':' || coalesce(max(updated_at)::text, '') AS huella
-			FROM public.buro_interno_personas WHERE activo`,
-	);
-	return rows[0]?.huella ?? "0:";
+export function huellaEvaluacionSql(
+	opportunityIdExpr: SQL,
+	leadIdExpr: SQL,
+): SQL {
+	const foto = (tabla: string, filtro?: SQL) =>
+		sql`(SELECT count(*)::text || ':' || coalesce(max(updated_at)::text, '')
+			FROM ${sql.raw(tabla)}${filtro ? sql` WHERE ${filtro}` : sql``})`;
+
+	return sql`concat_ws('|',
+		${foto("public.buro_interno_personas", sql`activo`)},
+		${foto("public.buro_interno_reglas")},
+		${foto("public.co_debtors", sql`opportunity_id = ${opportunityIdExpr}`)},
+		${foto("public.referencias_lead", sql`lead_id = ${leadIdExpr}`)},
+		${foto("public.leads", sql`id = ${leadIdExpr}`)}
+	)`;
+}
+
+export async function huellaEvaluacion(opportunityId: string): Promise<string> {
+	const { rows } = await db.execute<{ huella: string }>(sql`
+		SELECT ${huellaEvaluacionSql(sql`o.id`, sql`o.lead_id`)} AS huella
+		FROM public.opportunities o
+		WHERE o.id = ${opportunityId}
+	`);
+	return rows[0]?.huella ?? "";
 }
 
 /**
@@ -1079,7 +1102,12 @@ export async function autorizarOportunidad(
 
 	await db.transaction(async (tx) => {
 		for (const bloqueante of evaluacion.bloqueantes) {
-			const [insertada] = await tx
+			// Si ya hay una fila para esta persona pero de otra identidad (le
+			// cambiaron el lead o el DPI), se reemplaza: esa autorización vieja
+			// ya no aplica y sin esto el analista no podría dar la nueva.
+			// Cuando la fila existente es de la MISMA identidad no se escribe
+			// nada, así dos analistas a la vez no anotan dos autorizaciones.
+			const [guardada] = await tx
 				.insert(buroInternoAutorizaciones)
 				.values({
 					opportunityId,
@@ -1089,12 +1117,24 @@ export async function autorizarOportunidad(
 					motivo: motivo.trim(),
 					autorizadoPor: actor.id,
 				})
-				.onConflictDoNothing()
+				.onConflictDoUpdate({
+					target: [
+						buroInternoAutorizaciones.opportunityId,
+						buroInternoAutorizaciones.personaId,
+					],
+					set: {
+						leadId: evaluacion.identidad.leadId,
+						dpi: evaluacion.identidad.dpi,
+						motivo: motivo.trim(),
+						autorizadoPor: actor.id,
+						createdAt: new Date(),
+					},
+					setWhere: sql`${buroInternoAutorizaciones.leadId} IS DISTINCT FROM excluded.lead_id
+						OR ${buroInternoAutorizaciones.dpi} IS DISTINCT FROM excluded.dpi`,
+				})
 				.returning({ id: buroInternoAutorizaciones.id });
 
-			// Con dos analistas autorizando a la vez, el que pierde no escribe
-			// nada: anotar igual le atribuiría una autorización que no creó
-			if (!insertada) continue;
+			if (!guardada) continue;
 
 			await registrarEvento(tx, {
 				accion: "autorizacion_analisis",
@@ -1115,7 +1155,9 @@ export async function autorizarOportunidad(
 export async function bloqueoBuroInterno(
 	opportunityId: string,
 ): Promise<{ bloquea: boolean; nombres: string[]; huella: string }> {
-	const huella = await huellaBuroInterno();
+	// Se toma ANTES de evaluar: si algo cambia mientras se evalúa, la huella
+	// queda vieja y la aprobación falla, que es el lado seguro del error
+	const huella = await huellaEvaluacion(opportunityId);
 
 	try {
 		const evaluacion = await evaluarOportunidad(opportunityId);

@@ -157,6 +157,8 @@ export const buroInternoAutorizaciones = pgTable(
 			.notNull()
 			.defaultNow(),
 	},
+	// Una fila por oportunidad y persona: si cambia la identidad evaluada, la
+	// autorización se reemplaza en vez de acumular filas muertas
 	(table) => [
 		uniqueIndex("buro_interno_autorizaciones_uq").on(
 			table.opportunityId,

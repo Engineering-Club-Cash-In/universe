@@ -1865,21 +1865,34 @@ describe("cableado de la restitución de mora (que un rechazo no le regale la mo
     expect(bloque).toContain("moraCreditoIdSinRegistrar = credito.credito_id;");
   });
 
-  it("vuelve a 0 en CADA sitio donde queda commiteada una fila de pago", () => {
-    // Si falta en alguno, el catch compensaría una mora que el pago ya cubrió:
-    // doble cobro al cliente.
+  it("vuelve a 0 recién DESPUÉS de que cierra la transacción que escribe la fila", () => {
+    // El reset tiene que quedar después del `await db.transaction(...)` que
+    // inserta/actualiza la fila de pago, no justo tras el `cuotas_*++`: si la
+    // transacción falla, el flag debe seguir prendido para que el catch
+    // restituya (si no, el defecto original vuelve disparado por un error de
+    // base en vez de por el guard). Si falta en algún sitio, el catch
+    // compensaría una mora que el pago ya cubrió: doble cobro al cliente.
     for (const contador of ["cuotas_completas\\+\\+;", "cuotas_parciales\\+\\+;"]) {
       const total = [...cuerpoInsertPayment.matchAll(
         new RegExp(` {14}${contador}`, "g"),
       )];
       expect(total.length).toBeGreaterThan(0);
-      const conReset = [...cuerpoInsertPayment.matchAll(
+      const conResetTrasTransaccion = [...cuerpoInsertPayment.matchAll(
+        new RegExp(
+          ` {14}${contador}[\\s\\S]*?\\n {14}\\}\\);\\n(?: *\\/\\/[^\\n]*\\n)* *moraAplicadaSinRegistrar = 0;`,
+          "g",
+        ),
+      )];
+      expect(conResetTrasTransaccion.length).toBe(total.length);
+      // Y que NO quede pegado al incremento (eso sería la posición vieja,
+      // ANTES de que la transacción confirme la escritura).
+      const pegadoAlIncremento = [...cuerpoInsertPayment.matchAll(
         new RegExp(
           ` {14}${contador}\\n(?: *\\/\\/[^\\n]*\\n)* *moraAplicadaSinRegistrar = 0;`,
           "g",
         ),
       )];
-      expect(conReset.length).toBe(total.length);
+      expect(pegadoAlIncremento.length).toBe(0);
     }
     // Los returns de éxito tempranos de sólo-mora: ahí la mora SÍ quedó
     // registrada en la fila que `insertarPago` acaba de escribir.

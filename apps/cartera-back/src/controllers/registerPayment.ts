@@ -1826,10 +1826,6 @@ export const insertPayment = async (
               // pisarla con el pago de cierre no destruye plata. Comportamiento
               // histórico para el caso normal.
               cuotas_completas++;
-              // A partir de esta cuota ya existe una fila de pago que respalda la
-              // mora descontada antes del loop: compensarla en el `catch` sería
-              // cobrarla dos veces.
-              moraAplicadaSinRegistrar = 0;
 
               // El UPDATE de esta fila y el marcado del ajuste (si aplica a la
               // cuota 1) van en una sola transacción: si el marcado falla, el
@@ -1872,6 +1868,12 @@ export const insertPayment = async (
                 }
                 return rows;
               });
+              // Recién aquí, con la transacción cerrada, existe una fila de
+              // pago que respalda la mora descontada antes del loop:
+              // compensarla en el `catch` sería cobrarla dos veces. Si la
+              // transacción falla, no llegamos a esta línea y el flag sigue
+              // prendido para que el `catch` restituya.
+              moraAplicadaSinRegistrar = 0;
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
               }
@@ -1909,10 +1911,6 @@ export const insertPayment = async (
               // parcial pero `pagado: true` y restantes en 0). El UPDATE masivo
               // de abajo marca toda la cuota como pagada.
               cuotas_completas++;
-              // A partir de esta cuota ya existe una fila de pago que respalda la
-              // mora descontada antes del loop: compensarla en el `catch` sería
-              // cobrarla dos veces.
-              moraAplicadaSinRegistrar = 0;
 
 
               const fechaGuatemala = paymentRegistrationDate();
@@ -2017,6 +2015,12 @@ export const insertPayment = async (
               }
               return rows;
               });
+              // Recién aquí, con la transacción cerrada, existe una fila de
+              // pago que respalda la mora descontada antes del loop:
+              // compensarla en el `catch` sería cobrarla dos veces. Si la
+              // transacción falla, no llegamos a esta línea y el flag sigue
+              // prendido para que el `catch` restituya.
+              moraAplicadaSinRegistrar = 0;
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
               }
@@ -2071,10 +2075,6 @@ export const insertPayment = async (
                 disponible_para_cuotasPosteriores.plus(disponible);
 
               cuotas_parciales++;
-              // A partir de esta cuota ya existe una fila de pago que respalda la
-              // mora descontada antes del loop: compensarla en el `catch` sería
-              // cobrarla dos veces.
-              moraAplicadaSinRegistrar = 0;
               const fechaGuatemala = paymentRegistrationDate();
 
 
@@ -2176,6 +2176,12 @@ export const insertPayment = async (
               }
               return rows;
               });
+              // Recién aquí, con la transacción cerrada, existe una fila de
+              // pago que respalda la mora descontada antes del loop:
+              // compensarla en el `catch` sería cobrarla dos veces. Si la
+              // transacción falla, no llegamos a esta línea y el flag sigue
+              // prendido para que el `catch` restituya.
+              moraAplicadaSinRegistrar = 0;
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
               }

@@ -42,6 +42,39 @@ export interface AvisoAccesoPortal {
 }
 
 /**
+ * Buscar un texto en una de las tablas de traducción CON LA CLAVE DEL SERVIDOR.
+ *
+ * `TABLA[clave]` sobre un objeto literal no consulta solo lo que se escribió
+ * ahí: `Object.prototype` aporta `constructor`, `toString`, `valueOf`,
+ * `hasOwnProperty`… y todas devuelven algo truthy. Las claves que se buscan
+ * acá son códigos que viajan desde el servidor —las `advertencias` salen
+ * verbatim de auth-google, y por el camino de ESCRITURA el `motivo` puede ser
+ * una cadena arbitraria (`String(error?.message ?? error)`,
+ * portalProvisioning.ts)—, así que un `motivo: "constructor"` no es un
+ * imposible teórico: es una cadena más.
+ *
+ * Y el resultado no se queda en un `undefined` inofensivo. Estas tablas se
+ * interpolan en el aviso que lee una persona: con `constructor` salía
+ * `function Object() { [native code] }` metido en la frase, y con una tabla de
+ * objetos (`{ problema, siContinuar }`) salía `"undefined undefined"`. El
+ * aviso es el único control de un botón que manda contraseñas: no puede pintar
+ * basura.
+ *
+ * Se exporta porque el mismo patrón vive en la pantalla del inversionista
+ * (`ESTADOS_ACCESO_PORTAL`, `MOTIVOS_CUENTA_PORTAL_ROTA`), y una copia que se
+ * olvide es exactamente el mismo agujero. Acá, además, queda probado.
+ */
+export const valorDeTabla = <T>(
+	tabla: Record<string, T>,
+	clave: unknown,
+): T | undefined =>
+	// `Object.hasOwn` y no `clave in tabla`: `in` también recorre el prototipo,
+	// que es justo lo que hay que dejar fuera.
+	typeof clave === "string" && Object.hasOwn(tabla, clave)
+		? tabla[clave]
+		: undefined;
+
+/**
  * Desde dónde se está leyendo el aviso. NO es cosmético: cambia qué se puede
  * aconsejar.
  *
@@ -83,6 +116,18 @@ const COMO_SE_ARREGLA: Record<OrigenAviso, string> = {
 };
 
 /**
+ * El `origen` está tipado, pero el tipo no existe en tiempo de ejecución: esta
+ * función la llama código JS de dos pantallas y su valor termina indexando la
+ * tabla de arriba. Por el mismo camino que los códigos del servidor —un
+ * `"constructor"` devuelve la función y se interpola como
+ * `function Object() { [native code] }`—, así que se resuelve con la misma
+ * guarda y lo que no sea uno de los dos orígenes cae en el del alta, que es el
+ * valor por omisión documentado.
+ */
+const comoSeArregla = (origen: OrigenAviso): string =>
+	valorDeTabla(COMO_SE_ARREGLA, origen) ?? COMO_SE_ARREGLA.alta;
+
+/**
  * Por qué no se pudo, en palabras. Lo que no está en la lista se calla en vez de
  * enseñar el código crudo: el detalle técnico ya viaja en `audit_logs`.
  */
@@ -118,7 +163,7 @@ const CAUSA_EN_PALABRAS: Record<string, string> = {
 };
 
 const causa = (motivo: string | null): string => {
-	const texto = motivo ? CAUSA_EN_PALABRAS[motivo] : undefined;
+	const texto = valorDeTabla(CAUSA_EN_PALABRAS, motivo);
 	if (texto) return ` (${texto})`;
 	if (motivo?.startsWith("http_")) return " (el portal respondió con un error)";
 	return "";
@@ -267,9 +312,7 @@ const mensajeDeFallo = (
 	);
 	// Los motivos que tampoco se arreglan reintentando, pero que SÍ tienen un
 	// arreglo que nombrar. Van por motivo, no por advertencia: son el desenlace.
-	const enVezDeReintentar = acceso.motivo
-		? EN_VEZ_DE_REINTENTAR[acceso.motivo]
-		: undefined;
+	const enVezDeReintentar = valorDeTabla(EN_VEZ_DE_REINTENTAR, acceso.motivo);
 
 	// Desde el botón no se creó ningún inversionista: la fila ya existía y
 	// sigue igual. Decirle "no lo vuelvas a crear" sería hablarle de un alta
@@ -301,13 +344,60 @@ const mensajeDeFallo = (
 	};
 };
 
+/**
+ * Lo que llega NO cumple `AccesoPortal` por el hecho de estar tipado así.
+ *
+ * Los dos llamadores le pasan JSON crudo de una respuesta (`data.accesoPortal`
+ * y `data?.resultados?.[0]`, los dos `any`), y el contrato de este módulo es
+ * "ante cualquier otra forma, `null`" — así lo dicen los comentarios de los
+ * cuatro sitios que lo llaman, y de eso depende que el toast de "no se pudo
+ * confirmar" exista. La guarda `if (!acceso)` cumplía la mitad: con
+ * `{estado:"fallo", motivo:"http_500"}` —una forma que el servidor puede
+ * devolver— el `.map` sobre `advertencias` ausente TIRABA. Y tirar acá no es
+ * un `null`: pasa dentro del `onSuccess`, TanStack lo desvía al `onError`, y
+ * quien lee ve un error rojo genérico con el diálogo todavía abierto y el
+ * botón vivo DESPUÉS de que la contraseña ya salió.
+ *
+ * Así que la forma se normaliza una vez, acá, y de ahí para abajo el resto del
+ * módulo lee campos que existen. Cada campo cae al valor que significa "no sé":
+ * nunca a uno que afirme algo.
+ */
+const normalizar = (acceso: unknown): AccesoPortal => {
+	const crudo = acceso as Partial<AccesoPortal> | null;
+	const correo = (crudo?.correo ?? null) as AccesoPortal["correo"] | null;
+	return {
+		estado: typeof crudo?.estado === "string" ? crudo.estado : "",
+		usuarioEmail:
+			typeof crudo?.usuarioEmail === "string" ? crudo.usuarioEmail : null,
+		correo: {
+			enviado: correo?.enviado === true,
+			plantilla: typeof correo?.plantilla === "string" ? correo.plantilla : null,
+			redirigido: correo?.redirigido === true,
+			destinatarioReal:
+				typeof correo?.destinatarioReal === "string"
+					? correo.destinatarioReal
+					: null,
+		},
+		// Los no-cadena se descartan en vez de colarse: son claves de tabla y de
+		// `includes`, y un objeto ahí no traduce a nada pero sí se interpola.
+		advertencias: Array.isArray(crudo?.advertencias)
+			? crudo.advertencias.filter((a): a is string => typeof a === "string")
+			: [],
+		motivo: typeof crudo?.motivo === "string" ? crudo.motivo : null,
+	};
+};
+
 export const avisoAccesoPortal = (
-	acceso: AccesoPortal | null | undefined,
+	// `unknown` y no `AccesoPortal`: es lo que de verdad entra. Declararlo con
+	// el tipo bueno era la ficción que dejó pasar la forma que tiraba.
+	accesoCrudo: unknown,
 	// Por omisión, el alta: es el camino que ya existía y el único que la
 	// pantalla de liquidaciones usa. Quien lo llame desde el botón lo dice.
 	origen: OrigenAviso = "alta",
 ): AvisoAccesoPortal | null => {
-	if (!acceso) return null;
+	if (!accesoCrudo || typeof accesoCrudo !== "object") return null;
+
+	const acceso = normalizar(accesoCrudo);
 
 	const avisos = acceso.advertencias
 		.map((a) => texto(a, acceso))
@@ -336,13 +426,13 @@ export const avisoAccesoPortal = (
 		if (acceso.motivo === "sin_correo") {
 			return {
 				tono: "advertencia",
-				texto: `Quedó sin acceso al portal porque no tiene correo capturado. Agrégaselo y después ${COMO_SE_ARREGLA[origen]}.`,
+				texto: `Quedó sin acceso al portal porque no tiene correo capturado. Agrégaselo y después ${comoSeArregla(origen)}.`,
 			};
 		}
 		if (acceso.motivo === "sin_nombre") {
 			return {
 				tono: "advertencia",
-				texto: `Quedó sin acceso al portal porque no tiene nombre capturado. Agrégaselo y después ${COMO_SE_ARREGLA[origen]}.`,
+				texto: `Quedó sin acceso al portal porque no tiene nombre capturado. Agrégaselo y después ${comoSeArregla(origen)}.`,
 			};
 		}
 		// El servicio del CRM no es ADMIN, así que cartera ni lo intentó. Es un

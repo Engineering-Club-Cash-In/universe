@@ -61,7 +61,7 @@ import {
 	TooltipContent,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { avisoAccesoPortal } from "@/lib/acceso-portal";
+import { avisoAccesoPortal, valorDeTabla } from "@/lib/acceso-portal";
 import { authClient } from "@/lib/auth-client";
 import {
 	errorRepLegal,
@@ -470,15 +470,57 @@ const ACTION_LABELS: Record<string, string> = {
  * `details.estado` y son los mismos que traduce `@/lib/acceso-portal`; acá solo
  * se resumen en una etiqueta, porque la bitácora es una lista y no un aviso.
  *
- * Lo que no esté en la lista se calla en vez de enseñar el código crudo: la fila
- * ya dice QUIÉN y CUÁNDO, que es a lo que sirve la bitácora.
+ * NINGUNA fila de acceso se queda sin insignia. Antes el render iba guardado
+ * por `ESTADOS_ACCESO_PORTAL[details.estado] &&`, así que un estado que la
+ * tabla no conociera —o uno nulo— salía sin nada y quedaba INDISTINGUIBLE de
+ * una fila normal. Justo el caso peor: `sin_respuesta_de_cartera` es la fila
+ * que significa "puede que haya salido una contraseña y nadie sabe", y sin
+ * insignia nadie la iba a mirar. La duda se VE.
  */
-const ESTADOS_ACCESO_PORTAL: Record<string, string> = {
-	creada: "Cuenta creada",
-	ya_tenia: "Ya tenía cuenta",
-	avisada: "Se avisó al representante",
-	omitida: "No se le abrió",
-	fallo: "No se pudo",
+const ESTADOS_ACCESO_PORTAL: Record<
+	string,
+	{ etiqueta: string; clase: string }
+> = {
+	creada: { etiqueta: "Cuenta creada", clase: "" },
+	ya_tenia: { etiqueta: "Ya tenía cuenta", clase: "" },
+	avisada: { etiqueta: "Se avisó al representante", clase: "" },
+	omitida: { etiqueta: "No se le abrió", clase: "" },
+	fallo: { etiqueta: "No se pudo", clase: "" },
+	// Este NO es de la enumeración de cartera: lo escribe el propio servidor del
+	// CRM cuando cartera no contestó (`investor-documents.ts:735-737`, junto con
+	// la advertencia `no_se_sabe_si_la_contrasena_salio`). El salto CRM→cartera
+	// se abortó mientras cartera podía seguir dentro de su `fetch` a
+	// auth-google, así que la contraseña PUDO salir. Va en rojo y nombrando la
+	// duda, no el error: "no se pudo" sería afirmar que no pasó nada.
+	sin_respuesta_de_cartera: {
+		etiqueta: "No se sabe si salió la contraseña",
+		clase:
+			"border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-950 dark:text-red-300",
+	},
+};
+
+/**
+ * Un estado que esta tabla no conoce tampoco se calla. El código crudo no se
+ * enseña —es jerga del backend— pero que hubo un desenlace que esta pantalla
+ * no sabe leer sí se dice: callarlo lo pinta como una fila normal, y la fila
+ * que no sabemos leer es justo la que hay que mirar.
+ */
+const ESTADO_ACCESO_DESCONOCIDO = {
+	etiqueta: "Desenlace no reconocido",
+	clase:
+		"border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300",
+};
+
+/**
+ * El tipo de reinversión, en palabras. Vive acá y no en línea dentro del JSX
+ * por lo mismo que las otras tablas: la clave la manda cartera.
+ */
+const ETIQUETAS_REINVERSION: Record<string, string> = {
+	reinversion_capital: "Reinversión Capital",
+	reinversion_interes: "Reinversión Interés",
+	reinversion_total: "Reinversión Total",
+	reinversion_variable: "Reinversión Variable",
+	reinversion_combinada: "Reinversión Combinada",
 };
 
 const ACTION_COLORS: Record<string, string> = {
@@ -557,9 +599,9 @@ function InvestorActivityLogSection({
 									<div className="flex flex-wrap items-center gap-2">
 										<Badge
 											variant="outline"
-											className={`text-[10px] ${ACTION_COLORS[log.action] ?? ""}`}
+											className={`text-[10px] ${valorDeTabla(ACTION_COLORS, log.action) ?? ""}`}
 										>
-											{ACTION_LABELS[log.action] ?? log.action}
+											{valorDeTabla(ACTION_LABELS, log.action) ?? log.action}
 										</Badge>
 										{details?.nombre || details?.documentoNombre ? (
 											<span className="truncate font-medium text-xs">
@@ -581,12 +623,26 @@ function InvestorActivityLogSection({
 											mirar. */}
 										{log.action === "acceso_portal" && (
 											<>
-												{details?.estado &&
-												ESTADOS_ACCESO_PORTAL[details.estado] ? (
-													<Badge variant="outline" className="text-[10px]">
-														{ESTADOS_ACCESO_PORTAL[details.estado]}
-													</Badge>
-												) : null}
+												{(() => {
+													// Con `valorDeTabla` y no `TABLA[clave]`: `details`
+													// es JSON que escribió el servidor, y un
+													// `estado: "constructor"` devolvería la función
+													// heredada de `Object.prototype` —truthy— para
+													// terminar pintando `undefined` en la insignia.
+													const estado =
+														valorDeTabla(
+															ESTADOS_ACCESO_PORTAL,
+															details?.estado,
+														) ?? ESTADO_ACCESO_DESCONOCIDO;
+													return (
+														<Badge
+															variant="outline"
+															className={`text-[10px] ${estado.clase}`}
+														>
+															{estado.etiqueta}
+														</Badge>
+													);
+												})()}
 												{details?.usuarioEmail ? (
 													<span className="truncate text-muted-foreground text-xs">
 														{details.usuarioEmail}
@@ -1078,6 +1134,40 @@ function InvestorLiquidacionesPage() {
 		campo: string;
 		mensaje: string;
 	} | null>(null);
+	// 🔴 NINGÚN DIÁLOGO SOBREVIVE A UN CAMBIO DE INVERSIONISTA.
+	//
+	// Esta ruta NO se re-monta al cambiar `$inversionistaId` —no está
+	// re-keyed—, así que el estado de los modales viaja con quien navega. Un
+	// modal de Radix tampoco bloquea el botón Atrás del navegador, que es el
+	// reflejo normal para cancelar.
+	//
+	// El caso que lo obliga es "Dar acceso al portal": alguien lo abre en el
+	// inversionista 7, lee y aprueba `ana@x.com`, le da Atrás, y el diálogo
+	// sigue ABIERTO, repintado con los datos del 6 y con el botón vivo. Un clic
+	// de memoria muscular manda la contraseña al inversionista equivocado, con
+	// la revisión humana hecha sobre otro.
+	//
+	// Se cierran todos y no solo ese, porque todos escriben contra el id del
+	// render de AHORA: la compra de cartera mueve dinero, "liquidar todo" cambia
+	// el status, y Editar guarda los campos de una ficha sobre la otra. El
+	// mismo bug, la misma línea.
+	//
+	// El efecto no LEE `investorIdNum`: reacciona a que CAMBIE, igual que el
+	// drawer de `components/header.tsx` con la ruta. Quitarlo de la lista lo
+	// dejaría sin disparador y devolvería el defecto.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: es el disparador, no una lectura
+	useEffect(() => {
+		setAccesoPortalOpen(false);
+		setEditOpen(false);
+		setConfirmarQuitarRepOpen(false);
+		setLiquidarTodoOpen(false);
+		setCompraCarteraOpen(false);
+		// Lo mismo que hace el `onOpenChange` de ese modal al cerrarse: cerrarlo
+		// por acá sin esto dejaría el monto tecleado para la ficha siguiente.
+		setCompraCarteraMonto("");
+		setCompraCarteraSpreadOverrideId(null);
+	}, [investorIdNum]);
+
 	const errorEn = (campo: string) => campoConError?.campo === campo;
 	// Al corregir el dato que falló, la marca deja de aplicar.
 	const limpiarError = (campo: string) => {
@@ -1248,26 +1338,42 @@ function InvestorLiquidacionesPage() {
 		return Array.isArray(raw) ? raw[0] ?? null : raw;
 	}, [investorsQuery.data]);
 
-	// "Es empresa" se DERIVA igual que en el modal de editar: el representante
-	// tiene que ser OTRA persona. Comparado sin ceros a la izquierda, porque
-	// hay filas con `dpi = 4036613` y `dpi_rep_legal = '04036613'` — el mismo
-	// número — que no son empresas.
-	const accesoPortalEsEmpresa = esEmpresaInicial(
-		(investor as any)?.dpiRepLegal ?? (investor as any)?.dpi_rep_legal,
-		(investor as any)?.dpi,
-	);
-	// Recortado: un correo de solo espacios NO es un correo capturado, y sin el
-	// `trim` pasaba como presente —el aviso rojo se callaba y el botón de
-	// confirmar quedaba habilitado— para que cartera lo rechazara después.
-	const accesoPortalEmail = ((investor?.email ?? "") as string).trim();
-	// ¿Ya cargó la fila? Mientras `investorsQuery` no resuelve, `investor` es
-	// `null` y las dos derivaciones de arriba salen en su valor vacío: el
-	// diálogo diría "— sin correo capturado —" y "Agregáselo primero desde
-	// Editar" sobre alguien que SÍ tiene correo, y quien lo lea va a Editar, lo
-	// encuentra ahí, y se queda con dos pantallas que se contradicen. El botón
-	// de abajo no abre el diálogo hasta que haya fila, igual que el "Editar"
-	// vecino.
-	const accesoPortalDatosListos = !!investor;
+	// 🔴 EL CORREO DEL DIÁLOGO NO PUEDE SALIR DE `investorsQuery`.
+	//
+	// `getInversionistas` se sirve de la caché EN PROCESO del servidor
+	// (`cartera-back-client.ts`, `getInvestors()` pide con `useCache = true`,
+	// TTL 5 minutos, `CARTERA_BACK_ENABLE_CACHE=true`) y NADIE la invalida
+	// nunca: no hay un solo llamador de `invalidateCache`/`clearCache` en todo
+	// el servidor. O sea que después de corregir el correo en Editar, la
+	// invalidación de TanStack refetchea… y el servidor vuelve a contestar la
+	// fila VIEJA hasta cinco minutos.
+	//
+	// Con el correo saliendo de ahí, el diálogo enseñaba el correo viejo, la
+	// persona lo aprobaba, y cartera —que lee la tabla fresca al provisionar—
+	// mandaba la contraseña al NUEVO. El único control humano de este botón
+	// terminaba aprobando una dirección que no es la que recibe la contraseña.
+	// Lo mismo con "¿es empresa?": recién marcada como empresa, el diálogo
+	// seguía ofreciendo el flujo de persona.
+	//
+	// Así que el diálogo se pinta con DOS lecturas sin caché:
+	//
+	//  1. `estadoAccesoPortal` (abajo) decide empresa-vs-persona. Va sin caché
+	//     de punta a punta —`consultarAccesoPortal` deja `useCache` en su
+	//     default y el controlador de cartera hace su propio `select` sobre
+	//     `inversionistas`— y `omitida/es_empresa` es exactamente la decisión
+	//     que va a tomar el camino que escribe.
+	//  2. `identidadInversionista` (abajo) trae el NOMBRE y el CORREO frescos.
+	//     También va sin caché por las dos puntas: el cliente la pide con
+	//     `useCache = false` a propósito, y acá se pide con `staleTime: 0` y
+	//     `gcTime: 0`, igual que ya lo hace la detección de empresas del alta
+	//     (`liquidaciones.index.tsx`), que es el gemelo de este mismo defecto.
+	//
+	// Lo de la fila cacheada se usa SOLO como pista de búsqueda (el DPI y el
+	// correo con los que preguntar), nunca como dato que se enseñe: si la pista
+	// está vieja, la respuesta no casa por id y el diálogo se declara incapaz
+	// de confirmar en vez de enseñar algo falso. Falla cerrado.
+	const accesoPortalPistaDpi = String((investor as any)?.dpi ?? "").trim();
+	const accesoPortalPistaEmail = ((investor?.email ?? "") as string).trim();
 
 	// ¿Ya tiene cuenta en el portal? Solo lectura: sirve para poner el botón en
 	// gris sin tener que apretarlo para averiguarlo.
@@ -1293,6 +1399,23 @@ function InvestorLiquidacionesPage() {
 		// El único momento en que este valor cambia es el botón de abajo, y ese
 		// ya invalida esta misma llave a mano.
 		staleTime: 5 * 60 * 1000,
+		// 🔴 SIN REINTENTOS. Esta consulta corre en CADA carga de esta pantalla
+		// y el modo de fallo no es un tropiezo de red: con `CARTERA_USER` mal
+		// configurado —un estado real y documentado
+		// (`cartera-back/DEPLOYMENT.md`)— cartera contesta 403 SIEMPRE. Con los
+		// 3 reintentos por defecto de TanStack eso son 4 llamadas por vista, y
+		// cada una hace que el cliente del servidor tire y renueve el token de
+		// servicio que comparte TODO el CRM. Reintentar un permiso que falta no
+		// lo consigue: solo multiplica el daño.
+		//
+		// Y que quede dicho: un fallo acá NO es silencioso. El `QueryCache` del
+		// cliente (`utils/orpc.ts`) pinta un `toast.error("Error: …")` por cada
+		// consulta que falla, sin mirar la query, así que el 403 sale en rojo en
+		// cada carga de esta pantalla. No se puede callar desde acá —el
+		// manejador es global— y prometer lo contrario en este comentario sería
+		// la misma mentira que hizo falta venir a arreglar. Lo que sí queda
+		// acotado es el número de toasts: uno por carga, no cuatro.
+		retry: false,
 	});
 	const estadoAccesoPortal = estadoAccesoPortalQuery.data as
 		| {
@@ -1304,6 +1427,121 @@ function InvestorLiquidacionesPage() {
 		  }
 		| undefined;
 	const yaTieneAccesoPortal = estadoAccesoPortal?.tieneCuentaSana === true;
+
+	// ─── Lo que el diálogo puede AFIRMAR ───────────────────────────────────
+	//
+	// "¿Es empresa?" sale de acá y no de `dpi_rep_legal` de la fila cacheada:
+	// es la MISMA decisión que va a tomar el camino que escribe
+	// (`decidirProvisionamiento` → `omitida/es_empresa`), leída sin caché.
+	const accesoPortalEsEmpresa =
+		estadoAccesoPortal?.estado === "omitida" &&
+		estadoAccesoPortal?.motivo === "es_empresa";
+	// ¿La consulta sin caché contestó? Si no, esta pantalla no sabe si es
+	// empresa ni a dónde iría la contraseña, y el diálogo lo dice en vez de
+	// elegir una de las dos ramas a ciegas.
+	const accesoPortalBaseFresca = estadoAccesoPortalQuery.isSuccess;
+	// Que la fila NO tiene correo también es una respuesta fresca, y es mejor
+	// que la genérica: cartera acaba de leer la tabla y contestó
+	// `omitida/sin_correo`. Sin esto, una fila sin correo caía en "no se pudo
+	// confirmar" —que manda a reintentar— en vez de en "agregáselo en Editar",
+	// que es el arreglo de verdad.
+	const accesoPortalSinCorreoFresco =
+		estadoAccesoPortal?.estado === "omitida" &&
+		estadoAccesoPortal?.motivo === "sin_correo";
+
+	// El NOMBRE y el CORREO frescos, para el diálogo. Solo se pide con el
+	// diálogo abierto: es una consulta que sale hasta cartera y la dispara un
+	// humano que ya decidió mirar, no cada carga de la pantalla.
+	//
+	// Se pregunta con el DPI Y el correo que tenga la fila cacheada porque el
+	// endpoint busca por cualquiera de los dos (`buscarIdentidad`, un `OR`):
+	// son pistas, y con dos hay más chance de acertar la fila aunque una esté
+	// vieja.
+	const accesoPortalPuedePreguntar =
+		!!accesoPortalPistaDpi || !!accesoPortalPistaEmail;
+	const identidadFrescaQuery = useQuery({
+		...orpc.identidadInversionista.queryOptions({
+			input: {
+				...(accesoPortalPistaDpi ? { dpi: accesoPortalPistaDpi } : {}),
+				...(accesoPortalPistaEmail ? { email: accesoPortalPistaEmail } : {}),
+			},
+		}),
+		enabled:
+			accesoPortalOpen &&
+			!accesoPortalEsEmpresa &&
+			// Ya se sabe, sin caché, que no hay correo: no hay nada que confirmar.
+			!accesoPortalSinCorreoFresco &&
+			accesoPortalPuedePreguntar,
+		// El gemelo exacto de la detección de empresas del alta: un dato de
+		// identidad no envejece bien, y este en particular es el que una persona
+		// está por aprobar. Ni un segundo de caché.
+		staleTime: 0,
+		gcTime: 0,
+		// Mismo criterio que la consulta de arriba: si no se pudo confirmar, el
+		// diálogo lo dice y bloquea. Reintentar tres veces solo retrasa ese
+		// aviso y multiplica las llamadas.
+		retry: false,
+	});
+	const identidadFresca = identidadFrescaQuery.data as
+		| {
+				inversionista_id?: number;
+				nombre?: string;
+				email?: string | null;
+		  }
+		| null
+		| undefined;
+	// 🔴 LA COMPROBACIÓN QUE HACE QUE ESTO SEA SEGURO.
+	//
+	// `buscarIdentidad` devuelve siempre a la PERSONA: si la pista casa con una
+	// sociedad, salta a su representante; y un correo compartido por dos filas
+	// (pasa en producción) lo desempata por orden. O sea que la fila que vuelve
+	// puede no ser esta. Se acepta ÚNICAMENTE cuando el id coincide, y entonces
+	// la garantía es total: sea cual sea el camino por el que se llegó, lo que
+	// volvió es la fila de ESTE inversionista leída recién de la tabla, así que
+	// su `email` es el correo al que cartera va a mandar la contraseña.
+	//
+	// Cuando no coincide —pista vieja, fila sin DPI, correo compartido, cartera
+	// caída— no se enseña ningún correo. Falla cerrado: un diálogo que dice "no
+	// pudimos confirmarlo" no engaña a nadie; uno que enseña el correo
+	// equivocado, sí.
+	const destinoFresco =
+		identidadFresca && identidadFresca.inversionista_id === investorIdNum
+			? identidadFresca
+			: null;
+	const accesoPortalEmail = (destinoFresco?.email ?? "").trim();
+	const accesoPortalNombre = destinoFresco?.nombre ?? null;
+	/**
+	 * En qué situación está el diálogo, para no confundir "todavía no sé" con
+	 * "no tiene correo". Son tres textos distintos y tres desenlaces distintos.
+	 */
+	const accesoPortalDestino:
+		| "cargando"
+		| "confirmado"
+		| "sin_correo"
+		| "no_confirmado" = accesoPortalSinCorreoFresco
+		? "sin_correo"
+		: !accesoPortalPuedePreguntar
+			? // Sin DPI y sin correo en la fila no hay con qué preguntar. Una
+				// consulta deshabilitada se queda en `isPending` para siempre, así
+				// que sin esta rama el diálogo giraría un spinner eterno.
+				"no_confirmado"
+			: identidadFrescaQuery.isPending || identidadFrescaQuery.isFetching
+				? "cargando"
+				: destinoFresco
+					? accesoPortalEmail
+						? "confirmado"
+						: "sin_correo"
+					: "no_confirmado";
+
+	// ¿Se puede abrir el diálogo? Hace falta la fila cacheada (de ahí salen las
+	// pistas de búsqueda) y que la consulta sin caché haya contestado algo,
+	// bien o mal: con ella pendiente el diálogo no sabría ni qué rama pintar.
+	// La guarda va en el `onClick` y no en `disabled` por lo que explica el
+	// botón: lo que apaga ese botón significa "ya tiene cuenta".
+	const accesoPortalDatosListos =
+		!!investor &&
+		(estadoAccesoPortalQuery.isSuccess || estadoAccesoPortalQuery.isError);
+
 	// Cuenta que EXISTE pero no sirve. El booleano ya vino en `false`, así que
 	// el botón sigue vivo; lo que falta es decir por qué conviene apretarlo.
 	// Una empresa (`estado: "omitida"`) NO entra acá: su cuenta es la del
@@ -1312,7 +1550,12 @@ function InvestorLiquidacionesPage() {
 		if (yaTieneAccesoPortal) return [] as string[];
 		const advertencias = estadoAccesoPortal?.advertencias ?? [];
 		const entradas = advertencias
-			.map((a) => MOTIVOS_CUENTA_PORTAL_ROTA[a])
+			// `valorDeTabla` y no `TABLA[a]`: estas advertencias vienen del
+			// servidor y una clave del prototipo (`constructor`, `toString`…)
+			// devuelve algo truthy que pasa el filtro de abajo y se pinta como
+			// `"undefined undefined"` en el aviso que lee quien va a mandar una
+			// contraseña.
+			.map((a) => valorDeTabla(MOTIVOS_CUENTA_PORTAL_ROTA, a))
 			.filter((t): t is (typeof MOTIVOS_CUENTA_PORTAL_ROTA)[string] => !!t);
 		const base =
 			entradas.length > 0
@@ -1510,22 +1753,23 @@ function InvestorLiquidacionesPage() {
 											size="sm"
 											className="gap-2"
 											// Guarda de carga, igual que el "Editar" vecino
-											// (`if (investor) openEditModal(investor)`): sin la
-											// fila cargada, `accesoPortalEmail` y
-											// `accesoPortalEsEmpresa` salen vacíos y el diálogo se
-											// abriría diciendo "— sin correo capturado —" y
-											// "Agregáselo primero desde Editar" sobre alguien que
-											// SÍ tiene correo.
+											// (`if (investor) openEditModal(investor)`): hacen falta
+											// la fila —de ahí salen las pistas con las que se
+											// pregunta el correo fresco— y que la consulta sin caché
+											// haya contestado algo. Con esa consulta todavía en el
+											// aire, el diálogo no sabe ni si es empresa, y sus dos
+											// ramas dicen cosas distintas sobre a dónde va una
+											// contraseña.
+											//
+											// Que la consulta FALLE sí abre el diálogo: adentro dice
+											// que no se pudo confirmar nada y no deja continuar. Es
+											// mejor que un botón que no responde y no explica.
 											//
 											// La guarda va en el `onClick` y NO en `disabled`: lo
 											// que apaga este botón significa "ya tiene cuenta", y
 											// apagarlo por otra razón estaría afirmando eso sin que
 											// sea cierto. Quien explica por qué todavía no abre es
-											// la etiqueta, que dice "Cargando…". Si la fila no
-											// llega nunca —la consulta falló— la etiqueta se queda
-											// ahí, que es lo mismo que hace el resto de la
-											// pantalla: sin fila no se pinta ni el correo ni los
-											// datos del inversionista.
+											// la etiqueta, que dice "Cargando…".
 											onClick={() => {
 												if (accesoPortalDatosListos) setAccesoPortalOpen(true);
 											}}
@@ -1695,13 +1939,14 @@ function InvestorLiquidacionesPage() {
 									variant="outline"
 									className="border-purple-300 bg-purple-50 text-[10px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
 								>
-									{{
-										reinversion_capital: "Reinversión Capital",
-										reinversion_interes: "Reinversión Interés",
-										reinversion_total: "Reinversión Total",
-										reinversion_variable: "Reinversión Variable",
-										reinversion_combinada: "Reinversión Combinada",
-									}[investor.tipoReinversion as string] ?? "Reinversión"}
+									{/* Mismo criterio que las demás tablas de este archivo: la
+										clave la manda cartera y un objeto literal contesta a
+										`constructor` o `toString` con algo truthy que se pinta en
+										la insignia. */}
+									{valorDeTabla(
+										ETIQUETAS_REINVERSION,
+										investor.tipoReinversion,
+									) ?? "Reinversión"}
 								</Badge>
 							)}
 						</div>
@@ -2357,7 +2602,17 @@ function InvestorLiquidacionesPage() {
 							Dar acceso al portal
 						</DialogTitle>
 						<DialogDescription className="pt-2">
-							{accesoPortalEsEmpresa ? (
+							{!accesoPortalBaseFresca ? (
+								// Sin la consulta sin caché no se sabe ni si es empresa. Las
+								// dos ramas de abajo AFIRMAN cosas distintas sobre a dónde va
+								// una contraseña: elegir una a ciegas es justo lo que no se
+								// puede hacer.
+								<>
+									No se pudo consultar el estado de esta persona en el portal,
+									así que esta pantalla no puede decir a dónde iría su
+									contraseña.
+								</>
+							) : accesoPortalEsEmpresa ? (
 								<>
 									<span className="font-semibold">
 										{investor?.nombre ?? "Este inversionista"}
@@ -2368,8 +2623,12 @@ function InvestorLiquidacionesPage() {
 							) : (
 								<>
 									Se le va a crear la cuenta del Portal del Inversionista a{" "}
+									{/* El nombre sale de la MISMA lectura sin caché que el
+										correo: es contra el nombre que se juzga si el correo
+										cuadra, así que un nombre viejo al lado de un correo
+										fresco rompe la comparación que hace este diálogo. */}
 									<span className="font-semibold">
-										{investor?.nombre ?? "este inversionista"}
+										{accesoPortalNombre ?? "este inversionista"}
 									</span>{" "}
 									y se le va a mandar su contraseña a este correo:
 								</>
@@ -2390,7 +2649,21 @@ function InvestorLiquidacionesPage() {
 						contraseña (`portalProvisioning.ts` devuelve
 						`es_empresa_el_acceso_es_del_representante` en cuanto el llamador es
 						este botón). */}
-					{accesoPortalEsEmpresa ? (
+					{!accesoPortalBaseFresca ? (
+						// Sin la consulta sin caché no se sabe ni si es empresa, así que no
+						// se pinta ninguna de las dos ramas: las dos AFIRMAN cosas distintas
+						// sobre a dónde va una contraseña.
+						<div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/40">
+							<p className="font-bold text-amber-900 text-base dark:text-amber-100">
+								No se pudo confirmar nada de esta persona.
+							</p>
+							<p className="pt-1 text-amber-900 text-sm dark:text-amber-100">
+								Volvé a cargar la pantalla. Si se repite, avisa a sistemas: sin
+								esa consulta no se puede saber a qué correo caería su
+								contraseña, y a ciegas no se manda ninguna.
+							</p>
+						</div>
+					) : accesoPortalEsEmpresa ? (
 						<div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/40">
 							<p className="font-bold text-amber-900 text-base dark:text-amber-100">
 								Desde esta fila no se abre ninguna cuenta ni sale ninguna
@@ -2401,6 +2674,34 @@ function InvestorLiquidacionesPage() {
 								donde vas a poder revisar SU correo antes de que le salga la
 								contraseña. Al continuar, cartera te va a decir a qué fila ir —
 								no hace falta capturarle un correo propio a la empresa.
+							</p>
+						</div>
+					) : accesoPortalDestino === "cargando" ? (
+						// El correo todavía no está confirmado. Se dice que se está
+						// consultando en vez de enseñar el hueco: "— sin correo capturado —"
+						// sobre alguien que SÍ tiene manda a quien lee a buscar en Editar
+						// algo que ya está ahí.
+						<div className="flex items-center gap-2 rounded-lg border-2 border-sky-300 bg-sky-50 p-4 text-sky-900 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-100">
+							<Loader2 className="h-4 w-4 animate-spin" />
+							<span className="text-sm">
+								Consultando a qué correo iría su contraseña…
+							</span>
+						</div>
+					) : accesoPortalDestino === "no_confirmado" ? (
+						// No se pudo confirmar CONTRA LA TABLA FRESCA a qué correo va la
+						// contraseña. El de la fila cacheada existe y es lo que se enseñaba
+						// antes, pero puede tener hasta cinco minutos de atraso: aprobarlo
+						// es aprobar una dirección que puede no ser la que recibe. Se calla
+						// y se bloquea.
+						<div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/40">
+							<p className="font-bold text-amber-900 text-base dark:text-amber-100">
+								No se pudo confirmar a qué correo iría su contraseña.
+							</p>
+							<p className="pt-1 text-amber-900 text-sm dark:text-amber-100">
+								Por eso no se enseña ninguno: el que tiene cargado esta pantalla
+								puede estar viejo, y la contraseña sale al que tenga cartera en
+								ese momento. Cerrá y volvé a abrir; si se repite, avisa a
+								sistemas.
 							</p>
 						</div>
 					) : (
@@ -2452,9 +2753,18 @@ function InvestorLiquidacionesPage() {
 									inversionistaId: investorIdNum,
 								})
 							}
+							// 🔴 SOLO SE PUEDE APROBAR LO QUE SE PUDO ENSEÑAR.
+							// Sobre una empresa no sale ninguna contraseña —cartera
+							// contesta a qué fila ir—, así que ahí no hay correo que
+							// aprobar. En el camino de persona hace falta que el correo
+							// venga CONFIRMADO contra la tabla fresca: mientras carga, si
+							// no se pudo confirmar, o si la fila no tiene correo, el
+							// diálogo ya dijo por qué y el botón no dispara nada.
 							disabled={
 								darAccesoPortalMutation.isPending ||
-								(!accesoPortalEmail && !accesoPortalEsEmpresa)
+								(!accesoPortalEsEmpresa &&
+									(!accesoPortalBaseFresca ||
+										accesoPortalDestino !== "confirmado"))
 							}
 						>
 							{darAccesoPortalMutation.isPending ? (

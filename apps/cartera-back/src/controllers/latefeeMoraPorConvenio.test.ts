@@ -100,7 +100,10 @@ const fakeDb: any = {
   insert: (table: unknown) => ({
     values: (values: Fila) => {
       state.inserts.push({ table, values });
-      return Promise.resolve([]);
+      // `registrarHistorialMora` pide `.returning({ historial_id })`.
+      return Object.assign(Promise.resolve([]), {
+        returning: () => Promise.resolve([{ historial_id: 6102 }]),
+      });
     },
   }),
   delete: () => {
@@ -156,6 +159,18 @@ beforeEach(() => {
 
 const correr = (opts: Record<string, unknown> = {}) =>
   desactivarMoraPorConvenio(72, { dbClient: fakeDb as any, ...opts });
+
+/**
+ * Un INSERT que revienta, con `.returning()` incluido: `registrarHistorialMora`
+ * lo encadena para quedarse con el `historial_id` del evento.
+ */
+const insertCaido = () => {
+  const error = () => Promise.reject(new Error("historial caído simulado"));
+  const caido: any = error();
+  caido.catch(() => {});
+  caido.returning = error;
+  return caido;
+};
 
 describe("desactivarMoraPorConvenio", () => {
   it("con mora activa: la apaga en vez de borrarla", async () => {
@@ -235,7 +250,7 @@ describe("desactivarMoraPorConvenio", () => {
     const txFallado = {
       ...fakeDb,
       insert: () => ({
-        values: () => Promise.reject(new Error("historial caído simulado")),
+        values: () => insertCaido(),
       }),
     };
 
@@ -324,7 +339,7 @@ describe("desactivarMoraPorConvenio", () => {
     state.selectQueue = [[MORA_ACTIVA]];
     const insertOk = fakeDb.insert;
     fakeDb.insert = () => ({
-      values: () => Promise.reject(new Error("historial caído simulado")),
+      values: () => insertCaido(),
     });
 
     try {

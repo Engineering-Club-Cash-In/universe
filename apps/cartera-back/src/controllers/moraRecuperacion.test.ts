@@ -1,35 +1,805 @@
 import { describe, expect, it } from "bun:test";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
+	MOTIVOS_RESTITUCION_MORA_PREFIJOS,
+	MOTIVO_ANULACION_MORA_PREFIJO,
+	MOTIVO_REVERSA_MORA_PREFIJO,
+	motivoAnulacionMora,
+	motivoReversaMora,
+} from "../utils/motivoReversaMora";
+import {
+	type MoraLevelEvent,
 	type MoraRecoverySourceRow,
 	buildMoraRecoveryQuery,
 	buildMoraRecoveryReport,
+	esReseteoDeNivel,
 	getMoraRecoveryPeriod,
+	moraGeneradaEnPeriodo,
+	nivelSembrado,
+	plegarNivel,
 } from "./moraRecuperacion";
+
+const evento = (
+	tipoEvento: string,
+	montoAnterior: number,
+	montoNuevo: number,
+): MoraLevelEvent => ({ tipoEvento, montoAnterior, montoNuevo });
+
+/** La restitución de una reversa de pago: repone el techo, no genera. */
+const reverso = (montoAnterior: number, montoNuevo: number): MoraLevelEvent => ({
+	tipoEvento: "INCREMENTO",
+	montoAnterior,
+	montoNuevo,
+	reverso: true,
+});
+
+/** El mismo evento, pero ocurrido ANTES del corte: solo siembra el nivel. */
+const previo = (
+	tipoEvento: string,
+	montoAnterior: number,
+	montoNuevo: number,
+): MoraLevelEvent => ({
+	tipoEvento,
+	montoAnterior,
+	montoNuevo,
+	previo: true,
+});
 
 const rows: MoraRecoverySourceRow[] = [
 	{
 		asesorId: 1,
 		nombre: "Ana",
 		esperado: "100.00",
-		cobradoEnSnapshot: "120.00",
-		cobradoFueraSnapshot: "30.00",
+		eventos: [],
+		cobrado: "120.00",
 	},
 	{
 		asesorId: null,
 		nombre: "Sin asignar",
 		esperado: "50.00",
-		cobradoEnSnapshot: "20.00",
-		cobradoFueraSnapshot: "0.00",
+		eventos: [],
+		cobrado: "20.00",
 	},
 	{
 		asesorId: 2,
 		nombre: "Beto",
 		esperado: "0.00",
-		cobradoEnSnapshot: "0.00",
-		cobradoFueraSnapshot: "40.00",
+		eventos: [],
+		cobrado: "40.00",
 	},
 ];
+
+describe("marca de la reversa de pago", () => {
+	it("el motivo que escribe la reversa es el que el reporte busca", () => {
+		// Si alguien cambia la redacción en reversePayment sin tocar el prefijo,
+		// esta prueba sigue verde; si cambia el prefijo, el reporte dejaría de
+		// reconocer las restituciones y acá se cae.
+		const motivo = motivoReversaMora(4321);
+		expect(motivo.startsWith(MOTIVO_REVERSA_MORA_PREFIJO)).toBe(true);
+		expect(motivo).toContain("4321");
+		// El LIKE del SQL es exactamente `${prefijo}%`.
+		const patron = new RegExp(
+			`^${MOTIVO_REVERSA_MORA_PREFIJO.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+		);
+		expect(patron.test(motivo)).toBe(true);
+	});
+
+	it("la anulación firma con su PROPIO prefijo, y el lector reconoce a los dos", () => {
+		// Anular no es revertir: son hechos distintos y el historial tiene que
+		// poder distinguirlos. Pero para la mora los dos son una RESTITUCIÓN, así
+		// que los dos tienen que estar en la lista que lee el reporte.
+		const motivo = motivoAnulacionMora(4321);
+		expect(motivo.startsWith(MOTIVO_ANULACION_MORA_PREFIJO)).toBe(true);
+		expect(motivo).toContain("4321");
+		expect(motivo.startsWith(MOTIVO_REVERSA_MORA_PREFIJO)).toBe(false);
+		expect(MOTIVOS_RESTITUCION_MORA_PREFIJOS).toContain(
+			MOTIVO_ANULACION_MORA_PREFIJO,
+		);
+		expect(MOTIVOS_RESTITUCION_MORA_PREFIJOS).toContain(
+			MOTIVO_REVERSA_MORA_PREFIJO,
+		);
+		for (const prefijo of MOTIVOS_RESTITUCION_MORA_PREFIJOS) {
+			expect(prefijo.length).toBeGreaterThan(0);
+		}
+	});
+});
+
+describe("el pago anulado y su restitución, de punta a punta", () => {
+	it("foto Q100 + pago falseado + RECALCULO → esperado Q100, no Q200", () => {
+		// El defecto completo: `falsePayment` dejaba el DECREMENTO huérfano y el
+		// RECALCULO de la mañana siguiente entraba como mora nueva. Ahora la
+		// anulación escribe su restitución marcada, el plegado la reconoce, y el
+		// RECALCULO que la sigue ya no supera el nivel.
+		const reporte = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: "100",
+					eventos: [
+						evento("DECREMENTO", 100, 0),
+						reverso(0, 100),
+						evento("RECALCULO", 100, 100),
+					],
+					cobrado: "0",
+				},
+			],
+			{ inicio: "2026-07-06", fin: "2026-08-06", alcance: "historico" },
+		);
+		expect(reporte.totales.esperado).toBe("100.00");
+		expect(reporte.totales.esperado).not.toBe("200.00");
+	});
+
+	it("la reversa de un pago ANTERIOR al ciclo genera, y el cobro cae DENTRO del alcance", () => {
+		// Foto 0 porque el pago ya la había bajado antes del corte. La reversa
+		// revive Q100 que el asesor tiene vivos hoy; si el esperado quedara en 0,
+		// el cobro de esos Q100 se contaría como "fuera del alcance" y el reporte
+		// premiaría un cobro que ni siquiera esperaba.
+		const reporte = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: "0",
+					eventos: [reverso(0, 100)],
+					cobrado: "100",
+				},
+			],
+			{ inicio: "2026-07-06", fin: "2026-08-06", alcance: "historico" },
+		);
+		expect(reporte.totales.esperado).toBe("100.00");
+		expect(reporte.totales.cobradoEnSnapshot).toBe("100.00");
+		expect(reporte.totales.cobradoFueraSnapshot).toBe("0.00");
+		expect(reporte.totales.pendiente).toBe("0.00");
+	});
+});
+
+describe("moraGeneradaEnPeriodo", () => {
+	it("no cuenta dos veces la deuda que la empresa condonó y el cron repuso", () => {
+		// El ejemplo del negocio, tal cual: solo el crecimiento real de 100 a 120
+		// es oportunidad de cobro nueva.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("CONDONACION", 100, 0),
+				evento("RECALCULO", 0, 100),
+				evento("RECALCULO", 100, 120),
+				evento("CONDONACION", 120, 0),
+				evento("RECALCULO", 0, 120),
+			]),
+		).toBe(20);
+	});
+
+	it("después de un pago la mora nueva SÍ es oportunidad nueva", () => {
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 0),
+				evento("CREACION", 0, 60),
+			]),
+		).toBe(60);
+	});
+
+	it("condonación seguida de crecimiento real: solo cuenta el crecimiento", () => {
+		expect(
+			moraGeneradaEnPeriodo(200, [
+				evento("CONDONACION", 200, 0),
+				evento("RECALCULO", 0, 200),
+				evento("RECALCULO", 200, 245),
+			]),
+		).toBe(45);
+	});
+
+	it("el rebote parcial tampoco reabre lo ya condonado", () => {
+		// El cron puede reponer en varios pasos: ninguno supera el nivel, así que
+		// ninguno cuenta. Si el primer paso bajara el nivel a 60, el segundo
+		// facturaría otra vez la mora condonada.
+		expect(
+			moraGeneradaEnPeriodo(120, [
+				evento("CONDONACION", 120, 0),
+				evento("RECALCULO", 0, 60),
+				evento("RECALCULO", 60, 120),
+			]),
+		).toBe(0);
+	});
+
+	it("pago parcial: el nivel baja a lo que quedó y el crecimiento posterior cuenta", () => {
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 40),
+				evento("RECALCULO", 40, 70),
+			]),
+		).toBe(30);
+	});
+
+	it("tras una DESACTIVACION la mora nueva cuenta entera", () => {
+		expect(
+			moraGeneradaEnPeriodo(80, [
+				evento("DESACTIVACION", 80, 0),
+				evento("CREACION", 0, 95),
+			]),
+		).toBe(95);
+	});
+
+	it("la DESACTIVACION reinicia el nivel aunque venga de una condonación", () => {
+		// `desactivarMora` registra monto_anterior = monto_mora de la fila, que una
+		// condonación previa ya dejó en 0: el evento es un "0 → 0" que no baja nada
+		// por sí solo. Sin reiniciar el nivel en DESACTIVACION, el crédito que se
+		// puso al día y volvió a atrasarse arrastraría el techo viejo y su mora
+		// nueva no se contaría.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("CONDONACION", 100, 0),
+				evento("DESACTIVACION", 0, 0),
+				evento("CREACION", 0, 90),
+			]),
+		).toBe(90);
+	});
+
+	it("un crédito sin foto inicial que genera mora adentro la cuenta toda", () => {
+		expect(
+			moraGeneradaEnPeriodo(0, [
+				evento("CREACION", 0, 40),
+				evento("RECALCULO", 40, 55),
+			]),
+		).toBe(55);
+	});
+
+	it("sin eventos no hay nada generado", () => {
+		expect(moraGeneradaEnPeriodo(100, [])).toBe(0);
+	});
+
+	it("la condonación masiva se comporta igual que la individual", () => {
+		// Ambas se registran como tipo_evento CONDONACION; solo cambia el `origen`,
+		// que el nivel no mira.
+		expect(
+			moraGeneradaEnPeriodo(305041, [
+				evento("CONDONACION", 305041, 0),
+				evento("RECALCULO", 0, 305041),
+			]),
+		).toBe(0);
+	});
+
+	it("MUTACIÓN: si la CONDONACION bajara el nivel, el rebote se contaría de nuevo", () => {
+		// Con la regla correcta el rebote no suma; con la mutación sumaría 100.
+		const generado = moraGeneradaEnPeriodo(100, [
+			evento("CONDONACION", 100, 0),
+			evento("RECALCULO", 0, 100),
+		]);
+		expect(generado).toBe(0);
+		expect(generado).not.toBe(100);
+	});
+
+	it("la condonación que quedó justo AFUERA del corte no revive con el rebote", () => {
+		// El borde que el reporte medía mal: el 5 la empresa condona (queda fuera
+		// del ciclo) y la foto del día 6 dice cero; el 6 el cron repone los 100.
+		// Sin siembra el nivel arrancaba en 0 y el rebote se contaba entero.
+		expect(
+			moraGeneradaEnPeriodo(0, [
+				previo("CONDONACION", 100, 0),
+				evento("RECALCULO", 0, 100),
+			]),
+		).toBe(0);
+	});
+
+	it("el PAGO justo antes del corte sí deja contar la mora nueva de adentro", () => {
+		// El borde simétrico: acá el cliente saldó, así que lo que nazca adentro es
+		// deuda nueva y el asesor sí tuvo que cobrarla.
+		expect(
+			moraGeneradaEnPeriodo(0, [
+				previo("DECREMENTO", 100, 0),
+				evento("RECALCULO", 0, 100),
+			]),
+		).toBe(100);
+	});
+
+	it("condonación afuera y crecimiento real adentro: solo cuenta el crecimiento", () => {
+		expect(
+			moraGeneradaEnPeriodo(0, [
+				previo("CONDONACION", 100, 0),
+				evento("RECALCULO", 0, 100),
+				evento("RECALCULO", 100, 130),
+			]),
+		).toBe(30);
+	});
+
+	it("sin eventos previos el nivel arranca en la foto, como antes", () => {
+		expect(
+			moraGeneradaEnPeriodo(100, [evento("RECALCULO", 100, 140)]),
+		).toBe(40);
+	});
+
+	it("la siembra nunca deja el nivel POR DEBAJO de la foto", () => {
+		// Si el tramo previo dejara el nivel en 40 y la foto dice 100, el primer
+		// RECALCULO del ciclo sumaría 60 de una mora que la foto ya contó.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				previo("DECREMENTO", 90, 40),
+				evento("RECALCULO", 100, 100),
+			]),
+		).toBe(0);
+	});
+
+	it("MUTACIÓN: sin siembra, el rebote del borde se contaría entero", () => {
+		const conSiembra = moraGeneradaEnPeriodo(0, [
+			previo("CONDONACION", 100, 0),
+			evento("RECALCULO", 0, 100),
+		]);
+		// La mutación "ignorar los previos" es exactamente esta llamada.
+		const sinSiembra = moraGeneradaEnPeriodo(0, [evento("RECALCULO", 0, 100)]);
+		expect(conSiembra).toBe(0);
+		expect(sinSiembra).toBe(100);
+		expect(conSiembra).not.toBe(sinSiembra);
+	});
+
+	it("MUTACIÓN: si la siembra también sostuviera el nivel tras un pago, la mora nueva se perdería", () => {
+		// Sembrar "a lo bruto" —quedarse con el monto más alto de la ventana sin
+		// mirar POR QUÉ bajó— daría 0 acá, y el asesor perdería 100 de esperado.
+		const generado = moraGeneradaEnPeriodo(0, [
+			previo("DECREMENTO", 100, 0),
+			evento("RECALCULO", 0, 100),
+		]);
+		expect(generado).toBe(100);
+		expect(generado).not.toBe(0);
+	});
+
+	it("revertir un pago no inventa oportunidad de cobro", () => {
+		// Q100 de foto, el cliente paga, y el pago se revierte: la mora vuelve a
+		// estar viva, pero es la MISMA deuda de siempre. Sin esto el plegado veía
+		// "bajó y volvió a subir" y el crédito terminaba con Q200 de esperado.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 0),
+				reverso(0, 100),
+			]),
+		).toBe(0);
+	});
+
+	it("la restitución de la reversa repone el techo, así que el RECALCULO siguiente tampoco cobra dos veces", () => {
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 0),
+				reverso(0, 100),
+				evento("RECALCULO", 100, 100),
+			]),
+		).toBe(0);
+	});
+
+	it("después de una reversa, la mora que crece de verdad SÍ se cuenta", () => {
+		// Solo los 30 de crecimiento real posterior a la restitución.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 0),
+				reverso(0, 100),
+				evento("RECALCULO", 100, 130),
+			]),
+		).toBe(30);
+	});
+
+	it("un pago DE VERDAD seguido de mora nueva no se confunde con una reversa", () => {
+		// El matiz que no se puede perder: mismo par de eventos que la reversa,
+		// pero sin la marca, y acá los 100 sí son oportunidad nueva.
+		const conReversa = moraGeneradaEnPeriodo(100, [
+			evento("DECREMENTO", 100, 0),
+			reverso(0, 100),
+		]);
+		const pagoDeVerdad = moraGeneradaEnPeriodo(100, [
+			evento("DECREMENTO", 100, 0),
+			evento("RECALCULO", 0, 100),
+		]);
+		expect(conReversa).toBe(0);
+		expect(pagoDeVerdad).toBe(100);
+	});
+
+	it("la reversa de un pago ANTERIOR al ciclo SÍ es oportunidad", () => {
+		// El pago fue antes del día 6, así que su DECREMENTO ya bajó la foto: la
+		// foto dice 0 y la siembra dice 0. La reversa de adentro deja al cliente
+		// debiendo Q100 que NUNCA se contaron y que el asesor tiene vivos hoy;
+		// suprimirla hacía desaparecer una oportunidad real.
+		expect(moraGeneradaEnPeriodo(0, [reverso(0, 100)])).toBe(100);
+	});
+
+	it("la restitución parcial: suprime lo que bajó ADENTRO y genera el resto", () => {
+		// Adentro del ciclo el cliente pagó Q40 (100 → 60). Después se revierte un
+		// pago de Q100 —Q40 de adentro y Q60 de un pago anterior al corte—: solo
+		// los Q40 estaban contados, los otros Q60 son oportunidad nueva.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 60),
+				reverso(60, 160),
+			]),
+		).toBe(60);
+	});
+
+	it("la restitución no puede suprimir más de una vez lo que bajó adentro", () => {
+		// Un solo DECREMENTO de Q100 adentro y DOS restituciones: la primera
+		// consume el crédito de supresión, la segunda genera entera.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 0),
+				reverso(0, 100),
+				evento("DECREMENTO", 100, 100),
+				reverso(100, 200),
+			]),
+		).toBe(100);
+	});
+
+	it("MUTACIÓN: suprimir SIEMPRE borra la oportunidad del pago anterior al ciclo", () => {
+		// La regla vieja —`if (reverso) { subir el nivel; continue; }`— aplicada
+		// al caso de afuera del ciclo.
+		const suprimirSiempre = (foto: number, eventos: MoraLevelEvent[]) => {
+			let nivel = foto;
+			let generado = 0;
+			for (const e of eventos) {
+				if (e.reverso) {
+					if (e.montoNuevo > nivel) nivel = e.montoNuevo;
+					continue;
+				}
+				if (e.montoNuevo > nivel) {
+					generado += e.montoNuevo - nivel;
+					nivel = e.montoNuevo;
+				} else if (e.montoNuevo < e.montoAnterior) nivel = e.montoNuevo;
+			}
+			return generado;
+		};
+		const eventos = [reverso(0, 100)];
+		expect(moraGeneradaEnPeriodo(0, eventos)).toBe(100);
+		expect(suprimirSiempre(0, eventos)).toBe(0);
+	});
+
+	it("MUTACIÓN: generar SIEMPRE duplica la deuda del pago del MISMO ciclo", () => {
+		// El lado que no se puede romper al arreglar el otro: tratar la
+		// restitución como un INCREMENTO cualquiera.
+		const eventos: MoraLevelEvent[] = [
+			evento("DECREMENTO", 100, 0),
+			reverso(0, 100),
+		];
+		expect(moraGeneradaEnPeriodo(100, eventos)).toBe(0);
+		expect(
+			moraGeneradaEnPeriodo(
+				100,
+				eventos.map(({ reverso: _, ...resto }) => resto),
+			),
+		).toBe(100);
+	});
+
+	it("MUTACIÓN: si la restitución de la reversa contara como mora nueva, la deuda se duplicaría", () => {
+		const eventos: MoraLevelEvent[] = [
+			evento("DECREMENTO", 100, 0),
+			reverso(0, 100),
+		];
+		const conMarca = moraGeneradaEnPeriodo(100, eventos);
+		// La mutación "ignorar la marca de reverso" es exactamente esta llamada.
+		const sinMarca = moraGeneradaEnPeriodo(
+			100,
+			eventos.map(({ reverso: _, ...resto }) => resto),
+		);
+		expect(conMarca).toBe(0);
+		expect(sinMarca).toBe(100);
+		expect(100 + sinMarca).toBe(200);
+	});
+
+	it("la condonación anterior al ciclo sostiene el techo aunque la foto diga menos", () => {
+		// El ejemplo del defecto: CONDONACION 100→0 antes del corte, un RECALCULO
+		// parcial que deja la foto en 60, y adentro el rebote completo a 100. Los
+		// 40 de diferencia son deuda YA condonada, no mora nueva.
+		expect(
+			moraGeneradaEnPeriodo(60, [
+				previo("CONDONACION", 100, 0),
+				previo("RECALCULO", 0, 60),
+				evento("RECALCULO", 60, 100),
+			]),
+		).toBe(0);
+	});
+
+	it("una condonación de semanas atrás también sostiene el techo", () => {
+		// Mismo caso con un tramo previo largo: mientras no haya un reseteo, el
+		// techo sigue siendo el de la condonación vieja.
+		expect(
+			moraGeneradaEnPeriodo(60, [
+				previo("CONDONACION", 100, 0),
+				previo("RECALCULO", 0, 20),
+				previo("RECALCULO", 20, 40),
+				previo("RECALCULO", 40, 60),
+				evento("RECALCULO", 60, 100),
+			]),
+		).toBe(0);
+	});
+
+	it("un pago anterior al ciclo sí reabre la oportunidad de adentro", () => {
+		// El reseteo manda sobre el techo viejo: el cliente saldó, así que la mora
+		// que nace adentro se cuenta entera.
+		expect(
+			moraGeneradaEnPeriodo(0, [
+				previo("CONDONACION", 500, 0),
+				previo("RECALCULO", 0, 100),
+				previo("DECREMENTO", 100, 0),
+				evento("RECALCULO", 0, 100),
+			]),
+		).toBe(100);
+	});
+
+	it("MUTACIÓN: si el DECREMENTO no bajara el nivel, la mora nueva no se contaría", () => {
+		// Con la regla correcta se cuentan los 60; con la mutación darían 0.
+		const generado = moraGeneradaEnPeriodo(100, [
+			evento("DECREMENTO", 100, 0),
+			evento("RECALCULO", 0, 60),
+		]);
+		expect(generado).toBe(60);
+		expect(generado).not.toBe(0);
+	});
+});
+
+/** Un evento del historial ANTERIOR al ciclo, con el día en que ocurrió. */
+type EventoFechado = MoraLevelEvent & { diasAntes: number };
+
+const fechado = (
+	diasAntes: number,
+	tipoEvento: string,
+	montoAnterior: number,
+	montoNuevo: number,
+	extra: Partial<MoraLevelEvent> = {},
+): EventoFechado => ({
+	diasAntes,
+	tipoEvento,
+	montoAnterior,
+	montoNuevo,
+	...extra,
+});
+
+/**
+ * La MUTACIÓN: volver a acotar la siembra por días. Es exactamente lo que hacía
+ * el tope de 31 días, y lo que hacía antes la ventana fija de 3.
+ */
+const conTopeDeDias = (historial: EventoFechado[], topeDias: number) =>
+	historial.filter((evento) => evento.diasAntes <= topeDias);
+
+/**
+ * El plegado fila por fila: la ESPECIFICACIÓN de la regla. El agregado
+ * (`nivelSembrado`) tiene que dar siempre esto mismo.
+ */
+const nivelPlegado = (previos: MoraLevelEvent[]) =>
+	previos.length === 0
+		? 0
+		: plegarNivel((previos[0] as MoraLevelEvent).montoAnterior, previos).nivel;
+
+describe("nivelSembrado", () => {
+	// El caso del defecto: la condonación quedó 32 días antes del corte, o sea
+	// un día más vieja que el viejo tope de 31. El RECALCULO parcial de adentro
+	// del tope dejó la foto en 60, y el del ciclo repone los 100. Esos 40 son
+	// deuda YA condonada, no mora nueva.
+	const historialDelDefecto: EventoFechado[] = [
+		fechado(40, "RECALCULO", 0, 100),
+		fechado(32, "CONDONACION", 100, 0),
+		fechado(20, "RECALCULO", 0, 60),
+	];
+
+	it("la condonación de hace 32 días sostiene el techo: no hay mora nueva", () => {
+		expect(nivelSembrado(historialDelDefecto)).toBe(100);
+		expect(
+			moraGeneradaEnPeriodo(
+				60,
+				[evento("RECALCULO", 60, 100)],
+				nivelSembrado(historialDelDefecto),
+			),
+		).toBe(0);
+	});
+
+	it("MUTACIÓN: con un tope de 31 días la condonación se pierde y aparecen Q40 de mora inventada", () => {
+		const mutado = conTopeDeDias(historialDelDefecto, 31);
+		// El tope deja afuera la condonación Y el evento que había levantado el
+		// techo a 100: el techo cae a 60 y el rebote de adentro cobra los 40.
+		expect(nivelSembrado(mutado)).toBe(60);
+		expect(
+			moraGeneradaEnPeriodo(
+				60,
+				[evento("RECALCULO", 60, 100)],
+				nivelSembrado(mutado),
+			),
+		).toBe(40);
+		// Y con cualquier otro tope pasa lo mismo, solo que con otra condonación:
+		// por eso el arreglo no es agrandar el número sino quitarlo.
+		expect(nivelSembrado(conTopeDeDias(historialDelDefecto, 90))).toBe(100);
+		expect(nivelSembrado(conTopeDeDias(historialDelDefecto, 35))).toBe(100);
+		expect(nivelSembrado(conTopeDeDias(historialDelDefecto, 25))).toBe(60);
+	});
+
+	it("ya no importa cuán vieja sea la condonación: a seis meses da lo mismo", () => {
+		const aSeisMeses: EventoFechado[] = [
+			fechado(200, "RECALCULO", 0, 100),
+			fechado(180, "CONDONACION", 100, 0),
+			fechado(20, "RECALCULO", 0, 60),
+		];
+		expect(nivelSembrado(aSeisMeses)).toBe(100);
+		expect(
+			moraGeneradaEnPeriodo(
+				60,
+				[evento("RECALCULO", 60, 100)],
+				nivelSembrado(aSeisMeses),
+			),
+		).toBe(0);
+		// Mismo resultado que a 32 días: la edad dejó de ser una variable.
+		expect(nivelSembrado(aSeisMeses)).toBe(nivelSembrado(historialDelDefecto));
+	});
+
+	it("un PAGO antes del ciclo resetea el techo y la mora nueva se cuenta entera", () => {
+		const historial: EventoFechado[] = [
+			fechado(200, "RECALCULO", 0, 500),
+			fechado(180, "CONDONACION", 500, 0),
+			fechado(40, "RECALCULO", 0, 100),
+			fechado(10, "DECREMENTO", 100, 0),
+		];
+		expect(nivelSembrado(historial)).toBe(0);
+		expect(
+			moraGeneradaEnPeriodo(
+				0,
+				[evento("RECALCULO", 0, 100)],
+				nivelSembrado(historial),
+			),
+		).toBe(100);
+	});
+
+	it("un pago PARCIAL deja el techo en lo que quedó, no en cero", () => {
+		const historial: EventoFechado[] = [
+			fechado(40, "RECALCULO", 0, 120),
+			fechado(10, "DECREMENTO", 120, 45),
+			fechado(8, "RECALCULO", 45, 50),
+		];
+		expect(nivelSembrado(historial)).toBe(50);
+		expect(
+			moraGeneradaEnPeriodo(
+				50,
+				[evento("RECALCULO", 50, 80)],
+				nivelSembrado(historial),
+			),
+		).toBe(30);
+	});
+
+	it("la DESACTIVACION también ancla, y ancla en cero", () => {
+		const historial: EventoFechado[] = [
+			fechado(200, "RECALCULO", 0, 900),
+			fechado(150, "CONDONACION", 900, 0),
+			fechado(60, "RECALCULO", 0, 400),
+			fechado(30, "DESACTIVACION", 400, 0),
+			fechado(5, "CREACION", 0, 25),
+		];
+		expect(nivelSembrado(historial)).toBe(25);
+		expect(
+			moraGeneradaEnPeriodo(
+				25,
+				[evento("RECALCULO", 25, 70)],
+				nivelSembrado(historial),
+			),
+		).toBe(45);
+	});
+
+	it("un crédito SIN ningún reseteo en toda su historia siembra con su máximo entero", () => {
+		// Correcto por definición: sin reseteo NADA bajó nunca el techo, así que
+		// el techo vigente es el más alto que alcanzó. No hace falta ningún tope
+		// para acotarlo —el ancla ausente no es un caso excepcional, es el tramo
+		// que arranca en el primer evento del crédito— y es justo el caso que el
+		// tope de días trataba peor: le recortaba el pico sin motivo.
+		const historial: EventoFechado[] = [
+			fechado(300, "CREACION", 0, 80),
+			fechado(200, "RECALCULO", 80, 240),
+			fechado(150, "CONDONACION", 240, 0),
+			fechado(100, "RECALCULO", 0, 90),
+			fechado(2, "CONDONACION", 90, 0),
+		];
+		expect(nivelSembrado(historial)).toBe(240);
+		// Y nada de lo que el cron reponga adentro es mora nueva.
+		expect(
+			moraGeneradaEnPeriodo(
+				0,
+				[evento("RECALCULO", 0, 90), evento("RECALCULO", 90, 240)],
+				nivelSembrado(historial),
+			),
+		).toBe(0);
+	});
+
+	it("sin historial previo la siembra es cero y manda la foto", () => {
+		expect(nivelSembrado([])).toBe(0);
+		expect(moraGeneradaEnPeriodo(100, [evento("RECALCULO", 100, 140)], 0)).toBe(
+			40,
+		);
+	});
+
+	it("la siembra nunca deja el nivel POR DEBAJO de la foto", () => {
+		// Si el techo sembrado fuera 40 y la foto dice 100, el primer RECALCULO
+		// del ciclo sumaría 60 de una mora que la foto ya contó.
+		expect(moraGeneradaEnPeriodo(100, [evento("RECALCULO", 100, 100)], 40)).toBe(
+			0,
+		);
+	});
+
+	it("EQUIVALENCIA: el agregado da lo mismo que plegar el tramo fila por fila", () => {
+		const casos: MoraLevelEvent[][] = [
+			[],
+			[evento("CREACION", 0, 100)],
+			historialDelDefecto,
+			[
+				evento("RECALCULO", 0, 100),
+				evento("CONDONACION", 100, 0),
+				evento("RECALCULO", 0, 60),
+				evento("RECALCULO", 60, 80),
+			],
+			[
+				evento("RECALCULO", 0, 300),
+				evento("DECREMENTO", 300, 0),
+				evento("RECALCULO", 0, 120),
+				evento("CONDONACION", 120, 0),
+				evento("RECALCULO", 0, 45),
+			],
+			[
+				evento("RECALCULO", 0, 500),
+				evento("CONDONACION", 500, 0),
+				evento("DESACTIVACION", 0, 0),
+				evento("CREACION", 0, 30),
+			],
+			[
+				evento("RECALCULO", 0, 200),
+				evento("DECREMENTO", 200, 0),
+				reverso(0, 200),
+				evento("RECALCULO", 200, 210),
+			],
+			[
+				evento("CONDONACION", 90, 0),
+				evento("RECALCULO", 0, 20),
+				evento("DECREMENTO", 20, 5),
+				evento("CONDONACION", 5, 0),
+				evento("RECALCULO", 0, 5),
+			],
+			[evento("DESACTIVACION", 400, 0)],
+			[evento("CONDONACION", 400, 0)],
+		];
+		for (const caso of casos) {
+			expect({ caso, nivel: nivelSembrado(caso) }).toEqual({
+				caso,
+				nivel: nivelPlegado(caso),
+			});
+		}
+	});
+
+	it("EQUIVALENCIA: también sobre historiales mezclados generados al azar", () => {
+		// El argumento de por qué son equivalentes —entre dos reseteos el nivel
+		// solo sube, así que el plegado es un máximo— se prueba, no se explica.
+		let semilla = 20260922;
+		const azar = () => {
+			semilla = (semilla * 1103515245 + 12345) % 2147483648;
+			return semilla / 2147483648;
+		};
+		const tipos = [
+			"RECALCULO",
+			"CONDONACION",
+			"DESACTIVACION",
+			"DECREMENTO",
+			"INCREMENTO",
+			"CREACION",
+		];
+		for (let caso = 0; caso < 3000; caso++) {
+			const historial: MoraLevelEvent[] = [];
+			let monto = Math.floor(azar() * 200);
+			const largo = Math.floor(azar() * 12);
+			for (let i = 0; i < largo; i++) {
+				const tipoEvento = tipos[Math.floor(azar() * tipos.length)] as string;
+				const montoNuevo =
+					tipoEvento === "CONDONACION" || tipoEvento === "DESACTIVACION"
+						? 0
+						: Math.floor(azar() * 300);
+				const esReverso = tipoEvento === "INCREMENTO" && azar() < 0.4;
+				historial.push({
+					tipoEvento,
+					montoAnterior: monto,
+					montoNuevo,
+					...(esReverso ? { reverso: true } : {}),
+				});
+				monto = montoNuevo;
+			}
+			expect({ historial, nivel: nivelSembrado(historial) }).toEqual({
+				historial,
+				nivel: nivelPlegado(historial),
+			});
+		}
+	});
+});
 
 describe("buildMoraRecoveryReport", () => {
 	it("construye el contrato SQL histórico con el ciclo, FULL JOIN y filtros actuales", () => {
@@ -70,6 +840,27 @@ describe("buildMoraRecoveryReport", () => {
 			8,
 			"2026-06-06",
 			"2026-07-06",
+			// Los límites del ciclo como instantes UTC: el día 6 GT empieza a las 06:00Z.
+			// Los prefijos con los que un pago caído firma su restitución —reversa y
+			// anulación—, el rango de eventos DEL CICLO, y después la siembra: el
+			// corte del ancla, los mismos prefijos (una restitución nunca ancla) y el
+			// corte del máximo. Todas las fechas son el inicio o el fin del ciclo: la
+			// siembra no tiene fecha propia.
+			"Reversa de pago #%",
+			"Anulación de pago #%",
+			// La marca del decremento cuyo pago se cayó: el reporte la lee para no
+			// contar como mora nueva lo que el cron repuso después de una bajada
+			// que ya no vale.
+			"% [decremento anulado]%",
+			"2026-06-06 06:00:00.000",
+			"2026-07-06 06:00:00.000",
+			"2026-06-06 06:00:00.000",
+			// La misma marca otra vez: un decremento anulado tampoco puede ser el
+			// ancla de la siembra.
+			"% [decremento anulado]%",
+			"Reversa de pago #%",
+			"Anulación de pago #%",
+			"2026-06-06 06:00:00.000",
 		]);
 	});
 
@@ -102,8 +893,8 @@ describe("buildMoraRecoveryReport", () => {
 					asesorId: 1,
 					nombre: "Ana",
 					esperado: "100",
-					cobradoEnSnapshot: "40",
-					cobradoFueraSnapshot: "0",
+					eventos: [],
+					cobrado: "40",
 				},
 			],
 			period,
@@ -130,7 +921,7 @@ describe("buildMoraRecoveryReport", () => {
 		expect(report.totales).toEqual({
 			esperado: "150.00",
 			cobradoEnSnapshot: "140.00",
-			cobradoFueraSnapshot: "70.00",
+			cobradoFueraSnapshot: "40.00",
 			excedenteEnSnapshot: "20.00",
 			pendiente: "30.00",
 		});
@@ -170,15 +961,15 @@ describe("buildMoraRecoveryReport", () => {
 					asesorId: 7,
 					nombre: "Cora",
 					esperado: "100",
-					cobradoEnSnapshot: "140",
-					cobradoFueraSnapshot: "0",
+					eventos: [],
+					cobrado: "140",
 				},
 				{
 					asesorId: 7,
 					nombre: "Cora",
 					esperado: "80",
-					cobradoEnSnapshot: "20",
-					cobradoFueraSnapshot: "90",
+					eventos: [],
+					cobrado: "20",
 				},
 			],
 			{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "live" },
@@ -189,7 +980,7 @@ describe("buildMoraRecoveryReport", () => {
 				asesorId: 7,
 				esperado: "180.00",
 				cobradoEnSnapshot: "160.00",
-				cobradoFueraSnapshot: "90.00",
+				cobradoFueraSnapshot: "0.00",
 				excedenteEnSnapshot: "40.00",
 				pendiente: "60.00",
 			}),
@@ -224,5 +1015,453 @@ describe("buildMoraRecoveryReport", () => {
 		});
 		expect(query.sql).toContain("moras_historial");
 		expect(query.sql).not.toContain("mora_activa");
+	});
+
+	it("suma al esperado la mora generada dentro del ciclo", () => {
+		const report = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: "100",
+					eventos: [evento("RECALCULO", 100, 250)],
+					cobrado: "250",
+				},
+			],
+			{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "historico" },
+		);
+
+		expect(report.totales).toEqual({
+			esperado: "250.00",
+			cobradoEnSnapshot: "250.00",
+			cobradoFueraSnapshot: "0.00",
+			excedenteEnSnapshot: "0.00",
+			pendiente: "0.00",
+		});
+	});
+
+	it("sin la mora generada el mismo cobro fingía un excedente del asesor", () => {
+		const sinGenerado = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: "100",
+					eventos: [],
+					cobrado: "250",
+				},
+			],
+			{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "historico" },
+		);
+
+		expect(sinGenerado.totales.excedenteEnSnapshot).toBe("150.00");
+	});
+
+	it("el rebote de la condonación no infla el esperado del asesor", () => {
+		// Mismo crédito, mismo cobro: antes cada rebote sumaba su mora entera al
+		// esperado y el asesor aparecía con un pendiente que nunca pudo cobrar.
+		const report = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 3,
+					nombre: "Dina",
+					esperado: "100",
+					eventos: [
+						evento("CONDONACION", 100, 0),
+						evento("RECALCULO", 0, 100),
+						evento("RECALCULO", 100, 120),
+					],
+					cobrado: "120",
+				},
+			],
+			{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "historico" },
+		);
+
+		expect(report.totales).toMatchObject({
+			esperado: "120.00",
+			pendiente: "0.00",
+			excedenteEnSnapshot: "0.00",
+		});
+	});
+
+	it("acumula lo generado por asesor sin compensar entre créditos", () => {
+		const report = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 7,
+					nombre: "Cora",
+					esperado: "100",
+					eventos: [evento("RECALCULO", 100, 140)],
+					cobrado: "140",
+				},
+				{
+					asesorId: 7,
+					nombre: "Cora",
+					esperado: "0",
+					eventos: [evento("CREACION", 0, 60)],
+					cobrado: "10",
+				},
+			],
+			{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "live" },
+		);
+
+		expect(report.porAsesor).toEqual([
+			expect.objectContaining({
+				asesorId: 7,
+				esperado: "200.00",
+				excedenteEnSnapshot: "0.00",
+				pendiente: "50.00",
+			}),
+		]);
+	});
+
+	it("los créditos no se contaminan entre sí: cada uno lleva su propio nivel", () => {
+		const report = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 9,
+					nombre: "Eli",
+					esperado: "100",
+					eventos: [
+						evento("CONDONACION", 100, 0),
+						evento("RECALCULO", 0, 100),
+					],
+					cobrado: "0",
+				},
+				{
+					asesorId: 9,
+					nombre: "Eli",
+					esperado: "0",
+					eventos: [evento("CREACION", 0, 70)],
+					cobrado: "0",
+				},
+			],
+			{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "historico" },
+		);
+
+		// 100 (foto del primero, sin rebote) + 70 (mora nueva del segundo).
+		expect(report.totales.esperado).toBe("170.00");
+	});
+
+	it("trae los eventos del ciclo en orden y sin filtrar por tipo", () => {
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+
+		// El nivel depende de lo que sube Y de lo que baja: filtrar por tipo en SQL
+		// escondería las condonaciones y los pagos, que son justo lo que decide si
+		// una mora repuesta vuelve a ser oportunidad.
+		expect(query.sql).not.toContain(
+			"h.tipo_evento IN ('CREACION', 'RECALCULO', 'INCREMENTO')",
+		);
+		expect(query.sql).toContain("ORDER BY e.fecha, e.historial_id");
+		expect(query.sql).toContain("'tipoEvento', e.tipo_evento");
+		expect(query.sql).toContain("'montoAnterior', e.monto_anterior");
+		expect(query.sql).toContain("'montoNuevo', e.monto_nuevo");
+		expect(query.sql).toContain(
+			"h.monto_anterior::numeric::text AS monto_anterior",
+		);
+		expect(query.sql).toContain("COALESCE(e.eventos, '[]'::json) AS eventos");
+	});
+
+	it("filtra los eventos por los límites UTC contra la columna cruda y semiabierto", () => {
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+
+		// Columna CRUDA: envolverla en AT TIME ZONE mataría moras_historial_fecha_idx.
+		// El rango de eventos es EL CICLO, semiabierto por la derecha.
+		expect(query.sql).toContain("WHERE h.fecha >= $7::timestamp");
+		expect(query.sql).toContain("AND h.fecha < $8::timestamp");
+		expect(query.sql).not.toContain(
+			"(h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >=",
+		);
+		expect(query.params.slice(3)).toEqual([
+			// los prefijos con los que un pago caído firma su restitución
+			"Reversa de pago #%",
+			"Anulación de pago #%",
+			// y la marca del decremento que ese pago caído invalidó
+			"% [decremento anulado]%",
+			// el ciclo
+			"2026-06-06 06:00:00.000",
+			"2026-07-06 06:00:00.000",
+			// la siembra: corte del ancla, la marca de anulado, prefijos, corte del máximo
+			"2026-06-06 06:00:00.000",
+			"% [decremento anulado]%",
+			"Reversa de pago #%",
+			"Anulación de pago #%",
+			"2026-06-06 06:00:00.000",
+		]);
+	});
+
+	it("la siembra viaja como un NÚMERO, no como filas previas", () => {
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+
+		// El tramo anterior al ciclo ya no se trae fila por fila: se agrega en SQL
+		// y llega como un solo techo. Por eso `previo` desapareció del JSON.
+		expect(query.sql).not.toContain("AS previo");
+		expect(query.sql).not.toContain("'previo', e.previo");
+		expect(query.sql).toContain("COALESCE(n.nivel, '0') AS nivel_sembrado");
+	});
+
+	it("la siembra no amplía el universo de créditos del reporte", () => {
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+
+		// Lo que antes garantizaba el `HAVING BOOL_OR(NOT e.previo)` ahora lo
+		// garantiza la FORMA: el techo se calcula SOLO para los créditos que ya
+		// tienen un evento adentro del ciclo, así que no puede meter ninguno.
+		expect(query.sql).toContain(
+			"nivel_sembrado AS (\n      SELECT e.credito_id, COALESCE(techo.nivel, 0)::text AS nivel\n      FROM eventos_por_credito e",
+		);
+		expect(query.sql).toContain(
+			"LEFT JOIN nivel_sembrado n ON n.credito_id = e.credito_id",
+		);
+		// Y un crédito sin eventos en el ciclo no genera nada por más techo que
+		// traiga: no hay nada que plegar.
+		expect(
+			buildMoraRecoveryReport(
+				[
+					{
+						asesorId: 1,
+						nombre: "Ana",
+						esperado: "70",
+						eventos: [],
+						nivelSembrado: "900",
+						cobrado: "0",
+					},
+				],
+				{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "historico" },
+			).totales.esperado,
+		).toBe("70.00");
+	});
+
+	it("la siembra no cambia el agregado al plegar por lotes de créditos", () => {
+		// El plegado del nivel es POR CRÉDITO, así que partir la lista de créditos
+		// en lotes no puede mover el total. Con la siembra sigue siendo cierto:
+		// los eventos previos vienen en la MISMA fila del crédito.
+		const filas: MoraRecoverySourceRow[] = [
+			{
+				asesorId: 1,
+				nombre: "Ana",
+				esperado: "0",
+				eventos: [previo("CONDONACION", 100, 0), evento("RECALCULO", 0, 100)],
+				cobrado: "0",
+			},
+			{
+				asesorId: 1,
+				nombre: "Ana",
+				esperado: "0",
+				eventos: [previo("DECREMENTO", 80, 0), evento("RECALCULO", 0, 80)],
+				cobrado: "30",
+			},
+			{
+				asesorId: 2,
+				nombre: "Beto",
+				esperado: "50",
+				eventos: [evento("RECALCULO", 50, 75)],
+				cobrado: "10",
+			},
+			{
+				asesorId: 2,
+				nombre: "Beto",
+				esperado: "100",
+				// Pagó y se revirtió: el esperado vuelve a ser la foto, no el doble.
+				eventos: [evento("DECREMENTO", 100, 0), reverso(0, 100)],
+				cobrado: "0",
+			},
+		];
+		const periodo = {
+			inicio: "2026-06-06",
+			fin: "2026-07-06",
+			alcance: "historico" as const,
+		};
+		const unaPasada = buildMoraRecoveryReport(filas, periodo);
+		const porLotes = [
+			filas.slice(0, 1),
+			filas.slice(1, 2),
+			filas.slice(2, 3),
+			filas.slice(3),
+		].map(
+			(lote) => buildMoraRecoveryReport(lote, periodo),
+		);
+		const sumaLotes = porLotes
+			.reduce((total, r) => total + Number(r.totales.esperado), 0)
+			.toFixed(2);
+
+		// 0 (condonado afuera, rebote adentro) + 80 (pagó y volvió a generar) + 75
+		// + 100 (la foto del que se revirtió, sin duplicar).
+		expect(unaPasada.totales.esperado).toBe("255.00");
+		expect(sumaLotes).toBe(unaPasada.totales.esperado);
+	});
+
+	it("un crédito que solo generó mora adentro entra al alcance del esperado", () => {
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+
+		// FULL JOIN: si solo tiene eventos no hay fila en snapshot ni en pagos.
+		expect(query.sql).toContain("FULL JOIN eventos_por_credito e");
+		expect(query.sql).toContain(
+			"ca.credito_id = COALESCE(s.credito_id, p.credito_id, e.credito_id)",
+		);
+
+		// Y su cobro cuenta DENTRO del alcance, no fuera.
+		const report = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 4,
+					nombre: "Fabi",
+					esperado: "0",
+					eventos: [evento("CREACION", 0, 80)],
+					cobrado: "80",
+				},
+			],
+			{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "historico" },
+		);
+		expect(report.totales).toMatchObject({
+			esperado: "80.00",
+			cobradoEnSnapshot: "80.00",
+			cobradoFueraSnapshot: "0.00",
+		});
+	});
+
+	it("el cobro de un crédito sin esperado alguno queda FUERA del alcance", () => {
+		const report = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 5,
+					nombre: "Gabo",
+					esperado: "0",
+					eventos: [],
+					cobrado: "45",
+				},
+			],
+			{ inicio: "2026-06-06", fin: "2026-07-06", alcance: "historico" },
+		);
+
+		expect(report.totales).toMatchObject({
+			esperado: "0.00",
+			cobradoEnSnapshot: "0.00",
+			cobradoFueraSnapshot: "45.00",
+		});
+	});
+
+	it("el ancla se busca con UNA fila y sin ventana de tiempo", () => {
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+
+		// El ANCLA es el último evento previo que bajó el techo de verdad: un pago
+		// (cualquier baja real) o una DESACTIVACION. La CONDONACION queda fuera a
+		// propósito: perdonar no vuelve a abrir la oportunidad de cobro.
+		expect(query.sql).toContain(
+			"AND (h.tipo_evento = 'DESACTIVACION'\n               OR (h.tipo_evento <> 'CONDONACION'",
+		);
+		expect(query.sql).toContain("AND h.monto_nuevo < h.monto_anterior))");
+		// Una sola fila, por índice: ORDER BY ... DESC + LIMIT 1, no un scan.
+		expect(query.sql).toContain(
+			"ORDER BY h.fecha DESC, h.historial_id DESC\n        LIMIT 1",
+		);
+		// Y el techo es un AGREGADO desde el ancla, no las filas plegadas.
+		expect(query.sql).toContain(
+			"WHEN h.tipo_evento = 'CONDONACION' THEN h.monto_anterior::numeric",
+		);
+		expect(query.sql).toContain(
+			"AND (ancla.fecha IS NULL\n               OR (h.fecha, h.historial_id) >= (ancla.fecha, ancla.historial_id))",
+		);
+	});
+
+	it("MUTACIÓN: la consulta no tiene NINGÚN corte por días para la siembra", () => {
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+
+		// Cualquier tope por días —31, 90, el que sea— tendría que viajar como un
+		// instante propio. Los únicos instantes de la consulta son los DOS límites
+		// del ciclo, así que no hay dónde esconder un corte elegido a ojo.
+		const instantes = new Set(
+			query.params.filter(
+				(p): p is string =>
+					typeof p === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:/.test(p),
+			),
+		);
+		expect([...instantes].sort()).toEqual([
+			"2026-06-06 06:00:00.000",
+			"2026-07-06 06:00:00.000",
+		]);
+		// La siembra solo mira "antes del inicio", nunca "después de tal fecha".
+		expect(query.sql).not.toContain("2026-05-06");
+		expect(query.sql.match(/h\.fecha >= /g) ?? []).toHaveLength(1);
+	});
+
+	it("la restitución de una reversa se reconoce por el motivo y nunca es un ancla", () => {
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+
+		// Las marcas las escriben reversePayment (reversa) y falsePayment
+		// (anulación), y las lee el reporte: MISMAS constantes, una por escritor.
+		expect(query.params).toContain(`${MOTIVO_REVERSA_MORA_PREFIJO}%`);
+		expect(query.params).toContain(`${MOTIVO_ANULACION_MORA_PREFIJO}%`);
+		// Ninguna se puede quedar afuera del lector: la lista es la fuente.
+		for (const prefijo of MOTIVOS_RESTITUCION_MORA_PREFIJOS) {
+			expect(query.params).toContain(`${prefijo}%`);
+		}
+		expect(query.sql).toContain(
+			"(h.tipo_evento = 'INCREMENTO' AND (COALESCE(h.motivo, '') LIKE $4 OR COALESCE(h.motivo, '') LIKE $5)) AS reverso",
+		);
+		expect(query.sql).toContain("'reverso', e.reverso");
+		// Y el ancla las excluye EXPLÍCITAMENTE, igual que `esReseteoDeNivel`: una
+		// restitución repone un techo, nunca lo baja.
+		expect(query.sql).toContain(
+			"AND NOT (h.tipo_evento = 'INCREMENTO'\n                            AND (COALESCE(h.motivo, '') LIKE $11 OR COALESCE(h.motivo, '') LIKE $12))",
+		);
+		expect(
+			esReseteoDeNivel({
+				tipoEvento: "INCREMENTO",
+				montoAnterior: 100,
+				montoNuevo: 40,
+				reverso: true,
+			}),
+		).toBe(false);
+	});
+
+	it("rechaza un ciclo con límites que no son un día real", () => {
+		expect(() =>
+			buildMoraRecoveryQuery({
+				inicio: "2026-02-31",
+				fin: "2026-07-06",
+				fechaSnapshot: "2026-06-06",
+				alcance: "historico",
+			}),
+		).toThrow("Período de recuperación de mora inválido");
+		expect(() =>
+			buildMoraRecoveryQuery({
+				inicio: "2026-06-06",
+				fin: "no-es-fecha",
+				fechaSnapshot: "2026-06-06",
+				alcance: "historico",
+			}),
+		).toThrow("Período de recuperación de mora inválido");
 	});
 });

@@ -19,6 +19,7 @@ import {
 import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { desactivarMoraSiCreditoAlDia, updateMora } from "./latefee";
+import { crearEstampadorDecrementoMora } from "./moraDecrementoDePago";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor";
 import { prepararConvenioPayment } from "./paymentAgreement";
@@ -128,6 +129,16 @@ interface StatsInfo {
 interface ResultadoMora {
   teniaMora: boolean;
   moraPagada: boolean;
+  /**
+   * El evento `DECREMENTO` que este descuento dejó en `moras_historial`.
+   *
+   * Viaja hasta acá porque el decremento tiene que quedar LIGADO a su pago, y
+   * cuando se escribe la fila del pago todavía no existe: el estampado ocurre
+   * más abajo, en cuanto hay `pago_id` (ver `estamparPagoEnDecremento`). Sin
+   * ese lazo, anular o revertir el pago tenía que adivinar cuál de los
+   * decrementos del crédito era el suyo.
+   */
+  historialIdDecremento?: number | null;
   pagoCompleto?: boolean;
   pagoParcial?: boolean;
   montoAplicadoMora: number;
@@ -215,6 +226,7 @@ const procesarPagoMora = async ({
       teniaMora: true,
       moraPagada: true,
       pagoCompleto: true,
+      historialIdDecremento: resultadoMora.historial_id ?? null,
       montoAplicadoMora: montoMora.toNumber(),
       saldoMoraRestante: 0,
       disponibleRestante: nuevoDisponible.toNumber(),
@@ -247,6 +259,7 @@ const procesarPagoMora = async ({
     moraPagada: false,
     pagoCompleto: false,
     pagoParcial: true,
+    historialIdDecremento: resultadoMora.historial_id ?? null,
     montoAplicadoMora: disponible.toNumber(),
     saldoMoraRestante: saldoMoraRestante.toNumber(),
     disponibleRestante: 0,
@@ -841,6 +854,19 @@ export const insertPayment = async (
     });
     // Actualizar disponible
     disponible = new Big(resultadoMora.disponibleRestante);
+    // 🔗 LIGAR EL DECREMENTO DE MORA A SU PAGO.
+    //
+    // La mora acaba de bajar, pero la fila del pago todavía no existe: esa es
+    // justamente la razón de que `pagos_credito.createdat` sea POSTERIOR al
+    // evento del decremento y de que anular o revertir el pago tuviera que
+    // adivinar cuál era su bajada. El estampador marca el evento en cuanto haya
+    // un `pago_id`, y como la mora viaja en UNA sola de las filas que este
+    // método escribe, se dispara con la primera y después es un no-op: cada
+    // rama lo llama sin preguntar. Ver `crearEstampadorDecrementoMora`.
+    const estamparDecrementoMora = crearEstampadorDecrementoMora(
+      resultadoMora.historialIdDecremento,
+      db,
+    );
     const montoCuota = new Big(credito.cuota);
     let disponible_restante = disponible
     if (!resultadoMora.teniaMora) {
@@ -850,7 +876,7 @@ export const insertPayment = async (
       if (resultadoMora.pagoCompleto && resultadoMora.moraPagada) {
         moraBig = new Big(resultadoMora.montoAplicadoMora);
         if (disponible_restante.lte(0)) {
-          await insertarPago({
+          const pagoDeMora = await insertarPago({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
             cuotaId: cuotaIdPagoEspecial,
@@ -868,12 +894,13 @@ export const insertPayment = async (
             observaciones,
             nexaPaymentEventId,
           });
+          await estamparDecrementoMora(pagoDeMora?.pago_id);
         }
 
       }
       if (!resultadoMora.moraPagada && resultadoMora.pagoParcial) {
         if (disponible_restante.lte(0)) {
-          await insertarPago({
+          const pagoDeMora = await insertarPago({
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
             cuotaId: cuotaIdPagoEspecial,
@@ -891,6 +918,7 @@ export const insertPayment = async (
             observaciones,
             nexaPaymentEventId,
           });
+          await estamparDecrementoMora(pagoDeMora?.pago_id);
         }
         return {
           message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
@@ -902,7 +930,7 @@ export const insertPayment = async (
 
     if (!resultadoMora.moraPagada && resultadoMora.montoAplicadoMora > 0) {
       if (disponible_restante.lte(0)) {
-        await insertarPago({
+        const pagoDeMora = await insertarPago({
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
           cuotaId: cuotaIdPagoEspecial,
@@ -920,6 +948,7 @@ export const insertPayment = async (
           observaciones,
           nexaPaymentEventId,
         });
+        await estamparDecrementoMora(pagoDeMora?.pago_id);
       }
       return {
         message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
@@ -2020,6 +2049,14 @@ export const insertPayment = async (
           // correcto) y los rubros planos se netean contra objetivos+Σmonto_
           // aplicado, no contra estos saldos.
           //
+          // 🔗 Esta es la fila que se llevó la mora (`moraParaPago` solo es > 0
+          // en la primera cuota que escribe): en cuanto existe, se le estampa
+          // su `pago_id` al DECREMENTO que la bajó. Es un no-op si no hubo
+          // decremento o si otra rama ya estampó.
+          if (moraParaPago.gt(0)) {
+            await estamparDecrementoMora(pagoInsertado?.pago_id);
+          }
+
           // Se omite si la cuota no absorbió nada: un pago que no tocó la
           // cuota tampoco debe reescribirle los saldos de sus filas.
           if (!filaParcialOmitida) {
@@ -2237,7 +2274,12 @@ export const insertPayment = async (
         pagoConvenioPagoId = pagoInsertado.pago_id;
       }
 
-
+      // 🔗 Esta fila se llevó la mora (`mora: moraBig` en `pagoData`) y es la
+      // ÚNICA que escribe esta rama: si el pago cobró mora y no se estampa acá,
+      // el decremento nace sin marca y anular o revertir el pago cae al camino
+      // de reserva —"¿el cron tocó la mora después?"—, que casi siempre dice
+      // que sí y restituye CERO: el capital vuelve y la mora no.
+      await estamparDecrementoMora(pagoInsertado.pago_id);
 
       // 3️⃣ Insertar boletas si existen
       if (urlCompletas && urlCompletas.length > 0) {
@@ -2412,6 +2454,10 @@ export const insertPayment = async (
         if (new Big(pagoConvenioParaFila).gt(0)) {
           pagoConvenioPagoId = pagoEspecialInsertado.pago_id;
         }
+        // Esta fila también lleva `resultadoMora.montoAplicadoMora`: si ninguna
+        // cuota llegó a escribirse, es la única que puede cargar con la mora y
+        // por lo tanto la que tiene que quedar ligada al decremento.
+        await estamparDecrementoMora(pagoEspecialInsertado?.pago_id);
       }
 
       const newSaldoAFavor = saldoAFavor

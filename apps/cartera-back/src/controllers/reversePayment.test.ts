@@ -169,6 +169,11 @@ function createPersistenceHarness(
     refrescarProyeccion: mock(() =>
       Promise.resolve({ corrio: true as const }),
     ) as unknown as ReversePaymentDependencies["refrescarProyeccion"],
+    // La restitución de mora entra inyectada (ver ReversePaymentDependencies);
+    // estos escenarios corren con `mora: "0"`, así que no debería llamarse.
+    restituirMora: (async () => ({
+      success: true,
+    })) as unknown as ReversePaymentDependencies["restituirMora"],
   });
   return { handler, runTransaction };
 }

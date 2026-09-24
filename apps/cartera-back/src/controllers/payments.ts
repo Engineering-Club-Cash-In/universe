@@ -26,6 +26,7 @@ import {
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
+import { anularPagoYRestituirMora } from "./anularPagoMora";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
 import { calcularVentanaProporcional } from "../utils/functions/diasParticipacion";
@@ -1945,6 +1946,55 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   console.log(
     `Falsificando pago con ID: ${pago_id} para crédito ID: ${credito_id}`
   );
+
+  // ── EL ORDEN ES LO QUE HACE ESTO REINTENTABLE ──────────────────────────────
+  //
+  // Antes los espejos de inversionistas se escribían PRIMERO y la anulación
+  // después. Si la anulación fallaba —la restitución de mora tira a propósito
+  // para abortar su transacción— el caller reintentaba `falsePayment` entera y
+  // los espejos se volvían a escribir: `pagos_credito_inversionistas_espejo` NO
+  // tiene restricción de unicidad por pago e inversionista (verificado contra
+  // el esquema: solo la PK por `id`, `idx_pagos_liquidacion_espejo` y los dos
+  // parciales por `no liquidado`; la que sí existe, `uk_pago_inversionista`, es
+  // de la tabla vieja `pagos_credito_inversionistas`), así que quedaban filas
+  // DUPLICADAS sin liquidar, que aguas abajo duplican montos.
+  //
+  // Y no se puede juntar todo en UNA transacción, que sería lo natural:
+  // `withPendingReturnCreditLocks` abre su PROPIA conexión (`lockPool`) y toma
+  // `FOR NO KEY UPDATE` sobre la fila de `cartera.creditos` mientras corre su
+  // callback. `anularPagoYRestituirMora` pide `FOR UPDATE` sobre esa MISMA fila
+  // —el candado que abre el orden del módulo de mora— desde la conexión de la
+  // transacción: los dos modos entran en conflicto, así que meter la anulación
+  // adentro del callback la dejaría esperando un candado que solo se suelta
+  // cuando el callback termine. Bloqueo contra uno mismo.
+  //
+  // Invertir el orden resuelve las dos cosas sin tocar esa arquitectura:
+  //
+  //   * si la ANULACIÓN falla, su transacción no dejó nada y los espejos ni
+  //     siquiera se intentaron: el reintento arranca limpio;
+  //   * si fallan los ESPEJOS, su propia transacción (la de
+  //     `insertPagosCreditoInversionistas`) hace rollback entera, y el
+  //     reintento vuelve a pasar por la anulación —que sobre un pago ya
+  //     `paymentFalse` no restituye mora de nuevo ni re-marca su decremento— y
+  //     escribe los espejos UNA sola vez.
+  //
+  // El resultado del espejo no depende del orden: solo lee la cuota del pago,
+  // el espejo del crédito y los abonos no liquidados; nada de eso lo toca la
+  // anulación.
+
+  // Marcar la boleta como falsa y restituir su mora son UN SOLO HECHO, así que
+  // van en UNA transacción: si la restitución falla, el pago NO queda marcado y
+  // el reintento vuelve a intentar las dos cosas. Sueltos como estaban, una
+  // restitución fallida dejaba la anulación firme y el reintento la SALTEABA
+  // para siempre (leía `paymentFalse = true` y la regla devolvía `null`).
+  //
+  // El cuerpo vive en `anularPagoMora.ts` —no acá— para poder ejercerse en una
+  // prueba: varios tests registran un `mock.module("./payments")` global y este
+  // módulo desaparece en la corrida completa.
+  const updatedCount = await db.transaction((tx) =>
+    anularPagoYRestituirMora(tx as unknown as typeof db, { pago_id, credito_id })
+  );
+
   // Mismo guard que obtenerCreditosConPagosPendientes/calcularYRegistrarPagosEspejo:
   // un crédito en PENDIENTE_AUTORIZACION no debe generar pagos espejo, ni siquiera
   // "falsos", mientras la devolución a CUBE sigue sin resolver.
@@ -1953,34 +2003,10 @@ export async function falsePayment(pago_id: number, credito_id: number) {
     // Falsear un pago no debe descontar el aporte del crédito/espejo.
     await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
   });
-  // Actualizar el estado del pago a falso
-  const result = await db
-    .update(pagos_credito)
-    .set({
-      pagado: false,
-      paymentFalse: true,
-    })
-    .where(
-      and(
-        eq(pagos_credito.pago_id, pago_id),
-        eq(pagos_credito.credito_id, credito_id)
-      )
-    );
-
-  // 🚨 Si no se actualizó ningún registro, lanza error controlado
-  if (!result.rowCount || result.rowCount === 0) {
-    throw new Error(
-      "No payment found to mark as false with the given criteria"
-    );
-  }
-
-  // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo
-  // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad.
-  await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
 
   return {
     message: "Payment marked as false successfully",
-    updatedCount: result.rowCount ?? 0,
+    updatedCount,
   };
 }
 

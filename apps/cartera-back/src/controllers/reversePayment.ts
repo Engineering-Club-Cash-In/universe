@@ -19,6 +19,11 @@ import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
 import { updateMora } from "./latefee";
+import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
+import {
+  estadoMoraTrasElPago,
+  marcarDecrementoAnulado,
+} from "./moraDecrementoDePago";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { ahoraEnGuatemala, formatearFechaSAT } from "../utils/functions/fechaSAT";
@@ -108,6 +113,13 @@ export interface ReversePaymentDependencies {
   readonly withCreditLock: typeof withPaymentAdvisoryLock;
   /** Refresca la proyección de las cuotas pendientes tras la reversión. */
   readonly refrescarProyeccion: typeof refrescarProyeccionTrasReversa;
+  /**
+   * El ajuste de mora del paso 6️⃣. Entra por acá —y no como import directo—
+   * porque tres archivos de la suite registran `mock.module("./latefee")` y la
+   * prueba que ejerce la restitución no puede quedar a merced de cuál gane la
+   * corrida.
+   */
+  readonly restituirMora: typeof updateMora;
 }
 
 const defaultDependencies: ReversePaymentDependencies = {
@@ -116,6 +128,7 @@ const defaultDependencies: ReversePaymentDependencies = {
   reverseCapitalPayment: revertirAbonoCapitalEspejo,
   withCreditLock: withPaymentAdvisoryLock,
   refrescarProyeccion: refrescarProyeccionTrasReversa,
+  restituirMora: updateMora,
 };
 
 export function createReversePayment(
@@ -333,17 +346,78 @@ export function createReversePayment(
       // 6️⃣ REVERSAR MORA SI EXISTÍA
       // ======================================================================
       if (pago.mora && Number(pago.mora) > 0) {
-        mayHaveGlobalPersistence = true;
-        const reverseMoraResult = await updateMora({
-          credito_id,
-          monto_cambio: Number(pago.mora),
-          tipo: "INCREMENTO",
-          activa: true,
-          motivo: `Reversa de pago #${pago_id}: se restituye la mora que ese pago había cubierto`,
-        });
+        // ── ¿HAY ALGO QUE RESTITUIR? ──────────────────────────────────────
+        // Esto sumaba `pago.mora` A CIEGAS, y por eso sobrecobraba: registrar
+        // un pago baja la mora EN EL ACTO, pero el criterio de cobertura del
+        // cron solo cuenta pagos `validated`/`no_required`, así que un pago que
+        // amanece `pending` deja su cuota contada como vencida y `procesarMoras`
+        // vuelve a FIJAR la mora completa desde la fórmula —REEMPLAZA, no
+        // acumula—. Para cuando alguien revierte, la bajada del pago YA está
+        // deshecha y sumarla otra vez deja el doble. Medido sobre el dump: 32 de
+        // 33 pagos `pending` con mora > 0 sobrevivieron una corrida (crédito
+        // 980, pago 152172: DECREMENTO 333.95 → 0.00 el 05-ago 20:09 y CREACION
+        // 0.00 → 333.95 el 06-ago 05:59; revertirlo dejaba Q667.90).
+        //
+        // El cargo dura hasta la corrida siguiente —el cron reemplaza— pero en
+        // esa ventana el cliente lo ve y se lo cobran.
+        //
+        // La regla y el criterio son los MISMOS que usa la anulación por boleta
+        // falsa (`anularPagoYRestituirMora`): una sola definición en
+        // `restitucionMoraDePago` + `elCronYaRepusoLaMora`. Solo cambia la
+        // causa, que es lo único que de verdad distingue los dos hechos en el
+        // historial.
+        //
+        // La lectura va por `tx` (es una lectura, no toma candados: no
+        // participa del orden `creditos` → `moras_credito` del módulo).
+        const { estado: estadoMora, decremento } = await estadoMoraTrasElPago(
+          tx,
+          { credito_id, pago_id, createdAt: pago.createdAt },
+        );
 
-        if (!reverseMoraResult.success) {
-          throw new Error("Error al reversar mora: " + reverseMoraResult.message);
+        const restitucion = restitucionMoraDePago(
+          pago,
+          pago_id,
+          "REVERSA",
+          estadoMora,
+        );
+
+        // La marca del decremento va SIEMPRE que se lo haya podido identificar,
+        // restituya o no: aunque el cron ya hubiera repuesto la mora —y por eso
+        // el monto sea 0— el reporte de recuperación necesita saber que esa
+        // bajada dejó de valer, o cuenta la reposición del cron como mora
+        // NUEVA. Y va por `tx`, no por el `db` global como la restitución: es
+        // una anotación que solo tiene sentido si la reversa commitea.
+        if (decremento) {
+          await marcarDecrementoAnulado(tx, decremento.historial_id);
+        }
+
+        if (restitucion) {
+          mayHaveGlobalPersistence = true;
+          // 🔒 SIN `dbClient`, A PROPÓSITO: el ajuste sigue yendo por el `db`
+          // global, FUERA de esta transacción, exactamente como antes de este
+          // arreglo. No es descuido: la reversa está construida alrededor de
+          // eso —el portero del paso 4️⃣.5️⃣ se adelanta justamente porque acá se
+          // escribe fuera de la tx, y `mayHaveGlobalPersistence` es lo que hace
+          // que un fallo posterior se reporte como `manual_action_required`—.
+          // Meterlo adentro no rompería el orden de candados (`updateMora` pide
+          // `creditos` FOR UPDATE antes que `moras_credito`, y esta transacción
+          // no tiene candada ninguna de las dos al llegar acá), pero cambiaría
+          // la semántica de rollback de toda la reversa: es otra tarea, con sus
+          // propias pruebas. Acá el alcance es cuánta mora se restituye.
+          const reverseMoraResult = await dependencies.restituirMora({
+            credito_id,
+            tipo: "INCREMENTO",
+            activa: true,
+            // El texto NO es decorativo: el reporte de recuperación lo lee para
+            // distinguir esta RESTITUCIÓN de una mora genuinamente nueva.
+            ...restitucion,
+          });
+
+          if (!reverseMoraResult.success) {
+            throw new Error(
+              "Error al reversar mora: " + reverseMoraResult.message,
+            );
+          }
         }
       }
 

@@ -278,6 +278,20 @@ export const PERMISSIONS = {
 		role === ROLES.JURIDICO ||
 		role === ROLES.INVESTMENT_MANAGER,
 
+	/**
+	 * Resolver una verificación facial que WeeTrust no validó: pedirle a la
+	 * persona que se identifique de nuevo, u omitirla para que el contrato cierre.
+	 *
+	 * Es de inversiones, que le da seguimiento a la firma con el inversionista.
+	 * Jurídico no: entrega los contratos —los emite, reemplaza y anula—, pero el
+	 * seguimiento ya no es suyo.
+	 */
+	canResolveInvestorIdentity: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.INVESTMENT_ADVISOR_JR ||
+		role === ROLES.INVESTMENT_ADVISOR_SR ||
+		role === ROLES.INVESTMENT_MANAGER,
+
 	canCreateLegalContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 

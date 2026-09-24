@@ -91,24 +91,24 @@ describe("el estado de la batería lo marcan sus documentos", () => {
 		});
 	});
 
-	test("una cerrada no se reabre porque falte una firma", async () => {
-		bateria = { ...BATERIA, status: "completada", completedAt: new Date() };
-		contratos = [{ status: "pending" }, { status: "signed" }];
+	test("con un contrato ya está en firma, aunque sea el único", async () => {
+		contratos = [{ status: "pending" }];
 
-		expect(await recalcularEstadoDeLaBateria("bateria-1")).toBe("completada");
-		expect(guardado).toBeUndefined();
+		expect(await recalcularEstadoDeLaBateria("bateria-1", "juan")).toBe(
+			"en_proceso",
+		);
 	});
 
-	test("pero sí se reabre cuando le emiten otro contrato", async () => {
+	test("cerrada es sólo con todo firmado: una cerrada a mano con firmas pendientes vuelve a en firma", async () => {
+		// Las que cerró el "Listo" que había antes, con firmas trabadas.
 		bateria = { ...BATERIA, status: "completada", completedAt: new Date() };
 		contratos = [{ status: "pending" }, { status: "signed" }];
 
-		expect(
-			await recalcularEstadoDeLaBateria("bateria-1", "juan", { reabrir: true }),
-		).toBe("en_proceso");
+		expect(await recalcularEstadoDeLaBateria("bateria-1")).toBe("en_proceso");
 		expect(guardado).toMatchObject({
 			status: "en_proceso",
 			completedAt: null,
+			completedBy: null,
 		});
 	});
 

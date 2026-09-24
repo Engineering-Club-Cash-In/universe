@@ -666,3 +666,81 @@ describe("reset credit atomic closing payment wiring", () => {
 		);
 	});
 });
+
+describe("el detalle expone el ritmo de la mora Y su techo, en los DOS returns", () => {
+	// El CRM le dice al cliente "aumenta Q X por cada día de atraso, hasta un
+	// máximo de Q Y al mes". Las dos cifras salen de getCreditoByNumero, que
+	// tiene DOS returns (con cuota actual y sin ella): si una rama se queda sin
+	// el techo, la frase pierde el tope justo en los créditos más atrasados y
+	// vuelve a prometer un crecimiento infinito. Es un test de contrato sobre el
+	// fuente porque esa función depende de la base.
+	const leerFuente = () =>
+		Bun.file(resolve(import.meta.dir, "credits.ts")).text();
+
+	it("la rama sin cuota actual devuelve las dos", async () => {
+		const branch = (await leerFuente()).match(
+			/if \(!cuotaActualDataResult[\s\S]*?(?=\n\s*const cuotaActualData)/,
+		)?.[0];
+
+		expect(branch).toContain(
+			"incrementoDiarioMora: incrementoDiarioMoraStr,",
+		);
+		expect(branch).toContain(
+			"incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,",
+		);
+	});
+
+	it("el return normal devuelve las dos", async () => {
+		const source = await leerFuente();
+		const ramaSinCuota =
+			source.match(
+				/if \(!cuotaActualDataResult[\s\S]*?(?=\n\s*const cuotaActualData)/,
+			)?.[0] ?? "";
+		const resto = source.slice(
+			source.indexOf(ramaSinCuota) + ramaSinCuota.length,
+		);
+
+		expect(resto).toContain("incrementoDiarioMora: incrementoDiarioMoraStr,");
+		expect(resto).toContain(
+			"incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,",
+		);
+	});
+
+	it("la proyección mira hasta hoy + 30 días, no solo lo ya vencido", async () => {
+		// El defecto que esto fija: con el filtro en "vencidas" la cuota que vence
+		// HOY quedaba fuera, y mañana el cron ya le cobra 1/30 — el ritmo
+		// anunciado salía por DEBAJO del real y el cliente pagaba de menos.
+		const source = await leerFuente();
+		const query = source.slice(
+			source.indexOf("const cuotasParaMora = await db"),
+			source.indexOf("const diasDeCuotasEnHorizonteDeMora ="),
+		);
+
+		// La ventana de la query es el horizonte, no "hoy".
+		expect(query).toContain(
+			"lte(cuotas_credito.fecha_vencimiento, limiteHorizonteMora)",
+		);
+		expect(source).toContain("hoyGT.getDate() + BASE_DIAS_MORA");
+
+		// Y el filtro en memoria usa el MISMO horizonte, con días CON SIGNO: con
+		// `diasAtrasoMora` (que aplasta a 0) una cuota futura cobraría desde hoy.
+		const filtro = source.slice(
+			source.indexOf("const diasDeCuotasEnHorizonteDeMora ="),
+			source.indexOf("const incrementoDiarioMoraStr"),
+		);
+		expect(filtro).toContain("isInstallmentWithinMoraHorizon(");
+		expect(filtro).toContain("diasAtrasoMoraConSigno(c.fecha_vencimiento, hoyGT)");
+	});
+
+	it("las dos cifras salen de las MISMAS cuotas, sin una query extra", async () => {
+		const source = await leerFuente();
+
+		// Un solo cálculo de días de atraso alimenta a las dos.
+		expect(
+			source.match(/diasAtrasadosPorCuota: diasDeCuotasEnHorizonteDeMora,/g),
+		).toHaveLength(2);
+		expect(
+			source.match(/const diasDeCuotasEnHorizonteDeMora =/g),
+		).toHaveLength(1);
+	});
+});

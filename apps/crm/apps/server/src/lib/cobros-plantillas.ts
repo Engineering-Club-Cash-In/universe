@@ -45,6 +45,36 @@ export interface VariablesPlantilla {
 	 * lo que el cron sumará mañana si el cliente no paga hoy.
 	 */
 	expectativaMoraDiaria?: string;
+	/**
+	 * Lo que sube POR DÍA el crédito que YA está en mora — no confundir con
+	 * `expectativaMoraDiaria`:
+	 *  - expectativaMoraDiaria es el recargo de UNA cuota (1/30 de su cargo
+	 *    mensual). Se le dice a un cliente AL DÍA: "si no pagás hoy, empieza a
+	 *    correr esto".
+	 *  - incrementoDiarioMora es lo que crece el crédito COMPLETO: 1/30 por
+	 *    CADA cuota vencida que todavía no llegó a su techo de 30 días. Tres
+	 *    cuotas frescas crecen 3/30 por día; una cuota abandonada hace 200 días
+	 *    ya está congelada y aporta 0, así que un crédito viejo puede traer
+	 *    "0.00" aunque deba mucho.
+	 * Lo calcula cartera-back (`incrementoDiarioMora` en latefee.ts), que es el
+	 * único que conoce los días de cada cuota. Lo usan las plantillas de mora
+	 * (1 cuota, 2-3 cuotas, jurídico) para que el cliente pueda calcular lo que
+	 * debe el día que pague, en vez de pagar el monto de hoy dos días después y
+	 * dejar residuo.
+	 */
+	incrementoDiarioMora?: string;
+	/**
+	 * El TECHO de ese aumento: lo máximo que la mora de este crédito puede
+	 * subir en un mes. Va SIEMPRE junto a `incrementoDiarioMora`, porque el
+	 * ritmo solo ("aumenta Q16.80 por cada día") promete un crecimiento que no
+	 * dura para siempre: cada cuota deja de crecer al llegar a su cargo
+	 * mensual. Decir las dos cifras es el mismo estándar que ya usa la
+	 * plantilla del día de pago ({expectativaMoraDiaria} + {expectativaMora}).
+	 * Lo calcula cartera-back (`incrementoMaximoMensualMora` en latefee.ts) a
+	 * partir de las MISMAS cuotas que el diario, así que las dos no pueden
+	 * contradecirse.
+	 */
+	incrementoMaximoMensualMora?: string;
 	/** Año del impuesto de circulación. Default: año actual en Guatemala. */
 	anioImpuesto?: string;
 	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
@@ -454,6 +484,61 @@ export function calcularExpectativaMoraDiaria(
 	return moraDeUnaCuota(capital, statusCredit, 1);
 }
 
+/**
+ * Oración que anuncia cuánto sube el saldo por día en las plantillas de mora,
+ * CON su techo: "…, y aumenta Q3.73 por cada día de atraso, hasta un máximo de
+ * Q93.33 al mes". El ritmo solo prometía un crecimiento infinito — cada cuota
+ * deja de crecer al llegar a su cargo mensual—, así que se dice igual que en
+ * la plantilla del día de pago: el ritmo Y su tope.
+ *
+ * Vive en constantes porque `interpolar` las borra cuando no hay qué anunciar:
+ * la oración ENTERA si el crédito ya no crece (todas las cuotas en su techo →
+ * Q0.00 por día), y solo el `FRAGMENTO_TOPE_INCREMENTO_MORA` si llegó el ritmo
+ * pero no el techo (cartera-back viejo), que deja la frase corta pero sana.
+ * Tienen que ser idénticas a las del archivo del front
+ * (apps/web/src/lib/cobros/plantillas-mensajes.ts) — ver la nota de cabecera.
+ *
+ * Va DENTRO del párrafo del monto adeudado, así que no cambia el conteo de
+ * bloques (`\n\n`) del que depende la selección de template en Meta.
+ */
+export const FRAGMENTO_TOPE_INCREMENTO_MORA =
+	", hasta un máximo de Q{incrementoMaximoMensualMora} al mes";
+
+export const CLAUSULA_INCREMENTO_DIARIO_MORA =
+	", y aumenta Q{incrementoDiarioMora} por cada día de atraso" +
+	FRAGMENTO_TOPE_INCREMENTO_MORA;
+
+/**
+ * true si hay un monto de aumento REAL que anunciar — sirve igual para el
+ * ritmo diario y para su techo mensual. "" (cartera no lo mandó, versión vieja
+ * del back) y "0.00" son lo mismo para el mensaje: no hay frase.
+ * El valor viene formateado es-GT, así que se le quitan los separadores de
+ * miles antes de compararlo.
+ */
+export function hayIncrementoMora(valor: string | null | undefined): boolean {
+	if (!valor) return false;
+	return Number(valor.replace(/,/g, "")) > 0;
+}
+
+/**
+ * Formatea a es-GT un incremento de mora que manda cartera-back —el diario o
+ * su techo mensual— (un
+ * `Big.toFixed(2)`, p. ej. "1120.00" → "1,120.00"). "" cuando no hay nada que
+ * anunciar: cartera no lo mandó, no es un número, o es 0 (todas las cuotas ya
+ * topadas). El "" hace que la oración desaparezca sola en `interpolar`.
+ */
+export function formatearIncrementoMora(
+	valor: string | number | null | undefined,
+): string {
+	if (valor === null || valor === undefined || valor === "") return "";
+	const numero = Number(valor);
+	if (!Number.isFinite(numero) || numero <= 0) return "";
+	return numero.toLocaleString("es-GT", {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
+	});
+}
+
 export interface PlantillaMensaje {
 	id: string;
 	nombre: string;
@@ -555,6 +640,85 @@ function toCapitalCase(str: string): string {
 		.join(" ");
 }
 
+/**
+ * Borra la oración del aumento cuando no hay nada que anunciar: la cláusula
+ * ENTERA si el crédito ya no crece (todas las cuotas en su techo → Q0.00 por
+ * día), y solo el `FRAGMENTO_TOPE_INCREMENTO_MORA` si llegó el ritmo pero no
+ * el techo (cartera-back viejo), que deja la frase corta pero sana. Dejar
+ * "aumenta Q0.00 por cada día que pase" sería ruido, y dejar "aumenta Q."
+ * sería un mensaje roto.
+ *
+ * El orden importa: si primero se sacara el tope, la cláusula entera ya no
+ * coincidiría para poder borrarse.
+ *
+ * Vive aparte de `interpolar` porque el gate de envío necesita preguntar lo
+ * mismo ANTES de mandar: qué queda del cuerpo una vez borrada la cláusula.
+ */
+export function quitarClausulaIncrementoMora(
+	texto: string,
+	incrementoDiarioMora: string,
+	incrementoMaximoMensualMora: string,
+): string {
+	if (!hayIncrementoMora(incrementoDiarioMora)) {
+		return texto.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
+	}
+	if (!hayIncrementoMora(incrementoMaximoMensualMora)) {
+		return texto.split(FRAGMENTO_TOPE_INCREMENTO_MORA).join("");
+	}
+	return texto;
+}
+
+export const COBROS_MOTIVO_SIN_INCREMENTO_MORA =
+	"la plantilla anuncia el aumento de la mora y cartera no lo pudo calcular";
+
+/**
+ * Un cuerpo que TODAVÍA menciona {incrementoDiarioMora} o
+ * {incrementoMaximoMensualMora} después de borrar la cláusula incorporada no
+ * se puede enviar si el valor correspondiente viene vacío: al cliente le
+ * llegaría "El saldo aumenta Q diario".
+ *
+ * Por qué no alcanza con borrar la cláusula: el modal del masivo ofrece las
+ * dos como variables insertables SUELTAS, así que un asesor puede escribir su
+ * propia oración ("El saldo aumenta Q{incrementoDiarioMora} diario") que no
+ * coincide con `CLAUSULA_INCREMENTO_DIARIO_MORA` y sobrevive al borrado. Un
+ * mensaje roto al cliente es peor que no mandarlo, así que se descarta con
+ * motivo — mismo patrón que prepararMontoAdeudadoParaEnvio.
+ *
+ * Lo que NO bloquea: el crédito que legítimamente no crece (todas las cuotas
+ * en su techo) usando la cláusula incorporada, que desaparece sola y deja el
+ * mensaje sano.
+ */
+export function prepararIncrementoMoraParaEnvio(
+	cuerpo: string,
+	incrementoDiarioMora: string | null | undefined,
+	incrementoMaximoMensualMora: string | null | undefined,
+):
+	| {
+			enviar: true;
+			incrementoDiarioMora: string;
+			incrementoMaximoMensualMora: string;
+	  }
+	| { enviar: false; motivo: string } {
+	const diario = incrementoDiarioMora ?? "";
+	const maximo = incrementoMaximoMensualMora ?? "";
+	const restante = quitarClausulaIncrementoMora(cuerpo, diario, maximo);
+
+	if (
+		(restante.includes("{incrementoDiarioMora}") &&
+			!hayIncrementoMora(diario)) ||
+		(restante.includes("{incrementoMaximoMensualMora}") &&
+			!hayIncrementoMora(maximo))
+	) {
+		return { enviar: false, motivo: COBROS_MOTIVO_SIN_INCREMENTO_MORA };
+	}
+
+	return {
+		enviar: true,
+		incrementoDiarioMora: diario,
+		incrementoMaximoMensualMora: maximo,
+	};
+}
+
 export function interpolar(
 	texto: string,
 	variables: VariablesPlantilla,
@@ -568,7 +732,18 @@ export function interpolar(
 		? toCapitalCase(variables.clienteNombre)
 		: "";
 
-	return texto
+	const incrementoDiarioMora = variables.incrementoDiarioMora ?? "";
+	const incrementoMaximoMensualMora =
+		variables.incrementoMaximoMensualMora ?? "";
+	const base = quitarClausulaIncrementoMora(
+		texto,
+		incrementoDiarioMora,
+		incrementoMaximoMensualMora,
+	);
+
+	return base
+		.replace(/{incrementoDiarioMora}/g, v(incrementoDiarioMora))
+		.replace(/{incrementoMaximoMensualMora}/g, v(incrementoMaximoMensualMora))
 		.replace(/{clienteNombre}/g, v(nombre))
 		.replace(/{fechaPago}/g, v(variables.fechaPago))
 		.replace(/{cuotaMensual}/g, v(variables.cuotaMensual))
@@ -695,7 +870,7 @@ ${COBROS_NO_REPLY_WARNING}
 		asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola {clienteNombre} 👋
-Tienes *1 cuota con atraso por un monto de Q{montoAdeudado}*.
+Tienes *1 cuota con atraso por un monto de Q{montoAdeudado}* al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 Es importante que realices tu pago lo antes posible para evitar mayores recargos en tu cuenta.
 
@@ -713,7 +888,7 @@ Es importante que realices tu pago lo antes posible para evitar mayores recargos
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola {clienteNombre},
-Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}*.
+Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}* al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 ⚠️ *En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.*
 
@@ -730,7 +905,7 @@ Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un mo
 		etapa: "mora_90",
 		asunto: "ÚLTIMO AVISO: Proceso jurídico - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
-		cuerpo: `Señor(a) {clienteNombre}, le informamos que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
+		cuerpo: `Señor(a) {clienteNombre}, le informamos que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.
 

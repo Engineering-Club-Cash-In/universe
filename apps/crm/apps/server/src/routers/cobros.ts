@@ -57,9 +57,11 @@ import {
 	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
+	formatearIncrementoMora,
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
+	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
 	seguroPorAseguradora,
@@ -2316,6 +2318,21 @@ export const cobrosRouter = {
 						creditoCompleto.credito.capital,
 						creditoCompleto.credito.statusCredit,
 					),
+					// {incrementoDiarioMora} de las plantillas de mora: lo que crece
+					// este crédito por día — 1/30 del cargo mensual por CADA cuota
+					// vencida que aún no llegó a su techo de 30 días. No es
+					// expectativaMoraDiaria (esa es una sola cuota): lo calcula
+					// cartera-back, que es el único que conoce los días de cada cuota.
+					// "" cuando ya no crece (todas topadas) o el estado está excluido.
+					incrementoDiarioMora: formatearIncrementoMora(
+						creditoCompleto.incrementoDiarioMora,
+					),
+					// Y su techo: lo máximo que esa mora puede subir en un mes. El
+					// ritmo sin tope promete un crecimiento infinito; las dos
+					// cifras juntas son el estándar de la plantilla del día de pago.
+					incrementoMaximoMensualMora: formatearIncrementoMora(
+						creditoCompleto.incrementoMaximoMensualMora,
+					),
 					// {montoAdeudado} de las plantillas de mora (1 cuota, 2-3 cuotas,
 					// jurídico): saldo real de cada cuota vencida — recibo menos lo ya
 					// abonado, misma regla de cobertura que cartera — + mora. "" si no
@@ -3682,9 +3699,24 @@ export const cobrosRouter = {
 			// contando — y el mensaje diría "2 cuotas" con el monto de una.
 			const detallePorSifco = new Map<
 				string,
-				{ montoAdeudado: string; cuotasAtraso: number } | null
+				{
+					montoAdeudado: string;
+					cuotasAtraso: number;
+					incrementoDiarioMora: string;
+					incrementoMaximoMensualMora: string;
+				} | null
 			>();
-			if (cuerpoBase.includes("{montoAdeudado}")) {
+			// Las tres variables salen del MISMO detalle de cartera-back, así que
+			// la carga se dispara con cualquiera de ellas. El incremento diario y
+			// su techo se ofrecen como variables insertables por su cuenta en el
+			// modal del masivo: si el gate mirara solo {montoAdeudado}, una
+			// plantilla editada que use únicamente una de ellas se quedaría sin
+			// detalle y la cláusula desaparecería en silencio.
+			if (
+				cuerpoBase.includes("{montoAdeudado}") ||
+				cuerpoBase.includes("{incrementoDiarioMora}") ||
+				cuerpoBase.includes("{incrementoMaximoMensualMora}")
+			) {
 				const sifcosElegibles = creditosFiltrados
 					.filter(
 						(c) =>
@@ -3712,6 +3744,14 @@ export const cobrosRouter = {
 											detalle.credito.statusCredit,
 										),
 										cuotasAtraso: contarCuotasAtrasadasUnicas(cuotasDetalle),
+										// Del MISMO detalle que el monto: lo que ese saldo
+										// crece por día (ver {incrementoDiarioMora}).
+										incrementoDiarioMora: formatearIncrementoMora(
+											detalle.incrementoDiarioMora,
+										),
+										incrementoMaximoMensualMora: formatearIncrementoMora(
+											detalle.incrementoMaximoMensualMora,
+										),
 									});
 								} catch (err) {
 									console.error(
@@ -3817,6 +3857,27 @@ export const cobrosRouter = {
 					continue;
 				}
 
+				// La cláusula incorporada del aumento desaparece sola al interpolar
+				// cuando no hay nada que anunciar, pero el modal ofrece
+				// {incrementoDiarioMora} y {incrementoMaximoMensualMora} como
+				// variables SUELTAS: una plantilla editada a mano ("El saldo aumenta
+				// Q{incrementoDiarioMora} diario") sobrevive al borrado y, sin el
+				// dato, le llegaría al cliente "El saldo aumenta Q diario". Un
+				// mensaje roto es peor que no mandarlo.
+				const incremento = prepararIncrementoMoraParaEnvio(
+					cuerpoBase,
+					detalleCartera?.incrementoDiarioMora,
+					detalleCartera?.incrementoMaximoMensualMora,
+				);
+				if (!incremento.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: incremento.motivo,
+					});
+					continue;
+				}
+
 				// Día de pago: tomar el día del mes de la fecha de vencimiento de la
 				// próxima cuota que devuelve cartera (`proxima_cuota`). Es el mismo
 				// criterio que usa el detalle individual de este router, y la única
@@ -3846,6 +3907,16 @@ export const cobrosRouter = {
 					nombreAsesor: asesor.nombre ?? "",
 					expectativaMora: expectativaMora.expectativaMora,
 					expectativaMoraDiaria: expectativaMora.expectativaMoraDiaria,
+					// Cuánto crece por día el saldo que el mensaje acaba de anunciar
+					// (mismo detalle, ver 4.b), ya pasado por el gate de arriba.
+					// Vacío es legítimo cuando el crédito no crece (todas sus cuotas
+					// en el techo de 30 días): la cláusula incorporada se borra sola
+					// al interpolar. Lo que el gate no deja pasar es un placeholder
+					// suelto sin dato, que dejaría el hueco a la vista.
+					incrementoDiarioMora: incremento.incrementoDiarioMora,
+					// Su techo, del mismo detalle. Vacío = la frase se queda solo
+					// con el ritmo, corta pero sana.
+					incrementoMaximoMensualMora: incremento.incrementoMaximoMensualMora,
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad de cada crédito (Universales o G&T).
 					...seguroPorAseguradora(info?.insuranceProvider),

@@ -48,6 +48,14 @@ import {
   filtrarCuotasVencidasSinCobertura,
 } from "./registerPaymentPolicy";
 import {
+  BASE_DIAS_MORA,
+  diasAtrasoMoraConSigno,
+  hoyGuatemala,
+  incrementoDiarioMora,
+  incrementoMaximoMensualMora,
+  isInstallmentWithinMoraHorizon,
+} from "./latefee";
+import {
   CREDIT_DETAIL_STATUSES,
   RESET_CREDIT_ERRORS,
   canResetCreditByStatus,
@@ -280,6 +288,97 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       currentCredit.creditos.cuota ?? 0
     );
 
+    // Cuánto le sube la mora a este crédito por cada día que pase (lo que
+    // sumará la próxima corrida del cron). El CRM lo usa para decirle al
+    // cliente "tu saldo de hoy es X y aumenta Y por día": con la mora
+    // proporcional el monto adeudado ya no es fijo dentro del mes, y un cliente
+    // que paga dos días después lo que se le cotizó deja residuo y la cuota no
+    // se cubre.
+    //
+    // Se consulta aparte y NO se reusa cuotasVencidasSinCerrar: esa lista trae
+    // una fila por (cuota, pago) y decide la cobertura por montos, mientras que
+    // la mora se cobra con el criterio del cron (esCuotaElegibleParaMora), que
+    // mira el flag `pagado` y la existencia de un pago aplicado. Usar el otro
+    // criterio daría un incremento que no cuadra con lo que el cron va a
+    // escribir. Es UNA sola query por crédito (este endpoint es de detalle, no
+    // corre en loop).
+    //
+    // Trae las cuotas impagas que vencen DENTRO DEL HORIZONTE de la proyección
+    // (hasta hoy + 30 días), no solo las ya vencidas: la que vence hoy mañana
+    // ya suma 1/30 al saldo, y dejarla fuera anunciaba un ritmo menor al que el
+    // cron cobra. Las que vencen más allá de 30 días no pueden mover la mora
+    // dentro de la ventana que se le anuncia al cliente, así que no se traen.
+    const hoyGT = hoyGuatemala();
+    // Hasta dónde mira la proyección: hoy + 30 días, en fecha de calendario de
+    // Guatemala (misma fecha que usa el cron), para que el filtro de la query y
+    // el de `isInstallmentWithinMoraHorizon` hablen del mismo día.
+    const finHorizonte = new Date(
+      hoyGT.getFullYear(),
+      hoyGT.getMonth(),
+      hoyGT.getDate() + BASE_DIAS_MORA
+    );
+    const limiteHorizonteMora = [
+      String(finHorizonte.getFullYear()).padStart(4, "0"),
+      String(finHorizonte.getMonth() + 1).padStart(2, "0"),
+      String(finHorizonte.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    const cuotasParaMora = await db
+      .select({
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,
+        hasPaidPayment: sql<boolean>`EXISTS (
+          SELECT 1
+          FROM cartera.pagos_credito pc
+          WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
+            AND pc."paymentFalse" = false
+            AND pc.pagado = true
+            AND pc.validation_status IN ('validated', 'no_required')
+            AND COALESCE(pc.monto_aplicado, 0) > 0
+        )`,
+      })
+      .from(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, creditoId),
+          eq(cuotas_credito.pagado, false),
+          lte(cuotas_credito.fecha_vencimiento, limiteHorizonteMora)
+        )
+      );
+
+    // Días CON SIGNO: la que vence hoy entra con 0 y la que vence en 10 días
+    // con −10. La proyección los desplaza y cada cuota empieza a cobrar sola el
+    // día que le toca; aplastarlos a 0 las haría cobrar desde hoy.
+    const diasDeCuotasEnHorizonteDeMora = cuotasParaMora
+      .filter((c) =>
+        isInstallmentWithinMoraHorizon(
+          { ...c, statusCredit: currentCredit.creditos.statusCredit },
+          hoyGT
+        )
+      )
+      .map((c) => diasAtrasoMoraConSigno(c.fecha_vencimiento, hoyGT));
+
+    // String con 2 decimales, igual que el resto de montos del detalle.
+    // "0.00" cuando el crédito está en un estado excluido, sin capital, o
+    // cuando ninguna cuota del horizonte mueve el saldo mañana (todas topadas,
+    // o todavía lejos de vencer). NO toca `moraActual`, que sigue saliendo de
+    // moras_credito: acá solo se proyecta hacia adelante.
+    const incrementoDiarioMoraStr = incrementoDiarioMora({
+      capital: currentCredit.creditos.capital ?? 0,
+      diasAtrasadosPorCuota: diasDeCuotasEnHorizonteDeMora,
+    }).toFixed(2);
+
+    // El TECHO de ese incremento: lo máximo que la mora puede subir en un mes.
+    // Va junto al diario porque el mensaje al cliente dice las dos cifras
+    // ("aumenta Q X por cada día de atraso, hasta un máximo de Q Y al mes"):
+    // el ritmo solo, sin su tope, promete un crecimiento que no dura para
+    // siempre. Sale de las MISMAS cuotas ya consultadas arriba — no hay query
+    // extra — justamente para que las dos cifras no puedan contradecirse.
+    const incrementoMaximoMensualMoraStr = incrementoMaximoMensualMora({
+      capital: currentCredit.creditos.capital ?? 0,
+      diasAtrasadosPorCuota: diasDeCuotasEnHorizonteDeMora,
+    }).toFixed(2);
+
     const cuotasPendientes = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
@@ -437,6 +536,8 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         cuotasEnValidacion,
         cuotasPagadas,
         moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
+        incrementoDiarioMora: incrementoDiarioMoraStr,
+        incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
         mora: moraActual.length > 0 ? moraActual[0] : null,
         convenioActivo: null,
         cuotasEnConvenio: [],
@@ -567,6 +668,8 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       cuotasEnValidacion,
       cuotasPagadas,
       moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
+      incrementoDiarioMora: incrementoDiarioMoraStr,
+      incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
       mora: moraActual.length > 0 ? moraActual[0] : null,
       convenioActivo:
         convenioActivo.length > 0

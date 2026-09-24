@@ -38,6 +38,8 @@ const VARIABLES_DISPONIBLES = [
 	"nombreAsesor",
 	"expectativaMora",
 	"expectativaMoraDiaria",
+	"incrementoDiarioMora",
+	"incrementoMaximoMensualMora",
 	"anioImpuesto",
 	"fechaLimiteImpuesto",
 	"aseguradora",

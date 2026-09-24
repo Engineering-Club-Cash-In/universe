@@ -85,23 +85,60 @@ export function fechaCalendarioGT(valor: Date | string): number {
   return Date.UTC(valor.getFullYear(), valor.getMonth(), valor.getDate());
 }
 
-export function isOverdueInstallmentForMora(
-  cuota: {
-    fecha_vencimiento: Date | string;
-    pagado: boolean | null;
-    hasPaidPayment?: boolean | null;
-    statusCredit?: string | null;
-  },
-  hoy: Date,
-) {
-  const fechaVenc = fechaCalendarioGT(cuota.fecha_vencimiento);
-  const fechaHoy = fechaCalendarioGT(hoy);
+export type CuotaParaMora = {
+  fecha_vencimiento: Date | string;
+  pagado: boolean | null;
+  hasPaidPayment?: boolean | null;
+  statusCredit?: string | null;
+};
 
-  const isOverdue = fechaVenc < fechaHoy;
+/**
+ * La mitad del criterio de mora que NO habla de fechas: la cuota está impaga,
+ * no tiene un pago aplicado encima, y el crédito no está en un estado que el
+ * cron excluye.
+ *
+ * Existe separada porque hay DOS preguntas sobre la misma cuota: "¿el cron le
+ * cobra mora hoy?" (vencida) y "¿le va a cobrar dentro del horizonte que se le
+ * anuncia al cliente?" (vence pronto). Si cada una repitiera los mismos tres
+ * chequeos, podrían divergir y el aviso hablaría de cuotas que el cron nunca
+ * va a tocar.
+ */
+export function esCuotaElegibleParaMora(cuota: CuotaParaMora): boolean {
   const isUnpaid = cuota.pagado === false && cuota.hasPaidPayment !== true;
   const isEligible = !STATUS_EXCLUIDOS_MORA.includes(cuota.statusCredit ?? "");
 
-  return isOverdue && isUnpaid && isEligible;
+  return isUnpaid && isEligible;
+}
+
+export function isOverdueInstallmentForMora(cuota: CuotaParaMora, hoy: Date) {
+  const fechaVenc = fechaCalendarioGT(cuota.fecha_vencimiento);
+  const fechaHoy = fechaCalendarioGT(hoy);
+
+  return esCuotaElegibleParaMora(cuota) && fechaVenc < fechaHoy;
+}
+
+/**
+ * Las cuotas que entran en la PROYECCIÓN de la mora: las elegibles cuyo
+ * vencimiento cae dentro del horizonte que se le anuncia al cliente (por
+ * defecto los próximos 30 días), estén ya vencidas o no.
+ *
+ * Por qué incluye las que todavía no vencen: lo que se le dice al cliente es
+ * cuánto va a subir su saldo mañana y de aquí a un mes. Una cuota que vence
+ * HOY mañana lleva 1 día de atraso y el cron ya le cobra 1/30 — dejarla fuera
+ * anuncia un ritmo MENOR al real, que es la dirección peligrosa: el cliente
+ * paga lo que se le dijo y queda corto. Con los días en negativo (una cuota
+ * que vence en 10 días entra con −10), `calcularMoraProporcional` las recoge
+ * solas el día que les toca, porque sube a 0 todo día negativo.
+ */
+export function isInstallmentWithinMoraHorizon(
+  cuota: CuotaParaMora,
+  hoy: Date,
+  horizonteDias: number = BASE_DIAS_MORA,
+) {
+  return (
+    esCuotaElegibleParaMora(cuota) &&
+    diasAtrasoMoraConSigno(cuota.fecha_vencimiento, hoy) >= -horizonteDias
+  );
 }
 
 // Tasa mensual de mora (1.12%). En la fila de moras_credito el porcentaje se
@@ -119,10 +156,25 @@ export const BASE_DIAS_MORA = 30;
  * exactos de 86_400_000 y el `Math.trunc` es solo blindaje.
  */
 export function diasAtrasoMora(fechaVencimiento: Date | string, hoy: Date): number {
+  return Math.max(0, diasAtrasoMoraConSigno(fechaVencimiento, hoy));
+}
+
+/**
+ * Los mismos días, pero CON signo: negativo cuando la cuota todavía no vence
+ * (vence en 10 días → −10). Lo necesita la proyección de la mora, que desplaza
+ * los días hacia adelante y necesita saber cuánto le falta a cada cuota para
+ * empezar a cobrar; `diasAtrasoMora` los aplasta a 0 y ahí se pierde esa
+ * distancia. Para el cron y para el monto de hoy se sigue usando la versión
+ * aplastada, que es la que corresponde a `calcularMoraProporcional`.
+ */
+export function diasAtrasoMoraConSigno(
+  fechaVencimiento: Date | string,
+  hoy: Date,
+): number {
   const fechaVenc = fechaCalendarioGT(fechaVencimiento);
   const fechaHoy = fechaCalendarioGT(hoy);
 
-  return Math.max(0, Math.trunc((fechaHoy - fechaVenc) / 86_400_000));
+  return Math.trunc((fechaHoy - fechaVenc) / 86_400_000);
 }
 
 /**
@@ -152,6 +204,119 @@ export function calcularMoraProporcional(params: {
     const factor = dias >= BASE_DIAS_MORA ? new Big(1) : new Big(dias).div(BASE_DIAS_MORA);
     return acc.plus(cargoMensual.times(factor));
   }, new Big(0));
+}
+
+/**
+ * La mora que este crédito va a tener DENTRO DE `dias` días, con la fórmula
+ * real: los mismos días de atraso de cada cuota, desplazados hacia adelante.
+ *
+ * Es la única pieza que sabe proyectar. Las dos cifras que se le anuncian al
+ * cliente —el ritmo diario y su techo mensual— salen de restar dos
+ * proyecciones, no de contar cuotas: contar obliga a repetir la fórmula en
+ * otras palabras ("1/30 por cada cuota bajo el techo") y esa paráfrasis se
+ * desincroniza sola en cuanto la fórmula tiene un borde (el techo por cuota,
+ * las cuotas que aún no vencen). Restar dos corridas de la MISMA función no
+ * puede desincronizarse.
+ *
+ * Los días desplazados que sigan negativos (una cuota que aún no vence)
+ * cuentan como 0: es lo que ya hace `calcularMoraProporcional`, y es lo
+ * correcto — esa cuota todavía no cobra nada, pero empieza a cobrar sola en la
+ * proyección del día en que vence.
+ *
+ * Devuelve un Big SIN redondear, igual que `calcularMoraProporcional`.
+ */
+export function proyectarMoraEnDias(params: {
+  capital: Big | string | number;
+  diasAtrasadosPorCuota: number[];
+  dias: number;
+}): Big {
+  return calcularMoraProporcional({
+    capital: params.capital,
+    diasAtrasadosPorCuota: params.diasAtrasadosPorCuota.map(
+      (dias) => dias + params.dias,
+    ),
+  });
+}
+
+/**
+ * La mora tal como el cliente la LEE: a dos decimales.
+ *
+ * Por qué redondear antes de restar y no al final: al cliente se le dice "hoy
+ * debés Q108.27 y aumenta Q3.73 por día". Él suma esos dos números, no los
+ * Big crudos. Si la resta se hiciera entre valores sin redondear, el
+ * incremento anunciado no cerraría con la mora anunciada y le faltaría un
+ * centavo para cubrir la cuota.
+ */
+function moraComoLaVeElCliente(mora: Big): Big {
+  return new Big(mora.toFixed(2));
+}
+
+/**
+ * Cuánto va a CRECER la mora de este crédito en la próxima corrida del cron:
+ * la mora proyectada a mañana menos la de hoy, las dos ya redondeadas.
+ *
+ * Por qué existe: con la mora proporcional el monto adeudado ya no es el mismo
+ * del día 5 al día 25 del mes — sube todos los días. Cuando al cliente se le
+ * dice "debés Q4,318.20" ese número es correcto hoy y está corto pasado
+ * mañana: paga lo que se le dijo, queda un residuo y la cuota no se cubre. En
+ * vez de un "al día de hoy" sin más, se le dice cuánto sube por día para que
+ * pueda calcular lo que debe el día que pague.
+ *
+ * Sale de la proyección y no de un conteo de cuotas porque el conteo se
+ * equivocaba en los bordes: una cuota que VENCE HOY todavía no cobra nada,
+ * pero mañana lleva 1 día y el cron le cobra 1/30 — contando solo las ya
+ * vencidas, el ritmo anunciado se quedaba corto justo el día en que el cliente
+ * más lo necesita. Las cuotas ya topadas por el min(1,·) aportan lo mismo en
+ * las dos proyecciones y se cancelan solas, sin tener que reconocerlas.
+ *
+ * Devuelve un Big que YA es una diferencia de montos redondeados: el
+ * `.toFixed(2)` del caller no lo mueve.
+ */
+export function incrementoDiarioMora(params: {
+  capital: Big | string | number;
+  diasAtrasadosPorCuota: number[];
+}): Big {
+  return crecimientoDeLaMoraEn(params, 1);
+}
+
+/**
+ * El TECHO de ese crecimiento: lo MÁXIMO que la mora de este crédito puede
+ * subir en un mes, contado desde hoy — la misma resta, pero contra la mora
+ * proyectada a 30 días.
+ *
+ * Por qué existe: `incrementoDiarioMora` sola promete un ritmo que no dura
+ * para siempre — "aumenta Q16.80 por cada día que pase" es cierto hoy, pero
+ * cada cuota deja de crecer al llegar a su cargo mensual. Decir el techo junto
+ * al ritmo —el mismo estándar de la plantilla del día de pago, "Q… por cada
+ * día de atraso, hasta un máximo de Q… al mes"— evita prometer un crecimiento
+ * infinito.
+ *
+ * Por qué 30 días es un techo de verdad: toda cuota elegible que entra en la
+ * lista llega a su tope dentro de esa ventana (le faltan como mucho 30 días
+ * desde que vence), así que la mora proyectada a 30 días ya no puede subir más
+ * por esas cuotas.
+ *
+ * NO puede dar negativo: la mora proyectada crece con los días (cada cuota
+ * aporta `cargoMensual × min(1, días/30)`, que es monótono), así que restarle
+ * la de hoy nunca da menos que 0 — por eso no hay clamp, que sería código
+ * muerto (ver el test que fija la invariante).
+ */
+export function incrementoMaximoMensualMora(params: {
+  capital: Big | string | number;
+  diasAtrasadosPorCuota: number[];
+}): Big {
+  return crecimientoDeLaMoraEn(params, BASE_DIAS_MORA);
+}
+
+/** Lo que la mora sube de hoy a `dias` días, entre los montos que el cliente ve. */
+function crecimientoDeLaMoraEn(
+  params: { capital: Big | string | number; diasAtrasadosPorCuota: number[] },
+  dias: number,
+): Big {
+  const hoy = moraComoLaVeElCliente(proyectarMoraEnDias({ ...params, dias: 0 }));
+  const futura = moraComoLaVeElCliente(proyectarMoraEnDias({ ...params, dias }));
+
+  return futura.minus(hoy);
 }
 
 /**

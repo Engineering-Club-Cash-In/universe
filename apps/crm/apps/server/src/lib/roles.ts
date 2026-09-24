@@ -222,6 +222,17 @@ export const PERMISSIONS = {
 	canViewAllCasosCobros: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
 
+	// Buró interno (lista negra propia). Cobros registra y consulta; dar de
+	// baja a alguien y cambiar las reglas de coincidencia queda en supervisión.
+	// Análisis ve las coincidencias desde la oportunidad (canAccessAnalysis).
+	canAccessBuroInterno: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.COBROS ||
+		role === ROLES.COBROS_SUPERVISOR,
+
+	canManageBuroInterno: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
+
 	// WhatsApp Module Access
 	canAccessWhatsApp: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
@@ -288,6 +299,13 @@ export const PERMISSIONS = {
 	// Reenviar enlaces (WhatsApp o correo de WeeTrust) le escribe al cliente.
 	// Lo hacen análisis, después de regenerar, y jurídico, después de reemplazar.
 	canResendContractLinks: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
+
+	// Anular un contrato lo descarta sin reemplazarlo: la oportunidad se queda
+	// sin ese documento hasta que se genere o suba otro. Lo deciden los dos que
+	// trabajan la papelería —jurídico en 80% y análisis en 85%—, no quien sólo
+	// la mira.
+	canAnnulContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
 
 	canConfirmContractsSigning: (role: UserRole | string): boolean =>

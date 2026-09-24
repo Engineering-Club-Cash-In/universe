@@ -9,6 +9,10 @@ import {
 	User,
 } from "lucide-react";
 import { useState } from "react";
+import {
+	ETAPA_EN_FIRMA,
+	etapaPermite,
+} from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import { z } from "zod";
 import type { ContractSigner } from "@/components/contracts/DynamicContractWizard";
@@ -30,6 +34,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
+import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/juridico/$leadId")({
@@ -61,6 +66,10 @@ function RouteComponent() {
 		null,
 	);
 	const [preguntarReenvio, setPreguntarReenvio] = useState(false);
+	// Lo que se acaba de rehacer o subir: sólo eso se reenvía, no la batería.
+	const [contratosAReenviar, setContratosAReenviar] = useState<
+		Array<{ id: string; nombre: string }> | undefined
+	>(undefined);
 	const [contratoAReemplazar, setContratoAReemplazar] = useState<{
 		id: string;
 		contractType: string;
@@ -181,6 +190,24 @@ function RouteComponent() {
 			queryClient.invalidateQueries({
 				queryKey: ["getGenerationSnapshot"],
 			});
+			// En 85% los enlaces ya le llegaron al cliente por WhatsApp al aprobar,
+			// y regenerar acaba de borrar esos documentos: si nadie le manda los
+			// nuevos, se queda firmando sobre links muertos. En 80% todavía no
+			// salió nada; los manda la aprobación.
+			// La etapa con la que regeneró el servidor: la de la pantalla puede ser
+			// vieja si la aprobaron mientras estaba abierta.
+			if (
+				data.regeneratedCount > 0 &&
+				data.porcentajeEtapa === ETAPA_EN_FIRMA
+			) {
+				setContratosAReenviar(
+					data.contracts.map((c) => ({
+						id: c.id,
+						nombre: getContractTypeLabel(c.contractType),
+					})),
+				);
+				setPreguntarReenvio(true);
+			}
 		},
 		onError: (error: Error) => {
 			toast.error(error.message || "Error al regenerar contratos");
@@ -232,12 +259,15 @@ function RouteComponent() {
 			: null;
 
 	/**
-	 * Jurídico sólo maneja los contratos mientras la oportunidad está en 80%.
-	 * En 85% ya pasó a análisis, que los regenera desde su ficha; para que
-	 * jurídico intervenga hay que devolverla a esta etapa. Los botones ni
-	 * aparecen para no ofrecer algo que el servidor va a rechazar.
+	 * Jurídico maneja los contratos en 80% y sigue en 85%, mientras están en
+	 * firma: rehacer la batería con otra fecha cuando venció, o subir uno a
+	 * mano, es parte de su operación. Del 90% en adelante los botones ni
+	 * aparecen, para no ofrecer algo que el servidor va a rechazar.
 	 */
-	const enEtapaDeJuridico = opportunityData?.stage?.closurePercentage === 80;
+	const enEtapaDeJuridico = etapaPermite(
+		"reemplazar",
+		opportunityData?.stage?.closurePercentage,
+	);
 
 	// Transformar datos de oportunidad para el modal
 	const selectedOpportunity: OpportunityForModal | null = opportunityData
@@ -437,8 +467,14 @@ function RouteComponent() {
 						onReplace={
 							canCreateLegal && enEtapaDeJuridico ? handleReplace : undefined
 						}
+						// Eliminar va en 80% y 85%, como reemplazar, pero con su propia
+						// regla para que el servidor y el botón no se separen si cambia.
 						onDelete={
-							canCreateLegal && enEtapaDeJuridico
+							canCreateLegal &&
+							etapaPermite(
+								"eliminar",
+								opportunityData?.stage?.closurePercentage,
+							)
 								? handleDeleteContract
 								: undefined
 						}
@@ -478,11 +514,18 @@ function RouteComponent() {
 						setIsUploadModalOpen(abierto);
 						if (!abierto) setContratoAReemplazar(null);
 					}}
-					onUploaded={() => {
+					onUploaded={({ porcentajeEtapa, contractId, contractType }) => {
 						refetch();
-						// Sólo al reemplazar: ahí los enlaces viejos dejaron de servir.
-						// Una subida nueva ya avisa por el envío normal al aprobar.
-						if (contratoAReemplazar) setPreguntarReenvio(true);
+						// Sólo en 85%, sea subida nueva o reemplazo: ahí el envío de la
+						// aprobación ya pasó, y el cliente se quedaría con un enlace muerto
+						// o sin el del contrato nuevo. En 80% todavía no le llegó nada: lo
+						// que se suba o reemplace sale con el envío al aprobar.
+						if (porcentajeEtapa === ETAPA_EN_FIRMA) {
+							setContratosAReenviar([
+								{ id: contractId, nombre: getContractTypeLabel(contractType) },
+							]);
+							setPreguntarReenvio(true);
+						}
 					}}
 					reemplaza={contratoAReemplazar}
 				/>
@@ -491,6 +534,7 @@ function RouteComponent() {
 			{opportunityId && (
 				<ReenviarWhatsappDialog
 					opportunityId={opportunityId}
+					contratos={contratosAReenviar}
 					open={preguntarReenvio}
 					onOpenChange={setPreguntarReenvio}
 				/>

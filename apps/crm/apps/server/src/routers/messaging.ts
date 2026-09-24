@@ -1,8 +1,8 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { coDebtors, leads } from "../db/schema/crm";
+import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import {
 	contractSignatories,
 	generatedLegalContracts,
@@ -21,6 +21,7 @@ import {
 } from "../lib/contratos-rep-legal";
 import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
 import { crmProcedure } from "../lib/orpc";
+import { PERMISSIONS } from "../lib/roles";
 import { getSimpletechClient, sendWhatsappTemplate } from "../lib/simpletech";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 
@@ -50,6 +51,10 @@ export interface ContractLink {
 /**
  * Arma el mensaje de WhatsApp con los links de firma de contratos.
  * Exportable para reutilizar desde el front u otros routers.
+ *
+ * Sin saludo: va dentro de la plantilla de SimpleTech, que ya empieza con
+ * "Hola, te compartimos la siguiente información importante:". Con el nuestro
+ * al cliente le llegaban dos "Hola" seguidos.
  */
 export function buildContractLinksMessage(
 	clientName: string,
@@ -59,7 +64,15 @@ export function buildContractLinksMessage(
 		.map((c) => `📄 ${c.contractName}:\n${c.link}`)
 		.join("\n\n");
 
-	return `Hola ${clientName}, tus contratos están listos para firmar. Por favor ingresa a los siguientes enlaces:\n\n${linksText}\n\nSi tienes alguna duda, no dudes en contactarnos.`;
+	// En singular cuando va uno solo: pasa al reenviar el contrato que se acaba
+	// de renovar o reemplazar. La batería entera (al aprobar, o rehecha con
+	// otra fecha) va en plural.
+	const encabezado =
+		contracts.length === 1
+			? "tu contrato está listo para firmar. Por favor ingresa al siguiente enlace"
+			: "tus contratos están listos para firmar. Por favor ingresa a los siguientes enlaces";
+
+	return `${clientName}, ${encabezado}:\n\n${linksText}\n\nSi tienes alguna duda, no dudes en contactarnos.`;
 }
 
 interface DestinatarioDeFirma {
@@ -71,6 +84,117 @@ interface DestinatarioDeFirma {
 	phone: string | null;
 	leadId?: string;
 	coDebtorId?: string;
+}
+
+/**
+ * Los enlaces que le tocan HOY a una persona de una oportunidad.
+ *
+ * El reintento manual no puede confiar en los enlaces que trae la pantalla:
+ * pueden ser de un contrato que ya se regeneró, o de otro firmante (pegado a
+ * mano), y mandarle a alguien el enlace de otro lo deja firmando en su nombre.
+ * Así que se resuelven acá, por rol y correo, igual que el envío automático.
+ *
+ * Quien ya firmó no aparece: su enlace es de un documento cerrado.
+ */
+async function enlacesDeLaPersona(
+	opportunityId: string,
+	recipient: { leadId: string | null; coDebtorId: string | null },
+): Promise<{
+	destinatario: DestinatarioDeFirma | null;
+	contratos: { contractName: string; link: string | null }[];
+}> {
+	const [oportunidad] = await db
+		.select({ leadId: opportunities.leadId })
+		.from(opportunities)
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+
+	const [lead] = oportunidad?.leadId
+		? await db
+				.select({
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+					phone: leads.phone,
+				})
+				.from(leads)
+				.where(eq(leads.id, oportunidad.leadId))
+				.limit(1)
+		: [];
+
+	// Mismo orden que al mandar: el reparto de correos de prueba es posicional.
+	const coDebtorsList = await db
+		.select({
+			id: coDebtors.id,
+			fullName: coDebtors.fullName,
+			email: coDebtors.email,
+			phone: coDebtors.phone,
+		})
+		.from(coDebtors)
+		.where(eq(coDebtors.opportunityId, opportunityId))
+		.orderBy(coDebtors.createdAt);
+
+	const reales: DestinatarioDeFirma[] = [
+		{
+			role: "TITULAR",
+			nombre: lead ? `${lead.firstName} ${lead.lastName}` : "Cliente",
+			email: lead?.email ?? null,
+			phone: lead?.phone ?? null,
+			...(lead ? { leadId: lead.id } : {}),
+		},
+		...coDebtorsList.map((cd) => ({
+			role: "COFIRMANTE",
+			nombre: cd.fullName,
+			email: cd.email,
+			phone: cd.phone,
+			coDebtorId: cd.id,
+		})),
+		{
+			role: "REP_LEGAL",
+			nombre: REP_LEGAL_NOMBRE,
+			email: REP_LEGAL_EMAIL,
+			phone: REP_LEGAL_TELEFONO || null,
+		},
+	];
+
+	const lista = isTestModeEnabled() ? aplicarCorreosDePrueba(reales) : reales;
+
+	const destinatario =
+		lista.find((d) =>
+			recipient.leadId
+				? d.leadId === recipient.leadId
+				: recipient.coDebtorId
+					? d.coDebtorId === recipient.coDebtorId
+					: d.role === "REP_LEGAL",
+		) ?? null;
+
+	if (!destinatario?.email) return { destinatario, contratos: [] };
+
+	const filas = await db
+		.select({
+			contractName: generatedLegalContracts.contractName,
+			link: contractSignatories.signingUrl,
+		})
+		.from(contractSignatories)
+		.innerJoin(
+			generatedLegalContracts,
+			eq(contractSignatories.contractId, generatedLegalContracts.id),
+		)
+		.where(
+			and(
+				eq(generatedLegalContracts.opportunityId, opportunityId),
+				ne(generatedLegalContracts.status, "cancelled"),
+				isNull(generatedLegalContracts.replacedByContractId),
+				eq(contractSignatories.role, destinatario.role),
+				// WeeTrust puede devolver el correo en minúsculas.
+				sql`lower(${contractSignatories.email}) = lower(${destinatario.email})`,
+				ne(contractSignatories.status, "signed"),
+			),
+		)
+		.orderBy(generatedLegalContracts.generatedAt);
+
+	return { destinatario, contratos: filas };
 }
 
 /**
@@ -88,6 +212,13 @@ interface DestinatarioDeFirma {
 export async function sendContractLinksToLead(params: {
 	leadId: string;
 	opportunityId: string;
+	/**
+	 * Mandar sólo estos contratos (ids). Es para el reenvío después de renovar
+	 * o reemplazar uno: los enlaces de los demás siguen sirviendo, y mandarle
+	 * al cliente la batería entera por un solo contrato lo confunde. Sin esto se
+	 * mandan todos los vigentes, como al aprobar.
+	 */
+	soloContratos?: string[];
 }): Promise<{ sent: boolean; reason?: string }> {
 	// Con el candado de la oportunidad tomado de punta a punta: entre armar los
 	// mensajes y mandarlos hay varias llamadas a SimpleTech, y una regeneración
@@ -114,6 +245,7 @@ const LIMITE_DEL_ENVIO_MS = 120_000;
 async function enviarEnlacesDeFirma(params: {
 	leadId: string;
 	opportunityId: string;
+	soloContratos?: string[];
 }): Promise<{ sent: boolean; reason?: string }> {
 	const [lead] = await db
 		.select({
@@ -158,6 +290,9 @@ async function enviarEnlacesDeFirma(params: {
 				// Reclamado por un reemplazo que todavía no terminó de anularlo: ya
 				// no es el vigente, aunque su estado aún no lo diga.
 				isNull(generatedLegalContracts.replacedByContractId),
+				params.soloContratos
+					? inArray(generatedLegalContracts.id, params.soloContratos)
+					: undefined,
 			),
 		);
 
@@ -323,6 +458,14 @@ async function enviarEnlacesDeFirma(params: {
 		// no lo lleva). Si no le toca ninguno, no se le deja una fila pendiente
 		// que nadie puede cerrar.
 		if (destinatario.role === "REP_LEGAL" && susContratos.length === 0) {
+			continue;
+		}
+
+		// Lo mismo en un reenvío de sólo algunos contratos: quien no firma
+		// ninguno de ellos no tiene nada nuevo que recibir, y una fila
+		// "pendiente" suya confundiría la ficha. Sin correo sí se anota: ahí no
+		// se sabe si le tocaba.
+		if (params.soloContratos && clave && susContratos.length === 0) {
 			continue;
 		}
 
@@ -660,15 +803,18 @@ export const messagingRouter = {
 			z.object({
 				recipientId: z.string().uuid(),
 				phone: z.string().min(1),
-				contracts: z.array(
-					z.object({
-						contractName: z.string(),
-						link: z.string().nullable(),
-					}),
-				),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// Le escribe al cliente con sus enlaces de firma, al teléfono que diga
+			// quien llama: la misma regla que el reenvío desde la ficha. Si no,
+			// ventas podía mandar los enlaces de otro a un número suyo.
+			if (!PERMISSIONS.canResendContractLinks(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tenés permiso para reenviar los enlaces de firma",
+				});
+			}
+
 			const [recipient] = await db
 				.select()
 				.from(whatsappLogRecipients)
@@ -701,52 +847,90 @@ export const messagingRouter = {
 					.where(eq(coDebtors.id, recipient.coDebtorId));
 			}
 
-			// Armar mensaje
-			const completeContracts = input.contracts.filter(
-				(c): c is ContractLink => c.link !== null,
-			);
+			// La oportunidad del envío: de ahí salen los enlaces vigentes.
+			const [log] = await db
+				.select({ opportunityId: whatsappLogs.opportunityId })
+				.from(whatsappLogs)
+				.where(eq(whatsappLogs.id, recipient.whatsappLogId))
+				.limit(1);
 
-			if (completeContracts.length === 0) {
+			if (!log?.opportunityId) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: "Todos los contratos deben tener link de firma",
+					message:
+						"Este envío no está asociado a una oportunidad: no se puede reintentar.",
 				});
 			}
 
-			const message = buildContractLinksMessage(
-				recipient.recipientName,
-				completeContracts,
-			);
+			return conCandadoDeFirma(log.opportunityId, async () => {
+				// Los enlaces se resuelven acá, no se toman de la pantalla: los que
+				// ésta tiene pueden ser de un contrato ya regenerado, o de otro
+				// firmante, y mandarle a alguien el enlace de otro lo deja firmando
+				// en su nombre. Con el candado tomado, además, no se cuela una
+				// regeneración entre resolverlos y mandarlos.
+				const { destinatario, contratos } = await enlacesDeLaPersona(
+					log.opportunityId,
+					recipient,
+				);
 
-			// Enviar por WhatsApp. TEST_MESSAGE rige también el envío manual: si
-			// no, reintentar desde la ficha en modo prueba le escribía al cliente.
-			const modoPrueba = isTestModeEnabled();
-			const sendResult = await sendWhatsappTemplate({
-				phone: modoPrueba ? getTestPhone() : input.phone,
-				message,
-				logPrefix: modoPrueba
-					? "[SimpleTech][manual][TEST]"
-					: "[SimpleTech][manual]",
-				ocultarEnlacesEnLog: true,
-			});
-			const status: "sent" | "failed" = sendResult.success ? "sent" : "failed";
-			const reason: string | null = sendResult.success
-				? null
-				: (sendResult.error ?? "Error desconocido al enviar");
+				if (!destinatario) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"No se pudo ubicar a esta persona en la oportunidad. Reenviá desde la ficha.",
+					});
+				}
 
-			const [updated] = await db
-				.update(whatsappLogRecipients)
-				.set({
-					status,
-					phone: input.phone,
-					contracts: input.contracts,
+				if (contratos.length === 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Esta persona no tiene enlaces de firma pendientes: o ya firmó, o sus contratos se reemplazaron. Revisá la ficha.",
+					});
+				}
+
+				const sinEnlace = contratos.filter((c) => !c.link);
+				if (sinEnlace.length > 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Falta el enlace de firma de: ${sinEnlace.map((c) => c.contractName).join(", ")}. Hay que regenerarlo antes de mandarlo.`,
+					});
+				}
+
+				const message = buildContractLinksMessage(
+					recipient.recipientName,
+					contratos as ContractLink[],
+				);
+
+				// Enviar por WhatsApp. TEST_MESSAGE rige también el envío manual: si
+				// no, reintentar desde la ficha en modo prueba le escribía al cliente.
+				const modoPrueba = isTestModeEnabled();
+				const sendResult = await sendWhatsappTemplate({
+					phone: modoPrueba ? getTestPhone() : input.phone,
 					message,
-					reason,
-					sentAt: status === "sent" ? new Date() : undefined,
-					updatedAt: new Date(),
-				})
-				.where(eq(whatsappLogRecipients.id, input.recipientId))
-				.returning();
+					logPrefix: modoPrueba
+						? "[SimpleTech][manual][TEST]"
+						: "[SimpleTech][manual]",
+					ocultarEnlacesEnLog: true,
+				});
+				const status: "sent" | "failed" = sendResult.success
+					? "sent"
+					: "failed";
+				const reason: string | null = sendResult.success
+					? null
+					: (sendResult.error ?? "Error desconocido al enviar");
 
-			return updated;
+				const [updated] = await db
+					.update(whatsappLogRecipients)
+					.set({
+						status,
+						phone: input.phone,
+						contracts: contratos,
+						message,
+						reason,
+						sentAt: status === "sent" ? new Date() : undefined,
+						updatedAt: new Date(),
+					})
+					.where(eq(whatsappLogRecipients.id, input.recipientId))
+					.returning();
+
+				return updated;
+			});
 		}),
 };

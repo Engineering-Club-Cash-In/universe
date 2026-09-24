@@ -21,20 +21,30 @@ import { client } from "@/utils/orpc";
  * manda los nuevos se quedan esperando sobre un link muerto. No se manda solo
  * porque a veces se regenera varias veces seguidas mientras se corrige algo, y
  * no tiene sentido inundar al cliente.
+ *
+ * Con `contratos` se manda sólo lo que acaba de cambiar: si se renovó uno, ese;
+ * si se rehízo la batería, todos. Los enlaces de los demás siguen sirviendo, y
+ * mandarle al cliente la batería entera por un solo contrato lo confunde.
  */
 export function ReenviarWhatsappDialog({
 	opportunityId,
+	contratos,
 	open,
 	onOpenChange,
 }: {
 	opportunityId: string | null;
+	/** Los contratos a mandar. Sin esto, todos los vigentes. */
+	contratos?: Array<{ id: string; nombre: string }>;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 }) {
 	const reenviar = useMutation({
 		mutationFn: () => {
 			if (!opportunityId) throw new Error("Falta la oportunidad");
-			return client.resendContractLinksWhatsapp({ opportunityId });
+			return client.resendContractLinksWhatsapp({
+				opportunityId,
+				contratos: contratos?.length ? contratos.map((c) => c.id) : undefined,
+			});
 		},
 		onSuccess: (data) => {
 			if (data.success) toast.success(data.message);
@@ -58,6 +68,13 @@ export function ReenviarWhatsappDialog({
 								Los enlaces anteriores dejaron de servir. Si no se reenvían, el
 								cliente y los codeudores se quedan con un link que ya no abre.
 							</p>
+							{contratos?.length ? (
+								<p className="text-sm">
+									Se manda sólo {contratos.length === 1 ? "el de " : "los de "}
+									{contratos.map((c) => `«${c.nombre}»`).join(", ")}: los demás
+									contratos siguen con sus enlaces.
+								</p>
+							) : null}
 							<p className="text-muted-foreground text-sm">
 								Cada uno recibe el suyo. A quien ya firmó no se le manda nada.
 							</p>

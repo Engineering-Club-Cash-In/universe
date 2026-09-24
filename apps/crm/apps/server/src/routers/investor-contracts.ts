@@ -7,11 +7,15 @@ import {
 	contractSignatories,
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
-import { filasDeFirmantes, linksPorRol } from "../lib/contract-signatories";
+import {
+	alguienFirmo,
+	filasDeFirmantes,
+	linksPorRol,
+} from "../lib/contract-signatories";
 import { getSignatureMode } from "../lib/contract-signature-mode";
 import {
+	estadoEnWeeTrust,
 	sincronizarEstadoDeFirma,
-	tieneFirmas,
 } from "../lib/contrato-estado-firma";
 import {
 	etiquetaDeMotivo,
@@ -1019,10 +1023,10 @@ export const investorContractsRouter = {
 			// conserva siempre: lo que diga WeeTrust antes de borrar es una foto, y
 			// alguien puede firmar entre esa consulta y el borrado.
 			if (contrato.status !== "signed" && contrato.weetrustDocumentId) {
-				const conFirmasParciales = await tieneFirmas(
-					input.contractId,
-					contrato.weetrustDocumentId,
-				);
+				const conFirmasParciales =
+					(await alguienFirmo(input.contractId)) ||
+					((await estadoEnWeeTrust(contrato.weetrustDocumentId))?.conFirmas ??
+						true);
 				let detalle: string;
 				try {
 					await borrarDocumentoDeWeeTrust(contrato.weetrustDocumentId);

@@ -35,16 +35,55 @@ export const ETAPAS_QUE_PERMITEN_REEMPLAZO = [80, 85];
 /**
  * Qué etapas permiten cada acción sobre un contrato ya emitido.
  *
- * - **reemplazar** (subir otro documento) es de jurídico, y sólo mientras la
- *   oportunidad está en 80%. En 85% ya salió de su operación y pasó a análisis;
- *   si hace falta que jurídico intervenga, primero hay que devolverla al 80%.
+ * - **reemplazar** (generar de nuevo, subir otro documento) es de jurídico, y
+ *   va en 80% y en 85%. Jurídico sigue trabajando la papelería mientras la
+ *   oportunidad está en firma: rehacer la batería con otra fecha cuando los
+ *   contratos vencieron es parte de su operación normal, no una excepción.
  * - **regenerar** (mismo documento, enlaces nuevos) lo hace análisis, que es
  *   quien lleva la oportunidad en 85%. Se permite también en 80% para que
  *   jurídico pueda hacerlo durante su etapa.
+ * - **anular** (descartar el contrato sin reemplazarlo) lo hacen los dos,
+ *   cuando el documento no va: datos equivocados, la identificación que
+ *   WeeTrust dejó pasar, o simplemente se subió otro. Va también en 85% porque
+ *   es una decisión explícita, con motivo. Lo borra en WeeTrust aunque tenga
+ *   firmas parciales; sólo queda allá lo que ya firmaron todos.
+ * - **eliminar** (el "Eliminar" de jurídico: descarta el contrato y lo borra
+ *   en WeeTrust sin poner otro en su lugar) también en 80% y 85%. En 85% los
+ *   enlaces ya le llegaron al cliente por WhatsApp y dejan de servir, pero un
+ *   contrato que no va hay que poder sacarlo igual: jurídico es quien lo
+ *   decide, y el diálogo de confirmación lo avisa.
+ *
+ * Del 90% en adelante los contratos ya son parte de una decisión tomada y no
+ * se tocan, para ninguna.
  */
 export const ETAPAS_POR_ACCION = {
-	reemplazar: [80],
+	reemplazar: [80, 85],
 	regenerar: [80, 85],
+	anular: [80, 85],
+	eliminar: [80, 85],
 } as const;
 
 export type AccionSobreContrato = keyof typeof ETAPAS_POR_ACCION;
+
+/**
+ * "Contratos en Firma": la etapa en la que los enlaces ya le llegaron al
+ * cliente por WhatsApp, al aprobar. Rehacer o agregar contratos acá lo deja con
+ * links muertos (o sin el nuevo) si no se le reenvían.
+ */
+export const ETAPA_EN_FIRMA = 85;
+
+/**
+ * Si una oportunidad en ese porcentaje admite la acción.
+ *
+ * La usa el front para no ofrecer botones que el servidor va a rechazar, y el
+ * servidor para rechazarlos. Que sea la misma función evita que se separen: la
+ * reja de jurídico estuvo un tiempo en 80% duro en cuatro lugares del front
+ * mientras el servidor decía otra cosa.
+ */
+export function etapaPermite(
+	accion: AccionSobreContrato,
+	porcentaje: number | null | undefined,
+): boolean {
+	if (porcentaje === null || porcentaje === undefined) return false;
+	return ETAPAS_POR_ACCION[accion].includes(porcentaje as never);
+}

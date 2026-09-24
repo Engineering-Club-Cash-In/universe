@@ -18,6 +18,10 @@ import {
 	User,
 } from "lucide-react";
 import { useState } from "react";
+import {
+	ETAPAS_POR_ACCION,
+	etapaPermite,
+} from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import { ApproveOpportunityModal } from "@/components/juridico/ApproveOpportunityModal";
 import {
@@ -60,6 +64,13 @@ export const Route = createFileRoute("/juridico/")({
 	component: RouteComponent,
 });
 
+type EtapaDeJuridico = (typeof ETAPAS_POR_ACCION.reemplazar)[number];
+
+const ETIQUETA_DE_ETAPA: Record<EtapaDeJuridico, string> = {
+	80: "Cierre final (80%)",
+	85: "En firma (85%)",
+};
+
 function RouteComponent() {
 	const navigate = Route.useNavigate();
 	const queryClient = useQueryClient();
@@ -70,6 +81,7 @@ function RouteComponent() {
 	} = useJuridicoPermissions();
 	const [searchQuery, setSearchQuery] = useState("");
 	const [opportunitiesSearchQuery, setOpportunitiesSearchQuery] = useState("");
+	const [etapaFiltro, setEtapaFiltro] = useState<EtapaDeJuridico>(80);
 	const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
 	const [opportunityToApprove, setOpportunityToApprove] = useState<{
 		id: string;
@@ -130,10 +142,19 @@ function RouteComponent() {
 		enabled: canViewLegal,
 	});
 
-	// Obtener oportunidades listas para contratos (80%+)
+	// Las oportunidades que jurídico todavía puede trabajar: 80% armando la
+	// papelería y 85% en firma, donde rehace la batería con otra fecha si los
+	// contratos vencieron. Con sólo 80% las de 85% no aparecían en esta
+	// pestaña, y el menú de generar no tenía dónde mostrarse.
+	//
+	// Se traen juntas pero se ven de a una etapa, y por defecto la de 80%: ése
+	// es el trabajo del día de jurídico. Mezcladas, las de 85% parecían
+	// pendientes suyos cuando ya están en firma.
 	const { data: opportunitiesForContracts, isLoading: isLoadingOpportunities } =
 		useQuery({
-			...orpc.getOpportunitiesForContracts.queryOptions({ input: {} }),
+			...orpc.getOpportunitiesForContracts.queryOptions({
+				input: { closurePercentages: [...ETAPAS_POR_ACCION.reemplazar] },
+			}),
 			enabled: canViewLegal,
 		});
 
@@ -160,21 +181,27 @@ function RouteComponent() {
 			lead.lead.email?.toLowerCase().includes(searchQuery.toLowerCase()),
 	);
 
-	// Filtrar oportunidades por búsqueda
+	const cuantasEnEtapa = (etapa: EtapaDeJuridico) =>
+		opportunitiesForContracts?.filter(
+			(opp) => opp.stage.closurePercentage === etapa,
+		).length ?? 0;
+
+	// Filtrar oportunidades por etapa y búsqueda
 	const filteredOpportunities = opportunitiesForContracts?.filter(
 		(opp) =>
-			opp.title
+			opp.stage.closurePercentage === etapaFiltro &&
+			(opp.title
 				.toLowerCase()
 				.includes(opportunitiesSearchQuery.toLowerCase()) ||
-			opp.lead.firstName
-				.toLowerCase()
-				.includes(opportunitiesSearchQuery.toLowerCase()) ||
-			opp.lead.lastName
-				.toLowerCase()
-				.includes(opportunitiesSearchQuery.toLowerCase()) ||
-			opp.lead.dpi
-				?.toLowerCase()
-				.includes(opportunitiesSearchQuery.toLowerCase()),
+				opp.lead.firstName
+					.toLowerCase()
+					.includes(opportunitiesSearchQuery.toLowerCase()) ||
+				opp.lead.lastName
+					.toLowerCase()
+					.includes(opportunitiesSearchQuery.toLowerCase()) ||
+				opp.lead.dpi
+					?.toLowerCase()
+					.includes(opportunitiesSearchQuery.toLowerCase())),
 	);
 
 	// Find opportunity data from the list
@@ -296,10 +323,8 @@ function RouteComponent() {
 						<Target className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">
-							{opportunitiesForContracts?.length || 0}
-						</div>
-						<p className="text-muted-foreground text-xs">Al 80%+ de cierre</p>
+						<div className="font-bold text-2xl">{cuantasEnEtapa(80)}</div>
+						<p className="text-muted-foreground text-xs">Al 80% de cierre</p>
 					</CardContent>
 				</Card>
 
@@ -498,9 +523,26 @@ function RouteComponent() {
 						<CardHeader>
 							<CardTitle>Oportunidades Listas para Contratos</CardTitle>
 							<CardDescription>
-								Oportunidades al 80% o más de cierre que requieren contratos
-								legales
+								Oportunidades al 80% que requieren contratos legales. En «En
+								firma» están las que ya se mandaron a firmar, por si hay que
+								rehacer la batería con otra fecha.
 							</CardDescription>
+
+							{/* Filtro de etapa */}
+							<div className="flex flex-wrap gap-2">
+								{ETAPAS_POR_ACCION.reemplazar.map((etapa) => (
+									<Button
+										key={etapa}
+										variant={etapaFiltro === etapa ? "default" : "outline"}
+										size="sm"
+										aria-pressed={etapaFiltro === etapa}
+										onClick={() => setEtapaFiltro(etapa)}
+										className="tabular-nums"
+									>
+										{ETIQUETA_DE_ETAPA[etapa]} · {cuantasEnEtapa(etapa)}
+									</Button>
+								))}
+							</div>
 
 							{/* Barra de búsqueda */}
 							<div className="relative">
@@ -628,7 +670,13 @@ function RouteComponent() {
 																	Gestionar
 																</Link>
 															</DropdownMenuItem>
-															{opp.stage.closurePercentage === 80 && (
+															{/* Generar va en 80% y también en 85%: jurídico rehace la
+															    batería con otra fecha cuando los contratos vencieron
+															    mientras la oportunidad está en firma. */}
+															{etapaPermite(
+																"reemplazar",
+																opp.stage.closurePercentage,
+															) && (
 																<DropdownMenuItem asChild>
 																	<Link
 																		to="/juridico/generate/$opportunityId"
@@ -672,12 +720,16 @@ function RouteComponent() {
 									<h3 className="mb-1 font-semibold text-gray-900 text-lg">
 										{opportunitiesSearchQuery
 											? "No se encontraron resultados"
-											: "No hay oportunidades listas"}
+											: etapaFiltro === 80
+												? "No hay oportunidades listas"
+												: "No hay oportunidades en firma"}
 									</h3>
 									<p className="text-gray-500 text-sm">
 										{opportunitiesSearchQuery
 											? "Intenta con otros términos de búsqueda"
-											: "Las oportunidades al 80% o más aparecerán aquí"}
+											: etapaFiltro === 80
+												? "Las oportunidades al 80% aparecerán aquí"
+												: "Las oportunidades al 85% aparecerán aquí"}
 									</p>
 								</div>
 							)}

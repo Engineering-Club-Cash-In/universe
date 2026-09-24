@@ -161,6 +161,16 @@ const app = new Elysia()
       };
     }
 
+    // El paquete de cartas no tiene plantilla propia: se arma con las cartas
+    // que trae, y sólo por /contracts/batch. Acá daba un 500.
+    if (requestBody.contractType === ContractType.PAQUETE_CARTAS) {
+      set.status = 400;
+      return {
+        success: false,
+        error: 'El paquete de cartas se genera por /contracts/batch, con las cartas que lleva',
+      };
+    }
+
     // Validar que se enviaron datos
     if (!requestBody.data || Object.keys(requestBody.data).length === 0) {
       set.status = 400;
@@ -272,6 +282,18 @@ const app = new Elysia()
         };
       }
 
+      // Las cartas unidas no traen datos propios: cada carta trae los suyos.
+      if (contract.contractType === ContractType.PAQUETE_CARTAS) {
+        if (!Array.isArray(contract.cartas) || contract.cartas.length === 0) {
+          set.status = 400;
+          return {
+            success: false,
+            error: `Contrato en posición ${i}: las cartas unidas no traen ninguna carta`
+          };
+        }
+        continue;
+      }
+
       if (!contract.data || Object.keys(contract.data).length === 0) {
         set.status = 400;
         return {
@@ -333,6 +355,14 @@ const app = new Elysia()
       };
     }
 
+    if (contractType === ContractType.PAQUETE_CARTAS) {
+      set.status = 400;
+      return {
+        success: false,
+        error: 'El paquete de cartas se genera por /contracts/batch, con las cartas que lleva',
+      };
+    }
+
     // Generar
     const result = await contractGenerator.generateContract(
       contractType,
@@ -377,11 +407,12 @@ const app = new Elysia()
     const rechazo = rechazoSinSecretoDelCrm(headers, set);
     if (rechazo) return rechazo;
     try {
-      const { contractType, pdfBase64, filenamePrefix, signers, observers } =
+      const { contractType, pdfBase64, filenamePrefix, documentName, signers, observers } =
         body as {
           contractType?: ContractType;
           pdfBase64?: string;
           filenamePrefix?: string;
+          documentName?: string;
           signers?: GenerateContractRequest['signers'];
           observers?: string[];
         };
@@ -392,6 +423,18 @@ const app = new Elysia()
           success: false,
           error: `Tipo de contrato inválido: ${contractType}`,
           availableTypes: Object.values(ContractType)
+        };
+      }
+
+      // Las cartas unidas no se suben a mano: sus firmas se ubican carta por
+      // carta, y eso sólo se puede con un paquete que armó este servicio y que
+      // dice en sus metadatos qué cartas trae. Un PDF unido por fuera no lo dice.
+      if (contractType === ContractType.PAQUETE_CARTAS) {
+        set.status = 400;
+        return {
+          success: false,
+          error:
+            'Las cartas unidas no se pueden subir a mano: se generan desde el CRM. Para cambiar una, regenerá las cartas.',
         };
       }
 
@@ -426,7 +469,7 @@ const app = new Elysia()
       const result = await contractGenerator.signExistingPdf(
         contractType,
         pdfBuffer,
-        { filenamePrefix, signers, observers }
+        { filenamePrefix, documentName, signers, observers }
       );
 
       set.status = result.success ? 200 : 400;
@@ -481,11 +524,12 @@ const app = new Elysia()
     const rechazo = rechazoSinSecretoDelCrm(headers, set);
     if (rechazo) return rechazo;
     try {
-      const { r2Key, contractType, filenamePrefix, signers, observers } =
+      const { r2Key, contractType, filenamePrefix, documentName, signers, observers } =
         body as {
           r2Key?: string;
           contractType?: ContractType;
           filenamePrefix?: string;
+          documentName?: string;
           signers?: GenerateContractRequest['signers'];
           observers?: string[];
         };
@@ -506,7 +550,7 @@ const app = new Elysia()
       const result = await contractGenerator.signExistingPdf(
         contractType,
         pdfBuffer,
-        { filenamePrefix, signers, observers, r2KeyExistente: r2Key }
+        { filenamePrefix, documentName, signers, observers, r2KeyExistente: r2Key }
       );
 
       set.status = result.success ? 200 : 400;
@@ -560,8 +604,9 @@ const app = new Elysia()
    *
    * Devuelve el PDF **firmado** de un documento ya completado.
    *
-   * El CRM lo usa para reemplazar en la ficha del inversionista el PDF que se
-   * generó, que es el borrador sin firmas. Va por acá y no directo a WeeTrust
+   * El CRM lo usa para dos cosas: que ventas y jurídico se bajen el contrato de
+   * verdad, y reemplazar en la ficha del inversionista el borrador que se
+   * generó, que no tiene firmas. Va por acá y no directo a WeeTrust
    * porque las credenciales las tiene este servicio.
    *
    * Sólo con el documento COMPLETED: antes de eso el archivo que WeeTrust
@@ -682,6 +727,7 @@ const app = new Elysia()
       reissue: 'POST /contracts/reissue',
       deleteDocument: 'DELETE /contracts/document/:documentID',
       signingStatus: 'GET /contracts/signing-status/:documentID',
+      signedPdf: 'GET /contracts/signed-pdf/:documentID',
       refreshSigningLinks: 'PUT /contracts/refresh-signing-links/:documentID',
       resendSigningEmail: 'PUT /contracts/resend-email/:documentID',
       webhooks: {

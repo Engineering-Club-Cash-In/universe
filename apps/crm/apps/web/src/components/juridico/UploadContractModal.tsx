@@ -32,7 +32,16 @@ interface UploadContractModalProps {
 	opportunityId: string;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onUploaded?: () => void;
+	/**
+	 * Recibe la etapa con la que el servidor aceptó la subida: decide si hay
+	 * que ofrecer el reenvío por WhatsApp, y la de la pantalla puede ser vieja.
+	 * Y el contrato que quedó, que es el único que hay que reenviar.
+	 */
+	onUploaded?: (resultado: {
+		porcentajeEtapa?: number;
+		contractId: string;
+		contractType: string;
+	}) => void;
 	/**
 	 * Contrato al que reemplaza, si se llegó por "Reemplazar documento" en vez
 	 * de por "Subir contrato". El tipo queda fijo: reemplazar un contrato por
@@ -109,7 +118,11 @@ export function UploadContractModal({
 			toast.success(data.message);
 			limpiar();
 			onOpenChange(false);
-			onUploaded?.();
+			onUploaded?.({
+				porcentajeEtapa: data.porcentajeEtapa,
+				contractId: data.contractId,
+				contractType: data.contractType,
+			});
 		},
 		onError: (error: Error) => toast.error(error.message),
 	});

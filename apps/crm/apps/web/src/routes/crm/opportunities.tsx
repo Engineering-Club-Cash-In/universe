@@ -123,6 +123,7 @@ import {
 } from "@/lib/vehicle-utils";
 import { isVehicleAvailable } from "@/utils/constants";
 import { usePersistedState } from "@/hooks/usePersistedState";
+import { etapaPermite } from "server/src/lib/contratos-anulacion";
 import {
 	formatMissingAssignmentsMessage,
 	getMissingOpportunityAssignments,
@@ -2787,6 +2788,15 @@ function RouteComponent() {
 											puedeRegenerar={PERMISSIONS.canRegenerateContractLinks(
 												userProfile.data.role,
 											)}
+											// El rol no alcanza: fuera de 80% y 85% el servidor lo
+											// rechaza, y no hay que ofrecerlo.
+											puedeAnular={
+												PERMISSIONS.canAnnulContracts(userProfile.data.role) &&
+												etapaPermite(
+													"anular",
+													selectedOpportunity.stage?.closurePercentage,
+												)
+											}
 											onUpdate={() => opportunityContractsQuery.refetch()}
 										/>
 									)}

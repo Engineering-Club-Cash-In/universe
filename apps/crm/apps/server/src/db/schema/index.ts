@@ -1,6 +1,7 @@
 export * from "./auctionVehicles";
 export * from "./auth";
 export * from "./buro";
+export * from "./buro-interno";
 export * from "./cartera-back";
 export * from "./cartera-shared-enums";
 export * from "./checks";

@@ -53,13 +53,18 @@ import {
   shouldRejectZeroAppliedNormalValidation,
   shouldIncobrableInstallmentBePaid,
   shouldMarkInstallmentPaymentPaid,
+  shouldApplyFinalSmallRemainderAsOther,
   sumarAplicadoACuota,
   pagoSchema,
+  internalNexaPagoSchema,
+  getInternalNexaPaymentDate,
   cuentaComoHermanoVivo,
 } from "./registerPaymentPolicy";
 import {
+  holdsPaymentAdvisoryLock,
   PAYMENT_ADVISORY_LOCK_NAMESPACE,
   withPaymentAdvisoryLock,
+  type PaymentAdvisoryLock,
   type PaymentAdvisoryLockConnection,
 } from "../utils/paymentAdvisoryLock";
 import { emitRecoveredDuplicatePendingInstallment } from "../utils/structuredLogger";
@@ -613,13 +618,24 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 // FUNCIÓN PRINCIPAL
 // ========================================
 
-export const insertPayment = async ({ body, set }: any) => {
+export const insertPayment = async (
+  { body, set }: any,
+  {
+    nexaPaymentEventId,
+    paymentLock,
+  }: {
+    nexaPaymentEventId?: number;
+    paymentLock?: PaymentAdvisoryLock;
+  } = {},
+) => {
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
   let lockConn: PaymentAdvisoryLockConnection | undefined;
   let lockedCreditoId: number | undefined;
   try {
     // 1. Validar schema
-    const parseResult = pagoSchema.safeParse(body);
+    const parseResult = (nexaPaymentEventId === undefined
+      ? pagoSchema
+      : internalNexaPagoSchema).safeParse(body);
     if (!parseResult.success) {
       set.status = 400;
       return validationFailed(parseResult.error.flatten().fieldErrors);
@@ -642,6 +658,23 @@ export const insertPayment = async ({ body, set }: any) => {
       fecha_boleta,
       origen_pago,
     } = parseResult.data;
+    const nexaPaymentDate = getInternalNexaPaymentDate(fecha_pago, nexaPaymentEventId);
+    const paymentRegistrationDate = () => {
+      if (nexaPaymentDate) return nexaPaymentDate;
+      const guatemalaTimeString = new Date().toLocaleString("en-US", {
+        timeZone: "America/Guatemala",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      const [datePart, timePart] = guatemalaTimeString.split(", ");
+      const [month, day, year] = datePart.split("/");
+      return new Date(`${year}-${month}-${day}T${timePart}`);
+    };
 
     // 🔒 LOCK PESIMISTA POR CRÉDITO
     // Serializa los pagos concurrentes del MISMO crédito. Sin esto, dos pagos
@@ -653,12 +686,15 @@ export const insertPayment = async ({ body, set }: any) => {
     // termine y vea el saldo ya actualizado.
     // Conexión del pool DEDICADO de locks: los waiters de pg_advisory_lock no
     // deben consumir conexiones del pool de trabajo (deadlock de pool).
-    lockConn = await lockPool.connect();
-    lockedCreditoId = credito_id;
-    await lockConn.query("SELECT pg_advisory_lock($1, $2)", [
-      PAYMENT_ADVISORY_LOCK_NAMESPACE,
-      credito_id,
-    ]);
+    if (!holdsPaymentAdvisoryLock(paymentLock, credito_id)) {
+      const acquiredLockConn = await lockPool.connect();
+      lockConn = acquiredLockConn;
+      lockedCreditoId = credito_id;
+      await acquiredLockConn.query("SELECT pg_advisory_lock($1, $2)", [
+        PAYMENT_ADVISORY_LOCK_NAMESPACE,
+        credito_id,
+      ]);
+    }
 
     // 2. Preparar datos
     const urlCompletas = prepararURLsBoletas(url_boletas);
@@ -774,9 +810,11 @@ export const insertPayment = async ({ body, set }: any) => {
         banco_id: banco_id ?? 0,
         numeroAutorizacion: numeroAutorizacion ?? "",
         registerBy: registerBy ?? "",
+        fecha_pago: paymentRegistrationDate(),
         fecha_boleta,
         monto_aplicado: pagoEspecialCuota.montoAplicado,
         observaciones,
+        nexaPaymentEventId,
       });
     }
 
@@ -824,9 +862,11 @@ export const insertPayment = async ({ body, set }: any) => {
             banco_id: banco_id ?? 0,
             numeroAutorizacion: numeroAutorizacion ?? "",
             registerBy: registerBy ?? "",
+            fecha_pago: paymentRegistrationDate(),
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
             observaciones,
+            nexaPaymentEventId,
           });
         }
 
@@ -845,9 +885,11 @@ export const insertPayment = async ({ body, set }: any) => {
             banco_id: banco_id ?? 0,
             numeroAutorizacion: numeroAutorizacion ?? "",
             registerBy: registerBy ?? "",
+            fecha_pago: paymentRegistrationDate(),
             fecha_boleta,
             monto_aplicado: pagoEspecialCuota.montoAplicado,
             observaciones,
+            nexaPaymentEventId,
           });
         }
         return {
@@ -872,9 +914,11 @@ export const insertPayment = async ({ body, set }: any) => {
           banco_id: banco_id ?? 0,
           numeroAutorizacion: numeroAutorizacion ?? "",
           registerBy: registerBy ?? "",
+          fecha_pago: paymentRegistrationDate(),
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
           observaciones,
+          nexaPaymentEventId,
         });
       }
       return {
@@ -989,6 +1033,7 @@ export const insertPayment = async ({ body, set }: any) => {
     // conteo tenía efectos observables (ajuste stale y guard anti-pérdida).
     let cuotas_saltadas = 0;
     let disponible_para_cuotasPosteriores = new Big(0);
+    let ultimoPagoInsertado: typeof pagos_credito.$inferSelect | undefined;
     for (const cuota of cuotasPendientes) {
 
 
@@ -1480,21 +1525,7 @@ export const insertPayment = async ({ body, set }: any) => {
         const paymentFalse = existingPago
           ? existingPago.pago.paymentFalse
           : false;
-        const guatemalaTimeString = new Date().toLocaleString("en-US", {
-          timeZone: "America/Guatemala",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: false,
-        });
-
-        // Convertir "11/22/2025, 17:07:09" a Date object
-        const [datePart, timePart] = guatemalaTimeString.split(", ");
-        const [month, day, year] = datePart.split("/");
-        const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+        const fechaGuatemala = paymentRegistrationDate();
 
         // La mora sigue yendo en la primera cuota RECORRIDA: un recibo de sólo
         // mora es legítimo y debe escribir su fila aunque ninguna cuota absorba.
@@ -1587,6 +1618,7 @@ export const insertPayment = async ({ body, set }: any) => {
           fecha_boleta: fecha_boleta,
           monto_aplicado: totalPagado.toString(),
           origen_pago: origen_pago,
+          nexaPaymentEventId,
         };
 
         // Insertar o actualizar pago
@@ -1693,21 +1725,7 @@ export const insertPayment = async ({ body, set }: any) => {
               cuotas_completas++;
 
 
-              const guatemalaTimeString = new Date().toLocaleString("en-US", {
-                timeZone: "America/Guatemala",
-                year: "numeric",
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: false,
-              });
-              const [datePart, timePart] = guatemalaTimeString.split(", ");
-              const [month, day, year] = datePart.split("/");
-              const fechaGuatemala = new Date(
-                `${year}-${month}-${day}T${timePart}`
-              );
+              const fechaGuatemala = paymentRegistrationDate();
 
               // El INSERT de esta fila y el marcado del ajuste (si aplica a la
               // cuota 1) van en una sola transacción: si el marcado falla, el
@@ -1789,6 +1807,7 @@ export const insertPayment = async ({ body, set }: any) => {
                   // Paridad con la rama UPDATE de cierre (que persiste pagoData
                   // completo): conservar el origen del pago en la fila de cierre.
                   origen_pago: pagoData.origen_pago,
+                  nexaPaymentEventId,
                 })
                 .returning();
               const [inserted] = rows;
@@ -1862,23 +1881,7 @@ export const insertPayment = async ({ body, set }: any) => {
                 disponible_para_cuotasPosteriores.plus(disponible);
 
               cuotas_parciales++;
-              const guatemalaTimeString = new Date().toLocaleString("en-US", {
-                timeZone: "America/Guatemala",
-                year: "numeric",
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: false,
-              });
-
-              // Convertir "11/22/2025, 17:07:09" a Date object
-              const [datePart, timePart] = guatemalaTimeString.split(", ");
-              const [month, day, year] = datePart.split("/");
-              const fechaGuatemala = new Date(
-                `${year}-${month}-${day}T${timePart}`
-              );
+              const fechaGuatemala = paymentRegistrationDate();
 
 
 
@@ -1959,6 +1962,7 @@ export const insertPayment = async ({ body, set }: any) => {
                   pagoConvenio: "0",
                   fecha_boleta:pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
+                  nexaPaymentEventId,
                 })
                 .returning();
               const [inserted] = rows;
@@ -2001,6 +2005,8 @@ export const insertPayment = async ({ body, set }: any) => {
             }
           }
 
+          if (pagoInsertado?.pago_id) ultimoPagoInsertado = pagoInsertado;
+
           // ── Sincronizar `*_restante` en TODAS las filas vivas de la cuota ──
           // Antes los `*_restante` se guardaban por fila (snapshot del momento)
           // y se desincronizaban entre pagos hermanos: la fila `no_required` y
@@ -2039,24 +2045,31 @@ export const insertPayment = async ({ body, set }: any) => {
           if (disponible_restante.lte(0)) {
             break;
           }
-          // Si el sobrante es <= Q25, agregarlo como "otros" al pago actual y no continuar
-          if (disponible_restante.lte(25) && pagoInsertado?.pago_id) {
-            const otrosActual = new Big(pagoInsertado.otros ?? "0");
-            await db
-              .update(pagos_credito)
-              .set({
-                otros: otrosActual.plus(disponible_restante).toString(),
-                monto_aplicado: new Big(pagoInsertado.monto_aplicado ?? "0").plus(disponible_restante).toString(),
-              })
-              .where(eq(pagos_credito.pago_id, pagoInsertado.pago_id));
-            disponible_restante = new Big(0);
-            break;
-          }
         }
       }
 
       // 7. Procesar abono directo a capital (si aplica)
     }
+
+    // Sólo después de intentar TODAS las cuotas pagables, el sobrante pequeño
+    // final puede conservar la regla legacy de "otros".
+    if (shouldApplyFinalSmallRemainderAsOther({
+      availableRemaining: disponible_restante,
+      hasInsertedPayment: !!ultimoPagoInsertado?.pago_id,
+    }) && ultimoPagoInsertado) {
+      const otrosActual = new Big(ultimoPagoInsertado.otros ?? "0");
+      await db
+        .update(pagos_credito)
+        .set({
+          otros: otrosActual.plus(disponible_restante).toString(),
+          monto_aplicado: new Big(ultimoPagoInsertado.monto_aplicado ?? "0")
+            .plus(disponible_restante)
+            .toString(),
+        })
+        .where(eq(pagos_credito.pago_id, ultimoPagoInsertado.pago_id));
+      disponible_restante = new Big(0);
+    }
+
     // Jalar la última cuota con plata aplicada (ver `condicionUltimaCuotaPagada`
     // para el criterio y por qué NO se exige `cuotas_credito.pagado`). El
     // resultado tiene DOS consumidores: su `fecha_vencimiento` es el ancla de
@@ -2148,21 +2161,7 @@ export const insertPayment = async ({ body, set }: any) => {
         );
       }
 
-      const guatemalaTimeString = new Date().toLocaleString("en-US", {
-        timeZone: "America/Guatemala",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      });
-
-      // Convertir "11/22/2025, 17:07:09" a Date object
-      const [datePart, timePart] = guatemalaTimeString.split(", ");
-      const [month, day, year] = datePart.split("/");
-      const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+      const fechaGuatemala = paymentRegistrationDate();
       const pagoConvenioParaFila = estamparPagoConvenio();
       const pagoData = {
         credito_id,
@@ -2224,6 +2223,7 @@ export const insertPayment = async ({ body, set }: any) => {
         fecha_boleta: fecha_boleta,
         monto_aplicado: abonoCapital.toString(),
         origen_pago: origen_pago,
+        nexaPaymentEventId,
       };
 
 
@@ -2402,10 +2402,12 @@ export const insertPayment = async ({ body, set }: any) => {
           banco_id: banco_id ?? 0,
           numeroAutorizacion: numeroAutorizacion ?? "",
           registerBy: registerBy ?? "",
+          fecha_pago: paymentRegistrationDate(),
           fecha_boleta,
           monto_aplicado: pagoEspecialCuota.montoAplicado,
           pagoConvenio: 0,
           observaciones,
+          nexaPaymentEventId,
         });
         if (new Big(pagoConvenioParaFila).gt(0)) {
           pagoConvenioPagoId = pagoEspecialInsertado.pago_id;
@@ -2535,10 +2537,12 @@ interface InsertarPagoParams {
   banco_id: number;
   numeroAutorizacion: string;
   registerBy: string;
+  fecha_pago?: Date;
   fecha_boleta?: string;
   monto_aplicado: number;
   pagoConvenio?: number;
   observaciones?: string;
+  nexaPaymentEventId?: number;
 }
 export async function insertarPago({
   numero_credito_sifco,
@@ -2552,10 +2556,12 @@ export async function insertarPago({
   banco_id,
   numeroAutorizacion,
   registerBy,
+  fecha_pago,
   fecha_boleta,
   monto_aplicado,
   pagoConvenio = 0,
-  observaciones = ""
+  observaciones = "",
+  nexaPaymentEventId,
 }: InsertarPagoParams) {
 
 
@@ -2672,6 +2678,7 @@ export async function insertarPago({
       total_restante: "0",
 
       llamada: "",
+      fecha_pago,
 
       renuevo_o_nuevo: "renuevo",
 
@@ -2696,6 +2703,7 @@ export async function insertarPago({
       registerBy: registerBy,
       pagoConvenio: pagoConvenio.toString(),
       monto_aplicado: monto_aplicado.toString(),
+      nexaPaymentEventId,
     })
     .returning();
 
@@ -2725,7 +2733,21 @@ export async function insertarPago({
  * viejo pre-abono, o marcaría la fila validated para que el recálculo la
  * salte. La lectura real del pago ocurre adentro, YA bajo el lock.
  */
-export async function aplicarPagoAlCredito(pago_id: number) {
+export async function aplicarPagoAlCredito(
+  pago_id: number,
+  { paymentLock }: { paymentLock?: PaymentAdvisoryLock } = {},
+) {
+  if (paymentLock) {
+    const [pago] = await db
+      .select({ credito_id: pagos_credito.credito_id })
+      .from(pagos_credito)
+      .where(eq(pagos_credito.pago_id, pago_id))
+      .limit(1);
+    if (pago?.credito_id != null && holdsPaymentAdvisoryLock(paymentLock, pago.credito_id)) {
+      return aplicarPagoAlCreditoSinLock(pago_id);
+    }
+  }
+
   // Pre-lectura mínima: solo para conocer el crédito a serializar.
   const [pagoPre] = await db
     .select({ credito_id: pagos_credito.credito_id })

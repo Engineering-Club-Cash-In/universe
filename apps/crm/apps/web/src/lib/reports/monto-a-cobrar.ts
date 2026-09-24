@@ -43,6 +43,7 @@ type ParticipacionTotals = {
 };
 
 export type MontoACobrarViewRow = {
+	cuotas: number;
 	capital: number;
 	interesIva: number;
 	servicios: number;
@@ -56,6 +57,14 @@ export type MontoACobrarViewRow = {
 	totalMora: number;
 	total: number;
 };
+
+export function dateRangeIncludesMonth(
+	fechaInicio: string,
+	fechaFin: string,
+	month: string,
+): boolean {
+	return fechaInicio <= `${month}-31` && fechaFin >= `${month}-01`;
+}
 
 const emptyRow = (bucket: string): MontoACobrarParticipacionRow => ({
 	bucket,
@@ -116,6 +125,19 @@ export function fillMissingMontoACobrarPeriods(
 	return dates.map((date) => rows.get(toKey(date)) ?? emptyRow(toKey(date)));
 }
 
+export function applyOfficialMonthlyMora(
+	rows: MontoACobrarParticipacionRow[],
+	operationalMonth: string,
+	expected: string | undefined,
+) {
+	if (expected === undefined) return rows;
+	return rows.map((row) =>
+		row.bucket.slice(0, 7) === operationalMonth
+			? { ...row, total_mora: expected }
+			: row,
+	);
+}
+
 export function getMontoACobrarViewRow(
 	row: MontoACobrarParticipacionRow,
 	acumulado: boolean,
@@ -137,6 +159,7 @@ export function getMontoACobrarViewRow(
 	);
 
 	return {
+		cuotas: acumulado ? row.mora_count : row.cuotas_count,
 		capital,
 		interesIva,
 		servicios,
@@ -180,7 +203,9 @@ export function getMontoACobrarParticipacionTotals(
 	>,
 	acumulado: boolean,
 ): ParticipacionTotals {
-	const last = rows.findLast((row) => row.cuotas_count > 0);
+	const last = acumulado
+		? rows.at(-1)
+		: rows.findLast((row) => row.cuotas_count > 0);
 	const numeric = (value: string) => Number.parseFloat(value) || 0;
 	const creditosInvalidosRango = rows.find(
 		(row) => row.creditos_participacion_invalida_rango !== undefined,

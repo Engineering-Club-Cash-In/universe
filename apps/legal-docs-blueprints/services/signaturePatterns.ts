@@ -65,6 +65,34 @@ export interface SignaturePatternConfig {
    */
   repeticiones?: number;
   /**
+   * Rúbrica: una firma chica de cada firmante en **cada página impar**, aparte
+   * del bloque de firma del final.
+   *
+   * Es lo que pidió gerencia para los contratos (no para las cartas): que
+   * ninguna hoja pueda cambiarse sin que se note. Van en fila a lo ancho del
+   * texto, en el aire que queda abajo de la hoja; ese aire no es el mismo en
+   * todos —depende del template y de su pie de página—, así que se declara por
+   * tipo y se calibra mirando el PDF.
+   *
+   * Sólo va en los contratos con layout auditado (`bloques`). Un tipo sin esto
+   * no lleva rúbrica, que es lo correcto para las cartas de una hoja.
+   */
+  rubrica?: {
+    /**
+     * Franja de la hoja donde va la fila de rúbricas, en puntos y con el
+     * origen abajo a la izquierda, como en el PDF.
+     *
+     * De izquierda a derecha es el ancho del texto, para que la fila quede
+     * alineada con él. De abajo a arriba es el aire entre el pie de página (o
+     * el borde, si no tiene) y la última línea que alcanza una hoja llena. La
+     * fila va centrada en ese alto y repartida en todo ese ancho: cada
+     * firmante tiene su lugar, en vez de quedar todas juntas en un rincón.
+     *
+     * Se mide sobre un PDF real con `scripts/previsualizar-rubricas.ts`.
+     */
+    franja: { izquierda: number; derecha: number; abajo: number; arriba: number };
+  };
+  /**
    * Número de firmantes esperados para este contrato.
    * @deprecated No describe la realidad cuando hay cofirmantes: el template
    * plural expande la fila de deudores y el PDF termina con más widgets que
@@ -149,6 +177,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.CONTRATO_PRIVADO_USO]: {
     pattern: 'f)_____________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
+    // Hoja de 612×936 sin pie: el texto de una hoja llena baja hasta y≈124.
+    rubrica: { franja: { izquierda: 139, derecha: 568, abajo: 24, arriba: 116 } },
     signerCount: 2,
     signers: ['Deudor', 'Richard/CCI'],
     xOffset: 1.5,  // Un punto y medio a la derecha
@@ -158,6 +188,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.USO_CARRO_USADO]: {
     pattern: 'f)_____________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
+    // Mismo template que el de carro nuevo: sin pie, el texto baja hasta y≈129.
+    rubrica: { franja: { izquierda: 139, derecha: 568, abajo: 24, arriba: 116 } },
     signerCount: 2,
     signers: ['Deudor', 'Richard/CCI'],
     yOffset: -1.5,  // Subir 1.5 puntos
@@ -187,6 +219,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.GARANTIA_MOBILIARIA]: {
     pattern: 'f)_______________________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
+    // "Página X de Y" abajo a la derecha llega a y≈61; el texto baja hasta y≈151.
+    rubrica: { franja: { izquierda: 71, derecha: 541, abajo: 66, arriba: 144 } },
     signerCount: 2,
     signers: ['Andrés', 'Deudor'],
     yOffset: -6,  // Bajar un punto más (era -7, ahora -6)
@@ -196,6 +230,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.PAGARE_UNICO_LIBRE_PROTESTO]: {
     pattern: 'f. _______________________________',
     bloques: ['DEUDORES'],
+    // Una sola hoja: debajo de los nombres de quienes firman (y≈137) no hay nada.
+    rubrica: { franja: { izquierda: 43, derecha: 570, abajo: 24, arriba: 130 } },
     signerCount: 1,
     signers: ['Deudor']
   },
@@ -203,6 +239,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   [ContractType.RECONOCIMIENTO_DEUDA]: {
     pattern: 'f)___________________________',
     bloques: ['REP_LEGAL', 'DEUDORES'],
+    // "Página X de Y" abajo a la derecha llega a y≈86; el texto baja hasta y≈144.
+    rubrica: { franja: { izquierda: 113, derecha: 571, abajo: 92, arriba: 138 } },
     signerCount: 2,
     signers: ['Andrés', 'Deudor'],
     yOffset: -3.5,  // Subir 3.5 puntos,
@@ -211,6 +249,21 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   [ContractType.SOLICITUD_COMPRA_VEHICULO]: {
     pattern: 'F)_______________________________________',
+    bloques: ['DEUDORES'],
+    signerCount: 1,
+    signers: ['Cliente']
+  },
+
+  // Las cartas unidas en un solo documento. Firman los mismos que en cada carta
+  // (titular y codeudores), así que el bloque es el de deudores: eso es lo que
+  // ordena a los firmantes para WeeTrust.
+  //
+  // El patrón NO se usa. Cada carta tiene su propia línea de firma ("F)___",
+  // "Firma:___"), así que las posiciones del paquete se calculan carta por
+  // carta sobre sus propias páginas (`posicionesDelPaquete`) y viajan ya
+  // resueltas. Buscar un solo patrón en el PDF unido no encontraría la mitad.
+  [ContractType.PAQUETE_CARTAS]: {
+    pattern: '(las posiciones se calculan por carta)',
     bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Cliente']
@@ -406,6 +459,47 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     signers: ['Cliente']
   }
 };
+
+/**
+ * Las cartas que se unen en un solo documento para firmar.
+ *
+ * Gerencia lo pidió porque a los clientes les llegaban once enlaces y no los
+ * firmaban. Las cartas son lo que se puede juntar: sólo las firman el cliente y
+ * sus codeudores, y casi todas son de una hoja (la cobertura es de dos).
+ *
+ * Los contratos NO van acá: llevan al representante legal y la rúbrica por
+ * página, y cada uno tiene que poder anularse o regenerarse por separado. El
+ * descargo de responsabilidades tampoco, aunque sea de una hoja: no es una
+ * carta. Y la declaración de vendedor se firma en papel.
+ *
+ * El CRM repite esta lista en `lib/paquete-cartas.ts`: si se cambia acá, hay
+ * que cambiarla allá.
+ */
+export const CARTAS_UNIFICABLES: readonly ContractType[] = [
+  ContractType.CARTA_EMISION_CHEQUES,
+  ContractType.CARTA_CARRO_NUEVO,
+  ContractType.CARTA_ACEPTACION_INSTALACION_GPS,
+  ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO,
+  ContractType.SOLICITUD_COMPRA_VEHICULO,
+  ContractType.COBERTURA_INREXSA,
+  ContractType.COBERTURA_INREXSA_COMERCIAL,
+];
+
+export function esCartaUnificable(contractType: string): boolean {
+  return (CARTAS_UNIFICABLES as readonly string[]).includes(contractType);
+}
+
+/**
+ * Dónde va la rúbrica de cada página impar, o `undefined` si ese tipo no lleva.
+ *
+ * Es su propia función para que el CRM y los scripts de calibración puedan
+ * preguntarlo sin depender de la forma interna de `signaturePatterns`.
+ */
+export function getRubrica(
+  contractType: ContractType,
+): SignaturePatternConfig['rubrica'] | undefined {
+  return signaturePatterns[contractType]?.rubrica;
+}
 
 /**
  * Obtiene la configuración de patrón de firma para un tipo de contrato

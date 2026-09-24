@@ -22,16 +22,20 @@ import {
 } from "../lib/contract-signatories";
 import { getSignatureMode } from "../lib/contract-signature-mode";
 import {
+	estadoEnWeeTrust,
 	sincronizarEstadoDeFirma,
-	tieneFirmas,
 } from "../lib/contrato-estado-firma";
+import {
+	conMarcaDeSubidoAMano,
+	fueSubidoAMano,
+} from "../lib/contrato-subido-a-mano";
 import {
 	type AccionSobreContrato,
 	ETAPAS_POR_ACCION,
 	etiquetaDeMotivo,
 	MOTIVOS_DE_ANULACION_KEYS,
 } from "../lib/contratos-anulacion";
-import { claveDeFirma, conCandadoDeFirma } from "../lib/contratos-candado";
+import { conCandadoDeFirma } from "../lib/contratos-candado";
 import {
 	aplicarCorreosDePrueba,
 	correoRepetido,
@@ -56,6 +60,7 @@ import {
 	borrarDocumentoDeWeeTrust,
 	type ContractSigner,
 	consultarEstadoFirma,
+	descargarPdfFirmado,
 	type EstadoDocumentoFirma,
 	motivoDeFalla,
 	reemitirContratoEnWeeTrust,
@@ -179,6 +184,49 @@ function estaVigente(contrato: {
 async function eliminarContrato(
 	contrato: typeof generatedLegalContracts.$inferSelect,
 	motivo: string,
+	/**
+	 * Con qué acción se revisa la etapa de la oportunidad, o `null` para no
+	 * revisarla (sólo el administrador). La pide quien borra desde una ficha:
+	 * la pantalla pudo quedar abierta desde antes, y un botón escondido no
+	 * frena un pedido que ya salió.
+	 */
+	exigirEtapa: AccionSobreContrato | null = null,
+	/** Ver `anularContratoReemplazado`. */
+	opciones: { conservarFila?: boolean } = {},
+): Promise<{ conservado: boolean }> {
+	// Con el candado de la oportunidad: esto borra el documento en WeeTrust, y
+	// si un envío por WhatsApp está mandando sus enlaces, el cliente recibiría
+	// links que mueren en el acto.
+	return conCandadoDeFirma(contrato.opportunityId, async () => {
+		// Ya con el candado, porque esperarlo puede tardar: en 85% los enlaces
+		// están en manos del cliente y borrar el documento se los mata; del 90%
+		// en adelante la oportunidad ya se cerró con esos contratos.
+		if (exigirEtapa && contrato.opportunityId) {
+			await exigirEtapaDeFirma(contrato.opportunityId, exigirEtapa);
+		}
+		// Y el contrato mismo, que se leyó antes de esperar: mientras tanto otro
+		// pedido pudo reemplazarlo, anularlo o borrarlo. Seguir con la foto de
+		// antes pisaba el motivo de ese otro pedido, o contestaba que la fila
+		// quedó en «Ver anulados» cuando ya no existía.
+		const [actual] = await db
+			.select()
+			.from(generatedLegalContracts)
+			.where(eq(generatedLegalContracts.id, contrato.id))
+			.limit(1);
+		if (!actual || !estaVigente(actual)) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Otra persona acaba de anular o reemplazar este contrato. Recargá para ver cómo quedó.",
+			});
+		}
+		return eliminarConCandadoTomado(actual, motivo, opciones);
+	});
+}
+
+async function eliminarConCandadoTomado(
+	contrato: typeof generatedLegalContracts.$inferSelect,
+	motivo: string,
+	opciones: { conservarFila?: boolean } = {},
 ): Promise<{ conservado: boolean }> {
 	// Los generados antes de que se guardara el `documentID` lo llevan en el
 	// link. Se guarda en la fila para que anular lo borre allá también.
@@ -202,37 +250,16 @@ async function eliminarContrato(
 		contrato.id,
 		contrato.opportunityId,
 		motivo,
+		opciones,
 	);
 	return { conservado: anulado?.conservado ?? false };
 }
 
 /**
- * Corta antes de emitir nada en WeeTrust si ya hay una confirmación de firma
- * en curso. Es sólo para avisar a tiempo: lo que garantiza que no se cuele es
- * que la regeneración vuelve a tomar el candado al guardar.
- */
-async function exigirQueNoSeEsteConfirmando(
-	opportunityId: string,
-): Promise<void> {
-	const libre = await db.transaction(async (tx) => {
-		const resultado = await tx.execute<{ libre: boolean }>(
-			sql`select pg_try_advisory_xact_lock(${claveDeFirma(opportunityId)}) as libre`,
-		);
-		return resultado.rows[0]?.libre === true;
-	});
-	if (!libre) {
-		throw new ORPCError("CONFLICT", {
-			message:
-				"Se está confirmando la firma de esta oportunidad. Recargá en un momento.",
-		});
-	}
-}
-
-/**
  * Corta si la oportunidad ya no está en una etapa que permita esta acción.
  *
- * Reemplazar es de jurídico y sólo en 80%; regenerar lo hace análisis y va en
- * 80% u 85%. Del 90% en adelante los contratos ya son parte de una decisión
+ * Qué etapas admite cada acción está en `ETAPAS_POR_ACCION`: hoy todas van en
+ * 80% y 85%. Del 90% en adelante los contratos ya son parte de una decisión
  * tomada y no se tocan.
  */
 async function exigirEtapaDeFirma(
@@ -490,6 +517,7 @@ export const legalContractsRouter = {
 			const { conservado } = await eliminarContrato(
 				existingContract,
 				"Eliminado por jurídico",
+				"eliminar",
 			);
 
 			return {
@@ -1107,42 +1135,79 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Actualizar la oportunidad y registrar historial en una transacción
-			await auditedTransaction(async (tx) => {
-				// Actualizar la oportunidad a 85%, sólo si sigue en la etapa que se
-				// leyó. Dos aprobaciones a la vez pasaban las dos la validación del
-				// 80% y cada una mandaba su WhatsApp: el cliente recibía todo doble.
-				const movidas = await tx
-					.update(opportunities)
-					.set({
-						stageId: targetStage.id,
-						updatedAt: new Date(),
-					})
-					.where(
-						and(
-							eq(opportunities.id, input.opportunityId),
-							eq(opportunities.stageId, opportunity.stageId),
-						),
-					)
-					.returning({ id: opportunities.id });
-				if (movidas.length === 0) {
+			// Con el candado de la oportunidad: generar y regenerar lo tienen tomado
+			// mientras WeeTrust emite, y mover la etapa por debajo hacía que esos
+			// documentos se descartaran al instalarlos, dejando al cliente con
+			// invitaciones muertas. Acá se espera a que terminen.
+			await conCandadoDeFirma(input.opportunityId, async () => {
+				// Ya con el candado: la etapa y los contratos se leyeron antes de
+				// esperar, y en esa espera una generación pudo instalar o descartar.
+				const [etapaAhora] = await db
+					.select({ porcentaje: salesStages.closurePercentage })
+					.from(opportunities)
+					.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1);
+				if (etapaAhora?.porcentaje !== 80) {
 					throw new ORPCError("CONFLICT", {
 						message: "La oportunidad ya fue aprobada por otro usuario.",
 					});
 				}
-				auditRecord({
-					entity: "opportunity",
-					id: input.opportunityId,
-					action: "approve_legal",
-				});
 
-				// Registrar en el historial de etapas
-				await tx.insert(opportunityStageHistory).values({
-					opportunityId: input.opportunityId,
-					fromStageId: opportunity.stageId,
-					toStageId: targetStage.id,
-					changedBy: context.userId,
-					reason: "Aprobación legal - Contratos generados, pendientes de firma",
+				const [{ count: vigentesAhora }] = await db
+					.select({ count: count() })
+					.from(generatedLegalContracts)
+					.where(
+						and(
+							eq(generatedLegalContracts.opportunityId, input.opportunityId),
+							contratoVigente(),
+						),
+					);
+				if (Number(vigentesAhora) === 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Debe haber al menos un contrato asociado a la oportunidad para aprobarla",
+					});
+				}
+
+				// Actualizar la oportunidad y registrar historial en una transacción
+				await auditedTransaction(async (tx) => {
+					// Actualizar la oportunidad a 85%, sólo si sigue en la etapa que se
+					// leyó. Dos aprobaciones a la vez pasaban las dos la validación del
+					// 80% y cada una mandaba su WhatsApp: el cliente recibía todo doble.
+					const movidas = await tx
+						.update(opportunities)
+						.set({
+							stageId: targetStage.id,
+							updatedAt: new Date(),
+						})
+						.where(
+							and(
+								eq(opportunities.id, input.opportunityId),
+								eq(opportunities.stageId, opportunity.stageId),
+							),
+						)
+						.returning({ id: opportunities.id });
+					if (movidas.length === 0) {
+						throw new ORPCError("CONFLICT", {
+							message: "La oportunidad ya fue aprobada por otro usuario.",
+						});
+					}
+					auditRecord({
+						entity: "opportunity",
+						id: input.opportunityId,
+						action: "approve_legal",
+					});
+
+					// Registrar en el historial de etapas
+					await tx.insert(opportunityStageHistory).values({
+						opportunityId: input.opportunityId,
+						fromStageId: opportunity.stageId,
+						toStageId: targetStage.id,
+						changedBy: context.userId,
+						reason:
+							"Aprobación legal - Contratos generados, pendientes de firma",
+					});
 				});
 			});
 
@@ -1162,14 +1227,15 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Enviar links de contratos por WhatsApp al cliente (si aplica)
+			// Enviar links de contratos por WhatsApp al cliente (si aplica). Va
+			// FUERA del candado: toma el suyo y, adentro, se esperaría a sí mismo.
 			if (opportunity.leadId)
 				sendContractLinksToLead({
 					leadId: opportunity.leadId,
 					opportunityId: input.opportunityId,
 				}).catch((err) => {
 					console.error(
-						"[confirmContractsSigned] Error enviando WhatsApp:",
+						"[approveOpportunityLegal] Error enviando WhatsApp:",
 						err,
 					);
 				});
@@ -1447,6 +1513,144 @@ export const legalContractsRouter = {
 		}),
 
 	/**
+	 * Anula un contrato desde la ficha de la oportunidad, sin reemplazarlo.
+	 *
+	 * Es para cuando el documento no va y punto: datos equivocados, una
+	 * identificación que WeeTrust dejó pasar, o se subió el que no era. Hasta
+	 * acá sólo jurídico podía descartarlo, y análisis —que es quien lleva la
+	 * oportunidad en 85%— tenía que pedírselo.
+	 *
+	 * Qué pasa del lado de WeeTrust:
+	 *
+	 * - si falta firmar alguien —haya firmado otro o nadie—, el documento se
+	 *   borra allá y los enlaces mueren: un contrato anulado no tiene que seguir
+	 *   recibiendo firmas;
+	 * - si ya lo firmaron todos, **allá queda**, porque WeeTrust no deja borrar
+	 *   un documento completado. Acá se ve anulado igual.
+	 *
+	 * La fila anulada no se borra nunca: es el registro de lo que se descartó, y
+	 * sin ella un documento que quedó vivo en WeeTrust no tendría rastro acá.
+	 */
+	anularContrato: viewOpportunityContractsProcedure
+		.input(
+			z.object({
+				contractId: z.string().uuid(),
+				motivo: z.enum(MOTIVOS_DE_ANULACION_KEYS),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Ver los contratos lo puede hacer ventas o contabilidad; anularlos no.
+			if (!PERMISSIONS.canAnnulContracts(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "Sólo jurídico o análisis pueden anular un contrato",
+				});
+			}
+
+			const [contrato] = await db
+				.select()
+				.from(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.id, input.contractId))
+				.limit(1);
+
+			if (!contrato) {
+				throw new ORPCError("NOT_FOUND", { message: "Contrato no encontrado" });
+			}
+
+			// Los del respaldo de Documenso no se anulan desde acá: el CRM sólo sabe
+			// borrar en WeeTrust, así que la fila quedaría anulada con los enlaces
+			// de Documenso vivos, y el cliente podría seguir firmando.
+			if (contrato.signingProvider === "documenso") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato salió por Documenso: anularlo acá no cancelaría sus enlaces. Hay que cancelarlo en Documenso.",
+				});
+			}
+
+			// Anular lo ya anulado no hace nada y confunde: la fila que se ve en
+			// "Ver anulados" es registro, no un contrato que se pueda volver a
+			// descartar.
+			if (!estaVigente(contrato)) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Este contrato ya está anulado.",
+				});
+			}
+
+			const quien = context.session?.user?.name ?? "alguien del CRM";
+			// En WeeTrust se borra aunque alguien ya haya firmado: un contrato
+			// anulado no tiene que seguir recibiendo firmas. Sólo queda allá el que
+			// firmaron todos, porque WeeTrust no deja borrarlo. La fila queda
+			// siempre, aunque no haya documento (uno en papel sin firmar): el
+			// diálogo promete que va a estar en «Ver anulados» con su motivo.
+			const { conservado } = await eliminarContrato(
+				contrato,
+				`${etiquetaDeMotivo(input.motivo)} (anulado por ${quien})`,
+				"anular",
+				{ conservarFila: true },
+			);
+
+			return {
+				success: true,
+				conservado,
+				// La fila queda siempre (`conservarFila`): el detalle de qué pasó
+				// con el documento en WeeTrust está en su motivo.
+				message:
+					"Contrato anulado. Queda en «Ver anulados» con el motivo y cómo quedó en la plataforma de firma.",
+			};
+		}),
+
+	/**
+	 * El PDF **firmado**, para bajarlo sin salir del CRM.
+	 *
+	 * El PDF que la ficha muestra como "PDF" es el borrador que se generó: no
+	 * tiene ninguna firma. Hasta acá, para conseguir el documento que vale había
+	 * que entrar al portal de WeeTrust, y ventas no tiene cuenta.
+	 *
+	 * Va con el permiso de ver contratos, igual que el estado de firma: el
+	 * vendedor y el analista son los que lo necesitan.
+	 *
+	 * Se pide en el momento en vez de guardarse: es un archivo chico, se baja en
+	 * un par de segundos y así no hay una copia que pueda quedar vieja respecto
+	 * de lo que WeeTrust tiene. Si algún día se quiere una copia propia que
+	 * sobreviva a WeeTrust, el lugar es el webhook de documento completado.
+	 */
+	getSignedContractPdf: viewOpportunityContractsProcedure
+		.input(z.object({ contractId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const { contract, documentID } = await contratoConDocumentID(
+				input.contractId,
+			);
+
+			// El generador también lo verifica contra WeeTrust, que es la fuente de
+			// verdad. Acá se corta antes para no gastar el viaje y para poder decir
+			// algo que se entienda: "todavía falta firmar" y no un 409.
+			if (contract.status !== "signed") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato todavía no está firmado por todos: no hay PDF firmado que bajar.",
+				});
+			}
+
+			let pdf: Blob;
+			try {
+				pdf = await descargarPdfFirmado(documentID);
+			} catch (error) {
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						error instanceof Error
+							? error.message
+							: "No se pudo bajar el PDF firmado",
+				});
+			}
+
+			// Base64 y no una URL: el archivo vive en WeeTrust detrás de sus
+			// credenciales, así que no hay link que se le pueda pasar al navegador.
+			return {
+				nombre: `${contract.contractName} (firmado).pdf`,
+				pdfBase64: Buffer.from(await pdf.arrayBuffer()).toString("base64"),
+			};
+		}),
+
+	/**
 	 * Regenera los enlaces de firma del contrato, sobre el MISMO documento.
 	 *
 	 * Es lo que hace el analista: no cambia el contrato, sólo emite enlaces
@@ -1471,7 +1675,7 @@ export const legalContractsRouter = {
 			// gente ya tenía. Es de análisis.
 			if (!PERMISSIONS.canRegenerateContractLinks(context.userRole)) {
 				throw new ORPCError("FORBIDDEN", {
-					message: "Sólo análisis puede regenerar los enlaces de firma",
+					message: "Sólo análisis puede renovar los enlaces de firma",
 				});
 			}
 
@@ -1494,7 +1698,8 @@ export const legalContractsRouter = {
 			// resucitaría con enlaces nuevos al lado del que lo reemplazó.
 			if (contract.status === "cancelled") {
 				throw new ORPCError("BAD_REQUEST", {
-					message: "Este contrato está anulado: no se puede regenerar.",
+					message:
+						"Este contrato está anulado: no se pueden renovar sus enlaces.",
 				});
 			}
 
@@ -1513,7 +1718,7 @@ export const legalContractsRouter = {
 			if (!r2KeyDelPdf) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
-						"Este contrato no tiene el PDF guardado, así que no se puede reemitir. Hay que generarlo de nuevo.",
+						"Este contrato no tiene el PDF guardado, así que no se pueden renovar sus enlaces. Hay que generarlo de nuevo.",
 				});
 			}
 
@@ -1523,7 +1728,6 @@ export const legalContractsRouter = {
 					contract.opportunityId,
 					"regenerar",
 				);
-				await exigirQueNoSeEsteConfirmando(contract.opportunityId);
 			}
 
 			// Los mismos firmantes, con su rol. No se recalculan desde la
@@ -1571,192 +1775,257 @@ export const legalContractsRouter = {
 				}
 			}
 
-			const resultado = await reemitirContratoEnWeeTrust({
-				r2Key: r2KeyDelPdf,
-				contractType: contract.contractType,
-				filenamePrefix: contract.contractName,
-				signers,
-				observers: CONTRATOS_OBSERVADORES,
-			});
+			// De acá al final, con el candado de la oportunidad tomado: incluye la
+			// reemisión en WeeTrust. Si no, un envío por WhatsApp que arrancara
+			// mientras el generador trabaja leía los enlaces viejos, los mandaba, y
+			// esta regeneración los dejaba muertos al instalar el documento nuevo.
+			// Las llamadas al generador tienen tope, así que el candado no se queda
+			// tomado si deja de responder.
+			return conCandadoDeFirma(contract.opportunityId, async () => {
+				// Igual que al subir: esperar el candado pudo tardar, y reemitir manda
+				// las invitaciones en el acto. Se vuelve a mirar la etapa antes de
+				// tocar WeeTrust, en vez de enterarse al guardar y tener que borrar el
+				// documento recién emitido.
+				if (contract.opportunityId) {
+					const etapaAhora = await exigirEtapaDeFirma(
+						contract.opportunityId,
+						"regenerar",
+					);
+					if (etapaAhora !== etapaInicial) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La oportunidad cambió de etapa mientras se esperaba. Recargá y, si todavía hace falta, volvé a renovar los enlaces.",
+						});
+					}
+				}
 
-			const falla = motivoDeFalla(resultado);
-			if (falla) {
-				throw new ORPCError("BAD_REQUEST", { message: falla });
-			}
+				// Y el contrato, por lo mismo: dos personas que regeneran a la vez
+				// leyeron la fila viva antes de esperar. La segunda encontraba acá
+				// todo en orden, emitía (con sus invitaciones) y recién al guardar se
+				// enteraba de que la otra ya lo había reemplazado.
+				const [sigueVigente] = await db
+					.select({
+						status: generatedLegalContracts.status,
+						replacedByContractId: generatedLegalContracts.replacedByContractId,
+					})
+					.from(generatedLegalContracts)
+					.where(eq(generatedLegalContracts.id, input.contractId))
+					.limit(1);
+				if (!sigueVigente || !estaVigente(sigueVigente)) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Otra persona acaba de renovar los enlaces de este contrato o de reemplazarlo. Recargá para ver el nuevo.",
+					});
+				}
 
-			const ahora = new Date();
-			const motivo = etiquetaDeMotivo(input.motivo);
+				// Cómo se va a ver en WeeTrust: el nombre de quien firma, que el
+				// generador completa con la descripción del documento. Antes se
+				// mandaba `contractName` como prefijo —que ES la descripción—, y
+				// el reemitido quedaba allá sin la persona, imposible de ubicar
+				// entre decenas de pagarés iguales. Va el titular real y no el de
+				// prueba: en WeeTrust se ve el nombre, no el correo redirigido.
+				const titular = guardados.find((f) => f.role === "TITULAR");
 
-			// El reemitido va SIEMPRE en una fila nueva, y se guarda antes de tocar
-			// el documento viejo: si el guardado fallara con el viejo ya borrado, el
-			// CRM quedaba apuntando a un documento inexistente y el nuevo sin
-			// registro. Si falla, se borra el nuevo en WeeTrust para que un
-			// reintento no deje dos vivos.
-			let nuevoId: string;
-			try {
-				nuevoId = await db.transaction(async (tx) => {
-					// Dos regeneraciones a la vez del mismo contrato emitían dos
-					// documentos y dejaban los dos vigentes. Se bloquea la fila y se
-					// vuelve a mirar: si otra ya lo anuló, ésta pierde, y el catch de
-					// abajo borra en WeeTrust el documento que acaba de emitir.
-					// También si jurídico ya lo reclamó para reemplazarlo y todavía no
-					// terminó de anularlo: si no, quedaban dos reemisiones vigentes.
-					// La etapa se vuelve a mirar acá, con la oportunidad bloqueada: la
-					// reemisión en WeeTrust tarda, y si mientras tanto alguien la pasó
-					// a 90% se colaba un contrato pendiente en una oportunidad cerrada.
-					// Antes, el candado de firma: si hay una confirmación en curso se
-					// espera a que termine y acá ya se ve el 90%.
-					if (contract.opportunityId) {
-						await tx.execute(
-							sql`select pg_advisory_xact_lock(${claveDeFirma(contract.opportunityId)})`,
-						);
-						const [etapa] = await tx
+				const resultado = await reemitirContratoEnWeeTrust({
+					r2Key: r2KeyDelPdf,
+					contractType: contract.contractType,
+					filenamePrefix: contract.contractName,
+					documentName: titular?.name,
+					signers,
+					observers: CONTRATOS_OBSERVADORES,
+				});
+
+				const falla = motivoDeFalla(resultado);
+				if (falla) {
+					throw new ORPCError("BAD_REQUEST", { message: falla });
+				}
+
+				const ahora = new Date();
+				const motivo = etiquetaDeMotivo(input.motivo);
+
+				// El reemitido va SIEMPRE en una fila nueva, y se guarda antes de tocar
+				// el documento viejo: si el guardado fallara con el viejo ya borrado, el
+				// CRM quedaba apuntando a un documento inexistente y el nuevo sin
+				// registro. Si falla, se borra el nuevo en WeeTrust para que un
+				// reintento no deje dos vivos.
+				let nuevoId: string;
+				// La etapa con la que se guardó: la ficha pregunta si reenviar sólo en
+				// 85%, y la de la pantalla puede ser vieja.
+				let porcentajeEtapa: number | null = null;
+				try {
+					nuevoId = await db.transaction(async (tx) => {
+						// Dos regeneraciones a la vez del mismo contrato emitían dos
+						// documentos y dejaban los dos vigentes. Se bloquea la fila y se
+						// vuelve a mirar: si otra ya lo anuló, ésta pierde, y el catch de
+						// abajo borra en WeeTrust el documento que acaba de emitir.
+						// También si jurídico ya lo reclamó para reemplazarlo y todavía no
+						// terminó de anularlo: si no, quedaban dos reemisiones vigentes.
+						// La etapa se vuelve a mirar acá, con la oportunidad bloqueada: la
+						// reemisión en WeeTrust tarda, y si mientras tanto alguien la pasó
+						// a 90% se colaba un contrato pendiente en una oportunidad cerrada.
+						// El candado de firma ya lo tiene el de afuera: tomarlo otra vez
+						// desde esta transacción, que es otra conexión, se trabaría solo.
+						if (contract.opportunityId) {
+							const [etapa] = await tx
+								.select({
+									stageId: opportunities.stageId,
+									porcentaje: salesStages.closurePercentage,
+								})
+								.from(opportunities)
+								.leftJoin(
+									salesStages,
+									eq(opportunities.stageId, salesStages.id),
+								)
+								.where(eq(opportunities.id, contract.opportunityId))
+								.for("update", { of: opportunities });
+							// Tiene que seguir en la MISMA etapa, no sólo en una permitida:
+							// si la aprobaron de 80 a 85 mientras se reemitía, el WhatsApp de
+							// la aprobación ya salió con los enlaces viejos, y guardar ésta
+							// los dejaba muertos. Lo mismo si la devolvieron de 85 a 80.
+							if (
+								!etapa?.porcentaje ||
+								etapa.stageId !== etapaInicial ||
+								!ETAPAS_POR_ACCION.regenerar.includes(etapa.porcentaje as never)
+							) {
+								throw new ORPCError("CONFLICT", {
+									message:
+										"La oportunidad cambió de etapa mientras se renovaban los enlaces, así que no se guardó. Recargá y, si todavía hace falta, volvé a renovarlos.",
+								});
+							}
+							porcentajeEtapa = etapa.porcentaje;
+						}
+
+						const [original] = await tx
 							.select({
-								stageId: opportunities.stageId,
-								porcentaje: salesStages.closurePercentage,
+								status: generatedLegalContracts.status,
+								reemplazadoPor: generatedLegalContracts.replacedByContractId,
 							})
-							.from(opportunities)
-							.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-							.where(eq(opportunities.id, contract.opportunityId))
-							.for("update", { of: opportunities });
-						// Tiene que seguir en la MISMA etapa, no sólo en una permitida:
-						// si la aprobaron de 80 a 85 mientras se reemitía, el WhatsApp de
-						// la aprobación ya salió con los enlaces viejos, y guardar ésta
-						// los dejaba muertos. Lo mismo si la devolvieron de 85 a 80.
+							.from(generatedLegalContracts)
+							.where(eq(generatedLegalContracts.id, input.contractId))
+							.for("update");
 						if (
-							!etapa?.porcentaje ||
-							etapa.stageId !== etapaInicial ||
-							!ETAPAS_POR_ACCION.regenerar.includes(etapa.porcentaje as never)
+							!original ||
+							original.status === "cancelled" ||
+							original.reemplazadoPor
 						) {
 							throw new ORPCError("CONFLICT", {
 								message:
-									"La oportunidad cambió de etapa mientras se regeneraba, así que no se guardó. Recargá y, si todavía hace falta, volvé a regenerar.",
+									"Otra persona acaba de renovar los enlaces de este contrato. Recargá para ver el nuevo.",
 							});
 						}
+
+						const [nuevo] = await tx
+							.insert(generatedLegalContracts)
+							.values({
+								leadId: contract.leadId,
+								opportunityId: contract.opportunityId,
+								contractType: contract.contractType,
+								contractName: contract.contractName,
+								templateId: contract.templateId,
+								// Regenerado sigue siendo el documento que se subió a mano.
+								apiResponse: fueSubidoAMano(contract.apiResponse)
+									? conMarcaDeSubidoAMano(resultado)
+									: resultado,
+								pdfLink: r2KeyDelPdf,
+								signingProvider: resultado.signingProvider ?? "weetrust",
+								signatureMode: contract.signatureMode,
+								generatedBy: context.userId,
+								generatedAt: ahora,
+								...linksPorRol(resultado.signatories, resultado.signing_links),
+								weetrustDocumentId: resultado.documentID ?? null,
+								observerUrl: resultado.observerUrl ?? null,
+								status: "pending",
+								lastRegenerationReason: motivo,
+								lastRegeneratedAt: ahora,
+								signingStatusCheckedAt: ahora,
+								updatedAt: ahora,
+							})
+							.returning({ id: generatedLegalContracts.id });
+
+						// Los firmantes en la misma transacción: sin ellos el contrato
+						// nuevo no se puede sincronizar, regenerar ni mandar por WhatsApp,
+						// y no tiene sentido retirar el viejo por uno así.
+						const filas = filasDeFirmantes(nuevo.id, resultado.signatories);
+						if (filas.length === 0) {
+							throw new ORPCError("INTERNAL_SERVER_ERROR", {
+								message:
+									"WeeTrust no devolvió los firmantes del documento reemitido.",
+							});
+						}
+						await tx.insert(contractSignatories).values(filas);
+
+						await tx
+							.update(generatedLegalContracts)
+							.set({
+								status: "cancelled",
+								cancellationReason: `Enlaces renovados: ${motivo}`,
+								cancelledAt: ahora,
+								replacedByContractId: nuevo.id,
+								updatedAt: ahora,
+							})
+							.where(eq(generatedLegalContracts.id, input.contractId));
+
+						return nuevo.id;
+					});
+				} catch (error) {
+					if (resultado.documentID) {
+						await borrarDocumentoDeWeeTrust(resultado.documentID).catch((e) =>
+							console.error(
+								`[refreshContractSigningLinks] no se pudo borrar el reemitido ${resultado.documentID}:`,
+								e,
+							),
+						);
 					}
+					throw error;
+				}
 
-					const [original] = await tx
-						.select({
-							status: generatedLegalContracts.status,
-							reemplazadoPor: generatedLegalContracts.replacedByContractId,
-						})
-						.from(generatedLegalContracts)
-						.where(eq(generatedLegalContracts.id, input.contractId))
-						.for("update");
-					if (
-						!original ||
-						original.status === "cancelled" ||
-						original.reemplazadoPor
-					) {
-						throw new ORPCError("CONFLICT", {
-							message:
-								"Otra persona acaba de regenerar este contrato. Recargá para ver el nuevo.",
-						});
+				// Recién ahora el documento viejo. Su fila ya quedó anulada arriba y se
+				// conserva siempre: lo que diga WeeTrust antes de borrar es una foto, y
+				// alguien puede firmar entre esa consulta y el borrado. Borrar la fila
+				// por esa foto perdía el único registro de esa firma.
+				// - Completo: WeeTrust no deja borrarlo.
+				// - Si no: se borra allá (si no, los que faltan seguirían firmando un
+				//   documento reemplazado) y el motivo dice cómo quedó.
+				// - Si el borrado falla: el motivo avisa que hay que borrarlo a mano.
+				//
+				// "Completo" lo dice WeeTrust, no la fila: el estado local también lo
+				// pone la confirmación a mano, que no consulta allá, y creerle dejaba
+				// vivo un documento pendiente con sus enlaces.
+				const estadoAlla = contract.weetrustDocumentId
+					? await estadoEnWeeTrust(contract.weetrustDocumentId)
+					: null;
+				if (!estadoAlla?.completo && contract.weetrustDocumentId) {
+					const conFirmasParciales = estadoAlla?.conFirmas ?? true;
+					let detalle: string;
+					try {
+						await borrarDocumentoDeWeeTrust(contract.weetrustDocumentId);
+						detalle = conFirmasParciales
+							? "tenía firmas parciales; el documento se borró en WeeTrust"
+							: "el documento se borró en WeeTrust";
+					} catch (error) {
+						console.error(
+							`[refreshContractSigningLinks] no se pudo borrar ${contract.weetrustDocumentId}:`,
+							error,
+						);
+						detalle = "no se pudo borrar en WeeTrust: hay que borrarlo a mano";
 					}
-
-					const [nuevo] = await tx
-						.insert(generatedLegalContracts)
-						.values({
-							leadId: contract.leadId,
-							opportunityId: contract.opportunityId,
-							contractType: contract.contractType,
-							contractName: contract.contractName,
-							templateId: contract.templateId,
-							apiResponse: resultado,
-							pdfLink: r2KeyDelPdf,
-							signingProvider: resultado.signingProvider ?? "weetrust",
-							signatureMode: contract.signatureMode,
-							generatedBy: context.userId,
-							generatedAt: ahora,
-							...linksPorRol(resultado.signatories, resultado.signing_links),
-							weetrustDocumentId: resultado.documentID ?? null,
-							observerUrl: resultado.observerUrl ?? null,
-							status: "pending",
-							lastRegenerationReason: motivo,
-							lastRegeneratedAt: ahora,
-							signingStatusCheckedAt: ahora,
-							updatedAt: ahora,
-						})
-						.returning({ id: generatedLegalContracts.id });
-
-					// Los firmantes en la misma transacción: sin ellos el contrato
-					// nuevo no se puede sincronizar, regenerar ni mandar por WhatsApp,
-					// y no tiene sentido retirar el viejo por uno así.
-					const filas = filasDeFirmantes(nuevo.id, resultado.signatories);
-					if (filas.length === 0) {
-						throw new ORPCError("INTERNAL_SERVER_ERROR", {
-							message:
-								"WeeTrust no devolvió los firmantes del documento reemitido.",
-						});
-					}
-					await tx.insert(contractSignatories).values(filas);
-
-					await tx
+					await db
 						.update(generatedLegalContracts)
 						.set({
-							status: "cancelled",
-							cancellationReason: `Regenerado: ${motivo}`,
-							cancelledAt: ahora,
-							replacedByContractId: nuevo.id,
-							updatedAt: ahora,
+							cancellationReason: `Enlaces renovados: ${motivo} (${detalle})`,
 						})
 						.where(eq(generatedLegalContracts.id, input.contractId));
-
-					return nuevo.id;
-				});
-			} catch (error) {
-				if (resultado.documentID) {
-					await borrarDocumentoDeWeeTrust(resultado.documentID).catch((e) =>
-						console.error(
-							`[refreshContractSigningLinks] no se pudo borrar el reemitido ${resultado.documentID}:`,
-							e,
-						),
-					);
 				}
-				throw error;
-			}
 
-			// Recién ahora el documento viejo. Su fila ya quedó anulada arriba y se
-			// conserva siempre: lo que diga WeeTrust antes de borrar es una foto, y
-			// alguien puede firmar entre esa consulta y el borrado. Borrar la fila
-			// por esa foto perdía el único registro de esa firma.
-			// - Completo: WeeTrust no deja borrarlo.
-			// - Si no: se borra allá (si no, los que faltan seguirían firmando un
-			//   documento reemplazado) y el motivo dice cómo quedó.
-			// - Si el borrado falla: el motivo avisa que hay que borrarlo a mano.
-			const completo = contract.status === "signed";
-			if (!completo && contract.weetrustDocumentId) {
-				const conFirmasParciales = await tieneFirmas(
-					input.contractId,
-					contract.weetrustDocumentId,
-				);
-				let detalle: string;
-				try {
-					await borrarDocumentoDeWeeTrust(contract.weetrustDocumentId);
-					detalle = conFirmasParciales
-						? "tenía firmas parciales; el documento se borró en WeeTrust"
-						: "el documento se borró en WeeTrust";
-				} catch (error) {
-					console.error(
-						`[refreshContractSigningLinks] no se pudo borrar ${contract.weetrustDocumentId}:`,
-						error,
-					);
-					detalle = "no se pudo borrar en WeeTrust: hay que borrarlo a mano";
-				}
-				await db
-					.update(generatedLegalContracts)
-					.set({ cancellationReason: `Regenerado: ${motivo} (${detalle})` })
-					.where(eq(generatedLegalContracts.id, input.contractId));
-			}
-
-			return {
-				success: true,
-				message:
-					"Documento reemitido con enlaces nuevos; el anterior queda anulado",
-				contractId: nuevoId,
-				documentID: resultado.documentID,
-				enlaces: resultado.signing_links?.length ?? 0,
-			};
+				return {
+					success: true,
+					message: "Enlaces renovados: los anteriores ya no sirven",
+					contractId: nuevoId,
+					porcentajeEtapa,
+					documentID: resultado.documentID,
+					enlaces: resultado.signing_links?.length ?? 0,
+				};
+			});
 		}),
 
 	/**
@@ -1765,9 +2034,18 @@ export const legalContractsRouter = {
 	 * Después de reemplazar un contrato o regenerar sus enlaces, los que tenía la
 	 * gente en el teléfono dejaron de servir. Sin esto habría que mover la
 	 * oportunidad de etapa para que el envío automático se dispare otra vez.
+	 *
+	 * Con `contratos` se manda sólo esos: los que se acaban de renovar o
+	 * reemplazar. Los demás siguen con sus enlaces vivos, y al cliente no tiene
+	 * por qué llegarle la batería entera por uno solo.
 	 */
 	resendContractLinksWhatsapp: viewOpportunityContractsProcedure
-		.input(z.object({ opportunityId: z.string().uuid() }))
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				contratos: z.array(z.string().uuid()).min(1).max(50).optional(),
+			}),
+		)
 		.handler(async ({ input, context }) => {
 			// Ver los contratos no alcanza: esto le escribe al cliente.
 			if (!PERMISSIONS.canResendContractLinks(context.userRole)) {
@@ -1791,6 +2069,7 @@ export const legalContractsRouter = {
 			const resultado = await sendContractLinksToLead({
 				leadId: opportunity.leadId,
 				opportunityId: input.opportunityId,
+				soloContratos: input.contratos,
 			});
 
 			return {
@@ -1815,30 +2094,46 @@ export const legalContractsRouter = {
 				input.contractId,
 			);
 
-			// Un anulado se conserva sólo como registro: reenviarle la invitación
-			// sería pedirle al cliente que firme un documento reemplazado.
-			// Tampoco uno ya reclamado por un reemplazo que todavía no terminó de
-			// anularlo: su documento es el que se está dejando sin efecto.
-			if (contract.status === "cancelled" || contract.replacedByContractId) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Este contrato está anulado: no se le reenvían correos.",
-				});
-			}
+			// Con el candado de la oportunidad: una regeneración, un reemplazo o un
+			// borrado que entraran entre la revisión y el reenvío dejarían al
+			// firmante con una invitación cuyo enlace ya no existe.
+			return conCandadoDeFirma(contract.opportunityId, async () => {
+				// Se vuelve a leer acá, ya con el candado: lo de arriba es de antes
+				// de esperar, y en esa espera pudo anularse.
+				const [vigente] = await db
+					.select({
+						status: generatedLegalContracts.status,
+						replacedByContractId: generatedLegalContracts.replacedByContractId,
+					})
+					.from(generatedLegalContracts)
+					.where(eq(generatedLegalContracts.id, input.contractId))
+					.limit(1);
 
-			try {
-				await reenviarCorreoDeFirma(documentID);
-			} catch (error) {
-				throw new ORPCError("INTERNAL_SERVER_ERROR", {
-					message:
-						error instanceof Error
-							? error.message
-							: "No se pudo reenviar el correo de firma",
-				});
-			}
+				// Un anulado se conserva sólo como registro: reenviarle la invitación
+				// sería pedirle al cliente que firme un documento reemplazado.
+				// Tampoco uno ya reclamado por un reemplazo que todavía no terminó de
+				// anularlo: su documento es el que se está dejando sin efecto.
+				if (!vigente || !estaVigente(vigente)) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Este contrato está anulado: no se le reenvían correos.",
+					});
+				}
 
-			return {
-				success: true,
-				message: "Correo reenviado a los firmantes pendientes",
-			};
+				try {
+					await reenviarCorreoDeFirma(documentID);
+				} catch (error) {
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message:
+							error instanceof Error
+								? error.message
+								: "No se pudo reenviar el correo de firma",
+					});
+				}
+
+				return {
+					success: true,
+					message: "Correo reenviado a los firmantes pendientes",
+				};
+			});
 		}),
 };

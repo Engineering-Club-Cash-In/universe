@@ -11,10 +11,12 @@ import {
 	FileText,
 	Loader2,
 	RefreshCw,
+	Trash2,
 	TriangleAlert,
 } from "lucide-react";
 import { useState } from "react";
 import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
+import { ETAPA_EN_FIRMA } from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,8 +28,12 @@ import {
 } from "@/lib/contract-signers-display";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client } from "@/utils/orpc";
+import { AnularContratoDialog } from "./AnularContratoDialog";
+import { CartasDelPaquete } from "./CartasDelPaquete";
+import { DescargarFirmadoButton } from "./DescargarFirmadoButton";
 import { ReenviarWhatsappDialog } from "./ReenviarWhatsappDialog";
 import { RegenerarEnlacesDialog } from "./RegenerarEnlacesDialog";
+import { EtiquetaSubidoAMano, RevisarSubidoAMano } from "./SubidoAMano";
 
 /**
  * La card de "Contratos Legales" que aparece en el detalle de una oportunidad.
@@ -56,12 +62,20 @@ interface ContratoDeOportunidad {
 	/** Cómo se firma, según quedó guardado al generarlo. */
 	signatureMode?: string | null;
 	/**
+	 * La respuesta del generador tal como se guardó. De ahí sale qué cartas trae
+	 * un paquete de cartas.
+	 */
+	apiResponse?: unknown;
+	/**
 	 * El contrato que lo reemplaza. Puede estar puesto con el estado todavía en
 	 * `pending`: el reemplazo lo reclama al confirmar y el anulado en WeeTrust
 	 * viene después.
 	 */
 	replacedByContractId?: string | null;
 }
+
+/** Un contrato para el reenvío por WhatsApp: el id y cómo se llama. */
+type ContratoAReenviar = { id: string; nombre: string };
 
 export interface FilaDeContrato {
 	contract: ContratoDeOportunidad;
@@ -76,6 +90,12 @@ interface OpportunityContractsCardProps {
 	 * contabilidad ven la card pero no ese botón.
 	 */
 	puedeRegenerar?: boolean;
+	/**
+	 * Si quien mira puede anular un contrato. Va aparte de `puedeRegenerar`:
+	 * anular lo descarta sin reemplazarlo, y lo pueden hacer tanto análisis como
+	 * jurídico, mientras que regenerar es sólo de análisis.
+	 */
+	puedeAnular?: boolean;
 	/** Se llama cuando cambia el estado, para refrescar la lista. */
 	onUpdate?: () => void;
 }
@@ -101,11 +121,33 @@ export function OpportunityContractsCard({
 	contracts,
 	isLoading = false,
 	puedeRegenerar = false,
+	puedeAnular = false,
 	onUpdate,
 }: OpportunityContractsCardProps) {
 	// Los anulados se conservan (dicen qué se descartó y si alguien lo había
 	// firmado), pero van aparte: cada reemplazo deja uno y taparían los vigentes.
 	const [verAnulados, setVerAnulados] = useState(false);
+	// Con qué oportunidad se abre la pregunta de reenviar por WhatsApp.
+	//
+	// Vive acá y no en la fila que la dispara: regenerar crea un contrato NUEVO
+	// y manda el viejo a "Ver anulados", que viene colapsado. Como cada fila se
+	// monta con su propio `id`, la que abrió el diálogo desaparecía de la lista
+	// un instante después y se llevaba el diálogo puesto: alcanzaba a verse un
+	// segundo y se cerraba solo, como si la página se hubiera recargado.
+	const [reenviarDeOportunidad, setReenviarDeOportunidad] = useState<
+		string | null
+	>(null);
+	// Y qué contratos: sólo el que se acaba de renovar, no la batería entera.
+	const [contratosAReenviar, setContratosAReenviar] = useState<
+		ContratoAReenviar[] | undefined
+	>(undefined);
+	const preguntarReenvio = (
+		opportunityId: string | null,
+		contratos?: ContratoAReenviar[],
+	) => {
+		setContratosAReenviar(contratos);
+		setReenviarDeOportunidad(opportunityId);
+	};
 	const vigentes = contracts?.filter((f) => !estaAnulado(f.contract)) ?? [];
 	const anulados = contracts?.filter((f) => estaAnulado(f.contract)) ?? [];
 
@@ -114,7 +156,9 @@ export function OpportunityContractsCard({
 			key={f.contract.id}
 			fila={f}
 			puedeRegenerar={puedeRegenerar}
+			puedeAnular={puedeAnular}
 			onUpdate={onUpdate}
+			onPreguntarReenvio={preguntarReenvio}
 		/>
 	);
 
@@ -172,6 +216,15 @@ export function OpportunityContractsCard({
 					)}
 				</>
 			)}
+
+			<ReenviarWhatsappDialog
+				opportunityId={reenviarDeOportunidad}
+				contratos={contratosAReenviar}
+				open={reenviarDeOportunidad !== null}
+				onOpenChange={(abierto) => {
+					if (!abierto) setReenviarDeOportunidad(null);
+				}}
+			/>
 		</div>
 	);
 }
@@ -186,11 +239,22 @@ export function OpportunityContractsCard({
 function ContratoFila({
 	fila,
 	puedeRegenerar: tienePermiso,
+	puedeAnular,
 	onUpdate,
+	onPreguntarReenvio,
 }: {
 	fila: FilaDeContrato;
 	puedeRegenerar: boolean;
+	puedeAnular: boolean;
 	onUpdate?: () => void;
+	/**
+	 * Avisa que hay que preguntar si se reenvían los enlaces. Lo resuelve la
+	 * card, no la fila: después de regenerar, esta fila deja de existir.
+	 */
+	onPreguntarReenvio: (
+		opportunityId: string | null,
+		contratos?: ContratoAReenviar[],
+	) => void;
 }) {
 	const { contract, signatories } = fila;
 	// Manda lo guardado: una declaración de vendedor generada antes de que se
@@ -243,11 +307,31 @@ function ContratoFila({
 		onError: (error: Error) => toast.error(error.message),
 	});
 
-	const [preguntarReenvio, setPreguntarReenvio] = useState(false);
-
 	const [regenerando, setRegenerando] = useState(false);
+	const [anulando, setAnulando] = useState(false);
 
 	const ocupado = actualizarEstado.isPending;
+
+	// Descartar el documento sin reemplazarlo. Va también en los de papel: un
+	// contrato impreso equivocado se anula igual, y la fila queda con su motivo.
+	// No para los del respaldo de Documenso: anularlo acá no cancela sus enlaces
+	// allá, y el cliente podría seguir firmando uno que el CRM da por anulado.
+	// Gris como las otras acciones de la fila, y rojo sólo al pasar encima: en
+	// rojo fijo, repetido en cada contrato, se robaba la atención de la ficha.
+	// Lo que protege de un clic de más es el diálogo, que pide el motivo.
+	const botonAnular = puedeAnular && !inactivo && enWeeTrust && (
+		<Button
+			variant="ghost"
+			size="sm"
+			className="h-6 px-1.5 text-muted-foreground text-xs hover:text-destructive"
+			disabled={ocupado}
+			onClick={() => setAnulando(true)}
+			title="Descarta el contrato sin reemplazarlo: se borra de la plataforma de firma salvo que ya lo hayan firmado todos. Queda en «Ver anulados» con el motivo."
+		>
+			<Trash2 className="mr-1 h-3 w-3" />
+			Anular
+		</Button>
+	);
 
 	return (
 		<div className="rounded-md border bg-background p-3">
@@ -260,8 +344,13 @@ function ContratoFila({
 					<p className="truncate text-muted-foreground text-xs">
 						{getContractTypeLabel(contract.contractType)}
 					</p>
+					<CartasDelPaquete
+						contractType={contract.contractType}
+						apiResponse={contract.apiResponse}
+					/>
 				</div>
 				<div className="flex shrink-0 items-center gap-2">
+					<EtiquetaSubidoAMano apiResponse={contract.apiResponse} />
 					<Badge variant="outline" className={`${estado.className} text-xs`}>
 						{estado.label}
 					</Badge>
@@ -287,6 +376,14 @@ function ContratoFila({
 							</a>
 						</Button>
 					)}
+					{/* El documento con las firmas puestas. Sólo existe cuando lo
+					    firmaron todos: antes de eso WeeTrust todavía guarda el mismo
+					    archivo que le subimos. Los de papel no tienen: su firma está en
+					    la hoja impresa. Y los del respaldo de Documenso tampoco: el PDF
+					    firmado se baja de WeeTrust. */}
+					{contract.status === "signed" && !firmaEnPapel && enWeeTrust && (
+						<DescargarFirmadoButton contractId={contract.id} />
+					)}
 					{contract.pdfLink && (
 						<Button variant="outline" size="sm" asChild className="h-7">
 							<a
@@ -296,7 +393,9 @@ function ContratoFila({
 								className="flex items-center gap-1"
 							>
 								<FileText className="h-3 w-3" />
-								PDF
+								{/* Ya firmado, decir sólo "PDF" hacía creer que éste era el
+								    documento con las firmas. Es el borrador. */}
+								{contract.status === "signed" ? "Sin firmas" : "PDF"}
 							</a>
 						</Button>
 					)}
@@ -304,11 +403,20 @@ function ContratoFila({
 			</div>
 
 			{firmaEnPapel ? (
-				<p className="mt-3 border-t pt-2 text-amber-700 text-xs dark:text-amber-400">
-					Se firma en papel. No lleva enlace de firma.
-				</p>
+				<div className="mt-3 flex items-center justify-between gap-2 border-t pt-2">
+					<p className="text-amber-700 text-xs dark:text-amber-400">
+						Se firma en papel. No lleva enlace de firma.
+					</p>
+					{botonAnular}
+				</div>
 			) : (
 				<div className="mt-3 space-y-2 border-t pt-2">
+					{!inactivo && contract.status === "pending" && (
+						<RevisarSubidoAMano
+							apiResponse={contract.apiResponse}
+							observerUrl={contract.observerUrl}
+						/>
+					)}
 					{/* Una fila por firmante: el estado es de cada link, no del
 					    contrato. Puede haber uno firmado y otro con el link vencido. */}
 					{firmantes.length > 0 ? (
@@ -439,15 +547,28 @@ function ContratoFila({
 								}
 								disabled={ocupado}
 								onClick={() => setRegenerando(true)}
-								title="Vuelve a emitir el mismo documento con enlaces nuevos para todos. Los anteriores dejan de servir."
+								title="Manda otra vez el mismo documento a firmar, con enlaces nuevos para todos. Los anteriores dejan de servir."
 							>
 								<RefreshCw className="mr-1 h-3 w-3" />
-								{hayVencidos ? "Regenerar (hay vencidos)" : "Regenerar enlaces"}
+								{hayVencidos
+									? "Renovar enlaces (hay vencidos)"
+									: "Renovar enlaces"}
 							</Button>
 						)}
+
+						{botonAnular}
 					</div>
 				</div>
 			)}
+
+			<AnularContratoDialog
+				contractId={contract.id}
+				contractName={contract.contractName}
+				hayFirmas={alguienFirmo}
+				open={anulando}
+				onOpenChange={setAnulando}
+				onAnulado={() => onUpdate?.()}
+			/>
 
 			<RegenerarEnlacesDialog
 				contractId={contract.id}
@@ -455,16 +576,17 @@ function ContratoFila({
 				hayFirmas={alguienFirmo}
 				open={regenerando}
 				onOpenChange={setRegenerando}
-				onRegenerado={() => {
+				onRegenerado={(nuevoId, porcentajeEtapa) => {
+					// Sólo en 85%: ahí el cliente ya recibió los enlaces al aprobar y
+					// los que tiene dejaron de servir. En 80% todavía no le llegó
+					// nada; se los manda la aprobación.
+					if (porcentajeEtapa === ETAPA_EN_FIRMA) {
+						onPreguntarReenvio(contract.opportunityId ?? null, [
+							{ id: nuevoId, nombre: contract.contractName },
+						]);
+					}
 					onUpdate?.();
-					setPreguntarReenvio(true);
 				}}
-			/>
-
-			<ReenviarWhatsappDialog
-				opportunityId={contract.opportunityId ?? null}
-				open={preguntarReenvio}
-				onOpenChange={setPreguntarReenvio}
 			/>
 		</div>
 	);

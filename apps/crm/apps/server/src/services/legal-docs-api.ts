@@ -161,7 +161,22 @@ export interface GenerateContractPayload {
 		generatePdf: boolean;
 		isPlural?: boolean;
 		filenamePrefix: string;
+		/**
+		 * Nombre con el que el documento se ve en WeeTrust y en el correo de
+		 * firma. Es lo que lee el cliente, así que va sin timestamp y sin el
+		 * identificador técnico del tipo.
+		 */
+		documentName?: string;
 	};
+	/**
+	 * Sólo en un `paquete_cartas`: las cartas que lo forman, en orden, cada una
+	 * con sus datos. Lo arma `agruparCartas`.
+	 */
+	cartas?: Array<{
+		contractType: string;
+		data: Record<string, unknown>;
+		options: Record<string, unknown>;
+	}>;
 }
 
 export interface BatchGeneratePayload {
@@ -193,6 +208,11 @@ export interface DocumentResult {
 	 * firmar. Es el único que se le puede pasar a alguien para que mire.
 	 */
 	observerUrl?: string;
+	/**
+	 * Sólo en un `paquete_cartas`: qué cartas quedaron en el PDF y cuántas
+	 * páginas ocupa cada una, en orden.
+	 */
+	cartas?: Array<{ contractType: string; label: string; paginas: number }>;
 	/**
 	 * Quiénes quedaron efectivamente enviados a firmar, con su rol y su link.
 	 * Es lo que reemplaza al reparto por posición de `signing_links`.
@@ -312,6 +332,7 @@ export async function generateContractsBatch(
 			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
 		},
 		body: JSON.stringify(payload),
+		signal: AbortSignal.timeout(TOPE_GENERACION_MS),
 	});
 
 	if (!response.ok) {
@@ -426,6 +447,19 @@ export interface EstadoDocumentoFirma {
  * o reemiten documentos en WeeTrust. Es el mismo secreto que usa el generador
  * para avisarnos el estado de firma (`WEETRUST_RELAY_SECRET`).
  */
+/**
+ * Topes de las llamadas al generador.
+ *
+ * Quien regenera o manda enlaces las hace con el candado de la oportunidad
+ * tomado, y ese candado sólo sirve si la tarea termina: una petición sin tope
+ * lo dejaría tomado hasta que Postgres corte la transacción, que lo suelta sin
+ * detener nada. Subir y reemitir mueven un PDF, así que van más holgados.
+ */
+const TOPE_CONSULTA_MS = 30_000;
+const TOPE_CON_PDF_MS = 120_000;
+/** Generar convierte a PDF varios documentos; es lo más lento que hace. */
+const TOPE_GENERACION_MS = 180_000;
+
 function secretoParaElGenerador(): Record<string, string> {
 	return {
 		"x-weetrust-relay-secret": process.env.WEETRUST_RELAY_SECRET || "",
@@ -444,6 +478,7 @@ async function pedirAlGenerador<T>(
 			Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
 			...secretoParaElGenerador(),
 		},
+		signal: AbortSignal.timeout(TOPE_CONSULTA_MS),
 	});
 
 	const cuerpo = await response.text();
@@ -494,6 +529,8 @@ export async function subirContratoParaFirma(payload: {
 	contractType: string;
 	pdfBase64: string;
 	filenamePrefix?: string;
+	/** Ver `GenerateContractPayload.options.documentName`. */
+	documentName?: string;
 	signers?: ContractSigner[];
 	observers?: string[];
 }): Promise<DocumentResult & { message?: string }> {
@@ -507,6 +544,7 @@ export async function subirContratoParaFirma(payload: {
 				...secretoParaElGenerador(),
 			},
 			body: JSON.stringify(payload),
+			signal: AbortSignal.timeout(TOPE_CON_PDF_MS),
 		},
 	);
 
@@ -540,7 +578,8 @@ export async function subirContratoParaFirma(payload: {
  * Baja el PDF **firmado** de un documento ya completado.
  *
  * El que se guardó al generarlo es el borrador: no tiene las firmas. Éste es el
- * que vale como contrato, y es el que termina en la papelería del inversionista.
+ * que vale como contrato: el que ventas y jurídico bajan sin salir del CRM, y
+ * el que termina en la papelería del inversionista.
  *
  * Pasa por el generador porque las credenciales de WeeTrust las tiene él.
  */
@@ -577,6 +616,7 @@ export async function borrarDocumentoDeWeeTrust(
 				Authorization: `Bearer ${process.env.LEGAL_DOCS_API_KEY || ""}`,
 				...secretoParaElGenerador(),
 			},
+			signal: AbortSignal.timeout(TOPE_CONSULTA_MS),
 		},
 	);
 
@@ -599,6 +639,8 @@ export async function reemitirContratoEnWeeTrust(payload: {
 	r2Key: string;
 	contractType: string;
 	filenamePrefix?: string;
+	/** Ver `GenerateContractPayload.options.documentName`. */
+	documentName?: string;
 	signers?: ContractSigner[];
 	observers?: string[];
 }): Promise<DocumentResult & { message?: string }> {
@@ -610,6 +652,7 @@ export async function reemitirContratoEnWeeTrust(payload: {
 			...secretoParaElGenerador(),
 		},
 		body: JSON.stringify(payload),
+		signal: AbortSignal.timeout(TOPE_CON_PDF_MS),
 	});
 
 	const cuerpo = await response.text();

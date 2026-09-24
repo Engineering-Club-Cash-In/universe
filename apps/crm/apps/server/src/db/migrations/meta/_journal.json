@@ -173,56 +173,70 @@
 		{
 			"idx": 24,
 			"version": "7",
-			"when": 1789604100000,
-			"tag": "0034_create_contract_signatories",
+			"when": 1790089286602,
+			"tag": "0035_create_buro_interno",
 			"breakpoints": true
 		},
 		{
 			"idx": 25,
 			"version": "7",
-			"when": 1789604200000,
-			"tag": "0035_add_signing_status_tracking",
+			"when": 1789776000000,
+			"tag": "0035_add_identity_revalidated_at",
 			"breakpoints": true
 		},
 		{
 			"idx": 26,
 			"version": "7",
-			"when": 1789604300000,
-			"tag": "0036_add_contract_observer_url",
+			"when": 1790089386602,
+			"tag": "0034_create_contract_signatories",
 			"breakpoints": true
 		},
 		{
 			"idx": 27,
 			"version": "7",
-			"when": 1789604400000,
-			"tag": "0037_add_contract_cancellation",
+			"when": 1790089486602,
+			"tag": "0035_add_signing_status_tracking",
 			"breakpoints": true
 		},
 		{
 			"idx": 28,
 			"version": "7",
-			"when": 1789604500000,
-			"tag": "0038_add_contract_regeneration_reason",
+			"when": 1790089586602,
+			"tag": "0036_add_contract_observer_url",
 			"breakpoints": true
 		},
 		{
 			"idx": 29,
 			"version": "7",
-			"when": 1789604600000,
-			"tag": "0039_create_investor_contract_batches",
+			"when": 1790089686602,
+			"tag": "0037_add_contract_cancellation",
 			"breakpoints": true
 		},
 		{
 			"idx": 30,
 			"version": "7",
-			"when": 1789604700000,
-			"tag": "0040_link_contracts_to_investors",
+			"when": 1790089786602,
+			"tag": "0038_add_contract_regeneration_reason",
 			"breakpoints": true
 		},
 		{
 			"idx": 31,
 			"version": "7",
-			"when": 1789604800000,
+			"when": 1790089886602,
+			"tag": "0039_create_investor_contract_batches",
+			"breakpoints": true
+		},
+		{
+			"idx": 32,
+			"version": "7",
+			"when": 1790089986602,
+			"tag": "0040_link_contracts_to_investors",
+			"breakpoints": true
+		},
+		{
+			"idx": 33,
+			"version": "7",
+			"when": 1790090086602,
 			"tag": "0041_add_investor_rep_legal_dpi",
 			"breakpoints": true
 		}

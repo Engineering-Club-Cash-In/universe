@@ -655,6 +655,16 @@ export type IncrementoMora = {
   incrementoDiarioMora: string;
   /** Lo MÁXIMO que puede subir de aquí a 30 días, con 2 decimales. */
   incrementoMaximoMensualMora: string;
+  /**
+   * Días REALES de atraso del crédito: los de la cuota vencida MÁS ANTIGUA
+   * entre las que mueven la mora. 0 si ninguna venció todavía.
+   *
+   * Es el atraso del crédito, no el de una cuota cualquiera: es el número que
+   * el cliente reconoce ("llevo 3 días") y el que ordena la cobranza. Sale del
+   * mismo conjunto de cuotas con que se calcula el monto proporcional, así que
+   * el número y la plata no pueden contradecirse.
+   */
+  diasAtrasoMoraMaximo: number;
 };
 
 /**
@@ -771,9 +781,18 @@ export async function incrementosMoraPorCredito(
       capital: credito.capital ?? 0,
       diasAtrasadosPorCuota,
     };
+    // El MÁXIMO de los días con signo es la cuota más ANTIGUA (más días
+    // corridos desde su vencimiento). Se aplasta a 0 porque las que aún no
+    // vencen entran con signo negativo y no son atraso.
+    const diasAtrasoMoraMaximo =
+      diasAtrasadosPorCuota.length > 0
+        ? Math.max(0, ...diasAtrasadosPorCuota)
+        : 0;
+
     resultado.set(credito.credito_id, {
       incrementoDiarioMora: incrementoDiarioMora(params).toFixed(2),
       incrementoMaximoMensualMora: incrementoMaximoMensualMora(params).toFixed(2),
+      diasAtrasoMoraMaximo,
     });
   }
 
@@ -838,6 +857,13 @@ export interface CreditoConInfo {
    */
   incrementoDiarioMora?: string;
   incrementoMaximoMensualMora?: string;
+  /**
+   * Días REALES de atraso del crédito (cuota vencida más antigua). El CRM los
+   * muestra como "Días de Mora" y ordena la cobranza con ellos; sin este campo
+   * los inventaba como `cuotas_atrasadas × 30`, que con la mora proporcional
+   * contradice al monto que se muestra al lado.
+   */
+  diasAtrasoMoraMaximo?: number;
 }
 
 // 🔥 Función auxiliar para calcular proximidad (con zona horaria de Guatemala)
@@ -1566,6 +1592,8 @@ export async function getCreditosWithUserByMesAnio(
             incrementosMoraMap.get(creditoId)?.incrementoDiarioMora,
           incrementoMaximoMensualMora:
             incrementosMoraMap.get(creditoId)?.incrementoMaximoMensualMora,
+          diasAtrasoMoraMaximo:
+            incrementosMoraMap.get(creditoId)?.diasAtrasoMoraMaximo,
         });
       }
     });

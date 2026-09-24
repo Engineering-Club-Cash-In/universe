@@ -79,6 +79,7 @@ describe("incrementosMoraPorCredito: el listado provee ritmo y techo", () => {
     expect(mapa.get(1)).toEqual({
       incrementoDiarioMora: "3.74",
       incrementoMaximoMensualMora: "74.67",
+      diasAtrasoMoraMaximo: 10,
     });
   });
 
@@ -91,6 +92,7 @@ describe("incrementosMoraPorCredito: el listado provee ritmo y techo", () => {
     expect(mapa.get(2)).toEqual({
       incrementoDiarioMora: "0.00",
       incrementoMaximoMensualMora: "0.00",
+      diasAtrasoMoraMaximo: 60,
     });
   });
 
@@ -103,6 +105,7 @@ describe("incrementosMoraPorCredito: el listado provee ritmo y techo", () => {
     expect(mapa.get(3)).toEqual({
       incrementoDiarioMora: "0.00",
       incrementoMaximoMensualMora: "0.00",
+      diasAtrasoMoraMaximo: 0,
     });
   });
 
@@ -116,6 +119,10 @@ describe("incrementosMoraPorCredito: el listado provee ritmo y techo", () => {
     expect(mapa.get(4)).toEqual({
       incrementoDiarioMora: "0.00",
       incrementoMaximoMensualMora: "0.00",
+      // Estado excluido: no hay mora que cobrar, así que tampoco hay atraso
+      // que anunciar. Mostrar "60 días" junto a Q0.00 sería la misma
+      // contradicción, al revés.
+      diasAtrasoMoraMaximo: 0,
     });
   });
 
@@ -162,7 +169,47 @@ describe("incrementosMoraPorCredito: el listado provee ritmo y techo", () => {
   });
 });
 
-describe("CONTRATO: el listado cablea los dos campos, y fuera del loop", () => {
+describe("diasAtrasoMoraMaximo: los días REALES, no cuotas × 30", () => {
+  it("una cuota con POCOS días: el número es el atraso corrido, no 30", async () => {
+    // El caso que delata la contradicción: 3 días de atraso cobran Q11,20 de
+    // un cargo mensual de Q112. Si acá saliera 30, el asesor le anuncia al
+    // cliente un mes de atraso al lado de un monto de tres días.
+    cuotasDevueltas = [cuota(11, diasAntes(3))];
+    const mapa = await incrementosMoraPorCredito(
+      [{ credito_id: 11, capital: "10000", statusCredit: "MOROSO" }],
+      HOY,
+    );
+    expect(mapa.get(11)?.diasAtrasoMoraMaximo).toBe(3);
+  });
+
+  it("VARIAS cuotas vencidas: manda la MÁS ANTIGUA, que es el atraso del crédito", async () => {
+    // 3 cuotas: 65, 35 y 5 días. El atraso del crédito es 65 —desde cuándo
+    // dejó de pagar—, no el de la última ni la suma ni 3 × 30 = 90.
+    cuotasDevueltas = [
+      cuota(12, diasAntes(35)),
+      cuota(12, diasAntes(65)),
+      cuota(12, diasAntes(5)),
+    ];
+    const mapa = await incrementosMoraPorCredito(
+      [{ credito_id: 12, capital: "10000", statusCredit: "MOROSO" }],
+      HOY,
+    );
+    expect(mapa.get(12)?.diasAtrasoMoraMaximo).toBe(65);
+  });
+
+  it("SIN mora: cuota que aún no vence → 0, no un número negativo", async () => {
+    // Vence en 5 días: entra al horizonte con −5 y mueve el techo, pero
+    // atraso no hay. Un −5 en pantalla sería peor que un 0.
+    cuotasDevueltas = [cuota(13, diasAntes(-5))];
+    const mapa = await incrementosMoraPorCredito(
+      [{ credito_id: 13, capital: "10000", statusCredit: "ACTIVO" }],
+      HOY,
+    );
+    expect(mapa.get(13)?.diasAtrasoMoraMaximo).toBe(0);
+  });
+});
+
+describe("CONTRATO: el listado cablea los tres campos, y fuera del loop", () => {
   const fuente = readFileSync(
     new URL("./credits.ts", import.meta.url),
     "utf8",
@@ -188,9 +235,10 @@ describe("CONTRATO: el listado cablea los dos campos, y fuera del loop", () => {
   );
   const cuerpo = listado.slice(0, listado.indexOf("\ntype Aporte"));
 
-  it("los dos campos viajan en cada fila del listado", () => {
+  it("los tres campos viajan en cada fila del listado", () => {
     expect(cuerpo).toContain("incrementoDiarioMora:");
     expect(cuerpo).toContain("incrementoMaximoMensualMora:");
+    expect(cuerpo).toContain("diasAtrasoMoraMaximo:");
   });
 
   it("se llama UNA sola vez en todo el listado", () => {

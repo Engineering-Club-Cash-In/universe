@@ -31,6 +31,7 @@ import {
 	esContratoDeInversion,
 } from "../lib/contratos-inversiones";
 import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
+import { conMarcaDeSubidoAMano } from "../lib/contrato-subido-a-mano";
 import { espejarContratoEnCartera } from "../lib/espejo-contratos-inversionista";
 import { firmantesDeContratoDeInversion } from "../lib/firmantes-inversionista";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
@@ -48,6 +49,7 @@ import {
 	reemitirContratoEnWeeTrust,
 	reenviarCorreoDeFirma,
 	type SignerRole,
+	subirContratoParaFirma,
 } from "../services/legal-docs-api";
 
 /**
@@ -138,6 +140,35 @@ async function bateriaAbierta(batchId: string) {
 }
 
 /**
+ * Cierra la batería: el trabajo que abrió la compra ya salió.
+ *
+ * Se llama en cuanto se emite o se sube el primer contrato. Dejarla pendiente
+ * obligaba a acordarse de marcarla, y lo que saca de la lista de jurídico es
+ * esto, no la ficha del inversionista.
+ *
+ * Cerrada no significa cerrada con llave: se le pueden emitir más contratos
+ * después (lo único que no se repite es el mismo tipo), y por eso se guarda
+ * también cuándo empezó.
+ */
+async function cerrarLaBateria(
+	bateria: { id: string; startedAt: Date | null; startedBy: string | null },
+	userId: string,
+): Promise<void> {
+	const ahora = new Date();
+	await db
+		.update(investorContractBatches)
+		.set({
+			status: "completada",
+			startedAt: bateria.startedAt ?? ahora,
+			startedBy: bateria.startedBy ?? userId,
+			completedAt: ahora,
+			completedBy: userId,
+			updatedAt: ahora,
+		})
+		.where(eq(investorContractBatches.id, bateria.id));
+}
+
+/**
  * El contrato, siempre que sea de un inversionista y tenga documento en WeeTrust.
  *
  * Se corta acá y no más adelante para no dejar que un contrato de ventas entre
@@ -193,6 +224,8 @@ async function guardarContratoDeInversion(params: {
 	contractName: string;
 	resultado: DocumentResult;
 	userId: string;
+	/** Lo armó una persona por fuera, no la plantilla. */
+	subidoAMano?: boolean;
 }): Promise<string> {
 	const { resultado } = params;
 	const firmantes = resultado.signatories ?? [];
@@ -251,7 +284,12 @@ async function guardarContratoDeInversion(params: {
 				observerUrl: resultado.observerUrl ?? null,
 				signatureMode: getSignatureMode(params.contractType),
 				templateId: resultado.templateId,
-				apiResponse: resultado,
+				// Con la marca, la ficha pide mirar dónde quedaron las firmas: el
+				// documento lo armó una persona y puede traer las líneas en otro lado
+				// que la plantilla.
+				apiResponse: params.subidoAMano
+					? conMarcaDeSubidoAMano(resultado)
+					: resultado,
 				// La key de R2, no la URL firmada que se muestra: esa vence en una
 				// hora, y con ella no se puede volver a emitir el documento.
 				pdfLink: resultado.r2Key || resultado.linkDocument || null,
@@ -662,18 +700,7 @@ export const investorContractsRouter = {
 			// contratos después (lo único que no se repite es el mismo tipo), y por
 			// eso se guarda también cuándo empezó.
 			if (emitidos.length > 0) {
-				const ahora = new Date();
-				await db
-					.update(investorContractBatches)
-					.set({
-						status: "completada",
-						startedAt: bateria.startedAt ?? ahora,
-						startedBy: bateria.startedBy ?? context.userId,
-						completedAt: ahora,
-						completedBy: context.userId,
-						updatedAt: ahora,
-					})
-					.where(eq(investorContractBatches.id, input.batchId));
+				await cerrarLaBateria(bateria, context.userId);
 			}
 
 			const successCount = results.filter((r) => r.success).length;
@@ -684,6 +711,151 @@ export const investorContractsRouter = {
 				successCount,
 				failCount: results.length - successCount,
 				results,
+			};
+		}),
+
+	/**
+	 * Sube un contrato de inversión que jurídico armó por fuera y lo manda a
+	 * firmar.
+	 *
+	 * Termina igual que el generado: enlaces por rol, fila en el CRM y copia en
+	 * la papelería del inversionista. Lo único que cambia es de dónde sale el
+	 * PDF, y que queda marcado como subido a mano para que la ficha pida mirar
+	 * dónde quedaron las firmas: el documento lo armó una persona y puede traer
+	 * las líneas en otro lugar que la plantilla.
+	 *
+	 * El tipo tiene que ser uno de inversión con layout auditado. El generador
+	 * ubica las líneas de firma por ese layout, así que el PDF tiene que ser de
+	 * verdad ese contrato; si no las encuentra, no manda nada a firmar.
+	 *
+	 * Los firmantes NO vienen del navegador, igual que al generar: se arman acá
+	 * con los datos de la batería y los representantes de la casa.
+	 */
+	uploadInvestorContract: juridicoProcedure
+		.input(
+			z.object({
+				batchId: z.string().uuid(),
+				contractType: z.string().min(1),
+				contractName: z.string().min(1),
+				filename: z.string().min(1),
+				/** PDF en base64, sin el prefijo `data:`. */
+				pdfBase64: z.string().min(1),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const bateria = await bateriaAbierta(input.batchId);
+
+			if (!esContratoDeInversion(input.contractType)) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Ese tipo no es de inversiones o no tiene layout de firmas auditado.",
+				});
+			}
+
+			// ~15 MB de PDF. Un contrato pesa bastante menos; lo que pasa de ahí es
+			// un escaneo sin comprimir y conviene frenarlo antes de pasearlo.
+			const bytes = Math.floor((input.pdfBase64.length * 3) / 4);
+			if (bytes > 15 * 1024 * 1024) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El PDF pesa más de 15 MB. Comprimilo antes de subirlo.",
+				});
+			}
+
+			// Un contrato vigente por tipo y por batería, lo mismo que al generar:
+			// con dos, el inversionista recibe dos enlaces del mismo contrato y
+			// firma el que no es. Se vuelve a mirar, bloqueado, al guardar.
+			const [yaVigente] = await db
+				.select({ id: generatedLegalContracts.id })
+				.from(generatedLegalContracts)
+				.where(
+					and(
+						eq(generatedLegalContracts.batchId, input.batchId),
+						eq(generatedLegalContracts.contractType, input.contractType),
+						ne(generatedLegalContracts.status, "cancelled"),
+					),
+				)
+				.limit(1);
+			if (yaVigente) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Esta batería ya tiene ese contrato. Anulá el que está vigente antes de subir otro.",
+				});
+			}
+
+			// Puede cortar: sin correo del inversionista, con correos repetidos, o
+			// en modo prueba sin las envs. Se hace antes de mandar nada.
+			const signers = firmantesDeContratoDeInversion(input.contractType, {
+				nombre: bateria.investorName,
+				email: bateria.investorEmail,
+			});
+
+			const resultado = await subirContratoParaFirma({
+				contractType: input.contractType,
+				pdfBase64: input.pdfBase64,
+				filenamePrefix: input.filename.replace(/\.pdf$/i, ""),
+				// En WeeTrust se ve quién firma y qué firma, no el nombre con el que
+				// jurídico guardó el archivo en su computadora.
+				documentName: bateria.investorName,
+				signers,
+				observers: CONTRATOS_OBSERVADORES,
+			});
+
+			const falla = motivoDeFalla(resultado);
+			if (falla) {
+				throw new ORPCError("BAD_REQUEST", { message: falla });
+			}
+
+			let contractId: string;
+			try {
+				contractId = await guardarContratoDeInversion({
+					batchId: input.batchId,
+					investorId: bateria.investorId,
+					contractType: input.contractType,
+					contractName: input.contractName,
+					resultado,
+					userId: context.userId,
+					subidoAMano: true,
+				});
+			} catch (error) {
+				// El documento ya salió a WeeTrust con sus invitaciones: se borra allá
+				// para que un reintento no deje dos vivos del mismo contrato.
+				if (resultado.documentID) {
+					await borrarDocumentoDeWeeTrust(resultado.documentID).catch((e) =>
+						console.error(
+							`[uploadInvestorContract] no se pudo borrar ${resultado.documentID}:`,
+							e,
+						),
+					);
+				}
+				throw error instanceof ORPCError
+					? error
+					: new ORPCError("INTERNAL_SERVER_ERROR", {
+							message:
+								error instanceof Error
+									? error.message
+									: "No se pudo guardar el contrato",
+						});
+			}
+
+			// Copiarlo a cartera es lo que lo hace visible en la ficha del
+			// inversionista. Best-effort y sin bloquear, igual que al generar.
+			void espejarContratoEnCartera(contractId, context.userId);
+
+			await cerrarLaBateria(bateria, context.userId);
+
+			return {
+				success: true,
+				message: "Contrato subido y mandado a firmar",
+				contractId,
+				contractType: input.contractType,
+				contractName: input.contractName,
+				// URL firmada para poder abrirlo desde la pantalla. Vence en una hora;
+				// lo que queda guardado es la key.
+				documentLink: resultado.r2Key
+					? await getFileUrlWithBucketInKey(resultado.r2Key)
+					: resultado.linkDocument,
+				signingLinks: resultado.signing_links,
+				signatories: resultado.signatories,
 			};
 		}),
 

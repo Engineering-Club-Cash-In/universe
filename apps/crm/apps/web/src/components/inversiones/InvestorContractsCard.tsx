@@ -18,6 +18,10 @@ import { useState } from "react";
 import type { MOTIVOS_DE_ANULACION } from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import { RegenerarEnlacesDialog } from "@/components/contracts/RegenerarEnlacesDialog";
+import {
+	EtiquetaSubidoAMano,
+	RevisarSubidoAMano,
+} from "@/components/contracts/SubidoAMano";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,6 +55,8 @@ interface ContratoDeInversionista {
 	pdfUrl?: string | null;
 	/** Si lo que sirve `pdfUrl` es el documento firmado o el borrador. */
 	pdfFirmado?: boolean;
+	/** La respuesta del generador. De acá sale si lo subieron a mano. */
+	apiResponse?: unknown;
 	cancellationReason?: string | null;
 	replacedByContractId?: string | null;
 	firmantes?: FirmanteDeContrato[];
@@ -151,6 +157,7 @@ function FilaDeContrato({
 					)}
 				</div>
 				<div className="flex shrink-0 items-center gap-2">
+					<EtiquetaSubidoAMano apiResponse={contrato.apiResponse} />
 					<Badge variant="outline" className={`${estado.className} text-xs`}>
 						{estado.label}
 					</Badge>
@@ -198,6 +205,17 @@ function FilaDeContrato({
 					)}
 				</div>
 			</div>
+
+			{/* Mientras falta firmar, el subido a mano pide un vistazo: después ya no
+			    hay nada que corregir. */}
+			{contrato.status !== "signed" && !inactivo && (
+				<div className="mt-3">
+					<RevisarSubidoAMano
+						apiResponse={contrato.apiResponse}
+						observerUrl={contrato.observerUrl}
+					/>
+				</div>
+			)}
 
 			{/* Una fila por firmante: el estado es de cada enlace, no del contrato */}
 			<div className="mt-3 space-y-1 border-t pt-2">

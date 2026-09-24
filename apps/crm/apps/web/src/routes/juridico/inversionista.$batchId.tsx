@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Ban, Building2, Check, Loader2, User } from "lucide-react";
+import {
+	ArrowLeft,
+	Ban,
+	Building2,
+	Check,
+	FileUp,
+	Loader2,
+	User,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import type { CategoriaDeInversion } from "server/src/lib/contratos-inversiones";
 import { toast } from "sonner";
@@ -20,6 +28,7 @@ import {
 	AlertDialogTitle,
 	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { UploadInvestorContractModal } from "@/components/inversiones/UploadInvestorContractModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -80,6 +89,7 @@ function RouteComponent() {
 	const [dpiTocado, setDpiTocado] = useState(false);
 	const [motivoDescarte, setMotivoDescarte] = useState("");
 	const [descartando, setDescartando] = useState(false);
+	const [subiendo, setSubiendo] = useState(false);
 
 	const bateriaQuery = useQuery({
 		...orpc.getInvestorContractBatch.queryOptions({ input: { batchId } }),
@@ -412,12 +422,35 @@ function RouteComponent() {
 			) : (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-base">Emitir contratos</CardTitle>
-						<CardDescription>
-							Elegí la categoría y después los contratos que se van a hacer. Los
-							campos se llenan acá mismo; los enlaces de firma salen solos y
-							quedan en la ficha del inversionista.
-						</CardDescription>
+						<div className="flex items-start justify-between gap-3">
+							<div>
+								<CardTitle className="text-base">Emitir contratos</CardTitle>
+								<CardDescription>
+									Elegí la categoría y después los contratos que se van a
+									hacer. Los campos se llenan acá mismo; los enlaces de firma
+									salen solos y quedan en la ficha del inversionista.
+								</CardDescription>
+							</div>
+
+							{/* El contrato que se armó por fuera entra por acá y termina
+							    igual que los emitidos: con sus enlaces y en la ficha. Pide
+							    la categoría primero porque de ahí sale la lista de tipos. */}
+							<Button
+								variant="outline"
+								size="sm"
+								className="shrink-0"
+								disabled={documentTypes.length === 0}
+								title={
+									documentTypes.length === 0
+										? "Elegí la categoría para ver los tipos de contrato"
+										: undefined
+								}
+								onClick={() => setSubiendo(true)}
+							>
+								<FileUp className="mr-2 h-4 w-4" />
+								Subir contrato
+							</Button>
+						</div>
 					</CardHeader>
 					<CardContent>
 						<DynamicContractWizard
@@ -493,6 +526,21 @@ function RouteComponent() {
 					</CardContent>
 				</Card>
 			)}
+
+			<UploadInvestorContractModal
+				batchId={batchId}
+				documentTypes={documentTypes}
+				open={subiendo}
+				onOpenChange={setSubiendo}
+				// Subir cierra la batería igual que emitir: la lista de jurídico y la
+				// cabecera de esta pantalla tienen que reflejarlo.
+				onUploaded={() => {
+					queryClient.invalidateQueries({
+						predicate: (query) =>
+							JSON.stringify(query.queryKey).includes("InvestorContract"),
+					});
+				}}
+			/>
 		</div>
 	);
 }

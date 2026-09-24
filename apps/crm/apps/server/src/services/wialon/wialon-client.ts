@@ -51,6 +51,18 @@ function esperar(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function exigirItems(mensaje: string): (data: unknown) => void {
+	return (data) => {
+		if (
+			!data ||
+			typeof data !== "object" ||
+			!Array.isArray((data as { items?: unknown }).items)
+		) {
+			throw new WialonClientError(mensaje, "WIALON_INVALID_RESPONSE");
+		}
+	};
+}
+
 // Diccionario calibrado para los dispositivos GPS de La Legión / Club Cash-In
 // Cubre valores estándar como "Encendido", "Apagado", "APAGADO (Apagado)", "Motor encendido/apagado", etc.
 const IGNITION_ON_REGEX =
@@ -559,6 +571,10 @@ export class WialonClient {
 		svc: string,
 		params: Record<string, unknown>,
 		sid?: string,
+		// Valida la forma de la respuesta ANTES de registrar el intento como
+		// exitoso: un contrato roto (ej. login sin eid) debe quedar como error
+		// crítico en la bitácora, no como ok.
+		validar?: (data: unknown) => void,
 	): Promise<unknown> {
 		const idempotente = esOperacionIdempotente(svc);
 
@@ -585,8 +601,11 @@ export class WialonClient {
 
 		for (let intento = 1; intento <= maxIntentos; intento++) {
 			const inicio = Date.now();
+			let dataRecibida: unknown;
 			try {
 				const data = await this.requestRawUnaVez(svc, params, sid);
+				dataRecibida = data;
+				validar?.(data);
 				const duracionMs = Date.now() - inicio;
 				this.registrarExitoCircuito();
 				this.emitirEvento({
@@ -616,16 +635,31 @@ export class WialonClient {
 					idempotente && reintentable && intento < maxIntentos;
 				if (idempotente && reintentable) this.registrarFalloCircuito();
 
+				// Se registra el desenlace final, no un "error" genérico:
+				// - escritura con falla transitoria → "incierto" (pide verificar a mano).
+				// - sesión vencida → "reintentado": executeWithSession re-autentica
+				//   y repite la operación; no es una falla de la integración.
+				const resultado = quedanIntentos
+					? "reintentado"
+					: codigo === "WIALON_INVALID_SESSION"
+						? "reintentado"
+						: !idempotente && reintentable
+							? "incierto"
+							: "error";
+
 				this.emitirEvento({
 					intento,
 					operacion: svc,
-					resultado: quedanIntentos ? "reintentado" : "error",
+					resultado,
 					errorCode: codigo,
 					wialonErrorCode,
 					httpStatus,
 					severidad,
 					duracionMs,
 					requestResumen: params,
+					...(dataRecibida !== undefined
+						? { responseResumen: dataRecibida }
+						: {}),
 				});
 
 				if (!quedanIntentos) break;
@@ -664,10 +698,22 @@ export class WialonClient {
 	 */
 	public async login(force = false): Promise<string> {
 		if (!this.config.token) {
-			throw new WialonClientError(
+			const error = new WialonClientError(
 				"No se ha configurado el token de Wialon (WIALON_TOKEN)",
 				"WIALON_AUTH_REQUIRED",
 			);
+			// Falla antes de requestRaw: sin este evento no quedaría en la
+			// bitácora ni abriría la alerta crítica, y toda consulta GPS fallaría
+			// sin que nadie se entere.
+			this.emitirEvento({
+				intento: 1,
+				operacion: "token/login",
+				resultado: "error",
+				errorCode: error.code,
+				severidad: clasificarFallaWialon(error).severidad,
+				duracionMs: 0,
+			});
+			throw error;
 		}
 
 		if (!force) {
@@ -696,20 +742,23 @@ export class WialonClient {
 		let p: Promise<string> | null = null;
 		p = (async () => {
 			try {
-				const res = (await this.requestRaw("token/login", {
-					token: this.config.token,
-				})) as {
+				const res = (await this.requestRaw(
+					"token/login",
+					{ token: this.config.token },
+					undefined,
+					(data) => {
+						if (!(data as { eid?: unknown } | null)?.eid) {
+							throw new WialonClientError(
+								"Respuesta de login inválida: no se recibió 'eid'",
+								"WIALON_INVALID_RESPONSE",
+							);
+						}
+					},
+				)) as {
 					eid: string;
 					user?: { id: number; nm: string };
 					tm?: number;
 				};
-
-				if (!res?.eid) {
-					throw new WialonClientError(
-						"Respuesta de login inválida: no se recibió 'eid'",
-						"WIALON_INVALID_RESPONSE",
-					);
-				}
 
 				this.sessionCache = {
 					eid: res.eid,
@@ -783,14 +832,10 @@ export class WialonClient {
 				"core/search_items",
 				params,
 				sid,
-			)) as WialonSearchItemsResponse;
-
-			if (!data || typeof data !== "object" || !Array.isArray(data.items)) {
-				throw new WialonClientError(
+				exigirItems(
 					"Respuesta inesperada de Wialon: se esperaba un objeto con 'items' en 'core/search_items'",
-					"WIALON_INVALID_RESPONSE",
-				);
-			}
+				),
+			)) as WialonSearchItemsResponse;
 
 			// Pre-cargar caché de sensores de ignición para unidades devueltas solo si
 			// la consulta incluyó tanto propiedades (prp) como sensores (sens) para garantizar autoritatividad
@@ -851,24 +896,16 @@ export class WialonClient {
 								to: 0xffffffff,
 							},
 							sid,
+							exigirItems(
+								"Respuesta inesperada de Wialon: se esperaba un objeto con 'items' en 'core/search_items'",
+							),
 						)) as {
-							items?: Array<{
+							items: Array<{
 								id: number;
 								sens?: Record<string, WialonSensorMeta>;
 								prp?: Record<string, unknown>;
 							}>;
 						};
-
-						if (
-							!metaRes ||
-							typeof metaRes !== "object" ||
-							!Array.isArray(metaRes.items)
-						) {
-							throw new WialonClientError(
-								"Respuesta inesperada de Wialon: se esperaba un objeto con 'items' en 'core/search_items'",
-								"WIALON_INVALID_RESPONSE",
-							);
-						}
 
 						const foundIds = new Set<number>();
 						for (const item of metaRes.items) {
@@ -934,6 +971,18 @@ export class WialonClient {
 					"unit/calc_last",
 					{ itemIds: chunk },
 					sid,
+					(data) => {
+						if (
+							!Array.isArray(data) &&
+							typeof (data as Record<string, unknown> | null)?.error !==
+								"number"
+						) {
+							throw new WialonClientError(
+								"Respuesta inesperada de Wialon: se esperaba un arreglo en 'unit/calc_last'",
+								"WIALON_INVALID_RESPONSE",
+							);
+						}
+					},
 				)) as WialonUnitCalcLastItem[];
 
 				if (Array.isArray(batch)) {
@@ -942,13 +991,6 @@ export class WialonClient {
 							rawMap.set(raw.i, raw);
 						}
 					}
-				} else if (
-					typeof (batch as Record<string, unknown>)?.error !== "number"
-				) {
-					throw new WialonClientError(
-						"Respuesta inesperada de Wialon: se esperaba un arreglo en 'unit/calc_last'",
-						"WIALON_INVALID_RESPONSE",
-					);
 				}
 			}
 
@@ -1087,19 +1129,16 @@ export class WialonClient {
 				"core/search_item",
 				{ id: unitId, flags },
 				sid,
+				(respuesta) => {
+					const item = (respuesta as { item?: unknown } | null)?.item;
+					if (!item || typeof item !== "object") {
+						throw new WialonClientError(
+							"Respuesta inesperada de Wialon: se esperaba un objeto con 'item' en 'core/search_item'",
+							"WIALON_INVALID_RESPONSE",
+						);
+					}
+				},
 			)) as WialonSearchItemResponse;
-
-			if (
-				!data ||
-				typeof data !== "object" ||
-				!data.item ||
-				typeof data.item !== "object"
-			) {
-				throw new WialonClientError(
-					"Respuesta inesperada de Wialon: se esperaba un objeto con 'item' en 'core/search_item'",
-					"WIALON_INVALID_RESPONSE",
-				);
-			}
 
 			// Pre-cargar caché de sensores solo si la consulta incluyó metadatos completos (prp y sens)
 			const hasPrp = (flags & 2) !== 0;
@@ -1141,19 +1180,24 @@ export class WialonClient {
 		};
 
 		return this.executeWithSession(async (sid) => {
-			const data = (await this.requestRaw("token/update", params, sid)) as {
+			const data = (await this.requestRaw(
+				"token/update",
+				params,
+				sid,
+				(respuesta) => {
+					if (!(respuesta as { h?: unknown } | null)?.h) {
+						throw new WialonClientError(
+							"Respuesta de token/update inválida: no se recibió el hash 'h'",
+							"WIALON_INVALID_RESPONSE",
+						);
+					}
+				},
+			)) as {
 				h: string;
 				app: string;
 				dur: number;
 				items: number[];
 			};
-
-			if (!data?.h) {
-				throw new WialonClientError(
-					"Respuesta de token/update inválida: no se recibió el hash 'h'",
-					"WIALON_INVALID_RESPONSE",
-				);
-			}
 
 			const fullUrl = `${this.config.locatorBaseUrl}?t=${data.h}`;
 			return {
@@ -1211,14 +1255,10 @@ export class WialonClient {
 					to: 0,
 				},
 				sid,
-			)) as { items?: unknown[]; totalItemsCount?: unknown };
-
-			if (!res || typeof res !== "object" || !Array.isArray(res.items)) {
-				throw new WialonClientError(
+				exigirItems(
 					"Respuesta inesperada de Wialon durante health check: se esperaba un objeto con 'items' en 'core/search_items'",
-					"WIALON_INVALID_RESPONSE",
-				);
-			}
+				),
+			)) as { items: unknown[]; totalItemsCount?: unknown };
 
 			return {
 				status: "connected",

@@ -8,6 +8,7 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import {
 	clasificarFallaWialon,
+	esIntentoExitoso,
 	esOperacionIdempotente,
 	sanitizarPayloadWialon,
 	WIALON_SVC_IDEMPOTENTES,
@@ -460,5 +461,120 @@ describe("CB-121 — hook de eventos nunca rompe la llamada real", () => {
 
 		const resultado = await client.searchUnits({ flags: 1 });
 		expect(resultado.totalItemsCount).toBe(1);
+	});
+});
+
+describe("CB-121 — la bitácora registra el desenlace real de cada intento", () => {
+	beforeEach(() => {
+		delete process.env.WIALON_TOKEN;
+	});
+
+	test("sin token, login deja un evento crítico antes de fallar", async () => {
+		const eventos: WialonIntentoEvento[] = [];
+		const client = new WialonClient(
+			{ token: "" },
+			async () => new Response("{}"),
+			(e) => eventos.push(e),
+		);
+
+		await expect(client.login()).rejects.toThrow(/WIALON_TOKEN/);
+		expect(eventos).toHaveLength(1);
+		expect(eventos[0]).toMatchObject({
+			operacion: "token/login",
+			resultado: "error",
+			errorCode: "WIALON_AUTH_REQUIRED",
+			severidad: "critical",
+		});
+	});
+
+	test("un login sin eid queda como error crítico, no como ok", async () => {
+		const eventos: WialonIntentoEvento[] = [];
+		const client = new WialonClient(
+			{ token: "tok" },
+			async () => new Response(JSON.stringify({}), { status: 200 }),
+			(e) => eventos.push(e),
+		);
+
+		await expect(client.login()).rejects.toThrow(/eid/);
+		expect(eventos.map((e) => e.resultado)).toEqual(["error"]);
+		expect(eventos[0]).toMatchObject({
+			errorCode: "WIALON_INVALID_RESPONSE",
+			severidad: "critical",
+		});
+	});
+
+	test("core/search_items sin items queda como error, no como ok", async () => {
+		const eventos: WialonIntentoEvento[] = [];
+		const fetchMock: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			return new Response(JSON.stringify({ totalItemsCount: 0 }), {
+				status: 200,
+			});
+		};
+		const client = new WialonClient({ token: "tok" }, fetchMock, (e) =>
+			eventos.push(e),
+		);
+
+		await expect(client.searchUnits({ flags: 1 })).rejects.toThrow(/items/);
+		const search = eventos.filter((e) => e.operacion === "core/search_items");
+		expect(search.map((e) => e.resultado)).toEqual(["error"]);
+		expect(search[0]?.errorCode).toBe("WIALON_INVALID_RESPONSE");
+	});
+
+	test("una escritura con falla transitoria queda como incierto", async () => {
+		const eventos: WialonIntentoEvento[] = [];
+		const fetchMock: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			throw new DOMException("aborted", "AbortError");
+		};
+		const client = new WialonClient(
+			{ token: "tok", timeoutMs: 5 },
+			fetchMock,
+			(e) => eventos.push(e),
+		);
+
+		await expect(
+			client.createLocatorLink({ unitId: 1, durationSeconds: 60 }),
+		).rejects.toThrow(WialonClientError);
+		const update = eventos.filter((e) => e.operacion === "token/update");
+		expect(update.map((e) => e.resultado)).toEqual(["incierto"]);
+	});
+
+	test("una sesión vencida queda como reintentado y no cuenta como fallo", async () => {
+		const eventos: WialonIntentoEvento[] = [];
+		let llamadasSearch = 0;
+		const fetchMock: WialonFetch = async (_, init) => {
+			const bodyStr = String(init?.body || "");
+			if (bodyStr.includes("svc=token%2Flogin")) {
+				return new Response(JSON.stringify({ eid: "sid-ok" }), { status: 200 });
+			}
+			llamadasSearch++;
+			if (llamadasSearch === 1) {
+				return new Response(JSON.stringify({ error: 1 }), { status: 200 });
+			}
+			return new Response(JSON.stringify({ items: [], totalItemsCount: 0 }), {
+				status: 200,
+			});
+		};
+		const client = new WialonClient({ token: "tok" }, fetchMock, (e) =>
+			eventos.push(e),
+		);
+
+		await client.searchUnits({ flags: 1 });
+		const search = eventos.filter((e) => e.operacion === "core/search_items");
+		expect(search.map((e) => e.resultado)).toEqual(["reintentado", "ok"]);
+		expect(search[0]?.errorCode).toBe("WIALON_INVALID_SESSION");
+		expect(
+			esIntentoExitoso({
+				resultado: "reintentado",
+				errorCode: "WIALON_INVALID_SESSION",
+			}),
+		).toBe(true);
 	});
 });

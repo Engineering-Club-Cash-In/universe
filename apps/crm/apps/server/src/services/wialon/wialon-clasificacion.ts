@@ -114,13 +114,16 @@ export function esOperacionIdempotente(svc: string): boolean {
 
 // "reintentado" se usa tanto para el éxito tras reintento (sin errorCode)
 // como para un fallo que todavía tiene reintentos pendientes (con errorCode).
+// La sesión vencida no cuenta como fallo: es la renovación esperada del sid
+// (re-login + repetir la operación) y el intento siguiente decide el resultado.
 export function esIntentoExitoso(fila: {
 	resultado: string;
 	errorCode: string | null;
 }): boolean {
 	return (
 		fila.resultado === "ok" ||
-		(fila.resultado === "reintentado" && fila.errorCode === null)
+		(fila.resultado === "reintentado" &&
+			(fila.errorCode === null || fila.errorCode === "WIALON_INVALID_SESSION"))
 	);
 }
 

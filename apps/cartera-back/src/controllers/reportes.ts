@@ -6,10 +6,15 @@ import {
   type ProjectionSourceRow,
 } from "./investmentProjection";
 import {
-	type MoraRecoverySourceRow,
+	type MoraRecoveryFilaCruda,
+	acumularMoraRecoveryRows,
+	buildMoraRecoveryCreditosQuery,
 	buildMoraRecoveryQuery,
-	buildMoraRecoveryReport,
+	finalizarMoraRecoveryReport,
 	getMoraRecoveryPeriod,
+	nuevoMoraRecoveryAccumulator,
+	partirEnLotes,
+	traducirFilaMoraRecovery,
 } from "./moraRecuperacion";
 import {
   buildCapitalCarteraQuery,
@@ -2277,43 +2282,52 @@ export async function getMoraRecuperacionPorAsesor({
 }) {
   const period = getMoraRecoveryPeriod({ mes, anio, hoy: hoyGTStr() });
 
-  const result = await db.execute<{
-    asesor_id: number | null;
-    nombre: string | null;
-    esperado: string;
-    // `JSON_BUILD_OBJECT` devuelve los montos como texto a propósito: numeric →
-    // número de JSON los haría pasar por el double del driver.
-    eventos: {
-      tipoEvento: string;
-      montoAnterior: string;
-      montoNuevo: string;
-      reverso: boolean;
-      // El DECREMENTO cuyo pago se cayó. Viaja en el JSON desde
-      // `esDecrementoAnuladoSql`; si no se mapea, `plegarNivel` no lo
-      // saltea y la reposición del cron se cuenta como mora NUEVA.
-      anulado: boolean;
-    }[];
-    // Techo sembrado con el historial ANTERIOR al ciclo, ya agregado en SQL.
-    nivel_sembrado: string;
-    cobrado: string;
-  }>(buildMoraRecoveryQuery({ ...period, asesores, emailCobrador }));
+  // Por LOTES de créditos. El plegado del nivel de referencia necesita los
+  // eventos crudos del ciclo, y con el RECALCULO diario de la mora proporcional
+  // eso pasa de ~8.000 a ~45.000 objetos por consulta y sigue creciendo con la
+  // cartera. Partir por crédito no cambia el agregado —el plegado es por
+  // crédito— y cada lote suelta sus eventos antes de pedir el siguiente.
+  //
+  // Todo eso —la enumeración del universo Y todos los lotes— va dentro de UNA
+  // transacción REPEATABLE READ, que es lo que le devuelve al reporte la
+  // garantía que la única sentencia SQL de antes tenía gratis: un solo
+  // instante para todo. En READ COMMITTED cada consulta abre su propio
+  // snapshot, así que mientras corre el cron nocturno de mora —o entran pagos,
+  // o cambian asesores y estados— los lotes tempranos reflejaban un instante y
+  // los tardíos otro, y un crédito elegible al enumerar podía dejar de serlo
+  // cuando le tocaba su lote: el total terminaba dependiendo de dónde cayeron
+  // los cortes. `read only` deja escrito que el reporte solo lee.
+  return await db.transaction(
+    async (tx) => {
+      const creditos = await tx.execute<{ credito_id: number }>(
+        buildMoraRecoveryCreditosQuery({ asesores, emailCobrador }),
+      );
+      const acumulador = nuevoMoraRecoveryAccumulator();
 
-  return buildMoraRecoveryReport(
-    result.rows.map((row): MoraRecoverySourceRow => ({
-      asesorId: row.asesor_id,
-      nombre: row.nombre ?? "Sin asignar",
-      esperado: row.esperado,
-      eventos: (row.eventos ?? []).map((evento) => ({
-        tipoEvento: evento.tipoEvento,
-        montoAnterior: Number(evento.montoAnterior),
-        montoNuevo: Number(evento.montoNuevo),
-        reverso: evento.reverso === true,
-        anulado: evento.anulado === true,
-      })),
-      nivelSembrado: row.nivel_sembrado,
-      cobrado: row.cobrado,
-    })),
-    period,
+      for (const lote of partirEnLotes(creditos.rows.map((c) => c.credito_id))) {
+        // La forma de la fila NO se escribe acá: se importa de donde vive la
+        // consulta (`MoraRecoveryFilaCruda`), y la traducción a lo que consume
+        // el plegado la hace `traducirFilaMoraRecovery`, que el compilador
+        // obliga a cubrir TODAS las columnas. Copiar campo por campo acá fue lo
+        // que perdió en silencio `nivel_sembrado`, `reverso` y `anulado`.
+        const result = await tx.execute<MoraRecoveryFilaCruda>(
+          buildMoraRecoveryQuery({
+            ...period,
+            asesores,
+            emailCobrador,
+            creditos: lote,
+          }),
+        );
+
+        acumularMoraRecoveryRows(
+          acumulador,
+          result.rows.map(traducirFilaMoraRecovery),
+        );
+      }
+
+      return finalizarMoraRecoveryReport(acumulador, period);
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
   );
 }
 

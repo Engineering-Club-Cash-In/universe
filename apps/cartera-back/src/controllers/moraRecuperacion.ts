@@ -393,6 +393,78 @@ export function getMoraRecoveryPeriod({
 	};
 }
 
+/**
+ * Créditos que se piden por lote al reporte de recuperación.
+ *
+ * El plegado del nivel de referencia necesita los eventos CRUDOS del ciclo, y
+ * con el `RECALCULO` diario de la mora proporcional eso es ~31 eventos por
+ * crédito por ciclo (más pagos y condonaciones: digamos ~40 como techo). Traer
+ * el ciclo entero de una eran 7.977 eventos antes de la mora proporcional y
+ * pasarían a ~45.000, creciendo con la cartera sin techo.
+ *
+ * Se parte por CRÉDITOS y no por página de respuesta —la respuesta ya es chica,
+ * una fila por asesor— porque el plegado es por crédito: partir ahí no puede
+ * cambiar el agregado. 500 créditos acotan cada lote a ~20.000 eventos sea cual
+ * sea el tamaño de la cartera, y el NÚMERO de lotes depende solo de cuántos
+ * créditos elegibles hay, nunca de cuántos eventos tenga cada uno.
+ */
+export const CREDITOS_POR_LOTE = 500;
+
+/**
+ * Parte una lista en trozos de `tamano`. Lista vacía → cero lotes (el reporte
+ * sale vacío sin tocar la base).
+ */
+export function partirEnLotes<T>(
+	items: T[],
+	tamano: number = CREDITOS_POR_LOTE,
+): T[][] {
+	if (!Number.isInteger(tamano) || tamano < 1) {
+		throw new RangeError(`Tamaño de lote inválido: ${tamano}`);
+	}
+	const lotes: T[][] = [];
+	for (let i = 0; i < items.length; i += tamano) {
+		lotes.push(items.slice(i, i + tamano));
+	}
+	return lotes;
+}
+
+/**
+ * Universo de créditos del reporte: exactamente el mismo `creditos_con_asesor`
+ * que usa `buildMoraRecoveryQuery`, para que la partición en lotes cubra todas
+ * las filas que el reporte podría devolver y ni una más. Va ordenado por
+ * `credito_id` para que los lotes sean estables entre llamadas.
+ */
+export function buildMoraRecoveryCreditosQuery({
+	asesores,
+	emailCobrador,
+}: {
+	asesores?: number[];
+	emailCobrador?: string;
+}) {
+	return sql`
+    SELECT c.credito_id
+    FROM cartera.creditos c
+    LEFT JOIN cartera.asesores a ON a.asesor_id = c.asesor_id
+    WHERE c."statusCredit" IN (${creditosElegiblesMoraSql})
+      ${filtroEmailAsesor(emailCobrador)}
+      ${filtroAsesores(asesores)}
+    ORDER BY c.credito_id
+  `;
+}
+
+const filtroEmailAsesor = (emailCobrador?: string) =>
+	emailCobrador
+		? sql`AND LOWER(a.email_cash_in) = LOWER(TRIM(${emailCobrador}))`
+		: sql``;
+
+const filtroAsesores = (asesores?: number[]) =>
+	asesores?.length
+		? sql`AND a.asesor_id IN (${sql.join(
+				asesores.map((id) => sql`${id}`),
+				sql`, `,
+			)})`
+		: sql``;
+
 export function buildMoraRecoveryQuery({
 	inicio,
 	fin,
@@ -400,22 +472,41 @@ export function buildMoraRecoveryQuery({
 	alcance,
 	asesores,
 	emailCobrador,
+	creditos,
 }: MoraRecoveryPeriod & {
 	asesores?: number[];
 	emailCobrador?: string;
+	/**
+	 * Lote de créditos a procesar. Sin él la consulta abarca toda la cartera
+	 * elegible (es lo que hacen los tests de forma de la consulta).
+	 */
+	creditos?: number[];
 }) {
-	const emailFilter = emailCobrador
-		? sql`AND LOWER(a.email_cash_in) = LOWER(TRIM(${emailCobrador}))`
-		: sql``;
-	const asesoresFilter = asesores?.length
-		? sql`AND a.asesor_id IN (${sql.join(
-				asesores.map((id) => sql`${id}`),
+	const emailFilter = filtroEmailAsesor(emailCobrador);
+	const asesoresFilter = filtroAsesores(asesores);
+	// El lote acota `creditos_con_asesor`, que es de donde cuelgan los eventos,
+	// los pagos y el JOIN final.
+	const creditosFilter = creditos?.length
+		? sql`AND c.credito_id IN (${sql.join(
+				creditos.map((id) => sql`${id}`),
 				sql`, `,
 			)})`
 		: sql``;
+	// …pero la FOTO inicial va ANTES de `creditos_con_asesor` y no cuelga de
+	// ella: sin este segundo filtro cada lote reconstruía la foto de la cartera
+	// COMPLETA y recién descartaba los créditos ajenos en el JOIN final. Con N
+	// lotes eso es N veces la foto entera: el batching dejaba de pagar. El lote
+	// tiene que entrar TAMBIÉN acá —y en la rama `live`, que tiene su propia
+	// foto— para que cada consulta reconstruya solo sus créditos.
+	const moraActivaFiltro = creditos?.length
+		? sql`AND credito_id = ANY (ARRAY[${sql.join(
+				creditos.map((id) => sql`${id}`),
+				sql`, `,
+			)}]::int[])`
+		: sql``;
 	const snapshotCte =
 		alcance === "historico"
-			? sql`${snapCte(fechaSnapshot, false)}, snapshot_por_credito AS (
+			? sql`${snapCte(fechaSnapshot, false, creditos)}, snapshot_por_credito AS (
       SELECT s.credito_id, s.monto::numeric AS esperado
       FROM snap s
       WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 AND s.cuotas > 0
@@ -424,6 +515,7 @@ export function buildMoraRecoveryQuery({
       SELECT DISTINCT ON (credito_id) credito_id, monto_mora::numeric AS esperado
       FROM cartera.moras_credito
       WHERE activa = true AND cuotas_atrasadas > 0
+        ${moraActivaFiltro}
       ORDER BY credito_id, mora_id DESC
     ), snapshot_por_credito AS (
       SELECT m.credito_id, m.esperado
@@ -453,6 +545,7 @@ export function buildMoraRecoveryQuery({
       WHERE c."statusCredit" IN (${creditosElegiblesMoraSql})
         ${emailFilter}
         ${asesoresFilter}
+        ${creditosFilter}
     ),
     pagos_por_credito AS (
       SELECT pc.credito_id, COALESCE(SUM(pc.mora::numeric), 0) AS cobrado
@@ -579,6 +672,141 @@ export function buildMoraRecoveryQuery({
   `;
 }
 
+/**
+ * La forma CRUDA de un evento tal como lo emite el `JSON_BUILD_OBJECT` de
+ * `buildMoraRecoveryQuery`. Los montos son texto a propósito: `numeric` →
+ * número de JSON los haría pasar por el `double` del driver.
+ *
+ * Vive acá, pegado a la consulta que lo produce, y no en el llamador: quien
+ * agregue una clave al `JSON_BUILD_OBJECT` la agrega también acá, y a partir
+ * de ese momento el compilador exige traducirla (ver `TRADUCTORES_EVENTO`).
+ */
+export type MoraRecoveryEventoCrudo = {
+	tipoEvento: string;
+	montoAnterior: string;
+	montoNuevo: string;
+	reverso: boolean;
+	anulado: boolean;
+};
+
+/**
+ * La fila CRUDA que devuelve el `SELECT` final de `buildMoraRecoveryQuery`,
+ * con los nombres de columna tal cual salen de Postgres.
+ */
+export type MoraRecoveryFilaCruda = {
+	asesor_id: number | null;
+	nombre: string | null;
+	esperado: string;
+	eventos: MoraRecoveryEventoCrudo[] | null;
+	nivel_sembrado: string;
+	cobrado: string;
+};
+
+/**
+ * A qué campo de `MoraRecoverySourceRow` corresponde cada columna cruda.
+ *
+ * Existe solo porque el SQL sale en `snake_case` y el plegado consume
+ * `camelCase`. Es el primero de los dos candados: una columna nueva que no
+ * figure acá hace fallar el tipo de `TRADUCTORES_FILA` (`CampoDestino[K]` no
+ * existe), así que ni siquiera se llega a discutir si alguien "se acordó" de
+ * mapearla.
+ */
+type CampoDestino = {
+	asesor_id: "asesorId";
+	nombre: "nombre";
+	esperado: "esperado";
+	eventos: "eventos";
+	nivel_sembrado: "nivelSembrado";
+	cobrado: "cobrado";
+};
+
+/**
+ * POR QUÉ ESTA TABLA Y NO UN OBJETO A MANO.
+ *
+ * Tres veces seguidas se perdió un campo en este mismo punto —`nivel_sembrado`,
+ * `reverso` y `anulado`—: la consulta lo emitía, el objeto literal del llamador
+ * no lo copiaba, el campo llegaba `undefined` y el plegado lo ignoraba EN
+ * SILENCIO. Compilaba, pasaba los tests, y el reporte decía otra cosa.
+ *
+ * El defecto no era el campo: era que se PUDIERA olvidar uno. Un objeto literal
+ * que omite una propiedad opcional es código válido, así que ninguna revisión
+ * ni ningún tipo lo detenía.
+ *
+ * Acá la traducción deja de ser un objeto literal y pasa a ser una tabla
+ * INDEXADA POR LAS COLUMNAS DE LA CONSULTA: el tipo obliga a que haya una
+ * entrada por cada clave de `MoraRecoveryFilaCruda`, ni una menos. Agregar una
+ * columna a la consulta y no traducirla ya no compila.
+ *
+ * `Required<Pick<…>>` cierra el segundo agujero: sin él, la entrada de un campo
+ * OPCIONAL del destino (como `nivelSembrado`) podía devolver `{}` y volvíamos al
+ * mismo silencio, pero con más ceremonia.
+ *
+ * Los tests de "MUTACIÓN: perder X en el mapeo" siguen vivos y siguen haciendo
+ * falta: el tipo obliga a ESCRIBIR la entrada, los tests obligan a que lo que
+ * escribió sea lo correcto.
+ */
+const TRADUCTORES_FILA: {
+	[K in keyof MoraRecoveryFilaCruda]-?: (
+		fila: MoraRecoveryFilaCruda,
+	) => Required<Pick<MoraRecoverySourceRow, CampoDestino[K]>>;
+} = {
+	asesor_id: (fila) => ({ asesorId: fila.asesor_id }),
+	// Sin asesor asignado el reporte igual tiene que mostrar la fila: el crédito
+	// generó mora aunque nadie la esté cobrando.
+	nombre: (fila) => ({ nombre: fila.nombre ?? "Sin asignar" }),
+	esperado: (fila) => ({ esperado: fila.esperado }),
+	eventos: (fila) => ({
+		eventos: (fila.eventos ?? []).map(traducirEventoMoraRecovery),
+	}),
+	nivel_sembrado: (fila) => ({ nivelSembrado: fila.nivel_sembrado }),
+	cobrado: (fila) => ({ cobrado: fila.cobrado }),
+};
+
+/**
+ * Igual que `TRADUCTORES_FILA` pero para cada evento del JSON. Acá los nombres
+ * ya coinciden con los de `MoraLevelEvent`, así que el candado es más directo:
+ * `Pick<MoraLevelEvent, K>` exige que la clave cruda EXISTA en el evento del
+ * plegado, y una clave nueva que no exista ahí tampoco compila.
+ */
+const TRADUCTORES_EVENTO: {
+	[K in keyof MoraRecoveryEventoCrudo]-?: (
+		crudo: MoraRecoveryEventoCrudo,
+	) => Required<Pick<MoraLevelEvent, K>>;
+} = {
+	tipoEvento: (crudo) => ({ tipoEvento: crudo.tipoEvento }),
+	montoAnterior: (crudo) => ({ montoAnterior: Number(crudo.montoAnterior) }),
+	montoNuevo: (crudo) => ({ montoNuevo: Number(crudo.montoNuevo) }),
+	// `=== true` y no un cast: el driver puede devolver el booleano de Postgres
+	// como texto dentro del JSON, y `"false"` es verdadero en JavaScript.
+	reverso: (crudo) => ({ reverso: crudo.reverso === true }),
+	anulado: (crudo) => ({ anulado: crudo.anulado === true }),
+};
+
+/** Arma el evento del plegado aplicando TODAS las entradas de la tabla. */
+export function traducirEventoMoraRecovery(
+	crudo: MoraRecoveryEventoCrudo,
+): MoraLevelEvent {
+	const evento = {} as MoraLevelEvent;
+	for (const traducir of Object.values(TRADUCTORES_EVENTO)) {
+		Object.assign(evento, traducir(crudo));
+	}
+	return evento;
+}
+
+/**
+ * Arma la fila que consume el acumulador aplicando TODAS las entradas de la
+ * tabla. El llamador ya no copia campo por campo: le pasa la fila cruda.
+ */
+export function traducirFilaMoraRecovery(
+	fila: MoraRecoveryFilaCruda,
+): MoraRecoverySourceRow {
+	const row = {} as MoraRecoverySourceRow;
+	for (const traducir of Object.values(TRADUCTORES_FILA)) {
+		Object.assign(row, traducir(fila));
+	}
+	return row;
+}
+
 function metricFrom(
 	row: Omit<MoraRecoverySourceRow, "asesorId" | "nombre">,
 ): MoraRecoveryMetric {
@@ -604,11 +832,24 @@ function metricFrom(
 	};
 }
 
-export function buildMoraRecoveryReport(
+/**
+ * Acumulador del reporte: un asesor por clave, ya plegado.
+ *
+ * Existe para que el reporte se pueda armar POR LOTES de créditos sin tener
+ * nunca todos los eventos del ciclo en memoria: cada lote se pliega acá y los
+ * eventos crudos se sueltan. Como el plegado del nivel de referencia es POR
+ * CRÉDITO y la suma por asesor es asociativa, el resultado es el mismo que en
+ * una sola pasada.
+ */
+export type MoraRecoveryAccumulator = Map<string, MoraRecoveryRow>;
+
+export const nuevoMoraRecoveryAccumulator = (): MoraRecoveryAccumulator =>
+	new Map();
+
+export function acumularMoraRecoveryRows(
+	byAsesor: MoraRecoveryAccumulator,
 	rows: MoraRecoverySourceRow[],
-	periodo: { inicio: string; fin: string; alcance: "live" | "historico" },
-): MoraRecoveryReport {
-	const byAsesor = new Map<string, MoraRecoveryRow>();
+): MoraRecoveryAccumulator {
 	for (const source of rows) {
 		const key = String(source.asesorId);
 		const current = byAsesor.get(key) ?? {
@@ -636,6 +877,13 @@ export function buildMoraRecoveryReport(
 			),
 		});
 	}
+	return byAsesor;
+}
+
+export function finalizarMoraRecoveryReport(
+	byAsesor: MoraRecoveryAccumulator,
+	periodo: { inicio: string; fin: string; alcance: "live" | "historico" },
+): MoraRecoveryReport {
 	const porAsesor = [...byAsesor.values()];
 	const sum = (field: keyof MoraRecoveryMetric) =>
 		porAsesor.reduce((total, row) => total + Number(row[field]), 0).toFixed(2);
@@ -652,4 +900,18 @@ export function buildMoraRecoveryReport(
 		},
 		porAsesor,
 	};
+}
+
+/**
+ * Una sola pasada: sigue siendo la forma natural de probar el plegado sin base.
+ * El endpoint usa el acumulador por lotes, que da lo mismo.
+ */
+export function buildMoraRecoveryReport(
+	rows: MoraRecoverySourceRow[],
+	periodo: { inicio: string; fin: string; alcance: "live" | "historico" },
+): MoraRecoveryReport {
+	return finalizarMoraRecoveryReport(
+		acumularMoraRecoveryRows(nuevoMoraRecoveryAccumulator(), rows),
+		periodo,
+	);
 }

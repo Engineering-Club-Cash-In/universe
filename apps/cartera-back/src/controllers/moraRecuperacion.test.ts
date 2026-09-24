@@ -10,12 +10,18 @@ import {
 import {
 	type MoraLevelEvent,
 	type MoraRecoverySourceRow,
+	CREDITOS_POR_LOTE,
+	acumularMoraRecoveryRows,
+	buildMoraRecoveryCreditosQuery,
 	buildMoraRecoveryQuery,
 	buildMoraRecoveryReport,
 	esReseteoDeNivel,
+	finalizarMoraRecoveryReport,
 	getMoraRecoveryPeriod,
 	moraGeneradaEnPeriodo,
 	nivelSembrado,
+	nuevoMoraRecoveryAccumulator,
+	partirEnLotes,
 	plegarNivel,
 } from "./moraRecuperacion";
 
@@ -830,11 +836,14 @@ describe("buildMoraRecoveryReport", () => {
 		expect(query.sql).not.toContain("EN_CONVENIO");
 		expect(query.sql).not.toContain("CANCELADO");
 		expect(query.sql).not.toContain("CAIDO");
-		expect(query.sql).toContain("LOWER(a.email_cash_in) = LOWER(TRIM($2))");
-		expect(query.sql).toContain("a.asesor_id IN ($3, $4)");
+		expect(query.sql).toContain("LOWER(a.email_cash_in) = LOWER(TRIM($3))");
+		expect(query.sql).toContain("a.asesor_id IN ($4, $5)");
 		expect(query.sql).toContain("COALESCE(ca.nombre, 'Sin asignar')");
 		expect(query.params).toEqual([
-			"2026-06-06",
+			// El corte del snapshot (dos veces: último evento y carry-forward), ya
+			// como instante UTC contra la columna cruda.
+			"2026-06-06 06:00:00.000",
+			"2026-06-06 06:00:00.000",
 			"cashin@example.com",
 			7,
 			8,
@@ -900,9 +909,11 @@ describe("buildMoraRecoveryReport", () => {
 			period,
 		);
 
-		expect(query.sql).toContain(
-			"(h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date < $1::date",
-		);
+		// El snapshot corta ESTRICTAMENTE antes del día 6 y lo hace contra la
+		// columna cruda: el día 6 GT empieza a las 06:00Z.
+		expect(query.sql).toContain("WHERE h.fecha < $1::timestamp");
+		expect(query.sql).not.toContain("AT TIME ZONE");
+		expect(query.params[0]).toBe("2026-06-06 06:00:00.000");
 		expect(report.totales).toMatchObject({
 			esperado: "100.00",
 			cobradoEnSnapshot: "40.00",
@@ -1175,12 +1186,16 @@ describe("buildMoraRecoveryReport", () => {
 
 		// Columna CRUDA: envolverla en AT TIME ZONE mataría moras_historial_fecha_idx.
 		// El rango de eventos es EL CICLO, semiabierto por la derecha.
-		expect(query.sql).toContain("WHERE h.fecha >= $7::timestamp");
-		expect(query.sql).toContain("AND h.fecha < $8::timestamp");
+		// Sin número de placeholder fijo: el snapshot y el filtro de lote aportan
+		// parámetros propios y renumerarlos no es un cambio de contrato. Lo que SÍ
+		// es contrato es la COLA: el orden y el contenido de los parámetros que
+		// aportan los prefijos de restitución, el ciclo y la siembra.
+		expect(query.sql).toMatch(/WHERE h\.fecha >= \$\d+::timestamp/);
+		expect(query.sql).toMatch(/AND h\.fecha < \$\d+::timestamp/);
 		expect(query.sql).not.toContain(
 			"(h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >=",
 		);
-		expect(query.params.slice(3)).toEqual([
+		expect(query.params.slice(-10)).toEqual([
 			// los prefijos con los que un pago caído firma su restitución
 			"Reversa de pago #%",
 			"Anulación de pago #%",
@@ -1427,14 +1442,17 @@ describe("buildMoraRecoveryReport", () => {
 		for (const prefijo of MOTIVOS_RESTITUCION_MORA_PREFIJOS) {
 			expect(query.params).toContain(`${prefijo}%`);
 		}
-		expect(query.sql).toContain(
-			"(h.tipo_evento = 'INCREMENTO' AND (COALESCE(h.motivo, '') LIKE $4 OR COALESCE(h.motivo, '') LIKE $5)) AS reverso",
+		// Sin número de placeholder fijo: los lotes y el snapshot renumeran, pero
+		// la FORMA —un LIKE por prefijo, unidos por OR, sobre el motivo con
+		// COALESCE— es la que decide si una restitución se cuenta como mora nueva.
+		expect(query.sql).toMatch(
+			/\(h\.tipo_evento = 'INCREMENTO' AND \(COALESCE\(h\.motivo, ''\) LIKE \$\d+ OR COALESCE\(h\.motivo, ''\) LIKE \$\d+\)\) AS reverso/,
 		);
 		expect(query.sql).toContain("'reverso', e.reverso");
 		// Y el ancla las excluye EXPLÍCITAMENTE, igual que `esReseteoDeNivel`: una
 		// restitución repone un techo, nunca lo baja.
-		expect(query.sql).toContain(
-			"AND NOT (h.tipo_evento = 'INCREMENTO'\n                            AND (COALESCE(h.motivo, '') LIKE $11 OR COALESCE(h.motivo, '') LIKE $12))",
+		expect(query.sql).toMatch(
+			/AND NOT \(h\.tipo_evento = 'INCREMENTO'\n {28}AND \(COALESCE\(h\.motivo, ''\) LIKE \$\d+ OR COALESCE\(h\.motivo, ''\) LIKE \$\d+\)\)/,
 		);
 		expect(
 			esReseteoDeNivel({
@@ -1463,5 +1481,181 @@ describe("buildMoraRecoveryReport", () => {
 				alcance: "historico",
 			}),
 		).toThrow("Período de recuperación de mora inválido");
+	});
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lotes de créditos. El plegado del nivel de referencia necesita los eventos
+// CRUDOS del ciclo; con el RECALCULO diario eso pasa de ~8.000 a ~45.000 por
+// consulta. Se parte por CRÉDITO —no por página de respuesta— porque el
+// plegado es por crédito, así que partir ahí no puede cambiar el agregado.
+// Estos tests fijan justamente eso.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("partirEnLotes", () => {
+	it("parte en trozos del tamaño pedido y no pierde nada", () => {
+		expect(partirEnLotes([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+		expect(partirEnLotes([1, 2, 3, 4], 2)).toEqual([
+			[1, 2],
+			[3, 4],
+		]);
+	});
+
+	it("lista vacía = cero lotes (el reporte sale sin tocar la base)", () => {
+		expect(partirEnLotes([], 500)).toEqual([]);
+	});
+
+	it("una lista más chica que el lote es un solo lote", () => {
+		expect(partirEnLotes([7], 500)).toEqual([[7]]);
+	});
+
+	it("el número de lotes depende SOLO de cuántos créditos hay", () => {
+		// 1.201 créditos con CREDITOS_POR_LOTE = 500 → 3 lotes, tengan los
+		// créditos 1 evento o 10.000. Si alguien reintrodujera una paginación por
+		// eventos, este número dejaría de ser función del largo de la lista.
+		const creditos = Array.from({ length: 1201 }, (_, i) => i + 1);
+		expect(partirEnLotes(creditos).length).toBe(
+			Math.ceil(1201 / CREDITOS_POR_LOTE),
+		);
+		expect(partirEnLotes(creditos).flat()).toEqual(creditos);
+	});
+
+	it("un tamaño de lote absurdo revienta en vez de colgar el proceso", () => {
+		expect(() => partirEnLotes([1], 0)).toThrow(RangeError);
+		expect(() => partirEnLotes([1], -3)).toThrow(RangeError);
+		expect(() => partirEnLotes([1], 1.5)).toThrow(RangeError);
+	});
+});
+
+describe("el reporte por lotes es idéntico al de una sola pasada", () => {
+	// Filas sintéticas: varios asesores, créditos con eventos y sin ellos,
+	// cobrado dentro y fuera de alcance. Lo importante es que haya MÁS créditos
+	// que el tamaño de lote que se usa al partir.
+	const muchasFilas: MoraRecoverySourceRow[] = Array.from(
+		{ length: 23 },
+		(_, i) => ({
+			asesorId: i % 4 === 3 ? null : (i % 4) + 1,
+			nombre: i % 4 === 3 ? "Sin asignar" : `Asesor ${(i % 4) + 1}`,
+			esperado: (i * 10).toFixed(2),
+			eventos:
+				i % 3 === 0
+					? []
+					: [
+							// Ventana de siembra: la mitad de los créditos cruza el
+							// corte con una condonación de la víspera y la otra mitad
+							// con un pago, que son los dos casos que mueven el nivel
+							// de arranque. Van acá para que la identidad por lotes se
+							// pruebe CON siembra y no solo con eventos del ciclo.
+							i % 2 === 0
+								? previo("CONDONACION", i * 10, 0)
+								: previo("DECREMENTO", i * 10, 0),
+							evento("RECALCULO", i * 10, i * 10 + 5),
+							evento("CONDONACION", i * 10 + 5, 0),
+							evento("RECALCULO", 0, i * 10 + 5),
+							evento("DECREMENTO", i * 10 + 5, 1),
+						],
+			cobrado: (i % 5).toFixed(2),
+		}),
+	);
+
+	const periodo = { inicio: "2026-06-06", fin: "2026-07-06", alcance: "historico" as const };
+
+	const porLotes = (tamano: number) => {
+		const acc = nuevoMoraRecoveryAccumulator();
+		for (const lote of partirEnLotes(muchasFilas, tamano)) {
+			acumularMoraRecoveryRows(acc, lote);
+		}
+		return finalizarMoraRecoveryReport(acc, periodo);
+	};
+
+	const unaPasada = buildMoraRecoveryReport(muchasFilas, periodo);
+
+	for (const tamano of [1, 2, 5, 10, 23, 100]) {
+		it(`con lotes de ${tamano} da lo mismo que de una`, () => {
+			expect(porLotes(tamano)).toEqual(unaPasada);
+		});
+	}
+
+	it("el caso que importa: más créditos que el tamaño de lote", () => {
+		// 23 filas en lotes de 5 = 5 lotes. Si el acumulador pisara en vez de
+		// sumar, o si el plegado se reiniciara por lote, los totales cambiarían.
+		expect(partirEnLotes(muchasFilas, 5).length).toBe(5);
+		expect(porLotes(5).totales).toEqual(unaPasada.totales);
+		expect(Number(unaPasada.totales.esperado)).toBeGreaterThan(0);
+	});
+});
+
+describe("buildMoraRecoveryQuery — el filtro de lote", () => {
+	const periodo = getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" });
+
+	it("acota `creditos_con_asesor`, que es de donde cuelga todo lo demás", () => {
+		const { sql: texto, params } = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery({ ...periodo, creditos: [7, 9] }),
+		);
+		expect(texto).toMatch(/creditos_con_asesor AS \([\s\S]*?c\.credito_id IN \(/);
+		expect(params).toContain(7);
+		expect(params).toContain(9);
+	});
+
+	it("sin lote la consulta es la de siempre (toda la cartera elegible)", () => {
+		const { sql: texto } = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(periodo),
+		);
+		expect(texto).not.toContain("c.credito_id IN (");
+	});
+
+	// EL DEFECTO. El lote acotaba `creditos_con_asesor`, pero la FOTO inicial
+	// —`snapCte`, y la CTE de mora viva de la rama `live`— va ANTES y no cuelga
+	// de ella: cada lote reconstruía la foto de la cartera COMPLETA y recién
+	// descartaba los créditos ajenos en el JOIN final. Con N lotes eso es N veces
+	// la foto entera, o sea el batching pagando de más en vez de de menos.
+	it("acota TAMBIÉN la foto del snapshot, no solo `creditos_con_asesor`", () => {
+		const { sql: texto } = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery({ ...periodo, creditos: [7, 9] }),
+		);
+		// La foto entra por el lote: un LATERAL por crédito sobre la lista.
+		expect(texto).toMatch(/snap_ultimo AS \([\s\S]*?unnest\(/);
+		expect(texto).toMatch(/snap_cuotas AS \([\s\S]*?unnest\(/);
+		// Y lo que NO puede volver: un barrido de la tabla sin atarse al crédito.
+		const snapshot = texto.slice(
+			texto.indexOf("snap_ultimo AS ("),
+			texto.indexOf("creditos_con_asesor AS ("),
+		);
+		expect(snapshot).toContain("h.credito_id = l.credito_id");
+		expect(snapshot).not.toContain("DISTINCT ON");
+	});
+
+	it("la rama `live` acota su propia foto de mora activa", () => {
+		// `mora_activa` es la foto de la rama viva y tiene el mismo problema.
+		const vivo = getMoraRecoveryPeriod({ mes: 9, anio: 2026, hoy: "2026-09-03" });
+		expect(vivo.alcance).toBe("live");
+		const { sql: texto, params } = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery({ ...vivo, creditos: [7, 9] }),
+		);
+		expect(texto).toMatch(
+			/mora_activa AS \([\s\S]*?credito_id = ANY \(ARRAY\[/,
+		);
+		expect(params).toContain(7);
+		expect(params).toContain(9);
+	});
+
+	it("sin lote la foto sigue siendo la de toda la cartera", () => {
+		// Los otros llamadores de `snapCte` dependen de esto.
+		const { sql: texto } = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(periodo),
+		);
+		expect(texto).toContain("snap_ultimo AS (");
+		expect(texto).toContain("DISTINCT ON (h.credito_id)");
+		expect(texto).not.toContain("unnest(");
+	});
+
+	it("el universo de créditos usa los MISMOS filtros que el reporte", () => {
+		// Si divergieran, la partición dejaría créditos afuera del reporte.
+		const { sql: universo } = new PgDialect().sqlToQuery(
+			buildMoraRecoveryCreditosQuery({ asesores: [3], emailCobrador: "a@b.c" }),
+		);
+		expect(universo).toContain('c."statusCredit" IN (');
+		expect(universo).toContain("LOWER(a.email_cash_in) = LOWER(TRIM(");
+		expect(universo).toContain("a.asesor_id IN (");
+		expect(universo).toContain("ORDER BY c.credito_id");
 	});
 });

@@ -137,23 +137,40 @@ export async function getMoraTimeline({ desde, hasta, asesor, etapa }: { desde: 
 
   const res = await db.execute<any>(sql`
     SELECT d::date AS fecha, (
+      -- Estado as-of por crédito al día \`d\`: monto/tipo del último evento, cuotas con
+      -- carry-forward (último evento con cuotas>0) para clasificar la etapa igual que
+      -- el snapshot. Misma forma que \`snapCte\` —dos DISTINCT ON contra los índices
+      -- ix_moras_historial_snapshot*— y no window functions: acá el sort NO era uno
+      -- sino UNO POR DÍA del rango, porque la subconsulta está correlacionada con \`d\`.
+      --
+      -- El corte también va contra la columna CRUDA. \`d\` es una fecha de Guatemala;
+      -- su medianoche siguiente como instante UTC es
+      -- \`(d + 1) AT TIME ZONE 'America/Guatemala' AT TIME ZONE 'UTC'\`. Eso envuelve a
+      -- \`d\` (constante en cada fila del generate_series), no a \`h.fecha\`.
       SELECT COALESCE(SUM(s.monto), 0)
       FROM (
-        -- estado as-of por crédito: monto/tipo del último evento, cuotas con carry-forward
-        -- (último evento con cuotas>0) para clasificar la etapa igual que el snapshot.
-        SELECT credito_id, monto, tipo_evento, cuotas,
-          ROW_NUMBER() OVER (PARTITION BY credito_id ORDER BY fecha DESC, historial_id DESC) AS rn
+        SELECT u.credito_id, u.monto, u.tipo_evento,
+               COALESCE(k.cuotas, u.cuotas_ultimo) AS cuotas
         FROM (
-          SELECT h.credito_id, h.monto_nuevo::numeric AS monto, h.tipo_evento, h.fecha, h.historial_id,
-            FIRST_VALUE(h.cuotas_atrasadas_nuevas) OVER (
-              PARTITION BY h.credito_id
-              ORDER BY (h.cuotas_atrasadas_nuevas > 0) DESC, h.fecha DESC, h.historial_id DESC
-            ) AS cuotas
+          SELECT DISTINCT ON (h.credito_id)
+            h.credito_id, h.monto_nuevo::numeric AS monto, h.tipo_evento,
+            h.cuotas_atrasadas_nuevas AS cuotas_ultimo
           FROM cartera.moras_historial h
-          WHERE (h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= d ${asesorFilter}
-        ) hh
+          WHERE h.fecha < ((d::date + 1)::timestamp AT TIME ZONE 'America/Guatemala' AT TIME ZONE 'UTC')
+            ${asesorFilter}
+          ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC
+        ) u
+        LEFT JOIN (
+          SELECT DISTINCT ON (h.credito_id)
+            h.credito_id, h.cuotas_atrasadas_nuevas AS cuotas
+          FROM cartera.moras_historial h
+          WHERE h.fecha < ((d::date + 1)::timestamp AT TIME ZONE 'America/Guatemala' AT TIME ZONE 'UTC')
+            AND h.cuotas_atrasadas_nuevas > 0
+            ${asesorFilter}
+          ORDER BY h.credito_id, h.fecha DESC, h.historial_id DESC
+        ) k ON k.credito_id = u.credito_id
       ) s
-      WHERE s.rn = 1 AND s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 ${etapaFilter}
+      WHERE s.tipo_evento <> 'DESACTIVACION' AND s.monto > 0 ${etapaFilter}
     ) AS mora_total
     FROM generate_series(${desde}::date, ${hasta}::date, INTERVAL '1 day') d
     ORDER BY d

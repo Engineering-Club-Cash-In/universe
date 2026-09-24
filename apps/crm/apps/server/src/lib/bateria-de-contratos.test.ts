@@ -57,13 +57,28 @@ beforeEach(() => {
 });
 
 describe("el estado de la batería lo marcan sus documentos", () => {
-	test("con contratos a medio firmar queda en proceso", async () => {
+	test("antes del Listo sigue pendiente, aunque ya tenga contratos", async () => {
 		contratos = [{ status: "pending" }, { status: "signed" }];
 
 		expect(await recalcularEstadoDeLaBateria("bateria-1", "juan")).toBe(
-			"en_proceso",
+			"pendiente",
 		);
-		expect(guardado).toMatchObject({ status: "en_proceso", startedBy: "juan" });
+		expect(guardado).toBeUndefined();
+	});
+
+	test("ni con todo firmado: sin Listo no salió el correo", async () => {
+		contratos = [{ status: "signed" }];
+
+		expect(await recalcularEstadoDeLaBateria("bateria-1")).toBe("pendiente");
+		expect(guardado).toBeUndefined();
+	});
+
+	test("después del Listo, con firmas pendientes, queda por firmar", async () => {
+		bateria = { ...BATERIA, status: "en_proceso", startedAt: new Date() };
+		contratos = [{ status: "pending" }, { status: "signed" }];
+
+		expect(await recalcularEstadoDeLaBateria("bateria-1")).toBe("en_proceso");
+		expect(guardado).toBeUndefined();
 	});
 
 	test("firmados todos, se cierra", async () => {
@@ -89,14 +104,6 @@ describe("el estado de la batería lo marcan sus documentos", () => {
 			completedAt: null,
 			completedBy: null,
 		});
-	});
-
-	test("con un contrato ya está en firma, aunque sea el único", async () => {
-		contratos = [{ status: "pending" }];
-
-		expect(await recalcularEstadoDeLaBateria("bateria-1", "juan")).toBe(
-			"en_proceso",
-		);
 	});
 
 	test("cerrada es sólo con todo firmado: una cerrada a mano con firmas pendientes vuelve a en firma", async () => {

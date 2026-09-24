@@ -6,10 +6,7 @@ import {
 } from "../db/schema/legal-contracts";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { descargarPdfFirmado } from "../services/legal-docs-api";
-import {
-	getFileUrlWithBucketInKey,
-	uploadPdfWithBucketInKey,
-} from "./storage";
+import { getFileUrlWithBucketInKey, uploadPdfWithBucketInKey } from "./storage";
 
 /**
  * El espejo de los contratos de inversión en cartera.
@@ -115,9 +112,7 @@ function nombreEnLaPapeleria(contrato: {
 	// Sin fecha se manda el nombre pelado: todo esto es best-effort y un error
 	// acá no se ve en ninguna pantalla, así que no se arriesga la copia por el
 	// nombre.
-	const emitido = contrato.generatedAt
-		? new Date(contrato.generatedAt)
-		: null;
+	const emitido = contrato.generatedAt ? new Date(contrato.generatedAt) : null;
 	if (!emitido || Number.isNaN(emitido.getTime())) return contrato.contractName;
 
 	const fecha = emitido.toLocaleDateString("es-GT", {
@@ -130,11 +125,15 @@ function nombreEnLaPapeleria(contrato: {
 }
 
 /**
- * Copia el contrato entero en cartera: el PDF y sus enlaces.
+ * Copia el contrato firmado en la papelería del inversionista, en cartera.
  *
- * Se llama al emitirlo y cada vez que se reemite, porque ahí cambia el
- * documento. El PDF se baja de R2 con la key guardada, no con la URL firmada
- * que se le muestra a la gente: esa vence en una hora.
+ * **Sólo firmado.** Mientras se firma, el contrato ya se ve en la tarjeta de
+ * contratos de la ficha, con sus enlaces; copiarlo antes llenaba "Documentos"
+ * de borradores ocultos —y de anulados— que nadie iba a mostrar. La papelería
+ * es de documentos que valen, y ahí entra visible.
+ *
+ * El PDF se baja de R2 con la key guardada, no con la URL firmada que se le
+ * muestra a la gente: esa vence en una hora.
  */
 export async function espejarContratoEnCartera(
 	contractId: string,
@@ -144,7 +143,7 @@ export async function espejarContratoEnCartera(
 ): Promise<boolean> {
 	try {
 		const contrato = await contratoConDueno(contractId);
-		if (!contrato) return false;
+		if (!contrato || contrato.status !== "signed") return false;
 
 		// El firmado manda: en la papelería tiene que estar el documento que vale,
 		// no el borrador. Se lee de nuestra copia en R2, así que volver a copiar un
@@ -171,12 +170,8 @@ export async function espejarContratoEnCartera(
 			firmantes: await firmantesDelContrato(contractId),
 			estado_firma: contrato.status,
 			created_by: createdBy,
-			// Qué ve el inversionista en su portal: el firmado sí, el anulado no, y
-			// mientras se firma no se toca. Antes de firmarse lo que hay es el
-			// borrador —enseñárselo es mostrarle como suyo un documento que nadie
-			// firmó— pero si alguien decidió mostrárselo desde la ficha, esa
-			// decisión se respeta.
-			visible: visibilidadEnElPortal(contrato.status),
+			// Firmado: entra visible, en la ficha y en el portal.
+			visible: true,
 		});
 
 		return true;
@@ -235,19 +230,23 @@ async function guardarElPdfFirmado(contrato: {
 }
 
 /**
- * Actualiza en cartera cómo va la firma, sin mover el PDF.
+ * Lleva a la papelería de cartera lo que cambió de un contrato.
  *
  * Sale de la única puerta de escritura del estado (`sincronizarEstadoDeFirma`),
  * así que se dispara tanto con el webhook de WeeTrust como con el botón de
- * actualizar estado. Es lo que hace que inversiones vea "ya firmó" sin tener
- * que entrar al CRM.
+ * actualizar estado, y también al anular y al reemplazar.
+ *
+ * - Firmado: se copia con el PDF firmado, visible. Es el momento en que entra.
+ * - Anulado: si estaba copiado (uno firmado que después se anuló, o uno de
+ *   antes de que sólo entraran los firmados), se oculta.
+ * - Mientras se firma: nada. Se ve en la tarjeta de contratos de la ficha.
  */
 export async function espejarEstadoDeFirmaEnCartera(
 	contractId: string,
 ): Promise<boolean> {
 	try {
 		const contrato = await contratoConDueno(contractId);
-		if (!contrato) return false;
+		if (!contrato || contrato.status === "pending") return false;
 
 		// Quedó firmado y todavía no tenemos su PDF firmado: se baja ahora, una
 		// sola vez, y con ese mismo archivo se actualizan los dos lados. Va antes
@@ -269,9 +268,10 @@ export async function espejarEstadoDeFirmaEnCartera(
 				visible: visibilidadEnElPortal(contrato.status),
 			});
 
-		// Todavía no estaba copiado (el CRM guarda primero y copia después, y esa
-		// copia pudo fallar). Se copia entero ahora, con PDF y todo.
-		if (espejado === false) {
+		// Firmado y todavía sin copiar (la copia pudo fallar la primera vez): se
+		// copia ahora, con PDF y todo. Un anulado que no estaba copiado se queda
+		// así: a la papelería sólo entran los que valen.
+		if (espejado === false && contrato.status === "signed") {
 			return espejarContratoEnCartera(contractId);
 		}
 

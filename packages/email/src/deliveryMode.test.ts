@@ -12,6 +12,7 @@ describe("resolveEmailDeliveryMode", () => {
       server: "PROD",
       redirige: false,
       destinatarioUnico: null,
+      destinatarios: [],
     });
   });
 
@@ -23,13 +24,28 @@ describe("resolveEmailDeliveryMode", () => {
     expect(resolveEmailDeliveryMode({})).toEqual({
       server: "DEV",
       redirige: true,
-      destinatarioUnico: "jalvarado@clubcashin.com",
+      destinatarioUnico: "jalvarado@clubcashin.com, daniel.r@clubcashin.com",
+      destinatarios: ["jalvarado@clubcashin.com", "daniel.r@clubcashin.com"],
     });
   });
 
   it("informa el destinatario único real cuando EMAIL_DEV_RECIPIENT lo cambia", () => {
     expect(
       resolveEmailDeliveryMode({ SERVER: "QA", EMAIL_DEV_RECIPIENT: "qa@x.com" }),
-    ).toEqual({ server: "QA", redirige: true, destinatarioUnico: "qa@x.com" });
+    ).toEqual({
+      server: "QA",
+      redirige: true,
+      destinatarioUnico: "qa@x.com",
+      destinatarios: ["qa@x.com"],
+    });
+  });
+
+  it("EMAIL_DEV_RECIPIENT acepta varias bandejas separadas por coma", () => {
+    expect(
+      resolveEmailDeliveryMode({
+        SERVER: "DEV",
+        EMAIL_DEV_RECIPIENT: " a@x.com, b@x.com ,",
+      }).destinatarios,
+    ).toEqual(["a@x.com", "b@x.com"]);
   });
 });

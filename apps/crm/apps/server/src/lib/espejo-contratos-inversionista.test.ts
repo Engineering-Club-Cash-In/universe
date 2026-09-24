@@ -118,8 +118,17 @@ beforeEach(() => {
 	bajadoDeR2 = undefined;
 });
 
+/** Un contrato ya firmado, con su PDF firmado guardado en R2. */
+const FIRMADO = {
+	...CONTRATO_DE_INVERSION,
+	status: "signed",
+	signedPdfLink: "bucket-crm/legal-contracts/firmados/contrato-1.pdf",
+};
+
 describe("espejo de contratos en cartera", () => {
-	test("copia el contrato con su PDF, sus enlaces y su estado", async () => {
+	test("el firmado se copia con su PDF, sus enlaces y visible", async () => {
+		contrato = { ...FIRMADO };
+
 		expect(await espejarContratoEnCartera("contrato-1")).toBe(true);
 
 		const enviado = upsertInvestorContractDocument.mock.calls[0][0];
@@ -127,7 +136,8 @@ describe("espejo de contratos en cartera", () => {
 			inversionista_id: 42,
 			contrato_id: "contrato-1",
 			tipo_contrato: "acuerdo_inversion_cash_in",
-			estado_firma: "pending",
+			estado_firma: "signed",
+			visible: true,
 		});
 		expect(enviado.firmantes).toEqual([
 			{
@@ -141,7 +151,17 @@ describe("espejo de contratos en cartera", () => {
 		]);
 	});
 
+	test("mientras se firma no se copia nada: se ve en la tarjeta de contratos", async () => {
+		expect(await espejarContratoEnCartera("contrato-1")).toBe(false);
+		expect(await espejarEstadoDeFirmaEnCartera("contrato-1")).toBe(false);
+
+		expect(upsertInvestorContractDocument).not.toHaveBeenCalled();
+		expect(updateInvestorContractDocumentState).not.toHaveBeenCalled();
+	});
+
 	test("el nombre lleva la fecha, para distinguir una compra de la otra", async () => {
+		contrato = { ...FIRMADO };
+
 		await espejarContratoEnCartera("contrato-1");
 
 		expect(upsertInvestorContractDocument.mock.calls[0][0].nombre).toBe(
@@ -150,7 +170,7 @@ describe("espejo de contratos en cartera", () => {
 	});
 
 	test("un contrato sin fecha se copia igual, con el nombre pelado", async () => {
-		contrato = { ...CONTRATO_DE_INVERSION, generatedAt: null };
+		contrato = { ...FIRMADO, generatedAt: null };
 
 		expect(await espejarContratoEnCartera("contrato-1")).toBe(true);
 		expect(upsertInvestorContractDocument.mock.calls[0][0].nombre).toBe(
@@ -159,30 +179,24 @@ describe("espejo de contratos en cartera", () => {
 	});
 
 	test("un contrato de ventas no se copia a cartera", async () => {
-		contrato = { ...CONTRATO_DE_INVERSION, investorId: null };
+		contrato = { ...FIRMADO, investorId: null };
 
 		expect(await espejarContratoEnCartera("contrato-1")).toBe(false);
 		expect(upsertInvestorContractDocument).not.toHaveBeenCalled();
 	});
 
 	test("sin PDF no se copia, pero tampoco revienta", async () => {
-		contrato = { ...CONTRATO_DE_INVERSION, pdfLink: null };
+		contrato = { ...FIRMADO, pdfLink: null, signedPdfLink: null };
 
 		expect(await espejarContratoEnCartera("contrato-1")).toBe(false);
 		expect(upsertInvestorContractDocument).not.toHaveBeenCalled();
 	});
 
 	test("si cartera no responde, se informa y no se lanza", async () => {
+		contrato = { ...FIRMADO };
 		fallaCartera = true;
 
 		expect(await espejarContratoEnCartera("contrato-1")).toBe(false);
-	});
-
-	test("el estado de firma se manda sin mover el PDF", async () => {
-		expect(await espejarEstadoDeFirmaEnCartera("contrato-1")).toBe(true);
-
-		expect(updateInvestorContractDocumentState).toHaveBeenCalledTimes(1);
-		expect(upsertInvestorContractDocument).not.toHaveBeenCalled();
 	});
 
 	test("al quedar firmado se baja el PDF firmado, se guarda y se copia", async () => {
@@ -202,16 +216,13 @@ describe("espejo de contratos en cartera", () => {
 		expect(upsertInvestorContractDocument).toHaveBeenCalledTimes(1);
 	});
 
-	test("con el firmado ya guardado no se le pide nada más a WeeTrust", async () => {
-		contrato = {
-			...CONTRATO_DE_INVERSION,
-			status: "signed",
-			signedPdfLink: "bucket-crm/legal-contracts/firmados/contrato-1.pdf",
-		};
+	test("con el firmado ya guardado y copiado no se le pide nada más a WeeTrust", async () => {
+		contrato = { ...FIRMADO };
 
 		await espejarEstadoDeFirmaEnCartera("contrato-1");
 
 		expect(descargarPdfFirmado).not.toHaveBeenCalled();
+		expect(updateInvestorContractDocumentState).toHaveBeenCalledTimes(1);
 		expect(upsertInvestorContractDocument).not.toHaveBeenCalled();
 	});
 
@@ -227,12 +238,8 @@ describe("espejo de contratos en cartera", () => {
 		expect(guardadoEnElContrato).toBeUndefined();
 	});
 
-	test("la papelería recibe el firmado, no el borrador, cuando ya hay firmado", async () => {
-		contrato = {
-			...CONTRATO_DE_INVERSION,
-			status: "signed",
-			signedPdfLink: "bucket-crm/legal-contracts/firmados/contrato-1.pdf",
-		};
+	test("la papelería recibe el firmado, no el borrador", async () => {
+		contrato = { ...FIRMADO };
 
 		await espejarContratoEnCartera("contrato-1");
 
@@ -241,12 +248,25 @@ describe("espejo de contratos en cartera", () => {
 		);
 	});
 
-	test("si el contrato no estaba copiado, se copia entero", async () => {
+	test("un firmado que no estaba copiado se copia entero", async () => {
+		contrato = { ...FIRMADO };
 		respuestaDeEstado = { success: true, espejado: false };
 
 		expect(await espejarEstadoDeFirmaEnCartera("contrato-1")).toBe(true);
 
 		expect(updateInvestorContractDocumentState).toHaveBeenCalledTimes(1);
 		expect(upsertInvestorContractDocument).toHaveBeenCalledTimes(1);
+	});
+
+	test("un anulado que estaba copiado se oculta, y uno que no, no se copia", async () => {
+		contrato = { ...CONTRATO_DE_INVERSION, status: "cancelled" };
+		respuestaDeEstado = { success: true, espejado: false };
+
+		await espejarEstadoDeFirmaEnCartera("contrato-1");
+
+		expect(updateInvestorContractDocumentState.mock.calls[0][0]).toMatchObject({
+			visible: false,
+		});
+		expect(upsertInvestorContractDocument).not.toHaveBeenCalled();
 	});
 });

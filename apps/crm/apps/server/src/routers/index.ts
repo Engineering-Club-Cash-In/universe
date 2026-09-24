@@ -332,6 +332,8 @@ export const legalAppRouter = {
 		investorContractsRouter.refreshInvestorContractSigningLinks,
 	uploadInvestorContract: investorContractsRouter.uploadInvestorContract,
 	cancelInvestorContract: investorContractsRouter.cancelInvestorContract,
+	marcarBateriaLista: investorContractsRouter.marcarBateriaLista,
+	descartarVistaPrevia: investorContractsRouter.descartarVistaPrevia,
 };
 
 /**

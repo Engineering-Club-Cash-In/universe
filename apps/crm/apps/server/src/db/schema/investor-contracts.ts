@@ -114,6 +114,14 @@ export const investorContractBatches = pgTable(
 		/** Cuándo y quién aceptó la compra, del lado de cartera. */
 		acceptedAt: timestamp("accepted_at").notNull(),
 		acceptedByEmail: text("accepted_by_email"),
+		/**
+		 * El id de Resend del correo de "Compra de Cartera aceptada".
+		 *
+		 * Es el hilo donde el "Listo" de jurídico contesta con los contratos y los
+		 * enlaces. Resend no respeta un Message-ID propio: con este id se le
+		 * pregunta el real, y el asunto y los destinatarios. Vacío en las de antes.
+		 */
+		emailThreadId: text("email_thread_id"),
 
 		startedAt: timestamp("started_at"),
 		startedBy: text("started_by").references(() => user.id),

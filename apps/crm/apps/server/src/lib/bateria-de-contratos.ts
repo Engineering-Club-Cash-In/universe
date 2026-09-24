@@ -9,18 +9,18 @@ import { generatedLegalContracts } from "../db/schema/legal-contracts";
  * La batería no tiene etapas como una oportunidad de ventas: lo que la mueve es
  * el estado de sus documentos, y nada más.
  *
- * - `pendiente` ("Sin contratos"): no hay ningún contrato vigente. Así nace con
- *   la compra, y es también adonde vuelve si se anulan todos.
- * - `en_proceso` ("En firma"): tiene contratos y falta alguna firma. Está en
- *   firma desde el primer contrato, y mientras tanto jurídico puede seguir
- *   agregando, reemplazando o anulando.
- * - `completada` ("Cerrada"): todos sus contratos vigentes están firmados. Ya
- *   no admite cambios: la papelería está completa, y en WeeTrust un documento
- *   firmado tampoco se puede borrar.
+ * - `pendiente` ("Pendiente"): jurídico la está armando. Emite, mira los PDF,
+ *   reemplaza o sube alguno; tenga o no contratos, sigue acá hasta el "Listo".
+ * - `en_proceso` ("Por firmar"): jurídico le dio "Listo" —que manda los
+ *   contratos al hilo de la compra— y falta alguna firma. Puede seguir
+ *   agregando o reemplazando; eso sale solo al mismo hilo.
+ * - `completada` ("Cerrada"): después del Listo, todos sus contratos vigentes
+ *   están firmados. Ya no admite cambios: la papelería está completa, y en
+ *   WeeTrust un documento firmado tampoco se puede borrar.
  *
- * No se cierra a mano. Hubo un "Listo" de jurídico que la cerraba aunque
- * faltaran firmas, y sacaba de la lista baterías con una firma trabada —una
- * identidad que WeeTrust no validó— que todavía había que corregir.
+ * Sólo el Listo la saca de pendiente: es el que manda el correo. Y no se cierra
+ * a mano: cerrada es cuando se firma todo. Si después del Listo se anulan todos
+ * sus contratos, vuelve a pendiente, porque hay que armarla y mandarla de nuevo.
  *
  * `descartada` no se recalcula nunca: alguien dijo que esa compra no llevaba
  * papelería, y eso no lo decide el estado de ningún documento.
@@ -50,6 +50,10 @@ export async function recalcularEstadoDeLaBateria(
 				ne(generatedLegalContracts.status, "cancelled"),
 			),
 		);
+
+	// Mientras jurídico arma, nada la mueve: el Listo es lo único que la saca
+	// de acá, porque es el que manda los contratos.
+	if (bateria.status === "pendiente") return "pendiente";
 
 	const todosFirmados =
 		vigentes.length > 0 && vigentes.every((c) => c.status === "signed");

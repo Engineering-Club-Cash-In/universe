@@ -1393,6 +1393,9 @@ export const bankAnalysisRouter = {
 						const resolvedCoverage = resolveBankStatementMonthlyCoverage({
 							uploadedFileCount: downloadedFiles.length,
 							coverageByFile: analysis.cobertura_por_archivo,
+							monthlySummaryMonths: analysis.resumen_mensual.map(
+								({ mes }) => mes,
+							),
 						});
 						const coverage: PersistedBankStatementCoverage = {
 							...resolvedCoverage,

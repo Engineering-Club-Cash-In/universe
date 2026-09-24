@@ -46,6 +46,20 @@ export function isCanonicalBankStatementMonth(value: string): boolean {
 }
 
 const uniqueSorted = (values: string[]) => [...new Set(values)].sort();
+const SPANISH_MONTHS = [
+	"enero",
+	"febrero",
+	"marzo",
+	"abril",
+	"mayo",
+	"junio",
+	"julio",
+	"agosto",
+	"septiembre",
+	"octubre",
+	"noviembre",
+	"diciembre",
+];
 
 export function getBankStatementOpportunityDocumentType(
 	index: number,
@@ -56,10 +70,12 @@ export function getBankStatementOpportunityDocumentType(
 export function resolveBankStatementMonthlyCoverage({
 	uploadedFileCount,
 	coverageByFile,
+	monthlySummaryMonths,
 	manualDeclarations = [],
 }: {
 	uploadedFileCount: number;
 	coverageByFile?: BankStatementCoverageByFile[];
+	monthlySummaryMonths?: string[];
 	manualDeclarations?: BankStatementManualDeclaration[];
 }): ResolvedBankStatementCoverage {
 	const fileCount = Math.max(0, Math.min(9, uploadedFileCount));
@@ -67,11 +83,51 @@ export function resolveBankStatementMonthlyCoverage({
 		indice_archivo: entry.indice_archivo,
 		meses: [...entry.meses],
 	}));
+	// With one PDF, each unambiguous monthly summary has that sole file as source.
+	const summaryMonths = monthlySummaryMonths?.map((label) => {
+		const match = /^([a-záéíóú]+) (\d{4})$/i.exec(label.trim());
+		const month = match
+			? SPANISH_MONTHS.indexOf(match[1].toLowerCase()) + 1
+			: 0;
+		return match && month
+			? `${match[2]}-${String(month).padStart(2, "0")}`
+			: null;
+	});
+	const inferredCoverage =
+		fileCount === 1 &&
+		reportedCoverage.length <= 1 &&
+		reportedCoverage.every(
+			(entry) =>
+				entry.indice_archivo === 0 &&
+				entry.meses.length > 0 &&
+				entry.meses.every((month) => summaryMonths?.includes(month)),
+		) &&
+		summaryMonths?.length &&
+		summaryMonths.length <= BANK_STATEMENT_OPPORTUNITY_DOCUMENT_TYPES.length &&
+		summaryMonths.every((month): month is string => month !== null) &&
+		new Set(summaryMonths).size === summaryMonths.length
+			? [{ indice_archivo: 0, meses: summaryMonths }]
+			: [];
+	const effectiveCoverage = inferredCoverage.length
+		? inferredCoverage
+		: reportedCoverage;
 	const issues: string[] = [];
 	const invalidProvenanceIssues: string[] = [];
+	if (
+		fileCount === 1 &&
+		summaryMonths?.length &&
+		summaryMonths.every((month): month is string => month !== null) &&
+		reportedCoverage.some((entry) =>
+			entry.meses.some((month) => !summaryMonths.includes(month)),
+		)
+	) {
+		invalidProvenanceIssues.push(
+			"La cobertura por archivo contradice el resumen mensual",
+		);
+	}
 	const entriesByFile = new Map<number, BankStatementCoverageByFile[]>();
 
-	for (const entry of reportedCoverage) {
+	for (const entry of effectiveCoverage) {
 		if (
 			!Number.isInteger(entry.indice_archivo) ||
 			entry.indice_archivo < 0 ||

@@ -36,6 +36,74 @@ describe("bank statement monthly coverage", () => {
 		).toEqual([0, 0, 0]);
 	});
 
+	test("one PDF with three monthly summaries fills three slots when model omits provenance", () => {
+		const result = resolveBankStatementMonthlyCoverage({
+			uploadedFileCount: 1,
+			monthlySummaryMonths: ["Junio 2026", "Julio 2026", "Agosto 2026"],
+		});
+
+		expect(result.status).toBe("detected");
+		expect(result.checklistAssignments).toMatchObject([
+			{ month: "2026-06", fileIndex: 0 },
+			{ month: "2026-07", fileIndex: 0 },
+			{ month: "2026-08", fileIndex: 0 },
+		]);
+	});
+
+	test("never invents month-to-file provenance from ambiguous summaries", () => {
+		for (const input of [
+			{
+				uploadedFileCount: 2,
+				monthlySummaryMonths: ["Junio 2026", "Julio 2026"],
+			},
+			{
+				uploadedFileCount: 1,
+				monthlySummaryMonths: ["Junio 2026", "Junio 2026"],
+			},
+			{ uploadedFileCount: 1, monthlySummaryMonths: ["Junio", "Julio 2026"] },
+		]) {
+			const result = resolveBankStatementMonthlyCoverage(input);
+			expect(result.status).toBe("needs_confirmation");
+			expect(result.checklistAssignments).toEqual([]);
+		}
+	});
+
+	test("one PDF with a partial model coverage uses the other distinct monthly summaries", () => {
+		const result = resolveBankStatementMonthlyCoverage({
+			uploadedFileCount: 1,
+			coverageByFile: [{ indice_archivo: 0, meses: ["2026-06"] }],
+			monthlySummaryMonths: ["Junio 2026", "Julio 2026", "Agosto 2026"],
+		});
+		expect(result.checklistAssignments.map(({ month }) => month)).toEqual([
+			"2026-06",
+			"2026-07",
+			"2026-08",
+		]);
+		expect(result.reportedCoverage).toEqual([
+			{ indice_archivo: 0, meses: ["2026-06"] },
+		]);
+	});
+
+	test("an explicitly empty month list still requires confirmation", () => {
+		const result = resolveBankStatementMonthlyCoverage({
+			uploadedFileCount: 1,
+			coverageByFile: [{ indice_archivo: 0, meses: [] }],
+			monthlySummaryMonths: ["Junio 2026", "Julio 2026", "Agosto 2026"],
+		});
+		expect(result.status).toBe("needs_confirmation");
+		expect(result.checklistAssignments).toEqual([]);
+	});
+
+	test("contradictory per-file provenance requires confirmation", () => {
+		const result = resolveBankStatementMonthlyCoverage({
+			uploadedFileCount: 1,
+			coverageByFile: [{ indice_archivo: 0, meses: ["2026-05"] }],
+			monthlySummaryMonths: ["Junio 2026", "Julio 2026", "Agosto 2026"],
+		});
+		expect(result.status).toBe("needs_confirmation");
+		expect(result.checklistAssignments).toEqual([]);
+	});
+
 	test("three PDFs preserve one actual source per distinct month", () => {
 		const result = coverage(3, [
 			{ indice_archivo: 0, meses: ["2026-06"] },

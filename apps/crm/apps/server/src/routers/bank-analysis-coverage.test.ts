@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { resolveBankStatementMonthlyCoverage } from "../lib/bank-statement-documents";
 import {
+	type ChecklistData,
+	rebuildClientDocumentChecklistData,
+} from "../lib/checklist";
+import {
 	applyManualCoverageDeclaration,
 	assertBankStatementCoverageMutation,
 	buildBankStatementArtifactPlan,
@@ -27,6 +31,79 @@ const resolvedCoverage = resolveBankStatementMonthlyCoverage({
 });
 
 describe("bank analysis coverage save lifecycle", () => {
+	test("one analyzed PDF saves three distinct documents and marks all checklist months", async () => {
+		const resolved = resolveBankStatementMonthlyCoverage({
+			uploadedFileCount: 1,
+			monthlySummaryMonths: ["Junio 2026", "Julio 2026", "Agosto 2026"],
+		});
+		const plan = buildBankStatementArtifactPlan({
+			analysisBatchId: "single-pdf-batch",
+			files: [files[0]],
+			coverage: resolved,
+			existingDocuments: [],
+		});
+		const savedRows: Array<{
+			id: string;
+			documentType: string;
+			description: string;
+		}> = [];
+		const checklist: ChecklistData = {
+			sections: {
+				documentos: {
+					items: [1, 2, 3].map((index) => ({
+						documentType: `estados_cuenta_${index}`,
+						required: true,
+						uploaded: false,
+					})),
+					completed: false,
+				},
+				verificaciones: {
+					items: [{ required: true, completed: false }],
+					completed: false,
+				},
+			},
+			overallProgress: 0,
+			canApprove: false,
+		};
+		const saved = await saveBankStatementArtifacts({
+			artifacts: plan,
+			existingArtifacts: [],
+			createArtifact: async (artifact) => {
+				const id = `document-${savedRows.length + 1}`;
+				savedRows.push({
+					id,
+					documentType: artifact.documentType,
+					description: artifact.description,
+				});
+				return { ...artifact, id, filePath: `opportunities/opp/${id}.pdf` };
+			},
+			linkArtifacts: async () => {},
+			refreshChecklist: async () => {
+				rebuildClientDocumentChecklistData(checklist, savedRows, false);
+			},
+			rollbackArtifact: async () => {},
+		});
+		expect(plan.map(({ fileIndex }) => fileIndex)).toEqual([0, 0, 0]);
+		expect(saved.map(({ documentType }) => documentType)).toEqual([
+			"estados_cuenta_1",
+			"estados_cuenta_2",
+			"estados_cuenta_3",
+		]);
+		expect(new Set(saved.map(({ filePath }) => filePath)).size).toBe(3);
+		expect(
+			checklist.sections.documentos.items.map(({ uploaded, documentId }) => ({
+				uploaded,
+				documentId,
+			})),
+		).toEqual([
+			{ uploaded: true, documentId: "document-1" },
+			{ uploaded: true, documentId: "document-2" },
+			{ uploaded: true, documentId: "document-3" },
+		]);
+		expect(checklist.sections.documentos.completed).toBe(true);
+		expect(checklist.canApprove).toBe(false);
+	});
+
 	test("plans checklist slots from actual month sources and preserves every accepted file", () => {
 		const plan = buildBankStatementArtifactPlan({
 			analysisBatchId: "analysis-1",

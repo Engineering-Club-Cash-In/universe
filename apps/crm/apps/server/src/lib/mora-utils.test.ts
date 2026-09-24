@@ -1,10 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { CarteraCuotaCredito } from "../types/cartera-back";
 import {
 	calcularDiasMoraExactos,
 	diasMoraDeListado,
 	estadoMoraPorCuotasAtrasadas,
+	fechaCalendarioGT,
+	hoyCalendarioGT,
 } from "./mora-utils";
 
 /**
@@ -18,15 +20,6 @@ import {
  * contradicción frente al cliente: "Días de Mora: 30" al lado de Q50,40, que
  * son 3 días. Ese mismo número ordena la lista de cobranza.
  */
-
-const hoy = new Date();
-const venceHace = (dias: number): CarteraCuotaCredito => {
-	const fecha = new Date(hoy);
-	fecha.setDate(fecha.getDate() - dias);
-	return {
-		fecha_vencimiento: fecha.toISOString(),
-	} as CarteraCuotaCredito;
-};
 
 describe("diasMoraDeListado: los días vienen de cartera-back, no de cuotas × 30", () => {
 	test("pocos días: 3 días de atraso son 3, no 30", () => {
@@ -85,19 +78,148 @@ describe("estadoMoraPorCuotasAtrasadas: el bucket de aging sigue siendo categór
 	});
 });
 
-describe("calcularDiasMoraExactos: el detalle calcula con las fechas que sí tiene", () => {
-	test("una cuota con pocos días", () => {
-		expect(calcularDiasMoraExactos([venceHace(3)])).toBe(3);
+/**
+ * El reloj se congela en TODOS estos casos: el defecto que se arregla acá sólo
+ * aparece a ciertas horas del día, así que un test que use la hora real pasa
+ * por casualidad 18 horas de cada 24.
+ *
+ * El defecto: `fecha_vencimiento` es una fecha de CALENDARIO ("2026-09-22") y
+ * se la restaba contra `new Date()`, que es un INSTANTE. Como el server corre
+ * en UTC y Guatemala es UTC−6, entre las 00:00 y las 05:59 UTC el instante ya
+ * cambió de día y Guatemala no: el atraso salía inflado en un día durante toda
+ * la tarde y noche de Guatemala.
+ */
+describe("calcularDiasMoraExactos: el detalle cuenta días de calendario de Guatemala", () => {
+	const cuotaQueVence = (fecha: string) =>
+		({ fecha_vencimiento: fecha }) as CarteraCuotaCredito;
+
+	afterEach(() => {
+		setSystemTime();
+	});
+
+	describe("la franja del defecto: 00:00–05:59 UTC, que en Guatemala es la tarde/noche del día ANTERIOR", () => {
+		test("03:00 UTC del 23: en Guatemala son las 21:00 del 22, y una cuota que vence el 22 NO tiene atraso", () => {
+			// El caso medido. Antes reportaba 1 día: le anunciaba mora al
+			// cliente el día que la cuota vence, y contradecía a cartera-back,
+			// que sí cuenta en calendario de Guatemala.
+			setSystemTime(new Date("2026-09-23T03:00:00.000Z"));
+			expect(calcularDiasMoraExactos([cuotaQueVence("2026-09-22")])).toBe(0);
+		});
+
+		test("00:00 UTC en punto: el borde de arriba de la franja", () => {
+			setSystemTime(new Date("2026-09-23T00:00:00.000Z"));
+			expect(calcularDiasMoraExactos([cuotaQueVence("2026-09-22")])).toBe(0);
+		});
+
+		test("05:59 UTC: el último minuto de la franja, todavía el 22 en Guatemala", () => {
+			setSystemTime(new Date("2026-09-23T05:59:59.999Z"));
+			expect(calcularDiasMoraExactos([cuotaQueVence("2026-09-22")])).toBe(0);
+		});
+
+		test("06:00 UTC: recién ahí Guatemala pasa al 23 y la cuota del 22 lleva 1 día", () => {
+			setSystemTime(new Date("2026-09-23T06:00:00.000Z"));
+			expect(calcularDiasMoraExactos([cuotaQueVence("2026-09-22")])).toBe(1);
+		});
+
+		test("dentro de la franja, una cuota que venció AYER en Guatemala lleva 1 día, no 2", () => {
+			setSystemTime(new Date("2026-09-23T03:00:00.000Z"));
+			expect(calcularDiasMoraExactos([cuotaQueVence("2026-09-21")])).toBe(1);
+		});
+	});
+
+	test("mediodía UTC: en Guatemala ya es el mismo día y la cuenta es la de siempre", () => {
+		setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
+		expect(calcularDiasMoraExactos([cuotaQueVence("2026-09-20")])).toBe(3);
+	});
+
+	describe("cambio de mes", () => {
+		test("03:00 UTC del 1-oct: en Guatemala todavía es 30-sep, y la cuota del 30 no vence", () => {
+			setSystemTime(new Date("2026-10-01T03:00:00.000Z"));
+			expect(calcularDiasMoraExactos([cuotaQueVence("2026-09-30")])).toBe(0);
+		});
+
+		test("cruza el mes completo: del 31-ago al 30-sep son 30 días", () => {
+			setSystemTime(new Date("2026-10-01T03:00:00.000Z"));
+			expect(calcularDiasMoraExactos([cuotaQueVence("2026-08-31")])).toBe(30);
+		});
+	});
+
+	test("cuota futura: no es atraso, nunca negativo", () => {
+		setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
+		expect(calcularDiasMoraExactos([cuotaQueVence("2026-10-15")])).toBe(0);
 	});
 
 	test("varias cuotas con días distintos: manda la MÁS ANTIGUA", () => {
+		setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
 		expect(
-			calcularDiasMoraExactos([venceHace(35), venceHace(65), venceHace(5)]),
+			calcularDiasMoraExactos([
+				cuotaQueVence("2026-08-19"), // 35 días
+				cuotaQueVence("2026-07-20"), // 65 días
+				cuotaQueVence("2026-09-18"), // 5 días
+			]),
 		).toBe(65);
 	});
 
 	test("sin cuotas atrasadas: cero", () => {
+		setSystemTime(new Date("2026-09-23T03:00:00.000Z"));
 		expect(calcularDiasMoraExactos([])).toBe(0);
+	});
+
+	test("si la fecha viniera con hora pegada, se cuenta el mismo día de calendario", () => {
+		// Hoy `cuotas_credito.fecha_vencimiento` es una columna `date` y llega
+		// como "2026-09-22". Si algún día llegara con hora, la hora de una
+		// fecha de calendario no significa nada y no puede correr el día.
+		setSystemTime(new Date("2026-09-23T03:00:00.000Z"));
+		expect(
+			calcularDiasMoraExactos([cuotaQueVence("2026-09-22T00:00:00.000Z")]),
+		).toBe(0);
+		expect(
+			calcularDiasMoraExactos([cuotaQueVence("2026-09-22 00:00:00")]),
+		).toBe(0);
+	});
+
+	test("una fecha ilegible se saltea en vez de devolver NaN a la base", () => {
+		// `dias_mora_maximo` de casos_cobros se ESCRIBE con este número.
+		setSystemTime(new Date("2026-09-23T12:00:00.000Z"));
+		expect(
+			calcularDiasMoraExactos([
+				cuotaQueVence("2026-09"),
+				cuotaQueVence("2026-09-20"),
+			]),
+		).toBe(3);
+		expect(calcularDiasMoraExactos([cuotaQueVence("basura")])).toBe(0);
+	});
+});
+
+describe("fechaCalendarioGT: una fecha de calendario nunca pasa por conversión de zona", () => {
+	test("lee los primeros 10 caracteres, sin importar qué venga después", () => {
+		expect(fechaCalendarioGT("2026-09-22")).toBe(Date.UTC(2026, 8, 22));
+		expect(fechaCalendarioGT("2026-09-22T00:00:00.000Z")).toBe(
+			Date.UTC(2026, 8, 22),
+		);
+	});
+
+	test("un string truncado es NaN, no una fecha inventada", () => {
+		// `Number("")` es 0: sin validar la forma, "2026-09" devolvía en
+		// silencio el 31-ago-2026.
+		expect(fechaCalendarioGT("2026-09")).toBeNaN();
+		expect(fechaCalendarioGT("")).toBeNaN();
+	});
+});
+
+describe("hoyCalendarioGT: el día de hoy sale de la zona de Guatemala, no del proceso", () => {
+	afterEach(() => {
+		setSystemTime();
+	});
+
+	test("en la franja 00:00–05:59 UTC el proceso ya cambió de día y Guatemala no", () => {
+		setSystemTime(new Date("2026-09-23T03:00:00.000Z"));
+		expect(hoyCalendarioGT()).toBe(Date.UTC(2026, 8, 22));
+	});
+
+	test("a partir de las 06:00 UTC los dos coinciden", () => {
+		setSystemTime(new Date("2026-09-23T06:00:00.000Z"));
+		expect(hoyCalendarioGT()).toBe(Date.UTC(2026, 8, 23));
 	});
 });
 

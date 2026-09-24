@@ -465,11 +465,18 @@ export function TableInvestors() {
       // mandaría al mismo menú en el que está.
       const aviso = avisoAccesoPortal(respuesta?.resultados?.[0], "boton");
       // El `null` del traductor NO es "salió bien": es "no sé qué pasó". Vuelve
-      // en `null` cuando `resultados` viene vacío o con otra forma, cuando el
-      // estado es `omitida` con un motivo que no está en la lista, y ante
-      // cualquier estado fuera de los cinco conocidos. En verde eso es el mismo
-      // bug que este traductor existe para cerrar: quien lee cuelga el teléfono
-      // prometiendo una contraseña que no salió.
+      // en `null` cuando `resultados` viene vacío o con algo que no es un
+      // objeto, cuando el estado es `omitida` con un motivo que no está en la
+      // lista, y ante cualquier estado fuera de los cinco conocidos. En verde
+      // eso es el mismo bug que este traductor existe para cerrar: quien lee
+      // cuelga el teléfono prometiendo una contraseña que no salió.
+      //
+      // Y `null` es lo PEOR que devuelve: ante un objeto al que le faltan
+      // campos —`{estado, motivo}` sin `advertencias`, que el back puede
+      // mandar— ya no tira. Antes ese `TypeError` caía en el `catch` de abajo y
+      // pintaba el rojo de "No se pudo abrir el acceso al portal" sobre un
+      // envío que SÍ salió, y quien lo leía apretaba otra vez. Ese `catch`
+      // queda solo para lo que de verdad falla: la llamada HTTP.
       if (!aviso)
         toast.warning(
           "No se pudo confirmar si le quedó el acceso al portal. NO le digas todavía que le va a llegar su contraseña: avisa a sistemas para que confirmen si la cuenta quedó creada y si el correo salió.",

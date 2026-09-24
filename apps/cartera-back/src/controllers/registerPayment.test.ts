@@ -1578,7 +1578,13 @@ describe("cableado del cierre corto en cascada (que un throw no deje la boleta a
       "cuota_no_cobrada_por_rubros_cortos: cuotaCortadaPorPlanosCortos ?? null,",
     );
     expect(registerPaymentSource).toContain(
-      "no se cobró porque sus rubros fijos vienen cortos; el remanente quedó disponible.",
+      "no se cobró: sus rubros fijos (seguro, GPS, membresías) vienen cortos",
+    );
+    // El "Ya no queda saldo disponible" tiene que ser la RAMA ELSE del corte.
+    // Si vuelve a quedar suelto al final, el asesor lee la contradicción de
+    // "el resto no se aplicó" seguida de "ya no queda saldo".
+    expect(registerPaymentSource).toContain(
+      ' : "Ya no queda saldo disponible."}',
     );
   });
 });

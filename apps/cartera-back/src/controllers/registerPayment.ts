@@ -2551,7 +2551,7 @@ export const insertPayment = async (
           capital_no_aplicado_a_saldo: capitalDevuelto.toString(),
           cuota_no_cobrada_por_rubros_cortos: cuotaCortadaPorPlanosCortos ?? null,
         },
-        resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. ${capitalDevuelto.gt(0) ? `El abono a capital de Q${capitalDevuelto.toString()} no se aplicó (el crédito no lo permite) y quedó en saldo a favor. ` : ""}${cuotaCortadaPorPlanosCortos !== undefined ? `La cuota #${cuotaCortadaPorPlanosCortos} no se cobró porque sus rubros fijos vienen cortos; el remanente quedó disponible. ` : ""}Ya no queda saldo disponible.`,
+        resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. ${capitalDevuelto.gt(0) ? `El abono a capital de Q${capitalDevuelto.toString()} no se aplicó (el crédito no lo permite) y quedó en saldo a favor. ` : ""}${cuotaCortadaPorPlanosCortos !== undefined ? `La cuota #${cuotaCortadaPorPlanosCortos} no se cobró: sus rubros fijos (seguro, GPS, membresías) vienen cortos y cerrarla dejaría de cobrarlos. El resto de la boleta no se aplicó a esa cuota — revisar sus saldos antes de reintentar.` : "Ya no queda saldo disponible."}`,
       };
     }
   } catch (error) {

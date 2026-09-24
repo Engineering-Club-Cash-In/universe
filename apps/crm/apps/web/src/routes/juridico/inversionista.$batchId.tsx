@@ -47,13 +47,13 @@ import { fechaEnPalabras } from "@/lib/fechas-en-palabras";
 import { client, orpc } from "@/utils/orpc";
 
 /**
- * Qué dice el estado de la batería, que lo marcan sus documentos: sin
- * contratos, con contratos a los que les falta firma, o firmados por todos.
+ * Qué dice el estado de la batería: sin contratos, con contratos emitidos que
+ * todavía se pueden corregir, o cerrada porque jurídico le dio "Listo".
  */
 const ESTADO_DE_BATERIA: Record<string, string> = {
 	pendiente: "Sin contratos",
 	en_proceso: "En firma",
-	completada: "Firmados",
+	completada: "Cerrada",
 	descartada: "Descartada",
 };
 

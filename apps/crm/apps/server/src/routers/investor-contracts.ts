@@ -781,11 +781,13 @@ export const investorContractsRouter = {
 			// Cerrada no significa cerrada con llave: se le pueden emitir más
 			// contratos después (lo único que no se repite es el mismo tipo), y por
 			// eso se guarda también cuándo empezó.
-			// La batería queda "en proceso" mientras falte alguna firma: jurídico
-			// la sigue viendo y todavía puede corregir. Se cierra sola cuando los
-			// firman todos.
+			// La batería queda "en proceso": jurídico la sigue viendo hasta que le
+			// dé "Listo". Si ya la había cerrado, esto la reabre, porque emitirle
+			// un contrato es trabajo nuevo.
 			if (emitidos.length > 0) {
-				await recalcularEstadoDeLaBateria(input.batchId, context.userId);
+				await recalcularEstadoDeLaBateria(input.batchId, context.userId, {
+					reabrir: true,
+				});
 			}
 
 			const successCount = results.filter((r) => r.success).length;
@@ -1006,7 +1008,9 @@ export const investorContractsRouter = {
 			// el nuevo entra con sus enlaces.
 			void espejarContratoEnCartera(contractId, context.userId);
 
-			await recalcularEstadoDeLaBateria(input.batchId, context.userId);
+			await recalcularEstadoDeLaBateria(input.batchId, context.userId, {
+				reabrir: true,
+			});
 
 			return {
 				success: true,
@@ -1137,12 +1141,16 @@ export const investorContractsRouter = {
 		}),
 
 	/**
-	 * Avisa a inversiones que la batería quedó lista.
+	 * Cierra la batería y le avisa a inversiones que quedó lista.
 	 *
-	 * Lo dispara jurídico al darle "Listo": es el momento en que dice que
-	 * terminó, y hasta ahora inversiones se enteraba entrando a la ficha a ver
-	 * si ya había algo. Los enlaces de firma que le pasan al inversionista
-	 * salen de esa ficha.
+	 * Lo dispara jurídico al darle "Listo", que es el momento en que dice que
+	 * terminó. Hasta ese botón la batería sigue en su lista aunque ya tenga los
+	 * contratos emitidos, porque mientras no lo diga todavía puede corregir:
+	 * reemplazar, anular o subir otro.
+	 *
+	 * El aviso es la otra mitad: los enlaces de firma que inversiones le pasa al
+	 * inversionista salen de su ficha, y hasta ahora se enteraban entrando a ver
+	 * si ya había algo.
 	 *
 	 * Una notificación por rol de inversiones: la columna guarda un solo rol, y
 	 * el aviso le sirve tanto a quien atiende al inversionista como a su
@@ -1180,9 +1188,32 @@ export const investorContractsRouter = {
 					),
 				);
 
-			// Sin contratos no hay nada que avisar: jurídico entró, miró y salió.
+			// Sin contratos no hay nada que cerrar ni que avisar: jurídico entró,
+			// miró y salió.
 			if (vigentes.length === 0) {
-				return { avisado: false, motivo: "sin_contratos" as const };
+				return {
+					avisado: false,
+					cerrada: false,
+					motivo: "sin_contratos" as const,
+				};
+			}
+
+			// Cerrarla es lo que la saca de la lista de jurídico. No espera a las
+			// firmas: la papelería ya está hecha, y lo que falta es del
+			// inversionista.
+			if (bateria.status !== "completada") {
+				const ahora = new Date();
+				await db
+					.update(investorContractBatches)
+					.set({
+						status: "completada",
+						startedAt: bateria.startedAt ?? ahora,
+						startedBy: bateria.startedBy ?? context.userId,
+						completedAt: ahora,
+						completedBy: context.userId,
+						updatedAt: ahora,
+					})
+					.where(eq(investorContractBatches.id, input.batchId));
 			}
 
 			const [yaAvisado] = await db
@@ -1198,7 +1229,7 @@ export const investorContractsRouter = {
 				.limit(1);
 
 			if (yaAvisado) {
-				return { avisado: false, motivo: "ya_avisado" as const };
+				return { avisado: false, cerrada: true, motivo: "ya_avisado" as const };
 			}
 
 			for (const rol of ROLES_DE_INVERSIONES) {
@@ -1216,7 +1247,7 @@ export const investorContractsRouter = {
 				});
 			}
 
-			return { avisado: true, contratos: vigentes.length };
+			return { avisado: true, cerrada: true, contratos: vigentes.length };
 		}),
 
 	/**

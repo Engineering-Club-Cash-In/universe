@@ -63,11 +63,20 @@ import { client, orpc } from "@/utils/orpc";
  * Qué dice el estado de una batería, que lo marcan sus documentos y no una
  * etapa: sin contratos, con contratos a medio firmar, o firmados por todos.
  */
+const ESTADOS_DE_BATERIA = [
+	"pendiente",
+	"en_proceso",
+	"completada",
+	"descartada",
+] as const;
+
+type EstadoDeBateria = (typeof ESTADOS_DE_BATERIA)[number];
+
 const ESTADO_DE_BATERIA: Record<string, string> = {
 	pendiente: "Sin contratos",
 	en_proceso: "En firma",
-	completada: "Firmados",
-	descartada: "Descartada",
+	completada: "Cerradas",
+	descartada: "Descartadas",
 };
 
 export const Route = createFileRoute("/juridico/")({
@@ -107,15 +116,18 @@ function RouteComponent() {
 	// Las firmadas por todos salen de la lista: un documento completo no admite
 	// cambios, y en WeeTrust ya no se puede ni borrar. Se ven con "Ver
 	// cerradas", para mirar qué se hizo o agregarle el contrato que faltó.
-	const [verCerradas, setVerCerradas] = useState(false);
+	const [estadoBateria, setEstadoBateria] =
+		useState<EstadoDeBateria>("pendiente");
 	const bateriasQuery = useQuery({
 		...orpc.listInvestorContractBatches.queryOptions({
-			input: verCerradas
-				? { status: ["completada", "descartada"] as const }
-				: {},
+			input: { status: ESTADOS_DE_BATERIA },
 		}),
 		enabled: canViewLegal,
 	});
+
+	const bateriasDelEstado = (estado: EstadoDeBateria) =>
+		(bateriasQuery.data ?? []).filter((b) => b.status === estado);
+	const bateriasVisibles = bateriasDelEstado(estadoBateria);
 	const bateriasPendientesQuery = useQuery({
 		...orpc.listInvestorContractBatches.queryOptions({ input: {} }),
 		enabled: canViewLegal,
@@ -414,27 +426,28 @@ function RouteComponent() {
 				<TabsContent value="inversiones">
 					<Card>
 						<CardHeader>
-							<div className="flex items-start justify-between gap-4">
-								<div>
-									<CardTitle>
-										{verCerradas
-											? "Baterías cerradas"
-											: "Contratos de inversionistas pendientes"}
-									</CardTitle>
-									<CardDescription>
-										Cada compra de cartera aceptada abre una batería. Jurídico
-										elige qué contratos hacer y los emite; los enlaces de firma
-										quedan en la ficha del inversionista, y la batería se cierra
-										sola.
-									</CardDescription>
-								</div>
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => setVerCerradas((v) => !v)}
-								>
-									{verCerradas ? "Ver pendientes" : "Ver cerradas"}
-								</Button>
+							<CardTitle>Contratos de inversionistas</CardTitle>
+							<CardDescription>
+								Cada compra de cartera aceptada abre una batería. En «En firma»
+								están las que ya tienen contratos y todavía se pueden corregir;
+								salen de acá cuando jurídico les da «Listo».
+							</CardDescription>
+
+							{/* Filtro por estado, como el de etapas en ventas */}
+							<div className="flex flex-wrap gap-2">
+								{ESTADOS_DE_BATERIA.map((estado) => (
+									<Button
+										key={estado}
+										variant={estadoBateria === estado ? "default" : "outline"}
+										size="sm"
+										aria-pressed={estadoBateria === estado}
+										onClick={() => setEstadoBateria(estado)}
+										className="tabular-nums"
+									>
+										{ESTADO_DE_BATERIA[estado]} ·{" "}
+										{bateriasDelEstado(estado).length}
+									</Button>
+								))}
 							</div>
 						</CardHeader>
 						<CardContent>
@@ -442,18 +455,16 @@ function RouteComponent() {
 								<div className="flex items-center justify-center py-12">
 									<Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
 								</div>
-							) : (bateriasQuery.data?.length ?? 0) === 0 ? (
+							) : bateriasVisibles.length === 0 ? (
 								<div className="flex flex-col items-center justify-center py-12 text-center">
 									<Landmark className="mb-3 h-12 w-12 text-gray-400" />
 									<h3 className="mb-1 font-semibold text-gray-900 text-lg">
-										{verCerradas
-											? "No hay baterías cerradas"
-											: "No hay contratos de inversión pendientes"}
+										No hay baterías en «{ESTADO_DE_BATERIA[estadoBateria]}»
 									</h3>
 									<p className="text-gray-500 text-sm">
-										{verCerradas
-											? "Se cierran solas al emitirles el primer contrato"
-											: "Aparecen acá en cuanto se acepta una compra de cartera"}
+										{estadoBateria === "pendiente"
+											? "Aparecen acá en cuanto se acepta una compra de cartera"
+											: "Probá con otro estado"}
 									</p>
 								</div>
 							) : (
@@ -469,7 +480,7 @@ function RouteComponent() {
 										</TableRow>
 									</TableHeader>
 									<TableBody>
-										{bateriasQuery.data?.map((bateria) => (
+										{bateriasVisibles.map((bateria) => (
 											<TableRow key={bateria.id}>
 												<TableCell>
 													<div className="font-medium">

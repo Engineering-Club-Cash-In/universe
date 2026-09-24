@@ -14,12 +14,17 @@ import { generatedLegalContracts } from "../db/schema/legal-contracts";
  * - `en_proceso`: hay contratos y falta alguna firma. Jurídico la sigue viendo,
  *   porque mientras falte firmar todavía se puede corregir: reemplazar, anular
  *   o subir otro.
- * - `completada`: los firmaron todos. Sale de la lista de jurídico: un
- *   documento firmado por todos ya no admite cambios, y en WeeTrust tampoco se
- *   puede borrar.
+ * - `completada`: la cerró jurídico con "Listo", o la firmaron todos. Sale de
+ *   la lista: jurídico ya dijo que terminó, y un documento firmado por todos no
+ *   admite cambios (en WeeTrust tampoco se puede borrar).
  *
  * `descartada` no se recalcula nunca: alguien dijo que esa compra no llevaba
  * papelería, y eso no lo decide el estado de ningún documento.
+ *
+ * **Una completada no se reabre sola.** Que llegue una firma de las que
+ * faltaban no la devuelve a la lista de jurídico: cerrarla fue una decisión
+ * suya. Vuelve a abrirse cuando hay trabajo de verdad — se le emite otro
+ * contrato (`reabrir`) o se anulan todos y queda sin ninguno.
  *
  * Se llama en los cuatro momentos que pueden moverla: al emitir, al subir uno a
  * mano, al anular, y cada vez que alguien firma.
@@ -28,6 +33,13 @@ export async function recalcularEstadoDeLaBateria(
 	batchId: string,
 	/** Quién provocó el cambio, para dejarlo anotado si la batería se cierra. */
 	userId?: string,
+	opciones: {
+		/**
+		 * Devuelve a la lista una batería que jurídico ya había cerrado. Lo pasa
+		 * quien le acaba de emitir o subir un contrato: eso es trabajo nuevo.
+		 */
+		reabrir?: boolean;
+	} = {},
 ): Promise<"pendiente" | "en_proceso" | "completada" | null> {
 	const [bateria] = await db
 		.select()
@@ -47,12 +59,19 @@ export async function recalcularEstadoDeLaBateria(
 			),
 		);
 
+	const todosFirmados =
+		vigentes.length > 0 && vigentes.every((c) => c.status === "signed");
+
 	const estado =
 		vigentes.length === 0
 			? "pendiente"
-			: vigentes.every((c) => c.status === "signed")
+			: todosFirmados
 				? "completada"
-				: "en_proceso";
+				: // Falta firmar: es trabajo abierto, salvo que jurídico ya la haya
+					// cerrado y nadie le haya agregado nada desde entonces.
+					bateria.status === "completada" && !opciones.reabrir
+					? "completada"
+					: "en_proceso";
 
 	if (estado === bateria.status) return estado;
 

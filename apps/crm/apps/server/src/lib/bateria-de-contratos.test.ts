@@ -91,6 +91,27 @@ describe("el estado de la batería lo marcan sus documentos", () => {
 		});
 	});
 
+	test("una cerrada no se reabre porque falte una firma", async () => {
+		bateria = { ...BATERIA, status: "completada", completedAt: new Date() };
+		contratos = [{ status: "pending" }, { status: "signed" }];
+
+		expect(await recalcularEstadoDeLaBateria("bateria-1")).toBe("completada");
+		expect(guardado).toBeUndefined();
+	});
+
+	test("pero sí se reabre cuando le emiten otro contrato", async () => {
+		bateria = { ...BATERIA, status: "completada", completedAt: new Date() };
+		contratos = [{ status: "pending" }, { status: "signed" }];
+
+		expect(
+			await recalcularEstadoDeLaBateria("bateria-1", "juan", { reabrir: true }),
+		).toBe("en_proceso");
+		expect(guardado).toMatchObject({
+			status: "en_proceso",
+			completedAt: null,
+		});
+	});
+
 	test("una descartada no se recalcula", async () => {
 		bateria = { ...BATERIA, status: "descartada" };
 		contratos = [{ status: "pending" }];

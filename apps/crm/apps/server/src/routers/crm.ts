@@ -1383,9 +1383,11 @@ export const crmRouter = {
 							.values({
 								title: `${input.firstName} ${input.lastName}`,
 								leadId: existingLead.id,
-								// Igual que createOpportunity: la oportunidad hereda el NIT del
-								// lead (ya actualizado), para que al cerrarla no se facture a CF.
+								// Igual que createOpportunity: la oportunidad hereda el NIT y la
+								// empresa del lead (ya actualizado). Sin NIT se factura a CF al
+								// cerrarla; sin empresa no la ve el tracker de la agencia.
 								nit: lead.nit,
+								companyId: lead.companyId,
 								creditType: "autocompra",
 								stageId: firstStage.id,
 								probability: 1,

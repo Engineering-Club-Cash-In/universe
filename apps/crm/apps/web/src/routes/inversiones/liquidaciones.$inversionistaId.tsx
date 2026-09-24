@@ -16,6 +16,7 @@ import {
 	EyeOff,
 	FileText,
 	Filter,
+	KeyRound,
 	Landmark,
 	Layers,
 	Loader2,
@@ -55,6 +56,12 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { avisoAccesoPortal } from "@/lib/acceso-portal";
 import { authClient } from "@/lib/auth-client";
 import {
 	errorRepLegal,
@@ -367,34 +374,59 @@ function InvestorDocumentsSection({
 										</Button>
 									</a>
 								)}
-								<Button
-									variant="ghost"
-									size="icon"
-									className="h-7 w-7"
-									onClick={() => {
-										if (!isManager) return;
-										toggleVisibilityMutation.mutate({
-											inversionistaId,
-											documentoId: doc.documento_id,
-											visible: !doc.visible,
-											documentoNombre: doc.nombre,
-										});
-									}}
-									disabled={!isManager || toggleVisibilityMutation.isPending}
-									title={
-										!isManager
+								{/* Mismo caso que el botón de acceso al portal: sin el gerente
+									de inversiones este botón queda gris, y un `title` sobre un
+									botón deshabilitado no se ve nunca
+									(`disabled:pointer-events-none` en components/ui/button.tsx).
+									El <span> de afuera sí recibe el mouse, y es el único lugar
+									donde se explica por qué está apagado. */}
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<span className="inline-flex">
+											<Button
+												variant="ghost"
+												size="icon"
+												className="h-7 w-7"
+												onClick={() => {
+													if (!isManager) return;
+													toggleVisibilityMutation.mutate({
+														inversionistaId,
+														documentoId: doc.documento_id,
+														visible: !doc.visible,
+														documentoNombre: doc.nombre,
+													});
+												}}
+												disabled={
+													!isManager || toggleVisibilityMutation.isPending
+												}
+												// El botón es solo un ícono: su nombre lo daba el
+												// `title` que acaba de mudarse al tooltip, y el
+												// tooltip describe al <span>, no a él. Sin esto el
+												// lector de pantalla se queda con un botón sin nombre.
+												aria-label={
+													!isManager
+														? "Solo el gerente de inversiones puede cambiar la visibilidad"
+														: doc.visible
+															? "Ocultar"
+															: "Hacer visible"
+												}
+											>
+												{doc.visible ? (
+													<EyeOff className="h-3.5 w-3.5" />
+												) : (
+													<Eye className="h-3.5 w-3.5" />
+												)}
+											</Button>
+										</span>
+									</TooltipTrigger>
+									<TooltipContent side="bottom" className="max-w-xs">
+										{!isManager
 											? "Solo el gerente de inversiones puede cambiar la visibilidad"
 											: doc.visible
 												? "Ocultar"
-												: "Hacer visible"
-									}
-								>
-									{doc.visible ? (
-										<EyeOff className="h-3.5 w-3.5" />
-									) : (
-										<Eye className="h-3.5 w-3.5" />
-									)}
-								</Button>
+												: "Hacer visible"}
+									</TooltipContent>
+								</Tooltip>
 								<Button
 									variant="ghost"
 									size="icon"
@@ -430,6 +462,23 @@ const ACTION_LABELS: Record<string, string> = {
 	compra_cartera: "Compra de cartera",
 	investor_created: "Inversionista creado",
 	investor_updated: "Inversionista actualizado",
+	acceso_portal: "Acceso al portal",
+};
+
+/**
+ * Qué pasó con ese acceso, en palabras. Los estados los manda cartera dentro de
+ * `details.estado` y son los mismos que traduce `@/lib/acceso-portal`; acá solo
+ * se resumen en una etiqueta, porque la bitácora es una lista y no un aviso.
+ *
+ * Lo que no esté en la lista se calla en vez de enseñar el código crudo: la fila
+ * ya dice QUIÉN y CUÁNDO, que es a lo que sirve la bitácora.
+ */
+const ESTADOS_ACCESO_PORTAL: Record<string, string> = {
+	creada: "Cuenta creada",
+	ya_tenia: "Ya tenía cuenta",
+	avisada: "Se avisó al representante",
+	omitida: "No se le abrió",
+	fallo: "No se pudo",
 };
 
 const ACTION_COLORS: Record<string, string> = {
@@ -445,6 +494,8 @@ const ACTION_COLORS: Record<string, string> = {
 		"border-cyan-300 bg-cyan-50 text-cyan-700 dark:border-cyan-700 dark:bg-cyan-950 dark:text-cyan-300",
 	investor_updated:
 		"border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-300",
+	acceso_portal:
+		"border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950 dark:text-violet-300",
 };
 
 function InvestorActivityLogSection({
@@ -521,6 +572,37 @@ function InvestorActivityLogSection({
 													{details.visible ? "Visible" : "Oculto"}
 												</Badge>
 											)}
+										{/* El registro de acceso al portal guarda `estado`,
+											`usuarioEmail`, `advertencias` y `motivo`. Sin esto la
+											fila decía solo quién y cuándo: no si la persona quedó
+											con acceso. El `motivo` y las `advertencias` NO se
+											imprimen —son códigos del backend— pero que hubo
+											advertencias sí se dice, porque es lo que manda a
+											mirar. */}
+										{log.action === "acceso_portal" && (
+											<>
+												{details?.estado &&
+												ESTADOS_ACCESO_PORTAL[details.estado] ? (
+													<Badge variant="outline" className="text-[10px]">
+														{ESTADOS_ACCESO_PORTAL[details.estado]}
+													</Badge>
+												) : null}
+												{details?.usuarioEmail ? (
+													<span className="truncate text-muted-foreground text-xs">
+														{details.usuarioEmail}
+													</span>
+												) : null}
+												{Array.isArray(details?.advertencias) &&
+												details.advertencias.length > 0 ? (
+													<Badge
+														variant="outline"
+														className="border-amber-300 bg-amber-50 text-[10px] text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300"
+													>
+														Con advertencias
+													</Badge>
+												) : null}
+											</>
+										)}
 									</div>
 									<p className="mt-0.5 text-[10px] text-muted-foreground">
 										{log.performedByName} ·{" "}
@@ -694,6 +776,75 @@ function LiquidacionCard({ item }: { item: any }) {
 	);
 }
 
+// ─── Cuenta del portal que EXISTE pero no sirve ──────────────────────────────
+// Se dice DENTRO del diálogo, no en el botón: el botón sigue habilitado —es la
+// única forma de intentar corregirlo desde la pantalla— y un botón activo sin
+// explicación no le dice a nadie que la cuenta está rota.
+//
+// Los textos NO se reusan de `lib/acceso-portal.ts` a propósito: aquellos
+// narran lo que ACABA de pasar en un alta ("se le creó…", "avisa a sistemas") y
+// estos describen lo que YA está mal ANTES de apretar, más qué gana apretando.
+// Además `cuenta_sin_rol_de_inversionista` —la que llega por el camino de solo
+// lectura— no existe allá, porque allá nunca se consulta sin escribir.
+//
+// Lo que no esté en la lista cae al texto genérico de abajo: jamás se enseña el
+// código crudo de la advertencia.
+//
+// Cada texto va PARTIDO en dos: qué está mal (no cambia nunca) y qué pasa si se
+// continúa (sí cambia, y de eso depende si el párrafo miente).
+const MOTIVOS_CUENTA_PORTAL_ROTA: Record<
+	string,
+	{ problema: string; siContinuar: string }
+> = {
+	cuenta_sin_rol_de_inversionista: {
+		problema:
+			"Ya tiene cuenta, pero sin el rol de inversionista: entra y no ve sus inversiones.",
+		siContinuar: "Al continuar se intenta corregir.",
+	},
+	rol_no_promovido: {
+		problema:
+			"Ya tiene cuenta, pero no se le pudo dar el permiso de inversionista: entra y no ve sus inversiones.",
+		siContinuar: "Al continuar se intenta corregir.",
+	},
+	cuenta_creada_sin_rol_ni_dpi: {
+		problema:
+			"Ya tiene cuenta, pero quedó sin ligar a este inversionista: entra y no ve sus inversiones.",
+		siContinuar: "Al continuar se intenta corregir.",
+	},
+	// Esta NO promete arreglo: continuar no cuadra los correos, y decir que sí
+	// mandaría a apretar un botón que no puede resolverlo.
+	correo_de_cartera_distinto_al_de_la_cuenta: {
+		problema:
+			"Ya tiene cuenta en el portal con otro correo, así que al entrar no ve sus inversiones.",
+		siContinuar: "Continuar no cuadra los correos: avisá a sistemas.",
+	},
+};
+
+const MOTIVO_CUENTA_PORTAL_ROTA_GENERICO = {
+	problema:
+		"Ya tiene cuenta en el portal, pero con un problema que le impide ver sus inversiones.",
+	siContinuar: "Al continuar se intenta corregir.",
+};
+
+/**
+ * La promesa "al continuar se intenta corregir" es FALSA cuando la cuenta se
+ * reconoció solo por el correo.
+ *
+ * `ensureInvestorAccount` se niega estructuralmente a promover una cuenta a la
+ * que llegó por correo y que ningún DPI respalda: devuelve `fallo` con motivo
+ * `cuenta_anclada_solo_por_correo` sin tocar el rol. O sea que el párrafo de
+ * arriba estaría prometiendo justo lo que la escritura tiene prohibido hacer, y
+ * quien lo lee aprieta, ve el fallo, vuelve a leer la misma promesa y aprieta
+ * otra vez.
+ *
+ * Esta advertencia sola NO llega acá (`salud-cuenta-portal.ts` la deja fuera de
+ * las que rompen la cuenta a propósito, porque sola no la rompe): aparece
+ * acompañando a una de las de arriba, y es ahí donde les quita la promesa.
+ */
+const ANCLADA_SOLO_POR_CORREO = "cuenta_anclada_solo_por_correo";
+const SI_CONTINUAR_ANCLADA_SOLO_POR_CORREO =
+	"Continuar NO lo corrige: a esa cuenta se la reconoce solo por el correo, y hasta que su DPI la respalde el sistema no le toca el permiso. Avisá a sistemas.";
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 function InvestorLiquidacionesPage() {
@@ -793,19 +944,23 @@ function InvestorLiquidacionesPage() {
 	const queryClient = useQueryClient();
 	const compraCarteraMutation = useMutation({
 		...orpc.compraCartera.mutationOptions(),
-		onSuccess: () => {
+		// Mismo motivo que en `darAccesoPortalMutation`: el id sale de lo que se
+		// mandó, no del render que cierra el `onSuccess`, que puede ser ya el de
+		// otro inversionista si se navegó mientras la respuesta venía en camino.
+		onSuccess: (_data: any, variables: any) => {
+			const inversionistaId: number = variables.inversionistaId;
 			toast.success("Compra de cartera registrada correctamente");
 			setCompraCarteraOpen(false);
 			setCompraCarteraMonto("");
 			setCompraCarteraSpreadOverrideId(null);
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInvestorActivityLog.queryOptions({
-					input: { inversionistaId: investorIdNum },
+					input: { inversionistaId },
 				}).queryKey,
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInversionistas.queryOptions({
-					input: { id: investorIdNum, page: 1, perPage: 1 },
+					input: { id: inversionistaId, page: 1, perPage: 1 },
 				}).queryKey,
 			});
 			queryClient.invalidateQueries({
@@ -820,6 +975,75 @@ function InvestorLiquidacionesPage() {
 		},
 		onError: (err: any) => {
 			toast.error(err?.message ?? "Error al registrar compra de cartera");
+		},
+	});
+
+	// ─── Dar acceso al portal ──────────────────────────────────────────────
+	// Esta acción CREA la cuenta del portal y MANDA una contraseña por correo.
+	// El único control que tiene es humano: el diálogo enseña EL CORREO al que
+	// va a caer esa contraseña y quien confirma responde por él. Por eso el
+	// botón no dispara nada: solo abre la confirmación.
+	const [accesoPortalOpen, setAccesoPortalOpen] = useState(false);
+	const darAccesoPortalMutation = useMutation({
+		...orpc.darAccesoPortal.mutationOptions(),
+		// `variables` y no `investorIdNum`: React Query invoca SIEMPRE el último
+		// objeto de opciones, y esta ruta no se re-monta por `$inversionistaId`
+		// —no está re-keyed—, así que `investorIdNum` es el del render de
+		// AHORA. Quien confirma sobre el inversionista 7 y navega al 8 antes de
+		// que vuelva la respuesta mandaba la contraseña del 7 e invalidaba las
+		// tres consultas del 8: el botón del 7 no se ponía gris y su fila del
+		// historial no aparecía hasta recargar. `variables` es lo que se mandó.
+		onSuccess: (data: any, variables: any) => {
+			const inversionistaId: number = variables.inversionistaId;
+			// El tono lo decide el traductor, no un `if` sobre el estado: una
+			// cuenta `creada` cuya contraseña NO salió es una ADVERTENCIA, y
+			// enseñarla en verde es decirle a conta que ya puede colgar mientras
+			// esa persona queda con una cuenta que no sabe que tiene.
+			// `"boton"`: quien lee está parada en ESTA pantalla y acaba de apretar
+			// este botón. Sin ese dato el traductor le diría "el inversionista sí
+			// quedó creado: no lo vuelvas a crear" —acá no se creó nada— y la
+			// mandaría a abrir el acceso desde la pantalla en la que ya está.
+			//
+			// Y el `null` del traductor NO es "salió bien": es "no sé qué pasó".
+			// Vuelve en `null` cuando `resultados` viene vacío o con otra forma,
+			// cuando el estado es `omitida` con un motivo que no está en la lista,
+			// y ante cualquier estado fuera de los cinco conocidos —`candidata`,
+			// por ejemplo, que el camino de solo lectura ya emite—. En verde, eso
+			// es el mismo bug que este traductor existe para cerrar: quien lee
+			// cuelga el teléfono prometiendo una contraseña que no salió.
+			const aviso = avisoAccesoPortal(data?.resultados?.[0], "boton");
+			if (!aviso)
+				toast.warning(
+					"No se pudo confirmar si le quedó el acceso al portal. NO le digas todavía que le va a llegar su contraseña: avisa a sistemas para que confirmen si la cuenta quedó creada y si el correo salió.",
+					{ duration: 15000 },
+				);
+			else if (aviso.tono === "advertencia")
+				toast.warning(aviso.texto, { duration: 15000 });
+			else toast.success(aviso.texto, { duration: 15000 });
+			setAccesoPortalOpen(false);
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInversionistas.queryOptions({
+					input: { id: inversionistaId, page: 1, perPage: 1 },
+				}).queryKey,
+			});
+			// Para que el botón se ponga gris solo, sin recargar la pantalla.
+			queryClient.invalidateQueries({
+				queryKey: orpc.estadoAccesoPortal.queryOptions({
+					input: { inversionistaId },
+				}).queryKey,
+			});
+			// El backend deja constancia de QUIÉN autorizó mandar esa contraseña
+			// (`action: "acceso_portal"`). Sin invalidar, esa fila no aparece hasta
+			// recargar la pantalla — igual que hacen las demás acciones de acá.
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInvestorActivityLog.queryOptions({
+					input: { inversionistaId },
+				}).queryKey,
+				refetchType: "all",
+			});
+		},
+		onError: (err: any) => {
+			toast.error(err?.message ?? "Error al dar acceso al portal");
 		},
 	});
 
@@ -895,19 +1119,38 @@ function InvestorLiquidacionesPage() {
 
 	const editMutation = useMutation({
 		...orpc.editarInversionista.mutationOptions(),
-		onSuccess: () => {
+		// Mismo motivo que en `darAccesoPortalMutation`: el id sale de lo que se
+		// mandó, no del render que cierra el `onSuccess`, que puede ser ya el de
+		// otro inversionista si se navegó mientras la respuesta venía en camino.
+		onSuccess: (_data: any, variables: any) => {
+			const inversionistaId: number = variables.inversionistaId;
 			toast.success("Inversionista actualizado correctamente");
 			setConfirmarQuitarRepOpen(false);
 			setEditOpen(false);
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInversionistas.queryOptions({
-					input: { id: investorIdNum, page: 1, perPage: 1 },
+					input: { id: inversionistaId, page: 1, perPage: 1 },
 				}).queryKey,
 				refetchType: "all",
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInvestorActivityLog.queryOptions({
-					input: { inversionistaId: investorIdNum },
+					input: { inversionistaId },
+				}).queryKey,
+				refetchType: "all",
+			});
+			// El estado de la cuenta del portal se calcula con el correo, el DPI y
+			// el DPI del representante legal de ESTA fila — los tres se editan
+			// acá. Y editar el correo es justo el arreglo que el diálogo de
+			// "Dar acceso al portal" recomienda para dos de sus advertencias: sin
+			// esto, quien lo corrige reabre el diálogo y ve la MISMA advertencia
+			// vieja. `refetchType: "all"` como las dos invalidaciones de arriba:
+			// esta consulta está montada mientras la pantalla está abierta, así
+			// que "active" alcanzaría, pero con el `staleTime` de 5 minutos que
+			// ahora tiene, una copia que quedara inactiva se serviría vencida.
+			queryClient.invalidateQueries({
+				queryKey: orpc.estadoAccesoPortal.queryOptions({
+					input: { inversionistaId },
 				}).queryKey,
 				refetchType: "all",
 			});
@@ -965,20 +1208,24 @@ function InvestorLiquidacionesPage() {
 
 	const cambiarStatusMutation = useMutation({
 		...orpc.cambiarStatusInversionista.mutationOptions(),
-		onSuccess: () => {
+		// Mismo motivo que en `darAccesoPortalMutation`: el id sale de lo que se
+		// mandó, no del render que cierra el `onSuccess`, que puede ser ya el de
+		// otro inversionista si se navegó mientras la respuesta venía en camino.
+		onSuccess: (_data: any, variables: any) => {
+			const inversionistaId: number = variables.inversionistaId;
 			toast.success(
 				"Inversionista marcado para devolución total. Se liquidará en la próxima corrida.",
 			);
 			setLiquidarTodoOpen(false);
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInversionistas.queryOptions({
-					input: { id: investorIdNum, page: 1, perPage: 1 },
+					input: { id: inversionistaId, page: 1, perPage: 1 },
 				}).queryKey,
 				refetchType: "all",
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInvestorActivityLog.queryOptions({
-					input: { inversionistaId: investorIdNum },
+					input: { inversionistaId },
 				}).queryKey,
 				refetchType: "all",
 			});
@@ -1000,6 +1247,97 @@ function InvestorLiquidacionesPage() {
 		// Con id cartera devuelve objeto directo, sin id devuelve array
 		return Array.isArray(raw) ? raw[0] ?? null : raw;
 	}, [investorsQuery.data]);
+
+	// "Es empresa" se DERIVA igual que en el modal de editar: el representante
+	// tiene que ser OTRA persona. Comparado sin ceros a la izquierda, porque
+	// hay filas con `dpi = 4036613` y `dpi_rep_legal = '04036613'` — el mismo
+	// número — que no son empresas.
+	const accesoPortalEsEmpresa = esEmpresaInicial(
+		(investor as any)?.dpiRepLegal ?? (investor as any)?.dpi_rep_legal,
+		(investor as any)?.dpi,
+	);
+	// Recortado: un correo de solo espacios NO es un correo capturado, y sin el
+	// `trim` pasaba como presente —el aviso rojo se callaba y el botón de
+	// confirmar quedaba habilitado— para que cartera lo rechazara después.
+	const accesoPortalEmail = ((investor?.email ?? "") as string).trim();
+	// ¿Ya cargó la fila? Mientras `investorsQuery` no resuelve, `investor` es
+	// `null` y las dos derivaciones de arriba salen en su valor vacío: el
+	// diálogo diría "— sin correo capturado —" y "Agregáselo primero desde
+	// Editar" sobre alguien que SÍ tiene correo, y quien lo lea va a Editar, lo
+	// encuentra ahí, y se queda con dos pantallas que se contradicen. El botón
+	// de abajo no abre el diálogo hasta que haya fila, igual que el "Editar"
+	// vecino.
+	const accesoPortalDatosListos = !!investor;
+
+	// ¿Ya tiene cuenta en el portal? Solo lectura: sirve para poner el botón en
+	// gris sin tener que apretarlo para averiguarlo.
+	//
+	// 🔴 Este dato solo puede DESHABILITAR cuando AFIRMA que la cuenta está sana.
+	// Mientras carga, si la consulta falla o si no vuelve nada, el botón queda
+	// HABILITADO. La operación de abajo es idempotente —sobre una cuenta que ya
+	// existe cartera contesta "ya tenía" y NO le reenvía ninguna contraseña a
+	// nadie—, así que el peor caso de un falso negativo es un clic inútil,
+	// mientras que apagar el botón por un error de red deja a alguien sin poder
+	// trabajar y sin entender por qué. Nunca deshabilitar por ausencia de dato.
+	const estadoAccesoPortalQuery = useQuery({
+		...orpc.estadoAccesoPortal.queryOptions({
+			input: { inversionistaId: investorIdNum },
+		}),
+		enabled: Number.isInteger(investorIdNum) && investorIdNum > 0,
+		// Igual que las dos consultas hermanas de este archivo
+		// (`resolverModalidadFacturacionSpread`,
+		// `listModalidadFacturacionSpreadByModalidad`). Sin esto —el QueryClient
+		// no define `defaultOptions`, así que rige el `staleTime: 0` de v5— la
+		// cadena entera (CRM → cartera → auth-google) se vuelve a recorrer en
+		// cada montaje, cada reconexión y cada vez que se vuelve a la pestaña.
+		// El único momento en que este valor cambia es el botón de abajo, y ese
+		// ya invalida esta misma llave a mano.
+		staleTime: 5 * 60 * 1000,
+	});
+	const estadoAccesoPortal = estadoAccesoPortalQuery.data as
+		| {
+				tieneCuentaSana?: boolean;
+				estado?: string;
+				usuarioEmail?: string | null;
+				advertencias?: string[] | null;
+				motivo?: string | null;
+		  }
+		| undefined;
+	const yaTieneAccesoPortal = estadoAccesoPortal?.tieneCuentaSana === true;
+	// Cuenta que EXISTE pero no sirve. El booleano ya vino en `false`, así que
+	// el botón sigue vivo; lo que falta es decir por qué conviene apretarlo.
+	// Una empresa (`estado: "omitida"`) NO entra acá: su cuenta es la del
+	// representante legal y eso no es una cuenta rota.
+	const avisosCuentaPortalRota = useMemo(() => {
+		if (yaTieneAccesoPortal) return [] as string[];
+		const advertencias = estadoAccesoPortal?.advertencias ?? [];
+		const entradas = advertencias
+			.map((a) => MOTIVOS_CUENTA_PORTAL_ROTA[a])
+			.filter((t): t is (typeof MOTIVOS_CUENTA_PORTAL_ROTA)[string] => !!t);
+		const base =
+			entradas.length > 0
+				? entradas
+				: // "Ya tenía" sin advertencia traducible sigue siendo una cuenta que
+					// el servidor no pudo declarar sana: se dice, sin enseñar el código.
+					estadoAccesoPortal?.estado === "ya_tenia"
+					? [MOTIVO_CUENTA_PORTAL_ROTA_GENERICO]
+					: [];
+		// Con la cuenta anclada solo por el correo, NINGUNA de estas se corrige
+		// continuando: la escritura corta antes de tocar el rol.
+		const ancladaSoloPorCorreo = advertencias.includes(ANCLADA_SOLO_POR_CORREO);
+		return Array.from(
+			new Set(
+				base.map(
+					(e) =>
+						`${e.problema} ${
+							ancladaSoloPorCorreo
+								? SI_CONTINUAR_ANCLADA_SOLO_POR_CORREO
+								: e.siContinuar
+						}`,
+				),
+			),
+		);
+	}, [yaTieneAccesoPortal, estadoAccesoPortal]);
 
 	// Fetch rendimiento/stats
 	const rendimientoQuery = useQuery({
@@ -1110,6 +1448,12 @@ function InvestorLiquidacionesPage() {
 								size="sm"
 								className="gap-2"
 								onClick={() => {
+									// Mismo hermano que el de "Dar acceso al portal": sin la
+									// fila cargada, el `?? "sin_reinversion"` de abajo no es un
+									// valor por omisión, es un dato que todavía no llegó, y el
+									// modal se abriría con la reinversión equivocada
+									// preseleccionada. El "Editar" vecino ya se guarda así.
+									if (!investor) return;
 									const inv =
 										(investor?.tipoReinversion as string | undefined) ??
 										(investor as any)?.tipo_reinversion ??
@@ -1139,6 +1483,92 @@ function InvestorLiquidacionesPage() {
 								<ShoppingCart className="h-4 w-4" />
 								Compra de Cartera
 							</Button>
+							{/* Gris SOLO cuando el servidor afirma que la cuenta está sana.
+								Cargando, con error o sin dato queda habilitado: apretar de más
+								cuesta un clic ("ya tenía", sin reenviar contraseña), y apagarlo
+								por un error de red deja a alguien trabado sin saber por qué.
+
+								El porqué del gris NO puede vivir en el `title` del botón:
+								`components/ui/button.tsx` trae `disabled:pointer-events-none`,
+								así que el botón deshabilitado no recibe el mouse y el tooltip
+								nativo nunca llega a dispararse. Quien escucha el mouse es el
+								<span> que lo envuelve, que no está deshabilitado y ocupa el
+								mismo recuadro.
+
+								El hover no es el único camino: el texto del propio botón ya
+								dice "Ya tiene acceso al portal", que es el motivo del gris. Lo
+								que agrega el tooltip es CON QUÉ CORREO, que es detalle. Un
+								botón deshabilitado no recibe foco, y Radix ignora a propósito
+								el `pointerType: "touch"`, así que ni por teclado ni por toque
+								se abre — de ahí que el motivo tenga que seguir estando en la
+								etiqueta y no solo acá. */}
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<span className="inline-flex">
+										<Button
+											variant="outline"
+											size="sm"
+											className="gap-2"
+											// Guarda de carga, igual que el "Editar" vecino
+											// (`if (investor) openEditModal(investor)`): sin la
+											// fila cargada, `accesoPortalEmail` y
+											// `accesoPortalEsEmpresa` salen vacíos y el diálogo se
+											// abriría diciendo "— sin correo capturado —" y
+											// "Agregáselo primero desde Editar" sobre alguien que
+											// SÍ tiene correo.
+											//
+											// La guarda va en el `onClick` y NO en `disabled`: lo
+											// que apaga este botón significa "ya tiene cuenta", y
+											// apagarlo por otra razón estaría afirmando eso sin que
+											// sea cierto. Quien explica por qué todavía no abre es
+											// la etiqueta, que dice "Cargando…". Si la fila no
+											// llega nunca —la consulta falló— la etiqueta se queda
+											// ahí, que es lo mismo que hace el resto de la
+											// pantalla: sin fila no se pinta ni el correo ni los
+											// datos del inversionista.
+											onClick={() => {
+												if (accesoPortalDatosListos) setAccesoPortalOpen(true);
+											}}
+											disabled={yaTieneAccesoPortal}
+										>
+											<KeyRound className="h-4 w-4" />
+											{yaTieneAccesoPortal
+												? "Ya tiene acceso al portal"
+												: accesoPortalDatosListos
+													? "Dar acceso al portal"
+													: "Cargando…"}
+										</Button>
+									</span>
+								</TooltipTrigger>
+								{/* El contenido se monta SIEMPRE, con texto para los tres
+									estados del botón. Antes solo existía con
+									`yaTieneAccesoPortal`, y con el botón habilitado el Root se
+									abría igual al pasar el mouse: el Trigger ponía
+									`aria-describedby` apuntando a un id que nunca se renderiza
+									—`aria-valid-attr-value` lo marca, y un lector de pantalla
+									que siguiera la referencia no encontraba nada—, y el ciclo
+									de apertura y cierre corría en cada hover para no enseñar
+									nada. Y así queda igual que el otro tooltip nuevo de este
+									archivo, el del ojo de `InvestorDocumentsSection`, que
+									también monta su contenido siempre. */}
+								<TooltipContent side="bottom" className="max-w-xs">
+									{yaTieneAccesoPortal
+										? estadoAccesoPortal?.usuarioEmail
+											? `Ya tiene cuenta en el portal con ${estadoAccesoPortal.usuarioEmail}. Por eso el botón está apagado.`
+											: "Ya tiene cuenta en el portal. Por eso el botón está apagado."
+										: !accesoPortalDatosListos
+											? "Todavía se están cargando sus datos. En cuanto carguen vas a poder abrirle el acceso."
+											: accesoPortalEsEmpresa
+												? // Siendo empresa, desde esta fila no sale ninguna
+													// contraseña: el diálogo lo dice con todas las letras y
+													// cartera responde
+													// `es_empresa_el_acceso_es_del_representante`.
+													// Prometer acá el correo con la contraseña
+													// contradiría lo que se lee dos clics después.
+													"Es una empresa: al portal entra su representante legal. Al continuar, cartera te va a decir desde qué fila abrirle el acceso."
+												: "Le crea su cuenta del portal y le manda su contraseña por correo. Antes de mandarla vas a poder revisar a qué correo va."}
+								</TooltipContent>
+							</Tooltip>
 						</div>
 					</div>
 				</div>
@@ -1903,6 +2333,145 @@ function InvestorLiquidacionesPage() {
 								<Banknote className="h-4 w-4" />
 							)}
 							Sí, marcar para devolución total
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Confirmación de acceso al portal.
+				El correo va GRANDE y arriba: es el único dato que hay que revisar
+				antes de que salga una contraseña, y quien confirma responde por él.
+				Salvo cuando es empresa: ahí el correo de la fila NO es el destino de
+				nada, y enseñarlo con esa promesa apuntaba el control humano a la
+				dirección equivocada. */}
+			<Dialog
+				open={accesoPortalOpen}
+				onOpenChange={(open) => {
+					if (!darAccesoPortalMutation.isPending) setAccesoPortalOpen(open);
+				}}
+			>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2">
+							<KeyRound className="h-5 w-5" />
+							Dar acceso al portal
+						</DialogTitle>
+						<DialogDescription className="pt-2">
+							{accesoPortalEsEmpresa ? (
+								<>
+									<span className="font-semibold">
+										{investor?.nombre ?? "Este inversionista"}
+									</span>{" "}
+									está capturado como empresa, y al Portal del Inversionista
+									entra con su representante legal.
+								</>
+							) : (
+								<>
+									Se le va a crear la cuenta del Portal del Inversionista a{" "}
+									<span className="font-semibold">
+										{investor?.nombre ?? "este inversionista"}
+									</span>{" "}
+									y se le va a mandar su contraseña a este correo:
+								</>
+							)}
+						</DialogDescription>
+					</DialogHeader>
+
+					{/* EL ORDEN NO ES COSMÉTICO.
+						Antes el correo de la SOCIEDAD iba primero, grande y presentado como
+						"a este correo se le manda su contraseña", y que es empresa se decía
+						dos párrafos más abajo. Ese vistazo humano al correo es el único
+						control que tiene este botón, y apuntarlo a una dirección que cartera
+						nunca va a usar —la cuenta es del representante legal— lo anulaba:
+						quien aprueba termina aprobando el correo equivocado.
+
+						Siendo empresa, el correo de la sociedad NO se enseña: no hay ningún
+						correo que aprobar acá, porque desde esta fila no sale ninguna
+						contraseña (`portalProvisioning.ts` devuelve
+						`es_empresa_el_acceso_es_del_representante` en cuanto el llamador es
+						este botón). */}
+					{accesoPortalEsEmpresa ? (
+						<div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/40">
+							<p className="font-bold text-amber-900 text-base dark:text-amber-100">
+								Desde esta fila no se abre ninguna cuenta ni sale ninguna
+								contraseña.
+							</p>
+							<p className="pt-1 text-amber-900 text-sm dark:text-amber-100">
+								El acceso se abre desde la fila del representante legal, que es
+								donde vas a poder revisar SU correo antes de que le salga la
+								contraseña. Al continuar, cartera te va a decir a qué fila ir —
+								no hace falta capturarle un correo propio a la empresa.
+							</p>
+						</div>
+					) : (
+						<>
+							<div className="rounded-lg border-2 border-sky-300 bg-sky-50 p-4 dark:border-sky-700 dark:bg-sky-950/40">
+								<p className="break-all font-bold text-base text-sky-900 dark:text-sky-100">
+									{accesoPortalEmail || "— sin correo capturado —"}
+								</p>
+							</div>
+
+							<p className="text-muted-foreground text-sm">
+								Confirmá que ese correo es de esta persona antes de continuar.
+								Quien reciba ese mensaje va a poder entrar a ver sus
+								liquidaciones, sus documentos y sus datos bancarios.
+							</p>
+
+							{!accesoPortalEmail && (
+								<p className="font-bold text-red-700 text-sm dark:text-red-400">
+									Sin correo capturado no se le puede abrir la cuenta.
+									Agregáselo primero desde Editar.
+								</p>
+							)}
+						</>
+					)}
+					{/* La cuenta EXISTE pero no sirve. Va acá y no en el botón: el botón
+						queda habilitado porque apretarlo es lo que puede corregirlo, y sin
+						este párrafo nadie sabría que hay algo que corregir. */}
+					{avisosCuentaPortalRota.map((aviso) => (
+						<p
+							key={aviso}
+							className="font-bold text-amber-700 text-sm dark:text-amber-400"
+						>
+							{aviso}
+						</p>
+					))}
+
+					<DialogFooter className="gap-2 sm:gap-2">
+						<Button
+							variant="outline"
+							onClick={() => setAccesoPortalOpen(false)}
+							disabled={darAccesoPortalMutation.isPending}
+						>
+							Cancelar
+						</Button>
+						<Button
+							className="gap-2 bg-sky-600 text-white hover:bg-sky-700"
+							onClick={() =>
+								darAccesoPortalMutation.mutate({
+									inversionistaId: investorIdNum,
+								})
+							}
+							disabled={
+								darAccesoPortalMutation.isPending ||
+								(!accesoPortalEmail && !accesoPortalEsEmpresa)
+							}
+						>
+							{darAccesoPortalMutation.isPending ? (
+								<>
+									<Loader2 className="h-4 w-4 animate-spin" />
+									{accesoPortalEsEmpresa ? "Consultando…" : "Abriendo…"}
+								</>
+							) : (
+								<>
+									<KeyRound className="h-4 w-4" />
+									{/* Sobre una empresa no se le manda el acceso a nadie: el
+										botón dice lo que de verdad va a pasar. */}
+									{accesoPortalEsEmpresa
+										? "Ver a qué fila ir"
+										: "Sí, mandarle su acceso"}
+								</>
+							)}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

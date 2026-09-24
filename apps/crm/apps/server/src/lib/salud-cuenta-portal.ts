@@ -184,3 +184,64 @@ export const exigeConstancia = (
 	// todos modos alguien autorizó tocarla.
 	return true;
 };
+
+/**
+ * Los códigos con los que cartera rechaza la LLAMADA ENTERA —no un id dentro de
+ * ella— antes de tocar nada. Son los únicos que permiten afirmar que no se creó
+ * ninguna cuenta ni salió ningún correo.
+ *
+ * Cada uno, contra `controllers/otorgarAccesoPortal.ts`:
+ *  - `400`: o la validación del cuerpo de Elysia (`t.Array(..., minItems: 1)`),
+ *    que corre ANTES del handler, o el guard `sin_inversionistas` — que es lo
+ *    primero que hace el handler después del rol, antes de leer la tabla.
+ *  - `401`: `requireAuth` rebota sin llegar al handler.
+ *  - `403`: `user?.role !== "ADMIN"`, la PRIMERA línea del handler.
+ *  - `404`: la ruta no existe (cartera todavía sin desplegar esta versión);
+ *    nada se ejecutó.
+ *
+ * NO están el 5xx ni la ausencia de status (timeout, corte de red, breaker
+ * abierto): ahí cartera pudo haber entrado a `provisionarInversionista`, y ese
+ * camino hace `fetch` a auth-google —que crea la cuenta y manda la contraseña—
+ * antes de poder contarnos nada. Es el mismo reparto que hace `MOTIVOS_SIN_EFECTO`
+ * un escalón más adentro, y por la misma razón.
+ *
+ * DE QUÉ DEPENDE QUE EL 401/403 SIGAN SIENDO "SIN EFECTO"
+ * ------------------------------------------------------
+ * De que el cliente NO reenvíe el POST al recibirlos. `request()` de
+ * `services/cartera-back-client.ts` reautenticaba y repetía la MISMA petición
+ * una vez ante 401/403, con lo que un 403 puesto por algo intermedio —un
+ * balanceador, un WAF, un chequeo futuro ubicado después de provisionar— habría
+ * llegado acá con el trabajo hecho DOS veces y esta lista lo habría callado. Ese
+ * reenvío ya no ocurre para métodos que mutan; si alguien lo reactiva, esta
+ * lista miente.
+ *
+ * Lista blanca, como todo lo demás de este archivo: un status que no esté acá
+ * —uno nuevo, o uno que ponga una pieza intermedia— deja fila.
+ */
+export const STATUS_SIN_EFECTO: readonly number[] = [400, 401, 403, 404];
+
+/**
+ * ¿Una llamada a `otorgarAccesoPortal` que FALLÓ tiene que dejar fila?
+ *
+ * POR QUÉ NO ALCANZA CON `exigeConstancia`
+ * ----------------------------------------
+ * `exigeConstancia(null) === true` ("ante la duda, registra") solo se alcanza
+ * cuando la llamada HTTP salió bien y trajo `resultados` vacío. La duda de
+ * verdad —no sabemos si la contraseña salió— es el timeout, y ahí no hay
+ * `detalle` que mirar porque no hubo respuesta: el error sube por el `catch`.
+ * Sin esta función, ese caso —justo el que `portalProvisioning.ts` documenta
+ * como "la cuenta pudo quedar creada y la contraseña pudo haber salido"— era el
+ * único que no dejaba NINGÚN rastro. Y el reintento lo tapa: la cuenta recién
+ * creada ya resuelve por DPI, cartera contesta `ya_tenia` limpio y el segundo
+ * apretón sale en verde.
+ *
+ * @param statusDeCartera el status HTTP con que cartera rechazó, o `null`
+ *   cuando no hubo respuesta (timeout, conexión cortada, breaker abierto). Sin
+ *   status no hay nada que descarte el efecto: registra.
+ */
+export const exigeConstanciaPorFalla = (
+	statusDeCartera: number | null | undefined,
+): boolean => {
+	if (typeof statusDeCartera !== "number") return true;
+	return !STATUS_SIN_EFECTO.includes(statusDeCartera);
+};

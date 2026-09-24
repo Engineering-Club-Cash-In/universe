@@ -1,5 +1,57 @@
-import { expect, test } from "bun:test";
-import { CarteraBackClient } from "./cartera-back-client";
+import { beforeEach, expect, mock, test } from "bun:test";
+
+/**
+ * QUIÉN PUBLICA UN MOCK PUBLICA EL NAMESPACE ENTERO (misma regla que
+ * `routers/investor-documents.portalAccess.test.ts`): `mock.module` es global al
+ * proceso y congela la lista de exports del módulo en cuanto alguien se enlaza
+ * contra él. El spread sale del módulo REAL —sufijo `?real`, que resuelve al
+ * mismo archivo saltándose el registro de mocks— y lo único sustituido son las
+ * dos funciones que hay que OBSERVAR.
+ *
+ * Se mockean porque las dos salen a la red de verdad: `invalidateAndReauth`
+ * hace `POST ${CARTERA_BACK_URL}/auth/login`. Por eso el 403 de cartera no
+ * estaba probado acá hasta ahora — con el reenvío por reautenticación, probarlo
+ * disparaba un login real desde la suite.
+ */
+const authReal = (await import(
+	`${"./cartera-auth.service.ts"}?real`
+)) as typeof import("./cartera-auth.service");
+
+let reautenticaciones = 0;
+let tokensTirados = 0;
+
+mock.module("./cartera-auth.service", () => ({
+	...authReal,
+	invalidateAndReauth: async () => {
+		reautenticaciones += 1;
+		return "token-reautenticado";
+	},
+	clearCarteraTokens: () => {
+		tokensTirados += 1;
+	},
+}));
+
+// Canario del `?real`: si dejara de saltarse el registro de mocks, el namespace
+// quedaría recortado y los módulos que importan el resto no cargarían.
+const authPublicado: any = await import("./cartera-auth.service");
+for (const exportFaltante of [
+	"getCarteraAccessToken",
+	"ensureCarteraAuth",
+	"loginCartera",
+]) {
+	if (typeof authPublicado[exportFaltante] !== "function") {
+		throw new Error(
+			`./cartera-auth.service quedó publicado recortado (falta ${exportFaltante}).`,
+		);
+	}
+}
+
+const { CarteraBackClient } = await import("./cartera-back-client");
+
+beforeEach(() => {
+	reautenticaciones = 0;
+	tokensTirados = 0;
+});
 
 const fetchTransport = (
 	handler: (
@@ -76,9 +128,114 @@ test("un POST que manda contraseñas no se reintenta", async () => {
 	expect(llamadas).toBe(1);
 });
 
-// El 403 de cartera (no-ADMIN) no se prueba acá a propósito: `request()`
-// reautentica una vez ante 401/403 y eso saldría a la red real desde la
-// suite. El rechazo definitivo se prueba con el 400 de cartera.
+// LA PRUEBA QUE IMPORTA del reenvío por reautenticación.
+//
+// `request()` reenviaba la MISMA petición una vez ante 401/403 —mismo método,
+// mismo cuerpo— al margen de la política de reintentos. Para este POST eso es
+// una SEGUNDA contraseña al inversionista. Hoy el 403 de cartera es la primera
+// línea de `otorgarAccesoPortal.ts` y llega antes de provisionar, pero basta que
+// el 403 lo ponga algo intermedio —un balanceador, un WAF— o un chequeo futuro
+// ubicado después de provisionar para que el reenvío duplique el acto.
+//
+// Es además de lo que depende que el CRM pueda afirmar "un 403 descarta el
+// efecto" y no deje constancia (`lib/salud-cuenta-portal.ts`,
+// `STATUS_SIN_EFECTO`): si esto se reactiva, esa lista miente.
+test("un 403 NO se reenvía reautenticado: sería una segunda contraseña", async () => {
+	let llamadas = 0;
+	const client = new CarteraBackClient({
+		baseUrl: "https://cartera.test",
+		retryAttempts: 0,
+		accessTokenProvider: async () => "test-token",
+		fetchTransport: fetchTransport(async () => {
+			llamadas += 1;
+			return Response.json(
+				{
+					error: "forbidden",
+					message: "Solo un ADMIN puede abrir accesos al portal",
+				},
+				{ status: 403 },
+			);
+		}),
+	});
+
+	const error = await client.otorgarAccesoPortal([7]).then(
+		() => null,
+		(e) => e,
+	);
+
+	// El status y el `payload` se conservan tal cual: son los que
+	// `toCarteraOrpcError` convierte en el mensaje que ve la persona, en vez del
+	// "Internal server error" genérico.
+	expect(error).toBeInstanceOf(Error);
+	expect(error.status).toBe(403);
+	expect(error.payload.message).toBe(
+		"Solo un ADMIN puede abrir accesos al portal",
+	);
+
+	expect(llamadas).toBe(1);
+	expect(reautenticaciones).toBe(0);
+	// Un 403 es la identidad rechazada: otro token de la misma cuenta de
+	// servicio vuelve con el mismo 403, así que el cacheado no se tira.
+	expect(tokensTirados).toBe(0);
+});
+
+test("un 401 tampoco se reenvía, pero sí tira el token cacheado", async () => {
+	let llamadas = 0;
+	const client = new CarteraBackClient({
+		baseUrl: "https://cartera.test",
+		retryAttempts: 0,
+		accessTokenProvider: async () => "test-token",
+		fetchTransport: fetchTransport(async () => {
+			llamadas += 1;
+			return Response.json({ error: "unauthorized" }, { status: 401 });
+		}),
+	});
+
+	await expect(client.otorgarAccesoPortal([7])).rejects.toThrow(
+		"Authentication failed",
+	);
+
+	// La petición NO se repite; el token sí se invalida para que la SIGUIENTE
+	// llamada entre reautenticada. Quién repite el acto lo decide una persona.
+	expect(llamadas).toBe(1);
+	expect(reautenticaciones).toBe(0);
+	expect(tokensTirados).toBe(1);
+});
+
+// El contraste que prueba que lo anterior es un ESTRECHAMIENTO y no una
+// amputación: en una lectura no hay efecto que duplicar, así que el reenvío
+// reautenticado sigue vivo tal cual.
+test("una LECTURA sí se reenvía reautenticada ante un 401", async () => {
+	const esperado = {
+		estado: "ya_tenia" as const,
+		usuarioEmail: "ana@ejemplo.com",
+		resueltoPor: "dpi" as const,
+		advertencias: [] as string[],
+		motivo: null,
+	};
+	const tokens: string[] = [];
+	const client = new CarteraBackClient({
+		baseUrl: "https://cartera.test",
+		retryAttempts: 0,
+		accessTokenProvider: async () => "token-vencido",
+		fetchTransport: fetchTransport(async (_input, init) => {
+			const token = new Headers(init?.headers).get("authorization") ?? "";
+			tokens.push(token);
+			if (token === "Bearer token-vencido") {
+				return Response.json({ error: "unauthorized" }, { status: 401 });
+			}
+			return Response.json(esperado);
+		}),
+	});
+
+	expect(await client.consultarAccesoPortal(7)).toEqual(esperado);
+	expect(reautenticaciones).toBe(1);
+	expect(tokens).toEqual([
+		"Bearer token-vencido",
+		"Bearer token-reautenticado",
+	]);
+});
+
 test("un rechazo de cartera-back se propaga en vez de devolver datos vacíos", async () => {
 	const client = new CarteraBackClient({
 		baseUrl: "https://cartera.test",

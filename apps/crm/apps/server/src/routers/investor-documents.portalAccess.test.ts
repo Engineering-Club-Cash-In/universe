@@ -14,7 +14,12 @@ import { call, os } from "@orpc/server";
  * única constancia veraz de quién lo autorizó.
  */
 
+// `inserts` son las filas que QUEDARON escritas; `intentos` incluye también las
+// que la base rechazó. La diferencia entre las dos es la prueba de que la
+// constancia es best-effort y no puede tumbar la respuesta.
 const inserts: { tabla: unknown; valores: Record<string, any> }[] = [];
+const intentos: { tabla: unknown; valores: Record<string, any> }[] = [];
+let fallaDelInsert: Error | null = null;
 const idsEnviados: number[][] = [];
 let responderCartera: () => Promise<unknown> = async () => ({
 	message: "Procesados 1 inversionista(s)",
@@ -69,6 +74,10 @@ mock.module("../db", () => ({
 	db: {
 		insert: (tabla: unknown) => ({
 			values: async (valores: Record<string, any>) => {
+				intentos.push({ tabla, valores });
+				// El enum `acceso_portal` sin aplicar en ese ambiente, el pool, la FK
+				// de `performed_by`: la fila no entra y el insert TIRA.
+				if (fallaDelInsert) throw fallaDelInsert;
 				inserts.push({ tabla, valores });
 			},
 		}),
@@ -163,9 +172,36 @@ const contexto = () =>
 		},
 	}) as never;
 
+// Una respuesta de cartera con el desenlace que se quiera, sin correo enviado y
+// sin advertencias: así el ÚNICO que decide si hay fila es el estado/motivo, y
+// no los dos atajos que `exigeConstancia` resuelve antes.
+const desenlace = (over: {
+	estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+	motivo?: string | null;
+}) => ({
+	message: "Procesados 1 inversionista(s)",
+	resultados: [
+		{
+			inversionistaId: 7,
+			usuarioEmail: null as string | null,
+			correo: {
+				enviado: false,
+				plantilla: null as string | null,
+				redirigido: false,
+				destinatarioReal: null as string | null,
+			},
+			advertencias: [] as string[],
+			motivo: null as string | null,
+			...over,
+		},
+	],
+});
+
 describe("darAccesoPortal", () => {
 	beforeEach(() => {
 		inserts.length = 0;
+		intentos.length = 0;
+		fallaDelInsert = null;
 		idsEnviados.length = 0;
 		responderCartera = async () => respuestaCartera();
 	});
@@ -219,7 +255,121 @@ describe("darAccesoPortal", () => {
 		expect(inserts[0].valores.performedByName).toBe("sinnombre@clubcashin.com");
 	});
 
-	test("un tropiezo de red se propaga traducido y NO deja registro de éxito", async () => {
+	// ========================================================================
+	// QUÉ APRETONES DEJAN FILA (el cableado, no la función pura)
+	// ========================================================================
+
+	// LA PRUEBA QUE IMPORTA del guard. Apretar sobre una EMPRESA no crea nada y
+	// no manda ningún correo, y el camino de lectura contesta `omitida/es_empresa`
+	// para siempre, así que el botón NUNCA se apaga: se puede apretar sin
+	// límite. Sin el guard, cada apretón escribía una fila y la bitácora —que
+	// existe para conservar QUIÉN autorizó mandar una contraseña— quedaba
+	// enterrada bajo apretones que no autorizaron nada.
+	test("apretar sobre una EMPRESA no deja fila: no crea nada ni manda correo", async () => {
+		const respuesta = desenlace({
+			estado: "fallo",
+			motivo: "es_empresa_el_acceso_es_del_representante",
+		});
+		responderCartera = async () => respuesta;
+
+		const actual = await call(
+			investorDocumentsRouter.darAccesoPortal,
+			{ inversionistaId: 7 },
+			contexto(),
+		);
+
+		expect(intentos).toHaveLength(0);
+		// Y la respuesta llega igual: el front necesita el motivo para explicar
+		// por qué ese botón no le sirve a esta fila.
+		expect(actual).toEqual(respuesta);
+	});
+
+	// El hermano de la de arriba: si el guard se borrara, la de la empresa se
+	// pondría roja; si se invirtiera, esta. Las dos juntas lo fijan.
+	test("un desenlace sin correo ni advertencias SÍ deja fila si hubo acto", async () => {
+		responderCartera = async () => desenlace({ estado: "ya_tenia" });
+
+		await call(
+			investorDocumentsRouter.darAccesoPortal,
+			{ inversionistaId: 7 },
+			contexto(),
+		);
+
+		expect(inserts).toHaveLength(1);
+		expect(inserts[0].valores.details).toMatchObject({ estado: "ya_tenia" });
+		expect(inserts[0].valores.performedBy).toBe("usr_operador");
+	});
+
+	// Un `fallo` que cartera NO decide sola —se salió a la red y auth-google no
+	// contestó— es la duda, y la duda registra.
+	test("un fallo con un motivo que cartera no decidió sola deja fila", async () => {
+		responderCartera = async () =>
+			desenlace({ estado: "fallo", motivo: "timeout" });
+
+		await call(
+			investorDocumentsRouter.darAccesoPortal,
+			{ inversionistaId: 7 },
+			contexto(),
+		);
+
+		expect(inserts).toHaveLength(1);
+		expect(inserts[0].valores.details).toMatchObject({
+			estado: "fallo",
+			motivo: "timeout",
+		});
+	});
+
+	// ========================================================================
+	// LA CONSTANCIA NO PUEDE TUMBAR LA RESPUESTA
+	// ========================================================================
+
+	// Cuando esto corre, la cuenta ya existe y el correo YA SALIÓ. Si el insert
+	// tirara y el throw subiera, el navegador mostraría un rojo de "falló" sobre
+	// algo que sí ocurrió y quien apretó volvería a apretar. Es el invariante al
+	// revés: por perder la constancia se perdía además la verdad.
+	test("si la bitácora truena, la respuesta del acto irreversible llega igual", async () => {
+		fallaDelInsert = new Error(
+			'invalid input value for enum investor_activity_log_action: "acceso_portal"',
+		);
+		const errores: unknown[][] = [];
+		const consolaOriginal = console.error;
+		console.error = (...args: unknown[]) => {
+			errores.push(args);
+		};
+
+		try {
+			const actual = await call(
+				investorDocumentsRouter.darAccesoPortal,
+				{ inversionistaId: 7 },
+				contexto(),
+			);
+
+			expect(actual).toEqual(respuestaCartera());
+		} finally {
+			console.error = consolaOriginal;
+		}
+
+		// Se intentó y no quedó: entonces el log es la ÚNICA constancia, y tiene
+		// que traer la fila entera para poder reconstruirla a mano.
+		expect(intentos).toHaveLength(1);
+		expect(inserts).toHaveLength(0);
+		expect(errores).toHaveLength(1);
+		const gritado = errores[0].map(String).join(" ");
+		expect(gritado).toContain("investor_activity_log");
+		expect(gritado).toContain("usr_operador");
+		expect(gritado).toContain("ana@ejemplo.com");
+	});
+
+	// ========================================================================
+	// CUANDO LA LLAMADA NI SIQUIERA VUELVE
+	// ========================================================================
+
+	// LA PRUEBA QUE IMPORTA de la duda real. El salto CRM→cartera se corta
+	// mientras cartera sigue dentro de su `fetch` a auth-google: la contraseña
+	// puede estar en el buzón del inversionista. Antes esto no dejaba NADA, y el
+	// reintento lo enterraba —la cuenta ya existe, cartera contesta `ya_tenia` y
+	// el segundo apretón sale en verde—.
+	test("un tropiezo de red se propaga traducido y DEJA constancia de la duda", async () => {
 		responderCartera = async () => {
 			throw new Error("socket hang up");
 		};
@@ -232,6 +382,70 @@ describe("darAccesoPortal", () => {
 			),
 		).rejects.toThrow("Dar acceso al portal: cartera no está respondiendo");
 
+		expect(inserts).toHaveLength(1);
+		expect(inserts[0].valores).toMatchObject({
+			inversionistaId: 7,
+			action: "acceso_portal",
+			performedBy: "usr_operador",
+			performedByName: "Operador Real",
+		});
+		// No se inventa un desenlace de cartera: cartera no contestó.
+		expect(inserts[0].valores.details).toMatchObject({
+			estado: "sin_respuesta_de_cartera",
+			advertencias: ["no_se_sabe_si_la_contrasena_salio"],
+			motivo: "socket hang up",
+			httpStatus: null,
+			correo: null,
+		});
+	});
+
+	// Un 5xx tampoco descarta el efecto: cartera pudo haber entrado a
+	// provisionar y caerse después.
+	test("un 5xx de cartera deja constancia de la duda", async () => {
+		responderCartera = async () => {
+			throw new moduloReal.CarteraBackHttpError("HTTP 502: bad gateway", 502, {
+				error: "bad gateway",
+			});
+		};
+
+		await expect(
+			call(
+				investorDocumentsRouter.darAccesoPortal,
+				{ inversionistaId: 7 },
+				contexto(),
+			),
+		).rejects.toThrow();
+
+		expect(inserts).toHaveLength(1);
+		expect(inserts[0].valores.details).toMatchObject({
+			estado: "sin_respuesta_de_cartera",
+			httpStatus: 502,
+		});
+	});
+
+	// Y si encima la bitácora truena, lo que sube es el error de CARTERA: es lo
+	// que explica qué pasó. El de la base se grita al log.
+	test("si la bitácora truena en la rama de falla, sube el error de cartera", async () => {
+		responderCartera = async () => {
+			throw new Error("socket hang up");
+		};
+		fallaDelInsert = new Error("no hay conexión con la base del CRM");
+		const consolaOriginal = console.error;
+		console.error = () => {};
+
+		try {
+			await expect(
+				call(
+					investorDocumentsRouter.darAccesoPortal,
+					{ inversionistaId: 7 },
+					contexto(),
+				),
+			).rejects.toThrow("Dar acceso al portal: cartera no está respondiendo");
+		} finally {
+			console.error = consolaOriginal;
+		}
+
+		expect(intentos).toHaveLength(1);
 		expect(inserts).toHaveLength(0);
 	});
 
@@ -260,7 +474,11 @@ describe("darAccesoPortal", () => {
 			),
 		).rejects.toThrow("Solo un ADMIN puede abrir accesos al portal");
 
-		expect(inserts).toHaveLength(0);
+		// Y NO deja fila, al revés que el timeout: el 403 es la primera línea de
+		// `otorgarAccesoPortal.ts`, así que cartera no llegó a provisionar nada.
+		// Que eso siga siendo cierto depende de que el cliente no reenvíe el POST
+		// reautenticado (`cartera-back-client.portalAccess.test.ts`).
+		expect(intentos).toHaveLength(0);
 	});
 
 	test("rechaza un id que no es un entero positivo antes de salir a cartera", async () => {

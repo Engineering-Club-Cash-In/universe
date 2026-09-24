@@ -22,9 +22,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
+	ETIQUETA_SIN_CERRAR,
 	estaAnulado,
 	type FirmanteDeContrato,
+	firmadoSinCerrar,
 	firmantesEnFicha,
+	identidadesFallidas,
 } from "@/lib/contract-signers-display";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client } from "@/utils/orpc";
@@ -266,6 +269,13 @@ function ContratoFila({
 	const inactivo = estaAnulado(contract);
 	// Uno en papel no está "pendiente" de nadie en WeeTrust: se imprime y se
 	// firma a mano. Anulado sí se muestra como anulado.
+	// Firmado por todos y sin cerrar allá: WeeTrust no cierra el documento hasta
+	// que la verificación facial salga válida. "Pendiente" ahí parece que falta
+	// que alguien firme, y no falta nadie.
+	const sinCerrar =
+		!reemplazado &&
+		!firmaEnPapel &&
+		firmadoSinCerrar(contract.status, signatories);
 	const estado =
 		reemplazado && contract.status === "pending"
 			? { label: "Reemplazado", className: ESTADO.cancelled.className }
@@ -275,7 +285,9 @@ function ContratoFila({
 						className:
 							"border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-400",
 					}
-				: ESTADO[contract.status];
+				: sinCerrar
+					? ETIQUETA_SIN_CERRAR
+					: ESTADO[contract.status];
 	const firmantes = firmaEnPapel ? [] : firmantesEnFicha(signatories, contract);
 
 	const hayVencidos = firmantes.some((f) => f.vencido);
@@ -299,9 +311,20 @@ function ContratoFila({
 			client.getContractSigningStatus({ contractId: contract.id }),
 		onSuccess: (data) => {
 			const firmados = data.signatories.filter((f) => f.isSigned).length;
-			toast.success(
-				`${firmados} de ${data.signatories.length} firmaron (${data.status})`,
-			);
+			const cuenta = `${firmados} de ${data.signatories.length} firmaron (${data.status})`;
+			// Si la verificación facial de alguien no pasó, WeeTrust no cierra el
+			// documento: hay que decirlo, porque "2 de 2 firmaron (PENDING)" no lo
+			// explica.
+			const fallaron = identidadesFallidas(data.signatories);
+			if (fallaron.length > 0) {
+				toast.warning(
+					`${cuenta}, pero la verificación facial de ${fallaron
+						.map((f) => f.name)
+						.join(", ")} no pasó`,
+				);
+			} else {
+				toast.success(cuenta);
+			}
 			onUpdate?.();
 		},
 		onError: (error: Error) => toast.error(error.message),
@@ -351,7 +374,11 @@ function ContratoFila({
 				</div>
 				<div className="flex shrink-0 items-center gap-2">
 					<EtiquetaSubidoAMano apiResponse={contract.apiResponse} />
-					<Badge variant="outline" className={`${estado.className} text-xs`}>
+					<Badge
+						variant="outline"
+						className={`${estado.className} text-xs`}
+						title={"title" in estado ? estado.title : undefined}
+					>
 						{estado.label}
 					</Badge>
 					{/* El de observador es el link que importa acá: muestra el documento

@@ -146,3 +146,71 @@ export function estaAnulado(contract: {
 }): boolean {
 	return contract.status === "cancelled" || !!contract.replacedByContractId;
 }
+
+/**
+ * El documento tiene todas las firmas y WeeTrust igual no lo cerró.
+ *
+ * WeeTrust sólo cierra un documento (COMPLETED) cuando, además de las firmas,
+ * la verificación facial de quien la lleva salió válida. Si esa verificación
+ * falló, el documento se queda en PENDING con todo firmado y no avanza más: hay
+ * que repetirla. Mientras siga abierto no existe el PDF firmado —el generador
+ * no lo entrega— y por eso el contrato tampoco puede quedar "Firmado".
+ *
+ * Se distingue en la ficha porque "En firma" ahí parece que falta que alguien
+ * firme, y no falta nadie.
+ */
+export function firmadoSinCerrar(
+	estado: string,
+	firmantes: { status?: string | null }[] | undefined,
+): boolean {
+	return (
+		estado === "pending" &&
+		!!firmantes?.length &&
+		firmantes.every((f) => f.status === "signed")
+	);
+}
+
+/** Cómo se rotula mientras no se sabe por qué no cerró. */
+export const ETIQUETA_SIN_CERRAR = {
+	label: "Sin cerrar",
+	className:
+		"border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-400",
+	title:
+		"Ya firmaron todos, pero WeeTrust no ha cerrado el documento. Suele ser la verificación facial: si no pasó, hay que repetirla para que el contrato quede firmado.",
+} as const;
+
+/** Y cuando WeeTrust ya dijo que la verificación facial no pasó. */
+export const ETIQUETA_IDENTIDAD_FALLIDA = {
+	label: "Identidad fallida",
+	className: "border-red-500/50 bg-red-500/15 text-red-700 dark:text-red-400",
+	title:
+		"Firmaron todos, pero la verificación facial no pasó y WeeTrust no cierra el documento. Hay que repetir la verificación.",
+} as const;
+
+/**
+ * Un firmante tal como lo devuelve la consulta a WeeTrust, con lo que contó de
+ * su verificación facial.
+ */
+export interface FirmanteConBiometria {
+	name?: string;
+	signatoryID?: string;
+	biometric?: {
+		logID?: string | null;
+		finished: boolean;
+		valid: boolean;
+		resultUrl?: string | null;
+	} | null;
+}
+
+/**
+ * Los firmantes cuya verificación facial terminó y no pasó.
+ *
+ * Mientras haya uno, el documento no cierra por más que estén todas las firmas.
+ */
+export function identidadesFallidas<T extends FirmanteConBiometria>(
+	firmantes: T[] | undefined,
+): T[] {
+	return (firmantes ?? []).filter(
+		(f) => f.biometric?.finished && !f.biometric.valid,
+	);
+}

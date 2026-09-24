@@ -22,6 +22,10 @@ import {
 	EtiquetaSubidoAMano,
 	RevisarSubidoAMano,
 } from "@/components/contracts/SubidoAMano";
+import {
+	EtiquetaIdentidadOmitida,
+	VerificacionFacialFallida,
+} from "@/components/contracts/VerificacionFacialFallida";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,10 +36,14 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import {
+	ETIQUETA_IDENTIDAD_FALLIDA,
+	ETIQUETA_SIN_CERRAR,
 	ETIQUETAS_DE_INVERSIONES,
 	estaAnulado,
 	type FirmanteDeContrato,
+	firmadoSinCerrar,
 	firmantesEnFicha,
+	identidadesFallidas,
 } from "@/lib/contract-signers-display";
 import { client, orpc } from "@/utils/orpc";
 
@@ -116,13 +124,56 @@ function FilaDeContrato({
 }) {
 	const [regenerando, setRegenerando] = useState(false);
 
-	const estado = ESTADO[contrato.status] ?? ESTADO.pending;
 	const inactivo = estaAnulado(contrato);
 	const firmantes = firmantesEnFicha(
 		contrato.firmantes,
 		contrato,
 		ETIQUETAS_DE_INVERSIONES,
 	);
+	const sinCerrar = firmadoSinCerrar(contrato.status, contrato.firmantes);
+
+	// Con todo firmado y el contrato en "pendiente", la ficha le pregunta a
+	// WeeTrust sola: o el documento acaba de cerrar —y entonces hay que refrescar
+	// para que aparezcan el PDF firmado, la batería y el espejo en cartera— o no
+	// va a cerrar nunca, y lo que hace falta es saber por qué. Se apaga en los
+	// dos casos: no tiene sentido seguir preguntando.
+	const cierreQuery = useQuery({
+		queryKey: ["cierre-de-contrato", contrato.id],
+		queryFn: async () => {
+			const enWeeTrust = await client.getInvestorContractSigningStatus({
+				contractId: contrato.id,
+			});
+			if (enWeeTrust.status === "COMPLETED") onCambio();
+			return enWeeTrust;
+		},
+		enabled: sinCerrar,
+		refetchInterval: (query) => {
+			const datos = query.state.data;
+			if (!datos) return 20_000;
+			if (datos.status === "COMPLETED") return false;
+			return identidadesFallidas(datos.signatories).length > 0 ? false : 20_000;
+		},
+		// Sólo con la ficha a la vista: cada consulta llega hasta WeeTrust.
+		refetchIntervalInBackground: false,
+		retry: false,
+	});
+
+	// Quién no pasó la verificación facial. Es la explicación de por qué el
+	// documento no cierra.
+	//
+	// Sólo mientras siga sin cerrar: la respuesta de WeeTrust se queda en caché
+	// después de que el contrato se firma, y sin esto el aviso seguía puesto en
+	// un contrato ya cerrado —el caso de omitir, que cierra justamente con la
+	// verificación fallida—.
+	const fallaronIdentidad = sinCerrar
+		? identidadesFallidas(cierreQuery.data?.signatories)
+		: [];
+
+	const estado = !sinCerrar
+		? (ESTADO[contrato.status] ?? ESTADO.pending)
+		: fallaronIdentidad.length > 0
+			? ETIQUETA_IDENTIDAD_FALLIDA
+			: ETIQUETA_SIN_CERRAR;
 
 	const actualizarEstado = useMutation({
 		mutationFn: () =>
@@ -131,9 +182,19 @@ function FilaDeContrato({
 			const firmados = estadoDeFirma.signatories.filter(
 				(f) => f.isSigned,
 			).length;
-			toast.success(
-				`${firmados} de ${estadoDeFirma.signatories.length} firmaron`,
-			);
+			const cuenta = `${firmados} de ${estadoDeFirma.signatories.length} firmaron`;
+			// Decirlo acá también: "2 de 2 firmaron" con el contrato en "En firma"
+			// no se entiende sin saber que lo que falló fue la identificación.
+			const fallaron = identidadesFallidas(estadoDeFirma.signatories);
+			if (fallaron.length > 0) {
+				toast.warning(
+					`${cuenta}, pero la verificación facial de ${fallaron
+						.map((f) => f.name)
+						.join(", ")} no pasó`,
+				);
+			} else {
+				toast.success(cuenta);
+			}
 			onCambio();
 		},
 		onError: (error: Error) => toast.error(error.message),
@@ -143,71 +204,107 @@ function FilaDeContrato({
 
 	const alguienFirmo = firmantes.some((f) => f.estado === "signed");
 	const hayVencidos = firmantes.some((f) => f.vencido);
-	const puedeRegenerar = alguienFirmo || hayVencidos;
+	// Regenerar emite otro documento y tumba TODAS las firmas. Con el contrato
+	// firmado no hay nada que renovar, y con todas las firmas puestas y el
+	// documento sin cerrar tampoco: ahí lo que falta es la identidad, y para eso
+	// están los botones de arriba, que no tocan a quien ya firmó.
+	const puedeRegenerar =
+		contrato.status !== "signed" && !sinCerrar && (alguienFirmo || hayVencidos);
 
 	return (
 		<div className="rounded-md border bg-background p-2.5">
-			{/* Encabezado: qué contrato es, cómo va y el enlace de seguimiento */}
-			<div className="flex flex-wrap items-start justify-between gap-2">
-				<div className="min-w-0 flex-1">
-					<p className="truncate font-medium text-sm">
-						{contrato.contractName}
+			{/* Encabezado: qué contrato es, cómo va y el enlace de seguimiento.
+			    En dos filas: en la rejilla de tres columnas, las etiquetas y el
+			    nombre peleando por el mismo renglón dejaban el nombre en una letra
+			    y tres puntos. */}
+			<div className="min-w-0">
+				<p className="truncate font-medium text-sm">{contrato.contractName}</p>
+				{emitidoEl(contrato.generatedAt) && (
+					<p className="truncate text-[11px] text-muted-foreground">
+						{emitidoEl(contrato.generatedAt)}
 					</p>
-					{emitidoEl(contrato.generatedAt) && (
-						<p className="truncate text-[11px] text-muted-foreground">
-							{emitidoEl(contrato.generatedAt)}
-						</p>
-					)}
-				</div>
-				<div className="flex flex-wrap items-center justify-end gap-1">
-					<EtiquetaSubidoAMano apiResponse={contrato.apiResponse} />
-					<Badge variant="outline" className={`${estado.className} text-xs`}>
-						{estado.label}
-					</Badge>
-					{/* El documento, sin entrar a WeeTrust. Mientras se firma es el
+				)}
+			</div>
+			<div className="mt-1.5 flex flex-wrap items-center gap-1">
+				<EtiquetaSubidoAMano apiResponse={contrato.apiResponse} />
+				<EtiquetaIdentidadOmitida apiResponse={contrato.apiResponse} />
+				<Badge
+					variant="outline"
+					className={`${estado.className} text-xs`}
+					title={"title" in estado ? estado.title : undefined}
+				>
+					{estado.label}
+				</Badge>
+				{/* El documento, sin entrar a WeeTrust. Mientras se firma es el
 					    borrador que se emitió; cuando terminan de firmar es el firmado,
 					    que se baja una sola vez y queda guardado. */}
-					{contrato.pdfUrl && (
-						<Button variant="outline" size="sm" asChild className="h-6 px-2 text-xs">
-							<a
-								href={contrato.pdfUrl}
-								target="_blank"
-								rel="noopener noreferrer"
-								className="flex items-center gap-1"
-								title={
-									contrato.pdfFirmado
-										? "Abrir el PDF con las firmas"
-										: "Abrir el PDF del contrato, todavía sin firmas"
-								}
-							>
-								<FileText className="h-3 w-3" />
-								{contrato.pdfFirmado ? "PDF firmado" : "PDF"}
-							</a>
-						</Button>
-					)}
-					{/* El de observador es el único que se puede pasar sin riesgo:
-					    muestra el documento y cómo va la firma, sin dejar firmar. */}
-					{contrato.observerUrl && !inactivo && (
-						<Button
-							variant="outline"
-							size="sm"
-							asChild
-							className="h-6 px-2 text-[11px] text-muted-foreground hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-950/40 dark:hover:text-violet-300"
+				{contrato.pdfUrl && (
+					<Button
+						variant="outline"
+						size="sm"
+						asChild
+						className="h-6 px-2 text-xs"
+					>
+						<a
+							href={contrato.pdfUrl}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="flex items-center gap-1"
+							title={
+								contrato.pdfFirmado
+									? "Abrir el PDF con las firmas"
+									: "Abrir el PDF del contrato, todavía sin firmas"
+							}
 						>
-							<a
-								href={contrato.observerUrl}
-								target="_blank"
-								rel="noopener noreferrer"
-								className="flex items-center gap-1"
-								title="Ver el documento y cómo va la firma (no permite firmar)"
-							>
-								<Eye className="h-3 w-3" />
-								Seguimiento
-							</a>
-						</Button>
-					)}
-				</div>
+							<FileText className="h-3 w-3" />
+							{contrato.pdfFirmado ? "PDF firmado" : "PDF"}
+						</a>
+					</Button>
+				)}
+				{/* El de observador es el único que se puede pasar sin riesgo:
+					    muestra el documento y cómo va la firma, sin dejar firmar. */}
+				{contrato.observerUrl && !inactivo && (
+					<Button
+						variant="outline"
+						size="sm"
+						asChild
+						className="h-6 px-2 text-[11px] text-muted-foreground hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-950/40 dark:hover:text-violet-300"
+					>
+						<a
+							href={contrato.observerUrl}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="flex items-center gap-1"
+							title="Ver el documento y cómo va la firma (no permite firmar)"
+						>
+							<Eye className="h-3 w-3" />
+							Seguimiento
+						</a>
+					</Button>
+				)}
 			</div>
+
+			{/* Por qué un contrato con todas las firmas sigue abierto, y las dos
+			    salidas que tiene. Sin esto la ficha decía "En firma" y no había
+			    forma de saber que lo que falta no es que alguien firme, sino que
+			    WeeTrust no le creyó la identidad. */}
+			{fallaronIdentidad.length > 0 && !inactivo && (
+				<div className="mt-2">
+					<VerificacionFacialFallida
+						firmantes={fallaronIdentidad}
+						resolver={(accion) =>
+							client.retryInvestorContractBiometric({
+								contractId: contrato.id,
+								accion,
+							})
+						}
+						onResuelto={() => {
+							cierreQuery.refetch();
+							onCambio();
+						}}
+					/>
+				</div>
+			)}
 
 			{/* Mientras falta firmar, el subido a mano pide un vistazo: después ya no
 			    hay nada que corregir. */}
@@ -325,12 +422,10 @@ function FilaDeContrato({
 						Actualizar estado
 					</Button>
 
-					{/* Con la misma regla que en ventas: aparece una vez que alguien
-					    firmó —incluso si firmaron todos, que es el caso en que la firma
-					    existe pero no sirve— o si algún enlace venció, que si no
-					    dejaría a esa persona sin forma de firmar. Antes de eso no hay
-					    nada que renovar y el botón sólo sirve para tirar abajo los
-					    enlaces que acaban de salir. */}
+					{/* Aparece cuando alguien firmó y todavía falta firmar, o si algún
+					    enlace venció, que si no dejaría a esa persona sin forma de
+					    firmar. Antes de eso no hay nada que renovar y el botón sólo
+					    sirve para tirar abajo los enlaces que acaban de salir. */}
 					{puedeRegenerar && (
 						<Button
 							variant="ghost"
@@ -495,10 +590,7 @@ export function InvestorContractsCard({
 									<p className="font-medium text-foreground/80 text-xs">
 										{tituloDeLaCompra(grupo[0]?.bateria)}
 									</p>
-									<Badge
-										variant="secondary"
-										className="h-5 px-1.5 text-[11px]"
-									>
+									<Badge variant="secondary" className="h-5 px-1.5 text-[11px]">
 										{grupo.length}
 									</Badge>
 								</div>

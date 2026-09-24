@@ -12,6 +12,7 @@ import { useState } from "react";
 import type { MOTIVOS_DE_ANULACION } from "server/src/lib/contratos-anulacion";
 import { AnularContratoDialog } from "@/components/contracts/AnularContratoDialog";
 import { EtiquetaSubidoAMano } from "@/components/contracts/SubidoAMano";
+import { EtiquetaIdentidadOmitida } from "@/components/contracts/VerificacionFacialFallida";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,8 +22,19 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { estaAnulado } from "@/lib/contract-signers-display";
+import {
+	ETIQUETA_IDENTIDAD_FALLIDA,
+	ETIQUETA_SIN_CERRAR,
+	estaAnulado,
+	firmadoSinCerrar,
+	identidadesFallidas,
+} from "@/lib/contract-signers-display";
 import { client, orpc } from "@/utils/orpc";
+
+/** Lo que contesta WeeTrust de un documento, tal como lo relaya el CRM. */
+type EstadoEnWeeTrust = Awaited<
+	ReturnType<typeof client.getInvestorContractSigningStatus>
+>;
 
 const ESTADO: Record<string, { label: string; className: string }> = {
 	pending: {
@@ -93,6 +105,44 @@ export function ContratosDeLaBateria({
 	const vigentes = contratos.filter((c) => !estaAnulado(c));
 	const anulados = contratos.filter((c) => estaAnulado(c));
 
+	// Los que tienen todas las firmas y WeeTrust igual no cerró. Se les pregunta
+	// solo: o acaban de cerrar —y la batería sale de la lista de jurídico— o no
+	// van a cerrar, y entonces hay que decir por qué. Se apaga en los dos casos.
+	const sinCerrar = vigentes.filter((c) =>
+		firmadoSinCerrar(c.status, c.firmantes),
+	);
+	const cierreQuery = useQuery({
+		queryKey: ["cierre-de-bateria", sinCerrar.map((c) => c.id).join(",")],
+		queryFn: async () => {
+			const porContrato: Record<string, EstadoEnWeeTrust> = {};
+			let alguno = false;
+			for (const contrato of sinCerrar) {
+				const enWeeTrust = await client.getInvestorContractSigningStatus({
+					contractId: contrato.id,
+				});
+				porContrato[contrato.id] = enWeeTrust;
+				if (enWeeTrust.status === "COMPLETED") alguno = true;
+			}
+			if (alguno) refrescar();
+			return porContrato;
+		},
+		enabled: sinCerrar.length > 0,
+		refetchInterval: (query) => {
+			const datos = Object.values(query.state.data ?? {});
+			if (datos.length === 0) return 20_000;
+			// Cerrado, o con la identidad fallida, ya no cambia solo.
+			const resueltos = datos.every(
+				(d) =>
+					d.status === "COMPLETED" ||
+					identidadesFallidas(d.signatories).length > 0,
+			);
+			return resueltos ? false : 20_000;
+		},
+		// Sólo con la pantalla a la vista: cada consulta llega hasta WeeTrust.
+		refetchIntervalInBackground: false,
+		retry: false,
+	});
+
 	if (contratosQuery.isLoading) {
 		return (
 			<Card>
@@ -114,15 +164,27 @@ export function ContratosDeLaBateria({
 					Contratos de esta batería
 				</CardTitle>
 				<CardDescription>
-					Mientras falte firmar se pueden corregir. Los enlaces de cada
-					firmante están en la ficha del inversionista.
+					Mientras falte firmar se pueden corregir. Los enlaces de cada firmante
+					están en la ficha del inversionista.
 				</CardDescription>
 			</CardHeader>
 
 			<CardContent className="space-y-2">
 				{[...vigentes, ...anulados].map((contrato) => {
-					const estado = ESTADO[contrato.status] ?? ESTADO.pending;
 					const inactivo = estaAnulado(contrato);
+					const abierto = firmadoSinCerrar(contrato.status, contrato.firmantes);
+					// Sólo el badge: qué hacer con la identidad lo resuelve inversiones
+					// desde la ficha; jurídico reemplaza o anula. Y sólo mientras el
+					// documento siga sin cerrar: lo que contestó WeeTrust se queda en
+					// caché, y el badge seguía en rojo en un contrato ya firmado.
+					const fallaronIdentidad = abierto
+						? identidadesFallidas(cierreQuery.data?.[contrato.id]?.signatories)
+						: [];
+					const estado = !abierto
+						? (ESTADO[contrato.status] ?? ESTADO.pending)
+						: fallaronIdentidad.length > 0
+							? ETIQUETA_IDENTIDAD_FALLIDA
+							: ETIQUETA_SIN_CERRAR;
 					const firmado = contrato.status === "signed";
 
 					return (
@@ -144,7 +206,12 @@ export function ContratosDeLaBateria({
 							</div>
 
 							<EtiquetaSubidoAMano apiResponse={contrato.apiResponse} />
-							<Badge variant="outline" className={`${estado.className} text-xs`}>
+							<EtiquetaIdentidadOmitida apiResponse={contrato.apiResponse} />
+							<Badge
+								variant="outline"
+								className={`${estado.className} text-xs`}
+								title={"title" in estado ? estado.title : undefined}
+							>
 								{estado.label}
 							</Badge>
 

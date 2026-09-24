@@ -162,6 +162,7 @@ describe("buildInstallmentRemainderReplication", () => {
         membresias: "743.24",
       },
       aplicadoALaCuota: "2000",
+      filaAnulada: false,
     });
 
     expect(replica).toEqual({
@@ -194,6 +195,7 @@ describe("buildInstallmentRemainderReplication", () => {
           membresias: "0",
         },
         aplicadoALaCuota: "10",
+        filaAnulada: false,
       }),
     ).toBeNull();
   });
@@ -212,6 +214,7 @@ describe("buildInstallmentRemainderReplication", () => {
           membresias: "0",
         },
         aplicadoALaCuota: "10",
+        filaAnulada: false,
       }),
     ).toBeNull();
   });
@@ -236,6 +239,37 @@ describe("buildInstallmentRemainderReplication", () => {
           membresias: "0",
         },
         aplicadoALaCuota: "0",
+        filaAnulada: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("no replica cuando la fila que se revierte YA ESTÁ ANULADA (paymentFalse)", () => {
+    // `falsePayment` (controllers/payments.ts) anula con sólo
+    // `set({ pagado: false, paymentFalse: true })`: CONSERVA los `abono_*`, así
+    // que `aplicadoALaCuota` no es cero y la guarda de arriba no la atrapa. Pero
+    // la fila anulada está fuera de la contabilidad de la cuota (el saldo
+    // replicado se estampa con `paymentFalse = false`), así que devolverle sus
+    // abonos al saldo es DOBLE CONTEO.
+    //
+    // Cuota de Q1,000: el pago A cobra 400 → se anula → el pago B cobra 600 y
+    // salda la cuota. Reversar A con réplica dejaría el saldo en Q1,000 (400 de
+    // la fila anulada + los 600 que el saldo vivo ya no debe) y el próximo pago
+    // le re-cobraría Q600 al cliente que no debe nada.
+    expect(
+      buildInstallmentRemainderReplication({
+        cuotaId: 55,
+        creditoId: 9234,
+        restantes: {
+          capital: "400",
+          interes: "0",
+          iva: "0",
+          seguro: "0",
+          gps: "0",
+          membresias: "0",
+        },
+        aplicadoALaCuota: "400",
+        filaAnulada: true,
       }),
     ).toBeNull();
   });

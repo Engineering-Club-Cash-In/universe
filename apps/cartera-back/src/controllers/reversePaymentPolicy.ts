@@ -163,20 +163,42 @@ export type ReplicaRestantesCuota = {
  * estampa CERO en todas las filas vivas de esa cuota abierta, borrándole el
  * saldo real: la cuota queda incobrable y el pago siguiente la cierra corta,
  * el mismo defecto que este helper vino a arreglar, invertido.
+ *
+ * Y devuelve `null` cuando la fila que se revierte YA ESTÁ ANULADA
+ * (`filaAnulada`, o sea `paymentFalse = true`). `falsePayment`
+ * (controllers/payments.ts) anula haciendo sólo
+ * `set({ pagado: false, paymentFalse: true })`: CONSERVA los `abono_*` y los
+ * `*_restante` de la fila, así que la guarda de `aplicadoALaCuota === 0` no la
+ * atrapa. Pero una fila anulada está FUERA de la contabilidad de la cuota
+ * —`insertPayment` estampa el saldo replicado con `paymentFalse = false`
+ * (registerPayment.ts), y el saldo que hoy llevan las hermanas vivas ya no
+ * cuenta esa plata—, así que devolverle sus abonos al saldo replicado es doble
+ * conteo: estampa en las hermanas VIVAS un saldo que incluye plata que ya no
+ * existe. Contraejemplo: cuota de Q1,000; el pago A cobra 400 → se anula → el
+ * pago B cobra 600 y salda la cuota; reversar A dejaría el saldo en Q1,000
+ * cuando el cliente no debe nada, y el próximo pago le re-cobra Q600.
+ *
+ * Ojo: esto NO rechaza la reversa de una fila anulada — hoy es la única vía que
+ * limpia la fila zombi con sus boletas e inversionistas. Sólo se salta la
+ * réplica del saldo, que es lo que corrompería a las hermanas.
  */
 export function buildInstallmentRemainderReplication({
   cuotaId,
   creditoId,
   restantes,
   aplicadoALaCuota,
+  filaAnulada,
 }: {
   cuotaId?: number | null;
   creditoId?: number | null;
   restantes: RestantesRestaurados;
   aplicadoALaCuota: string | number | Big;
+  /** `pagos_credito.paymentFalse` de la fila que se está revirtiendo. */
+  filaAnulada: boolean;
 }): ReplicaRestantesCuota | null {
   if (cuotaId === null || cuotaId === undefined) return null;
   if (creditoId === null || creditoId === undefined) return null;
+  if (filaAnulada) return null;
   if (new Big(aplicadoALaCuota ?? 0).eq(0)) return null;
 
   return {

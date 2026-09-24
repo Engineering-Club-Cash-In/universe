@@ -538,6 +538,36 @@ describe("reversePayment replica el saldo restaurado a toda la cuota", () => {
 
     expect(replicas).toHaveLength(0);
   });
+
+  // `reversePayment` ACEPTA filas anuladas (los únicos guards de admisión son el
+  // estado del crédito y el de INCOBRABLE) y tiene que seguir aceptándolas: hoy
+  // es la única vía que limpia la fila zombi con sus boletas e inversionistas.
+  // Lo que no debe hacer es replicar su saldo: `falsePayment` anula con sólo
+  // `pagado: false, paymentFalse: true` y CONSERVA los `abono_*`, así que la
+  // guarda de `aplicadoALaCuota === 0` no la atrapa, y la fila anulada está
+  // fuera de la contabilidad de la cuota (el saldo replicado se estampa con
+  // `paymentFalse = false`).
+  //
+  // Cuota de Q1,000: el pago A cobra 400 → se anula → el pago B cobra 600 y
+  // salda la cuota. Reversar A replicando dejaría el saldo en Q1,000 y el
+  // próximo pago le re-cobraría Q600 al cliente que ya no debe nada.
+  test("fila ya ANULADA (paymentFalse): la reversa corre pero NO replica saldo a las hermanas vivas", async () => {
+    const replicas = await reversarYCapturarReplicas(
+      {
+        ...pagoDeCuota,
+        paymentFalse: true,
+        pagado: false,
+        abono_capital: "400",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_seguro: "0",
+        membresias_pago: "0",
+      },
+      3,
+    );
+
+    expect(replicas).toHaveLength(0);
+  });
 });
 
 describe("reversePayment cuenta SÓLO las filas vivas de la cuota", () => {

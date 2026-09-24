@@ -441,6 +441,16 @@ export function createReversePayment(
           membresias: nuevoMembresiasRestante,
         },
         aplicadoALaCuota,
+        // Y hay un segundo caso: la fila YA ESTÁ ANULADA. `falsePayment` anula
+        // con sólo `pagado: false, paymentFalse: true` — CONSERVA los `abono_*`,
+        // así que `aplicadoALaCuota` no es cero y la guarda de arriba no la
+        // atrapa. Pero la fila anulada está fuera de la contabilidad de la cuota
+        // (el saldo replicado se estampa con `paymentFalse = false`), así que
+        // devolverle sus abonos al saldo sería doble conteo: le estamparía a las
+        // hermanas VIVAS plata que ya no existe. La reversa de la fila anulada
+        // SÍ sigue (es la única vía que limpia la fila zombi); lo que se salta
+        // es la réplica. Ver el helper.
+        filaAnulada: pago.paymentFalse === true,
       });
 
       // Se llama DESPUÉS de la mutación de cada rama (reset de la fila, o su

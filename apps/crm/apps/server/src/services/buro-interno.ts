@@ -92,6 +92,24 @@ async function registrarEvento(
 	});
 }
 
+/**
+ * Candado de Postgres que serializa las escrituras del buró con la aprobación
+ * del análisis. Sin él, la huella de `huellaEvaluacionSql` es solo una foto:
+ * en READ COMMITTED un alta que se confirma mientras corre el UPDATE de
+ * aprobación no la invalida. Lo toman las dos puntas, así que una espera a la
+ * otra y la huella siempre se evalúa contra un catálogo quieto.
+ *
+ * Es por transacción: se libera solo al terminar, sin nada que desbloquear a
+ * mano. El orden es siempre candado → escritura, así que no hay abrazos.
+ */
+export async function tomarCandadoBuroInterno(
+	ejecutor: Pick<typeof db, "execute">,
+): Promise<void> {
+	await ejecutor.execute(
+		sql`SELECT pg_advisory_xact_lock(hashtext('buro_interno'))`,
+	);
+}
+
 /** "" y espacios cuentan como vacío */
 function textoOpcional(valor: string | null | undefined): string | null {
 	const limpio = valor?.trim();
@@ -534,6 +552,8 @@ export async function crearPersona(
 
 	try {
 		return await db.transaction(async (tx) => {
+			await tomarCandadoBuroInterno(tx);
+
 			const [persona] = await tx
 				.insert(buroInternoPersonas)
 				.values({ ...limpios, creadoPor: actor.id })
@@ -591,6 +611,8 @@ export async function actualizarPersona(
 
 	try {
 		return await db.transaction(async (tx) => {
+			await tomarCandadoBuroInterno(tx);
+
 			// `activo` va en el mismo UPDATE: si alguien lo retiró después de la
 			// lectura de arriba, no se toca la fila ni se anota una edición
 			// posterior a su baja
@@ -631,6 +653,8 @@ export async function desactivarPersona(
 	actor: ActorBuroInterno,
 ): Promise<BuroInternoPersona> {
 	return db.transaction(async (tx) => {
+		await tomarCandadoBuroInterno(tx);
+
 		const [persona] = await tx
 			.update(buroInternoPersonas)
 			.set({
@@ -731,6 +755,8 @@ export async function actualizarRegla(
 	const parametros = { ...anterior.parametros, ...validacion.parametros };
 
 	await db.transaction(async (tx) => {
+		await tomarCandadoBuroInterno(tx);
+
 		await tx
 			.insert(buroInternoReglas)
 			.values({

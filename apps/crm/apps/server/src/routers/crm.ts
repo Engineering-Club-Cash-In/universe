@@ -178,6 +178,7 @@ import {
 	bloqueoBuroInterno,
 	huellaEvaluacion,
 	huellaEvaluacionSql,
+	tomarCandadoBuroInterno,
 } from "../services/buro-interno";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
@@ -4561,24 +4562,36 @@ export const crmRouter = {
 						)
 					: condicionesConDpi;
 
-				// Update opportunity with analysisStatus
-				const updatedRows = await db
-					.update(opportunities)
-					.set({
-						stageId: newStageId,
-						analysisStatus: input.approved ? "approved" : "rejected",
-						analysisRejectionCount: input.approved
-							? opportunity[0].analysisRejectionCount
-							: opportunity[0].analysisRejectionCount + 1,
-						lastAnalysisRejectedAt: input.approved ? null : new Date(),
-						lastAnalysisRejectedBy: input.approved ? null : context.userId,
-						notes: input.reason
-							? `${opportunity[0].notes || ""}\n\n[Análisis ${input.approved ? "Aprobado" : "Rechazado"}]: ${input.reason}`
-							: opportunity[0].notes,
-						updatedAt: new Date(),
-					})
-					.where(whereClause)
-					.returning();
+				// Update opportunity with analysisStatus.
+				// Cuando hay huella de buró, la escritura va dentro de una
+				// transacción que primero toma el candado que usan las escrituras
+				// del buró: así ninguna se confirma mientras se evalúa la huella,
+				// que por sí sola es una foto y en READ COMMITTED no alcanza.
+				const escribirAprobacion = (ejecutor: Pick<typeof db, "update">) =>
+					ejecutor
+						.update(opportunities)
+						.set({
+							stageId: newStageId,
+							analysisStatus: input.approved ? "approved" : "rejected",
+							analysisRejectionCount: input.approved
+								? opportunity[0].analysisRejectionCount
+								: opportunity[0].analysisRejectionCount + 1,
+							lastAnalysisRejectedAt: input.approved ? null : new Date(),
+							lastAnalysisRejectedBy: input.approved ? null : context.userId,
+							notes: input.reason
+								? `${opportunity[0].notes || ""}\n\n[Análisis ${input.approved ? "Aprobado" : "Rechazado"}]: ${input.reason}`
+								: opportunity[0].notes,
+							updatedAt: new Date(),
+						})
+						.where(whereClause)
+						.returning();
+
+				const updatedRows = huellaBuro
+					? await db.transaction(async (tx) => {
+							await tomarCandadoBuroInterno(tx);
+							return escribirAprobacion(tx);
+						})
+					: await escribirAprobacion(db);
 				// Check for concurrent modification
 				if (updatedRows.length === 0) {
 					// Con el chequeo atómico del buró interno, 0 filas también

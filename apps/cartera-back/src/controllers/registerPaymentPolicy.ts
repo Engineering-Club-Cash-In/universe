@@ -1600,10 +1600,16 @@ export const restaurarDisponibleTrasCorteEnCascada = ({
  *
  * De ahí los dos comportamientos distintos:
  *
- * - Sin nada escrito todavía, el `throw` es limpio: no hay fila, no hay
- *   boleta, no hay restantes tocados. El cajero ve el error, corrige la
- *   boleta y reintenta. Es el caso del crédito 9234 (la cuota corta es la
- *   primera que toca la boleta) y es exactamente la protección que se quiso.
+ * - Sin nada escrito todavía, el `throw` no deja fila de pago, ni boleta, ni
+ *   restantes tocados. El cajero ve el error, corrige la boleta y reintenta.
+ *   Es el caso del crédito 9234 (la cuota corta es la primera que toca la
+ *   boleta) y es exactamente la protección que se quiso. Ojo: "limpio" NO
+ *   quiere decir que la base esté intacta. `procesarPagoMora` corre antes del
+ *   loop y, si la boleta cubría la mora, ya dejó COMMITEADAS tres escrituras
+ *   (mora en 0 e inactiva, `statusCredit` → ACTIVO, fila DECREMENTO en
+ *   `moras_historial`). Por eso el `catch` de `insertPayment` compensa esa
+ *   mora con un `updateMora({tipo:"INCREMENTO", activa:true})` antes de
+ *   devolver el error — ver `debeRestituirMoraTrasRechazo`.
  *
  * - Con cuotas ya escritas, tirar es PEOR que no cobrar la cuota corta: la
  *   boleta queda a medias en la base (cuota 1 cobrada y marcada pagada,
@@ -1630,6 +1636,36 @@ export const decidirCierreCortoEnCascada = ({
   if (!rechazar) return "seguir";
   return yaSeEscribioAlgo ? "cortar" : "rechazar";
 };
+
+/**
+ * Cuando `insertPayment` rechaza el registro, ¿hay que devolverle la mora al
+ * crédito?
+ *
+ * La mora se descuenta ANTES del loop de cuotas (`procesarPagoMora` →
+ * `updateMora({tipo:"DECREMENTO"})`) y esa escritura queda commiteada: mora en
+ * 0 e inactiva, `statusCredit` → ACTIVO y una fila DECREMENTO en
+ * `moras_historial` que dice "Pago aplicado a mora". Si el registro después
+ * tira (el guard anti-sobreaplicación, o el rechazo por cierre corto de
+ * rubros) y no llegó a quedar ninguna fila de `pagos_credito`, el crédito se
+ * queda con la mora perdonada y con una constancia de un pago que no existe;
+ * `reversePayment` no lo arregla después porque sólo restituye la mora de un
+ * pago que la traía.
+ *
+ * Las dos condiciones son necesarias:
+ * - sin mora aplicada no hay nada que devolver;
+ * - CON un pago ya registrado, la mora está respaldada por esa fila y
+ *   devolverla sería cobrársela dos veces (el pago dice que la cubrió y la
+ *   mora volvería a estar viva).
+ */
+export const debeRestituirMoraTrasRechazo = ({
+  moraAplicada,
+  hayPagoRegistrado,
+}: {
+  /** Mora descontada en la base por este registro (`montoAplicadoMora`). */
+  moraAplicada: number;
+  /** ¿Quedó commiteada alguna fila de `pagos_credito` que respalde esa mora? */
+  hayPagoRegistrado: boolean;
+}): boolean => moraAplicada > 0 && !hayPagoRegistrado;
 
 /**
  * Con el recibo en cero (todos los `*_restante` de la fila en ~0), ¿la cuota

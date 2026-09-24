@@ -62,6 +62,7 @@ import {
   decidirCierrePorRestantesEnCero,
   evaluarCierreCuotaPorPlanos,
   decidirCierreCortoEnCascada,
+  debeRestituirMoraTrasRechazo,
   restaurarDisponibleTrasCorteEnCascada,
   evaluarRubrosPlanosCuota,
   calcularMontoAplicadoReportado,
@@ -637,6 +638,35 @@ export const insertPayment = async (
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
   let lockConn: PaymentAdvisoryLockConnection | undefined;
   let lockedCreditoId: number | undefined;
+  // ─────────────────────────────────────────────────────────────────────────
+  // 💸 MORA YA DESCONTADA EN BD QUE TODAVÍA NINGÚN PAGO RESPALDA
+  //
+  // `procesarPagoMora` corre ANTES del loop de cuotas y, cuando la boleta
+  // cubre la mora, COMMITEA tres escrituras vía `updateMora(DECREMENTO)`:
+  // `moras_credito` (monto en 0, `activa = false`), `creditos.statusCredit`
+  // → "ACTIVO", y una fila `DECREMENTO` en `moras_historial` con motivo
+  // "Pago aplicado a mora". `insertPayment` no tiene transacción envolvente,
+  // así que si después algo TIRA dentro del loop y no llegó a quedar ninguna
+  // fila de `pagos_credito`, el cliente se queda con la mora regalada y con
+  // una constancia en la bitácora que dice que se le aplicó un pago que no
+  // existe. `reversePayment` tampoco la restituye después: sólo restituye si
+  // el pago traía mora (`if (pago.mora && > 0)`), y acá no hay pago.
+  //
+  // Por eso la compensación vive en el `catch`, no en el sitio del throw:
+  // cubre los DOS throws con esta exposición dentro del loop —el guard
+  // anti-sobreaplicación (500, preexistente) y el rechazo por cierre corto de
+  // rubros (409)— y cualquier otro que aparezca en el futuro.
+  //
+  // ⚠️ CARRERA CONOCIDA CON EL CRON, ACEPTADA A CONCIENCIA: `procesarMoras`
+  // no toma el advisory lock de pagos, así que si corre justo en la ventana
+  // entre el DECREMENTO y esta compensación puede crear una fila de mora nueva
+  // y activa, y el INCREMENTO sumaría encima → mora duplicada. Es una ventana
+  // de milisegundos y su modo de falla es VISIBLE y reparable (queda rastro en
+  // `moras_historial`), mientras la alternativa —no compensar— pierde la mora
+  // en silencio y sin forma de detectarla.
+  // ─────────────────────────────────────────────────────────────────────────
+  let moraAplicadaSinRegistrar = 0;
+  let moraCreditoIdSinRegistrar: number | undefined;
   try {
     // 1. Validar schema
     const parseResult = (nexaPaymentEventId === undefined
@@ -845,6 +875,13 @@ export const insertPayment = async (
       stats,
       disponible,
     });
+    // Desde acá y hasta que quede commiteada una fila de pago, la mora está
+    // descontada en la base sin nada que la respalde (ver el comentario de la
+    // declaración). Si el registro termina en error, el `catch` la restituye.
+    if (resultadoMora.montoAplicadoMora > 0) {
+      moraAplicadaSinRegistrar = resultadoMora.montoAplicadoMora;
+      moraCreditoIdSinRegistrar = credito.credito_id;
+    }
     // Actualizar disponible
     disponible = new Big(resultadoMora.disponibleRestante);
     const montoCuota = new Big(credito.cuota);
@@ -874,6 +911,9 @@ export const insertPayment = async (
             observaciones,
             nexaPaymentEventId,
           });
+          // Ya hay fila de pago con `mora`: la mora está respaldada y
+          // compensarla sería regalarle el doble al crédito.
+          moraAplicadaSinRegistrar = 0;
         }
 
       }
@@ -897,6 +937,9 @@ export const insertPayment = async (
             observaciones,
             nexaPaymentEventId,
           });
+          // Ya hay fila de pago con `mora`: la mora está respaldada y
+          // compensarla sería regalarle el doble al crédito.
+          moraAplicadaSinRegistrar = 0;
         }
         return {
           message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
@@ -926,6 +969,9 @@ export const insertPayment = async (
           observaciones,
           nexaPaymentEventId,
         });
+        // Ya hay fila de pago con `mora`: la mora está respaldada y
+        // compensarla sería regalarle el doble al crédito.
+        moraAplicadaSinRegistrar = 0;
       }
       return {
         message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
@@ -1780,6 +1826,10 @@ export const insertPayment = async (
               // pisarla con el pago de cierre no destruye plata. Comportamiento
               // histórico para el caso normal.
               cuotas_completas++;
+              // A partir de esta cuota ya existe una fila de pago que respalda la
+              // mora descontada antes del loop: compensarla en el `catch` sería
+              // cobrarla dos veces.
+              moraAplicadaSinRegistrar = 0;
 
               // El UPDATE de esta fila y el marcado del ajuste (si aplica a la
               // cuota 1) van en una sola transacción: si el marcado falla, el
@@ -1859,6 +1909,10 @@ export const insertPayment = async (
               // parcial pero `pagado: true` y restantes en 0). El UPDATE masivo
               // de abajo marca toda la cuota como pagada.
               cuotas_completas++;
+              // A partir de esta cuota ya existe una fila de pago que respalda la
+              // mora descontada antes del loop: compensarla en el `catch` sería
+              // cobrarla dos veces.
+              moraAplicadaSinRegistrar = 0;
 
 
               const fechaGuatemala = paymentRegistrationDate();
@@ -2017,6 +2071,10 @@ export const insertPayment = async (
                 disponible_para_cuotasPosteriores.plus(disponible);
 
               cuotas_parciales++;
+              // A partir de esta cuota ya existe una fila de pago que respalda la
+              // mora descontada antes del loop: compensarla en el `catch` sería
+              // cobrarla dos veces.
+              moraAplicadaSinRegistrar = 0;
               const fechaGuatemala = paymentRegistrationDate();
 
 
@@ -2625,6 +2683,50 @@ export const insertPayment = async (
       };
     }
   } catch (error) {
+    // ── RESTITUIR LA MORA QUE SE DESCONTÓ SIN LLEGAR A REGISTRAR EL PAGO ───
+    // Va ANTES de armar cualquier respuesta, y es best-effort: si la
+    // compensación falla NO puede tapar el error original (el 409 del cierre
+    // corto y el 500 del guard anti-sobreaplicación tienen que salir igual que
+    // antes), sólo deja un grito en el log para repararlo a mano.
+    if (
+      debeRestituirMoraTrasRechazo({
+        moraAplicada: moraAplicadaSinRegistrar,
+        // Por construcción: `moraAplicadaSinRegistrar` se pone en 0 en cada
+        // sitio donde queda commiteada una fila de pago que respalda la mora,
+        // así que si acá sigue en > 0 es porque no hay ningún pago escrito.
+        hayPagoRegistrado: false,
+      }) &&
+      moraCreditoIdSinRegistrar !== undefined
+    ) {
+      try {
+        // Inverso exacto del `updateMora({tipo:"DECREMENTO"})` de
+        // `procesarPagoMora`. Con `INCREMENTO` + `activa: true` el `where` se
+        // relaja (`shouldReactivateMora` en latefee.ts), así que funciona
+        // aunque la fila haya quedado `activa = false`: restituye
+        // `monto_mora`, `activa` y `statusCredit` → MOROSO. Mismo patrón que
+        // usa `reversePayment` al reversar la mora de un pago anulado.
+        const restitucion = await updateMora({
+          credito_id: moraCreditoIdSinRegistrar,
+          monto_cambio: moraAplicadaSinRegistrar,
+          tipo: "INCREMENTO",
+          activa: true,
+          motivo:
+            "Rechazo de registro de pago: se restituye la mora que se había descontado sin llegar a registrar el pago",
+        });
+        if (!restitucion.success) {
+          throw new Error(restitucion.message);
+        }
+        moraAplicadaSinRegistrar = 0;
+      } catch (errorRestitucion) {
+        console.error(
+          `[registerPayment] 🚨 NO SE PUDO RESTITUIR LA MORA tras rechazar el ` +
+            `pago: crédito ${moraCreditoIdSinRegistrar} quedó con ` +
+            `Q${moraAplicadaSinRegistrar} de mora descontada SIN pago que la ` +
+            `respalde — reparar a mano. Causa: ` +
+            `${errorRestitucion instanceof Error ? errorRestitucion.message : String(errorRestitucion)}`,
+        );
+      }
+    }
 
     if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {
       set.status = 409;

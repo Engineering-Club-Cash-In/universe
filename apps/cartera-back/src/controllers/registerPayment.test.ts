@@ -1801,3 +1801,128 @@ describe("el aviso del corte también sale por el camino de abono a capital", ()
     ).toHaveLength(1);
   });
 });
+
+describe("cableado de la restitución de mora (que un rechazo no le regale la mora al cliente)", () => {
+  // Chequeo de CABLEADO, no de conducta: la decisión vive en
+  // `debeRestituirMoraTrasRechazo` (probada en registerPaymentPolicy.test.ts).
+  // Lo que no se puede afirmar desde el helper es el DÓNDE, que es justo el
+  // P1: `procesarPagoMora` corre antes del loop y COMMITEA el DECREMENTO de la
+  // mora (monto en 0, activa=false, statusCredit → ACTIVO, fila en
+  // moras_historial), así que un throw dentro del loop devolvía el error con la
+  // mora ya perdonada y sin ninguna fila de `pagos_credito` que la respalde —y
+  // `reversePayment` no la recupera después porque sólo restituye la mora de un
+  // pago que la traía.
+  // El archivo tiene varios try/catch, así que todo se mide DENTRO del cuerpo
+  // de `insertPayment`.
+  const cuerpoInsertPayment = (() => {
+    const inicio = registerPaymentSource.indexOf(
+      "export const insertPayment = async (",
+    );
+    if (inicio === -1) {
+      throw new Error("No se encontró insertPayment");
+    }
+    const fin = registerPaymentSource.indexOf(
+      "\nexport async function getPagosDelMesActual(",
+      inicio,
+    );
+    return registerPaymentSource.slice(inicio, fin);
+  })();
+
+  const bloqueCatch = (() => {
+    const ancla = cuerpoInsertPayment.indexOf(
+      "    if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {",
+    );
+    if (ancla === -1) {
+      throw new Error("No se encontró el catch de insertPayment");
+    }
+    const inicio = cuerpoInsertPayment.lastIndexOf("} catch (error) {", ancla);
+    const fin = cuerpoInsertPayment.indexOf("\n  } finally {", ancla);
+    return cuerpoInsertPayment.slice(inicio, fin);
+  })();
+
+  it("la variable se declara FUERA del try (si no, el catch no la ve)", () => {
+    const declaracion = cuerpoInsertPayment.indexOf(
+      "let moraAplicadaSinRegistrar = 0;",
+    );
+    const abreTry = cuerpoInsertPayment.indexOf("\n  try {");
+    expect(declaracion).toBeGreaterThan(-1);
+    expect(abreTry).toBeGreaterThan(-1);
+    expect(declaracion).toBeLessThan(abreTry);
+  });
+
+  it("se carga con lo que `procesarPagoMora` alcanzó a descontar", () => {
+    const inicio = cuerpoInsertPayment.indexOf(
+      "    const resultadoMora = await procesarPagoMora({",
+    );
+    expect(inicio).toBeGreaterThan(-1);
+    const bloque = cuerpoInsertPayment.slice(inicio, inicio + 1200);
+    expect(bloque).toContain("if (resultadoMora.montoAplicadoMora > 0) {");
+    expect(bloque).toContain(
+      "moraAplicadaSinRegistrar = resultadoMora.montoAplicadoMora;",
+    );
+    // El crédito también se guarda afuera: `credito_id` se destructura dentro
+    // del try y `lockedCreditoId` sólo se setea si este llamado tomó el lock.
+    expect(bloque).toContain("moraCreditoIdSinRegistrar = credito.credito_id;");
+  });
+
+  it("vuelve a 0 en CADA sitio donde queda commiteada una fila de pago", () => {
+    // Si falta en alguno, el catch compensaría una mora que el pago ya cubrió:
+    // doble cobro al cliente.
+    for (const contador of ["cuotas_completas\\+\\+;", "cuotas_parciales\\+\\+;"]) {
+      const total = [...cuerpoInsertPayment.matchAll(
+        new RegExp(` {14}${contador}`, "g"),
+      )];
+      expect(total.length).toBeGreaterThan(0);
+      const conReset = [...cuerpoInsertPayment.matchAll(
+        new RegExp(
+          ` {14}${contador}\\n(?: *\\/\\/[^\\n]*\\n)* *moraAplicadaSinRegistrar = 0;`,
+          "g",
+        ),
+      )];
+      expect(conReset.length).toBe(total.length);
+    }
+    // Los returns de éxito tempranos de sólo-mora: ahí la mora SÍ quedó
+    // registrada en la fila que `insertarPago` acaba de escribir.
+    const escritoresMora = [...cuerpoInsertPayment.matchAll(
+      /mora: resultadoMora\.montoAplicadoMora,[\s\S]{0,700}?\}\);\n(?:\s*\/\/[^\n]*\n)*\s*moraAplicadaSinRegistrar = 0;/g,
+    )];
+    expect(escritoresMora).toHaveLength(3);
+  });
+
+  it("el catch restituye con el INVERSO exacto del DECREMENTO y reactiva la fila", () => {
+    expect(bloqueCatch).toContain("debeRestituirMoraTrasRechazo({");
+    expect(bloqueCatch).toContain("await updateMora({");
+    expect(bloqueCatch).toContain("monto_cambio: moraAplicadaSinRegistrar,");
+    expect(bloqueCatch).toContain('tipo: "INCREMENTO",');
+    // `activa: true` no es decorativo: con INCREMENTO + activa relaja el
+    // `where` de updateMora (`shouldReactivateMora`), que es lo único que
+    // permite restituir una fila que el DECREMENTO dejó en activa=false.
+    expect(bloqueCatch).toContain("activa: true,");
+  });
+
+  it("la restitución va ANTES de armar cualquier respuesta de error", () => {
+    const restitucion = bloqueCatch.indexOf('tipo: "INCREMENTO",');
+    expect(restitucion).toBeGreaterThan(-1);
+    for (const respuesta of ["set.status = 409;", "set.status = 500;"]) {
+      expect(bloqueCatch.indexOf(respuesta)).toBeGreaterThan(restitucion);
+    }
+  });
+
+  it("es best-effort: si la restitución falla NO tapa el error original", () => {
+    // El 409 del cierre corto y el 500 del guard anti-sobreaplicación tienen
+    // que salir igual que antes; una falla al restituir sólo deja rastro en el
+    // log para repararla a mano.
+    const inicioTry = bloqueCatch.indexOf("      try {");
+    const cierreTry = bloqueCatch.indexOf("} catch (errorRestitucion) {");
+    expect(inicioTry).toBeGreaterThan(-1);
+    expect(cierreTry).toBeGreaterThan(inicioTry);
+    expect(bloqueCatch.indexOf('tipo: "INCREMENTO",')).toBeGreaterThan(inicioTry);
+    expect(bloqueCatch.indexOf('tipo: "INCREMENTO",')).toBeLessThan(cierreTry);
+    expect(bloqueCatch).toContain("console.error(");
+    // El grito tiene que traer crédito y monto: sin eso el rastro no sirve
+    // para reparar nada.
+    const bloqueLog = bloqueCatch.slice(bloqueCatch.indexOf("console.error("));
+    expect(bloqueLog).toContain("${moraCreditoIdSinRegistrar}");
+    expect(bloqueLog).toContain("${moraAplicadaSinRegistrar}");
+  });
+});

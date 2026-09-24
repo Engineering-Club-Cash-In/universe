@@ -2217,3 +2217,50 @@ describe("calcularMontoAplicadoReportado (que monto_aplicado no mienta tras un c
     ).toBe("0.00");
   });
 });
+
+describe("debeRestituirMoraTrasRechazo (que el rechazo no regale la mora)", () => {
+  const { debeRestituirMoraTrasRechazo } = registerPaymentPolicy;
+
+  it("restituye cuando se descontó mora y el registro no dejó ningún pago", () => {
+    // El defecto: `procesarPagoMora` corre ANTES del loop de cuotas y su
+    // DECREMENTO queda commiteado (mora en 0 e inactiva, statusCredit →
+    // ACTIVO, fila en moras_historial que dice "Pago aplicado a mora"). Si
+    // después el loop tira —el guard anti-sobreaplicación o el rechazo por
+    // cierre corto de rubros— el crédito se queda con la mora perdonada y con
+    // la constancia de un pago que no existe.
+    expect(
+      debeRestituirMoraTrasRechazo({
+        moraAplicada: 1234.56,
+        hayPagoRegistrado: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("NO restituye si ya hay un pago registrado que respalda la mora", () => {
+    // Doble cobro: la fila de `pagos_credito` dice que ese pago cubrió la
+    // mora, así que volver a activarla se la cobra dos veces al cliente.
+    expect(
+      debeRestituirMoraTrasRechazo({
+        moraAplicada: 1234.56,
+        hayPagoRegistrado: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("NO restituye cuando no se aplicó nada a mora", () => {
+    // Sin DECREMENTO no hay nada que devolver: un INCREMENTO acá le INVENTARÍA
+    // mora al crédito (y lo dejaría MOROSO) por un pago que ni la tocó.
+    expect(
+      debeRestituirMoraTrasRechazo({
+        moraAplicada: 0,
+        hayPagoRegistrado: false,
+      }),
+    ).toBe(false);
+    expect(
+      debeRestituirMoraTrasRechazo({
+        moraAplicada: 0,
+        hayPagoRegistrado: true,
+      }),
+    ).toBe(false);
+  });
+});

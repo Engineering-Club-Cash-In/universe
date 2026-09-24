@@ -59,6 +59,13 @@ import {
   internalNexaPagoSchema,
   getInternalNexaPaymentDate,
   cuentaComoHermanoVivo,
+  decidirCierrePorRestantesEnCero,
+  evaluarCierreCuotaPorPlanos,
+  decidirCierreCortoEnCascada,
+  debeRestituirMoraTrasRechazo,
+  restaurarDisponibleTrasCorteEnCascada,
+  evaluarRubrosPlanosCuota,
+  calcularMontoAplicadoReportado,
 } from "./registerPaymentPolicy";
 import {
   holdsPaymentAdvisoryLock,
@@ -631,6 +638,35 @@ export const insertPayment = async (
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
   let lockConn: PaymentAdvisoryLockConnection | undefined;
   let lockedCreditoId: number | undefined;
+  // ─────────────────────────────────────────────────────────────────────────
+  // 💸 MORA YA DESCONTADA EN BD QUE TODAVÍA NINGÚN PAGO RESPALDA
+  //
+  // `procesarPagoMora` corre ANTES del loop de cuotas y, cuando la boleta
+  // cubre la mora, COMMITEA tres escrituras vía `updateMora(DECREMENTO)`:
+  // `moras_credito` (monto en 0, `activa = false`), `creditos.statusCredit`
+  // → "ACTIVO", y una fila `DECREMENTO` en `moras_historial` con motivo
+  // "Pago aplicado a mora". `insertPayment` no tiene transacción envolvente,
+  // así que si después algo TIRA dentro del loop y no llegó a quedar ninguna
+  // fila de `pagos_credito`, el cliente se queda con la mora regalada y con
+  // una constancia en la bitácora que dice que se le aplicó un pago que no
+  // existe. `reversePayment` tampoco la restituye después: sólo restituye si
+  // el pago traía mora (`if (pago.mora && > 0)`), y acá no hay pago.
+  //
+  // Por eso la compensación vive en el `catch`, no en el sitio del throw:
+  // cubre los DOS throws con esta exposición dentro del loop —el guard
+  // anti-sobreaplicación (500, preexistente) y el rechazo por cierre corto de
+  // rubros (409)— y cualquier otro que aparezca en el futuro.
+  //
+  // ⚠️ CARRERA CONOCIDA CON EL CRON, ACEPTADA A CONCIENCIA: `procesarMoras`
+  // no toma el advisory lock de pagos, así que si corre justo en la ventana
+  // entre el DECREMENTO y esta compensación puede crear una fila de mora nueva
+  // y activa, y el INCREMENTO sumaría encima → mora duplicada. Es una ventana
+  // de milisegundos y su modo de falla es VISIBLE y reparable (queda rastro en
+  // `moras_historial`), mientras la alternativa —no compensar— pierde la mora
+  // en silencio y sin forma de detectarla.
+  // ─────────────────────────────────────────────────────────────────────────
+  let moraAplicadaSinRegistrar = 0;
+  let moraCreditoIdSinRegistrar: number | undefined;
   try {
     // 1. Validar schema
     const parseResult = (nexaPaymentEventId === undefined
@@ -839,6 +875,13 @@ export const insertPayment = async (
       stats,
       disponible,
     });
+    // Desde acá y hasta que quede commiteada una fila de pago, la mora está
+    // descontada en la base sin nada que la respalde (ver el comentario de la
+    // declaración). Si el registro termina en error, el `catch` la restituye.
+    if (resultadoMora.montoAplicadoMora > 0) {
+      moraAplicadaSinRegistrar = resultadoMora.montoAplicadoMora;
+      moraCreditoIdSinRegistrar = credito.credito_id;
+    }
     // Actualizar disponible
     disponible = new Big(resultadoMora.disponibleRestante);
     const montoCuota = new Big(credito.cuota);
@@ -868,6 +911,9 @@ export const insertPayment = async (
             observaciones,
             nexaPaymentEventId,
           });
+          // Ya hay fila de pago con `mora`: la mora está respaldada y
+          // compensarla sería regalarle el doble al crédito.
+          moraAplicadaSinRegistrar = 0;
         }
 
       }
@@ -891,6 +937,9 @@ export const insertPayment = async (
             observaciones,
             nexaPaymentEventId,
           });
+          // Ya hay fila de pago con `mora`: la mora está respaldada y
+          // compensarla sería regalarle el doble al crédito.
+          moraAplicadaSinRegistrar = 0;
         }
         return {
           message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
@@ -920,6 +969,9 @@ export const insertPayment = async (
           observaciones,
           nexaPaymentEventId,
         });
+        // Ya hay fila de pago con `mora`: la mora está respaldada y
+        // compensarla sería regalarle el doble al crédito.
+        moraAplicadaSinRegistrar = 0;
       }
       return {
         message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
@@ -1032,6 +1084,17 @@ export const insertPayment = async (
     // `cuotas_parciales`; este contador preserva esa semántica donde el
     // conteo tenía efectos observables (ajuste stale y guard anti-pérdida).
     let cuotas_saltadas = 0;
+    // Número de la cuota que quedó SIN cobrar porque sus rubros planos venían
+    // cortos y la boleta ya había escrito cuotas (ver
+    // `decidirCierreCortoEnCascada`). Tiene que salir en la respuesta: si no,
+    // el asesor ve "pago exitoso" y no se entera de que una cuota no se cobró
+    // y su plata se fue a saldo a favor.
+    let cuotaCortadaPorPlanosCortos: number | undefined;
+    // Monto que la iteración cortada ya había descontado del `disponible` y que
+    // se repone al cortar (ver `restaurarDisponibleTrasCorteEnCascada`): es la
+    // plata que NO se cobró en esa cuota y terminó en saldo a favor. Va en la
+    // respuesta para que el asesor sepa cuánto quedó sin aplicar.
+    let montoNoAplicadoPorCorte: Big | undefined;
     let disponible_para_cuotasPosteriores = new Big(0);
     let ultimoPagoInsertado: typeof pagos_credito.$inferSelect | undefined;
     for (const cuota of cuotasPendientes) {
@@ -1457,18 +1520,18 @@ export const insertPayment = async (
         const pagoExactoDeUnaCuota = montoEfectivo.eq(montoCuota);
         const faltanteContraCuota = montoCuota.minus(totalPagado);
 
-        if (
-          shouldApplyStaleZeroRestanteAdjustment({
-            hasExistingPayment: !!existingPago,
-            isFirstProcessedInstallment: esPrimeraCuotaProcesada,
-            isExactSingleInstallmentPayment: pagoExactoDeUnaCuota,
-            hasValidatedPayments: tienePagosValidados,
-            hasLastPartialPaymentWithRemaining: !!ultimoPagoParcialConRestante,
-            allRemainingZero: todosRestantesEnCero,
-            missingAgainstInstallment: faltanteContraCuota,
-            availableRemaining: disponible_restante,
-          })
-        ) {
+        const ajusteStaleZeroAplicado = shouldApplyStaleZeroRestanteAdjustment({
+          hasExistingPayment: !!existingPago,
+          isFirstProcessedInstallment: esPrimeraCuotaProcesada,
+          isExactSingleInstallmentPayment: pagoExactoDeUnaCuota,
+          hasValidatedPayments: tienePagosValidados,
+          hasLastPartialPaymentWithRemaining: !!ultimoPagoParcialConRestante,
+          allRemainingZero: todosRestantesEnCero,
+          missingAgainstInstallment: faltanteContraCuota,
+          availableRemaining: disponible_restante,
+        });
+
+        if (ajusteStaleZeroAplicado) {
 
           totalPagado = totalPagado.plus(faltanteContraCuota);
           disponible_restante = disponible_restante.minus(faltanteContraCuota);
@@ -1486,6 +1549,10 @@ export const insertPayment = async (
         // ─────────────────────────────────────────────────────────────────
         const totalProyectadoCuota = aplicadoPrevioCuota.plus(totalPagado);
 
+        // NO se le agrega el CUOTA_INTEGRITY_ERROR_PREFIX: este guard es
+        // preexistente y sigue saliendo como 500. Cambiarle el status es
+        // contrato que el front puede estar leyendo; queda fuera de alcance
+        // de este fix (que solo toca el rechazo por cierre corto de rubros).
         if (totalProyectadoCuota.gt(montoCuota.plus(TOLERANCIA_CENTAVO))) {
           throw new Error(
             `Pago rechazado: la cuota #${cuota.cuotas_credito.numero_cuota} quedaría ` +
@@ -1496,6 +1563,121 @@ export const insertPayment = async (
               `${totalPagado.toFixed(2)} más. Revisar los pagos previos de la cuota ` +
               `antes de registrar.`
           );
+        }
+
+
+        // ─────────────────────────────────────────────────────────────────
+        // 🛡️ RED DE SEGURIDAD ANTI-CIERRE POR DEBAJO (la simétrica de arriba)
+        //
+        // La distribución dice "ya no queda nada por cobrar en esta cuota"
+        // (todos los restantes en 0) pero los rubros PLANOS —seguro, GPS,
+        // membresías— no se juntaron completos. Eso NO es un redondeo: es una
+        // fila con los `*_restante` subestimados, y la cuota se cerraría con
+        // plata que nadie va a volver a cobrar (crédito 9234, cuota 1: seguro
+        // Q0.00 de Q245.00 y membresías Q107.16 de Q743.24).
+        //
+        // La medida va contra los planos y NO contra `montoCuota`: un recibo de
+        // cola vale legítimamente menos que `credito.cuota` cuando un abono
+        // grande a capital topó su capital proyectado (`recalcularPagosCredito`),
+        // así que un piso por monto de cuota rechazaría pagos correctos. Los
+        // planos salen de la cabecera del crédito, se siembran iguales en todas
+        // las cuotas y no se topan nunca.
+        //
+        // `*PrevioCuota` son Σ sobre `pagosHermanos`, que es el MISMO set que
+        // usó la distribución (incluye las `no_required` con plata vía
+        // `cuentaComoHermanoVivo`), así que no hay falso positivo por ahí.
+        // ─────────────────────────────────────────────────────────────────
+        const cierrePorDebajo = evaluarCierreCuotaPorPlanos({
+          // Excepción: el ajuste de restantes stale-cero ya consumió el monto
+          // EXACTO de una cuota entera del `disponible` (y sólo dispara sin
+          // hermanos validados ni parciales con restante). La cuota SÍ quedó
+          // cobrada completa; lo que no hay es itemización por rubro, así que
+          // medir los planos ahí daría un falso rechazo. No debilita el caso
+          // 9234: ese pago era de Q1,000 contra una cuota de Q2,998.48, o sea
+          // `isExactSingleInstallmentPayment` falso y el ajuste nunca corrió.
+          todosRestantesEnCero: todosRestantesEnCero && !ajusteStaleZeroAplicado,
+          cobrado: {
+            seguro: seguroPrevioCuota.plus(abono_seguro),
+            gps: gpsPrevioCuota.plus(abono_gps),
+            membresias: membresiasPrevioCuota.plus(abono_membresias),
+          },
+          objetivo: {
+            seguro: credito.seguro_10_cuotas ?? 0,
+            gps: credito.gps ?? 0,
+            membresias: credito.membresias_pago ?? 0,
+          },
+          tolerancia: TOLERANCIA_CENTAVO,
+        });
+
+        // Tirar o cortar NO es lo mismo, porque `insertPayment` no tiene
+        // transacción envolvente: el loop escribe con una transacción por
+        // iteración (más la fila, la boleta y la sincronización de restantes
+        // fuera de tx). Si esta es la primera cuota que toca la boleta no hay
+        // nada commiteado y el `throw` es limpio: el cajero corrige y
+        // reintenta (caso del crédito 9234). Si la boleta ya cascadeó y dejó
+        // cuotas escritas, tirar deja la boleta a medias en la base con un
+        // error al operador —y con banco + autorización el reintento choca
+        // contra el dedupe y lo deja trabado—, así que se corta: esta cuota no
+        // se cobra, se frena la cascada y el remanente sigue por el camino
+        // post-loop que ya existe.
+        const accionCierreCorto = decidirCierreCortoEnCascada({
+          rechazar: cierrePorDebajo.rechazar,
+          yaSeEscribioAlgo: cuotas_completas + cuotas_parciales > 0,
+        });
+
+        if (accionCierreCorto !== "seguir") {
+          const detalle = cierrePorDebajo.cortos
+            .map(
+              (corto) =>
+                `${corto.rubro}: se cobró ${corto.cobrado.toFixed(2)} de ` +
+                `${corto.objetivo.toFixed(2)} (faltan ${corto.faltante.toFixed(2)})`
+            )
+            .join("; ");
+
+          if (accionCierreCorto === "rechazar") {
+            // Es un rechazo de negocio, no una falla del servidor: se prefija
+            // con CUOTA_INTEGRITY_ERROR_PREFIX para que el catch genérico lo
+            // mapee a 409 (igual que los otros dos usos del prefijo), en vez
+            // de dejarlo caer como 500 "Internal server error".
+            throw new Error(
+              `${CUOTA_INTEGRITY_ERROR_PREFIX} Pago rechazado: la cuota #${cuota.cuotas_credito.numero_cuota} se ` +
+                `cerraría con rubros fijos cobrados de menos — ${detalle}. Los ` +
+                `saldos de la cuota vienen subestimados: revisar los saldos de los ` +
+                `pagos previos de esa cuota antes de registrar.`
+            );
+          }
+
+          console.warn(
+            `[registerPayment] cascada cortada por cierre corto: crédito ` +
+              `${credito.credito_id}, cuota #${cuota.cuotas_credito.numero_cuota} ` +
+              `no se cobró — ${detalle}. Las cuotas ya escritas de esta boleta se ` +
+              `conservan y el remanente queda disponible.`
+          );
+          // REPONER antes de cortar. La distribución de arriba ya descontó de
+          // `disponible_restante` todo lo que esta cuota iba a cobrar
+          // (`totalPagado`), y el `break` no escribe nada: sin reponer, esa
+          // plata no queda en la cuota, no llega al saldo a favor (el post-loop
+          // lee `disponible_restante`) y no sale en la respuesta — se evapora
+          // con el pago reportado exitoso. `totalPagado` es la cifra EXACTA
+          // descontada: es la suma de los seis abonos que decrementan el
+          // disponible, y el ajuste stale-cero (que también suma a
+          // `totalPagado`) es mutuamente excluyente con el corte porque la
+          // compuerta recibe `todosRestantesEnCero && !ajusteStaleZeroAplicado`.
+          // Ver el helper para el detalle.
+          disponible_restante = restaurarDisponibleTrasCorteEnCascada({
+            disponible: disponible_restante,
+            totalPagado,
+          });
+          // OJO: `montoNoAplicadoPorCorte` se toma de `disponible_restante`
+          // (ya repuesto), NO de `totalPagado`. El `break` de abajo no solo
+          // frena lo que esta cuota iba a cobrar: frena TODA la cascada, así
+          // que todo lo que quede en `disponible_restante` (incluyendo lo que
+          // habría ido a cuotas posteriores) termina en saldo a favor por el
+          // post-loop. `totalPagado` solo mide la porción de esta cuota y
+          // subestimaría lo no aplicado, inflando el aplicado reportado.
+          montoNoAplicadoPorCorte = disponible_restante;
+          cuotaCortadaPorPlanosCortos = cuota.cuotas_credito.numero_cuota;
+          break;
         }
 
         // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
@@ -1686,6 +1868,12 @@ export const insertPayment = async (
                 }
                 return rows;
               });
+              // Recién aquí, con la transacción cerrada, existe una fila de
+              // pago que respalda la mora descontada antes del loop:
+              // compensarla en el `catch` sería cobrarla dos veces. Si la
+              // transacción falla, no llegamos a esta línea y el flag sigue
+              // prendido para que el `catch` restituya.
+              moraAplicadaSinRegistrar = 0;
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
               }
@@ -1827,6 +2015,12 @@ export const insertPayment = async (
               }
               return rows;
               });
+              // Recién aquí, con la transacción cerrada, existe una fila de
+              // pago que respalda la mora descontada antes del loop:
+              // compensarla en el `catch` sería cobrarla dos veces. Si la
+              // transacción falla, no llegamos a esta línea y el flag sigue
+              // prendido para que el `catch` restituya.
+              moraAplicadaSinRegistrar = 0;
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
               }
@@ -1982,6 +2176,12 @@ export const insertPayment = async (
               }
               return rows;
               });
+              // Recién aquí, con la transacción cerrada, existe una fila de
+              // pago que respalda la mora descontada antes del loop:
+              // compensarla en el `catch` sería cobrarla dos veces. Si la
+              // transacción falla, no llegamos a esta línea y el flag sigue
+              // prendido para que el `catch` restituya.
+              moraAplicadaSinRegistrar = 0;
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
                 cuota1PagoId = pagoInsertado.pago_id;
               }
@@ -2053,7 +2253,13 @@ export const insertPayment = async (
 
     // Sólo después de intentar TODAS las cuotas pagables, el sobrante pequeño
     // final puede conservar la regla legacy de "otros".
-    if (shouldApplyFinalSmallRemainderAsOther({
+    //
+    // Salvo que la cascada se haya CORTADO: el disponible repuesto es plata que
+    // esta boleta no pudo cobrar en su cuota, no un sobrante de redondeo. Si el
+    // corte fue chico (≤ Q25), esta regla la estamparía como `otros` sobre la
+    // fila de la cuota ANTERIOR — cobrándosela a una cuota que no la cobró y
+    // disfrazando el corte. Con corte, el remanente sigue al saldo a favor.
+    if (cuotaCortadaPorPlanosCortos === undefined && shouldApplyFinalSmallRemainderAsOther({
       availableRemaining: disponible_restante,
       hasInsertedPayment: !!ultimoPagoInsertado?.pago_id,
     }) && ultimoPagoInsertado) {
@@ -2069,6 +2275,17 @@ export const insertPayment = async (
         .where(eq(pagos_credito.pago_id, ultimoPagoInsertado.pago_id));
       disponible_restante = new Big(0);
     }
+
+    // El corte de la cascada tiene que verse en TODAS las salidas de éxito, no
+    // sólo en la del pago normal: un pago mixto efectivo + abono a capital sale
+    // por el return de la sección 7 y reportaba éxito liso aunque una cuota
+    // quedara sin cobrar y su plata acreditada en silencio a saldo a favor.
+    const montoNoAplicadoPorCorteTexto =
+      montoNoAplicadoPorCorte?.toFixed(2) ?? null;
+    const fraseCorteEnCascada =
+      cuotaCortadaPorPlanosCortos !== undefined
+        ? `La cuota #${cuotaCortadaPorPlanosCortos} no se cobró: sus rubros fijos (seguro, GPS, membresías) vienen cortos y cerrarla dejaría de cobrarlos.${montoNoAplicadoPorCorteTexto ? ` Los Q${montoNoAplicadoPorCorteTexto} que quedaban por aplicar no se aplicaron y quedaron en saldo a favor.` : ""} Revisar sus saldos antes de reintentar.`
+        : "";
 
     // Jalar la última cuota con plata aplicada (ver `condicionUltimaCuotaPagada`
     // para el criterio y por qué NO se exige `cuotas_credito.pagado`). El
@@ -2233,6 +2450,14 @@ export const insertPayment = async (
         .insert(pagos_credito)
         .values(pagoData)
         .returning();
+      // Esta fila lleva `mora: moraBig`, y el único camino que llega acá con
+      // el flag prendido es el de mora cubierta completa (`pagoCompleto &&
+      // moraPagada`), que es justo donde `moraBig` quedó igualada a
+      // `resultadoMora.montoAplicadoMora`: la mora ya está respaldada. Igual
+      // que en la fila-rastro, el reset va ANTES del `commitConvenio` de unas
+      // líneas más abajo, que puede tirar y caer al `catch` — restituir ahí
+      // sería doble cobro.
+      moraAplicadaSinRegistrar = 0;
       if (new Big(pagoConvenioParaFila).gt(0)) {
         pagoConvenioPagoId = pagoInsertado.pago_id;
       }
@@ -2293,7 +2518,12 @@ export const insertPayment = async (
       return {
         success: true,
         message:
-          "Abono directo a capital registrado exitosamente (pendiente de validación)",
+          "Abono directo a capital registrado exitosamente (pendiente de validación)" +
+          (fraseCorteEnCascada ? `. ${fraseCorteEnCascada}` : ""),
+        detalle: {
+          cuota_no_cobrada_por_rubros_cortos: cuotaCortadaPorPlanosCortos ?? null,
+          monto_no_aplicado_por_corte: montoNoAplicadoPorCorteTexto,
+        },
         pago: {
           pago_id: pagoInsertado.pago_id,
           abono_capital: abonoCapital.toString(),
@@ -2409,6 +2639,14 @@ export const insertPayment = async (
           observaciones,
           nexaPaymentEventId,
         });
+        // La fila-rastro ya está escrita CON la mora (`mora:
+        // resultadoMora.montoAplicadoMora`): desde acá la mora descontada está
+        // respaldada por un pago y restituirla en el `catch` sería cobrársela
+        // dos veces al cliente. Importa que el reset quede ANTES del
+        // `commitConvenio` de unas líneas más abajo, que puede tirar (convenio
+        // sin fila persistida, o convenio que cambió y no pudo acreditarse) y
+        // llevar el flujo directo al `catch`.
+        moraAplicadaSinRegistrar = 0;
         if (new Big(pagoConvenioParaFila).gt(0)) {
           pagoConvenioPagoId = pagoEspecialInsertado.pago_id;
         }
@@ -2440,7 +2678,13 @@ export const insertPayment = async (
         }
       }
 
-      const montoTotal = montoBoleta.toString();
+      // Reporta lo que de verdad se aplicó, no la boleta a secas: si la
+      // cascada se cortó, la parte que se repuso a saldo a favor no cuenta
+      // como aplicada (ver doc de `calcularMontoAplicadoReportado`).
+      const montoTotal = calcularMontoAplicadoReportado({
+        montoBoleta,
+        montoNoAplicadoPorCorte,
+      }).toString();
 
       return {
         success: true,
@@ -2451,11 +2695,60 @@ export const insertPayment = async (
           monto_aplicado: montoTotal,
           saldo_sobrante: "0.00",
           capital_no_aplicado_a_saldo: capitalDevuelto.toString(),
+          cuota_no_cobrada_por_rubros_cortos: cuotaCortadaPorPlanosCortos ?? null,
+          // `saldo_sobrante` está hardcodeado a "0.00" (contrato preexistente),
+          // así que el monto que el corte dejó sin aplicar necesita su propio
+          // campo o no se ve en ninguna parte de la respuesta.
+          monto_no_aplicado_por_corte: montoNoAplicadoPorCorteTexto,
         },
-        resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. ${capitalDevuelto.gt(0) ? `El abono a capital de Q${capitalDevuelto.toString()} no se aplicó (el crédito no lo permite) y quedó en saldo a favor. ` : ""}Ya no queda saldo disponible.`,
+        resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. ${capitalDevuelto.gt(0) ? `El abono a capital de Q${capitalDevuelto.toString()} no se aplicó (el crédito no lo permite) y quedó en saldo a favor. ` : ""}${cuotaCortadaPorPlanosCortos !== undefined ? fraseCorteEnCascada : "Ya no queda saldo disponible."}`,
       };
     }
   } catch (error) {
+    // ── RESTITUIR LA MORA QUE SE DESCONTÓ SIN LLEGAR A REGISTRAR EL PAGO ───
+    // Va ANTES de armar cualquier respuesta, y es best-effort: si la
+    // compensación falla NO puede tapar el error original (el 409 del cierre
+    // corto y el 500 del guard anti-sobreaplicación tienen que salir igual que
+    // antes), sólo deja un grito en el log para repararlo a mano.
+    if (
+      debeRestituirMoraTrasRechazo({
+        moraAplicada: moraAplicadaSinRegistrar,
+        // Por construcción: `moraAplicadaSinRegistrar` se pone en 0 en cada
+        // sitio donde queda commiteada una fila de pago que respalda la mora,
+        // así que si acá sigue en > 0 es porque no hay ningún pago escrito.
+        hayPagoRegistrado: false,
+      }) &&
+      moraCreditoIdSinRegistrar !== undefined
+    ) {
+      try {
+        // Inverso exacto del `updateMora({tipo:"DECREMENTO"})` de
+        // `procesarPagoMora`. Con `INCREMENTO` + `activa: true` el `where` se
+        // relaja (`shouldReactivateMora` en latefee.ts), así que funciona
+        // aunque la fila haya quedado `activa = false`: restituye
+        // `monto_mora`, `activa` y `statusCredit` → MOROSO. Mismo patrón que
+        // usa `reversePayment` al reversar la mora de un pago anulado.
+        const restitucion = await updateMora({
+          credito_id: moraCreditoIdSinRegistrar,
+          monto_cambio: moraAplicadaSinRegistrar,
+          tipo: "INCREMENTO",
+          activa: true,
+          motivo:
+            "Rechazo de registro de pago: se restituye la mora que se había descontado sin llegar a registrar el pago",
+        });
+        if (!restitucion.success) {
+          throw new Error(restitucion.message);
+        }
+        moraAplicadaSinRegistrar = 0;
+      } catch (errorRestitucion) {
+        console.error(
+          `[registerPayment] 🚨 NO SE PUDO RESTITUIR LA MORA tras rechazar el ` +
+            `pago: crédito ${moraCreditoIdSinRegistrar} quedó con ` +
+            `Q${moraAplicadaSinRegistrar} de mora descontada SIN pago que la ` +
+            `respalde — reparar a mano. Causa: ` +
+            `${errorRestitucion instanceof Error ? errorRestitucion.message : String(errorRestitucion)}`,
+        );
+      }
+    }
 
     if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {
       set.status = 409;
@@ -3021,19 +3314,139 @@ async function aplicarPagoNormalEnTx(
               )
             )
             .limit(1);
-          if (hermanoPendiente) {
-            // La fila de cierre viene marcada pagado=true desde el registro
-            // (dejó su recibo en 0). Si se queda así ya validada, la mora
-            // tomaría la cuota como satisfecha aunque el hermano nunca se
-            // valide (latefee/procesarMoras excluyen cuotas con una fila viva
-            // pagado=true validated/no_required con monto>0). Mientras el
-            // cierre esté diferido, la fila viaja como parcial (pagado=false);
-            // cuotas_credito.pagado lo pone el hermano que cierra en RAMA B.
-            cierreDiferido = pago.pagado === true;
+          // La fila de cierre viene marcada pagado=true desde el registro (dejó
+          // su recibo en 0). Si se queda así ya validada, la mora tomaría la
+          // cuota como satisfecha aunque el hermano nunca se valide
+          // (latefee/procesarMoras excluyen cuotas con una fila viva
+          // pagado=true validated/no_required con monto>0). Mientras el cierre
+          // esté diferido, la fila viaja como parcial (pagado=false);
+          // cuotas_credito.pagado lo pone el hermano que cierra en RAMA B.
+          const decisionCierre = decidirCierrePorRestantesEnCero({
+            hayHermanoPendiente: !!hermanoPendiente,
+            filaPagada: pago.pagado === true,
+          });
+          cuotaCompleta = decisionCierre.cuotaCompleta;
+          cierreDiferido = decisionCierre.cierreDiferido;
 
-          } else {
-            cuotaCompleta = true;
+          if (decisionCierre.cuotaCompleta) {
+            // ─────────────────────────────────────────────────────────────
+            // ALERTA (no bloqueo): ¿los rubros PLANOS quedaron a medias?
+            //
+            // Este camino cierra la cuota porque la fila quedó con todos sus
+            // `*_restante` en ~0, lo cual es legítimo para el capital TOPADO
+            // (tras un abono grande el recibo de cola vale menos que
+            // `credito.cuota`). Pero el seguro, el GPS y las membresías no se
+            // topan nunca, así que si quedaron cortos es señal de restantes
+            // subestimados (crédito 9234, cuota 1: seguro Q0.00 de Q245.00 y
+            // membresías Q107.16 de Q743.24).
+            //
+            // Sólo ALERTA, a propósito: bloquear acá dejaría la cuota sin
+            // salida —el camino de la suma de validados nunca alcanza para un
+            // recibo de cola, y por RAMA A no se reescriben restantes ni se
+            // distribuye a inversionistas— o sea cuota abierta para siempre,
+            // que es peor que el cierre corto. La compuerta que RECHAZA está en
+            // el registro (`evaluarCierreCuotaPorPlanos` en `insertPayment`),
+            // donde la boleta todavía se puede corregir.
+            //
+            // El set de hermanas tiene que ser el MISMO que usa el registro:
+            // trae también las `no_required` y las filtra con
+            // `cuentaComoHermanoVivo`. Con el filtro por status solamente, una
+            // cuota cuyos planos los pagó una fila `no_required` con plata
+            // (crédito 890 / cuota 12) gritaría en falso.
+            const hermanasVivasCuota = (
+              await tx
+                .select({
+                  validationStatus: pagos_credito.validationStatus,
+                  monto_aplicado: pagos_credito.monto_aplicado,
+                  abono_capital: pagos_credito.abono_capital,
+                  abono_interes: pagos_credito.abono_interes,
+                  abono_iva_12: pagos_credito.abono_iva_12,
+                  abono_seguro: pagos_credito.abono_seguro,
+                  abono_gps: pagos_credito.abono_gps,
+                  membresias_pago: pagos_credito.membresias_pago,
+                  abono_interes_ci: pagos_credito.abono_interes_ci,
+                  abono_iva_ci: pagos_credito.abono_iva_ci,
+                  mora: pagos_credito.mora,
+                  pagoConvenio: pagos_credito.pagoConvenio,
+                  otros: pagos_credito.otros,
+                })
+                .from(pagos_credito)
+                .where(
+                  and(
+                    eq(pagos_credito.cuota_id, pago.cuota_id),
+                    eq(pagos_credito.credito_id, pago.credito_id),
+                    eq(pagos_credito.paymentFalse, false),
+                    inArray(pagos_credito.validationStatus, [
+                      "validated",
+                      "pending",
+                      "no_required",
+                    ]),
+                    ne(pagos_credito.pago_id, pago_id)
+                  )
+                )
+            ).filter(cuentaComoHermanoVivo);
 
+            // La fila en vuelo se suma aparte: en la BD todavía está `pending`
+            // y no queremos depender de su status.
+            const cobradoPlanos = hermanasVivasCuota.reduce(
+              (acc, fila) => ({
+                seguro: acc.seguro.plus(new Big(fila.abono_seguro ?? 0)),
+                gps: acc.gps.plus(new Big(fila.abono_gps ?? 0)),
+                membresias: acc.membresias.plus(
+                  new Big(fila.membresias_pago ?? 0)
+                ),
+              }),
+              {
+                seguro: new Big(pago.abono_seguro ?? 0),
+                gps: new Big(pago.abono_gps ?? 0),
+                membresias: new Big(pago.membresias_pago ?? 0),
+              }
+            );
+            const objetivoPlanos = {
+              seguro: credito.seguro_10_cuotas ?? 0,
+              gps: credito.gps ?? 0,
+              membresias: credito.membresias_pago ?? 0,
+            };
+            const planosCuota = evaluarRubrosPlanosCuota({
+              cobrado: cobradoPlanos,
+              objetivo: objetivoPlanos,
+            });
+
+            if (!planosCuota.cubiertos) {
+              // `console.warn` y no el logger estructurado a propósito: el
+              // logger del paquete tiene una denylist que prohíbe emitir
+              // `credito_id`/`cuota_id`/montos, que es justamente lo único que
+              // hace accionable este rastro. Cambiar esa denylist queda fuera
+              // del alcance de este fix.
+              //
+              // Sin `numero_cuota`: no está en `pago` y no vale una consulta
+              // extra dentro de la transacción sólo para un log; el `cuota_id`
+              // alcanza para encontrarla.
+              console.warn(
+                `⚠️ Cierre de cuota con rubros fijos cobrados de menos: la ` +
+                  `cuota cierra igual (no hay otra vía de cierre), pero hay ` +
+                  `saldos subestimados que revisar.`,
+                {
+                  credito_id: pago.credito_id,
+                  cuota_id: pago.cuota_id,
+                  seguro: {
+                    cobrado: cobradoPlanos.seguro.toFixed(2),
+                    objetivo: new Big(objetivoPlanos.seguro).toFixed(2),
+                    faltante: planosCuota.faltanteSeguro.toFixed(2),
+                  },
+                  gps: {
+                    cobrado: cobradoPlanos.gps.toFixed(2),
+                    objetivo: new Big(objetivoPlanos.gps).toFixed(2),
+                    faltante: planosCuota.faltanteGps.toFixed(2),
+                  },
+                  membresias: {
+                    cobrado: cobradoPlanos.membresias.toFixed(2),
+                    objetivo: new Big(objetivoPlanos.membresias).toFixed(2),
+                    faltante: planosCuota.faltanteMembresias.toFixed(2),
+                  },
+                }
+              );
+            }
           }
         }
       }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import Big from "big.js";
 import {
   getAjusteFechaIdealADeducir,
   recomputeCreditAfterCapital,
@@ -1762,5 +1763,504 @@ describe("esReciboSaldado vía filtrar — pagos exactos por la vía stale-zero"
       }),
     ];
     expect(filtrarAtrasadas(rows, "2273.80")).toHaveLength(1);
+  });
+});
+
+describe("evaluarRubrosPlanosCuota (qué puede cerrar el fallback de aplicar-pago)", () => {
+  const { evaluarRubrosPlanosCuota } = registerPaymentPolicy;
+
+  it("bloquea el cierre del crédito 9234: seguro 0.00 de 245.00 y membresías 107.16 de 743.24", () => {
+    // Los planos no se topan nunca: se cobran enteros en cada cuota. Que la fila
+    // del pago tenga sus restantes en 0 no significa que estén cobrados.
+    const evaluacion = evaluarRubrosPlanosCuota({
+      cobrado: { seguro: "0", gps: "0", membresias: "107.16" },
+      objetivo: { seguro: "245.00", gps: "0", membresias: "743.24" },
+    });
+
+    expect(evaluacion.cubiertos).toBe(false);
+    expect(evaluacion.faltanteSeguro.toFixed(2)).toBe("245.00");
+    expect(evaluacion.faltanteMembresias.toFixed(2)).toBe("636.08");
+    expect(evaluacion.faltanteGps.toFixed(2)).toBe("0.00");
+  });
+
+  it("deja cerrar el recibo de cola legítimo: capital topado pero planos completos", () => {
+    // Éste es el caso por el que el fallback existe: tras un abono grande el
+    // recibo vale menos que `credito.cuota`, pero seguro/GPS/membresías se
+    // cobraron enteros.
+    const evaluacion = evaluarRubrosPlanosCuota({
+      cobrado: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+      objetivo: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+    });
+
+    expect(evaluacion.cubiertos).toBe(true);
+  });
+
+  it("un crédito sin rubros planos no queda bloqueado", () => {
+    expect(
+      evaluarRubrosPlanosCuota({
+        cobrado: { seguro: "0", gps: "0", membresias: "0" },
+        objetivo: { seguro: "0", gps: "0", membresias: "0" },
+      }).cubiertos,
+    ).toBe(true);
+  });
+
+  it("tolera el centavo y no se queja de un sobre-cobro", () => {
+    expect(
+      evaluarRubrosPlanosCuota({
+        cobrado: { seguro: "244.99", gps: "150.01", membresias: "743.24" },
+        objetivo: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+      }).cubiertos,
+    ).toBe(true);
+  });
+});
+
+describe("evaluarCierreCuotaPorPlanos (la compuerta que RECHAZA al registrar)", () => {
+  const { evaluarCierreCuotaPorPlanos, cuentaComoHermanoVivo } =
+    registerPaymentPolicy;
+  const TOLERANCIA = 0.01;
+
+  /**
+   * Arma el `cobrado` igual que `insertPayment`: Σ de los planos de los
+   * hermanos VIVOS (los que pasan `cuentaComoHermanoVivo`) más lo que aplica el
+   * pago en vuelo.
+   */
+  const cobradoDe = (
+    hermanos: any[],
+    enVuelo: { seguro: string; gps: string; membresias: string },
+  ): { seguro: string; gps: string; membresias: string } =>
+    hermanos.filter((h) => cuentaComoHermanoVivo(h)).reduce(
+      (acc, h) => ({
+        seguro: new Big(acc.seguro).plus(h.abono_seguro ?? 0).toString(),
+        gps: new Big(acc.gps).plus(h.abono_gps ?? 0).toString(),
+        membresias: new Big(acc.membresias)
+          .plus(h.membresias_pago ?? 0)
+          .toString(),
+      }),
+      enVuelo,
+    );
+
+  it("RECHAZA el caso real del crédito 9234: seguro 0.00 de 245.00 y membresías 107.16 de 743.24", () => {
+    const decision = evaluarCierreCuotaPorPlanos({
+      todosRestantesEnCero: true,
+      cobrado: { seguro: "0", gps: "0", membresias: "107.16" },
+      objetivo: { seguro: "245.00", gps: "0", membresias: "743.24" },
+      tolerancia: TOLERANCIA,
+    });
+
+    expect(decision.rechazar).toBe(true);
+    expect(decision.cortos.map((c) => c.rubro)).toEqual([
+      "seguro",
+      "membresías",
+    ]);
+    expect(decision.cortos[0]?.faltante.toFixed(2)).toBe("245.00");
+    expect(decision.cortos[1]?.faltante.toFixed(2)).toBe("636.08");
+    // El GPS estaba en 0 de 0: no se reporta como corto.
+    expect(decision.cortos.map((c) => c.rubro)).not.toContain("GPS");
+  });
+
+  it("NO rechaza el recibo de cola con capital topado: vale menos que la cuota pero los planos están enteros", () => {
+    // NO-REGRESIÓN. Un piso medido contra `credito.cuota` (2,998.48) rechazaba
+    // este pago de 1,301.68, que es exactamente lo que el crédito pide después
+    // de un abono grande a capital: `recalcularPagosCredito` topa el capital
+    // proyectado del recibo de cola. Los planos, en cambio, no se topan nunca y
+    // acá están completos, así que el pago tiene que pasar.
+    const decision = evaluarCierreCuotaPorPlanos({
+      todosRestantesEnCero: true,
+      cobrado: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+      objetivo: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+      tolerancia: TOLERANCIA,
+    });
+
+    expect(decision.rechazar).toBe(false);
+    expect(decision.cortos).toEqual([]);
+  });
+
+  it("NO rechaza cuando los planos los cubrió una fila hermana `no_required` con plata", () => {
+    // Crédito 890 / cuota 12: una `no_required` que lleva plata aplicada y
+    // facturada es hermana VIVA. Filtrarla por status (validated/pending)
+    // dejaría los planos en cero y bloquearía la cuota para siempre.
+    const hermanaNoRequiredConPlata = {
+      validationStatus: "no_required",
+      monto_aplicado: "988.24",
+      abono_capital: "0",
+      abono_interes: "0",
+      abono_iva_12: "0",
+      abono_seguro: "245.00",
+      abono_gps: "0",
+      membresias_pago: "743.24",
+      abono_interes_ci: "0",
+      abono_iva_ci: "0",
+      mora: "0",
+      pagoConvenio: "0",
+      otros: null,
+    };
+    // Y una semilla virgen de SIFCO, que NO cuenta (no aporta nada).
+    const semillaSifco = {
+      validationStatus: "no_required",
+      monto_aplicado: "0",
+      abono_seguro: "0",
+      membresias_pago: "0",
+      otros: null,
+    };
+
+    expect(cuentaComoHermanoVivo(hermanaNoRequiredConPlata)).toBe(true);
+    expect(cuentaComoHermanoVivo(semillaSifco)).toBe(false);
+
+    const decision = evaluarCierreCuotaPorPlanos({
+      todosRestantesEnCero: true,
+      cobrado: cobradoDe([hermanaNoRequiredConPlata, semillaSifco], {
+        seguro: "0",
+        gps: "0",
+        membresias: "0",
+      }),
+      objetivo: { seguro: "245.00", gps: "0", membresias: "743.24" },
+      tolerancia: TOLERANCIA,
+    });
+
+    expect(decision.rechazar).toBe(false);
+  });
+
+  it("NO rechaza cuando el ajuste de restantes stale-cero ya consumió la cuota entera", () => {
+    // Ese ajuste (`shouldApplyStaleZeroRestanteAdjustment`) sólo dispara con el
+    // monto EXACTO de una cuota, sin hermanos validados y sin parcial con
+    // restante: la cuota SÍ quedó cobrada completa, lo que falta es la
+    // itemización por rubro. `insertPayment` le pasa entonces
+    // `todosRestantesEnCero: false` para no rechazar un pago correcto.
+    const staleZeroDisparo = registerPaymentPolicy.shouldApplyStaleZeroRestanteAdjustment(
+      {
+        hasExistingPayment: true,
+        isFirstProcessedInstallment: true,
+        isExactSingleInstallmentPayment: true,
+        hasValidatedPayments: false,
+        hasLastPartialPaymentWithRemaining: false,
+        allRemainingZero: true,
+        missingAgainstInstallment: "2998.48",
+        availableRemaining: "2998.48",
+      },
+    );
+    expect(staleZeroDisparo).toBe(true);
+
+    expect(
+      evaluarCierreCuotaPorPlanos({
+        todosRestantesEnCero: true && !staleZeroDisparo,
+        cobrado: { seguro: "0", gps: "0", membresias: "0" },
+        objetivo: { seguro: "245.00", gps: "0", membresias: "743.24" },
+        tolerancia: TOLERANCIA,
+      }).rechazar,
+    ).toBe(false);
+
+    // Y el caso 9234 NO pasa por esa puerta: Q1,000.00 contra una cuota de
+    // Q2,998.48 no es el monto exacto de una cuota.
+    expect(
+      registerPaymentPolicy.shouldApplyStaleZeroRestanteAdjustment({
+        hasExistingPayment: true,
+        isFirstProcessedInstallment: true,
+        isExactSingleInstallmentPayment: false,
+        hasValidatedPayments: false,
+        hasLastPartialPaymentWithRemaining: false,
+        allRemainingZero: true,
+        missingAgainstInstallment: "1998.48",
+        availableRemaining: "1998.48",
+      }),
+    ).toBe(false);
+  });
+
+  it("no se mete cuando la cuota queda parcial (quedan restantes vivos)", () => {
+    // Un parcial cobra de menos A PROPÓSITO: la cuota sigue abierta y el
+    // faltante se puede seguir cobrando.
+    expect(
+      evaluarCierreCuotaPorPlanos({
+        todosRestantesEnCero: false,
+        cobrado: { seguro: "0", gps: "0", membresias: "0" },
+        objetivo: { seguro: "245.00", gps: "0", membresias: "743.24" },
+        tolerancia: TOLERANCIA,
+      }).rechazar,
+    ).toBe(false);
+  });
+
+  it("un crédito sin rubros planos nunca queda bloqueado", () => {
+    expect(
+      evaluarCierreCuotaPorPlanos({
+        todosRestantesEnCero: true,
+        cobrado: { seguro: "0", gps: "0", membresias: "0" },
+        objetivo: { seguro: "0", gps: "0", membresias: "0" },
+        tolerancia: TOLERANCIA,
+      }).rechazar,
+    ).toBe(false);
+  });
+
+  it("tolera el centavo de redondeo y no se queja de un sobre-cobro", () => {
+    expect(
+      evaluarCierreCuotaPorPlanos({
+        todosRestantesEnCero: true,
+        cobrado: { seguro: "244.99", gps: "150.01", membresias: "743.24" },
+        objetivo: { seguro: "245.00", gps: "150.00", membresias: "743.24" },
+        tolerancia: TOLERANCIA,
+      }).rechazar,
+    ).toBe(false);
+  });
+});
+
+describe("decidirCierrePorRestantesEnCero (la validación NO se traba por planos)", () => {
+  const { decidirCierrePorRestantesEnCero } = registerPaymentPolicy;
+
+  it("cierra la cuota cuando no queda ningún hermano pendiente", () => {
+    expect(
+      decidirCierrePorRestantesEnCero({
+        hayHermanoPendiente: false,
+        filaPagada: true,
+      }),
+    ).toEqual({ cuotaCompleta: true, cierreDiferido: false });
+  });
+
+  it("difiere el cierre al hermano que falta validar, sin cerrar la cuota", () => {
+    expect(
+      decidirCierrePorRestantesEnCero({
+        hayHermanoPendiente: true,
+        filaPagada: true,
+      }),
+    ).toEqual({ cuotaCompleta: false, cierreDiferido: true });
+    expect(
+      decidirCierrePorRestantesEnCero({
+        hayHermanoPendiente: true,
+        filaPagada: false,
+      }),
+    ).toEqual({ cuotaCompleta: false, cierreDiferido: false });
+  });
+
+  it("la cobertura de los planos NO es una entrada de esta decisión", () => {
+    // Es el invariante que la versión anterior rompió: si los planos cortos
+    // pudieran impedir el cierre, la cuota de un recibo de cola quedaría
+    // abierta para siempre (por RAMA A no se reescriben restantes ni se
+    // distribuye a inversionistas). Los planos sólo dejan rastro.
+    expect(
+      decidirCierrePorRestantesEnCero({
+        hayHermanoPendiente: false,
+        filaPagada: false,
+        // Aunque se le grite que los planos están cortos, cierra igual.
+        planosCubiertos: false,
+      } as any),
+    ).toEqual({ cuotaCompleta: true, cierreDiferido: false });
+  });
+});
+
+describe("decidirCierreCortoEnCascada (tirar sólo si no se escribió nada)", () => {
+  const { decidirCierreCortoEnCascada } = registerPaymentPolicy;
+
+  // Se arma igual que en el call-site (`cuotas_completas + cuotas_parciales >
+  // 0`) para que el caso "ya hay una parcial" y el caso "ya hay una completa"
+  // sean dos escenarios distintos y no la misma constante escrita dos veces.
+  const yaSeEscribioAlgo = (completas: number, parciales: number) =>
+    completas + parciales > 0;
+
+  it("rechaza el pago cuando la cuota corta es la primera que toca la boleta", () => {
+    // El caso del crédito 9234: la cuota 1 es la primera del cascadeo, no hay
+    // ninguna fila commiteada, así que el throw es limpio — el cajero corrige
+    // la boleta y reintenta sin dejar nada a medias.
+    expect(
+      decidirCierreCortoEnCascada({
+        rechazar: true,
+        yaSeEscribioAlgo: yaSeEscribioAlgo(0, 0),
+      }),
+    ).toBe("rechazar");
+  });
+
+  it("corta la cascada cuando ya hay una cuota completa escrita", () => {
+    // 🔒 El candado: `insertPayment` no tiene transacción envolvente, así que
+    // la cuota anterior YA está commiteada (fila, pagado=true, boleta,
+    // restantes). Tirar acá deja la boleta a medias con un error al operador,
+    // y con banco + autorización el reintento choca contra el dedupe.
+    expect(
+      decidirCierreCortoEnCascada({
+        rechazar: true,
+        yaSeEscribioAlgo: yaSeEscribioAlgo(1, 0),
+      }),
+    ).toBe("cortar");
+  });
+
+  it("corta también cuando lo escrito es una parcial", () => {
+    // Una parcial escribe exactamente igual que una completa (misma fila,
+    // misma boleta, mismos restantes sincronizados): el daño de tirar es el
+    // mismo, de ahí que `yaSeEscribioAlgo` sume completas + parciales.
+    expect(
+      decidirCierreCortoEnCascada({
+        rechazar: true,
+        yaSeEscribioAlgo: yaSeEscribioAlgo(0, 1),
+      }),
+    ).toBe("cortar");
+  });
+
+  it("sigue de largo cuando no hay rechazo, haya o no cuotas escritas", () => {
+    // Sin rechazo la compuerta no opina: el cascadeo normal no se toca.
+    expect(
+      decidirCierreCortoEnCascada({
+        rechazar: false,
+        yaSeEscribioAlgo: yaSeEscribioAlgo(0, 0),
+      }),
+    ).toBe("seguir");
+    expect(
+      decidirCierreCortoEnCascada({
+        rechazar: false,
+        yaSeEscribioAlgo: yaSeEscribioAlgo(2, 1),
+      }),
+    ).toBe("seguir");
+  });
+});
+
+describe("restaurarDisponibleTrasCorteEnCascada (que el corte no evapore la plata)", () => {
+  const { restaurarDisponibleTrasCorteEnCascada } = registerPaymentPolicy;
+
+  // CONSERVACIÓN: la distribución de la cuota ya descontó `totalPagado` del
+  // disponible, y el corte no escribe nada. Lo que entró a la iteración tiene
+  // que ser exactamente lo que queda disponible al salir por el `break`: si no,
+  // el monto no queda en la cuota, no llega a saldo a favor (el post-loop lee
+  // `disponible_restante`) y no sale en la respuesta — se evapora con el pago
+  // reportado exitoso.
+  it("lo que entró a la iteración es lo que queda disponible al cortar", () => {
+    const disponibleAlEntrar = new Big("500.00");
+    const totalPagado = new Big("500.00");
+    const disponibleAlBreak = disponibleAlEntrar.minus(totalPagado);
+
+    expect(disponibleAlBreak.toFixed(2)).toBe("0.00");
+    expect(
+      restaurarDisponibleTrasCorteEnCascada({
+        disponible: disponibleAlBreak,
+        totalPagado,
+      }).toFixed(2),
+    ).toBe(disponibleAlEntrar.toFixed(2));
+  });
+
+  it("conserva también el sobrante que la cuota no alcanzó a consumir", () => {
+    // Cuota que sólo pudo absorber 800 de los 1,000 que traía la boleta: al
+    // cortar tienen que quedar disponibles los 1,000 completos.
+    const disponibleAlEntrar = new Big("1000");
+    const totalPagado = new Big("800");
+
+    expect(
+      restaurarDisponibleTrasCorteEnCascada({
+        disponible: disponibleAlEntrar.minus(totalPagado),
+        totalPagado,
+      }).toFixed(2),
+    ).toBe("1000.00");
+  });
+
+  it("no inventa plata cuando la cuota no consumió nada", () => {
+    expect(
+      restaurarDisponibleTrasCorteEnCascada({
+        disponible: "250.75",
+        totalPagado: "0",
+      }).toFixed(2),
+    ).toBe("250.75");
+  });
+
+  it("no pierde centavos (Big, no float)", () => {
+    expect(
+      restaurarDisponibleTrasCorteEnCascada({
+        disponible: "0.1",
+        totalPagado: "0.2",
+      }).toString(),
+    ).toBe("0.3");
+  });
+});
+
+describe("calcularMontoAplicadoReportado (que monto_aplicado no mienta tras un corte)", () => {
+  const { calcularMontoAplicadoReportado } = registerPaymentPolicy;
+
+  it("sin corte devuelve la boleta íntegra", () => {
+    // El caso normal: nada se cortó, lo aplicado es la boleta completa.
+    expect(
+      calcularMontoAplicadoReportado({
+        montoBoleta: "1000.00",
+        montoNoAplicadoPorCorte: undefined,
+      }).toFixed(2),
+    ).toBe("1000.00");
+  });
+
+  it("con corte devuelve la boleta menos lo que se repuso a saldo a favor", () => {
+    // De los Q1,000 de la boleta, Q300 iban a la cuota que se cortó y
+    // volvieron a `disponible_restante` (y de ahí a saldo a favor). Lo
+    // reportado como aplicado tiene que ser sólo los Q700 que sí llegaron a
+    // cuotas.
+    expect(
+      calcularMontoAplicadoReportado({
+        montoBoleta: "1000.00",
+        montoNoAplicadoPorCorte: new Big("300.00"),
+      }).toFixed(2),
+    ).toBe("700.00");
+  });
+
+  it("conservación: aplicado reportado + no aplicado por corte == boleta", () => {
+    // Este es el que importa: nada de la boleta se puede evaporar entre las
+    // dos cifras que la respuesta expone.
+    const montoBoleta = new Big("1543.27");
+    const montoNoAplicadoPorCorte = new Big("612.10");
+
+    const montoAplicadoReportado = calcularMontoAplicadoReportado({
+      montoBoleta,
+      montoNoAplicadoPorCorte,
+    });
+
+    expect(
+      montoAplicadoReportado.plus(montoNoAplicadoPorCorte).toFixed(2),
+    ).toBe(montoBoleta.toFixed(2));
+  });
+
+  it("nunca negativo cuando el corte defensivamente excede la boleta", () => {
+    // No debería pasar en la práctica (el corte nunca descuenta más de lo
+    // que la boleta trae), pero si pasara, mejor 0 que un monto negativo en
+    // la respuesta.
+    expect(
+      calcularMontoAplicadoReportado({
+        montoBoleta: "100.00",
+        montoNoAplicadoPorCorte: new Big("150.00"),
+      }).toFixed(2),
+    ).toBe("0.00");
+  });
+});
+
+describe("debeRestituirMoraTrasRechazo (que el rechazo no regale la mora)", () => {
+  const { debeRestituirMoraTrasRechazo } = registerPaymentPolicy;
+
+  it("restituye cuando se descontó mora y el registro no dejó ningún pago", () => {
+    // El defecto: `procesarPagoMora` corre ANTES del loop de cuotas y su
+    // DECREMENTO queda commiteado (mora en 0 e inactiva, statusCredit →
+    // ACTIVO, fila en moras_historial que dice "Pago aplicado a mora"). Si
+    // después el loop tira —el guard anti-sobreaplicación o el rechazo por
+    // cierre corto de rubros— el crédito se queda con la mora perdonada y con
+    // la constancia de un pago que no existe.
+    expect(
+      debeRestituirMoraTrasRechazo({
+        moraAplicada: 1234.56,
+        hayPagoRegistrado: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("NO restituye si ya hay un pago registrado que respalda la mora", () => {
+    // Doble cobro: la fila de `pagos_credito` dice que ese pago cubrió la
+    // mora, así que volver a activarla se la cobra dos veces al cliente.
+    expect(
+      debeRestituirMoraTrasRechazo({
+        moraAplicada: 1234.56,
+        hayPagoRegistrado: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("NO restituye cuando no se aplicó nada a mora", () => {
+    // Sin DECREMENTO no hay nada que devolver: un INCREMENTO acá le INVENTARÍA
+    // mora al crédito (y lo dejaría MOROSO) por un pago que ni la tocó.
+    expect(
+      debeRestituirMoraTrasRechazo({
+        moraAplicada: 0,
+        hayPagoRegistrado: false,
+      }),
+    ).toBe(false);
+    expect(
+      debeRestituirMoraTrasRechazo({
+        moraAplicada: 0,
+        hayPagoRegistrado: true,
+      }),
+    ).toBe(false);
   });
 });

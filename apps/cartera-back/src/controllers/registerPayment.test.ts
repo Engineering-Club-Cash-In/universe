@@ -26,6 +26,8 @@ import {
   calcularCoberturaCuota,
   getCreditPaymentBlock,
   getInternalNexaPaymentDate,
+  restaurarDisponibleTrasCorteEnCascada,
+  calcularMontoAplicadoReportado,
 } from "./registerPaymentPolicy";
 
 describe("register payment", () => {
@@ -1509,5 +1511,494 @@ describe("otros: se estampa en la fila que la boleta escribe, no en la primera c
     expect(bloque).toContain("otros: ajusteFechaIdealParaFila,");
     expect(bloque).not.toContain("otros: otrosBig");
     expect(bloque).toContain("estamparPagoConvenio.pendiente()");
+  });
+});
+
+describe("cableado del cierre en aplicar-pago (que la alerta no se vuelva bloqueo)", () => {
+  // Chequeo de CABLEADO, no de conducta: la conducta vive en
+  // `decidirCierrePorRestantesEnCero` (probada con números en
+  // registerPaymentPolicy.test.ts). Lo único que no se puede afirmar desde el
+  // helper es que el call-site lo respete, y ese fue justamente el defecto de
+  // la versión anterior: un `else if (planosCuota.cubiertos)` que dejaba la
+  // cuota abierta para siempre.
+  it("cuotaCompleta sale del helper y los planos no lo condicionan", () => {
+    expect(registerPaymentSource).toContain(
+      "cuotaCompleta = decisionCierre.cuotaCompleta;",
+    );
+    expect(registerPaymentSource).not.toContain(
+      "} else if (planosCuota.cubiertos) {",
+    );
+    expect(registerPaymentSource).not.toContain("cerrariaCuotaPorDebajo");
+  });
+});
+
+describe("cableado del cierre corto en cascada (que un throw no deje la boleta a medias)", () => {
+  // Chequeo de CABLEADO, no de conducta: la conducta vive en
+  // `decidirCierreCortoEnCascada` (probada en registerPaymentPolicy.test.ts).
+  // Lo que no se puede afirmar desde el helper es que el call-site lo use y
+  // que la rama "cortar" haga `break` en vez de `throw` — y eso es justamente
+  // el P1: `insertPayment` no tiene transacción envolvente, así que tirar con
+  // cuotas ya escritas deja la boleta a medias y el reintento trabado por el
+  // dedupe.
+  const bloqueCierreCorto = (() => {
+    const inicio = registerPaymentSource.indexOf(
+      "        const accionCierreCorto = decidirCierreCortoEnCascada({",
+    );
+    if (inicio === -1) {
+      throw new Error("No se encontró el call-site de decidirCierreCortoEnCascada");
+    }
+    const fin = registerPaymentSource.indexOf("\n        }\n", inicio);
+    return registerPaymentSource.slice(inicio, fin);
+  })();
+
+  it("la compuerta decide con el helper, no con `cierrePorDebajo.rechazar` a pelo", () => {
+    expect(registerPaymentSource).toContain("decidirCierreCortoEnCascada");
+    expect(registerPaymentSource).not.toContain("if (cierrePorDebajo.rechazar) {");
+  });
+
+  it("yaSeEscribioAlgo se arma con las cuotas ya commiteadas", () => {
+    expect(bloqueCierreCorto).toContain(
+      "yaSeEscribioAlgo: cuotas_completas + cuotas_parciales > 0,",
+    );
+  });
+
+  it("el throw de la rama `rechazar` lleva el prefijo de integridad (para que mapee a 409, no 500)", () => {
+    // Es un rechazo de negocio, no una falla del servidor: sin el prefijo el
+    // catch genérico lo deja caer como 500 "Internal server error" en vez de
+    // 409 con el mensaje que le pide al asesor revisar los saldos.
+    expect(bloqueCierreCorto).toContain(
+      "throw new Error(\n              `${CUOTA_INTEGRITY_ERROR_PREFIX}",
+    );
+  });
+
+  it("sólo la rama `rechazar` tira; la rama `cortar` corta el loop", () => {
+    expect(bloqueCierreCorto).toContain('if (accionCierreCorto === "rechazar") {');
+    expect(bloqueCierreCorto).toContain("throw new Error(");
+    // El `break` va después del throw condicional: si desapareciera, la cuota
+    // corta se cobraría igual (el bug original) o el throw volvería a ser
+    // incondicional (el P1).
+    expect(bloqueCierreCorto).toContain("break;");
+    expect(bloqueCierreCorto.indexOf("break;")).toBeGreaterThan(
+      bloqueCierreCorto.indexOf('if (accionCierreCorto === "rechazar") {'),
+    );
+  });
+
+  it("el corte se ve en la respuesta que lee el asesor", () => {
+    expect(bloqueCierreCorto).toContain("cuotaCortadaPorPlanosCortos =");
+    expect(registerPaymentSource).toContain(
+      "cuota_no_cobrada_por_rubros_cortos: cuotaCortadaPorPlanosCortos ?? null,",
+    );
+    expect(registerPaymentSource).toContain(
+      "no se cobró: sus rubros fijos (seguro, GPS, membresías) vienen cortos",
+    );
+    // El "Ya no queda saldo disponible" tiene que ser la RAMA ELSE del corte.
+    // Si vuelve a quedar suelto al final, el asesor lee la contradicción de
+    // "el resto no se aplicó" seguida de "ya no queda saldo".
+    expect(registerPaymentSource).toContain(
+      ' : "Ya no queda saldo disponible."}',
+    );
+  });
+});
+
+describe("cableado del corte en cascada: la plata no aplicada no se evapora", () => {
+  // Chequeo de CABLEADO: la conducta (conservación) vive en
+  // `restaurarDisponibleTrasCorteEnCascada` (registerPaymentPolicy.test.ts). Lo
+  // que no se puede afirmar desde el helper es que el call-site lo use y que la
+  // reposición esté ANTES del `break` — y eso es justamente el defecto: la
+  // distribución descuenta del `disponible` todo lo que la cuota iba a cobrar, el
+  // `break` llega después y no repone nada, así que el monto no queda en la cuota,
+  // no llega a saldo a favor (el post-loop lee `disponible_restante`) y no sale en
+  // la respuesta. Probe: totalPagado Q500.00, disponible al break Q0.00,
+  // acreditado a saldo a favor Q0.00 → Q500 sin destino.
+  const bloqueCierreCorto = (() => {
+    const inicio = registerPaymentSource.indexOf(
+      "        const accionCierreCorto = decidirCierreCortoEnCascada({",
+    );
+    if (inicio === -1) {
+      throw new Error("No se encontró el call-site de decidirCierreCortoEnCascada");
+    }
+    const fin = registerPaymentSource.indexOf("\n        }\n", inicio);
+    return registerPaymentSource.slice(inicio, fin);
+  })();
+
+  it("repone el disponible con el helper puro, no con aritmética a pelo", () => {
+    expect(bloqueCierreCorto).toContain(
+      "disponible_restante = restaurarDisponibleTrasCorteEnCascada({",
+    );
+    expect(bloqueCierreCorto).toContain("totalPagado,");
+  });
+
+  it("la reposición va ANTES del `break` (si queda después, no corre nunca)", () => {
+    const reposicion = bloqueCierreCorto.indexOf(
+      "disponible_restante = restaurarDisponibleTrasCorteEnCascada({",
+    );
+    const corte = bloqueCierreCorto.indexOf("break;");
+    expect(reposicion).toBeGreaterThan(-1);
+    expect(corte).toBeGreaterThan(reposicion);
+  });
+
+  it("guarda el monto no aplicado desde el disponible YA REPUESTO, no desde totalPagado", () => {
+    // El `break` frena TODA la cascada, no solo la porción de esta cuota: lo
+    // no aplicado es todo lo que queda en `disponible_restante` tras reponer,
+    // no `totalPagado` (que subestimaría lo no aplicado e infla el aplicado
+    // reportado). Ver también registerPaymentPolicy.test.ts.
+    expect(bloqueCierreCorto).toContain(
+      "montoNoAplicadoPorCorte = disponible_restante;",
+    );
+    expect(bloqueCierreCorto).not.toContain(
+      "montoNoAplicadoPorCorte = totalPagado;",
+    );
+    // Y la asignación va DESPUÉS de la reposición, no antes.
+    const reposicion = bloqueCierreCorto.indexOf(
+      "disponible_restante = restaurarDisponibleTrasCorteEnCascada({",
+    );
+    const asignacion = bloqueCierreCorto.indexOf(
+      "montoNoAplicadoPorCorte = disponible_restante;",
+    );
+    expect(reposicion).toBeGreaterThan(-1);
+    expect(asignacion).toBeGreaterThan(reposicion);
+  });
+
+  it("la regla legacy de ≤Q25 no corre cuando hubo corte", () => {
+    // Si no, el disponible repuesto (plata que esta boleta NO pudo cobrar en su
+    // cuota) se estampa como `otros` en la fila de la cuota ANTERIOR: se la
+    // cobra a una cuota que no la cobró y el corte queda disfrazado.
+    expect(registerPaymentSource).toContain(
+      "if (cuotaCortadaPorPlanosCortos === undefined && shouldApplyFinalSmallRemainderAsOther({",
+    );
+  });
+
+  it("el monto no aplicado sale en la respuesta en su propio campo", () => {
+    // `saldo_sobrante` sigue hardcodeado a "0.00" (contrato preexistente), así
+    // que sin campo nuevo el monto no se ve en ninguna parte.
+    expect(registerPaymentSource).toContain('saldo_sobrante: "0.00",');
+    expect(registerPaymentSource).toContain(
+      "monto_no_aplicado_por_corte: montoNoAplicadoPorCorteTexto,",
+    );
+    expect(registerPaymentSource).toContain(
+      "const montoNoAplicadoPorCorteTexto =\n      montoNoAplicadoPorCorte?.toFixed(2) ?? null;",
+    );
+    // Y la cifra se menciona en la frase del resumen. El texto ya no dice
+    // "que iban a esa cuota" porque el monto incluye TODO lo que quedaba por
+    // aplicar (no solo la porción de esta cuota).
+    expect(registerPaymentSource).toContain(
+      "Los Q${montoNoAplicadoPorCorteTexto} que quedaban por aplicar no se aplicaron",
+    );
+  });
+});
+
+describe("conservación del monto no aplicado por corte con el disponible completo", () => {
+  // Atrapa el defecto 1: si el corte llega con `disponible_restante` MAYOR
+  // que `totalPagado` (por ejemplo, porque venían cuotas posteriores por
+  // cobrar), lo NO aplicado tiene que ser el disponible repuesto completo,
+  // no solo la porción que esta cuota había consumido. Si se deja
+  // `montoNoAplicadoPorCorte = totalPagado`, lo reportado como aplicado
+  // (boleta - noAplicado) queda inflado y aplicado+noAplicado != boleta.
+  it("aplicado reportado + no aplicado == boleta cuando disponible > totalPagado al cortar", () => {
+    // La boleta completa es 600: esta cuota consumió 100 de disponible
+    // (quedando en 500) antes de que el corte disparara la reposición. Tras
+    // reponer, el disponible vuelve a 600 y ESO es lo no aplicado — nada de
+    // los 600 llegó a aplicarse a ninguna cuota en este escenario.
+    const disponibleAlCortar = new Big("500.00");
+    const totalPagado = new Big("100.00");
+    const montoBoleta = new Big("600.00");
+
+    // Simula el bloque del corte: reponer y ASIGNAR DESDE disponible_restante.
+    const disponibleRepuesto = restaurarDisponibleTrasCorteEnCascada({
+      disponible: disponibleAlCortar,
+      totalPagado,
+    });
+    const montoNoAplicadoPorCorte = disponibleRepuesto;
+
+    const montoTotal = calcularMontoAplicadoReportado({
+      montoBoleta,
+      montoNoAplicadoPorCorte,
+    });
+
+    expect(new Big(montoTotal).plus(montoNoAplicadoPorCorte).toString()).toBe(
+      montoBoleta.toString(),
+    );
+  });
+});
+
+describe("cableado de monto_aplicado: que no reporte la boleta a secas tras un corte", () => {
+  // Chequeo de CABLEADO: la conservación (aplicado + no-aplicado == boleta)
+  // vive en `calcularMontoAplicadoReportado` (registerPaymentPolicy.test.ts).
+  // Lo que el helper no puede probar es que el return de éxito del pago
+  // normal use ese cálculo en vez de `montoBoleta.toString()` a pelo — que es
+  // justamente el defecto: cuando la cascada se corta, la parte repuesta a
+  // saldo a favor seguía apareciendo como "aplicada" en `detalle.monto_aplicado`
+  // y en la frase del `resumen`.
+  it("calcula montoTotal con el helper puro, no con montoBoleta.toString()", () => {
+    expect(registerPaymentSource).toContain(
+      "const montoTotal = calcularMontoAplicadoReportado({",
+    );
+    expect(registerPaymentSource).toContain("montoBoleta,\n        montoNoAplicadoPorCorte,");
+  });
+
+  it("no queda ningún montoBoleta.toString() suelto para el return de éxito del pago normal", () => {
+    expect(registerPaymentSource).not.toContain(
+      "const montoTotal = montoBoleta.toString();",
+    );
+  });
+
+  it("detalle.monto_aplicado y el resumen usan el montoTotal ya corregido", () => {
+    expect(registerPaymentSource).toContain("monto_aplicado: montoTotal,");
+    expect(registerPaymentSource).toContain(
+      "Monto total aplicado: Q${montoTotal}.",
+    );
+  });
+});
+
+describe("el aviso del corte también sale por el camino de abono a capital", () => {
+  // `insertPayment` tiene DOS returns de éxito alcanzables después del loop: el
+  // del abono directo a capital (sección 7) y el del pago normal. El campo y la
+  // frase del corte estaban sólo en el segundo, así que un pago mixto
+  // efectivo + capital salía por el primero reportando éxito liso aunque la
+  // cascada se hubiera cortado — y encima esa rama acredita el sobrante a saldo
+  // a favor en silencio. (Los dos 409 quedan descartados por construcción:
+  // exigen cero cuotas escritas y el corte exige lo contrario.)
+  const bloqueAbonoCapital = (() => {
+    const inicio = registerPaymentSource.indexOf(
+      '          "Abono directo a capital registrado exitosamente (pendiente de validación)"',
+    );
+    if (inicio === -1) {
+      throw new Error("No se encontró el return del abono directo a capital");
+    }
+    const fin = registerPaymentSource.indexOf("\n      };", inicio);
+    return registerPaymentSource.slice(inicio, fin);
+  })();
+
+  it("reporta la cuota que no se cobró y el monto que quedó sin aplicar", () => {
+    expect(bloqueAbonoCapital).toContain(
+      "cuota_no_cobrada_por_rubros_cortos: cuotaCortadaPorPlanosCortos ?? null,",
+    );
+    expect(bloqueAbonoCapital).toContain(
+      "monto_no_aplicado_por_corte: montoNoAplicadoPorCorteTexto,",
+    );
+    // Los DOS returns de éxito lo reportan, no sólo el del pago normal.
+    expect(
+      [...registerPaymentSource.matchAll(
+        /monto_no_aplicado_por_corte: montoNoAplicadoPorCorteTexto,/g,
+      )],
+    ).toHaveLength(2);
+  });
+
+  it("la frase del corte se pega a su mensaje de éxito", () => {
+    expect(bloqueAbonoCapital).toContain("fraseCorteEnCascada");
+  });
+
+  it("la frase es la MISMA que la del pago normal (una sola fuente)", () => {
+    // Una sola declaración y ningún segundo literal de la frase: si se
+    // duplicara, los dos caminos se desincronizarían al primer retoque.
+    expect(
+      [...registerPaymentSource.matchAll(/const fraseCorteEnCascada =/g)],
+    ).toHaveLength(1);
+    expect(
+      [...registerPaymentSource.matchAll(
+        /no se cobró: sus rubros fijos \(seguro, GPS, membresías\) vienen cortos/g,
+      )],
+    ).toHaveLength(1);
+  });
+});
+
+describe("cableado de la restitución de mora (que un rechazo no le regale la mora al cliente)", () => {
+  // Chequeo de CABLEADO, no de conducta: la decisión vive en
+  // `debeRestituirMoraTrasRechazo` (probada en registerPaymentPolicy.test.ts).
+  // Lo que no se puede afirmar desde el helper es el DÓNDE, que es justo el
+  // P1: `procesarPagoMora` corre antes del loop y COMMITEA el DECREMENTO de la
+  // mora (monto en 0, activa=false, statusCredit → ACTIVO, fila en
+  // moras_historial), así que un throw dentro del loop devolvía el error con la
+  // mora ya perdonada y sin ninguna fila de `pagos_credito` que la respalde —y
+  // `reversePayment` no la recupera después porque sólo restituye la mora de un
+  // pago que la traía.
+  // El archivo tiene varios try/catch, así que todo se mide DENTRO del cuerpo
+  // de `insertPayment`.
+  const cuerpoInsertPayment = (() => {
+    const inicio = registerPaymentSource.indexOf(
+      "export const insertPayment = async (",
+    );
+    if (inicio === -1) {
+      throw new Error("No se encontró insertPayment");
+    }
+    const fin = registerPaymentSource.indexOf(
+      "\nexport async function getPagosDelMesActual(",
+      inicio,
+    );
+    return registerPaymentSource.slice(inicio, fin);
+  })();
+
+  const bloqueCatch = (() => {
+    const ancla = cuerpoInsertPayment.indexOf(
+      "    if ((error as { code?: string }).code === CREDIT_PENDING_CANCELLATION_ERROR.code) {",
+    );
+    if (ancla === -1) {
+      throw new Error("No se encontró el catch de insertPayment");
+    }
+    const inicio = cuerpoInsertPayment.lastIndexOf("} catch (error) {", ancla);
+    const fin = cuerpoInsertPayment.indexOf("\n  } finally {", ancla);
+    return cuerpoInsertPayment.slice(inicio, fin);
+  })();
+
+  it("la variable se declara FUERA del try (si no, el catch no la ve)", () => {
+    const declaracion = cuerpoInsertPayment.indexOf(
+      "let moraAplicadaSinRegistrar = 0;",
+    );
+    const abreTry = cuerpoInsertPayment.indexOf("\n  try {");
+    expect(declaracion).toBeGreaterThan(-1);
+    expect(abreTry).toBeGreaterThan(-1);
+    expect(declaracion).toBeLessThan(abreTry);
+  });
+
+  it("se carga con lo que `procesarPagoMora` alcanzó a descontar", () => {
+    const inicio = cuerpoInsertPayment.indexOf(
+      "    const resultadoMora = await procesarPagoMora({",
+    );
+    expect(inicio).toBeGreaterThan(-1);
+    const bloque = cuerpoInsertPayment.slice(inicio, inicio + 1200);
+    expect(bloque).toContain("if (resultadoMora.montoAplicadoMora > 0) {");
+    expect(bloque).toContain(
+      "moraAplicadaSinRegistrar = resultadoMora.montoAplicadoMora;",
+    );
+    // El crédito también se guarda afuera: `credito_id` se destructura dentro
+    // del try y `lockedCreditoId` sólo se setea si este llamado tomó el lock.
+    expect(bloque).toContain("moraCreditoIdSinRegistrar = credito.credito_id;");
+  });
+
+  it("vuelve a 0 recién DESPUÉS de que cierra la transacción que escribe la fila", () => {
+    // El reset tiene que quedar después del `await db.transaction(...)` que
+    // inserta/actualiza la fila de pago, no justo tras el `cuotas_*++`: si la
+    // transacción falla, el flag debe seguir prendido para que el catch
+    // restituya (si no, el defecto original vuelve disparado por un error de
+    // base en vez de por el guard). Si falta en algún sitio, el catch
+    // compensaría una mora que el pago ya cubrió: doble cobro al cliente.
+    for (const contador of ["cuotas_completas\\+\\+;", "cuotas_parciales\\+\\+;"]) {
+      const total = [...cuerpoInsertPayment.matchAll(
+        new RegExp(` {14}${contador}`, "g"),
+      )];
+      expect(total.length).toBeGreaterThan(0);
+      const conResetTrasTransaccion = [...cuerpoInsertPayment.matchAll(
+        new RegExp(
+          ` {14}${contador}[\\s\\S]*?\\n {14}\\}\\);\\n(?: *\\/\\/[^\\n]*\\n)* *moraAplicadaSinRegistrar = 0;`,
+          "g",
+        ),
+      )];
+      expect(conResetTrasTransaccion.length).toBe(total.length);
+      // Y que NO quede pegado al incremento (eso sería la posición vieja,
+      // ANTES de que la transacción confirme la escritura).
+      const pegadoAlIncremento = [...cuerpoInsertPayment.matchAll(
+        new RegExp(
+          ` {14}${contador}\\n(?: *\\/\\/[^\\n]*\\n)* *moraAplicadaSinRegistrar = 0;`,
+          "g",
+        ),
+      )];
+      expect(pegadoAlIncremento.length).toBe(0);
+    }
+    // CANDADO sobre el fuente: TODA escritura que persista la mora en la fila
+    // (`mora: resultadoMora.montoAplicadoMora`) tiene que apagar el flag justo
+    // después. No se enumeran los sitios a mano a propósito: así fue como se
+    // colaron los returns de sólo-mora y, después, la fila-rastro del convenio
+    // —que registraba la mora y dejaba el flag prendido, de modo que el
+    // `commitConvenio` de unas líneas más abajo caía al catch y le reactivaba
+    // al cliente una mora ya cobrada (doble cobro)—. Si aparece una ruta nueva
+    // sin reset, este test la caza sin que haya que acordarse de agregarla.
+    const sitiosQueEscribenMora = [...cuerpoInsertPayment.matchAll(
+      /mora: resultadoMora\.montoAplicadoMora,/g,
+    )];
+    expect(sitiosQueEscribenMora.length).toBeGreaterThan(0);
+    const escritoresMora = [...cuerpoInsertPayment.matchAll(
+      /mora: resultadoMora\.montoAplicadoMora,[\s\S]{0,700}?\}\);\n(?:\s*\/\/[^\n]*\n)*\s*moraAplicadaSinRegistrar = 0;/g,
+    )];
+    expect(escritoresMora).toHaveLength(sitiosQueEscribenMora.length);
+  });
+
+  it("la fila-rastro del convenio apaga el flag, y ANTES del commitConvenio que puede tirar", () => {
+    // El caso concreto: crédito EN_CONVENIO sin cuotas abiertas. El loop no
+    // escribe nada, así que el flag sigue prendido cuando `insertarPago`
+    // persiste la fila-rastro CON la mora. Si el reset no estuviera acá, el
+    // `commitConvenio` de abajo (tira si el convenio cambió o si no hay fila
+    // persistida) llevaría al catch con el flag prendido y el INCREMENTO le
+    // reactivaría al cliente una mora que esa fila ya registró como cobrada.
+    const inicioFila = cuerpoInsertPayment.indexOf(
+      "const pagoEspecialInsertado = await insertarPago({",
+    );
+    expect(inicioFila).toBeGreaterThan(-1);
+    const reset = cuerpoInsertPayment.indexOf(
+      "moraAplicadaSinRegistrar = 0;",
+      inicioFila,
+    );
+    expect(reset).toBeGreaterThan(inicioFila);
+    // Entre el insert y el reset no puede haber otro `insertarPago(` ni el
+    // commit: el reset es del insert de la fila-rastro y va antes del commit.
+    const commit = cuerpoInsertPayment.indexOf(
+      "const convenioAcreditado = await commitConvenio(",
+      inicioFila,
+    );
+    expect(commit).toBeGreaterThan(-1);
+    expect(reset).toBeLessThan(commit);
+    // Y pegado al cierre del insert, no suelto más abajo.
+    const anclaFila = "const pagoEspecialInsertado = await insertarPago({";
+    expect(
+      cuerpoInsertPayment.slice(inicioFila + anclaFila.length, reset),
+    ).not.toContain("await insertarPago({");
+  });
+
+  it("el abono directo a capital apaga el flag tras escribir su fila (su commitConvenio también tira)", () => {
+    // Esa fila lleva `mora: moraBig`, y el único camino que llega ahí con el
+    // flag prendido es el de mora cubierta completa, donde `moraBig` quedó
+    // igualada a `resultadoMora.montoAplicadoMora`. O sea: la fila respalda la
+    // mora entera, y su `commitConvenio` puede tirar igual que el otro.
+    const inicioFila = cuerpoInsertPayment.indexOf(
+      "      const [pagoInsertado] = await db\n        .insert(pagos_credito)\n        .values(pagoData)\n        .returning();",
+    );
+    expect(inicioFila).toBeGreaterThan(-1);
+    const reset = cuerpoInsertPayment.indexOf(
+      "moraAplicadaSinRegistrar = 0;",
+      inicioFila,
+    );
+    const commit = cuerpoInsertPayment.indexOf(
+      "const convenioAcreditado = await commitConvenio(",
+      inicioFila,
+    );
+    expect(reset).toBeGreaterThan(inicioFila);
+    expect(commit).toBeGreaterThan(-1);
+    expect(reset).toBeLessThan(commit);
+  });
+
+  it("el catch restituye con el INVERSO exacto del DECREMENTO y reactiva la fila", () => {
+    expect(bloqueCatch).toContain("debeRestituirMoraTrasRechazo({");
+    expect(bloqueCatch).toContain("await updateMora({");
+    expect(bloqueCatch).toContain("monto_cambio: moraAplicadaSinRegistrar,");
+    expect(bloqueCatch).toContain('tipo: "INCREMENTO",');
+    // `activa: true` no es decorativo: con INCREMENTO + activa relaja el
+    // `where` de updateMora (`shouldReactivateMora`), que es lo único que
+    // permite restituir una fila que el DECREMENTO dejó en activa=false.
+    expect(bloqueCatch).toContain("activa: true,");
+  });
+
+  it("la restitución va ANTES de armar cualquier respuesta de error", () => {
+    const restitucion = bloqueCatch.indexOf('tipo: "INCREMENTO",');
+    expect(restitucion).toBeGreaterThan(-1);
+    for (const respuesta of ["set.status = 409;", "set.status = 500;"]) {
+      expect(bloqueCatch.indexOf(respuesta)).toBeGreaterThan(restitucion);
+    }
+  });
+
+  it("es best-effort: si la restitución falla NO tapa el error original", () => {
+    // El 409 del cierre corto y el 500 del guard anti-sobreaplicación tienen
+    // que salir igual que antes; una falla al restituir sólo deja rastro en el
+    // log para repararla a mano.
+    const inicioTry = bloqueCatch.indexOf("      try {");
+    const cierreTry = bloqueCatch.indexOf("} catch (errorRestitucion) {");
+    expect(inicioTry).toBeGreaterThan(-1);
+    expect(cierreTry).toBeGreaterThan(inicioTry);
+    expect(bloqueCatch.indexOf('tipo: "INCREMENTO",')).toBeGreaterThan(inicioTry);
+    expect(bloqueCatch.indexOf('tipo: "INCREMENTO",')).toBeLessThan(cierreTry);
+    expect(bloqueCatch).toContain("console.error(");
+    // El grito tiene que traer crédito y monto: sin eso el rastro no sirve
+    // para reparar nada.
+    const bloqueLog = bloqueCatch.slice(bloqueCatch.indexOf("console.error("));
+    expect(bloqueLog).toContain("${moraCreditoIdSinRegistrar}");
+    expect(bloqueLog).toContain("${moraAplicadaSinRegistrar}");
   });
 });

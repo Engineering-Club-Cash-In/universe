@@ -1417,3 +1417,307 @@ export const debeInsertarFilaParcialCuota = ({
   new Big(mora ?? 0).gt(0) ||
   new Big(otros ?? 0).gt(0) ||
   new Big(pagoConvenio ?? 0).gt(0);
+
+export type RubrosPlanosCuota = {
+  seguro: BigInput;
+  gps: BigInput;
+  membresias: BigInput;
+};
+
+export type EvaluacionRubrosPlanos = {
+  cubiertos: boolean;
+  faltanteSeguro: Big;
+  faltanteGps: Big;
+  faltanteMembresias: Big;
+};
+
+/**
+ * ¿Los rubros PLANOS (seguro / GPS / membresías) de la cuota están cobrados
+ * completos?
+ *
+ * Son planos porque su objetivo sale de la cabecera del crédito y no varía por
+ * cuota — es el mismo criterio que ya usa `calcularSaldoNetoCuota`
+ * (`objetivoSeguro: credito.seguro_10_cuotas`, `objetivoGps: credito.gps`,
+ * `objetivoMembresias: credito.membresias_pago`).
+ *
+ * Lo usa el fallback de `aplicarPagoNormalEnTx` que da una cuota por completa
+ * cuando la fila del pago quedó con todos sus `*_restante` en ~0 (recibos de
+ * cola que valen menos que `credito.cuota` tras un abono a capital). Ese
+ * fallback es legítimo para el capital topado, pero NO para los planos: el
+ * seguro, el GPS y las membresías se siguen cobrando enteros. Sin esta
+ * restricción, una fila con restantes subestimados cerraba la cuota habiendo
+ * cobrado Q0.00 de Q245.00 de seguro y Q107.16 de Q743.24 de membresías
+ * (crédito 9234, cuota 1).
+ */
+export const evaluarRubrosPlanosCuota = ({
+  cobrado,
+  objetivo,
+  tolerancia = 0.01,
+}: {
+  cobrado: RubrosPlanosCuota;
+  objetivo: RubrosPlanosCuota;
+  tolerancia?: BigInput;
+}): EvaluacionRubrosPlanos => {
+  const toleranciaBig = new Big(tolerancia);
+  const faltante = (obj: BigInput, cob: BigInput) => {
+    const diferencia = new Big(obj).minus(cob);
+    return diferencia.gt(0) ? diferencia : new Big(0);
+  };
+
+  const faltanteSeguro = faltante(objetivo.seguro, cobrado.seguro);
+  const faltanteGps = faltante(objetivo.gps, cobrado.gps);
+  const faltanteMembresias = faltante(objetivo.membresias, cobrado.membresias);
+
+  return {
+    cubiertos:
+      faltanteSeguro.lte(toleranciaBig) &&
+      faltanteGps.lte(toleranciaBig) &&
+      faltanteMembresias.lte(toleranciaBig),
+    faltanteSeguro,
+    faltanteGps,
+    faltanteMembresias,
+  };
+};
+
+export type RubroPlanoCorto = {
+  /** Nombre del rubro tal como se le muestra a quien registra la boleta. */
+  rubro: "seguro" | "GPS" | "membresías";
+  cobrado: Big;
+  objetivo: Big;
+  faltante: Big;
+};
+
+/**
+ * ¿Hay que RECHAZAR este pago porque cerraría la cuota con rubros planos a
+ * medias?
+ *
+ * La red dura anti-SOBREaplicación (`registerPayment`, guard de
+ * `totalProyectadoCuota`) impide que una cuota reciba más plata de la que vale.
+ * Faltaba la simétrica por abajo, y por ahí se perdió ingreso real: si los
+ * `*_restante` de la fila vigente vienen SUBESTIMADOS —lo que pasa cuando una
+ * reversa restaura los restantes sólo en la fila revertida y deja a las
+ * hermanas con el saldo POSTERIOR al pago revertido— la distribución llega a
+ * cero en todos los rubros habiendo cobrado de menos, la cuota se marca pagada
+ * y el faltante ya no se cobra nunca (crédito 9234, cuota 1: seguro Q0.00 de
+ * Q245.00 y membresías Q107.16 de Q743.24).
+ *
+ * La medida es contra los rubros PLANOS, NO contra `credito.cuota`. Un recibo
+ * puede valer legítimamente MENOS que `credito.cuota`: tras un abono grande a
+ * capital, `recalcularPagosCredito` topa el capital proyectado de los recibos de
+ * cola (`updateCredit.ts`, `if (abonoCapital.gt(capitalEnMemoria))`), así que un
+ * piso basado en `credito.cuota` rechazaría pagos correctos. El seguro, el GPS y
+ * las membresías, en cambio, salen de la cabecera del crédito, se siembran
+ * iguales en TODAS las cuotas (`createCredit`) y no se topan nunca: son la única
+ * referencia que no depende ni de `credito.cuota` ni de los `*_restante`
+ * posiblemente corruptos.
+ *
+ * `todosRestantesEnCero` es la condición de cierre: sólo importa cuando la
+ * distribución dice "ya no queda nada por cobrar en esta cuota". Si la fila deja
+ * restantes, la cuota queda parcial y el faltante se puede seguir cobrando.
+ */
+export const evaluarCierreCuotaPorPlanos = ({
+  todosRestantesEnCero,
+  cobrado,
+  objetivo,
+  tolerancia = 0.01,
+}: {
+  todosRestantesEnCero: boolean;
+  /** Σ de los planos de los hermanos vivos MÁS lo que aplica este pago. */
+  cobrado: RubrosPlanosCuota;
+  objetivo: RubrosPlanosCuota;
+  tolerancia?: BigInput;
+}): { rechazar: boolean; cortos: RubroPlanoCorto[] } => {
+  if (!todosRestantesEnCero) return { rechazar: false, cortos: [] };
+
+  const evaluacion = evaluarRubrosPlanosCuota({ cobrado, objetivo, tolerancia });
+  if (evaluacion.cubiertos) return { rechazar: false, cortos: [] };
+
+  const toleranciaBig = new Big(tolerancia);
+  const candidatos: RubroPlanoCorto[] = [
+    {
+      rubro: "seguro" as const,
+      cobrado: new Big(cobrado.seguro),
+      objetivo: new Big(objetivo.seguro),
+      faltante: evaluacion.faltanteSeguro,
+    },
+    {
+      rubro: "GPS" as const,
+      cobrado: new Big(cobrado.gps),
+      objetivo: new Big(objetivo.gps),
+      faltante: evaluacion.faltanteGps,
+    },
+    {
+      rubro: "membresías" as const,
+      cobrado: new Big(cobrado.membresias),
+      objetivo: new Big(objetivo.membresias),
+      faltante: evaluacion.faltanteMembresias,
+    },
+  ];
+
+  return {
+    rechazar: true,
+    cortos: candidatos.filter((c) => c.faltante.gt(toleranciaBig)),
+  };
+};
+
+/**
+ * El corte en cascada devuelve al `disponible` la plata que la iteración
+ * abortada ya había descontado.
+ *
+ * La distribución de la cuota resta de `disponible_restante` a medida que calcula
+ * cada abono (interés, IVA, seguro, GPS, membresías, capital), y el `break` del
+ * corte llega DESPUÉS de todo eso. Como no repone nada, ese monto no queda en la
+ * cuota (la iteración no escribe nada), no queda en saldo a favor (el post-loop
+ * —la regla legacy de "otros" y el acreditado a saldo a favor— lee sólo
+ * `disponible_restante`, ya minado) y no sale en la respuesta: se evapora con el
+ * pago reportado exitoso. Probe: `totalPagado` Q500.00, `disponible_restante` al
+ * break Q0.00, acreditado a saldo a favor Q0.00 → Q500 sin destino.
+ *
+ * `totalPagado` es EXACTAMENTE la cifra descontada: es la suma de los seis abonos
+ * que decrementan `disponible_restante`, y el ajuste de restantes stale-cero
+ * —que también suma a `totalPagado` y resta del disponible— es mutuamente
+ * excluyente con el corte, porque la compuerta del cierre corto recibe
+ * `todosRestantesEnCero && !ajusteStaleZeroAplicado`. La mora se descuenta antes
+ * del loop, el ajuste por fecha ideal se reclama después del break y el convenio
+ * no consume disponible, así que nada de eso entra acá.
+ */
+export const restaurarDisponibleTrasCorteEnCascada = ({
+  disponible,
+  totalPagado,
+}: {
+  disponible: BigInput;
+  totalPagado: BigInput;
+}): Big => new Big(disponible).plus(totalPagado);
+
+/**
+ * La compuerta de arriba dijo "rechazar". ¿Se puede tirar, o hay que cortar?
+ *
+ * `insertPayment` NO tiene transacción envolvente: el loop de cuotas escribe
+ * con una transacción POR ITERACIÓN, más escrituras sueltas fuera de tx (la
+ * fila de `pagos_credito`, la boleta, la sincronización de restantes). O sea
+ * que cuando una boleta cascadea sobre varias cuotas, lo de la cuota 1 ya
+ * quedó COMMITEADO cuando la cuota 2 se evalúa.
+ *
+ * De ahí los dos comportamientos distintos:
+ *
+ * - Sin nada escrito todavía, el `throw` no deja fila de pago, ni boleta, ni
+ *   restantes tocados. El cajero ve el error, corrige la boleta y reintenta.
+ *   Es el caso del crédito 9234 (la cuota corta es la primera que toca la
+ *   boleta) y es exactamente la protección que se quiso. Ojo: "limpio" NO
+ *   quiere decir que la base esté intacta. `procesarPagoMora` corre antes del
+ *   loop y, si la boleta cubría la mora, ya dejó COMMITEADAS tres escrituras
+ *   (mora en 0 e inactiva, `statusCredit` → ACTIVO, fila DECREMENTO en
+ *   `moras_historial`). Por eso el `catch` de `insertPayment` compensa esa
+ *   mora con un `updateMora({tipo:"INCREMENTO", activa:true})` antes de
+ *   devolver el error — ver `debeRestituirMoraTrasRechazo`.
+ *
+ * - Con cuotas ya escritas, tirar es PEOR que no cobrar la cuota corta: la
+ *   boleta queda a medias en la base (cuota 1 cobrada y marcada pagada,
+ *   boleta insertada, restantes sincronizados) mientras el operador recibe un
+ *   error que dice "pago rechazado"; y si la boleta trae banco y número de
+ *   autorización, el reintento choca contra el dedupe y el cajero queda
+ *   trabado sin forma de completar el cobro. Entonces se corta: no se aplica
+ *   nada a esa cuota, se frena la cascada, y el remanente sigue por el camino
+ *   que ya existe (sobrante chico → `otros`, si no → saldo a favor). La cuota
+ *   corta NO se cierra, que era el daño que había que evitar.
+ *
+ * El corte tiene que verse en la respuesta: si no, el asesor lee "pago
+ * exitoso" sin enterarse de que una cuota quedó sin cobrar.
+ */
+export const decidirCierreCortoEnCascada = ({
+  rechazar,
+  yaSeEscribioAlgo,
+}: {
+  /** `rechazar` de `evaluarCierreCuotaPorPlanos`. */
+  rechazar: boolean;
+  /** ¿Esta boleta ya commiteó filas en iteraciones anteriores del loop? */
+  yaSeEscribioAlgo: boolean;
+}): "rechazar" | "cortar" | "seguir" => {
+  if (!rechazar) return "seguir";
+  return yaSeEscribioAlgo ? "cortar" : "rechazar";
+};
+
+/**
+ * Cuando `insertPayment` rechaza el registro, ¿hay que devolverle la mora al
+ * crédito?
+ *
+ * La mora se descuenta ANTES del loop de cuotas (`procesarPagoMora` →
+ * `updateMora({tipo:"DECREMENTO"})`) y esa escritura queda commiteada: mora en
+ * 0 e inactiva, `statusCredit` → ACTIVO y una fila DECREMENTO en
+ * `moras_historial` que dice "Pago aplicado a mora". Si el registro después
+ * tira (el guard anti-sobreaplicación, o el rechazo por cierre corto de
+ * rubros) y no llegó a quedar ninguna fila de `pagos_credito`, el crédito se
+ * queda con la mora perdonada y con una constancia de un pago que no existe;
+ * `reversePayment` no lo arregla después porque sólo restituye la mora de un
+ * pago que la traía.
+ *
+ * Las dos condiciones son necesarias:
+ * - sin mora aplicada no hay nada que devolver;
+ * - CON un pago ya registrado, la mora está respaldada por esa fila y
+ *   devolverla sería cobrársela dos veces (el pago dice que la cubrió y la
+ *   mora volvería a estar viva).
+ */
+export const debeRestituirMoraTrasRechazo = ({
+  moraAplicada,
+  hayPagoRegistrado,
+}: {
+  /** Mora descontada en la base por este registro (`montoAplicadoMora`). */
+  moraAplicada: number;
+  /** ¿Quedó commiteada alguna fila de `pagos_credito` que respalde esa mora? */
+  hayPagoRegistrado: boolean;
+}): boolean => moraAplicada > 0 && !hayPagoRegistrado;
+
+/**
+ * Con el recibo en cero (todos los `*_restante` de la fila en ~0), ¿la cuota
+ * cierra ya, o el cierre queda diferido al hermano que falta validar?
+ *
+ * Vive acá, como decisión PURA y con estas dos únicas entradas, para que quede
+ * garantizado lo que importa: la cobertura de los rubros planos NO participa.
+ * Bloquear el cierre por planos cortos dejaría la cuota sin salida —el camino
+ * de la suma de validados nunca alcanza para un recibo de cola con capital
+ * topado, y por RAMA A no se reescriben restantes ni se distribuye a
+ * inversionistas—, o sea cuota abierta para siempre, peor que el cierre corto.
+ * La compuerta que RECHAZA es `evaluarCierreCuotaPorPlanos`, en el registro,
+ * donde la boleta todavía se puede corregir; en la validación los planos sólo
+ * dejan rastro.
+ */
+export const decidirCierrePorRestantesEnCero = ({
+  hayHermanoPendiente,
+  filaPagada,
+}: {
+  hayHermanoPendiente: boolean;
+  /** `pagos_credito.pagado` de la fila que se está validando. */
+  filaPagada: boolean;
+}): { cuotaCompleta: boolean; cierreDiferido: boolean } =>
+  hayHermanoPendiente
+    ? { cuotaCompleta: false, cierreDiferido: filaPagada }
+    : { cuotaCompleta: true, cierreDiferido: false };
+
+/**
+ * `detalle.monto_aplicado` y la frase del `resumen` del pago normal
+ * históricamente reportan `montoBoleta` completo, porque en el caso normal
+ * eso SÍ es lo que se aplicó. El corte en cascada (`decidirCierreCortoEnCascada`
+ * + `restaurarDisponibleTrasCorteEnCascada`) rompe esa igualdad: una parte de
+ * la boleta se repone a `disponible_restante` y termina en saldo a favor, no
+ * en las cuotas — así que reportar la boleta entera ahí es una regresión
+ * nuestra, no el contrato viejo. Esta función corrige SOLO ese caso: resta de
+ * `montoBoleta` lo que el corte dejó sin aplicar (`montoNoAplicadoPorCorte`),
+ * y sin corte devuelve la boleta tal cual.
+ *
+ * A propósito NO toca el caso preexistente de `capitalDevuelto > 0` (abono a
+ * capital rechazado por el crédito): ese sigue reportando la boleta completa
+ * a propósito, porque el `resumen` ya explica en palabras que ese monto quedó
+ * en saldo a favor. Cambiarlo sería tocar contrato viejo fuera de alcance de
+ * este arreglo.
+ */
+export const calcularMontoAplicadoReportado = ({
+  montoBoleta,
+  montoNoAplicadoPorCorte,
+}: {
+  montoBoleta: BigInput;
+  montoNoAplicadoPorCorte: BigInput | undefined;
+}): Big => {
+  if (montoNoAplicadoPorCorte === undefined) return new Big(montoBoleta);
+  const reportado = new Big(montoBoleta).minus(montoNoAplicadoPorCorte);
+  return reportado.lt(0) ? new Big(0) : reportado;
+};

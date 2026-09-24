@@ -389,6 +389,19 @@ describe("plantillas web de cobros", () => {
 		);
 		expect(mensajeAnunciaExpectativaMora("Q{expectativaMora}")).toBe(true);
 
+		// …pero NO bloquea una frase que el asesor escribió a mano y que empieza
+		// igual. El guard solo corre en créditos SIN mora calculable, que es
+		// justo donde el asesor escribe esto; con un fragmento más corto
+		// ("recargo por mora de") casaba y le bloqueaba un mensaje legítimo.
+		expect(
+			mensajeAnunciaExpectativaMora(
+				"El recargo por mora de este crédito no aplica por estar en convenio.",
+			),
+		).toBe(false);
+		expect(
+			mensajeAnunciaExpectativaMora("No se cobra recargo por mora de ningún tipo."),
+		).toBe(false);
+
 		// …pero si el asesor borra esa oración, el mensaje se puede enviar.
 		const sinOracion = interpolado
 			.split("\n")

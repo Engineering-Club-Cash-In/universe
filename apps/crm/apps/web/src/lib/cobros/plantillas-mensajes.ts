@@ -138,12 +138,18 @@ export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
  * Fragmento fijo de la oración de mora del recordatorio del día de pago
  * ("…se agregará un recargo por mora de alrededor de Q{expectativaMoraDiaria}
  * por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.").
- * Corta ANTES del "alrededor de" a propósito, para que el detector no dependa
- * de esa palabra. Sirve para
- * detectar, en el mensaje YA interpolado que el asesor editó, si la oración
- * sigue presente: si la borró, no hay nada que bloquear.
+ * Sirve para detectar, en el mensaje YA interpolado que el asesor editó, si la
+ * oración sigue presente: si la borró, no hay nada que bloquear.
+ *
+ * Incluye "alrededor de" A PROPÓSITO. Cortar antes lo volvía demasiado ancho:
+ * el guard SOLO se evalúa en créditos SIN mora calculable —estado excluido o
+ * sin capital—, que es justo donde un asesor escribe a mano cosas como "el
+ * recargo por mora de este crédito no aplica". Con el fragmento corto esa
+ * frase legítima casaba y el modal le bloqueaba el envío con un error que no
+ * venía al caso. El precio de ser específico es que si el copy cambia hay que
+ * ajustar esta constante; la prueba de abajo lo fija.
  */
-export const FRAGMENTO_EXPECTATIVA_MORA = "recargo por mora de";
+export const FRAGMENTO_EXPECTATIVA_MORA = "recargo por mora de alrededor de";
 
 /**
  * Fragmentos fijos de las oraciones que llevan {montoAdeudado}: una por cada

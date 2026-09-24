@@ -200,6 +200,15 @@ app.post("/", async (c) => {
 			createdByRole: autor.role,
 			assignedToRole: ROLES.JURIDICO,
 			redirectPage: "investor_contracts",
+			// Con esto la notificación trae el botón que lleva directo a la
+			// batería; sin `relatedEntityId` la pantalla no arma el enlace y el
+			// aviso queda siendo sólo un texto.
+			//
+			// El enum de entidades no tiene una para la batería. Se usa la más
+			// cercana: lo que queda pendiente son contratos. Nadie filtra por ella
+			// fuera de contabilidad, que mira las de oportunidades.
+			relatedEntityType: "contract",
+			relatedEntityId: creada.id,
 		});
 	} else {
 		console.warn(

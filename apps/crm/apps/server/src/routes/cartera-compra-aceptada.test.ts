@@ -132,6 +132,8 @@ describe("aviso de compra aceptada", () => {
 		expect(createNotification.mock.calls[0][0]).toMatchObject({
 			assignedToRole: "juridico",
 			redirectPage: "investor_contracts",
+			// Sin la entidad relacionada la notificación no lleva a ningún lado.
+			relatedEntityId: "bateria-1",
 		});
 	});
 

@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { investorContractBatches } from "../db/schema/investor-contracts";
+import { notifications } from "../db/schema/notifications";
 import {
 	contractSignatories,
 	generatedLegalContracts,
@@ -32,11 +33,15 @@ import {
 } from "../lib/contratos-inversiones";
 import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
 import { conMarcaDeSubidoAMano } from "../lib/contrato-subido-a-mano";
-import { espejarContratoEnCartera } from "../lib/espejo-contratos-inversionista";
+import { createNotification } from "../lib/notificaciones";
+import {
+	espejarContratoEnCartera,
+	espejarEstadoDeFirmaEnCartera,
+} from "../lib/espejo-contratos-inversionista";
 import { firmantesDeContratoDeInversion } from "../lib/firmantes-inversionista";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import { juridicoProcedure, viewInvestorContractsProcedure } from "../lib/orpc";
-import { PERMISSIONS } from "../lib/roles";
+import { PERMISSIONS, ROLES } from "../lib/roles";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import {
 	borrarDocumentoDeWeeTrust,
@@ -226,6 +231,14 @@ async function guardarContratoDeInversion(params: {
 	userId: string;
 	/** Lo armó una persona por fuera, no la plantilla. */
 	subidoAMano?: boolean;
+	/**
+	 * El contrato al que reemplaza, con el motivo por el que se anula.
+	 *
+	 * Va en la misma transacción que el nuevo: si dos personas reemplazan el
+	 * mismo contrato a la vez, la segunda espera el bloqueo, ve que ya fue
+	 * reclamado y pierde. Su documento se borra en WeeTrust.
+	 */
+	reemplaza?: { contractId: string; motivo: string };
 }): Promise<string> {
 	const { resultado } = params;
 	const firmantes = resultado.signatories ?? [];
@@ -262,6 +275,9 @@ async function guardarContratoDeInversion(params: {
 					eq(generatedLegalContracts.batchId, params.batchId),
 					eq(generatedLegalContracts.contractType, params.contractType),
 					ne(generatedLegalContracts.status, "cancelled"),
+					...(params.reemplaza
+						? [ne(generatedLegalContracts.id, params.reemplaza.contractId)]
+						: []),
 				),
 			)
 			.limit(1);
@@ -269,6 +285,31 @@ async function guardarContratoDeInversion(params: {
 			throw new Error(
 				"Otro pedido emitió este mismo contrato mientras se generaba",
 			);
+		}
+
+		// Se reclama el viejo ANTES de insertar el nuevo: bloquea la fila, y si
+		// otra persona ya lo reemplazó, ésta pierde acá y no llega a guardar nada.
+		if (params.reemplaza) {
+			const [original] = await tx
+				.select({
+					status: generatedLegalContracts.status,
+					reemplazadoPor: generatedLegalContracts.replacedByContractId,
+				})
+				.from(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.id, params.reemplaza.contractId))
+				.for("update")
+				.limit(1);
+
+			if (
+				!original ||
+				original.status === "cancelled" ||
+				original.reemplazadoPor
+			) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Otra persona acaba de reemplazar este contrato. Recargá para ver el nuevo.",
+				});
+			}
 		}
 
 		const [guardado] = await tx
@@ -305,8 +346,65 @@ async function guardarContratoDeInversion(params: {
 			.insert(contractSignatories)
 			.values(filasDeFirmantes(guardado.id, firmantes));
 
+		if (params.reemplaza) {
+			await tx
+				.update(generatedLegalContracts)
+				.set({
+					status: "cancelled",
+					cancellationReason: `Reemplazado: ${params.reemplaza.motivo}`,
+					cancelledAt: new Date(),
+					replacedByContractId: guardado.id,
+					updatedAt: new Date(),
+				})
+				.where(eq(generatedLegalContracts.id, params.reemplaza.contractId));
+		}
+
 		return guardado.id;
 	});
+}
+
+/**
+ * Borra en WeeTrust el documento del contrato que se acaba de anular.
+ *
+ * Va después de guardar el nuevo y fuera de la transacción: si se borrara
+ * antes y el guardado fallara, la batería se quedaba sin ninguno de los dos.
+ *
+ * Lo que diga WeeTrust antes de borrar es una foto —alguien puede firmar entre
+ * la consulta y el borrado—, así que la fila se conserva siempre y lo que
+ * cambia es el detalle que queda escrito en el motivo.
+ */
+async function borrarElViejoEnWeeTrust(params: {
+	contractId: string;
+	status: string | null;
+	weetrustDocumentId: string | null;
+	/** El motivo ya armado, al que se le agrega cómo quedó allá. */
+	razon: string;
+	origen: string;
+}): Promise<void> {
+	if (params.status === "signed" || !params.weetrustDocumentId) return;
+
+	const conFirmasParciales =
+		(await alguienFirmo(params.contractId)) ||
+		((await estadoEnWeeTrust(params.weetrustDocumentId))?.conFirmas ?? true);
+
+	let detalle: string;
+	try {
+		await borrarDocumentoDeWeeTrust(params.weetrustDocumentId);
+		detalle = conFirmasParciales
+			? "tenía firmas parciales; el documento se borró en WeeTrust"
+			: "el documento se borró en WeeTrust";
+	} catch (error) {
+		console.error(
+			`[${params.origen}] no se pudo borrar ${params.weetrustDocumentId}:`,
+			error,
+		);
+		detalle = "no se pudo borrar en WeeTrust: hay que borrarlo a mano";
+	}
+
+	await db
+		.update(generatedLegalContracts)
+		.set({ cancellationReason: `${params.razon} (${detalle})` })
+		.where(eq(generatedLegalContracts.id, params.contractId));
 }
 
 const ESTADOS = [
@@ -318,6 +416,18 @@ const ESTADOS = [
 
 /** Estados en los que la batería todavía es trabajo por hacer. */
 const ABIERTAS = ["pendiente", "en_proceso"] as const;
+
+/**
+ * A quiénes les toca el trabajo cuando jurídico termina.
+ *
+ * Son los mismos que pueden ver los contratos del inversionista: el asesor que
+ * lo atiende le pasa los enlaces, y la gerencia mira cómo va.
+ */
+const ROLES_DE_INVERSIONES = [
+	ROLES.INVESTMENT_ADVISOR_JR,
+	ROLES.INVESTMENT_ADVISOR_SR,
+	ROLES.INVESTMENT_MANAGER,
+] as const;
 
 export const investorContractsRouter = {
 	listInvestorContractBatches: juridicoProcedure
@@ -740,9 +850,22 @@ export const investorContractsRouter = {
 				filename: z.string().min(1),
 				/** PDF en base64, sin el prefijo `data:`. */
 				pdfBase64: z.string().min(1),
+				/**
+				 * Contrato al que reemplaza. Es para corregir uno ya emitido: el
+				 * nuevo ocupa su lugar y el viejo se anula y se borra en WeeTrust.
+				 */
+				replaceContractId: z.string().uuid().optional(),
+				/** Por qué se anula el que se reemplaza. Obligatorio si hay reemplazo. */
+				motivo: z.enum(MOTIVOS_DE_ANULACION_KEYS).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			if (input.replaceContractId && !input.motivo) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Hay que decir por qué se anula el contrato anterior.",
+				});
+			}
+
 			const bateria = await bateriaAbierta(input.batchId);
 
 			if (!esContratoDeInversion(input.contractType)) {
@@ -761,6 +884,43 @@ export const investorContractsRouter = {
 				});
 			}
 
+			// El que se reemplaza tiene que ser de esta batería y del mismo tipo:
+			// cambiar un contrato por otro de distinto tipo no es reemplazar, es
+			// subir uno nuevo, y dejaría a la batería sin el que se anuló.
+			let reemplazado:
+				| {
+						id: string;
+						status: string | null;
+						weetrustDocumentId: string | null;
+				  }
+				| undefined;
+
+			if (input.replaceContractId) {
+				[reemplazado] = await db
+					.select({
+						id: generatedLegalContracts.id,
+						status: generatedLegalContracts.status,
+						weetrustDocumentId: generatedLegalContracts.weetrustDocumentId,
+					})
+					.from(generatedLegalContracts)
+					.where(
+						and(
+							eq(generatedLegalContracts.id, input.replaceContractId),
+							eq(generatedLegalContracts.batchId, input.batchId),
+							eq(generatedLegalContracts.contractType, input.contractType),
+							ne(generatedLegalContracts.status, "cancelled"),
+						),
+					)
+					.limit(1);
+
+				if (!reemplazado) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Ese contrato no es de esta batería, no es del mismo tipo o ya está anulado.",
+					});
+				}
+			}
+
 			// Un contrato vigente por tipo y por batería, lo mismo que al generar:
 			// con dos, el inversionista recibe dos enlaces del mismo contrato y
 			// firma el que no es. Se vuelve a mirar, bloqueado, al guardar.
@@ -772,13 +932,16 @@ export const investorContractsRouter = {
 						eq(generatedLegalContracts.batchId, input.batchId),
 						eq(generatedLegalContracts.contractType, input.contractType),
 						ne(generatedLegalContracts.status, "cancelled"),
+						...(input.replaceContractId
+							? [ne(generatedLegalContracts.id, input.replaceContractId)]
+							: []),
 					),
 				)
 				.limit(1);
 			if (yaVigente) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
-						"Esta batería ya tiene ese contrato. Anulá el que está vigente antes de subir otro.",
+						"Esta batería ya tiene ese contrato. Reemplazalo o anulalo antes de subir otro.",
 				});
 			}
 
@@ -815,6 +978,14 @@ export const investorContractsRouter = {
 					resultado,
 					userId: context.userId,
 					subidoAMano: true,
+					...(reemplazado && input.motivo
+						? {
+								reemplaza: {
+									contractId: reemplazado.id,
+									motivo: etiquetaDeMotivo(input.motivo),
+								},
+							}
+						: {}),
 				});
 			} catch (error) {
 				// El documento ya salió a WeeTrust con sus invitaciones: se borra allá
@@ -837,15 +1008,36 @@ export const investorContractsRouter = {
 						});
 			}
 
+			// Recién ahora el documento viejo: su fila ya quedó anulada, y borrarlo
+			// antes de guardar el nuevo dejaba a la batería sin ninguno de los dos.
+			if (reemplazado && input.motivo) {
+				await borrarElViejoEnWeeTrust({
+					contractId: reemplazado.id,
+					status: reemplazado.status,
+					weetrustDocumentId: reemplazado.weetrustDocumentId,
+					razon: `Reemplazado: ${etiquetaDeMotivo(input.motivo)}`,
+					origen: "uploadInvestorContract",
+				});
+
+				// El anulado, en la papelería, seguía figurando con sus enlaces: que
+				// diga que está anulado es lo que evita que alguien se los pase al
+				// inversionista.
+				void espejarEstadoDeFirmaEnCartera(reemplazado.id);
+			}
+
 			// Copiarlo a cartera es lo que lo hace visible en la ficha del
-			// inversionista. Best-effort y sin bloquear, igual que al generar.
+			// inversionista. Best-effort y sin bloquear, igual que al generar. El
+			// espejo se guarda por contrato, así que el viejo queda como estaba y
+			// el nuevo entra con sus enlaces.
 			void espejarContratoEnCartera(contractId, context.userId);
 
 			await cerrarLaBateria(bateria, context.userId);
 
 			return {
 				success: true,
-				message: "Contrato subido y mandado a firmar",
+				message: reemplazado
+					? "Contrato reemplazado y mandado a firmar"
+					: "Contrato subido y mandado a firmar",
 				contractId,
 				contractType: input.contractType,
 				contractName: input.contractName,
@@ -857,6 +1049,89 @@ export const investorContractsRouter = {
 				signingLinks: resultado.signing_links,
 				signatories: resultado.signatories,
 			};
+		}),
+
+	/**
+	 * Avisa a inversiones que la batería quedó lista.
+	 *
+	 * Lo dispara jurídico al darle "Listo": es el momento en que dice que
+	 * terminó, y hasta ahora inversiones se enteraba entrando a la ficha a ver
+	 * si ya había algo. Los enlaces de firma que le pasan al inversionista
+	 * salen de esa ficha.
+	 *
+	 * Una notificación por rol de inversiones: la columna guarda un solo rol, y
+	 * el aviso le sirve tanto a quien atiende al inversionista como a su
+	 * gerencia.
+	 *
+	 * No lleva enlace: la ficha del inversionista se abre por su id de cartera,
+	 * que es un número, y la notificación sólo puede guardar un uuid. Va con el
+	 * nombre, que es con lo que se lo busca.
+	 *
+	 * Se puede llamar dos veces sin avisar dos veces: la batería queda marcada
+	 * en la notificación, y si ya hay una, no se crea otra.
+	 */
+	marcarBateriaLista: juridicoProcedure
+		.input(z.object({ batchId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			const [bateria] = await db
+				.select()
+				.from(investorContractBatches)
+				.where(eq(investorContractBatches.id, input.batchId))
+				.limit(1);
+
+			if (!bateria) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Esa batería de contratos no existe",
+				});
+			}
+
+			const vigentes = await db
+				.select({ id: generatedLegalContracts.id })
+				.from(generatedLegalContracts)
+				.where(
+					and(
+						eq(generatedLegalContracts.batchId, input.batchId),
+						ne(generatedLegalContracts.status, "cancelled"),
+					),
+				);
+
+			// Sin contratos no hay nada que avisar: jurídico entró, miró y salió.
+			if (vigentes.length === 0) {
+				return { avisado: false, motivo: "sin_contratos" as const };
+			}
+
+			const [yaAvisado] = await db
+				.select({ id: notifications.id })
+				.from(notifications)
+				.where(
+					and(
+						eq(notifications.relatedEntityId, input.batchId),
+						eq(notifications.relatedEntityType, "contract"),
+						inArray(notifications.assignedToRole, ROLES_DE_INVERSIONES),
+					),
+				)
+				.limit(1);
+
+			if (yaAvisado) {
+				return { avisado: false, motivo: "ya_avisado" as const };
+			}
+
+			for (const rol of ROLES_DE_INVERSIONES) {
+				await createNotification({
+					titulo: `Contratos listos: ${bateria.investorName}`,
+					descripcion:
+						`Jurídico terminó de emitir ${vigentes.length} contrato(s). ` +
+						"Los enlaces de firma están en la ficha del inversionista.",
+					type: "aviso",
+					createdBy: context.userId,
+					createdByRole: context.userRole,
+					assignedToRole: rol,
+					relatedEntityType: "contract",
+					relatedEntityId: input.batchId,
+				});
+			}
+
+			return { avisado: true, contratos: vigentes.length };
 		}),
 
 	/**
@@ -1215,32 +1490,18 @@ export const investorContractsRouter = {
 				throw error;
 			}
 
-			// Recién ahora el documento viejo. Su fila ya quedó anulada y se
-			// conserva siempre: lo que diga WeeTrust antes de borrar es una foto, y
-			// alguien puede firmar entre esa consulta y el borrado.
-			if (contrato.status !== "signed" && contrato.weetrustDocumentId) {
-				const conFirmasParciales =
-					(await alguienFirmo(input.contractId)) ||
-					((await estadoEnWeeTrust(contrato.weetrustDocumentId))?.conFirmas ??
-						true);
-				let detalle: string;
-				try {
-					await borrarDocumentoDeWeeTrust(contrato.weetrustDocumentId);
-					detalle = conFirmasParciales
-						? "tenía firmas parciales; el documento se borró en WeeTrust"
-						: "el documento se borró en WeeTrust";
-				} catch (error) {
-					console.error(
-						`[refreshInvestorContractSigningLinks] no se pudo borrar ${contrato.weetrustDocumentId}:`,
-						error,
-					);
-					detalle = "no se pudo borrar en WeeTrust: hay que borrarlo a mano";
-				}
-				await db
-					.update(generatedLegalContracts)
-					.set({ cancellationReason: `Regenerado: ${motivo} (${detalle})` })
-					.where(eq(generatedLegalContracts.id, input.contractId));
-			}
+			// Recién ahora el documento viejo: su fila ya quedó anulada.
+			await borrarElViejoEnWeeTrust({
+				contractId: input.contractId,
+				status: contrato.status,
+				weetrustDocumentId: contrato.weetrustDocumentId,
+				razon: `Regenerado: ${motivo}`,
+				origen: "refreshInvestorContractSigningLinks",
+			});
+
+			// Y que la papelería diga que ese quedó anulado, para que nadie siga
+			// pasando sus enlaces.
+			void espejarEstadoDeFirmaEnCartera(input.contractId);
 
 			// El espejo de cartera tiene que apuntar al documento nuevo: si no, la
 			// ficha del inversionista seguiría mostrando enlaces muertos.

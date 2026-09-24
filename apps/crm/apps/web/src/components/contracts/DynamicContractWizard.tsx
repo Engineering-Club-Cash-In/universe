@@ -330,6 +330,12 @@ interface DynamicContractWizardProps {
 	 * Sólo en ventas, donde generar y guardar son dos pasos: jurídico revisa los
 	 * PDF antes de instalarlos. Sin esto, el wizard termina al generar.
 	 */
+	/**
+	 * Qué hacer cuando le dan "Listo" en los resultados, si no hay paso de
+	 * enlazado. Por defecto se sale de la pantalla, como el botón de volver;
+	 * inversiones aprovecha para avisarle a quien sigue.
+	 */
+	onFinish?: () => void | Promise<void>;
 	onLinkContracts?: (data: {
 		opportunityId: string;
 		leadId: string;
@@ -862,6 +868,7 @@ export function DynamicContractWizard({
 	valoresIniciales,
 	onGetDocumentsByDpi,
 	onGenerate,
+	onFinish,
 	onLinkContracts,
 	onBack,
 	onDescartarSinEnlazar,
@@ -3030,7 +3037,7 @@ export function DynamicContractWizard({
 									</div>
 									<Button
 										size="lg"
-										onClick={onBack}
+										onClick={() => (onFinish ?? onBack)()}
 										disabled={isGenerating || Boolean(retryingType)}
 										className="bg-green-600 hover:bg-green-700"
 									>
@@ -3122,7 +3129,7 @@ export function DynamicContractWizard({
 				{step === 3 && !onLinkContracts ? (
 					<Button
 						size="lg"
-						onClick={onBack}
+						onClick={() => (onFinish ?? onBack)()}
 						disabled={isGenerating || Boolean(retryingType)}
 						className="bg-green-600 hover:bg-green-700"
 					>

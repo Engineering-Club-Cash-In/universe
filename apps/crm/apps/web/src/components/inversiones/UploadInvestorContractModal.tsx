@@ -1,6 +1,10 @@
-import { useMutation } from "@tanstack/react-query";
-import { FileText, FileUp, Loader2 } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { FileText, FileUp, Loader2, TriangleAlert } from "lucide-react";
 import { useState } from "react";
+import {
+	MOTIVOS_DE_ANULACION,
+	type MotivoDeAnulacion,
+} from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,7 +25,8 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { leerBase64 } from "@/lib/archivo-base64";
-import { client } from "@/utils/orpc";
+import { estaAnulado } from "@/lib/contract-signers-display";
+import { client, orpc } from "@/utils/orpc";
 
 /**
  * Sube un contrato de inversión que jurídico armó por fuera y lo manda a
@@ -36,6 +41,11 @@ import { client } from "@/utils/orpc";
  * ubica las líneas de firma por el layout de ese tipo, así que el PDF tiene que
  * ser de verdad ese contrato. Si no lo es, el servidor lo rechaza en vez de
  * colocar las firmas a ojo.
+ *
+ * Si la batería ya tiene un contrato vigente de ese tipo, esto **reemplaza**:
+ * el que sube ocupa su lugar y el anterior se anula con su motivo y se borra en
+ * WeeTrust. No se puede dejar los dos vivos, porque el inversionista recibiría
+ * dos enlaces del mismo contrato y firmaría el que no es.
  */
 export function UploadInvestorContractModal({
 	batchId,
@@ -53,16 +63,31 @@ export function UploadInvestorContractModal({
 }) {
 	const [contractType, setContractType] = useState<string>("");
 	const [archivo, setArchivo] = useState<File | null>(null);
+	const [motivo, setMotivo] = useState<string>("");
+
+	// Lo que la batería ya tiene emitido: de acá sale si el tipo elegido
+	// reemplaza a uno o entra como nuevo.
+	const contratosQuery = useQuery({
+		...orpc.listInvestorContracts.queryOptions({ input: { batchId } }),
+		enabled: open,
+	});
+
+	const reemplaza = (contratosQuery.data ?? [])
+		.filter((c) => !estaAnulado(c))
+		.find((c) => c.contractType === contractType);
 
 	const limpiar = () => {
 		setContractType("");
 		setArchivo(null);
+		setMotivo("");
 	};
 
 	const subir = useMutation({
 		mutationFn: async () => {
 			if (!contractType) throw new Error("Elegí el tipo de contrato");
 			if (!archivo) throw new Error("Elegí el PDF del contrato");
+			if (reemplaza && !motivo)
+				throw new Error("Elegí por qué se anula el contrato anterior");
 
 			const tipo = documentTypes.find((t) => t.enum === contractType);
 
@@ -72,6 +97,12 @@ export function UploadInvestorContractModal({
 				contractName: tipo?.label ?? contractType,
 				filename: archivo.name,
 				pdfBase64: await leerBase64(archivo),
+				...(reemplaza
+					? {
+							replaceContractId: reemplaza.id,
+							motivo: motivo as MotivoDeAnulacion,
+						}
+					: {}),
 			});
 		},
 		onSuccess: (data) => {
@@ -93,7 +124,9 @@ export function UploadInvestorContractModal({
 		>
 			<DialogContent className="sm:max-w-lg">
 				<DialogHeader>
-					<DialogTitle>Subir contrato</DialogTitle>
+					<DialogTitle>
+						{reemplaza ? "Reemplazar contrato" : "Subir contrato"}
+					</DialogTitle>
 					<DialogDescription>
 						Para el contrato que se armó fuera del sistema. Se manda a firmar
 						igual que los emitidos acá y sus enlaces quedan en la ficha del
@@ -125,6 +158,42 @@ export function UploadInvestorContractModal({
 						</p>
 					</div>
 
+					{reemplaza && (
+						<>
+							<div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-amber-800 text-xs dark:text-amber-300">
+								<TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+								<p>
+									Esta batería ya tiene «{reemplaza.contractName}». El que subas
+									lo reemplaza: el anterior se anula y sus enlaces dejan de
+									servir.
+								</p>
+							</div>
+
+							<div className="space-y-2">
+								<Label htmlFor="motivo-anulacion-inversion">
+									Motivo de la anulación
+								</Label>
+								<Select value={motivo} onValueChange={setMotivo}>
+									<SelectTrigger
+										id="motivo-anulacion-inversion"
+										className="w-full"
+									>
+										<SelectValue placeholder="¿Por qué se anula el anterior?" />
+									</SelectTrigger>
+									<SelectContent>
+										{Object.entries(MOTIVOS_DE_ANULACION).map(
+											([clave, etiqueta]) => (
+												<SelectItem key={clave} value={clave}>
+													{etiqueta}
+												</SelectItem>
+											),
+										)}
+									</SelectContent>
+								</Select>
+							</div>
+						</>
+					)}
+
 					<div className="space-y-2">
 						<Label htmlFor="pdf-contrato-inversion">PDF del contrato</Label>
 						<Input
@@ -152,14 +221,19 @@ export function UploadInvestorContractModal({
 					</Button>
 					<Button
 						onClick={() => subir.mutate()}
-						disabled={subir.isPending || !contractType || !archivo}
+						disabled={
+							subir.isPending ||
+							!contractType ||
+							!archivo ||
+							(!!reemplaza && !motivo)
+						}
 					>
 						{subir.isPending ? (
 							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 						) : (
 							<FileUp className="mr-2 h-4 w-4" />
 						)}
-						Subir y mandar a firmar
+						{reemplaza ? "Reemplazar y mandar a firmar" : "Subir y mandar a firmar"}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

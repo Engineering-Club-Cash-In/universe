@@ -162,6 +162,21 @@ function RouteComponent() {
 		return { listaCreditos: JSON.stringify(items) };
 	}, [bateria]);
 
+	/**
+	 * El "Listo" de jurídico avisa a inversiones que la batería quedó lista.
+	 *
+	 * Es el momento en que jurídico dice que terminó; hasta ahora inversiones se
+	 * enteraba entrando a la ficha a ver si ya había algo. Si el aviso falla, se
+	 * sale igual: el trabajo ya está hecho y el aviso se puede repetir.
+	 */
+	const avisarMutation = useMutation({
+		mutationFn: () => client.marcarBateriaLista({ batchId }),
+		onSuccess: (resultado) => {
+			if (resultado.avisado) toast.success("Inversiones ya fue avisado");
+		},
+		onError: (error: Error) => toast.error(error.message),
+	});
+
 	const cerrarMutation = useMutation({
 		...orpc.closeInvestorContractBatch.mutationOptions(),
 		onSuccess: (_, variables) => {
@@ -460,6 +475,10 @@ function RouteComponent() {
 							onGenerate={(data) => generarMutation.mutateAsync(data)}
 							isGenerating={generarMutation.isPending}
 							onBack={() => navigate({ to: "/juridico" })}
+							onFinish={async () => {
+								await avisarMutation.mutateAsync().catch(() => undefined);
+								navigate({ to: "/juridico" });
+							}}
 							valoresIniciales={valoresIniciales}
 							pasoPrevio={{
 								etiqueta: "Categoría",

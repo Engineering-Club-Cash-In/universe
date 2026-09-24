@@ -42,6 +42,7 @@ import type {
 } from "../types/cartera-back";
 import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import {
+	clearCarteraTokens,
 	getCarteraAccessToken,
 	invalidateAndReauth,
 } from "./cartera-auth.service";
@@ -1224,6 +1225,8 @@ export class CarteraBackClient {
 	 *   Por defecto SOLO se reintentan GET/HEAD: reintentar un POST que ya se
 	 *   ejecutó del otro lado duplica el efecto (ver el bloque de reintentos
 	 *   más abajo). Pasar `true` únicamente en POST de solo lectura.
+	 *   Lo que decide gobierna LAS DOS formas de repetir la petición: el bucle
+	 *   de reintentos del final Y el reenvío por reautenticación ante 401/403.
 	 * @param timeoutMs deadline del fetch. Puede ser una FUNCIÓN para que se
 	 *   evalúe al despachar y no al encolar: el reloj del fetch arranca después
 	 *   de la autenticación, así que un número fijo calculado antes se pasa de
@@ -1313,6 +1316,39 @@ export class CarteraBackClient {
 							}
 
 							if (res.status === 401 || res.status === 403) {
+								// 🚫 El reenvío por reautenticación NO aplica a los métodos
+								// que mutan. Repetía la MISMA petición —mismo método, mismo
+								// cuerpo— y lo hacía al margen de `permiteReintento`, así que
+								// era un segundo POST idéntico por la puerta de atrás.
+								//
+								// Hoy cartera contesta 401/403 antes de que corra el handler
+								// (`requireAuth`, y el `role !== "ADMIN"` que es la primera
+								// línea de `otorgarAccesoPortal.ts`), así que el trabajo no
+								// había empezado y repetirlo era inocuo. Deja de serlo en
+								// cuanto un 403 lo ponga algo intermedio —un balanceador, un
+								// WAF— o un chequeo futuro ubicado DESPUÉS de provisionar: en
+								// `/investor/portal-access` eso es una segunda contraseña al
+								// inversionista, y en `/facturar-generico` es la factura
+								// duplicada del 2026-08-07 que documenta el bloque de abajo.
+								//
+								// Un 401 sí dice "tu token no sirve", y eso conviene atenderlo
+								// aunque no se repita la petición: se tira el token cacheado
+								// para que la SIGUIENTE llamada entre reautenticada, y quien
+								// apretó decide si repite el acto. Un 403 no se toca: es la
+								// identidad la rechazada, y otro token de la misma cuenta de
+								// servicio vuelve con el mismo 403.
+								if (!permiteReintento) {
+									console.warn(
+										`[CarteraBack] ${metodo} ${endpoint} recibió ${res.status} y NO se reenvía reautenticado (operación no idempotente).`,
+									);
+									if (res.status === 401) clearCarteraTokens();
+									throw new CarteraBackHttpError(
+										`Authentication failed: ${errorData.error || errorData.message || errorText}`,
+										res.status,
+										errorData,
+									);
+								}
+
 								if (!didReauth) {
 									didReauth = true;
 									const retryOptions = await buildRequestOptions(true);
@@ -2598,7 +2634,9 @@ export class CarteraBackClient {
 	 *
 	 * Sin `retryOnFailure`: es un POST con efecto, y cada reintento le mandaría
 	 * OTRA contraseña al inversionista. La política por defecto de `request()`
-	 * (solo reintenta GET/HEAD) es la correcta acá y se deja tal cual.
+	 * (solo reintenta GET/HEAD) es la correcta acá y se deja tal cual — y cubre
+	 * también el reenvío por reautenticación ante 401/403, que antes repetía la
+	 * petición al margen de esa política.
 	 */
 	async otorgarAccesoPortal(inversionistaIds: number[]): Promise<{
 		message: string;
@@ -2656,7 +2694,13 @@ export class CarteraBackClient {
 	 * lo activaría sobre una que ya se abrió.
 	 */
 	async consultarAccesoPortal(inversionistaId: number): Promise<{
-		estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "candidata" | "fallo";
+		estado:
+			| "creada"
+			| "ya_tenia"
+			| "avisada"
+			| "omitida"
+			| "candidata"
+			| "fallo";
 		usuarioEmail: string | null;
 		resueltoPor: "dpi" | "email" | null;
 		advertencias: string[];

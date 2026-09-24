@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
 	ADVERTENCIAS_INOCUAS,
-	MOTIVOS_SIN_EFECTO,
 	exigeConstancia,
+	exigeConstanciaPorFalla,
+	MOTIVOS_SIN_EFECTO,
+	STATUS_SIN_EFECTO,
 	tieneCuentaSana,
 } from "./salud-cuenta-portal";
 
@@ -325,5 +327,51 @@ describe("exigeConstancia", () => {
 		expect(
 			exigeConstancia({ estado: "omitida", motivo: "sin_correo" } as never),
 		).toBe(false);
+	});
+});
+
+/**
+ * La otra mitad de "ante la duda siempre registra", y la que de verdad importa:
+ * `exigeConstancia` solo se evalúa cuando HUBO respuesta. Cuando la llamada
+ * falla no hay `detalle` que mirar, y el caso para el que se escribió la regla
+ * —no sabemos si la contraseña salió— es precisamente ese.
+ */
+describe("exigeConstanciaPorFalla", () => {
+	// LA PRUEBA QUE IMPORTA. El salto CRM→cartera aborta por timeout mientras
+	// cartera sigue dentro de su `fetch` a auth-google: la contraseña puede
+	// estar en el buzón y acá solo se ve "cartera no está respondiendo". Si esto
+	// dijera `false`, no quedaría rastro de quién la mandó — y el reintento lo
+	// entierra, porque la cuenta ya existe y el segundo apretón sale en verde.
+	test("sin status (timeout, conexión cortada, breaker abierto) deja constancia", () => {
+		expect(exigeConstanciaPorFalla(null)).toBe(true);
+		expect(exigeConstanciaPorFalla(undefined)).toBe(true);
+	});
+
+	test("un 5xx deja constancia: cartera pudo haber entrado a provisionar", () => {
+		for (const status of [500, 502, 503, 504]) {
+			expect(exigeConstanciaPorFalla(status)).toBe(true);
+		}
+	});
+
+	// Estos cuatro los contesta cartera ANTES de tocar nada: el 403 es la
+	// primera línea de `otorgarAccesoPortal.ts`, el 401 ni llega al handler, el
+	// 400 es la validación del cuerpo y el 404 es que la ruta no existe.
+	test("los rechazos que preceden al trabajo no dejan fila", () => {
+		for (const status of [400, 401, 403, 404]) {
+			expect(exigeConstanciaPorFalla(status)).toBe(false);
+		}
+	});
+
+	// Lista blanca, como las otras dos de este archivo: un status que todavía no
+	// significa nada acá —o que ponga una pieza intermedia— NO puede callar la
+	// constancia por omisión.
+	test("un status que no está en la lista deja constancia", () => {
+		for (const status of [402, 409, 418, 429, 451]) {
+			expect(exigeConstanciaPorFalla(status)).toBe(true);
+		}
+	});
+
+	test("la lista blanca es la de los rechazos previos al trabajo", () => {
+		expect([...STATUS_SIN_EFECTO].sort()).toEqual([400, 401, 403, 404]);
 	});
 });

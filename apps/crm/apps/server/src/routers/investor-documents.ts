@@ -8,7 +8,11 @@ import {
 	investmentManagerProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
-import { exigeConstancia, tieneCuentaSana } from "../lib/salud-cuenta-portal";
+import {
+	exigeConstancia,
+	exigeConstanciaPorFalla,
+	tieneCuentaSana,
+} from "../lib/salud-cuenta-portal";
 import {
 	CarteraBackHttpError,
 	carteraBackClient,
@@ -99,6 +103,49 @@ export function toCarteraOrpcError(
 	return new ORPCError("INTERNAL_SERVER_ERROR", {
 		message: `${contexto}: cartera no está respondiendo. Intenta de nuevo en unos minutos.`,
 	});
+}
+
+// Los motivos que se guardan en `details` salen de un `Error` cualquiera, así
+// que se acotan: un cuerpo de error largo de cartera no tiene por qué entrar
+// entero a una columna que se lee a ojo.
+const LARGO_MAXIMO_MOTIVO = 300;
+
+function motivoDeLaFalla(error: unknown): string {
+	const texto = error instanceof Error ? error.message : String(error);
+	return texto.slice(0, LARGO_MAXIMO_MOTIVO);
+}
+
+/**
+ * Escribe la constancia del acceso al portal SIN PODER TUMBAR la respuesta.
+ *
+ * Cuando esto se llama, lo irreversible ya pasó: cartera contestó, la cuenta
+ * puede estar creada y la contraseña puede haber salido por correo. Si el
+ * insert tirara —el enum `acceso_portal` sin aplicar en ese ambiente, el pool,
+ * la FK de `performed_by`, una conexión cortada— el throw subiría, el navegador
+ * vería un rojo de "falló" sobre algo que SÍ ocurrió, y quien lo apretó volvería
+ * a apretar. Es exactamente el invariante al revés: por callar la constancia se
+ * perdía además la verdad de lo que pasó.
+ *
+ * Es la misma forma que ya usan `editarInversionista` y
+ * `cambiarStatusInversionista` en este archivo, y el mismo criterio que
+ * `portalProvisioning.ts` de cartera-back deja escrito como REGLA DE ORO: la
+ * función que corre DESPUÉS del efecto nunca tira.
+ *
+ * El `console.error` no es decoración: es la constancia de última instancia.
+ * Lleva la fila entera para que se pueda reconstruir a mano desde el log.
+ */
+async function dejarConstanciaDeAccesoPortal(
+	valores: typeof investorActivityLog.$inferInsert,
+): Promise<void> {
+	try {
+		await db.insert(investorActivityLog).values(valores);
+	} catch (errorDeBitacora) {
+		console.error(
+			"🔴 [darAccesoPortal] NO se pudo escribir la constancia en investor_activity_log. Es la ÚNICA constancia veraz de quién autorizó mandar la contraseña (cartera la firma con el token de servicio): reconstruir esta fila a mano.",
+			JSON.stringify(valores),
+			errorDeBitacora,
+		);
+	}
 }
 
 export const investorDocumentsRouter = {
@@ -639,6 +686,12 @@ export const investorDocumentsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			const firmante = {
+				performedBy: context.session.user.id,
+				performedByName:
+					context.session.user.name ?? context.session.user.email,
+			};
+
 			// 1. Llamar a cartera-back (el contrato pide un arreglo de ids)
 			//
 			// El try/catch es el mismo de `crearInversionista`/`editarInversionista`
@@ -654,6 +707,42 @@ export const investorDocumentsRouter = {
 					input.inversionistaId,
 				]);
 			} catch (error) {
+				// Una llamada que FALLÓ también deja constancia, salvo cuando el
+				// propio status prueba que cartera no llegó a provisionar.
+				//
+				// El caso que lo obliga es el timeout: el salto CRM→cartera aborta
+				// mientras cartera sigue dentro de su `fetch` a auth-google, así que
+				// la contraseña puede estar en el buzón del inversionista mientras
+				// acá solo se ve "cartera no está respondiendo". Sin esta fila no
+				// quedaba NADA: ni quién apretó, ni cuándo, ni sobre quién. Y el
+				// reintento lo entierra —la cuenta ya existe, cartera contesta
+				// `ya_tenia` y el segundo apretón sale en verde—.
+				//
+				// Qué status descarta el efecto y cuál no vive en
+				// `lib/salud-cuenta-portal.ts`; es una lista blanca, igual que las
+				// otras dos decisiones de este flujo.
+				const statusDeCartera =
+					error instanceof CarteraBackHttpError ? error.status : null;
+
+				if (exigeConstanciaPorFalla(statusDeCartera)) {
+					await dejarConstanciaDeAccesoPortal({
+						inversionistaId: input.inversionistaId,
+						action: "acceso_portal",
+						details: {
+							// `estado` NO es de la enumeración de cartera a propósito:
+							// cartera nunca contestó, y escribir uno de los suyos sería
+							// inventar un desenlace que nadie observó.
+							estado: "sin_respuesta_de_cartera",
+							usuarioEmail: null,
+							advertencias: ["no_se_sabe_si_la_contrasena_salio"],
+							motivo: motivoDeLaFalla(error),
+							correo: null,
+							httpStatus: statusDeCartera,
+						},
+						...firmante,
+					});
+				}
+
 				throw toCarteraOrpcError(error, "Dar acceso al portal");
 			}
 
@@ -674,7 +763,7 @@ export const investorDocumentsRouter = {
 			// correo—. Qué cuenta como acto, y por qué la duda SIEMPRE cuenta,
 			// vive en `lib/salud-cuenta-portal.ts`.
 			if (exigeConstancia(detalle)) {
-				await db.insert(investorActivityLog).values({
+				await dejarConstanciaDeAccesoPortal({
 					inversionistaId: input.inversionistaId,
 					action: "acceso_portal",
 					details: {
@@ -686,9 +775,7 @@ export const investorDocumentsRouter = {
 						// su dueño no puede entrar; sin este rastro nadie se entera.
 						correo: detalle?.correo ?? null,
 					},
-					performedBy: context.session.user.id,
-					performedByName:
-						context.session.user.name ?? context.session.user.email,
+					...firmante,
 				});
 			}
 

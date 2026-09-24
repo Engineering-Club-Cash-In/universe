@@ -61,6 +61,7 @@ import {
   cuentaComoHermanoVivo,
   decidirCierrePorRestantesEnCero,
   evaluarCierreCuotaPorPlanos,
+  decidirCierreCortoEnCascada,
   evaluarRubrosPlanosCuota,
 } from "./registerPaymentPolicy";
 import {
@@ -1035,6 +1036,12 @@ export const insertPayment = async (
     // `cuotas_parciales`; este contador preserva esa semántica donde el
     // conteo tenía efectos observables (ajuste stale y guard anti-pérdida).
     let cuotas_saltadas = 0;
+    // Número de la cuota que quedó SIN cobrar porque sus rubros planos venían
+    // cortos y la boleta ya había escrito cuotas (ver
+    // `decidirCierreCortoEnCascada`). Tiene que salir en la respuesta: si no,
+    // el asesor ve "pago exitoso" y no se entera de que una cuota no se cobró
+    // y su plata se fue a saldo a favor.
+    let cuotaCortadaPorPlanosCortos: number | undefined;
     let disponible_para_cuotasPosteriores = new Big(0);
     let ultimoPagoInsertado: typeof pagos_credito.$inferSelect | undefined;
     for (const cuota of cuotasPendientes) {
@@ -1545,7 +1552,23 @@ export const insertPayment = async (
           tolerancia: TOLERANCIA_CENTAVO,
         });
 
-        if (cierrePorDebajo.rechazar) {
+        // Tirar o cortar NO es lo mismo, porque `insertPayment` no tiene
+        // transacción envolvente: el loop escribe con una transacción por
+        // iteración (más la fila, la boleta y la sincronización de restantes
+        // fuera de tx). Si esta es la primera cuota que toca la boleta no hay
+        // nada commiteado y el `throw` es limpio: el cajero corrige y
+        // reintenta (caso del crédito 9234). Si la boleta ya cascadeó y dejó
+        // cuotas escritas, tirar deja la boleta a medias en la base con un
+        // error al operador —y con banco + autorización el reintento choca
+        // contra el dedupe y lo deja trabado—, así que se corta: esta cuota no
+        // se cobra, se frena la cascada y el remanente sigue por el camino
+        // post-loop que ya existe.
+        const accionCierreCorto = decidirCierreCortoEnCascada({
+          rechazar: cierrePorDebajo.rechazar,
+          yaSeEscribioAlgo: cuotas_completas + cuotas_parciales > 0,
+        });
+
+        if (accionCierreCorto !== "seguir") {
           const detalle = cierrePorDebajo.cortos
             .map(
               (corto) =>
@@ -1554,12 +1577,23 @@ export const insertPayment = async (
             )
             .join("; ");
 
-          throw new Error(
-            `Pago rechazado: la cuota #${cuota.cuotas_credito.numero_cuota} se ` +
-              `cerraría con rubros fijos cobrados de menos — ${detalle}. Los ` +
-              `saldos de la cuota vienen subestimados: revisar los saldos de los ` +
-              `pagos previos de esa cuota antes de registrar.`
+          if (accionCierreCorto === "rechazar") {
+            throw new Error(
+              `Pago rechazado: la cuota #${cuota.cuotas_credito.numero_cuota} se ` +
+                `cerraría con rubros fijos cobrados de menos — ${detalle}. Los ` +
+                `saldos de la cuota vienen subestimados: revisar los saldos de los ` +
+                `pagos previos de esa cuota antes de registrar.`
+            );
+          }
+
+          console.warn(
+            `[registerPayment] cascada cortada por cierre corto: crédito ` +
+              `${credito.credito_id}, cuota #${cuota.cuotas_credito.numero_cuota} ` +
+              `no se cobró — ${detalle}. Las cuotas ya escritas de esta boleta se ` +
+              `conservan y el remanente queda disponible.`
           );
+          cuotaCortadaPorPlanosCortos = cuota.cuotas_credito.numero_cuota;
+          break;
         }
 
         // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
@@ -2515,8 +2549,9 @@ export const insertPayment = async (
           monto_aplicado: montoTotal,
           saldo_sobrante: "0.00",
           capital_no_aplicado_a_saldo: capitalDevuelto.toString(),
+          cuota_no_cobrada_por_rubros_cortos: cuotaCortadaPorPlanosCortos ?? null,
         },
-        resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. ${capitalDevuelto.gt(0) ? `El abono a capital de Q${capitalDevuelto.toString()} no se aplicó (el crédito no lo permite) y quedó en saldo a favor. ` : ""}Ya no queda saldo disponible.`,
+        resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. ${capitalDevuelto.gt(0) ? `El abono a capital de Q${capitalDevuelto.toString()} no se aplicó (el crédito no lo permite) y quedó en saldo a favor. ` : ""}${cuotaCortadaPorPlanosCortos !== undefined ? `La cuota #${cuotaCortadaPorPlanosCortos} no se cobró porque sus rubros fijos vienen cortos; el remanente quedó disponible. ` : ""}Ya no queda saldo disponible.`,
       };
     }
   } catch (error) {

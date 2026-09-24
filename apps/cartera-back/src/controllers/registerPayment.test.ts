@@ -1529,3 +1529,56 @@ describe("cableado del cierre en aplicar-pago (que la alerta no se vuelva bloque
     expect(registerPaymentSource).not.toContain("cerrariaCuotaPorDebajo");
   });
 });
+
+describe("cableado del cierre corto en cascada (que un throw no deje la boleta a medias)", () => {
+  // Chequeo de CABLEADO, no de conducta: la conducta vive en
+  // `decidirCierreCortoEnCascada` (probada en registerPaymentPolicy.test.ts).
+  // Lo que no se puede afirmar desde el helper es que el call-site lo use y
+  // que la rama "cortar" haga `break` en vez de `throw` — y eso es justamente
+  // el P1: `insertPayment` no tiene transacción envolvente, así que tirar con
+  // cuotas ya escritas deja la boleta a medias y el reintento trabado por el
+  // dedupe.
+  const bloqueCierreCorto = (() => {
+    const inicio = registerPaymentSource.indexOf(
+      "        const accionCierreCorto = decidirCierreCortoEnCascada({",
+    );
+    if (inicio === -1) {
+      throw new Error("No se encontró el call-site de decidirCierreCortoEnCascada");
+    }
+    const fin = registerPaymentSource.indexOf("\n        }\n", inicio);
+    return registerPaymentSource.slice(inicio, fin);
+  })();
+
+  it("la compuerta decide con el helper, no con `cierrePorDebajo.rechazar` a pelo", () => {
+    expect(registerPaymentSource).toContain("decidirCierreCortoEnCascada");
+    expect(registerPaymentSource).not.toContain("if (cierrePorDebajo.rechazar) {");
+  });
+
+  it("yaSeEscribioAlgo se arma con las cuotas ya commiteadas", () => {
+    expect(bloqueCierreCorto).toContain(
+      "yaSeEscribioAlgo: cuotas_completas + cuotas_parciales > 0,",
+    );
+  });
+
+  it("sólo la rama `rechazar` tira; la rama `cortar` corta el loop", () => {
+    expect(bloqueCierreCorto).toContain('if (accionCierreCorto === "rechazar") {');
+    expect(bloqueCierreCorto).toContain("throw new Error(");
+    // El `break` va después del throw condicional: si desapareciera, la cuota
+    // corta se cobraría igual (el bug original) o el throw volvería a ser
+    // incondicional (el P1).
+    expect(bloqueCierreCorto).toContain("break;");
+    expect(bloqueCierreCorto.indexOf("break;")).toBeGreaterThan(
+      bloqueCierreCorto.indexOf('if (accionCierreCorto === "rechazar") {'),
+    );
+  });
+
+  it("el corte se ve en la respuesta que lee el asesor", () => {
+    expect(bloqueCierreCorto).toContain("cuotaCortadaPorPlanosCortos =");
+    expect(registerPaymentSource).toContain(
+      "cuota_no_cobrada_por_rubros_cortos: cuotaCortadaPorPlanosCortos ?? null,",
+    );
+    expect(registerPaymentSource).toContain(
+      "no se cobró porque sus rubros fijos vienen cortos; el remanente quedó disponible.",
+    );
+  });
+});

@@ -2043,3 +2043,66 @@ describe("decidirCierrePorRestantesEnCero (la validación NO se traba por planos
     ).toEqual({ cuotaCompleta: true, cierreDiferido: false });
   });
 });
+
+describe("decidirCierreCortoEnCascada (tirar sólo si no se escribió nada)", () => {
+  const { decidirCierreCortoEnCascada } = registerPaymentPolicy;
+
+  // Se arma igual que en el call-site (`cuotas_completas + cuotas_parciales >
+  // 0`) para que el caso "ya hay una parcial" y el caso "ya hay una completa"
+  // sean dos escenarios distintos y no la misma constante escrita dos veces.
+  const yaSeEscribioAlgo = (completas: number, parciales: number) =>
+    completas + parciales > 0;
+
+  it("rechaza el pago cuando la cuota corta es la primera que toca la boleta", () => {
+    // El caso del crédito 9234: la cuota 1 es la primera del cascadeo, no hay
+    // ninguna fila commiteada, así que el throw es limpio — el cajero corrige
+    // la boleta y reintenta sin dejar nada a medias.
+    expect(
+      decidirCierreCortoEnCascada({
+        rechazar: true,
+        yaSeEscribioAlgo: yaSeEscribioAlgo(0, 0),
+      }),
+    ).toBe("rechazar");
+  });
+
+  it("corta la cascada cuando ya hay una cuota completa escrita", () => {
+    // 🔒 El candado: `insertPayment` no tiene transacción envolvente, así que
+    // la cuota anterior YA está commiteada (fila, pagado=true, boleta,
+    // restantes). Tirar acá deja la boleta a medias con un error al operador,
+    // y con banco + autorización el reintento choca contra el dedupe.
+    expect(
+      decidirCierreCortoEnCascada({
+        rechazar: true,
+        yaSeEscribioAlgo: yaSeEscribioAlgo(1, 0),
+      }),
+    ).toBe("cortar");
+  });
+
+  it("corta también cuando lo escrito es una parcial", () => {
+    // Una parcial escribe exactamente igual que una completa (misma fila,
+    // misma boleta, mismos restantes sincronizados): el daño de tirar es el
+    // mismo, de ahí que `yaSeEscribioAlgo` sume completas + parciales.
+    expect(
+      decidirCierreCortoEnCascada({
+        rechazar: true,
+        yaSeEscribioAlgo: yaSeEscribioAlgo(0, 1),
+      }),
+    ).toBe("cortar");
+  });
+
+  it("sigue de largo cuando no hay rechazo, haya o no cuotas escritas", () => {
+    // Sin rechazo la compuerta no opina: el cascadeo normal no se toca.
+    expect(
+      decidirCierreCortoEnCascada({
+        rechazar: false,
+        yaSeEscribioAlgo: yaSeEscribioAlgo(0, 0),
+      }),
+    ).toBe("seguir");
+    expect(
+      decidirCierreCortoEnCascada({
+        rechazar: false,
+        yaSeEscribioAlgo: yaSeEscribioAlgo(2, 1),
+      }),
+    ).toBe("seguir");
+  });
+});

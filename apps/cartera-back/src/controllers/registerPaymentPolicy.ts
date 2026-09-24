@@ -1561,6 +1561,48 @@ export const evaluarCierreCuotaPorPlanos = ({
 };
 
 /**
+ * La compuerta de arriba dijo "rechazar". ¿Se puede tirar, o hay que cortar?
+ *
+ * `insertPayment` NO tiene transacción envolvente: el loop de cuotas escribe
+ * con una transacción POR ITERACIÓN, más escrituras sueltas fuera de tx (la
+ * fila de `pagos_credito`, la boleta, la sincronización de restantes). O sea
+ * que cuando una boleta cascadea sobre varias cuotas, lo de la cuota 1 ya
+ * quedó COMMITEADO cuando la cuota 2 se evalúa.
+ *
+ * De ahí los dos comportamientos distintos:
+ *
+ * - Sin nada escrito todavía, el `throw` es limpio: no hay fila, no hay
+ *   boleta, no hay restantes tocados. El cajero ve el error, corrige la
+ *   boleta y reintenta. Es el caso del crédito 9234 (la cuota corta es la
+ *   primera que toca la boleta) y es exactamente la protección que se quiso.
+ *
+ * - Con cuotas ya escritas, tirar es PEOR que no cobrar la cuota corta: la
+ *   boleta queda a medias en la base (cuota 1 cobrada y marcada pagada,
+ *   boleta insertada, restantes sincronizados) mientras el operador recibe un
+ *   error que dice "pago rechazado"; y si la boleta trae banco y número de
+ *   autorización, el reintento choca contra el dedupe y el cajero queda
+ *   trabado sin forma de completar el cobro. Entonces se corta: no se aplica
+ *   nada a esa cuota, se frena la cascada, y el remanente sigue por el camino
+ *   que ya existe (sobrante chico → `otros`, si no → saldo a favor). La cuota
+ *   corta NO se cierra, que era el daño que había que evitar.
+ *
+ * El corte tiene que verse en la respuesta: si no, el asesor lee "pago
+ * exitoso" sin enterarse de que una cuota quedó sin cobrar.
+ */
+export const decidirCierreCortoEnCascada = ({
+  rechazar,
+  yaSeEscribioAlgo,
+}: {
+  /** `rechazar` de `evaluarCierreCuotaPorPlanos`. */
+  rechazar: boolean;
+  /** ¿Esta boleta ya commiteó filas en iteraciones anteriores del loop? */
+  yaSeEscribioAlgo: boolean;
+}): "rechazar" | "cortar" | "seguir" => {
+  if (!rechazar) return "seguir";
+  return yaSeEscribioAlgo ? "cortar" : "rechazar";
+};
+
+/**
  * Con el recibo en cero (todos los `*_restante` de la fila en ~0), ¿la cuota
  * cierra ya, o el cierre queda diferido al hermano que falta validar?
  *

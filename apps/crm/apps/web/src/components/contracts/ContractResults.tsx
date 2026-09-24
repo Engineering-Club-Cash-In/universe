@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
 	AlertCircle,
 	CheckCircle,
@@ -50,6 +51,13 @@ interface ContractResultsProps {
 	onRetry?: (contractType: string) => void;
 	/** Tipo de contrato que se está reintentando en este momento */
 	retryingType?: string | null;
+	/**
+	 * Una acción propia del área por cada contrato, al lado del estado.
+	 *
+	 * Inversiones pone ahí "Reemplazar": es su última oportunidad de corregir un
+	 * documento, porque al darle "Listo" la batería sale de su lista.
+	 */
+	accionPorContrato?: (result: ContractResult) => ReactNode;
 }
 
 export function ContractResults({
@@ -59,6 +67,7 @@ export function ContractResults({
 	failCount,
 	onRetry,
 	retryingType,
+	accionPorContrato,
 }: ContractResultsProps) {
 	const failedNames = results
 		.filter((r) => !r.success)
@@ -124,9 +133,12 @@ export function ContractResults({
 									</span>
 								</div>
 							</div>
-							<Badge variant={result.success ? "default" : "destructive"}>
-								{result.success ? "Generado" : "Error"}
-							</Badge>
+							<div className="flex items-center gap-2">
+								{accionPorContrato?.(result)}
+								<Badge variant={result.success ? "default" : "destructive"}>
+									{result.success ? "Generado" : "Error"}
+								</Badge>
+							</div>
 						</div>
 
 						{result.success && (

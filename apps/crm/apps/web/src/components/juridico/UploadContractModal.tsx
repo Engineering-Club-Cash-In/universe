@@ -25,6 +25,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { leerBase64 } from "@/lib/archivo-base64";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client } from "@/utils/orpc";
 
@@ -48,19 +49,6 @@ interface UploadContractModalProps {
 	 * otro de distinto tipo no es reemplazar, es subir uno nuevo.
 	 */
 	reemplaza?: { id: string; contractType: string; contractName: string } | null;
-}
-
-/** Lee el archivo como base64, sin el prefijo `data:...;base64,`. */
-function leerBase64(file: File): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
-		reader.onload = () => {
-			const resultado = String(reader.result);
-			resolve(resultado.slice(resultado.indexOf(",") + 1));
-		};
-		reader.readAsDataURL(file);
-	});
 }
 
 /**

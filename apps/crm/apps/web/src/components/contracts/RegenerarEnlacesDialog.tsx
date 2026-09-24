@@ -36,6 +36,7 @@ export function RegenerarEnlacesDialog({
 	open,
 	onOpenChange,
 	onRegenerado,
+	regenerar: regenerarDelArea,
 }: {
 	contractId: string;
 	contractName: string;
@@ -44,28 +45,41 @@ export function RegenerarEnlacesDialog({
 	onOpenChange: (open: boolean) => void;
 	/**
 	 * Con el id del contrato nuevo, que es el que hay que reenviar, y la etapa
-	 * con la que lo guardó el servidor.
+	 * con la que lo guardó el servidor. Inversiones no tiene etapa de
+	 * oportunidad: ahí llega en null.
 	 */
 	onRegenerado: (
 		nuevoContractId: string,
 		porcentajeEtapa: number | null,
 	) => void;
+	/**
+	 * Qué hacer con el motivo elegido. Por defecto reemite un contrato de venta;
+	 * inversiones pasa el suyo, que no mira etapas de oportunidad.
+	 */
+	regenerar?: (motivo: keyof typeof MOTIVOS_DE_ANULACION) => Promise<{
+		message: string;
+		enlaces: number;
+		contractId: string;
+		porcentajeEtapa?: number | null;
+	}>;
 }) {
 	const [motivo, setMotivo] = useState<string>("");
 
 	const regenerar = useMutation({
 		mutationFn: () => {
 			if (!motivo) throw new Error("Elegí el motivo");
+			const elegido = motivo as keyof typeof MOTIVOS_DE_ANULACION;
+			if (regenerarDelArea) return regenerarDelArea(elegido);
 			return client.refreshContractSigningLinks({
 				contractId,
-				motivo: motivo as keyof typeof MOTIVOS_DE_ANULACION,
+				motivo: elegido,
 			});
 		},
 		onSuccess: (data) => {
 			toast.success(`${data.message} (${data.enlaces} enlace(s))`);
 			setMotivo("");
 			onOpenChange(false);
-			onRegenerado(data.contractId, data.porcentajeEtapa);
+			onRegenerado(data.contractId, data.porcentajeEtapa ?? null);
 		},
 		onError: (error: Error) => toast.error(error.message),
 	});

@@ -6,12 +6,26 @@ import {
 	ChevronRight,
 	Link2,
 	Loader2,
+	Plus,
+	Trash2,
 	TriangleAlert,
 	User,
 	Users,
 	UserX,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
+import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
+import {
+	esCartaUnificable,
+	PAQUETE_CARTAS,
+} from "server/src/lib/paquete-cartas";
 import { toast } from "sonner";
 import {
 	AlertDialog,
@@ -30,11 +44,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
-import {
-	esCartaUnificable,
-	PAQUETE_CARTAS,
-} from "server/src/lib/paquete-cartas";
 import { type ContractResult, ContractResults } from "./ContractResults";
 
 // Types from API
@@ -77,6 +86,21 @@ interface Document {
 	count_doble_line: number;
 }
 
+/**
+ * Qué clase de campo es.
+ *
+ * Los contratos de inversiones traen los tres: la cesión pide una lista de
+ * créditos cedidos, el anexo de beneficiarios una lista de personas, y la
+ * modalidad de retorno o la figura fiscal son opciones cerradas. Sin esto se
+ * pintaban todos como una caja de texto y no había forma de cargarlos.
+ */
+type FieldType = "text" | "select" | "list";
+
+interface FieldOption {
+	value: string;
+	label: string;
+}
+
 interface Field {
 	name: string;
 	key: string;
@@ -87,6 +111,53 @@ interface Field {
 	description: string | null;
 	default: string | null;
 	is_double_line: boolean;
+	type?: FieldType;
+	/** En un `select`, las opciones; en una `list`, las columnas de cada item. */
+	options?: FieldOption[] | null;
+}
+
+/** Los items de un campo de lista, que se guardan como JSON en el formulario. */
+function itemsDeLista(valor: string): Array<Record<string, string>> {
+	if (!valor) return [];
+	try {
+		const parsed = JSON.parse(valor);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Los valores como los espera el generador.
+ *
+ * Las listas viajan como arreglo, no como el JSON con el que se editan. Y cada
+ * `select` manda, además de su valor, una marca por opción (`clave_opcion`:
+ * ☒ o ☐): así el template puede marcar la casilla que corresponde en vez de
+ * escribir el texto.
+ */
+function valoresParaElGenerador(
+	fields: Field[],
+	fieldValues: Record<string, string>,
+): Record<string, unknown> {
+	const datos: Record<string, unknown> = { ...fieldValues };
+
+	for (const field of fields) {
+		const valor = fieldValues[field.key] ?? "";
+
+		if (field.type === "list") {
+			datos[field.key] = itemsDeLista(valor);
+			continue;
+		}
+
+		if (field.type === "select" && Array.isArray(field.options)) {
+			for (const opcion of field.options) {
+				datos[`${field.key}_${opcion.value}`] =
+					valor === opcion.value ? "☒" : "☐";
+			}
+		}
+	}
+
+	return datos;
 }
 
 // Co-debtor data from database
@@ -220,7 +291,13 @@ interface GenerationResultWithData extends GenerationResult {
 interface DynamicContractWizardProps {
 	documentTypes: DocumentType[];
 	crmData: CRMData;
-	opportunityId: string;
+	/**
+	 * La oportunidad de venta, cuando los contratos son de ventas.
+	 *
+	 * En inversiones no hay oportunidad: los contratos son del inversionista y
+	 * `onGenerate` ya los guarda, así que no hay segundo paso que enlazar.
+	 */
+	opportunityId?: string;
 	leadId?: string;
 	onGetDocumentsByDpi: (
 		dpi: string,
@@ -247,7 +324,30 @@ interface DynamicContractWizardProps {
 			};
 		}>;
 	}) => Promise<GenerationResultWithData>;
-	onLinkContracts: (data: {
+	/**
+	 * Guarda en la oportunidad los contratos recién generados.
+	 *
+	 * Sólo en ventas, donde generar y guardar son dos pasos: jurídico revisa los
+	 * PDF antes de instalarlos. Sin esto, el wizard termina al generar.
+	 */
+	/**
+	 * Una acción propia del área en cada contrato de los resultados. Se pasa tal
+	 * cual a `ContractResults`.
+	 */
+	accionPorContrato?: (result: ContractResult) => ReactNode;
+	/**
+	 * Lo que el área quiera poner debajo de la lista de resultados, antes de las
+	 * instrucciones. Inversiones pone ahí lo de subir un contrato armado por
+	 * fuera, para tenerlo a mano sin bajar hasta el final de la pantalla.
+	 */
+	accionesDeResultados?: ReactNode;
+	/**
+	 * Qué hacer cuando le dan "Listo" en los resultados, si no hay paso de
+	 * enlazado. Por defecto se sale de la pantalla, como el botón de volver;
+	 * inversiones aprovecha para avisarle a quien sigue.
+	 */
+	onFinish?: () => void | Promise<void>;
+	onLinkContracts?: (data: {
 		opportunityId: string;
 		leadId: string;
 		contracts: Array<{
@@ -272,6 +372,28 @@ interface DynamicContractWizardProps {
 			};
 		}>;
 	}) => Promise<{ success: boolean; message: string }>;
+	/**
+	 * Valores que el área ya conoce, por clave de campo.
+	 *
+	 * En ventas los campos se llenan del lead, la oportunidad y el vehículo, que
+	 * el wizard conoce. En inversiones lo que se sabe viene de cartera —los
+	 * créditos de la compra, con su capital y sus fechas—, y eso lo arma quien
+	 * llama. Lo que ya se editó a mano no se pisa.
+	 */
+	valoresIniciales?: Record<string, string>;
+	/**
+	 * Un paso propio del área, antes del de selección.
+	 *
+	 * Inversiones lo usa para la categoría: primero individual o sociedad, y
+	 * recién ahí qué contratos, porque la categoría decide cuáles hay. Sin esto,
+	 * el wizard arranca en la selección de documentos, como en ventas.
+	 */
+	pasoPrevio?: {
+		etiqueta: string;
+		contenido: ReactNode;
+		/** Si ya se puede seguir al paso de selección. */
+		completo: boolean;
+	};
 	onBack: () => void;
 	/**
 	 * Borra en WeeTrust lo que se generó y no se va a enlazar. Los contratos se
@@ -424,7 +546,7 @@ function dpiGroupToWords(numStr: string): string {
 }
 
 // Convert money amount to words in Spanish
-function moneyToWords(amount: number): string {
+export function moneyToWords(amount: number): string {
 	const unidades = [
 		"",
 		"UN",
@@ -650,20 +772,123 @@ function dpiToWords(dpi: string): string {
 	return `${texto} (${cleanDpi})`;
 }
 
+/**
+ * Un campo de lista: tantos items como haga falta, cada uno con sus columnas.
+ *
+ * Es lo que piden la cesión de créditos (un item por crédito cedido) y el anexo
+ * de beneficiarios (uno por persona designada). Se guarda como JSON en el
+ * formulario y se convierte a arreglo al mandarlo.
+ */
+function CampoDeLista({
+	field,
+	valor,
+	onChange,
+}: {
+	field: Field;
+	valor: string;
+	onChange: (key: string, value: string) => void;
+}) {
+	const items = itemsDeLista(valor);
+	const columnas = field.options ?? [];
+
+	const guardar = (siguientes: Array<Record<string, string>>) =>
+		onChange(field.key, JSON.stringify(siguientes));
+
+	return (
+		<div className="space-y-3">
+			{items.length === 0 && (
+				<p className="text-muted-foreground text-xs italic">
+					Sin items todavía. Agregá el primero.
+				</p>
+			)}
+
+			{items.map((item, idx) => (
+				<div
+					key={`${field.key}-${idx}`}
+					className="space-y-2 rounded-md border bg-muted/20 p-3"
+				>
+					<div className="flex items-center justify-between">
+						<span className="font-medium text-muted-foreground text-xs">
+							Item #{idx + 1}
+						</span>
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							className="text-destructive hover:text-destructive"
+							onClick={() => guardar(items.filter((_, i) => i !== idx))}
+						>
+							<Trash2 className="h-4 w-4" />
+						</Button>
+					</div>
+					<div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+						{columnas.map((columna) => (
+							<div key={columna.value} className="flex flex-col">
+								<label
+									className="mb-1 text-muted-foreground text-xs"
+									htmlFor={`${field.key}-${idx}-${columna.value}`}
+								>
+									{columna.label}
+								</label>
+								<Input
+									id={`${field.key}-${idx}-${columna.value}`}
+									value={item[columna.value] ?? ""}
+									placeholder={columna.label}
+									className="h-9 bg-white text-sm"
+									onChange={(e) =>
+										guardar(
+											items.map((otro, i) =>
+												i === idx
+													? { ...otro, [columna.value]: e.target.value }
+													: otro,
+											),
+										)
+									}
+								/>
+							</div>
+						))}
+					</div>
+				</div>
+			))}
+
+			<Button
+				type="button"
+				variant="outline"
+				size="sm"
+				className="gap-2"
+				onClick={() =>
+					guardar([
+						...items,
+						Object.fromEntries(columnas.map((c) => [c.value, ""])),
+					])
+				}
+			>
+				<Plus className="h-4 w-4" />
+				Agregar
+			</Button>
+		</div>
+	);
+}
+
 export function DynamicContractWizard({
 	documentTypes,
 	crmData,
 	opportunityId,
 	leadId,
+	pasoPrevio,
+	valoresIniciales,
 	onGetDocumentsByDpi,
 	onGenerate,
+	accionPorContrato,
+	accionesDeResultados,
+	onFinish,
 	onLinkContracts,
 	onBack,
 	onDescartarSinEnlazar,
 	isGenerating = false,
 	isLinking = false,
 }: DynamicContractWizardProps) {
-	const [step, setStep] = useState<1 | 2 | 3>(1);
+	const [step, setStep] = useState<0 | 1 | 2 | 3>(pasoPrevio ? 0 : 1);
 
 	// Lo generado que todavía no se enlazó: documento -> comprobante. Ref y no
 	// estado porque lo lee la limpieza al desmontar, que ve la última versión.
@@ -1436,16 +1661,18 @@ export function DynamicContractWizard({
 				}
 			});
 
-			
 			setFieldValues((prev) => {
 				const editadosAMano: Record<string, string> = {};
 				for (const key of touchedFieldsRef.current) {
 					if (prev[key] !== undefined) editadosAMano[key] = prev[key];
 				}
-				return { ...initialValues, ...editadosAMano };
+				// Los del área van después de los del CRM y antes de lo editado a
+				// mano: son datos que acá no se saben calcular, pero no le ganan a
+				// quien ya los corrigió.
+				return { ...initialValues, ...valoresIniciales, ...editadosAMano };
 			});
 		},
-		[crmData, numberToText, moneyToText],
+		[crmData, numberToText, moneyToText, valoresIniciales],
 	);
 
 	// Fetch documents and fields when moving to step 2
@@ -1532,6 +1759,16 @@ export function DynamicContractWizard({
 	// Validate a specific field against its regex
 	const validateField = useCallback((field: Field, value: string): string => {
 		const strValue = typeof value === "string" ? value : String(value || "");
+
+		// Una lista se guarda como JSON, así que "[]" es texto y pasaría por
+		// llena. Lo que importa es si tiene items, y la regex no aplica: no se
+		// valida el JSON, se validan sus columnas.
+		if (field.type === "list") {
+			if (field.required && itemsDeLista(strValue).length === 0) {
+				return "Agregá al menos un item";
+			}
+			return "";
+		}
 
 		// Validate required field
 		if (field.required && !strValue.trim()) {
@@ -1657,13 +1894,21 @@ export function DynamicContractWizard({
 	// Check if field has value
 	const fieldHasValue = useCallback(
 		(fieldKey: string): boolean => {
-			return !!fieldValues[fieldKey]?.trim();
+			const valor = fieldValues[fieldKey]?.trim();
+			if (!valor) return false;
+
+			// Una lista vacía se guarda como "[]", que es texto: contarla como
+			// llena dejaba seguir sin haber cargado ningún item.
+			const field = fields.find((f) => f.key === fieldKey);
+			if (field?.type === "list") return itemsDeLista(valor).length > 0;
+
+			return true;
 		},
-		[fieldValues],
+		[fieldValues, fields],
 	);
 
 	// Count filled vs required fields
-	// Campos tecnicos que quedaron con guion: se avisan para que juridico los corrija 
+	// Campos tecnicos que quedaron con guion: se avisan para que juridico los corrija
 	// Aviso corto bajo un campo cuando el valor autollenado necesita una
 	// aclaración: dato que el CRM no tiene, o vendedor sin asignar.
 	const avisoDelCampo = (field: Field): string | null => {
@@ -1744,7 +1989,9 @@ export function DynamicContractWizard({
 		unsupportedDisbursementCount === 0;
 
 	const handleNext = async () => {
-		if (step === 1 && canProceedStep1) {
+		if (step === 0) {
+			setStep(1);
+		} else if (step === 1 && canProceedStep1) {
 			await fetchDocumentsData();
 			setStep(2);
 		} else if (step === 2) {
@@ -1780,7 +2027,9 @@ export function DynamicContractWizard({
 				);
 				if (hayElectronicos) {
 					const sinCorreo = [
-						...(clientEmail ? [] : [crmData.cliente.nombreCompleto || "El cliente"]),
+						...(clientEmail
+							? []
+							: [crmData.cliente.nombreCompleto || "El cliente"]),
 						...coDebtorFields
 							.filter((cd) => !cd.correoElectronico?.trim())
 							.map((cd) => cd.nombreCompleto || "Un codeudor"),
@@ -1873,7 +2122,8 @@ export function DynamicContractWizard({
 						}
 
 						// Build contract data with deudoresAdicionales
-						const contractData: Record<string, unknown> = { ...fieldValues };
+						const contractData: Record<string, unknown> =
+							valoresParaElGenerador(fields, fieldValues);
 						if (hasCoDebtors && !isVendorDeclaration) {
 							contractData.deudoresAdicionales = deudoresAdicionales;
 						}
@@ -1973,7 +2223,9 @@ export function DynamicContractWizard({
 	};
 
 	const handlePrevious = () => {
-		if (step === 2) {
+		if (step === 1 && pasoPrevio) {
+			setStep(0);
+		} else if (step === 2) {
 			setStep(1);
 		} else if (step === 3) {
 			// Volver al paso 2 para corregir campos y regenerar. Lo que se generó
@@ -1988,6 +2240,9 @@ export function DynamicContractWizard({
 	// Handle linking contracts to opportunity
 	const handleLinkContracts = async () => {
 		if (!generationResult || !leadId || retryingType) return;
+		// En inversiones no hay oportunidad ni paso de enlazado: los contratos se
+		// guardaron al generarlos.
+		if (!onLinkContracts || !opportunityId) return;
 
 		const successfulContracts = generationResult.results.filter(
 			(r) => r.success,
@@ -2066,7 +2321,11 @@ export function DynamicContractWizard({
 		}
 	};
 
+	// Se numeran por posición y no con el número interno del paso: con un paso
+	// previo, "Seleccionar" es el 2 para quien lo mira aunque adentro siga
+	// siendo el 1.
 	const steps = [
+		...(pasoPrevio ? [{ number: 0, label: pasoPrevio.etiqueta }] : []),
 		{ number: 1, label: "Seleccionar" },
 		{ number: 2, label: "Confirmar" },
 		{ number: 3, label: "Resultados" },
@@ -2089,7 +2348,7 @@ export function DynamicContractWizard({
 								{step > s.number ? (
 									<Check className="h-5 w-5" />
 								) : (
-									<span className="font-medium">{s.number}</span>
+									<span className="font-medium">{index + 1}</span>
 								)}
 							</div>
 							<span
@@ -2115,6 +2374,16 @@ export function DynamicContractWizard({
 
 			{/* Step Content */}
 			<div className="min-h-[400px]">
+				{/* Paso previo del área (en inversiones, la categoría) */}
+				{step === 0 && pasoPrevio && (
+					<Card>
+						<CardHeader>
+							<CardTitle>{pasoPrevio.etiqueta}</CardTitle>
+						</CardHeader>
+						<CardContent>{pasoPrevio.contenido}</CardContent>
+					</Card>
+				)}
+
 				{/* Step 1: Document Selection */}
 				{step === 1 && (
 					<Card>
@@ -2202,8 +2471,8 @@ export function DynamicContractWizard({
 										</CardHeader>
 										<CardContent>
 											<p className="text-red-800 text-sm dark:text-red-200">
-												Se encontraron {unsupportedDisbursementCount} cheque(s) en
-												una moneda distinta de GTQ. Esos cheques no pueden
+												Se encontraron {unsupportedDisbursementCount} cheque(s)
+												en una moneda distinta de GTQ. Esos cheques no pueden
 												incluirse correctamente en la carta.
 											</p>
 											<p className="mt-2 text-red-800 text-sm dark:text-red-200">
@@ -2413,7 +2682,15 @@ export function DynamicContractWizard({
 													const hasValue = fieldHasValue(field.key);
 													const hasError = !!fieldErrors[field.key];
 													return (
-														<div key={field.key} className="flex flex-col">
+														<div
+															key={field.key}
+															// Las listas ocupan el ancho completo: cada item
+															// trae varias columnas adentro y en media fila
+															// quedan apretadas.
+															className={`flex flex-col ${
+																field.type === "list" ? "md:col-span-2" : ""
+															}`}
+														>
 															{/* Label */}
 															<div className="mb-1.5 flex items-center gap-2">
 																{hasError ? (
@@ -2440,8 +2717,36 @@ export function DynamicContractWizard({
 																)}
 															</div>
 
-															{/* Input o Select según el campo */}
-															{field.key?.toLowerCase() === "gendervendedor" ? (
+															{/* Input, selector o lista, según lo que sea */}
+															{field.type === "list" ? (
+																<CampoDeLista
+																	field={field}
+																	valor={fieldValues[field.key] || ""}
+																	onChange={handleFieldChange}
+																/>
+															) : field.type === "select" &&
+																Array.isArray(field.options) ? (
+																<select
+																	value={fieldValues[field.key] || ""}
+																	onChange={(e) =>
+																		handleFieldChange(field.key, e.target.value)
+																	}
+																	className={`flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${hasError ? "border-red-500" : ""}`}
+																>
+																	<option value="" disabled>
+																		Selecciona {field.name.toLowerCase()}
+																	</option>
+																	{field.options.map((opcion) => (
+																		<option
+																			key={opcion.value}
+																			value={opcion.value}
+																		>
+																			{opcion.label}
+																		</option>
+																	))}
+																</select>
+															) : field.key?.toLowerCase() ===
+																"gendervendedor" ? (
 																<select
 																	value={fieldValues[field.key] || ""}
 																	onChange={(e) =>
@@ -2724,6 +3029,38 @@ export function DynamicContractWizard({
 				{/* Step 3: Results */}
 				{step === 3 && generationResult && (
 					<div className="space-y-4">
+						{/* Sin paso de enlazado, "Listo" es lo único que queda por hacer y
+						    hay que verlo sin bajar hasta el final de los resultados. */}
+						{!onLinkContracts && (
+							<Card className="border-green-200 bg-green-50">
+								<CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+									<div className="flex items-start gap-3">
+										<div className="rounded-full bg-green-100 p-2">
+											<CheckCircle className="h-5 w-5 text-green-600" />
+										</div>
+										<div>
+											<h4 className="font-semibold text-green-800">
+												Contratos emitidos y enlazados
+											</h4>
+											<p className="text-green-700 text-sm">
+												Ya están en la ficha del inversionista, con sus enlaces
+												de firma. Revisá los PDF y dale Listo.
+											</p>
+										</div>
+									</div>
+									<Button
+										size="lg"
+										onClick={() => (onFinish ?? onBack)()}
+										disabled={isGenerating || Boolean(retryingType)}
+										className="bg-green-600 hover:bg-green-700"
+									>
+										<Check className="mr-2 h-5 w-5" />
+										Listo
+									</Button>
+								</CardContent>
+							</Card>
+						)}
+
 						<ContractResults
 							results={generationResult.results}
 							totalRequested={generationResult.totalRequested}
@@ -2731,7 +3068,10 @@ export function DynamicContractWizard({
 							failCount={generationResult.failCount}
 							onRetry={handleRetryContract}
 							retryingType={retryingType}
+							accionPorContrato={accionPorContrato}
 						/>
+
+						{accionesDeResultados}
 
 						{/* Instructions for user */}
 						<Card className="border-blue-200 bg-blue-50">
@@ -2756,11 +3096,18 @@ export function DynamicContractWizard({
 												Si un documento tiene datos equivocados, haz clic en
 												"Corregir y Regenerar" para volver a editarlo
 											</li>
-											<li>
-												Cuando estés satisfecho, haz clic en{" "}
-												<strong>"Finalizar y Enlazar"</strong> para guardar los
-												contratos en la oportunidad
-											</li>
+											{onLinkContracts ? (
+												<li>
+													Cuando estés satisfecho, haz clic en{" "}
+													<strong>"Finalizar y Enlazar"</strong> para guardar
+													los contratos en la oportunidad
+												</li>
+											) : (
+												<li>
+													Los contratos ya quedaron guardados con sus enlaces de
+													firma: aparecen en la ficha del inversionista
+												</li>
+											)}
 										</ul>
 									</div>
 								</div>
@@ -2774,18 +3121,38 @@ export function DynamicContractWizard({
 			<div className="flex justify-between border-t pt-4">
 				<Button
 					variant="outline"
-					onClick={step === 1 ? onBack : handlePrevious}
+					onClick={
+						step === 0 ||
+						(step === 1 && !pasoPrevio) ||
+						(step === 3 && !onLinkContracts)
+							? onBack
+							: handlePrevious
+					}
 					disabled={isGenerating || isLoadingFields || isLinking}
 				>
 					<ChevronLeft className="mr-2 h-4 w-4" />
-					{step === 1
+					{step === 0 || (step === 1 && !pasoPrevio)
 						? "Volver"
 						: step === 3
-							? "Corregir y Regenerar"
+							? // Sin paso de enlazado los contratos ya quedaron guardados:
+								// volver a generarlos chocaría contra los que ya existen.
+								onLinkContracts
+								? "Corregir y Regenerar"
+								: "Volver"
 							: "Anterior"}
 				</Button>
 
-				{step === 3 ? (
+				{step === 3 && !onLinkContracts ? (
+					<Button
+						size="lg"
+						onClick={() => (onFinish ?? onBack)()}
+						disabled={isGenerating || Boolean(retryingType)}
+						className="bg-green-600 hover:bg-green-700"
+					>
+						<Check className="mr-2 h-5 w-5" />
+						Listo
+					</Button>
+				) : step === 3 ? (
 					<Button
 						onClick={() => setShowLinkConfirmDialog(true)}
 						disabled={
@@ -2815,6 +3182,7 @@ export function DynamicContractWizard({
 					<Button
 						onClick={handleNext}
 						disabled={
+							(step === 0 && !pasoPrevio?.completo) ||
 							(step === 1 && !canProceedStep1) ||
 							(step === 2 && !canProceedStep2) ||
 							isGenerating ||

@@ -6,8 +6,8 @@ import {
 	Banknote,
 	CheckCircle,
 	FilePlus2,
-	FileSignature,
 	FileText,
+	Landmark,
 	Loader2,
 	MoreHorizontal,
 	Scale,
@@ -59,6 +59,26 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { client, orpc } from "@/utils/orpc";
 
+/**
+ * Qué dice el estado de una batería, que lo marcan sus documentos y no una
+ * etapa: sin contratos, con contratos a medio firmar, o firmados por todos.
+ */
+const ESTADOS_DE_BATERIA = [
+	"pendiente",
+	"en_proceso",
+	"completada",
+	"descartada",
+] as const;
+
+type EstadoDeBateria = (typeof ESTADOS_DE_BATERIA)[number];
+
+const ESTADO_DE_BATERIA: Record<string, string> = {
+	pendiente: "Sin contratos",
+	en_proceso: "En firma",
+	completada: "Cerradas",
+	descartada: "Descartadas",
+};
+
 export const Route = createFileRoute("/juridico/")({
 	component: RouteComponent,
 });
@@ -78,7 +98,6 @@ function RouteComponent() {
 		canApproveLegalStage,
 		isLoading: isLoadingPermissions,
 	} = useJuridicoPermissions();
-	const [searchQuery, setSearchQuery] = useState("");
 	const [opportunitiesSearchQuery, setOpportunitiesSearchQuery] = useState("");
 	const [etapaFiltro, setEtapaFiltro] = useState<EtapaDeJuridico>(80);
 	const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
@@ -86,6 +105,34 @@ function RouteComponent() {
 		id: string;
 		title: string;
 	} | null>(null);
+
+	// Las baterías de contratos de inversionistas. Van en su propia pestaña: son
+	// otro flujo, con otra gente y sin oportunidad de venta detrás.
+	//
+	// Por defecto, las que todavía son trabajo: sin contratos, o con contratos a
+	// los que les falta alguna firma. Mientras falte firmar se puede corregir
+	// —reemplazar, anular, subir otro—, así que siguen acá.
+	//
+	// Las firmadas por todos salen de la lista: un documento completo no admite
+	// cambios, y en WeeTrust ya no se puede ni borrar. Se ven con "Ver
+	// cerradas", para mirar qué se hizo o agregarle el contrato que faltó.
+	const [estadoBateria, setEstadoBateria] =
+		useState<EstadoDeBateria>("pendiente");
+	const bateriasQuery = useQuery({
+		...orpc.listInvestorContractBatches.queryOptions({
+			input: { status: ESTADOS_DE_BATERIA },
+		}),
+		enabled: canViewLegal,
+	});
+
+	const bateriasDelEstado = (estado: EstadoDeBateria) =>
+		(bateriasQuery.data ?? []).filter((b) => b.status === estado);
+	const bateriasVisibles = bateriasDelEstado(estadoBateria);
+	const bateriasPendientesQuery = useQuery({
+		...orpc.listInvestorContractBatches.queryOptions({ input: {} }),
+		enabled: canViewLegal,
+	});
+	const bateriasAbiertas = bateriasPendientesQuery.data?.length ?? 0;
 
 	// Mutación para aprobar oportunidad (mover a 85%)
 	const approveMutation = useMutation({
@@ -112,7 +159,7 @@ function RouteComponent() {
 	const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
 
 	// Obtener oportunidades listas para contratos (90%+)
-	const { data: leadsWithContracts, isLoading } = useQuery({
+	const { data: leadsWithContracts } = useQuery({
 		...orpc.getOpportunitiesForContracts.queryOptions({
 			input: { closurePercentages: [90, 85] },
 		}),
@@ -151,13 +198,6 @@ function RouteComponent() {
 	}
 
 	// Filtrar leads por búsqueda
-	const filteredLeads = leadsWithContracts?.filter(
-		(lead) =>
-			lead?.lead.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			lead.lead.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			lead.lead.dpi?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			lead.lead.email?.toLowerCase().includes(searchQuery.toLowerCase()),
-	);
 
 	const cuantasEnEtapa = (etapa: EtapaDeJuridico) =>
 		opportunitiesForContracts?.filter(
@@ -371,13 +411,125 @@ function RouteComponent() {
 						className="flex items-center gap-2"
 					>
 						<Target className="h-4 w-4" />
-						Oportunidades Listas
+						Ventas
 					</TabsTrigger>
-					<TabsTrigger value="contracts" className="flex items-center gap-2">
-						<FileSignature className="h-4 w-4" />
-						Personas con Contratos
+					<TabsTrigger value="inversiones" className="flex items-center gap-2">
+						<Landmark className="h-4 w-4" />
+						Inversiones
+						{bateriasAbiertas > 0 && (
+							<Badge variant="secondary">{bateriasAbiertas}</Badge>
+						)}
 					</TabsTrigger>
 				</TabsList>
+
+				{/* Inversiones: las baterías que abre cada compra de cartera aceptada */}
+				<TabsContent value="inversiones">
+					<Card>
+						<CardHeader>
+							<CardTitle>Contratos de inversionistas</CardTitle>
+							<CardDescription>
+								Cada compra de cartera aceptada abre una batería. En «En firma»
+								están las que ya tienen contratos y todavía se pueden corregir;
+								salen de acá cuando jurídico les da «Listo».
+							</CardDescription>
+
+							{/* Filtro por estado, como el de etapas en ventas */}
+							<div className="flex flex-wrap gap-2">
+								{ESTADOS_DE_BATERIA.map((estado) => (
+									<Button
+										key={estado}
+										variant={estadoBateria === estado ? "default" : "outline"}
+										size="sm"
+										aria-pressed={estadoBateria === estado}
+										onClick={() => setEstadoBateria(estado)}
+										className="tabular-nums"
+									>
+										{ESTADO_DE_BATERIA[estado]} ·{" "}
+										{bateriasDelEstado(estado).length}
+									</Button>
+								))}
+							</div>
+						</CardHeader>
+						<CardContent>
+							{bateriasQuery.isLoading ? (
+								<div className="flex items-center justify-center py-12">
+									<Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+								</div>
+							) : bateriasVisibles.length === 0 ? (
+								<div className="flex flex-col items-center justify-center py-12 text-center">
+									<Landmark className="mb-3 h-12 w-12 text-gray-400" />
+									<h3 className="mb-1 font-semibold text-gray-900 text-lg">
+										No hay baterías en «{ESTADO_DE_BATERIA[estadoBateria]}»
+									</h3>
+									<p className="text-gray-500 text-sm">
+										{estadoBateria === "pendiente"
+											? "Aparecen acá en cuanto se acepta una compra de cartera"
+											: "Probá con otro estado"}
+									</p>
+								</div>
+							) : (
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>Inversionista</TableHead>
+											<TableHead>Compra</TableHead>
+											<TableHead>Créditos</TableHead>
+											<TableHead>Aceptada</TableHead>
+											<TableHead>Estado</TableHead>
+											<TableHead className="text-right">Acción</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{bateriasVisibles.map((bateria) => (
+											<TableRow key={bateria.id}>
+												<TableCell>
+													<div className="font-medium">
+														{bateria.investorName}
+													</div>
+													<div className="text-muted-foreground text-xs">
+														{bateria.investorEmail ?? "Sin correo registrado"}
+													</div>
+												</TableCell>
+												<TableCell>
+													{new Intl.NumberFormat("es-GT", {
+														style: "currency",
+														currency: "GTQ",
+													}).format(Number(bateria.montoTotal))}
+												</TableCell>
+												<TableCell>{bateria.creditos.length}</TableCell>
+												<TableCell>
+													{format(new Date(bateria.acceptedAt), "d MMM yyyy", {
+														locale: es,
+													})}
+												</TableCell>
+												<TableCell>
+													<Badge
+														variant={
+															bateria.status === "pendiente"
+																? "default"
+																: "secondary"
+														}
+													>
+														{ESTADO_DE_BATERIA[bateria.status] ??
+															bateria.status.replace("_", " ")}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">
+													<Link
+														to="/juridico/inversionista/$batchId"
+														params={{ batchId: bateria.id }}
+													>
+														<Button size="sm">Trabajar</Button>
+													</Link>
+												</TableCell>
+											</TableRow>
+										))}
+									</TableBody>
+								</Table>
+							)}
+						</CardContent>
+					</Card>
+				</TabsContent>
 
 				{/* Oportunidades Listas Tab */}
 				<TabsContent value="opportunities">
@@ -599,133 +751,6 @@ function RouteComponent() {
 					</Card>
 				</TabsContent>
 
-				{/* Personas con Contratos Tab */}
-				<TabsContent value="contracts">
-					<Card>
-						<CardHeader>
-							<CardTitle>Personas con Contratos</CardTitle>
-							<CardDescription>
-								Lista de personas que tienen contratos legales registrados
-							</CardDescription>
-
-							{/* Barra de búsqueda */}
-							<div className="relative">
-								<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-								<Input
-									placeholder="Buscar por nombre, DPI o email..."
-									value={searchQuery}
-									onChange={(e) => setSearchQuery(e.target.value)}
-									className="pl-9"
-								/>
-							</div>
-						</CardHeader>
-						<CardContent>
-							{isLoading ? (
-								<div className="flex items-center justify-center py-8">
-									<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-								</div>
-							) : filteredLeads && filteredLeads.length > 0 ? (
-								<Table>
-									<TableHeader>
-										<TableRow>
-											<TableHead>Nombre</TableHead>
-											<TableHead>DPI</TableHead>
-											<TableHead>Contacto</TableHead>
-											<TableHead className="text-center">Contratos</TableHead>
-											<TableHead>Último Contrato</TableHead>
-											<TableHead className="text-right">Acciones</TableHead>
-										</TableRow>
-									</TableHeader>
-									<TableBody>
-										{filteredLeads.map((opp) => (
-											<TableRow
-												key={opp.id}
-												className="cursor-pointer hover:bg-muted/50"
-												onClick={() =>
-													navigate({
-														to: `/juridico/${opp.lead.id}?opportunityId=${opp.id}`,
-													})
-												}
-											>
-												<TableCell>
-													<button
-														type="button"
-														className="cursor-pointer text-left font-medium text-primary hover:underline"
-														onClick={(e) => {
-															e.stopPropagation();
-															handleOpenOpportunityModal(opp.id);
-														}}
-													>
-														{opp.lead.firstName} {opp.lead.lastName}
-													</button>
-												</TableCell>
-												<TableCell className="font-mono text-sm">
-													{opp.lead.dpi || "N/A"}
-												</TableCell>
-												<TableCell>
-													<div className="text-sm">
-														<div>{opp.lead.email || "Sin email"}</div>
-														<div className="text-muted-foreground">
-															{opp.lead.phone || "Sin teléfono"}
-														</div>
-													</div>
-												</TableCell>
-												<TableCell className="text-center">
-													<Badge variant="outline">{opp.contractCount}</Badge>
-												</TableCell>
-												<TableCell>
-													{opp.latestContractDate ? (
-														<div className="text-sm">
-															<div>
-																{format(
-																	new Date(opp.latestContractDate),
-																	"dd MMM yyyy",
-																	{ locale: es },
-																)}
-															</div>
-															<div className="text-muted-foreground">
-																{opp.latestContractName}
-															</div>
-														</div>
-													) : (
-														<span className="text-muted-foreground text-sm">
-															N/A
-														</span>
-													)}
-												</TableCell>
-												<TableCell className="text-right">
-													<Link
-														to="/juridico/$leadId"
-														params={{ leadId: opp.lead.id }}
-														search={{ opportunityId: opp.id }}
-														className="font-medium text-primary text-sm hover:underline"
-														onClick={(e) => e.stopPropagation()}
-													>
-														Ver detalles →
-													</Link>
-												</TableCell>
-											</TableRow>
-										))}
-									</TableBody>
-								</Table>
-							) : (
-								<div className="flex flex-col items-center justify-center py-12 text-center">
-									<FileText className="mb-3 h-12 w-12 text-gray-400" />
-									<h3 className="mb-1 font-semibold text-gray-900 text-lg">
-										{searchQuery
-											? "No se encontraron resultados"
-											: "No hay contratos registrados"}
-									</h3>
-									<p className="text-gray-500 text-sm">
-										{searchQuery
-											? "Intenta con otros términos de búsqueda"
-											: "Los contratos registrados aparecerán aquí"}
-									</p>
-								</div>
-							)}
-						</CardContent>
-					</Card>
-				</TabsContent>
 			</Tabs>
 
 			{/* Opportunity Detail Modal */}

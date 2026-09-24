@@ -14,6 +14,7 @@ export * from "./documents";
 export * from "./document-integrity-validations";
 export * from "./insurance";
 export * from "./investments";
+export * from "./investor-contracts";
 export * from "./juridico-dashboard";
 export * from "./legal-contracts";
 export * from "./license-verification";

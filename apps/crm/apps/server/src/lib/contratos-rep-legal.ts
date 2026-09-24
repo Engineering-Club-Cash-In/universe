@@ -30,6 +30,37 @@ export const REP_LEGAL_TELEFONO =
 	process.env.CONTRATOS_REP_LEGAL_TELEFONO?.trim() || "";
 
 /**
+ * Quién firma por CUBE en los contratos de **inversiones**.
+ *
+ * Va aparte del de ventas a propósito: no es la misma persona. En los contratos
+ * de inversión el nombre impreso es el del administrador único de Cube
+ * Investments, y el de ventas firma por otra entidad. Si compartieran correo,
+ * además, WeeTrust los juntaría en un solo firmante.
+ */
+export const REP_LEGAL_INVERSIONES_EMAIL =
+	process.env.CONTRATOS_REP_LEGAL_INVERSIONES_EMAIL ||
+	"andresasensio@clubcashin.com";
+
+export const REP_LEGAL_INVERSIONES_NOMBRE =
+	process.env.CONTRATOS_REP_LEGAL_INVERSIONES_NOMBRE ||
+	"José Andrés Asensio Hernández";
+
+/**
+ * Quién firma por RDBE.
+ *
+ * Sólo lo lleva el contrato de servicios, que tiene una línea para cada
+ * sociedad. Tiene que ser una persona distinta de la de CUBE: WeeTrust junta a
+ * los firmantes por correo, así que con el mismo correo en las dos líneas una
+ * de las dos firmas desaparece del documento.
+ */
+export const REP_LEGAL_RDBE_EMAIL =
+	process.env.CONTRATOS_REP_LEGAL_RDBE_EMAIL ||
+	"richard.kachler@clubcashin.com";
+
+export const REP_LEGAL_RDBE_NOMBRE =
+	process.env.CONTRATOS_REP_LEGAL_RDBE_NOMBRE || "Richard Kachler";
+
+/**
  * Observadores del flujo de firma: ven el documento y su avance, no firman.
  * Lista separada por comas.
  *

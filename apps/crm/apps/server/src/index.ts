@@ -56,6 +56,7 @@ import {
 	proyeccionRouter,
 } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
+import carteraCompraAceptadaRouter from "./routes/cartera-compra-aceptada";
 import externalContractsRouter from "./routes/external-contracts";
 import weetrustStatusRouter from "./routes/weetrust-status";
 
@@ -209,6 +210,9 @@ app.route("/api/contracts/external", externalContractsRouter);
 // El generador nos relaya lo que WeeTrust le avisa por webhook: quién firmó y
 // cómo va el documento. La base es de acá, así que el estado se escribe acá.
 app.route("/api/contracts/weetrust-status", weetrustStatusRouter);
+// Cartera avisa que una compra de cartera fue aceptada y abre la batería de
+// contratos del inversionista.
+app.route("/api/investor-contracts/compra-aceptada", carteraCompraAceptadaRouter);
 
 const handler = new RPCHandler(
 	Object.assign(

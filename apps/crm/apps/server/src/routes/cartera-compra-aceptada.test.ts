@@ -147,10 +147,17 @@ describe("aviso de compra aceptada", () => {
 		expect(valoresInsertados[0]?.purchaseKey).toBe("100-900");
 	});
 
+	/** La batería que ya existía, con la fecha de aceptación de este mismo aviso. */
+	const MISMA_ACEPTACION = {
+		id: "bateria-1",
+		status: "pendiente",
+		acceptedAt: new Date(CUERPO.compra.aceptadaEn),
+	};
+
 	test("un reintento no abre otra batería ni vuelve a notificar", async () => {
 		// Sin fila devuelta: el índice único la rechazó porque ya existía.
 		filaInsertada = [];
-		filaRefrescada = [{ id: "bateria-1" }];
+		resultadosDeSelect = [[MISMA_ACEPTACION]];
 
 		const res = await pedir(CUERPO);
 
@@ -164,7 +171,7 @@ describe("aviso de compra aceptada", () => {
 
 	test("el reintento refresca la foto de la batería abierta", async () => {
 		filaInsertada = [];
-		filaRefrescada = [{ id: "bateria-1" }];
+		resultadosDeSelect = [[MISMA_ACEPTACION]];
 
 		await pedir(CUERPO);
 
@@ -173,13 +180,15 @@ describe("aviso de compra aceptada", () => {
 			investorEmail: "ana@ejemplo.com",
 			montoTotal: "150000.00",
 		});
+		// Pero no la mueve de estado: sigue siendo el mismo trabajo.
+		expect(valoresRefrescados[0]).not.toHaveProperty("status");
 	});
 
 	test("una batería ya cerrada no se refresca, pero el aviso se acepta", async () => {
 		filaInsertada = [];
-		// El update no alcanza ninguna fila: la batería está completada.
-		filaRefrescada = [];
-		resultadosDeSelect = [[{ id: "bateria-cerrada" }]];
+		resultadosDeSelect = [
+			[{ ...MISMA_ACEPTACION, id: "bateria-cerrada", status: "completada" }],
+		];
 
 		const res = await pedir(CUERPO);
 
@@ -187,6 +196,39 @@ describe("aviso de compra aceptada", () => {
 			batchId: "bateria-cerrada",
 			repetida: true,
 		});
+		expect(valoresRefrescados).toHaveLength(0);
+	});
+
+	test("otra compra sobre los mismos créditos reabre la batería y vuelve a avisar", async () => {
+		filaInsertada = [];
+		resultadosDeSelect = [
+			// La que existía es de una aceptación anterior y ya estaba cerrada.
+			[
+				{
+					id: "bateria-1",
+					status: "completada",
+					acceptedAt: new Date("2026-08-01T10:00:00.000Z"),
+				},
+			],
+			// Tiene contratos emitidos, así que vuelve a "en proceso".
+			[{ id: "contrato-1" }],
+			[{ id: "usuario-juridico", role: "juridico" }],
+		];
+
+		const res = await pedir(CUERPO);
+
+		expect(await res.json()).toMatchObject({
+			batchId: "bateria-1",
+			repetida: true,
+		});
+		expect(valoresRefrescados[0]).toMatchObject({
+			status: "en_proceso",
+			acceptedAt: new Date(CUERPO.compra.aceptadaEn),
+			completedAt: null,
+			montoTotal: "150000.00",
+		});
+		// Es trabajo nuevo: jurídico tiene que enterarse.
+		expect(createNotification).toHaveBeenCalledTimes(1);
 	});
 
 	test("sin usuario de jurídico ni admin, la batería igual queda abierta", async () => {

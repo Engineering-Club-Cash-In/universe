@@ -7,7 +7,10 @@ import {
 	contractSignatories,
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
-import { notifications } from "../db/schema/notifications";
+import {
+	type NewNotification,
+	notifications,
+} from "../db/schema/notifications";
 import { recalcularEstadoDeLaBateria } from "../lib/bateria-de-contratos";
 import {
 	alguienFirmo,
@@ -120,9 +123,10 @@ function prefijoDeArchivo(nombre: string): string {
 /**
  * La batería, siempre que todavía se le puedan emitir contratos.
  *
- * Una completada sí admite más: se completa sola al emitir el primero, y
- * después puede faltar uno. La descartada no: alguien dijo que esa compra no
- * llevaba papelería, y emitirle contratos sería desdecirlo por la espalda.
+ * La cerrada no: se cierra cuando están firmados todos sus contratos, y a
+ * partir de ahí la papelería está completa. La descartada tampoco: alguien dijo
+ * que esa compra no llevaba papelería, y emitirle contratos sería desdecirlo
+ * por la espalda.
  */
 async function bateriaAbierta(batchId: string) {
 	const [bateria] = await db
@@ -141,6 +145,13 @@ async function bateriaAbierta(batchId: string) {
 		throw new ORPCError("BAD_REQUEST", {
 			message:
 				"Esta batería se descartó: si hay que hacer contratos, primero hay que decir por qué se descartó mal.",
+		});
+	}
+
+	if (bateria.status === "completada") {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"Esta batería está cerrada: todos sus contratos están firmados y ya no admite cambios.",
 		});
 	}
 
@@ -445,6 +456,86 @@ const ROLES_DE_INVERSIONES = [
 	ROLES.INVESTMENT_MANAGER,
 ] as const;
 
+/**
+ * Le avisa a inversiones que la batería ya tiene contratos en firma.
+ *
+ * Los enlaces que inversiones le pasa al inversionista salen de su ficha, y sin
+ * esto se enteraba entrando a ver si ya había algo. Antes lo disparaba el
+ * "Listo" de jurídico; sin ese botón, sale con el primer contrato, que es
+ * cuando la batería pasa a estar en firma. Lo que se agregue después aparece en
+ * la misma ficha, así que se avisa una sola vez por batería.
+ *
+ * Una notificación por rol de inversiones: la columna guarda un solo rol, y el
+ * aviso le sirve tanto a quien atiende al inversionista como a su gerencia.
+ * Mirar si ya se avisó y avisar van en una transacción con un candado por
+ * batería: dos emisiones a la vez veían las dos que no había aviso y mandaban
+ * el doble.
+ *
+ * Best-effort: el contrato ya quedó emitido, y un aviso que no sale no lo
+ * deshace.
+ */
+async function avisarAInversiones(
+	batchId: string,
+	quien: Pick<NewNotification, "createdBy" | "createdByRole">,
+): Promise<void> {
+	try {
+		const [bateria] = await db
+			.select()
+			.from(investorContractBatches)
+			.where(eq(investorContractBatches.id, batchId))
+			.limit(1);
+
+		if (!bateria) return;
+
+		const monto = Number(bateria.montoTotal).toLocaleString("es-GT", {
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2,
+		});
+
+		await db.transaction(async (tx) => {
+			await tx.execute(
+				sql`select pg_advisory_xact_lock(hashtext(${`bateria-aviso:${batchId}`}::text))`,
+			);
+
+			const [yaAvisado] = await tx
+				.select({ id: notifications.id })
+				.from(notifications)
+				.where(
+					and(
+						eq(notifications.relatedEntityId, batchId),
+						eq(notifications.relatedEntityType, "contract"),
+						inArray(notifications.assignedToRole, ROLES_DE_INVERSIONES),
+					),
+				)
+				.limit(1);
+
+			if (yaAvisado) return;
+
+			for (const rol of ROLES_DE_INVERSIONES) {
+				await createNotification(
+					{
+						titulo: `Contratos en firma: ${bateria.investorName}`,
+						descripcion:
+							`Jurídico emitió los contratos de la compra de Q${monto}. ` +
+							"Los enlaces de firma están en la ficha del inversionista, y lo que se agregue después aparece ahí también.",
+						type: "aviso",
+						...quien,
+						assignedToRole: rol,
+						relatedEntityType: "contract",
+						relatedEntityId: batchId,
+					},
+					tx,
+				);
+			}
+		});
+	} catch (error) {
+		console.error(
+			`[avisarAInversiones] no se pudo avisar la batería ${batchId}:`,
+			error,
+		);
+	}
+}
+
 export const investorContractsRouter = {
 	listInvestorContractBatches: juridicoProcedure
 		.input(
@@ -554,8 +645,11 @@ export const investorContractsRouter = {
 		}),
 
 	/**
-	 * Cierra la batería: completada cuando la papelería quedó hecha, descartada
-	 * cuando no había que hacerla.
+	 * Descarta la batería: la compra que no lleva papelería.
+	 *
+	 * Es la única forma de cerrarla a mano. Completada no: una batería se cierra
+	 * cuando se firman todos sus contratos, y dejar cerrarla antes sacaba de la
+	 * lista de jurídico baterías con firmas trabadas.
 	 *
 	 * Descartar exige motivo escrito. Una batería que desaparece sin explicación
 	 * no se distingue de una que se olvidó.
@@ -564,12 +658,12 @@ export const investorContractsRouter = {
 		.input(
 			z.object({
 				batchId: z.string().uuid(),
-				resultado: z.enum(["completada", "descartada"]),
+				resultado: z.literal("descartada"),
 				motivo: z.string().trim().min(3).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			if (input.resultado === "descartada" && !input.motivo) {
+			if (!input.motivo) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "Hay que decir por qué se descarta la batería.",
 				});
@@ -579,44 +673,33 @@ export const investorContractsRouter = {
 			// emitidos deja de ser cierto: sus documentos siguen vivos en WeeTrust
 			// pidiendo firma, y la batería descartada ni se recalcula ni vuelve a
 			// la lista, así que nadie se acuerda de ellos. Se anulan primero.
-			if (input.resultado === "descartada") {
-				const [vigente] = await db
-					.select({ contractName: generatedLegalContracts.contractName })
-					.from(generatedLegalContracts)
-					.where(
-						and(
-							eq(generatedLegalContracts.batchId, input.batchId),
-							ne(generatedLegalContracts.status, "cancelled"),
-						),
-					)
-					.limit(1);
+			const [vigente] = await db
+				.select({ contractName: generatedLegalContracts.contractName })
+				.from(generatedLegalContracts)
+				.where(
+					and(
+						eq(generatedLegalContracts.batchId, input.batchId),
+						ne(generatedLegalContracts.status, "cancelled"),
+					),
+				)
+				.limit(1);
 
-				if (vigente) {
-					throw new ORPCError("BAD_REQUEST", {
-						message: `Esta batería ya tiene contratos emitidos («${vigente.contractName}»). Anulalos antes de descartarla.`,
-					});
-				}
+			if (vigente) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Esta batería ya tiene contratos emitidos («${vigente.contractName}»). Anulalos antes de descartarla.`,
+				});
 			}
 
 			const ahora = new Date();
 			const [actualizada] = await db
 				.update(investorContractBatches)
-				.set(
-					input.resultado === "completada"
-						? {
-								status: "completada",
-								completedAt: ahora,
-								completedBy: context.session.user.id,
-								updatedAt: ahora,
-							}
-						: {
-								status: "descartada",
-								discardedAt: ahora,
-								discardedBy: context.session.user.id,
-								discardReason: input.motivo,
-								updatedAt: ahora,
-							},
-				)
+				.set({
+					status: "descartada",
+					discardedAt: ahora,
+					discardedBy: context.session.user.id,
+					discardReason: input.motivo,
+					updatedAt: ahora,
+				})
 				.where(
 					and(
 						eq(investorContractBatches.id, input.batchId),
@@ -765,7 +848,8 @@ export const investorContractsRouter = {
 				contractId?: string;
 				documentLink?: string;
 				signingLinks?: string[];
-				signatories?: unknown[];
+				// Con su forma: la pantalla de resultados los rotula por rol.
+				signatories?: DocumentResult["signatories"];
 				error?: string;
 			}> = [];
 			const emitidos: Array<{ id: string; contractType: string }> = [];
@@ -871,20 +955,14 @@ export const investorContractsRouter = {
 				}
 			}
 
-			// La batería se cierra sola en cuanto salió el primer contrato: el
-			// trabajo que abrió la compra ya se hizo, y dejarla pendiente obligaba a
-			// acordarse de marcarla. Sale de la lista de jurídico, no de la ficha
-			// del inversionista.
-			//
-			// Cerrada no significa cerrada con llave: se le pueden emitir más
-			// contratos después (lo único que no se repite es el mismo tipo), y por
-			// eso se guarda también cuándo empezó.
-			// La batería queda "en proceso": jurídico la sigue viendo hasta que le
-			// dé "Listo". Si ya la había cerrado, esto la reabre, porque emitirle
-			// un contrato es trabajo nuevo.
+			// Con el primer contrato la batería queda en firma: jurídico la sigue
+			// viendo y puede agregar o corregir hasta que se firme todo. Y es el
+			// momento de avisarle a inversiones, que es quien pasa los enlaces.
 			if (emitidos.length > 0) {
-				await recalcularEstadoDeLaBateria(input.batchId, context.userId, {
-					reabrir: true,
+				await recalcularEstadoDeLaBateria(input.batchId, context.userId);
+				await avisarAInversiones(input.batchId, {
+					createdBy: context.userId,
+					createdByRole: context.userRole,
 				});
 			}
 
@@ -1106,8 +1184,12 @@ export const investorContractsRouter = {
 			// el nuevo entra con sus enlaces.
 			void espejarContratoEnCartera(contractId, context.userId);
 
-			await recalcularEstadoDeLaBateria(input.batchId, context.userId, {
-				reabrir: true,
+			await recalcularEstadoDeLaBateria(input.batchId, context.userId);
+			// Una batería armada entera con contratos subidos a mano también tiene
+			// que avisar: es el mismo momento que al emitir.
+			await avisarAInversiones(input.batchId, {
+				createdBy: context.userId,
+				createdByRole: context.userRole,
 			});
 
 			return {
@@ -1236,133 +1318,6 @@ export const investorContractsRouter = {
 				message:
 					"Contrato anulado. Queda en «Ver anulados» con el motivo y cómo quedó en la plataforma de firma.",
 			};
-		}),
-
-	/**
-	 * Cierra la batería y le avisa a inversiones que quedó lista.
-	 *
-	 * Lo dispara jurídico al darle "Listo", que es el momento en que dice que
-	 * terminó. Hasta ese botón la batería sigue en su lista aunque ya tenga los
-	 * contratos emitidos, porque mientras no lo diga todavía puede corregir:
-	 * reemplazar, anular o subir otro.
-	 *
-	 * El aviso es la otra mitad: los enlaces de firma que inversiones le pasa al
-	 * inversionista salen de su ficha, y hasta ahora se enteraban entrando a ver
-	 * si ya había algo.
-	 *
-	 * Una notificación por rol de inversiones: la columna guarda un solo rol, y
-	 * el aviso le sirve tanto a quien atiende al inversionista como a su
-	 * gerencia.
-	 *
-	 * No lleva enlace: la ficha del inversionista se abre por su id de cartera,
-	 * que es un número, y la notificación sólo puede guardar un uuid. Va con el
-	 * nombre, que es con lo que se lo busca.
-	 *
-	 * Se puede llamar dos veces sin avisar dos veces: la batería queda marcada
-	 * en la notificación, y si ya hay una, no se crea otra.
-	 */
-	marcarBateriaLista: juridicoProcedure
-		.input(z.object({ batchId: z.string().uuid() }))
-		.handler(async ({ input, context }) => {
-			const [bateria] = await db
-				.select()
-				.from(investorContractBatches)
-				.where(eq(investorContractBatches.id, input.batchId))
-				.limit(1);
-
-			if (!bateria) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Esa batería de contratos no existe",
-				});
-			}
-
-			const vigentes = await db
-				.select({ id: generatedLegalContracts.id })
-				.from(generatedLegalContracts)
-				.where(
-					and(
-						eq(generatedLegalContracts.batchId, input.batchId),
-						ne(generatedLegalContracts.status, "cancelled"),
-					),
-				);
-
-			// Sin contratos no hay nada que cerrar ni que avisar: jurídico entró,
-			// miró y salió.
-			if (vigentes.length === 0) {
-				return {
-					avisado: false,
-					cerrada: false,
-					motivo: "sin_contratos" as const,
-				};
-			}
-
-			// Cerrarla es lo que la saca de la lista de jurídico. No espera a las
-			// firmas: la papelería ya está hecha, y lo que falta es del
-			// inversionista.
-			if (bateria.status !== "completada") {
-				const ahora = new Date();
-				await db
-					.update(investorContractBatches)
-					.set({
-						status: "completada",
-						startedAt: bateria.startedAt ?? ahora,
-						startedBy: bateria.startedBy ?? context.userId,
-						completedAt: ahora,
-						completedBy: context.userId,
-						updatedAt: ahora,
-					})
-					.where(eq(investorContractBatches.id, input.batchId));
-			}
-
-			// Mirar si ya se avisó y avisar van en la misma transacción, con un
-			// candado por batería: dos clics a la vez veían los dos que no había
-			// aviso y mandaban seis notificaciones. El segundo espera, vuelve a
-			// mirar y encuentra el del primero.
-			const avisado = await db.transaction(async (tx) => {
-				await tx.execute(
-					sql`select pg_advisory_xact_lock(hashtext(${`bateria-lista:${input.batchId}`}::text))`,
-				);
-
-				const [yaAvisado] = await tx
-					.select({ id: notifications.id })
-					.from(notifications)
-					.where(
-						and(
-							eq(notifications.relatedEntityId, input.batchId),
-							eq(notifications.relatedEntityType, "contract"),
-							inArray(notifications.assignedToRole, ROLES_DE_INVERSIONES),
-						),
-					)
-					.limit(1);
-
-				if (yaAvisado) return false;
-
-				for (const rol of ROLES_DE_INVERSIONES) {
-					await createNotification(
-						{
-							titulo: `Contratos listos: ${bateria.investorName}`,
-							descripcion:
-								`Jurídico terminó de emitir ${vigentes.length} contrato(s). ` +
-								"Los enlaces de firma están en la ficha del inversionista.",
-							type: "aviso",
-							createdBy: context.userId,
-							createdByRole: context.userRole,
-							assignedToRole: rol,
-							relatedEntityType: "contract",
-							relatedEntityId: input.batchId,
-						},
-						tx,
-					);
-				}
-
-				return true;
-			});
-
-			if (!avisado) {
-				return { avisado: false, cerrada: true, motivo: "ya_avisado" as const };
-			}
-
-			return { avisado: true, cerrada: true, contratos: vigentes.length };
 		}),
 
 	/**
@@ -1507,20 +1462,12 @@ export const investorContractsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Repetir es pedirle a alguien que se vuelva a identificar: el mismo
-			// permiso que regenerar. Omitir es dar por bueno un contrato con la
-			// identidad sin validar, y eso es de jurídico.
-			const permitido =
-				input.accion === "omitir"
-					? PERMISSIONS.canCreateLegalContracts(context.userRole)
-					: PERMISSIONS.canRegenerateInvestorContractLinks(context.userRole);
-
-			if (!permitido) {
+			// Las dos son de inversiones, que le da seguimiento a la firma. Jurídico
+			// entrega los contratos, pero el seguimiento ya no es suyo.
+			if (!PERMISSIONS.canResolveInvestorIdentity(context.userRole)) {
 				throw new ORPCError("FORBIDDEN", {
 					message:
-						input.accion === "omitir"
-							? "Sólo jurídico puede omitir la verificación de identidad"
-							: "Sólo la gerencia de inversiones o jurídico pueden pedir de nuevo la verificación",
+						"La verificación de identidad la resuelve inversiones desde la ficha del inversionista",
 				});
 			}
 

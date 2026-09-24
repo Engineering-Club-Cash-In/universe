@@ -59,7 +59,7 @@ test("eleventh structured-log slice reconciles exactly 22 scheduler traces", () 
 test("scheduler has zero executable console calls and delegates eight finite jobs", () => {
 	const names = callNames(sourceFile());
 	expect(names.filter((name) => name.startsWith("console."))).toHaveLength(0);
-	expect(names.filter((name) => name === "runScheduledJob")).toHaveLength(7);
+	expect(names.filter((name) => name === "runScheduledJob")).toHaveLength(8);
 	expect(
 		names.filter((name) => name === "runScheduledJobAttempts"),
 	).toHaveLength(1);
@@ -69,7 +69,7 @@ test("scheduler has zero executable console calls and delegates eight finite job
 test("scheduler preserves cron rules, timezone, order, and snapshot offsets", () => {
 	const source = readFileSync(scheduleFile, "utf8");
 	const rules = [
-		"59 23 * * *",
+		"5 0 * * *",
 		"0 23 * * *",
 		"0 0 * * *",
 		"0 2 * * *",
@@ -77,6 +77,7 @@ test("scheduler preserves cron rules, timezone, order, and snapshot offsets", ()
 		"0 8-19 * * *",
 		"0 1 * * *",
 		"0 8 11-13 * *",
+		"0 7 * * *",
 	];
 	let previous = -1;
 	for (const rule of rules) {
@@ -84,7 +85,7 @@ test("scheduler preserves cron rules, timezone, order, and snapshot offsets", ()
 		expect(current).toBeGreaterThan(previous);
 		previous = current;
 	}
-	expect(source.match(/tz: TZ_GUATEMALA/g)).toHaveLength(8);
+	expect(source.match(/tz: TZ_GUATEMALA/g)).toHaveLength(9);
 	expect(source).toContain("for (const offset of [-1, -2, -3])");
 	expect(source).toContain("const fecha = getFechaGuatemalaISO(offset)");
 	expect(

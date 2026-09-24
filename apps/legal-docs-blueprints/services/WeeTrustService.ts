@@ -144,6 +144,21 @@ export interface WeeTrustSignatoryResponse {
 	};
 	imageURL: string;
 	emailTracking: unknown[];
+	/**
+	 * Cómo le fue a la verificación facial, en los firmantes que la llevan.
+	 *
+	 * `isValid: false` con `hasFinished: true` es el caso que deja documentos a
+	 * medias: la persona firmó (`isSigned: 1`) pero WeeTrust no cierra el
+	 * documento, así que se queda en PENDING para siempre hasta que alguien
+	 * repita o salte la verificación.
+	 */
+	biometricResultInfo?: {
+		biometricLogID: string;
+		biometricResultUrl?: string;
+		hasFinished: boolean;
+		isValid: boolean;
+		uuid?: string;
+	};
 }
 
 export interface WeeTrustWebhookResponse {
@@ -606,10 +621,9 @@ export class WeeTrustService {
 	/**
 	 * Repite (o salta) la verificación facial de un intento fallido.
 	 *
-	 * OJO: necesita el `biometricLogID` del intento, que WeeTrust no expone en
-	 * `GET /documents/{id}`: sólo llega en los webhooks `pendingBiometric` /
-	 * `failedBiometric`. Sin webhooks registrados no hay de dónde sacarlo, y por
-	 * eso el CRM no ofrece este botón todavía.
+	 * El `biometricLogID` del intento viene en `GET /documents/{id}`, dentro del
+	 * `biometricResultInfo` de ese firmante: no hace falta esperar el webhook
+	 * `pendingBiometric` / `failedBiometric`, que hoy no está registrado.
 	 *
 	 * `PUT /documents/retry-biometric`.
 	 */

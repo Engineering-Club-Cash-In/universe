@@ -179,29 +179,287 @@ describe("lo que se le promete a quien captura el alta", () => {
   });
 
   /**
-   * El botón "Dar acceso al portal" NO existe en el CRM: vive solo en
-   * carteraFront (tableInvestors.tsx:1583), y la ruta está cerrada a ADMIN de
-   * cartera a propósito (otorgarAccesoPortal.ts:50-53). En el CRM ni siquiera
-   * hay menú por fila donde buscarlo.
+   * El botón "Dar acceso al portal" YA existe en el CRM: está en la pantalla
+   * del inversionista (`liquidaciones.$inversionistaId.tsx`). ANTES vivía solo
+   * en carteraFront y estos avisos mandaban a "pedírselo a cartera"; ese
+   * consejo quedó obsoleto y dejaría a conta esperando por algo que puede
+   * hacer ella misma, con el inversionista sin portal mientras tanto.
    *
-   * Sin esta prueba el texto vuelve a mandar a conta a apretar un botón que en
-   * su aplicación no existe: se pone a buscarlo, no lo encuentra, y el
-   * inversionista queda sin portal — el mismo fallo silencioso que este PR vino
-   * a cerrar, movido de "nadie avisa" a "se avisa y no se puede ejecutar".
-   *
-   * NO copiar esta prueba al gemelo de carteraFront: ahí el botón SÍ está en la
-   * misma pantalla y mandar a pedírselo a otro sería falso.
+   * NO volver a poner "pedile a cartera" sin borrar antes ese botón.
    */
   it.each([
     ["fallo", "http_500"],
     ["omitida", "sin_correo"],
     ["omitida", "sin_nombre"],
     ["omitida", "no_solicitado"],
-  ])("desde el CRM el aviso (%s/%s) manda a pedírselo a cartera, no a apretar un botón que aquí no existe", (estado, motivo) => {
+  ])("desde el CRM el aviso (%s/%s) manda al botón que esta aplicación ya tiene", (estado, motivo) => {
     const aviso = avisoAccesoPortal(
       acceso({ estado, motivo, advertencias: [] }),
     )!;
 
-    expect(aviso.texto).toContain("cartera");
+    expect(aviso.texto).toContain('opción "Dar acceso al portal"');
+    expect(aviso.texto).not.toMatch(/pedile a cartera/);
   });
+	/**
+	 * El botón "Dar acceso al portal" apretado sobre una fila de EMPRESA.
+	 *
+	 * Cartera contesta con este motivo, y el diálogo del CRM promete que va a
+	 * decir a qué fila ir. Sin traducción, lo que se enseñaba era el código
+	 * crudo.
+	 */
+	it("la empresa manda a la fila del representante, no enseña el código", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({
+				estado: "fallo",
+				motivo: "es_empresa_el_acceso_es_del_representante",
+				advertencias: [],
+			}),
+		)!;
+
+		expect(aviso.tono).toBe("advertencia");
+		expect(aviso.texto).toContain("representante legal");
+		// Sin jerga: el código del backend no se le enseña a nadie.
+		expect(aviso.texto).not.toContain("_");
+		// Y NO manda a apretar otra vez el mismo botón sobre la misma fila.
+		expect(aviso.texto).not.toContain("Dar acceso al portal");
+	});
+
+	/**
+	 * El caso que el `onSuccess` escrito a mano mostraba en VERDE: la cuenta se
+	 * creó, pero la contraseña no salió. Decirle "listo" a conta es lo que deja
+	 * a la persona con una cuenta que no sabe que tiene y no puede usar.
+	 */
+	it("creada CON la contraseña sin entregar nunca es éxito", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({
+				estado: "creada",
+				correo: {
+					enviado: false,
+					plantilla: "bienvenida",
+					redirigido: false,
+					destinatarioReal: null,
+				},
+				advertencias: [
+					"cuenta_creada_sin_contrasena_entregada",
+					"correo_no_enviado",
+				],
+			}),
+		)!;
+
+		expect(aviso.tono).not.toBe("exito");
+		expect(aviso.texto).not.toContain("Se le mandó");
+	});
+});
+
+/**
+ * El consejo de siempre —"volvé a intentarlo" desde el botón, "abrile el acceso
+ * desde la pantalla del inversionista" desde el alta— apunta las dos veces a la
+ * MISMA acción. Sobre estos motivos esa acción vuelve a caer en el mismo corte,
+ * así que aconsejarla es mandar a alguien a dar vueltas en círculo mientras el
+ * inversionista sigue sin portal.
+ */
+describe("los motivos que reintentar NO arregla", () => {
+	const DESDE_EL_BOTON = "volvé a intentarlo con este mismo botón";
+	const DESDE_EL_ALTA = 'opción "Dar acceso al portal"';
+
+	it.each([
+		"representante_no_encontrado_en_cartera",
+		"correo_de_cartera_distinto_al_de_la_cuenta",
+		"provisionamiento_no_configurado",
+		"cuenta_anclada_solo_por_correo",
+		"inversionista_no_encontrado",
+	])("%s no manda a apretar el botón otra vez, desde ningún lado", (motivo) => {
+		const desdeElBoton = avisoAccesoPortal(
+			acceso({ estado: "fallo", motivo, advertencias: [] }),
+			"boton",
+		)!;
+		const desdeElAlta = avisoAccesoPortal(
+			acceso({ estado: "fallo", motivo, advertencias: [] }),
+			"alta",
+		)!;
+
+		expect(desdeElBoton.tono).toBe("advertencia");
+		expect(desdeElBoton.texto).not.toContain(DESDE_EL_BOTON);
+		expect(desdeElAlta.texto).not.toContain(DESDE_EL_ALTA);
+		// Y ninguno enseña el código crudo del backend.
+		expect(desdeElBoton.texto).not.toContain(motivo);
+		expect(desdeElAlta.texto).not.toContain(motivo);
+		// El alta sigue diciendo lo suyo: el inversionista SÍ quedó creado.
+		expect(desdeElAlta.texto).toContain("sí quedó creado");
+	});
+
+	/**
+	 * El peor de los cuatro: el texto se contradecía dentro de la misma línea
+	 * —"hasta cuadrarlos no vería sus inversiones. Si querés, volvé a intentarlo
+	 * con este mismo botón"—.
+	 */
+	it("el correo distinto manda a sistemas a cuadrarlos, no a reintentar", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({
+				estado: "fallo",
+				motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+				advertencias: [],
+			}),
+			"boton",
+		)!;
+
+		expect(aviso.texto).toContain("hasta cuadrarlos no vería sus inversiones");
+		expect(aviso.texto).toContain("sistemas");
+		expect(aviso.texto).not.toContain("Si querés");
+	});
+
+	/**
+	 * El representante ya está capturado: lo que pasa es que ese DPI no existe
+	 * en cartera. El arreglo está en Editar, y el aviso nunca lo nombraba.
+	 */
+	it("el representante que cartera no encuentra manda a Editar", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({
+				estado: "fallo",
+				motivo: "representante_no_encontrado_en_cartera",
+				advertencias: [],
+			}),
+			"boton",
+		)!;
+
+		expect(aviso.texto).toContain("no se encontró a su representante legal");
+		expect(aviso.texto).toContain("Editar");
+		expect(aviso.texto).toContain("DPI");
+	});
+
+	/**
+	 * `cuenta_anclada_solo_por_correo` no estaba en la tabla de causas: el aviso
+	 * salía como un "No se le pudo dar acceso al portal." pelado, sin decir por
+	 * qué, y encima aconsejando reintentar — y el provisionamiento se niega
+	 * ESTRUCTURALMENTE a promover una cuenta que solo el correo respalda, así
+	 * que el reintento devuelve exactamente lo mismo, para siempre.
+	 */
+	it("la cuenta anclada solo por correo dice la causa y nombra el DPI", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({
+				estado: "fallo",
+				motivo: "cuenta_anclada_solo_por_correo",
+				advertencias: ["cuenta_anclada_solo_por_correo"],
+			}),
+			"boton",
+		)!;
+
+		expect(aviso.tono).toBe("advertencia");
+		expect(aviso.texto).toContain("solo se la reconoce por el correo");
+		expect(aviso.texto).toContain("DPI");
+		expect(aviso.texto).not.toContain("Si querés");
+	});
+
+	/**
+	 * El contrapeso: el motivo que SÍ se arregla reintentando tiene que seguir
+	 * aconsejándolo. `no_se_pudo_marcar_password_provisionada` SIN la
+	 * advertencia de "no se pudo deshacer" significa que la cuenta a medias se
+	 * deshizo, y ahí el reintento la crea limpia.
+	 */
+	it("la cuenta a medias que SÍ se deshizo sigue mandando a reintentar", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({
+				estado: "fallo",
+				motivo: "no_se_pudo_marcar_password_provisionada",
+				advertencias: [],
+			}),
+			"boton",
+		)!;
+
+		expect(aviso.texto).toContain("la cuenta quedó a medias al crearla");
+		expect(aviso.texto).toContain(DESDE_EL_BOTON);
+	});
+
+	it("y la que NO se pudo deshacer no aconseja nada, porque no sirve", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({
+				estado: "fallo",
+				motivo: "no_se_pudo_marcar_password_provisionada",
+				advertencias: ["cuenta_creada_sin_marca_de_password"],
+			}),
+			"boton",
+		)!;
+
+		expect(aviso.texto).not.toContain(DESDE_EL_BOTON);
+		expect(aviso.texto).toContain("Avisa a sistemas");
+	});
+});
+
+/**
+ * La advertencia que solo emite el camino de SOLO LECTURA. Por el alta no
+ * llega, pero si llegara sin traducir el aviso se quedaría con el `ya_tenia`
+ * pelado —"Ya tenía acceso al portal", en VERDE— sobre una cuenta que entra y
+ * no ve ninguna inversión.
+ */
+describe("la cuenta sin el rol de inversionista", () => {
+	it("nunca sale en verde, ni siquiera sobre un ya_tenia", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({
+				estado: "ya_tenia",
+				advertencias: ["cuenta_sin_rol_de_inversionista"],
+			}),
+			"boton",
+		)!;
+
+		expect(aviso.tono).toBe("advertencia");
+		expect(aviso.texto).not.toContain("Ya tenía acceso al portal");
+		expect(aviso.texto).toContain("permiso de inversionista");
+		expect(aviso.texto).not.toContain("_");
+	});
+});
+
+/**
+ * 🔴 LA REGLA QUE SOSTIENE EL LLAMADOR.
+ *
+ * `liquidaciones.$inversionistaId.tsx` decidía el toast con `if (!aviso)
+ * toast.success("Listo.")`. O sea que `null` se estaba leyendo como "salió
+ * bien", y `null` es "no sé qué pasó": resultado vacío, estado desconocido,
+ * `omitida` con un motivo que no está en la lista. En verde, quien lee cuelga
+ * el teléfono prometiendo una contraseña que nunca salió — exactamente el bug
+ * que este traductor existe para cerrar, colado por la puerta de atrás.
+ *
+ * Lo que este archivo garantiza es la mitad de acá: un desenlace que no se
+ * reconoce NUNCA vuelve con `tono: "exito"`. La otra mitad —que el llamador
+ * pinte el `null` de amarillo y no de verde— vive en el `onSuccess` de ese
+ * archivo, donde hoy sale un `toast.warning`.
+ */
+describe("un desenlace desconocido nunca sale en verde", () => {
+	const desconocidos: Array<
+		[string, Partial<AccesoPortal> | null | undefined]
+	> = [
+		["no vino ningún resultado", undefined],
+		["vino nulo", null],
+		// El camino de solo lectura ya emite `candidata`, y el traductor no lo
+		// conoce.
+		["un estado que el traductor no conoce", { estado: "candidata" }],
+		["un estado inventado", { estado: "loquesea", motivo: "loquesea" }],
+		[
+			"omitida con un motivo fuera de la lista",
+			{ estado: "omitida", motivo: "motivo_que_nadie_tradujo" },
+		],
+		["omitida sin motivo", { estado: "omitida", motivo: null }],
+	];
+
+	it.each(desconocidos)("%s", (_caso, over) => {
+		const entrada = over === null || over === undefined ? over : acceso(over);
+
+		for (const origen of ["alta", "boton"] as const) {
+			const aviso = avisoAccesoPortal(entrada, origen);
+			// O no dice nada (y el llamador lo pinta de amarillo), o dice que algo
+			// pasa. Lo que no puede es afirmar que salió bien.
+			expect(aviso?.tono).not.toBe("exito");
+		}
+	});
+
+	/**
+	 * El contrapeso: los desenlaces que SÍ se reconocen como buenos tienen que
+	 * seguir saliendo en verde, o la prueba de arriba se cumpliría apagando todo.
+	 */
+	it.each([
+		["creada"],
+		["ya_tenia"],
+		["avisada"],
+	])("pero %s sigue siendo verde", (estado) => {
+		expect(avisoAccesoPortal(acceso({ estado }), "boton")?.tono).toBe("exito");
+	});
 });

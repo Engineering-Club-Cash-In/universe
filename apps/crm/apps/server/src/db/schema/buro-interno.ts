@@ -131,8 +131,9 @@ export const buroInternoReglas = pgTable(
 /**
  * Autorizaciones para aprobar un análisis pese al buró interno. Una coincidencia
  * de severidad alta frena la aprobación; el analista la levanta con un motivo,
- * y la autorización vale solo para esa oportunidad y esa persona: si después
- * aparece otra coincidencia alta, vuelve a frenar.
+ * y la autorización vale solo para esa oportunidad, esa persona y la identidad
+ * que se evaluó: si después aparece otra coincidencia alta, o la oportunidad
+ * cambia de lead o de DPI, vuelve a frenar.
  */
 export const buroInternoAutorizaciones = pgTable(
 	"buro_interno_autorizaciones",
@@ -144,6 +145,10 @@ export const buroInternoAutorizaciones = pgTable(
 		personaId: uuid("persona_id")
 			.notNull()
 			.references(() => buroInternoPersonas.id, { onDelete: "cascade" }),
+		// A quién se evaluó cuando se autorizó. Si la oportunidad cambia de lead
+		// o el lead cambia de DPI, ya es otra persona y la autorización no aplica
+		leadId: uuid("lead_id").references(() => leads.id, { onDelete: "cascade" }),
+		dpi: text("dpi"),
 		motivo: text("motivo").notNull(),
 		autorizadoPor: text("autorizado_por")
 			.notNull()

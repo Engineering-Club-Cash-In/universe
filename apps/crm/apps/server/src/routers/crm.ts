@@ -26,6 +26,7 @@ import {
 	vehicles,
 	vehicleVendors,
 } from "../db/schema";
+import { buroInternoPersonas } from "../db/schema/buro-interno";
 import { user } from "../db/schema/auth";
 import {
 	creditApplications,
@@ -174,7 +175,10 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
-import { bloqueoBuroInterno } from "../services/buro-interno";
+import {
+	bloqueoBuroInterno,
+	huellaBuroInterno,
+} from "../services/buro-interno";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import {
@@ -4397,6 +4401,8 @@ export const crmRouter = {
 			// El UPDATE de aprobación se condiciona a que el lead siga teniendo
 			// este DPI, tanto si se validó como si quedó exenta
 			let dpiVerificado: string | null = null;
+			// Foto del buró interno al momento de revisarlo; viaja en el UPDATE
+			let huellaBuro: string | null = null;
 
 			if (input.approved && !input.bypassValidation) {
 				// La exención se resuelve en el servicio: `source` es editable por el
@@ -4470,6 +4476,7 @@ export const crmRouter = {
 				// `registrosQueBloquean`); el analista las levanta con un motivo
 				// desde la tarjeta "Buró interno" del análisis.
 				const buroInterno = await bloqueoBuroInterno(input.opportunityId);
+				huellaBuro = buroInterno.huella;
 
 				if (buroInterno.bloquea) {
 					throw new ORPCError("BAD_REQUEST", {
@@ -4528,7 +4535,11 @@ export const crmRouter = {
 				// mismo UPDATE: si el lead cambia de DPI entre la verificación y
 				// la escritura, no se afecta ninguna fila y la aprobación falla
 				// en vez de aprobar con el veredicto de otra persona
-				const whereClause = dpiVerificado
+				// Misma idea para el buró interno: si cobros agregó o editó a
+				// alguien entre la revisión y esta escritura, la huella cambió y no
+				// se afecta ninguna fila, en vez de aprobar sin evaluar al registro
+				// nuevo
+				const condicionesConDpi = dpiVerificado
 					? and(
 							condicionesBase,
 							sql`exists (
@@ -4538,6 +4549,17 @@ export const crmRouter = {
 							)`,
 						)
 					: condicionesBase;
+
+				const whereClause = huellaBuro
+					? and(
+							condicionesConDpi,
+							sql`(
+								select count(*)::text || ':' || coalesce(max(updated_at)::text, '')
+								from ${buroInternoPersonas}
+								where ${buroInternoPersonas.activo}
+							) = ${huellaBuro}`,
+						)
+					: condicionesConDpi;
 
 				// Update opportunity with analysisStatus
 				const updatedRows = await db
@@ -4559,6 +4581,15 @@ export const crmRouter = {
 					.returning();
 				// Check for concurrent modification
 				if (updatedRows.length === 0) {
+					// Con el chequeo atómico del buró interno, 0 filas también
+					// significa que el catálogo cambió mientras se aprobaba
+					if (huellaBuro && (await huellaBuroInterno()) !== huellaBuro) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"El buró interno cambió mientras se aprobaba. Recarga la página para revisar las coincidencias e intenta de nuevo.",
+						});
+					}
+
 					// Con el chequeo atómico de DPI, 0 filas también significa que el
 					// DPI del lead cambió después de validar: se relee para dar el
 					// mensaje correcto en vez del de conflicto genérico

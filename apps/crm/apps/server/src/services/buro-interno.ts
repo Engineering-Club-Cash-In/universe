@@ -985,9 +985,14 @@ export async function evaluarOportunidad(opportunityId: string) {
 		referencia: referencias.length,
 	};
 
+	const identidad: IdentidadEvaluada = {
+		leadId: fila.leadId,
+		dpi: normalizarDpiMatch(fila.dpi),
+	};
+
 	const [coincidencias, autorizaciones] = await Promise.all([
 		evaluar(candidatos),
-		cargarAutorizaciones(opportunityId),
+		cargarAutorizaciones(opportunityId, identidad),
 	]);
 
 	const bloqueantes = registrosQueBloquean(
@@ -998,6 +1003,7 @@ export async function evaluarOportunidad(opportunityId: string) {
 	return {
 		evaluadoEn: new Date(),
 		evaluados,
+		identidad,
 		coincidencias,
 		autorizaciones,
 		bloqueantes: bloqueantes.map((c) => ({
@@ -1009,8 +1015,18 @@ export async function evaluarOportunidad(opportunityId: string) {
 	};
 }
 
-/** Autorizaciones ya dadas para esta oportunidad, con quién las dio */
-async function cargarAutorizaciones(opportunityId: string) {
+/** A quién se evaluó: si esto cambia, las autorizaciones anteriores no valen */
+type IdentidadEvaluada = { leadId: string | null; dpi: string | null };
+
+/**
+ * Autorizaciones vigentes para esta oportunidad. Solo cuentan las que se
+ * dieron sobre la misma identidad: cambiarle el lead a la oportunidad, o
+ * cambiarle el DPI al lead, las deja sin efecto.
+ */
+async function cargarAutorizaciones(
+	opportunityId: string,
+	identidad: IdentidadEvaluada,
+) {
 	return db
 		.select({
 			personaId: buroInternoAutorizaciones.personaId,
@@ -1020,8 +1036,27 @@ async function cargarAutorizaciones(opportunityId: string) {
 		})
 		.from(buroInternoAutorizaciones)
 		.leftJoin(user, eq(user.id, buroInternoAutorizaciones.autorizadoPor))
-		.where(eq(buroInternoAutorizaciones.opportunityId, opportunityId))
+		.where(
+			and(
+				eq(buroInternoAutorizaciones.opportunityId, opportunityId),
+				sql`${buroInternoAutorizaciones.leadId} IS NOT DISTINCT FROM ${identidad.leadId}::uuid`,
+				sql`${buroInternoAutorizaciones.dpi} IS NOT DISTINCT FROM ${identidad.dpi}::text`,
+			),
+		)
 		.orderBy(desc(buroInternoAutorizaciones.createdAt));
+}
+
+/**
+ * Foto del catálogo activo. El gate de aprobación la compara dentro del mismo
+ * UPDATE: si cobros agregó o editó a alguien mientras se aprobaba, la huella
+ * cambia y la aprobación falla en vez de pasar sin revisar al nuevo registro.
+ */
+export async function huellaBuroInterno(): Promise<string> {
+	const { rows } = await db.execute<{ huella: string }>(
+		sql`SELECT count(*)::text || ':' || coalesce(max(updated_at)::text, '') AS huella
+			FROM public.buro_interno_personas WHERE activo`,
+	);
+	return rows[0]?.huella ?? "0:";
 }
 
 /**
@@ -1044,15 +1079,22 @@ export async function autorizarOportunidad(
 
 	await db.transaction(async (tx) => {
 		for (const bloqueante of evaluacion.bloqueantes) {
-			await tx
+			const [insertada] = await tx
 				.insert(buroInternoAutorizaciones)
 				.values({
 					opportunityId,
 					personaId: bloqueante.registroId,
+					leadId: evaluacion.identidad.leadId,
+					dpi: evaluacion.identidad.dpi,
 					motivo: motivo.trim(),
 					autorizadoPor: actor.id,
 				})
-				.onConflictDoNothing();
+				.onConflictDoNothing()
+				.returning({ id: buroInternoAutorizaciones.id });
+
+			// Con dos analistas autorizando a la vez, el que pierde no escribe
+			// nada: anotar igual le atribuiría una autorización que no creó
+			if (!insertada) continue;
 
 			await registrarEvento(tx, {
 				accion: "autorizacion_analisis",
@@ -1072,16 +1114,19 @@ export async function autorizarOportunidad(
  */
 export async function bloqueoBuroInterno(
 	opportunityId: string,
-): Promise<{ bloquea: boolean; nombres: string[] }> {
+): Promise<{ bloquea: boolean; nombres: string[]; huella: string }> {
+	const huella = await huellaBuroInterno();
+
 	try {
 		const evaluacion = await evaluarOportunidad(opportunityId);
 		return {
 			bloquea: evaluacion.bloqueaAprobacion,
 			nombres: evaluacion.bloqueantes.map((b) => b.nombreCompleto),
+			huella,
 		};
 	} catch (error) {
 		if (error instanceof OportunidadSinLeadError) {
-			return { bloquea: false, nombres: [] };
+			return { bloquea: false, nombres: [], huella };
 		}
 		throw error;
 	}

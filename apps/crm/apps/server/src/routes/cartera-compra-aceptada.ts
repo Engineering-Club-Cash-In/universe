@@ -1,9 +1,10 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { investorContractBatches } from "../db/schema/investor-contracts";
+import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { createNotification } from "../lib/notificaciones";
 import { ROLES } from "../lib/roles";
 
@@ -133,64 +134,108 @@ app.post("/", async (c) => {
 		})
 		.returning({ id: investorContractBatches.id });
 
-	// Sin fila devuelta, el aviso ya había entrado: se contesta con la batería
-	// que ya existe y no se vuelve a notificar. Un reintento no puede hacerle
-	// sonar la campana a jurídico dos veces por el mismo trabajo.
+	// Sin fila devuelta, ya había una batería para este inversionista y este
+	// juego de créditos. Son dos cosas muy distintas y se distinguen por la
+	// fecha de aceptación:
 	//
-	// Sí se refresca la foto mientras la batería siga abierta: el aviso se
-	// reintenta cuando el CRM no contestó, y en el medio pudieron completar en
-	// cartera un dato que faltaba (el DPI del representante, el correo). Una
-	// batería ya cerrada no se toca: sus contratos salieron con lo que había.
+	// - **el mismo aviso otra vez** (cartera lo reintenta si el CRM no
+	//   contestó): se refresca la foto mientras la batería siga abierta —en el
+	//   medio pudieron completar un dato que faltaba— y NO se vuelve a
+	//   notificar. Un reintento no puede hacerle sonar la campana a jurídico dos
+	//   veces por el mismo trabajo. Una batería ya cerrada no se toca: sus
+	//   contratos salieron con lo que había.
+	//
+	// - **otra compra sobre los mismos créditos**, con fecha posterior: en un
+	//   pool pasa cuando el inversionista le mete más capital a lo mismo. Eso es
+	//   trabajo nuevo: la batería vuelve a la lista de jurídico con la foto
+	//   nueva y se avisa otra vez.
+	let batchId = creada?.id;
+	let avisar = Boolean(creada);
+
 	if (!creada) {
 		const [existente] = await db
-			.update(investorContractBatches)
-			.set({
-				investorName: inversionista.nombre,
-				investorDpi: inversionista.dpi ?? null,
-				investorDpiRepLegal: inversionista.dpiRepLegal ?? null,
-				investorEmail: inversionista.email ?? null,
-				investorPhone: inversionista.celular ?? null,
-				creditos: compra.creditos,
-				montoTotal: compra.montoTotal,
-				modalidad: compra.modalidad ?? null,
-				facturacion: compra.facturacion ?? null,
-				updatedAt: new Date(),
+			.select({
+				id: investorContractBatches.id,
+				status: investorContractBatches.status,
+				acceptedAt: investorContractBatches.acceptedAt,
 			})
+			.from(investorContractBatches)
 			.where(
 				and(
 					eq(investorContractBatches.investorId, inversionista.id),
 					eq(investorContractBatches.purchaseKey, purchaseKey),
-					inArray(investorContractBatches.status, ["pendiente", "en_proceso"]),
 				),
 			)
-			.returning({ id: investorContractBatches.id });
+			.limit(1);
 
-		// Si no se actualizó ninguna, la batería existe pero ya está cerrada: se
-		// devuelve igual, para que cartera sepa que el aviso llegó.
-		const [cerrada] = existente
-			? []
-			: await db
-					.select({ id: investorContractBatches.id })
-					.from(investorContractBatches)
-					.where(
-						and(
-							eq(investorContractBatches.investorId, inversionista.id),
-							eq(investorContractBatches.purchaseKey, purchaseKey),
-						),
-					)
-					.limit(1);
+		if (!existente) {
+			// La fila desapareció entre el insert y esta consulta: alguien la
+			// borró a mano. Que cartera lo reintente.
+			return c.json(
+				{ success: false, error: "La batería ya no existe. Reintentar." },
+				409,
+			);
+		}
 
+		batchId = existente.id;
+		const otraCompra = aceptadaEn.getTime() > existente.acceptedAt.getTime();
+		const abierta =
+			existente.status === "pendiente" || existente.status === "en_proceso";
+
+		if (otraCompra || abierta) {
+			// La batería vuelve a ser trabajo sólo si esto es otra compra: si es
+			// el mismo aviso, la que estaba abierta sigue abierta y la cerrada
+			// sigue cerrada.
+			const [tieneContratos] = otraCompra
+				? await db
+						.select({ id: generatedLegalContracts.id })
+						.from(generatedLegalContracts)
+						.where(
+							and(
+								eq(generatedLegalContracts.batchId, existente.id),
+								ne(generatedLegalContracts.status, "cancelled"),
+							),
+						)
+						.limit(1)
+				: [];
+
+			await db
+				.update(investorContractBatches)
+				.set({
+					investorName: inversionista.nombre,
+					investorDpi: inversionista.dpi ?? null,
+					investorDpiRepLegal: inversionista.dpiRepLegal ?? null,
+					investorEmail: inversionista.email ?? null,
+					investorPhone: inversionista.celular ?? null,
+					creditos: compra.creditos,
+					montoTotal: compra.montoTotal,
+					modalidad: compra.modalidad ?? null,
+					facturacion: compra.facturacion ?? null,
+					updatedAt: new Date(),
+					...(otraCompra
+						? {
+								acceptedAt: aceptadaEn,
+								acceptedByEmail: compra.aceptadaPor ?? null,
+								status: tieneContratos ? "en_proceso" : "pendiente",
+								completedAt: null,
+								completedBy: null,
+							}
+						: {}),
+				})
+				.where(eq(investorContractBatches.id, existente.id));
+		}
+
+		avisar = otraCompra;
 		console.log(
-			`[cartera-compra-aceptada] batería repetida para ${inversionista.nombre} (${purchaseKey})`,
+			`[cartera-compra-aceptada] ${otraCompra ? "otra compra sobre los mismos créditos" : "aviso repetido"} para ${inversionista.nombre} (${purchaseKey})`,
 		);
-		return c.json({
-			success: true,
-			batchId: existente?.id ?? cerrada?.id,
-			repetida: true,
-		});
+
+		if (!otraCompra) {
+			return c.json({ success: true, batchId, repetida: true });
+		}
 	}
 
-	const autor = await autorDeLaNotificacion();
+	const autor = avisar ? await autorDeLaNotificacion() : undefined;
 	if (autor) {
 		await createNotification({
 			titulo: `Contratos pendientes: ${inversionista.nombre}`,
@@ -210,7 +255,7 @@ app.post("/", async (c) => {
 			// cercana: lo que queda pendiente son contratos. Nadie filtra por ella
 			// fuera de contabilidad, que mira las de oportunidades.
 			relatedEntityType: "contract",
-			relatedEntityId: creada.id,
+			relatedEntityId: batchId as string,
 		});
 	} else {
 		console.warn(
@@ -219,10 +264,10 @@ app.post("/", async (c) => {
 	}
 
 	console.log(
-		`[cartera-compra-aceptada] batería ${creada.id} para ${inversionista.nombre} (${compra.creditos.length} crédito(s))`,
+		`[cartera-compra-aceptada] batería ${batchId} para ${inversionista.nombre} (${compra.creditos.length} crédito(s))`,
 	);
 
-	return c.json({ success: true, batchId: creada.id, repetida: false });
+	return c.json({ success: true, batchId, repetida: !creada });
 });
 
 export default app;

@@ -1588,3 +1588,122 @@ describe("cableado del cierre corto en cascada (que un throw no deje la boleta a
     );
   });
 });
+
+describe("cableado del corte en cascada: la plata no aplicada no se evapora", () => {
+  // Chequeo de CABLEADO: la conducta (conservación) vive en
+  // `restaurarDisponibleTrasCorteEnCascada` (registerPaymentPolicy.test.ts). Lo
+  // que no se puede afirmar desde el helper es que el call-site lo use y que la
+  // reposición esté ANTES del `break` — y eso es justamente el defecto: la
+  // distribución descuenta del `disponible` todo lo que la cuota iba a cobrar, el
+  // `break` llega después y no repone nada, así que el monto no queda en la cuota,
+  // no llega a saldo a favor (el post-loop lee `disponible_restante`) y no sale en
+  // la respuesta. Probe: totalPagado Q500.00, disponible al break Q0.00,
+  // acreditado a saldo a favor Q0.00 → Q500 sin destino.
+  const bloqueCierreCorto = (() => {
+    const inicio = registerPaymentSource.indexOf(
+      "        const accionCierreCorto = decidirCierreCortoEnCascada({",
+    );
+    if (inicio === -1) {
+      throw new Error("No se encontró el call-site de decidirCierreCortoEnCascada");
+    }
+    const fin = registerPaymentSource.indexOf("\n        }\n", inicio);
+    return registerPaymentSource.slice(inicio, fin);
+  })();
+
+  it("repone el disponible con el helper puro, no con aritmética a pelo", () => {
+    expect(bloqueCierreCorto).toContain(
+      "disponible_restante = restaurarDisponibleTrasCorteEnCascada({",
+    );
+    expect(bloqueCierreCorto).toContain("totalPagado,");
+  });
+
+  it("la reposición va ANTES del `break` (si queda después, no corre nunca)", () => {
+    const reposicion = bloqueCierreCorto.indexOf(
+      "disponible_restante = restaurarDisponibleTrasCorteEnCascada({",
+    );
+    const corte = bloqueCierreCorto.indexOf("break;");
+    expect(reposicion).toBeGreaterThan(-1);
+    expect(corte).toBeGreaterThan(reposicion);
+  });
+
+  it("guarda el monto no aplicado para poder reportarlo", () => {
+    expect(bloqueCierreCorto).toContain("montoNoAplicadoPorCorte = totalPagado;");
+  });
+
+  it("la regla legacy de ≤Q25 no corre cuando hubo corte", () => {
+    // Si no, el disponible repuesto (plata que esta boleta NO pudo cobrar en su
+    // cuota) se estampa como `otros` en la fila de la cuota ANTERIOR: se la
+    // cobra a una cuota que no la cobró y el corte queda disfrazado.
+    expect(registerPaymentSource).toContain(
+      "if (cuotaCortadaPorPlanosCortos === undefined && shouldApplyFinalSmallRemainderAsOther({",
+    );
+  });
+
+  it("el monto no aplicado sale en la respuesta en su propio campo", () => {
+    // `saldo_sobrante` sigue hardcodeado a "0.00" (contrato preexistente), así
+    // que sin campo nuevo el monto no se ve en ninguna parte.
+    expect(registerPaymentSource).toContain('saldo_sobrante: "0.00",');
+    expect(registerPaymentSource).toContain(
+      "monto_no_aplicado_por_corte: montoNoAplicadoPorCorteTexto,",
+    );
+    expect(registerPaymentSource).toContain(
+      "const montoNoAplicadoPorCorteTexto =\n      montoNoAplicadoPorCorte?.toFixed(2) ?? null;",
+    );
+    // Y la cifra se menciona en la frase del resumen.
+    expect(registerPaymentSource).toContain(
+      "Los Q${montoNoAplicadoPorCorteTexto} que iban a esa cuota no se aplicaron",
+    );
+  });
+});
+
+describe("el aviso del corte también sale por el camino de abono a capital", () => {
+  // `insertPayment` tiene DOS returns de éxito alcanzables después del loop: el
+  // del abono directo a capital (sección 7) y el del pago normal. El campo y la
+  // frase del corte estaban sólo en el segundo, así que un pago mixto
+  // efectivo + capital salía por el primero reportando éxito liso aunque la
+  // cascada se hubiera cortado — y encima esa rama acredita el sobrante a saldo
+  // a favor en silencio. (Los dos 409 quedan descartados por construcción:
+  // exigen cero cuotas escritas y el corte exige lo contrario.)
+  const bloqueAbonoCapital = (() => {
+    const inicio = registerPaymentSource.indexOf(
+      '          "Abono directo a capital registrado exitosamente (pendiente de validación)"',
+    );
+    if (inicio === -1) {
+      throw new Error("No se encontró el return del abono directo a capital");
+    }
+    const fin = registerPaymentSource.indexOf("\n      };", inicio);
+    return registerPaymentSource.slice(inicio, fin);
+  })();
+
+  it("reporta la cuota que no se cobró y el monto que quedó sin aplicar", () => {
+    expect(bloqueAbonoCapital).toContain(
+      "cuota_no_cobrada_por_rubros_cortos: cuotaCortadaPorPlanosCortos ?? null,",
+    );
+    expect(bloqueAbonoCapital).toContain(
+      "monto_no_aplicado_por_corte: montoNoAplicadoPorCorteTexto,",
+    );
+    // Los DOS returns de éxito lo reportan, no sólo el del pago normal.
+    expect(
+      [...registerPaymentSource.matchAll(
+        /monto_no_aplicado_por_corte: montoNoAplicadoPorCorteTexto,/g,
+      )],
+    ).toHaveLength(2);
+  });
+
+  it("la frase del corte se pega a su mensaje de éxito", () => {
+    expect(bloqueAbonoCapital).toContain("fraseCorteEnCascada");
+  });
+
+  it("la frase es la MISMA que la del pago normal (una sola fuente)", () => {
+    // Una sola declaración y ningún segundo literal de la frase: si se
+    // duplicara, los dos caminos se desincronizarían al primer retoque.
+    expect(
+      [...registerPaymentSource.matchAll(/const fraseCorteEnCascada =/g)],
+    ).toHaveLength(1);
+    expect(
+      [...registerPaymentSource.matchAll(
+        /no se cobró: sus rubros fijos \(seguro, GPS, membresías\) vienen cortos/g,
+      )],
+    ).toHaveLength(1);
+  });
+});

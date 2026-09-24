@@ -2106,3 +2106,59 @@ describe("decidirCierreCortoEnCascada (tirar sólo si no se escribió nada)", ()
     ).toBe("seguir");
   });
 });
+
+describe("restaurarDisponibleTrasCorteEnCascada (que el corte no evapore la plata)", () => {
+  const { restaurarDisponibleTrasCorteEnCascada } = registerPaymentPolicy;
+
+  // CONSERVACIÓN: la distribución de la cuota ya descontó `totalPagado` del
+  // disponible, y el corte no escribe nada. Lo que entró a la iteración tiene
+  // que ser exactamente lo que queda disponible al salir por el `break`: si no,
+  // el monto no queda en la cuota, no llega a saldo a favor (el post-loop lee
+  // `disponible_restante`) y no sale en la respuesta — se evapora con el pago
+  // reportado exitoso.
+  it("lo que entró a la iteración es lo que queda disponible al cortar", () => {
+    const disponibleAlEntrar = new Big("500.00");
+    const totalPagado = new Big("500.00");
+    const disponibleAlBreak = disponibleAlEntrar.minus(totalPagado);
+
+    expect(disponibleAlBreak.toFixed(2)).toBe("0.00");
+    expect(
+      restaurarDisponibleTrasCorteEnCascada({
+        disponible: disponibleAlBreak,
+        totalPagado,
+      }).toFixed(2),
+    ).toBe(disponibleAlEntrar.toFixed(2));
+  });
+
+  it("conserva también el sobrante que la cuota no alcanzó a consumir", () => {
+    // Cuota que sólo pudo absorber 800 de los 1,000 que traía la boleta: al
+    // cortar tienen que quedar disponibles los 1,000 completos.
+    const disponibleAlEntrar = new Big("1000");
+    const totalPagado = new Big("800");
+
+    expect(
+      restaurarDisponibleTrasCorteEnCascada({
+        disponible: disponibleAlEntrar.minus(totalPagado),
+        totalPagado,
+      }).toFixed(2),
+    ).toBe("1000.00");
+  });
+
+  it("no inventa plata cuando la cuota no consumió nada", () => {
+    expect(
+      restaurarDisponibleTrasCorteEnCascada({
+        disponible: "250.75",
+        totalPagado: "0",
+      }).toFixed(2),
+    ).toBe("250.75");
+  });
+
+  it("no pierde centavos (Big, no float)", () => {
+    expect(
+      restaurarDisponibleTrasCorteEnCascada({
+        disponible: "0.1",
+        totalPagado: "0.2",
+      }).toString(),
+    ).toBe("0.3");
+  });
+});

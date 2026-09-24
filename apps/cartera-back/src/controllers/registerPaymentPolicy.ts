@@ -1561,6 +1561,35 @@ export const evaluarCierreCuotaPorPlanos = ({
 };
 
 /**
+ * El corte en cascada devuelve al `disponible` la plata que la iteración
+ * abortada ya había descontado.
+ *
+ * La distribución de la cuota resta de `disponible_restante` a medida que calcula
+ * cada abono (interés, IVA, seguro, GPS, membresías, capital), y el `break` del
+ * corte llega DESPUÉS de todo eso. Como no repone nada, ese monto no queda en la
+ * cuota (la iteración no escribe nada), no queda en saldo a favor (el post-loop
+ * —la regla legacy de "otros" y el acreditado a saldo a favor— lee sólo
+ * `disponible_restante`, ya minado) y no sale en la respuesta: se evapora con el
+ * pago reportado exitoso. Probe: `totalPagado` Q500.00, `disponible_restante` al
+ * break Q0.00, acreditado a saldo a favor Q0.00 → Q500 sin destino.
+ *
+ * `totalPagado` es EXACTAMENTE la cifra descontada: es la suma de los seis abonos
+ * que decrementan `disponible_restante`, y el ajuste de restantes stale-cero
+ * —que también suma a `totalPagado` y resta del disponible— es mutuamente
+ * excluyente con el corte, porque la compuerta del cierre corto recibe
+ * `todosRestantesEnCero && !ajusteStaleZeroAplicado`. La mora se descuenta antes
+ * del loop, el ajuste por fecha ideal se reclama después del break y el convenio
+ * no consume disponible, así que nada de eso entra acá.
+ */
+export const restaurarDisponibleTrasCorteEnCascada = ({
+  disponible,
+  totalPagado,
+}: {
+  disponible: BigInput;
+  totalPagado: BigInput;
+}): Big => new Big(disponible).plus(totalPagado);
+
+/**
  * La compuerta de arriba dijo "rechazar". ¿Se puede tirar, o hay que cortar?
  *
  * `insertPayment` NO tiene transacción envolvente: el loop de cuotas escribe

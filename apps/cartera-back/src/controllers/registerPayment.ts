@@ -62,6 +62,7 @@ import {
   decidirCierrePorRestantesEnCero,
   evaluarCierreCuotaPorPlanos,
   decidirCierreCortoEnCascada,
+  restaurarDisponibleTrasCorteEnCascada,
   evaluarRubrosPlanosCuota,
 } from "./registerPaymentPolicy";
 import {
@@ -1042,6 +1043,11 @@ export const insertPayment = async (
     // el asesor ve "pago exitoso" y no se entera de que una cuota no se cobró
     // y su plata se fue a saldo a favor.
     let cuotaCortadaPorPlanosCortos: number | undefined;
+    // Monto que la iteración cortada ya había descontado del `disponible` y que
+    // se repone al cortar (ver `restaurarDisponibleTrasCorteEnCascada`): es la
+    // plata que NO se cobró en esa cuota y terminó en saldo a favor. Va en la
+    // respuesta para que el asesor sepa cuánto quedó sin aplicar.
+    let montoNoAplicadoPorCorte: Big | undefined;
     let disponible_para_cuotasPosteriores = new Big(0);
     let ultimoPagoInsertado: typeof pagos_credito.$inferSelect | undefined;
     for (const cuota of cuotasPendientes) {
@@ -1592,6 +1598,22 @@ export const insertPayment = async (
               `no se cobró — ${detalle}. Las cuotas ya escritas de esta boleta se ` +
               `conservan y el remanente queda disponible.`
           );
+          // REPONER antes de cortar. La distribución de arriba ya descontó de
+          // `disponible_restante` todo lo que esta cuota iba a cobrar
+          // (`totalPagado`), y el `break` no escribe nada: sin reponer, esa
+          // plata no queda en la cuota, no llega al saldo a favor (el post-loop
+          // lee `disponible_restante`) y no sale en la respuesta — se evapora
+          // con el pago reportado exitoso. `totalPagado` es la cifra EXACTA
+          // descontada: es la suma de los seis abonos que decrementan el
+          // disponible, y el ajuste stale-cero (que también suma a
+          // `totalPagado`) es mutuamente excluyente con el corte porque la
+          // compuerta recibe `todosRestantesEnCero && !ajusteStaleZeroAplicado`.
+          // Ver el helper para el detalle.
+          disponible_restante = restaurarDisponibleTrasCorteEnCascada({
+            disponible: disponible_restante,
+            totalPagado,
+          });
+          montoNoAplicadoPorCorte = totalPagado;
           cuotaCortadaPorPlanosCortos = cuota.cuotas_credito.numero_cuota;
           break;
         }
@@ -2151,7 +2173,13 @@ export const insertPayment = async (
 
     // Sólo después de intentar TODAS las cuotas pagables, el sobrante pequeño
     // final puede conservar la regla legacy de "otros".
-    if (shouldApplyFinalSmallRemainderAsOther({
+    //
+    // Salvo que la cascada se haya CORTADO: el disponible repuesto es plata que
+    // esta boleta no pudo cobrar en su cuota, no un sobrante de redondeo. Si el
+    // corte fue chico (≤ Q25), esta regla la estamparía como `otros` sobre la
+    // fila de la cuota ANTERIOR — cobrándosela a una cuota que no la cobró y
+    // disfrazando el corte. Con corte, el remanente sigue al saldo a favor.
+    if (cuotaCortadaPorPlanosCortos === undefined && shouldApplyFinalSmallRemainderAsOther({
       availableRemaining: disponible_restante,
       hasInsertedPayment: !!ultimoPagoInsertado?.pago_id,
     }) && ultimoPagoInsertado) {
@@ -2167,6 +2195,17 @@ export const insertPayment = async (
         .where(eq(pagos_credito.pago_id, ultimoPagoInsertado.pago_id));
       disponible_restante = new Big(0);
     }
+
+    // El corte de la cascada tiene que verse en TODAS las salidas de éxito, no
+    // sólo en la del pago normal: un pago mixto efectivo + abono a capital sale
+    // por el return de la sección 7 y reportaba éxito liso aunque una cuota
+    // quedara sin cobrar y su plata acreditada en silencio a saldo a favor.
+    const montoNoAplicadoPorCorteTexto =
+      montoNoAplicadoPorCorte?.toFixed(2) ?? null;
+    const fraseCorteEnCascada =
+      cuotaCortadaPorPlanosCortos !== undefined
+        ? `La cuota #${cuotaCortadaPorPlanosCortos} no se cobró: sus rubros fijos (seguro, GPS, membresías) vienen cortos y cerrarla dejaría de cobrarlos.${montoNoAplicadoPorCorteTexto ? ` Los Q${montoNoAplicadoPorCorteTexto} que iban a esa cuota no se aplicaron y quedaron en saldo a favor.` : ""} Revisar sus saldos antes de reintentar.`
+        : "";
 
     // Jalar la última cuota con plata aplicada (ver `condicionUltimaCuotaPagada`
     // para el criterio y por qué NO se exige `cuotas_credito.pagado`). El
@@ -2391,7 +2430,12 @@ export const insertPayment = async (
       return {
         success: true,
         message:
-          "Abono directo a capital registrado exitosamente (pendiente de validación)",
+          "Abono directo a capital registrado exitosamente (pendiente de validación)" +
+          (fraseCorteEnCascada ? `. ${fraseCorteEnCascada}` : ""),
+        detalle: {
+          cuota_no_cobrada_por_rubros_cortos: cuotaCortadaPorPlanosCortos ?? null,
+          monto_no_aplicado_por_corte: montoNoAplicadoPorCorteTexto,
+        },
         pago: {
           pago_id: pagoInsertado.pago_id,
           abono_capital: abonoCapital.toString(),
@@ -2550,8 +2594,12 @@ export const insertPayment = async (
           saldo_sobrante: "0.00",
           capital_no_aplicado_a_saldo: capitalDevuelto.toString(),
           cuota_no_cobrada_por_rubros_cortos: cuotaCortadaPorPlanosCortos ?? null,
+          // `saldo_sobrante` está hardcodeado a "0.00" (contrato preexistente),
+          // así que el monto que el corte dejó sin aplicar necesita su propio
+          // campo o no se ve en ninguna parte de la respuesta.
+          monto_no_aplicado_por_corte: montoNoAplicadoPorCorteTexto,
         },
-        resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. ${capitalDevuelto.gt(0) ? `El abono a capital de Q${capitalDevuelto.toString()} no se aplicó (el crédito no lo permite) y quedó en saldo a favor. ` : ""}${cuotaCortadaPorPlanosCortos !== undefined ? `La cuota #${cuotaCortadaPorPlanosCortos} no se cobró: sus rubros fijos (seguro, GPS, membresías) vienen cortos y cerrarla dejaría de cobrarlos. El resto de la boleta no se aplicó a esa cuota — revisar sus saldos antes de reintentar.` : "Ya no queda saldo disponible."}`,
+        resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. ${capitalDevuelto.gt(0) ? `El abono a capital de Q${capitalDevuelto.toString()} no se aplicó (el crédito no lo permite) y quedó en saldo a favor. ` : ""}${cuotaCortadaPorPlanosCortos !== undefined ? fraseCorteEnCascada : "Ya no queda saldo disponible."}`,
       };
     }
   } catch (error) {

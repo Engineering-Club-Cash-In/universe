@@ -1287,13 +1287,95 @@ export const crmRouter = {
 						.orderBy(desc(opportunities.createdAt))
 						.limit(1);
 
-					throw new ORPCError("CONFLICT", {
-						message: "Ya existe un lead con este DPI",
-						data: buildLeadDuplicateConflict(
-							matchingLeads,
-							activeOpportunity ?? null,
-							context.userId,
-						),
+					// Solo se libera el cliente si TODAS sus oportunidades están cerradas
+					// (ganadas o perdidas). Cualquier otro estado —open, on_hold, o un
+					// crédito migrado— lo sigue atendiendo su asesor.
+					const [procesoNoCerrado] = await db
+						.select({ id: opportunities.id })
+						.from(opportunities)
+						.where(
+							and(
+								inArray(
+									opportunities.leadId,
+									matchingLeads.map((lead) => lead.id),
+								),
+								not(inArray(opportunities.status, ["won", "lost"])),
+							),
+						)
+						.limit(1);
+
+					if (activeOpportunity || procesoNoCerrado) {
+						throw new ORPCError("CONFLICT", {
+							message: "Ya existe un lead con este DPI",
+							data: buildLeadDuplicateConflict(
+								matchingLeads,
+								activeOpportunity ?? null,
+								context.userId,
+							),
+						});
+					}
+
+					// Todas sus oportunidades cerradas: se reusa el más antiguo, que
+					// arrastra el historial, y se reasigna al asesor que lo está creando.
+					const existingLead = matchingLeads[0];
+
+					return await auditedTransaction(async (tx) => {
+						const [lead] = await tx
+							.update(leads)
+							.set({
+								assignedTo,
+								status: "new",
+								source: input.source,
+								campaign: input.campaign,
+								updatedAt: new Date(),
+							})
+							.where(eq(leads.id, existingLead.id))
+							.returning();
+
+						// Crear nueva oportunidad en el primer stage
+						const [firstStage] = await tx
+							.select({ id: salesStages.id })
+							.from(salesStages)
+							.orderBy(salesStages.order)
+							.limit(1);
+
+						if (!firstStage) {
+							throw new ORPCError("INTERNAL_SERVER_ERROR", {
+								message: "No se encontró el primer stage de ventas",
+							});
+						}
+
+						// Este lead ya existía: lo que pasó fue una reasignación, no
+						// un alta.
+						auditRecord({
+							entity: "lead",
+							id: existingLead.id,
+							action: "reassign",
+							data: { dpi: normalizedDpi, assignedTo },
+						});
+
+						const [nuevaOportunidad] = await tx
+							.insert(opportunities)
+							.values({
+								title: `${input.firstName} ${input.lastName}`,
+								leadId: existingLead.id,
+								creditType: "autocompra",
+								stageId: firstStage.id,
+								probability: 1,
+								assignedTo,
+								createdBy: context.userId,
+								source: input.source,
+								campaign: input.campaign,
+							})
+							.returning({ id: opportunities.id });
+						auditRecord({
+							entity: "opportunity",
+							id: nuevaOportunidad.id,
+							action: "create",
+							data: { leadId: existingLead.id, assignedTo },
+						});
+
+						return lead;
 					});
 				}
 			}

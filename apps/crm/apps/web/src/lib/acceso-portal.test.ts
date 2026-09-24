@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { avisoAccesoPortal, type AccesoPortal } from "./acceso-portal";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+	avisoAccesoPortal,
+	type AccesoPortal,
+	valorDeTabla,
+} from "./acceso-portal";
 
 const acceso = (over: Partial<AccesoPortal> = {}): AccesoPortal => ({
 	estado: "creada",
@@ -461,5 +467,285 @@ describe("un desenlace desconocido nunca sale en verde", () => {
 		["avisada"],
 	])("pero %s sigue siendo verde", (estado) => {
 		expect(avisoAccesoPortal(acceso({ estado }), "boton")?.tono).toBe("exito");
+	});
+});
+
+/**
+ * La forma que llega NO es la que dice el tipo.
+ *
+ * Los dos llamadores le pasan JSON crudo de una respuesta (`data.accesoPortal`
+ * en el alta, `data?.resultados?.[0]` en el botón), los dos `any`. Sus cuatro
+ * comentarios dan por hecho que "ante otra forma vuelve `null`", y de eso
+ * cuelga el toast amarillo de "no se pudo confirmar".
+ *
+ * Tirar acá no se parece en nada a devolver `null`: el throw cae dentro del
+ * `onSuccess`, TanStack lo desvía al `onError`, y quien lee ve un rojo
+ * genérico con el diálogo abierto y el botón habilitado DESPUÉS de que la
+ * contraseña ya salió — o sea, invitándola a apretar otra vez.
+ */
+describe("cualquier forma que llegue tiene respuesta, nunca una excepción", () => {
+	const formas: Array<[string, unknown]> = [
+		// El caso comprobado: cartera contestó un fallo sin `advertencias`.
+		["un fallo sin advertencias", { estado: "fallo", motivo: "http_500" }],
+		["un objeto vacío", {}],
+		["creada pelada, sin correo ni advertencias", { estado: "creada" }],
+		[
+			"el correo desviado sin el bloque `correo`",
+			{
+				estado: "creada",
+				advertencias: ["correo_redirigido_por_modo_no_prod"],
+			},
+		],
+		[
+			"advertencias que no son un arreglo",
+			{ estado: "creada", advertencias: "correo_no_enviado" },
+		],
+		[
+			"advertencias con cosas que no son cadenas",
+			{ estado: "fallo", advertencias: [null, 7, {}, ["x"]] },
+		],
+		["un motivo que no es cadena", { estado: "fallo", motivo: 500 }],
+		["un estado que no es cadena", { estado: 7 }],
+		["un arreglo", []],
+		["una cadena", "fallo"],
+		["un número", 7],
+	];
+
+	it.each(formas)("%s", (_caso, entrada) => {
+		for (const origen of ["alta", "boton"] as const) {
+			const aviso = avisoAccesoPortal(entrada, origen);
+			// Lo que se exige es que CONTESTE. Y que si contesta algo, no sea verde
+			// sobre una forma que nadie pudo leer.
+			if (aviso) {
+				expect(typeof aviso.texto).toBe("string");
+				expect(aviso.texto.length).toBeGreaterThan(0);
+			}
+		}
+	});
+
+	it("el fallo sin advertencias dice que no se pudo, en vez de tirar", () => {
+		const aviso = avisoAccesoPortal(
+			{ estado: "fallo", motivo: "http_500" },
+			"boton",
+		)!;
+		expect(aviso.tono).toBe("advertencia");
+		expect(aviso.texto).toContain("No se le pudo dar acceso");
+		// `http_*` sí tiene causa en palabras, y se sigue diciendo.
+		expect(aviso.texto).toContain("el portal respondió con un error");
+	});
+
+	it("sin el bloque `correo`, el desvío nombra la bandeja genérica", () => {
+		const aviso = avisoAccesoPortal({
+			estado: "creada",
+			advertencias: ["correo_redirigido_por_modo_no_prod"],
+		})!;
+		expect(aviso.tono).toBe("advertencia");
+		expect(aviso.texto).toContain("una sola bandeja de pruebas");
+		expect(aviso.texto).not.toContain("undefined");
+	});
+});
+
+/**
+ * Las tablas se indexan con CADENAS DEL SERVIDOR.
+ *
+ * `advertencias` viaja verbatim desde auth-google, y por el camino de escritura
+ * el `motivo` puede ser cualquier cadena (`String(error?.message ?? error)`,
+ * portalProvisioning.ts). Un objeto literal contesta a `constructor`,
+ * `toString`, `valueOf`… con algo truthy que viene de `Object.prototype`, y eso
+ * termina interpolado en el aviso que lee una persona:
+ * `function Object() { [native code] }`.
+ */
+describe("una clave del prototipo no pinta basura en el aviso", () => {
+	const delPrototipo = [
+		"constructor",
+		"toString",
+		"valueOf",
+		"hasOwnProperty",
+		"__proto__",
+		"isPrototypeOf",
+	];
+
+	const basura = (texto: string) => {
+		expect(texto).not.toContain("native code");
+		expect(texto).not.toContain("function ");
+		expect(texto).not.toContain("[object");
+		expect(texto).not.toContain("undefined");
+	};
+
+	it.each(delPrototipo)(
+		"el motivo `%s` no saca ni la causa ni el consejo del prototipo",
+		(clave) => {
+			for (const origen of ["alta", "boton"] as const) {
+				const aviso = avisoAccesoPortal(
+					acceso({ estado: "fallo", motivo: clave }),
+					origen,
+				)!;
+				expect(aviso.tono).toBe("advertencia");
+				basura(aviso.texto);
+				// Y como no es un motivo conocido, el consejo genérico sigue ahí.
+				expect(aviso.texto).toContain("No se le pudo dar acceso al portal");
+			}
+		},
+	);
+
+	it.each(delPrototipo)(
+		"la advertencia `%s` no se traduce a nada",
+		(clave) => {
+			const aviso = avisoAccesoPortal(
+				acceso({ estado: "creada", advertencias: [clave] }),
+			);
+			// Sin advertencias traducibles, `creada` vuelve a su verde de siempre.
+			expect(aviso?.tono).toBe("exito");
+			basura(aviso!.texto);
+		},
+	);
+
+	it("un origen del prototipo cae en el del alta y no en una función", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({ estado: "omitida", motivo: "sin_correo" }),
+			"constructor" as unknown as "alta",
+		)!;
+		basura(aviso.texto);
+		expect(aviso.texto).toContain("Dar acceso al portal");
+	});
+});
+
+/**
+ * El ayudante que cierra lo de arriba. Se prueba solo porque lo reusa la
+ * pantalla del inversionista (`ESTADOS_ACCESO_PORTAL`,
+ * `MOTIVOS_CUENTA_PORTAL_ROTA`, `ACTION_LABELS`), que no tiene arnés de
+ * componentes: acá es donde esa garantía queda escrita.
+ */
+describe("valorDeTabla", () => {
+	const tabla: Record<string, string> = { creada: "Cuenta creada" };
+
+	it("devuelve lo que sí está escrito en la tabla", () => {
+		expect(valorDeTabla(tabla, "creada")).toBe("Cuenta creada");
+	});
+
+	it("no devuelve nada de `Object.prototype`", () => {
+		for (const clave of [
+			"constructor",
+			"toString",
+			"valueOf",
+			"hasOwnProperty",
+			"__proto__",
+			"isPrototypeOf",
+			"propertyIsEnumerable",
+		]) {
+			expect(valorDeTabla(tabla, clave)).toBeUndefined();
+		}
+	});
+
+	it("una clave que no es cadena tampoco encuentra nada", () => {
+		expect(valorDeTabla(tabla, null)).toBeUndefined();
+		expect(valorDeTabla(tabla, undefined)).toBeUndefined();
+		expect(valorDeTabla(tabla, 0)).toBeUndefined();
+		expect(valorDeTabla(tabla, {})).toBeUndefined();
+	});
+});
+
+/**
+ * LO QUE NO SE PUEDE PROBAR EJECUTANDO.
+ *
+ * La pantalla del inversionista es un `.tsx` de 2.700 líneas y este repo no
+ * tiene arnés de componentes: no hay forma de montar el diálogo, navegar y
+ * apretar el botón desde una prueba. Lo que sí se puede es fijar por escrito
+ * las cuatro decisiones de las que depende que no salga una contraseña al
+ * destinatario equivocado, para que volver a romperlas cueste un rojo y no una
+ * revisión con suerte.
+ *
+ * Son pruebas de FUENTE, y se sabe: no prueban comportamiento, prueban que la
+ * decisión sigue escrita. Lo mismo que hace `investor-documents.portalAccessStatus.test.ts`
+ * con el guard de sus procedures.
+ */
+describe("la pantalla del inversionista no vuelve a los defectos de siempre", () => {
+	const fuente = readFileSync(
+		join(import.meta.dir, "../routes/inversiones/liquidaciones.$inversionistaId.tsx"),
+		"utf8",
+	);
+	// Las afirmaciones EN NEGATIVO se hacen sobre el código sin comentarios: los
+	// comentarios de ese archivo citan a propósito el código viejo para explicar
+	// por qué se cambió, y contarlos como uso haría que la prueba fallara por la
+	// explicación en vez de por el defecto.
+	const codigo = fuente
+		.split("\n")
+		.filter((l) => {
+			const t = l.trim();
+			return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+		})
+		.join("\n");
+
+	it("el correo del diálogo NO sale de la fila cacheada", () => {
+		// `getInversionistas` se sirve de la caché en proceso del servidor (TTL 5
+		// minutos, sin un solo llamador de `invalidateCache`). El correo que se
+		// aprueba sale de `identidadInversionista`, que va sin caché por las dos
+		// puntas, y solo se acepta si la fila que volvió es ESTA.
+		expect(fuente).toContain(
+			"const accesoPortalEmail = (destinoFresco?.email ?? \"\").trim()",
+		);
+		expect(fuente).toContain(
+			"identidadFresca.inversionista_id === investorIdNum",
+		);
+		expect(codigo).not.toContain(
+			"const accesoPortalEmail = ((investor?.email ?? \"\") as string).trim()",
+		);
+	});
+
+	it("«es empresa» lo decide la consulta sin caché, no `dpi_rep_legal`", () => {
+		expect(fuente).toContain('estadoAccesoPortal?.motivo === "es_empresa"');
+		expect(codigo).not.toContain(
+			"const accesoPortalEsEmpresa = esEmpresaInicial(",
+		);
+	});
+
+	it("el diálogo se cierra al cambiar de inversionista", () => {
+		// Sin esto el diálogo sobrevive al botón Atrás y se repinta con los datos
+		// de OTRO inversionista, con el botón vivo y la revisión hecha sobre el
+		// anterior.
+		const efecto = fuente.slice(
+			fuente.indexOf("useEffect(() => {\n\t\tsetAccesoPortalOpen(false);"),
+		);
+		expect(efecto.slice(0, 600)).toContain("}, [investorIdNum]);");
+	});
+
+	it("la consulta de estado no reintenta", () => {
+		// Con `CARTERA_USER` mal configurado cartera contesta 403 siempre: los 3
+		// reintentos por defecto son 4 llamadas por vista, y cada una renueva el
+		// token de servicio que comparte todo el CRM.
+		const bloque = fuente.slice(
+			fuente.indexOf("const estadoAccesoPortalQuery = useQuery({"),
+		);
+		expect(bloque.slice(0, bloque.indexOf("\n\t});"))).toContain("retry: false");
+	});
+
+	it("la bitácora traduce el estado que escribe el servidor cuando cartera no contesta", () => {
+		// `investor-documents.ts` escribe `estado: "sin_respuesta_de_cartera"` con
+		// la advertencia `no_se_sabe_si_la_contrasena_salio`. Sin esta entrada esa
+		// fila salía SIN insignia: indistinguible de una normal, siendo la única
+		// que significa "puede que haya salido una contraseña y nadie sabe".
+		expect(fuente).toContain("sin_respuesta_de_cartera:");
+		expect(fuente).toContain("No se sabe si salió la contraseña");
+		// Y lo desconocido tampoco se calla.
+		expect(fuente).toContain("ESTADO_ACCESO_DESCONOCIDO");
+		expect(codigo).not.toContain("ESTADOS_ACCESO_PORTAL[details.estado]");
+	});
+
+	it("ninguna tabla se indexa con la clave del servidor a pelo", () => {
+		for (const tabla of [
+			"MOTIVOS_CUENTA_PORTAL_ROTA[",
+			"ESTADOS_ACCESO_PORTAL[",
+			"ACTION_LABELS[",
+			"ACTION_COLORS[",
+			"ETIQUETAS_REINVERSION[",
+		]) {
+			// La única indexación permitida es la del TIPO
+			// (`(typeof MOTIVOS_CUENTA_PORTAL_ROTA)[string]`), que no lee nada en
+			// tiempo de ejecución.
+			const usos = codigo
+				.split("\n")
+				.filter((l) => l.includes(tabla) && !l.includes("typeof "));
+			expect(usos).toEqual([]);
+		}
 	});
 });

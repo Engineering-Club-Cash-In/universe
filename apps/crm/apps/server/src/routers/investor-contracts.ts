@@ -641,10 +641,18 @@ export const investorContractsRouter = {
 				});
 			}
 
-			// Un contrato vigente por tipo y por batería: con dos, el inversionista
-			// recibe dos enlaces del mismo contrato y firma el que no es.
+			// Volver a emitir un tipo que la batería ya tiene lo REEMPLAZA: el nuevo
+			// ocupa su lugar y el viejo se anula y se borra en WeeTrust. Es lo que
+			// jurídico quiere decir cuando lo genera de nuevo —el anterior salió con
+			// un error—, y dejar los dos vivos le mandaría al inversionista dos
+			// enlaces del mismo contrato para que firme el que no es.
 			const yaVigentes = await db
-				.select({ contractType: generatedLegalContracts.contractType })
+				.select({
+					id: generatedLegalContracts.id,
+					contractType: generatedLegalContracts.contractType,
+					status: generatedLegalContracts.status,
+					weetrustDocumentId: generatedLegalContracts.weetrustDocumentId,
+				})
 				.from(generatedLegalContracts)
 				.where(
 					and(
@@ -653,11 +661,10 @@ export const investorContractsRouter = {
 						inArray(generatedLegalContracts.contractType, tipos),
 					),
 				);
-			if (yaVigentes.length > 0) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: `Esta batería ya tiene emitidos: ${yaVigentes.map((c) => c.contractType).join(", ")}.`,
-				});
-			}
+
+			const vigentePorTipo = new Map(
+				yaVigentes.map((contrato) => [contrato.contractType, contrato]),
+			);
 
 			// Puede cortar: sin correo del inversionista, con correos repetidos, o
 			// en modo prueba sin las envs. Se hace antes de generar nada.
@@ -722,6 +729,8 @@ export const investorContractsRouter = {
 				}
 
 				try {
+					const reemplazado = vigentePorTipo.get(pedido.contractType);
+
 					const id = await guardarContratoDeInversion({
 						batchId: input.batchId,
 						investorId: bateria.investorId,
@@ -729,7 +738,29 @@ export const investorContractsRouter = {
 						contractName: pedido.contractName,
 						resultado,
 						userId: context.userId,
+						...(reemplazado
+							? {
+									reemplaza: {
+										contractId: reemplazado.id,
+										motivo: "se volvió a emitir desde jurídico",
+									},
+								}
+							: {}),
 					});
+
+					// El documento viejo, ya con su fila anulada: se borra allá para
+					// que sus enlaces no sigan firmando, y la papelería del
+					// inversionista deja de ofrecerlos.
+					if (reemplazado) {
+						await borrarElViejoEnWeeTrust({
+							contractId: reemplazado.id,
+							status: reemplazado.status,
+							weetrustDocumentId: reemplazado.weetrustDocumentId,
+							razon: "Reemplazado: se volvió a emitir desde jurídico",
+							origen: "generateInvestorContracts",
+						});
+						void espejarEstadoDeFirmaEnCartera(reemplazado.id);
+					}
 					emitidos.push({ id, contractType: pedido.contractType });
 					results.push({
 						contractType: pedido.contractType,

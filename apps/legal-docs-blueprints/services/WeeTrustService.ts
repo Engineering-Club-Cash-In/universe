@@ -1116,12 +1116,31 @@ export class WeeTrustService {
 			config.anclasExactas,
 		);
 
-		if (lineas.length !== esperados.length) {
+		// Un documento puede traer menos repeticiones de las declaradas y estar
+		// bien: los anexos de inversiones son dos, pero a veces se manda uno solo
+		// unificado y entonces cada persona firma una vez en vez de dos. Mientras
+		// lo que llegue sean repeticiones COMPLETAS de la secuencia, se firman
+		// las que haya; media repetición sí es un layout que no entendemos.
+		const porRepeticion = esperados.length / (config.repeticiones ?? 1);
+		const repeticionesEnElPdf =
+			porRepeticion > 0 ? lineas.length / porRepeticion : 0;
+		const esRepeticionCompleta =
+			Number.isInteger(repeticionesEnElPdf) && repeticionesEnElPdf >= 1;
+
+		if (lineas.length > esperados.length || !esRepeticionCompleta) {
 			throw new SignatureLayoutError(
 				`El contrato "${contractType}" tiene ${lineas.length} línea(s) de firma en el PDF ` +
 					`pero se esperaban ${esperados.length} (${esperados.map((s) => s.role).join(", ")}). ` +
 					`Revisar el layout declarado en signaturePatterns.ts con scripts/inventario-firmas.ts.`,
 			);
+		}
+
+		if (lineas.length < esperados.length) {
+			console.log(
+				`[WeeTrust] ${contractType}: el PDF trae ${repeticionesEnElPdf} de las ` +
+					`${config.repeticiones} repeticiones declaradas; se firman las que hay.`,
+			);
+			esperados.length = lineas.length;
 		}
 
 		// Donde el template imprime el DPI debajo de la línea, lo usamos para

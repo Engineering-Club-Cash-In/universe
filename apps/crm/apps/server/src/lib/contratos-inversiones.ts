@@ -70,9 +70,11 @@ export const CONTRATOS_DE_INVERSION: readonly ContratoDeInversion[] = [
 		entidades: [],
 	},
 	{
+		// Cada anexo lleva dos líneas: la del inversionista y la de quien recibe
+		// por Cube, que va impresa con su nombre en el template.
 		tipo: "anexos_confirmacion_participacion_beneficiario",
 		categoria: "individual",
-		entidades: [],
+		entidades: ["CUBE"],
 	},
 	{ tipo: "cesion_creditos", categoria: "individual", entidades: ["CUBE"] },
 	{

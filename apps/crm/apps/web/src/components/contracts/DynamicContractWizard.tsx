@@ -331,6 +331,11 @@ interface DynamicContractWizardProps {
 	 * PDF antes de instalarlos. Sin esto, el wizard termina al generar.
 	 */
 	/**
+	 * Una acción propia del área en cada contrato de los resultados. Se pasa tal
+	 * cual a `ContractResults`.
+	 */
+	accionPorContrato?: (result: ContractResult) => ReactNode;
+	/**
 	 * Qué hacer cuando le dan "Listo" en los resultados, si no hay paso de
 	 * enlazado. Por defecto se sale de la pantalla, como el botón de volver;
 	 * inversiones aprovecha para avisarle a quien sigue.
@@ -868,6 +873,7 @@ export function DynamicContractWizard({
 	valoresIniciales,
 	onGetDocumentsByDpi,
 	onGenerate,
+	accionPorContrato,
 	onFinish,
 	onLinkContracts,
 	onBack,
@@ -3055,6 +3061,7 @@ export function DynamicContractWizard({
 							failCount={generationResult.failCount}
 							onRetry={handleRetryContract}
 							retryingType={retryingType}
+							accionPorContrato={accionPorContrato}
 						/>
 
 						{/* Instructions for user */}

@@ -67,8 +67,15 @@ async function widgetsDelPdf(
 	buffer: Buffer,
 	contractType: ContractType,
 ): Promise<Widget[]> {
-	const { pattern } = getSignaturePattern(contractType);
-	const lineas = await WeeTrustService.readSignatureLines(buffer, pattern);
+	const { pattern, anclasExactas } = getSignaturePattern(contractType);
+	// Con las anclas declaradas, igual que producción: sin ellas el inventario
+	// no veía las líneas que no traen guiones y reportaba de menos justo en los
+	// contratos que hay que auditar.
+	const lineas = await WeeTrustService.readSignatureLines(
+		buffer,
+		pattern,
+		anclasExactas,
+	);
 	return lineas.map((l) => ({
 		page: l.pageNum,
 		x: l.pdfX,

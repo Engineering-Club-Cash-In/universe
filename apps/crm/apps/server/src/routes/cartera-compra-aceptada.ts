@@ -26,6 +26,8 @@ const creditoSchema = z.object({
 	monto: z.string().min(1),
 	fechaInicio: z.string().nullish(),
 	fechaVencimiento: z.string().nullish(),
+	tipoReinversion: z.string().nullish(),
+	modalidadFacturacion: z.string().nullish(),
 });
 
 const cuerpoSchema = z.object({

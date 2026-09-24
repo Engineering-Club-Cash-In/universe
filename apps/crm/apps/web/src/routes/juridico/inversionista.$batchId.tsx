@@ -7,6 +7,7 @@ import {
 	Check,
 	FileUp,
 	Loader2,
+	RefreshCw,
 	User,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -43,6 +44,30 @@ import { Label } from "@/components/ui/label";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { fechaEnPalabras } from "@/lib/fechas-en-palabras";
 import { client, orpc } from "@/utils/orpc";
+
+/**
+ * Cómo se traduce a las opciones del contrato lo que cartera estampó en el
+ * crédito.
+ *
+ * Las claves son las de cartera (`inversionistas.tipo_reinversion` y
+ * `creditos_inversionistas_espejo.modalidad_facturacion`); los valores, las
+ * opciones del campo en el catálogo de documentos.
+ *
+ * Las modalidades que no están (interés, variable, excedente, combinada) no
+ * tienen opción en el contrato: ahí jurídico elige, que es lo que hacía antes
+ * para todas.
+ */
+const MODALIDAD_DE_RETORNO: Record<string, string> = {
+	sin_reinversion: "tradicional",
+	reinversion_capital: "reinversion_capital",
+	reinversion_total: "reinversion_total",
+};
+
+const FIGURA_FISCAL: Record<string, string> = {
+	p2p_directa: "figura_1",
+	factura_cube: "figura_2",
+	factura_cube_pequeno: "figura_3",
+};
 
 export const Route = createFileRoute("/juridico/inversionista/$batchId")({
 	component: RouteComponent,
@@ -90,6 +115,7 @@ function RouteComponent() {
 	const [motivoDescarte, setMotivoDescarte] = useState("");
 	const [descartando, setDescartando] = useState(false);
 	const [subiendo, setSubiendo] = useState(false);
+	const [tipoASubir, setTipoASubir] = useState<string | undefined>(undefined);
 
 	const bateriaQuery = useQuery({
 		...orpc.getInvestorContractBatch.queryOptions({ input: { batchId } }),
@@ -159,7 +185,24 @@ function RouteComponent() {
 			fechaTextoVencimiento: fechaEnPalabras(credito.fechaVencimiento),
 		}));
 
-		return { listaCreditos: JSON.stringify(items) };
+		// Cómo recibe el retorno y cómo factura salen del crédito, que es donde
+		// cartera los estampa. Alcanza con el primero de la compra: el monto puede
+		// repartirse en varios créditos, pero el trato con el inversionista es uno
+		// solo y va igual en todos.
+		const primero = creditos[0];
+
+		return {
+			listaCreditos: JSON.stringify(items),
+			...(MODALIDAD_DE_RETORNO[primero?.tipoReinversion ?? ""]
+				? {
+						modalidadRetorno:
+							MODALIDAD_DE_RETORNO[primero?.tipoReinversion ?? ""],
+					}
+				: {}),
+			...(FIGURA_FISCAL[primero?.modalidadFacturacion ?? ""]
+				? { figuraFiscal: FIGURA_FISCAL[primero?.modalidadFacturacion ?? ""] }
+				: {}),
+		};
 	}, [bateria]);
 
 	/**
@@ -437,35 +480,12 @@ function RouteComponent() {
 			) : (
 				<Card>
 					<CardHeader>
-						<div className="flex items-start justify-between gap-3">
-							<div>
-								<CardTitle className="text-base">Emitir contratos</CardTitle>
-								<CardDescription>
-									Elegí la categoría y después los contratos que se van a
-									hacer. Los campos se llenan acá mismo; los enlaces de firma
-									salen solos y quedan en la ficha del inversionista.
-								</CardDescription>
-							</div>
-
-							{/* El contrato que se armó por fuera entra por acá y termina
-							    igual que los emitidos: con sus enlaces y en la ficha. Pide
-							    la categoría primero porque de ahí sale la lista de tipos. */}
-							<Button
-								variant="outline"
-								size="sm"
-								className="shrink-0"
-								disabled={documentTypes.length === 0}
-								title={
-									documentTypes.length === 0
-										? "Elegí la categoría para ver los tipos de contrato"
-										: undefined
-								}
-								onClick={() => setSubiendo(true)}
-							>
-								<FileUp className="mr-2 h-4 w-4" />
-								Subir contrato
-							</Button>
-						</div>
+						<CardTitle className="text-base">Emitir contratos</CardTitle>
+						<CardDescription>
+							Elegí la categoría y después los contratos que se van a hacer. Los
+							campos se llenan acá mismo; los enlaces de firma salen solos y
+							quedan en la ficha del inversionista.
+						</CardDescription>
 					</CardHeader>
 					<CardContent>
 						<DynamicContractWizard
@@ -475,6 +495,25 @@ function RouteComponent() {
 							onGenerate={(data) => generarMutation.mutateAsync(data)}
 							isGenerating={generarMutation.isPending}
 							onBack={() => navigate({ to: "/juridico" })}
+							// Reemplazar acá y no sólo desde la ficha porque al darle
+							// "Listo" la batería sale de la lista de jurídico: esta pantalla
+							// es la última oportunidad de corregir un documento.
+							accionPorContrato={(resultado) =>
+								resultado.success ? (
+									<Button
+										variant="ghost"
+										size="sm"
+										className="h-7 text-xs"
+										onClick={() => {
+											setTipoASubir(resultado.contractType);
+											setSubiendo(true);
+										}}
+									>
+										<RefreshCw className="mr-1 h-3 w-3" />
+										Reemplazar
+									</Button>
+								) : null
+							}
 							onFinish={async () => {
 								await avisarMutation.mutateAsync().catch(() => undefined);
 								navigate({ to: "/juridico" });
@@ -546,9 +585,39 @@ function RouteComponent() {
 				</Card>
 			)}
 
+			{/* Abajo de todo, después del último contrato: el que se armó por fuera
+			    entra por acá y termina igual que los emitidos, con sus enlaces y en
+			    la ficha. Pide la categoría primero porque de ahí sale la lista de
+			    tipos. */}
+			{!cerrada && (
+				<div className="flex items-center justify-end gap-3 rounded-lg border border-dashed p-3">
+					<p className="text-muted-foreground text-sm">
+						¿El contrato se armó fuera del sistema?
+					</p>
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={documentTypes.length === 0}
+						title={
+							documentTypes.length === 0
+								? "Elegí la categoría para ver los tipos de contrato"
+								: undefined
+						}
+						onClick={() => {
+							setTipoASubir(undefined);
+							setSubiendo(true);
+						}}
+					>
+						<FileUp className="mr-2 h-4 w-4" />
+						Subir contrato
+					</Button>
+				</div>
+			)}
+
 			<UploadInvestorContractModal
 				batchId={batchId}
 				documentTypes={documentTypes}
+				tipoInicial={tipoASubir}
 				open={subiendo}
 				onOpenChange={setSubiendo}
 				// Subir cierra la batería igual que emitir: la lista de jurídico y la

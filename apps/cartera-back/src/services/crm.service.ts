@@ -83,6 +83,14 @@ export interface CreditoDeLaCompra {
   fechaInicio?: string | null;
   /** Fecha de la última cuota: cuándo vence el crédito. */
   fechaVencimiento?: string | null;
+  /**
+   * Lo que quedó estampado en el espejo para este crédito: qué hace el
+   * inversionista con el retorno y cómo factura. Los contratos lo piden como
+   * dato del inversionista y en cartera vive por crédito, así que el CRM usa
+   * el del primer crédito de la compra.
+   */
+  tipoReinversion?: string | null;
+  modalidadFacturacion?: string | null;
 }
 
 export interface BateriaDeContratosInput {

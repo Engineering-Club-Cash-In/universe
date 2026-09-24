@@ -43,6 +43,20 @@ export type CreditoDeLaCompra = {
 	 */
 	fechaInicio?: string | null;
 	fechaVencimiento?: string | null;
+	/**
+	 * Lo que quedó estampado en el espejo de cartera para este crédito: qué hace
+	 * el inversionista con el retorno (`sin_reinversion`, `reinversion_capital`,
+	 * …) y cómo factura (`p2p_directa`, `factura_cube`, `factura_cube_pequeno`).
+	 *
+	 * Los contratos los piden como dato del inversionista, pero en cartera viven
+	 * por crédito: una compra de Q100,000 puede estar repartida en dos créditos
+	 * y lo que vale es lo que se estampó en ellos. Se usa el del primero.
+	 *
+	 * Opcionales: las baterías abiertas antes de que esto existiera no los
+	 * tienen, y ahí esos campos del contrato se eligen a mano.
+	 */
+	tipoReinversion?: string | null;
+	modalidadFacturacion?: string | null;
 };
 
 /**

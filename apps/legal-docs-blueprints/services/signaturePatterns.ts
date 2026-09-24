@@ -364,15 +364,19 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
   },
 
   // Anexos 1 y 2 - el bloque de firma no usa línea de guiones, ancla en la etiqueta.
-  // Aparece 2 veces (una por anexo), ambas del MISMO firmante: 1 solo email
-  // (signerCount) pero 2 widgets de firma (signatureFieldCount).
+  //
+  // Cada anexo lleva DOS líneas, lado a lado: la del inversionista a la
+  // izquierda y la de quien recibe por Cube a la derecha. La de Cube se ancla
+  // por su etiqueta exacta, porque tampoco trae guiones. Son 2 anexos, así que
+  // el par se repite dos veces: 2 firmantes, 4 widgets.
   [ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO]: {
     pattern: 'Firma del Inversionista',
-    bloques: ['DEUDORES'],
+    anclasExactas: ['Recibido por Cube Investments, S.A.'],
+    bloques: ['DEUDORES', 'REP_LEGAL'],
     repeticiones: 2,
-    signerCount: 1,
-    signatureFieldCount: 2,
-    signers: ['Inversionista']
+    signerCount: 2,
+    signatureFieldCount: 4,
+    signers: ['Inversionista', 'Rep. Legal']
   },
 
   // ===== INVERSIONES SOCIEDAD =====

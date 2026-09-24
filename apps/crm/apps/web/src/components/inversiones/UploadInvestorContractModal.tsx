@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { FileText, FileUp, Loader2, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
 	MOTIVOS_DE_ANULACION,
 	type MotivoDeAnulacion,
@@ -50,6 +50,7 @@ import { client, orpc } from "@/utils/orpc";
 export function UploadInvestorContractModal({
 	batchId,
 	documentTypes,
+	tipoInicial,
 	open,
 	onOpenChange,
 	onUploaded,
@@ -57,6 +58,11 @@ export function UploadInvestorContractModal({
 	batchId: string;
 	/** El catálogo de la categoría elegida: `enum` es el tipo, `label` el nombre. */
 	documentTypes: { enum: string; label: string }[];
+	/**
+	 * Con qué tipo abrir. Se usa al entrar por "Reemplazar" de un contrato, que
+	 * ya dice cuál es; por "Subir contrato" se elige acá.
+	 */
+	tipoInicial?: string;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onUploaded?: () => void;
@@ -64,6 +70,12 @@ export function UploadInvestorContractModal({
 	const [contractType, setContractType] = useState<string>("");
 	const [archivo, setArchivo] = useState<File | null>(null);
 	const [motivo, setMotivo] = useState<string>("");
+
+	// Al abrirse desde "Reemplazar", el tipo viene dado por el contrato que se
+	// reemplaza. Desde "Subir contrato" arranca vacío.
+	useEffect(() => {
+		if (open) setContractType(tipoInicial ?? "");
+	}, [open, tipoInicial]);
 
 	// Lo que la batería ya tiene emitido: de acá sale si el tipo elegido
 	// reemplaza a uno o entra como nuevo.

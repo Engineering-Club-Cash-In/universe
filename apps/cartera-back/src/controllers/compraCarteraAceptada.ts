@@ -89,12 +89,27 @@ async function abrirBateriasDeContratos(params: {
   }>;
   rowsPorCredito: Map<number, FilaDePool[]>;
   montoNuevoPorPar: Map<string, Big>;
+  /**
+   * Lo que quedó estampado en el espejo para cada crédito de esta compra: cómo
+   * factura y qué hace con el retorno. Los contratos lo piden como dato del
+   * inversionista, pero en cartera vive por crédito, así que el CRM se queda
+   * con el del primero de la compra.
+   */
+  tipoReinversionPorCredito: Map<number, string | null>;
+  modalidadFacturacionPorCredito: Map<number, string | null>;
   aceptadaEn: Date;
   aceptadaPor?: string;
 }): Promise<
   Array<{ inversionista_id: number; success: boolean; batchId?: string; error?: string }>
 > {
-  const { targetIds, creditosRows, rowsPorCredito, montoNuevoPorPar } = params;
+  const {
+    targetIds,
+    creditosRows,
+    rowsPorCredito,
+    montoNuevoPorPar,
+    tipoReinversionPorCredito,
+    modalidadFacturacionPorCredito,
+  } = params;
   if (targetIds.length === 0) return [];
 
   try {
@@ -202,6 +217,10 @@ async function abrirBateriasDeContratos(params: {
             monto: monto.toFixed(2),
             fechaInicio: fechas.inicio ?? null,
             fechaVencimiento: fechas.vencimiento ?? null,
+            tipoReinversion:
+              tipoReinversionPorCredito.get(credito.credito_id) ?? null,
+            modalidadFacturacion:
+              modalidadFacturacionPorCredito.get(credito.credito_id) ?? null,
           },
         ];
       });
@@ -640,6 +659,8 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       creditosRows,
       rowsPorCredito,
       montoNuevoPorPar,
+      tipoReinversionPorCredito: tipoReinvPorCredito,
+      modalidadFacturacionPorCredito: modalidadFactPorCredito,
       aceptadaEn: ahora,
       aceptadaPor: usuarioEmail,
     });

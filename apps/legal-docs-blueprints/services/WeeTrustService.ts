@@ -14,6 +14,7 @@ import * as path from "node:path";
 import FormData from "form-data";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import {
+	CONTRATOS_DE_INVERSION,
 	ContractType,
 	SignerRole,
 	type ContractSigner,
@@ -1253,7 +1254,14 @@ export class WeeTrustService {
 						enLaFilaMasLlena,
 				),
 			);
-			const alto = Math.round(ancho * PROPORCION);
+			// La franja manda sobre la proporción: el contrato de participación
+			// deja muy poco aire, y una rúbrica más alta que su franja se sale
+			// hacia el texto o hacia el borde de la hoja. En los contratos de
+			// ventas la franja es más alta que esto, así que no los cambia.
+			const alto = Math.min(
+				Math.round(ancho * PROPORCION),
+				Math.floor(franja.arriba - franja.abajo),
+			);
 			// Las filas van centradas en el alto de la franja. Si son tantas que no
 			// entran, se cuelgan del borde de arriba de la franja y crecen hacia el
 			// borde de la hoja, porque arriba está el texto del contrato: sin tope
@@ -1617,11 +1625,16 @@ function identificacionDe(
 		return {};
 	}
 
+	// Biometría facial además del documento: en el reconocimiento de deuda
+	// porque es el título que se ejecuta, y en TODOS los de inversión porque el
+	// inversionista entrega dinero y la relación se arma por correo, sin nadie
+	// de la empresa enfrente.
+	const conSelfie =
+		contractType === ContractType.RECONOCIMIENTO_DEUDA ||
+		CONTRATOS_DE_INVERSION.has(contractType);
+
 	return {
-		identification:
-			contractType === ContractType.RECONOCIMIENTO_DEUDA
-				? "face"
-				: WEETRUST_DEFAULT_IDENTIFICATION,
+		identification: conSelfie ? "face" : WEETRUST_DEFAULT_IDENTIFICATION,
 	};
 }
 

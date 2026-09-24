@@ -351,6 +351,14 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     pattern: 'EL INVERSIONISTA___________________________________',
     anclasExactas: ['CUBE INVESTMENTS, S.A.', 'EL INVERSIONISTA'],
     bloques: ['REP_LEGAL', 'DEUDORES'],
+    // Único contrato de inversión con rúbrica por hoja: es el que arma la
+    // relación entera, así que gerencia pide lo mismo que en los de ventas.
+    //
+    // Va DEBAJO del pie de página, no encima. Medido sobre el PDF real (hoja
+    // de 612x1008): el texto del pie queda en y≈38, su línea en y≈50 y el
+    // cuerpo baja hasta y≈61, así que arriba del pie quedan 11 puntos, que no
+    // alcanzan para una rúbrica. Debajo hay 36, y ahí entra sin tocar nada.
+    rubrica: { franja: { izquierda: 63, derecha: 550, abajo: 6, arriba: 34 } },
     signerCount: 1,
     signers: ['Inversionista']
   },

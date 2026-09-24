@@ -59,6 +59,39 @@ export enum ContractType {
 }
 
 /**
+ * Los contratos de **inversiones**, individual y sociedad.
+ *
+ * Firman distinto que los de ventas: al inversionista se le pide selfie con
+ * prueba de vida además del documento, porque está entregando dinero y la
+ * relación se arma entera por correo, sin nadie de la empresa enfrente.
+ *
+ * Se declara a mano y no por prefijo del identificador porque los nombres no
+ * comparten uno: hay `acuerdo_`, `carta_`, `cesion_`, `contrato_` y `anexos_`.
+ */
+export const CONTRATOS_DE_INVERSION: ReadonlySet<ContractType> = new Set([
+  ContractType.ACUERDO_INVERSION_CASH_IN,
+  ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL,
+  ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION,
+  ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA,
+  ContractType.CARTA_INCREMENTO_INVERSION,
+  ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO,
+  ContractType.CESION_CREDITOS,
+  ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL,
+  ContractType.DESIGNACION_BENEFICIARIO,
+  ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA,
+  ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO,
+  ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD,
+  ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL_SOCIEDAD,
+  ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION_SOCIEDAD,
+  ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA_SOCIEDAD,
+  ContractType.CARTA_INCREMENTO_INVERSION_SOCIEDAD,
+  ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO_SOCIEDAD,
+  ContractType.CESION_CREDITOS_SOCIEDAD,
+  ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD,
+  ContractType.DESIGNACION_BENEFICIARIO_SOCIEDAD,
+]);
+
+/**
  * Interfaz base para todos los contratos
  */
 export interface BaseContractData {

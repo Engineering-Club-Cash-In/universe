@@ -7,6 +7,7 @@ import {
 	Link2,
 	Loader2,
 	Plus,
+	Send,
 	Trash2,
 	TriangleAlert,
 	User,
@@ -341,6 +342,31 @@ interface DynamicContractWizardProps {
 	 * fuera, para tenerlo a mano sin bajar hasta el final de la pantalla.
 	 */
 	accionesDeResultados?: ReactNode;
+	/**
+	 * Lo que el área tiene de verdad, para mostrarlo en los resultados en vez de
+	 * lo que devolvió esta emisión.
+	 *
+	 * Inversiones lo usa para que las tarjetas sean la vista previa del correo:
+	 * reemplazar o subir un contrato cambia lo que la batería tiene, y los
+	 * resultados de la emisión seguían mostrando el viejo. Los que fallaron en
+	 * esta sesión se agregan igual, para poder reintentarlos.
+	 */
+	resultadosVigentes?: ContractResult[];
+	/**
+	 * El "Listo" de los resultados, cuando no hay paso de enlazado. Sin esto no
+	 * aparece: inversiones sólo lo pasa mientras la batería no se mandó.
+	 */
+	onFinish?: () => void;
+	/** Si el "Listo" está trabajando, para no mandarlo dos veces. */
+	finalizando?: boolean;
+	/** Avisa cuándo se están mostrando los resultados, y cuándo ya no. */
+	onResultadosVisibles?: (visibles: boolean) => void;
+	/**
+	 * "Corregir y Regenerar" sin paso de enlazado: descarta lo emitido y vuelve
+	 * al formulario con los datos cargados, como en ventas. Inversiones lo pasa
+	 * sólo antes del "Listo"; sin esto el botón es "Volver".
+	 */
+	onCorregir?: () => Promise<void>;
 	onLinkContracts?: (data: {
 		opportunityId: string;
 		leadId: string;
@@ -875,6 +901,11 @@ export function DynamicContractWizard({
 	onGenerate,
 	accionPorContrato,
 	accionesDeResultados,
+	resultadosVigentes,
+	onFinish,
+	finalizando = false,
+	onResultadosVisibles,
+	onCorregir,
 	onLinkContracts,
 	onBack,
 	onDescartarSinEnlazar,
@@ -1673,9 +1704,21 @@ export function DynamicContractWizard({
 	 * trabajo: la batería saldría de la lista de jurídico con un contrato de
 	 * menos y nadie se enteraría.
 	 */
-	const fallidos =
-		generationResult?.results.filter((r) => !r.success).length ?? 0;
+	const fallidosDeLaSesion =
+		generationResult?.results.filter((r) => !r.success) ?? [];
+	const fallidos = fallidosDeLaSesion.length;
 	const hayFallidos = fallidos > 0;
+
+	// Las tarjetas: lo que el área tiene de verdad, si lo pasa, más lo que falló
+	// en esta sesión. Si no, lo que devolvió la emisión.
+	const resultadosAMostrar = resultadosVigentes
+		? [...resultadosVigentes, ...fallidosDeLaSesion]
+		: (generationResult?.results ?? []);
+
+	const resultadosVisibles = step === 3 && Boolean(generationResult);
+	useEffect(() => {
+		onResultadosVisibles?.(resultadosVisibles);
+	}, [resultadosVisibles, onResultadosVisibles]);
 
 	// Fetch documents and fields when moving to step 2
 	const fetchDocumentsData = async () => {
@@ -2221,6 +2264,23 @@ export function DynamicContractWizard({
 			toast.error("No se pudo reintentar el documento");
 		} finally {
 			setRetryingType(null);
+		}
+	};
+
+	// Descartar lo emitido tarda (habla con WeeTrust): mientras tanto no se
+	// puede volver a apretar ni darle Listo.
+	const [corrigiendo, setCorrigiendo] = useState(false);
+	const handleCorregir = async () => {
+		if (!onCorregir) return;
+		setCorrigiendo(true);
+		try {
+			await onCorregir();
+			setGenerationResult(null);
+			setStep(2);
+		} catch {
+			// Quien lo pasa ya avisó el error; se queda en los resultados.
+		} finally {
+			setCorrigiendo(false);
 		}
 	};
 
@@ -3064,25 +3124,60 @@ export function DynamicContractWizard({
 										) : (
 											<div>
 												<h4 className="font-semibold text-green-800">
-													Contratos emitidos y enlazados
+													Contratos emitidos
 												</h4>
 												<p className="text-green-700 text-sm">
-													Ya están en la ficha del inversionista, con sus
-													enlaces de firma. Revisá los PDF: mientras falte
-													firmar se pueden corregir desde la batería.
+													{onFinish
+														? "Revisalos abajo, reemplazá o subí el que haga falta, y dale Listo para mandarlos al hilo de la compra."
+														: "Ya se mandaron al hilo de la compra: lo que emitas ahora se manda solo."}
 												</p>
 											</div>
 										)}
 									</div>
+									{onFinish && (
+										<Button
+											size="lg"
+											onClick={onFinish}
+											disabled={
+												finalizando ||
+												isGenerating ||
+												Boolean(retryingType) ||
+												hayFallidos
+											}
+											title={
+												hayFallidos
+													? "Hay contratos que no salieron: reintentalos o subilos a mano"
+													: undefined
+											}
+											className="bg-green-600 hover:bg-green-700"
+										>
+											{finalizando ? (
+												<Loader2 className="mr-2 h-5 w-5 animate-spin" />
+											) : (
+												<Send className="mr-2 h-5 w-5" />
+											)}
+											Listo
+										</Button>
+									)}
 								</CardContent>
 							</Card>
 						)}
 
 						<ContractResults
-							results={generationResult.results}
-							totalRequested={generationResult.totalRequested}
-							successCount={generationResult.successCount}
-							failCount={generationResult.failCount}
+							results={resultadosAMostrar}
+							totalRequested={
+								resultadosVigentes
+									? resultadosAMostrar.length
+									: generationResult.totalRequested
+							}
+							successCount={
+								resultadosVigentes
+									? resultadosVigentes.length
+									: generationResult.successCount
+							}
+							failCount={
+								resultadosVigentes ? fallidos : generationResult.failCount
+							}
 							onRetry={handleRetryContract}
 							retryingType={retryingType}
 							accionPorContrato={accionPorContrato}
@@ -3100,30 +3195,50 @@ export function DynamicContractWizard({
 									<div>
 										<h4 className="font-semibold text-blue-800">¿Qué sigue?</h4>
 										<ul className="mt-1 list-inside list-disc space-y-1 text-blue-700 text-sm">
-											<li>
-												<strong>Revisa los documentos generados</strong>{" "}
-												haciendo clic en el botón morado "Ver PDF"
-											</li>
-											<li>
-												Si algún documento salió en rojo, haz clic en{" "}
-												<strong>"Reintentar"</strong> en esa tarjeta: se vuelve
-												a generar solo ese, los demás se quedan como están
-											</li>
-											<li>
-												Si un documento tiene datos equivocados, haz clic en
-												"Corregir y Regenerar" para volver a editarlo
-											</li>
 											{onLinkContracts ? (
-												<li>
-													Cuando estés satisfecho, haz clic en{" "}
-													<strong>"Finalizar y Enlazar"</strong> para guardar
-													los contratos en la oportunidad
-												</li>
+												<>
+													<li>
+														<strong>Revisa los documentos generados</strong>{" "}
+														haciendo clic en el botón morado "Ver PDF"
+													</li>
+													<li>
+														Si algún documento salió en rojo, haz clic en{" "}
+														<strong>"Reintentar"</strong> en esa tarjeta: se
+														vuelve a generar solo ese, los demás se quedan como
+														están
+													</li>
+													<li>
+														Si un documento tiene datos equivocados, haz clic en
+														"Corregir y Regenerar" para volver a editarlo
+													</li>
+													<li>
+														Cuando estés satisfecho, haz clic en{" "}
+														<strong>"Finalizar y Enlazar"</strong> para guardar
+														los contratos en la oportunidad
+													</li>
+												</>
 											) : (
-												<li>
-													Los contratos ya quedaron guardados con sus enlaces de
-													firma: aparecen en la ficha del inversionista
-												</li>
+												<>
+													<li>
+														<strong>Revisá los contratos</strong> de acá arriba:
+														lo que ves es exactamente lo que se va a mandar
+													</li>
+													<li>
+														Si alguno salió en rojo,{" "}
+														<strong>"Reintentar"</strong> vuelve a generar sólo
+														ese
+													</li>
+													<li>
+														Para cambiar uno, <strong>"Reemplazar"</strong> en
+														su tarjeta; para agregar uno armado por fuera,{" "}
+														<strong>"Subir contrato"</strong>
+													</li>
+													<li>
+														Cuando estén bien, <strong>"Listo"</strong>: se
+														mandan al hilo del correo de la compra, con los PDF
+														y los enlaces de firma
+													</li>
+												</>
 											)}
 										</ul>
 									</div>
@@ -3139,29 +3254,65 @@ export function DynamicContractWizard({
 				<Button
 					variant="outline"
 					onClick={
-						step === 0 ||
-						(step === 1 && !pasoPrevio) ||
-						(step === 3 && !onLinkContracts)
-							? onBack
-							: handlePrevious
+						step === 3 && !onLinkContracts && onCorregir
+							? handleCorregir
+							: step === 0 ||
+									(step === 1 && !pasoPrevio) ||
+									(step === 3 && !onLinkContracts)
+								? onBack
+								: handlePrevious
 					}
-					disabled={isGenerating || isLoadingFields || isLinking}
+					disabled={
+						isGenerating ||
+						isLoadingFields ||
+						isLinking ||
+						corrigiendo ||
+						finalizando
+					}
 				>
-					<ChevronLeft className="mr-2 h-4 w-4" />
+					{corrigiendo ? (
+						<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+					) : (
+						<ChevronLeft className="mr-2 h-4 w-4" />
+					)}
 					{step === 0 || (step === 1 && !pasoPrevio)
 						? "Volver"
 						: step === 3
-							? // Sin paso de enlazado los contratos ya quedaron guardados:
-								// volver a generarlos chocaría contra los que ya existen.
-								onLinkContracts
+							? // Sin enlazado, corregir descarta lo emitido: sólo mientras no
+								// se mandó. Después los contratos ya salieron en el hilo.
+								onLinkContracts || onCorregir
 								? "Corregir y Regenerar"
 								: "Volver"
 							: "Anterior"}
 				</Button>
 
-				{/* Sin enlazado no hay nada que confirmar: los contratos ya quedaron
-				    guardados en firma, y "Volver" ya está a la izquierda. */}
-				{step === 3 && !onLinkContracts ? null : step === 3 ? (
+				{step === 3 && !onLinkContracts ? (
+					onFinish ? (
+						<Button
+							size="lg"
+							onClick={onFinish}
+							disabled={
+								finalizando ||
+								isGenerating ||
+								Boolean(retryingType) ||
+								hayFallidos
+							}
+							title={
+								hayFallidos
+									? "Hay contratos que no salieron: reintentalos o subilos a mano"
+									: undefined
+							}
+							className="bg-green-600 hover:bg-green-700"
+						>
+							{finalizando ? (
+								<Loader2 className="mr-2 h-5 w-5 animate-spin" />
+							) : (
+								<Send className="mr-2 h-5 w-5" />
+							)}
+							Listo
+						</Button>
+					) : null
+				) : step === 3 ? (
 					<Button
 						onClick={() => setShowLinkConfirmDialog(true)}
 						disabled={

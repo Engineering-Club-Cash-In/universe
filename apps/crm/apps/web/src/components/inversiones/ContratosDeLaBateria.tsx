@@ -6,6 +6,7 @@ import {
 	FileText,
 	Loader2,
 	RefreshCw,
+	Send,
 } from "lucide-react";
 import { useState } from "react";
 import type { MOTIVOS_DE_ANULACION } from "server/src/lib/contratos-anulacion";
@@ -58,24 +59,35 @@ const ESTADO: Record<string, { label: string; className: string }> = {
  * wizard son de la sesión en la que se emitieron, y sin esto un contrato con un
  * error emitido ayer no tenía desde dónde corregirse.
  *
+ * Antes del "Listo" es la vista previa de lo que va a salir en el correo:
+ * refleja los reemplazos y lo subido a mano, que los resultados del wizard no.
+ *
  * Mientras falte alguna firma se puede reemplazar y anular. Un contrato
  * firmado no tiene acciones: WeeTrust no deja borrar un documento completo. Y
- * cuando están firmados todos, la batería se cierra sola; no hay un "Listo".
+ * cuando están firmados todos, la batería se cierra sola.
  */
 export function ContratosDeLaBateria({
 	batchId,
+	estadoDeLaBateria,
 	onReemplazar,
+	onListo,
+	mandando = false,
 }: {
 	batchId: string;
+	/** Antes del "Listo" es la vista previa; después, lo que ya salió. */
+	estadoDeLaBateria: string;
 	/** Abre la subida con ese tipo ya elegido, que es lo que reemplaza. */
 	onReemplazar: (contractType: string) => void;
+	/**
+	 * Manda estos contratos al hilo de la compra y pasa la batería a "Por
+	 * firmar". Vive acá porque esta lista es la vista previa: lo que se ve acá,
+	 * con los reemplazos y lo subido a mano, es exactamente lo que se manda.
+	 */
+	onListo?: () => void;
+	/** Si el correo está saliendo, para no mandarlo dos veces. */
+	mandando?: boolean;
 }) {
 	const queryClient = useQueryClient();
-	const [anulando, setAnulando] = useState<{
-		id: string;
-		nombre: string;
-		hayFirmas: boolean;
-	} | null>(null);
 
 	const contratosQuery = useQuery(
 		orpc.listInvestorContracts.queryOptions({ input: { batchId } }),
@@ -219,61 +231,119 @@ export function ContratosDeLaBateria({
 							{/* Un documento firmado por todos ya no se toca: allá no se puede
 							    borrar y acá no habría qué corregir. */}
 							{!inactivo && !firmado && (
-								<>
-									<Button
-										variant="ghost"
-										size="sm"
-										className="h-7 text-xs"
-										onClick={() => onReemplazar(contrato.contractType)}
-									>
-										<RefreshCw className="mr-1 h-3 w-3" />
-										Reemplazar
-									</Button>
-									<Button
-										variant="ghost"
-										size="sm"
-										className="h-7 text-destructive text-xs hover:text-destructive"
-										onClick={() =>
-											setAnulando({
-												id: contrato.id,
-												nombre: contrato.contractName,
-												hayFirmas: (contrato.firmantes ?? []).some(
-													(f) => f.status === "signed",
-												),
-											})
-										}
-									>
-										<Ban className="mr-1 h-3 w-3" />
-										Anular
-									</Button>
-								</>
+								<AccionesDelContrato
+									contrato={contrato}
+									onReemplazar={onReemplazar}
+									onAnulado={refrescar}
+								/>
 							)}
 						</div>
 					);
 				})}
 			</CardContent>
 
+			{/* Antes del Listo esta lista es la vista previa del correo; después,
+			    lo que se agrega o reemplaza sale solo al mismo hilo. */}
+			{estadoDeLaBateria === "pendiente" && onListo && vigentes.length > 0 && (
+				<CardContent className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+					<p className="max-w-2xl text-muted-foreground text-sm">
+						¿Están bien todos? Se mandan al hilo del correo de la compra, con
+						los PDF adjuntos y los enlaces de firma de cada persona, y la
+						batería pasa a «Por firmar».
+					</p>
+					<Button
+						onClick={onListo}
+						disabled={mandando}
+						className="bg-green-600 hover:bg-green-700"
+					>
+						{mandando ? (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						) : (
+							<Send className="mr-2 h-4 w-4" />
+						)}
+						Listo
+					</Button>
+				</CardContent>
+			)}
+			{estadoDeLaBateria === "en_proceso" && (
+				<CardContent className="border-t pt-3 text-muted-foreground text-sm">
+					Ya se mandaron al hilo de la compra. Lo que agregues o reemplaces se
+					manda solo al mismo hilo.
+				</CardContent>
+			)}
+		</Card>
+	);
+}
+
+/**
+ * Lo que jurídico puede hacerle a un contrato mientras falte firmar:
+ * reemplazarlo o anularlo.
+ *
+ * Va igual en las tarjetas de arriba —lo recién emitido, que es la vista
+ * previa del correo— y en la lista de la batería, que es por donde se entra al
+ * volver otro día.
+ */
+export function AccionesDelContrato({
+	contrato,
+	onReemplazar,
+	onAnulado,
+}: {
+	contrato: {
+		id: string;
+		contractName: string;
+		contractType: string;
+		firmantes?: Array<{ status?: string | null }> | null;
+	};
+	/** Abre la subida con ese tipo ya elegido, que es lo que reemplaza. */
+	onReemplazar: (contractType: string) => void;
+	onAnulado: () => void;
+}) {
+	const [anulando, setAnulando] = useState(false);
+
+	return (
+		<>
+			<Button
+				variant="ghost"
+				size="sm"
+				className="h-7 text-xs"
+				onClick={() => onReemplazar(contrato.contractType)}
+			>
+				<RefreshCw className="mr-1 h-3 w-3" />
+				Reemplazar
+			</Button>
+			<Button
+				variant="ghost"
+				size="sm"
+				className="h-7 text-destructive text-xs hover:text-destructive"
+				onClick={() => setAnulando(true)}
+			>
+				<Ban className="mr-1 h-3 w-3" />
+				Anular
+			</Button>
+
 			{anulando && (
 				<AnularContratoDialog
-					contractId={anulando.id}
-					contractName={anulando.nombre}
-					hayFirmas={anulando.hayFirmas}
+					contractId={contrato.id}
+					contractName={contrato.contractName}
+					hayFirmas={(contrato.firmantes ?? []).some(
+						(f) => f.status === "signed",
+					)}
 					open
 					onOpenChange={(abierto) => {
-						if (!abierto) setAnulando(null);
+						if (!abierto) setAnulando(false);
 					}}
 					anular={(motivo: keyof typeof MOTIVOS_DE_ANULACION) =>
 						client.cancelInvestorContract({
-							contractId: anulando.id,
+							contractId: contrato.id,
 							motivo,
 						})
 					}
 					onAnulado={() => {
-						setAnulando(null);
-						refrescar();
+						setAnulando(false);
+						onAnulado();
 					}}
 				/>
 			)}
-		</Card>
+		</>
 	);
 }

@@ -60,23 +60,19 @@ import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { client, orpc } from "@/utils/orpc";
 
 /**
- * Qué dice el estado de una batería, que lo marcan sus documentos y no una
- * etapa: sin contratos, con contratos a medio firmar, o firmados por todos.
+ * Los estados que jurídico ve, como el 80 y el 85 en ventas: las que está
+ * armando y las que ya mandó y esperan firmas.
+ *
+ * Cerradas y descartadas no: ya no son trabajo de jurídico. Una cerrada tiene
+ * todo firmado y no admite cambios; una descartada no llevaba papelería.
  */
-const ESTADOS_DE_BATERIA = [
-	"pendiente",
-	"en_proceso",
-	"completada",
-	"descartada",
-] as const;
+const ESTADOS_DE_BATERIA = ["pendiente", "en_proceso"] as const;
 
 type EstadoDeBateria = (typeof ESTADOS_DE_BATERIA)[number];
 
 const ESTADO_DE_BATERIA: Record<string, string> = {
-	pendiente: "Sin contratos",
-	en_proceso: "En firma",
-	completada: "Cerradas",
-	descartada: "Descartadas",
+	pendiente: "Pendientes",
+	en_proceso: "Por firmar",
 };
 
 export const Route = createFileRoute("/juridico/")({
@@ -109,13 +105,9 @@ function RouteComponent() {
 	// Las baterías de contratos de inversionistas. Van en su propia pestaña: son
 	// otro flujo, con otra gente y sin oportunidad de venta detrás.
 	//
-	// Por defecto, las que todavía son trabajo: sin contratos, o con contratos a
-	// los que les falta alguna firma. Mientras falte firmar se puede corregir
-	// —reemplazar, anular, subir otro—, así que siguen acá.
-	//
-	// Las firmadas por todos salen de la lista: un documento completo no admite
-	// cambios, y en WeeTrust ya no se puede ni borrar. Se ven con "Ver
-	// cerradas", para mirar qué se hizo o agregarle el contrato que faltó.
+	// Por defecto, las que está armando. Cuando se firma todo, la batería sale
+	// de la lista: un documento completo no admite cambios, y en WeeTrust ya no
+	// se puede ni borrar.
 	const [estadoBateria, setEstadoBateria] =
 		useState<EstadoDeBateria>("pendiente");
 	const bateriasQuery = useQuery({
@@ -428,9 +420,10 @@ function RouteComponent() {
 						<CardHeader>
 							<CardTitle>Contratos de inversionistas</CardTitle>
 							<CardDescription>
-								Cada compra de cartera aceptada abre una batería. Con el primer
-								contrato pasa a «En firma», donde se puede seguir agregando y
-								corrigiendo; pasa sola a «Cerradas» cuando se firma todo.
+								Cada compra de cartera aceptada abre una batería. En
+								«Pendientes» se arma: emitir, revisar, reemplazar, subir. Con
+								«Listo» se mandan al hilo del correo de la compra y pasa a «Por
+								firmar»; cuando se firma todo, sale de la lista.
 							</CardDescription>
 
 							{/* Filtro por estado, como el de etapas en ventas */}

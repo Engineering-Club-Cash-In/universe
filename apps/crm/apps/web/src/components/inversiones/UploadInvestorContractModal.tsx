@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { leerBase64 } from "@/lib/archivo-base64";
 import { estaAnulado } from "@/lib/contract-signers-display";
+import { avisarCorreoDelHilo } from "@/lib/correo-del-hilo";
 import { client, orpc } from "@/utils/orpc";
 
 /**
@@ -119,6 +120,7 @@ export function UploadInvestorContractModal({
 		},
 		onSuccess: (data) => {
 			toast.success(data.message);
+			avisarCorreoDelHilo(data.correo);
 			limpiar();
 			onOpenChange(false);
 			onUploaded?.();
@@ -251,7 +253,9 @@ export function UploadInvestorContractModal({
 						) : (
 							<FileUp className="mr-2 h-4 w-4" />
 						)}
-						{reemplaza ? "Reemplazar y mandar a firmar" : "Subir y mandar a firmar"}
+						{reemplaza
+							? "Reemplazar y mandar a firmar"
+							: "Subir y mandar a firmar"}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

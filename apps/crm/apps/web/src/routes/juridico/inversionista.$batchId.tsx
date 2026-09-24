@@ -7,18 +7,21 @@ import {
 	Check,
 	FileUp,
 	Loader2,
-	RefreshCw,
 	User,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { CategoriaDeInversion } from "server/src/lib/contratos-inversiones";
 import { toast } from "sonner";
+import type { ContractResult } from "@/components/contracts/ContractResults";
 import {
 	type CRMData,
 	DynamicContractWizard,
 	moneyToWords,
 } from "@/components/contracts/DynamicContractWizard";
-import { ContratosDeLaBateria } from "@/components/inversiones/ContratosDeLaBateria";
+import {
+	AccionesDelContrato,
+	ContratosDeLaBateria,
+} from "@/components/inversiones/ContratosDeLaBateria";
 import { UploadInvestorContractModal } from "@/components/inversiones/UploadInvestorContractModal";
 import {
 	AlertDialog,
@@ -43,16 +46,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
+import { estaAnulado } from "@/lib/contract-signers-display";
+import { avisarCorreoDelHilo } from "@/lib/correo-del-hilo";
 import { fechaEnPalabras } from "@/lib/fechas-en-palabras";
 import { client, orpc } from "@/utils/orpc";
 
 /**
- * Qué dice el estado de la batería: sin contratos, en firma desde el primer
- * contrato —y todavía se puede corregir—, o cerrada porque se firmó todo.
+ * Qué dice el estado de la batería: pendiente mientras jurídico la arma, por
+ * firmar desde el "Listo" —que manda los contratos al hilo de la compra—, y
+ * cerrada cuando se firma todo.
  */
 const ESTADO_DE_BATERIA: Record<string, string> = {
-	pendiente: "Sin contratos",
-	en_proceso: "En firma",
+	pendiente: "Pendiente",
+	en_proceso: "Por firmar",
 	completada: "Cerrada",
 	descartada: "Descartada",
 };
@@ -141,6 +147,43 @@ function RouteComponent() {
 		...orpc.getInvestorContractBatch.queryOptions({ input: { batchId } }),
 		enabled: canViewLegal,
 	});
+
+	// Lo que la batería tiene de verdad. Las tarjetas de los resultados salen
+	// de acá y no de lo que devolvió la emisión: son la vista previa del
+	// correo, y un reemplazo o una subida tienen que verse ahí mismo.
+	const contratosQuery = useQuery({
+		...orpc.listInvestorContracts.queryOptions({ input: { batchId } }),
+		enabled: canViewLegal,
+	});
+	const vigentes = useMemo(
+		() =>
+			(contratosQuery.data ?? [])
+				.filter((c) => !estaAnulado(c))
+				.sort(
+					(a, b) =>
+						new Date(a.generatedAt ?? 0).getTime() -
+						new Date(b.generatedAt ?? 0).getTime(),
+				),
+		[contratosQuery.data],
+	);
+	const resultadosVigentes = useMemo<ContractResult[]>(
+		() =>
+			vigentes.map((c) => ({
+				contractType: c.contractType,
+				contractName: c.contractName,
+				success: true,
+				contractId: c.id,
+				documentLink: c.pdfUrl ?? undefined,
+				signatories: c.firmantes,
+				apiResponse: c.apiResponse,
+			})),
+		[vigentes],
+	);
+
+	// Mientras el wizard muestra las tarjetas, la lista y la barra de abajo
+	// repetían lo mismo: se esconden. Al volver otro día, sin tarjetas, son
+	// por donde se entra.
+	const [mostrandoResultados, setMostrandoResultados] = useState(false);
 
 	// El catálogo del generador sólo devuelve los de inversiones si se le pide la
 	// categoría, y el servidor ya deja únicamente los que tienen layout auditado.
@@ -235,6 +278,25 @@ function RouteComponent() {
 		};
 	}, [bateria]);
 
+	/**
+	 * El "Listo": manda al hilo de la compra los contratos que se ven en la
+	 * lista —con los reemplazos y lo subido a mano— y la batería pasa a "Por
+	 * firmar". Si el correo no sale, el servidor la deja pendiente y el error
+	 * se ve acá, para reintentar.
+	 */
+	const listoMutation = useMutation({
+		mutationFn: () => client.marcarBateriaLista({ batchId }),
+		onSuccess: (resultado) => {
+			avisarCorreoDelHilo(resultado);
+			queryClient.invalidateQueries({
+				predicate: (query) =>
+					JSON.stringify(query.queryKey).includes("InvestorContract"),
+			});
+			navigate({ to: "/juridico" });
+		},
+		onError: (error: Error) => toast.error(error.message),
+	});
+
 	const cerrarMutation = useMutation({
 		...orpc.closeInvestorContractBatch.mutationOptions(),
 		onSuccess: () => {
@@ -285,6 +347,8 @@ function RouteComponent() {
 			} else {
 				toast.warning("Algunos contratos no se pudieron emitir");
 			}
+			// Sólo después del "Listo": lo emitido sale solo al hilo de la compra.
+			avisarCorreoDelHilo(resultado.correo);
 			queryClient.invalidateQueries({
 				predicate: (query) =>
 					JSON.stringify(query.queryKey).includes("InvestorContract"),
@@ -556,23 +620,72 @@ function RouteComponent() {
 							isGenerating={generarMutation.isPending}
 							onBack={() => navigate({ to: "/juridico" })}
 							accionesDeResultados={barraDeSubida}
-							// Reemplazar acá mismo, sin ir a buscarlo a la lista de abajo:
-							// es donde se ve el PDF que acaba de salir.
-							accionPorContrato={(resultado) =>
-								resultado.success ? (
-									<Button
-										variant="ghost"
-										size="sm"
-										className="h-7 text-xs"
-										onClick={() => {
-											setTipoASubir(resultado.contractType);
+							resultadosVigentes={resultadosVigentes}
+							onResultadosVisibles={setMostrandoResultados}
+							// Mientras falte firmar, jurídico corrige desde la tarjeta.
+							accionPorContrato={(resultado) => {
+								const contrato = vigentes.find(
+									(c) => c.id === resultado.contractId,
+								);
+								if (!contrato || contrato.status === "signed") return null;
+								return (
+									<AccionesDelContrato
+										contrato={contrato}
+										onReemplazar={(contractType) => {
+											setTipoASubir(contractType);
 											setSubiendo(true);
 										}}
-									>
-										<RefreshCw className="mr-1 h-3 w-3" />
-										Reemplazar
-									</Button>
-								) : null
+										onAnulado={() =>
+											queryClient.invalidateQueries({
+												predicate: (query) =>
+													JSON.stringify(query.queryKey).includes(
+														"InvestorContract",
+													),
+											})
+										}
+									/>
+								);
+							}}
+							// El "Listo" sólo antes de mandarlos: después, lo que se
+							// emite sale solo al hilo.
+							onFinish={
+								bateria.status === "pendiente"
+									? () => listoMutation.mutate()
+									: undefined
+							}
+							finalizando={listoMutation.isPending}
+							// "Corregir y Regenerar", como en ventas: descarta lo emitido
+							// (se borra en WeeTrust) y vuelve al formulario con los datos.
+							// Sólo antes del Listo.
+							onCorregir={
+								bateria.status === "pendiente"
+									? async () => {
+											try {
+												const r = await client.descartarVistaPrevia({
+													batchId,
+												});
+												if (r.firmados.length > 0) {
+													toast.warning(
+														`No se descartó ${r.firmados.join(", ")}: ya está firmado.`,
+													);
+												}
+											} catch (error) {
+												toast.error(
+													error instanceof Error
+														? error.message
+														: "No se pudieron descartar los contratos",
+												);
+												throw error;
+											} finally {
+												queryClient.invalidateQueries({
+													predicate: (query) =>
+														JSON.stringify(query.queryKey).includes(
+															"InvestorContract",
+														),
+												});
+											}
+										}
+									: undefined
 							}
 							valoresIniciales={valoresIniciales}
 							pasoPrevio={{
@@ -646,19 +759,22 @@ function RouteComponent() {
 			    wizard son sólo de la sesión en que se emitieron. */}
 			{/* También cerrada: ahí sólo muestra los firmados con su PDF, sin
 			    acciones, que es lo que jurídico viene a buscar. */}
-			{bateria.status !== "descartada" && (
+			{bateria.status !== "descartada" && !mostrandoResultados && (
 				<ContratosDeLaBateria
 					batchId={batchId}
+					estadoDeLaBateria={bateria.status}
 					onReemplazar={(contractType) => {
 						setTipoASubir(contractType);
 						setSubiendo(true);
 					}}
+					onListo={() => listoMutation.mutate()}
+					mandando={listoMutation.isPending}
 				/>
 			)}
 
 			{/* La misma barra que va bajo los resultados: al final de la pantalla
 			    también, para el que llega hasta acá. */}
-			{!cerrada && barraDeSubida}
+			{!cerrada && !mostrandoResultados && barraDeSubida}
 
 			<UploadInvestorContractModal
 				batchId={batchId}

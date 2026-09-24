@@ -45,9 +45,19 @@ function mockDb() {
 					//  - getGpsIntegracionSalud (último crítico): { errorCode, operacion,
 					//    createdAt } → where → orderBy → limit.
 					//  - getGpsIntegracionLogs (conteo): { total }, resuelve en .where().
-					//  - getGpsIntegracionLogs (filas): select() sin proyección →
-					//    where → orderBy → limit → offset.
+					//  - getGpsIntegracionLogs (filas): columnas + { userNombre,
+					//    userEmail } → leftJoin(user) → where → orderBy → limit → offset.
 					const camposNombres = campos ? Object.keys(campos) : [];
+					if (camposNombres.includes("userNombre")) {
+						const lista = {
+							leftJoin: () => lista,
+							where: () => lista,
+							orderBy: () => lista,
+							limit: () => lista,
+							offset: async () => logsFilasMock,
+						};
+						return lista;
+					}
 					const esConteo =
 						camposNombres.length === 1 && camposNombres[0] === "total";
 					const esVentanaSalud =
@@ -69,13 +79,9 @@ function mockDb() {
 					if (esConteo) {
 						return { where: async () => [{ total: logsTotalMock }] };
 					}
-					const encadenable = {
-						where: () => encadenable,
-						orderBy: () => encadenable,
-						limit: () => encadenable,
-						offset: async () => logsFilasMock,
-					};
-					return encadenable;
+					throw new Error(
+						`Consulta a gps_integracion_logs no reconocida: ${camposNombres.join(",")}`,
+					);
 				}
 				if (tabla === gpsIntegracionAlertas) {
 					const esConteo = Boolean(
@@ -139,21 +145,48 @@ describe("CB-121 — getGpsIntegracionLogs", () => {
 				requestResumen: null,
 				responseResumen: null,
 				userId: "user-1",
+				userNombre: "Ana Pérez",
+				userEmail: "ana@example.com",
 				vehicleId: "veh-1",
 				numeroCreditoSifco: "0101",
 				gpsConsultaLogId: null,
 				createdAt: new Date(),
 			},
+			{
+				id: "log-2",
+				correlationId: "22222222-2222-2222-2222-222222222222",
+				intento: 1,
+				operacion: "token/login",
+				origen: "desconocido",
+				resultado: "ok",
+				errorCode: null,
+				wialonErrorCode: null,
+				httpStatus: null,
+				severidad: "info",
+				duracionMs: 300,
+				requestResumen: null,
+				responseResumen: null,
+				userId: null,
+				userNombre: null,
+				userEmail: null,
+				vehicleId: null,
+				numeroCreditoSifco: null,
+				gpsConsultaLogId: null,
+				createdAt: new Date(),
+			},
 		];
-		logsTotalMock = 1;
+		logsTotalMock = 2;
 
 		const res = await call(
 			gpsIntegracionRouter.getGpsIntegracionLogs,
 			{ page: 1, perPage: 25 },
 			{ context: ctx("admin") },
 		);
-		expect(res.total).toBe(1);
+		expect(res.total).toBe(2);
 		expect(res.items[0]?.errorCode).toBe("WIALON_TIMEOUT");
+		expect(res.items[0]?.userNombre).toBe("Ana Pérez");
+		expect(res.items[0]?.userEmail).toBe("ana@example.com");
+		expect(res.items[1]?.userNombre).toBeNull();
 	});
 
 	it("un asesor de cobros no puede ver la bitácora técnica (FORBIDDEN)", async () => {

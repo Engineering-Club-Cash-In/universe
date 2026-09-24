@@ -369,6 +369,8 @@ export const gpsIntegracionLogsOutputSchema = z.object({
 			requestResumen: z.unknown().nullable(),
 			responseResumen: z.unknown().nullable(),
 			userId: z.string().nullable(),
+			userNombre: z.string().nullable(),
+			userEmail: z.string().nullable(),
 			vehicleId: z.string().nullable(),
 			numeroCreditoSifco: z.string().nullable(),
 			gpsConsultaLogId: z.string().nullable(),

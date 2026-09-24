@@ -1307,6 +1307,41 @@ export const crmRouter = {
 					const existingLead = matchingLeads[0];
 
 					return await auditedTransaction(async (tx) => {
+						// Dos altas simultáneas del mismo DPI pasarían las dos el chequeo
+						// de arriba y abrirían dos oportunidades. El candado por DPI las
+						// pone en fila, y la segunda vuelve a mirar ya con la primera
+						// confirmada.
+						await tx.execute(
+							sql`SELECT pg_advisory_xact_lock(hashtextextended(${`lead-dpi:${normalizedDpi}`}, 0))`,
+						);
+						const [procesoAbierto] = await tx
+							.select({
+								id: opportunities.id,
+								leadId: opportunities.leadId,
+							})
+							.from(opportunities)
+							.where(
+								and(
+									inArray(
+										opportunities.leadId,
+										matchingLeads.map((lead) => lead.id),
+									),
+									inArray(opportunities.status, ["open", "on_hold"]),
+								),
+							)
+							.orderBy(desc(opportunities.createdAt))
+							.limit(1);
+						if (procesoAbierto) {
+							throw new ORPCError("CONFLICT", {
+								message: "Ya existe un lead con este DPI",
+								data: buildLeadDuplicateConflict(
+									matchingLeads,
+									procesoAbierto,
+									context.userId,
+								),
+							});
+						}
+
 						const [lead] = await tx
 							.update(leads)
 							.set({
@@ -1348,6 +1383,9 @@ export const crmRouter = {
 							.values({
 								title: `${input.firstName} ${input.lastName}`,
 								leadId: existingLead.id,
+								// Igual que createOpportunity: la oportunidad hereda el NIT del
+								// lead (ya actualizado), para que al cerrarla no se facture a CF.
+								nit: lead.nit,
 								creditType: "autocompra",
 								stageId: firstStage.id,
 								probability: 1,

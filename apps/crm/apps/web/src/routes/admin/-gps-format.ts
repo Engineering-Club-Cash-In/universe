@@ -78,3 +78,80 @@ export function resolveEstado(d: DiagnosticoParaEstado): EstadoConexion {
 	}
 	return "conectado";
 }
+
+// ── CB-121: bitácora técnica, salud y alertas ─────────────────────────────────
+
+/** "42%" o "—" si no hay muestras suficientes (tasa null). */
+export function formatPorcentaje(valor: number | null): string {
+	if (valor == null || !Number.isFinite(valor)) return "—";
+	return `${Math.round(valor * 100)}%`;
+}
+
+export type ResultadoIntento = "ok" | "error" | "reintentado" | "incierto";
+
+export const RESULTADO_INTENTO_CONFIG: Record<
+	ResultadoIntento,
+	{ label: string; badgeClass: string }
+> = {
+	ok: {
+		label: "OK",
+		badgeClass:
+			"bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+	},
+	reintentado: {
+		label: "Reintentado",
+		badgeClass:
+			"bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+	},
+	error: {
+		label: "Error",
+		badgeClass: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+	},
+	incierto: {
+		label: "Incierto",
+		badgeClass:
+			"bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
+	},
+};
+
+export type SeveridadFalla = "info" | "warning" | "critical";
+
+export const SEVERIDAD_CONFIG: Record<
+	SeveridadFalla,
+	{ label: string; badgeClass: string }
+> = {
+	info: {
+		label: "Info",
+		badgeClass:
+			"bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+	},
+	warning: {
+		label: "Advertencia",
+		badgeClass:
+			"bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+	},
+	critical: {
+		label: "Crítica",
+		badgeClass: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+	},
+};
+
+export type TipoAlertaGps =
+	| "error_critico"
+	| "tasa_error"
+	| "fallos_consecutivos"
+	| "latencia_sla";
+
+export const TIPO_ALERTA_LABEL: Record<TipoAlertaGps, string> = {
+	error_critico: "Error crítico",
+	tasa_error: "Tasa de error alta",
+	fallos_consecutivos: "Fallos consecutivos",
+	latencia_sla: "Latencia fuera de SLA",
+};
+
+/** "5.2 s" para valores grandes, "480 ms" para chicos; "—" si no hay dato. */
+export function formatDuracion(ms: number | null): string {
+	if (ms == null || !Number.isFinite(ms)) return "—";
+	if (ms >= 1000) return `${(ms / 1000).toFixed(1)} s`;
+	return `${ms} ms`;
+}

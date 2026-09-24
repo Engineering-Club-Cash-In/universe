@@ -28,7 +28,14 @@ export class WialonClientError extends Error {
 			| "WIALON_API_ERROR"
 			| "WIALON_TIMEOUT"
 			| "WIALON_NETWORK_ERROR"
-			| "WIALON_INVALID_RESPONSE",
+			| "WIALON_INVALID_RESPONSE"
+			// CB-121: una escritura (svc no idempotente) falló por una causa
+			// transitoria y no se sabe si Wialon llegó a aplicarla. Nunca se
+			// reintenta sola — requiere verificación manual antes de repetir.
+			| "WIALON_RESULTADO_INCIERTO"
+			// CB-121: el circuit breaker está abierto por fallos consecutivos;
+			// ni siquiera se llamó a Wialon en este intento.
+			| "WIALON_NO_DISPONIBLE",
 		readonly wialonErrorCode?: number,
 		readonly status?: number,
 	) {
@@ -41,6 +48,57 @@ export type WialonFetch = (
 	input: RequestInfo | URL,
 	init?: RequestInit,
 ) => Promise<Response>;
+
+// ── Trazabilidad técnica de la integración (CB-121) ───────────────────────────
+
+/**
+ * Severidad de una falla de Wialon, para decidir si abre una alerta y si el
+ * error se muestra en detalle solo a roles autorizados.
+ *
+ * - "critical": la integración no puede operar hasta que alguien intervenga
+ *   (token mal configurado, credenciales rechazadas, acceso denegado,
+ *   facturación, respuesta upstream que no se pudo interpretar).
+ * - "warning": probablemente transitorio (timeout, red, servidor de Wialon
+ *   caído momentáneamente) — puede reintentarse si la operación es de lectura.
+ * - "info": no es una falla (resultado ok) o es un reintento que sí funcionó.
+ */
+export type WialonFallaSeveridad = "info" | "warning" | "critical";
+
+export interface WialonFallaClasificacion {
+	severidad: WialonFallaSeveridad;
+	// Si tiene sentido reintentar ESTE tipo de error (independiente de si el
+	// svc es de lectura o escritura — eso lo decide requestRaw aparte).
+	reintentable: boolean;
+}
+
+/**
+ * Contexto de la llamada en curso: de dónde vino (qué endpoint/job del CRM)
+ * y para qué caso/usuario, para que la bitácora técnica no dependa de pasar
+ * estos datos por parámetro en cada método del cliente.
+ */
+export interface WialonLlamadaContexto {
+	origen: string;
+	correlationId: string;
+	userId?: string | null;
+	vehicleId?: string | null;
+	numeroCreditoSifco?: string | null;
+	gpsConsultaLogId?: string | null;
+}
+
+/** Un evento por cada intento HTTP a Wialon, éxito o error. */
+export interface WialonIntentoEvento {
+	contexto: WialonLlamadaContexto;
+	intento: number;
+	operacion: string;
+	resultado: "ok" | "error" | "reintentado" | "incierto";
+	errorCode?: string;
+	wialonErrorCode?: number;
+	httpStatus?: number;
+	severidad: WialonFallaSeveridad;
+	duracionMs: number;
+	requestResumen?: unknown;
+	responseResumen?: unknown;
+}
 
 export interface WialonConfig {
 	baseUrl: string;
@@ -215,6 +273,11 @@ export const gpsVehiculoOutputSchema = z.discriminatedUnion("estado", [
 		estado: z.literal("no_disponible"),
 		auditada: z.boolean(),
 		error: z.object({ code: z.string(), message: z.string() }),
+		// CB-121: correlationId de la bitácora técnica (gps_integracion_logs).
+		// Un asesor que ve "no disponible" no puede diagnosticar nada con ese
+		// mensaje genérico, pero puede darle esta referencia a soporte/admin
+		// para que la busquen en /admin/gps sin tener que reproducir el fallo.
+		referencia: z.string().nullable(),
 	}),
 ]);
 export type GpsVehiculoOutput = z.infer<typeof gpsVehiculoOutputSchema>;
@@ -266,6 +329,117 @@ export const gpsBitacoraOutputSchema = z.object({
 	),
 });
 export type GpsBitacoraOutput = z.infer<typeof gpsBitacoraOutputSchema>;
+
+// ── Bitácora técnica y alertas de la integración (CB-121) ─────────────────────
+// Solo admin: es diagnóstico de infraestructura, no una vista de negocio.
+
+export const gpsIntegracionLogsInputSchema = z.object({
+	page: z.number().int().min(1).default(1),
+	perPage: z.number().int().min(1).max(100).default(25),
+	resultado: z.enum(["ok", "error", "reintentado", "incierto"]).optional(),
+	severidad: z.enum(["info", "warning", "critical"]).optional(),
+	errorCode: z.string().trim().optional(),
+	operacion: z.string().trim().optional(),
+	numeroCreditoSifco: z.string().trim().optional(),
+	correlationId: z.string().uuid().optional(),
+});
+export type GpsIntegracionLogsInput = z.infer<
+	typeof gpsIntegracionLogsInputSchema
+>;
+
+export const gpsIntegracionLogsOutputSchema = z.object({
+	total: z.number(),
+	page: z.number(),
+	perPage: z.number(),
+	items: z.array(
+		z.object({
+			id: z.string(),
+			correlationId: z.string(),
+			intento: z.number(),
+			operacion: z.string(),
+			origen: z.string(),
+			resultado: z.enum(["ok", "error", "reintentado", "incierto"]),
+			errorCode: z.string().nullable(),
+			wialonErrorCode: z.number().nullable(),
+			httpStatus: z.number().nullable(),
+			severidad: z.enum(["info", "warning", "critical"]),
+			duracionMs: z.number(),
+			// Los resúmenes ya vienen sanitizados desde el escritor (nunca token/sid);
+			// se sirven como unknown porque su forma varía por operación.
+			requestResumen: z.unknown().nullable(),
+			responseResumen: z.unknown().nullable(),
+			userId: z.string().nullable(),
+			vehicleId: z.string().nullable(),
+			numeroCreditoSifco: z.string().nullable(),
+			gpsConsultaLogId: z.string().nullable(),
+			createdAt: z.date(),
+		}),
+	),
+});
+export type GpsIntegracionLogsOutput = z.infer<
+	typeof gpsIntegracionLogsOutputSchema
+>;
+
+export const gpsIntegracionSaludOutputSchema = z.object({
+	ventana: z.object({
+		desde: z.date(),
+		hasta: z.date(),
+		totalIntentos: z.number(),
+		fallos: z.number(),
+		tasaError: z.number().nullable(),
+		p50Ms: z.number().nullable(),
+		p95Ms: z.number().nullable(),
+	}),
+	circuito: z.object({
+		abierto: z.boolean(),
+		fallosConsecutivos: z.number(),
+	}),
+	alertasAbiertas: z.number(),
+	ultimoErrorCritico: z
+		.object({
+			errorCode: z.string().nullable(),
+			operacion: z.string(),
+			createdAt: z.date(),
+		})
+		.nullable(),
+});
+export type GpsIntegracionSaludOutput = z.infer<
+	typeof gpsIntegracionSaludOutputSchema
+>;
+
+export const gpsAlertasOutputSchema = z.object({
+	items: z.array(
+		z.object({
+			id: z.string(),
+			tipo: z.enum([
+				"error_critico",
+				"tasa_error",
+				"fallos_consecutivos",
+				"latencia_sla",
+			]),
+			errorCode: z.string().nullable(),
+			// El detalle técnico completo solo lo arma el endpoint para admin;
+			// para supervisor se recorta a algo presentable sin payloads.
+			detalle: z.string(),
+			estado: z.enum(["abierta", "resuelta"]),
+			primeraVez: z.date(),
+			ultimaVez: z.date(),
+			ocurrencias: z.number(),
+			resueltaPor: z.string().nullable(),
+			resueltaAt: z.date().nullable(),
+			notaResolucion: z.string().nullable(),
+		}),
+	),
+});
+export type GpsAlertasOutput = z.infer<typeof gpsAlertasOutputSchema>;
+
+export const resolverGpsAlertaInputSchema = z.object({
+	alertaId: z.string().uuid(),
+	nota: z.string().trim().min(5).max(500),
+});
+export type ResolverGpsAlertaInput = z.infer<
+	typeof resolverGpsAlertaInputSchema
+>;
 
 // ── Búsqueda de Unidades (core/search_items) ──────────────────────────────────
 export interface WialonSensorMeta {

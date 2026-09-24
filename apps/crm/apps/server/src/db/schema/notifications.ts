@@ -52,6 +52,10 @@ export const notificationRedirectPageEnum = pgEnum(
 		"pay_investors",
 		"cobros_detail",
 		"client_details_disbursement",
+		// CB-121: alerta de falla/degradación de la integración GPS/Wialon,
+		// dirigida a admin. No lleva relatedEntityId (no es una entidad del
+		// CRM), igual que pay_investors.
+		"admin_gps",
 	],
 );
 

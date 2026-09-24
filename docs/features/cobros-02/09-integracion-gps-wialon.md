@@ -1,7 +1,7 @@
 # 9 · Integración GPS / Wialon (La Legión)
 
-**Estado:** 🟢 Implementado en CRM Server · CB-117 (panel admin `/admin/gps`) y CB-118 (GPS en Ficha 360) implementados · pendiente alertas/webhooks (CB-119), corte remoto (CB-120) y bitácora persistente (CB-121)  
-**⚠️ Migración sin aplicar:** `0057_cb118_wialon_unit_link.sql` está commiteada pero **no ejecutada** en ningún ambiente. Mientras no se aplique, el vínculo vehículo↔unidad no persiste: la ficha lo deduce por placa en cada consulta y el botón de vincular falla (ver D-10).  
+**Estado:** 🟢 Implementado en CRM Server · CB-117 (panel admin `/admin/gps`), CB-118 (GPS en Ficha 360) y CB-121 (trazabilidad y manejo de fallas) implementados · pendiente alertas/webhooks (CB-119) y corte remoto (CB-120)  
+**⚠️ Migraciones sin aplicar:** `0057_cb118_wialon_unit_link.sql` y `0058_cb121_gps_integracion_logs.sql` están commiteadas pero **no ejecutadas** en ningún ambiente. Mientras la `0057` no se aplique, el vínculo vehículo↔unidad no persiste: la ficha lo deduce por placa en cada consulta y el botón de vincular falla (ver D-10). Mientras la `0058` no se aplique, no hay bitácora técnica ni alertas (CB-121): el escritor falla en silencio (`GPS_INTEGRACION_LOG_FALLIDO`) sin afectar las consultas.  
 **Apps que toca:** `apps/crm` (server + web) · Wialon Remote API (`gps.lalegion.gt`)  
 
 ---
@@ -115,6 +115,26 @@ Su propósito principal dentro del flujo de [Recuperación de vehículo (B4)](./
 * **Contexto:** todos los datos del tab Vehículo llegan hoy en la respuesta de `getDetallesCreditoCarteraBack`. Sumar ahí la telemetría habría sido lo "natural".
 * **Decisión:** el GPS va en su propio procedimiento (`getGpsVehiculo`) y su propia query en el frontend. Wialon es un proveedor externo con timeout de 15 s; meterlo en la consulta que pinta toda la ficha haría que una caída del GPS retrase —o tumbe— la pantalla completa de gestión. Por la misma razón `getGpsVehiculo` **degrada a `no_disponible` en vez de lanzar**, igual que `getWialonDiagnostics` (D-09): que el proveedor no responda no es un problema del crédito.
 
+### D-13 · Trazabilidad técnica, reintentos y manejo de fallas (CB-121)
+* **Contexto:** `gps_consulta_logs` (D-10, CB-118) audita la INTENCIÓN de negocio — quién vio la ubicación de un vehículo, por qué motivo y para qué crédito. No registra qué pasó con Wialon: no hay rastro de solicitudes/respuestas, errores, reintentos ni tiempos de respuesta, y los fallos solo quedaban en `console.*` sin alertar a nadie. El `WialonClient` tampoco tenía política de reintentos más allá del re-login transparente de D-02, ni forma de contener una caída sostenida del proveedor.
+* **Decisión — bitácora separada, no una extensión de `gps_consulta_logs`:** `gps_integracion_logs` (migración `0058`) registra **una fila por cada intento HTTP** a Wialon (login, catálogo, telemetría, links de Locator, diagnóstico), con `correlationId` (agrupa los reintentos de una misma operación lógica), `operacion` (svc de Wialon), `origen` (endpoint/job del CRM), `resultado` (`ok`/`error`/`reintentado`/`incierto`), `errorCode`, `severidad`, `duracionMs` y resúmenes de request/response **sanitizados** (nunca token/sid/eid, truncados a ~2 KB). Es otra tabla porque: (1) una sola consulta de la ficha genera varias llamadas HTTP, cada una con su propia fila; (2) no toda llamada a Wialon tiene `vehicleId`/`motivo` (login, catálogo admin, diagnóstico); (3) es **no bloqueante** — si el insert falla, la operación contra Wialon sigue igual, justo lo contrario de la auditoría de CB-118, que es fail-closed a propósito. `gpsConsultaLogId` conecta ambas cuando el origen fue una consulta de la ficha. Retención: 90 días, purgada a diario (mismo patrón que `bot-cobros-purga.ts`).
+* **Decisión — clasificación de fallas (`clasificarFallaWialon`):** cada error se clasifica en severidad (`info`/`warning`/`critical`) y si es reintentable, según el código de Wialon:
+  - **Crítico, no reintentable:** `WIALON_AUTH_REQUIRED` (token no configurado), Wialon 7/8/14 (acceso denegado, credenciales, facturación), `WIALON_INVALID_RESPONSE` (contrato roto), 4xx de red, y cualquier código no listado (2, 4, 6). Abre una alerta `error_critico` que **no se auto-resuelve**.
+  - **Transitorio, reintentable:** timeout, error de red con status 5xx o sin status, Wialon 5/11 (ejecución/BD no disponible).
+  - **Transitorio, NO reintentable:** Wialon 9/10 (cuota o tamaño de paquete excedido) — reintentar de inmediato empeora el problema en vez de resolverlo.
+  - El error 1 (sesión inválida) sigue con su propio flujo de D-02 (re-login + 1 reintento), registrado como `reintentado`.
+* **Decisión — reintentos solo en lecturas idempotentes:** `WIALON_SVC_IDEMPOTENTES` es una allowlist cerrada a los svc que el cliente realmente usa (`token/login`, `core/search_items`, `core/search_item`, `unit/calc_last`). Solo esos se reintentan automáticamente ante una falla transitoria: hasta 2 reintentos (3 intentos en total), backoff 500 ms → 1500 ms + jitter. **`token/update` (crear/borrar link de Locator) nunca está en la allowlist y nunca se reintenta.** Si una escritura falla por una causa transitoria, no hay forma de saber si Wialon ya la aplicó antes de que la conexión se cortara: el cliente la propaga como `WIALON_RESULTADO_INCIERTO` (mapeado a `CONFLICT` en ORPC) con un mensaje que pide verificación manual antes de repetir la acción — cubre el requisito de no ejecutar acciones ambiguas automáticamente.
+* **Decisión — circuit breaker en memoria:** 5 fallos reintentables consecutivos (de cualquier operación, no solo la que está fallando) abren el circuito por 60 s; mientras está abierto, ninguna operación llama a Wialon —ni lecturas ni escrituras— y responden de inmediato `WIALON_NO_DISPONIBLE` (mapeado a `SERVICE_UNAVAILABLE`), dejando que la ficha muestre la contingencia manual en vez de acumular más timeouts. El circuito se evalúa al INICIO de cada llamada pública, no entre los reintentos internos de una misma llamada (una tanda de 3 intentos que ya está en curso no se corta a mitad). Es por instancia del proceso: en un despliegue con varias réplicas, cada una tiene su propio estado.
+* **Decisión — mensajes al asesor vs. detalle técnico:** `getGpsVehiculo` sigue devolviendo mensajes fijos y genéricos al asesor (ya lo hacía desde D-09/D-12), y ahora además incluye `referencia` (el `correlationId` de esa consulta) en toda respuesta `no_disponible`, para que el asesor pueda dársela a soporte/admin sin tener que reproducir el fallo. El detalle técnico completo (payloads sanitizados, código de Wialon, reintentos) solo es visible en `/admin/gps` (`getGpsIntegracionLogs`, `getGpsIntegracionSalud`), exclusivo de `adminProcedure`. Las alertas (`getGpsAlertas`) sí las ve también `cobrosSupervisorProcedure`: un supervisor necesita saber si el GPS no es confiable ahora mismo, aunque no vea la bitácora técnica completa.
+* **Decisión — alertas con dedup por fila, no por tabla de notificaciones:** `gps_integracion_alertas` tiene un índice único parcial `(tipo, COALESCE(errorCode, '')) WHERE estado = 'abierta'` (el `COALESCE` evita que las alertas de umbral, con `errorCode` nulo, se dupliquen): solo puede haber una alerta abierta por tipo+código a la vez. Abrir una alerta nueva notifica una vez a todos los `admin` (tipo `system`, `redirectPage: "admin_gps"`); reforzar una que ya estaba abierta solo incrementa `ocurrencias` y `ultimaVez`, sin notificar de nuevo. Las alertas de umbral (`tasa_error`, `latencia_sla`, `fallos_consecutivos`) se auto-resuelven cuando la métrica vuelve a estar dentro del SLA (job `gps-integracion-salud.ts`, cada 5 min); las de `error_critico` requieren que un admin las cierre a mano (`resolverGpsAlerta`, con nota obligatoria) porque su causa típica no se arregla sola con que pase el tiempo.
+* **SLA y umbrales:** ventana de evaluación de 15 min (mínimo 5 muestras). Tasa de error ≥ 20% → alerta `tasa_error` (por intento: cuenta como fallo todo intento no exitoso, incluidos los `reintentado` con `errorCode`). Latencia p95 > 5000 ms → alerta `latencia_sla`. 5 fallos consecutivos → alerta `fallos_consecutivos` (evaluado en caliente en cada evento, no solo por el job periódico).
+* **Proceso manual de contingencia** (mientras el circuito está abierto o hay una alerta crítica sin resolver):
+  1. El asesor ve en la ficha el aviso de contingencia y, si necesita la ubicación con urgencia, usa el portal web de La Legión (`gps.lalegion.gt`) directamente o contacta a su supervisor.
+  2. El supervisor/admin revisa `/admin/gps` → sección "Fallas y salud": tasa de error, latencia p95, estado del circuito y alertas abiertas con su detalle.
+  3. Si la alerta es `error_critico` (típicamente token vencido, credenciales rechazadas o acceso denegado), contacta al proveedor (La Legión) o corrige la variable de entorno `WIALON_TOKEN` y reinicia el servicio.
+  4. Tras confirmar que la integración responde de nuevo (`testWialonConnection` en el panel), el admin resuelve la alerta manualmente con una nota (`resolverGpsAlerta`) — las de umbral no necesitan este paso, se cierran solas.
+  5. Si una escritura (link de Locator, vínculo de unidad) quedó en estado incierto, se verifica manualmente en Wialon/la ficha antes de repetir la acción — nunca se reintenta automáticamente.
+
 ---
 
 ## Mapa de Procedimientos ORPC (Frontend CRM - Protegidos por Rol)
@@ -134,6 +154,10 @@ Disponibles vía `@/utils/orpc` en el cliente web bajo `orpc.wialon.*`:
 | `getWialonUnitsCatalog` | `adminProcedure` | Query | `{ filterName?: string, from?: number, to?: number }` | Mismo handler que `getWialonUnits`, resguardado con `adminProcedure` para que el panel de administración no dependa del rol de cobros. |
 | `getGpsVehiculo` | `cobrosProcedure` | Query | `{ casoCobroId, vehicleId, motivo }` | **CB-118.** Todo lo que la Ficha 360 necesita del GPS en un solo viaje: resuelve la unidad (vínculo fijado o deducción por placa) y devuelve telemetría + fecha de última señal. Unión discriminada por `estado`: `vinculado` / `sin_vinculo` (con `motivo` y candidatos) / `no_disponible`. No lanza ante fallo upstream. **Sí lanza `NOT_FOUND`** si el usuario no tiene acceso al caso (`assertAccesoCasoCobro`: un asesor regular solo ve sus casos) o si `vehicleId` no es el vehículo del caso; en ese caso no se audita. El SIFCO de la bitácora se toma del caso, no del cliente. Toda respuesta trae `auditada` (si quedó en la bitácora), que la tarjeta usa para decir "Consulta registrada" o "no registrada". |
 | `vincularUnidadWialon` | `cobrosSupervisorProcedure` | Mutation | `{ vehicleId, unitId, unitName }` | **CB-118.** Fija manualmente qué unidad corresponde al vehículo cuando la placa no alcanza. Auditado (`WIALON_UNIDAD_VINCULADA`). Sí propaga el error (`NOT_FOUND` si el vehículo no existe). Reasignar **mueve** la unidad: en una transacción se le quita a cualquier otro vehículo que la tuviera (queda en `vehiculosDesvinculados` del log). |
+| `getGpsIntegracionLogs` | `adminProcedure` | Query | `{ page?, perPage?, resultado?, severidad?, errorCode?, operacion?, numeroCreditoSifco?, correlationId? }` | **CB-121.** Bitácora técnica paginada: cada intento HTTP a Wialon con su resultado, duración y payloads sanitizados. Vive en `routers/gps-integracion.ts` (no en `wialon.ts`) para no exceder el límite de inferencia de TypeScript (ver D-03). |
+| `getGpsIntegracionSalud` | `adminProcedure` | Query | `void` | **CB-121.** Resumen de salud de la última hora: tasa de error, latencia p50/p95, alertas abiertas, último error crítico y estado del circuit breaker de la instancia. |
+| `getGpsAlertas` | `cobrosSupervisorProcedure` | Query | `void` | **CB-121.** Lista de alertas (abiertas y resueltas), con su tipo, ocurrencias y detalle. También visible para supervisores de cobros, no solo admin. |
+| `resolverGpsAlerta` | `adminProcedure` | Mutation | `{ alertaId, nota }` | **CB-121.** Cierra manualmente una alerta abierta (obligatorio para `error_critico`, que no se auto-resuelve). `NOT_FOUND` si ya estaba resuelta o no existe. |
 
 ---
 
@@ -160,17 +184,21 @@ El módulo cuenta con suite de pruebas automatizadas con `bun:test`:
 
 * Cobertura añadida en CB-118: `matchUnidadPorPlaca` (normalización de placa, unidad sin placa en el nombre, placa duplicada → ambiguo), `extraerUltimaSenal` (epoch en segundos → ms, `lmsg.t` sobre `pos.t`, timestamps inválidos) y `getGpsVehiculo` (degradación a `no_disponible` con Wialon caído, y que **siga resolviendo por placa cuando las columnas de la `0057` no existen**).
 * [`-gps-ficha.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/web/src/routes/cobros/-gps-ficha.test.ts) (web): fronteras de 15 min y 2 h para el estado de la señal, relojes desfasados, y que ignición `undefined` se muestre como "Sin dato" y nunca como "Apagado".
+* [`wialon-cb121.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/server/src/services/wialon/wialon-cb121.test.ts): clasificación de fallas (timeout/red/Wialon 5/7/8/9 → severidad y reintentabilidad correctas), reintentos de lecturas idempotentes (3 intentos con backoff, sin reintento ante 7/9), escrituras que nunca reintentan y se propagan como `WIALON_RESULTADO_INCIERTO`, circuit breaker (abre a los 5 fallos consecutivos y deja de llamar a `fetch`), sanitización de payloads (redacta token/sid/eid, trunca payloads grandes) y que un hook `onIntento` roto nunca rompa la llamada real.
+* [`gps-integracion.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/server/src/routers/gps-integracion.test.ts): los 4 endpoints nuevos con roles correctos (`adminProcedure` para logs/salud/resolver, también `cobrosSupervisorProcedure` para alertas) y `FORBIDDEN` para un asesor regular.
+* [`gps-integracion-salud.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/server/src/jobs/gps-integracion-salud.test.ts): `percentil95` sobre valores desordenados, un solo valor y arreglo vacío.
+* [`-gps-format.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/web/src/routes/admin/-gps-format.test.ts) (web): `formatPorcentaje` y `formatDuracion` (umbral de 1000ms para pasar a segundos).
 
 ```bash
 # server
 cd apps/crm/apps/server
-bun test src/services/wialon/ src/routers/wialon.test.ts
-# 182 pass, 0 fail
+bun test src/services/wialon/ src/routers/wialon.test.ts src/routers/gps-integracion.test.ts src/jobs/gps-integracion-salud.test.ts
+# 312 pass, 0 fail
 
 # web
 cd apps/crm/apps/web
-bun test src/routes/cobros/
-# 40 pass, 0 fail
+bun test src/routes/cobros/ src/routes/admin/-gps-format.test.ts
+# 59 pass, 0 fail
 ```
 
 > **Build:** el monorepo usa TS project references (`composite: true`). Tras tocar

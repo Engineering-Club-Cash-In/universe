@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { logAuthDiagnostic } from "@/lib/auth-session";
 import type { bucketCapacidadRouter } from "../../../server/src/routers/bucket-capacidad";
 import type { convenioDecisionRouter } from "../../../server/src/routers/convenio-decision";
+import type { gpsIntegracionRouter } from "../../../server/src/routers/gps-integracion";
 import type {
 	AppRouter,
 	disbursementRouter,
@@ -97,7 +98,8 @@ type MergedRouter = AppRouter &
 	typeof pagaloSupervisionRouter &
 	typeof convenioDecisionRouter &
 	typeof recuperacionVehiculoRouter &
-	typeof wialonRouter;
+	typeof wialonRouter &
+	typeof gpsIntegracionRouter;
 
 export const client: RouterClient<MergedRouter> = createORPCClient(link);
 

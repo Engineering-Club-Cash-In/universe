@@ -1,4 +1,9 @@
 import {
+	clasificarFallaWialon,
+	esOperacionIdempotente,
+} from "./wialon-clasificacion";
+import { contextoGpsActual } from "./wialon-contexto";
+import {
 	type CreateLocatorLinkInput,
 	createLocatorLinkInputSchema,
 	type LocatorLinkResult,
@@ -9,6 +14,7 @@ import {
 	WialonClientError,
 	type WialonConfig,
 	type WialonFetch,
+	type WialonIntentoEvento,
 	type WialonSearchItemResponse,
 	type WialonSearchItemsResponse,
 	type WialonSensorMeta,
@@ -22,6 +28,28 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 horas de vigencia en caché
 const NEGATIVE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos para unidades sin sensores o errores transitorios
 const MAX_SENSOR_CACHE_SIZE = 1000; // Cota máxima de entradas en memoria para evitar crecimiento indefinido
+
+// ── Política de reintentos y circuit breaker (CB-121) ─────────────────────────
+// Solo operaciones de LECTURA (ver WIALON_SVC_IDEMPOTENTES) se reintentan de
+// forma transparente ante una falla clasificada como transitoria. Las
+// escrituras (crear/borrar link, futuros comandos de CB-120) nunca se
+// reintentan automáticamente: si su resultado queda incierto, se propaga tal
+// cual para que quien las llamó decida — nunca se ejecuta una acción
+// ambigua sin que alguien lo confirme.
+const MAX_REINTENTOS_LECTURA = 2; // hasta 3 intentos en total
+const BACKOFF_BASE_MS = 500;
+const BACKOFF_MAX_MS = 1500;
+
+// Circuito abierto tras N fallos reintentables consecutivos: mientras está
+// abierto, las lecturas ni siquiera llaman a Wialon (fail fast) y responden
+// de inmediato con WIALON_NO_DISPONIBLE, dejando que la UI ofrezca la
+// contingencia manual en vez de acumular más timeouts.
+const CIRCUITO_UMBRAL_FALLOS = 5;
+const CIRCUITO_ABIERTO_MS = 60 * 1000;
+
+function esperar(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // Diccionario calibrado para los dispositivos GPS de La Legión / Club Cash-In
 // Cubre valores estándar como "Encendido", "Apagado", "APAGADO (Apagado)", "Motor encendido/apagado", etc.
@@ -268,6 +296,7 @@ export function getWialonConfig(
 export class WialonClient {
 	private readonly config: WialonConfig;
 	private readonly fetchFn: WialonFetch;
+	private readonly onIntento?: (evento: WialonIntentoEvento) => void;
 	private sessionCache: WialonSession | null = null;
 	private loginPromise: Promise<string> | null = null;
 	private ignitionSensorCache = new Map<
@@ -275,9 +304,20 @@ export class WialonClient {
 		{ sensorId: string | null; expiresAt: number; lookupFailed?: boolean }
 	>();
 
-	constructor(config?: Partial<WialonConfig>, customFetch?: WialonFetch) {
+	// Circuit breaker en memoria (CB-121): cuenta fallos reintentables
+	// consecutivos de operaciones idempotentes. No distingue por svc a
+	// propósito — si Wialon está caído, lo está para todo el cliente.
+	private fallosConsecutivos = 0;
+	private circuitoAbiertoHasta: number | null = null;
+
+	constructor(
+		config?: Partial<WialonConfig>,
+		customFetch?: WialonFetch,
+		onIntento?: (evento: WialonIntentoEvento) => void,
+	) {
 		this.config = getWialonConfig(config);
 		this.fetchFn = customFetch || globalThis.fetch.bind(globalThis);
+		this.onIntento = onIntento;
 	}
 
 	/**
@@ -361,9 +401,12 @@ export class WialonClient {
 	}
 
 	/**
-	 * Envía una solicitud HTTP al endpoint base de Wialon con control de timeout
+	 * Envía una solicitud HTTP al endpoint base de Wialon con control de timeout.
+	 * Es UN SOLO intento, sin reintento — eso lo maneja `requestRaw`, que
+	 * envuelve esta función con la política de reintentos/circuito y emite
+	 * los eventos de bitácora técnica (CB-121).
 	 */
-	private async requestRaw(
+	private async requestRawUnaVez(
 		svc: string,
 		params: Record<string, unknown>,
 		sid?: string,
@@ -447,6 +490,172 @@ export class WialonClient {
 		} finally {
 			clearTimeout(timer);
 		}
+	}
+
+	/**
+	 * Estado del circuit breaker de ESTA instancia (CB-121), para el panel de
+	 * salud admin. No consulta Date.now() contra circuitoAbiertoHasta con la
+	 * lógica de expiración de circuitoSigueAbierto() a propósito: leer el
+	 * estado no debe tener el efecto secundario de "medio-abrir" el circuito.
+	 */
+	public getEstadoCircuito(): { abierto: boolean; fallosConsecutivos: number } {
+		return {
+			abierto:
+				this.circuitoAbiertoHasta !== null &&
+				Date.now() < this.circuitoAbiertoHasta,
+			fallosConsecutivos: this.fallosConsecutivos,
+		};
+	}
+
+	/** Si el circuito sigue abierto, en microsegundos; null si está cerrado o ya expiró. */
+	private circuitoSigueAbierto(): boolean {
+		if (this.circuitoAbiertoHasta === null) return false;
+		if (Date.now() >= this.circuitoAbiertoHasta) {
+			// Expiró: pasa a "half-open" — se deja pasar el próximo intento para
+			// probar si Wialon ya respondió, sin resetear el contador todavía
+			// (eso solo pasa si ese intento de prueba tiene éxito).
+			this.circuitoAbiertoHasta = null;
+			return false;
+		}
+		return true;
+	}
+
+	private registrarExitoCircuito(): void {
+		this.fallosConsecutivos = 0;
+		this.circuitoAbiertoHasta = null;
+	}
+
+	// Solo los fallos de lectura reintentables cuentan. Cualquier otro fallo
+	// (escritura, error de contrato) no dice que Wialon se recuperó, así que
+	// tampoco cierra el circuito ni reinicia el contador.
+	private registrarFalloCircuito(): void {
+		this.fallosConsecutivos += 1;
+		if (this.fallosConsecutivos >= CIRCUITO_UMBRAL_FALLOS) {
+			this.circuitoAbiertoHasta = Date.now() + CIRCUITO_ABIERTO_MS;
+		}
+	}
+
+	private emitirEvento(evento: Omit<WialonIntentoEvento, "contexto">): void {
+		if (!this.onIntento) return;
+		try {
+			this.onIntento({ ...evento, contexto: contextoGpsActual() });
+		} catch {
+			// El hook nunca debe romper una llamada real a Wialon.
+		}
+	}
+
+	/**
+	 * Envuelve `requestRawUnaVez` con: circuit breaker (fail-fast si la
+	 * integración lleva varios fallos consecutivos), reintento automático
+	 * SOLO para svc de lectura ante una falla clasificada como transitoria, y
+	 * emisión de un evento por intento para la bitácora técnica (CB-121).
+	 *
+	 * Las escrituras (svc no idempotente) nunca se reintentan acá: si fallan
+	 * por timeout/red, no hay forma de saber si Wialon sí llegó a aplicar el
+	 * cambio, así que se marca "incierto" y se propaga tal cual — reintentar
+	 * solo sería repetir una acción que quizás ya ocurrió.
+	 */
+	private async requestRaw(
+		svc: string,
+		params: Record<string, unknown>,
+		sid?: string,
+	): Promise<unknown> {
+		const idempotente = esOperacionIdempotente(svc);
+
+		// Las escrituras también: con Wialon caído terminarían en timeout y
+		// quedarían como resultado incierto. Fallar antes deja claro que no se
+		// aplicaron y no obliga a verificarlas a mano.
+		if (this.circuitoSigueAbierto()) {
+			this.emitirEvento({
+				intento: 1,
+				operacion: svc,
+				resultado: "error",
+				errorCode: "WIALON_NO_DISPONIBLE",
+				severidad: "warning",
+				duracionMs: 0,
+			});
+			throw new WialonClientError(
+				"La integración con Wialon está temporalmente deshabilitada por fallos repetidos; use la contingencia manual.",
+				"WIALON_NO_DISPONIBLE",
+			);
+		}
+
+		const maxIntentos = idempotente ? MAX_REINTENTOS_LECTURA + 1 : 1;
+		let ultimoError: unknown;
+
+		for (let intento = 1; intento <= maxIntentos; intento++) {
+			const inicio = Date.now();
+			try {
+				const data = await this.requestRawUnaVez(svc, params, sid);
+				const duracionMs = Date.now() - inicio;
+				this.registrarExitoCircuito();
+				this.emitirEvento({
+					intento,
+					operacion: svc,
+					resultado: intento > 1 ? "reintentado" : "ok",
+					severidad: "info",
+					duracionMs,
+					requestResumen: params,
+					responseResumen: data,
+				});
+				return data;
+			} catch (error) {
+				const duracionMs = Date.now() - inicio;
+				ultimoError = error;
+				const { severidad, reintentable } = clasificarFallaWialon(error, svc);
+				const codigo =
+					error instanceof WialonClientError ? error.code : undefined;
+				const wialonErrorCode =
+					error instanceof WialonClientError
+						? error.wialonErrorCode
+						: undefined;
+				const httpStatus =
+					error instanceof WialonClientError ? error.status : undefined;
+
+				const quedanIntentos =
+					idempotente && reintentable && intento < maxIntentos;
+				if (idempotente && reintentable) this.registrarFalloCircuito();
+
+				this.emitirEvento({
+					intento,
+					operacion: svc,
+					resultado: quedanIntentos ? "reintentado" : "error",
+					errorCode: codigo,
+					wialonErrorCode,
+					httpStatus,
+					severidad,
+					duracionMs,
+					requestResumen: params,
+				});
+
+				if (!quedanIntentos) break;
+
+				const backoff = Math.min(
+					BACKOFF_BASE_MS * 2 ** (intento - 1),
+					BACKOFF_MAX_MS,
+				);
+				await esperar(backoff + Math.random() * 200);
+			}
+		}
+
+		// Escritura (no idempotente) que falló por una causa transitoria: no
+		// sabemos si Wialon sí llegó a aplicar el cambio antes de que la
+		// conexión se cortara. Se marca "incierto" en vez de "error" para que
+		// quien llamó NUNCA la reintente sola — que un humano verifique antes
+		// de repetir la acción (CB-121: no ejecutar acciones ambiguas).
+		if (!idempotente && ultimoError instanceof WialonClientError) {
+			const { reintentable } = clasificarFallaWialon(ultimoError, svc);
+			if (reintentable) {
+				throw new WialonClientError(
+					`No se pudo confirmar si "${svc}" se aplicó en Wialon (${ultimoError.message}). Verifique manualmente antes de repetir la acción.`,
+					"WIALON_RESULTADO_INCIERTO",
+					ultimoError.wialonErrorCode,
+					ultimoError.status,
+				);
+			}
+		}
+
+		throw ultimoError;
 	}
 
 	/**
@@ -1029,9 +1238,34 @@ export class WialonClient {
  */
 let defaultClientInstance: WialonClient | null = null;
 
+// Hook de bitácora técnica (CB-121), inyectado por `configurarBitacoraWialon`
+// desde el router en vez de importarse acá arriba: wialon-client.ts no debe
+// depender de `db` (Drizzle) para que se pueda instanciar en tests con solo
+// un `customFetch` fake, sin levantar ninguna conexión a la base de datos.
+let hookBitacoraWialon: ((evento: WialonIntentoEvento) => void) | undefined;
+
+export function configurarBitacoraWialon(
+	hook: (evento: WialonIntentoEvento) => void,
+): void {
+	hookBitacoraWialon = hook;
+	if (defaultClientInstance) {
+		// El cliente por defecto ya se había creado (p. ej. otro módulo llamó
+		// getWialonClient() antes de que el router configurara el hook): se
+		// re-crea para que quede instrumentado, preservando la sesión en
+		// caché no tiene sentido acá porque WialonClient no expone forma de
+		// migrarla, así que simplemente se reemplaza — el próximo login es
+		// transparente para quien llama.
+		defaultClientInstance = new WialonClient(undefined, undefined, hook);
+	}
+}
+
 export function getWialonClient(): WialonClient {
 	if (!defaultClientInstance) {
-		defaultClientInstance = new WialonClient();
+		defaultClientInstance = new WialonClient(
+			undefined,
+			undefined,
+			hookBitacoraWialon,
+		);
 	}
 	return defaultClientInstance;
 }

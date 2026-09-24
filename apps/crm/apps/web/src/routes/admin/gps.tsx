@@ -2,10 +2,12 @@ import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
+	CircleCheck,
 	ClipboardList,
 	Loader2,
 	MapPin,
 	RefreshCw,
+	ShieldAlert,
 	TriangleAlert,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -20,15 +22,30 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { orpc } from "@/utils/orpc";
 import {
 	ESTADO_CONEXION_CONFIG,
+	formatDuracion,
 	formatFechaHora,
 	formatLatency,
+	formatPorcentaje,
+	RESULTADO_INTENTO_CONFIG,
 	resolveEstado,
+	SEVERIDAD_CONFIG,
+	TIPO_ALERTA_LABEL,
+	type TipoAlertaGps,
 } from "./-gps-format";
 
 export const Route = createFileRoute("/admin/gps")({
@@ -139,6 +156,90 @@ const BITACORA_COLUMNS: ColumnDef<BitacoraFila>[] = [
 		header: "Motivo",
 	},
 ];
+
+// ── CB-121: bitácora técnica de la integración ────────────────────────────────
+
+interface IntegracionLogFila {
+	id: string;
+	correlationId: string;
+	operacion: string;
+	origen: string;
+	resultado: "ok" | "error" | "reintentado" | "incierto";
+	errorCode: string | null;
+	severidad: "info" | "warning" | "critical";
+	duracionMs: number;
+	numeroCreditoSifco: string | null;
+	createdAt: Date;
+}
+
+const INTEGRACION_LOGS_COLUMNS: ColumnDef<IntegracionLogFila>[] = [
+	{
+		accessorKey: "createdAt",
+		header: "Fecha",
+		cell: ({ row }) => formatFechaHora(row.original.createdAt),
+	},
+	{
+		accessorKey: "operacion",
+		header: "Operación",
+		cell: ({ row }) => (
+			<div>
+				<div className="font-mono text-xs">{row.original.operacion}</div>
+				<div className="text-muted-foreground text-xs">
+					{row.original.origen}
+				</div>
+			</div>
+		),
+	},
+	{
+		accessorKey: "resultado",
+		header: "Resultado",
+		cell: ({ row }) => {
+			const config = RESULTADO_INTENTO_CONFIG[row.original.resultado];
+			return <Badge className={config.badgeClass}>{config.label}</Badge>;
+		},
+	},
+	{
+		accessorKey: "severidad",
+		header: "Severidad",
+		cell: ({ row }) => {
+			const config = SEVERIDAD_CONFIG[row.original.severidad];
+			return <Badge className={config.badgeClass}>{config.label}</Badge>;
+		},
+	},
+	{
+		accessorKey: "errorCode",
+		header: "Código",
+		cell: ({ row }) => (
+			<span className="font-mono text-xs">{row.original.errorCode ?? "—"}</span>
+		),
+	},
+	{
+		accessorKey: "duracionMs",
+		header: "Duración",
+		cell: ({ row }) => formatDuracion(row.original.duracionMs),
+	},
+	{
+		accessorKey: "numeroCreditoSifco",
+		header: "Cuenta (SIFCO)",
+		cell: ({ row }) => {
+			const sifco = row.original.numeroCreditoSifco;
+			if (!sifco) return "—";
+			return (
+				<Link
+					className="font-mono text-blue-600 hover:underline"
+					params={{ id: sifco }}
+					search={{ tipo: "contrato" }}
+					to="/cobros/$id"
+				>
+					{sifco}
+				</Link>
+			);
+		},
+	},
+];
+
+const UUID_RE =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function RouteComponent() {
 	const {
@@ -265,6 +366,70 @@ function RouteComponent() {
 			})) ?? [],
 		[bitacora.data],
 	);
+
+	// ── CB-121: bitácora técnica, salud y alertas ─────────────────────────────
+	const [logsPage, setLogsPage] = useState(1);
+	const [logsPageSize, setLogsPageSize] = useState(25);
+	const [logsReferencia, setLogsReferencia] = useState("");
+	const referenciaBuscada = logsReferencia.trim();
+	// La referencia que ve el asesor es el correlationId completo; el backend
+	// exige un UUID, así que un texto a medias no se envía.
+	const referenciaValida = UUID_RE.test(referenciaBuscada);
+
+	const salud = useQuery({
+		...orpc.getGpsIntegracionSalud.queryOptions(),
+		enabled: !!session && isAdmin,
+		refetchInterval: 60_000,
+		refetchIntervalInBackground: false,
+	});
+
+	const alertas = useQuery({
+		...orpc.getGpsAlertas.queryOptions(),
+		enabled: !!session && isAdmin,
+		refetchInterval: 60_000,
+		refetchIntervalInBackground: false,
+	});
+
+	const integracionLogs = useQuery({
+		...orpc.getGpsIntegracionLogs.queryOptions({
+			input: {
+				page: logsPage,
+				perPage: logsPageSize,
+				...(referenciaValida ? { correlationId: referenciaBuscada } : {}),
+			},
+		}),
+		enabled: !!session && isAdmin,
+		placeholderData: keepPreviousData,
+	});
+
+	const integracionLogsRows: IntegracionLogFila[] = useMemo(
+		() =>
+			integracionLogs.data?.items.map((i) => ({
+				...i,
+				createdAt: new Date(i.createdAt),
+			})) ?? [],
+		[integracionLogs.data],
+	);
+
+	const [alertaAResolver, setAlertaAResolver] = useState<{
+		id: string;
+		tipo: TipoAlertaGps;
+	} | null>(null);
+	const [notaResolucion, setNotaResolucion] = useState("");
+
+	const resolverAlerta = useMutation({
+		...orpc.resolverGpsAlerta.mutationOptions(),
+		onSuccess: () => {
+			toast.success("Alerta resuelta");
+			setAlertaAResolver(null);
+			setNotaResolucion("");
+			alertas.refetch();
+			salud.refetch();
+		},
+		onError: (error) => {
+			toast.error(error.message || "No se pudo resolver la alerta");
+		},
+	});
 
 	if (isPending || userProfile.isPending) {
 		return <div className="container mx-auto p-6">Cargando...</div>;
@@ -549,6 +714,271 @@ function RouteComponent() {
 					)}
 				</CardContent>
 			</Card>
+
+			<div className="border-t pt-2">
+				<h2 className="flex items-center gap-2 font-semibold text-2xl">
+					<ShieldAlert className="h-6 w-6" />
+					Fallas y salud (CB-121)
+				</h2>
+				<p className="text-muted-foreground text-sm">
+					Trazabilidad técnica de cada llamada a Wialon (solicitudes, errores,
+					reintentos y tiempos de respuesta) y alertas cuando la integración se
+					degrada.
+				</p>
+			</div>
+
+			<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+				<Card>
+					<CardHeader className="pb-2">
+						<CardDescription>Tasa de error (última hora)</CardDescription>
+					</CardHeader>
+					<CardContent className="font-semibold text-2xl">
+						{formatPorcentaje(salud.data?.ventana.tasaError ?? null)}
+					</CardContent>
+				</Card>
+				<Card>
+					<CardHeader className="pb-2">
+						<CardDescription>Latencia p95 (última hora)</CardDescription>
+					</CardHeader>
+					<CardContent className="font-semibold text-2xl">
+						{formatDuracion(salud.data?.ventana.p95Ms ?? null)}
+					</CardContent>
+				</Card>
+				<Card
+					className={
+						salud.data?.circuito.abierto
+							? "border-red-200 dark:border-red-900/50"
+							: undefined
+					}
+				>
+					<CardHeader className="pb-2">
+						<CardDescription>Circuito (reintentos)</CardDescription>
+					</CardHeader>
+					<CardContent className="flex items-center gap-2 font-semibold text-lg">
+						{salud.isPending ? (
+							<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+						) : !salud.data ? (
+							<span className="text-muted-foreground">Sin datos</span>
+						) : salud.data.circuito.abierto ? (
+							<>
+								<TriangleAlert className="h-4 w-4 text-red-600 dark:text-red-400" />
+								Abierto (contingencia)
+							</>
+						) : (
+							<>
+								<CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+								Cerrado
+							</>
+						)}
+					</CardContent>
+				</Card>
+				<Card
+					className={
+						(salud.data?.alertasAbiertas ?? 0) > 0
+							? "border-amber-200 dark:border-amber-900/50"
+							: undefined
+					}
+				>
+					<CardHeader className="pb-2">
+						<CardDescription>Alertas abiertas</CardDescription>
+					</CardHeader>
+					<CardContent className="font-semibold text-2xl">
+						{salud.data?.alertasAbiertas ?? "—"}
+					</CardContent>
+				</Card>
+			</div>
+
+			<Card>
+				<CardHeader>
+					<CardTitle className="flex items-center gap-2">
+						<TriangleAlert className="h-5 w-5" />
+						Alertas de la integración
+					</CardTitle>
+					<CardDescription>
+						Se abren solas cuando la tasa de error, la latencia o los fallos
+						consecutivos superan el SLA, o ante un error crítico (credenciales,
+						acceso denegado). Las de umbral se cierran solas al normalizarse;
+						las críticas requieren resolución manual.
+					</CardDescription>
+				</CardHeader>
+				<CardContent className="space-y-3">
+					{alertas.isPending ? (
+						<div className="flex items-center gap-2 text-muted-foreground text-sm">
+							<Loader2 className="h-4 w-4 animate-spin" />
+							Cargando alertas...
+						</div>
+					) : alertas.data?.items.length === 0 ? (
+						<div className="flex items-center gap-2 text-muted-foreground text-sm">
+							<CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+							Sin alertas registradas.
+						</div>
+					) : (
+						alertas.data?.items.map((a) => (
+							<div
+								className={`flex items-start justify-between gap-4 rounded-md border p-3 ${
+									a.estado === "abierta"
+										? "border-amber-200 dark:border-amber-900/50"
+										: "opacity-60"
+								}`}
+								key={a.id}
+							>
+								<div className="space-y-1">
+									<div className="flex items-center gap-2">
+										<Badge
+											variant={a.estado === "abierta" ? "default" : "outline"}
+										>
+											{a.estado === "abierta" ? "Abierta" : "Resuelta"}
+										</Badge>
+										<span className="font-medium text-sm">
+											{TIPO_ALERTA_LABEL[a.tipo]}
+										</span>
+										<span className="text-muted-foreground text-xs">
+											× {a.ocurrencias}
+										</span>
+									</div>
+									<p className="text-sm">{a.detalle}</p>
+									<p className="text-muted-foreground text-xs">
+										Desde {formatFechaHora(new Date(a.primeraVez))} · última vez{" "}
+										{formatFechaHora(new Date(a.ultimaVez))}
+										{a.notaResolucion ? ` · Nota: ${a.notaResolucion}` : ""}
+									</p>
+								</div>
+								{a.estado === "abierta" && (
+									<Button
+										onClick={() =>
+											setAlertaAResolver({ id: a.id, tipo: a.tipo })
+										}
+										size="sm"
+										variant="outline"
+									>
+										Resolver
+									</Button>
+								)}
+							</div>
+						))
+					)}
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle>Bitácora técnica de la integración</CardTitle>
+					<CardDescription>
+						Cada intento HTTP a Wialon (login, catálogo, telemetría, links de
+						rastreo), con su resultado, duración y si se reintentó. Para ver
+						quién consultó qué unidad y por qué, use la bitácora de consultas
+						arriba.
+					</CardDescription>
+				</CardHeader>
+				<CardContent className="space-y-4">
+					<div className="space-y-1">
+						<Input
+							className="max-w-sm font-mono"
+							onChange={(e) => {
+								setLogsReferencia(e.target.value);
+								setLogsPage(1);
+							}}
+							placeholder="Buscar por referencia de la consulta..."
+							value={logsReferencia}
+						/>
+						{referenciaBuscada && !referenciaValida && (
+							<p className="text-muted-foreground text-xs">
+								Pegue la referencia completa que ve el asesor en la ficha.
+							</p>
+						)}
+					</div>
+					{integracionLogs.isError ? (
+						<div className="flex items-center justify-between gap-4 rounded-md border border-red-200 p-4 dark:border-red-900/50">
+							<div className="flex items-center gap-2 text-red-600 text-sm dark:text-red-400">
+								<TriangleAlert className="h-4 w-4 shrink-0" />
+								<span>
+									No se pudo cargar la bitácora técnica:{" "}
+									{integracionLogs.error?.message || "error desconocido"}
+								</span>
+							</div>
+							<Button
+								onClick={() => integracionLogs.refetch()}
+								size="sm"
+								variant="outline"
+							>
+								Reintentar
+							</Button>
+						</div>
+					) : (
+						<DataTable
+							columns={INTEGRACION_LOGS_COLUMNS}
+							data={integracionLogsRows}
+							hideSearch
+							isLoading={integracionLogs.isPending}
+							serverPagination={{
+								onPageChange: setLogsPage,
+								onPageSizeChange: (size) => {
+									setLogsPageSize(size);
+									setLogsPage(1);
+								},
+								page: logsPage,
+								pageSize: logsPageSize,
+								totalItems: integracionLogs.data?.total ?? 0,
+								totalPages: Math.max(
+									1,
+									Math.ceil((integracionLogs.data?.total ?? 0) / logsPageSize),
+								),
+							}}
+						/>
+					)}
+				</CardContent>
+			</Card>
+
+			<Dialog
+				onOpenChange={(open) => {
+					if (!open) {
+						setAlertaAResolver(null);
+						setNotaResolucion("");
+					}
+				}}
+				open={alertaAResolver !== null}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>Resolver alerta</DialogTitle>
+						<DialogDescription>
+							{alertaAResolver &&
+								`${TIPO_ALERTA_LABEL[alertaAResolver.tipo]}: describa qué se hizo para resolverla.`}
+						</DialogDescription>
+					</DialogHeader>
+					<Textarea
+						onChange={(e) => setNotaResolucion(e.target.value)}
+						placeholder="Ej: se renovó el token de Wialon y se confirmó conexión."
+						value={notaResolucion}
+					/>
+					<DialogFooter>
+						<Button
+							disabled={resolverAlerta.isPending}
+							onClick={() => setAlertaAResolver(null)}
+							variant="outline"
+						>
+							Cancelar
+						</Button>
+						<Button
+							disabled={
+								resolverAlerta.isPending || notaResolucion.trim().length < 5
+							}
+							onClick={() => {
+								if (!alertaAResolver) return;
+								resolverAlerta.mutate({
+									alertaId: alertaAResolver.id,
+									nota: notaResolucion.trim(),
+								});
+							}}
+						>
+							{resolverAlerta.isPending && (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							)}
+							Confirmar
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

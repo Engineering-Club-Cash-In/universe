@@ -173,6 +173,12 @@ const REDIRECT_CONFIG: Record<
 			to: "/accounting/pay-investors",
 		}),
 	},
+	admin_gps: {
+		label: "Ver salud del GPS",
+		getRoute: () => ({
+			to: "/admin/gps",
+		}),
+	},
 	cobros_detail: {
 		label: "Ver caso de cobro",
 		getRoute: (id) => ({
@@ -196,6 +202,7 @@ const REDIRECT_PAGE_FILTER_LABEL: Record<string, string> = {
 	analysis_90_details: "Análisis 90%",
 	pay_investors: "Pago inversionistas",
 	cobros_detail: "Casos de cobro",
+	admin_gps: "Integración GPS",
 };
 
 // COBROS-02: cada subtipo de cobros (columna cobros_tipo) pinta la tarjeta de
@@ -317,6 +324,7 @@ const REDIRECT_ACCENT: Record<string, string> = {
 	analysis_90_details: "border-l-sky-400",
 	pay_investors: "border-l-green-500",
 	cobros_detail: "border-l-rose-400",
+	admin_gps: "border-l-amber-500",
 };
 
 const PAGE_SIZE = 20;
@@ -965,10 +973,11 @@ function NotificationCard({
 		const config = REDIRECT_CONFIG[notification.redirectPage];
 		if (!config) return null;
 
-		// Algunas notificaciones (como pay_investors) no necesitan relatedEntityId
+		// Algunas notificaciones (pay_investors, admin_gps) no necesitan relatedEntityId
 		if (
 			!notification.relatedEntityId &&
-			notification.redirectPage !== "pay_investors"
+			notification.redirectPage !== "pay_investors" &&
+			notification.redirectPage !== "admin_gps"
 		)
 			return null;
 

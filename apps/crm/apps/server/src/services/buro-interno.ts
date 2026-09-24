@@ -1048,7 +1048,8 @@ async function cargarAutorizaciones(
 
 /**
  * Foto de todo lo que entra en una evaluación: el catálogo activo, las reglas
- * de coincidencia y la gente de la solicitud (lead, codeudores y referencias).
+ * de coincidencia y la gente de la solicitud (lead, sus datos de RENAP,
+ * codeudores y referencias).
  *
  * El gate de aprobación compara esta misma expresión dentro del UPDATE que
  * aprueba: si algo de eso cambió entre la revisión y la escritura —cobros
@@ -1064,12 +1065,24 @@ export function huellaEvaluacionSql(
 		sql`(SELECT count(*)::text || ':' || coalesce(max(updated_at)::text, '')
 			FROM ${sql.raw(tabla)}${filtro ? sql` WHERE ${filtro}` : sql``})`;
 
+	// `renapinfo` no tiene timestamps y el titular se arma con esos nombres
+	// cuando ya está sincronizado, así que se versiona con un hash de ellos
+	const fotoRenap = sql`(SELECT coalesce(md5(string_agg(
+			concat_ws('|', r.first_name, r.second_name, r.third_name, r.first_last_name, r.second_last_name),
+			'~' ORDER BY r.dpi)), '')
+		FROM public.renapinfo r
+		WHERE regexp_replace(r.dpi, '\s', '', 'g') = (
+			SELECT regexp_replace(coalesce(l.dpi, ''), '\s', '', 'g')
+			FROM public.leads l WHERE l.id = ${leadIdExpr}
+		))`;
+
 	return sql`concat_ws('|',
 		${foto("public.buro_interno_personas", sql`activo`)},
 		${foto("public.buro_interno_reglas")},
 		${foto("public.co_debtors", sql`opportunity_id = ${opportunityIdExpr}`)},
 		${foto("public.referencias_lead", sql`lead_id = ${leadIdExpr}`)},
-		${foto("public.leads", sql`id = ${leadIdExpr}`)}
+		${foto("public.leads", sql`id = ${leadIdExpr}`)},
+		${fotoRenap}
 	)`;
 }
 

@@ -604,8 +604,9 @@ const app = new Elysia()
    *
    * Devuelve el PDF **firmado** de un documento ya completado.
    *
-   * El CRM lo usa para que ventas y jurídico puedan bajarse el contrato de
-   * verdad, no el borrador que se generó. Va por acá y no directo a WeeTrust
+   * El CRM lo usa para dos cosas: que ventas y jurídico se bajen el contrato de
+   * verdad, y reemplazar en la ficha del inversionista el borrador que se
+   * generó, que no tiene firmas. Va por acá y no directo a WeeTrust
    * porque las credenciales las tiene este servicio.
    *
    * Sólo con el documento COMPLETED: antes de eso el archivo que WeeTrust

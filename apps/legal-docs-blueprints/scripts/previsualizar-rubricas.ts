@@ -31,6 +31,10 @@ import { ContractType, SignerRole, type ContractSigner } from "../types/contract
  *
  * Tres personas es el caso que más aprieta: titular, un codeudor y el
  * representante legal. Si las rúbricas caben con tres, caben con menos.
+ *
+ * Con `--sin-cofirmante` quedan dos, que es lo que llevan los contratos de
+ * inversión: el inversionista y el representante legal. Mandarle un codeudor a
+ * un contrato que no tiene esa línea corta antes de dibujar nada.
  */
 const FIRMANTES_DE_PRUEBA: ContractSigner[] = [
 	{
@@ -51,11 +55,18 @@ const FIRMANTES_DE_PRUEBA: ContractSigner[] = [
 ];
 
 async function main() {
-	const [tipo, entrada, salida] = process.argv.slice(2);
+	const argumentos = process.argv.slice(2);
+	const sinCofirmante = argumentos.includes("--sin-cofirmante");
+	const [tipo, entrada, salida] = argumentos.filter(
+		(a) => !a.startsWith("--"),
+	);
+	const firmantes = sinCofirmante
+		? FIRMANTES_DE_PRUEBA.filter((f) => f.role !== SignerRole.COFIRMANTE)
+		: FIRMANTES_DE_PRUEBA;
 
 	if (!tipo || !entrada) {
 		console.error(
-			"Uso: bun scripts/previsualizar-rubricas.ts <tipo> <entrada.pdf> [salida.pdf]",
+			"Uso: bun scripts/previsualizar-rubricas.ts <tipo> <entrada.pdf> [salida.pdf] [--sin-cofirmante]",
 		);
 		console.error(`\nTipos: ${Object.values(ContractType).join(", ")}`);
 		process.exit(1);
@@ -72,10 +83,10 @@ async function main() {
 	const posiciones = await WeeTrustService.locateSignatureWidgets(
 		pdfBuffer,
 		tipo as ContractType,
-		FIRMANTES_DE_PRUEBA,
+		firmantes,
 	);
 
-	const porEmail = new Map(FIRMANTES_DE_PRUEBA.map((f) => [f.email, f]));
+	const porEmail = new Map(firmantes.map((f) => [f.email, f]));
 
 	const doc = await PDFDocument.load(pdfBuffer);
 	const fuente = await doc.embedFont(StandardFonts.Helvetica);

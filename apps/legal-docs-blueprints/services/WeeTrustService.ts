@@ -14,6 +14,7 @@ import * as path from "node:path";
 import FormData from "form-data";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import {
+	CONTRATOS_DE_INVERSION,
 	ContractType,
 	SignerRole,
 	type ContractSigner,
@@ -1109,14 +1110,37 @@ export class WeeTrustService {
 				esperados.map((s) => s.role).join(", "),
 		);
 
-		const lineas = await WeeTrustService.readSignatureLines(pdfBuffer, pattern);
+		const lineas = await WeeTrustService.readSignatureLines(
+			pdfBuffer,
+			pattern,
+			config.anclasExactas,
+		);
 
-		if (lineas.length !== esperados.length) {
+		// Un documento puede traer menos repeticiones de las declaradas y estar
+		// bien: los anexos de inversiones son dos, pero a veces se manda uno solo
+		// unificado y entonces cada persona firma una vez en vez de dos. Mientras
+		// lo que llegue sean repeticiones COMPLETAS de la secuencia, se firman
+		// las que haya; media repetición sí es un layout que no entendemos.
+		const porRepeticion = esperados.length / (config.repeticiones ?? 1);
+		const repeticionesEnElPdf =
+			porRepeticion > 0 ? lineas.length / porRepeticion : 0;
+		const esRepeticionCompleta =
+			Number.isInteger(repeticionesEnElPdf) && repeticionesEnElPdf >= 1;
+
+		if (lineas.length > esperados.length || !esRepeticionCompleta) {
 			throw new SignatureLayoutError(
 				`El contrato "${contractType}" tiene ${lineas.length} línea(s) de firma en el PDF ` +
 					`pero se esperaban ${esperados.length} (${esperados.map((s) => s.role).join(", ")}). ` +
 					`Revisar el layout declarado en signaturePatterns.ts con scripts/inventario-firmas.ts.`,
 			);
+		}
+
+		if (lineas.length < esperados.length) {
+			console.log(
+				`[WeeTrust] ${contractType}: el PDF trae ${repeticionesEnElPdf} de las ` +
+					`${config.repeticiones} repeticiones declaradas; se firman las que hay.`,
+			);
+			esperados.length = lineas.length;
 		}
 
 		// Donde el template imprime el DPI debajo de la línea, lo usamos para
@@ -1249,7 +1273,14 @@ export class WeeTrustService {
 						enLaFilaMasLlena,
 				),
 			);
-			const alto = Math.round(ancho * PROPORCION);
+			// La franja manda sobre la proporción: el contrato de participación
+			// deja muy poco aire, y una rúbrica más alta que su franja se sale
+			// hacia el texto o hacia el borde de la hoja. En los contratos de
+			// ventas la franja es más alta que esto, así que no los cambia.
+			const alto = Math.min(
+				Math.round(ancho * PROPORCION),
+				Math.floor(franja.arriba - franja.abajo),
+			);
 			// Las filas van centradas en el alto de la franja. Si son tantas que no
 			// entran, se cuelgan del borde de arriba de la franja y crecen hacia el
 			// borde de la hoja, porque arriba está el texto del contrato: sin tope
@@ -1402,6 +1433,7 @@ export class WeeTrustService {
 		const lineas = await WeeTrustService.readSignatureLines(
 			pdfBuffer,
 			config.pattern,
+			config.anclasExactas,
 		);
 
 		if (lineas.length === 0) {
@@ -1464,6 +1496,7 @@ export class WeeTrustService {
 	static async readSignatureLines(
 		pdfBuffer: Buffer,
 		pattern: string,
+		anclasExactas?: string[],
 	): Promise<
 		Array<{
 			pageNum: number;
@@ -1496,9 +1529,17 @@ export class WeeTrustService {
 		// inversiones dice "Firma del Inversionista"). Esos se reconocen por el
 		// texto, como antes: exigirles guiones bajos los dejaba sin ninguna firma.
 		const soloEtiqueta = !pattern.includes("_");
+		// Anclas de texto exacto, para los bloques de firma que no traen línea
+		// dibujada (el espacio queda en blanco y lo único que lo marca es el
+		// nombre impreso debajo, o una "f)" suelta porque la línea es un borde de
+		// tabla). El calce es exacto a propósito: "EL INVERSIONISTA" aparece
+		// decenas de veces en el cuerpo del contrato y un "contiene" habría puesto
+		// un widget de firma en cada párrafo.
+		const anclas = new Set((anclasExactas ?? []).map((a) => a.trim()));
 		const esLineaDeFirma = (texto: string): boolean =>
 			reLineaDeFirma.test(texto.trim()) ||
-			(soloEtiqueta && texto.includes(pattern.trim()));
+			(soloEtiqueta && texto.includes(pattern.trim())) ||
+			anclas.has(texto.trim());
 
 		const encontradas: Array<{
 			pageNum: number;
@@ -1599,13 +1640,20 @@ function identificacionDe(
 	role: SignerRole,
 	contractType: ContractType,
 ): { identification?: IdentificationMode } {
-	if (role === SignerRole.REP_LEGAL) return {};
+	if (role === SignerRole.REP_LEGAL || role === SignerRole.REP_LEGAL_RDBE) {
+		return {};
+	}
+
+	// Biometría facial además del documento: en el reconocimiento de deuda
+	// porque es el título que se ejecuta, y en TODOS los de inversión porque el
+	// inversionista entrega dinero y la relación se arma por correo, sin nadie
+	// de la empresa enfrente.
+	const conSelfie =
+		contractType === ContractType.RECONOCIMIENTO_DEUDA ||
+		CONTRATOS_DE_INVERSION.has(contractType);
 
 	return {
-		identification:
-			contractType === ContractType.RECONOCIMIENTO_DEUDA
-				? "face"
-				: WEETRUST_DEFAULT_IDENTIFICATION,
+		identification: conSelfie ? "face" : WEETRUST_DEFAULT_IDENTIFICATION,
 	};
 }
 

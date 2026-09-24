@@ -1,7 +1,8 @@
 # 9 · Integración GPS / Wialon (La Legión)
 
-**Estado:** 🟢 Implementado en CRM Server · CB-117 (panel admin `/admin/gps`), CB-118 (GPS en Ficha 360) y CB-121 (trazabilidad y manejo de fallas) implementados · pendiente alertas/webhooks (CB-119) y corte remoto (CB-120)  
-**⚠️ Migraciones sin aplicar:** `0057_cb118_wialon_unit_link.sql` y `0058_cb121_gps_integracion_logs.sql` están commiteadas pero **no ejecutadas** en ningún ambiente. Mientras la `0057` no se aplique, el vínculo vehículo↔unidad no persiste: la ficha lo deduce por placa en cada consulta y el botón de vincular falla (ver D-10). Mientras la `0058` no se aplique, no hay bitácora técnica ni alertas (CB-121): el escritor falla en silencio (`GPS_INTEGRACION_LOG_FALLIDO`) sin afectar las consultas.  
+**Estado:** 🟢 Implementado en CRM Server · CB-117 (panel admin `/admin/gps`), CB-118 (GPS en Ficha 360), CB-121 (trazabilidad y manejo de fallas) y CB-119 (alertas de eventos, ver D-14) implementados · pendiente corte remoto (CB-120)  
+**⚠️ Migraciones sin aplicar:** `0057_cb118_wialon_unit_link.sql`, `0058_cb121_gps_integracion_logs.sql` y `0059_cb119_gps_eventos.sql` están commiteadas pero **no ejecutadas** en ningún ambiente (solo se aplicaron en local, para desarrollo). Mientras la `0057` no se aplique, el vínculo vehículo↔unidad no persiste: la ficha lo deduce por placa en cada consulta y el botón de vincular falla (ver D-10). Mientras la `0058` no se aplique, no hay bitácora técnica ni alertas (CB-121): el escritor falla en silencio (`GPS_INTEGRACION_LOG_FALLIDO`) sin afectar las consultas. Mientras la `0059` no se aplique, el job de CB-119 no puede correr (`gps_eventos`/`gps_unidad_estado` no existen).  
+**⚠️ Job apagado:** `JOBS_PROGRAMADOS.eventosGps` está en `false` en `index.ts` — CB-119 está implementado pero no corre en ningún ambiente hasta que alguien lo prenda a mano (y aplique la `0059`).  
 **Apps que toca:** `apps/crm` (server + web) · Wialon Remote API (`gps.lalegion.gt`)  
 
 ---
@@ -136,6 +137,17 @@ Su propósito principal dentro del flujo de [Recuperación de vehículo (B4)](./
   4. Tras confirmar que la integración responde de nuevo (`testWialonConnection` en el panel), el admin resuelve la alerta manualmente con una nota (`resolverGpsAlerta`) — las de umbral no necesitan este paso, se cierran solas.
   5. Si una escritura (link de Locator, vínculo de unidad) quedó en estado incierto, se verifica manualmente en Wialon/la ficha antes de repetir la acción — nunca se reintenta automáticamente.
 
+### D-14 · Alertas de eventos GPS por polling, acotadas a B4 (CB-119)
+* **Contexto:** el ticket ("Como Asesor B4 y Supervisor, quiero recibir alertas de eventos GPS relevantes para priorizar casos de recuperación") pide pérdida de señal, movimiento, geocerca y batería baja, con la Definición de Listo explícita de "definir eventos realmente disponibles en el proveedor y reglas operativas para evitar alertas masivas".
+* **Decisión — polling, no webhook:** un spike de solo lectura confirmó que Wialon SÍ soporta notificaciones con acción `push_messages` (webhook), pero eso exige que La Legión configure notificaciones en su portal apuntando a una URL pública del CRM, con un secreto compartido — coordinación externa y una superficie nueva (endpoint público autenticado por query string). Se optó por **polling**: un job en `jobs/gps-eventos-poll.ts` (cada 5 min) trae telemetría de las unidades con caso B4 y compara contra el último estado visto. Cero dependencia de que el proveedor configure nada; el costo es latencia de hasta 5 min y no capturar eventos más cortos que el intervalo (aceptable para el caso de uso: recuperación de vehículo, no rastreo en tiempo real).
+* **Decisión — 3 tipos de evento, no 4:** **movimiento se descartó**, a diferencia de los otros tres no tiene un momento único de transición ("empezó a moverse") — un vehículo manejando genera la condición en CADA corrida mientras esté en movimiento, y aunque el dedup de notificación evita el spam de avisos, igual llenaría `gps_eventos` de filas repetidas sin aportar nada que "ignición" (el arranque del motor) no cubra ya para priorizar recuperación. Quedan: `desconexion_energia` (voltaje externo < 3V, umbral tomado de la notificación "Desconexión de fuente" que ya existía configurada en el portal de La Legión), `ignicion` (transición apagado→encendido), `sin_reportar` (última señal ≥ 2h, mismo corte que D-11 usa en la Ficha), `salida_geocerca` (ver más abajo).
+* **Decisión — geocerca por punto-en-polígono local, no notificación de Wialon:** el spike encontró una geocerca real ya configurada en el recurso de La Legión ("Perimetro cash", zona id 1, polígono de Guatemala) además de geocercas puntuales por cliente/dirección (fuera de alcance). En vez de depender de que Wialon dispare el evento, el job trae el polígono (`resource/get_zone_data`, cacheado en memoria con el TTL de sesión — la zona casi no cambia) y evalúa cada unidad con ray-casting (`services/wialon/geo.ts`, sin librería nueva, mismo criterio "cero dependencias de mapas" de D-11). Dispara solo en la transición dentro→fuera; si la corrida no pudo leer la geocerca (falla de red), se trata como "no evaluar", nunca como "está afuera" — evita falsos positivos por un fallo transitorio de la API.
+* **Decisión — universo acotado a B4 real, vía cartera-back:** el ticket pide "Asesor B4 y Supervisor" explícitamente, no "cualquier caso activo". B4 (mora exacta de 4 cuotas) es un cálculo del motor de cartera-back (`buckets_historial`), no una columna simple en el CRM, así que el job pide primero `getAllCreditos({cuotas_min:4, cuotas_max:4, estado: MOROSO|EN_RECUPERACION})` (batch, no una llamada por caso) y solo consulta Wialon para las unidades vinculadas a esos SIFCOs. **`mes`/`anio` van en `0`**: ese filtro en cartera-back significa "creado en ese mes/año", no "reporte del mes actual" — con el mes actual, un crédito viejo en B4 (lo normal en mora avanzada) quedaba afuera silenciosamente (hallazgo de una prueba manual contra datos reales). Si cartera-back no está habilitado o falla, el job se salta la corrida entera (`null`), nunca interpreta el fallo como "0 créditos en B4 hoy".
+* **Decisión — snapshot propio, no reusar `gps_integracion_logs`:** `gps_unidad_estado` (una fila por unidad, sobreescrita cada corrida) guarda el último estado visto (voltaje, ignición, última señal, dentro/fuera de geocerca). Sin esto, cada corrida repetiría la misma alerta mientras la condición se mantenga. `gps_eventos` (retención 180 días, distinta de `gps_integracion_logs` de D-13 que audita llamadas HTTP, no eventos de negocio) guarda el historial visible en la Ficha 360.
+* **Decisión — escalamiento y dedup de notificación:** `desconexion_energia`, `sin_reportar` y `salida_geocerca` escalan a `cobros_supervisor` además del asesor (las tres son señales de posible manipulación del equipo o intento de ocultar el vehículo — justo el escenario de recuperación del ticket); `ignicion` va solo al asesor. Ventana de dedup de notificación (no del evento crudo, que siempre se guarda): 6 h para energía/sin-reportar/geocerca, 24 h para ignición — mismo mecanismo `filasNotificacionCobros` + `uq_notifications_cobros_dedup` que ya usan las demás alertas de cobros.
+* **Decisión — apagado por defecto:** el job va detrás de `JOBS_PROGRAMADOS.eventosGps` (`false`), a diferencia de la salud/purga de CB-121 (infraestructura pura, fuera de esa bandera): depende de cartera-back y crea notificaciones internas, más cerca de `alertasCobros` que de observabilidad. No corre en ningún ambiente hasta que alguien lo prenda a mano y la `0059` esté aplicada.
+* **Historial en la Ficha 360:** `getGpsEventosCaso` (`routers/gps-eventos-router.ts`, archivo aparte por D-03) — mismo control de acceso que el resto de la ficha (`assertAccesoCasoCobro`). A diferencia de `getGpsVehiculo` (D-12), no consulta Wialon en vivo ni exige motivo auditado: lee `gps_eventos` ya guardado, así que no tiene el gate de auditoría de la tarjeta de telemetría.
+
 ---
 
 ## Mapa de Procedimientos ORPC (Frontend CRM - Protegidos por Rol)
@@ -159,6 +171,7 @@ Disponibles vía `@/utils/orpc` en el cliente web bajo `orpc.wialon.*`:
 | `getGpsIntegracionSalud` | `adminProcedure` | Query | `void` | **CB-121.** Resumen de salud de la última hora: tasa de error, latencia p50/p95, alertas abiertas, último error crítico y estado del circuit breaker de la instancia. |
 | `getGpsAlertas` | `cobrosSupervisorProcedure` | Query | `void` | **CB-121.** Lista de alertas (abiertas y resueltas), con su tipo, ocurrencias y detalle. También visible para supervisores de cobros, no solo admin. |
 | `resolverGpsAlerta` | `adminProcedure` | Mutation | `{ alertaId, nota }` | **CB-121.** Cierra manualmente una alerta abierta (obligatorio para `error_critico`, que no se auto-resuelve). `NOT_FOUND` si ya estaba resuelta o no existe. |
+| `getGpsEventosCaso` | `cobrosProcedure` | Query | `{ casoCobroId, limit? }` | **CB-119.** Historial de eventos GPS del caso (energía, ignición, sin reportar, geocerca), para la card de la Ficha 360. No consulta Wialon en vivo ni exige motivo auditado — lee `gps_eventos` ya guardado por el job. Vive en `routers/gps-eventos-router.ts` (no en `wialon.ts`, ver D-03). |
 
 ---
 
@@ -173,6 +186,12 @@ WIALON_LOCATOR_URL=https://gps.lalegion.gt/locator/index.html
 # Token permanente generado en https://gps.lalegion.gt/login.html?access_type=-1&duration=0
 WIALON_TOKEN=d85ef21e1af4d78bbd874926...
 WIALON_TIMEOUT_MS=15000
+
+# CB-119 · recurso y geocerca "Perimetro cash" en el portal de La Legión.
+# Defaults confirmados en el spike (recurso "CASH IN", zona 1); solo hace
+# falta setearlos si la cuenta de Wialon del ambiente es otra.
+WIALON_RESOURCE_ID=28351747
+WIALON_ZONA_PAIS_ID=1
 ```
 
 ---
@@ -189,18 +208,25 @@ El módulo cuenta con suite de pruebas automatizadas con `bun:test`:
 * [`gps-integracion.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/server/src/routers/gps-integracion.test.ts): los 4 endpoints nuevos con roles correctos (`adminProcedure` para logs/salud/resolver, también `cobrosSupervisorProcedure` para alertas) y `FORBIDDEN` para un asesor regular.
 * [`gps-integracion-salud.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/server/src/jobs/gps-integracion-salud.test.ts): `percentil95` sobre valores desordenados, un solo valor y arreglo vacío.
 * [`-gps-format.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/web/src/routes/admin/-gps-format.test.ts) (web): `formatPorcentaje` y `formatDuracion` (umbral de 1000ms para pasar a segundos).
+* [`geo.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/server/src/services/wialon/geo.test.ts): `puntoDentroDePoligono` (ray-casting) contra un cuadrado simple y el polígono real de "Perimetro cash" — Ciudad de Guatemala dentro, San Salvador y el Pacífico fuera.
+* [`gps-eventos.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/server/src/services/wialon/gps-eventos.test.ts): `registrarEventoGps` — resolución unidad→caso por los dos caminos (contrato/oportunidad), dedup del evento y de la notificación, escalamiento a supervisor por tipo, caso sin responsable/sin usuario sistema.
+* [`gps-eventos-poll.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/server/src/jobs/gps-eventos-poll.test.ts): `detectarTransiciones` (función pura) — los 3 tipos con sus reglas de transición/no-repetición, geocerca con `dentroDeGeocercaAhora: null` (no evaluada esa corrida) y combinaciones.
+* [`gps-eventos-poll.b4.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/server/src/jobs/gps-eventos-poll.b4.test.ts): `sifcosEnB4` (cartera-back deshabilitado/caído → `null`, `mes`/`anio` siempre en `0`, junta y deduplica SIFCOs de MOROSO+EN_RECUPERACION) y `unidadesConCasoActivo` (junta unidades de ambos caminos sin duplicar).
+* [`gps-eventos-router.test.ts`](file:///home/jalvarezatcci/Documentos/universe/apps/crm/apps/server/src/routers/gps-eventos-router.test.ts): `getGpsEventosCaso` — acceso por rol (`admin`/`cobros_supervisor` ven cualquier caso, `cobros` solo el suyo, `NOT_FOUND` sin acceso).
 
 ```bash
 # server
 cd apps/crm/apps/server
-bun test src/services/wialon/ src/routers/wialon.test.ts src/routers/gps-integracion.test.ts src/jobs/gps-integracion-salud.test.ts
-# 312 pass, 0 fail
+bun test src/services/wialon/ src/jobs/gps-eventos-poll.test.ts src/jobs/gps-eventos-poll.b4.test.ts src/jobs/gps-integracion-salud.test.ts src/routers/wialon.test.ts src/routers/gps-integracion.test.ts src/routers/gps-eventos-router.test.ts
+# 411 pass, 0 fail
 
 # web
 cd apps/crm/apps/web
 bun test src/routes/cobros/ src/routes/admin/-gps-format.test.ts
 # 59 pass, 0 fail
 ```
+
+> **CB-119 se probó además contra Wialon y cartera-back reales** (no solo mocks): energía baja detectada en una unidad real de la flota, snapshot guardado correctamente, y el filtro B4 corregido tras encontrar que `mes`/`anio` de `getAllCreditos` excluía créditos viejos (ver D-14).
 
 > **Build:** el monorepo usa TS project references (`composite: true`). Tras tocar
 > el router de Wialon hay que correr `bun run build` en `apps/server` antes de que

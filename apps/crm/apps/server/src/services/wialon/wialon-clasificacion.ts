@@ -98,14 +98,15 @@ export function clasificarFallaWialon(
  * ambiguas automáticamente ante una falla incierta).
  */
 // Lista cerrada a los svc que el cliente REALMENTE usa hoy (ver wialon-client.ts):
-// token/login, core/search_items, core/search_item, unit/calc_last son
-// lecturas puras. token/update (crear/borrar link de Locator) es la única
-// escritura y a propósito NO está acá.
+// token/login, core/search_items, core/search_item, unit/calc_last y
+// resource/get_zone_data son lecturas puras. token/update (crear/borrar link
+// de Locator) es la única escritura y a propósito NO está acá.
 export const WIALON_SVC_IDEMPOTENTES: ReadonlySet<string> = new Set([
 	"token/login",
 	"core/search_items",
 	"core/search_item",
 	"unit/calc_last",
+	"resource/get_zone_data",
 ]);
 
 export function esOperacionIdempotente(svc: string): boolean {

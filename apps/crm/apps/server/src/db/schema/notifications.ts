@@ -90,6 +90,14 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// a esa alerta por `notificacion_origen_id`: son la misma conversación, en
 	// dos momentos. Lo crea `POST /api/bot/cobros/conversacion/modo-agente`.
 	"bot_modo_agente",
+	// CB-119: evento de Wialon (desconexión de energía, ignición/movimiento,
+	// GPS sin reportar) detectado por el job de polling en un vehículo con
+	// caso de cobro activo. Va al asesor dueño del caso y, para
+	// desconexión/sin-reportar (posible manipulación), también a los
+	// cobros_supervisor. Dedup por episodio en
+	// `uq_notifications_cobros_dedup` (ventana por tipo, ver
+	// services/wialon/gps-eventos.ts).
+	"gps_evento",
 ]);
 
 // Notifications table

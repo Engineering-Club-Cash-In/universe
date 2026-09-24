@@ -32,6 +32,7 @@ import {
 	esContratoDeInversion,
 } from "../lib/contratos-inversiones";
 import { CONTRATOS_OBSERVADORES } from "../lib/contratos-rep-legal";
+import { recalcularEstadoDeLaBateria } from "../lib/bateria-de-contratos";
 import { conMarcaDeSubidoAMano } from "../lib/contrato-subido-a-mano";
 import { createNotification } from "../lib/notificaciones";
 import {
@@ -142,35 +143,6 @@ async function bateriaAbierta(batchId: string) {
 	}
 
 	return bateria;
-}
-
-/**
- * Cierra la batería: el trabajo que abrió la compra ya salió.
- *
- * Se llama en cuanto se emite o se sube el primer contrato. Dejarla pendiente
- * obligaba a acordarse de marcarla, y lo que saca de la lista de jurídico es
- * esto, no la ficha del inversionista.
- *
- * Cerrada no significa cerrada con llave: se le pueden emitir más contratos
- * después (lo único que no se repite es el mismo tipo), y por eso se guarda
- * también cuándo empezó.
- */
-async function cerrarLaBateria(
-	bateria: { id: string; startedAt: Date | null; startedBy: string | null },
-	userId: string,
-): Promise<void> {
-	const ahora = new Date();
-	await db
-		.update(investorContractBatches)
-		.set({
-			status: "completada",
-			startedAt: bateria.startedAt ?? ahora,
-			startedBy: bateria.startedBy ?? userId,
-			completedAt: ahora,
-			completedBy: userId,
-			updatedAt: ahora,
-		})
-		.where(eq(investorContractBatches.id, bateria.id));
 }
 
 /**
@@ -809,8 +781,11 @@ export const investorContractsRouter = {
 			// Cerrada no significa cerrada con llave: se le pueden emitir más
 			// contratos después (lo único que no se repite es el mismo tipo), y por
 			// eso se guarda también cuándo empezó.
+			// La batería queda "en proceso" mientras falte alguna firma: jurídico
+			// la sigue viendo y todavía puede corregir. Se cierra sola cuando los
+			// firman todos.
 			if (emitidos.length > 0) {
-				await cerrarLaBateria(bateria, context.userId);
+				await recalcularEstadoDeLaBateria(input.batchId, context.userId);
 			}
 
 			const successCount = results.filter((r) => r.success).length;
@@ -1031,7 +1006,7 @@ export const investorContractsRouter = {
 			// el nuevo entra con sus enlaces.
 			void espejarContratoEnCartera(contractId, context.userId);
 
-			await cerrarLaBateria(bateria, context.userId);
+			await recalcularEstadoDeLaBateria(input.batchId, context.userId);
 
 			return {
 				success: true,
@@ -1048,6 +1023,116 @@ export const investorContractsRouter = {
 					: resultado.linkDocument,
 				signingLinks: resultado.signing_links,
 				signatories: resultado.signatories,
+			};
+		}),
+
+	/**
+	 * Anula un contrato de inversión, sin reemplazarlo.
+	 *
+	 * Es para cuando el documento no va y punto: datos equivocados, o se emitió
+	 * el que no era. Lo hace jurídico mientras la batería sigue abierta; una vez
+	 * que los firman todos ya no hay nada que anular, y WeeTrust tampoco deja
+	 * borrar un documento completo.
+	 *
+	 * Qué pasa del lado de WeeTrust: si falta firmar alguien —haya firmado otro
+	 * o nadie—, el documento se borra allá y sus enlaces mueren, porque un
+	 * contrato anulado no tiene que seguir recibiendo firmas.
+	 *
+	 * La fila no se borra nunca: es el registro de lo que se descartó y de quién
+	 * lo había firmado. Queda en «Ver anulados», con su motivo.
+	 */
+	cancelInvestorContract: juridicoProcedure
+		.input(
+			z.object({
+				contractId: z.string().uuid(),
+				motivo: z.enum(MOTIVOS_DE_ANULACION_KEYS),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const [contrato] = await db
+				.select()
+				.from(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.id, input.contractId))
+				.limit(1);
+
+			if (!contrato) {
+				throw new ORPCError("NOT_FOUND", { message: "Contrato no encontrado" });
+			}
+
+			if (!contrato.investorId || !contrato.batchId) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Ese contrato no es de un inversionista.",
+				});
+			}
+
+			if (contrato.status === "cancelled" || contrato.replacedByContractId) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Este contrato ya está anulado o fue reemplazado.",
+				});
+			}
+
+			const quien = context.session?.user?.name ?? "alguien del CRM";
+			const razon = `${etiquetaDeMotivo(input.motivo)} (anulado por ${quien})`;
+			const ahora = new Date();
+
+			// La fila se marca primero y bloqueada: si dos personas anulan a la
+			// vez, la segunda ve que ya no está vigente y no vuelve a pedirle nada
+			// a WeeTrust.
+			await db.transaction(async (tx) => {
+				const [actual] = await tx
+					.select({
+						status: generatedLegalContracts.status,
+						reemplazadoPor: generatedLegalContracts.replacedByContractId,
+					})
+					.from(generatedLegalContracts)
+					.where(eq(generatedLegalContracts.id, input.contractId))
+					.for("update")
+					.limit(1);
+
+				if (!actual || actual.status === "cancelled" || actual.reemplazadoPor) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Otra persona acaba de anular o reemplazar este contrato. Recargá para ver cómo quedó.",
+					});
+				}
+
+				await tx
+					.update(generatedLegalContracts)
+					.set({
+						status: "cancelled",
+						cancellationReason: razon,
+						cancelledAt: ahora,
+						updatedAt: ahora,
+					})
+					.where(eq(generatedLegalContracts.id, input.contractId));
+			});
+
+			// Recién ahora el documento allá, con el detalle de cómo quedó pegado
+			// al motivo.
+			await borrarElViejoEnWeeTrust({
+				contractId: input.contractId,
+				status: contrato.status,
+				weetrustDocumentId: contrato.weetrustDocumentId,
+				razon,
+				origen: "cancelInvestorContract",
+			});
+
+			// Que la papelería del inversionista diga que quedó anulado: si no,
+			// alguien puede seguir pasando sus enlaces.
+			void espejarEstadoDeFirmaEnCartera(input.contractId);
+
+			// Sin este contrato, la batería puede volver a "pendiente" (si era el
+			// único) o quedar completa (si los que restan ya están firmados).
+			const estado = await recalcularEstadoDeLaBateria(
+				contrato.batchId,
+				context.userId,
+			);
+
+			return {
+				success: true,
+				estadoDeLaBateria: estado,
+				message:
+					"Contrato anulado. Queda en «Ver anulados» con el motivo y cómo quedó en la plataforma de firma.",
 			};
 		}),
 

@@ -29,6 +29,7 @@ import {
 	AlertDialogTitle,
 	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { ContratosDeLaBateria } from "@/components/inversiones/ContratosDeLaBateria";
 import { UploadInvestorContractModal } from "@/components/inversiones/UploadInvestorContractModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,17 @@ import { Label } from "@/components/ui/label";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { fechaEnPalabras } from "@/lib/fechas-en-palabras";
 import { client, orpc } from "@/utils/orpc";
+
+/**
+ * Qué dice el estado de la batería, que lo marcan sus documentos: sin
+ * contratos, con contratos a los que les falta firma, o firmados por todos.
+ */
+const ESTADO_DE_BATERIA: Record<string, string> = {
+	pendiente: "Sin contratos",
+	en_proceso: "En firma",
+	completada: "Firmados",
+	descartada: "Descartada",
+};
 
 /**
  * Cómo se traduce a las opciones del contrato lo que cartera estampó en el
@@ -347,7 +359,8 @@ function RouteComponent() {
 					</p>
 				</div>
 				<Badge variant={cerrada ? "secondary" : "default"} className="ml-auto">
-					{bateria.status.replace("_", " ")}
+					{ESTADO_DE_BATERIA[bateria.status] ??
+						bateria.status.replace("_", " ")}
 				</Badge>
 
 				{/* La batería se cierra sola al emitir el primer contrato. Descartar es
@@ -583,6 +596,19 @@ function RouteComponent() {
 						/>
 					</CardContent>
 				</Card>
+			)}
+
+			{/* Lo que la batería ya tiene. Sin esto, volver a una batería de otro
+			    día no daba desde dónde corregir un contrato: los resultados del
+			    wizard son sólo de la sesión en que se emitieron. */}
+			{!cerrada && (
+				<ContratosDeLaBateria
+					batchId={batchId}
+					onReemplazar={(contractType) => {
+						setTipoASubir(contractType);
+						setSubiendo(true);
+					}}
+				/>
 			)}
 
 			{/* Abajo de todo, después del último contrato: el que se armó por fuera

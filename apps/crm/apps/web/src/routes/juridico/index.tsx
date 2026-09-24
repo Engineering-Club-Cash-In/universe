@@ -59,6 +59,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { client, orpc } from "@/utils/orpc";
 
+/**
+ * Qué dice el estado de una batería, que lo marcan sus documentos y no una
+ * etapa: sin contratos, con contratos a medio firmar, o firmados por todos.
+ */
+const ESTADO_DE_BATERIA: Record<string, string> = {
+	pendiente: "Sin contratos",
+	en_proceso: "En firma",
+	completada: "Firmados",
+	descartada: "Descartada",
+};
+
 export const Route = createFileRoute("/juridico/")({
 	component: RouteComponent,
 });
@@ -89,9 +100,13 @@ function RouteComponent() {
 	// Las baterías de contratos de inversionistas. Van en su propia pestaña: son
 	// otro flujo, con otra gente y sin oportunidad de venta detrás.
 	//
-	// Por defecto sólo las que esperan. Una batería se cierra sola al emitirle
-	// el primer contrato, así que las cerradas se ven aparte: sirven para mirar
-	// qué se hizo, o para agregarle a una el contrato que faltó.
+	// Por defecto, las que todavía son trabajo: sin contratos, o con contratos a
+	// los que les falta alguna firma. Mientras falte firmar se puede corregir
+	// —reemplazar, anular, subir otro—, así que siguen acá.
+	//
+	// Las firmadas por todos salen de la lista: un documento completo no admite
+	// cambios, y en WeeTrust ya no se puede ni borrar. Se ven con "Ver
+	// cerradas", para mirar qué se hizo o agregarle el contrato que faltó.
 	const [verCerradas, setVerCerradas] = useState(false);
 	const bateriasQuery = useQuery({
 		...orpc.listInvestorContractBatches.queryOptions({
@@ -484,7 +499,8 @@ function RouteComponent() {
 																: "secondary"
 														}
 													>
-														{bateria.status.replace("_", " ")}
+														{ESTADO_DE_BATERIA[bateria.status] ??
+															bateria.status.replace("_", " ")}
 													</Badge>
 												</TableCell>
 												<TableCell className="text-right">

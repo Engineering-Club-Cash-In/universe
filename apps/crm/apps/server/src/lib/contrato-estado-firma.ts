@@ -8,6 +8,7 @@ import {
 	consultarEstadoFirma,
 	type EstadoDocumentoFirma,
 } from "../services/legal-docs-api";
+import { recalcularLaBateriaDelContrato } from "./bateria-de-contratos";
 import { espejarEstadoDeFirmaEnCartera } from "./espejo-contratos-inversionista";
 
 /**
@@ -120,6 +121,10 @@ export async function sincronizarEstadoDeFirma(
 	// con otro servicio, y si no contesta no se puede perder por eso el estado
 	// que WeeTrust acaba de contarnos. Se reintenta en la próxima consulta.
 	await espejarEstadoDeFirmaEnCartera(contractId);
+
+	// Y la batería, si el contrato es de una: cuando se firman todos sale de la
+	// lista de jurídico, porque ya no hay nada que corregir.
+	await recalcularLaBateriaDelContrato(contractId);
 }
 
 /**

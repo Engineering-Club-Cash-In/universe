@@ -2,7 +2,54 @@ import { describe, expect, test } from "bun:test";
 import { esIntentoExitoso } from "../services/wialon/wialon-clasificacion";
 import { _INTERNOS } from "./gps-integracion-salud";
 
-const { percentil95 } = _INTERNOS;
+const { percentil95, decidirUmbrales } = _INTERNOS;
+
+const ok = (duracionMs = 200) => ({
+	resultado: "ok",
+	errorCode: null,
+	duracionMs,
+});
+const fallo = (duracionMs = 200) => ({
+	resultado: "error",
+	errorCode: "WIALON_TIMEOUT",
+	duracionMs,
+});
+
+describe("decidirUmbrales", () => {
+	test("ventana vacía: resuelve ambas alertas de umbral", () => {
+		expect(decidirUmbrales([])).toEqual({
+			tasaError: "resolver",
+			latencia: "resolver",
+		});
+	});
+
+	test("pocas muestras todas sanas: resuelve aunque no alcance el mínimo", () => {
+		expect(decidirUmbrales([ok(), ok()])).toEqual({
+			tasaError: "resolver",
+			latencia: "resolver",
+		});
+	});
+
+	test("pocas muestras con una falla o una lenta: mantiene, no abre ni resuelve", () => {
+		expect(decidirUmbrales([ok(), fallo()]).tasaError).toBe("mantener");
+		expect(decidirUmbrales([ok(), ok(9000)]).latencia).toBe("mantener");
+	});
+
+	test("con muestras suficientes abre por tasa y por latencia", () => {
+		const filas = [fallo(9000), fallo(9000), ok(), ok(), ok()];
+		expect(decidirUmbrales(filas)).toEqual({
+			tasaError: "abrir",
+			latencia: "abrir",
+		});
+	});
+
+	test("con muestras suficientes y todo sano, resuelve", () => {
+		expect(decidirUmbrales([ok(), ok(), ok(), ok(), ok()])).toEqual({
+			tasaError: "resolver",
+			latencia: "resolver",
+		});
+	});
+});
 
 /**
  * CB-121 — solo la función pura (sin tocar `db`): el resto del job

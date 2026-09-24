@@ -41,30 +41,27 @@ export async function evaluarSaludGpsIntegracion(): Promise<void> {
 		.from(gpsIntegracionLogs)
 		.where(gte(gpsIntegracionLogs.createdAt, desde));
 
-	if (filas.length >= MIN_MUESTRAS_PARA_TASA_ERROR) {
-		const fallos = filas.filter((f) => !esIntentoExitoso(f)).length;
-		const tasaError = fallos / filas.length;
+	const decision = decidirUmbrales(filas);
+	const fallos = filas.filter((f) => !esIntentoExitoso(f)).length;
 
-		if (tasaError >= UMBRAL_TASA_ERROR) {
-			await abrirOReforzarAlerta({
-				tipo: "tasa_error",
-				errorCode: null,
-				detalle: `Tasa de error de ${(tasaError * 100).toFixed(0)}% en los últimos 15 min (${fallos}/${filas.length} intentos).`,
-			});
-		} else {
-			await resolverAlertaDeUmbral("tasa_error");
-		}
+	if (decision.tasaError === "abrir") {
+		await abrirOReforzarAlerta({
+			tipo: "tasa_error",
+			errorCode: null,
+			detalle: `Tasa de error de ${((fallos / filas.length) * 100).toFixed(0)}% en los últimos 15 min (${fallos}/${filas.length} intentos).`,
+		});
+	} else if (decision.tasaError === "resolver") {
+		await resolverAlertaDeUmbral("tasa_error");
+	}
 
-		const p95 = percentil95(filas.map((f) => f.duracionMs));
-		if (p95 !== null && p95 > UMBRAL_LATENCIA_P95_MS) {
-			await abrirOReforzarAlerta({
-				tipo: "latencia_sla",
-				errorCode: null,
-				detalle: `Latencia p95 de ${p95}ms en los últimos 15 min (SLA: ${UMBRAL_LATENCIA_P95_MS}ms).`,
-			});
-		} else if (p95 !== null) {
-			await resolverAlertaDeUmbral("latencia_sla");
-		}
+	if (decision.latencia === "abrir") {
+		await abrirOReforzarAlerta({
+			tipo: "latencia_sla",
+			errorCode: null,
+			detalle: `Latencia p95 de ${percentil95(filas.map((f) => f.duracionMs))}ms en los últimos 15 min (SLA: ${UMBRAL_LATENCIA_P95_MS}ms).`,
+		});
+	} else if (decision.latencia === "resolver") {
+		await resolverAlertaDeUmbral("latencia_sla");
 	}
 
 	// fallos_consecutivos se evalúa en caliente en gps-integracion-log-writer;
@@ -82,6 +79,37 @@ export async function evaluarSaludGpsIntegracion(): Promise<void> {
 	if (ultimo && esIntentoExitoso(ultimo)) {
 		await resolverAlertaDeUmbral("fallos_consecutivos");
 	}
+}
+
+type DecisionUmbral = "abrir" | "resolver" | "mantener";
+
+/**
+ * Con muestras suficientes se compara contra el umbral. Con pocas (tráfico
+ * bajo) no se abre nada, pero sí se cierra si ningún intento de la ventana
+ * falló / superó el SLA — incluida una ventana vacía. Si no, una alerta
+ * abierta quedaría colgada hasta que lleguen 5 consultas nuevas.
+ */
+function decidirUmbrales(
+	filas: { resultado: string; errorCode: string | null; duracionMs: number }[],
+): { tasaError: DecisionUmbral; latencia: DecisionUmbral } {
+	const fallos = filas.filter((f) => !esIntentoExitoso(f)).length;
+
+	if (filas.length < MIN_MUESTRAS_PARA_TASA_ERROR) {
+		return {
+			tasaError: fallos === 0 ? "resolver" : "mantener",
+			latencia: filas.every((f) => f.duracionMs <= UMBRAL_LATENCIA_P95_MS)
+				? "resolver"
+				: "mantener",
+		};
+	}
+
+	const p95 = percentil95(filas.map((f) => f.duracionMs));
+	return {
+		tasaError:
+			fallos / filas.length >= UMBRAL_TASA_ERROR ? "abrir" : "resolver",
+		latencia:
+			p95 !== null && p95 > UMBRAL_LATENCIA_P95_MS ? "abrir" : "resolver",
+	};
 }
 
 function percentil95(valores: number[]): number | null {
@@ -150,4 +178,4 @@ export async function correrPurgaGpsIntegracionLogs(): Promise<void> {
 }
 
 // Exportado para tests de umbral.
-export const _INTERNOS = { percentil95, sql };
+export const _INTERNOS = { percentil95, decidirUmbrales, sql };

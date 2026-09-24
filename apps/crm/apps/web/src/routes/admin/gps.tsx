@@ -172,6 +172,8 @@ interface IntegracionLogFila {
 	severidad: "info" | "warning" | "critical";
 	duracionMs: number;
 	numeroCreditoSifco: string | null;
+	userNombre: string | null;
+	userEmail: string | null;
 	createdAt: Date;
 }
 
@@ -180,6 +182,18 @@ const INTEGRACION_LOGS_COLUMNS: ColumnDef<IntegracionLogFila>[] = [
 		accessorKey: "createdAt",
 		header: "Fecha",
 		cell: ({ row }) => formatFechaHora(row.original.createdAt),
+	},
+	{
+		accessorKey: "userNombre",
+		header: "Usuario",
+		cell: ({ row }) => (
+			<div>
+				<div>{row.original.userNombre ?? "—"}</div>
+				<div className="text-muted-foreground text-xs">
+					{row.original.userEmail ?? ""}
+				</div>
+			</div>
+		),
 	},
 	{
 		accessorKey: "operacion",

@@ -10,9 +10,19 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { and, asc, count, desc, eq, gte, ilike } from "drizzle-orm";
+import {
+	and,
+	asc,
+	count,
+	desc,
+	eq,
+	getTableColumns,
+	gte,
+	ilike,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { user } from "../db/schema/auth";
 import {
 	gpsIntegracionAlertas,
 	gpsIntegracionLogs,
@@ -65,8 +75,13 @@ export const gpsIntegracionRouter = {
 
 			const [filas, totalRows] = await Promise.all([
 				db
-					.select()
+					.select({
+						...getTableColumns(gpsIntegracionLogs),
+						userNombre: user.name,
+						userEmail: user.email,
+					})
 					.from(gpsIntegracionLogs)
+					.leftJoin(user, eq(gpsIntegracionLogs.userId, user.id))
 					.where(filtro)
 					.orderBy(desc(gpsIntegracionLogs.createdAt))
 					.limit(input.perPage)
@@ -78,7 +93,11 @@ export const gpsIntegracionRouter = {
 				total: totalRows[0]?.total ?? 0,
 				page: input.page,
 				perPage: input.perPage,
-				items: filas,
+				items: filas.map((f) => ({
+					...f,
+					userNombre: f.userNombre ?? null,
+					userEmail: f.userEmail ?? null,
+				})),
 			};
 		}),
 

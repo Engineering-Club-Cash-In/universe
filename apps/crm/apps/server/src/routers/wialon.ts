@@ -8,6 +8,7 @@
  * para evitar el límite de TypeScript (TS7056) en la inferencia de tipos hacia apps/web.
  */
 
+import { randomUUID } from "node:crypto";
 import { ORPCError } from "@orpc/server";
 import {
 	and,
@@ -32,9 +33,12 @@ import {
 	adminProcedure,
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
+	o,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
+import { registrarIntentoWialon } from "../services/wialon/gps-integracion-log-writer";
 import {
+	configurarBitacoraWialon,
 	extraerNucleoDeNombreUnidad,
 	extraerNucleoPlaca,
 	getWialonClient,
@@ -42,6 +46,10 @@ import {
 	resolveWialonEnvironment,
 	type WialonClient,
 } from "../services/wialon/wialon-client";
+import {
+	conContextoGps,
+	enlazarConsultaLogEnContexto,
+} from "../services/wialon/wialon-contexto";
 import {
 	createLocatorLinkInputSchema,
 	deleteLocatorLinkInputSchema,
@@ -63,6 +71,14 @@ import {
 	wialonUnitsCatalogOutputSchema,
 } from "../services/wialon/wialon-types";
 import { assertAccesoCasoCobro } from "./cobros";
+
+// CB-121: conecta la bitácora técnica de cada intento HTTP a Wialon al
+// cargar este router (una sola vez por proceso). Va acá y no en
+// wialon-client.ts porque el cliente no debe depender de `db` — así se puede
+// instanciar en tests con solo un `customFetch` fake.
+configurarBitacoraWialon((evento) => {
+	void registrarIntentoWialon(evento);
+});
 
 export function mapWialonErrorToOrpc(error: unknown): never {
 	if (error instanceof WialonClientError) {
@@ -94,6 +110,16 @@ export function mapWialonErrorToOrpc(error: unknown): never {
 			throw new ORPCError("BAD_GATEWAY", {
 				message: `Respuesta inválida de Wialon: ${error.message}`,
 			});
+		}
+		if (error.code === "WIALON_RESULTADO_INCIERTO") {
+			// CB-121: una escritura (link de rastreo, vínculo de unidad) falló
+			// por una causa transitoria y no se sabe si se aplicó en Wialon.
+			// CONFLICT (no BAD_GATEWAY) para que el frontend la trate distinto
+			// a un simple reintento: pide verificación manual antes de repetir.
+			throw new ORPCError("CONFLICT", { message: error.message });
+		}
+		if (error.code === "WIALON_NO_DISPONIBLE") {
+			throw new ORPCError("SERVICE_UNAVAILABLE", { message: error.message });
 		}
 		if (error.code === "WIALON_API_ERROR") {
 			const upstreamFaults = [5, 8, 9, 10, 11, 14]; // 5=ejecución, 8=credenciales inválidas, 9=servidor ocupado, 10=límite peticiones, 11=DB no disponible, 14=facturación
@@ -219,7 +245,13 @@ async function leerVehiculoParaGps(vehicleId: string): Promise<{
 export const WIALON_VINCULO_AUTO_PLACA = "auto:placa";
 
 /** Respuesta de getGpsVehiculo antes de agregarle `auditada` (se calcula al final). */
-type SinAuditada<T> = T extends unknown ? Omit<T, "auditada"> : never;
+// "referencia" (CB-121) también se completa afuera del IIFE interno, al mismo
+// tiempo que "auditada": solo tiene sentido rellenarla en el caso
+// "no_disponible" y con el correlationId de ESTA llamada, así que ninguno de
+// los `return` internos la conoce.
+type SinAuditada<T> = T extends unknown
+	? Omit<T, "auditada" | "referencia">
+	: never;
 
 /**
  * ¿Un vínculo auto:placa sigue correspondiendo a la placa actual? Mismo
@@ -250,6 +282,10 @@ function mensajeUsuarioWialon(error: WialonClientError): string {
 			return "No se pudo conectar con Wialon. Intente de nuevo.";
 		case "WIALON_INVALID_RESPONSE":
 			return "Wialon respondió con datos inesperados. Intente de nuevo.";
+		case "WIALON_NO_DISPONIBLE":
+			return "La integración con Wialon está temporalmente deshabilitada por fallos repetidos. Intente en unos minutos.";
+		case "WIALON_RESULTADO_INCIERTO":
+			return "No se pudo confirmar la operación en Wialon. Verifique antes de repetirla.";
 		default:
 			return "No se pudo autenticar con Wialon.";
 	}
@@ -717,7 +753,20 @@ async function resolverCasoParaGps(
 	return { numeroCreditoSifco };
 }
 
-export const wialonRouter = {
+// Toda llamada a Wialon hecha desde un endpoint queda en la bitácora técnica
+// con el endpoint como origen y el usuario que la disparó. getGpsVehiculo
+// abre su propio contexto adentro (con vehículo y crédito), que prevalece.
+const contextoGpsPorEndpoint = o.middleware(async ({ context, path, next }) =>
+	conContextoGps(
+		{
+			origen: path.at(-1) ?? "wialon",
+			userId: context.session?.user?.id ?? null,
+		},
+		async () => next(),
+	),
+);
+
+export const wialonRouter = o.use(contextoGpsPorEndpoint).router({
 	/**
 	 * Busca y lista las unidades de rastreo GPS (svc: core/search_items)
 	 */
@@ -1011,6 +1060,12 @@ export const wialonRouter = {
 				context.user?.email || context.session?.user?.email,
 			);
 
+			// CB-121: correlationId propio de esta consulta — agrupa en la
+			// bitácora técnica todos los intentos HTTP a Wialon que dispare
+			// (login, catálogo, telemetría, reintentos) y sirve de referencia
+			// para soporte cuando la respuesta es "no_disponible".
+			const correlationId = randomUUID();
+
 			// La auditoría se registra ANTES de resolver la unidad y NUNCA aborta
 			// la respuesta: la historia pide dejar rastro de que alguien consultó
 			// con tal motivo, no solo de las consultas que resultaron en datos.
@@ -1023,6 +1078,7 @@ export const wialonRouter = {
 			// auditar cada consulta, y la tarjeta además dice "Consulta registrada".
 			// Sin la 0057 la tabla no existe, así que tampoco se muestra ubicación.
 			let auditado: boolean | null = null;
+			let gpsConsultaLogId: string | null = null;
 			const registrarAuditoria = async (
 				unitId: number | null,
 				unitName: string | null,
@@ -1039,14 +1095,21 @@ export const wialonRouter = {
 					return false;
 				}
 				try {
-					await db.insert(gpsConsultaLogs).values({
-						vehicleId: input.vehicleId,
-						numeroCreditoSifco,
-						motivo: input.motivo,
-						unitId: unitId != null ? String(unitId) : null,
-						unitName,
-						userId,
-					});
+					const [fila] = await db
+						.insert(gpsConsultaLogs)
+						.values({
+							vehicleId: input.vehicleId,
+							numeroCreditoSifco,
+							motivo: input.motivo,
+							unitId: unitId != null ? String(unitId) : null,
+							unitName,
+							userId,
+						})
+						.returning({ id: gpsConsultaLogs.id });
+					gpsConsultaLogId = fila?.id ?? null;
+					if (gpsConsultaLogId) {
+						enlazarConsultaLogEnContexto(gpsConsultaLogId);
+					}
 					auditado = true;
 				} catch (error) {
 					console.error("GPS_CONSULTA_LOG_FALLIDO", {
@@ -1070,234 +1133,259 @@ export const wialonRouter = {
 			// respuesta lleva si quedó registrada para que la UI no diga
 			// "Consulta registrada" cuando no fue así (incluidas las rutas sin
 			// ubicación, que no se bloquean).
-			const respuesta = await (async (): Promise<
-				SinAuditada<GpsVehiculoOutput>
-			> => {
-				try {
-					let vehiculo = await leerVehiculoParaGps(input.vehicleId);
+			const respuesta = await conContextoGps(
+				{
+					origen: "getGpsVehiculo",
+					correlationId,
+					userId: context.userId ?? context.user?.id ?? null,
+					vehicleId: input.vehicleId,
+					numeroCreditoSifco,
+					// gpsConsultaLogId se resuelve adentro, al auditar, y
+					// enlazarConsultaLogEnContexto lo agrega al contexto: las
+					// llamadas posteriores (telemetría) quedan enlazadas a la
+					// auditoría; las anteriores (resolver la unidad) solo se
+					// cruzan por correlationId.
+				},
+				(): Promise<SinAuditada<GpsVehiculoOutput>> =>
+					(async () => {
+						try {
+							let vehiculo = await leerVehiculoParaGps(input.vehicleId);
 
-					if (!vehiculo) {
-						await registrarAuditoria(null, null);
-						return {
-							estado: "no_disponible" as const,
-							error: {
-								code: "VEHICULO_NO_ENCONTRADO",
-								message: "No se encontró el vehículo del crédito",
-							},
-						};
-					}
+							if (!vehiculo) {
+								await registrarAuditoria(null, null);
+								return {
+									estado: "no_disponible" as const,
+									error: {
+										code: "VEHICULO_NO_ENCONTRADO",
+										message: "No se encontró el vehículo del crédito",
+									},
+								};
+							}
 
-					const client = getWialonClient();
+							const client = getWialonClient();
 
-					// Respuesta con el vínculo guardado en el vehículo (ruta normal, y
-					// también cuando un supervisor lo fijó durante esta consulta).
-					const responderVinculoGuardado = async (v: {
-						wialonUnitId: number;
-						wialonUnitName: string | null;
-						wialonVinculadoPor: string | null;
-						licensePlate: string | null;
-					}) => {
-						const unitName = v.wialonUnitName ?? String(v.wialonUnitId);
-						if (!(await registrarAuditoria(v.wialonUnitId, unitName))) {
-							return sinAuditoria;
-						}
-						return await construirRespuestaVinculada(
-							client,
-							v.wialonUnitId,
-							unitName,
-							v.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA
-								? "placa"
-								: "persistido",
-							v.licensePlate?.trim() || null,
-						);
-					};
+							// Respuesta con el vínculo guardado en el vehículo (ruta normal, y
+							// también cuando un supervisor lo fijó durante esta consulta).
+							const responderVinculoGuardado = async (v: {
+								wialonUnitId: number;
+								wialonUnitName: string | null;
+								wialonVinculadoPor: string | null;
+								licensePlate: string | null;
+							}) => {
+								const unitName = v.wialonUnitName ?? String(v.wialonUnitId);
+								if (!(await registrarAuditoria(v.wialonUnitId, unitName))) {
+									return sinAuditoria;
+								}
+								return await construirRespuestaVinculada(
+									client,
+									v.wialonUnitId,
+									unitName,
+									v.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA
+										? "placa"
+										: "persistido",
+									v.licensePlate?.trim() || null,
+								);
+							};
 
-					// Un vínculo DEDUCIDO se basa en que la placa del vehículo aparezca en
-					// el nombre de la unidad. Deja de valer si la placa se corrigió
-					// (updateVehicle no toca el vínculo) o si el GPS se pasó a otro carro y
-					// lo renombraron en Wialon. Por eso se compara contra el nombre ACTUAL
-					// en Wialon, no contra el guardado al vincular. Si ya no coincide, se
-					// libera y se vuelve a deducir. Los vínculos que fijó un supervisor no
-					// se revalidan: esa decisión es explícita.
-					if (
-						vehiculo.wialonUnitId &&
-						vehiculo.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA &&
-						!(await vinculoAutoSigueUnico(
-							client,
-							vehiculo.licensePlate,
-							vehiculo.wialonUnitId,
-						))
-					) {
-						const liberado = await liberarVinculoAuto(
-							input.vehicleId,
-							vehiculo.wialonUnitId,
-						);
-						if (!liberado) {
-							// Fail closed: el vínculo vencido sigue en la base y cualquier
-							// camino siguiente podría terminar mostrando esa unidad.
+							// Un vínculo DEDUCIDO se basa en que la placa del vehículo aparezca en
+							// el nombre de la unidad. Deja de valer si la placa se corrigió
+							// (updateVehicle no toca el vínculo) o si el GPS se pasó a otro carro y
+							// lo renombraron en Wialon. Por eso se compara contra el nombre ACTUAL
+							// en Wialon, no contra el guardado al vincular. Si ya no coincide, se
+							// libera y se vuelve a deducir. Los vínculos que fijó un supervisor no
+							// se revalidan: esa decisión es explícita.
+							if (
+								vehiculo.wialonUnitId &&
+								vehiculo.wialonVinculadoPor === WIALON_VINCULO_AUTO_PLACA &&
+								!(await vinculoAutoSigueUnico(
+									client,
+									vehiculo.licensePlate,
+									vehiculo.wialonUnitId,
+								))
+							) {
+								const liberado = await liberarVinculoAuto(
+									input.vehicleId,
+									vehiculo.wialonUnitId,
+								);
+								if (!liberado) {
+									// Fail closed: el vínculo vencido sigue en la base y cualquier
+									// camino siguiente podría terminar mostrando esa unidad.
+									await registrarAuditoria(null, null);
+									return {
+										estado: "no_disponible" as const,
+										error: {
+											code: "VINCULO_NO_ACTUALIZADO",
+											message:
+												"La unidad GPS vinculada ya no corresponde a este vehículo y no se pudo actualizar el vínculo. Intente de nuevo.",
+										},
+									};
+								}
+								vehiculo = {
+									...vehiculo,
+									wialonUnitId: null,
+									wialonUnitName: null,
+									wialonVinculadoPor: null,
+								};
+							}
+
+							// 1. Vínculo ya fijado: es la ruta normal y no toca el catálogo.
+							if (vehiculo.wialonUnitId) {
+								return await responderVinculoGuardado({
+									...vehiculo,
+									wialonUnitId: vehiculo.wialonUnitId,
+								});
+							}
+
+							// 2. Sin vínculo: se deduce buscando la placa en el catálogo.
+							const placa = vehiculo.licensePlate?.trim() || null;
+							// Sin núcleo de placa (vacía o de relleno: "NUEVO", "N/A") no hay
+							// nada confiable que buscar: cualquier resultado sería adivinar.
+							const nucleo = extraerNucleoPlaca(placa);
+							if (!placa || !nucleo) {
+								await registrarAuditoria(null, null);
+								return {
+									estado: "sin_vinculo" as const,
+									motivo: "sin_placa" as const,
+									placa,
+									candidatos: [],
+								};
+							}
+
+							// Wialon filtra por subcadena LITERAL de sys_name, así que la placa
+							// cruda del CRM ("P - 278KJQ", "P0-720GVH") no trae la unidad
+							// "P-278KJQ ..." / "P-720GVH ...". Se prefiltra solo por los 3
+							// dígitos del núcleo (mismo criterio que el selector de la ficha) y
+							// matchUnidadPorPlaca descarta lo que no coincide completo.
+							// flags:1 = solo id/nm, que es todo lo que el match necesita.
+							const catalogo = await client.searchUnits({
+								filterName: nucleo.digitos,
+								flags: 1,
+							});
+							const { unidad, motivo, coincidencias } = matchUnidadPorPlaca(
+								placa,
+								catalogo.items,
+							);
+
+							if (!unidad) {
+								await registrarAuditoria(null, null);
+								return {
+									estado: "sin_vinculo" as const,
+									motivo: motivo === "ok" ? "sin_coincidencia" : motivo,
+									placa,
+									// Solo tiene sentido ofrecer candidatos cuando hay de dónde
+									// elegir; con cero coincidencias la lista sería ruido.
+									candidatos:
+										motivo === "ambiguo"
+											? coincidencias.map((u) => ({ id: u.id, nm: u.nm }))
+											: [],
+								};
+							}
+
+							// Sin las columnas de la 0057 no se puede guardar ni chequear
+							// vínculos: se responde con la deducción, como documenta el fallback.
+							const auto = vehiculo.columnasVinculo
+								? await fijarVinculoPorPlaca(
+										input.vehicleId,
+										unidad.id,
+										unidad.nm,
+									)
+								: "sin_columnas";
+
+							// No se pudo confirmar que la unidad no esté asignada a otro vehículo
+							// (falló el lock o la consulta): fail closed. Devolver la deducción
+							// podría mostrar la ubicación del carro al que se reasignó el GPS.
+							if (auto === "error") {
+								await registrarAuditoria(null, null);
+								return {
+									estado: "no_disponible" as const,
+									error: {
+										code: "VINCULO_NO_VERIFICADO",
+										message:
+											"No se pudo verificar la unidad GPS de este vehículo. Intente de nuevo.",
+									},
+								};
+							}
+
+							if (auto === "asignada_a_otro") {
+								await registrarAuditoria(null, null);
+								return {
+									estado: "sin_vinculo" as const,
+									motivo: "asignada_a_otro" as const,
+									placa,
+									candidatos: [{ id: unidad.id, nm: unidad.nm }],
+								};
+							}
+
+							if (auto === "ya_vinculado") {
+								const actual = await leerVehiculoParaGps(input.vehicleId);
+								if (actual?.wialonUnitId) {
+									return await responderVinculoGuardado({
+										...actual,
+										wialonUnitId: actual.wialonUnitId,
+									});
+								}
+								// El UPDATE no escribió porque había un vínculo, pero al releer ya no
+								// está (lo cambiaron entre medio): no se sabe cuál vale, fail closed.
+								await registrarAuditoria(null, null);
+								return {
+									estado: "no_disponible" as const,
+									error: {
+										code: "VINCULO_NO_VERIFICADO",
+										message:
+											"No se pudo verificar la unidad GPS de este vehículo. Intente de nuevo.",
+									},
+								};
+							}
+
+							if (!(await registrarAuditoria(unidad.id, unidad.nm))) {
+								return sinAuditoria;
+							}
+							return await construirRespuestaVinculada(
+								client,
+								unidad.id,
+								unidad.nm,
+								"placa",
+								placa,
+							);
+						} catch (error) {
 							await registrarAuditoria(null, null);
+							// A la UI solo llegan textos fijos: el error original (un
+							// DrizzleQueryError trae el SQL y sus parámetros; un error de red,
+							// host/IP) se loguea completo en el servidor.
+							console.error("GPS_VEHICULO_ERROR", {
+								vehicleId: input.vehicleId,
+								code:
+									error instanceof WialonClientError ? error.code : undefined,
+								message: error instanceof Error ? error.message : String(error),
+							});
+							if (error instanceof WialonClientError) {
+								return {
+									estado: "no_disponible" as const,
+									error: {
+										code: error.code,
+										message: mensajeUsuarioWialon(error),
+									},
+								};
+							}
 							return {
 								estado: "no_disponible" as const,
 								error: {
-									code: "VINCULO_NO_ACTUALIZADO",
+									code: "ERROR_INTERNO",
 									message:
-										"La unidad GPS vinculada ya no corresponde a este vehículo y no se pudo actualizar el vínculo. Intente de nuevo.",
+										"No se pudo consultar el GPS del vehículo. Intente de nuevo.",
 								},
 							};
 						}
-						vehiculo = {
-							...vehiculo,
-							wialonUnitId: null,
-							wialonUnitName: null,
-							wialonVinculadoPor: null,
-						};
-					}
+					})(),
+			);
 
-					// 1. Vínculo ya fijado: es la ruta normal y no toca el catálogo.
-					if (vehiculo.wialonUnitId) {
-						return await responderVinculoGuardado({
-							...vehiculo,
-							wialonUnitId: vehiculo.wialonUnitId,
-						});
-					}
-
-					// 2. Sin vínculo: se deduce buscando la placa en el catálogo.
-					const placa = vehiculo.licensePlate?.trim() || null;
-					// Sin núcleo de placa (vacía o de relleno: "NUEVO", "N/A") no hay
-					// nada confiable que buscar: cualquier resultado sería adivinar.
-					const nucleo = extraerNucleoPlaca(placa);
-					if (!placa || !nucleo) {
-						await registrarAuditoria(null, null);
-						return {
-							estado: "sin_vinculo" as const,
-							motivo: "sin_placa" as const,
-							placa,
-							candidatos: [],
-						};
-					}
-
-					// Wialon filtra por subcadena LITERAL de sys_name, así que la placa
-					// cruda del CRM ("P - 278KJQ", "P0-720GVH") no trae la unidad
-					// "P-278KJQ ..." / "P-720GVH ...". Se prefiltra solo por los 3
-					// dígitos del núcleo (mismo criterio que el selector de la ficha) y
-					// matchUnidadPorPlaca descarta lo que no coincide completo.
-					// flags:1 = solo id/nm, que es todo lo que el match necesita.
-					const catalogo = await client.searchUnits({
-						filterName: nucleo.digitos,
-						flags: 1,
-					});
-					const { unidad, motivo, coincidencias } = matchUnidadPorPlaca(
-						placa,
-						catalogo.items,
-					);
-
-					if (!unidad) {
-						await registrarAuditoria(null, null);
-						return {
-							estado: "sin_vinculo" as const,
-							motivo: motivo === "ok" ? "sin_coincidencia" : motivo,
-							placa,
-							// Solo tiene sentido ofrecer candidatos cuando hay de dónde
-							// elegir; con cero coincidencias la lista sería ruido.
-							candidatos:
-								motivo === "ambiguo"
-									? coincidencias.map((u) => ({ id: u.id, nm: u.nm }))
-									: [],
-						};
-					}
-
-					// Sin las columnas de la 0057 no se puede guardar ni chequear
-					// vínculos: se responde con la deducción, como documenta el fallback.
-					const auto = vehiculo.columnasVinculo
-						? await fijarVinculoPorPlaca(input.vehicleId, unidad.id, unidad.nm)
-						: "sin_columnas";
-
-					// No se pudo confirmar que la unidad no esté asignada a otro vehículo
-					// (falló el lock o la consulta): fail closed. Devolver la deducción
-					// podría mostrar la ubicación del carro al que se reasignó el GPS.
-					if (auto === "error") {
-						await registrarAuditoria(null, null);
-						return {
-							estado: "no_disponible" as const,
-							error: {
-								code: "VINCULO_NO_VERIFICADO",
-								message:
-									"No se pudo verificar la unidad GPS de este vehículo. Intente de nuevo.",
-							},
-						};
-					}
-
-					if (auto === "asignada_a_otro") {
-						await registrarAuditoria(null, null);
-						return {
-							estado: "sin_vinculo" as const,
-							motivo: "asignada_a_otro" as const,
-							placa,
-							candidatos: [{ id: unidad.id, nm: unidad.nm }],
-						};
-					}
-
-					if (auto === "ya_vinculado") {
-						const actual = await leerVehiculoParaGps(input.vehicleId);
-						if (actual?.wialonUnitId) {
-							return await responderVinculoGuardado({
-								...actual,
-								wialonUnitId: actual.wialonUnitId,
-							});
-						}
-						// El UPDATE no escribió porque había un vínculo, pero al releer ya no
-						// está (lo cambiaron entre medio): no se sabe cuál vale, fail closed.
-						await registrarAuditoria(null, null);
-						return {
-							estado: "no_disponible" as const,
-							error: {
-								code: "VINCULO_NO_VERIFICADO",
-								message:
-									"No se pudo verificar la unidad GPS de este vehículo. Intente de nuevo.",
-							},
-						};
-					}
-
-					if (!(await registrarAuditoria(unidad.id, unidad.nm))) {
-						return sinAuditoria;
-					}
-					return await construirRespuestaVinculada(
-						client,
-						unidad.id,
-						unidad.nm,
-						"placa",
-						placa,
-					);
-				} catch (error) {
-					await registrarAuditoria(null, null);
-					// A la UI solo llegan textos fijos: el error original (un
-					// DrizzleQueryError trae el SQL y sus parámetros; un error de red,
-					// host/IP) se loguea completo en el servidor.
-					console.error("GPS_VEHICULO_ERROR", {
-						vehicleId: input.vehicleId,
-						code: error instanceof WialonClientError ? error.code : undefined,
-						message: error instanceof Error ? error.message : String(error),
-					});
-					if (error instanceof WialonClientError) {
-						return {
-							estado: "no_disponible" as const,
-							error: {
-								code: error.code,
-								message: mensajeUsuarioWialon(error),
-							},
-						};
-					}
-					return {
-						estado: "no_disponible" as const,
-						error: {
-							code: "ERROR_INTERNO",
-							message:
-								"No se pudo consultar el GPS del vehículo. Intente de nuevo.",
-						},
-					};
-				}
-			})();
-
+			if (respuesta.estado === "no_disponible") {
+				return {
+					...respuesta,
+					auditada: auditado === true,
+					referencia: correlationId,
+				};
+			}
 			return { ...respuesta, auditada: auditado === true };
 		}),
 
@@ -1449,4 +1537,4 @@ export const wialonRouter = {
 				})),
 			};
 		}),
-};
+});

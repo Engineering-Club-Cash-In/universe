@@ -178,14 +178,30 @@ export function GpsVehiculoCard({
 				) : (
 					// Wialon caído: nota discreta, no una alerta roja. Que el proveedor
 					// no responda no es un problema del crédito ni del asesor.
-					<p className="py-2 text-muted-foreground text-sm italic">
-						No se pudo consultar el GPS en este momento
-						{gps.data?.estado === "no_disponible" && gps.data.error.message
-							? `: ${gps.data.error.message}`
-							: gps.error?.message
-								? `: ${gps.error.message}`
-								: "."}
-					</p>
+					<div className="space-y-1 py-2">
+						<p className="text-muted-foreground text-sm italic">
+							No se pudo consultar el GPS en este momento
+							{gps.data?.estado === "no_disponible" && gps.data.error.message
+								? `: ${gps.data.error.message}`
+								: gps.error?.message
+									? `: ${gps.error.message}`
+									: "."}
+						</p>
+						{gps.data?.estado === "no_disponible" &&
+							gps.data.error.code === "WIALON_NO_DISPONIBLE" && (
+								<p className="text-muted-foreground text-xs">
+									La integración está temporalmente deshabilitada por fallos
+									repetidos. Use el portal de La Legión o contacte a su
+									supervisor mientras se restablece.
+								</p>
+							)}
+						{gps.data?.estado === "no_disponible" && gps.data.referencia && (
+							<p className="text-muted-foreground text-xs">
+								Referencia para soporte:{" "}
+								<span className="font-mono">{gps.data.referencia}</span>
+							</p>
+						)}
+					</div>
 				)}
 				{motivoConfirmado != null && (
 					<div className="mt-4 flex items-center justify-between border-t pt-3">

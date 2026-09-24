@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { formatFechaHora, formatLatency, resolveEstado } from "./-gps-format";
+import {
+	formatDuracion,
+	formatFechaHora,
+	formatLatency,
+	formatPorcentaje,
+	resolveEstado,
+} from "./-gps-format";
 
 describe("formatLatency", () => {
 	test("formatea milisegundos", () => {
@@ -59,5 +65,35 @@ describe("resolveEstado", () => {
 		expect(
 			resolveEstado({ connected: true, latencyMs: 5000, unitCount: 70 }),
 		).toBe("conectado");
+	});
+});
+
+describe("formatPorcentaje", () => {
+	test("redondea a entero", () => {
+		expect(formatPorcentaje(0.421)).toBe("42%");
+		expect(formatPorcentaje(0)).toBe("0%");
+		expect(formatPorcentaje(1)).toBe("100%");
+	});
+
+	test("retorna guión largo ante null o valores no finitos", () => {
+		expect(formatPorcentaje(null)).toBe("—");
+		expect(formatPorcentaje(Number.NaN)).toBe("—");
+	});
+});
+
+describe("formatDuracion", () => {
+	test("milisegundos por debajo de 1000", () => {
+		expect(formatDuracion(480)).toBe("480 ms");
+		expect(formatDuracion(0)).toBe("0 ms");
+	});
+
+	test("segundos con un decimal desde 1000ms", () => {
+		expect(formatDuracion(1000)).toBe("1.0 s");
+		expect(formatDuracion(5200)).toBe("5.2 s");
+	});
+
+	test("retorna guión largo ante null o valores no finitos", () => {
+		expect(formatDuracion(null)).toBe("—");
+		expect(formatDuracion(Number.NaN)).toBe("—");
 	});
 });

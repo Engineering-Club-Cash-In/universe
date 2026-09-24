@@ -15,7 +15,10 @@ import {
 	setWialonClient,
 	WialonClient,
 } from "../services/wialon/wialon-client";
-import { WialonClientError } from "../services/wialon/wialon-types";
+import {
+	WialonClientError,
+	type WialonIntentoEvento,
+} from "../services/wialon/wialon-types";
 import { mapWialonErrorToOrpc, wialonRouter } from "./wialon";
 
 // Rol "admin" satisface también canAccessCobros/canAssignCobros/canAccessAdmin,
@@ -215,10 +218,21 @@ function mockDbAdmin() {
 		}),
 		// getGpsVehiculo audita cada consulta en gps_consulta_logs (CB-118).
 		// Se captura en insertsGpsAuditoria para poder aserir motivo/usuario.
+		// `.returning()` simula el id generado (CB-121: se enlaza con la
+		// bitácora técnica de gps_integracion_logs).
 		insert: () => ({
-			values: async (data: Record<string, unknown>) => {
-				if (errorInsertAuditoria) throw errorInsertAuditoria;
+			values: (data: Record<string, unknown>) => {
+				if (errorInsertAuditoria) {
+					return {
+						returning: async () => {
+							throw errorInsertAuditoria;
+						},
+					};
+				}
 				insertsGpsAuditoria.push(data);
+				return {
+					returning: async () => [{ id: "gps-consulta-log-id-fake" }],
+				};
 			},
 		}),
 	};
@@ -551,6 +565,50 @@ describe("wialonRouter", () => {
 
 				expect(res.connected).toBe(true);
 				expect(res.user?.nm).toBe("Admin IT");
+			} finally {
+				setWialonClient(null);
+			}
+		});
+
+		it("cada llamada a Wialon queda en la bitácora con el endpoint como origen y el usuario", async () => {
+			const mockFetch = async (_: unknown, init?: RequestInit) => {
+				const bodyStr = String(init?.body || "");
+				if (bodyStr.includes("token%2Flogin")) {
+					return new Response(
+						JSON.stringify({ eid: "sid-ctx", user: { id: 1, nm: "Admin IT" } }),
+						{ status: 200 },
+					);
+				}
+				return new Response(JSON.stringify({ totalItemsCount: 0, items: [] }), {
+					status: 200,
+				});
+			};
+			const eventos: WialonIntentoEvento[] = [];
+			setWialonClient(
+				new WialonClient({ token: "tok-test" }, mockFetch, (e) =>
+					eventos.push(e),
+				),
+			);
+
+			try {
+				const mockContext = {
+					headers: new Headers(),
+					session: { user: { id: "user-ctx", email: "agent@example.com" } },
+					user: { id: "user-ctx", role: "cobros_ejecutivo" },
+					userId: "user-ctx",
+					userRole: "cobros_ejecutivo",
+				};
+
+				await call(wialonRouter.getWialonConnectionStatus, undefined, {
+					context: mockContext as unknown as Context,
+					path: ["wialonRouter", "getWialonConnectionStatus"],
+				});
+
+				expect(eventos.length).toBeGreaterThan(0);
+				for (const e of eventos) {
+					expect(e.contexto.origen).toBe("getWialonConnectionStatus");
+					expect(e.contexto.userId).toBe("user-ctx");
+				}
 			} finally {
 				setWialonClient(null);
 			}

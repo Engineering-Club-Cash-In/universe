@@ -60,6 +60,10 @@ import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
+import {
+	correrPurgaGpsIntegracionLogs,
+	correrSaludGpsIntegracion,
+} from "./jobs/gps-integracion-salud";
 import { correrDispatchPagalo } from "./jobs/pagalo-dispatch";
 import { correrPollPagalo } from "./jobs/pagalo-poll";
 import {
@@ -85,6 +89,7 @@ import {
 import { PERMISSIONS } from "./lib/roles";
 import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
 import { convenioDecisionRouter } from "./routers/convenio-decision";
+import { gpsIntegracionRouter } from "./routers/gps-integracion";
 import {
 	appRouter,
 	disbursementRouter,
@@ -248,6 +253,7 @@ const handler = new RPCHandler(
 		convenioDecisionRouter,
 		recuperacionVehiculoRouter,
 		wialonRouter,
+		gpsIntegracionRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {
@@ -2112,6 +2118,18 @@ async function correrReconciliacionDeBoletas(): Promise<void> {
 }
 
 setInterval(correrReconciliacionDeBoletas, 5 * 60 * 1000);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Salud de la integración GPS/Wialon (CB-121), también fuera de la bandera de
+// negocio: es observabilidad de infraestructura (abre/cierra alertas de tasa
+// de error y latencia, y purga la bitácora técnica >90 días), no depende de
+// qué jobs de cobros estén prendidos en esta rama.
+// ═══════════════════════════════════════════════════════════════════════════
+setInterval(correrSaludGpsIntegracion, 5 * 60 * 1000);
+// Corre también al arrancar: si el proceso se reinicia antes de 24 h (deploys
+// seguidos), el setInterval solo nunca llegaría a purgar.
+void correrPurgaGpsIntegracionLogs();
+setInterval(correrPurgaGpsIntegracionLogs, 24 * 60 * 60 * 1000);
 
 // El respaldo del rechazo (D-39), también fuera de la bandera: si el WhatsApp
 // del rechazo falló, el cliente sigue creyendo que su pago va bien — y, peor,

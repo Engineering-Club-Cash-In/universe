@@ -1541,7 +1541,11 @@ describe("WialonClient", () => {
 
 		// Ejecutamos getUnitsStatus: la búsqueda de metadatos fallará
 		const status = await client.getUnitsStatus([333]);
-		expect(searchCalls).toBe(1);
+		// CB-121: el error 5 (ejecución en el servidor) se clasifica como
+		// transitorio y core/search_items es una lectura idempotente, así que
+		// el cliente reintenta automáticamente (3 intentos en total) antes de
+		// darse por vencido — la negative cache sigue siendo el resultado final.
+		expect(searchCalls).toBe(3);
 		expect(status.length).toBe(1);
 
 		// Verificamos que la entrada expirada fue SOBRESCRITA con negative cache (null) y lookupFailed: true
@@ -1563,10 +1567,12 @@ describe("WialonClient", () => {
 		expect(remainingTtl).toBeGreaterThan(4 * 60 * 1000);
 		expect(remainingTtl).toBeLessThanOrEqual(5 * 60 * 1000);
 
-		// En la siguiente llamada inmediata, NO debe reintentar la búsqueda de metadatos (respeta backoff)
-		// y continúa preservando isIgnitionOn como undefined
+		// En la siguiente llamada inmediata, la negative cache evita volver a
+		// buscar metadatos (searchCalls no sube desde donde quedó tras los 3
+		// intentos de la llamada anterior) y sigue preservando isIgnitionOn
+		// como undefined.
 		const statusSecond = await client.getUnitsStatus([333]);
-		expect(searchCalls).toBe(1); // Sigue siendo 1 llamada
+		expect(searchCalls).toBe(3); // Ningún intento nuevo: la negative cache lo evita
 		expect(statusSecond[0].isIgnitionOn).toBeUndefined();
 	});
 

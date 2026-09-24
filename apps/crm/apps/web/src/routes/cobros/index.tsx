@@ -65,6 +65,35 @@ function calcularDiasHastaPago(fechaProximoPago: string | null) {
 
 type FiltroTemporal = "hoy" | "semana" | "quincena" | "mes" | "todos";
 
+/**
+ * Etapas que la cobranza gestiona.
+ *
+ * Ya no están "En Convenio", "Incobrable", "Pendiente Cancelación" ni
+ * "Completado": a esos créditos el sistema no les devenga mora, así que no hay
+ * nada que cobrar y el servidor dejó de listarlos (lib/estados-cobranza.ts en
+ * el back, derivado de STATUS_EXCLUIDOS_MORA de cartera-back). Dejar el chip
+ * sólo ofrecía un filtro que siempre devuelve una lista vacía.
+ */
+const ETAPAS_COBRANZA = [
+	{ key: "al_dia", label: "Al Día", color: "bg-green-100 text-green-800" },
+	{
+		key: "mora_30",
+		label: "Mora 30",
+		color: "bg-yellow-100 text-yellow-800",
+	},
+	{
+		key: "mora_60",
+		label: "Mora 60",
+		color: "bg-orange-100 text-orange-800",
+	},
+	{ key: "mora_90", label: "Mora 90", color: "bg-red-100 text-red-800" },
+	{
+		key: "mora_120",
+		label: "Mora 120+",
+		color: "bg-red-200 text-red-900",
+	},
+];
+
 interface EmbudoEstado {
 	key: string;
 	label: string;
@@ -294,9 +323,13 @@ function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
 	const [filtroTemporal, setFiltroTemporal] = usePersistedState<FiltroTemporal>("cobros/filtroTemporal", "hoy");
-	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
-		useState(false);
-	const [filtroEtapa, setFiltroEtapa] = usePersistedState<string | null>("cobros/filtroEtapa", null);
+	const [filtroEtapaGuardado, setFiltroEtapa] = usePersistedState<string | null>("cobros/filtroEtapa", null);
+	// El filtro vive en el navegador: un cobrador que dejó marcado "Incobrable"
+	// o "En Convenio" antes de que esas etapas desaparecieran volvería a una
+	// lista permanentemente vacía. Si la etapa guardada ya no existe, se ignora.
+	const filtroEtapa = ETAPAS_COBRANZA.some((e) => e.key === filtroEtapaGuardado)
+		? filtroEtapaGuardado
+		: null;
 	const [filtroEtiquetas, setFiltroEtiquetas] = usePersistedState<string[]>("cobros/filtroEtiquetas", []);
 	const [page, setPage] = usePersistedState<number>("cobros/page", 1);
 	const [filterValue, setFilterValue] = usePersistedState<string>("cobros/filterValue", "");
@@ -519,17 +552,7 @@ function RouteComponent() {
 
 	// Filtrar según el rango temporal seleccionado
 	const creditosFiltrados = useMemo(() => {
-		let filtrados = creditosConDias;
-
-		// Excluir completados e incobrables si el filtro está desactivado
-		// NOTA: El filtro por etapa ahora se hace en el servidor mediante estadoMora
-		if (!mostrarCompletadosIncobrables && !filtroEtapa) {
-			filtrados = filtrados.filter(
-				(c) =>
-					c.estadoContrato !== "completado" &&
-					c.estadoContrato !== "incobrable",
-			);
-		}
+		const filtrados = creditosConDias;
 
 		// Filtrar por rango temporal
 		if (filtroTemporal === "todos") return filtrados;
@@ -548,7 +571,7 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtiquetas, filtroEtapa]);
+	}, [creditosConDias, filtroTemporal, filtroEtiquetas, filtroEtapa]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -574,45 +597,7 @@ function RouteComponent() {
 		{ key: "todos" as const, label: "Todos", icon: Users },
 	];
 
-	const filtrosEtapa = [
-		{ key: "al_dia", label: "Al Día", color: "bg-green-100 text-green-800" },
-		{
-			key: "en_convenio",
-			label: "En Convenio",
-			color: "bg-green-100 text-green-800",
-		},
-		{
-			key: "mora_30",
-			label: "Mora 30",
-			color: "bg-yellow-100 text-yellow-800",
-		},
-		{
-			key: "mora_60",
-			label: "Mora 60",
-			color: "bg-orange-100 text-orange-800",
-		},
-		{ key: "mora_90", label: "Mora 90", color: "bg-red-100 text-red-800" },
-		{
-			key: "mora_120",
-			label: "Mora 120+",
-			color: "bg-red-200 text-red-900",
-		},
-		{
-			key: "incobrable",
-			label: "Incobrable",
-			color: "bg-gray-100 text-gray-800",
-		},
-		{
-			key: "pendiente_cancelacion",
-			label: "Pendiente Cancelación",
-			color: "bg-purple-100 text-purple-800",
-		},
-		{
-			key: "completado",
-			label: "Completado",
-			color: "bg-blue-100 text-blue-800",
-		},
-	];
+	const filtrosEtapa = ETAPAS_COBRANZA;
 
 	if (dashboardStats.isLoading) {
 		return (
@@ -795,18 +780,6 @@ function RouteComponent() {
 									label: "Mora 120+",
 									color: "bg-red-200 text-red-900",
 									barColor: "#b91c1c",
-								},
-								{
-									key: "incobrable",
-									label: "Incobrable",
-									color: "bg-gray-100 text-gray-800",
-									barColor: "#6b7280",
-								},
-								{
-									key: "completado",
-									label: "Completado",
-									color: "bg-blue-100 text-blue-800",
-									barColor: "#3b82f6",
 								},
 							] satisfies EmbudoEstado[]
 						).map((estado) => {

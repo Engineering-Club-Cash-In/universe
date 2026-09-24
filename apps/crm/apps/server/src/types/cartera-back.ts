@@ -713,6 +713,11 @@ export interface GetAllCreditsParams {
 	mes: number;
 	anio: number;
 	estado?: StatusCreditEnum;
+	/**
+	 * Lista blanca de estados. Se INTERSECTA con `estado` en el WHERE de
+	 * cartera-back (son dos condiciones AND, no una alternativa).
+	 */
+	estados_credito?: string[];
 	page?: number;
 	perPage?: number;
 	numero_credito_sifco?: string;

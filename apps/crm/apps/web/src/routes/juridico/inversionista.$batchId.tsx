@@ -359,6 +359,39 @@ function RouteComponent() {
 	// al emitir el primero y puede necesitar otro después.
 	const cerrada = bateria.status === "descartada";
 
+	/**
+	 * El contrato que se armó por fuera entra por acá y termina igual que los
+	 * emitidos: con sus enlaces y en la ficha del inversionista.
+	 *
+	 * Va en dos lugares: debajo de los resultados de la generación —que es donde
+	 * jurídico se da cuenta de que le falta uno— y al final de la pantalla. Pide
+	 * la categoría primero porque de ahí sale la lista de tipos.
+	 */
+	const barraDeSubida = (
+		<div className="flex items-center justify-end gap-3 rounded-lg border border-dashed p-3">
+			<p className="text-muted-foreground text-sm">
+				¿El contrato se armó fuera del sistema?
+			</p>
+			<Button
+				variant="outline"
+				size="sm"
+				disabled={documentTypes.length === 0}
+				title={
+					documentTypes.length === 0
+						? "Elegí la categoría para ver los tipos de contrato"
+						: undefined
+				}
+				onClick={() => {
+					setTipoASubir(undefined);
+					setSubiendo(true);
+				}}
+			>
+				<FileUp className="mr-2 h-4 w-4" />
+				Subir contrato
+			</Button>
+		</div>
+	);
+
 	return (
 		<div className="space-y-4 p-4 md:p-6">
 			<div className="flex items-center gap-3">
@@ -526,6 +559,7 @@ function RouteComponent() {
 							onGenerate={(data) => generarMutation.mutateAsync(data)}
 							isGenerating={generarMutation.isPending}
 							onBack={() => navigate({ to: "/juridico" })}
+							accionesDeResultados={barraDeSubida}
 							// Reemplazar acá y no sólo desde la ficha porque al darle
 							// "Listo" la batería sale de la lista de jurídico: esta pantalla
 							// es la última oportunidad de corregir un documento.
@@ -629,34 +663,9 @@ function RouteComponent() {
 				/>
 			)}
 
-			{/* Abajo de todo, después del último contrato: el que se armó por fuera
-			    entra por acá y termina igual que los emitidos, con sus enlaces y en
-			    la ficha. Pide la categoría primero porque de ahí sale la lista de
-			    tipos. */}
-			{!cerrada && (
-				<div className="flex items-center justify-end gap-3 rounded-lg border border-dashed p-3">
-					<p className="text-muted-foreground text-sm">
-						¿El contrato se armó fuera del sistema?
-					</p>
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={documentTypes.length === 0}
-						title={
-							documentTypes.length === 0
-								? "Elegí la categoría para ver los tipos de contrato"
-								: undefined
-						}
-						onClick={() => {
-							setTipoASubir(undefined);
-							setSubiendo(true);
-						}}
-					>
-						<FileUp className="mr-2 h-4 w-4" />
-						Subir contrato
-					</Button>
-				</div>
-			)}
+			{/* La misma barra que va bajo los resultados: al final de la pantalla
+			    también, para el que llega hasta acá. */}
+			{!cerrada && barraDeSubida}
 
 			<UploadInvestorContractModal
 				batchId={batchId}

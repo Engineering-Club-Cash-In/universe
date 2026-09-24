@@ -336,6 +336,12 @@ interface DynamicContractWizardProps {
 	 */
 	accionPorContrato?: (result: ContractResult) => ReactNode;
 	/**
+	 * Lo que el área quiera poner debajo de la lista de resultados, antes de las
+	 * instrucciones. Inversiones pone ahí lo de subir un contrato armado por
+	 * fuera, para tenerlo a mano sin bajar hasta el final de la pantalla.
+	 */
+	accionesDeResultados?: ReactNode;
+	/**
 	 * Qué hacer cuando le dan "Listo" en los resultados, si no hay paso de
 	 * enlazado. Por defecto se sale de la pantalla, como el botón de volver;
 	 * inversiones aprovecha para avisarle a quien sigue.
@@ -874,6 +880,7 @@ export function DynamicContractWizard({
 	onGetDocumentsByDpi,
 	onGenerate,
 	accionPorContrato,
+	accionesDeResultados,
 	onFinish,
 	onLinkContracts,
 	onBack,
@@ -3063,6 +3070,8 @@ export function DynamicContractWizard({
 							retryingType={retryingType}
 							accionPorContrato={accionPorContrato}
 						/>
+
+						{accionesDeResultados}
 
 						{/* Instructions for user */}
 						<Card className="border-blue-200 bg-blue-50">

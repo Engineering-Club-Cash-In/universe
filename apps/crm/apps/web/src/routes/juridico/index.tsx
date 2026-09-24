@@ -6,7 +6,6 @@ import {
 	Banknote,
 	CheckCircle,
 	FilePlus2,
-	FileSignature,
 	FileText,
 	Landmark,
 	Loader2,
@@ -79,7 +78,6 @@ function RouteComponent() {
 		canApproveLegalStage,
 		isLoading: isLoadingPermissions,
 	} = useJuridicoPermissions();
-	const [searchQuery, setSearchQuery] = useState("");
 	const [opportunitiesSearchQuery, setOpportunitiesSearchQuery] = useState("");
 	const [etapaFiltro, setEtapaFiltro] = useState<EtapaDeJuridico>(80);
 	const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
@@ -134,7 +132,7 @@ function RouteComponent() {
 	const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
 
 	// Obtener oportunidades listas para contratos (90%+)
-	const { data: leadsWithContracts, isLoading } = useQuery({
+	const { data: leadsWithContracts } = useQuery({
 		...orpc.getOpportunitiesForContracts.queryOptions({
 			input: { closurePercentages: [90, 85] },
 		}),
@@ -173,13 +171,6 @@ function RouteComponent() {
 	}
 
 	// Filtrar leads por búsqueda
-	const filteredLeads = leadsWithContracts?.filter(
-		(lead) =>
-			lead?.lead.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			lead.lead.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			lead.lead.dpi?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			lead.lead.email?.toLowerCase().includes(searchQuery.toLowerCase()),
-	);
 
 	const cuantasEnEtapa = (etapa: EtapaDeJuridico) =>
 		opportunitiesForContracts?.filter(
@@ -387,7 +378,7 @@ function RouteComponent() {
 
 			{/* Tabs for different views */}
 			<Tabs defaultValue="opportunities" className="w-full">
-				<TabsList className="grid w-full grid-cols-3">
+				<TabsList className="grid w-full grid-cols-2">
 					<TabsTrigger
 						value="opportunities"
 						className="flex items-center gap-2"
@@ -401,10 +392,6 @@ function RouteComponent() {
 						{bateriasAbiertas > 0 && (
 							<Badge variant="secondary">{bateriasAbiertas}</Badge>
 						)}
-					</TabsTrigger>
-					<TabsTrigger value="contracts" className="flex items-center gap-2">
-						<FileSignature className="h-4 w-4" />
-						Personas con Contratos
 					</TabsTrigger>
 				</TabsList>
 
@@ -737,133 +724,6 @@ function RouteComponent() {
 					</Card>
 				</TabsContent>
 
-				{/* Personas con Contratos Tab */}
-				<TabsContent value="contracts">
-					<Card>
-						<CardHeader>
-							<CardTitle>Personas con Contratos</CardTitle>
-							<CardDescription>
-								Lista de personas que tienen contratos legales registrados
-							</CardDescription>
-
-							{/* Barra de búsqueda */}
-							<div className="relative">
-								<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-								<Input
-									placeholder="Buscar por nombre, DPI o email..."
-									value={searchQuery}
-									onChange={(e) => setSearchQuery(e.target.value)}
-									className="pl-9"
-								/>
-							</div>
-						</CardHeader>
-						<CardContent>
-							{isLoading ? (
-								<div className="flex items-center justify-center py-8">
-									<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-								</div>
-							) : filteredLeads && filteredLeads.length > 0 ? (
-								<Table>
-									<TableHeader>
-										<TableRow>
-											<TableHead>Nombre</TableHead>
-											<TableHead>DPI</TableHead>
-											<TableHead>Contacto</TableHead>
-											<TableHead className="text-center">Contratos</TableHead>
-											<TableHead>Último Contrato</TableHead>
-											<TableHead className="text-right">Acciones</TableHead>
-										</TableRow>
-									</TableHeader>
-									<TableBody>
-										{filteredLeads.map((opp) => (
-											<TableRow
-												key={opp.id}
-												className="cursor-pointer hover:bg-muted/50"
-												onClick={() =>
-													navigate({
-														to: `/juridico/${opp.lead.id}?opportunityId=${opp.id}`,
-													})
-												}
-											>
-												<TableCell>
-													<button
-														type="button"
-														className="cursor-pointer text-left font-medium text-primary hover:underline"
-														onClick={(e) => {
-															e.stopPropagation();
-															handleOpenOpportunityModal(opp.id);
-														}}
-													>
-														{opp.lead.firstName} {opp.lead.lastName}
-													</button>
-												</TableCell>
-												<TableCell className="font-mono text-sm">
-													{opp.lead.dpi || "N/A"}
-												</TableCell>
-												<TableCell>
-													<div className="text-sm">
-														<div>{opp.lead.email || "Sin email"}</div>
-														<div className="text-muted-foreground">
-															{opp.lead.phone || "Sin teléfono"}
-														</div>
-													</div>
-												</TableCell>
-												<TableCell className="text-center">
-													<Badge variant="outline">{opp.contractCount}</Badge>
-												</TableCell>
-												<TableCell>
-													{opp.latestContractDate ? (
-														<div className="text-sm">
-															<div>
-																{format(
-																	new Date(opp.latestContractDate),
-																	"dd MMM yyyy",
-																	{ locale: es },
-																)}
-															</div>
-															<div className="text-muted-foreground">
-																{opp.latestContractName}
-															</div>
-														</div>
-													) : (
-														<span className="text-muted-foreground text-sm">
-															N/A
-														</span>
-													)}
-												</TableCell>
-												<TableCell className="text-right">
-													<Link
-														to="/juridico/$leadId"
-														params={{ leadId: opp.lead.id }}
-														search={{ opportunityId: opp.id }}
-														className="font-medium text-primary text-sm hover:underline"
-														onClick={(e) => e.stopPropagation()}
-													>
-														Ver detalles →
-													</Link>
-												</TableCell>
-											</TableRow>
-										))}
-									</TableBody>
-								</Table>
-							) : (
-								<div className="flex flex-col items-center justify-center py-12 text-center">
-									<FileText className="mb-3 h-12 w-12 text-gray-400" />
-									<h3 className="mb-1 font-semibold text-gray-900 text-lg">
-										{searchQuery
-											? "No se encontraron resultados"
-											: "No hay contratos registrados"}
-									</h3>
-									<p className="text-gray-500 text-sm">
-										{searchQuery
-											? "Intenta con otros términos de búsqueda"
-											: "Los contratos registrados aparecerán aquí"}
-									</p>
-								</div>
-							)}
-						</CardContent>
-					</Card>
-				</TabsContent>
 			</Tabs>
 
 			{/* Opportunity Detail Modal */}

@@ -239,6 +239,13 @@
 			"when": 1790090086602,
 			"tag": "0041_add_investor_rep_legal_dpi",
 			"breakpoints": true
+		},
+		{
+			"idx": 34,
+			"version": "7",
+			"when": 1790090186602,
+			"tag": "0042_add_signed_pdf_link",
+			"breakpoints": true
 		}
 	]
 }

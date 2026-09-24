@@ -6,7 +6,10 @@ import {
 } from "../db/schema/legal-contracts";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { descargarPdfFirmado } from "../services/legal-docs-api";
-import { getFileUrlWithBucketInKey } from "./storage";
+import {
+	getFileUrlWithBucketInKey,
+	uploadPdfWithBucketInKey,
+} from "./storage";
 
 /**
  * El espejo de los contratos de inversión en cartera.
@@ -120,21 +123,26 @@ function nombreEnLaPapeleria(contrato: {
 export async function espejarContratoEnCartera(
 	contractId: string,
 	createdBy?: string,
-	/** PDF a copiar. Por defecto, el que se generó y quedó en R2. */
+	/** PDF a copiar. Por defecto, el mejor que haya en R2. */
 	pdf?: Blob,
 ): Promise<boolean> {
 	try {
 		const contrato = await contratoConDueno(contractId);
 		if (!contrato) return false;
 
-		if (!pdf && !contrato.pdfLink) {
+		// El firmado manda: en la papelería tiene que estar el documento que vale,
+		// no el borrador. Se lee de nuestra copia en R2, así que volver a copiar un
+		// contrato ya cerrado no le pregunta nada a WeeTrust.
+		const key = contrato.signedPdfLink ?? contrato.pdfLink;
+
+		if (!pdf && !key) {
 			console.warn(
 				`[espejo-contratos] el contrato ${contractId} no tiene PDF: no se copia a cartera`,
 			);
 			return false;
 		}
 
-		const archivo = pdf ?? (await bajarPdfDeR2(contrato.pdfLink as string));
+		const archivo = pdf ?? (await bajarPdfDeR2(key as string));
 
 		await carteraBackClient.upsertInvestorContractDocument({
 			file: archivo,
@@ -160,27 +168,47 @@ export async function espejarContratoEnCartera(
 }
 
 /**
- * Cambia en cartera el borrador por el PDF firmado.
+ * Baja de WeeTrust el PDF firmado y lo guarda en R2.
  *
- * Aparte y best-effort: si WeeTrust no lo entrega, el contrato igual quedó
- * marcado como firmado y en cartera sigue estando el documento con sus
- * enlaces; lo que falta es el archivo con las firmas estampadas, que se puede
- * volver a intentar.
+ * Se le pide a WeeTrust **una sola vez**: la marca es `signedPdfLink`. Antes la
+ * decisión era "el estado acaba de cambiar a firmado", que dependía de lo que
+ * contestara cartera; preguntándole a la propia base, ni un webhook repetido lo
+ * vuelve a bajar ni se queda sin archivo un contrato que firmaron antes de que
+ * existiera su copia en cartera.
+ *
+ * El borrador no se pisa: `pdfLink` es el que se vuelve a subir si hay que
+ * reemitir el documento, y reemitir con el firmado mandaría a firmar un PDF que
+ * ya trae firmas estampadas.
+ *
+ * Best-effort: si WeeTrust no lo entrega, el contrato igual quedó firmado y lo
+ * que se sigue viendo es el borrador. Se reintenta en la próxima consulta de
+ * estado.
  */
-async function reemplazarPorElFirmado(
-	contractId: string,
-	documentID: string | null,
-): Promise<void> {
-	if (!documentID) return;
+async function guardarElPdfFirmado(contrato: {
+	id: string;
+	weetrustDocumentId: string | null;
+}): Promise<Blob | null> {
+	if (!contrato.weetrustDocumentId) return null;
 
 	try {
-		const firmado = await descargarPdfFirmado(documentID);
-		await espejarContratoEnCartera(contractId, undefined, firmado);
+		const firmado = await descargarPdfFirmado(contrato.weetrustDocumentId);
+		const key = await uploadPdfWithBucketInKey(
+			`legal-contracts/firmados/${contrato.id}.pdf`,
+			Buffer.from(await firmado.arrayBuffer()),
+		);
+
+		await db
+			.update(generatedLegalContracts)
+			.set({ signedPdfLink: key, updatedAt: new Date() })
+			.where(eq(generatedLegalContracts.id, contrato.id));
+
+		return firmado;
 	} catch (error) {
 		console.error(
-			`[espejo-contratos] no se pudo copiar el PDF firmado de ${contractId}:`,
+			`[espejo-contratos] no se pudo guardar el PDF firmado de ${contrato.id}:`,
 			error,
 		);
+		return null;
 	}
 }
 
@@ -199,7 +227,18 @@ export async function espejarEstadoDeFirmaEnCartera(
 		const contrato = await contratoConDueno(contractId);
 		if (!contrato) return false;
 
-		const { espejado, estadoAnterior } =
+		// Quedó firmado y todavía no tenemos su PDF firmado: se baja ahora, una
+		// sola vez, y con ese mismo archivo se actualizan los dos lados. Va antes
+		// del PATCH porque copiar el contrato entero ya manda el estado y los
+		// firmantes: el PATCH sería el mismo viaje dos veces.
+		if (contrato.status === "signed" && !contrato.signedPdfLink) {
+			const firmado = await guardarElPdfFirmado(contrato);
+			if (firmado) {
+				return espejarContratoEnCartera(contractId, undefined, firmado);
+			}
+		}
+
+		const { espejado } =
 			await carteraBackClient.updateInvestorContractDocumentState({
 				contrato_id: contrato.id,
 				observer_url: contrato.observerUrl,
@@ -211,14 +250,6 @@ export async function espejarEstadoDeFirmaEnCartera(
 		// copia pudo fallar). Se copia entero ahora, con PDF y todo.
 		if (espejado === false) {
 			return espejarContratoEnCartera(contractId);
-		}
-
-		// Acaba de quedar firmado: lo que hay en cartera es el borrador que se
-		// generó, sin firmas. Se reemplaza por el PDF firmado, que es el que vale
-		// como contrato. Sólo en el cambio de estado: si no, cada consulta de un
-		// contrato ya cerrado volvería a pasear el archivo entero.
-		if (contrato.status === "signed" && estadoAnterior !== "signed") {
-			await reemplazarPorElFirmado(contrato.id, contrato.weetrustDocumentId);
 		}
 
 		return true;

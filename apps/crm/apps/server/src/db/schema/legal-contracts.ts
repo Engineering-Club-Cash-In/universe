@@ -66,6 +66,21 @@ export const generatedLegalContracts = pgTable(
 		additionalSigningLinks: text("additional_signing_links").array(), // Links adicionales si aplica
 		pdfLink: text("pdf_link"), // Link del PDF subido a R2 (opcional)
 
+		/**
+		 * El PDF **firmado**, ya copiado a R2.
+		 *
+		 * `pdfLink` guarda el borrador: el documento como se generó, sin ninguna
+		 * firma. Cuando terminan de firmar, el que vale es otro archivo y vive en
+		 * WeeTrust detrás de sus credenciales. Se baja **una sola vez** —esta
+		 * columna es la marca de que ya se bajó— y desde acá lo sirve la ficha y
+		 * se copia a la papelería del inversionista.
+		 *
+		 * El borrador no se pisa: es el que se vuelve a subir si hay que reemitir
+		 * el documento, y reemitir con el firmado mandaría a firmar un PDF que ya
+		 * tiene firmas estampadas.
+		 */
+		signedPdfLink: text("signed_pdf_link"),
+
 		// Proveedor de firma electrónica usado ("weetrust" | "documenso").
 		signingProvider: text("signing_provider"),
 

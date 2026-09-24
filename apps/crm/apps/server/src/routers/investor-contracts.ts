@@ -62,21 +62,28 @@ import {
 /**
  * URL firmada del PDF de un contrato, o null si no se puede armar.
  *
+ * Con el contrato ya firmado devuelve el **PDF firmado**, que es el que vale:
+ * el de `pdfLink` es el borrador que se generó y no tiene ninguna firma. El
+ * firmado se baja de WeeTrust una sola vez, al cerrarse la firma, y queda en
+ * R2 como cualquier otro archivo nuestro.
+ *
  * Hay contratos que guardaron en `pdfLink` una URL firmada (la que se muestra,
  * que vence) en vez de la key: con una URL entera como key, R2 no encuentra
  * nada. Para esos se recupera la key de la respuesta del generador.
  */
 async function urlDelPdf(contrato: {
 	pdfLink: string | null;
+	signedPdfLink: string | null;
 	apiResponse: unknown;
 }): Promise<string | null> {
 	const respuesta = contrato.apiResponse as { r2Key?: unknown } | null;
 	const key =
-		contrato.pdfLink && !/^https?:\/\//i.test(contrato.pdfLink)
+		contrato.signedPdfLink ||
+		(contrato.pdfLink && !/^https?:\/\//i.test(contrato.pdfLink)
 			? contrato.pdfLink
 			: typeof respuesta?.r2Key === "string"
 				? respuesta.r2Key
-				: null;
+				: null);
 
 	if (!key) return null;
 
@@ -546,6 +553,10 @@ export const investorContractsRouter = {
 					gender: contrato.gender,
 					generatePdf: true,
 					filenamePrefix: prefijoDeArchivo(bateria.investorName),
+					// Lo que lee el inversionista en WeeTrust y en el correo: su
+					// nombre y qué está firmando. Sin esto, el generador cae al nombre
+					// de archivo, que lleva el tipo de contrato y un timestamp.
+					documentName: bateria.investorName,
 				},
 			}));
 
@@ -739,9 +750,11 @@ export const investorContractsRouter = {
 					// la URL se firma acá y vence en una hora, así que se arma en cada
 					// consulta en vez de quedar pegada a la fila.
 					//
-					// Es el documento tal como se emitió. El firmado, cuando todos
-					// firman, se copia aparte a la papelería del inversionista.
+					// Mientras se firma es el documento tal como se emitió; cuando
+					// terminan de firmar, el firmado. `pdfFirmado` dice cuál es, para
+					// que la ficha no prometa firmas que el archivo no tiene.
 					pdfUrl: await urlDelPdf(contrato),
+					pdfFirmado: Boolean(contrato.signedPdfLink),
 				})),
 			);
 		}),
@@ -885,6 +898,13 @@ export const investorContractsRouter = {
 				name: f.name,
 			}));
 
+			// El titular de un contrato de inversión es el inversionista. Sale de
+			// los firmantes guardados y no de la batería porque un contrato puede
+			// reemitirse cuando su batería ya se cerró.
+			const nombreDelInversionista = guardados.find(
+				(f) => f.role === "TITULAR",
+			)?.name;
+
 			// En modo prueba se redirige igual que al generar: un contrato emitido
 			// con correos reales le mandaría la invitación al inversionista.
 			let signers = guardados;
@@ -908,6 +928,10 @@ export const investorContractsRouter = {
 				r2Key: r2KeyDelPdf,
 				contractType: contrato.contractType,
 				filenamePrefix: contrato.contractName,
+				// Igual que al emitirlo: el documento reemitido tiene que llamarse
+				// como el primero, y no "Contrato de Participación - Contrato de
+				// Participación", que es a lo que lleva usar el nombre del archivo.
+				documentName: nombreDelInversionista,
 				signers,
 				observers: CONTRATOS_OBSERVADORES,
 			});

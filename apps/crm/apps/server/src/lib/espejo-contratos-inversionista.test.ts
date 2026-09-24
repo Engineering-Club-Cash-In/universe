@@ -20,8 +20,17 @@ const updateInvestorContractDocumentState = mock(
 	async (_input: Record<string, unknown>) => respuestaDeEstado,
 );
 
+/** Lo que el espejo le escribió al contrato (la key del PDF firmado). */
+let guardadoEnElContrato: Record<string, unknown> | undefined;
+
 mock.module("../db", () => ({
 	db: {
+		update: () => ({
+			set: (valores: Record<string, unknown>) => {
+				guardadoEnElContrato = valores;
+				return { where: async () => undefined };
+			},
+		}),
 		select: () => ({
 			from: (tabla: { _: { name?: string } }) => ({
 				where: () => {
@@ -53,8 +62,18 @@ mock.module("../services/cartera-back-client", () => ({
 		updateInvestorContractDocumentState,
 	},
 }));
+const uploadPdfWithBucketInKey = mock(
+	async (key: string, _buffer: Buffer) => `bucket-crm/${key}`,
+);
+/** Qué key se bajó de R2 para copiarla a cartera. */
+let bajadoDeR2: string | undefined;
+
 mock.module("./storage", () => ({
-	getFileUrlWithBucketInKey: async () => "https://r2.ejemplo/contrato.pdf",
+	getFileUrlWithBucketInKey: async (key: string) => {
+		bajadoDeR2 = key;
+		return "https://r2.ejemplo/contrato.pdf";
+	},
+	uploadPdfWithBucketInKey,
 }));
 
 const descargarPdfFirmado = mock(
@@ -94,6 +113,9 @@ beforeEach(() => {
 	upsertInvestorContractDocument.mockClear();
 	updateInvestorContractDocumentState.mockClear();
 	descargarPdfFirmado.mockClear();
+	uploadPdfWithBucketInKey.mockClear();
+	guardadoEnElContrato = undefined;
+	bajadoDeR2 = undefined;
 });
 
 describe("espejo de contratos en cartera", () => {
@@ -163,26 +185,28 @@ describe("espejo de contratos en cartera", () => {
 		expect(upsertInvestorContractDocument).not.toHaveBeenCalled();
 	});
 
-	test("al quedar firmado, el borrador se reemplaza por el PDF firmado", async () => {
+	test("al quedar firmado se baja el PDF firmado, se guarda y se copia", async () => {
 		contrato = { ...CONTRATO_DE_INVERSION, status: "signed" };
-		respuestaDeEstado = {
-			success: true,
-			espejado: true,
-			estadoAnterior: "pending",
-		};
 
 		await espejarEstadoDeFirmaEnCartera("contrato-1");
 
 		expect(descargarPdfFirmado).toHaveBeenCalledWith("doc-1");
+		// Queda en R2 y la key se escribe en el contrato: es la marca de que ya no
+		// hay que volver a pedírselo a WeeTrust.
+		expect(uploadPdfWithBucketInKey.mock.calls[0][0]).toBe(
+			"legal-contracts/firmados/contrato-1.pdf",
+		);
+		expect(guardadoEnElContrato).toMatchObject({
+			signedPdfLink: "bucket-crm/legal-contracts/firmados/contrato-1.pdf",
+		});
 		expect(upsertInvestorContractDocument).toHaveBeenCalledTimes(1);
 	});
 
-	test("un contrato que ya estaba firmado no vuelve a pasear el archivo", async () => {
-		contrato = { ...CONTRATO_DE_INVERSION, status: "signed" };
-		respuestaDeEstado = {
-			success: true,
-			espejado: true,
-			estadoAnterior: "signed",
+	test("con el firmado ya guardado no se le pide nada más a WeeTrust", async () => {
+		contrato = {
+			...CONTRATO_DE_INVERSION,
+			status: "signed",
+			signedPdfLink: "bucket-crm/legal-contracts/firmados/contrato-1.pdf",
 		};
 
 		await espejarEstadoDeFirmaEnCartera("contrato-1");
@@ -191,18 +215,30 @@ describe("espejo de contratos en cartera", () => {
 		expect(upsertInvestorContractDocument).not.toHaveBeenCalled();
 	});
 
-	test("si WeeTrust no entrega el firmado, el contrato igual queda espejado", async () => {
+	test("si WeeTrust no entrega el firmado, el estado igual se espeja", async () => {
 		contrato = { ...CONTRATO_DE_INVERSION, status: "signed" };
-		respuestaDeEstado = {
-			success: true,
-			espejado: true,
-			estadoAnterior: "pending",
-		};
 		descargarPdfFirmado.mockImplementationOnce(async () => {
 			throw new Error("WeeTrust no responde");
 		});
 
 		expect(await espejarEstadoDeFirmaEnCartera("contrato-1")).toBe(true);
+		// Sin archivo no se escribe la marca: se vuelve a intentar en la próxima
+		// consulta de estado.
+		expect(guardadoEnElContrato).toBeUndefined();
+	});
+
+	test("la papelería recibe el firmado, no el borrador, cuando ya hay firmado", async () => {
+		contrato = {
+			...CONTRATO_DE_INVERSION,
+			status: "signed",
+			signedPdfLink: "bucket-crm/legal-contracts/firmados/contrato-1.pdf",
+		};
+
+		await espejarContratoEnCartera("contrato-1");
+
+		expect(bajadoDeR2).toBe(
+			"bucket-crm/legal-contracts/firmados/contrato-1.pdf",
+		);
 	});
 
 	test("si el contrato no estaba copiado, se copia entero", async () => {

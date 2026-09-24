@@ -47,8 +47,10 @@ interface ContratoDeInversionista {
 	representativeSigningLink: string | null;
 	additionalSigningLinks: string[] | null;
 	signingStatusCheckedAt?: Date | string | null;
-	/** URL firmada del PDF tal como se emitió. Vence: se pide en cada consulta. */
+	/** URL firmada del PDF. Vence: se pide en cada consulta. */
 	pdfUrl?: string | null;
+	/** Si lo que sirve `pdfUrl` es el documento firmado o el borrador. */
+	pdfFirmado?: boolean;
 	cancellationReason?: string | null;
 	replacedByContractId?: string | null;
 	firmantes?: FirmanteDeContrato[];
@@ -152,9 +154,9 @@ function FilaDeContrato({
 					<Badge variant="outline" className={`${estado.className} text-xs`}>
 						{estado.label}
 					</Badge>
-					{/* El documento en bruto, para leerlo sin entrar a WeeTrust. Es el
-					    que se emitió; el firmado queda en la papelería del
-					    inversionista cuando terminan de firmar. */}
+					{/* El documento, sin entrar a WeeTrust. Mientras se firma es el
+					    borrador que se emitió; cuando terminan de firmar es el firmado,
+					    que se baja una sola vez y queda guardado. */}
 					{contrato.pdfUrl && (
 						<Button variant="outline" size="sm" asChild className="h-7">
 							<a
@@ -162,10 +164,14 @@ function FilaDeContrato({
 								target="_blank"
 								rel="noopener noreferrer"
 								className="flex items-center gap-1"
-								title="Abrir el PDF del contrato"
+								title={
+									contrato.pdfFirmado
+										? "Abrir el PDF con las firmas"
+										: "Abrir el PDF del contrato, todavía sin firmas"
+								}
 							>
 								<FileText className="h-3 w-3" />
-								PDF
+								{contrato.pdfFirmado ? "PDF firmado" : "PDF"}
 							</a>
 						</Button>
 					)}

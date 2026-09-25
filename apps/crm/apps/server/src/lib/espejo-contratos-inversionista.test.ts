@@ -144,7 +144,8 @@ describe("espejo de contratos en cartera", () => {
 				rol: "TITULAR",
 				nombre: "ANA REITER",
 				correo: "ana@ejemplo.com",
-				enlace: "https://app.weetrust.mx/signatory/doc/ana",
+				// El enlace de firma no viaja a cartera.
+				enlace: null,
 				estado: "pending",
 				firmadoEl: null,
 			},

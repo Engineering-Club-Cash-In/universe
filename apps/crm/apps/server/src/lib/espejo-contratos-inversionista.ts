@@ -47,7 +47,11 @@ async function firmantesDelContrato(
 		rol: firmante.role,
 		nombre: firmante.name,
 		correo: firmante.email,
-		enlace: firmante.signingUrl,
+		// El enlace de firma no viaja: con él se firma en nombre de esa persona,
+		// y en cartera nadie lo usa —la ficha y el portal muestran el documento,
+		// no los enlaces, que viven en el CRM—. Allá lo podía leer cualquier
+		// cuenta de cartera desde el listado de documentos.
+		enlace: null,
 		estado: firmante.status,
 		firmadoEl: firmante.signedAt?.toISOString() ?? null,
 	}));

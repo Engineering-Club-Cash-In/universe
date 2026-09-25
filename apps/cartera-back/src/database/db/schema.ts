@@ -591,6 +591,15 @@
     seguro_facturado: numeric("seguro_facturado", { precision: 18, scale: 2 }), //viene del credito
     gps_facturado: numeric("gps_facturado", { precision: 18, scale: 2 }), //viene del credito
     reserva: numeric("reserva", { precision: 18, scale: 2 }), //seguro + 600
+  /**
+   * Cuánto acreditó ESTA fila a `usuarios.saldo_a_favor`.
+   *
+   * NULL = fila anterior a la migración 0039; la reversa cae en su conducta
+   * vieja para ésas. No se deriva de las otras columnas: en un pago mixto el
+   * disponible inicial se consume después en mora, rubros y cuotas, y sólo se
+   * acredita el remanente final.
+   */
+  saldo_a_favor_acreditado: numeric("saldo_a_favor_acreditado", { precision: 18, scale: 2 }).default("0"),
     observaciones: text("observaciones"), //input
 
     paymentFalse: boolean("paymentFalse").notNull().default(false), // indica si el pago es falso
@@ -2251,4 +2260,177 @@
       idx_verif_periodo: index("idx_verif_liquidacion_periodo").on(t.periodo, t.cuadra),
       idx_verif_inv: index("idx_verif_liquidacion_inv").on(t.inversionista_id),
     })
+  );
+
+  // ---------------------------------------------------------------------
+  // Rubros: cobros adicionales por crédito (ej. tarjeta de circulación) que
+  // se consumen del disponible de cada pago.
+  //
+  // El TIPO define la naturaleza del cobro —si es obligatorio o no—; el rubro
+  // sólo guarda el caso concreto (a qué crédito, por cuánto, con qué saldo).
+  // No hay periodicidad ni activación programada: un rubro se cobra desde que
+  // se crea, y cuando se salda se puede volver a crear el mismo concepto.
+  // ---------------------------------------------------------------------
+
+  // `customSchema.enum` y no `pgEnum`: la migración los crea como
+  // `cartera.rubro_evento` / `cartera.rubro_origen`, y `pgEnum` los declararía
+  // en `public`. No cambia el runtime (el INSERT que emite drizzle no lleva
+  // cast), pero dejaba a schema.ts describiendo objetos distintos a los que la
+  // base tiene — y `drizzle-kit generate` emitiendo un CREATE TYPE en el schema
+  // equivocado. Mismo patrón que el resto de enums de `cartera` del archivo.
+  export const rubroEventoEnum = customSchema.enum("rubro_evento", [
+    "creacion",
+    "edicion_monto",
+    "edicion",
+    "abono",
+    "activacion",
+    "desactivacion",
+    "reversa",
+    // Un rubro cargado por error no se borra ni se edita a 0 (un rubro de Q0 no
+    // es un rubro): se ANULA. La fila sobrevive con su `monto_original` intacto
+    // —el rastro de cuánto se había llegado a cobrar— y este evento es el que
+    // explica por qué dejó de cobrarse y quién lo decidió.
+    "anulacion",
+  ]);
+
+  // `asesor` está separado de `admin` porque el alta de rubros dejó de ser
+  // ADMIN-only: sin ese valor, el historial —que existe para responder "¿quién
+  // le cobró esto al cliente?"— marcaba "admin" todo lo que daba de alta un
+  // asesor, y la pregunta se volvía irrespondible desde la tabla.
+  export const rubroOrigenEnum = customSchema.enum("rubro_origen", [
+    "admin",
+    "asesor",
+    "job",
+    "pago",
+    "reversa",
+  ]);
+
+  export const rubros_tipos = customSchema.table(
+    "rubros_tipos",
+    {
+      tipo_id: serial("tipo_id").primaryKey(),
+      nombre: text("nombre").notNull(),
+      descripcion: text("descripcion"),
+      // La naturaleza del cobro vive acá, no en cada rubro: "tarjeta de
+      // circulación" ES obligatoria siempre, y quien da de alta el rubro elige
+      // el concepto, no si ese concepto puede saltarse los frenos de mora.
+      obligatorio: boolean("obligatorio").notNull().default(false),
+      activo: boolean("activo").notNull().default(true),
+      created_by: integer("created_by").references(() => platform_users.id),
+      created_at: timestamp("created_at").defaultNow(),
+      updated_at: timestamp("updated_at").defaultNow(),
+    },
+    (t) => [
+      uniqueIndex("rubros_tipos_uq_nombre_activo")
+        .on(sql`lower(${t.nombre})`)
+        .where(sql`${t.activo} = true`),
+    ]
+  );
+
+  export const rubros = customSchema.table(
+    "rubros",
+    {
+      rubro_id: serial("rubro_id").primaryKey(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      tipo_id: integer("tipo_id")
+        .notNull()
+        .references(() => rubros_tipos.tipo_id),
+      // NOT NULL: el tipo dice QUÉ se cobra, la descripción dice POR QUÉ este
+      // crédito en particular. Sin ella el historial no explica el cobro.
+      descripcion: text("descripcion").notNull(),
+      monto_original: numeric("monto_original", { precision: 18, scale: 2 }).notNull(),
+      saldo_pendiente: numeric("saldo_pendiente", { precision: 18, scale: 2 }).notNull(),
+      activo: boolean("activo").notNull().default(true),
+      completado: boolean("completado").notNull().default(false),
+      // Anulado NO se deduce del saldo: anulado y pagado quedan los dos en cero
+      // y son hechos distintos. Es el único flag de esta tabla no derivable.
+      anulado: boolean("anulado").notNull().default(false),
+      created_by: integer("created_by").references(() => platform_users.id),
+      // created_at define el orden de consumo.
+      created_at: timestamp("created_at").defaultNow(),
+      updated_at: timestamp("updated_at").defaultNow(),
+    },
+    (t) => [
+      index("rubros_credito_activo_idx").on(t.credito_id, t.activo),
+      // Acá vivía `rubros_uq_credito_tipo_vivo`, un índice único parcial sobre
+      // (credito_id, tipo_id) con `completado = false AND anulado = false`. La 0038 lo
+      // borra, y esta declaración se va CON ella: dejarla sería peor que no
+      // haber migrado, porque cualquier entorno aprovisionado o sincronizado
+      // desde este esquema volvería a crear el índice y a reventar la reversa
+      // —que es exactamente el escenario que la 0038 viene a arreglar—, sin que
+      // la migración diera ninguna señal de que el problema volvió.
+      //
+      // El motivo de fondo está en la 0038: la exclusividad de "un solo cobro
+      // vivo por concepto" sigue existiendo, pero como regla de ALTA
+      // (`crearRubro`, y al revivir por edición), no como invariante permanente
+      // de la base. Tras una reversa legítima hay DE VERDAD dos deudas del
+      // mismo tipo —la del año pasado que volvió y la de este año—, y ninguna
+      // restricción de base puede distinguir ese caso de un duplicado.
+    ]
+  );
+
+  export const rubros_historial = customSchema.table(
+    "rubros_historial",
+    {
+      historial_id: serial("historial_id").primaryKey(),
+      rubro_id: integer("rubro_id")
+        .notNull()
+        .references(() => rubros.rubro_id, { onDelete: "cascade" }),
+      tipo_evento: rubroEventoEnum("tipo_evento").notNull(),
+      monto_anterior: numeric("monto_anterior", { precision: 18, scale: 2 }),
+      monto_nuevo: numeric("monto_nuevo", { precision: 18, scale: 2 }),
+      saldo_anterior: numeric("saldo_anterior", { precision: 18, scale: 2 }),
+      saldo_nuevo: numeric("saldo_nuevo", { precision: 18, scale: 2 }),
+      pago_id: integer("pago_id").references(() => pagos_credito.pago_id, {
+        onDelete: "set null",
+      }),
+      usuario_id: integer("usuario_id").references(() => platform_users.id),
+      origen: rubroOrigenEnum("origen").notNull(),
+      motivo: text("motivo"),
+      created_at: timestamp("created_at").defaultNow(),
+    },
+    (t) => [
+      index("rubros_historial_rubro_idx").on(t.rubro_id, t.created_at),
+      index("rubros_historial_pago_idx").on(t.pago_id),
+    ]
+  );
+
+  /**
+   * El vínculo boleta ↔ rubro (migración 0037).
+   *
+   * El pago corre en dos etapas: `POST /newPayment` sólo APARTA (escribe el
+   * reclamo con `aplicado = false` y NO toca `rubros.saldo_pendiente`) y
+   * `/aplicar-pago` es el que baja el saldo cuando contabilidad valida. Esta
+   * tabla es donde vive lo apartado mientras tanto, y por lo mismo es la que
+   * contesta "¿este rubro tiene reclamos vivos?" — la pregunta que congela su
+   * edición y que hace imposible que al aplicar el saldo ya no alcance.
+   */
+  export const rubros_pagos = customSchema.table(
+    "rubros_pagos",
+    {
+      id: serial("id").primaryKey(),
+      // CASCADE: la reversa de un parcial BORRA la fila de pagos_credito, y un
+      // reclamo huérfano congelaría el rubro para siempre. La reversa procesa
+      // los reclamos antes de ese borrado; la cascada es la red, no el camino.
+      pago_id: integer("pago_id")
+        .notNull()
+        .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+      rubro_id: integer("rubro_id")
+        .notNull()
+        .references(() => rubros.rubro_id),
+      // Lo APARTADO al registrar la boleta.
+      monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+      // Lo REALMENTE descontado al aplicar. Nullable a propósito: un 0 sería
+      // indistinguible de "se aplicó y no descontó nada".
+      monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }),
+      aplicado: boolean("aplicado").notNull().default(false),
+      created_at: timestamp("created_at").defaultNow(),
+    },
+    (t) => [
+      index("rubros_pagos_pago_idx").on(t.pago_id),
+      // La consulta caliente: "¿tiene reclamos vivos?" en cada edición.
+      index("rubros_pagos_rubro_aplicado_idx").on(t.rubro_id, t.aplicado),
+    ]
   );

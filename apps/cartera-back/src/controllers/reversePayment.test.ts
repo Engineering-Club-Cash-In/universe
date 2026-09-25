@@ -129,7 +129,17 @@ function createTransactionTx(
   const selectResults: unknown[][] = [[payment], [activeCredit], [user], []];
   const takeRows = () => {
     const rows = selectResults.shift() ?? [];
-    return Object.assign(Promise.resolve(rows), { limit: () => Promise.resolve(rows) });
+    // `.for(...)` además de `.limit(...)`: desde que la reversa devuelve los
+    // rubros del pago, `revertirRubrosDelPago` lee sus reclamos con
+    // `.where(...).for("update")`. Sin este eslabón, `.for` era `undefined` y
+    // reventaba la transacción ENTERA — el síntoma no era "falta el rubro" sino
+    // que `reverseInvestors` nunca se llamaba y no se registraba ningún reset,
+    // o sea tests de inversionistas y de `fecha_aplicado` en rojo por una razón
+    // que no tiene nada que ver con ellos.
+    return Object.assign(Promise.resolve(rows), {
+      limit: () => Promise.resolve(rows),
+      for: () => Promise.resolve(rows),
+    });
   };
   const updateWhere = () =>
     Object.assign(Promise.resolve([]), {

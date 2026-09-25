@@ -40,6 +40,7 @@ import {
 	estaAnulado,
 	type FirmanteDeContrato,
 	firmantesEnFicha,
+	salioPorDocumenso,
 } from "@/lib/contract-signers-display";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client } from "@/utils/orpc";
@@ -137,7 +138,7 @@ export function ContractCard({
 		: esFirmaFisica(contract.contractType);
 	// Los contratos que cayeron al fallback de Documenso no tienen documento en
 	// WeeTrust: consultar o reenviar sólo devolvería un error.
-	const enWeeTrust = contract.signingProvider !== "documenso";
+	const enWeeTrust = !salioPorDocumenso(contract);
 	// Sus enlaces son de un documento descartado y, si no se pudo borrar en
 	// WeeTrust, todavía firman: no se ofrecen, no se reenvían ni se consultan
 	// (allá casi siempre ya no existe).

@@ -33,10 +33,14 @@ export function DescargarFirmadoButton({
 			const enlace = document.createElement("a");
 			enlace.href = url;
 			enlace.download = data.nombre;
+			document.body.appendChild(enlace);
 			enlace.click();
+			enlace.remove();
 			// Sin esto el blob queda en memoria hasta que se recarga la página, y
-			// acá se bajan varios contratos seguidos.
-			URL.revokeObjectURL(url);
+			// acá se bajan varios contratos seguidos. Pero no en el mismo tick que
+			// el click: Safari y Firefox cancelan la descarga, sin error, porque
+			// todavía no terminaron de leer el blob.
+			setTimeout(() => URL.revokeObjectURL(url), 60_000);
 		},
 		onError: (error: Error) => toast.error(error.message),
 	});

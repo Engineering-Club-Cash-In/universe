@@ -218,9 +218,11 @@ describe("getMoraRecuperacionPorAsesor — un solo snapshot", () => {
 		// valer es la marca sobre el PROPIO decremento: no hay INCREMENTO de
 		// restitución que marcar como `reverso`.
 		//
-		// Con `anulado` mapeado el plegado saltea el decremento, el nivel se
-		// queda en 100 y el RECALCULO no lo supera: esperado = la foto.
-		// Sin mapearlo el nivel baja a 0 y el rebote del cron se cobra entero.
+		// OJO CON LA FUERZA DE ESTE CANDADO: desde que el techo dejó de bajar con
+		// un pago, el nivel se queda en 100 con la marca y sin ella, así que hoy
+		// el número NO depende de este mapeo. La marca sigue siendo contrato —la
+		// escribe `marcarDecrementoAnulado` y el plegado la lee—, pero quien
+		// impide el esperado de 200 acá es el techo, no ella.
 		respuestas = [
 			universo(1),
 			[
@@ -254,6 +256,49 @@ describe("getMoraRecuperacionPorAsesor — un solo snapshot", () => {
 
 		// Con la marca mapeada: 100.00 (la foto). Sin ella: 200.00.
 		expect(reporte.totales.esperado).toBe("100.00");
+	});
+
+	it("MUTACIÓN: perder `pagoId` en el mapeo deja que un pago ajeno tape la restitución", async () => {
+		// Foto 100. Adentro el cliente paga esos Q100 (pago 7) y además se
+		// revierte un pago ANTERIOR al ciclo (pago 9): son Q100 de mora que nunca
+		// se contaron y que el asesor tiene vivos. Sin el id, las dos mitades
+		// caen a la misma bolsa, el pago 7 tapa la reversa del 9 y el esperado
+		// vuelve a 100.00 con Q100 cobrables afuera del reporte.
+		respuestas = [
+			universo(1),
+			[
+				{
+					asesor_id: 7,
+					nombre: "Ana",
+					esperado: "100",
+					eventos: [
+						{
+							tipoEvento: "DECREMENTO",
+							montoAnterior: "100",
+							montoNuevo: "0",
+							reverso: false,
+							anulado: false,
+							pagoId: "7",
+						},
+						{
+							tipoEvento: "INCREMENTO",
+							montoAnterior: "0",
+							montoNuevo: "100",
+							reverso: true,
+							anulado: false,
+							pagoId: "9",
+						},
+					],
+					nivel_sembrado: "0",
+					cobrado: "0",
+				},
+			],
+		];
+
+		const reporte = await getMoraRecuperacionPorAsesor({ mes: 7, anio: 2026 });
+
+		// Con el id mapeado: 200.00. Sin él: 100.00.
+		expect(reporte.totales.esperado).toBe("200.00");
 	});
 
 	it("sin créditos elegibles no se pide ni un lote, pero la transacción igual es la única puerta", async () => {

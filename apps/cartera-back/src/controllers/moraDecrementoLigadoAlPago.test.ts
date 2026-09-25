@@ -392,24 +392,27 @@ describe("(C) el reporte deja de contar lo repuesto como mora nueva", () => {
 		montoNuevo: 100,
 	};
 
-	it("sin marcar el decremento, la foto de Q100 termina en Q200 de esperado", () => {
-		const generado = moraGeneradaEnPeriodo(foto, [
-			decremento,
-			reposicionDelCron,
-		]);
-
-		expect(foto + generado).toBe(200);
-	});
-
-	it("con el decremento marcado como anulado, el esperado vuelve a Q100", () => {
-		// El pago se cayó: esa bajada nunca debió existir. El nivel no baja, así
-		// que la reposición del cron no supera nada y no genera.
-		const generado = moraGeneradaEnPeriodo(foto, [
-			{ ...decremento, anulado: true },
-			reposicionDelCron,
-		]);
-
-		expect(foto + generado).toBe(100);
+	it("la foto de Q100 termina en Q100 de esperado, marca o no marca", () => {
+		// ESTE CASO YA NO LO SOSTIENE LA MARCA, LO SOSTIENE EL TECHO. Cuando esta
+		// prueba se escribió, un decremento sin marcar bajaba el nivel y la
+		// reposición del cron se cobraba como Q100 de mora nueva: la foto de Q100
+		// terminaba en Q200 y la marca era lo único que lo evitaba. Desde que el
+		// techo no baja por un pago —lo ya contado no se vuelve a contar cuando
+		// el cron repone—, los dos caminos dan la foto.
+		//
+		// La marca no sobra: sigue siendo la única forma de saber que esa bajada
+		// dejó de valer, y es lo que impide que el decremento caído genere por sí
+		// mismo. Pero el Q200 de este ejemplo ya no depende de ella.
+		expect(
+			foto + moraGeneradaEnPeriodo(foto, [decremento, reposicionDelCron]),
+		).toBe(100);
+		expect(
+			foto +
+				moraGeneradaEnPeriodo(foto, [
+					{ ...decremento, anulado: true },
+					reposicionDelCron,
+				]),
+		).toBe(100);
 	});
 
 	it("y sigue valiendo aunque la restitución sí haya ocurrido", () => {

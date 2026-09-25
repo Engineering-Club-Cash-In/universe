@@ -909,6 +909,20 @@ function InvestorLiquidacionesPage() {
 	const { data: session } = authClient.useSession();
 	const userRole = (session?.user as any)?.role ?? "";
 	const isManager = PERMISSIONS.canValidateInvestmentFunds(userRole);
+	// El espejo EXACTO del guard que protege las dos puntas del acceso al
+	// portal. `darAccesoPortal` y `estadoAccesoPortal` cuelgan de
+	// `investmentProcedure` (server/src/routers/investor-documents.ts), que es
+	// `requireInvestmentAccess` (server/src/lib/orpc.ts), y ese middleware
+	// rechaza con FORBIDDEN a todo el que no pase
+	// `PERMISSIONS.canAccessInvestments`: ADMIN, INVESTMENT_ADVISOR_JR,
+	// INVESTMENT_ADVISOR_SR e INVESTMENT_MANAGER, y nadie más.
+	//
+	// Hace falta preguntarlo acá porque esta pantalla NO es solo de
+	// inversiones: su ruta no filtra por rol y el resto de sus consultas
+	// cuelgan de `crmCobrosOrInvestmentsProcedure`, que además deja entrar a
+	// CRM, cobros y contabilidad. Para esa gente la ficha funciona; lo único
+	// que el servidor les niega es el acceso al portal.
+	const puedeAccesoPortal = PERMISSIONS.canAccessInvestments(userRole);
 
 	const now = new Date();
 	const [filterByMonth, setFilterByMonth] = useState(false);
@@ -1389,7 +1403,16 @@ function InvestorLiquidacionesPage() {
 		...orpc.estadoAccesoPortal.queryOptions({
 			input: { inversionistaId: investorIdNum },
 		}),
-		enabled: Number.isInteger(investorIdNum) && investorIdNum > 0,
+		// 🔴 El rol es parte de la condición, no un detalle de presentación.
+		// `estadoAccesoPortal` es `investmentProcedure`: a quien no pasa
+		// `canAccessInvestments` el servidor le contesta FORBIDDEN, siempre. Y el
+		// `QueryCache` global (`utils/orpc.ts`) pinta un `toast.error` ante
+		// CUALQUIER consulta que falle, sin mirar cuál. Sin esta condición un
+		// vendedor, un cobrador, un abogado o un contador abrían esta ficha —que
+		// para ellos funciona— y se comían un rojo en cada carga. No se dispara lo
+		// que ya se sabe que va a ser rechazado.
+		enabled:
+			puedeAccesoPortal && Number.isInteger(investorIdNum) && investorIdNum > 0,
 		// Igual que las dos consultas hermanas de este archivo
 		// (`resolverModalidadFacturacionSpread`,
 		// `listModalidadFacturacionSpreadByModalidad`). Sin esto —el QueryClient
@@ -1410,10 +1433,11 @@ function InvestorLiquidacionesPage() {
 		//
 		// Y que quede dicho: un fallo acá NO es silencioso. El `QueryCache` del
 		// cliente (`utils/orpc.ts`) pinta un `toast.error("Error: …")` por cada
-		// consulta que falla, sin mirar la query, así que el 403 sale en rojo en
-		// cada carga de esta pantalla. No se puede callar desde acá —el
-		// manejador es global— y prometer lo contrario en este comentario sería
-		// la misma mentira que hizo falta venir a arreglar. Lo que sí queda
+		// consulta que falla, sin mirar la query, así que ese 403 de cartera sale
+		// en rojo en cada carga que haga alguien de inversiones —los demás ya no
+		// la disparan, ver el `enabled` de arriba—. No se puede callar desde acá
+		// —el manejador es global— y prometer lo contrario en este comentario
+		// sería la misma mentira que hizo falta venir a arreglar. Lo que sí queda
 		// acotado es el número de toasts: uno por carga, no cuatro.
 		retry: false,
 	});
@@ -1421,7 +1445,11 @@ function InvestorLiquidacionesPage() {
 		| {
 				tieneCuentaSana?: boolean;
 				estado?: string;
-				usuarioEmail?: string | null;
+				// Sin `usuarioEmail`: `estadoAccesoPortal` dejó de devolverlo a
+				// propósito —corre en cada carga, con un id que elige quien llama,
+				// así que devolver el correo convertía un barrido de ids en una
+				// cosecha de buzones—. El camino de ESCRITURA sí lo trae y ahí se
+				// sigue usando: `lib/acceso-portal.ts` y la bitácora del historial.
 				advertencias?: string[] | null;
 				motivo?: string | null;
 		  }
@@ -1726,6 +1754,16 @@ function InvestorLiquidacionesPage() {
 								<ShoppingCart className="h-4 w-4" />
 								Compra de Cartera
 							</Button>
+							{/* Ni el botón ni su tooltip existen para quien no puede usarlos. La
+								mutación de atrás (`darAccesoPortal`) es `investmentProcedure`, igual
+								que la consulta de estado: a quien no pasa `canAccessInvestments` el
+								servidor le contesta FORBIDDEN. Dejárselo a la vista no era solo un
+								clic perdido — el diálogo le enseña un correo y le pide aprobarlo, o
+								sea le hace creer que está por mandarle una contraseña a alguien.
+
+								Mismo criterio con el que esta pantalla ya esconde el historial de
+								actividad y el ojo de visibilidad, que cuelgan de
+								`investmentManagerProcedure` y se piden con `isManager`. */}
 							{/* Gris SOLO cuando el servidor afirma que la cuenta está sana.
 								Cargando, con error o sin dato queda habilitado: apretar de más
 								cuesta un clic ("ya tenía", sin reenviar contraseña), y apagarlo
@@ -1739,80 +1777,84 @@ function InvestorLiquidacionesPage() {
 								mismo recuadro.
 
 								El hover no es el único camino: el texto del propio botón ya
-								dice "Ya tiene acceso al portal", que es el motivo del gris. Lo
-								que agrega el tooltip es CON QUÉ CORREO, que es detalle. Un
-								botón deshabilitado no recibe foco, y Radix ignora a propósito
+								dice "Ya tiene acceso al portal", que es el motivo del gris, y
+								el tooltip no agrega ningún dato que no esté ahí —el correo de
+								la cuenta ya no viaja hasta esta pantalla—. Un botón
+								deshabilitado no recibe foco, y Radix ignora a propósito
 								el `pointerType: "touch"`, así que ni por teclado ni por toque
 								se abre — de ahí que el motivo tenga que seguir estando en la
 								etiqueta y no solo acá. */}
-							<Tooltip>
-								<TooltipTrigger asChild>
-									<span className="inline-flex">
-										<Button
-											variant="outline"
-											size="sm"
-											className="gap-2"
-											// Guarda de carga, igual que el "Editar" vecino
-											// (`if (investor) openEditModal(investor)`): hacen falta
-											// la fila —de ahí salen las pistas con las que se
-											// pregunta el correo fresco— y que la consulta sin caché
-											// haya contestado algo. Con esa consulta todavía en el
-											// aire, el diálogo no sabe ni si es empresa, y sus dos
-											// ramas dicen cosas distintas sobre a dónde va una
-											// contraseña.
-											//
-											// Que la consulta FALLE sí abre el diálogo: adentro dice
-											// que no se pudo confirmar nada y no deja continuar. Es
-											// mejor que un botón que no responde y no explica.
-											//
-											// La guarda va en el `onClick` y NO en `disabled`: lo
-											// que apaga este botón significa "ya tiene cuenta", y
-											// apagarlo por otra razón estaría afirmando eso sin que
-											// sea cierto. Quien explica por qué todavía no abre es
-											// la etiqueta, que dice "Cargando…".
-											onClick={() => {
-												if (accesoPortalDatosListos) setAccesoPortalOpen(true);
-											}}
-											disabled={yaTieneAccesoPortal}
-										>
-											<KeyRound className="h-4 w-4" />
-											{yaTieneAccesoPortal
-												? "Ya tiene acceso al portal"
-												: accesoPortalDatosListos
-													? "Dar acceso al portal"
-													: "Cargando…"}
-										</Button>
-									</span>
-								</TooltipTrigger>
-								{/* El contenido se monta SIEMPRE, con texto para los tres
-									estados del botón. Antes solo existía con
-									`yaTieneAccesoPortal`, y con el botón habilitado el Root se
-									abría igual al pasar el mouse: el Trigger ponía
-									`aria-describedby` apuntando a un id que nunca se renderiza
-									—`aria-valid-attr-value` lo marca, y un lector de pantalla
-									que siguiera la referencia no encontraba nada—, y el ciclo
-									de apertura y cierre corría en cada hover para no enseñar
-									nada. Y así queda igual que el otro tooltip nuevo de este
-									archivo, el del ojo de `InvestorDocumentsSection`, que
-									también monta su contenido siempre. */}
-								<TooltipContent side="bottom" className="max-w-xs">
-									{yaTieneAccesoPortal
-										? estadoAccesoPortal?.usuarioEmail
-											? `Ya tiene cuenta en el portal con ${estadoAccesoPortal.usuarioEmail}. Por eso el botón está apagado.`
-											: "Ya tiene cuenta en el portal. Por eso el botón está apagado."
-										: !accesoPortalDatosListos
-											? "Todavía se están cargando sus datos. En cuanto carguen vas a poder abrirle el acceso."
-											: accesoPortalEsEmpresa
-												? // Siendo empresa, desde esta fila no sale ninguna
-													// contraseña: el diálogo lo dice con todas las letras y
-													// cartera responde
-													// `es_empresa_el_acceso_es_del_representante`.
-													// Prometer acá el correo con la contraseña
-													// contradiría lo que se lee dos clics después.
-													"Es una empresa: al portal entra su representante legal. Al continuar, cartera te va a decir desde qué fila abrirle el acceso."
-												: "Le crea su cuenta del portal y le manda su contraseña por correo. Antes de mandarla vas a poder revisar a qué correo va."}
-								</TooltipContent>
-							</Tooltip>
+							{puedeAccesoPortal && (
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<span className="inline-flex">
+											<Button
+												variant="outline"
+												size="sm"
+												className="gap-2"
+												// Guarda de carga, igual que el "Editar" vecino
+												// (`if (investor) openEditModal(investor)`): hacen falta
+												// la fila —de ahí salen las pistas con las que se
+												// pregunta el correo fresco— y que la consulta sin caché
+												// haya contestado algo. Con esa consulta todavía en el
+												// aire, el diálogo no sabe ni si es empresa, y sus dos
+												// ramas dicen cosas distintas sobre a dónde va una
+												// contraseña.
+												//
+												// Que la consulta FALLE sí abre el diálogo: adentro dice
+												// que no se pudo confirmar nada y no deja continuar. Es
+												// mejor que un botón que no responde y no explica.
+												//
+												// La guarda va en el `onClick` y NO en `disabled`: lo
+												// que apaga este botón significa "ya tiene cuenta", y
+												// apagarlo por otra razón estaría afirmando eso sin que
+												// sea cierto. Quien explica por qué todavía no abre es
+												// la etiqueta, que dice "Cargando…".
+												onClick={() => {
+													if (accesoPortalDatosListos)
+														setAccesoPortalOpen(true);
+												}}
+												disabled={yaTieneAccesoPortal}
+											>
+												<KeyRound className="h-4 w-4" />
+												{yaTieneAccesoPortal
+													? "Ya tiene acceso al portal"
+													: accesoPortalDatosListos
+														? "Dar acceso al portal"
+														: "Cargando…"}
+											</Button>
+										</span>
+									</TooltipTrigger>
+									{/* El contenido se monta SIEMPRE, con texto para los tres
+										estados del botón. Antes solo existía con
+										`yaTieneAccesoPortal`, y con el botón habilitado el Root se
+										abría igual al pasar el mouse: el Trigger ponía
+										`aria-describedby` apuntando a un id que nunca se renderiza
+										—`aria-valid-attr-value` lo marca, y un lector de pantalla
+										que siguiera la referencia no encontraba nada—, y el ciclo
+										de apertura y cierre corría en cada hover para no enseñar
+										nada. Y así queda igual que el otro tooltip nuevo de este
+										archivo, el del ojo de `InvestorDocumentsSection`, que
+										también monta su contenido siempre. */}
+									<TooltipContent side="bottom" className="max-w-xs">
+										{yaTieneAccesoPortal
+											? // Sin el correo: esta consulta ya no lo devuelve, y el motivo
+												// del gris tampoco lo necesita.
+												"Ya tiene cuenta en el portal. Por eso el botón está apagado."
+											: !accesoPortalDatosListos
+												? "Todavía se están cargando sus datos. En cuanto carguen vas a poder abrirle el acceso."
+												: accesoPortalEsEmpresa
+													? // Siendo empresa, desde esta fila no sale ninguna
+														// contraseña: el diálogo lo dice con todas las letras y
+														// cartera responde
+														// `es_empresa_el_acceso_es_del_representante`.
+														// Prometer acá el correo con la contraseña
+														// contradiría lo que se lee dos clics después.
+														"Es una empresa: al portal entra su representante legal. Al continuar, cartera te va a decir desde qué fila abrirle el acceso."
+													: "Le crea su cuenta del portal y le manda su contraseña por correo. Antes de mandarla vas a poder revisar a qué correo va."}
+									</TooltipContent>
+								</Tooltip>
+							)}
 						</div>
 					</div>
 				</div>
@@ -2589,8 +2631,13 @@ function InvestorLiquidacionesPage() {
 				Salvo cuando es empresa: ahí el correo de la fila NO es el destino de
 				nada, y enseñarlo con esa promesa apuntaba el control humano a la
 				dirección equivocada. */}
+			{/* El rol vuelve a preguntarse acá y no solo en el botón: este diálogo
+				es el que enseña un correo y pide aprobarlo, y hoy la única forma de
+				abrirlo es ese botón. Repetir la condición es lo que hace que siga
+				siendo cierto si mañana aparece otro camino —un atajo de teclado, un
+				enlace— que ponga `accesoPortalOpen` en true sin pasar por él. */}
 			<Dialog
-				open={accesoPortalOpen}
+				open={puedeAccesoPortal && accesoPortalOpen}
 				onOpenChange={(open) => {
 					if (!darAccesoPortalMutation.isPending) setAccesoPortalOpen(open);
 				}}

@@ -29,7 +29,9 @@ mock.module("../services/crm.service", () => ({
   getVehicleDetailsBySifco: async () => ({ success: false }),
 }));
 
-const { abrirBateriasDeContratos } = await import("./compraCarteraAceptada");
+const { abrirBateriasDeContratos, paresSoloManuales } = await import(
+  "./compraCarteraAceptada"
+);
 
 const ANA = 10;
 const BETO = 20;
@@ -97,5 +99,36 @@ describe("baterías de una aceptación con varios inversionistas", () => {
     expect(deAna?.compra.montoTotal).toBe("5000.00");
     expect(deBeto?.compra.creditos.map((c) => c.creditoId)).toEqual([2]);
     expect(deBeto?.compra.montoTotal).toBe("3000.00");
+  });
+});
+
+describe("compras vueltas a meter a mano", () => {
+  test("un par con sólo compras manuales no lleva papelería; con una normal, sí", () => {
+    const pares = paresSoloManuales([
+      { credito_id: 1, inversionista_id: ANA, origen_manual: true },
+      { credito_id: 2, inversionista_id: ANA, origen_manual: true },
+      { credito_id: 2, inversionista_id: ANA, origen_manual: false },
+      { credito_id: 3, inversionista_id: BETO, origen_manual: false },
+    ]);
+
+    expect([...pares]).toEqual([`1-${ANA}`]);
+  });
+
+  test("sin sus pares, el inversionista no recibe batería", async () => {
+    await abrirBateriasDeContratos({
+      targetIds: [ANA],
+      creditosRows: [
+        { credito_id: 1, numero_credito_sifco: "S1", cliente_nombre: "Cliente 1" },
+      ],
+      rowsPorCredito: new Map([[1, [fila(ANA, "5000")]]]),
+      montoNuevoPorPar: new Map([[`1-${ANA}`, new Big("5000")]]),
+      tipoReinversionPorCredito: new Map(),
+      modalidadFacturacionPorCredito: new Map(),
+      // La aceptación ya sacó el par manual de los términos.
+      terminosPorPar: new Map(),
+      aceptadaEn: new Date("2026-09-24T15:00:00.000Z"),
+    });
+
+    expect(bateriasPedidas).toHaveLength(0);
   });
 });

@@ -794,6 +794,10 @@
       tipo_compra: tipoCompraEnum("tipo_compra")
         .notNull()
         .default("sin_clasificar"),
+      // Cargada en el modo manual: así se vuelve a meter una compra que se cayó
+      // porque el inversionista tardó en pagar. Sus contratos jurídico ya los
+      // hizo, así que al aceptarla no se le abre batería en el CRM.
+      origen_manual: boolean("origen_manual").notNull().default(false),
     },
     (t) => ({
       ixStatus: index("ix_compras_credito_inv_status").on(t.status),

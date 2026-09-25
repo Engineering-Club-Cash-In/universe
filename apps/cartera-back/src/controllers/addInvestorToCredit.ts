@@ -1574,6 +1574,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           // quien conoce su propia liquidacion_id. Deja rastro de procedencia
           // para poder distinguirla de una reubicación manual.
           liquidacion_id: liquidacion_id ?? null,
+          // El modo manual es como se vuelve a meter una compra que se cayó:
+          // al aceptarla, jurídico no recibe batería por estos créditos.
+          origen_manual: esManual,
           status: statusEspejo,
         });
 

@@ -28,6 +28,15 @@
  * desde el alta y desde el menú de la fila. La única excepción es
  * `inversionista_no_encontrado`, que sí manda a mirar dónde está parado quien
  * lee —y acá eso es una FILA, no la ficha del gemelo—.
+ *
+ * Y ahora hay un código que este archivo traduce y el gemelo NO:
+ * `correo_aprobado_no_coincide`. No es un descuido ni una deuda que haya que
+ * "sincronizar": ese motivo solo lo devuelve `POST /investor/portal-access`
+ * cuando el cuerpo trae `correo_aprobado`, y ese botón vive únicamente acá
+ * (`tableInvestors.tsx`). El gemelo del CRM solo lee el bloque del alta, que no
+ * manda correo aprobado, así que allá ese código no puede llegar. Si algún día
+ * el CRM gana su propio botón, ahí sí habrá que darle su texto —y el consejo
+ * volverá a diverger, porque "actualizá la lista" nombra ESTA pantalla—.
  */
 
 export interface AccesoPortal {
@@ -276,6 +285,31 @@ const mensajeDeFallo = (
       tono: "advertencia",
       texto:
         "No se le abrió acceso: es una empresa, y al portal entra con su representante legal. Abrile el acceso desde la fila del representante (su DPI está en Editar → Representante legal); ahí vas a poder revisar su correo antes de mandarle la contraseña.",
+    };
+  }
+
+  // El correo cambió entre lo que se aprobó y lo que cartera tiene guardado.
+  //
+  // Sale del `causa()` genérico —y del camino de `EN_VEZ_DE_REINTENTAR`, que
+  // igual termina bajo un encabezado que no dice lo principal— porque este
+  // desenlace tiene que decir TRES cosas y ninguna cabe en "(por esto)": que el
+  // correo cambió MIENTRAS lo revisaba, que NO salió ninguna contraseña, y que
+  // volver a aprobar lo mismo vuelve a fallar.
+  //
+  // Lo tercero no es una cortesía: la lista de esta pantalla no se refresca
+  // sola, así que reabrir el menú de la fila enseña el MISMO correo viejo, se
+  // aprueba otra vez y cartera lo veta otra vez. Por eso el consejo empieza por
+  // actualizar la lista; sin eso el aviso manda a dar vueltas en círculo.
+  //
+  // Y el desenlace se dice igual desde el alta: el veto significa lo mismo
+  // —nadie recibió nada— venga de donde venga el aviso. Lo que el alta agrega
+  // ("el inversionista sí quedó creado") no aplica, porque el alta no manda
+  // correo aprobado: este motivo solo llega desde el botón.
+  if (acceso.motivo === "correo_aprobado_no_coincide") {
+    return {
+      tono: "advertencia",
+      texto:
+        "No se le abrió acceso: el correo de este inversionista cambió mientras lo revisabas, así que el que aprobaste ya no es el que tiene cartera. NO salió ninguna contraseña y no se creó ninguna cuenta. Volver a aprobar el mismo correo vuelve a fallar: actualizá la lista, mirá el correo que tiene ahora y aprobalo solo si es de esta persona. Si nadie debería haberlo cambiado, avisa a sistemas antes de mandarle nada.",
     };
   }
 

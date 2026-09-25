@@ -575,3 +575,84 @@ describe("avisoAccesoPortal — el lugar que nombran los textos", () => {
     expect(aviso.texto).not.toContain("ficha");
   });
 });
+
+/**
+ * El veto del correo aprobado. Es el desenlace que MÁS necesita explicarse:
+ * nada salió mal del lado del portal, se abortó a propósito porque el correo
+ * que la persona miró dejó de ser el de cartera mientras lo miraba.
+ */
+describe("avisoAccesoPortal — el correo cambió mientras lo revisaba", () => {
+  const veto = (origen: "alta" | "boton" = "boton") =>
+    avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "correo_aprobado_no_coincide",
+        advertencias: [],
+      }),
+      origen,
+    )!;
+
+  it("no sale el código crudo", () => {
+    // Era lo que pasaba antes de traducirlo: `causa()` no lo encontraba, se
+    // callaba, y quedaba "No se le pudo dar acceso al portal." a secas.
+    const aviso = veto();
+    expect(aviso.tono).toBe("advertencia");
+    expect(aviso.texto).not.toContain("correo_aprobado_no_coincide");
+    expect(aviso.texto).not.toContain("_");
+  });
+
+  it("dice que el correo cambió MIENTRAS lo revisaba", () => {
+    expect(veto().texto).toContain("cambió mientras lo revisabas");
+  });
+
+  it("dice que NO salió ninguna contraseña", () => {
+    // Sin esto quien lee cuelga el teléfono sin saber si la contraseña ya
+    // viajó a la dirección envenenada. Es la mitad del aviso.
+    const texto = veto().texto;
+    expect(texto).toContain("NO salió ninguna contraseña");
+    expect(texto).toContain("no se creó ninguna cuenta");
+  });
+
+  it("NO aconseja reintentar con lo mismo", () => {
+    // El consejo genérico del botón es "volvé a intentarlo con esta misma
+    // opción del menú de su fila": sobre este veto vuelve a fallar idéntico,
+    // porque la lista de la pantalla sigue enseñando el correo viejo.
+    const texto = veto().texto;
+    expect(texto).not.toContain("volvé a intentarlo");
+    expect(texto).toContain("vuelve a fallar");
+  });
+
+  it("manda a ACTUALIZAR la lista antes de volver a aprobar", () => {
+    // El arreglo real. Sin refrescar, el diálogo repinta el mismo correo
+    // aprobado y el veto se repite: el aviso mandaría a dar vueltas.
+    expect(veto().texto).toContain("actualizá la lista");
+  });
+
+  it("manda a avisar a sistemas si nadie debía cambiarlo", () => {
+    expect(veto().texto).toContain("avisa a sistemas");
+  });
+
+  it("dice lo mismo leído desde el alta: no inventa un alta que sí salió", () => {
+    // El alta no manda correo aprobado, así que este motivo solo llega desde
+    // el botón; pero el traductor lo comparten los dos y el encabezado del
+    // alta agrega "el inversionista sí quedó creado: no lo vuelvas a crear",
+    // que acá sería hablar de un alta que quien lee no hizo.
+    expect(veto("alta").texto).toBe(veto("boton").texto);
+    expect(veto("alta").texto).not.toContain("no lo vuelvas a crear");
+  });
+
+  it("las advertencias que vengan pegadas no tapan el veto", () => {
+    // El veto corta ANTES de provisionar, así que hoy no trae advertencias.
+    // Si algún día trajera, lo primero que hay que leer sigue siendo que no
+    // salió ninguna contraseña.
+    const aviso = avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "correo_aprobado_no_coincide",
+        advertencias: ["correo_no_enviado"],
+      }),
+      "boton",
+    )!;
+    expect(aviso.texto.startsWith("No se le abrió acceso:")).toBe(true);
+  });
+});

@@ -118,9 +118,12 @@ function copiar(url: string, etiqueta: string) {
 function FilaDeContrato({
 	contrato,
 	onCambio,
+	puedeRenovar,
 }: {
 	contrato: ContratoDeInversionista;
 	onCambio: () => void;
+	/** Si quien mira puede renovar los enlaces: el mismo permiso del servidor. */
+	puedeRenovar: boolean;
 }) {
 	const [regenerando, setRegenerando] = useState(false);
 
@@ -209,7 +212,10 @@ function FilaDeContrato({
 	// documento sin cerrar tampoco: ahí lo que falta es la identidad, y para eso
 	// están los botones de arriba, que no tocan a quien ya firmó.
 	const puedeRegenerar =
-		contrato.status !== "signed" && !sinCerrar && (alguienFirmo || hayVencidos);
+		puedeRenovar &&
+		contrato.status !== "signed" &&
+		!sinCerrar &&
+		(alguienFirmo || hayVencidos);
 
 	return (
 		<div className="rounded-md border bg-background p-2.5">
@@ -517,8 +523,15 @@ function porCompra(contratos: ContratoDeInversionista[]) {
  */
 export function InvestorContractsCard({
 	inversionistaId,
+	puedeRenovar = false,
 }: {
 	inversionistaId: number;
+	/**
+	 * Si quien mira puede renovar enlaces (gerencia de inversiones, jurídico,
+	 * admin). Los asesores ven y copian: sin esto se les ofrecía el botón y
+	 * terminaba siempre en "no tenés permiso".
+	 */
+	puedeRenovar?: boolean;
 }) {
 	const queryClient = useQueryClient();
 	const [verAnulados, setVerAnulados] = useState(false);
@@ -602,6 +615,7 @@ export function InvestorContractsCard({
 											key={contrato.id}
 											contrato={contrato}
 											onCambio={refrescar}
+											puedeRenovar={puedeRenovar}
 										/>
 									))}
 								</div>
@@ -629,6 +643,7 @@ export function InvestorContractsCard({
 												key={contrato.id}
 												contrato={contrato}
 												onCambio={refrescar}
+												puedeRenovar={puedeRenovar}
 											/>
 										))}
 									</div>

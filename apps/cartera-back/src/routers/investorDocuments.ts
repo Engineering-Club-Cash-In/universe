@@ -332,7 +332,18 @@ export const investorDocumentsRouter = new Elysia()
   // POST - Crear o reemplazar el documento de un contrato del CRM
   .post(
     "/investor-documents/contrato",
-    async ({ body, set }) => {
+    async ({ body, set, headers }) => {
+      // Sólo el CRM escribe acá, con el secreto que comparten. El JWT solo no
+      // alcanza: cualquier cuenta de cartera podía crear o pisar el contrato de
+      // otro inversionista, hacerlo visible en su portal y meterle enlaces.
+      const secreto = process.env.CARTERA_RELAY_SECRET;
+      if (!secreto || headers["x-cartera-relay-secret"] !== secreto) {
+        set.status = 403;
+        return {
+          success: false,
+          message: "Sólo el CRM puede escribir los contratos de inversión",
+        };
+      }
       try {
         const {
           file,
@@ -477,7 +488,18 @@ export const investorDocumentsRouter = new Elysia()
   // PATCH - Actualizar sólo el estado de firma de un contrato ya espejado
   .patch(
     "/investor-documents/contrato/:contratoId",
-    async ({ params, body, set }) => {
+    async ({ params, body, set, headers }) => {
+      // Sólo el CRM escribe acá, con el secreto que comparten. El JWT solo no
+      // alcanza: cualquier cuenta de cartera podía crear o pisar el contrato de
+      // otro inversionista, hacerlo visible en su portal y meterle enlaces.
+      const secreto = process.env.CARTERA_RELAY_SECRET;
+      if (!secreto || headers["x-cartera-relay-secret"] !== secreto) {
+        set.status = 403;
+        return {
+          success: false,
+          message: "Sólo el CRM puede escribir los contratos de inversión",
+        };
+      }
       try {
         // Cómo estaba antes: el CRM lo usa para saber si esta es la primera vez
         // que el contrato queda firmado y toca reemplazar el PDF por el firmado.

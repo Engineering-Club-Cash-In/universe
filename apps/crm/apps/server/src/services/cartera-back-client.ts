@@ -2444,7 +2444,11 @@ export class CarteraBackClient {
 		const response = await fetch(url, {
 			method: "POST",
 			body: formData,
-			headers: { Authorization: `Bearer ${token}` },
+			headers: {
+				Authorization: `Bearer ${token}`,
+				// Cartera sólo acepta estas escrituras del CRM (ver investorDocuments).
+				"x-cartera-relay-secret": process.env.CARTERA_RELAY_SECRET ?? "",
+			},
 			signal: AbortSignal.timeout(this.config.timeout),
 		});
 
@@ -2481,6 +2485,10 @@ export class CarteraBackClient {
 			`/investor-documents/contrato/${encodeURIComponent(input.contrato_id)}`,
 			{
 				method: "PATCH",
+				// Cartera sólo acepta estas escrituras del CRM (ver investorDocuments).
+				headers: {
+					"x-cartera-relay-secret": process.env.CARTERA_RELAY_SECRET ?? "",
+				},
 				body: JSON.stringify({
 					observer_url: input.observer_url ?? undefined,
 					firmantes: input.firmantes ?? undefined,

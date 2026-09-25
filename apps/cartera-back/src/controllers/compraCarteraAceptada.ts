@@ -97,6 +97,16 @@ async function abrirBateriasDeContratos(params: {
    */
   tipoReinversionPorCredito: Map<number, string | null>;
   modalidadFacturacionPorCredito: Map<number, string | null>;
+  /**
+   * Lo mismo por crédito E inversionista (`${credito}-${inversionista}`).
+   * Cuando dos inversionistas compran el mismo crédito en una aceptación, cada
+   * uno tiene sus términos: por crédito solo, el último pisaba al resto y un
+   * inversionista se llevaba a sus contratos los del otro.
+   */
+  terminosPorPar: Map<
+    string,
+    { tipoReinversion: string | null; modalidadFacturacion: string | null }
+  >;
   aceptadaEn: Date;
   aceptadaPor?: string;
   /** El id de Resend del correo de aceptación: es el hilo de la compra. */
@@ -111,6 +121,7 @@ async function abrirBateriasDeContratos(params: {
     montoNuevoPorPar,
     tipoReinversionPorCredito,
     modalidadFacturacionPorCredito,
+    terminosPorPar,
   } = params;
   if (targetIds.length === 0) return [];
 
@@ -210,6 +221,7 @@ async function abrirBateriasDeContratos(params: {
           montoNuevoPorPar.get(`${credito.credito_id}-${targetId}`) ?? fila.monto;
 
         const fechas = fechasPorCredito.get(credito.credito_id) ?? {};
+        const terminos = terminosPorPar.get(`${credito.credito_id}-${targetId}`);
 
         return [
           {
@@ -219,10 +231,12 @@ async function abrirBateriasDeContratos(params: {
             monto: monto.toFixed(2),
             fechaInicio: fechas.inicio ?? null,
             fechaVencimiento: fechas.vencimiento ?? null,
-            tipoReinversion:
-              tipoReinversionPorCredito.get(credito.credito_id) ?? null,
-            modalidadFacturacion:
-              modalidadFacturacionPorCredito.get(credito.credito_id) ?? null,
+            tipoReinversion: terminos
+              ? terminos.tipoReinversion
+              : (tipoReinversionPorCredito.get(credito.credito_id) ?? null),
+            modalidadFacturacion: terminos
+              ? terminos.modalidadFacturacion
+              : (modalidadFacturacionPorCredito.get(credito.credito_id) ?? null),
           },
         ];
       });
@@ -664,6 +678,15 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       montoNuevoPorPar,
       tipoReinversionPorCredito: tipoReinvPorCredito,
       modalidadFacturacionPorCredito: modalidadFactPorCredito,
+      terminosPorPar: new Map(
+        updateRes.map((r) => [
+          `${r.credito_id}-${r.inversionista_id}`,
+          {
+            tipoReinversion: r.tipo_reinversion ?? null,
+            modalidadFacturacion: r.modalidad_facturacion ?? null,
+          },
+        ]),
+      ),
       aceptadaEn: ahora,
       aceptadaPor: usuarioEmail,
       // El hilo donde jurídico va a contestar con los contratos. Por eso la

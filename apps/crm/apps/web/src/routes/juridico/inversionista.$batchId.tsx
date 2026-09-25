@@ -462,8 +462,9 @@ function RouteComponent() {
 				</Badge>
 
 				{/* La batería se cierra sola cuando se firma todo. Descartar es para la
-				    compra que no lleva papelería, y pide motivo. */}
-				{!cerrada && (
+				    compra que no lleva papelería, y pide motivo: con contratos
+				    emitidos el servidor lo rechaza, así que ni se ofrece. */}
+				{!cerrada && contratosQuery.isSuccess && vigentes.length === 0 && (
 					<AlertDialog open={descartando} onOpenChange={setDescartando}>
 						<AlertDialogTrigger asChild>
 							<Button variant="ghost" size="sm">

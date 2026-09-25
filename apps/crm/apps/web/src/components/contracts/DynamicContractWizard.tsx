@@ -128,6 +128,11 @@ function itemsDeLista(valor: string): Array<Record<string, string>> {
 	}
 }
 
+/** Un item de lista sin nada escrito en ninguna columna. */
+function itemVacio(item: Record<string, string>): boolean {
+	return Object.values(item).every((valor) => !String(valor ?? "").trim());
+}
+
 /**
  * Los valores como los espera el generador.
  *
@@ -1721,8 +1726,16 @@ export function DynamicContractWizard({
 	}, [resultadosVisibles, onResultadosVisibles]);
 
 	// Fetch documents and fields when moving to step 2
-	const fetchDocumentsData = async () => {
-		if (selectedDocuments.length === 0 || !crmData.cliente.dpi) return;
+	// Devuelve si trajo los campos. Sin eso no se avanza: el paso siguiente se
+	// veía completo sin ningún documento, y la emisión terminaba mandando una
+	// lista vacía con un error que no decía nada.
+	const fetchDocumentsData = async (): Promise<boolean> => {
+		if (selectedDocuments.length === 0) return false;
+		if (!crmData.cliente.dpi) {
+			toast.error("Falta el DPI de quien firma: completalo antes de seguir.");
+			return false;
+		}
+		let trajoCampos = false;
 
 		setIsLoadingFields(true);
 		try {
@@ -1731,6 +1744,7 @@ export function DynamicContractWizard({
 				selectedDocuments,
 			);
 			if (response.success) {
+				trajoCampos = true;
 				setRenapData(response.renapData);
 				setDocuments(response.documents);
 				setFields(response.fields);
@@ -1799,6 +1813,7 @@ export function DynamicContractWizard({
 		} finally {
 			setIsLoadingFields(false);
 		}
+		return trajoCampos;
 	};
 
 	// Validate a specific field against its regex
@@ -1809,8 +1824,14 @@ export function DynamicContractWizard({
 		// llena. Lo que importa es si tiene items, y la regex no aplica: no se
 		// valida el JSON, se validan sus columnas.
 		if (field.type === "list") {
-			if (field.required && itemsDeLista(strValue).length === 0) {
+			const items = itemsDeLista(strValue);
+			if (field.required && items.length === 0) {
 				return "Agregá al menos un item";
+			}
+			// "Agregar" crea una fila en blanco: si se queda así, el contrato sale
+			// con un beneficiario o un crédito sin datos.
+			if (items.some(itemVacio)) {
+				return "Hay un item vacío: completalo o quitalo";
 			}
 			return "";
 		}
@@ -1945,7 +1966,10 @@ export function DynamicContractWizard({
 			// Una lista vacía se guarda como "[]", que es texto: contarla como
 			// llena dejaba seguir sin haber cargado ningún item.
 			const field = fields.find((f) => f.key === fieldKey);
-			if (field?.type === "list") return itemsDeLista(valor).length > 0;
+			if (field?.type === "list") {
+				const items = itemsDeLista(valor);
+				return items.length > 0 && !items.some(itemVacio);
+			}
 
 			return true;
 		},
@@ -2037,8 +2061,7 @@ export function DynamicContractWizard({
 		if (step === 0) {
 			setStep(1);
 		} else if (step === 1 && canProceedStep1) {
-			await fetchDocumentsData();
-			setStep(2);
+			if (await fetchDocumentsData()) setStep(2);
 		} else if (step === 2) {
 			if (unsupportedDisbursementCount > 0) {
 				toast.error(

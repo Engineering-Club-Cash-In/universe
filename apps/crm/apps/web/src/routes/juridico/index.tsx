@@ -112,7 +112,9 @@ function RouteComponent() {
 		useState<EstadoDeBateria>("pendiente");
 	const bateriasQuery = useQuery({
 		...orpc.listInvestorContractBatches.queryOptions({
-			input: { status: [...ESTADOS_DE_BATERIA] },
+			// El máximo que acepta el servidor, que devuelve primero las abiertas:
+			// el trabajo pendiente no se cae de la lista por el historial.
+			input: { status: [...ESTADOS_DE_BATERIA], limit: 200 },
 		}),
 		enabled: canViewLegal,
 	});
@@ -121,7 +123,7 @@ function RouteComponent() {
 		(bateriasQuery.data ?? []).filter((b) => b.status === estado);
 	const bateriasVisibles = bateriasDelEstado(estadoBateria);
 	const bateriasPendientesQuery = useQuery({
-		...orpc.listInvestorContractBatches.queryOptions({ input: {} }),
+		...orpc.listInvestorContractBatches.queryOptions({ input: { limit: 200 } }),
 		enabled: canViewLegal,
 	});
 	const bateriasAbiertas = bateriasPendientesQuery.data?.length ?? 0;

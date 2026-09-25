@@ -93,6 +93,7 @@ import {
 import { PERMISSIONS } from "./lib/roles";
 import { bucketCapacidadRouter } from "./routers/bucket-capacidad";
 import { convenioDecisionRouter } from "./routers/convenio-decision";
+import { gpsEventosRouter } from "./routers/gps-eventos-router";
 import { gpsIntegracionRouter } from "./routers/gps-integracion";
 import {
 	appRouter,
@@ -258,6 +259,7 @@ const handler = new RPCHandler(
 		recuperacionVehiculoRouter,
 		wialonRouter,
 		gpsIntegracionRouter,
+		gpsEventosRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {
@@ -1327,7 +1329,9 @@ async function handlerCarteraPagaloSupervision(
 	// resolviendo scope de un usuario con permisos acotados) ya decidió el
 	// universo exacto de SIFCOs — nunca confiar en un scope vacío como "sin
 	// recorte": una lista vacía != sin parámetro.
-	const sifcosCsv = listaCsv(sifcosPermitidosBody ?? c.req.query("sifcosPermitidos"));
+	const sifcosCsv = listaCsv(
+		sifcosPermitidosBody ?? c.req.query("sifcosPermitidos"),
+	);
 	const sifcosPermitidos =
 		(sifcosPermitidosBody ?? c.req.query("sifcosPermitidos")) !== undefined
 			? new Set(sifcosCsv ?? [])

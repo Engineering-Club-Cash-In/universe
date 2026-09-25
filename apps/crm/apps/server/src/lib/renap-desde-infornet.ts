@@ -38,8 +38,8 @@ function texto(valor: string | null | undefined): string | null {
 
 function mapearSexo(sexo: string | null | undefined): "M" | "F" | null {
 	const valor = sexo?.trim().toUpperCase();
-	if (valor === "MASCULINO") return "M";
-	if (valor === "FEMENINO") return "F";
+	if (valor === "MASCULINO" || valor === "M") return "M";
+	if (valor === "FEMENINO" || valor === "F") return "F";
 	return null;
 }
 

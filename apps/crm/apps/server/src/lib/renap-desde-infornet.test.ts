@@ -69,6 +69,15 @@ describe("mapearFichaInfornetARenap", () => {
 		).toBeNull();
 	});
 
+	test("acepta también el sexo en una letra", () => {
+		expect(
+			mapearFichaInfornetARenap(DPI, { ...fichaBase, sexo: "M" })?.gender,
+		).toBe("M");
+		expect(
+			mapearFichaInfornetARenap(DPI, { ...fichaBase, sexo: "f" })?.gender,
+		).toBe("F");
+	});
+
 	test("fechas aproximadas, vacías o inválidas quedan vacías", () => {
 		for (const fechaNacimiento of ["APROX 12/1998", "", "31/02/1999"]) {
 			expect(

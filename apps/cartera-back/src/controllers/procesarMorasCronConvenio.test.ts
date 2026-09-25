@@ -155,7 +155,7 @@ mock.module("../utils/structuredLogger", () => ({
 }));
 
 const { procesarMoras, hoyGuatemala, STATUS_EXCLUIDOS_MORA } = await import("./latefee");
-const { creditos, moras_credito, moras_historial } = await import("../database/db/schema");
+const { creditos, moras_credito, moras_historial, MORAS_CREDITO_UQ_ACTIVA } = await import("../database/db/schema");
 
 const CREDITO_ID = 4242;
 
@@ -309,7 +309,10 @@ describe("procesarMoras — el convenio se confirma a media corrida", () => {
   });
 
   it("CREACION que choca con el índice único (23505): no anota historial y no cuenta", async () => {
-    estado.insertThrows = Object.assign(new Error("dup"), { code: "23505" });
+    estado.insertThrows = Object.assign(new Error("dup"), {
+      code: "23505",
+      constraint: MORAS_CREDITO_UQ_ACTIVA,
+    });
     estado.resultados = [[cuotaDeAyer()], []];
     const r = (await procesarMoras()) as any;
 

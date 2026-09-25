@@ -1,6 +1,6 @@
 import { and, count, desc, eq, gte, ilike, inArray, notInArray, sql, sum } from "drizzle-orm";
 import { client, db } from "../database";
-import { asesores, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, platform_users, usuarios } from "../database/db/schema";
+import { MORAS_CREDITO_UQ_ACTIVA, asesores, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, platform_users, usuarios } from "../database/db/schema";
 import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -1894,11 +1894,25 @@ export async function procesarMoras() {
               return fila;
             });
           } catch (e: any) {
-            // Índice único parcial moras_credito_uq_activa: otra corrida concurrente
-            // ya creó la mora activa de este crédito → omitir (no duplicar).
-            // El MOROSO que acabamos de dejar sigue siendo el estado correcto:
-            // hay una mora activa sobre un crédito que no estaba excluido.
-            if (e?.code === "23505") return;
+            // Se absorbe SOLO la violación del índice único parcial
+            // `moras_credito_uq_activa`: otra corrida concurrente ya creó la
+            // mora activa de este crédito → omitir (no duplicar). El MOROSO
+            // que acabamos de dejar sigue siendo el estado correcto: hay una
+            // mora activa sobre un crédito que no estaba excluido.
+            //
+            // ⚠️ El código 23505 SOLO no alcanza para afirmar eso. `moras_credito`
+            // tiene además la llave primaria `moras_credito_pkey`, y una secuencia
+            // desincronizada —lo que deja una restauración de respaldo, que en esta
+            // base ha pasado— la hace chocar con el mismo 23505. Ahí NO hay mora
+            // activa, así que un `return` dejaría el UPDATE a MOROSO ya escrito sin
+            // mora que lo respalde y sin evento de CREACION: exactamente el estado
+            // a medias que la transacción existe para impedir, y que ni el cron ni
+            // una segunda pasada corrigen porque ambos parten de "hay mora activa".
+            // Por eso la discriminación es por NOMBRE de restricción: `pg` publica
+            // el nombre del índice violado en `error.constraint` (campo `n` del
+            // mensaje de error de Postgres), y el nombre sale de la misma constante
+            // con la que se define el índice en el esquema.
+            if (e?.code === "23505" && e?.constraint === MORAS_CREDITO_UQ_ACTIVA) return;
             throw e;
           }
 

@@ -452,9 +452,25 @@ export function TableInvestors() {
 
   const handleConfirmarAccesoPortal = async () => {
     if (!accesoPortalTarget) return;
+    // El correo que se manda a aprobar es EL QUE ESTE DIÁLOGO PINTÓ, no uno
+    // releído al apretar: `accesoPortalTarget` es el mismo objeto que se
+    // renderiza abajo (`accesoPortalTarget?.email`), congelado al elegir "Dar
+    // acceso al portal" en el menú de la fila. Volver a leerlo de `data` o de
+    // la fila expandida acá reabriría la ventana que este campo cierra: entre
+    // lo que la persona miró y lo que se manda no puede haber una segunda
+    // lectura.
+    const aprobado = accesoPortalTarget;
     setAccesoPortalPending(true);
     try {
-      const respuesta = await otorgarAccesoPortalService([accesoPortalTarget.id]);
+      const respuesta = await otorgarAccesoPortalService(
+        [aprobado.id],
+        // La EMPRESA no manda la llave: su diálogo no enseña ningún correo
+        // —la cuenta es del representante— así que no hay nada aprobado que
+        // mandar, y cartera corta antes con `es_empresa_el_acceso_es_del_
+        // representante`. Mandar el correo de la empresa sería mandar como
+        // "aprobado" algo que nadie aprobó para ese envío.
+        aprobado.esEmpresa ? null : aprobado.email,
+      );
       // Se reusa el mismo traductor del alta: los códigos son los mismos y las
       // advertencias que importan —contraseña no entregada, correo desviado—
       // tienen que leerse igual vengan de donde vengan.

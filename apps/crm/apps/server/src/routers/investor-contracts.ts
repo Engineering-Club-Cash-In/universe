@@ -30,6 +30,7 @@ import {
 } from "../lib/contract-signatories";
 import { getSignatureMode } from "../lib/contract-signature-mode";
 import { conMarcaDeBiometriaOmitida } from "../lib/contrato-biometria";
+import { compraDelContrato, conMarcaDeCompra } from "../lib/contrato-compra";
 import {
 	estadoEnWeeTrust,
 	sincronizarEstadoDeFirma,
@@ -390,9 +391,15 @@ async function guardarContratoDeInversion(params: {
 				// Con la marca, la ficha pide mirar dónde quedaron las firmas: el
 				// documento lo armó una persona y puede traer las líneas en otro lado
 				// que la plantilla.
-				apiResponse: params.subidoAMano
-					? conMarcaDeSubidoAMano(resultado)
-					: resultado,
+				// Y de qué compra es: la batería sólo guarda la última.
+				apiResponse: (() => {
+					const respuesta = params.subidoAMano
+						? conMarcaDeSubidoAMano(resultado)
+						: resultado;
+					return bateria
+						? conMarcaDeCompra(respuesta, bateria.acceptedAt)
+						: respuesta;
+				})(),
 				// La key de R2, no la URL firmada que se muestra: esa vence en una
 				// hora, y con ella no se puede volver a emitir el documento.
 				pdfLink: resultado.r2Key || resultado.linkDocument || null,
@@ -2215,7 +2222,13 @@ export const investorContractsRouter = {
 							contractType: contrato.contractType,
 							contractName: contrato.contractName,
 							templateId: contrato.templateId,
-							apiResponse: resultado,
+							// Se lleva la compra del original: es el mismo contrato.
+							apiResponse: (() => {
+								const compra = compraDelContrato(contrato.apiResponse);
+								return compra
+									? conMarcaDeCompra(resultado, new Date(compra))
+									: resultado;
+							})(),
 							pdfLink: r2KeyDelPdf,
 							signingProvider: resultado.signingProvider ?? "weetrust",
 							signatureMode: contrato.signatureMode,

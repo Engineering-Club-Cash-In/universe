@@ -21,6 +21,7 @@ import {
 import {
 	AccionesDelContrato,
 	ContratosDeLaBateria,
+	esDeEstaCompra,
 } from "@/components/inversiones/ContratosDeLaBateria";
 import { UploadInvestorContractModal } from "@/components/inversiones/UploadInvestorContractModal";
 import {
@@ -155,16 +156,20 @@ function RouteComponent() {
 		...orpc.listInvestorContracts.queryOptions({ input: { batchId } }),
 		enabled: canViewLegal,
 	});
+	// Sólo los de la compra actual: los de una compra anterior sobre los mismos
+	// créditos siguen en la batería, pero no son la vista previa de ésta.
+	const aceptadaEn = bateriaQuery.data?.acceptedAt;
 	const vigentes = useMemo(
 		() =>
-			(contratosQuery.data ?? [])
+			(aceptadaEn ? (contratosQuery.data ?? []) : [])
 				.filter((c) => !estaAnulado(c))
+				.filter((c) => esDeEstaCompra(c, aceptadaEn as string | Date))
 				.sort(
 					(a, b) =>
 						new Date(a.generatedAt ?? 0).getTime() -
 						new Date(b.generatedAt ?? 0).getTime(),
 				),
-		[contratosQuery.data],
+		[contratosQuery.data, aceptadaEn],
 	);
 	const resultadosVigentes = useMemo<ContractResult[]>(
 		() =>
@@ -770,6 +775,7 @@ function RouteComponent() {
 			{bateria.status !== "descartada" && !mostrandoResultados && (
 				<ContratosDeLaBateria
 					batchId={batchId}
+					aceptadaEn={bateria.acceptedAt}
 					estadoDeLaBateria={bateria.status}
 					onReemplazar={(contractType) => {
 						setTipoASubir(contractType);

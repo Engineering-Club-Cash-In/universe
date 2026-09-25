@@ -66,14 +66,36 @@ const ESTADO: Record<string, { label: string; className: string }> = {
  * firmado no tiene acciones: WeeTrust no deja borrar un documento completo. Y
  * cuando están firmados todos, la batería se cierra sola.
  */
+/**
+ * Si el contrato es de la compra que la batería tiene ahora.
+ *
+ * Otra compra sobre los mismos créditos reabre la misma batería con otra fecha
+ * de aceptación, y los contratos de la anterior siguen colgados de ella: son
+ * otro acuerdo, ya firmado. El servidor sólo cuenta como trabajo de ahora los
+ * emitidos desde la aceptación (Listo, Volver, reemplazar), y la pantalla
+ * tiene que ver lo mismo.
+ */
+export function esDeEstaCompra(
+	contrato: { generatedAt?: string | Date | null },
+	aceptadaEn: string | Date,
+): boolean {
+	if (!contrato.generatedAt) return true;
+	return (
+		new Date(contrato.generatedAt).getTime() >= new Date(aceptadaEn).getTime()
+	);
+}
+
 export function ContratosDeLaBateria({
 	batchId,
+	aceptadaEn,
 	estadoDeLaBateria,
 	onReemplazar,
 	onListo,
 	mandando = false,
 }: {
 	batchId: string;
+	/** Cuándo se aceptó la compra actual: los de antes son de otra compra. */
+	aceptadaEn: string | Date;
 	/** Antes del "Listo" es la vista previa; después, lo que ya salió. */
 	estadoDeLaBateria: string;
 	/** Abre la subida con ese tipo ya elegido, que es lo que reemplaza. */
@@ -99,7 +121,9 @@ export function ContratosDeLaBateria({
 				JSON.stringify(query.queryKey).includes("InvestorContract"),
 		});
 
-	const contratos = contratosQuery.data ?? [];
+	const contratos = (contratosQuery.data ?? []).filter((c) =>
+		esDeEstaCompra(c, aceptadaEn),
+	);
 	const vigentes = contratos.filter((c) => !estaAnulado(c));
 	const anulados = contratos.filter((c) => estaAnulado(c));
 

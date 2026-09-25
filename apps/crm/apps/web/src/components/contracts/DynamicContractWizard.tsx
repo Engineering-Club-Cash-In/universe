@@ -1709,8 +1709,17 @@ export function DynamicContractWizard({
 	 * trabajo: la batería saldría de la lista de jurídico con un contrato de
 	 * menos y nadie se enteraría.
 	 */
+	//
+	// Uno que ya tiene contrato vigente de su tipo —se subió a mano o se volvió
+	// a emitir desde los resultados— ya no falta: sin esto "Listo" seguía
+	// trabado por un fallido que estaba resuelto.
+	const tiposVigentes = new Set(
+		resultadosVigentes?.map((r) => r.contractType) ?? [],
+	);
 	const fallidosDeLaSesion =
-		generationResult?.results.filter((r) => !r.success) ?? [];
+		generationResult?.results.filter(
+			(r) => !r.success && !tiposVigentes.has(r.contractType),
+		) ?? [];
 	const fallidos = fallidosDeLaSesion.length;
 	const hayFallidos = fallidos > 0;
 

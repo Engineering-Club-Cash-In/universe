@@ -1131,17 +1131,22 @@ export class WeeTrustService {
 		);
 
 		// Un documento puede traer menos repeticiones de las declaradas y estar
-		// bien: los anexos de inversiones son dos, pero a veces se manda uno solo
-		// unificado y entonces cada persona firma una vez en vez de dos. Mientras
-		// lo que llegue sean repeticiones COMPLETAS de la secuencia, se firman
-		// las que haya; media repetición sí es un layout que no entendemos.
+		// bien, pero sólo donde el tipo lo declara (`repeticionesOpcionales`): los
+		// anexos de inversiones son dos, y a veces se manda uno solo unificado.
+		// Mientras lo que llegue sean repeticiones COMPLETAS de la secuencia, se
+		// firman las que haya; media repetición sí es un layout que no
+		// entendemos. En los demás (la cobertura lleva siempre sus dos secciones)
+		// la cuenta tiene que ser exacta.
 		const porRepeticion = esperados.length / (config.repeticiones ?? 1);
 		const repeticionesEnElPdf =
 			porRepeticion > 0 ? lineas.length / porRepeticion : 0;
 		const esRepeticionCompleta =
 			Number.isInteger(repeticionesEnElPdf) && repeticionesEnElPdf >= 1;
+		const cuentaAceptable = config.repeticionesOpcionales
+			? lineas.length <= esperados.length && esRepeticionCompleta
+			: lineas.length === esperados.length;
 
-		if (lineas.length > esperados.length || !esRepeticionCompleta) {
+		if (!cuentaAceptable) {
 			throw new SignatureLayoutError(
 				`El contrato "${contractType}" tiene ${lineas.length} línea(s) de firma en el PDF ` +
 					`pero se esperaban ${esperados.length} (${esperados.map((s) => s.role).join(", ")}). ` +

@@ -52,6 +52,13 @@ const FIRMANTES_DE_PRUEBA: ContractSigner[] = [
 		email: "replegal@ejemplo.test",
 		name: "REP LEGAL DE PRUEBA",
 	},
+	// El contrato de servicios lleva una línea por sociedad: sin la segunda
+	// entidad en el roster, ese contrato no se podía previsualizar.
+	{
+		role: SignerRole.REP_LEGAL_RDBE,
+		email: "replegal-rdbe@ejemplo.test",
+		name: "REP LEGAL RDBE DE PRUEBA",
+	},
 ];
 
 async function main() {

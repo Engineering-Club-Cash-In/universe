@@ -221,6 +221,18 @@ app.post("/", async (c) => {
 		}
 
 		batchId = existente.id;
+
+		// Un aviso de una aceptación más vieja que la guardada llega tarde (dos
+		// compras sobre los mismos créditos que se cruzan): no se toca nada. Si
+		// no, pisaba la foto de la compra nueva —créditos y monto— con la de la
+		// vieja, y jurídico emitía con los términos de la compra que no era.
+		if (aceptadaEn.getTime() < existente.acceptedAt.getTime()) {
+			console.warn(
+				`[cartera-compra-aceptada] aviso de una aceptación anterior a la guardada para ${inversionista.nombre} (${purchaseKey}): se ignora`,
+			);
+			return c.json({ success: true, batchId, repetida: true });
+		}
+
 		let otraCompra = aceptadaEn.getTime() > existente.acceptedAt.getTime();
 		const abierta =
 			existente.status === "pendiente" || existente.status === "en_proceso";
@@ -268,9 +280,13 @@ app.post("/", async (c) => {
 						// Dos avisos de la misma compra nueva pueden leer los dos la
 						// aceptación vieja. Sólo uno la registra; el otro no encuentra la
 						// fila y sigue como aviso repetido, sin volver a notificar.
-						...(otraCompra
-							? [lt(investorContractBatches.acceptedAt, aceptadaEn)]
-							: []),
+						//
+						// Y el mismo aviso repetido sólo refresca si la batería sigue
+						// siendo de esa aceptación: una compra nueva que entró en el
+						// medio no se pisa con la foto de ésta.
+						otraCompra
+							? lt(investorContractBatches.acceptedAt, aceptadaEn)
+							: eq(investorContractBatches.acceptedAt, aceptadaEn),
 					),
 				)
 				.returning({ id: investorContractBatches.id });

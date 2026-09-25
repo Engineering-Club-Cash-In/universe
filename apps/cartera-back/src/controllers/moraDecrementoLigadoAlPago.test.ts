@@ -79,6 +79,38 @@ function executorFalso({
 	return { executor: { select } as any };
 }
 
+/**
+ * Una RE-FIJACIÓN POR FÓRMULA del cron: la única clase de evento que puede
+ * deshacer el decremento de un pago, porque REEMPLAZA el monto ignorando el
+ * pago (`procesarMoras`, ramas CREACION/RECALCULO, las dos `PROCESO_AUTO`).
+ */
+const refijacionDelCron = (
+	anterior: string,
+	nuevo: string,
+	tipo_evento: "RECALCULO" | "CREACION" = "RECALCULO",
+) => ({
+	monto_anterior: anterior,
+	monto_nuevo: nuevo,
+	origen: "PROCESO_AUTO",
+	tipo_evento,
+});
+
+/** El ajuste a mano de un analista desde `POST /mora/update`. */
+const incrementoManual = (anterior: string, nuevo: string) => ({
+	monto_anterior: anterior,
+	monto_nuevo: nuevo,
+	origen: "API_MANUAL",
+	tipo_evento: "INCREMENTO",
+});
+
+/** Otro pago cobrando mora: baja, no repone. */
+const decrementoDeOtroPago = (anterior: string, nuevo: string) => ({
+	monto_anterior: anterior,
+	monto_nuevo: nuevo,
+	origen: "API_MANUAL",
+	tipo_evento: "DECREMENTO",
+});
+
 const filaDecremento = (anterior: string, nuevo: string, extra = "") => [
 	{
 		historial_id: 5001,
@@ -116,7 +148,7 @@ describe("(A) el hueco entre el decremento y la fila del pago", () => {
 			{ mora: "333.95" },
 			{
 				decremento: filaDecremento("333.95", "0.00"),
-				posteriores: [{ monto_anterior: "0.00", monto_nuevo: "333.95" }],
+				posteriores: [refijacionDelCron("0.00", "333.95")],
 			},
 		);
 
@@ -147,7 +179,7 @@ describe("(B) el delta real en vez del proxy", () => {
 			{ mora: "100.00" },
 			{
 				decremento: filaDecremento("100.00", "0.00"),
-				posteriores: [{ monto_anterior: "0.00", monto_nuevo: "60.00" }],
+				posteriores: [refijacionDelCron("0.00", "60.00")],
 			},
 		);
 
@@ -163,7 +195,7 @@ describe("(B) el delta real en vez del proxy", () => {
 			{ mora: "60.00" },
 			{
 				decremento: filaDecremento("100.00", "40.00"),
-				posteriores: [{ monto_anterior: "40.00", monto_nuevo: "50.00" }],
+				posteriores: [refijacionDelCron("40.00", "50.00")],
 			},
 		);
 
@@ -193,8 +225,8 @@ describe("(B) el delta real en vez del proxy", () => {
 			{
 				decremento: filaDecremento("100.00", "0.00"),
 				posteriores: [
-					{ monto_anterior: "0.00", monto_nuevo: "100.00" },
-					{ monto_anterior: "100.00", monto_nuevo: "0.00" },
+					refijacionDelCron("0.00", "100.00"),
+					decrementoDeOtroPago("100.00", "0.00"),
 				],
 			},
 		);
@@ -213,8 +245,8 @@ describe("(B) el delta real en vez del proxy", () => {
 			{
 				decremento: filaDecremento("100.00", "0.00"),
 				posteriores: [
-					{ monto_anterior: "0.00", monto_nuevo: "60.00" },
-					{ monto_anterior: "60.00", monto_nuevo: "0.00" },
+					refijacionDelCron("0.00", "60.00"),
+					decrementoDeOtroPago("60.00", "0.00"),
 				],
 			},
 		);
@@ -228,6 +260,91 @@ describe("(B) el delta real en vez del proxy", () => {
 			{
 				decremento: filaDecremento("100.00", "0.00", MARCA_DECREMENTO_ANULADO),
 				posteriores: [],
+			},
+		);
+
+		expect(restitucion).toBeNull();
+	});
+});
+
+describe("(D) solo repone quien de verdad pudo reponer", () => {
+	// El delta real no alcanzaba: contaba como «restitución de este pago»
+	// CUALQUIER subida posterior de la mora, sin mirar de dónde venía ni
+	// cuántas eran. Las dos mitades del criterio —el filtro por origen/tipo y
+	// el corte en la PRIMERA re-fijación— se prueban acá con números.
+
+	it("el ajuste manual de un analista no descuenta de la restitución", async () => {
+		// La mora bajó de Q100 a Q40 (bajó Q60). Después un analista la subió a
+		// mano de Q40 a Q50 —deuda distinta, decisión suya—. Contar esos Q10 como
+		// «ya repuesto» dejaba la restitución en Q50 y al crédito con Q100 de mora
+		// en vez de Q110: Q10 del cliente que nadie le devuelve.
+		const { restitucion } = await reconciliar(
+			{ mora: "60.00" },
+			{
+				decremento: filaDecremento("100.00", "40.00"),
+				posteriores: [incrementoManual("40.00", "50.00")],
+			},
+		);
+
+		expect(restitucion?.monto_cambio).toBe(60);
+	});
+
+	it("y si además pasó el cron, repone el cron, no el ajuste", async () => {
+		// Mismo caso con la re-fijación del cron DESPUÉS del ajuste manual: la
+		// que repone es ella (Q50 → Q60, Q10), no la subida ajena que la precede.
+		const { restitucion } = await reconciliar(
+			{ mora: "60.00" },
+			{
+				decremento: filaDecremento("100.00", "40.00"),
+				posteriores: [
+					incrementoManual("40.00", "50.00"),
+					refijacionDelCron("50.00", "60.00"),
+				],
+			},
+		);
+
+		expect(restitucion?.monto_cambio).toBe(50);
+	});
+
+	it("los recálculos de las noches siguientes no se acumulan hasta borrarla", async () => {
+		// Mora proporcional: el cron recalcula TODAS las noches y el monto sube
+		// por cuotas que van venciendo (Q40 → 55 → 70 → 85 → 100). Sumando las
+		// cuatro subidas, lo «repuesto» llegaba a Q60 —todo lo que el pago había
+		// bajado— y la restitución se iba a CERO: a unos días del pago, cualquier
+		// reversa se comía la devolución entera. Repone la PRIMERA (Q15); las
+		// otras son deuda NUEVA, no devolución de nada.
+		const { restitucion } = await reconciliar(
+			{ mora: "60.00" },
+			{
+				decremento: filaDecremento("100.00", "40.00"),
+				posteriores: [
+					refijacionDelCron("40.00", "55.00"),
+					refijacionDelCron("55.00", "70.00"),
+					refijacionDelCron("70.00", "85.00"),
+					refijacionDelCron("85.00", "100.00"),
+				],
+			},
+		);
+
+		expect(restitucion?.monto_cambio).toBe(45);
+	});
+
+	it("una DESACTIVACION no repone, y la CREACION que le sigue sí", async () => {
+		// Apagar la mora es lo contrario de reponerla. La mora vuelve a nacer por
+		// fórmula en Q100: ahí sí quedó repuesto todo lo que el pago bajó.
+		const { restitucion } = await reconciliar(
+			{ mora: "100.00" },
+			{
+				decremento: filaDecremento("100.00", "0.00"),
+				posteriores: [
+					{
+						monto_anterior: "0.00",
+						monto_nuevo: "0.00",
+						origen: "PROCESO_AUTO",
+						tipo_evento: "DESACTIVACION",
+					},
+					refijacionDelCron("0.00", "100.00", "CREACION"),
+				],
 			},
 		);
 

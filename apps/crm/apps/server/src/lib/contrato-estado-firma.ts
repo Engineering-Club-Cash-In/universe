@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, lte, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
 	contractSignatories,
@@ -24,6 +24,19 @@ import { espejarEstadoDeFirmaEnCartera } from "./espejo-contratos-inversionista"
 export async function sincronizarEstadoDeFirma(
 	contractId: string,
 	estado: EstadoDocumentoFirma,
+	opciones: {
+		/**
+		 * Cuándo se le preguntó a WeeTrust. Un firmante que cambió después no se
+		 * toca: la foto es más vieja que él. Pasa con "pedir que se identifique
+		 * de nuevo", que le deshace la firma a alguien: una consulta que salió
+		 * antes y termina después lo volvía a dejar firmado con el enlace viejo,
+		 * y como una firma no se baja, ninguna consulta nueva lo arreglaba.
+		 *
+		 * El webhook no lo pasa: trae el estado en el mensaje y no se sabe
+		 * cuándo lo leyó WeeTrust.
+		 */
+		observadoEn?: Date;
+	} = {},
 ): Promise<void> {
 	const ahora = new Date();
 
@@ -86,6 +99,9 @@ export async function sincronizarEstadoDeFirma(
 						firmante.isSigned
 							? undefined
 							: ne(contractSignatories.status, "signed"),
+						opciones.observadoEn
+							? lte(contractSignatories.updatedAt, opciones.observadoEn)
+							: undefined,
 					),
 				);
 		}

@@ -154,8 +154,9 @@ export async function resolverVerificacionFacial(params: {
 	// cerrado, y con eso se guardan el PDF firmado y lo que dependa de él.
 	let despues: EstadoDocumentoFirma | null = null;
 	try {
+		const observadoEn = new Date();
 		despues = await consultarEstadoFirma(documentID);
-		await sincronizarEstadoDeFirma(contrato.id, despues);
+		await sincronizarEstadoDeFirma(contrato.id, despues, { observadoEn });
 		if (accion === "repetir") {
 			await devolverAFirmar(contrato.id, despues);
 		}

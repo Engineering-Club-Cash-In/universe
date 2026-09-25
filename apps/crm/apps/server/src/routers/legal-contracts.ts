@@ -1498,6 +1498,7 @@ export const legalContractsRouter = {
 			const { documentID } = await contratoConDocumentID(input.contractId);
 
 			let estado: EstadoDocumentoFirma;
+			const observadoEn = new Date();
 			try {
 				estado = await consultarEstadoFirma(documentID);
 			} catch (error) {
@@ -1509,7 +1510,7 @@ export const legalContractsRouter = {
 				});
 			}
 
-			await sincronizarEstadoDeFirma(input.contractId, estado);
+			await sincronizarEstadoDeFirma(input.contractId, estado, { observadoEn });
 			return estado;
 		}),
 
@@ -1555,24 +1556,44 @@ export const legalContractsRouter = {
 				});
 			}
 
-			if (contract.status === "cancelled" || contract.replacedByContractId) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Este contrato está anulado o fue reemplazado.",
+			// Con el candado de firma de la oportunidad, el mismo que toma la
+			// confirmación de 85 a 90: si se cruzaban, la confirmación marcaba todo
+			// firmado y después esto le deshacía la firma a alguien, y el contrato
+			// quedaba firmado con un firmante pendiente y sin salida. Adentro se
+			// vuelve a leer el contrato, que pudo cambiar mientras se esperaba.
+			//
+			// Cada llamada a WeeTrust corta a los 30s: termina bastante antes de
+			// que Neon suelte el candado.
+			return conCandadoDeFirma(contract.opportunityId, async () => {
+				const [actual] = await db
+					.select()
+					.from(generatedLegalContracts)
+					.where(eq(generatedLegalContracts.id, input.contractId))
+					.limit(1);
+
+				if (
+					!actual ||
+					actual.status === "cancelled" ||
+					actual.replacedByContractId
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Este contrato está anulado o fue reemplazado.",
+					});
+				}
+
+				const resultado = await resolverVerificacionFacial({
+					contrato: actual,
+					documentID,
+					accion: input.accion,
+					quien:
+						context.session?.user?.name ||
+						context.session?.user?.email ||
+						"alguien del CRM",
+					origen: "retryContractBiometric",
 				});
-			}
 
-			const resultado = await resolverVerificacionFacial({
-				contrato: contract,
-				documentID,
-				accion: input.accion,
-				quien:
-					context.session?.user?.name ||
-					context.session?.user?.email ||
-					"alguien del CRM",
-				origen: "retryContractBiometric",
+				return { success: true, accion: input.accion, ...resultado };
 			});
-
-			return { success: true, accion: input.accion, ...resultado };
 		}),
 
 	/**

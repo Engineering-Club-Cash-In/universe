@@ -1735,6 +1735,7 @@ export const investorContractsRouter = {
 			const { documentID } = await contratoDeInversionista(input.contractId);
 
 			let estado: EstadoDocumentoFirma;
+			const observadoEn = new Date();
 			try {
 				estado = await consultarEstadoFirma(documentID);
 			} catch (error) {
@@ -1747,7 +1748,7 @@ export const investorContractsRouter = {
 			}
 
 			// Escribe el estado y, de paso, lo copia a cartera: es la única puerta.
-			await sincronizarEstadoDeFirma(input.contractId, estado);
+			await sincronizarEstadoDeFirma(input.contractId, estado, { observadoEn });
 			return estado;
 		}),
 

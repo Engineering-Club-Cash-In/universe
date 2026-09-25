@@ -578,6 +578,16 @@ function RouteComponent() {
 		placeholderData: (previa) => previa,
 	});
 
+	// CB-036: solo para el contador de la pestaña Referencias. Es la misma
+	// query (misma llave) que pinta ReferenciasView, así que abrir la pestaña
+	// no vuelve a pedirla.
+	const referenciasCaso = useQuery({
+		...orpc.getReferenciasCaso.queryOptions({
+			input: { casoCobroId: casoDetails.data?.id || "" },
+		}),
+		enabled: !!session && !!casoDetails.data?.id,
+	});
+
 	// La lista COMPLETA (limit 200), solo para las derivaciones que necesitan
 	// ver todo el historial: promesasPago (CB-020) y la regla B1 (CB-026). Las
 	// tarjetas ya no pintan de acá — eso es del paginado de arriba.
@@ -1156,6 +1166,7 @@ function RouteComponent() {
 	// server (las promesas van en su propia tarjeta, CB-020).
 	const contactos = historialContactosPagina.data?.contactos ?? [];
 	const totalContactos = historialContactosPagina.data?.total ?? 0;
+	const totalReferencias = referenciasCaso.data?.referencias.length ?? 0;
 	const contactosPorPagina = historialContactosPagina.data?.porPagina ?? 10;
 	const cuotas = historialPagos.data || [];
 	const recuperacion = recuperacionInfo.data;
@@ -2155,7 +2166,17 @@ function RouteComponent() {
 					</TabsTrigger>
 					<TabsTrigger value="estado-cuenta">Estado de cuenta</TabsTrigger>
 					<TabsTrigger value="vehiculo">Vehículo</TabsTrigger>
-					<TabsTrigger value="referencias">Referencias</TabsTrigger>
+					<TabsTrigger value="referencias">
+						Referencias
+						{totalReferencias > 0 && (
+							<Badge
+								variant="secondary"
+								className="ml-1.5 h-4 px-1 text-[10px]"
+							>
+								{totalReferencias}
+							</Badge>
+						)}
+					</TabsTrigger>
 				</TabsList>
 
 				{/* RESUMEN — lo que se necesita para gestionar AHORA. */}
@@ -4502,18 +4523,9 @@ function RouteComponent() {
 				</TabsContent>
 
 				<TabsContent value="referencias" className="mt-4">
-					{/* Referencias */}
-					{matchingOpportunity?.lead?.id && (
-						<ReferenciasView leadId={matchingOpportunity.lead.id} />
-					)}
-					{!matchingOpportunity?.lead?.id && (
-						<Card>
-							<CardContent className="py-10 text-center text-muted-foreground text-sm">
-								Este crédito no está enlazado a una oportunidad del CRM, así que
-								no se pueden mostrar sus referencias.
-							</CardContent>
-						</Card>
-					)}
+					{/* Referencias (CB-036): el server resuelve el lead y la
+					    oportunidad desde el caso — no dependen de matchingOpportunity. */}
+					{caso.id && <ReferenciasView casoCobroId={caso.id} />}
 				</TabsContent>
 			</Tabs>
 

@@ -44,8 +44,6 @@ import {
 	coDebtors,
 	leads,
 	opportunities,
-	PARENTESCO_VALUES,
-	referenciasLead,
 	salesStages,
 } from "../db/schema/crm";
 import { notifications } from "../db/schema/notifications";
@@ -6920,116 +6918,6 @@ export const cobrosRouter = {
 			}
 
 			return updated;
-		}),
-
-	// ============================================================================
-	// CRUD DE REFERENCIAS
-	// ============================================================================
-
-	getReferencias: cobrosProcedure
-		.input(
-			z.object({
-				leadId: z.string().uuid(),
-			}),
-		)
-		.handler(async ({ input }) => {
-			const result = await db
-				.select()
-				.from(referenciasLead)
-				.where(eq(referenciasLead.leadId, input.leadId))
-				.orderBy(desc(referenciasLead.createdAt));
-
-			return result;
-		}),
-
-	createReferencia: cobrosProcedure
-		.input(
-			z.object({
-				leadId: z.string().uuid(),
-				nombre: z.string().min(1),
-				telefono: z.string().min(1),
-				parentesco: z.enum(PARENTESCO_VALUES),
-				notas: z.string().optional(),
-			}),
-		)
-		.handler(async ({ input }) => {
-			const [created] = await db
-				.insert(referenciasLead)
-				.values({
-					leadId: input.leadId,
-					nombre: input.nombre,
-					telefono: input.telefono,
-					parentesco: input.parentesco,
-					notas: input.notas || null,
-				})
-				.returning();
-
-			return created;
-		}),
-
-	updateReferencia: cobrosProcedure
-		.input(
-			z.object({
-				id: z.string().uuid(),
-				leadId: z.string().uuid(),
-				nombre: z.string().min(1),
-				telefono: z.string().min(1),
-				parentesco: z.enum(PARENTESCO_VALUES),
-				notas: z.string().optional(),
-			}),
-		)
-		.handler(async ({ input }) => {
-			const [updated] = await db
-				.update(referenciasLead)
-				.set({
-					nombre: input.nombre,
-					telefono: input.telefono,
-					parentesco: input.parentesco,
-					notas: input.notas || null,
-					updatedAt: new Date(),
-				})
-				.where(
-					and(
-						eq(referenciasLead.id, input.id),
-						eq(referenciasLead.leadId, input.leadId),
-					),
-				)
-				.returning();
-
-			if (!updated) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Referencia no encontrada",
-				});
-			}
-
-			return updated;
-		}),
-
-	deleteReferencia: cobrosProcedure
-		.input(
-			z.object({
-				id: z.string().uuid(),
-				leadId: z.string().uuid(),
-			}),
-		)
-		.handler(async ({ input }) => {
-			const [deleted] = await db
-				.delete(referenciasLead)
-				.where(
-					and(
-						eq(referenciasLead.id, input.id),
-						eq(referenciasLead.leadId, input.leadId),
-					),
-				)
-				.returning();
-
-			if (!deleted) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Referencia no encontrada",
-				});
-			}
-
-			return { success: true };
 		}),
 
 	// ========================================================================

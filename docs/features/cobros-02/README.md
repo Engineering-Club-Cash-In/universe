@@ -135,6 +135,7 @@ le habla, cuándo y por dónde → CRM. El bot solo habla con el CRM
 | Sandbox al día con producción | ✅ Scriptado y a demanda: `alinear_desde_prod.sh`. Corre el motor, así que las bajadas de quien ya pagó quedan registradas. Ver [datos y ambientes](./05-datos-y-ambientes.md#poner-el-sandbox-al-día-con-producción) |
 | Recuperación de vehículo (traslado a B4) | 🟡 El traslado funciona; **cómo se sostiene ya se definió** con el PM (estado `EN_RECUPERACION` como piso en B4) pero **no está implementado** — ver [el plan, doc 8](./08-plan-convenios-y-recuperacion.md) |
 | Convenios que no bajan de bucket | 🔵 Acordado, sin implementar. Hoy el job hace lo CONTRARIO (un convenio nuevo cae a B0). [Doc 8, fase 2](./08-plan-convenios-y-recuperacion.md) |
+| Referencias y contactos de emergencia (CB-036) | ✅ Implementado — seis fuentes juntas (cobros, ventas, cónyuge, emergencia, cofirmantes), bitácora de gestiones, teléfonos agregados e información nueva del cliente. Migración CRM `0060` pendiente en prod. Ver [Ficha 360 §4.c](./06-ficha-360.md#4c-referencias-y-contactos-de-emergencia-cb-036) |
 | Carga inicial en producción | ⚪ Pendiente — mismo runbook, pero **sin replay**: línea base limpia |
 
 ---

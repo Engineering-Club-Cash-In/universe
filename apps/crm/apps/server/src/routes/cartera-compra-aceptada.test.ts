@@ -153,6 +153,40 @@ describe("aviso de compra aceptada", () => {
 		expect(valoresInsertados[0]?.purchaseKey).toBe("100-900");
 	});
 
+	test("guarda lo que el inversionista tenía aportado antes de la compra", async () => {
+		filaInsertada = [{ id: "bateria-1" }];
+		resultadosDeSelect = [[{ id: "usuario-juridico", role: "juridico" }]];
+
+		await pedir({
+			...CUERPO,
+			compra: { ...CUERPO.compra, montoAportadoPrevio: "25000.00" },
+		});
+
+		expect(valoresInsertados[0]?.montoAportadoPrevio).toBe("25000.00");
+	});
+
+	test("sin el monto previo, o con uno raro, la batería se abre igual y queda vacío", async () => {
+		filaInsertada = [{ id: "bateria-1" }];
+		resultadosDeSelect = [
+			[{ id: "usuario-juridico", role: "juridico" }],
+			[{ id: "usuario-juridico", role: "juridico" }],
+		];
+
+		const sinDato = await pedir(CUERPO);
+		const raro = await pedir({
+			...CUERPO,
+			compra: { ...CUERPO.compra, montoAportadoPrevio: "-5" },
+		});
+
+		expect(sinDato.status).toBe(200);
+		expect(raro.status).toBe(200);
+		// Vacío = se trata como primera compra: selfie y DPI, lo de siempre.
+		expect(valoresInsertados.map((v) => v.montoAportadoPrevio)).toEqual([
+			null,
+			null,
+		]);
+	});
+
 	/** La batería que ya existía, con la fecha de aceptación de este mismo aviso. */
 	const MISMA_ACEPTACION = {
 		id: "bateria-1",
@@ -233,6 +267,8 @@ describe("aviso de compra aceptada", () => {
 			completedAt: null,
 			montoTotal: "150000.00",
 		});
+		// La compra nueva trae su propio "antes": la anterior ya cuenta.
+		expect(valoresRefrescados[0]).toHaveProperty("montoAportadoPrevio", null);
 		// Es trabajo nuevo: jurídico tiene que enterarse.
 		expect(createNotification).toHaveBeenCalledTimes(1);
 	});

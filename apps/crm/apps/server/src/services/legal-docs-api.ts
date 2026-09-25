@@ -13,6 +13,7 @@ const LEGAL_DOCS_API_URL =
 	"https://legal-docs-blueprints.s4.devteamatcci.site";
 
 import type { SignatureMode } from "../lib/contract-signature-mode";
+import type { IdentificacionDelInversionista } from "../lib/identidad-inversionista";
 
 // ============ TIPOS ============
 
@@ -139,6 +140,12 @@ export interface ContractSigner {
 	name: string;
 	dpi?: string;
 	phone?: string;
+	/**
+	 * Qué verificación de identidad pedirle. Sólo la usan los contratos de
+	 * inversiones (ver `lib/identidad-inversionista.ts`); sin el campo, el
+	 * generador pide lo de siempre para ese tipo de contrato.
+	 */
+	identification?: IdentificacionDelInversionista;
 }
 
 export interface GenerateContractPayload {

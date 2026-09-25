@@ -55,6 +55,12 @@ import {
 } from "../lib/correo-contratos-inversion";
 import { espejarEstadoDeFirmaEnCartera } from "../lib/espejo-contratos-inversionista";
 import { firmantesDeContratoDeInversion } from "../lib/firmantes-inversionista";
+import {
+	conMarcaDeIdentificacion,
+	type IdentificacionDelInversionista,
+	identificacionDelContrato,
+	identificacionParaLaCompra,
+} from "../lib/identidad-inversionista";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
 import { createNotification } from "../lib/notificaciones";
 import { juridicoProcedure, viewInvestorContractsProcedure } from "../lib/orpc";
@@ -221,6 +227,11 @@ async function guardarContratoDeInversion(params: {
 	/** Lo armó una persona por fuera, no la plantilla. */
 	subidoAMano?: boolean;
 	/**
+	 * Qué verificación de identidad se le pidió al inversionista. Queda en el
+	 * contrato para que renovarle los enlaces pida lo mismo.
+	 */
+	identificacion: IdentificacionDelInversionista;
+	/**
 	 * El contrato al que reemplaza, con el motivo por el que se anula.
 	 *
 	 * Va en la misma transacción que el nuevo: si dos personas reemplazan el
@@ -347,9 +358,10 @@ async function guardarContratoDeInversion(params: {
 				// Con la marca, la ficha pide mirar dónde quedaron las firmas: el
 				// documento lo armó una persona y puede traer las líneas en otro lado
 				// que la plantilla.
-				apiResponse: params.subidoAMano
-					? conMarcaDeSubidoAMano(resultado)
-					: resultado,
+				apiResponse: conMarcaDeIdentificacion(
+					params.subidoAMano ? conMarcaDeSubidoAMano(resultado) : resultado,
+					params.identificacion,
+				),
 				// La key de R2, no la URL firmada que se muestra: esa vence en una
 				// hora, y con ella no se puede volver a emitir el documento.
 				pdfLink: resultado.r2Key || resultado.linkDocument || null,
@@ -925,6 +937,12 @@ export const investorContractsRouter = {
 				yaVigentes.map((contrato) => [contrato.contractType, contrato]),
 			);
 
+			// Selfie y DPI si es su primera compra, sólo firma si ya tenía monto
+			// aportado. Lo mismo para todos los contratos de la compra.
+			const identificacion = identificacionParaLaCompra(
+				bateria.montoAportadoPrevio,
+			);
+
 			// Puede cortar: sin correo del inversionista, con correos repetidos, o
 			// en modo prueba sin las envs. Se hace antes de generar nada.
 			const aGenerar = input.contracts.map((contrato) => ({
@@ -933,6 +951,7 @@ export const investorContractsRouter = {
 				signers: firmantesDeContratoDeInversion(contrato.contractType, {
 					nombre: bateria.investorName,
 					email: bateria.investorEmail,
+					identificacion,
 				}),
 				observers: CONTRATOS_OBSERVADORES,
 				options: {
@@ -1002,6 +1021,7 @@ export const investorContractsRouter = {
 						contractName: pedido.contractName,
 						resultado,
 						userId: context.userId,
+						identificacion,
 						...(reemplazado
 							? {
 									reemplaza: {
@@ -1214,9 +1234,13 @@ export const investorContractsRouter = {
 
 			// Puede cortar: sin correo del inversionista, con correos repetidos, o
 			// en modo prueba sin las envs. Se hace antes de mandar nada.
+			const identificacion = identificacionParaLaCompra(
+				bateria.montoAportadoPrevio,
+			);
 			const signers = firmantesDeContratoDeInversion(input.contractType, {
 				nombre: bateria.investorName,
 				email: bateria.investorEmail,
+				identificacion,
 			});
 
 			const resultado = await subirContratoParaFirma({
@@ -1245,6 +1269,7 @@ export const investorContractsRouter = {
 					resultado,
 					userId: context.userId,
 					subidoAMano: true,
+					identificacion,
 					...(reemplazado && input.motivo
 						? {
 								reemplaza: {
@@ -1985,10 +2010,17 @@ export const investorContractsRouter = {
 				});
 			}
 
+			// Y con lo que se le pidió al inversionista al emitirlo: la batería pudo
+			// reusarla otra compra, y lo que vale para ésa no es lo de éste. Los de
+			// antes de guardarlo no lo traen y salen con selfie, como salieron.
+			const identificacion = identificacionDelContrato(contrato.apiResponse);
 			const guardados = firmantes.map((f) => ({
 				role: f.role as SignerRole,
 				email: f.email,
 				name: f.name,
+				...(identificacion && f.role === "TITULAR"
+					? { identification: identificacion }
+					: {}),
 			}));
 
 			// El titular de un contrato de inversión es el inversionista. Sale de
@@ -2109,7 +2141,9 @@ export const investorContractsRouter = {
 							contractType: contrato.contractType,
 							contractName: contrato.contractName,
 							templateId: contrato.templateId,
-							apiResponse: resultado,
+							apiResponse: identificacion
+								? conMarcaDeIdentificacion(resultado, identificacion)
+								: resultado,
 							pdfLink: r2KeyDelPdf,
 							signingProvider: resultado.signingProvider ?? "weetrust",
 							signatureMode: contrato.signatureMode,

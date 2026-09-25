@@ -963,6 +963,17 @@ export interface ContractSigner {
   dpi?: string;
   /** Número de WhatsApp, en formato internacional sin `+`. */
   phone?: string;
+  /**
+   * Qué verificación de identidad pedirle, cuando la decide quien manda el
+   * contrato. `none` = sólo firma.
+   *
+   * **Sólo cuenta en los contratos de inversiones** (`CONTRATOS_DE_INVERSION`):
+   * el CRM la decide por compra —selfie y DPI en la primera del inversionista,
+   * sólo firma en las siguientes— en `lib/identidad-inversionista.ts`. En ventas
+   * se ignora y manda `identificacionDe` (WeeTrustService). Sin el campo, cada
+   * contrato pide lo de siempre.
+   */
+  identification?: IdentificationMode | 'none';
 }
 
 /**

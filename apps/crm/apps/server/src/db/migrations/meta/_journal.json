@@ -253,6 +253,13 @@
 			"when": 1790090286602,
 			"tag": "0043_add_batch_email_thread",
 			"breakpoints": true
+		},
+		{
+			"idx": 36,
+			"version": "7",
+			"when": 1790373775351,
+			"tag": "0044_add_batch_monto_aportado_previo",
+			"breakpoints": true
 		}
 	]
 }

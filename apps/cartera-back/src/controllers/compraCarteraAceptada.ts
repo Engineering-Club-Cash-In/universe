@@ -70,6 +70,61 @@ type FilaDePool = {
   porcentajeInversion: Big;
 };
 
+/** Una posición o una compra de un inversionista en un crédito. */
+type MontoDeUnPar = {
+  credito_id: number;
+  inversionista_id: number;
+  monto_aportado: string;
+};
+
+/**
+ * Cuánto tenía aportado cada inversionista ANTES de esta compra.
+ *
+ * Decide cómo firma sus contratos: en cero es su primera compra y el CRM le pide
+ * selfie y DPI; con monto, sólo la firma (`lib/identidad-inversionista.ts` del
+ * CRM, que es donde se cambia qué se pide).
+ *
+ * La posición del padre (`creditos_inversionistas`) ya trae sumado lo de esta
+ * compra y lo de cualquier otra que todavía no se aceptó: la compra se suma al
+ * registrarla, no al aceptarla. Lo "de antes" es la posición menos esas
+ * operaciones, crédito por crédito y sin bajar de cero (un abono a capital en
+ * el medio puede dejar la posición por debajo de lo que entró).
+ *
+ * Una compra ya aceptada sí cuenta, aunque no se haya terminado de revisar:
+ * esa persona ya pasó por su primera batería.
+ */
+export function montoAportadoAntesDeLaCompra(params: {
+  /** Las posiciones del padre de estos inversionistas, en todos sus créditos. */
+  posiciones: MontoDeUnPar[];
+  /** Sus compras que siguen sin aceptar (`pendiente_compra_cartera`). */
+  sinAceptar: MontoDeUnPar[];
+  /** Lo que entró en ESTA aceptación, por `${credito}-${inversionista}`. */
+  montoNuevoPorPar: Map<string, Big>;
+}): Map<number, Big> {
+  const enVuelo = new Map<string, Big>(params.montoNuevoPorPar);
+  for (const compra of params.sinAceptar) {
+    const par = `${compra.credito_id}-${compra.inversionista_id}`;
+    enVuelo.set(
+      par,
+      (enVuelo.get(par) ?? new Big(0)).plus(new Big(compra.monto_aportado)),
+    );
+  }
+
+  const antes = new Map<number, Big>();
+  for (const posicion of params.posiciones) {
+    const par = `${posicion.credito_id}-${posicion.inversionista_id}`;
+    const deAntes = new Big(posicion.monto_aportado).minus(
+      enVuelo.get(par) ?? new Big(0),
+    );
+    if (deAntes.lte(0)) continue;
+    antes.set(
+      posicion.inversionista_id,
+      (antes.get(posicion.inversionista_id) ?? new Big(0)).plus(deAntes),
+    );
+  }
+  return antes;
+}
+
 /**
  * Le abre al CRM una batería de contratos por cada inversionista de la compra.
  *
@@ -198,6 +253,45 @@ export async function abrirBateriasDeContratos(params: {
       fechasPorCredito.set(cuota.credito_id, actual);
     }
 
+    // Lo que cada uno tenía aportado antes: si no se puede leer, la batería se
+    // abre igual sin el dato y el CRM pide lo de siempre (selfie y DPI).
+    let montoPrevioPorInversionista: Map<number, Big> | null = null;
+    try {
+      const posiciones = await db
+        .select({
+          credito_id: creditos_inversionistas.credito_id,
+          inversionista_id: creditos_inversionistas.inversionista_id,
+          monto_aportado: creditos_inversionistas.monto_aportado,
+        })
+        .from(creditos_inversionistas)
+        .where(inArray(creditos_inversionistas.inversionista_id, targetIds));
+      // Esta aceptación ya pasó sus compras a revisión: las que quedan sin
+      // aceptar son otras, y tampoco cuentan como aportado.
+      const sinAceptar = await db
+        .select({
+          credito_id: compras_credito_inversionista.credito_id,
+          inversionista_id: compras_credito_inversionista.inversionista_id,
+          monto_aportado: compras_credito_inversionista.monto_aportado,
+        })
+        .from(compras_credito_inversionista)
+        .where(
+          and(
+            inArray(compras_credito_inversionista.inversionista_id, targetIds),
+            eq(compras_credito_inversionista.status, "pendiente_compra_cartera"),
+          ),
+        );
+      montoPrevioPorInversionista = montoAportadoAntesDeLaCompra({
+        posiciones,
+        sinAceptar,
+        montoNuevoPorPar,
+      });
+    } catch (error) {
+      console.error(
+        "[compraCarteraAceptada] No se pudo calcular lo aportado antes de la compra:",
+        error,
+      );
+    }
+
     const resultados: Array<{
       inversionista_id: number;
       success: boolean;
@@ -275,6 +369,9 @@ export async function abrirBateriasDeContratos(params: {
           aceptadaEn: params.aceptadaEn.toISOString(),
           aceptadaPor: params.aceptadaPor,
           correoId: params.correoId ?? null,
+          montoAportadoPrevio: montoPrevioPorInversionista
+            ? (montoPrevioPorInversionista.get(targetId) ?? new Big(0)).toFixed(2)
+            : null,
         },
       });
 

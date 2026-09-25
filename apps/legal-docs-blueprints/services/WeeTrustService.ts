@@ -965,7 +965,7 @@ export class WeeTrustService {
 			(s, index) => ({
 				emailID: s.email,
 				name: nombreParaWeeTrust(s.name, index),
-				...(modo === "rol" ? identificacionDe(s.role, contractType) : {}),
+				...(modo === "rol" ? identificacionDe(s, contractType) : {}),
 				...(s.phone ? { phone: s.phone } : {}),
 			}),
 		);
@@ -1626,20 +1626,6 @@ function nombreParaWeeTrust(nombre: string, index: number): string {
 }
 
 /**
- * Verificación de identidad que le toca a cada firmante.
- *
- * Al cliente y a los codeudores se les valida el DPI, y en el reconocimiento de
- * deuda además se les pide biometría facial con prueba de vida.
- *
- * Al **representante legal no se le pide nada**: firma por la entidad, es
- * personal nuestro y su nombre y cargo ya vienen impresos en el template.
- * Pedirle DPI o selfie no agrega ninguna garantía y le pone un trámite encima a
- * alguien que firma decenas de contratos al día.
- *
- * `identification` es opcional en WeeTrust: omitirlo deja la firma electrónica
- * sin verificación de identidad.
- */
-/**
  * Si un recuadro se solapa con un widget ya puesto (en el sistema de WeeTrust,
  * origen arriba a la izquierda). Tocarse en el borde no cuenta.
  */
@@ -1655,21 +1641,62 @@ function seSolapan(
 	);
 }
 
-function identificacionDe(
-	role: SignerRole,
+/** Los valores que WeeTrust acepta en `identification`. */
+const MODOS_DE_IDENTIFICACION: ReadonlySet<string> = new Set<IdentificationMode>([
+	"id",
+	"face",
+	"ocr",
+	"face_login",
+]);
+
+/**
+ * Verificación de identidad que le toca a cada firmante.
+ *
+ * Al cliente y a los codeudores se les valida el DPI, y en el reconocimiento de
+ * deuda además se les pide biometría facial con prueba de vida.
+ *
+ * En los contratos de **inversiones** la decide el CRM por compra y viene en el
+ * firmante (`signer.identification`): selfie y DPI en la primera compra del
+ * inversionista, sólo firma en las siguientes. Para cambiar qué se pide, se
+ * toca `apps/crm/apps/server/src/lib/identidad-inversionista.ts`, no esto. Si
+ * no viene (un CRM de antes), se le pide selfie como siempre.
+ *
+ * Al **representante legal no se le pide nada**: firma por la entidad, es
+ * personal nuestro y su nombre y cargo ya vienen impresos en el template.
+ * Pedirle DPI o selfie no agrega ninguna garantía y le pone un trámite encima a
+ * alguien que firma decenas de contratos al día.
+ *
+ * `identification` es opcional en WeeTrust: omitirlo deja la firma electrónica
+ * sin verificación de identidad.
+ */
+export function identificacionDe(
+	signer: Pick<ContractSigner, "role" | "identification">,
 	contractType: ContractType,
 ): { identification?: IdentificationMode } {
-	if (role === SignerRole.REP_LEGAL || role === SignerRole.REP_LEGAL_RDBE) {
+	if (
+		signer.role === SignerRole.REP_LEGAL ||
+		signer.role === SignerRole.REP_LEGAL_RDBE
+	) {
 		return {};
 	}
 
+	const deInversion = CONTRATOS_DE_INVERSION.has(contractType);
+
+	// Lo que decidió el CRM para esta compra. Sólo en inversiones: ventas no lo
+	// manda y, si llegara, no le toca cambiar lo que se le pide a un deudor.
+	if (deInversion && signer.identification) {
+		if (signer.identification === "none") return {};
+		if (MODOS_DE_IDENTIFICACION.has(signer.identification)) {
+			return { identification: signer.identification };
+		}
+	}
+
 	// Biometría facial además del documento: en el reconocimiento de deuda
-	// porque es el título que se ejecuta, y en TODOS los de inversión porque el
-	// inversionista entrega dinero y la relación se arma por correo, sin nadie
-	// de la empresa enfrente.
+	// porque es el título que se ejecuta, y en los de inversión (cuando el CRM
+	// no dijo otra cosa) porque el inversionista entrega dinero y la relación se
+	// arma por correo, sin nadie de la empresa enfrente.
 	const conSelfie =
-		contractType === ContractType.RECONOCIMIENTO_DEUDA ||
-		CONTRATOS_DE_INVERSION.has(contractType);
+		contractType === ContractType.RECONOCIMIENTO_DEUDA || deInversion;
 
 	return {
 		identification: conSelfie ? "face" : WEETRUST_DEFAULT_IDENTIFICATION,

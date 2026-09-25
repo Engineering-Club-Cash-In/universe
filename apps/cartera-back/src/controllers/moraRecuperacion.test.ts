@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
+	MARCA_DECREMENTO_ANULADO,
 	MOTIVOS_RESTITUCION_MORA_PREFIJOS,
 	MOTIVO_ANULACION_MORA_PREFIJO,
 	MOTIVO_REVERSA_MORA_PREFIJO,
+	marcaPagoDelDecremento,
 	motivoAnulacionMora,
 	motivoReversaMora,
 } from "../utils/motivoReversaMora";
@@ -38,6 +40,28 @@ const reverso = (montoAnterior: number, montoNuevo: number): MoraLevelEvent => (
 	montoAnterior,
 	montoNuevo,
 	reverso: true,
+});
+
+/** Un `DECREMENTO` ligado a SU pago por la marca `[pago #N]`. */
+const pagoDe = (
+	montoAnterior: number,
+	montoNuevo: number,
+	pagoId: number,
+): MoraLevelEvent => ({
+	tipoEvento: "DECREMENTO",
+	montoAnterior,
+	montoNuevo,
+	pagoId: String(pagoId),
+});
+
+/** La restitución de ESE pago: la reversa o la anulación firman con su id. */
+const reversoDe = (
+	montoAnterior: number,
+	montoNuevo: number,
+	pagoId: number,
+): MoraLevelEvent => ({
+	...reverso(montoAnterior, montoNuevo),
+	pagoId: String(pagoId),
 });
 
 /** El mismo evento, pero ocurrido ANTES del corte: solo siembra el nivel. */
@@ -260,6 +284,106 @@ describe("la marca de decremento anulado solo vale DENTRO del ciclo", () => {
 	});
 });
 
+/**
+ * Los dos defectos, en QUETZALES y sobre el reporte entero: el plegado devuelve
+ * un número suelto, pero lo que el asesor ve es el esperado y el pendiente.
+ */
+describe("el techo y la identidad del pago, en el reporte", () => {
+	const reporte = (
+		eventos: MoraLevelEvent[],
+		{
+			foto,
+			cobrado,
+			sembrado = "0",
+		}: { foto: string; cobrado: string; sembrado?: string },
+	) =>
+		buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: foto,
+					eventos,
+					nivelSembrado: sembrado,
+					cobrado,
+				},
+			],
+			{ inicio: "2026-07-06", fin: "2026-08-06", alcance: "historico" },
+		);
+
+	it("un pago de Q20 ya no derrumba el techo: esperado 120, no 200", () => {
+		// Foto 120, la empresa condona, el cron repone 60, el cliente paga 20 y
+		// el cron termina de reponer hasta 120. Debe 120 y pagó 20: el esperado
+		// es 120 y el pendiente 100. Antes el reporte reclamaba 200 de esperado
+		// y 180 de pendiente por un pago de Q20.
+		const totales = reporte(
+			[
+				evento("CONDONACION", 120, 0),
+				evento("RECALCULO", 0, 60),
+				pagoDe(60, 40, 7),
+				evento("RECALCULO", 40, 120),
+			],
+			{ foto: "120", cobrado: "20" },
+		).totales;
+		expect(totales.esperado).toBe("120.00");
+		expect(totales.esperado).not.toBe("200.00");
+		expect(totales.pendiente).toBe("100.00");
+	});
+
+	it("lo mismo sin condonación, con el techo SEMBRADO: esperado 60, no 140", () => {
+		// Foto 60 y techo sembrado en 120 (la condonación quedó del otro lado del
+		// corte). El pago de Q20 tampoco derrumba ese techo.
+		const totales = reporte([pagoDe(60, 40, 7), evento("RECALCULO", 40, 120)], {
+			foto: "60",
+			cobrado: "20",
+			sembrado: "120",
+		}).totales;
+		expect(totales.esperado).toBe("60.00");
+		expect(totales.esperado).not.toBe("140.00");
+	});
+
+	it("el pago ajeno ya no tapa la reversa de un pago anterior: esperado 200", () => {
+		// Foto 100. Adentro el cliente paga esos Q100 (pago 7) y además se
+		// revierte un pago ANTERIOR al ciclo (pago 9), que le devuelve Q100 de
+		// mora que nunca se contaron y que hoy están vivos. Antes el pago 7
+		// llenaba el contador común y tapaba entera la reversa del 9: el reporte
+		// decía pendiente 0.00 con Q100 vivos y cobrables.
+		const totales = reporte([pagoDe(100, 0, 7), reversoDe(0, 100, 9)], {
+			foto: "100",
+			cobrado: "100",
+		}).totales;
+		expect(totales.esperado).toBe("200.00");
+		expect(totales.cobradoEnSnapshot).toBe("100.00");
+		expect(totales.pendiente).toBe("100.00");
+		expect(totales.pendiente).not.toBe("0.00");
+	});
+
+	it("cobrar dos veces la misma mora en el ciclo aparece como EXCEDENTE", () => {
+		// La consecuencia declarada de que el techo no baje: si el cliente paga
+		// la mora, el cron la repone y la vuelve a pagar, el asesor cobró Q200
+		// sobre una oportunidad de Q100. El esperado ya no se infla para
+		// acompañar al cobro —era el defecto—: el sobrante sale por
+		// `excedenteEnSnapshot`, que es donde se puede ver.
+		const totales = reporte(
+			[pagoDe(100, 0, 7), evento("RECALCULO", 0, 100), pagoDe(100, 0, 8)],
+			{ foto: "100", cobrado: "200" },
+		).totales;
+		expect(totales.esperado).toBe("100.00");
+		expect(totales.cobradoEnSnapshot).toBe("200.00");
+		expect(totales.excedenteEnSnapshot).toBe("100.00");
+		expect(totales.pendiente).toBe("0.00");
+	});
+
+	it("y la reversa del pago que SÍ bajó adentro sigue sin inventar esperado", () => {
+		const totales = reporte([pagoDe(100, 0, 7), reversoDe(0, 100, 7)], {
+			foto: "100",
+			cobrado: "0",
+		}).totales;
+		expect(totales.esperado).toBe("100.00");
+		expect(totales.pendiente).toBe("100.00");
+	});
+});
+
 describe("moraGeneradaEnPeriodo", () => {
 	it("no cuenta dos veces la deuda que la empresa condonó y el cron repuso", () => {
 		// El ejemplo del negocio, tal cual: solo el crecimiento real de 100 a 120
@@ -275,11 +399,26 @@ describe("moraGeneradaEnPeriodo", () => {
 		).toBe(20);
 	});
 
-	it("después de un pago la mora nueva SÍ es oportunidad nueva", () => {
+	it("después de un pago, reponer la mora YA CONTADA no es oportunidad nueva", () => {
+		// EL TECHO NO BAJA POR UN PAGO. El cliente pagó los Q100 que la foto ya
+		// contó; que la mora vuelva a nacer hasta Q60 es la misma deuda de
+		// siempre, no una oportunidad de cobro NUEVA. Antes esto daba 60 y el
+		// esperado del asesor terminaba en 160 por una deuda de 60.
 		expect(
 			moraGeneradaEnPeriodo(100, [
 				evento("DECREMENTO", 100, 0),
 				evento("CREACION", 0, 60),
+			]),
+		).toBe(0);
+	});
+
+	it("lo que SUPERA el techo ya contado sí cuenta, aunque haya habido un pago", () => {
+		// El otro lado de la misma regla: el techo contado era 100, la mora
+		// rebota a 160 y esos 60 de más sí son deuda que nadie contó nunca.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 0),
+				evento("CREACION", 0, 160),
 			]),
 		).toBe(60);
 	});
@@ -307,11 +446,23 @@ describe("moraGeneradaEnPeriodo", () => {
 		).toBe(0);
 	});
 
-	it("pago parcial: el nivel baja a lo que quedó y el crecimiento posterior cuenta", () => {
+	it("pago parcial: el techo se queda arriba y el rebote hasta ahí no cuenta", () => {
+		// El cliente pagó Q60 de los Q100 de la foto y el cron repone hasta Q70:
+		// todo eso está dentro de lo ya contado. Con el techo bajando al saldo
+		// vivo esto daba 30, y el esperado subía a 130 por una deuda de 70.
 		expect(
 			moraGeneradaEnPeriodo(100, [
 				evento("DECREMENTO", 100, 40),
 				evento("RECALCULO", 40, 70),
+			]),
+		).toBe(0);
+	});
+
+	it("pago parcial: lo que pasa del techo sí cuenta", () => {
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 40),
+				evento("RECALCULO", 40, 130),
 			]),
 		).toBe(30);
 	});
@@ -480,19 +631,22 @@ describe("moraGeneradaEnPeriodo", () => {
 		).toBe(30);
 	});
 
-	it("un pago DE VERDAD seguido de mora nueva no se confunde con una reversa", () => {
-		// El matiz que no se puede perder: mismo par de eventos que la reversa,
-		// pero sin la marca, y acá los 100 sí son oportunidad nueva.
-		const conReversa = moraGeneradaEnPeriodo(100, [
-			evento("DECREMENTO", 100, 0),
-			reverso(0, 100),
+	it("la restitución de un pago AJENO no se confunde con el rebote del cron", () => {
+		// El matiz que no se puede perder, ahora del lado que importa: el cliente
+		// pagó adentro (pago 7) y lo que sube después es la reversa de OTRO pago,
+		// anterior al ciclo (pago 9). Esos Q100 nunca se contaron y están vivos:
+		// son oportunidad. El mismo movimiento hecho por el cron —la misma deuda
+		// de siempre volviendo a nacer— no lo es.
+		const restitucionAjena = moraGeneradaEnPeriodo(100, [
+			pagoDe(100, 0, 7),
+			reversoDe(0, 100, 9),
 		]);
-		const pagoDeVerdad = moraGeneradaEnPeriodo(100, [
-			evento("DECREMENTO", 100, 0),
+		const reboteDelCron = moraGeneradaEnPeriodo(100, [
+			pagoDe(100, 0, 7),
 			evento("RECALCULO", 0, 100),
 		]);
-		expect(conReversa).toBe(0);
-		expect(pagoDeVerdad).toBe(100);
+		expect(restitucionAjena).toBe(100);
+		expect(reboteDelCron).toBe(0);
 	});
 
 	it("la reversa de un pago ANTERIOR al ciclo SÍ es oportunidad", () => {
@@ -551,36 +705,63 @@ describe("moraGeneradaEnPeriodo", () => {
 		expect(suprimirSiempre(0, eventos)).toBe(0);
 	});
 
-	it("MUTACIÓN: generar SIEMPRE duplica la deuda del pago del MISMO ciclo", () => {
-		// El lado que no se puede romper al arreglar el otro: tratar la
-		// restitución como un INCREMENTO cualquiera.
-		const eventos: MoraLevelEvent[] = [
-			evento("DECREMENTO", 100, 0),
-			reverso(0, 100),
-		];
-		expect(moraGeneradaEnPeriodo(100, eventos)).toBe(0);
-		expect(
-			moraGeneradaEnPeriodo(
-				100,
-				eventos.map(({ reverso: _, ...resto }) => resto),
-			),
-		).toBe(100);
+	it("MUTACIÓN: sin la identidad del pago, la restitución ajena se tapa", () => {
+		// EL DEFECTO DEL POOL, en una línea: los mismos montos, en el mismo
+		// orden, y lo único que cambia es DE QUÉ PAGO habla la restitución.
+		//   * pago 7: es la reversa del pago que bajó la mora adentro → no genera.
+		//   * pago 9: es la reversa de un pago ANTERIOR al ciclo → genera 100.
+		// Con un contador común de "lo que bajó adentro" los dos daban 0, y los
+		// Q100 vivos del segundo caso desaparecían del esperado.
+		const mismoPago = moraGeneradaEnPeriodo(100, [
+			pagoDe(100, 0, 7),
+			reversoDe(0, 100, 7),
+		]);
+		const pagoAjeno = moraGeneradaEnPeriodo(100, [
+			pagoDe(100, 0, 7),
+			reversoDe(0, 100, 9),
+		]);
+		expect(mismoPago).toBe(0);
+		expect(pagoAjeno).toBe(100);
+		expect(mismoPago).not.toBe(pagoAjeno);
 	});
 
-	it("MUTACIÓN: si la restitución de la reversa contara como mora nueva, la deuda se duplicaría", () => {
-		const eventos: MoraLevelEvent[] = [
-			evento("DECREMENTO", 100, 0),
-			reverso(0, 100),
-		];
+	it("MUTACIÓN: suprimir la restitución del MISMO pago sigue haciendo falta", () => {
+		// El lado que no se puede romper al arreglar el otro: si la restitución
+		// del pago 7 generara igual, la deuda se contaría dos veces (esperado
+		// 200 por Q100 vivos).
+		const eventos = [pagoDe(100, 0, 7), reversoDe(0, 100, 7)];
+		const generarSiempre = (foto: number, lista: MoraLevelEvent[]) => {
+			let nivel = foto;
+			let generado = 0;
+			for (const e of lista) {
+				const sube = Math.max(0, e.montoNuevo - e.montoAnterior);
+				if (e.reverso) {
+					generado += sube;
+					nivel += sube;
+				} else if (e.montoNuevo > nivel) {
+					generado += e.montoNuevo - nivel;
+					nivel = e.montoNuevo;
+				}
+			}
+			return generado;
+		};
+		expect(moraGeneradaEnPeriodo(100, eventos)).toBe(0);
+		expect(generarSiempre(100, eventos)).toBe(100);
+	});
+
+	it("MUTACIÓN: ignorar la marca de restitución borra la oportunidad viva", () => {
+		// Con el techo sostenido, perder la marca ya no duplica la deuda: la
+		// esconde. Sin marca la subida es un rebote cualquiera por debajo del
+		// techo y no genera nada, y el asesor pierde Q100 de esperado que tiene
+		// vivos y cobrables.
+		const eventos = [pagoDe(100, 0, 7), reversoDe(0, 100, 9)];
 		const conMarca = moraGeneradaEnPeriodo(100, eventos);
-		// La mutación "ignorar la marca de reverso" es exactamente esta llamada.
 		const sinMarca = moraGeneradaEnPeriodo(
 			100,
 			eventos.map(({ reverso: _, ...resto }) => resto),
 		);
-		expect(conMarca).toBe(0);
-		expect(sinMarca).toBe(100);
-		expect(100 + sinMarca).toBe(200);
+		expect(conMarca).toBe(100);
+		expect(sinMarca).toBe(0);
 	});
 
 	it("la condonación anterior al ciclo sostiene el techo aunque la foto diga menos", () => {
@@ -623,14 +804,110 @@ describe("moraGeneradaEnPeriodo", () => {
 		).toBe(100);
 	});
 
-	it("MUTACIÓN: si el DECREMENTO no bajara el nivel, la mora nueva no se contaría", () => {
-		// Con la regla correcta se cuentan los 60; con la mutación darían 0.
-		const generado = moraGeneradaEnPeriodo(100, [
-			evento("DECREMENTO", 100, 0),
+	it("MUTACIÓN: si el pago bajara el techo, el rebote se cobraría como mora nueva", () => {
+		// EL DEFECTO DEL TECHO, con el caso del negocio: foto 120, la empresa
+		// condona, el cron repone 60, el cliente paga 20 y el cron termina de
+		// reponer hasta 120. La mora viva es 120 y ya estaba contada: cero mora
+		// nueva. Con el techo pisado por el saldo vivo daban 80, y el esperado
+		// del asesor salía en 200 por una deuda de 120.
+		const eventos = [
+			evento("CONDONACION", 120, 0),
 			evento("RECALCULO", 0, 60),
-		]);
-		expect(generado).toBe(60);
-		expect(generado).not.toBe(0);
+			pagoDe(60, 40, 7),
+			evento("RECALCULO", 40, 120),
+		];
+		const conTechoSostenido = moraGeneradaEnPeriodo(120, eventos);
+		// La mutación es exactamente la línea vieja: `nivel = evento.montoNuevo`.
+		const conTechoPisado = (foto: number, lista: MoraLevelEvent[]) => {
+			let nivel = foto;
+			let generado = 0;
+			for (const e of lista) {
+				if (e.tipoEvento === "CONDONACION") continue;
+				if (e.montoNuevo > nivel) {
+					generado += e.montoNuevo - nivel;
+					nivel = e.montoNuevo;
+				} else if (e.montoNuevo < e.montoAnterior) nivel = e.montoNuevo;
+			}
+			return generado;
+		};
+		expect(conTechoSostenido).toBe(0);
+		expect(conTechoPisado(120, eventos)).toBe(80);
+	});
+
+	it("el mismo caso SIN condonación: la siembra tampoco se derrumba con un pago", () => {
+		// Foto 60 con el techo sembrado en 120 (una condonación de la víspera).
+		// El cliente paga 20 y el cron repone hasta 120: todo ya estaba contado.
+		// Antes el pago dejaba el techo en 40 y el rebote cobraba 80.
+		expect(
+			moraGeneradaEnPeriodo(
+				60,
+				[pagoDe(60, 40, 7), evento("RECALCULO", 40, 120)],
+				120,
+			),
+		).toBe(0);
+	});
+
+	it("la bajada que se anota es lo que el cliente PAGÓ, no lo que el techo tenía", () => {
+		// Cómo se mira por fuera un contador interno: con lo que anotó. El
+		// cliente pagó Q20 (60 → 40) con el techo en 120, y después se revierte
+		// ESE pago por Q100. Solo los Q20 que el ciclo vio bajar pueden
+		// suprimirse; los otros Q80 son deuda que nunca se contó.
+		//   * anotando 20 (correcto): genera 80.
+		//   * anotando `nivel - montoNuevo` = 80 (el defecto): generaría 20, y el
+		//     reporte se comería 60 de oportunidad viva.
+		expect(
+			moraGeneradaEnPeriodo(120, [
+				evento("CONDONACION", 120, 0),
+				evento("RECALCULO", 0, 60),
+				pagoDe(60, 40, 7),
+				evento("RECALCULO", 40, 120),
+				reversoDe(120, 220, 7),
+			]),
+		).toBe(80);
+	});
+
+	it("lo que la restitución genera SUBE el techo: el cron no lo vuelve a cobrar", () => {
+		// Foto 100, el cliente paga esos 100 (pago 7) y se revierte un pago
+		// anterior al ciclo (pago 9) que repone 100: eso sí es oportunidad, y
+		// pasa a estar CONTADO. Cuando la mora proporcional crece a 150 al día
+		// siguiente, esos 150 ya están dentro de los 200 contados. Si la
+		// restitución no subiera el techo, el RECALCULO cobraría 50 de la misma
+		// deuda por segunda vez.
+		const eventos = [
+			pagoDe(100, 0, 7),
+			reversoDe(0, 100, 9),
+			evento("RECALCULO", 100, 150),
+		];
+		expect(moraGeneradaEnPeriodo(100, eventos)).toBe(100);
+		expect(moraGeneradaEnPeriodo(100, eventos)).not.toBe(150);
+	});
+
+	it("la restitución con id gasta PRIMERO su propia bajada, no la bolsa anónima", () => {
+		// Conviven una bajada identificada (pago 7, Q60) y una vieja sin marca
+		// (Q40). La reversa del pago 7 tiene que consumir SU bajada; si se
+		// sirviera primero de la bolsa anónima, se comería los Q40 del historial
+		// viejo y la restitución vieja que viene después —que es justamente la de
+		// esa bajada— se contaría como mora nueva.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				pagoDe(100, 40, 7),
+				evento("DECREMENTO", 40, 0),
+				reversoDe(0, 60, 7),
+				reverso(60, 100),
+			]),
+		).toBe(0);
+	});
+
+	it("una bajada sin id de pago sigue suprimiendo: el historial viejo no se rompe", () => {
+		// Las filas anteriores a la marca `[pago #N]` no tienen con qué ligarse.
+		// Caen a la bolsa anónima, que es el comportamiento de antes: sin esto,
+		// toda reversa de un ciclo pasado se habría contado como mora nueva.
+		expect(
+			moraGeneradaEnPeriodo(100, [
+				evento("DECREMENTO", 100, 0),
+				reverso(0, 100),
+			]),
+		).toBe(0);
 	});
 });
 
@@ -978,6 +1255,12 @@ describe("buildMoraRecoveryReport", () => {
 			// contar como mora nueva lo que el cron repuso después de una bajada
 			// que ya no vale.
 			"% [decremento anulado]%",
+			// Los patrones que leen de qué PAGO habla cada evento: la marca del
+			// decremento y los dos prefijos de restitución, escapados como regex.
+			// Es lo que liga una restitución con SU bajada y no con la de otro.
+			" \\[pago #([0-9]+)",
+			"Reversa de pago #([0-9]+)",
+			"Anulación de pago #([0-9]+)",
 			"2026-06-06 06:00:00.000",
 			"2026-07-06 06:00:00.000",
 			"2026-06-06 06:00:00.000",
@@ -1311,13 +1594,19 @@ describe("buildMoraRecoveryReport", () => {
 		expect(query.sql).not.toContain(
 			"(h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >=",
 		);
-		expect(query.params.slice(-9)).toEqual([
+		expect(query.params.slice(-12)).toEqual([
 			// los prefijos con los que un pago caído firma su restitución
 			"Reversa de pago #%",
 			"Anulación de pago #%",
 			// y la marca del decremento que ese pago caído invalidó: la lee SOLO el
 			// tramo del ciclo, así que aparece UNA vez en toda la consulta.
 			"% [decremento anulado]%",
+			// los patrones con los que se lee de qué PAGO habla el evento: la marca
+			// del decremento y los dos prefijos de restitución, ya escapados como
+			// expresión regular.
+			" \\[pago #([0-9]+)",
+			"Reversa de pago #([0-9]+)",
+			"Anulación de pago #([0-9]+)",
 			// el ciclo
 			"2026-06-06 06:00:00.000",
 			"2026-07-06 06:00:00.000",
@@ -1333,6 +1622,44 @@ describe("buildMoraRecoveryReport", () => {
 		expect(
 			query.params.filter((p) => p === "% [decremento anulado]%"),
 		).toHaveLength(1);
+	});
+
+	it("los patrones del pago leen de verdad los motivos que escriben las marcas", () => {
+		// El contrato del otro extremo: que el patrón esté armado con la constante
+		// no garantiza que EXTRAIGA el id. Acá se toman los patrones tal como
+		// viajan a Postgres y se aplican a los motivos reales.
+		const query = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(
+				getMoraRecoveryPeriod({ mes: 6, anio: 2026, hoy: "2026-07-29" }),
+			),
+		);
+		const patrones = query.params
+			.slice(-12, -6)
+			.filter(
+				(p): p is string => typeof p === "string" && p.includes("([0-9]+)"),
+			);
+		const idDe = (motivo: string) => {
+			for (const patron of patrones) {
+				const encontrado = motivo.match(new RegExp(patron))?.[1];
+				if (encontrado) return encontrado;
+			}
+			return null;
+		};
+
+		expect(patrones).toHaveLength(3);
+		expect(
+			idDe(`Pago aplicado a mora (crédito 980)${marcaPagoDelDecremento(4321)}`),
+		).toBe("4321");
+		// Con la marca de anulado encima, que es como queda el decremento caído.
+		expect(
+			idDe(
+				`Pago aplicado a mora${marcaPagoDelDecremento(4321)}${MARCA_DECREMENTO_ANULADO}`,
+			),
+		).toBe("4321");
+		expect(idDe(motivoReversaMora(77))).toBe("77");
+		expect(idDe(motivoAnulacionMora(77))).toBe("77");
+		// Un ajuste a mano no habla de ningún pago.
+		expect(idDe("Ajuste manual del analista")).toBe(null);
 	});
 
 	it("la siembra viaja como un NÚMERO, no como filas previas", () => {

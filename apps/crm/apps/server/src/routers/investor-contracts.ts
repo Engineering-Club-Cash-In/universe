@@ -293,7 +293,15 @@ async function guardarContratoDeInversion(params: {
 	 * reclamado y pierde. Su documento se borra en WeeTrust.
 	 */
 	reemplaza?: { contractId: string; motivo: string };
-}): Promise<string> {
+}): Promise<{
+	id: string;
+	/**
+	 * Cómo estaba el contrato reemplazado al bloquearlo, que es lo que vale
+	 * para limpiarlo en WeeTrust: pudo terminar de firmarse mientras el nuevo
+	 * se generaba, y lo que se leyó antes ya no sirve. null si no reemplaza.
+	 */
+	estadoDelReemplazado: string | null;
+}> {
 	const { resultado } = params;
 	const firmantes = resultado.signatories ?? [];
 
@@ -372,7 +380,7 @@ async function guardarContratoDeInversion(params: {
 					eq(generatedLegalContracts.weetrustDocumentId, resultado.documentID),
 				)
 				.limit(1);
-			if (existente) return existente.id;
+			if (existente) return { id: existente.id, estadoDelReemplazado: null };
 		}
 
 		// Uno vigente por tipo en ESTA compra: los de una compra anterior sobre
@@ -402,6 +410,7 @@ async function guardarContratoDeInversion(params: {
 
 		// Se reclama el viejo ANTES de insertar el nuevo: bloquea la fila, y si
 		// otra persona ya lo reemplazó, ésta pierde acá y no llega a guardar nada.
+		let estadoDelReemplazado: string | null = null;
 		if (params.reemplaza) {
 			const [original] = await tx
 				.select({
@@ -423,6 +432,7 @@ async function guardarContratoDeInversion(params: {
 						"Otra persona acaba de reemplazar este contrato. Recargá para ver el nuevo.",
 				});
 			}
+			estadoDelReemplazado = original.status;
 		}
 
 		const [guardado] = await tx
@@ -478,7 +488,7 @@ async function guardarContratoDeInversion(params: {
 				.where(eq(generatedLegalContracts.id, params.reemplaza.contractId));
 		}
 
-		return guardado.id;
+		return { id: guardado.id, estadoDelReemplazado };
 	});
 }
 
@@ -1090,24 +1100,26 @@ export const investorContractsRouter = {
 				try {
 					const reemplazado = vigentePorTipo.get(pedido.contractType);
 
-					const id = await guardarContratoDeInversion({
-						batchId: input.batchId,
-						aceptadaEn: bateria.acceptedAt,
-						iniciadoEn,
-						investorId: bateria.investorId,
-						contractType: pedido.contractType,
-						contractName: pedido.contractName,
-						resultado,
-						userId: context.userId,
-						...(reemplazado
-							? {
-									reemplaza: {
-										contractId: reemplazado.id,
-										motivo: "se volvió a emitir desde jurídico",
-									},
-								}
-							: {}),
-					});
+					const { id, estadoDelReemplazado } = await guardarContratoDeInversion(
+						{
+							batchId: input.batchId,
+							aceptadaEn: bateria.acceptedAt,
+							iniciadoEn,
+							investorId: bateria.investorId,
+							contractType: pedido.contractType,
+							contractName: pedido.contractName,
+							resultado,
+							userId: context.userId,
+							...(reemplazado
+								? {
+										reemplaza: {
+											contractId: reemplazado.id,
+											motivo: "se volvió a emitir desde jurídico",
+										},
+									}
+								: {}),
+						},
+					);
 
 					// El documento viejo, ya con su fila anulada: se borra allá para
 					// que sus enlaces no sigan firmando, y la papelería del
@@ -1115,7 +1127,9 @@ export const investorContractsRouter = {
 					if (reemplazado) {
 						await borrarElViejoEnWeeTrust({
 							contractId: reemplazado.id,
-							status: reemplazado.status,
+							// Lo que se leyó con la fila bloqueada: pudo terminar de
+							// firmarse mientras se generaba el nuevo.
+							status: estadoDelReemplazado ?? reemplazado.status,
 							weetrustDocumentId: reemplazado.weetrustDocumentId,
 							razon: "Reemplazado: se volvió a emitir desde jurídico",
 							origen: "generateInvestorContracts",
@@ -1335,26 +1349,28 @@ export const investorContractsRouter = {
 			}
 
 			let contractId: string;
+			let estadoDelReemplazado: string | null = null;
 			try {
-				contractId = await guardarContratoDeInversion({
-					batchId: input.batchId,
-					aceptadaEn: bateria.acceptedAt,
-					iniciadoEn,
-					investorId: bateria.investorId,
-					contractType: input.contractType,
-					contractName: input.contractName,
-					resultado,
-					userId: context.userId,
-					subidoAMano: true,
-					...(reemplazado && input.motivo
-						? {
-								reemplaza: {
-									contractId: reemplazado.id,
-									motivo: etiquetaDeMotivo(input.motivo),
-								},
-							}
-						: {}),
-				});
+				({ id: contractId, estadoDelReemplazado } =
+					await guardarContratoDeInversion({
+						batchId: input.batchId,
+						aceptadaEn: bateria.acceptedAt,
+						iniciadoEn,
+						investorId: bateria.investorId,
+						contractType: input.contractType,
+						contractName: input.contractName,
+						resultado,
+						userId: context.userId,
+						subidoAMano: true,
+						...(reemplazado && input.motivo
+							? {
+									reemplaza: {
+										contractId: reemplazado.id,
+										motivo: etiquetaDeMotivo(input.motivo),
+									},
+								}
+							: {}),
+					}));
 			} catch (error) {
 				// El documento ya salió a WeeTrust con sus invitaciones: se borra allá
 				// para que un reintento no deje dos vivos del mismo contrato.
@@ -1381,7 +1397,8 @@ export const investorContractsRouter = {
 			if (reemplazado && input.motivo) {
 				await borrarElViejoEnWeeTrust({
 					contractId: reemplazado.id,
-					status: reemplazado.status,
+					// El leído con la fila bloqueada, como al generar.
+					status: estadoDelReemplazado ?? reemplazado.status,
 					weetrustDocumentId: reemplazado.weetrustDocumentId,
 					razon: `Reemplazado: ${etiquetaDeMotivo(input.motivo)}`,
 					origen: "uploadInvestorContract",

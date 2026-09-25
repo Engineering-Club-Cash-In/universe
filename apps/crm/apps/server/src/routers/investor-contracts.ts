@@ -1361,7 +1361,11 @@ export const investorContractsRouter = {
 			// La fila se marca primero y bloqueada: si dos personas anulan a la
 			// vez, la segunda ve que ya no está vigente y no vuelve a pedirle nada
 			// a WeeTrust.
-			await db.transaction(async (tx) => {
+			//
+			// Y lo que se hace allá sale del estado leído con la fila bloqueada, no
+			// del de arriba: si la última firma entró en el medio, el documento ya
+			// está completo y no se intenta borrar como si faltara firmar.
+			const estadoAlAnular = await db.transaction(async (tx) => {
 				const [actual] = await tx
 					.select({
 						status: generatedLegalContracts.status,
@@ -1388,13 +1392,15 @@ export const investorContractsRouter = {
 						updatedAt: ahora,
 					})
 					.where(eq(generatedLegalContracts.id, input.contractId));
+
+				return actual.status;
 			});
 
 			// Recién ahora el documento allá, con el detalle de cómo quedó pegado
 			// al motivo.
 			await borrarElViejoEnWeeTrust({
 				contractId: input.contractId,
-				status: contrato.status,
+				status: estadoAlAnular,
 				weetrustDocumentId: contrato.weetrustDocumentId,
 				razon,
 				origen: "cancelInvestorContract",

@@ -15,7 +15,18 @@ export interface IntegrityValidatedBatchLike {
 	}>;
 }
 
-export function requiresManualApproval(result: IntegrityResult): boolean {
+export function requiresManualApproval(_result: IntegrityResult): boolean {
+	return false;
+}
+
+/**
+ * Historical manual-review outcomes predate the current hotfix. They cannot
+ * continue to capacity analysis and must be revalidated, while observations
+ * remain eligible to continue.
+ */
+export function requiresDocumentRevalidation(
+	result: IntegrityResult,
+): boolean {
 	return result === "revision_manual";
 }
 
@@ -31,8 +42,7 @@ export function hasCompleteIntegrityValidation(
 				!!result.validation &&
 				result.validation.result !== "error" &&
 				result.validation.result !== "rechazado" &&
-				(!requiresManualApproval(result.validation.result) ||
-					!!result.validation.manualApproval),
+				result.validation.result !== "revision_manual",
 		)
 	);
 }
@@ -51,7 +61,7 @@ export function aggregateIntegrityResult(
 	return (
 		RESULT_PRIORITY.find((result) =>
 			results.some((validation) => validation.autoResult === result),
-		) ?? "error"
+		) ?? (results.length > 0 ? "valido" : "error")
 	);
 }
 

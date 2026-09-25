@@ -19,6 +19,8 @@ const acceptedQuotation = {
 	value: "125000.00",
 	monthlyPayment: "3500.00",
 	membershipCost: "875.50",
+	idealPaymentDateAdjustment: "1424.12",
+	idealPaymentDateAdjustmentReferenceDate: "2026-09-16",
 	isInterno: false,
 	insuranceProvider: "gyt",
 };
@@ -59,6 +61,30 @@ mock.module("../db", () => ({
 	},
 }));
 
+describe("cartera-back credit mapping", () => {
+	test("preserva la referencia y el rollover hasta el payload HTTP", async () => {
+		const { buildCreateCreditoInput } = await import("./cartera-back-integration");
+		const input = buildCreateCreditoInput({
+			opportunityId: "11111111-1111-4111-8111-111111111111",
+			userId: "22222222-2222-4222-8222-222222222222",
+			usuario_id: "Cliente prueba",
+			numero_credito_sifco: "TEST-001",
+			capital: 88419.27,
+			porcentaje_interes: 1.5,
+			plazo: 60,
+			cuota: 3341.6,
+			fecha_referencia_calendario: "2026-09-16T12:00:00.000Z",
+			desplazar_primera_cuota_un_mes: true,
+		});
+
+		expect(input.fecha_referencia_calendario).toBe(
+			"2026-09-16T12:00:00.000Z",
+		);
+		expect(input.desplazar_primera_cuota_un_mes).toBe(true);
+		expect(input.ajuste_fecha_ideal).toBeUndefined();
+	});
+});
+
 describe("getLatestApprovedQuotation", () => {
 	test("prefers an older accepted quotation over a newer internal draft", async () => {
 		const { getLatestApprovedQuotation } = await import("./close-opportunity");
@@ -78,5 +104,6 @@ describe("getLatestApprovedQuotation", () => {
 				quotation?.isInterno,
 			),
 		).toBe(875.5);
+		expect(quotation?.idealPaymentDateAdjustmentReferenceDate).toBe("2026-09-16");
 	});
 });

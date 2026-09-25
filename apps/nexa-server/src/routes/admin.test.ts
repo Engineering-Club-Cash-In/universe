@@ -4,7 +4,7 @@ import { createAdminRouter } from "./admin";
 describe("admin router", () => {
   test("lists token users and transactions for the test console", async () => {
     const router = createAdminRouter({
-      internalApiKey: "dev-secret",
+      adminApiKey: "dev-secret",
       nexa: {} as never,
       cartera: {} as never,
       paymentTokens: {} as never,
@@ -12,7 +12,7 @@ describe("admin router", () => {
         list: async () => [{ id: 1, creditoId: 123, token: "32200310005010", identifier: "310005010" }],
       } as never,
       transactions: {
-        list: async () => [{ id: 1, reference: "4617308", processingStatus: "APPLIED", amount: "50.00" }],
+        listReconciliation: async () => [{ reference: "4617308", token: "************5010", creditoId: 123, processingStatus: "APPLIED", amount: "50.00" }],
       } as never,
       mockCredits: {
         list: async () => [{ creditoId: 123, currentBalance: "950.00", installmentAmount: "250.00", totalPaid: "50.00" }],
@@ -30,14 +30,14 @@ describe("admin router", () => {
     expect(tokenUsers.status).toBe(200);
     expect(await tokenUsers.json()).toEqual({ tokenUsers: [{ id: 1, creditoId: 123, token: "32200310005010", identifier: "310005010" }] });
     expect(transactions.status).toBe(200);
-    expect(await transactions.json()).toEqual({ transactions: [{ id: 1, reference: "4617308", processingStatus: "APPLIED", amount: "50.00" }] });
+    expect(await transactions.json()).toEqual({ transactions: [{ reference: "4617308", token: "************5010", creditoId: 123, processingStatus: "APPLIED", amount: "50.00" }] });
     expect(credits.status).toBe(200);
     expect(await credits.json()).toEqual({ credits: [{ creditoId: 123, currentBalance: "950.00", installmentAmount: "250.00", totalPaid: "50.00" }] });
   });
 
   test("returns a validation response when Nexa rejects token user creation", async () => {
     const router = createAdminRouter({
-      internalApiKey: "dev-secret",
+      adminApiKey: "dev-secret",
       nexa: {
         createPaymentToken: async () => ({ id: 455, prefix: "32200" }),
         createTokenUsers: async () => ({

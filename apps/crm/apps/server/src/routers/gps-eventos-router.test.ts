@@ -3,7 +3,7 @@
  * Mock de `db` propio: identifica ramas por TABLA (`.from(tabla)`) y por los
  * campos pedidos en `select()`, igual que wialon.test.ts.
  */
-import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { call, ORPCError } from "@orpc/server";
 import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
@@ -115,6 +115,14 @@ function mockDb() {
 				};
 			}
 			throw new Error(`insert en tabla no mockeada: ${String(tabla)}`);
+		},
+		delete: (tabla: unknown) => {
+			if (tabla === gpsUbicacionesClave) {
+				return {
+					where: async () => {},
+				};
+			}
+			throw new Error(`delete en tabla no mockeada: ${String(tabla)}`);
 		},
 	};
 }
@@ -273,6 +281,12 @@ describe("CB-119 — getGpsEventosCaso", () => {
 });
 
 describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
+	beforeEach(() => {
+		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+			bucket: 4,
+		} as never);
+	});
+
 	afterEach(() => {
 		ubicacionesFilasMock = [];
 		casoGpsMock = {
@@ -414,5 +428,38 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		});
 
 		expect(ubicacionesWhereCondition).toBeDefined();
+	});
+
+	it("crédito fuera de B4 (bucket !== 4): purga filas y no expone ubicaciones", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+			bucket: 2, // B2
+		} as never);
+
+		ubicacionesFilasMock = [
+			{
+				id: "ub-1",
+				lat: 14.5951,
+				lon: -90.5069,
+				radioM: 200,
+				tipo: "probable_casa",
+				horasTotales: 480,
+				diasDistintos: 55,
+				visitas: 55,
+				patron: { nocturna: 55, laboral: 0, finDeSemana: 0 },
+				primeraVisita: new Date("2026-07-01T00:00:00.000Z"),
+				ultimaVisita: new Date("2026-08-29T00:00:00.000Z"),
+				calculadoAt: new Date("2026-08-30T06:00:00.000Z"),
+			},
+		];
+
+		const res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("cobros"),
+		});
+
+		expect(res.auditada).toBe(true);
+		expect(res.ubicaciones).toEqual([]);
 	});
 });

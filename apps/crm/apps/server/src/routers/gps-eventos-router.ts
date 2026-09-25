@@ -21,6 +21,7 @@ import {
 	ubicacionesClaveCasoInputSchema,
 	ubicacionesClaveCasoOutputSchema,
 } from "../services/wialon/wialon-types";
+import { carteraBackClient } from "../services/cartera-back-client";
 import { assertAccesoCasoCobro } from "./cobros";
 import { resolverCasoParaGps } from "./wialon";
 
@@ -129,6 +130,24 @@ export const gpsEventosRouter = {
 					message: error instanceof Error ? error.message : String(error),
 				});
 				return { auditada: false, ubicaciones: [] };
+			}
+
+			// CB-119 / D-15: Las ubicaciones clave son EXCLUSIVAMENTE para casos
+			// en B4 / recuperación. Si el crédito salió de B4 (regularizó o cambió
+			// de bucket entre corridas del job nocturno), se purgan las filas
+			// huérfanas de este caso y no se exponen ubicaciones.
+			if (numeroCreditoSifco) {
+				const bucketActual = await carteraBackClient
+					.getBucketActualCredito(numeroCreditoSifco)
+					.catch(() => null);
+
+				if (bucketActual && bucketActual.bucket !== 4) {
+					await db
+						.delete(gpsUbicacionesClave)
+						.where(eq(gpsUbicacionesClave.casoCobroId, input.casoCobroId))
+						.catch(() => {});
+					return { auditada: true, ubicaciones: [] };
+				}
 			}
 
 			const ubicaciones = await db

@@ -1850,6 +1850,12 @@ describe("WialonClient", () => {
 				}
 				if (bodyStr.includes("svc=messages%2Fload_interval")) {
 					svcsLlamados.push("load_interval");
+					const paramsMatch = bodyStr.match(/params=([^&]+)/);
+					if (paramsMatch?.[1]) {
+						const params = JSON.parse(decodeURIComponent(paramsMatch[1]));
+						expect(params.flags).toBe(1);
+						expect(params.flagsMask).toBe(0xff01);
+					}
 					return new Response(
 						JSON.stringify({
 							count: 2,

@@ -1367,10 +1367,10 @@ export class WialonClient {
 								itemId: unitId,
 								timeFrom: Math.floor(inicioTramo / 1000),
 								timeTo: Math.floor(finTramo / 1000),
-								// flags 0 + flagsMask 0: sin filtrar por tipo de mensaje,
-								// se quiere todo lo que traiga posición.
-								flags: 0,
-								flagsMask: 0xff00,
+								// flags: 1 (0x0001) + flagsMask: 0xff01: solicita específicamente
+								// mensajes de datos con posición (data messages).
+								flags: 1,
+								flagsMask: 0xff01,
 								loadCount: 0xffffffff,
 							},
 							sid,

@@ -213,9 +213,10 @@ describe("rúbricas de páginas impares", () => {
 		expect(new Set(rubricas.map((r) => r.coordinates.y)).size).toBe(2);
 	});
 
-	test("si no entran en el alto de la franja, crecen hacia el borde y no hacia el texto", async () => {
+	test("si no entran en el alto de la franja, se achican y no tapan ni el pie ni el texto", async () => {
 		// El reconocimiento de deuda tiene poco aire entre el pie y el texto: dos
-		// filas no entran, y la de más no puede subir sobre el contrato.
+		// filas a tamaño normal no entran. Ni subir sobre el contrato ni bajar
+		// sobre el pie de página (que llega casi hasta el borde de la franja).
 		const muchos = firmantesDePrueba(6);
 		const posiciones = await WeeTrustService.locateSignatureWidgets(
 			await pdfConFirmantes(muchos.length),
@@ -223,11 +224,15 @@ describe("rúbricas de páginas impares", () => {
 			muchos,
 		);
 		const { franja } = getRubrica(ContractType.RECONOCIMIENTO_DEUDA)!;
+		const rubricas = posiciones.filter(esRubrica);
 
-		for (const r of posiciones.filter(esRubrica)) {
-			// Borde de arriba en coordenadas del PDF (origen abajo).
+		expect(rubricas.length).toBeGreaterThan(0);
+		for (const r of rubricas) {
+			// Bordes en coordenadas del PDF (origen abajo).
 			const arriba = r.viewport.height - r.coordinates.y;
+			const abajo = arriba - r.imageSize.height;
 			expect(arriba).toBeLessThanOrEqual(franja.arriba);
+			expect(abajo).toBeGreaterThanOrEqual(franja.abajo);
 		}
 	});
 

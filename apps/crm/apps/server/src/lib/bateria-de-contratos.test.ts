@@ -7,37 +7,54 @@ let contratos: Array<{ status: string }> = [];
 /** Lo que se le escribió a la batería, si se le escribió algo. */
 let guardado: Record<string, unknown> | undefined;
 
-mock.module("../db", () => ({
-	db: {
-		select: (campos?: Record<string, unknown>) => ({
-			from: () => ({
-				where: () => {
-					// La batería se lee con `.limit(1)`; los contratos, sin límite. Y la
-					// consulta que sólo pide `batchId` es la que resuelve de qué batería
-					// es un contrato.
-					const esDelContrato = campos && "batchId" in campos;
-					const filas = esDelContrato
-						? [{ batchId: bateria ? "bateria-1" : null }]
-						: contratos;
-					return Object.assign(Promise.resolve(filas), {
-						limit: async () =>
-							esDelContrato
-								? filas
-								: bateria
-									? [bateria]
-									: ([] as Record<string, unknown>[]),
-					});
-				},
-			}),
-		}),
-		update: () => ({
-			set: (valores: Record<string, unknown>) => {
-				guardado = valores;
-				return { where: async () => undefined };
+/** Si el recálculo leyó la batería bloqueada, dentro de una transacción. */
+let bloqueada = false;
+let enTransaccion = false;
+
+const db = {
+	select: (campos?: Record<string, unknown>) => ({
+		from: () => ({
+			where: () => {
+				// La batería se lee con `.limit(1)`; los contratos, sin límite. Y la
+				// consulta que sólo pide `batchId` es la que resuelve de qué batería
+				// es un contrato.
+				const esDelContrato = campos && "batchId" in campos;
+				const filas = esDelContrato
+					? [{ batchId: bateria ? "bateria-1" : null }]
+					: contratos;
+				const limit = async () =>
+					esDelContrato
+						? filas
+						: bateria
+							? [bateria]
+							: ([] as Record<string, unknown>[]);
+				return Object.assign(Promise.resolve(filas), {
+					limit,
+					for: (modo: string) => {
+						bloqueada = modo === "update" && enTransaccion;
+						return { limit };
+					},
+				});
 			},
 		}),
+	}),
+	update: () => ({
+		set: (valores: Record<string, unknown>) => {
+			guardado = valores;
+			return { where: async () => undefined };
+		},
+	}),
+	transaction: async <T>(trabajo: (tx: unknown) => Promise<T>) => {
+		enTransaccion = true;
+		try {
+			return await trabajo(db);
+		} finally {
+			enTransaccion = false;
+		}
 	},
-}));
+};
+
+mock.module("../db", () => ({ db }));
 
 const { recalcularEstadoDeLaBateria } = await import("./bateria-de-contratos");
 
@@ -54,6 +71,7 @@ beforeEach(() => {
 	bateria = { ...BATERIA };
 	contratos = [];
 	guardado = undefined;
+	bloqueada = false;
 });
 
 describe("el estado de la batería lo marcan sus documentos", () => {
@@ -133,5 +151,14 @@ describe("el estado de la batería lo marcan sus documentos", () => {
 
 		expect(await recalcularEstadoDeLaBateria("bateria-1")).toBe("en_proceso");
 		expect(guardado).toBeUndefined();
+	});
+
+	test("lee la batería bloqueada: dos recálculos a la vez van en fila", async () => {
+		bateria = { ...BATERIA, status: "en_proceso", startedAt: new Date() };
+		contratos = [{ status: "signed" }];
+
+		await recalcularEstadoDeLaBateria("bateria-1");
+
+		expect(bloqueada).toBe(true);
 	});
 });

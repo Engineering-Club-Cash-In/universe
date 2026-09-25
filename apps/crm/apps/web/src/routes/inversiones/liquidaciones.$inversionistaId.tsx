@@ -1301,7 +1301,12 @@ function InvestorLiquidacionesPage() {
 				)}
 
 				{/* Contratos de inversión, con sus enlaces de firma */}
-				<InvestorContractsCard inversionistaId={investorIdNum} />
+				<InvestorContractsCard
+					inversionistaId={investorIdNum}
+					puedeRenovar={PERMISSIONS.canRegenerateInvestorContractLinks(
+						userRole,
+					)}
+				/>
 
 				{/* Documentos */}
 				<InvestorDocumentsSection

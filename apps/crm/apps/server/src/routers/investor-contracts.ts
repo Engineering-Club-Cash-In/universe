@@ -635,8 +635,15 @@ export const investorContractsRouter = {
 							: []),
 					),
 				)
-				// Las más viejas primero: son las que llevan más tiempo esperando.
-				.orderBy(investorContractBatches.acceptedAt)
+				// Las abiertas primero, las más viejas arriba: son las que llevan más
+				// tiempo esperando. Después las cerradas, las más recientes arriba. Con
+				// todo mezclado y por fecha, al juntarse historial el tope dejaba
+				// afuera justo el trabajo nuevo.
+				.orderBy(
+					sql`case when ${investorContractBatches.status} in ('pendiente', 'en_proceso') then 0 else 1 end`,
+					sql`case when ${investorContractBatches.status} in ('pendiente', 'en_proceso') then ${investorContractBatches.acceptedAt} end asc`,
+					desc(investorContractBatches.acceptedAt),
+				)
 				.limit(input.limit);
 
 			return filas;

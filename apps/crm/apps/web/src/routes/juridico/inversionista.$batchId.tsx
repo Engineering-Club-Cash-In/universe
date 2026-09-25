@@ -621,7 +621,14 @@ function RouteComponent() {
 							isGenerating={generarMutation.isPending}
 							onBack={() => navigate({ to: "/juridico" })}
 							accionesDeResultados={barraDeSubida}
-							resultadosVigentes={resultadosVigentes}
+							// Mientras la lista se refresca (o si no se pudo), lo que devolvió la
+							// emisión: con la lista vieja, recién emitido, el wizard mostraba
+							// "0 de 0" con el "Listo" habilitado.
+							resultadosVigentes={
+								contratosQuery.isFetching || contratosQuery.isError
+									? undefined
+									: resultadosVigentes
+							}
 							onResultadosVisibles={setMostrandoResultados}
 							// Mientras falte firmar, jurídico corrige desde la tarjeta.
 							accionPorContrato={(resultado) => {

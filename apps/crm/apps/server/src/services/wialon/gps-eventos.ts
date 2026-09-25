@@ -372,19 +372,44 @@ export async function registrarEventoGps(
 	}
 
 	const ventanaMs = VENTANA_NOTIFICACION_MS[input.tipo];
-	// Bucket alineado a hora de Guatemala (UTC-6 fijo, sin horario de
-	// verano), no a medianoche UTC: sin este offset, el corte de la ventana
-	// de 24h (ignición) caía a las 18:00 hora local — dos encendidos
-	// separados por minutos, pero a cada lado de esa hora, generaban dos
-	// notificaciones y rompían la promesa de "máximo una cada 24h".
-	const OFFSET_GUATEMALA_MS = 6 * 60 * 60 * 1000;
-	const ventana = Math.floor(
-		(input.ocurridoAt.getTime() - OFFSET_GUATEMALA_MS) / ventanaMs,
-	);
-	// Incluye casoCobroId: sin esto, la notificación del caso nuevo caería en
-	// el mismo bucket de tiempo que la del caso viejo (misma unidad, mismo
-	// tipo) y el índice único de dedup de notifications la bloquearía.
-	const dedupNotifKey = `gps:${input.tipo}:${input.wialonUnitId}:${ventana}:${casoCobroId}`;
+	// Ventana DESLIZANTE contra el último evento notificado de esta misma
+	// unidad+tipo+caso, no un bucket fijo (ni siquiera alineado a hora de
+	// Guatemala): con un bucket, dos transiciones a los dos lados de un
+	// corte del bucket (ej. 23:58 y 00:08, apenas 10 min de diferencia)
+	// caen en buckets distintos y ambas notifican — el bucket resuelve el
+	// caso de "medianoche UTC" pero no elimina el problema en general.
+	const [ultimoNotificado] = await db
+		.select({ ocurridoAt: gpsEventos.ocurridoAt })
+		.from(gpsEventos)
+		.where(
+			and(
+				eq(gpsEventos.wialonUnitId, input.wialonUnitId),
+				eq(gpsEventos.tipo, input.tipo),
+				eq(gpsEventos.casoCobroId, casoCobroId),
+				eq(gpsEventos.notificado, true),
+			),
+		)
+		.orderBy(desc(gpsEventos.ocurridoAt))
+		.limit(1);
+
+	if (
+		ultimoNotificado &&
+		input.ocurridoAt.getTime() - ultimoNotificado.ocurridoAt.getTime() <
+			ventanaMs
+	) {
+		return {
+			eventoId,
+			duplicado,
+			vehicleId,
+			casoCobroId,
+			notificado: false,
+		};
+	}
+
+	// dedupKey único por evento (no por bucket): la ventana deslizante de
+	// arriba ya decide SI se notifica; esta llave solo evita que
+	// onConflictDoNothing de notifications choque con una fila previa real.
+	const dedupNotifKey = `gps:${input.tipo}:${input.wialonUnitId}:${casoCobroId}:${input.ocurridoAt.toISOString()}`;
 
 	const filas = filasNotificacionCobros({
 		casoId: casoCobroId,

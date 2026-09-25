@@ -41,6 +41,9 @@ let usuarioSistemaMock: string | null = "sistema-1";
 let notificacionesInsertadas: Record<string, unknown>[] = [];
 let notificacionInsertDaFilas = true;
 let eventoInsertadoValues: Record<string, unknown> | null = null;
+// Último evento notificado de la misma unidad+tipo+caso (ventana deslizante
+// de dedup de notificación). null = no hay ninguno (siempre notifica).
+let ultimoNotificadoMock: { ocurridoAt: Date } | null = null;
 
 function mockDb() {
 	return {
@@ -112,7 +115,24 @@ function mockDb() {
 					};
 				}
 				if (tabla === gpsEventos) {
-					// Consulta del evento existente tras un conflicto de dedup.
+					// Dos consultas distintas contra gpsEventos, distinguidas por
+					// los campos pedidos en select():
+					//  1. select({id, notificado}) — evento existente tras un
+					//     conflicto de dedup (sin .orderBy).
+					//  2. select({ocurridoAt}) — último evento notificado de la
+					//     misma unidad+tipo+caso, para la ventana deslizante (con
+					//     .orderBy().limit()).
+					const camposNombres = campos ? Object.keys(campos) : [];
+					if (camposNombres.includes("ocurridoAt")) {
+						return {
+							where: () => ({
+								orderBy: () => ({
+									limit: async () =>
+										ultimoNotificadoMock ? [ultimoNotificadoMock] : [],
+								}),
+							}),
+						};
+					}
 					return {
 						where: () => ({
 							limit: async () => [
@@ -199,6 +219,7 @@ beforeEach(() => {
 	notificacionesInsertadas = [];
 	notificacionInsertDaFilas = true;
 	eventoInsertadoValues = null;
+	ultimoNotificadoMock = null;
 
 	// Default: cartera-back deshabilitado → resolverAsesorActual devuelve
 	// null de inmediato → registrarEventoGps cae al fallback
@@ -404,51 +425,52 @@ describe("CB-119 — registrarEventoGps", () => {
 	});
 });
 
-describe("CB-119 — ventana de dedup de notificación alineada a hora de Guatemala", () => {
-	test("dos eventos a cada lado de medianoche UTC, mismo día calendario en Guatemala: mismo bucket", async () => {
-		// 17:58 hora GT del 24/sep = 23:58 UTC del 24/sep.
-		await registrarEventoGps({
-			tipo: "ignicion",
-			wialonUnitId,
+describe("CB-119 — ventana de dedup de notificación: deslizante, no por bucket fijo", () => {
+	test("dos transiciones a los dos lados de un corte de bucket, apenas minutos de diferencia real: NO vuelve a notificar", async () => {
+		// Con un bucket fijo (aunque esté alineado a hora de Guatemala), dos
+		// eventos que caen justo a cada lado del corte del bucket se tratan
+		// como si no hubiera relación entre ellos, aunque hayan pasado pocos
+		// minutos — la ventana deslizante evita eso comparando siempre contra
+		// el último evento NOTIFICADO real, no contra un corte de calendario.
+		ultimoNotificadoMock = {
 			ocurridoAt: new Date("2026-09-24T23:58:00.000Z"),
-		});
-		const bucket1 = notificacionesInsertadas[0]?.cobrosDedupKey;
+		};
 
-		notificacionesInsertadas = [];
-
-		// 18:03 hora GT del 24/sep (5 min después) = 00:03 UTC del 25/sep —
-		// cruza medianoche UTC, pero sigue siendo el mismo día en Guatemala.
-		await registrarEventoGps({
+		const resultado = await registrarEventoGps({
 			tipo: "ignicion",
 			wialonUnitId,
-			ocurridoAt: new Date("2026-09-25T00:03:00.000Z"),
+			ocurridoAt: new Date("2026-09-25T00:08:00.000Z"),
 		});
-		const bucket2 = notificacionesInsertadas[0]?.cobrosDedupKey;
 
-		// Antes del fix (bucket alineado a UTC), estos dos caían en buckets
-		// distintos porque el corte de 24h ocurría a las 18:00 hora GT —
-		// justo en medio de este par de eventos.
-		expect(bucket1).toBe(bucket2);
+		expect(resultado.notificado).toBe(false);
+		expect(notificacionesInsertadas).toHaveLength(0);
 	});
 
-	test("dos eventos con 24h+ de diferencia real: bucket distinto (sí debe volver a notificar)", async () => {
-		await registrarEventoGps({
-			tipo: "ignicion",
-			wialonUnitId,
+	test("último evento notificado fuera de la ventana (24h+ para ignición): sí vuelve a notificar", async () => {
+		ultimoNotificadoMock = {
 			ocurridoAt: new Date("2026-09-24T10:00:00.000Z"),
-		});
-		const bucket1 = notificacionesInsertadas[0]?.cobrosDedupKey;
+		};
 
-		notificacionesInsertadas = [];
-
-		await registrarEventoGps({
+		const resultado = await registrarEventoGps({
 			tipo: "ignicion",
 			wialonUnitId,
 			ocurridoAt: new Date("2026-09-26T10:00:00.000Z"),
 		});
-		const bucket2 = notificacionesInsertadas[0]?.cobrosDedupKey;
 
-		expect(bucket1).not.toBe(bucket2);
+		expect(resultado.notificado).toBe(true);
+		expect(notificacionesInsertadas.length).toBeGreaterThan(0);
+	});
+
+	test("sin evento notificado previo: notifica (primera vez que se ve la condición)", async () => {
+		ultimoNotificadoMock = null;
+
+		const resultado = await registrarEventoGps({
+			tipo: "ignicion",
+			wialonUnitId,
+			ocurridoAt,
+		});
+
+		expect(resultado.notificado).toBe(true);
 	});
 });
 

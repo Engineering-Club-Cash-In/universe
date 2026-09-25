@@ -40,6 +40,7 @@ import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
+import { GpsEventosHistorial } from "@/components/cobros/gps-eventos-historial";
 import { GpsVehiculoCard } from "@/components/cobros/gps-vehiculo-card";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
@@ -4386,6 +4387,12 @@ function RouteComponent() {
 								vehicleId={caso.vehicleId}
 							/>
 						)}
+						{/* CB-119: historial de eventos GPS detectados automáticamente
+						    (energía, ignición, sin reportar, geocerca) para créditos en
+						    B4. Solo requiere caso.id (a diferencia de GpsVehiculoCard, no
+						    audita consulta ni depende del vehículo: lee eventos ya
+						    guardados). */}
+						{caso.id && <GpsEventosHistorial casoCobroId={caso.id} />}
 						{/* Información de Recuperación - Solo para casos incobrables */}
 						{caso.estadoMora === "incobrable" && recuperacion && (
 							<Card>

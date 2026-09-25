@@ -340,4 +340,36 @@ describe("CB-119 — esPoligonoValido (bug crítico de falso positivo masivo)", 
 			false,
 		);
 	});
+
+	test("vértice con x/y no numéricos (NaN): false — sin esto, puntoDentroDePoligono devuelve false para CUALQUIER coordenada (todas las comparaciones contra NaN son false), disparando una alerta masiva falsa", () => {
+		expect(
+			esPoligonoValido({
+				t: 2,
+				p: [
+					{ x: 0, y: 0 },
+					{ x: Number.NaN, y: 0 },
+					{ x: 1, y: 1 },
+				],
+			}),
+		).toBe(false);
+	});
+
+	test("vértice con x/y faltantes o de otro tipo (respuesta corrupta de Wialon, cast desde unknown): false", () => {
+		expect(
+			esPoligonoValido({
+				t: 2,
+				p: [{ x: 0, y: 0 }, { x: 1 } as never, { x: 1, y: 1 }],
+			}),
+		).toBe(false);
+		expect(
+			esPoligonoValido({
+				t: 2,
+				p: [
+					{ x: 0, y: 0 },
+					{ x: "1" as never, y: 0 },
+					{ x: 1, y: 1 },
+				],
+			}),
+		).toBe(false);
+	});
 });

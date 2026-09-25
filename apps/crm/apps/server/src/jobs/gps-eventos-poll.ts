@@ -225,15 +225,30 @@ export async function unidadesConCasoActivo(
 /**
  * Valida que la geocerca traída de Wialon sea geométricamente apta para
  * evaluar punto-en-polígono, ANTES de confiar en su resultado. Sin esto,
- * una zona corrupta o vacía (0 puntos, o un tipo que no es polígono) haría
- * que `puntoDentroDePoligono` devuelva `false` para cualquier coordenada —
- * "está afuera" para TODA la flota a la vez, disparando una alerta masiva
- * falsa por un problema del proveedor, no del vehículo.
+ * una zona corrupta o vacía (0 puntos, un tipo que no es polígono, o
+ * vértices con x/y no numéricos o NaN) haría que `puntoDentroDePoligono`
+ * devuelva `false` para cualquier coordenada — cualquier comparación contra
+ * NaN da `false`, así que ningún lado del polígono "cruza" nunca — "está
+ * afuera" para TODA la flota a la vez, disparando una alerta masiva falsa
+ * por un problema del proveedor, no del vehículo. `zona.p` viene de un cast
+ * desde `unknown` (Wialon), así que cada vértice se valida en runtime, no
+ * solo el array.
  */
 export function esPoligonoValido(
 	zona: { t: number; p: unknown } | null | undefined,
 ): zona is { t: number; p: { x: number; y: number }[] } {
-	return zona?.t === 2 && Array.isArray(zona.p) && zona.p.length >= 3;
+	return (
+		zona?.t === 2 &&
+		Array.isArray(zona.p) &&
+		zona.p.length >= 3 &&
+		zona.p.every(
+			(punto) =>
+				typeof punto?.x === "number" &&
+				Number.isFinite(punto.x) &&
+				typeof punto?.y === "number" &&
+				Number.isFinite(punto.y),
+		)
+	);
 }
 
 interface EventoDetectado {

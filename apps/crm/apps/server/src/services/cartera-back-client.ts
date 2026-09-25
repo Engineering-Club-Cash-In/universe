@@ -2473,7 +2473,10 @@ export class CarteraBackClient {
 		observer_url?: string | null;
 		firmantes?: unknown;
 		estado_firma?: string | null;
-		/** Si el inversionista lo ve en su portal. Sólo sirve para encenderlo. */
+		/**
+		 * Si el inversionista lo ve en su portal: `true` lo enciende (firmado),
+		 * `false` lo apaga (anulado). Sin el campo, cartera deja lo que había.
+		 */
 		visible?: boolean;
 	}): Promise<{
 		success: boolean;
@@ -2493,7 +2496,9 @@ export class CarteraBackClient {
 					observer_url: input.observer_url ?? undefined,
 					firmantes: input.firmantes ?? undefined,
 					estado_firma: input.estado_firma ?? undefined,
-					visible: input.visible ? true : undefined,
+					// Tal cual: `false` tiene que llegar para apagarlo al anularse.
+					// `undefined` se cae del JSON, que es el "no opino".
+					visible: input.visible,
 				}),
 			},
 		);

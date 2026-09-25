@@ -46,3 +46,32 @@ export async function conCandadoDeFirma<T>(
 		return tarea();
 	});
 }
+
+/**
+ * El mismo tipo de candado, por batería de contratos de inversión.
+ *
+ * Lo comparten las acciones sobre la batería que no pueden cruzarse: el
+ * "Listo" (que la reclama, manda el correo y la devuelve a pendiente si el
+ * correo falla), el envío al hilo de lo que se agrega después, el descarte y el
+ * guardado de un contrato nuevo. Sin él, un contrato podía quedar colgado de
+ * una batería que se descartaba en ese instante, y un "Listo" fallido devolvía
+ * a pendiente una batería cuyo agregado ya había salido al hilo.
+ *
+ * Mismo cuidado que `conCandadoDeFirma`: la tarea tiene que terminar bastante
+ * antes de los 300s de Neon.
+ */
+export function claveDeBateria(batchId: string) {
+	return sql`hashtext(${`bateria-inversion:${batchId}`}::text)`;
+}
+
+export async function conCandadoDeBateria<T>(
+	batchId: string,
+	tarea: () => Promise<T>,
+): Promise<T> {
+	return db.transaction(async (candado) => {
+		await candado.execute(
+			sql`select pg_advisory_xact_lock(${claveDeBateria(batchId)})`,
+		);
+		return tarea();
+	});
+}

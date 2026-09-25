@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { investorContractBatches } from "../db/schema/investor-contracts";
+import { notifications } from "../db/schema/notifications";
 import { createNotification } from "../lib/notificaciones";
 import { ROLES } from "../lib/roles";
 
@@ -231,7 +232,26 @@ app.post("/", async (c) => {
 		);
 
 		if (!otraCompra) {
-			return c.json({ success: true, batchId, repetida: true });
+			// Un reintento de cartera puede venir justo de la vez en que la batería
+			// se guardó pero el aviso a jurídico no llegó a crearse (se cayó el
+			// proceso, falló la notificación). Si sigue abierta y no tiene aviso,
+			// se crea ahora; si no, jurídico tenía una batería que nadie le dijo.
+			const [yaAvisada] = abierta
+				? await db
+						.select({ id: notifications.id })
+						.from(notifications)
+						.where(
+							and(
+								eq(notifications.relatedEntityId, existente.id),
+								eq(notifications.redirectPage, "investor_contracts"),
+							),
+						)
+						.limit(1)
+				: [];
+			if (!abierta || yaAvisada) {
+				return c.json({ success: true, batchId, repetida: true });
+			}
+			avisar = true;
 		}
 	}
 

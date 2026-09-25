@@ -65,6 +65,14 @@ export interface SignaturePatternConfig {
    */
   repeticiones?: number;
   /**
+   * Si el PDF puede traer MENOS repeticiones que las declaradas, siempre que
+   * sean completas. Es el caso de los anexos de inversiones: son dos, pero a
+   * veces se manda uno solo unificado. En los demás (la cobertura lleva sus dos
+   * secciones siempre) una repetición que falta es un documento incompleto y se
+   * rechaza.
+   */
+  repeticionesOpcionales?: boolean;
+  /**
    * Rúbrica: una firma chica de cada firmante en **cada página impar**, aparte
    * del bloque de firma del final.
    *
@@ -374,6 +382,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     anclasExactas: ['Recibido por Cube Investments, S.A.'],
     bloques: ['DEUDORES', 'REP_LEGAL'],
     repeticiones: 2,
+    // A veces se manda un solo anexo unificado: cada persona firma una vez.
+    repeticionesOpcionales: true,
     signerCount: 2,
     signatureFieldCount: 4,
     signers: ['Inversionista', 'Rep. Legal']

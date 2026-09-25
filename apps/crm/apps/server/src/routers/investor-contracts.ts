@@ -28,6 +28,7 @@ import {
 	etiquetaDeMotivo,
 	MOTIVOS_DE_ANULACION_KEYS,
 } from "../lib/contratos-anulacion";
+import { claveDeBateria, conCandadoDeBateria } from "../lib/contratos-candado";
 import {
 	aplicarCorreosDePrueba,
 	correoRepetido,
@@ -273,6 +274,23 @@ async function guardarContratoDeInversion(params: {
 		await tx.execute(
 			sql`select pg_advisory_xact_lock(hashtext(${`contrato-inversion:${params.batchId}:${params.contractType}`}::text))`,
 		);
+		// Y el de la batería, el mismo que toma el descarte: la batería se miró
+		// abierta antes de generar, pero en ese rato pudo descartarse, y un
+		// contrato vivo colgado de una descartada no vuelve a ninguna lista.
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(${claveDeBateria(params.batchId)})`,
+		);
+		const [bateria] = await tx
+			.select({ status: investorContractBatches.status })
+			.from(investorContractBatches)
+			.where(eq(investorContractBatches.id, params.batchId))
+			.limit(1);
+		if (bateria?.status === "descartada") {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"La batería se descartó mientras se generaba el contrato: no se guardó.",
+			});
+		}
 
 		// Guardar dos veces el mismo documento (reintento, doble clic) no inserta
 		// otra fila: se devuelve la que ya lo registra.
@@ -543,49 +561,54 @@ async function mandarAlHiloSiYaSeMando(
 	batchId: string,
 	nuevos: Array<{ id: string; reemplazo: boolean }>,
 ): Promise<{ enviado: boolean; enHilo: boolean; error?: string } | null> {
-	const [bateria] = await db
-		.select({ status: investorContractBatches.status })
-		.from(investorContractBatches)
-		.where(eq(investorContractBatches.id, batchId))
-		.limit(1);
+	// Con el candado de la batería, como el "Listo": si éste está mandando y
+	// falla, devuelve la batería a pendiente; un agregado que saliera en ese
+	// rato quedaba en el hilo y el reintento del "Listo" lo mandaba otra vez.
+	return conCandadoDeBateria(batchId, async () => {
+		const [bateria] = await db
+			.select({ status: investorContractBatches.status })
+			.from(investorContractBatches)
+			.where(eq(investorContractBatches.id, batchId))
+			.limit(1);
 
-	if (bateria?.status !== "en_proceso") return null;
+		if (bateria?.status !== "en_proceso") return null;
 
-	try {
-		const reemplazos = nuevos.filter((n) => n.reemplazo).map((n) => n.id);
-		const agregados = nuevos.filter((n) => !n.reemplazo).map((n) => n.id);
-		let resultado: Awaited<ReturnType<typeof mandarContratosAlHilo>> | null =
-			null;
+		try {
+			const reemplazos = nuevos.filter((n) => n.reemplazo).map((n) => n.id);
+			const agregados = nuevos.filter((n) => !n.reemplazo).map((n) => n.id);
+			let resultado: Awaited<ReturnType<typeof mandarContratosAlHilo>> | null =
+				null;
 
-		// Un correo por qué pasó: "se reemplazó" y "se agregó" dicen cosas
-		// distintas sobre los enlaces que ya estaban en el hilo.
-		if (reemplazos.length > 0) {
-			resultado = await mandarContratosAlHilo({
-				batchId,
-				contractIds: reemplazos,
-				motivo: { tipo: "reemplazo" },
-			});
+			// Un correo por qué pasó: "se reemplazó" y "se agregó" dicen cosas
+			// distintas sobre los enlaces que ya estaban en el hilo.
+			if (reemplazos.length > 0) {
+				resultado = await mandarContratosAlHilo({
+					batchId,
+					contractIds: reemplazos,
+					motivo: { tipo: "reemplazo" },
+				});
+			}
+			if (agregados.length > 0) {
+				const deAgregados = await mandarContratosAlHilo({
+					batchId,
+					contractIds: agregados,
+					motivo: { tipo: "agregado" },
+				});
+				if (!resultado || resultado.enviado) resultado = deAgregados;
+			}
+			return resultado;
+		} catch (error) {
+			console.error(
+				`[mandarAlHiloSiYaSeMando] no se pudo mandar lo nuevo de ${batchId}:`,
+				error,
+			);
+			return {
+				enviado: false,
+				enHilo: false,
+				error: error instanceof Error ? error.message : "No se pudo mandar",
+			};
 		}
-		if (agregados.length > 0) {
-			const deAgregados = await mandarContratosAlHilo({
-				batchId,
-				contractIds: agregados,
-				motivo: { tipo: "agregado" },
-			});
-			if (!resultado || resultado.enviado) resultado = deAgregados;
-		}
-		return resultado;
-	} catch (error) {
-		console.error(
-			`[mandarAlHiloSiYaSeMando] no se pudo mandar lo nuevo de ${batchId}:`,
-			error,
-		);
-		return {
-			enviado: false,
-			enHilo: false,
-			error: error instanceof Error ? error.message : "No se pudo mandar",
-		};
-	}
+	});
 }
 
 export const investorContractsRouter = {
@@ -668,10 +691,13 @@ export const investorContractsRouter = {
 	startInvestorContractBatch: juridicoProcedure
 		.input(z.object({ batchId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
+			// Sólo anota quién la tomó. `en_proceso` quiere decir que ya salió al
+			// hilo de la compra (lo pone el "Listo"): pasarla ahí al tomarla hacía
+			// que lo que se emitiera después saliera solo, a medio revisar, y que
+			// el "Listo" ya no se pudiera dar.
 			const [actualizada] = await db
 				.update(investorContractBatches)
 				.set({
-					status: "en_proceso",
 					startedAt: new Date(),
 					startedBy: context.session.user.id,
 					updatedAt: new Date(),
@@ -721,52 +747,57 @@ export const investorContractsRouter = {
 				});
 			}
 
-			// Descartar es para la compra que NO lleva papelería. Con contratos ya
-			// emitidos deja de ser cierto: sus documentos siguen vivos en WeeTrust
-			// pidiendo firma, y la batería descartada ni se recalcula ni vuelve a
-			// la lista, así que nadie se acuerda de ellos. Se anulan primero.
-			const [vigente] = await db
-				.select({ contractName: generatedLegalContracts.contractName })
-				.from(generatedLegalContracts)
-				.where(
-					and(
-						eq(generatedLegalContracts.batchId, input.batchId),
-						ne(generatedLegalContracts.status, "cancelled"),
-					),
-				)
-				.limit(1);
+			// Con el candado de la batería, el mismo que toma el guardado de un
+			// contrato: si no, uno que terminaba de guardarse después de esta
+			// revisión quedaba vivo en una batería descartada.
+			return conCandadoDeBateria(input.batchId, async () => {
+				// Descartar es para la compra que NO lleva papelería. Con contratos ya
+				// emitidos deja de ser cierto: sus documentos siguen vivos en WeeTrust
+				// pidiendo firma, y la batería descartada ni se recalcula ni vuelve a
+				// la lista, así que nadie se acuerda de ellos. Se anulan primero.
+				const [vigente] = await db
+					.select({ contractName: generatedLegalContracts.contractName })
+					.from(generatedLegalContracts)
+					.where(
+						and(
+							eq(generatedLegalContracts.batchId, input.batchId),
+							ne(generatedLegalContracts.status, "cancelled"),
+						),
+					)
+					.limit(1);
 
-			if (vigente) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: `Esta batería ya tiene contratos emitidos («${vigente.contractName}»). Anulalos antes de descartarla.`,
-				});
-			}
+				if (vigente) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Esta batería ya tiene contratos emitidos («${vigente.contractName}»). Anulalos antes de descartarla.`,
+					});
+				}
 
-			const ahora = new Date();
-			const [actualizada] = await db
-				.update(investorContractBatches)
-				.set({
-					status: "descartada",
-					discardedAt: ahora,
-					discardedBy: context.session.user.id,
-					discardReason: input.motivo,
-					updatedAt: ahora,
-				})
-				.where(
-					and(
-						eq(investorContractBatches.id, input.batchId),
-						inArray(investorContractBatches.status, [...ABIERTAS]),
-					),
-				)
-				.returning();
+				const ahora = new Date();
+				const [actualizada] = await db
+					.update(investorContractBatches)
+					.set({
+						status: "descartada",
+						discardedAt: ahora,
+						discardedBy: context.session.user.id,
+						discardReason: input.motivo,
+						updatedAt: ahora,
+					})
+					.where(
+						and(
+							eq(investorContractBatches.id, input.batchId),
+							inArray(investorContractBatches.status, [...ABIERTAS]),
+						),
+					)
+					.returning();
 
-			if (!actualizada) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Esa batería ya estaba cerrada. Recargá la pantalla.",
-				});
-			}
+				if (!actualizada) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Esa batería ya estaba cerrada. Recargá la pantalla.",
+					});
+				}
 
-			return actualizada;
+				return actualizada;
+			});
 		}),
 
 	/**
@@ -1527,62 +1558,68 @@ export const investorContractsRouter = {
 				});
 			}
 
-			// Se reclama el paso a "Por firmar" antes de mandar: dos clics a la vez
-			// mandaban dos correos. El que no lo reclama, no manda.
-			const ahora = new Date();
-			const [reclamada] = await db
-				.update(investorContractBatches)
-				.set({
-					status: "en_proceso",
-					startedAt: ahora,
-					startedBy: context.userId,
-					updatedAt: ahora,
-				})
-				.where(
-					and(
-						eq(investorContractBatches.id, input.batchId),
-						eq(investorContractBatches.status, "pendiente"),
-					),
-				)
-				.returning({ id: investorContractBatches.id });
-
-			if (!reclamada) {
-				throw new ORPCError("CONFLICT", {
-					message: "Otra persona le acaba de dar Listo a esta batería.",
-				});
-			}
-
-			const correo = await mandarContratosAlHilo({
-				batchId: input.batchId,
-				contractIds: contratos.map((c) => c.id),
-				motivo: { tipo: "listo" },
-			}).catch((error: unknown) => ({
-				enviado: false,
-				enHilo: false,
-				error: error instanceof Error ? error.message : "No se pudo mandar",
-			}));
-
-			if (!correo.enviado) {
-				// Sin correo no hay Listo: vuelve a pendiente, para que se pueda
-				// reintentar sin que nadie crea que los enlaces ya salieron.
-				await db
+			// Reclamar, mandar y, si el correo falla, devolver: todo con el candado
+			// de la batería, el mismo del envío de lo que se agrega después. Así un
+			// agregado no sale al hilo en medio de un "Listo" que termina fallando.
+			const correo = await conCandadoDeBateria(input.batchId, async () => {
+				// Se reclama el paso a "Por firmar" antes de mandar: dos clics a la vez
+				// mandaban dos correos. El que no lo reclama, no manda.
+				const ahora = new Date();
+				const [reclamada] = await db
 					.update(investorContractBatches)
 					.set({
-						status: "pendiente",
-						startedAt: null,
-						startedBy: null,
-						updatedAt: new Date(),
+						status: "en_proceso",
+						startedAt: ahora,
+						startedBy: context.userId,
+						updatedAt: ahora,
 					})
 					.where(
 						and(
 							eq(investorContractBatches.id, input.batchId),
-							eq(investorContractBatches.status, "en_proceso"),
+							eq(investorContractBatches.status, "pendiente"),
 						),
-					);
-				throw new ORPCError("BAD_REQUEST", {
-					message: `No se pudo mandar el correo (${correo.error ?? "sin detalle"}). La batería sigue pendiente: probá de nuevo.`,
-				});
-			}
+					)
+					.returning({ id: investorContractBatches.id });
+
+				if (!reclamada) {
+					throw new ORPCError("CONFLICT", {
+						message: "Otra persona le acaba de dar Listo a esta batería.",
+					});
+				}
+
+				const correo = await mandarContratosAlHilo({
+					batchId: input.batchId,
+					contractIds: contratos.map((c) => c.id),
+					motivo: { tipo: "listo" },
+				}).catch((error: unknown) => ({
+					enviado: false,
+					enHilo: false,
+					error: error instanceof Error ? error.message : "No se pudo mandar",
+				}));
+
+				if (!correo.enviado) {
+					// Sin correo no hay Listo: vuelve a pendiente, para que se pueda
+					// reintentar sin que nadie crea que los enlaces ya salieron.
+					await db
+						.update(investorContractBatches)
+						.set({
+							status: "pendiente",
+							startedAt: null,
+							startedBy: null,
+							updatedAt: new Date(),
+						})
+						.where(
+							and(
+								eq(investorContractBatches.id, input.batchId),
+								eq(investorContractBatches.status, "en_proceso"),
+							),
+						);
+					throw new ORPCError("BAD_REQUEST", {
+						message: `No se pudo mandar el correo (${correo.error ?? "sin detalle"}). La batería sigue pendiente: probá de nuevo.`,
+					});
+				}
+				return correo;
+			});
 
 			// Puede que ya estén todos firmados (uno subido ya firmado, o gente
 			// rápida): entonces se cierra de una vez.
@@ -2113,6 +2150,13 @@ export const investorContractsRouter = {
 			// Y que la papelería diga que ese quedó anulado, para que nadie siga
 			// pasando sus enlaces.
 			void espejarEstadoDeFirmaEnCartera(input.contractId);
+
+			// Si era un firmado de una batería ya completada, el reemitido la
+			// vuelve trabajo pendiente: que vuelva a la lista de jurídico ya, no
+			// cuando alguien consulte el estado del nuevo.
+			if (contrato.batchId) {
+				await recalcularEstadoDeLaBateria(contrato.batchId, context.userId);
+			}
 
 			return {
 				success: true,

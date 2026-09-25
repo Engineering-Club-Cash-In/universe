@@ -124,6 +124,23 @@ export interface AccesoPortalOtorgado {
  * otro lado la cuenta pudo quedar creada y la contraseña pudo haber salido.
  * Tampoco está ningún motivo que venga del cuerpo de auth-google: este repo no
  * puede afirmar que no escribió nada.
+ *
+ * 🔴 Y NO ESTÁ `correo_aprobado_no_coincide`, QUE ES A PROPÓSITO.
+ * ---------------------------------------------------------------
+ * Ese motivo CUMPLE la descripción de arriba al pie de la letra —cartera lo
+ * decide con la fila en la mano, antes del `fetch`, sin provisionar nada— así
+ * que la tentación de "completar la lista" es real. No se agrega: mide otra
+ * cosa. Los cuatro de arriba son no-ops que se repiten idénticos en cada
+ * apretón y cuyo registro solo entierra la constancia (la empresa contesta lo
+ * mismo para siempre). El veto ocurre únicamente cuando el correo de la fila
+ * CAMBIÓ entre que el diálogo se pintó y el clic llegó: es el evento contra el
+ * que existe `correo_aprobado` (controllers/otorgarAccesoPortal.ts), y quien
+ * mueve ese correo no es quien aprueba —`editarInversionista` lo alcanzan once
+ * familias de rol y el botón cuatro—.
+ *
+ * O sea que "no se provisionó nada" acá es el ÉXITO del control, no un apretón
+ * intrascendente. Agregarlo a esta lista no ahorraría ruido: apagaría la única
+ * alarma que avisa que alguien intentó desviar una contraseña ya aprobada.
  */
 export const MOTIVOS_SIN_EFECTO: readonly string[] = [
 	"inversionista_no_encontrado",

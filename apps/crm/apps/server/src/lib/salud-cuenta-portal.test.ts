@@ -233,6 +233,49 @@ describe("exigeConstancia", () => {
 		}
 	});
 
+	// ========================================================================
+	// EL VETO DEL CORREO APROBADO
+	// ========================================================================
+
+	// LA PRUEBA QUE IMPORTA de esta lista blanca. El veto CUMPLE la descripción
+	// de `MOTIVOS_SIN_EFECTO` al pie de la letra —cartera lo decide con la fila
+	// en la mano, antes del `fetch`, sin provisionar nada—, así que "completar
+	// la lista" es una regresión plausible y en apariencia correcta.
+	//
+	// Mide otra cosa. Los cuatro de la lista son no-ops que se repiten idénticos
+	// en cada apretón y cuyo registro solo entierra la constancia (la empresa
+	// contesta lo mismo para siempre). El veto solo ocurre si el correo de la
+	// fila CAMBIÓ entre que el diálogo se pintó y el clic llegó: es el ÉXITO del
+	// control, no un apretón intrascendente. Callarlo apagaría la única alarma
+	// de que alguien intentó desviar una contraseña ya aprobada — y quien mueve
+	// ese correo (`editarInversionista`, once familias de rol) no es quien
+	// aprueba (cuatro).
+	test("el veto por correo que cambió DEJA fila, aunque no provisione nada", () => {
+		expect(
+			exigeConstancia(
+				otorgado({
+					estado: "fallo",
+					usuarioEmail: null,
+					correo: sinCorreo,
+					motivo: "correo_aprobado_no_coincide",
+				}),
+			),
+		).toBe(true);
+	});
+
+	// El candado explícito: fija la lista entera. Agregar el motivo del veto
+	// —que es como se apagaría la alarma— pone esto en rojo con el nombre a la
+	// vista, en vez de pasar en verde por ser "un motivo más sin efecto".
+	test("la lista blanca de no-ops es exactamente la de los cuatro conocidos", () => {
+		expect([...MOTIVOS_SIN_EFECTO].sort()).toEqual([
+			"es_empresa_el_acceso_es_del_representante",
+			"inversionista_no_encontrado",
+			"provisionamiento_no_configurado",
+			"representante_no_encontrado_en_cartera",
+		]);
+		expect(MOTIVOS_SIN_EFECTO).not.toContain("correo_aprobado_no_coincide");
+	});
+
 	// El timeout NO es un "no pasó nada": abortamos la espera, pero auth-google
 	// pudo haber creado la cuenta y mandado la contraseña igual. Es el caso en
 	// que más falta hace saber quién apretó.

@@ -253,3 +253,117 @@ test("un rechazo de cartera-back se propaga en vez de devolver datos vacíos", a
 		"Hay que indicar al menos un inversionista_id",
 	);
 });
+
+// ============================================================================
+// EL CORREO APROBADO (se aprueba un correo, no un id)
+// ============================================================================
+
+/** Un cliente que solo anota el cuerpo que salió, sin red de verdad. */
+const clienteQueAnota = () => {
+	const cuerpos: any[] = [];
+	let llamadas = 0;
+	const client = new CarteraBackClient({
+		baseUrl: "https://cartera.test",
+		retryAttempts: 0,
+		accessTokenProvider: async () => "test-token",
+		fetchTransport: fetchTransport(async (_input, init) => {
+			llamadas += 1;
+			cuerpos.push(JSON.parse(String(init?.body)));
+			return Response.json(respuesta());
+		}),
+	});
+	return { client, cuerpos, llamadas: () => llamadas };
+};
+
+test("el correo aprobado VIAJA a cartera junto al id", async () => {
+	const { client, cuerpos } = clienteQueAnota();
+
+	await client.otorgarAccesoPortal([7], "ana@ejemplo.com");
+
+	// La mutación que esto mata: dejar de reenviar el campo. Sin él cartera
+	// vuelve a decidir el destinatario releyendo la fila, que es el agujero.
+	expect(cuerpos[0]).toEqual({
+		inversionista_ids: [7],
+		correo_aprobado: "ana@ejemplo.com",
+	});
+});
+
+test("se manda RECORTADO: el maxLength 255 de cartera mide lo que recibe", async () => {
+	const { client, cuerpos } = clienteQueAnota();
+
+	await client.otorgarAccesoPortal([7], "  ana@ejemplo.com  ");
+
+	expect(cuerpos[0].correo_aprobado).toBe("ana@ejemplo.com");
+
+	// Un correo que USA los 255 y viene con espacios: recortado entra, crudo se
+	// iría en 422 contra `t.String({ maxLength: 255 })` sin llegar al handler.
+	const alLimite = `${"a".repeat(243)}@ejemplo.com`;
+	expect(alLimite).toHaveLength(255);
+	await client.otorgarAccesoPortal([7], `  ${alLimite}  `);
+	expect(cuerpos[1].correo_aprobado).toHaveLength(255);
+});
+
+// El camino de la EMPRESA: su diálogo no enseña correo porque la cuenta es del
+// representante. La llave tiene que quedar AUSENTE — no en `""`, que cartera
+// rebota con 400, ni en `null`.
+test("sin correo aprobado la llave NO viaja (empresa)", async () => {
+	const { client, cuerpos } = clienteQueAnota();
+
+	await client.otorgarAccesoPortal([7]);
+
+	expect(cuerpos[0]).toEqual({ inversionista_ids: [7] });
+	expect("correo_aprobado" in cuerpos[0]).toBe(false);
+});
+
+// LA PRUEBA QUE IMPORTA de la llave vacía. Un diálogo que SÍ tenía que enseñar
+// un correo y llegó sin él es un llamador roto. Omitir la llave en silencio lo
+// convertiría en un provisionamiento SIN aprobación — el agujero, servido por
+// el propio arreglo. Tiene que tronar, y ANTES de salir a la red.
+test("un correo aprobado vacío TRUENA sin llegar a cartera", async () => {
+	for (const vacio of ["", "   ", "\t\n"]) {
+		const { client, cuerpos, llamadas } = clienteQueAnota();
+
+		await expect(client.otorgarAccesoPortal([7], vacio)).rejects.toThrow(
+			"`correoAprobado` vino vacío",
+		);
+
+		// Nada salió: ni una petición, ni un cuerpo con la llave omitida.
+		expect(llamadas()).toBe(0);
+		expect(cuerpos).toHaveLength(0);
+	}
+});
+
+// El veto de cartera es un 200 con `fallo` adentro, NO un rechazo HTTP: el
+// cliente tiene que devolverlo tal cual para que el procedure lo lea y deje
+// constancia. Si lo tratara como error, el veto subiría por el `catch` y se
+// anotaría como "no se sabe si la contraseña salió", que es falso: no salió.
+test("el veto vuelve como resultado normal, no como excepción", async () => {
+	const vetada = {
+		message: "Procesados 1 inversionista(s)",
+		resultados: [
+			{
+				inversionistaId: 7,
+				estado: "fallo" as const,
+				usuarioEmail: null,
+				correo: {
+					enviado: false,
+					plantilla: null,
+					redirigido: false,
+					destinatarioReal: null,
+				},
+				advertencias: [],
+				motivo: "correo_aprobado_no_coincide",
+			},
+		],
+	};
+	const client = new CarteraBackClient({
+		baseUrl: "https://cartera.test",
+		retryAttempts: 0,
+		accessTokenProvider: async () => "test-token",
+		fetchTransport: fetchTransport(async () => Response.json(vetada)),
+	});
+
+	expect(await client.otorgarAccesoPortal([7], "vieja@ejemplo.com")).toEqual(
+		vetada,
+	);
+});

@@ -3117,7 +3117,10 @@ export function CreditDetailView({
 										<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
 											<div>
 												<Label className="text-muted-foreground text-xs">
-													Seguro {insuranceProviderLabel}
+													{insuranceDisplay.insuranceProvider === "gyt" &&
+													insuranceDisplay.membershipCost > 0
+														? "Seguro + membresía GyT (GPS aparte)"
+														: `Seguro ${insuranceProviderLabel}`}
 												</Label>
 												<p className="font-medium">
 													{formatCurrency(insuranceDisplay.insuranceCost)}
@@ -3149,7 +3152,10 @@ export function CreditDetailView({
 											</div>
 											<div>
 												<Label className="text-muted-foreground text-xs">
-													Membresía
+													{insuranceDisplay.insuranceProvider === "gyt" &&
+													insuranceDisplay.membershipCost > 0
+														? "Membresía (incluida en seguro)"
+														: "Membresía"}
 												</Label>
 												<p className="font-medium">
 													{formatCurrency(insuranceDisplay.membershipCost)}

@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	ArrowLeft,
-	Ban,
 	Building2,
 	Check,
 	FileUp,
@@ -23,18 +22,8 @@ import {
 	ContratosDeLaBateria,
 	esDeEstaCompra,
 } from "@/components/inversiones/ContratosDeLaBateria";
+import { DescartarBateria } from "@/components/inversiones/DescartarBateria";
 import { UploadInvestorContractModal } from "@/components/inversiones/UploadInvestorContractModal";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -139,8 +128,6 @@ function RouteComponent() {
 	const [categoria, setCategoria] = useState<CategoriaDeInversion | null>(null);
 	const [dpi, setDpi] = useState("");
 	const [dpiTocado, setDpiTocado] = useState(false);
-	const [motivoDescarte, setMotivoDescarte] = useState("");
-	const [descartando, setDescartando] = useState(false);
 	const [subiendo, setSubiendo] = useState(false);
 	const [tipoASubir, setTipoASubir] = useState<string | undefined>(undefined);
 
@@ -296,19 +283,6 @@ function RouteComponent() {
 			queryClient.invalidateQueries({
 				predicate: (query) =>
 					JSON.stringify(query.queryKey).includes("InvestorContract"),
-			});
-			navigate({ to: "/juridico" });
-		},
-		onError: (error: Error) => toast.error(error.message),
-	});
-
-	const cerrarMutation = useMutation({
-		...orpc.closeInvestorContractBatch.mutationOptions(),
-		onSuccess: () => {
-			toast.success("Batería descartada");
-			queryClient.invalidateQueries({
-				predicate: (query) =>
-					JSON.stringify(query.queryKey).includes("InvestorContractBatch"),
 			});
 			navigate({ to: "/juridico" });
 		},
@@ -472,45 +446,10 @@ function RouteComponent() {
 				    ofrece. Los de una compra anterior sobre los mismos créditos no
 				    cuentan, ni acá (`vigentes`) ni allá. */}
 				{!cerrada && contratosQuery.isSuccess && vigentes.length === 0 && (
-					<AlertDialog open={descartando} onOpenChange={setDescartando}>
-						<AlertDialogTrigger asChild>
-							<Button variant="ghost" size="sm">
-								<Ban className="mr-2 h-4 w-4" />
-								Descartar
-							</Button>
-						</AlertDialogTrigger>
-						<AlertDialogContent>
-							<AlertDialogHeader>
-								<AlertDialogTitle>¿Descartar esta batería?</AlertDialogTitle>
-								<AlertDialogDescription>
-									Es para la compra que no lleva contratos. Queda registrada con
-									el motivo y no se le pueden emitir contratos después.
-								</AlertDialogDescription>
-							</AlertDialogHeader>
-							<Input
-								value={motivoDescarte}
-								onChange={(e) => setMotivoDescarte(e.target.value)}
-								placeholder="Por qué no hay que hacer estos contratos"
-							/>
-							<AlertDialogFooter>
-								<AlertDialogCancel>Cancelar</AlertDialogCancel>
-								<AlertDialogAction
-									onClick={() =>
-										cerrarMutation.mutate({
-											batchId,
-											resultado: "descartada",
-											motivo: motivoDescarte,
-										})
-									}
-									disabled={
-										cerrarMutation.isPending || motivoDescarte.trim().length < 3
-									}
-								>
-									Descartar
-								</AlertDialogAction>
-							</AlertDialogFooter>
-						</AlertDialogContent>
-					</AlertDialog>
+					<DescartarBateria
+						batchId={batchId}
+						onDescartada={() => navigate({ to: "/juridico" })}
+					/>
 				)}
 			</div>
 

@@ -236,6 +236,25 @@ export const investorDocumentsRouter = new Elysia()
       try {
         const documentoId = Number(params.documentoId);
 
+        // Un contrato del CRM anulado no se vuelve a mostrar desde acá: sus
+        // enlaces ya no sirven y el CRM lo ocultó a propósito. Mostrarlo le
+        // ofrecería al inversionista un contrato que se descartó.
+        const [actual] = await db
+          .select({
+            contrato_id: documentos_inversionista.contrato_id,
+            estado_firma: documentos_inversionista.estado_firma,
+          })
+          .from(documentos_inversionista)
+          .where(eq(documentos_inversionista.documento_id, documentoId));
+
+        if (actual?.contrato_id && body.visible && actual.estado_firma === "cancelled") {
+          set.status = 409;
+          return {
+            success: false,
+            message: "Este contrato está anulado en el CRM: no se puede volver a mostrar.",
+          };
+        }
+
         const [updated] = await db
           .update(documentos_inversionista)
           .set({ visible: body.visible })
@@ -288,6 +307,17 @@ export const investorDocumentsRouter = new Elysia()
         if (!documento) {
           set.status = 404;
           return { success: false, message: "Documento no encontrado" };
+        }
+
+        // Los contratos los maneja el CRM, que es el dueño: borrarlos acá
+        // perdía la copia de un documento legal (el CRM la vuelve a mandar en
+        // la próxima firma) sin anularlo en ningún lado. Se anulan desde allá.
+        if (documento.contrato_id) {
+          set.status = 409;
+          return {
+            success: false,
+            message: "Es un contrato del CRM: se anula desde el CRM, no se borra acá.",
+          };
         }
 
         // Eliminar de R2

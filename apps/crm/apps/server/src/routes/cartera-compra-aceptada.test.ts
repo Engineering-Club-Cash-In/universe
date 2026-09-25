@@ -298,4 +298,27 @@ describe("aviso de compra aceptada", () => {
 		expect(await res.json()).toMatchObject({ batchId: "bateria-1" });
 		expect(createNotification).not.toHaveBeenCalled();
 	});
+
+	test("un aviso de una aceptación anterior a la guardada no toca la batería", async () => {
+		filaInsertada = [];
+		resultadosDeSelect = [
+			[
+				{
+					id: "bateria-1",
+					status: "pendiente",
+					// Ya se registró una compra más nueva sobre los mismos créditos.
+					acceptedAt: new Date("2026-10-01T10:00:00.000Z"),
+				},
+			],
+		];
+
+		const res = await pedir(CUERPO);
+
+		expect(await res.json()).toMatchObject({
+			batchId: "bateria-1",
+			repetida: true,
+		});
+		expect(valoresRefrescados).toHaveLength(0);
+		expect(createNotification).not.toHaveBeenCalled();
+	});
 });

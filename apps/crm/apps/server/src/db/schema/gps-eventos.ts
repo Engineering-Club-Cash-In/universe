@@ -6,6 +6,7 @@ import {
 	jsonb,
 	pgEnum,
 	pgTable,
+	primaryKey,
 	text,
 	timestamp,
 	uniqueIndex,
@@ -104,36 +105,48 @@ export const gpsEventos = pgTable(
 );
 
 /**
- * Snapshot del ÚLTIMO estado que el job vio por unidad (CB-119). NO es
- * historial: una fila por unidad, se sobreescribe en cada corrida. Sin esto
- * el job no puede distinguir "la ignición YA estaba encendida" (no genera
- * evento de nuevo) de "la ignición ACABA de encenderse" (sí genera evento):
- * cada corrida repetiría la alerta mientras el estado se mantenga.
+ * Snapshot del ÚLTIMO estado que el job vio por (unidad, caso B4) (CB-119).
+ * NO es historial: una fila por (unidad, caso), se sobreescribe en cada
+ * corrida. Sin esto el job no puede distinguir "la ignición YA estaba
+ * encendida" (no genera evento de nuevo) de "la ignición ACABA de
+ * encenderse" (sí genera evento): cada corrida repetiría la alerta mientras
+ * el estado se mantenga.
+ *
+ * PK compuesta (wialonUnitId, numeroCreditoSifco), NO solo wialonUnitId:
+ * `wialonUnitId` no es UNIQUE en `vehicles` (D-10) — una misma unidad Wialon
+ * puede estar vinculada a más de un vehículo con caso B4 activo a la vez
+ * (reasignación en curso, o dos créditos legítimos compartiendo GPS). Con PK
+ * solo por unidad, el segundo caso pisaba el snapshot del primero (o
+ * viceversa, según el orden del batch) y su asesor dejaba de recibir
+ * alertas para esa unidad.
  */
-export const gpsUnidadEstado = pgTable("gps_unidad_estado", {
-	wialonUnitId: integer("wialon_unit_id").primaryKey(),
+export const gpsUnidadEstado = pgTable(
+	"gps_unidad_estado",
+	{
+		wialonUnitId: integer("wialon_unit_id").notNull(),
 
-	// SIFCO B4 que originó la última corrida que actualizó esta fila. Si
-	// cambia entre corridas (unidad reasignada a otro caso, D-10), el job
-	// resetea el resto de las columnas en vez de heredar el estado del caso
-	// viejo.
-	numeroCreditoSifco: text("numero_credito_sifco"),
+		// SIFCO B4 que originó la última corrida que actualizó esta fila. Parte
+		// de la PK: nunca cambia sin cambiar de fila (una reasignación crea una
+		// fila nueva bajo el SIFCO nuevo, no reescribe la vieja).
+		numeroCreditoSifco: text("numero_credito_sifco").notNull(),
 
-	// Voltaje crudo de energía externa (lmsg.p.pwr_ext) de la última corrida.
-	pwrExt: doublePrecision("pwr_ext"),
-	ignicionOn: boolean("ignicion_on"),
-	ultimaSenalWialon: timestamp("ultima_señal_wialon"),
+		// Voltaje crudo de energía externa (lmsg.p.pwr_ext) de la última corrida.
+		pwrExt: doublePrecision("pwr_ext"),
+		ignicionOn: boolean("ignicion_on"),
+		ultimaSenalWialon: timestamp("ultima_señal_wialon"),
 
-	// Desde cuándo la unidad dejó de reportar señal (null si está reportando
-	// con normalidad). Se usa para no re-disparar "sin_reportar" en cada
-	// corrida mientras la unidad se mantenga caída.
-	sinReportarDesde: timestamp("sin_reportar_desde"),
+		// Desde cuándo la unidad dejó de reportar señal (null si está reportando
+		// con normalidad). Se usa para no re-disparar "sin_reportar" en cada
+		// corrida mientras la unidad se mantenga caída.
+		sinReportarDesde: timestamp("sin_reportar_desde"),
 
-	// Si la última posición conocida estaba DENTRO de "Perimetro cash". Null
-	// = nunca se pudo evaluar (sin lat/lon, o la geocerca no se pudo leer de
-	// Wialon esa corrida). Evita re-disparar "salida_geocerca" en cada
-	// corrida mientras la unidad se mantenga fuera.
-	dentroDeGeocerca: boolean("dentro_de_geocerca"),
+		// Si la última posición conocida estaba DENTRO de "Perimetro cash". Null
+		// = nunca se pudo evaluar (sin lat/lon, o la geocerca no se pudo leer de
+		// Wialon esa corrida). Evita re-disparar "salida_geocerca" en cada
+		// corrida mientras la unidad se mantenga fuera.
+		dentroDeGeocerca: boolean("dentro_de_geocerca"),
 
-	actualizadoAt: timestamp("actualizado_at").defaultNow().notNull(),
-});
+		actualizadoAt: timestamp("actualizado_at").defaultNow().notNull(),
+	},
+	(t) => [primaryKey({ columns: [t.wialonUnitId, t.numeroCreditoSifco] })],
+);

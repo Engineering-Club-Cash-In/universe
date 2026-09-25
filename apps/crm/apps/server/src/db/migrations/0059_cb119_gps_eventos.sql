@@ -68,24 +68,29 @@ CREATE INDEX IF NOT EXISTS "idx_gps_eventos_unidad_ocurrido" ON "gps_eventos" ("
 CREATE INDEX IF NOT EXISTS "idx_gps_eventos_recibido_at" ON "gps_eventos" ("recibido_at");
 --> statement-breakpoint
 
--- Snapshot del último estado visto por unidad (no historial: se sobreescribe
--- cada corrida). Solo cubre unidades con caso de cobro activo al momento de
--- la última corrida; una unidad que sale de cobros deja de actualizarse pero
--- su fila no se borra (referencia útil, sin costo de mantenerla).
+-- Snapshot del último estado visto por (unidad, caso B4) — no historial: se
+-- sobreescribe cada corrida. PK compuesta (wialon_unit_id,
+-- numero_credito_sifco), no solo wialon_unit_id: wialon_unit_id NO es UNIQUE
+-- en vehicles (D-10) — una misma unidad puede estar vinculada a más de un
+-- vehículo con caso B4 activo (reasignación en curso, o dos créditos
+-- legítimos compartiendo GPS). Con PK solo por unidad, el segundo caso
+-- pisaba el snapshot del primero y su asesor dejaba de recibir alertas.
+-- Una unidad que sale de cobros deja de actualizarse pero su fila no se
+-- borra (referencia útil, sin costo de mantenerla).
 CREATE TABLE IF NOT EXISTS "gps_unidad_estado" (
-	"wialon_unit_id" integer PRIMARY KEY,
-	-- SIFCO B4 que originó la última corrida que actualizó esta fila. Si
-	-- cambia entre corridas (unidad reasignada a otro caso, D-10), el job
-	-- resetea el resto de las columnas en vez de heredar el estado del caso
-	-- viejo — sin esto, una unidad ya sin energía/fuera de geocerca al
-	-- reasignarse nunca generaría evento para el caso/asesor nuevo.
-	"numero_credito_sifco" text,
+	"wialon_unit_id" integer NOT NULL,
+	-- SIFCO B4 que originó la última corrida que actualizó esta fila. Parte
+	-- de la PK: una reasignación (D-10) crea una fila nueva bajo el SIFCO
+	-- nuevo en vez de reescribir la vieja, así que nunca hereda el estado del
+	-- caso anterior.
+	"numero_credito_sifco" text NOT NULL,
 	"pwr_ext" double precision,
 	"ignicion_on" boolean,
 	"ultima_señal_wialon" timestamp,
 	"sin_reportar_desde" timestamp,
 	"dentro_de_geocerca" boolean,
-	"actualizado_at" timestamp DEFAULT now() NOT NULL
+	"actualizado_at" timestamp DEFAULT now() NOT NULL,
+	PRIMARY KEY ("wialon_unit_id", "numero_credito_sifco")
 );
 --> statement-breakpoint
 

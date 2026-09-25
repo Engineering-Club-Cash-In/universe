@@ -81,11 +81,17 @@ const WIALON_ZONA_PAIS_ID = Number(process.env.WIALON_ZONA_PAIS_ID ?? 1);
 interface UnidadConCaso {
 	wialonUnitId: number;
 	/**
-	 * SIFCO en B4 que hizo que esta unidad entrara al universo de la corrida.
-	 * Se propaga hasta `registrarEventoGps` para que la resolución de caso
-	 * quede acotada a ESTE caso — sin esto, una unidad vinculada a más de un
-	 * vehículo/caso activo (reasignación, D-10) podía resolver contra el
-	 * caso activo más reciente en vez del caso B4 que originó la detección.
+	 * SIFCO en B4 que hizo que ESTE PAR (unidad, caso) entrara al universo de
+	 * la corrida. Se propaga hasta `registrarEventoGps` para que la
+	 * resolución de caso quede acotada a ESTE caso — sin esto, una unidad
+	 * vinculada a más de un vehículo/caso activo (reasignación, D-10) podía
+	 * resolver contra el caso activo más reciente en vez del caso B4 que
+	 * originó la detección.
+	 *
+	 * Una misma unidad puede aparecer en MÁS DE UNA fila (varios vehículos
+	 * compartiendo unidad Wialon, cada uno con su propio caso en B4): el
+	 * monitoreo es por (unidad, caso), no por unidad sola — descartar el
+	 * segundo caso dejaría a su asesor sin alertas.
 	 */
 	numeroCreditoSifco: string;
 }
@@ -155,10 +161,10 @@ export async function sifcosEnB4(): Promise<string[] | null> {
 }
 
 /**
- * Unidades vinculadas a un caso de cobro ACTIVO cuyo `numeroCreditoSifco`
- * está en `sifcosB4`. Un caso llega a su vehículo por DOS caminos distintos
- * según el origen del crédito (mismo patrón dual que `routers/wialon.ts`
- * usa para la vinculación masiva, D-14 del plan CB-119):
+ * Pares (unidad, caso) de cobro ACTIVO cuyo `numeroCreditoSifco` está en
+ * `sifcosB4`. Un caso llega a su vehículo por DOS caminos distintos según el
+ * origen del crédito (mismo patrón dual que `routers/wialon.ts` usa para la
+ * vinculación masiva, D-14 del plan CB-119):
  *  1. `casosCobros.contratoId → contratosFinanciamiento.vehicleId` — créditos
  *     que pasaron por el flujo de financiamiento del CRM.
  *  2. `opportunities.vehicleId` (cruzando por `numeroCreditoSifco`) — créditos
@@ -168,6 +174,14 @@ export async function sifcosEnB4(): Promise<string[] | null> {
  *     Ficha 360, y en la práctica es el que casi todos los casos usan.
  * `sifcosB4` ya viene sin prefijo `CRM-` (cartera-back nunca conoce esos
  * placeholders internos).
+ *
+ * Devuelve UNA FILA POR (unidad, SIFCO), no una por unidad: `wialonUnitId`
+ * no es UNIQUE en `vehicles` (D-10), así que una misma unidad Wialon puede
+ * estar vinculada a más de un vehículo con caso B4 activo (reasignación en
+ * curso, o dos créditos legítimos compartiendo GPS). Colapsar a una fila
+ * por unidad (versión anterior de esta función) descartaba silenciosamente
+ * el segundo caso: nunca se consultaba su transición ni se notificaba a su
+ * asesor.
  */
 export async function unidadesConCasoActivo(
 	sifcosB4: string[],
@@ -214,24 +228,25 @@ export async function unidadesConCasoActivo(
 			),
 	]);
 
-	// Si la misma unidad aparece con más de un SIFCO B4 (varios vehículos
-	// compartiendo unidad, cada uno con su propio caso en B4), se queda con
-	// el primero visto — más adelante `resolverVehiculoYCaso` igual acota
-	// contra ESE SIFCO puntual, no contra "cualquier caso activo de la
-	// unidad", que es el bug que se corrige acá.
-	const porUnidad = new Map<number, string>();
+	// Dedup exacto por (unidad, SIFCO): el mismo par puede repetirse entre
+	// las dos ramas (contrato y oportunidad) si por error hay casos activos
+	// duplicados para el mismo crédito — pero DOS SIFCOs distintos de la
+	// misma unidad quedan como DOS filas, a propósito.
+	const vistos = new Set<string>();
+	const resultado: UnidadConCaso[] = [];
 	for (const fila of [...porContrato, ...porOportunidad]) {
 		if (fila.wialonUnitId == null || fila.numeroCreditoSifco == null) {
 			continue;
 		}
-		if (!porUnidad.has(fila.wialonUnitId)) {
-			porUnidad.set(fila.wialonUnitId, fila.numeroCreditoSifco);
-		}
+		const clave = `${fila.wialonUnitId}:${fila.numeroCreditoSifco}`;
+		if (vistos.has(clave)) continue;
+		vistos.add(clave);
+		resultado.push({
+			wialonUnitId: fila.wialonUnitId,
+			numeroCreditoSifco: fila.numeroCreditoSifco,
+		});
 	}
-	return Array.from(porUnidad, ([wialonUnitId, numeroCreditoSifco]) => ({
-		wialonUnitId,
-		numeroCreditoSifco,
-	}));
+	return resultado;
 }
 
 /**
@@ -393,10 +408,11 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 		};
 	}
 
-	const unitIds = unidades.map((u) => u.wialonUnitId);
-	const sifcoPorUnidad = new Map(
-		unidades.map((u) => [u.wialonUnitId, u.numeroCreditoSifco]),
-	);
+	// Deduplicado por unidad SOLO para la llamada a Wialon (una unidad
+	// compartida por 2 casos B4 no necesita 2 llamadas de telemetría idéntica)
+	// — `unidades` (con posibles filas repetidas por unidad) es lo que se
+	// recorre más abajo para el monitoreo por caso.
+	const unitIds = Array.from(new Set(unidades.map((u) => u.wialonUnitId)));
 
 	const [telemetrias, poligonoPais] = await conContextoGps(
 		{ origen: "gps-eventos-poll" },
@@ -432,9 +448,16 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 		.select()
 		.from(gpsUnidadEstado)
 		.where(inArray(gpsUnidadEstado.wialonUnitId, unitIds));
-	const snapshotPorId = new Map(
-		snapshotsPrevios.map((s) => [s.wialonUnitId, s]),
+	// Clave compuesta (unidad, SIFCO): dos casos B4 compartiendo la misma
+	// unidad Wialon tienen cada uno su propio snapshot — mismo criterio que
+	// el PK de gps_unidad_estado.
+	const snapshotPorClave = new Map(
+		snapshotsPrevios.map((s) => [
+			`${s.wialonUnitId}:${s.numeroCreditoSifco}`,
+			s,
+		]),
 	);
+	const telemetriaPorUnidad = new Map(telemetrias.map((t) => [t.unitId, t]));
 
 	// Se calcula UNA vez por corrida, no por unidad dentro del loop.
 	const poligonoValido = esPoligonoValido(poligonoPais);
@@ -449,25 +472,33 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 	// innecesaria en cada corrida.
 	const snapshotsParaGuardar: (typeof gpsUnidadEstado.$inferInsert)[] = [];
 
-	for (const telemetria of telemetrias) {
-		const sifcoActual = sifcoPorUnidad.get(telemetria.unitId) ?? "";
-		const snapshotPrevio = snapshotPorId.get(telemetria.unitId) ?? null;
-		// Se descarta el snapshot previo (se trata como primera vez que se ve
-		// la unidad) en dos casos:
-		//  1. Reasignación (D-10): el SIFCO cambió entre corridas. Heredar el
-		//     snapshot haría que detectarTransiciones compare contra un
-		//     estado ajeno (una unidad ya sin energía/fuera de geocerca en el
-		//     caso viejo nunca generaría evento para el caso/asesor nuevo,
-		//     porque "ya estaba así").
-		//  2. Hueco de monitoreo: MISMO SIFCO, pero el snapshot es más viejo
-		//     que MAX_GAP_MONITOREO_MS — típicamente el crédito salió de B4 y
-		//     volvió a entrar. Sin este chequeo, "mismo SIFCO" alcanzaba para
-		//     heredar un snapshot de hace días, y si la condición seguía
-		//     activa antes y después del hueco nunca se generaba una alerta
-		//     nueva, ni con la ventana de dedup ya expirada hace tiempo.
+	// Se recorre `unidades` (una fila por caso B4), no `telemetrias` (una fila
+	// por unidad Wialon): si dos casos comparten unidad, cada uno necesita su
+	// propio snapshot/detección/evento — recorrer telemetrias los colapsaría
+	// de vuelta a uno solo.
+	for (const { wialonUnitId, numeroCreditoSifco: sifcoActual } of unidades) {
+		const telemetria = telemetriaPorUnidad.get(wialonUnitId);
+		// Wialon no devolvió telemetría para esta unidad esta corrida (ver
+		// getTelemetriaUnidades: id omitido en ambas respuestas) — no hay nada
+		// que comparar, se salta sin tocar su snapshot.
+		if (!telemetria) continue;
+
+		// La clave (unidad, SIFCO) ya resuelve la reasignación (D-10): un
+		// cambio de SIFCO para la misma unidad simplemente no encuentra
+		// snapshot previo bajo la clave nueva, así que se trata como primera
+		// vez que se ve ese (unidad, caso) — sin heredar el estado del caso
+		// viejo.
+		//
+		// Lo que SÍ hay que chequear acá es un HUECO de monitoreo con el
+		// MISMO (unidad, SIFCO): el crédito salió de B4 y volvió a entrar
+		// días después. Sin este chequeo, el snapshot viejo se heredaría
+		// igual, y si la condición seguía activa antes y después del hueco
+		// nunca se generaría una alerta nueva — ni con la ventana de dedup ya
+		// expirada hace tiempo.
+		const snapshotPrevio =
+			snapshotPorClave.get(`${wialonUnitId}:${sifcoActual}`) ?? null;
 		const monitoreoContinuo =
 			snapshotPrevio != null &&
-			snapshotPrevio.numeroCreditoSifco === sifcoActual &&
 			ahora.getTime() - snapshotPrevio.actualizadoAt.getTime() <=
 				MAX_GAP_MONITOREO_MS;
 		const anterior = monitoreoContinuo ? snapshotPrevio : null;
@@ -564,9 +595,13 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 			.insert(gpsUnidadEstado)
 			.values(snapshotsParaGuardar)
 			.onConflictDoUpdate({
-				target: gpsUnidadEstado.wialonUnitId,
+				// PK compuesta (unidad, SIFCO): dos casos B4 en la misma unidad
+				// Wialon tienen cada uno su propia fila de snapshot.
+				target: [
+					gpsUnidadEstado.wialonUnitId,
+					gpsUnidadEstado.numeroCreditoSifco,
+				],
 				set: {
-					numeroCreditoSifco: sql`excluded.numero_credito_sifco`,
 					pwrExt: sql`excluded.pwr_ext`,
 					ignicionOn: sql`excluded.ignicion_on`,
 					ultimaSenalWialon: sql`excluded.ultima_señal_wialon`,

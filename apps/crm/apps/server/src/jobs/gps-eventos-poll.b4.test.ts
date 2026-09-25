@@ -199,6 +199,22 @@ describe("CB-119 — unidadesConCasoActivo", () => {
 			{ wialonUnitId: 100, numeroCreditoSifco: "001" },
 		]);
 	});
+
+	test("una misma unidad Wialon con DOS SIFCOs B4 distintos (dos vehículos compartiendo GPS): devuelve las DOS filas, no colapsa a una", async () => {
+		// Antes de este fix se colapsaba a una fila por unidad (se quedaba con
+		// la primera vista) y el segundo caso nunca se consultaba ni
+		// notificaba a su asesor.
+		porContratoMock = [
+			{ wialonUnitId: 100, numeroCreditoSifco: "001" },
+			{ wialonUnitId: 100, numeroCreditoSifco: "002" },
+		];
+
+		const resultado = await unidadesConCasoActivo(["001", "002"]);
+		const claves = resultado
+			.map((u) => `${u.wialonUnitId}:${u.numeroCreditoSifco}`)
+			.sort();
+		expect(claves).toEqual(["100:001", "100:002"]);
+	});
 });
 
 describe("CB-119 — correrDeteccionEventosGps: guard de ejecución solapada", () => {

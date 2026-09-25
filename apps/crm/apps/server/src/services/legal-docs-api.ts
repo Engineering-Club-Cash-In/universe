@@ -528,6 +528,9 @@ export async function subirContratoParaFirma(payload: {
  *
  * Pasa por el generador porque las credenciales de WeeTrust las tiene él.
  */
+/** WeeTrust todavía no cerró el documento: no hay PDF firmado que bajar. */
+export class DocumentoSinCerrarError extends Error {}
+
 export async function descargarPdfFirmado(documentID: string): Promise<Blob> {
 	const response = await fetch(
 		`${LEGAL_DOCS_API_URL}/contracts/signed-pdf/${encodeURIComponent(documentID)}`,
@@ -538,6 +541,13 @@ export async function descargarPdfFirmado(documentID: string): Promise<Blob> {
 			signal: AbortSignal.timeout(120_000),
 		},
 	);
+
+	// El generador contesta 409 mientras WeeTrust no lo dé por COMPLETED.
+	if (response.status === 409) {
+		throw new DocumentoSinCerrarError(
+			`WeeTrust todavía no cerró el documento ${documentID}`,
+		);
+	}
 
 	if (!response.ok) {
 		const detalle = await response.text().catch(() => "");

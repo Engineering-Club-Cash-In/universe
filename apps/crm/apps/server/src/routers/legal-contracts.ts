@@ -56,6 +56,7 @@ import {
 	borrarDocumentoDeWeeTrust,
 	type ContractSigner,
 	consultarEstadoFirma,
+	DocumentoSinCerrarError,
 	descargarPdfFirmado,
 	type EstadoDocumentoFirma,
 	motivoDeFalla,
@@ -1609,6 +1610,16 @@ export const legalContractsRouter = {
 			try {
 				pdf = await descargarPdfFirmado(documentID);
 			} catch (error) {
+				// "Firmado" en el CRM también lo pone quien confirma a mano el paso
+				// de 85 a 90, sin esperar a WeeTrust. Si el documento allá sigue
+				// abierto —falta una firma, o una verificación de identidad que no
+				// pasó—, no hay PDF firmado todavía: se dice eso y no un 409.
+				if (error instanceof DocumentoSinCerrarError) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"En el CRM figura firmado, pero WeeTrust todavía no cerró el documento: a alguien le falta terminar de firmar o validar su identidad. El PDF firmado sale cuando cierre.",
+					});
+				}
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message:
 						error instanceof Error

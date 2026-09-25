@@ -273,7 +273,7 @@ export function ReferenciasView({ casoCobroId }: ReferenciasViewProps) {
 															key={t.telefono}
 															className={cn(
 																"inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-sm",
-																t.agregado && "border-dashed",
+																!t.original && "border-dashed",
 															)}
 														>
 															<a
@@ -296,31 +296,40 @@ export function ReferenciasView({ casoCobroId }: ReferenciasViewProps) {
 															>
 																<MessageCircle className="h-3.5 w-3.5" />
 															</a>
-															{t.agregado && (
+															{t.agregados[0] && (
 																<Tooltip>
 																	<TooltipTrigger asChild>
 																		<button
 																			type="button"
 																			className="text-muted-foreground hover:text-red-600"
-																			aria-label={`Quitar ${t.telefono}`}
+																			aria-label={
+																				t.original
+																					? `Quitar el ${t.telefono} que agregó cobros`
+																					: `Quitar ${t.telefono}`
+																			}
 																			disabled={quitarTelefono.isPending}
 																			onClick={() =>
-																				t.agregado &&
-																				quitarTelefono.mutate(t.agregado.id)
+																				t.agregados[0] &&
+																				quitarTelefono.mutate(t.agregados[0].id)
 																			}
 																		>
 																			<X className="h-3.5 w-3.5" />
 																		</button>
 																	</TooltipTrigger>
 																	<TooltipContent>
-																		Agregado en cobros
-																		{t.agregado.registradoPor
-																			? ` por ${t.agregado.registradoPor}`
+																		{t.original
+																			? "Ya venía en la referencia y cobros lo volvió a agregar"
+																			: "Agregado en cobros"}
+																		{t.agregados[0].registradoPor
+																			? ` por ${t.agregados[0].registradoPor}`
 																			: ""}
-																		{t.agregado.notas
-																			? ` · ${t.agregado.notas}`
+																		{t.agregados[0].notas
+																			? ` · ${t.agregados[0].notas}`
 																			: ""}
-																		. Clic para quitarlo.
+																		.{" "}
+																		{t.original
+																			? "Clic para quitar el repetido (el número se queda)."
+																			: "Clic para quitarlo."}
 																	</TooltipContent>
 																</Tooltip>
 															)}

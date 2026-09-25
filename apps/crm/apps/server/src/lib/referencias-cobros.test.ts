@@ -7,6 +7,7 @@ import {
 	type EntradaReferencias,
 	encontrarReferencia,
 	leerFilasReferenciasJson,
+	referenciaDelTelefono,
 	referenciaTieneTelefono,
 	separarTelefonos,
 } from "./referencias-cobros";
@@ -269,10 +270,64 @@ describe("construirReferencias", () => {
 		expect(refs).toHaveLength(1);
 		const [pedro] = refs;
 		expect(pedro?.origenes).toEqual(["cofirmante", "ventas_personal"]);
-		// El de ventas ya lo traía: se muestra como original, no como agregado.
+		// El número sale una vez, como original de ventas, y el agregado NO se
+		// esconde: queda colgado de esa entrada para poder quitarlo (Codex,
+		// PR #1751).
 		expect(pedro?.telefonos).toEqual([
-			{ telefono: "30000009", etiqueta: null, agregado: null },
+			{
+				telefono: "30000009",
+				etiqueta: null,
+				original: true,
+				agregados: [
+					{
+						id: "tel-1",
+						referenciaKey: claveReferencia.cofirmante("cd-1"),
+						notas: "Lo dio la mamá",
+						registradoPor: "Asesor Uno",
+						createdAt: creado,
+					},
+				],
+			},
 		]);
+	});
+
+	it("una referencia de cobros creada después con el número de un agregado no lo esconde", () => {
+		const creado = new Date("2026-09-25T15:00:00.000Z");
+		const [ref] = construirReferencias(
+			entrada({
+				referenciasLead: [
+					{
+						id: "rl-1",
+						nombre: "Mildred",
+						telefono: "3321-7788",
+						parentesco: "amigo_a",
+						notas: null,
+					},
+				],
+				solicitudesTitular: [
+					solicitud({
+						referenciasPersonales: [
+							{ nombre: "Mildred G.", relacion: "amiga", telefono: "48279589" },
+						],
+					}),
+				],
+				telefonosAgregados: [
+					{
+						id: "tel-1",
+						referenciaKey: claveReferencia.ventasPersonal("sol-1", 0),
+						telefono: "33217788",
+						notas: null,
+						registradoPor: "Asesor Uno",
+						createdAt: creado,
+					},
+				],
+			}),
+		);
+		// Se juntaron por el número; la de cobros encabeza.
+		expect(ref?.origenes).toEqual(["cobros", "ventas_personal"]);
+		const telefono = ref?.telefonos.find((t) => t.telefono === "3321-7788");
+		expect(telefono?.original).toBe(true);
+		expect(telefono?.agregados.map((a) => a.id)).toEqual(["tel-1"]);
 	});
 
 	it("un teléfono agregado nuevo aparece marcado como agregado", () => {
@@ -296,13 +351,16 @@ describe("construirReferencias", () => {
 			{
 				telefono: "30000009",
 				etiqueta: null,
-				agregado: {
-					id: "tel-1",
-					referenciaKey: claveReferencia.cofirmante("cd-1"),
-					notas: null,
-					registradoPor: "Asesor Uno",
-					createdAt: creado,
-				},
+				original: false,
+				agregados: [
+					{
+						id: "tel-1",
+						referenciaKey: claveReferencia.cofirmante("cd-1"),
+						notas: null,
+						registradoPor: "Asesor Uno",
+						createdAt: creado,
+					},
+				],
 			},
 		]);
 	});
@@ -346,6 +404,28 @@ describe("construirReferencias", () => {
 		expect(refs).toHaveLength(1);
 		expect(refs[0]?.totalContactos).toBe(2);
 		expect(refs[0]?.ultimoContacto?.resultado).toBe("dio_informacion");
+	});
+});
+
+describe("referenciaDelTelefono", () => {
+	const refs = construirReferencias(
+		entrada({
+			codeudores: [{ id: "cd-1", fullName: "Pedro", phone: "5844-6376" }],
+			solicitudesTitular: [
+				solicitud({
+					referenciasPersonales: [
+						{ nombre: "Ana", relacion: "", telefono: "" },
+					],
+				}),
+			],
+		}),
+	);
+
+	it("encuentra a la OTRA referencia dueña del número, para rechazar el agregado", () => {
+		expect(referenciaDelTelefono(refs, "+502 58446376")?.key).toBe(
+			claveReferencia.cofirmante("cd-1"),
+		);
+		expect(referenciaDelTelefono(refs, "30000000")).toBeNull();
 	});
 });
 

@@ -125,18 +125,27 @@ export type EntradaReferencias = {
 // Salida
 // ---------------------------------------------------------------------------
 
+export type TelefonoAgregado = {
+	id: string;
+	referenciaKey: string;
+	notas: string | null;
+	registradoPor: string | null;
+	createdAt: Date;
+};
+
 export type TelefonoReferencia = {
 	telefono: string;
 	/** "Móvil" / "Oficina" en el cónyuge; null en el resto. */
 	etiqueta: string | null;
-	/** Lleno solo en los que agregó cobros (se pueden quitar). */
-	agregado: {
-		id: string;
-		referenciaKey: string;
-		notas: string | null;
-		registradoPor: string | null;
-		createdAt: Date;
-	} | null;
+	/** Viene de la fuente (ventas, cofirmante, la referencia de cobros). */
+	original: boolean;
+	/**
+	 * Filas de `referencias_telefonos_cobros` con este número (se pueden
+	 * quitar). Normalmente 0 o 1; puede haber más, o venir junto con
+	 * `original`, cuando dos referencias se juntaron por teléfono DESPUÉS de
+	 * agregarlo — y ninguna fila puede quedar escondida sin forma de quitarla.
+	 */
+	agregados: TelefonoAgregado[];
 };
 
 export type ReferenciaUnificada = {
@@ -478,32 +487,48 @@ export function construirReferencias(
 		const cabeza = fuentes[cabezaIdx] as Fuente;
 		const miembros = indices.map((i) => fuentes[i] as Fuente);
 
+		// El mismo número se muestra una sola vez. Si un agregado repite uno que
+		// ya está (porque las filas se juntaron después de agregarlo), NO se
+		// descarta: se cuelga de esa entrada, para que siga viéndose y se pueda
+		// quitar (Codex, PR #1751).
 		const telefonos: TelefonoReferencia[] = [];
-		const vistos = new Set<string>();
-		const agregarTelefono = (t: TelefonoReferencia) => {
-			const clave = claveTelefono(t.telefono) ?? t.telefono;
-			if (vistos.has(clave)) return;
-			vistos.add(clave);
-			telefonos.push(t);
-		};
+		const porClave = new Map<string, TelefonoReferencia>();
 		for (const miembro of miembros) {
 			for (const t of miembro.telefonos) {
-				agregarTelefono({ ...t, agregado: null });
+				const clave = claveTelefono(t.telefono) ?? t.telefono;
+				if (porClave.has(clave)) continue;
+				const entrada: TelefonoReferencia = {
+					...t,
+					original: true,
+					agregados: [],
+				};
+				porClave.set(clave, entrada);
+				telefonos.push(entrada);
 			}
 		}
 		for (const miembro of miembros) {
 			for (const a of agregadosPorKey.get(miembro.key) ?? []) {
-				agregarTelefono({
+				const agregado: TelefonoAgregado = {
+					id: a.id,
+					referenciaKey: a.referenciaKey,
+					notas: a.notas,
+					registradoPor: a.registradoPor,
+					createdAt: a.createdAt,
+				};
+				const clave = claveTelefono(a.telefono) ?? a.telefono;
+				const existente = porClave.get(clave);
+				if (existente) {
+					existente.agregados.push(agregado);
+					continue;
+				}
+				const entrada: TelefonoReferencia = {
 					telefono: a.telefono,
 					etiqueta: null,
-					agregado: {
-						id: a.id,
-						referenciaKey: a.referenciaKey,
-						notas: a.notas,
-						registradoPor: a.registradoPor,
-						createdAt: a.createdAt,
-					},
-				});
+					original: false,
+					agregados: [agregado],
+				};
+				porClave.set(clave, entrada);
+				telefonos.push(entrada);
 			}
 		}
 
@@ -551,6 +576,18 @@ export function encontrarReferencia(
 	key: string,
 ): ReferenciaUnificada | null {
 	return referencias.find((r) => r.keys.includes(key)) ?? null;
+}
+
+/**
+ * La referencia del caso que ya tiene ese número, si alguna. Agregar a una
+ * referencia un número que es de OTRA las juntaría en la próxima lectura (se
+ * agrupan por teléfono): se rechaza antes de escribir.
+ */
+export function referenciaDelTelefono(
+	referencias: ReferenciaUnificada[],
+	telefono: string,
+): ReferenciaUnificada | null {
+	return referencias.find((r) => referenciaTieneTelefono(r, telefono)) ?? null;
 }
 
 /** ¿El teléfono es uno de los de la referencia? (compara por dígitos). */

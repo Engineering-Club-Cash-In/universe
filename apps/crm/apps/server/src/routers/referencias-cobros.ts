@@ -45,6 +45,7 @@ import {
 	encontrarReferencia,
 	METODOS_CONTACTO_REFERENCIA,
 	RESULTADOS_CONTACTO_REFERENCIA,
+	referenciaDelTelefono,
 	referenciaTieneTelefono,
 	TIPOS_HALLAZGO,
 } from "../lib/referencias-cobros";
@@ -496,9 +497,16 @@ export const referenciasCobrosRouter = {
 					message: "La referencia ya no existe. Recargá la ficha.",
 				});
 			}
-			if (referenciaTieneTelefono(referencia, input.telefono)) {
+			// Se busca en TODAS las referencias del caso, no solo en la elegida:
+			// un número que ya es de otra las juntaría en la próxima lectura y
+			// el agregado quedaría repetido (Codex, PR #1751).
+			const duenio = referenciaDelTelefono(referencias, input.telefono);
+			if (duenio) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: "Ese teléfono ya está en la referencia.",
+					message:
+						duenio.key === referencia.key
+							? "Ese teléfono ya está en la referencia."
+							: `Ese teléfono ya es de ${duenio.nombre}. Si es la misma persona, registrá la gestión desde esa referencia.`,
 				});
 			}
 			const [creado] = await db

@@ -258,7 +258,12 @@ export async function registrarEventoGps(
 		input.numeroCreditoSifcoEsperado,
 	);
 
-	const dedupKey = `${input.wialonUnitId}:${input.tipo}:${input.ocurridoAt.toISOString()}`;
+	// Incluye el SIFCO esperado: sin esto, una unidad reasignada de un caso
+	// B4 a otro mientras la misma condición sigue activa (mismo timestamp de
+	// Wialon) colisiona con el dedupKey del evento YA notificado del caso
+	// viejo — el caso nuevo nunca se registraría ni notificaría, porque
+	// registrarEventoGps lo trataría como duplicado del evento ajeno.
+	const dedupKey = `${input.wialonUnitId}:${input.tipo}:${input.ocurridoAt.toISOString()}:${input.numeroCreditoSifcoEsperado ?? ""}`;
 
 	const payload = input.payloadCrudo
 		? sanitizarPayloadWialon(input.payloadCrudo)
@@ -376,7 +381,10 @@ export async function registrarEventoGps(
 	const ventana = Math.floor(
 		(input.ocurridoAt.getTime() - OFFSET_GUATEMALA_MS) / ventanaMs,
 	);
-	const dedupNotifKey = `gps:${input.tipo}:${input.wialonUnitId}:${ventana}`;
+	// Incluye casoCobroId: sin esto, la notificación del caso nuevo caería en
+	// el mismo bucket de tiempo que la del caso viejo (misma unidad, mismo
+	// tipo) y el índice único de dedup de notifications la bloquearía.
+	const dedupNotifKey = `gps:${input.tipo}:${input.wialonUnitId}:${ventana}:${casoCobroId}`;
 
 	const filas = filasNotificacionCobros({
 		casoId: casoCobroId,

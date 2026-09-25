@@ -1275,7 +1275,10 @@ export class WialonClient {
 			const pwrExtRaw = crudo?.lmsg?.p?.pwr_ext;
 			resultado.push({
 				unitId,
-				ultimoMensajeAt: crudo?.lmsg?.t ? new Date(crudo.lmsg.t * 1000) : null,
+				// extraerUltimaSenal (no lmsg.t directo): un lmsg con t ausente o
+				// en 0 no debe tapar un pos.t válido — mismo criterio que ya usa
+				// el resto del cliente para "última señal" de una unidad.
+				ultimoMensajeAt: extraerUltimaSenal({ item: crudo }),
 				pwrExt: typeof pwrExtRaw === "number" ? pwrExtRaw : null,
 				ignicionOn: estado?.isIgnitionOn ?? null,
 				lat: estado?.latitude ?? null,

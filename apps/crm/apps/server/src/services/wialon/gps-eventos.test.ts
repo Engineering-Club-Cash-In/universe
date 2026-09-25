@@ -40,6 +40,7 @@ let supervisoresMock: string[] = [];
 let usuarioSistemaMock: string | null = "sistema-1";
 let notificacionesInsertadas: Record<string, unknown>[] = [];
 let notificacionInsertDaFilas = true;
+let eventoInsertadoValues: Record<string, unknown> | null = null;
 
 function mockDb() {
 	return {
@@ -129,12 +130,15 @@ function mockDb() {
 		insert: (tabla: unknown) => {
 			if (tabla === gpsEventos) {
 				return {
-					values: () => ({
-						onConflictDoNothing: () => ({
-							returning: async () =>
-								eventoYaExisteMock ? [] : [{ id: "evento-nuevo" }],
-						}),
-					}),
+					values: (valores: Record<string, unknown>) => {
+						eventoInsertadoValues = valores;
+						return {
+							onConflictDoNothing: () => ({
+								returning: async () =>
+									eventoYaExisteMock ? [] : [{ id: "evento-nuevo" }],
+							}),
+						};
+					},
 				};
 			}
 			if (tabla === notifications) {
@@ -194,6 +198,7 @@ beforeEach(() => {
 	usuarioSistemaMock = "sistema-1";
 	notificacionesInsertadas = [];
 	notificacionInsertDaFilas = true;
+	eventoInsertadoValues = null;
 
 	// Default: cartera-back deshabilitado → resolverAsesorActual devuelve
 	// null de inmediato → registrarEventoGps cae al fallback
@@ -271,6 +276,26 @@ describe("CB-119 — registrarEventoGps", () => {
 		expect(resultado.eventoId).toBe(eventoExistenteIdMock);
 		expect(resultado.notificado).toBe(true);
 		expect(notificacionesInsertadas.length).toBeGreaterThan(0);
+	});
+
+	test("dedupKey del evento incluye el SIFCO esperado: una unidad reasignada a otro caso B4 no colisiona con el evento ya notificado del caso viejo", async () => {
+		await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+			numeroCreditoSifcoEsperado: "01010214100000",
+		});
+		const dedupKeyPrimerCaso = eventoInsertadoValues?.dedupKey;
+
+		await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+			numeroCreditoSifcoEsperado: "02020214100000",
+		});
+		const dedupKeySegundoCaso = eventoInsertadoValues?.dedupKey;
+
+		expect(dedupKeyPrimerCaso).not.toBe(dedupKeySegundoCaso);
 	});
 
 	test("desconexión de energía: notifica al asesor Y a los supervisores", async () => {

@@ -670,22 +670,6 @@ export interface WialonTelemetriaUnidad {
 	velocidadKmh: number | null;
 }
 
-// ── Geocerca (resource/get_zone_data, CB-119) ──────────────────────────────
-// Solo se tipa lo que el job necesita para punto-en-polígono: nombre, tipo
-// (2 = polígono, el único que usa "Perimetro cash") y sus vértices. El resto
-// de la forma de Wialon (boundary, color, íconos) se ignora.
-export interface WialonZonaPunto {
-	x: number; // longitud
-	y: number; // latitud
-}
-
-export interface WialonZona {
-	id: number;
-	n: string; // nombre
-	t: number; // tipo (1 = línea, 2 = polígono, 3 = círculo)
-	p: WialonZonaPunto[];
-}
-
 // ── Historial de eventos GPS en la Ficha 360 (CB-119) ──────────────────────
 export const gpsEventosCasoInputSchema = z.object({
 	casoCobroId: z.string().uuid(),
@@ -696,12 +680,7 @@ export type GpsEventosCasoInput = z.infer<typeof gpsEventosCasoInputSchema>;
 export const gpsEventosCasoOutputSchema = z.array(
 	z.object({
 		id: z.string(),
-		tipo: z.enum([
-			"desconexion_energia",
-			"ignicion",
-			"sin_reportar",
-			"salida_geocerca",
-		]),
+		tipo: z.enum(["desconexion_energia", "ignicion", "sin_reportar"]),
 		wialonUnitId: z.number(),
 		ocurridoAt: z.date(),
 		lat: z.number().nullable(),
@@ -711,3 +690,69 @@ export const gpsEventosCasoOutputSchema = z.array(
 	}),
 );
 export type GpsEventosCasoOutput = z.infer<typeof gpsEventosCasoOutputSchema>;
+
+// ── Historial de posiciones para "ubicaciones clave" (CB-119, D-15) ────────
+// Forma cruda de un mensaje de messages/load_interval — solo los campos que
+// WialonClient.getHistorialPosiciones necesita para filtrar/mapear.
+export interface WialonMensajeCrudo {
+	t: number; // epoch en segundos
+	pos?: {
+		y: number; // latitud
+		x: number; // longitud
+		s?: number; // velocidad en km/h
+	} | null;
+}
+
+// Forma ya limpia (sin campos irrelevantes) que usa el algoritmo de
+// clustering — solo posición, velocidad y timestamp de cada mensaje.
+export interface WialonMensajePosicion {
+	t: number; // epoch en segundos
+	lat: number;
+	lon: number;
+	velocidadKmh: number | null;
+}
+
+export interface HistorialPosicionesResultado {
+	mensajes: WialonMensajePosicion[];
+	completo: boolean;
+	tramosTotal: number;
+	tramosCompletados: number;
+}
+
+// ── Ubicaciones clave en la Ficha 360 (CB-119, D-15) ────────────────────────
+export const ubicacionesClaveCasoInputSchema = z.object({
+	casoCobroId: z.string().uuid(),
+	vehicleId: z.string().uuid(),
+	motivo: z.string().trim().min(5).max(300),
+});
+export type UbicacionesClaveCasoInput = z.infer<
+	typeof ubicacionesClaveCasoInputSchema
+>;
+
+export const ubicacionesClaveCasoOutputSchema = z.object({
+	auditada: z.boolean(),
+	ubicaciones: z.array(
+		z.object({
+			id: z.string(),
+			lat: z.number(),
+			lon: z.number(),
+			radioM: z.number(),
+			tipo: z.enum([
+				"probable_casa",
+				"probable_trabajo",
+				"recurrente",
+				"frecuente",
+			]),
+			horasTotales: z.number(),
+			diasDistintos: z.number(),
+			visitas: z.number(),
+			patron: z.unknown(),
+			primeraVisita: z.date(),
+			ultimaVisita: z.date(),
+			calculadoAt: z.date(),
+		}),
+	),
+});
+export type UbicacionesClaveCasoOutput = z.infer<
+	typeof ubicacionesClaveCasoOutputSchema
+>;

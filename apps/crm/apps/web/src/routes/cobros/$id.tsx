@@ -43,6 +43,7 @@ import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { GpsEventosHistorial } from "@/components/cobros/gps-eventos-historial";
+import { GpsUbicacionesClaveCard } from "@/components/cobros/gps-ubicaciones-clave-card";
 import { GpsVehiculoCard } from "@/components/cobros/gps-vehiculo-card";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
@@ -4683,11 +4684,24 @@ function RouteComponent() {
 							/>
 						)}
 						{/* CB-119: historial de eventos GPS detectados automáticamente
-						    (energía, ignición, sin reportar, geocerca) para créditos en
-						    B4. Solo requiere caso.id (a diferencia de GpsVehiculoCard, no
-						    audita consulta ni depende del vehículo: lee eventos ya
-						    guardados). */}
+						    (energía, ignición, sin reportar) para créditos en B4. Solo
+						    requiere caso.id (a diferencia de GpsVehiculoCard, no audita
+						    consulta ni depende del vehículo: lee eventos ya guardados). */}
 						{caso.id && <GpsEventosHistorial casoCobroId={caso.id} />}
+						{/* CB-119 (D-15): ubicaciones clave (casa, trabajo, lugares
+						    recurrentes) calculadas por el job nocturno para casos en B4
+						    o recuperación. Mismo gate de motivo auditado que
+						    GpsVehiculoCard — revela dónde vive/trabaja el cliente, así
+						    que necesita caso.vehicleId, no solo caso.id. */}
+						{caso.id &&
+							caso.vehicleId &&
+							(bucketNumero === 4 || enRecuperacion) && (
+								<GpsUbicacionesClaveCard
+									casoCobroId={caso.id}
+									key={`${id}:${caso.vehicleId}`}
+									vehicleId={caso.vehicleId}
+								/>
+							)}
 						{/* Información de Recuperación - Solo para casos incobrables */}
 						{caso.estadoMora === "incobrable" && recuperacion && (
 							<Card>

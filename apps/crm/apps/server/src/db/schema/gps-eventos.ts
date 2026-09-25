@@ -17,13 +17,13 @@ import { vehicles } from "./vehicles";
 
 /**
  * Eventos de Wialon relevantes para cobros (CB-119): desconexión de
- * energía, ignición, GPS sin reportar y salida de la geocerca "Perimetro
- * cash" (Guatemala), para vehículos con caso de cobro activo EN B4
- * (mora exacta de 4 cuotas — ver `jobs/gps-eventos-poll.ts`, "Como Asesor
- * B4 y Supervisor..." del ticket CB-119). Los detecta un JOB de polling, no
- * un webhook: no depende de que La Legión configure nada de su lado.
+ * energía, ignición y GPS sin reportar, para vehículos con caso de cobro
+ * activo EN B4 (mora exacta de 4 cuotas — ver `jobs/gps-eventos-poll.ts`,
+ * "Como Asesor B4 y Supervisor..." del ticket CB-119). Los detecta un JOB de
+ * polling, no un webhook: no depende de que La Legión configure nada de su
+ * lado.
  *
- * NO incluye "movimiento" a propósito: a diferencia de los otros cuatro, no
+ * NO incluye "movimiento" a propósito: a diferencia de los otros dos, no
  * hay un momento único de transición ("empezó a moverse") tan limpio como
  * encendido/apagado — un vehículo manejando genera el evento en CADA
  * corrida del job mientras esté en movimiento, y aunque la notificación se
@@ -40,7 +40,6 @@ export const gpsEventoTipoEnum = pgEnum("gps_evento_tipo", [
 	"desconexion_energia",
 	"ignicion",
 	"sin_reportar",
-	"salida_geocerca",
 ]);
 
 export const gpsEventos = pgTable(
@@ -140,13 +139,83 @@ export const gpsUnidadEstado = pgTable(
 		// corrida mientras la unidad se mantenga caída.
 		sinReportarDesde: timestamp("sin_reportar_desde"),
 
-		// Si la última posición conocida estaba DENTRO de "Perimetro cash". Null
-		// = nunca se pudo evaluar (sin lat/lon, o la geocerca no se pudo leer de
-		// Wialon esa corrida). Evita re-disparar "salida_geocerca" en cada
-		// corrida mientras la unidad se mantenga fuera.
-		dentroDeGeocerca: boolean("dentro_de_geocerca"),
-
 		actualizadoAt: timestamp("actualizado_at").defaultNow().notNull(),
 	},
 	(t) => [primaryKey({ columns: [t.wialonUnitId, t.numeroCreditoSifco] })],
+);
+
+/**
+ * Ubicaciones donde un vehículo en B4 pasa más tiempo (CB-119, D-15):
+ * reemplaza el enfoque de "salida de geocerca" (cruce de país) — el alcance
+ * real del ticket es identificar dónde suele estar el vehículo (casa,
+ * trabajo, lugares recurrentes) para orientar al equipo de recuperación.
+ *
+ * Snapshot, no historial: un job nocturno recalcula sobre los últimos 60
+ * días de posiciones de Wialon (`messages/load_interval`, que el CRM no
+ * guarda — la fuente de verdad del historial crudo es Wialon) y REEMPLAZA
+ * las filas de cada (unidad, SIFCO) en una transacción. No se acumulan
+ * corridas viejas: la última corrida es siempre la vigente.
+ */
+export const gpsUbicacionClaveTipoEnum = pgEnum("gps_ubicacion_clave_tipo", [
+	"probable_casa",
+	"probable_trabajo",
+	"recurrente",
+	"frecuente",
+]);
+
+export const gpsUbicacionesClave = pgTable(
+	"gps_ubicaciones_clave",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+
+		wialonUnitId: integer("wialon_unit_id").notNull(),
+		// Mismo criterio que gps_unidad_estado: el SIFCO que originó el cálculo,
+		// para que una unidad compartida por dos casos B4 tenga ubicaciones
+		// clave separadas por caso.
+		numeroCreditoSifco: text("numero_credito_sifco").notNull(),
+
+		// Nullable por el mismo motivo que en gps_eventos: se resuelven al
+		// calcular y pueden no encontrarse si el vínculo cambió después.
+		vehicleId: uuid("vehicle_id").references(() => vehicles.id, {
+			onDelete: "set null",
+		}),
+		casoCobroId: uuid("caso_cobro_id").references(() => casosCobros.id, {
+			onDelete: "set null",
+		}),
+
+		lat: doublePrecision("lat").notNull(),
+		lon: doublePrecision("lon").notNull(),
+		// Radio del cluster en metros — el conjunto de estadías que se
+		// agruparon en este punto no cayeron todas en el mismo lat/lon exacto.
+		radioM: doublePrecision("radio_m").notNull(),
+
+		tipo: gpsUbicacionClaveTipoEnum("tipo").notNull(),
+
+		horasTotales: doublePrecision("horas_totales").notNull(),
+		diasDistintos: integer("dias_distintos").notNull(),
+		visitas: integer("visitas").notNull(),
+
+		// Distribución de horas por franja horaria (noche/laboral/fin de
+		// semana) y día de la semana — lo que permite mostrar "sábados ~3h" en
+		// vez de solo un total. Estructura libre a propósito: es 100% derivado,
+		// nunca se consulta por columna, así que no necesita su propia tabla.
+		patron: jsonb("patron").notNull(),
+
+		primeraVisita: timestamp("primera_visita").notNull(),
+		ultimaVisita: timestamp("ultima_visita").notNull(),
+
+		// Ventana de historial que se analizó para llegar a este resultado —
+		// para saber, al ver el dato, sobre qué rango de tiempo se calculó.
+		ventanaDesde: timestamp("ventana_desde").notNull(),
+		ventanaHasta: timestamp("ventana_hasta").notNull(),
+
+		calculadoAt: timestamp("calculado_at").defaultNow().notNull(),
+	},
+	(t) => [
+		index("idx_gps_ubicaciones_clave_unidad_sifco").on(
+			t.wialonUnitId,
+			t.numeroCreditoSifco,
+		),
+		index("idx_gps_ubicaciones_clave_caso").on(t.casoCobroId),
+	],
 );

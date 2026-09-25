@@ -68,6 +68,7 @@ import {
 	correrPurgaGpsIntegracionLogs,
 	correrSaludGpsIntegracion,
 } from "./jobs/gps-integracion-salud";
+import { correrCalculoUbicacionesClave } from "./jobs/gps-ubicaciones-clave";
 import { correrDispatchPagalo } from "./jobs/pagalo-dispatch";
 import { correrPollPagalo } from "./jobs/pagalo-poll";
 import {
@@ -2069,6 +2070,14 @@ const JOBS_PROGRAMADOS = {
 	 *  exige `GPS_EVENTOS_ENABLED=true` explícito en el ambiente, así se
 	 *  puede activar en dev tras aplicar la 0059 sin un deploy de código. */
 	eventosGps: process.env.GPS_EVENTOS_ENABLED === "true",
+	/** CB-119 (D-15): cálculo nocturno de "ubicaciones clave" (casa, trabajo,
+	 *  lugares recurrentes) para créditos en B4, a partir del historial de
+	 *  posiciones de Wialon. Reemplaza el enfoque de "salida de geocerca"
+	 *  (retirado). Mismo criterio que eventosGps: depende de cartera-back,
+	 *  es pesado (hasta 60 días de historial por unidad, cada noche), y
+	 *  necesita la migración 0061 aplicada. Default `false` FIJO — exige
+	 *  `GPS_UBICACIONES_ENABLED=true` explícito. */
+	ubicacionesClaveGps: process.env.GPS_UBICACIONES_ENABLED === "true",
 } as const;
 
 const HAY_JOBS_ACTIVOS = Object.values(JOBS_PROGRAMADOS).some(Boolean);
@@ -2169,6 +2178,26 @@ if (JOBS_PROGRAMADOS.eventosGps) {
 // esta rama — corre sobre tabla vacía sin costo si eventosGps sigue en false.
 void correrPurgaGpsEventos();
 setInterval(correrPurgaGpsEventos, 24 * 60 * 60 * 1000);
+
+// CB-119 (D-15) — Ubicaciones clave (casa, trabajo, lugares recurrentes)
+// para créditos en B4, calculadas contra el historial de Wialon de los
+// últimos 60 días. A diferencia del polling de eventos (cada 5 min), esto
+// es pesado por unidad (hasta 9 tramos de load_interval), así que corre UNA
+// vez por noche, a las 02:00 GT (= 08:00 UTC) — horario de bajo tráfico,
+// lejos de la medianoche de cierre diario de cobros.
+function scheduleAtUbicacionesClaveGT() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(8, 0, 0, 0); // 02:00 GT
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	setTimeout(async () => {
+		await correrCalculoUbicacionesClave();
+		scheduleAtUbicacionesClaveGT();
+	}, next.getTime() - now.getTime());
+}
+if (JOBS_PROGRAMADOS.ubicacionesClaveGps) {
+	scheduleAtUbicacionesClaveGT();
+}
 
 // El respaldo del rechazo (D-39), también fuera de la bandera: si el WhatsApp
 // del rechazo falló, el cliente sigue creyendo que su pago va bien — y, peor,

@@ -1,6 +1,6 @@
 /**
- * CB-119 · Historial de eventos GPS (desconexión de energía, ignición,
- * GPS sin reportar, salida de geocerca) para la Ficha 360.
+ * CB-119 · Historial de eventos GPS (desconexión de energía, ignición, GPS
+ * sin reportar) y ubicaciones clave (D-15) para la Ficha 360.
  *
  * Módulo aparte de wialon.ts y gps-integracion.ts: mismo motivo de siempre
  * (D-03 en docs/features/cobros-02/09-integracion-gps-wialon.md) — evitar
@@ -8,17 +8,22 @@
  * a un router ya grande.
  */
 
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
-import { gpsEventos } from "../db/schema/gps-eventos";
+import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
+import { gpsEventos, gpsUbicacionesClave } from "../db/schema/gps-eventos";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure } from "../lib/orpc";
 import {
 	gpsEventosCasoInputSchema,
 	gpsEventosCasoOutputSchema,
+	ubicacionesClaveCasoInputSchema,
+	ubicacionesClaveCasoOutputSchema,
 } from "../services/wialon/wialon-types";
+import { carteraBackClient } from "../services/cartera-back-client";
 import { assertAccesoCasoCobro } from "./cobros";
+import { resolverCasoParaGps } from "./wialon";
 
 export const gpsEventosRouter = {
 	/**
@@ -75,5 +80,110 @@ export const gpsEventosRouter = {
 				.limit(input.limit);
 
 			return filas;
+		}),
+
+	/**
+	 * Ubicaciones clave del vehículo (D-15): casa, trabajo, lugares
+	 * recurrentes, calculadas por el job nocturno a partir del historial de
+	 * Wialon. Revela dónde vive/trabaja el cliente — mismo gate de acceso Y
+	 * motivo auditado que `getGpsVehiculo` (CB-118): `resolverCasoParaGps`
+	 * cubre acceso al caso + que `vehicleId` sea el del caso +
+	 * `assertCreditoAsignadoEnCarteraPorSifco`, y la consulta se registra en
+	 * `gps_consulta_logs` ANTES de responder. Fail-closed: si no se pudo
+	 * auditar, no se devuelven ubicaciones (mismo criterio que
+	 * `AUDITORIA_NO_DISPONIBLE` en `getGpsVehiculo`).
+	 */
+	getUbicacionesClaveCaso: cobrosProcedure
+		.input(ubicacionesClaveCasoInputSchema)
+		.output(ubicacionesClaveCasoOutputSchema)
+		.handler(async ({ input, context }) => {
+			const { numeroCreditoSifco } = await resolverCasoParaGps(
+				input.casoCobroId,
+				input.vehicleId,
+				context.userId,
+				context.userRole,
+				context.user?.email || context.session?.user?.email,
+			);
+
+			const userId = context.userId ?? context.user?.id;
+			if (!userId) {
+				console.error("GPS_CONSULTA_LOG_SIN_USUARIO", {
+					vehicleId: input.vehicleId,
+					origen: "getUbicacionesClaveCaso",
+				});
+				return { auditada: false, ubicaciones: [] };
+			}
+
+			try {
+				await db.insert(gpsConsultaLogs).values({
+					vehicleId: input.vehicleId,
+					numeroCreditoSifco,
+					motivo: input.motivo,
+					unitId: null,
+					unitName: null,
+					userId,
+				});
+			} catch (error) {
+				console.error("GPS_CONSULTA_LOG_FALLIDO", {
+					vehicleId: input.vehicleId,
+					origen: "getUbicacionesClaveCaso",
+					message: error instanceof Error ? error.message : String(error),
+				});
+				return { auditada: false, ubicaciones: [] };
+			}
+
+			// CB-119 / D-15: Las ubicaciones clave son EXCLUSIVAMENTE para casos
+			// en B4 / recuperación. Solo se devuelven ubicaciones si la consulta en
+			// vivo a cartera-back confirma positivamente que el crédito está en B4
+			// (bucket === 4). Fail closed: si no hay SIFCO, si cartera-back no
+			// responde, o si el crédito no está en B4, no se exponen ubicaciones.
+			if (!numeroCreditoSifco) {
+				return { auditada: true, ubicaciones: [] };
+			}
+
+			const bucketActual = await carteraBackClient
+				.getBucketActualCredito(numeroCreditoSifco)
+				.catch(() => null);
+
+			if (bucketActual?.bucket !== 4) {
+				// Si cartera-back respondió positivamente que el crédito está fuera
+				// de B4 (regularizó o cambió de bucket), se purgan de forma síncrona
+				// las filas huérfanas de este caso en la DB. Si falló la red
+				// (bucketActual === null), no borramos la DB por si es un fallo
+				// transitorio, pero no devolvemos datos al usuario.
+				if (bucketActual !== null) {
+					await db
+						.delete(gpsUbicacionesClave)
+						.where(eq(gpsUbicacionesClave.casoCobroId, input.casoCobroId))
+						.catch(() => {});
+				}
+				return { auditada: true, ubicaciones: [] };
+			}
+
+			const ubicaciones = await db
+				.select({
+					id: gpsUbicacionesClave.id,
+					lat: gpsUbicacionesClave.lat,
+					lon: gpsUbicacionesClave.lon,
+					radioM: gpsUbicacionesClave.radioM,
+					tipo: gpsUbicacionesClave.tipo,
+					horasTotales: gpsUbicacionesClave.horasTotales,
+					diasDistintos: gpsUbicacionesClave.diasDistintos,
+					visitas: gpsUbicacionesClave.visitas,
+					patron: gpsUbicacionesClave.patron,
+					primeraVisita: gpsUbicacionesClave.primeraVisita,
+					ultimaVisita: gpsUbicacionesClave.ultimaVisita,
+					calculadoAt: gpsUbicacionesClave.calculadoAt,
+				})
+				.from(gpsUbicacionesClave)
+				.where(
+					and(
+						eq(gpsUbicacionesClave.casoCobroId, input.casoCobroId),
+						eq(gpsUbicacionesClave.vehicleId, input.vehicleId),
+					),
+				)
+				.orderBy(desc(gpsUbicacionesClave.horasTotales));
+
+			return { auditada: true, ubicaciones };
 		}),
 };

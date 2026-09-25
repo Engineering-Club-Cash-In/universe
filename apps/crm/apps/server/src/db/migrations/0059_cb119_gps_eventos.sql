@@ -1,7 +1,7 @@
 -- CB-119 — Alertas GPS por eventos de Wialon (desconexión de energía,
--- ignición, GPS sin reportar, salida de geocerca) para vehículos con caso de
--- cobro activo en B4, detectados por un job de polling (sin depender de que
--- Wialon configure webhooks del lado de La Legión).
+-- ignición, GPS sin reportar) para vehículos con caso de cobro activo en B4,
+-- detectados por un job de polling (sin depender de que Wialon configure
+-- webhooks del lado de La Legión).
 --
 -- gps_integracion_logs (0058, CB-121) audita CADA LLAMADA HTTP del CRM hacia
 -- Wialon. Esto es otra cosa: gps_eventos audita EVENTOS de negocio que el
@@ -17,7 +17,7 @@
 -- y generaría una alerta nueva cada 5 minutos mientras el motor siga prendido.
 
 DO $$ BEGIN
-	CREATE TYPE "gps_evento_tipo" AS ENUM ('desconexion_energia', 'ignicion', 'sin_reportar', 'salida_geocerca');
+	CREATE TYPE "gps_evento_tipo" AS ENUM ('desconexion_energia', 'ignicion', 'sin_reportar');
 EXCEPTION
 	WHEN duplicate_object THEN null;
 END $$;
@@ -88,7 +88,6 @@ CREATE TABLE IF NOT EXISTS "gps_unidad_estado" (
 	"ignicion_on" boolean,
 	"ultima_señal_wialon" timestamp,
 	"sin_reportar_desde" timestamp,
-	"dentro_de_geocerca" boolean,
 	"actualizado_at" timestamp DEFAULT now() NOT NULL,
 	PRIMARY KEY ("wialon_unit_id", "numero_credito_sifco")
 );

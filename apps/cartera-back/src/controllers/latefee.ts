@@ -47,6 +47,48 @@ type MoraEventoOrigen =
 // archivo. Se re-exporta acá porque varios módulos ya la importaban de latefee.
 export { STATUS_EXCLUIDOS_MORA };
 
+/**
+ * Fecha de CALENDARIO (año/mes/día) de un vencimiento, como número comparable
+ * — `Date.UTC(y, m, d)`, o sea la medianoche UTC de ese día.
+ *
+ * `cuotas_credito.fecha_vencimiento` es un `timestamp` SIN zona que guarda la
+ * fecha de calendario tal cual (siempre 00:00:00); NO es un instante. `pg` la
+ * entrega como un Date cuyos campos LOCALES ya son esa fecha, así que se leen
+ * tal cual. Pasarla por `toZonedTime` —que sirve para instantes reales, como
+ * `moras_historial.fecha`— le resta 6 h y en un proceso UTC (producción: el
+ * Dockerfile arranca de oven/bun y no fija TZ) la tira al DÍA ANTERIOR: la
+ * cuota cobraría mora el mismo día que vence, y el cron (TS) quedaría peleado
+ * con el guard de createMora/paymentAgreement (SQL, que usa
+ * `fecha_vencimiento::date` y sí acierta).
+ *
+ * Con los dos extremos en `Date.UTC(...)` la resta es exacta en múltiplos de
+ * 86_400_000: no hay residuos que redondear.
+ *
+ * El `hoy` que reciben los helpers de abajo es el canónico `hoyGuatemala()`,
+ * cuyos campos locales YA son la hora de pared de Guatemala: por eso también
+ * se le leen tal cual y no se lo vuelve a pasar por `toZonedTime` (hacerlo lo
+ * correría un día más).
+ */
+export function fechaCalendarioGT(valor: Date | string): number {
+  if (typeof valor === "string") {
+    // "2026-09-20", "2026-09-20 00:00:00", "2026-09-20T00:00:00.000Z": los
+    // primeros 10 caracteres son la fecha. Nunca `new Date(str)`, que
+    // reintroduce la zona del proceso.
+    // Se valida la FORMA antes de parsear: `Number("")` es 0, así que un string
+    // truncado como "2026-09" pasaba el chequeo de Number.isFinite (día 0) y
+    // devolvía en silencio el 31-ago-2026. Exigir YYYY-MM-DD en los primeros 10
+    // caracteres es lo único que distingue "fecha" de "basura"; lo que venga
+    // después ("T00:00:00Z", " 00:00:00") no importa y se ignora igual que antes.
+    const fecha = valor.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return NaN;
+    const anio = Number(fecha.slice(0, 4));
+    const mes = Number(fecha.slice(5, 7));
+    const dia = Number(fecha.slice(8, 10));
+    return Date.UTC(anio, mes - 1, dia);
+  }
+  return Date.UTC(valor.getFullYear(), valor.getMonth(), valor.getDate());
+}
+
 export function isOverdueInstallmentForMora(
   cuota: {
     fecha_vencimiento: Date | string;
@@ -56,18 +98,64 @@ export function isOverdueInstallmentForMora(
   },
   hoy: Date,
 ) {
-  const zona = "America/Guatemala";
-  const fechaVenc = toZonedTime(cuota.fecha_vencimiento, zona);
-  fechaVenc.setHours(0, 0, 0, 0);
-
-  const fechaHoy = toZonedTime(hoy, zona);
-  fechaHoy.setHours(0, 0, 0, 0);
+  const fechaVenc = fechaCalendarioGT(cuota.fecha_vencimiento);
+  const fechaHoy = fechaCalendarioGT(hoy);
 
   const isOverdue = fechaVenc < fechaHoy;
   const isUnpaid = cuota.pagado === false && cuota.hasPaidPayment !== true;
   const isEligible = !STATUS_EXCLUIDOS_MORA.includes(cuota.statusCredit ?? "");
 
   return isOverdue && isUnpaid && isEligible;
+}
+
+// Tasa mensual de mora (1.12%). En la fila de moras_credito el porcentaje se
+// sigue guardando como "1.12" — esta es la misma tasa en forma decimal.
+export const TASA_MORA_MENSUAL = "0.0112";
+// Base FIJA de 30 días (no los días calendario del mes): negocio quiere que el
+// cargo de una cuota sea el mismo sin importar si cayó en febrero o en julio.
+export const BASE_DIAS_MORA = 30;
+
+/**
+ * Días enteros de atraso de una cuota: diferencia de fechas de CALENDARIO en
+ * los dos extremos (mismo helper que isOverdueInstallmentForMora, para que
+ * nunca cuente un día que el filtro de vencidas no reconoce, ni al revés).
+ * Como ambos lados son `Date.UTC(y,m,d)`, la resta cae siempre en múltiplos
+ * exactos de 86_400_000 y el `Math.trunc` es solo blindaje.
+ */
+export function diasAtrasoMora(fechaVencimiento: Date | string, hoy: Date): number {
+  const fechaVenc = fechaCalendarioGT(fechaVencimiento);
+  const fechaHoy = fechaCalendarioGT(hoy);
+
+  return Math.max(0, Math.trunc((fechaHoy - fechaVenc) / 86_400_000));
+}
+
+/**
+ * Mora proporcional a los días de atraso: por CADA cuota vencida se cobra
+ * capital × 1.12% × (días/30), con TECHO de un cargo mensual completo por cuota.
+ *
+ * El techo es lo que evita que la cartera vieja se dispare: antes una cuota
+ * vencida hace 365 días cobraba lo mismo que una de 30 (un bloque fijo), y sin
+ * el min(1,·) ahora cobraría 12 veces más. Con el techo, atrasarse 1 día cuesta
+ * 1/30 del cargo y atrasarse un año cuesta exactamente 1 cargo.
+ *
+ * Devuelve un Big SIN redondear: el .toFixed(2) va solo al final, para que
+ * redondear los factores intermedios no corra el total centavo a centavo.
+ */
+export function calcularMoraProporcional(params: {
+  capital: Big | string | number;
+  diasAtrasadosPorCuota: number[];
+}): Big {
+  const capital = new Big(params.capital || 0);
+  if (capital.lte(0) || params.diasAtrasadosPorCuota.length === 0) return new Big(0);
+
+  const cargoMensual = capital.times(TASA_MORA_MENSUAL);
+
+  return params.diasAtrasadosPorCuota.reduce((acc, diasRaw) => {
+    const dias = Math.max(0, diasRaw);
+    // big.js no tiene Big.min, así que el techo se hace con una comparación.
+    const factor = dias >= BASE_DIAS_MORA ? new Big(1) : new Big(dias).div(BASE_DIAS_MORA);
+    return acc.plus(cargoMensual.times(factor));
+  }, new Big(0));
 }
 
 /**
@@ -122,9 +210,19 @@ async function registrarHistorialMora(params: {
   }
 }
 
-/** Medianoche de hoy en hora Guatemala — el "hoy" canónico del módulo de mora. */
-function hoyGuatemala(): Date {
-  const hoy = toZonedTime(new Date(), "America/Guatemala");
+/**
+ * Medianoche de hoy en hora Guatemala — el "hoy" canónico del módulo de mora.
+ *
+ * Acá `toZonedTime` SÍ corresponde: `ahora` es un INSTANTE real y lo que se
+ * quiere es su hora de pared en Guatemala. El Date que devuelve tiene esa hora
+ * de pared en sus campos LOCALES, que es justo lo que leen `fechaCalendarioGT`
+ * y sus dos consumidores — por eso ellos NO lo vuelven a pasar por
+ * `toZonedTime` (hacerlo lo correría otro día hacia atrás).
+ *
+ * `ahora` es parámetro solo para poder fijarlo en pruebas.
+ */
+export function hoyGuatemala(ahora: Date = new Date()): Date {
+  const hoy = toZonedTime(ahora, "America/Guatemala");
   hoy.setHours(0, 0, 0, 0);
   return hoy;
 }

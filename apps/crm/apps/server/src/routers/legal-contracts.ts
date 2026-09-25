@@ -290,6 +290,27 @@ async function exigirEtapaDeFirma(
 	return etapa.stageId;
 }
 
+/**
+ * Si el contrato salió por el respaldo de Documenso.
+ *
+ * `signing_provider` se agregó sin rellenar los de antes, y en prod ninguno lo
+ * tiene todavía: en esos se mira el enlace. Los de Documenso son
+ * `/sign/{token}`; los de WeeTrust, `/signatory/...`.
+ */
+function salioPorDocumenso(contrato: {
+	signingProvider: string | null;
+	clientSigningLink: string | null;
+	representativeSigningLink: string | null;
+	additionalSigningLinks: string[] | null;
+}): boolean {
+	if (contrato.signingProvider) return contrato.signingProvider === "documenso";
+	return [
+		contrato.clientSigningLink,
+		contrato.representativeSigningLink,
+		...(contrato.additionalSigningLinks ?? []),
+	].some((link) => Boolean(link && /\/sign\/[^/?#]+/.test(link)));
+}
+
 export const legalContractsRouter = {
 	// Crear nuevo contrato legal
 	createLegalContract: juridicoProcedure
@@ -1535,7 +1556,7 @@ export const legalContractsRouter = {
 			// Los del respaldo de Documenso no se anulan desde acá: el CRM sólo sabe
 			// borrar en WeeTrust, así que la fila quedaría anulada con los enlaces
 			// de Documenso vivos, y el cliente podría seguir firmando.
-			if (contrato.signingProvider === "documenso") {
+			if (salioPorDocumenso(contrato)) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
 						"Este contrato salió por Documenso: anularlo acá no cancelaría sus enlaces. Hay que cancelarlo en Documenso.",

@@ -56,6 +56,36 @@ async function devolverAFirmar(
 }
 
 /**
+ * Deja pendiente, ya, a quien se le pidió identificarse de nuevo.
+ *
+ * Va apenas WeeTrust acepta el pedido, antes de releer el estado: si esa
+ * relectura falla, la firma deshecha tiene que quedar igual, porque el
+ * sincronizador nunca baja a nadie de "firmado" y la ficha lo seguiría
+ * mostrando firmado para siempre. El enlace viejo se borra —WeeTrust le dio
+ * otro— y la próxima consulta trae el nuevo.
+ */
+async function marcarQueFaltaFirmar(
+	contractId: string,
+	correo: string,
+): Promise<void> {
+	await db
+		.update(contractSignatories)
+		.set({
+			status: "pending",
+			signedAt: null,
+			signingUrl: null,
+			signingUrlExpiry: null,
+			updatedAt: new Date(),
+		})
+		.where(
+			and(
+				eq(contractSignatories.contractId, contractId),
+				sql`lower(${contractSignatories.email}) = lower(${correo})`,
+			),
+		);
+}
+
+/**
  * Resuelve una verificación de identidad que WeeTrust no validó: la repite, o
  * la omite.
  *
@@ -129,6 +159,9 @@ export async function resolverVerificacionFacial(params: {
 			biometricLogID: firmante.biometric?.logID as string,
 			action: accion === "omitir" ? "biometricSkipped" : "biometricRetry",
 		});
+		if (accion === "repetir") {
+			await marcarQueFaltaFirmar(contrato.id, firmante.emailID);
+		}
 	}
 
 	// Omitir cierra el documento: queda dicho en la fila quién lo decidió,
@@ -161,8 +194,8 @@ export async function resolverVerificacionFacial(params: {
 			await devolverAFirmar(contrato.id, despues);
 		}
 	} catch (error) {
-		// La acción en WeeTrust ya se hizo; el estado se vuelve a consultar solo
-		// desde la ficha.
+		// La acción en WeeTrust ya se hizo, y quien repite ya quedó pendiente
+		// arriba; su enlace nuevo llega con la próxima consulta de estado.
 		console.warn(`[${params.origen}] no se pudo releer el estado:`, error);
 	}
 

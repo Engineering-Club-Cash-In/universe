@@ -2026,6 +2026,37 @@ export const investorContractsRouter = {
 				});
 			}
 
+			// Firmado por todos no tiene enlaces que regenerar, y hacerlo anulaba un
+			// acuerdo que ya vale. La ficha ya no ofrece el botón; esto es por si
+			// llega igual.
+			if (contrato.status === "signed") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato ya lo firmaron todos: no hay enlaces que regenerar.",
+				});
+			}
+
+			// La batería se mira antes de reemitir: WeeTrust manda las invitaciones
+			// en el acto. Se vuelve a mirar con su candado al guardar.
+			if (contrato.batchId) {
+				const [bateria] = await db
+					.select({ status: investorContractBatches.status })
+					.from(investorContractBatches)
+					.where(eq(investorContractBatches.id, contrato.batchId))
+					.limit(1);
+				if (
+					bateria?.status === "descartada" ||
+					bateria?.status === "completada"
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							bateria.status === "descartada"
+								? "La batería de este contrato se descartó: no se pueden regenerar sus enlaces."
+								: "La batería de este contrato está cerrada: no se pueden regenerar sus enlaces.",
+					});
+				}
+			}
+
 			// La key de R2 del PDF. Hay contratos que guardaron en `pdfLink` una URL
 			// firmada (la que se muestra, que vence) en vez de la key: con una URL
 			// entera como key, R2 no encuentra nada.
@@ -2119,10 +2150,36 @@ export const investorContractsRouter = {
 			let nuevoId: string;
 			try {
 				nuevoId = await db.transaction(async (tx) => {
+					// Con el candado de la batería, el mismo que toman el descarte y el
+					// guardado de un contrato: una batería descartada o cerrada no
+					// recibe un contrato nuevo. Si no, el reemitido quedaba pidiendo
+					// firma colgado de una batería que ya no está en ninguna lista.
+					if (contrato.batchId) {
+						await tx.execute(
+							sql`select pg_advisory_xact_lock(${claveDeBateria(contrato.batchId)})`,
+						);
+						const [bateria] = await tx
+							.select({ status: investorContractBatches.status })
+							.from(investorContractBatches)
+							.where(eq(investorContractBatches.id, contrato.batchId))
+							.limit(1);
+						if (
+							bateria?.status === "descartada" ||
+							bateria?.status === "completada"
+						) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									bateria.status === "descartada"
+										? "La batería de este contrato se descartó: no se pueden regenerar sus enlaces."
+										: "La batería de este contrato está cerrada: no se pueden regenerar sus enlaces.",
+							});
+						}
+					}
+
 					// Dos regeneraciones a la vez emitían dos documentos y dejaban los
 					// dos vigentes. Se bloquea la fila y se vuelve a mirar: si otra ya
 					// lo anuló, ésta pierde y el catch borra el documento que acaba de
-					// emitir.
+					// emitir. Y si la última firma entró en el medio, tampoco.
 					const [original] = await tx
 						.select({
 							status: generatedLegalContracts.status,
@@ -2143,6 +2200,12 @@ export const investorContractsRouter = {
 								"Otra persona acaba de regenerar este contrato. Recargá para ver el nuevo.",
 						});
 					}
+					if (original.status === "signed") {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Este contrato se terminó de firmar mientras se regeneraba: no hacía falta.",
+						});
+					}
 
 					const [nuevo] = await tx
 						.insert(generatedLegalContracts)
@@ -2157,7 +2220,11 @@ export const investorContractsRouter = {
 							signingProvider: resultado.signingProvider ?? "weetrust",
 							signatureMode: contrato.signatureMode,
 							generatedBy: context.userId,
-							generatedAt: ahora,
+							// La emisión del contrato, no la de sus enlaces (esa queda en
+							// `lastRegeneratedAt`): es lo que dice de qué compra es. Con la
+							// fecha de hoy, uno de una compra anterior pasaba a contar como
+							// de la actual.
+							generatedAt: contrato.generatedAt ?? ahora,
 							...linksPorRol(resultado.signatories, resultado.signing_links),
 							weetrustDocumentId: resultado.documentID ?? null,
 							observerUrl: resultado.observerUrl ?? null,

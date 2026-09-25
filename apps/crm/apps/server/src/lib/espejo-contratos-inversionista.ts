@@ -124,6 +124,69 @@ function nombreEnLaPapeleria(contrato: {
 	return `${contrato.contractName} — ${fecha}`;
 }
 
+/** Cuántas veces se vuelve a mandar un contrato que cambió mientras viajaba. */
+const MAX_VUELTAS = 3;
+
+/** Lo que tiene un contrato por delante para escribir en cartera. */
+const enFila = new Map<string, Promise<unknown>>();
+
+/**
+ * Las escrituras de un mismo contrato a cartera, una detrás de otra.
+ *
+ * Cartera pisa la fila por el id del contrato sin mirar cuál llegó primero. El
+ * webhook de firmado y un "Anular" pueden correr a la vez: el de firmado leía
+ * "signed", se tardaba bajando el PDF y llegaba DESPUÉS del de anulado con
+ * `visible: true`, y el anulado volvía a aparecer en el portal. En fila, cada
+ * uno lee el contrato cuando le toca, no cuando lo pidieron.
+ */
+function unoPorContrato<T>(
+	contractId: string,
+	trabajo: () => Promise<T>,
+): Promise<T> {
+	const anterior = enFila.get(contractId) ?? Promise.resolve();
+	const este = anterior.then(trabajo);
+	const turno = este.catch(() => undefined);
+	enFila.set(contractId, turno);
+	void turno.then(() => {
+		if (enFila.get(contractId) === turno) enFila.delete(contractId);
+	});
+	return este;
+}
+
+async function estadoDelContrato(contractId: string): Promise<string | null> {
+	const [fila] = await db
+		.select({ status: generatedLegalContracts.status })
+		.from(generatedLegalContracts)
+		.where(eq(generatedLegalContracts.id, contractId))
+		.limit(1);
+	return fila?.status ?? null;
+}
+
+/**
+ * Lo que se mandó salió de una foto del contrato. Si mientras viajaba el
+ * contrato cambió —lo anularon mientras se bajaba el firmado—, lo que quedó en
+ * cartera es lo viejo: se manda otra vez con lo de ahora.
+ *
+ * La fila ordena las escrituras de este proceso; esto cubre las que corren en
+ * otro, donde la fila no llega.
+ */
+async function siCambioMandarDeNuevo(
+	contractId: string,
+	enviado: string | null,
+	vuelta: number,
+): Promise<boolean> {
+	const actual = await estadoDelContrato(contractId);
+	if (actual === enviado) return true;
+
+	if (vuelta + 1 >= MAX_VUELTAS) {
+		console.warn(
+			`[espejo-contratos] el contrato ${contractId} sigue cambiando (${enviado} → ${actual}): cartera queda con lo último que se mandó`,
+		);
+		return true;
+	}
+	return llevarEstado(contractId, vuelta + 1);
+}
+
 /**
  * Copia el contrato firmado en la papelería del inversionista, en cartera.
  *
@@ -135,11 +198,22 @@ function nombreEnLaPapeleria(contrato: {
  * El PDF se baja de R2 con la key guardada, no con la URL firmada que se le
  * muestra a la gente: esa vence en una hora.
  */
-export async function espejarContratoEnCartera(
+export function espejarContratoEnCartera(
 	contractId: string,
 	createdBy?: string,
 	/** PDF a copiar. Por defecto, el mejor que haya en R2. */
 	pdf?: Blob,
+): Promise<boolean> {
+	return unoPorContrato(contractId, () =>
+		copiarFirmado(contractId, createdBy, pdf, 0),
+	);
+}
+
+async function copiarFirmado(
+	contractId: string,
+	createdBy: string | undefined,
+	pdf: Blob | undefined,
+	vuelta: number,
 ): Promise<boolean> {
 	try {
 		const contrato = await contratoConDueno(contractId);
@@ -174,7 +248,7 @@ export async function espejarContratoEnCartera(
 			visible: true,
 		});
 
-		return true;
+		return await siCambioMandarDeNuevo(contractId, "signed", vuelta);
 	} catch (error) {
 		console.error(
 			`[espejo-contratos] no se pudo copiar el contrato ${contractId} a cartera:`,
@@ -241,8 +315,15 @@ async function guardarElPdfFirmado(contrato: {
  *   antes de que sólo entraran los firmados), se oculta.
  * - Mientras se firma: nada. Se ve en la tarjeta de contratos de la ficha.
  */
-export async function espejarEstadoDeFirmaEnCartera(
+export function espejarEstadoDeFirmaEnCartera(
 	contractId: string,
+): Promise<boolean> {
+	return unoPorContrato(contractId, () => llevarEstado(contractId, 0));
+}
+
+async function llevarEstado(
+	contractId: string,
+	vuelta: number,
 ): Promise<boolean> {
 	try {
 		const contrato = await contratoConDueno(contractId);
@@ -255,7 +336,7 @@ export async function espejarEstadoDeFirmaEnCartera(
 		if (contrato.status === "signed" && !contrato.signedPdfLink) {
 			const firmado = await guardarElPdfFirmado(contrato);
 			if (firmado) {
-				return espejarContratoEnCartera(contractId, undefined, firmado);
+				return await copiarFirmado(contractId, undefined, firmado, vuelta);
 			}
 		}
 
@@ -272,10 +353,10 @@ export async function espejarEstadoDeFirmaEnCartera(
 		// copia ahora, con PDF y todo. Un anulado que no estaba copiado se queda
 		// así: a la papelería sólo entran los que valen.
 		if (espejado === false && contrato.status === "signed") {
-			return espejarContratoEnCartera(contractId);
+			return await copiarFirmado(contractId, undefined, undefined, vuelta);
 		}
 
-		return true;
+		return await siCambioMandarDeNuevo(contractId, contrato.status, vuelta);
 	} catch (error) {
 		console.error(
 			`[espejo-contratos] no se pudo actualizar el estado de ${contractId} en cartera:`,

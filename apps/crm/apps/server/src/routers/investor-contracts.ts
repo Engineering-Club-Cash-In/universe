@@ -281,7 +281,10 @@ async function guardarContratoDeInversion(params: {
 			sql`select pg_advisory_xact_lock(${claveDeBateria(params.batchId)})`,
 		);
 		const [bateria] = await tx
-			.select({ status: investorContractBatches.status })
+			.select({
+				status: investorContractBatches.status,
+				acceptedAt: investorContractBatches.acceptedAt,
+			})
 			.from(investorContractBatches)
 			.where(eq(investorContractBatches.id, params.batchId))
 			.limit(1);
@@ -310,6 +313,8 @@ async function guardarContratoDeInversion(params: {
 			if (existente) return existente.id;
 		}
 
+		// Uno vigente por tipo en ESTA compra: los de una compra anterior sobre
+		// los mismos créditos siguen en la batería, firmados, y no cuentan.
 		const [otroVigente] = await tx
 			.select({ id: generatedLegalContracts.id })
 			.from(generatedLegalContracts)
@@ -318,6 +323,9 @@ async function guardarContratoDeInversion(params: {
 					eq(generatedLegalContracts.batchId, params.batchId),
 					eq(generatedLegalContracts.contractType, params.contractType),
 					ne(generatedLegalContracts.status, "cancelled"),
+					...(bateria
+						? [gte(generatedLegalContracts.generatedAt, bateria.acceptedAt)]
+						: []),
 					...(params.reemplaza
 						? [ne(generatedLegalContracts.id, params.reemplaza.contractId)]
 						: []),
@@ -884,6 +892,11 @@ export const investorContractsRouter = {
 			// jurídico quiere decir cuando lo genera de nuevo —el anterior salió con
 			// un error—, y dejar los dos vivos le mandaría al inversionista dos
 			// enlaces del mismo contrato para que firme el que no es.
+			//
+			// Sólo los de ESTA compra. Otra compra sobre los mismos créditos reusa
+			// la batería con los contratos de la anterior adentro, ya firmados: ésos
+			// son otro acuerdo, y la compra nueva lleva los suyos al lado, no en su
+			// lugar.
 			const yaVigentes = await db
 				.select({
 					id: generatedLegalContracts.id,
@@ -897,6 +910,7 @@ export const investorContractsRouter = {
 						eq(generatedLegalContracts.batchId, input.batchId),
 						ne(generatedLegalContracts.status, "cancelled"),
 						inArray(generatedLegalContracts.contractType, tipos),
+						gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
 					),
 				);
 
@@ -1162,9 +1176,10 @@ export const investorContractsRouter = {
 				}
 			}
 
-			// Un contrato vigente por tipo y por batería, lo mismo que al generar:
+			// Un contrato vigente por tipo en cada compra, lo mismo que al generar:
 			// con dos, el inversionista recibe dos enlaces del mismo contrato y
-			// firma el que no es. Se vuelve a mirar, bloqueado, al guardar.
+			// firma el que no es. Los de una compra anterior no cuentan. Se vuelve a
+			// mirar, bloqueado, al guardar.
 			const [yaVigente] = await db
 				.select({ id: generatedLegalContracts.id })
 				.from(generatedLegalContracts)
@@ -1173,6 +1188,7 @@ export const investorContractsRouter = {
 						eq(generatedLegalContracts.batchId, input.batchId),
 						eq(generatedLegalContracts.contractType, input.contractType),
 						ne(generatedLegalContracts.status, "cancelled"),
+						gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
 						...(input.replaceContractId
 							? [ne(generatedLegalContracts.id, input.replaceContractId)]
 							: []),

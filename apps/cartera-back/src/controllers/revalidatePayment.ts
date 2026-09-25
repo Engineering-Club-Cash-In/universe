@@ -12,6 +12,7 @@ import {
 } from "./registerPaymentPolicy";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { desactivarMoraSiCreditoAlDia } from "./latefee";
+import { aplicarRubrosDelPago, RubroError } from "./rubros";
 import {
   carteraStructuredLogger,
   type CarteraStructuredLogger,
@@ -231,6 +232,24 @@ async function handleRevalidatePayment(
         .plus(membresias_pago)
         .round(2);
 
+      // 🧾 RUBROS: acá es donde el saldo del rubro vuelve a BAJAR.
+      //
+      // El pago llega con sus reclamos en `aplicado = false` —así los dejó el
+      // registro de la boleta, o `desaplicarRubrosDelPago` si vino por
+      // "Revertir Especial"—, y revalidar es la misma transición que
+      // `/aplicar-pago`: contabilidad se pronunció, el saldo se descuenta. Sin
+      // esto el ciclo validated → pending → validated devolvía el saldo y no lo
+      // volvía a cobrar nunca, o sea el rubro se perdonaba solo.
+      //
+      // Va ANTES de tocar el crédito, en el mismo punto en que lo hace
+      // `aplicarPagoAlCredito`: el cobro del rubro no depende de que la cuota
+      // cierre. Y si el saldo ya no alcanza, LANZA y la transacción entera se
+      // revierte — preferimos ver el agujero a cobrar de menos.
+      await aplicarRubrosDelPago(
+        pago_id,
+        tx as unknown as Parameters<typeof aplicarRubrosDelPago>[1]
+      );
+
       // 6️⃣ ACTUALIZAR EL CRÉDITO
       if (pago.credito_id !== null) {
         await setCapitalSource(tx, "PAGO");
@@ -340,6 +359,42 @@ async function handleRevalidatePayment(
         message: "Internal server error",
         error: error.publicError,
       };
+    }
+
+    // 🧾 RUBROS: `aplicarRubrosDelPago` (paso 5️⃣) lanza `RubroError`, que es un
+    // rechazo de NEGOCIO —con su propio `status`, casi siempre 409, y un texto
+    // redactado para que el operador entienda qué hacer— y NO una falla del
+    // servidor. Sin esta rama caía al catch genérico de abajo y salía como un
+    // 500 mudo, además de loguearse como `failed` con `error_code: "unknown"`:
+    // un incidente inventado en el tablero por un conflicto previsto.
+    //
+    // No es un caso remoto: el camino validado → pendiente → revalidar sobre un
+    // rubro editado o anulado es uno que el módulo soporta a propósito, y es
+    // exactamente el que deja al operador sin saber por qué no pudo revalidar.
+    //
+    // Se responde con la MISMA forma que `responderError` en `routers/rubros.ts`
+    // (`{ success: false, message }`) para no inventar un formato nuevo: el
+    // front prioriza `message` al extraer el detalle (`extraerDetalle` en
+    // `lib/apiError.ts`), así que el texto de la policy llega tal cual al toast.
+    if (error instanceof RubroError) {
+      logger.emit("payment.revalidation", "rejected", {
+        credit_updated: false,
+        installment_closed: false,
+        duration_ms: elapsedMilliseconds(clock, startedAt),
+        // `credit_updated: false` sin mirar la bandera de afuera: el rubro se
+        // cobra DENTRO de la transacción, así que si lanza, revierte todo.
+        //
+        // `state_conflict` y no un código propio: el catálogo de `reason_code`
+        // es un enum CERRADO y compartido (`packages/structured-logger`), y
+        // meterle un valor nuevo es un cambio de contrato de todo el monorepo,
+        // no parte de este arreglo. Además describe bien el caso: lo que falló
+        // es que el estado del rubro cambió (se editó o se anuló) mientras la
+        // boleta esperaba a contabilidad. El `message` de la respuesta es el que
+        // lleva el detalle.
+        reason_code: "state_conflict",
+      });
+      set.status = error.status;
+      return { success: false, message: error.message };
     }
 
     logger.emit("payment.revalidation", "failed", {

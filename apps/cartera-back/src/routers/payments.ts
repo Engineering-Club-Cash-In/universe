@@ -25,6 +25,7 @@ import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIF
 import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
 import { esPagoAplicado } from "../utils/paymentStatus";
 import { getApplyPaymentHttpStatus } from "../controllers/registerPaymentPolicy";
+import { RubroError } from "../controllers/rubros";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -562,6 +563,23 @@ export const paymentRouter = new Elysia()
       return resultado;
 
     } catch (error) {
+      // 🧾 RUBROS: `aplicarRubrosDelPago` (dentro de `aplicarPagoNormalEnTx` y
+      // de la rama de abono a capital) lanza `RubroError` cuando el rubro que
+      // la boleta había apartado ya no admite el cobro —lo anularon, o el saldo
+      // no alcanza—. Es un choque de NEGOCIO con su propio `status` (casi
+      // siempre 409) y un texto redactado por la policy, no una falla del
+      // servidor: sin esta rama se respondía 500 y se logueaba como error de
+      // servidor un conflicto previsto, así que toda alerta o reintento
+      // cableado a 5xx lo trataba como caída del sistema.
+      //
+      // Va ANTES del `console.error` por lo mismo: el 409 se explica solo en la
+      // respuesta y no merece una línea de error en el log del servidor. Misma
+      // forma que en `revalidatePayment.ts` (`{ success: false, message }`), que
+      // es la que este catch ya usaba.
+      if (error instanceof RubroError) {
+        set.status = error.status;
+        return { success: false, message: error.message };
+      }
       console.error("Error en el endpoint aplicar-pago:", error);
       set.status = 500;
       return {

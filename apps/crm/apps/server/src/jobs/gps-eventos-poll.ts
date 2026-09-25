@@ -233,7 +233,8 @@ export async function unidadesConCasoActivo(
 	// duplicados para el mismo crédito — pero DOS SIFCOs distintos de la
 	// misma unidad quedan como DOS filas, a propósito.
 	const vistos = new Set<string>();
-	const resultado: UnidadConCaso[] = [];
+	const unidadesPorSifco = new Map<string, Set<number>>();
+	const candidatos: UnidadConCaso[] = [];
 	for (const fila of [...porContrato, ...porOportunidad]) {
 		if (fila.wialonUnitId == null || fila.numeroCreditoSifco == null) {
 			continue;
@@ -241,12 +242,36 @@ export async function unidadesConCasoActivo(
 		const clave = `${fila.wialonUnitId}:${fila.numeroCreditoSifco}`;
 		if (vistos.has(clave)) continue;
 		vistos.add(clave);
-		resultado.push({
+		candidatos.push({
 			wialonUnitId: fila.wialonUnitId,
 			numeroCreditoSifco: fila.numeroCreditoSifco,
 		});
+		const unidades =
+			unidadesPorSifco.get(fila.numeroCreditoSifco) ?? new Set<number>();
+		unidades.add(fila.wialonUnitId);
+		unidadesPorSifco.set(fila.numeroCreditoSifco, unidades);
 	}
-	return resultado;
+
+	// Fail closed ante un SIFCO ambiguo: si el mismo crédito resuelve a MÁS
+	// DE UNA unidad Wialon distinta (típicamente oportunidades duplicadas o
+	// obsoletas del mismo numeroSifco, que no es único — ver
+	// resolverCasoParaGps en routers/wialon.ts, que trata esto como
+	// CONFLICT), no hay forma confiable de saber cuál vehículo es el real.
+	// Emitir todas las unidades candidatas generaría alertas falsas desde el
+	// vehículo equivocado; se prefiere no monitorear ese SIFCO esta corrida
+	// a notificar con datos que pueden ser incorrectos.
+	const sifcosAmbiguos = new Set(
+		Array.from(unidadesPorSifco.entries())
+			.filter(([, unidades]) => unidades.size > 1)
+			.map(([sifco]) => sifco),
+	);
+	if (sifcosAmbiguos.size > 0) {
+		console.warn(
+			`${LOG_PREFIX} SIFCOs con más de una unidad Wialon distinta (dato ambiguo, se saltan esta corrida): ${Array.from(sifcosAmbiguos).join(", ")}`,
+		);
+	}
+
+	return candidatos.filter((c) => !sifcosAmbiguos.has(c.numeroCreditoSifco));
 }
 
 /**

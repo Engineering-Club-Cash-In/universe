@@ -215,6 +215,34 @@ describe("CB-119 — unidadesConCasoActivo", () => {
 			.sort();
 		expect(claves).toEqual(["100:001", "100:002"]);
 	});
+
+	test("un mismo SIFCO resuelve a DOS unidades Wialon distintas (oportunidades duplicadas/obsoletas, numeroSifco no es único): fail closed, se descarta ese SIFCO entero", async () => {
+		// No hay forma confiable de saber cuál de las dos unidades es el
+		// vehículo real del crédito — mismo criterio que resolverCasoParaGps
+		// en routers/wialon.ts, que trata esta forma de dato como CONFLICT en
+		// vez de adivinar. Emitir ambas generaría alertas falsas desde la
+		// unidad equivocada.
+		porOportunidadMock = [
+			{ wialonUnitId: 100, numeroCreditoSifco: "001" },
+			{ wialonUnitId: 200, numeroCreditoSifco: "001" },
+		];
+
+		const resultado = await unidadesConCasoActivo(["001"]);
+		expect(resultado).toEqual([]);
+	});
+
+	test("SIFCO ambiguo no afecta a otros SIFCOs sin ambigüedad en la misma corrida", async () => {
+		porOportunidadMock = [
+			{ wialonUnitId: 100, numeroCreditoSifco: "001" },
+			{ wialonUnitId: 200, numeroCreditoSifco: "001" },
+			{ wialonUnitId: 300, numeroCreditoSifco: "002" },
+		];
+
+		const resultado = await unidadesConCasoActivo(["001", "002"]);
+		expect(resultado).toEqual([
+			{ wialonUnitId: 300, numeroCreditoSifco: "002" },
+		]);
+	});
 });
 
 describe("CB-119 — correrDeteccionEventosGps: guard de ejecución solapada", () => {

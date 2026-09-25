@@ -16,8 +16,20 @@ const createNotification = mock(async (_datos: Record<string, unknown>) => ({
 }));
 
 mock.module("../lib/notificaciones", () => ({ createNotification }));
+
+const select = () => ({
+	from: () => ({
+		where: () => ({
+			limit: async () => resultadosDeSelect.shift() ?? [],
+		}),
+	}),
+});
+
 mock.module("../db", () => ({
 	db: {
+		// El aviso a jurídico se decide adentro, con el candado de la batería.
+		transaction: async (trabajo: (tx: unknown) => Promise<unknown>) =>
+			trabajo({ execute: async () => undefined, select }),
 		insert: () => ({
 			values: (valores: Record<string, unknown>) => {
 				valoresInsertados.push(valores);
@@ -28,13 +40,7 @@ mock.module("../db", () => ({
 				};
 			},
 		}),
-		select: () => ({
-			from: () => ({
-				where: () => ({
-					limit: async () => resultadosDeSelect.shift() ?? [],
-				}),
-			}),
-		}),
+		select,
 		update: () => ({
 			set: (valores: Record<string, unknown>) => {
 				valoresRefrescados.push(valores);
@@ -210,10 +216,9 @@ describe("aviso de compra aceptada", () => {
 					acceptedAt: new Date("2026-08-01T10:00:00.000Z"),
 				},
 			],
-			// Tiene contratos emitidos, así que vuelve a "en proceso".
-			[{ id: "contrato-1" }],
 			[{ id: "usuario-juridico", role: "juridico" }],
 		];
+		filaRefrescada = [{ id: "bateria-1" }];
 
 		const res = await pedir(CUERPO);
 
@@ -221,13 +226,64 @@ describe("aviso de compra aceptada", () => {
 			batchId: "bateria-1",
 			repetida: true,
 		});
+		// Vuelve a ser trabajo de jurídico hasta que le dé "Listo".
 		expect(valoresRefrescados[0]).toMatchObject({
-			status: "en_proceso",
+			status: "pendiente",
 			acceptedAt: new Date(CUERPO.compra.aceptadaEn),
 			completedAt: null,
 			montoTotal: "150000.00",
 		});
 		// Es trabajo nuevo: jurídico tiene que enterarse.
+		expect(createNotification).toHaveBeenCalledTimes(1);
+	});
+
+	test("dos avisos de la misma compra nueva a la vez: sólo el que la registra avisa", async () => {
+		filaInsertada = [];
+		resultadosDeSelect = [
+			[
+				{
+					id: "bateria-1",
+					status: "completada",
+					acceptedAt: new Date("2026-08-01T10:00:00.000Z"),
+				},
+			],
+		];
+		// El otro aviso ya movió la aceptación: este update no encuentra la fila.
+		filaRefrescada = [];
+
+		const res = await pedir(CUERPO);
+
+		expect(await res.json()).toMatchObject({ repetida: true });
+		expect(createNotification).not.toHaveBeenCalled();
+	});
+
+	test("la batería recién abierta no avisa dos veces si otro aviso se le adelantó", async () => {
+		filaInsertada = [{ id: "bateria-1" }];
+		resultadosDeSelect = [
+			[{ id: "usuario-juridico", role: "juridico" }],
+			// Ya con el candado: el reintento que se cruzó dejó su aviso.
+			[{ id: "aviso-del-otro" }],
+		];
+
+		const res = await pedir(CUERPO);
+
+		expect(res.status).toBe(200);
+		expect(createNotification).not.toHaveBeenCalled();
+	});
+
+	test("el reintento que encuentra la batería abierta sin aviso lo crea, una vez", async () => {
+		filaInsertada = [];
+		resultadosDeSelect = [
+			[MISMA_ACEPTACION],
+			// Sin aviso todavía.
+			[],
+			[{ id: "usuario-juridico", role: "juridico" }],
+			// Con el candado, sigue sin aviso.
+			[],
+		];
+
+		await pedir(CUERPO);
+
 		expect(createNotification).toHaveBeenCalledTimes(1);
 	});
 

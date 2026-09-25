@@ -1139,9 +1139,11 @@ export const investorContractsRouter = {
 				});
 			}
 
-			// El que se reemplaza tiene que ser de esta batería y del mismo tipo:
-			// cambiar un contrato por otro de distinto tipo no es reemplazar, es
-			// subir uno nuevo, y dejaría a la batería sin el que se anuló.
+			// El que se reemplaza tiene que ser de esta batería, de esta compra y
+			// del mismo tipo: cambiar un contrato por otro de distinto tipo no es
+			// reemplazar, es subir uno nuevo, y dejaría a la batería sin el que se
+			// anuló. Y uno de una compra anterior sobre los mismos créditos es otro
+			// acuerdo, casi siempre ya firmado: no se anula desde la compra nueva.
 			let reemplazado:
 				| {
 						id: string;
@@ -1164,6 +1166,7 @@ export const investorContractsRouter = {
 							eq(generatedLegalContracts.batchId, input.batchId),
 							eq(generatedLegalContracts.contractType, input.contractType),
 							ne(generatedLegalContracts.status, "cancelled"),
+							gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
 						),
 					)
 					.limit(1);
@@ -1171,7 +1174,7 @@ export const investorContractsRouter = {
 				if (!reemplazado) {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							"Ese contrato no es de esta batería, no es del mismo tipo o ya está anulado.",
+							"Ese contrato no es de esta compra, no es del mismo tipo o ya está anulado.",
 					});
 				}
 			}

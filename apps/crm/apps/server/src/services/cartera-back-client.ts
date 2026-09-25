@@ -42,6 +42,7 @@ import type {
 } from "../types/cartera-back";
 import { ConsultaMoraNoDisponibleError } from "../types/cartera-back";
 import {
+	clearCarteraTokens,
 	getCarteraAccessToken,
 	invalidateAndReauth,
 } from "./cartera-auth.service";
@@ -1224,6 +1225,8 @@ export class CarteraBackClient {
 	 *   Por defecto SOLO se reintentan GET/HEAD: reintentar un POST que ya se
 	 *   ejecutó del otro lado duplica el efecto (ver el bloque de reintentos
 	 *   más abajo). Pasar `true` únicamente en POST de solo lectura.
+	 *   Lo que decide gobierna LAS DOS formas de repetir la petición: el bucle
+	 *   de reintentos del final Y el reenvío por reautenticación ante 401/403.
 	 * @param timeoutMs deadline del fetch. Puede ser una FUNCIÓN para que se
 	 *   evalúe al despachar y no al encolar: el reloj del fetch arranca después
 	 *   de la autenticación, así que un número fijo calculado antes se pasa de
@@ -1313,6 +1316,39 @@ export class CarteraBackClient {
 							}
 
 							if (res.status === 401 || res.status === 403) {
+								// 🚫 El reenvío por reautenticación NO aplica a los métodos
+								// que mutan. Repetía la MISMA petición —mismo método, mismo
+								// cuerpo— y lo hacía al margen de `permiteReintento`, así que
+								// era un segundo POST idéntico por la puerta de atrás.
+								//
+								// Hoy cartera contesta 401/403 antes de que corra el handler
+								// (`requireAuth`, y el `role !== "ADMIN"` que es la primera
+								// línea de `otorgarAccesoPortal.ts`), así que el trabajo no
+								// había empezado y repetirlo era inocuo. Deja de serlo en
+								// cuanto un 403 lo ponga algo intermedio —un balanceador, un
+								// WAF— o un chequeo futuro ubicado DESPUÉS de provisionar: en
+								// `/investor/portal-access` eso es una segunda contraseña al
+								// inversionista, y en `/facturar-generico` es la factura
+								// duplicada del 2026-08-07 que documenta el bloque de abajo.
+								//
+								// Un 401 sí dice "tu token no sirve", y eso conviene atenderlo
+								// aunque no se repita la petición: se tira el token cacheado
+								// para que la SIGUIENTE llamada entre reautenticada, y quien
+								// apretó decide si repite el acto. Un 403 no se toca: es la
+								// identidad la rechazada, y otro token de la misma cuenta de
+								// servicio vuelve con el mismo 403.
+								if (!permiteReintento) {
+									console.warn(
+										`[CarteraBack] ${metodo} ${endpoint} recibió ${res.status} y NO se reenvía reautenticado (operación no idempotente).`,
+									);
+									if (res.status === 401) clearCarteraTokens();
+									throw new CarteraBackHttpError(
+										`Authentication failed: ${errorData.error || errorData.message || errorText}`,
+										res.status,
+										errorData,
+									);
+								}
+
 								if (!didReauth) {
 									didReauth = true;
 									const retryOptions = await buildRequestOptions(true);
@@ -2583,6 +2619,155 @@ export class CarteraBackClient {
 			body: JSON.stringify(input),
 		});
 		return response;
+	}
+
+	// ========================================================================
+	// ACCESO AL PORTAL DEL INVERSIONISTA
+	// ========================================================================
+
+	/**
+	 * Abre el acceso al Portal del Inversionista: crea la cuenta y le manda la
+	 * contraseña por correo. Es un acto humano de back office —la
+	 * reconciliación diaria de cartera detecta a quién le falta acceso pero NO
+	 * lo abre sola (cartera-back: controllers/otorgarAccesoPortal.ts)—, así que
+	 * el disparo vive detrás de un procedure del CRM, no de un cron.
+	 *
+	 * Sin `retryOnFailure`: es un POST con efecto, y cada reintento le mandaría
+	 * OTRA contraseña al inversionista. La política por defecto de `request()`
+	 * (solo reintenta GET/HEAD) es la correcta acá y se deja tal cual — y cubre
+	 * también el reenvío por reautenticación ante 401/403, que antes repetía la
+	 * petición al margen de esa política.
+	 *
+	 * SE APRUEBA UN CORREO, NO UN ID
+	 * ------------------------------
+	 * `correoAprobado` es el correo que el diálogo del CRM le ENSEÑÓ a quien
+	 * apretó. Viaja porque el id solo no alcanza: cartera volvía a LEER la fila
+	 * para saber a dónde mandar la contraseña, así que lo aprobado y lo usado
+	 * eran dos lecturas distintas de una fila que se puede reescribir entre una
+	 * y otra. La ventana dura lo que la persona tarde en leer el diálogo, y
+	 * quien puede moverla NO es quien aprueba: `editarInversionista` (mismo
+	 * router) cambia el `email` bajo once familias de rol y este botón cuelga
+	 * de cuatro. Cartera lo revalida contra la fila y VETA con
+	 * `correo_aprobado_no_coincide` sin provisionar nada
+	 * (controllers/otorgarAccesoPortal.ts).
+	 *
+	 * Se manda RECORTADO, y no crudo, por dos razones que apuntan al mismo
+	 * lado: el `maxLength: 255` de Elysia mide el string que RECIBE —un correo
+	 * de 255 con espacios alrededor se iría en 422 antes de llegar al
+	 * handler—, y así lo que se manda es exactamente lo que el procedure ya
+	 * validó y lo que queda escrito en la bitácora. Una sola definición.
+	 *
+	 * La llave se OMITE cuando no hay correo aprobado. Omitir y `null` son
+	 * equivalentes para cartera, pero `""` o espacios son un 400
+	 * (`correo_aprobado_invalido`): mandar la llave vacía es un llamador roto,
+	 * no un "no se aprobó nada". Por eso acá se TIRA en vez de omitirla en
+	 * silencio — omitirla convertiría el error del llamador en un
+	 * provisionamiento SIN aprobación, que es justo el agujero que esto cierra.
+	 *
+	 * El único caso legítimo sin correo es la EMPRESA: su diálogo no enseña
+	 * ninguno —la cuenta es del representante— y cartera ya corta antes con
+	 * `es_empresa_el_acceso_es_del_representante`.
+	 *
+	 * Con `correoAprobado` va UN SOLO id. Esa regla NO se reimplementa acá: la
+	 * dueña es cartera, que rechaza la combinación con
+	 * `correo_aprobado_con_varios_inversionistas` (400). Duplicarla sería una
+	 * segunda definición de la misma regla, que es exactamente como aparecen
+	 * las asimetrías silenciosas; y las dos fallan cerrado igual.
+	 */
+	async otorgarAccesoPortal(
+		inversionistaIds: number[],
+		correoAprobado?: string,
+	): Promise<{
+		message: string;
+		resultados: {
+			inversionistaId: number;
+			estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+			usuarioEmail: string | null;
+			correo: {
+				enviado: boolean;
+				plantilla: string | null;
+				redirigido: boolean;
+				destinatarioReal: string | null;
+			};
+			advertencias: string[];
+			motivo: string | null;
+		}[];
+	}> {
+		const correoAprobadoRecortado = correoAprobado?.trim();
+
+		// Presente pero vacío: se tira ANTES de salir a la red. Ver el bloque de
+		// la llave vacía en el docstring — el silencio acá sería provisionar sin
+		// aprobación.
+		if (correoAprobado !== undefined && !correoAprobadoRecortado) {
+			throw new Error(
+				"otorgarAccesoPortal: `correoAprobado` vino vacío. Si no hay correo que aprobar (empresa), no mandes el campo.",
+			);
+		}
+
+		const response = await this.request<{
+			message: string;
+			resultados: {
+				inversionistaId: number;
+				estado: "creada" | "ya_tenia" | "avisada" | "omitida" | "fallo";
+				usuarioEmail: string | null;
+				correo: {
+					enviado: boolean;
+					plantilla: string | null;
+					redirigido: boolean;
+					destinatarioReal: string | null;
+				};
+				advertencias: string[];
+				motivo: string | null;
+			}[];
+		}>("/investor/portal-access", {
+			method: "POST",
+			body: JSON.stringify({
+				// Cartera espera un ARREGLO (`t.Array(t.Number(), { minItems: 1 })`).
+				inversionista_ids: inversionistaIds,
+				// El spread deja la llave AUSENTE, no en `""` ni en `null`.
+				...(correoAprobadoRecortado
+					? { correo_aprobado: correoAprobadoRecortado }
+					: {}),
+			}),
+		});
+		return response;
+	}
+
+	/**
+	 * ¿Este inversionista YA tiene cuenta del portal? SOLO LECTURA.
+	 *
+	 * Es la consulta que deja deshabilitar el botón de arriba sin apretarlo:
+	 * hasta que existió, la única forma de averiguarlo era disparar el acto que
+	 * crea la cuenta y manda la contraseña.
+	 *
+	 * Aquí SÍ se reintenta, al revés que `otorgarAccesoPortal`: no hay efecto
+	 * que duplicar, y un tropiezo de red que se propagara dejaría la pantalla
+	 * sin saber nada. La política por defecto de `request()` ya reintenta GET,
+	 * así que no se fuerza `retryOnFailure`.
+	 *
+	 * Sin caché a propósito (`useCache` se deja en su default): una respuesta
+	 * vieja pondría el botón en gris sobre una cuenta que se rompió después, o
+	 * lo activaría sobre una que ya se abrió.
+	 */
+	async consultarAccesoPortal(inversionistaId: number): Promise<{
+		estado:
+			| "creada"
+			| "ya_tenia"
+			| "avisada"
+			| "omitida"
+			| "candidata"
+			| "fallo";
+		usuarioEmail: string | null;
+		resueltoPor: "dpi" | "email" | null;
+		advertencias: string[];
+		motivo: string | null;
+	}> {
+		return await this.request(
+			`/investor/portal-access-status?inversionista_id=${encodeURIComponent(
+				inversionistaId,
+			)}`,
+			{ method: "GET" },
+		);
 	}
 
 	/**

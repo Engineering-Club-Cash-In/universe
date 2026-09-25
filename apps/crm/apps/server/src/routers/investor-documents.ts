@@ -6,8 +6,14 @@ import { investorActivityLog } from "../db/schema";
 import {
 	crmCobrosOrInvestmentsProcedure,
 	investmentManagerProcedure,
+	investmentProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
+import {
+	exigeConstancia,
+	exigeConstanciaPorFalla,
+	tieneCuentaSana,
+} from "../lib/salud-cuenta-portal";
 import {
 	CarteraBackHttpError,
 	carteraBackClient,
@@ -98,6 +104,49 @@ export function toCarteraOrpcError(
 	return new ORPCError("INTERNAL_SERVER_ERROR", {
 		message: `${contexto}: cartera no está respondiendo. Intenta de nuevo en unos minutos.`,
 	});
+}
+
+// Los motivos que se guardan en `details` salen de un `Error` cualquiera, así
+// que se acotan: un cuerpo de error largo de cartera no tiene por qué entrar
+// entero a una columna que se lee a ojo.
+const LARGO_MAXIMO_MOTIVO = 300;
+
+function motivoDeLaFalla(error: unknown): string {
+	const texto = error instanceof Error ? error.message : String(error);
+	return texto.slice(0, LARGO_MAXIMO_MOTIVO);
+}
+
+/**
+ * Escribe la constancia del acceso al portal SIN PODER TUMBAR la respuesta.
+ *
+ * Cuando esto se llama, lo irreversible ya pasó: cartera contestó, la cuenta
+ * puede estar creada y la contraseña puede haber salido por correo. Si el
+ * insert tirara —el enum `acceso_portal` sin aplicar en ese ambiente, el pool,
+ * la FK de `performed_by`, una conexión cortada— el throw subiría, el navegador
+ * vería un rojo de "falló" sobre algo que SÍ ocurrió, y quien lo apretó volvería
+ * a apretar. Es exactamente el invariante al revés: por callar la constancia se
+ * perdía además la verdad de lo que pasó.
+ *
+ * Es la misma forma que ya usan `editarInversionista` y
+ * `cambiarStatusInversionista` en este archivo, y el mismo criterio que
+ * `portalProvisioning.ts` de cartera-back deja escrito como REGLA DE ORO: la
+ * función que corre DESPUÉS del efecto nunca tira.
+ *
+ * El `console.error` no es decoración: es la constancia de última instancia.
+ * Lleva la fila entera para que se pueda reconstruir a mano desde el log.
+ */
+async function dejarConstanciaDeAccesoPortal(
+	valores: typeof investorActivityLog.$inferInsert,
+): Promise<void> {
+	try {
+		await db.insert(investorActivityLog).values(valores);
+	} catch (errorDeBitacora) {
+		console.error(
+			"🔴 [darAccesoPortal] NO se pudo escribir la constancia en investor_activity_log. Es la ÚNICA constancia veraz de quién autorizó mandar la contraseña (cartera la firma con el token de servicio): reconstruir esta fila a mano.",
+			JSON.stringify(valores),
+			errorDeBitacora,
+		);
+	}
 }
 
 export const investorDocumentsRouter = {
@@ -626,6 +675,262 @@ export const investorDocumentsRouter = {
 			});
 
 			return result;
+		}),
+
+	// Abrir el acceso al Portal del Inversionista: cartera crea la cuenta y le
+	// manda la contraseña por correo. El acto lo dispara una persona desde acá
+	// (cartera-back no lo automatiza a propósito: controllers/otorgarAccesoPortal.ts).
+	//
+	// GUARD: `investmentProcedure` (`PERMISSIONS.canAccessInvestments`), o sea
+	// ADMIN, INVESTMENT_ADVISOR_JR, INVESTMENT_ADVISOR_SR e INVESTMENT_MANAGER.
+	// NO el `crmCobrosOrInvestmentsProcedure` del resto del archivo, que es la
+	// unión de `canAccessCRM`, `canAccessCobros`, `canAccessInvestments` y
+	// `canAccessAccounting`. Son once familias de rol: las cuatro de arriba más
+	// ventas, supervisor de ventas, analista, jurídico, cobros, supervisor de
+	// cobros y contabilidad.
+	//
+	// La razón no es el conteo: es que ese guard ancho cubre TAMBIÉN
+	// `editarInversionista` (más arriba en este mismo archivo), que cambia el
+	// `email` del inversionista. Con los dos bajo el mismo permiso, cualquiera de
+	// las once familias podía poner su propia dirección y apretar este botón: la
+	// contraseña del portal salía hacia el buzón que acabara de escribir. Cerrar
+	// solo este procedure no arregla `editarInversionista`, pero sí corta el
+	// segundo paso, que es el que convierte una edición en una credencial.
+	//
+	// `correoAprobado` es el correo que el diálogo ENSEÑÓ antes de apretar, y
+	// viaja hasta cartera para que lo revalide contra la fila. El id solo no
+	// alcanzaba: cartera volvía a LEER la fila para saber a dónde mandar la
+	// contraseña, así que lo aprobado y lo usado eran dos lecturas distintas de
+	// algo que se puede reescribir en el medio. La ventana dura lo que la
+	// persona tarde en leer el diálogo, y quien la mueve —`editarInversionista`,
+	// once familias— no es quien aprueba —este botón, cuatro—.
+	darAccesoPortal: investmentProcedure
+		.input(
+			z.object({
+				inversionistaId: z.number().int().positive(),
+
+				// AUSENTE o un correo de verdad. NO se acepta `""`, ni espacios, ni
+				// `null`, aunque cartera trate `null` como ausente:
+				//
+				//  - Ausente es el camino legítimo de la EMPRESA, cuyo diálogo no
+				//    enseña correo porque la cuenta es del representante.
+				//  - Vacío es un diálogo que SÍ tenía que enseñar uno y llegó sin él.
+				//    Dejarlo pasar como "no se aprobó nada" saltaría el control justo
+				//    cuando el front se equivoca, que es cuando más falta hace; y
+				//    aceptar `null` le daría a un front con un `?? null` de más la
+				//    misma salida silenciosa. Acá rebota con 400 sin salir a la red,
+				//    un escalón antes del `correo_aprobado_invalido` de cartera.
+				//
+				// `.trim()` va ANTES de `.min`/`.max` a propósito (zod aplica los
+				// checks en orden): así `"   "` se rechaza y el `.max(255)` mide el
+				// mismo string RECORTADO que Elysia va a medir del otro lado con su
+				// `maxLength: 255`. Al revés, un correo de 255 con espacios alrededor
+				// pasaría acá y se iría en 422 contra cartera.
+				correoAprobado: z.string().trim().min(1).max(255).optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const firmante = {
+				performedBy: context.session.user.id,
+				performedByName:
+					context.session.user.name ?? context.session.user.email,
+			};
+
+			// 1. Llamar a cartera-back (el contrato pide un arreglo de ids)
+			//
+			// El try/catch es el mismo de `crearInversionista`/`editarInversionista`
+			// y por la misma razón: oRPC solo conserva el mensaje de los
+			// ORPCError, así que sin él el 403 "Solo un ADMIN puede abrir accesos
+			// al portal" —un estado real y documentado, `cartera-back/DEPLOYMENT.md`—
+			// llegaba al navegador como "Internal server error".
+			let result: Awaited<
+				ReturnType<typeof carteraBackClient.otorgarAccesoPortal>
+			>;
+			try {
+				result = await carteraBackClient.otorgarAccesoPortal(
+					[input.inversionistaId],
+					input.correoAprobado,
+				);
+			} catch (error) {
+				// Una llamada que FALLÓ también deja constancia, salvo cuando el
+				// propio status prueba que cartera no llegó a provisionar.
+				//
+				// El caso que lo obliga es el timeout: el salto CRM→cartera aborta
+				// mientras cartera sigue dentro de su `fetch` a auth-google, así que
+				// la contraseña puede estar en el buzón del inversionista mientras
+				// acá solo se ve "cartera no está respondiendo". Sin esta fila no
+				// quedaba NADA: ni quién apretó, ni cuándo, ni sobre quién. Y el
+				// reintento lo entierra —la cuenta ya existe, cartera contesta
+				// `ya_tenia` y el segundo apretón sale en verde—.
+				//
+				// Qué status descarta el efecto y cuál no vive en
+				// `lib/salud-cuenta-portal.ts`; es una lista blanca, igual que las
+				// otras dos decisiones de este flujo.
+				const statusDeCartera =
+					error instanceof CarteraBackHttpError ? error.status : null;
+
+				if (exigeConstanciaPorFalla(statusDeCartera)) {
+					await dejarConstanciaDeAccesoPortal({
+						inversionistaId: input.inversionistaId,
+						action: "acceso_portal",
+						details: {
+							// `estado` NO es de la enumeración de cartera a propósito:
+							// cartera nunca contestó, y escribir uno de los suyos sería
+							// inventar un desenlace que nadie observó.
+							estado: "sin_respuesta_de_cartera",
+							usuarioEmail: null,
+							advertencias: ["no_se_sabe_si_la_contrasena_salio"],
+							motivo: motivoDeLaFalla(error),
+							correo: null,
+							httpStatus: statusDeCartera,
+							// Acá es donde MÁS vale: este es el caso en que no se sabe si
+							// la contraseña salió. `usuarioEmail` viene en null porque
+							// cartera nunca contestó, así que el correo aprobado es el
+							// ÚNICO dato de a dónde habría ido a parar.
+							correoAprobado: input.correoAprobado ?? null,
+						},
+						...firmante,
+					});
+				}
+
+				throw toCarteraOrpcError(error, "Dar acceso al portal");
+			}
+
+			const detalle = result.resultados?.[0] ?? null;
+
+			// 2. Registrar QUIÉN lo autorizó, cuando hubo algo que autorizar.
+			// `cartera.audit_logs` graba el "quién" decodificándolo del JWT, y el
+			// CRM llama con un token de servicio que pertenece a una persona
+			// real: allá este acto aparece firmado por ESA persona, lo apriete
+			// quien lo apriete. Este insert es la única constancia veraz de quién
+			// mandó la contraseña, así que no es opcional ni decorativo.
+			//
+			// Por eso mismo NO se escribe en los apretones que cartera resuelve
+			// sin tocar nada: una fila por apretón diluye esa constancia hasta
+			// taparla. El caso que lo obliga es la empresa —el camino de lectura
+			// contesta `omitida/es_empresa` para siempre, así que el botón nunca
+			// se apaga y cada apretón vuelve sin crear nada y sin mandar ningún
+			// correo—. Qué cuenta como acto, y por qué la duda SIEMPRE cuenta,
+			// vive en `lib/salud-cuenta-portal.ts`.
+			//
+			// EL VETO DEJA FILA, y es el caso que más la necesita. Cuando cartera
+			// contesta `fallo/correo_aprobado_no_coincide` no provisionó nada, así
+			// que por forma se parece a los no-ops que este guard calla. No lo es:
+			// un veto significa que la fila SE MOVIÓ entre que el diálogo se pintó
+			// y el clic llegó, que es exactamente el evento contra el que existe
+			// todo este mecanismo. Puede ser alguien corrigiendo un typo o puede
+			// ser el correo envenenado a tiempo, y desde acá no se distingue —
+			// justamente por eso se anota—. Tampoco es ruido repetitivo como la
+			// empresa: la empresa contesta igual en cada apretón para siempre, y un
+			// veto solo ocurre si de verdad cambió el destinatario.
+			//
+			// Cae del lado correcto SOLO porque `MOTIVOS_SIN_EFECTO` es una lista
+			// blanca y el motivo del veto no está en ella. Es deliberado y está
+			// anotado allá: agregarlo apagaría la única alarma de la carrera.
+			if (exigeConstancia(detalle)) {
+				await dejarConstanciaDeAccesoPortal({
+					inversionistaId: input.inversionistaId,
+					action: "acceso_portal",
+					details: {
+						estado: detalle?.estado ?? null,
+						usuarioEmail: detalle?.usuarioEmail ?? null,
+						advertencias: detalle?.advertencias ?? [],
+						motivo: detalle?.motivo ?? null,
+						// Si el correo se desvió por SERVER != PROD, la cuenta existe y
+						// su dueño no puede entrar; sin este rastro nadie se entera.
+						correo: detalle?.correo ?? null,
+						// QUÉ se aprobó, no solo a quién. Sin esto la fila dice que
+						// alguien autorizó, pero no qué tenía delante al autorizar, y
+						// esa es la mitad que importa cuando el correo de la fila
+						// resulta no ser de su dueño.
+						//
+						// En un veto es la ÚNICA evidencia que queda de lo que el
+						// diálogo enseñaba: cartera NO devuelve el correo de la fila a
+						// propósito. Con el `investor_updated` de `editarInversionista`
+						// —que sí guarda el `email` nuevo— el par reconstruye la
+						// carrera entera: quién movió el correo, cuándo, y qué se había
+						// aprobado.
+						//
+						// No agrega una clase de dato nueva a la tabla: `usuarioEmail`
+						// y `correo.destinatarioReal` ya viven en esta misma columna.
+						correoAprobado: input.correoAprobado ?? null,
+					},
+					...firmante,
+				});
+			}
+
+			// El front necesita el resultado crudo para mostrar el estado.
+			return result;
+		}),
+
+	// ¿Ya tiene cuenta en el portal? SOLO LECTURA: sirve para poner en gris el
+	// botón de arriba sin tener que apretarlo para averiguarlo.
+	//
+	// NO registra en `investorActivityLog` a propósito. Esto corre en cada carga
+	// de la pantalla del inversionista: anotarlo inundaría la bitácora y taparía
+	// los actos REALES —quién autorizó mandar una contraseña—, que es lo único
+	// que esa tabla existe para conservar.
+	//
+	// GUARD: el MISMO que `darAccesoPortal` (`investmentProcedure`), y no uno más
+	// flojo por ser de lectura. Una consulta más abierta que el acto es
+	// reconocimiento previo: contesta, por cada id que le pasen, si esa persona ya
+	// tiene cuenta en el portal. Quien no puede abrir el acceso tampoco necesita
+	// saber quién lo tiene.
+	estadoAccesoPortal: investmentProcedure
+		.input(
+			z.object({
+				inversionistaId: z.number().int().positive(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			// Mismo try/catch que los demás procedures que salen a cartera: sin
+			// él, el 403 "Solo un ADMIN puede consultar accesos al portal" y el
+			// 404 "No existe ese inversionista" llegaban al navegador como
+			// "Internal server error", y los dos son estados accionables.
+			let acceso: Awaited<
+				ReturnType<typeof carteraBackClient.consultarAccesoPortal>
+			>;
+			try {
+				acceso = await carteraBackClient.consultarAccesoPortal(
+					input.inversionistaId,
+				);
+			} catch (error) {
+				throw toCarteraOrpcError(error, "Consultar acceso al portal");
+			}
+
+			// El booleano se calcula AQUÍ y no en el front: es el valor que
+			// deshabilita el botón, y marcar sana una cuenta rota dejaría a esa
+			// persona con el botón en gris y sin forma de arreglarlo desde la
+			// pantalla. La regla —una lista blanca de advertencias inocuas, para
+			// que lo que todavía no existe caiga del lado barato— vive en
+			// `lib/salud-cuenta-portal.ts`.
+			//
+			// `usuarioEmail` NO viaja por acá, a propósito, aunque cartera lo
+			// devuelva. Esto corre en CADA carga de la pantalla del inversionista,
+			// con un id que elige quien llama y sin ninguna cota: devolver el correo
+			// de la cuenta del portal convierte un barrido de ids en una cosecha de
+			// "quién tiene cuenta y en qué buzón". El booleano y el motivo también
+			// se cosechan, pero son lo que la pantalla necesita para no encerrar a
+			// nadie detrás de un botón gris; el correo no lo es.
+			//
+			// El camino de ESCRITURA sí lo devuelve y debe seguir haciéndolo:
+			// `darAccesoPortal` entrega el crudo de cartera porque el front traduce
+			// con él el desenlace (`correo_de_cartera_distinto_al_de_la_cuenta`
+			// nombra la dirección), y el insert en `investor_activity_log` lo guarda
+			// porque es la constancia de a dónde salió la contraseña. Ahí hay un
+			// acto detrás; acá no hay más que abrir una pantalla.
+			//
+			// Y el correo que el diálogo enseña antes de apretar tampoco sale de
+			// acá: sale de `identidadInversionista`, que lo trae fresco.
+			return {
+				tieneCuentaSana: tieneCuentaSana(acceso),
+				estado: acceso.estado,
+				// Las advertencias VIAJAN aunque el booleano ya esté resuelto: sin
+				// ellas la pantalla no tiene con qué explicar por qué el botón
+				// sigue activo sobre alguien que "ya tenía" cuenta.
+				advertencias: acceso.advertencias,
+				motivo: acceso.motivo,
+			};
 		}),
 
 	getInvestorsCartera: investmentManagerProcedure.handler(async () => {

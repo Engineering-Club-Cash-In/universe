@@ -409,6 +409,8 @@ export const reportsAppRouter = {
 	getInvestorActivityLog: investorDocumentsRouter.getInvestorActivityLog,
 	getBancosCartera: investorDocumentsRouter.getBancosCartera,
 	compraCartera: investorDocumentsRouter.compraCartera,
+	darAccesoPortal: investorDocumentsRouter.darAccesoPortal,
+	estadoAccesoPortal: investorDocumentsRouter.estadoAccesoPortal,
 	crearInversionista: investorDocumentsRouter.crearInversionista,
 	editarInversionista: investorDocumentsRouter.editarInversionista,
 	cambiarStatusInversionista:

@@ -2795,11 +2795,48 @@ function InvestorLiquidacionesPage() {
 						</Button>
 						<Button
 							className="gap-2 bg-sky-600 text-white hover:bg-sky-700"
-							onClick={() =>
+							// 🔴 SE MANDA EL CORREO QUE ESTE DIÁLOGO ENSEÑÓ, NO SOLO EL ID.
+							// Con el id solo, cartera volvía a LEER la fila para saber a
+							// dónde mandar la contraseña: lo aprobado y lo usado eran dos
+							// lecturas distintas de una tabla que se puede reescribir en el
+							// medio, y quien la reescribe (`editarInversionista`) no es
+							// quien aprueba (este botón). Mandando el correo, cartera lo
+							// compara contra la fila y, si cambió, corta sin provisionar
+							// (`fallo/correo_aprobado_no_coincide`).
+							//
+							// `accesoPortalEmail` y NO una relectura acá: es la MISMA
+							// expresión que pinta el correo grande de arriba, así que este
+							// `onClick` cierra sobre el valor del render que la persona
+							// tiene delante. Releerlo al apretar —de la fila cacheada, o
+							// pidiéndolo de nuevo— reabriría exactamente la ventana que
+							// esto cierra.
+							onClick={() => {
+								// EMPRESA: la llave va AUSENTE, que es el único camino sin
+								// aprobación que el servidor acepta. Y es correcto que no
+								// haya nada que aprobar: desde esta fila no sale ninguna
+								// contraseña —cartera contesta a qué fila ir— y por eso el
+								// diálogo no enseñó ningún correo. Mandar el de la sociedad
+								// sería aprobar una dirección que nadie miró.
+								if (accesoPortalEsEmpresa) {
+									darAccesoPortalMutation.mutate({
+										inversionistaId: investorIdNum,
+									});
+									return;
+								}
+								// Sin correo NO se manda la llave vacía: el servidor la
+								// rechaza con 400 (`.trim().min(1)`) y ese rojo genérico no
+								// explica nada, mientras que el diálogo ya dijo arriba, en
+								// palabras, por qué no hay correo que aprobar. No debería
+								// llegarse acá —el `disabled` de abajo exige
+								// `accesoPortalDestino === "confirmado"`, que solo es cierto
+								// con `accesoPortalEmail` no vacío—; es el cierre del
+								// camino, no el control.
+								if (!accesoPortalEmail) return;
 								darAccesoPortalMutation.mutate({
 									inversionistaId: investorIdNum,
-								})
-							}
+									correoAprobado: accesoPortalEmail,
+								});
+							}}
 							// 🔴 SOLO SE PUEDE APROBAR LO QUE SE PUDO ENSEÑAR.
 							// Sobre una empresa no sale ninguna contraseña —cartera
 							// contesta a qué fila ir—, así que ahí no hay correo que

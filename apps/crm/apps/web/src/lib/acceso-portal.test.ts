@@ -274,6 +274,7 @@ describe("los motivos que reintentar NO arregla", () => {
 		"provisionamiento_no_configurado",
 		"cuenta_anclada_solo_por_correo",
 		"inversionista_no_encontrado",
+		"correo_aprobado_no_coincide",
 	])("%s no manda a apretar el botón otra vez, desde ningún lado", (motivo) => {
 		const desdeElBoton = avisoAccesoPortal(
 			acceso({ estado: "fallo", motivo, advertencias: [] }),
@@ -353,6 +354,42 @@ describe("los motivos que reintentar NO arregla", () => {
 		expect(aviso.tono).toBe("advertencia");
 		expect(aviso.texto).toContain("solo se la reconoce por el correo");
 		expect(aviso.texto).toContain("DPI");
+		expect(aviso.texto).not.toContain("Si querés");
+	});
+
+	/**
+	 * El veto del correo aprobado. Es el ÚNICO de la lista que no describe una
+	 * falla: describe el control funcionando —cartera vio que el correo de la
+	 * fila ya no era el que el diálogo enseñó y cortó antes de provisionar—, y
+	 * es justo el que más necesita explicarse, porque quien lee acaba de
+	 * aprobar un correo y no tiene forma de saber que alguien más lo movió.
+	 *
+	 * Sin estas dos entradas el aviso salía como "No se le pudo dar acceso al
+	 * portal." pelado —sin causa, porque el motivo no estaba en la tabla— y
+	 * encima mandando a apretar otra vez el mismo botón, que con el mismo
+	 * correo aprobado vuelve a caer en el mismo corte.
+	 */
+	it("el correo que cambió mientras revisaba se explica y NO manda a reintentar", () => {
+		const aviso = avisoAccesoPortal(
+			acceso({
+				estado: "fallo",
+				motivo: "correo_aprobado_no_coincide",
+				advertencias: [],
+			}),
+			"boton",
+		)!;
+
+		expect(aviso.tono).toBe("advertencia");
+		// 1. QUÉ pasó: el correo se movió entre que lo enseñamos y que confirmó.
+		expect(aviso.texto).toContain("el correo cambió mientras lo revisabas");
+		// 2. Lo que hay que poder decirle al inversionista por teléfono: NO salió
+		//    ninguna contraseña. Cartera corta antes de provisionar.
+		expect(aviso.texto).toContain("No salió ninguna contraseña");
+		// 3. QUÉ hacer: volver a abrir y mirar el correo nuevo.
+		expect(aviso.texto).toContain("abrí de nuevo el acceso");
+		expect(aviso.texto).toContain("el correo NUEVO");
+		// 4. Y no se promete un reintento que vuelve a fallar.
+		expect(aviso.texto).toContain("Volver a confirmar el mismo no sirve");
 		expect(aviso.texto).not.toContain("Si querés");
 	});
 
@@ -690,6 +727,43 @@ describe("la pantalla del inversionista no vuelve a los defectos de siempre", ()
 		expect(codigo).not.toContain(
 			"const accesoPortalEmail = ((investor?.email ?? \"\") as string).trim()",
 		);
+	});
+
+	/**
+	 * El defecto que cierra este cambio: la mutación mandaba SOLO el id, y
+	 * cartera releía la fila para saber a dónde mandar la contraseña. Entre lo
+	 * que la persona aprobó y lo que se usó había una ventana del tamaño de lo
+	 * que tarde en leer el diálogo, y quien puede mover ese correo
+	 * (`editarInversionista`) no es quien lo aprueba (este botón).
+	 */
+	it("la mutación manda el correo que el diálogo ENSEÑÓ, no solo el id", () => {
+		expect(fuente).toContain("correoAprobado: accesoPortalEmail,");
+		// Y es la misma expresión que se pinta arriba, en el recuadro celeste:
+		// si mañana el correo del diálogo sale de otra variable, esta prueba
+		// deja de cubrir nada, así que se ancla también el render.
+		expect(fuente).toContain('{accesoPortalEmail || "— sin correo capturado —"}');
+		// Nunca de la fila cacheada ni de una relectura al momento del clic.
+		expect(codigo).not.toContain("correoAprobado: investor?.email");
+		expect(codigo).not.toContain("correoAprobado: accesoPortalPistaEmail");
+	});
+
+	/**
+	 * Sobre una empresa el diálogo NO enseña ningún correo —la cuenta es del
+	 * representante—, así que no hay nada aprobado que mandar. La llave AUSENTE
+	 * es el único camino sin aprobación que el servidor acepta: `""` rebota con
+	 * 400 (`z.string().trim().min(1)`).
+	 */
+	it("sobre una empresa la llave va ausente, nunca vacía", () => {
+		const bloque = fuente.slice(
+			fuente.indexOf("if (accesoPortalEsEmpresa) {\n\t\t\t\t\t\t\t\t\tdarAccesoPortalMutation.mutate({"),
+		);
+		// La rama de empresa manda el id pelado y corta.
+		expect(bloque.slice(0, 300)).toContain("inversionistaId: investorIdNum,");
+		expect(bloque.slice(0, 300)).not.toContain("correoAprobado");
+		// Y sin correo confirmado no se dispara nada.
+		expect(fuente).toContain("if (!accesoPortalEmail) return;");
+		expect(codigo).not.toContain('correoAprobado: ""');
+		expect(codigo).not.toContain("correoAprobado: accesoPortalEmail ?? null");
 	});
 
 	it("«es empresa» lo decide la consulta sin caché, no `dpi_rep_legal`", () => {

@@ -3,6 +3,7 @@ import {
 	documentIdDesdeLink,
 	filasDeFirmantes,
 	linksPorRol,
+	rolDeFirmanteViejo,
 } from "./contract-signatories";
 
 describe("linksPorRol", () => {
@@ -66,5 +67,64 @@ describe("documentIdDesdeLink", () => {
 	test("devuelve null cuando el link no tiene la forma esperada", () => {
 		expect(documentIdDesdeLink("https://app.weetrust.mx/otra/cosa")).toBeNull();
 		expect(documentIdDesdeLink(null)).toBeNull();
+	});
+});
+
+describe("rol de un firmante de un contrato de antes", () => {
+	const VIEJO = {
+		clientSigningLink:
+			"https://app.weetrust.mx/signatory/doc-1/sig-ana/x/0d1f30",
+		representativeSigningLink:
+			"https://app.weetrust.mx/signatory/doc-1/sig-rep/x/0d1f30",
+		additionalSigningLinks: [
+			"https://app.weetrust.mx/signatory/doc-1/sig-beto/x/0d1f30",
+		],
+	};
+	const opciones = {
+		correoRepLegal: "juridico2@sepresta.com",
+		yaHayTitular: false,
+	};
+
+	test("se reconoce por el signatoryID de su enlace", () => {
+		expect(
+			rolDeFirmanteViejo(
+				VIEJO,
+				{ signatoryID: "sig-ana", emailID: "a@x.com" },
+				opciones,
+			),
+		).toBe("TITULAR");
+		expect(
+			rolDeFirmanteViejo(
+				VIEJO,
+				{ signatoryID: "sig-rep", emailID: "r@x.com" },
+				opciones,
+			),
+		).toBe("REP_LEGAL");
+		expect(
+			rolDeFirmanteViejo(
+				VIEJO,
+				{ signatoryID: "sig-beto", emailID: "b@x.com" },
+				opciones,
+			),
+		).toBe("COFIRMANTE");
+	});
+
+	test("si los enlaces ya no calzan, el rep legal por su correo y el primero es el titular", () => {
+		const sinCalce = { signatoryID: "otro", emailID: "Juridico2@SePresta.com" };
+		expect(rolDeFirmanteViejo(VIEJO, sinCalce, opciones)).toBe("REP_LEGAL");
+		expect(
+			rolDeFirmanteViejo(
+				VIEJO,
+				{ signatoryID: "otro", emailID: "c@x.com" },
+				opciones,
+			),
+		).toBe("TITULAR");
+		expect(
+			rolDeFirmanteViejo(
+				VIEJO,
+				{ signatoryID: "otro", emailID: "c@x.com" },
+				{ ...opciones, yaHayTitular: true },
+			),
+		).toBe("COFIRMANTE");
 	});
 });

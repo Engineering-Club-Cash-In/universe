@@ -9,6 +9,8 @@ import {
 	type EstadoDocumentoFirma,
 } from "../services/legal-docs-api";
 import { recalcularLaBateriaDelContrato } from "./bateria-de-contratos";
+import { rolDeFirmanteViejo } from "./contract-signatories";
+import { REP_LEGAL_EMAIL } from "./contratos-rep-legal";
 import { espejarEstadoDeFirmaEnCartera } from "./espejo-contratos-inversionista";
 
 /**
@@ -50,6 +52,10 @@ export async function sincronizarEstadoDeFirma(
 			.select({
 				documentID: generatedLegalContracts.weetrustDocumentId,
 				status: generatedLegalContracts.status,
+				clientSigningLink: generatedLegalContracts.clientSigningLink,
+				representativeSigningLink:
+					generatedLegalContracts.representativeSigningLink,
+				additionalSigningLinks: generatedLegalContracts.additionalSigningLinks,
 			})
 			.from(generatedLegalContracts)
 			.where(eq(generatedLegalContracts.id, contractId))
@@ -59,6 +65,43 @@ export async function sincronizarEstadoDeFirma(
 		// La fila ya apunta a otro documento: esta foto es vieja. Los contratos
 		// viejos no tienen ID guardado.
 		if (actual.documentID && actual.documentID !== estado.documentID) return;
+
+		// Un contrato de antes de `contract_signatories` no tiene a nadie
+		// guardado, y abajo sólo se actualizan filas que existen: sin esto nunca
+		// tendría estado por firmante, ni la salida de la verificación facial. Se
+		// crean con lo que WeeTrust dice ahora, una sola vez.
+		const [yaTieneFirmantes] = await tx
+			.select({ id: contractSignatories.id })
+			.from(contractSignatories)
+			.where(eq(contractSignatories.contractId, contractId))
+			.limit(1);
+
+		if (!yaTieneFirmantes && estado.signatories.length > 0) {
+			let yaHayTitular = false;
+			const filas = estado.signatories.map((firmante, position) => {
+				const role = rolDeFirmanteViejo(actual, firmante, {
+					correoRepLegal: REP_LEGAL_EMAIL,
+					yaHayTitular,
+				});
+				if (role === "TITULAR") yaHayTitular = true;
+				return {
+					contractId,
+					role,
+					email: firmante.emailID,
+					name: firmante.name || firmante.emailID,
+					weetrustSignatoryId: firmante.signatoryID || null,
+					signingUrl: firmante.signingUrl,
+					signingUrlExpiry: firmante.expiry ? new Date(firmante.expiry) : null,
+					position,
+					status: firmante.isSigned
+						? ("signed" as const)
+						: ("pending" as const),
+					signedAt: firmante.isSigned ? ahora : null,
+					updatedAt: ahora,
+				};
+			});
+			await tx.insert(contractSignatories).values(filas).onConflictDoNothing();
+		}
 
 		// Con el contrato ya cerrado (confirmado a mano, o anulado) no se le baja
 		// a nadie de "firmado" a "pendiente": WeeTrust puede seguir diciendo

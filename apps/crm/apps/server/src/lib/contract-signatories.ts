@@ -157,3 +157,48 @@ export async function alguienFirmo(contractId: string): Promise<boolean> {
 		.limit(1);
 	return Boolean(firma);
 }
+
+/** El `signatoryID` de WeeTrust dentro de un enlace de firma guardado. */
+function signatoryIdDesdeLink(link: string | null): string | null {
+	if (!link) return null;
+	return link.match(/\/signatory\/[^/?#]+\/([^/?#]+)/)?.[1] ?? null;
+}
+
+/**
+ * El rol de un firmante de un contrato de antes de `contract_signatories`.
+ *
+ * Esos contratos sólo guardaron los enlaces en tres columnas: el del cliente,
+ * el del representante y los adicionales (codeudores). El enlace lleva el
+ * `signatoryID`, así que se reconoce a cada uno por ahí. Si no calza —los
+ * enlaces se regeneraron por fuera—, el rep legal se reconoce por su correo y
+ * el primero de los demás es el titular.
+ */
+export function rolDeFirmanteViejo(
+	contrato: {
+		clientSigningLink: string | null;
+		representativeSigningLink: string | null;
+		additionalSigningLinks: string[] | null;
+	},
+	firmante: { signatoryID: string; emailID: string },
+	opciones: { correoRepLegal: string; yaHayTitular: boolean },
+): "TITULAR" | "COFIRMANTE" | "REP_LEGAL" {
+	const id = firmante.signatoryID;
+	if (id && signatoryIdDesdeLink(contrato.clientSigningLink) === id)
+		return "TITULAR";
+	if (id && signatoryIdDesdeLink(contrato.representativeSigningLink) === id)
+		return "REP_LEGAL";
+	if (
+		id &&
+		(contrato.additionalSigningLinks ?? []).some(
+			(link) => signatoryIdDesdeLink(link) === id,
+		)
+	)
+		return "COFIRMANTE";
+
+	if (
+		firmante.emailID.trim().toLowerCase() ===
+		opciones.correoRepLegal.trim().toLowerCase()
+	)
+		return "REP_LEGAL";
+	return opciones.yaHayTitular ? "COFIRMANTE" : "TITULAR";
+}

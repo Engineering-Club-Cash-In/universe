@@ -283,6 +283,22 @@ function ContratoFila({
 		contract.signingProvider !== "documenso" &&
 		firmadoSinCerrar(contract.status, signatories);
 
+	// Uno de antes de que se guardaran los firmantes: pendiente, en WeeTrust y
+	// sin nadie guardado. La primera consulta los crea con lo que dice WeeTrust,
+	// y desde ahí es un contrato como cualquier otro. Sin esto nunca se
+	// consultaba solo, y no tenía estado por firmante ni salida a la
+	// verificación facial.
+	const viejoSinFirmantes =
+		!inactivo &&
+		!firmaEnPapel &&
+		contract.status === "pending" &&
+		(signatories?.length ?? 0) === 0 &&
+		[
+			contract.clientSigningLink,
+			contract.representativeSigningLink,
+			...(contract.additionalSigningLinks ?? []),
+		].some((link) => link?.includes("/signatory/"));
+
 	// Con todo firmado y el contrato en pendiente, la ficha le pregunta sola a
 	// WeeTrust: o el documento acaba de cerrar —y hay que refrescar— o no va a
 	// cerrar nunca porque no le creyó la identidad a alguien, y hay que decir
@@ -293,11 +309,15 @@ function ContratoFila({
 			const respuesta = await client.getContractSigningStatus({
 				contractId: contract.id,
 			});
-			if (respuesta.status === "COMPLETED") onUpdate?.();
+			// Uno viejo recién sincronizado ya tiene firmantes: se recarga para
+			// verlos.
+			if (respuesta.status === "COMPLETED" || viejoSinFirmantes) onUpdate?.();
 			return respuesta;
 		},
-		enabled: sinCerrar,
+		enabled: sinCerrar || viejoSinFirmantes,
 		refetchInterval: (query) => {
+			// El viejo pregunta una vez; después de recargar sigue por `sinCerrar`.
+			if (!sinCerrar) return false;
 			const datos = query.state.data;
 			if (!datos) return 20_000;
 			if (datos.status === "COMPLETED") return false;

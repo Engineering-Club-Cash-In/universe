@@ -150,6 +150,55 @@ interface ClusterEnConstruccion extends ClusterUbicacion {
 }
 
 /**
+ * Desglosa las horas de una estancia entre las franjas horarias analizadas:
+ *  - nocturna: 22:00 a 06:00 (hora local de Guatemala), cualquier día.
+ *  - finDeSemana: sábados y domingos en horario diurno (06:00 a 22:00).
+ *  - laboral: lunes a viernes en horario laboral (08:00 a 18:00).
+ *
+ * Muestrea la estancia en pasos de 15 min para distribuir con precisión
+ * estancias largas (ej. fin de semana completo o estadías nocturnas continuas)
+ * entre sus franjas reales, en lugar de asignar todas las horas a una sola
+ * franja por el punto medio.
+ */
+function desglosarHorasPorFranja(
+	desde: Date,
+	hasta: Date,
+): { nocturna: number; laboral: number; finDeSemana: number } {
+	let nocturna = 0;
+	let laboral = 0;
+	let finDeSemana = 0;
+
+	const PASO_MS = 15 * 60 * 1000;
+	const desdeMs = desde.getTime();
+	const hastaMs = hasta.getTime();
+
+	if (hastaMs <= desdeMs) {
+		return { nocturna: 0, laboral: 0, finDeSemana: 0 };
+	}
+
+	for (let t = desdeMs; t < hastaMs; t += PASO_MS) {
+		const duracionTramoMs = Math.min(PASO_MS, hastaMs - t);
+		const duracionHoras = duracionTramoMs / MS_POR_HORA;
+
+		const tMedio = t + duracionTramoMs / 2;
+		const fechaGt = new Date(tMedio - OFFSET_GUATEMALA_MS);
+		const horaDelDia = fechaGt.getUTCHours();
+		const diaSemana = fechaGt.getUTCDay();
+		const esFinDeSemana = diaSemana === 0 || diaSemana === 6;
+
+		if (horaDelDia >= 22 || horaDelDia < 6) {
+			nocturna += duracionHoras;
+		} else if (esFinDeSemana) {
+			finDeSemana += duracionHoras;
+		} else if (horaDelDia >= 8 && horaDelDia < 18) {
+			laboral += duracionHoras;
+		}
+	}
+
+	return { nocturna, laboral, finDeSemana };
+}
+
+/**
  * Agrupa estancias cuyos centros están cerca entre sí (RADIO_CLUSTER_M) en
  * una sola ubicación clave, acumulando horas/días/visitas y la distribución
  * horaria que usa clasificar() para decidir el tipo.
@@ -193,24 +242,21 @@ export function agruparEstancias(estancias: Estancia[]): ClusterUbicacion[] {
 			cluster.ultimaVisita = estancia.hasta;
 		}
 
-		// Franja horaria en hora de Guatemala, tomando el punto medio de la
-		// estancia — una estancia larga que cruza medianoche igual cuenta como
-		// una sola franja representativa, no se reparte hora por hora.
+		// Día de la semana y unicidad de días tomados del punto medio de la estancia
 		const medioMs = (estancia.desde.getTime() + estancia.hasta.getTime()) / 2;
 		const horaGt = new Date(medioMs - OFFSET_GUATEMALA_MS);
-		const horaDelDia = horaGt.getUTCHours();
 		const diaSemana = horaGt.getUTCDay();
 
 		cluster.visitasPorDiaSemana[diaSemana] += 1;
 		cluster.diasUnicos.add(horaGt.toISOString().slice(0, 10));
-		const esFinDeSemana = diaSemana === 0 || diaSemana === 6;
-		if (esFinDeSemana) {
-			cluster.franjas.finDeSemana += 1;
-		} else if (horaDelDia >= 22 || horaDelDia < 6) {
-			cluster.franjas.nocturna += 1;
-		} else if (horaDelDia >= 8 && horaDelDia < 18) {
-			cluster.franjas.laboral += 1;
-		}
+
+		// Se acumulan horasEstancia distribuidas por franja real para que visitas
+		// cortas no distorsionen la clasificación de casa o trabajo frente a
+		// estancias sustancialmente más largas.
+		const franjas = desglosarHorasPorFranja(estancia.desde, estancia.hasta);
+		cluster.franjas.nocturna += franjas.nocturna;
+		cluster.franjas.laboral += franjas.laboral;
+		cluster.franjas.finDeSemana += franjas.finDeSemana;
 	}
 
 	return clusters.map(({ diasUnicos, ...cluster }) => ({

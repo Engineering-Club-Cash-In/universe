@@ -180,3 +180,38 @@ describe("calcularUbicacionesClave — sin historial", () => {
 		expect(calcularUbicacionesClave([])).toEqual([]);
 	});
 });
+
+describe("calcularUbicacionesClave — ponderación por duración", () => {
+	test("estancias nocturnas largas superan en peso a múltiples paradas cortas de fin de semana", () => {
+		const mensajes: WialonMensajePosicion[] = [];
+		// 5 noches de semana (días 5 a 9): estancia nocturna de 10 horas cada una en CASA (21:00 a 07:00)
+		// y viaje a TRABAJO durante el día para separar las estancias
+		for (let dia = 5; dia <= 9; dia++) {
+			mensajes.push(msg(horaGtAEpoch(dia, 21), CASA));
+			mensajes.push(msg(horaGtAEpoch(dia + 1, 7), CASA));
+			mensajes.push(msg(horaGtAEpoch(dia + 1, 10), TRABAJO));
+			mensajes.push(msg(horaGtAEpoch(dia + 1, 16), TRABAJO));
+		}
+
+		// Fin de semana (día 10 = sábado): 8 paradas cortas de 25 min en CASA,
+		// intercaladas con viajes a otro punto para que no se fusionen
+		for (let parada = 0; parada < 8; parada++) {
+			const inicio = horaGtAEpoch(10, 8 + parada);
+			mensajes.push(msg(inicio, CASA));
+			mensajes.push(msg(inicio + 25 * 60, CASA));
+			mensajes.push(msg(inicio + 35 * 60, TRABAJO));
+		}
+
+		const ubicaciones = calcularUbicacionesClave(mensajes);
+		const casa = ubicaciones.find((u) => Math.abs(u.lat - CASA.lat) < 0.001);
+
+		expect(casa).toBeDefined();
+		// 5 visitas nocturnas de 10h = 50h vs 8 visitas cortas de fin de semana = ~3.3h
+		// Con ponderación por visitas (5 vs 8), 5/13 = 38% (< 60%), fallaría.
+		// Con ponderación por horas (50h vs ~3.3h), 50/53.3 = 93.8% (>= 60%), es probable_casa.
+		expect(casa?.tipo).toBe("probable_casa");
+		expect(casa?.patron.nocturna).toBeGreaterThanOrEqual(40);
+		expect(casa?.patron.finDeSemana).toBeLessThan(10);
+	});
+});
+

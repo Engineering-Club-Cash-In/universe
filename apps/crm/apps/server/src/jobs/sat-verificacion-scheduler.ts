@@ -106,14 +106,13 @@ function esperarReintento(version: number): Promise<boolean> {
 async function ejecutarConReintentos(
 	intentoInicial: number,
 	version: number,
+	objetivoProgramado: Date,
 ): Promise<void> {
 	let intento = intentoInicial;
 	while (intento <= MAX_INTENTOS_AUTOMATICOS && schedulerEstaActivo(version)) {
 		// Si otra instancia ya termino la corrida del dia mientras esperabamos
 		// el candado, no iniciamos una segunda corrida automatica.
-		const loteActual = await ultimoLoteAutomaticoDesde(
-			objetivoDeHoyEnGuatemala(new Date()),
-		);
+		const loteActual = await ultimoLoteAutomaticoDesde(objetivoProgramado);
 		if (!schedulerEstaActivo(version) || loteActual?.estado === "ok") return;
 
 		let estadoResultado: "ok" | "omitida" | "otro" = "otro";
@@ -172,7 +171,6 @@ async function ejecutarConReintentos(
 	}
 }
 
-
 async function ejecutarVerificacionProgramada(version: number): Promise<void> {
 	if (!schedulerEstaActivo(version)) return;
 	const objetivo = objetivoDeHoyEnGuatemala(new Date());
@@ -191,7 +189,7 @@ async function ejecutarVerificacionProgramada(version: number): Promise<void> {
 		return;
 	}
 
-	await ejecutarConReintentos(intentoInicial, version);
+	await ejecutarConReintentos(intentoInicial, version, objetivo);
 }
 
 function programarSiguienteEjecucion(version: number): void {

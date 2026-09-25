@@ -424,6 +424,19 @@
     }),
   );
 
+  /**
+   * Nombre del índice único parcial que garantiza UNA sola mora activa por
+   * crédito.
+   *
+   * Vive como constante y no como literal suelto porque el código que atrapa
+   * el 23505 de este índice (ver `procesarMoras` en `controllers/latefee.ts`)
+   * tiene que comparar contra el MISMO nombre: `pg` expone el nombre del
+   * índice violado en `error.constraint`, y si el literal del `catch` y el de
+   * la definición se separaran, el `catch` dejaría de reconocer la carrera
+   * benigna —o, peor, absorbería la violación de otra restricción—.
+   */
+  export const MORAS_CREDITO_UQ_ACTIVA = "moras_credito_uq_activa";
+
   export const moras_credito = customSchema.table(
     "moras_credito",
     {
@@ -447,7 +460,7 @@
       // Garantiza UNA sola mora activa por crédito. Bloquea a nivel BD la
       // condición de carrera de procesarMoras corriendo en paralelo (varias
       // réplicas) que insertaba filas activa=true duplicadas e inflaba el total.
-      uniqueIndex("moras_credito_uq_activa")
+      uniqueIndex(MORAS_CREDITO_UQ_ACTIVA)
         .on(t.credito_id)
         .where(sql`${t.activa} = true`),
     ]

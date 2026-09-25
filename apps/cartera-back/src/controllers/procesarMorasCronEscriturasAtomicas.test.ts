@@ -160,7 +160,7 @@ mock.module("../utils/structuredLogger", () => ({
 }));
 
 const { procesarMoras, hoyGuatemala } = await import("./latefee");
-const { creditos, moras_credito, moras_historial } = await import("../database/db/schema");
+const { creditos, moras_credito, moras_historial, MORAS_CREDITO_UQ_ACTIVA } = await import("../database/db/schema");
 
 const CREDITO_ID = 4242;
 
@@ -262,8 +262,11 @@ describe("procesarMoras — CREACION atómica (status + mora + historial)", () =
     expect(confirmados(moras_credito)).toEqual([]);
   });
 
-  it("con 23505 el crédito SÍ queda MOROSO (hay una mora activa que lo respalda) y se cuenta como omitido", async () => {
-    estado.insertMoraThrows = Object.assign(new Error("dup"), { code: "23505" });
+  it("con 23505 DEL ÍNDICE DE MORA ACTIVA el crédito SÍ queda MOROSO (hay una mora activa que lo respalda) y se cuenta como omitido", async () => {
+    estado.insertMoraThrows = Object.assign(new Error("dup"), {
+      code: "23505",
+      constraint: MORAS_CREDITO_UQ_ACTIVA,
+    });
 
     const r = await correr();
 
@@ -276,6 +279,35 @@ describe("procesarMoras — CREACION atómica (status + mora + historial)", () =
     expect(r.creadas).toBe(0);
     expect(succeededCount()).toBe(0);
     expect(skippedCount()).toBe(1);
+  });
+
+  it("un 23505 de OTRA restricción (la llave primaria) NO se traga: el crédito no queda MOROSO y el error se propaga", async () => {
+    // Una secuencia desincronizada —lo que deja una restauración de respaldo—
+    // hace que el `serial` de `mora_id` choque con `moras_credito_pkey`. Mismo
+    // código 23505, pero acá NO hay mora activa: tragárselo dejaba el crédito
+    // MOROSO sin mora y sin evento de CREACION, un estado que ninguna pasada
+    // posterior corrige porque todas parten de "hay mora activa".
+    estado.insertMoraThrows = Object.assign(new Error("llave duplicada"), {
+      code: "23505",
+      constraint: "moras_credito_pkey",
+    });
+
+    await expect(correr()).rejects.toThrow("llave duplicada");
+
+    expect(confirmados(creditos)).toEqual([]);
+    expect(confirmados(moras_credito)).toEqual([]);
+    expect(confirmados(moras_historial)).toEqual([]);
+    expect(estado.emitidos.some((e) => e.outcome === "failed" && e.operation === "process")).toBe(true);
+  });
+
+  it("un 23505 SIN nombre de restricción tampoco se traga: no hay con qué afirmar que la mora existe", async () => {
+    estado.insertMoraThrows = Object.assign(new Error("dup sin nombre"), { code: "23505" });
+
+    await expect(correr()).rejects.toThrow("dup sin nombre");
+
+    expect(confirmados(creditos)).toEqual([]);
+    expect(confirmados(moras_credito)).toEqual([]);
+    expect(confirmados(moras_historial)).toEqual([]);
   });
 
   it("el candado sigue vivo: cero filas del RETURNING → no se inserta mora ni historial y cuenta como omitido", async () => {

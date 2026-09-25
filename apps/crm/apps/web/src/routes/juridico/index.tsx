@@ -22,6 +22,7 @@ import {
 	etapaPermite,
 } from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
+import { DescartarBateria } from "@/components/inversiones/DescartarBateria";
 import { ApproveOpportunityModal } from "@/components/juridico/ApproveOpportunityModal";
 import {
 	LeadDetailModal,
@@ -510,12 +511,24 @@ function RouteComponent() {
 													</Badge>
 												</TableCell>
 												<TableCell className="text-right">
-													<Link
-														to="/juridico/inversionista/$batchId"
-														params={{ batchId: bateria.id }}
-													>
-														<Button size="sm">Trabajar</Button>
-													</Link>
+													{/* Las dos salidas de una batería pendiente, sin entrar:
+													    trabajarla, o descartarla si la compra no lleva
+													    contratos. Una "Por firmar" ya los tiene mandados. */}
+													<div className="flex items-center justify-end gap-2">
+														{bateria.status === "pendiente" && (
+															<DescartarBateria
+																batchId={bateria.id}
+																investorName={bateria.investorName}
+																variant="outline"
+															/>
+														)}
+														<Link
+															to="/juridico/inversionista/$batchId"
+															params={{ batchId: bateria.id }}
+														>
+															<Button size="sm">Trabajar</Button>
+														</Link>
+													</div>
 												</TableCell>
 											</TableRow>
 										))}

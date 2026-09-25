@@ -265,6 +265,14 @@ async function guardarContratoDeInversion(params: {
 	/** Lo armó una persona por fuera, no la plantilla. */
 	subidoAMano?: boolean;
 	/**
+	 * La aceptación de la compra que se leyó al empezar, antes de ir a
+	 * WeeTrust. Si con el candado tomado la batería ya es de otra compra (entró
+	 * un aviso nuevo mientras se generaba), no se guarda: el documento se armó
+	 * con los términos de la compra anterior, y guardarlo lo daba por de la
+	 * nueva —su marca, su fecha— y el Listo lo mandaba en el hilo que no era.
+	 */
+	aceptadaEn: Date;
+	/**
 	 * El contrato al que reemplaza, con el motivo por el que se anula.
 	 *
 	 * Va en la misma transacción que el nuevo: si dos personas reemplazan el
@@ -303,6 +311,15 @@ async function guardarContratoDeInversion(params: {
 		// Tampoco una que se completó en ese rato (se firmaron todos los que
 		// tenía): una cerrada no admite cambios, y guardar éste la reabría con
 		// un contrato nuevo que nadie pidió sobre una batería ya terminada.
+		if (
+			bateria &&
+			bateria.acceptedAt.getTime() !== params.aceptadaEn.getTime()
+		) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Entró otra compra sobre estos créditos mientras se generaba el contrato: no se guardó. Recargá la batería y volvé a emitirlo.",
+			});
+		}
 		if (bateria?.status === "descartada" || bateria?.status === "completada") {
 			throw new ORPCError("CONFLICT", {
 				message:
@@ -1040,6 +1057,7 @@ export const investorContractsRouter = {
 
 					const id = await guardarContratoDeInversion({
 						batchId: input.batchId,
+						aceptadaEn: bateria.acceptedAt,
 						investorId: bateria.investorId,
 						contractType: pedido.contractType,
 						contractName: pedido.contractName,
@@ -1282,6 +1300,7 @@ export const investorContractsRouter = {
 			try {
 				contractId = await guardarContratoDeInversion({
 					batchId: input.batchId,
+					aceptadaEn: bateria.acceptedAt,
 					investorId: bateria.investorId,
 					contractType: input.contractType,
 					contractName: input.contractName,

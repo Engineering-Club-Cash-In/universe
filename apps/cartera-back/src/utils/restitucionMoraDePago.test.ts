@@ -137,10 +137,30 @@ describe("CABLEADO: falsePayment anula y restituye en UNA transacción", () => {
 	};
 
 	it("delega el cuerpo entero adentro de db.transaction", async () => {
+		// La transacción ya no se abre acá: la abre
+		// `anularPagoYRestituirMoraSerializado`, que además la envuelve en el
+		// advisory lock por crédito —la misma cola que hacen `insertPayment` y
+		// `reversePayment`— para que anular y revertir no restituyan la mora
+		// cada uno por su lado. `falsePayment` solo la llama.
 		const cuerpo = await cuerpoFalsePayment();
-		const tx = cuerpo.indexOf("await db.transaction((tx) =>");
-		expect(tx).toBeGreaterThan(-1);
-		const llamada = cuerpo.indexOf("anularPagoYRestituirMora(tx");
+		expect(cuerpo).toContain("anularPagoYRestituirMoraSerializado({");
+
+		const texto = await Bun.file(
+			new URL("../controllers/anularPagoMora.ts", import.meta.url).pathname,
+		).text();
+		const desde = texto.indexOf(
+			"export async function anularPagoYRestituirMoraSerializado(",
+		);
+		expect(desde).toBeGreaterThan(-1);
+		const cuerpoSerializado = texto.slice(desde);
+
+		// El candado ABRAZA la transacción: si se invirtieran, la otra ruta se
+		// cuela entre la lectura del estado y la restitución.
+		const lock = cuerpoSerializado.indexOf("deps.withCreditLock(credito_id");
+		const tx = cuerpoSerializado.indexOf("deps.runTransaction(");
+		const llamada = cuerpoSerializado.indexOf("deps.anular(tx");
+		expect(lock).toBeGreaterThan(-1);
+		expect(tx).toBeGreaterThan(lock);
 		expect(llamada).toBeGreaterThan(tx);
 	});
 

@@ -26,7 +26,7 @@ import {
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
-import { anularPagoYRestituirMora } from "./anularPagoMora";
+import { anularPagoYRestituirMoraSerializado } from "./anularPagoMora";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
 import { calcularVentanaProporcional } from "../utils/functions/diasParticipacion";
@@ -1962,11 +1962,17 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   // Y no se puede juntar todo en UNA transacción, que sería lo natural:
   // `withPendingReturnCreditLocks` abre su PROPIA conexión (`lockPool`) y toma
   // `FOR NO KEY UPDATE` sobre la fila de `cartera.creditos` mientras corre su
-  // callback. `anularPagoYRestituirMora` pide `FOR UPDATE` sobre esa MISMA fila
-  // —el candado que abre el orden del módulo de mora— desde la conexión de la
-  // transacción: los dos modos entran en conflicto, así que meter la anulación
-  // adentro del callback la dejaría esperando un candado que solo se suelta
-  // cuando el callback termine. Bloqueo contra uno mismo.
+  // callback. `anularPagoYRestituirMoraSerializado` pide `FOR UPDATE` sobre esa
+  // MISMA fila —el candado que abre el orden del módulo de mora— desde la
+  // conexión de la transacción: los dos modos entran en conflicto, así que
+  // meter la anulación adentro del callback la dejaría esperando un candado que
+  // solo se suelta cuando el callback termine. Bloqueo contra uno mismo.
+  //
+  // Por eso el guard de devolución pendiente NO se movió acá adentro sino que
+  // se DUPLICÓ donde sí puede decidir a tiempo: la anulación lo revalida ella
+  // misma, sobre la fila que ya tiene candada, y aborta su transacción antes de
+  // escribir nada. Este `withPendingReturnCreditLocks` de abajo sigue siendo el
+  // portero de los espejos.
   //
   // Invertir el orden resuelve las dos cosas sin tocar esa arquitectura:
   //
@@ -1991,9 +1997,18 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   // El cuerpo vive en `anularPagoMora.ts` —no acá— para poder ejercerse en una
   // prueba: varios tests registran un `mock.module("./payments")` global y este
   // módulo desaparece en la corrida completa.
-  const updatedCount = await db.transaction((tx) =>
-    anularPagoYRestituirMora(tx as unknown as typeof db, { pago_id, credito_id })
-  );
+  // Y va SERIALIZADA: la anulación hace fila en el mismo advisory lock por
+  // crédito que `insertPayment` y `reversePayment`, porque la reversa restituye
+  // exactamente la misma mora que esta anulación y sin cola compartida las dos
+  // la devolvían por separado (ver el bloque en `anularPagoMora.ts`).
+  //
+  // Adentro de esa transacción se revalida, sobre la fila del crédito ya
+  // candada, que la devolución a CUBE no esté pendiente: si lo está, no se
+  // marca nada y el 422 que ve el operador es verdad.
+  const updatedCount = await anularPagoYRestituirMoraSerializado({
+    pago_id,
+    credito_id,
+  });
 
   // Mismo guard que obtenerCreditosConPagosPendientes/calcularYRegistrarPagosEspejo:
   // un crédito en PENDIENTE_AUTORIZACION no debe generar pagos espejo, ni siquiera

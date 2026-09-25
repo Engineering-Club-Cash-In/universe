@@ -436,3 +436,82 @@ describe("el pago pendiente que sobrevivió una corrida del cron", () => {
     expect(condicion).not.toContain("API_MANUAL");
   });
 });
+
+/**
+ * EL BLOQUEO POR DEVOLUCIÓN PENDIENTE SE DECIDE ANTES DE TOCAR NADA.
+ *
+ * El guard existía, pero corría DESPUÉS de esta transacción, en `falsePayment`:
+ * para cuando rechazaba, la boleta ya estaba marcada falsa y la mora ya estaba
+ * restituida —las dos commiteadas—, y lo único que veía el operador era un 422.
+ * Reintentaba, le salía 422 otra vez, y el pago seguía anulado desde el primer
+ * intento, con su espejo de inversionistas sin escribir.
+ *
+ * Ahora la pregunta se hace sobre la MISMA fila del crédito que esta
+ * transacción ya tiene candada, y el throw la aborta entera.
+ */
+describe("crédito con la devolución a CUBE pendiente de autorización", () => {
+  const CREDITO_BLOQUEADO = [
+    {
+      credito_id: CREDITO_ID,
+      numero_credito_sifco: "SIFCO-4242",
+      estado_devolucion: "PENDIENTE_AUTORIZACION",
+    },
+  ];
+
+  it("rechaza con el código que la ruta traduce a 422", async () => {
+    prepararBase({ pago: PAGO_CON_MORA, credito: CREDITO_BLOQUEADO });
+
+    await expect(anular()).rejects.toMatchObject({
+      code: "CREDIT_PENDING_RETURN_AUTHORIZATION",
+      creditos_bloqueados: [
+        {
+          credito_id: CREDITO_ID,
+          numero_credito_sifco: "SIFCO-4242",
+          estado_devolucion: "PENDIENTE_AUTORIZACION",
+        },
+      ],
+    });
+  });
+
+  it("NO marca la boleta ni restituye mora: el 422 dice la verdad", async () => {
+    prepararBase({ pago: PAGO_CON_MORA, credito: CREDITO_BLOQUEADO });
+
+    await expect(anular()).rejects.toThrow();
+
+    // Esto es el defecto entero: antes las dos cosas YA habían pasado.
+    expect(
+      estado.llamadas.some((l) => l.tabla === pagos_credito && l.via === "update"),
+    ).toBe(false);
+    expect(estado.updateMoraArgs.length).toBe(0);
+    expect(estado.resets.length).toBe(0);
+  });
+
+  it("el crédito se lee CON candado antes de decidir", async () => {
+    // Si se decidiera sobre una lectura sin candado, otro podría estar
+    // cambiando `estado_devolucion` en el mismo instante.
+    prepararBase({ pago: PAGO_CON_MORA, credito: CREDITO_BLOQUEADO });
+    await expect(anular()).rejects.toThrow();
+
+    expect(estado.llamadas[0]).toEqual({
+      tabla: creditos,
+      via: "select for update",
+    });
+  });
+
+  it("un crédito SIN devolución pendiente sigue anulándose normal", async () => {
+    // El guard no puede haberse vuelto un portazo para todos.
+    prepararBase({
+      pago: PAGO_CON_MORA,
+      credito: [
+        {
+          credito_id: CREDITO_ID,
+          numero_credito_sifco: "SIFCO-4242",
+          estado_devolucion: "NO_APLICA",
+        },
+      ],
+    });
+
+    expect(await anular()).toBe(1);
+    expect(estado.updateMoraArgs.length).toBe(1);
+  });
+});

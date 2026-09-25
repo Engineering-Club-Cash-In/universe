@@ -36,7 +36,7 @@ const cuerpoDeFalsePayment = (() => {
 describe("falsePayment: el reintento no duplica espejos", () => {
   it("la anulación va ANTES de escribir los espejos", () => {
     const anulacion = cuerpoDeFalsePayment.indexOf(
-      "anularPagoYRestituirMora(",
+      "anularPagoYRestituirMoraSerializado(",
     );
     const espejos = cuerpoDeFalsePayment.indexOf(
       "insertPagosCreditoInversionistas(",
@@ -69,7 +69,7 @@ describe("falsePayment: el reintento no duplica espejos", () => {
     // suya. Adentro del callback, la segunda espera un candado que solo se
     // suelta cuando el callback termina.
     const guard = cuerpoDeFalsePayment.indexOf("withPendingReturnCreditLocks(");
-    const anulacion = cuerpoDeFalsePayment.indexOf("anularPagoYRestituirMora(");
+    const anulacion = cuerpoDeFalsePayment.indexOf("anularPagoYRestituirMoraSerializado(");
 
     expect(anulacion).toBeLessThan(guard);
   });

@@ -82,6 +82,13 @@ export interface RegistrarEventoGpsInput {
 	velocidadKmh?: number;
 	/** Snapshot crudo que disparó la detección, se sanitiza y trunca antes de guardar. */
 	payloadCrudo?: unknown;
+	/**
+	 * SIFCO B4 que originó la detección (job de polling). Cuando viene, acota
+	 * la resolución de caso a ESE SIFCO puntual — si la unidad tiene más de
+	 * un vehículo/caso activo (D-10, reasignación), el evento no debe caer
+	 * en un caso no relacionado solo por ser el más reciente.
+	 */
+	numeroCreditoSifcoEsperado?: string;
 }
 
 export interface RegistrarEventoGpsResultado {
@@ -104,8 +111,18 @@ export interface RegistrarEventoGpsResultado {
  * apuntando a la misma unidad, se prioriza el que SÍ tiene caso activo — que
  * un vehículo de prueba sin caso comparta la unidad no debe tapar al caso
  * real que sí la usa.
+ *
+ * `numeroCreditoSifcoEsperado` (viene del job de polling cuando la unidad se
+ * originó de un SIFCO en B4): si se pasa, la búsqueda se acota a ESE SIFCO
+ * en vez de "cualquier caso activo" — sin esto, una unidad con más de un
+ * vehículo/caso activo (D-10) podía resolver al caso activo más reciente en
+ * vez del caso B4 que disparó la corrida, notificando/guardando el evento
+ * contra un caso no relacionado.
  */
-async function resolverVehiculoYCaso(wialonUnitId: number): Promise<{
+async function resolverVehiculoYCaso(
+	wialonUnitId: number,
+	numeroCreditoSifcoEsperado?: string,
+): Promise<{
 	vehicleId: string | null;
 	casoCobroId: string | null;
 }> {
@@ -114,7 +131,21 @@ async function resolverVehiculoYCaso(wialonUnitId: number): Promise<{
 	// misma unidad, se prioriza el caso más reciente (createdAt desc) en vez
 	// de dejar que el orden físico del heap scan de Postgres decida — sin
 	// esto, dos corridas del mismo job podían resolver a casos distintos
-	// para el mismo evento.
+	// para el mismo evento. Cuando hay SIFCO esperado, ya no hace falta
+	// desempatar por fecha: el filtro deja como mucho un caso por rama.
+	const filtroSifcoContrato = numeroCreditoSifcoEsperado
+		? eq(casosCobros.numeroCreditoSifco, numeroCreditoSifcoEsperado)
+		: and(
+				isNotNull(casosCobros.numeroCreditoSifco),
+				notLike(casosCobros.numeroCreditoSifco, "CRM-%"),
+			);
+	const filtroSifcoOportunidad = numeroCreditoSifcoEsperado
+		? eq(opportunities.numeroSifco, numeroCreditoSifcoEsperado)
+		: and(
+				isNotNull(opportunities.numeroSifco),
+				notLike(opportunities.numeroSifco, "CRM-%"),
+			);
+
 	const [porContrato, porOportunidad] = await Promise.all([
 		db
 			.select({ vehicleId: vehicles.id, casoCobroId: casosCobros.id })
@@ -131,8 +162,7 @@ async function resolverVehiculoYCaso(wialonUnitId: number): Promise<{
 				and(
 					eq(vehicles.wialonUnitId, wialonUnitId),
 					eq(casosCobros.activo, true),
-					isNotNull(casosCobros.numeroCreditoSifco),
-					notLike(casosCobros.numeroCreditoSifco, "CRM-%"),
+					filtroSifcoContrato,
 				),
 			)
 			.orderBy(desc(casosCobros.createdAt))
@@ -149,8 +179,7 @@ async function resolverVehiculoYCaso(wialonUnitId: number): Promise<{
 				and(
 					eq(vehicles.wialonUnitId, wialonUnitId),
 					eq(casosCobros.activo, true),
-					isNotNull(opportunities.numeroSifco),
-					notLike(opportunities.numeroSifco, "CRM-%"),
+					filtroSifcoOportunidad,
 				),
 			)
 			.orderBy(desc(casosCobros.createdAt))
@@ -226,6 +255,7 @@ export async function registrarEventoGps(
 ): Promise<RegistrarEventoGpsResultado> {
 	const { vehicleId, casoCobroId } = await resolverVehiculoYCaso(
 		input.wialonUnitId,
+		input.numeroCreditoSifcoEsperado,
 	);
 
 	const dedupKey = `${input.wialonUnitId}:${input.tipo}:${input.ocurridoAt.toISOString()}`;

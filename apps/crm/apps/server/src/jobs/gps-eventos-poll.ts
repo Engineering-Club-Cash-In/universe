@@ -68,6 +68,14 @@ const WIALON_ZONA_PAIS_ID = Number(process.env.WIALON_ZONA_PAIS_ID ?? 1);
 
 interface UnidadConCaso {
 	wialonUnitId: number;
+	/**
+	 * SIFCO en B4 que hizo que esta unidad entrara al universo de la corrida.
+	 * Se propaga hasta `registrarEventoGps` para que la resolución de caso
+	 * quede acotada a ESTE caso — sin esto, una unidad vinculada a más de un
+	 * vehículo/caso activo (reasignación, D-10) podía resolver contra el
+	 * caso activo más reciente en vez del caso B4 que originó la detección.
+	 */
+	numeroCreditoSifco: string;
 }
 
 /**
@@ -156,7 +164,10 @@ export async function unidadesConCasoActivo(
 
 	const [porContrato, porOportunidad] = await Promise.all([
 		db
-			.selectDistinct({ wialonUnitId: vehicles.wialonUnitId })
+			.selectDistinct({
+				wialonUnitId: vehicles.wialonUnitId,
+				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			})
 			.from(vehicles)
 			.innerJoin(
 				contratosFinanciamiento,
@@ -173,7 +184,10 @@ export async function unidadesConCasoActivo(
 				),
 			),
 		db
-			.selectDistinct({ wialonUnitId: vehicles.wialonUnitId })
+			.selectDistinct({
+				wialonUnitId: vehicles.wialonUnitId,
+				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			})
 			.from(vehicles)
 			.innerJoin(opportunities, eq(opportunities.vehicleId, vehicles.id))
 			.innerJoin(
@@ -188,11 +202,24 @@ export async function unidadesConCasoActivo(
 			),
 	]);
 
-	const unitIds = new Set<number>();
+	// Si la misma unidad aparece con más de un SIFCO B4 (varios vehículos
+	// compartiendo unidad, cada uno con su propio caso en B4), se queda con
+	// el primero visto — más adelante `resolverVehiculoYCaso` igual acota
+	// contra ESE SIFCO puntual, no contra "cualquier caso activo de la
+	// unidad", que es el bug que se corrige acá.
+	const porUnidad = new Map<number, string>();
 	for (const fila of [...porContrato, ...porOportunidad]) {
-		if (fila.wialonUnitId != null) unitIds.add(fila.wialonUnitId);
+		if (fila.wialonUnitId == null || fila.numeroCreditoSifco == null) {
+			continue;
+		}
+		if (!porUnidad.has(fila.wialonUnitId)) {
+			porUnidad.set(fila.wialonUnitId, fila.numeroCreditoSifco);
+		}
 	}
-	return Array.from(unitIds, (wialonUnitId) => ({ wialonUnitId }));
+	return Array.from(porUnidad, ([wialonUnitId, numeroCreditoSifco]) => ({
+		wialonUnitId,
+		numeroCreditoSifco,
+	}));
 }
 
 /**
@@ -217,6 +244,7 @@ interface EventoDetectado {
 	lon?: number;
 	velocidadKmh?: number;
 	telemetria: WialonTelemetriaUnidad;
+	numeroCreditoSifco: string;
 }
 
 /**
@@ -237,6 +265,12 @@ export function detectarTransiciones(
 	// Wialon) — en ese caso no se genera ni evalúa el evento, para no
 	// confundir "no sabemos" con "está afuera".
 	dentroDeGeocercaAhora: boolean | null = null,
+	// SIFCO B4 que hizo entrar esta unidad al universo de la corrida — se
+	// propaga hasta registrarEventoGps para acotar la resolución de caso.
+	// Default solo para no romper los tests unitarios existentes de esta
+	// función pura, que no ejercitan la resolución de caso; el caller real
+	// (ejecutarDeteccionEventosGps) siempre lo pasa.
+	numeroCreditoSifco = "",
 ): EventoDetectado[] {
 	const eventos: EventoDetectado[] = [];
 	const base = {
@@ -245,6 +279,7 @@ export function detectarTransiciones(
 		lon: telemetria.lon ?? undefined,
 		velocidadKmh: telemetria.velocidadKmh ?? undefined,
 		telemetria,
+		numeroCreditoSifco,
 	};
 
 	// Energía: transición de "con energía o desconocido" a "sin energía".
@@ -332,6 +367,9 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 	}
 
 	const unitIds = unidades.map((u) => u.wialonUnitId);
+	const sifcoPorUnidad = new Map(
+		unidades.map((u) => [u.wialonUnitId, u.numeroCreditoSifco]),
+	);
 
 	const [telemetrias, poligonoPais] = await conContextoGps(
 		{ origen: "gps-eventos-poll" },
@@ -414,7 +452,16 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 				: null,
 			ahora,
 			dentroDeGeocercaAhora,
+			// unitIds viene de unidades (unidadesConCasoActivo), así que siempre
+			// hay un SIFCO mapeado para cada telemetria.unitId de esta corrida.
+			sifcoPorUnidad.get(telemetria.unitId) ?? "",
 		);
+
+		// Si algún evento de esta unidad falla al registrarse, el snapshot de
+		// la unidad NO se guarda esta corrida: si se guardara igual, la
+		// próxima corrida compararía contra el estado ya "avanzado" y la
+		// transición fallida jamás se volvería a detectar ni reintentar.
+		let huboFalloEnUnidad = false;
 
 		for (const evento of eventos) {
 			eventosDetectados++;
@@ -427,15 +474,19 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 					lon: evento.lon,
 					velocidadKmh: evento.velocidadKmh,
 					payloadCrudo: sanitizarPayloadWialon(evento.telemetria),
+					numeroCreditoSifcoEsperado: evento.numeroCreditoSifco || undefined,
 				});
 				if (resultado.notificado) eventosNotificados++;
 			} catch (error) {
+				huboFalloEnUnidad = true;
 				console.error(
 					`${LOG_PREFIX} Error registrando evento ${evento.tipo} de la unidad ${evento.wialonUnitId}:`,
 					error,
 				);
 			}
 		}
+
+		if (huboFalloEnUnidad) continue;
 
 		const ultimaSenal = telemetria.ultimoMensajeAt;
 		const sinReportarAhora =

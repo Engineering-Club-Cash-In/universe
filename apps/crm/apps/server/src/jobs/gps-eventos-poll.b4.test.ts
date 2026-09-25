@@ -18,8 +18,14 @@ import { vehicles } from "../db/schema/vehicles";
 import { carteraBackClient } from "../services/cartera-back-client";
 import * as carteraBackIntegration from "../services/cartera-back-integration";
 
-let porContratoMock: { wialonUnitId: number | null }[] = [];
-let porOportunidadMock: { wialonUnitId: number | null }[] = [];
+let porContratoMock: {
+	wialonUnitId: number | null;
+	numeroCreditoSifco: string | null;
+}[] = [];
+let porOportunidadMock: {
+	wialonUnitId: number | null;
+	numeroCreditoSifco: string | null;
+}[] = [];
 
 function mockDb() {
 	return {
@@ -159,19 +165,39 @@ describe("CB-119 — unidadesConCasoActivo", () => {
 	});
 
 	test("junta unidades de ambos caminos (contrato y oportunidad) sin duplicar", async () => {
-		porContratoMock = [{ wialonUnitId: 100 }, { wialonUnitId: 200 }];
-		porOportunidadMock = [{ wialonUnitId: 200 }, { wialonUnitId: 300 }];
+		porContratoMock = [
+			{ wialonUnitId: 100, numeroCreditoSifco: "001" },
+			{ wialonUnitId: 200, numeroCreditoSifco: "002" },
+		];
+		porOportunidadMock = [
+			{ wialonUnitId: 200, numeroCreditoSifco: "002" },
+			{ wialonUnitId: 300, numeroCreditoSifco: "003" },
+		];
 
-		const resultado = await unidadesConCasoActivo(["001"]);
+		const resultado = await unidadesConCasoActivo(["001", "002", "003"]);
 		const ids = resultado.map((u) => u.wialonUnitId).sort((a, b) => a - b);
 		expect(ids).toEqual([100, 200, 300]);
 	});
 
 	test("filas con wialonUnitId null se descartan", async () => {
-		porContratoMock = [{ wialonUnitId: null }, { wialonUnitId: 100 }];
+		porContratoMock = [
+			{ wialonUnitId: null, numeroCreditoSifco: "001" },
+			{ wialonUnitId: 100, numeroCreditoSifco: "001" },
+		];
 
 		const resultado = await unidadesConCasoActivo(["001"]);
-		expect(resultado).toEqual([{ wialonUnitId: 100 }]);
+		expect(resultado).toEqual([
+			{ wialonUnitId: 100, numeroCreditoSifco: "001" },
+		]);
+	});
+
+	test("propaga el numeroCreditoSifco de cada unidad para acotar la resolución del caso", async () => {
+		porContratoMock = [{ wialonUnitId: 100, numeroCreditoSifco: "001" }];
+
+		const resultado = await unidadesConCasoActivo(["001"]);
+		expect(resultado).toEqual([
+			{ wialonUnitId: 100, numeroCreditoSifco: "001" },
+		]);
 	});
 });
 

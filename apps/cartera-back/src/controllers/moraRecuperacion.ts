@@ -265,8 +265,12 @@ export function nivelSembrado(previos: MoraLevelEvent[]): number {
  *     borraba una oportunidad REAL. Lo que liga las dos mitades es el id del
  *     pago (`pagoId`); con un contador común, el pago de OTRO que hubiera
  *     bajado adentro tapaba la restitución ajena y la oportunidad viva
- *     desaparecía del reporte. Lo que sí genera SUBE el techo, para que el
- *     `RECALCULO` de la mañana siguiente no cobre lo mismo otra vez.
+ *     desaparecía del reporte. El TECHO, en cambio, se repone por la
+ *     restitución ENTERA aunque lo generado esté suprimido: después de ella el
+ *     cliente vuelve a deber ese monto y el `RECALCULO` de la mañana siguiente
+ *     no puede cobrarlo otra vez. Importa sobre todo cuando entre el pago y su
+ *     reversa hubo una `DESACTIVACION` —el pago puso el crédito al día— que
+ *     dejó el techo en cero.
  *   * Un evento que sube pero NO supera el nivel (el rebote del `RECALCULO` de
  *     la mañana siguiente a una condonación) no suma y tampoco mueve el nivel:
  *     si lo bajara, el siguiente rebote volvería a cobrar lo ya contado.
@@ -415,7 +419,20 @@ export function plegarNivel(
 				restituido,
 			);
 			generado += restituido - suprimido;
-			nivel += restituido - suprimido;
+			// EL TECHO SE REPONE POR LA RESTITUCIÓN COMPLETA, aunque lo GENERADO
+			// esté suprimido: tras la restitución el cliente debe `montoNuevo` otra
+			// vez, y todo eso ya está contado —lo suprimido porque se contó antes,
+			// lo demás porque acaba de generarse—, así que el techo no puede quedar
+			// por debajo. `Math.max` y no una suma a secas porque el techo puede
+			// venir MÁS ALTO que la deuda viva (un pago de adentro no lo baja) y ahí
+			// subirlo otra vez lo inflaría.
+			//
+			// Sin el piso, una `DESACTIVACION` entre el pago y su reversa —el caso
+			// normal: el pago pone el crédito al día, lo saca del universo de mora, y
+			// después el pago se cae— dejaba el techo en cero mientras la deuda
+			// restituida revivía, y el `RECALCULO` de la mañana siguiente la cobraba
+			// como mora NUEVA: una foto de Q100 terminaba en Q200 de esperado.
+			nivel = Math.max(nivel + restituido - suprimido, evento.montoNuevo);
 			continue;
 		}
 		if (evento.montoNuevo > nivel) {

@@ -269,4 +269,48 @@ describe("espejo de contratos en cartera", () => {
 		});
 		expect(upsertInvestorContractDocument).not.toHaveBeenCalled();
 	});
+
+	test("si lo anulan mientras viaja el firmado, se vuelve a mandar oculto", async () => {
+		contrato = { ...FIRMADO };
+		// El "Anular" se guarda mientras cartera recibe el firmado: lo que quedó
+		// allá es la foto vieja, visible.
+		updateInvestorContractDocumentState.mockImplementationOnce(async () => {
+			contrato = { ...FIRMADO, status: "cancelled" };
+			return respuestaDeEstado;
+		});
+
+		expect(await espejarEstadoDeFirmaEnCartera("contrato-1")).toBe(true);
+
+		const enviados = updateInvestorContractDocumentState.mock.calls.map(
+			(llamada) => llamada[0].visible,
+		);
+		expect(enviados).toEqual([true, false]);
+	});
+
+	test("dos escrituras del mismo contrato no se cruzan: la segunda lee lo último", async () => {
+		contrato = { ...FIRMADO };
+		let soltarLaPrimera: () => void = () => {};
+		updateInvestorContractDocumentState.mockImplementationOnce(
+			() =>
+				new Promise((resolver) => {
+					soltarLaPrimera = () => resolver(respuestaDeEstado);
+				}),
+		);
+
+		const primera = espejarEstadoDeFirmaEnCartera("contrato-1");
+		await Bun.sleep(0);
+		// Se anula mientras la primera sigue en camino, y el anular espeja lo suyo.
+		contrato = { ...FIRMADO, status: "cancelled" };
+		const segunda = espejarEstadoDeFirmaEnCartera("contrato-1");
+		await Bun.sleep(0);
+
+		// La segunda espera su turno: no sale hasta que la primera termine.
+		expect(updateInvestorContractDocumentState).toHaveBeenCalledTimes(1);
+
+		soltarLaPrimera();
+		await Promise.all([primera, segunda]);
+
+		const ultima = updateInvestorContractDocumentState.mock.calls.at(-1)?.[0];
+		expect(ultima).toMatchObject({ estado_firma: "cancelled", visible: false });
+	});
 });

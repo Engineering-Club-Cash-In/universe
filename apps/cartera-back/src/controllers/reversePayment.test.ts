@@ -107,11 +107,24 @@ const activeCredit = {
 };
 const user = { usuario_id: 20, saldo_a_favor: "0" };
 
-type RecordedUpdate = { table: unknown; payload: Record<string, unknown> };
+type RecordedUpdate = {
+  table: unknown;
+  payload: Record<string, unknown>;
+  where?: unknown;
+};
 
 function createTransactionTx(
   payment: Record<string, unknown> = pendingPayment,
   recordedUpdates: RecordedUpdate[] = [],
+  /**
+   * Cuántas filas tiene la cuota del pago. La reversa lo consulta con un
+   * `COUNT(*)` para decidir entre BORRAR la fila (hay hermanas) o resetearla
+   * (es la única); el harness lo responde por la forma del SELECT y no por su
+   * posición en la cola, que cambia con cada paso nuevo de la reversa.
+   */
+  filasEnLaCuota = 1,
+  /** Cláusulas WHERE con las que la reversa pidió ese `COUNT(*)`. */
+  recordedCountWheres: unknown[] = [],
 ) {
   const selectResults: unknown[][] = [[payment], [activeCredit], [user], []];
   const takeRows = () => {
@@ -132,17 +145,31 @@ function createTransactionTx(
     Object.assign(Promise.resolve([]), {
       returning: () => Promise.resolve([]),
     });
+  const takeCount = (clause?: unknown) => {
+    recordedCountWheres.push(clause);
+    const rows = [{ count: filasEnLaCuota }];
+    return Object.assign(Promise.resolve(rows), {
+      limit: () => Promise.resolve(rows),
+      for: () => Promise.resolve(rows),
+    });
+  };
   return {
-    select: mock(() => ({
+    select: mock((fields?: Record<string, unknown>) => ({
       from: () => ({
         innerJoin: () => ({ where: takeRows }),
-        where: takeRows,
+        where: fields && "count" in fields ? takeCount : takeRows,
       }),
     })),
     update: mock((table: unknown) => ({
       set: (payload: Record<string, unknown>) => {
-        recordedUpdates.push({ table, payload });
-        return { where: updateWhere };
+        const recorded: RecordedUpdate = { table, payload };
+        recordedUpdates.push(recorded);
+        return {
+          where: (clause: unknown) => {
+            recorded.where = clause;
+            return updateWhere();
+          },
+        };
       },
     })),
     delete: mock(() => ({
@@ -160,8 +187,15 @@ function createPersistenceHarness(
   reverseInvestors: ReversePaymentDependencies["reverseInvestors"],
   payment: Record<string, unknown> = pendingPayment,
   recordedUpdates: RecordedUpdate[] = [],
+  filasEnLaCuota = 1,
+  recordedCountWheres: unknown[] = [],
 ) {
-  const tx = createTransactionTx(payment, recordedUpdates);
+  const tx = createTransactionTx(
+    payment,
+    recordedUpdates,
+    filasEnLaCuota,
+    recordedCountWheres,
+  );
   const runTransaction = mock(async (callback: (value: typeof tx) => Promise<unknown>) => {
     await callback(tx);
     throw new Error("synthetic later transaction failure");
@@ -321,5 +355,268 @@ describe("reversePayment limpia fecha_aplicado", () => {
       fecha_pago: null,
       fecha_aplicado: null,
     });
+  });
+});
+
+/**
+ * El saldo de una cuota vive REPLICADO en todas sus filas vivas (insertPayment
+ * estampa los `nuevo_*_restante` con `WHERE cuota_id = X AND credito_id = Y AND
+ * paymentFalse = false`). Si la reversa devuelve los restantes sólo en la fila
+ * que revierte, las hermanas se quedan con el saldo POSTERIOR al pago revertido:
+ * el pago siguiente distribuye contra ese saldo subestimado y cierra la cuota
+ * corta (crédito 9234: cuota 1 de Q2,998.48 cerrada con Q1,000.00 cobrados y
+ * Q1,998.48 estampados en la cuota 2).
+ *
+ * Por eso lo que se verifica acá no es "se escribió el valor" sino DÓNDE: el
+ * UPDATE de restantes tiene que ir filtrado por cuota + crédito + vivas, no por
+ * `pago_id`.
+ */
+function describirWhere(clause: unknown) {
+  const columnas: string[] = [];
+  const valores: unknown[] = [];
+  const walk = (node: any) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (typeof node.name === "string" && node.table) columnas.push(node.name);
+    else if ("value" in node && !Array.isArray(node.value)) valores.push(node.value);
+    if (Array.isArray(node.queryChunks)) node.queryChunks.forEach(walk);
+  };
+  walk(clause);
+  return { columnas, valores };
+}
+
+const LLAVES_RESTANTES = [
+  "capital_restante",
+  "interes_restante",
+  "iva_12_restante",
+  "seguro_restante",
+  "gps_restante",
+  "membresias",
+] as const;
+
+/** El UPDATE que replica el saldo trae SÓLO los seis restantes y nada más. */
+function esReplicaDeRestantes(update: RecordedUpdate) {
+  const llaves = Object.keys(update.payload);
+  return (
+    update.table === pagos_credito &&
+    llaves.length === LLAVES_RESTANTES.length &&
+    LLAVES_RESTANTES.every((llave) => llaves.includes(llave))
+  );
+}
+
+describe("reversePayment replica el saldo restaurado a toda la cuota", () => {
+  const noopInvestors = mock(async (
+    _creditoId: number,
+    _pagoId: number,
+    _onPersisted?: () => void,
+  ) => []) as unknown as ReversePaymentDependencies["reverseInvestors"];
+
+  // Pago de una cuota real: cobró 500 de capital, 80 de interés, 9.6 de IVA,
+  // 245 de seguro, 0 de GPS y 100 de membresías, y dejó sus restantes en 0.
+  const pagoDeCuota = {
+    ...pendingPayment,
+    cuota_id: 55,
+    capital_restante: "0",
+    interes_restante: "0",
+    iva_12_restante: "0",
+    seguro_restante: "0",
+    gps_restante: "0",
+    membresias: "0",
+    abono_capital: "500",
+    abono_interes: "80",
+    abono_iva_12: "9.6",
+    abono_seguro: "245",
+    abono_gps: "0",
+    membresias_pago: "100",
+  };
+
+  async function reversarYCapturarReplicas(
+    payment: Record<string, unknown>,
+    filasEnLaCuota: number,
+  ) {
+    const recordedUpdates: RecordedUpdate[] = [];
+    const { handler } = createPersistenceHarness(
+      noopInvestors,
+      payment,
+      recordedUpdates,
+      filasEnLaCuota,
+    );
+
+    await handler({
+      body: { credito_id: 10, pago_id: 30 },
+      set: { status: 0 },
+      telemetryLogger: createCarteraStructuredLogger({ sink: () => {} }),
+    });
+
+    return recordedUpdates.filter(esReplicaDeRestantes);
+  }
+
+  test("cuota con 3 filas: el saldo restaurado va a TODAS las filas vivas, no sólo a la revertida", async () => {
+    // La fila revertida se BORRA (hay hermanas), así que si el saldo no se
+    // replica el restante restaurado se pierde entero: las hermanas siguen
+    // diciendo "esta cuota ya no debe nada".
+    const replicas = await reversarYCapturarReplicas(pagoDeCuota, 3);
+
+    expect(replicas).toHaveLength(1);
+    expect(replicas[0]?.payload).toEqual({
+      capital_restante: "500",
+      interes_restante: "80",
+      iva_12_restante: "9.6",
+      seguro_restante: "245",
+      gps_restante: "0",
+      membresias: "100",
+    });
+
+    const { columnas, valores } = describirWhere(replicas[0]?.where);
+    expect(columnas).toEqual(["cuota_id", "credito_id", "paymentFalse"]);
+    expect(valores).toEqual([55, 10, false]);
+    // Si estuviera filtrado por pago_id volveríamos al defecto original.
+    expect(columnas).not.toContain("pago_id");
+  });
+
+  test("cuota con 1 sola fila: se replica el mismo saldo que la fila reseteada", async () => {
+    const replicas = await reversarYCapturarReplicas(pagoDeCuota, 1);
+
+    expect(replicas).toHaveLength(1);
+    expect(replicas[0]?.payload).toMatchObject({
+      capital_restante: "500",
+      seguro_restante: "245",
+      membresias: "100",
+    });
+    const { valores } = describirWhere(replicas[0]?.where);
+    expect(valores).toEqual([55, 10, false]);
+  });
+
+  test("pago que ESTABA pagado: también deja el saldo parejo en la cuota", async () => {
+    const replicas = await reversarYCapturarReplicas(
+      { ...pagoDeCuota, pagado: true, validationStatus: "validated" },
+      3,
+    );
+
+    expect(replicas).toHaveLength(1);
+    expect(replicas[0]?.payload).toMatchObject({ capital_restante: "500" });
+  });
+
+  test("un pago sin cuota (abono directo a capital) no replica nada", async () => {
+    // Sin `cuota_id` no hay cuota cuyo saldo replicar, y un UPDATE sin ese
+    // filtro barrería filas de otras cuotas del crédito.
+    const replicas = await reversarYCapturarReplicas(
+      { ...pagoDeCuota, cuota_id: null },
+      1,
+    );
+
+    expect(replicas).toHaveLength(0);
+  });
+
+  // `insertarPago` (registerPayment.ts) inserta los pagos de SOLO MORA / SOLO
+  // OTROS / SOLO CONVENIO con los seis `*_restante` en "0" literal, todos los
+  // `abono_*` en 0, y los engancha a la primera cuota PENDIENTE vía
+  // `getSpecialPaymentCuotaId` — no a una cuota que ellos hayan "pagado" (no
+  // pagaron ninguna). Si se replicara igual, `nuevo*Restante = 0 + 0 = 0` para
+  // los seis y el UPDATE estampa CERO en todas las filas vivas de esa cuota
+  // abierta, dejándola incobrable.
+  const pagoSoloMora = {
+    ...pendingPayment,
+    cuota_id: 55,
+    capital_restante: "0",
+    interes_restante: "0",
+    iva_12_restante: "0",
+    seguro_restante: "0",
+    gps_restante: "0",
+    membresias: "0",
+    abono_capital: "0",
+    abono_interes: "0",
+    abono_iva_12: "0",
+    abono_seguro: "0",
+    abono_gps: "0",
+    membresias_pago: "0",
+    mora: "150",
+  };
+
+  test("pago de SOLO MORA (todo en 0 salvo mora) sobre una cuota con más filas: NO replica", async () => {
+    const replicas = await reversarYCapturarReplicas(pagoSoloMora, 3);
+
+    expect(replicas).toHaveLength(0);
+  });
+
+  test("pago de SOLO OTROS (todo en 0 salvo otros): tampoco replica", async () => {
+    const pagoSoloOtros = { ...pagoSoloMora, mora: "0", otros: "200" };
+    const replicas = await reversarYCapturarReplicas(pagoSoloOtros, 3);
+
+    expect(replicas).toHaveLength(0);
+  });
+
+  // `reversePayment` ACEPTA filas anuladas (los únicos guards de admisión son el
+  // estado del crédito y el de INCOBRABLE) y tiene que seguir aceptándolas: hoy
+  // es la única vía que limpia la fila zombi con sus boletas e inversionistas.
+  // Lo que no debe hacer es replicar su saldo: `falsePayment` anula con sólo
+  // `pagado: false, paymentFalse: true` y CONSERVA los `abono_*`, así que la
+  // guarda de `aplicadoALaCuota === 0` no la atrapa, y la fila anulada está
+  // fuera de la contabilidad de la cuota (el saldo replicado se estampa con
+  // `paymentFalse = false`).
+  //
+  // Cuota de Q1,000: el pago A cobra 400 → se anula → el pago B cobra 600 y
+  // salda la cuota. Reversar A replicando dejaría el saldo en Q1,000 y el
+  // próximo pago le re-cobraría Q600 al cliente que ya no debe nada.
+  test("fila ya ANULADA (paymentFalse): la reversa corre pero NO replica saldo a las hermanas vivas", async () => {
+    const replicas = await reversarYCapturarReplicas(
+      {
+        ...pagoDeCuota,
+        paymentFalse: true,
+        pagado: false,
+        abono_capital: "400",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_seguro: "0",
+        membresias_pago: "0",
+      },
+      3,
+    );
+
+    expect(replicas).toHaveLength(0);
+  });
+});
+
+describe("reversePayment cuenta SÓLO las filas vivas de la cuota", () => {
+  const noopInvestors = mock(async (
+    _creditoId: number,
+    _pagoId: number,
+    _onPersisted?: () => void,
+  ) => []) as unknown as ReversePaymentDependencies["reverseInvestors"];
+
+  test("el COUNT que decide borrar-vs-resetear filtra por cuota, crédito y paymentFalse=false", async () => {
+    // Ese conteo decide si la fila se BORRA (hay hermanas) o se RESETEA (es la
+    // única). Filtrando sólo por `cuota_id`, una fila ya anulada
+    // (`paymentFalse = true`) bastaba para que diera >1 y se borrara la única
+    // fila viva: la réplica del saldo se quedaba sin destino y el restante
+    // restaurado se perdía igual que antes del fix. Con `paymentFalse = false`
+    // ese caso cae en la rama de reset, que conserva la fila con su saldo.
+    const recordedCountWheres: unknown[] = [];
+    const { handler } = createPersistenceHarness(
+      noopInvestors,
+      {
+        ...pendingPayment,
+        cuota_id: 55,
+        capital_restante: "0",
+        abono_capital: "500",
+      },
+      [],
+      1,
+      recordedCountWheres,
+    );
+
+    await handler({
+      body: { credito_id: 10, pago_id: 30 },
+      set: { status: 0 },
+      telemetryLogger: createCarteraStructuredLogger({ sink: () => {} }),
+    });
+
+    expect(recordedCountWheres).toHaveLength(1);
+    const { columnas, valores } = describirWhere(recordedCountWheres[0]);
+    expect(columnas).toEqual(["cuota_id", "credito_id", "paymentFalse"]);
+    expect(valores).toEqual([55, 10, false]);
   });
 });

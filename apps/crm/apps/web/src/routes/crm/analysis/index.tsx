@@ -393,7 +393,21 @@ function AnalysisPage() {
 				</p>
 			</div>
 
-			<Tabs defaultValue={search.stage || "analysis"} className="w-full">
+			{/* Controlado por la URL: el navbar y las notificaciones cambian de tab
+			aunque ya se esté en la página */}
+			<Tabs
+				value={search.stage || "analysis"}
+				onValueChange={(stage) =>
+					navigate({
+						search: (prev) => ({
+							...prev,
+							stage: stage as "analysis" | "investment" | "disbursement",
+						}),
+						replace: true,
+					})
+				}
+				className="w-full"
+			>
 				<TabsList className="mb-6">
 					<TabsTrigger value="analysis" className="flex items-center gap-2">
 						<FileText className="h-4 w-4" />

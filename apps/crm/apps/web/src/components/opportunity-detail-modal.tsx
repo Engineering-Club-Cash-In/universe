@@ -186,6 +186,12 @@ export function OpportunityDetailModal({
 			PERMISSIONS.canAccessClients(userRole),
 		queryKey: ["listQuotationsByOpportunity", opportunity?.id, userRole],
 	});
+	const contractualQuotation =
+		opportunityQuotationsQuery.data?.find(
+			(quotation) => quotation.status === "accepted",
+		) ??
+		opportunityQuotationsQuery.data?.[0] ??
+		null;
 
 	// Query for documents associated with the opportunity
 	const opportunityDocumentsQuery = useQuery({
@@ -773,10 +779,7 @@ export function OpportunityDetailModal({
 								);
 							}
 
-							const latestQuotation =
-								opportunityQuotationsQuery.data?.[0] || null;
-
-							if (!latestQuotation) {
+							if (!contractualQuotation) {
 								return (
 									<div className="rounded-lg border border-orange-300 border-dashed bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
 										<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
@@ -804,7 +807,7 @@ export function OpportunityDetailModal({
 									opportunityId={opportunity.id}
 									userRole={userRole ?? undefined}
 									opportunity={opportunity as any}
-									quotation={latestQuotation}
+									quotation={contractualQuotation}
 								/>
 							);
 						})()}
@@ -818,14 +821,11 @@ export function OpportunityDetailModal({
 								assignedUserId={opportunity.assignedUser?.id}
 								userRole={userRole}
 								quotation={
-									opportunityQuotationsQuery.data?.[0]
+									contractualQuotation
 										? {
-												amountToFinance: (
-													opportunityQuotationsQuery.data[0] as any
-												).amountToFinance,
-												totalFinanced: (
-													opportunityQuotationsQuery.data[0] as any
-												).totalFinanced,
+												amountToFinance:
+													contractualQuotation.amountToFinance,
+												totalFinanced: contractualQuotation.totalFinanced,
 											}
 										: null
 								}

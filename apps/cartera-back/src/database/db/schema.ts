@@ -377,6 +377,53 @@
     })
   );
 
+  // Cierre financiero oficial e inmutable. El Excel aprobado se consolida
+  // antes de persistir: una fila por asesor y período.
+  export const cierre_mora_oficial = customSchema.table(
+    "cierre_mora_oficial",
+    {
+      id: serial("id").primaryKey(),
+      periodo: date("periodo").notNull(),
+      asesor_id: integer("asesor_id")
+        .notNull()
+        .references(() => asesores.asesor_id),
+      asesor_nombre: text("asesor_nombre").notNull(),
+      capital_cierre: numeric("capital_cierre", { precision: 18, scale: 2 }).notNull(),
+      capital_mora_30: numeric("capital_mora_30", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      capital_mora_60: numeric("capital_mora_60", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      capital_mora_90: numeric("capital_mora_90", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      capital_mora_120: numeric("capital_mora_120", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      cantidad_mora_30: integer("cantidad_mora_30").notNull().default(0),
+      cantidad_mora_60: integer("cantidad_mora_60").notNull().default(0),
+      cantidad_mora_90: integer("cantidad_mora_90").notNull().default(0),
+      cantidad_mora_120: integer("cantidad_mora_120").notNull().default(0),
+      fecha_corte: timestamp("fecha_corte", { withTimezone: true }).notNull(),
+      regla_version: text("regla_version").notNull(),
+      porcentaje_mora: numeric("porcentaje_mora", { precision: 5, scale: 2 })
+        .notNull()
+        .default("1.12"),
+      fuente: text("fuente").notNull(),
+      fuente_hash: text("fuente_hash").notNull(),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+    },
+    (table) => ({
+      uqPeriodoAsesor: uniqueIndex("cierre_mora_oficial_periodo_asesor_unique").on(
+        table.periodo,
+        table.asesor_id,
+      ),
+    }),
+  );
+
   export const moras_credito = customSchema.table(
     "moras_credito",
     {
@@ -563,6 +610,7 @@
       banco_id: integer("banco_id").references(() => bancos.banco_id), // 👈 OPCIONAL
     numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }),
     registerBy:varchar("registerby",{length:150}).notNull(),
+    nexaPaymentEventId: integer("nexa_payment_event_id"),
       cuenta_empresa_id: integer("cuenta_empresa_id")
       .references(() => cuentasEmpresa.cuentaId), //
     pagoConvenio :numeric("pago_convenio",{precision:18,scale:2}).notNull(),
@@ -571,7 +619,49 @@
     monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }).notNull(),
     fecha_aplicado: timestamp("fecha_aplicado"), // Fecha en que se aplicó el pago al crédito
     origen_pago: origenPagoEnum("origen_pago"),
+  }, (table) => ({
+    cuotaIdx: index("idx_pagos_credito_cuota").on(table.cuota_id),
+  }));
+  export const nexa_credit_bindings = customSchema.table("nexa_credit_bindings", {
+    credito_id: integer("credito_id")
+      .primaryKey()
+      .references(() => creditos.credito_id, { onDelete: "cascade" }),
+    activo: boolean("activo").notNull().default(true),
+    expires_at: timestamp("expires_at", { withTimezone: true }),
+    max_payment_amount: numeric("max_payment_amount", { precision: 18, scale: 2 }),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   });
+  export const nexa_payment_nonces = customSchema.table("nexa_payment_nonces", {
+    nonce: varchar("nonce", { length: 150 }).primaryKey(),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  });
+  export const nexa_payment_events = customSchema.table(
+    "nexa_payment_events",
+    {
+      id: serial("id").primaryKey(),
+      provider: varchar("provider", { length: 20 }).notNull().default("NEXA"),
+      external_reference: varchar("external_reference", { length: 150 }).notNull(),
+      nonce: varchar("nonce", { length: 150 }).notNull(),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id),
+      amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+      currency: varchar("currency", { length: 3 }).notNull(),
+      payload_hash: varchar("payload_hash", { length: 64 }).notNull(),
+      status: varchar("status", { length: 20 }).notNull().default("processing"),
+      pago_id: integer("pago_id").references(() => pagos_credito.pago_id),
+      error: text("error"),
+      created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+      updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => ({
+      uqProviderReference: unique("uq_nexa_payment_events_provider_reference").on(
+        table.provider,
+        table.external_reference,
+      ),
+      uqNonce: uniqueIndex("uq_nexa_payment_events_nonce").on(table.nonce),
+    }),
+  );
   export const boletas = customSchema.table("boletas", {
     id: serial("id").primaryKey(),
     pago_id: integer("pago_id")

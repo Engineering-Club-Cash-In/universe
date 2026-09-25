@@ -71,7 +71,11 @@ mock.module("@cci/email", () => ({
   sendNewCreditNotification: mock(() => Promise.resolve()),
 }));
 
-const { insertCredit, findOrCreateAseguradora } = await import("./createCredit");
+const {
+  insertCredit,
+  findOrCreateAseguradora,
+  generatePaymentDates,
+} = await import("./createCredit");
 
 type Executor = Parameters<typeof findOrCreateAseguradora>[1];
 
@@ -122,6 +126,35 @@ describe("insertCredit", () => {
     expect(globalInsertCalls).toBe(0);
     expect(txInsertCalls).toBeGreaterThan(0);
     expect(set.status).toBe(500);
+  });
+
+  it("rechaza rollover sin fecha antes de abrir la transacción", async () => {
+    const set = { status: 200 };
+    const result = await insertCredit({
+      body: {
+        ...validCreditBody,
+        desplazar_primera_cuota_un_mes: true,
+      },
+      set,
+    });
+
+    expect(set.status).toBe(400);
+    expect(transactionCalls).toBe(0);
+    expect(result).toMatchObject({ message: "Validation failed" });
+  });
+});
+
+describe("generatePaymentDates", () => {
+  it("desplaza solo las cuotas regulares cuando la fecha ideal cruza de mes", () => {
+    expect(
+      generatePaymentDates(2, 2, new Date("2026-09-16T18:00:00.000Z"), true),
+    ).toEqual(["2026-09-16", "2026-11-02", "2026-12-02"]);
+  });
+
+  it("clampa el día en el mes efectivo después del rollover", () => {
+    expect(
+      generatePaymentDates(1, 29, new Date("2026-01-15T18:00:00.000Z"), true),
+    ).toEqual(["2026-01-15", "2026-03-29"]);
   });
 });
 

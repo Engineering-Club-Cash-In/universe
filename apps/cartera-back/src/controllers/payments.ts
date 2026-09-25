@@ -39,6 +39,13 @@ import {
   PendingReturnAuthorizationError,
   PENDING_RETURN_AUTHORIZATION_CODE,
 } from "../utils/pendingReturnGuard";
+import { esCube } from "../utils/devolucionCompletada";
+import {
+  resolverAbonosNoLiquidados,
+  type AbonoNoLiquidado,
+} from "../utils/abonosNoLiquidados";
+
+export { resolverAbonosNoLiquidados, type AbonoNoLiquidado };
 
 export const crearResumenAbonosCuota = (input: Parameters<
   typeof calcularResumenAbonosCuota
@@ -56,6 +63,35 @@ export const crearResumenAbonosCuota = (input: Parameters<
 // Se redefine local (igual que investor.ts) para no acoplar la carga de este módulo
 // con assignCapital. Toda compra de cartera se le hace a Cube.
 const CUBE_ID = 86;
+
+// `esCube` se importa de devolucionCompletada.ts (no se redefine acá): debe
+// ser EXACTAMENTE el mismo criterio que usa abonosCapital.ts al decidir si
+// generar una CANCELACION, o una fila histórica de CUBE con ID distinto
+// pasaría el filtro de creación allá y quedaría igual excluida de todo
+// cálculo acá — el mismo dato fantasma que este guard evita.
+
+/**
+ * ¿A este inversionista le toca la devolución COMPLETA de su capital en este
+ * pago (crédito en VERIFICADO, o el inversionista saliendo del todo)?
+ *
+ * Único punto que decide esta regla — antes vivía repetida en tres lugares
+ * de insertPagosCreditoInversionistas (el cálculo de abono_capital, el `if`
+ * que lo aplica, y lo que se le pasa a resolverAbonosNoLiquidados), lo que
+ * dejaba abierta la posibilidad de que un cambio futuro actualizara uno y se
+ * olvidara de los otros dos.
+ *
+ * NUNCA es true para CUBE: CUBE es quien absorbe la cartera cuando los demás
+ * inversionistas salen, jamás "sale" él mismo. Tratarlo como saliente le
+ * devolvería su propio capital como si estuviera abandonando el crédito —
+ * exactamente el bug que dejó ~Q1.9M en filas CANCELACION a nombre de CUBE
+ * en producción, ninguna liquidada porque CUBE no pasa por ese flujo.
+ */
+const esDevolucionCompleta = (
+  inv: { inversionista_id: number; nombre: string; status_inversionista?: string | null },
+  estadoDevolucionCredito: string | null | undefined,
+): boolean =>
+  !esCube(inv) &&
+  (estadoDevolucionCredito === "VERIFICADO" || inv.status_inversionista === "pendiente_devolucion");
 
 type PendingReturnLockRow = {
   creditoId: number;
@@ -432,6 +468,7 @@ export async function getPayments(
     totalPages: Math.ceil(Number(count) / perPage),
   };
 }
+
 /**
  * Inserta los registros en pagos_credito_inversionistas para cada inversionista,
  * repartiendo los abonos según el porcentaje de participación (Big.js).
@@ -640,8 +677,7 @@ export async function insertPagosCreditoInversionistas(
     console.log(`   Nombre: ${inv.nombre}`);
     console.log(`   inversionista_id: ${inv.inversionista_id}`);
 
-    const isCube =
-      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+    const isCube = esCube(inv);
 
     console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
 
@@ -915,9 +951,13 @@ export async function insertPagosCreditoInversionistas(
       `   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`
     );
 
-    const aplicarDevolucionCube = currentCredit?.estado_devolucion === 'VERIFICADO';
+    // Ver esDevolucionCompleta (arriba del archivo) para la regla completa y
+    // por qué nunca aplica a CUBE. `aplicarDevolucionCube` se conserva aparte
+    // solo para distinguir en el log si el motivo fue el crédito en
+    // VERIFICADO o el inversionista en pendiente_devolucion.
+    const aplicarDevolucionCube = !isCube && currentCredit?.estado_devolucion === 'VERIFICADO';
 
-    if (aplicarDevolucionCube || inv.status_inversionista === "pendiente_devolucion") {
+    if (esDevolucionCompleta(inv, currentCredit?.estado_devolucion)) {
       // 🆕 CASO ESPECIAL:
       // - crédito con devolucion_cube=true, o
       // - inversionista en pendiente_devolucion.
@@ -970,24 +1010,6 @@ export async function insertPagosCreditoInversionistas(
       );
     }
 
-    if (updateCredito) {
-      console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors:`);
-      console.log(`      credito_id: ${credito_id}`);
-      console.log(`      abono_capital: ${abono_capital.toNumber()}`);
-      console.log(`      addition: false (RESTA)`);
-      console.log(`      inversionista_id: ${inv.inversionista_id}`);
-
-      await processAndReplaceCreditInvestors(
-        credito_id,
-        abono_capital.toNumber(),
-        false,
-        inv.inversionista_id,
-        true
-      );
-    } else {
-      console.log(`\n   ⏭️  updateCredito=false → omitiendo UPDATE a creditos_inversionistas_espejo`);
-    }
-
     console.log(`   📊 Porcentajes:`);
     console.log(`      porcentaje_cash_in: ${inv.porcentaje_cash_in}`);
     console.log(
@@ -1006,41 +1028,38 @@ export async function insertPagosCreditoInversionistas(
         )
       );
 
-    let abonoCapitalId: number | null = null;
     // Abonos que esta fila de espejo consume (los que suma en su abono_capital).
     // Se marcan con el id de la fila después del insert: son "los que entraron en
     // la foto" y por lo tanto los únicos que la liquidación puede cerrar.
-    let abonoIdsConsumidos: number[] = [];
-    if (abonosNoLiquidados.length > 0) {
-      if (inv.status_inversionista === "pendiente_devolucion" || aplicarDevolucionCube) {
-        // 🆕 Si está en pendiente_devolucion o el crédito usa devolucion_cube,
-        // su abono_capital ya es el monto_aportado completo del espejo.
-        // Sumar abonos pendientes provocaría doble conteo.
-        console.log(
-          `   ⏭️  DEVOLUCIÓN COMPLETA: saltando ${abonosNoLiquidados.length} ` +
-            `abono(s) a capital pendiente(s) (no se suman al abono_capital ` +
-            `ni se linkea abono_capital_id)`
-        );
-      } else {
-        let montoAbono = new Big(0);
-        for (const abono of abonosNoLiquidados) {
-          if (abono.tipo === "CAPITAL") {
-            montoAbono = montoAbono.plus(abono.monto);
-          } else if (abono.tipo === "CANCELACION") {
-            // colocar el monto aportado del espejo como abono a capital, para que se liquide aunque el abono sea de cancelación
-            abono_capital = new Big(inv.monto_aportado || 0);
-          }
-        }
-        if (!montoAbono.eq(0)) {
-          abono_capital = abono_capital.plus(montoAbono);
-        }
-        abonoCapitalId = abonosNoLiquidados[0].abono_id;
-        // Todos, no solo el linkeado: el abono_capital de arriba los sumó a todos.
-        abonoIdsConsumidos = abonosNoLiquidados.map((a) => a.abono_id);
+    //
+    // La decisión de qué sumar y qué marcar como consumido vive en
+    // resolverAbonosNoLiquidados (arriba de esta función): CUBE nunca sale
+    // del crédito, así que una CANCELACION a su nombre (basura de una
+    // corrida anterior del bug de la línea de aplicarDevolucionCube) no se
+    // suma ni se marca consumida — si se marcara, quedaría `liquidado=true`
+    // sin que su monto haya entrado en ningún cálculo real.
+    const resuelto = resolverAbonosNoLiquidados({
+      abonosNoLiquidados,
+      abonoCapitalBase: abono_capital,
+      montoAportado: inv.monto_aportado,
+      devolucionCompleta: esDevolucionCompleta(inv, currentCredit?.estado_devolucion),
+      isCube,
+    });
+    abono_capital = resuelto.abonoCapital;
+    const abonoCapitalId = resuelto.abonoCapitalId;
+    const abonoIdsConsumidos = resuelto.abonoIdsConsumidos;
 
-        console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
-        console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
-      }
+    if (resuelto.saltado) {
+      // 🆕 Si está en pendiente_devolucion o el crédito usa devolucion_cube,
+      // su abono_capital ya es el monto_aportado completo del espejo.
+      // Sumar abonos pendientes provocaría doble conteo.
+      console.log(
+        `   ⏭️  DEVOLUCIÓN COMPLETA: saltando ${abonosNoLiquidados.length} ` +
+          `abono(s) a capital pendiente(s) (no se suman al abono_capital; ` +
+          `marcados ${abonoIdsConsumidos.length} para liquidar)`
+      );
+    } else if (abonosNoLiquidados.length > 0) {
+      console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): abono_capital ahora ${abono_capital.toString()} (tipo: ${abonosNoLiquidados[0].tipo})`);
     }
 
     // Validation 2: abono_capital must not exceed monto_aportado (prevents negative balance)
@@ -1061,6 +1080,11 @@ export async function insertPagosCreditoInversionistas(
       }
     }
 
+    // Se actualiza en la transacción atómica de abajo (Codex P1 fix):
+    // Descontar el espejo dentro de db.transaction(tx) garantiza que si falla
+    // la inserción de las fotos o el marcado de abonos, el débito al saldo del
+    // espejo también hace rollback y no se descuenta capital sin foto de pago.
+
     const resultado = {
       pago_id,
       inversionista_id: inv.inversionista_id,
@@ -1079,8 +1103,9 @@ export async function insertPagosCreditoInversionistas(
       estado_liquidacion: "NO_LIQUIDADO" as const,
       abono_capital_id: abonoCapitalId,
       fecha_pago: fechaDelPeriodo,
-      // No es columna del espejo: se separa antes del insert (ver abajo).
+      // No son columnas del espejo: se separan antes del insert (ver abajo).
       _abonoIdsConsumidos: abonoIdsConsumidos,
+      _updateCredito: updateCredito,
     };
 
     console.log(`   ✅ Resultado final para ${inv.nombre}:`, {
@@ -1100,25 +1125,42 @@ export async function insertPagosCreditoInversionistas(
   // 4. Insertar todos los registros (ESPEJO)
   const resolvedInserts = await Promise.all(inserts);
 
-  // `_abonoIdsConsumidos` es interno, no es columna: se separa antes del insert.
+  // `_abonoIdsConsumidos` y `_updateCredito` son internos, no son columnas: se separan antes del insert.
   const filas = resolvedInserts.map(
-    ({ _abonoIdsConsumidos, ...fila }) => fila
+    ({ _abonoIdsConsumidos, _updateCredito, ...fila }) => fila
   );
 
-  // 5. Insertar el espejo y marcar los abonos que consumió, ATADOS en una sola
-  //    transacción: o se guardan los dos o ninguno.
+  // 5. Descontar del espejo, insertar la foto de pagos y marcar los abonos consumidos,
+  //    TODO ATADO en una sola transacción: o se aplican todos o ninguno hace commit.
   //
-  //    🔴 Van juntos y no sueltos porque la marca (`pago_espejo_id`) es lo único
-  //    que dice "este abono ya entró en una foto que se va a pagar". Si el espejo
-  //    quedara guardado con el monto adentro pero los abonos sin marcar (falla el
-  //    update, se cae la conexión, se reinicia el proceso), la liquidación —que
-  //    cierra SOLO los marcados— los dejaría abiertos: se pagarían con esta foto
-  //    y el siguiente cálculo los agarraría de nuevo, pagándole DOS VECES el
-  //    mismo capital al inversionista.
-  //
-  //    Atados, si se rompe en el medio no queda foto tampoco y el cálculo se
-  //    rehace limpio la próxima vez.
+  //    🔴 Atomicidad garantizada (Codex P1 fix): el débito a creditos_inversionistas_espejo
+  //    (processAndReplaceCreditInvestors) corre dentro de la misma transacción usando `tx`.
+  //    Si el insert del espejo o el update de abonos_capital falla, el descuento al saldo
+  //    se revierte automáticamente (rollback) en vez de quedar descontado sin foto de pago.
   await db.transaction(async (tx) => {
+    // 5a. Descontar del espejo atómicamente con el abono_capital YA final
+    for (const origen of resolvedInserts) {
+      if (origen._updateCredito) {
+        console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors (en transacción):`);
+        console.log(`      credito_id: ${credito_id}`);
+        console.log(`      abono_capital: ${Number(origen.abono_capital)}`);
+        console.log(`      addition: false (RESTA)`);
+        console.log(`      inversionista_id: ${origen.inversionista_id}`);
+
+        await processAndReplaceCreditInvestors(
+          credito_id,
+          Number(origen.abono_capital),
+          false,
+          origen.inversionista_id,
+          true,
+          tx as any
+        );
+      } else {
+        console.log(`\n   ⏭️  updateCredito=false → omitiendo UPDATE a creditos_inversionistas_espejo para inv ${origen.inversionista_id}`);
+      }
+    }
+
+    // 5b. Insertar fotos en pagos_credito_inversionistas_espejo
     const filasInsertadas = await tx
       .insert(pagos_credito_inversionistas_espejo)
       .values(filas)
@@ -1127,8 +1169,7 @@ export async function insertPagosCreditoInversionistas(
         inversionista_id: pagos_credito_inversionistas_espejo.inversionista_id,
       });
 
-    // Se matchea por inversionista_id (hay una fila por inversionista) y no por
-    // índice, para no depender del orden que devuelve el INSERT.
+    // 5c. Vincular abonos consumidos con pago_espejo_id
     for (const insertada of filasInsertadas) {
       const origen = resolvedInserts.find(
         (r) => r.inversionista_id === insertada.inversionista_id
@@ -1429,8 +1470,7 @@ export async function insertPagosCreditoInversionistasV2(
 
   const inserts = [];
   for (const inv of inversionistasWithName) {
-    const isCube =
-      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+    const isCube = esCube(inv);
 
     const montoBaseCalculoV2 = new Big(inv.monto_aportado ?? 0);
 
@@ -1849,8 +1889,7 @@ export async function insertPagosCreditoInversionistasSpecial(
   );
   // 3. Calcular e insertar el abono proporcional de cada inversionista
   const inserts = inversionistasWithName.map(async (inv, idx) => {
-    const isCube =
-      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+    const isCube = esCube(inv);
 
     let abono_universo = new Big(0);
     let porcentaje = new Big(0);

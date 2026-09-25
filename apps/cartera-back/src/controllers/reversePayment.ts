@@ -27,6 +27,7 @@ import { esPagoAplicado } from "../utils/paymentStatus";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { refrescarProyeccionTrasReversa } from "./reversePaymentRecalculo";
 import {
+  buildInstallmentRemainderReplication,
   getRemainingPaymentPaidStatusAfterReversal,
   isReversibleIncobrablePayment,
   REVERSIBLE_CREDIT_STATUSES,
@@ -37,6 +38,7 @@ import {
   calcularCuotasConvenioCompletadas,
   recomputeCreditAfterCapital,
   shouldIncobrableInstallmentBePaid,
+  sumarAplicadoACuota,
 } from "./registerPaymentPolicy";
 import {
   emitInvoiceVoiding,
@@ -429,6 +431,62 @@ export function createReversePayment(
         pago.membresias_pago ?? 0,
       );
 
+      // ======================================================================
+      // 9️⃣.5️⃣ DEJAR EL SALDO DE LA CUOTA PAREJO EN TODAS SUS FILAS VIVAS
+      // ======================================================================
+      // El saldo de una cuota vive REPLICADO: `insertPayment` estampa los
+      // `nuevo_*_restante` sobre todas las filas vivas de la cuota. Devolver los
+      // restantes SÓLO en la fila revertida dejaba a las hermanas con el saldo
+      // POSTERIOR al pago revertido, el pago siguiente distribuía contra ese
+      // saldo subestimado y la cuota se cerraba corta (crédito 9234, cuota 1 de
+      // Q2,998.48 cerrada con Q1,000.00). Ver el helper para el detalle.
+      //
+      // Y hay un caso donde NO hay nada que replicar: los pagos de SOLO MORA /
+      // SOLO OTROS / SOLO CONVENIO (`insertarPago`, registerPayment.ts) se
+      // insertan con los seis abonos en cero y colgados de la primera cuota
+      // PENDIENTE. Si esta fila no le aportó nada a la cuota, revertirla no le
+      // cambia el saldo — y sí replicar estampa cero sobre una cuota abierta
+      // que nada tiene que ver con este pago. Ver el helper para el detalle.
+      const aplicadoALaCuota = sumarAplicadoACuota([pago]);
+      const replicaRestantesCuota = buildInstallmentRemainderReplication({
+        cuotaId: pago.cuota_id,
+        creditoId: credito_id,
+        restantes: {
+          capital: nuevoCapitalRestante,
+          interes: nuevoInteresRestante,
+          iva: nuevoIvaRestante,
+          seguro: nuevoSeguroRestante,
+          gps: nuevoGpsRestante,
+          membresias: nuevoMembresiasRestante,
+        },
+        aplicadoALaCuota,
+        // Y hay un segundo caso: la fila YA ESTÁ ANULADA. `falsePayment` anula
+        // con sólo `pagado: false, paymentFalse: true` — CONSERVA los `abono_*`,
+        // así que `aplicadoALaCuota` no es cero y la guarda de arriba no la
+        // atrapa. Pero la fila anulada está fuera de la contabilidad de la cuota
+        // (el saldo replicado se estampa con `paymentFalse = false`), así que
+        // devolverle sus abonos al saldo sería doble conteo: le estamparía a las
+        // hermanas VIVAS plata que ya no existe. La reversa de la fila anulada
+        // SÍ sigue (es la única vía que limpia la fila zombi); lo que se salta
+        // es la réplica. Ver el helper.
+        filaAnulada: pago.paymentFalse === true,
+      });
+
+      // Se llama DESPUÉS de la mutación de cada rama (reset de la fila, o su
+      // borrado) para que el valor replicado sea el último que queda escrito.
+      const replicarRestantesEnCuota = async () => {
+        if (!replicaRestantesCuota) return;
+        await tx
+          .update(pagos_credito)
+          .set(replicaRestantesCuota.payload)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, replicaRestantesCuota.cuotaId),
+              eq(pagos_credito.credito_id, replicaRestantesCuota.creditoId),
+              eq(pagos_credito.paymentFalse, false),
+            ),
+          );
+      };
 
       // ======================================================================
       // 🔟 ACTUALIZAR LA CUOTA ASOCIADA (marcar como NO pagada)
@@ -511,15 +569,29 @@ export function createReversePayment(
           })
           .where(eq(pagos_credito.pago_id, pago_id));
 
+        await replicarRestantesEnCuota();
+
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
       } else {
         // Pago parcial - verificar si es el único registro de la cuota
+        // El conteo tiene que contar sólo las filas VIVAS de ESTA cuota de
+        // ESTE crédito. Sin `paymentFalse = false`, una fila ya anulada bastaba
+        // para que el conteo diera >1 y se BORRARA la única fila viva: la
+        // réplica de restantes se quedaba sin destino y el saldo restaurado se
+        // perdía igual que antes del fix. Sin `credito_id`, un `cuota_id`
+        // compartido entre créditos contaminaría el conteo.
         const cantidadPagos = pago.cuota_id === null
           ? 0
           : (await tx
               .select({ count: sql<number>`COUNT(*)` })
               .from(pagos_credito)
-              .where(eq(pagos_credito.cuota_id, pago.cuota_id)))[0].count;
+              .where(
+                and(
+                  eq(pagos_credito.cuota_id, pago.cuota_id),
+                  eq(pagos_credito.credito_id, credito_id),
+                  eq(pagos_credito.paymentFalse, false),
+                ),
+              ))[0].count;
 
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
         await tx
@@ -531,6 +603,10 @@ export function createReversePayment(
           await tx
             .delete(pagos_credito)
             .where(eq(pagos_credito.pago_id, pago_id));
+
+          // La fila se va, pero su saldo restaurado es el de la CUOTA: sin esto
+          // las hermanas se quedaban con el saldo de después del pago borrado.
+          await replicarRestantesEnCuota();
         } else {
           // Es el único registro, resetear en vez de eliminar
           await tx
@@ -575,6 +651,8 @@ export function createReversePayment(
               saldo_a_favor_acreditado: "0",
             })
             .where(eq(pagos_credito.pago_id, pago_id));
+
+          await replicarRestantesEnCuota();
         }
       }
 

@@ -15,6 +15,7 @@ export const ROLES = {
 	INVESTMENT_MANAGER: "investment_manager",
 	SERVICE_CENTER_MANAGER: "service_center_manager",
 	VEHICLE_VERIFIER: "vehicle_verifier",
+	PARTNER: "partner",
 } as const;
 
 export const USER_ROLE_VALUES = [
@@ -31,6 +32,7 @@ export const USER_ROLE_VALUES = [
 	ROLES.INVESTMENT_MANAGER,
 	ROLES.SERVICE_CENTER_MANAGER,
 	ROLES.VEHICLE_VERIFIER,
+	ROLES.PARTNER,
 ] as const;
 
 export type UserRole = (typeof ROLES)[keyof typeof ROLES];
@@ -102,6 +104,11 @@ export const ROLE_CONFIG = {
 		color: "bg-lime-100 text-lime-800",
 		icon: "ClipboardCheck" as const,
 	},
+	[ROLES.PARTNER]: {
+		label: "Predio / Agencia",
+		color: "bg-rose-100 text-rose-800",
+		icon: "Store" as const,
+	},
 } as const;
 
 // Permission definitions - these match the server-side access control
@@ -124,10 +131,14 @@ export const PERMISSIONS = {
 	canAccessAdmin: (role: UserRole | string): boolean => role === ROLES.ADMIN,
 
 	// Entity Permissions
+	// El analista entra aquí porque en la asignación de inversión (50%) es
+	// quien captura la agencia del vehículo para los contratos, y muchas
+	// agencias todavía no están en el catálogo.
 	canCreateCompanies: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||
-		role === ROLES.SALES_SUPERVISOR,
+		role === ROLES.SALES_SUPERVISOR ||
+		role === ROLES.ANALYST,
 
 	canManageAllCompanies: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
@@ -209,6 +220,17 @@ export const PERMISSIONS = {
 		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
 
 	canViewAllCasosCobros: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
+
+	// Buró interno (lista negra propia). Cobros registra y consulta; dar de
+	// baja a alguien y cambiar las reglas de coincidencia queda en supervisión.
+	// Análisis ve las coincidencias desde la oportunidad (canAccessAnalysis).
+	canAccessBuroInterno: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.COBROS ||
+		role === ROLES.COBROS_SUPERVISOR,
+
+	canManageBuroInterno: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
 
 	// WhatsApp Module Access

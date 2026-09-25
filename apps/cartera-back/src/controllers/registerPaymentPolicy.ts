@@ -8,7 +8,10 @@ type BigInput = number | string | Big;
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
-  monto_boleta: z.number().min(0),
+  monto_boleta: z.union([
+    z.number().min(0),
+    z.string().regex(/^\d{1,16}\.\d{2}$/),
+  ]),
   fecha_pago: z.string(),
   llamada: z.string().optional(),
   renuevo_o_nuevo: z.string().optional(),
@@ -20,10 +23,44 @@ export const pagoSchema = z.object({
   url_boletas: z.array(z.string()),
   banco_id: z.number().int().positive().optional(),
   numeroAutorizacion: z.string().optional(),
-  registerBy: z.string().min(1),
+  registerBy: z.string().min(1).refine((value) => {
+    const normalized = value.trim().toUpperCase();
+    return normalized !== "NEXA" && !normalized.startsWith("NEXA:");
+  }),
   fecha_boleta: z.string(),
   origen_pago: z.enum(["transferencia", "cheque", "boleta"]).optional().default("transferencia"),
 });
+
+export const internalNexaPagoSchema = pagoSchema.extend({
+  fecha_pago: z.string().datetime({ offset: true })
+    .refine((value) => !Number.isNaN(Date.parse(value)), "Invalid payment date"),
+  fecha_boleta: z.string().date(),
+  registerBy: z.literal("NEXA"),
+});
+
+export const getInternalNexaPaymentDate = (fechaPago: string, eventId?: number) => {
+  if (eventId === undefined) return null;
+  const date = new Date(fechaPago);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Guatemala",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date).map(({ type, value }) => [type, value]));
+  return new Date(Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+    date.getUTCMilliseconds(),
+  ));
+};
 
 export const CREDIT_PENDING_CANCELLATION_ERROR = {
   code: "CREDIT_PENDING_CANCELLATION",
@@ -41,6 +78,17 @@ export const getCuotaIdForPaymentInsert = (
 ) => cuotaId ?? null;
 
 export const getRequestedInstallmentFloor = (_requestedInstallment: number) => 1;
+
+export const shouldApplyFinalSmallRemainderAsOther = ({
+  availableRemaining,
+  hasInsertedPayment,
+}: {
+  availableRemaining: BigInput;
+  hasInsertedPayment: boolean;
+}) =>
+  hasInsertedPayment &&
+  new Big(availableRemaining).gt(0) &&
+  new Big(availableRemaining).lte(25);
 
 export const shouldMarkInstallmentPaymentPaid = ({
   allRemainingZero,
@@ -1124,14 +1172,69 @@ export const calcularAplicacionConvenio = ({
  */
 export const crearEstampadorPagoConvenio = (
   montoConvenio: BigInput | null | undefined
-) => {
-  const monto = new Big(montoConvenio ?? 0);
+) => crearEstampadorDeMontoUnico(montoConvenio);
+
+/**
+ * Mismo sello de una sola fila, para el `otros` de la boleta.
+ *
+ * `otros` es un monto de la BOLETA, no de una cuota: el sobrante que el asesor
+ * tipea aparte (típicamente los centavos que no calzan con la cuota). Se
+ * estampaba en la primera cuota que RECORRÍA el cascadeo, y eso tiene dos
+ * efectos feos cuando esa cuota ya está cubierta por un pago sin validar:
+ * obliga a escribir una fila con `monto_aplicado = 0` —justo la que
+ * `debeInsertarFilaParcialCuota` existe para evitar— y deja el `otros` colgado
+ * de una cuota que no cobró nada. Caso real: crédito 8674, boleta de Q3,000
+ * con Q10.32 de otros; la cuota 6 ya estaba cubierta por un pago pendiente de
+ * validar, así que los Q10.32 quedaron en una fila fantasma de la cuota 6 y la
+ * cuota 7 —la que sí cobró los Q2,989.68— salió sin ellos.
+ *
+ * Con el sello, el `otros` viaja hasta la primera fila que la boleta va a
+ * escribir de todos modos.
+ */
+export const crearEstampadorOtros = (
+  otros: BigInput | null | undefined
+) => crearEstampadorDeMontoUnico(otros);
+
+/**
+ * Cuánto `otros` carga la fila que el loop está por escribir para esta cuota.
+ *
+ * `filaSeEscribeSinOtrosManual` es la misma pregunta de
+ * `debeInsertarFilaParcialCuota` pero SIN contar el `otros` que el operador
+ * tipeó: ¿esta cuota escribe fila por su propia plata (abonos, mora, el sello
+ * del convenio o el ajuste por fecha ideal de la cuota 1)? Si no, devuelve 0
+ * SIN consumir el sello, así la cuota se salta limpia y el `otros` sigue vivo
+ * para la siguiente. Si sí, se lleva el sello y el ajuste, que comparte el
+ * campo con lo tipeado.
+ *
+ * El ajuste va de los dos lados a propósito: su monto ya se descontó del
+ * disponible antes del loop, así que tiene que forzar la fila que lo registra
+ * (y que lo marca como cobrado). El `otros` manual no: ese es el que dejaba
+ * filas fantasma.
+ */
+export const resolverOtrosDeLaFila = ({
+  filaSeEscribeSinOtrosManual,
+  estamparOtros,
+  ajusteFechaIdeal = 0,
+}: {
+  filaSeEscribeSinOtrosManual: boolean;
+  estamparOtros: () => string;
+  ajusteFechaIdeal?: BigInput | null;
+}): Big =>
+  filaSeEscribeSinOtrosManual
+    ? new Big(estamparOtros()).plus(new Big(ajusteFechaIdeal ?? 0))
+    : new Big(0);
+
+/**
+ * Entrega el monto a la PRIMERA fila que lo pide y "0" a todas las demás.
+ */
+const crearEstampadorDeMontoUnico = (monto: BigInput | null | undefined) => {
+  const total = new Big(monto ?? 0);
   let estampado = false;
   return Object.assign(
     (): string => {
-      if (estampado || monto.lte(0)) return "0";
+      if (estampado || total.lte(0)) return "0";
       estampado = true;
-      return monto.toString();
+      return total.toString();
     },
     {
       /**
@@ -1140,7 +1243,7 @@ export const crearEstampadorPagoConvenio = (
        * (`debeInsertarFilaParcialCuota`) sin quemar el sello en la consulta.
        */
       pendiente: (): string =>
-        estampado || monto.lte(0) ? "0" : monto.toString(),
+        estampado || total.lte(0) ? "0" : total.toString(),
     }
   );
 };

@@ -105,6 +105,9 @@ mock.module("../database", () => ({
 
 mock.module("../utils/paymentAdvisoryLock", () => ({
   PAYMENT_ADVISORY_LOCK_NAMESPACE: 8765,
+  // registerPayment la importa desde develop; editarPago no la usa. Sin ella
+  // el módulo no carga.
+  holdsPaymentAdvisoryLock: () => false,
   withPaymentAdvisoryLock: async (clave: number, fn: () => Promise<any>) => {
     eventos.push(`lock:${clave}`);
     try {

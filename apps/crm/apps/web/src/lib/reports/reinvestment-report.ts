@@ -29,11 +29,7 @@ const BILLING_MODES = new Set([
 	"factura_cube_pequeno",
 	"sin_modalidad",
 ]);
-const PURCHASE_CLASSIFICATIONS = new Set([
-	"nueva_posicion",
-	"ampliacion_posicion",
-	"sin_clasificar",
-]);
+const FUNDING_ORIGINS = new Set(["compra_nueva", "reinversion"]);
 
 const MODE_MONEY_FIELDS = [
 	"reinversion_capital",
@@ -66,7 +62,94 @@ const isLiquidationComposition = (value: unknown) =>
 export function getCompatibleReportData(
 	input: unknown,
 ): ReinversionLiquidacionesResponse | undefined {
-	if (!isRecord(input) || input.contrato_version !== 3) return undefined;
+	if (!isRecord(input)) return undefined;
+	if (input.contrato_version === 3) {
+		const convertedPurchases = Array.isArray(input.comprasMes)
+			? input.comprasMes.map((row) =>
+					isRecord(row) ? { ...row, origen_dinero: "compra_nueva" } : row,
+				)
+			: input.comprasMes;
+		let comprasMes = convertedPurchases;
+		let ticketInversion = input.ticketInversion;
+		if (
+			Array.isArray(convertedPurchases) &&
+			convertedPurchases.every(
+				(row) =>
+					isRecord(row) &&
+					typeof row.modalidad_facturacion === "string" &&
+					typeof row.tipo_reinversion === "string" &&
+					isNonnegativeInteger(row.cantidad) &&
+					isMoney(row.monto),
+			)
+		) {
+			const grouped = new Map<
+				string,
+				{
+					modalidad_facturacion: string;
+					tipo_reinversion: string;
+					origen_dinero: "compra_nueva";
+					cantidad: number;
+					montoCentavos: number;
+				}
+			>();
+			for (const row of convertedPurchases) {
+				if (!isRecord(row)) continue;
+				const key = `${row.modalidad_facturacion}\u0000${row.tipo_reinversion}`;
+				const current = grouped.get(key);
+				grouped.set(key, {
+					modalidad_facturacion: String(row.modalidad_facturacion),
+					tipo_reinversion: String(row.tipo_reinversion),
+					origen_dinero: "compra_nueva",
+					cantidad: (current?.cantidad ?? 0) + Number(row.cantidad),
+					montoCentavos:
+						(current?.montoCentavos ?? 0) + cents(String(row.monto)),
+				});
+			}
+			comprasMes = [...grouped.values()].map(({ montoCentavos, ...row }) => ({
+				...row,
+				monto: (montoCentavos / 100).toFixed(2),
+			}));
+			const cantidad = [...grouped.values()].reduce(
+				(total, row) => total + row.cantidad,
+				0,
+			);
+			const montoCentavos = [...grouped.values()].reduce(
+				(total, row) => total + row.montoCentavos,
+				0,
+			);
+			const actual = isRecord(input.ticketInversion)
+				? input.ticketInversion.actual
+				: undefined;
+			if (isRecord(actual) && /^\d{4}-\d{2}$/.test(String(actual.periodo))) {
+				const rebuilt = {
+					periodo: String(actual.periodo),
+					cantidad,
+					monto_total: (montoCentavos / 100).toFixed(2),
+					ticket_promedio:
+						cantidad === 0
+							? "0.00"
+							: (montoCentavos / cantidad / 100).toFixed(2),
+				};
+				ticketInversion = {
+					actual: { ...rebuilt, variacion_porcentual: null },
+					historico: [rebuilt],
+				};
+			}
+		}
+		const detalleComprasMes = Array.isArray(input.detalleComprasMes)
+			? input.detalleComprasMes.map((row) =>
+					isRecord(row) ? { ...row, origen_dinero: "compra_nueva" } : row,
+				)
+			: input.detalleComprasMes;
+		return getCompatibleReportData({
+			...input,
+			contrato_version: 4,
+			comprasMes,
+			detalleComprasMes,
+			ticketInversion,
+		});
+	}
+	if (input.contrato_version !== 4) return undefined;
 	if (!isRecord(input.porTipo)) return undefined;
 	if (
 		!Object.keys(input.porTipo).every((key) => MODES.has(key)) ||
@@ -114,7 +197,7 @@ export function getCompatibleReportData(
 				isRecord(row) &&
 				BILLING_MODES.has(String(row.modalidad_facturacion)) &&
 				MODES.has(String(row.tipo_reinversion)) &&
-				PURCHASE_CLASSIFICATIONS.has(String(row.tipo_compra)) &&
+				FUNDING_ORIGINS.has(String(row.origen_dinero)) &&
 				isNonnegativeInteger(row.cantidad) &&
 				isMoney(row.monto),
 		)
@@ -181,7 +264,7 @@ export function getCompatibleReportData(
 				isRecord(row) &&
 				BILLING_MODES.has(String(row.modalidad_facturacion)) &&
 				MODES.has(String(row.tipo_reinversion)) &&
-				PURCHASE_CLASSIFICATIONS.has(String(row.tipo_compra)) &&
+				FUNDING_ORIGINS.has(String(row.origen_dinero)) &&
 				isMoney(row.monto),
 		)
 	)
@@ -221,16 +304,15 @@ const billingLabels: Record<string, string> = {
 };
 
 const purchaseLabels: Record<string, string> = {
-	nueva_posicion: "Nueva posición",
-	ampliacion_posicion: "Ampliación de posición",
-	sin_clasificar: "Sin clasificar",
+	compra_nueva: "Compra Nueva",
+	reinversion: "Reinversión",
 };
 
 export const getReinvestmentModeLabel = (value: string) =>
 	labels[value] ?? value;
 export const getBillingModeLabel = (value: string) =>
 	billingLabels[value] ?? value;
-export const getPurchaseClassificationLabel = (value: string) =>
+export const getFundingOriginLabel = (value: string) =>
 	purchaseLabels[value] ?? value;
 
 export type ReinvestmentModeRow = {
@@ -463,9 +545,9 @@ export function buildReinvestmentReportModel(input: unknown) {
 	const purchaseKey = (row: {
 		modalidad_facturacion: string;
 		tipo_reinversion: string;
-		tipo_compra: string;
+		origen_dinero: string;
 	}) =>
-		`${row.modalidad_facturacion}\u0000${row.tipo_reinversion}\u0000${row.tipo_compra}`;
+		`${row.modalidad_facturacion}\u0000${row.tipo_reinversion}\u0000${row.origen_dinero}`;
 	const purchasesByMode = data.comprasMes.every(
 		(summary) =>
 			data.detalleComprasMes.filter(
@@ -766,6 +848,19 @@ export function buildSecondarySummaryPresentation(
 	if (!data) return [];
 	const noVerificado = data.interesNeto.noVerificado;
 	const cube = data.interesNeto.cube;
+	const purchaseItems = (["compra_nueva", "reinversion"] as const).map(
+		(origin) => {
+			const rows = data.comprasMes.filter(
+				(item) => item.origen_dinero === origin,
+			);
+			const count = rows.reduce((total, item) => total + item.cantidad, 0);
+			return {
+				label: getFundingOriginLabel(origin),
+				value: amount(rows.map((item) => item.monto)),
+				meta: `${count} ${count === 1 ? "movimiento" : "movimientos"}`,
+			};
+		},
+	);
 	return [
 		{
 			key: "interest",
@@ -773,9 +868,9 @@ export function buildSecondarySummaryPresentation(
 			total: amount([noVerificado.interes, cube.interes]),
 			items: [
 				{
-					label: "Sin asignación fiscal",
+					label: "Interés de inversionistas",
 					value: Number(noVerificado.interes),
-					formula: `${q(Number(noVerificado.interes))} interés registrado sin asignación fiscal`,
+					formula: `${q(Number(noVerificado.interes))} interés de inversionistas registrado`,
 				},
 				{
 					label: "CUBE",
@@ -804,13 +899,9 @@ export function buildSecondarySummaryPresentation(
 		},
 		{
 			key: "purchases",
-			label: "Compras del mes",
+			label: "Capital colocado en el mes por origen",
 			total: amount(data.comprasMes.map((item) => item.monto)),
-			items: data.comprasMes.map((item) => ({
-				label: `${getBillingModeLabel(item.modalidad_facturacion)} · ${getPurchaseClassificationLabel(item.tipo_compra)}`,
-				value: Number(item.monto),
-				meta: `${getReinvestmentModeLabel(item.tipo_reinversion)} · ${item.cantidad} ${item.cantidad === 1 ? "compra" : "compras"}`,
-			})),
+			items: purchaseItems,
 		},
 	];
 }

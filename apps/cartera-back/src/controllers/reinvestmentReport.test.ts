@@ -144,6 +144,37 @@ test("distribuye un ajuste monetario grande en tiempo acotado", () => {
   expect(elapsedMs).toBeLessThan(250);
 });
 
+test("absorbe un centavo de deriva entre componentes de reinversión", () => {
+  expect(
+    buildLiquidationComposition({
+      totalCapital: "380.36",
+      paidTotal: "0.00",
+      reinvestedCapital: "380.36",
+      reinvestedRest: "390.53",
+      reinvestedTotal: "770.88",
+    }),
+  ).toEqual({
+    pagado: {
+      capital: "0.00",
+      resto: "0.00",
+      sin_clasificar: "0.00",
+      total: "0.00",
+    },
+    reinvertido: {
+      capital: "380.36",
+      resto: "390.52",
+      sin_clasificar: "0.00",
+      total: "770.88",
+    },
+    flujo: {
+      capital: "380.36",
+      resto: "390.52",
+      total: "770.88",
+    },
+    estado: "exacto",
+  });
+});
+
 test("preserva reinversión de capital dentro del capital al repartir un centavo", () => {
   const rows = canonicalizeLiquidationModeRows([
     {
@@ -620,47 +651,47 @@ test("resume compras por modalidad de facturación, tipo de reinversión y clasi
     {
       modalidad_facturacion: "interes_mas_iva",
       tipo_reinversion: "reinversion_capital",
-      tipo_compra: "nueva_posicion",
+      origen_dinero: "compra_nueva",
       monto: "10.005",
     },
     {
       modalidad_facturacion: "interes_mas_iva",
       tipo_reinversion: "reinversion_capital",
-      tipo_compra: "nueva_posicion",
+      origen_dinero: "compra_nueva",
       monto: "20.005",
     },
     {
       modalidad_facturacion: "sin_modalidad",
       tipo_reinversion: "sin_reinversion",
-      tipo_compra: "sin_clasificar",
+      origen_dinero: "reinversion",
       monto: "7.00",
     },
   ])).toEqual([
     {
       modalidad_facturacion: "interes_mas_iva",
       tipo_reinversion: "reinversion_capital",
-      tipo_compra: "nueva_posicion",
+      origen_dinero: "compra_nueva",
       cantidad: 2,
       monto: "30.01",
     },
     {
       modalidad_facturacion: "sin_modalidad",
       tipo_reinversion: "sin_reinversion",
-      tipo_compra: "sin_clasificar",
+      origen_dinero: "reinversion",
       cantidad: 1,
       monto: "7.00",
     },
   ]);
 });
 
-test("ticket histórico usa solo nuevas posiciones y compara el mes calendario anterior", () => {
+test("ticket histórico usa solo compras nuevas y compara el mes calendario anterior", () => {
   expect(buildPurchaseTicketHistory([
-    { periodo: "2026-06", tipo_compra: "nueva_posicion", monto: "100.00", cantidad: 2 },
-    { periodo: "2026-07", tipo_compra: "nueva_posicion", monto: "100.00" },
-    { periodo: "2026-07", tipo_compra: "ampliacion_posicion", monto: "900.00" },
-    { periodo: "2026-08", tipo_compra: "nueva_posicion", monto: "100.00" },
-    { periodo: "2026-08", tipo_compra: "nueva_posicion", monto: "200.00" },
-    { periodo: "2026-08", tipo_compra: "sin_clasificar", monto: "1000.00" },
+    { periodo: "2026-06", origen_dinero: "compra_nueva", monto: "100.00", cantidad: 2 },
+    { periodo: "2026-07", origen_dinero: "compra_nueva", monto: "100.00" },
+    { periodo: "2026-07", origen_dinero: "reinversion", monto: "900.00" },
+    { periodo: "2026-08", origen_dinero: "compra_nueva", monto: "100.00" },
+    { periodo: "2026-08", origen_dinero: "compra_nueva", monto: "200.00" },
+    { periodo: "2026-08", origen_dinero: "reinversion", monto: "1000.00" },
   ], "2026-08")).toEqual({
     actual: {
       periodo: "2026-08",
@@ -729,12 +760,12 @@ test("capital activo agrega compras pendientes por posición antes de restarlas"
   );
 });
 
-test("el resumen de compras usa modalidad de facturación y conserva tipo de reinversión", async () => {
+test("el resumen de movimientos clasifica el origen del dinero por tipo de operación", async () => {
   const source = await Bun.file(
     new URL("./reportes.ts", import.meta.url),
   ).text();
   const purchasesQuery = source.slice(
-    source.indexOf("const comprasRows"),
+    source.indexOf("const comprasCompletadasPredicate"),
     source.indexOf("let detalleInteresNeto"),
   );
 
@@ -744,7 +775,11 @@ test("el resumen de compras usa modalidad de facturación y conserva tipo de rei
   expect(purchasesQuery).toContain(
     "COALESCE(c.tipo_reinversion::text, 'sin_reinversion') AS tipo_reinversion",
   );
-  expect(purchasesQuery).toContain("c.tipo_compra::text AS tipo_compra");
+  expect(purchasesQuery).toContain("c.tipo_operacion IN ('compra_cartera', 'reinversion')");
+  expect(purchasesQuery).toContain("WHEN 'compra_cartera' THEN 'compra_nueva'");
+  expect(purchasesQuery).toContain("WHEN 'reinversion' THEN 'reinversion'");
+  expect(purchasesQuery).toContain("AND c.revertida_at IS NULL");
+  expect(purchasesQuery).not.toContain("c.tipo_compra::text AS origen_dinero");
 });
 
 test("compras legacy NULL y sin_reinversion se agregan bajo una sola llave pública", () => {
@@ -782,6 +817,19 @@ test("peso de flujo mixto usa capital más interés neto con IVA o ISR", async (
   expect(query).toContain("pe.abono_iva_12::numeric");
   expect(query).toContain("l.descuenta_impuestos = true OR l.total_isr::numeric > 0");
   expect(query).toContain("-(pe.abono_interes::numeric * 0.07)");
+});
+
+test("la proyección filtra pagado después de elegir la versión autoritativa de la cuota", async () => {
+  const source = await Bun.file(new URL("./reportes.ts", import.meta.url)).text();
+  const query = source.slice(
+    source.indexOf("cuotas_autoritativas AS"),
+    source.indexOf("SELECT\n      CASE", source.indexOf("cuotas_autoritativas AS")),
+  );
+  const authoritativeRow = query.indexOf("ORDER BY c.credito_id, c.numero_cuota, c.cuota_id DESC");
+  const unpaidFilter = query.lastIndexOf("pagado = false");
+
+  expect(authoritativeRow).toBeGreaterThan(-1);
+  expect(unpaidFilter).toBeGreaterThan(authoritativeRow);
 });
 
 test("consulta de interés no deja una coma antes de FROM", async () => {

@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { fetchReinvestmentLiquidaciones } from "../routers/reportes-cartera";
-import type { ReinversionLiquidacionesResponse } from "./cartera-back-client";
+import type {
+	FlujoCuotasPorInversionistaResponse,
+	ReinversionLiquidacionesResponse,
+} from "./cartera-back-client";
 import { CarteraBackClient } from "./cartera-back-client";
 
 const fetchTransport = (
@@ -9,8 +12,11 @@ const fetchTransport = (
 	) => ReturnType<typeof globalThis.fetch>,
 ) => Object.assign(handler, { preconnect: globalThis.fetch.preconnect });
 
-const response = (): ReinversionLiquidacionesResponse => ({
-	contrato_version: 3,
+const response = (): Extract<
+	ReinversionLiquidacionesResponse,
+	{ contrato_version: 4 }
+> => ({
+	contrato_version: 4,
 	porTipo: {
 		reinversion_capital: {
 			reinversion_capital: "40.00",
@@ -79,7 +85,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 		{
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "reinversion_capital",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			cantidad: 2,
 			monto: "80.00",
 		},
@@ -119,7 +125,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 			inversionista: "Ana",
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "reinversion_capital",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			monto: "40.00",
 		},
 		{
@@ -127,7 +133,7 @@ const response = (): ReinversionLiquidacionesResponse => ({
 			inversionista: "Ana",
 			modalidad_facturacion: "factura_cube",
 			tipo_reinversion: "reinversion_capital",
-			tipo_compra: "nueva_posicion",
+			origen_dinero: "compra_nueva",
 			monto: "40.00",
 		},
 	],
@@ -162,7 +168,7 @@ test("cliente HTTP propaga íntegro el contrato real de reinversión sin reconst
 	});
 
 	expect(actual).toEqual(expected);
-	expect(actual.contrato_version).toBe(3);
+	expect(actual.contrato_version).toBe(4);
 	expect(actual.porInversionista[0]?.capital_activo).toBe("1000.00");
 	expect(actual.detalle_estado).toEqual(expected.detalle_estado);
 	expect(actual.detalleInteresNeto).toEqual(expected.detalleInteresNeto);
@@ -175,6 +181,36 @@ test("cliente HTTP propaga íntegro el contrato real de reinversión sin reconst
 	expect(requestedMethod).toBe("GET");
 	expect(authorization).toBe("Bearer test-token");
 	expect(requestedBody).toBeUndefined();
+});
+
+test("cliente HTTP conserva contrato v3 durante el despliegue transitorio", async () => {
+	const current = response();
+	const legacy = {
+		...current,
+		contrato_version: 3 as const,
+		comprasMes: current.comprasMes.map(
+			({ origen_dinero: _origen, ...row }) => ({
+				...row,
+				tipo_compra: "nueva_posicion" as const,
+			}),
+		),
+		detalleComprasMes: current.detalleComprasMes.map(
+			({ origen_dinero: _origen, ...row }) => ({
+				...row,
+				tipo_compra: "nueva_posicion" as const,
+			}),
+		),
+	};
+	const client = new CarteraBackClient({
+		baseUrl: "https://cartera.test",
+		retryAttempts: 0,
+		accessTokenProvider: async () => "test-token",
+		fetchTransport: fetchTransport(async () => Response.json(legacy)),
+	});
+
+	await expect(
+		client.getReinversionLiquidaciones({ mes: 7, anio: 2026 }),
+	).resolves.toEqual(legacy);
 });
 
 test("router CRM devuelve sin pérdida el contrato recibido de cartera-back", async () => {
@@ -217,6 +253,91 @@ test("error total de cartera-back se propaga y no se convierte en datos parciale
 	await expect(
 		fetchReinvestmentLiquidaciones({ mes: 7, anio: 2026 }, client),
 	).rejects.toThrow("No fue posible generar el reporte");
+});
+
+test("la proyección al corte no reutiliza una respuesta cacheada", async () => {
+	const expected: FlujoCuotasPorInversionistaResponse = {
+		porInversionista: [],
+		totales: {
+			reinversion_total: "0.00",
+			cash_total: "0.00",
+			interes_bruto: "0.00",
+			iva: "0.00",
+			isr: "0.00",
+			total: "0.00",
+			externos: {
+				reinversion_total: "0.00",
+				cash_total: "0.00",
+				total: "0.00",
+			},
+			cube: {
+				reinversion_total: "0.00",
+				cash_total: "0.00",
+				total: "0.00",
+			},
+		},
+		contexto: {
+			cancelaciones_pendientes: {
+				cantidad_creditos: 0,
+				monto_bruto: "0.00",
+				capital_externo_asociado: "0.00",
+			},
+			cierres_naturales_periodo: {
+				cantidad_creditos: 0,
+				capital_externo_asociado: "0.00",
+			},
+		},
+	};
+	let llamadas = 0;
+	const client = new CarteraBackClient({
+		baseUrl: "https://cartera.test",
+		retryAttempts: 0,
+		enableCache: true,
+		accessTokenProvider: async () => "test-token",
+		fetchTransport: fetchTransport(async () => {
+			llamadas += 1;
+			return Response.json(expected);
+		}),
+	});
+
+	await client.getFlujoCuotasPorInversionista({
+		fechaInicio: "2026-10-01",
+		fechaFin: "2026-10-31",
+	});
+	await client.getFlujoCuotasPorInversionista({
+		fechaInicio: "2026-10-01",
+		fechaFin: "2026-10-31",
+	});
+
+	expect(llamadas).toBe(2);
+});
+
+test("cliente HTTP rechaza una proyección malformada", async () => {
+	const client = new CarteraBackClient({
+		baseUrl: "https://cartera.test",
+		retryAttempts: 0,
+		accessTokenProvider: async () => "test-token",
+		fetchTransport: fetchTransport(async () =>
+			Response.json({
+				porInversionista: [],
+				totales: {
+					reinversion_total: "0.00",
+					cash_total: "no-es-monto",
+					interes_bruto: "0.00",
+					iva: "0.00",
+					isr: "0.00",
+					total: "0.00",
+				},
+			}),
+		),
+	});
+
+	await expect(
+		client.getFlujoCuotasPorInversionista({
+			fechaInicio: "2026-10-01",
+			fechaFin: "2026-10-31",
+		}),
+	).rejects.toThrow("Contrato de proyección inválido");
 });
 
 test("cliente HTTP rechaza un contrato malformado antes de republicarlo por ORPC", async () => {

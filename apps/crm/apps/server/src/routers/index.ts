@@ -6,11 +6,13 @@ import { adminMiniagentRouter } from "./admin-miniagent";
 import { auctionRouter } from "./auctionVehicles";
 import { authRouter } from "./auth";
 import { bankAnalysisRouter } from "./bank-analysis";
+import { buroInternoRouter } from "./buro-interno";
 import { checksRouter } from "./checks";
 import { clientFormsRouter } from "./client-forms";
 import { cobrosRouter } from "./cobros";
 import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
+import { documentIntegrityProcedures } from "./document-integrity";
 import { insuranceRouter } from "./insurance";
 import { investorDocumentsRouter } from "./investor-documents";
 import { juridicoDashboardRouter } from "./juridico-dashboard";
@@ -25,6 +27,7 @@ import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
 import { seguimientosRouter } from "./seguimientos";
+import { trackerRouter } from "./tracker";
 import { uploadRouter } from "./upload";
 import { validationsRouter } from "./validations";
 import { vehiclesRouter } from "./vehicles";
@@ -38,9 +41,12 @@ export const crmAppRouter = {
 	getSalesStages: crmRouter.getSalesStages,
 	getCrmUsers: crmRouter.getCrmUsers,
 	getCompanies: crmRouter.getCompanies,
+	getCompaniesForContracts: crmRouter.getCompaniesForContracts,
 	getCompanyRelationshipStats: crmRouter.getCompanyRelationshipStats,
 	createCompany: crmRouter.createCompany,
 	updateCompany: crmRouter.updateCompany,
+	setCompanyRazonSocial: crmRouter.setCompanyRazonSocial,
+	setOpportunityContractParty: crmRouter.setOpportunityContractParty,
 	getLeads: crmRouter.getLeads,
 	getLeadById: crmRouter.getLeadById,
 	getLeadsStats: crmRouter.getLeadsStats,
@@ -99,6 +105,10 @@ export const crmAppRouter = {
 	updateCoDebtor: crmRouter.updateCoDebtor,
 	deleteCoDebtor: crmRouter.deleteCoDebtor,
 	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
+	// Consulta de mora por DPI contra cartera (fail-closed). Es la versión
+	// informativa para la pantalla: el gate que bloquea es `evaluarGateMoraDpi`
+	// y se aplica en los puntos de alta/cambio de DPI, no acá.
+	validarMoraPorDpi: crmRouter.validarMoraPorDpi,
 	// Verificación de QR del reverso de licencia contra Tránsito (Maicon)
 	verifyLicenseQr: licenseVerificationRouter.verifyLicenseQr,
 	listLicenseVerifications: licenseVerificationRouter.listLicenseVerifications,
@@ -187,6 +197,7 @@ export const cobrosAppRouter = {
 
 	// CRM Cobros — nuevas vistas
 	getMoraByEtapaYAsesor: cobrosRouter.getMoraByEtapaYAsesor,
+	getCierreMoraOficial: cobrosRouter.getCierreMoraOficial,
 	getMoraCobradaPorAsesor: cobrosRouter.getMoraCobradaPorAsesor,
 	getMoraRecuperacionPorAsesor: cobrosRouter.getMoraRecuperacionPorAsesor,
 	getCuotasPorFecha: cobrosRouter.getCuotasPorFecha,
@@ -213,6 +224,7 @@ export const adminAppRouter = {
 	toggleUserSuspension: adminRouter.toggleUserSuspension,
 	deleteUser: adminRouter.deleteUser,
 	createUser: adminRouter.createUser,
+	setPartnerCompanies: adminRouter.setPartnerCompanies,
 
 	// Admin Import routes
 	setupImportacion: adminImportRouter.setupImportacion,
@@ -234,6 +246,9 @@ export const formsAppRouter = {
 
 	// Bank Analysis routes (Análisis de estados de cuenta)
 	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
+	retryBankStatementCoverageSave:
+		bankAnalysisRouter.retryBankStatementCoverageSave,
+	confirmBankStatementCoverage: bankAnalysisRouter.confirmBankStatementCoverage,
 };
 
 /**
@@ -287,6 +302,7 @@ export const miscAppRouter = {
 	updateVendor: vendorsRouter.update,
 	deleteVendor: vendorsRouter.delete,
 	searchVendors: vendorsRouter.search,
+	lookupVendorByDpi: vendorsRouter.lookupByDpi,
 
 	// Notes routes
 	getEntityNotes: notesRouter.getEntityNotes,
@@ -433,6 +449,7 @@ export const appRouter = Object.assign(
 	legalAppRouter,
 	miscAppRouter,
 	reportsAppRouter,
+	documentIntegrityProcedures,
 );
 
 // Disbursement routes exported separately to avoid TS7056 with declaration emit.
@@ -454,6 +471,33 @@ export const disbursementRouter = {
 	// Dashboard jurídico manual
 	getJuridicoDashboardSnapshot: juridicoDashboardRouter.getSnapshot,
 	updateJuridicoDashboardSnapshot: juridicoDashboardRouter.updateSnapshot,
+};
+
+// Tracker de predios/agencias. Aparte del appRouter para no empujar TS7056.
+export const partnerTrackerRouter = {
+	getCasos: trackerRouter.getCasos,
+	getCasoById: trackerRouter.getCasoById,
+	getPartnerAgencies: trackerRouter.getPartnerAgencies,
+	getPartnerPasswordStatus: trackerRouter.getPartnerPasswordStatus,
+	changePartnerPassword: trackerRouter.changePartnerPassword,
+};
+
+// Buró interno (lista negra propia). Aparte del appRouter para no empujar TS7056.
+export const buroInternoProcedures = {
+	listBuroInterno: buroInternoRouter.listBuroInterno,
+	buscarCandidatosBuroInterno: buroInternoRouter.buscarCandidatosBuroInterno,
+	crearRegistroBuroInterno: buroInternoRouter.crearRegistroBuroInterno,
+	actualizarRegistroBuroInterno:
+		buroInternoRouter.actualizarRegistroBuroInterno,
+	desactivarRegistroBuroInterno:
+		buroInternoRouter.desactivarRegistroBuroInterno,
+	getHistorialBuroInterno: buroInternoRouter.getHistorialBuroInterno,
+	consultarBuroInterno: buroInternoRouter.consultarBuroInterno,
+	getReglasBuroInterno: buroInternoRouter.getReglasBuroInterno,
+	actualizarReglaBuroInterno: buroInternoRouter.actualizarReglaBuroInterno,
+	getBuroInternoOportunidad: buroInternoRouter.getBuroInternoOportunidad,
+	autorizarBuroInternoOportunidad:
+		buroInternoRouter.autorizarBuroInternoOportunidad,
 };
 
 export const manualVehicleRouter = {
@@ -480,4 +524,5 @@ export type AppRouter = typeof healthRouter &
 	typeof formsAppRouter &
 	typeof legalAppRouter &
 	typeof miscAppRouter &
-	typeof reportsAppRouter;
+	typeof reportsAppRouter &
+	typeof documentIntegrityProcedures;

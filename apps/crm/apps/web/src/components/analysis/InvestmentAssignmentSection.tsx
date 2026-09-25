@@ -3,7 +3,6 @@ import {
 	AlertCircle,
 	AlertTriangle,
 	Car,
-	CheckCircle2,
 	ChevronLeft,
 	ChevronRight,
 	ChevronsLeft,
@@ -22,6 +21,12 @@ import {
 } from "lucide-react";
 import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
+import {
+	ContractPartiesFields,
+	type ContractPartiesValue,
+	emptyContractParties,
+	toContractPartiesPayload,
+} from "@/components/contract-parties/ContractPartiesFields";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -46,7 +51,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import { client } from "@/utils/orpc";
 
 // Type for selected investor
@@ -106,6 +111,8 @@ export function InvestmentAssignmentSection({
 	// Estados para campos adicionales del detalle de crédito
 	const [editDireccion, setEditDireccion] = useState<string>("");
 	const [editNit, setEditNit] = useState<string>("");
+	const [contractParties, setContractParties] =
+		useState<ContractPartiesValue>(emptyContractParties);
 	// Default: si estamos del 1-20 del mes es 15, si es 21-31 es último día (31)
 	const getDefaultDiaPago = (): PaymentDay => {
 		const today = new Date();
@@ -214,6 +221,23 @@ export function InvestmentAssignmentSection({
 			setElegidoDesdeRecomendacionIA(
 				selectedOpportunity.diaPagoOriginalSistema != null,
 			);
+			// Partes del contrato: se precargan con lo que ya tenga la oportunidad
+			setContractParties({
+				vendedor: {
+					dpi: selectedOpportunity.vendedor?.dpi ?? "",
+					nombre: selectedOpportunity.vendedor?.name ?? "",
+					genero:
+						selectedOpportunity.vendedor?.gender === "male" ||
+						selectedOpportunity.vendedor?.gender === "female"
+							? selectedOpportunity.vendedor.gender
+							: "",
+				},
+				agencia: {
+					companyId: selectedOpportunity.empresa?.id ?? "",
+					nombre: selectedOpportunity.empresa?.name ?? "",
+					razonSocial: selectedOpportunity.empresa?.razonSocial ?? "",
+				},
+			});
 			// Limpiar inversionistas seleccionados
 			setSelectedInversionistas([]);
 			setIsEditingExisting(false);
@@ -230,6 +254,7 @@ export function InvestmentAssignmentSection({
 			nit,
 			diaPagoMensual,
 			elegidoDesdeRecomendacionIA,
+			partesContrato,
 		}: {
 			opportunityId: string;
 			inversionistas?: string;
@@ -237,6 +262,7 @@ export function InvestmentAssignmentSection({
 			nit: string;
 			diaPagoMensual: PaymentDay;
 			elegidoDesdeRecomendacionIA: boolean;
+			partesContrato: ReturnType<typeof toContractPartiesPayload>;
 		}) => {
 			return client.assignInvestorAndAdvance({
 				opportunityId,
@@ -246,6 +272,7 @@ export function InvestmentAssignmentSection({
 				nit: nit,
 				diaPagoMensual: diaPagoMensual,
 				elegidoDesdeRecomendacionIA,
+				...partesContrato,
 			});
 		},
 		onSuccess: () => {
@@ -476,6 +503,10 @@ export function InvestmentAssignmentSection({
 			nit: editNit,
 			diaPagoMensual: editDiaPagoMensual,
 			elegidoDesdeRecomendacionIA,
+			partesContrato: toContractPartiesPayload(
+				contractParties,
+				selectedOpportunity?.vehicle?.isNew,
+			),
 		});
 	};
 
@@ -637,7 +668,7 @@ export function InvestmentAssignmentSection({
 	}
 
 	return (
-		<div className="grid gap-6 lg:grid-cols-2">
+		<div className="grid items-start gap-4 lg:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]">
 			{/* List of opportunities */}
 			<Card>
 				<CardHeader>
@@ -675,107 +706,76 @@ export function InvestmentAssignmentSection({
 						</Alert>
 					) : (
 						<>
-							<div className="space-y-3">
-								{opportunities.map((opp) => (
-									<div
-										key={opp.id}
-										className={`cursor-pointer rounded-lg border p-4 transition-colors hover:bg-muted/50 ${
-											selectedOpportunityId === opp.id
-												? "border-primary bg-muted/50"
-												: ""
-										}`}
-										role="button"
-										tabIndex={0}
-										onClick={() => {
+								<div className="space-y-2">
+									{opportunities.map((opp) => {
+										const seleccionar = () => {
 											setSelectedOpportunityId(opp.id);
 											setSelectedInversionistas([]);
-										}}
-										onKeyDown={(e) => {
-											if (e.key === "Enter" || e.key === " ") {
-												e.preventDefault();
-												setSelectedOpportunityId(opp.id);
-												setSelectedInversionistas([]);
-											}
-										}}
-									>
-										<div className="flex items-center justify-between">
-											<div>
-												<p className="font-medium">
-													{opp.lead?.name || "Sin cliente"}
-												</p>
-												<p className="text-muted-foreground text-sm">
-													{opp.vehicle?.description || "Sin vehículo"}
-												</p>
-												<p className="font-mono text-[10px] text-muted-foreground/60">
-													ID: {opp.id.slice(0, 8)}
-												</p>
-											</div>
-											<div className="text-right">
-												<p className="font-medium">
-													{formatCurrency(opp.value)}
-												</p>
-												<div className="flex items-center gap-2">
-													{opp.hasInvestor ? (
-														<Badge variant="default">Con inversor</Badge>
-													) : (
-														<Badge variant="outline">Sin inversor</Badge>
-													)}
+										};
+										return (
+											<div
+												key={opp.id}
+												className={cn(
+													"cursor-pointer rounded-lg border px-3 py-2.5 transition-colors hover:bg-muted/50",
+													selectedOpportunityId === opp.id &&
+														"border-primary bg-muted/50",
+												)}
+												role="button"
+												tabIndex={0}
+												onClick={seleccionar}
+												onKeyDown={(e) => {
+													if (e.key === "Enter" || e.key === " ") {
+														e.preventDefault();
+														seleccionar();
+													}
+												}}
+											>
+												<div className="flex items-start justify-between gap-3">
+													<div className="min-w-0">
+														<p className="truncate font-medium text-sm">
+															{opp.lead?.name || "Sin cliente"}
+														</p>
+														<p className="truncate text-muted-foreground text-xs">
+															{opp.vehicle?.description || "Sin vehículo"}
+														</p>
+													</div>
+													<p className="shrink-0 font-medium text-sm tabular-nums">
+														{formatCurrency(opp.value)}
+													</p>
+												</div>
+												<div className="mt-2 flex items-center justify-between gap-2">
+													<div className="flex flex-wrap items-center gap-1">
+														<DataCheck
+															ok={!!opp.lead?.hasRequiredData}
+															icon={User}
+															label="Cliente"
+														/>
+														<DataCheck
+															ok={!!opp.vehicle?.hasRequiredData}
+															icon={Car}
+															label="Vehículo"
+														/>
+														<DataCheck
+															ok={opp.hasCreditData}
+															icon={CreditCard}
+															label="Crédito"
+														/>
+													</div>
+													<span
+														className={cn(
+															"shrink-0 text-xs",
+															opp.hasInvestor
+																? "font-medium text-emerald-700 dark:text-emerald-400"
+																: "text-muted-foreground",
+														)}
+													>
+														{opp.hasInvestor ? "Con inversor" : "Sin inversor"}
+													</span>
 												</div>
 											</div>
-										</div>
-
-										{/* Validation indicators */}
-										<div className="mt-2 flex flex-wrap gap-1">
-											<Badge
-												variant={
-													opp.lead?.hasRequiredData
-														? "secondary"
-														: "destructive"
-												}
-												className="text-xs"
-											>
-												<User className="mr-1 h-3 w-3" />
-												Cliente{" "}
-												{opp.lead?.hasRequiredData ? (
-													<CheckCircle2 className="ml-1 h-3 w-3" />
-												) : (
-													<AlertTriangle className="ml-1 h-3 w-3" />
-												)}
-											</Badge>
-											<Badge
-												variant={
-													opp.vehicle?.hasRequiredData
-														? "secondary"
-														: "destructive"
-												}
-												className="text-xs"
-											>
-												<Car className="mr-1 h-3 w-3" />
-												Vehículo{" "}
-												{opp.vehicle?.hasRequiredData ? (
-													<CheckCircle2 className="ml-1 h-3 w-3" />
-												) : (
-													<AlertTriangle className="ml-1 h-3 w-3" />
-												)}
-											</Badge>
-											<Badge
-												variant={
-													opp.hasCreditData ? "secondary" : "destructive"
-												}
-												className="text-xs"
-											>
-												<CreditCard className="mr-1 h-3 w-3" />
-												Crédito{" "}
-												{opp.hasCreditData ? (
-													<CheckCircle2 className="ml-1 h-3 w-3" />
-												) : (
-													<AlertTriangle className="ml-1 h-3 w-3" />
-												)}
-											</Badge>
-										</div>
-									</div>
-								))}
-							</div>
+										);
+									})}
+								</div>
 
 							{/* Paginación */}
 							{totalPages > 1 && (
@@ -834,94 +834,52 @@ export function InvestmentAssignmentSection({
 			<div>
 				{selectedOpportunity ? (
 					<Card>
-						<CardHeader className="pb-3">
-							<div className="flex items-center justify-between">
-								<CardTitle className="text-lg">Asignar Inversión</CardTitle>
-								<div className="flex items-center gap-2">
-									<Button
-										variant="outline"
-										size="sm"
-										onClick={() =>
-											handleOpenOpportunityModal(selectedOpportunity)
-										}
-									>
-										<Eye className="mr-1 h-4 w-4" />
-										Ver Detalle
-									</Button>
-									<Badge
-										variant="outline"
-										style={{
-											borderColor: selectedOpportunity.stage.color,
-											color: selectedOpportunity.stage.color,
-										}}
-									>
-										{selectedOpportunity.stage.closurePercentage}%
-									</Badge>
-								</div>
-							</div>
-							<div className="mt-2 text-muted-foreground text-sm">
-								<span className="font-medium">
-									{selectedOpportunity.lead?.name || "Sin cliente"}
-								</span>{" "}
-								- {formatCurrency(selectedOpportunity.value)}
-							</div>
-						</CardHeader>
-						<CardContent className="space-y-4">
-							{/* Validation summary */}
-							<div className="space-y-2">
-								<Label className="font-medium text-sm">
-									Estado de validación
-								</Label>
-								<div className="space-y-2 rounded-lg border bg-muted/30 p-3">
-									{/* Lead validation */}
-									<div className="flex items-center gap-2">
-										{selectedOpportunity.lead?.hasRequiredData ? (
-											<CheckCircle2 className="h-4 w-4 text-green-500" />
-										) : (
-											<AlertTriangle className="h-4 w-4 text-destructive" />
-										)}
-										<span className="text-sm">
-											Cliente:{" "}
-											{selectedOpportunity.lead?.hasRequiredData
-												? "Datos completos"
-												: `Faltan: ${selectedOpportunity.lead?.missingFields?.join(", ")}`}
-										</span>
+							<CardHeader className="gap-1">
+								<div className="flex items-start justify-between gap-3">
+									<div className="min-w-0">
+										<CardTitle className="text-lg">
+											{selectedOpportunity.lead?.name || "Sin cliente"}
+										</CardTitle>
+										<CardDescription className="flex flex-wrap gap-x-3">
+											<span>
+												{selectedOpportunity.vehicle?.description ||
+													"Sin vehículo"}
+											</span>
+											<span className="font-medium text-foreground tabular-nums">
+												{formatCurrency(selectedOpportunity.value)}
+											</span>
+											<span className="font-mono text-xs">
+												ID {selectedOpportunity.id.slice(0, 8)}
+											</span>
+										</CardDescription>
 									</div>
-
-									{/* Vehicle validation */}
-									<div className="flex items-center gap-2">
-										{selectedOpportunity.vehicle?.hasRequiredData ? (
-											<CheckCircle2 className="h-4 w-4 text-green-500" />
-										) : (
-											<AlertTriangle className="h-4 w-4 text-destructive" />
-										)}
-										<span className="text-sm">
-											Vehículo:{" "}
-											{selectedOpportunity.vehicle?.hasRequiredData
-												? "Datos completos"
-												: `Faltan: ${selectedOpportunity.vehicle?.missingFields?.join(", ")}`}
-										</span>
-									</div>
-
-									{/* Credit validation */}
-									<div className="flex items-center gap-2">
-										{selectedOpportunity.hasCreditData ? (
-											<CheckCircle2 className="h-4 w-4 text-green-500" />
-										) : (
-											<AlertTriangle className="h-4 w-4 text-destructive" />
-										)}
-										<span className="text-sm">
-											Crédito:{" "}
-											{selectedOpportunity.hasCreditData
-												? "Datos completos"
-												: "Faltan datos (cuotas, tasa, monto)"}
-										</span>
+									<div className="flex shrink-0 items-center gap-2">
+										<Badge
+											variant="outline"
+											style={{
+												borderColor: selectedOpportunity.stage.color,
+												color: selectedOpportunity.stage.color,
+											}}
+										>
+											{selectedOpportunity.stage.closurePercentage}%
+										</Badge>
+										<Button
+											variant="outline"
+											size="sm"
+											className="border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
+											onClick={() =>
+												handleOpenOpportunityModal(selectedOpportunity)
+											}
+										>
+											<Eye className="mr-1 h-4 w-4" />
+											Ver detalle
+										</Button>
 									</div>
 								</div>
-							</div>
-
-							<Separator />
-
+							</CardHeader>
+							<CardContent className="space-y-6">
+								<div className="grid gap-6 xl:grid-cols-2">
+									<div className="space-y-6">
 							{/* Datos del Crédito - Campos editables */}
 							<div className="space-y-3">
 								<div className="flex items-center gap-2">
@@ -931,86 +889,89 @@ export function InvestmentAssignmentSection({
 									</Label>
 								</div>
 
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-3">
-									{/* Categoría (automática) y NIT */}
-									<div className="grid grid-cols-2 gap-2">
-										<div>
-											<Label className="text-xs">Categoría</Label>
-											<div className="flex h-10 w-full items-center rounded-md border border-input bg-muted px-3 py-2 text-sm">
+									<div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+										<p className="text-sm">
+											<span className="text-muted-foreground">Categoría </span>
+											<span className="font-medium">
 												{getAutomaticCategoria(selectedOpportunity) ||
 													"Sin categoría"}
+											</span>
+										</p>
+										<div className="grid gap-3 sm:grid-cols-2">
+											<div className="space-y-1">
+												<Label htmlFor="asignacion-nit" className="text-xs">
+													NIT *
+												</Label>
+												<Input
+													id="asignacion-nit"
+													value={editNit}
+													onChange={(e) => setEditNit(e.target.value)}
+													placeholder="Ej: 12345678-9"
+													className={!editNit.trim() ? "border-orange-400" : ""}
+												/>
 											</div>
-											<p className="mt-1 text-[10px] text-muted-foreground">
-												Calculada según tipo de crédito
-												{selectedOpportunity?.creditType === "autocompra"
-													? " y vehículo"
-													: ""}
-											</p>
+											<div className="space-y-1">
+												<Label className="text-xs">Día de pago mensual</Label>
+												<Select
+													value={
+														elegidoDesdeRecomendacionIA
+															? `ia-${editDiaPagoMensual}`
+															: editDiaPagoMensual.toString()
+													}
+													onValueChange={(value) => {
+														if (value.startsWith("ia-")) {
+															setEditDiaPagoMensual(Number(value.slice(3)));
+															setElegidoDesdeRecomendacionIA(true);
+														} else {
+															setEditDiaPagoMensual(Number(value));
+															setElegidoDesdeRecomendacionIA(false);
+														}
+													}}
+												>
+													<SelectTrigger className="w-full">
+														<SelectValue placeholder="Seleccionar día" />
+													</SelectTrigger>
+													<SelectContent>
+														<SelectItem value="15">15</SelectItem>
+														<SelectItem value="30">Fin de mes</SelectItem>
+														{/* No se excluyen 15/30: si la IA los recomienda, deben
+														verse como opción aparte para que el analista sepa que
+														la IA los sugirió — aunque el número se repita. */}
+														{selectedOpportunity.suggestedPaymentDays
+															?.filter(
+																(d, i, arr) =>
+																	arr.findIndex((x) => x.dia === d.dia) === i,
+															)
+															.map((d: { dia: number; porcentaje: number }) => (
+																<SelectItem key={`ia-${d.dia}`} value={`ia-${d.dia}`}>
+																	Día {d.dia} ({d.porcentaje}% recomendado en Análisis)
+																</SelectItem>
+															))}
+													</SelectContent>
+												</Select>
+											</div>
 										</div>
-										<div>
-											<Label className="text-xs">NIT *</Label>
-											<Input
-												value={editNit}
-												onChange={(e) => setEditNit(e.target.value)}
-												placeholder="Ej: 12345678-9"
-												className={!editNit.trim() ? "border-orange-400" : ""}
-											/>
-										</div>
-									</div>
-
-									{/* Día de pago mensual */}
-									<div>
-										<Label className="text-xs">Día de Pago Mensual</Label>
-										<Select
-											value={
-												elegidoDesdeRecomendacionIA
-													? `ia-${editDiaPagoMensual}`
-													: editDiaPagoMensual.toString()
-											}
-											onValueChange={(value) => {
-												if (value.startsWith("ia-")) {
-													setEditDiaPagoMensual(Number(value.slice(3)));
-													setElegidoDesdeRecomendacionIA(true);
-												} else {
-													setEditDiaPagoMensual(Number(value));
-													setElegidoDesdeRecomendacionIA(false);
-												}
-											}}
-										>
-											<SelectTrigger>
-												<SelectValue placeholder="Seleccionar día" />
-											</SelectTrigger>
-											<SelectContent>
-												<SelectItem value="15">15</SelectItem>
-												<SelectItem value="30">Fin de mes</SelectItem>
-												{/* No se excluyen 15/30: si la IA los recomienda, deben
-												verse como opción aparte para que el analista sepa que
-												la IA los sugirió — aunque el número se repita. */}
-												{selectedOpportunity.suggestedPaymentDays
-													?.filter(
-														(d, i, arr) =>
-															arr.findIndex((x) => x.dia === d.dia) === i,
-													)
-													.map((d: { dia: number; porcentaje: number }) => (
-														<SelectItem key={`ia-${d.dia}`} value={`ia-${d.dia}`}>
-															Día {d.dia} ({d.porcentaje}% recomendado en Análisis)
-														</SelectItem>
-													))}
-											</SelectContent>
-										</Select>
 										{selectedOpportunity.suggestedPaymentDays &&
 											selectedOpportunity.suggestedPaymentDays.length > 0 && (
-												<p className="mt-1 text-[10px] text-muted-foreground">
-													Análisis de capacidad de pago sugiere estas fechas
-													según los ingresos detectados del cliente.
+												<p className="text-muted-foreground text-xs">
+													El análisis de capacidad de pago sugiere días según los
+													ingresos del cliente.
 												</p>
 											)}
 									</div>
 								</div>
-							</div>
 
-							<Separator />
+									{/* Partes del contrato: solo con vehículo, que decide qué pedir */}
+									{selectedOpportunity.vehicle && (
+										<ContractPartiesFields
+											vehicleIsNew={selectedOpportunity.vehicle.isNew}
+											value={contractParties}
+											onChange={setContractParties}
+										/>
+									)}
+									</div>
 
+									<div className="space-y-4">
 							{/* Existing Investors section */}
 							{selectedOpportunity?.existingInvestors &&
 								selectedOpportunity.existingInvestors.length > 0 && (
@@ -1335,38 +1296,43 @@ export function InvestmentAssignmentSection({
 								)}
 							</div>
 
-							{/* Action button */}
-							<div className="pt-4">
-								<Button
-									className="w-full"
-									onClick={handleAssign}
-									disabled={!canAssign || assignMutation.isPending}
-								>
-									{assignMutation.isPending ? (
-										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-									) : (
-										<TrendingUp className="mr-2 h-4 w-4" />
-									)}
-									{canAssign
-										? "Asignar y Avanzar a 80%"
-										: "Complete los datos para continuar"}
-								</Button>
-
-								{/* Show reasons if disabled */}
-								{!canAssign && getDisabledReasons().length > 0 && (
-									<div className="mt-2 rounded border border-orange-200 bg-orange-50 p-2">
-										<p className="mb-1 font-medium text-orange-800 text-xs">
-											No se puede avanzar:
-										</p>
-										<ul className="list-inside list-disc text-orange-700 text-xs">
-											{getDisabledReasons().map((reason, idx) => (
-												<li key={idx}>{reason}</li>
-											))}
-										</ul>
 									</div>
-								)}
-							</div>
-						</CardContent>
+								</div>
+
+								{/* Acción: fija abajo para no tener que bajar a buscarla */}
+								<div className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 rounded-b-xl border-t bg-card px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+									<div className="min-w-0 text-xs">
+										{canAssign ? (
+											<span className="text-muted-foreground">
+												Todo listo para pasar a jurídico.
+											</span>
+										) : (
+											getDisabledReasons().length > 0 && (
+												<ul className="space-y-0.5 text-orange-700 dark:text-orange-400">
+													{getDisabledReasons().map((reason) => (
+														<li key={reason} className="flex gap-1">
+															<AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+															{reason}
+														</li>
+													))}
+												</ul>
+											)
+										)}
+									</div>
+									<Button
+										className="shrink-0"
+										onClick={handleAssign}
+										disabled={!canAssign || assignMutation.isPending}
+									>
+										{assignMutation.isPending ? (
+											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+										) : (
+											<TrendingUp className="mr-2 h-4 w-4" />
+										)}
+										Asignar y avanzar a 80%
+									</Button>
+								</div>
+													</CardContent>
 					</Card>
 				) : (
 					<Card>
@@ -1388,5 +1354,31 @@ export function InvestmentAssignmentSection({
 				readOnly
 			/>
 		</div>
+	);
+}
+
+/** Indicador compacto de la lista: ícono tenue si está completo; con nombre y en rojo si falta. */
+function DataCheck({
+	ok,
+	icon: Icon,
+	label,
+}: {
+	ok: boolean;
+	icon: typeof User;
+	label: string;
+}) {
+	return ok ? (
+		<span
+			title={`${label}: datos completos`}
+			className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-muted text-muted-foreground"
+		>
+			<Icon className="h-3.5 w-3.5" />
+			<span className="sr-only">{label}: datos completos</span>
+		</span>
+	) : (
+		<span className="inline-flex h-6 items-center gap-1 rounded-md bg-destructive/10 px-1.5 text-destructive text-xs">
+			<Icon className="h-3.5 w-3.5" />
+			Falta {label.toLowerCase()}
+		</span>
 	);
 }

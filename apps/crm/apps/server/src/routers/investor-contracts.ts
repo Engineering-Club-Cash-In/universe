@@ -1,5 +1,16 @@
 import { ORPCError } from "@orpc/server";
-import { and, asc, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	desc,
+	eq,
+	gte,
+	inArray,
+	isNull,
+	ne,
+	or,
+	sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { investorContractBatches } from "../db/schema/investor-contracts";
@@ -663,7 +674,9 @@ export const investorContractsRouter = {
 	 * Jurídico toma la batería.
 	 *
 	 * Deja dicho quién la está trabajando, para que dos personas no emitan los
-	 * mismos contratos en paralelo. No bloquea: avisa.
+	 * mismos contratos en paralelo. No bloquea: avisa. Si ya la tomó otra
+	 * persona, se devuelve tal cual —con quién la tiene— en vez de pisarla: si
+	 * no, las dos creían que era suya y emitían a la vez.
 	 */
 	startInvestorContractBatch: juridicoProcedure
 		.input(z.object({ batchId: z.string().uuid() }))
@@ -685,18 +698,31 @@ export const investorContractsRouter = {
 						// Sólo desde pendiente: volver a "en_proceso" una completada
 						// reabriría trabajo que alguien ya dio por terminado.
 						eq(investorContractBatches.status, "pendiente"),
+						// Y sin dueño, o con el mismo que la vuelve a tomar.
+						or(
+							isNull(investorContractBatches.startedAt),
+							eq(investorContractBatches.startedBy, context.session.user.id),
+						),
 					),
 				)
 				.returning();
 
-			if (!actualizada) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"Esa batería ya fue tomada, completada o descartada. Recargá la pantalla.",
-				});
-			}
+			if (actualizada) return actualizada;
 
-			return actualizada;
+			const [bateria] = await db
+				.select()
+				.from(investorContractBatches)
+				.where(eq(investorContractBatches.id, input.batchId))
+				.limit(1);
+
+			// Pendiente con otro dueño: se devuelve con su `startedBy`, que es el
+			// aviso de que alguien más la está trabajando.
+			if (bateria?.status === "pendiente") return bateria;
+
+			throw new ORPCError("BAD_REQUEST", {
+				message:
+					"Esa batería ya se completó o se descartó. Recargá la pantalla.",
+			});
 		}),
 
 	/**
@@ -728,10 +754,26 @@ export const investorContractsRouter = {
 			// contrato: si no, uno que terminaba de guardarse después de esta
 			// revisión quedaba vivo en una batería descartada.
 			return conCandadoDeBateria(input.batchId, async () => {
+				const [bateria] = await db
+					.select({ acceptedAt: investorContractBatches.acceptedAt })
+					.from(investorContractBatches)
+					.where(eq(investorContractBatches.id, input.batchId))
+					.limit(1);
+
+				if (!bateria) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Esa batería de contratos no existe",
+					});
+				}
+
 				// Descartar es para la compra que NO lleva papelería. Con contratos ya
 				// emitidos deja de ser cierto: sus documentos siguen vivos en WeeTrust
 				// pidiendo firma, y la batería descartada ni se recalcula ni vuelve a
 				// la lista, así que nadie se acuerda de ellos. Se anulan primero.
+				//
+				// Sólo los de esta compra: los de una compra anterior sobre los mismos
+				// créditos son otro acuerdo, casi siempre firmado, y no tienen que
+				// frenar el descarte de la nueva.
 				const [vigente] = await db
 					.select({ contractName: generatedLegalContracts.contractName })
 					.from(generatedLegalContracts)
@@ -739,6 +781,7 @@ export const investorContractsRouter = {
 						and(
 							eq(generatedLegalContracts.batchId, input.batchId),
 							ne(generatedLegalContracts.status, "cancelled"),
+							gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
 						),
 					)
 					.limit(1);
@@ -1325,7 +1368,11 @@ export const investorContractsRouter = {
 			// La fila se marca primero y bloqueada: si dos personas anulan a la
 			// vez, la segunda ve que ya no está vigente y no vuelve a pedirle nada
 			// a WeeTrust.
-			await db.transaction(async (tx) => {
+			//
+			// Y lo que se hace allá sale del estado leído con la fila bloqueada, no
+			// del de arriba: si la última firma entró en el medio, el documento ya
+			// está completo y no se intenta borrar como si faltara firmar.
+			const estadoAlAnular = await db.transaction(async (tx) => {
 				const [actual] = await tx
 					.select({
 						status: generatedLegalContracts.status,
@@ -1352,13 +1399,15 @@ export const investorContractsRouter = {
 						updatedAt: ahora,
 					})
 					.where(eq(generatedLegalContracts.id, input.contractId));
+
+				return actual.status;
 			});
 
 			// Recién ahora el documento allá, con el detalle de cómo quedó pegado
 			// al motivo.
 			await borrarElViejoEnWeeTrust({
 				contractId: input.contractId,
-				status: contrato.status,
+				status: estadoAlAnular,
 				weetrustDocumentId: contrato.weetrustDocumentId,
 				razon,
 				origen: "cancelInvestorContract",
@@ -1871,6 +1920,37 @@ export const investorContractsRouter = {
 				});
 			}
 
+			// Firmado por todos no tiene enlaces que regenerar, y hacerlo anulaba un
+			// acuerdo que ya vale. La ficha ya no ofrece el botón; esto es por si
+			// llega igual.
+			if (contrato.status === "signed") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato ya lo firmaron todos: no hay enlaces que regenerar.",
+				});
+			}
+
+			// La batería se mira antes de reemitir: WeeTrust manda las invitaciones
+			// en el acto. Se vuelve a mirar con su candado al guardar.
+			if (contrato.batchId) {
+				const [bateria] = await db
+					.select({ status: investorContractBatches.status })
+					.from(investorContractBatches)
+					.where(eq(investorContractBatches.id, contrato.batchId))
+					.limit(1);
+				if (
+					bateria?.status === "descartada" ||
+					bateria?.status === "completada"
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							bateria.status === "descartada"
+								? "La batería de este contrato se descartó: no se pueden regenerar sus enlaces."
+								: "La batería de este contrato está cerrada: no se pueden regenerar sus enlaces.",
+					});
+				}
+			}
+
 			// La key de R2 del PDF. Hay contratos que guardaron en `pdfLink` una URL
 			// firmada (la que se muestra, que vence) en vez de la key: con una URL
 			// entera como key, R2 no encuentra nada.
@@ -1964,10 +2044,36 @@ export const investorContractsRouter = {
 			let nuevoId: string;
 			try {
 				nuevoId = await db.transaction(async (tx) => {
+					// Con el candado de la batería, el mismo que toman el descarte y el
+					// guardado de un contrato: una batería descartada o cerrada no
+					// recibe un contrato nuevo. Si no, el reemitido quedaba pidiendo
+					// firma colgado de una batería que ya no está en ninguna lista.
+					if (contrato.batchId) {
+						await tx.execute(
+							sql`select pg_advisory_xact_lock(${claveDeBateria(contrato.batchId)})`,
+						);
+						const [bateria] = await tx
+							.select({ status: investorContractBatches.status })
+							.from(investorContractBatches)
+							.where(eq(investorContractBatches.id, contrato.batchId))
+							.limit(1);
+						if (
+							bateria?.status === "descartada" ||
+							bateria?.status === "completada"
+						) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									bateria.status === "descartada"
+										? "La batería de este contrato se descartó: no se pueden regenerar sus enlaces."
+										: "La batería de este contrato está cerrada: no se pueden regenerar sus enlaces.",
+							});
+						}
+					}
+
 					// Dos regeneraciones a la vez emitían dos documentos y dejaban los
 					// dos vigentes. Se bloquea la fila y se vuelve a mirar: si otra ya
 					// lo anuló, ésta pierde y el catch borra el documento que acaba de
-					// emitir.
+					// emitir. Y si la última firma entró en el medio, tampoco.
 					const [original] = await tx
 						.select({
 							status: generatedLegalContracts.status,
@@ -1988,6 +2094,12 @@ export const investorContractsRouter = {
 								"Otra persona acaba de regenerar este contrato. Recargá para ver el nuevo.",
 						});
 					}
+					if (original.status === "signed") {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Este contrato se terminó de firmar mientras se regeneraba: no hacía falta.",
+						});
+					}
 
 					const [nuevo] = await tx
 						.insert(generatedLegalContracts)
@@ -2002,7 +2114,11 @@ export const investorContractsRouter = {
 							signingProvider: resultado.signingProvider ?? "weetrust",
 							signatureMode: contrato.signatureMode,
 							generatedBy: context.userId,
-							generatedAt: ahora,
+							// La emisión del contrato, no la de sus enlaces (esa queda en
+							// `lastRegeneratedAt`): es lo que dice de qué compra es. Con la
+							// fecha de hoy, uno de una compra anterior pasaba a contar como
+							// de la actual.
+							generatedAt: contrato.generatedAt ?? ahora,
 							...linksPorRol(resultado.signatories, resultado.signing_links),
 							weetrustDocumentId: resultado.documentID ?? null,
 							observerUrl: resultado.observerUrl ?? null,

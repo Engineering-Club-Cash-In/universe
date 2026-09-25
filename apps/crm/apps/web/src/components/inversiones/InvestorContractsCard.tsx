@@ -477,19 +477,22 @@ function FilaDeContrato({
 	);
 }
 
-/** Cómo se lee una compra: la fecha en que se aceptó y lo que puso. */
-function tituloDeLaCompra(bateria: ContratoDeInversionista["bateria"]): string {
-	if (!bateria) return "Sin compra asociada";
-	const fecha = new Date(bateria.acceptedAt).toLocaleDateString("es-GT", {
+function fechaCorta(fecha: Date | string): string {
+	return new Date(fecha).toLocaleDateString("es-GT", {
 		day: "2-digit",
 		month: "short",
 		year: "numeric",
 	});
+}
+
+/** Cómo se lee una compra: la fecha en que se aceptó y lo que puso. */
+function tituloDeLaCompra(bateria: ContratoDeInversionista["bateria"]): string {
+	if (!bateria) return "Sin compra asociada";
 	const monto = new Intl.NumberFormat("es-GT", {
 		style: "currency",
 		currency: "GTQ",
 	}).format(Number(bateria.montoTotal));
-	return `Compra del ${fecha} · ${monto}`;
+	return `Compra del ${fechaCorta(bateria.acceptedAt)} · ${monto}`;
 }
 
 /**
@@ -498,21 +501,54 @@ function tituloDeLaCompra(bateria: ContratoDeInversionista["bateria"]): string {
  *
  * Un inversionista que compra cartera tres veces termina con los mismos
  * contratos repetidos: sin agrupar, la ficha es una lista de nombres iguales.
+ *
+ * La batería sola no alcanza: otra compra sobre los mismos créditos reusa la
+ * misma batería y le pisa la fecha y el monto. Los contratos emitidos antes de
+ * esa aceptación son de la compra anterior y van aparte; de ella ya no queda el
+ * monto, así que se nombra por cuándo se emitieron.
  */
 function porCompra(contratos: ContratoDeInversionista[]) {
-	const grupos = new Map<string, ContratoDeInversionista[]>();
+	const grupos = new Map<
+		string,
+		{
+			clave: string;
+			titulo: string;
+			orden: number;
+			contratos: ContratoDeInversionista[];
+		}
+	>();
+
 	for (const contrato of contratos) {
-		const clave = contrato.bateria?.id ?? "sin-bateria";
-		grupos.set(clave, [...(grupos.get(clave) ?? []), contrato]);
+		const bateria = contrato.bateria;
+		const emitido = contrato.generatedAt
+			? new Date(contrato.generatedAt).getTime()
+			: null;
+		const anterior =
+			bateria !== undefined &&
+			bateria !== null &&
+			emitido !== null &&
+			emitido < new Date(bateria.acceptedAt).getTime();
+
+		const clave = bateria
+			? `${bateria.id}${anterior ? ":anterior" : ""}`
+			: "sin-bateria";
+		const grupo = grupos.get(clave) ?? {
+			clave,
+			titulo: anterior
+				? `Compra anterior sobre los mismos créditos · emitidos el ${fechaCorta(contrato.generatedAt as Date | string)}`
+				: tituloDeLaCompra(bateria),
+			orden: anterior
+				? (emitido ?? 0)
+				: bateria
+					? new Date(bateria.acceptedAt).getTime()
+					: Number.NEGATIVE_INFINITY,
+			contratos: [],
+		};
+		grupo.contratos.push(contrato);
+		grupos.set(clave, grupo);
 	}
 
-	return [...grupos.values()].sort((a, b) => {
-		const fechaA = a[0]?.bateria?.acceptedAt;
-		const fechaB = b[0]?.bateria?.acceptedAt;
-		if (!fechaA) return 1;
-		if (!fechaB) return -1;
-		return new Date(fechaB).getTime() - new Date(fechaA).getTime();
-	});
+	return [...grupos.values()].sort((a, b) => b.orden - a.orden);
 }
 
 /**
@@ -594,23 +630,23 @@ export function InvestorContractsCard({
 					<>
 						{porCompra(vigentes).map((grupo) => (
 							<div
-								key={grupo[0]?.bateria?.id ?? "sin-bateria"}
+								key={grupo.clave}
 								className="rounded-lg border bg-muted/40 p-2.5"
 							>
 								<div className="mb-2 flex items-center gap-2">
 									<Landmark className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 									<p className="font-medium text-foreground/80 text-xs">
-										{tituloDeLaCompra(grupo[0]?.bateria)}
+										{grupo.titulo}
 									</p>
 									<Badge variant="secondary" className="h-5 px-1.5 text-[11px]">
-										{grupo.length}
+										{grupo.contratos.length}
 									</Badge>
 								</div>
 
 								{/* En rejilla: a lo ancho, una fila por contrato hacía una
 								    pantalla larguísima con seis documentos. */}
 								<div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-									{grupo.map((contrato) => (
+									{grupo.contratos.map((contrato) => (
 										<FilaDeContrato
 											key={contrato.id}
 											contrato={contrato}

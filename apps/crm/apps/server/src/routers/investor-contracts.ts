@@ -1473,36 +1473,45 @@ export const investorContractsRouter = {
 			// Y lo que se hace allá sale del estado leído con la fila bloqueada, no
 			// del de arriba: si la última firma entró en el medio, el documento ya
 			// está completo y no se intenta borrar como si faltara firmar.
-			const estadoAlAnular = await db.transaction(async (tx) => {
-				const [actual] = await tx
-					.select({
-						status: generatedLegalContracts.status,
-						reemplazadoPor: generatedLegalContracts.replacedByContractId,
-					})
-					.from(generatedLegalContracts)
-					.where(eq(generatedLegalContracts.id, input.contractId))
-					.for("update")
-					.limit(1);
+			// Y con el candado de la batería, el del Listo: si no, una anulación que
+			// caía mientras el Listo armaba el correo dejaba en el hilo los enlaces
+			// de un contrato recién anulado, cuyo documento se borra enseguida.
+			const estadoAlAnular = await conCandadoDeBateria(contrato.batchId, () =>
+				db.transaction(async (tx) => {
+					const [actual] = await tx
+						.select({
+							status: generatedLegalContracts.status,
+							reemplazadoPor: generatedLegalContracts.replacedByContractId,
+						})
+						.from(generatedLegalContracts)
+						.where(eq(generatedLegalContracts.id, input.contractId))
+						.for("update")
+						.limit(1);
 
-				if (!actual || actual.status === "cancelled" || actual.reemplazadoPor) {
-					throw new ORPCError("CONFLICT", {
-						message:
-							"Otra persona acaba de anular o reemplazar este contrato. Recargá para ver cómo quedó.",
-					});
-				}
+					if (
+						!actual ||
+						actual.status === "cancelled" ||
+						actual.reemplazadoPor
+					) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Otra persona acaba de anular o reemplazar este contrato. Recargá para ver cómo quedó.",
+						});
+					}
 
-				await tx
-					.update(generatedLegalContracts)
-					.set({
-						status: "cancelled",
-						cancellationReason: razon,
-						cancelledAt: ahora,
-						updatedAt: ahora,
-					})
-					.where(eq(generatedLegalContracts.id, input.contractId));
+					await tx
+						.update(generatedLegalContracts)
+						.set({
+							status: "cancelled",
+							cancellationReason: razon,
+							cancelledAt: ahora,
+							updatedAt: ahora,
+						})
+						.where(eq(generatedLegalContracts.id, input.contractId));
 
-				return actual.status;
-			});
+					return actual.status;
+				}),
+			);
 
 			// Recién ahora el documento allá, con el detalle de cómo quedó pegado
 			// al motivo.

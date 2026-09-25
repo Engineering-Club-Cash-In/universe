@@ -231,6 +231,37 @@ export function mensajeAnunciaExpectativaMora(mensaje: string): boolean {
 }
 
 /**
+ * ¿La tarjeta del asesor debe anunciar que la mora va a seguir subiendo?
+ *
+ * Hacen falta las DOS cosas:
+ *
+ *  - que el crédito tenga mora HOY, y
+ *  - que algo crezca: el ritmo diario o el techo a 30 días.
+ *
+ * El primer requisito no es decorativo. `incrementosMoraPorCredito` incluye a
+ * propósito las cuotas que vencen DENTRO de los próximos 30 días, así que un
+ * crédito AL DÍA con su próxima cuota a diez días devuelve ritmo 0.00 y techo
+ * Q336.00: sin este chequeo la ficha le anunciaba un aumento a alguien que no
+ * debe un centavo.
+ *
+ * El segundo permite el caso que sí hay que anunciar: la víspera del próximo
+ * vencimiento el ritmo da 0 —la cuota vieja ya topó y la nueva todavía no
+ * vence— pero la mora sí va a crecer, y el techo lo dice.
+ */
+export function debeAnunciarCrecimientoMora(params: {
+	montoEnMora: string | number | null | undefined;
+	incrementoDiarioMora: string | null | undefined;
+	incrementoMaximoMensualMora: string | null | undefined;
+}): boolean {
+	const mora = Number(String(params.montoEnMora ?? "").replace(/,/g, ""));
+	if (!Number.isFinite(mora) || mora <= 0) return false;
+	return (
+		hayIncrementoMora(params.incrementoDiarioMora) ||
+		hayIncrementoMora(params.incrementoMaximoMensualMora)
+	);
+}
+
+/**
  * true si ya pasó el corte del impuesto y el mensaje que se va a mandar
  * todavía trae la fecha límite vencida (la variable sin interpolar o la fecha
  * ya resuelta, p. ej. "31/07/2026"). Si el asesor la reemplazó por otra fecha

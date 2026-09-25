@@ -14,6 +14,7 @@ import {
 	fechaLimiteImpuestoVencida,
 	hayIncrementoMora,
 	interpolar,
+	debeAnunciarCrecimientoMora,
 	mensajeAnunciaExpectativaMora,
 	mensajeAnunciaIncrementoMoraSinDato,
 	mensajeAnunciaMontoAdeudado,
@@ -936,5 +937,68 @@ describe("mensajeAnunciaIncrementoMoraSinDato — el hueco que llegaría al clie
 		expect(mensajeAnunciaIncrementoMoraSinDato("Buenos días.", "", "")).toBe(
 			false,
 		);
+	});
+});
+
+describe("debeAnunciarCrecimientoMora", () => {
+	test("crédito AL DÍA con cuota por vencer: NO anuncia nada", () => {
+		// incrementosMoraPorCredito incluye las cuotas que vencen dentro de 30
+		// días, así que un crédito sin mora devuelve techo > 0. Medido con las
+		// funciones reales: capital Q45,000, cuota a 10 días → ritmo 0.00,
+		// techo Q336.00, mora de hoy Q0.00.
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: "0",
+				incrementoDiarioMora: "0.00",
+				incrementoMaximoMensualMora: "336.00",
+			}),
+		).toBe(false);
+	});
+
+	test("la VÍSPERA del próximo vencimiento sí anuncia: ritmo 0 pero techo > 0", () => {
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: "1,612.00",
+				incrementoDiarioMora: "0.00",
+				incrementoMaximoMensualMora: "108.27",
+			}),
+		).toBe(true);
+	});
+
+	test("crédito con mora que sube todos los días: anuncia", () => {
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: "84.00",
+				incrementoDiarioMora: "16.80",
+				incrementoMaximoMensualMora: "420.00",
+			}),
+		).toBe(true);
+	});
+
+	test("con mora pero sin nada que crezca (todas las cuotas topadas): NO anuncia", () => {
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: "504.00",
+				incrementoDiarioMora: "0.00",
+				incrementoMaximoMensualMora: "0.00",
+			}),
+		).toBe(false);
+	});
+
+	test("valores ausentes o basura no anuncian", () => {
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: null,
+				incrementoDiarioMora: "16.80",
+				incrementoMaximoMensualMora: "420.00",
+			}),
+		).toBe(false);
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: "no-es-un-numero",
+				incrementoDiarioMora: "16.80",
+				incrementoMaximoMensualMora: "420.00",
+			}),
+		).toBe(false);
 	});
 });

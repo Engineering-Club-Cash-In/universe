@@ -59,6 +59,18 @@ const UMBRAL_PWR_EXT_V = 3;
 // del doc 09).
 const UMBRAL_SIN_REPORTAR_MS = 2 * 60 * 60 * 1000;
 
+// El job corre cada 5 min (setInterval en index.ts). Un snapshot más viejo
+// que esto (3x el intervalo, tolera un tick lento o saltado por el guard de
+// ejecución solapada) significa que la unidad NO se monitoreó de forma
+// continua — típicamente porque su SIFCO salió de B4 y volvió a entrar
+// después. Sin este chequeo, el mismo numeroCreditoSifco alcanzaba para
+// heredar el snapshot viejo aunque hubiera un hueco de días entre medio: si
+// la condición (sin energía, fuera de geocerca) seguía activa antes y
+// después del hueco, detectarTransiciones no veía transición y nunca se
+// generaba una alerta nueva — ni aunque la ventana de dedup de 6h/24h ya
+// hubiera expirado hace tiempo.
+const MAX_GAP_MONITOREO_MS = 3 * 5 * 60 * 1000;
+
 // Recurso y geocerca "Perimetro cash" que ya existen en el portal de La
 // Legión (confirmados en el spike de CB-119: recurso "CASH IN", zona 1 =
 // polígono de Guatemala). Configurables porque cada ambiente (dev/prod)
@@ -440,17 +452,25 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 	for (const telemetria of telemetrias) {
 		const sifcoActual = sifcoPorUnidad.get(telemetria.unitId) ?? "";
 		const snapshotPrevio = snapshotPorId.get(telemetria.unitId) ?? null;
-		// Si la unidad se reasignó a otro caso B4 entre corridas (D-10), el
-		// snapshot viejo pertenece al caso anterior: heredarlo haría que
-		// detectarTransiciones compare contra un estado ajeno (una unidad ya
-		// sin energía/fuera de geocerca en el caso viejo nunca generaría
-		// evento para el caso/asesor nuevo, porque "ya estaba así"). Se trata
-		// como primera vez que se ve la unidad — sin transición en esta
-		// corrida, pero el siguiente estado sí se compara correctamente.
-		const anterior =
-			snapshotPrevio && snapshotPrevio.numeroCreditoSifco === sifcoActual
-				? snapshotPrevio
-				: null;
+		// Se descarta el snapshot previo (se trata como primera vez que se ve
+		// la unidad) en dos casos:
+		//  1. Reasignación (D-10): el SIFCO cambió entre corridas. Heredar el
+		//     snapshot haría que detectarTransiciones compare contra un
+		//     estado ajeno (una unidad ya sin energía/fuera de geocerca en el
+		//     caso viejo nunca generaría evento para el caso/asesor nuevo,
+		//     porque "ya estaba así").
+		//  2. Hueco de monitoreo: MISMO SIFCO, pero el snapshot es más viejo
+		//     que MAX_GAP_MONITOREO_MS — típicamente el crédito salió de B4 y
+		//     volvió a entrar. Sin este chequeo, "mismo SIFCO" alcanzaba para
+		//     heredar un snapshot de hace días, y si la condición seguía
+		//     activa antes y después del hueco nunca se generaba una alerta
+		//     nueva, ni con la ventana de dedup ya expirada hace tiempo.
+		const monitoreoContinuo =
+			snapshotPrevio != null &&
+			snapshotPrevio.numeroCreditoSifco === sifcoActual &&
+			ahora.getTime() - snapshotPrevio.actualizadoAt.getTime() <=
+				MAX_GAP_MONITOREO_MS;
+		const anterior = monitoreoContinuo ? snapshotPrevio : null;
 
 		// null si no hay geocerca válida, coordenadas no finitas (incluye NaN:
 		// `NaN != null` es `true` en JS, así que un check contra `null` a

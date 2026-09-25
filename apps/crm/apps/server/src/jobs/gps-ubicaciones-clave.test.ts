@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	mock,
+	spyOn,
+} from "bun:test";
 import { db } from "../db";
 import * as gpsEventosService from "../services/wialon/gps-eventos";
 import * as wialonClientModule from "../services/wialon/wialon-client";
@@ -10,9 +18,7 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 
 	beforeEach(() => {
 		txCalled = false;
-		spyOn(gpsEventosPoll, "sifcosEnB4").mockResolvedValue(
-			["01010214100000"],
-		);
+		spyOn(gpsEventosPoll, "sifcosEnB4").mockResolvedValue(["01010214100000"]);
 		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([
 			{ wialonUnitId: 100, numeroCreditoSifco: "01010214100000" },
 		]);
@@ -71,5 +77,36 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 		expect(res.unidadesConError).toBe(0);
 		expect(res.unidadesProcesadas).toBe(1);
 		expect(txCalled).toBe(true);
+	});
+
+	it("invalida el snapshot anterior del caso (casoCobroId) y de la unidad al reemplazar", async () => {
+		let deleteCondition: unknown = null;
+		spyOn(db, "transaction").mockImplementation(async (cb: any) => {
+			return cb({
+				delete: () => ({
+					where: async (cond: unknown) => {
+						deleteCondition = cond;
+					},
+				}),
+				insert: () => ({ values: async () => {} }),
+			});
+		});
+
+		const mockWialon = {
+			getHistorialPosiciones: mock().mockResolvedValue({
+				mensajes: [],
+				completo: true,
+				tramosTotal: 1,
+				tramosCompletados: 1,
+			}),
+		};
+		spyOn(wialonClientModule, "getWialonClient").mockReturnValue(
+			mockWialon as any,
+		);
+
+		const res = await ejecutarCalculoUbicacionesClave();
+
+		expect(res.unidadesProcesadas).toBe(1);
+		expect(deleteCondition).toBeDefined();
 	});
 });

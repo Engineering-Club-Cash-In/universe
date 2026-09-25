@@ -16,7 +16,7 @@
  * 60 días — no se van sumando corridas viejas.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { db } from "../db";
 import { gpsUbicacionesClave } from "../db/schema/gps-eventos";
 import { resolverVehiculoYCaso } from "../services/wialon/gps-eventos";
@@ -99,17 +99,29 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 			);
 
 			// Reemplazo transaccional: se borran las filas viejas de este
-			// (unidad, SIFCO) y se insertan las nuevas juntas — un observador
-			// nunca ve un estado intermedio "sin ubicaciones" para una unidad
-			// que sí las tenía calculadas.
+			// (unidad, SIFCO) y de este caso (si existe) para no dejar huérfanos
+			// si la unidad o el vehículo cambiaron de vínculo, y se insertan las
+			// nuevas juntas — un observador nunca ve un estado intermedio "sin
+			// ubicaciones" para una unidad que sí las tenía calculadas.
 			await db.transaction(async (tx) => {
+				const condicionesBorrado = [
+					and(
+						eq(gpsUbicacionesClave.wialonUnitId, wialonUnitId),
+						eq(gpsUbicacionesClave.numeroCreditoSifco, numeroCreditoSifco),
+					),
+				];
+				if (casoCobroId) {
+					condicionesBorrado.push(
+						eq(gpsUbicacionesClave.casoCobroId, casoCobroId),
+					);
+				}
+
 				await tx
 					.delete(gpsUbicacionesClave)
 					.where(
-						and(
-							eq(gpsUbicacionesClave.wialonUnitId, wialonUnitId),
-							eq(gpsUbicacionesClave.numeroCreditoSifco, numeroCreditoSifco),
-						),
+						condicionesBorrado.length > 1
+							? or(...condicionesBorrado)
+							: condicionesBorrado[0]!,
 					);
 
 				if (ubicaciones.length > 0) {

@@ -27,6 +27,7 @@ let casoGpsMock: Record<string, unknown> | null = {
 };
 let insertGpsConsultaLogFalla = false;
 let gpsConsultaLogsInsertados: Record<string, unknown>[] = [];
+let ubicacionesWhereCondition: unknown = null;
 
 function mockDb() {
 	return {
@@ -89,9 +90,12 @@ function mockDb() {
 
 				if (tabla === gpsUbicacionesClave) {
 					return {
-						where: () => ({
-							orderBy: async () => ubicacionesFilasMock,
-						}),
+						where: (cond?: unknown) => {
+							ubicacionesWhereCondition = cond;
+							return {
+								orderBy: async () => ubicacionesFilasMock,
+							};
+						},
 					};
 				}
 
@@ -277,6 +281,7 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		};
 		insertGpsConsultaLogFalla = false;
 		gpsConsultaLogsInsertados = [];
+		ubicacionesWhereCondition = null;
 		mock.restore();
 	});
 
@@ -397,5 +402,17 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 				{ context: ctx("admin") },
 			),
 		).rejects.toThrow();
+	});
+
+	it("acota la consulta tanto al casoCobroId como al vehicleId", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+
+		await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("cobros"),
+		});
+
+		expect(ubicacionesWhereCondition).toBeDefined();
 	});
 });

@@ -8,7 +8,7 @@
  * a un router ya grande.
  */
 
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
@@ -147,7 +147,12 @@ export const gpsEventosRouter = {
 					calculadoAt: gpsUbicacionesClave.calculadoAt,
 				})
 				.from(gpsUbicacionesClave)
-				.where(eq(gpsUbicacionesClave.casoCobroId, input.casoCobroId))
+				.where(
+					and(
+						eq(gpsUbicacionesClave.casoCobroId, input.casoCobroId),
+						eq(gpsUbicacionesClave.vehicleId, input.vehicleId),
+					),
+				)
 				.orderBy(desc(gpsUbicacionesClave.horasTotales));
 
 			return { auditada: true, ubicaciones };

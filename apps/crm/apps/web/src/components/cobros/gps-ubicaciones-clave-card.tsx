@@ -56,7 +56,10 @@ const TIPO_CONFIG: Record<
 // (0=domingo..6=sábado, mismo criterio que Date.getUTCDay en el servidor).
 const DIAS_SEMANA = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
 
-function describirPatron(patron: unknown): string | null {
+export function describirPatron(
+	patron: unknown,
+	horasTotales?: number,
+): string | null {
 	if (!patron || typeof patron !== "object") return null;
 	const p = patron as {
 		nocturna?: number;
@@ -74,11 +77,17 @@ function describirPatron(patron: unknown): string | null {
 		}
 	}
 
-	const total = (p.nocturna ?? 0) + (p.laboral ?? 0) + (p.finDeSemana ?? 0);
-	if (total === 0) return null;
-	if ((p.nocturna ?? 0) / total >= 0.6) return "Sobre todo de noche";
-	if ((p.laboral ?? 0) / total >= 0.6) return "Sobre todo en horario laboral";
-	if ((p.finDeSemana ?? 0) / total >= 0.6) return "Sobre todo fin de semana";
+	// Se usa horasTotales en el denominador si está disponible para incluir el
+	// tiempo de estancia no clasificado (ej. 18:00–22:00) y no sesgar el porcentaje
+	// cuando una estancia de tarde/noche solo tiene 1h nocturna.
+	const total =
+		horasTotales != null && horasTotales > 0
+			? horasTotales
+			: (p.nocturna ?? 0) + (p.laboral ?? 0) + (p.finDeSemana ?? 0);
+	if (total <= 0) return null;
+	if ((p.nocturna ?? 0) / total >= 0.5) return "Sobre todo de noche";
+	if ((p.laboral ?? 0) / total >= 0.5) return "Sobre todo en horario laboral";
+	if ((p.finDeSemana ?? 0) / total >= 0.5) return "Sobre todo fin de semana";
 	return null;
 }
 
@@ -171,8 +180,8 @@ export function GpsUbicacionesClaveCard({
 					</p>
 				) : ubicaciones.data?.auditada === false ? (
 					<p className="text-destructive text-sm">
-						No se pudo registrar la auditoría de la consulta. Por seguridad no se
-						muestran las ubicaciones.
+						No se pudo registrar la auditoría de la consulta. Por seguridad no
+						se muestran las ubicaciones.
 					</p>
 				) : ubicaciones.data && ubicaciones.data.ubicaciones.length > 0 ? (
 					<ul className="space-y-2">
@@ -180,7 +189,7 @@ export function GpsUbicacionesClaveCard({
 							const config = TIPO_CONFIG[u.tipo as TipoUbicacionClave];
 							const Icon = config.icon;
 							const mapsUrl = googleMapsUrl(u.lat, u.lon);
-							const patronTexto = describirPatron(u.patron);
+							const patronTexto = describirPatron(u.patron, u.horasTotales);
 							return (
 								<li
 									className="flex items-start justify-between gap-3 rounded-md border p-3"

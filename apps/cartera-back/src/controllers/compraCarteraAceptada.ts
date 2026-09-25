@@ -80,7 +80,7 @@ type FilaDePool = {
  * Nunca lanza. Cuando esto corre la compra ya está aceptada, así que un CRM
  * caído tiene que costar el aviso, no la operación.
  */
-async function abrirBateriasDeContratos(params: {
+export async function abrirBateriasDeContratos(params: {
   targetIds: number[];
   creditosRows: Array<{
     credito_id: number;
@@ -209,19 +209,28 @@ async function abrirBateriasDeContratos(params: {
       const inv = porId.get(targetId);
       if (!inv) continue;
 
-      // Sólo los créditos donde este inversionista tiene posición, con el monto
-      // de ESTA operación (el delta), no el acumulado que ya tenía.
+      // Sólo los créditos que ESTE inversionista compró en esta aceptación, con
+      // el monto de la operación (el delta), no el acumulado que ya tenía.
+      //
+      // Tener posición no alcanza: si en una aceptación uno compra el crédito A
+      // y otro el B, y el primero ya tenía parte del B de antes, su batería se
+      // llevaba también el B —con lo que ya tenía como monto— y sus contratos
+      // cedían un crédito que no compró. Lo comprado es lo que pasó en el
+      // espejo de `pendiente_compra_cartera` a revisión: `terminosPorPar` se
+      // arma con esas filas.
       const creditos = creditosRows.flatMap((credito) => {
+        const par = `${credito.credito_id}-${targetId}`;
+        if (!terminosPorPar.has(par)) return [];
+
         const fila = (rowsPorCredito.get(credito.credito_id) ?? []).find(
           (r) => r.inversionista_id === targetId,
         );
         if (!fila) return [];
 
-        const monto =
-          montoNuevoPorPar.get(`${credito.credito_id}-${targetId}`) ?? fila.monto;
+        const monto = montoNuevoPorPar.get(par) ?? fila.monto;
 
         const fechas = fechasPorCredito.get(credito.credito_id) ?? {};
-        const terminos = terminosPorPar.get(`${credito.credito_id}-${targetId}`);
+        const terminos = terminosPorPar.get(par);
 
         return [
           {

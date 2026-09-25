@@ -33,61 +33,74 @@ export async function recalcularEstadoDeLaBateria(
 	/** Quién provocó el cambio, para dejarlo anotado si la batería se cierra. */
 	userId?: string,
 ): Promise<"pendiente" | "en_proceso" | "completada" | null> {
-	const [bateria] = await db
-		.select()
-		.from(investorContractBatches)
-		.where(eq(investorContractBatches.id, batchId))
-		.limit(1);
+	// Leer y escribir juntos, con la fila de la batería bloqueada: dos
+	// recálculos a la vez —una firma que completa lo que había y un contrato
+	// que se agrega después del Listo— leían juegos de contratos distintos, y
+	// el que escribía último podía ser el de la foto vieja: "completada" con
+	// un contrato pendiente adentro, fuera de la lista de jurídico y sin poder
+	// corregirse. En fila, el segundo lee después de que el primero escribió.
+	//
+	// Es un candado de fila y no el de la batería (`conCandadoDeBateria`): esto
+	// se llama también desde tareas que ya tienen ese tomado, y esperarían
+	// contra sí mismas.
+	return db.transaction(async (tx) => {
+		const [bateria] = await tx
+			.select()
+			.from(investorContractBatches)
+			.where(eq(investorContractBatches.id, batchId))
+			.for("update")
+			.limit(1);
 
-	if (!bateria || bateria.status === "descartada") return null;
+		if (!bateria || bateria.status === "descartada") return null;
 
-	const vigentes = await db
-		.select({ status: generatedLegalContracts.status })
-		.from(generatedLegalContracts)
-		.where(
-			and(
-				eq(generatedLegalContracts.batchId, batchId),
-				ne(generatedLegalContracts.status, "cancelled"),
-			),
-		);
+		const vigentes = await tx
+			.select({ status: generatedLegalContracts.status })
+			.from(generatedLegalContracts)
+			.where(
+				and(
+					eq(generatedLegalContracts.batchId, batchId),
+					ne(generatedLegalContracts.status, "cancelled"),
+				),
+			);
 
-	// Mientras jurídico arma, nada la mueve: el Listo es lo único que la saca
-	// de acá, porque es el que manda los contratos.
-	if (bateria.status === "pendiente") return "pendiente";
+		// Mientras jurídico arma, nada la mueve: el Listo es lo único que la
+		// saca de acá, porque es el que manda los contratos.
+		if (bateria.status === "pendiente") return "pendiente";
 
-	const todosFirmados =
-		vigentes.length > 0 && vigentes.every((c) => c.status === "signed");
+		const todosFirmados =
+			vigentes.length > 0 && vigentes.every((c) => c.status === "signed");
 
-	const estado =
-		vigentes.length === 0
-			? "pendiente"
-			: todosFirmados
-				? "completada"
-				: "en_proceso";
+		const estado =
+			vigentes.length === 0
+				? "pendiente"
+				: todosFirmados
+					? "completada"
+					: "en_proceso";
 
-	if (estado === bateria.status) return estado;
+		if (estado === bateria.status) return estado;
 
-	const ahora = new Date();
+		const ahora = new Date();
 
-	await db
-		.update(investorContractBatches)
-		.set({
-			status: estado,
-			updatedAt: ahora,
-			// Cuándo la empezó a trabajar jurídico: se anota la primera vez que
-			// salió de "pendiente" y no se vuelve a tocar.
-			...(estado !== "pendiente" && !bateria.startedAt
-				? { startedAt: ahora, startedBy: userId ?? bateria.startedBy }
-				: {}),
-			// Y cuándo quedó cerrada. Si vuelve a faltar una firma se limpia: una
-			// cerrada a mano con el "Listo" de antes vuelve a la lista así.
-			...(estado === "completada"
-				? { completedAt: ahora, completedBy: userId ?? bateria.completedBy }
-				: { completedAt: null, completedBy: null }),
-		})
-		.where(eq(investorContractBatches.id, batchId));
+		await tx
+			.update(investorContractBatches)
+			.set({
+				status: estado,
+				updatedAt: ahora,
+				// Cuándo la empezó a trabajar jurídico: se anota la primera vez que
+				// salió de "pendiente" y no se vuelve a tocar.
+				...(estado !== "pendiente" && !bateria.startedAt
+					? { startedAt: ahora, startedBy: userId ?? bateria.startedBy }
+					: {}),
+				// Y cuándo quedó cerrada. Si vuelve a faltar una firma se limpia: una
+				// cerrada a mano con el "Listo" de antes vuelve a la lista así.
+				...(estado === "completada"
+					? { completedAt: ahora, completedBy: userId ?? bateria.completedBy }
+					: { completedAt: null, completedBy: null }),
+			})
+			.where(eq(investorContractBatches.id, batchId));
 
-	return estado;
+		return estado;
+	});
 }
 
 /**

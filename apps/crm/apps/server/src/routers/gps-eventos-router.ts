@@ -10,7 +10,9 @@
 
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db";
+import { casosCobros } from "../db/schema/cobros";
 import { gpsEventos } from "../db/schema/gps-eventos";
+import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure } from "../lib/orpc";
 import {
 	gpsEventosCasoInputSchema,
@@ -20,9 +22,16 @@ import { assertAccesoCasoCobro } from "./cobros";
 
 export const gpsEventosRouter = {
 	/**
-	 * Historial de eventos GPS de un caso, para la Ficha 360. Mismo control
-	 * de acceso que el resto de la ficha (assertAccesoCasoCobro): un asesor
-	 * regular solo ve sus propios casos.
+	 * Historial de eventos GPS de un caso, para la Ficha 360.
+	 *
+	 * `assertAccesoCasoCobro` NO alcanza como autorización completa:
+	 * `getDetallesCreditoCarteraBack` auto-crea un caso con
+	 * `responsableCobros = quien consulta` cuando el crédito no tenía uno
+	 * activo — un asesor puede fabricarse el acceso abriendo el SIFCO de
+	 * otro (mismo hallazgo de Codex ya corregido en `routers/wialon.ts` vía
+	 * `assertCreditoAsignadoEnCarteraPorSifco`, la fuente autoritativa es
+	 * CARTERA, no el caso local). Acá se aplica el mismo guard antes de
+	 * devolver lat/lon histórica.
 	 */
 	getGpsEventosCaso: cobrosProcedure
 		.input(gpsEventosCasoInputSchema)
@@ -33,6 +42,21 @@ export const gpsEventosRouter = {
 				context.userId,
 				context.userRole,
 			);
+
+			const [caso] = await db
+				.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+				.from(casosCobros)
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.limit(1);
+
+			if (caso?.numeroCreditoSifco) {
+				await assertCreditoAsignadoEnCarteraPorSifco({
+					numeroSifco: caso.numeroCreditoSifco,
+					emailUsuario: context.user?.email || context.session?.user?.email,
+					userRole: context.userRole,
+					accion: "ver el historial de eventos GPS de este vehículo",
+				});
+			}
 
 			const filas = await db
 				.select({

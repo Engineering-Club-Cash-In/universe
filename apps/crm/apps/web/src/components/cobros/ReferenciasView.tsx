@@ -69,6 +69,19 @@ import {
 
 interface ReferenciasViewProps {
 	casoCobroId: string;
+	/**
+	 * "Agregar a teléfonos del cliente" lo resuelve la ficha, no esta vista:
+	 * los teléfonos del caso los escriben también el editor de contacto y su
+	 * autoguardado, y todo tiene que ir por la misma cola y mantener al día el
+	 * formulario. Si esta vista llamara por su cuenta, un editor abierto en
+	 * Resumen mandaría después su lista vieja y borraría el número recién
+	 * agregado (Codex, PR #1751).
+	 */
+	onAgregarTelefonoAlCaso: (v: {
+		hallazgoId: string;
+		telefono: string;
+	}) => void;
+	agregandoTelefonoAlCaso: boolean;
 }
 
 type Hallazgo = DatosReferencias["hallazgos"][number];
@@ -96,7 +109,11 @@ function IconoHallazgo({ tipo }: { tipo: string }) {
 	return <Navigation className="h-4 w-4" />;
 }
 
-export function ReferenciasView({ casoCobroId }: ReferenciasViewProps) {
+export function ReferenciasView({
+	casoCobroId,
+	onAgregarTelefonoAlCaso,
+	agregandoTelefonoAlCaso,
+}: ReferenciasViewProps) {
 	const queryClient = useQueryClient();
 	const opcionesQuery = orpc.getReferenciasCaso.queryOptions({
 		input: { casoCobroId },
@@ -133,26 +150,6 @@ export function ReferenciasView({ casoCobroId }: ReferenciasViewProps) {
 		},
 		onError: (error) => {
 			toast.error(`No se pudo quitar el teléfono: ${error.message}`);
-		},
-	});
-
-	const agregarAlCaso = useMutation({
-		mutationFn: (hallazgoId: string) =>
-			client.agregarHallazgoATelefonosCaso({ casoCobroId, hallazgoId }),
-		onSuccess: (res) => {
-			invalidar();
-			// La ficha pinta los teléfonos del caso desde este detalle.
-			queryClient.invalidateQueries({
-				queryKey: orpc.getDetallesCreditoCarteraBack.key(),
-			});
-			toast.success(
-				res.agregado
-					? "Teléfono agregado a los del cliente"
-					: "Ese teléfono ya estaba entre los del cliente",
-			);
-		},
-		onError: (error) => {
-			toast.error(`No se pudo agregar el teléfono: ${error.message}`);
 		},
 	});
 
@@ -511,8 +508,13 @@ export function ReferenciasView({ casoCobroId }: ReferenciasViewProps) {
 													size="sm"
 													variant="outline"
 													className="shrink-0"
-													disabled={agregarAlCaso.isPending}
-													onClick={() => agregarAlCaso.mutate(h.id)}
+													disabled={agregandoTelefonoAlCaso}
+													onClick={() =>
+														onAgregarTelefonoAlCaso({
+															hallazgoId: h.id,
+															telefono: h.valor,
+														})
+													}
 												>
 													Agregar a teléfonos del cliente
 												</Button>

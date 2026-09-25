@@ -4799,7 +4799,15 @@ function RouteComponent() {
 				<TabsContent value="referencias" className="mt-4">
 					{/* Referencias (CB-036): el server resuelve el lead y la
 					    oportunidad desde el caso — no dependen de matchingOpportunity. */}
-					{caso.id && <ReferenciasView casoCobroId={caso.id} />}
+					{caso.id && (
+						<ReferenciasView
+							casoCobroId={caso.id}
+							onAgregarTelefonoAlCaso={agregarTelefonoEncontrado}
+							agregandoTelefonoAlCaso={
+								agregarTelefonoEncontradoMutation.isPending
+							}
+						/>
+					)}
 				</TabsContent>
 			</Tabs>
 

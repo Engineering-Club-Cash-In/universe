@@ -1648,7 +1648,24 @@ export const investorContractsRouter = {
 							)
 							.returning({ id: generatedLegalContracts.id });
 
-						if (marcado) anulados.push(contrato);
+						if (marcado) {
+							anulados.push(contrato);
+							continue;
+						}
+
+						// No se pudo: alguien lo tocó entre la lectura y el UPDATE. Si
+						// es que se terminó de firmar (un webhook o una consulta de
+						// estado), va con los firmados: sigue vivo y hay que decirlo,
+						// no dar el descarte por completo. Si lo anuló o reemplazó otra
+						// persona, ya no está en la vista previa.
+						const [ahora] = await db
+							.select({ status: generatedLegalContracts.status })
+							.from(generatedLegalContracts)
+							.where(eq(generatedLegalContracts.id, contrato.id))
+							.limit(1);
+						if (ahora?.status === "signed") {
+							firmados.push(contrato.contractName);
+						}
 					}
 					return { anulados, firmados };
 				},

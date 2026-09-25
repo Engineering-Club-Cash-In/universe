@@ -35,33 +35,26 @@ import { sanitizarPayloadWialon } from "./wialon-clasificacion";
 // importa del schema para no acoplar este módulo de dominio a
 // drizzle-orm/pg-core; TypeScript igual falla si diverge, porque
 // `.values({tipo: input.tipo, ...})` exige que coincidan.
-export type GpsEventoTipo =
-	| "desconexion_energia"
-	| "ignicion"
-	| "sin_reportar"
-	| "salida_geocerca";
+export type GpsEventoTipo = "desconexion_energia" | "ignicion" | "sin_reportar";
 
 // Ventana de dedup de la NOTIFICACIÓN (no del evento crudo, que siempre se
 // guarda): como mucho un aviso por vehículo+tipo dentro de la ventana.
-// Energía/sin-reportar/geocerca más larga porque el job corre cada 5 min y
-// el problema puede seguir presente muchas corridas seguidas; ignición más
+// Energía/sin-reportar más larga porque el job corre cada 5 min y el
+// problema puede seguir presente muchas corridas seguidas; ignición más
 // corta porque es un evento puntual y accionable al momento.
 const VENTANA_NOTIFICACION_MS: Record<GpsEventoTipo, number> = {
 	desconexion_energia: 6 * 60 * 60 * 1000,
 	sin_reportar: 6 * 60 * 60 * 1000,
-	salida_geocerca: 6 * 60 * 60 * 1000,
 	ignicion: 24 * 60 * 60 * 1000,
 };
 
-// Desconexión de energía, GPS sin reportar y salida de geocerca escalan a
-// supervisor: los tres son señales de posible manipulación del equipo o
-// intento de ocultar el vehículo (justo el escenario B4/recuperación del
-// ticket). Un arranque es información útil para el asesor, pero no amerita
-// escalar de entrada.
+// Desconexión de energía y GPS sin reportar escalan a supervisor: ambas son
+// señales de posible manipulación del equipo o intento de ocultar el
+// vehículo (justo el escenario B4/recuperación del ticket). Un arranque es
+// información útil para el asesor, pero no amerita escalar de entrada.
 const ESCALA_A_SUPERVISOR: Record<GpsEventoTipo, boolean> = {
 	desconexion_energia: true,
 	sin_reportar: true,
-	salida_geocerca: true,
 	ignicion: false,
 };
 
@@ -69,7 +62,6 @@ const TITULO_POR_TIPO: Record<GpsEventoTipo, string> = {
 	desconexion_energia: "GPS: desconexión de energía",
 	ignicion: "GPS: ignición detectada",
 	sin_reportar: "GPS: unidad sin reportar",
-	salida_geocerca: "GPS: salida de Guatemala",
 };
 
 export interface RegistrarEventoGpsInput {
@@ -119,7 +111,7 @@ export interface RegistrarEventoGpsResultado {
  * vez del caso B4 que disparó la corrida, notificando/guardando el evento
  * contra un caso no relacionado.
  */
-async function resolverVehiculoYCaso(
+export async function resolverVehiculoYCaso(
 	wialonUnitId: number,
 	numeroCreditoSifcoEsperado?: string,
 ): Promise<{
@@ -461,7 +453,5 @@ function descripcionEvento(input: RegistrarEventoGpsInput): string {
 			return `Se encendió el motor de la unidad ${input.wialonUnitId} (${hora}).`;
 		case "sin_reportar":
 			return `La unidad ${input.wialonUnitId} dejó de reportar señal GPS (${hora}). Verificá el estado del equipo.`;
-		case "salida_geocerca":
-			return `La unidad ${input.wialonUnitId} salió de Guatemala (${hora}). Verificá la ubicación del vehículo.`;
 	}
 }

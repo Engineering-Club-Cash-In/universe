@@ -348,18 +348,6 @@ describe("CB-119 — registrarEventoGps", () => {
 		).toBe(true);
 	});
 
-	test("salida de geocerca: también escala a supervisores", async () => {
-		await registrarEventoGps({
-			tipo: "salida_geocerca",
-			wialonUnitId,
-			ocurridoAt,
-		});
-
-		expect(
-			notificacionesInsertadas.some((f) => f.assignedTo === "supervisor-1"),
-		).toBe(true);
-	});
-
 	test("ignición: solo notifica al asesor, no a supervisores", async () => {
 		await registrarEventoGps({
 			tipo: "ignicion",

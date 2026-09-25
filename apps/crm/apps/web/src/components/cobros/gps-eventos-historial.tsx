@@ -1,11 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-	BatteryWarning,
-	History,
-	MapPinOff,
-	Power,
-	SatelliteDish,
-} from "lucide-react";
+import { BatteryWarning, History, Power, SatelliteDish } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
 	Card,
@@ -17,11 +11,7 @@ import {
 import { formatFechaSenal, googleMapsUrl } from "@/routes/cobros/-gps-ficha";
 import { orpc } from "@/utils/orpc";
 
-type GpsEventoTipo =
-	| "desconexion_energia"
-	| "ignicion"
-	| "sin_reportar"
-	| "salida_geocerca";
+type GpsEventoTipo = "desconexion_energia" | "ignicion" | "sin_reportar";
 
 const EVENTO_CONFIG: Record<
 	GpsEventoTipo,
@@ -44,11 +34,6 @@ const EVENTO_CONFIG: Record<
 		badgeClass:
 			"bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
 	},
-	salida_geocerca: {
-		label: "Salida de Guatemala",
-		icon: MapPinOff,
-		badgeClass: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-	},
 };
 
 // Fallback defensivo: si el enum de BD gana un tipo nuevo antes de que este
@@ -63,8 +48,8 @@ const EVENTO_CONFIG_FALLBACK = {
 
 /**
  * Historial de eventos GPS (CB-119) en el tab Vehículo de la Ficha 360:
- * desconexión de energía, ignición, sin reportar y salida de Guatemala,
- * detectados por el job de polling para créditos en B4.
+ * desconexión de energía, ignición y sin reportar, detectados por el job de
+ * polling para créditos en B4.
  *
  * A diferencia de GpsVehiculoCard (CB-118), esto NO consulta Wialon en vivo
  * ni exige motivo auditado — lee eventos ya guardados en gps_eventos, y el
@@ -102,7 +87,7 @@ export function GpsEventosHistorial({ casoCobroId }: { casoCobroId: string }) {
 				</CardTitle>
 				<CardDescription>
 					Eventos detectados automáticamente (desconexión de energía, ignición,
-					GPS sin reportar, salida de Guatemala) para créditos en B4.
+					GPS sin reportar) para créditos en B4.
 				</CardDescription>
 			</CardHeader>
 			<CardContent>

@@ -99,14 +99,18 @@ export function clasificarFallaWialon(
  */
 // Lista cerrada a los svc que el cliente REALMENTE usa hoy (ver wialon-client.ts):
 // token/login, core/search_items, core/search_item, unit/calc_last y
-// resource/get_zone_data son lecturas puras. token/update (crear/borrar link
+// messages/load_interval son lecturas puras. token/update (crear/borrar link
 // de Locator) es la única escritura y a propósito NO está acá.
+// messages/unload (liberar la capa que carga load_interval del lado
+// servidor) tampoco está: getHistorialPosiciones ya la llama best-effort
+// (catch propio, nunca tumba el resultado ya obtenido), así que no necesita
+// el reintento automático de este mecanismo.
 export const WIALON_SVC_IDEMPOTENTES: ReadonlySet<string> = new Set([
 	"token/login",
 	"core/search_items",
 	"core/search_item",
 	"unit/calc_last",
-	"resource/get_zone_data",
+	"messages/load_interval",
 ]);
 
 export function esOperacionIdempotente(svc: string): boolean {

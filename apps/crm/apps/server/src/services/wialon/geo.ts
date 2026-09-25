@@ -1,37 +1,27 @@
-import type { WialonZonaPunto } from "./wialon-types";
+const RADIO_TIERRA_M = 6371000;
 
 /**
- * Punto-en-polígono por ray-casting (algoritmo par/impar): traza un rayo
- * horizontal desde el punto hacia la derecha y cuenta cuántas veces cruza
- * los lados del polígono — impar significa adentro. Estándar, sin
- * dependencias nuevas (mismo criterio "cero dependencias de mapas" de D-11
- * en docs/features/cobros-02/09-integracion-gps-wialon.md).
- *
- * `poligono` es una lista de vértices `{x: longitud, y: latitud}` en el
- * mismo orden que devuelve Wialon (resource/get_zone_data). No se cierra el
- * polígono explícitamente: el último vértice se conecta con el primero
- * dentro del loop.
+ * Distancia en metros entre dos puntos (lat/lon), fórmula de Haversine —
+ * suficiente para las distancias cortas que maneja "ubicaciones clave"
+ * (agrupar puntos a pocos cientos de metros entre sí), sin dependencias
+ * nuevas (mismo criterio "cero dependencias de mapas" de D-11 en
+ * docs/features/cobros-02/09-integracion-gps-wialon.md).
  */
-export function puntoDentroDePoligono(
-	lat: number,
-	lon: number,
-	poligono: WialonZonaPunto[],
-): boolean {
-	if (poligono.length < 3) return false;
+export function distanciaMetros(
+	lat1: number,
+	lon1: number,
+	lat2: number,
+	lon2: number,
+): number {
+	const radLat1 = (lat1 * Math.PI) / 180;
+	const radLat2 = (lat2 * Math.PI) / 180;
+	const deltaLat = ((lat2 - lat1) * Math.PI) / 180;
+	const deltaLon = ((lon2 - lon1) * Math.PI) / 180;
 
-	let dentro = false;
-	for (let i = 0, j = poligono.length - 1; i < poligono.length; j = i++) {
-		const vi = poligono[i];
-		const vj = poligono[j];
+	const a =
+		Math.sin(deltaLat / 2) ** 2 +
+		Math.cos(radLat1) * Math.cos(radLat2) * Math.sin(deltaLon / 2) ** 2;
+	const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-		// Paréntesis explícitos por legibilidad — mismo resultado que sin
-		// ellos, la precedencia real de JS ya evalúa `>` antes que `!==` y `&&`.
-		const cruza =
-			vi.y > lat !== vj.y > lat &&
-			lon < ((vj.x - vi.x) * (lat - vi.y)) / (vj.y - vi.y) + vi.x;
-
-		if (cruza) dentro = !dentro;
-	}
-
-	return dentro;
+	return RADIO_TIERRA_M * c;
 }

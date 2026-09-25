@@ -1,19 +1,32 @@
 /**
- * CB-119 — getGpsEventosCaso: historial de eventos GPS en la Ficha 360.
- * Mock de `db` propio: identifica ramas por TABLA (`.from(tabla)`), igual
- * que gps-integracion.test.ts.
+ * CB-119 — getGpsEventosCaso (historial) y getUbicacionesClaveCaso (D-15).
+ * Mock de `db` propio: identifica ramas por TABLA (`.from(tabla)`) y por los
+ * campos pedidos en `select()`, igual que wialon.test.ts.
  */
 import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { call, ORPCError } from "@orpc/server";
 import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
-import { gpsEventos } from "../db/schema/gps-eventos";
+import { opportunities } from "../db/schema/crm";
+import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
+import { gpsEventos, gpsUbicacionesClave } from "../db/schema/gps-eventos";
 import type { Context } from "../lib/context";
 
 let rolUsuarioMock = "cobros";
 let responsableCasoMock = "user-test";
 let eventosFilasMock: Record<string, unknown>[] = [];
+let ubicacionesFilasMock: Record<string, unknown>[] = [];
 let numeroCreditoSifcoMock: string | null = "01010214100000";
+
+const VEHICLE_ID = "22222222-2222-2222-2222-222222222222";
+
+// Caso ⨝ oportunidades que lee resolverCasoParaGps (getUbicacionesClaveCaso).
+let casoGpsMock: Record<string, unknown> | null = {
+	casoSifco: "01010214100000",
+	vehiculoOportunidad: VEHICLE_ID,
+};
+let insertGpsConsultaLogFalla = false;
+let gpsConsultaLogsInsertados: Record<string, unknown>[] = [];
 
 function mockDb() {
 	return {
@@ -26,6 +39,17 @@ function mockDb() {
 						}),
 					};
 				}
+
+				// resolverCasoParaGps: select({casoSifco, vehiculoOportunidad})
+				// .from(casosCobros).leftJoin(opportunities).where()
+				if (campos && "casoSifco" in campos) {
+					return {
+						leftJoin: () => ({
+							where: async () => (casoGpsMock ? [casoGpsMock] : []),
+						}),
+					};
+				}
+
 				if (tabla === casosCobros) {
 					const camposNombres = campos ? Object.keys(campos) : [];
 					// getGpsEventosCaso trae numeroCreditoSifco para el guard de
@@ -52,6 +76,7 @@ function mockDb() {
 						}),
 					};
 				}
+
 				if (tabla === gpsEventos) {
 					return {
 						where: () => ({
@@ -61,9 +86,32 @@ function mockDb() {
 						}),
 					};
 				}
+
+				if (tabla === gpsUbicacionesClave) {
+					return {
+						where: () => ({
+							orderBy: async () => ubicacionesFilasMock,
+						}),
+					};
+				}
+
 				throw new Error(`select from tabla no mockeada: ${String(tabla)}`);
 			},
 		}),
+		insert: (tabla: unknown) => {
+			if (tabla === gpsConsultaLogs) {
+				return {
+					values: (fila: Record<string, unknown>) => {
+						if (insertGpsConsultaLogFalla) {
+							return Promise.reject(new Error("insert falló"));
+						}
+						gpsConsultaLogsInsertados.push(fila);
+						return Promise.resolve();
+					},
+				};
+			}
+			throw new Error(`insert en tabla no mockeada: ${String(tabla)}`);
+		},
 	};
 }
 
@@ -217,5 +265,136 @@ describe("CB-119 — getGpsEventosCaso", () => {
 
 		expect(res).toEqual([]);
 		expect(getCreditoSpy).not.toHaveBeenCalled();
+	});
+});
+
+describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
+	afterEach(() => {
+		ubicacionesFilasMock = [];
+		casoGpsMock = {
+			casoSifco: "01010214100000",
+			vehiculoOportunidad: VEHICLE_ID,
+		};
+		insertGpsConsultaLogFalla = false;
+		gpsConsultaLogsInsertados = [];
+		mock.restore();
+	});
+
+	const input = {
+		casoCobroId: CASO_ID,
+		vehicleId: VEHICLE_ID,
+		motivo: "Verificar patrón de ubicaciones para gestión de recuperación",
+	};
+
+	it("acceso al caso, vehículo correcto, asignado en cartera: audita y devuelve ubicaciones", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		ubicacionesFilasMock = [
+			{
+				id: "ub-1",
+				lat: 14.5951,
+				lon: -90.5069,
+				radioM: 200,
+				tipo: "probable_casa",
+				horasTotales: 480,
+				diasDistintos: 55,
+				visitas: 55,
+				patron: { nocturna: 55, laboral: 0, finDeSemana: 0 },
+				primeraVisita: new Date("2026-07-01T00:00:00.000Z"),
+				ultimaVisita: new Date("2026-08-29T00:00:00.000Z"),
+				calculadoAt: new Date("2026-08-30T06:00:00.000Z"),
+			},
+		];
+
+		const res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("cobros"),
+		});
+
+		expect(res).toHaveLength(1);
+		expect(res[0]?.tipo).toBe("probable_casa");
+		expect(gpsConsultaLogsInsertados).toHaveLength(1);
+		expect(gpsConsultaLogsInsertados[0]?.motivo).toBe(input.motivo);
+	});
+
+	it("caso o vehículo sin acceso: NOT_FOUND (propaga error de resolverCasoParaGps)", async () => {
+		casoGpsMock = null;
+
+		await expect(
+			call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+				context: ctx("cobros"),
+			}),
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
+	});
+
+	it("caso auto-creado de OTRO asesor en cartera: FORBIDDEN, no expone ubicaciones", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "otro.asesor@example.com" },
+		} as never);
+
+		await expect(
+			call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+				context: ctx("cobros"),
+			}),
+		).rejects.toMatchObject({ code: "FORBIDDEN" });
+		expect(gpsConsultaLogsInsertados).toHaveLength(0);
+	});
+
+	it("falla la auditoría (insert de gps_consulta_logs): fail closed, no devuelve ubicaciones", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		insertGpsConsultaLogFalla = true;
+		ubicacionesFilasMock = [
+			{
+				id: "ub-1",
+				lat: 14.5951,
+				lon: -90.5069,
+				radioM: 200,
+				tipo: "probable_casa",
+				horasTotales: 480,
+				diasDistintos: 55,
+				visitas: 55,
+				patron: {},
+				primeraVisita: new Date(),
+				ultimaVisita: new Date(),
+				calculadoAt: new Date(),
+			},
+		];
+
+		const res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("cobros"),
+		});
+
+		expect(res).toEqual([]);
+	});
+
+	it("admin puede ver ubicaciones de cualquier caso sin llamar a cartera-back", async () => {
+		const getCreditoSpy = spyOn(carteraBackClient, "getCredito");
+		ubicacionesFilasMock = [];
+
+		const res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("admin"),
+		});
+
+		expect(res).toEqual([]);
+		expect(getCreditoSpy).not.toHaveBeenCalled();
+	});
+
+	it("motivo de 5 caracteres es aceptado y motivo menor a 5 es rechazado por validación", async () => {
+		const resValido = await call(
+			gpsEventosRouter.getUbicacionesClaveCaso,
+			{ ...input, motivo: "12345" },
+			{ context: ctx("admin") },
+		);
+		expect(resValido).toEqual([]);
+
+		await expect(
+			call(
+				gpsEventosRouter.getUbicacionesClaveCaso,
+				{ ...input, motivo: "1234" },
+				{ context: ctx("admin") },
+			),
+		).rejects.toThrow();
 	});
 });

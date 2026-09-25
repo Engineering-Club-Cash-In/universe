@@ -31,7 +31,6 @@ import { vehicles } from "../db/schema/vehicles";
 import { fetchAllPages } from "../lib/fetch-all-pages";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
-import { puntoDentroDePoligono } from "../services/wialon/geo";
 import {
 	type GpsEventoTipo,
 	registrarEventoGps,
@@ -65,18 +64,11 @@ const UMBRAL_SIN_REPORTAR_MS = 2 * 60 * 60 * 1000;
 // continua — típicamente porque su SIFCO salió de B4 y volvió a entrar
 // después. Sin este chequeo, el mismo numeroCreditoSifco alcanzaba para
 // heredar el snapshot viejo aunque hubiera un hueco de días entre medio: si
-// la condición (sin energía, fuera de geocerca) seguía activa antes y
-// después del hueco, detectarTransiciones no veía transición y nunca se
+// la condición (sin energía, sin reportar) seguía activa antes y después
+// del hueco, detectarTransiciones no veía transición y nunca se
 // generaba una alerta nueva — ni aunque la ventana de dedup de 6h/24h ya
 // hubiera expirado hace tiempo.
 const MAX_GAP_MONITOREO_MS = 3 * 5 * 60 * 1000;
-
-// Recurso y geocerca "Perimetro cash" que ya existen en el portal de La
-// Legión (confirmados en el spike de CB-119: recurso "CASH IN", zona 1 =
-// polígono de Guatemala). Configurables porque cada ambiente (dev/prod)
-// puede apuntar a una cuenta de Wialon distinta.
-const WIALON_RESOURCE_ID = Number(process.env.WIALON_RESOURCE_ID ?? 28351747);
-const WIALON_ZONA_PAIS_ID = Number(process.env.WIALON_ZONA_PAIS_ID ?? 1);
 
 interface UnidadConCaso {
 	wialonUnitId: number;
@@ -274,35 +266,6 @@ export async function unidadesConCasoActivo(
 	return candidatos.filter((c) => !sifcosAmbiguos.has(c.numeroCreditoSifco));
 }
 
-/**
- * Valida que la geocerca traída de Wialon sea geométricamente apta para
- * evaluar punto-en-polígono, ANTES de confiar en su resultado. Sin esto,
- * una zona corrupta o vacía (0 puntos, un tipo que no es polígono, o
- * vértices con x/y no numéricos o NaN) haría que `puntoDentroDePoligono`
- * devuelva `false` para cualquier coordenada — cualquier comparación contra
- * NaN da `false`, así que ningún lado del polígono "cruza" nunca — "está
- * afuera" para TODA la flota a la vez, disparando una alerta masiva falsa
- * por un problema del proveedor, no del vehículo. `zona.p` viene de un cast
- * desde `unknown` (Wialon), así que cada vértice se valida en runtime, no
- * solo el array.
- */
-export function esPoligonoValido(
-	zona: { t: number; p: unknown } | null | undefined,
-): zona is { t: number; p: { x: number; y: number }[] } {
-	return (
-		zona?.t === 2 &&
-		Array.isArray(zona.p) &&
-		zona.p.length >= 3 &&
-		zona.p.every(
-			(punto) =>
-				typeof punto?.x === "number" &&
-				Number.isFinite(punto.x) &&
-				typeof punto?.y === "number" &&
-				Number.isFinite(punto.y),
-		)
-	);
-}
-
 interface EventoDetectado {
 	tipo: GpsEventoTipo;
 	wialonUnitId: number;
@@ -324,14 +287,8 @@ export function detectarTransiciones(
 		pwrExt: number | null;
 		ignicionOn: boolean | null;
 		sinReportarDesde: Date | null;
-		dentroDeGeocerca: boolean | null;
 	} | null,
 	ahora: Date,
-	// Ya evaluado (punto-en-polígono) por el caller: `null` = no se pudo
-	// evaluar esta corrida (sin lat/lon, o la geocerca no se pudo leer de
-	// Wialon) — en ese caso no se genera ni evalúa el evento, para no
-	// confundir "no sabemos" con "está afuera".
-	dentroDeGeocercaAhora: boolean | null = null,
 	// SIFCO B4 que hizo entrar esta unidad al universo de la corrida — se
 	// propaga hasta registrarEventoGps para acotar la resolución de caso.
 	// Default solo para no romper los tests unitarios existentes de esta
@@ -388,18 +345,6 @@ export function detectarTransiciones(
 		});
 	}
 
-	// Geocerca: transición de "dentro o desconocido" a "fuera". Solo si esta
-	// corrida SÍ pudo evaluarse (dentroDeGeocercaAhora !== null) — con la
-	// geocerca sin leer, no hay forma de distinguir un cruce real de un
-	// simple fallo de la API.
-	if (dentroDeGeocercaAhora === false && anterior?.dentroDeGeocerca !== false) {
-		eventos.push({
-			...base,
-			tipo: "salida_geocerca",
-			ocurridoAt: telemetria.ultimoMensajeAt ?? ahora,
-		});
-	}
-
 	return eventos;
 }
 
@@ -439,34 +384,8 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 	// recorre más abajo para el monitoreo por caso.
 	const unitIds = Array.from(new Set(unidades.map((u) => u.wialonUnitId)));
 
-	const [telemetrias, poligonoPais] = await conContextoGps(
-		{ origen: "gps-eventos-poll" },
-		async () => {
-			const cliente = getWialonClient();
-			// En paralelo: la geocerca no depende de las unidades. Si falla
-			// (spike de CB-119: puede devolver null si la zona no existe o
-			// cambió de id), el error NO debe tumbar la telemetría del resto de
-			// eventos — se degrada a "no evaluar geocerca esta corrida".
-			const [telemetriasResult, poligonoResult] = await Promise.allSettled([
-				cliente.getTelemetriaUnidades(unitIds),
-				cliente.getZonaPoligono(WIALON_RESOURCE_ID, WIALON_ZONA_PAIS_ID),
-			]);
-
-			if (telemetriasResult.status === "rejected") {
-				throw telemetriasResult.reason;
-			}
-			if (poligonoResult.status === "rejected") {
-				console.error(
-					`${LOG_PREFIX} No se pudo leer la geocerca "Perimetro cash":`,
-					poligonoResult.reason,
-				);
-			}
-
-			return [
-				telemetriasResult.value,
-				poligonoResult.status === "fulfilled" ? poligonoResult.value : null,
-			] as const;
-		},
+	const telemetrias = await conContextoGps({ origen: "gps-eventos-poll" }, () =>
+		getWialonClient().getTelemetriaUnidades(unitIds),
 	);
 
 	const snapshotsPrevios = await db
@@ -483,9 +402,6 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 		]),
 	);
 	const telemetriaPorUnidad = new Map(telemetrias.map((t) => [t.unitId, t]));
-
-	// Se calcula UNA vez por corrida, no por unidad dentro del loop.
-	const poligonoValido = esPoligonoValido(poligonoPais);
 
 	const ahora = new Date();
 	let eventosDetectados = 0;
@@ -528,21 +444,6 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 				MAX_GAP_MONITOREO_MS;
 		const anterior = monitoreoContinuo ? snapshotPrevio : null;
 
-		// null si no hay geocerca válida, coordenadas no finitas (incluye NaN:
-		// `NaN != null` es `true` en JS, así que un check contra `null` a
-		// secas no lo filtraba) o no se pudo leer la geocerca esta corrida —
-		// detectarTransiciones lo trata como "no evaluar", no como "está afuera".
-		const tieneCoordenadas =
-			Number.isFinite(telemetria.lat) && Number.isFinite(telemetria.lon);
-		const dentroDeGeocercaAhora =
-			poligonoValido && tieneCoordenadas
-				? puntoDentroDePoligono(
-						telemetria.lat as number,
-						telemetria.lon as number,
-						(poligonoPais as NonNullable<typeof poligonoPais>).p,
-					)
-				: null;
-
 		const eventos = detectarTransiciones(
 			telemetria,
 			anterior
@@ -550,11 +451,9 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 						pwrExt: anterior.pwrExt,
 						ignicionOn: anterior.ignicionOn,
 						sinReportarDesde: anterior.sinReportarDesde,
-						dentroDeGeocerca: anterior.dentroDeGeocerca,
 					}
 				: null,
 			ahora,
-			dentroDeGeocercaAhora,
 			sifcoActual,
 		);
 
@@ -594,13 +493,6 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 			!ultimaSenal ||
 			ahora.getTime() - ultimaSenal.getTime() >= UMBRAL_SIN_REPORTAR_MS;
 
-		// Si esta corrida no pudo evaluar geocerca (null), se conserva el
-		// último valor conocido en vez de pisarlo — perderlo haría que la
-		// PRÓXIMA corrida que sí pueda evaluar trate cualquier resultado como
-		// una "transición" aunque no lo sea.
-		const dentroDeGeocercaGuardar =
-			dentroDeGeocercaAhora ?? anterior?.dentroDeGeocerca ?? null;
-
 		snapshotsParaGuardar.push({
 			wialonUnitId: telemetria.unitId,
 			numeroCreditoSifco: sifcoActual,
@@ -610,7 +502,6 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 			sinReportarDesde: sinReportarAhora
 				? (anterior?.sinReportarDesde ?? ahora)
 				: null,
-			dentroDeGeocerca: dentroDeGeocercaGuardar,
 			actualizadoAt: ahora,
 		});
 	}
@@ -631,7 +522,6 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 					ignicionOn: sql`excluded.ignicion_on`,
 					ultimaSenalWialon: sql`excluded.ultima_señal_wialon`,
 					sinReportarDesde: sql`excluded.sin_reportar_desde`,
-					dentroDeGeocerca: sql`excluded.dentro_de_geocerca`,
 					actualizadoAt: sql`excluded.actualizado_at`,
 				},
 			});

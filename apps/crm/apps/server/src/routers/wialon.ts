@@ -682,7 +682,7 @@ async function creditosPorUnidad(
  * Lanza NOT_FOUND (mismo mensaje en ambos casos, para no revelar si el caso o
  * el vehículo existen) y no deja fila de auditoría: no se mostró nada.
  */
-async function resolverCasoParaGps(
+export async function resolverCasoParaGps(
 	casoCobroId: string,
 	vehicleId: string,
 	userId: string,

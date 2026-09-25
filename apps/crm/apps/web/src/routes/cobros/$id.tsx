@@ -24,10 +24,10 @@ import {
 	Play,
 	Shield,
 	Tag,
+	TriangleAlert,
 	Upload,
 	User,
 	Users,
-	TriangleAlert,
 	X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -41,6 +41,7 @@ import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
 import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { GpsEventosHistorial } from "@/components/cobros/gps-eventos-historial";
+import { GpsUbicacionesClaveCard } from "@/components/cobros/gps-ubicaciones-clave-card";
 import { GpsVehiculoCard } from "@/components/cobros/gps-vehiculo-card";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
@@ -1439,8 +1440,8 @@ function RouteComponent() {
 						</p>
 						<p className="text-red-800 text-sm dark:text-red-300">
 							El crédito acumuló 5 cuotas atrasadas estando en recuperación de
-							vehículo, así que subió solo a jurídico. Sigue en recuperación:
-							el estado no se levanta con un convenio, solo pagando todo lo que
+							vehículo, así que subió solo a jurídico. Sigue en recuperación: el
+							estado no se levanta con un convenio, solo pagando todo lo que
 							debe.
 						</p>
 					</div>
@@ -1469,9 +1470,10 @@ function RouteComponent() {
 							{" desde el "}
 							{(() => {
 								const [y, m, d] = alertaConv.fecha_vencimiento.split("-");
-								return y && m && d ? `${d}/${m}/${y}` : alertaConv.fecha_vencimiento;
-							})()}
-							. El cliente ya había negociado este acuerdo.
+								return y && m && d
+									? `${d}/${m}/${y}`
+									: alertaConv.fecha_vencimiento;
+							})()}. El cliente ya había negociado este acuerdo.
 						</p>
 					</div>
 				</div>
@@ -1953,7 +1955,9 @@ function RouteComponent() {
 												<div className="space-y-3">
 													<p>
 														El crédito pasa a{" "}
-														<strong>B4 · Última Instancia / Pre Jurídico</strong>{" "}
+														<strong>
+															B4 · Última Instancia / Pre Jurídico
+														</strong>{" "}
 														sin importar cuántas cuotas lleve atrasadas, y queda
 														con el asesor que cubre ese bucket.
 													</p>
@@ -1967,8 +1971,8 @@ function RouteComponent() {
 													<p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
 														El estado se levanta <strong>solo</strong> si el
 														cliente paga todo lo que debe —cuotas vencidas y
-														mora— y contabilidad valida ese pago. Un convenio
-														no lo levanta.
+														mora— y contabilidad valida ese pago. Un convenio no
+														lo levanta.
 													</p>
 												</div>
 											</AlertDialogDescription>
@@ -2031,9 +2035,9 @@ function RouteComponent() {
 											<AlertDialogDescription asChild>
 												<div className="space-y-3">
 													<p>
-														El acuerdo deja de estar vigente y el crédito
-														vuelve a <strong>MOROSO</strong>, con la mora
-														recalculada sobre las cuotas que realmente debe.
+														El acuerdo deja de estar vigente y el crédito vuelve
+														a <strong>MOROSO</strong>, con la mora recalculada
+														sobre las cuotas que realmente debe.
 													</p>
 													<p>
 														El convenio <strong>no se borra</strong>: su plan de
@@ -4128,13 +4132,13 @@ function RouteComponent() {
 								</Card>
 							)}
 
-						{/* CB-033 — Historial de aprobaciones/rechazos del convenio.
+							{/* CB-033 — Historial de aprobaciones/rechazos del convenio.
 						    FUERA del `mostrarConvenio` de arriba a propósito: un rechazo
 						    BORRA el convenio, y ese es justo el caso que hay que poder
 						    auditar. El componente se oculta solo si no hay decisiones. */}
-						<ConvenioDecisionesHistorial
-							casoCobroId={casoDetails.data?.id || ""}
-						/>
+							<ConvenioDecisionesHistorial
+								casoCobroId={casoDetails.data?.id || ""}
+							/>
 						</div>
 					</div>
 				</TabsContent>
@@ -4388,11 +4392,22 @@ function RouteComponent() {
 							/>
 						)}
 						{/* CB-119: historial de eventos GPS detectados automáticamente
-						    (energía, ignición, sin reportar, geocerca) para créditos en
-						    B4. Solo requiere caso.id (a diferencia de GpsVehiculoCard, no
-						    audita consulta ni depende del vehículo: lee eventos ya
-						    guardados). */}
+						    (energía, ignición, sin reportar) para créditos en B4. Solo
+						    requiere caso.id (a diferencia de GpsVehiculoCard, no audita
+						    consulta ni depende del vehículo: lee eventos ya guardados). */}
 						{caso.id && <GpsEventosHistorial casoCobroId={caso.id} />}
+						{/* CB-119 (D-15): ubicaciones clave (casa, trabajo, lugares
+						    recurrentes) calculadas por el job nocturno. Mismo gate de
+						    motivo auditado que GpsVehiculoCard — revela dónde vive/trabaja
+						    el cliente, así que necesita caso.vehicleId (igual que esa
+						    tarjeta), no solo caso.id. */}
+						{caso.id && caso.vehicleId && (
+							<GpsUbicacionesClaveCard
+								casoCobroId={caso.id}
+								key={`${id}:${caso.vehicleId}`}
+								vehicleId={caso.vehicleId}
+							/>
+						)}
 						{/* Información de Recuperación - Solo para casos incobrables */}
 						{caso.estadoMora === "incobrable" && recuperacion && (
 							<Card>

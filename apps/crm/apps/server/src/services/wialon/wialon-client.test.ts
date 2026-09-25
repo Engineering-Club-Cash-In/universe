@@ -1837,6 +1837,130 @@ describe("WialonClient", () => {
 			expect(client.getPublicConfig().tokenConfigured).toBe(false);
 		});
 	});
+
+	describe("getHistorialPosiciones (CB-119, D-15)", () => {
+		test("mapea mensajes con posición y descarga la capa al terminar", async () => {
+			const svcsLlamados: string[] = [];
+			const mockFetch: WialonFetch = async (_, init) => {
+				const bodyStr = String(init?.body || "");
+				if (bodyStr.includes("svc=token%2Flogin")) {
+					return new Response(JSON.stringify({ eid: "sid-historial" }), {
+						status: 200,
+					});
+				}
+				if (bodyStr.includes("svc=messages%2Fload_interval")) {
+					svcsLlamados.push("load_interval");
+					return new Response(
+						JSON.stringify({
+							count: 2,
+							messages: [
+								{ t: 1700000000, pos: { y: 14.6, x: -90.5, s: 0 } },
+								{ t: 1700000100, pos: { y: 14.61, x: -90.51, s: 20 } },
+							],
+						}),
+						{ status: 200 },
+					);
+				}
+				if (bodyStr.includes("svc=messages%2Funload")) {
+					svcsLlamados.push("unload");
+					return new Response(JSON.stringify({ error: 0 }), { status: 200 });
+				}
+				throw new Error(`svc no mockeado: ${bodyStr}`);
+			};
+
+			const client = new WialonClient({ token: "tok-historial" }, mockFetch);
+			const mensajes = await client.getHistorialPosiciones(
+				20060450,
+				new Date("2026-01-01T00:00:00.000Z"),
+				new Date("2026-01-02T00:00:00.000Z"),
+			);
+
+			expect(mensajes).toHaveLength(2);
+			expect(mensajes[0]).toEqual({
+				t: 1700000000,
+				lat: 14.6,
+				lon: -90.5,
+				velocidadKmh: 0,
+			});
+			expect(svcsLlamados).toContain("load_interval");
+			expect(svcsLlamados).toContain("unload");
+		});
+
+		test("mensajes sin posición se descartan", async () => {
+			const mockFetch: WialonFetch = async (_, init) => {
+				const bodyStr = String(init?.body || "");
+				if (bodyStr.includes("svc=token%2Flogin")) {
+					return new Response(JSON.stringify({ eid: "sid-sin-pos" }), {
+						status: 200,
+					});
+				}
+				if (bodyStr.includes("svc=messages%2Fload_interval")) {
+					return new Response(
+						JSON.stringify({
+							count: 2,
+							messages: [
+								{ t: 1700000000, pos: { y: 14.6, x: -90.5 } },
+								{ t: 1700000100 }, // sin campo pos
+							],
+						}),
+						{ status: 200 },
+					);
+				}
+				return new Response(JSON.stringify({ error: 0 }), { status: 200 });
+			};
+
+			const client = new WialonClient({ token: "tok-sin-pos" }, mockFetch);
+			const mensajes = await client.getHistorialPosiciones(
+				1,
+				new Date("2026-01-01T00:00:00.000Z"),
+				new Date("2026-01-02T00:00:00.000Z"),
+			);
+
+			expect(mensajes).toHaveLength(1);
+		});
+
+		test("un tramo que falla se degrada a sin datos para ese tramo, no tumba los demás", async () => {
+			// timeFrom identifica de qué tramo es la llamada — el primer tramo
+			// (arranca en el timeFrom más chico) falla SIEMPRE, incluidos los
+			// reintentos automáticos de lecturas idempotentes; el segundo tramo
+			// siempre responde bien.
+			const primerTimeFrom = Math.floor(
+				new Date("2026-01-01T00:00:00.000Z").getTime() / 1000,
+			);
+			const mockFetch: WialonFetch = async (_, init) => {
+				const bodyStr = decodeURIComponent(String(init?.body || ""));
+				if (bodyStr.includes("svc=token/login")) {
+					return new Response(JSON.stringify({ eid: "sid-tramo-falla" }), {
+						status: 200,
+					});
+				}
+				if (bodyStr.includes("svc=messages/load_interval")) {
+					if (bodyStr.includes(`"timeFrom":${primerTimeFrom}`)) {
+						return new Response("no soy json", { status: 500 });
+					}
+					return new Response(
+						JSON.stringify({
+							count: 1,
+							messages: [{ t: 1700000000, pos: { y: 14.6, x: -90.5 } }],
+						}),
+						{ status: 200 },
+					);
+				}
+				return new Response(JSON.stringify({ error: 0 }), { status: 200 });
+			};
+
+			const client = new WialonClient({ token: "tok-falla" }, mockFetch);
+			// 10 días de ventana → 2 tramos de 7 días: el primero falla, el
+			// segundo sí trae datos.
+			const mensajes = await client.getHistorialPosiciones(
+				1,
+				new Date("2026-01-01T00:00:00.000Z"),
+				new Date("2026-01-11T00:00:00.000Z"),
+			);
+
+			expect(mensajes).toHaveLength(1);
+		});
+	});
 });
 
 describe("matchUnidadPorPlaca (CB-118)", () => {

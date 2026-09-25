@@ -15,6 +15,8 @@ import {
 	type WialonConfig,
 	type WialonFetch,
 	type WialonIntentoEvento,
+	type WialonMensajeCrudo,
+	type WialonMensajePosicion,
 	type WialonSearchItemResponse,
 	type WialonSearchItemsResponse,
 	type WialonSensorMeta,
@@ -22,7 +24,6 @@ import {
 	type WialonTelemetriaUnidad,
 	type WialonUnitCalcLastItem,
 	type WialonUnitItem,
-	type WialonZona,
 } from "./wialon-types";
 
 const DEFAULT_BASE_URL = "https://hst-api.wialon.com/wialon/ajax.html";
@@ -317,13 +318,6 @@ export class WialonClient {
 	private ignitionSensorCache = new Map<
 		number,
 		{ sensorId: string | null; expiresAt: number; lookupFailed?: boolean }
-	>();
-	// Geocerca "Perimetro cash" (CB-119): cambia rarísimo (alguien la edita a
-	// mano en el portal de Wialon), así que se cachea con el mismo TTL de
-	// sesión en vez de pedirla cada corrida del job (cada 5 min).
-	private zonaCache = new Map<
-		string,
-		{ zona: WialonZona | null; expiresAt: number }
 	>();
 
 	// Circuit breaker en memoria (CB-121): cuenta fallos reintentables
@@ -1330,50 +1324,94 @@ export class WialonClient {
 	}
 
 	/**
-	 * Trae UNA geocerca por id dentro de un recurso (resource/get_zone_data,
-	 * CB-119). Lectura pura, cacheada con el mismo TTL de sesión: la zona
-	 * "Perimetro cash" prácticamente no cambia, y pedirla en cada corrida del
-	 * job (cada 5 min) sería ruido innecesario contra la API.
+	 * Historial de posiciones de una unidad en un rango de tiempo
+	 * (messages/load_interval, CB-119 D-15), para el cálculo de "ubicaciones
+	 * clave". El CRM no guarda este historial — Wialon es la fuente de
+	 * verdad, se pide sobre demanda cada vez que el job nocturno recalcula.
 	 *
-	 * `col` con el id explícito, no `[]` (spike de CB-119: pedir "todas las
-	 * zonas" con `col: []` devolvió un arreglo vacío contra este recurso —
-	 * comportamiento del proveedor, no un bug propio — así que se pide
-	 * siempre por id conocido).
+	 * Se pagina en tramos de 7 días: pedir 60 días de una sola vez puede
+	 * exceder límites de respuesta del proveedor para una unidad con mucho
+	 * tráfico de mensajes, y un tramo que falla no debe tumbar los demás
+	 * (se degrada a "sin datos para ese tramo", no lanza).
 	 *
-	 * Devuelve `null` si la zona no existe (id incorrecto, o la borraron del
-	 * portal) — no lanza, porque el caller (detección de geocerca) debe
-	 * degradar a "no evaluar" en vez de tumbar toda la corrida del job.
+	 * `messages/unload` en `finally` de cada tramo: Wialon carga los mensajes
+	 * en una "capa" del lado servidor al pedir `load_interval`, y esa capa
+	 * cuenta contra un límite de la cuenta — sin liberarla, corridas
+	 * sucesivas del job (una por unidad, cada noche) podrían agotarlo.
 	 */
-	public async getZonaPoligono(
-		resourceId: number,
-		zonaId: number,
-	): Promise<WialonZona | null> {
-		const claveCache = `${resourceId}:${zonaId}`;
-		const cacheada = this.zonaCache.get(claveCache);
-		if (cacheada && cacheada.expiresAt > Date.now()) {
-			return cacheada.zona;
+	public async getHistorialPosiciones(
+		unitId: number,
+		desde: Date,
+		hasta: Date,
+	): Promise<WialonMensajePosicion[]> {
+		const TRAMO_MS = 7 * 24 * 60 * 60 * 1000;
+		const mensajes: WialonMensajePosicion[] = [];
+
+		for (
+			let inicioTramo = desde.getTime();
+			inicioTramo < hasta.getTime();
+			inicioTramo += TRAMO_MS
+		) {
+			const finTramo = Math.min(inicioTramo + TRAMO_MS, hasta.getTime());
+
+			try {
+				const delTramo = await this.executeWithSession(async (sid) => {
+					try {
+						const data = (await this.requestRaw(
+							"messages/load_interval",
+							{
+								itemId: unitId,
+								timeFrom: Math.floor(inicioTramo / 1000),
+								timeTo: Math.floor(finTramo / 1000),
+								// flags 0 + flagsMask 0: sin filtrar por tipo de mensaje,
+								// se quiere todo lo que traiga posición.
+								flags: 0,
+								flagsMask: 0xff00,
+								loadCount: 0xffffffff,
+							},
+							sid,
+						)) as { messages?: WialonMensajeCrudo[] } | unknown;
+
+						const crudos = Array.isArray(
+							(data as { messages?: unknown })?.messages,
+						)
+							? ((data as { messages: WialonMensajeCrudo[] }).messages ?? [])
+							: [];
+
+						return crudos
+							.filter(
+								(
+									m,
+								): m is WialonMensajeCrudo & {
+									pos: NonNullable<WialonMensajeCrudo["pos"]>;
+								} =>
+									m.pos != null &&
+									typeof m.pos.y === "number" &&
+									typeof m.pos.x === "number",
+							)
+							.map((m) => ({
+								t: m.t,
+								lat: m.pos.y,
+								lon: m.pos.x,
+								velocidadKmh: typeof m.pos.s === "number" ? m.pos.s : null,
+							}));
+					} finally {
+						// Best-effort: liberar la capa no debe tumbar el resultado ya
+						// obtenido si Wialon falla al descargarla.
+						await this.requestRaw("messages/unload", {}, sid).catch(() => {});
+					}
+				});
+
+				mensajes.push(...delTramo);
+			} catch (error) {
+				console.warn(
+					`[WialonClient] No se pudo traer historial de posiciones de la unidad ${unitId} entre ${new Date(inicioTramo).toISOString()} y ${new Date(finTramo).toISOString()}:`,
+					error instanceof Error ? error.message : String(error),
+				);
+			}
 		}
 
-		return this.executeWithSession(async (sid) => {
-			const zonas = (await this.requestRaw(
-				"resource/get_zone_data",
-				{ itemId: resourceId, col: [zonaId], flags: 29 },
-				sid,
-			)) as WialonZona[] | unknown;
-
-			const zona = Array.isArray(zonas) ? (zonas[0] ?? null) : null;
-
-			// TTL corto para el caso negativo: si Wialon devuelve vacío por una
-			// falla transitoria, cachear `null` por las mismas 2h de sesión
-			// dejaría ~24 corridas del job (cada 5 min) sin evaluar geocerca por
-			// un problema que pudo durar segundos.
-			this.zonaCache.set(claveCache, {
-				zona,
-				expiresAt: Date.now() + (zona ? SESSION_TTL_MS : NEGATIVE_CACHE_TTL_MS),
-			});
-
-			return zona;
-		});
+		return mensajes;
 	}
 
 	/**

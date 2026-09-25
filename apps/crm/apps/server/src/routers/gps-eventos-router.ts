@@ -1,6 +1,6 @@
 /**
- * CB-119 · Historial de eventos GPS (desconexión de energía, ignición,
- * GPS sin reportar, salida de geocerca) para la Ficha 360.
+ * CB-119 · Historial de eventos GPS (desconexión de energía, ignición, GPS
+ * sin reportar) y ubicaciones clave (D-15) para la Ficha 360.
  *
  * Módulo aparte de wialon.ts y gps-integracion.ts: mismo motivo de siempre
  * (D-03 en docs/features/cobros-02/09-integracion-gps-wialon.md) — evitar
@@ -11,14 +11,18 @@
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
-import { gpsEventos } from "../db/schema/gps-eventos";
+import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
+import { gpsEventos, gpsUbicacionesClave } from "../db/schema/gps-eventos";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure } from "../lib/orpc";
 import {
 	gpsEventosCasoInputSchema,
 	gpsEventosCasoOutputSchema,
+	ubicacionesClaveCasoInputSchema,
+	ubicacionesClaveCasoOutputSchema,
 } from "../services/wialon/wialon-types";
 import { assertAccesoCasoCobro } from "./cobros";
+import { resolverCasoParaGps } from "./wialon";
 
 export const gpsEventosRouter = {
 	/**
@@ -75,5 +79,75 @@ export const gpsEventosRouter = {
 				.limit(input.limit);
 
 			return filas;
+		}),
+
+	/**
+	 * Ubicaciones clave del vehículo (D-15): casa, trabajo, lugares
+	 * recurrentes, calculadas por el job nocturno a partir del historial de
+	 * Wialon. Revela dónde vive/trabaja el cliente — mismo gate de acceso Y
+	 * motivo auditado que `getGpsVehiculo` (CB-118): `resolverCasoParaGps`
+	 * cubre acceso al caso + que `vehicleId` sea el del caso +
+	 * `assertCreditoAsignadoEnCarteraPorSifco`, y la consulta se registra en
+	 * `gps_consulta_logs` ANTES de responder. Fail-closed: si no se pudo
+	 * auditar, no se devuelven ubicaciones (mismo criterio que
+	 * `AUDITORIA_NO_DISPONIBLE` en `getGpsVehiculo`).
+	 */
+	getUbicacionesClaveCaso: cobrosProcedure
+		.input(ubicacionesClaveCasoInputSchema)
+		.output(ubicacionesClaveCasoOutputSchema)
+		.handler(async ({ input, context }) => {
+			const { numeroCreditoSifco } = await resolverCasoParaGps(
+				input.casoCobroId,
+				input.vehicleId,
+				context.userId,
+				context.userRole,
+				context.user?.email || context.session?.user?.email,
+			);
+
+			const userId = context.userId ?? context.user?.id;
+			if (!userId) {
+				console.error("GPS_CONSULTA_LOG_SIN_USUARIO", {
+					vehicleId: input.vehicleId,
+					origen: "getUbicacionesClaveCaso",
+				});
+				return [];
+			}
+
+			try {
+				await db.insert(gpsConsultaLogs).values({
+					vehicleId: input.vehicleId,
+					numeroCreditoSifco,
+					motivo: input.motivo,
+					unitId: null,
+					unitName: null,
+					userId,
+				});
+			} catch (error) {
+				console.error("GPS_CONSULTA_LOG_FALLIDO", {
+					vehicleId: input.vehicleId,
+					origen: "getUbicacionesClaveCaso",
+					message: error instanceof Error ? error.message : String(error),
+				});
+				return [];
+			}
+
+			return await db
+				.select({
+					id: gpsUbicacionesClave.id,
+					lat: gpsUbicacionesClave.lat,
+					lon: gpsUbicacionesClave.lon,
+					radioM: gpsUbicacionesClave.radioM,
+					tipo: gpsUbicacionesClave.tipo,
+					horasTotales: gpsUbicacionesClave.horasTotales,
+					diasDistintos: gpsUbicacionesClave.diasDistintos,
+					visitas: gpsUbicacionesClave.visitas,
+					patron: gpsUbicacionesClave.patron,
+					primeraVisita: gpsUbicacionesClave.primeraVisita,
+					ultimaVisita: gpsUbicacionesClave.ultimaVisita,
+					calculadoAt: gpsUbicacionesClave.calculadoAt,
+				})
+				.from(gpsUbicacionesClave)
+				.where(eq(gpsUbicacionesClave.casoCobroId, input.casoCobroId))
+				.orderBy(desc(gpsUbicacionesClave.horasTotales));
 		}),
 };

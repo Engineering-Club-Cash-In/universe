@@ -21,16 +21,18 @@ import {
 	MessageSquare,
 	Pencil,
 	Phone,
+	PhoneCall,
 	Play,
+	Plus,
 	Shield,
 	Tag,
+	TriangleAlert,
 	Upload,
 	User,
 	Users,
-	TriangleAlert,
 	X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
 	etiquetaMetodoContacto,
 	evaluarGestionTempranaB1,
@@ -48,6 +50,10 @@ import { Pagination } from "@/components/cobros/pagination";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
+import {
+	TelefonosEditor,
+	telefonosParaGuardar,
+} from "@/components/cobros/telefonos-editor";
 import { ContactoModal } from "@/components/contacto-modal";
 import {
 	OpportunityDetailModal,
@@ -102,6 +108,7 @@ import {
 	numeroDeEstadoMora,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
+import { type ColaSerial, crearColaSerial } from "@/lib/cobros/cola-serial";
 import { cuotasElegiblesParaConvenio } from "@/lib/cobros/convenio-cuotas";
 import {
 	type EstadoPromesaUI,
@@ -530,11 +537,28 @@ function RouteComponent() {
 
 	// Estado de edición de contacto
 	const [isEditingContact, setIsEditingContact] = useState(false);
+	// Controlada para que "Más números para localizarlo" (tarjeta de contacto)
+	// pueda llevar a la pestaña Referencias.
+	const [tabActiva, setTabActiva] = useState("resumen");
 	const [contactForm, setContactForm] = useState({
 		telefonoPrincipal: [] as string[],
 		telefonoAlternativo: [] as string[],
 		emailContacto: "",
 	});
+	// CB-036 — refs (no estado) porque los leen tareas asíncronas de la cola de
+	// teléfonos, que tienen que ver el valor de AHORA y no el del render en que
+	// se crearon:
+	// - contactFormRef: el formulario más reciente. Se escribe en el acto en
+	//   cada cambio, sin esperar al re-render.
+	// - contactGuardadoRef: lo último que el servidor CONFIRMÓ. Solo se mueve
+	//   cuando un guardado sale bien (Codex, PR #1751): si falla, "Cancelar"
+	//   tiene que seguir avisando que hay cambios sin guardar.
+	const contactFormRef = useRef(contactForm);
+	const contactGuardadoRef = useRef(contactForm);
+	const cambiarContactForm = (nuevo: typeof contactForm) => {
+		contactFormRef.current = nuevo;
+		setContactForm(nuevo);
+	};
 
 	// Estado modal seguimiento
 	const [isSeguimientoModalOpen, setIsSeguimientoModalOpen] = useState(false);
@@ -576,6 +600,16 @@ function RouteComponent() {
 		}),
 		enabled: !!session && !!casoDetails.data?.id,
 		placeholderData: (previa) => previa,
+	});
+
+	// CB-036: solo para el contador de la pestaña Referencias. Es la misma
+	// query (misma llave) que pinta ReferenciasView, así que abrir la pestaña
+	// no vuelve a pedirla.
+	const referenciasCaso = useQuery({
+		...orpc.getReferenciasCaso.queryOptions({
+			input: { casoCobroId: casoDetails.data?.id || "" },
+		}),
+		enabled: !!session && !!casoDetails.data?.id,
 	});
 
 	// La lista COMPLETA (limit 200), solo para las derivaciones que necesitan
@@ -1065,6 +1099,10 @@ function RouteComponent() {
 			}),
 		onSuccess: () => {
 			toast.success("Información de contacto actualizada");
+			// Los teléfonos nuevos de Referencias se marcan contra los del caso.
+			queryClient.invalidateQueries({
+				queryKey: orpc.getReferenciasCaso.key(),
+			});
 			queryClient.invalidateQueries(
 				orpc.getDetallesCreditoCarteraBack.queryOptions({
 					input: { creditoId: id },
@@ -1077,6 +1115,128 @@ function RouteComponent() {
 		},
 	});
 
+	// CB-036: los teléfonos del caso se guardan EN EL ACTO desde el editor de la
+	// tarjeta de contacto (al confirmar o quitar un número), sin esperar al
+	// "Guardar" del formulario, para que un número escrito no se pierda.
+	//
+	// Todo lo que escribe los teléfonos del caso pasa por UNA cola, en orden:
+	// el autoguardado, el número sugerido y el "Guardar". Cada guardado manda
+	// las dos listas completas, así que dos en vuelo podían llegar al revés y
+	// el viejo pisar al nuevo (Codex, PR #1751). Y cada tarea lee el
+	// formulario al SALIR de la cola, no al entrar: un autoguardado encolado
+	// detrás de un número sugerido ya lo incluye.
+	const colaTelefonos = useRef<ColaSerial | null>(null);
+	colaTelefonos.current ??= crearColaSerial();
+	const encolarTelefonos = <T,>(tarea: () => Promise<T>): Promise<T> =>
+		(colaTelefonos.current as ColaSerial).encolar(tarea);
+	// Varios blur seguidos no encolan varios autoguardados: basta uno que lea
+	// el formulario al salir.
+	const autoguardadoEncolado = useRef(false);
+
+	const refrescarTelefonos = () => {
+		queryClient.invalidateQueries(
+			orpc.getDetallesCreditoCarteraBack.queryOptions({
+				input: { creditoId: id },
+			}),
+		);
+		queryClient.invalidateQueries({
+			queryKey: orpc.getReferenciasCaso.key(),
+		});
+	};
+
+	const guardarTelefonosMutation = useMutation({
+		mutationFn: (v: {
+			telefonosPrincipales: string[];
+			telefonosAlternativos: string[];
+		}) =>
+			client.guardarTelefonosCaso({
+				casoCobroId: casoDetails.data?.id ?? "",
+				...v,
+			}),
+		onSuccess: () => {
+			toast.success("Teléfonos guardados");
+			refrescarTelefonos();
+		},
+		onError: (err: Error) => {
+			toast.error(`No se pudieron guardar los teléfonos: ${err.message}`);
+		},
+	});
+
+	/** El editor avisa un cambio de teléfonos: se refleja ya y se encola el guardado. */
+	const guardarTelefonos = (
+		cambio: Partial<
+			Pick<typeof contactForm, "telefonoPrincipal" | "telefonoAlternativo">
+		>,
+	) => {
+		contactFormRef.current = { ...contactFormRef.current, ...cambio };
+		if (autoguardadoEncolado.current) return;
+		autoguardadoEncolado.current = true;
+		encolarTelefonos(async () => {
+			autoguardadoEncolado.current = false;
+			const f = contactFormRef.current;
+			const p = telefonosParaGuardar(f.telefonoPrincipal);
+			if (p.length === 0) {
+				toast.error(
+					"El teléfono principal no puede quedar vacío: escribí otro número.",
+				);
+				return;
+			}
+			const a = telefonosParaGuardar(f.telefonoAlternativo);
+			await guardarTelefonosMutation.mutateAsync({
+				telefonosPrincipales: p,
+				telefonosAlternativos: a,
+			});
+			contactGuardadoRef.current = {
+				...contactGuardadoRef.current,
+				telefonoPrincipal: p,
+				telefonoAlternativo: a,
+			};
+		}).catch(() => undefined);
+	};
+
+	// Un número que se consiguió por referencias: se suma con la operación del
+	// botón de la pestaña Referencias, que deja quién y cuándo lo agregó.
+	const agregarTelefonoEncontradoMutation = useMutation({
+		mutationFn: (v: { hallazgoId: string; telefono: string }) =>
+			client.agregarHallazgoATelefonosCaso({
+				casoCobroId: casoDetails.data?.id ?? "",
+				hallazgoId: v.hallazgoId,
+			}),
+		onSuccess: (res, v) => {
+			toast.success(
+				res.agregado
+					? `${v.telefono} quedó guardado entre los teléfonos del cliente`
+					: `${v.telefono} ya estaba entre los teléfonos del cliente`,
+			);
+			refrescarTelefonos();
+		},
+		onError: (err: Error) => {
+			toast.error(`No se pudo guardar el teléfono: ${err.message}`);
+		},
+	});
+
+	const agregarTelefonoEncontrado = (v: {
+		hallazgoId: string;
+		telefono: string;
+	}) => {
+		encolarTelefonos(async () => {
+			await agregarTelefonoEncontradoMutation.mutateAsync(v);
+			// El número ya quedó en el caso: entra al formulario (si está abierto)
+			// y a lo guardado, para que un guardado posterior no lo borre.
+			const digitos = (t: string) => t.replace(/\D/g, "").slice(-8);
+			const sumar = (f: typeof contactForm) =>
+				[...f.telefonoPrincipal, ...f.telefonoAlternativo].some(
+					(t) => digitos(t) === digitos(v.telefono),
+				)
+					? f
+					: {
+							...f,
+							telefonoAlternativo: [...f.telefonoAlternativo, v.telefono],
+						};
+			cambiarContactForm(sumar(contactFormRef.current));
+			contactGuardadoRef.current = sumar(contactGuardadoRef.current);
+		}).catch(() => undefined);
+	};
 	const cancelSeguimientoMutation = useMutation({
 		mutationFn: (seguimientoId: string) =>
 			client.deleteSeguimiento({ id: seguimientoId }),
@@ -1156,6 +1316,37 @@ function RouteComponent() {
 	// server (las promesas van en su propia tarjeta, CB-020).
 	const contactos = historialContactosPagina.data?.contactos ?? [];
 	const totalContactos = historialContactosPagina.data?.total ?? 0;
+	const totalReferencias = referenciasCaso.data?.referencias.length ?? 0;
+	// CB-036: acceso directo en la tarjeta de contacto. Teléfonos del cliente
+	// que se consiguieron (de una referencia o sueltos) y que todavía no están
+	// entre los del caso, y cuántas referencias tienen a quién llamar.
+	const ultimos8 = (t: string) => t.replace(/\D/g, "").slice(-8);
+	const telefonosDelCaso = new Set(
+		[caso.telefonoPrincipal, caso.telefonoAlternativo]
+			.flatMap((v) => String(v || "").split(","))
+			.map((t) => ultimos8(t))
+			.filter(Boolean),
+	);
+	const telefonosNuevosCliente = (referenciasCaso.data?.hallazgos ?? []).filter(
+		(h, i, lista) =>
+			h.tipo === "telefono" &&
+			!h.enTelefonosDelCaso &&
+			!telefonosDelCaso.has(ultimos8(h.valor)) &&
+			lista.findIndex(
+				(otro) =>
+					otro.tipo === "telefono" &&
+					ultimos8(otro.valor) === ultimos8(h.valor),
+			) === i,
+	);
+	const referenciasConTelefono = (
+		referenciasCaso.data?.referencias ?? []
+	).filter((r) => r.telefonos.length > 0).length;
+	const textoReferencias =
+		referenciasConTelefono === totalReferencias
+			? totalReferencias === 1
+				? "1 referencia con teléfono"
+				: `${totalReferencias} referencias con teléfono`
+			: `${totalReferencias === 1 ? "1 referencia" : `${totalReferencias} referencias`} (${referenciasConTelefono} con teléfono)`;
 	const contactosPorPagina = historialContactosPagina.data?.porPagina ?? 10;
 	const cuotas = historialPagos.data || [];
 	const recuperacion = recuperacionInfo.data;
@@ -1439,8 +1630,8 @@ function RouteComponent() {
 						</p>
 						<p className="text-red-800 text-sm dark:text-red-300">
 							El crédito acumuló 5 cuotas atrasadas estando en recuperación de
-							vehículo, así que subió solo a jurídico. Sigue en recuperación:
-							el estado no se levanta con un convenio, solo pagando todo lo que
+							vehículo, así que subió solo a jurídico. Sigue en recuperación: el
+							estado no se levanta con un convenio, solo pagando todo lo que
 							debe.
 						</p>
 					</div>
@@ -1469,9 +1660,10 @@ function RouteComponent() {
 							{" desde el "}
 							{(() => {
 								const [y, m, d] = alertaConv.fecha_vencimiento.split("-");
-								return y && m && d ? `${d}/${m}/${y}` : alertaConv.fecha_vencimiento;
-							})()}
-							. El cliente ya había negociado este acuerdo.
+								return y && m && d
+									? `${d}/${m}/${y}`
+									: alertaConv.fecha_vencimiento;
+							})()}. El cliente ya había negociado este acuerdo.
 						</p>
 					</div>
 				</div>
@@ -1953,7 +2145,9 @@ function RouteComponent() {
 												<div className="space-y-3">
 													<p>
 														El crédito pasa a{" "}
-														<strong>B4 · Última Instancia / Pre Jurídico</strong>{" "}
+														<strong>
+															B4 · Última Instancia / Pre Jurídico
+														</strong>{" "}
 														sin importar cuántas cuotas lleve atrasadas, y queda
 														con el asesor que cubre ese bucket.
 													</p>
@@ -1967,8 +2161,8 @@ function RouteComponent() {
 													<p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
 														El estado se levanta <strong>solo</strong> si el
 														cliente paga todo lo que debe —cuotas vencidas y
-														mora— y contabilidad valida ese pago. Un convenio
-														no lo levanta.
+														mora— y contabilidad valida ese pago. Un convenio no
+														lo levanta.
 													</p>
 												</div>
 											</AlertDialogDescription>
@@ -2031,9 +2225,9 @@ function RouteComponent() {
 											<AlertDialogDescription asChild>
 												<div className="space-y-3">
 													<p>
-														El acuerdo deja de estar vigente y el crédito
-														vuelve a <strong>MOROSO</strong>, con la mora
-														recalculada sobre las cuotas que realmente debe.
+														El acuerdo deja de estar vigente y el crédito vuelve
+														a <strong>MOROSO</strong>, con la mora recalculada
+														sobre las cuotas que realmente debe.
 													</p>
 													<p>
 														El convenio <strong>no se borra</strong>: su plan de
@@ -2139,7 +2333,7 @@ function RouteComponent() {
 			    (3.1k líneas de scroll). Se agrupan por intención de uso —
 			    gestionar hoy / revisar qué pasó / ver la deuda / el activo —
 			    sin quitar ninguno. */}
-			<Tabs defaultValue="resumen" className="w-full">
+			<Tabs value={tabActiva} onValueChange={setTabActiva} className="w-full">
 				<TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
 					<TabsTrigger value="resumen">Resumen</TabsTrigger>
 					<TabsTrigger value="historial">
@@ -2155,7 +2349,17 @@ function RouteComponent() {
 					</TabsTrigger>
 					<TabsTrigger value="estado-cuenta">Estado de cuenta</TabsTrigger>
 					<TabsTrigger value="vehiculo">Vehículo</TabsTrigger>
-					<TabsTrigger value="referencias">Referencias</TabsTrigger>
+					<TabsTrigger value="referencias">
+						Referencias
+						{totalReferencias > 0 && (
+							<Badge
+								variant="secondary"
+								className="ml-1.5 h-4 px-1 text-[10px]"
+							>
+								{totalReferencias}
+							</Badge>
+						)}
+					</TabsTrigger>
 				</TabsList>
 
 				{/* RESUMEN — lo que se necesita para gestionar AHORA. */}
@@ -2732,13 +2936,17 @@ function RouteComponent() {
 														.split(",")
 														.map((t) => t.trim())
 														.filter(Boolean);
-												setContactForm({
-													telefonoPrincipal: parseTels(caso.telefonoPrincipal),
+												const principales = parseTels(caso.telefonoPrincipal);
+												const inicial = {
+													telefonoPrincipal:
+														principales.length > 0 ? principales : [""],
 													telefonoAlternativo: parseTels(
 														caso.telefonoAlternativo,
 													),
 													emailContacto: caso.emailContacto || "",
-												});
+												};
+												cambiarContactForm(inicial);
+												contactGuardadoRef.current = inicial;
 												setIsEditingContact(true);
 											}}
 										>
@@ -2749,103 +2957,88 @@ function RouteComponent() {
 								</CardHeader>
 								<CardContent className="space-y-4">
 									{isEditingContact ? (
-										<div className="space-y-3">
-											<div className="space-y-1">
-												<Label>Teléfono Principal *</Label>
-												<div className="flex flex-wrap gap-1.5">
-													{contactForm.telefonoPrincipal.map((tel, i) => (
-														<Badge
-															key={`principal-${tel}-${i}`}
-															variant="secondary"
-															className="gap-1 pr-1 pl-2"
-														>
-															{tel}
-															<button
-																type="button"
-																onClick={() =>
-																	setContactForm((f) => ({
-																		...f,
-																		telefonoPrincipal:
-																			f.telefonoPrincipal.filter(
-																				(_, idx) => idx !== i,
-																			),
-																	}))
-																}
-																className="rounded-full hover:bg-muted"
-															>
-																<X className="h-3 w-3" />
-															</button>
-														</Badge>
-													))}
-												</div>
-												<Input
-													placeholder="Agregar teléfono y presionar Enter"
-													onKeyDown={(e) => {
-														if (e.key === "Enter") {
-															e.preventDefault();
-															const val = e.currentTarget.value.trim();
-															if (val) {
-																setContactForm((f) => ({
-																	...f,
-																	telefonoPrincipal: [
-																		...f.telefonoPrincipal,
-																		val,
-																	],
-																}));
-																e.currentTarget.value = "";
-															}
-														}
-													}}
-												/>
-											</div>
-											<div className="space-y-1">
-												<Label>Teléfono Alternativo</Label>
-												<div className="flex flex-wrap gap-1.5">
-													{contactForm.telefonoAlternativo.map((tel, i) => (
-														<Badge
-															key={`alt-${tel}-${i}`}
-															variant="secondary"
-															className="gap-1 pr-1 pl-2"
-														>
-															{tel}
-															<button
-																type="button"
-																onClick={() =>
-																	setContactForm((f) => ({
-																		...f,
-																		telefonoAlternativo:
-																			f.telefonoAlternativo.filter(
-																				(_, idx) => idx !== i,
-																			),
-																	}))
-																}
-																className="rounded-full hover:bg-muted"
-															>
-																<X className="h-3 w-3" />
-															</button>
-														</Badge>
-													))}
-												</div>
-												<Input
-													placeholder="Agregar teléfono y presionar Enter"
-													onKeyDown={(e) => {
-														if (e.key === "Enter") {
-															e.preventDefault();
-															const val = e.currentTarget.value.trim();
-															if (val) {
-																setContactForm((f) => ({
-																	...f,
-																	telefonoAlternativo: [
-																		...f.telefonoAlternativo,
-																		val,
-																	],
-																}));
-																e.currentTarget.value = "";
-															}
-														}
-													}}
-												/>
-											</div>
+										<div className="space-y-4">
+											<TelefonosEditor
+												id="contacto-tel-principal"
+												label="Teléfono principal"
+												requerido
+												guardando={guardarTelefonosMutation.isPending}
+												onGuardar={(valores) =>
+													guardarTelefonos({ telefonoPrincipal: valores })
+												}
+												valores={contactForm.telefonoPrincipal}
+												onChange={(valores) =>
+													cambiarContactForm({
+														...contactFormRef.current,
+														telefonoPrincipal: valores,
+													})
+												}
+											/>
+											<TelefonosEditor
+												id="contacto-tel-alternativo"
+												label="Teléfonos alternativos"
+												guardando={guardarTelefonosMutation.isPending}
+												onGuardar={(valores) =>
+													guardarTelefonos({ telefonoAlternativo: valores })
+												}
+												valores={contactForm.telefonoAlternativo}
+												onChange={(valores) =>
+													cambiarContactForm({
+														...contactFormRef.current,
+														telefonoAlternativo: valores,
+													})
+												}
+											/>
+											{(() => {
+												// CB-036: los teléfonos del cliente que se consiguieron por
+												// referencias, a un clic de sumarse.
+												const enFormulario = new Set(
+													[
+														...contactForm.telefonoPrincipal,
+														...contactForm.telefonoAlternativo,
+													].map((t) => ultimos8(t)),
+												);
+												const sugeridos = telefonosNuevosCliente.filter(
+													(h) => !enFormulario.has(ultimos8(h.valor)),
+												);
+												if (sugeridos.length === 0) return null;
+												return (
+													<div className="space-y-1.5 rounded-lg border border-dashed bg-muted/30 p-3">
+														<p className="text-muted-foreground text-xs">
+															Se consiguieron estos números del cliente. Al
+															tocarlos quedan guardados:
+														</p>
+														<div className="flex flex-wrap gap-1.5">
+															{sugeridos.map((h) => (
+																<Button
+																	key={h.id}
+																	type="button"
+																	variant="outline"
+																	size="sm"
+																	className="h-7 px-2"
+																	title={
+																		h.referenciaNombre
+																			? `Lo dio ${h.referenciaNombre}`
+																			: undefined
+																	}
+																	disabled={
+																		agregarTelefonoEncontradoMutation.isPending
+																	}
+																	onClick={() =>
+																		agregarTelefonoEncontrado({
+																			hallazgoId: h.id,
+																			telefono: h.valor,
+																		})
+																	}
+																>
+																	<Plus className="mr-1 h-3.5 w-3.5" />
+																	{h.valor}
+																</Button>
+															))}
+														</div>
+													</div>
+												);
+											})()}
 											<div className="space-y-1">
 												<Label htmlFor="contact-email">Email</Label>
 												<Input
@@ -2853,14 +3046,18 @@ function RouteComponent() {
 													type="email"
 													value={contactForm.emailContacto}
 													onChange={(e) =>
-														setContactForm((f) => ({
-															...f,
+														cambiarContactForm({
+															...contactFormRef.current,
 															emailContacto: e.target.value,
-														}))
+														})
 													}
 													placeholder="Ej: correo@ejemplo.com"
 												/>
 											</div>
+											<p className="text-muted-foreground text-xs">
+												Los teléfonos se guardan solos al escribirlos o
+												quitarlos. "Guardar" es para el email.
+											</p>
 											<div className="flex gap-2">
 												<Button
 													size="sm"
@@ -2871,20 +3068,31 @@ function RouteComponent() {
 															)
 														)
 															return;
-														updateContactMutation.mutate({
-															telefonoPrincipal:
-																contactForm.telefonoPrincipal.join(", "),
-															telefonoAlternativo:
-																contactForm.telefonoAlternativo.length > 0
-																	? contactForm.telefonoAlternativo.join(", ")
-																	: undefined,
-															emailContacto:
-																contactForm.emailContacto || undefined,
-														});
+														// Por la cola, como el autoguardado: también
+														// escribe los teléfonos, y lee el formulario al
+														// salir para mandar lo más reciente.
+														encolarTelefonos(async () => {
+															const f = contactFormRef.current;
+															const alternativos = telefonosParaGuardar(
+																f.telefonoAlternativo,
+															);
+															await updateContactMutation.mutateAsync({
+																telefonoPrincipal: telefonosParaGuardar(
+																	f.telefonoPrincipal,
+																).join(", "),
+																telefonoAlternativo:
+																	alternativos.length > 0
+																		? alternativos.join(", ")
+																		: undefined,
+																emailContacto: f.emailContacto || undefined,
+															});
+															contactGuardadoRef.current = f;
+														}).catch(() => undefined);
 													}}
 													disabled={
 														updateContactMutation.isPending ||
-														contactForm.telefonoPrincipal.length === 0
+														telefonosParaGuardar(contactForm.telefonoPrincipal)
+															.length === 0
 													}
 												>
 													{updateContactMutation.isPending
@@ -2894,7 +3102,29 @@ function RouteComponent() {
 												<Button
 													size="sm"
 													variant="outline"
-													onClick={() => setIsEditingContact(false)}
+													onClick={async () => {
+														// Primero que termine lo que está en vuelo (el
+														// blur de este mismo clic encola un
+														// autoguardado): la comparación es contra lo que
+														// el servidor CONFIRMÓ, y si ese guardado falló
+														// tiene que avisar.
+														await colaTelefonos.current?.esperar();
+														const normalizar = (f: typeof contactForm) =>
+															JSON.stringify([
+																telefonosParaGuardar(f.telefonoPrincipal),
+																telefonosParaGuardar(f.telefonoAlternativo),
+																f.emailContacto.trim(),
+															]);
+														if (
+															normalizar(contactFormRef.current) !==
+																normalizar(contactGuardadoRef.current) &&
+															!window.confirm(
+																"Hay cambios sin guardar en el contacto. ¿Salir sin guardarlos?",
+															)
+														)
+															return;
+														setIsEditingContact(false);
+													}}
 													disabled={updateContactMutation.isPending}
 												>
 													Cancelar
@@ -2970,6 +3200,71 @@ function RouteComponent() {
 											</div>
 										</div>
 									)}
+									{!isEditingContact &&
+										(telefonosNuevosCliente.length > 0 ||
+											totalReferencias > 0) && (
+											<div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-3">
+												<p className="flex items-center gap-2 font-medium text-sm">
+													<PhoneCall className="h-4 w-4 text-muted-foreground" />
+													Más números para localizarlo
+												</p>
+												{telefonosNuevosCliente.length > 0 && (
+													<div className="space-y-1">
+														<p className="text-muted-foreground text-xs">
+															Nuevos del cliente, todavía no están en sus
+															teléfonos. Con + quedan guardados.
+														</p>
+														<div className="flex flex-wrap gap-1.5">
+															{telefonosNuevosCliente.map((h) => (
+																<span
+																	key={h.id}
+																	className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-0.5 text-sm"
+																>
+																	<a
+																		href={`tel:${h.valor.replace(/[^0-9+]/g, "")}`}
+																		title={
+																			h.referenciaNombre
+																				? `Lo dio ${h.referenciaNombre}`
+																				: undefined
+																		}
+																		className="font-medium text-primary hover:underline"
+																	>
+																		{h.valor}
+																	</a>
+																	<button
+																		type="button"
+																		className="text-muted-foreground hover:text-primary disabled:opacity-50"
+																		title="Guardar entre los teléfonos del cliente"
+																		aria-label={`Guardar ${h.valor} entre los teléfonos del cliente`}
+																		disabled={
+																			agregarTelefonoEncontradoMutation.isPending
+																		}
+																		onClick={() =>
+																			agregarTelefonoEncontrado({
+																				hallazgoId: h.id,
+																				telefono: h.valor,
+																			})
+																		}
+																	>
+																		<Plus className="h-3.5 w-3.5" />
+																	</button>
+																</span>
+															))}
+														</div>
+													</div>
+												)}
+												{totalReferencias > 0 && (
+													<button
+														type="button"
+														onClick={() => setTabActiva("referencias")}
+														className="inline-flex items-center gap-1 text-primary text-sm hover:underline"
+													>
+														{textoReferencias}
+														<ChevronRight className="h-4 w-4" />
+													</button>
+												)}
+											</div>
+										)}
 								</CardContent>
 							</Card>
 						</div>
@@ -4128,13 +4423,13 @@ function RouteComponent() {
 								</Card>
 							)}
 
-						{/* CB-033 — Historial de aprobaciones/rechazos del convenio.
+							{/* CB-033 — Historial de aprobaciones/rechazos del convenio.
 						    FUERA del `mostrarConvenio` de arriba a propósito: un rechazo
 						    BORRA el convenio, y ese es justo el caso que hay que poder
 						    auditar. El componente se oculta solo si no hay decisiones. */}
-						<ConvenioDecisionesHistorial
-							casoCobroId={casoDetails.data?.id || ""}
-						/>
+							<ConvenioDecisionesHistorial
+								casoCobroId={casoDetails.data?.id || ""}
+							/>
 						</div>
 					</div>
 				</TabsContent>
@@ -4502,17 +4797,16 @@ function RouteComponent() {
 				</TabsContent>
 
 				<TabsContent value="referencias" className="mt-4">
-					{/* Referencias */}
-					{matchingOpportunity?.lead?.id && (
-						<ReferenciasView leadId={matchingOpportunity.lead.id} />
-					)}
-					{!matchingOpportunity?.lead?.id && (
-						<Card>
-							<CardContent className="py-10 text-center text-muted-foreground text-sm">
-								Este crédito no está enlazado a una oportunidad del CRM, así que
-								no se pueden mostrar sus referencias.
-							</CardContent>
-						</Card>
+					{/* Referencias (CB-036): el server resuelve el lead y la
+					    oportunidad desde el caso — no dependen de matchingOpportunity. */}
+					{caso.id && (
+						<ReferenciasView
+							casoCobroId={caso.id}
+							onAgregarTelefonoAlCaso={agregarTelefonoEncontrado}
+							agregandoTelefonoAlCaso={
+								agregarTelefonoEncontradoMutation.isPending
+							}
+						/>
 					)}
 				</TabsContent>
 			</Tabs>

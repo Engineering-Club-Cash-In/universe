@@ -211,10 +211,6 @@ export const cobrosAppRouter = {
 	enviarEmailCobros: cobrosRouter.enviarEmailCobros,
 	enviarWhatsappCobros: cobrosRouter.enviarWhatsappCobros,
 	enviarWhatsappMasivoCobros: cobrosRouter.enviarWhatsappMasivoCobros,
-	getReferencias: cobrosRouter.getReferencias,
-	createReferencia: cobrosRouter.createReferencia,
-	updateReferencia: cobrosRouter.updateReferencia,
-	deleteReferencia: cobrosRouter.deleteReferencia,
 	// Metas de mora
 	getMetasMora: cobrosRouter.getMetasMora,
 	getMetasMoraAnual: cobrosRouter.getMetasMoraAnual,

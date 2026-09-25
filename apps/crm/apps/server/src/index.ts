@@ -109,6 +109,7 @@ import {
 	resolverSifcosPermitidosPagalo,
 } from "./routers/pagalo-supervision";
 import { recuperacionVehiculoRouter } from "./routers/recuperacion-vehiculo";
+import { referenciasCobrosRouter } from "./routers/referencias-cobros";
 import { wialonRouter } from "./routers/wialon";
 import externalContractsRouter from "./routes/external-contracts";
 import { carteraBackClient } from "./services/cartera-back-client";
@@ -260,6 +261,7 @@ const handler = new RPCHandler(
 		wialonRouter,
 		gpsIntegracionRouter,
 		gpsEventosRouter,
+		referenciasCobrosRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {

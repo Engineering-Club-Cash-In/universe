@@ -1,5 +1,29 @@
+/**
+ * CB-036 · Pestaña Referencias de la Ficha 360.
+ *
+ * Tres bloques: las referencias del cliente (seis fuentes juntas, con el último
+ * intento de cada una), la bitácora de gestiones a referencias y la
+ * información nueva del cliente que se fue consiguiendo.
+ *
+ * Solo las referencias de cobros se editan y se borran; las de ventas y los
+ * cofirmantes son de solo lectura, pero a cualquiera se le puede agregar un
+ * teléfono y registrar una gestión. Siempre disponible, sin requisitos previos.
+ */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Edit2, Phone, Plus, Save, Trash2, User } from "lucide-react";
+import {
+	ClipboardList,
+	Edit2,
+	MapPin,
+	MessageCircle,
+	Navigation,
+	Phone,
+	PhoneCall,
+	PhoneForwarded,
+	Plus,
+	Trash2,
+	User,
+	X,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -13,409 +37,611 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+	clasesResultadoReferencia,
+	esEnlaceSeguro,
+	etiquetaMetodoReferencia,
+	etiquetaOrigenReferencia,
+	etiquetaResultadoReferencia,
+	ORIGEN_REFERENCIA_CLASES,
+	PARENTESCO_LABELS,
+	TIPO_HALLAZGO_LABELS,
+	urlLlamada,
+	urlWhatsapp,
+} from "@/lib/cobros/referencias";
+import { formatGuatemalaDateTime } from "@/lib/crm-formatters";
+import { cn } from "@/lib/utils";
 import { client, orpc } from "@/utils/orpc";
+import {
+	AgregarTelefonoReferenciaDialog,
+	type DatosReferencias,
+	type ReferenciaCaso,
+	ReferenciaCobrosDialog,
+	RegistrarGestionReferenciaDialog,
+	RegistrarHallazgoDialog,
+} from "./referencias-dialogs";
 
 interface ReferenciasViewProps {
-	leadId: string;
+	casoCobroId: string;
+	/**
+	 * "Agregar a teléfonos del cliente" lo resuelve la ficha, no esta vista:
+	 * los teléfonos del caso los escriben también el editor de contacto y su
+	 * autoguardado, y todo tiene que ir por la misma cola y mantener al día el
+	 * formulario. Si esta vista llamara por su cuenta, un editor abierto en
+	 * Resumen mandaría después su lista vieja y borraría el número recién
+	 * agregado (Codex, PR #1751).
+	 */
+	onAgregarTelefonoAlCaso: (v: {
+		hallazgoId: string;
+		telefono: string;
+	}) => void;
+	agregandoTelefonoAlCaso: boolean;
 }
 
-type Referencia = Awaited<ReturnType<typeof client.getReferencias>>[number];
+type Hallazgo = DatosReferencias["hallazgos"][number];
 
-const parentescoLabels: Record<string, string> = {
-	padre_madre: "Padre/Madre",
-	hermano_a: "Hermano/a",
-	hijo_a: "Hijo/a",
-	conyuge: "Cónyuge",
-	tio_a: "Tío/a",
-	primo_a: "Primo/a",
-	amigo_a: "Amigo/a",
-	vecino_a: "Vecino/a",
-	companero_trabajo: "Compañero de trabajo",
-	otro: "Otro",
-};
-
-const parentescoOptions = [
-	"padre_madre",
-	"hermano_a",
-	"hijo_a",
-	"conyuge",
-	"tio_a",
-	"primo_a",
-	"amigo_a",
-	"vecino_a",
-	"companero_trabajo",
-	"otro",
-] as const;
-
-interface ReferenciaFormData {
-	nombre: string;
-	telefono: string;
-	parentesco: string;
-	notas: string;
+/** Etiqueta de origen; la de cobros muestra el parentesco que se capturó. */
+function etiquetaOrigen(
+	referencia: ReferenciaCaso,
+	origen: ReferenciaCaso["origen"],
+): string {
+	if (origen === "cobros" && referencia.editable) {
+		return (
+			PARENTESCO_LABELS[referencia.editable.parentesco] ??
+			referencia.editable.parentesco
+		);
+	}
+	if (origen === "ventas_personal" && referencia.detalle) {
+		return `Personal · ${referencia.detalle}`;
+	}
+	return etiquetaOrigenReferencia(origen);
 }
 
-const emptyFormData: ReferenciaFormData = {
-	nombre: "",
-	telefono: "",
-	parentesco: "",
-	notas: "",
-};
+function IconoHallazgo({ tipo }: { tipo: string }) {
+	if (tipo === "telefono") return <Phone className="h-4 w-4" />;
+	if (tipo === "direccion") return <MapPin className="h-4 w-4" />;
+	return <Navigation className="h-4 w-4" />;
+}
 
-export function ReferenciasView({ leadId }: ReferenciasViewProps) {
+export function ReferenciasView({
+	casoCobroId,
+	onAgregarTelefonoAlCaso,
+	agregandoTelefonoAlCaso,
+}: ReferenciasViewProps) {
 	const queryClient = useQueryClient();
-	const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-	const [selectedRef, setSelectedRef] = useState<Referencia | null>(null);
-	const [formData, setFormData] = useState<ReferenciaFormData>(emptyFormData);
-
-	const { data: referencias = [], isLoading } = useQuery({
-		...orpc.getReferencias.queryOptions({
-			input: { leadId },
-		}),
+	const opcionesQuery = orpc.getReferenciasCaso.queryOptions({
+		input: { casoCobroId },
 	});
+	const { data, isLoading, isError, refetch } = useQuery(opcionesQuery);
+	const invalidar = () => queryClient.invalidateQueries(opcionesQuery);
 
-	const createMutation = useMutation({
-		mutationFn: (data: Parameters<typeof client.createReferencia>[0]) =>
-			client.createReferencia(data),
+	const [gestionDe, setGestionDe] = useState<ReferenciaCaso | null>(null);
+	const [telefonoPara, setTelefonoPara] = useState<ReferenciaCaso | null>(null);
+	const [formAbierto, setFormAbierto] = useState(false);
+	const [editando, setEditando] = useState<ReferenciaCaso | null>(null);
+	const [borrando, setBorrando] = useState<ReferenciaCaso | null>(null);
+	const [hallazgoAbierto, setHallazgoAbierto] = useState(false);
+
+	const eliminarReferencia = useMutation({
+		mutationFn: (id: string) =>
+			client.eliminarReferenciaCobros({ casoCobroId, id }),
 		onSuccess: () => {
-			queryClient.invalidateQueries(
-				orpc.getReferencias.queryOptions({ input: { leadId } }),
-			);
-			toast.success("Referencia agregada correctamente");
-			setIsAddDialogOpen(false);
-			setFormData(emptyFormData);
+			invalidar();
+			toast.success("Referencia eliminada");
+			setBorrando(null);
 		},
 		onError: (error) => {
-			toast.error(`Error al agregar referencia: ${error.message}`);
+			toast.error(`No se pudo eliminar la referencia: ${error.message}`);
 		},
 	});
 
-	const updateMutation = useMutation({
-		mutationFn: (data: Parameters<typeof client.updateReferencia>[0]) =>
-			client.updateReferencia(data),
+	const quitarTelefono = useMutation({
+		mutationFn: (id: string) =>
+			client.eliminarTelefonoReferencia({ casoCobroId, id }),
 		onSuccess: () => {
-			queryClient.invalidateQueries(
-				orpc.getReferencias.queryOptions({ input: { leadId } }),
-			);
-			toast.success("Referencia actualizada correctamente");
-			setIsEditDialogOpen(false);
-			setSelectedRef(null);
-			setFormData(emptyFormData);
+			invalidar();
+			toast.success("Teléfono quitado de la referencia");
 		},
 		onError: (error) => {
-			toast.error(`Error al actualizar referencia: ${error.message}`);
+			toast.error(`No se pudo quitar el teléfono: ${error.message}`);
 		},
 	});
 
-	const deleteMutation = useMutation({
-		mutationFn: (id: string) => client.deleteReferencia({ id, leadId }),
-		onSuccess: () => {
-			queryClient.invalidateQueries(
-				orpc.getReferencias.queryOptions({ input: { leadId } }),
-			);
-			toast.success("Referencia eliminada correctamente");
-			setIsDeleteDialogOpen(false);
-			setSelectedRef(null);
-		},
-		onError: (error) => {
-			toast.error(`Error al eliminar referencia: ${error.message}`);
-		},
-	});
+	if (isLoading) {
+		return (
+			<Card>
+				<CardContent className="py-10 text-center text-muted-foreground text-sm">
+					Cargando referencias...
+				</CardContent>
+			</Card>
+		);
+	}
 
-	const handleCreate = () => {
-		if (!formData.nombre || !formData.telefono || !formData.parentesco) {
-			toast.error("Nombre, teléfono y parentesco son requeridos");
-			return;
-		}
-		createMutation.mutate({
-			leadId,
-			nombre: formData.nombre,
-			telefono: formData.telefono,
-			parentesco: formData.parentesco as (typeof parentescoOptions)[number],
-			notas: formData.notas || undefined,
-		});
-	};
+	if (isError || !data) {
+		return (
+			<Card>
+				<CardContent className="flex flex-col items-center gap-3 py-10 text-center text-muted-foreground text-sm">
+					No se pudieron cargar las referencias.
+					<Button variant="outline" size="sm" onClick={() => refetch()}>
+						Reintentar
+					</Button>
+				</CardContent>
+			</Card>
+		);
+	}
 
-	const handleUpdate = () => {
-		if (!selectedRef) return;
-		if (!formData.nombre || !formData.telefono || !formData.parentesco) {
-			toast.error("Nombre, teléfono y parentesco son requeridos");
-			return;
-		}
-		updateMutation.mutate({
-			id: selectedRef.id,
-			leadId,
-			nombre: formData.nombre,
-			telefono: formData.telefono,
-			parentesco: formData.parentesco as (typeof parentescoOptions)[number],
-			notas: formData.notas || undefined,
-		});
-	};
-
-	const handleOpenAdd = () => {
-		setFormData(emptyFormData);
-		setIsAddDialogOpen(true);
-	};
-
-	const handleEdit = (ref: Referencia) => {
-		setSelectedRef(ref);
-		setFormData({
-			nombre: ref.nombre,
-			telefono: ref.telefono,
-			parentesco: ref.parentesco,
-			notas: ref.notas || "",
-		});
-		setIsEditDialogOpen(true);
-	};
-
-	const handleDeleteClick = (ref: Referencia) => {
-		setSelectedRef(ref);
-		setIsDeleteDialogOpen(true);
-	};
-
-	const renderFormFields = () => (
-		<div className="grid gap-4 py-4">
-			<div className="grid grid-cols-2 gap-4">
-				<div className="space-y-2">
-					<Label htmlFor="ref-nombre">
-						Nombre <span className="text-red-500">*</span>
-					</Label>
-					<Input
-						id="ref-nombre"
-						value={formData.nombre}
-						onChange={(e) =>
-							setFormData((prev) => ({ ...prev, nombre: e.target.value }))
-						}
-						placeholder="Ej: María López"
-					/>
-				</div>
-				<div className="space-y-2">
-					<Label htmlFor="ref-telefono">
-						Teléfono <span className="text-red-500">*</span>
-					</Label>
-					<Input
-						id="ref-telefono"
-						value={formData.telefono}
-						onChange={(e) =>
-							setFormData((prev) => ({ ...prev, telefono: e.target.value }))
-						}
-						placeholder="Ej: 5555-5555"
-					/>
-				</div>
-			</div>
-			<div className="space-y-2">
-				<Label htmlFor="ref-parentesco">
-					Parentesco <span className="text-red-500">*</span>
-				</Label>
-				<Select
-					value={formData.parentesco}
-					onValueChange={(value) =>
-						setFormData((prev) => ({ ...prev, parentesco: value }))
-					}
-				>
-					<SelectTrigger>
-						<SelectValue placeholder="Seleccionar parentesco" />
-					</SelectTrigger>
-					<SelectContent>
-						{parentescoOptions.map((p) => (
-							<SelectItem key={p} value={p}>
-								{parentescoLabels[p]}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-			</div>
-			<div className="space-y-2">
-				<Label htmlFor="ref-notas">Notas</Label>
-				<Textarea
-					id="ref-notas"
-					value={formData.notas}
-					onChange={(e) =>
-						setFormData((prev) => ({ ...prev, notas: e.target.value }))
-					}
-					placeholder="Notas adicionales sobre la referencia..."
-					rows={2}
-				/>
-			</div>
-		</div>
-	);
+	const { referencias, contactos, hallazgos } = data;
+	const gestionadas = referencias.filter((r) => r.totalContactos > 0).length;
 
 	return (
-		<Card>
-			<CardHeader className="flex flex-row items-center justify-between">
-				<CardTitle className="flex items-center gap-2">
-					<User className="h-5 w-5" />
-					Referencias
-				</CardTitle>
-				<Button size="sm" onClick={handleOpenAdd}>
-					<Plus className="mr-2 h-4 w-4" />
-					Agregar
-				</Button>
-			</CardHeader>
-			<CardContent>
-				{isLoading ? (
-					<div className="flex items-center justify-center py-4">
-						<p className="text-muted-foreground text-sm">
-							Cargando referencias...
-						</p>
-					</div>
-				) : referencias.length === 0 ? (
-					<div className="flex flex-col items-center justify-center py-6">
-						<User className="mb-2 h-8 w-8 text-muted-foreground" />
-						<p className="text-muted-foreground text-sm">
-							No hay referencias registradas
-						</p>
-					</div>
-				) : (
-					<div className="space-y-3">
-						{referencias.map((ref) => (
-							<div
-								key={ref.id}
-								className="flex items-center justify-between rounded-lg border p-3"
+		<TooltipProvider>
+			<div className="space-y-6">
+				{/* Referencias */}
+				<Card>
+					<CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+						<div className="space-y-1">
+							<CardTitle className="flex items-center gap-2">
+								<User className="h-5 w-5" />
+								Referencias
+							</CardTitle>
+							{referencias.length > 0 && (
+								<p className="text-muted-foreground text-sm">
+									{gestionadas} de {referencias.length} gestionadas
+								</p>
+							)}
+						</div>
+						{data.enlazado && (
+							<Button
+								size="sm"
+								onClick={() => {
+									setEditando(null);
+									setFormAbierto(true);
+								}}
 							>
-								<div className="space-y-1">
-									<div className="flex items-center gap-2">
-										<span className="font-medium">{ref.nombre}</span>
-										<Badge variant="secondary">
-											{parentescoLabels[ref.parentesco] || ref.parentesco}
-										</Badge>
-									</div>
-									<div className="flex items-center gap-2 text-sm">
-										<Phone className="h-3 w-3 text-muted-foreground" />
-										<a
-											href={`tel:${ref.telefono}`}
-											className="text-primary hover:underline"
-										>
-											{ref.telefono}
-										</a>
-									</div>
-									{ref.notas && (
-										<p className="text-muted-foreground text-xs">{ref.notas}</p>
-									)}
-								</div>
-								<div className="flex gap-1">
-									<Button
-										variant="ghost"
-										size="icon"
-										onClick={() => handleEdit(ref)}
-									>
-										<Edit2 className="h-4 w-4" />
-									</Button>
-									<Button
-										variant="ghost"
-										size="icon"
-										className="text-red-500 hover:text-red-600"
-										onClick={() => handleDeleteClick(ref)}
-									>
-										<Trash2 className="h-4 w-4" />
-									</Button>
-								</div>
+								<Plus className="mr-2 h-4 w-4" />
+								Agregar
+							</Button>
+						)}
+					</CardHeader>
+					<CardContent>
+						{!data.enlazado ? (
+							<p className="py-6 text-center text-muted-foreground text-sm">
+								Este crédito no está enlazado a una oportunidad del CRM, así que
+								no se pueden mostrar sus referencias.
+							</p>
+						) : referencias.length === 0 ? (
+							<div className="flex flex-col items-center justify-center py-6">
+								<User className="mb-2 h-8 w-8 text-muted-foreground" />
+								<p className="text-muted-foreground text-sm">
+									No hay referencias registradas
+								</p>
+								<p className="text-muted-foreground text-xs">
+									Ni en cobros, ni en la solicitud de crédito, ni cofirmantes.
+								</p>
 							</div>
-						))}
-					</div>
-				)}
-			</CardContent>
+						) : (
+							<div className="space-y-3">
+								{referencias.map((ref) => (
+									<div
+										key={ref.key}
+										className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between"
+									>
+										<div className="min-w-0 space-y-1.5">
+											<div className="flex flex-wrap items-center gap-1.5">
+												<span className="font-medium">{ref.nombre}</span>
+												{ref.origenes.map((origen) => (
+													<Badge
+														key={origen}
+														variant="outline"
+														className={cn(
+															"font-normal",
+															ORIGEN_REFERENCIA_CLASES[origen],
+														)}
+													>
+														{etiquetaOrigen(ref, origen)}
+													</Badge>
+												))}
+											</div>
+											{ref.otrosNombres.length > 0 && (
+												<p className="text-muted-foreground text-xs">
+													También aparece como: {ref.otrosNombres.join(", ")}
+												</p>
+											)}
+											{ref.detalle && ref.origen !== "ventas_personal" && (
+												<p className="text-muted-foreground text-xs">
+													{ref.detalle}
+												</p>
+											)}
 
-			{/* Dialog para agregar */}
-			<Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-				<DialogContent>
-					<DialogHeader>
-						<DialogTitle>Agregar Referencia</DialogTitle>
-						<DialogDescription>
-							Ingresa la información de la persona de referencia
-						</DialogDescription>
-					</DialogHeader>
-					{renderFormFields()}
-					<DialogFooter>
-						<Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-							Cancelar
-						</Button>
-						<Button onClick={handleCreate} disabled={createMutation.isPending}>
-							{createMutation.isPending ? (
-								"Guardando..."
-							) : (
-								<>
-									<Save className="mr-2 h-4 w-4" />
-									Guardar
-								</>
-							)}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+											{ref.telefonos.length === 0 ? (
+												<p className="text-muted-foreground text-sm italic">
+													Sin teléfono
+												</p>
+											) : (
+												<div className="flex flex-wrap gap-1.5">
+													{ref.telefonos.map((t) => (
+														<span
+															key={t.telefono}
+															className={cn(
+																"inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-sm",
+																!t.original && "border-dashed",
+															)}
+														>
+															<a
+																href={urlLlamada(t.telefono)}
+																className="font-medium text-primary hover:underline"
+															>
+																{t.telefono}
+															</a>
+															{t.etiqueta && (
+																<span className="text-muted-foreground text-xs">
+																	{t.etiqueta}
+																</span>
+															)}
+															<a
+																href={urlWhatsapp(t.telefono)}
+																target="_blank"
+																rel="noreferrer"
+																className="text-muted-foreground hover:text-emerald-600"
+																aria-label={`Abrir WhatsApp con ${t.telefono}`}
+															>
+																<MessageCircle className="h-3.5 w-3.5" />
+															</a>
+															{t.agregados[0] && (
+																<Tooltip>
+																	<TooltipTrigger asChild>
+																		<button
+																			type="button"
+																			className="text-muted-foreground hover:text-red-600"
+																			aria-label={
+																				t.original
+																					? `Quitar el ${t.telefono} que agregó cobros`
+																					: `Quitar ${t.telefono}`
+																			}
+																			disabled={quitarTelefono.isPending}
+																			onClick={() =>
+																				t.agregados[0] &&
+																				quitarTelefono.mutate(t.agregados[0].id)
+																			}
+																		>
+																			<X className="h-3.5 w-3.5" />
+																		</button>
+																	</TooltipTrigger>
+																	<TooltipContent>
+																		{t.original
+																			? "Ya venía en la referencia y cobros lo volvió a agregar"
+																			: "Agregado en cobros"}
+																		{t.agregados[0].registradoPor
+																			? ` por ${t.agregados[0].registradoPor}`
+																			: ""}
+																		{t.agregados[0].notas
+																			? ` · ${t.agregados[0].notas}`
+																			: ""}
+																		.{" "}
+																		{t.original
+																			? "Clic para quitar el repetido (el número se queda)."
+																			: "Clic para quitarlo."}
+																	</TooltipContent>
+																</Tooltip>
+															)}
+														</span>
+													))}
+												</div>
+											)}
 
-			{/* Dialog para editar */}
-			<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-				<DialogContent>
-					<DialogHeader>
-						<DialogTitle>Editar Referencia</DialogTitle>
-						<DialogDescription>
-							Modifica la información de la referencia
-						</DialogDescription>
-					</DialogHeader>
-					{renderFormFields()}
-					<DialogFooter>
+											{ref.notas && (
+												<p className="text-muted-foreground text-xs">
+													{ref.notas}
+												</p>
+											)}
+
+											<p className="text-muted-foreground text-xs">
+												{ref.ultimoContacto ? (
+													<>
+														Último intento:{" "}
+														{formatGuatemalaDateTime(
+															ref.ultimoContacto.fechaContacto,
+														)}{" "}
+														·{" "}
+														{etiquetaMetodoReferencia(
+															ref.ultimoContacto.metodoContacto,
+														)}{" "}
+														·{" "}
+														<span className="font-medium text-foreground">
+															{etiquetaResultadoReferencia(
+																ref.ultimoContacto.resultado,
+															)}
+														</span>
+														{ref.totalContactos > 1 &&
+															` (${ref.totalContactos} gestiones)`}
+													</>
+												) : (
+													"Sin gestiones"
+												)}
+											</p>
+										</div>
+
+										<div className="flex shrink-0 flex-wrap items-center gap-1">
+											<Button
+												size="sm"
+												variant="outline"
+												onClick={() => setGestionDe(ref)}
+											>
+												<PhoneCall className="mr-2 h-4 w-4" />
+												Registrar gestión
+											</Button>
+											<Tooltip>
+												<TooltipTrigger asChild>
+													<Button
+														variant="ghost"
+														size="icon"
+														aria-label="Agregar teléfono"
+														onClick={() => setTelefonoPara(ref)}
+													>
+														<PhoneForwarded className="h-4 w-4" />
+													</Button>
+												</TooltipTrigger>
+												<TooltipContent>Agregar teléfono</TooltipContent>
+											</Tooltip>
+											{ref.editable && (
+												<>
+													<Button
+														variant="ghost"
+														size="icon"
+														aria-label="Editar referencia"
+														onClick={() => {
+															setEditando(ref);
+															setFormAbierto(true);
+														}}
+													>
+														<Edit2 className="h-4 w-4" />
+													</Button>
+													<Button
+														variant="ghost"
+														size="icon"
+														className="text-red-500 hover:text-red-600"
+														aria-label="Eliminar referencia"
+														onClick={() => setBorrando(ref)}
+													>
+														<Trash2 className="h-4 w-4" />
+													</Button>
+												</>
+											)}
+										</div>
+									</div>
+								))}
+							</div>
+						)}
+					</CardContent>
+				</Card>
+
+				{/* Información nueva del cliente */}
+				<Card>
+					<CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+						<CardTitle className="flex items-center gap-2">
+							<MapPin className="h-5 w-5" />
+							Información nueva del cliente
+						</CardTitle>
 						<Button
+							size="sm"
 							variant="outline"
-							onClick={() => setIsEditDialogOpen(false)}
+							onClick={() => setHallazgoAbierto(true)}
 						>
-							Cancelar
+							<Plus className="mr-2 h-4 w-4" />
+							Registrar dato
 						</Button>
-						<Button onClick={handleUpdate} disabled={updateMutation.isPending}>
-							{updateMutation.isPending ? (
-								"Guardando..."
-							) : (
-								<>
-									<Save className="mr-2 h-4 w-4" />
-									Actualizar
-								</>
-							)}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+					</CardHeader>
+					<CardContent>
+						{hallazgos.length === 0 ? (
+							<p className="py-4 text-center text-muted-foreground text-sm">
+								Todavía no se ha conseguido información nueva.
+							</p>
+						) : (
+							<div className="space-y-2">
+								{hallazgos.map((h: Hallazgo) => (
+									<div
+										key={h.id}
+										className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between"
+									>
+										<div className="flex min-w-0 gap-3">
+											<div className="mt-0.5 text-muted-foreground">
+												<IconoHallazgo tipo={h.tipo} />
+											</div>
+											<div className="min-w-0 space-y-1">
+												<div className="flex flex-wrap items-center gap-2">
+													<span className="text-muted-foreground text-xs uppercase">
+														{TIPO_HALLAZGO_LABELS[
+															h.tipo as keyof typeof TIPO_HALLAZGO_LABELS
+														] ?? h.tipo}
+													</span>
+													{h.tipo === "telefono" ? (
+														<a
+															href={urlLlamada(h.valor)}
+															className="font-medium text-primary hover:underline"
+														>
+															{h.valor}
+														</a>
+													) : (
+														<span className="font-medium">{h.valor}</span>
+													)}
+													{esEnlaceSeguro(h.enlaceMapa) && (
+														<a
+															href={h.enlaceMapa}
+															target="_blank"
+															rel="noreferrer"
+															className="text-primary text-xs hover:underline"
+														>
+															Ver en el mapa
+														</a>
+													)}
+												</div>
+												{h.notas && (
+													<p className="text-muted-foreground text-xs">
+														{h.notas}
+													</p>
+												)}
+												<p className="text-muted-foreground text-xs">
+													{h.referenciaNombre
+														? `Lo dio ${h.referenciaNombre}`
+														: "Registrado sin gestión a referencia"}{" "}
+													· {h.registradoPor ?? "—"} ·{" "}
+													{formatGuatemalaDateTime(h.createdAt)}
+												</p>
+											</div>
+										</div>
+										{h.tipo === "telefono" &&
+											(h.enTelefonosDelCaso ? (
+												<Badge
+													variant="outline"
+													className="shrink-0 border-emerald-200 bg-emerald-50 font-normal text-emerald-700"
+												>
+													En los teléfonos del cliente
+												</Badge>
+											) : (
+												<Button
+													size="sm"
+													variant="outline"
+													className="shrink-0"
+													disabled={agregandoTelefonoAlCaso}
+													onClick={() =>
+														onAgregarTelefonoAlCaso({
+															hallazgoId: h.id,
+															telefono: h.valor,
+														})
+													}
+												>
+													Agregar a teléfonos del cliente
+												</Button>
+											))}
+									</div>
+								))}
+							</div>
+						)}
+					</CardContent>
+				</Card>
 
-			{/* Dialog para confirmar eliminación */}
-			<Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+				{/* Bitácora */}
+				<Card>
+					<CardHeader>
+						<CardTitle className="flex items-center gap-2">
+							<ClipboardList className="h-5 w-5" />
+							Gestiones a referencias
+							{contactos.length > 0 && (
+								<Badge variant="secondary">{contactos.length}</Badge>
+							)}
+						</CardTitle>
+						<p className="text-muted-foreground text-xs">
+							No cuentan como contacto con el cliente (SLA, cola del día ni
+							alertas).
+						</p>
+					</CardHeader>
+					<CardContent>
+						{contactos.length === 0 ? (
+							<p className="py-4 text-center text-muted-foreground text-sm">
+								Todavía no se ha gestionado ninguna referencia.
+							</p>
+						) : (
+							<div className="space-y-2">
+								{contactos.map((c) => (
+									<div key={c.id} className="rounded-lg border p-3">
+										<div className="flex flex-wrap items-center justify-between gap-2">
+											<div className="flex flex-wrap items-center gap-1.5">
+												<span className="font-medium">
+													{c.referenciaNombre}
+												</span>
+												<Badge variant="outline" className="font-normal">
+													{etiquetaOrigenReferencia(c.referenciaOrigen)}
+												</Badge>
+												<Badge
+													variant="outline"
+													className={cn(
+														"font-normal",
+														clasesResultadoReferencia(c.resultado),
+													)}
+												>
+													{etiquetaResultadoReferencia(c.resultado)}
+												</Badge>
+											</div>
+											<span className="text-muted-foreground text-xs">
+												{formatGuatemalaDateTime(c.fechaContacto)}
+											</span>
+										</div>
+										<p className="mt-1 text-muted-foreground text-xs">
+											{etiquetaMetodoReferencia(c.metodoContacto)}
+											{c.telefono ? ` al ${c.telefono}` : ""} ·{" "}
+											{c.realizadoPor ?? "—"}
+										</p>
+										{c.comentarios && (
+											<p className="mt-2 whitespace-pre-line text-sm">
+												{c.comentarios}
+											</p>
+										)}
+									</div>
+								))}
+							</div>
+						)}
+					</CardContent>
+				</Card>
+			</div>
+
+			<RegistrarGestionReferenciaDialog
+				casoCobroId={casoCobroId}
+				referencia={gestionDe}
+				onOpenChange={(open) => !open && setGestionDe(null)}
+			/>
+			<AgregarTelefonoReferenciaDialog
+				casoCobroId={casoCobroId}
+				referencia={telefonoPara}
+				onOpenChange={(open) => !open && setTelefonoPara(null)}
+			/>
+			<ReferenciaCobrosDialog
+				casoCobroId={casoCobroId}
+				open={formAbierto}
+				editando={editando}
+				onOpenChange={setFormAbierto}
+			/>
+			<RegistrarHallazgoDialog
+				casoCobroId={casoCobroId}
+				open={hallazgoAbierto}
+				onOpenChange={setHallazgoAbierto}
+			/>
+
+			<Dialog
+				open={!!borrando}
+				onOpenChange={(open) => !open && setBorrando(null)}
+			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>Eliminar Referencia</DialogTitle>
+						<DialogTitle>Eliminar referencia</DialogTitle>
 						<DialogDescription>
-							¿Estás seguro de que deseas eliminar a{" "}
-							<span className="font-medium">{selectedRef?.nombre}</span>? Esta
-							acción no se puede deshacer.
+							¿Eliminar a{" "}
+							<span className="font-medium">{borrando?.nombre}</span>? Las
+							gestiones que ya se le hicieron se quedan en la bitácora.
 						</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={() => setIsDeleteDialogOpen(false)}
-						>
+						<Button variant="outline" onClick={() => setBorrando(null)}>
 							Cancelar
 						</Button>
 						<Button
 							variant="destructive"
+							disabled={eliminarReferencia.isPending}
 							onClick={() =>
-								selectedRef && deleteMutation.mutate(selectedRef.id)
+								borrando?.editable &&
+								eliminarReferencia.mutate(borrando.editable.referenciaLeadId)
 							}
-							disabled={deleteMutation.isPending}
 						>
-							{deleteMutation.isPending ? "Eliminando..." : "Eliminar"}
+							{eliminarReferencia.isPending ? "Eliminando..." : "Eliminar"}
 						</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
-		</Card>
+		</TooltipProvider>
 	);
 }

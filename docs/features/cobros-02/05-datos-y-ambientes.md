@@ -100,7 +100,8 @@ El bloque de COBROS-02 hoy:
 | `0015_cb114_traslados_cartera.sql` | Ledger de los traslados masivos: `operaciones_traslado_cartera` (+ detalle) con el plan previsualizado, su hash y su clave de idempotencia |
 
 Y en el CRM: `0025` premora · `0027` alertas de cobros · `0030` reducción CB-010 ·
-`0031` recordatorios de convenio · `0032` alerta de promesa · `0033`-`0035` bot de cobros.
+`0031` recordatorios de convenio · `0032` alerta de promesa · `0033`-`0035` bot de cobros ·
+`0060` referencias (CB-036).
 
 ---
 

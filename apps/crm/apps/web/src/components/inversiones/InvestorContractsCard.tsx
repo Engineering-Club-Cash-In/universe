@@ -15,6 +15,7 @@ import {
 	TriangleAlert,
 } from "lucide-react";
 import { useState } from "react";
+import { compraDelContrato } from "server/src/lib/contrato-compra";
 import type { MOTIVOS_DE_ANULACION } from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
 import { RegenerarEnlacesDialog } from "@/components/contracts/RegenerarEnlacesDialog";
@@ -503,9 +504,13 @@ function tituloDeLaCompra(bateria: ContratoDeInversionista["bateria"]): string {
  * contratos repetidos: sin agrupar, la ficha es una lista de nombres iguales.
  *
  * La batería sola no alcanza: otra compra sobre los mismos créditos reusa la
- * misma batería y le pisa la fecha y el monto. Los contratos emitidos antes de
- * esa aceptación son de la compra anterior y van aparte; de ella ya no queda el
- * monto, así que se nombra por cuándo se emitieron.
+ * misma batería y le pisa la fecha y el monto. Cada contrato trae marcada la
+ * aceptación de su compra (`compraAceptadaEn`), así que se agrupa por esa: con
+ * tres compras, las dos anteriores quedan cada una en lo suyo. De las
+ * anteriores ya no queda el monto, así que se nombran por la fecha.
+ *
+ * Los de antes de la marca caen en "antes de la compra actual", nombrados por
+ * cuándo se emitieron.
  */
 function porCompra(contratos: ContratoDeInversionista[]) {
 	const grupos = new Map<
@@ -520,28 +525,41 @@ function porCompra(contratos: ContratoDeInversionista[]) {
 
 	for (const contrato of contratos) {
 		const bateria = contrato.bateria;
+		const actual = bateria ? new Date(bateria.acceptedAt).getTime() : null;
+		const marcada = compraDelContrato(contrato.apiResponse);
+		const suCompra = marcada ? new Date(marcada).getTime() : null;
 		const emitido = contrato.generatedAt
 			? new Date(contrato.generatedAt).getTime()
 			: null;
-		const anterior =
-			bateria !== undefined &&
-			bateria !== null &&
-			emitido !== null &&
-			emitido < new Date(bateria.acceptedAt).getTime();
 
-		const clave = bateria
-			? `${bateria.id}${anterior ? ":anterior" : ""}`
-			: "sin-bateria";
+		// De la compra actual: la marca coincide, o —sin marca— se emitió desde
+		// la aceptación actual.
+		const deLaActual =
+			actual !== null &&
+			(suCompra !== null
+				? suCompra === actual
+				: emitido === null || emitido >= actual);
+
+		const clave = !bateria
+			? "sin-bateria"
+			: deLaActual
+				? bateria.id
+				: suCompra !== null
+					? `${bateria.id}:${suCompra}`
+					: `${bateria.id}:antes`;
 		const grupo = grupos.get(clave) ?? {
 			clave,
-			titulo: anterior
-				? `Compra anterior sobre los mismos créditos · emitidos el ${fechaCorta(contrato.generatedAt as Date | string)}`
-				: tituloDeLaCompra(bateria),
-			orden: anterior
-				? (emitido ?? 0)
-				: bateria
-					? new Date(bateria.acceptedAt).getTime()
-					: Number.NEGATIVE_INFINITY,
+			titulo:
+				!bateria || deLaActual
+					? tituloDeLaCompra(bateria)
+					: suCompra !== null
+						? `Compra anterior del ${fechaCorta(new Date(suCompra))} sobre los mismos créditos`
+						: `Compra anterior sobre los mismos créditos · emitidos el ${fechaCorta(contrato.generatedAt as Date | string)}`,
+			orden: !bateria
+				? Number.NEGATIVE_INFINITY
+				: deLaActual
+					? (actual as number)
+					: (suCompra ?? emitido ?? 0),
 			contratos: [],
 		};
 		grupo.contratos.push(contrato);

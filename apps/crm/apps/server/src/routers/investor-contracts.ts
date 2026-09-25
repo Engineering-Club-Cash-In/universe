@@ -1,5 +1,16 @@
 import { ORPCError } from "@orpc/server";
-import { and, asc, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
+import {
+	and,
+	asc,
+	desc,
+	eq,
+	gte,
+	inArray,
+	isNull,
+	ne,
+	or,
+	sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { investorContractBatches } from "../db/schema/investor-contracts";
@@ -699,7 +710,9 @@ export const investorContractsRouter = {
 	 * Jurídico toma la batería.
 	 *
 	 * Deja dicho quién la está trabajando, para que dos personas no emitan los
-	 * mismos contratos en paralelo. No bloquea: avisa.
+	 * mismos contratos en paralelo. No bloquea: avisa. Si ya la tomó otra
+	 * persona, se devuelve tal cual —con quién la tiene— en vez de pisarla: si
+	 * no, las dos creían que era suya y emitían a la vez.
 	 */
 	startInvestorContractBatch: juridicoProcedure
 		.input(z.object({ batchId: z.string().uuid() }))
@@ -721,18 +734,31 @@ export const investorContractsRouter = {
 						// Sólo desde pendiente: volver a "en_proceso" una completada
 						// reabriría trabajo que alguien ya dio por terminado.
 						eq(investorContractBatches.status, "pendiente"),
+						// Y sin dueño, o con el mismo que la vuelve a tomar.
+						or(
+							isNull(investorContractBatches.startedAt),
+							eq(investorContractBatches.startedBy, context.session.user.id),
+						),
 					),
 				)
 				.returning();
 
-			if (!actualizada) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"Esa batería ya fue tomada, completada o descartada. Recargá la pantalla.",
-				});
-			}
+			if (actualizada) return actualizada;
 
-			return actualizada;
+			const [bateria] = await db
+				.select()
+				.from(investorContractBatches)
+				.where(eq(investorContractBatches.id, input.batchId))
+				.limit(1);
+
+			// Pendiente con otro dueño: se devuelve con su `startedBy`, que es el
+			// aviso de que alguien más la está trabajando.
+			if (bateria?.status === "pendiente") return bateria;
+
+			throw new ORPCError("BAD_REQUEST", {
+				message:
+					"Esa batería ya se completó o se descartó. Recargá la pantalla.",
+			});
 		}),
 
 	/**
@@ -764,10 +790,26 @@ export const investorContractsRouter = {
 			// contrato: si no, uno que terminaba de guardarse después de esta
 			// revisión quedaba vivo en una batería descartada.
 			return conCandadoDeBateria(input.batchId, async () => {
+				const [bateria] = await db
+					.select({ acceptedAt: investorContractBatches.acceptedAt })
+					.from(investorContractBatches)
+					.where(eq(investorContractBatches.id, input.batchId))
+					.limit(1);
+
+				if (!bateria) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Esa batería de contratos no existe",
+					});
+				}
+
 				// Descartar es para la compra que NO lleva papelería. Con contratos ya
 				// emitidos deja de ser cierto: sus documentos siguen vivos en WeeTrust
 				// pidiendo firma, y la batería descartada ni se recalcula ni vuelve a
 				// la lista, así que nadie se acuerda de ellos. Se anulan primero.
+				//
+				// Sólo los de esta compra: los de una compra anterior sobre los mismos
+				// créditos son otro acuerdo, casi siempre firmado, y no tienen que
+				// frenar el descarte de la nueva.
 				const [vigente] = await db
 					.select({ contractName: generatedLegalContracts.contractName })
 					.from(generatedLegalContracts)
@@ -775,6 +817,7 @@ export const investorContractsRouter = {
 						and(
 							eq(generatedLegalContracts.batchId, input.batchId),
 							ne(generatedLegalContracts.status, "cancelled"),
+							gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
 						),
 					)
 					.limit(1);

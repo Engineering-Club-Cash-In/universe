@@ -1869,14 +1869,17 @@ describe("WialonClient", () => {
 			};
 
 			const client = new WialonClient({ token: "tok-historial" }, mockFetch);
-			const mensajes = await client.getHistorialPosiciones(
+			const resultado = await client.getHistorialPosiciones(
 				20060450,
 				new Date("2026-01-01T00:00:00.000Z"),
 				new Date("2026-01-02T00:00:00.000Z"),
 			);
 
-			expect(mensajes).toHaveLength(2);
-			expect(mensajes[0]).toEqual({
+			expect(resultado.completo).toBe(true);
+			expect(resultado.tramosTotal).toBe(1);
+			expect(resultado.tramosCompletados).toBe(1);
+			expect(resultado.mensajes).toHaveLength(2);
+			expect(resultado.mensajes[0]).toEqual({
 				t: 1700000000,
 				lat: 14.6,
 				lon: -90.5,
@@ -1910,13 +1913,14 @@ describe("WialonClient", () => {
 			};
 
 			const client = new WialonClient({ token: "tok-sin-pos" }, mockFetch);
-			const mensajes = await client.getHistorialPosiciones(
+			const resultado = await client.getHistorialPosiciones(
 				1,
 				new Date("2026-01-01T00:00:00.000Z"),
 				new Date("2026-01-02T00:00:00.000Z"),
 			);
 
-			expect(mensajes).toHaveLength(1);
+			expect(resultado.completo).toBe(true);
+			expect(resultado.mensajes).toHaveLength(1);
 		});
 
 		test("un tramo que falla se degrada a sin datos para ese tramo, no tumba los demás", async () => {
@@ -1952,13 +1956,16 @@ describe("WialonClient", () => {
 			const client = new WialonClient({ token: "tok-falla" }, mockFetch);
 			// 10 días de ventana → 2 tramos de 7 días: el primero falla, el
 			// segundo sí trae datos.
-			const mensajes = await client.getHistorialPosiciones(
+			const resultado = await client.getHistorialPosiciones(
 				1,
 				new Date("2026-01-01T00:00:00.000Z"),
 				new Date("2026-01-11T00:00:00.000Z"),
 			);
 
-			expect(mensajes).toHaveLength(1);
+			expect(resultado.completo).toBe(false);
+			expect(resultado.tramosTotal).toBe(2);
+			expect(resultado.tramosCompletados).toBe(1);
+			expect(resultado.mensajes).toHaveLength(1);
 		});
 	});
 });

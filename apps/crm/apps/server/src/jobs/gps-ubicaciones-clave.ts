@@ -73,7 +73,7 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 	// crítica.
 	for (const { wialonUnitId, numeroCreditoSifco } of unidades) {
 		try {
-			const mensajes = await conContextoGps(
+			const historial = await conContextoGps(
 				{ origen: "gps-ubicaciones-clave" },
 				() =>
 					getWialonClient().getHistorialPosiciones(
@@ -83,7 +83,15 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 					),
 			);
 
-			const ubicaciones = calcularUbicacionesClave(mensajes);
+			if (!historial.completo) {
+				unidadesConError++;
+				console.warn(
+					`${LOG_PREFIX} No se pudo obtener el historial completo de 60 días para la unidad ${wialonUnitId} (SIFCO ${numeroCreditoSifco}): ${historial.tramosCompletados}/${historial.tramosTotal} tramos completados. Se preserva el snapshot previo.`,
+				);
+				continue;
+			}
+
+			const ubicaciones = calcularUbicacionesClave(historial.mensajes);
 
 			const { vehicleId, casoCobroId } = await resolverVehiculoYCaso(
 				wialonUnitId,

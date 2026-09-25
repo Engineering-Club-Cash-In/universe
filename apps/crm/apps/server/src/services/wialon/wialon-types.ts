@@ -712,6 +712,13 @@ export interface WialonMensajePosicion {
 	velocidadKmh: number | null;
 }
 
+export interface HistorialPosicionesResultado {
+	mensajes: WialonMensajePosicion[];
+	completo: boolean;
+	tramosTotal: number;
+	tramosCompletados: number;
+}
+
 // ── Ubicaciones clave en la Ficha 360 (CB-119, D-15) ────────────────────────
 export const ubicacionesClaveCasoInputSchema = z.object({
 	casoCobroId: z.string().uuid(),
@@ -722,27 +729,30 @@ export type UbicacionesClaveCasoInput = z.infer<
 	typeof ubicacionesClaveCasoInputSchema
 >;
 
-export const ubicacionesClaveCasoOutputSchema = z.array(
-	z.object({
-		id: z.string(),
-		lat: z.number(),
-		lon: z.number(),
-		radioM: z.number(),
-		tipo: z.enum([
-			"probable_casa",
-			"probable_trabajo",
-			"recurrente",
-			"frecuente",
-		]),
-		horasTotales: z.number(),
-		diasDistintos: z.number(),
-		visitas: z.number(),
-		patron: z.unknown(),
-		primeraVisita: z.date(),
-		ultimaVisita: z.date(),
-		calculadoAt: z.date(),
-	}),
-);
+export const ubicacionesClaveCasoOutputSchema = z.object({
+	auditada: z.boolean(),
+	ubicaciones: z.array(
+		z.object({
+			id: z.string(),
+			lat: z.number(),
+			lon: z.number(),
+			radioM: z.number(),
+			tipo: z.enum([
+				"probable_casa",
+				"probable_trabajo",
+				"recurrente",
+				"frecuente",
+			]),
+			horasTotales: z.number(),
+			diasDistintos: z.number(),
+			visitas: z.number(),
+			patron: z.unknown(),
+			primeraVisita: z.date(),
+			ultimaVisita: z.date(),
+			calculadoAt: z.date(),
+		}),
+	),
+});
 export type UbicacionesClaveCasoOutput = z.infer<
 	typeof ubicacionesClaveCasoOutputSchema
 >;

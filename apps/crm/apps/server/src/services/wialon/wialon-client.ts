@@ -6,6 +6,7 @@ import { contextoGpsActual } from "./wialon-contexto";
 import {
 	type CreateLocatorLinkInput,
 	createLocatorLinkInputSchema,
+	type HistorialPosicionesResultado,
 	type LocatorLinkResult,
 	type SearchUnitsInput,
 	searchUnitsInputSchema,
@@ -1343,15 +1344,18 @@ export class WialonClient {
 		unitId: number,
 		desde: Date,
 		hasta: Date,
-	): Promise<WialonMensajePosicion[]> {
+	): Promise<HistorialPosicionesResultado> {
 		const TRAMO_MS = 7 * 24 * 60 * 60 * 1000;
 		const mensajes: WialonMensajePosicion[] = [];
+		let tramosTotal = 0;
+		let tramosCompletados = 0;
 
 		for (
 			let inicioTramo = desde.getTime();
 			inicioTramo < hasta.getTime();
 			inicioTramo += TRAMO_MS
 		) {
+			tramosTotal++;
 			const finTramo = Math.min(inicioTramo + TRAMO_MS, hasta.getTime());
 
 			try {
@@ -1403,6 +1407,7 @@ export class WialonClient {
 				});
 
 				mensajes.push(...delTramo);
+				tramosCompletados++;
 			} catch (error) {
 				console.warn(
 					`[WialonClient] No se pudo traer historial de posiciones de la unidad ${unitId} entre ${new Date(inicioTramo).toISOString()} y ${new Date(finTramo).toISOString()}:`,
@@ -1411,7 +1416,12 @@ export class WialonClient {
 			}
 		}
 
-		return mensajes;
+		return {
+			mensajes,
+			completo: tramosTotal > 0 && tramosCompletados === tramosTotal,
+			tramosTotal,
+			tramosCompletados,
+		};
 	}
 
 	/**

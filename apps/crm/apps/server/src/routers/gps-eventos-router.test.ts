@@ -311,8 +311,9 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 			context: ctx("cobros"),
 		});
 
-		expect(res).toHaveLength(1);
-		expect(res[0]?.tipo).toBe("probable_casa");
+		expect(res.auditada).toBe(true);
+		expect(res.ubicaciones).toHaveLength(1);
+		expect(res.ubicaciones[0]?.tipo).toBe("probable_casa");
 		expect(gpsConsultaLogsInsertados).toHaveLength(1);
 		expect(gpsConsultaLogsInsertados[0]?.motivo).toBe(input.motivo);
 	});
@@ -340,7 +341,7 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		expect(gpsConsultaLogsInsertados).toHaveLength(0);
 	});
 
-	it("falla la auditoría (insert de gps_consulta_logs): fail closed, no devuelve ubicaciones", async () => {
+	it("falla la auditoría (insert de gps_consulta_logs): fail closed, no devuelve ubicaciones y auditada=false", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
 		} as never);
@@ -366,7 +367,7 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 			context: ctx("cobros"),
 		});
 
-		expect(res).toEqual([]);
+		expect(res).toEqual({ auditada: false, ubicaciones: [] });
 	});
 
 	it("admin puede ver ubicaciones de cualquier caso sin llamar a cartera-back", async () => {
@@ -377,7 +378,7 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 			context: ctx("admin"),
 		});
 
-		expect(res).toEqual([]);
+		expect(res).toEqual({ auditada: true, ubicaciones: [] });
 		expect(getCreditoSpy).not.toHaveBeenCalled();
 	});
 
@@ -387,7 +388,7 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 			{ ...input, motivo: "12345" },
 			{ context: ctx("admin") },
 		);
-		expect(resValido).toEqual([]);
+		expect(resValido).toEqual({ auditada: true, ubicaciones: [] });
 
 		await expect(
 			call(

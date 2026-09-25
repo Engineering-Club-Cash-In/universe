@@ -164,9 +164,19 @@ export function GpsUbicacionesClaveCard({
 					<div className="flex justify-center py-4">
 						<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
 					</div>
-				) : ubicaciones.data && ubicaciones.data.length > 0 ? (
+				) : ubicaciones.isError ? (
+					<p className="text-destructive text-sm">
+						No se pudieron cargar las ubicaciones clave:{" "}
+						{ubicaciones.error?.message ?? "Error inesperado"}
+					</p>
+				) : ubicaciones.data?.auditada === false ? (
+					<p className="text-destructive text-sm">
+						No se pudo registrar la auditoría de la consulta. Por seguridad no se
+						muestran las ubicaciones.
+					</p>
+				) : ubicaciones.data && ubicaciones.data.ubicaciones.length > 0 ? (
 					<ul className="space-y-2">
-						{ubicaciones.data.map((u) => {
+						{ubicaciones.data.ubicaciones.map((u) => {
 							const config = TIPO_CONFIG[u.tipo as TipoUbicacionClave];
 							const Icon = config.icon;
 							const mapsUrl = googleMapsUrl(u.lat, u.lon);
@@ -217,7 +227,9 @@ export function GpsUbicacionesClaveCard({
 						<p className="text-muted-foreground text-xs">
 							{ubicaciones.isLoading
 								? "Registrando consulta"
-								: "Consulta registrada"}{" "}
+								: ubicaciones.data?.auditada
+									? "Consulta registrada"
+									: "Consulta no registrada"}{" "}
 							— motivo: "{motivoConfirmado}"
 						</p>
 						<Button

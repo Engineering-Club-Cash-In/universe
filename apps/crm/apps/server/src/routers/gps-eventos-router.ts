@@ -110,7 +110,7 @@ export const gpsEventosRouter = {
 					vehicleId: input.vehicleId,
 					origen: "getUbicacionesClaveCaso",
 				});
-				return [];
+				return { auditada: false, ubicaciones: [] };
 			}
 
 			try {
@@ -128,10 +128,10 @@ export const gpsEventosRouter = {
 					origen: "getUbicacionesClaveCaso",
 					message: error instanceof Error ? error.message : String(error),
 				});
-				return [];
+				return { auditada: false, ubicaciones: [] };
 			}
 
-			return await db
+			const ubicaciones = await db
 				.select({
 					id: gpsUbicacionesClave.id,
 					lat: gpsUbicacionesClave.lat,
@@ -149,5 +149,7 @@ export const gpsEventosRouter = {
 				.from(gpsUbicacionesClave)
 				.where(eq(gpsUbicacionesClave.casoCobroId, input.casoCobroId))
 				.orderBy(desc(gpsUbicacionesClave.horasTotales));
+
+			return { auditada: true, ubicaciones };
 		}),
 };

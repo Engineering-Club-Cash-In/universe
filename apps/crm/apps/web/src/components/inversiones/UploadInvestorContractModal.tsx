@@ -6,6 +6,7 @@ import {
 	type MotivoDeAnulacion,
 } from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
+import { esDeEstaCompra } from "@/components/inversiones/ContratosDeLaBateria";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -50,6 +51,7 @@ import { client, orpc } from "@/utils/orpc";
  */
 export function UploadInvestorContractModal({
 	batchId,
+	aceptadaEn,
 	documentTypes,
 	tipoInicial,
 	open,
@@ -57,6 +59,12 @@ export function UploadInvestorContractModal({
 	onUploaded,
 }: {
 	batchId: string;
+	/**
+	 * Cuándo se aceptó la compra actual. Sólo se reemplaza un contrato de esta
+	 * compra: uno de una compra anterior sobre los mismos créditos es otro
+	 * acuerdo, y el servidor rechaza reemplazarlo.
+	 */
+	aceptadaEn: string | Date;
 	/** El catálogo de la categoría elegida: `enum` es el tipo, `label` el nombre. */
 	documentTypes: { enum: string; label: string }[];
 	/**
@@ -86,7 +94,7 @@ export function UploadInvestorContractModal({
 	});
 
 	const reemplaza = (contratosQuery.data ?? [])
-		.filter((c) => !estaAnulado(c))
+		.filter((c) => !estaAnulado(c) && esDeEstaCompra(c, aceptadaEn))
 		.find((c) => c.contractType === contractType);
 
 	const limpiar = () => {

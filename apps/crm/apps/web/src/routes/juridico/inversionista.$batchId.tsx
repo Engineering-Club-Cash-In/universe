@@ -792,6 +792,7 @@ function RouteComponent() {
 
 			<UploadInvestorContractModal
 				batchId={batchId}
+				aceptadaEn={bateria.acceptedAt}
 				documentTypes={documentTypes}
 				tipoInicial={tipoASubir}
 				open={subiendo}

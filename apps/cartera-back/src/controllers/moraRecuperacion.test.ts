@@ -10,6 +10,7 @@ import {
 import {
 	type MoraLevelEvent,
 	type MoraRecoverySourceRow,
+	CLAVES_EVENTO_MORA_RECOVERY_CRUDO,
 	CREDITOS_POR_LOTE,
 	acumularMoraRecoveryRows,
 	buildMoraRecoveryCreditosQuery,
@@ -1657,5 +1658,108 @@ describe("buildMoraRecoveryQuery — el filtro de lote", () => {
 		expect(universo).toContain("LOWER(a.email_cash_in) = LOWER(TRIM(");
 		expect(universo).toContain("a.asesor_id IN (");
 		expect(universo).toContain("ORDER BY c.credito_id");
+	});
+});
+
+/**
+ * EL CONTRATO DEL MAPEO, EN LA DIRECCIÓN QUE FALTABA.
+ *
+ * `db.execute<MoraRecoveryFilaCruda>` AFIRMA la forma de lo que devuelve la
+ * consulta; no la verifica. El compilador ya cubría una dirección: si el TIPO
+ * declara un campo, `TRADUCTORES_EVENTO` obliga a traducirlo (fue lo que cerró
+ * el agujero que se abrió tres veces con `nivel_sembrado`, `reverso` y
+ * `anulado`). Pero la contraria estaba abierta de par en par: agregar una clave
+ * al `JSON_BUILD_OBJECT` del SQL sin agregarla al tipo COMPILA, y el valor se
+ * descarta en silencio mientras el reporte dice otra cosa.
+ *
+ * Esta prueba cierra esa dirección leyendo el SQL RENDERIZADO —la fuente real,
+ * no una copia— y comparándolo contra las claves del tipo, que a su vez salen
+ * de `TRADUCTORES_EVENTO` (ver `CLAVES_EVENTO_MORA_RECOVERY_CRUDO`). No hay
+ * ninguna lista escrita a mano en el medio: si el SQL y el tipo se separan en
+ * CUALQUIERA de las dos direcciones, esto se pone rojo.
+ */
+describe("contrato: JSON_BUILD_OBJECT del SQL ↔ MoraRecoveryEventoCrudo", () => {
+	/**
+	 * Devuelve los argumentos de primer nivel del `JSON_BUILD_OBJECT` del SQL
+	 * renderizado, recortando por paréntesis balanceados (adentro hay llamadas
+	 * anidadas y comas que NO separan argumentos del objeto).
+	 */
+	const clavesDelJsonBuildObject = (texto: string): string[] => {
+		const apariciones = texto.match(/JSON_BUILD_OBJECT\s*\(/gi) ?? [];
+		// Si algún día hay más de uno, esta prueba estaría mirando el que no es.
+		expect(apariciones.length).toBe(1);
+
+		const inicio = texto.search(/JSON_BUILD_OBJECT\s*\(/i);
+		const abre = texto.indexOf("(", inicio);
+		let profundidad = 0;
+		let cierra = -1;
+		for (let i = abre; i < texto.length; i++) {
+			if (texto[i] === "(") profundidad++;
+			else if (texto[i] === ")") {
+				profundidad--;
+				if (profundidad === 0) {
+					cierra = i;
+					break;
+				}
+			}
+		}
+		expect(cierra).toBeGreaterThan(abre);
+
+		const cuerpo = texto.slice(abre + 1, cierra);
+		const argumentos: string[] = [];
+		let actual = "";
+		profundidad = 0;
+		for (const ch of cuerpo) {
+			if (ch === "(") profundidad++;
+			else if (ch === ")") profundidad--;
+			if (ch === "," && profundidad === 0) {
+				argumentos.push(actual.trim());
+				actual = "";
+			} else actual += ch;
+		}
+		argumentos.push(actual.trim());
+
+		// `JSON_BUILD_OBJECT(clave, valor, clave, valor, …)`: las claves son los
+		// argumentos pares, y tienen que ser literales de texto.
+		return argumentos
+			.filter((_, i) => i % 2 === 0)
+			.map((arg) => {
+				const m = arg.match(/^'([^']+)'$/);
+				expect(m).not.toBeNull();
+				return (m as RegExpMatchArray)[1];
+			});
+	};
+
+	it("las claves que emite el SQL son EXACTAMENTE las del tipo crudo", () => {
+		const periodo = getMoraRecoveryPeriod({
+			mes: 6,
+			anio: 2026,
+			hoy: "2026-07-29",
+		});
+		const { sql: texto } = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(periodo),
+		);
+
+		const delSql = clavesDelJsonBuildObject(texto).sort();
+		const delTipo = [...CLAVES_EVENTO_MORA_RECOVERY_CRUDO].sort();
+
+		// Un solo `toEqual` sobre los dos conjuntos ordenados: una clave de más
+		// en el SQL (se descartaría en silencio) y una de menos (llegaría
+		// `undefined`) fallan las dos por el mismo lado.
+		expect(delSql).toEqual(delTipo);
+	});
+
+	it("el número de argumentos es par: ninguna clave quedó sin valor", () => {
+		const periodo = getMoraRecoveryPeriod({
+			mes: 6,
+			anio: 2026,
+			hoy: "2026-07-29",
+		});
+		const { sql: texto } = new PgDialect().sqlToQuery(
+			buildMoraRecoveryQuery(periodo),
+		);
+		expect(clavesDelJsonBuildObject(texto).length).toBe(
+			CLAVES_EVENTO_MORA_RECOVERY_CRUDO.length,
+		);
 	});
 });

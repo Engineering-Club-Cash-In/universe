@@ -8,6 +8,7 @@ mock.module("../database", () => ({ db: {}, client: {} }));
 const {
   calcularMoraProporcional,
   diasAtrasoMora,
+  decidirMoraDelCron,
   fechaCalendarioGT,
   hoyGuatemala,
   isOverdueInstallmentForMora,
@@ -324,5 +325,49 @@ describe("fechaCalendarioGT — entradas malformadas no pueden devolver una fech
     expect(fechaCalendarioGT("2026-09-20")).toBe(Date.UTC(2026, 8, 20));
     expect(fechaCalendarioGT("2026-09-20 00:00:00")).toBe(Date.UTC(2026, 8, 20));
     expect(fechaCalendarioGT("2026-09-20T06:00:00.000Z")).toBe(Date.UTC(2026, 8, 20));
+  });
+});
+
+// Decisión del paso 5 del cron. Existe como función pura por la misma razón que
+// decidirMoraTrasRomperConvenio: la regla vive detrás de tres writes a la base.
+describe("decidirMoraDelCron — el cron nunca escribe una mora activa de Q0.00", () => {
+  it("capital chico con 1 día de atraso: DESACTIVAR, con su motivo propio", () => {
+    const d = decidirMoraDelCron({ capital: 10, diasAtrasadosPorCuota: [1] });
+    expect(d.accion).toBe("DESACTIVAR");
+    expect(d.accion === "DESACTIVAR" && d.motivo).toBe("Mora proporcional menor a un centavo");
+  });
+
+  it("el motivo de capital cero es OTRO (el historial tiene que decir la verdad)", () => {
+    const d = decidirMoraDelCron({ capital: 0, diasAtrasadosPorCuota: [45] });
+    expect(d.accion).toBe("DESACTIVAR");
+    expect(d.accion === "DESACTIVAR" && d.motivo).toBe("Crédito sin capital — no aplica mora");
+  });
+
+  it("capital nulo o negativo tampoco genera mora", () => {
+    for (const capital of [null, -500]) {
+      expect(decidirMoraDelCron({ capital, diasAtrasadosPorCuota: [30] }).accion).toBe("DESACTIVAR");
+    }
+  });
+
+  it("mora cobrable: APLICAR con el monto ya redondeado que se guarda", () => {
+    const d = decidirMoraDelCron({ capital: 10_000, diasAtrasadosPorCuota: [35, 5] });
+    expect(d.accion).toBe("APLICAR");
+    expect(d.accion === "APLICAR" && d.montoStr).toBe("130.67");
+  });
+
+  it("el monto de APLICAR SIEMPRE es > 0 (lo que createMora exige)", () => {
+    for (const capital of [10, 13.39, 13.4, 14, 100, 10_000]) {
+      for (const dias of [[1], [2], [15], [30], [95, 65, 35, 5]]) {
+        const d = decidirMoraDelCron({ capital, diasAtrasadosPorCuota: dias });
+        if (d.accion !== "APLICAR") continue;
+        expect(Number(d.montoStr)).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("coincide con decidirMoraTrasRomperConvenio en el borde del medio centavo", () => {
+    // 13.39 × 1.12% × 1/30 = 0.004998… → Q0.00; 13.40 → Q0.005 → Q0.01.
+    expect(decidirMoraDelCron({ capital: 13.39, diasAtrasadosPorCuota: [1] }).accion).toBe("DESACTIVAR");
+    expect(decidirMoraDelCron({ capital: 13.4, diasAtrasadosPorCuota: [1] }).accion).toBe("APLICAR");
   });
 });

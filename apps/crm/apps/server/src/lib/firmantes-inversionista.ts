@@ -12,12 +12,18 @@ import {
 	REP_LEGAL_RDBE_EMAIL,
 	REP_LEGAL_RDBE_NOMBRE,
 } from "./contratos-rep-legal";
+import type { IdentificacionDelInversionista } from "./identidad-inversionista";
 import { isTestModeEnabled } from "./messaging-test-mode";
 
 /** Lo que hace falta saber del inversionista para mandarlo a firmar. */
 export interface InversionistaQueFirma {
 	nombre: string;
 	email: string | null;
+	/**
+	 * Qué verificación de identidad se le pide en esta compra
+	 * (`identificacionParaLaCompra`, en `lib/identidad-inversionista.ts`).
+	 */
+	identificacion: IdentificacionDelInversionista;
 }
 
 /**
@@ -56,7 +62,12 @@ export function firmantesDeContratoDeInversion(
 	}
 
 	const firmantes: ContractSigner[] = [
-		{ role: "TITULAR", email, name: inversionista.nombre },
+		{
+			role: "TITULAR",
+			email,
+			name: inversionista.nombre,
+			identification: inversionista.identificacion,
+		},
 		...(contrato.entidades.includes("CUBE")
 			? [
 					{

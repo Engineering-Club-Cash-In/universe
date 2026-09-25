@@ -49,6 +49,16 @@ const cuerpoSchema = z.object({
 		aceptadaPor: z.string().nullish(),
 		/** El id de Resend del correo de aceptación: el hilo de la compra. */
 		correoId: z.string().nullish(),
+		/**
+		 * Lo que el inversionista tenía aportado antes de esta compra. Decide si
+		 * firma con selfie y DPI (primera compra) o sólo firma. Un valor raro no
+		 * tumba el aviso: queda vacío y se le pide lo de siempre.
+		 */
+		montoAportadoPrevio: z
+			.string()
+			.regex(/^\d+(\.\d+)?$/)
+			.nullish()
+			.catch(null),
 	}),
 });
 
@@ -161,6 +171,7 @@ app.post("/", async (c) => {
 			purchaseKey,
 			creditos: compra.creditos,
 			montoTotal: compra.montoTotal,
+			montoAportadoPrevio: compra.montoAportadoPrevio ?? null,
 			modalidad: compra.modalidad ?? null,
 			facturacion: compra.facturacion ?? null,
 			acceptedAt: aceptadaEn,
@@ -239,6 +250,7 @@ app.post("/", async (c) => {
 					investorPhone: inversionista.celular ?? null,
 					creditos: compra.creditos,
 					montoTotal: compra.montoTotal,
+					montoAportadoPrevio: compra.montoAportadoPrevio ?? null,
 					modalidad: compra.modalidad ?? null,
 					facturacion: compra.facturacion ?? null,
 					updatedAt: new Date(),

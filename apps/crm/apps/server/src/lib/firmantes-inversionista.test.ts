@@ -10,7 +10,11 @@ const { firmantesDeContratoDeInversion } = await import(
 	"./firmantes-inversionista"
 );
 
-const ANA = { nombre: "ANA CAROLINA REITER", email: "ana@ejemplo.com" };
+const ANA = {
+	nombre: "ANA CAROLINA REITER",
+	email: "ana@ejemplo.com",
+	identificacion: "face" as const,
+};
 
 describe("firmantes de un contrato de inversiones", () => {
 	test("una carta la firma sólo el inversionista", () => {
@@ -24,7 +28,21 @@ describe("firmantes de un contrato de inversiones", () => {
 				role: "TITULAR",
 				email: "ana@ejemplo.com",
 				name: "ANA CAROLINA REITER",
+				identification: "face",
 			},
+		]);
+	});
+
+	test("lo que se le pide al inversionista va en su firma, no en la de los representantes", () => {
+		const firmantes = firmantesDeContratoDeInversion(
+			"contrato_servicios_cash_in_inversor_general",
+			{ ...ANA, identificacion: "none" },
+		);
+
+		expect(firmantes.map((f) => [f.role, f.identification])).toEqual([
+			["TITULAR", "none"],
+			["REP_LEGAL", undefined],
+			["REP_LEGAL_RDBE", undefined],
 		]);
 	});
 
@@ -75,6 +93,7 @@ describe("firmantes de un contrato de inversiones", () => {
 			firmantesDeContratoDeInversion("acuerdo_inversion_cash_in", {
 				nombre: "SIN CORREO",
 				email: "   ",
+				identificacion: "face",
 			}),
 		).toThrow(/no tiene correo registrado/);
 	});
@@ -84,6 +103,7 @@ describe("firmantes de un contrato de inversiones", () => {
 			firmantesDeContratoDeInversion("acuerdo_inversion_cash_in", {
 				nombre: "ALGUIEN DE LA CASA",
 				email: "andres@ejemplo.com",
+				identificacion: "face",
 			}),
 		).toThrow(/repetido/);
 	});

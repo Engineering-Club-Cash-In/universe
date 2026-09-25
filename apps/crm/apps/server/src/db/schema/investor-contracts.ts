@@ -103,6 +103,19 @@ export const investorContractBatches = pgTable(
 
 		creditos: jsonb("creditos").$type<CreditoDeLaCompra[]>().notNull(),
 		montoTotal: numeric("monto_total", { precision: 18, scale: 2 }).notNull(),
+		/**
+		 * Lo que el inversionista tenía aportado en cartera ANTES de esta compra.
+		 *
+		 * Decide qué verificación de identidad se le pide al firmar: en cero es
+		 * su primera compra y va con selfie y DPI; con monto, sólo firma (ver
+		 * `lib/identidad-inversionista.ts`). Lo calcula cartera al aceptar la
+		 * compra y se pisa cuando otra compra reusa la batería. Vacío en las de
+		 * antes: se tratan como primera compra.
+		 */
+		montoAportadoPrevio: numeric("monto_aportado_previo", {
+			precision: 18,
+			scale: 2,
+		}),
 		/** Modalidad de reinversión y facturación del inversionista, como texto. */
 		modalidad: text("modalidad"),
 		facturacion: text("facturacion"),

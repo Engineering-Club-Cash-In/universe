@@ -10,6 +10,11 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { CategoriaDeInversion } from "server/src/lib/contratos-inversiones";
+import {
+	ETIQUETA_IDENTIFICACION,
+	esPrimeraCompra,
+	identificacionParaLaCompra,
+} from "server/src/lib/identidad-inversionista";
 import { toast } from "sonner";
 import type { ContractResult } from "@/components/contracts/ContractResults";
 import {
@@ -484,6 +489,25 @@ function RouteComponent() {
 						<Label className="text-muted-foreground text-xs">Modalidad</Label>
 						<p className="text-sm">
 							{bateria.modalidad ?? "—"} · {bateria.facturacion ?? "—"}
+						</p>
+					</div>
+					<div className="space-y-1">
+						<Label className="text-muted-foreground text-xs">
+							Cómo firma el inversionista
+						</Label>
+						<p className="text-sm">
+							{
+								ETIQUETA_IDENTIFICACION[
+									identificacionParaLaCompra(bateria.montoAportadoPrevio)
+								]
+							}
+						</p>
+						<p className="text-muted-foreground text-xs">
+							{bateria.montoAportadoPrevio == null
+								? "Cartera no dijo si ya invertía: se le pide lo de siempre."
+								: esPrimeraCompra(bateria.montoAportadoPrevio)
+									? "Es su primera compra: no tenía nada aportado."
+									: `Ya tenía ${quetzales(bateria.montoAportadoPrevio)} aportados antes de esta compra.`}
 						</p>
 					</div>
 					<div className="space-y-1">

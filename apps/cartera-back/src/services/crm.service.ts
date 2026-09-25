@@ -117,6 +117,12 @@ export interface BateriaDeContratosInput {
      * enlaces. Falta si el correo no salió: el CRM manda igual, fuera del hilo.
      */
     correoId?: string | null;
+    /**
+     * Lo que el inversionista tenía aportado antes de esta compra. En cero es su
+     * primera compra y firma con selfie y DPI; con monto, sólo firma. Vacío si
+     * no se pudo calcular: el CRM pide lo de siempre.
+     */
+    montoAportadoPrevio?: string | null;
   };
 }
 

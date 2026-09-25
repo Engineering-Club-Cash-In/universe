@@ -1591,115 +1591,124 @@ export const investorContractsRouter = {
 	marcarBateriaLista: juridicoProcedure
 		.input(z.object({ batchId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			const [bateria] = await db
-				.select({
-					status: investorContractBatches.status,
-					acceptedAt: investorContractBatches.acceptedAt,
-				})
-				.from(investorContractBatches)
-				.where(eq(investorContractBatches.id, input.batchId))
-				.limit(1);
+			// Todo con el candado de la batería, el mismo del envío de lo que se
+			// agrega después y el del aviso de una compra nueva: leer qué se manda,
+			// reclamar, mandar y, si el correo falla, devolver. Leyendo afuera, otra
+			// compra sobre los mismos créditos podía entrar en el medio —nueva
+			// aceptación, nuevo hilo— y el Listo mandaba los contratos de la compra
+			// anterior en el hilo de la nueva, dándola por enviada.
+			const { correo, contratos } = await conCandadoDeBateria(
+				input.batchId,
+				async () => {
+					const [bateria] = await db
+						.select({
+							status: investorContractBatches.status,
+							acceptedAt: investorContractBatches.acceptedAt,
+						})
+						.from(investorContractBatches)
+						.where(eq(investorContractBatches.id, input.batchId))
+						.limit(1);
 
-			if (!bateria) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Esa batería de contratos no existe",
-				});
-			}
+					if (!bateria) {
+						throw new ORPCError("NOT_FOUND", {
+							message: "Esa batería de contratos no existe",
+						});
+					}
 
-			if (bateria.status !== "pendiente") {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						bateria.status === "en_proceso"
-							? "Esta batería ya se mandó. Lo que agregues o reemplaces sale solo al hilo."
-							: bateria.status === "completada"
-								? "Esta batería ya está cerrada: se firmó todo."
-								: "Esta batería se descartó.",
-				});
-			}
+					if (bateria.status !== "pendiente") {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								bateria.status === "en_proceso"
+									? "Esta batería ya se mandó. Lo que agregues o reemplaces sale solo al hilo."
+									: bateria.status === "completada"
+										? "Esta batería ya está cerrada: se firmó todo."
+										: "Esta batería se descartó.",
+						});
+					}
 
-			// Los de ESTA compra. Una batería puede venir de otra compra anterior
-			// sobre los mismos créditos, y los contratos de aquélla ya salieron en
-			// su propio hilo.
-			const contratos = await db
-				.select({ id: generatedLegalContracts.id })
-				.from(generatedLegalContracts)
-				.where(
-					and(
-						eq(generatedLegalContracts.batchId, input.batchId),
-						ne(generatedLegalContracts.status, "cancelled"),
-						gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
-					),
-				)
-				.orderBy(asc(generatedLegalContracts.generatedAt));
+					// Los de ESTA compra. Una batería puede venir de otra compra
+					// anterior sobre los mismos créditos, y los contratos de aquélla ya
+					// salieron en su propio hilo.
+					const contratos = await db
+						.select({ id: generatedLegalContracts.id })
+						.from(generatedLegalContracts)
+						.where(
+							and(
+								eq(generatedLegalContracts.batchId, input.batchId),
+								ne(generatedLegalContracts.status, "cancelled"),
+								gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
+							),
+						)
+						.orderBy(asc(generatedLegalContracts.generatedAt));
 
-			if (contratos.length === 0) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Todavía no hay contratos que mandar.",
-				});
-			}
+					if (contratos.length === 0) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: "Todavía no hay contratos que mandar.",
+						});
+					}
 
-			// Reclamar, mandar y, si el correo falla, devolver: todo con el candado
-			// de la batería, el mismo del envío de lo que se agrega después. Así un
-			// agregado no sale al hilo en medio de un "Listo" que termina fallando.
-			const correo = await conCandadoDeBateria(input.batchId, async () => {
-				// Se reclama el paso a "Por firmar" antes de mandar: dos clics a la vez
-				// mandaban dos correos. El que no lo reclama, no manda.
-				const ahora = new Date();
-				const [reclamada] = await db
-					.update(investorContractBatches)
-					.set({
-						status: "en_proceso",
-						startedAt: ahora,
-						startedBy: context.userId,
-						updatedAt: ahora,
-					})
-					.where(
-						and(
-							eq(investorContractBatches.id, input.batchId),
-							eq(investorContractBatches.status, "pendiente"),
-						),
-					)
-					.returning({ id: investorContractBatches.id });
-
-				if (!reclamada) {
-					throw new ORPCError("CONFLICT", {
-						message: "Otra persona le acaba de dar Listo a esta batería.",
-					});
-				}
-
-				const correo = await mandarContratosAlHilo({
-					batchId: input.batchId,
-					contractIds: contratos.map((c) => c.id),
-					motivo: { tipo: "listo" },
-				}).catch((error: unknown) => ({
-					enviado: false,
-					enHilo: false,
-					error: error instanceof Error ? error.message : "No se pudo mandar",
-				}));
-
-				if (!correo.enviado) {
-					// Sin correo no hay Listo: vuelve a pendiente, para que se pueda
-					// reintentar sin que nadie crea que los enlaces ya salieron.
-					await db
+					// Se reclama el paso a "Por firmar" antes de mandar: dos clics a la
+					// vez mandaban dos correos. El que no lo reclama, no manda. Y sólo si
+					// la batería sigue en la compra que se leyó.
+					const ahora = new Date();
+					const [reclamada] = await db
 						.update(investorContractBatches)
 						.set({
-							status: "pendiente",
-							startedAt: null,
-							startedBy: null,
-							updatedAt: new Date(),
+							status: "en_proceso",
+							startedAt: ahora,
+							startedBy: context.userId,
+							updatedAt: ahora,
 						})
 						.where(
 							and(
 								eq(investorContractBatches.id, input.batchId),
-								eq(investorContractBatches.status, "en_proceso"),
+								eq(investorContractBatches.status, "pendiente"),
+								eq(investorContractBatches.acceptedAt, bateria.acceptedAt),
 							),
-						);
-					throw new ORPCError("BAD_REQUEST", {
-						message: `No se pudo mandar el correo (${correo.error ?? "sin detalle"}). La batería sigue pendiente: probá de nuevo.`,
-					});
-				}
-				return correo;
-			});
+						)
+						.returning({ id: investorContractBatches.id });
+
+					if (!reclamada) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La batería cambió mientras se mandaba (otra persona le dio Listo, o entró otra compra). Recargá la pantalla.",
+						});
+					}
+
+					const correo = await mandarContratosAlHilo({
+						batchId: input.batchId,
+						contractIds: contratos.map((c) => c.id),
+						motivo: { tipo: "listo" },
+					}).catch((error: unknown) => ({
+						enviado: false,
+						enHilo: false,
+						error: error instanceof Error ? error.message : "No se pudo mandar",
+					}));
+
+					if (!correo.enviado) {
+						// Sin correo no hay Listo: vuelve a pendiente, para que se pueda
+						// reintentar sin que nadie crea que los enlaces ya salieron.
+						await db
+							.update(investorContractBatches)
+							.set({
+								status: "pendiente",
+								startedAt: null,
+								startedBy: null,
+								updatedAt: new Date(),
+							})
+							.where(
+								and(
+									eq(investorContractBatches.id, input.batchId),
+									eq(investorContractBatches.status, "en_proceso"),
+								),
+							);
+						throw new ORPCError("BAD_REQUEST", {
+							message: `No se pudo mandar el correo (${correo.error ?? "sin detalle"}). La batería sigue pendiente: probá de nuevo.`,
+						});
+					}
+					return { correo, contratos };
+				},
+			);
 
 			// Puede que ya estén todos firmados (uno subido ya firmado, o gente
 			// rápida): entonces se cierra de una vez.

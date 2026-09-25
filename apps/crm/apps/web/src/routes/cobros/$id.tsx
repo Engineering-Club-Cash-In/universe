@@ -63,7 +63,10 @@ import {
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
-import { hayIncrementoMora } from "@/lib/cobros/plantillas-mensajes";
+import {
+	debeAnunciarCrecimientoMora,
+	hayIncrementoMora,
+} from "@/lib/cobros/plantillas-mensajes";
 import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -664,11 +667,17 @@ function RouteComponent() {
 									    Manda el TECHO, no el ritmo: el ritmo es el delta de UN
 									    día y la víspera del próximo vencimiento da 0 (la cuota
 									    vieja ya topó y la nueva todavía no vence) aunque la
-									    mora sí vaya a crecer. Solo se calla cuando NINGUNO de
-									    los dos crece: ahí el crédito de verdad ya no sube. */}
+									    mora sí vaya a crecer. Y exige mora HOY: un crédito
+									    AL DÍA con su próxima cuota dentro de 30 días devuelve techo
+									    > 0, y sin ese chequeo la ficha le anunciaba un aumento a
+									    quien no debe nada. */}
 									{caso.cuotaConvenio == null &&
-										(hayIncrementoMora(caso.incrementoDiarioMora) ||
-											hayIncrementoMora(caso.incrementoMaximoMensualMora)) && (
+										debeAnunciarCrecimientoMora({
+											montoEnMora: caso.montoEnMora,
+											incrementoDiarioMora: caso.incrementoDiarioMora,
+											incrementoMaximoMensualMora:
+												caso.incrementoMaximoMensualMora,
+										}) && (
 											<p className="text-muted-foreground text-xs">
 												{hayIncrementoMora(caso.incrementoDiarioMora)
 													? `Sube alrededor de Q${caso.incrementoDiarioMora} por día`

@@ -140,13 +140,25 @@ export interface ClusterUbicacion {
 	// Visitas por día de la semana (0=domingo..6=sábado), para detectar
 	// patrones tipo "todos los sábados" en clasificar().
 	visitasPorDiaSemana: number[];
+	// Semanas distintas con visitas para cada día de la semana (0=domingo..6=sábado),
+	// para exigir evidencia de al menos 3 semanas distintas antes de marcar como recurrente.
+	semanasPorDiaSemana: number[];
 }
 
-// Estado interno del cluster mientras se acumulan estancias — diasUnicos no
-// forma parte del resultado público (ClusterUbicacion.diasDistintos es su
-// tamaño final), solo existe para no recorrer las estancias dos veces.
+// Estado interno del cluster mientras se acumulan estancias — diasUnicos y
+// diasPorDiaSemana no forman parte del resultado público, solo existen para no
+// recorrer las estancias dos veces.
 interface ClusterEnConstruccion extends ClusterUbicacion {
 	diasUnicos: Set<string>;
+	diasPorDiaSemana: [
+		Set<string>,
+		Set<string>,
+		Set<string>,
+		Set<string>,
+		Set<string>,
+		Set<string>,
+		Set<string>,
+	];
 }
 
 /**
@@ -225,7 +237,17 @@ export function agruparEstancias(estancias: Estancia[]): ClusterUbicacion[] {
 				ultimaVisita: estancia.hasta,
 				franjas: { nocturna: 0, laboral: 0, finDeSemana: 0 },
 				visitasPorDiaSemana: [0, 0, 0, 0, 0, 0, 0],
+				semanasPorDiaSemana: [0, 0, 0, 0, 0, 0, 0],
 				diasUnicos: new Set(),
+				diasPorDiaSemana: [
+					new Set(),
+					new Set(),
+					new Set(),
+					new Set(),
+					new Set(),
+					new Set(),
+					new Set(),
+				],
 			};
 			clusters.push(cluster);
 		}
@@ -246,9 +268,11 @@ export function agruparEstancias(estancias: Estancia[]): ClusterUbicacion[] {
 		const medioMs = (estancia.desde.getTime() + estancia.hasta.getTime()) / 2;
 		const horaGt = new Date(medioMs - OFFSET_GUATEMALA_MS);
 		const diaSemana = horaGt.getUTCDay();
+		const fechaIso = horaGt.toISOString().slice(0, 10);
 
 		cluster.visitasPorDiaSemana[diaSemana] += 1;
-		cluster.diasUnicos.add(horaGt.toISOString().slice(0, 10));
+		cluster.diasPorDiaSemana[diaSemana].add(fechaIso);
+		cluster.diasUnicos.add(fechaIso);
 
 		// Se acumulan horasEstancia distribuidas por franja real para que visitas
 		// cortas no distorsionen la clasificación de casa o trabajo frente a
@@ -259,9 +283,10 @@ export function agruparEstancias(estancias: Estancia[]): ClusterUbicacion[] {
 		cluster.franjas.finDeSemana += franjas.finDeSemana;
 	}
 
-	return clusters.map(({ diasUnicos, ...cluster }) => ({
+	return clusters.map(({ diasUnicos, diasPorDiaSemana, ...cluster }) => ({
 		...cluster,
 		diasDistintos: diasUnicos.size,
+		semanasPorDiaSemana: diasPorDiaSemana.map((s) => s.size),
 	}));
 }
 
@@ -279,36 +304,67 @@ export interface UbicacionClaveClasificada {
 	horasTotales: number;
 	diasDistintos: number;
 	visitas: number;
-	patron: FranjaHoraria & { visitasPorDiaSemana: number[] };
+	patron: FranjaHoraria & {
+		visitasPorDiaSemana: number[];
+		semanasPorDiaSemana: number[];
+	};
 	primeraVisita: Date;
 	ultimaVisita: Date;
 }
 
 /**
  * Clasifica un cluster ya agrupado según su distribución horaria:
- *  - probable_casa: mayoría nocturna, en muchos días distintos.
- *  - probable_trabajo: mayoría en horario laboral L-V, en muchos días.
- *  - recurrente: concentrado en un mismo día de la semana (ej. "sábados"),
- *    con al menos 3 semanas de evidencia.
+ *  - probable_casa: mayoría nocturna (>= 50% de las horas totales de estancia),
+ *    en al menos 5 días distintos.
+ *  - probable_trabajo: mayoría en horario laboral L-V (>= 50% de las horas totales),
+ *    en al menos 5 días distintos.
+ *  - recurrente: concentrado en un mismo día de la semana (>= 60% de visitas),
+ *    con al menos 3 semanas distintas de evidencia.
  *  - frecuente: visitado seguido pero sin un patrón horario/día claro.
  */
 export function clasificar(cluster: ClusterUbicacion): TipoUbicacionClave {
-	const total =
-		cluster.franjas.nocturna +
-		cluster.franjas.laboral +
-		cluster.franjas.finDeSemana;
-	if (total === 0) return "frecuente";
+	// Se incluye todo el tiempo de estancia (horasTotales) en el denominador,
+	// evitando que ubicaciones visitadas en la tarde/noche temprana (ej. 18:00–23:00)
+	// omitan horas intermedias y se clasifiquen como casa por la sola hora nocturna.
+	const totalHoras = cluster.horasTotales;
+	if (totalHoras <= 0) return "frecuente";
 
-	if (cluster.franjas.nocturna / total >= 0.6 && cluster.diasDistintos >= 5) {
+	if (
+		cluster.franjas.nocturna / totalHoras >= 0.5 &&
+		cluster.diasDistintos >= 5
+	) {
 		return "probable_casa";
 	}
 
-	if (cluster.franjas.laboral / total >= 0.6 && cluster.diasDistintos >= 5) {
+	if (
+		cluster.franjas.laboral / totalHoras >= 0.5 &&
+		cluster.diasDistintos >= 5
+	) {
 		return "probable_trabajo";
 	}
 
-	const maxVisitasUnDia = Math.max(...cluster.visitasPorDiaSemana);
-	if (maxVisitasUnDia >= 3 && maxVisitasUnDia / cluster.visitas >= 0.6) {
+	let diaMasRecurrente = -1;
+	let maxVisitasUnDia = 0;
+	for (let dia = 0; dia < 7; dia++) {
+		const v = cluster.visitasPorDiaSemana[dia] ?? 0;
+		if (v > maxVisitasUnDia) {
+			maxVisitasUnDia = v;
+			diaMasRecurrente = dia;
+		}
+	}
+
+	const semanasEnDiaMasRecurrente =
+		diaMasRecurrente >= 0
+			? (cluster.semanasPorDiaSemana[diaMasRecurrente] ?? 0)
+			: 0;
+
+	// Requiere concentración en un mismo día (>= 60% de visitas) Y evidencia
+	// en al menos 3 semanas distintas, evitando promover un día aislado de
+	// mandados (con varias paradas) a ubicación recurrente.
+	if (
+		semanasEnDiaMasRecurrente >= 3 &&
+		maxVisitasUnDia / cluster.visitas >= 0.6
+	) {
 		return "recurrente";
 	}
 
@@ -343,6 +399,7 @@ export function calcularUbicacionesClave(
 			patron: {
 				...cluster.franjas,
 				visitasPorDiaSemana: cluster.visitasPorDiaSemana,
+				semanasPorDiaSemana: cluster.semanasPorDiaSemana,
 			},
 			primeraVisita: cluster.primeraVisita,
 			ultimaVisita: cluster.ultimaVisita,

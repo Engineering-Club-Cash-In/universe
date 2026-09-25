@@ -213,5 +213,66 @@ describe("calcularUbicacionesClave — ponderación por duración", () => {
 		expect(casa?.patron.nocturna).toBeGreaterThanOrEqual(40);
 		expect(casa?.patron.finDeSemana).toBeLessThan(10);
 	});
+
+	test("ubicación vespertina (18:00 a 23:00) no se clasifica como casa porque la mayoría de su tiempo no es nocturno", () => {
+		const RESTAURANTE = { lat: 14.6, lon: -90.52 };
+		const mensajes: WialonMensajePosicion[] = [];
+		// 5 días de semana (días 5 a 9): estancia de 18:00 a 23:00 (5 horas cada día, solo 1 hora nocturna de 22:00 a 23:00)
+		for (let dia = 5; dia <= 9; dia++) {
+			mensajes.push(msg(horaGtAEpoch(dia, 18), RESTAURANTE));
+			mensajes.push(msg(horaGtAEpoch(dia, 23), RESTAURANTE));
+			// Separador de estancia
+			mensajes.push(msg(horaGtAEpoch(dia + 1, 8), TRABAJO));
+		}
+
+		const ubicaciones = calcularUbicacionesClave(mensajes);
+		const lugar = ubicaciones.find(
+			(u) => Math.abs(u.lat - RESTAURANTE.lat) < 0.001,
+		);
+
+		expect(lugar).toBeDefined();
+		// Total horas = 25h, nocturna = 5h (20%). Al incluir todo el tiempo de estancia, no es probable_casa.
+		expect(lugar?.tipo).not.toBe("probable_casa");
+		expect(lugar?.tipo).toBe("frecuente");
+	});
+
+	test("múltiples paradas en un solo sábado no se clasifican como recurrente sin al menos 3 semanas distintas", () => {
+		const MANDADOS = { lat: 14.58, lon: -90.53 };
+		const mensajes: WialonMensajePosicion[] = [];
+		// Un solo sábado (día 10): 4 paradas de 30 minutos intercaladas
+		for (let parada = 0; parada < 4; parada++) {
+			const inicio = horaGtAEpoch(10, 9 + parada * 2);
+			mensajes.push(msg(inicio, MANDADOS));
+			mensajes.push(msg(inicio + 30 * 60, MANDADOS));
+			mensajes.push(msg(inicio + 45 * 60, TRABAJO));
+		}
+
+		const ubicaciones = calcularUbicacionesClave(mensajes);
+		const lugar = ubicaciones.find(
+			(u) => Math.abs(u.lat - MANDADOS.lat) < 0.001,
+		);
+
+		expect(lugar).toBeDefined();
+		// Aunque el 100% de visitas fue en sábado, solo hay 1 semana de evidencia (< 3).
+		expect(lugar?.tipo).not.toBe("recurrente");
+		expect(lugar?.tipo).toBe("frecuente");
+	});
+
+	test("visitas a un mismo lugar a lo largo de 3 semanas distintas en sábado sí se clasifican como recurrente", () => {
+		const CLUB = { lat: 14.57, lon: -90.54 };
+		const mensajes: WialonMensajePosicion[] = [];
+		// 3 sábados consecutivos (día 10, 17, 24): 2 horas cada sábado
+		for (const sabado of [10, 17, 24]) {
+			mensajes.push(msg(horaGtAEpoch(sabado, 14), CLUB));
+			mensajes.push(msg(horaGtAEpoch(sabado, 16), CLUB));
+			mensajes.push(msg(horaGtAEpoch(sabado, 17), TRABAJO));
+		}
+
+		const ubicaciones = calcularUbicacionesClave(mensajes);
+		const lugar = ubicaciones.find((u) => Math.abs(u.lat - CLUB.lat) < 0.001);
+
+		expect(lugar).toBeDefined();
+		expect(lugar?.tipo).toBe("recurrente");
+	});
 });
 

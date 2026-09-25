@@ -44,7 +44,7 @@ Schema version: **1**
 | `installment_closed` | boolean |
 | `investments_reversed` | boolean |
 | `investor_count` | integer 0..1000000000 |
-| `job_name` | enum: process_late_fees, upsert_advisor_effectiveness, expire_portfolio_purchases, generate_monthly_close, verify_sat_invoices, report_failed_sat_invoices, generate_daily_invoice_snapshot |
+| `job_name` | enum: process_late_fees, upsert_advisor_effectiveness, expire_portfolio_purchases, generate_monthly_close, verify_sat_invoices, report_failed_sat_invoices, generate_daily_invoice_snapshot, verify_liquidation_balance, provision_portal_accounts, retry_crm_contract_batches |
 | `late_fee_operation` | enum: history, deactivate, create, update, process, condone, list, bulk_condone |
 | `late_fee_recreation` | enum: not_required, completed, failed |
 | `liquidation_mode` | enum: single, batch, credit |

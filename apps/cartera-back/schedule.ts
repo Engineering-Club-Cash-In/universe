@@ -13,6 +13,7 @@ import {
   enviarResumenProvisionamiento,
   provisionarCuentasPortal,
 } from './src/controllers/provisionarCuentasPortal';
+import { reintentarBateriasPendientes } from './src/controllers/bateriasCrmPendientes';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
@@ -145,6 +146,18 @@ export function iniciarTareasProgramadas() {
     await runScheduledJob(
       'provision_portal_accounts',
       () => provisionarCuentasPortal({ enviarResumen: enviarResumenProvisionamiento }),
+    );
+  });
+
+  // 📨 Avisos de compra aceptada que el CRM no recibió - cada 10 minutos.
+  //    Si el CRM no contestó al aceptar la compra, jurídico se quedaba sin su
+  //    batería de contratos para siempre. Ver bateriasCrmPendientes.ts.
+  schedule.scheduleJob({ rule: '*/10 * * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'retry_crm_contract_batches',
+      async () => {
+        await reintentarBateriasPendientes();
+      },
     );
   });
 }

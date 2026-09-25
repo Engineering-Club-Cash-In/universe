@@ -757,6 +757,25 @@
   // monto_aportado del espejo (que ya incluye lo que el inversionista
   // tenía antes en el crédito).
   // ====================================================================
+  /**
+   * Avisos al CRM de "compra aceptada" que no llegaron: se reintentan solos
+   * (ver src/controllers/bateriasCrmPendientes.ts).
+   */
+  export const baterias_crm_pendientes = customSchema.table(
+    "baterias_crm_pendientes",
+    {
+      id: serial("id").primaryKey(),
+      inversionista_id: integer("inversionista_id").notNull(),
+      payload: jsonb("payload").notNull(),
+      intentos: integer("intentos").notNull().default(0),
+      ultimo_error: text("ultimo_error"),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+      enviado_at: timestamp("enviado_at", { withTimezone: true }),
+    },
+  );
+
   export const compras_credito_inversionista = customSchema.table(
     "compras_credito_inversionista",
     {

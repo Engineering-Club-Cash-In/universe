@@ -19,8 +19,10 @@ import z from "zod";
 import { sendCompraCarteraAcceptedNotification } from "@cci/email";
 import {
   abrirBateriaDeContratosEnCrm,
+  type BateriaDeContratosInput,
   getVehicleDetailsBySifco,
 } from "../services/crm.service";
+import { guardarBateriaPendiente } from "./bateriasCrmPendientes";
 import {
   calcularExpiracionCompraCartera,
   formatFechaLargaGT,
@@ -285,7 +287,7 @@ export async function abrirBateriasDeContratos(params: {
         new Big(0),
       );
 
-      const res = await abrirBateriaDeContratosEnCrm({
+      const pedido: BateriaDeContratosInput = {
         inversionista: {
           id: targetId,
           nombre: inv.nombre,
@@ -304,7 +306,14 @@ export async function abrirBateriasDeContratos(params: {
           aceptadaPor: params.aceptadaPor,
           correoId: params.correoId ?? null,
         },
-      });
+      };
+
+      const res = await abrirBateriaDeContratosEnCrm(pedido);
+      // Si el CRM no lo recibió, queda para reintentar: la compra ya salió de
+      // "pendientes" y nadie más lo va a volver a mandar.
+      if (!res.success) {
+        await guardarBateriaPendiente(pedido, res.error);
+      }
 
       resultados.push({ inversionista_id: targetId, ...res });
     }

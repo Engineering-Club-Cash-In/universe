@@ -56,6 +56,13 @@ export interface CarteraUsuario {
 	saldo_a_favor: string; // decimal(18,2) comes as string
 }
 
+export interface CarteraCreditoOperativoSat {
+	numeroCreditoSifco: string;
+	nombreCliente: string;
+	estado: "ACTIVO" | "MOROSO" | "EN_CONVENIO";
+	fechaCreacion: string;
+}
+
 export interface CreateUsuarioInput {
 	nombre: string;
 	nit?: string;

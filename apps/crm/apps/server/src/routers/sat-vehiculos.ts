@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
 	iniciarVerificacionVehiculosEnSat,
 	obtenerEstadoUltimaVerificacion,
+	obtenerReporteCreditosMultiples,
 	obtenerUltimaVerificacion,
 } from "../jobs/sat-verificacion-vehiculos";
 import { auditRecord } from "../lib/audit";
@@ -47,5 +48,10 @@ export const satVehiculosRouter = {
 	/** Estado liviano para seguir una ejecución que continúa en segundo plano. */
 	obtenerEstadoVerificacionSat: adminProcedure.handler(async () =>
 		obtenerEstadoUltimaVerificacion(),
+	),
+
+	/** Reporte de vehiculos con mas de un credito operativo vinculado. */
+	obtenerConflictosCreditosSat: adminProcedure.handler(async () =>
+		obtenerReporteCreditosMultiples(),
 	),
 };

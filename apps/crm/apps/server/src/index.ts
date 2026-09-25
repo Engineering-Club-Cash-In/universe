@@ -37,6 +37,7 @@ import {
 	checkSeguimientosVencidos,
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
+import { iniciarSchedulerVerificacionSat } from "./jobs/sat-verificacion-scheduler";
 import { auditRequest, markAuditFailure } from "./lib/audit";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
@@ -1200,6 +1201,7 @@ setTimeout(() => {
 	checkSeguimientosVencidos().catch(console.error);
 	checkCasosSinContacto(3).catch(console.error);
 	procesarSeguimientosRecurrentes().catch(console.error);
+	iniciarSchedulerVerificacionSat();
 }, 10_000);
 
 // Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.

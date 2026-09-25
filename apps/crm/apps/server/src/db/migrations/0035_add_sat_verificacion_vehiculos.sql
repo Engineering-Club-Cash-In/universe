@@ -1,5 +1,6 @@
--- Verificacion manual de vehiculos en SAT (Agencia Virtual).
--- Aplicar manualmente en dev y prod.
+-- Verificacion manual y automatica de vehiculos en SAT (Agencia Virtual).
+-- Archivo unico y final para aplicar en prod.
+-- En dev, donde 0035 ya existe, ejecutar el script de alineacion separado.
 -- No registrar en meta/_journal.json: drizzle-kit migrate no debe ejecutarla automaticamente.
 
 DO $$ BEGIN
@@ -22,12 +23,13 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE TABLE IF NOT EXISTS public.sat_verificacion_lotes (
   id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  usuario_id            text NOT NULL REFERENCES public."user"(id) ON DELETE RESTRICT,
+  -- NULL identifica una corrida automatica del sistema; las manuales guardan el usuario autenticado.
+  usuario_id            text REFERENCES public."user"(id) ON DELETE RESTRICT,
   usuario_nit           varchar(20) NOT NULL,
   estado                public.sat_lote_estado NOT NULL DEFAULT 'en_proceso',
   intento               integer NOT NULL DEFAULT 1,
-  iniciada_at           timestamp NOT NULL DEFAULT now(),
-  finalizada_at         timestamp
+  iniciada_at           timestamp with time zone NOT NULL DEFAULT now(),
+  finalizada_at         timestamp with time zone
 );
 
 CREATE INDEX IF NOT EXISTS ix_sat_lotes_estado_fecha
@@ -71,6 +73,7 @@ CREATE TABLE IF NOT EXISTS public.sat_verificacion_resultados (
   puede_autorizar_traspaso boolean,
   puede_imprimir_tarjeta boolean,
   puede_imprimir_certificado boolean,
+  detalle_sat    jsonb,
   mensaje_error  text,
   consultado_at  timestamptz NOT NULL DEFAULT now()
 );

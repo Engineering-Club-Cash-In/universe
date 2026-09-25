@@ -13,6 +13,7 @@ import type {
 	CarteraBackError,
 	CarteraBackValidationError,
 	CarteraCredito,
+	CarteraCreditoOperativoSat,
 	CarteraInversionista,
 	CarteraPagoCredito,
 	CarteraStatsResponse,
@@ -1108,6 +1109,22 @@ export class CarteraBackClient {
 			true, // use cache
 		);
 		return response.data || [];
+	}
+
+	async getCreditosOperativosParaSat(): Promise<CarteraCreditoOperativoSat[]> {
+		const response = await this.request<
+			CarteraBackApiResponse<CarteraCreditoOperativoSat[]>
+		>(
+			"/internal/sat/creditos-operativos",
+			{ method: "GET" },
+			false,
+		);
+		if (!response.success) {
+			throw new Error(
+				response.message ?? "Cartera no devolvió los créditos operativos.",
+			);
+		}
+		return response.data ?? [];
 	}
 
 	// ========================================================================

@@ -3,16 +3,17 @@ import {
 	boolean,
 	index,
 	integer,
+	jsonb,
 	pgEnum,
 	pgTable,
-	uniqueIndex,
 	text,
 	timestamp,
+	uniqueIndex,
 	uuid,
 	varchar,
 } from "drizzle-orm/pg-core";
-import { vehicles } from "./vehicles";
 import { user } from "./auth";
+import { vehicles } from "./vehicles";
 
 // Estado de una corrida completa contra Agencia Virtual.
 export const satCorridaEstadoEnum = pgEnum("sat_corrida_estado", [
@@ -38,19 +39,21 @@ export const satLoteEstadoEnum = pgEnum("sat_lote_estado", [
 	"error",
 ]);
 
-/** Una consulta manual completa que puede incluir varios titulares delegados. */
+/** Una consulta manual o automática completa que puede incluir varios titulares delegados. */
 export const satVerificacionLotes = pgTable(
 	"sat_verificacion_lotes",
 	{
 		id: uuid("id").primaryKey().defaultRandom(),
-		usuarioId: text("usuario_id")
-			.notNull()
-			.references(() => user.id, { onDelete: "restrict" }),
+		usuarioId: text("usuario_id").references(() => user.id, {
+			onDelete: "restrict",
+		}),
 		usuarioNit: varchar("usuario_nit", { length: 20 }).notNull(),
 		estado: satLoteEstadoEnum("estado").notNull().default("en_proceso"),
 		intento: integer("intento").notNull().default(1),
-		iniciadaAt: timestamp("iniciada_at").notNull().defaultNow(),
-		finalizadaAt: timestamp("finalizada_at"),
+		iniciadaAt: timestamp("iniciada_at", { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+		finalizadaAt: timestamp("finalizada_at", { withTimezone: true }),
 	},
 	(t) => [
 		index("ix_sat_lotes_estado_fecha").on(t.estado, t.iniciadaAt),
@@ -98,8 +101,9 @@ export const satVerificacionResultados = pgTable(
 			.notNull()
 			.references(() => satVerificacionLotes.id, { onDelete: "cascade" }),
 
-		corridaId: uuid("corrida_id")
-			.references(() => satVerificacionCorridas.id, { onDelete: "cascade" }),
+		corridaId: uuid("corrida_id").references(() => satVerificacionCorridas.id, {
+			onDelete: "cascade",
+		}),
 
 		// Nulo cuando SAT reporta una placa que el CRM no tiene registrada.
 		// Si se borra un vehículo interno, se descarta su estado actual de SAT.
@@ -123,6 +127,11 @@ export const satVerificacionResultados = pgTable(
 		puedeAutorizarTraspaso: boolean("puede_autorizar_traspaso"),
 		puedeImprimirTarjeta: boolean("puede_imprimir_tarjeta"),
 		puedeImprimirCertificado: boolean("puede_imprimir_certificado"),
+		// Detalle completo que SAT muestra al abrir el registro del vehiculo.
+		detalleSat: jsonb("detalle_sat").$type<{
+			texto: string;
+			campos: Record<string, string>;
+		} | null>(),
 
 		mensajeError: text("mensaje_error"),
 

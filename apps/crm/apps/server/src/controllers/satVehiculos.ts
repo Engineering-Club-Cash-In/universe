@@ -3,6 +3,10 @@ import { launchBrowser } from "../lib/browser";
 
 const URL_LOGIN = "https://agenciavirtual.sat.gob.gt/";
 const TIMEOUT_NAV = 120000;
+// Una pestaña para el titular pequeño y cuatro rangos para el titular grande.
+const MAXIMO_TRABAJADORES_SAT = 5;
+const UMBRAL_PARALELO_SAT = 500;
+const TAMANO_PAGINA_SAT = 10;
 
 const SEL = {
 	usuario: "#formContent\\:username",
@@ -24,6 +28,11 @@ export interface SenalesSatVehiculo {
 	puedeImprimirCertificado: boolean | null;
 }
 
+export interface DetalleSatVehiculo {
+	texto: string;
+	campos: Record<string, string>;
+}
+
 export interface VehiculoSatPropio extends SenalesSatVehiculo {
 	placa: string;
 	tipo: string;
@@ -31,6 +40,7 @@ export interface VehiculoSatPropio extends SenalesSatVehiculo {
 	modelo: string;
 	color: string;
 	estado: string;
+	detalleSat?: DetalleSatVehiculo | null;
 }
 
 export type EstadoConsultaSat =
@@ -490,8 +500,27 @@ export async function listadoSatCompleto(frame: Frame): Promise<boolean> {
 
 export async function leerTablaVehiculos(
 	frame: Frame,
+	filasMinimas = 1,
 ): Promise<VehiculoSatPropio[]> {
 	await frame.waitForSelector(SEL.tablaVehiculos, { timeout: 20000 });
+	await frame.waitForFunction(
+		(selector, minimo) => {
+			const tabla = document.querySelector(selector);
+			if (!tabla) return false;
+			const filas = [...tabla.querySelectorAll("tbody tr")].filter((fila) => {
+				const celdas = fila.querySelectorAll("td");
+				return (
+					celdas.length >= 10 &&
+					!fila.querySelector("[colspan]") &&
+					!fila.classList.contains("ui-datatable-empty-message")
+				);
+			});
+			return filas.length >= minimo;
+		},
+		{ timeout: 20000, polling: 100 },
+		SEL.tablaVehiculos,
+		Math.max(1, filasMinimas),
+	);
 
 	return frame.evaluate((selector) => {
 		const tabla = document.querySelector(selector);
@@ -611,6 +640,7 @@ export async function leerTablaVehiculos(
 					modelo: textos[3] ?? "",
 					color: textos[4] ?? "",
 					estado: estado,
+					detalleSat: null,
 					impuestoCirculacionPagado,
 					puedeAutorizarTraspaso,
 					puedeImprimirTarjeta: impresiones.puedeImprimirTarjeta,
@@ -621,6 +651,209 @@ export async function leerTablaVehiculos(
 	}, SEL.tablaVehiculos);
 }
 
+function normalizarTextoDetalle(value: string | null | undefined): string {
+	return (value ?? "")
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.toUpperCase()
+		.replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * Abre el detalle de una fila y convierte a JSON el bloque RichFaces que SAT
+ * carga de forma asíncrona dentro de `#divtoprint`.
+ */
+async function leerDetalleVehiculo(
+	frame: Frame,
+	placa: string,
+): Promise<DetalleSatVehiculo | null> {
+	const clicado = await frame.evaluate((placaObjetivo) => {
+		const normalizar = (value: string | null | undefined) =>
+			(value ?? "")
+				.normalize("NFD")
+				.replace(/[\u0300-\u036f]/g, "")
+				.toUpperCase()
+				.replace(/[^A-Z0-9]/g, "");
+		const fila = [
+			...document.querySelectorAll(
+				"#frmAcciones\\:dtListadoVehiculos tbody tr",
+			),
+		].find(
+			(element) =>
+				normalizar(element.querySelector("td")?.textContent) ===
+				normalizar(placaObjetivo),
+		);
+		if (!fila) return false;
+		const celda = fila.querySelectorAll("td")[7];
+		const control = celda?.querySelector<HTMLElement>(
+			"a, button, input, img, span[onclick], [onclick]",
+		);
+		const objetivo = control?.closest<HTMLElement>("a, button") ?? control;
+		if (!objetivo) return false;
+		objetivo.click();
+		return true;
+	}, placa);
+
+	if (!clicado) return null;
+
+	const placaNormalizada = normalizarTextoDetalle(placa);
+	const detalleListo = await frame
+		.waitForFunction(
+			(placaObjetivo) => {
+				const normalizar = (value: string | null | undefined) =>
+					(value ?? "")
+						.normalize("NFD")
+						.replace(/[\u0300-\u036f]/g, "")
+						.toUpperCase()
+						.replace(/[^A-Z0-9]/g, "");
+				const root = document.querySelector<HTMLElement>("#divtoprint");
+				const texto = root?.innerText ?? "";
+				const placaActual = texto.match(/Placa actual:\s*([A-Z0-9-]+)/i)?.[1];
+				return (
+					!!root &&
+					texto.length > 100 &&
+					normalizar(placaActual) === placaObjetivo
+				);
+			},
+			{ timeout: 30000, polling: 200 },
+			placaNormalizada,
+		)
+		.then(() => true)
+		.catch(() => false);
+
+	if (!detalleListo) {
+		await frame.evaluate(() => {
+			const cerrar = document.querySelector<HTMLElement>(
+				"#panel [aria-label*='errar'], #panel [title*='errar'], " +
+					"#panel .rich-mpnl-controls, #panel .ui-dialog-titlebar-close, " +
+					"#panel .close, #panel button",
+			);
+			cerrar?.click();
+		});
+		return null;
+	}
+
+	const detalle = await frame.evaluate(() => {
+		const objetivo =
+			document.querySelector<HTMLElement>("#divtoprint") ??
+			document.querySelector<HTMLElement>("#panel");
+		if (!objetivo) return null;
+
+		const texto = (objetivo.innerText || "").trim().replace(/\s+/g, " ");
+		const campos: Record<string, string> = {};
+		for (const tabla of objetivo.querySelectorAll("table")) {
+			const filas = [...tabla.querySelectorAll("tr")];
+			for (let indice = 0; indice < filas.length; indice += 1) {
+				const fila = filas[indice];
+				const celdas = [...fila.children]
+					.filter(
+						(element): element is HTMLElement =>
+							element.tagName === "TH" || element.tagName === "TD",
+					)
+					.map((celda) => (celda.textContent || "").trim().replace(/\s+/g, " "))
+					.filter(Boolean);
+				const siguiente = filas[indice + 1];
+				const valores = siguiente
+					? [...siguiente.children]
+							.filter(
+								(element): element is HTMLElement =>
+									element.tagName === "TH" || element.tagName === "TD",
+							)
+							.map((celda) =>
+								(celda.textContent || "").trim().replace(/\s+/g, " "),
+							)
+							.filter(Boolean)
+					: [];
+				if (celdas.length > 0 && valores.length === celdas.length) {
+					celdas.forEach((campo, posicion) => {
+						const valor = valores[posicion];
+						if (campo && valor && !campos[campo]) campos[campo] = valor;
+					});
+				}
+				if (celdas.length >= 2 && !valores.length) {
+					campos[celdas[0]] = celdas.slice(1).join(" | ");
+				}
+			}
+		}
+		for (const detalle of objetivo.querySelectorAll("dt")) {
+			const clave = (detalle.textContent || "").trim().replace(/\s+/g, " ");
+			const valor = detalle.nextElementSibling?.textContent
+				?.trim()
+				.replace(/\s+/g, " ");
+			if (clave && valor) campos[clave] = valor;
+		}
+		return { texto, campos };
+	});
+
+	await frame.evaluate(() => {
+		const cerrar = document.querySelector<HTMLElement>(
+			"#panel [aria-label*='errar'], #panel [title*='errar'], " +
+				"#panel .rich-mpnl-controls, #panel .ui-dialog-titlebar-close, " +
+				"#panel .close, #panel button",
+		);
+		cerrar?.click();
+	});
+
+	return detalle;
+}
+
+async function leerDetallesPagina(
+	frame: Frame,
+	vehiculos: VehiculoSatPropio[],
+): Promise<Map<string, DetalleSatVehiculo>> {
+	const detalles = new Map<string, DetalleSatVehiculo>();
+	for (const vehiculo of vehiculos) {
+		const detalle = await leerDetalleVehiculo(frame, vehiculo.placa).catch(
+			() => null,
+		);
+		if (detalle) detalles.set(normalizarTextoDetalle(vehiculo.placa), detalle);
+	}
+	const faltantes = vehiculos.filter(
+		(vehiculo) => !detalles.has(normalizarTextoDetalle(vehiculo.placa)),
+	);
+	if (faltantes.length > 0) {
+		throw new SatScrapeError(
+			`SAT no devolvió el detalle de ${faltantes.length} vehículo(s) de la página: ${faltantes
+				.slice(0, 5)
+				.map((vehiculo) => vehiculo.placa)
+				.join(", ")}.`,
+		);
+	}
+	return detalles;
+}
+
+export async function leerPaginaActualConDetalles(
+	frame: Frame,
+	filasMinimas = 1,
+	nitEsperado?: string,
+): Promise<VehiculoSatPropio[]> {
+	if (nitEsperado) {
+		const nitListado = await frame
+			.evaluate(() => {
+				const texto = document.body?.innerText ?? "";
+				return texto.match(/\bNIT\s*:\s*([A-Z0-9-]+)/i)?.[1] ?? null;
+			})
+			.catch(() => null);
+		if (
+			normalizarNitTitular(nitListado ?? "") !==
+			normalizarNitTitular(nitEsperado)
+		) {
+			throw new SatScrapeError(
+				`El listado de SAT no corresponde al titular ${nitEsperado}.`,
+			);
+		}
+	}
+	const vehiculos = await leerTablaVehiculos(frame, filasMinimas);
+	const detalles = await leerDetallesPagina(frame, vehiculos);
+	return vehiculos.map((vehiculo) => ({
+		...vehiculo,
+		detalleSat:
+			detalles.get(normalizarTextoDetalle(vehiculo.placa)) ??
+			vehiculo.detalleSat ??
+			null,
+	}));
+}
+
 function firmaPagina(vehiculos: VehiculoSatPropio[]) {
 	return vehiculos
 		.map(
@@ -629,57 +862,294 @@ function firmaPagina(vehiculos: VehiculoSatPropio[]) {
 		.join(";");
 }
 
+async function leerTotalRegistros(frame: Frame): Promise<number | null> {
+	return frame.evaluate(() => {
+		const texto = document.body?.innerText ?? "";
+		const encontrado = texto.match(/Total\s+Registros\s*:\s*([\d.,]+)/i);
+		return encontrado ? Number(encontrado[1].replace(/[^\d]/g, "")) : null;
+	});
+}
+
+type DireccionPaginacion = "primera" | "anterior" | "siguiente" | "ultima";
+
+async function hacerClickPaginacion(
+	frame: Frame,
+	direccion: DireccionPaginacion,
+): Promise<boolean> {
+	return frame.evaluate(
+		(selector, sentido) => {
+			const tabla = document.querySelector(selector);
+			if (!tabla) return false;
+
+			const selectores: Record<DireccionPaginacion, string> = {
+				primera:
+					"[id$=':btnBegin'], [name$=':btnBegin'], .ui-paginator-first, " +
+					"[title*='Primera'], [title*='First']",
+				anterior:
+					"[id$=':btnBck'], [name$=':btnBck'], .ui-paginator-prev, " +
+					"[title*='Anterior'], [title*='Previous'], [aria-label*='previous']",
+				siguiente:
+					"[id$=':btnNext'], [name$=':btnNext'], .ui-paginator-next, " +
+					"[title*='Siguiente'], [title*='Next'], [aria-label*='next']",
+				ultima:
+					"[id$=':btnLast'], [name$=':btnLast'], .ui-paginator-last, " +
+					"[title*='Ultima'], [title*='Última'], [title*='Last']",
+			};
+			const paginadores = [
+				document.getElementById(`${tabla.id}_paginator_top`),
+				document.getElementById(`${tabla.id}_paginator_bottom`),
+			].filter((element): element is HTMLElement => element !== null);
+			const botones = paginadores.length
+				? paginadores.flatMap((paginador) => [
+						...paginador.querySelectorAll<HTMLElement>(selectores[sentido]),
+					])
+				: [...document.querySelectorAll<HTMLElement>(selectores[sentido])];
+			const boton = botones.find(
+				(element) =>
+					!element.classList.contains("ui-state-disabled") &&
+					element.getAttribute("aria-disabled") !== "true" &&
+					!(element as HTMLButtonElement).disabled &&
+					!/^\s*return\s+false;?\s*$/i.test(
+						element.getAttribute("onclick") || "",
+					),
+			);
+
+			if (!boton) return false;
+			boton.click();
+			return true;
+		},
+		SEL.tablaVehiculos,
+		direccion,
+	);
+}
+
 async function hacerClickSiguiente(frame: Frame): Promise<boolean> {
-	return frame.evaluate((selector) => {
-		const tabla = document.querySelector(selector);
-		if (!tabla) return false;
+	return hacerClickPaginacion(frame, "siguiente");
+}
 
-		const paginadores = [
-			document.getElementById(`${tabla.id}_paginator_top`),
-			document.getElementById(`${tabla.id}_paginator_bottom`),
-		].filter((element): element is HTMLElement => element !== null);
-		const selectorSiguiente =
-			".ui-paginator-next, [title*='Next'], [title*='Siguiente'], " +
-			"[aria-label*='next'], [id$=':btnNext'], [name$=':btnNext']";
-		const botones = paginadores.length
-			? paginadores.flatMap((paginador) => [
-					...paginador.querySelectorAll<HTMLElement>(selectorSiguiente),
-				])
-			: [...document.querySelectorAll<HTMLElement>(selectorSiguiente)];
-		const siguiente = botones.find(
-			(element) =>
-				!element.classList.contains("ui-state-disabled") &&
-				element.getAttribute("aria-disabled") !== "true" &&
-				!(element as HTMLButtonElement).disabled,
-		);
-
-		if (!siguiente) return false;
-		siguiente.click();
-		return true;
-	}, SEL.tablaVehiculos);
+async function esperarCambioPagina(
+	frame: Frame,
+	firmaAnterior: string,
+	etapa: string,
+) {
+	await esperarSatConReintento(etapa, () =>
+		frame.waitForFunction(
+			(selector, firma) => {
+				const tabla = document.querySelector(selector);
+				if (!tabla) return false;
+				const filas = [...tabla.querySelectorAll("tbody tr")]
+					.filter(
+						(fila) =>
+							fila.querySelectorAll("td").length >= 10 &&
+							!fila.querySelector("[colspan]"),
+					)
+					.map((fila) => {
+						const textos = [...fila.querySelectorAll("td")].map((celda) =>
+							(celda.textContent || "").trim().replace(/\s+/g, " "),
+						);
+						return `${textos[0] ?? ""}|${textos[5] ?? ""}|${textos[3] ?? ""}`;
+					})
+					.join(";");
+				return filas.length > 0 && filas !== firma;
+			},
+			{ timeout: 30000, polling: 100 },
+			SEL.tablaVehiculos,
+			firmaAnterior,
+		),
+	);
 }
 
 /** Lee las diez filas visibles y avanza hasta agotar la paginación de SAT. */
+interface ResultadoRangoPaginas {
+	vehiculos: VehiculoSatPropio[];
+	filasLeidas: number;
+	firmasPaginas: string[];
+}
+
+async function leerRangoPaginas(
+	frame: Frame,
+	direccion: "siguiente" | "anterior",
+	totalPaginas: number,
+	paginaInicial: number,
+	tamanoPagina: number,
+	totalRegistros: number,
+	nitEsperado: string,
+): Promise<ResultadoRangoPaginas> {
+	const vehiculos = new Map<string, VehiculoSatPropio>();
+	let filasLeidas = 0;
+	const firmasPaginas: string[] = [];
+
+	for (let pagina = 0; pagina < totalPaginas; pagina += 1) {
+		const paginaGlobal =
+			paginaInicial + (direccion === "siguiente" ? pagina : -pagina);
+		const filasEsperadas = Math.min(
+			tamanoPagina,
+			Math.max(1, totalRegistros - paginaGlobal * tamanoPagina),
+		);
+		const actuales = await esperarSatConReintento(
+			`Lectura del bloque ${pagina + 1}/${totalPaginas} de SAT`,
+			() => leerPaginaActualConDetalles(frame, filasEsperadas, nitEsperado),
+		);
+		filasLeidas += actuales.length;
+		const firmaActual = firmaPagina(actuales);
+		firmasPaginas.push(firmaActual);
+		for (const vehiculo of actuales) {
+			const clave = normalizarTextoDetalle(vehiculo.placa);
+			if (clave) vehiculos.set(clave, vehiculo);
+		}
+
+		if (pagina + 1 >= totalPaginas) break;
+		const firmaAnterior = firmaActual;
+		if (!(await hacerClickPaginacion(frame, direccion))) {
+			throw new SatScrapeError(
+				`SAT no permitió avanzar en dirección ${direccion} desde el bloque ${pagina + 1}.`,
+			);
+		}
+		await esperarCambioPagina(
+			frame,
+			firmaAnterior,
+			`Avance al bloque ${pagina + 2}/${totalPaginas} de SAT`,
+		);
+	}
+
+	return { vehiculos: [...vehiculos.values()], filasLeidas, firmasPaginas };
+}
+
+export interface RangoPaginasSat {
+	paginaInicial: number;
+	paginaFinal: number;
+	totalPaginas: number;
+	direccion: "siguiente" | "anterior";
+}
+
+export function dividirRangosPaginas(
+	totalPaginas: number,
+	trabajadores: number,
+): RangoPaginasSat[] {
+	const paginas = Math.max(0, Math.floor(totalPaginas));
+	const cantidadTrabajadores = Math.min(
+		paginas,
+		Math.max(1, Math.floor(trabajadores)),
+	);
+	if (paginas === 0) return [];
+
+	const base = Math.floor(paginas / cantidadTrabajadores);
+	const sobrantes = paginas % cantidadTrabajadores;
+	let inicio = 0;
+	const rangos: RangoPaginasSat[] = [];
+	for (let indice = 0; indice < cantidadTrabajadores; indice += 1) {
+		const cantidad = base + (indice < sobrantes ? 1 : 0);
+		const fin = inicio + cantidad - 1;
+		const distanciaDesdeInicio = inicio;
+		const distanciaDesdeFinal = paginas - 1 - fin;
+		rangos.push({
+			paginaInicial: inicio,
+			paginaFinal: fin,
+			totalPaginas: cantidad,
+			direccion:
+				distanciaDesdeInicio <= distanciaDesdeFinal ? "siguiente" : "anterior",
+		});
+		inicio = fin + 1;
+	}
+	return rangos;
+}
+
+async function posicionarPagina(
+	frame: Frame,
+	paginaObjetivo: number,
+	totalPaginas: number,
+	tamanoPagina: number,
+	totalRegistros: number,
+) {
+	if (paginaObjetivo <= 0) return;
+	const filasEsperadas = (pagina: number) =>
+		Math.min(tamanoPagina, Math.max(1, totalRegistros - pagina * tamanoPagina));
+	const ultimaPagina = totalPaginas - 1;
+	let paginaActual = 0;
+	const desdeFinal = ultimaPagina - paginaObjetivo < paginaObjetivo;
+
+	if (desdeFinal) {
+		const actuales = await leerTablaVehiculos(
+			frame,
+			filasEsperadas(paginaActual),
+		);
+		const firmaAnterior = firmaPagina(actuales);
+		if (!(await hacerClickPaginacion(frame, "ultima"))) {
+			throw new SatScrapeError("No se pudo abrir la última página de SAT.");
+		}
+		await esperarCambioPagina(
+			frame,
+			firmaAnterior,
+			"Posicionamiento en la última página de SAT",
+		);
+		paginaActual = ultimaPagina;
+	}
+
+	while (paginaActual !== paginaObjetivo) {
+		const actuales = await leerTablaVehiculos(
+			frame,
+			filasEsperadas(paginaActual),
+		);
+		const firmaAnterior = firmaPagina(actuales);
+		const direccion = paginaActual < paginaObjetivo ? "siguiente" : "anterior";
+		if (!(await hacerClickPaginacion(frame, direccion))) {
+			throw new SatScrapeError(
+				`SAT no permitió posicionar el trabajador en la página ${paginaObjetivo + 1}.`,
+			);
+		}
+		await esperarCambioPagina(
+			frame,
+			firmaAnterior,
+			`Posicionamiento en la página ${paginaObjetivo + 1} de SAT`,
+		);
+		paginaActual += direccion === "siguiente" ? 1 : -1;
+	}
+}
+
+async function leerRangoAsignado(
+	frame: Frame,
+	rango: RangoPaginasSat,
+	totalPaginasListado: number,
+	tamanoPagina: number,
+	totalRegistros: number,
+	nitEsperado: string,
+) {
+	const paginaArranque =
+		rango.direccion === "siguiente" ? rango.paginaInicial : rango.paginaFinal;
+	await posicionarPagina(
+		frame,
+		paginaArranque,
+		totalPaginasListado,
+		tamanoPagina,
+		totalRegistros,
+	);
+	return leerRangoPaginas(
+		frame,
+		rango.direccion,
+		rango.totalPaginas,
+		paginaArranque,
+		tamanoPagina,
+		totalRegistros,
+		nitEsperado,
+	);
+}
+
 export async function leerTodasLasPaginas(
 	frame: Frame,
 ): Promise<{ vehiculos: VehiculoSatPropio[]; listadoCompleto: boolean }> {
 	const MAX_PAGINAS = 500;
 	const vehiculos = new Map<string, VehiculoSatPropio>();
-	const totalRegistros = await frame.evaluate(() => {
-		const texto = document.body?.innerText ?? "";
-		const encontrado = texto.match(/Total\s+Registros\s*:\s*([\d.,]+)/i);
-		return encontrado ? Number(encontrado[1].replace(/[^\d]/g, "")) : null;
-	});
+	const totalRegistros = await leerTotalRegistros(frame);
 	let filasLeidas = 0;
 
 	for (let pagina = 0; pagina < MAX_PAGINAS; pagina += 1) {
-		const actuales = await esperarSatConReintento(
+		const actualesConDetalle = await esperarSatConReintento(
 			`Lectura de la página ${pagina + 1} de SAT`,
-			() => leerTablaVehiculos(frame),
+			() => leerPaginaActualConDetalles(frame),
 		);
-		filasLeidas += actuales.length;
-		const firmaAnterior = firmaPagina(actuales);
-		for (const vehiculo of actuales) {
+		filasLeidas += actualesConDetalle.length;
+		const firmaAnterior = firmaPagina(actualesConDetalle);
+		for (const vehiculo of actualesConDetalle) {
 			const clave = vehiculo.placa.toUpperCase().replace(/[^A-Z0-9]/g, "");
 			if (clave) vehiculos.set(clave, vehiculo);
 		}
@@ -693,32 +1163,10 @@ export async function leerTodasLasPaginas(
 			};
 		}
 
-		await esperarSatConReintento(
+		await esperarCambioPagina(
+			frame,
+			firmaAnterior,
 			`Avance a la página ${pagina + 2} de SAT`,
-			() =>
-				frame.waitForFunction(
-					(selector, firma) => {
-						const tabla = document.querySelector(selector);
-						if (!tabla) return false;
-						const filas = [...tabla.querySelectorAll("tbody tr")]
-							.filter(
-								(fila) =>
-									fila.querySelectorAll("td").length >= 10 &&
-									!fila.querySelector("[colspan]"),
-							)
-							.map((fila) => {
-								const textos = [...fila.querySelectorAll("td")].map((celda) =>
-									(celda.textContent || "").trim().replace(/\s+/g, " "),
-								);
-								return `${textos[0] ?? ""}|${textos[5] ?? ""}|${textos[3] ?? ""}`;
-							})
-							.join(";");
-						return filas.length > 0 && filas !== firma;
-					},
-					{ timeout: 30000, polling: 100 },
-					SEL.tablaVehiculos,
-					firmaAnterior,
-				),
 		);
 	}
 
@@ -893,41 +1341,142 @@ function estadoGeneralDelegado(
 	return "ERROR";
 }
 
-async function consultarTitularDelegado(
+interface ContextoTitularDelegado {
+	titular: SatTitularObjetivo;
+	page: Page;
+	frame: Frame;
+	totalRegistros: number;
+	tamanoPagina: number;
+	totalPaginas: number;
+}
+
+async function abrirPaginaPortal(browser: Browser, urlPortal: string) {
+	const page = await browser.newPage();
+	await page.setViewport({ width: 1400, height: 900 });
+	await page.goto(urlPortal, {
+		waitUntil: "domcontentloaded",
+		timeout: TIMEOUT_NAV,
+	});
+	return page;
+}
+
+async function prepararContextoTitular(
 	page: Page,
 	titular: SatTitularObjetivo,
-): Promise<SatVehiculosTitularResponse> {
-	try {
-		await seleccionarTitular(page, titular);
-		const listado = await irAListadoVehiculosDelegado(page, titular.nit);
-		const resultado = await leerTodasLasPaginas(listado);
-
-		if (!resultado.listadoCompleto) {
-			throw new SatScrapeError(
-				"El listado de vehículos quedó incompleto; se cancela la corrida del titular.",
-			);
-		}
-		if (resultado.vehiculos.length === 0) {
-			throw new SatScrapeError(
-				"SAT devolvió un listado vacío; se cancela la corrida del titular para evitar falsos positivos.",
-			);
-		}
-
-		return {
-			...titular,
-			estado: "OK",
-			vehiculos: resultado.vehiculos,
-			listadoCompleto: true,
-		};
-	} catch (error) {
-		const evidencia = await page.content().catch(() => "");
-		return titularConError(
-			titular,
-			clasificarError(error, evidencia),
-			error instanceof Error ? error.message : String(error),
-			evidencia.slice(0, MAX_EVIDENCIA),
+): Promise<ContextoTitularDelegado> {
+	await seleccionarTitular(page, titular);
+	const frame = await irAListadoVehiculosDelegado(page, titular.nit);
+	const totalRegistros = await leerTotalRegistros(frame);
+	if (totalRegistros === null || totalRegistros <= 0) {
+		throw new SatScrapeError(
+			`SAT no informó un total válido para el titular ${titular.nit}.`,
 		);
 	}
+	const primeraPagina = await leerTablaVehiculos(
+		frame,
+		Math.min(TAMANO_PAGINA_SAT, totalRegistros),
+	);
+	if (primeraPagina.length === 0) {
+		throw new SatScrapeError(
+			`SAT devolvió vacía la primera página del titular ${titular.nit}.`,
+		);
+	}
+
+	return {
+		titular,
+		page,
+		frame,
+		totalRegistros,
+		tamanoPagina: primeraPagina.length,
+		totalPaginas: Math.ceil(totalRegistros / primeraPagina.length),
+	};
+}
+
+async function consultarContextoTitular(
+	principal: ContextoTitularDelegado,
+	secundarios: ContextoTitularDelegado[] = [],
+): Promise<SatVehiculosTitularResponse> {
+	const trabajadores = [principal, ...secundarios];
+	for (const trabajador of trabajadores.slice(1)) {
+		if (
+			principal.totalRegistros !== trabajador.totalRegistros ||
+			principal.tamanoPagina !== trabajador.tamanoPagina
+		) {
+			throw new SatScrapeError(
+				`Los trabajadores del titular ${principal.titular.nit} recibieron listados distintos.`,
+			);
+		}
+	}
+	const rangosAsignados = dividirRangosPaginas(
+		principal.totalPaginas,
+		trabajadores.length,
+	);
+	const trabajos = trabajadores.map((trabajador, indice) =>
+		leerRangoAsignado(
+			trabajador.frame,
+			rangosAsignados[indice],
+			principal.totalPaginas,
+			principal.tamanoPagina,
+			principal.totalRegistros,
+			principal.titular.nit,
+		),
+	);
+
+	const resueltos = await Promise.allSettled(trabajos);
+	const fallo = resueltos.find(
+		(resultado): resultado is PromiseRejectedResult =>
+			resultado.status === "rejected",
+	);
+	if (fallo) throw fallo.reason;
+	const rangos = resueltos
+		.filter(
+			(resultado): resultado is PromiseFulfilledResult<ResultadoRangoPaginas> =>
+				resultado.status === "fulfilled",
+		)
+		.map((resultado) => resultado.value);
+	const filasLeidas = rangos.reduce(
+		(total, resultado) => total + resultado.filasLeidas,
+		0,
+	);
+	if (filasLeidas !== principal.totalRegistros) {
+		throw new SatScrapeError(
+			`El titular ${principal.titular.nit} informó ${principal.totalRegistros} vehículos, pero se leyeron ${filasLeidas}.`,
+		);
+	}
+	const firmasPaginas = rangos.flatMap((rango) => rango.firmasPaginas);
+	if (
+		firmasPaginas.length !== principal.totalPaginas ||
+		new Set(firmasPaginas).size !== principal.totalPaginas
+	) {
+		throw new SatScrapeError(
+			`Los trabajadores del titular ${principal.titular.nit} repitieron u omitieron páginas del listado.`,
+		);
+	}
+
+	const vehiculos = new Map<string, VehiculoSatPropio>();
+	for (const rango of rangos) {
+		for (const vehiculo of rango.vehiculos) {
+			const clave = normalizarTextoDetalle(vehiculo.placa);
+			if (clave) vehiculos.set(clave, vehiculo);
+		}
+	}
+	if (vehiculos.size === 0) {
+		throw new SatScrapeError(
+			`SAT devolvió un listado vacío para el titular ${principal.titular.nit}.`,
+		);
+	}
+	if ([...vehiculos.values()].some((vehiculo) => !vehiculo.detalleSat)) {
+		throw new SatScrapeError(
+			`La lectura del titular ${principal.titular.nit} terminó con detalles faltantes.`,
+		);
+	}
+
+	return {
+		...principal.titular,
+		estado: "OK",
+		vehiculos: [...vehiculos.values()],
+		listadoCompleto: true,
+	};
 }
 
 /** Inicia una sola sesión y consulta todos los titulares delegados configurados. */
@@ -936,15 +1485,88 @@ export async function obtenerVehiculosDelegados(): Promise<SatVehiculosDelegados
 	const titulares = titularesDelegadosDelEntorno();
 
 	try {
-		const resultados = await conNavegador(async (page) => {
+		const resultados = await conNavegador(async (page, browser) => {
 			await capturarEvidenciaSat(page, () =>
 				iniciarSesion(page, credenciales, { permisosDelegados: true }),
 			);
-			const respuestas: SatVehiculosTitularResponse[] = [];
-			for (const titular of titulares) {
-				respuestas.push(await consultarTitularDelegado(page, titular));
+			const urlPortal = page.url();
+			const respuestas = new Map<string, SatVehiculosTitularResponse>();
+
+			for (let indice = 0; indice < titulares.length; indice += 1) {
+				const titular = titulares[indice];
+				const paginaTitular =
+					indice === 0 ? page : await abrirPaginaPortal(browser, urlPortal);
+				const secundarios: ContextoTitularDelegado[] = [];
+				try {
+					const contexto = await prepararContextoTitular(
+						paginaTitular,
+						titular,
+					);
+					if (
+						contexto.totalRegistros >= UMBRAL_PARALELO_SAT &&
+						contexto.totalPaginas > 1
+					) {
+						while (secundarios.length < MAXIMO_TRABAJADORES_SAT - 1) {
+							const paginaSecundaria = await abrirPaginaPortal(
+								browser,
+								urlPortal,
+							);
+							try {
+								const secundario = await prepararContextoTitular(
+									paginaSecundaria,
+									titular,
+								);
+								if (
+									secundario.totalRegistros !== contexto.totalRegistros ||
+									secundario.tamanoPagina !== contexto.tamanoPagina
+								) {
+									await paginaSecundaria.close().catch(() => undefined);
+									break;
+								}
+								secundarios.push(secundario);
+							} catch {
+								await paginaSecundaria.close().catch(() => undefined);
+								break;
+							}
+						}
+					}
+
+					respuestas.set(
+						normalizarNitTitular(titular.nit),
+						await consultarContextoTitular(contexto, secundarios),
+					);
+				} catch (error) {
+					const evidencia = await paginaTitular.content().catch(() => "");
+					respuestas.set(
+						normalizarNitTitular(titular.nit),
+						titularConError(
+							titular,
+							clasificarError(error, evidencia),
+							error instanceof Error ? error.message : String(error),
+							evidencia.slice(0, MAX_EVIDENCIA),
+						),
+					);
+				} finally {
+					await Promise.all(
+						secundarios.map((contexto) =>
+							contexto.page.close().catch(() => undefined),
+						),
+					);
+					if (paginaTitular !== page) {
+						await paginaTitular.close().catch(() => undefined);
+					}
+				}
 			}
-			return respuestas;
+
+			return titulares.map(
+				(titular) =>
+					respuestas.get(normalizarNitTitular(titular.nit)) ??
+					titularConError(
+						titular,
+						"ERROR",
+						"No se obtuvo respuesta para el titular configurado.",
+					),
+			);
 		});
 
 		const estado = estadoGeneralDelegado(resultados);

@@ -4,12 +4,51 @@ import puppeteer from "puppeteer";
 import {
 	capturarEvidenciaSat,
 	clasificarError,
+	dividirRangosPaginas,
 	esperarSatConReintento,
 	irAListadoVehiculosDelegado,
 	leerTablaVehiculos,
 	leerTodasLasPaginas,
 	seleccionarTitular,
 } from "./satVehiculos";
+
+test("reparte todas las páginas entre varios trabajadores sin huecos", () => {
+	const rangos = dividirRangosPaginas(154, 4);
+	expect(rangos).toEqual([
+		{
+			paginaInicial: 0,
+			paginaFinal: 38,
+			totalPaginas: 39,
+			direccion: "siguiente",
+		},
+		{
+			paginaInicial: 39,
+			paginaFinal: 77,
+			totalPaginas: 39,
+			direccion: "siguiente",
+		},
+		{
+			paginaInicial: 78,
+			paginaFinal: 115,
+			totalPaginas: 38,
+			direccion: "anterior",
+		},
+		{
+			paginaInicial: 116,
+			paginaFinal: 153,
+			totalPaginas: 38,
+			direccion: "anterior",
+		},
+	]);
+	expect(
+		rangos.flatMap((rango) =>
+			Array.from(
+				{ length: rango.totalPaginas },
+				(_, indice) => rango.paginaInicial + indice,
+			),
+		),
+	).toEqual(Array.from({ length: 154 }, (_, indice) => indice));
+});
 
 test("conserva evidencia del login delegado cuando SAT bloquea el acceso", async () => {
 	const html = "<title>Just a moment...</title><div>cf-chl-</div>";
@@ -105,8 +144,21 @@ function tabla(impresiones: string) {
 		<td>P-123ABC</td><td>Automovil</td><td>Honda</td><td>2020</td>
 		<td>Blanco</td><td>Activo</td>
 		<td><a href="#"><img src="traspaso.png"></a></td>
-		<td></td><td></td><td>${impresiones}</td>
-	</tr></tbody></table>`;
+		<td><button id="detalle">Detalle</button></td>
+		<td></td><td>${impresiones}</td>
+	</tr></tbody></table>
+	<div id="divtoprint"></div>
+	<script>
+		document.getElementById('detalle').onclick = function () {
+			mostrarDetalle('P-123ABC');
+		};
+		function mostrarDetalle(placa) {
+			document.getElementById('divtoprint').textContent =
+				'Detalle del Vehículo Placa actual: ' + placa +
+				' Marca: Honda Modelo: 2020 Color: Blanco Tipo: Automovil' +
+				' Propietario: Titular de prueba Estado: Activo Serie: ABC123';
+		}
+	</script>`;
 }
 
 testConChrome(
@@ -250,8 +302,14 @@ testConChrome(
 					const placas = ["P-111AAA", "P-222BBB", "P-333CCC"];
 					const cuerpo = document.querySelector("tbody");
 					function mostrarFila() {
-						cuerpo.innerHTML = "<tr><td>" + placas[pagina] + "</td><td>Automovil</td><td>Honda</td><td>2020</td><td>Blanco</td><td>Activo</td><td></td><td></td><td></td><td></td></tr>";
+						cuerpo.innerHTML = "<tr><td>" + placas[pagina] + "</td><td>Automovil</td><td>Honda</td><td>2020</td><td>Blanco</td><td>Activo</td><td></td><td><button>Detalle</button></td><td></td><td></td></tr>";
+						document.querySelector("button").onclick = function () {
+							mostrarDetalle(placas[pagina]);
+						};
 						if (pagina === placas.length - 1) document.getElementById("frmAcciones:btnNext").disabled = true;
+					}
+					function mostrarDetalle(placa) {
+						document.getElementById('divtoprint').textContent = 'Detalle del Vehículo Placa actual: ' + placa + ' Marca: Honda Modelo: 2020 Color: Blanco Tipo: Automovil Propietario: Titular de prueba Estado: Activo Serie: ABC123';
 					}
 					function avanzar() {
 						pagina += 1;
@@ -260,6 +318,7 @@ testConChrome(
 					}
 					mostrarFila();
 				</script>
+				<div id="divtoprint"></div>
 			`);
 			const resultado = await leerTodasLasPaginas(page.mainFrame());
 			expect(resultado.listadoCompleto).toBe(true);

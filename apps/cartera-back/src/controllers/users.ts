@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { creditos, usuarios } from "../database/db/schema";
 import { db } from "../database";
-import { eq, inArray, and } from "drizzle-orm"; // Import eq for query conditions
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 type DbExecutor = Pick<typeof db, "select" | "insert">;
 
@@ -184,5 +184,33 @@ if (!isAdmin && asesorId !== null && asesorId !== undefined) {
     console.error("[ERROR] getUsersWithSifco:", error);
     throw new Error("No se pudieron obtener los usuarios con créditos SIFCO.");
   }
+}
+
+export interface CreditoOperativoParaSat {
+  numeroCreditoSifco: string;
+  nombreCliente: string;
+  estado: "ACTIVO" | "MOROSO" | "EN_CONVENIO";
+  fechaCreacion: Date;
+}
+
+/**
+ * Devuelve únicamente la información de Cartera que CRM necesita para cruzar
+ * vehículos durante la verificación SAT. La ruta está protegida por JWT y el
+ * router limita su acceso a usuarios ADMIN.
+ */
+export async function getCreditosOperativosParaSat(): Promise<CreditoOperativoParaSat[]> {
+  const rows = await db
+    .select({
+      numeroCreditoSifco: creditos.numero_credito_sifco,
+      nombreCliente: usuarios.nombre,
+      estado: creditos.statusCredit,
+      fechaCreacion: creditos.fecha_creacion,
+    })
+    .from(creditos)
+    .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+    .where(inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_CONVENIO"]))
+    .orderBy(desc(creditos.fecha_creacion));
+
+  return rows as CreditoOperativoParaSat[];
 }
  

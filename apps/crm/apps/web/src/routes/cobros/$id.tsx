@@ -32,7 +32,7 @@ import {
 	Users,
 	X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
 	etiquetaMetodoContacto,
 	evaluarGestionTempranaB1,
@@ -108,6 +108,7 @@ import {
 	numeroDeEstadoMora,
 	useBucketsCatalogo,
 } from "@/lib/cobros/buckets-catalogo";
+import { type ColaSerial, crearColaSerial } from "@/lib/cobros/cola-serial";
 import { cuotasElegiblesParaConvenio } from "@/lib/cobros/convenio-cuotas";
 import {
 	type EstadoPromesaUI,
@@ -544,9 +545,20 @@ function RouteComponent() {
 		telefonoAlternativo: [] as string[],
 		emailContacto: "",
 	});
-	// Cómo quedó lo último guardado: "Cancelar" pregunta antes de tirar cambios
-	// que no se guardaron (los teléfonos se guardan solos; el email no).
-	const [contactFormInicial, setContactFormInicial] = useState(contactForm);
+	// CB-036 — refs (no estado) porque los leen tareas asíncronas de la cola de
+	// teléfonos, que tienen que ver el valor de AHORA y no el del render en que
+	// se crearon:
+	// - contactFormRef: el formulario más reciente. Se escribe en el acto en
+	//   cada cambio, sin esperar al re-render.
+	// - contactGuardadoRef: lo último que el servidor CONFIRMÓ. Solo se mueve
+	//   cuando un guardado sale bien (Codex, PR #1751): si falla, "Cancelar"
+	//   tiene que seguir avisando que hay cambios sin guardar.
+	const contactFormRef = useRef(contactForm);
+	const contactGuardadoRef = useRef(contactForm);
+	const cambiarContactForm = (nuevo: typeof contactForm) => {
+		contactFormRef.current = nuevo;
+		setContactForm(nuevo);
+	};
 
 	// Estado modal seguimiento
 	const [isSeguimientoModalOpen, setIsSeguimientoModalOpen] = useState(false);
@@ -1087,7 +1099,6 @@ function RouteComponent() {
 			}),
 		onSuccess: () => {
 			toast.success("Información de contacto actualizada");
-			setContactFormInicial(contactForm);
 			// Los teléfonos nuevos de Referencias se marcan contra los del caso.
 			queryClient.invalidateQueries({
 				queryKey: orpc.getReferenciasCaso.key(),
@@ -1107,6 +1118,21 @@ function RouteComponent() {
 	// CB-036: los teléfonos del caso se guardan EN EL ACTO desde el editor de la
 	// tarjeta de contacto (al confirmar o quitar un número), sin esperar al
 	// "Guardar" del formulario, para que un número escrito no se pierda.
+	//
+	// Todo lo que escribe los teléfonos del caso pasa por UNA cola, en orden:
+	// el autoguardado, el número sugerido y el "Guardar". Cada guardado manda
+	// las dos listas completas, así que dos en vuelo podían llegar al revés y
+	// el viejo pisar al nuevo (Codex, PR #1751). Y cada tarea lee el
+	// formulario al SALIR de la cola, no al entrar: un autoguardado encolado
+	// detrás de un número sugerido ya lo incluye.
+	const colaTelefonos = useRef<ColaSerial | null>(null);
+	colaTelefonos.current ??= crearColaSerial();
+	const encolarTelefonos = <T,>(tarea: () => Promise<T>): Promise<T> =>
+		(colaTelefonos.current as ColaSerial).encolar(tarea);
+	// Varios blur seguidos no encolan varios autoguardados: basta uno que lea
+	// el formulario al salir.
+	const autoguardadoEncolado = useRef(false);
+
 	const refrescarTelefonos = () => {
 		queryClient.invalidateQueries(
 			orpc.getDetallesCreditoCarteraBack.queryOptions({
@@ -1136,51 +1162,47 @@ function RouteComponent() {
 		},
 	});
 
-	const guardarTelefonos = (principales: string[], alternativos: string[]) => {
-		const p = telefonosParaGuardar(principales);
-		if (p.length === 0) {
-			toast.error(
-				"El teléfono principal no puede quedar vacío: escribí otro número.",
-			);
-			return;
-		}
-		const a = telefonosParaGuardar(alternativos);
-		// La foto se actualiza al mandar, no al volver: un "Cancelar" justo
-		// después del blur no debe ver como pendiente lo que ya va en camino.
-		setContactFormInicial((f) => ({
-			...f,
-			telefonoPrincipal: p,
-			telefonoAlternativo: a,
-		}));
-		guardarTelefonosMutation.mutate({
-			telefonosPrincipales: p,
-			telefonosAlternativos: a,
-		});
+	/** El editor avisa un cambio de teléfonos: se refleja ya y se encola el guardado. */
+	const guardarTelefonos = (
+		cambio: Partial<
+			Pick<typeof contactForm, "telefonoPrincipal" | "telefonoAlternativo">
+		>,
+	) => {
+		contactFormRef.current = { ...contactFormRef.current, ...cambio };
+		if (autoguardadoEncolado.current) return;
+		autoguardadoEncolado.current = true;
+		encolarTelefonos(async () => {
+			autoguardadoEncolado.current = false;
+			const f = contactFormRef.current;
+			const p = telefonosParaGuardar(f.telefonoPrincipal);
+			if (p.length === 0) {
+				toast.error(
+					"El teléfono principal no puede quedar vacío: escribí otro número.",
+				);
+				return;
+			}
+			const a = telefonosParaGuardar(f.telefonoAlternativo);
+			await guardarTelefonosMutation.mutateAsync({
+				telefonosPrincipales: p,
+				telefonosAlternativos: a,
+			});
+			contactGuardadoRef.current = {
+				...contactGuardadoRef.current,
+				telefonoPrincipal: p,
+				telefonoAlternativo: a,
+			};
+		}).catch(() => undefined);
 	};
 
 	// Un número que se consiguió por referencias: se suma con la operación del
 	// botón de la pestaña Referencias, que deja quién y cuándo lo agregó.
-	const agregarTelefonoEncontrado = useMutation({
+	const agregarTelefonoEncontradoMutation = useMutation({
 		mutationFn: (v: { hallazgoId: string; telefono: string }) =>
 			client.agregarHallazgoATelefonosCaso({
 				casoCobroId: casoDetails.data?.id ?? "",
 				hallazgoId: v.hallazgoId,
 			}),
 		onSuccess: (res, v) => {
-			// Si el formulario está abierto, el número (ya guardado) entra también
-			// ahí y en su foto: un guardado posterior no lo borra.
-			const digitos = (t: string) => t.replace(/\D/g, "").slice(-8);
-			const sumar = (f: typeof contactForm) =>
-				[...f.telefonoPrincipal, ...f.telefonoAlternativo].some(
-					(t) => digitos(t) === digitos(v.telefono),
-				)
-					? f
-					: {
-							...f,
-							telefonoAlternativo: [...f.telefonoAlternativo, v.telefono],
-						};
-			setContactForm(sumar);
-			setContactFormInicial(sumar);
 			toast.success(
 				res.agregado
 					? `${v.telefono} quedó guardado entre los teléfonos del cliente`
@@ -1192,6 +1214,29 @@ function RouteComponent() {
 			toast.error(`No se pudo guardar el teléfono: ${err.message}`);
 		},
 	});
+
+	const agregarTelefonoEncontrado = (v: {
+		hallazgoId: string;
+		telefono: string;
+	}) => {
+		encolarTelefonos(async () => {
+			await agregarTelefonoEncontradoMutation.mutateAsync(v);
+			// El número ya quedó en el caso: entra al formulario (si está abierto)
+			// y a lo guardado, para que un guardado posterior no lo borre.
+			const digitos = (t: string) => t.replace(/\D/g, "").slice(-8);
+			const sumar = (f: typeof contactForm) =>
+				[...f.telefonoPrincipal, ...f.telefonoAlternativo].some(
+					(t) => digitos(t) === digitos(v.telefono),
+				)
+					? f
+					: {
+							...f,
+							telefonoAlternativo: [...f.telefonoAlternativo, v.telefono],
+						};
+			cambiarContactForm(sumar(contactFormRef.current));
+			contactGuardadoRef.current = sumar(contactGuardadoRef.current);
+		}).catch(() => undefined);
+	};
 	const cancelSeguimientoMutation = useMutation({
 		mutationFn: (seguimientoId: string) =>
 			client.deleteSeguimiento({ id: seguimientoId }),
@@ -2900,8 +2945,8 @@ function RouteComponent() {
 													),
 													emailContacto: caso.emailContacto || "",
 												};
-												setContactForm(inicial);
-												setContactFormInicial(inicial);
+												cambiarContactForm(inicial);
+												contactGuardadoRef.current = inicial;
 												setIsEditingContact(true);
 											}}
 										>
@@ -2919,17 +2964,14 @@ function RouteComponent() {
 												requerido
 												guardando={guardarTelefonosMutation.isPending}
 												onGuardar={(valores) =>
-													guardarTelefonos(
-														valores,
-														contactForm.telefonoAlternativo,
-													)
+													guardarTelefonos({ telefonoPrincipal: valores })
 												}
 												valores={contactForm.telefonoPrincipal}
 												onChange={(valores) =>
-													setContactForm((f) => ({
-														...f,
+													cambiarContactForm({
+														...contactFormRef.current,
 														telefonoPrincipal: valores,
-													}))
+													})
 												}
 											/>
 											<TelefonosEditor
@@ -2937,17 +2979,14 @@ function RouteComponent() {
 												label="Teléfonos alternativos"
 												guardando={guardarTelefonosMutation.isPending}
 												onGuardar={(valores) =>
-													guardarTelefonos(
-														contactForm.telefonoPrincipal,
-														valores,
-													)
+													guardarTelefonos({ telefonoAlternativo: valores })
 												}
 												valores={contactForm.telefonoAlternativo}
 												onChange={(valores) =>
-													setContactForm((f) => ({
-														...f,
+													cambiarContactForm({
+														...contactFormRef.current,
 														telefonoAlternativo: valores,
-													}))
+													})
 												}
 											/>
 											{(() => {
@@ -2982,9 +3021,11 @@ function RouteComponent() {
 																			? `Lo dio ${h.referenciaNombre}`
 																			: undefined
 																	}
-																	disabled={agregarTelefonoEncontrado.isPending}
+																	disabled={
+																		agregarTelefonoEncontradoMutation.isPending
+																	}
 																	onClick={() =>
-																		agregarTelefonoEncontrado.mutate({
+																		agregarTelefonoEncontrado({
 																			hallazgoId: h.id,
 																			telefono: h.valor,
 																		})
@@ -3005,10 +3046,10 @@ function RouteComponent() {
 													type="email"
 													value={contactForm.emailContacto}
 													onChange={(e) =>
-														setContactForm((f) => ({
-															...f,
+														cambiarContactForm({
+															...contactFormRef.current,
 															emailContacto: e.target.value,
-														}))
+														})
 													}
 													placeholder="Ej: correo@ejemplo.com"
 												/>
@@ -3027,20 +3068,26 @@ function RouteComponent() {
 															)
 														)
 															return;
-														const alternativos = telefonosParaGuardar(
-															contactForm.telefonoAlternativo,
-														);
-														updateContactMutation.mutate({
-															telefonoPrincipal: telefonosParaGuardar(
-																contactForm.telefonoPrincipal,
-															).join(", "),
-															telefonoAlternativo:
-																alternativos.length > 0
-																	? alternativos.join(", ")
-																	: undefined,
-															emailContacto:
-																contactForm.emailContacto || undefined,
-														});
+														// Por la cola, como el autoguardado: también
+														// escribe los teléfonos, y lee el formulario al
+														// salir para mandar lo más reciente.
+														encolarTelefonos(async () => {
+															const f = contactFormRef.current;
+															const alternativos = telefonosParaGuardar(
+																f.telefonoAlternativo,
+															);
+															await updateContactMutation.mutateAsync({
+																telefonoPrincipal: telefonosParaGuardar(
+																	f.telefonoPrincipal,
+																).join(", "),
+																telefonoAlternativo:
+																	alternativos.length > 0
+																		? alternativos.join(", ")
+																		: undefined,
+																emailContacto: f.emailContacto || undefined,
+															});
+															contactGuardadoRef.current = f;
+														}).catch(() => undefined);
 													}}
 													disabled={
 														updateContactMutation.isPending ||
@@ -3055,7 +3102,13 @@ function RouteComponent() {
 												<Button
 													size="sm"
 													variant="outline"
-													onClick={() => {
+													onClick={async () => {
+														// Primero que termine lo que está en vuelo (el
+														// blur de este mismo clic encola un
+														// autoguardado): la comparación es contra lo que
+														// el servidor CONFIRMÓ, y si ese guardado falló
+														// tiene que avisar.
+														await colaTelefonos.current?.esperar();
 														const normalizar = (f: typeof contactForm) =>
 															JSON.stringify([
 																telefonosParaGuardar(f.telefonoPrincipal),
@@ -3063,8 +3116,8 @@ function RouteComponent() {
 																f.emailContacto.trim(),
 															]);
 														if (
-															normalizar(contactForm) !==
-																normalizar(contactFormInicial) &&
+															normalizar(contactFormRef.current) !==
+																normalizar(contactGuardadoRef.current) &&
 															!window.confirm(
 																"Hay cambios sin guardar en el contacto. ¿Salir sin guardarlos?",
 															)
@@ -3184,10 +3237,10 @@ function RouteComponent() {
 																		title="Guardar entre los teléfonos del cliente"
 																		aria-label={`Guardar ${h.valor} entre los teléfonos del cliente`}
 																		disabled={
-																			agregarTelefonoEncontrado.isPending
+																			agregarTelefonoEncontradoMutation.isPending
 																		}
 																		onClick={() =>
-																			agregarTelefonoEncontrado.mutate({
+																			agregarTelefonoEncontrado({
 																				hallazgoId: h.id,
 																				telefono: h.valor,
 																			})

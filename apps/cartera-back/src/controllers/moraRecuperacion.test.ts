@@ -749,6 +749,75 @@ describe("moraGeneradaEnPeriodo", () => {
 		expect(generarSiempre(100, eventos)).toBe(100);
 	});
 
+	it("la desactivación entre el pago y su reversa no vuelve a cobrar lo restituido", () => {
+		// EL CASO: el pago pone el crédito al día (DECREMENTO 100 → 0), eso lo saca
+		// del universo de mora (DESACTIVACION), y DESPUÉS el pago se cae y la
+		// reversa le devuelve los Q100. Esa deuda ya estaba contada en la foto, así
+		// que la restitución no genera; pero el techo tiene que volver a subir con
+		// ella, porque el RECALCULO de la mañana siguiente la ve viva otra vez.
+		const eventos = [
+			pagoDe(100, 0, 7),
+			evento("DESACTIVACION", 0, 0),
+			reversoDe(0, 100, 7),
+			evento("RECALCULO", 100, 100),
+		];
+		expect(moraGeneradaEnPeriodo(100, eventos)).toBe(0);
+		// Y el techo queda en los Q100 restituidos, no en el cero que dejó la
+		// desactivación.
+		expect(plegarNivel(100, eventos).nivel).toBe(100);
+
+		// Lo que SÍ crece por encima de lo restituido sigue siendo mora nueva: el
+		// piso repone el techo, no lo infla.
+		expect(
+			moraGeneradaEnPeriodo(100, [...eventos, evento("RECALCULO", 100, 130)]),
+		).toBe(30);
+	});
+
+	it("MUTACIÓN: sin el piso, la deuda restituida tras una desactivación se cobra dos veces", () => {
+		// La mutación es la línea vieja: `nivel += restituido - suprimido`, sin el
+		// `Math.max` contra `montoNuevo`. Con la generación suprimida, el techo se
+		// quedaba en el cero de la DESACTIVACION y el RECALCULO siguiente cobraba
+		// los Q100 como mora nueva: foto 100 → esperado 200.
+		const eventos = [
+			pagoDe(100, 0, 7),
+			evento("DESACTIVACION", 0, 0),
+			reversoDe(0, 100, 7),
+			evento("RECALCULO", 100, 100),
+		];
+		const sinPiso = (foto: number, lista: MoraLevelEvent[]) => {
+			let nivel = foto;
+			let generado = 0;
+			const bajado = new Map<string, number>();
+			for (const e of lista) {
+				if (e.tipoEvento === "DESACTIVACION") {
+					nivel = 0;
+					continue;
+				}
+				if (e.tipoEvento === "CONDONACION") continue;
+				if (e.reverso) {
+					const restituido = Math.max(0, e.montoNuevo - e.montoAnterior);
+					const clave = e.pagoId ?? "";
+					const suprimido = Math.min(restituido, bajado.get(clave) ?? 0);
+					bajado.set(clave, (bajado.get(clave) ?? 0) - suprimido);
+					generado += restituido - suprimido;
+					nivel += restituido - suprimido;
+					continue;
+				}
+				if (e.montoNuevo > nivel) {
+					generado += e.montoNuevo - nivel;
+					nivel = e.montoNuevo;
+				} else if (e.montoNuevo < e.montoAnterior) {
+					const bajada = e.montoAnterior - e.montoNuevo;
+					const clave = e.pagoId ?? "";
+					bajado.set(clave, (bajado.get(clave) ?? 0) + bajada);
+				}
+			}
+			return generado;
+		};
+		expect(moraGeneradaEnPeriodo(100, eventos)).toBe(0);
+		expect(sinPiso(100, eventos)).toBe(100);
+	});
+
 	it("MUTACIÓN: ignorar la marca de restitución borra la oportunidad viva", () => {
 		// Con el techo sostenido, perder la marca ya no duplica la deuda: la
 		// esconde. Sin marca la subida es un rebote cualquiera por debajo del
@@ -2129,10 +2198,17 @@ describe("buildMoraRecoveryQuery — el filtro de lote", () => {
 describe("contrato: JSON_BUILD_OBJECT del SQL ↔ MoraRecoveryEventoCrudo", () => {
 	/**
 	 * Devuelve los argumentos de primer nivel del `JSON_BUILD_OBJECT` del SQL
-	 * renderizado, recortando por paréntesis balanceados (adentro hay llamadas
-	 * anidadas y comas que NO separan argumentos del objeto).
+	 * renderizado —CRUDOS, claves y valores—, recortando por paréntesis
+	 * balanceados (adentro hay llamadas anidadas y comas que NO separan
+	 * argumentos del objeto).
+	 *
+	 * Devuelve la lista ENTERA y no solo las claves a propósito: filtrar los
+	 * valores acá dejaba ciega la prueba de paridad. Con `…, 'anulado')` —una
+	 * clave sin su valor— los argumentos pares siguen siendo las mismas seis
+	 * claves, así que las dos pruebas pasaban y Postgres rechazaba la consulta
+	 * del reporte por número IMPAR de argumentos.
 	 */
-	const clavesDelJsonBuildObject = (texto: string): string[] => {
+	const argumentosDelJsonBuildObject = (texto: string): string[] => {
 		const apariciones = texto.match(/JSON_BUILD_OBJECT\s*\(/gi) ?? [];
 		// Si algún día hay más de uno, esta prueba estaría mirando el que no es.
 		expect(apariciones.length).toBe(1);
@@ -2167,16 +2243,21 @@ describe("contrato: JSON_BUILD_OBJECT del SQL ↔ MoraRecoveryEventoCrudo", () =
 		}
 		argumentos.push(actual.trim());
 
-		// `JSON_BUILD_OBJECT(clave, valor, clave, valor, …)`: las claves son los
-		// argumentos pares, y tienen que ser literales de texto.
-		return argumentos
+		return argumentos;
+	};
+
+	/**
+	 * `JSON_BUILD_OBJECT(clave, valor, clave, valor, …)`: las claves son los
+	 * argumentos pares, y tienen que ser literales de texto.
+	 */
+	const clavesDelJsonBuildObject = (texto: string): string[] =>
+		argumentosDelJsonBuildObject(texto)
 			.filter((_, i) => i % 2 === 0)
 			.map((arg) => {
 				const m = arg.match(/^'([^']+)'$/);
 				expect(m).not.toBeNull();
 				return (m as RegExpMatchArray)[1];
 			});
-	};
 
 	it("las claves que emite el SQL son EXACTAMENTE las del tipo crudo", () => {
 		const periodo = getMoraRecoveryPeriod({
@@ -2197,7 +2278,7 @@ describe("contrato: JSON_BUILD_OBJECT del SQL ↔ MoraRecoveryEventoCrudo", () =
 		expect(delSql).toEqual(delTipo);
 	});
 
-	it("el número de argumentos es par: ninguna clave quedó sin valor", () => {
+	it("el número de argumentos es PAR: ninguna clave quedó sin valor", () => {
 		const periodo = getMoraRecoveryPeriod({
 			mes: 6,
 			anio: 2026,
@@ -2206,8 +2287,18 @@ describe("contrato: JSON_BUILD_OBJECT del SQL ↔ MoraRecoveryEventoCrudo", () =
 		const { sql: texto } = new PgDialect().sqlToQuery(
 			buildMoraRecoveryQuery(periodo),
 		);
-		expect(clavesDelJsonBuildObject(texto).length).toBe(
-			CLAVES_EVENTO_MORA_RECOVERY_CRUDO.length,
+
+		// Sobre los argumentos CRUDOS: una clave sin valor no cambia la lista de
+		// claves —los pares siguen siendo los mismos nombres— pero sí deja la
+		// cuenta impar, y Postgres rechaza la consulta entera con
+		// "argument list must have even number of elements".
+		const argumentos = argumentosDelJsonBuildObject(texto);
+		expect(argumentos.length % 2).toBe(0);
+		// Y son exactamente dos por clave del tipo: ni una de más ni una de menos.
+		expect(argumentos.length).toBe(
+			CLAVES_EVENTO_MORA_RECOVERY_CRUDO.length * 2,
 		);
+		// Ningún argumento vacío: `'x', , 'y'` también sería un SQL roto.
+		for (const arg of argumentos) expect(arg).not.toBe("");
 	});
 });

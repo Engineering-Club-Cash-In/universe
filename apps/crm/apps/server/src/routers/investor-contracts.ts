@@ -255,6 +255,13 @@ async function contratoDeInversionista(contractId: string): Promise<{
  * reenviar los enlaces, así que ese contrato no sirve y es mejor deshacerlo que
  * dejarlo a medias.
  */
+/**
+ * Cómo empieza el motivo de los contratos que se anularon al descartar la
+ * vista previa ("Volver" antes del Listo). El guardado lo busca para no dejar
+ * vivo un contrato que se estaba generando mientras se descartaba.
+ */
+const MOTIVO_VISTA_PREVIA_DESCARTADA = "Se corrigió antes de mandarlo";
+
 async function guardarContratoDeInversion(params: {
 	batchId: string;
 	investorId: number;
@@ -272,6 +279,12 @@ async function guardarContratoDeInversion(params: {
 	 * nueva —su marca, su fecha— y el Listo lo mandaba en el hilo que no era.
 	 */
 	aceptadaEn: Date;
+	/**
+	 * Cuándo empezó el pedido, antes de ir a WeeTrust. Si en ese rato se
+	 * descartó la vista previa, este contrato era parte de lo que se descartó:
+	 * no se guarda.
+	 */
+	iniciadoEn: Date;
 	/**
 	 * El contrato al que reemplaza, con el motivo por el que se anula.
 	 *
@@ -318,6 +331,26 @@ async function guardarContratoDeInversion(params: {
 			throw new ORPCError("CONFLICT", {
 				message:
 					"Entró otra compra sobre estos créditos mientras se generaba el contrato: no se guardó. Recargá la batería y volvé a emitirlo.",
+			});
+		}
+		// Un "Volver" mientras éste esperaba a WeeTrust: la vista previa que se
+		// descartó incluía este contrato, aunque todavía no tuviera fila.
+		const [descartadoEnElMedio] = await tx
+			.select({ id: generatedLegalContracts.id })
+			.from(generatedLegalContracts)
+			.where(
+				and(
+					eq(generatedLegalContracts.batchId, params.batchId),
+					eq(generatedLegalContracts.status, "cancelled"),
+					gte(generatedLegalContracts.cancelledAt, params.iniciadoEn),
+					sql`${generatedLegalContracts.cancellationReason} like ${`${MOTIVO_VISTA_PREVIA_DESCARTADA}%`}`,
+				),
+			)
+			.limit(1);
+		if (descartadoEnElMedio) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Se descartó la vista previa mientras se generaba el contrato: no se guardó.",
 			});
 		}
 		if (bateria?.status === "descartada" || bateria?.status === "completada") {
@@ -937,6 +970,8 @@ export const investorContractsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Antes de hablar con WeeTrust: ver `iniciadoEn` en el guardado.
+			const iniciadoEn = new Date();
 			const bateria = await bateriaAbierta(input.batchId);
 
 			const tipos = input.contracts.map((c) => c.contractType);
@@ -1058,6 +1093,7 @@ export const investorContractsRouter = {
 					const id = await guardarContratoDeInversion({
 						batchId: input.batchId,
 						aceptadaEn: bateria.acceptedAt,
+						iniciadoEn,
 						investorId: bateria.investorId,
 						contractType: pedido.contractType,
 						contractName: pedido.contractName,
@@ -1183,6 +1219,8 @@ export const investorContractsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Antes de hablar con WeeTrust: ver `iniciadoEn` en el guardado.
+			const iniciadoEn = new Date();
 			if (input.replaceContractId && !input.motivo) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "Hay que decir por qué se anula el contrato anterior.",
@@ -1301,6 +1339,7 @@ export const investorContractsRouter = {
 				contractId = await guardarContratoDeInversion({
 					batchId: input.batchId,
 					aceptadaEn: bateria.acceptedAt,
+					iniciadoEn,
 					investorId: bateria.investorId,
 					contractType: input.contractType,
 					contractName: input.contractName,
@@ -1511,73 +1550,85 @@ export const investorContractsRouter = {
 	descartarVistaPrevia: juridicoProcedure
 		.input(z.object({ batchId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			const [bateria] = await db
-				.select({
-					status: investorContractBatches.status,
-					acceptedAt: investorContractBatches.acceptedAt,
-				})
-				.from(investorContractBatches)
-				.where(eq(investorContractBatches.id, input.batchId))
-				.limit(1);
-
-			if (!bateria) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Esa batería de contratos no existe",
-				});
-			}
-
-			if (bateria.status !== "pendiente") {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"Estos contratos ya se mandaron al hilo de la compra: para corregir uno, reemplazalo o anulalo.",
-				});
-			}
-
-			// Los de la vista previa: los de esta compra que siguen vigentes. Uno
-			// firmado no se toca —WeeTrust no deja borrarlo— y se dice.
-			const vigentes = await db
-				.select()
-				.from(generatedLegalContracts)
-				.where(
-					and(
-						eq(generatedLegalContracts.batchId, input.batchId),
-						ne(generatedLegalContracts.status, "cancelled"),
-						sql`${generatedLegalContracts.replacedByContractId} is null`,
-						gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
-					),
-				);
-
 			const quien = context.session?.user?.name ?? "alguien del CRM";
-			const razon = `Se corrigió antes de mandarlo (descartado por ${quien})`;
-			const firmados: string[] = [];
-			let descartados = 0;
+			const razon = `${MOTIVO_VISTA_PREVIA_DESCARTADA} (descartado por ${quien})`;
 
-			for (const contrato of vigentes) {
-				if (contrato.status === "signed") {
-					firmados.push(contrato.contractName);
-					continue;
-				}
+			// Mirar qué hay y anularlo, con el candado de la batería: el mismo que
+			// toma el guardado de un contrato. Uno que termina de guardarse después
+			// ve la marca de este descarte y no queda (ver `iniciadoEn`). Lo de
+			// WeeTrust va afuera: puede tardar, y el candado no espera 300s.
+			const { anulados, firmados } = await conCandadoDeBateria(
+				input.batchId,
+				async () => {
+					const [bateria] = await db
+						.select({
+							status: investorContractBatches.status,
+							acceptedAt: investorContractBatches.acceptedAt,
+						})
+						.from(investorContractBatches)
+						.where(eq(investorContractBatches.id, input.batchId))
+						.limit(1);
 
-				// Igual que al anular: la fila primero, y sólo si nadie la tocó.
-				const [marcado] = await db
-					.update(generatedLegalContracts)
-					.set({
-						status: "cancelled",
-						cancellationReason: razon,
-						cancelledAt: new Date(),
-						updatedAt: new Date(),
-					})
-					.where(
-						and(
-							eq(generatedLegalContracts.id, contrato.id),
-							eq(generatedLegalContracts.status, "pending"),
-							sql`${generatedLegalContracts.replacedByContractId} is null`,
-						),
-					)
-					.returning({ id: generatedLegalContracts.id });
+					if (!bateria) {
+						throw new ORPCError("NOT_FOUND", {
+							message: "Esa batería de contratos no existe",
+						});
+					}
 
-				if (!marcado) continue;
+					if (bateria.status !== "pendiente") {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Estos contratos ya se mandaron al hilo de la compra: para corregir uno, reemplazalo o anulalo.",
+						});
+					}
 
+					// Los de la vista previa: los de esta compra que siguen vigentes.
+					// Uno firmado no se toca —WeeTrust no deja borrarlo— y se dice.
+					const vigentes = await db
+						.select()
+						.from(generatedLegalContracts)
+						.where(
+							and(
+								eq(generatedLegalContracts.batchId, input.batchId),
+								ne(generatedLegalContracts.status, "cancelled"),
+								sql`${generatedLegalContracts.replacedByContractId} is null`,
+								gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
+							),
+						);
+
+					const firmados: string[] = [];
+					const anulados: typeof vigentes = [];
+					for (const contrato of vigentes) {
+						if (contrato.status === "signed") {
+							firmados.push(contrato.contractName);
+							continue;
+						}
+
+						// Igual que al anular: la fila primero, y sólo si nadie la tocó.
+						const [marcado] = await db
+							.update(generatedLegalContracts)
+							.set({
+								status: "cancelled",
+								cancellationReason: razon,
+								cancelledAt: new Date(),
+								updatedAt: new Date(),
+							})
+							.where(
+								and(
+									eq(generatedLegalContracts.id, contrato.id),
+									eq(generatedLegalContracts.status, "pending"),
+									sql`${generatedLegalContracts.replacedByContractId} is null`,
+								),
+							)
+							.returning({ id: generatedLegalContracts.id });
+
+						if (marcado) anulados.push(contrato);
+					}
+					return { anulados, firmados };
+				},
+			);
+
+			for (const contrato of anulados) {
 				await borrarElViejoEnWeeTrust({
 					contractId: contrato.id,
 					status: contrato.status,
@@ -1586,8 +1637,8 @@ export const investorContractsRouter = {
 					origen: "descartarVistaPrevia",
 				});
 				void espejarEstadoDeFirmaEnCartera(contrato.id);
-				descartados += 1;
 			}
+			const descartados = anulados.length;
 
 			await recalcularEstadoDeLaBateria(input.batchId, context.userId);
 

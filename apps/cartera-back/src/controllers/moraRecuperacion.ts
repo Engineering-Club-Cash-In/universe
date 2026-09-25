@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { inicioDiaGTComoTimestampUTC } from "../utils/functions/diaGuatemala";
 import {
 	MARCA_DECREMENTO_ANULADO,
+	MARCA_PAGO_DEL_DECREMENTO_PREFIJO,
 	MOTIVOS_RESTITUCION_MORA_PREFIJOS,
 } from "../utils/motivoReversaMora";
 import { creditosElegiblesMoraSql } from "./moraCapitalCartera";
@@ -38,6 +39,38 @@ function esRestitucionSql(columnaMotivo: ReturnType<typeof sql.raw>) {
  */
 function esDecrementoAnuladoSql(columnaMotivo: ReturnType<typeof sql.raw>) {
 	return sql`(COALESCE(${columnaMotivo}, '') LIKE ${`%${MARCA_DECREMENTO_ANULADO}%`})`;
+}
+
+/** Lo que en una expresión regular POSIX hay que escapar para leerlo literal. */
+const escaparRegex = (texto: string) =>
+	texto.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * ¿De qué PAGO habla este evento? El id que deja la marca del decremento
+ * (`[pago #N]`) o, si el evento es una restitución, el que dejan sus prefijos
+ * (`Reversa de pago #N`, `Anulación de pago #N`). NULL si no lleva ninguno.
+ *
+ * Es lo que le permite al reporte ligar una restitución con SU bajada en vez de
+ * con cualquiera; ver `pagoId` en `MoraLevelEvent`. Los patrones se ARMAN con
+ * las mismas constantes que escriben las marcas, para que no se puedan separar
+ * con un cambio de redacción. Sale como TEXTO: el id no se usa para aritmética,
+ * solo como identidad.
+ */
+function pagoDelEventoSql(columnaMotivo: ReturnType<typeof sql.raw>) {
+	const patrones = [
+		MARCA_PAGO_DEL_DECREMENTO_PREFIJO,
+		...MOTIVOS_RESTITUCION_MORA_PREFIJOS,
+	];
+	return sql`COALESCE(${sql.join(
+		patrones.map(
+			(prefijo) =>
+				// `::text` explícito: sin él el parámetro llega sin tipo y
+				// `substring(text, unknown)` tiene dos candidatas (la de posición y
+				// la de expresión regular). Acá siempre es la de expresión regular.
+				sql`SUBSTRING(${columnaMotivo} FROM ${`${escaparRegex(prefijo)}([0-9]+)`}::text)`,
+		),
+		sql`, `,
+	)})`;
 }
 
 /**
@@ -94,6 +127,18 @@ export type MoraLevelEvent = {
 	 * `MARCA_DECREMENTO_ANULADO`.
 	 */
 	anulado?: boolean;
+	/**
+	 * El PAGO al que pertenece el evento, cuando se puede saber: el id que la
+	 * marca `[pago #N]` deja sobre el `DECREMENTO` y el que los prefijos de
+	 * restitución (`Reversa de pago #N`, `Anulación de pago #N`) dejan sobre el
+	 * `INCREMENTO` que lo deshace. Es lo que liga una supresión con SU bajada.
+	 *
+	 * `null` = no se pudo saber. Pasa con las filas ANTERIORES a la marca, que
+	 * son casi todo el historial viejo. Esas caen a una bolsa ANÓNIMA —el
+	 * comportamiento de antes— porque la alternativa, no suprimir nada sin id,
+	 * habría inflado el esperado de todos los ciclos pasados.
+	 */
+	pagoId?: string | null;
 };
 
 /**
@@ -199,25 +244,29 @@ export function nivelSembrado(previos: MoraLevelEvent[]): number {
  *     condonaciones masivas mensuales aportaba su mora entera en cada rebote y
  *     el esperado del reporte se multiplicaba.
  *   * Una BAJA REAL (`DECREMENTO`, o cualquier evento cuyo monto baja respecto
- *     del anterior, que es como quedan registrados los pagos): el nivel SÍ baja
- *     a `monto_nuevo`. El cliente pagó y saldó, así que la mora que se genere
- *     después es deuda nueva y sí es oportunidad nueva. Este matiz es el que
- *     evita que a un cliente que pagó su mora y volvió a atrasarse no se le
- *     cuente la mora nueva.
+ *     del anterior, que es como quedan registrados los pagos): EL TECHO NO
+ *     BAJA. Que el cliente pague no borra que esa deuda ya se contó como
+ *     oportunidad, así que el rebote del cron que la repone no es oportunidad
+ *     nueva: solo lo que SUPERE el máximo ya contado lo es. Bajar el techo al
+ *     saldo vivo era el defecto: un pago de Q20 sobre una mora de Q120 dejaba
+ *     el techo en Q40, el rebote a Q120 se cobraba como Q80 de mora nueva y el
+ *     esperado terminaba en Q200 por una deuda de Q120. La bajada igual se
+ *     ANOTA —por Q20, lo que el cliente pagó— porque es lo que su propia
+ *     reversa podría reponer sin ser deuda nueva.
  *   * `DESACTIVACION`: el nivel vuelve a 0 —el crédito se puso al día o salió
  *     del universo de mora—; si vuelve a entrar, empieza de cero.
- *   * Una RESTITUCIÓN por pago caído (`reverso`: reversa o anulación): sube el
- *     nivel hasta el monto restituido, y genera SOLO la parte que el ciclo no
- *     vio bajar. Es el espejo del caso del pago: si el `DECREMENTO` cayó DENTRO
- *     del ciclo, el plegado ya bajó el nivel por él y reponerlo es deshacer ese
- *     paso, no deuda nueva —sin esto, un crédito con Q100 de foto que pagó y se
- *     revirtió terminaba con Q200 de esperado—. Pero si el pago fue ANTES del
- *     corte, su decremento ya está descontado de la foto inicial: esa mora
- *     nunca se contó y el asesor la tiene viva hoy, así que suprimirla borraba
- *     una oportunidad REAL. Por eso el recorrido lleva la cuenta de lo que bajó
- *     adentro por pagos (`bajadoAdentro`) y la restitución suprime hasta ese
- *     monto y genera el resto. Que el nivel suba (y no solo que no genere) es
- *     lo que impide que el `RECALCULO` de la mañana siguiente cobre lo mismo.
+ *   * Una RESTITUCIÓN por pago caído (`reverso`: reversa o anulación): genera
+ *     SOLO la parte que este ciclo no vio bajar POR ESE MISMO PAGO. Si el
+ *     `DECREMENTO` de ese pago cayó DENTRO del ciclo, reponerlo es deshacer un
+ *     paso del recorrido, no deuda nueva —sin esto, un crédito con Q100 de foto
+ *     que pagó y se revirtió terminaba con Q200 de esperado—. Pero si el pago
+ *     fue ANTES del corte, su decremento ya está descontado de la foto inicial:
+ *     esa mora nunca se contó y el asesor la tiene viva hoy, así que suprimirla
+ *     borraba una oportunidad REAL. Lo que liga las dos mitades es el id del
+ *     pago (`pagoId`); con un contador común, el pago de OTRO que hubiera
+ *     bajado adentro tapaba la restitución ajena y la oportunidad viva
+ *     desaparecía del reporte. Lo que sí genera SUBE el techo, para que el
+ *     `RECALCULO` de la mañana siguiente no cobre lo mismo otra vez.
  *   * Un evento que sube pero NO supera el nivel (el rebote del `RECALCULO` de
  *     la mañana siguiente a una condonación) no suma y tampoco mueve el nivel:
  *     si lo bajara, el siguiente rebote volvería a cobrar lo ya contado.
@@ -290,54 +339,136 @@ export function plegarNivel(
 	nivelInicial: number,
 	eventos: MoraLevelEvent[],
 	/**
-	 * ¿Este recorrido es el DEL CICLO? Solo ahí vale la marca de decremento
-	 * anulado: la bajada que se salta es una que este mismo recorrido vio. En el
-	 * tramo ANTERIOR al ciclo la marca no dice cuándo se anuló, así que no se
-	 * honra y el decremento cuenta como la bajada real que fue. Ver `anulado`
-	 * en `MoraLevelEvent`.
+	 * ¿Este recorrido MIDE oportunidad (el ciclo) o solo reconstruye el techo
+	 * con el que el crédito LLEGA al ciclo (la víspera)? Son dos lecturas del
+	 * mismo número y de ahí salen las tres diferencias:
+	 *
+	 *   * la marca de decremento anulado solo vale adentro, donde la bajada es
+	 *     una que este mismo recorrido vio; afuera la marca no dice CUÁNDO se
+	 *     anuló el pago. Ver `anulado` en `MoraLevelEvent`.
+	 *   * adentro el nivel es DEUDA YA CONTADA y un pago no la descuenta;
+	 *     afuera es el techo VIVO y un pago lo baja de verdad, porque esa
+	 *     bajada ya está descontada de la foto inicial y lo que reviva adentro
+	 *     es oportunidad que nunca se contó.
+	 *   * adentro la restitución suma deuda contada; afuera solo sube el techo.
+	 *
+	 * Que afuera el pago siga bajando el techo es además lo que mantiene el
+	 * plegado alineado con el agregado SQL de la siembra (`nivelSembrado`), que
+	 * son equivalentes por prueba.
 	 */
 	{ tramoDelCiclo = true }: { tramoDelCiclo?: boolean } = {},
 ): { nivel: number; generado: number } {
 	let nivel = nivelInicial;
 	let generado = 0;
-	// Cuánto BAJÓ el nivel dentro de este recorrido por bajas reales (pagos).
-	// Es el saldo de "deuda que ya estaba contada y que el ciclo vio
-	// desaparecer": exactamente lo que una restitución puede reponer sin que sea
-	// oportunidad nueva. Ver la regla del reverso más abajo.
-	let bajadoAdentro = 0;
+	// Cuánto bajó CADA PAGO dentro de este recorrido, por pago: el saldo de
+	// "deuda ya contada que este ciclo vio desaparecer por ESE pago", que es
+	// exactamente lo que la restitución de ESE pago puede reponer sin que sea
+	// oportunidad nueva. Las bajadas sin id caen a la bolsa anónima
+	// (`SIN_PAGO`), que es el comportamiento de antes. Ver la regla del reverso.
+	const bajadoPorPago = new Map<string, number>();
+	const anotarBajada = (evento: MoraLevelEvent) => {
+		const bajada = evento.montoAnterior - evento.montoNuevo;
+		if (bajada <= 0) return;
+		const clave = evento.pagoId ?? SIN_PAGO;
+		bajadoPorPago.set(clave, (bajadoPorPago.get(clave) ?? 0) + bajada);
+	};
 	for (const evento of eventos) {
 		// Decremento anulado DENTRO del ciclo: ese pago se cayó, así que la
-		// bajada no ocurrió. Saltarlo deja el nivel donde estaba, y la reposición
-		// del cron que venga después no supera ese nivel y no se cuenta como mora
-		// nueva. Fuera del ciclo la marca no se honra: ver `tramoDelCiclo`.
-		if (tramoDelCiclo && evento.anulado) continue;
+		// bajada no ocurrió y no puede generar nada por sí misma. Se ANOTA igual,
+		// para que la restitución de ese mismo pago —si llega— encuentre su
+		// bajada y no se cuente como deuda nueva. Fuera del ciclo la marca no se
+		// honra: ver `tramoDelCiclo`.
+		//
+		// QUÉ QUEDA DE ESTA RAMA desde que el techo no baja por un pago: casi
+		// nada. El trabajo que hacía —que la reposición del cron no se cobrara
+		// como mora nueva— ahora lo hace el techo, con marca o sin ella. Sigue
+		// acá porque es lo único correcto que se puede hacer con una bajada que
+		// se declaró inexistente: no generar por ella. La marca se conserva
+		// además como contrato con quien la escribe (`marcarDecrementoAnulado`).
+		if (tramoDelCiclo && evento.anulado) {
+			anotarBajada(evento);
+			continue;
+		}
 		if (evento.tipoEvento === "DESACTIVACION") {
 			nivel = 0;
 			continue;
 		}
 		if (evento.tipoEvento === "CONDONACION") continue;
 		if (evento.reverso) {
-			// Restitución (reversa o anulación de pago): devuelve el techo que el
-			// pago caído había bajado. Suprime la generación SOLO hasta lo que ese
-			// mismo recorrido vio bajar por pagos; el resto SÍ genera, porque
-			// corresponde a un pago ANTERIOR al ciclo cuyo decremento ya estaba
-			// descontado de la foto inicial y que por lo tanto nunca se contó.
-			const subida = Math.max(0, evento.montoNuevo - nivel);
-			const suprimido = Math.min(subida, bajadoAdentro);
-			generado += subida - suprimido;
-			bajadoAdentro -= suprimido;
-			if (evento.montoNuevo > nivel) nivel = evento.montoNuevo;
+			if (!tramoDelCiclo) {
+				// En la víspera el nivel es el TECHO VIVO con el que el crédito
+				// llega al ciclo, no deuda contada: la restitución solo lo sube.
+				if (evento.montoNuevo > nivel) nivel = evento.montoNuevo;
+				continue;
+			}
+			// Restitución (reversa o anulación de pago): el cliente vuelve a deber
+			// lo que ese pago había cubierto. Si la bajada de ESE pago la vio este
+			// mismo ciclo, reponerla es deshacer un paso del recorrido y no es
+			// oportunidad nueva. Si no —el pago fue ANTERIOR al ciclo y su
+			// decremento ya está descontado de la foto—, esa deuda NUNCA se contó
+			// y está viva hoy: genera, y el techo sube con ella para que el
+			// RECALCULO de la mañana siguiente no la vuelva a cobrar.
+			const restituido = Math.max(0, evento.montoNuevo - evento.montoAnterior);
+			const suprimido = consumirBajada(
+				bajadoPorPago,
+				evento.pagoId ?? SIN_PAGO,
+				restituido,
+			);
+			generado += restituido - suprimido;
+			nivel += restituido - suprimido;
 			continue;
 		}
 		if (evento.montoNuevo > nivel) {
 			generado += evento.montoNuevo - nivel;
 			nivel = evento.montoNuevo;
 		} else if (evento.montoNuevo < evento.montoAnterior) {
-			bajadoAdentro += nivel - evento.montoNuevo;
-			nivel = evento.montoNuevo;
+			// EL TECHO NO BAJA POR UN PAGO (solo dentro del ciclo): lo ya contado
+			// como oportunidad no se vuelve a contar cuando el cron repone la mora.
+			// La bajada SÍ se anota —es lo que el cliente efectivamente pagó, y lo
+			// que su propia reversa podría reponer—, pero el techo se queda donde
+			// estaba. En la VÍSPERA la regla es la contraria: ahí el nivel es el
+			// techo vivo y un pago lo baja de verdad, porque esa bajada ya está
+			// descontada de la foto inicial y la deuda que reviva adentro nunca se
+			// contó. Ver `tramoDelCiclo`.
+			if (tramoDelCiclo) anotarBajada(evento);
+			else nivel = evento.montoNuevo;
 		}
 	}
 	return { nivel, generado };
+}
+
+/** La bolsa de bajadas sin pago identificable: las filas previas a la marca. */
+const SIN_PAGO = "";
+
+/**
+ * Consume hasta `monto` del crédito de supresión de `clave`, y solo si no
+ * alcanza recurre a la bolsa ANÓNIMA.
+ *
+ * El orden importa y es lo que arregla el defecto: con una sola bolsa común, el
+ * pago de adentro del ciclo —ajeno a la reversa— tapaba entera la restitución
+ * de un pago anterior al corte, y una oportunidad viva desaparecía del reporte.
+ * Ligada al id, la bajada de un pago solo puede suprimir SU propia restitución.
+ * La bolsa anónima queda como red para el historial viejo, que no lleva la
+ * marca: ahí no hay identidad que ligar y quitarle la supresión habría inflado
+ * el esperado de todos los ciclos pasados.
+ */
+function consumirBajada(
+	bajadoPorPago: Map<string, number>,
+	clave: string,
+	monto: number,
+): number {
+	let restante = monto;
+	let consumido = 0;
+	for (const bolsa of clave === SIN_PAGO ? [SIN_PAGO] : [clave, SIN_PAGO]) {
+		if (restante <= 0) break;
+		const disponible = bajadoPorPago.get(bolsa) ?? 0;
+		const toma = Math.min(restante, disponible);
+		if (toma <= 0) continue;
+		bajadoPorPago.set(bolsa, disponible - toma);
+		restante -= toma;
+		consumido += toma;
+	}
+	return consumido;
 }
 
 export type MoraRecoverySourceRow = {
@@ -610,7 +741,10 @@ export function buildMoraRecoveryQuery({
              (h.tipo_evento = 'INCREMENTO' AND ${esRestitucionSql(sql.raw("h.motivo"))}) AS reverso,
              -- El decremento de un pago que se cayó: la bajada no ocurrió. Ver
              -- \`esDecrementoAnuladoSql\`.
-             ${esDecrementoAnuladoSql(sql.raw("h.motivo"))} AS anulado
+             ${esDecrementoAnuladoSql(sql.raw("h.motivo"))} AS anulado,
+             -- El pago del que habla el evento, para ligar cada restitución
+             -- con SU bajada y no con la de otro. Ver \`pagoDelEventoSql\`.
+             ${pagoDelEventoSql(sql.raw("h.motivo"))} AS pago_id
       FROM cartera.moras_historial h
       JOIN creditos_con_asesor ca ON ca.credito_id = h.credito_id
       WHERE h.fecha >= ${inicioUtc}::timestamp
@@ -624,7 +758,8 @@ export function buildMoraRecoveryQuery({
                  'montoAnterior', e.monto_anterior,
                  'montoNuevo', e.monto_nuevo,
                  'reverso', e.reverso,
-                 'anulado', e.anulado
+                 'anulado', e.anulado,
+                 'pagoId', e.pago_id
                )
                ORDER BY e.fecha, e.historial_id
              ) AS eventos
@@ -722,6 +857,8 @@ export type MoraRecoveryEventoCrudo = {
 	montoNuevo: string;
 	reverso: boolean;
 	anulado: boolean;
+	/** El id del pago del evento, o NULL si el motivo no lo lleva. */
+	pagoId: string | null;
 };
 
 /**
@@ -815,6 +952,9 @@ const TRADUCTORES_EVENTO: {
 	// como texto dentro del JSON, y `"false"` es verdadero en JavaScript.
 	reverso: (crudo) => ({ reverso: crudo.reverso === true }),
 	anulado: (crudo) => ({ anulado: crudo.anulado === true }),
+	// `?? null` y no el valor crudo: `undefined` haría que la clave existiera
+	// con el valor de "no vino", y la bolsa anónima se elige por `null`.
+	pagoId: (crudo) => ({ pagoId: crudo.pagoId ?? null }),
 };
 
 /**

@@ -164,26 +164,82 @@ export async function buscarDecrementoDelPago(
 }
 
 /**
+ * ¿Este evento es una RE-FIJACIÓN POR FÓRMULA del cron?
+ *
+ * Es la única clase de evento que puede DESHACER el decremento de un pago, y
+ * la razón es cómo escribe el cron: `procesarMoras` no suma ni resta, FIJA el
+ * monto que sale de la fórmula (`latefee.ts`, ramas `CREACION` y `RECALCULO`,
+ * las dos con `origen: "PROCESO_AUTO"`). Ese REEMPLAZO ignora el pago, así que
+ * después de él la bajada del pago ya no está en el saldo.
+ *
+ * Ningún otro evento repone ESTE decremento:
+ *
+ *   * un `INCREMENTO` `API_MANUAL` es el ajuste de un analista o la
+ *     restitución de OTRO pago: deuda distinta, no la devolución de esta;
+ *   * un `DECREMENTO` es otro pago cobrando mora, lo contrario de reponer;
+ *   * una `DESACTIVACION` apaga la mora, tampoco repone nada.
+ *
+ * Es el mismo filtro que tenía el camino viejo (`elCronYaRepusoLaMora`) y que
+ * el camino nuevo había perdido: sin él, CUALQUIER subida posterior contaba
+ * como restitución de este pago.
+ */
+export function esRefijacionDelCron(evento: {
+	origen?: string | null;
+	tipo_evento?: string | null;
+}): boolean {
+	return (
+		evento.origen === "PROCESO_AUTO" &&
+		(evento.tipo_evento === "CREACION" || evento.tipo_evento === "RECALCULO")
+	);
+}
+
+/**
  * Cuánto de lo que ese decremento bajó YA volvió a subir.
  *
- * Es la suma de las SUBIDAS (`monto_nuevo - monto_anterior` cuando es
- * positivo) de todos los eventos posteriores al decremento, topeada en lo que
- * el decremento había bajado. Reemplaza al "¿hubo algún CREACION/RECALCULO del
- * cron?", que era todo-o-nada y se equivocaba en los dos sentidos:
+ * ── Qué cuenta y qué no ─────────────────────────────────────────────────────
+ * Cuenta UN SOLO evento: la PRIMERA re-fijación por fórmula del cron posterior
+ * al decremento (`esRefijacionDelCron`). Lo que ese evento mueva —acotado a
+ * `[0, bajado]`— es lo repuesto, y ahí se corta el recorrido.
  *
- *   * una reposición PARCIAL (el cron recalculó a un monto menor porque el pago
- *     bajó el capital) contaba como reposición completa y la diferencia se
- *     perdía;
- *   * un `RECALCULO` que subió por OTRAS cuotas contaba como si hubiera
- *     repuesto esto, y la restitución legítima quedaba salteada.
+ * Las dos mitades del criterio hacen falta por separado:
  *
- * Solo se SUMAN las subidas; las bajadas posteriores NO se restan. Una bajada
- * posterior es otro pago cobrando la mora que el cron ya había repuesto: esa
- * deuda se saldó de verdad y devolverla acá se la cobraría dos veces al mismo
- * cliente.
+ *   * el FILTRO por origen y tipo, porque sin él cualquier subida ajena se
+ *     cobraba como restitución de este pago. Un `INCREMENTO` manual de Q10 de
+ *     un analista dejaba la restitución en Q50 en vez de Q60, y el crédito
+ *     terminaba con Q100 de mora en vez de Q110: plata del cliente;
+ *   * el corte en la PRIMERA, porque el cron REEMPLAZA el monto. Esa primera
+ *     corrida ya borró la bajada del pago: todo lo que suba DESPUÉS es mora
+ *     nueva —cuotas que vencieron— y no devolución de nada. Sumarlas saturaba
+ *     el tope y dejaba la restitución en CERO. Con mora proporcional, que
+ *     recalcula todas las noches, bastaban unos días entre el pago y la reversa
+ *     para que la restitución entera desapareciera.
+ *
+ * Se conserva el DELTA REAL en vez del todo-o-nada del camino viejo: si la
+ * re-fijación subió menos que lo que el pago bajó —el pago también bajó el
+ * capital, y la fórmula da menos—, se restituye la diferencia.
+ *
+ * ── Lo que este criterio NO cubre ───────────────────────────────────────────
+ *   * Una re-fijación del cron que sube por OTRAS cuotas vencidas cuenta como
+ *     reposición hasta el tope. No se puede separar qué parte de la fórmula es
+ *     esto y qué parte es deuda nueva; y da igual, porque el reemplazo ya
+ *     borró la bajada del pago de todas formas.
+ *   * Una re-fijación que BAJA el monto (la fórmula da menos que el saldo que
+ *     dejó el pago) cuenta como CERO repuesto, y la restitución completa puede
+ *     dejar la mora por encima de lo que la fórmula dice hoy. Nunca por encima
+ *     de lo que el crédito debía ANTES del pago, y la siguiente corrida del
+ *     cron la vuelve a fijar.
+ *   * Un `INCREMENTO` manual hecho por un analista con la intención de reponer
+ *     esta mora a mano no se reconoce: el evento no tiene cómo declararlo. La
+ *     restitución se suma encima. Es el precio de no volver a tratar cualquier
+ *     ajuste ajeno como si fuera esta devolución.
  *
  * El corte es por `(fecha, historial_id)` y no solo por `fecha`: dos eventos
  * pueden caer en la misma marca de `clock_timestamp()`.
+ *
+ * El filtro por origen y tipo se resuelve en TypeScript y no en el `WHERE`: el
+ * recorrido es sobre los eventos de UN crédito posteriores a UN instante
+ * —puñado de filas—, y acá el criterio queda ejercitable por las pruebas, que
+ * corren contra un ejecutor falso al que el `WHERE` le pasa por encima.
  */
 export async function moraRepuestaDesdeElDecremento(
 	executor: Pick<typeof db, "select">,
@@ -198,6 +254,8 @@ export async function moraRepuestaDesdeElDecremento(
 		.select({
 			monto_anterior: moras_historial.monto_anterior,
 			monto_nuevo: moras_historial.monto_nuevo,
+			origen: moras_historial.origen,
+			tipo_evento: moras_historial.tipo_evento,
 		})
 		.from(moras_historial)
 		.where(
@@ -214,13 +272,13 @@ export async function moraRepuestaDesdeElDecremento(
 		)
 		.orderBy(asc(moras_historial.fecha), asc(moras_historial.historial_id));
 
-	let repuesto = 0;
-	for (const evento of eventos) {
-		const subida = Number(evento.monto_nuevo) - Number(evento.monto_anterior);
-		if (Number.isFinite(subida) && subida > 0) repuesto += subida;
-		if (repuesto >= decremento.bajado) return decremento.bajado;
-	}
-	return repuesto;
+	const refijacion = eventos.find((evento) => esRefijacionDelCron(evento));
+	if (!refijacion) return 0;
+
+	const subida =
+		Number(refijacion.monto_nuevo) - Number(refijacion.monto_anterior);
+	if (!Number.isFinite(subida) || subida <= 0) return 0;
+	return Math.min(subida, decremento.bajado);
 }
 
 /**

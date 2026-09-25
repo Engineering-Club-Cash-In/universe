@@ -343,7 +343,17 @@ describe("el pago pendiente que sobrevivió una corrida del cron", () => {
           motivo: `Pago aplicado a mora (crédito 4242) [pago #${PAGO_ID}]`,
         },
       ],
-      posteriores: [{ monto_anterior: "0.00", monto_nuevo: "100.00" }],
+      // La re-fijación por fórmula del cron: `PROCESO_AUTO` + `RECALCULO`. El
+      // origen y el tipo ya no son decorativos — son lo que distingue a quien
+      // de verdad pudo reponer esta bajada de cualquier otra subida de la mora.
+      posteriores: [
+        {
+          monto_anterior: "0.00",
+          monto_nuevo: "100.00",
+          origen: "PROCESO_AUTO",
+          tipo_evento: "RECALCULO",
+        },
+      ],
     });
 
     await anular();
@@ -368,7 +378,14 @@ describe("el pago pendiente que sobrevivió una corrida del cron", () => {
           motivo: `Pago aplicado a mora (crédito 4242) [pago #${PAGO_ID}]`,
         },
       ],
-      posteriores: [{ monto_anterior: "0.00", monto_nuevo: "60.00" }],
+      posteriores: [
+        {
+          monto_anterior: "0.00",
+          monto_nuevo: "60.00",
+          origen: "PROCESO_AUTO",
+          tipo_evento: "RECALCULO",
+        },
+      ],
     });
 
     await anular();

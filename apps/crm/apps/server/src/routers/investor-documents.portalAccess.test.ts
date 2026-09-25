@@ -21,6 +21,10 @@ const inserts: { tabla: unknown; valores: Record<string, any> }[] = [];
 const intentos: { tabla: unknown; valores: Record<string, any> }[] = [];
 let fallaDelInsert: Error | null = null;
 const idsEnviados: number[][] = [];
+// El SEGUNDO argumento con que el procedure llamó al cliente. `undefined` es
+// "no mandó la llave" (empresa), y es distinto de no haber llamado: para eso
+// está el largo de `idsEnviados`.
+const correosAprobadosEnviados: (string | undefined)[] = [];
 let responderCartera: () => Promise<unknown> = async () => ({
 	message: "Procesados 1 inversionista(s)",
 	resultados: [],
@@ -128,8 +132,9 @@ const moduloReal = (await import(
 mock.module("../services/cartera-back-client", () => ({
 	...moduloReal,
 	carteraBackClient: {
-		otorgarAccesoPortal: async (ids: number[]) => {
+		otorgarAccesoPortal: async (ids: number[], correoAprobado?: string) => {
 			idsEnviados.push(ids);
+			correosAprobadosEnviados.push(correoAprobado);
 			return await responderCartera();
 		},
 	},
@@ -211,6 +216,7 @@ describe("darAccesoPortal", () => {
 		intentos.length = 0;
 		fallaDelInsert = null;
 		idsEnviados.length = 0;
+		correosAprobadosEnviados.length = 0;
 		responderCartera = async () => respuestaCartera();
 	});
 
@@ -532,5 +538,236 @@ describe("darAccesoPortal", () => {
 	test("el namespace publicado conserva los exports reales del módulo", () => {
 		expect(typeof (moduloReal as any).CarteraBackHttpError).toBe("function");
 		expect(typeof (moduloReal as any).CarteraBackClient).toBe("function");
+	});
+
+	// ========================================================================
+	// SE APRUEBA UN CORREO, NO UN ID
+	// ========================================================================
+	//
+	// El diálogo le enseña un correo a una persona y le pide aprobarlo. Hasta
+	// que este campo existió, el clic mandaba solo el id y cartera releía la
+	// fila para saber a dónde mandar la contraseña: lo aprobado y lo usado eran
+	// dos lecturas distintas de algo reescribible en el medio, y quien lo
+	// reescribe (`editarInversionista`, once familias de rol) no es quien
+	// aprueba (este botón, cuatro).
+
+	test("el correo aprobado llega hasta el cliente de cartera", async () => {
+		await call(
+			investorDocumentsRouter.darAccesoPortal,
+			{ inversionistaId: 7, correoAprobado: "ana@ejemplo.com" },
+			contexto(),
+		);
+
+		// La mutación que esto mata: que el procedure acepte el campo y no lo
+		// pase. El diálogo se vería igual y el control no existiría.
+		expect(idsEnviados).toEqual([[7]]);
+		expect(correosAprobadosEnviados).toEqual(["ana@ejemplo.com"]);
+	});
+
+	// El camino de la EMPRESA sigue vivo: su diálogo no enseña correo porque la
+	// cuenta es del representante legal, y cartera ya corta antes.
+	test("sin correo aprobado el procedure sigue funcionando (empresa)", async () => {
+		await call(
+			investorDocumentsRouter.darAccesoPortal,
+			{ inversionistaId: 7 },
+			contexto(),
+		);
+
+		expect(idsEnviados).toEqual([[7]]);
+		// Llamó, y con la llave AUSENTE. No es lo mismo que no haber llamado.
+		expect(correosAprobadosEnviados).toEqual([undefined]);
+	});
+
+	test("el correo aprobado se recorta antes de salir", async () => {
+		await call(
+			investorDocumentsRouter.darAccesoPortal,
+			{ inversionistaId: 7, correoAprobado: "  ana@ejemplo.com  " },
+			contexto(),
+		);
+
+		expect(correosAprobadosEnviados).toEqual(["ana@ejemplo.com"]);
+	});
+
+	// LA PRUEBA QUE IMPORTA del campo vacío. Un diálogo que SÍ tenía que
+	// enseñar un correo y llegó sin él es un front roto. Tratarlo como "no se
+	// aprobó nada" provisionaría SIN aprobación — el agujero, servido por el
+	// propio arreglo. Rebota acá, un escalón antes del `correo_aprobado_invalido`
+	// de cartera, y `null` cae igual aunque cartera lo trate como ausente.
+	test("un correo aprobado vacío rebota sin llegar a cartera y SIN dejar fila", async () => {
+		for (const vacio of ["", "   ", "\t", null]) {
+			idsEnviados.length = 0;
+			correosAprobadosEnviados.length = 0;
+			intentos.length = 0;
+
+			await expect(
+				call(
+					investorDocumentsRouter.darAccesoPortal,
+					{ inversionistaId: 7, correoAprobado: vacio } as never,
+					contexto(),
+				),
+			).rejects.toThrow();
+
+			expect(idsEnviados).toHaveLength(0);
+			// Y NO deja constancia. Importa: el `catch` del handler le pregunta a
+			// `exigeConstanciaPorFalla(null)`, que contesta "registrá" —es su
+			// respuesta correcta para un timeout—. Si este rechazo llegara hasta
+			// ahí, la bitácora diría "no se sabe si la contraseña salió" sobre una
+			// petición que NUNCA salió. Lo evita zod, que corta antes del handler.
+			expect(intentos).toHaveLength(0);
+		}
+	});
+
+	test("un correo aprobado más largo que la columna rebota; uno de 255 pasa", async () => {
+		// 256: uno más que `inversionistas.email` (varchar(255)) y que el
+		// `maxLength` de cartera. El largo se afirma para que no se vuelva otra
+		// cosa al editar la cadena.
+		const pasado = `${"a".repeat(244)}@ejemplo.com`;
+		expect(pasado).toHaveLength(256);
+
+		await expect(
+			call(
+				investorDocumentsRouter.darAccesoPortal,
+				{ inversionistaId: 7, correoAprobado: pasado },
+				contexto(),
+			),
+		).rejects.toThrow();
+		expect(idsEnviados).toHaveLength(0);
+
+		// 255 exactos CON espacios alrededor: el `.trim()` corre antes del
+		// `.max(255)`, así que entra —y llega a cartera midiendo 255, que es lo
+		// que su `maxLength` mide—. Sin ese orden, un correo legítimo se iría en
+		// 422 y quien aprueba vería un error sin causa visible.
+		const alLimite = `${"a".repeat(243)}@ejemplo.com`;
+		expect(alLimite).toHaveLength(255);
+		await call(
+			investorDocumentsRouter.darAccesoPortal,
+			{ inversionistaId: 7, correoAprobado: `  ${alLimite}  ` },
+			contexto(),
+		);
+		expect(correosAprobadosEnviados).toEqual([alLimite]);
+	});
+
+	// ========================================================================
+	// EL VETO
+	// ========================================================================
+
+	// LA PRUEBA QUE IMPORTA de la bitácora. El veto no provisiona nada, así que
+	// por forma se parece a los no-ops que `exigeConstancia` calla (la empresa).
+	// No lo es: significa que el correo de la fila CAMBIÓ entre que el diálogo se
+	// pintó y el clic llegó — el evento contra el que existe todo esto. Si se
+	// callara, la única alarma de la carrera se apagaría.
+	test("el VETO por correo que cambió DEJA fila en la bitácora", async () => {
+		responderCartera = async () =>
+			desenlace({ estado: "fallo", motivo: "correo_aprobado_no_coincide" });
+
+		const actual = await call(
+			investorDocumentsRouter.darAccesoPortal,
+			{ inversionistaId: 7, correoAprobado: "vieja@ejemplo.com" },
+			contexto(),
+		);
+
+		expect(inserts).toHaveLength(1);
+		expect(inserts[0].valores).toMatchObject({
+			inversionistaId: 7,
+			action: "acceso_portal",
+			performedBy: "usr_operador",
+		});
+		expect(inserts[0].valores.details).toMatchObject({
+			estado: "fallo",
+			motivo: "correo_aprobado_no_coincide",
+			// Lo que se aprobó queda escrito. Cartera NO devuelve el correo que
+			// la fila tiene AHORA, así que esta es la única evidencia de lo que el
+			// diálogo enseñaba; con el `investor_updated` de `editarInversionista`
+			// —que sí guarda el email nuevo— se reconstruye la carrera entera.
+			correoAprobado: "vieja@ejemplo.com",
+		});
+
+		// Y el veto vuelve al front tal cual: es lo que explica por qué no pasó
+		// nada y por qué hay que volver a mirar la pantalla.
+		expect((actual as any).resultados[0].motivo).toBe(
+			"correo_aprobado_no_coincide",
+		);
+	});
+
+	test("el correo aprobado queda escrito también cuando el acto SÍ ocurrió", async () => {
+		await call(
+			investorDocumentsRouter.darAccesoPortal,
+			{ inversionistaId: 7, correoAprobado: "ana@ejemplo.com" },
+			contexto(),
+		);
+
+		expect(inserts[0].valores.details).toMatchObject({
+			estado: "creada",
+			usuarioEmail: "ana@ejemplo.com",
+			correoAprobado: "ana@ejemplo.com",
+		});
+	});
+
+	// Donde MÁS vale: acá no se sabe si la contraseña salió, y `usuarioEmail`
+	// viene en null porque cartera nunca contestó. El correo aprobado es el
+	// único dato de a dónde habría ido a parar.
+	test("un timeout deja constancia CON el correo que se había aprobado", async () => {
+		responderCartera = async () => {
+			throw new Error("socket hang up");
+		};
+
+		await expect(
+			call(
+				investorDocumentsRouter.darAccesoPortal,
+				{ inversionistaId: 7, correoAprobado: "ana@ejemplo.com" },
+				contexto(),
+			),
+		).rejects.toThrow("cartera no está respondiendo");
+
+		expect(inserts).toHaveLength(1);
+		expect(inserts[0].valores.details).toMatchObject({
+			estado: "sin_respuesta_de_cartera",
+			usuarioEmail: null,
+			correoAprobado: "ana@ejemplo.com",
+		});
+	});
+
+	// La empresa no aprueba ningún correo, y la fila lo dice en vez de callarlo:
+	// una llave ausente se lee igual que una que alguien olvidó escribir.
+	test("sin correo aprobado la fila lo deja en null, no omitido", async () => {
+		responderCartera = async () => desenlace({ estado: "ya_tenia" });
+
+		await call(
+			investorDocumentsRouter.darAccesoPortal,
+			{ inversionistaId: 7 },
+			contexto(),
+		);
+
+		expect(inserts).toHaveLength(1);
+		expect(inserts[0].valores.details).toHaveProperty("correoAprobado", null);
+	});
+
+	// Los dos 400 con que cartera rechaza la LLAMADA ENTERA por culpa de este
+	// campo. Los dos guards corren antes del `db.select` de cartera, así que no
+	// se provisionó nada y `STATUS_SIN_EFECTO` (que ya trae el 400) acierta al
+	// no dejar fila. Se fija acá para que quede atado a estos motivos nuevos.
+	test("los 400 de cartera por el correo aprobado no dejan fila", async () => {
+		for (const codigo of [
+			"correo_aprobado_invalido",
+			"correo_aprobado_con_varios_inversionistas",
+		]) {
+			intentos.length = 0;
+			responderCartera = async () => {
+				throw new moduloReal.CarteraBackHttpError(`HTTP 400: ${codigo}`, 400, {
+					error: codigo,
+					message: "El correo aprobado viene vacío",
+				});
+			};
+
+			await expect(
+				call(
+					investorDocumentsRouter.darAccesoPortal,
+					{ inversionistaId: 7, correoAprobado: "ana@ejemplo.com" },
+					contexto(),
+				),
+			).rejects.toThrow();
+
+			expect(intentos).toHaveLength(0);
+		}
 	});
 });

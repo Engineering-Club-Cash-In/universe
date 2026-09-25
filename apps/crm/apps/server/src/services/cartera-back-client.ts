@@ -2637,8 +2637,47 @@ export class CarteraBackClient {
 	 * (solo reintenta GET/HEAD) es la correcta acá y se deja tal cual — y cubre
 	 * también el reenvío por reautenticación ante 401/403, que antes repetía la
 	 * petición al margen de esa política.
+	 *
+	 * SE APRUEBA UN CORREO, NO UN ID
+	 * ------------------------------
+	 * `correoAprobado` es el correo que el diálogo del CRM le ENSEÑÓ a quien
+	 * apretó. Viaja porque el id solo no alcanza: cartera volvía a LEER la fila
+	 * para saber a dónde mandar la contraseña, así que lo aprobado y lo usado
+	 * eran dos lecturas distintas de una fila que se puede reescribir entre una
+	 * y otra. La ventana dura lo que la persona tarde en leer el diálogo, y
+	 * quien puede moverla NO es quien aprueba: `editarInversionista` (mismo
+	 * router) cambia el `email` bajo once familias de rol y este botón cuelga
+	 * de cuatro. Cartera lo revalida contra la fila y VETA con
+	 * `correo_aprobado_no_coincide` sin provisionar nada
+	 * (controllers/otorgarAccesoPortal.ts).
+	 *
+	 * Se manda RECORTADO, y no crudo, por dos razones que apuntan al mismo
+	 * lado: el `maxLength: 255` de Elysia mide el string que RECIBE —un correo
+	 * de 255 con espacios alrededor se iría en 422 antes de llegar al
+	 * handler—, y así lo que se manda es exactamente lo que el procedure ya
+	 * validó y lo que queda escrito en la bitácora. Una sola definición.
+	 *
+	 * La llave se OMITE cuando no hay correo aprobado. Omitir y `null` son
+	 * equivalentes para cartera, pero `""` o espacios son un 400
+	 * (`correo_aprobado_invalido`): mandar la llave vacía es un llamador roto,
+	 * no un "no se aprobó nada". Por eso acá se TIRA en vez de omitirla en
+	 * silencio — omitirla convertiría el error del llamador en un
+	 * provisionamiento SIN aprobación, que es justo el agujero que esto cierra.
+	 *
+	 * El único caso legítimo sin correo es la EMPRESA: su diálogo no enseña
+	 * ninguno —la cuenta es del representante— y cartera ya corta antes con
+	 * `es_empresa_el_acceso_es_del_representante`.
+	 *
+	 * Con `correoAprobado` va UN SOLO id. Esa regla NO se reimplementa acá: la
+	 * dueña es cartera, que rechaza la combinación con
+	 * `correo_aprobado_con_varios_inversionistas` (400). Duplicarla sería una
+	 * segunda definición de la misma regla, que es exactamente como aparecen
+	 * las asimetrías silenciosas; y las dos fallan cerrado igual.
 	 */
-	async otorgarAccesoPortal(inversionistaIds: number[]): Promise<{
+	async otorgarAccesoPortal(
+		inversionistaIds: number[],
+		correoAprobado?: string,
+	): Promise<{
 		message: string;
 		resultados: {
 			inversionistaId: number;
@@ -2654,6 +2693,17 @@ export class CarteraBackClient {
 			motivo: string | null;
 		}[];
 	}> {
+		const correoAprobadoRecortado = correoAprobado?.trim();
+
+		// Presente pero vacío: se tira ANTES de salir a la red. Ver el bloque de
+		// la llave vacía en el docstring — el silencio acá sería provisionar sin
+		// aprobación.
+		if (correoAprobado !== undefined && !correoAprobadoRecortado) {
+			throw new Error(
+				"otorgarAccesoPortal: `correoAprobado` vino vacío. Si no hay correo que aprobar (empresa), no mandes el campo.",
+			);
+		}
+
 		const response = await this.request<{
 			message: string;
 			resultados: {
@@ -2671,8 +2721,14 @@ export class CarteraBackClient {
 			}[];
 		}>("/investor/portal-access", {
 			method: "POST",
-			// Cartera espera un ARREGLO (`t.Array(t.Number(), { minItems: 1 })`).
-			body: JSON.stringify({ inversionista_ids: inversionistaIds }),
+			body: JSON.stringify({
+				// Cartera espera un ARREGLO (`t.Array(t.Number(), { minItems: 1 })`).
+				inversionista_ids: inversionistaIds,
+				// El spread deja la llave AUSENTE, no en `""` ni en `null`.
+				...(correoAprobadoRecortado
+					? { correo_aprobado: correoAprobadoRecortado }
+					: {}),
+			}),
 		});
 		return response;
 	}

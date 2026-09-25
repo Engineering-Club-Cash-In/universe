@@ -696,10 +696,37 @@ export const investorDocumentsRouter = {
 	// contraseña del portal salía hacia el buzón que acabara de escribir. Cerrar
 	// solo este procedure no arregla `editarInversionista`, pero sí corta el
 	// segundo paso, que es el que convierte una edición en una credencial.
+	//
+	// `correoAprobado` es el correo que el diálogo ENSEÑÓ antes de apretar, y
+	// viaja hasta cartera para que lo revalide contra la fila. El id solo no
+	// alcanzaba: cartera volvía a LEER la fila para saber a dónde mandar la
+	// contraseña, así que lo aprobado y lo usado eran dos lecturas distintas de
+	// algo que se puede reescribir en el medio. La ventana dura lo que la
+	// persona tarde en leer el diálogo, y quien la mueve —`editarInversionista`,
+	// once familias— no es quien aprueba —este botón, cuatro—.
 	darAccesoPortal: investmentProcedure
 		.input(
 			z.object({
 				inversionistaId: z.number().int().positive(),
+
+				// AUSENTE o un correo de verdad. NO se acepta `""`, ni espacios, ni
+				// `null`, aunque cartera trate `null` como ausente:
+				//
+				//  - Ausente es el camino legítimo de la EMPRESA, cuyo diálogo no
+				//    enseña correo porque la cuenta es del representante.
+				//  - Vacío es un diálogo que SÍ tenía que enseñar uno y llegó sin él.
+				//    Dejarlo pasar como "no se aprobó nada" saltaría el control justo
+				//    cuando el front se equivoca, que es cuando más falta hace; y
+				//    aceptar `null` le daría a un front con un `?? null` de más la
+				//    misma salida silenciosa. Acá rebota con 400 sin salir a la red,
+				//    un escalón antes del `correo_aprobado_invalido` de cartera.
+				//
+				// `.trim()` va ANTES de `.min`/`.max` a propósito (zod aplica los
+				// checks en orden): así `"   "` se rechaza y el `.max(255)` mide el
+				// mismo string RECORTADO que Elysia va a medir del otro lado con su
+				// `maxLength: 255`. Al revés, un correo de 255 con espacios alrededor
+				// pasaría acá y se iría en 422 contra cartera.
+				correoAprobado: z.string().trim().min(1).max(255).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -720,9 +747,10 @@ export const investorDocumentsRouter = {
 				ReturnType<typeof carteraBackClient.otorgarAccesoPortal>
 			>;
 			try {
-				result = await carteraBackClient.otorgarAccesoPortal([
-					input.inversionistaId,
-				]);
+				result = await carteraBackClient.otorgarAccesoPortal(
+					[input.inversionistaId],
+					input.correoAprobado,
+				);
 			} catch (error) {
 				// Una llamada que FALLÓ también deja constancia, salvo cuando el
 				// propio status prueba que cartera no llegó a provisionar.
@@ -755,6 +783,11 @@ export const investorDocumentsRouter = {
 							motivo: motivoDeLaFalla(error),
 							correo: null,
 							httpStatus: statusDeCartera,
+							// Acá es donde MÁS vale: este es el caso en que no se sabe si
+							// la contraseña salió. `usuarioEmail` viene en null porque
+							// cartera nunca contestó, así que el correo aprobado es el
+							// ÚNICO dato de a dónde habría ido a parar.
+							correoAprobado: input.correoAprobado ?? null,
 						},
 						...firmante,
 					});
@@ -779,6 +812,21 @@ export const investorDocumentsRouter = {
 			// se apaga y cada apretón vuelve sin crear nada y sin mandar ningún
 			// correo—. Qué cuenta como acto, y por qué la duda SIEMPRE cuenta,
 			// vive en `lib/salud-cuenta-portal.ts`.
+			//
+			// EL VETO DEJA FILA, y es el caso que más la necesita. Cuando cartera
+			// contesta `fallo/correo_aprobado_no_coincide` no provisionó nada, así
+			// que por forma se parece a los no-ops que este guard calla. No lo es:
+			// un veto significa que la fila SE MOVIÓ entre que el diálogo se pintó
+			// y el clic llegó, que es exactamente el evento contra el que existe
+			// todo este mecanismo. Puede ser alguien corrigiendo un typo o puede
+			// ser el correo envenenado a tiempo, y desde acá no se distingue —
+			// justamente por eso se anota—. Tampoco es ruido repetitivo como la
+			// empresa: la empresa contesta igual en cada apretón para siempre, y un
+			// veto solo ocurre si de verdad cambió el destinatario.
+			//
+			// Cae del lado correcto SOLO porque `MOTIVOS_SIN_EFECTO` es una lista
+			// blanca y el motivo del veto no está en ella. Es deliberado y está
+			// anotado allá: agregarlo apagaría la única alarma de la carrera.
 			if (exigeConstancia(detalle)) {
 				await dejarConstanciaDeAccesoPortal({
 					inversionistaId: input.inversionistaId,
@@ -791,6 +839,21 @@ export const investorDocumentsRouter = {
 						// Si el correo se desvió por SERVER != PROD, la cuenta existe y
 						// su dueño no puede entrar; sin este rastro nadie se entera.
 						correo: detalle?.correo ?? null,
+						// QUÉ se aprobó, no solo a quién. Sin esto la fila dice que
+						// alguien autorizó, pero no qué tenía delante al autorizar, y
+						// esa es la mitad que importa cuando el correo de la fila
+						// resulta no ser de su dueño.
+						//
+						// En un veto es la ÚNICA evidencia que queda de lo que el
+						// diálogo enseñaba: cartera NO devuelve el correo de la fila a
+						// propósito. Con el `investor_updated` de `editarInversionista`
+						// —que sí guarda el `email` nuevo— el par reconstruye la
+						// carrera entera: quién movió el correo, cuándo, y qué se había
+						// aprobado.
+						//
+						// No agrega una clase de dato nueva a la tabla: `usuarioEmail`
+						// y `correo.destinatarioReal` ya viven en esta misma columna.
+						correoAprobado: input.correoAprobado ?? null,
 					},
 					...firmante,
 				});

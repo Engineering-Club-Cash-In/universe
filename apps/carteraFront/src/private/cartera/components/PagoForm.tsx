@@ -6,6 +6,11 @@ import { formatFieldErrors } from "@/lib/formErrors";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import {
+  escalonesQueConsumenLaBoleta,
+  loQueElAbonoACapitalNoAplica,
+} from "./escalonesQueConsumenLaBoleta";
+import { montoParaAbonoDirectoACapital } from "./abonoDirectoACapital";
 import { DollarSign, Info, FileText, Building2, CheckCircle2, ChevronsUpDown, Check } from "lucide-react";
 import { Combobox, Transition } from "@headlessui/react";
 import { Fragment, useMemo } from "react";
@@ -57,6 +62,8 @@ export function PagoForm() {
     resetBuscador,
     setResetBuscador,
     mora,
+    rubros,
+    rubrosActual,
     convenioActivoInfo,
     cuotaSeleccionada,
     abonosCuota,
@@ -217,57 +224,188 @@ export function PagoForm() {
         const montoBoleta = Number(formik.values.monto_boleta) || 0;
         const otros = Number(formik.values.otros) || 0;
         const moraMonto = mora || 0;
+        // rubrosActual ya viaja como number (a diferencia de moraActual, que
+        // llega en string cuando hay mora).
+        const rubrosMonto = Number(rubrosActual || 0);
         const cuotaConvenio = Number(convenioActivoInfo?.cuotaConvenioAPagar) || 0;
         const saldoAFavor = Number(dataCredito?.usuario?.saldo_a_favor) || 0;
 
-        // Total disponible = Boleta + Saldo a Favor
-        let montoRestante = montoBoleta;
+        /**
+         * El abono DIRECTO a capital sale primero, antes que todo lo demás.
+         *
+         * Es lo que hace el backend: `calcularMontoEfectivo` lo resta de la
+         * boleta y recién sobre ese resto corre la cascada otros → mora →
+         * rubros → convenio → cuotas. Acá se partía de la boleta entera, así que
+         * con "Abonar todo a Capital" —que manda la boleta completa a capital—
+         * este desglose seguía anunciando que una parte se iba a los rubros
+         * mientras el backend no les dejaba un quetzal. El asesor confirmaba una
+         * pantalla y pasaba otra cosa.
+         */
+        const abonoCapitalDirecto = Number(formik.values.abono_directo_capital) || 0;
+
+        // Total disponible = Boleta − abono directo a capital
+        let montoRestante = Math.max(0, montoBoleta - abonoCapitalDirecto);
 
         const distribucion: { concepto: string; monto: number }[] = [];
 
+        // Los montos aplicados de cada escalón se declaran acá afuera porque el
+        // aviso de "cobro corto" de más abajo tiene que nombrar QUIÉN se llevó
+        // la plata, no solo los rubros.
+        let montoOtrosAplicado = 0;
+        let montoMoraAplicado = 0;
+        let montoConvenioAplicado = 0;
+
         // 1 Otros
         if (otros > 0) {
-          const montoOtros = Math.min(montoRestante, otros);
-          montoRestante -= montoOtros;
+          montoOtrosAplicado = Math.min(montoRestante, otros);
+          montoRestante -= montoOtrosAplicado;
           distribucion.push({
             concepto: "1. Otros",
-            monto: montoOtros,
+            monto: montoOtrosAplicado,
           });
         }
 
         // 2 Mora
         if (moraMonto > 0) {
-          const montoMora = Math.min(montoRestante, moraMonto);
-          montoRestante -= montoMora;
+          montoMoraAplicado = Math.min(montoRestante, Number(moraMonto));
+          montoRestante -= montoMoraAplicado;
           distribucion.push({
             concepto: "2. Mora",
-            monto: montoMora,
+            monto: montoMoraAplicado,
           });
         }
 
-        // 3 Convenio
-        if (cuotaConvenio > 0) {
-          const montoConv = Math.min(montoRestante, cuotaConvenio);
-          montoRestante -= montoConv;
+        // 3 Rubros (tarjeta de circulación, placas, traspaso...). El back los
+        // cobra en este punto exacto de la cascada — otros → mora → rubros →
+        // convenio → cuotas —, antes que el convenio y la cuota. Mostrarlos
+        // en otro orden le mentiría al asesor sobre cómo se aplica la plata.
+        let montoRubrosAplicado = 0;
+        if (rubrosMonto > 0) {
+          montoRubrosAplicado = Math.min(montoRestante, rubrosMonto);
+          montoRestante -= montoRubrosAplicado;
           distribucion.push({
-            concepto: "3. Cuota Convenio",
-            monto: montoConv,
+            concepto: "3. Rubros",
+            monto: montoRubrosAplicado,
           });
         }
 
-        // 4 Cuota Normal (restando abonos ya realizados desde endpoint)
+        // 4 Convenio — SE REGISTRA PERO NO CONSUME LA BOLETA.
+        //
+        // El back topea el convenio al disponible y acredita `convenios_pago`,
+        // pero NO lo resta de `disponible_restante`: "acreditar convenios_pago
+        // es el RASTRO de cuánto de esta boleta cuenta como catch-up del
+        // convenio, no un cobro aparte que compita con las cuotas"
+        // (registerPayment.ts, regla del dueño del dominio 06-ago-2026, que
+        // revirtió la resta de b6d79b8d). Esa misma plata sigue pagando la cuota
+        // corriente, y el hook ya lo dice igual (`registerPayment.ts`: "El
+        // convenio se REGISTRA pero NO consume la boleta").
+        //
+        // Acá se restaba igual, y el modal mentía dos veces con boleta Q1,000 /
+        // convenio Q300 / cuota Q1,000: mostraba la cuota en Q700 cuando el back
+        // la paga entera, y encima le echaba la culpa al convenio en el aviso de
+        // cobro corto.
+        //
+        // La línea se CONSERVA —el asesor tiene que ver que el convenio se
+        // acredita— pero etiquetada como lo que es, y `montoRestante` no se toca.
+        if (cuotaConvenio > 0) {
+          montoConvenioAplicado = Math.min(montoRestante, cuotaConvenio);
+          distribucion.push({
+            concepto: "4. Cuota Convenio (se registra, no descuenta)",
+            monto: montoConvenioAplicado,
+          });
+        }
+
+        // 5 Cuota Normal (restando abonos ya realizados desde endpoint)
         const cuotaBase =
           Number(dataCredito?.cuotaMensualAPagar ?? dataCredito?.credito?.cuota) || 0;
         const abonosYaHechos = displayedPartialContribution;
         const cuotaNormal = Math.max(0, cuotaBase - abonosYaHechos);
+        let montoCuotaAplicado = 0;
         if (cuotaNormal > 0 && montoRestante > 0) {
-          const montoCuota = Math.min(montoRestante, cuotaNormal);
-          montoRestante -= montoCuota;
+          montoCuotaAplicado = Math.min(montoRestante, cuotaNormal);
+          montoRestante -= montoCuotaAplicado;
           distribucion.push({
-            concepto: `4. Cuota #${cuotaSeleccionada || "?"}`,
-            monto: montoCuota,
+            concepto: `5. Cuota #${cuotaSeleccionada || "?"}`,
+            monto: montoCuotaAplicado,
           });
         }
+
+        // Aviso de cobro corto: si tras otros + mora + rubros no
+        // alcanza para la cuota completa, el asesor tiene que enterarse ANTES
+        // de confirmar — no es un bloqueo, un abono parcial es legítimo, pero
+        // no puede pasar que se entere después de que "sobró" o "faltó" sin
+        // saber qué se comió parte de la boleta.
+        //
+        // Acá se arma QUIÉN se llevó la plata antes que la cuota. El aviso antes
+        // culpaba siempre a los rubros ("porque QX se van a rubros"), aunque el
+        // faltante viniera de la mora: con boleta Q1,000 / mora Q800 / rubros
+        // Q100 / cuota Q200, la cuota queda corta por la mora y el aviso
+        // señalaba los Q100. Sobreatribuir la causa le impide al asesor
+        // explicarle al cliente por qué su cuota no quedó cubierta.
+        //
+        // Sólo lo que DE VERDAD consume la boleta en el back: `otros` y `mora`
+        // se descuentan antes de las cuotas, y los rubros también (son un cobro
+        // aparte que compite con la cuota por la plata). El CONVENIO no está en
+        // la lista: se registra pero no consume (ver el escalón 4), así que
+        // culparlo del faltante era acusar a quien no se llevó nada.
+        //
+        // ⚠️ Esta lista es SÓLO de este aviso. Acá estaba escrito que el aviso de
+        // "Abonar todo a Capital" necesitaba "exactamente la misma", y eso era
+        // falso: ese otro pregunta qué se deja de APLICAR, no quién consume, y
+        // colapsar las dos costó un agujero (el convenio y el excedente quedaban
+        // fuera). El otro usa `loQueElAbonoACapitalNoAplica`, con sus propios
+        // miembros. No volver a unirlas.
+        const consumo = escalonesQueConsumenLaBoleta([
+          { etiqueta: "otros", monto: montoOtrosAplicado },
+          { etiqueta: "mora", monto: montoMoraAplicado },
+          { etiqueta: "rubros", monto: montoRubrosAplicado },
+        ]);
+
+        /**
+         * Lo que el botón de "Abonar todo a Capital" deja sin aplicar. Es OTRA
+         * pregunta que la de arriba, con otros miembros: entra el convenio
+         * —que no consume la boleta pero sí se acredita, y con el abono directo
+         * no—, entra el excedente prometido como saldo a favor, y NO entra
+         * `otros`, que sí se cobra igual porque es una columna de la fila del
+         * pago. Ver el docstring de la función.
+         */
+        // Lo que de verdad va a capital si el asesor aprieta el botón: la boleta
+        // MENOS `otros`, porque `otros` se cobra igual (es una columna de la fila
+        // del pago). Mandar la boleta completa dejaba Q1,200 asignados contra un
+        // comprobante de Q1,100. Ver `montoParaAbonoDirectoACapital`.
+        const aCapitalSiAprieta = montoParaAbonoDirectoACapital({
+          boleta: montoBoleta,
+          otros,
+        });
+
+        const noSeAplica = loQueElAbonoACapitalNoAplica({
+          mora: montoMoraAplicado,
+          rubros: montoRubrosAplicado,
+          convenio: montoConvenioAplicado,
+          // La cuota es el término que faltaba, y el caso más común: sin ella,
+          // una boleta normal sin mora ni rubros ni convenio dejaba todo en cero
+          // y el aviso no salía.
+          cuota: montoCuotaAplicado,
+          // El excedente es lo que sobra al final de la cascada, que es lo mismo
+          // que el modal pinta como "Excedente (nuevo saldo a favor)".
+          excedente: montoRestante,
+        });
+
+        const textoCausas = consumo.escalones
+          .map((c) => `Q${c.monto.toFixed(2)} a ${c.etiqueta}`)
+          .reduce(
+            (acc, txt, i, arr) =>
+              i === 0 ? txt : `${acc}${i === arr.length - 1 ? " y " : ", "}${txt}`,
+            "",
+          );
+
+        // Se avisa solo si algo que va antes que la cuota consumió boleta; un
+        // abono parcial "pelado" (boleta menor a la cuota, sin nada más de por
+        // medio) se sigue mostrando sin aviso, igual que hoy.
+        const cuotaQuedaCorta =
+          consumo.hayConsumo &&
+          cuotaNormal > 0 &&
+          montoCuotaAplicado < cuotaNormal - 0.005;
 
         return (
           <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-5 border-2 border-green-200">
@@ -307,6 +445,23 @@ export function PagoForm() {
                   </p>
                 </div>
               )}
+
+              {cuotaQuedaCorta && (
+                <div className="flex flex-col gap-1 py-3 px-4 rounded-lg border-2 border-orange-300 bg-orange-50">
+                  <span className="text-orange-800 font-bold flex items-center gap-2">
+                    <span className="text-xl">!</span>
+                    Cobro corto: la cuota queda parcial
+                  </span>
+                  <p className="text-xs text-orange-700">
+                    Con este monto la cuota queda en{" "}
+                    <strong>Q{montoCuotaAplicado.toFixed(2)}</strong> de{" "}
+                    <strong>Q{cuotaNormal.toFixed(2)}</strong>, porque{" "}
+                    <strong>{textoCausas}</strong> se cobran antes que la cuota.
+                    Es un abono parcial válido — confirmá solo si es lo
+                    esperado.
+                  </p>
+                </div>
+              )}
             </div>
 
           <div className="mt-4 pt-4 border-t-2 border-green-300 space-y-2">
@@ -330,35 +485,62 @@ export function PagoForm() {
     </div>
   )}
 
-  {otros > 0 && (
+  {/* Lo APLICADO, no el total pendiente — mismo criterio que la línea de rubros
+      de más abajo, y por la misma razón. Estas dos líneas mostraban `otros` y
+      `moraMonto` crudos, que son lo que el crédito DEBE, no lo que esta boleta
+      alcanza a cubrir: con una boleta de Q50 contra una mora de Q800, el pie
+      decía "- Mora: Q800" mientras la distribución de arriba decía "2. Mora
+      Q50". El mismo defecto que se corrigió en rubros estaba abierto en sus dos
+      hermanos, que es justo la forma en que estas cosas se escapan. */}
+  {montoOtrosAplicado > 0 && (
     <div className="flex justify-between items-center text-sm">
       <span className="text-gray-600 font-medium">
         - Otros:
       </span>
       <span className="text-gray-700 font-bold">
-        Q{Number(otros).toFixed(2)}
+        Q{montoOtrosAplicado.toFixed(2)}
       </span>
     </div>
   )}
 
-  {moraMonto > 0 && (
+  {montoMoraAplicado > 0 && (
     <div className="flex justify-between items-center text-sm">
       <span className="text-gray-600 font-medium">
         - Mora:
       </span>
       <span className="text-gray-700 font-bold">
-        Q{Number(moraMonto).toFixed(2)}
+        Q{montoMoraAplicado.toFixed(2)}
       </span>
     </div>
   )}
 
-  {cuotaConvenio > 0 && (
+  {/* Lo que ESTA boleta le alcanza a pagar a los rubros, no el total pendiente.
+      `rubrosMonto` es el saldo vivo de los rubros del crédito; `montoRubrosAplicado`
+      es lo que la cascada de arriba les entrega. Con boleta de Q100 contra Q300 de
+      rubros, arriba decía "3. Rubros Q100.00" y acá abajo "- Rubros: Q300.00": dos
+      números contradictorios en la misma pantalla, y el de abajo insinuando que la
+      boleta perdió Q300 que nunca tuvo. */}
+  {montoRubrosAplicado > 0 && (
     <div className="flex justify-between items-center text-sm">
       <span className="text-gray-600 font-medium">
-        - Cuota Convenio:
+        - Rubros:
       </span>
       <span className="text-gray-700 font-bold">
-        Q{Number(cuotaConvenio).toFixed(2)}
+        Q{montoRubrosAplicado.toFixed(2)}
+      </span>
+    </div>
+  )}
+
+  {/* SIN signo menos: el convenio se acredita pero no descuenta de la boleta
+      (misma razón que en el escalón 4 de la distribución). Con el "-" esta línea
+      contradecía a la de arriba en la misma pantalla. */}
+  {montoConvenioAplicado > 0 && (
+    <div className="flex justify-between items-center text-sm">
+      <span className="text-gray-600 font-medium">
+        Cuota Convenio (se registra):
+      </span>
+      <span className="text-gray-700 font-bold">
+        Q{montoConvenioAplicado.toFixed(2)}
       </span>
     </div>
   )}
@@ -372,6 +554,44 @@ export function PagoForm() {
     </span>
   </div>
 </div>
+
+{/* "Abonar todo a Capital" —el botón verde de acá abajo— NO aplica el desglose
+    de arriba: manda la boleta entera a `abono_directo_capital`, y el backend
+    arranca la cascada con `boleta − otros − abono directo`, que en ese caso da
+    cero. El asesor terminaba de leer un desglose que decía "3. Rubros Q300" y
+    tenía justo debajo un botón que los dejaba en Q0, sin nada que se lo dijera.
+
+    Duele sobre todo con los rubros: son deuda del cliente que queda pendiente
+    igual. El que cobró Q1,000 incluyendo Q300 de tarjeta de circulación manda
+    los Q1,000 a capital y el cliente sigue debiendo la tarjeta. No se pierde
+    plata, pero queda aplicada donde nadie la mandó.
+
+    El aviso se gatea con su PROPIO predicado y no con `consumo`, que contesta
+    otra pregunta. Gatearlo por los escalones que consumen dejaba dos huecos: un
+    crédito con convenio activo y sin otros/mora/rubros mostraba la contribución
+    al convenio DOS veces y el botón aparecía sin aviso, y lo mismo con el
+    excedente prometido como saldo a favor. Ninguno de los dos consume la
+    boleta, pero los dos se dejan de aplicar.
+
+    Se avisa en vez de bloquear: el abono directo a capital es una operación
+    legítima y un rubro puede quedar pendiente mucho tiempo. Lo que no puede
+    pasar es que el asesor elija a ciegas. */}
+{permiteAbonoCapital &&
+  !(cuotasAtrasadasInfo && cuotasAtrasadasInfo.total > 0) &&
+  noSeAplica.hayAviso && (
+    <div className="mt-3 rounded-lg border-2 border-amber-300 bg-amber-50 p-3">
+      <p className="text-sm font-bold text-amber-900">
+        "Abonar todo a Capital" no aplica este desglose
+      </p>
+      <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+        Esa opción manda Q{aCapitalSiAprieta.toFixed(2)} a reducir capital
+        {otros > 0 && ` (la boleta menos los Q${otros.toFixed(2)} de otros, que se cobran igual)`}:
+        no se aplica {noSeAplica.etiquetas.join(", ")} —Q
+        {noSeAplica.total.toFixed(2)} en total—. Lo que quede sin cobrar sigue
+        pendiente.
+      </p>
+    </div>
+  )}
           </div>
         );
       })()
@@ -385,7 +605,17 @@ export function PagoForm() {
           <span className="font-bold text-green-800 text-sm">Opcion disponible: Abono directo a capital</span>
         </div>
         <p className="text-xs text-green-700 mb-3">
-          Este credito permite abonar directamente a capital. El monto completo de la boleta (Q{Number(formik.values.monto_boleta || 0).toFixed(2)}) se aplicara como reduccion al saldo de capital.
+          {/* Decía "el monto completo de la boleta". Con `otros` tipeado eso era
+              falso y además describía el descuadre: `otros` se cobra igual, así
+              que a capital va la boleta MENOS otros. */}
+          Este credito permite abonar directamente a capital. Se aplicaran
+          Q{montoParaAbonoDirectoACapital({
+            boleta: Number(formik.values.monto_boleta || 0),
+            otros: Number(formik.values.otros) || 0,
+          }).toFixed(2)} como reduccion al saldo de capital
+          {(Number(formik.values.otros) || 0) > 0
+            ? ` (la boleta menos los Q${(Number(formik.values.otros) || 0).toFixed(2)} de otros).`
+            : "."}
         </p>
         <Button
           onClick={() => {
@@ -536,8 +766,17 @@ export function PagoForm() {
                 onCuotaSeleccionadaChange={setCuotaSeleccionada}
                 cuotasPendientesInfo={cuotasPendientesInfo ?? { cuotas: [] }}
                 mora={mora || 0}
+                rubros={rubros}
+                rubrosActual={rubrosActual}
                 convenioActivoInfo={convenioActivoInfo}
                 cuotaMensualAPagar={dataCredito.cuotaMensualAPagar}
+                // Los valores VIVOS de formik: `NumberInput` usa `setFieldValue`,
+                // así que esto re-renderiza mientras el asesor tipea y el total
+                // no queda congelado en el valor inicial.
+                otrosFormulario={Number(formik.values.otros) || 0}
+                abonoDirectoCapitalFormulario={
+                  Number(formik.values.abono_directo_capital) || 0
+                }
                 abonosParciales={(() => {
                   if (!abonosCuota || displayedPartialContribution === 0) {
                     return null;

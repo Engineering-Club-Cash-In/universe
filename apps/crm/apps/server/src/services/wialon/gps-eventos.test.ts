@@ -35,6 +35,7 @@ let numeroCreditoSifcoMock: string | null = "01010214100000";
 let asesorActualUserIdMock: string | null = null;
 let eventoYaExisteMock = false;
 let eventoExistenteIdMock = "evento-existente";
+let eventoExistenteNotificadoMock = true;
 let supervisoresMock: string[] = [];
 let usuarioSistemaMock: string | null = "sistema-1";
 let notificacionesInsertadas: Record<string, unknown>[] = [];
@@ -113,7 +114,12 @@ function mockDb() {
 					// Consulta del evento existente tras un conflicto de dedup.
 					return {
 						where: () => ({
-							limit: async () => [{ id: eventoExistenteIdMock }],
+							limit: async () => [
+								{
+									id: eventoExistenteIdMock,
+									notificado: eventoExistenteNotificadoMock,
+								},
+							],
 						}),
 					};
 				}
@@ -183,6 +189,7 @@ beforeEach(() => {
 	asesorActualUserIdMock = null;
 	eventoYaExisteMock = false;
 	eventoExistenteIdMock = "evento-existente";
+	eventoExistenteNotificadoMock = true;
 	supervisoresMock = ["supervisor-1"];
 	usuarioSistemaMock = "sistema-1";
 	notificacionesInsertadas = [];
@@ -248,6 +255,22 @@ describe("CB-119 — registrarEventoGps", () => {
 		expect(resultado.eventoId).toBe(eventoExistenteIdMock);
 		expect(resultado.notificado).toBe(false);
 		expect(notificacionesInsertadas).toHaveLength(0);
+	});
+
+	test("evento existe pero no fue notificado (fallo transitorio en la corrida anterior): reintenta la notificación", async () => {
+		eventoYaExisteMock = true;
+		eventoExistenteNotificadoMock = false;
+
+		const resultado = await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+		});
+
+		expect(resultado.duplicado).toBe(true);
+		expect(resultado.eventoId).toBe(eventoExistenteIdMock);
+		expect(resultado.notificado).toBe(true);
+		expect(notificacionesInsertadas.length).toBeGreaterThan(0);
 	});
 
 	test("desconexión de energía: notifica al asesor Y a los supervisores", async () => {

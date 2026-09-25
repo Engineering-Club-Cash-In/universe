@@ -1260,12 +1260,20 @@ export class WialonClient {
 
 		const estadoPorId = new Map(estados.map((e) => [e.unitId, e]));
 
-		return uniqueIds.map((unitId) => {
+		// Si Wialon omite un id en AMBAS respuestas (link viejo, unidad
+		// eliminada o sin acceso), no se fabrica una fila con
+		// `ultimoMensajeAt: null` — el job de polling interpreta ausencia de
+		// última señal como "sin reportar" y generaría una alerta falsa (y
+		// guardaría ese estado falso) en la primera corrida que vea esa
+		// unidad, en vez de simplemente no tener datos de ella.
+		const resultado: WialonTelemetriaUnidad[] = [];
+		for (const unitId of uniqueIds) {
 			const estado = estadoPorId.get(unitId);
 			const crudo = crudos.get(unitId);
-			const pwrExtRaw = crudo?.lmsg?.p?.pwr_ext;
+			if (!estado && !crudo) continue;
 
-			return {
+			const pwrExtRaw = crudo?.lmsg?.p?.pwr_ext;
+			resultado.push({
 				unitId,
 				ultimoMensajeAt: crudo?.lmsg?.t ? new Date(crudo.lmsg.t * 1000) : null,
 				pwrExt: typeof pwrExtRaw === "number" ? pwrExtRaw : null,
@@ -1273,8 +1281,9 @@ export class WialonClient {
 				lat: estado?.latitude ?? null,
 				lon: estado?.longitude ?? null,
 				velocidadKmh: estado?.speedKmh ?? null,
-			};
-		});
+			});
+		}
+		return resultado;
 	}
 
 	private async buscarLmsgPorId(

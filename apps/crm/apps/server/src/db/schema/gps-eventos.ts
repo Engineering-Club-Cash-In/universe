@@ -113,6 +113,12 @@ export const gpsEventos = pgTable(
 export const gpsUnidadEstado = pgTable("gps_unidad_estado", {
 	wialonUnitId: integer("wialon_unit_id").primaryKey(),
 
+	// SIFCO B4 que originó la última corrida que actualizó esta fila. Si
+	// cambia entre corridas (unidad reasignada a otro caso, D-10), el job
+	// resetea el resto de las columnas en vez de heredar el estado del caso
+	// viejo.
+	numeroCreditoSifco: text("numero_credito_sifco"),
+
 	// Voltaje crudo de energía externa (lmsg.p.pwr_ext) de la última corrida.
 	pwrExt: doublePrecision("pwr_ext"),
 	ignicionOn: boolean("ignicion_on"),

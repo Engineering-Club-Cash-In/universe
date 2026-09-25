@@ -423,7 +423,19 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 	const snapshotsParaGuardar: (typeof gpsUnidadEstado.$inferInsert)[] = [];
 
 	for (const telemetria of telemetrias) {
-		const anterior = snapshotPorId.get(telemetria.unitId) ?? null;
+		const sifcoActual = sifcoPorUnidad.get(telemetria.unitId) ?? "";
+		const snapshotPrevio = snapshotPorId.get(telemetria.unitId) ?? null;
+		// Si la unidad se reasignó a otro caso B4 entre corridas (D-10), el
+		// snapshot viejo pertenece al caso anterior: heredarlo haría que
+		// detectarTransiciones compare contra un estado ajeno (una unidad ya
+		// sin energía/fuera de geocerca en el caso viejo nunca generaría
+		// evento para el caso/asesor nuevo, porque "ya estaba así"). Se trata
+		// como primera vez que se ve la unidad — sin transición en esta
+		// corrida, pero el siguiente estado sí se compara correctamente.
+		const anterior =
+			snapshotPrevio && snapshotPrevio.numeroCreditoSifco === sifcoActual
+				? snapshotPrevio
+				: null;
 
 		// null si no hay geocerca válida, coordenadas no finitas (incluye NaN:
 		// `NaN != null` es `true` en JS, así que un check contra `null` a
@@ -452,9 +464,7 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 				: null,
 			ahora,
 			dentroDeGeocercaAhora,
-			// unitIds viene de unidades (unidadesConCasoActivo), así que siempre
-			// hay un SIFCO mapeado para cada telemetria.unitId de esta corrida.
-			sifcoPorUnidad.get(telemetria.unitId) ?? "",
+			sifcoActual,
 		);
 
 		// Si algún evento de esta unidad falla al registrarse, el snapshot de
@@ -502,6 +512,7 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 
 		snapshotsParaGuardar.push({
 			wialonUnitId: telemetria.unitId,
+			numeroCreditoSifco: sifcoActual,
 			pwrExt: telemetria.pwrExt,
 			ignicionOn: telemetria.ignicionOn,
 			ultimaSenalWialon: ultimaSenal,
@@ -520,6 +531,7 @@ export async function ejecutarDeteccionEventosGps(): Promise<{
 			.onConflictDoUpdate({
 				target: gpsUnidadEstado.wialonUnitId,
 				set: {
+					numeroCreditoSifco: sql`excluded.numero_credito_sifco`,
 					pwrExt: sql`excluded.pwr_ext`,
 					ignicionOn: sql`excluded.ignicion_on`,
 					ultimaSenalWialon: sql`excluded.ultima_señal_wialon`,

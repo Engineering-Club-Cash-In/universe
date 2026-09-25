@@ -74,6 +74,12 @@ CREATE INDEX IF NOT EXISTS "idx_gps_eventos_recibido_at" ON "gps_eventos" ("reci
 -- su fila no se borra (referencia útil, sin costo de mantenerla).
 CREATE TABLE IF NOT EXISTS "gps_unidad_estado" (
 	"wialon_unit_id" integer PRIMARY KEY,
+	-- SIFCO B4 que originó la última corrida que actualizó esta fila. Si
+	-- cambia entre corridas (unidad reasignada a otro caso, D-10), el job
+	-- resetea el resto de las columnas en vez de heredar el estado del caso
+	-- viejo — sin esto, una unidad ya sin energía/fuera de geocerca al
+	-- reasignarse nunca generaría evento para el caso/asesor nuevo.
+	"numero_credito_sifco" text,
 	"pwr_ext" double precision,
 	"ignicion_on" boolean,
 	"ultima_señal_wialon" timestamp,

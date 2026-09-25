@@ -281,27 +281,54 @@ export async function registrarEventoGps(
 		.onConflictDoNothing({ target: gpsEventos.dedupKey })
 		.returning({ id: gpsEventos.id });
 
-	// onConflictDoNothing sin fila devuelta = ya existía (el job volvió a ver
-	// la misma transición, típicamente por un reinicio a mitad de corrida).
-	if (!insertado) {
+	let eventoId: string;
+	let duplicado: boolean;
+
+	if (insertado) {
+		eventoId = insertado.id;
+		duplicado = false;
+	} else {
+		// onConflictDoNothing sin fila devuelta = ya existía (el job volvió a
+		// ver la misma transición, típicamente por un reinicio a mitad de
+		// corrida, o un reintento tras un fallo transitorio al notificar).
+		// Si esa fila YA fue notificada, es un duplicado real y no hay nada
+		// más que hacer. Si NO fue notificada (el insert del evento tuvo
+		// éxito en la corrida anterior, pero la resolución de destinatarios o
+		// el insert de notifications falló después), se sigue de largo y se
+		// reintenta la notificación en vez de devolver "duplicado" — sin
+		// esto, un fallo transitorio después de insertar el evento dejaba la
+		// alerta sin notificar para siempre (mismo dedupKey en cada corrida).
 		const [existente] = await db
-			.select({ id: gpsEventos.id })
+			.select({ id: gpsEventos.id, notificado: gpsEventos.notificado })
 			.from(gpsEventos)
 			.where(eq(gpsEventos.dedupKey, dedupKey))
 			.limit(1);
-		return {
-			eventoId: existente?.id ?? "",
-			duplicado: true,
-			vehicleId,
-			casoCobroId,
-			notificado: false,
-		};
+		if (!existente) {
+			return {
+				eventoId: "",
+				duplicado: true,
+				vehicleId,
+				casoCobroId,
+				notificado: false,
+			};
+		}
+		if (existente.notificado) {
+			return {
+				eventoId: existente.id,
+				duplicado: true,
+				vehicleId,
+				casoCobroId,
+				notificado: false,
+			};
+		}
+		eventoId = existente.id;
+		duplicado = true;
 	}
 
 	if (!casoCobroId) {
 		return {
-			eventoId: insertado.id,
-			duplicado: false,
+			eventoId,
+			duplicado,
 			vehicleId,
 			casoCobroId,
 			notificado: false,
@@ -331,8 +358,8 @@ export async function registrarEventoGps(
 
 	if (!usuarioSistema) {
 		return {
-			eventoId: insertado.id,
-			duplicado: false,
+			eventoId,
+			duplicado,
 			vehicleId,
 			casoCobroId,
 			notificado: false,
@@ -376,12 +403,12 @@ export async function registrarEventoGps(
 		await db
 			.update(gpsEventos)
 			.set({ notificado: true })
-			.where(eq(gpsEventos.id, insertado.id));
+			.where(eq(gpsEventos.id, eventoId));
 	}
 
 	return {
-		eventoId: insertado.id,
-		duplicado: false,
+		eventoId,
+		duplicado,
 		vehicleId,
 		casoCobroId,
 		notificado,

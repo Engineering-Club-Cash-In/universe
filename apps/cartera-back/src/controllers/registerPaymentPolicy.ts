@@ -42,7 +42,7 @@ export const getInternalNexaPaymentDate = (fechaPago: string, eventId?: number) 
   if (eventId === undefined) return null;
   // tokenDate is a banking calendar value, stored in a timezone-less column.
   // Preserve its wall-clock fields rather than shifting the day to Guatemala.
-  return new Date(fechaPago.replace(/(?:Z|[+-]\d{2}:\d{2})$/, "Z"));
+  return new Date(fechaPago.replace(/(?:Z|[+-]\d{2}:?\d{2})$/, "Z"));
 };
 
 export const CREDIT_PENDING_CANCELLATION_ERROR = {

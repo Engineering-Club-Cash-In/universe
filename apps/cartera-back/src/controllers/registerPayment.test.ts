@@ -84,6 +84,8 @@ describe("register payment", () => {
     for (const input of [
       "2026-09-25T00:00:00.000Z",
       "2026-10-01T00:00:00+09:00",
+      "2026-10-01T00:00:00+0900",
+      "2026-09-30T23:30:00-0600",
       "2026-09-30T23:30:00-06:00",
     ]) {
       expect(getInternalNexaPaymentDate(input, 7)?.toISOString().slice(0, 10))

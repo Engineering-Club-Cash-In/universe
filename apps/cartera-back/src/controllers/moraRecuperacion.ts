@@ -782,6 +782,19 @@ const TRADUCTORES_EVENTO: {
 	anulado: (crudo) => ({ anulado: crudo.anulado === true }),
 };
 
+/**
+ * Las claves de `MoraRecoveryEventoCrudo`, en tiempo de EJECUCIÓN.
+ *
+ * Sale de `TRADUCTORES_EVENTO` y no de una lista escrita a mano porque esa
+ * tabla es un tipo mapeado `[K in keyof MoraRecoveryEventoCrudo]-?`: tiene
+ * exactamente una entrada por campo del tipo, ni una más (una clave de sobra
+ * no compila) ni una menos (`-?` las hace todas obligatorias). Así, la prueba
+ * de contrato que compara estas claves contra el `JSON_BUILD_OBJECT` del SQL
+ * no depende de una TERCERA lista que también habría que acordarse de tocar.
+ */
+export const CLAVES_EVENTO_MORA_RECOVERY_CRUDO: readonly (keyof MoraRecoveryEventoCrudo)[] =
+	Object.keys(TRADUCTORES_EVENTO) as (keyof MoraRecoveryEventoCrudo)[];
+
 /** Arma el evento del plegado aplicando TODAS las entradas de la tabla. */
 export function traducirEventoMoraRecovery(
 	crudo: MoraRecoveryEventoCrudo,

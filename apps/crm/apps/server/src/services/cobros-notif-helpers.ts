@@ -27,7 +27,8 @@ export type CobrosNotifTipo =
 	| "convenio_resuelto"
 	| "convenio_incumplido"
 	| "bot_cliente_escribio"
-	| "bot_modo_agente";
+	| "bot_modo_agente"
+	| "gps_evento";
 
 /**
  * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando el correo de cash-in del

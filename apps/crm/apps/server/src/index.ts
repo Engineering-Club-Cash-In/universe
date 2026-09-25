@@ -61,6 +61,10 @@ import {
 	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
 import {
+	correrDeteccionEventosGps,
+	correrPurgaGpsEventos,
+} from "./jobs/gps-eventos-poll";
+import {
 	correrPurgaGpsIntegracionLogs,
 	correrSaludGpsIntegracion,
 } from "./jobs/gps-integracion-salud";
@@ -2050,6 +2054,15 @@ const JOBS_PROGRAMADOS = {
 	 *  negocio, no del código: `CONVENIO_WHATSAPP_ENABLED=true` en el ambiente
 	 *  (el gate propio del servicio) y apagar el modo prueba. */
 	recordatoriosConvenio: isTestModeEnabled(),
+	/** CB-119: detección de eventos GPS (desconexión de energía, ignición,
+	 *  GPS sin reportar) por polling cada 5 min, acotado a créditos en B4. No
+	 *  le escribe al cliente, pero sí depende de cartera-back (bucket real
+	 *  por crédito) y crea notificaciones internas — apagado a propósito
+	 *  mientras se termina de probar (falta aplicar la migración 0059 en el
+	 *  ambiente). Default `false` FIJO (no solo el fallback): prenderlo
+	 *  exige `GPS_EVENTOS_ENABLED=true` explícito en el ambiente, así se
+	 *  puede activar en dev tras aplicar la 0059 sin un deploy de código. */
+	eventosGps: process.env.GPS_EVENTOS_ENABLED === "true",
 } as const;
 
 const HAY_JOBS_ACTIVOS = Object.values(JOBS_PROGRAMADOS).some(Boolean);
@@ -2130,6 +2143,26 @@ setInterval(correrSaludGpsIntegracion, 5 * 60 * 1000);
 // seguidos), el setInterval solo nunca llegaría a purgar.
 void correrPurgaGpsIntegracionLogs();
 setInterval(correrPurgaGpsIntegracionLogs, 24 * 60 * 60 * 1000);
+
+// CB-119 — Detección de eventos GPS (desconexión de energía, ignición, GPS
+// sin reportar) por POLLING, acotada a créditos en B4: no depende de que La
+// Legión configure webhooks de su lado. Mismo intervalo que la salud de la
+// integración (5 min); no corre al arrancar porque no es una tarea de
+// retención pendiente, solo el siguiente tick.
+//
+// A diferencia de la salud/purga de CB-121 (arriba, infraestructura pura),
+// este job SÍ va detrás de JOBS_PROGRAMADOS: depende de cartera-back (bucket
+// real por crédito) y crea notificaciones internas, más cerca de
+// `alertasCobros` que de observabilidad. Apagado mientras se termina de probar.
+if (JOBS_PROGRAMADOS.eventosGps) {
+	setInterval(correrDeteccionEventosGps, 5 * 60 * 1000);
+}
+// Purga de gps_eventos (retención 180 días, D-14) SÍ fuera de la bandera,
+// igual que correrPurgaGpsIntegracionLogs: es una obligación de retención de
+// infraestructura, no depende de si el job de detección está prendido en
+// esta rama — corre sobre tabla vacía sin costo si eventosGps sigue en false.
+void correrPurgaGpsEventos();
+setInterval(correrPurgaGpsEventos, 24 * 60 * 60 * 1000);
 
 // El respaldo del rechazo (D-39), también fuera de la bandera: si el WhatsApp
 // del rechazo falló, el cliente sigue creyendo que su pago va bien — y, peor,

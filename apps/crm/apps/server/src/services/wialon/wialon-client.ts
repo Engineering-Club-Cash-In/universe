@@ -19,7 +19,10 @@ import {
 	type WialonSearchItemsResponse,
 	type WialonSensorMeta,
 	type WialonSession,
+	type WialonTelemetriaUnidad,
 	type WialonUnitCalcLastItem,
+	type WialonUnitItem,
+	type WialonZona,
 } from "./wialon-types";
 
 const DEFAULT_BASE_URL = "https://hst-api.wialon.com/wialon/ajax.html";
@@ -314,6 +317,13 @@ export class WialonClient {
 	private ignitionSensorCache = new Map<
 		number,
 		{ sensorId: string | null; expiresAt: number; lookupFailed?: boolean }
+	>();
+	// Geocerca "Perimetro cash" (CB-119): cambia rarísimo (alguien la edita a
+	// mano en el portal de Wialon), así que se cachea con el mismo TTL de
+	// sesión en vez de pedirla cada corrida del job (cada 5 min).
+	private zonaCache = new Map<
+		string,
+		{ zona: WialonZona | null; expiresAt: number }
 	>();
 
 	// Circuit breaker en memoria (CB-121): cuenta fallos reintentables
@@ -1223,6 +1233,146 @@ export class WialonClient {
 				sid,
 			);
 			return { success: true };
+		});
+	}
+
+	/**
+	 * Telemetría cruda en batch para el job de detección de eventos (CB-119).
+	 *
+	 * Se apoya en `getUnitsStatus` (ya usado en producción para ignición y
+	 * velocidad, resuelve el sensor real en vez de asumir un I/O fijo) y
+	 * suma una segunda llamada batch con `core/search_items` (flags 1025 =
+	 * base + lmsg, mismo valor que usa la Ficha 360 para telemetría cruda,
+	 * ver D-04 en docs/features/cobros-02/09-integracion-gps-wialon.md) para
+	 * el voltaje de energía externa (`lmsg.p.pwr_ext`) y el timestamp del
+	 * último mensaje — ninguno de los dos viene en `unit/calc_last`.
+	 */
+	public async getTelemetriaUnidades(
+		unitIds: number[],
+	): Promise<WialonTelemetriaUnidad[]> {
+		if (!unitIds.length) return [];
+		const uniqueIds = Array.from(new Set(unitIds));
+
+		const [estados, crudos] = await Promise.all([
+			this.getUnitsStatus(uniqueIds),
+			this.buscarLmsgPorId(uniqueIds),
+		]);
+
+		const estadoPorId = new Map(estados.map((e) => [e.unitId, e]));
+
+		// Si Wialon omite un id en AMBAS respuestas (link viejo, unidad
+		// eliminada o sin acceso), no se fabrica una fila con
+		// `ultimoMensajeAt: null` — el job de polling interpreta ausencia de
+		// última señal como "sin reportar" y generaría una alerta falsa (y
+		// guardaría ese estado falso) en la primera corrida que vea esa
+		// unidad, en vez de simplemente no tener datos de ella.
+		const resultado: WialonTelemetriaUnidad[] = [];
+		for (const unitId of uniqueIds) {
+			const estado = estadoPorId.get(unitId);
+			const crudo = crudos.get(unitId);
+			if (!estado && !crudo) continue;
+
+			const pwrExtRaw = crudo?.lmsg?.p?.pwr_ext;
+			resultado.push({
+				unitId,
+				// extraerUltimaSenal (no lmsg.t directo): un lmsg con t ausente o
+				// en 0 no debe tapar un pos.t válido — mismo criterio que ya usa
+				// el resto del cliente para "última señal" de una unidad.
+				ultimoMensajeAt: extraerUltimaSenal({ item: crudo }),
+				pwrExt: typeof pwrExtRaw === "number" ? pwrExtRaw : null,
+				ignicionOn: estado?.isIgnitionOn ?? null,
+				lat: estado?.latitude ?? null,
+				lon: estado?.longitude ?? null,
+				velocidadKmh: estado?.speedKmh ?? null,
+			});
+		}
+		return resultado;
+	}
+
+	private async buscarLmsgPorId(
+		unitIds: number[],
+	): Promise<Map<number, WialonUnitItem>> {
+		return this.executeWithSession(async (sid) => {
+			const mapa = new Map<number, WialonUnitItem>();
+			const CHUNK_SIZE = 100;
+
+			for (let i = 0; i < unitIds.length; i += CHUNK_SIZE) {
+				const chunk = unitIds.slice(i, i + CHUNK_SIZE);
+				const data = (await this.requestRaw(
+					"core/search_items",
+					{
+						spec: {
+							itemsType: "avl_unit",
+							propName: chunk.map(() => "sys_id").join(","),
+							propValueMask: chunk.join(","),
+							propType: chunk.map(() => "property").join(","),
+							sortType: "sys_name",
+							or_logic: 1,
+						},
+						force: 1,
+						flags: 1025, // base (0x1) + último mensaje / lmsg (0x400)
+						from: 0,
+						to: 0xffffffff,
+					},
+					sid,
+					exigirItems(
+						"Respuesta inesperada de Wialon: se esperaba un objeto con 'items' en 'core/search_items'",
+					),
+				)) as { items: WialonUnitItem[] };
+
+				for (const item of data.items) {
+					mapa.set(item.id, item);
+				}
+			}
+
+			return mapa;
+		});
+	}
+
+	/**
+	 * Trae UNA geocerca por id dentro de un recurso (resource/get_zone_data,
+	 * CB-119). Lectura pura, cacheada con el mismo TTL de sesión: la zona
+	 * "Perimetro cash" prácticamente no cambia, y pedirla en cada corrida del
+	 * job (cada 5 min) sería ruido innecesario contra la API.
+	 *
+	 * `col` con el id explícito, no `[]` (spike de CB-119: pedir "todas las
+	 * zonas" con `col: []` devolvió un arreglo vacío contra este recurso —
+	 * comportamiento del proveedor, no un bug propio — así que se pide
+	 * siempre por id conocido).
+	 *
+	 * Devuelve `null` si la zona no existe (id incorrecto, o la borraron del
+	 * portal) — no lanza, porque el caller (detección de geocerca) debe
+	 * degradar a "no evaluar" en vez de tumbar toda la corrida del job.
+	 */
+	public async getZonaPoligono(
+		resourceId: number,
+		zonaId: number,
+	): Promise<WialonZona | null> {
+		const claveCache = `${resourceId}:${zonaId}`;
+		const cacheada = this.zonaCache.get(claveCache);
+		if (cacheada && cacheada.expiresAt > Date.now()) {
+			return cacheada.zona;
+		}
+
+		return this.executeWithSession(async (sid) => {
+			const zonas = (await this.requestRaw(
+				"resource/get_zone_data",
+				{ itemId: resourceId, col: [zonaId], flags: 29 },
+				sid,
+			)) as WialonZona[] | unknown;
+
+			const zona = Array.isArray(zonas) ? (zonas[0] ?? null) : null;
+
+			// TTL corto para el caso negativo: si Wialon devuelve vacío por una
+			// falla transitoria, cachear `null` por las mismas 2h de sesión
+			// dejaría ~24 corridas del job (cada 5 min) sin evaluar geocerca por
+			// un problema que pudo durar segundos.
+			this.zonaCache.set(claveCache, {
+				zona,
+				expiresAt: Date.now() + (zona ? SESSION_TTL_MS : NEGATIVE_CACHE_TTL_MS),
+			});
+
+			return zona;
 		});
 	}
 

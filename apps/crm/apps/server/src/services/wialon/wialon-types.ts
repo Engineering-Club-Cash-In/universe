@@ -654,3 +654,60 @@ export const deleteLocatorLinkInputSchema = z.object({
 export type DeleteLocatorLinkInput = z.infer<
 	typeof deleteLocatorLinkInputSchema
 >;
+
+// ── Telemetría cruda para el job de detección de eventos (CB-119) ─────────────
+// Subconjunto de WialonUnitItem con solo lo que el job compara contra el
+// snapshot (gps_unidad_estado): posición/velocidad de `pos`, y de `lmsg.p`
+// el voltaje de energía externa (`pwr_ext`) y el I/O de ignición (`io_1`),
+// más el timestamp del último mensaje para detectar "sin reportar".
+export interface WialonTelemetriaUnidad {
+	unitId: number;
+	ultimoMensajeAt: Date | null;
+	pwrExt: number | null;
+	ignicionOn: boolean | null;
+	lat: number | null;
+	lon: number | null;
+	velocidadKmh: number | null;
+}
+
+// ── Geocerca (resource/get_zone_data, CB-119) ──────────────────────────────
+// Solo se tipa lo que el job necesita para punto-en-polígono: nombre, tipo
+// (2 = polígono, el único que usa "Perimetro cash") y sus vértices. El resto
+// de la forma de Wialon (boundary, color, íconos) se ignora.
+export interface WialonZonaPunto {
+	x: number; // longitud
+	y: number; // latitud
+}
+
+export interface WialonZona {
+	id: number;
+	n: string; // nombre
+	t: number; // tipo (1 = línea, 2 = polígono, 3 = círculo)
+	p: WialonZonaPunto[];
+}
+
+// ── Historial de eventos GPS en la Ficha 360 (CB-119) ──────────────────────
+export const gpsEventosCasoInputSchema = z.object({
+	casoCobroId: z.string().uuid(),
+	limit: z.number().int().min(1).max(100).default(20),
+});
+export type GpsEventosCasoInput = z.infer<typeof gpsEventosCasoInputSchema>;
+
+export const gpsEventosCasoOutputSchema = z.array(
+	z.object({
+		id: z.string(),
+		tipo: z.enum([
+			"desconexion_energia",
+			"ignicion",
+			"sin_reportar",
+			"salida_geocerca",
+		]),
+		wialonUnitId: z.number(),
+		ocurridoAt: z.date(),
+		lat: z.number().nullable(),
+		lon: z.number().nullable(),
+		velocidadKmh: z.number().nullable(),
+		notificado: z.boolean(),
+	}),
+);
+export type GpsEventosCasoOutput = z.infer<typeof gpsEventosCasoOutputSchema>;

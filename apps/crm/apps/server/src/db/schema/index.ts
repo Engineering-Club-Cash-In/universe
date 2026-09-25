@@ -12,6 +12,7 @@ export * from "./cobros-send-logs";
 export * from "./crm";
 export * from "./documents";
 export * from "./gps-consulta-logs";
+export * from "./gps-eventos";
 export * from "./gps-integracion-logs";
 export * from "./insurance";
 export * from "./investments";

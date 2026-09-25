@@ -3,7 +3,10 @@ import {
 	contratoPorDocumentID,
 	sincronizarEstadoDeFirma,
 } from "../lib/contrato-estado-firma";
-import type { EstadoDocumentoFirma } from "../services/legal-docs-api";
+import {
+	consultarEstadoFirma,
+	type EstadoDocumentoFirma,
+} from "../services/legal-docs-api";
 
 /**
  * Recibe del generador el estado de firma que WeeTrust le avisó por webhook.
@@ -58,17 +61,39 @@ app.post("/", async (c) => {
 		return c.json({ success: true, message: "Documento no registrado" });
 	}
 
-	await sincronizarEstadoDeFirma(contrato.id, estado);
+	// El aviso dice QUÉ documento cambió, no cuándo se leyó lo que trae: si el
+	// relay se atrasa, puede llegar la foto de antes de "pedir que se
+	// identifique de nuevo" y volver a dejar firmada a esa persona. Así que el
+	// estado se pide acá, en el momento, con su hora, igual que "Actualizar
+	// estado".
+	let vigente: EstadoDocumentoFirma;
+	const observadoEn = new Date();
+	try {
+		vigente = await consultarEstadoFirma(estado.documentID);
+	} catch (error) {
+		// Sin estado fresco no se escribe nada: se recupera con la próxima
+		// consulta de la ficha o el próximo aviso.
+		console.error(
+			`[weetrust-status] no se pudo consultar ${estado.documentID}:`,
+			error,
+		);
+		return c.json(
+			{ success: false, error: "No se pudo consultar el estado" },
+			502,
+		);
+	}
 
-	const firmados = estado.signatories.filter((s) => s.isSigned).length;
+	await sincronizarEstadoDeFirma(contrato.id, vigente, { observadoEn });
+
+	const firmados = vigente.signatories.filter((s) => s.isSigned).length;
 	console.log(
-		`[weetrust-status] ${contrato.contractType}: ${firmados}/${estado.signatories.length} firmaron (${estado.status})`,
+		`[weetrust-status] ${contrato.contractType}: ${firmados}/${vigente.signatories.length} firmaron (${vigente.status})`,
 	);
 
 	return c.json({
 		success: true,
 		contractId: contrato.id,
-		status: estado.status,
+		status: vigente.status,
 		firmados,
 	});
 });

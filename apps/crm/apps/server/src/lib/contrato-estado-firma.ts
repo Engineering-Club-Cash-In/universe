@@ -32,11 +32,12 @@ export async function sincronizarEstadoDeFirma(
 		 * antes y termina después lo volvía a dejar firmado con el enlace viejo,
 		 * y como una firma no se baja, ninguna consulta nueva lo arreglaba.
 		 *
-		 * El webhook no lo pasa: trae el estado en el mensaje y no se sabe
-		 * cuándo lo leyó WeeTrust.
+		 * Obligatorio: todos los caminos le preguntan a WeeTrust en el momento
+		 * —el webhook también, en vez de creerle al mensaje—, así que todos
+		 * saben cuándo.
 		 */
-		observadoEn?: Date;
-	} = {},
+		observadoEn: Date;
+	},
 ): Promise<void> {
 	const ahora = new Date();
 
@@ -99,9 +100,7 @@ export async function sincronizarEstadoDeFirma(
 						firmante.isSigned
 							? undefined
 							: ne(contractSignatories.status, "signed"),
-						opciones.observadoEn
-							? lte(contractSignatories.updatedAt, opciones.observadoEn)
-							: undefined,
+						lte(contractSignatories.updatedAt, opciones.observadoEn),
 					),
 				);
 		}

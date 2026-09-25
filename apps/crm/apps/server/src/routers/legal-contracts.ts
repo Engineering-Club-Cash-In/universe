@@ -1544,6 +1544,17 @@ export const legalContractsRouter = {
 				input.contractId,
 			);
 
+			// Sólo contratos de una oportunidad: la verificación de un inversionista
+			// la resuelve inversiones, con su propio permiso, desde su ficha. Sin
+			// esto, análisis podía omitírsela a un contrato de inversión con sólo
+			// pasar su id.
+			if (contract.investorId || !contract.opportunityId) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Ese contrato no es de una oportunidad: la verificación de un inversionista se resuelve desde su ficha.",
+				});
+			}
+
 			if (contract.status === "cancelled" || contract.replacedByContractId) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "Este contrato está anulado o fue reemplazado.",

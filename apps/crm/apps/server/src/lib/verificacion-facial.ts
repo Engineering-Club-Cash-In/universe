@@ -75,7 +75,7 @@ async function devolverAFirmar(
  * WeeTrust conteste que no encuentra nada.
  */
 export async function resolverVerificacionFacial(params: {
-	contrato: { id: string; apiResponse: unknown };
+	contrato: { id: string; status: string | null; apiResponse: unknown };
 	documentID: string;
 	accion: "repetir" | "omitir";
 	/** Quién lo decide: queda en la marca si se omite. */
@@ -84,6 +84,19 @@ export async function resolverVerificacionFacial(params: {
 	origen: string;
 }): Promise<{ firmantes: string[]; status: string }> {
 	const { contrato, documentID, accion } = params;
+
+	// Sólo con el contrato abierto. Uno que ya figura firmado —por ejemplo,
+	// confirmado a mano— no tiene nada que resolver, y repetir ahí dejaba a la
+	// persona en pendiente con el contrato firmado: un estado sin salida desde
+	// la pantalla, porque el sincronizador no baja un contrato cerrado.
+	if (contrato.status !== "pending") {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				contrato.status === "signed"
+					? "Este contrato ya figura como firmado: no hay ninguna verificación que resolver."
+					: "Este contrato está anulado.",
+		});
+	}
 
 	let estado: EstadoDocumentoFirma;
 	try {

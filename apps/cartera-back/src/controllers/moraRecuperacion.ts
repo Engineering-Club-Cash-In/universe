@@ -70,13 +70,28 @@ export type MoraLevelEvent = {
 	 * El evento es un `DECREMENTO` cuyo pago SE CAYÓ (se anuló la boleta o se
 	 * revirtió el pago), así que esa bajada NUNCA DEBIÓ EXISTIR.
 	 *
-	 * El plegado lo salta entero: el nivel no baja y no aporta a
-	 * `bajadoAdentro`. Sin esto, el reporte veía la bajada y contaba la
-	 * reposición del cron de la mañana siguiente como mora NUEVA —una foto de
-	 * Q100 terminaba en Q200 de esperado— incluso cuando la reconciliación
-	 * había decidido, con razón, no restituir nada porque el cron ya lo había
-	 * hecho. El monto no alcanzaba: hacía falta el HECHO. Quien lo escribe es
-	 * `marcarDecrementoAnulado`; ver `MARCA_DECREMENTO_ANULADO`.
+	 * ── SOLO VALE DENTRO DEL CICLO ──────────────────────────────────────────
+	 * La marca es un booleano estampado sobre la fila vieja del decremento:
+	 * dice QUE se cayó, no CUÁNDO. Lo único que la fecha del propio decremento
+	 * permite afirmar es de qué lado del corte ocurrió la BAJADA, y de ahí sale
+	 * la única lectura honesta:
+	 *
+	 *   * decremento DENTRO del ciclo: la bajada la vio este mismo recorrido, y
+	 *     saltarla es lo que impide que la reposición del cron que venga después
+	 *     se cobre como mora NUEVA —una foto de Q100 terminaba en Q200 de
+	 *     esperado— incluso cuando la reconciliación decidía, con razón, no
+	 *     restituir nada porque el cron ya lo había hecho. El monto no
+	 *     alcanzaba: hacía falta el HECHO.
+	 *   * decremento ANTERIOR al ciclo: su bajada ya está descontada de la foto
+	 *     inicial, y la marca no dice que la anulación haya caído adentro. Acá
+	 *     la marca NO se honra —el tramo previo se pliega como si no existiera—,
+	 *     porque suprimir esa bajada dejaba el techo sembrado arriba y la
+	 *     reposición de adentro salía con `esperado 0.00` teniendo Q100 vivos y
+	 *     cobrables: una oportunidad REAL borrada, y el cobro de esos Q100
+	 *     cayendo en `cobradoFueraSnapshot`, o sea un cobro descontado al asesor.
+	 *
+	 * Quien la escribe es `marcarDecrementoAnulado`; ver
+	 * `MARCA_DECREMENTO_ANULADO`.
 	 */
 	anulado?: boolean;
 };
@@ -99,10 +114,13 @@ export type MoraLevelEvent = {
  *     como "solo sube".
  */
 export function esReseteoDeNivel(evento: MoraLevelEvent): boolean {
-	// Un decremento anulado no bajó nada: el pago que lo causó se cayó. No
-	// puede ser el ancla de la siembra, o el techo vigente se calcularía a
-	// partir de una bajada que no ocurrió.
-	if (evento.anulado) return false;
+	// La marca de "decremento anulado" NO se mira acá, a propósito: esta función
+	// solo recorre el tramo ANTERIOR al ciclo, donde la marca no dice si la
+	// anulación cayó adentro del ciclo o en otro posterior. Un decremento de un
+	// ciclo anterior SÍ bajó el techo —su bajada está descontada de la foto—, y
+	// sacarlo del ancla dejaba la siembra arriba y borraba del esperado la
+	// reposición de adentro, que es oportunidad real. Ver `anulado` en
+	// `MoraLevelEvent`.
 	if (evento.tipoEvento === "DESACTIVACION") return true;
 	if (evento.tipoEvento === "CONDONACION") return false;
 	if (evento.reverso) return false;
@@ -254,7 +272,13 @@ export function nivelDeArranque(
 ): number {
 	const primero = previos[0];
 	if (!primero) return foto;
-	return Math.max(foto, plegarNivel(primero.montoAnterior, previos).nivel);
+	return Math.max(
+		foto,
+		// `tramoDelCiclo: false`: este plegado es el de la VÍSPERA. Un decremento
+		// de antes del corte bajó el techo de verdad aunque su pago se haya caído
+		// después; ver `anulado` en `MoraLevelEvent`.
+		plegarNivel(primero.montoAnterior, previos, { tramoDelCiclo: false }).nivel,
+	);
 }
 
 /**
@@ -265,6 +289,14 @@ export function nivelDeArranque(
 export function plegarNivel(
 	nivelInicial: number,
 	eventos: MoraLevelEvent[],
+	/**
+	 * ¿Este recorrido es el DEL CICLO? Solo ahí vale la marca de decremento
+	 * anulado: la bajada que se salta es una que este mismo recorrido vio. En el
+	 * tramo ANTERIOR al ciclo la marca no dice cuándo se anuló, así que no se
+	 * honra y el decremento cuenta como la bajada real que fue. Ver `anulado`
+	 * en `MoraLevelEvent`.
+	 */
+	{ tramoDelCiclo = true }: { tramoDelCiclo?: boolean } = {},
 ): { nivel: number; generado: number } {
 	let nivel = nivelInicial;
 	let generado = 0;
@@ -274,10 +306,11 @@ export function plegarNivel(
 	// oportunidad nueva. Ver la regla del reverso más abajo.
 	let bajadoAdentro = 0;
 	for (const evento of eventos) {
-		// Decremento anulado: ese pago se cayó, así que la bajada no ocurrió.
-		// Saltarlo deja el nivel donde estaba, y la reposición del cron que
-		// venga después no supera ese nivel y no se cuenta como mora nueva.
-		if (evento.anulado) continue;
+		// Decremento anulado DENTRO del ciclo: ese pago se cayó, así que la
+		// bajada no ocurrió. Saltarlo deja el nivel donde estaba, y la reposición
+		// del cron que venga después no supera ese nivel y no se cuenta como mora
+		// nueva. Fuera del ciclo la marca no se honra: ver `tramoDelCiclo`.
+		if (tramoDelCiclo && evento.anulado) continue;
 		if (evento.tipoEvento === "DESACTIVACION") {
 			nivel = 0;
 			continue;
@@ -623,10 +656,12 @@ export function buildMoraRecoveryQuery({
         FROM cartera.moras_historial h
         WHERE h.credito_id = e.credito_id
           AND h.fecha < ${inicioUtc}::timestamp
-          -- Un decremento ANULADO tampoco puede ser el ancla: su bajada no
-          -- ocurrió, y tomarla como reseteo dejaría el techo vigente en el
-          -- monto de un pago que se cayó. Espejo de \`esReseteoDeNivel\`.
-          AND NOT ${esDecrementoAnuladoSql(sql.raw("h.motivo"))}
+          -- La marca de DECREMENTO ANULADO no se mira acá: todas estas filas son
+          -- anteriores al ciclo y la marca no dice CUÁNDO se anuló el pago. Un
+          -- decremento de un ciclo anterior sí bajó el techo —su bajada ya está
+          -- descontada de la foto—, así que sacarlo del ancla dejaba la siembra
+          -- arriba y la reposición de adentro salía con esperado 0 teniendo la
+          -- mora viva. Espejo de \`esReseteoDeNivel\`.
           AND (h.tipo_evento = 'DESACTIVACION'
                OR (h.tipo_evento <> 'CONDONACION'
                    AND NOT (h.tipo_evento = 'INCREMENTO'

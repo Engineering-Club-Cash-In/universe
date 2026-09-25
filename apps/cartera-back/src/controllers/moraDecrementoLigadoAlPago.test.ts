@@ -442,12 +442,13 @@ describe("(C) el reporte deja de contar lo repuesto como mora nueva", () => {
 	});
 });
 
-describe("(C) la siembra tampoco puede apoyarse en una bajada que no ocurrió", () => {
-	it("un decremento anulado no es el ancla del techo vigente", () => {
-		// El ancla es el ÚLTIMO evento que bajó el techo DE VERDAD. Si una bajada
-		// que se cayó pudiera serlo, el techo vigente quedaría en el monto de un
-		// pago que nunca existió y el rebote del cron se contaría como mora nueva
-		// por el borde de la siembra.
+describe("(C) la marca NO llega a la siembra: ahí no dice cuándo se anuló", () => {
+	it("un decremento de la víspera sigue siendo el ancla, lleve marca o no", () => {
+		// El ancla es el ÚLTIMO evento que bajó el techo antes del ciclo. La marca
+		// es un booleano sin fecha: dice QUE el pago se cayó, no CUÁNDO. Si por
+		// llevarla el decremento dejara de anclar, un pago de un ciclo ANTERIOR
+		// anulado adentro se borraría de la siembra, el techo quedaría arriba y la
+		// reposición de adentro —Q100 vivos y cobrables— saldría con esperado 0.
 		expect(
 			esReseteoDeNivel({
 				tipoEvento: "DECREMENTO",
@@ -462,15 +463,14 @@ describe("(C) la siembra tampoco puede apoyarse en una bajada que no ocurrió", 
 				montoNuevo: 0,
 				anulado: true,
 			}),
-		).toBe(false);
+		).toBe(true);
 	});
 
-	it("y el techo sembrado conserva los Q100 que el decremento anulado había bajado", () => {
-		// Lo último antes del corte fue el pago, que después se cayó. Con la
-		// marca no hay ancla —nada bajó el techo de verdad— y el techo sigue
-		// siendo Q100; sin ella el ancla es el decremento y el techo cae a Q0, con
-		// lo que el RECALCULO de adentro del ciclo se cuenta ENTERO como mora
-		// nueva: el doble conteo metido por el borde de la siembra.
+	it("y el techo sembrado da lo mismo con marca que sin ella", () => {
+		// Lo último antes del corte fue el pago. Que después se haya caído no
+		// cambia que ESA bajada ya está descontada de la foto inicial: el techo
+		// con el que el crédito entra al ciclo es Q0 en los dos casos, y lo que el
+		// ciclo reponga es oportunidad REAL.
 		const previos = [
 			{ tipoEvento: "CREACION", montoAnterior: 0, montoNuevo: 100 },
 			{ tipoEvento: "DECREMENTO", montoAnterior: 100, montoNuevo: 0 },
@@ -480,8 +480,38 @@ describe("(C) la siembra tampoco puede apoyarse en una bajada que no ocurrió", 
 			nivelSembrado(
 				previos.map((e, i) => (i === 1 ? { ...e, anulado: true } : e)),
 			),
-		).toBe(100);
+		).toBe(0);
 		expect(nivelSembrado(previos)).toBe(0);
+	});
+
+	it("con esa siembra, la reposición de adentro del ciclo SÍ genera", () => {
+		// El cierre del caso: foto 0 (el pago viejo ya la había bajado), el pago
+		// se cae adentro del ciclo y la mora vuelve. Son Q100 que el asesor tiene
+		// que cobrar este mes.
+		const previos = [
+			{ tipoEvento: "CREACION", montoAnterior: 0, montoNuevo: 100 },
+			{
+				tipoEvento: "DECREMENTO",
+				montoAnterior: 100,
+				montoNuevo: 0,
+				anulado: true,
+			},
+		];
+
+		expect(
+			moraGeneradaEnPeriodo(
+				0,
+				[
+					{
+						tipoEvento: "INCREMENTO",
+						montoAnterior: 0,
+						montoNuevo: 100,
+						reverso: true,
+					},
+				],
+				nivelSembrado(previos),
+			),
+		).toBe(100);
 	});
 });
 

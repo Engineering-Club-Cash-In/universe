@@ -161,6 +161,105 @@ describe("el pago anulado y su restitución, de punta a punta", () => {
 	});
 });
 
+describe("la marca de decremento anulado solo vale DENTRO del ciclo", () => {
+	/**
+	 * El crédito llega al ciclo con la mora ya cobrada por un pago de un ciclo
+	 * ANTERIOR (foto 0). Adentro del ciclo ese pago se cae y el decremento viejo
+	 * queda marcado como anulado. Esos Q100 vuelven a estar vivos y cobrables:
+	 * son oportunidad REAL del asesor, no la reposición de algo que el ciclo ya
+	 * contó.
+	 */
+	const previosConDecrementoAnulado: MoraLevelEvent[] = [
+		evento("CREACION", 0, 100),
+		{ ...evento("DECREMENTO", 100, 0), anulado: true },
+	];
+
+	const reporteDelCiclo = (eventos: MoraLevelEvent[], cobrado: string) =>
+		buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: "0",
+					eventos,
+					nivelSembrado: String(nivelSembrado(previosConDecrementoAnulado)),
+					cobrado,
+				},
+			],
+			{ inicio: "2026-07-06", fin: "2026-08-06", alcance: "historico" },
+		);
+
+	it("el decremento de la víspera SIGUE siendo el ancla de la siembra", () => {
+		// Si la marca lo sacara del ancla, el techo sembrado quedaría en 100 y la
+		// reposición de adentro no generaría nada.
+		expect(nivelSembrado(previosConDecrementoAnulado)).toBe(0);
+	});
+
+	it("(a) la restitución de adentro genera: esperado 100, pendiente 100", () => {
+		const reporte = reporteDelCiclo([reverso(0, 100)], "0");
+		expect(reporte.totales.esperado).toBe("100.00");
+		expect(reporte.totales.pendiente).toBe("100.00");
+	});
+
+	it("(a bis) sin evento de restitución, el RECALCULO del cron también genera", () => {
+		// Si el cron ya había repuesto, la reconciliación restituye 0 y no queda
+		// ningún evento marcado como reverso: lo único de adentro es la
+		// re-fijación del cron. Tiene que contar igual.
+		const reporte = reporteDelCiclo([evento("RECALCULO", 0, 100)], "0");
+		expect(reporte.totales.esperado).toBe("100.00");
+		expect(reporte.totales.pendiente).toBe("100.00");
+	});
+
+	it("(c) si el cliente paga esos Q100, el cobro NO cae fuera del alcance", () => {
+		const reporte = reporteDelCiclo([reverso(0, 100)], "100");
+		expect(reporte.totales.cobradoEnSnapshot).toBe("100.00");
+		expect(reporte.totales.cobradoFueraSnapshot).toBe("0.00");
+		expect(reporte.totales.pendiente).toBe("0.00");
+	});
+
+	it("el camino viejo (eventos `previo`) siembra igual que el agregado", () => {
+		// El plegado fila por fila del tramo previo es la ESPECIFICACIÓN del
+		// agregado que hoy calcula el SQL: si una de las dos piezas honrara la
+		// marca y la otra no, la siembra diría dos cosas distintas.
+		const conPrevios = moraGeneradaEnPeriodo(0, [
+			...previosConDecrementoAnulado.map((e) => ({ ...e, previo: true })),
+			reverso(0, 100),
+		]);
+		const conAgregado = moraGeneradaEnPeriodo(
+			0,
+			[reverso(0, 100)],
+			nivelSembrado(previosConDecrementoAnulado),
+		);
+
+		expect(conPrevios).toBe(100);
+		expect(conAgregado).toBe(100);
+	});
+
+	it("(b) el caso que la marca vino a resolver sigue dando 100, no 200", () => {
+		// Pago y anulación DENTRO del mismo ciclo: el decremento marcado es una
+		// bajada que este recorrido vio, y saltarlo es lo que impide que la
+		// reposición del cron se cobre como mora nueva.
+		const reporte = buildMoraRecoveryReport(
+			[
+				{
+					asesorId: 1,
+					nombre: "Ana",
+					esperado: "100",
+					eventos: [
+						{ ...evento("DECREMENTO", 100, 0), anulado: true },
+						evento("RECALCULO", 0, 100),
+					],
+					nivelSembrado: String(nivelSembrado([evento("CREACION", 0, 100)])),
+					cobrado: "0",
+				},
+			],
+			{ inicio: "2026-07-06", fin: "2026-08-06", alcance: "historico" },
+		);
+		expect(reporte.totales.esperado).toBe("100.00");
+		expect(reporte.totales.esperado).not.toBe("200.00");
+	});
+});
+
 describe("moraGeneradaEnPeriodo", () => {
 	it("no cuenta dos veces la deuda que la empresa condonó y el cron repuso", () => {
 		// El ejemplo del negocio, tal cual: solo el crecimiento real de 100 a 120
@@ -566,7 +665,11 @@ const conTopeDeDias = (historial: EventoFechado[], topeDias: number) =>
 const nivelPlegado = (previos: MoraLevelEvent[]) =>
 	previos.length === 0
 		? 0
-		: plegarNivel((previos[0] as MoraLevelEvent).montoAnterior, previos).nivel;
+		: plegarNivel((previos[0] as MoraLevelEvent).montoAnterior, previos, {
+				// El tramo previo NO es el del ciclo: la marca de decremento anulado
+				// no se honra acá, igual que en `nivelSembrado` y en el ancla del SQL.
+				tramoDelCiclo: false,
+			}).nivel;
 
 describe("nivelSembrado", () => {
 	// El caso del defecto: la condonación quedó 32 días antes del corte, o sea
@@ -756,6 +859,13 @@ describe("nivelSembrado", () => {
 			],
 			[evento("DESACTIVACION", 400, 0)],
 			[evento("CONDONACION", 400, 0)],
+			// Un decremento marcado como anulado en el tramo PREVIO: ni el agregado
+			// ni el plegado honran la marca ahí, así que los dos lo toman como el
+			// reseteo que fue.
+			[
+				evento("RECALCULO", 0, 100),
+				{ ...evento("DECREMENTO", 100, 0), anulado: true },
+			],
 		];
 		for (const caso of casos) {
 			expect({ caso, nivel: nivelSembrado(caso) }).toEqual({
@@ -792,11 +902,17 @@ describe("nivelSembrado", () => {
 						? 0
 						: Math.floor(azar() * 300);
 				const esReverso = tipoEvento === "INCREMENTO" && azar() < 0.4;
+				// También decrementos MARCADOS como anulados: en el tramo previo la
+				// marca no se honra, así que el agregado y el plegado tienen que
+				// seguir dando lo mismo. Si una de las dos piezas volviera a mirarla,
+				// la equivalencia se cae acá.
+				const esAnulado = tipoEvento === "DECREMENTO" && azar() < 0.4;
 				historial.push({
 					tipoEvento,
 					montoAnterior: monto,
 					montoNuevo,
 					...(esReverso ? { reverso: true } : {}),
+					...(esAnulado ? { anulado: true } : {}),
 				});
 				monto = montoNuevo;
 			}
@@ -865,9 +981,8 @@ describe("buildMoraRecoveryReport", () => {
 			"2026-06-06 06:00:00.000",
 			"2026-07-06 06:00:00.000",
 			"2026-06-06 06:00:00.000",
-			// La misma marca otra vez: un decremento anulado tampoco puede ser el
-			// ancla de la siembra.
-			"% [decremento anulado]%",
+			// La marca NO vuelve a aparecer: el ancla de la siembra mira solo filas
+			// anteriores al ciclo, donde la marca no dice cuándo se anuló el pago.
 			"Reversa de pago #%",
 			"Anulación de pago #%",
 			"2026-06-06 06:00:00.000",
@@ -1196,22 +1311,28 @@ describe("buildMoraRecoveryReport", () => {
 		expect(query.sql).not.toContain(
 			"(h.fecha AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >=",
 		);
-		expect(query.params.slice(-10)).toEqual([
+		expect(query.params.slice(-9)).toEqual([
 			// los prefijos con los que un pago caído firma su restitución
 			"Reversa de pago #%",
 			"Anulación de pago #%",
-			// y la marca del decremento que ese pago caído invalidó
+			// y la marca del decremento que ese pago caído invalidó: la lee SOLO el
+			// tramo del ciclo, así que aparece UNA vez en toda la consulta.
 			"% [decremento anulado]%",
 			// el ciclo
 			"2026-06-06 06:00:00.000",
 			"2026-07-06 06:00:00.000",
-			// la siembra: corte del ancla, la marca de anulado, prefijos, corte del máximo
+			// la siembra: corte del ancla, prefijos, corte del máximo. SIN la marca
+			// de anulado: acá todas las filas son anteriores al ciclo.
 			"2026-06-06 06:00:00.000",
-			"% [decremento anulado]%",
 			"Reversa de pago #%",
 			"Anulación de pago #%",
 			"2026-06-06 06:00:00.000",
 		]);
+		// Candado explícito: si alguien vuelve a meter la marca en el ancla, este
+		// conteo lo delata aunque la cola de parámetros se reacomode.
+		expect(
+			query.params.filter((p) => p === "% [decremento anulado]%"),
+		).toHaveLength(1);
 	});
 
 	it("la siembra viaja como un NÚMERO, no como filas previas", () => {

@@ -544,6 +544,9 @@ function RouteComponent() {
 		telefonoAlternativo: [] as string[],
 		emailContacto: "",
 	});
+	// Cómo quedó lo último guardado: "Cancelar" pregunta antes de tirar cambios
+	// que no se guardaron (los teléfonos se guardan solos; el email no).
+	const [contactFormInicial, setContactFormInicial] = useState(contactForm);
 
 	// Estado modal seguimiento
 	const [isSeguimientoModalOpen, setIsSeguimientoModalOpen] = useState(false);
@@ -1084,6 +1087,7 @@ function RouteComponent() {
 			}),
 		onSuccess: () => {
 			toast.success("Información de contacto actualizada");
+			setContactFormInicial(contactForm);
 			// Los teléfonos nuevos de Referencias se marcan contra los del caso.
 			queryClient.invalidateQueries({
 				queryKey: orpc.getReferenciasCaso.key(),
@@ -1100,6 +1104,94 @@ function RouteComponent() {
 		},
 	});
 
+	// CB-036: los teléfonos del caso se guardan EN EL ACTO desde el editor de la
+	// tarjeta de contacto (al confirmar o quitar un número), sin esperar al
+	// "Guardar" del formulario, para que un número escrito no se pierda.
+	const refrescarTelefonos = () => {
+		queryClient.invalidateQueries(
+			orpc.getDetallesCreditoCarteraBack.queryOptions({
+				input: { creditoId: id },
+			}),
+		);
+		queryClient.invalidateQueries({
+			queryKey: orpc.getReferenciasCaso.key(),
+		});
+	};
+
+	const guardarTelefonosMutation = useMutation({
+		mutationFn: (v: {
+			telefonosPrincipales: string[];
+			telefonosAlternativos: string[];
+		}) =>
+			client.guardarTelefonosCaso({
+				casoCobroId: casoDetails.data?.id ?? "",
+				...v,
+			}),
+		onSuccess: () => {
+			toast.success("Teléfonos guardados");
+			refrescarTelefonos();
+		},
+		onError: (err: Error) => {
+			toast.error(`No se pudieron guardar los teléfonos: ${err.message}`);
+		},
+	});
+
+	const guardarTelefonos = (principales: string[], alternativos: string[]) => {
+		const p = telefonosParaGuardar(principales);
+		if (p.length === 0) {
+			toast.error(
+				"El teléfono principal no puede quedar vacío: escribí otro número.",
+			);
+			return;
+		}
+		const a = telefonosParaGuardar(alternativos);
+		// La foto se actualiza al mandar, no al volver: un "Cancelar" justo
+		// después del blur no debe ver como pendiente lo que ya va en camino.
+		setContactFormInicial((f) => ({
+			...f,
+			telefonoPrincipal: p,
+			telefonoAlternativo: a,
+		}));
+		guardarTelefonosMutation.mutate({
+			telefonosPrincipales: p,
+			telefonosAlternativos: a,
+		});
+	};
+
+	// Un número que se consiguió por referencias: se suma con la operación del
+	// botón de la pestaña Referencias, que deja quién y cuándo lo agregó.
+	const agregarTelefonoEncontrado = useMutation({
+		mutationFn: (v: { hallazgoId: string; telefono: string }) =>
+			client.agregarHallazgoATelefonosCaso({
+				casoCobroId: casoDetails.data?.id ?? "",
+				hallazgoId: v.hallazgoId,
+			}),
+		onSuccess: (res, v) => {
+			// Si el formulario está abierto, el número (ya guardado) entra también
+			// ahí y en su foto: un guardado posterior no lo borra.
+			const digitos = (t: string) => t.replace(/\D/g, "").slice(-8);
+			const sumar = (f: typeof contactForm) =>
+				[...f.telefonoPrincipal, ...f.telefonoAlternativo].some(
+					(t) => digitos(t) === digitos(v.telefono),
+				)
+					? f
+					: {
+							...f,
+							telefonoAlternativo: [...f.telefonoAlternativo, v.telefono],
+						};
+			setContactForm(sumar);
+			setContactFormInicial(sumar);
+			toast.success(
+				res.agregado
+					? `${v.telefono} quedó guardado entre los teléfonos del cliente`
+					: `${v.telefono} ya estaba entre los teléfonos del cliente`,
+			);
+			refrescarTelefonos();
+		},
+		onError: (err: Error) => {
+			toast.error(`No se pudo guardar el teléfono: ${err.message}`);
+		},
+	});
 	const cancelSeguimientoMutation = useMutation({
 		mutationFn: (seguimientoId: string) =>
 			client.deleteSeguimiento({ id: seguimientoId }),
@@ -2800,14 +2892,16 @@ function RouteComponent() {
 														.map((t) => t.trim())
 														.filter(Boolean);
 												const principales = parseTels(caso.telefonoPrincipal);
-												setContactForm({
+												const inicial = {
 													telefonoPrincipal:
 														principales.length > 0 ? principales : [""],
 													telefonoAlternativo: parseTels(
 														caso.telefonoAlternativo,
 													),
 													emailContacto: caso.emailContacto || "",
-												});
+												};
+												setContactForm(inicial);
+												setContactFormInicial(inicial);
 												setIsEditingContact(true);
 											}}
 										>
@@ -2823,6 +2917,13 @@ function RouteComponent() {
 												id="contacto-tel-principal"
 												label="Teléfono principal"
 												requerido
+												guardando={guardarTelefonosMutation.isPending}
+												onGuardar={(valores) =>
+													guardarTelefonos(
+														valores,
+														contactForm.telefonoAlternativo,
+													)
+												}
 												valores={contactForm.telefonoPrincipal}
 												onChange={(valores) =>
 													setContactForm((f) => ({
@@ -2834,6 +2935,13 @@ function RouteComponent() {
 											<TelefonosEditor
 												id="contacto-tel-alternativo"
 												label="Teléfonos alternativos"
+												guardando={guardarTelefonosMutation.isPending}
+												onGuardar={(valores) =>
+													guardarTelefonos(
+														contactForm.telefonoPrincipal,
+														valores,
+													)
+												}
 												valores={contactForm.telefonoAlternativo}
 												onChange={(valores) =>
 													setContactForm((f) => ({
@@ -2858,7 +2966,8 @@ function RouteComponent() {
 												return (
 													<div className="space-y-1.5 rounded-lg border border-dashed bg-muted/30 p-3">
 														<p className="text-muted-foreground text-xs">
-															Se consiguieron estos números del cliente:
+															Se consiguieron estos números del cliente. Al
+															tocarlos quedan guardados:
 														</p>
 														<div className="flex flex-wrap gap-1.5">
 															{sugeridos.map((h) => (
@@ -2873,16 +2982,12 @@ function RouteComponent() {
 																			? `Lo dio ${h.referenciaNombre}`
 																			: undefined
 																	}
+																	disabled={agregarTelefonoEncontrado.isPending}
 																	onClick={() =>
-																		setContactForm((f) => ({
-																			...f,
-																			telefonoAlternativo: [
-																				...telefonosParaGuardar(
-																					f.telefonoAlternativo,
-																				),
-																				h.valor,
-																			],
-																		}))
+																		agregarTelefonoEncontrado.mutate({
+																			hallazgoId: h.id,
+																			telefono: h.valor,
+																		})
 																	}
 																>
 																	<Plus className="mr-1 h-3.5 w-3.5" />
@@ -2908,6 +3013,10 @@ function RouteComponent() {
 													placeholder="Ej: correo@ejemplo.com"
 												/>
 											</div>
+											<p className="text-muted-foreground text-xs">
+												Los teléfonos se guardan solos al escribirlos o
+												quitarlos. "Guardar" es para el email.
+											</p>
 											<div className="flex gap-2">
 												<Button
 													size="sm"
@@ -2946,7 +3055,23 @@ function RouteComponent() {
 												<Button
 													size="sm"
 													variant="outline"
-													onClick={() => setIsEditingContact(false)}
+													onClick={() => {
+														const normalizar = (f: typeof contactForm) =>
+															JSON.stringify([
+																telefonosParaGuardar(f.telefonoPrincipal),
+																telefonosParaGuardar(f.telefonoAlternativo),
+																f.emailContacto.trim(),
+															]);
+														if (
+															normalizar(contactForm) !==
+																normalizar(contactFormInicial) &&
+															!window.confirm(
+																"Hay cambios sin guardar en el contacto. ¿Salir sin guardarlos?",
+															)
+														)
+															return;
+														setIsEditingContact(false);
+													}}
 													disabled={updateContactMutation.isPending}
 												>
 													Cancelar
@@ -3034,22 +3159,43 @@ function RouteComponent() {
 													<div className="space-y-1">
 														<p className="text-muted-foreground text-xs">
 															Nuevos del cliente, todavía no están en sus
-															teléfonos
+															teléfonos. Con + quedan guardados.
 														</p>
 														<div className="flex flex-wrap gap-1.5">
 															{telefonosNuevosCliente.map((h) => (
-																<a
+																<span
 																	key={h.id}
-																	href={`tel:${h.valor.replace(/[^0-9+]/g, "")}`}
-																	title={
-																		h.referenciaNombre
-																			? `Lo dio ${h.referenciaNombre}`
-																			: undefined
-																	}
-																	className="inline-flex items-center rounded-md border border-dashed px-2 py-0.5 font-medium text-primary text-sm hover:underline"
+																	className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-0.5 text-sm"
 																>
-																	{h.valor}
-																</a>
+																	<a
+																		href={`tel:${h.valor.replace(/[^0-9+]/g, "")}`}
+																		title={
+																			h.referenciaNombre
+																				? `Lo dio ${h.referenciaNombre}`
+																				: undefined
+																		}
+																		className="font-medium text-primary hover:underline"
+																	>
+																		{h.valor}
+																	</a>
+																	<button
+																		type="button"
+																		className="text-muted-foreground hover:text-primary disabled:opacity-50"
+																		title="Guardar entre los teléfonos del cliente"
+																		aria-label={`Guardar ${h.valor} entre los teléfonos del cliente`}
+																		disabled={
+																			agregarTelefonoEncontrado.isPending
+																		}
+																		onClick={() =>
+																			agregarTelefonoEncontrado.mutate({
+																				hallazgoId: h.id,
+																				telefono: h.valor,
+																			})
+																		}
+																	>
+																		<Plus className="h-3.5 w-3.5" />
+																	</button>
+																</span>
 															))}
 														</div>
 													</div>

@@ -759,4 +759,59 @@ export const referenciasCobrosRouter = {
 				return { agregado: nuevoAlternativo !== null };
 			});
 		}),
+
+	/**
+	 * Guarda los teléfonos del caso en el acto, desde el editor de la tarjeta
+	 * de contacto: cada número que el asesor confirma (Enter o al salir del
+	 * campo) o quita se persiste sin esperar a "Guardar".
+	 *
+	 * Aparte de `updateContactInfoCobros` a propósito: esa escribe también el
+	 * email (y lo deja en "" si no viene), así que un autoguardado de
+	 * teléfonos pisaría un email a medio editar, o fallaría en los casos cuyo
+	 * email no pasa `z.string().email()` ("Sin email" de los casos creados por
+	 * el sync). Esta toca solo los dos campos de teléfono.
+	 */
+	guardarTelefonosCaso: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				telefonosPrincipales: z
+					.array(telefonoSchema)
+					.min(1, "El teléfono principal no puede quedar vacío")
+					.max(10),
+				telefonosAlternativos: z.array(telefonoSchema).max(20),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const sinRepetir = (lista: string[]) => [...new Set(lista)];
+			const principales = sinRepetir(input.telefonosPrincipales);
+			const alternativos = sinRepetir(input.telefonosAlternativos).filter(
+				(t) => !principales.includes(t),
+			);
+			// Mismo formato que edita la ficha: separados por coma.
+			const [caso] = await db
+				.update(casosCobros)
+				.set({
+					telefonoPrincipal: principales.join(", "),
+					telefonoAlternativo:
+						alternativos.length > 0 ? alternativos.join(", ") : null,
+					updatedAt: new Date(),
+				})
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.returning({
+					telefonoPrincipal: casosCobros.telefonoPrincipal,
+					telefonoAlternativo: casosCobros.telefonoAlternativo,
+				});
+			if (!caso) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Caso de cobro no encontrado.",
+				});
+			}
+			return caso;
+		}),
 };

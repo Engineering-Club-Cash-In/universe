@@ -1,7 +1,7 @@
 -- Verificacion manual y automatica de vehiculos en SAT (Agencia Virtual).
 -- Archivo unico y final para aplicar en prod.
 -- En dev, donde una version previa ya existe, ejecutar el script de alineacion separado.
--- No registrar en meta/_journal.json: drizzle-kit migrate no debe ejecutarla automaticamente.
+-- La migracion es idempotente y tambien esta registrada para drizzle-kit migrate.
 
 DO $$ BEGIN
   CREATE TYPE public.sat_corrida_estado AS ENUM (

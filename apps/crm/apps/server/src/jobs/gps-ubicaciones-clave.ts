@@ -16,7 +16,7 @@
  * 60 días — no se van sumando corridas viejas.
  */
 
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, not, or } from "drizzle-orm";
 import { db } from "../db";
 import { gpsUbicacionesClave } from "../db/schema/gps-eventos";
 import { resolverVehiculoYCaso } from "../services/wialon/gps-eventos";
@@ -50,12 +50,28 @@ export async function ejecutarCalculoUbicacionesClave(): Promise<{
 
 	const unidades = await unidadesConCasoActivo(sifcosB4);
 	if (unidades.length === 0) {
+		// CB-119: si no hay unidades con caso activo en B4 hoy, se purgan todos
+		// los snapshots previos (créditos que salieron de B4 o casos cerrados).
+		await db.delete(gpsUbicacionesClave);
 		return {
 			unidadesProcesadas: 0,
 			unidadesConError: 0,
 			ubicacionesCalculadas: 0,
 		};
 	}
+
+	// CB-119: Purgar snapshots de pares (unidad, SIFCO) que ya no están activos
+	// en B4 (créditos que regularizaron, salieron de mora, casos cerrados o GPS
+	// desvinculado) para no retener ubicaciones sensibles fuera del alcance B4.
+	const paresActivos = unidades.map((u) =>
+		and(
+			eq(gpsUbicacionesClave.wialonUnitId, u.wialonUnitId),
+			eq(gpsUbicacionesClave.numeroCreditoSifco, u.numeroCreditoSifco),
+		),
+	);
+	const condicionActivos =
+		paresActivos.length > 1 ? or(...paresActivos)! : paresActivos[0]!;
+	await db.delete(gpsUbicacionesClave).where(not(condicionActivos));
 
 	const ahora = new Date();
 	const ventanaDesde = new Date(

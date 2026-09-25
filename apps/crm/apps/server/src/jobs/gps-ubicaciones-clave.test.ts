@@ -26,6 +26,9 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 			vehicleId: "veh-1",
 			casoCobroId: "caso-1",
 		});
+		spyOn(db, "delete").mockReturnValue({
+			where: async () => {},
+		} as any);
 		spyOn(db, "transaction").mockImplementation(async (cb: any) => {
 			txCalled = true;
 			return cb({
@@ -108,5 +111,45 @@ describe("CB-119 (D-15) — ejecutarCalculoUbicacionesClave", () => {
 
 		expect(res.unidadesProcesadas).toBe(1);
 		expect(deleteCondition).toBeDefined();
+	});
+
+	it("purga snapshots de unidades que salieron de B4 (no presentes en unidadesConCasoActivo)", async () => {
+		let deleteWhereCondition: unknown = null;
+		spyOn(db, "delete").mockReturnValue({
+			where: async (cond: unknown) => {
+				deleteWhereCondition = cond;
+			},
+		} as any);
+
+		const mockWialon = {
+			getHistorialPosiciones: mock().mockResolvedValue({
+				mensajes: [],
+				completo: true,
+				tramosTotal: 1,
+				tramosCompletados: 1,
+			}),
+		};
+		spyOn(wialonClientModule, "getWialonClient").mockReturnValue(
+			mockWialon as any,
+		);
+
+		await ejecutarCalculoUbicacionesClave();
+
+		expect(deleteWhereCondition).toBeDefined();
+	});
+
+	it("purga todos los snapshots si no hay unidades activas en B4 (unidades.length === 0)", async () => {
+		let deleteCalled = false;
+		spyOn(db, "delete").mockImplementation((() => {
+			deleteCalled = true;
+			return Promise.resolve();
+		}) as any);
+
+		spyOn(gpsEventosPoll, "unidadesConCasoActivo").mockResolvedValue([]);
+
+		const res = await ejecutarCalculoUbicacionesClave();
+
+		expect(deleteCalled).toBe(true);
+		expect(res.unidadesProcesadas).toBe(0);
 	});
 });

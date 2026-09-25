@@ -18,8 +18,8 @@ import {
 	Navigation,
 	Phone,
 	PhoneCall,
+	PhoneForwarded,
 	Plus,
-	Smartphone,
 	Trash2,
 	User,
 	X,
@@ -88,19 +88,6 @@ function etiquetaOrigen(
 		return `Personal · ${referencia.detalle}`;
 	}
 	return etiquetaOrigenReferencia(origen);
-}
-
-/** Celular con un "+": lucide no trae "phone-plus" en esta versión. */
-function IconoAgregarTelefono() {
-	return (
-		<span className="relative inline-flex">
-			<Smartphone className="h-4 w-4" />
-			<Plus
-				className="absolute -right-1.5 -bottom-1 h-3 w-3 rounded-full bg-background"
-				strokeWidth={3}
-			/>
-		</span>
-	);
 }
 
 function IconoHallazgo({ tipo }: { tipo: string }) {
@@ -391,7 +378,7 @@ export function ReferenciasView({ casoCobroId }: ReferenciasViewProps) {
 														aria-label="Agregar teléfono"
 														onClick={() => setTelefonoPara(ref)}
 													>
-														<IconoAgregarTelefono />
+														<PhoneForwarded className="h-4 w-4" />
 													</Button>
 												</TooltipTrigger>
 												<TooltipContent>Agregar teléfono</TooltipContent>

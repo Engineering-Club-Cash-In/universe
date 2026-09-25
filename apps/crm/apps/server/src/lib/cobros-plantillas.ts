@@ -35,7 +35,16 @@ export interface VariablesPlantilla {
 	cuotasAtraso: number;
 	telefonoAsesor: string;
 	nombreAsesor: string;
+	/**
+	 * Tope de mora de UNA cuota: su cargo mensual completo (capital × 1.12%).
+	 * Es lo máximo que puede llegar a cobrar esa cuota por más días que pasen.
+	 */
 	expectativaMora: string;
+	/**
+	 * Recargo por cada día de atraso de una cuota: 1/30 del cargo mensual. Es
+	 * lo que el cron sumará mañana si el cliente no paga hoy.
+	 */
+	expectativaMoraDiaria?: string;
 	/** Año del impuesto de circulación. Default: año actual en Guatemala. */
 	anioImpuesto?: string;
 	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
@@ -359,11 +368,18 @@ export function cuerpoUsaFechaLimiteImpuesto(cuerpo: string): boolean {
 }
 
 /**
- * Porcentaje de mora por cuota vencida. MISMA fórmula que el job nocturno
- * `procesarMoras` de cartera-back (apps/cartera-back/src/controllers/latefee.ts):
- * mora = capital × 1.12% × cuotas vencidas.
+ * Mora PROPORCIONAL a los días de atraso. MISMA fórmula que el job nocturno
+ * `procesarMoras` de cartera-back (`calcularMoraProporcional` en
+ * apps/cartera-back/src/controllers/latefee.ts):
+ *
+ *   mora = Σ capital × 1.12% × min(1, días_i / 30)   (por cada cuota vencida)
+ *
+ * Una cuota suma 1/30 de su cargo mensual por cada día de atraso y se congela
+ * al llegar al cargo completo (día 30). Base FIJA de 30 días, no los del mes.
+ * El día del vencimiento no cuenta: al día siguiente ya corre 1/30.
  */
 const PORCENTAJE_MORA_POR_CUOTA = "0.0112";
+const BASE_DIAS_MORA = 30;
 
 /**
  * Estados que el job `procesarMoras` excluye de mora (STATUS_EXCLUIDOS_MORA
@@ -380,30 +396,62 @@ const STATUS_EXCLUIDOS_MORA = new Set([
 ]);
 
 /**
- * "Expectativa de mora" del recordatorio del día de pago: el recargo de UNA
- * cuota adicional que el job de cartera asignaría si el cliente no paga hoy
- * (mora aún no asignada). Devuelve el monto formateado es-GT ("1,382.72") o
- * "" si no hay capital o el estado del crédito está excluido de mora (igual
- * que el job).
+ * Mora de UNA cuota con `dias` de atraso, con el mismo orden de operaciones
+ * que `calcularMoraProporcional` del cron (cargo mensual × factor, factor =
+ * min(1, días/30)) para que el redondeo coincida al centavo. Devuelve el monto
+ * formateado es-GT ("1,382.72"), o "" si el job no cobraría nada: estado
+ * excluido de mora, sin capital, o un monto que redondea a Q0.00 (el cron,
+ * `decidirMoraDelCron`, tampoco crea mora en ese caso).
  */
-export function calcularExpectativaMora(
+function moraDeUnaCuota(
 	capital: string | number | null | undefined,
-	statusCredit?: string | null,
+	statusCredit: string | null | undefined,
+	dias: number,
 ): string {
 	if (statusCredit && STATUS_EXCLUIDOS_MORA.has(statusCredit)) return "";
 	if (capital === null || capital === undefined || capital === "") return "";
 	let monto: Big;
 	try {
-		monto = new Big(capital).times(PORCENTAJE_MORA_POR_CUOTA);
+		const cargoMensual = new Big(capital).times(PORCENTAJE_MORA_POR_CUOTA);
+		if (cargoMensual.lte(0)) return "";
+		const factor =
+			dias >= BASE_DIAS_MORA ? new Big(1) : new Big(dias).div(BASE_DIAS_MORA);
+		monto = cargoMensual.times(factor);
 	} catch {
 		return "";
 	}
-	if (monto.lte(0)) return "";
 	// Redondeo half-up a 2 decimales, idéntico al toFixed(2) de Big en el job.
-	return Number(monto.toFixed(2)).toLocaleString("es-GT", {
+	const redondeado = monto.toFixed(2);
+	if (!(Number(redondeado) > 0)) return "";
+	return Number(redondeado).toLocaleString("es-GT", {
 		minimumFractionDigits: 2,
 		maximumFractionDigits: 2,
 	});
+}
+
+/**
+ * Tope de mora de una cuota ({expectativaMora}): su cargo mensual completo,
+ * capital × 1.12%. Es lo que llega a cobrar esa cuota al cumplir 30 días de
+ * atraso, y ahí se congela. "" si el crédito no genera mora.
+ */
+export function calcularExpectativaMora(
+	capital: string | number | null | undefined,
+	statusCredit?: string | null,
+): string {
+	return moraDeUnaCuota(capital, statusCredit, BASE_DIAS_MORA);
+}
+
+/**
+ * Recargo por cada día de atraso ({expectativaMoraDiaria}): 1/30 del cargo
+ * mensual. Es lo que el cron sumará mañana si el cliente no paga hoy. "" si el
+ * crédito no genera mora — incluido un capital tan chico que un día redondea a
+ * Q0.00, porque en ese caso el cron tampoco cobra al día siguiente.
+ */
+export function calcularExpectativaMoraDiaria(
+	capital: string | number | null | undefined,
+	statusCredit?: string | null,
+): string {
+	return moraDeUnaCuota(capital, statusCredit, 1);
 }
 
 export interface PlantillaMensaje {
@@ -418,29 +466,46 @@ export const COBROS_NO_REPLY_WARNING =
 	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
 export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
 export const COBROS_MOTIVO_SIN_EXPECTATIVA_MORA =
-	"el crédito no genera mora (estado excluido o sin capital)";
+	"el crédito no genera mora (estado excluido o sin capital suficiente)";
+
+/** true si el cuerpo menciona el recargo diario o su tope mensual. */
+export function cuerpoUsaExpectativaMora(cuerpo: string): boolean {
+	return (
+		cuerpo.includes("{expectativaMora}") ||
+		cuerpo.includes("{expectativaMoraDiaria}")
+	);
+}
 
 /**
- * Un cuerpo que usa {expectativaMora} no se puede enviar si el crédito no
- * genera mora: sin capital válido (p. ej. insolutos) o en un estado que el
- * job excluye (EN_CONVENIO, INCOBRABLE, etc.), el mensaje anunciaría un
- * recargo que jamás se va a asignar. Mismo patrón de gate que
- * prepararTelefonoAsesorParaEnvio.
+ * Un cuerpo que usa {expectativaMoraDiaria} o {expectativaMora} no se puede
+ * enviar si el crédito no genera mora: sin capital válido (p. ej. insolutos),
+ * en un estado que el job excluye (EN_CONVENIO, INCOBRABLE, etc.) o con un
+ * capital tan chico que un día redondea a Q0.00. El mensaje anunciaría un
+ * recargo que jamás se va a asignar. Se exigen LOS DOS montos porque la
+ * oración los dice juntos ("Q… por cada día, hasta un máximo de Q…"). Mismo
+ * patrón de gate que prepararTelefonoAsesorParaEnvio.
  */
 export function prepararExpectativaMoraParaEnvio(
 	cuerpo: string,
 	capital: string | number | null | undefined,
 	statusCredit?: string | null,
 ):
-	| { enviar: true; expectativaMora: string }
+	| { enviar: true; expectativaMora: string; expectativaMoraDiaria: string }
 	| { enviar: false; motivo: string } {
 	const expectativaMora = calcularExpectativaMora(capital, statusCredit);
+	const expectativaMoraDiaria = calcularExpectativaMoraDiaria(
+		capital,
+		statusCredit,
+	);
 
-	if (cuerpo.includes("{expectativaMora}") && !expectativaMora) {
+	if (
+		cuerpoUsaExpectativaMora(cuerpo) &&
+		(!expectativaMora || !expectativaMoraDiaria)
+	) {
 		return { enviar: false, motivo: COBROS_MOTIVO_SIN_EXPECTATIVA_MORA };
 	}
 
-	return { enviar: true, expectativaMora };
+	return { enviar: true, expectativaMora, expectativaMoraDiaria };
 }
 
 export const COBROS_MOTIVO_SIN_MONTO_ADEUDADO =
@@ -515,6 +580,10 @@ export function interpolar(
 		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor))
 		.replace(/{expectativaMora}/g, v(variables.expectativaMora))
 		.replace(
+			/{expectativaMoraDiaria}/g,
+			v(variables.expectativaMoraDiaria ?? ""),
+		)
+		.replace(
 			/{anioImpuesto}/g,
 			v(variables.anioImpuesto ?? anioImpuestoCirculacion()),
 		)
@@ -573,7 +642,7 @@ Si tienes alguna consulta, con gusto estamos para apoyarte. Agradeceremos confir
 		cuerpo: `Hola {clienteNombre} 👋
 Te recordamos que *hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}*. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
 
-🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMora}.*
+🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMoraDiaria} por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.*
 
 📞 Si necesitas apoyo, comunícate con tu asesor:
 *{nombreAsesor} - Asesor de Cobros*

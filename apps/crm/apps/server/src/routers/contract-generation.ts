@@ -29,9 +29,11 @@ import {
 } from "../lib/contract-generation-gender";
 import {
 	alguienFirmo,
+	documentIdDesdeLosEnlaces,
 	type FirmanteEnviado,
 	filasDeFirmantes,
 	linksPorRol,
+	salioPorDocumenso,
 } from "../lib/contract-signatories";
 import {
 	esFirmaFisica,
@@ -393,6 +395,25 @@ export async function anularContratoReemplazado(
 
 	if (!viejo) return null;
 
+	// Los generados antes de que se guardara el `documentID` lo llevan en el
+	// enlace. Sin recuperarlo, el reemplazo lo trataba como si no tuviera
+	// documento allá: borraba la fila y sus enlaces seguían firmando, sin
+	// rastro en el CRM. Se guarda en la fila, como hace "Anular".
+	if (!viejo.weetrustDocumentId) {
+		const recuperado = documentIdDesdeLosEnlaces(viejo);
+		if (recuperado) {
+			await db
+				.update(generatedLegalContracts)
+				.set({ weetrustDocumentId: recuperado })
+				.where(eq(generatedLegalContracts.id, contractId));
+			viejo.weetrustDocumentId = recuperado;
+		}
+	}
+
+	// Y uno de Documenso no se puede borrar desde acá: la fila queda anulada,
+	// diciendo que allá sigue vivo, en vez de desaparecer con sus enlaces.
+	const deDocumenso = salioPorDocumenso(viejo);
+
 	// El mismo documento de WeeTrust en otra fila: ésta es un duplicado (un
 	// reintento que volvió a enlazar el mismo resultado). Borrarlo allá dejaría
 	// sin enlaces a la otra, que lo sigue usando; sólo se quita esta fila. El
@@ -452,18 +473,20 @@ export async function anularContratoReemplazado(
 		}
 	}
 
-	if (viejo.weetrustDocumentId || conFirmas) {
+	if (viejo.weetrustDocumentId || conFirmas || deDocumenso) {
 		await db
 			.update(generatedLegalContracts)
 			.set({
 				status: "cancelled",
-				cancellationReason: !borradoAlla
-					? `${etiquetaDeMotivo(motivo)} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`
-					: completo || !viejo.weetrustDocumentId
-						? etiquetaDeMotivo(motivo)
-						: conFirmas
-							? `${etiquetaDeMotivo(motivo)} (tenía firmas parciales; el documento se borró en WeeTrust)`
-							: `${etiquetaDeMotivo(motivo)} (el documento se borró en WeeTrust)`,
+				cancellationReason: deDocumenso
+					? `${etiquetaDeMotivo(motivo)} (salió por Documenso: sus enlaces siguen vivos allá, hay que cancelarlo en Documenso)`
+					: !borradoAlla
+						? `${etiquetaDeMotivo(motivo)} (no se pudo borrar en WeeTrust: hay que borrarlo a mano)`
+						: completo || !viejo.weetrustDocumentId
+							? etiquetaDeMotivo(motivo)
+							: conFirmas
+								? `${etiquetaDeMotivo(motivo)} (tenía firmas parciales; el documento se borró en WeeTrust)`
+								: `${etiquetaDeMotivo(motivo)} (el documento se borró en WeeTrust)`,
 				cancelledAt: new Date(),
 				updatedAt: new Date(),
 			})

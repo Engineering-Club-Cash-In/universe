@@ -67,6 +67,7 @@ import {
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
 import {
+	formatFinancedInsuranceLabel,
 	formatInsuranceProviderLabel,
 	formatQuotationClientName,
 	formatVehicleWithClient,
@@ -2088,8 +2089,9 @@ function QuoterPage() {
 										{(field) => (
 											<div>
 												<Label htmlFor={field.name} className="mb-2">
-													{formatInsuranceProviderLabel(
+													{formatFinancedInsuranceLabel(
 														quoterForm.state.values.insuranceProvider,
+														quoterForm.state.values.membershipCost,
 													)}
 												</Label>
 												<Input

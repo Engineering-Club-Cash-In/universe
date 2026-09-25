@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
 	DISBURSEMENT_SALE_LABEL,
+	formatFinancedInsuranceLabel,
 	formatInsuranceProviderLabel,
 	formatQuotationClientName,
 	formatVehicleWithClient,
-	getQuotationInsuranceFieldName,
 	getQuotationInsuranceDisplay,
+	getQuotationInsuranceFieldName,
 	isQuotationInsuranceBreakdownLocked,
 } from "./quotation-display";
 
@@ -40,8 +41,15 @@ describe("quotation display helpers", () => {
 		expect(DISBURSEMENT_SALE_LABEL).toBe("Desembolso por venta");
 	});
 
-	test("shows the GyT provider label in the quoter", () => {
+	test("distinguishes the GyT premium from the financed total", () => {
 		expect(formatInsuranceProviderLabel("gyt")).toBe("Seguro: GyT");
+		expect(formatFinancedInsuranceLabel("gyt", 1259.28)).toBe(
+			"Seguro + membresía: GyT",
+		);
+		expect(formatFinancedInsuranceLabel("gyt", 0)).toBe("Seguro: GyT");
+		expect(formatFinancedInsuranceLabel("universales", 1259.28)).toBe(
+			"Seguro: Universales",
+		);
 	});
 
 	test("keeps the Universales provider label in the quoter", () => {
@@ -50,7 +58,7 @@ describe("quotation display helpers", () => {
 		);
 	});
 
-	test("uses GyT visible costs when GyT is selected", () => {
+	test("shows the financed GyT total rather than its isolated premium", () => {
 		expect(
 			getQuotationInsuranceDisplay({
 				insuranceProvider: "gyt",
@@ -61,7 +69,7 @@ describe("quotation display helpers", () => {
 			}),
 		).toEqual({
 			insuranceProvider: "gyt",
-			insuranceCost: 1125.8,
+			insuranceCost: 3206.72,
 			membershipCost: 2229.12,
 		});
 	});
@@ -86,8 +94,8 @@ describe("quotation display helpers", () => {
 		expect(getQuotationInsuranceFieldName("universales")).toBe("insuranceCost");
 	});
 
-	test("binds the GyT form to the visible provider cost", () => {
-		expect(getQuotationInsuranceFieldName("gyt")).toBe("extraInsuranceCost");
+	test("keeps the GyT form bound to the financed total", () => {
+		expect(getQuotationInsuranceFieldName("gyt")).toBe("insuranceCost");
 	});
 
 	test("locks the calculated GyT breakdown", () => {

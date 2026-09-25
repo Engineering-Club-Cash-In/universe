@@ -208,3 +208,451 @@ describe("avisoAccesoPortal — el botón sobre una empresa", () => {
     expect(aviso.texto).toContain("representante legal");
   });
 });
+
+/**
+ * El aviso leído DESDE el botón del menú de la fila (`tableInvestors.tsx`), no
+ * desde el alta del modal.
+ *
+ * Los dos defectos que se arreglan aquí: el consejo en bucle —mandar a apretar
+ * el botón que la persona acaba de apretar— y afirmar un alta que desde este
+ * camino nunca ocurrió: el botón no crea ningún inversionista, la fila ya
+ * existía.
+ */
+describe("avisoAccesoPortal — leído desde el botón del menú de la fila", () => {
+  it("no afirma un alta que no pasó ni manda al botón que ya se apretó", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "fallo", motivo: "http_500", advertencias: [] }),
+      "boton",
+    )!;
+
+    expect(aviso.tono).toBe("advertencia");
+    expect(aviso.texto).not.toContain("sí quedó creado");
+    expect(aviso.texto).not.toContain("no lo vuelvas a crear");
+    expect(aviso.texto).not.toContain("Dar acceso al portal");
+    expect(aviso.texto).toContain("esta misma opción del menú de su fila");
+  });
+
+  it("con la cuenta a medias NO aconseja reintentar: la advertencia ya dice que no sirve", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "http_500",
+        advertencias: ["cuenta_creada_sin_marca_de_password"],
+      }),
+      "boton",
+    )!;
+
+    expect(aviso.texto).not.toContain("volvé a intentarlo");
+    expect(aviso.texto).toContain("Volver a intentarlo NO la arregla");
+  });
+
+  it("sin correo capturado manda a capturarlo y volver a ESTA misma opción", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "omitida", motivo: "sin_correo", advertencias: [] }),
+      "boton",
+    )!;
+
+    expect(aviso.texto).toContain("correo");
+    expect(aviso.texto).toContain("esta misma opción del menú de su fila");
+    expect(aviso.texto).not.toContain("Dar acceso al portal");
+  });
+
+  it("el permiso que le falta al servidor no se arregla reintentando", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "omitida", motivo: "origen_no_autorizado", advertencias: [] }),
+      "boton",
+    )!;
+
+    expect(aviso.texto).toContain("Volver a intentarlo no lo arregla");
+    expect(aviso.texto).not.toContain("Dar acceso al portal");
+  });
+
+  it("el pedido perdido no le habla de un alta que quien lee no hizo", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "omitida", motivo: "no_solicitado", advertencias: [] }),
+      "boton",
+    )!;
+
+    expect(aviso.texto).not.toContain("Este alta");
+    expect(aviso.texto).toContain("no registró el pedido");
+  });
+
+  it("el timeout y la empresa no cambian: su texto ya no manda al botón", () => {
+    const timeout = avisoAccesoPortal(
+      acceso({ estado: "fallo", motivo: "timeout", advertencias: [] }),
+      "boton",
+    )!;
+    const empresa = avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "es_empresa_el_acceso_es_del_representante",
+      }),
+      "boton",
+    )!;
+
+    expect(timeout.texto).toContain("NO le des acceso de nuevo");
+    expect(empresa.texto).toContain("Abrile el acceso desde la fila del representante");
+  });
+
+  // El default es `alta`: el llamador del alta (`modalInvestor.tsx`) no pasa
+  // origen y tiene que seguir leyendo exactamente lo mismo de antes.
+  it("sin origen explícito sigue hablando como el alta", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({ estado: "fallo", motivo: "http_500", advertencias: [] }),
+    )!;
+
+    expect(aviso.texto).toContain("sí quedó creado");
+    expect(aviso.texto).toContain("Dar acceso al portal");
+  });
+});
+
+/**
+ * La forma que llega NO es `AccesoPortal` por estar tipada así: los dos
+ * llamadores le pasan JSON crudo (`any`) de una respuesta HTTP.
+ *
+ * Y acá tirar no es devolver `null`: en `tableInvestors.tsx` la llamada vive
+ * dentro del `try` del botón, así que un `TypeError` cae en el `catch` y pinta
+ * "No se pudo abrir el acceso al portal" en ROJO sobre un envío que SÍ salió —
+ * y quien lee lo vuelve a apretar.
+ */
+describe("avisoAccesoPortal — formas que el servidor puede devolver", () => {
+  it("un resultado sin `advertencias` NO tira: lo traduce igual", () => {
+    const crudo = { estado: "fallo", motivo: "http_500" };
+
+    expect(() => avisoAccesoPortal(crudo)).not.toThrow();
+    const aviso = avisoAccesoPortal(crudo)!;
+    expect(aviso.tono).toBe("advertencia");
+    expect(aviso.texto).toContain("sí quedó creado");
+  });
+
+  it("desde el botón, tampoco: ese throw era un rojo sobre un envío que salió", () => {
+    const crudo = { estado: "fallo", motivo: "http_500" };
+
+    expect(() => avisoAccesoPortal(crudo, "boton")).not.toThrow();
+    expect(avisoAccesoPortal(crudo, "boton")!.texto).not.toContain(
+      "sí quedó creado",
+    );
+  });
+
+  it("una forma que no se reconoce sigue cayendo en `null`, no en verde", () => {
+    // Es de lo que depende el toast de "no se pudo confirmar" de los dos
+    // llamadores: `null` significa "no sé", nunca "salió bien".
+    expect(avisoAccesoPortal({})).toBeNull();
+    expect(avisoAccesoPortal({ estado: 7 })).toBeNull();
+    expect(avisoAccesoPortal("fallo")).toBeNull();
+    expect(avisoAccesoPortal(0)).toBeNull();
+  });
+
+  it("sin el bloque `correo` nombra la bandeja genérica en vez de tirar", () => {
+    const aviso = avisoAccesoPortal({
+      estado: "creada",
+      advertencias: ["correo_redirigido_por_modo_no_prod"],
+    })!;
+
+    expect(aviso.tono).toBe("advertencia");
+    expect(aviso.texto).toContain("una sola bandeja de pruebas");
+  });
+
+  it("una advertencia que no es cadena se descarta, no se interpola", () => {
+    const aviso = avisoAccesoPortal({
+      estado: "ya_tenia",
+      advertencias: [{ codigo: "x" }, "rol_no_promovido"],
+    })!;
+
+    expect(aviso.texto).toContain("permiso");
+    expect(aviso.texto).not.toContain("object Object");
+  });
+});
+
+/**
+ * Las tablas de traducción se indexan CON LA CLAVE DEL SERVIDOR, y el `motivo`
+ * puede ser una cadena arbitraria (`String(error?.message ?? error)`,
+ * portalProvisioning.ts:160). Sobre un objeto literal, `constructor` y
+ * compañía devuelven algo truthy del prototipo, y eso se interpolaba en el
+ * aviso que lee una persona.
+ */
+describe("avisoAccesoPortal — claves del prototipo", () => {
+  it("un motivo `constructor` no pinta la función en el aviso", () => {
+    for (const origen of ["alta", "boton"] as const) {
+      const aviso = avisoAccesoPortal(
+        { estado: "fallo", motivo: "constructor", advertencias: [] },
+        origen,
+      )!;
+
+      expect(aviso.texto).not.toContain("native code");
+      expect(aviso.texto).not.toContain("function Object");
+      expect(aviso.texto).not.toContain("constructor");
+    }
+  });
+
+  it("un motivo `toString` tampoco se cuela como causa ni como consejo", () => {
+    const aviso = avisoAccesoPortal(
+      { estado: "fallo", motivo: "toString", advertencias: [] },
+      "boton",
+    )!;
+
+    expect(aviso.texto).toBe(
+      "No se le pudo dar acceso al portal. Si querés, volvé a intentarlo con esta misma opción del menú de su fila; si vuelve a fallar, avisa a sistemas.",
+    );
+  });
+
+  it("un origen que no es ninguno de los dos cae en el del alta", () => {
+    // `OrigenAviso` no existe en tiempo de ejecución y el valor indexa la
+    // tabla de consejos igual que un código del servidor.
+    const aviso = avisoAccesoPortal(
+      { estado: "omitida", motivo: "sin_correo", advertencias: [] },
+      "constructor" as never,
+    )!;
+
+    expect(aviso.texto).not.toContain("native code");
+    expect(aviso.texto).toContain("Dar acceso al portal");
+  });
+});
+
+/**
+ * Motivos que son permanentes POR DISEÑO: el backend los devuelve después de
+ * un corte que un reintento vuelve a encontrar idéntico. El aviso mandaba a
+ * apretar otra vez, y con `correo_de_cartera_distinto_al_de_la_cuenta` se
+ * contradecía dentro de la misma línea.
+ *
+ * Los cinco salen de leer el backend: `representante_no_encontrado_en_cartera`
+ * y `provisionamiento_no_configurado` de portalProvisioning.ts (228, 118),
+ * `inversionista_no_encontrado` de otorgarAccesoPortal.ts:104, y
+ * `correo_de_cartera_distinto_al_de_la_cuenta` y
+ * `cuenta_anclada_solo_por_correo` de ensureInvestorAccount.ts (581/759 y
+ * 609/780).
+ */
+const PERMANENTES = [
+  "representante_no_encontrado_en_cartera",
+  "correo_de_cartera_distinto_al_de_la_cuenta",
+  "provisionamiento_no_configurado",
+  "cuenta_anclada_solo_por_correo",
+  "inversionista_no_encontrado",
+] as const;
+
+describe("avisoAccesoPortal — lo que reintentar no arregla", () => {
+  for (const motivo of PERMANENTES) {
+    it(`${motivo}: desde el botón no manda a apretar de nuevo`, () => {
+      const aviso = avisoAccesoPortal(
+        acceso({ estado: "fallo", motivo, advertencias: [] }),
+        "boton",
+      )!;
+
+      expect(aviso.tono).toBe("advertencia");
+      expect(aviso.texto).toContain("no lo arregla");
+      expect(aviso.texto).not.toContain("volvé a intentarlo");
+      expect(aviso.texto).not.toContain("si vuelve a fallar");
+      // Sin jerga: el código crudo no sale nunca.
+      expect(aviso.texto).not.toContain(motivo);
+    });
+
+    it(`${motivo}: desde el alta tampoco manda al menú, y sí dice que el alta salió`, () => {
+      const aviso = avisoAccesoPortal(
+        acceso({ estado: "fallo", motivo, advertencias: [] }),
+      )!;
+
+      expect(aviso.texto).toContain("sí quedó creado");
+      expect(aviso.texto).toContain("no lo arregla");
+      expect(aviso.texto).not.toContain("Cuando quieras");
+      expect(aviso.texto).not.toContain("Dar acceso al portal");
+    });
+  }
+
+  it("los motivos que se arreglan reintentando SIGUEN aconsejándolo", () => {
+    // El hermano del cambio: `http_500` no está en la tabla y tiene que
+    // conservar el consejo de siempre por los dos caminos.
+    const boton = avisoAccesoPortal(
+      acceso({ estado: "fallo", motivo: "http_500", advertencias: [] }),
+      "boton",
+    )!;
+    const alta = avisoAccesoPortal(
+      acceso({ estado: "fallo", motivo: "http_500", advertencias: [] }),
+    )!;
+
+    expect(boton.texto).toContain("esta misma opción del menú de su fila");
+    expect(alta.texto).toContain("Dar acceso al portal");
+  });
+
+  it("el correo distinto ya no se contradice en la misma línea", () => {
+    // Antes decía "hasta cuadrarlos no vería sus inversiones. Si querés,
+    // volvé a intentarlo…": la causa y el consejo, peleados.
+    const aviso = avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "correo_de_cartera_distinto_al_de_la_cuenta",
+        advertencias: [],
+      }),
+      "boton",
+    )!;
+
+    expect(aviso.texto).toContain("hasta cuadrarlos no vería sus inversiones");
+    expect(aviso.texto).toContain("cuadrarle los dos correos");
+    expect(aviso.texto).not.toContain("volvé a intentarlo");
+  });
+
+  it("la cuenta a medias trae su causa en palabras, no el código", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "no_se_pudo_marcar_password_provisionada",
+        advertencias: [],
+      }),
+      "boton",
+    )!;
+
+    expect(aviso.texto).toContain("la cuenta quedó a medias al crearla");
+    expect(aviso.texto).not.toContain("_");
+    // Deshecha por el backend, reintentar SÍ sirve: el consejo se conserva.
+    expect(aviso.texto).toContain("esta misma opción del menú de su fila");
+  });
+});
+
+/**
+ * `cuenta_creada_sin_marca_de_password` se consultaba solo dentro de la rama
+ * del botón, así que el alta seguía aconsejando abrir el acceso desde el menú
+ * —justo encima de la advertencia que dice "Volver a intentarlo NO la
+ * arregla. Avisa a sistemas."—, contradiciéndola en la misma línea.
+ */
+describe("avisoAccesoPortal — la cuenta a medias, leída desde el ALTA", () => {
+  it("no aconseja abrir el acceso, pero sí dice que el alta salió", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "http_500",
+        advertencias: ["cuenta_creada_sin_marca_de_password"],
+      }),
+    )!;
+
+    expect(aviso.texto).toContain("sí quedó creado");
+    expect(aviso.texto).toContain("no lo vuelvas a crear");
+    expect(aviso.texto).not.toContain("Cuando quieras");
+    expect(aviso.texto).not.toContain("Dar acceso al portal");
+    // La advertencia que sí manda a sistemas sigue pegada abajo.
+    expect(aviso.texto).toContain("Volver a intentarlo NO la arregla");
+  });
+});
+
+/**
+ * La divergencia con el gemelo del CRM está documentada en la cabecera de
+ * `accesoPortal.ts` y tiene que seguir siendo cierta: acá el botón vive en el
+ * menú de tres puntos de CADA FILA, no en una pantalla de detalle.
+ */
+describe("avisoAccesoPortal — el lugar que nombran los textos", () => {
+  it("ningún consejo manda a la pantalla de detalle del gemelo", () => {
+    const todos = [
+      ...PERMANENTES.flatMap((motivo) =>
+        (["alta", "boton"] as const).map(
+          (origen) =>
+            avisoAccesoPortal(
+              acceso({ estado: "fallo", motivo, advertencias: [] }),
+              origen,
+            )!.texto,
+        ),
+      ),
+      avisoAccesoPortal(
+        acceso({ estado: "omitida", motivo: "sin_correo", advertencias: [] }),
+        "boton",
+      )!.texto,
+    ];
+
+    for (const texto of todos) {
+      expect(texto).not.toContain("pantalla del inversionista");
+      expect(texto).not.toContain("este mismo botón");
+    }
+  });
+
+  it("la fila que no existe manda a revisar la FILA, no la ficha", () => {
+    const aviso = avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "inversionista_no_encontrado",
+        advertencias: [],
+      }),
+      "boton",
+    )!;
+
+    expect(aviso.texto).toContain("la fila correcta");
+    expect(aviso.texto).not.toContain("ficha");
+  });
+});
+
+/**
+ * El veto del correo aprobado. Es el desenlace que MÁS necesita explicarse:
+ * nada salió mal del lado del portal, se abortó a propósito porque el correo
+ * que la persona miró dejó de ser el de cartera mientras lo miraba.
+ */
+describe("avisoAccesoPortal — el correo cambió mientras lo revisaba", () => {
+  const veto = (origen: "alta" | "boton" = "boton") =>
+    avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "correo_aprobado_no_coincide",
+        advertencias: [],
+      }),
+      origen,
+    )!;
+
+  it("no sale el código crudo", () => {
+    // Era lo que pasaba antes de traducirlo: `causa()` no lo encontraba, se
+    // callaba, y quedaba "No se le pudo dar acceso al portal." a secas.
+    const aviso = veto();
+    expect(aviso.tono).toBe("advertencia");
+    expect(aviso.texto).not.toContain("correo_aprobado_no_coincide");
+    expect(aviso.texto).not.toContain("_");
+  });
+
+  it("dice que el correo cambió MIENTRAS lo revisaba", () => {
+    expect(veto().texto).toContain("cambió mientras lo revisabas");
+  });
+
+  it("dice que NO salió ninguna contraseña", () => {
+    // Sin esto quien lee cuelga el teléfono sin saber si la contraseña ya
+    // viajó a la dirección envenenada. Es la mitad del aviso.
+    const texto = veto().texto;
+    expect(texto).toContain("NO salió ninguna contraseña");
+    expect(texto).toContain("no se creó ninguna cuenta");
+  });
+
+  it("NO aconseja reintentar con lo mismo", () => {
+    // El consejo genérico del botón es "volvé a intentarlo con esta misma
+    // opción del menú de su fila": sobre este veto vuelve a fallar idéntico,
+    // porque la lista de la pantalla sigue enseñando el correo viejo.
+    const texto = veto().texto;
+    expect(texto).not.toContain("volvé a intentarlo");
+    expect(texto).toContain("vuelve a fallar");
+  });
+
+  it("manda a ACTUALIZAR la lista antes de volver a aprobar", () => {
+    // El arreglo real. Sin refrescar, el diálogo repinta el mismo correo
+    // aprobado y el veto se repite: el aviso mandaría a dar vueltas.
+    expect(veto().texto).toContain("actualizá la lista");
+  });
+
+  it("manda a avisar a sistemas si nadie debía cambiarlo", () => {
+    expect(veto().texto).toContain("avisa a sistemas");
+  });
+
+  it("dice lo mismo leído desde el alta: no inventa un alta que sí salió", () => {
+    // El alta no manda correo aprobado, así que este motivo solo llega desde
+    // el botón; pero el traductor lo comparten los dos y el encabezado del
+    // alta agrega "el inversionista sí quedó creado: no lo vuelvas a crear",
+    // que acá sería hablar de un alta que quien lee no hizo.
+    expect(veto("alta").texto).toBe(veto("boton").texto);
+    expect(veto("alta").texto).not.toContain("no lo vuelvas a crear");
+  });
+
+  it("las advertencias que vengan pegadas no tapan el veto", () => {
+    // El veto corta ANTES de provisionar, así que hoy no trae advertencias.
+    // Si algún día trajera, lo primero que hay que leer sigue siendo que no
+    // salió ninguna contraseña.
+    const aviso = avisoAccesoPortal(
+      acceso({
+        estado: "fallo",
+        motivo: "correo_aprobado_no_coincide",
+        advertencias: ["correo_no_enviado"],
+      }),
+      "boton",
+    )!;
+    expect(aviso.texto.startsWith("No se le abrió acceso:")).toBe(true);
+  });
+});

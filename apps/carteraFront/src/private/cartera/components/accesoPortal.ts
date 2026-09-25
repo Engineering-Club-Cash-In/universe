@@ -15,6 +15,28 @@
  * `apps/web/src/lib/acceso-portal.ts`. Son dos apps sin paquete común (mismo
  * caso que repLegalEmpresa.ts); si cambian los códigos del backend hay que
  * tocar los dos.
+ *
+ * Pero NO son idénticos ni deben serlo: el consejo de cómo arreglarlo depende
+ * de DESDE DÓNDE se lee el aviso, y el lugar no es el mismo en las dos apps.
+ * Aquí el botón "Dar acceso al portal" vive en el menú de tres puntos de cada
+ * fila de la tabla de inversionistas (`tableInvestors.tsx`); en el CRM vive en
+ * la pantalla de detalle del inversionista. Copiar la redacción del gemelo a
+ * ciegas manda al operador a una pantalla que en cartera no existe.
+ *
+ * Por eso los textos de `EN_VEZ_DE_REINTENTAR` están escritos SIN nombrar el
+ * lugar ("Abrir el acceso otra vez no lo arregla…"): así sirven igual leídos
+ * desde el alta y desde el menú de la fila. La única excepción es
+ * `inversionista_no_encontrado`, que sí manda a mirar dónde está parado quien
+ * lee —y acá eso es una FILA, no la ficha del gemelo—.
+ *
+ * Y ahora hay un código que este archivo traduce y el gemelo NO:
+ * `correo_aprobado_no_coincide`. No es un descuido ni una deuda que haya que
+ * "sincronizar": ese motivo solo lo devuelve `POST /investor/portal-access`
+ * cuando el cuerpo trae `correo_aprobado`, y ese botón vive únicamente acá
+ * (`tableInvestors.tsx`). El gemelo del CRM solo lee el bloque del alta, que no
+ * manda correo aprobado, así que allá ese código no puede llegar. Si algún día
+ * el CRM gana su propio botón, ahí sí habrá que darle su texto —y el consejo
+ * volverá a diverger, porque "actualizá la lista" nombra ESTA pantalla—.
  */
 
 export interface AccesoPortal {
@@ -36,6 +58,47 @@ export interface AvisoAccesoPortal {
 }
 
 /**
+ * Buscar un texto en una de las tablas de traducción CON LA CLAVE DEL SERVIDOR.
+ *
+ * `TABLA[clave]` sobre un objeto literal no consulta solo lo que se escribió
+ * ahí: `Object.prototype` aporta `constructor`, `toString`, `valueOf`,
+ * `hasOwnProperty`… y todas devuelven algo truthy. Las claves que se buscan
+ * acá son códigos que viajan desde el servidor —las `advertencias` salen
+ * verbatim de auth-google, y el `motivo` puede ser una cadena arbitraria
+ * (`String(error?.message ?? error)`, portalProvisioning.ts:160)—, así que un
+ * `motivo: "constructor"` no es un imposible teórico: es una cadena más.
+ *
+ * Y el resultado no se queda en un `undefined` inofensivo: estas tablas se
+ * interpolan en el aviso que lee una persona, así que con `constructor` salía
+ * `function Object() { [native code] }` metido en la frase. El aviso es el
+ * único control de un botón que manda contraseñas: no puede pintar basura.
+ */
+const valorDeTabla = <T>(
+  tabla: Record<string, T>,
+  clave: unknown,
+): T | undefined =>
+  // `Object.hasOwn` y no `clave in tabla`: `in` también recorre el prototipo,
+  // que es justo lo que hay que dejar fuera.
+  typeof clave === "string" && Object.hasOwn(tabla, clave)
+    ? tabla[clave]
+    : undefined;
+
+/**
+ * Desde dónde se está leyendo el aviso. NO es cosmético: cambia qué se puede
+ * aconsejar.
+ *
+ * - `alta`: se acaba de crear el inversionista desde el modal y el acceso al
+ *   portal fue un paso más de ese alta. Ahí "no lo vuelvas a crear" y "abrile
+ *   el acceso desde el menú del inversionista" son las dos instrucciones
+ *   correctas: el inversionista existe, y el botón está en otro lado —el menú
+ *   de su fila en la tabla—, al que hay que mandar a quien lee.
+ * - `boton`: quien lee YA está en ese menú y acaba de apretar esa opción. Nada
+ *   se creó, así que "no lo vuelvas a crear" habla de algo que no pasó, y
+ *   mandarlo al botón que acaba de fallar es un círculo.
+ */
+export type OrigenAviso = "alta" | "boton";
+
+/**
  * A dónde se manda a quien quedó sin acceso.
  *
  * ANTES esto decía "mañana a las 7:00 a.m.": la reconciliación diaria creaba
@@ -47,9 +110,25 @@ export interface AvisoAccesoPortal {
  * Seguir prometiendo el automatismo sería peor que callar: conta cerraría el
  * modal tranquila, nadie apretaría el botón, y la persona se quedaría sin
  * portal esperando algo que no va a pasar.
+ *
+ * Y desde ESE botón el texto cambia: quien lee ya tiene el menú de la fila
+ * abierto y acaba de usar esa opción, así que mandarla al menú del
+ * inversionista sería mandarla donde ya está.
  */
-const COMO_SE_ARREGLA =
-  'abrile el acceso desde el menú del inversionista, opción "Dar acceso al portal"';
+const COMO_SE_ARREGLA: Record<OrigenAviso, string> = {
+  alta: 'abrile el acceso desde el menú del inversionista, opción "Dar acceso al portal"',
+  boton: "volvé a intentarlo con esta misma opción del menú de su fila",
+};
+
+/**
+ * El `origen` está tipado, pero el tipo no existe en tiempo de ejecución: esta
+ * función la llaman dos sitios que le pasan JSON crudo (`any`) y el `origen`
+ * termina indexando la tabla de arriba. Por el mismo camino que los códigos
+ * del servidor, así que se resuelve con la misma guarda y lo que no sea uno de
+ * los dos orígenes cae en el del alta, que es el valor por omisión documentado.
+ */
+const comoSeArregla = (origen: OrigenAviso): string =>
+  valorDeTabla(COMO_SE_ARREGLA, origen) ?? COMO_SE_ARREGLA.alta;
 
 /**
  * Por qué no se pudo, en palabras. Lo que no está en la lista se calla en vez de
@@ -66,10 +145,25 @@ const CAUSA_EN_PALABRAS: Record<string, string> = {
     "su cuenta quedó sin el permiso de inversionista",
   representante_sin_cuenta:
     "su representante legal todavía no tiene cuenta en el portal",
+  // `ensureInvestorAccount.ts:609,780`: a la cuenta se llegó solo por el correo
+  // y ningún DPI la respalda, así que se niega a escribirle el rol y corta.
+  // Sin esta línea el aviso salía SIN causa —"No se le pudo dar acceso al
+  // portal."— y encima aconsejaba reintentar, que vuelve a caer en lo mismo.
+  cuenta_anclada_solo_por_correo:
+    "ya tiene cuenta, pero solo se la reconoce por el correo y ningún DPI la respalda",
+  // `otorgarAccesoPortal.ts:104`: el id no está en `cartera.inversionistas`.
+  // Salía sin causa y aconsejando reintentar sobre una fila que no existe.
+  inversionista_no_encontrado: "cartera no encuentra a este inversionista",
+  // `ensureInvestorAccount.ts:386`: la cuenta se creó y no se le pudo marcar la
+  // contraseña. Cuando NO se pudo deshacer viene además la advertencia
+  // `cuenta_creada_sin_marca_de_password`, que es la que corta el consejo de
+  // reintentar; cuando SÍ se deshizo, reintentar es lo correcto y lo único que
+  // faltaba era decir qué pasó.
+  no_se_pudo_marcar_password_provisionada: "la cuenta quedó a medias al crearla",
 };
 
 const causa = (motivo: string | null): string => {
-  const texto = motivo ? CAUSA_EN_PALABRAS[motivo] : undefined;
+  const texto = valorDeTabla(CAUSA_EN_PALABRAS, motivo);
   if (texto) return ` (${texto})`;
   if (motivo?.startsWith("http_")) return " (el portal respondió con un error)";
   return "";
@@ -126,6 +220,44 @@ const texto = (
 };
 
 /**
+ * Motivos que el consejo de siempre —"volvé a intentarlo" / "abrile el acceso
+ * desde el menú del inversionista"— NO arregla: apretar otra vez vuelve a caer
+ * exactamente en el mismo corte, y el aviso quedaba mandando a alguien a dar
+ * vueltas en círculo. Peor todavía con
+ * `correo_de_cartera_distinto_al_de_la_cuenta`, donde la causa y el consejo se
+ * contradecían en la misma línea ("hasta cuadrarlos no vería sus inversiones.
+ * Si querés, volvé a intentarlo…").
+ *
+ * Cada texto nombra el arreglo REAL. Sirve igual desde el alta y desde el
+ * botón —por eso no dice "este botón"—, porque desde los dos lados el consejo
+ * genérico termina apuntando a la misma acción que no sirve.
+ */
+const EN_VEZ_DE_REINTENTAR: Record<string, string> = {
+  // `portalProvisioning.ts:228`: la fila SÍ trae `dpi_rep_legal`, pero ese DPI
+  // no corresponde a ninguna fila de cartera, así que no hay a quién
+  // escribirle. El dato a corregir está en Editar, no en este botón.
+  representante_no_encontrado_en_cartera:
+    "Abrir el acceso otra vez no lo arregla: el DPI que tiene capturado como representante legal no corresponde a ninguna fila de cartera. Corregilo en Editar → ¿Es empresa?, o dale de alta primero a esa persona.",
+  // Cuadrar dos correos es trabajo de sistemas; ningún reintento los junta.
+  correo_de_cartera_distinto_al_de_la_cuenta:
+    "Abrir el acceso otra vez no lo arregla: avisa a sistemas para cuadrarle los dos correos.",
+  // `portalProvisioning.ts:118`: le falta configuración al servidor y se
+  // comprueba ANTES de salir a la red, así que el reintento le pega al mismo
+  // muro sin llegar a ningún lado.
+  provisionamiento_no_configurado:
+    "Abrir el acceso otra vez no lo arregla: avisa a sistemas.",
+  // El provisionamiento se niega a escribir sobre una cuenta que solo el
+  // correo respalda. Mientras su DPI no la respalde, el resultado es idéntico.
+  cuenta_anclada_solo_por_correo:
+    "Abrir el acceso otra vez no lo arregla: hasta que su DPI respalde esa cuenta, el sistema no le va a tocar el permiso. Avisa a sistemas.",
+  // La fila no está. Ningún reintento la va a encontrar. Y acá quien lee está
+  // parada en una FILA de la tabla, no en una ficha: eso es lo que se le manda
+  // a revisar.
+  inversionista_no_encontrado:
+    "Abrir el acceso otra vez no lo arregla: revisá que sea la fila correcta y, si esa fila debería existir, avisa a sistemas.",
+};
+
+/**
  * El desenlace cuando el acceso NO se dio.
  *
  * Vive aparte de las advertencias porque no compite con ellas: una cuenta
@@ -135,6 +267,7 @@ const texto = (
  */
 const mensajeDeFallo = (
   acceso: AccesoPortal,
+  origen: OrigenAviso,
 ): AvisoAccesoPortal | null => {
   // El botón apretado sobre una fila de EMPRESA.
   //
@@ -155,6 +288,31 @@ const mensajeDeFallo = (
     };
   }
 
+  // El correo cambió entre lo que se aprobó y lo que cartera tiene guardado.
+  //
+  // Sale del `causa()` genérico —y del camino de `EN_VEZ_DE_REINTENTAR`, que
+  // igual termina bajo un encabezado que no dice lo principal— porque este
+  // desenlace tiene que decir TRES cosas y ninguna cabe en "(por esto)": que el
+  // correo cambió MIENTRAS lo revisaba, que NO salió ninguna contraseña, y que
+  // volver a aprobar lo mismo vuelve a fallar.
+  //
+  // Lo tercero no es una cortesía: la lista de esta pantalla no se refresca
+  // sola, así que reabrir el menú de la fila enseña el MISMO correo viejo, se
+  // aprueba otra vez y cartera lo veta otra vez. Por eso el consejo empieza por
+  // actualizar la lista; sin eso el aviso manda a dar vueltas en círculo.
+  //
+  // Y el desenlace se dice igual desde el alta: el veto significa lo mismo
+  // —nadie recibió nada— venga de donde venga el aviso. Lo que el alta agrega
+  // ("el inversionista sí quedó creado") no aplica, porque el alta no manda
+  // correo aprobado: este motivo solo llega desde el botón.
+  if (acceso.motivo === "correo_aprobado_no_coincide") {
+    return {
+      tono: "advertencia",
+      texto:
+        "No se le abrió acceso: el correo de este inversionista cambió mientras lo revisabas, así que el que aprobaste ya no es el que tiene cartera. NO salió ninguna contraseña y no se creó ninguna cuenta. Volver a aprobar el mismo correo vuelve a fallar: actualizá la lista, mirá el correo que tiene ahora y aprobalo solo si es de esta persona. Si nadie debería haberlo cambiado, avisa a sistemas antes de mandarle nada.",
+    };
+  }
+
   // El timeout no es un "no se pudo": es un "no sabemos". Abortamos la
   // espera, pero del otro lado la cuenta pudo quedar creada. Sale del
   // `causa()` genérico porque ese texto termina mandando a apretar otra vez
@@ -168,18 +326,107 @@ const mensajeDeFallo = (
     };
   }
 
+  // Con la cuenta a medias el reintento no arregla nada, y la advertencia que
+  // viene pegada abajo ya lo dice y ya manda a sistemas. Aconsejar reintentar
+  // acá sería contradecirla en la misma línea.
+  //
+  // Se calcula ACÁ y no dentro del `if (origen === "boton")`: la contradicción
+  // no es del botón. Desde el alta el consejo es "abrile el acceso desde el
+  // menú del inversionista", que sobre esta cuenta a medias tampoco arregla
+  // nada, y quedaba pegado justo encima de la advertencia que dice "Volver a
+  // intentarlo NO la arregla. Avisa a sistemas."
+  const reintentarNoSirve = acceso.advertencias.includes(
+    "cuenta_creada_sin_marca_de_password",
+  );
+  // Los motivos que tampoco se arreglan reintentando, pero que SÍ tienen un
+  // arreglo que nombrar. Van por motivo, no por advertencia: son el desenlace.
+  const enVezDeReintentar = valorDeTabla(EN_VEZ_DE_REINTENTAR, acceso.motivo);
+
+  // Desde el botón no se creó ningún inversionista: la fila ya existía y sigue
+  // igual. Decirle "no lo vuelvas a crear" sería hablarle de un alta que nunca
+  // ocurrió.
+  if (origen === "boton") {
+    const encabezado = `No se le pudo dar acceso al portal${causa(acceso.motivo)}.`;
+    if (reintentarNoSirve) return { tono: "advertencia", texto: encabezado };
+    return {
+      tono: "advertencia",
+      texto: enVezDeReintentar
+        ? `${encabezado} ${enVezDeReintentar}`
+        : `${encabezado} Si querés, ${COMO_SE_ARREGLA.boton}; si vuelve a fallar, avisa a sistemas.`,
+    };
+  }
+
   // El alta SÍ salió: decirlo es lo que evita que lo vuelvan a crear y se
   // estrellen contra el guard de duplicados.
+  //
+  // El consejo de cerrar también se calla cuando no sirve: desde el alta manda
+  // al menú de la fila, y sobre estos motivos ese menú vuelve a contestar lo
+  // mismo.
+  const encabezadoAlta = `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado: no lo vuelvas a crear.`;
+  if (reintentarNoSirve) return { tono: "advertencia", texto: encabezadoAlta };
   return {
     tono: "advertencia",
-    texto: `No se le pudo dar acceso al portal${causa(acceso.motivo)}, pero el inversionista sí quedó creado: no lo vuelvas a crear. Cuando quieras, ${COMO_SE_ARREGLA}.`,
+    texto: enVezDeReintentar
+      ? `${encabezadoAlta} ${enVezDeReintentar}`
+      : `${encabezadoAlta} Cuando quieras, ${COMO_SE_ARREGLA.alta}.`,
+  };
+};
+
+/**
+ * Lo que llega NO cumple `AccesoPortal` por el hecho de estar tipado así.
+ *
+ * Los dos llamadores le pasan JSON crudo de una respuesta
+ * (`respuesta?.provisioning?.[0]` en modalInvestor.tsx:239 y
+ * `respuesta?.resultados?.[0]` en tableInvestors.tsx:466, los dos `any`), y el
+ * contrato de este módulo es "ante cualquier otra forma, `null`" — de eso
+ * depende que exista el toast de "no se pudo confirmar" que los dos sitios
+ * tienen escrito. La guarda `if (!acceso)` cumplía la mitad: con
+ * `{estado:"fallo", motivo:"http_500"}` —una forma que el servidor puede
+ * devolver— el `.map` sobre `advertencias` ausente TIRABA. Y tirar acá no es
+ * un `null`: en tableInvestors.tsx ese throw cae en el `catch` del botón y
+ * pinta "No se pudo abrir el acceso al portal" en ROJO sobre un envío que SÍ
+ * salió, así que la persona lo aprieta otra vez.
+ *
+ * Así que la forma se normaliza una vez, acá, y de ahí para abajo el resto del
+ * módulo lee campos que existen. Cada campo cae al valor que significa "no sé":
+ * nunca a uno que afirme algo.
+ */
+const normalizar = (acceso: unknown): AccesoPortal => {
+  const crudo = acceso as Partial<AccesoPortal> | null;
+  const correo = (crudo?.correo ?? null) as AccesoPortal["correo"] | null;
+  return {
+    estado: typeof crudo?.estado === "string" ? crudo.estado : "",
+    usuarioEmail:
+      typeof crudo?.usuarioEmail === "string" ? crudo.usuarioEmail : null,
+    correo: {
+      enviado: correo?.enviado === true,
+      plantilla: typeof correo?.plantilla === "string" ? correo.plantilla : null,
+      redirigido: correo?.redirigido === true,
+      destinatarioReal:
+        typeof correo?.destinatarioReal === "string"
+          ? correo.destinatarioReal
+          : null,
+    },
+    // Los no-cadena se descartan en vez de colarse: son claves de tabla y de
+    // `includes`, y un objeto ahí no traduce a nada pero sí se interpola.
+    advertencias: Array.isArray(crudo?.advertencias)
+      ? crudo.advertencias.filter((a): a is string => typeof a === "string")
+      : [],
+    motivo: typeof crudo?.motivo === "string" ? crudo.motivo : null,
   };
 };
 
 export const avisoAccesoPortal = (
-  acceso: AccesoPortal | null | undefined,
+  // `unknown` y no `AccesoPortal`: es lo que de verdad entra. Declararlo con el
+  // tipo bueno era la ficción que dejó pasar la forma que tiraba.
+  accesoCrudo: unknown,
+  // Por omisión, el alta: es el camino que ya existía (`modalInvestor.tsx`) y
+  // el que no debe cambiar de redacción. Quien lo llame desde el botón lo dice.
+  origen: OrigenAviso = "alta",
 ): AvisoAccesoPortal | null => {
-  if (!acceso) return null;
+  if (!accesoCrudo || typeof accesoCrudo !== "object") return null;
+
+  const acceso = normalizar(accesoCrudo);
 
   const avisos = acceso.advertencias
     .map((a) => texto(a, acceso))
@@ -191,7 +438,8 @@ export const avisoAccesoPortal = (
   // advertencia de vínculo frágil— y el operador se quedaba leyendo el detalle
   // sin enterarse de que esa persona no puede entrar. Primero el desenlace,
   // después el detalle.
-  const fallo = acceso.estado === "fallo" ? mensajeDeFallo(acceso) : null;
+  const fallo =
+    acceso.estado === "fallo" ? mensajeDeFallo(acceso, origen) : null;
 
   if (fallo) {
     return avisos.length > 0
@@ -207,13 +455,13 @@ export const avisoAccesoPortal = (
     if (acceso.motivo === "sin_correo") {
       return {
         tono: "advertencia",
-        texto: `Quedó sin acceso al portal porque no tiene correo capturado. Agrégaselo y después ${COMO_SE_ARREGLA}.`,
+        texto: `Quedó sin acceso al portal porque no tiene correo capturado. Agrégaselo y después ${comoSeArregla(origen)}.`,
       };
     }
     if (acceso.motivo === "sin_nombre") {
       return {
         tono: "advertencia",
-        texto: `Quedó sin acceso al portal porque no tiene nombre capturado. Agrégaselo y después ${COMO_SE_ARREGLA}.`,
+        texto: `Quedó sin acceso al portal porque no tiene nombre capturado. Agrégaselo y después ${comoSeArregla(origen)}.`,
       };
     }
     // El servicio no es ADMIN, así que cartera ni lo intentó. Es un fallo de
@@ -223,13 +471,25 @@ export const avisoAccesoPortal = (
     if (acceso.motivo === "origen_no_autorizado") {
       return {
         tono: "advertencia",
-        texto: `Quedó sin acceso al portal: este servicio no tiene permiso para abrirlo. Avisa a sistemas, y mientras tanto ${COMO_SE_ARREGLA}.`,
+        // Falta un permiso del servidor, no un dato de la fila: volver a usar
+        // la opción del menú le pega al mismo muro. Por eso desde el botón NO
+        // se aconseja reintentar — solo avisar.
+        texto:
+          origen === "boton"
+            ? "Quedó sin acceso al portal: este servicio no tiene permiso para abrirlo. Volver a intentarlo no lo arregla; avisa a sistemas."
+            : `Quedó sin acceso al portal: este servicio no tiene permiso para abrirlo. Avisa a sistemas, y mientras tanto ${COMO_SE_ARREGLA.alta}.`,
       };
     }
     if (acceso.motivo === "no_solicitado") {
       return {
         tono: "advertencia",
-        texto: `Este alta no pidió abrirle acceso al portal. Si le toca tenerlo, ${COMO_SE_ARREGLA}.`,
+        // Desde el botón esto no debería pasar: el botón SIEMPRE pide el
+        // acceso. Si aparece, el pedido se perdió en el camino — y hablar de
+        // "este alta" sería hablarle de un alta que quien lee no hizo.
+        texto:
+          origen === "boton"
+            ? "El portal no registró el pedido de acceso. Volvé a intentarlo con esta misma opción del menú y, si se repite, avisa a sistemas."
+            : `Este alta no pidió abrirle acceso al portal. Si le toca tenerlo, ${COMO_SE_ARREGLA.alta}.`,
       };
     }
     if (acceso.motivo === "es_empresa") {

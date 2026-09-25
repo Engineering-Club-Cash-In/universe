@@ -109,12 +109,42 @@ export async function insertInvestorService(
  *
  * Esta ruta NO está en el proxy `/api/cartera` de auth-google, así que no es
  * alcanzable desde el portal: solo desde aquí, con un ADMIN de cartera.
+ *
+ * SE APRUEBA UN CORREO, NO UN ID
+ * ------------------------------
+ * Mandar solo el id dejaba una ventana: el diálogo le enseña UN correo a una
+ * persona, ella lo aprueba, y cartera volvía a LEER la fila para saber a dónde
+ * mandar la contraseña. Entre esas dos lecturas la fila se puede reescribir
+ * —quién puede reescribirla y por qué caminos está detallado en
+ * `apps/cartera-back/src/controllers/otorgarAccesoPortal.ts`— y quien aprobó no
+ * tiene cómo notarlo: su diálogo ya está pintado. La ventana dura lo que tarde
+ * en leer y decidir, no milisegundos.
+ *
+ * Por eso va `correo_aprobado`: el correo que el diálogo ENSEÑÓ, tal cual.
+ * Cartera lo recorta y lo baja a minúsculas de los dos lados y lo compara
+ * contra la misma fila que va a usar. Si ya no coincide no provisiona nada y
+ * contesta `correo_aprobado_no_coincide`. Es poder de VETO: el destinatario lo
+ * sigue mandando la fila, nunca este cuerpo.
+ *
+ * `correoAprobado` vacío o solo espacios NO se manda como llave vacía: cartera
+ * devuelve 400 (`correo_aprobado_invalido`) a propósito, porque una llave vacía
+ * es un front roto y tratarla como "no se aprobó nada" saltaría el control justo
+ * cuando más falta hace. Cuando no hay correo que aprobar —la EMPRESA, cuyo
+ * diálogo no enseña ninguno— la llave se OMITE.
+ *
+ * Y con `correoAprobado` va UN solo id: cartera rechaza la combinación con
+ * varios (`correo_aprobado_con_varios_inversionistas`), porque quien confirmó
+ * vio UNA dirección.
  */
 export async function otorgarAccesoPortalService(
-  inversionistaIds: number[]
+  inversionistaIds: number[],
+  correoAprobado?: string | null
 ): Promise<{ message: string; resultados: AccesoPortalRespuesta[] }> {
+  const aprobado = correoAprobado?.trim() ?? "";
   const res = await api.post(`${API_URL}/investor/portal-access`, {
     inversionista_ids: inversionistaIds,
+    // La llave existe o no existe; nunca existe vacía.
+    ...(aprobado ? { correo_aprobado: correoAprobado } : {}),
   });
   return res.data;
 }

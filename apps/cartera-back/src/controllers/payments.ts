@@ -1,4 +1,5 @@
 import { db, lockPool } from "../database/index";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import {
   creditos,
   pagos_credito,
@@ -20,6 +21,7 @@ import Big from "big.js";
 import { z } from "zod";
 import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
+import { revertirRubrosDelPago } from "./rubros";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
@@ -1906,6 +1908,60 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   console.log(
     `Falsificando pago con ID: ${pago_id} para crédito ID: ${credito_id}`
   );
+  /**
+   * Si el pago YA está declarado falso, salir ANTES de tocar nada.
+   *
+   * Tiene que estar acá arriba y no dentro de la transacción de más abajo, y
+   * ese detalle es todo el punto: `insertPagosCreditoInversionistas` corre
+   * primero, commitea sus filas de `pagos_credito_inversionistas` y resta de
+   * `creditos_inversionistas.monto_aportado`, y NO es idempotente —no tiene
+   * ON CONFLICT—. Una segunda llamada sobre un pago ya falso duplicaba el
+   * espejo y restaba el aporte dos veces, rompiendo el invariante
+   * `capital == Σ monto_aportado`, y recién después chocaba con el guard de la
+   * transacción y devolvía un 400 que suena a "no pasó nada" e invita a otro
+   * clic que repite el daño.
+   *
+   * El filtro `paymentFalse = false` del UPDATE de abajo NO alcanza para esto:
+   * frena la escritura del pago, pero el espejo ya se escribió.
+   */
+  const [yaFalso] = await db
+    .select({ paymentFalse: pagos_credito.paymentFalse })
+    .from(pagos_credito)
+    .where(
+      and(
+        eq(pagos_credito.pago_id, pago_id),
+        eq(pagos_credito.credito_id, credito_id)
+      )
+    )
+    .limit(1);
+
+  if (!yaFalso) {
+    throw new Error("No payment found to mark as false with the given criteria");
+  }
+  if (yaFalso.paymentFalse) {
+    // Antes de salir, limpiar el ajuste por fecha ideal — sí, otra vez.
+    //
+    // Es la red de seguridad de las filas que quedaron a medias: el reset vivía
+    // DESPUÉS del commit de la transacción de abajo, así que si esa consulta
+    // fallaba la boleta quedaba commiteada como falsa con el ajuste todavía
+    // marcado como cobrado, y el reintento entraba justo por acá y se iba sin
+    // limpiar nada. El ajuste quedaba cobrado para siempre apuntando a un pago
+    // que nunca entró, y ningún pago futuro se lo volvía a cobrar al cliente.
+    //
+    // Correrlo de más no cuesta nada: el UPDATE filtra por el `pago_id` de ESTE
+    // pago invalidado, así que en el caso normal no encuentra filas, y nunca
+    // puede pisar un ajuste que un pago posterior ya reclamó (ese apunta a otro
+    // `pago_id`). Va fuera de transacción a propósito: es una sola sentencia
+    // sobre a lo sumo una fila, toma y suelta su candado sola y no puede entrar
+    // en un ciclo de deadlock.
+    await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
+
+    return {
+      message: "Payment was already marked as false",
+      updatedCount: 0,
+    };
+  }
+
   // Mismo guard que obtenerCreditosConPagosPendientes/calcularYRegistrarPagosEspejo:
   // un crédito en PENDIENTE_AUTORIZACION no debe generar pagos espejo, ni siquiera
   // "falsos", mientras la devolución a CUBE sigue sin resolver.
@@ -1914,30 +1970,104 @@ export async function falsePayment(pago_id: number, credito_id: number) {
     // Falsear un pago no debe descontar el aporte del crédito/espejo.
     await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
   });
-  // Actualizar el estado del pago a falso
-  const result = await db
-    .update(pagos_credito)
-    .set({
-      pagado: false,
-      paymentFalse: true,
+  // Actualizar el estado del pago a falso — Y devolver los rubros que cobró,
+  // en la MISMA transacción.
+  //
+  // 🧾 RUBROS: declarar falsa una boleta la invalida, así que lo que cobró de
+  // los rubros tiene que irse con ella. Un reclamo SIN APLICAR se soltaba solo
+  // (el neteo de `reclamosVivosDeRubros` filtra `paymentFalse = false`), pero
+  // uno YA APLICADO dejaba el saldo descontado: si el abono había dejado el
+  // rubro en cero, quedaba `completado` y `activo = false` —o sea, la deuda
+  // desaparecía por una boleta que se declaró falsa— y no había ninguna ruta
+  // que la devolviera.
+  //
+  // `revertirRubrosDelPago` y no `desaplicarRubrosDelPago`: acá el pago NO
+  // vuelve a estar pendiente, se INVALIDA. Es la misma operación que hace
+  // `reversePayment`, y borra el reclamo, que es a la vez el guard de doble
+  // reversa (una segunda pasada no encuentra filas).
+  //
+  // Todo en UNA transacción para que no exista el estado intermedio "boleta
+  // falsa con el rubro todavía cobrado".
+  //
+  // OJO con reintentar si esta transacción falla: NO es una operación limpia.
+  // `insertPagosCreditoInversionistas` de más arriba ya commiteó sus filas de
+  // `pagos_credito_inversionistas` y ya restó de `creditos_inversionistas`, y no
+  // tiene ON CONFLICT — así que un reintento duplica el espejo y resta el aporte
+  // dos veces, rompiendo el invariante `capital == Σ monto_aportado`. Si esto
+  // falla, hay que revisar el espejo antes de volver a intentar.
+  //
+  // BAJO EL CANDADO DEL CRÉDITO, como todos los demás que escriben
+  // `rubros.saldo_pendiente`. `withPendingReturnCreditLocks` de arriba NO sirve
+  // para esto: es un `FOR NO KEY UPDATE` sobre `creditos` que hace COMMIT y
+  // suelta antes de que esta transacción abra. Sin el advisory lock, esta ruta
+  // quedaba como la única de la familia sin serializar — justo lo que se acababa
+  // de cerrar en `revertPaymentToPending`.
+  const result = await withPaymentAdvisoryLock(credito_id, () =>
+    db.transaction(async (tx) => {
+    // El `paymentFalse = false` del WHERE es el guard de idempotencia: sin él,
+    // dos llamadas solapadas sobre el mismo pago actualizaban las dos, y como
+    // `revertirRubrosDelPago` relee el saldo YA restituido y le vuelve a sumar
+    // `monto_aplicado`, el rubro terminaba por encima de su monto original
+    // (Q1,000 con Q400 cobrados: 600 → 1000 → 1400) y la siguiente boleta le
+    // cobraba al cliente una diferencia que nunca debió.
+    const actualizado = await tx
+      .update(pagos_credito)
+      .set({
+        pagado: false,
+        paymentFalse: true,
+      })
+      .where(
+        and(
+          eq(pagos_credito.pago_id, pago_id),
+          eq(pagos_credito.credito_id, credito_id),
+          eq(pagos_credito.paymentFalse, false)
+        )
+      );
+
+    // 🚨 Si no se actualizó ningún registro, lanza error controlado. Va ANTES
+    // de tocar los rubros: sin fila actualizada no hay boleta de este crédito
+    // que invalidar, y revertirle los rubros a un pago que no le pertenece
+    // sería peor que no hacer nada.
+    if (!actualizado.rowCount || actualizado.rowCount === 0) {
+      throw new Error(
+        "No payment found to mark as false with the given criteria"
+      );
+    }
+
+    await revertirRubrosDelPago(
+      pago_id,
+      tx as unknown as Parameters<typeof revertirRubrosDelPago>[1]
+    );
+
+    // Si este pago era el que cobró un ajuste por fecha ideal de pago,
+    // resetearlo a pendiente — la boleta resultó falsa, el dinero nunca entró
+    // de verdad y el ajuste tiene que quedar disponible para un pago futuro.
+    //
+    // DENTRO de la transacción, igual que en `reversePayment` y en la anulación
+    // por incobrable de `credits.ts`. Afuera —donde estaba— no era atómico:
+    // si esta consulta fallaba, el `paymentFalse = true` ya estaba commiteado y
+    // el ajuste se quedaba marcado como cobrado sin nadie que lo soltara. Acá
+    // adentro, o se invalida la boleta y se suelta el ajuste, o no pasa ninguna
+    // de las dos.
+    //
+    // No estrena una inversión de orden de candados, que es el riesgo real de
+    // meter una tabla más adentro de una transacción. Va ÚLTIMA, después de
+    // `pagos_credito` y de los rubros, y las otras dos rutas que resetean el
+    // ajuste dentro de su transacción —la caída a incobrable y la anulación de
+    // `credits.ts`— también tocan `pagos_credito` ANTES. O sea: nadie toma este
+    // par al revés.
+    //
+    // Se dice `credits.ts` y no "todos" a propósito: esas rutas NO toman el
+    // advisory lock del crédito, así que la serialización no viene de ahí sino
+    // del orden. El advisory lock sí envuelve a esta transacción
+    // (`withPaymentAdvisoryLock`, más arriba), pero no es lo que sostiene este
+    // argumento. El índice único por `credito_id` garantiza que sea a lo sumo
+    // una fila.
+    await resetAjusteFechaIdealSiPagoInvalidado(pago_id, tx);
+
+    return actualizado;
     })
-    .where(
-      and(
-        eq(pagos_credito.pago_id, pago_id),
-        eq(pagos_credito.credito_id, credito_id)
-      )
-    );
-
-  // 🚨 Si no se actualizó ningún registro, lanza error controlado
-  if (!result.rowCount || result.rowCount === 0) {
-    throw new Error(
-      "No payment found to mark as false with the given criteria"
-    );
-  }
-
-  // Si este pago era el que cobró un ajuste por fecha ideal de pago, resetearlo
-  // a pendiente — la boleta resultó falsa, el dinero nunca entró de verdad.
-  await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
+  );
 
   return {
     message: "Payment marked as false successfully",

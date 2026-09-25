@@ -26,6 +26,7 @@ import { notificationsRouter } from "./notifications";
 import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
+import { satVehiculosRouter } from "./sat-vehiculos";
 import { seguimientosRouter } from "./seguimientos";
 import { trackerRouter } from "./tracker";
 import { uploadRouter } from "./upload";
@@ -391,6 +392,12 @@ export const reportsAppRouter = {
 
 	// MiniAgent routes
 	getMiniAgentCredentials: miniagentRouter.getMiniAgentCredentials,
+
+	// Verificación de vehículos en SAT
+	ejecutarVerificacionSat: satVehiculosRouter.ejecutarVerificacionSat,
+	obtenerEstadoVerificacionSat:
+		satVehiculosRouter.obtenerEstadoVerificacionSat,
+	obtenerUltimaVerificacionSat: satVehiculosRouter.obtenerUltimaVerificacionSat,
 
 	// Admin MiniAgent routes
 	adminListUsersWithCredentials: adminMiniagentRouter.listUsersWithCredentials,

@@ -20,6 +20,7 @@ import {
 	Scale,
 	Settings,
 	ShieldBan,
+	ShieldCheck,
 	Target,
 	TrendingUp,
 	UserCircle,
@@ -29,7 +30,7 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 import { logo } from "@/assets";
 import { authClient } from "@/lib/auth-client";
-import { PERMISSIONS } from "@/lib/roles";
+import { PERMISSIONS, ROLES } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 import { ModeToggle } from "./mode-toggle";
@@ -252,6 +253,17 @@ export default function Header() {
 											Carros en Remate
 										</Link>
 									</DropdownMenuItem>
+									{userRole === ROLES.ADMIN && (
+										<DropdownMenuItem asChild>
+											<Link
+												to="/vehicles/sat-verificacion"
+												className="cursor-pointer"
+											>
+												<ShieldCheck className="mr-2 h-4 w-4" />
+												Verificación en SAT
+											</Link>
+										</DropdownMenuItem>
+									)}
 								</DropdownMenuContent>
 							</DropdownMenu>
 						)}
@@ -648,6 +660,15 @@ function MobileNav({
 											<Gavel />
 											Carros en Remate
 										</Link>
+										{userRole === ROLES.ADMIN && (
+											<Link
+												to="/vehicles/sat-verificacion"
+												className={MOBILE_LINK_CLASS}
+											>
+												<ShieldCheck />
+												Verificación en SAT
+											</Link>
+										)}
 									</MobileSection>
 								)}
 

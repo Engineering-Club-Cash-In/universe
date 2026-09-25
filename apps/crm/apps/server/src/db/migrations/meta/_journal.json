@@ -190,6 +190,13 @@
 			"when": 1790265214957,
 			"tag": "0036_buro_interno_autorizaciones",
 			"breakpoints": true
+		},
+		{
+			"idx": 27,
+			"version": "7",
+			"when": 1790363618969,
+			"tag": "0037_add_sat_verificacion_vehiculos",
+			"breakpoints": true
 		}
 	]
 }

@@ -438,6 +438,20 @@ export const inversionistasRouter = new Elysia()
     {
       body: t.Object({
         inversionista_ids: t.Array(t.Number({ minimum: 1 }), { minItems: 1 }),
+        // El correo que el diálogo le ENSEÑÓ a quien aprobó. Se revalida contra
+        // la fila antes de provisionar (otorgarAccesoPortal.ts): entre que el
+        // diálogo se pinta y el clic llega, el correo se puede haber cambiado
+        // desde el CRM, y quien aprueba no tiene forma de notarlo.
+        //
+        // Opcional porque hay un camino sin nada que aprobar: la EMPRESA, cuyo
+        // diálogo no enseña correo —la cuenta es del representante— y que ya
+        // corta antes sin provisionar. Con correo aprobado va UN id a la vez;
+        // la combinación con varios se rechaza en el controller.
+        //
+        // `maxLength` 255 = el largo de `inversionistas.email` (varchar(255)):
+        // más corto rechazaría con 422 un correo que la fila SÍ puede tener, y
+        // quien aprueba vería un error sin causa visible.
+        correo_aprobado: t.Optional(t.Nullable(t.String({ maxLength: 255 }))),
       }),
       detail: {
         summary: "Abre el acceso al Portal del Inversionista (acto humano, solo ADMIN)",
@@ -447,7 +461,10 @@ export const inversionistasRouter = new Elysia()
           "el cron detecta a quién le falta acceso y lo reporta, pero abrir la cuenta " +
           "pasa por una persona, porque cartera.inversionistas se escribe desde " +
           "caminos que no prueban identidad y el correo de una fila legítima puede " +
-          "estar envenenado. NO agregar esta ruta al proxy de auth-google " +
+          "estar envenenado. Por eso acepta `correo_aprobado`: el correo que se le " +
+          "enseñó a quien confirmó, que se revalida contra la fila y VETA el " +
+          "provisionamiento con `correo_aprobado_no_coincide` si cambió en el " +
+          "camino. NO agregar esta ruta al proxy de auth-google " +
           "(cartera.routes.ts): ahí queda alcanzable desde el portal.",
         tags: ["Inversionistas"],
       },

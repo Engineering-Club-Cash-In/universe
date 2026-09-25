@@ -28,6 +28,7 @@ let casoGpsMock: Record<string, unknown> | null = {
 let insertGpsConsultaLogFalla = false;
 let gpsConsultaLogsInsertados: Record<string, unknown>[] = [];
 let ubicacionesWhereCondition: unknown = null;
+let ubicacionesClaveBorradasCount = 0;
 
 function mockDb() {
 	return {
@@ -119,7 +120,9 @@ function mockDb() {
 		delete: (tabla: unknown) => {
 			if (tabla === gpsUbicacionesClave) {
 				return {
-					where: async () => {},
+					where: async () => {
+						ubicacionesClaveBorradasCount++;
+					},
 				};
 			}
 			throw new Error(`delete en tabla no mockeada: ${String(tabla)}`);
@@ -296,6 +299,7 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		insertGpsConsultaLogFalla = false;
 		gpsConsultaLogsInsertados = [];
 		ubicacionesWhereCondition = null;
+		ubicacionesClaveBorradasCount = 0;
 		mock.restore();
 	});
 
@@ -461,5 +465,71 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 
 		expect(res.auditada).toBe(true);
 		expect(res.ubicaciones).toEqual([]);
+		expect(ubicacionesClaveBorradasCount).toBe(1);
+	});
+
+	it("cartera-back no disponible (rechaza / bucketActual === null): fail closed, no expone ubicaciones y no purga la DB", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		spyOn(carteraBackClient, "getBucketActualCredito").mockRejectedValue(
+			new Error("cartera-back caído"),
+		);
+
+		ubicacionesFilasMock = [
+			{
+				id: "ub-1",
+				lat: 14.5951,
+				lon: -90.5069,
+				radioM: 200,
+				tipo: "probable_casa",
+				horasTotales: 480,
+				diasDistintos: 55,
+				visitas: 55,
+				patron: { nocturna: 55, laboral: 0, finDeSemana: 0 },
+				primeraVisita: new Date("2026-07-01T00:00:00.000Z"),
+				ultimaVisita: new Date("2026-08-29T00:00:00.000Z"),
+				calculadoAt: new Date("2026-08-30T06:00:00.000Z"),
+			},
+		];
+
+		const res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("cobros"),
+		});
+
+		expect(res.auditada).toBe(true);
+		expect(res.ubicaciones).toEqual([]);
+		expect(ubicacionesClaveBorradasCount).toBe(0);
+	});
+
+	it("caso sin numeroCreditoSifco: no expone ubicaciones", async () => {
+		casoGpsMock = {
+			casoSifco: null,
+			vehiculoOportunidad: VEHICLE_ID,
+		};
+		ubicacionesFilasMock = [
+			{
+				id: "ub-1",
+				lat: 14.5951,
+				lon: -90.5069,
+				radioM: 200,
+				tipo: "probable_casa",
+				horasTotales: 480,
+				diasDistintos: 55,
+				visitas: 55,
+				patron: { nocturna: 55, laboral: 0, finDeSemana: 0 },
+				primeraVisita: new Date("2026-07-01T00:00:00.000Z"),
+				ultimaVisita: new Date("2026-08-29T00:00:00.000Z"),
+				calculadoAt: new Date("2026-08-30T06:00:00.000Z"),
+			},
+		];
+
+		const res = await call(gpsEventosRouter.getUbicacionesClaveCaso, input, {
+			context: ctx("admin"),
+		});
+
+		expect(res.auditada).toBe(true);
+		expect(res.ubicaciones).toEqual([]);
+		expect(ubicacionesClaveBorradasCount).toBe(0);
 	});
 });

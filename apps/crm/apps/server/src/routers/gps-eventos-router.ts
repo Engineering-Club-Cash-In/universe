@@ -133,21 +133,31 @@ export const gpsEventosRouter = {
 			}
 
 			// CB-119 / D-15: Las ubicaciones clave son EXCLUSIVAMENTE para casos
-			// en B4 / recuperación. Si el crédito salió de B4 (regularizó o cambió
-			// de bucket entre corridas del job nocturno), se purgan las filas
-			// huérfanas de este caso y no se exponen ubicaciones.
-			if (numeroCreditoSifco) {
-				const bucketActual = await carteraBackClient
-					.getBucketActualCredito(numeroCreditoSifco)
-					.catch(() => null);
+			// en B4 / recuperación. Solo se devuelven ubicaciones si la consulta en
+			// vivo a cartera-back confirma positivamente que el crédito está en B4
+			// (bucket === 4). Fail closed: si no hay SIFCO, si cartera-back no
+			// responde, o si el crédito no está en B4, no se exponen ubicaciones.
+			if (!numeroCreditoSifco) {
+				return { auditada: true, ubicaciones: [] };
+			}
 
-				if (bucketActual && bucketActual.bucket !== 4) {
+			const bucketActual = await carteraBackClient
+				.getBucketActualCredito(numeroCreditoSifco)
+				.catch(() => null);
+
+			if (bucketActual?.bucket !== 4) {
+				// Si cartera-back respondió positivamente que el crédito está fuera
+				// de B4 (regularizó o cambió de bucket), se purgan de forma síncrona
+				// las filas huérfanas de este caso en la DB. Si falló la red
+				// (bucketActual === null), no borramos la DB por si es un fallo
+				// transitorio, pero no devolvemos datos al usuario.
+				if (bucketActual !== null) {
 					await db
 						.delete(gpsUbicacionesClave)
 						.where(eq(gpsUbicacionesClave.casoCobroId, input.casoCobroId))
 						.catch(() => {});
-					return { auditada: true, ubicaciones: [] };
 				}
+				return { auditada: true, ubicaciones: [] };
 			}
 
 			const ubicaciones = await db

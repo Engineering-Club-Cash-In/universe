@@ -63,7 +63,10 @@ import {
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
-import { hayIncrementoMora } from "@/lib/cobros/plantillas-mensajes";
+import {
+	debeAnunciarCrecimientoMora,
+	hayIncrementoMora,
+} from "@/lib/cobros/plantillas-mensajes";
 import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -660,15 +663,27 @@ function RouteComponent() {
 									{/* La mora ya no es un bloque fijo del mes: sube todos los
 									    días. Sin este dato el asesor cotiza por teléfono el
 									    total de HOY, el cliente paga dos días después y queda
-									    un residuo que no cubre la cuota. No se muestra cuando
-									    no crece (todas las cuotas ya en su techo de 30 días). */}
+									    un residuo que no cubre la cuota.
+									    Manda el TECHO, no el ritmo: el ritmo es el delta de UN
+									    día y la víspera del próximo vencimiento da 0 (la cuota
+									    vieja ya topó y la nueva todavía no vence) aunque la
+									    mora sí vaya a crecer. Y exige mora HOY: un crédito
+									    AL DÍA con su próxima cuota dentro de 30 días devuelve techo
+									    > 0, y sin ese chequeo la ficha le anunciaba un aumento a
+									    quien no debe nada. */}
 									{caso.cuotaConvenio == null &&
-										hayIncrementoMora(caso.incrementoDiarioMora) && (
+										debeAnunciarCrecimientoMora({
+											montoEnMora: caso.montoEnMora,
+											incrementoDiarioMora: caso.incrementoDiarioMora,
+											incrementoMaximoMensualMora:
+												caso.incrementoMaximoMensualMora,
+										}) && (
 											<p className="text-muted-foreground text-xs">
-												Aumenta Q{caso.incrementoDiarioMora} por cada día de
-												atraso
+												{hayIncrementoMora(caso.incrementoDiarioMora)
+													? `Sube alrededor de Q${caso.incrementoDiarioMora} por día`
+													: "Va a seguir subiendo"}
 												{hayIncrementoMora(caso.incrementoMaximoMensualMora) &&
-													`, hasta un máximo de Q${caso.incrementoMaximoMensualMora} al mes`}
+													`, y puede aumentar hasta Q${caso.incrementoMaximoMensualMora} más en los próximos 30 días`}
 											</p>
 										)}
 								</div>

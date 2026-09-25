@@ -138,6 +138,7 @@ import { scoreLead } from "../services/lead-scoring";
 import {
 	ejecutarValidaciones,
 	resolverExencionPorBot,
+	VALIDACIONES_EXTERNAS_BLOQUEAN_APROBACION,
 } from "../services/opportunity-validations";
 import type { StatusCreditEnum } from "../types/cartera-back";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
@@ -3695,38 +3696,48 @@ export const crmRouter = {
 						});
 					}
 
-					const resultadoValidaciones = await ejecutarValidaciones({
-						opportunityId: input.opportunityId,
-						userId: context.userId,
-						reusarVigente: true,
-					});
-
-					// Un fallo técnico (API caída, timeout, sin respuesta) sí
-					// bloquea: ninguna oportunidad no-bot pasa a 40% sin
-					// validación ejecutada con veredicto
-					if (resultadoValidaciones.errorTecnico) {
-						throw new ORPCError("BAD_REQUEST", {
-							message: `No se pudo completar la validación de Buró/RENAP: ${resultadoValidaciones.mensaje ?? "error desconocido"}. Intenta nuevamente o contacta al administrador.`,
+					if (VALIDACIONES_EXTERNAS_BLOQUEAN_APROBACION) {
+						const resultadoValidaciones = await ejecutarValidaciones({
+							opportunityId: input.opportunityId,
+							userId: context.userId,
+							reusarVigente: true,
 						});
-					}
 
-					// El DPI pudo cambiar mientras corrían las validaciones: el
-					// veredicto sería de otra persona
-					const [leadActual] = await db
-						.select({ dpi: leads.dpi })
-						.from(opportunities)
-						.leftJoin(leads, eq(opportunities.leadId, leads.id))
-						.where(eq(opportunities.id, input.opportunityId))
-						.limit(1);
+						// Un fallo técnico (API caída, timeout, sin respuesta) sí
+						// bloquea: ninguna oportunidad no-bot pasa a 40% sin
+						// validación ejecutada con veredicto
+						if (resultadoValidaciones.errorTecnico) {
+							throw new ORPCError("BAD_REQUEST", {
+								message: `No se pudo completar la validación de Buró/RENAP: ${resultadoValidaciones.mensaje ?? "error desconocido"}. Intenta nuevamente o contacta al administrador.`,
+							});
+						}
 
-					if (
-						normalizarDpi(leadActual?.dpi ?? "") !==
-						normalizarDpi(opportunity[0].leadDpi)
-					) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"El DPI del cliente cambió mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
-						});
+						// El DPI pudo cambiar mientras corrían las validaciones: el
+						// veredicto sería de otra persona
+						const [leadActual] = await db
+							.select({ dpi: leads.dpi })
+							.from(opportunities)
+							.leftJoin(leads, eq(opportunities.leadId, leads.id))
+							.where(eq(opportunities.id, input.opportunityId))
+							.limit(1);
+
+						if (
+							normalizarDpi(leadActual?.dpi ?? "") !==
+							normalizarDpi(opportunity[0].leadDpi)
+						) {
+							throw new ORPCError("BAD_REQUEST", {
+								message:
+									"El DPI del cliente cambió mientras se ejecutaban las validaciones. Vuelve a ejecutarlas antes de aprobar.",
+							});
+						}
+					} else {
+						// `ejecutarValidaciones` también validaba el formato; eso no depende de Centinela
+						const dpiValidado = validarDpi(opportunity[0].leadDpi);
+						if (!dpiValidado.valid) {
+							throw new ORPCError("BAD_REQUEST", {
+								message: `${dpiValidado.error}. Corrígelo en la ficha del lead antes de aprobar.`,
+							});
+						}
 					}
 
 					// Ni el rechazo del buró ni la ausencia de registro bloquean:

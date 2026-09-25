@@ -47,6 +47,9 @@ const ERROR_BURO_SIN_RENAP_LOCAL = "DPI no encontrado en RENAP";
 /** Vigencia de un override manual de Buró: igual al TTL normal de un veredicto real de Infornet */
 const VIGENCIA_OVERRIDE_BURO_MS = 30 * 24 * 60 * 60 * 1000;
 
+/** Hotfix temporal: la API key de Centinela falla, así que RENAP/Infornet no bloquean la aprobación. Volver a `true` cuando se restablezca */
+export const VALIDACIONES_EXTERNAS_BLOQUEAN_APROBACION = false;
+
 export class OportunidadNoEncontradaError extends Error {
 	constructor() {
 		super("Oportunidad no encontrada");

@@ -80,6 +80,19 @@ describe("register payment", () => {
     expect(getInternalNexaPaymentDate(body.fecha_pago)).toBeNull();
   });
 
+  it("preserva el día bancario Nexa al preparar fecha_pago para persistencia", () => {
+    for (const input of [
+      "2026-09-25T00:00:00.000Z",
+      "2026-10-01T00:00:00+09:00",
+      "2026-09-30T23:30:00-06:00",
+    ]) {
+      expect(getInternalNexaPaymentDate(input, 7)?.toISOString().slice(0, 10))
+        .toBe(input.slice(0, 10));
+    }
+    expect(getInternalNexaPaymentDate("2026-09-25T00:00:00.000Z", 7)?.toISOString())
+      .toBe("2026-09-25T00:00:00.000Z");
+  });
+
   it("clasifica un crédito pendiente de cancelación con un mensaje descriptivo", () => {
     expect(getCreditPaymentBlock("PENDIENTE_CANCELACION")).toEqual({
       code: "CREDIT_PENDING_CANCELLATION",

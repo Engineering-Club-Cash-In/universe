@@ -40,26 +40,9 @@ export const internalNexaPagoSchema = pagoSchema.extend({
 
 export const getInternalNexaPaymentDate = (fechaPago: string, eventId?: number) => {
   if (eventId === undefined) return null;
-  const date = new Date(fechaPago);
-  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Guatemala",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date).map(({ type, value }) => [type, value]));
-  return new Date(Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(parts.hour),
-    Number(parts.minute),
-    Number(parts.second),
-    date.getUTCMilliseconds(),
-  ));
+  // tokenDate is a banking calendar value, stored in a timezone-less column.
+  // Preserve its wall-clock fields rather than shifting the day to Guatemala.
+  return new Date(fechaPago.replace(/(?:Z|[+-]\d{2}:\d{2})$/, "Z"));
 };
 
 export const CREDIT_PENDING_CANCELLATION_ERROR = {

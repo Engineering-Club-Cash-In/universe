@@ -710,7 +710,15 @@ export const messagingRouter = {
 				opportunityId: z.string().uuid(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			// Cada destinatario guarda los enlaces de firma de sus contratos, y con
+			// uno de ésos se firma en nombre del cliente o del codeudor. El log lo
+			// ve todo el CRM —cobros incluido— para el badge del pipeline; los
+			// enlaces y el PDF, sólo quien puede ver los contratos de la oportunidad.
+			const veContratos = PERMISSIONS.canViewOpportunityContracts(
+				context.userRole ?? "",
+			);
+
 			// El más reciente. Una oportunidad junta varios envíos: cada vez que se
 			// aprueba se crea un log nuevo. Sin ordenar, `logs[0]` devolvía una fila
 			// cualquiera —en la práctica la más vieja—, así que la ficha mostraba
@@ -746,10 +754,11 @@ export const messagingRouter = {
 					if (!contracts) return r;
 
 					const resolved = await Promise.all(
-						contracts.map(async (c) => ({
-							...c,
-							pdfLink: await resolvePdfUrl(c.pdfLink ?? null),
-						})),
+						contracts.map(async (c) =>
+							veContratos
+								? { ...c, pdfLink: await resolvePdfUrl(c.pdfLink ?? null) }
+								: { ...c, link: null, pdfLink: null },
+						),
 					);
 					return { ...r, contracts: resolved };
 				}),

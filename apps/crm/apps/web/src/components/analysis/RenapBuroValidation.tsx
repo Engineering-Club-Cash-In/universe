@@ -19,6 +19,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { CONSULTAR_RENAP } from "server/src/lib/renap-config";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -51,6 +52,14 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { client, orpc } from "@/utils/orpc";
+
+const TITULO = CONSULTAR_RENAP
+	? "Validaciones RENAP y Buró"
+	: "Validaciones Buró";
+const DESCRIPCION = CONSULTAR_RENAP
+	? "Verificación de identidad (RENAP) y riesgo crediticio (Infornet)"
+	: "Riesgo crediticio (Infornet)";
+const FUENTES = CONSULTAR_RENAP ? "RENAP y Buró" : "Buró";
 
 type EstadoValidacion = "aprobado" | "rechazado" | "error" | "sin_registro";
 type TipoValidacion = "buro" | "renap";
@@ -301,7 +310,7 @@ export function RenapBuroValidation({
 		return (
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-lg">Validaciones RENAP y Buró</CardTitle>
+					<CardTitle className="text-lg">{TITULO}</CardTitle>
 				</CardHeader>
 				<CardContent className="space-y-2">
 					<Skeleton className="h-4 w-full" />
@@ -319,16 +328,14 @@ export function RenapBuroValidation({
 		return (
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-lg">Validaciones RENAP y Buró</CardTitle>
-					<CardDescription>
-						Verificación de identidad (RENAP) y riesgo crediticio (Infornet)
-					</CardDescription>
+					<CardTitle className="text-lg">{TITULO}</CardTitle>
+					<CardDescription>{DESCRIPCION}</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<Alert>
 						<ShieldCheck className="h-4 w-4" />
 						<AlertDescription>
-							Origen bot de WhatsApp: las validaciones de RENAP y Buró quedan
+							Origen bot de WhatsApp: las validaciones de {FUENTES} quedan
 							exentas porque ya se ejecutan en el flujo del bot.
 						</AlertDescription>
 					</Alert>
@@ -345,7 +352,7 @@ export function RenapBuroValidation({
 	// aviso de "DPI cambió"
 	const buroErrorVigente = buro?.estado === "error" && !data.buroDesactualizado;
 	const renapErrorVigente =
-		renap?.estado === "error" && !data.renapDesactualizado;
+		CONSULTAR_RENAP && renap?.estado === "error" && !data.renapDesactualizado;
 	const hayError = buroErrorVigente || renapErrorVigente;
 	const buroConVeredicto =
 		buro?.estado === "aprobado" || buro?.estado === "rechazado";
@@ -358,10 +365,8 @@ export function RenapBuroValidation({
 			<CardHeader>
 				<div className="flex items-center justify-between">
 					<div>
-						<CardTitle className="text-lg">Validaciones RENAP y Buró</CardTitle>
-						<CardDescription>
-							Verificación de identidad (RENAP) y riesgo crediticio (Infornet)
-						</CardDescription>
+						<CardTitle className="text-lg">{TITULO}</CardTitle>
+						<CardDescription>{DESCRIPCION}</CardDescription>
 					</div>
 					{!data.faltaDpi && (
 						<Button
@@ -410,13 +415,14 @@ export function RenapBuroValidation({
 						<AlertTitle>Origen WhatsApp sin validación previa</AlertTitle>
 						<AlertDescription>
 							La oportunidad tiene origen WhatsApp, pero no hay registro de que
-							el bot haya ejecutado RENAP y Buró para este cliente, así que se
+							el bot haya ejecutado {FUENTES} para este cliente, así que se
 							valida como cualquier otra.
 						</AlertDescription>
 					</Alert>
 				)}
 
-				{data.dpiDesactualizado && (
+				{(data.buroDesactualizado ||
+					(CONSULTAR_RENAP && data.renapDesactualizado)) && (
 					<Alert className="border-yellow-300 bg-yellow-50 dark:bg-yellow-950/30">
 						<UserCog className="h-4 w-4" />
 						<AlertTitle>El DPI del lead cambió después de validar</AlertTitle>
@@ -427,7 +433,9 @@ export function RenapBuroValidation({
 							<span className="font-medium">
 								{[
 									data.buroDesactualizado && `Buró (${buro?.dpi})`,
-									data.renapDesactualizado && `RENAP (${renap?.dpi})`,
+									CONSULTAR_RENAP &&
+										data.renapDesactualizado &&
+										`RENAP (${renap?.dpi})`,
 								]
 									.filter(Boolean)
 									.join(" y ")}
@@ -441,14 +449,16 @@ export function RenapBuroValidation({
 				{ejecutandoPrimeraVez && (
 					<div className="flex items-center gap-2 text-muted-foreground text-sm">
 						<Loader2 className="h-4 w-4 animate-spin" />
-						Ejecutando validaciones de RENAP y Buró...
+						Ejecutando validaciones de {FUENTES}...
 					</div>
 				)}
 
 				{!ejecutandoPrimeraVez && (
 					<div className="space-y-3">
 						{/* RENAP */}
-						<div className="rounded-lg border p-3">
+						<div
+							className={CONSULTAR_RENAP ? "rounded-lg border p-3" : "hidden"}
+						>
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-2">
 									<ShieldCheck className="h-4 w-4 text-muted-foreground" />
@@ -711,20 +721,22 @@ export function RenapBuroValidation({
 					</Alert>
 				)}
 
-				{renap?.fuenteDeDatos === "manual" && data.overrideRenap && (
-					<Alert className="border-purple-300 bg-purple-50 dark:bg-purple-950/30">
-						<UserCog className="h-4 w-4" />
-						<AlertTitle>RENAP validado manualmente</AlertTitle>
-						<AlertDescription>
-							{data.overrideRenap.marcadoPorNombre ?? "Un analista"} verificó a
-							este cliente en el portal de RENAP
-							{data.overrideRenap.motivo
-								? `: "${data.overrideRenap.motivo}"`
-								: ""}
-							.
-						</AlertDescription>
-					</Alert>
-				)}
+				{CONSULTAR_RENAP &&
+					renap?.fuenteDeDatos === "manual" &&
+					data.overrideRenap && (
+						<Alert className="border-purple-300 bg-purple-50 dark:bg-purple-950/30">
+							<UserCog className="h-4 w-4" />
+							<AlertTitle>RENAP validado manualmente</AlertTitle>
+							<AlertDescription>
+								{data.overrideRenap.marcadoPorNombre ?? "Un analista"} verificó
+								a este cliente en el portal de RENAP
+								{data.overrideRenap.motivo
+									? `: "${data.overrideRenap.motivo}"`
+									: ""}
+								.
+							</AlertDescription>
+						</Alert>
+					)}
 
 				{hayError && (
 					<Alert variant="destructive">

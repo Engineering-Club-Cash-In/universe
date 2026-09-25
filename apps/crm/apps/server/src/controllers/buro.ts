@@ -9,6 +9,7 @@ import {
 	infornetPersonaCache,
 } from "@/db/schema/buro";
 import { eqDpi } from "@/lib/dpi-lookup";
+import { CONSULTAR_RENAP } from "@/lib/renap-config";
 import { normalizarDpi } from "@/utils/cui-validation";
 
 // 🔥 Instanciar el cliente con las credenciales del .env
@@ -50,16 +51,22 @@ export class InfornetController {
 				.limit(1);
 
 			if (personaRenap.length === 0) {
-				console.log("   ❌ DPI no encontrado en RENAP");
-				return {
-					success: false,
-					error: "DPI no encontrado en RENAP",
-				};
+				// Con RENAP deshabilitado nadie llena renapinfo: Infornet solo necesita el DPI
+				if (CONSULTAR_RENAP) {
+					console.log("   ❌ DPI no encontrado en RENAP");
+					return {
+						success: false,
+						error: "DPI no encontrado en RENAP",
+					};
+				}
+				console.log(
+					"   ⚠️ Sin RENAP local (consulta deshabilitada), se continúa",
+				);
+			} else {
+				console.log(
+					`   ✅ DPI encontrado en RENAP: ${personaRenap[0].firstName} ${personaRenap[0].firstLastName}`,
+				);
 			}
-
-			console.log(
-				`   ✅ DPI encontrado en RENAP: ${personaRenap[0].firstName} ${personaRenap[0].firstLastName}`,
-			);
 
 			// 2. Buscar en caché de Infornet (que no esté expirado)
 			console.log("   💾 2. Buscando en caché de Infornet...");
@@ -201,7 +208,7 @@ export class InfornetController {
 	private async guardarEnCache(
 		dpi: string,
 		estudio: EstudioPersonaJSON,
-		personaRenap: typeof renapInfo.$inferSelect,
+		personaRenap: typeof renapInfo.$inferSelect | undefined,
 	): Promise<void> {
 		try {
 			// Calcular fecha de expiración (30 días)
@@ -225,16 +232,23 @@ export class InfornetController {
 				.values({
 					codigoPersona: estudio.fichaPrincipal.codigo,
 					dpi,
-					nombres:
-						personaRenap.firstName +
-						(personaRenap.secondName ? ` ${personaRenap.secondName}` : ""),
-					apellidos:
-						personaRenap.firstLastName +
-						(personaRenap.secondLastName
-							? ` ${personaRenap.secondLastName}`
-							: ""),
-					fechaNacimiento: personaRenap.birthDate?.toString(),
-					sexo: personaRenap.gender,
+					// Sin RENAP local, la identidad sale de la ficha del propio estudio
+					nombres: personaRenap
+						? personaRenap.firstName +
+							(personaRenap.secondName ? ` ${personaRenap.secondName}` : "")
+						: estudio.fichaPrincipal.nombres,
+					apellidos: personaRenap
+						? personaRenap.firstLastName +
+							(personaRenap.secondLastName
+								? ` ${personaRenap.secondLastName}`
+								: "")
+						: estudio.fichaPrincipal.apellidos,
+					fechaNacimiento: personaRenap
+						? personaRenap.birthDate?.toString()
+						: estudio.fichaPrincipal.fechaNacimiento,
+					sexo: personaRenap
+						? personaRenap.gender
+						: estudio.fichaPrincipal.sexo,
 					estudioCompleto: estudio,
 					tieneReferenciasComerciales:
 						estudio.referenciasComerciales.length > 0,

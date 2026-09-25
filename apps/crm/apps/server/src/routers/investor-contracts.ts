@@ -242,10 +242,15 @@ async function guardarContratoDeInversion(params: {
 			.from(investorContractBatches)
 			.where(eq(investorContractBatches.id, params.batchId))
 			.limit(1);
-		if (bateria?.status === "descartada") {
+		// Tampoco una que se completó en ese rato (se firmaron todos los que
+		// tenía): una cerrada no admite cambios, y guardar éste la reabría con
+		// un contrato nuevo que nadie pidió sobre una batería ya terminada.
+		if (bateria?.status === "descartada" || bateria?.status === "completada") {
 			throw new ORPCError("CONFLICT", {
 				message:
-					"La batería se descartó mientras se generaba el contrato: no se guardó.",
+					bateria.status === "descartada"
+						? "La batería se descartó mientras se generaba el contrato: no se guardó."
+						: "La batería se completó mientras se generaba el contrato: no se guardó.",
 			});
 		}
 

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db";
@@ -71,6 +71,44 @@ async function autorDeLaNotificacion() {
 		if (candidato) return candidato;
 	}
 	return undefined;
+}
+
+/**
+ * Le deja a jurídico el aviso de la batería, una sola vez.
+ *
+ * Mirar si ya hay aviso y crearlo van en una transacción con un candado por
+ * batería. Dos avisos de cartera que se cruzan con una batería recién abierta
+ * —el que la crea y un reintento que ya la encuentra— veían los dos que no
+ * había aviso y jurídico recibía la tarea dos veces.
+ */
+async function avisarAJuridico(
+	batchId: string,
+	params: {
+		aunqueYaHayaAviso: boolean;
+		notificacion: Parameters<typeof createNotification>[0];
+	},
+): Promise<void> {
+	await db.transaction(async (tx) => {
+		await tx.execute(
+			sql`select pg_advisory_xact_lock(hashtext(${`bateria-aviso-juridico:${batchId}`}::text))`,
+		);
+
+		if (!params.aunqueYaHayaAviso) {
+			const [yaAvisada] = await tx
+				.select({ id: notifications.id })
+				.from(notifications)
+				.where(
+					and(
+						eq(notifications.relatedEntityId, batchId),
+						eq(notifications.redirectPage, "investor_contracts"),
+					),
+				)
+				.limit(1);
+			if (yaAvisada) return;
+		}
+
+		await createNotification(params.notificacion, tx);
+	});
 }
 
 app.post("/", async (c) => {
@@ -154,6 +192,7 @@ app.post("/", async (c) => {
 	//   nueva y se avisa otra vez.
 	let batchId = creada?.id;
 	let avisar = Boolean(creada);
+	let avisarAunqueYaHayaAviso = false;
 
 	if (!creada) {
 		const [existente] = await db
@@ -182,7 +221,7 @@ app.post("/", async (c) => {
 		}
 
 		batchId = existente.id;
-		const otraCompra = aceptadaEn.getTime() > existente.acceptedAt.getTime();
+		let otraCompra = aceptadaEn.getTime() > existente.acceptedAt.getTime();
 		const abierta =
 			existente.status === "pendiente" || existente.status === "en_proceso";
 
@@ -190,7 +229,7 @@ app.post("/", async (c) => {
 			// La batería vuelve a ser trabajo sólo si esto es otra compra: si es
 			// el mismo aviso, la que estaba abierta sigue abierta y la cerrada
 			// sigue cerrada.
-			await db
+			const actualizada = await db
 				.update(investorContractBatches)
 				.set({
 					investorName: inversionista.nombre,
@@ -223,10 +262,24 @@ app.post("/", async (c) => {
 							? { emailThreadId: compra.correoId }
 							: {}),
 				})
-				.where(eq(investorContractBatches.id, existente.id));
+				.where(
+					and(
+						eq(investorContractBatches.id, existente.id),
+						// Dos avisos de la misma compra nueva pueden leer los dos la
+						// aceptación vieja. Sólo uno la registra; el otro no encuentra la
+						// fila y sigue como aviso repetido, sin volver a notificar.
+						...(otraCompra
+							? [lt(investorContractBatches.acceptedAt, aceptadaEn)]
+							: []),
+					),
+				)
+				.returning({ id: investorContractBatches.id });
+
+			if (otraCompra && actualizada.length === 0) otraCompra = false;
 		}
 
 		avisar = otraCompra;
+		avisarAunqueYaHayaAviso = otraCompra;
 		console.log(
 			`[cartera-compra-aceptada] ${otraCompra ? "otra compra sobre los mismos créditos" : "aviso repetido"} para ${inversionista.nombre} (${purchaseKey})`,
 		);
@@ -257,25 +310,30 @@ app.post("/", async (c) => {
 
 	const autor = avisar ? await autorDeLaNotificacion() : undefined;
 	if (autor) {
-		await createNotification({
-			titulo: `Contratos pendientes: ${inversionista.nombre}`,
-			descripcion:
-				`Se aceptó la compra de cartera por Q${compra.montoTotal} ` +
-				`(${compra.creditos.length} crédito(s)). Falta emitir sus contratos.`,
-			type: "action_required",
-			createdBy: autor.id,
-			createdByRole: autor.role,
-			assignedToRole: ROLES.JURIDICO,
-			redirectPage: "investor_contracts",
-			// Con esto la notificación trae el botón que lleva directo a la
-			// batería; sin `relatedEntityId` la pantalla no arma el enlace y el
-			// aviso queda siendo sólo un texto.
-			//
-			// El enum de entidades no tiene una para la batería. Se usa la más
-			// cercana: lo que queda pendiente son contratos. Nadie filtra por ella
-			// fuera de contabilidad, que mira las de oportunidades.
-			relatedEntityType: "contract",
-			relatedEntityId: batchId as string,
+		await avisarAJuridico(batchId as string, {
+			// Otra compra sobre la misma batería ya tiene el aviso de la anterior,
+			// y ésta necesita el suyo.
+			aunqueYaHayaAviso: avisarAunqueYaHayaAviso,
+			notificacion: {
+				titulo: `Contratos pendientes: ${inversionista.nombre}`,
+				descripcion:
+					`Se aceptó la compra de cartera por Q${compra.montoTotal} ` +
+					`(${compra.creditos.length} crédito(s)). Falta emitir sus contratos.`,
+				type: "action_required",
+				createdBy: autor.id,
+				createdByRole: autor.role,
+				assignedToRole: ROLES.JURIDICO,
+				redirectPage: "investor_contracts",
+				// Con esto la notificación trae el botón que lleva directo a la
+				// batería; sin `relatedEntityId` la pantalla no arma el enlace y el
+				// aviso queda siendo sólo un texto.
+				//
+				// El enum de entidades no tiene una para la batería. Se usa la más
+				// cercana: lo que queda pendiente son contratos. Nadie filtra por ella
+				// fuera de contabilidad, que mira las de oportunidades.
+				relatedEntityType: "contract",
+				relatedEntityId: batchId as string,
+			},
 		});
 	} else {
 		console.warn(

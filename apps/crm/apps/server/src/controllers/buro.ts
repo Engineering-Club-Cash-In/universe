@@ -6,10 +6,12 @@ import { db } from "@/db";
 import { renapInfo } from "@/db/schema";
 import {
 	type EstudioPersonaJSON,
+	type FichaPrincipalPersona,
 	infornetPersonaCache,
 } from "@/db/schema/buro";
 import { eqDpi } from "@/lib/dpi-lookup";
 import { CONSULTAR_RENAP } from "@/lib/renap-config";
+import { mapearFichaInfornetARenap } from "@/lib/renap-desde-infornet";
 import { normalizarDpi } from "@/utils/cui-validation";
 
 // 🔥 Instanciar el cliente con las credenciales del .env
@@ -90,6 +92,12 @@ export class InfornetController {
 				console.log(
 					`   📅 Consultado originalmente: ${cache[0].consultadoEn.toLocaleDateString()}`,
 				);
+				if (!CONSULTAR_RENAP && personaRenap.length === 0) {
+					await this.completarRenapDesdeInfornet(
+						dpi,
+						cache[0].estudioCompleto.fichaPrincipal,
+					);
+				}
 				return {
 					success: true,
 					data: cache[0].estudioCompleto,
@@ -133,6 +141,10 @@ export class InfornetController {
 			// 3.3 Guardar en caché (30 días)
 			console.log("   💾 3.3. Guardando en caché...");
 			await this.guardarEnCache(dpi, estudio, personaRenap[0]);
+
+			if (!CONSULTAR_RENAP && personaRenap.length === 0) {
+				await this.completarRenapDesdeInfornet(dpi, estudio.fichaPrincipal);
+			}
 
 			console.log("\n✅ ========== ESTUDIO COMPLETADO ==========\n");
 
@@ -199,6 +211,27 @@ export class InfornetController {
 		} catch (error) {
 			console.error("      ❌ Error en obtenerEstudioDesdeAPI:", error);
 			return null;
+		}
+	}
+
+	/** Solo inserta: un registro existente de RENAP nunca se pisa, y un fallo no rompe la consulta de Buró */
+	private async completarRenapDesdeInfornet(
+		dpi: string,
+		ficha: FichaPrincipalPersona,
+	): Promise<void> {
+		try {
+			const persona = mapearFichaInfornetARenap(dpi, ficha);
+			if (!persona) return;
+
+			await db
+				.insert(renapInfo)
+				.values(persona)
+				.onConflictDoNothing({ target: renapInfo.dpi });
+		} catch (error) {
+			console.error(
+				"   ❌ No se pudo completar renapinfo desde Infornet:",
+				error,
+			);
 		}
 	}
 

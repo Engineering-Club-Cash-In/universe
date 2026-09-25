@@ -499,7 +499,7 @@ export function ReferenciasView({ casoCobroId }: ReferenciasViewProps) {
 											</div>
 										</div>
 										{h.tipo === "telefono" &&
-											(h.agregadoAlCasoAt ? (
+											(h.enTelefonosDelCaso ? (
 												<Badge
 													variant="outline"
 													className="shrink-0 border-emerald-200 bg-emerald-50 font-normal text-emerald-700"

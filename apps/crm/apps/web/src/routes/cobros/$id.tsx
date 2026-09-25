@@ -21,13 +21,15 @@ import {
 	MessageSquare,
 	Pencil,
 	Phone,
+	PhoneCall,
 	Play,
+	Plus,
 	Shield,
 	Tag,
+	TriangleAlert,
 	Upload,
 	User,
 	Users,
-	TriangleAlert,
 	X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -48,6 +50,10 @@ import { Pagination } from "@/components/cobros/pagination";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
+import {
+	TelefonosEditor,
+	telefonosParaGuardar,
+} from "@/components/cobros/telefonos-editor";
 import { ContactoModal } from "@/components/contacto-modal";
 import {
 	OpportunityDetailModal,
@@ -530,6 +536,9 @@ function RouteComponent() {
 
 	// Estado de edición de contacto
 	const [isEditingContact, setIsEditingContact] = useState(false);
+	// Controlada para que "Más números para localizarlo" (tarjeta de contacto)
+	// pueda llevar a la pestaña Referencias.
+	const [tabActiva, setTabActiva] = useState("resumen");
 	const [contactForm, setContactForm] = useState({
 		telefonoPrincipal: [] as string[],
 		telefonoAlternativo: [] as string[],
@@ -1075,6 +1084,10 @@ function RouteComponent() {
 			}),
 		onSuccess: () => {
 			toast.success("Información de contacto actualizada");
+			// Los teléfonos nuevos de Referencias se marcan contra los del caso.
+			queryClient.invalidateQueries({
+				queryKey: orpc.getReferenciasCaso.key(),
+			});
 			queryClient.invalidateQueries(
 				orpc.getDetallesCreditoCarteraBack.queryOptions({
 					input: { creditoId: id },
@@ -1167,6 +1180,36 @@ function RouteComponent() {
 	const contactos = historialContactosPagina.data?.contactos ?? [];
 	const totalContactos = historialContactosPagina.data?.total ?? 0;
 	const totalReferencias = referenciasCaso.data?.referencias.length ?? 0;
+	// CB-036: acceso directo en la tarjeta de contacto. Teléfonos del cliente
+	// que se consiguieron (de una referencia o sueltos) y que todavía no están
+	// entre los del caso, y cuántas referencias tienen a quién llamar.
+	const ultimos8 = (t: string) => t.replace(/\D/g, "").slice(-8);
+	const telefonosDelCaso = new Set(
+		[caso.telefonoPrincipal, caso.telefonoAlternativo]
+			.flatMap((v) => String(v || "").split(","))
+			.map((t) => ultimos8(t))
+			.filter(Boolean),
+	);
+	const telefonosNuevosCliente = (referenciasCaso.data?.hallazgos ?? []).filter(
+		(h, i, lista) =>
+			h.tipo === "telefono" &&
+			!h.enTelefonosDelCaso &&
+			!telefonosDelCaso.has(ultimos8(h.valor)) &&
+			lista.findIndex(
+				(otro) =>
+					otro.tipo === "telefono" &&
+					ultimos8(otro.valor) === ultimos8(h.valor),
+			) === i,
+	);
+	const referenciasConTelefono = (
+		referenciasCaso.data?.referencias ?? []
+	).filter((r) => r.telefonos.length > 0).length;
+	const textoReferencias =
+		referenciasConTelefono === totalReferencias
+			? totalReferencias === 1
+				? "1 referencia con teléfono"
+				: `${totalReferencias} referencias con teléfono`
+			: `${totalReferencias === 1 ? "1 referencia" : `${totalReferencias} referencias`} (${referenciasConTelefono} con teléfono)`;
 	const contactosPorPagina = historialContactosPagina.data?.porPagina ?? 10;
 	const cuotas = historialPagos.data || [];
 	const recuperacion = recuperacionInfo.data;
@@ -1450,8 +1493,8 @@ function RouteComponent() {
 						</p>
 						<p className="text-red-800 text-sm dark:text-red-300">
 							El crédito acumuló 5 cuotas atrasadas estando en recuperación de
-							vehículo, así que subió solo a jurídico. Sigue en recuperación:
-							el estado no se levanta con un convenio, solo pagando todo lo que
+							vehículo, así que subió solo a jurídico. Sigue en recuperación: el
+							estado no se levanta con un convenio, solo pagando todo lo que
 							debe.
 						</p>
 					</div>
@@ -1480,9 +1523,10 @@ function RouteComponent() {
 							{" desde el "}
 							{(() => {
 								const [y, m, d] = alertaConv.fecha_vencimiento.split("-");
-								return y && m && d ? `${d}/${m}/${y}` : alertaConv.fecha_vencimiento;
-							})()}
-							. El cliente ya había negociado este acuerdo.
+								return y && m && d
+									? `${d}/${m}/${y}`
+									: alertaConv.fecha_vencimiento;
+							})()}. El cliente ya había negociado este acuerdo.
 						</p>
 					</div>
 				</div>
@@ -1964,7 +2008,9 @@ function RouteComponent() {
 												<div className="space-y-3">
 													<p>
 														El crédito pasa a{" "}
-														<strong>B4 · Última Instancia / Pre Jurídico</strong>{" "}
+														<strong>
+															B4 · Última Instancia / Pre Jurídico
+														</strong>{" "}
 														sin importar cuántas cuotas lleve atrasadas, y queda
 														con el asesor que cubre ese bucket.
 													</p>
@@ -1978,8 +2024,8 @@ function RouteComponent() {
 													<p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
 														El estado se levanta <strong>solo</strong> si el
 														cliente paga todo lo que debe —cuotas vencidas y
-														mora— y contabilidad valida ese pago. Un convenio
-														no lo levanta.
+														mora— y contabilidad valida ese pago. Un convenio no
+														lo levanta.
 													</p>
 												</div>
 											</AlertDialogDescription>
@@ -2042,9 +2088,9 @@ function RouteComponent() {
 											<AlertDialogDescription asChild>
 												<div className="space-y-3">
 													<p>
-														El acuerdo deja de estar vigente y el crédito
-														vuelve a <strong>MOROSO</strong>, con la mora
-														recalculada sobre las cuotas que realmente debe.
+														El acuerdo deja de estar vigente y el crédito vuelve
+														a <strong>MOROSO</strong>, con la mora recalculada
+														sobre las cuotas que realmente debe.
 													</p>
 													<p>
 														El convenio <strong>no se borra</strong>: su plan de
@@ -2150,7 +2196,7 @@ function RouteComponent() {
 			    (3.1k líneas de scroll). Se agrupan por intención de uso —
 			    gestionar hoy / revisar qué pasó / ver la deuda / el activo —
 			    sin quitar ninguno. */}
-			<Tabs defaultValue="resumen" className="w-full">
+			<Tabs value={tabActiva} onValueChange={setTabActiva} className="w-full">
 				<TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
 					<TabsTrigger value="resumen">Resumen</TabsTrigger>
 					<TabsTrigger value="historial">
@@ -2753,8 +2799,10 @@ function RouteComponent() {
 														.split(",")
 														.map((t) => t.trim())
 														.filter(Boolean);
+												const principales = parseTels(caso.telefonoPrincipal);
 												setContactForm({
-													telefonoPrincipal: parseTels(caso.telefonoPrincipal),
+													telefonoPrincipal:
+														principales.length > 0 ? principales : [""],
 													telefonoAlternativo: parseTels(
 														caso.telefonoAlternativo,
 													),
@@ -2770,103 +2818,81 @@ function RouteComponent() {
 								</CardHeader>
 								<CardContent className="space-y-4">
 									{isEditingContact ? (
-										<div className="space-y-3">
-											<div className="space-y-1">
-												<Label>Teléfono Principal *</Label>
-												<div className="flex flex-wrap gap-1.5">
-													{contactForm.telefonoPrincipal.map((tel, i) => (
-														<Badge
-															key={`principal-${tel}-${i}`}
-															variant="secondary"
-															className="gap-1 pr-1 pl-2"
-														>
-															{tel}
-															<button
-																type="button"
-																onClick={() =>
-																	setContactForm((f) => ({
-																		...f,
-																		telefonoPrincipal:
-																			f.telefonoPrincipal.filter(
-																				(_, idx) => idx !== i,
-																			),
-																	}))
-																}
-																className="rounded-full hover:bg-muted"
-															>
-																<X className="h-3 w-3" />
-															</button>
-														</Badge>
-													))}
-												</div>
-												<Input
-													placeholder="Agregar teléfono y presionar Enter"
-													onKeyDown={(e) => {
-														if (e.key === "Enter") {
-															e.preventDefault();
-															const val = e.currentTarget.value.trim();
-															if (val) {
-																setContactForm((f) => ({
-																	...f,
-																	telefonoPrincipal: [
-																		...f.telefonoPrincipal,
-																		val,
-																	],
-																}));
-																e.currentTarget.value = "";
-															}
-														}
-													}}
-												/>
-											</div>
-											<div className="space-y-1">
-												<Label>Teléfono Alternativo</Label>
-												<div className="flex flex-wrap gap-1.5">
-													{contactForm.telefonoAlternativo.map((tel, i) => (
-														<Badge
-															key={`alt-${tel}-${i}`}
-															variant="secondary"
-															className="gap-1 pr-1 pl-2"
-														>
-															{tel}
-															<button
-																type="button"
-																onClick={() =>
-																	setContactForm((f) => ({
-																		...f,
-																		telefonoAlternativo:
-																			f.telefonoAlternativo.filter(
-																				(_, idx) => idx !== i,
-																			),
-																	}))
-																}
-																className="rounded-full hover:bg-muted"
-															>
-																<X className="h-3 w-3" />
-															</button>
-														</Badge>
-													))}
-												</div>
-												<Input
-													placeholder="Agregar teléfono y presionar Enter"
-													onKeyDown={(e) => {
-														if (e.key === "Enter") {
-															e.preventDefault();
-															const val = e.currentTarget.value.trim();
-															if (val) {
-																setContactForm((f) => ({
-																	...f,
-																	telefonoAlternativo: [
-																		...f.telefonoAlternativo,
-																		val,
-																	],
-																}));
-																e.currentTarget.value = "";
-															}
-														}
-													}}
-												/>
-											</div>
+										<div className="space-y-4">
+											<TelefonosEditor
+												id="contacto-tel-principal"
+												label="Teléfono principal"
+												requerido
+												valores={contactForm.telefonoPrincipal}
+												onChange={(valores) =>
+													setContactForm((f) => ({
+														...f,
+														telefonoPrincipal: valores,
+													}))
+												}
+											/>
+											<TelefonosEditor
+												id="contacto-tel-alternativo"
+												label="Teléfonos alternativos"
+												valores={contactForm.telefonoAlternativo}
+												onChange={(valores) =>
+													setContactForm((f) => ({
+														...f,
+														telefonoAlternativo: valores,
+													}))
+												}
+											/>
+											{(() => {
+												// CB-036: los teléfonos del cliente que se consiguieron por
+												// referencias, a un clic de sumarse.
+												const enFormulario = new Set(
+													[
+														...contactForm.telefonoPrincipal,
+														...contactForm.telefonoAlternativo,
+													].map((t) => ultimos8(t)),
+												);
+												const sugeridos = telefonosNuevosCliente.filter(
+													(h) => !enFormulario.has(ultimos8(h.valor)),
+												);
+												if (sugeridos.length === 0) return null;
+												return (
+													<div className="space-y-1.5 rounded-lg border border-dashed bg-muted/30 p-3">
+														<p className="text-muted-foreground text-xs">
+															Se consiguieron estos números del cliente:
+														</p>
+														<div className="flex flex-wrap gap-1.5">
+															{sugeridos.map((h) => (
+																<Button
+																	key={h.id}
+																	type="button"
+																	variant="outline"
+																	size="sm"
+																	className="h-7 px-2"
+																	title={
+																		h.referenciaNombre
+																			? `Lo dio ${h.referenciaNombre}`
+																			: undefined
+																	}
+																	onClick={() =>
+																		setContactForm((f) => ({
+																			...f,
+																			telefonoAlternativo: [
+																				...telefonosParaGuardar(
+																					f.telefonoAlternativo,
+																				),
+																				h.valor,
+																			],
+																		}))
+																	}
+																>
+																	<Plus className="mr-1 h-3.5 w-3.5" />
+																	{h.valor}
+																</Button>
+															))}
+														</div>
+													</div>
+												);
+											})()}
 											<div className="space-y-1">
 												<Label htmlFor="contact-email">Email</Label>
 												<Input
@@ -2892,12 +2918,16 @@ function RouteComponent() {
 															)
 														)
 															return;
+														const alternativos = telefonosParaGuardar(
+															contactForm.telefonoAlternativo,
+														);
 														updateContactMutation.mutate({
-															telefonoPrincipal:
-																contactForm.telefonoPrincipal.join(", "),
+															telefonoPrincipal: telefonosParaGuardar(
+																contactForm.telefonoPrincipal,
+															).join(", "),
 															telefonoAlternativo:
-																contactForm.telefonoAlternativo.length > 0
-																	? contactForm.telefonoAlternativo.join(", ")
+																alternativos.length > 0
+																	? alternativos.join(", ")
 																	: undefined,
 															emailContacto:
 																contactForm.emailContacto || undefined,
@@ -2905,7 +2935,8 @@ function RouteComponent() {
 													}}
 													disabled={
 														updateContactMutation.isPending ||
-														contactForm.telefonoPrincipal.length === 0
+														telefonosParaGuardar(contactForm.telefonoPrincipal)
+															.length === 0
 													}
 												>
 													{updateContactMutation.isPending
@@ -2991,6 +3022,50 @@ function RouteComponent() {
 											</div>
 										</div>
 									)}
+									{!isEditingContact &&
+										(telefonosNuevosCliente.length > 0 ||
+											totalReferencias > 0) && (
+											<div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-3">
+												<p className="flex items-center gap-2 font-medium text-sm">
+													<PhoneCall className="h-4 w-4 text-muted-foreground" />
+													Más números para localizarlo
+												</p>
+												{telefonosNuevosCliente.length > 0 && (
+													<div className="space-y-1">
+														<p className="text-muted-foreground text-xs">
+															Nuevos del cliente, todavía no están en sus
+															teléfonos
+														</p>
+														<div className="flex flex-wrap gap-1.5">
+															{telefonosNuevosCliente.map((h) => (
+																<a
+																	key={h.id}
+																	href={`tel:${h.valor.replace(/[^0-9+]/g, "")}`}
+																	title={
+																		h.referenciaNombre
+																			? `Lo dio ${h.referenciaNombre}`
+																			: undefined
+																	}
+																	className="inline-flex items-center rounded-md border border-dashed px-2 py-0.5 font-medium text-primary text-sm hover:underline"
+																>
+																	{h.valor}
+																</a>
+															))}
+														</div>
+													</div>
+												)}
+												{totalReferencias > 0 && (
+													<button
+														type="button"
+														onClick={() => setTabActiva("referencias")}
+														className="inline-flex items-center gap-1 text-primary text-sm hover:underline"
+													>
+														{textoReferencias}
+														<ChevronRight className="h-4 w-4" />
+													</button>
+												)}
+											</div>
+										)}
 								</CardContent>
 							</Card>
 						</div>
@@ -4149,13 +4224,13 @@ function RouteComponent() {
 								</Card>
 							)}
 
-						{/* CB-033 — Historial de aprobaciones/rechazos del convenio.
+							{/* CB-033 — Historial de aprobaciones/rechazos del convenio.
 						    FUERA del `mostrarConvenio` de arriba a propósito: un rechazo
 						    BORRA el convenio, y ese es justo el caso que hay que poder
 						    auditar. El componente se oculta solo si no hay decisiones. */}
-						<ConvenioDecisionesHistorial
-							casoCobroId={casoDetails.data?.id || ""}
-						/>
+							<ConvenioDecisionesHistorial
+								casoCobroId={casoDetails.data?.id || ""}
+							/>
 						</div>
 					</div>
 				</TabsContent>

@@ -358,7 +358,20 @@ export const referenciasCobrosRouter = {
 				enlazado: ctx.leadId !== null,
 				referencias,
 				contactos,
-				hallazgos,
+				// Un teléfono encontrado puede haber llegado a los del caso por el
+				// botón o porque el asesor lo escribió al editar el contacto: en los
+				// dos casos ya no hay nada que agregar.
+				hallazgos: hallazgos.map((h) => ({
+					...h,
+					enTelefonosDelCaso:
+						h.tipo === "telefono" &&
+						(h.agregadoAlCasoAt !== null ||
+							agregarATelefonosDelCaso(
+								ctx.telefonoPrincipal,
+								ctx.telefonoAlternativo,
+								h.valor,
+							) === null),
+				})),
 			};
 		}),
 

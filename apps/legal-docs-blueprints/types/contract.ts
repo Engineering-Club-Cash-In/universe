@@ -741,6 +741,11 @@ export interface ContractGenerationResponse {
   docx_url?: string;
   pdf_url?: string;
   signing_links?: string[];
+  /**
+   * Cómo se firma este contrato. Los `fisica` nunca llevan `signing_links`:
+   * no es una falla, es que se firman en papel.
+   */
+  signatureMode?: SignatureMode;
   /** Proveedor de firma electrónica usado (weetrust | documenso) */
   signingProvider?: 'weetrust' | 'documenso';
   /**
@@ -844,6 +849,17 @@ export enum SignerRole {
   /** Vendedor del vehículo. */
   VENDEDOR = 'VENDEDOR',
 }
+
+/**
+ * Cómo se firma un contrato.
+ *
+ * - `electronica`: se sube a WeeTrust y cada firmante recibe su link.
+ * - `fisica`: se imprime y se firma en papel. No se manda a ningún proveedor
+ *   de firma electrónica. Hoy el único caso es la declaración de vendedor: del
+ *   vendedor tenemos nombre y DPI, pero no correo, así que no hay a dónde
+ *   mandarle un link.
+ */
+export type SignatureMode = 'electronica' | 'fisica';
 
 /**
  * Tipo de verificación de identidad que WeeTrust le exige al firmante.

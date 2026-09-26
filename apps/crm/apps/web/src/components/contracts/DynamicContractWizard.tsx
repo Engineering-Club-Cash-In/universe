@@ -30,6 +30,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { esFirmaFisica } from "server/src/lib/contract-signature-mode";
 import { type ContractResult, ContractResults } from "./ContractResults";
 
 // Types from API
@@ -1791,7 +1792,12 @@ export function DynamicContractWizard({
 						return {
 							contractType: doc.nombre_documento,
 							data: contractData as Record<string, string>,
-							signers: signers.length > 0 ? signers : undefined,
+							// Los contratos que se firman en papel no llevan firmantes: el
+							// entregable es el PDF para imprimir, no un link.
+							signers:
+								signers.length > 0 && !esFirmaFisica(doc.nombre_documento)
+									? signers
+									: undefined,
 							options: {
 								gender,
 								generatePdf: true,

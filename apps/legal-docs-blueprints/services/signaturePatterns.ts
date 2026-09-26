@@ -1,4 +1,9 @@
-import { ContractType, SignerRole, type ContractSigner } from '../types/contract';
+import {
+  ContractType,
+  SignerRole,
+  type ContractSigner,
+  type SignatureMode,
+} from '../types/contract';
 
 /**
  * Configuración de patrones de firma para cada tipo de contrato
@@ -29,6 +34,13 @@ export interface SignaturePatternConfig {
    * de inspeccionar los PDF generados (`scripts/inventario-firmas.ts`).
    */
   bloques?: SignatureBlock[];
+  /**
+   * Cómo se firma este contrato. Por defecto `electronica`.
+   *
+   * Un contrato `fisica` no se sube a WeeTrust: se genera, se guarda en R2 y
+   * jurídico lo imprime. No lleva firmantes ni links, y eso no es una falla.
+   */
+  firma?: SignatureMode;
   /**
    * Cuántas veces se repite la secuencia de `bloques` en el documento. Sirve
    * para los contratos que llevan el mismo juego de firmas más de una vez
@@ -137,8 +149,11 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
 
   },
 
+  // La firma el vendedor del vehículo, de quien sólo tenemos nombre y DPI: no
+  // hay correo al que mandarle un link, así que se imprime y se firma en papel.
   [ContractType.DECLARACION_DE_VENDEDOR]: {
     pattern: 'f)____________________________________',
+    firma: 'fisica',
     bloques: ['DEUDORES'],
     signerCount: 1,
     signers: ['Vendedor'],
@@ -356,6 +371,24 @@ export function getSignaturePattern(contractType: ContractType): SignaturePatter
 
   return config;
 }
+
+/**
+ * Cómo se firma un contrato: electrónicamente (WeeTrust) o en papel.
+ *
+ * Esta es la fuente de verdad. Quien la consulte no debe tratar la ausencia de
+ * links de firma en un contrato `fisica` como un error.
+ */
+export function getSignatureMode(contractType: ContractType): SignatureMode {
+  return signaturePatterns[contractType]?.firma ?? 'electronica';
+}
+
+/**
+ * Tipos de contrato que se firman en papel. Útil para el CRM, que necesita
+ * saberlo sin pedirle nada al generador.
+ */
+export const CONTRATOS_FIRMA_FISICA: ContractType[] = (
+  Object.keys(signaturePatterns) as ContractType[]
+).filter((tipo) => signaturePatterns[tipo].firma === 'fisica');
 
 /**
  * Error de calce entre los firmantes que nos pasaron y las líneas de firma del

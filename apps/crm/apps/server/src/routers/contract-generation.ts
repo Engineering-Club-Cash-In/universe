@@ -13,6 +13,7 @@ import {
 } from "../db/schema/legal-contracts";
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
+import { esFirmaFisica } from "../lib/contract-signature-mode";
 import { eqDpi } from "../lib/dpi-lookup";
 import { juridicoProcedure } from "../lib/orpc";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
@@ -61,15 +62,22 @@ const CONTRATOS_OBSERVADORES = (process.env.CONTRATOS_OBSERVADORES || "")
 	.filter(Boolean);
 
 /**
- * Completa los firmantes que manda el front con los que sólo conoce el servidor.
+ * Quiénes firman un contrato, completando lo que manda el front con lo que sólo
+ * conoce el servidor.
  *
- * El representante legal se agrega siempre: el generador sabe qué contratos lo
- * llevan (lo dice el layout de cada template) y descarta al firmante que no
- * corresponde, así que mandarlo de más no lo mete donde no va.
+ * El representante legal se agrega siempre que la firma sea electrónica: el
+ * generador sabe qué contratos lo llevan (lo dice el layout de cada template) y
+ * descarta al firmante que no corresponde, así que mandarlo de más no lo mete
+ * donde no va.
+ *
+ * Los contratos que se firman en papel no llevan firmantes: el entregable es el
+ * PDF, y mandar correos de gente que no va a recibir ningún link sólo ensucia.
  */
-function conRepresentanteLegal(
+function firmantesDelContrato(
+	contractType: string,
 	signers: ContractSigner[] | undefined,
 ): ContractSigner[] | undefined {
+	if (esFirmaFisica(contractType)) return undefined;
 	if (!signers || signers.length === 0) return signers;
 	// El representante legal lo pone siempre el servidor. Si viniera del
 	// navegador, cualquiera podría mandar su propio correo con ese rol y
@@ -541,8 +549,13 @@ export const contractGenerationRouter = {
 				// Derivar isPlural automáticamente desde deudoresAdicionales
 				const contractsWithPlural = input.contracts.map((contract) => ({
 					...contract,
-					signers: conRepresentanteLegal(contract.signers),
-					observers: CONTRATOS_OBSERVADORES,
+					signers: firmantesDelContrato(
+						contract.contractType,
+						contract.signers,
+					),
+					observers: esFirmaFisica(contract.contractType)
+						? undefined
+						: CONTRATOS_OBSERVADORES,
 					options: {
 						...contract.options,
 						isPlural: (contract.data.deudoresAdicionales?.length ?? 0) > 0,
@@ -993,8 +1006,13 @@ export const contractGenerationRouter = {
 						// Los snapshots viejos sólo guardaron `emails`; el generador los
 						// sigue aceptando, pero los que ya traen roles se regeneran con
 						// el reparto correcto.
-						signers: conRepresentanteLegal(contract.signers),
-						observers: CONTRATOS_OBSERVADORES,
+						signers: firmantesDelContrato(
+							contract.contractType,
+							contract.signers,
+						),
+						observers: esFirmaFisica(contract.contractType)
+							? undefined
+							: CONTRATOS_OBSERVADORES,
 						options: {
 							...contract.options,
 							isPlural:

@@ -143,10 +143,19 @@ const app = new Elysia()
 
     // Generar el contrato
     console.log(`\n🚀 Generando contrato tipo: ${requestBody.contractType}`);
+    // `signers`, `observers` y `emails` viajan arriba en el request pero el
+    // generador los lee de las opciones. Sin pasarlos, este endpoint generaba
+    // el PDF sin ningún link de firma (el mismo agujero que tenía el batch).
     const result = await contractGenerator.generateContract(
       requestBody.contractType,
       requestBody.data,
-      requestBody.options
+      {
+        ...requestBody.options,
+        // Sin pisar lo que ya viniera dentro de `options`.
+        signers: requestBody.signers ?? requestBody.options?.signers,
+        observers: requestBody.observers ?? requestBody.options?.observers,
+        emails: requestBody.emails ?? requestBody.options?.emails,
+      }
     );
 
     // Responder según el resultado

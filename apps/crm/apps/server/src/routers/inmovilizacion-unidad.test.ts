@@ -56,6 +56,7 @@ let resolverPendientesLlamadas: string[] = [];
 let unidadReactivadaNotificada = 0;
 let resolverAvisoLlamarClienteLlamadas: string[] = [];
 let notificarLlamarClienteLlamadas: { asesorUserId: string }[] = [];
+let reactivacionesObsoletasMock: { id: string }[] = [];
 // bloquearUnidadFisica (review de Codex, PR #1758): cada llamada a
 // tx.execute() dentro de una transacción — para confirmar que el advisory
 // lock se adquiere, y ANTES que cualquier SELECT/UPDATE sobre una fila.
@@ -118,19 +119,19 @@ function mockDb() {
 					};
 				}
 				if (tabla === inmovilizacionesUnidad && campos && "id" in campos) {
-					// filaSigueVigente (dentro de la transacción, review de Codex):
-					// select({ id }).from(inmovilizacionesUnidad).where().for("update").
-					// El mock in-memory no simula el lock en sí (no hay concurrencia
-					// real acá), solo deja pasar la llamada — el resultado no se lee.
+					// Usado por:
+					// 1. filaSigueVigente: select({ id }).from(...).where().for("update")
+					// 2. reactivacionesObsoletas en marcarEjecutada: select({ id }).from(...).where(...)
 					return {
-						where: () => ({
-							for: () => {
-								executeLlamadas.push("select_for_update_fila");
-								return Promise.resolve([
-									{ id: (inmovilizacionExistente as { id?: string })?.id },
-								]);
-							},
-						}),
+						where: () =>
+							Object.assign(Promise.resolve(reactivacionesObsoletasMock), {
+								for: () => {
+									executeLlamadas.push("select_for_update_fila");
+									return Promise.resolve([
+										{ id: (inmovilizacionExistente as { id?: string })?.id },
+									]);
+								},
+							}),
 					};
 				}
 				if (tabla === inmovilizacionesUnidad && campos === undefined) {
@@ -330,6 +331,7 @@ function reset() {
 	resolverPendientesLlamadas = [];
 	unidadReactivadaNotificada = 0;
 	resolverAvisoLlamarClienteLlamadas = [];
+	reactivacionesObsoletasMock = [];
 	executeLlamadas = [];
 }
 
@@ -1141,6 +1143,32 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			{ context: ctx("cobros_supervisor") },
 		);
 		expect(resolverAvisoLlamarClienteLlamadas).toEqual([]);
+	});
+
+	it("marcarEjecutada de un apagado resuelve avisos de reactivaciones previas pendientes de llamada", async () => {
+		const REACTIVACION_OBSOLETA_ID = "77777777-7777-7777-7777-777777777777";
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			inmovilizacionOrigenId: null,
+		};
+		reactivacionesObsoletasMock = [{ id: REACTIVACION_OBSOLETA_ID }];
+
+		await call(
+			inmovilizacionUnidadRouter.marcarEjecutada,
+			{ id: INMOV_ID },
+			{ context: ctx("cobros_supervisor") },
+		);
+
+		expect(resolverAvisoLlamarClienteLlamadas).toEqual([
+			REACTIVACION_OBSOLETA_ID,
+		]);
 	});
 });
 

@@ -836,6 +836,44 @@ export const inmovilizacionUnidadRouter = {
 				await resolverAvisoLlamarCliente(inm.inmovilizacionOrigenId);
 			}
 
+			// Apagado posterior: deja la unidad inmovilizada y deja obsoleta
+			// cualquier llamada de confirmación pendiente de una reactivación
+			// anterior sobre la misma unidad física (o caso): la Ficha 360 ya
+			// no muestra el banner (pendienteLlamarReactivacion requiere unidad
+			// activa) y registrarLlamadaReactivacion la rechaza. Sin esto, el
+			// aviso "unidad reactivada" quedaba pending para siempre en
+			// notifications (la resolución manual está bloqueada para este
+			// tipo).
+			if (inm.accion === "apagado") {
+				const reactivacionesObsoletas = await (inm.wialonUnitId != null
+					? db
+							.select({ id: inmovilizacionesUnidad.id })
+							.from(inmovilizacionesUnidad)
+							.where(
+								and(
+									eq(inmovilizacionesUnidad.wialonUnitId, inm.wialonUnitId),
+									eq(inmovilizacionesUnidad.accion, "reactivacion"),
+									eq(inmovilizacionesUnidad.estado, "ejecutada"),
+									isNull(inmovilizacionesUnidad.llamadaContactoId),
+								),
+							)
+					: db
+							.select({ id: inmovilizacionesUnidad.id })
+							.from(inmovilizacionesUnidad)
+							.where(
+								and(
+									eq(inmovilizacionesUnidad.casoCobroId, inm.casoCobroId),
+									eq(inmovilizacionesUnidad.accion, "reactivacion"),
+									eq(inmovilizacionesUnidad.estado, "ejecutada"),
+									isNull(inmovilizacionesUnidad.llamadaContactoId),
+								),
+							));
+
+				for (const r of reactivacionesObsoletas) {
+					await resolverAvisoLlamarCliente(r.id);
+				}
+			}
+
 			const caso = await getCasoParaInmovilizacion(inm.casoCobroId);
 			// Fallback a quien solicitó: sin esto, un caso momentáneamente sin
 			// responsableCobros (columna nullable) se quedaba sin avisar a

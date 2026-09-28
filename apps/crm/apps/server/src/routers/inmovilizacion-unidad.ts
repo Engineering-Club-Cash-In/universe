@@ -209,13 +209,25 @@ export const inmovilizacionUnidadRouter = {
 				// Solo mientras la unidad SIGA apagada: si ya se reactivó (p. ej. el
 				// cliente pagó por ventanilla y se pidió la reactivación directa), el
 				// apagado viejo sin llamada ya no es una tarea pendiente.
+				//
+				// La fila vigente se busca en la UNIDAD FÍSICA (no en `historial`,
+				// que es solo de este caso): con una unidad compartida (D-10), el
+				// apagado/reactivación más reciente pudo haberse ejecutado desde
+				// OTRO caso. Buscar en `historial` encontraba el apagado VIEJO de
+				// ESTE caso (si lo tenía) en vez de `null`, y el asesor completaba
+				// una llamada sobre un apagado ya superado por eventos posteriores.
+				// Si la fila vigente es de otro caso, se suprime: este caso no
+				// puede enlazarle una llamada a una fila que no es suya. Review de
+				// Codex, PR #1758.
 				const estado = estadoUnidad(historialParaEstado);
 				const apagadoVigente =
 					estado === "inmovilizada"
-						? ultimaEjecutada(historial, "apagado")
+						? ultimaEjecutada(historialUnidadFisica, "apagado")
 						: null;
 				const pendienteLlamar =
-					apagadoVigente && apagadoVigente.llamadaContactoId === null
+					apagadoVigente &&
+					apagadoVigente.llamadaContactoId === null &&
+					apagadoVigente.casoCobroId === input.casoCobroId
 						? apagadoVigente
 						: null;
 
@@ -224,10 +236,12 @@ export const inmovilizacionUnidadRouter = {
 				// se volvió a apagar, esa llamada vieja no es tarea pendiente).
 				const reactivacionVigente =
 					estado === "activa"
-						? ultimaEjecutada(historial, "reactivacion")
+						? ultimaEjecutada(historialUnidadFisica, "reactivacion")
 						: null;
 				const pendienteLlamarReactivacion =
-					reactivacionVigente && reactivacionVigente.llamadaContactoId === null
+					reactivacionVigente &&
+					reactivacionVigente.llamadaContactoId === null &&
+					reactivacionVigente.casoCobroId === input.casoCobroId
 						? reactivacionVigente
 						: null;
 

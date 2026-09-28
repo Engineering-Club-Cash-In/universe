@@ -32,6 +32,15 @@ let inmovilizacionesInsertadas: Record<string, unknown>[] = [];
 let eventosInsertados: Record<string, unknown>[] = [];
 let inmovilizacionExistente: Record<string, unknown> | null = null;
 let historialCasoMock: Record<string, unknown>[] = [];
+// Por defecto igual a historialCasoMock (la mayoría de los tests no
+// necesitan distinguir unidad compartida). Los tests que SÍ prueban D-10
+// lo sobreescriben para simular un historial de UNIDAD FÍSICA distinto al
+// del caso — getHistorialCaso y getHistorialUnidadFisica tienen la misma
+// firma (select().from(tabla).where().orderBy()), así que el mock las
+// distingue por ORDEN de llamada dentro de getInmovilizacionesCaso: la
+// 1ra es getHistorialCaso, la 2da getHistorialUnidadFisica.
+let historialUnidadFisicaMock: Record<string, unknown>[] | null = null;
+let llamadasHistorialUnidad = 0;
 let updateDevuelveFila = true;
 let contactoExisteMock = true;
 let contactoInmovilizacionIdMock: string | null = null;
@@ -99,10 +108,18 @@ function mockDb() {
 				}
 				if (tabla === inmovilizacionesUnidad && campos === undefined) {
 					// getHistorialCaso: select().from(inmovilizacionesUnidad).where().orderBy()
+					// getHistorialUnidadFisica: misma firma — ver comentario de
+					// historialUnidadFisicaMock arriba.
 					// marcarEjecutada / registrarResultadoLlamada: select().from().where().limit()
+					llamadasHistorialUnidad++;
+					const esSegundaLlamada = llamadasHistorialUnidad % 2 === 0;
+					const historialDevuelto =
+						esSegundaLlamada && historialUnidadFisicaMock !== null
+							? historialUnidadFisicaMock
+							: historialCasoMock;
 					return {
 						where: () => ({
-							orderBy: async () => historialCasoMock,
+							orderBy: async () => historialDevuelto,
 							limit: async () =>
 								inmovilizacionExistente ? [inmovilizacionExistente] : [],
 						}),
@@ -261,6 +278,8 @@ function reset() {
 	eventosInsertados = [];
 	inmovilizacionExistente = null;
 	historialCasoMock = [];
+	historialUnidadFisicaMock = null;
+	llamadasHistorialUnidad = 0;
 	updateDevuelveFila = true;
 	contactoExisteMock = true;
 	contactoInmovilizacionIdMock = null;
@@ -794,6 +813,41 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			{ context: ctx("cobros") },
 		);
 		expect(res.estadoUnidad).toBe("activa");
+		expect(res.pendienteLlamar).toBeNull();
+	});
+
+	it("pendienteLlamar: null si el apagado vigente de la unidad física es de OTRO caso (D-10, review de Codex)", async () => {
+		// Caso A (CASO_ID, el que consulta) tiene un apagado viejo sin llamar.
+		// La unidad FÍSICA (compartida con otro caso, D-10) después tuvo una
+		// reactivación y un apagado nuevo — ambos ejecutados desde el OTRO
+		// caso. estadoUnidad ve la unidad física completa y da "inmovilizada"
+		// (correcto), pero pendienteLlamar NO debe apuntar al apagado viejo de
+		// A: ese ciclo ya quedó superado por eventos que A no puede resolver
+		// (la fila es de otro caso).
+		const OTRO_CASO_ID = "55555555-5555-5555-5555-555555555555";
+		historialCasoMock = [apagadoEjecutado()]; // solo lo que ve el Caso A
+		historialUnidadFisicaMock = [
+			{
+				...apagadoEjecutado(),
+				id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+				casoCobroId: OTRO_CASO_ID,
+				ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"),
+			},
+			{
+				...apagadoEjecutado(),
+				id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+				casoCobroId: OTRO_CASO_ID,
+				accion: "reactivacion",
+				ejecutadoAt: new Date("2026-09-24T10:00:00.000Z"),
+			},
+			apagadoEjecutado(), // el viejo de A, más antiguo que los dos de arriba
+		];
+		const res = await call(
+			inmovilizacionUnidadRouter.getInmovilizacionesCaso,
+			{ casoCobroId: CASO_ID },
+			{ context: ctx("cobros") },
+		);
+		expect(res.estadoUnidad).toBe("inmovilizada");
 		expect(res.pendienteLlamar).toBeNull();
 	});
 

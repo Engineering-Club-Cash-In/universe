@@ -61,6 +61,10 @@ let resolverPendientesLlamadas: string[] = [];
 let unidadReactivadaNotificada = 0;
 let resolverAvisoLlamarClienteLlamadas: string[] = [];
 let notificarLlamarClienteLlamadas: { asesorUserId: string }[] = [];
+let reasignarAvisosLlamarClienteLlamadas: {
+	casoCobroId: string;
+	nuevoResponsableUserId: string;
+}[] = [];
 let onNotificarLlamarCliente: (() => void) | null = null;
 let reactivacionesObsoletasMock: { id: string }[] = [];
 // bloquearUnidadFisica (review de Codex, PR #1758): cada llamada a
@@ -357,7 +361,12 @@ mock.module("../services/inmovilizacion-notif", () => ({
 	resolverPendientesInmovilizacion: async (id: string) => {
 		resolverPendientesLlamadas.push(id);
 	},
-	reasignarAvisosLlamarCliente: async () => undefined,
+	reasignarAvisosLlamarCliente: async (params: {
+		casoCobroId: string;
+		nuevoResponsableUserId: string;
+	}) => {
+		reasignarAvisosLlamarClienteLlamadas.push(params);
+	},
 }));
 // Mock propio de cartera-back-client y no spyOn sobre el módulo real: otros
 // archivos de test lo reemplazan con `mock.module` (global en bun), y en el
@@ -421,6 +430,7 @@ function reset() {
 	resolverAvisoLlamarClienteLlamadas = [];
 	reactivacionesObsoletasMock = [];
 	onNotificarLlamarCliente = null;
+	reasignarAvisosLlamarClienteLlamadas = [];
 	executeLlamadas = [];
 	spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 		bucket: 2,
@@ -1658,6 +1668,41 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 		// Se intentó notificar, pero al reconciliar se detectó el cambio y se resolvió
 		expect(notificarLlamarClienteLlamadas).toHaveLength(1);
 		expect(resolverAvisoLlamarClienteLlamadas).toEqual([INMOV_ID]);
+	});
+
+	it("marcarEjecutada reasigna el aviso si el caso fue reasignado concurrentemente durante el envío (review de Codex)", async () => {
+		responsableCasoMock = "asesor-original";
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			inmovilizacionOrigenId: null,
+		};
+
+		// Durante el envío de la notificación, el caso se reasigna a otro asesor
+		onNotificarLlamarCliente = () => {
+			responsableCasoMock = "asesor-nuevo";
+		};
+
+		await call(
+			inmovilizacionUnidadRouter.marcarEjecutada,
+			{ id: INMOV_ID },
+			{ context: ctx("cobros_supervisor") },
+		);
+
+		// Se notificó al original inicialmente
+		expect(notificarLlamarClienteLlamadas).toEqual([
+			{ asesorUserId: "asesor-original" },
+		]);
+		// Pero la reconciliación post-envío detectó el cambio de asesor y reasignó el aviso
+		expect(reasignarAvisosLlamarClienteLlamadas).toEqual([
+			{ casoCobroId: CASO_ID, nuevoResponsableUserId: "asesor-nuevo" },
+		]);
 	});
 });
 

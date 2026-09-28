@@ -48,6 +48,7 @@ import {
 	notificarInmovilizacionResuelta,
 	notificarLlamarCliente,
 	notificarUnidadReactivada,
+	reasignarAvisosLlamarCliente,
 	resolverAvisoLlamarCliente,
 	resolverPendientesInmovilizacion,
 } from "../services/inmovilizacion-notif";
@@ -1159,13 +1160,29 @@ export const inmovilizacionUnidadRouter = {
 						});
 					}
 
-					// Reconciliación: si entre la comprobación previa y el await de envío
-					// se completó una llamada o la acción quedó superada por un evento
-					// posterior en la unidad física, la resolución de avisos corrió
-					// antes de que esta fila existiera en notifications. Re-verificamos
-					// y cerramos el aviso si ya no aplica.
+					// Reconciliación:
+					// 1. Si entre la comprobación previa y el await de envío se completó una
+					// llamada o la acción quedó superada por un evento posterior en la unidad
+					// física, la resolución de avisos corrió antes de que esta fila existiera
+					// en notifications. Re-verificamos y cerramos el aviso si ya no aplica.
 					if (!(await necesitaAvisoLlamada(inm))) {
 						await resolverAvisoLlamarCliente(inm.id);
+					} else {
+						// 2. Si el caso fue reasignado concurrentemente entre la lectura temprana
+						// y el envío del aviso, el aviso recién creado quedó asignado al asesor
+						// anterior. Re-leer el caso actual y reasignar al responsable vigente.
+						// Review de Codex, PR #1758.
+						const casoPostEnvio = await getCasoParaInmovilizacion(
+							inm.casoCobroId,
+						);
+						const responsableActual =
+							casoPostEnvio?.responsableCobros ?? inm.solicitadoPor;
+						if (responsableActual && responsableActual !== asesorUserId) {
+							await reasignarAvisosLlamarCliente({
+								casoCobroId: inm.casoCobroId,
+								nuevoResponsableUserId: responsableActual,
+							});
+						}
 					}
 				}
 			}

@@ -85,7 +85,7 @@ function mockDb() {
 						}),
 					};
 				}
-				if (tabla === casosCobros && campos && "responsableCobros" in campos) {
+				if (tabla === casosCobros && campos && "clienteNombre" in campos) {
 					// getCasoParaInmovilizacion (con joins encadenados)
 					return {
 						leftJoin: () => ({
@@ -112,15 +112,19 @@ function mockDb() {
 					};
 				}
 				if (tabla === casosCobros) {
-					// assertAccesoCasoCobro: select({id}).from(casosCobros).where().limit()
+					// assertAccesoCasoCobro / assertAccesoLlamadaInmovilizacion:
 					return {
 						where: () => ({
-							limit: async () =>
-								rolUsuarioMock === "admin" ||
-								rolUsuarioMock === "cobros_supervisor" ||
-								responsableCasoMock === "user-test"
+							limit: async () => {
+								if (campos && "responsableCobros" in campos) {
+									return [{ id: CASO_ID, responsableCobros: responsableCasoMock }];
+								}
+								return rolUsuarioMock === "admin" ||
+									rolUsuarioMock === "cobros_supervisor" ||
+									responsableCasoMock === "user-test"
 									? [{ id: CASO_ID }]
-									: [],
+									: [];
+							},
 						}),
 					};
 				}
@@ -1019,6 +1023,21 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 		await expect(llamar("paga")).rejects.toMatchObject({ code: "CONFLICT" });
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
+
+	it("caso sin responsableCobros pero el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada (review de Codex)", async () => {
+		responsableCasoMock = null;
+		conApagadoVigente({ solicitadoPor: "user-test" });
+
+		const res = await llamar("paga");
+		expect(res.ok).toBe(true);
+	});
+
+	it("caso sin responsableCobros y el usuario NO es solicitadoPor: rechaza con NOT_FOUND (review de Codex)", async () => {
+		responsableCasoMock = null;
+		conApagadoVigente({ solicitadoPor: "otro-asesor" });
+
+		await expect(llamar("paga")).rejects.toMatchObject({ code: "NOT_FOUND" });
+	});
 });
 
 describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () => {
@@ -1437,6 +1456,25 @@ describe("CB-041 — registrarLlamadaReactivacion", () => {
 		];
 		await expect(llamar()).rejects.toMatchObject({ code: "CONFLICT" });
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("caso sin responsableCobros pero el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada (review de Codex)", async () => {
+		responsableCasoMock = null;
+		const fila = reactivacionEjecutada({ solicitadoPor: "user-test" });
+		inmovilizacionExistente = fila;
+		historialCasoMock = [fila];
+
+		const res = await llamar();
+		expect(res.ok).toBe(true);
+	});
+
+	it("caso sin responsableCobros y el usuario NO es solicitadoPor: rechaza con NOT_FOUND (review de Codex)", async () => {
+		responsableCasoMock = null;
+		const fila = reactivacionEjecutada({ solicitadoPor: "otro-asesor" });
+		inmovilizacionExistente = fila;
+		historialCasoMock = [fila];
+
+		await expect(llamar()).rejects.toMatchObject({ code: "NOT_FOUND" });
 	});
 });
 

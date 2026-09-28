@@ -38,6 +38,7 @@ import {
 	puedeSolicitar,
 } from "../lib/inmovilizacion-unidad";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import { ejecutarInmovilizacion } from "../services/inmovilizacion/ejecutor";
@@ -297,6 +298,59 @@ function esViolacionUnica(error: unknown): boolean {
 		codigo(error) === "23505" ||
 		codigo((error as { cause?: unknown } | null)?.cause) === "23505"
 	);
+}
+
+/**
+ * Verifica que el usuario tenga acceso para registrar la llamada de una
+ * inmovilización ejecutada (`registrarResultadoLlamada` o
+ * `registrarLlamadaReactivacion`).
+ *
+ * El caso normal exige ser el asesor asignado al caso (`responsableCobros`), o
+ * tener un rol con visibilidad completa (supervisores/admin). Sin embargo, si el
+ * caso quedó sin responsable asignado (`responsableCobros == null`),
+ * `marcarEjecutada` enrutó el aviso de llamada a `inm.solicitadoPor` como
+ * fallback: autorizar a ese usuario para registrar la llamada evita que la
+ * tarea quede permanentemente trabada. Review de Codex.
+ */
+async function assertAccesoLlamadaInmovilizacion(
+	inm: { casoCobroId: string; solicitadoPor: string | null },
+	userId: string,
+	userRole: string,
+): Promise<void> {
+	if (PERMISSIONS.canViewAllCasosCobros(userRole)) return;
+
+	const [caso] = await db
+		.select({
+			id: casosCobros.id,
+			responsableCobros: casosCobros.responsableCobros,
+		})
+		.from(casosCobros)
+		.where(eq(casosCobros.id, inm.casoCobroId))
+		.limit(1);
+
+	if (!caso) {
+		throw new ORPCError("NOT_FOUND", {
+			message: "Caso de cobro no encontrado o sin acceso.",
+		});
+	}
+
+	// 1. Asesor asignado al caso
+	if (caso.responsableCobros && caso.responsableCobros === userId) {
+		return;
+	}
+
+	// 2. Fallback: caso sin asesor asignado y el usuario es quien solicitó la acción
+	if (
+		!caso.responsableCobros &&
+		inm.solicitadoPor &&
+		inm.solicitadoPor === userId
+	) {
+		return;
+	}
+
+	throw new ORPCError("NOT_FOUND", {
+		message: "Caso de cobro no encontrado o sin acceso.",
+	});
 }
 
 export const inmovilizacionUnidadRouter = {
@@ -1019,8 +1073,8 @@ export const inmovilizacionUnidadRouter = {
 				});
 			}
 
-			await assertAccesoCasoCobro(
-				inm.casoCobroId,
+			await assertAccesoLlamadaInmovilizacion(
+				inm,
 				context.userId,
 				context.userRole,
 			);
@@ -1267,8 +1321,8 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 			});
 		}
 
-		await assertAccesoCasoCobro(
-			inm.casoCobroId,
+		await assertAccesoLlamadaInmovilizacion(
+			inm,
 			context.userId,
 			context.userRole,
 		);

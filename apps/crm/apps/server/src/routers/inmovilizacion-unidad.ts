@@ -891,6 +891,9 @@ export const inmovilizacionUnidadRouter = {
 				});
 			}
 
+			let motivoFalloPrecondicion: string | null = null;
+			let detalleFalloPrecondicion: Record<string, unknown> | undefined;
+
 			// Si la acción es apagado, revalidar que el crédito siga en mora B2/B3:
 			// si el cliente pagó entre la aprobación y la ejecución, el crédito bajó
 			// a B0/B1 (o salió del funnel) y no debe apagarse el vehículo. Review de Codex.
@@ -907,12 +910,17 @@ export const inmovilizacionUnidadRouter = {
 						error,
 					);
 				}
-				if (bucket == null || !BUCKETS_INMOVILIZACION.includes(bucket)) {
-					const message =
-						bucket == null
-							? "No se pudo confirmar el bucket del crédito en cartera. Intentá de nuevo en unos minutos."
-							: `El crédito ya no se encuentra en mora B2/B3 (está en B${bucket}). El apagado ya no aplica.`;
-					throw new ORPCError("CONFLICT", { message });
+				if (bucket == null) {
+					// Fallo transitorio de red/timeout con cartera-back: se rechaza la
+					// ejecución pero no se cancela la aprobación para permitir reintentar.
+					throw new ORPCError("CONFLICT", {
+						message:
+							"No se pudo confirmar el bucket del crédito en cartera. Intentá de nuevo en unos minutos.",
+					});
+				}
+				if (!BUCKETS_INMOVILIZACION.includes(bucket)) {
+					motivoFalloPrecondicion = `El crédito ya no se encuentra en mora B2/B3 (está en B${bucket}). El apagado ya no aplica.`;
+					detalleFalloPrecondicion = { bucket };
 				}
 			}
 
@@ -929,45 +937,67 @@ export const inmovilizacionUnidadRouter = {
 					wialonUnitId: inm.wialonUnitId,
 				});
 
-				// Re-validar la vinculación Wialon del vehículo bajo lock: si el
-				// GPS fue reasignado a otro vehículo o desvinculado después de que
-				// la solicitud fue aprobada (por ejemplo, vía `reasignarUnidad` o
-				// `vincularUnidadWialon`), ejecutar la solicitud aplicaría la
-				// acción sobre el GPS ahora instalado en el vehículo de otro
-				// cliente. Review de Codex.
-				if (!inm.vehicleId) {
-					throw new ORPCError("CONFLICT", {
-						message:
-							"El vehículo asociado a la solicitud ya no existe o fue desasociado.",
-					});
-				}
-
 				// Re-validar la vinculación Wialon del vehículo bajo lock (FOR UPDATE):
 				// el lock de fila sobre vehicles serializa contra vincularUnidadWialon
 				// (que toma lock exclusivo al reasignar la unidad del vehículo),
 				// evitando que el GPS sea reemplazado concurrentemente entre esta
 				// lectura y ejecutarInmovilizacion. Review de Codex.
-				const [vehiculoTx] = await tx
-					.select({ wialonUnitId: vehicles.wialonUnitId })
-					.from(vehicles)
-					.where(eq(vehicles.id, inm.vehicleId))
-					.for("update")
-					.limit(1);
+				if (!motivoFalloPrecondicion) {
+					if (!inm.vehicleId) {
+						motivoFalloPrecondicion =
+							"El vehículo asociado a la solicitud ya no existe o fue desasociado.";
+					} else {
+						const [vehiculoTx] = await tx
+							.select({ wialonUnitId: vehicles.wialonUnitId })
+							.from(vehicles)
+							.where(eq(vehicles.id, inm.vehicleId))
+							.for("update")
+							.limit(1);
 
-				if (!vehiculoTx) {
-					throw new ORPCError("CONFLICT", {
-						message:
-							"El vehículo asociado a la solicitud ya no existe o fue desasociado.",
-					});
+						if (!vehiculoTx) {
+							motivoFalloPrecondicion =
+								"El vehículo asociado a la solicitud ya no existe o fue desasociado.";
+						} else if (
+							(vehiculoTx.wialonUnitId ?? null) !== (inm.wialonUnitId ?? null)
+						) {
+							motivoFalloPrecondicion =
+								"La unidad GPS del vehículo cambió o fue reasignada tras la aprobación. La acción ya no aplica a la unidad original.";
+						}
+					}
 				}
 
-				if (
-					(vehiculoTx.wialonUnitId ?? null) !== (inm.wialonUnitId ?? null)
-				) {
-					throw new ORPCError("CONFLICT", {
-						message:
-							"La unidad GPS del vehículo cambió o fue reasignada tras la aprobación. La acción ya no aplica a la unidad original.",
+				if (motivoFalloPrecondicion) {
+					// Precondición de ejecución falló (el cliente pagó, el vehículo fue
+					// desasociado o el GPS fue reasignado tras la aprobación). En vez de
+					// dejar la fila huérfana en 'aprobada' (que bloquearía permanentemente
+					// cualquier solicitud futura del caso por el índice único de abiertas),
+					// se cancela atómicamente la aprobación y se audita el evento. Review de Codex.
+					await tx
+						.update(inmovilizacionesUnidad)
+						.set({
+							estado: "cancelada",
+							updatedAt: new Date(),
+						})
+						.where(
+							and(
+								eq(inmovilizacionesUnidad.id, input.id),
+								eq(inmovilizacionesUnidad.estado, "aprobada"),
+							),
+						)
+						.returning({ id: inmovilizacionesUnidad.id });
+
+					await tx.insert(inmovilizacionesUnidadEventos).values({
+						inmovilizacionId: input.id,
+						evento: "cancelar",
+						estadoAnterior: "aprobada",
+						estadoNuevo: "cancelada",
+						usuarioId: context.userId,
+						detalle: {
+							motivo: motivoFalloPrecondicion,
+							...detalleFalloPrecondicion,
+						},
 					});
+					return;
 				}
 
 				resultado = await ejecutarInmovilizacion({
@@ -1016,6 +1046,13 @@ export const inmovilizacionUnidadRouter = {
 						.where(eq(inmovilizacionesUnidad.id, inm.inmovilizacionOrigenId));
 				}
 			});
+
+			if (motivoFalloPrecondicion) {
+				await resolverPendientesInmovilizacion(input.id);
+				throw new ORPCError("CONFLICT", {
+					message: motivoFalloPrecondicion,
+				});
+			}
 
 			// Reactivación directa (cliente pagó por ventanilla, sin pasar por
 			// registrarResultadoLlamada): el aviso "llamar al cliente" del

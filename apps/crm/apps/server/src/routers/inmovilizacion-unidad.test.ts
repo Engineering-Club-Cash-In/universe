@@ -865,6 +865,8 @@ describe("CB-041 — marcarEjecutada", () => {
 				"El crédito ya no se encuentra en mora B2/B3 (está en B0). El apagado ya no aplica.",
 		});
 		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
+		expect(inmovilizacionExistente.estado).toBe("cancelada");
+		expect(eventosInsertados.some((e) => e.evento === "cancelar")).toBe(true);
 	});
 
 	it("apagado aprobado pero no se pudo resolver el bucket (fail closed): rechaza con CONFLICT (review de Codex)", async () => {
@@ -896,6 +898,8 @@ describe("CB-041 — marcarEjecutada", () => {
 				"No se pudo confirmar el bucket del crédito en cartera. Intentá de nuevo en unos minutos.",
 		});
 		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
+		// Fallo transitorio: no se cancela la aprobación
+		expect(inmovilizacionExistente.estado).toBe("aprobada");
 	});
 
 	it("unidad GPS reasignada a otro vehículo tras la aprobación: detecta el cambio en vehicles bajo lock y rechaza con CONFLICT (review de Codex)", async () => {
@@ -926,6 +930,8 @@ describe("CB-041 — marcarEjecutada", () => {
 				"La unidad GPS del vehículo cambió o fue reasignada tras la aprobación. La acción ya no aplica a la unidad original.",
 		});
 		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
+		expect(inmovilizacionExistente.estado).toBe("cancelada");
+		expect(eventosInsertados.some((e) => e.evento === "cancelar")).toBe(true);
 	});
 
 	it("vehículo desasociado o eliminado tras la aprobación: rechaza con CONFLICT bajo lock (review de Codex)", async () => {
@@ -955,6 +961,8 @@ describe("CB-041 — marcarEjecutada", () => {
 				"El vehículo asociado a la solicitud ya no existe o fue desasociado.",
 		});
 		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
+		expect(inmovilizacionExistente.estado).toBe("cancelada");
+		expect(eventosInsertados.some((e) => e.evento === "cancelar")).toBe(true);
 	});
 
 	it("marcarEjecutada toma SELECT ... FOR UPDATE sobre la fila de vehicles para serializar reasignaciones concurrentes (review de Codex)", async () => {

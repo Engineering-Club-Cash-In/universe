@@ -147,7 +147,9 @@ function normalizarNit(nit: string): string {
 function usuarioNitParaLote(): string {
 	const usuarioNit = normalizarNit(process.env.SAT_AV_USUARIO ?? "");
 	if (!usuarioNit) {
-		throw new Error("SAT_AV_USUARIO debe contener un NIT para registrar el lote.");
+		throw new Error(
+			"SAT_AV_USUARIO debe contener un NIT para registrar el lote.",
+		);
 	}
 	if (usuarioNit.length > 20) {
 		throw new Error("SAT_AV_USUARIO excede los 20 caracteres permitidos.");
@@ -629,10 +631,8 @@ async function ejecutarVerificacionVehiculosEnSat(
 		};
 	}
 
-	const esperados = await obtenerUniversoEsperado(universoEsperado);
-
-	// El lote y sus corridas se registran ANTES de consultar: si el proceso
-	// muere, queda constancia tanto del intento como de cada titular objetivo.
+	// El lote y sus corridas se registran antes de consultar Cartera o SAT: si
+	// cualquier dependencia falla, queda constancia del intento y su estado.
 	const { lote, corridas } = await db.transaction(async (tx) => {
 		const [lote] = await tx
 			.insert(satVerificacionLotes)
@@ -663,12 +663,13 @@ async function ejecutarVerificacionVehiculosEnSat(
 	});
 
 	const corridaIds = corridas.map((corrida) => corrida.id);
+	let totalEsperados = 0;
 	alRegistrar?.({
 		corridaId: corridas[0]?.id ?? null,
 		loteId: lote.id,
 		corridaIds,
 		estado: "en_proceso",
-		totalEsperados: esperados.length,
+		totalEsperados,
 		totalReportadosSat: 0,
 		totalAlertas: 0,
 	});
@@ -688,6 +689,8 @@ async function ejecutarVerificacionVehiculosEnSat(
 	};
 
 	try {
+		const esperados = await obtenerUniversoEsperado(universoEsperado);
+		totalEsperados = esperados.length;
 		const respuesta = await proveedor();
 		const respuestasPorNit = new Map(
 			respuesta.titulares.map((titular) => [
@@ -847,7 +850,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 			loteId: lote.id,
 			corridaIds,
 			estado: "error",
-			totalEsperados: esperados.length,
+			totalEsperados,
 			totalReportadosSat: 0,
 			totalAlertas: 0,
 		};

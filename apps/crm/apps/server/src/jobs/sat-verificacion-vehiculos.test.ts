@@ -380,6 +380,36 @@ describe("cruce de vehículos contra SAT", () => {
 		expect(trabajoTerminado).toBe(true);
 	});
 
+	test("conserva la respuesta inicial si la preparacion falla despues de registrar el lote", async () => {
+		const enProceso: ResumenVerificacion = {
+			corridaId: "corrida-1",
+			loteId: "lote-1",
+			corridaIds: ["corrida-1"],
+			estado: "en_proceso",
+			totalEsperados: 0,
+			totalReportadosSat: 0,
+			totalAlertas: 0,
+		};
+		const falloPreparacion = new Error("Cartera no disponible");
+		let rechazarTrabajo!: (error: Error) => void;
+		const trabajo = new Promise<ResumenVerificacion>((_resolve, reject) => {
+			rechazarTrabajo = reject;
+		});
+		let registrarFallo!: (error: unknown) => void;
+		const falloRegistrado = new Promise<unknown>((resolve) => {
+			registrarFallo = resolve;
+		});
+
+		const inicio = await desacoplarVerificacionSat(async (alRegistrar) => {
+			alRegistrar(enProceso);
+			return trabajo;
+		}, registrarFallo);
+
+		expect(inicio).toEqual(enProceso);
+		rechazarTrabajo(falloPreparacion);
+		expect(await falloRegistrado).toBe(falloPreparacion);
+	});
+
 	test("no reporta alertas cuando todo está en orden", () => {
 		const filas = construirResultados(
 			[

@@ -11,9 +11,9 @@
  * Archivo aparte de cobros.ts por TS7056 (el tipo inferido del router grande
  * ya está en el límite); se monta dentro de `recuperacionVehiculoRouter`.
  *
- * Autorización: la misma cadena que el envío a recuperación — el caso da el
- * acceso (`assertAccesoCasoCobro`) y cartera la verdad de quién lleva el
- * crédito, leída sin cache (`assertCreditoAsignadoEnCarteraPorSifco`).
+ * Autorización: la misma cadena que el envío a recuperación, también para
+ * LEER — el caso da el acceso (`assertAccesoCasoCobro`) y cartera la verdad de
+ * quién lleva el crédito, leída sin cache (`assertCreditoAsignadoEnCarteraPorSifco`).
  * El bucket se exige en el servidor y falla cerrado: si cartera no responde,
  * no se registra nada (mismo criterio que la inmovilización de CB-041).
  */
@@ -49,11 +49,23 @@ type ContextoProcedure = {
  * Caso → SIFCO → dueño en cartera → bucket de hoy. Lanza si algo no cuadra.
  * `accion` completa el mensaje de "este crédito no es tuyo".
  */
-async function resolverCreditoEnB4(
+/**
+ * Caso → SIFCO → dueño en cartera. Lanza si no hay acceso; devuelve null si el
+ * caso no tiene crédito de cartera (entonces tampoco puede tener registros de
+ * recuperación: el envío exige SIFCO).
+ *
+ * El caso solo NO alcanza, ni para leer: `getDetallesCreditoCarteraBack`
+ * auto-crea casos, y cuando cartera reasigna el crédito el caso del CRM sigue
+ * a nombre del dueño anterior. Estos registros traen la ubicación de la unidad,
+ * la entrega y el saldo, así que se pide la misma verdad que para escribir: el
+ * dueño en cartera, leído sin cache (review de Codex, P1, PR #1762). Mismo
+ * criterio que `getGpsEventosCaso`.
+ */
+async function resolverCreditoDelCaso(
 	casoCobroId: string,
 	context: ContextoProcedure,
 	accion: string,
-): Promise<{ numeroSifco: string; bucket: number }> {
+): Promise<string | null> {
 	await assertAccesoCasoCobro(casoCobroId, context.userId, context.userRole);
 	const [caso] = await db
 		.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
@@ -61,17 +73,31 @@ async function resolverCreditoEnB4(
 		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
 	const numeroSifco = caso?.numeroCreditoSifco?.trim();
-	if (!numeroSifco) {
-		throw new ORPCError("BAD_REQUEST", {
-			message: "El caso no tiene crédito de cartera asociado.",
-		});
-	}
+	if (!numeroSifco) return null;
 	await assertCreditoAsignadoEnCarteraPorSifco({
 		numeroSifco,
 		emailUsuario: context.session.user.email,
 		userRole: context.userRole,
 		accion,
 	});
+	return numeroSifco;
+}
+
+async function resolverCreditoEnB4(
+	casoCobroId: string,
+	context: ContextoProcedure,
+	accion: string,
+): Promise<{ numeroSifco: string; bucket: number }> {
+	const numeroSifco = await resolverCreditoDelCaso(
+		casoCobroId,
+		context,
+		accion,
+	);
+	if (!numeroSifco) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: "El caso no tiene crédito de cartera asociado.",
+		});
+	}
 	if (!isCarteraBackEnabled()) {
 		throw new ORPCError("SERVICE_UNAVAILABLE", {
 			message: "Cartera no está disponible: no se puede confirmar el bucket.",
@@ -107,11 +133,12 @@ export const recuperacionVehiculoRegistroRouter = {
 	getRecuperacionesVehiculoCaso: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			await assertAccesoCasoCobro(
+			const numeroSifco = await resolverCreditoDelCaso(
 				input.casoCobroId,
-				context.userId,
-				context.userRole,
+				context,
+				"ver el registro de recuperación de este vehículo",
 			);
+			if (!numeroSifco) return [];
 			const filas = await db
 				.select({
 					id: recuperacionesVehiculo.id,

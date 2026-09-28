@@ -139,7 +139,7 @@ export function CreditoAcciones({
 }: CreditoAccionesProps) {
   const credito = item.creditos;
   const estado = credito.statusCredit;
-  const esAdmin = user?.role === "ADMIN";
+  const puedeGestionar = user?.role === "ADMIN" || user?.role === "ASESOR";
 
   // ── Condiciones de visibilidad (las mismas de la barra vieja) ──────────────
   const verRegistrarPago = user?.role === "ADMIN" || user?.role === "ASESOR";
@@ -148,23 +148,23 @@ export function CreditoAcciones({
   // adicionales (los tipos obligatorios se le filtran dentro del modal).
   const verRubros = user?.role === "ADMIN" || user?.role === "ASESOR";
 
-  const verCrearMora = canEdit(estado) && esAdmin;
+  const verCrearMora = canEdit(estado) && puedeGestionar;
   const verHistorialMora =
     user?.role === "ADMIN" || user?.role === "CONTA" || user?.role === "ASESOR";
 
-  const verEditar = canEdit(estado) && esAdmin;
-  const verMarcarCuotas = esAdmin;
-  const verFechaInicio = esAdmin;
+  const verEditar = canEdit(estado) && puedeGestionar;
+  const verMarcarCuotas = puedeGestionar;
+  const verFechaInicio = puedeGestionar;
 
-  // El `&& esAdmin` es NUEVO. "Cancelar crédito" era la única acción de estado
+  // El `&& puedeGestionar` es NUEVO. "Cancelar crédito" era la única acción de estado
   // sin gate de rol —venía así de las dos barras viejas—, así que un CONTA veía
   // la opción de cancelar. Las otras tres del grupo (caído, activar
-  // cancelación, reactivar) ya eran ADMIN-only; cancelar no tiene por qué ser
-  // la excepción, y esta es la definición que ahora comparten las dos vistas.
-  const verCancelar = canCancel(estado) && esAdmin;
-  const verMarcarCaido = canMarkCaido(estado) && esAdmin;
-  const verActivarCancelacion = canActivate(estado) && esAdmin;
-  const verReactivar = canActivate(estado) && esAdmin;
+  // cancelación, reactivar) ya eran ADMIN/ASESOR-only; cancelar no tiene por qué
+  // ser la excepción, y esta es la definición que ahora comparten las dos vistas.
+  const verCancelar = canCancel(estado) && puedeGestionar;
+  const verMarcarCaido = canMarkCaido(estado) && puedeGestionar;
+  const verActivarCancelacion = canActivate(estado) && puedeGestionar;
+  const verReactivar = canActivate(estado) && puedeGestionar;
 
   const verReportes =
     canViewReports(estado) && (user?.role === "ADMIN" || user?.role === "ASESOR");

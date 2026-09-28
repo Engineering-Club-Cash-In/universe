@@ -113,6 +113,20 @@ function mockDb() {
 						}),
 					};
 				}
+				if (tabla === inmovilizacionesUnidad && campos && "id" in campos) {
+					// filaSigueVigente (dentro de la transacción, review de Codex):
+					// select({ id }).from(inmovilizacionesUnidad).where().for("update").
+					// El mock in-memory no simula el lock en sí (no hay concurrencia
+					// real acá), solo deja pasar la llamada — el resultado no se lee.
+					return {
+						where: () => ({
+							for: () =>
+								Promise.resolve([
+									{ id: (inmovilizacionExistente as { id?: string })?.id },
+								]),
+						}),
+					};
+				}
 				if (tabla === inmovilizacionesUnidad && campos === undefined) {
 					// getHistorialCaso: select().from(inmovilizacionesUnidad).where().orderBy()
 					// getHistorialUnidadFisica: misma firma — ver comentario de
@@ -267,7 +281,8 @@ mock.module("../services/cartera-back-integration", () => ({
 	isCarteraBackPaymentsEnabled: () => true,
 }));
 
-const { inmovilizacionUnidadRouter } = await import("./inmovilizacion-unidad");
+const { inmovilizacionUnidadRouter, registrarLlamadaReactivacion } =
+	await import("./inmovilizacion-unidad");
 const carteraBackClient = carteraBackClientMock;
 
 function ctx(role: string, userId = "user-test"): Context {
@@ -743,8 +758,9 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 		// de otra acción. ultimaEjecutada(..., "apagado") sigue devolviendo A
 		// (es el único/último apagado), así que comparar solo IDs entre
 		// apagados no detecta que la unidad ya no está inmovilizada.
-		inmovilizacionExistente = apagadoEjecutado();
-		llamadasAntesDeHistorialFisico = 0;
+		const fila = apagadoEjecutado();
+		inmovilizacionExistente = fila;
+		historialCasoMock = [fila];
 		historialUnidadFisicaMock = [
 			{
 				...apagadoEjecutado(),
@@ -752,7 +768,30 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 				accion: "reactivacion",
 				ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"), // posterior
 			},
-			apagadoEjecutado(), // el propio INMOV_ID, más antiguo
+			fila, // el propio INMOV_ID, más antiguo
+		];
+		await expect(llamar("paga")).rejects.toMatchObject({ code: "CONFLICT" });
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("apagado superado por un ciclo más reciente DETECTADO SOLO por el lock dentro de la transacción — carrera real, no el guard temprano (review de Codex)", async () => {
+		// El guard TEMPRANO (1ra consulta, sin lock, historialCasoMock) ve el
+		// apagado como vigente y pasa. La carrera real: entre ese guard y el
+		// UPDATE, marcarEjecutada ejecuta una reactivación directa más
+		// reciente desde otro lado. La transacción, con el lock adquirido,
+		// re-consulta (2da consulta, historialUnidadFisicaMock) y ahí SÍ ve
+		// el evento más reciente — tiene que rechazar en ese punto, no antes.
+		const fila = apagadoEjecutado();
+		inmovilizacionExistente = fila;
+		historialCasoMock = [fila]; // guard temprano: sigue vigente, pasa
+		historialUnidadFisicaMock = [
+			{
+				...apagadoEjecutado(),
+				id: "ffffffff-ffff-ffff-ffff-ffffffffffff",
+				accion: "reactivacion",
+				ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"), // posterior
+			},
+			fila, // ya no es el vigente
 		];
 		await expect(llamar("paga")).rejects.toMatchObject({ code: "CONFLICT" });
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
@@ -969,5 +1008,66 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			{ context: ctx("cobros_supervisor") },
 		);
 		expect(resolverAvisoLlamarClienteLlamadas).toEqual([]);
+	});
+});
+
+describe("CB-041 — registrarLlamadaReactivacion", () => {
+	afterEach(reset);
+
+	function reactivacionEjecutada(extra: Record<string, unknown> = {}) {
+		return {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "reactivacion",
+			estado: "ejecutada",
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			llamadaContactoId: null,
+			ejecutadoAt: new Date("2026-09-20T10:00:00.000Z"),
+			...extra,
+		};
+	}
+
+	const llamar = () =>
+		call(
+			registrarLlamadaReactivacion,
+			{ inmovilizacionId: INMOV_ID, contactoId: CONTACTO_ID },
+			{ context: ctx("cobros") },
+		);
+
+	it("reactivación vigente: enlaza el contacto sin error", async () => {
+		const fila = reactivacionEjecutada();
+		inmovilizacionExistente = fila;
+		historialCasoMock = [fila];
+
+		const res = await llamar();
+		expect(res.ok).toBe(true);
+	});
+
+	it("reactivación superada por un apagado DIRECTO más reciente en la unidad física — carrera detectada por el lock, no por el guard temprano (review de Codex)", async () => {
+		// Simula la carrera: cuando el guard TEMPRANO corre (1ra consulta,
+		// sin lock, historialCasoMock), la reactivación todavía es vigente —
+		// pasa. En el instante siguiente, marcarEjecutada ejecuta un apagado
+		// DIRECTO más reciente desde otro lado. Cuando la transacción toma el
+		// lock y re-consulta (2da consulta, historialUnidadFisicaMock), ya ve
+		// ese apagado — y ahí es donde tiene que rechazar. Si el guard con
+		// lock no existiera (o comparara solo entre reactivaciones), esta
+		// llamada pasaría igual que la 1ra.
+		const fila = reactivacionEjecutada();
+		inmovilizacionExistente = fila;
+		historialCasoMock = [fila]; // lo que ve el guard temprano: sigue vigente
+		historialUnidadFisicaMock = [
+			{
+				...reactivacionEjecutada(),
+				id: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+				accion: "apagado",
+				ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"), // posterior
+			},
+			fila, // el propio INMOV_ID, más antiguo — ya no es el vigente
+		];
+		await expect(llamar()).rejects.toMatchObject({ code: "CONFLICT" });
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 });

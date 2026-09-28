@@ -120,6 +120,78 @@ async function getHistorialUnidadFisica(
 }
 
 /**
+ * Ejecutor de transacción de Drizzle — el tipo real de `tx` en
+ * `db.transaction(async (tx) => ...)`, inferido sin necesitar el import de
+ * Postgres/Drizzle solo para esta anotación.
+ */
+type TxExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * `getHistorialUnidadFisica`, pero corriendo dentro de una transacción con
+ * el `tx` ya lockeado (SELECT ... FOR UPDATE) sobre la fila que importa.
+ * Se usa como curry: `getHistorialUnidadFisicaTx(tx)` da una función con la
+ * misma firma que `getHistorialUnidadFisica`, para poder reusar
+ * `filaSigueVigente` en ambos contextos — fuera de transacción (chequeo
+ * temprano, sin lock) y dentro (chequeo real, con lock).
+ */
+function getHistorialUnidadFisicaTx(
+	tx: TxExecutor,
+): typeof getHistorialUnidadFisica {
+	return async (casoCobroId, wialonUnitId) => {
+		if (wialonUnitId == null) {
+			return tx
+				.select()
+				.from(inmovilizacionesUnidad)
+				.where(eq(inmovilizacionesUnidad.casoCobroId, casoCobroId))
+				.orderBy(desc(inmovilizacionesUnidad.createdAt));
+		}
+		return tx
+			.select()
+			.from(inmovilizacionesUnidad)
+			.where(eq(inmovilizacionesUnidad.wialonUnitId, wialonUnitId))
+			.orderBy(desc(inmovilizacionesUnidad.createdAt));
+	};
+}
+
+/**
+ * ¿`fila` sigue siendo la acción EJECUTADA vigente de la unidad física? Dos
+ * condiciones, no solo una:
+ *  1. `estadoUnidad` (mira la acción ejecutada más reciente de CUALQUIER
+ *     tipo, no solo las de `fila.accion`) da el estado esperado para esa
+ *     acción — "inmovilizada" si `fila.accion === "apagado"`, "activa" si
+ *     es "reactivacion". Comparar solo entre filas de la misma acción no
+ *     detecta que una acción MÁS RECIENTE de otro tipo ya superó a `fila`.
+ *  2. Esa fila vigente es justo `fila.id` (no otra fila vieja de otro caso,
+ *     D-10 — unidad compartida).
+ * Se usa en `registrarResultadoLlamada` y `registrarLlamadaReactivacion`,
+ * primero sin lock (mensaje de error temprano) y de nuevo con
+ * `SELECT ... FOR UPDATE` dentro de la transacción (la garantía real bajo
+ * concurrencia). Review de Codex, PR #1758.
+ */
+async function filaSigueVigente(
+	fila: Pick<
+		FilaInmovilizacion,
+		"id" | "casoCobroId" | "wialonUnitId" | "accion"
+	>,
+	historialFn: typeof getHistorialUnidadFisica,
+): Promise<boolean> {
+	const historial = await historialFn(fila.casoCobroId, fila.wialonUnitId);
+	const historialParaEstado: InmovilizacionHistorialItem[] = historial.map(
+		(h) => ({
+			accion: h.accion,
+			estado: h.estado,
+			ejecutadoAt: h.ejecutadoAt,
+		}),
+	);
+	const estadoEsperado = fila.accion === "apagado" ? "inmovilizada" : "activa";
+	const filaVigente = ultimaEjecutada(historial, fila.accion);
+	return (
+		estadoUnidad(historialParaEstado) === estadoEsperado &&
+		filaVigente?.id === fila.id
+	);
+}
+
+/**
  * La fila EJECUTADA más reciente (por `ejecutadoAt`) de una `accion` dada.
  * Con "apagado" es la que tiene la unidad apagada hoy cuando `estadoUnidad`
  * dice "inmovilizada" — la usan el banner de "llamar al cliente" y la
@@ -755,37 +827,12 @@ export const inmovilizacionUnidadRouter = {
 				});
 			}
 
-			// `inm` tiene que seguir siendo el apagado VIGENTE de la unidad
-			// física — dos condiciones, no solo una:
-			//  1. La unidad TODAVÍA está inmovilizada (estadoUnidad, que mira
-			//     la acción EJECUTADA más reciente de cualquier tipo, no solo
-			//     apagados). Sin esto: apagado A, reactivación DIRECTA B más
-			//     reciente (sin pasar por acá) — comparar solo entre apagados
-			//     seguía viendo a A como "el último apagado" y el guard pasaba
-			//     de largo, aunque la unidad ya estuviera reactivada.
-			//  2. Ese apagado vigente es justo `inm` (no otro apagado viejo de
-			//     otro caso, D-10 — unidad compartida).
-			// Sin ambas, "paga" podía abrir una reactivación redundante o
-			// reencender una unidad por encima de un ciclo más reciente.
-			// Review de Codex, PR #1758.
-			const historialUnidadFisica = await getHistorialUnidadFisica(
-				inm.casoCobroId,
-				inm.wialonUnitId,
-			);
-			const historialUnidadFisicaParaEstado: InmovilizacionHistorialItem[] =
-				historialUnidadFisica.map((h) => ({
-					accion: h.accion,
-					estado: h.estado,
-					ejecutadoAt: h.ejecutadoAt,
-				}));
-			const apagadoVigenteUnidad = ultimaEjecutada(
-				historialUnidadFisica,
-				"apagado",
-			);
-			if (
-				estadoUnidad(historialUnidadFisicaParaEstado) !== "inmovilizada" ||
-				apagadoVigenteUnidad?.id !== inm.id
-			) {
+			// Chequeo temprano SIN lock: da un mensaje claro rápido para el caso
+			// común. La garantía real bajo concurrencia es el re-chequeo CON
+			// lock, dentro de la transacción (ver más abajo) — este de acá
+			// puede quedar desactualizado si algo cambia entre esta lectura y
+			// el UPDATE. Review de Codex, PR #1758.
+			if (!(await filaSigueVigente(inm, getHistorialUnidadFisica))) {
 				throw new ORPCError("CONFLICT", {
 					message:
 						"Este apagado ya no es el vigente de la unidad: fue superado por un ciclo más reciente.",
@@ -832,6 +879,30 @@ export const inmovilizacionUnidadRouter = {
 
 			try {
 				await db.transaction(async (tx) => {
+					// SELECT ... FOR UPDATE de ESTA fila antes de tocar nada: toma
+					// su lock. Si marcarEjecutada está por marcar `inm` como
+					// `resultado = 'reactivada'` (porque es el origen de una
+					// reactivación que se está ejecutando AHORA, en paralelo), esa
+					// transacción ya tiene el lock por su propio UPDATE —
+					// esperamos a que termine y re-verificamos con el estado YA
+					// actualizado. Sin este lock, el guard de arriba (sin lock,
+					// solo para un mensaje temprano) podía pasar y el UPDATE de
+					// abajo pisaba igual el `resultado` recién escrito por
+					// marcarEjecutada — o, con "paga", abría una reactivación
+					// redundante sobre una unidad que ya se reactivó por otro
+					// lado. Review de Codex, PR #1758.
+					await tx
+						.select({ id: inmovilizacionesUnidad.id })
+						.from(inmovilizacionesUnidad)
+						.where(eq(inmovilizacionesUnidad.id, inm.id))
+						.for("update");
+					if (!(await filaSigueVigente(inm, getHistorialUnidadFisicaTx(tx)))) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Este apagado ya no es el vigente de la unidad: fue superado por un ciclo más reciente.",
+						});
+					}
+
 					// Los chequeos de arriba son para dar un mensaje claro; la garantía
 					// bajo concurrencia (doble clic, dos asesores a la vez) son estos
 					// UPDATE condicionados a `IS NULL`: si otro ya enlazó, no devuelven
@@ -1002,30 +1073,10 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 			});
 		}
 
-		// Mismo guard que registrarResultadoLlamada (dos condiciones, no
-		// solo comparar entre reactivaciones): la unidad sigue ACTIVA
-		// (estadoUnidad mira la acción ejecutada más reciente de cualquier
-		// tipo — un apagado directo más reciente que esta reactivación no se
-		// veía comparando solo entre reactivaciones) y esa fila vigente es
-		// justo `inm`. Review de Codex, PR #1758.
-		const historialUnidadFisica = await getHistorialUnidadFisica(
-			inm.casoCobroId,
-			inm.wialonUnitId,
-		);
-		const historialUnidadFisicaParaEstado: InmovilizacionHistorialItem[] =
-			historialUnidadFisica.map((h) => ({
-				accion: h.accion,
-				estado: h.estado,
-				ejecutadoAt: h.ejecutadoAt,
-			}));
-		const reactivacionVigenteUnidad = ultimaEjecutada(
-			historialUnidadFisica,
-			"reactivacion",
-		);
-		if (
-			estadoUnidad(historialUnidadFisicaParaEstado) !== "activa" ||
-			reactivacionVigenteUnidad?.id !== inm.id
-		) {
+		// Chequeo temprano SIN lock (mensaje claro rápido); el re-chequeo CON
+		// lock dentro de la transacción es la garantía real bajo concurrencia
+		// — ver comentario de `filaSigueVigente`. Review de Codex, PR #1758.
+		if (!(await filaSigueVigente(inm, getHistorialUnidadFisica))) {
 			throw new ORPCError("CONFLICT", {
 				message:
 					"Esta reactivación ya no es la vigente de la unidad: fue superada por un ciclo más reciente.",
@@ -1065,6 +1116,23 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 		}
 
 		await db.transaction(async (tx) => {
+			// SELECT ... FOR UPDATE de ESTA fila: mismo criterio que
+			// registrarResultadoLlamada — toma el lock antes de re-verificar
+			// que sigue siendo la vigente, para serializar contra cualquier
+			// UPDATE concurrente sobre la misma fila (p. ej. marcarEjecutada
+			// de un apagado que la supera). Review de Codex, PR #1758.
+			await tx
+				.select({ id: inmovilizacionesUnidad.id })
+				.from(inmovilizacionesUnidad)
+				.where(eq(inmovilizacionesUnidad.id, inm.id))
+				.for("update");
+			if (!(await filaSigueVigente(inm, getHistorialUnidadFisicaTx(tx)))) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Esta reactivación ya no es la vigente de la unidad: fue superada por un ciclo más reciente.",
+				});
+			}
+
 			// Mismo criterio que registrarResultadoLlamada: los UPDATE
 			// condicionados a IS NULL son la garantía bajo concurrencia.
 			const [reactivacion] = await tx

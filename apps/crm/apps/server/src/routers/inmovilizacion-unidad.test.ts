@@ -28,6 +28,7 @@ let carteraHabilitadaMock = true;
 // "unique_envuelto" = 23505 dentro de `cause` (como lo envuelve Drizzle);
 // "otro" = cualquier otro error de DB (no debe traducirse a CONFLICT).
 let insertError: null | "unique" | "unique_envuelto" | "otro" = null;
+let transactionError: Error | null = null;
 let inmovilizacionesInsertadas: Record<string, unknown>[] = [];
 let eventosInsertados: Record<string, unknown>[] = [];
 let inmovilizacionExistente: Record<string, unknown> | null = null;
@@ -289,7 +290,12 @@ function mockDb() {
 			}
 			throw new Error(`update en tabla no mockeada: ${String(tabla)}`);
 		},
-		transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(mockDb()),
+		transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+			if (transactionError) {
+				throw transactionError;
+			}
+			return fn(mockDb());
+		},
 		// bloquearUnidadFisica (review de Codex, PR #1758): advisory lock por
 		// unidad, tx.execute(sql`select pg_advisory_xact_lock(...)`). El mock
 		// in-memory no simula el lock en sí (no hay concurrencia real acá, ni
@@ -366,6 +372,7 @@ function reset() {
 	notificarLlamarClienteLlamadas = [];
 	carteraHabilitadaMock = true;
 	insertError = null;
+	transactionError = null;
 	inmovilizacionesInsertadas = [];
 	eventosInsertados = [];
 	inmovilizacionExistente = null;
@@ -1428,6 +1435,27 @@ describe("CB-041 — marcarInmovilizacionEnviadaARecuperacion", () => {
 		});
 
 		expect(inmovilizacionExistente.resultado).toBe("reactivada");
+		expect(eventosInsertados).toHaveLength(0);
+	});
+
+	it("no arroja error si la transacción local de base de datos falla (reconciliación best-effort)", async () => {
+		transactionError = new Error("connection to server was lost");
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "ejecutada",
+			resultado: "no_pago_pendiente_recuperacion",
+		};
+
+		await expect(
+			marcarInmovilizacionEnviadaARecuperacion({
+				casoCobroId: CASO_ID,
+				usuarioId: "user-test",
+				motivo: "Cliente en recuperación",
+			}),
+		).resolves.toBeUndefined();
+
 		expect(eventosInsertados).toHaveLength(0);
 	});
 });

@@ -813,43 +813,54 @@ export async function assertAccesoCasoCobro(
  * CB-041: Si el caso tiene una inmovilización (apagado) ejecutada pendiente de
  * recuperación (`no_pago_pendiente_recuperacion`), actualiza atómicamente su
  * resultado a `enviada_recuperacion` y registra el evento en la bitácora.
+ *
+ * Tratado como reconciliación best-effort: si la base de datos local tiene un
+ * error transitorio, se captura y loguea para no fallar una operación de
+ * recuperación que ya fue completada exitosamente en cartera-back.
  */
 export async function marcarInmovilizacionEnviadaARecuperacion(params: {
 	casoCobroId: string;
 	usuarioId: string;
 	motivo: string;
 }): Promise<void> {
-	await db.transaction(async (tx) => {
-		const actualizadas = await tx
-			.update(inmovilizacionesUnidad)
-			.set({
-				resultado: "enviada_recuperacion",
-				updatedAt: new Date(),
-			})
-			.where(
-				and(
-					eq(inmovilizacionesUnidad.casoCobroId, params.casoCobroId),
-					eq(inmovilizacionesUnidad.accion, "apagado"),
-					eq(inmovilizacionesUnidad.estado, "ejecutada"),
-					eq(
-						inmovilizacionesUnidad.resultado,
-						"no_pago_pendiente_recuperacion",
+	try {
+		await db.transaction(async (tx) => {
+			const actualizadas = await tx
+				.update(inmovilizacionesUnidad)
+				.set({
+					resultado: "enviada_recuperacion",
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(inmovilizacionesUnidad.casoCobroId, params.casoCobroId),
+						eq(inmovilizacionesUnidad.accion, "apagado"),
+						eq(inmovilizacionesUnidad.estado, "ejecutada"),
+						eq(
+							inmovilizacionesUnidad.resultado,
+							"no_pago_pendiente_recuperacion",
+						),
 					),
-				),
-			)
-			.returning({ id: inmovilizacionesUnidad.id });
+				)
+				.returning({ id: inmovilizacionesUnidad.id });
 
-		for (const inm of actualizadas) {
-			await tx.insert(inmovilizacionesUnidadEventos).values({
-				inmovilizacionId: inm.id,
-				evento: "enviar_a_recuperacion",
-				estadoAnterior: "ejecutada",
-				estadoNuevo: "ejecutada",
-				usuarioId: params.usuarioId,
-				detalle: { motivo: params.motivo },
-			});
-		}
-	});
+			for (const inm of actualizadas) {
+				await tx.insert(inmovilizacionesUnidadEventos).values({
+					inmovilizacionId: inm.id,
+					evento: "enviar_a_recuperacion",
+					estadoAnterior: "ejecutada",
+					estadoNuevo: "ejecutada",
+					usuarioId: params.usuarioId,
+					detalle: { motivo: params.motivo },
+				});
+			}
+		});
+	} catch (err) {
+		console.error(
+			"[inmovilizacion] Error al reconciliar inmovilización enviada a recuperación:",
+			err,
+		);
+	}
 }
 
 /**
@@ -8923,29 +8934,39 @@ export const cobrosRouter = {
 			// El rango de origen ya se verificó arriba, antes de deshacer. Cartera
 			// lo revalida bajo sus locks: si entre medio el crédito cambió de
 			// bucket, esto falla y se reporta el parcial como siempre.
+			let recuperacion: Awaited<
+				ReturnType<typeof carteraBackClient.enviarARecuperacionVehiculo>
+			> | null = null;
+			let recuperacionError: string | null = null;
 			try {
-				const recuperacion = await carteraBackClient.enviarARecuperacionVehiculo({
+				recuperacion = await carteraBackClient.enviarARecuperacionVehiculo({
 					credito_id: resultado.credito_id,
 					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo}`,
 					usuario_email: context.session.user.email,
 					asesor_esperado_email: dueñoEsperado,
 				});
+			} catch (err) {
+				recuperacionError =
+					err instanceof Error
+						? err.message
+						: "No se pudo enviar el crédito a recuperación";
+			}
+
+			if (recuperacion) {
 				await marcarInmovilizacionEnviadaARecuperacion({
 					casoCobroId: input.casoCobroId,
 					usuarioId: context.userId,
 					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo}`,
 				});
 				return { ...resultado, recuperacion };
-			} catch (err) {
-				return {
-					...resultado,
-					recuperacion: null,
-					recuperacionError:
-						err instanceof Error
-							? err.message
-							: "No se pudo enviar el crédito a recuperación",
-				};
 			}
+
+			return {
+				...resultado,
+				recuperacion: null,
+				recuperacionError:
+					recuperacionError ?? "No se pudo enviar el crédito a recuperación",
+			};
 		}),
 
 	// Bitácora de reasignaciones de asesor (auditoría) — manual + automática.

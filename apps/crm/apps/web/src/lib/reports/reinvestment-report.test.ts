@@ -1168,7 +1168,7 @@ test("workbook comparte modelos, conserva números y contiene las siete hojas", 
 	).toMatchObject({ Campo: "Contrato Inversión", Valor: 4 });
 });
 
-test("workbook acumulado conserva montos acumulados pero suma cuotas de todos los buckets", () => {
+test("workbook acumulado conserva montos y cuotas del último corte atrasado", () => {
 	const reinvestment = response();
 	const rows = fillMissingMontoACobrarPeriods(
 		[
@@ -1210,10 +1210,13 @@ test("workbook acumulado conserva montos acumulados pero suma cuotas de todos lo
 		"2026-07-01",
 		"2026-07-02",
 	);
+	const firstRow = rows[0];
+	const secondRow = rows[1];
+	if (!firstRow || !secondRow) throw new Error("Faltan cortes de Cobranza");
 	rows[1] = {
-		...rows[0]!,
-		bucket: rows[1]!.bucket,
-		cuotas_count: 3,
+		...secondRow,
+		cuotas_count: 0,
+		mora_count: 0,
 	};
 	const workbook = buildAdminReportsWorkbook({
 		cobranza: { acumulado: true, rows },
@@ -1230,9 +1233,9 @@ test("workbook acumulado conserva montos acumulados pero suma cuotas de todos lo
 
 	expect(total).toMatchObject({
 		Período: "Total",
-		"Cantidad de cuotas": 5,
-		Capital: 100,
-		Facturación: 18.72,
+		"Cantidad de cuotas": 0,
+		Capital: 0,
+		Facturación: 0,
 	});
 });
 

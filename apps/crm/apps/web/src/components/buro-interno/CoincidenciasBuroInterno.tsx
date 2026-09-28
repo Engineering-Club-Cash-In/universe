@@ -1,0 +1,121 @@
+import { ShieldAlert } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+	CLASE_SEVERIDAD,
+	type CoincidenciaBuroInterno,
+	ETIQUETA_SEVERIDAD,
+	etiquetaCategoria,
+	formatearFecha,
+	type Severidad,
+} from "./buro-interno-labels";
+
+export function SeveridadBadge({ severidad }: { severidad: Severidad }) {
+	return (
+		<Badge variant="outline" className={CLASE_SEVERIDAD[severidad]}>
+			{ETIQUETA_SEVERIDAD[severidad]}
+		</Badge>
+	);
+}
+
+export type AutorizacionBuroInterno = {
+	personaId: string;
+	motivo: string;
+	autorizadoPorNombre: string | null;
+	createdAt: Date | string;
+};
+
+/** Lista de coincidencias: a quién de la solicitud se parece y por qué reglas */
+export function CoincidenciasBuroInterno({
+	coincidencias,
+	mostrarOrigen = true,
+	autorizaciones = [],
+	marcarBloqueo = false,
+}: {
+	coincidencias: CoincidenciaBuroInterno[];
+	mostrarOrigen?: boolean;
+	/** Bloqueos ya levantados por análisis, para esta oportunidad */
+	autorizaciones?: AutorizacionBuroInterno[];
+	/** En el análisis se marca cuáles frenan la aprobación */
+	marcarBloqueo?: boolean;
+}) {
+	const autorizacionPorRegistro = new Map(
+		autorizaciones.map((a) => [a.personaId, a]),
+	);
+	return (
+		<ul className="space-y-3">
+			{coincidencias.map((coincidencia) => (
+				<li
+					key={`${coincidencia.etiqueta}-${coincidencia.registroId}`}
+					className="rounded-lg border bg-card p-4"
+				>
+					<div className="flex flex-wrap items-start justify-between gap-2">
+						<div className="flex items-start gap-2">
+							<ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+							<div>
+								<p className="font-medium">
+									{coincidencia.registro.nombreCompleto}
+								</p>
+								<p className="text-muted-foreground text-xs">
+									{etiquetaCategoria(coincidencia.registro.categoria)}
+									{coincidencia.registro.dpi &&
+										` · DPI ${coincidencia.registro.dpi}`}
+									{coincidencia.registro.numeroCreditoSifco &&
+										` · SIFCO ${coincidencia.registro.numeroCreditoSifco}`}
+								</p>
+							</div>
+						</div>
+						<div className="flex items-center gap-2">
+							{mostrarOrigen && (
+								<Badge variant="secondary">{coincidencia.etiqueta}</Badge>
+							)}
+							<SeveridadBadge severidad={coincidencia.severidad} />
+							{marcarBloqueo &&
+								coincidencia.severidad === "alta" &&
+								(autorizacionPorRegistro.has(coincidencia.registroId) ? (
+									<Badge
+										variant="outline"
+										className="border-green-300 bg-green-100 text-green-800 hover:bg-green-100"
+									>
+										Autorizado
+									</Badge>
+								) : (
+									<Badge variant="destructive">Frena la aprobación</Badge>
+								))}
+						</div>
+					</div>
+
+					<ul className="mt-3 space-y-1 text-sm">
+						{coincidencia.reglas.map((regla) => (
+							<li key={regla.clave} className="flex flex-wrap gap-x-2">
+								<span className="font-medium">{regla.nombre}:</span>
+								<span className="text-muted-foreground">{regla.detalle}</span>
+							</li>
+						))}
+					</ul>
+
+					<p className="mt-3 border-t pt-2 text-sm">
+						<span className="font-medium">Motivo: </span>
+						{coincidencia.registro.motivo}
+					</p>
+					<p className="mt-1 text-muted-foreground text-xs">
+						Registrado por {coincidencia.registro.creadoPorNombre ?? "—"} el{" "}
+						{formatearFecha(coincidencia.registro.createdAt)}
+					</p>
+
+					{(() => {
+						const autorizacion = autorizacionPorRegistro.get(
+							coincidencia.registroId,
+						);
+						if (!marcarBloqueo || !autorizacion) return null;
+						return (
+							<p className="mt-2 rounded-md border border-green-200 bg-green-50 p-2 text-green-900 text-xs">
+								Autorizado por {autorizacion.autorizadoPorNombre ?? "—"} el{" "}
+								{formatearFecha(autorizacion.createdAt)}: {autorizacion.motivo}
+							</p>
+						);
+					})()}
+				</li>
+			))}
+		</ul>
+	);
+}

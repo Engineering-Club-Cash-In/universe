@@ -15,6 +15,7 @@ import {
 import { z } from "zod";
 import { db } from "../db";
 import { auctionVehicles } from "../db/schema/auctionVehicles";
+import { user } from "../db/schema/auth";
 import { carteraBackReferences } from "../db/schema/cartera-back";
 import {
 	casosCobros,
@@ -453,9 +454,16 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 				fechaCierre: opportunities.actualCloseDate,
 				// Día del mes en que paga (1-31), tomado de la oportunidad.
 				diaPago: opportunities.diaPagoMensual,
+				marca: vehicles.make,
+				modelo: vehicles.model,
+				asesor: user.name,
+				canalVenta: opportunities.creditType,
+				fuenteLead: leads.source,
 			})
 			.from(opportunities)
 			.leftJoin(leads, eq(opportunities.leadId, leads.id))
+			.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+			.leftJoin(user, eq(opportunities.assignedTo, user.id))
 			.leftJoin(
 				latestClient,
 				and(

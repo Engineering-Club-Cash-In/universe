@@ -3,7 +3,7 @@
  */
 
 import apiAuth from "@/lib/api/apiAuth";
-import type { AxiosError } from "axios";
+import axios from "axios";
 
 import { mensajeDelServidor } from "./mensajeDelServidor";
 
@@ -65,6 +65,10 @@ export interface UpdateLeadPayload {
   dpi?: string;
   phone?: string;
   address?: string;
+  // Simulacro: el CRM corre candado, mora y duplicados y devuelve el veredicto
+  // SIN escribir nada. El portal lo usa para no dejar escrito el DPI de la
+  // cuenta cuando el CRM va a rechazar el cambio.
+  soloValidar?: boolean;
 }
 
 /**
@@ -80,11 +84,20 @@ export const getProfile = async (
     );
     return response.data.data;
   } catch (error) {
-    const axiosError = error as AxiosError<{ error?: string; success?: boolean }>;
-    const errorMessage = axiosError.response?.data?.error || "Error al cargar el perfil";
-    const customError: any = new Error(errorMessage);
-    customError.status = axiosError.response?.status;
-    customError.data = axiosError.response?.data;
+    // Mismo motivo que en `updateOwnDpi`: auth-google serializa sus rechazos
+    // como `{ error: { message } }`, así que leer `data.error` como TEXTO le
+    // mostraba "[object Object]" en vez del motivo.
+    const customError: any = new Error(
+      mensajeDelServidor(error, "Error al cargar el perfil")
+    );
+    // `status` y `data` se conservan: hoy nadie en el portal los lee, pero son
+    // parte del error que ya viajaba y quitarlos sería un cambio aparte.
+    customError.status = axios.isAxiosError(error)
+      ? error.response?.status
+      : undefined;
+    customError.data = axios.isAxiosError(error)
+      ? error.response?.data
+      : undefined;
     throw customError;
   }
 };
@@ -102,13 +115,32 @@ export const updateLead = async (
     );
 
     if (!response.data.success) {
-      throw new Error(response.data.error || "Error al actualizar la información");
+      // El CRM puede contestar 200 con el rechazo adentro; el motivo se lee
+      // igual que el de un 4xx porque viene con la misma forma anidada.
+      throw new Error(
+        mensajeDelServidor({ response }, "Error al actualizar la información")
+      );
     }
 
     return response.data;
   } catch (error) {
-    const axiosError = error as AxiosError<{ error?: string }>;
-    throw new Error(axiosError.response?.data?.error || "Error al actualizar la información");
+    // Mismo motivo que en `updateOwnDpi`: auth-google serializa sus rechazos
+    // como `{ error: { message } }`, así que leer `data.error` como TEXTO le
+    // mostraba "[object Object]" en lugar del motivo que la persona sí puede
+    // corregir sola (mora activa, DPI duplicado, candado de la solicitud).
+    //
+    // El `throw` de arriba cae en este mismo `catch` y su texto ya está listo
+    // para el usuario, así que se relanza tal cual. Se distingue por
+    // `isAxiosError` y NO por "no trae response": un fallo de red o un timeout
+    // también es `instanceof Error` y también viene sin `response`, y con ese
+    // guard el usuario terminaba leyendo "Network Error" o "ECONNREFUSED".
+    if (!axios.isAxiosError(error)) {
+      throw error;
+    }
+
+    throw new Error(
+      mensajeDelServidor(error, "Error al actualizar la información")
+    );
   }
 };
 
@@ -122,11 +154,17 @@ export const getNumbersSifco = async (
     );
     return response.data.data;
   } catch (error) {
-    const axiosError = error as AxiosError<{ error?: string; success?: boolean }>;
-    const errorMessage = axiosError.response?.data?.error || "Error al cargar los números Sifco";
-    const customError: any = new Error(errorMessage);
-    customError.status = axiosError.response?.status;
-    customError.data = axiosError.response?.data;
+    // Igual que `getProfile`: el motivo de auth-google viene anidado, y leerlo
+    // como texto plano le mostraba "[object Object]" al usuario.
+    const customError: any = new Error(
+      mensajeDelServidor(error, "Error al cargar los números Sifco")
+    );
+    customError.status = axios.isAxiosError(error)
+      ? error.response?.status
+      : undefined;
+    customError.data = axios.isAxiosError(error)
+      ? error.response?.data
+      : undefined;
     throw customError;
   }
 };

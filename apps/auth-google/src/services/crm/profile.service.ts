@@ -67,6 +67,19 @@ export interface UpdateLeadPayload {
   dpi?: string;
   phone?: string;
   address?: string;
+  /**
+   * Simulacro: el CRM corre candado, gate de mora y duplicados y contesta
+   * `{ success: true, validado: true }` SIN escribir nada
+   * (`updateLeadByEmail`, controllers/portal-lead.ts).
+   *
+   * Lo necesita el cambio de DPI del portal, que está obligado a escribir la
+   * cuenta ANTES que el lead: sin esta pasada previa, un rechazo del CRM deja
+   * la identidad partida entre los dos servicios.
+   *
+   * Sin la bandera el CRM ESCRIBE, así que omitirla no es "validar de más":
+   * es el modo real.
+   */
+  soloValidar?: boolean;
 }
 
 export interface SendLeadPayload {

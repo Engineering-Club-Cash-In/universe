@@ -27,9 +27,28 @@ const extraerCampo = (error: any): string => {
   return campo === "root" ? "" : campo;
 };
 
+// Rubros pactó con el front un 400 —no el 422 de acá— para el body malformado,
+// y lo traduce en el `onError` de su propio router. Pero este middleware se
+// registra en `index.ts` ANTES que los routers, y Elysia corta la cadena de
+// `onError` en cuanto uno devuelve respuesta: el del router nunca corría y el
+// front recibía 422. Así que se DELEGA: no se responde el error de validación
+// de rubros, para que la cadena siga hasta el manejador que sí conoce ese
+// contrato. Ninguna otra ruta cambia.
+//
+// La decisión vive acá y no en `rubros.ts` porque el problema es el ORDEN de
+// registro, y ese orden sólo se puede ceder desde el que va primero: no hay
+// forma de que el router se adelante (ni con `onError({ as: "global" })`, ni
+// con el hook `error` de la ruta o del `guard` — se probaron las tres y las
+// tres siguen perdiendo contra este).
+const esRubros = (request: Request): boolean => {
+  const ruta = new URL(request.url).pathname;
+  return ruta === "/rubros" || ruta.startsWith("/rubros/");
+};
+
 export const validationErrorMiddleware = (app: Elysia) =>
-  app.onError(({ code, error, set }) => {
+  app.onError(({ code, error, set, request }) => {
     if (code !== "VALIDATION") return;
+    if (esRubros(request)) return;
 
     set.status = 422;
     const campo = extraerCampo(error);

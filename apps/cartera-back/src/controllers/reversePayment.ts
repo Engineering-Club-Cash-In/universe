@@ -18,6 +18,7 @@ import {
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { revertirAbonoCapitalEspejo } from "./abonosCapital";
+import { revertirRubrosDelPago } from "./rubros";
 import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
@@ -26,6 +27,7 @@ import { esPagoAplicado } from "../utils/paymentStatus";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { refrescarProyeccionTrasReversa } from "./reversePaymentRecalculo";
 import {
+  buildInstallmentRemainderReplication,
   getRemainingPaymentPaidStatusAfterReversal,
   isReversibleIncobrablePayment,
   REVERSIBLE_CREDIT_STATUSES,
@@ -36,6 +38,7 @@ import {
   calcularCuotasConvenioCompletadas,
   recomputeCreditAfterCapital,
   shouldIncobrableInstallmentBePaid,
+  sumarAplicadoACuota,
 } from "./registerPaymentPolicy";
 import {
   emitInvoiceVoiding,
@@ -359,6 +362,24 @@ export function createReversePayment(
       }
 
       // ======================================================================
+      // 6️⃣.7️⃣ REVERSAR LOS RUBROS QUE ESTE PAGO COBRÓ
+      // ======================================================================
+      // Los dos casos no son simétricos porque las dos etapas del pago no lo
+      // son: un reclamo YA APLICADO descontó saldo de verdad y hay que
+      // devolvérselo al rubro (con su evento `reversa` en el historial); uno
+      // SIN APLICAR nunca movió nada, así que sólo se suelta lo apartado.
+      //
+      // En ambos casos el reclamo se BORRA, y eso ES el guard de doble reversa:
+      // la segunda pasada no encuentra filas y no devuelve nada — mismo
+      // criterio con el que el convenio se protege dejando `pagoConvenio = 0`.
+      //
+      // 🔴 VA ACÁ Y NO MÁS ABAJO: la rama de pago parcial hace `DELETE FROM
+      // pagos_credito`, y el FK de `rubros_pagos.pago_id` es ON DELETE CASCADE.
+      // Después de ese borrado los reclamos ya no existen y el saldo del rubro
+      // se quedaría descontado para siempre por un pago que se revirtió.
+      await revertirRubrosDelPago(pago_id, tx as unknown as Parameters<typeof revertirRubrosDelPago>[1]);
+
+      // ======================================================================
       // 7️⃣ ACTUALIZAR EL CRÉDITO CON LOS NUEVOS VALORES
       // ======================================================================
       if (pagoValidado) {
@@ -410,6 +431,62 @@ export function createReversePayment(
         pago.membresias_pago ?? 0,
       );
 
+      // ======================================================================
+      // 9️⃣.5️⃣ DEJAR EL SALDO DE LA CUOTA PAREJO EN TODAS SUS FILAS VIVAS
+      // ======================================================================
+      // El saldo de una cuota vive REPLICADO: `insertPayment` estampa los
+      // `nuevo_*_restante` sobre todas las filas vivas de la cuota. Devolver los
+      // restantes SÓLO en la fila revertida dejaba a las hermanas con el saldo
+      // POSTERIOR al pago revertido, el pago siguiente distribuía contra ese
+      // saldo subestimado y la cuota se cerraba corta (crédito 9234, cuota 1 de
+      // Q2,998.48 cerrada con Q1,000.00). Ver el helper para el detalle.
+      //
+      // Y hay un caso donde NO hay nada que replicar: los pagos de SOLO MORA /
+      // SOLO OTROS / SOLO CONVENIO (`insertarPago`, registerPayment.ts) se
+      // insertan con los seis abonos en cero y colgados de la primera cuota
+      // PENDIENTE. Si esta fila no le aportó nada a la cuota, revertirla no le
+      // cambia el saldo — y sí replicar estampa cero sobre una cuota abierta
+      // que nada tiene que ver con este pago. Ver el helper para el detalle.
+      const aplicadoALaCuota = sumarAplicadoACuota([pago]);
+      const replicaRestantesCuota = buildInstallmentRemainderReplication({
+        cuotaId: pago.cuota_id,
+        creditoId: credito_id,
+        restantes: {
+          capital: nuevoCapitalRestante,
+          interes: nuevoInteresRestante,
+          iva: nuevoIvaRestante,
+          seguro: nuevoSeguroRestante,
+          gps: nuevoGpsRestante,
+          membresias: nuevoMembresiasRestante,
+        },
+        aplicadoALaCuota,
+        // Y hay un segundo caso: la fila YA ESTÁ ANULADA. `falsePayment` anula
+        // con sólo `pagado: false, paymentFalse: true` — CONSERVA los `abono_*`,
+        // así que `aplicadoALaCuota` no es cero y la guarda de arriba no la
+        // atrapa. Pero la fila anulada está fuera de la contabilidad de la cuota
+        // (el saldo replicado se estampa con `paymentFalse = false`), así que
+        // devolverle sus abonos al saldo sería doble conteo: le estamparía a las
+        // hermanas VIVAS plata que ya no existe. La reversa de la fila anulada
+        // SÍ sigue (es la única vía que limpia la fila zombi); lo que se salta
+        // es la réplica. Ver el helper.
+        filaAnulada: pago.paymentFalse === true,
+      });
+
+      // Se llama DESPUÉS de la mutación de cada rama (reset de la fila, o su
+      // borrado) para que el valor replicado sea el último que queda escrito.
+      const replicarRestantesEnCuota = async () => {
+        if (!replicaRestantesCuota) return;
+        await tx
+          .update(pagos_credito)
+          .set(replicaRestantesCuota.payload)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, replicaRestantesCuota.cuotaId),
+              eq(pagos_credito.credito_id, replicaRestantesCuota.creditoId),
+              eq(pagos_credito.paymentFalse, false),
+            ),
+          );
+      };
 
       // ======================================================================
       // 🔟 ACTUALIZAR LA CUOTA ASOCIADA (marcar como NO pagada)
@@ -471,18 +548,50 @@ export function createReversePayment(
             validationStatus: "no_required" as const,
             numeroAutorizacion: "",
             banco_id: null,
+
+            /**
+             * Y se limpia lo ACREDITADO, no sólo los montos.
+             *
+             * Sin esto la fila reseteada conserva el crédito de saldo a favor que
+             * ya se devolvió, y el endpoint acepta revertirla otra vez: la segunda
+             * reversa relee el mismo valor y se lo vuelve a restar al cliente.
+             *
+             * Medido contra una copia de producción: un pago que acreditó
+             * Q4,635,531.32 se revierte bien la primera vez, y la SEGUNDA se lleva
+             * los Q5,000 que el cliente ya tenía de antes. El piso en cero evita el
+             * negativo, pero no evita que le vacíe el saldo legítimo.
+             *
+             * Va en CERO y no en NULL a propósito: NULL significa "fila anterior a
+             * la 0039, no se sabe" y haría caer la reversa en la conducta vieja.
+             * Cero es el dato real — esta fila, ya revertida, no acredita nada.
+             */
+            saldo_a_favor_acreditado: "0",
           })
           .where(eq(pagos_credito.pago_id, pago_id));
+
+        await replicarRestantesEnCuota();
 
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
       } else {
         // Pago parcial - verificar si es el único registro de la cuota
+        // El conteo tiene que contar sólo las filas VIVAS de ESTA cuota de
+        // ESTE crédito. Sin `paymentFalse = false`, una fila ya anulada bastaba
+        // para que el conteo diera >1 y se BORRARA la única fila viva: la
+        // réplica de restantes se quedaba sin destino y el saldo restaurado se
+        // perdía igual que antes del fix. Sin `credito_id`, un `cuota_id`
+        // compartido entre créditos contaminaría el conteo.
         const cantidadPagos = pago.cuota_id === null
           ? 0
           : (await tx
               .select({ count: sql<number>`COUNT(*)` })
               .from(pagos_credito)
-              .where(eq(pagos_credito.cuota_id, pago.cuota_id)))[0].count;
+              .where(
+                and(
+                  eq(pagos_credito.cuota_id, pago.cuota_id),
+                  eq(pagos_credito.credito_id, credito_id),
+                  eq(pagos_credito.paymentFalse, false),
+                ),
+              ))[0].count;
 
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
         await tx
@@ -494,6 +603,10 @@ export function createReversePayment(
           await tx
             .delete(pagos_credito)
             .where(eq(pagos_credito.pago_id, pago_id));
+
+          // La fila se va, pero su saldo restaurado es el de la CUOTA: sin esto
+          // las hermanas se quedaban con el saldo de después del pago borrado.
+          await replicarRestantesEnCuota();
         } else {
           // Es el único registro, resetear en vez de eliminar
           await tx
@@ -533,8 +646,13 @@ export function createReversePayment(
               validationStatus: "no_required" as const,
               numeroAutorizacion: "",
               banco_id: null,
+              // Misma limpieza que la rama de arriba: sin esto una segunda
+              // reversa le vuelve a restar al cliente lo que este pago acreditó.
+              saldo_a_favor_acreditado: "0",
             })
             .where(eq(pagos_credito.pago_id, pago_id));
+
+          await replicarRestantesEnCuota();
         }
       }
 
@@ -577,8 +695,50 @@ export function createReversePayment(
       // ======================================================================
 
       const saldoActual = new Big(user.saldo_a_favor ?? 0);
-      const montoBoleta = new Big(pago.monto_boleta ?? 0);
-      let nuevoSaldoAFavor = saldoActual.minus(montoBoleta);
+
+      /**
+       * Se devuelve lo que el pago ACREDITÓ, no el `monto_boleta`.
+       *
+       * Medido contra una copia de producción: un abono directo a capital de
+       * Q1,100 con Q100 de `otros` acredita CERO a saldo a favor —la boleta se
+       * reparte entera— y esta resta le quitaba Q1,000 al cliente. Plata que ese
+       * pago nunca le dio.
+       *
+       * La columna la escribe el registro (migración 0039) en vez de derivarse,
+       * porque no se puede derivar: en un pago mixto el disponible inicial se
+       * consume después en mora, rubros y cuotas, así que
+       * `boleta − otros − abono_capital` es el disponible de ARRANQUE. Calcularlo
+       * así borraría saldo ajeno — es exactamente el error que tuvo el primer
+       * intento de arreglar esto.
+       *
+       * NULL significa "fila anterior a la 0039, no se sabe": ahí se conserva la
+       * conducta vieja. Cambiarla a ciegas para las filas históricas sería
+       * inventar un dato que nadie registró.
+       *
+       * Y una vez aplicada la 0040 —que le pone `DEFAULT 0` a la columna— NULL es
+       * SÓLO eso: las filas que ya existían quedaron en NULL y toda fila nueva
+       * nace diciendo "acreditó cero". Hizo falta porque el NULL de una fila nueva
+       * era indistinguible del de una histórica, y había dos formas de llegar a
+       * él: que la transacción que acredita falle después de insertar la fila, y
+       * el camino NORMAL de pagos, que acredita saldo sin estampar esta columna.
+       *
+       * 🔴 Por eso el default vive en la 0040 y NO en la 0039: si se adelantara al
+       * despliegue, una instancia vieja —que no conoce la columna— acreditaría el
+       * sobrante y dejaría la fila en 0, y revertirla después devolvería CERO. Con
+       * la 0039 sola esas filas quedan en NULL, que es lo que de verdad son.
+       *
+       * ⚠️ Lo que eso NO resuelve: el camino normal sigue sin devolver lo que
+       * acreditó, porque su crédito es uno por boleta y las filas son por cuota —
+       * falta decidir cuál la carga. Pero dejar de sacarle al cliente plata que el
+       * pago nunca le dio es el lado seguro del error.
+       */
+      const acreditado = pago.saldo_a_favor_acreditado;
+      const aDevolver =
+        acreditado === null || acreditado === undefined
+          ? new Big(pago.monto_boleta ?? 0)
+          : new Big(acreditado);
+
+      let nuevoSaldoAFavor = saldoActual.minus(aDevolver);
 
       // Si el saldo queda negativo, ponerlo en cero
       if (nuevoSaldoAFavor.lt(0)) {

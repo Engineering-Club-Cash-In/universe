@@ -20,7 +20,13 @@ mock.module("../services/cartera-back-integration", () => ({
 	isCarteraBackEnabled: () => true,
 }));
 
+// `mock.module` es global al proceso: reemplazar el módulo entero con un doble
+// parcial le borra `CarteraBackClient` y las clases de error a los demás
+// archivos de test, que revientan al cargarse. Se conserva lo real y solo se
+// pisa el singleton.
+const moduloCarteraBackClient = await import("../services/cartera-back-client");
 mock.module("../services/cartera-back-client", () => ({
+	...moduloCarteraBackClient,
 	carteraBackClient: {
 		getMontoACobrarPeriodo: async () => [],
 		getFacturacionMes: async () => ({

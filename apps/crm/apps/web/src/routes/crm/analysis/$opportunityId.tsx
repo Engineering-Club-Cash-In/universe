@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
 import { RenapBuroValidation } from "@/components/analysis/RenapBuroValidation";
+import { BuroInternoAnalisis } from "@/components/buro-interno/BuroInternoAnalisis";
 import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import {
 	LeadDetailModal,
@@ -220,9 +221,13 @@ function OpportunityDocumentsPage() {
 		enabled: !!opportunityId,
 	});
 
+	// El servidor es el que manda (gate en `approveOpportunityAnalysis`); acá
+	// solo se evita el intento y se explica el motivo en el tooltip
+	const [bloqueadoPorBuroInterno, setBloqueadoPorBuroInterno] = useState(false);
 	const canApprove =
 		(validation.data?.canApprove ?? false) &&
-		((checklist.data as any)?.canApprove ?? false);
+		((checklist.data as any)?.canApprove ?? false) &&
+		!bloqueadoPorBuroInterno;
 	const isValidationLoading = validation.isLoading || checklist.isLoading;
 	// Mientras la validación de Buró/RENAP corre no se puede aprobar: el gate
 	// volvería a llamar a las mismas fuentes y duplicaría consultas facturadas.
@@ -247,6 +252,11 @@ function OpportunityDocumentsPage() {
 		if (checklistData && !checklistData.canApprove) {
 			reasons.push(
 				"Debe completar todas las verificaciones del checklist de análisis",
+			);
+		}
+		if (bloqueadoPorBuroInterno) {
+			reasons.push(
+				'El buró interno tiene una coincidencia de severidad alta: autorizala con una justificación desde la tarjeta "Buró interno"',
 			);
 		}
 
@@ -522,6 +532,13 @@ function OpportunityDocumentsPage() {
 				opportunityId={opportunityId}
 				onEjecucionChange={setValidandoBuroRenap}
 				currentUserRole={userProfile.data?.role}
+			/>
+
+			{/* Buró interno: coincidencias con personas marcadas por cobros (informativo) */}
+			<BuroInternoAnalisis
+				opportunityId={opportunityId}
+				currentUserRole={userProfile.data?.role}
+				onBloqueoChange={setBloqueadoPorBuroInterno}
 			/>
 
 			{/* Asignaciones pendientes: informativo, no bloquea la aprobación */}

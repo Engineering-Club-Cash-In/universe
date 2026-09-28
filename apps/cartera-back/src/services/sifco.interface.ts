@@ -36,6 +36,26 @@ export interface WSClientesEmailConsultaResponse {
 }
 
 /** ================================
+ * WSIngresarClientes (Modo DSP) — búsqueda de cliente por identificación
+ * ================================
+ */
+export interface WSBuscarClientesRequest {
+  numeroIdentificacion: string;
+}
+
+export interface ClienteIdentificacion {
+  CodigoCliente?: number | string;
+  TipoDePersona?: string; // N = Natural, J = Jurídica
+  NumeroIdentificacion?: string;
+  PrimerNombre?: string;
+  SegundoNombre?: string;
+  PrimeApellido?: string;
+  SegundoApellido?: string;
+  ApellidoCasada?: string;
+  NombreJuridico?: string;
+}
+
+/** ================================
  * WSVerPrestamosPorCliente
  * ================================
  */

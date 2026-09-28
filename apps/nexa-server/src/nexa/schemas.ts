@@ -23,20 +23,28 @@ export const reviewTransferResponseSchema = z.object({
   status: reviewTransferStatusSchema,
 });
 
+const exactCentAmount = z.number().multipleOf(0.01);
+export const tokenDateSchema = z.string().datetime({ offset: true })
+  .refine((value) => !Number.isNaN(Date.parse(value)), "Invalid tokenDate");
+
 export const tokenTransactionSchema = z.object({
   reference: z.union([z.string(), z.number()]),
-  amount: z.number(),
+  amount: exactCentAmount,
   bank: z.string(),
   comments: z.string().nullable().default(""),
   currency: z.enum(["GTQ", "USD"]),
   account: z.string(),
   token: z.string(),
-  tokenDate: z.string(),
+  tokenDate: tokenDateSchema,
   tokenIdentifier: z.string(),
   tokenName: z.string(),
   tokenPrefix: z.string(),
   wasReturn: z.union([z.literal(0), z.literal(1), z.boolean()]).transform((value) => value === true ? 1 : value === false ? 0 : value),
   transactionId: z.string(),
+});
+
+export const receivedTokenTransactionSchema = tokenTransactionSchema.extend({
+  tokenDate: tokenDateSchema.optional(),
 });
 
 export const paymentTokenStatementResponseSchema = z.object({
@@ -52,7 +60,7 @@ export const paymentTokenWebhookSchema = z.object({
   id: safePositiveInteger,
   reference: safePositiveInteger,
   token: z.string(),
-  amount: z.number().positive(),
+  amount: exactCentAmount.positive(),
   originAccount: z.string(),
   originBank: z.string(),
   comments: z.string().nullable().default(""),
@@ -61,4 +69,5 @@ export const paymentTokenWebhookSchema = z.object({
 });
 
 export type TokenTransaction = z.infer<typeof tokenTransactionSchema>;
+export type ReceivedTokenTransaction = z.infer<typeof receivedTokenTransactionSchema>;
 export type ReviewTransferStatus = z.infer<typeof reviewTransferStatusSchema>;

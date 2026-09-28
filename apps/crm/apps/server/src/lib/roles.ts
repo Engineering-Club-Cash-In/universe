@@ -222,6 +222,17 @@ export const PERMISSIONS = {
 	canViewAllCasosCobros: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
 
+	// Buró interno (lista negra propia). Cobros registra y consulta; dar de
+	// baja a alguien y cambiar las reglas de coincidencia queda en supervisión.
+	// Análisis ve las coincidencias desde la oportunidad (canAccessAnalysis).
+	canAccessBuroInterno: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.COBROS ||
+		role === ROLES.COBROS_SUPERVISOR,
+
+	canManageBuroInterno: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
+
 	// WhatsApp Module Access
 	canAccessWhatsApp: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||

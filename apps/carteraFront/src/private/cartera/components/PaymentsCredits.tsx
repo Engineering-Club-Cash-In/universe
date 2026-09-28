@@ -50,6 +50,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DollarSign, Pencil, History } from "lucide-react";
 import { toast } from "sonner";
 import { cuotasEnAtraso } from "@/lib/cuotaAtrasada";
+import { PaymentStatusBadges } from "./PaymentStatusBadges";
 // Iconos y colores por atributo
 const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
   pago_id: {
@@ -783,7 +784,7 @@ const handleDownloadExcel = async () => {
                     Cuota
                   </TableHead>
                   <TableHead className="font-bold text-blue-700">
-                    Pagado
+                    Estados
                   </TableHead>
                   <TableHead className="w-16 text-center font-bold text-blue-700">
                     Acciones
@@ -862,16 +863,8 @@ const handleDownloadExcel = async () => {
                       <TableCell className="text-center text-blue-700 font-semibold">
                         {formatCurrency(item.pago.cuota)}
                       </TableCell>
-                      <TableCell className="text-center">
-                        {item.pago.pagado ? (
-                          <span className="px-2 py-1 rounded bg-green-100 text-green-700 font-bold">
-                            Sí
-                          </span>
-                        ) : (
-                          <span className="px-2 py-1 rounded bg-red-100 text-red-600 font-bold">
-                            No
-                          </span>
-                        )}
+                      <TableCell>
+                        <PaymentStatusBadges payment={item.pago} />
                       </TableCell>
              <TableCell className="text-center">
               {user?.role === "ADMIN" ? (

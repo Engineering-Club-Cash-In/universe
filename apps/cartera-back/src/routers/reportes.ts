@@ -2,8 +2,9 @@ import { Elysia } from "elysia";
 import { buildActivePortfolioRows, buildActivePortfolioWorkbook, getActivePortfolioCredits } from "../controllers/activePortfolioReport";
 import { getCobranzaDiaria, getCobranzaDiariaDetalle } from "../controllers/cobranzaDiariaReporte";
 import { MoraRecoveryFuturePeriodError } from "../controllers/moraRecuperacion";
+import { getOfficialClosure } from "../controllers/cierreMoraOficial";
 import { getCobradoDelMesSnapshot, getColocacionPorPeriodo, getComparativoHistorico, getCuotasPorFecha, getEsperadoDelMesMeta, getFlujoCuotasInversiones, getFlujoCuotasPorInversionista, getMontoACobrar, getMontoACobrarPeriodo, getMoraByEtapaYAsesor, getMoraCobradaPorAsesor, getMoraRecuperacionPorAsesor, getReinversionLiquidaciones } from "../controllers/reportes";
-import { db } from "../database";
+import { client, db } from "../database";
 import { getVehiclesBySifcoMap } from "../services/crm.service";
 import { authMiddleware } from "./midleware";
 
@@ -322,6 +323,32 @@ export const reportesRouter = new Elysia().use(authMiddleware)
       return data;
     } catch (error) {
       console.error("[/reportes/mora-por-etapa-asesor]", error);
+      set.status = 500;
+      return { error: "Error interno del servidor" };
+    }
+  })
+
+  .get("/reportes/cierre-mora-oficial", async ({ query, set }) => {
+    try {
+      const { periodo, asesores } = query as Record<string, string>;
+      if (!/^\d{4}-\d{2}-01$/.test(periodo ?? "") || !fechaValida(periodo)) {
+        set.status = 400;
+        return { error: "Periodo inválido. Use YYYY-MM-01" };
+      }
+      const asesoresIds = asesores
+        ? asesores
+            .split(",")
+            .map((value) => Number(value.trim()))
+            .filter((value) => Number.isInteger(value) && value > 0)
+        : undefined;
+      if (asesores && !asesoresIds?.length) {
+        set.status = 400;
+        return { error: "Parámetro 'asesores' inválido" };
+      }
+      set.status = 200;
+      return getOfficialClosure(client, periodo, asesoresIds);
+    } catch (error) {
+      console.error("[/reportes/cierre-mora-oficial]", error);
       set.status = 500;
       return { error: "Error interno del servidor" };
     }

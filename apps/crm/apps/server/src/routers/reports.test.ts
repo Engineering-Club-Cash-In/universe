@@ -178,6 +178,58 @@ describe("enforceClosedCreditReportLimit", () => {
 	});
 });
 
+test("closed credits query and export expose vehicle, assigned advisor, credit type, and lead source", async () => {
+	const server = await Bun.file(
+		new URL("./reports.ts", import.meta.url),
+	).text();
+	const report = server.slice(
+		server.indexOf("export const getReporteCreditosCerrados"),
+		server.indexOf("/**\n * Reporte de Cobranza"),
+	);
+	for (const field of [
+		"marca: vehicles.make",
+		"modelo: vehicles.model",
+		"asesor: user.name",
+		"canalVenta: opportunities.creditType",
+		"fuenteLead: leads.source",
+	])
+		expect(report).toContain(field);
+	expect(report).toContain(
+		".leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))",
+	);
+	expect(report).toContain(
+		".leftJoin(user, eq(opportunities.assignedTo, user.id))",
+	);
+	const web = await Bun.file(
+		new URL("../../../web/src/routes/admin/reports/index.tsx", import.meta.url),
+	).text();
+	const exportBlock = web.slice(
+		web.indexOf("const exportClosedCreditsExcel"),
+		web.indexOf("const closedCreditsRows"),
+	);
+	const tableBlock = web.slice(
+		web.indexOf("const creditosCerradosCard"),
+		web.indexOf("closedCreditsRows.map"),
+	);
+	expect(exportBlock).toContain(
+		"buildClosedCreditsWorksheet(res.rows, formatFechaCorta)",
+	);
+	for (const label of [
+		"Marca del Vehículo",
+		"Modelo",
+		"Asesor",
+		"Canal de Venta",
+		"Fuente del Lead",
+	])
+		expect(tableBlock).toContain(label);
+	const renderedRows = web.slice(
+		web.indexOf("closedCreditsRows.map"),
+		web.indexOf("closedCreditsTotal}{"),
+	);
+	for (const field of ["marca", "modelo", "asesor", "canalVenta", "fuenteLead"])
+		expect(renderedRows).toContain(`row.${field}`);
+});
+
 describe("getLeadSourceChannelType", () => {
 	test("groups known and unknown lead sources by channel type", () => {
 		expect(getLeadSourceChannelType("property")).toBe("Físico");

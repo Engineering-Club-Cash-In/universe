@@ -61,6 +61,11 @@ export const participacionExternaActualCteSql = `
       FROM participacion_externa_actual_base
     )`;
 
+export function buildAtrasadoOnlySql(atrasado: string, tope?: string): string {
+	const monto = tope ? `LEAST(${atrasado}, ${tope})` : atrasado;
+	return `CASE WHEN excluido_mora OR cuotas_atrasadas <= 0 THEN 0 ELSE ${monto} END`;
+}
+
 export function buildInteresIvaInversionistaSql(
 	interes: string,
 	iva: string,

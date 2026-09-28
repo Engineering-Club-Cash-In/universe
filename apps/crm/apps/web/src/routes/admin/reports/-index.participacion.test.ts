@@ -119,7 +119,7 @@ test("Cobranza e Inversión usan el mismo workbook multihoja", async () => {
 	expect(source).toContain("onExportInvestors={exportAdminReportsExcel}");
 	expect(source).toContain("onClick={exportAdminReportsExcel}");
 	expect(source).toMatch(
-		/\{isAdmin && \(\s*<Button variant="outline" onClick=\{exportAdminReportsExcel\}>/,
+		/\{isAdmin && \(\s*<Button\s+variant="outline"\s+onClick=\{exportAdminReportsExcel\}\s+disabled=\{!officialMoraReady\}\s*>/,
 	);
 });
 
@@ -130,14 +130,32 @@ test("pantalla y workbook usan las mismas filas de Cobranza con períodos vacío
 		source.indexOf("const closedCreditsRows"),
 	);
 
-	expect(source).toContain(
-		"const montoCobrarRows = fillMissingMontoACobrarPeriods(",
+	expect(source).toMatch(
+		/const montoCobrarRows =\s*applyOfficialMonthlyMora\(\s*fillMissingMontoACobrarPeriods\(/,
 	);
 	expect(exportBlock).toContain("rows: montoCobrarRows");
 	expect(source.match(/fillMissingMontoACobrarPeriods\(/g)?.length).toBe(1);
 	expect(source).not.toContain("function fillMissingPeriods(");
 	expect(source).toContain("const rows = montoCobrarRows;");
-	expect(source).toMatch(
-		/const lastRow = rows\.findLast\(\s*\(row\) => row\.cuotas_count > 0,?\s*\)/,
+	expect(source).toContain("const lastRow = a ? rows.at(-1) : undefined;");
+});
+
+test("integra la mora oficial en la tabla existente sin tarjeta adicional", async () => {
+	const source = await Bun.file(new URL("./index.tsx", import.meta.url)).text();
+	expect(source).not.toContain("Prospección de mora del mes");
+	expect(source).toContain("applyOfficialMonthlyMora(");
+	expect(source).toContain("rows: montoCobrarRows");
+});
+
+test("bloquea tabla y exportación mensual hasta tener la mora oficial", async () => {
+	const source = await Bun.file(new URL("./index.tsx", import.meta.url)).text();
+	expect(source).toContain(
+		"enabled: canAccessCobranzaReport && officialMoraRequired",
 	);
+	expect(source).toContain("if (!officialMoraReady)");
+	expect(source).toContain("disabled={!officialMoraReady}");
+	expect(source).toContain(
+		"{officialMoraReady && !!montoCobrarData?.data.length && (",
+	);
+	expect(source).toContain("{officialMoraFailed && (");
 });

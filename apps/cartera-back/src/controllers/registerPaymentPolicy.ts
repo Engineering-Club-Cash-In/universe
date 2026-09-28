@@ -8,7 +8,10 @@ type BigInput = number | string | Big;
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
-  monto_boleta: z.number().min(0),
+  monto_boleta: z.union([
+    z.number().min(0),
+    z.string().regex(/^\d{1,16}\.\d{2}$/),
+  ]),
   fecha_pago: z.string(),
   llamada: z.string().optional(),
   renuevo_o_nuevo: z.string().optional(),
@@ -20,10 +23,27 @@ export const pagoSchema = z.object({
   url_boletas: z.array(z.string()),
   banco_id: z.number().int().positive().optional(),
   numeroAutorizacion: z.string().optional(),
-  registerBy: z.string().min(1),
+  registerBy: z.string().min(1).refine((value) => {
+    const normalized = value.trim().toUpperCase();
+    return normalized !== "NEXA" && !normalized.startsWith("NEXA:");
+  }),
   fecha_boleta: z.string(),
   origen_pago: z.enum(["transferencia", "cheque", "boleta"]).optional().default("transferencia"),
 });
+
+export const internalNexaPagoSchema = pagoSchema.extend({
+  fecha_pago: z.string().datetime({ offset: true })
+    .refine((value) => !Number.isNaN(Date.parse(value)), "Invalid payment date"),
+  fecha_boleta: z.string().date(),
+  registerBy: z.literal("NEXA"),
+});
+
+export const getInternalNexaPaymentDate = (fechaPago: string, eventId?: number) => {
+  if (eventId === undefined) return null;
+  // tokenDate is a banking calendar value, stored in a timezone-less column.
+  // Preserve its wall-clock fields rather than shifting the day to Guatemala.
+  return new Date(fechaPago.replace(/(?:Z|[+-]\d{2}:?\d{2})$/, "Z"));
+};
 
 export const CREDIT_PENDING_CANCELLATION_ERROR = {
   code: "CREDIT_PENDING_CANCELLATION",
@@ -41,6 +61,17 @@ export const getCuotaIdForPaymentInsert = (
 ) => cuotaId ?? null;
 
 export const getRequestedInstallmentFloor = (_requestedInstallment: number) => 1;
+
+export const shouldApplyFinalSmallRemainderAsOther = ({
+  availableRemaining,
+  hasInsertedPayment,
+}: {
+  availableRemaining: BigInput;
+  hasInsertedPayment: boolean;
+}) =>
+  hasInsertedPayment &&
+  new Big(availableRemaining).gt(0) &&
+  new Big(availableRemaining).lte(25);
 
 export const shouldMarkInstallmentPaymentPaid = ({
   allRemainingZero,
@@ -1281,6 +1312,7 @@ export const debeRechazarPagoSinAplicacion = ({
   moraAplicada,
   otrosEspecialAplicado,
   convenioAplicado,
+  rubrosCobrados = 0,
 }: {
   cuotasSaltadas: number;
   cuotasCompletas: number;
@@ -1288,13 +1320,26 @@ export const debeRechazarPagoSinAplicacion = ({
   moraAplicada: BigInput;
   otrosEspecialAplicado: boolean;
   convenioAplicado: BigInput;
+  /**
+   * Lo cobrado en RUBROS por esta boleta. Es acreditación válida igual que la
+   * mora y el convenio: una boleta que sólo cobró rubros SÍ dejó rastro y no
+   * puede caer en el 409 de "no se aplicó nada" — el cobro de un rubro es
+   * exactamente el caso de boleta legítima que no toca ninguna cuota.
+   *
+   * En la práctica el sello ya fuerza una fila (`debeInsertarFilaParcialCuota`
+   * cuenta los rubros pendientes de estampar), así que cuando hay rubros
+   * `cuotasParciales` no es 0; esto lo deja explícito en la regla en vez de
+   * depender de ese encadenamiento.
+   */
+  rubrosCobrados?: BigInput;
 }): boolean =>
   cuotasSaltadas > 0 &&
   cuotasCompletas === 0 &&
   cuotasParciales === 0 &&
   new Big(moraAplicada ?? 0).lte(0) &&
   !otrosEspecialAplicado &&
-  new Big(convenioAplicado ?? 0).lte(0);
+  new Big(convenioAplicado ?? 0).lte(0) &&
+  new Big(rubrosCobrados ?? 0).lte(0);
 
 /**
  * Generalización de lo anterior: capital pedido que se evaporaría porque el
@@ -1359,13 +1404,81 @@ export const debeInsertarFilaParcialCuota = ({
   mora = 0,
   otros = 0,
   pagoConvenio = 0,
+  rubros = 0,
 }: {
   totalPagado: BigInput;
   mora?: BigInput | null;
   otros?: BigInput | null;
   pagoConvenio?: BigInput | null;
+  /**
+   * Lo que esta boleta cobró en RUBROS y todavía no estampó en ninguna fila
+   * (el peek `pendiente()` del estampador, no una llamada consumidora).
+   *
+   * Cuenta como acreditación válida por la misma razón que la mora y el
+   * convenio: es plata de la boleta que ya tiene destino. Una boleta que SÓLO
+   * cobró rubros no absorbe nada en ninguna cuota, así que sin esto todas se
+   * saltarían y el cobro se quedaría sin fila donde vivir — y una fila con
+   * `monto_aplicado = 0` pero `otros > 0` es legítima y validable
+   * (`shouldRejectZeroAppliedNormalValidation` exime a las que traen otros).
+   */
+  rubros?: BigInput | null;
 }): boolean =>
   new Big(totalPagado ?? 0).gt(0) ||
   new Big(mora ?? 0).gt(0) ||
   new Big(otros ?? 0).gt(0) ||
-  new Big(pagoConvenio ?? 0).gt(0);
+  new Big(pagoConvenio ?? 0).gt(0) ||
+  new Big(rubros ?? 0).gt(0);
+
+/** Una cuota de la que se puede colgar un pago. */
+type CuotaColgable = { cuota_id: number } | null | undefined;
+
+/**
+ * A qué cuota se cuelga una fila de pago que el loop de cuotas NO escribió.
+ *
+ * La usan las dos rutas que crean filas así: el abono directo a capital y la
+ * "fila-rastro" que necesita una boleta cuando el cobro de rubros o el registro
+ * del convenio no alcanzaron a estamparse en ninguna fila de cuota.
+ *
+ * **Devuelve `null`, nunca 0, y ahí está todo el punto.** `insertarPago` trata el
+ * `cuotaId` 0 como "sin filtro de cuota": el left join pierde su predicado,
+ * queda ordenado por `pago_id` y hereda el `cuota_id` del pago MÁS VIEJO del
+ * crédito — que es la fila estructural de la cuota 0, porque `insertPayments` la
+ * inserta primera. Desde ahí la fila pasa a ser tratada como la cuota inicial:
+ *
+ *   * `updateInitialQuotaOtros` PISA `otros` en todas las filas de la cuota 0,
+ *     así que borra el cargo del rubro —o lo infla con los gastos del crédito—
+ *     sin tocar `rubros_pagos`. Queda el saldo del rubro descontado, el reclamo
+ *     diciendo que se cobró, y el pago sin mostrar el cobro: `otros` es la única
+ *     huella del cargo dentro de la boleta y de la factura;
+ *   * revertir esa fila recalcula la cuota 0 como NO pagada, porque la fila
+ *     estructural nace `no_required` y no suma. Y una vez en `pagado = false`
+ *     con boleta y aplicado en cero, cae en el predicado de
+ *     `shouldRemoveSameInstallmentPaymentOnReverse`: la reversa siguiente la
+ *     BORRA, y es el ancla que sostiene a un crédito CAIDO.
+ *
+ * Colgarla de una cuota pagada de verdad sí es seguro, y la diferencia es
+ * exactamente esa: esa cuota tiene un pago `validated` detrás que suma, así que
+ * `shouldInstallmentRemainPaidAfterReversal` la deja pagada al revertir.
+ *
+ * Con `null`, el llamador TIRA. Una boleta con plata que no encuentra ninguna
+ * cuota donde colgarse tiene que fallar ruidosa, no inventarse una asociación.
+ */
+export function resolverCuotaParaFilaSuelta(opciones: {
+  ultimaCuotaPagada?: CuotaColgable;
+  primeraPendiente?: CuotaColgable;
+  cuotaReferenciaCapital?: CuotaColgable;
+}): number | null {
+  const candidatas = [
+    opciones.ultimaCuotaPagada,
+    opciones.primeraPendiente,
+    opciones.cuotaReferenciaCapital,
+  ];
+
+  for (const c of candidatas) {
+    // El 0 se descarta explícitamente, no sólo por falsy: si alguna consulta
+    // devolviera la cuota inicial, dejarla pasar reabre el mismo agujero.
+    if (c?.cuota_id) return c.cuota_id;
+  }
+
+  return null;
+}

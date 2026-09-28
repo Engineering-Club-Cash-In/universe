@@ -4208,6 +4208,22 @@ export const cobrosRouter = {
 			});
 		}),
 
+	getCierreMoraOficial: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				periodo: z.string().regex(/^\d{4}-\d{2}-01$/),
+				asesores: z.array(z.number()).optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
+			}
+			return carteraBackClient.getCierreMoraOficial(input);
+		}),
+
 	getMoraCobradaPorAsesor: cobrosSupervisorProcedure
 		.input(
 			z.object({

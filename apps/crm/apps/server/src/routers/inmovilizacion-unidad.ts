@@ -755,6 +755,30 @@ export const inmovilizacionUnidadRouter = {
 				});
 			}
 
+			// `inm` tiene que seguir siendo el apagado VIGENTE de la unidad
+			// física, no solo un apagado ejecutado con id/llamadaContactoId que
+			// calzan. Con una unidad compartida (D-10), este apagado puede
+			// haber sido superado por un ciclo completo (reactivación + nuevo
+			// apagado) ejecutado desde OTRO caso — la fila vieja sigue teniendo
+			// llamadaContactoId=null (nadie la tocó) aunque ya no representa el
+			// estado real de la unidad. Sin este guard, "paga" abre una
+			// reactivación que reenciende la unidad por encima del apagado
+			// nuevo y vigente. Review de Codex, PR #1758.
+			const historialUnidadFisica = await getHistorialUnidadFisica(
+				inm.casoCobroId,
+				inm.wialonUnitId,
+			);
+			const apagadoVigenteUnidad = ultimaEjecutada(
+				historialUnidadFisica,
+				"apagado",
+			);
+			if (apagadoVigenteUnidad?.id !== inm.id) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Este apagado ya no es el vigente de la unidad: fue superado por un ciclo más reciente.",
+				});
+			}
+
 			// El contacto tiene que ser del MISMO caso — evita enlazar la
 			// llamada de un caso distinto (contactoId enumerable) —, una LLAMADA
 			// (no whatsapp/sms/visita/pago) POSTERIOR al apagado, y no puede
@@ -962,6 +986,25 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 		if (inm.llamadaContactoId !== null) {
 			throw new ORPCError("CONFLICT", {
 				message: "Esta llamada ya se registró.",
+			});
+		}
+
+		// Mismo guard que registrarResultadoLlamada: `inm` tiene que seguir
+		// siendo la reactivación VIGENTE de la unidad física, no una superada
+		// por un ciclo más reciente ejecutado desde otro caso. Review de
+		// Codex, PR #1758.
+		const historialUnidadFisica = await getHistorialUnidadFisica(
+			inm.casoCobroId,
+			inm.wialonUnitId,
+		);
+		const reactivacionVigenteUnidad = ultimaEjecutada(
+			historialUnidadFisica,
+			"reactivacion",
+		);
+		if (reactivacionVigenteUnidad?.id !== inm.id) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Esta reactivación ya no es la vigente de la unidad: fue superada por un ciclo más reciente.",
 			});
 		}
 

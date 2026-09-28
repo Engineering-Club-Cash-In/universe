@@ -158,7 +158,7 @@ function usuarioNitParaLote(): string {
 }
 
 type MarcaCruceCartera = {
-	cruceCartera: "con_credito" | "disponible" | "sin_registro";
+	cruceCartera: "con_credito" | "disponible" | "sin_registro" | "no_disponible";
 	titularCarteraNombre: string | null;
 	numeroSifco: string | null;
 	estadoCredito: string | null;
@@ -169,7 +169,22 @@ type MarcaCruceCartera = {
 /** Enriquecimiento de lectura: Cartera no se replica en sat_verificacion_resultados. */
 export function agregarCruceCartera<
 	T extends { vehicleId: string | null; placa: string },
->(filas: T[], contexto: ContextoCarteraVehiculos): (T & MarcaCruceCartera)[] {
+>(
+	filas: T[],
+	contexto: ContextoCarteraVehiculos | null,
+): (T & MarcaCruceCartera)[] {
+	if (!contexto) {
+		return filas.map((fila) => ({
+			...fila,
+			cruceCartera: "no_disponible",
+			titularCarteraNombre: null,
+			numeroSifco: null,
+			estadoCredito: null,
+			fechaCredito: null,
+			estaDisponible: false,
+		}));
+	}
+
 	return filas.map((fila) => {
 		const cruce =
 			(fila.vehicleId ? contexto.porVehiculo.get(fila.vehicleId) : undefined) ??
@@ -966,7 +981,15 @@ export async function obtenerUltimaVerificacion() {
 			eq(satVerificacionResultados.corridaId, satVerificacionCorridas.id),
 		)
 		.orderBy(satVerificacionResultados.placa);
-	const contextoCartera = await obtenerContextoCarteraVehiculos();
+	const contextoCartera = await obtenerContextoCarteraVehiculos().catch(
+		(error) => {
+			console.error(
+				"[SAT] No se pudo enriquecer la última verificación con Cartera:",
+				error,
+			);
+			return null;
+		},
+	);
 	const filasConCruce = agregarCruceCartera(filas, contextoCartera);
 	const resultadosPublicos = filasConCruce.map((fila) => ({
 		...fila,

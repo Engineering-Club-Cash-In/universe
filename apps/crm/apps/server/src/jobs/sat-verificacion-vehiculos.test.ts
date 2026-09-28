@@ -566,6 +566,24 @@ describe("cruce de vehículos contra SAT", () => {
 		expect(filas[2].titularCarteraNombre).toBe("Ana Cliente");
 	});
 
+	test("conserva las filas SAT cuando Cartera no esta disponible", () => {
+		const filas = agregarCruceCartera(
+			[{ vehicleId: "veh-1", placa: "P-123ABC" }],
+			null,
+		);
+
+		expect(filas).toEqual([
+			expect.objectContaining({
+				vehicleId: "veh-1",
+				placa: "P-123ABC",
+				cruceCartera: "no_disponible",
+				titularCarteraNombre: null,
+				numeroSifco: null,
+				estadoCredito: null,
+			}),
+		]);
+	});
+
 	test("el upsert externo usa el indice parcial y parámetros", () => {
 		const [fila] = construirResultados([], [vehiculoSat("P-123ABC")]);
 		const sentencia = new PgDialect().sqlToQuery(

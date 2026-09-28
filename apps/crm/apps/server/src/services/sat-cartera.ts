@@ -12,7 +12,11 @@ export const ESTADOS_CREDITO_OPERATIVOS = [
 
 export type EstadoCreditoOperativo =
 	(typeof ESTADOS_CREDITO_OPERATIVOS)[number];
-export type CruceCartera = "con_credito" | "disponible" | "sin_registro";
+export type CruceCartera =
+	| "con_credito"
+	| "disponible"
+	| "sin_registro"
+	| "no_disponible";
 
 export interface CreditoCarteraVehiculo {
 	numeroSifco: string;
@@ -24,7 +28,7 @@ export interface CreditoCarteraVehiculo {
 export interface VehiculoCarteraEsperado {
 	id: string;
 	placa: string | null;
-	cruceCartera: Exclude<CruceCartera, "sin_registro">;
+	cruceCartera: Exclude<CruceCartera, "sin_registro" | "no_disponible">;
 	titularCarteraNombre: string | null;
 	numeroSifco: string | null;
 	estadoCredito: EstadoCreditoOperativo | null;

@@ -55,7 +55,11 @@ type EstadoSatFiltro =
 	| "activo"
 	| "inactivo"
 	| "no_encontrado";
-type CruceCartera = "con_credito" | "disponible" | "sin_registro";
+type CruceCartera =
+	| "con_credito"
+	| "disponible"
+	| "sin_registro"
+	| "no_disponible";
 type CruceCarteraFiltro = "todos" | "con_credito" | "sin_credito";
 type EstadoCreditoFiltro = "todos" | "ACTIVO" | "MOROSO" | "EN_CONVENIO";
 
@@ -142,6 +146,13 @@ function CruceCarteraBadge({
 			</Badge>
 		);
 	}
+	if (cruce === "no_disponible") {
+		return (
+			<Badge className="border-slate-300 bg-slate-100 text-slate-700">
+				No disponible
+			</Badge>
+		);
+	}
 	return (
 		<Badge className="border-amber-300 bg-amber-100 text-amber-800">
 			<XCircle /> No
@@ -163,6 +174,9 @@ function TitularCell({
 			</span>
 		);
 	}
+	if (cruce === "no_disponible") {
+		return <span className="text-muted-foreground">No disponible</span>;
+	}
 	return <span>Sin crédito</span>;
 }
 
@@ -178,6 +192,7 @@ function textoCruceCartera(cruce: CruceCartera, estadoCredito: string | null) {
 	if (cruce === "con_credito") {
 		return estadoCredito ? `Sí · ${estadoCredito}` : "Sí";
 	}
+	if (cruce === "no_disponible") return "No disponible";
 	return "No";
 }
 
@@ -192,6 +207,7 @@ function textoTitularCartera(cruce: CruceCartera, nombre: string | null) {
 	if (cruce === "con_credito") {
 		return nombre?.trim() || "Titular no identificado en Cartera";
 	}
+	if (cruce === "no_disponible") return "No disponible";
 	return "Sin crédito";
 }
 
@@ -531,7 +547,8 @@ function SatVerificationPage() {
 				(cruceCarteraFiltro === "con_credito" &&
 					vehiculo.cruceCartera === "con_credito") ||
 				(cruceCarteraFiltro === "sin_credito" &&
-					vehiculo.cruceCartera !== "con_credito");
+					(vehiculo.cruceCartera === "disponible" ||
+						vehiculo.cruceCartera === "sin_registro"));
 			const matchesEstadoCredito =
 				estadoCreditoFiltro === "todos" ||
 				vehiculo.estadoCredito?.trim().toUpperCase() === estadoCreditoFiltro;

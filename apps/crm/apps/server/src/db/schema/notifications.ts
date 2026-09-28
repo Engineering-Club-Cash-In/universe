@@ -111,6 +111,11 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// cliente. Se resuelve al registrar esa llamada, o, si es el aviso de un
 	// apagado, también cuando se ejecuta la reactivación que lo revierte.
 	"inmovilizacion_llamar_cliente",
+	// CB-042: un crédito llegó a recuperación de vehículo (forzosa o entrega
+	// voluntaria), o se registró una entrega voluntaria con el crédito ya en
+	// B4. Va al asesor de B4 que lo lleva y a los cobros_supervisor, con el
+	// motivo y los datos de la entrega. Dedup por registro (migración 0065).
+	"recuperacion_vehiculo",
 ]);
 
 // Notifications table

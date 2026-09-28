@@ -14,6 +14,7 @@ import {
 	FileText,
 	HandCoins,
 	Handshake,
+	KeyRound,
 	Loader,
 	Mail,
 	MapPin,
@@ -38,6 +39,11 @@ import {
 	evaluarGestionTempranaB1,
 	type ResultadoGestionB1,
 } from "server/src/lib/gestion-temprana-b1";
+import {
+	motivoBloqueoRecuperacion,
+	operacionRecuperacion,
+	type TipoEnvioRecuperacion,
+} from "server/src/lib/recuperacion-vehiculo";
 import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
@@ -50,6 +56,8 @@ import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { Pagination } from "@/components/cobros/pagination";
 import { PromesaActivaBadge } from "@/components/cobros/promesa-activa-badge";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
+import { RecuperacionVehiculoCard } from "@/components/cobros/recuperacion-vehiculo-card";
+import { RecuperacionVehiculoDialog } from "@/components/cobros/recuperacion-vehiculo-dialog";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
 import {
 	TelefonosEditor,
@@ -293,6 +301,12 @@ const ALERTA_COBROS_CONFIG: Record<string, { label: string; clase: string }> = {
 		label: "Esperando asesor",
 		clase: "bg-red-600 text-white dark:bg-red-700 dark:text-white",
 	},
+	// CB-042: llegó a recuperación de vehículo (o entrega voluntaria en B4).
+	recuperacion_vehiculo: {
+		label: "Recuperación de vehículo",
+		clase:
+			"bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+	},
 };
 
 function getMetodoIcon(metodo: string) {
@@ -461,9 +475,10 @@ function RouteComponent() {
 		null,
 	);
 	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] = useState(false);
-	// Recuperación de vehículo: traslado manual a B4. Motivo obligatorio.
-	const [recuperacionAbierta, setRecuperacionAbierta] = useState(false);
-	const [motivoRecuperacion, setMotivoRecuperacion] = useState("");
+	// CB-042: los dos envíos a recuperación (forzosa / entrega voluntaria)
+	// comparten formulario; null = cerrado.
+	const [envioRecuperacion, setEnvioRecuperacion] =
+		useState<TipoEnvioRecuperacion | null>(null);
 	// COBROS-02 Fase 3: deshacer el convenio, con o sin recuperación en el mismo
 	// gesto. El mismo modal sirve para las dos; lo que cambia es el interruptor.
 	const [deshacerAbierto, setDeshacerAbierto] = useState(false);
@@ -780,18 +795,6 @@ function RouteComponent() {
 		enabled: !!session && !!(casoDetails.data?.numeroCreditoSifco || id),
 	});
 
-	// Obtener información de recuperación si es caso incobrable
-	const recuperacionInfo = useQuery({
-		...orpc.getRecuperacionVehiculo.queryOptions({
-			input: { casoCobroId: id },
-		}),
-		enabled:
-			!!session &&
-			!!id &&
-			tipo === "caso" &&
-			casoDetails.data?.estadoMora === "incobrable",
-	});
-
 	// COBROS-02 Fase 3 — estado del convenio de ESTE crédito, para la banda roja.
 	// Se pregunta al server (que le pregunta a cartera) en vez de deducirlo del
 	// plan de cuotas que ya viene en la ficha: la cobertura de una cuota del
@@ -953,39 +956,6 @@ function RouteComponent() {
 		},
 	});
 
-	// Recuperación de vehículo: manda el crédito a B4 (Última Instancia / Pre
-	// Jurídico). Escalación humana, no consecuencia de la mora.
-	const recuperacionMutation = useMutation({
-		mutationFn: () =>
-			client.enviarCreditoARecuperacion({
-				// El crédito lo resuelve el servidor desde el caso: mandarlo desde acá
-				// dejaba mover créditos ajenos (review de Codex, P1).
-				casoCobroId: casoDetails.data?.id ?? "",
-				motivo: motivoRecuperacion.trim(),
-			}),
-		onSuccess: (r) => {
-			toast.success(
-				r.asesor_sin_cambio
-					? `Crédito trasladado a B${r.bucket_nuevo}. El asesor no cambia: ya cubre ese bucket.`
-					: `Crédito trasladado a B${r.bucket_nuevo} y reasignado.`,
-			);
-			setRecuperacionAbierta(false);
-			setMotivoRecuperacion("");
-			// El badge de bucket y el detalle del crédito cambian con el traslado.
-			queryClient.invalidateQueries({
-				queryKey: orpc.getBucketActualCredito.key(),
-			});
-			queryClient.invalidateQueries({
-				queryKey: orpc.getDetallesCreditoCarteraBack.key(),
-			});
-		},
-		onError: (error: Error) => {
-			toast.error(
-				error.message || "No se pudo enviar el crédito a recuperación",
-			);
-		},
-	});
-
 	// COBROS-02 Fase 3 — deshacer el convenio (soft delete), con la opción de
 	// mandar el crédito a recuperación en el mismo gesto.
 	const deshacerConvenioMutation = useMutation({
@@ -1027,6 +997,10 @@ function RouteComponent() {
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getBucketActualCredito.key(),
+			});
+			// CB-042: "deshacer y mandar" también deja registro de recuperación.
+			queryClient.invalidateQueries({
+				queryKey: orpc.getRecuperacionesVehiculoCaso.key(),
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getAlertaConvenioDelCaso.key(),
@@ -1350,7 +1324,6 @@ function RouteComponent() {
 			: `${totalReferencias === 1 ? "1 referencia" : `${totalReferencias} referencias`} (${referenciasConTelefono} con teléfono)`;
 	const contactosPorPagina = historialContactosPagina.data?.porPagina ?? 10;
 	const cuotas = historialPagos.data || [];
-	const recuperacion = recuperacionInfo.data;
 
 	// El bloque de props que comparten TODOS los modales de contacto: antes
 	// vivía copiado seis veces (uno por canal). El modal solo se monta cuando
@@ -1529,23 +1502,27 @@ function RouteComponent() {
 	const recuperacionEnB5 =
 		enRecuperacion && bucketNumero !== null && bucketNumero >= 5;
 
-	// Mandar a recuperación: la decisión es "ya no se recupera por teléfono".
-	// Se habilita de B1 a B3 (decisión del plan 08): en B0 no hay nada que
-	// recuperar todavía, y en B4/B5 el crédito ya está donde la recuperación lo
-	// pondría. El botón NO se esconde — el asesor tiene que saber que existe y
-	// por qué hoy no aplica, mismo criterio que el convenio.
-	const recuperacionMotivoBloqueo: string | null = !puedeRecuperarVehiculo
+	// Recuperación de vehículo (CB-042): dos envíos con su propio rango, que
+	// define la librería compartida con el servidor. La forzosa, de B1 a B3
+	// (plan 08: en B0 no hay nada que recuperar y en B4/B5 ya está donde la
+	// pondría). La entrega voluntaria, de B1 a B4: en B4 solo se registra. Las
+	// opciones NO se esconden — el asesor tiene que saber que existen y por
+	// qué hoy no aplican, mismo criterio que el convenio.
+	const recuperacionBloqueoBase: string | null = !puedeRecuperarVehiculo
 		? "Solo el equipo de cobros puede mandar una cuenta a recuperación."
 		: !caso.id || !caso.numeroCreditoSifco
 			? "Este caso todavía no tiene crédito de cartera asociado."
 			: bucketActual.isPending
 				? "Cargando el bucket del crédito…"
-				: bucketNumero === null
-					? "El crédito no tiene bucket: no se puede registrar el traslado."
-					: bucketNumero < 1 || bucketNumero > 3
-						? `Disponible de B1 a B3. Este caso está en ${bucketPrefijo ?? "un bucket sin definir"}.`
-						: null;
-	const recuperacionHabilitada = recuperacionMotivoBloqueo === null;
+				: null;
+	const bloqueoRecuperacion = (tipo: TipoEnvioRecuperacion) =>
+		recuperacionBloqueoBase ??
+		motivoBloqueoRecuperacion(tipo, bucketNumero, bucketPrefijo);
+	const bloqueoForzosa = bloqueoRecuperacion("tomado");
+	const bloqueoVoluntaria = bloqueoRecuperacion("entrega_voluntaria");
+	const operacionEnvio = envioRecuperacion
+		? operacionRecuperacion(envioRecuperacion, bucketNumero)
+		: null;
 	// El cliente ORPC infiere `{}` para esta query (mismo caso que CasoDetalle).
 	const maxMesesConvenio =
 		(convenioConfig.data as { maxMeses?: number } | undefined)?.maxMeses ?? 6;
@@ -1975,20 +1952,69 @@ function RouteComponent() {
 										</DropdownMenu>
 									)}
 
-									{/* Mandar a recuperación, sin convenio de por medio. No se
-									    esconde cuando no aplica: se deshabilita y el título dice
-									    por qué (mismo criterio que el convenio). */}
+									{/* CB-042 · Mandar a recuperación, sin convenio de por
+									    medio. Dos envíos: el asesor decide quitar la unidad, o el
+									    cliente la entrega. Ya no va en rojo: son dos caminos, y
+									    uno de ellos (la entrega) es el cliente colaborando. Las
+									    opciones no se esconden cuando no aplican: se deshabilitan
+									    con el motivo a la vista. */}
 									{puedeRecuperarVehiculo && !puedeDeshacerConvenio && (
-										<Button
-											variant="outline"
-											className="flex items-center gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 dark:border-red-900 dark:hover:bg-red-950"
-											disabled={!recuperacionHabilitada}
-											title={recuperacionMotivoBloqueo ?? undefined}
-											onClick={() => setRecuperacionAbierta(true)}
-										>
-											<Car className="h-4 w-4" />
-											Recuperación de vehículo
-										</Button>
+										<DropdownMenu>
+											<DropdownMenuTrigger asChild>
+												<Button
+													variant="outline"
+													className="flex items-center gap-2"
+													disabled={
+														bloqueoForzosa !== null &&
+														bloqueoVoluntaria !== null
+													}
+													title={
+														bloqueoForzosa !== null &&
+														bloqueoVoluntaria !== null
+															? bloqueoVoluntaria
+															: undefined
+													}
+												>
+													<Car className="h-4 w-4" />
+													Recuperación de vehículo
+													<ChevronDown className="h-3.5 w-3.5 opacity-60" />
+												</Button>
+											</DropdownMenuTrigger>
+											<DropdownMenuContent align="end" className="w-80">
+												<DropdownMenuItem
+													className="cursor-pointer items-start gap-2 py-2"
+													disabled={bloqueoForzosa !== null}
+													onClick={() => setEnvioRecuperacion("tomado")}
+												>
+													<Car className="mt-0.5 h-4 w-4 text-amber-600" />
+													<div>
+														<p className="font-medium">Recuperar vehículo</p>
+														<p className="text-muted-foreground text-xs">
+															{bloqueoForzosa ??
+																"El cliente no paga: pasa a B4 con los motivos y dónde está la unidad."}
+														</p>
+													</div>
+												</DropdownMenuItem>
+												<DropdownMenuItem
+													className="cursor-pointer items-start gap-2 py-2"
+													disabled={bloqueoVoluntaria !== null}
+													onClick={() =>
+														setEnvioRecuperacion("entrega_voluntaria")
+													}
+												>
+													<KeyRound className="mt-0.5 h-4 w-4 text-sky-600" />
+													<div>
+														<p className="font-medium">Entrega voluntaria</p>
+														<p className="text-muted-foreground text-xs">
+															{bloqueoVoluntaria ??
+																(bucketNumero === 4
+																	? "El cliente entrega la unidad. Ya está en B4: se registra la entrega."
+																	: "El cliente entrega la unidad: pasa a B4 con fecha, lugar y documentos.")}
+														</p>
+													</div>
+												</DropdownMenuItem>
+											</DropdownMenuContent>
+										</DropdownMenu>
 									)}
 
 									{/* 4 · Lo demás — y lo que se venga a futuro — cabe acá
@@ -2130,78 +2156,20 @@ function RouteComponent() {
 									</AlertDialogContent>
 								</AlertDialog>
 
-								<AlertDialog
-									open={recuperacionAbierta}
-									onOpenChange={(abierto) => {
-										setRecuperacionAbierta(abierto);
-										if (!abierto) setMotivoRecuperacion("");
-									}}
-								>
-									<AlertDialogContent>
-										<AlertDialogHeader>
-											<AlertDialogTitle>
-												¿Enviar a recuperación de vehículo?
-											</AlertDialogTitle>
-											<AlertDialogDescription asChild>
-												<div className="space-y-3">
-													<p>
-														El crédito pasa a{" "}
-														<strong>
-															B4 · Última Instancia / Pre Jurídico
-														</strong>{" "}
-														sin importar cuántas cuotas lleve atrasadas, y queda
-														con el asesor que cubre ese bucket.
-													</p>
-													<p>
-														El crédito queda en estado{" "}
-														<strong>En recuperación</strong>, que fija B4 como
-														piso: ya no vuelve a bajar en la corrida nocturna.
-														Si le caen 5 cuotas atrasadas sube solo a B5,
-														conservando el estado.
-													</p>
-													<p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-														El estado se levanta <strong>solo</strong> si el
-														cliente paga todo lo que debe —cuotas vencidas y
-														mora— y contabilidad valida ese pago. Un convenio no
-														lo levanta.
-													</p>
-												</div>
-											</AlertDialogDescription>
-										</AlertDialogHeader>
-										<div className="space-y-2">
-											<Label htmlFor="motivo-recuperacion">
-												Motivo <span className="text-red-600">*</span>
-											</Label>
-											<Textarea
-												id="motivo-recuperacion"
-												value={motivoRecuperacion}
-												onChange={(e) => setMotivoRecuperacion(e.target.value)}
-												placeholder="Por qué se decide recuperar la unidad"
-												rows={3}
-											/>
-										</div>
-										<AlertDialogFooter>
-											<AlertDialogCancel>Cancelar</AlertDialogCancel>
-											<AlertDialogAction
-												disabled={
-													!motivoRecuperacion.trim() ||
-													recuperacionMutation.isPending
-												}
-												onClick={(e) => {
-													// El AlertDialogAction cierra el modal por defecto;
-													// acá se cierra al confirmar el éxito, para no dejar
-													// el motivo escrito perdido si el traslado falla.
-													e.preventDefault();
-													recuperacionMutation.mutate();
-												}}
-											>
-												{recuperacionMutation.isPending
-													? "Enviando…"
-													: "Enviar a recuperación"}
-											</AlertDialogAction>
-										</AlertDialogFooter>
-									</AlertDialogContent>
-								</AlertDialog>
+								{/* CB-042 · El formulario de los dos envíos. `operacionEnvio`
+								    dice si traslada (B1–B3) o solo registra (entrega en B4). */}
+								{caso.id && envioRecuperacion && operacionEnvio && (
+									<RecuperacionVehiculoDialog
+										open
+										onOpenChange={(abierto) => {
+											if (!abierto) setEnvioRecuperacion(null);
+										}}
+										tipo={envioRecuperacion}
+										operacion={operacionEnvio}
+										casoCobroId={caso.id}
+										vehicleId={caso.vehicleId ?? null}
+									/>
+								)}
 
 								{/* COBROS-02 Fase 3 — deshacer el convenio. Un solo modal
 								    para las dos variantes: lo que cambia es si además manda el
@@ -2367,6 +2335,18 @@ function RouteComponent() {
 				<TabsContent value="resumen" className="mt-4">
 					<div className="grid gap-6 lg:grid-cols-3">
 						<div className="space-y-6 lg:col-span-2">
+							{/* CB-042 · Si el crédito llegó a recuperación, es lo primero
+							    que necesita el asesor de B4: por qué, dónde está la unidad
+							    y, si la entrega el cliente, cuándo y dónde. */}
+							{caso.id && (
+								<RecuperacionVehiculoCard
+									casoCobroId={caso.id}
+									bucketNumero={bucketNumero}
+									enRecuperacion={enRecuperacion}
+									puedeGestionar={puedeRecuperarVehiculo}
+									onVerVehiculo={() => setTabActiva("vehiculo")}
+								/>
+							)}
 							{/* Resumen del Caso */}
 							<Card>
 								<CardHeader>
@@ -4702,110 +4682,16 @@ function RouteComponent() {
 									vehicleId={caso.vehicleId}
 								/>
 							)}
-						{/* Información de Recuperación - Solo para casos incobrables */}
-						{caso.estadoMora === "incobrable" && recuperacion && (
-							<Card>
-								<CardHeader>
-									<CardTitle className="flex items-center gap-2">
-										<Car className="h-5 w-5" />
-										Recuperación de Vehículo
-									</CardTitle>
-								</CardHeader>
-								<CardContent>
-									<div className="space-y-3">
-										<div>
-											<p className="text-muted-foreground text-sm">
-												Tipo de Recuperación
-											</p>
-											<Badge
-												className={
-													recuperacion.tipoRecuperacion === "entrega_voluntaria"
-														? "bg-blue-100 text-blue-800"
-														: recuperacion.tipoRecuperacion === "tomado"
-															? "bg-orange-100 text-orange-800"
-															: recuperacion.tipoRecuperacion ===
-																	"orden_secuestro"
-																? "bg-red-100 text-red-800"
-																: "bg-gray-100 text-gray-800"
-												}
-											>
-												{recuperacion.tipoRecuperacion === "entrega_voluntaria"
-													? "Entrega Voluntaria"
-													: recuperacion.tipoRecuperacion === "tomado"
-														? "Tomado"
-														: recuperacion.tipoRecuperacion ===
-																"orden_secuestro"
-															? "Orden de Secuestro"
-															: recuperacion.tipoRecuperacion}
-											</Badge>
-										</div>
-
-										{recuperacion.fechaRecuperacion && (
-											<div>
-												<p className="text-muted-foreground text-sm">
-													Fecha de Recuperación
-												</p>
-												<p className="font-medium">
-													{new Date(
-														recuperacion.fechaRecuperacion,
-													).toLocaleDateString("es-GT")}
-												</p>
-											</div>
-										)}
-
-										{recuperacion.ordenSecuestro && (
-											<div className="border-red-500 border-l-4 bg-red-50 py-2 pl-3">
-												<h4 className="mb-1 font-medium text-red-800">
-													Proceso Legal
-												</h4>
-												{recuperacion.numeroExpediente && (
-													<p className="text-sm">
-														<span className="font-medium">Expediente:</span>{" "}
-														{recuperacion.numeroExpediente}
-													</p>
-												)}
-												{recuperacion.juzgadoCompetente && (
-													<p className="text-sm">
-														<span className="font-medium">Juzgado:</span>{" "}
-														{recuperacion.juzgadoCompetente}
-													</p>
-												)}
-											</div>
-										)}
-
-										<div>
-											<p className="text-muted-foreground text-sm">Estado</p>
-											<Badge
-												variant={
-													recuperacion.completada ? "default" : "secondary"
-												}
-											>
-												{recuperacion.completada ? "Completada" : "En Proceso"}
-											</Badge>
-										</div>
-
-										{recuperacion.observaciones && (
-											<div>
-												<p className="text-muted-foreground text-sm">
-													Observaciones
-												</p>
-												<p className="text-sm">{recuperacion.observaciones}</p>
-											</div>
-										)}
-
-										{recuperacion.responsableRecuperacion && (
-											<div>
-												<p className="text-muted-foreground text-sm">
-													Responsable
-												</p>
-												<p className="font-medium text-sm">
-													{recuperacion.responsableRecuperacion}
-												</p>
-											</div>
-										)}
-									</div>
-								</CardContent>
-							</Card>
+						{/* CB-042 · El registro de recuperación (forzosa o entrega
+						    voluntaria). Reemplaza la tarjeta vieja, que solo salía para
+						    incobrables y leía una tabla que nadie llenaba. */}
+						{caso.id && (
+							<RecuperacionVehiculoCard
+								casoCobroId={caso.id}
+								bucketNumero={bucketNumero}
+								enRecuperacion={enRecuperacion}
+								puedeGestionar={puedeRecuperarVehiculo}
+							/>
 						)}
 					</div>
 				</TabsContent>

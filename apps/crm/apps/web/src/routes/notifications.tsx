@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	Bell,
+	Car,
 	CheckCircle,
 	ChevronLeft,
 	ChevronRight,
@@ -308,6 +309,18 @@ const COBROS_TIPO_CONFIG: Record<
 		iconWrap: "bg-red-100 dark:bg-red-900/40",
 		iconColor: "text-red-600 dark:text-red-400",
 		badge: "bg-red-600 text-white dark:bg-red-700 dark:text-white",
+	},
+	// CB-042: un crédito llegó a recuperación de vehículo, o se registró una
+	// entrega voluntaria con el crédito ya en B4.
+	recuperacion_vehiculo: {
+		label: "Recuperación de vehículo",
+		border: "border-amber-200 dark:border-amber-900/50",
+		bg: "bg-amber-50/50 dark:bg-amber-950/20",
+		icon: Car,
+		iconWrap: "bg-amber-100 dark:bg-amber-900/40",
+		iconColor: "text-amber-600 dark:text-amber-400",
+		badge:
+			"bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
 	},
 };
 

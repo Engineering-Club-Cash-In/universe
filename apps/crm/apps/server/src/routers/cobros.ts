@@ -36,7 +36,6 @@ import {
 	conveniosPago,
 	estadoMoraEnum,
 	metasMoraCobros,
-	recuperacionesVehiculo,
 } from "../db/schema/cobros";
 import { cobrosSendLogs } from "../db/schema/cobros-send-logs";
 import {
@@ -141,6 +140,14 @@ import {
 } from "../lib/promesa-pago";
 import { condicionesPromesaVigente } from "../lib/promesa-vigente";
 import { pushPromesaActivaEnSegundoPlano } from "../lib/push-promesa-cartera-back";
+import {
+	BUCKET_MAXIMO_RECUPERACION,
+	BUCKET_MINIMO_RECUPERACION,
+	type DetalleRecuperacion,
+	detalleRecuperacionSchema,
+	TIPOS_ENVIO_RECUPERACION,
+	validarDetalleRecuperacion,
+} from "../lib/recuperacion-vehiculo";
 import { resolverNumeroSifco } from "../lib/resolver-numero-sifco";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -179,6 +186,7 @@ import {
 	reintentarGestionLinkPagalo,
 } from "../services/pagalo-link-orchestrator";
 import { resolverVehiculoCasoPagalo } from "../services/pagalo-vehiculo";
+import { prepararEnvioRecuperacion } from "../services/recuperacion-vehiculo";
 import {
 	type EstadoCuentaErrorCodigo,
 	sendEstadoCuentaWhatsapp,
@@ -691,16 +699,6 @@ async function promesaActivaDelCaso(casoCobroId: string) {
  * red — a costa de ser el estado del último sync y no el del instante exacto.
  */
 const TIMEOUT_BUCKET_SNAPSHOT_MS = 3000;
-
-/**
- * Rango de origen de la recuperación de vehículo: B1 a B3 (plan 08). La MISMA
- * regla vive en tres lugares y tienen que coincidir:
- *  · la ficha (`routes/cobros/$id.tsx`), que deshabilita el botón suelto;
- *  · este router, que la exige antes de "deshacer y mandar";
- *  · cartera (`BUCKET_MINIMO/MAXIMO_RECUPERACION`), que manda bajo sus locks.
- */
-const BUCKET_MINIMO_RECUPERACION = 1;
-const BUCKET_MAXIMO_RECUPERACION = 3;
 
 async function capturarBucketSnapshot(
 	casoCobroId: string,
@@ -4691,53 +4689,6 @@ export const cobrosRouter = {
 			}
 		}),
 
-	// Obtener información de recuperación de vehículo
-	getRecuperacionVehiculo: cobrosProcedure
-		.input(z.object({ casoCobroId: z.string().uuid() }))
-		.handler(async ({ input, context }) => {
-			// Verificar acceso
-			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
-				const caso = await db
-					.select()
-					.from(casosCobros)
-					.where(
-						and(
-							eq(casosCobros.id, input.casoCobroId),
-							eq(casosCobros.responsableCobros, context.userId),
-						),
-					)
-					.limit(1);
-
-				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para ver esta información",
-					});
-				}
-			}
-
-			const recuperacion = await db
-				.select({
-					id: recuperacionesVehiculo.id,
-					tipoRecuperacion: recuperacionesVehiculo.tipoRecuperacion,
-					fechaRecuperacion: recuperacionesVehiculo.fechaRecuperacion,
-					ordenSecuestro: recuperacionesVehiculo.ordenSecuestro,
-					numeroExpediente: recuperacionesVehiculo.numeroExpediente,
-					juzgadoCompetente: recuperacionesVehiculo.juzgadoCompetente,
-					completada: recuperacionesVehiculo.completada,
-					observaciones: recuperacionesVehiculo.observaciones,
-					responsableRecuperacion: user.name,
-				})
-				.from(recuperacionesVehiculo)
-				.leftJoin(
-					user,
-					eq(recuperacionesVehiculo.responsableRecuperacion, user.id),
-				)
-				.where(eq(recuperacionesVehiculo.casoCobroId, input.casoCobroId))
-				.limit(1);
-
-			return recuperacion[0] || null;
-		}),
-
 	// Obtener detalles de contrato (puede ser caso de cobros o contrato directo)
 	getDetallesContrato: cobrosProcedure
 		.input(
@@ -8565,15 +8516,39 @@ export const cobrosRouter = {
 	// sabe que la unidad ya no se recupera por teléfono. La trazabilidad la da
 	// el motivo obligatorio + la bitácora API_MANUAL con su usuario.
 	//
-	// ⚠️ PENDIENTE: el traslado NO se sostiene solo. El motor de las 23:59 GT
-	// vuelve a derivar el bucket de la mora y devuelve la cuenta a su escalón
-	// (ver docs/features/cobros-02/07-recuperacion-de-vehiculo.md).
+	// CB-042: dos tipos de envío —recuperación forzosa (`tomado`) y entrega
+	// voluntaria— y cada uno deja su formulario en `recuperaciones_vehiculo`,
+	// que es lo que ve el asesor de B4. `tipo` y `detalle` son opcionales a
+	// propósito: un llamador sin formulario (el cierre de la inmovilización de
+	// CB-041, por ejemplo) sigue mandando solo `motivo` y queda registrado
+	// como forzosa con ese texto.
 	enviarCreditoARecuperacion: cobrosProcedure
 		.input(
-			z.object({
-				casoCobroId: z.string().uuid(),
-				motivo: z.string().trim().min(1, "El motivo es obligatorio"),
-			}),
+			z
+				.object({
+					casoCobroId: z.string().uuid(),
+					motivo: z.string().trim().max(2000).optional(),
+					tipo: z.enum(TIPOS_ENVIO_RECUPERACION).default("tomado"),
+					detalle: detalleRecuperacionSchema.optional(),
+				})
+				.superRefine((v, ctx) => {
+					if (v.detalle) {
+						validarDetalleRecuperacion(v.tipo, v.detalle, ctx);
+						return;
+					}
+					if (v.tipo === "entrega_voluntaria") {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message:
+								"La entrega voluntaria necesita el formulario (fecha, lugar y estado).",
+						});
+					} else if (!v.motivo) {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message: "El motivo es obligatorio",
+						});
+					}
+				}),
 		)
 		.handler(async ({ input, context }) => {
 			// El crédito NO se recibe del cliente: sale del caso. `credito_id` es
@@ -8632,14 +8607,31 @@ export const cobrosRouter = {
 			)
 				? undefined
 				: context.session.user.email;
+			// CB-042: el formulario se guarda ANTES del traslado y se descarta si
+			// cartera lo rechaza (el porqué del orden, en services/recuperacion-vehiculo.ts).
+			const detalle: DetalleRecuperacion = input.detalle ?? {
+				motivos: [],
+				motivoDetalle: input.motivo,
+			};
+			const envio = await prepararEnvioRecuperacion({
+				casoCobroId: input.casoCobroId,
+				numeroSifco: caso.numeroCreditoSifco,
+				tipo: input.tipo,
+				detalle,
+				registradoPor: context.userId,
+			});
+			let res: Awaited<
+				ReturnType<typeof carteraBackClient.enviarARecuperacionVehiculo>
+			>;
 			try {
-				return await carteraBackClient.enviarARecuperacionVehiculo({
+				res = await carteraBackClient.enviarARecuperacionVehiculo({
 					credito_id: referencia.carteraCreditoId,
-					motivo: input.motivo,
+					motivo: envio.motivoCartera,
 					usuario_email: context.session.user.email,
 					asesor_esperado_email: dueñoEsperado,
 				});
 			} catch (err) {
+				await envio.descartar();
 				throw new ORPCError("BAD_REQUEST", {
 					message:
 						err instanceof Error
@@ -8647,6 +8639,8 @@ export const cobrosRouter = {
 							: "No se pudo enviar el crédito a recuperación de vehículo",
 				});
 			}
+			await envio.confirmarTraslado(res);
+			return { ...res, recuperacionId: envio.registroId };
 		}),
 
 	/**
@@ -8861,15 +8855,33 @@ export const cobrosRouter = {
 			// El rango de origen ya se verificó arriba, antes de deshacer. Cartera
 			// lo revalida bajo sus locks: si entre medio el crédito cambió de
 			// bucket, esto falla y se reporta el parcial como siempre.
+			//
+			// CB-042: también deja su registro para el asesor de B4, con el mismo
+			// orden que el envío suelto (se guarda antes, se descarta si falla).
+			// Sin formulario: el motivo es el del modal de deshacer.
+			let envio: Awaited<ReturnType<typeof prepararEnvioRecuperacion>> | null =
+				null;
 			try {
+				envio = await prepararEnvioRecuperacion({
+					casoCobroId: input.casoCobroId,
+					numeroSifco: caso.numeroCreditoSifco,
+					tipo: "tomado",
+					detalle: {
+						motivos: ["convenio_incumplido"],
+						motivoDetalle: input.motivo,
+					},
+					registradoPor: context.userId,
+				});
 				const recuperacion = await carteraBackClient.enviarARecuperacionVehiculo({
 					credito_id: resultado.credito_id,
 					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo}`,
 					usuario_email: context.session.user.email,
 					asesor_esperado_email: dueñoEsperado,
 				});
+				await envio.confirmarTraslado(recuperacion);
 				return { ...resultado, recuperacion };
 			} catch (err) {
+				await envio?.descartar();
 				return {
 					...resultado,
 					recuperacion: null,

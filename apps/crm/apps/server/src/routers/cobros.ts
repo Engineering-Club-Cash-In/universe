@@ -46,6 +46,10 @@ import {
 	opportunities,
 	salesStages,
 } from "../db/schema/crm";
+import {
+	inmovilizacionesUnidad,
+	inmovilizacionesUnidadEventos,
+} from "../db/schema/inmovilizacion-unidad";
 import { notifications } from "../db/schema/notifications";
 import {
 	pagaloPaymentEvents,
@@ -189,6 +193,7 @@ import {
 } from "../services/sync-casos-cobros";
 import type { CreditoDirectoResponse } from "../types/cartera-back";
 import { normalizarDpi } from "../utils/cui-validation";
+import { reasignarAvisosLlamarCliente } from "../services/inmovilizacion-notif";
 import { createNotification } from "./notifications";
 
 // Helper: Obtener todos los créditos de todos los estados
@@ -802,6 +807,60 @@ export async function assertAccesoCasoCobro(
 		throw new ORPCError("NOT_FOUND", {
 			message: "Caso de cobro no encontrado o sin acceso.",
 		});
+	}
+}
+
+/**
+ * CB-041: Si el caso tiene una inmovilización (apagado) ejecutada pendiente de
+ * recuperación (`no_pago_pendiente_recuperacion`), actualiza atómicamente su
+ * resultado a `enviada_recuperacion` y registra el evento en la bitácora.
+ *
+ * Tratado como reconciliación best-effort: si la base de datos local tiene un
+ * error transitorio, se captura y loguea para no fallar una operación de
+ * recuperación que ya fue completada exitosamente en cartera-back.
+ */
+export async function marcarInmovilizacionEnviadaARecuperacion(params: {
+	casoCobroId: string;
+	usuarioId: string;
+	motivo: string;
+}): Promise<void> {
+	try {
+		await db.transaction(async (tx) => {
+			const actualizadas = await tx
+				.update(inmovilizacionesUnidad)
+				.set({
+					resultado: "enviada_recuperacion",
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(inmovilizacionesUnidad.casoCobroId, params.casoCobroId),
+						eq(inmovilizacionesUnidad.accion, "apagado"),
+						eq(inmovilizacionesUnidad.estado, "ejecutada"),
+						eq(
+							inmovilizacionesUnidad.resultado,
+							"no_pago_pendiente_recuperacion",
+						),
+					),
+				)
+				.returning({ id: inmovilizacionesUnidad.id });
+
+			for (const inm of actualizadas) {
+				await tx.insert(inmovilizacionesUnidadEventos).values({
+					inmovilizacionId: inm.id,
+					evento: "enviar_a_recuperacion",
+					estadoAnterior: "ejecutada",
+					estadoNuevo: "ejecutada",
+					usuarioId: params.usuarioId,
+					detalle: { motivo: params.motivo },
+				});
+			}
+		});
+	} catch (err) {
+		console.error(
+			"[inmovilizacion] Error al reconciliar inmovilización enviada a recuperación:",
+			err,
+		);
 	}
 }
 
@@ -2293,6 +2352,10 @@ export const cobrosRouter = {
 					montoComprometido: contactosCobros.montoComprometido,
 					realizadoPorId: contactosCobros.realizadoPor,
 					realizadoPor: user.name,
+					// CB-041: si esta gestión ya se enlazó como "la llamada posterior"
+					// de una inmovilización, InmovilizacionCard la excluye de la
+					// lista de contactos elegibles.
+					inmovilizacionId: contactosCobros.inmovilizacionId,
 				})
 				.from(contactosCobros)
 				.leftJoin(user, eq(contactosCobros.realizadoPor, user.id))
@@ -3214,6 +3277,13 @@ export const cobrosRouter = {
 				})
 				.where(eq(casosCobros.id, input.casoCobroId))
 				.returning();
+
+			// Mover avisos abiertos de llamada de inmovilización al nuevo responsable
+			await reasignarAvisosLlamarCliente({
+				casoCobroId: input.casoCobroId,
+				nuevoResponsableUserId: input.responsableCobros,
+				soloSiResponsableEs: input.responsableCobros,
+			});
 
 			// Notificar al nuevo cobrador asignado
 			await createNotification({
@@ -8632,8 +8702,11 @@ export const cobrosRouter = {
 			)
 				? undefined
 				: context.session.user.email;
+			let res: Awaited<
+				ReturnType<typeof carteraBackClient.enviarARecuperacionVehiculo>
+			>;
 			try {
-				return await carteraBackClient.enviarARecuperacionVehiculo({
+				res = await carteraBackClient.enviarARecuperacionVehiculo({
 					credito_id: referencia.carteraCreditoId,
 					motivo: input.motivo,
 					usuario_email: context.session.user.email,
@@ -8647,6 +8720,14 @@ export const cobrosRouter = {
 							: "No se pudo enviar el crédito a recuperación de vehículo",
 				});
 			}
+
+			await marcarInmovilizacionEnviadaARecuperacion({
+				casoCobroId: input.casoCobroId,
+				usuarioId: context.userId,
+				motivo: input.motivo,
+			});
+
+			return res;
 		}),
 
 	/**
@@ -8861,24 +8942,39 @@ export const cobrosRouter = {
 			// El rango de origen ya se verificó arriba, antes de deshacer. Cartera
 			// lo revalida bajo sus locks: si entre medio el crédito cambió de
 			// bucket, esto falla y se reporta el parcial como siempre.
+			let recuperacion: Awaited<
+				ReturnType<typeof carteraBackClient.enviarARecuperacionVehiculo>
+			> | null = null;
+			let recuperacionError: string | null = null;
 			try {
-				const recuperacion = await carteraBackClient.enviarARecuperacionVehiculo({
+				recuperacion = await carteraBackClient.enviarARecuperacionVehiculo({
 					credito_id: resultado.credito_id,
 					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo}`,
 					usuario_email: context.session.user.email,
 					asesor_esperado_email: dueñoEsperado,
 				});
-				return { ...resultado, recuperacion };
 			} catch (err) {
-				return {
-					...resultado,
-					recuperacion: null,
-					recuperacionError:
-						err instanceof Error
-							? err.message
-							: "No se pudo enviar el crédito a recuperación",
-				};
+				recuperacionError =
+					err instanceof Error
+						? err.message
+						: "No se pudo enviar el crédito a recuperación";
 			}
+
+			if (recuperacion) {
+				await marcarInmovilizacionEnviadaARecuperacion({
+					casoCobroId: input.casoCobroId,
+					usuarioId: context.userId,
+					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo}`,
+				});
+				return { ...resultado, recuperacion };
+			}
+
+			return {
+				...resultado,
+				recuperacion: null,
+				recuperacionError:
+					recuperacionError ?? "No se pudo enviar el crédito a recuperación",
+			};
 		}),
 
 	// Bitácora de reasignaciones de asesor (auditoría) — manual + automática.

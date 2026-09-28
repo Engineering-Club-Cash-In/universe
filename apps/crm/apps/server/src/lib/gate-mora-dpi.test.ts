@@ -197,7 +197,8 @@ describe("gate de mora: fail-closed", () => {
 		);
 
 		expect(caido.mensaje).toContain("No se pudo verificar");
-		expect(caido.mensaje).toContain("intenta de nuevo");
+		// HOTFIX 2026-09-28: ya no rechaza, así que avisa que se dejó continuar.
+		expect(caido.mensaje).toBe(MENSAJE_PASO_SIN_VERIFICAR);
 		// Y sobre todo: no acusa al cliente de tener mora.
 		expect(caido.mensaje).not.toContain("saldo en mora");
 		expect(caido.mensaje).not.toBe(moroso.mensaje);

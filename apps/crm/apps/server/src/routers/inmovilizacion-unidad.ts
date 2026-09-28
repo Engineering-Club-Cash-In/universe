@@ -227,6 +227,39 @@ async function filaSigueVigente(
 }
 
 /**
+ * Determina si una inmovilización ejecutada aún requiere que se envíe o
+ * mantenga abierto el aviso de "llamar al cliente" (o confirmación de
+ * reactivación).
+ *
+ * Retorna false si:
+ * 1. La llamada de confirmación ya fue registrada (`llamadaContactoId !== null`).
+ * 2. La acción quedó obsoleta por un evento posterior en la unidad física
+ *    (apagado superado por reactivación, o reactivación superada por nuevo apagado).
+ */
+async function necesitaAvisoLlamada(
+	inm: Pick<
+		FilaInmovilizacion,
+		"id" | "casoCobroId" | "wialonUnitId" | "accion"
+	>,
+): Promise<boolean> {
+	const [actual] = await db
+		.select()
+		.from(inmovilizacionesUnidad)
+		.where(eq(inmovilizacionesUnidad.id, inm.id))
+		.limit(1);
+
+	if (
+		!actual ||
+		(actual.llamadaContactoId ?? null) !== null ||
+		actual.estado !== "ejecutada"
+	) {
+		return false;
+	}
+
+	return filaSigueVigente(actual, getHistorialUnidadFisica);
+}
+
+/**
  * La fila EJECUTADA más reciente (por `ejecutadoAt`) de una `accion` dada.
  * Con "apagado" es la que tiene la unidad apagada hoy cuando `estadoUnidad`
  * dice "inmovilizada" — la usan el banner de "llamar al cliente" y la
@@ -880,26 +913,37 @@ export const inmovilizacionUnidadRouter = {
 			// NADIE — ni al asesor, ni a quien pidió la acción. Review de Codex.
 			const asesorUserId = caso?.responsableCobros ?? inm.solicitadoPor;
 			if (asesorUserId) {
-				if (inm.accion === "apagado") {
-					await notificarLlamarCliente({
-						inmovilizacionId: inm.id,
-						casoCobroId: inm.casoCobroId,
-						asesorUserId,
-						clienteNombre: caso?.clienteNombre ?? undefined,
-						ejecutadoPorUserId: context.userId,
-						ejecutadoPorRole: context.userRole,
-					});
-				} else {
-					// El asesor es quien le avisa al cliente que ya puede usar el
-					// vehículo: sin este aviso no se entera de que LEGION lo reactivó.
-					await notificarUnidadReactivada({
-						inmovilizacionId: inm.id,
-						casoCobroId: inm.casoCobroId,
-						asesorUserId,
-						clienteNombre: caso?.clienteNombre ?? undefined,
-						ejecutadoPorUserId: context.userId,
-						ejecutadoPorRole: context.userRole,
-					});
+				if (await necesitaAvisoLlamada(inm)) {
+					if (inm.accion === "apagado") {
+						await notificarLlamarCliente({
+							inmovilizacionId: inm.id,
+							casoCobroId: inm.casoCobroId,
+							asesorUserId,
+							clienteNombre: caso?.clienteNombre ?? undefined,
+							ejecutadoPorUserId: context.userId,
+							ejecutadoPorRole: context.userRole,
+						});
+					} else {
+						// El asesor es quien le avisa al cliente que ya puede usar el
+						// vehículo: sin este aviso no se entera de que LEGION lo reactivó.
+						await notificarUnidadReactivada({
+							inmovilizacionId: inm.id,
+							casoCobroId: inm.casoCobroId,
+							asesorUserId,
+							clienteNombre: caso?.clienteNombre ?? undefined,
+							ejecutadoPorUserId: context.userId,
+							ejecutadoPorRole: context.userRole,
+						});
+					}
+
+					// Reconciliación: si entre la comprobación previa y el await de envío
+					// se completó una llamada o la acción quedó superada por un evento
+					// posterior en la unidad física, la resolución de avisos corrió
+					// antes de que esta fila existiera en notifications. Re-verificamos
+					// y cerramos el aviso si ya no aplica.
+					if (!(await necesitaAvisoLlamada(inm))) {
+						await resolverAvisoLlamarCliente(inm.id);
+					}
 				}
 			}
 

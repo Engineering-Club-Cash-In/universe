@@ -56,6 +56,7 @@ let resolverPendientesLlamadas: string[] = [];
 let unidadReactivadaNotificada = 0;
 let resolverAvisoLlamarClienteLlamadas: string[] = [];
 let notificarLlamarClienteLlamadas: { asesorUserId: string }[] = [];
+let onNotificarLlamarCliente: (() => void) | null = null;
 let reactivacionesObsoletasMock: { id: string }[] = [];
 // bloquearUnidadFisica (review de Codex, PR #1758): cada llamada a
 // tx.execute() dentro de una transacción — para confirmar que el advisory
@@ -148,10 +149,28 @@ function mockDb() {
 								llamadasHistorialUnidad++;
 								const esLlamadaDeUnidadFisica =
 									llamadasHistorialUnidad > llamadasAntesDeHistorialFisico;
-								return esLlamadaDeUnidadFisica &&
+								if (
+									esLlamadaDeUnidadFisica &&
 									historialUnidadFisicaMock !== null
-									? historialUnidadFisicaMock
-									: historialCasoMock;
+								) {
+									return historialUnidadFisicaMock;
+								}
+								if (historialCasoMock.length > 0) {
+									return historialCasoMock;
+								}
+								if (
+									inmovilizacionExistente &&
+									inmovilizacionExistente.estado === "ejecutada"
+								) {
+									return [
+										{
+											...inmovilizacionExistente,
+											ejecutadoAt:
+												inmovilizacionExistente.ejecutadoAt ?? new Date(),
+										},
+									];
+								}
+								return [];
 							},
 							limit: async () =>
 								inmovilizacionExistente ? [inmovilizacionExistente] : [],
@@ -215,21 +234,29 @@ function mockDb() {
 		update: (tabla: unknown) => {
 			if (tabla === inmovilizacionesUnidad) {
 				return {
-					set: () => ({
-						where: () => ({
-							returning: async () =>
-								updateDevuelveFila
-									? [
-											{
-												id: INMOV_ID,
-												casoCobroId: CASO_ID,
-												accion: inmovilizacionExistente?.accion ?? "apagado",
-												solicitadoPor: solicitadoPorMarcarEjecutadaMock,
-											},
-										]
-									: [],
-						}),
-					}),
+					set: (cambios?: Record<string, unknown>) => {
+						if (inmovilizacionExistente && updateDevuelveFila && cambios) {
+							Object.assign(inmovilizacionExistente, cambios);
+						}
+						return {
+							where: () => ({
+								returning: async () =>
+									updateDevuelveFila
+										? [
+												{
+													id: INMOV_ID,
+													casoCobroId: CASO_ID,
+													accion: inmovilizacionExistente?.accion ?? "apagado",
+													solicitadoPor:
+														(inmovilizacionExistente as { solicitadoPor?: string })
+															?.solicitadoPor ??
+														solicitadoPorMarcarEjecutadaMock,
+												},
+											]
+										: [],
+							}),
+						};
+					},
 				};
 			}
 			if (tabla === contactosCobros) {
@@ -267,6 +294,7 @@ mock.module("../services/inmovilizacion-notif", () => ({
 	notificarInmovilizacionResuelta: async () => undefined,
 	notificarLlamarCliente: async (params: { asesorUserId: string }) => {
 		notificarLlamarClienteLlamadas.push({ asesorUserId: params.asesorUserId });
+		onNotificarLlamarCliente?.();
 	},
 	notificarUnidadReactivada: async () => {
 		unidadReactivadaNotificada++;
@@ -332,6 +360,7 @@ function reset() {
 	unidadReactivadaNotificada = 0;
 	resolverAvisoLlamarClienteLlamadas = [];
 	reactivacionesObsoletasMock = [];
+	onNotificarLlamarCliente = null;
 	executeLlamadas = [];
 }
 
@@ -1169,6 +1198,94 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 		expect(resolverAvisoLlamarClienteLlamadas).toEqual([
 			REACTIVACION_OBSOLETA_ID,
 		]);
+	});
+
+	it("marcarEjecutada no envía aviso de llamada si la llamada ya fue registrada concurrentemente", async () => {
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			inmovilizacionOrigenId: null,
+			llamadaContactoId: CONTACTO_ID,
+		};
+
+		await call(
+			inmovilizacionUnidadRouter.marcarEjecutada,
+			{ id: INMOV_ID },
+			{ context: ctx("cobros_supervisor") },
+		);
+
+		expect(notificarLlamarClienteLlamadas).toEqual([]);
+		expect(resolverAvisoLlamarClienteLlamadas).toEqual([]);
+	});
+
+	it("marcarEjecutada no envía aviso si la acción ya fue superada en la unidad física", async () => {
+		llamadasAntesDeHistorialFisico = 0;
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			inmovilizacionOrigenId: null,
+		};
+		// La unidad física ya fue reactivada por otro evento más reciente
+		historialUnidadFisicaMock = [
+			{
+				id: "99999999-9999-9999-9999-999999999999",
+				casoCobroId: CASO_ID,
+				accion: "reactivacion",
+				estado: "ejecutada",
+				ejecutadoAt: new Date(Date.now() + 10000),
+			},
+		];
+
+		await call(
+			inmovilizacionUnidadRouter.marcarEjecutada,
+			{ id: INMOV_ID },
+			{ context: ctx("cobros_supervisor") },
+		);
+
+		expect(notificarLlamarClienteLlamadas).toEqual([]);
+	});
+
+	it("marcarEjecutada reconcilia y resuelve el aviso si la llamada se registró durante el envío", async () => {
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			inmovilizacionOrigenId: null,
+		};
+
+		// Durante el envío de la notificación, una llamada concurrente se registra
+		onNotificarLlamarCliente = () => {
+			if (inmovilizacionExistente) {
+				inmovilizacionExistente.llamadaContactoId = CONTACTO_ID;
+			}
+		};
+
+		await call(
+			inmovilizacionUnidadRouter.marcarEjecutada,
+			{ id: INMOV_ID },
+			{ context: ctx("cobros_supervisor") },
+		);
+
+		// Se intentó notificar, pero al reconciliar se detectó el cambio y se resolvió
+		expect(notificarLlamarClienteLlamadas).toHaveLength(1);
+		expect(resolverAvisoLlamarClienteLlamadas).toEqual([INMOV_ID]);
 	});
 });
 

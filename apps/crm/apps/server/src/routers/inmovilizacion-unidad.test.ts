@@ -1173,6 +1173,45 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 
+	it("resultado=paga pero el crédito fue reasignado en cartera a otro asesor: rechaza con FORBIDDEN y no abre reactivación (review de Codex)", async () => {
+		conApagadoVigente();
+		const getCreditoSpy = spyOn(
+			carteraBackClient,
+			"getCredito",
+		).mockResolvedValueOnce({
+			asesor: { emailCashIn: "otro-asesor@example.com" },
+		});
+
+		try {
+			await expect(llamar("paga")).rejects.toMatchObject({
+				code: "FORBIDDEN",
+			});
+			expect(inmovilizacionesInsertadas).toHaveLength(0);
+		} finally {
+			getCreditoSpy.mockRestore();
+		}
+	});
+
+	it("resultado=no_paga: permite registrar llamada aunque en cartera esté asignado a otro asesor (no abre reactivación)", async () => {
+		conApagadoVigente();
+		const getCreditoSpy = spyOn(
+			carteraBackClient,
+			"getCredito",
+		).mockResolvedValueOnce({
+			asesor: { emailCashIn: "otro-asesor@example.com" },
+		});
+
+		try {
+			const res = await llamar("no_paga");
+			expect(res.ok).toBe(true);
+			expect(inmovilizacionesInsertadas).toHaveLength(0);
+			// No debe haber consultado Cartera para validar ownership de reactivación
+			expect(getCreditoSpy).not.toHaveBeenCalled();
+		} finally {
+			getCreditoSpy.mockRestore();
+		}
+	});
+
 	it("toma el advisory lock ANTES del SELECT ... FOR UPDATE de fila (review de Codex — evita deadlock 40P01)", async () => {
 		conApagadoVigente();
 		await llamar("paga");

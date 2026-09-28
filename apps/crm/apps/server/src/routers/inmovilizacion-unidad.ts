@@ -1286,6 +1286,15 @@ export const inmovilizacionUnidadRouter = {
 				});
 			}
 
+			if (input.resultado === "paga") {
+				await assertCreditoAsignadoEnCarteraPorSifco({
+					numeroSifco: inm.numeroCreditoSifco,
+					emailUsuario: context.session.user.email,
+					userRole: context.userRole,
+					accion: "solicitar la reactivación de la unidad",
+				});
+			}
+
 			let reactivacionId: string | null = null;
 
 			try {

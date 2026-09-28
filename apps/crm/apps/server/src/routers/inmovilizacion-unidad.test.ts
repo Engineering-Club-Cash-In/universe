@@ -32,14 +32,21 @@ let inmovilizacionesInsertadas: Record<string, unknown>[] = [];
 let eventosInsertados: Record<string, unknown>[] = [];
 let inmovilizacionExistente: Record<string, unknown> | null = null;
 let historialCasoMock: Record<string, unknown>[] = [];
-// Por defecto igual a historialCasoMock (la mayoría de los tests no
-// necesitan distinguir unidad compartida). Los tests que SÍ prueban D-10
-// lo sobreescriben para simular un historial de UNIDAD FÍSICA distinto al
-// del caso — getHistorialCaso y getHistorialUnidadFisica tienen la misma
-// firma (select().from(tabla).where().orderBy()), así que el mock las
-// distingue por ORDEN de llamada dentro de getInmovilizacionesCaso: la
-// 1ra es getHistorialCaso, la 2da getHistorialUnidadFisica.
+// Por defecto null (la mayoría de los tests no necesitan distinguir unidad
+// compartida). Los tests que SÍ prueban D-10 lo sobreescriben para simular
+// un historial de UNIDAD FÍSICA distinto al del caso — getHistorialCaso y
+// getHistorialUnidadFisica tienen la misma firma
+// (select().from(tabla).where().orderBy()), así que el mock no puede
+// distinguirlas por la consulta en sí. Las distingue por CUÁNTAS llamadas
+// a esta tabla ya pasaron antes de la que nos interesa (configurable por
+// `llamadasAntesDeHistorialFisico`, ver abajo):
+//  - getInmovilizacionesCaso llama primero getHistorialCaso y DESPUÉS
+//    getHistorialUnidadFisica → 1 llamada antes (el default).
+//  - registrarResultadoLlamada / registrarLlamadaReactivacion llaman SOLO
+//    getHistorialUnidadFisica, nada antes → 0 (los tests de esos describe
+//    lo pisan).
 let historialUnidadFisicaMock: Record<string, unknown>[] | null = null;
+let llamadasAntesDeHistorialFisico = 1;
 let llamadasHistorialUnidad = 0;
 let updateDevuelveFila = true;
 let contactoExisteMock = true;
@@ -112,15 +119,16 @@ function mockDb() {
 					// historialUnidadFisicaMock arriba. El contador solo cuenta
 					// llamadas a `orderBy` (una por cada getHistorial*), no a
 					// `limit` (marcarEjecutada / registrarResultadoLlamada /
-					// registrarLlamadaReactivacion, que traen una fila por id) —
-					// contarlas juntas desalineaba la paridad 1ra/2da llamada.
+					// registrarLlamadaReactivacion, que traen una fila por id).
 					// marcarEjecutada / registrarResultadoLlamada: select().from().where().limit()
 					return {
 						where: () => ({
 							orderBy: async () => {
 								llamadasHistorialUnidad++;
-								const esSegundaLlamada = llamadasHistorialUnidad % 2 === 0;
-								return esSegundaLlamada && historialUnidadFisicaMock !== null
+								const esLlamadaDeUnidadFisica =
+									llamadasHistorialUnidad > llamadasAntesDeHistorialFisico;
+								return esLlamadaDeUnidadFisica &&
+									historialUnidadFisicaMock !== null
 									? historialUnidadFisicaMock
 									: historialCasoMock;
 							},
@@ -283,6 +291,7 @@ function reset() {
 	inmovilizacionExistente = null;
 	historialCasoMock = [];
 	historialUnidadFisicaMock = null;
+	llamadasAntesDeHistorialFisico = 1;
 	llamadasHistorialUnidad = 0;
 	updateDevuelveFila = true;
 	contactoExisteMock = true;
@@ -709,6 +718,9 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 	it("apagado superado por un ciclo más reciente en la unidad física (D-10): CONFLICT, no abre reactivación (review de Codex)", async () => {
 		const OTRO_CASO_ID = "55555555-5555-5555-5555-555555555555";
 		inmovilizacionExistente = apagadoEjecutado(); // sigue con llamadaContactoId=null
+		// registrarResultadoLlamada llama getHistorialUnidadFisica UNA sola
+		// vez, nada antes (a diferencia de getInmovilizacionesCaso, default=1).
+		llamadasAntesDeHistorialFisico = 0;
 		// La unidad física ya pasó a un ciclo más reciente, ejecutado desde
 		// OTRO caso: este apagado (INMOV_ID) quedó superado.
 		historialUnidadFisicaMock = [
@@ -717,6 +729,28 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 				id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
 				casoCobroId: OTRO_CASO_ID,
 				ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"),
+			},
+			apagadoEjecutado(), // el propio INMOV_ID, más antiguo
+		];
+		await expect(llamar("paga")).rejects.toMatchObject({ code: "CONFLICT" });
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("apagado seguido de una reactivación DIRECTA más reciente en la unidad física: CONFLICT (review de Codex, comparación solo-apagados no lo veía)", async () => {
+		// Apagado A (este, INMOV_ID) ejecutado, nunca se llamó. Después la
+		// unidad se reactivó DIRECTO (sin pasar por acá, p. ej. el cliente
+		// pagó por ventanilla) — un evento MÁS RECIENTE que el apagado, pero
+		// de otra acción. ultimaEjecutada(..., "apagado") sigue devolviendo A
+		// (es el único/último apagado), así que comparar solo IDs entre
+		// apagados no detecta que la unidad ya no está inmovilizada.
+		inmovilizacionExistente = apagadoEjecutado();
+		llamadasAntesDeHistorialFisico = 0;
+		historialUnidadFisicaMock = [
+			{
+				...apagadoEjecutado(),
+				id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+				accion: "reactivacion",
+				ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"), // posterior
 			},
 			apagadoEjecutado(), // el propio INMOV_ID, más antiguo
 		];

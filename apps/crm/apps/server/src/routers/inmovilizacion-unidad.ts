@@ -756,23 +756,36 @@ export const inmovilizacionUnidadRouter = {
 			}
 
 			// `inm` tiene que seguir siendo el apagado VIGENTE de la unidad
-			// física, no solo un apagado ejecutado con id/llamadaContactoId que
-			// calzan. Con una unidad compartida (D-10), este apagado puede
-			// haber sido superado por un ciclo completo (reactivación + nuevo
-			// apagado) ejecutado desde OTRO caso — la fila vieja sigue teniendo
-			// llamadaContactoId=null (nadie la tocó) aunque ya no representa el
-			// estado real de la unidad. Sin este guard, "paga" abre una
-			// reactivación que reenciende la unidad por encima del apagado
-			// nuevo y vigente. Review de Codex, PR #1758.
+			// física — dos condiciones, no solo una:
+			//  1. La unidad TODAVÍA está inmovilizada (estadoUnidad, que mira
+			//     la acción EJECUTADA más reciente de cualquier tipo, no solo
+			//     apagados). Sin esto: apagado A, reactivación DIRECTA B más
+			//     reciente (sin pasar por acá) — comparar solo entre apagados
+			//     seguía viendo a A como "el último apagado" y el guard pasaba
+			//     de largo, aunque la unidad ya estuviera reactivada.
+			//  2. Ese apagado vigente es justo `inm` (no otro apagado viejo de
+			//     otro caso, D-10 — unidad compartida).
+			// Sin ambas, "paga" podía abrir una reactivación redundante o
+			// reencender una unidad por encima de un ciclo más reciente.
+			// Review de Codex, PR #1758.
 			const historialUnidadFisica = await getHistorialUnidadFisica(
 				inm.casoCobroId,
 				inm.wialonUnitId,
 			);
+			const historialUnidadFisicaParaEstado: InmovilizacionHistorialItem[] =
+				historialUnidadFisica.map((h) => ({
+					accion: h.accion,
+					estado: h.estado,
+					ejecutadoAt: h.ejecutadoAt,
+				}));
 			const apagadoVigenteUnidad = ultimaEjecutada(
 				historialUnidadFisica,
 				"apagado",
 			);
-			if (apagadoVigenteUnidad?.id !== inm.id) {
+			if (
+				estadoUnidad(historialUnidadFisicaParaEstado) !== "inmovilizada" ||
+				apagadoVigenteUnidad?.id !== inm.id
+			) {
 				throw new ORPCError("CONFLICT", {
 					message:
 						"Este apagado ya no es el vigente de la unidad: fue superado por un ciclo más reciente.",
@@ -989,19 +1002,30 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 			});
 		}
 
-		// Mismo guard que registrarResultadoLlamada: `inm` tiene que seguir
-		// siendo la reactivación VIGENTE de la unidad física, no una superada
-		// por un ciclo más reciente ejecutado desde otro caso. Review de
-		// Codex, PR #1758.
+		// Mismo guard que registrarResultadoLlamada (dos condiciones, no
+		// solo comparar entre reactivaciones): la unidad sigue ACTIVA
+		// (estadoUnidad mira la acción ejecutada más reciente de cualquier
+		// tipo — un apagado directo más reciente que esta reactivación no se
+		// veía comparando solo entre reactivaciones) y esa fila vigente es
+		// justo `inm`. Review de Codex, PR #1758.
 		const historialUnidadFisica = await getHistorialUnidadFisica(
 			inm.casoCobroId,
 			inm.wialonUnitId,
 		);
+		const historialUnidadFisicaParaEstado: InmovilizacionHistorialItem[] =
+			historialUnidadFisica.map((h) => ({
+				accion: h.accion,
+				estado: h.estado,
+				ejecutadoAt: h.ejecutadoAt,
+			}));
 		const reactivacionVigenteUnidad = ultimaEjecutada(
 			historialUnidadFisica,
 			"reactivacion",
 		);
-		if (reactivacionVigenteUnidad?.id !== inm.id) {
+		if (
+			estadoUnidad(historialUnidadFisicaParaEstado) !== "activa" ||
+			reactivacionVigenteUnidad?.id !== inm.id
+		) {
 			throw new ORPCError("CONFLICT", {
 				message:
 					"Esta reactivación ya no es la vigente de la unidad: fue superada por un ciclo más reciente.",

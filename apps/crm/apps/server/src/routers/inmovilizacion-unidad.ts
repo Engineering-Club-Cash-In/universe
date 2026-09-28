@@ -441,6 +441,7 @@ export const inmovilizacionUnidadRouter = {
 					message: "El caso no tiene un vehículo asociado para inmovilizar.",
 				});
 			}
+			const vehicleId = caso.vehicleId;
 
 			await assertCreditoAsignadoEnCarteraPorSifco({
 				numeroSifco: caso.numeroCreditoSifco,
@@ -519,6 +520,34 @@ export const inmovilizacionUnidadRouter = {
 						wialonUnitId: caso.wialonUnitId,
 					});
 
+					// Re-validar la vinculación Wialon del vehículo bajo lock: si el
+					// GPS fue reasignado a otro vehículo o desvinculado entre la
+					// lectura de `getCasoParaInmovilizacion` y la adquisición del lock
+					// (por ejemplo, vía `reasignarUnidad` en `routers/wialon.ts`),
+					// continuar con el `caso.wialonUnitId` obsoleto registraría la
+					// solicitud contra la unidad física anterior, afectando al nuevo
+					// vehículo y dejando al caso actual desincronizado.
+					const [vehiculoTx] = await tx
+						.select({ wialonUnitId: vehicles.wialonUnitId })
+						.from(vehicles)
+						.where(eq(vehicles.id, vehicleId))
+						.limit(1);
+
+					if (!vehiculoTx) {
+						throw new ORPCError("CONFLICT", {
+							message: "El vehículo ya no existe o fue desasociado.",
+						});
+					}
+
+					if (
+						(vehiculoTx.wialonUnitId ?? null) !== (caso.wialonUnitId ?? null)
+					) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La unidad GPS del vehículo cambió durante la solicitud. Por favor intentá de nuevo.",
+						});
+					}
+
 					// Re-validar estado bajo lock: entre la lectura temprana fuera
 					// de transacción y la adquisición del advisory lock, otro caso
 					// compartiendo la misma unidad física pudo haber completado la
@@ -563,7 +592,7 @@ export const inmovilizacionUnidadRouter = {
 							casoCobroId: input.casoCobroId,
 							numeroCreditoSifco: caso.numeroCreditoSifco as string,
 							vehicleId: caso.vehicleId,
-							wialonUnitId: caso.wialonUnitId,
+							wialonUnitId: vehiculoTx.wialonUnitId,
 							accion: input.accion,
 							motivo: input.motivo,
 							bucketSnapshot: bucket,

@@ -15,6 +15,7 @@ import {
 	inmovilizacionesUnidad,
 	inmovilizacionesUnidadEventos,
 } from "../db/schema/inmovilizacion-unidad";
+import { vehicles } from "../db/schema/vehicles";
 import type { Context } from "../lib/context";
 
 let rolUsuarioMock = "cobros";
@@ -22,6 +23,9 @@ let responsableCasoMock: string | null = "user-test";
 let solicitadoPorMarcarEjecutadaMock = "user-test";
 let numeroCreditoSifcoMock: string | null = "01010214100000";
 let vehicleIdMock: string | null; // inicializado abajo, junto a VEHICLE_ID
+let wialonUnitIdCasoMock: number | null = 12345;
+let wialonUnitIdVehiculoMock: number | null = 12345;
+let vehiculoExisteMock = true;
 let carteraHabilitadaMock = true;
 
 // null = inserta bien; "unique" = 23505 (índice único de solicitud abierta);
@@ -96,7 +100,7 @@ function mockDb() {
 															responsableCobros: responsableCasoMock,
 															numeroCreditoSifco: numeroCreditoSifcoMock,
 															vehicleId: vehicleIdMock,
-															wialonUnitId: 12345,
+															wialonUnitId: wialonUnitIdCasoMock,
 															clienteNombre: "Juan Pérez",
 														},
 													]
@@ -187,6 +191,21 @@ function mockDb() {
 											{
 												id: CONTACTO_ID,
 												inmovilizacionId: contactoInmovilizacionIdMock,
+											},
+										]
+									: [],
+						}),
+					};
+				}
+				if (tabla === vehicles) {
+					return {
+						where: () => ({
+							limit: async () =>
+								vehiculoExisteMock && vehicleIdMock
+									? [
+											{
+												id: vehicleIdMock,
+												wialonUnitId: wialonUnitIdVehiculoMock,
 											},
 										]
 									: [],
@@ -369,6 +388,9 @@ function reset() {
 	solicitadoPorMarcarEjecutadaMock = "user-test";
 	numeroCreditoSifcoMock = "01010214100000";
 	vehicleIdMock = VEHICLE_ID;
+	wialonUnitIdCasoMock = 12345;
+	wialonUnitIdVehiculoMock = 12345;
+	vehiculoExisteMock = true;
 	notificarLlamarClienteLlamadas = [];
 	carteraHabilitadaMock = true;
 	insertError = null;
@@ -663,6 +685,35 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 		expect(inmovilizacionesInsertadas[0]?.inmovilizacionOrigenId).toBe(
 			OTRO_APAGADO_ID,
 		);
+	});
+
+	it("unidad GPS reasignada a otro vehículo antes de adquirir el lock: detecta el cambio en vehicles bajo lock y rechaza con CONFLICT (review de Codex)", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+			bucket: 2,
+		} as never);
+
+		wialonUnitIdCasoMock = 12345;
+		wialonUnitIdVehiculoMock = 99999;
+
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.solicitarInmovilizacion,
+				{
+					casoCobroId: CASO_ID,
+					accion: "apagado",
+					motivo: "Cliente incontactable",
+				},
+				{ context: ctx("cobros") },
+			),
+		).rejects.toMatchObject({
+			code: "CONFLICT",
+			message:
+				"La unidad GPS del vehículo cambió durante la solicitud. Por favor intentá de nuevo.",
+		});
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 });
 

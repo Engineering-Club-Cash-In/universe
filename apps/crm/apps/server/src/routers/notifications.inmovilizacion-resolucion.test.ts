@@ -17,6 +17,7 @@ import type { Context } from "../lib/context";
 let cobrosTipoMock: string | null = "inmovilizacion_pendiente_aprobacion";
 let assignedToRoleMock = "cobros_supervisor";
 let assignedToMock = "user-test";
+let notifStatusMock = "pending";
 let updateLlamado = false;
 
 function mockDb() {
@@ -35,6 +36,7 @@ function mockDb() {
 						where: () => ({
 							limit: async () => [
 								{
+									status: notifStatusMock,
 									type: "action_required",
 									cobrosTipo: cobrosTipoMock,
 									assignedToRole: assignedToRoleMock,
@@ -73,6 +75,7 @@ function reset() {
 	cobrosTipoMock = "inmovilizacion_pendiente_aprobacion";
 	assignedToRoleMock = "cobros_supervisor";
 	assignedToMock = "user-test";
+	notifStatusMock = "pending";
 	updateLlamado = false;
 }
 
@@ -163,5 +166,57 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		);
 		expect(res.status).toBe("resolved");
 		expect(updateLlamado).toBe(true);
+	});
+
+	it("inmovilizacion_pendiente_aprobacion ya en 'resolved': reabrir a 'pending' rechaza con BAD_REQUEST (review de Codex)", async () => {
+		notifStatusMock = "resolved";
+		await expect(
+			call(
+				notificationsRouter.changeNotificationStatus,
+				{ notificationId: "11111111-1111-1111-1111-111111111111", status: "pending" },
+				{ context: ctx() },
+			),
+		).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message:
+				"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
+		});
+		expect(updateLlamado).toBe(false);
+	});
+
+	it("inmovilizacion_llamar_cliente ya en 'resolved': reabrir a 'read' o 'in_progress' rechaza con BAD_REQUEST (review de Codex)", async () => {
+		cobrosTipoMock = "inmovilizacion_llamar_cliente";
+		assignedToRoleMock = "cobros";
+		notifStatusMock = "resolved";
+		await expect(
+			call(
+				notificationsRouter.changeNotificationStatus,
+				{ notificationId: "11111111-1111-1111-1111-111111111111", status: "read" },
+				{ context: ctx() },
+			),
+		).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message:
+				"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
+		});
+		expect(updateLlamado).toBe(false);
+	});
+
+	it("inmovilizacion_llamar_cliente ya en 'dismissed': reabrir a 'in_progress' rechaza con BAD_REQUEST (review de Codex)", async () => {
+		cobrosTipoMock = "inmovilizacion_llamar_cliente";
+		assignedToRoleMock = "cobros";
+		notifStatusMock = "dismissed";
+		await expect(
+			call(
+				notificationsRouter.changeNotificationStatus,
+				{ notificationId: "11111111-1111-1111-1111-111111111111", status: "in_progress" },
+				{ context: ctx() },
+			),
+		).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message:
+				"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
+		});
+		expect(updateLlamado).toBe(false);
 	});
 });

@@ -339,6 +339,7 @@ export const notificationsRouter = {
 
 			const [notif] = await db
 				.select({
+					status: notifications.status,
 					type: notifications.type,
 					cobrosTipo: notifications.cobrosTipo,
 					assignedToRole: notifications.assignedToRole,
@@ -373,30 +374,46 @@ export const notificationsRouter = {
 				});
 			}
 
-			// CB-041: estos 3 cobrosTipo se resuelven SOLO por su flujo de
+			// CB-041: estos cobrosTipo se resuelven SOLO por su flujo de
 			// negocio (decidirInmovilizacion, marcarEjecutada,
 			// registrarResultadoLlamada / registrarLlamadaReactivacion) — nunca
 			// a mano desde acá. La UI de notificaciones expone "Resolver" para
 			// cualquier action_required sin mirar cobrosTipo: un supervisor
 			// podía ocultar "por aprobar" sin decidirla, o un asesor ocultar
 			// "llamar al cliente" sin enlazar ningún contacto — la tarea real
-			// seguía pendiente en inmovilizaciones_unidad, invisible. Review de
-			// Codex, PR #1758.
+			// seguía pendiente en inmovilizaciones_unidad, invisible.
+			//
+			// Asimismo, una vez que el flujo de negocio resolvió o descartó la
+			// notificación (estado terminal), no se puede reabrir a pending,
+			// read o in_progress: el flujo completado no volverá a correr sus
+			// resolutores y dejaría una tarea o alerta fantasma permanente en
+			// el caso (review de Codex, PR #1758).
 			const COBROS_TIPO_RESOLUCION_BLOQUEADA = [
 				"inmovilizacion_pendiente_aprobacion",
 				"inmovilizacion_llamar_cliente",
 			] as const;
-			if (
-				(input.status === "resolved" || input.status === "dismissed") &&
+			const esWorkflowInmovilizacion =
 				notif.cobrosTipo &&
 				(
 					COBROS_TIPO_RESOLUCION_BLOQUEADA as readonly string[]
-				).includes(notif.cobrosTipo)
-			) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"Esta notificación se resuelve automáticamente cuando se completa la acción correspondiente en el caso.",
-				});
+				).includes(notif.cobrosTipo);
+
+			if (esWorkflowInmovilizacion) {
+				if (input.status === "resolved" || input.status === "dismissed") {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Esta notificación se resuelve automáticamente cuando se completa la acción correspondiente en el caso.",
+					});
+				}
+
+				const esTerminal =
+					notif.status === "resolved" || notif.status === "dismissed";
+				if (esTerminal && input.status !== notif.status) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
+					});
+				}
 			}
 
 			// Si se intenta resolver, verificar que no sea action_upload_files sin documentos

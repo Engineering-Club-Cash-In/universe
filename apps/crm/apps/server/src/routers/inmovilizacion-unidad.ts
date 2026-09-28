@@ -33,6 +33,7 @@ import {
 import { vehicles } from "../db/schema/vehicles";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import {
+	BUCKETS_INMOVILIZACION,
 	estadoUnidad,
 	type InmovilizacionHistorialItem,
 	puedeSolicitar,
@@ -887,6 +888,31 @@ export const inmovilizacionUnidadRouter = {
 				throw new ORPCError("CONFLICT", {
 					message: "La solicitud no está aprobada (o ya fue ejecutada).",
 				});
+			}
+
+			// Si la acción es apagado, revalidar que el crédito siga en mora B2/B3:
+			// si el cliente pagó entre la aprobación y la ejecución, el crédito bajó
+			// a B0/B1 (o salió del funnel) y no debe apagarse el vehículo. Review de Codex.
+			if (inm.accion === "apagado" && isCarteraBackEnabled()) {
+				let bucket: number | null = null;
+				try {
+					const bucketActual = await carteraBackClient.getBucketActualCredito(
+						inm.numeroCreditoSifco,
+					);
+					bucket = bucketActual?.bucket ?? null;
+				} catch (error) {
+					console.error(
+						"[marcarEjecutada] No se pudo resolver el bucket:",
+						error,
+					);
+				}
+				if (bucket == null || !BUCKETS_INMOVILIZACION.includes(bucket)) {
+					const message =
+						bucket == null
+							? "No se pudo confirmar el bucket del crédito en cartera. Intentá de nuevo en unos minutos."
+							: `El crédito ya no se encuentra en mora B2/B3 (está en B${bucket}). El apagado ya no aplica.`;
+					throw new ORPCError("CONFLICT", { message });
+				}
 			}
 
 			const resultado = await ejecutarInmovilizacion({

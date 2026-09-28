@@ -827,6 +827,68 @@ describe("CB-041 — marcarEjecutada", () => {
 			),
 		).rejects.toBeInstanceOf(ORPCError);
 	});
+
+	it("apagado aprobado pero el crédito bajó a B0/B1 (cliente pagó): rechaza con CONFLICT (review de Codex)", async () => {
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			solicitadoPor: "user-test",
+			inmovilizacionOrigenId: null,
+		};
+		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+			bucket: 0,
+		} as never);
+
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.marcarEjecutada,
+				{ id: INMOV_ID },
+				{ context: ctx("cobros_supervisor") },
+			),
+		).rejects.toMatchObject({
+			code: "CONFLICT",
+			message:
+				"El crédito ya no se encuentra en mora B2/B3 (está en B0). El apagado ya no aplica.",
+		});
+		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
+	});
+
+	it("apagado aprobado pero no se pudo resolver el bucket (fail closed): rechaza con CONFLICT (review de Codex)", async () => {
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			solicitadoPor: "user-test",
+			inmovilizacionOrigenId: null,
+		};
+		spyOn(carteraBackClient, "getBucketActualCredito").mockRejectedValue(
+			new Error("cartera-back caído"),
+		);
+
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.marcarEjecutada,
+				{ id: INMOV_ID },
+				{ context: ctx("cobros_supervisor") },
+			),
+		).rejects.toMatchObject({
+			code: "CONFLICT",
+			message:
+				"No se pudo confirmar el bucket del crédito en cartera. Intentá de nuevo en unos minutos.",
+		});
+		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
+	});
 });
 
 function apagadoEjecutado(extra: Record<string, unknown> = {}) {

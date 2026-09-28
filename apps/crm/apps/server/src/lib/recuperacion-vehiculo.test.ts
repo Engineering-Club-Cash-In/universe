@@ -4,6 +4,7 @@ import {
 	type DetalleRecuperacion,
 	detalleRecuperacionSchema,
 	erroresDetalleRecuperacion,
+	falloDefinitivoDeCartera,
 	motivoBloqueoRecuperacion,
 	operacionRecuperacion,
 	textoAvisoRecuperacion,
@@ -272,5 +273,31 @@ describe("textoAvisoRecuperacion", () => {
 		expect(t.descripcion).toBe(
 			"Juan Pérez (0101): Se atrasa constantemente, Incumple sus promesas de pago.",
 		);
+	});
+});
+
+describe("falloDefinitivoDeCartera", () => {
+	it("un 4xx de cartera prueba que no trasladó", () => {
+		for (const status of [400, 404, 409]) {
+			expect(falloDefinitivoDeCartera({ status, message: "x" })).toBe(true);
+		}
+	});
+
+	it("el circuit breaker abierto también: la llamada nunca salió", () => {
+		expect(falloDefinitivoDeCartera(new Error("Circuit breaker is OPEN"))).toBe(
+			true,
+		);
+	});
+
+	it("timeout, corte de red o 5xx NO prueban nada", () => {
+		expect(falloDefinitivoDeCartera({ status: 500, message: "x" })).toBe(false);
+		expect(
+			falloDefinitivoDeCartera({ status: 504, message: "Gateway Timeout" }),
+		).toBe(false);
+		expect(
+			falloDefinitivoDeCartera(new DOMException("timed out", "TimeoutError")),
+		).toBe(false);
+		expect(falloDefinitivoDeCartera(new TypeError("fetch failed"))).toBe(false);
+		expect(falloDefinitivoDeCartera(null)).toBe(false);
 	});
 });

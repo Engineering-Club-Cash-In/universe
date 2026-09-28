@@ -9,7 +9,10 @@
  *   2. cartera traslada el crédito a B4 (valida rango, dueño y locks);
  *   3a. si cartera rechaza → se descarta el registro y se propaga el error;
  *   3b. si cartera traslada → se completa el registro (buckets, asesor de B4)
- *       y se avisa.
+ *       y se avisa;
+ *   3c. si no se sabe (timeout, corte de red, 5xx) → se le pregunta a cartera
+ *       dónde quedó el crédito: en B4, se sigue como 3b; en otro bucket, como
+ *       3a; y si tampoco contesta, el formulario se queda (review de Codex, P1).
  *
  * Al revés (trasladar y después guardar), un fallo al guardar dejaba el
  * crédito en B4 sin nada que le dijera al asesor de B4 por qué llegó ni dónde
@@ -19,15 +22,17 @@
  * sin formulario no se explica solo.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { recuperacionesVehiculo } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
 import {
+	BUCKET_RECUPERACION,
 	calcularFotoSaldo,
 	type DetalleRecuperacion,
 	type FotoSaldo,
+	falloDefinitivoDeCartera,
 	type TipoEnvioRecuperacion,
 	textoAvisoRecuperacion,
 	textoMotivoCartera,
@@ -39,9 +44,54 @@ import {
 	obtenerSupervisoresCobros,
 } from "./cobros-notif-helpers";
 
-type ResultadoTraslado = Awaited<
+type RespuestaCartera = Awaited<
 	ReturnType<typeof carteraBackClient.enviarARecuperacionVehiculo>
 >;
+
+/**
+ * Lo que se sabe del traslado: la respuesta de cartera, o lo reconstruido
+ * cuando la respuesta se perdió. En ese caso el bucket de origen es el que se
+ * leyó antes de llamar (null si esa lectura también falló).
+ */
+export type TrasladoConfirmado = Omit<RespuestaCartera, "bucket_anterior"> & {
+	bucket_anterior: number | null;
+	/** true = la respuesta se perdió y el traslado se confirmó preguntando. */
+	reconciliado?: boolean;
+};
+
+export type ResolucionFallo =
+	| { estado: "trasladado"; traslado: TrasladoConfirmado }
+	| { estado: "descartado" }
+	| { estado: "incierto" };
+
+/**
+ * Candado por caso para los registros de recuperación. Lo toman el alta de un
+ * registro y la confirmación de recepción, así "cuál es el registro vigente"
+ * no cambia entre que se revisa y se confirma (review de Codex, P2).
+ */
+const RECUPERACION_LOCK_NAMESPACE = 42042; // CB-042
+
+export async function tomarCandadoRecuperacion(
+	tx: Pick<typeof db, "execute">,
+	casoCobroId: string,
+): Promise<void> {
+	await tx.execute(
+		sql`select pg_advisory_xact_lock(${RECUPERACION_LOCK_NAMESPACE}, hashtext(${casoCobroId}))`,
+	);
+}
+
+async function insertarRegistro(
+	valores: typeof recuperacionesVehiculo.$inferInsert,
+): Promise<string> {
+	return db.transaction(async (tx) => {
+		await tomarCandadoRecuperacion(tx, valores.casoCobroId);
+		const [registro] = await tx
+			.insert(recuperacionesVehiculo)
+			.values(valores)
+			.returning({ id: recuperacionesVehiculo.id });
+		return registro.id;
+	});
+}
 
 /** Lo que el registro necesita saber de cartera, leído al momento de registrar. */
 export type ContextoCartera = {
@@ -226,49 +276,109 @@ async function avisarRecuperacion(params: {
 export async function prepararEnvioRecuperacion(params: {
 	casoCobroId: string;
 	numeroSifco: string;
+	/** `credito_id` de cartera, para reconstruir el resultado si se pierde la respuesta. */
+	creditoId: number;
 	tipo: TipoEnvioRecuperacion;
 	detalle: DetalleRecuperacion;
 	registradoPor: string;
 }) {
-	const contexto = await leerContextoCartera(params.numeroSifco);
-	const [registro] = await db
-		.insert(recuperacionesVehiculo)
-		.values(
-			valoresRegistro({
-				casoCobroId: params.casoCobroId,
-				tipo: params.tipo,
-				detalle: params.detalle,
-				trasladado: true,
-				registradoPor: params.registradoPor,
-				foto: contexto.foto,
-			}),
-		)
-		.returning({ id: recuperacionesVehiculo.id });
-	const registroId = registro.id;
+	// El bucket de ANTES, best-effort: solo sirve para anotar el origen si la
+	// respuesta del traslado se pierde y hay que reconstruirla.
+	const [contexto, bucketAntes] = await Promise.all([
+		leerContextoCartera(params.numeroSifco),
+		carteraBackClient
+			.getBucketActualCredito(params.numeroSifco)
+			.then((b) => b?.bucket ?? null)
+			.catch(() => null),
+	]);
+	const registroId = await insertarRegistro(
+		valoresRegistro({
+			casoCobroId: params.casoCobroId,
+			tipo: params.tipo,
+			detalle: params.detalle,
+			trasladado: true,
+			registradoPor: params.registradoPor,
+			foto: contexto.foto,
+		}),
+	);
+
+	const descartar = async (): Promise<void> => {
+		try {
+			await db
+				.delete(recuperacionesVehiculo)
+				.where(eq(recuperacionesVehiculo.id, registroId));
+		} catch (error) {
+			// Queda un registro de un traslado que no ocurrió. Se loguea con el
+			// id para poder borrarlo a mano; no tapa el error original.
+			console.error(
+				`[recuperacion-vehiculo] No se pudo descartar el registro ${registroId} tras un traslado fallido:`,
+				error,
+			);
+		}
+	};
 
 	return {
 		registroId,
 		/** El motivo para `buckets_historial`, con el tipo adelante. */
 		motivoCartera: textoMotivoCartera(params.tipo, params.detalle),
 
-		/** Cartera no trasladó: el registro no describe nada que haya pasado. */
-		async descartar(): Promise<void> {
-			try {
-				await db
-					.delete(recuperacionesVehiculo)
-					.where(eq(recuperacionesVehiculo.id, registroId));
-			} catch (error) {
-				// Queda un registro de un traslado que no ocurrió. Se loguea con el
-				// id para poder borrarlo a mano; no tapa el error original.
-				console.error(
-					`[recuperacion-vehiculo] No se pudo descartar el registro ${registroId} tras un traslado fallido:`,
-					error,
-				);
+		/**
+		 * La llamada a cartera lanzó. Decide qué pasó antes de tocar el registro:
+		 * solo se borra si cartera respondió que no, o si comprobadamente el
+		 * crédito no quedó en B4. Si no hay forma de saberlo, se conserva.
+		 */
+		async resolverFallo(error: unknown): Promise<ResolucionFallo> {
+			if (falloDefinitivoDeCartera(error)) {
+				await descartar();
+				return { estado: "descartado" };
 			}
+			console.warn(
+				`[recuperacion-vehiculo] Resultado incierto del traslado de ${params.numeroSifco}; se consulta el bucket:`,
+				error,
+			);
+			let bucketDespues: number | null;
+			try {
+				bucketDespues =
+					(await carteraBackClient.getBucketActualCredito(params.numeroSifco))
+						?.bucket ?? null;
+			} catch (consulta) {
+				console.error(
+					`[recuperacion-vehiculo] Tampoco se pudo leer el bucket de ${params.numeroSifco}; el registro ${registroId} se conserva:`,
+					consulta,
+				);
+				return { estado: "incierto" };
+			}
+			// El traslado solo acepta B1–B3 y deja el piso en B4: si ahora está en
+			// B4, lo movió esta llamada. En cualquier otro bucket, no pasó.
+			if (bucketDespues !== BUCKET_RECUPERACION) {
+				await descartar();
+				return { estado: "descartado" };
+			}
+			const asesorNuevo = await carteraBackClient
+				.getAsesorPorSifco({ sifcos: [params.numeroSifco] })
+				.then((r) => r.data?.[0]?.asesor_id ?? null)
+				.catch(() => null);
+			return {
+				estado: "trasladado",
+				traslado: {
+					success: true,
+					credito_id: params.creditoId,
+					bucket_anterior: bucketAntes,
+					bucket_nuevo: BUCKET_RECUPERACION,
+					tipo_evento: "SUBIDA",
+					asesor_anterior: null,
+					asesor_nuevo: asesorNuevo,
+					asesor_sin_cambio: false,
+					reconciliado: true,
+				},
+			};
 		},
 
+		/** Cartera no trasladó: el registro no describe nada que haya pasado. */
+		descartar,
+
 		/** Cartera trasladó: se anotan los buckets y el asesor de B4, y se avisa. */
-		async confirmarTraslado(res: ResultadoTraslado): Promise<void> {
+		async confirmarTraslado(res: TrasladoConfirmado): Promise<void> {
 			const asesorUserId = await usuarioDeAsesorCartera(res.asesor_nuevo);
 			try {
 				await db
@@ -316,9 +426,8 @@ export async function registrarEntregaSinTraslado(params: {
 }): Promise<{ registroId: string }> {
 	const contexto = await leerContextoCartera(params.numeroSifco);
 	const responsable = await usuarioPorEmail(contexto.asesorEmail);
-	const [registro] = await db
-		.insert(recuperacionesVehiculo)
-		.values(
+	const registro = {
+		id: await insertarRegistro(
 			valoresRegistro({
 				casoCobroId: params.casoCobroId,
 				tipo: "entrega_voluntaria",
@@ -330,8 +439,8 @@ export async function registrarEntregaSinTraslado(params: {
 				bucketOrigen: params.bucket,
 				bucketDestino: params.bucket,
 			}),
-		)
-		.returning({ id: recuperacionesVehiculo.id });
+		),
+	};
 	await avisarRecuperacion({
 		registroId: registro.id,
 		casoCobroId: params.casoCobroId,

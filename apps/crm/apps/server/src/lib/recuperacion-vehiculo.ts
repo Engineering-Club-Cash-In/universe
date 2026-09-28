@@ -319,6 +319,32 @@ export function erroresRecepcionUnidad(
 	return null;
 }
 
+// ── Cuando cartera no contesta ──────────────────────────────────────────────
+
+/**
+ * ¿El error PRUEBA que cartera no trasladó el crédito? Solo dos casos:
+ *  · cartera respondió con un 4xx: miró el crédito y dijo que no (rango,
+ *    dueño, locks ocupados, B4 sin pool…);
+ *  · el circuit breaker estaba abierto: la llamada nunca salió.
+ *
+ * Un timeout, un corte de red o un 5xx NO prueban nada: cartera pudo haber
+ * hecho el COMMIT y perderse solo la respuesta (review de Codex, P1). Ahí el
+ * formulario no se borra a ciegas: se pregunta dónde quedó el crédito.
+ */
+export function falloDefinitivoDeCartera(error: unknown): boolean {
+	const e = error as { status?: unknown; message?: unknown } | null;
+	if (typeof e?.status === "number" && e.status >= 400 && e.status < 500) {
+		return true;
+	}
+	return (
+		typeof e?.message === "string" &&
+		e.message.includes("Circuit breaker is OPEN")
+	);
+}
+
+export const MENSAJE_TRASLADO_INCIERTO =
+	"No se pudo confirmar si el crédito pasó a B4: cartera no respondió. El formulario quedó guardado. Revisá el bucket en la ficha antes de volver a intentarlo.";
+
 // ── Lo que llega a cartera ──────────────────────────────────────────────────
 
 const MAX_MOTIVO_CARTERA = 500;

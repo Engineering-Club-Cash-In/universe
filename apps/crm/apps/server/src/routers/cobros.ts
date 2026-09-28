@@ -149,6 +149,7 @@ import {
 	BUCKET_MINIMO_RECUPERACION,
 	type DetalleRecuperacion,
 	detalleRecuperacionSchema,
+	MENSAJE_TRASLADO_INCIERTO,
 	TIPOS_ENVIO_RECUPERACION,
 	validarDetalleRecuperacion,
 } from "../lib/recuperacion-vehiculo";
@@ -191,7 +192,10 @@ import {
 	reintentarGestionLinkPagalo,
 } from "../services/pagalo-link-orchestrator";
 import { resolverVehiculoCasoPagalo } from "../services/pagalo-vehiculo";
-import { prepararEnvioRecuperacion } from "../services/recuperacion-vehiculo";
+import {
+	prepararEnvioRecuperacion,
+	type TrasladoConfirmado,
+} from "../services/recuperacion-vehiculo";
 import {
 	type EstadoCuentaErrorCodigo,
 	sendEstadoCuentaWhatsapp,
@@ -8686,13 +8690,12 @@ export const cobrosRouter = {
 			const envio = await prepararEnvioRecuperacion({
 				casoCobroId: input.casoCobroId,
 				numeroSifco: caso.numeroCreditoSifco,
+				creditoId: referencia.carteraCreditoId,
 				tipo: input.tipo,
 				detalle,
 				registradoPor: context.userId,
 			});
-			let res: Awaited<
-				ReturnType<typeof carteraBackClient.enviarARecuperacionVehiculo>
-			>;
+			let res: TrasladoConfirmado;
 			try {
 				res = await carteraBackClient.enviarARecuperacionVehiculo({
 					credito_id: referencia.carteraCreditoId,
@@ -8701,13 +8704,24 @@ export const cobrosRouter = {
 					asesor_esperado_email: dueñoEsperado,
 				});
 			} catch (err) {
-				await envio.descartar();
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						err instanceof Error
-							? err.message
-							: "No se pudo enviar el crédito a recuperación de vehículo",
-				});
+				// Un error no siempre quiere decir que no se trasladó: si la
+				// respuesta se perdió, `resolverFallo` pregunta dónde quedó el
+				// crédito antes de tocar el formulario (review de Codex, P1).
+				const resolucion = await envio.resolverFallo(err);
+				if (resolucion.estado === "incierto") {
+					throw new ORPCError("CONFLICT", {
+						message: MENSAJE_TRASLADO_INCIERTO,
+					});
+				}
+				if (resolucion.estado === "descartado") {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							err instanceof Error
+								? err.message
+								: "No se pudo enviar el crédito a recuperación de vehículo",
+					});
+				}
+				res = resolucion.traslado;
 			}
 			await envio.confirmarTraslado(res);
 
@@ -8943,14 +8957,13 @@ export const cobrosRouter = {
 			// Sin formulario: el motivo es el del modal de deshacer.
 			let envio: Awaited<ReturnType<typeof prepararEnvioRecuperacion>> | null =
 				null;
-			let recuperacion: Awaited<
-				ReturnType<typeof carteraBackClient.enviarARecuperacionVehiculo>
-			> | null = null;
+			let recuperacion: TrasladoConfirmado | null = null;
 			let recuperacionError: string | null = null;
 			try {
 				envio = await prepararEnvioRecuperacion({
 					casoCobroId: input.casoCobroId,
 					numeroSifco: caso.numeroCreditoSifco,
+					creditoId: resultado.credito_id,
 					tipo: "tomado",
 					detalle: {
 						motivos: ["convenio_incumplido"],
@@ -8965,11 +8978,19 @@ export const cobrosRouter = {
 					asesor_esperado_email: dueñoEsperado,
 				});
 			} catch (err) {
-				await envio?.descartar();
-				recuperacionError =
-					err instanceof Error
-						? err.message
-						: "No se pudo enviar el crédito a recuperación";
+				// Mismo criterio que el envío suelto: sin respuesta no se asume que
+				// falló; se pregunta dónde quedó el crédito (review de Codex, P1).
+				const resolucion = envio ? await envio.resolverFallo(err) : null;
+				if (resolucion?.estado === "trasladado") {
+					recuperacion = resolucion.traslado;
+				} else {
+					recuperacionError =
+						resolucion?.estado === "incierto"
+							? MENSAJE_TRASLADO_INCIERTO
+							: err instanceof Error
+								? err.message
+								: "No se pudo enviar el crédito a recuperación";
+				}
 			}
 
 			if (recuperacion) {

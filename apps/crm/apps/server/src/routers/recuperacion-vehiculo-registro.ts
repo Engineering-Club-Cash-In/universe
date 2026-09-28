@@ -36,7 +36,10 @@ import {
 } from "../lib/recuperacion-vehiculo";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
-import { registrarEntregaSinTraslado } from "../services/recuperacion-vehiculo";
+import {
+	registrarEntregaSinTraslado,
+	tomarCandadoRecuperacion,
+} from "../services/recuperacion-vehiculo";
 import { assertAccesoCasoCobro } from "./cobros";
 
 type ContextoProcedure = {
@@ -271,58 +274,65 @@ export const recuperacionVehiculoRegistroRouter = {
 
 			// Se confirma sobre el registro VIGENTE: si después se registró otro
 			// (p. ej. una entrega voluntaria sobre una forzosa), el viejo ya no
-			// describe lo que está pasando. La fecha se compara en SQL y no con el
-			// `Date` leído: Postgres guarda microsegundos y JS milisegundos, así
-			// que el registro truncado quedaba "más viejo" que sí mismo.
-			const [masNuevo] = await db
-				.select({ id: recuperacionesVehiculo.id })
-				.from(recuperacionesVehiculo)
-				.where(
-					and(
-						eq(recuperacionesVehiculo.casoCobroId, registro.casoCobroId),
-						sql`${recuperacionesVehiculo.createdAt} > (select r.created_at from recuperaciones_vehiculo r where r.id = ${input.recuperacionId})`,
-					),
-				)
-				.limit(1);
-			if (masNuevo) {
+			// describe lo que está pasando. Revisar y confirmar van en UNA
+			// transacción con el candado del caso, el mismo que toma el alta de
+			// un registro: así nadie inserta uno más nuevo entre la revisión y el
+			// UPDATE (review de Codex, P2). La fecha se compara en SQL y no con el
+			// `Date` leído: Postgres guarda microsegundos y JS milisegundos.
+			const r = input.recepcion;
+			const resultado = await db.transaction(async (tx) => {
+				await tomarCandadoRecuperacion(tx, registro.casoCobroId);
+				const [masNuevo] = await tx
+					.select({ id: recuperacionesVehiculo.id })
+					.from(recuperacionesVehiculo)
+					.where(
+						and(
+							eq(recuperacionesVehiculo.casoCobroId, registro.casoCobroId),
+							sql`${recuperacionesVehiculo.createdAt} > (select r.created_at from recuperaciones_vehiculo r where r.id = ${input.recuperacionId})`,
+						),
+					)
+					.limit(1);
+				if (masNuevo) return { conflicto: "mas_nuevo" as const };
+
+				// El WHERE sobre `completada` es la garantía bajo doble clic o dos
+				// asesores a la vez: solo uno encuentra la fila sin confirmar.
+				const [fila] = await tx
+					.update(recuperacionesVehiculo)
+					.set({
+						completada: true,
+						fechaRecuperacion: r.fechaRecepcion,
+						recepcionLugar: r.lugar,
+						recepcionEstadoVehiculo: r.estadoVehiculo,
+						recepcionEstadoDetalle: r.estadoVehiculoDetalle ?? null,
+						recepcionKilometraje: r.kilometraje ?? null,
+						recepcionDocumentos: r.documentos,
+						recepcionDocumentosOtros: r.documentosOtros ?? null,
+						recepcionNotas: r.notas ?? null,
+						recepcionRegistradaPor: context.userId,
+						recepcionRegistradaAt: new Date(),
+						updatedAt: new Date(),
+					})
+					.where(
+						and(
+							eq(recuperacionesVehiculo.id, input.recuperacionId),
+							// IS NOT TRUE y no `= false`: la columna vieja admite NULL.
+							sql`${recuperacionesVehiculo.completada} IS NOT TRUE`,
+						),
+					)
+					.returning({ id: recuperacionesVehiculo.id });
+				return fila
+					? { actualizado: fila }
+					: { conflicto: "ya_recibida" as const };
+			});
+			if ("conflicto" in resultado) {
 				throw new ORPCError("CONFLICT", {
 					message:
-						"Hay un registro de recuperación más reciente. Confirmá la recepción sobre ese.",
+						resultado.conflicto === "mas_nuevo"
+							? "Hay un registro de recuperación más reciente. Confirmá la recepción sobre ese."
+							: "La recepción de esta unidad ya estaba registrada.",
 				});
 			}
-
-			const r = input.recepcion;
-			// El WHERE sobre `completada` es la garantía bajo doble clic o dos
-			// asesores a la vez: solo uno encuentra la fila sin confirmar.
-			const [actualizado] = await db
-				.update(recuperacionesVehiculo)
-				.set({
-					completada: true,
-					fechaRecuperacion: r.fechaRecepcion,
-					recepcionLugar: r.lugar,
-					recepcionEstadoVehiculo: r.estadoVehiculo,
-					recepcionEstadoDetalle: r.estadoVehiculoDetalle ?? null,
-					recepcionKilometraje: r.kilometraje ?? null,
-					recepcionDocumentos: r.documentos,
-					recepcionDocumentosOtros: r.documentosOtros ?? null,
-					recepcionNotas: r.notas ?? null,
-					recepcionRegistradaPor: context.userId,
-					recepcionRegistradaAt: new Date(),
-					updatedAt: new Date(),
-				})
-				.where(
-					and(
-						eq(recuperacionesVehiculo.id, input.recuperacionId),
-						// IS NOT TRUE y no `= false`: la columna vieja admite NULL.
-						sql`${recuperacionesVehiculo.completada} IS NOT TRUE`,
-					),
-				)
-				.returning({ id: recuperacionesVehiculo.id });
-			if (!actualizado) {
-				throw new ORPCError("CONFLICT", {
-					message: "La recepción de esta unidad ya estaba registrada.",
-				});
-			}
+			const actualizado = resultado.actualizado;
 			return { recuperacionId: actualizado.id };
 		}),
 };

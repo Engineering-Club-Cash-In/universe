@@ -329,6 +329,15 @@ export const contactosCobros = pgTable(
 		// este archivo, no al revés, y una FK acá crearía un ciclo de import.
 		pagoReferenceId: uuid("pago_reference_id"),
 
+		// CB-041: marca la gestión que registra la LLAMADA POSTERIOR a un
+		// apagado o reactivación de unidad ejecutados. Sin `.references()` por
+		// el mismo motivo que pagoReferenceId: inmovilizacion-unidad.ts importa
+		// de este archivo (casosCobros, contactosCobros), así que una FK acá
+		// crearía un ciclo de import. La consistencia la validan
+		// registrarResultadoLlamada / registrarLlamadaReactivacion en el
+		// router, no la DB.
+		inmovilizacionId: uuid("inmovilizacion_id"),
+
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 		// CB-128: última escritura sobre la fila. Dato TÉCNICO, no de negocio: lo
 		// tocan también los UPDATE de sistema que solo recalculan estado_promesa,

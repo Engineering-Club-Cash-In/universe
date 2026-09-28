@@ -3,15 +3,19 @@
 //
 // Todo acá es best-effort: un fallo de notificación NUNCA hace fallar la
 // acción de negocio (solicitar/decidir/ejecutar/llamar). A diferencia de
-// convenios, acá NO hay una carrera con un sistema externo — la
-// inmovilización vive entera en esta DB y el router serializa las
-// transiciones con `UPDATE ... WHERE estado = X RETURNING`, así que no
-// existe el escenario de "se decidió mientras se insertaba el aviso
-// pendiente" que sí tiene convenio-decision-notif.ts (esa decisión ahí SÍ
-// puede llegar por otro canal, cartera-back).
+// convenios, acá no hay una carrera con un sistema EXTERNO (cartera-back),
+// pero SÍ existe una ventana interna: la solicitud se crea en su propia
+// transacción (router) y notificarInmovilizacionPendiente corre DESPUÉS,
+// fuera de ella. Si un supervisor decide en esa ventana, resolverPendientes
+// (llamado por la decisión) corre antes de que el aviso pendiente exista —
+// no encuentra nada que cerrar, y el INSERT de acá lo crea igual, ya
+// huérfano y `pending` para siempre. notificarInmovilizacionPendiente
+// re-chequea el estado justo antes de insertar para cerrar esa ventana.
+// Review de Codex, PR #1758.
 
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
+import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
 import { notifications } from "../db/schema/notifications";
 import { obtenerSupervisoresCobros } from "./cobros-notif-helpers";
 
@@ -50,6 +54,18 @@ export async function notificarInmovilizacionPendiente(params: {
 	solicitadoPorRole?: RolNotificacion;
 }): Promise<void> {
 	await tryNotify("notificarInmovilizacionPendiente", async () => {
+		// Re-chequeo justo antes de insertar: si un supervisor ya decidió (o
+		// el solicitante canceló) en la ventana entre el commit de la
+		// solicitud y esta llamada, no queda nada "pendiente" que avisar —
+		// insertar igual dejaría un aviso pending huérfano. Ver comentario
+		// del encabezado del archivo.
+		const [inm] = await db
+			.select({ estado: inmovilizacionesUnidad.estado })
+			.from(inmovilizacionesUnidad)
+			.where(eq(inmovilizacionesUnidad.id, params.inmovilizacionId))
+			.limit(1);
+		if (inm?.estado !== "pendiente_aprobacion") return;
+
 		const supervisores = await obtenerSupervisoresCobros();
 		if (supervisores.length === 0) return;
 

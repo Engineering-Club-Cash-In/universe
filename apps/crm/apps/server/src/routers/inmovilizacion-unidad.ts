@@ -1181,6 +1181,7 @@ export const inmovilizacionUnidadRouter = {
 							await reasignarAvisosLlamarCliente({
 								casoCobroId: inm.casoCobroId,
 								nuevoResponsableUserId: responsableActual,
+								soloSiResponsableEs: casoPostEnvio?.responsableCobros ?? null,
 							});
 						}
 					}

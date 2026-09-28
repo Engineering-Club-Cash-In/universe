@@ -20,8 +20,9 @@
 // deja de leer una foto vieja mientras el UPDATE concurrente sigue en
 // vuelo. Review de Codex, PR #1758.
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
+import { casosCobros } from "../db/schema/cobros";
 import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
 import { notifications } from "../db/schema/notifications";
 import { obtenerSupervisoresCobros } from "./cobros-notif-helpers";
@@ -287,26 +288,53 @@ export async function notificarUnidadReactivada(params: {
  * tarea pendiente pase a quien ahora tiene acceso para registrar la llamada
  * en la Ficha 360 y la notificación no quede huérfana en la bandeja del
  * asesor anterior. Review de Codex, PR #1758.
+ *
+ * `soloSiResponsableEs`: condiciona atómicamente la actualización a que el
+ * caso en `casosCobros` siga teniendo este valor de `responsableCobros`
+ * (string o null). Evita que una carrera entre reasignaciones concurrentes
+ * (A→B seguido de B→C) sobreescriba a C y mueva el aviso de vuelta a B.
  */
 export async function reasignarAvisosLlamarCliente(params: {
 	casoCobroId: string;
 	nuevoResponsableUserId: string;
+	soloSiResponsableEs?: string | null;
 }): Promise<void> {
-	await tryNotify("reasignarAvisosLlamarCliente", () =>
-		db
+	await tryNotify("reasignarAvisosLlamarCliente", () => {
+		const condiciones = [
+			eq(notifications.cobrosTipo, "inmovilizacion_llamar_cliente"),
+			eq(notifications.relatedEntityType, "collection_case"),
+			eq(notifications.relatedEntityId, params.casoCobroId),
+			inArray(notifications.status, [...ESTADOS_ABIERTOS]),
+		];
+
+		if (params.soloSiResponsableEs !== undefined) {
+			const condicionResponsable =
+				params.soloSiResponsableEs === null
+					? isNull(casosCobros.responsableCobros)
+					: eq(casosCobros.responsableCobros, params.soloSiResponsableEs);
+
+			condiciones.push(
+				exists(
+					db
+						.select({ uno: sql`1` })
+						.from(casosCobros)
+						.where(
+							and(
+								eq(casosCobros.id, params.casoCobroId),
+								condicionResponsable,
+							),
+						),
+				),
+			);
+		}
+
+		return db
 			.update(notifications)
 			.set({
 				assignedTo: params.nuevoResponsableUserId,
 				updatedAt: new Date(),
 			})
-			.where(
-				and(
-					eq(notifications.cobrosTipo, "inmovilizacion_llamar_cliente"),
-					eq(notifications.relatedEntityType, "collection_case"),
-					eq(notifications.relatedEntityId, params.casoCobroId),
-					inArray(notifications.status, [...ESTADOS_ABIERTOS]),
-				),
-			),
-	);
+			.where(and(...condiciones));
+	});
 }
 

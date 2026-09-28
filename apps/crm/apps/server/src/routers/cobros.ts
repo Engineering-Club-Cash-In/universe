@@ -3282,6 +3282,7 @@ export const cobrosRouter = {
 			await reasignarAvisosLlamarCliente({
 				casoCobroId: input.casoCobroId,
 				nuevoResponsableUserId: input.responsableCobros,
+				soloSiResponsableEs: input.responsableCobros,
 			});
 
 			// Notificar al nuevo cobrador asignado

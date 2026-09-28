@@ -64,6 +64,7 @@ let notificarLlamarClienteLlamadas: { asesorUserId: string }[] = [];
 let reasignarAvisosLlamarClienteLlamadas: {
 	casoCobroId: string;
 	nuevoResponsableUserId: string;
+	soloSiResponsableEs?: string | null;
 }[] = [];
 let onNotificarLlamarCliente: (() => void) | null = null;
 let reactivacionesObsoletasMock: { id: string }[] = [];
@@ -364,6 +365,7 @@ mock.module("../services/inmovilizacion-notif", () => ({
 	reasignarAvisosLlamarCliente: async (params: {
 		casoCobroId: string;
 		nuevoResponsableUserId: string;
+		soloSiResponsableEs?: string | null;
 	}) => {
 		reasignarAvisosLlamarClienteLlamadas.push(params);
 	},
@@ -1701,7 +1703,11 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 		]);
 		// Pero la reconciliación post-envío detectó el cambio de asesor y reasignó el aviso
 		expect(reasignarAvisosLlamarClienteLlamadas).toEqual([
-			{ casoCobroId: CASO_ID, nuevoResponsableUserId: "asesor-nuevo" },
+			{
+				casoCobroId: CASO_ID,
+				nuevoResponsableUserId: "asesor-nuevo",
+				soloSiResponsableEs: "asesor-nuevo",
+			},
 		]);
 	});
 });

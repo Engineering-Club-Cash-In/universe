@@ -9,6 +9,7 @@
  * y que el INSERT queda condicionado al estado leído.
  */
 import { afterEach, describe, expect, it, mock } from "bun:test";
+import { casosCobros } from "../db/schema/cobros";
 import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
 import { notifications } from "../db/schema/notifications";
 
@@ -31,6 +32,11 @@ function mockDb() {
 										: [],
 							}),
 						}),
+					};
+				}
+				if (tabla === casosCobros) {
+					return {
+						where: () => ({}),
 					};
 				}
 				throw new Error(`select from tabla no mockeada: ${String(tabla)}`);
@@ -138,6 +144,16 @@ describe("CB-041 — reasignarAvisosLlamarCliente", () => {
 		await reasignarAvisosLlamarCliente({
 			casoCobroId: "caso-1",
 			nuevoResponsableUserId: "asesor-nuevo",
+		});
+		expect(notificacionesActualizadas).toHaveLength(1);
+		expect(notificacionesActualizadas[0]?.set.assignedTo).toBe("asesor-nuevo");
+	});
+
+	it("condiciona atómicamente la reasignación con soloSiResponsableEs (review de Codex)", async () => {
+		await reasignarAvisosLlamarCliente({
+			casoCobroId: "caso-1",
+			nuevoResponsableUserId: "asesor-nuevo",
+			soloSiResponsableEs: "asesor-nuevo",
 		});
 		expect(notificacionesActualizadas).toHaveLength(1);
 		expect(notificacionesActualizadas[0]?.set.assignedTo).toBe("asesor-nuevo");

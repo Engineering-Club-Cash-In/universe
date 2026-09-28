@@ -1482,6 +1482,17 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 		);
 		expect(res.estadoUnidad).toBe("inmovilizada");
 		expect(res.pendienteLlamar?.id).toBe(INMOV_ID);
+		expect(res.tieneGps).toBe(true);
+	});
+
+	it("reporta tieneGps=false si el vehículo no tiene unidad GPS vinculada", async () => {
+		wialonUnitIdCasoMock = null;
+		const res = await call(
+			inmovilizacionUnidadRouter.getInmovilizacionesCaso,
+			{ casoCobroId: CASO_ID },
+			{ context: ctx("cobros") },
+		);
+		expect(res.tieneGps).toBe(false);
 	});
 
 	it("pendienteLlamar: null si la unidad ya se reactivó aunque el apagado no tenga llamada", async () => {

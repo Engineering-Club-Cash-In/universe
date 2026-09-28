@@ -21,6 +21,7 @@ import {
 	Layers,
 	LayoutDashboard,
 	ListChecks,
+	Lock,
 	MapPin,
 	Menu,
 	MessageSquare,
@@ -390,6 +391,15 @@ export default function Header() {
 													<Link to="/cobros/metas" className="cursor-pointer">
 														<Target className="mr-2 h-4 w-4" />
 														Metas de Mora
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link
+														to="/cobros/inmovilizaciones"
+														className="cursor-pointer"
+													>
+														<Lock className="mr-2 h-4 w-4" />
+														Inmovilización de unidades
 													</Link>
 												</DropdownMenuItem>
 											</DropdownMenuGroup>
@@ -838,6 +848,13 @@ function MobileNav({
 												<Link to="/cobros/metas" className={MOBILE_LINK_CLASS}>
 													<Target />
 													Metas de Mora
+												</Link>
+												<Link
+													to="/cobros/inmovilizaciones"
+													className={MOBILE_LINK_CLASS}
+												>
+													<Lock />
+													Inmovilización de unidades
 												</Link>
 												<MobileGroupLabel>
 													Configuración y análisis

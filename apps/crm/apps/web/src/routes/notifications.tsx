@@ -15,7 +15,11 @@ import {
 	Info,
 	Link2,
 	Loader2,
+	Lock,
+	LockOpen,
+	MapPin,
 	MessageCircle,
+	PhoneCall,
 	PhoneOff,
 	Send,
 	TrendingUp,
@@ -308,6 +312,48 @@ const COBROS_TIPO_CONFIG: Record<
 		iconWrap: "bg-red-100 dark:bg-red-900/40",
 		iconColor: "text-red-600 dark:text-red-400",
 		badge: "bg-red-600 text-white dark:bg-red-700 dark:text-white",
+	},
+	// CB-041: solicitud de apagado/reactivación de unidad esperando al supervisor.
+	inmovilizacion_pendiente_aprobacion: {
+		label: "Inmovilización por aprobar",
+		border: "border-orange-200 dark:border-orange-900/50",
+		bg: "bg-orange-50/50 dark:bg-orange-950/20",
+		icon: Lock,
+		iconWrap: "bg-orange-100 dark:bg-orange-900/40",
+		iconColor: "text-orange-600 dark:text-orange-400",
+		badge:
+			"bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+	},
+	// CB-041: decisión del supervisor, o aviso de que la unidad ya se reactivó.
+	inmovilizacion_resuelta: {
+		label: "Inmovilización resuelta",
+		border: "border-slate-200 dark:border-slate-800",
+		bg: "bg-slate-50/50 dark:bg-slate-900/20",
+		icon: LockOpen,
+		iconWrap: "bg-slate-100 dark:bg-slate-800/60",
+		iconColor: "text-slate-600 dark:text-slate-400",
+		badge:
+			"bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-300",
+	},
+	// CB-041: el apagado ya se ejecutó — el asesor tiene que llamar al cliente.
+	inmovilizacion_llamar_cliente: {
+		label: "Llamar al cliente",
+		border: "border-red-300 dark:border-red-800",
+		bg: "bg-red-50 dark:bg-red-950/30",
+		icon: PhoneCall,
+		iconWrap: "bg-red-100 dark:bg-red-900/40",
+		iconColor: "text-red-600 dark:text-red-400",
+		badge: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+	},
+	// CB-119: evento GPS (bucket B4 en ubicación clave) que requiere revisión.
+	gps_evento: {
+		label: "Evento GPS",
+		border: "border-cyan-200 dark:border-cyan-900/50",
+		bg: "bg-cyan-50/50 dark:bg-cyan-950/20",
+		icon: MapPin,
+		iconWrap: "bg-cyan-100 dark:bg-cyan-900/40",
+		iconColor: "text-cyan-600 dark:text-cyan-400",
+		badge: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400",
 	},
 };
 

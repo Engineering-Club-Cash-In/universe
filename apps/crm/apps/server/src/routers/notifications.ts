@@ -340,6 +340,7 @@ export const notificationsRouter = {
 			const [notif] = await db
 				.select({
 					type: notifications.type,
+					cobrosTipo: notifications.cobrosTipo,
 					assignedToRole: notifications.assignedToRole,
 					assignedTo: notifications.assignedTo,
 				})
@@ -369,6 +370,32 @@ export const notificationsRouter = {
 			) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para modificar esta notificación",
+				});
+			}
+
+			// CB-041: estos 3 cobrosTipo se resuelven SOLO por su flujo de
+			// negocio (decidirInmovilizacion, marcarEjecutada,
+			// registrarResultadoLlamada / registrarLlamadaReactivacion) — nunca
+			// a mano desde acá. La UI de notificaciones expone "Resolver" para
+			// cualquier action_required sin mirar cobrosTipo: un supervisor
+			// podía ocultar "por aprobar" sin decidirla, o un asesor ocultar
+			// "llamar al cliente" sin enlazar ningún contacto — la tarea real
+			// seguía pendiente en inmovilizaciones_unidad, invisible. Review de
+			// Codex, PR #1758.
+			const COBROS_TIPO_RESOLUCION_BLOQUEADA = [
+				"inmovilizacion_pendiente_aprobacion",
+				"inmovilizacion_llamar_cliente",
+			] as const;
+			if (
+				(input.status === "resolved" || input.status === "dismissed") &&
+				notif.cobrosTipo &&
+				(
+					COBROS_TIPO_RESOLUCION_BLOQUEADA as readonly string[]
+				).includes(notif.cobrosTipo)
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Esta notificación se resuelve automáticamente cuando se completa la acción correspondiente en el caso.",
 				});
 			}
 

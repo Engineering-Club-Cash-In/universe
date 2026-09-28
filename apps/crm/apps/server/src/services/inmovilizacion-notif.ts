@@ -8,10 +8,17 @@
 // transacción (router) y notificarInmovilizacionPendiente corre DESPUÉS,
 // fuera de ella. Si un supervisor decide en esa ventana, resolverPendientes
 // (llamado por la decisión) corre antes de que el aviso pendiente exista —
-// no encuentra nada que cerrar, y el INSERT de acá lo crea igual, ya
-// huérfano y `pending` para siempre. notificarInmovilizacionPendiente
-// re-chequea el estado justo antes de insertar para cerrar esa ventana.
-// Review de Codex, PR #1758.
+// no encuentra nada que cerrar, y un INSERT posterior lo crea igual, ya
+// huérfano y `pending` para siempre.
+//
+// notificarInmovilizacionPendiente cierra la ventana con
+// `SELECT ... FOR UPDATE` dentro de una transacción: toma el lock de fila
+// de la inmovilización, así que si decidirInmovilizacion/cancelarSolicitud
+// (ambos hacen `UPDATE ... WHERE estado = X`) ya tienen la fila lockeada,
+// espera a que esa transacción termine — y ve el estado YA actualizado. Un
+// SELECT simple (sin FOR UPDATE, como el intento anterior) no logra esto:
+// deja de leer una foto vieja mientras el UPDATE concurrente sigue en
+// vuelo. Review de Codex, PR #1758.
 
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
@@ -54,18 +61,9 @@ export async function notificarInmovilizacionPendiente(params: {
 	solicitadoPorRole?: RolNotificacion;
 }): Promise<void> {
 	await tryNotify("notificarInmovilizacionPendiente", async () => {
-		// Re-chequeo justo antes de insertar: si un supervisor ya decidió (o
-		// el solicitante canceló) en la ventana entre el commit de la
-		// solicitud y esta llamada, no queda nada "pendiente" que avisar —
-		// insertar igual dejaría un aviso pending huérfano. Ver comentario
-		// del encabezado del archivo.
-		const [inm] = await db
-			.select({ estado: inmovilizacionesUnidad.estado })
-			.from(inmovilizacionesUnidad)
-			.where(eq(inmovilizacionesUnidad.id, params.inmovilizacionId))
-			.limit(1);
-		if (inm?.estado !== "pendiente_aprobacion") return;
-
+		// La lista de supervisores no depende del lock — se resuelve antes de
+		// abrir la transacción para no retenerla dentro esperando por algo
+		// que no la necesita.
 		const supervisores = await obtenerSupervisoresCobros();
 		if (supervisores.length === 0) return;
 
@@ -79,23 +77,39 @@ export async function notificarInmovilizacionPendiente(params: {
 				? `El crédito ${params.numeroCreditoSifco}`
 				: "Un cliente";
 
-		await db.insert(notifications).values(
-			supervisores.map((supervisorId) => ({
-				titulo: `Solicitud de ${accionTexto} pendiente de aprobación`,
-				descripcion: `${quien} tiene una solicitud de ${accionTexto} de unidad esperando aprobación. Motivo: ${params.motivo}.`,
-				type: "action_required" as const,
-				status: "pending" as const,
-				cobrosTipo: "inmovilizacion_pendiente_aprobacion" as const,
-				relatedEntityType: "collection_case" as const,
-				relatedEntityId: params.casoCobroId,
-				inmovilizacionId: params.inmovilizacionId,
-				redirectPage: "cobros_detail" as const,
-				createdBy: params.solicitadoPorUserId,
-				createdByRole: params.solicitadoPorRole ?? ("cobros" as const),
-				assignedToRole: "cobros_supervisor" as const,
-				assignedTo: supervisorId,
-			})),
-		);
+		await db.transaction(async (tx) => {
+			// SELECT ... FOR UPDATE: toma el lock de fila de la inmovilización.
+			// Si decidirInmovilizacion/cancelarSolicitud ya la tienen lockeada
+			// (su propio UPDATE), esto espera a que terminen — y lee el estado
+			// YA actualizado, no una foto vieja. Cierra la ventana de carrera
+			// por completo (a diferencia de un SELECT simple). Ver comentario
+			// del encabezado del archivo.
+			const [inm] = await tx
+				.select({ estado: inmovilizacionesUnidad.estado })
+				.from(inmovilizacionesUnidad)
+				.where(eq(inmovilizacionesUnidad.id, params.inmovilizacionId))
+				.for("update")
+				.limit(1);
+			if (inm?.estado !== "pendiente_aprobacion") return;
+
+			await tx.insert(notifications).values(
+				supervisores.map((supervisorId) => ({
+					titulo: `Solicitud de ${accionTexto} pendiente de aprobación`,
+					descripcion: `${quien} tiene una solicitud de ${accionTexto} de unidad esperando aprobación. Motivo: ${params.motivo}.`,
+					type: "action_required" as const,
+					status: "pending" as const,
+					cobrosTipo: "inmovilizacion_pendiente_aprobacion" as const,
+					relatedEntityType: "collection_case" as const,
+					relatedEntityId: params.casoCobroId,
+					inmovilizacionId: params.inmovilizacionId,
+					redirectPage: "cobros_detail" as const,
+					createdBy: params.solicitadoPorUserId,
+					createdByRole: params.solicitadoPorRole ?? ("cobros" as const),
+					assignedToRole: "cobros_supervisor" as const,
+					assignedTo: supervisorId,
+				})),
+			);
+		});
 	});
 }
 

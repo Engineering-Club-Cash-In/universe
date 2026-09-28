@@ -1,7 +1,12 @@
 /**
- * CB-041 — notificarInmovilizacionPendiente: el re-chequeo del estado antes
- * de insertar (review de Codex, PR #1758). Mock de `db` propio, mismo
- * criterio que inmovilizacion-unidad.test.ts: identifica ramas por TABLA.
+ * CB-041 — notificarInmovilizacionPendiente: el lock de fila (SELECT ...
+ * FOR UPDATE dentro de una transacción) que cierra la ventana de carrera
+ * con decidirInmovilizacion/cancelarSolicitud (review de Codex, PR #1758).
+ * Mock de `db` propio, mismo criterio que inmovilizacion-unidad.test.ts:
+ * identifica ramas por TABLA. `db.transaction` recibe un `tx` con la misma
+ * forma que `db` — el mock no simula el lock en sí (no hay concurrencia
+ * real en un mock in-memory), solo que el código pasa por `for("update")`
+ * y que el INSERT queda condicionado al estado leído.
  */
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
@@ -18,10 +23,12 @@ function mockDb() {
 				if (tabla === inmovilizacionesUnidad) {
 					return {
 						where: () => ({
-							limit: async () =>
-								estadoInmovilizacionMock
-									? [{ estado: estadoInmovilizacionMock }]
-									: [],
+							for: () => ({
+								limit: async () =>
+									estadoInmovilizacionMock
+										? [{ estado: estadoInmovilizacionMock }]
+										: [],
+							}),
 						}),
 					};
 				}
@@ -39,6 +46,7 @@ function mockDb() {
 			}
 			throw new Error(`insert en tabla no mockeada: ${String(tabla)}`);
 		},
+		transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(mockDb()),
 	};
 }
 

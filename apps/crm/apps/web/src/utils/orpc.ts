@@ -15,6 +15,8 @@ import type {
 	manualVehicleRouter,
 	proyeccionRouter,
 } from "../../../server/src/routers/index";
+import type { inmovilizacionReactivacionLlamadaRouter } from "../../../server/src/routers/inmovilizacion-reactivacion-llamada";
+import type { inmovilizacionUnidadRouter } from "../../../server/src/routers/inmovilizacion-unidad";
 import type { pagaloGrupoActivoRouter } from "../../../server/src/routers/pagalo-grupo-activo";
 import type { pagaloLinkActionsRouter } from "../../../server/src/routers/pagalo-link-actions";
 import type { pagaloSupervisionRouter } from "../../../server/src/routers/pagalo-supervision";
@@ -100,6 +102,8 @@ type MergedRouter = AppRouter &
 	typeof pagaloSupervisionRouter &
 	typeof convenioDecisionRouter &
 	typeof recuperacionVehiculoRouter &
+	typeof inmovilizacionUnidadRouter &
+	typeof inmovilizacionReactivacionLlamadaRouter &
 	typeof wialonRouter &
 	typeof gpsIntegracionRouter &
 	typeof gpsEventosRouter &

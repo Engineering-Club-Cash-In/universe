@@ -120,6 +120,17 @@ export const inmovilizacionesUnidad = pgTable(
 		uniqueIndex("uq_inmovilizaciones_unidad_caso_abierta")
 			.on(table.casoCobroId)
 			.where(sql`${table.estado} IN ('pendiente_aprobacion', 'aprobada')`),
+		// wialon_unit_id no es UNIQUE en vehicles (D-10, gps-eventos-poll.ts):
+		// una misma unidad física puede tener dos caso_cobro_id distintos. Sin
+		// este índice, el guard de arriba (por caso) no evita que esos dos
+		// casos tengan cada uno una solicitud abierta al mismo tiempo — el
+		// supervisor podía terminar con un apagado y una reactivación
+		// aprobados a la vez sobre el mismo vehículo real. Review de Codex.
+		uniqueIndex("uq_inmovilizaciones_unidad_wialon_abierta")
+			.on(table.wialonUnitId)
+			.where(
+				sql`${table.estado} IN ('pendiente_aprobacion', 'aprobada') AND ${table.wialonUnitId} IS NOT NULL`,
+			),
 		index("idx_inmovilizaciones_unidad_estado").on(table.estado),
 		index("idx_inmovilizaciones_unidad_caso").on(table.casoCobroId),
 	],

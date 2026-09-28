@@ -49,7 +49,12 @@ import {
 import { orpc } from "@/utils/orpc";
 
 const PAGE_SIZE = 10;
-type EstadoSatFiltro = "todos" | "activo" | "inactivo" | "no_encontrado";
+type EstadoSatFiltro =
+	| "todos"
+	| "encontrado"
+	| "activo"
+	| "inactivo"
+	| "no_encontrado";
 type CruceCartera = "con_credito" | "disponible" | "sin_registro";
 type CruceCarteraFiltro = "todos" | "con_credito" | "sin_credito";
 type EstadoCreditoFiltro = "todos" | "ACTIVO" | "MOROSO" | "EN_CONVENIO";
@@ -118,10 +123,7 @@ function EstadoSatBadge({
 	);
 }
 
-function textoEstadoSat(
-	estadoSat: string | null,
-	resultado: string,
-): string {
+function textoEstadoSat(estadoSat: string | null, resultado: string): string {
 	if (resultado === "no_aparece_en_sat") return "No se encontr\u00f3 en SAT";
 	return estadoSat || "Sin dato SAT";
 }
@@ -518,6 +520,8 @@ function SatVerificationPage() {
 			const estadoSat = vehiculo.estadoSat?.trim().toLowerCase();
 			const matchesEstadoSat =
 				estadoSatFiltro === "todos" ||
+				(estadoSatFiltro === "encontrado" &&
+					vehiculo.resultado !== "no_aparece_en_sat") ||
 				(estadoSatFiltro === "activo" && estadoSat === "activo") ||
 				(estadoSatFiltro === "inactivo" && estadoSat === "inactivo") ||
 				(estadoSatFiltro === "no_encontrado" &&
@@ -589,7 +593,9 @@ function SatVerificationPage() {
 				? `Estado SAT: ${
 						estadoSatFiltro === "no_encontrado"
 							? "No se encontró en SAT"
-							: estadoSatFiltro
+							: estadoSatFiltro === "encontrado"
+								? "Encontrado en SAT"
+								: estadoSatFiltro
 					}`
 				: null,
 			cruceCarteraFiltro !== "todos"
@@ -887,6 +893,7 @@ function SatVerificationPage() {
 								</SelectTrigger>
 								<SelectContent>
 									<SelectItem value="todos">Todos</SelectItem>
+									<SelectItem value="encontrado">Encontrado en SAT</SelectItem>
 									<SelectItem value="activo">Activo</SelectItem>
 									<SelectItem value="inactivo">Inactivo</SelectItem>
 									<SelectItem value="no_encontrado">

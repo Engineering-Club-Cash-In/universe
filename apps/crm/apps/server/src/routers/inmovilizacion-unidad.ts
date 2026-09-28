@@ -373,6 +373,7 @@ export const inmovilizacionUnidadRouter = {
 				pendienteLlamar: FilaInmovilizacion | null;
 				pendienteLlamarReactivacion: FilaInmovilizacion | null;
 				historial: FilaInmovilizacion[];
+				tieneGps: boolean;
 			}> => {
 				await assertAccesoCasoCobro(
 					input.casoCobroId,
@@ -452,6 +453,7 @@ export const inmovilizacionUnidadRouter = {
 					pendienteLlamar,
 					pendienteLlamarReactivacion,
 					historial,
+					tieneGps: caso?.wialonUnitId != null,
 				};
 			},
 		),

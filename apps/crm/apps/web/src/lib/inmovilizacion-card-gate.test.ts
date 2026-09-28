@@ -111,4 +111,40 @@ describe("debeMostrarCardInmovilizacion", () => {
 			}),
 		).toBe(true);
 	});
+
+	it("B0/B1 sin historial pero unidad inmovilizada (unidad compartida D-10): se muestra para permitir reactivación", () => {
+		expect(
+			debeMostrarCardInmovilizacion({
+				bucketNumero: 0,
+				haySolicitudAbierta: false,
+				hayPendienteLlamar: false,
+				historialLength: 0,
+				unidadInmovilizada: true,
+			}),
+		).toBe(true);
+	});
+
+	it("Vehículo sin GPS (tieneGps: false) en B2/B3 sin nada en curso: NO se muestra", () => {
+		expect(
+			debeMostrarCardInmovilizacion({
+				bucketNumero: 2,
+				haySolicitudAbierta: false,
+				hayPendienteLlamar: false,
+				historialLength: 0,
+				tieneGps: false,
+			}),
+		).toBe(false);
+	});
+
+	it("Vehículo sin GPS (tieneGps: false) pero con solicitud abierta previa: se muestra para auditar", () => {
+		expect(
+			debeMostrarCardInmovilizacion({
+				bucketNumero: 2,
+				haySolicitudAbierta: true,
+				hayPendienteLlamar: false,
+				historialLength: 0,
+				tieneGps: false,
+			}),
+		).toBe(true);
+	});
 });

@@ -120,17 +120,23 @@ export function InmovilizacionCard({
 
 	if (!inmov.data) return null;
 
-	const { estadoUnidad, solicitudAbierta, pendienteLlamar, pendienteLlamarReactivacion } =
-		inmov.data;
+	const {
+		estadoUnidad,
+		solicitudAbierta,
+		pendienteLlamar,
+		pendienteLlamarReactivacion,
+		tieneGps,
+	} = inmov.data;
 	// El apagado exige bucket B2/B3 (mismo criterio que el server,
-	// lib/inmovilizacion-unidad.ts) — sin este chequeo el botón quedaba visible
-	// en B4 y el asesor solo se enteraba del rechazo después de pedirlo.
+	// lib/inmovilizacion-unidad.ts) y unidad GPS vinculada (wialonUnitId != null).
 	const puedeApagar =
+		tieneGps &&
 		estadoUnidad === "activa" &&
 		!solicitudAbierta &&
 		bucketNumero !== null &&
 		BUCKETS_INMOVILIZACION.includes(bucketNumero);
-	const puedeReactivar = estadoUnidad === "inmovilizada" && !solicitudAbierta;
+	const puedeReactivar =
+		tieneGps && estadoUnidad === "inmovilizada" && !solicitudAbierta;
 
 	if (
 		!debeMostrarCardInmovilizacion({
@@ -138,6 +144,8 @@ export function InmovilizacionCard({
 			haySolicitudAbierta: !!solicitudAbierta,
 			hayPendienteLlamar: !!pendienteLlamar || !!pendienteLlamarReactivacion,
 			historialLength: inmov.data.historial.length,
+			unidadInmovilizada: estadoUnidad === "inmovilizada",
+			tieneGps,
 		})
 	) {
 		return null;
@@ -217,6 +225,7 @@ export function InmovilizacionCard({
 				{pendienteLlamar && (
 					<LlamarClienteBanner
 						casoCobroId={casoCobroId}
+						ejecutadoAt={pendienteLlamar.ejecutadoAt}
 						inmovilizacionId={pendienteLlamar.id}
 						onEnlazado={invalidar}
 					/>
@@ -225,6 +234,7 @@ export function InmovilizacionCard({
 				{pendienteLlamarReactivacion && (
 					<LlamarClienteReactivacionBanner
 						casoCobroId={casoCobroId}
+						ejecutadoAt={pendienteLlamarReactivacion.ejecutadoAt}
 						inmovilizacionId={pendienteLlamarReactivacion.id}
 						onEnlazado={invalidar}
 					/>
@@ -283,10 +293,12 @@ type ContactosCaso = Awaited<ReturnType<typeof client.getHistorialContactos>>;
  */
 function LlamarClienteBanner({
 	casoCobroId,
+	ejecutadoAt,
 	inmovilizacionId,
 	onEnlazado,
 }: {
 	casoCobroId: string;
+	ejecutadoAt?: Date | string | null;
 	inmovilizacionId: string;
 	onEnlazado: () => void;
 }) {
@@ -295,12 +307,17 @@ function LlamarClienteBanner({
 
 	const contactos = useQuery({
 		...orpc.getHistorialContactos.queryOptions({
-			input: { casoCobroId, limit: 10 },
+			input: { casoCobroId, limit: 200 },
 		}),
 	});
 
 	const disponibles: ContactosCaso =
-		contactos.data?.filter((c) => !c.inmovilizacionId) ?? [];
+		contactos.data?.filter(
+			(c) =>
+				!c.inmovilizacionId &&
+				c.metodoContacto === "llamada" &&
+				(!ejecutadoAt || new Date(c.fechaContacto) > new Date(ejecutadoAt)),
+		) ?? [];
 
 	async function registrar(resultado: "paga" | "no_paga") {
 		if (!contactoId) {
@@ -343,7 +360,15 @@ function LlamarClienteBanner({
 			<div className="mt-3 flex flex-wrap items-center gap-2">
 				<Select onValueChange={setContactoId} value={contactoId}>
 					<SelectTrigger className="w-64">
-						<SelectValue placeholder="Elegí la gestión de la llamada" />
+						<SelectValue
+							placeholder={
+								contactos.isLoading
+									? "Cargando llamadas..."
+									: disponibles.length === 0
+										? "Sin llamadas posteriores disponibles"
+										: "Elegí la gestión de la llamada"
+							}
+						/>
 					</SelectTrigger>
 					<SelectContent>
 						{disponibles.map((c) => (
@@ -382,10 +407,12 @@ function LlamarClienteBanner({
  */
 function LlamarClienteReactivacionBanner({
 	casoCobroId,
+	ejecutadoAt,
 	inmovilizacionId,
 	onEnlazado,
 }: {
 	casoCobroId: string;
+	ejecutadoAt?: Date | string | null;
 	inmovilizacionId: string;
 	onEnlazado: () => void;
 }) {
@@ -394,12 +421,17 @@ function LlamarClienteReactivacionBanner({
 
 	const contactos = useQuery({
 		...orpc.getHistorialContactos.queryOptions({
-			input: { casoCobroId, limit: 10 },
+			input: { casoCobroId, limit: 200 },
 		}),
 	});
 
 	const disponibles: ContactosCaso =
-		contactos.data?.filter((c) => !c.inmovilizacionId) ?? [];
+		contactos.data?.filter(
+			(c) =>
+				!c.inmovilizacionId &&
+				c.metodoContacto === "llamada" &&
+				(!ejecutadoAt || new Date(c.fechaContacto) > new Date(ejecutadoAt)),
+		) ?? [];
 
 	async function registrar() {
 		if (!contactoId) {
@@ -434,7 +466,15 @@ function LlamarClienteReactivacionBanner({
 			<div className="mt-3 flex flex-wrap items-center gap-2">
 				<Select onValueChange={setContactoId} value={contactoId}>
 					<SelectTrigger className="w-64">
-						<SelectValue placeholder="Elegí la gestión de la llamada" />
+						<SelectValue
+							placeholder={
+								contactos.isLoading
+									? "Cargando llamadas..."
+									: disponibles.length === 0
+										? "Sin llamadas posteriores disponibles"
+										: "Elegí la gestión de la llamada"
+							}
+						/>
 					</SelectTrigger>
 					<SelectContent>
 						{disponibles.map((c) => (

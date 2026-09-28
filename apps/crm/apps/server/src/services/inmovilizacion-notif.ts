@@ -22,8 +22,10 @@
 
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
+import { casosCobros } from "../db/schema/cobros";
 import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
 import { notifications } from "../db/schema/notifications";
+import { usuariosDuenosPorSifco } from "../lib/acceso-caso-cobro";
 import { obtenerSupervisoresCobros } from "./cobros-notif-helpers";
 
 type RolNotificacion = (typeof notifications.createdByRole.enumValues)[number];
@@ -279,6 +281,66 @@ export async function notificarUnidadReactivada(params: {
 			assignedTo: params.asesorUserId,
 		});
 	});
+}
+
+/**
+ * Pone cada aviso abierto de "llamar al cliente" en manos de quien lleva HOY
+ * el crédito en CARTERA.
+ *
+ * El aviso nace dirigido al dueño del momento, pero cartera puede reasignar el
+ * crédito después (el motor de las 23:59, una reasignación manual, un traslado
+ * masivo). Como el acceso a la ficha lo da cartera, el asesor anterior ya no
+ * podría cerrar la tarea y el nuevo no se enteraría (review de Codex, P1,
+ * PR #1765). Se corre al abrir la inmovilización del caso, después de cada
+ * reasignación hecha desde el CRM y en la tanda de alertas de las 08:00.
+ *
+ * Sin `casoCobroIds` revisa todos los avisos abiertos de este tipo (son pocos:
+ * uno por apagado ejecutado sin llamada registrada). Un dueño sin usuario en
+ * el CRM deja el aviso donde está (típicamente en quien pidió el apagado, que
+ * es quien puede registrar la llamada en ese caso). Best-effort.
+ */
+export async function reconciliarAvisosLlamarCliente(
+	casoCobroIds?: readonly string[],
+): Promise<number> {
+	let movidos = 0;
+	await tryNotify("reconciliarAvisosLlamarCliente", async () => {
+		if (casoCobroIds && casoCobroIds.length === 0) return;
+		const abiertos = await db
+			.select({
+				casoCobroId: notifications.relatedEntityId,
+				assignedTo: notifications.assignedTo,
+				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			})
+			.from(notifications)
+			.innerJoin(casosCobros, eq(casosCobros.id, notifications.relatedEntityId))
+			.where(
+				and(
+					eq(notifications.cobrosTipo, "inmovilizacion_llamar_cliente"),
+					eq(notifications.relatedEntityType, "collection_case"),
+					inArray(notifications.status, [...ESTADOS_ABIERTOS]),
+					casoCobroIds
+						? inArray(notifications.relatedEntityId, [...casoCobroIds])
+						: undefined,
+				),
+			);
+		if (abiertos.length === 0) return;
+
+		const duenos = await usuariosDuenosPorSifco(
+			abiertos.flatMap((a) => (a.numeroCreditoSifco ? [a.numeroCreditoSifco] : [])),
+		);
+		const casosAMover = new Map<string, string>();
+		for (const a of abiertos) {
+			const dueno = a.numeroCreditoSifco ? duenos.get(a.numeroCreditoSifco) : undefined;
+			if (a.casoCobroId && dueno && a.assignedTo !== dueno) {
+				casosAMover.set(a.casoCobroId, dueno);
+			}
+		}
+		for (const [casoCobroId, dueno] of casosAMover) {
+			await reasignarAvisosLlamarCliente({ casoCobroId, nuevoResponsableUserId: dueno });
+			movidos++;
+		}
+	});
+	return movidos;
 }
 
 /**

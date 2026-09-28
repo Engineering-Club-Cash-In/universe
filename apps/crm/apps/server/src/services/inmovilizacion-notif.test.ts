@@ -12,11 +12,20 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 import { casosCobros } from "../db/schema/cobros";
 import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
 import { notifications } from "../db/schema/notifications";
+import { moduloAccesoFalso } from "../lib/acceso-caso-cobro.mock";
 
 let estadoInmovilizacionMock: string | null = "pendiente_aprobacion";
 let notificacionesInsertadas: Record<string, unknown>[][] = [];
 let notificacionesActualizadas: { set: Record<string, unknown> }[] = [];
 let supervisoresMock = ["sup-1", "sup-2"];
+// Avisos abiertos de "llamar al cliente" (reconciliarAvisosLlamarCliente) y el
+// dueño del crédito en cartera, ya resuelto a usuario del CRM.
+let avisosAbiertosMock: {
+	casoCobroId: string;
+	assignedTo: string | null;
+	numeroCreditoSifco: string | null;
+}[] = [];
+let duenoEnCarteraMock: string | null = null;
 
 function mockDb() {
 	return {
@@ -37,6 +46,11 @@ function mockDb() {
 				if (tabla === casosCobros) {
 					return {
 						where: () => ({}),
+					};
+				}
+				if (tabla === notifications) {
+					return {
+						innerJoin: () => ({ where: async () => avisosAbiertosMock }),
 					};
 				}
 				throw new Error(`select from tabla no mockeada: ${String(tabla)}`);
@@ -74,15 +88,26 @@ mock.module("../db", () => ({ db: mockDb() }));
 mock.module("./cobros-notif-helpers", () => ({
 	obtenerSupervisoresCobros: async () => supervisoresMock,
 }));
+mock.module("../lib/acceso-caso-cobro", () =>
+	moduloAccesoFalso({
+		tieneAcceso: () => true,
+		duenoUsuario: () => duenoEnCarteraMock,
+	}),
+);
 
-const { notificarInmovilizacionPendiente, reasignarAvisosLlamarCliente } =
-	await import("./inmovilizacion-notif");
+const {
+	notificarInmovilizacionPendiente,
+	reasignarAvisosLlamarCliente,
+	reconciliarAvisosLlamarCliente,
+} = await import("./inmovilizacion-notif");
 
 function reset() {
 	estadoInmovilizacionMock = "pendiente_aprobacion";
 	notificacionesInsertadas = [];
 	notificacionesActualizadas = [];
 	supervisoresMock = ["sup-1", "sup-2"];
+	avisosAbiertosMock = [];
+	duenoEnCarteraMock = null;
 }
 
 const params = {
@@ -150,3 +175,55 @@ describe("CB-041 — reasignarAvisosLlamarCliente", () => {
 	});
 });
 
+describe("reconciliarAvisosLlamarCliente — el aviso sigue al dueño en cartera (review de Codex, PR #1765)", () => {
+	afterEach(reset);
+
+	it("cartera reasignó el crédito: el aviso pasa al dueño de hoy", async () => {
+		avisosAbiertosMock = [
+			{
+				casoCobroId: "caso-1",
+				assignedTo: "asesor-viejo",
+				numeroCreditoSifco: "0101",
+			},
+		];
+		duenoEnCarteraMock = "asesor-nuevo";
+
+		const movidos = await reconciliarAvisosLlamarCliente();
+
+		expect(movidos).toBe(1);
+		expect(notificacionesActualizadas).toHaveLength(1);
+		expect(notificacionesActualizadas[0]?.set.assignedTo).toBe("asesor-nuevo");
+	});
+
+	it("el aviso ya es del dueño: no toca nada", async () => {
+		avisosAbiertosMock = [
+			{
+				casoCobroId: "caso-1",
+				assignedTo: "asesor-nuevo",
+				numeroCreditoSifco: "0101",
+			},
+		];
+		duenoEnCarteraMock = "asesor-nuevo";
+
+		expect(await reconciliarAvisosLlamarCliente()).toBe(0);
+		expect(notificacionesActualizadas).toHaveLength(0);
+	});
+
+	it("el dueño no tiene usuario en el CRM: el aviso se queda donde está", async () => {
+		avisosAbiertosMock = [
+			{
+				casoCobroId: "caso-1",
+				assignedTo: "quien-pidio",
+				numeroCreditoSifco: "0101",
+			},
+		];
+		duenoEnCarteraMock = null;
+
+		expect(await reconciliarAvisosLlamarCliente()).toBe(0);
+		expect(notificacionesActualizadas).toHaveLength(0);
+	});
+
+	it("con una lista vacía de casos no consulta nada", async () => {
+		expect(await reconciliarAvisosLlamarCliente([])).toBe(0);
+	});
+});

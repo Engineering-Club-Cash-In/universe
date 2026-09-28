@@ -496,9 +496,14 @@ export const getReporteCobranza = protectedProcedure
 			})
 			.from(casosCobros)
 			.where(eq(casosCobros.activo, true));
+		// Sin cartera (integración apagada o caída) el reporte sale igual, con
+		// los casos bajo "sin_asesor": los datos son del CRM (Codex, P2).
 		const duenos = await duenosEnCarteraPorSifco(
 			casosActivos.flatMap((c) => (c.sifco ? [c.sifco] : [])),
-		);
+		).catch((error) => {
+			console.error("[getReporteCobranza] Sin dueños de cartera:", error);
+			return new Map<string, { asesorId: number; nombre: string }>();
+		});
 		const porAsesor = new Map<
 			string,
 			{ responsable: string | null; totalCasos: number; montoTotal: number }

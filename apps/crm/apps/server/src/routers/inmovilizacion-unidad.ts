@@ -50,6 +50,7 @@ import {
 	notificarLlamarCliente,
 	notificarUnidadReactivada,
 	reasignarAvisosLlamarCliente,
+	reconciliarAvisosLlamarCliente,
 	resolverAvisoLlamarCliente,
 	resolverPendientesInmovilizacion,
 } from "../services/inmovilizacion-notif";
@@ -371,6 +372,9 @@ export const inmovilizacionUnidadRouter = {
 					context.userId,
 					context.userRole,
 				);
+				// Si cartera reasignó el crédito, el aviso de "llamar al cliente"
+				// pasa al dueño de hoy antes de pintar la tarjeta.
+				await reconciliarAvisosLlamarCliente([input.casoCobroId]);
 
 				// El card (solicitudAbierta, pendienteLlamar, el historial que se
 				// LISTA) es siempre del caso — nunca se mezclan filas de otro caso

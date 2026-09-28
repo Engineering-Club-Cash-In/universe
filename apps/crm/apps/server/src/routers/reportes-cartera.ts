@@ -387,11 +387,16 @@ export const reportesCarteraRouter = {
 					GROUP BY cc.id
 				`,
 			);
+			// Sin cartera (integración apagada o caída) el reporte sale igual,
+			// con los casos bajo "sin_asesor": los datos son del CRM (Codex, P2).
 			const duenos = await duenosEnCarteraPorSifco(
 				porCaso.rows.flatMap((r) =>
 					r.numero_credito_sifco ? [r.numero_credito_sifco] : [],
 				),
-			);
+			).catch((error) => {
+				console.error("[getReporteEficienciaCobros] Sin dueños de cartera:", error);
+				return new Map<string, { asesorId: number; nombre: string }>();
+			});
 			type Acumulado = {
 				agenteId: string;
 				agenteNombre: string | null;

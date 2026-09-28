@@ -180,6 +180,7 @@ import {
 	notificarConvenioPendienteAprobacion,
 	notificarConvenioResuelto,
 } from "../services/convenio-decision-notif";
+import { reconciliarAvisosLlamarCliente } from "../services/inmovilizacion-notif";
 import {
 	createPagaloClient,
 	getPagaloSandboxConfig,
@@ -8503,12 +8504,16 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			try {
-				return await carteraBackClient.reasignarAsesor({
+				const res = await carteraBackClient.reasignarAsesor({
 					credito_id: input.creditoId,
 					asesor_nuevo_id: input.asesorNuevoId,
 					motivo: input.motivo,
 					usuario_email: context.session.user.email,
 				});
+				// El acceso sigue a cartera: los avisos pendientes de "llamar al
+				// cliente" pasan al asesor nuevo (review de Codex, PR #1765).
+				await reconciliarAvisosLlamarCliente();
+				return res;
 			} catch (err) {
 				throw new ORPCError("BAD_REQUEST", {
 					message:

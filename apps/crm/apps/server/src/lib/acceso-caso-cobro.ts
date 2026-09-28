@@ -98,6 +98,9 @@ export async function duenosEnCarteraPorSifco(
 ): Promise<Map<string, { asesorId: number; nombre: string }>> {
 	const unicos = [...new Set(sifcos.filter(Boolean))];
 	const duenos = new Map<string, { asesorId: number; nombre: string }>();
+	// Con la integración apagada no hay a quién preguntarle: sin dueños. El
+	// gate no llega acá en ese caso (falla cerrado antes, en sifcosQueTrabaja).
+	if (!isCarteraBackEnabled()) return duenos;
 	for (let i = 0; i < unicos.length; i += MAX_SIFCOS_POR_CONSULTA) {
 		const lote = unicos.slice(i, i + MAX_SIFCOS_POR_CONSULTA);
 		const respuesta = await carteraBackClient.getAsesorPorSifco({

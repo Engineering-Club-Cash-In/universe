@@ -380,6 +380,7 @@ mock.module("../services/inmovilizacion-notif", () => ({
 	}) => {
 		reasignarAvisosLlamarClienteLlamadas.push(params);
 	},
+	reconciliarAvisosLlamarCliente: async () => 0,
 }));
 // Mock propio de cartera-back-client y no spyOn sobre el módulo real: otros
 // archivos de test lo reemplazan con `mock.module` (global en bun), y en el

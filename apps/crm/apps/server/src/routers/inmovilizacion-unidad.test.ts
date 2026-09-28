@@ -56,6 +56,10 @@ let resolverPendientesLlamadas: string[] = [];
 let unidadReactivadaNotificada = 0;
 let resolverAvisoLlamarClienteLlamadas: string[] = [];
 let notificarLlamarClienteLlamadas: { asesorUserId: string }[] = [];
+// bloquearUnidadFisica (review de Codex, PR #1758): cada llamada a
+// tx.execute() dentro de una transacción — para confirmar que el advisory
+// lock se adquiere, y ANTES que cualquier SELECT/UPDATE sobre una fila.
+let executeLlamadas: string[] = [];
 
 const CASO_ID = "11111111-1111-1111-1111-111111111111";
 const VEHICLE_ID = "22222222-2222-2222-2222-222222222222";
@@ -120,10 +124,12 @@ function mockDb() {
 					// real acá), solo deja pasar la llamada — el resultado no se lee.
 					return {
 						where: () => ({
-							for: () =>
-								Promise.resolve([
+							for: () => {
+								executeLlamadas.push("select_for_update_fila");
+								return Promise.resolve([
 									{ id: (inmovilizacionExistente as { id?: string })?.id },
-								]),
+								]);
+							},
 						}),
 					};
 				}
@@ -238,6 +244,15 @@ function mockDb() {
 			throw new Error(`update en tabla no mockeada: ${String(tabla)}`);
 		},
 		transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(mockDb()),
+		// bloquearUnidadFisica (review de Codex, PR #1758): advisory lock por
+		// unidad, tx.execute(sql`select pg_advisory_xact_lock(...)`). El mock
+		// in-memory no simula el lock en sí (no hay concurrencia real acá, ni
+		// otro proceso Postgres con el que competir), solo deja pasar la
+		// llamada.
+		execute: async () => {
+			executeLlamadas.push("advisory_lock");
+			return undefined;
+		},
 	};
 }
 
@@ -315,6 +330,7 @@ function reset() {
 	resolverPendientesLlamadas = [];
 	unidadReactivadaNotificada = 0;
 	resolverAvisoLlamarClienteLlamadas = [];
+	executeLlamadas = [];
 }
 
 describe("CB-041 — solicitarInmovilizacion", () => {
@@ -669,6 +685,15 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 
+	it("toma el advisory lock ANTES del SELECT ... FOR UPDATE de fila (review de Codex — evita deadlock 40P01)", async () => {
+		conApagadoVigente();
+		await llamar("paga");
+		expect(executeLlamadas).toEqual([
+			"advisory_lock",
+			"select_for_update_fila",
+		]);
+	});
+
 	it("no hay apagado ejecutado con ese id: BAD_REQUEST", async () => {
 		inmovilizacionExistente = null;
 		await expect(llamar("paga")).rejects.toMatchObject({
@@ -990,6 +1015,26 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 		expect(resolverAvisoLlamarClienteLlamadas).toEqual([ORIGEN_ID]);
 	});
 
+	it("marcarEjecutada toma el advisory lock ANTES de tocar cualquier fila (review de Codex — evita deadlock 40P01)", async () => {
+		// marcarEjecutada y registrarResultadoLlamada/registrarLlamadaReactivacion
+		// pueden tomar locks de FILA en orden cruzado si compiten por la misma
+		// unidad física — el advisory lock (adquirido primero, antes de
+		// cualquier UPDATE/SELECT FOR UPDATE) serializa esa carrera en vez de
+		// dejar que dos transacciones se esperen mutuamente.
+		inmovilizacionExistente = {
+			...apagadoEjecutado(),
+			accion: "reactivacion",
+			estado: "aprobada",
+			inmovilizacionOrigenId: "88888888-8888-8888-8888-888888888888",
+		};
+		await call(
+			inmovilizacionUnidadRouter.marcarEjecutada,
+			{ id: INMOV_ID },
+			{ context: ctx("cobros_supervisor") },
+		);
+		expect(executeLlamadas[0]).toBe("advisory_lock");
+	});
+
 	it("marcarEjecutada de un apagado NO toca el aviso de llamar al cliente (nada que cerrar todavía)", async () => {
 		inmovilizacionExistente = {
 			id: INMOV_ID,
@@ -1044,6 +1089,17 @@ describe("CB-041 — registrarLlamadaReactivacion", () => {
 
 		const res = await llamar();
 		expect(res.ok).toBe(true);
+	});
+
+	it("toma el advisory lock ANTES del SELECT ... FOR UPDATE de fila (review de Codex — evita deadlock 40P01)", async () => {
+		const fila = reactivacionEjecutada();
+		inmovilizacionExistente = fila;
+		historialCasoMock = [fila];
+		await llamar();
+		expect(executeLlamadas).toEqual([
+			"advisory_lock",
+			"select_for_update_fila",
+		]);
 	});
 
 	it("reactivación superada por un apagado DIRECTO más reciente en la unidad física — carrera detectada por el lock, no por el guard temprano (review de Codex)", async () => {

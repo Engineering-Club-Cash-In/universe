@@ -127,6 +127,41 @@ async function getHistorialUnidadFisica(
 type TxExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
+ * Serializa, dentro de una transacción, TODA la actividad de una unidad
+ * física (o, sin `wialonUnitId`, del caso) — mismo patrón que
+ * `bloquearUnidadWialon` en `routers/wialon.ts`.
+ *
+ * Necesario porque `marcarEjecutada` y `registrarResultadoLlamada` /
+ * `registrarLlamadaReactivacion` toman locks de FILA en orden potencialmente
+ * inverso: `marcarEjecutada` de una reactivación lockea primero la
+ * reactivación (su propio UPDATE) y DESPUÉS el apagado origen
+ * (inmovilizacionOrigenId); `registrarResultadoLlamada` sobre ese mismo
+ * apagado lockea primero el apagado (SELECT ... FOR UPDATE) y su INSERT de
+ * la reactivación de seguimiento puede esperar por el índice único parcial,
+ * que depende de esa otra fila. Dos transacciones esperándose la una a la
+ * otra en orden cruzado es un deadlock (40P01) — Postgres lo detecta y
+ * aborta una de las dos, pero ese error no es un CONFLICT de negocio, sale
+ * como 500 crudo si nadie lo traduce.
+ *
+ * El advisory lock por unidad reemplaza esa carrera de locks de fila por
+ * una cola simple: la segunda transacción que toque la misma unidad espera
+ * a que la primera termine por completo (commit o rollback), sin poder
+ * quedar esperándose mutuamente. Review de Codex, PR #1758.
+ */
+async function bloquearUnidadFisica(
+	tx: TxExecutor,
+	params: { casoCobroId: string; wialonUnitId: number | null },
+): Promise<void> {
+	const clave =
+		params.wialonUnitId != null
+			? `wialon_unit:${params.wialonUnitId}`
+			: `inmovilizacion_caso:${params.casoCobroId}`;
+	await tx.execute(
+		sql`select pg_advisory_xact_lock(hashtextextended(${clave}, 0))`,
+	);
+}
+
+/**
  * `getHistorialUnidadFisica`, pero corriendo dentro de una transacción con
  * el `tx` ya lockeado (SELECT ... FOR UPDATE) sobre la fila que importa.
  * Se usa como curry: `getHistorialUnidadFisicaTx(tx)` da una función con la
@@ -696,6 +731,16 @@ export const inmovilizacionUnidadRouter = {
 			});
 
 			await db.transaction(async (tx) => {
+				// Serializa contra registrarResultadoLlamada / registrarLlamadaReactivacion
+				// sobre la MISMA unidad física — evita el deadlock de locks de fila
+				// en orden cruzado (esta transacción toca `input.id` y después
+				// `inmovilizacionOrigenId`; la otra puede tocarlos al revés). Ver
+				// comentario de `bloquearUnidadFisica`. Review de Codex, PR #1758.
+				await bloquearUnidadFisica(tx, {
+					casoCobroId: inm.casoCobroId,
+					wialonUnitId: inm.wialonUnitId,
+				});
+
 				const [actualizada] = await tx
 					.update(inmovilizacionesUnidad)
 					.set({
@@ -879,18 +924,21 @@ export const inmovilizacionUnidadRouter = {
 
 			try {
 				await db.transaction(async (tx) => {
-					// SELECT ... FOR UPDATE de ESTA fila antes de tocar nada: toma
-					// su lock. Si marcarEjecutada está por marcar `inm` como
-					// `resultado = 'reactivada'` (porque es el origen de una
-					// reactivación que se está ejecutando AHORA, en paralelo), esa
-					// transacción ya tiene el lock por su propio UPDATE —
-					// esperamos a que termine y re-verificamos con el estado YA
-					// actualizado. Sin este lock, el guard de arriba (sin lock,
-					// solo para un mensaje temprano) podía pasar y el UPDATE de
-					// abajo pisaba igual el `resultado` recién escrito por
-					// marcarEjecutada — o, con "paga", abría una reactivación
-					// redundante sobre una unidad que ya se reactivó por otro
-					// lado. Review de Codex, PR #1758.
+					// El advisory lock (por unidad, adquirido PRIMERO) serializa esta
+					// transacción contra marcarEjecutada — sin él, las dos podían
+					// tomar locks de fila en orden cruzado (deadlock 40P01, review de
+					// Codex, PR #1758: ver comentario de `bloquearUnidadFisica`). El
+					// SELECT ... FOR UPDATE de esta fila que sigue abajo ya no es la
+					// única defensa, pero queda como cinturón y tirantes: si
+					// `inm` sigue con `resultado` desactualizado (marcarEjecutada
+					// tenía que marcarla `resultado = 'reactivada'` porque es el
+					// origen de una reactivación que se está ejecutando AHORA), esta
+					// espera a que esa transacción termine y re-verifica con el
+					// estado YA actualizado.
+					await bloquearUnidadFisica(tx, {
+						casoCobroId: inm.casoCobroId,
+						wialonUnitId: inm.wialonUnitId,
+					});
 					await tx
 						.select({ id: inmovilizacionesUnidad.id })
 						.from(inmovilizacionesUnidad)
@@ -1116,11 +1164,16 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 		}
 
 		await db.transaction(async (tx) => {
-			// SELECT ... FOR UPDATE de ESTA fila: mismo criterio que
-			// registrarResultadoLlamada — toma el lock antes de re-verificar
-			// que sigue siendo la vigente, para serializar contra cualquier
-			// UPDATE concurrente sobre la misma fila (p. ej. marcarEjecutada
-			// de un apagado que la supera). Review de Codex, PR #1758.
+			// Mismo criterio que registrarResultadoLlamada: advisory lock por
+			// unidad PRIMERO (serializa contra marcarEjecutada, evita el
+			// deadlock de locks de fila cruzados — review de Codex, PR #1758,
+			// ver `bloquearUnidadFisica`), y el SELECT ... FOR UPDATE de esta
+			// fila como defensa adicional antes de re-verificar que sigue
+			// siendo la vigente.
+			await bloquearUnidadFisica(tx, {
+				casoCobroId: inm.casoCobroId,
+				wialonUnitId: inm.wialonUnitId,
+			});
 			await tx
 				.select({ id: inmovilizacionesUnidad.id })
 				.from(inmovilizacionesUnidad)

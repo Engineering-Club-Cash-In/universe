@@ -15,7 +15,7 @@
  */
 
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
@@ -93,6 +93,33 @@ async function getHistorialCaso(casoCobroId: string) {
 type FilaInmovilizacion = Awaited<ReturnType<typeof getHistorialCaso>>[number];
 
 /**
+ * Historial de inmovilizaciones de la UNIDAD FÍSICA, cruzando todos los
+ * `caso_cobro_id` que comparten el mismo `wialon_unit_id` — no solo el caso
+ * que está pidiendo. `wialonUnitId` no es UNIQUE en `vehicles` (D-10, ver
+ * jobs/gps-eventos-poll.ts): dos casos legítimos (reasignación en curso, o
+ * dos créditos compartiendo GPS) pueden apuntar a la misma unidad. Si el
+ * estado se derivara solo del historial de un caso, el Caso B nunca vería el
+ * apagado que el Caso A ya ejecutó sobre la MISMA unidad física: creería que
+ * está "activa" cuando en realidad está apagada, podría pedir otro apagado
+ * duplicado, y no podría pedir la reactivación real que sí hace falta.
+ * Review de Codex, PR #1758.
+ *
+ * Sin `wialonUnitId` (caso sin vehículo vinculado) no hay unidad física que
+ * cruzar: se usa el historial normal, por caso.
+ */
+async function getHistorialUnidadFisica(
+	casoCobroId: string,
+	wialonUnitId: number | null,
+): Promise<FilaInmovilizacion[]> {
+	if (wialonUnitId == null) return getHistorialCaso(casoCobroId);
+	return db
+		.select()
+		.from(inmovilizacionesUnidad)
+		.where(eq(inmovilizacionesUnidad.wialonUnitId, wialonUnitId))
+		.orderBy(desc(inmovilizacionesUnidad.createdAt));
+}
+
+/**
  * La fila EJECUTADA más reciente (por `ejecutadoAt`) de una `accion` dada.
  * Con "apagado" es la que tiene la unidad apagada hoy cuando `estadoUnidad`
  * dice "inmovilizada" — la usan el banner de "llamar al cliente" y la
@@ -152,9 +179,22 @@ export const inmovilizacionUnidadRouter = {
 					context.userRole,
 				);
 
-				const historial = await getHistorialCaso(input.casoCobroId);
+				// El card (solicitudAbierta, pendienteLlamar, el historial que se
+				// LISTA) es siempre del caso — nunca se mezclan filas de otro caso
+				// en la UI. Solo estadoUnidad usa la unidad física completa: sin
+				// esto, un apagado ejecutado desde OTRO caso sobre la misma unidad
+				// (D-10) no se reflejaba acá, y el card mostraba "Activa" aunque la
+				// unidad estuviera apagada. Review de Codex, PR #1758.
+				const [historial, caso] = await Promise.all([
+					getHistorialCaso(input.casoCobroId),
+					getCasoParaInmovilizacion(input.casoCobroId),
+				]);
+				const historialUnidadFisica = await getHistorialUnidadFisica(
+					input.casoCobroId,
+					caso?.wialonUnitId ?? null,
+				);
 				const historialParaEstado: InmovilizacionHistorialItem[] =
-					historial.map((h) => ({
+					historialUnidadFisica.map((h) => ({
 						accion: h.accion,
 						estado: h.estado,
 						ejecutadoAt: h.ejecutadoAt,
@@ -271,7 +311,15 @@ export const inmovilizacionUnidadRouter = {
 				}
 			}
 
-			const historial = await getHistorialCaso(input.casoCobroId);
+			// Estado de la UNIDAD FÍSICA (no solo de este caso): ver
+			// getHistorialUnidadFisica. `origenId` (abajo) sigue buscando el
+			// apagado en el historial de la unidad física, no solo del caso —
+			// mismo motivo: si el apagado se ejecutó desde otro caso B4 sobre
+			// la misma unidad, esta reactivación tiene que poder cerrarlo.
+			const historial = await getHistorialUnidadFisica(
+				input.casoCobroId,
+				caso.wialonUnitId,
+			);
 			const estadoActual = estadoUnidad(
 				historial.map((h) => ({
 					accion: h.accion,
@@ -694,8 +742,13 @@ export const inmovilizacionUnidadRouter = {
 			}
 
 			// El contacto tiene que ser del MISMO caso — evita enlazar la
-			// llamada de un caso distinto (contactoId enumerable) — y no puede
-			// estar ya enlazado a otra inmovilización.
+			// llamada de un caso distinto (contactoId enumerable) —, una LLAMADA
+			// (no whatsapp/sms/visita/pago) POSTERIOR al apagado, y no puede
+			// estar ya enlazado a otra inmovilización. Sin el filtro de método y
+			// fecha, cualquier gestión vieja o de otro canal —incluso una de
+			// `resultado: "paga"`— podía enlazarse como si fuera la llamada
+			// posterior exigida, sin que esa llamada hubiera ocurrido. Review de
+			// Codex, PR #1758.
 			const [contacto] = await db
 				.select({
 					id: contactosCobros.id,
@@ -706,12 +759,15 @@ export const inmovilizacionUnidadRouter = {
 					and(
 						eq(contactosCobros.id, input.contactoId),
 						eq(contactosCobros.casoCobroId, inm.casoCobroId),
+						eq(contactosCobros.metodoContacto, "llamada"),
+						gt(contactosCobros.fechaContacto, inm.ejecutadoAt ?? new Date(0)),
 					),
 				)
 				.limit(1);
 			if (!contacto) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: "El contacto indicado no pertenece a este caso.",
+					message:
+						"El contacto indicado no es una llamada registrada después del apagado.",
 				});
 			}
 			if (contacto.inmovilizacionId !== null) {
@@ -733,8 +789,15 @@ export const inmovilizacionUnidadRouter = {
 						.update(inmovilizacionesUnidad)
 						.set({
 							llamadaContactoId: input.contactoId,
+							// "no_pago_pendiente_recuperacion", NO
+							// "enviada_recuperacion": este endpoint solo conoce la
+							// respuesta de la llamada, no si enviarCreditoARecuperacion
+							// (que la UI ofrece después, un paso aparte) se llegó a
+							// ejecutar. Review de Codex, PR #1758.
 							resultado:
-								input.resultado === "paga" ? null : "enviada_recuperacion",
+								input.resultado === "paga"
+									? null
+									: "no_pago_pendiente_recuperacion",
 							updatedAt: new Date(),
 						})
 						.where(
@@ -888,9 +951,10 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 			});
 		}
 
-		// El contacto tiene que ser del MISMO caso — evita enlazar la
-		// llamada de un caso distinto (contactoId enumerable) — y no puede
-		// estar ya enlazado a otra inmovilización.
+		// Mismo guard que registrarResultadoLlamada: MISMO caso, una LLAMADA
+		// posterior a la ejecución (no cualquier gestión vieja o de otro
+		// canal), y no enlazada ya a otra inmovilización. Review de Codex, PR
+		// #1758.
 		const [contacto] = await db
 			.select({
 				id: contactosCobros.id,
@@ -901,12 +965,15 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 				and(
 					eq(contactosCobros.id, input.contactoId),
 					eq(contactosCobros.casoCobroId, inm.casoCobroId),
+					eq(contactosCobros.metodoContacto, "llamada"),
+					gt(contactosCobros.fechaContacto, inm.ejecutadoAt ?? new Date(0)),
 				),
 			)
 			.limit(1);
 		if (!contacto) {
 			throw new ORPCError("BAD_REQUEST", {
-				message: "El contacto indicado no pertenece a este caso.",
+				message:
+					"El contacto indicado no es una llamada registrada después de la reactivación.",
 			});
 		}
 		if (contacto.inmovilizacionId !== null) {

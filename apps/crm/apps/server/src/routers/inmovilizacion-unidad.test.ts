@@ -616,7 +616,15 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 		});
 	});
 
-	it("contacto no pertenece al caso: BAD_REQUEST", async () => {
+	it("contacto no encontrado por el filtro (caso distinto, canal distinto de llamada, o anterior a la ejecución): BAD_REQUEST", async () => {
+		// El mock de contactosCobros no distingue condiciones del WHERE real
+		// (caso, metodo_contacto='llamada', fecha_contacto > ejecutado_at) —
+		// contactoExisteMock=false simula que NINGUNA de esas condiciones
+		// matchea, sea porque el contacto es de otro caso, de otro canal
+		// (whatsapp/sms/visita/pago), o de antes del apagado. El filtro SQL
+		// real se verificó a mano contra Postgres: 3 contactos (whatsapp
+		// posterior, llamada anterior, llamada posterior) — solo el tercero
+		// pasa. Review de Codex, PR #1758.
 		inmovilizacionExistente = apagadoEjecutado();
 		contactoExisteMock = false;
 		await expect(llamar("paga")).rejects.toMatchObject({

@@ -43,10 +43,17 @@ export const inmovilizacionEstadoEnum = pgEnum("inmovilizacion_estado", [
 /**
  * Resultado de la llamada posterior al apagado. NULL mientras no se
  * registre la llamada, o si la fila es una `reactivacion` (no aplica).
+ *
+ * `no_pago_pendiente_recuperacion` (respuesta "no pagó" de la llamada) y
+ * `enviada_recuperacion` (el crédito YA se mandó a recuperación de
+ * vehículo, vía enviarCreditoARecuperacion en routers/cobros.ts) son
+ * estados distintos a propósito — registrarResultadoLlamada solo conoce el
+ * primero, nunca el segundo. Review de Codex, PR #1758.
  */
 export const inmovilizacionResultadoEnum = pgEnum("inmovilizacion_resultado", [
 	"reactivada",
 	"enviada_recuperacion",
+	"no_pago_pendiente_recuperacion",
 ]);
 
 export const inmovilizacionesUnidad = pgTable(

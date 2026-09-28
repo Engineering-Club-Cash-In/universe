@@ -4704,13 +4704,18 @@ function RouteComponent() {
 								/>
 							)}
 						{/* CB-041: solicitar/aprobar apagado o reactivación de la unidad,
-						    con llamada posterior al cliente. Mismo gate de vehículo que
-						    GpsVehiculoCard: sin vehículo no hay unidad que apagar. El
-						    server valida bucket B2/B3 para apagar (fail closed), pero el
-						    botón de "Solicitar apagado" también se oculta acá con
-						    bucketNumero — sin esto quedaba visible en B4 y el asesor solo
-						    se enteraba del rechazo después de hacer el pedido. */}
-						{caso.id && caso.vehicleId && (
+						    con llamada posterior al cliente. Solo requiere caso.id (a
+						    diferencia de GpsVehiculoCard): el servidor resuelve la unidad
+						    física desde contratos_financiamiento.vehicleId, no desde
+						    caso.vehicleId (que viene de opportunities.vehicleId y puede
+						    estar vacío o desactualizado aun con contrato y GPS vigentes,
+						    hallazgo de review). El propio card ya oculta sus acciones si
+						    `tieneGps` es false. El server valida bucket B2/B3 para apagar
+						    (fail closed), pero el botón de "Solicitar apagado" también se
+						    oculta acá con bucketNumero — sin esto quedaba visible en B4 y
+						    el asesor solo se enteraba del rechazo después de hacer el
+						    pedido. */}
+						{caso.id && (
 							<InmovilizacionCard
 								bucketNumero={bucketNumero}
 								casoCobroId={caso.id}

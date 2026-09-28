@@ -49,7 +49,12 @@ import {
 	resolverAvisoLlamarCliente,
 	resolverPendientesInmovilizacion,
 } from "../services/inmovilizacion-notif";
-import { assertAccesoCasoCobro } from "./cobros";
+import {
+	assertAccesoCasoCobro,
+	marcarInmovilizacionEnviadaARecuperacion,
+} from "./cobros";
+
+export { marcarInmovilizacionEnviadaARecuperacion };
 
 /**
  * Trae el caso con lo que hace falta para autorizar y para armar el mensaje
@@ -1084,11 +1089,10 @@ export const inmovilizacionUnidadRouter = {
 						.update(inmovilizacionesUnidad)
 						.set({
 							llamadaContactoId: input.contactoId,
-							// "no_pago_pendiente_recuperacion", NO
-							// "enviada_recuperacion": este endpoint solo conoce la
-							// respuesta de la llamada, no si enviarCreditoARecuperacion
-							// (que la UI ofrece después, un paso aparte) se llegó a
-							// ejecutar. Review de Codex, PR #1758.
+							// "no_pago_pendiente_recuperacion": este endpoint solo conoce la
+							// respuesta de la llamada; al ejecutarse enviarCreditoARecuperacion
+							// (vía cobros.ts), esa transición actualiza el resultado a
+							// "enviada_recuperacion".
 							resultado:
 								input.resultado === "paga"
 									? null

@@ -235,21 +235,39 @@ function mockDb() {
 			if (tabla === inmovilizacionesUnidad) {
 				return {
 					set: (cambios?: Record<string, unknown>) => {
-						if (inmovilizacionExistente && updateDevuelveFila && cambios) {
+						const esUpdateRecuperacion =
+							cambios?.resultado === "enviada_recuperacion";
+						const coincideRecuperacion =
+							!esUpdateRecuperacion ||
+							inmovilizacionExistente?.resultado ===
+								"no_pago_pendiente_recuperacion";
+						if (
+							inmovilizacionExistente &&
+							updateDevuelveFila &&
+							coincideRecuperacion &&
+							cambios
+						) {
 							Object.assign(inmovilizacionExistente, cambios);
 						}
 						return {
 							where: () => ({
 								returning: async () =>
-									updateDevuelveFila
+									updateDevuelveFila && coincideRecuperacion
 										? [
 												{
-													id: INMOV_ID,
-													casoCobroId: CASO_ID,
-													accion: inmovilizacionExistente?.accion ?? "apagado",
+													id:
+														(inmovilizacionExistente as { id?: string })?.id ??
+														INMOV_ID,
+													casoCobroId:
+														(inmovilizacionExistente as { casoCobroId?: string })
+															?.casoCobroId ?? CASO_ID,
+													accion:
+														(inmovilizacionExistente as { accion?: string })
+															?.accion ?? "apagado",
 													solicitadoPor:
-														(inmovilizacionExistente as { solicitadoPor?: string })
-															?.solicitadoPor ??
+														(inmovilizacionExistente as {
+															solicitadoPor?: string;
+														})?.solicitadoPor ??
 														solicitadoPorMarcarEjecutadaMock,
 												},
 											]
@@ -325,8 +343,11 @@ mock.module("../services/cartera-back-integration", () => ({
 	isCarteraBackPaymentsEnabled: () => true,
 }));
 
-const { inmovilizacionUnidadRouter, registrarLlamadaReactivacion } =
-	await import("./inmovilizacion-unidad");
+const {
+	inmovilizacionUnidadRouter,
+	registrarLlamadaReactivacion,
+	marcarInmovilizacionEnviadaARecuperacion,
+} = await import("./inmovilizacion-unidad");
 const carteraBackClient = carteraBackClientMock;
 
 function ctx(role: string, userId = "user-test"): Context {
@@ -1358,5 +1379,55 @@ describe("CB-041 — registrarLlamadaReactivacion", () => {
 		];
 		await expect(llamar()).rejects.toMatchObject({ code: "CONFLICT" });
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+});
+
+describe("CB-041 — marcarInmovilizacionEnviadaARecuperacion", () => {
+	afterEach(reset);
+
+	it("actualiza un apagado en no_pago_pendiente_recuperacion a enviada_recuperacion y registra el evento", async () => {
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "ejecutada",
+			resultado: "no_pago_pendiente_recuperacion",
+		};
+
+		await marcarInmovilizacionEnviadaARecuperacion({
+			casoCobroId: CASO_ID,
+			usuarioId: "user-test",
+			motivo: "Cliente no pagó ni respondió a llamadas",
+		});
+
+		expect(inmovilizacionExistente.resultado).toBe("enviada_recuperacion");
+		expect(eventosInsertados).toHaveLength(1);
+		expect(eventosInsertados[0]).toEqual({
+			inmovilizacionId: INMOV_ID,
+			evento: "enviar_a_recuperacion",
+			estadoAnterior: "ejecutada",
+			estadoNuevo: "ejecutada",
+			usuarioId: "user-test",
+			detalle: { motivo: "Cliente no pagó ni respondió a llamadas" },
+		});
+	});
+
+	it("no toca inmovilizaciones que no están en no_pago_pendiente_recuperacion", async () => {
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "ejecutada",
+			resultado: "reactivada",
+		};
+
+		await marcarInmovilizacionEnviadaARecuperacion({
+			casoCobroId: CASO_ID,
+			usuarioId: "user-test",
+			motivo: "Vehículo en recuperación",
+		});
+
+		expect(inmovilizacionExistente.resultado).toBe("reactivada");
+		expect(eventosInsertados).toHaveLength(0);
 	});
 });

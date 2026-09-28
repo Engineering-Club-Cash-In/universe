@@ -398,6 +398,8 @@ export const reportsAppRouter = {
 	obtenerEstadoVerificacionSat:
 		satVehiculosRouter.obtenerEstadoVerificacionSat,
 	obtenerUltimaVerificacionSat: satVehiculosRouter.obtenerUltimaVerificacionSat,
+	obtenerConflictosCreditosSat:
+		satVehiculosRouter.obtenerConflictosCreditosSat,
 
 	// Admin MiniAgent routes
 	adminListUsersWithCredentials: adminMiniagentRouter.listUsersWithCredentials,

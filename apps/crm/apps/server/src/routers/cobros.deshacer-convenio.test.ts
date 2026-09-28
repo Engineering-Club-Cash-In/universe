@@ -29,4 +29,29 @@ describe("deshacerConvenio: orden del chequeo de bucket", () => {
 		expect(chequeo).toBeLessThan(anular);
 		expect(rango).toBeLessThan(anular);
 	});
+
+	it("preserva la respuesta de recuperación exitosa desacoplada de la reconciliación de inmovilización", async () => {
+		const fuente = await Bun.file(
+			new URL("./cobros.ts", import.meta.url).pathname,
+		).text();
+		const inicio = fuente.indexOf("deshacerConvenio:");
+		expect(inicio).toBeGreaterThan(-1);
+		const handler = fuente.slice(inicio);
+
+		const enviarRecup = handler.indexOf(
+			"carteraBackClient.enviarARecuperacionVehiculo(",
+		);
+		const catchRecup = handler.indexOf("recuperacionError =");
+		const ifRecup = handler.indexOf("if (recuperacion) {");
+		const marcarInmov = handler.indexOf(
+			"marcarInmovilizacionEnviadaARecuperacion(",
+		);
+
+		expect(enviarRecup).toBeGreaterThan(-1);
+		expect(catchRecup).toBeGreaterThan(-1);
+		expect(ifRecup).toBeGreaterThan(-1);
+		expect(marcarInmov).toBeGreaterThan(-1);
+		expect(catchRecup).toBeLessThan(ifRecup);
+		expect(ifRecup).toBeLessThan(marcarInmov);
+	});
 });

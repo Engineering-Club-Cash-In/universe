@@ -29,6 +29,9 @@ export type CobrosNotifTipo =
 	| "bot_cliente_escribio"
 	| "bot_modo_agente"
 	| "gps_evento"
+	| "inmovilizacion_pendiente_aprobacion"
+	| "inmovilizacion_resuelta"
+	| "inmovilizacion_llamar_cliente"
 	| "recuperacion_vehiculo";
 
 /**

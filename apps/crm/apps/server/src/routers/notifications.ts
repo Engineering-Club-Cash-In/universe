@@ -8,6 +8,7 @@ import {
 	isNotNull,
 	isNull,
 	not,
+	notInArray,
 	or,
 	sql,
 } from "drizzle-orm";
@@ -339,7 +340,9 @@ export const notificationsRouter = {
 
 			const [notif] = await db
 				.select({
+					status: notifications.status,
 					type: notifications.type,
+					cobrosTipo: notifications.cobrosTipo,
 					assignedToRole: notifications.assignedToRole,
 					assignedTo: notifications.assignedTo,
 				})
@@ -372,6 +375,48 @@ export const notificationsRouter = {
 				});
 			}
 
+			// CB-041: estos cobrosTipo se resuelven SOLO por su flujo de
+			// negocio (decidirInmovilizacion, marcarEjecutada,
+			// registrarResultadoLlamada / registrarLlamadaReactivacion) — nunca
+			// a mano desde acá. La UI de notificaciones expone "Resolver" para
+			// cualquier action_required sin mirar cobrosTipo: un supervisor
+			// podía ocultar "por aprobar" sin decidirla, o un asesor ocultar
+			// "llamar al cliente" sin enlazar ningún contacto — la tarea real
+			// seguía pendiente en inmovilizaciones_unidad, invisible.
+			//
+			// Asimismo, una vez que el flujo de negocio resolvió o descartó la
+			// notificación (estado terminal), no se puede reabrir a pending,
+			// read o in_progress: el flujo completado no volverá a correr sus
+			// resolutores y dejaría una tarea o alerta fantasma permanente en
+			// el caso (review de Codex, PR #1758).
+			const COBROS_TIPO_RESOLUCION_BLOQUEADA = [
+				"inmovilizacion_pendiente_aprobacion",
+				"inmovilizacion_llamar_cliente",
+			] as const;
+			const esWorkflowInmovilizacion =
+				notif.cobrosTipo &&
+				(
+					COBROS_TIPO_RESOLUCION_BLOQUEADA as readonly string[]
+				).includes(notif.cobrosTipo);
+
+			if (esWorkflowInmovilizacion) {
+				if (input.status === "resolved" || input.status === "dismissed") {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Esta notificación se resuelve automáticamente cuando se completa la acción correspondiente en el caso.",
+					});
+				}
+
+				const esTerminal =
+					notif.status === "resolved" || notif.status === "dismissed";
+				if (esTerminal && input.status !== notif.status) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
+					});
+				}
+			}
+
 			// Si se intenta resolver, verificar que no sea action_upload_files sin documentos
 			if (input.status === "resolved" && notif.type === "action_upload_files") {
 				const docs = await db
@@ -390,6 +435,18 @@ export const notificationsRouter = {
 
 			const now = new Date();
 
+			// CB-041: Si es una notificación de inmovilización, condicionar
+			// atómicamente el UPDATE a que la fila siga abierta (status no terminal).
+			// Si el flujo de negocio la resolvió concurrentemente entre el SELECT
+			// inicial y este UPDATE, el UPDATE no afecta ninguna fila y se rechaza
+			// con BAD_REQUEST en vez de sobreescribir el estado terminal (review de Codex, PR #1758).
+			const whereClause = esWorkflowInmovilizacion
+				? and(
+						eq(notifications.id, input.notificationId),
+						notInArray(notifications.status, ["resolved", "dismissed"]),
+					)
+				: eq(notifications.id, input.notificationId);
+
 			const [updated] = await db
 				.update(notifications)
 				.set({
@@ -398,8 +455,20 @@ export const notificationsRouter = {
 					...(input.status === "read" ? { readAt: now } : {}),
 					...(input.status === "resolved" ? { resolvedAt: now } : {}),
 				})
-				.where(eq(notifications.id, input.notificationId))
+				.where(whereClause)
 				.returning();
+
+			if (!updated) {
+				if (esWorkflowInmovilizacion) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
+					});
+				}
+				throw new ORPCError("NOT_FOUND", {
+					message: "Notificación no encontrada",
+				});
+			}
 
 			return updated;
 		}),

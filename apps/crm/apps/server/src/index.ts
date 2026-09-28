@@ -102,6 +102,8 @@ import {
 	manualVehicleRouter,
 	proyeccionRouter,
 } from "./routers/index";
+import { inmovilizacionReactivacionLlamadaRouter } from "./routers/inmovilizacion-reactivacion-llamada";
+import { inmovilizacionUnidadRouter } from "./routers/inmovilizacion-unidad";
 import { investmentsRouter } from "./routers/investments";
 import { pagaloGrupoActivoRouter } from "./routers/pagalo-grupo-activo";
 import { pagaloLinkActionsRouter } from "./routers/pagalo-link-actions";
@@ -259,6 +261,8 @@ const handler = new RPCHandler(
 		pagaloSupervisionRouter,
 		convenioDecisionRouter,
 		recuperacionVehiculoRouter,
+		inmovilizacionUnidadRouter,
+		inmovilizacionReactivacionLlamadaRouter,
 		wialonRouter,
 		gpsIntegracionRouter,
 		gpsEventosRouter,

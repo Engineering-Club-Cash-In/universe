@@ -14,6 +14,7 @@ export * from "./documents";
 export * from "./gps-consulta-logs";
 export * from "./gps-eventos";
 export * from "./gps-integracion-logs";
+export * from "./inmovilizacion-unidad";
 export * from "./insurance";
 export * from "./investments";
 export * from "./juridico-dashboard";

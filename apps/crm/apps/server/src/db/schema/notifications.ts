@@ -11,6 +11,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { user, userRoleEnum } from "./auth";
+import { inmovilizacionesUnidad } from "./inmovilizacion-unidad";
 
 // Enums
 export const notificationStatusEnum = pgEnum("notification_status", [
@@ -98,6 +99,18 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// `uq_notifications_cobros_dedup` (ventana por tipo, ver
 	// services/wialon/gps-eventos.ts).
 	"gps_evento",
+	// CB-041: solicitud de apagado/reactivación de unidad, recién creada,
+	// pendiente de que un cobros_supervisor la apruebe o rechace. Va a TODOS
+	// los cobros_supervisor — mismo criterio que convenio_pendiente_aprobacion.
+	"inmovilizacion_pendiente_aprobacion",
+	// CB-041: la decisión (aprobada/rechazada) de una inmovilización, de
+	// vuelta al asesor que la solicitó.
+	"inmovilizacion_resuelta",
+	// CB-041: el apagado o la reactivación ya se ejecutó (LEGION lo confirmó
+	// y el supervisor lo marcó) — el asesor dueño del caso debe llamar al
+	// cliente. Se resuelve al registrar esa llamada, o, si es el aviso de un
+	// apagado, también cuando se ejecuta la reactivación que lo revierte.
+	"inmovilizacion_llamar_cliente",
 ]);
 
 // Notifications table
@@ -160,6 +173,18 @@ export const notifications = pgTable(
 		// avisos del convenio nuevo si el filtro fuera solo por caso.
 		convenioId: integer("convenio_id"),
 
+		// CB-041: id de la inmovilización (tabla local `inmovilizaciones_unidad`,
+		// por eso SÍ lleva FK, a diferencia de convenioId que vive en
+		// cartera-back). Identifica la solicitud concreta para poder cerrar
+		// SOLO sus avisos al decidir/ejecutar/llamar — mismo criterio que
+		// convenioId arriba (un caso puede tener más de una inmovilización en
+		// su historia). SET NULL: borrar la inmovilización no debe romper el
+		// aviso histórico.
+		inmovilizacionId: uuid("inmovilizacion_id").references(
+			(): AnyPgColumn => inmovilizacionesUnidad.id,
+			{ onDelete: "set null" },
+		),
+
 		// COBROS-02: la notificación de la que esta es continuación. Hoy la usa
 		// solo `bot_modo_agente`, que apunta al `bot_cliente_escribio` de la
 		// misma conversación y crédito — así el asesor ve un solo hilo
@@ -203,6 +228,10 @@ export const notifications = pgTable(
 		index("idx_notifications_convenio_pendiente")
 			.on(table.convenioId)
 			.where(sql`${table.convenioId} IS NOT NULL`),
+		// CB-041: mismo motivo que el índice de convenio_id de arriba.
+		index("idx_notifications_inmovilizacion_pendiente")
+			.on(table.inmovilizacionId)
+			.where(sql`${table.inmovilizacionId} IS NOT NULL`),
 		// COBROS-02 Fase 1 — la dedup POR EPISODIO. Va declarado acá y no solo
 		// en la migración 0054 por la misma razón que el de arriba: `db:push`
 		// compara la base contra este schema, así que un índice creado solo por

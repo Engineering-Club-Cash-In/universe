@@ -19,6 +19,7 @@ let assignedToRoleMock = "cobros_supervisor";
 let assignedToMock = "user-test";
 let notifStatusMock = "pending";
 let updateLlamado = false;
+let updateDevuelveFila = true;
 
 function mockDb() {
 	return {
@@ -56,7 +57,14 @@ function mockDb() {
 						where: () => ({
 							returning: async () => {
 								updateLlamado = true;
-								return [{ id: "11111111-1111-1111-1111-111111111111", status: "resolved" }];
+								return updateDevuelveFila
+									? [
+											{
+												id: "11111111-1111-1111-1111-111111111111",
+												status: "resolved",
+											},
+										]
+									: [];
 							},
 						}),
 					}),
@@ -77,6 +85,7 @@ function reset() {
 	assignedToMock = "user-test";
 	notifStatusMock = "pending";
 	updateLlamado = false;
+	updateDevuelveFila = true;
 }
 
 function ctx(): Context {
@@ -218,5 +227,25 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 				"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
 		});
 		expect(updateLlamado).toBe(false);
+	});
+
+	it("carrera: si la notificación se resolvió concurrentemente antes del UPDATE, el UPDATE condicionado no afecta filas y rechaza con BAD_REQUEST (review de Codex)", async () => {
+		// El SELECT inicial ve la notificación en 'pending' (pasa el guard temprano),
+		// pero antes del UPDATE el flujo de negocio la resolvió → el UPDATE atómico condicionado a status abierto no devuelve filas.
+		notifStatusMock = "pending";
+		updateDevuelveFila = false;
+
+		await expect(
+			call(
+				notificationsRouter.changeNotificationStatus,
+				{ notificationId: "11111111-1111-1111-1111-111111111111", status: "read" },
+				{ context: ctx() },
+			),
+		).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message:
+				"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
+		});
+		expect(updateLlamado).toBe(true);
 	});
 });

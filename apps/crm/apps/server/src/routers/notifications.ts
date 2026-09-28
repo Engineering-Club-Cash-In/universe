@@ -8,6 +8,7 @@ import {
 	isNotNull,
 	isNull,
 	not,
+	notInArray,
 	or,
 	sql,
 } from "drizzle-orm";
@@ -434,6 +435,18 @@ export const notificationsRouter = {
 
 			const now = new Date();
 
+			// CB-041: Si es una notificación de inmovilización, condicionar
+			// atómicamente el UPDATE a que la fila siga abierta (status no terminal).
+			// Si el flujo de negocio la resolvió concurrentemente entre el SELECT
+			// inicial y este UPDATE, el UPDATE no afecta ninguna fila y se rechaza
+			// con BAD_REQUEST en vez de sobreescribir el estado terminal (review de Codex, PR #1758).
+			const whereClause = esWorkflowInmovilizacion
+				? and(
+						eq(notifications.id, input.notificationId),
+						notInArray(notifications.status, ["resolved", "dismissed"]),
+					)
+				: eq(notifications.id, input.notificationId);
+
 			const [updated] = await db
 				.update(notifications)
 				.set({
@@ -442,8 +455,20 @@ export const notificationsRouter = {
 					...(input.status === "read" ? { readAt: now } : {}),
 					...(input.status === "resolved" ? { resolvedAt: now } : {}),
 				})
-				.where(eq(notifications.id, input.notificationId))
+				.where(whereClause)
 				.returning();
+
+			if (!updated) {
+				if (esWorkflowInmovilizacion) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
+					});
+				}
+				throw new ORPCError("NOT_FOUND", {
+					message: "Notificación no encontrada",
+				});
+			}
 
 			return updated;
 		}),

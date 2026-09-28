@@ -416,6 +416,9 @@ function reset() {
 	reactivacionesObsoletasMock = [];
 	onNotificarLlamarCliente = null;
 	executeLlamadas = [];
+	spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+		bucket: 2,
+	});
 }
 
 describe("CB-041 — solicitarInmovilizacion", () => {
@@ -777,7 +780,7 @@ describe("CB-041 — marcarEjecutada", () => {
 			wialonUnitId: 12345,
 			bucketSnapshot: 2,
 			numeroCreditoSifco: "01010214100000",
-			vehicleId: null,
+			vehicleId: VEHICLE_ID,
 			inmovilizacionOrigenId: null,
 		};
 
@@ -889,6 +892,65 @@ describe("CB-041 — marcarEjecutada", () => {
 		});
 		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
 	});
+
+	it("unidad GPS reasignada a otro vehículo tras la aprobación: detecta el cambio en vehicles bajo lock y rechaza con CONFLICT (review de Codex)", async () => {
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			solicitadoPor: "user-test",
+			inmovilizacionOrigenId: null,
+		};
+		// El vehículo fue reasignado a otro GPS tras la aprobación
+		wialonUnitIdVehiculoMock = 99999;
+
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.marcarEjecutada,
+				{ id: INMOV_ID },
+				{ context: ctx("cobros_supervisor") },
+			),
+		).rejects.toMatchObject({
+			code: "CONFLICT",
+			message:
+				"La unidad GPS del vehículo cambió o fue reasignada tras la aprobación. La acción ya no aplica a la unidad original.",
+		});
+		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
+	});
+
+	it("vehículo desasociado o eliminado tras la aprobación: rechaza con CONFLICT bajo lock (review de Codex)", async () => {
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			solicitadoPor: "user-test",
+			inmovilizacionOrigenId: null,
+		};
+		vehiculoExisteMock = false;
+
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.marcarEjecutada,
+				{ id: INMOV_ID },
+				{ context: ctx("cobros_supervisor") },
+			),
+		).rejects.toMatchObject({
+			code: "CONFLICT",
+			message:
+				"El vehículo asociado a la solicitud ya no existe o fue desasociado.",
+		});
+		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
+	});
 });
 
 function apagadoEjecutado(extra: Record<string, unknown> = {}) {
@@ -898,7 +960,7 @@ function apagadoEjecutado(extra: Record<string, unknown> = {}) {
 		accion: "apagado",
 		estado: "ejecutada",
 		numeroCreditoSifco: "01010214100000",
-		vehicleId: null,
+		vehicleId: VEHICLE_ID,
 		wialonUnitId: 12345,
 		bucketSnapshot: 2,
 		llamadaContactoId: null,

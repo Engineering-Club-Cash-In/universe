@@ -915,10 +915,7 @@ export const inmovilizacionUnidadRouter = {
 				}
 			}
 
-			const resultado = await ejecutarInmovilizacion({
-				accion: inm.accion,
-				wialonUnitId: inm.wialonUnitId,
-			});
+			let resultado!: Awaited<ReturnType<typeof ejecutarInmovilizacion>>;
 
 			await db.transaction(async (tx) => {
 				// Serializa contra registrarResultadoLlamada / registrarLlamadaReactivacion
@@ -928,6 +925,46 @@ export const inmovilizacionUnidadRouter = {
 				// comentario de `bloquearUnidadFisica`. Review de Codex, PR #1758.
 				await bloquearUnidadFisica(tx, {
 					casoCobroId: inm.casoCobroId,
+					wialonUnitId: inm.wialonUnitId,
+				});
+
+				// Re-validar la vinculación Wialon del vehículo bajo lock: si el
+				// GPS fue reasignado a otro vehículo o desvinculado después de que
+				// la solicitud fue aprobada (por ejemplo, vía `reasignarUnidad` o
+				// `vincularUnidadWialon`), ejecutar la solicitud aplicaría la
+				// acción sobre el GPS ahora instalado en el vehículo de otro
+				// cliente. Review de Codex.
+				if (!inm.vehicleId) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"El vehículo asociado a la solicitud ya no existe o fue desasociado.",
+					});
+				}
+
+				const [vehiculoTx] = await tx
+					.select({ wialonUnitId: vehicles.wialonUnitId })
+					.from(vehicles)
+					.where(eq(vehicles.id, inm.vehicleId))
+					.limit(1);
+
+				if (!vehiculoTx) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"El vehículo asociado a la solicitud ya no existe o fue desasociado.",
+					});
+				}
+
+				if (
+					(vehiculoTx.wialonUnitId ?? null) !== (inm.wialonUnitId ?? null)
+				) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"La unidad GPS del vehículo cambió o fue reasignada tras la aprobación. La acción ya no aplica a la unidad original.",
+					});
+				}
+
+				resultado = await ejecutarInmovilizacion({
+					accion: inm.accion,
 					wialonUnitId: inm.wialonUnitId,
 				});
 

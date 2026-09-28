@@ -498,6 +498,17 @@ export const inmovilizacionUnidadRouter = {
 			}
 			const vehicleId = caso.vehicleId;
 
+			// El vehículo debe tener una unidad GPS vinculada para poder inmovilizar:
+			// sin wialonUnitId no hay unidad física sobre la cual actuar ni auditar.
+			// Review de Codex.
+			if (caso.wialonUnitId == null) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El vehículo asociado no tiene una unidad GPS vinculada.",
+				});
+			}
+			const wialonUnitId = caso.wialonUnitId;
+
 			await assertCreditoAsignadoEnCarteraPorSifco({
 				numeroSifco: caso.numeroCreditoSifco,
 				emailUsuario: context.session.user.email,
@@ -572,7 +583,7 @@ export const inmovilizacionUnidadRouter = {
 				inmovilizacionId = await db.transaction(async (tx) => {
 					await bloquearUnidadFisica(tx, {
 						casoCobroId: input.casoCobroId,
-						wialonUnitId: caso.wialonUnitId,
+						wialonUnitId,
 					});
 
 					// Re-validar la vinculación Wialon del vehículo bajo lock: si el
@@ -595,9 +606,14 @@ export const inmovilizacionUnidadRouter = {
 						});
 					}
 
-					if (
-						(vehiculoTx.wialonUnitId ?? null) !== (caso.wialonUnitId ?? null)
-					) {
+					if (vehiculoTx.wialonUnitId == null) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"El vehículo asociado no tiene una unidad GPS vinculada.",
+						});
+					}
+
+					if (vehiculoTx.wialonUnitId !== wialonUnitId) {
 						throw new ORPCError("CONFLICT", {
 							message:
 								"La unidad GPS del vehículo cambió durante la solicitud. Por favor intentá de nuevo.",
@@ -611,7 +627,7 @@ export const inmovilizacionUnidadRouter = {
 					// lock garantiza que el estado y el origenId sean los reales.
 					const historialTx = await getHistorialUnidadFisicaTx(tx)(
 						input.casoCobroId,
-						caso.wialonUnitId,
+						vehiculoTx.wialonUnitId,
 					);
 					const estadoActualTx = estadoUnidad(
 						historialTx.map((h) => ({
@@ -958,7 +974,13 @@ export const inmovilizacionUnidadRouter = {
 							motivoFalloPrecondicion =
 								"El vehículo asociado a la solicitud ya no existe o fue desasociado.";
 						} else if (
-							(vehiculoTx.wialonUnitId ?? null) !== (inm.wialonUnitId ?? null)
+							inm.wialonUnitId == null ||
+							vehiculoTx.wialonUnitId == null
+						) {
+							motivoFalloPrecondicion =
+								"El vehículo asociado no tiene una unidad GPS vinculada.";
+						} else if (
+							vehiculoTx.wialonUnitId !== inm.wialonUnitId
 						) {
 							motivoFalloPrecondicion =
 								"La unidad GPS del vehículo cambió o fue reasignada tras la aprobación. La acción ya no aplica a la unidad original.";
@@ -1320,6 +1342,12 @@ export const inmovilizacionUnidadRouter = {
 					}
 
 					if (input.resultado === "paga") {
+						if (inm.wialonUnitId == null) {
+							throw new ORPCError("CONFLICT", {
+								message:
+									"El vehículo asociado no tiene una unidad GPS vinculada.",
+							});
+						}
 						const [reactivacion] = await tx
 							.insert(inmovilizacionesUnidad)
 							.values({

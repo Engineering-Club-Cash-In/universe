@@ -549,6 +549,26 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 
+	it("vehículo sin unidad GPS vinculada (wialonUnitId null): BAD_REQUEST (review de Codex)", async () => {
+		wialonUnitIdCasoMock = null;
+
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.solicitarInmovilizacion,
+				{
+					casoCobroId: CASO_ID,
+					accion: "apagado",
+					motivo: "Cliente incontactable",
+				},
+				{ context: ctx("cobros") },
+			),
+		).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message: "El vehículo asociado no tiene una unidad GPS vinculada.",
+		});
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
 	it("crédito reasignado en cartera a otro asesor: FORBIDDEN", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "otro@example.com" },
@@ -724,6 +744,34 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 			code: "CONFLICT",
 			message:
 				"La unidad GPS del vehículo cambió durante la solicitud. Por favor intentá de nuevo.",
+		});
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("unidad GPS desvinculada del vehículo antes de adquirir el lock: detecta wialonUnitId null en vehicles bajo lock y rechaza con CONFLICT (review de Codex)", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+			bucket: 2,
+		} as never);
+
+		wialonUnitIdCasoMock = 12345;
+		wialonUnitIdVehiculoMock = null;
+
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.solicitarInmovilizacion,
+				{
+					casoCobroId: CASO_ID,
+					accion: "apagado",
+					motivo: "Cliente incontactable",
+				},
+				{ context: ctx("cobros") },
+			),
+		).rejects.toMatchObject({
+			code: "CONFLICT",
+			message: "El vehículo asociado no tiene una unidad GPS vinculada.",
 		});
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
@@ -959,6 +1007,36 @@ describe("CB-041 — marcarEjecutada", () => {
 			code: "CONFLICT",
 			message:
 				"El vehículo asociado a la solicitud ya no existe o fue desasociado.",
+		});
+		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
+		expect(inmovilizacionExistente.estado).toBe("cancelada");
+		expect(eventosInsertados.some((e) => e.evento === "cancelar")).toBe(true);
+	});
+
+	it("vehículo sin unidad GPS vinculada al momento de ejecutar: cancela y audita la solicitud con CONFLICT (review de Codex)", async () => {
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			solicitadoPor: "user-test",
+			inmovilizacionOrigenId: null,
+		};
+		wialonUnitIdVehiculoMock = null;
+
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.marcarEjecutada,
+				{ id: INMOV_ID },
+				{ context: ctx("cobros_supervisor") },
+			),
+		).rejects.toMatchObject({
+			code: "CONFLICT",
+			message: "El vehículo asociado no tiene una unidad GPS vinculada.",
 		});
 		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
 		expect(inmovilizacionExistente.estado).toBe("cancelada");

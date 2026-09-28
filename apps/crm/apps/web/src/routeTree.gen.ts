@@ -38,6 +38,7 @@ import { Route as CobrosPromesasRouteImport } from './routes/cobros/promesas'
 import { Route as CobrosPagaloRouteImport } from './routes/cobros/pagalo'
 import { Route as CobrosMiDiaRouteImport } from './routes/cobros/mi-dia'
 import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
+import { Route as CobrosInmovilizacionesRouteImport } from './routes/cobros/inmovilizaciones'
 import { Route as CobrosHistorialAgendasRouteImport } from './routes/cobros/historial-agendas'
 import { Route as CobrosConveniosRouteImport } from './routes/cobros/convenios'
 import { Route as CobrosColaRouteImport } from './routes/cobros/cola'
@@ -213,6 +214,11 @@ const CobrosMetasRoute = CobrosMetasRouteImport.update({
   path: '/cobros/metas',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosInmovilizacionesRoute = CobrosInmovilizacionesRouteImport.update({
+  id: '/cobros/inmovilizaciones',
+  path: '/cobros/inmovilizaciones',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosHistorialAgendasRoute = CobrosHistorialAgendasRouteImport.update({
   id: '/cobros/historial-agendas',
   path: '/cobros/historial-agendas',
@@ -381,6 +387,7 @@ export interface FileRoutesByFullPath {
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
   '/cobros/historial-agendas': typeof CobrosHistorialAgendasRoute
+  '/cobros/inmovilizaciones': typeof CobrosInmovilizacionesRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/pagalo': typeof CobrosPagaloRoute
@@ -440,6 +447,7 @@ export interface FileRoutesByTo {
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
   '/cobros/historial-agendas': typeof CobrosHistorialAgendasRoute
+  '/cobros/inmovilizaciones': typeof CobrosInmovilizacionesRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/pagalo': typeof CobrosPagaloRoute
@@ -500,6 +508,7 @@ export interface FileRoutesById {
   '/cobros/cola': typeof CobrosColaRoute
   '/cobros/convenios': typeof CobrosConveniosRoute
   '/cobros/historial-agendas': typeof CobrosHistorialAgendasRoute
+  '/cobros/inmovilizaciones': typeof CobrosInmovilizacionesRoute
   '/cobros/metas': typeof CobrosMetasRoute
   '/cobros/mi-dia': typeof CobrosMiDiaRoute
   '/cobros/pagalo': typeof CobrosPagaloRoute
@@ -561,6 +570,7 @@ export interface FileRouteTypes {
     | '/cobros/cola'
     | '/cobros/convenios'
     | '/cobros/historial-agendas'
+    | '/cobros/inmovilizaciones'
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/pagalo'
@@ -620,6 +630,7 @@ export interface FileRouteTypes {
     | '/cobros/cola'
     | '/cobros/convenios'
     | '/cobros/historial-agendas'
+    | '/cobros/inmovilizaciones'
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/pagalo'
@@ -679,6 +690,7 @@ export interface FileRouteTypes {
     | '/cobros/cola'
     | '/cobros/convenios'
     | '/cobros/historial-agendas'
+    | '/cobros/inmovilizaciones'
     | '/cobros/metas'
     | '/cobros/mi-dia'
     | '/cobros/pagalo'
@@ -739,6 +751,7 @@ export interface RootRouteChildren {
   CobrosColaRoute: typeof CobrosColaRoute
   CobrosConveniosRoute: typeof CobrosConveniosRoute
   CobrosHistorialAgendasRoute: typeof CobrosHistorialAgendasRoute
+  CobrosInmovilizacionesRoute: typeof CobrosInmovilizacionesRoute
   CobrosMetasRoute: typeof CobrosMetasRoute
   CobrosMiDiaRoute: typeof CobrosMiDiaRoute
   CobrosPagaloRoute: typeof CobrosPagaloRoute
@@ -984,6 +997,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CobrosMetasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/inmovilizaciones': {
+      id: '/cobros/inmovilizaciones'
+      path: '/cobros/inmovilizaciones'
+      fullPath: '/cobros/inmovilizaciones'
+      preLoaderRoute: typeof CobrosInmovilizacionesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/historial-agendas': {
       id: '/cobros/historial-agendas'
       path: '/cobros/historial-agendas'
@@ -1203,6 +1223,7 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosColaRoute: CobrosColaRoute,
   CobrosConveniosRoute: CobrosConveniosRoute,
   CobrosHistorialAgendasRoute: CobrosHistorialAgendasRoute,
+  CobrosInmovilizacionesRoute: CobrosInmovilizacionesRoute,
   CobrosMetasRoute: CobrosMetasRoute,
   CobrosMiDiaRoute: CobrosMiDiaRoute,
   CobrosPagaloRoute: CobrosPagaloRoute,

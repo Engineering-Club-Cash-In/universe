@@ -51,6 +51,7 @@ import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { GpsEventosHistorial } from "@/components/cobros/gps-eventos-historial";
 import { GpsUbicacionesClaveCard } from "@/components/cobros/gps-ubicaciones-clave-card";
 import { GpsVehiculoCard } from "@/components/cobros/gps-vehiculo-card";
+import { InmovilizacionCard } from "@/components/cobros/inmovilizacion-card";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { Pagination } from "@/components/cobros/pagination";
@@ -4682,6 +4683,26 @@ function RouteComponent() {
 									vehicleId={caso.vehicleId}
 								/>
 							)}
+						{/* CB-041: solicitar/aprobar apagado o reactivación de la unidad,
+						    con llamada posterior al cliente. Solo requiere caso.id (a
+						    diferencia de GpsVehiculoCard): el servidor resuelve la unidad
+						    física desde contratos_financiamiento.vehicleId, no desde
+						    caso.vehicleId (que viene de opportunities.vehicleId y puede
+						    estar vacío o desactualizado aun con contrato y GPS vigentes,
+						    hallazgo de review). El propio card ya oculta sus acciones si
+						    `tieneGps` es false. El server valida bucket B2/B3 para apagar
+						    (fail closed), pero el botón de "Solicitar apagado" también se
+						    oculta acá con bucketNumero — sin esto quedaba visible en B4 y
+						    el asesor solo se enteraba del rechazo después de hacer el
+						    pedido. */}
+						{caso.id && (
+							<InmovilizacionCard
+								bucketNumero={bucketNumero}
+								casoCobroId={caso.id}
+								esSupervisor={esSupervisorCobros}
+								key={`inmov:${caso.id}`}
+							/>
+						)}
 						{/* CB-042 · El registro de recuperación (forzosa o entrega
 						    voluntaria). Reemplaza la tarjeta vieja, que solo salía para
 						    incobrables y leía una tabla que nadie llenaba. */}

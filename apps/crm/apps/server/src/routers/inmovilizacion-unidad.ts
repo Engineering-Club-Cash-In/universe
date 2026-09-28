@@ -1,0 +1,1048 @@
+/**
+ * CB-041 — Solicitar/aprobar/ejecutar el apagado o la reactivación de una
+ * unidad, con llamada posterior al cliente registrada en la misma Ficha 360.
+ *
+ * Módulo aparte, no en cobros.ts: mismo motivo que convenio-decision.ts /
+ * recuperacion-vehiculo.ts — cobrosAppRouter ya está en el límite donde
+ * TS7056 trunca el tipo inferido en el web (ver el comentario de esos
+ * archivos y https://orpc.dev/docs/advanced/exceeds-the-maximum-length-problem).
+ *
+ * Modo de ejecución: MANUAL. La integración con LEGION (`unit/exec_cmd`,
+ * CB-120) está bloqueada hasta confirmar permisos/comandos/relé de su lado
+ * — ver services/inmovilizacion/ejecutor.ts. `marcarEjecutada` deja
+ * constancia de que el supervisor coordinó el apagado/reactivación con
+ * LEGION por fuera del CRM.
+ */
+
+import { ORPCError } from "@orpc/server";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import { z } from "zod";
+import { db } from "../db";
+import { user } from "../db/schema/auth";
+import {
+	casosCobros,
+	contactosCobros,
+	contratosFinanciamiento,
+} from "../db/schema/cobros";
+import { clients } from "../db/schema/crm";
+import {
+	inmovilizacionesUnidad,
+	inmovilizacionesUnidadEventos,
+} from "../db/schema/inmovilizacion-unidad";
+import { vehicles } from "../db/schema/vehicles";
+import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
+import {
+	estadoUnidad,
+	type InmovilizacionHistorialItem,
+	puedeSolicitar,
+} from "../lib/inmovilizacion-unidad";
+import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import { carteraBackClient } from "../services/cartera-back-client";
+import { isCarteraBackEnabled } from "../services/cartera-back-integration";
+import { ejecutarInmovilizacion } from "../services/inmovilizacion/ejecutor";
+import {
+	notificarInmovilizacionPendiente,
+	notificarInmovilizacionResuelta,
+	notificarLlamarCliente,
+	notificarUnidadReactivada,
+	resolverAvisoLlamarCliente,
+	resolverPendientesInmovilizacion,
+} from "../services/inmovilizacion-notif";
+import { assertAccesoCasoCobro } from "./cobros";
+
+/**
+ * Trae el caso con lo que hace falta para autorizar y para armar el mensaje
+ * de las notificaciones ("Fulano (crédito 12345)"). No usa `getCasoCobroById`
+ * (routers/cobros.ts) porque ese trae columnas de UI que acá no hacen falta.
+ */
+async function getCasoParaInmovilizacion(casoCobroId: string) {
+	const [caso] = await db
+		.select({
+			id: casosCobros.id,
+			responsableCobros: casosCobros.responsableCobros,
+			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			vehicleId: vehicles.id,
+			wialonUnitId: vehicles.wialonUnitId,
+			clienteNombre: clients.contactPerson,
+		})
+		.from(casosCobros)
+		.leftJoin(
+			contratosFinanciamiento,
+			eq(casosCobros.contratoId, contratosFinanciamiento.id),
+		)
+		.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
+		.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
+		.where(eq(casosCobros.id, casoCobroId))
+		.limit(1);
+	return caso ?? null;
+}
+
+/**
+ * Historial completo de inmovilizaciones de un caso, para derivar el estado
+ * de la unidad y mostrarlo en la Ficha 360.
+ */
+async function getHistorialCaso(casoCobroId: string) {
+	return db
+		.select()
+		.from(inmovilizacionesUnidad)
+		.where(eq(inmovilizacionesUnidad.casoCobroId, casoCobroId))
+		.orderBy(desc(inmovilizacionesUnidad.createdAt));
+}
+
+type FilaInmovilizacion = Awaited<ReturnType<typeof getHistorialCaso>>[number];
+
+/**
+ * La fila EJECUTADA más reciente (por `ejecutadoAt`) de una `accion` dada.
+ * Con "apagado" es la que tiene la unidad apagada hoy cuando `estadoUnidad`
+ * dice "inmovilizada" — la usan el banner de "llamar al cliente" y la
+ * reactivación directa (para enlazar su `inmovilizacionOrigenId`). Con
+ * "reactivacion" es la que acaba de devolver la unidad al cliente — la usa
+ * el banner de "confirmar llamada" post-reactivación.
+ */
+function ultimaEjecutada(
+	historial: readonly FilaInmovilizacion[],
+	accion: FilaInmovilizacion["accion"],
+): FilaInmovilizacion | null {
+	let ultimo: FilaInmovilizacion | null = null;
+	for (const h of historial) {
+		if (h.accion !== accion || h.estado !== "ejecutada" || !h.ejecutadoAt)
+			continue;
+		if (!ultimo?.ejecutadoAt || h.ejecutadoAt > ultimo.ejecutadoAt) ultimo = h;
+	}
+	return ultimo;
+}
+
+/**
+ * ¿El error es una violación de índice único de Postgres (23505)? Drizzle
+ * puede envolver el error del driver, así que se mira también `cause`. Solo
+ * esto se traduce a CONFLICT: una caída de la DB o una FK rota tienen que
+ * salir como lo que son, no como "ya hay una solicitud abierta".
+ */
+function esViolacionUnica(error: unknown): boolean {
+	const codigo = (e: unknown) => (e as { code?: unknown } | null)?.code;
+	return (
+		codigo(error) === "23505" ||
+		codigo((error as { cause?: unknown } | null)?.cause) === "23505"
+	);
+}
+
+export const inmovilizacionUnidadRouter = {
+	/**
+	 * Historial de inmovilizaciones del caso + estado derivado de la unidad +
+	 * si hay una llamada pendiente por registrar. La Ficha 360 arma el card
+	 * completo con esto solo.
+	 */
+	getInmovilizacionesCaso: cobrosProcedure
+		.input(z.object({ casoCobroId: z.string().uuid() }))
+		.handler(
+			async ({
+				input,
+				context,
+			}): Promise<{
+				estadoUnidad: ReturnType<typeof estadoUnidad>;
+				solicitudAbierta: FilaInmovilizacion | null;
+				pendienteLlamar: FilaInmovilizacion | null;
+				pendienteLlamarReactivacion: FilaInmovilizacion | null;
+				historial: FilaInmovilizacion[];
+			}> => {
+				await assertAccesoCasoCobro(
+					input.casoCobroId,
+					context.userId,
+					context.userRole,
+				);
+
+				const historial = await getHistorialCaso(input.casoCobroId);
+				const historialParaEstado: InmovilizacionHistorialItem[] =
+					historial.map((h) => ({
+						accion: h.accion,
+						estado: h.estado,
+						ejecutadoAt: h.ejecutadoAt,
+					}));
+
+				const solicitudAbierta =
+					historial.find(
+						(h) =>
+							h.estado === "pendiente_aprobacion" || h.estado === "aprobada",
+					) ?? null;
+
+				// Solo mientras la unidad SIGA apagada: si ya se reactivó (p. ej. el
+				// cliente pagó por ventanilla y se pidió la reactivación directa), el
+				// apagado viejo sin llamada ya no es una tarea pendiente.
+				const estado = estadoUnidad(historialParaEstado);
+				const apagadoVigente =
+					estado === "inmovilizada"
+						? ultimaEjecutada(historial, "apagado")
+						: null;
+				const pendienteLlamar =
+					apagadoVigente && apagadoVigente.llamadaContactoId === null
+						? apagadoVigente
+						: null;
+
+				// Misma idea que pendienteLlamar pero en espejo: la última
+				// reactivación ejecutada, mientras la unidad siga ACTIVA (si ya
+				// se volvió a apagar, esa llamada vieja no es tarea pendiente).
+				const reactivacionVigente =
+					estado === "activa"
+						? ultimaEjecutada(historial, "reactivacion")
+						: null;
+				const pendienteLlamarReactivacion =
+					reactivacionVigente && reactivacionVigente.llamadaContactoId === null
+						? reactivacionVigente
+						: null;
+
+				return {
+					estadoUnidad: estado,
+					solicitudAbierta,
+					pendienteLlamar,
+					pendienteLlamarReactivacion,
+					historial,
+				};
+			},
+		),
+
+	/**
+	 * Solicita el apagado o la reactivación de la unidad del caso.
+	 *
+	 * Misma cadena de autorización que `enviarCreditoARecuperacion`
+	 * (routers/cobros.ts): el crédito no se recibe suelto del cliente
+	 * (sale del caso), y `assertCreditoAsignadoEnCarteraPorSifco` revalida
+	 * SIN cache que el crédito sigue siendo del asesor que pide — entre
+	 * autorizar y escribir alguien más pudo habérselo reasignado.
+	 */
+	solicitarInmovilizacion: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				accion: z.enum(["apagado", "reactivacion"]),
+				motivo: z
+					.string()
+					.trim()
+					.min(5, "El motivo es obligatorio (mínimo 5 caracteres)"),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+
+			const caso = await getCasoParaInmovilizacion(input.casoCobroId);
+			if (!caso?.numeroCreditoSifco) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El caso no tiene crédito de cartera asociado.",
+				});
+			}
+			// El front no muestra la carta sin vehicleId ($id.tsx), pero eso no
+			// alcanza como gate: un llamado directo al endpoint podía crear una
+			// solicitud de "apagar" sin unidad real. Review de Codex.
+			if (!caso.vehicleId) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El caso no tiene un vehículo asociado para inmovilizar.",
+				});
+			}
+
+			await assertCreditoAsignadoEnCarteraPorSifco({
+				numeroSifco: caso.numeroCreditoSifco,
+				emailUsuario: context.session.user.email,
+				userRole: context.userRole,
+				accion:
+					input.accion === "apagado"
+						? "solicitar el apagado de la unidad"
+						: "solicitar la reactivación de la unidad",
+			});
+
+			let bucket: number | null = null;
+			if (isCarteraBackEnabled()) {
+				try {
+					const bucketActual = await carteraBackClient.getBucketActualCredito(
+						caso.numeroCreditoSifco,
+					);
+					bucket = bucketActual?.bucket ?? null;
+				} catch (error) {
+					// Fail closed: si no se puede confirmar el bucket, NO se
+					// habilita la acción (mismo criterio que ubicaciones-clave.ts
+					// para B4) — bucket queda null y puedeSolicitar lo rechaza.
+					console.error(
+						"[solicitarInmovilizacion] No se pudo resolver el bucket:",
+						error,
+					);
+				}
+			}
+
+			const historial = await getHistorialCaso(input.casoCobroId);
+			const estadoActual = estadoUnidad(
+				historial.map((h) => ({
+					accion: h.accion,
+					estado: h.estado,
+					ejecutadoAt: h.ejecutadoAt,
+				})),
+			);
+
+			if (!puedeSolicitar(input.accion, estadoActual, bucket)) {
+				let message: string;
+				if (input.accion === "reactivacion") {
+					message =
+						"La unidad no está inmovilizada: no hay nada que reactivar.";
+				} else if (estadoActual === "inmovilizada") {
+					message = "La unidad ya está inmovilizada.";
+				} else if (bucket == null) {
+					message =
+						"No se pudo confirmar el bucket del crédito. Intentá de nuevo en unos minutos.";
+				} else {
+					message = `El apagado aplica a créditos en B2/B3 y este está en B${bucket}.`;
+				}
+				throw new ORPCError("BAD_REQUEST", { message });
+			}
+
+			// La reactivación pedida directo (sin pasar por "pagó" en la llamada)
+			// también apunta al apagado que revierte, para que al ejecutarse ese
+			// apagado quede con resultado = 'reactivada'.
+			const origenId =
+				input.accion === "reactivacion"
+					? (ultimaEjecutada(historial, "apagado")?.id ?? null)
+					: null;
+
+			let inmovilizacionId: string;
+			try {
+				inmovilizacionId = await db.transaction(async (tx) => {
+					const [fila] = await tx
+						.insert(inmovilizacionesUnidad)
+						.values({
+							casoCobroId: input.casoCobroId,
+							numeroCreditoSifco: caso.numeroCreditoSifco as string,
+							vehicleId: caso.vehicleId,
+							wialonUnitId: caso.wialonUnitId,
+							accion: input.accion,
+							motivo: input.motivo,
+							bucketSnapshot: bucket,
+							solicitadoPor: context.userId,
+							inmovilizacionOrigenId: origenId,
+						})
+						.returning({ id: inmovilizacionesUnidad.id });
+
+					await tx.insert(inmovilizacionesUnidadEventos).values({
+						inmovilizacionId: fila.id,
+						evento: "solicitar",
+						estadoNuevo: "pendiente_aprobacion",
+						usuarioId: context.userId,
+						detalle: { accion: input.accion, motivo: input.motivo },
+					});
+
+					return fila.id;
+				});
+			} catch (error) {
+				// El índice único parcial (caso_cobro_id) WHERE estado IN
+				// (pendiente_aprobacion, aprobada) es la protección real bajo
+				// concurrencia — dos solicitudes simultáneas sobre el mismo caso
+				// no pueden pasar ambas. Cualquier OTRO error sale tal cual.
+				if (esViolacionUnica(error)) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Ya hay una solicitud de inmovilización abierta para este caso.",
+					});
+				}
+				throw error;
+			}
+
+			await notificarInmovilizacionPendiente({
+				inmovilizacionId,
+				casoCobroId: input.casoCobroId,
+				accion: input.accion,
+				clienteNombre: caso.clienteNombre ?? undefined,
+				numeroCreditoSifco: caso.numeroCreditoSifco,
+				motivo: input.motivo,
+				solicitadoPorUserId: context.userId,
+				solicitadoPorRole: context.userRole,
+			});
+
+			return { id: inmovilizacionId };
+		}),
+
+	/**
+	 * El propio solicitante cancela su solicitud, solo mientras siga
+	 * `pendiente_aprobacion`. Una vez aprobada ya no se cancela desde acá: el
+	 * supervisor ya la está coordinando con LEGION.
+	 */
+	cancelarSolicitud: cobrosProcedure
+		.input(z.object({ id: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			const cancelada = await db.transaction(async (tx) => {
+				const [fila] = await tx
+					.update(inmovilizacionesUnidad)
+					.set({ estado: "cancelada", updatedAt: new Date() })
+					.where(
+						and(
+							eq(inmovilizacionesUnidad.id, input.id),
+							eq(inmovilizacionesUnidad.solicitadoPor, context.userId),
+							eq(inmovilizacionesUnidad.estado, "pendiente_aprobacion"),
+						),
+					)
+					.returning({ id: inmovilizacionesUnidad.id });
+				if (!fila) return false;
+
+				await tx.insert(inmovilizacionesUnidadEventos).values({
+					inmovilizacionId: input.id,
+					evento: "cancelar",
+					estadoAnterior: "pendiente_aprobacion",
+					estadoNuevo: "cancelada",
+					usuarioId: context.userId,
+				});
+				return true;
+			});
+
+			if (!cancelada) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"La solicitud ya no está pendiente de aprobación, o no te pertenece.",
+				});
+			}
+
+			// Los supervisores ya no tienen nada que decidir: sin esto seguían
+			// viendo el aviso y al abrirlo chocaban con un CONFLICT.
+			await resolverPendientesInmovilizacion(input.id);
+
+			return { ok: true };
+		}),
+
+	/**
+	 * Cola del supervisor: solicitudes pendientes de aprobación Y aprobadas
+	 * (por ejecutar) — la web las separa en dos secciones por `estado`.
+	 */
+	getColaInmovilizaciones: cobrosSupervisorProcedure.handler(async () => {
+		return db
+			.select({
+				id: inmovilizacionesUnidad.id,
+				casoCobroId: inmovilizacionesUnidad.casoCobroId,
+				numeroCreditoSifco: inmovilizacionesUnidad.numeroCreditoSifco,
+				accion: inmovilizacionesUnidad.accion,
+				estado: inmovilizacionesUnidad.estado,
+				motivo: inmovilizacionesUnidad.motivo,
+				bucketSnapshot: inmovilizacionesUnidad.bucketSnapshot,
+				solicitadoAt: inmovilizacionesUnidad.solicitadoAt,
+				solicitanteNombre: user.name,
+				clienteNombre: clients.contactPerson,
+			})
+			.from(inmovilizacionesUnidad)
+			.innerJoin(user, eq(inmovilizacionesUnidad.solicitadoPor, user.id))
+			.leftJoin(
+				casosCobros,
+				eq(inmovilizacionesUnidad.casoCobroId, casosCobros.id),
+			)
+			.leftJoin(
+				contratosFinanciamiento,
+				eq(casosCobros.contratoId, contratosFinanciamiento.id),
+			)
+			.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
+			.where(
+				inArray(inmovilizacionesUnidad.estado, [
+					"pendiente_aprobacion",
+					"aprobada",
+				]),
+			)
+			.orderBy(desc(inmovilizacionesUnidad.solicitadoAt));
+	}),
+
+	/**
+	 * El supervisor aprueba o rechaza. `UPDATE ... WHERE estado =
+	 * 'pendiente_aprobacion' RETURNING` es la garantía de "un solo supervisor
+	 * decide" bajo concurrencia — si no devuelve filas, otro ya decidió.
+	 */
+	decidirInmovilizacion: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				decision: z.enum(["aprobar", "rechazar"]),
+				motivoRechazo: z.string().trim().min(5).max(1000).optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (input.decision === "rechazar" && !input.motivoRechazo) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El rechazo requiere un motivo de al menos 5 caracteres.",
+				});
+			}
+
+			const nuevoEstado =
+				input.decision === "aprobar" ? "aprobada" : "rechazada";
+
+			const actualizada = await db.transaction(async (tx) => {
+				const [fila] = await tx
+					.update(inmovilizacionesUnidad)
+					.set({
+						estado: nuevoEstado,
+						decididoPor: context.userId,
+						decididoAt: new Date(),
+						motivoRechazo:
+							input.decision === "rechazar" ? input.motivoRechazo : null,
+						updatedAt: new Date(),
+					})
+					.where(
+						and(
+							eq(inmovilizacionesUnidad.id, input.id),
+							eq(inmovilizacionesUnidad.estado, "pendiente_aprobacion"),
+						),
+					)
+					.returning({
+						id: inmovilizacionesUnidad.id,
+						casoCobroId: inmovilizacionesUnidad.casoCobroId,
+						accion: inmovilizacionesUnidad.accion,
+						solicitadoPor: inmovilizacionesUnidad.solicitadoPor,
+					});
+				if (!fila) return null;
+
+				await tx.insert(inmovilizacionesUnidadEventos).values({
+					inmovilizacionId: input.id,
+					evento: input.decision,
+					estadoAnterior: "pendiente_aprobacion",
+					estadoNuevo: nuevoEstado,
+					usuarioId: context.userId,
+					detalle:
+						input.decision === "rechazar"
+							? { motivoRechazo: input.motivoRechazo }
+							: null,
+				});
+				return fila;
+			});
+
+			if (!actualizada) {
+				throw new ORPCError("CONFLICT", {
+					message: "Otro supervisor ya decidió esta solicitud.",
+				});
+			}
+
+			await notificarInmovilizacionResuelta({
+				inmovilizacionId: actualizada.id,
+				casoCobroId: actualizada.casoCobroId,
+				accion: actualizada.accion,
+				decision: nuevoEstado,
+				motivoRechazo: input.motivoRechazo,
+				solicitanteUserId: actualizada.solicitadoPor,
+				decididoPorUserId: context.userId,
+				decididoPorRole: context.userRole,
+			});
+
+			return { ok: true };
+		}),
+
+	/**
+	 * El supervisor marca que la acción YA se ejecutó — hoy siempre en modo
+	 * manual: coordinó con LEGION por fuera del CRM. `referencia` es la nota
+	 * o ticket de LEGION que respalda eso.
+	 */
+	marcarEjecutada: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				referencia: z.string().trim().max(500).optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const [inm] = await db
+				.select()
+				.from(inmovilizacionesUnidad)
+				.where(
+					and(
+						eq(inmovilizacionesUnidad.id, input.id),
+						eq(inmovilizacionesUnidad.estado, "aprobada"),
+					),
+				)
+				.limit(1);
+
+			if (!inm) {
+				throw new ORPCError("CONFLICT", {
+					message: "La solicitud no está aprobada (o ya fue ejecutada).",
+				});
+			}
+
+			const resultado = await ejecutarInmovilizacion({
+				accion: inm.accion,
+				wialonUnitId: inm.wialonUnitId,
+			});
+
+			await db.transaction(async (tx) => {
+				const [actualizada] = await tx
+					.update(inmovilizacionesUnidad)
+					.set({
+						estado: "ejecutada",
+						ejecutadoPor: context.userId,
+						ejecutadoAt: new Date(),
+						modoEjecucion: resultado.modo,
+						referenciaEjecucion: input.referencia ?? null,
+						updatedAt: new Date(),
+					})
+					.where(
+						and(
+							eq(inmovilizacionesUnidad.id, input.id),
+							eq(inmovilizacionesUnidad.estado, "aprobada"),
+						),
+					)
+					.returning({ id: inmovilizacionesUnidad.id });
+
+				if (!actualizada) {
+					throw new ORPCError("CONFLICT", {
+						message: "La solicitud ya no está aprobada.",
+					});
+				}
+
+				await tx.insert(inmovilizacionesUnidadEventos).values({
+					inmovilizacionId: input.id,
+					evento: "marcar_ejecutada",
+					estadoAnterior: "aprobada",
+					estadoNuevo: "ejecutada",
+					usuarioId: context.userId,
+					detalle: { modo: resultado.modo, referencia: input.referencia },
+				});
+
+				// La reactivación cierra el ciclo del apagado que la originó.
+				if (inm.accion === "reactivacion" && inm.inmovilizacionOrigenId) {
+					await tx
+						.update(inmovilizacionesUnidad)
+						.set({ resultado: "reactivada", updatedAt: new Date() })
+						.where(eq(inmovilizacionesUnidad.id, inm.inmovilizacionOrigenId));
+				}
+			});
+
+			// Reactivación directa (cliente pagó por ventanilla, sin pasar por
+			// registrarResultadoLlamada): el aviso "llamar al cliente" del
+			// apagado que originó esto queda con nada que resolverlo — el
+			// banner ya desapareció de la Ficha 360 (pendienteLlamar se apaga
+			// solo cuando la unidad vuelve a "activa"), pero el aviso en
+			// notifications seguía pending para siempre. Review de Codex.
+			if (inm.accion === "reactivacion" && inm.inmovilizacionOrigenId) {
+				await resolverAvisoLlamarCliente(inm.inmovilizacionOrigenId);
+			}
+
+			const caso = await getCasoParaInmovilizacion(inm.casoCobroId);
+			// Fallback a quien solicitó: sin esto, un caso momentáneamente sin
+			// responsableCobros (columna nullable) se quedaba sin avisar a
+			// NADIE — ni al asesor, ni a quien pidió la acción. Review de Codex.
+			const asesorUserId = caso?.responsableCobros ?? inm.solicitadoPor;
+			if (asesorUserId) {
+				if (inm.accion === "apagado") {
+					await notificarLlamarCliente({
+						inmovilizacionId: inm.id,
+						casoCobroId: inm.casoCobroId,
+						asesorUserId,
+						clienteNombre: caso?.clienteNombre ?? undefined,
+						ejecutadoPorUserId: context.userId,
+						ejecutadoPorRole: context.userRole,
+					});
+				} else {
+					// El asesor es quien le avisa al cliente que ya puede usar el
+					// vehículo: sin este aviso no se entera de que LEGION lo reactivó.
+					await notificarUnidadReactivada({
+						inmovilizacionId: inm.id,
+						casoCobroId: inm.casoCobroId,
+						asesorUserId,
+						clienteNombre: caso?.clienteNombre ?? undefined,
+						ejecutadoPorUserId: context.userId,
+						ejecutadoPorRole: context.userRole,
+					});
+				}
+			}
+
+			return { ok: true, modo: resultado.modo };
+		}),
+
+	/**
+	 * Registra el resultado de la llamada posterior al apagado. La gestión en
+	 * sí (contactosCobros) ya se creó por `createContactoCobros` — acá solo
+	 * se ENLAZA esa gestión con la inmovilización y se decide el siguiente
+	 * paso: `paga` abre una solicitud de reactivación (a aprobación); `no_paga`
+	 * cierra el ciclo dejando que la UI ofrezca `enviarCreditoARecuperacion`
+	 * (ya existe, no se duplica acá).
+	 */
+	registrarResultadoLlamada: cobrosProcedure
+		.input(
+			z.object({
+				inmovilizacionId: z.string().uuid(),
+				contactoId: z.string().uuid(),
+				resultado: z.enum(["paga", "no_paga"]),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const [inm] = await db
+				.select()
+				.from(inmovilizacionesUnidad)
+				.where(
+					and(
+						eq(inmovilizacionesUnidad.id, input.inmovilizacionId),
+						eq(inmovilizacionesUnidad.accion, "apagado"),
+						eq(inmovilizacionesUnidad.estado, "ejecutada"),
+					),
+				)
+				.limit(1);
+
+			if (!inm) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "No hay un apagado ejecutado con ese id.",
+				});
+			}
+
+			await assertAccesoCasoCobro(
+				inm.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+
+			if (inm.llamadaContactoId !== null) {
+				throw new ORPCError("CONFLICT", {
+					message: "El resultado de esta llamada ya se registró.",
+				});
+			}
+
+			// El contacto tiene que ser del MISMO caso — evita enlazar la
+			// llamada de un caso distinto (contactoId enumerable) — y no puede
+			// estar ya enlazado a otra inmovilización.
+			const [contacto] = await db
+				.select({
+					id: contactosCobros.id,
+					inmovilizacionId: contactosCobros.inmovilizacionId,
+				})
+				.from(contactosCobros)
+				.where(
+					and(
+						eq(contactosCobros.id, input.contactoId),
+						eq(contactosCobros.casoCobroId, inm.casoCobroId),
+					),
+				)
+				.limit(1);
+			if (!contacto) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El contacto indicado no pertenece a este caso.",
+				});
+			}
+			if (contacto.inmovilizacionId !== null) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Esa gestión ya está registrada como la llamada de otra inmovilización.",
+				});
+			}
+
+			let reactivacionId: string | null = null;
+
+			try {
+				await db.transaction(async (tx) => {
+					// Los chequeos de arriba son para dar un mensaje claro; la garantía
+					// bajo concurrencia (doble clic, dos asesores a la vez) son estos
+					// UPDATE condicionados a `IS NULL`: si otro ya enlazó, no devuelven
+					// fila y la transacción entera se revierte.
+					const [apagado] = await tx
+						.update(inmovilizacionesUnidad)
+						.set({
+							llamadaContactoId: input.contactoId,
+							resultado:
+								input.resultado === "paga" ? null : "enviada_recuperacion",
+							updatedAt: new Date(),
+						})
+						.where(
+							and(
+								eq(inmovilizacionesUnidad.id, inm.id),
+								isNull(inmovilizacionesUnidad.llamadaContactoId),
+							),
+						)
+						.returning({ id: inmovilizacionesUnidad.id });
+					if (!apagado) {
+						throw new ORPCError("CONFLICT", {
+							message: "El resultado de esta llamada ya se registró.",
+						});
+					}
+
+					const [enlazado] = await tx
+						.update(contactosCobros)
+						.set({ inmovilizacionId: inm.id })
+						.where(
+							and(
+								eq(contactosCobros.id, input.contactoId),
+								isNull(contactosCobros.inmovilizacionId),
+							),
+						)
+						.returning({ id: contactosCobros.id });
+					if (!enlazado) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Esa gestión ya está registrada como la llamada de otra inmovilización.",
+						});
+					}
+
+					if (input.resultado === "paga") {
+						const [reactivacion] = await tx
+							.insert(inmovilizacionesUnidad)
+							.values({
+								casoCobroId: inm.casoCobroId,
+								numeroCreditoSifco: inm.numeroCreditoSifco,
+								vehicleId: inm.vehicleId,
+								wialonUnitId: inm.wialonUnitId,
+								accion: "reactivacion",
+								motivo: "Cliente pagó tras la llamada posterior al apagado.",
+								bucketSnapshot: inm.bucketSnapshot,
+								solicitadoPor: context.userId,
+								inmovilizacionOrigenId: inm.id,
+							})
+							.returning({ id: inmovilizacionesUnidad.id });
+						reactivacionId = reactivacion.id;
+
+						await tx.insert(inmovilizacionesUnidadEventos).values({
+							inmovilizacionId: reactivacion.id,
+							evento: "solicitar",
+							estadoNuevo: "pendiente_aprobacion",
+							usuarioId: context.userId,
+							detalle: { accion: "reactivacion", origenId: inm.id },
+						});
+					}
+
+					await tx.insert(inmovilizacionesUnidadEventos).values({
+						inmovilizacionId: inm.id,
+						evento: "registrar_resultado_llamada",
+						estadoAnterior: "ejecutada",
+						estadoNuevo: "ejecutada",
+						usuarioId: context.userId,
+						detalle: {
+							resultado: input.resultado,
+							contactoId: input.contactoId,
+						},
+					});
+				});
+			} catch (error) {
+				// "paga" choca con el índice único si ya hay una solicitud abierta
+				// en el caso (p. ej. alguien pidió la reactivación directo).
+				if (esViolacionUnica(error)) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"Ya hay una solicitud de inmovilización abierta para este caso. Resolvé esa primero.",
+					});
+				}
+				throw error;
+			}
+
+			await resolverAvisoLlamarCliente(inm.id);
+
+			if (input.resultado === "paga" && reactivacionId) {
+				const casoActualizado = await getCasoParaInmovilizacion(
+					inm.casoCobroId,
+				);
+				await notificarInmovilizacionPendiente({
+					inmovilizacionId: reactivacionId,
+					casoCobroId: inm.casoCobroId,
+					accion: "reactivacion",
+					clienteNombre: casoActualizado?.clienteNombre ?? undefined,
+					numeroCreditoSifco: inm.numeroCreditoSifco,
+					motivo: "Cliente pagó tras la llamada posterior al apagado.",
+					solicitadoPorUserId: context.userId,
+					solicitadoPorRole: context.userRole,
+				});
+			}
+
+			return { ok: true };
+		}),
+};
+
+/**
+ * Confirma que el asesor ya llamó al cliente tras una REACTIVACIÓN
+ * ejecutada. Simétrico a `registrarResultadoLlamada` pero sin su
+ * bifurcación paga/no_paga — acá no hay siguiente paso que decidir, solo
+ * cerrar el ciclo dejando constancia de la gestión.
+ *
+ * Aparte de `inmovilizacionUnidadRouter` (no como una propiedad más) y
+ * re-exportado por inmovilizacion-reactivacion-llamada.ts: agregarlo ahí
+ * empujaba ese objeto sobre el límite de TS7056 — mismo problema que ya
+ * describe el comentario del encabezado de este archivo.
+ */
+export const registrarLlamadaReactivacion = cobrosProcedure
+	.input(
+		z.object({
+			inmovilizacionId: z.string().uuid(),
+			contactoId: z.string().uuid(),
+		}),
+	)
+	.handler(async ({ input, context }) => {
+		const [inm] = await db
+			.select()
+			.from(inmovilizacionesUnidad)
+			.where(
+				and(
+					eq(inmovilizacionesUnidad.id, input.inmovilizacionId),
+					eq(inmovilizacionesUnidad.accion, "reactivacion"),
+					eq(inmovilizacionesUnidad.estado, "ejecutada"),
+				),
+			)
+			.limit(1);
+
+		if (!inm) {
+			throw new ORPCError("BAD_REQUEST", {
+				message: "No hay una reactivación ejecutada con ese id.",
+			});
+		}
+
+		await assertAccesoCasoCobro(
+			inm.casoCobroId,
+			context.userId,
+			context.userRole,
+		);
+
+		if (inm.llamadaContactoId !== null) {
+			throw new ORPCError("CONFLICT", {
+				message: "Esta llamada ya se registró.",
+			});
+		}
+
+		// El contacto tiene que ser del MISMO caso — evita enlazar la
+		// llamada de un caso distinto (contactoId enumerable) — y no puede
+		// estar ya enlazado a otra inmovilización.
+		const [contacto] = await db
+			.select({
+				id: contactosCobros.id,
+				inmovilizacionId: contactosCobros.inmovilizacionId,
+			})
+			.from(contactosCobros)
+			.where(
+				and(
+					eq(contactosCobros.id, input.contactoId),
+					eq(contactosCobros.casoCobroId, inm.casoCobroId),
+				),
+			)
+			.limit(1);
+		if (!contacto) {
+			throw new ORPCError("BAD_REQUEST", {
+				message: "El contacto indicado no pertenece a este caso.",
+			});
+		}
+		if (contacto.inmovilizacionId !== null) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Esa gestión ya está registrada como la llamada de otra inmovilización.",
+			});
+		}
+
+		await db.transaction(async (tx) => {
+			// Mismo criterio que registrarResultadoLlamada: los UPDATE
+			// condicionados a IS NULL son la garantía bajo concurrencia.
+			const [reactivacion] = await tx
+				.update(inmovilizacionesUnidad)
+				.set({ llamadaContactoId: input.contactoId, updatedAt: new Date() })
+				.where(
+					and(
+						eq(inmovilizacionesUnidad.id, inm.id),
+						isNull(inmovilizacionesUnidad.llamadaContactoId),
+					),
+				)
+				.returning({ id: inmovilizacionesUnidad.id });
+			if (!reactivacion) {
+				throw new ORPCError("CONFLICT", {
+					message: "Esta llamada ya se registró.",
+				});
+			}
+
+			const [enlazado] = await tx
+				.update(contactosCobros)
+				.set({ inmovilizacionId: inm.id })
+				.where(
+					and(
+						eq(contactosCobros.id, input.contactoId),
+						isNull(contactosCobros.inmovilizacionId),
+					),
+				)
+				.returning({ id: contactosCobros.id });
+			if (!enlazado) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Esa gestión ya está registrada como la llamada de otra inmovilización.",
+				});
+			}
+
+			await tx.insert(inmovilizacionesUnidadEventos).values({
+				inmovilizacionId: inm.id,
+				evento: "registrar_llamada_reactivacion",
+				estadoAnterior: "ejecutada",
+				estadoNuevo: "ejecutada",
+				usuarioId: context.userId,
+				detalle: { contactoId: input.contactoId },
+			});
+		});
+
+		await resolverAvisoLlamarCliente(inm.id);
+
+		return { ok: true };
+	});
+
+const usuarioDecisor = alias(user, "usuario_decisor");
+const usuarioEjecutor = alias(user, "usuario_ejecutor");
+
+/**
+ * Historial COMPLETO de inmovilizaciones — todos los estados, no solo las
+ * pendientes de `getColaInmovilizaciones`. Paginado: la tabla crece con cada
+ * ciclo apagado→reactivación de cada caso, y sin límite la cola tardaría más
+ * cada semana.
+ *
+ * Aparte de `inmovilizacionUnidadRouter` por el mismo límite de TS7056 que
+ * `registrarLlamadaReactivacion` — ver el comentario de ese export.
+ */
+export const getHistorialInmovilizaciones = cobrosSupervisorProcedure
+	.input(
+		z.object({
+			page: z.number().int().min(1).default(1),
+			perPage: z.number().int().min(1).max(100).default(25),
+		}),
+	)
+	.handler(async ({ input }) => {
+		const offset = (input.page - 1) * input.perPage;
+
+		const [filas, [{ total }]] = await Promise.all([
+			db
+				.select({
+					id: inmovilizacionesUnidad.id,
+					casoCobroId: inmovilizacionesUnidad.casoCobroId,
+					numeroCreditoSifco: inmovilizacionesUnidad.numeroCreditoSifco,
+					accion: inmovilizacionesUnidad.accion,
+					estado: inmovilizacionesUnidad.estado,
+					motivo: inmovilizacionesUnidad.motivo,
+					motivoRechazo: inmovilizacionesUnidad.motivoRechazo,
+					bucketSnapshot: inmovilizacionesUnidad.bucketSnapshot,
+					solicitadoAt: inmovilizacionesUnidad.solicitadoAt,
+					solicitanteNombre: user.name,
+					decididoAt: inmovilizacionesUnidad.decididoAt,
+					decididoPorNombre: usuarioDecisor.name,
+					ejecutadoAt: inmovilizacionesUnidad.ejecutadoAt,
+					ejecutadoPorNombre: usuarioEjecutor.name,
+					modoEjecucion: inmovilizacionesUnidad.modoEjecucion,
+					referenciaEjecucion: inmovilizacionesUnidad.referenciaEjecucion,
+					resultado: inmovilizacionesUnidad.resultado,
+					clienteNombre: clients.contactPerson,
+				})
+				.from(inmovilizacionesUnidad)
+				.innerJoin(user, eq(inmovilizacionesUnidad.solicitadoPor, user.id))
+				.leftJoin(
+					usuarioDecisor,
+					eq(inmovilizacionesUnidad.decididoPor, usuarioDecisor.id),
+				)
+				.leftJoin(
+					usuarioEjecutor,
+					eq(inmovilizacionesUnidad.ejecutadoPor, usuarioEjecutor.id),
+				)
+				.leftJoin(
+					casosCobros,
+					eq(inmovilizacionesUnidad.casoCobroId, casosCobros.id),
+				)
+				.leftJoin(
+					contratosFinanciamiento,
+					eq(casosCobros.contratoId, contratosFinanciamiento.id),
+				)
+				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
+				.orderBy(desc(inmovilizacionesUnidad.solicitadoAt))
+				.limit(input.perPage)
+				.offset(offset),
+			db
+				.select({ total: sql<number>`count(*)::int` })
+				.from(inmovilizacionesUnidad),
+		]);
+
+		return {
+			items: filas,
+			page: input.page,
+			perPage: input.perPage,
+			total,
+			totalPages: Math.max(1, Math.ceil(total / input.perPage)),
+		};
+	});

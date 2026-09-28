@@ -2293,6 +2293,10 @@ export const cobrosRouter = {
 					montoComprometido: contactosCobros.montoComprometido,
 					realizadoPorId: contactosCobros.realizadoPor,
 					realizadoPor: user.name,
+					// CB-041: si esta gestión ya se enlazó como "la llamada posterior"
+					// de una inmovilización, InmovilizacionCard la excluye de la
+					// lista de contactos elegibles.
+					inmovilizacionId: contactosCobros.inmovilizacionId,
 				})
 				.from(contactosCobros)
 				.leftJoin(user, eq(contactosCobros.realizadoPor, user.id))

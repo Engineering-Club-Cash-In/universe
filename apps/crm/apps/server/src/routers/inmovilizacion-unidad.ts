@@ -586,6 +586,7 @@ export const inmovilizacionUnidadRouter = {
 						.select({ wialonUnitId: vehicles.wialonUnitId })
 						.from(vehicles)
 						.where(eq(vehicles.id, vehicleId))
+						.for("update")
 						.limit(1);
 
 					if (!vehiculoTx) {
@@ -941,10 +942,16 @@ export const inmovilizacionUnidadRouter = {
 					});
 				}
 
+				// Re-validar la vinculación Wialon del vehículo bajo lock (FOR UPDATE):
+				// el lock de fila sobre vehicles serializa contra vincularUnidadWialon
+				// (que toma lock exclusivo al reasignar la unidad del vehículo),
+				// evitando que el GPS sea reemplazado concurrentemente entre esta
+				// lectura y ejecutarInmovilizacion. Review de Codex.
 				const [vehiculoTx] = await tx
 					.select({ wialonUnitId: vehicles.wialonUnitId })
 					.from(vehicles)
 					.where(eq(vehicles.id, inm.vehicleId))
+					.for("update")
 					.limit(1);
 
 				if (!vehiculoTx) {

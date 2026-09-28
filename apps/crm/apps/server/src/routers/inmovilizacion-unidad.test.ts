@@ -202,17 +202,22 @@ function mockDb() {
 					};
 				}
 				if (tabla === vehicles) {
+					const devolver = async () =>
+						vehiculoExisteMock && vehicleIdMock
+							? [
+									{
+										id: vehicleIdMock,
+										wialonUnitId: wialonUnitIdVehiculoMock,
+									},
+								]
+							: [];
 					return {
 						where: () => ({
-							limit: async () =>
-								vehiculoExisteMock && vehicleIdMock
-									? [
-											{
-												id: vehicleIdMock,
-												wialonUnitId: wialonUnitIdVehiculoMock,
-											},
-										]
-									: [],
+							limit: devolver,
+							for: () => {
+								executeLlamadas.push("select_for_update_vehiculo");
+								return { limit: devolver };
+							},
 						}),
 					};
 				}
@@ -950,6 +955,29 @@ describe("CB-041 — marcarEjecutada", () => {
 				"El vehículo asociado a la solicitud ya no existe o fue desasociado.",
 		});
 		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
+	});
+
+	it("marcarEjecutada toma SELECT ... FOR UPDATE sobre la fila de vehicles para serializar reasignaciones concurrentes (review de Codex)", async () => {
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			solicitadoPor: "user-test",
+			inmovilizacionOrigenId: null,
+		};
+
+		await call(
+			inmovilizacionUnidadRouter.marcarEjecutada,
+			{ id: INMOV_ID },
+			{ context: ctx("cobros_supervisor") },
+		);
+
+		expect(executeLlamadas).toContain("select_for_update_vehiculo");
 	});
 });
 

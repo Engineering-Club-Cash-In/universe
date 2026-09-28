@@ -45,6 +45,7 @@ import { ConvenioModal } from "@/components/cobros/convenio-modal";
 import { GpsEventosHistorial } from "@/components/cobros/gps-eventos-historial";
 import { GpsUbicacionesClaveCard } from "@/components/cobros/gps-ubicaciones-clave-card";
 import { GpsVehiculoCard } from "@/components/cobros/gps-vehiculo-card";
+import { InmovilizacionCard } from "@/components/cobros/inmovilizacion-card";
 import { PagaloHistorial } from "@/components/cobros/pagalo-historial";
 import { PagaloLinkDialog } from "@/components/cobros/pagalo-link-dialog";
 import { Pagination } from "@/components/cobros/pagination";
@@ -4702,6 +4703,21 @@ function RouteComponent() {
 									vehicleId={caso.vehicleId}
 								/>
 							)}
+						{/* CB-041: solicitar/aprobar apagado o reactivación de la unidad,
+						    con llamada posterior al cliente. Mismo gate de vehículo que
+						    GpsVehiculoCard: sin vehículo no hay unidad que apagar. El
+						    server valida bucket B2/B3 para apagar (fail closed), pero el
+						    botón de "Solicitar apagado" también se oculta acá con
+						    bucketNumero — sin esto quedaba visible en B4 y el asesor solo
+						    se enteraba del rechazo después de hacer el pedido. */}
+						{caso.id && caso.vehicleId && (
+							<InmovilizacionCard
+								bucketNumero={bucketNumero}
+								casoCobroId={caso.id}
+								esSupervisor={esSupervisorCobros}
+								key={`inmov:${caso.id}`}
+							/>
+						)}
 						{/* Información de Recuperación - Solo para casos incobrables */}
 						{caso.estadoMora === "incobrable" && recuperacion && (
 							<Card>

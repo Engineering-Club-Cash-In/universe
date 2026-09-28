@@ -14,6 +14,7 @@ import { notifications } from "../db/schema/notifications";
 
 let estadoInmovilizacionMock: string | null = "pendiente_aprobacion";
 let notificacionesInsertadas: Record<string, unknown>[][] = [];
+let notificacionesActualizadas: { set: Record<string, unknown> }[] = [];
 let supervisoresMock = ["sup-1", "sup-2"];
 
 function mockDb() {
@@ -46,6 +47,19 @@ function mockDb() {
 			}
 			throw new Error(`insert en tabla no mockeada: ${String(tabla)}`);
 		},
+		update: (tabla: unknown) => {
+			if (tabla === notifications) {
+				return {
+					set: (cambios: Record<string, unknown>) => {
+						notificacionesActualizadas.push({ set: cambios });
+						return {
+							where: () => Promise.resolve(),
+						};
+					},
+				};
+			}
+			throw new Error(`update en tabla no mockeada: ${String(tabla)}`);
+		},
 		transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(mockDb()),
 	};
 }
@@ -55,13 +69,13 @@ mock.module("./cobros-notif-helpers", () => ({
 	obtenerSupervisoresCobros: async () => supervisoresMock,
 }));
 
-const { notificarInmovilizacionPendiente } = await import(
-	"./inmovilizacion-notif"
-);
+const { notificarInmovilizacionPendiente, reasignarAvisosLlamarCliente } =
+	await import("./inmovilizacion-notif");
 
 function reset() {
 	estadoInmovilizacionMock = "pendiente_aprobacion";
 	notificacionesInsertadas = [];
+	notificacionesActualizadas = [];
 	supervisoresMock = ["sup-1", "sup-2"];
 }
 
@@ -116,3 +130,17 @@ describe("CB-041 — notificarInmovilizacionPendiente", () => {
 		expect(notificacionesInsertadas).toHaveLength(0);
 	});
 });
+
+describe("CB-041 — reasignarAvisosLlamarCliente", () => {
+	afterEach(reset);
+
+	it("reasigna las notificaciones abiertas al nuevo responsable (review de Codex)", async () => {
+		await reasignarAvisosLlamarCliente({
+			casoCobroId: "caso-1",
+			nuevoResponsableUserId: "asesor-nuevo",
+		});
+		expect(notificacionesActualizadas).toHaveLength(1);
+		expect(notificacionesActualizadas[0]?.set.assignedTo).toBe("asesor-nuevo");
+	});
+});
+

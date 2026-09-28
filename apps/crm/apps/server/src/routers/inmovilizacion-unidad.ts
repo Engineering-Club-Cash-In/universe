@@ -994,7 +994,7 @@ export const inmovilizacionUnidadRouter = {
 					// dejar la fila huérfana en 'aprobada' (que bloquearía permanentemente
 					// cualquier solicitud futura del caso por el índice único de abiertas),
 					// se cancela atómicamente la aprobación y se audita el evento. Review de Codex.
-					await tx
+					const [cancelada] = await tx
 						.update(inmovilizacionesUnidad)
 						.set({
 							estado: "cancelada",
@@ -1008,17 +1008,23 @@ export const inmovilizacionUnidadRouter = {
 						)
 						.returning({ id: inmovilizacionesUnidad.id });
 
-					await tx.insert(inmovilizacionesUnidadEventos).values({
-						inmovilizacionId: input.id,
-						evento: "cancelar",
-						estadoAnterior: "aprobada",
-						estadoNuevo: "cancelada",
-						usuarioId: context.userId,
-						detalle: {
-							motivo: motivoFalloPrecondicion,
-							...detalleFalloPrecondicion,
-						},
-					});
+					// Solo auditar si esta transacción fue la que canceló la fila: si dos
+					// supervisores ejecutaron concurrentemente con precondición fallida,
+					// el segundo UPDATE devuelve cero filas y no debe duplicar el evento.
+					// Review de Codex, PR #1758.
+					if (cancelada) {
+						await tx.insert(inmovilizacionesUnidadEventos).values({
+							inmovilizacionId: input.id,
+							evento: "cancelar",
+							estadoAnterior: "aprobada",
+							estadoNuevo: "cancelada",
+							usuarioId: context.userId,
+							detalle: {
+								motivo: motivoFalloPrecondicion,
+								...detalleFalloPrecondicion,
+							},
+						});
+					}
 					return;
 				}
 

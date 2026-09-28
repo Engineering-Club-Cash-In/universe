@@ -280,3 +280,33 @@ export async function notificarUnidadReactivada(params: {
 		});
 	});
 }
+
+/**
+ * Al reasignar el responsable de un caso de cobro: mueve las notificaciones
+ * abiertas de `inmovilizacion_llamar_cliente` al nuevo asesor, para que la
+ * tarea pendiente pase a quien ahora tiene acceso para registrar la llamada
+ * en la Ficha 360 y la notificación no quede huérfana en la bandeja del
+ * asesor anterior. Review de Codex, PR #1758.
+ */
+export async function reasignarAvisosLlamarCliente(params: {
+	casoCobroId: string;
+	nuevoResponsableUserId: string;
+}): Promise<void> {
+	await tryNotify("reasignarAvisosLlamarCliente", () =>
+		db
+			.update(notifications)
+			.set({
+				assignedTo: params.nuevoResponsableUserId,
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(notifications.cobrosTipo, "inmovilizacion_llamar_cliente"),
+					eq(notifications.relatedEntityType, "collection_case"),
+					eq(notifications.relatedEntityId, params.casoCobroId),
+					inArray(notifications.status, [...ESTADOS_ABIERTOS]),
+				),
+			),
+	);
+}
+

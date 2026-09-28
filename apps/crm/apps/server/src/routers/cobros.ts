@@ -193,6 +193,7 @@ import {
 } from "../services/sync-casos-cobros";
 import type { CreditoDirectoResponse } from "../types/cartera-back";
 import { normalizarDpi } from "../utils/cui-validation";
+import { reasignarAvisosLlamarCliente } from "../services/inmovilizacion-notif";
 import { createNotification } from "./notifications";
 
 // Helper: Obtener todos los créditos de todos los estados
@@ -3276,6 +3277,12 @@ export const cobrosRouter = {
 				})
 				.where(eq(casosCobros.id, input.casoCobroId))
 				.returning();
+
+			// Mover avisos abiertos de llamada de inmovilización al nuevo responsable
+			await reasignarAvisosLlamarCliente({
+				casoCobroId: input.casoCobroId,
+				nuevoResponsableUserId: input.responsableCobros,
+			});
 
 			// Notificar al nuevo cobrador asignado
 			await createNotification({

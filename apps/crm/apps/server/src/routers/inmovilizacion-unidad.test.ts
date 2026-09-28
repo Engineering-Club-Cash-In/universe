@@ -357,6 +357,7 @@ mock.module("../services/inmovilizacion-notif", () => ({
 	resolverPendientesInmovilizacion: async (id: string) => {
 		resolverPendientesLlamadas.push(id);
 	},
+	reasignarAvisosLlamarCliente: async () => undefined,
 }));
 // Mock propio de cartera-back-client y no spyOn sobre el módulo real: otros
 // archivos de test lo reemplazan con `mock.module` (global en bun), y en el
@@ -1041,6 +1042,41 @@ describe("CB-041 — marcarEjecutada", () => {
 		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
 		expect(inmovilizacionExistente.estado).toBe("cancelada");
 		expect(eventosInsertados.some((e) => e.evento === "cancelar")).toBe(true);
+	});
+
+	it("carrera en precondición fallida: si la fila ya fue cancelada concurrentemente (UPDATE 0 filas), no duplica el evento de auditoría (review de Codex)", async () => {
+		inmovilizacionExistente = {
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "aprobada",
+			wialonUnitId: 12345,
+			bucketSnapshot: 2,
+			numeroCreditoSifco: "01010214100000",
+			vehicleId: VEHICLE_ID,
+			solicitadoPor: "user-test",
+			inmovilizacionOrigenId: null,
+		};
+		// Simular que el cliente pagó y el crédito bajó a B1
+		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+			bucket: 1,
+		} as never);
+		// Simular que otra transacción ya la canceló: el UPDATE devuelve 0 filas
+		updateDevuelveFila = false;
+
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.marcarEjecutada,
+				{ id: INMOV_ID },
+				{ context: ctx("cobros_supervisor") },
+			),
+		).rejects.toMatchObject({
+			code: "CONFLICT",
+			message:
+				"El crédito ya no se encuentra en mora B2/B3 (está en B1). El apagado ya no aplica.",
+		});
+		// No debe haberse insertado evento de cancelar porque no afectó filas
+		expect(eventosInsertados.some((e) => e.evento === "cancelar")).toBe(false);
 	});
 
 	it("marcarEjecutada toma SELECT ... FOR UPDATE sobre la fila de vehicles para serializar reasignaciones concurrentes (review de Codex)", async () => {

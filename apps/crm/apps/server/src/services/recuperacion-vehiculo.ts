@@ -28,11 +28,11 @@ import { user } from "../db/schema/auth";
 import { recuperacionesVehiculo } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
 import {
-	BUCKET_RECUPERACION,
 	calcularFotoSaldo,
 	type DetalleRecuperacion,
 	type FotoSaldo,
 	falloDefinitivoDeCartera,
+	referenciaDelRegistro,
 	type TipoEnvioRecuperacion,
 	textoAvisoRecuperacion,
 	textoMotivoCartera,
@@ -282,15 +282,7 @@ export async function prepararEnvioRecuperacion(params: {
 	detalle: DetalleRecuperacion;
 	registradoPor: string;
 }) {
-	// El bucket de ANTES, best-effort: solo sirve para anotar el origen si la
-	// respuesta del traslado se pierde y hay que reconstruirla.
-	const [contexto, bucketAntes] = await Promise.all([
-		leerContextoCartera(params.numeroSifco),
-		carteraBackClient
-			.getBucketActualCredito(params.numeroSifco)
-			.then((b) => b?.bucket ?? null)
-			.catch(() => null),
-	]);
+	const contexto = await leerContextoCartera(params.numeroSifco);
 	const registroId = await insertarRegistro(
 		valoresRegistro({
 			casoCobroId: params.casoCobroId,
@@ -317,15 +309,23 @@ export async function prepararEnvioRecuperacion(params: {
 		}
 	};
 
+	// La huella de ESTA solicitud en cartera: viaja dentro del motivo y cartera
+	// la guarda en `buckets_historial` en la misma transacción que el traslado.
+	// Es lo que permite, si la respuesta se pierde, saber si el traslado lo hizo
+	// este envío y no otro actor (review de Codex, P2, PR #1762).
+	const referenciaCartera = referenciaDelRegistro(registroId);
+
 	return {
 		registroId,
-		/** El motivo para `buckets_historial`, con el tipo adelante. */
-		motivoCartera: textoMotivoCartera(params.tipo, params.detalle),
+		/** Va al final de cualquier motivo que se le mande a cartera. */
+		referenciaCartera,
+		/** El motivo para `buckets_historial`, con el tipo adelante y la huella. */
+		motivoCartera: `${textoMotivoCartera(params.tipo, params.detalle)} ${referenciaCartera}`,
 
 		/**
 		 * La llamada a cartera lanzó. Decide qué pasó antes de tocar el registro:
-		 * solo se borra si cartera respondió que no, o si comprobadamente el
-		 * crédito no quedó en B4. Si no hay forma de saberlo, se conserva.
+		 * solo se borra si cartera respondió que no, o si su historial prueba que
+		 * esta solicitud no trasladó. Si no hay forma de saberlo, se conserva.
 		 */
 		async resolverFallo(error: unknown): Promise<ResolucionFallo> {
 			if (falloDefinitivoDeCartera(error)) {
@@ -333,24 +333,27 @@ export async function prepararEnvioRecuperacion(params: {
 				return { estado: "descartado" };
 			}
 			console.warn(
-				`[recuperacion-vehiculo] Resultado incierto del traslado de ${params.numeroSifco}; se consulta el bucket:`,
+				`[recuperacion-vehiculo] Resultado incierto del traslado de ${params.numeroSifco}; se busca la huella en cartera:`,
 				error,
 			);
-			let bucketDespues: number | null;
+			let eventos: Awaited<
+				ReturnType<typeof carteraBackClient.getBucketsHistorialCredito>
+			>;
 			try {
-				bucketDespues =
-					(await carteraBackClient.getBucketActualCredito(params.numeroSifco))
-						?.bucket ?? null;
+				eventos = await carteraBackClient.getBucketsHistorialCredito(
+					params.creditoId,
+				);
 			} catch (consulta) {
 				console.error(
-					`[recuperacion-vehiculo] Tampoco se pudo leer el bucket de ${params.numeroSifco}; el registro ${registroId} se conserva:`,
+					`[recuperacion-vehiculo] Tampoco se pudo leer el historial de ${params.numeroSifco}; el registro ${registroId} se conserva:`,
 					consulta,
 				);
 				return { estado: "incierto" };
 			}
-			// El traslado solo acepta B1–B3 y deja el piso en B4: si ahora está en
-			// B4, lo movió esta llamada. En cualquier otro bucket, no pasó.
-			if (bucketDespues !== BUCKET_RECUPERACION) {
+			// Que el crédito esté en B4 no prueba nada: lo pudo mover otro actor o
+			// el motor. Lo que prueba el traslado es la fila con NUESTRA huella.
+			const evento = eventos.find((e) => e.motivo?.includes(referenciaCartera));
+			if (!evento) {
 				await descartar();
 				return { estado: "descartado" };
 			}
@@ -363,8 +366,8 @@ export async function prepararEnvioRecuperacion(params: {
 				traslado: {
 					success: true,
 					credito_id: params.creditoId,
-					bucket_anterior: bucketAntes,
-					bucket_nuevo: BUCKET_RECUPERACION,
+					bucket_anterior: evento.bucket_anterior,
+					bucket_nuevo: evento.bucket_nuevo,
 					tipo_evento: "SUBIDA",
 					asesor_anterior: null,
 					asesor_nuevo: asesorNuevo,

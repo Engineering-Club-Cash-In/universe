@@ -7,6 +7,7 @@ import {
 	falloDefinitivoDeCartera,
 	motivoBloqueoRecuperacion,
 	operacionRecuperacion,
+	referenciaDelRegistro,
 	textoAvisoRecuperacion,
 	textoMotivoCartera,
 } from "./recuperacion-vehiculo";
@@ -299,5 +300,15 @@ describe("falloDefinitivoDeCartera", () => {
 		).toBe(false);
 		expect(falloDefinitivoDeCartera(new TypeError("fetch failed"))).toBe(false);
 		expect(falloDefinitivoDeCartera(null)).toBe(false);
+	});
+});
+
+describe("referenciaDelRegistro", () => {
+	it("la huella lleva el id completo del registro, para no confundir envíos", () => {
+		const id = "42b5f10d-d2bb-49ee-ba9a-521aac6394f1";
+		expect(referenciaDelRegistro(id)).toBe(`[ref CRM ${id}]`);
+		expect(referenciaDelRegistro(id)).not.toBe(
+			referenciaDelRegistro("42b5f10d-d2bb-49ee-ba9a-521aac6394f2"),
+		);
 	});
 });

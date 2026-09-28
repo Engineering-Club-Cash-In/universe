@@ -8973,7 +8973,9 @@ export const cobrosRouter = {
 				});
 				recuperacion = await carteraBackClient.enviarARecuperacionVehiculo({
 					credito_id: resultado.credito_id,
-					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo}`,
+					// La huella del registro va al final, para poder reconciliar
+					// si la respuesta se pierde (review de Codex, P2).
+					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo} ${envio.referenciaCartera}`,
 					usuario_email: context.session.user.email,
 					asesor_esperado_email: dueñoEsperado,
 				});

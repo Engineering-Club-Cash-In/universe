@@ -342,6 +342,15 @@ export function falloDefinitivoDeCartera(error: unknown): boolean {
 	);
 }
 
+/**
+ * Huella de un registro del CRM dentro del motivo que se le manda a cartera.
+ * Cartera la guarda en `buckets_historial` junto con el traslado, así que si
+ * la respuesta se pierde se puede saber si el traslado lo hizo ESTA solicitud.
+ */
+export function referenciaDelRegistro(registroId: string): string {
+	return `[ref CRM ${registroId}]`;
+}
+
 export const MENSAJE_TRASLADO_INCIERTO =
 	"No se pudo confirmar si el crédito pasó a B4: cartera no respondió. El formulario quedó guardado. Revisá el bucket en la ficha antes de volver a intentarlo.";
 

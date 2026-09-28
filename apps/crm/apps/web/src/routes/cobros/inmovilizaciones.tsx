@@ -545,6 +545,12 @@ const ESTADO_BADGE_VARIANT: Record<
 
 const PER_PAGE = 25;
 
+function formatFechaGT(date: Date | string): string {
+	return new Date(date).toLocaleDateString("es-GT", {
+		timeZone: "America/Guatemala",
+	});
+}
+
 /**
  * Historial COMPLETO de inmovilizaciones — todos los estados, de todos los
  * casos, con paginación (getHistorialInmovilizaciones). A diferencia de
@@ -636,7 +642,7 @@ function HistorialInmovilizaciones() {
 										<TableCell className="text-sm">
 											<p>{item.solicitanteNombre}</p>
 											<p className="text-muted-foreground text-xs">
-												{new Date(item.solicitadoAt).toLocaleDateString("es-GT")}
+												{formatFechaGT(item.solicitadoAt)}
 											</p>
 										</TableCell>
 										<TableCell className="text-sm">
@@ -645,9 +651,7 @@ function HistorialInmovilizaciones() {
 													<p>{item.decididoPorNombre}</p>
 													{item.decididoAt && (
 														<p className="text-muted-foreground text-xs">
-															{new Date(item.decididoAt).toLocaleDateString(
-																"es-GT",
-															)}
+															{formatFechaGT(item.decididoAt)}
 														</p>
 													)}
 												</>
@@ -661,9 +665,7 @@ function HistorialInmovilizaciones() {
 													<p>{item.ejecutadoPorNombre}</p>
 													{item.ejecutadoAt && (
 														<p className="text-muted-foreground text-xs">
-															{new Date(item.ejecutadoAt).toLocaleDateString(
-																"es-GT",
-															)}
+															{formatFechaGT(item.ejecutadoAt)}
 														</p>
 													)}
 													{item.referenciaEjecucion && (

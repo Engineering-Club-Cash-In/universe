@@ -517,6 +517,94 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 			),
 		).rejects.toBeInstanceOf(ORPCError);
 	});
+
+	it("toma el advisory lock por unidad antes de insertar en solicitarInmovilizacion (review de Codex)", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+			bucket: 2,
+		} as never);
+
+		await call(
+			inmovilizacionUnidadRouter.solicitarInmovilizacion,
+			{
+				casoCobroId: CASO_ID,
+				accion: "apagado",
+				motivo: "Cliente incontactable",
+			},
+			{ context: ctx("cobros") },
+		);
+
+		expect(executeLlamadas).toContain("advisory_lock");
+	});
+
+	it("unidad apagada por otro caso concurrente durante la solicitud: detecta el cambio bajo lock y rechaza con CONFLICT (review de Codex)", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+			bucket: 2,
+		} as never);
+
+		// Guard temprano ve la unidad activa (historialCasoMock vacío)
+		historialCasoMock = [];
+		// Pero bajo lock dentro del tx, ve que otro caso ya ejecutó un apagado en la misma unidad
+		historialUnidadFisicaMock = [apagadoEjecutado()];
+		llamadasAntesDeHistorialFisico = 1;
+
+		await expect(
+			call(
+				inmovilizacionUnidadRouter.solicitarInmovilizacion,
+				{
+					casoCobroId: CASO_ID,
+					accion: "apagado",
+					motivo: "Cliente incontactable",
+				},
+				{ context: ctx("cobros") },
+			),
+		).rejects.toMatchObject({ code: "CONFLICT" });
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("reactivación re-calcula origenId bajo lock si otro caso ejecutó un apagado más reciente (review de Codex)", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
+			bucket: 2,
+		} as never);
+
+		const OTRO_APAGADO_ID = "99999999-9999-9999-9999-999999999999";
+		// Guard temprano ve un apagado viejo
+		historialCasoMock = [
+			apagadoEjecutado({ id: INMOV_ID, ejecutadoAt: new Date("2026-09-01") }),
+		];
+		// Bajo lock en tx, ve un apagado más reciente ejecutado por otro caso en la misma unidad
+		historialUnidadFisicaMock = [
+			apagadoEjecutado({
+				id: OTRO_APAGADO_ID,
+				ejecutadoAt: new Date("2026-09-20"),
+			}),
+			apagadoEjecutado({ id: INMOV_ID, ejecutadoAt: new Date("2026-09-01") }),
+		];
+		llamadasAntesDeHistorialFisico = 1;
+
+		await call(
+			inmovilizacionUnidadRouter.solicitarInmovilizacion,
+			{
+				casoCobroId: CASO_ID,
+				accion: "reactivacion",
+				motivo: "Reactivar unidad",
+			},
+			{ context: ctx("cobros") },
+		);
+
+		expect(inmovilizacionesInsertadas).toHaveLength(1);
+		expect(inmovilizacionesInsertadas[0]?.inmovilizacionOrigenId).toBe(
+			OTRO_APAGADO_ID,
+		);
+	});
 });
 
 describe("CB-041 — decidirInmovilizacion", () => {

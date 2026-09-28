@@ -476,6 +476,49 @@ export const inmovilizacionUnidadRouter = {
 			let inmovilizacionId: string;
 			try {
 				inmovilizacionId = await db.transaction(async (tx) => {
+					await bloquearUnidadFisica(tx, {
+						casoCobroId: input.casoCobroId,
+						wialonUnitId: caso.wialonUnitId,
+					});
+
+					// Re-validar estado bajo lock: entre la lectura temprana fuera
+					// de transacción y la adquisición del advisory lock, otro caso
+					// compartiendo la misma unidad física pudo haber completado la
+					// acción opuesta (marcarEjecutada). Re-leer el historial bajo
+					// lock garantiza que el estado y el origenId sean los reales.
+					const historialTx = await getHistorialUnidadFisicaTx(tx)(
+						input.casoCobroId,
+						caso.wialonUnitId,
+					);
+					const estadoActualTx = estadoUnidad(
+						historialTx.map((h) => ({
+							accion: h.accion,
+							estado: h.estado,
+							ejecutadoAt: h.ejecutadoAt,
+						})),
+					);
+
+					if (!puedeSolicitar(input.accion, estadoActualTx, bucket)) {
+						let message: string;
+						if (input.accion === "reactivacion") {
+							message =
+								"La unidad no está inmovilizada: no hay nada que reactivar.";
+						} else if (estadoActualTx === "inmovilizada") {
+							message = "La unidad ya está inmovilizada.";
+						} else if (bucket == null) {
+							message =
+								"No se pudo confirmar el bucket del crédito. Intentá de nuevo en unos minutos.";
+						} else {
+							message = `El apagado aplica a créditos en B2/B3 y este está en B${bucket}.`;
+						}
+						throw new ORPCError("CONFLICT", { message });
+					}
+
+					const origenIdTx =
+						input.accion === "reactivacion"
+							? (ultimaEjecutada(historialTx, "apagado")?.id ?? null)
+							: null;
+
 					const [fila] = await tx
 						.insert(inmovilizacionesUnidad)
 						.values({
@@ -487,7 +530,7 @@ export const inmovilizacionUnidadRouter = {
 							motivo: input.motivo,
 							bucketSnapshot: bucket,
 							solicitadoPor: context.userId,
-							inmovilizacionOrigenId: origenId,
+							inmovilizacionOrigenId: origenIdTx,
 						})
 						.returning({ id: inmovilizacionesUnidad.id });
 

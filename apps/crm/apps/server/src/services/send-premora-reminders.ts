@@ -16,7 +16,8 @@
  *  - Historial de contacto: cada envío queda registrado en `contactos_cobros`
  *    (el histórico que ya usa el CRM) cuando el crédito tiene caso; si no hay
  *    caso, la traza queda igual en `cobros_send_logs` + `recordatorios_premora`.
- *  - D-0: además del mensaje, notifica al responsable del caso (si existe) y
+ *  - D-0: además del mensaje, notifica al asesor que lleva el crédito en
+ *    cartera (si tiene usuario en el CRM) y
  *    manda un resumen a los supervisores de cobros para la agenda del día.
  *  - Nunca lanza al caller: devuelve un resumen y loguea (patrón bienvenida).
  */
@@ -41,6 +42,7 @@ import { sendWhatsappTemplate } from "../lib/simpletech";
 import type { CarteraCuotaProximaVencer } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
+import { construirMapaAsesorUsuario } from "./cobros-notif-helpers";
 
 const LOG_PREFIX = "[Premora]";
 
@@ -248,7 +250,6 @@ export async function sendPremoraReminders(
 				id: casosCobros.id,
 				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 				telefonoPrincipal: casosCobros.telefonoPrincipal,
-				responsable: casosCobros.responsableCobros,
 				activo: casosCobros.activo,
 				updatedAt: casosCobros.updatedAt,
 			})
@@ -300,6 +301,20 @@ export async function sendPremoraReminders(
 				cuotas: cuotas.length,
 			});
 		}
+		// El dueño de cada crédito es el asesor de CARTERA (cada cuota trae su
+		// `asesor_id`); el caso del CRM no dice de quién es. Best-effort: sin
+		// mapa, los contactos quedan a nombre del sistema y el D-0 individual
+		// no sale (el resumen a supervisores sí).
+		const usuarioPorAsesor = await construirMapaAsesorUsuario({
+			useCircuitBreaker: false,
+		}).catch((error) => {
+			console.error(`${LOG_PREFIX} Sin mapa asesor→usuario:`, error);
+			return new Map<number, string>();
+		});
+		const duenoDeCuota = (cuota: CarteraCuotaProximaVencer): string | null =>
+			cuota.asesor_id !== null
+				? (usuarioPorAsesor.get(cuota.asesor_id) ?? null)
+				: null;
 
 		const testMode = isTestModeEnabled();
 
@@ -516,7 +531,7 @@ export async function sendPremoraReminders(
 						// `comentarios`. No cambiar el texto sin actualizar cualquier
 						// filtro que dependa de él.
 						comentarios: `Recordatorio automático ${tipo.replace("premora_", "Premora D-")} enviado por WhatsApp al ${telefonoDestino}${testMode ? " (modo prueba)" : ""}. Cuota #${cuota.numero_cuota} vence el ${fechaLegible(cuota.fecha_vencimiento)} por Q${montoLegible(cuota.monto_cuota)}.`,
-						realizadoPor: caso.responsable ?? usuarioSistema,
+						realizadoPor: duenoDeCuota(cuota) ?? usuarioSistema,
 					});
 					resumen.contactosRegistrados++;
 				} catch (err) {
@@ -529,7 +544,7 @@ export async function sendPremoraReminders(
 			}
 		}
 
-		// 6. D-0 → agenda del día: notificación individual al responsable del
+		// 6. D-0 → agenda del día: notificación individual al asesor dueño del
 		//    caso y resumen a los supervisores (los D-0 sin caso no tienen dueño
 		//    individual en el CRM). Se notifica aunque el WhatsApp fallara: el
 		//    asesor debe llamar igual.
@@ -539,6 +554,7 @@ export async function sendPremoraReminders(
 				d0,
 				casoPorSifco,
 				usuarioSistema,
+				duenoDeCuota,
 			);
 		}
 
@@ -567,28 +583,18 @@ const tituloResumenD0 = (fechaGT: string) =>
  */
 async function notificarAgendaD0(
 	d0: CarteraCuotaProximaVencer[],
-	casoPorSifco: Map<
-		string,
-		{ id: string; responsable: string | null } & Record<string, unknown>
-	>,
+	casoPorSifco: Map<string, { id: string } & Record<string, unknown>>,
 	usuarioSistema: string,
+	duenoDeCuota: (cuota: CarteraCuotaProximaVencer) => string | null,
 ): Promise<number> {
 	let creadas = 0;
 	try {
-		// Individuales: caso con responsable asignado.
-		const conCaso = d0
-			.map((c) => ({
-				cuota: c,
-				caso: casoPorSifco.get(c.numero_credito_sifco),
-			}))
-			.filter(
-				(
-					x,
-				): x is {
-					cuota: CarteraCuotaProximaVencer;
-					caso: NonNullable<typeof x.caso>;
-				} => Boolean(x.caso?.responsable),
-			);
+		// Individuales: al asesor que lleva el crédito en cartera, sobre su caso.
+		const conCaso = d0.flatMap((c) => {
+			const caso = casoPorSifco.get(c.numero_credito_sifco);
+			const dueno = duenoDeCuota(c);
+			return caso && dueno ? [{ cuota: c, caso, dueno }] : [];
+		});
 
 		if (conCaso.length > 0) {
 			const casoIds = conCaso.map((x) => x.caso.id);
@@ -613,10 +619,10 @@ async function notificarAgendaD0(
 					descripcion: `Hoy vence la cuota #${x.cuota.numero_cuota} del crédito ${x.cuota.numero_credito_sifco} (${x.cuota.cliente}) por Q${montoLegible(x.cuota.monto_cuota)}. Buscar contacto efectivo y promesa de pago.`,
 					type: "reminder" as const,
 					status: "pending" as const,
-					createdBy: x.caso.responsable as string,
+					createdBy: usuarioSistema,
 					createdByRole: "cobros" as const,
 					assignedToRole: "cobros" as const,
-					assignedTo: x.caso.responsable,
+					assignedTo: x.dueno,
 					relatedEntityType: "collection_case" as const,
 					relatedEntityId: x.caso.id,
 					redirectPage: "cobros_detail" as const,

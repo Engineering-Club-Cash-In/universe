@@ -23,6 +23,7 @@ import { createNotification } from "../routers/notifications";
 import type { StatusCreditEnum } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
+import { resolverUsuarioSistemaCobros } from "./cobros-notif-helpers";
 import { debeCrearCasoCobros } from "./sync-casos-cobros.politica";
 
 type EstadoMoraEnum = (typeof estadoMoraEnum.enumValues)[number];
@@ -72,58 +73,21 @@ function moraEscalo(estadoAnterior: string, estadoNuevo: string): boolean {
 	);
 }
 
+// A QUIÉN AVISAR
 // ============================================================================
-// ASIGNACIÓN AUTOMÁTICA DE AGENTES
-// ============================================================================
+//
+// Este job NO asigna casos. Antes repartía cada caso nuevo al agente con menos
+// casos (columna casos_cobros.responsable_cobros), una asignación paralela a la
+// de cartera que casi nunca coincidía con ella. La asignación vive en CARTERA
+// (el asesor del crédito): el aviso va a ese asesor, por el puente de correo
+// de siempre (`asesores.email_cash_in` == `user.email`).
 
-interface AgenteCobros {
-	userId: string;
-	nombre: string;
-	casosAsignados: number;
-}
-
-/**
- * Obtiene el agente de cobros con menos casos asignados
- * TODO: Implementar lógica más sofisticada (por región, monto, experiencia, etc.)
- */
-async function asignarAgenteAutomatico(): Promise<string | null> {
-	// Get all users with cobros role
-	const usuarios = await db.select().from(user).where(eq(user.role, "cobros"));
-
-	if (usuarios.length === 0) {
-		console.warn("[SyncCobros] No hay agentes de cobros disponibles");
-		return null;
-	}
-
-	// Count active cases per agent
-	const agentesConCasos: AgenteCobros[] = await Promise.all(
-		usuarios.map(async (usuario) => {
-			const casos = await db
-				.select()
-				.from(casosCobros)
-				.where(
-					and(
-						eq(casosCobros.responsableCobros, usuario.id),
-						eq(casosCobros.activo, true),
-					),
-				);
-
-			return {
-				userId: usuario.id,
-				nombre: usuario.name || usuario.email,
-				casosAsignados: casos.length,
-			};
-		}),
-	);
-
-	// Assign to agent with fewest cases
-	agentesConCasos.sort((a, b) => a.casosAsignados - b.casosAsignados);
-
-	console.log(
-		`[SyncCobros] Asignando a ${agentesConCasos[0].nombre} (${agentesConCasos[0].casosAsignados} casos)`,
-	);
-
-	return agentesConCasos[0].userId;
+/** Mapa correo → usuario del CRM, armado una vez por corrida. */
+async function usuariosPorCorreo(): Promise<Map<string, string>> {
+	const usuarios = await db
+		.select({ id: user.id, email: user.email })
+		.from(user);
+	return new Map(usuarios.map((u) => [u.email.trim().toLowerCase(), u.id]));
 }
 
 // ============================================================================
@@ -310,6 +274,13 @@ export async function sincronizarCasosCobros(
 			`[SyncCobros] Encontrados ${creditos.length} créditos en cartera-back`,
 		);
 
+		// Destinatarios de los avisos: el asesor de cartera de cada crédito, y
+		// como remitente el usuario sistema (no hay humano detrás del job).
+		const [usuarioPorCorreo, usuarioSistema] = await Promise.all([
+			usuariosPorCorreo(),
+			resolverUsuarioSistemaCobros(),
+		]);
+
 		// 2. Procesar cada crédito
 		for (const credito of creditos) {
 			try {
@@ -317,6 +288,12 @@ export async function sincronizarCasosCobros(
 				const creditoCompleto = await carteraBackClient.getCredito(
 					credito.creditos.numero_credito_sifco,
 				);
+				const correoAsesor = creditoCompleto.asesor?.emailCashIn
+					?.trim()
+					.toLowerCase();
+				const asesorUserId = correoAsesor
+					? (usuarioPorCorreo.get(correoAsesor) ?? null)
+					: null;
 
 				// Calcular días de mora exactos usando la fecha de vencimiento
 				// (se sigue usando para diasMoraMaximo/UI; la ETAPA se deriva de cuotas).
@@ -420,29 +397,31 @@ export async function sincronizarCasosCobros(
 						);
 
 						// Notificar si la mora escaló
-						if (moraEscalo(estadoAnterior, estadoMora)) {
+						if (moraEscalo(estadoAnterior, estadoMora) && usuarioSistema) {
 							const descripcionMora = `Caso ${credito.creditos.numero_credito_sifco} pasó de ${estadoAnterior.replace("_", " ")} a ${estadoMora.replace("_", " ")}`;
 
-							// Notificar al cobrador
-							await createNotification({
-								titulo: "Mora escalada",
-								descripcion: descripcionMora,
-								type: "system",
-								createdBy: caso.responsableCobros,
-								createdByRole: "cobros",
-								assignedToRole: "cobros",
-								assignedTo: caso.responsableCobros,
-								relatedEntityType: "collection_case",
-								relatedEntityId: caso.id,
-								redirectPage: "cobros_detail",
-							});
+							// Notificar al asesor que lleva el crédito en cartera
+							if (asesorUserId) {
+								await createNotification({
+									titulo: "Mora escalada",
+									descripcion: descripcionMora,
+									type: "system",
+									createdBy: usuarioSistema,
+									createdByRole: "cobros",
+									assignedToRole: "cobros",
+									assignedTo: asesorUserId,
+									relatedEntityType: "collection_case",
+									relatedEntityId: caso.id,
+									redirectPage: "cobros_detail",
+								});
+							}
 
 							// Notificar al supervisor
 							await createNotification({
 								titulo: "Mora escalada",
 								descripcion: descripcionMora,
 								type: "system",
-								createdBy: caso.responsableCobros,
+								createdBy: usuarioSistema,
 								createdByRole: "cobros",
 								assignedToRole: "cobros_supervisor",
 								relatedEntityType: "collection_case",
@@ -469,16 +448,8 @@ export async function sincronizarCasosCobros(
 						}
 					}
 				} else if (debeCrearCaso) {
-					// CREAR NUEVO CASO
-					const responsable = await asignarAgenteAutomatico();
-
-					if (!responsable) {
-						result.errors.push(
-							`No se pudo asignar agente para crédito ${credito.creditos.numero_credito_sifco}`,
-						);
-						continue;
-					}
-
+					// CREAR NUEVO CASO. Sin responsable: quién lo trabaja lo dice
+					// cartera, no el caso.
 					// Información de contacto del lead
 					const telefonoPrincipal = lead[0]?.phone || "Sin teléfono";
 					const emailContacto = lead[0]?.email || "Sin email";
@@ -493,7 +464,6 @@ export async function sincronizarCasosCobros(
 							montoEnMora: creditoCompleto.moraActual, // ya es string
 							diasMoraMaximo: diasMora,
 							cuotasVencidas: creditoCompleto.cuotasAtrasadas?.length || 0,
-							responsableCobros: responsable,
 							telefonoPrincipal,
 							telefonoAlternativo: null,
 							emailContacto,
@@ -508,19 +478,21 @@ export async function sincronizarCasosCobros(
 						`[SyncCobros] ✓ Creado caso para ${credito.creditos.numero_credito_sifco} - ${diasMora} días mora`,
 					);
 
-					// Notificar al cobrador asignado
-					await createNotification({
-						titulo: "Nuevo caso de cobro",
-						descripcion: `Nuevo caso asignado: ${credito.creditos.numero_credito_sifco} - mora ${estadoMora.replace("_", " ")}`,
-						type: "aviso",
-						createdBy: responsable,
-						createdByRole: "cobros",
-						assignedToRole: "cobros",
-						assignedTo: responsable,
-						relatedEntityType: "collection_case",
-						relatedEntityId: nuevoCaso.id,
-						redirectPage: "cobros_detail",
-					});
+					// Notificar al asesor que lleva el crédito en cartera
+					if (asesorUserId && usuarioSistema) {
+						await createNotification({
+							titulo: "Nuevo caso de cobro",
+							descripcion: `Nuevo caso de cobro: ${credito.creditos.numero_credito_sifco} - mora ${estadoMora.replace("_", " ")}`,
+							type: "aviso",
+							createdBy: usuarioSistema,
+							createdByRole: "cobros",
+							assignedToRole: "cobros",
+							assignedTo: asesorUserId,
+							relatedEntityType: "collection_case",
+							relatedEntityId: nuevoCaso.id,
+							redirectPage: "cobros_detail",
+						});
+					}
 				}
 			} catch (error) {
 				const errorMsg = `Error procesando crédito ${credito.creditos.numero_credito_sifco}: ${error instanceof Error ? error.message : String(error)}`;

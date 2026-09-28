@@ -148,15 +148,5 @@ describe("CB-041 — reasignarAvisosLlamarCliente", () => {
 		expect(notificacionesActualizadas).toHaveLength(1);
 		expect(notificacionesActualizadas[0]?.set.assignedTo).toBe("asesor-nuevo");
 	});
-
-	it("condiciona atómicamente la reasignación con soloSiResponsableEs (review de Codex)", async () => {
-		await reasignarAvisosLlamarCliente({
-			casoCobroId: "caso-1",
-			nuevoResponsableUserId: "asesor-nuevo",
-			soloSiResponsableEs: "asesor-nuevo",
-		});
-		expect(notificacionesActualizadas).toHaveLength(1);
-		expect(notificacionesActualizadas[0]?.set.assignedTo).toBe("asesor-nuevo");
-	});
 });
 

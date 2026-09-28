@@ -212,8 +212,9 @@ function FilaGrupo({
 						</Link>
 					) : (
 						// Un asesor ve grupos de sus buckets, pero el detalle de caso
-						// sigue protegido por responsableCobros. No exponer un enlace que
-						// terminaría en acceso denegado para créditos cubiertos por pool.
+						// solo lo abre quien lleva el crédito en cartera (o lo cubre
+						// hoy). No exponer un enlace que terminaría en acceso denegado
+						// para créditos del pool que son de otro asesor.
 						// Un grupo SIN casoCobroId (típicamente del bot) tampoco tiene
 						// caso de cobros detrás — /cobros/$id llama
 						// getDetallesCreditoCarteraBack, que si no encuentra un
@@ -228,7 +229,7 @@ function FilaGrupo({
 							className="font-medium"
 							title={
 								grupo.casoCobroId
-									? "Este crédito se muestra por bucket; abrir el caso exige asignación directa."
+									? "Este crédito se muestra por bucket; el caso lo abre el asesor que lo lleva en cartera."
 									: "Este grupo no tiene caso de cobros asociado — abrirlo crearía uno nuevo."
 							}
 						>

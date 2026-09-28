@@ -118,6 +118,7 @@ le habla, cuándo y por dónde → CRM. El bot solo habla con el CRM
 | Motor de buckets + historial | ✅ Implementado y probado E2E |
 | Catálogo dinámico de buckets | ✅ Implementado (rangos, colores, SLA, estados, todo en tabla) |
 | Reasignación automática de asesor | ✅ Implementado (automática por el motor + manual por el supervisor) |
+| La asignación vive solo en cartera | ✅ El CRM ya no asigna: acceso a la ficha, listados, avisos y reportes salen del dueño en cartera (o de quien lo cubre hoy). Migraciones CRM `0066` (antes del deploy) y `0067` (después). Ver [doc 2](./02-motor-y-asignacion.md#el-crm-no-asigna-2026-09-28) |
 | Buckets de créditos en convenio | ✅ Implementado (job aparte, 00:30 GT) |
 | Recordatorios premora D-5…D-0 | ✅ Implementado · se activa con env |
 | Recordatorios de convenio | ✅ Implementado · se activa con env |

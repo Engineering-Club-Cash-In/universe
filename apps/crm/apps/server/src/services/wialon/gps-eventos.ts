@@ -195,13 +195,10 @@ export async function resolverVehiculoYCaso(
 
 /**
  * Dueño REAL del crédito, sin cache — mismo patrón que
- * `aviso-bot-asesor.ts`: `casosCobros.responsableCobros` solo se llena al
- * CREAR el caso; el motor de buckets de cartera-back (`FASE 3`,
- * `controllers/latefee.ts`) sí reasigna `creditos.asesor_id` automáticamente
- * cuando el crédito cambia de bucket, y el CRM nunca sincroniza ese cambio
- * hacia `responsableCobros`. Entre el bucket de ayer y hoy el motor pudo
- * reasignar el crédito, y la alerta tiene que llegarle a quien lo lleva
- * AHORA, no a quien lo tenía cuando se creó el caso.
+ * `aviso-bot-asesor.ts`: la asignación vive en cartera (`creditos.asesor_id`),
+ * que el motor de buckets reasigna cuando el crédito cambia de bucket. Entre
+ * el bucket de ayer y hoy el motor pudo reasignarlo, y la alerta tiene que
+ * llegarle a quien lo lleva AHORA.
  *
  * `useCache=false, useCircuitBreaker=false`: best-effort (no comparte
  * contador de fallos con operaciones que sí importan) y con el dato más
@@ -209,8 +206,8 @@ export async function resolverVehiculoYCaso(
  * alertar de un vehículo posiblemente manipulado.
  *
  * Devuelve `null` si cartera-back está deshabilitado, falla, o el crédito no
- * tiene asesor mapeable — el caller cae a `responsableCobros` como fallback
- * (mejor notificar al asesor viejo que no notificar a nadie).
+ * tiene asesor mapeable: el aviso sale solo a supervisión (cuando el tipo
+ * escala). El caso del CRM ya no tiene un responsable al cual caer.
  */
 async function resolverAsesorActual(
 	numeroCreditoSifco: string,
@@ -235,7 +232,7 @@ async function resolverAsesorActual(
 		return usuarioAsesor?.id ?? null;
 	} catch (error) {
 		console.error(
-			`[GpsEventos] No se pudo resolver el asesor actual de ${numeroCreditoSifco} (se usa responsableCobros como fallback):`,
+			`[GpsEventos] No se pudo resolver el asesor actual de ${numeroCreditoSifco} (solo se avisa a supervisión si escala):`,
 			error,
 		);
 		return null;
@@ -333,10 +330,7 @@ export async function registrarEventoGps(
 	}
 
 	const [caso] = await db
-		.select({
-			responsableCobros: casosCobros.responsableCobros,
-			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-		})
+		.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
 		.from(casosCobros)
 		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
@@ -344,7 +338,9 @@ export async function registrarEventoGps(
 	const asesorActualId = caso?.numeroCreditoSifco
 		? await resolverAsesorActual(caso.numeroCreditoSifco)
 		: null;
-	const asesorUserId = asesorActualId ?? caso?.responsableCobros ?? null;
+	// Solo el dueño en cartera: el caso del CRM no dice de quién es el crédito.
+	// Si no se puede resolver, el aviso sale igual a supervisión (cuando escala).
+	const asesorUserId = asesorActualId;
 
 	const [supervisores, usuarioSistema] = await Promise.all([
 		ESCALA_A_SUPERVISOR[input.tipo]

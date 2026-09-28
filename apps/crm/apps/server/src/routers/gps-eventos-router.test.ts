@@ -10,6 +10,7 @@ import { casosCobros } from "../db/schema/cobros";
 import { opportunities } from "../db/schema/crm";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import { gpsEventos, gpsUbicacionesClave } from "../db/schema/gps-eventos";
+import { moduloAccesoFalso } from "../lib/acceso-caso-cobro.mock";
 import type { Context } from "../lib/context";
 
 let rolUsuarioMock = "cobros";
@@ -131,6 +132,12 @@ function mockDb() {
 }
 
 mock.module("../db", () => ({ db: mockDb() }));
+// El permiso de la ficha lo da cartera (lib/acceso-caso-cobro); acá se simula
+// con la misma bandera de siempre: `responsableCasoMock === "user-test"` =
+// el usuario trabaja el crédito.
+mock.module("../lib/acceso-caso-cobro", () =>
+	moduloAccesoFalso({ tieneAcceso: () => responsableCasoMock === "user-test" }),
+);
 
 const { gpsEventosRouter } = await import("./gps-eventos-router");
 const { carteraBackClient } = await import("../services/cartera-back-client");

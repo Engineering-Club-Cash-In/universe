@@ -9,8 +9,8 @@
  * `pago_id`, no por factura ni por boleta).
  *
  * Sin sesión de usuario: lo llama cartera-back servidor-a-servidor (API key),
- * no un asesor desde el frontend, así que el caso se busca por número SIFCO,
- * no por `casoCobroId` + scope de `responsableCobros`.
+ * no un asesor desde el frontend, así que el caso se busca por número SIFCO
+ * y no pasa por el gate de acceso de la ficha.
  *
  * Autocontenido y nunca lanza al caller: cualquier fallo (caso sin teléfono,
  * caso no encontrado, SimpleTech caído) se resuelve como un resultado

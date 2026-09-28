@@ -4,10 +4,13 @@ import { z } from "zod";
 import { db } from "../db";
 import { casosCobros, seguimientosProgramados } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
-import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { procesarSeguimientosRecurrentes } from "../jobs/cobros-notifications";
-import { PERMISSIONS } from "../lib/roles";
+import {
+	assertAccesoCasoCobro,
+	usuarioDuenoEnCartera,
+} from "../lib/acceso-caso-cobro";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
+import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 
 async function recomputeProximoContacto(casoCobroId: string) {
 	const remaining = await db
@@ -53,23 +56,17 @@ async function recomputeProximoContacto(casoCobroId: string) {
 		.where(eq(casosCobros.id, casoCobroId));
 }
 
-/** Verifica que el usuario tenga acceso al caso de cobro. Lanza FORBIDDEN si no. */
-async function verifyCaseAccess(casoCobroId: string, userId: string, userRole: string) {
-	const [caso] = await db
-		.select({ id: casosCobros.id, responsableCobros: casosCobros.responsableCobros })
-		.from(casosCobros)
-		.where(eq(casosCobros.id, casoCobroId))
-		.limit(1);
-
-	if (!caso) {
-		throw new ORPCError("NOT_FOUND", { message: "Caso de cobro no encontrado" });
-	}
-
-	if (!PERMISSIONS.canViewAllCasosCobros(userRole) && caso.responsableCobros !== userId) {
-		throw new ORPCError("FORBIDDEN", { message: "No tienes acceso a este caso de cobro" });
-	}
-
-	return caso;
+/**
+ * Verifica que el usuario tenga acceso al caso de cobro. El acceso lo da
+ * cartera (el asesor dueño del crédito o quien lo cubre hoy), no el CRM — ver
+ * lib/acceso-caso-cobro.ts. Lanza NOT_FOUND si no.
+ */
+async function verifyCaseAccess(
+	casoCobroId: string,
+	userId: string,
+	userRole: string,
+) {
+	await assertAccesoCasoCobro(casoCobroId, userId, userRole);
 }
 
 export const seguimientosRouter = {
@@ -159,7 +156,11 @@ export const seguimientosRouter = {
 							createdBy: context.userId,
 							createdByRole: "cobros",
 							assignedToRole: "cobros",
-							assignedTo: caso.responsableCobros,
+							// Al asesor que lleva el crédito en cartera; sin mapeo, a
+							// quien lo programó.
+							assignedTo:
+								(await usuarioDuenoEnCartera(caso.numeroCreditoSifco)) ??
+								context.userId,
 							relatedEntityType: "collection_case",
 							relatedEntityId: caso.id,
 							redirectPage: "cobros_detail",

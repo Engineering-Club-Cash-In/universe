@@ -16,6 +16,7 @@ import {
 	inmovilizacionesUnidadEventos,
 } from "../db/schema/inmovilizacion-unidad";
 import { vehicles } from "../db/schema/vehicles";
+import { moduloAccesoFalso } from "../lib/acceso-caso-cobro.mock";
 import type { Context } from "../lib/context";
 
 let rolUsuarioMock = "cobros";
@@ -64,7 +65,6 @@ let notificarLlamarClienteLlamadas: { asesorUserId: string }[] = [];
 let reasignarAvisosLlamarClienteLlamadas: {
 	casoCobroId: string;
 	nuevoResponsableUserId: string;
-	soloSiResponsableEs?: string | null;
 }[] = [];
 let onNotificarLlamarCliente: (() => void) | null = null;
 let reactivacionesObsoletasMock: { id: string }[] = [];
@@ -102,7 +102,6 @@ function mockDb() {
 												? [
 														{
 															id: CASO_ID,
-															responsableCobros: responsableCasoMock,
 															numeroCreditoSifco: numeroCreditoSifcoMock,
 															vehicleId: vehicleIdMock,
 															wialonUnitId: wialonUnitIdCasoMock,
@@ -121,8 +120,12 @@ function mockDb() {
 					return {
 						where: () => ({
 							limit: async () => {
-								if (campos && "responsableCobros" in campos) {
-									return [{ id: CASO_ID, responsableCobros: responsableCasoMock }];
+								// Fallback de assertAccesoLlamadaInmovilizacion: el SIFCO
+								// para preguntar si el dueño en cartera tiene usuario.
+								if (campos && "numeroCreditoSifco" in campos) {
+									return numeroCreditoSifcoMock
+										? [{ numeroCreditoSifco: numeroCreditoSifcoMock }]
+										: [];
 								}
 								return rolUsuarioMock === "admin" ||
 									rolUsuarioMock === "cobros_supervisor" ||
@@ -342,6 +345,15 @@ function mockDb() {
 }
 
 mock.module("../db", () => ({ db: mockDb() }));
+// El permiso y el dueño del crédito los da cartera (lib/acceso-caso-cobro).
+// Se simulan con la bandera de siempre: `responsableCasoMock` es el usuario del
+// CRM que lleva el crédito en cartera (null = sin usuario vinculado).
+mock.module("../lib/acceso-caso-cobro", () =>
+	moduloAccesoFalso({
+		tieneAcceso: (userId) => responsableCasoMock === userId,
+		duenoUsuario: () => responsableCasoMock,
+	}),
+);
 // routers/cobros.ts (de donde sale assertAccesoCasoCobro) inicializa
 // @cci/email al importarse y exige RESEND_API_KEY — mismo mock que
 // cobros.moraRecuperacion.test.ts y convenio-decision.errores.test.ts.
@@ -365,7 +377,6 @@ mock.module("../services/inmovilizacion-notif", () => ({
 	reasignarAvisosLlamarCliente: async (params: {
 		casoCobroId: string;
 		nuevoResponsableUserId: string;
-		soloSiResponsableEs?: string | null;
 	}) => {
 		reasignarAvisosLlamarClienteLlamadas.push(params);
 	},
@@ -1725,7 +1736,7 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			inmovilizacionOrigenId: null,
 		};
 
-		// Durante el envío de la notificación, el caso se reasigna a otro asesor
+		// Durante el envío de la notificación, cartera reasigna el crédito a otro asesor
 		onNotificarLlamarCliente = () => {
 			responsableCasoMock = "asesor-nuevo";
 		};
@@ -1742,11 +1753,7 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 		]);
 		// Pero la reconciliación post-envío detectó el cambio de asesor y reasignó el aviso
 		expect(reasignarAvisosLlamarClienteLlamadas).toEqual([
-			{
-				casoCobroId: CASO_ID,
-				nuevoResponsableUserId: "asesor-nuevo",
-				soloSiResponsableEs: "asesor-nuevo",
-			},
+			{ casoCobroId: CASO_ID, nuevoResponsableUserId: "asesor-nuevo" },
 		]);
 	});
 });

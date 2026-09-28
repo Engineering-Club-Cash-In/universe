@@ -12,11 +12,12 @@
  * un resultado tipado, nunca como una excepción.
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { clients } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
+import { usuarioTrabajaSifco } from "../lib/acceso-caso-cobro";
 import { persistCobrosSendLog } from "../lib/cobros-send-log";
 import { getTestPhone, isTestModeEnabled } from "../lib/messaging-test-mode";
 import { primerTelefono } from "../lib/phone-utils";
@@ -94,12 +95,6 @@ async function cargarCasoDefault(
 	casoCobroId: string,
 	scope: EstadoCuentaScope,
 ): Promise<DatosCaso | null> {
-	const whereClause = scope.puedeVerTodos
-		? eq(casosCobros.id, casoCobroId)
-		: and(
-				eq(casosCobros.id, casoCobroId),
-				eq(casosCobros.responsableCobros, scope.userId),
-			);
 	const [row] = await db
 		.select({
 			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
@@ -118,10 +113,20 @@ async function cargarCasoDefault(
 		)
 		.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
 		.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
-		.where(whereClause)
+		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
+	if (!row) return null;
 
-	return row ?? null;
+	// Quién puede mandar el estado de cuenta de un crédito lo dice cartera (el
+	// asesor que lo lleva, o quien lo cubre hoy), no el caso del CRM. Sin
+	// acceso se responde igual que sin caso.
+	if (
+		!scope.puedeVerTodos &&
+		!(await usuarioTrabajaSifco(scope.userId, row.numeroCreditoSifco))
+	) {
+		return null;
+	}
+	return row;
 }
 
 /**

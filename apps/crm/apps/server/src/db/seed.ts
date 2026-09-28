@@ -2421,14 +2421,10 @@ async function seedContratosFinanciamiento(
 
 		const contratosWithRelations = contratosData.map((contrato, index) => {
 			// Reutilizar clientes y vehículos si hay más contratos que entidades
-			const responsableCobros =
-				usersList.find((u) => u.role === "cobros") ||
-				usersList.find((u) => u.role === "admin");
 			return {
 				...contrato,
 				clientId: clientsList[index % clientsList.length].id, // Reutilizar clientes
 				vehicleId: vehiclesList[index % vehiclesList.length].id, // Reutilizar vehículos
-				responsableCobros: responsableCobros?.id,
 				createdBy: usersList[0].id,
 			};
 		});
@@ -2623,9 +2619,6 @@ async function seedCasosCobros(
 			if (index >= clientsList.length) return;
 
 			const cliente = clientsList[index];
-			const responsableCobros =
-				usersList.find((u) => u.role === "cobros") ||
-				usersList.find((u) => u.role === "admin");
 
 			// Determinar tipo de caso basado en el estado del contrato
 			if (contrato.estado === "activo") {
@@ -2654,7 +2647,6 @@ async function seedCasosCobros(
 						montoEnMora: montosEnMora[index],
 						diasMoraMaximo: diasMora[index],
 						cuotasVencidas: cuotasVencidas[index],
-						responsableCobros: responsableCobros?.id,
 						telefonoPrincipal: "+502 5555 0" + (index + 1) + "01",
 						telefonoAlternativo: "+502 4444 0" + (index + 1) + "01",
 						emailContacto:
@@ -2677,7 +2669,6 @@ async function seedCasosCobros(
 						montoEnMora: "0.00",
 						diasMoraMaximo: 0,
 						cuotasVencidas: 0,
-						responsableCobros: responsableCobros?.id,
 						telefonoPrincipal: "+502 5555 0" + (index + 1) + "01",
 						telefonoAlternativo: "+502 4444 0" + (index + 1) + "01",
 						emailContacto:
@@ -2700,7 +2691,6 @@ async function seedCasosCobros(
 					montoEnMora: (Number(contrato.cuotaMensual) * 8).toFixed(2), // 8 cuotas vencidas
 					diasMoraMaximo: 180, // 6 meses sin pagar
 					cuotasVencidas: 8,
-					responsableCobros: responsableCobros?.id,
 					telefonoPrincipal: "+502 5555 0" + (index + 1) + "01",
 					telefonoAlternativo: "+502 4444 0" + (index + 1) + "01",
 					emailContacto:
@@ -2739,7 +2729,7 @@ async function seedContactosCobros(casosList: any[], usersList: any[]) {
 		}
 
 		const contactosData = [];
-		const responsableCobros =
+		const usuarioCobros =
 			usersList.find((u) => u.role === "cobros") ||
 			usersList.find((u) => u.role === "admin");
 
@@ -2805,7 +2795,7 @@ async function seedContactosCobros(casosList: any[], usersList: any[]) {
 										Math.floor(Math.random() * 7) * 24 * 60 * 60 * 1000,
 								)
 							: null,
-					realizadoPor: responsableCobros?.id,
+					realizadoPor: usuarioCobros?.id,
 				});
 			}
 		}

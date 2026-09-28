@@ -10,6 +10,7 @@ import { db } from "../db";
 import { carteraBackReferences } from "../db/schema/cartera-back";
 import { casosCobros } from "../db/schema/cobros";
 import { metasMensuales, TIPOS_META } from "../db/schema/metas";
+import { duenosEnCarteraPorSifco } from "../lib/acceso-caso-cobro";
 import { fetchAllPages, mapWithConcurrency } from "../lib/fetch-all-pages";
 import {
 	getGuatemalaMonthWindow,
@@ -213,10 +214,11 @@ export const reportesCarteraRouter = {
 								// Cliente
 								clienteNombre: creditoCompleto.usuario.nombre,
 								clienteNit: creditoCompleto.usuario.nit,
-								// Asesor
-								asesorNombre: null, // No disponible
+								// Asesor: el que lleva el crédito en cartera (la asignación
+								// vive allá, no en el caso del CRM).
+								asesorNombre: creditoCompleto.asesor?.nombre ?? null,
 								// Datos CRM
-								agenteCobranza: casoCobros[0]?.responsableCobros || null,
+								agenteCobranza: creditoCompleto.asesor?.nombre ?? null,
 								numeroContactos,
 								ultimoContacto,
 								tieneConvenio,
@@ -355,17 +357,25 @@ export const reportesCarteraRouter = {
 			}),
 		)
 		.handler(async ({ input, context: _ }) => {
-			// Obtener todos los casos de cobros en el período
-			const casosCobrosResult = await db.execute(
+			// Una fila por caso del período; el agente es el asesor que lleva el
+			// crédito en CARTERA (la asignación vive allá), así que se agrupa en
+			// JS después de preguntarle a cartera de quién es cada SIFCO.
+			const porCaso = await db.execute<{
+				numero_credito_sifco: string | null;
+				activo: boolean;
+				monto_en_mora: string | null;
+				dias_mora_maximo: number | null;
+				total_contactos: string;
+				total_convenios: string;
+				total_recuperaciones: string;
+			}>(
 				sql`
 					SELECT
-						cc.responsable_cobros,
-						COUNT(DISTINCT cc.id) as total_casos,
-						COUNT(DISTINCT CASE WHEN cc.activo = true THEN cc.id END) as casos_activos,
-						COUNT(DISTINCT CASE WHEN cc.activo = false THEN cc.id END) as casos_cerrados,
-						SUM(cc.monto_en_mora) as monto_total_mora,
-						AVG(cc.dias_mora_maximo) as promedio_dias_mora,
-						COUNT(contactos.id) as total_contactos,
+						cc.numero_credito_sifco,
+						cc.activo,
+						cc.monto_en_mora,
+						cc.dias_mora_maximo,
+						COUNT(DISTINCT contactos.id) as total_contactos,
 						COUNT(DISTINCT convenios.id) as total_convenios,
 						COUNT(DISTINCT recuperaciones.id) as total_recuperaciones
 					FROM casos_cobros cc
@@ -374,12 +384,68 @@ export const reportesCarteraRouter = {
 					LEFT JOIN convenios_pago convenios ON convenios.caso_cobro_id = cc.id
 					LEFT JOIN recuperaciones_vehiculo recuperaciones ON recuperaciones.caso_cobro_id = cc.id
 					WHERE cc.created_at BETWEEN ${input.fechaInicio} AND ${input.fechaFin}
-					GROUP BY cc.responsable_cobros
+					GROUP BY cc.id
 				`,
 			);
+			const duenos = await duenosEnCarteraPorSifco(
+				porCaso.rows.flatMap((r) =>
+					r.numero_credito_sifco ? [r.numero_credito_sifco] : [],
+				),
+			);
+			type Acumulado = {
+				agenteId: string;
+				agenteNombre: string | null;
+				total_casos: number;
+				casos_activos: number;
+				casos_cerrados: number;
+				monto_total_mora: number;
+				suma_dias_mora: number;
+				total_contactos: number;
+				total_convenios: number;
+				total_recuperaciones: number;
+			};
+			const porAgente = new Map<string, Acumulado>();
+			for (const r of porCaso.rows) {
+				const dueno = r.numero_credito_sifco
+					? duenos.get(r.numero_credito_sifco)
+					: undefined;
+				const clave = dueno ? String(dueno.asesorId) : "sin_asesor";
+				const acc = porAgente.get(clave) ?? {
+					agenteId: clave,
+					agenteNombre: dueno?.nombre ?? null,
+					total_casos: 0,
+					casos_activos: 0,
+					casos_cerrados: 0,
+					monto_total_mora: 0,
+					suma_dias_mora: 0,
+					total_contactos: 0,
+					total_convenios: 0,
+					total_recuperaciones: 0,
+				};
+				acc.total_casos += 1;
+				if (r.activo) acc.casos_activos += 1;
+				else acc.casos_cerrados += 1;
+				acc.monto_total_mora += Number(r.monto_en_mora ?? 0);
+				acc.suma_dias_mora += Number(r.dias_mora_maximo ?? 0);
+				acc.total_contactos += Number(r.total_contactos);
+				acc.total_convenios += Number(r.total_convenios);
+				acc.total_recuperaciones += Number(r.total_recuperaciones);
+				porAgente.set(clave, acc);
+			}
+			const casosCobrosResult = {
+				rows: [...porAgente.values()].map((a) => ({
+					...a,
+					monto_total_mora: a.monto_total_mora.toFixed(2),
+					promedio_dias_mora: String(
+						a.total_casos > 0 ? a.suma_dias_mora / a.total_casos : 0,
+					),
+				})),
+			};
 
 			const agenteStats = casosCobrosResult.rows.map((row) => ({
-				agenteId: row.responsable_cobros as string,
+				// Id del asesor en CARTERA ("sin_asesor" si cartera no lo tiene).
+				agenteId: row.agenteId,
+				agenteNombre: row.agenteNombre,
 				totalCasos: Number(row.total_casos),
 				casosActivos: Number(row.casos_activos),
 				casosCerrados: Number(row.casos_cerrados),

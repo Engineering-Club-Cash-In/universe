@@ -65,6 +65,12 @@ import {
 } from "../jobs/cierre-diario-asesores";
 import { correrPollPagalo } from "../jobs/pagalo-poll";
 import {
+	asesoresDelUsuario,
+	assertAccesoCasoCobro,
+	duenosEnCarteraPorSifco,
+	sifcosQueTrabaja,
+} from "../lib/acceso-caso-cobro";
+import {
 	payloadEdicionManual,
 	registrarAuditContacto,
 } from "../lib/audit-contactos";
@@ -193,7 +199,6 @@ import {
 } from "../services/sync-casos-cobros";
 import type { CreditoDirectoResponse } from "../types/cartera-back";
 import { normalizarDpi } from "../utils/cui-validation";
-import { reasignarAvisosLlamarCliente } from "../services/inmovilizacion-notif";
 import { createNotification } from "./notifications";
 
 // Helper: Obtener todos los créditos de todos los estados
@@ -781,34 +786,11 @@ type ActividadBotSesion = {
 };
 
 /**
- * Verifica que el usuario tenga acceso al caso de cobro (mismo patrón que
- * getCasoCobroById): un asesor regular solo ve sus propios casos asignados
- * (responsableCobros), salvo que su rol pueda ver todos. Lanza NOT_FOUND si
- * no hay acceso — usarlo antes de devolver cualquier dato derivado del caso
- * (vehículo, links de pago, etc.) en procedures nuevos.
+ * El gate de acceso a un caso vive en lib/acceso-caso-cobro.ts: el permiso lo
+ * da CARTERA (el asesor dueño del crédito, o quien lo cubre hoy), no el CRM.
+ * Se re-exporta desde acá porque es el import que ya usan todos los routers.
  */
-export async function assertAccesoCasoCobro(
-	casoCobroId: string,
-	userId: string,
-	userRole: string,
-): Promise<void> {
-	const whereClause = PERMISSIONS.canViewAllCasosCobros(userRole)
-		? eq(casosCobros.id, casoCobroId)
-		: and(
-				eq(casosCobros.id, casoCobroId),
-				eq(casosCobros.responsableCobros, userId),
-			);
-	const [caso] = await db
-		.select({ id: casosCobros.id })
-		.from(casosCobros)
-		.where(whereClause)
-		.limit(1);
-	if (!caso) {
-		throw new ORPCError("NOT_FOUND", {
-			message: "Caso de cobro no encontrado o sin acceso.",
-		});
-	}
-}
+export { assertAccesoCasoCobro };
 
 /**
  * CB-041: Si el caso tiene una inmovilización (apagado) ejecutada pendiente de
@@ -1165,18 +1147,16 @@ export const cobrosRouter = {
 				}
 			});
 
-			// Casos asignados al usuario actual
-			const casosAsignados = await db
-				.select({ count: count() })
-				.from(casosCobros)
-				.where(
-					context.userRole === "admin"
-						? eq(casosCobros.activo, true)
-						: and(
-								eq(casosCobros.activo, true),
-								eq(casosCobros.responsableCobros, context.userId),
-							),
-				);
+			// Casos asignados: la asignación vive en cartera, y este respaldo
+			// corre justo cuando cartera no respondió. Quien ve toda la cartera
+			// recibe el total de casos activos; a un asesor no hay de dónde
+			// contarle los suyos, y un número inventado sería peor que un cero.
+			const casosAsignados = PERMISSIONS.canViewAllCasosCobros(context.userRole)
+				? await db
+						.select({ count: count() })
+						.from(casosCobros)
+						.where(eq(casosCobros.activo, true))
+				: [{ count: 0 }];
 
 			// Contactos realizados hoy
 			const contactosHoy = await db
@@ -1698,7 +1678,8 @@ export const cobrosRouter = {
 								cuotaMensual: credito.creditos.cuota.toString(),
 								fechaProximoPago:
 									credito.proxima_cuota?.fecha_vencimiento || null,
-								responsableCobros: credito.asesores?.nombre || null,
+								// El asesor que lleva el crédito en cartera (la asignación vive allá).
+								asesorNombre: credito.asesores?.nombre || null,
 								casoCobroId: casoCobro?.id ?? null,
 								estadoMora,
 								montoEnMora: montoEnMora.toFixed(2),
@@ -1779,7 +1760,6 @@ export const cobrosRouter = {
 		.input(
 			z.object({
 				estadoMora: z.enum(estadoMoraEnum.enumValues).optional(),
-				responsableCobros: z.string().optional(),
 				limit: z.number().default(50),
 				offset: z.number().default(0),
 			}),
@@ -1793,15 +1773,23 @@ export const cobrosRouter = {
 				conditions.push(eq(casosCobros.estadoMora, input.estadoMora));
 			}
 
-			if (input.responsableCobros) {
-				conditions.push(
-					eq(casosCobros.responsableCobros, input.responsableCobros),
-				);
-			}
-
-			// Si no es admin o supervisor de cobros, solo ver casos asignados
+			// Un asesor ve los casos de los créditos que cartera le asigna (o que
+			// cubre hoy). Admin y supervisor, todos. Se resuelve sobre los SIFCOs
+			// de los casos activos candidatos: cartera dice de quién es cada uno.
 			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
-				conditions.push(eq(casosCobros.responsableCobros, context.userId));
+				const candidatos = await db
+					.selectDistinct({ sifco: casosCobros.numeroCreditoSifco })
+					.from(casosCobros)
+					.where(and(...conditions));
+				const mios = await sifcosQueTrabaja({
+					userId: context.userId,
+					userRole: context.userRole,
+					sifcos: candidatos.flatMap((c) => (c.sifco ? [c.sifco] : [])),
+				});
+				if (mios && mios.size === 0) return [];
+				if (mios) {
+					conditions.push(inArray(casosCobros.numeroCreditoSifco, [...mios]));
+				}
 			}
 
 			const query = db
@@ -1812,7 +1800,6 @@ export const cobrosRouter = {
 					montoEnMora: casosCobros.montoEnMora,
 					diasMoraMaximo: casosCobros.diasMoraMaximo,
 					cuotasVencidas: casosCobros.cuotasVencidas,
-					responsableCobros: casosCobros.responsableCobros,
 					telefonoPrincipal: casosCobros.telefonoPrincipal,
 					emailContacto: casosCobros.emailContacto,
 					proximoContacto: casosCobros.proximoContacto,
@@ -1826,8 +1813,6 @@ export const cobrosRouter = {
 					vehiculoModelo: vehicles.model,
 					vehiculoYear: vehicles.year,
 					vehiculoPlaca: vehicles.licensePlate,
-					// Datos del responsable
-					responsableNombre: user.name,
 				})
 				.from(casosCobros)
 				.leftJoin(
@@ -1836,7 +1821,6 @@ export const cobrosRouter = {
 				)
 				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
 				.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
-				.leftJoin(user, eq(casosCobros.responsableCobros, user.id))
 				.where(and(...conditions));
 
 			const casos = await query
@@ -1851,12 +1835,7 @@ export const cobrosRouter = {
 	getCasoCobroById: cobrosProcedure
 		.input(z.object({ id: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			const whereClause = PERMISSIONS.canViewAllCasosCobros(context.userRole)
-				? eq(casosCobros.id, input.id)
-				: and(
-						eq(casosCobros.id, input.id),
-						eq(casosCobros.responsableCobros, context.userId),
-					);
+			await assertAccesoCasoCobro(input.id, context.userId, context.userRole);
 
 			const caso = await db
 				.select({
@@ -1894,7 +1873,7 @@ export const cobrosRouter = {
 				)
 				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
 				.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
-				.where(whereClause)
+				.where(eq(casosCobros.id, input.id))
 				.limit(1);
 
 			return caso[0] || null;
@@ -2471,8 +2450,10 @@ export const cobrosRouter = {
 	//                  acción pendiente todavía). Se incluye para que la página
 	//                  contenga TODO lo que cuenta la tile "activas".
 	//
-	// Scope por rol: el asesor ve solo sus casos (responsableCobros); el
-	// supervisor/admin ven el equipo completo (mismo criterio que getCasosCobros).
+	// Scope por rol: el asesor ve las promesas de los créditos que cartera le
+	// asigna (o que cubre hoy); el supervisor/admin ven el equipo completo
+	// (mismo criterio que getCasosCobros). El nombre del asesor también sale de
+	// cartera: es quien lleva el crédito, no quien registró la promesa.
 	getAlertasPromesas: cobrosProcedure
 		.input(z.object({}).optional())
 		.handler(async ({ context }) => {
@@ -2488,18 +2469,13 @@ export const cobrosRouter = {
 				eq(casosCobros.activo, true),
 				inArray(contactosCobros.estadoPromesa, ["pendiente", "incumplida"]),
 			];
-			// Asesor (no puede ver todo): solo sus casos asignados.
-			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
-				conditions.push(eq(casosCobros.responsableCobros, context.userId));
-			}
 
-			const rows = await db
+			const filas = await db
 				.select({
 					id: contactosCobros.id,
 					casoCobroId: contactosCobros.casoCobroId,
 					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 					clienteNombre: clients.contactPerson,
-					asesorNombre: user.name,
 					fechaPrometida: contactosCobros.fechaProximoContacto,
 					fechaAlerta: contactosCobros.fechaAlerta,
 					montoComprometido: contactosCobros.montoComprometido,
@@ -2515,8 +2491,39 @@ export const cobrosRouter = {
 					eq(casosCobros.contratoId, contratosFinanciamiento.id),
 				)
 				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
-				.leftJoin(user, eq(casosCobros.responsableCobros, user.id))
 				.where(and(...conditions));
+
+			const sifcos = [
+				...new Set(
+					filas.flatMap((f) =>
+						f.numeroCreditoSifco ? [f.numeroCreditoSifco] : [],
+					),
+				),
+			];
+			// Nombres best-effort para supervisión; el FILTRO del asesor falla
+			// cerrado dentro de sifcosQueTrabaja si cartera no responde.
+			const duenos = await duenosEnCarteraPorSifco(sifcos).catch((error) => {
+				console.error("[getAlertasPromesas] Sin dueños de cartera:", error);
+				return undefined;
+			});
+			const mios = await sifcosQueTrabaja({
+				userId: context.userId,
+				userRole: context.userRole,
+				sifcos,
+				duenos,
+			});
+			const rows = filas
+				.filter(
+					(f) =>
+						!mios ||
+						(f.numeroCreditoSifco !== null && mios.has(f.numeroCreditoSifco)),
+				)
+				.map((f) => ({
+					...f,
+					asesorNombre: f.numeroCreditoSifco
+						? (duenos?.get(f.numeroCreditoSifco)?.nombre ?? null)
+						: null,
+				}));
 
 			// Clasificación + orden en JS: vencidas primero (prioridad alta), luego
 			// vence hoy, por vencer, y al final las programadas (aún dentro de
@@ -2588,34 +2595,34 @@ export const cobrosRouter = {
 			// (review de Codex, P2).
 			//
 			// El orden importa: quedándose con la última fila que devolviera
-			// Postgres, dos asesores podían ver la misma alerta cada uno por su
-			// caso duplicado, y a un supervisor se lo mandaba a un caso
-			// arbitrario. `agruparCasosVigentesPorSifco` es el mismo criterio que
-			// ya usan la agenda, la cola y el listado.
+			// Postgres, a un supervisor se lo mandaba a un caso arbitrario.
+			// `agruparCasosVigentesPorSifco` es el mismo criterio que ya usan la
+			// agenda, la cola y el listado.
 			const casos = await db
 				.select({
 					id: casosCobros.id,
 					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 					activo: casosCobros.activo,
 					updatedAt: casosCobros.updatedAt,
-					responsable: casosCobros.responsableCobros,
 				})
 				.from(casosCobros)
 				.where(inArray(casosCobros.numeroCreditoSifco, sifcos));
+			const casoPorSifco = agruparCasosVigentesPorSifco(casos);
 
-			const vigentes = agruparCasosVigentesPorSifco(casos);
+			// De quién es cada alerta lo dice cartera: la fila ya trae el
+			// `asesor_id` del crédito. Un asesor ve las suyas y las de quien cubre
+			// hoy; admin y supervisor, todas.
 			const puedeVerTodo = PERMISSIONS.canViewAllCasosCobros(context.userRole);
-			const casoPorSifco = new Map<
-				string,
-				{ id: string; responsable: string | null }
-			>();
-			for (const [sifco, c] of vigentes) {
-				if (!puedeVerTodo && c.responsable !== context.userId) continue;
-				casoPorSifco.set(sifco, { id: c.id, responsable: c.responsable });
-			}
+			const mios = puedeVerTodo
+				? null
+				: await asesoresDelUsuario(context.userId);
 
 			return alertas
-				.filter((a) => casoPorSifco.has(a.numero_credito_sifco))
+				.filter(
+					(a) =>
+						casoPorSifco.has(a.numero_credito_sifco) &&
+						(!mios || (a.asesor_id !== null && mios.has(a.asesor_id))),
+				)
 				.map((a) => ({
 					...a,
 					casoCobroId: casoPorSifco.get(a.numero_credito_sifco)?.id ?? null,
@@ -2634,6 +2641,13 @@ export const cobrosRouter = {
 	getAlertasCaso: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
+			// Alcance: sin acceso al caso no se leen sus alertas (ni su
+			// descripción). El acceso lo da cartera — ver lib/acceso-caso-cobro.
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
 			const rows = await db
 				.select({
 					id: notifications.id,
@@ -2645,19 +2659,6 @@ export const cobrosRouter = {
 					assignedTo: notifications.assignedTo,
 				})
 				.from(notifications)
-				// Alcance: el rol `cobros` solo ve alertas de SUS casos. Sin este
-				// join, cualquier asesor podía pedir el UUID de otro caso y leer las
-				// alertas (y su descripción) de la cartera de un compañero — mismo
-				// criterio que getCasoCobroById/getAlertasPromesas (Codex).
-				.innerJoin(
-					casosCobros,
-					and(
-						eq(casosCobros.id, notifications.relatedEntityId),
-						PERMISSIONS.canViewAllCasosCobros(context.userRole)
-							? undefined
-							: eq(casosCobros.responsableCobros, context.userId),
-					),
-				)
 				.where(
 					and(
 						eq(notifications.relatedEntityId, input.casoCobroId),
@@ -2765,24 +2766,11 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			// Solo admin, supervisor de cobros o usuario asignado pueden crear convenios
-			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
-				const caso = await db
-					.select()
-					.from(casosCobros)
-					.where(
-						and(
-							eq(casosCobros.id, input.casoCobroId),
-							eq(casosCobros.responsableCobros, context.userId),
-						),
-					)
-					.limit(1);
-
-				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para crear convenios en este caso",
-					});
-				}
-			}
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
 
 			const convenio = await db
 				.insert(conveniosPago)
@@ -2800,24 +2788,11 @@ export const cobrosRouter = {
 		.input(z.object({ casoCobroId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			// Verificar acceso
-			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
-				const caso = await db
-					.select()
-					.from(casosCobros)
-					.where(
-						and(
-							eq(casosCobros.id, input.casoCobroId),
-							eq(casosCobros.responsableCobros, context.userId),
-						),
-					)
-					.limit(1);
-
-				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para ver convenios de este caso",
-					});
-				}
-			}
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
 
 			const convenios = await db
 				.select({
@@ -3033,13 +3008,10 @@ export const cobrosRouter = {
 			// Sin cache: cuotas, mora y convenio activo tienen que ser el dato
 			// real al momento de acordar (mismo criterio que registrarPagoCompleto).
 			const credito = await carteraBackClient.getCredito(numeroSifco, false);
-			// El caso NO alcanza como autorización: getDetallesCreditoCarteraBack
-			// AUTO-CREA un caso con responsableCobros = quien consulta cuando el
-			// crédito no tiene uno activo, así que un asesor podía fabricarse el
-			// acceso consultando un SIFCO enumerable y después pasar el gate de
-			// arriba (hallazgo de Codex, PR #1570). La fuente autoritativa de
-			// "de quién es este crédito" no es el CRM sino CARTERA: el asesor
-			// asignado al crédito. Se compara por `email_cash_in` contra el
+			// La fuente autoritativa de "de quién es este crédito" no es el CRM
+			// sino CARTERA: el asesor asignado al crédito (hallazgo de Codex, PR
+			// #1570). El gate de arriba ya la consulta; esta lectura SIN cache la
+			// repite sobre la misma foto con la que se arma el convenio. Se compara por `email_cash_in` contra el
 			// correo de login — el mismo puente por correo que usa el resto del
 			// módulo (getConveniosListado, getAgendaDia), porque
 			// platform_users.email está desactualizado para varios asesores.
@@ -3237,70 +3209,6 @@ export const cobrosRouter = {
 	// archivo (routers/convenio-decision.ts), no acá — cobrosAppRouter ya
 	// está en el límite donde TS7056 trunca el tipo inferido en el web
 	// (mismo motivo documentado en pagalo-supervision.ts).
-
-	// Asignar responsable de cobros
-	asignarResponsableCobros: cobrosSupervisorProcedure
-		.input(
-			z.object({
-				casoCobroId: z.string().uuid(),
-				responsableCobros: z.string(),
-			}),
-		)
-		.handler(async ({ input, context }) => {
-			// Verificar que el responsable tenga rol de cobros
-			const responsable = await db
-				.select()
-				.from(user)
-				.where(eq(user.id, input.responsableCobros))
-				.limit(1);
-
-			if (!responsable.length) {
-				throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
-			}
-
-			if (
-				responsable[0].role !== "cobros" &&
-				responsable[0].role !== "cobros_supervisor" &&
-				responsable[0].role !== "admin"
-			) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"El usuario debe tener rol de cobros, supervisor de cobros o admin",
-				});
-			}
-
-			const casoActualizado = await db
-				.update(casosCobros)
-				.set({
-					responsableCobros: input.responsableCobros,
-					updatedAt: new Date(),
-				})
-				.where(eq(casosCobros.id, input.casoCobroId))
-				.returning();
-
-			// Mover avisos abiertos de llamada de inmovilización al nuevo responsable
-			await reasignarAvisosLlamarCliente({
-				casoCobroId: input.casoCobroId,
-				nuevoResponsableUserId: input.responsableCobros,
-				soloSiResponsableEs: input.responsableCobros,
-			});
-
-			// Notificar al nuevo cobrador asignado
-			await createNotification({
-				titulo: "Caso de cobro asignado",
-				descripcion: `Se te ha asignado el caso de cobro #${input.casoCobroId.slice(0, 8)}`,
-				type: "aviso",
-				createdBy: context.user.id,
-				createdByRole: context.user.role,
-				assignedToRole: "cobros",
-				assignedTo: input.responsableCobros,
-				relatedEntityType: "collection_case",
-				relatedEntityId: input.casoCobroId,
-				redirectPage: "cobros_detail",
-			});
-
-			return casoActualizado[0];
-		}),
 
 	// Catálogo de buckets para render en la UI (label/color/orden por etapa) —
 	// evita que el frontend mantenga sus propias copias hardcodeadas.
@@ -4765,25 +4673,12 @@ export const cobrosRouter = {
 	getRecuperacionVehiculo: cobrosProcedure
 		.input(z.object({ casoCobroId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			// Verificar acceso
-			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
-				const caso = await db
-					.select()
-					.from(casosCobros)
-					.where(
-						and(
-							eq(casosCobros.id, input.casoCobroId),
-							eq(casosCobros.responsableCobros, context.userId),
-						),
-					)
-					.limit(1);
-
-				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para ver esta información",
-					});
-				}
-			}
+			// Verificar acceso: lo da cartera (lib/acceso-caso-cobro).
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
 
 			const recuperacion = await db
 				.select({
@@ -4818,13 +4713,9 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			if (input.tipo === "caso") {
-				// Es un caso de cobros
-				const whereClause = PERMISSIONS.canViewAllCasosCobros(context.userRole)
-					? eq(casosCobros.id, input.id)
-					: and(
-							eq(casosCobros.id, input.id),
-							eq(casosCobros.responsableCobros, context.userId),
-						);
+				// Es un caso de cobros. El acceso lo da cartera.
+				await assertAccesoCasoCobro(input.id, context.userId, context.userRole);
+				const whereClause = eq(casosCobros.id, input.id);
 
 				const caso = await db
 					.select({
@@ -5222,7 +5113,6 @@ export const cobrosRouter = {
 							diasMoraMaximo: diasMora,
 							cuotasVencidas: cuotasAtrasadas,
 							estadoMora,
-							responsableCobros: context.user.id,
 							telefonoPrincipal: leadInfo?.telefono || "00000000",
 							emailContacto: leadInfo?.email || "sin-email@example.com",
 							direccionContacto: direccion || "Sin dirección",
@@ -8679,12 +8569,10 @@ export const cobrosRouter = {
 						"No se encontró el crédito en cartera para este caso. Abrí la ficha del crédito e intentá de nuevo.",
 				});
 			}
-			// El caso NO alcanza como autorización: `getDetallesCreditoCarteraBack`
-			// auto-crea uno con `responsableCobros` = quien consulta, así que un
-			// asesor podía fabricarse acceso con un SIFCO enumerable y después pasar
-			// el gate de arriba (hallazgo de Codex, PR #1570 y de nuevo acá). La
-			// verdad de "de quién es este crédito" la tiene cartera, y se lee SIN
-			// cache: sobre la foto cacheada el dueño viejo seguiría pasando.
+			// La verdad de "de quién es este crédito" la tiene cartera (hallazgo de
+			// Codex, PR #1570). El gate de arriba ya la consulta; acá se relee SIN
+			// cache justo antes de escribir: sobre una foto vieja el dueño anterior
+			// seguiría pasando.
 			await assertCreditoAsignadoEnCarteraPorSifco({
 				numeroSifco: caso.numeroCreditoSifco,
 				emailUsuario: context.session.user.email,

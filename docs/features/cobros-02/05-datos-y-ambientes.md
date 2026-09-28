@@ -101,7 +101,9 @@ El bloque de COBROS-02 hoy:
 
 Y en el CRM: `0025` premora · `0027` alertas de cobros · `0030` reducción CB-010 ·
 `0031` recordatorios de convenio · `0032` alerta de promesa · `0033`-`0035` bot de cobros ·
-`0060` referencias (CB-036).
+`0060` referencias (CB-036) · `0066` y `0067` quitan la asignación del CRM
+(`responsable_cobros`): la `0066` antes o junto con el deploy, la `0067` **después** — ver
+[el CRM no asigna](./02-motor-y-asignacion.md#el-crm-no-asigna-2026-09-28).
 
 ---
 

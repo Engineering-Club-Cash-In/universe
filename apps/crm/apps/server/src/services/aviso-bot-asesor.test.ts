@@ -32,9 +32,7 @@ const insertadas: Record<string, unknown>[] = [];
 /** Qué devuelve el SELECT de dedup (vacío = no avisado todavía). */
 let yaAvisado: { id: string }[] = [];
 /** Qué devuelve el SELECT de caso de cobros. */
-let casoEncontrado: { id: string; responsableCobros: string | null }[] = [
-	{ id: "caso-1", responsableCobros: "user-1" },
-];
+let casoEncontrado: { id: string }[] = [{ id: "caso-1" }];
 /** Qué devuelve el SELECT de usuario del CRM por correo. */
 let usuarioEncontrado: { id: string; name: string; role?: string }[] = [
 	{ id: "user-1", name: "Asesor" },
@@ -85,7 +83,7 @@ beforeEach(() => {
 	insertadas.length = 0;
 	selectsHechos = 0;
 	yaAvisado = [];
-	casoEncontrado = [{ id: "caso-1", responsableCobros: "user-1" }];
+	casoEncontrado = [{ id: "caso-1" }];
 	usuarioEncontrado = [{ id: "user-1", name: "Asesor" }];
 	asesorEmail = "asesor@clubcashin.com";
 });
@@ -370,12 +368,12 @@ describe("modo agente", () => {
 	});
 });
 
-// Review de Codex (P2): cartera ya reasignó el crédito pero el caso local
-// todavía nombra al asesor anterior. Enlazarlo mandaba al nuevo dueño a un
-// NOT_FOUND (getCasoCobroById exige ser el responsable).
+// El destinatario es el dueño en CARTERA y el acceso a la ficha también lo da
+// cartera: quien recibe el aviso siempre puede abrir el caso, así que el aviso
+// lleva el enlace aunque el caso se haya creado cuando el crédito era de otro.
 describe("enlace al caso tras una reasignación", () => {
-	it("si el caso local es de otro asesor, el aviso va sin enlace", async () => {
-		casoEncontrado = [{ id: "caso-1", responsableCobros: "asesor-anterior" }];
+	it("el aviso al dueño en cartera siempre lleva el enlace al caso", async () => {
+		casoEncontrado = [{ id: "caso-1" }];
 		await avisarAsesorPorInteraccionBot({
 			sesionId: SESION,
 			numeroSifco: "0101",
@@ -384,21 +382,7 @@ describe("enlace al caso tras una reasignación", () => {
 		});
 		expect(insertadas).toHaveLength(1);
 		expect(insertadas[0].assignedTo).toBe("user-1");
-		expect(insertadas[0].relatedEntityId).toBeUndefined();
-		expect(insertadas[0].redirectPage).toBeUndefined();
-	});
-
-	it("un supervisor de cobros puede abrir cualquier caso: conserva el enlace", async () => {
-		casoEncontrado = [{ id: "caso-1", responsableCobros: "asesor-anterior" }];
-		usuarioEncontrado = [
-			{ id: "user-1", name: "Supervisora", role: "cobros_supervisor" },
-		];
-		await avisarAsesorPorInteraccionBot({
-			sesionId: SESION,
-			numeroSifco: "0101",
-			accion: "menu_credito",
-			exito: true,
-		});
 		expect(insertadas[0].relatedEntityId).toBe("caso-1");
+		expect(insertadas[0].redirectPage).toBe("cobros_detail");
 	});
 });

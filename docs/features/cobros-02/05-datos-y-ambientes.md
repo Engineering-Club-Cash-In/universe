@@ -101,7 +101,7 @@ El bloque de COBROS-02 hoy:
 
 Y en el CRM: `0025` premora · `0027` alertas de cobros · `0030` reducción CB-010 ·
 `0031` recordatorios de convenio · `0032` alerta de promesa · `0033`-`0035` bot de cobros ·
-`0060` referencias (CB-036).
+`0060` referencias (CB-036) · `0065` formulario de recuperación de vehículo (CB-042).
 
 ---
 

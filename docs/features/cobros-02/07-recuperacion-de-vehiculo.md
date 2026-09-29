@@ -1,14 +1,19 @@
 # 7 · Recuperación de vehículo (traslado manual a B4)
 
-**Estado:** 🟡 Implementado a medias **a propósito** — el traslado funciona; **cómo se
-sostiene está pendiente de definición de producto**. Ver [La pregunta abierta](#la-pregunta-abierta).
+**Estado:** ✅ Implementado. El traslado funciona y se sostiene con el estado
+`EN_RECUPERACION` ([plan 08](./08-plan-convenios-y-recuperacion.md), fase 4). Desde
+**CB-042** hay **dos tipos de envío** —recuperación forzosa y entrega voluntaria— y cada
+uno deja un formulario en el CRM que ve el asesor de B4. Ver
+[Los dos envíos y su formulario](#los-dos-envíos-y-su-formulario-cb-042).
+**Migración CRM `0065` pendiente en producción.**
 
 ---
 
 ## Qué es
 
-Un botón en **Más acciones** de la [Ficha 360](./06-ficha-360.md) que manda el crédito a
-**B4 · Última Instancia / Pre Jurídico**, sin importar cuántas cuotas lleve atrasadas.
+El menú **Recuperación de vehículo ▾** de la fila de acciones de la
+[Ficha 360](./06-ficha-360.md), que manda el crédito a **B4 · Última Instancia / Pre
+Jurídico** sin importar cuántas cuotas lleve atrasadas.
 
 Es la primera vez en COBROS-02 que **una persona decide el bucket**. Hasta acá el bucket
 siempre fue una consecuencia: el motor lo deriva del atraso y nadie más lo escribe
@@ -19,6 +24,90 @@ qué tan perdido esté el cliente, si el vehículo está localizado, si hubo acu
 Por eso el traslado es **manual, con motivo obligatorio y bitácora**, y por eso el
 endpoint manda a B4 y **solo** a B4: no es un "mover a cualquier bucket". Un endpoint
 genérico sería la puerta para romper la invariante de que el bucket lo deriva la mora.
+
+---
+
+## Los dos envíos y su formulario (CB-042)
+
+Hasta CB-042 el envío era un motivo en texto libre: el crédito llegaba a B4 y el asesor
+de B4 no sabía por qué, ni dónde estaba la unidad, ni si el cliente la iba a entregar.
+Ahora el menú tiene dos opciones, y **ya no va en rojo**: uno de los dos caminos es el
+cliente colaborando.
+
+| Opción | `tipo_recuperacion` | Cuándo | Buckets | Qué se llena |
+| --- | --- | --- | --- | --- |
+| **Recuperar vehículo** | `tomado` | El cliente no paga y el asesor decide quitarle la unidad | B1–B3 (traslada) | Motivos, dónde está el vehículo, estado, observaciones |
+| **Entrega voluntaria** | `entrega_voluntaria` | El cliente entrega la unidad por su cuenta | B1–B3 (traslada) · **B4 (solo registra)** | Lo mismo + fecha y hora, lugar, quién entrega, documentos |
+
+- **Motivos:** casillas de un catálogo por tipo (`lib/recuperacion-vehiculo.ts`) más un
+  detalle **opcional**. El detalle solo se exige si se marcó «Otro», que sin texto no
+  dice nada.
+- **La entrega en B4** existe porque un cliente que ya está en B4 también puede
+  entregar el carro (decisión del 2026-09-28). Ahí no hay traslado; solo se guarda el
+  formulario y se avisa. **No pone `EN_RECUPERACION`** si el crédito llegó a B4 por
+  cuotas y no por el botón: cartera no tiene endpoint para cambiar solo el estado.
+- **Saldo asociado:** al registrar, el CRM le pide el crédito a cartera (sin cache) y
+  guarda una foto: saldo pendiente (`deudatotal`), cuotas vencidas, vencido (cuotas ×
+  cuota), mora y total para ponerse al día. Cartera calcula; el CRM guarda la foto. Si
+  cartera no responde, el envío sigue y la foto queda vacía.
+- **GPS:** el botón **Tomar del GPS** hace una consulta a `getGpsVehiculo`
+  ([doc 9](./09-integracion-gps-wialon.md)), auditada con el motivo "Registro de
+  recuperación de vehículo (CB-042)". Llena coordenadas, enlace de mapa y kilometraje
+  (odómetro), y guarda la unidad y la hora de la señal. Si la señal tiene más de dos
+  horas, el formulario lo avisa: un GPS que no reporta también es información para B4.
+- **El motivo que llega a cartera** lleva el tipo adelante (`Entrega voluntaria: …`,
+  `Recuperación forzosa: …`), así la bitácora de buckets distingue los dos envíos sin
+  cruzar con el CRM.
+- **"Deshacer convenio y mandar a recuperación"** también deja registro: forzosa, motivo
+  «Incumplió el convenio», con el texto del modal de deshacer.
+
+### Dónde vive: `recuperaciones_vehiculo` (CRM)
+
+La tabla ya existía, con los tipos `entrega_voluntaria` / `tomado` / `orden_secuestro`,
+pero **nadie la llenaba** (0 filas en dev y en prod el 2026-09-28). Se reusa con la
+migración `0065`: las columnas viejas conservan su sentido (`fecha_recuperacion` +
+`completada` = la unidad se recibió; `responsable_recuperacion` = el asesor de B4) y se
+agregan las del formulario, la foto del saldo y la recepción. El reporte de cartera que
+ya contaba esa tabla (`reportes-cartera.ts`) empieza a mostrar datos reales.
+
+Una fila por envío; el **vigente** es el más reciente del caso.
+
+### Guardar antes de trasladar
+
+Son dos bases distintas (CRM y cartera) y no hay transacción que las una. El orden es:
+
+1. se guarda el registro en el CRM;
+2. cartera traslada (valida rango, dueño y locks);
+3. si cartera rechaza, **se borra el registro** y se propaga el error; si traslada, se
+   anotan los buckets y el asesor de B4, y se avisa.
+
+Al revés, un fallo al guardar dejaba el crédito en B4 **sin formulario**, que es justo lo
+que esta historia viene a resolver. Un registro de más se puede borrar; un traslado sin
+explicación no se explica solo.
+
+### Lo que ve el asesor de B4
+
+- **La tarjeta "Recuperación de vehículo"**, arriba del Resumen y en la pestaña
+  Vehículo: el tipo, quién lo mandó y desde qué bucket, los motivos, los datos de la
+  entrega (con "en 2 días" / "hace 3 horas"), los documentos que trae y los que no,
+  dónde está (con enlace al mapa y la antigüedad de la señal del GPS), el estado, el
+  saldo al registrar y las observaciones. Desde el Resumen lleva a la pestaña Vehículo,
+  donde están el GPS en vivo y las ubicaciones clave. Reemplaza la tarjeta vieja, que
+  solo salía para incobrables.
+- **Un aviso** (`cobros_tipo = recuperacion_vehiculo`) al asesor que lleva el crédito en
+  B4 y a los `cobros_supervisor`, con el cliente, el motivo o la fecha y el lugar de la
+  entrega. Quien registró no se avisa a sí mismo. Dedup por registro.
+- **Confirmar recepción de la unidad**, **solo con el crédito en B4** (el servidor lo
+  exige y falla cerrado si cartera no responde). Arranca con lo reportado al enviar y
+  guarda aparte lo que de verdad llegó (`recepcion_*`): la diferencia entre lo que el
+  cliente dijo que entregaba y lo que entregó es justo lo que interesa ver. No toca
+  cartera: lo que sigue (jurídico, contabilidad) queda como está (decisión 6 del plan 08).
+
+### Compatibilidad
+
+`enviarCreditoARecuperacion` recibe `tipo` y `detalle` **opcionales**. Un llamador que
+manda solo `motivo` (por ejemplo, el cierre "no pagó" de la inmovilización de CB-041)
+sigue funcionando y queda registrado como forzosa con ese texto.
 
 ---
 
@@ -161,8 +250,8 @@ el correo del dueño que verificó como **precondición** (`asesor_esperado_emai
 Va vacío para admin y supervisor, que no tienen un dueño que exigir.
 
 La trazabilidad no la da el permiso sino el **motivo obligatorio** y la bitácora
-`API_MANUAL`, que guarda quién lo pidió. En el menú el ítem va separado y en rojo para que
-no se apriete de pasada.
+`API_MANUAL`, que guarda quién lo pidió. Desde CB-042 también el formulario en
+`recuperaciones_vehiculo`, con `registrado_por`.
 
 ---
 
@@ -249,4 +338,8 @@ aditiva cuando se retome el tema.
 | Endpoint | `apps/cartera-back/src/routers/buckets.ts` → `POST /buckets/creditos/:credito_id/recuperacion-vehiculo` |
 | Cliente CRM | `apps/crm/apps/server/src/services/cartera-back-client.ts` → `enviarARecuperacionVehiculo` |
 | Procedure CRM | `apps/crm/apps/server/src/routers/cobros.ts` → `enviarCreditoARecuperacion` |
-| UI | `apps/crm/apps/web/src/routes/cobros/$id.tsx` (menú "Más acciones" + modal) |
+| Registro, entrega en B4 y recepción (CB-042) | `apps/crm/apps/server/src/routers/recuperacion-vehiculo-registro.ts` |
+| Reglas puras y catálogos (CB-042) | `apps/crm/apps/server/src/lib/recuperacion-vehiculo.ts` (+ `.test.ts`) |
+| Foto del saldo, registro y avisos (CB-042) | `apps/crm/apps/server/src/services/recuperacion-vehiculo.ts` |
+| Migración (CB-042) | `apps/crm/apps/server/src/db/migrations/0065_cb042_recuperacion_vehiculo.sql` |
+| UI | `apps/crm/apps/web/src/routes/cobros/$id.tsx` (menú "Recuperación de vehículo ▾") · `components/cobros/recuperacion-vehiculo-dialog.tsx` (formulario) · `components/cobros/recuperacion-vehiculo-card.tsx` (tarjeta y recepción) |

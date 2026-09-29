@@ -384,9 +384,8 @@ function exigirReglaFactura(fila: Fila, membresias: MembresiaSocio[]) {
 async function datosDelCorreo(
 	fila: Fila,
 ): Promise<{ aseguradora: Aseguradora; datos: DatosCorreoFacturaSeguro }> {
-	// PROVISIONAL (pendiente de confirmar con negocio qué define la
-	// aseguradora): cotización aceptada más reciente o, si no hay, la más
-	// reciente. Mismo criterio que getLatestApprovedQuotation (close-opportunity.ts).
+	// Regla confirmada con negocio: la aseguradora es la de la última
+	// cotización de la oportunidad (el cotizador la calcula y no se edita).
 	const [cotizacion] = await db
 		.select({
 			insuranceProvider: quotations.insuranceProvider,
@@ -396,10 +395,7 @@ async function datosDelCorreo(
 		})
 		.from(quotations)
 		.where(eq(quotations.opportunityId, fila.id))
-		.orderBy(
-			desc(eq(quotations.status, "accepted")),
-			desc(quotations.createdAt),
-		)
+		.orderBy(desc(quotations.createdAt))
 		.limit(1);
 	const [oportunidad] = await db
 		.select({

@@ -1,4 +1,4 @@
-import { call, ORPCError } from "@orpc/server";
+import { call } from "@orpc/server";
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { user } from "../db/schema/auth";
 import {
@@ -35,6 +35,8 @@ const insertados: Array<{ tabla: unknown; valores: Record<string, unknown> }> =
 	[];
 const actualizados: Array<Record<string, unknown>> = [];
 const correos: Array<Record<string, unknown>> = [];
+const subidosR2: Array<{ key: string; mime: string }> = [];
+const borradosR2: string[] = [];
 
 function cadena<T>(obtenerFilas: () => T[]) {
 	const nodo = {
@@ -122,30 +124,17 @@ mock.module("../lib/storage", () => ({
 	MAX_FILE_SIZE: 10 * 1024 * 1024,
 	buildUploadPrefix: (_: string, id: string) => `opportunities/${id}`,
 	generateUniqueFilename: (nombre: string) => `123-abc-${nombre}`,
-	generatePresignedUploadUrl: async (key: string) => `https://r2.test/${key}`,
 	validateResolvedMimeType: (f: { name: string; type?: string }) => {
 		const mime =
 			f.type ??
 			(f.name.endsWith(".pdf") ? "application/pdf" : "application/msword");
 		return { valid: true, mimeType: mime };
 	},
-	verifyUploadedDocumentInR2: async (p: {
-		key: string;
-		expectedPrefix: string;
-		filename: string;
-		mimeType?: string;
-	}) => {
-		if (!p.key.startsWith(`${p.expectedPrefix}/`)) {
-			throw new ORPCError("BAD_REQUEST", {
-				message: "El archivo no pertenece al recurso esperado.",
-			});
-		}
-		return {
-			key: p.key,
-			filename: p.filename,
-			size: 2048,
-			mimeType: p.mimeType ?? "application/pdf",
-		};
+	uploadBufferToR2: async (key: string, _buffer: Buffer, mime: string) => {
+		subidosR2.push({ key, mime });
+	},
+	deleteFileFromR2: async (key: string) => {
+		borradosR2.push(key);
 	},
 }));
 // La plantilla real sí corre; solo el envío se simula.
@@ -191,12 +180,10 @@ function casoAl(porcentaje: number, extra: Record<string, unknown> = {}) {
 	};
 }
 
-const archivoValido = {
-	name: "factura.pdf",
-	type: "application/pdf",
-	size: 2048,
-	key: `opportunities/${ID}/123-abc-factura.pdf`,
-};
+// Key que arma el mock de storage para "factura.pdf" en esta oportunidad.
+const KEY = `opportunities/${ID}/123-abc-factura.pdf`;
+const pdf = (nombre = "factura.pdf", tipo = "application/pdf", bytes = 2048) =>
+	new File([new Uint8Array(bytes)], nombre, { type: tipo });
 
 beforeEach(() => {
 	membresias = [{ companyId: "agencia-1", sellerId: "v1" }];
@@ -208,6 +195,8 @@ beforeEach(() => {
 	insertados.length = 0;
 	actualizados.length = 0;
 	correos.length = 0;
+	subidosR2.length = 0;
+	borradosR2.length = 0;
 	process.env.CORREOS_ASEGURADORA_GYT = "polizas@gyt.test";
 	process.env.CORREOS_ASEGURADORA_UNIVERSALES = "polizas@universales.test";
 });
@@ -242,60 +231,21 @@ describe("facturaSeguro en el caso", () => {
 	});
 });
 
-describe("getFacturaSeguroUploadUrl", () => {
-	const entrada = {
-		opportunityId: ID,
-		fileName: "factura.pdf",
-		mimeType: "application/pdf",
-		size: 2048,
-	};
+describe("subirFacturaSeguro", () => {
+	const subir = (archivo = pdf()) =>
+		call(trackerRouter.subirFacturaSeguro, { opportunityId: ID, archivo }, ctx);
 
-	test("devuelve la URL firmada dentro de la carpeta de la oportunidad (carro usado incluido)", async () => {
-		const r = await call(trackerRouter.getFacturaSeguroUploadUrl, entrada, ctx);
-		expect(r.key.startsWith(`opportunities/${ID}/`)).toBe(true);
-		expect(r.mimeType).toBe("application/pdf");
-	});
-
-	test("gerente → FORBIDDEN; etapa 85 → BAD_REQUEST; Word → BAD_REQUEST", async () => {
-		membresias = [{ companyId: "agencia-1", sellerId: null }];
-		await expect(
-			call(trackerRouter.getFacturaSeguroUploadUrl, entrada, ctx),
-		).rejects.toMatchObject({ code: "FORBIDDEN" });
-
-		membresias = [{ companyId: "agencia-1", sellerId: "v1" }];
-		caso = casoAl(85);
-		await expect(
-			call(trackerRouter.getFacturaSeguroUploadUrl, entrada, ctx),
-		).rejects.toMatchObject({ code: "BAD_REQUEST" });
-
-		caso = casoAl(90);
-		await expect(
-			call(
-				trackerRouter.getFacturaSeguroUploadUrl,
-				{
-					...entrada,
-					fileName: "factura.docx",
-					mimeType: "application/msword",
-				},
-				ctx,
-			),
-		).rejects.toMatchObject({ code: "BAD_REQUEST" });
-	});
-});
-
-describe("confirmFacturaSeguro", () => {
-	test("guarda la factura como documento seguro_vehiculo y la envía a la aseguradora de la cotización", async () => {
-		const r = await call(
-			trackerRouter.confirmFacturaSeguro,
-			{ opportunityId: ID, file: archivoValido },
-			ctx,
-		);
+	test("sube a R2 desde el server, guarda el documento seguro_vehiculo y envía a la aseguradora (carro usado incluido)", async () => {
+		const r = await subir();
 
 		expect(r).toEqual({ envio: "enviado", aseguradora: "gyt" });
+		expect(subidosR2).toEqual([{ key: KEY, mime: "application/pdf" }]);
 		const doc = insertados.find((i) => i.tabla === opportunityDocuments);
 		expect(doc?.valores).toMatchObject({
 			documentType: "seguro_vehiculo",
-			filePath: archivoValido.key,
+			filePath: KEY,
+			originalName: "factura.pdf",
+			size: 2048,
 			uploadedBy: "socio-1",
 		});
 		const envio = insertados.find(
@@ -314,11 +264,44 @@ describe("confirmFacturaSeguro", () => {
 		expect(guardado.html).toContain("la garantía va al Cliente Juan Pérez");
 		expect(correos[0]).toMatchObject({
 			destinatarios: ["polizas@gyt.test"],
+			archivo: { key: KEY, nombre: "factura.pdf" },
 			// Registro id-2 (id-1 es el documento), primer intento.
 			idempotencyKey: "factura-seguro/id-2/1",
 			correo: guardado,
 		});
 		expect(actualizados[0]).toMatchObject({ status: "enviado" });
+		expect(borradosR2).toHaveLength(0);
+	});
+
+	test("gerente → FORBIDDEN; etapa 85 → BAD_REQUEST; sin subir nada a R2", async () => {
+		membresias = [{ companyId: "agencia-1", sellerId: null }];
+		await expect(subir()).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+		membresias = [{ companyId: "agencia-1", sellerId: "v1" }];
+		caso = casoAl(85);
+		await expect(subir()).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		expect(subidosR2).toHaveLength(0);
+	});
+
+	test("Word, archivo vacío o de más de 10 MB → BAD_REQUEST, sin subir nada", async () => {
+		await expect(
+			subir(pdf("factura.docx", "application/msword")),
+		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		await expect(
+			subir(pdf("factura.pdf", "application/pdf", 0)),
+		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		await expect(
+			subir(pdf("factura.pdf", "application/pdf", 10 * 1024 * 1024 + 1)),
+		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		expect(subidosR2).toHaveLength(0);
+	});
+
+	test("si otra subida ganó la carrera: CONFLICT y se borra solo el archivo recién subido", async () => {
+		facturaPrevia = [{ id: "previa" }];
+		await expect(subir()).rejects.toMatchObject({ code: "CONFLICT" });
+		expect(subidosR2).toEqual([{ key: KEY, mime: "application/pdf" }]);
+		expect(borradosR2).toEqual([KEY]);
+		expect(insertados).toHaveLength(0);
 	});
 
 	test("si Resend dice que el mismo intento sigue en curso, queda 'pendiente'", async () => {
@@ -327,11 +310,7 @@ describe("confirmFacturaSeguro", () => {
 			error: "concurrente",
 			resultado: "en_curso",
 		};
-		const r = await call(
-			trackerRouter.confirmFacturaSeguro,
-			{ opportunityId: ID, file: archivoValido },
-			ctx,
-		);
+		const r = await subir();
 		expect(r.envio).toBe("pendiente");
 		expect(actualizados).toHaveLength(0);
 	});
@@ -342,11 +321,7 @@ describe("confirmFacturaSeguro", () => {
 			error: "Unable to fetch data",
 			resultado: "incierto",
 		};
-		const r = await call(
-			trackerRouter.confirmFacturaSeguro,
-			{ opportunityId: ID, file: archivoValido },
-			ctx,
-		);
+		const r = await subir();
 		expect(r.envio).toBe("pendiente");
 		expect(actualizados[0]).toMatchObject({ error: "Unable to fetch data" });
 		expect(actualizados[0]).not.toHaveProperty("status");
@@ -358,69 +333,25 @@ describe("confirmFacturaSeguro", () => {
 			error: "Resend caído",
 			resultado: "rechazado",
 		};
-		const r = await call(
-			trackerRouter.confirmFacturaSeguro,
-			{ opportunityId: ID, file: archivoValido },
-			ctx,
-		);
+		const r = await subir();
 		expect(r.envio).toBe("fallido");
 		expect(insertados.some((i) => i.tabla === opportunityDocuments)).toBe(true);
 		expect(actualizados[0]).toMatchObject({
 			status: "fallido",
 			error: "Resend caído",
 		});
+		expect(borradosR2).toHaveLength(0);
 	});
 
 	test("sin destinatarios configurados no se envía, pero la factura queda", async () => {
 		process.env.CORREOS_ASEGURADORA_GYT = "";
-		const r = await call(
-			trackerRouter.confirmFacturaSeguro,
-			{ opportunityId: ID, file: archivoValido },
-			ctx,
-		);
+		const r = await subir();
 		expect(r.envio).toBe("sin_destinatario");
 		expect(correos).toHaveLength(0);
 		expect(
 			insertados.find((i) => i.tabla === insuranceInvoiceSubmissions)?.valores
 				.status,
 		).toBe("sin_destinatario");
-	});
-
-	test("una segunda factura → CONFLICT, sin escribir nada", async () => {
-		facturaPrevia = [{ id: "previa" }];
-		await expect(
-			call(
-				trackerRouter.confirmFacturaSeguro,
-				{ opportunityId: ID, file: archivoValido },
-				ctx,
-			),
-		).rejects.toMatchObject({ code: "CONFLICT" });
-		expect(insertados).toHaveLength(0);
-	});
-
-	test("un archivo de otra oportunidad → BAD_REQUEST", async () => {
-		await expect(
-			call(
-				trackerRouter.confirmFacturaSeguro,
-				{
-					opportunityId: ID,
-					file: { ...archivoValido, key: "opportunities/otra/x.pdf" },
-				},
-				ctx,
-			),
-		).rejects.toMatchObject({ code: "BAD_REQUEST" });
-		expect(insertados).toHaveLength(0);
-	});
-
-	test("el gerente no puede confirmar", async () => {
-		membresias = [{ companyId: "agencia-1", sellerId: null }];
-		await expect(
-			call(
-				trackerRouter.confirmFacturaSeguro,
-				{ opportunityId: ID, file: archivoValido },
-				ctx,
-			),
-		).rejects.toMatchObject({ code: "FORBIDDEN" });
 	});
 });
 
@@ -436,7 +367,7 @@ describe("reenviarFacturaSeguro", () => {
 		createdAt: creado,
 		actualizadoAt,
 		insuranceProvider: "gyt",
-		key: archivoValido.key,
+		key: KEY,
 		nombre: "factura.pdf",
 	});
 
@@ -456,7 +387,7 @@ describe("reenviarFacturaSeguro", () => {
 		const nuevoHtml = actualizados[0].correoHtml as string;
 		expect(nuevoHtml).toContain("la garantía va al Cliente Juan Pérez");
 		expect(correos[0]).toMatchObject({
-			archivo: { key: archivoValido.key, nombre: "factura.pdf" },
+			archivo: { key: KEY, nombre: "factura.pdf" },
 			idempotencyKey: "factura-seguro/envio-1/2",
 			correo: { html: nuevoHtml },
 		});

@@ -546,8 +546,7 @@ export const partnerTrackerRouter = {
 	getPartnerAgencies: trackerRouter.getPartnerAgencies,
 	getPartnerPasswordStatus: trackerRouter.getPartnerPasswordStatus,
 	changePartnerPassword: trackerRouter.changePartnerPassword,
-	getFacturaSeguroUploadUrl: trackerRouter.getFacturaSeguroUploadUrl,
-	confirmFacturaSeguro: trackerRouter.confirmFacturaSeguro,
+	subirFacturaSeguro: trackerRouter.subirFacturaSeguro,
 	reenviarFacturaSeguro: trackerRouter.reenviarFacturaSeguro,
 };
 

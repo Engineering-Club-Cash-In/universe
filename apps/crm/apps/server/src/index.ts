@@ -2,6 +2,7 @@ import "dotenv/config";
 import { RPCHandler } from "@orpc/server/fetch";
 import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { Hono, type Context as HonoContext } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import {
@@ -226,6 +227,28 @@ const handler = new RPCHandler(
 		buroInternoProcedures,
 	),
 );
+// La factura del seguro del tracker llega como multipart: se corta antes de
+// recibir el cuerpo completo si pasa del tamaño permitido (10 MB + margen del
+// multipart). Sin esto Bun acepta hasta 128 MB y el límite se validaba tarde.
+app.use(
+	"/rpc/subirFacturaSeguro",
+	bodyLimit({
+		maxSize: 11 * 1024 * 1024,
+		onError: (c) =>
+			c.json(
+				{
+					json: {
+						defined: false,
+						code: "PAYLOAD_TOO_LARGE",
+						status: 413,
+						message: "La factura no puede pesar más de 10MB",
+					},
+				},
+				413,
+			),
+	}),
+);
+
 app.use("/rpc/*", async (c, next) => {
 	const context = await createContext({ context: c });
 	const { matched, response } = await handler.handle(c.req.raw, {

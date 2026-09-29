@@ -24,6 +24,7 @@ let cotizacion: Array<Record<string, unknown>> = [];
 let facturaPrevia: Array<Record<string, unknown>> = [];
 // Vendedor asignado leído dentro de la transacción (puede diferir del caso).
 let vendedorVigente: string | null | undefined;
+let fallaLecturaCotizacion = false;
 let resultadoCorreo:
 	| { ok: true }
 	| {
@@ -68,7 +69,11 @@ const dbFalsa = {
 			if (tabla === partnerAccounts)
 				return cadena(() => [{ passwordChangedAt: new Date("2026-01-01") }]);
 			if (tabla === opportunities) return cadena(() => [caso]);
-			if (tabla === quotations) return cadena(() => cotizacion);
+			if (tabla === quotations)
+				return cadena(() => {
+					if (fallaLecturaCotizacion) throw new Error("BD no disponible");
+					return cotizacion;
+				});
 			if (tabla === opportunityAgencySellers)
 				return cadena(() => [
 					{
@@ -191,6 +196,7 @@ beforeEach(() => {
 	cotizacion = [{ insuranceProvider: "gyt", insuredAmount: "300000" }];
 	facturaPrevia = [];
 	vendedorVigente = undefined;
+	fallaLecturaCotizacion = false;
 	resultadoCorreo = { ok: true };
 	insertados.length = 0;
 	actualizados.length = 0;
@@ -234,6 +240,13 @@ describe("facturaSeguro en el caso", () => {
 describe("subirFacturaSeguro", () => {
 	const subir = (archivo = pdf()) =>
 		call(trackerRouter.subirFacturaSeguro, { opportunityId: ID, archivo }, ctx);
+
+	test("si falla la lectura de los datos del correo, no se sube nada a R2", async () => {
+		fallaLecturaCotizacion = true;
+		await expect(subir()).rejects.toThrow();
+		expect(subidosR2).toHaveLength(0);
+		expect(insertados).toHaveLength(0);
+	});
 
 	test("sube a R2 desde el server, guarda el documento seguro_vehiculo y envía a la aseguradora (carro usado incluido)", async () => {
 		const r = await subir();

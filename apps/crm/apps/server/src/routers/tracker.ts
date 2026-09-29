@@ -689,23 +689,22 @@ export const trackerRouter = {
 				});
 			}
 
-			const subido = {
-				key: `${buildUploadPrefix("opportunity_document", fila.id)}/${generateUniqueFilename(nombre)}`,
-				mimeType,
-				size: input.archivo.size,
-			};
-			await uploadBufferToR2(
-				subido.key,
-				Buffer.from(await input.archivo.arrayBuffer()),
-				mimeType,
-			);
-
+			// Todo lo que puede fallar va antes de subir a R2: así la subida queda
+			// pegada a la transacción y a su limpieza, sin archivos huérfanos.
 			const { aseguradora, datos } = await datosDelCorreo(fila);
 			const destinatarios = destinatariosDe(aseguradora);
 			// El correo se arma una vez y se guarda: el saludo usa esta misma
 			// fecha (createdAt del registro), no la hora de cada reintento.
 			const creadoAt = new Date();
 			const correo = armarCorreoFacturaSeguro(datos, creadoAt);
+			const contenido = Buffer.from(await input.archivo.arrayBuffer());
+
+			const subido = {
+				key: `${buildUploadPrefix("opportunity_document", fila.id)}/${generateUniqueFilename(nombre)}`,
+				mimeType,
+				size: input.archivo.size,
+			};
+			await uploadBufferToR2(subido.key, contenido, mimeType);
 
 			const registrar = () =>
 				db.transaction(async (tx) => {

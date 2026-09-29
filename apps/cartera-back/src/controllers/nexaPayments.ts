@@ -49,9 +49,9 @@ export type NexaPaymentContext = {
 
 export type NexaClaim =
   | { kind: "new" | "retry" | "billing"; eventId: number }
-  | { kind: "applied"; paymentId: number }
+  | { kind: "applied"; paymentId: number; billingStatus?: "PENDING" }
   | { kind: "manual_review"; phase?: "payment" | "billing" }
-  | { kind: "conflict" | "replay" };
+  | { kind: "conflict" | "replay" | "billing_failed" };
 
 export type NexaBillingOutcome =
   | { kind: "billed" }
@@ -77,6 +77,7 @@ export const classifyNexaClaim = (
     payloadHash: string;
     compatiblePayloadHashes?: string[];
   },
+  billingIsRunning = false,
 ): NexaClaim => {
   if (nonceUsed) return { kind: "replay" };
   if (!event) throw new Error("nexa event claim missing");
@@ -92,8 +93,13 @@ export const classifyNexaClaim = (
     return { kind: "applied", paymentId: event.pago_id };
   }
   if (event.status === "failed") return { kind: "retry", eventId: event.id };
-  if (["billing_pending", "billing_failed"].includes(event.status) && event.pago_id !== null) {
+  // Preserve a durable rejection across polls instead of resetting Nexa's retry budget with PENDING.
+  if (event.status === "billing_failed") return { kind: "billing_failed" };
+  if (event.status === "billing_pending" && event.pago_id !== null) {
     return { kind: "billing", eventId: event.id };
+  }
+  if (event.status === "billing_running" && billingIsRunning && event.pago_id !== null) {
+    return { kind: "applied", paymentId: event.pago_id, billingStatus: "PENDING" };
   }
   if (["billing_running", "billing_unknown"].includes(event.status)) {
     return { kind: "manual_review", phase: "billing" };
@@ -222,8 +228,9 @@ export const processNexaPayment = (
   if (!existingCredit) throw new NexaPaymentError("credit_not_found", 404);
   const claim = await dependencies.claim(body, context);
   if ("paymentId" in claim) {
-    return { paymentId: claim.paymentId, idempotent: true };
+    return { paymentId: claim.paymentId, idempotent: true, ...(claim.billingStatus ? { billingStatus: claim.billingStatus } : {}) };
   }
+  if (claim.kind === "billing_failed") throw new NexaPaymentError("billing_failed", 503);
   if (claim.kind === "manual_review") {
     throw new NexaPaymentError(
       claim.phase === "billing" ? "billing_outcome_unknown" : "payment_outcome_uncertain",

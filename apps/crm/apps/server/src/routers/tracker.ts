@@ -45,11 +45,11 @@ import {
 } from "../lib/partner-scope";
 import {
 	buildUploadPrefix,
-	generatePresignedUploadUrl,
+	deleteFileFromR2,
 	generateUniqueFilename,
 	MAX_FILE_SIZE,
+	uploadBufferToR2,
 	validateResolvedMimeType,
-	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import { extraerIp, partnerAuthLimiter } from "../lib/rate-limit";
 import {
@@ -657,57 +657,46 @@ export const trackerRouter = {
 			return aCaso(fila, historiales.get(fila.id) ?? [], context.membresias);
 		}),
 
-	getFacturaSeguroUploadUrl: partnerProcedure
+	// El archivo pasa por el server y no por una URL firmada: el CORS del bucket
+	// de R2 no admite subidas desde el origen del tracker.
+	subirFacturaSeguro: partnerProcedure
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
-				fileName: z.string().min(1),
-				mimeType: z.string().optional(),
-				size: z.number().int().positive(),
+				archivo: z.instanceof(File),
 			}),
 		)
 		.handler(async ({ input, context }) => {
 			const fila = await casoDelSocio(input.opportunityId, context.membresias);
+			// Antes de escribir en R2: si el caso no califica, no se sube nada.
 			exigirReglaFactura(fila, context.membresias);
 
+			const nombre = input.archivo.name;
 			const mimeType = mimeDeFactura({
-				name: input.fileName,
-				type: input.mimeType,
+				name: nombre,
+				type: input.archivo.type || undefined,
 			});
-			if (input.size > MAX_FILE_SIZE) {
+			if (input.archivo.size === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El archivo está vacío",
+				});
+			}
+			if (input.archivo.size > MAX_FILE_SIZE) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: `La factura no puede pesar más de ${MAX_FILE_SIZE / (1024 * 1024)}MB`,
 				});
 			}
 
-			const key = `${buildUploadPrefix("opportunity_document", fila.id)}/${generateUniqueFilename(input.fileName)}`;
-			const url = await generatePresignedUploadUrl(key, mimeType);
-			return { url, key, mimeType };
-		}),
-
-	confirmFacturaSeguro: partnerProcedure
-		.input(
-			z.object({
-				opportunityId: z.string().uuid(),
-				file: z.object({
-					name: z.string().min(1),
-					type: z.string().optional(),
-					size: z.number().int().positive(),
-					key: z.string().min(1),
-				}),
-			}),
-		)
-		.handler(async ({ input, context }) => {
-			const fila = await casoDelSocio(input.opportunityId, context.membresias);
-			exigirReglaFactura(fila, context.membresias);
-
-			const subido = await verifyUploadedDocumentInR2({
-				key: input.file.key,
-				expectedPrefix: buildUploadPrefix("opportunity_document", fila.id),
-				filename: input.file.name,
-				mimeType: input.file.type,
-			});
-			mimeDeFactura({ name: input.file.name, type: subido.mimeType });
+			const subido = {
+				key: `${buildUploadPrefix("opportunity_document", fila.id)}/${generateUniqueFilename(nombre)}`,
+				mimeType,
+				size: input.archivo.size,
+			};
+			await uploadBufferToR2(
+				subido.key,
+				Buffer.from(await input.archivo.arrayBuffer()),
+				mimeType,
+			);
 
 			const { aseguradora, datos } = await datosDelCorreo(fila);
 			const destinatarios = destinatariosDe(aseguradora);
@@ -716,81 +705,92 @@ export const trackerRouter = {
 			const creadoAt = new Date();
 			const correo = armarCorreoFacturaSeguro(datos, creadoAt);
 
-			const registro = await db.transaction(async (tx) => {
-				// Oportunidad FOR UPDATE: dos confirmaciones simultáneas se turnan y
-				// la segunda ya ve la factura de la primera.
-				const [vigente] = await tx
-					.select({
-						status: opportunities.status,
-						closurePercentage: salesStages.closurePercentage,
-						companyId: opportunities.companyId,
-					})
-					.from(opportunities)
-					.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
-					.where(eq(opportunities.id, fila.id))
-					.for("update", { of: opportunities });
-				const [asignado] = await tx
-					.select({ sellerId: opportunityAgencySellers.sellerId })
-					.from(opportunityAgencySellers)
-					.where(eq(opportunityAgencySellers.opportunityId, fila.id));
-				const [previa] = await tx
-					.select({ id: insuranceInvoiceSubmissions.id })
-					.from(insuranceInvoiceSubmissions)
-					.where(eq(insuranceInvoiceSubmissions.opportunityId, fila.id));
-				exigirReglaFactura(
-					{
-						...fila,
-						status: vigente?.status ?? fila.status,
-						closurePercentage:
-							vigente?.closurePercentage ?? fila.closurePercentage,
-						companyId: vigente?.companyId ?? null,
-						sellerId: asignado?.sellerId ?? null,
-						facturaEnvio: previa ? "pendiente" : null,
-					},
-					context.membresias,
-				);
+			const registrar = () =>
+				db.transaction(async (tx) => {
+					// Oportunidad FOR UPDATE: dos subidas simultáneas se turnan y la
+					// segunda ya ve la factura de la primera.
+					const [vigente] = await tx
+						.select({
+							status: opportunities.status,
+							closurePercentage: salesStages.closurePercentage,
+							companyId: opportunities.companyId,
+						})
+						.from(opportunities)
+						.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
+						.where(eq(opportunities.id, fila.id))
+						.for("update", { of: opportunities });
+					const [asignado] = await tx
+						.select({ sellerId: opportunityAgencySellers.sellerId })
+						.from(opportunityAgencySellers)
+						.where(eq(opportunityAgencySellers.opportunityId, fila.id));
+					const [previa] = await tx
+						.select({ id: insuranceInvoiceSubmissions.id })
+						.from(insuranceInvoiceSubmissions)
+						.where(eq(insuranceInvoiceSubmissions.opportunityId, fila.id));
+					exigirReglaFactura(
+						{
+							...fila,
+							status: vigente?.status ?? fila.status,
+							closurePercentage:
+								vigente?.closurePercentage ?? fila.closurePercentage,
+							companyId: vigente?.companyId ?? null,
+							sellerId: asignado?.sellerId ?? null,
+							facturaEnvio: previa ? "pendiente" : null,
+						},
+						context.membresias,
+					);
 
-				const [documento] = await tx
-					.insert(opportunityDocuments)
-					.values({
-						opportunityId: fila.id,
-						filename: subido.key.split("/").pop() ?? subido.key,
-						originalName: input.file.name,
-						mimeType: subido.mimeType,
-						size: subido.size,
-						documentType: "seguro_vehiculo",
-						description: "Factura del seguro subida desde el tracker",
-						uploadedBy: context.userId,
-						filePath: subido.key,
-					})
-					.returning({ id: opportunityDocuments.id });
+					const [documento] = await tx
+						.insert(opportunityDocuments)
+						.values({
+							opportunityId: fila.id,
+							filename: subido.key.split("/").pop() ?? subido.key,
+							originalName: nombre,
+							mimeType: subido.mimeType,
+							size: subido.size,
+							documentType: "seguro_vehiculo",
+							description: "Factura del seguro subida desde el tracker",
+							uploadedBy: context.userId,
+							filePath: subido.key,
+						})
+						.returning({ id: opportunityDocuments.id });
 
-				const [envio] = await tx
-					.insert(insuranceInvoiceSubmissions)
-					.values({
-						opportunityId: fila.id,
-						documentId: documento.id,
-						insuranceProvider: aseguradora,
-						recipients: destinatarios,
-						status: destinatarios.length > 0 ? "pendiente" : "sin_destinatario",
-						correoAsunto: correo.asunto,
-						correoHtml: correo.html,
-						submittedBy: context.userId,
-						createdAt: creadoAt,
-						updatedAt: creadoAt,
-					})
-					.returning({
-						id: insuranceInvoiceSubmissions.id,
-						intento: insuranceInvoiceSubmissions.intento,
-					});
-				return envio;
-			});
+					const [envio] = await tx
+						.insert(insuranceInvoiceSubmissions)
+						.values({
+							opportunityId: fila.id,
+							documentId: documento.id,
+							insuranceProvider: aseguradora,
+							recipients: destinatarios,
+							status:
+								destinatarios.length > 0 ? "pendiente" : "sin_destinatario",
+							correoAsunto: correo.asunto,
+							correoHtml: correo.html,
+							submittedBy: context.userId,
+							createdAt: creadoAt,
+							updatedAt: creadoAt,
+						})
+						.returning({
+							id: insuranceInvoiceSubmissions.id,
+							intento: insuranceInvoiceSubmissions.intento,
+						});
+					return envio;
+				});
+
+			let registro: Awaited<ReturnType<typeof registrar>>;
+			try {
+				registro = await registrar();
+			} catch (error) {
+				// Solo se borra el archivo que esta misma llamada acaba de subir.
+				await deleteFileFromR2(subido.key).catch(() => {});
+				throw error;
+			}
 
 			// Después del commit: un fallo del correo no revierte la factura subida.
 			const envio = await enviarYRegistrar({
 				registro,
 				destinatarios,
-				archivo: { key: subido.key, nombre: input.file.name },
+				archivo: { key: subido.key, nombre },
 				correo,
 			});
 			return { envio, aseguradora };

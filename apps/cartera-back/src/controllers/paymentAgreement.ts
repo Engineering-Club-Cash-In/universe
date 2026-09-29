@@ -11,14 +11,17 @@ import {
   creditos_inversionistas,
   boletas,
   convenio_cuotas,
-  moras_credito,
 } from "../database/db";
 import Big from "big.js";
 import {
   calcularAplicacionConvenio,
   calcularCuotasConvenioCompletadas,
 } from "./registerPaymentPolicy";
-import { createMora } from "./latefee";
+import {
+  createMora,
+  decidirMoraTrasRomperConvenio,
+  desactivarMoraPorConvenio,
+} from "./latefee";
 import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { getPagosDelMesActual } from "./payments";
 import { creditRouter } from "../routers";
@@ -236,148 +239,211 @@ export async function createPaymentAgreement(
     console.log("💵 Cuota mensual calculada:", monthly_installment);
 
     // ============================================
-    // 📝 CREAR EL CONVENIO DE PAGO
+    // 🔐 UNA SOLA TRANSACCIÓN PARA TODO LO QUE ESCRIBE
     // ============================================
-    console.log("✅ Paso 10: Creando el convenio de pago...");
+    // Antes acá se escribía con `db` suelto, paso por paso: el convenio, su
+    // pivot de pagos y sus cuotas quedaban COMMITEADOS antes de tocar la mora.
+    // Cuando la desactivación de la mora empezó a propagar el error del
+    // historial (apagarla sin dejar rastro es el defecto que se vino a cerrar),
+    // ese orden dejaba el peor escenario posible: el endpoint respondía fallo
+    // con el convenio YA escrito, y el reintento pasaba el chequeo de convenio
+    // activo —porque el primero quedó `activo: false`— y creaba una segunda
+    // copia. Ahora el convenio, sus cuotas, sus vínculos de pago, la
+    // desactivación de la mora con su historial y el cambio de status del
+    // crédito confirman juntos o no queda nada: un fallo no deja convenio
+    // escrito y el reintento vuelve a arrancar limpio.
+    //
+    // Adentro solo va base de datos. Nada de HTTP, notificaciones ni efectos
+    // irreversibles: si mañana hay que avisarle a alguien, va DESPUÉS del
+    // commit — la tx puede revertirse y el aviso no.
+    const { agreement, resultadoUpdate } = await db.transaction(async (tx) => {
+      // ============================================
+      // 📝 CREAR EL CONVENIO DE PAGO
+      // ============================================
+      console.log("✅ Paso 10: Creando el convenio de pago...");
     
-    const [agreement] = await db
-      .insert(convenios_pago)
-      .values({
-        credito_id: credit_id,
-        monto_total_convenio: total_agreement_amount.toString(),
-        numero_meses: number_of_months,
-        cuota_mensual: monthly_installment.toString(),
-        fecha_convenio: new Date(),
-        monto_pagado: "0",
-        monto_pendiente: total_agreement_amount.toString(),
-        pagos_realizados: 0,
-        pagos_pendientes: number_of_months,
-        activo: false,
-        completado: false,
-        motivo: reason,
-        observaciones: observations,
-        created_by,
-      })
-      .returning();
+      const [agreement] = await tx
+        .insert(convenios_pago)
+        .values({
+          credito_id: credit_id,
+          monto_total_convenio: total_agreement_amount.toString(),
+          numero_meses: number_of_months,
+          cuota_mensual: monthly_installment.toString(),
+          fecha_convenio: new Date(),
+          monto_pagado: "0",
+          monto_pendiente: total_agreement_amount.toString(),
+          pagos_realizados: 0,
+          pagos_pendientes: number_of_months,
+          activo: false,
+          completado: false,
+          motivo: reason,
+          observaciones: observations,
+          created_by,
+        })
+        .returning();
 
-    if (!agreement) {
-      throw new Error("Error al crear el convenio de pago");
-    }
-
-    console.log("✅ Convenio creado exitosamente!");
-    console.log("🆔 Convenio ID:", agreement.convenio_id);
-    console.log("📋 Convenio completo:", JSON.stringify(agreement, null, 2));
-
-    // ============================================
-    // 🔗 ASOCIAR PAGOS AL CONVENIO (Tabla Pivot)
-    // ============================================
-    console.log("✅ Paso 11: Asociando pagos al convenio...");
-
-    // NO asociar al convenio los pagos SOLO DE MORA (pagado=true, monto_aplicado=0).
-    // Ya están cobrados y no representan una cuota del convenio. Tras los Pasos 5 y 6
-    // el único pago con pagado=true que puede quedar es justamente el mora-only, así
-    // que lo excluimos del pivot. Si entrara, getPaymentAgreements lo contaría como
-    // pago completado (summary.paid_payments) y el convenio recién creado se mostraría
-    // como parcialmente pagado en el front ("X de Y completados").
-    const agreementPaymentsData = pagos
-      .filter((item) => item.pago.pagado !== true)
-      .map((item) => ({
-        convenio_id: agreement.convenio_id,
-        pago_id: item.pago.pago_id,
-      }));
-
-    console.log("📦 Datos a insertar en pivot:", agreementPaymentsData);
-
-    if (agreementPaymentsData.length > 0) {
-      await db.insert(convenios_pagos_resume).values(agreementPaymentsData);
-    }
-
-    console.log("✅ Pagos asociados al convenio correctamente");
-
-    // ============================================
-    // 📅 CREAR LAS CUOTAS DEL CONVENIO
-    // ============================================
-    console.log("✅ Paso 12: Creando las cuotas del convenio...");
-
-    // Obtener las cuotas pendientes del crédito para usar sus fechas de vencimiento
-    const cuotasPendientesCredito = await db
-      .select({
-        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-      })
-      .from(cuotas_credito)
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, credit_id),
-          eq(cuotas_credito.pagado, false)
-        )
-      )
-      .orderBy(cuotas_credito.numero_cuota)
-      .limit(number_of_months);
-
-    console.log(`📅 Cuotas pendientes del crédito encontradas: ${cuotasPendientesCredito.length}`);
-
-    const cuotasConvenio = [];
-
-    for (let i = 0; i < number_of_months; i++) {
-      // Usar la fecha de vencimiento de la cuota del crédito si existe
-      const fechaVencimiento = cuotasPendientesCredito[i]
-        ? cuotasPendientesCredito[i].fecha_vencimiento
-        : null;
-
-      if (!fechaVencimiento) {
-        console.log(`⚠️ No hay cuota pendiente #${i + 1} en el crédito, se omite`);
-        continue;
+      if (!agreement) {
+        throw new Error("Error al crear el convenio de pago");
       }
 
-      cuotasConvenio.push({
+      console.log("✅ Convenio creado exitosamente!");
+      console.log("🆔 Convenio ID:", agreement.convenio_id);
+      console.log("📋 Convenio completo:", JSON.stringify(agreement, null, 2));
+
+      // ============================================
+      // 🔗 ASOCIAR PAGOS AL CONVENIO (Tabla Pivot)
+      // ============================================
+      console.log("✅ Paso 11: Asociando pagos al convenio...");
+
+      // NO asociar al convenio los pagos SOLO DE MORA (pagado=true, monto_aplicado=0).
+      // Ya están cobrados y no representan una cuota del convenio. Tras los Pasos 5 y 6
+      // el único pago con pagado=true que puede quedar es justamente el mora-only, así
+      // que lo excluimos del pivot. Si entrara, getPaymentAgreements lo contaría como
+      // pago completado (summary.paid_payments) y el convenio recién creado se mostraría
+      // como parcialmente pagado en el front ("X de Y completados").
+      const agreementPaymentsData = pagos
+        .filter((item) => item.pago.pagado !== true)
+        .map((item) => ({
+          convenio_id: agreement.convenio_id,
+          pago_id: item.pago.pago_id,
+        }));
+
+      console.log("📦 Datos a insertar en pivot:", agreementPaymentsData);
+
+      if (agreementPaymentsData.length > 0) {
+        await tx.insert(convenios_pagos_resume).values(agreementPaymentsData);
+      }
+
+      console.log("✅ Pagos asociados al convenio correctamente");
+
+      // ============================================
+      // 📅 CREAR LAS CUOTAS DEL CONVENIO
+      // ============================================
+      console.log("✅ Paso 12: Creando las cuotas del convenio...");
+
+      // Obtener las cuotas pendientes del crédito para usar sus fechas de vencimiento
+      const cuotasPendientesCredito = await tx
+        .select({
+          fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        })
+        .from(cuotas_credito)
+        .where(
+          and(
+            eq(cuotas_credito.credito_id, credit_id),
+            eq(cuotas_credito.pagado, false)
+          )
+        )
+        .orderBy(cuotas_credito.numero_cuota)
+        .limit(number_of_months);
+
+      console.log(`📅 Cuotas pendientes del crédito encontradas: ${cuotasPendientesCredito.length}`);
+
+      const cuotasConvenio = [];
+
+      for (let i = 0; i < number_of_months; i++) {
+        // Usar la fecha de vencimiento de la cuota del crédito si existe
+        const fechaVencimiento = cuotasPendientesCredito[i]
+          ? cuotasPendientesCredito[i].fecha_vencimiento
+          : null;
+
+        if (!fechaVencimiento) {
+          console.log(`⚠️ No hay cuota pendiente #${i + 1} en el crédito, se omite`);
+          continue;
+        }
+
+        cuotasConvenio.push({
+          convenio_id: agreement.convenio_id,
+          numero_cuota: i + 1,
+          fecha_vencimiento: fechaVencimiento,
+          fecha_pago: null, // NULL = no pagada
+        });
+
+        console.log(`📋 Cuota ${i + 1}: Vence el ${fechaVencimiento}`);
+      }
+
+      await tx.insert(convenio_cuotas).values(cuotasConvenio);
+    
+      console.log("✅ Cuotas del convenio creadas exitosamente!");
+
+      // ============================================
+      // 🔄 ACTUALIZAR ESTADO DEL CRÉDITO
+      // ============================================
+      console.log("🔥 ========== ACTUALIZANDO ESTADO DEL CRÉDITO ==========");
+      console.log("🔥 Crédito ID:", credit_id);
+      console.log("🔥 Estado actual:", creditExists.statusCredit);
+      console.log("🔥 Estado nuevo: EN_CONVENIO");
+      console.log("🔥 Convenio ID:", agreement.convenio_id);
+
+      // 🔒 El cambio de estado va ANTES de mirar la mora, y no es solo
+      // prolijidad: es el candado. Postgres toma el row lock del crédito en
+      // este UPDATE y no lo suelta hasta el commit, así que a partir de acá el
+      // cron no puede colarse.
+      //
+      // Con el orden viejo (mora primero, estado después) quedaba una ventana
+      // con la fila del crédito LIBRE: si el crédito no tenía mora activa, el
+      // `SELECT … FOR UPDATE` de `desactivarMoraPorConvenio` no bloqueaba
+      // ninguna fila —no hay nada que bloquear— y el cron entraba en el medio
+      // por su rama CREACION: tomaba el crédito, le insertaba una mora activa,
+      // commiteaba y soltaba; después este convenio lo marcaba EN_CONVENIO.
+      // Resultado: un crédito excluido de la mora con un cargo activo encima.
+      //
+      // Es el MISMO patrón que usa el cron (la condición se evalúa dentro del
+      // write, que de paso hace de candado) y no un `SELECT … FOR UPDATE`
+      // aparte sobre `creditos`: el UPDATE ya hay que hacerlo igual, así que
+      // tomar el lock con él no agrega ni un viaje a la base ni una segunda
+      // forma de candar la misma fila.
+      //
+      // Nada entre medio depende de que el crédito TODAVÍA no esté
+      // EN_CONVENIO: las validaciones (pasos 1 a 9, incluido el chequeo de
+      // convenio activo) ya corrieron antes de abrir la transacción, y lo que
+      // queda adentro —el pivot de pagos, las cuotas del convenio y la
+      // desactivación de la mora— no lee `statusCredit`.
+      const resultadoUpdate = await tx
+        .update(creditos)
+        .set({
+          statusCredit: "EN_CONVENIO",
+        })
+        .where(eq(creditos.credito_id, credit_id))
+        .returning();
+
+    // ============================================
+      // 💸 DESACTIVAR MORA ACTIVA (si existe)
+      // ============================================
+      // Antes acá había un DELETE duro sobre moras_credito: era la única ruta del
+      // módulo que hacía desaparecer un monto de mora sin dejar constancia, y por
+      // eso no se podía responder cuánta mora se perdona vía convenios. Ahora se
+      // desactiva y se anota el evento en moras_historial, igual que el cron.
+      //
+      // 🕸️ Si esto igual no llegara a correr, hay red: el crédito queda
+      // EN_CONVENIO (status excluido de la mora), así que sus cuotas se caen
+      // de `isOverdueInstallmentForMora` y esa misma noche el paso 6 de
+      // `procesarMoras` apaga la mora con SU propio DESACTIVACION en el
+      // historial. Es red, no permiso: el camino bueno es este, y el rastro de
+      // la mora del convenio no puede depender de que corra el cron.
+      console.log("✅ Paso 13: Desactivando mora activa del crédito (si existe)...");
+
+      const moraDesactivada = await desactivarMoraPorConvenio(credit_id, {
         convenio_id: agreement.convenio_id,
-        numero_cuota: i + 1,
-        fecha_vencimiento: fechaVencimiento,
-        fecha_pago: null, // NULL = no pagada
+        usuario_id: created_by,
+        // La MISMA transacción del convenio: la desactivación, su evento en
+        // moras_historial y el convenio confirman o se revierten juntos.
+        dbClient: tx as unknown as typeof db,
       });
 
-      console.log(`📋 Cuota ${i + 1}: Vence el ${fechaVencimiento}`);
-    }
-
-    await db.insert(convenio_cuotas).values(cuotasConvenio);
-    
-    console.log("✅ Cuotas del convenio creadas exitosamente!");
-
-    // ============================================
-    // 🔄 ACTUALIZAR ESTADO DEL CRÉDITO
-    // ============================================
-    console.log("🔥 ========== ACTUALIZANDO ESTADO DEL CRÉDITO ==========");
-    console.log("🔥 Crédito ID:", credit_id);
-    console.log("🔥 Estado actual:", creditExists.statusCredit);
-    console.log("🔥 Estado nuevo: EN_CONVENIO");
-    console.log("🔥 Convenio ID:", agreement.convenio_id);
-  // ============================================
-    // 💸 ELIMINAR MORA ACTIVA (si existe)
-    // ============================================
-    console.log("✅ Paso 13: Eliminando mora activa del crédito (si existe)...");
-
-    const morasEliminadas = await db
-      .delete(moras_credito)
-      .where(
-        and(
-          eq(moras_credito.credito_id, credit_id),
-          eq(moras_credito.activa, true)
-        )
-      )
-      .returning();
-
-    if (morasEliminadas.length > 0) {
-      console.log(`✅ Se eliminaron ${morasEliminadas.length} mora(s) activa(s)`);
-    } else {
-      console.log("ℹ️ No había moras activas para eliminar");
-    }
-    const resultadoUpdate = await db
-      .update(creditos)
-      .set({
-        statusCredit: "EN_CONVENIO",
-      })
-      .where(eq(creditos.credito_id, credit_id))
-      .returning();
+      if (moraDesactivada.desactivada) {
+        console.log(
+          `✅ Se desactivó la mora ${moraDesactivada.mora_id} (Q${moraDesactivada.monto_anterior}) y quedó registrada en el historial`
+        );
+      } else {
+        // Ojo: `desactivada: false` NO prueba que no hubiera mora. También pasa
+        // cuando otra ejecución concurrente la apagó primero (y anotó ella el
+        // evento). El log no puede afirmar una causa que no verificó.
+        console.log(
+          "ℹ️ No se desactivó ninguna mora en este convenio (no había activa, o ya la había apagado otra ejecución)"
+        );
+      }
+      return { agreement, resultadoUpdate };
+    });
 
     console.log("🔥 Resultado del UPDATE:", JSON.stringify(resultadoUpdate, null, 2));
     console.log("🔥 Cantidad de registros actualizados:", resultadoUpdate.length);
@@ -1613,8 +1679,12 @@ export const updateConvenioStatus = async (
       // (< hoy GT, impaga, sin pago cubriente validated/no_required CON plata real
       // aplicada — monto_aplicado > 0, igual que el guard cuotasReales) para que el
       // conteo coincida con el que recalcula createMora y no lo rechace por mismatch.
+      // El `factor` (Σ min(1, días/30)) replica el guard de createMora: si acá
+      // recreáramos la mora con el bloque fijo por cuota, createMora la vería
+      // fuera de rango o la escribiría por un monto que el cron corrige esa noche.
       const ovRes = await db.execute<any>(sql`
-        SELECT COUNT(*)::int AS n
+        SELECT COUNT(*)::int AS n,
+               COALESCE(SUM(LEAST(1.0, GREATEST(0, ((now() AT TIME ZONE 'America/Guatemala')::date - cu.fecha_vencimiento::date))::numeric / 30.0)), 0)::numeric AS factor
         FROM cartera.cuotas_credito cu
         WHERE cu.credito_id = ${creditoId}
           AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
@@ -1625,17 +1695,22 @@ export const updateConvenioStatus = async (
               AND pc.validation_status IN ('validated', 'no_required')
               AND COALESCE(pc.monto_aplicado, 0) > 0)`);
       const numCuotasAtrasadas = Number(ovRes.rows?.[0]?.n ?? 0);
+      const factorDiasMora = new Big(ovRes.rows?.[0]?.factor ?? 0);
 
       console.log(`📊 Cuotas atrasadas encontradas: ${numCuotasAtrasadas}`);
 
-      if (numCuotasAtrasadas > 0) {
-        // Calcular mora: capital * 1.12% * cuotas_atrasadas
-        const capital = new Big(credito.capital);
-        const porcentaje = new Big("0.0112");
-        const montoMora = capital.times(porcentaje).times(numCuotasAtrasadas);
+      // Mora = capital × 1.12% × Σ min(1, días/30) de las cuotas vencidas, con
+      // la decisión de crear-o-no extraída a un helper puro (ver su doc: un
+      // monto que redondea a Q0.00 haría que createMora rechace y el crédito
+      // quedaría sin convenio, sin mora y nunca MOROSO).
+      const decision = decidirMoraTrasRomperConvenio({
+        capital: credito.capital,
+        factorDias: factorDiasMora,
+        numCuotasAtrasadas,
+      });
 
-        console.log(`💰 Monto mora calculado: Q${montoMora.toFixed(2)}`);
-
+      if (decision.accion === "CREAR_MORA") {
+        console.log(`💰 Monto mora calculado: Q${decision.montoMora.toFixed(2)}`);
         // El convenio se eliminó: sacar el crédito de EN_CONVENIO ANTES de recrear la mora.
         // createMora ya NO escribe mora sobre estados excluidos (no des-castiga); si dejáramos
         // EN_CONVENIO rechazaría la operación y el crédito quedaría huérfano (sin convenio,
@@ -1645,10 +1720,10 @@ export const updateConvenioStatus = async (
           .set({ statusCredit: "MOROSO" })
           .where(eq(creditos.credito_id, creditoId));
 
-        // Recrear la mora (monto = fórmula capital × 1.12% × cuotas). createMora reconfirma MOROSO.
+        // Recrear la mora (monto = fórmula capital × 1.12% × factor de días). createMora reconfirma MOROSO.
         const resultMora = await createMora({
           credito_id: creditoId,
-          monto_mora: Number(montoMora.toFixed(2)),
+          monto_mora: decision.montoMora,
           cuotas_atrasadas: numCuotasAtrasadas,
         });
         if (!resultMora.success) {
@@ -1663,13 +1738,14 @@ export const updateConvenioStatus = async (
 
         console.log("✅ Resultado createMora:", resultMora);
       } else {
-        // Si no hay cuotas atrasadas, solo cambiar a ACTIVO
+        // Sin cuotas atrasadas — o con cuotas atrasadas cuya mora proporcional
+        // redondea a Q0.00 — no hay mora que crear: solo cambiar a ACTIVO.
         await db
           .update(creditos)
           .set({ statusCredit: "ACTIVO" })
           .where(eq(creditos.credito_id, creditoId));
 
-        console.log("✅ Crédito actualizado a ACTIVO (sin cuotas atrasadas)");
+        console.log(`✅ Crédito actualizado a ACTIVO (${decision.motivo})`);
       }
 
       return { success: true, message: "Convenio eliminado exitosamente" };

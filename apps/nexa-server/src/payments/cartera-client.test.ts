@@ -74,6 +74,23 @@ describe("HttpCarteraPaymentClient", () => {
     expect(result).toEqual({ status: "APPLIED", paymentId: 77, idempotent: true });
   });
 
+  test("preserva billingStatus PENDING sin confundirlo con éxito fiscal", async () => {
+    const { client } = capturingClient(Response.json({
+      status: "APPLIED",
+      paymentId: 77,
+      idempotent: false,
+      billingStatus: "PENDING",
+    }));
+
+    await expect(client.applyNexaPayment({ creditoId: 123, transaction: transaction() }))
+      .resolves.toEqual({
+        status: "APPLIED",
+        paymentId: 77,
+        idempotent: false,
+        billingStatus: "PENDING",
+      });
+  });
+
   test("omite transactionId vacío", async () => {
     const { client, getRequest } = capturingClient();
     await client.applyNexaPayment({ creditoId: 123, transaction: transaction({ transactionId: "" }) });

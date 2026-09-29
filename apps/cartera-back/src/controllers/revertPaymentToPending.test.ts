@@ -12,7 +12,14 @@ const tx = {
     from: () => ({
       where: () => {
         const rows = selectResults.shift() ?? [];
-        return Object.assign(Promise.resolve(rows), { limit: () => Promise.resolve(rows) });
+        // `.for("update")` hace falta desde que la reversión a pendiente
+        // DESAPLICA los rubros del pago: esa relectura bloquea la fila del
+        // rubro, igual que el resto del módulo de rubros.
+        const chain: any = Object.assign(Promise.resolve(rows), {
+          limit: () => chain,
+          for: () => Promise.resolve(rows),
+        });
+        return chain;
       },
     }),
   })),
@@ -40,7 +47,8 @@ const voidInvoice = mock(() => Promise.resolve(cofidiResult));
 process.env.SUPABASE_DB_URL ??= "postgresql://127.0.0.1:1/synthetic";
 process.env.RESEND_API_KEY ??= "synthetic-test-key";
 process.env.EMAIL_DOMAIN ??= "example.invalid";
-const { createRevertPaymentToPending, classifyRevertPaymentCredit, classifyRevertPendingTerminal } = await import("./revertPaymentToPending");
+const { createRevertPaymentToPending, clasificarEstadoParaRevertir,
+  classifyRevertPaymentCredit, classifyRevertPendingTerminal } = await import("./revertPaymentToPending");
 type Dependencies = NonNullable<Parameters<typeof createRevertPaymentToPending>[0]>;
 const revertPaymentToPending = createRevertPaymentToPending({
   runTransaction: transaction as unknown as Dependencies["runTransaction"],
@@ -48,6 +56,8 @@ const revertPaymentToPending = createRevertPaymentToPending({
   voidInvoice: voidInvoice as unknown as Dependencies["voidInvoice"],
   setCapitalSource: mock(() => Promise.resolve()) as unknown as Dependencies["setCapitalSource"],
   emitTerminal: (event) => emitted.push(event),
+  withCreditLock: ((_creditoId: number, fn: () => Promise<unknown>) =>
+    fn()) as Dependencies["withCreditLock"],
 });
 
 const credit = {
@@ -90,6 +100,27 @@ describe("revertPaymentToPending observability contract", () => {
     expect(classifyRevertPaymentCredit(undefined)).toBe("credit_not_found");
     expect(classifyRevertPaymentCredit({ statusCredit: "CANCELADO" })).toBe("state_conflict");
     expect(classifyRevertPaymentCredit({ statusCredit: "ACTIVO" })).toBeNull();
+  });
+
+  test("no finge que revirtió un pago de capital, que esta ruta no maneja", () => {
+    // `capital_validated` caía en el early-return de "el pago ya estaba
+    // pendiente" y respondía éxito sin desaplicar nada. Desde que un abono
+    // directo a capital también cobra rubros, eso deja el saldo del rubro
+    // descontado y su reclamo aplicado mientras al operador le dijeron que la
+    // reversa salió bien — y el rubro queda congelado, porque un reclamo vivo
+    // impide editarlo o anularlo.
+    expect(clasificarEstadoParaRevertir("capital_validated")).toBe(
+      "capital_no_soportado"
+    );
+    // Y el INTERMEDIO, que es el que de verdad aparece: un pago que ya cobró
+    // sus rubros y se quedó en `"capital"` porque el flujo falló en el medio.
+    // Cubrir sólo el sellado dejaba pasar justo al roto.
+    expect(clasificarEstadoParaRevertir("capital")).toBe("capital_no_soportado");
+    // Los demás siguen igual: `pending` es el caso legítimo del early-return y
+    // `validated` es el camino completo.
+    expect(clasificarEstadoParaRevertir("pending")).toBeNull();
+    expect(clasificarEstadoParaRevertir("validated")).toBeNull();
+    expect(clasificarEstadoParaRevertir(undefined)).toBeNull();
   });
 
   test("prioritizes local invoice inconsistency over provider partials", () => {
@@ -150,7 +181,11 @@ describe("revertPaymentToPending observability contract", () => {
 
   test("executes invoice processing and emits only aggregate partial counts", async () => {
     const invoice = { factura_id: 1, uuid: "synthetic-uuid", serie: "S", numero: "1", receptor_nit: "000", fecha_certificacion: null, fecha_emision: null };
-    selectResults = [[{ validationStatus: "validated", abono_capital: "100.00" }], [credit], [[invoice][0]]];
+    // El `[]` del medio son los reclamos de rubros del pago: la reversión a
+    // pendiente ahora los DESAPLICA (devuelve el saldo al rubro pero conserva
+    // la reserva de la boleta, que sigue viva en `pending`). Este pago sintético
+    // no cobró rubros, así que no hay nada que desaplicar.
+    selectResults = [[{ validationStatus: "validated", abono_capital: "100.00" }], [credit], [], [[invoice][0]]];
     cofidiResult = { success: false, anulado: false, error: "PROVIDER", mensaje: "synthetic provider detail" };
     const set = { status: 0 };
     const response = await revertPaymentToPending({ body: { credito_id: 10, pago_id: 30 }, set });

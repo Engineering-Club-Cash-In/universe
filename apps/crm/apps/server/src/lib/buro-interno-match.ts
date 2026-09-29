@@ -815,6 +815,30 @@ export function severidadMaxima(
 	);
 }
 
+/**
+ * Solo la severidad alta frena la aprobación del análisis: es cuando el motor
+ * dice que es la misma persona (mismo lead, DPI, NIT, nombre completo o
+ * teléfono). Las de familia y parecido avisan, pero no frenan.
+ */
+export const SEVERIDAD_QUE_BLOQUEA: BuroInternoSeveridad = "alta";
+
+/**
+ * Registros que frenan la aprobación: una coincidencia alta por cada persona
+ * que todavía no tenga autorización para esta oportunidad. Una persona con
+ * varias coincidencias (titular y referencia, por ejemplo) cuenta una vez.
+ */
+export function registrosQueBloquean<
+	T extends { registroId: string; severidad: BuroInternoSeveridad },
+>(coincidencias: T[], autorizados: ReadonlySet<string> = new Set()): T[] {
+	const vistos = new Set<string>();
+	return coincidencias.filter((c) => {
+		if (c.severidad !== SEVERIDAD_QUE_BLOQUEA) return false;
+		if (autorizados.has(c.registroId) || vistos.has(c.registroId)) return false;
+		vistos.add(c.registroId);
+		return true;
+	});
+}
+
 export function evaluarCoincidencias(
 	candidatos: CandidatoBuroInterno[],
 	registros: RegistroParaMatch[],

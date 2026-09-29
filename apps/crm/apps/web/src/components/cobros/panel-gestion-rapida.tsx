@@ -148,6 +148,8 @@ const ALERTA_LABEL: Record<string, string> = {
 	bot_modo_agente: "Esperando asesor",
 	recuperacion_vehiculo: "Recuperación de vehículo",
 	visita_programada: "Visita programada",
+	b3_llamada_supervisor: "Llamar: ingresó a B3",
+	b3_llamada_vencida: "Llamada B3 vencida",
 };
 
 function money(v: string | number | null | undefined) {

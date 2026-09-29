@@ -22,6 +22,7 @@ import type { pagaloLinkActionsRouter } from "../../../server/src/routers/pagalo
 import type { pagaloSupervisionRouter } from "../../../server/src/routers/pagalo-supervision";
 import type { recuperacionVehiculoRouter } from "../../../server/src/routers/recuperacion-vehiculo";
 import type { referenciasCobrosRouter } from "../../../server/src/routers/referencias-cobros";
+import type { tareasCobrosRouter } from "../../../server/src/routers/tareas-cobros";
 import type { visitasCobrosRouter } from "../../../server/src/routers/visitas-cobros";
 import type { wialonRouter } from "../../../server/src/routers/wialon";
 
@@ -109,7 +110,8 @@ type MergedRouter = AppRouter &
 	typeof gpsIntegracionRouter &
 	typeof gpsEventosRouter &
 	typeof referenciasCobrosRouter &
-	typeof visitasCobrosRouter;
+	typeof visitasCobrosRouter &
+	typeof tareasCobrosRouter;
 
 export const client: RouterClient<MergedRouter> = createORPCClient(link);
 

@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
 	coincideFiltroCobros,
 	esPrioritaria,
+	FILTRO_COBROS_TAREAS,
 	FILTRO_COBROS_TODAS,
 	ordenarPorPrioridad,
+	tareaVencida,
 } from "./notificaciones-cobros";
 
 const n = (
@@ -72,5 +74,48 @@ describe("coincideFiltroCobros", () => {
 		expect(coincideFiltroCobros(otra, FILTRO_COBROS_TODAS)).toBe(false);
 		expect(coincideFiltroCobros(cobros, "bot_modo_agente")).toBe(true);
 		expect(coincideFiltroCobros(cobros, "cliente_subido")).toBe(false);
+	});
+});
+
+describe("coincideFiltroCobros — grupo de tareas (CB-035)", () => {
+	test("deja la tarea B3; excluye su alerta de vencida, otras alertas y no-cobros", () => {
+		expect(
+			coincideFiltroCobros(
+				{ cobrosTipo: "b3_llamada_supervisor" },
+				FILTRO_COBROS_TAREAS,
+			),
+		).toBe(true);
+		expect(
+			coincideFiltroCobros(
+				{ cobrosTipo: "b3_llamada_vencida" },
+				FILTRO_COBROS_TAREAS,
+			),
+		).toBe(false);
+		expect(
+			coincideFiltroCobros(
+				{ cobrosTipo: "sin_contacto_3d" },
+				FILTRO_COBROS_TAREAS,
+			),
+		).toBe(false);
+		expect(
+			coincideFiltroCobros({ cobrosTipo: null }, FILTRO_COBROS_TAREAS),
+		).toBe(false);
+	});
+});
+
+describe("tareaVencida", () => {
+	// Vence jue 2025-02-13 23:59:59 GT.
+	const VENCE = new Date("2025-02-14T05:59:59.999Z");
+
+	test("el día límite todavía no venció", () => {
+		expect(tareaVencida(VENCE, new Date("2025-02-14T05:59:00.000Z"))).toBe(
+			false,
+		);
+	});
+
+	test("desde las 00:00 GT del día siguiente venció", () => {
+		expect(tareaVencida(VENCE, new Date("2025-02-14T06:00:00.000Z"))).toBe(
+			true,
+		);
 	});
 });

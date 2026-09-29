@@ -88,6 +88,9 @@ const configSchema = z.object({
     }
   }
   if (config.deploymentMode === "production") {
+    if (new URL(config.nexaBaseUrl).protocol !== "https:") {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["nexaBaseUrl"], message: "Production requires an HTTPS Nexa endpoint" });
+    }
     const origin = config.carteraApiBaseUrl ? new URL(config.carteraApiBaseUrl) : null;
     if (config.carteraTargetEnv !== "production" || origin?.protocol !== "https:" || !config.carteraProductionAllowedOrigins?.includes(origin.origin)) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["carteraTargetEnv"], message: "Production requires an explicitly allowed HTTPS production Cartera target" });

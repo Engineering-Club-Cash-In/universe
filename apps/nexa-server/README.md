@@ -18,4 +18,6 @@ Cartera persists application and `billing_pending` before returning the existing
 
 In the single-process Cartera deployment, retries while the local fiscal task is alive return PENDING. The in-memory registry is only a liveness hint, not a queue or persistence substitute: nonce/payload checks and the database fence still apply. After a crash (or a request reaching a different process), an orphan `billing_running` fails closed for reconciliation; it is never automatically invoiced again. This release does not introduce multi-replica fiscal ownership or a new queue service.
 
+Definitive fiscal rejections stay `billing_failed`: subsequent calls return 503 without another fiscal request. Nexa exhausts its existing bounded retry budget and raises `billing_reconciliation_required`; operations must reconcile the rejection before explicitly re-enabling fiscal processing.
+
 Success is persisted as `billed`. Ambiguous provider/persistence results retain `billing_unknown`/the running fence and require reconciliation. There is no automatic restart of an uncertain fiscal operation. Pending work that had not claimed the fiscal fence remains recoverable by Nexa's existing retries.

@@ -620,6 +620,7 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
   let now = new Date("2026-09-08T12:00:00Z");
   let enabled = false;
   let unknown = false;
+  let rejected = false;
   let invoices = 0;
   let registrations = 0;
   let applications = 0;
@@ -645,6 +646,7 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
           invoices++;
           invoiceStarted = true;
           await fiscalGate.promise;
+          if (rejected) return { status: 400, response: { success: false } };
           return unknown
             ? { status: 502, response: { success: false } }
             : { status: 200, response: { success: true, data: { total_facturas: 1, facturas: [{ factura_id: invoices }] } } };
@@ -690,11 +692,12 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
         return await runApplicationWorkerOnce({ repository: new DbPaymentTransactionRepository(restarted), cartera, now: () => now, ...options });
       } finally { await restarted.$client.end(); }
     };
-    for (const reference of ["4617307", "4617308"]) {
+    for (const reference of ["4617307", "4617308", "4617309"]) {
       enabled = false;
       fiscalGate = Promise.withResolvers<void>();
       invoiceStarted = false;
       unknown = reference === "4617308";
+      rejected = reference === "4617309";
       const repository = new DbPaymentTransactionRepository(db);
       await repository.upsertReceived({ bank: "local", comments: "", account: "local", token: "123456710005010", tokenName: "local", reference, amount: 50, currency: "GTQ", tokenDate: "2026-09-08T12:00:00Z", tokenIdentifier: "10005010", tokenPrefix: "1234567", transactionId: "7293", wasReturn: 0 });
       expect(await run()).toBe(true);
@@ -723,24 +726,24 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
       now = new Date(now.getTime() + 2_000);
       expect(await run()).toBe(true);
       // Successful disabled waits no longer consume the subsequent failure budget.
-      if (unknown) for (let attempt = 1; attempt < options.maxAttempts; attempt++) {
+      if (unknown || rejected) for (let attempt = 1; attempt < options.maxAttempts; attempt++) {
         now = new Date(now.getTime() + 2_000);
         expect(await run()).toBe(true);
       }
       now = new Date(now.getTime() + 60_000);
       expect(await run()).toBe(false);
       const [payment] = (await query.query("SELECT processing_status, failure_reason, next_attempt_at, lease_until FROM nexa_payment_transactions WHERE reference = $1", [reference])).rows;
-      expect(payment).toEqual({ processing_status: "COMPLETED", failure_reason: unknown ? "billing_reconciliation_required" : null, next_attempt_at: null, lease_until: null });
-      expect((await query.query("SELECT status FROM cartera.nexa_payment_events WHERE external_reference = $1", [reference])).rows[0]?.status).toBe(unknown ? "billing_unknown" : "billed");
+      expect(payment).toEqual({ processing_status: "COMPLETED", failure_reason: unknown || rejected ? "billing_reconciliation_required" : null, next_attempt_at: null, lease_until: null });
+      expect((await query.query("SELECT status FROM cartera.nexa_payment_events WHERE external_reference = $1", [reference])).rows[0]?.status).toBe(unknown ? "billing_unknown" : rejected ? "billing_failed" : "billed");
       expect(new Set(bodies).size).toBe(1);
       // A replay after an unknown fiscal outcome must not reach the provider again.
       const replay = () => cartera.applyNexaPayment({ creditoId: 10, transaction: { reference, amount: 50, currency: "GTQ", tokenDate: "2026-09-08T12:00:00Z", transactionId: "7293" } });
-      if (unknown) await expect(replay()).rejects.toThrow();
+      if (unknown || rejected) await expect(replay()).rejects.toThrow();
       else expect(await replay()).toMatchObject({ status: "APPLIED", idempotent: true });
       bodies.length = 0;
     }
-    expect({ registrations, applications, invoices, approvals }).toEqual({ registrations: 2, applications: 2, invoices: 2, approvals: 2 });
-    expect((await query.query("SELECT id FROM nexa_reviews")).rows).toHaveLength(2);
+    expect({ registrations, applications, invoices, approvals }).toEqual({ registrations: 3, applications: 3, invoices: 3, approvals: 3 });
+    expect((await query.query("SELECT id FROM nexa_reviews")).rows).toHaveLength(3);
   } finally {
     await query.query("DROP SCHEMA IF EXISTS cartera CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public");
     await query.end();

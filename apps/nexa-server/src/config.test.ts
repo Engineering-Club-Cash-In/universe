@@ -35,6 +35,8 @@ const qaRealEnv = {
 describe("loadConfig", () => {
   it.each([
     { CARTERA_TARGET_ENV: "qa" },
+    { NEXA_BASE_URL: "http://open-bank.example.com" },
+    { NEXA_BASE_URL: "ftp://open-bank.example.com" },
     { CARTERA_PRODUCTION_ALLOWED_ORIGINS: undefined },
     { CARTERA_PRODUCTION_ALLOWED_ORIGINS: "https://other.example.com" },
     { CARTERA_API_BASE_URL: "http://cartera.example.com" },

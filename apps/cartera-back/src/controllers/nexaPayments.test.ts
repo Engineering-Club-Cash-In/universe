@@ -578,7 +578,7 @@ test("clasifica conflicto de payload, replay, retry e idempotencia persistente",
   expect(classify({ ...event, status: "billing_pending", pago_id: 17 }, false, requested))
     .toEqual({ kind: "billing", eventId: 7 });
   expect(classify({ ...event, status: "billing_failed", pago_id: 17 }, false, requested))
-    .toEqual({ kind: "billing", eventId: 7 });
+    .toEqual({ kind: "billing_failed" });
   expect(classify({ ...event, status: "billing_running", pago_id: 17 }, false, requested))
     .toEqual({ kind: "manual_review", phase: "billing" });
   expect(classify({ ...event, status: "billing_unknown", pago_id: 17 }, false, requested))
@@ -1015,16 +1015,16 @@ test("éxito del proveedor seguido por fallo local queda desconocido y no reinte
   expect(providerCalls).toBe(1);
 });
 
-test("un rechazo fiscal definitivo queda billing_failed y permite reintentar solo la factura", async () => {
+test("un rechazo fiscal definitivo queda billing_failed y no vuelve a emitir ni responde PENDING", async () => {
   const { NexaPaymentError, processNexaPayment } = await import("./nexaPayments");
-  let claim: "new" | "billing" = "new";
+  let claim: "new" | "billing_failed" = "new";
   let billingAttempts = 0;
   let paymentMutations = 0;
   const dependencies = {
     withCreditLock: async (_creditoId: number, work: (_lock: PaymentAdvisoryLock) => Promise<{ paymentId: number; idempotent: boolean }>) => work(paymentLock),
     claim: async () => claim === "new"
       ? { kind: "new" as const, eventId: 7 }
-      : { kind: "billing" as const, eventId: 7 },
+      : { kind: "billing_failed" as const },
     loadCredit: async () => ({
       usuarioId: 5,
       statusCredit: "ACTIVO",
@@ -1044,7 +1044,7 @@ test("un rechazo fiscal definitivo queda billing_failed y permite reintentar sol
     completeBilling: async () => undefined,
     failBilling: async (_eventId: number, status: string) => {
       expect(status).toBe("billing_failed");
-      claim = "billing";
+      claim = "billing_failed";
     },
   };
 
@@ -1057,8 +1057,8 @@ test("un rechazo fiscal definitivo queda billing_failed y permite reintentar sol
     paymentBody("billing-rejected"),
     { nonce: "nonce-billing-rejected-2", payloadHash: "a".repeat(64), now: new Date() },
     dependencies,
-  )).resolves.toEqual({ paymentId: 17, idempotent: false });
-  expect({ billingAttempts, paymentMutations }).toEqual({ billingAttempts: 2, paymentMutations: 0 });
+  )).rejects.toEqual(new NexaPaymentError("billing_failed", 503));
+  expect({ billingAttempts, paymentMutations }).toEqual({ billingAttempts: 1, paymentMutations: 0 });
 });
 
 test("facturación automática deshabilitada deja el pago aplicado y la factura pendiente", async () => {

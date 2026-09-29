@@ -274,6 +274,13 @@
 			"when": 1790799299432,
 			"tag": "0045_add_sat_verificacion_vehiculos",
 			"breakpoints": true
+		},
+		{
+			"idx": 38,
+			"version": "7",
+			"when": 1790799299433,
+			"tag": "0046_add_agency_sellers",
+			"breakpoints": true
 		}
 	]
 }

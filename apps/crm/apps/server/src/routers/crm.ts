@@ -20,6 +20,7 @@ import {
 import { z } from "zod";
 import { db } from "../db";
 import {
+	opportunityAgencySellers,
 	vehicleDocumentRequirements,
 	vehicleDocuments,
 	vehicleInspections,
@@ -59,6 +60,12 @@ import {
 	hasStaleAnalysisChecklistDocumentState,
 	hasStaleAnalysisChecklistVehicleState,
 } from "../lib/analysis-checklist";
+import {
+	asegurarVendedorLegal,
+	esVendedorDeAgencia,
+	limpiarVendedorSiCambiaAgencia,
+	vendedorSigueValido,
+} from "../lib/agency-sellers";
 import { type AuditEntry, auditedTransaction, auditRecord } from "../lib/audit";
 import {
 	isReservedBankCoverageDescription,
@@ -868,19 +875,33 @@ export const crmRouter = {
 			if (soloPorSerElAsesor) {
 				condiciones.push(eq(opportunities.assignedTo, context.userId));
 			}
-			const [actualizada] = await db
-				.update(opportunities)
-				.set({
-					...(input.vendorId !== undefined && { vendorId: input.vendorId }),
-					...(input.companyId !== undefined && { companyId: input.companyId }),
-					updatedAt: new Date(),
-				})
-				.where(and(...condiciones))
-				.returning({
-					id: opportunities.id,
-					vendorId: opportunities.vendorId,
-					companyId: opportunities.companyId,
-				});
+			const [actualizada] = await db.transaction(async (tx) => {
+				// Oportunidad antes que vendedor: mismo orden de bloqueo que el
+				// resto de las rutas, para no interbloquearse con ellas.
+				await tx
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.for("update");
+				await asegurarVendedorLegal(tx, input.vendorId);
+				const filas = await tx
+					.update(opportunities)
+					.set({
+						...(input.vendorId !== undefined && { vendorId: input.vendorId }),
+						...(input.companyId !== undefined && { companyId: input.companyId }),
+						updatedAt: new Date(),
+					})
+					.where(and(...condiciones))
+					.returning({
+						id: opportunities.id,
+						vendorId: opportunities.vendorId,
+						companyId: opportunities.companyId,
+					});
+				if (filas[0] && input.companyId !== undefined) {
+					await limpiarVendedorSiCambiaAgencia(tx, input.opportunityId);
+				}
+				return filas;
+			});
 			if (!actualizada) {
 				// Distinguir el motivo: la fila cambió entre la lectura y el UPDATE
 				const [ahora] = await db
@@ -911,6 +932,125 @@ export const crmRouter = {
 				action: "update",
 			});
 			return actualizada;
+		}),
+
+	getOpportunityAgencySeller: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const [asignado] = await db
+				.select({
+					sellerId: opportunityAgencySellers.sellerId,
+					name: vehicleVendors.name,
+					email: vehicleVendors.email,
+				})
+				.from(opportunityAgencySellers)
+				.innerJoin(
+					vehicleVendors,
+					eq(vehicleVendors.id, opportunityAgencySellers.sellerId),
+				)
+				.where(eq(opportunityAgencySellers.opportunityId, input.opportunityId))
+				.limit(1);
+			return asignado ?? null;
+		}),
+
+	/**
+	 * Vendedor de la agencia/predio que colocó la oportunidad. Define qué
+	 * usuarios del tracker la ven; no es el vendedor legal del contrato.
+	 */
+	setOpportunityAgencySeller: crmProcedure
+		.meta({ audit: { entity: "opportunity", action: "update" } })
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				sellerId: z.string().uuid().nullable(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// La oportunidad va FOR UPDATE: un cambio de agencia (UPDATE de la
+			// fila) u otra asignación esperan a que esta termine, así que la
+			// agencia validada es la vigente al escribir. El vendedor va FOR SHARE
+			// para que no lo muevan de agencia en medio.
+			await db.transaction(async (tx) => {
+				const [oportunidad] = await tx
+					.select({
+						assignedTo: opportunities.assignedTo,
+						companyId: opportunities.companyId,
+					})
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.for("update")
+					.limit(1);
+				if (!oportunidad) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Oportunidad no encontrada",
+					});
+				}
+
+				const puedeEditar =
+					PERMISSIONS.canAccessAnalysis(context.userRole) ||
+					oportunidad.assignedTo === context.userId;
+				if (!puedeEditar) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para editar esta oportunidad",
+					});
+				}
+
+				if (input.sellerId === null) {
+					await tx
+						.delete(opportunityAgencySellers)
+						.where(
+							eq(opportunityAgencySellers.opportunityId, input.opportunityId),
+						);
+					return;
+				}
+
+				const [vendedor] = await tx
+					.select({
+						vendorType: vehicleVendors.vendorType,
+						companyId: vehicleVendors.companyId,
+					})
+					.from(vehicleVendors)
+					.where(eq(vehicleVendors.id, input.sellerId))
+					.for("share")
+					.limit(1);
+				if (!vendedor || !esVendedorDeAgencia(vendedor)) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "El vendedor seleccionado no es de una agencia o predio",
+					});
+				}
+				if (!vendedorSigueValido(vendedor.companyId, oportunidad.companyId)) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "El vendedor no pertenece a la agencia de esta oportunidad",
+					});
+				}
+
+				const ahora = new Date();
+				await tx
+					.insert(opportunityAgencySellers)
+					.values({
+						opportunityId: input.opportunityId,
+						sellerId: input.sellerId,
+						assignedBy: context.userId,
+						createdAt: ahora,
+						updatedAt: ahora,
+					})
+					.onConflictDoUpdate({
+						target: opportunityAgencySellers.opportunityId,
+						set: {
+							sellerId: input.sellerId,
+							assignedBy: context.userId,
+							updatedAt: ahora,
+						},
+					});
+			});
+
+			auditRecord({
+				entity: "opportunity",
+				id: input.opportunityId,
+				action: "update",
+				data: { agencySellerId: input.sellerId },
+			});
+			return { sellerId: input.sellerId };
 		}),
 
 	setCompanyRazonSocial: crmProcedure
@@ -2768,22 +2908,27 @@ export const crmRouter = {
 				}
 			}
 
-			const newOpportunity = await db
-				.insert(opportunities)
-				.values({
-					...input,
-					companyId,
-					source,
-					campaign,
-					nit: leadNit,
-					assignedTo,
-					expectedCloseDate: input.expectedCloseDate
-						? new Date(input.expectedCloseDate)
-						: undefined,
-					createdBy: context.userId,
-					updatedAt: new Date(),
-				})
-				.returning();
+			// En una transacción con el vendedor tomado FOR SHARE: no lo pueden
+			// convertir en vendedor de agencia entre la validación y el insert.
+			const newOpportunity = await db.transaction(async (tx) => {
+				await asegurarVendedorLegal(tx, input.vendorId);
+				return tx
+					.insert(opportunities)
+					.values({
+						...input,
+						companyId,
+						source,
+						campaign,
+						nit: leadNit,
+						assignedTo,
+						expectedCloseDate: input.expectedCloseDate
+							? new Date(input.expectedCloseDate)
+							: undefined,
+						createdBy: context.userId,
+						updatedAt: new Date(),
+					})
+					.returning();
+			});
 			auditRecord({
 				entity: "opportunity",
 				id: newOpportunity[0].id,
@@ -3670,6 +3815,14 @@ export const crmRouter = {
 						sql`select pg_advisory_xact_lock(${claveDeFirma(id)})`,
 					);
 				}
+				// Oportunidad antes que vendedor (orden de bloqueo común a todas las
+				// rutas); el vendedor queda FOR SHARE hasta el commit.
+				await tx
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(eq(opportunities.id, id))
+					.for("update");
+				await asegurarVendedorLegal(tx, input.vendorId);
 				// 🔴 La reapertura no puede aplicar un parche calculado sobre una foto
 				// vieja: sin `expectedUpdatedAt`, entre el cálculo y este UPDATE otra
 				// transacción pudo reabrir y avanzar la misma fila (≥90% o won), y el
@@ -3798,6 +3951,12 @@ export const crmRouter = {
 
 			// Después del chequeo de conflicto: con cero filas no hubo escritura.
 			auditRecord({ entity: "opportunity", id: id, action: "update" });
+
+			// Después del commit: la limpieza compara contra la agencia vigente en
+			// el mismo DELETE, así que una edición posterior no la vuelve inválida.
+			if (updatedOpportunity[0].companyId !== currentOpportunity[0].companyId) {
+				await limpiarVendedorSiCambiaAgencia(db, id);
+			}
 
 			// El cambio de lead deja su propia fila. Sin esto, quien encuentre el
 			// expediente de vuelta sin aprobación ve un retroceso sin causa y parece
@@ -8728,6 +8887,7 @@ export const crmRouter = {
 						.select({
 							id: vehicleVendors.id,
 							gender: vehicleVendors.gender,
+							vendorType: vehicleVendors.vendorType,
 						})
 						.from(vehicleVendors)
 						.where(
@@ -8736,8 +8896,19 @@ export const crmRouter = {
 								dpiVendedor.valid ? dpiVendedor.dpiLimpio : input.vendedor.dpi,
 							),
 						)
+						// NO KEY UPDATE y no SHARE: abajo se puede completar el género
+						// de esta fila, y dos avances con el mismo vendedor que la
+						// tomaran compartida se interbloquearían al escribir. Sigue
+						// frenando a `vendors.update` (ver `asegurarVendedorLegal`).
+						.for("no key update")
 						.limit(1);
 
+					if (existente && esVendedorDeAgencia(existente)) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Ese DPI es de un vendedor de agencia y no puede ser el vendedor del vehículo",
+						});
+					}
 					if (existente) {
 						// Un vendedor ya registrado solo se COMPLETA: el nombre y el
 						// género llegan precargados de la pantalla, así que
@@ -8848,6 +9019,9 @@ export const crmRouter = {
 					throw new ORPCError("CONFLICT", {
 						message: "La oportunidad cambió mientras se asignaban inversionistas",
 					});
+				}
+				if (input.agencia !== undefined) {
+					await limpiarVendedorSiCambiaAgencia(tx, input.opportunityId);
 				}
 				auditRecord({
 					entity: "opportunity",

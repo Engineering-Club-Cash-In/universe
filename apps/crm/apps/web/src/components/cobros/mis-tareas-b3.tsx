@@ -73,6 +73,8 @@ export function MisTareasB3({
 
 	const tareas = (data?.tareas ?? []) as TareaB3[];
 	if (tareas.length === 0) return null;
+	// El servidor topa la lista; `total` es el real (puede ser mayor).
+	const total = Math.max(data?.total ?? 0, tareas.length);
 
 	const vencidas = tareas.filter((t) => t.estadoPlazo === "vencida").length;
 
@@ -89,7 +91,7 @@ export function MisTareasB3({
 						<PhoneCall className="h-3.5 w-3.5" />
 					</span>
 					<span className="font-semibold text-sm">Mis tareas</span>
-					<Badge variant="secondary">{tareas.length}</Badge>
+					<Badge variant="secondary">{total}</Badge>
 					{vencidas > 0 && (
 						<Badge className="bg-red-600 text-white hover:bg-red-600">
 							{vencidas} vencida{vencidas === 1 ? "" : "s"}
@@ -132,6 +134,11 @@ export function MisTareasB3({
 							</div>
 						</div>
 					))}
+					{total > tareas.length && (
+						<p className="text-muted-foreground text-xs">
+							Mostrando las {tareas.length} más urgentes de {total} tareas.
+						</p>
+					)}
 				</div>
 			)}
 		</section>

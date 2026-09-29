@@ -14,7 +14,7 @@
  * está en el límite donde TS7056 trunca en silencio el tipo inferido.
  */
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
@@ -26,6 +26,11 @@ import {
 import { cobrosSupervisorProcedure } from "../lib/orpc";
 
 const ESTADOS_ABIERTOS = ["pending", "read", "in_progress"] as const;
+
+// Tope de filas que viajan al front. Cada ingreso a B3 crea una tarea por
+// supervisor, así que se responde también el `total` real para que la UI avise
+// si hay más de las que muestra en vez de truncar en silencio.
+const LIMITE_TAREAS = 200;
 
 // Vencidas primero, luego las que vencen hoy, luego las que están en plazo.
 const ORDEN_PLAZO: Record<EstadoPlazoTarea, number> = {
@@ -43,7 +48,14 @@ export const tareasCobrosRouter = {
 	 */
 	getMisTareasCobros: cobrosSupervisorProcedure.handler(async ({ context }) => {
 		const userId = context.session?.user?.id;
-		if (!userId) return { tareas: [] };
+		if (!userId) return { tareas: [], total: 0 };
+
+		const condiciones = and(
+			eq(notifications.assignedTo, userId),
+			inArray(notifications.cobrosTipo, [...COBROS_TIPOS_TAREA]),
+			inArray(notifications.status, [...ESTADOS_ABIERTOS]),
+			eq(casosCobros.activo, true),
+		);
 
 		const filas = await db
 			.select({
@@ -59,16 +71,15 @@ export const tareasCobrosRouter = {
 			})
 			.from(notifications)
 			.innerJoin(casosCobros, eq(casosCobros.id, notifications.relatedEntityId))
-			.where(
-				and(
-					eq(notifications.assignedTo, userId),
-					inArray(notifications.cobrosTipo, [...COBROS_TIPOS_TAREA]),
-					inArray(notifications.status, [...ESTADOS_ABIERTOS]),
-					eq(casosCobros.activo, true),
-				),
-			)
+			.where(condiciones)
 			.orderBy(asc(notifications.fechaVencimiento))
-			.limit(200);
+			.limit(LIMITE_TAREAS);
+
+		const [{ total }] = await db
+			.select({ total: count() })
+			.from(notifications)
+			.innerJoin(casosCobros, eq(casosCobros.id, notifications.relatedEntityId))
+			.where(condiciones);
 
 		const ahora = new Date();
 		const tareas = filas
@@ -85,6 +96,6 @@ export const tareasCobrosRouter = {
 						(b.fechaVencimiento?.getTime() ?? Number.MAX_SAFE_INTEGER),
 			);
 
-		return { tareas };
+		return { tareas, total };
 	}),
 };

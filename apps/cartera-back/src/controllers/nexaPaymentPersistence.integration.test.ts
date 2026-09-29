@@ -610,7 +610,7 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
   const { HttpCarteraPaymentClient } = await import("../../../nexa-server/src/payments/cartera-client");
   const { createNexaPaymentHandler } = await import("./nexaPayments");
   const { claimNexaPaymentEvent } = await import("./nexaPaymentRepository");
-  const { runNexaBilling } = await import("./nexaBilling");
+  const { runNexaBilling, createDeferredNexaBilling } = await import("./nexaBilling");
   const { nexaPaymentDependencies, startNexaBilling } = await import("./nexaPaymentRuntime");
   const { withPaymentAdvisoryLock } = await import("../utils/paymentAdvisoryLock");
   const db = createDb(testDatabaseUrl!);
@@ -625,6 +625,8 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
   let applications = 0;
   let approvals = 0;
   const bodies: string[] = [];
+  let fiscalGate = Promise.withResolvers<void>();
+  let invoiceStarted = false;
   try {
     await query.query(`DROP SCHEMA IF EXISTS cartera CASCADE; CREATE SCHEMA cartera;
       CREATE TABLE cartera.creditos (credito_id integer PRIMARY KEY);
@@ -637,10 +639,25 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
     await query.query(`INSERT INTO nexa_payment_tokens (nexa_token_id, prefix, account, name) VALUES (1, '1234567', 'local', 'local');
       INSERT INTO nexa_token_users (payment_token_id, credito_id, identifier, description, national_id, nexa_user_id, token)
       VALUES (1, 10, '10005010', 'local', 'local', 1, '123456710005010');`);
+    const deferred = createDeferredNexaBilling({
+      run: (eventId, paymentIds) => runNexaBilling({ enabled, eventId, paymentIds, start: startNexaBilling,
+        invoice: async () => {
+          invoices++;
+          invoiceStarted = true;
+          await fiscalGate.promise;
+          return unknown
+            ? { status: 502, response: { success: false } }
+            : { status: 200, response: { success: true, data: { total_facturas: 1, facturas: [{ factura_id: invoices }] } } };
+        },
+      }),
+      complete: nexaPaymentDependencies.completeBilling!,
+      fail: nexaPaymentDependencies.failBilling!,
+      logError: () => { throw new Error("unexpected background finalization failure"); },
+    });
     const handler = createNexaPaymentHandler({ secret, now: () => now.getTime(), dependencies: {
       ...nexaPaymentDependencies,
       withCreditLock: (creditoId, work) => withPaymentAdvisoryLock(creditoId, work),
-      claim: (body, context) => claimNexaPaymentEvent(query, body, context),
+      claim: (body, context) => claimNexaPaymentEvent(query, body, context, deferred.isRunning),
       loadCredit: async () => ({ usuarioId: 1, statusCredit: "ACTIVO", binding: { activo: true, expires_at: null, max_payment_amount: null } }),
       findPayments: async (eventId) => (await query.query<{ paymentId: number; validationStatus: string; amount: string }>(
         `SELECT pago_id AS "paymentId", CASE WHEN validated THEN 'validated' ELSE 'pending' END AS "validationStatus", '50.00' AS amount
@@ -656,14 +673,7 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
         await query.query("UPDATE cartera.pagos_credito SET validated = true WHERE pago_id = $1", [paymentId]);
         return { success: true };
       },
-      billPayments: (eventId, paymentIds) => runNexaBilling({ enabled, eventId, paymentIds, start: startNexaBilling,
-        invoice: async () => {
-          invoices++;
-          return unknown
-            ? { status: 502, response: { success: false } }
-            : { status: 200, response: { success: true, data: { total_facturas: 1, facturas: [{ factura_id: invoices }] } } };
-        },
-      }),
+      billPayments: deferred.run,
     } });
     const cartera = new HttpCarteraPaymentClient({ baseUrl: "http://local-only.invalid", secret, clock: () => now.getTime(),
       fetch: async (url, init) => {
@@ -682,6 +692,8 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
     };
     for (const reference of ["4617307", "4617308"]) {
       enabled = false;
+      fiscalGate = Promise.withResolvers<void>();
+      invoiceStarted = false;
       unknown = reference === "4617308";
       const repository = new DbPaymentTransactionRepository(db);
       await repository.upsertReceived({ bank: "local", comments: "", account: "local", token: "123456710005010", tokenName: "local", reference, amount: 50, currency: "GTQ", tokenDate: "2026-09-08T12:00:00Z", tokenIdentifier: "10005010", tokenPrefix: "1234567", transactionId: "7293", wasReturn: 0 });
@@ -694,6 +706,20 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
         expect(await run()).toBe(true);
       }
       enabled = true;
+      now = new Date(now.getTime() + 2_000);
+      expect(await run()).toBe(true);
+      for (let wait = 0; wait < 100 && !invoiceStarted; wait++) await Bun.sleep(5);
+      expect(invoiceStarted).toBe(true);
+      // Fiscal work remains blocked while the HTTP-facing handler answers promptly.
+      for (let wait = 0; wait < 6; wait++) {
+        now = new Date(now.getTime() + 2_000);
+        expect(await run()).toBe(true);
+      }
+      expect((await query.query("SELECT failure_reason FROM nexa_payment_transactions WHERE reference = $1", [reference])).rows[0]?.failure_reason).toBe("billing_pending");
+      fiscalGate.resolve();
+      const eventId = Number((await query.query("SELECT id FROM cartera.nexa_payment_events WHERE external_reference = $1", [reference])).rows[0].id);
+      for (let wait = 0; wait < 200 && deferred.isRunning(eventId); wait++) await Bun.sleep(5);
+      expect(deferred.isRunning(eventId)).toBe(false);
       now = new Date(now.getTime() + 2_000);
       expect(await run()).toBe(true);
       // Successful disabled waits no longer consume the subsequent failure budget.

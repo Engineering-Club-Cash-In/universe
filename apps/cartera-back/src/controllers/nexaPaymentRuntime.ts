@@ -9,7 +9,7 @@ import {
 } from "../database/db";
 import { facturarPagoCompleto } from "../routers/cofidi";
 import { aplicarPagoAlCredito, insertPayment } from "./registerPayment";
-import { runNexaBilling } from "./nexaBilling";
+import { createDeferredNexaBilling, runNexaBilling } from "./nexaBilling";
 import {
   withPaymentAdvisoryLock,
   withPaymentBindingLock,
@@ -66,6 +66,31 @@ export async function failNexaBilling(
     ));
 }
 
+const deferredBilling = createDeferredNexaBilling({
+  run: (eventId, paymentIds) => runNexaBilling({
+    enabled: canAutomaticallyInvoiceNexa({
+      environment: config.environment,
+      enabled: config.nexaAutomaticInvoicingEnabled,
+      simulated: process.env.SIMULAR_FACTURAS === "true",
+    }),
+    eventId,
+    paymentIds,
+    start: startNexaBilling,
+    invoice: async (paymentId) => {
+      const set: { status?: number | string } = { status: 200 };
+      const response = await facturarPagoCompleto({
+        body: { pago_id: paymentId },
+        set,
+      });
+      const status = typeof set.status === "number" ? set.status : Number(set.status ?? 200);
+      return { status: Number.isFinite(status) ? status : 500, response };
+    },
+  }),
+  complete: completeNexaBilling,
+  fail: failNexaBilling,
+  logError: () => console.error("Nexa billing finalization failed; durable fence retained"),
+});
+
 export const nexaPaymentDependencies: NexaPaymentDependencies = {
   withCreditLock: (creditoId, work) => withPaymentAdvisoryLock(
     creditoId,
@@ -85,6 +110,7 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
     } },
     body,
     context,
+    deferredBilling.isRunning,
   ),
   loadCredit: async (creditoId) => {
     const [row] = await db
@@ -194,25 +220,7 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
         ne(nexa_payment_events.status, "applied"),
       ));
   },
-  billPayments: (eventId, paymentIds) => runNexaBilling({
-    enabled: canAutomaticallyInvoiceNexa({
-      environment: config.environment,
-      enabled: config.nexaAutomaticInvoicingEnabled,
-      simulated: process.env.SIMULAR_FACTURAS === "true",
-    }),
-    eventId,
-    paymentIds,
-    start: startNexaBilling,
-    invoice: async (paymentId) => {
-      const set: { status?: number | string } = { status: 200 };
-      const response = await facturarPagoCompleto({
-        body: { pago_id: paymentId },
-        set,
-      });
-      const status = typeof set.status === "number" ? set.status : Number(set.status ?? 200);
-      return { status: Number.isFinite(status) ? status : 500, response };
-    },
-  }),
+  billPayments: deferredBilling.run,
   completeBilling: completeNexaBilling,
   failBilling: failNexaBilling,
   now: () => new Date(),

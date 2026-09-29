@@ -14,7 +14,7 @@ export function startPaymentLifecycle(
   deps: AppDependencies,
   options: { scheduler?: Scheduler; logError?: (message: string) => void; logInfo?: (message: string) => void } = {},
 ) {
-  if (config.deploymentMode !== "qa_real_payments") return () => {};
+  if (config.deploymentMode === "integration") return () => {};
 
   const scheduler = options.scheduler ?? defaultScheduler;
   const logError = options.logError ?? console.error;

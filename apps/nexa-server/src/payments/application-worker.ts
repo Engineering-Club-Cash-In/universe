@@ -12,6 +12,7 @@ export type ApplicationClaim = {
   transactionId: string;
   wasReturn: 0 | 1;
   attemptCount: number;
+  carteraPaymentId?: number | null;
 };
 
 export type ApplicationWorkerRepository = {
@@ -21,6 +22,7 @@ export type ApplicationWorkerRepository = {
     paymentId: number | null;
     reviewStatus: ReviewTransferStatus;
     failureReason: string | null;
+    nextAttemptAt?: Date | null;
   }, now: Date, attemptCount: number): Promise<void>;
   markApplicationFailed(id: number, reason: string, nextAttemptAt: Date | null, now: Date, attemptCount: number): Promise<void>;
 };
@@ -61,6 +63,7 @@ export async function runApplicationWorkerOnce(options: {
 
     const creditoId = await options.repository.resolveCreditoId(claim.tokenIdentifier, claim.tokenPrefix);
     if (!creditoId) {
+      if (claim.carteraPaymentId) throw new Error("Billing credit could not be resolved");
       await options.repository.finalizeApplication(claim.id, {
         paymentId: null,
         reviewStatus: "REJECTED",
@@ -79,10 +82,17 @@ export async function runApplicationWorkerOnce(options: {
         transactionId: claim.transactionId,
       },
     });
+    if (claim.carteraPaymentId && (result.status !== "APPLIED" || result.paymentId !== claim.carteraPaymentId)) {
+      throw new Error("Billing retry did not confirm the applied payment");
+    }
     await options.repository.finalizeApplication(claim.id, result.status === "APPLIED" ? {
       paymentId: result.paymentId,
       reviewStatus: "APPROVED",
       failureReason: result.billingStatus === "PENDING" ? "billing_pending" : null,
+      // A disabled fiscal feature is a successful wait, not an exhausted retry.
+      nextAttemptAt: result.billingStatus === "PENDING"
+        ? getNextAttemptAt(now, claim.attemptCount, Infinity, options.backoffSeconds, options.maxBackoffSeconds)
+        : null,
     } : {
       paymentId: null,
       reviewStatus: "REJECTED",

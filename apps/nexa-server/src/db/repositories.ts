@@ -225,18 +225,25 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
             processing_status = 'RECEIVED'
             OR (processing_status = 'FAILED' AND next_attempt_at <= ${now})
             OR (processing_status = 'APPLYING' AND lease_until <= ${now})
+            OR (cartera_payment_id IS NOT NULL AND failure_reason = 'billing_pending'
+              AND processing_status IN ('REVIEW_PENDING', 'COMPLETED', 'MANUAL_REVIEW')
+              AND (next_attempt_at IS NULL OR next_attempt_at <= ${now})
+              AND (lease_until IS NULL OR lease_until <= ${now}))
           )
         ORDER BY created_at, id
         FOR UPDATE SKIP LOCKED
         LIMIT 1
       )
       UPDATE nexa_payment_transactions AS payment
-      SET processing_status = 'APPLYING',
+      SET processing_status = CASE WHEN payment.cartera_payment_id IS NOT NULL
+            AND payment.failure_reason = 'billing_pending' THEN payment.processing_status
+            ELSE 'APPLYING'::nexa_processing_status END,
           attempt_count = payment.attempt_count + 1,
           last_attempt_at = ${now},
           lease_until = ${now}::timestamptz + ${leaseSeconds} * INTERVAL '1 second',
           next_attempt_at = NULL,
-          failure_reason = NULL,
+          failure_reason = CASE WHEN payment.cartera_payment_id IS NOT NULL
+            AND payment.failure_reason = 'billing_pending' THEN payment.failure_reason ELSE NULL END,
           updated_at = ${now}
       FROM candidate
       WHERE payment.id = candidate.id
@@ -249,6 +256,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         payment.token_prefix AS "tokenPrefix",
         COALESCE(payment.raw_payload->>'bankTransactionId', payment.transaction_id) AS "transactionId",
         payment.was_return AS "wasReturn",
+        payment.cartera_payment_id AS "carteraPaymentId",
         payment.attempt_count AS "attemptCount"
     `);
     const row = result.rows[0];
@@ -263,6 +271,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       transactionId: String(row.transactionId),
       wasReturn: paymentReturn(row.wasReturn),
       attemptCount: Number(row.attemptCount),
+      carteraPaymentId: row.carteraPaymentId == null ? null : Number(row.carteraPaymentId),
     } : null;
   }
 
@@ -284,13 +293,29 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
     paymentId: number | null;
     reviewStatus: "APPROVED" | "REJECTED";
     failureReason: string | null;
+    nextAttemptAt?: Date | null;
   }, now: Date, attemptCount: number) {
     await this.db.transaction(async (tx) => {
+      // Billing owns only the application lease/schedule, never the bank review state.
+      const [billed] = await tx.update(nexaPaymentTransactions).set({
+        failureReason: outcome.failureReason,
+        nextAttemptAt: outcome.nextAttemptAt ?? null,
+        leaseUntil: null,
+        updatedAt: now,
+      }).where(and(
+        eq(nexaPaymentTransactions.id, id),
+        eq(nexaPaymentTransactions.attemptCount, attemptCount),
+        eq(nexaPaymentTransactions.carteraPaymentId, outcome.paymentId ?? -1),
+        eq(nexaPaymentTransactions.failureReason, "billing_pending"),
+        ne(nexaPaymentTransactions.processingStatus, "APPLYING"),
+        isNotNull(nexaPaymentTransactions.leaseUntil),
+      )).returning({ id: nexaPaymentTransactions.id });
+      if (billed) return;
       const [payment] = await tx.update(nexaPaymentTransactions).set({
         processingStatus: "REVIEW_PENDING",
         carteraPaymentId: outcome.paymentId,
         failureReason: outcome.failureReason,
-        nextAttemptAt: null,
+        nextAttemptAt: outcome.nextAttemptAt ?? null,
         leaseUntil: null,
         updatedAt: now,
       }).where(and(
@@ -314,15 +339,25 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
 
   async markApplicationFailed(id: number, reason: string, nextAttemptAt: Date | null, now: Date, attemptCount: number) {
     await this.db.update(nexaPaymentTransactions).set({
-      processingStatus: nextAttemptAt ? "FAILED" : "MANUAL_REVIEW",
-      failureReason: reason,
+      processingStatus: sql`CASE WHEN ${nexaPaymentTransactions.carteraPaymentId} IS NOT NULL
+        THEN ${nexaPaymentTransactions.processingStatus}
+        ELSE ${nextAttemptAt ? "FAILED" : "MANUAL_REVIEW"}::nexa_processing_status END`,
+      failureReason: sql`CASE WHEN ${nexaPaymentTransactions.carteraPaymentId} IS NOT NULL
+        THEN ${nextAttemptAt ? "billing_pending" : "billing_reconciliation_required"} ELSE ${reason} END`,
       nextAttemptAt,
       leaseUntil: null,
       updatedAt: now,
     }).where(and(
       eq(nexaPaymentTransactions.id, id),
       eq(nexaPaymentTransactions.attemptCount, attemptCount),
-      eq(nexaPaymentTransactions.processingStatus, "APPLYING"),
+      or(
+        eq(nexaPaymentTransactions.processingStatus, "APPLYING"),
+        and(
+          isNotNull(nexaPaymentTransactions.carteraPaymentId),
+          eq(nexaPaymentTransactions.failureReason, "billing_pending"),
+          isNotNull(nexaPaymentTransactions.leaseUntil),
+        ),
+      ),
     ));
   }
 
@@ -353,6 +388,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
 
   async listManualReviewAlerts(staleBefore: Date) {
     const rows = await reconciliationQuery(this.db, or(
+      eq(nexaPaymentTransactions.failureReason, "billing_reconciliation_required"),
       and(eq(nexaPaymentTransactions.tokenDate, ""), lte(nexaPaymentTransactions.updatedAt, staleBefore)),
       and(
         eq(nexaPaymentTransactions.processingStatus, "MANUAL_REVIEW"),

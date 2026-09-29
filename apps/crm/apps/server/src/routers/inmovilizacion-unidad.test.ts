@@ -62,10 +62,7 @@ let resolverPendientesLlamadas: string[] = [];
 let unidadReactivadaNotificada = 0;
 let resolverAvisoLlamarClienteLlamadas: string[] = [];
 let notificarLlamarClienteLlamadas: { asesorUserId: string }[] = [];
-let reasignarAvisosLlamarClienteLlamadas: {
-	casoCobroId: string;
-	nuevoResponsableUserId: string;
-}[] = [];
+let reconciliarAvisosLlamadas: (readonly string[] | undefined)[] = [];
 let onNotificarLlamarCliente: (() => void) | null = null;
 let reactivacionesObsoletasMock: { id: string }[] = [];
 // bloquearUnidadFisica (review de Codex, PR #1758): cada llamada a
@@ -374,13 +371,10 @@ mock.module("../services/inmovilizacion-notif", () => ({
 	resolverPendientesInmovilizacion: async (id: string) => {
 		resolverPendientesLlamadas.push(id);
 	},
-	reasignarAvisosLlamarCliente: async (params: {
-		casoCobroId: string;
-		nuevoResponsableUserId: string;
-	}) => {
-		reasignarAvisosLlamarClienteLlamadas.push(params);
+	reconciliarAvisosLlamarCliente: async (casoCobroIds?: readonly string[]) => {
+		reconciliarAvisosLlamadas.push(casoCobroIds);
+		return 0;
 	},
-	reconciliarAvisosLlamarCliente: async () => 0,
 }));
 // Mock propio de cartera-back-client y no spyOn sobre el módulo real: otros
 // archivos de test lo reemplazan con `mock.module` (global en bun), y en el
@@ -444,7 +438,7 @@ function reset() {
 	resolverAvisoLlamarClienteLlamadas = [];
 	reactivacionesObsoletasMock = [];
 	onNotificarLlamarCliente = null;
-	reasignarAvisosLlamarClienteLlamadas = [];
+	reconciliarAvisosLlamadas = [];
 	executeLlamadas = [];
 	spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 		bucket: 2,
@@ -1763,10 +1757,10 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 		expect(notificarLlamarClienteLlamadas).toEqual([
 			{ asesorUserId: "asesor-original" },
 		]);
-		// Pero la reconciliación post-envío detectó el cambio de asesor y reasignó el aviso
-		expect(reasignarAvisosLlamarClienteLlamadas).toEqual([
-			{ casoCobroId: CASO_ID, nuevoResponsableUserId: "asesor-nuevo" },
-		]);
+		// Y después del envío corre la reconciliación del caso, que relee el dueño
+		// en cartera y mueve el aviso con compare-and-set (su lógica se prueba en
+		// inmovilizacion-notif.test.ts).
+		expect(reconciliarAvisosLlamadas).toContainEqual([CASO_ID]);
 	});
 });
 

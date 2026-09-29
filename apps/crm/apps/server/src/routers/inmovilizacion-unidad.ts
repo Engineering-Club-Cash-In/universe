@@ -49,7 +49,6 @@ import {
 	notificarInmovilizacionResuelta,
 	notificarLlamarCliente,
 	notificarUnidadReactivada,
-	reasignarAvisosLlamarCliente,
 	reconciliarAvisosLlamarCliente,
 	resolverAvisoLlamarCliente,
 	resolverPendientesInmovilizacion,
@@ -1170,17 +1169,9 @@ export const inmovilizacionUnidadRouter = {
 					} else {
 						// 2. Si cartera reasignó el crédito entre la lectura temprana y el
 						// envío del aviso, el aviso recién creado quedó asignado al asesor
-						// anterior. Re-leer el dueño en cartera y reasignar al vigente.
-						// Review de Codex, PR #1758.
-						const responsableActual =
-							(await usuarioDuenoEnCartera(caso?.numeroCreditoSifco)) ??
-							inm.solicitadoPor;
-						if (responsableActual && responsableActual !== asesorUserId) {
-							await reasignarAvisosLlamarCliente({
-								casoCobroId: inm.casoCobroId,
-								nuevoResponsableUserId: responsableActual,
-							});
-						}
+						// anterior: la reconciliación relee el dueño en cartera y lo mueve
+						// con compare-and-set. Review de Codex, PR #1758 y #1765.
+						await reconciliarAvisosLlamarCliente([inm.casoCobroId]);
 					}
 				}
 			}

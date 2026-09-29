@@ -20,11 +20,21 @@ let notificacionesActualizadas: { set: Record<string, unknown> }[] = [];
 let supervisoresMock = ["sup-1", "sup-2"];
 // Avisos abiertos de "llamar al cliente" (reconciliarAvisosLlamarCliente) y el
 // dueño del crédito en cartera, ya resuelto a usuario del CRM.
-let avisosAbiertosMock: {
+type AvisoAbierto = {
+	id: string;
 	casoCobroId: string;
 	assignedTo: string | null;
 	numeroCreditoSifco: string | null;
-}[] = [];
+};
+// Cada lectura de avisos toma la siguiente foto de la cola (la última se repite).
+let lecturasAvisos: AvisoAbierto[][] = [];
+// Resultado de cada compare-and-set, en orden (true = movió la fila).
+let resultadosCas: boolean[] = [];
+function siguienteLectura(): AvisoAbierto[] {
+	return lecturasAvisos.length > 1
+		? (lecturasAvisos.shift() ?? [])
+		: (lecturasAvisos[0] ?? []);
+}
 let duenoEnCarteraMock: string | null = null;
 
 function mockDb() {
@@ -50,7 +60,7 @@ function mockDb() {
 				}
 				if (tabla === notifications) {
 					return {
-						innerJoin: () => ({ where: async () => avisosAbiertosMock }),
+						innerJoin: () => ({ where: async () => siguienteLectura() }),
 					};
 				}
 				throw new Error(`select from tabla no mockeada: ${String(tabla)}`);
@@ -73,7 +83,17 @@ function mockDb() {
 					set: (cambios: Record<string, unknown>) => {
 						notificacionesActualizadas.push({ set: cambios });
 						return {
-							where: () => Promise.resolve(),
+							// Awaitable directo (los UPDATE sin RETURNING) y con
+							// `.returning()` para el compare-and-set de la reconciliación.
+							where: () => {
+								const movio =
+									resultadosCas.length > 0 ? resultadosCas.shift() : true;
+								const resultado = Promise.resolve() as Promise<void> & {
+									returning: () => Promise<{ id: string }[]>;
+								};
+								resultado.returning = async () => (movio ? [{ id: "n" }] : []);
+								return resultado;
+							},
 						};
 					},
 				};
@@ -95,18 +115,16 @@ mock.module("../lib/acceso-caso-cobro", () =>
 	}),
 );
 
-const {
-	notificarInmovilizacionPendiente,
-	reasignarAvisosLlamarCliente,
-	reconciliarAvisosLlamarCliente,
-} = await import("./inmovilizacion-notif");
+const { notificarInmovilizacionPendiente, reconciliarAvisosLlamarCliente } =
+	await import("./inmovilizacion-notif");
 
 function reset() {
 	estadoInmovilizacionMock = "pendiente_aprobacion";
 	notificacionesInsertadas = [];
 	notificacionesActualizadas = [];
 	supervisoresMock = ["sup-1", "sup-2"];
-	avisosAbiertosMock = [];
+	lecturasAvisos = [];
+	resultadosCas = [];
 	duenoEnCarteraMock = null;
 }
 
@@ -162,29 +180,19 @@ describe("CB-041 — notificarInmovilizacionPendiente", () => {
 	});
 });
 
-describe("CB-041 — reasignarAvisosLlamarCliente", () => {
-	afterEach(reset);
-
-	it("reasigna las notificaciones abiertas al nuevo responsable (review de Codex)", async () => {
-		await reasignarAvisosLlamarCliente({
-			casoCobroId: "caso-1",
-			nuevoResponsableUserId: "asesor-nuevo",
-		});
-		expect(notificacionesActualizadas).toHaveLength(1);
-		expect(notificacionesActualizadas[0]?.set.assignedTo).toBe("asesor-nuevo");
-	});
-});
-
 describe("reconciliarAvisosLlamarCliente — el aviso sigue al dueño en cartera (review de Codex, PR #1765)", () => {
 	afterEach(reset);
 
 	it("cartera reasignó el crédito: el aviso pasa al dueño de hoy", async () => {
-		avisosAbiertosMock = [
-			{
-				casoCobroId: "caso-1",
-				assignedTo: "asesor-viejo",
-				numeroCreditoSifco: "0101",
-			},
+		lecturasAvisos = [
+			[
+				{
+					id: "n1",
+					casoCobroId: "caso-1",
+					assignedTo: "asesor-viejo",
+					numeroCreditoSifco: "0101",
+				},
+			],
 		];
 		duenoEnCarteraMock = "asesor-nuevo";
 
@@ -196,12 +204,15 @@ describe("reconciliarAvisosLlamarCliente — el aviso sigue al dueño en cartera
 	});
 
 	it("el aviso ya es del dueño: no toca nada", async () => {
-		avisosAbiertosMock = [
-			{
-				casoCobroId: "caso-1",
-				assignedTo: "asesor-nuevo",
-				numeroCreditoSifco: "0101",
-			},
+		lecturasAvisos = [
+			[
+				{
+					id: "n1",
+					casoCobroId: "caso-1",
+					assignedTo: "asesor-nuevo",
+					numeroCreditoSifco: "0101",
+				},
+			],
 		];
 		duenoEnCarteraMock = "asesor-nuevo";
 
@@ -210,12 +221,15 @@ describe("reconciliarAvisosLlamarCliente — el aviso sigue al dueño en cartera
 	});
 
 	it("el dueño no tiene usuario en el CRM: el aviso se queda donde está", async () => {
-		avisosAbiertosMock = [
-			{
-				casoCobroId: "caso-1",
-				assignedTo: "quien-pidio",
-				numeroCreditoSifco: "0101",
-			},
+		lecturasAvisos = [
+			[
+				{
+					id: "n1",
+					casoCobroId: "caso-1",
+					assignedTo: "quien-pidio",
+					numeroCreditoSifco: "0101",
+				},
+			],
 		];
 		duenoEnCarteraMock = null;
 
@@ -223,7 +237,55 @@ describe("reconciliarAvisosLlamarCliente — el aviso sigue al dueño en cartera
 		expect(notificacionesActualizadas).toHaveLength(0);
 	});
 
+	it("otra reconciliación lo movió entre la lectura y el UPDATE: relee y no lo pisa", async () => {
+		// 1ª lectura: el aviso está en A y el dueño en cartera es C. Otra
+		// reconciliación lo mueve a C antes del UPDATE, así que el compare-and-set
+		// sobre "A" no encuentra la fila. 2ª lectura: ya está en C, nada que hacer.
+		lecturasAvisos = [
+			[
+				{
+					id: "n1",
+					casoCobroId: "caso-1",
+					assignedTo: "asesor-A",
+					numeroCreditoSifco: "0101",
+				},
+			],
+			[
+				{
+					id: "n1",
+					casoCobroId: "caso-1",
+					assignedTo: "asesor-C",
+					numeroCreditoSifco: "0101",
+				},
+			],
+		];
+		resultadosCas = [false];
+		duenoEnCarteraMock = "asesor-C";
+
+		expect(await reconciliarAvisosLlamarCliente()).toBe(0);
+		expect(notificacionesActualizadas).toHaveLength(1); // un solo intento, el que falló
+	});
+
+	it("si el compare-and-set sigue fallando, se rinde a las 3 vueltas sin pisar nada", async () => {
+		lecturasAvisos = [
+			[
+				{
+					id: "n1",
+					casoCobroId: "caso-1",
+					assignedTo: "asesor-A",
+					numeroCreditoSifco: "0101",
+				},
+			],
+		];
+		resultadosCas = [false, false, false, false];
+		duenoEnCarteraMock = "asesor-C";
+
+		expect(await reconciliarAvisosLlamarCliente()).toBe(0);
+		expect(notificacionesActualizadas).toHaveLength(3);
+	});
+
 	it("con una lista vacía de casos no consulta nada", async () => {
 		expect(await reconciliarAvisosLlamarCliente([])).toBe(0);
 	});
 });
+

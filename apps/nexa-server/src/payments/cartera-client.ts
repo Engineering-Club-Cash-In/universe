@@ -2,7 +2,7 @@ import { createHash, createHmac, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { tokenDateSchema } from "../nexa/schemas";
 export type CarteraApplyPaymentResult =
-  | { status: "APPLIED"; paymentId: number; idempotent?: boolean }
+  | { status: "APPLIED"; paymentId: number; idempotent?: boolean; billingStatus?: "PENDING" }
   | { status: "REJECTED"; reason: string };
 
 type CarteraTransaction = {
@@ -21,6 +21,7 @@ const applyPaymentResponseSchema = z.object({
   status: z.literal("APPLIED"),
   paymentId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   idempotent: z.boolean().optional(),
+  billingStatus: z.literal("PENDING").optional(),
 });
 const safeErrorResponseSchema = z.object({ error: z.string().regex(/^[a-z0-9_]{1,64}$/) });
 

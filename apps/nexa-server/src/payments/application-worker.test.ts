@@ -61,6 +61,60 @@ test.each([
   });
 });
 
+test("applied payment keeps billing pending durable while queuing bank approval", async () => {
+  const finalized: unknown[] = [];
+
+  await runApplicationWorkerOnce({
+    repository: repository(baseClaim, {
+      finalize: (...args) => { finalized.push(args); },
+      lookup: () => 42,
+      fail: () => { throw new Error("applied payment must not retry"); },
+    }),
+    cartera: {
+      applyNexaPayment: async () => ({
+        status: "APPLIED",
+        paymentId: 701,
+        billingStatus: "PENDING",
+      }),
+    },
+    now: () => new Date("2026-09-08T12:00:00Z"),
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 1,
+    maxBackoffSeconds: 10,
+  });
+
+  expect(finalized[0]).toEqual([
+    7,
+    { paymentId: 701, reviewStatus: "APPROVED", failureReason: "billing_pending", nextAttemptAt: new Date("2026-09-08T12:00:01Z") },
+    new Date("2026-09-08T12:00:00Z"),
+    1,
+  ]);
+});
+
+test.each(["rejected", "different_payment", "missing_token"])("billing retry %s cannot reject or replace applied money", async (scenario) => {
+  const finalized: unknown[] = [];
+  let failures = 0;
+  let calls = 0;
+  await runApplicationWorkerOnce({
+    repository: repository({ ...baseClaim, carteraPaymentId: 701 }, {
+      finalize: (...args) => { finalized.push(args); },
+      lookup: () => scenario === "missing_token" ? null : 42,
+      fail: () => { failures++; },
+    }),
+    cartera: { applyNexaPayment: async () => {
+      calls++;
+      return scenario === "rejected"
+        ? { status: "REJECTED", reason: "binding_missing" }
+        : { status: "APPLIED", paymentId: 702 };
+    } },
+    leaseSeconds: 10, maxAttempts: 3, backoffSeconds: 1, maxBackoffSeconds: 10,
+  });
+  expect(finalized).toEqual([]);
+  expect(failures).toBe(1);
+  expect(calls).toBe(scenario === "missing_token" ? 0 : 1);
+});
+
 test("malformed persisted date fails closed before unsupported classification", async () => {
   const finalized: unknown[] = [];
   let tokenLookups = 0;
@@ -132,7 +186,7 @@ test("returned transfer rejection keeps precedence over unsupported values", asy
 
 function repository(claim: ApplicationClaim, callbacks: {
   finalize: (...args: Parameters<ApplicationWorkerRepository["finalizeApplication"]>) => void;
-  lookup: () => number;
+  lookup: () => number | null;
   fail: () => void;
 }): ApplicationWorkerRepository {
   let claimed = false;

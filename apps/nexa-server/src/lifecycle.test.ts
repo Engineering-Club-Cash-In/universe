@@ -26,7 +26,7 @@ const baseEnv = {
   NEXA_CA_CERT_PATH: "/certs/ca.crt",
 };
 
-test("qa lifecycle drains application and review work without polling, then stop prevents later cycles", async () => {
+test.each(["qa_real_payments", "production"])("%s lifecycle drains application and review work without polling, then stop prevents later cycles", async (mode) => {
   const scheduler = controlledScheduler();
   let polls = 0;
   let applications = 0;
@@ -37,7 +37,7 @@ test("qa lifecycle drains application and review work without polling, then stop
     review: () => ++reviews < 2,
   });
 
-  const stop = startPaymentLifecycle(loadConfig(baseEnv), deps, { scheduler });
+  const stop = startPaymentLifecycle(loadConfig({ ...baseEnv, NEXA_DEPLOYMENT_MODE: mode, ...(mode === "production" ? { CARTERA_TARGET_ENV: "production", CARTERA_PRODUCTION_ALLOWED_ORIGINS: baseEnv.CARTERA_API_BASE_URL } : {}) }), deps, { scheduler });
   await waitFor(() => applications === 3 && reviews === 2);
   const scheduled = [...scheduler.callbacks];
   stop();
@@ -47,7 +47,7 @@ test("qa lifecycle drains application and review work without polling, then stop
   expect({ polls, applications, reviews }).toEqual({ polls: 0, applications: 3, reviews: 2 });
 });
 
-test.each(["integration", "production"] as const)("%s lifecycle does not start payment loops", async (deploymentMode) => {
+test.each(["integration"] as const)("%s lifecycle does not start payment loops", async (deploymentMode) => {
   let calls = 0;
   const config = { ...loadConfig(baseEnv), deploymentMode } as AppConfig;
   const stop = startPaymentLifecycle(config, lifecycleDependencies({
@@ -72,7 +72,7 @@ test("a failed cycle is logged without its error detail and the next cycle runs"
       return false;
     },
   }), { scheduler, logError: (message) => logs.push(message) });
-  await waitFor(() => logs.length === 1 && scheduler.callbacks.length === 4);
+  await waitFor(() => logs.length === 1 && scheduler.callbacks.length === 5);
 
   scheduler.callbacks.forEach((callback) => callback());
   await waitFor(() => applications === 2);
@@ -133,13 +133,14 @@ test("MANUAL_REVIEW uses a restart-safe throttled cadence without delaying actio
   });
   const scheduler = controlledScheduler();
   const stop = startPaymentLifecycle(loadConfig(baseEnv), dependencies(), { scheduler });
-  await waitFor(() => actionableScans === 1 && scheduler.scheduled.length === 4);
+  await waitFor(() => actionableScans === 1 && scheduler.scheduled.length === 5);
 
   expect(manualScans).toBe(0);
   expect(scheduler.scheduled.map(({ delay }) => delay).sort((a, b) => a - b)).toEqual([
     1_000,
     1_000,
     1_000,
+    30_000,
     300_000,
   ]);
   scheduler.scheduled.filter(({ delay }) => delay === 1_000).forEach(({ callback }) => callback());
@@ -152,11 +153,29 @@ test("MANUAL_REVIEW uses a restart-safe throttled cadence without delaying actio
 
   const restartedScheduler = controlledScheduler();
   const stopRestarted = startPaymentLifecycle(loadConfig(baseEnv), dependencies(), { scheduler: restartedScheduler });
-  await waitFor(() => actionableScans === 3 && restartedScheduler.scheduled.length === 4);
+  await waitFor(() => actionableScans === 3 && restartedScheduler.scheduled.length === 5);
   expect(manualScans).toBe(1);
   restartedScheduler.scheduled.find(({ delay }) => delay === 300_000)?.callback();
   await waitFor(() => manualScans === 2);
   stopRestarted();
+});
+
+test("qa lifecycle enriches the date automatically while preserving the bank review route", async () => {
+  const scheduler = controlledScheduler();
+  const deps = lifecycleDependencies({});
+  let enriched = 0;
+  deps.transactions.listMissingDateReceipts = async () => [{ reference: "date-test", createdAt: new Date("2026-05-05T01:00:00Z") }];
+  deps.transactions.enrichIncomingStatement = async () => { enriched++; return true; };
+  deps.nexa.getPaymentTokenStatement = async (date) => ({ transactions: date === "2026-05-04" ? [{
+    reference: "date-test", amount: 5, currency: "GTQ", bank: "test", account: "test", comments: "",
+    token: "12345100000000", tokenIdentifier: "100000000", tokenPrefix: "12345", tokenName: "test",
+    tokenDate: "2026-05-04T00:00:00Z", wasReturn: 0, transactionId: "",
+  }] : [] });
+  const stop = startPaymentLifecycle(loadConfig(baseEnv), deps, { scheduler });
+  try {
+    await waitFor(() => enriched === 1);
+    expect(scheduler.scheduled.some(({ delay }) => delay === 30_000)).toBe(true);
+  } finally { stop(); }
 });
 
 function lifecycleDependencies(options: {
@@ -181,6 +200,8 @@ function lifecycleDependencies(options: {
       finalizeApplication: async () => undefined,
       markApplicationFailed: async () => undefined,
       upsertReceived: async () => ({ id: 1, reference: "1", processingStatus: "RECEIVED" as const, created: true }),
+      listMissingDateReceipts: async () => [],
+      enrichIncomingStatement: async () => false,
       listReconciliationAlerts: async () => options.reconciliation?.() ?? [],
       listManualReviewAlerts: async () => options.manualReconciliation?.() ?? [],
     },

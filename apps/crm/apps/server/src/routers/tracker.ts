@@ -360,8 +360,14 @@ async function casoDelSocio(id: string, membresias: MembresiaSocio[]) {
 	}
 	// El alcance se revalida contra la membresía, nunca contra el id que manda el cliente.
 	if (!casoDentroDeAlcance(fila, membresias)) {
+		// Si la agencia es suya, el caso es de otro vendedor (o de ninguno).
+		const esDeSuAgencia = membresias.some(
+			(m) => m.companyId === fila.companyId,
+		);
 		throw new ORPCError("FORBIDDEN", {
-			message: "Este caso no pertenece a tu agencia",
+			message: esDeSuAgencia
+				? "Este caso no está asignado a ti"
+				: "Este caso no pertenece a tu agencia",
 		});
 	}
 	return fila;

@@ -212,7 +212,7 @@ describe("getCasoById: aislamiento por vendedor", () => {
 		expect(caso.vendedor).toBe("Ana López");
 	});
 
-	test("rechaza el caso de otro vendedor de la misma agencia", async () => {
+	test("rechaza el caso de otro vendedor de la misma agencia: no está asignado a él", async () => {
 		socioConAcceso("agencia-A", "vendedor-1");
 		filasOportunidad = [
 			filaOportunidad({ companyId: "agencia-A", sellerId: "vendedor-2" }),
@@ -220,7 +220,10 @@ describe("getCasoById: aislamiento por vendedor", () => {
 
 		await expect(
 			call(trackerRouter.getCasoById, { id }, contextoDeSocioValido()),
-		).rejects.toMatchObject({ code: "FORBIDDEN" });
+		).rejects.toMatchObject({
+			code: "FORBIDDEN",
+			message: "Este caso no está asignado a ti",
+		});
 	});
 
 	test("un vendedor no ve los casos de su agencia que no tienen vendedor", async () => {
@@ -229,7 +232,24 @@ describe("getCasoById: aislamiento por vendedor", () => {
 
 		await expect(
 			call(trackerRouter.getCasoById, { id }, contextoDeSocioValido()),
-		).rejects.toMatchObject({ code: "FORBIDDEN" });
+		).rejects.toMatchObject({
+			code: "FORBIDDEN",
+			message: "Este caso no está asignado a ti",
+		});
+	});
+
+	test("un caso de otra agencia sigue diciendo que no pertenece a su agencia", async () => {
+		socioConAcceso("agencia-A", "vendedor-1");
+		filasOportunidad = [
+			filaOportunidad({ companyId: "agencia-B", sellerId: "vendedor-1" }),
+		];
+
+		await expect(
+			call(trackerRouter.getCasoById, { id }, contextoDeSocioValido()),
+		).rejects.toMatchObject({
+			code: "FORBIDDEN",
+			message: "Este caso no pertenece a tu agencia",
+		});
 	});
 
 	test("el gerente ve el caso de cualquier vendedor de su agencia", async () => {

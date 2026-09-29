@@ -148,3 +148,8 @@ dist
 
 # DB dumps / backups (data sensible de prod, nunca commitear)
 apps/cartera-back/backups/
+
+# Puntos de entrada locales de desarrollo (gemelos de src/index.ts para levantar
+# el back sin crons contra una base real). Montan routers que ESCRIBEN, así que
+# no se publican: se quedan en la máquina de cada uno.
+apps/cartera-back/src/_dev_*.ts

@@ -73,7 +73,7 @@ import {
 const MAX_AI_ATTEMPTS = 2;
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB por archivo
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
-const AI_TIMEOUT_MS = 120_000; // 2 minutos timeout para la IA
+const AI_TIMEOUT_MS = 180_000; // 3 minutos timeout para la IA (p90 real ~55s; los PDFs grandes pasaban de 2)
 
 // Mismo nombre de variable que usa cartera-back para no tener dos tasas distintas.
 const RAW_USD_EXCHANGE_RATE = Number(process.env.USD_EXCHANGE_RATE);
@@ -1299,6 +1299,39 @@ export const bankAnalysisRouter = {
 					},
 				]);
 
+				// Devuelve el intento reservado cuando no fue culpa de los documentos:
+				// la IA se pasó de tiempo o falló, o las monedas vienen mezcladas.
+				// Libera también la reserva del lead para que pueda volver a intentar.
+				const devolverIntento = async () => {
+					const condition = capacityReservation
+						? and(
+								whereCondition,
+								eq(
+									creditAnalysis.analysisReservationToken,
+									capacityReservation.token,
+								),
+							)
+						: whereCondition;
+					const releasedAttempt = await db
+						.update(creditAnalysis)
+						.set({
+							attemptCount: sql`GREATEST(${creditAnalysis.attemptCount} - 1, 0)`,
+							...(capacityReservation
+								? {
+										analysisReservationToken: null,
+										analysisReservationStartedAt: null,
+									}
+								: {}),
+							updatedAt: new Date(),
+						})
+						.where(condition)
+						.returning({ id: creditAnalysis.id });
+					if (capacityReservation && releasedAttempt.length > 0) {
+						capacityReservation = null;
+					}
+					return releasedAttempt.length > 0;
+				};
+
 				// 5-8. La producción y las pruebas usan el mismo núcleo: una sola IA,
 				// persistencia financiera y ciclo real de adjuntos.
 				const initial = await runInitialBankStatementHandlerCore({
@@ -1332,9 +1365,31 @@ export const bankAnalysisRouter = {
 								isTimeout,
 								error: error instanceof Error ? error.message : String(error),
 							});
+							// Un timeout o un fallo de la IA no es culpa de los documentos:
+							// el intento no se descuenta.
+							let intentoDevuelto = false;
+							try {
+								intentoDevuelto = await devolverIntento();
+							} catch (releaseError) {
+								console.error("No se pudo devolver el intento del análisis:", {
+									leadId: input.leadId,
+									error:
+										releaseError instanceof Error
+											? releaseError.message
+											: String(releaseError),
+								});
+							}
+							const causa = isTimeout
+								? "El análisis tardó demasiado tiempo. "
+								: "";
+							if (intentoDevuelto) {
+								throw new ORPCError("INTERNAL_SERVER_ERROR", {
+									message: `${causa}No se pudieron analizar los documentos. Este intento no se descontó; puede volver a intentarlo.`,
+								});
+							}
 							const remainingAttempts = MAX_AI_ATTEMPTS - currentAttemptCount;
 							throw new ORPCError("INTERNAL_SERVER_ERROR", {
-								message: `${isTimeout ? "El análisis tardó demasiado tiempo. " : ""}Error al analizar los documentos (intento ${currentAttemptCount}/${MAX_AI_ATTEMPTS}). ${
+								message: `${causa}Error al analizar los documentos (intento ${currentAttemptCount}/${MAX_AI_ATTEMPTS}). ${
 									remainingAttempts > 0
 										? `Puede intentar ${remainingAttempts} vez más.`
 										: "Se agotaron los intentos disponibles. Contacte al administrador."
@@ -1345,32 +1400,7 @@ export const bankAnalysisRouter = {
 					prepareAnalysis: async (generated) => {
 						let analysis = generated;
 						if (analysis.moneda === "MIXTA") {
-							const mixedCurrencyCondition = capacityReservation
-								? and(
-										whereCondition,
-										eq(
-											creditAnalysis.analysisReservationToken,
-											capacityReservation.token,
-										),
-									)
-								: whereCondition;
-							const releasedAttempt = await db
-								.update(creditAnalysis)
-								.set({
-									attemptCount: sql`GREATEST(${creditAnalysis.attemptCount} - 1, 0)`,
-									...(capacityReservation
-										? {
-												analysisReservationToken: null,
-												analysisReservationStartedAt: null,
-											}
-										: {}),
-									updatedAt: new Date(),
-								})
-								.where(mixedCurrencyCondition)
-								.returning({ id: creditAnalysis.id });
-							if (capacityReservation && releasedAttempt.length > 0) {
-								capacityReservation = null;
-							}
+							await devolverIntento();
 							throw new ORPCError("BAD_REQUEST", {
 								message:
 									"Los estados de cuenta subidos están en monedas distintas (quetzales y dólares). Analice por separado los de cada moneda. Este intento no se descontó.",

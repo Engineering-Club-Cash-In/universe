@@ -48,9 +48,14 @@ export type NexaPaymentContext = {
 };
 
 export type NexaClaim =
-  | { kind: "new" | "retry"; eventId: number }
-  | { kind: "applied"; paymentId: number }
-  | { kind: "conflict" | "replay" | "manual_review" };
+  | { kind: "new" | "retry" | "billing"; eventId: number }
+  | { kind: "applied"; paymentId: number; billingStatus?: "PENDING" }
+  | { kind: "manual_review"; phase?: "payment" | "billing" }
+  | { kind: "conflict" | "replay" | "billing_failed" };
+
+export type NexaBillingOutcome =
+  | { kind: "billed" }
+  | { kind: "pending" | "failed" | "unknown"; code: string };
 
 export type StoredNexaEvent = {
   id: number;
@@ -72,6 +77,7 @@ export const classifyNexaClaim = (
     payloadHash: string;
     compatiblePayloadHashes?: string[];
   },
+  billingIsRunning = false,
 ): NexaClaim => {
   if (nonceUsed) return { kind: "replay" };
   if (!event) throw new Error("nexa event claim missing");
@@ -83,25 +89,39 @@ export const classifyNexaClaim = (
   ) {
     return { kind: "conflict" };
   }
-  if (event.status === "applied" && event.pago_id !== null) {
+  if (["applied", "billed"].includes(event.status) && event.pago_id !== null) {
     return { kind: "applied", paymentId: event.pago_id };
   }
   if (event.status === "failed") return { kind: "retry", eventId: event.id };
+  // Preserve a durable rejection across polls instead of resetting Nexa's retry budget with PENDING.
+  if (event.status === "billing_failed") return { kind: "billing_failed" };
+  if (event.status === "billing_pending" && event.pago_id !== null) {
+    return { kind: "billing", eventId: event.id };
+  }
+  if (event.status === "billing_running" && billingIsRunning && event.pago_id !== null) {
+    return { kind: "applied", paymentId: event.pago_id, billingStatus: "PENDING" };
+  }
+  if (["billing_running", "billing_unknown"].includes(event.status)) {
+    return { kind: "manual_review", phase: "billing" };
+  }
   return { kind: "manual_review" };
 };
 
-type NexaPaymentResult = { paymentId: number; idempotent: boolean };
+type NexaPaymentResult = {
+  paymentId: number;
+  idempotent: boolean;
+  billingStatus?: "PENDING";
+};
 
-export const formatNexaPaymentDate = (date: Date) => {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Guatemala",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(date).map(({ type, value }) => [type, value]),
-  );
-  return `${parts.year}-${parts.month}-${parts.day}`;
+export const getNexaReceiptFields = (body: NexaPaymentBody) => {
+  if (!body.tokenDate) throw new NexaPaymentError("payment_date_required", 503);
+  // Nexa statements supply a banking calendar date, not a local receipt time.
+  // Keep the original bank value for audit; do not shift the statement day.
+  return {
+    fecha_pago: body.tokenDate,
+    fecha_boleta: body.tokenDate.slice(0, 10),
+    numeroAutorizacion: body.transactionId || body.externalReference,
+  };
 };
 
 export type NexaPaymentDependencies = {
@@ -133,7 +153,61 @@ export type NexaPaymentDependencies = {
   ) => Promise<{ success?: boolean }>;
   complete: (eventId: number, paymentId: number) => Promise<void>;
   fail: (eventId: number, code: string) => Promise<void>;
+  billPayments?: (eventId: number, paymentIds: number[]) => Promise<NexaBillingOutcome>;
+  completeBilling?: (eventId: number, paymentId: number) => Promise<void>;
+  failBilling?: (
+    eventId: number,
+    status: "billing_failed" | "billing_unknown",
+    code: string,
+  ) => Promise<void>;
   now?: () => Date;
+};
+
+export const canAutomaticallyInvoiceNexa = ({
+  environment,
+  enabled,
+  simulated,
+}: {
+  environment: string;
+  enabled: boolean;
+  simulated: boolean;
+}) => environment.toLowerCase() === "production" && enabled && !simulated;
+
+export const classifyNexaBillingResponse = (
+  status: number,
+  response: unknown,
+): NexaBillingOutcome => {
+  if (!response || typeof response !== "object") {
+    return { kind: "unknown", code: "invalid_billing_response" };
+  }
+  const result = response as Record<string, unknown>;
+  if (result.success === true) {
+    if (status < 200 || status >= 300 || !result.data || typeof result.data !== "object") {
+      return { kind: "unknown", code: "invalid_billing_response" };
+    }
+    const data = result.data as Record<string, unknown>;
+    if (Array.isArray(data.errores) && data.errores.length > 0) {
+      return { kind: "unknown", code: "partial_billing_result" };
+    }
+    if (
+      typeof data.total_facturas !== "number" ||
+      !Number.isInteger(data.total_facturas) ||
+      !Array.isArray(data.facturas) ||
+      data.total_facturas !== data.facturas.length ||
+      data.facturas.some((invoice) => {
+        if (!invoice || typeof invoice !== "object") return true;
+        const id = (invoice as Record<string, unknown>).factura_id;
+        return typeof id !== "number" || !Number.isInteger(id) || id <= 0;
+      })
+    ) {
+      return { kind: "unknown", code: "invalid_billing_response" };
+    }
+    return { kind: "billed" };
+  }
+  if (status >= 400 && status < 500 && !("facturasExistentes" in result)) {
+    return { kind: "failed", code: "billing_rejected" };
+  }
+  return { kind: "unknown", code: "billing_provider_or_persistence_error" };
 };
 
 export class NexaPaymentError extends Error {
@@ -154,81 +228,133 @@ export const processNexaPayment = (
   if (!existingCredit) throw new NexaPaymentError("credit_not_found", 404);
   const claim = await dependencies.claim(body, context);
   if ("paymentId" in claim) {
-    return { paymentId: claim.paymentId, idempotent: true };
+    return { paymentId: claim.paymentId, idempotent: true, ...(claim.billingStatus ? { billingStatus: claim.billingStatus } : {}) };
   }
+  if (claim.kind === "billing_failed") throw new NexaPaymentError("billing_failed", 503);
   if (claim.kind === "manual_review") {
-    throw new NexaPaymentError("payment_outcome_uncertain", 503);
+    throw new NexaPaymentError(
+      claim.phase === "billing" ? "billing_outcome_unknown" : "payment_outcome_uncertain",
+      503,
+    );
   }
   if (!("eventId" in claim)) {
     throw new NexaPaymentError(claim.kind, 409);
   }
   const eventId = claim.eventId;
+  let payments: Awaited<ReturnType<NexaPaymentDependencies["findPayments"]>>;
 
-  try {
-    if (!body.tokenDate) throw new NexaPaymentError("payment_date_required", 503);
-    const credit = await dependencies.loadCredit(body.creditoId);
-    if (!credit) throw new NexaPaymentError("credit_not_found", 404);
-    const bindingRejection = getNexaBindingRejection(
-      credit.binding,
-      body.amount,
-      dependencies.now?.() ?? new Date(),
-    );
-    if (bindingRejection) throw new NexaPaymentError(bindingRejection, 403);
-    if (!["ACTIVO", "MOROSO", "EN_CONVENIO", "INCOBRABLE"].includes(credit.statusCredit)) {
-      throw new NexaPaymentError("credit_not_payable", 409);
+  if (claim.kind === "billing") {
+    if (!dependencies.failBilling) throw new NexaPaymentError("billing_not_configured", 503);
+    try {
+      payments = await dependencies.findPayments(eventId, body.creditoId);
+      if (payments.length === 0) throw new Error("linked payments missing");
+      const linkedAmount = payments.reduce((total, payment) => total.plus(payment.amount), new Big(0));
+      if (!linkedAmount.eq(body.amount)) throw new Error("linked payment amount mismatch");
+    } catch {
+      await dependencies.failBilling(eventId, "billing_unknown", "billing_payment_link_unknown");
+      throw new NexaPaymentError("billing_outcome_unknown", 503);
     }
-
-    let payments = await dependencies.findPayments(eventId, body.creditoId);
-    if (payments.length === 0) {
-      let registered: Awaited<ReturnType<NexaPaymentDependencies["registerPayment"]>>;
-      try {
-        registered = await dependencies.registerPayment(
-          body,
-          eventId,
-          credit.usuarioId,
-          async () => {
-            const currentCredit = await dependencies.loadCredit(body.creditoId);
-            if (!currentCredit) throw new NexaPaymentError("credit_not_found", 404);
-            const rejection = getNexaBindingRejection(
-              currentCredit.binding,
-              body.amount,
-              dependencies.now?.() ?? new Date(),
-            );
-            if (rejection) throw new NexaPaymentError(rejection, 403);
-          },
-          paymentLock,
-        );
-      } catch (error) {
-        if (error instanceof NexaPaymentError) throw error;
-        throw new NexaPaymentError("payment_outcome_uncertain", 503);
+  } else {
+    try {
+      if (!body.tokenDate) throw new NexaPaymentError("payment_date_required", 503);
+      const credit = await dependencies.loadCredit(body.creditoId);
+      if (!credit) throw new NexaPaymentError("credit_not_found", 404);
+      const bindingRejection = getNexaBindingRejection(
+        credit.binding,
+        body.amount,
+        dependencies.now?.() ?? new Date(),
+      );
+      if (bindingRejection) throw new NexaPaymentError(bindingRejection, 403);
+      if (!["ACTIVO", "MOROSO", "EN_CONVENIO", "INCOBRABLE"].includes(credit.statusCredit)) {
+        throw new NexaPaymentError("credit_not_payable", 409);
       }
+
       payments = await dependencies.findPayments(eventId, body.creditoId);
       if (payments.length === 0) {
-        throw registered.success === false
-          ? new NexaPaymentError(
-              registered.code ?? "payment_registration_rejected",
-              registered.status ?? 409,
-            )
-          : new NexaPaymentError("payment_outcome_uncertain", 503);
+        let registered: Awaited<ReturnType<NexaPaymentDependencies["registerPayment"]>>;
+        try {
+          registered = await dependencies.registerPayment(
+            body,
+            eventId,
+            credit.usuarioId,
+            async () => {
+              const currentCredit = await dependencies.loadCredit(body.creditoId);
+              if (!currentCredit) throw new NexaPaymentError("credit_not_found", 404);
+              const rejection = getNexaBindingRejection(
+                currentCredit.binding,
+                body.amount,
+                dependencies.now?.() ?? new Date(),
+              );
+              if (rejection) throw new NexaPaymentError(rejection, 403);
+            },
+            paymentLock,
+          );
+        } catch (error) {
+          if (error instanceof NexaPaymentError) throw error;
+          throw new NexaPaymentError("payment_outcome_uncertain", 503);
+        }
+        payments = await dependencies.findPayments(eventId, body.creditoId);
+        if (payments.length === 0) {
+          throw registered.success === false
+            ? new NexaPaymentError(
+                registered.code ?? "payment_registration_rejected",
+                registered.status ?? 409,
+              )
+            : new NexaPaymentError("payment_outcome_uncertain", 503);
+        }
       }
-    }
-    if (payments.length === 0) throw new NexaPaymentError("payment_not_created", 500);
-    const linkedAmount = payments.reduce((total, payment) => total.plus(payment.amount), new Big(0));
-    if (!linkedAmount.eq(body.amount)) {
-      throw new NexaPaymentError("payment_outcome_uncertain", 503);
-    }
+      const linkedAmount = payments.reduce((total, payment) => total.plus(payment.amount), new Big(0));
+      if (!linkedAmount.eq(body.amount)) {
+        throw new NexaPaymentError("payment_outcome_uncertain", 503);
+      }
 
-    for (const payment of payments) {
-      if (["validated", "capital_validated"].includes(payment.validationStatus)) continue;
-      const applied = await dependencies.applyPayment(payment.paymentId, paymentLock);
-      if (applied.success !== true) throw new NexaPaymentError("payment_not_applied", 409);
+      for (const payment of payments) {
+        if (["validated", "capital_validated"].includes(payment.validationStatus)) continue;
+        const applied = await dependencies.applyPayment(payment.paymentId, paymentLock);
+        if (applied.success !== true) throw new NexaPaymentError("payment_not_applied", 409);
+      }
+      await dependencies.complete(eventId, payments[0]!.paymentId);
+    } catch (error) {
+      const code = error instanceof NexaPaymentError ? error.code : "processing_failed";
+      await dependencies.fail(eventId, code);
+      throw error;
     }
-    await dependencies.complete(eventId, payments[0]!.paymentId);
-    return { paymentId: payments[0]!.paymentId, idempotent: false };
+  }
+
+  const paymentId = payments[0]!.paymentId;
+  if (!dependencies.billPayments || !dependencies.completeBilling || !dependencies.failBilling) {
+    throw new NexaPaymentError("billing_not_configured", 503);
+  }
+  let billing: NexaBillingOutcome;
+  try {
+    billing = await dependencies.billPayments(
+      eventId,
+      payments.map((payment) => payment.paymentId),
+    );
+    if (billing.kind === "billed") {
+      await dependencies.completeBilling(eventId, paymentId);
+      return { paymentId, idempotent: false };
+    }
+    if (billing.kind === "pending") {
+      return { paymentId, idempotent: false, billingStatus: "PENDING" };
+    }
+    await dependencies.failBilling(
+      eventId,
+      billing.kind === "failed" ? "billing_failed" : "billing_unknown",
+      billing.code,
+    );
+    throw new NexaPaymentError(
+      billing.kind === "failed" ? "billing_failed" : "billing_outcome_unknown",
+      503,
+    );
   } catch (error) {
-    const code = error instanceof NexaPaymentError ? error.code : "processing_failed";
-    await dependencies.fail(eventId, code);
-    throw error;
+    if (error instanceof NexaPaymentError) throw error;
+    try {
+      await dependencies.failBilling(eventId, "billing_unknown", "billing_persistence_unknown");
+    } catch {
+      // billing_running is itself the durable fail-closed fence when this write fails.
+    }
+    throw new NexaPaymentError("billing_outcome_unknown", 503);
   }
 });
 

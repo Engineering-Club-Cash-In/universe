@@ -93,6 +93,13 @@ export const MENSAJE_GATE_APAGADO =
 	"La validación de mora está desactivada por configuración; no se consultó el estado del cliente en cartera.";
 
 /**
+ * Lo que dice el gate cuando cartera no pudo verificar y se dejó pasar igual
+ * (hotfix fail-open, ver `evaluarGateMoraDpi`). Tampoco es un rechazo.
+ */
+export const MENSAJE_PASO_SIN_VERIFICAR =
+	"No se pudo verificar el estado de mora del cliente en cartera; se dejó continuar sin validar.";
+
+/**
  * El texto del rechazo. Es distinto del de `mensajeConsultaMora` a propósito:
  * aquel describe un estado para una pantalla de consulta, este explica por qué
  * la operación no siguió.
@@ -202,6 +209,10 @@ export async function evaluarGateMoraDpi(
 		}
 	}
 
+	// Un fallo DEFINITIVO (p. ej. más créditos que el tope) no es "cartera no
+	// contestó": pide revisión manual y sigue bloqueando. Se marca acá porque
+	// `resolverValidacionMora` lo devuelve con el mismo motivo que una caída.
+	let falloDefinitivo = false;
 	const resultado = await resolverValidacionMora(dpiNormalizado, {
 		// El DPI ya pasó por `validarDpi` en el sitio que llama —es su primer
 		// paso— y volver a validarlo acá solo abriría la puerta a que las dos
@@ -211,7 +222,16 @@ export async function evaluarGateMoraDpi(
 		// Los números viajan atados acá y no como parámetro de
 		// `resolverValidacionMora`: aquella función es la regla del veredicto y no
 		// tiene por qué enterarse de cómo se arma la pregunta.
-		consultar: (dpi) => deps.consultar(dpi, numerosConocidos),
+		consultar: async (dpi) => {
+			try {
+				return await deps.consultar(dpi, numerosConocidos);
+			} catch (error) {
+				if (error instanceof ConsultaMoraNoDisponibleError && error.definitivo) {
+					falloDefinitivo = true;
+				}
+				throw error;
+			}
+		},
 		anotar: deps.anotar,
 	});
 
@@ -232,6 +252,32 @@ export async function evaluarGateMoraDpi(
 			rechazado: false,
 			motivo: veredicto.motivo,
 			mensaje: veredicto.mensaje,
+		};
+	}
+
+	// 🔴 HOTFIX 2026-09-28: fail-open cuando cartera no pudo verificar. En prod
+	// cartera-back resuelve el DPI contra la pasarela de SIFCO en
+	// `localhost:9500`, que no existe en el contenedor (ECONNREFUSED): todo alta
+	// con DPI rebotaba. Mientras no haya pasarela desplegada, "no se pudo
+	// verificar" deja pasar —como antes del gate— y queda su propia fila en la
+	// bitácora para poder revisar después quiénes entraron así. La mora, el
+	// convenio y el insoluto confirmados por cartera siguen bloqueando.
+	if (veredicto.motivo === "SERVICIO_NO_DISPONIBLE" && !falloDefinitivo) {
+		deps.anotar({
+			entity: "lead",
+			id: null,
+			action: "validar_mora_dpi_paso_sin_verificar",
+			data: {
+				dpi: dpiNormalizado,
+				motivo: veredicto.motivo,
+				detalle:
+					"cartera no pudo verificar la mora; se dejó pasar sin validar (hotfix fail-open)",
+			},
+		});
+		return {
+			rechazado: false,
+			motivo: veredicto.motivo,
+			mensaje: MENSAJE_PASO_SIN_VERIFICAR,
 		};
 	}
 

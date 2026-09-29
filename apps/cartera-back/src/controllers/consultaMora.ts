@@ -6,21 +6,11 @@ import {
   moras_credito,
   moras_historial,
 } from "../database/db/schema";
-import { sifcoDb } from "../database/sifco";
-import { prestamos } from "../database/sifco/schema";
-import {
-  buscarClientesPorIdentificacion,
-  consultarPrestamosPorCliente,
-} from "../services/sifcoIntegrations";
 import {
   construirHistorialMora,
   construirRespuesta,
   cotaDelPresupuesto,
   fusionarCreditosPorId,
-  numerosEspejoConPresupuesto,
-  seleccionarFichasDelDpi,
-  nombreClienteSifco,
-  normalizarIdentificacion,
   respuestaClienteNoEncontrado,
   respuestaServicioNoDisponible,
   siguientePasoConsulta,
@@ -32,17 +22,15 @@ import {
 } from "./consultaMoraPolicy";
 
 /**
- * ⏱️ Presupuesto GLOBAL de toda la resolución de números: identificación +
- * espejo + API de CADA ficha, desde que entra la request hasta que hay lista de
- * números. Es el único tope que le importa al asesor parado frente a la
+ * ⏱️ Presupuesto GLOBAL de la consulta: desde que entra la request hasta que
+ * hay veredicto. Es el único tope que le importa al asesor parado frente a la
  * pantalla.
  *
  * 🔴 Antes no existía: cada paso traía su propio tope y los topes eran
- * ADITIVOS. Una sola ficha podía tardar 10s (identificación) + 5s (espejo) +
- * 10s (API) = 25s, y cada ficha extra sumaba otros 15s, así que el techo real
- * dependía de cuántas fichas tuviera el DPI. Los topes por paso siguen abajo
- * como COTAS INTERNAS —el espejo no puede comerse el presupuesto entero—, pero
- * ninguno puede pasarse de lo que queda del global.
+ * ADITIVOS. Los pasos caros de entonces —identificación, espejo y API de CADA
+ * ficha contra la pasarela de SIFCO— ya no existen (ver `consultarMoraPorDpi`),
+ * pero el presupuesto global sí sigue: las lecturas de cartera también se
+ * cuelgan, y el asesor sigue esperando.
  *
  * 15s porque el gate corre mientras el asesor espera: más allá de eso el CRM
  * ya no está mostrando una validación, está mostrando una pantalla colgada. Al
@@ -51,14 +39,22 @@ import {
  */
 const PRESUPUESTO_NUMEROS_GATE_MS = 15000;
 
-/** Cota interna de la búsqueda de fichas por identificación. */
-const TIMEOUT_IDENTIFICACION_GATE_MS = 10000;
+/**
+ * Lo que este endpoint necesita de la base de cartera, y nada más.
+ *
+ * Existe para que las pruebas puedan ejercitar el VEREDICTO —que es lo que el
+ * CRM consume— con una base falsa, sin `mock.module("../database")`: ese mock
+ * es GLOBAL en bun test y se lo comen también los demás archivos de la suite.
+ * En producción siempre es `db`; ver `consultarMoraPorDpi`.
+ */
+export type BaseDeCartera = Pick<typeof db, "transaction">;
 
-/** Cota interna del camino interactivo: ver `obtenerNumerosPrestamo`. */
-const TIMEOUT_PRESTAMOS_GATE_MS = 10000;
-
-/** Cota interna del espejo: ver `numerosEspejoConPresupuesto`. */
-const TIMEOUT_ESPEJO_GATE_MS = 5000;
+/** Costuras internas del endpoint. Solo las pruebas pasan algo acá. */
+export interface DependenciasConsultaMora {
+  baseDeCartera?: BaseDeCartera;
+  /** Ver `PRESUPUESTO_NUMEROS_GATE_MS`. Se baja en pruebas para no esperar 15s. */
+  presupuestoMs?: number;
+}
 
 /**
  * Cuánto le toca a un paso, o el corte si el presupuesto global ya venció.
@@ -74,7 +70,7 @@ function cotaODesistir(
 
   if (ms === null) {
     throw new Error(
-      `El presupuesto de ${PRESUPUESTO_NUMEROS_GATE_MS}ms de la consulta de mora venció antes de ${paso}`
+      `El presupuesto de la consulta de mora venció antes de ${paso}`
     );
   }
 
@@ -82,24 +78,37 @@ function cotaODesistir(
 }
 
 /**
- * La misma cota, aplicada a una promesa ya en vuelo. El pool de la base de
- * cartera se configura sin timeout propio (`database/index.ts`): una query
- * colgada dejaba la request pendiente para siempre y el presupuesto de 15s
- * solo cubria la resolucion de numeros contra SIFCO. El throw sale por el
- * catch como SERVICIO_NO_DISPONIBLE, fail-closed.
+ * La misma cota, aplicada al trabajo que arranca acá adentro.
+ *
+ * 🔴 Recibe una FÁBRICA, no una promesa ya en vuelo, y el orden importa: la
+ * cota se calcula ANTES de crear nada. Con una promesa como argumento, el
+ * llamador la construía primero —`conRelojDePostgres(...)` abre la transacción
+ * y puede rechazar— y recién después entraba acá `cotaODesistir`, que con el
+ * presupuesto ya vencido lanza ANTES de que `Promise.race` le enganche un
+ * manejador: la promesa del argumento quedaba rechazada y huérfana
+ * (`unhandledRejection`, que según cómo esté configurado el runtime tumba el
+ * proceso, no solo la petición). Con la fábrica, si el presupuesto ya venció
+ * `cotaODesistir` lanza y la promesa nunca llega a existir; y si llega a
+ * existir, la carrera ya la está observando.
+ *
+ * El pool de la base de cartera se configura sin timeout propio
+ * (`database/index.ts`): una query colgada dejaba la request pendiente para
+ * siempre. El throw sale por el catch como SERVICIO_NO_DISPONIBLE, fail-closed.
  */
 async function bajoPlazo<T>(
-  promesa: Promise<T>,
+  arrancar: () => Promise<T>,
+  presupuestoMs: number,
   venceEnMs: number,
   paso: string
 ): Promise<T> {
-  const ms = cotaODesistir(PRESUPUESTO_NUMEROS_GATE_MS, venceEnMs, paso);
+  const ms = cotaODesistir(presupuestoMs, venceEnMs, paso);
+  const promesa = arrancar();
   let temporizador: ReturnType<typeof setTimeout> | undefined;
   const corte = new Promise<never>((_, rechazar) => {
     temporizador = setTimeout(() => {
       rechazar(
         new Error(
-          `El presupuesto de ${PRESUPUESTO_NUMEROS_GATE_MS}ms de la consulta de mora vencio durante ${paso}`
+          `El presupuesto de ${presupuestoMs}ms de la consulta de mora vencio durante ${paso}`
         )
       );
     }, ms);
@@ -125,12 +134,14 @@ type EjecutorCartera = Pick<typeof db, "select">;
  * migraciones legítimamente lentos— no se toca.
  */
 async function conRelojDePostgres<T>(
+  baseDeCartera: BaseDeCartera,
+  presupuestoMs: number,
   venceEnMs: number,
   paso: string,
   correr: (ejecutor: EjecutorCartera) => Promise<T>
 ): Promise<T> {
-  const ms = cotaODesistir(PRESUPUESTO_NUMEROS_GATE_MS, venceEnMs, paso);
-  return db.transaction(async (tx) => {
+  const ms = cotaODesistir(presupuestoMs, venceEnMs, paso);
+  return baseDeCartera.transaction(async (tx) => {
     await tx.execute(relojDe(ms));
     return correr(tx);
   });
@@ -149,80 +160,64 @@ function relojDe(ms: number): SQL {
  * Responde si el dueño de un DPI ya es cliente y si está en mora, para el gate
  * del CRM antes de dejar avanzar una solicitud.
  *
- * Fail-closed: cualquier fallo de SIFCO o de la base sale como
- * SERVICIO_NO_DISPONIBLE con `puedeContinuar: false`. Nunca se devuelve un
- * "sin mora" optimista ante un fallo.
+ * 🔴 **Los números de crédito los pone QUIEN PREGUNTA. Cartera ya no le
+ * pregunta a SIFCO por este DPI.** La pasarela de SIFCO
+ * (`services/sifcoIntegrations.ts`, `http://localhost:9500`) NUNCA se desplegó
+ * en producción y no se va a desplegar: mientras este endpoint la consultaba
+ * como primer paso, TODA consulta terminaba en el catch y salía
+ * SERVICIO_NO_DISPONIBLE. Fail-closed sobre un servicio inexistente no es un
+ * gate, es un portón cerrado con llave: rebotaba a morosos y a clientes nuevos
+ * por igual, y obligó al CRM a dejar pasar ese motivo (hotfix #1756).
  *
- * `numerosCreditoConocidos` los aporta quien pregunta (ver
- * `unirNumerosCredito`): son créditos que existen en `creditos` pero que SIFCO
- * no sabe asociar a este DPI.
+ * El CRM sí sabe de quién es el DPI: lo resuelve con su propia base
+ * (`leads.dpi` ↔ `opportunities.numeroSifco`) y manda el resultado en
+ * `numerosCreditoConocidos`. Cartera no puede hacer ese join —`cartera.usuarios`
+ * no guarda DPI—, así que la lista que llega es la ÚNICA fuente posible acá.
  *
- * `numerosCreditoGarantizados` son los créditos que este DPI AFIANZÓ. Entran al
+ * - Con números: se buscan esos créditos en cartera y se arma el veredicto
+ *   igual que siempre. La mora, el convenio y el insoluto siguen bloqueando;
+ *   ver `construirVeredicto` y `usuariosParaExpandir`.
+ * - Sin números: `CLIENTE_NO_ENCONTRADO` con `puedeContinuar: true`. Es la
+ *   misma conducta que ya existía para un DPI sin ficha, y es lo único
+ *   honesto: sin la lista del CRM, cartera no sabe de quién es ese DPI.
+ *
+ * ⚠️ Consecuencia ACEPTADA del enfoque: el cliente viejo o importado cuya
+ * oportunidad no tiene `numeroSifco` en el CRM llega con la lista vacía y pasa
+ * sin validar. El gate cubre lo que el CRM conoce, no la cartera entera.
+ *
+ * Fail-closed sigue vivo, pero solo para fallos REALES de cartera: si la base
+ * no responde o se vence el presupuesto, sale SERVICIO_NO_DISPONIBLE con
+ * `puedeContinuar: false`. Nunca se devuelve un "sin mora" optimista ante un
+ * fallo.
+ *
+ * 🔴 `numerosCreditoGarantizados` —los créditos que este DPI AFIANZÓ— también
+ * los resuelve el CRM y también cuentan para "¿hay números?". Entran al
  * veredicto igual que los demás, pero NO expanden por dueño: el fiador responde
  * por lo que garantizó, no por la vida entera del titular. Ver
  * `usuariosParaExpandir`.
+ *
+ * `dpi` ya no se usa para resolver nada —queda en la firma porque es el sujeto
+ * de la consulta y el contrato del endpoint no cambia—. Lo valida el router
+ * (`validarDpiConsulta`) antes de llegar acá.
  */
 export async function consultarMoraPorDpi(
   dpi: string,
   numerosCreditoConocidos?: string[],
-  numerosCreditoGarantizados?: string[]
+  numerosCreditoGarantizados?: string[],
+  dependencias: DependenciasConsultaMora = {}
 ): Promise<RespuestaConsultaMora> {
+  void dpi;
   const consultadoEn = new Date();
+  const baseDeCartera = dependencias.baseDeCartera ?? db;
+  const presupuestoMs =
+    dependencias.presupuestoMs ?? PRESUPUESTO_NUMEROS_GATE_MS;
   // El reloj arranca acá, no en cada paso: ver `PRESUPUESTO_NUMEROS_GATE_MS`.
-  const venceEn = Date.now() + PRESUPUESTO_NUMEROS_GATE_MS;
+  const venceEn = Date.now() + presupuestoMs;
 
   try {
-    // Normalizado a dígitos, no solo trim: los DPI viajan con espacios y
-    // guiones internos, y el core busca por igualdad. Un DPI formateado de un
-    // moroso volvía como "sin ficha" → CLIENTE_NO_ENCONTRADO → pasaba.
-    // Normalizar solo las fichas de la respuesta no rescata una búsqueda que
-    // ya volvió vacía.
-    const dpiLimpio = normalizarIdentificacion(dpi);
-    const clientes = await buscarClientesPorIdentificacion(
-      dpiLimpio,
-      cotaODesistir(
-        TIMEOUT_IDENTIFICACION_GATE_MS,
-        venceEn,
-        "buscar las fichas del DPI"
-      )
-    );
-
-    // TODAS las fichas del DPI, no la primera: un mismo DPI puede tener varias
-    // en el core (natural + jurídica, o duplicados sin unificar) y los créditos
-    // cuelgan de la ficha. Con la primera, un moroso con dos fichas pasaba
-    // limpio si la primera estaba al día. Ver `seleccionarFichasDelDpi`.
-    const { fichas, indeterminado } = seleccionarFichasDelDpi(
-      clientes,
-      dpiLimpio
-    );
-
-    // El DPI tenía fichas y alguna quedó inconsultable: no se le pueden pedir
-    // los créditos, así que no sabemos si debe. Una ficha basura no es "no
-    // cliente", es "no pude verificar", y sin este throw el descarte silencioso
-    // se veía idéntico a un DPI inexistente —CLIENTE_NO_ENCONTRADO y a seguir—.
-    // El throw baja al catch y sale SERVICIO_NO_DISPONIBLE, fail-closed.
-    if (indeterminado) {
-      throw new Error(
-        `SIFCO devolvió fichas del DPI con CodigoCliente inconsultable (${fichas.length} de ${clientes.length} consultables)`
-      );
-    }
-    const codigosCliente = fichas.map((ficha) => String(ficha.CodigoCliente));
-
-    // Secuencial y no en paralelo: son pocas fichas (casi siempre una) y el
-    // core aguanta mal las ráfagas. Si una falla, el throw sube y el veredicto
-    // sale SERVICIO_NO_DISPONIBLE — fail-closed: una ficha no consultada no
-    // puede leerse como una ficha sin mora.
-    const numerosSifco: string[] = [];
-    for (const codigo of codigosCliente) {
-      numerosSifco.push(...(await obtenerNumerosPrestamo(codigo, venceEn)));
-    }
-
-    // Los que SÍ expanden por dueño: lo que el core sabe de este DPI más lo que
-    // el llamador conoce de él como TITULAR.
-    const numerosExpansivos = unirNumerosCredito(
-      numerosSifco,
-      numerosCreditoConocidos
-    );
+    // Los que SÍ expanden por dueño: lo que el CRM conoce de este DPI como
+    // TITULAR. Antes se unían con los que devolvía SIFCO; ya no hay SIFCO.
+    const numerosExpansivos = unirNumerosCredito(numerosCreditoConocidos);
     // Los afianzados, que entran al veredicto pero no arrastran la cartera del
     // titular. Ver `usuariosParaExpandir`.
     const numerosGarantizados = unirNumerosCredito(numerosCreditoGarantizados);
@@ -231,10 +226,11 @@ export async function consultarMoraPorDpi(
       numerosGarantizados
     );
 
-    // Ver `siguientePasoConsulta`: sin números pero CON ficha el cliente existe
-    // y está al día; el no-encontrado exige que no haya ni ficha ni números.
+    // `cantidadFichas: 0` no es un placeholder: cartera ya no resuelve fichas
+    // del core, así que el no-encontrado depende solo de que no haya números.
+    // Ver `siguientePasoConsulta`.
     const paso = siguientePasoConsulta({
-      cantidadFichas: fichas.length,
+      cantidadFichas: 0,
       cantidadNumeros: numerosPrestamo.length,
     });
 
@@ -242,21 +238,23 @@ export async function consultarMoraPorDpi(
       return respuestaClienteNoEncontrado(consultadoEn);
     }
 
-    // Sin números no se consulta la base: un `inArray` vacío no tiene nada que
-    // buscar y el cliente sale como lo que es, conocido y sin créditos.
-    const creditosCliente =
-      paso === "BUSCAR_CREDITOS"
-        ? await bajoPlazo(
-            conRelojDePostgres(venceEn, "la lectura de creditos y moras", (ej) =>
-              obtenerCreditosConMora(numerosPrestamo, numerosExpansivos, ej)
-            ),
-            venceEn,
-            "la lectura de creditos y moras"
-          )
-        : [];
+    const creditosCliente = await bajoPlazo(
+      () =>
+        conRelojDePostgres(
+          baseDeCartera,
+          presupuestoMs,
+          venceEn,
+          "la lectura de creditos y moras",
+          (ej) => obtenerCreditosConMora(numerosPrestamo, numerosExpansivos, ej)
+        ),
+      presupuestoMs,
+      venceEn,
+      "la lectura de creditos y moras"
+    );
 
-    // Ni ficha ni crédito: el DPI no le consta a nadie.
-    if (!fichas.length && !creditosCliente.length) {
+    // Los números que mandó el CRM no empataron con ningún crédito de cartera:
+    // el DPI no le consta a nadie de este lado.
+    if (!creditosCliente.length) {
       return respuestaClienteNoEncontrado(consultadoEn);
     }
 
@@ -274,16 +272,11 @@ export async function consultarMoraPorDpi(
     );
 
     return construirRespuesta({
-      // El cliente que viaja en la respuesta es la primera ficha: es un dato de
-      // presentación. El veredicto se arma sobre los créditos de todas. Va
-      // `null` cuando el crédito se encontró por los números aportados y el
-      // core no tiene ficha — el hallazgo es igual de real.
-      cliente: fichas.length
-        ? {
-            codigoClienteSifco: codigosCliente[0],
-            nombre: nombreClienteSifco(fichas[0]),
-          }
-        : null,
+      // Siempre `null`: el nombre y el código de cliente salían de la ficha del
+      // core, y cartera ya no la consulta. Es un dato de PRESENTACIÓN —el
+      // veredicto nunca dependió de él— y el hallazgo es igual de real: ver
+      // `construirRespuesta`.
+      cliente: null,
       creditos: creditosRespuesta,
       // Sin créditos no hay historial que leer, y abrir la transacción igual
       // solo agregaba una forma de fallar: con el pool ocupado o el
@@ -292,9 +285,15 @@ export async function consultarMoraPorDpi(
       // resultado ya se sabe vacío.
       historialMora: numeroPorCreditoId.size
         ? await bajoPlazo(
-            conRelojDePostgres(venceEn, "la lectura del historial de mora", (ej) =>
-              obtenerHistorialMora(numeroPorCreditoId, ej)
-            ),
+            () =>
+              conRelojDePostgres(
+                baseDeCartera,
+                presupuestoMs,
+                venceEn,
+                "la lectura del historial de mora",
+                (ej) => obtenerHistorialMora(numeroPorCreditoId, ej)
+              ),
+            presupuestoMs,
             venceEn,
             "la lectura del historial de mora"
           )
@@ -339,6 +338,12 @@ function selectCreditosConMora(ejecutor: EjecutorCartera) {
  * Dos pasadas: por número y después por dueño. Ver `fusionarCreditosPorId` para
  * por qué la segunda existe y por qué no reemplaza a la primera.
  *
+ * 🔴 La segunda pasada es lo que sostiene el gate ahora que SIFCO no aporta
+ * nada: con UN solo número del CRM que empate, la expansión por `usuario_id`
+ * alcanza a TODOS los créditos de ese dueño —los `insoluto-N`, los
+ * `CRM-<uuid>` y los que el CRM no tenía anotados—, así que la lista corta del
+ * CRM no se traduce en un veredicto corto.
+ *
  * `numerosExpansivos` es un SUBCONJUNTO de `numerosPrestamo`: los números que
  * este DPI tiene como titular. Los que no están ahí —los afianzados— se miran
  * uno por uno y no arrastran la cartera de su dueño. Ver
@@ -364,95 +369,6 @@ async function obtenerCreditosConMora(
   );
 
   return fusionarCreditosPorId(porNumero, porUsuario);
-}
-
-/**
- * Números de préstamo del cliente: la UNIÓN del espejo y del API, nunca uno u
- * otro.
- *
- * 🔴 El schema `sifco.` NO vive en la base de cartera: `database/sifco/index.ts`
- * abre su propio Pool contra `SIFCO_DB_URL`. Cruzar `sifco.prestamos` con
- * `cartera.creditos` en un solo SELECT es imposible; el cruce se hace en JS,
- * con los `pre_numero` de acá y un `inArray` sobre la conexión de cartera.
- *
- * 🔴 El espejo NO corta la consulta al API aunque devuelva filas. Antes sí: si
- * el espejo traía algo, se devolvía eso y el API ni se tocaba. Un espejo
- * PARCIALMENTE atrasado —tiene los préstamos viejos, le falta el que acaba de
- * caer en mora— pasaba entonces la validación como `SIN_MORA`, que es
- * exactamente el falso negativo que este endpoint existe para evitar; y es peor
- * que el espejo vacío, porque ahí sí había fallback. Un espejo incompleto no se
- * distingue de uno completo mirándolo, así que se preguntan los dos y se unen.
- *
- * Además `sifcoDb` puede ser `null` (variable sin configurar: el módulo solo
- * avisa por consola), y por eso el API es el camino principal en cualquier
- * entorno sin esa variable.
- *
- * ⚠️ Si el API lanza, el throw sube y el llamador responde
- * SERVICIO_NO_DISPONIBLE aunque el espejo hubiera traído filas. Es a propósito:
- * media lista no alcanza para decir "sin mora" —el crédito que falta puede ser
- * justo el moroso—, y fail-closed es la regla de todo el endpoint.
- *
- * ⚠️ El espejo es el caso OPUESTO y por eso no es fail-closed: si vence o falla,
- * se sigue con solo el API. Ver `numerosEspejoConPresupuesto`.
- */
-async function obtenerNumerosPrestamo(
-  codigoClienteSifco: string,
-  venceEn: number
-): Promise<string[]> {
-  // El espejo va con cota propia y corta: es una base aparte (`SIFCO_DB_URL`)
-  // que antes podía colgar la request entera sin llegar nunca ni al API ni al
-  // catch. 5s y no los 10s del API porque el espejo es el atajo: si no contesta
-  // rápido, dejó de ser atajo. Nunca más de lo que quede del presupuesto global
-  // —con varias fichas, la segunda ya no tiene 5s propios que gastar—.
-  const filasEspejo = sifcoDb
-    ? await numerosEspejoConPresupuesto(
-        (cotaMs) =>
-          // Con reloj también del lado de Postgres: la carrera de 5s soltaba
-          // la espera pero la query seguía viva en el servidor, y este pool
-          // (`SIFCO_DB_URL`) tampoco tiene statement_timeout propio — las
-          // consultas abandonadas se acumulaban reteniendo conexiones aunque
-          // el API en vivo respondiera.
-          sifcoDb!.transaction(async (tx) => {
-            await tx.execute(relojDe(cotaMs));
-            const filas = await tx
-              .select({ pre_numero: prestamos.pre_numero })
-              .from(prestamos)
-              .where(eq(prestamos.pre_cli_cod, codigoClienteSifco));
-            return filas.map((fila) => fila.pre_numero ?? "");
-          }),
-        cotaODesistir(
-          TIMEOUT_ESPEJO_GATE_MS,
-          venceEn,
-          `consultar el espejo del cliente ${codigoClienteSifco}`
-        ),
-        (detalle) =>
-          console.warn(
-            `⚠️ espejo de SIFCO no utilizable para el cliente ${codigoClienteSifco}; se sigue solo con el API:`,
-            detalle
-          )
-      )
-    : [];
-
-  // 10s y no los 30s del cliente: acá hay un asesor esperando en pantalla. Los
-  // 30s son el techo de los caminos por lote (sync, migración), donde una
-  // respuesta lenta sigue siendo útil; en el gate una respuesta a los 25s ya no
-  // le sirve a nadie. Al vencerse, el throw sube y sale SERVICIO_NO_DISPONIBLE.
-  // Igual que el espejo, nunca más de lo que quede del presupuesto global.
-  const respuesta = await consultarPrestamosPorCliente(
-    Number(codigoClienteSifco),
-    cotaODesistir(
-      TIMEOUT_PRESTAMOS_GATE_MS,
-      venceEn,
-      `consultar los préstamos del cliente ${codigoClienteSifco}`
-    )
-  );
-
-  // La misma unión que usa el llamador para los números del CRM: deduplica y
-  // descarta vacíos.
-  return unirNumerosCredito(
-    filasEspejo,
-    (respuesta?.Prestamos ?? []).map((prestamo) => prestamo.NumeroPrestamo ?? "")
-  );
 }
 
 async function obtenerHistorialMora(

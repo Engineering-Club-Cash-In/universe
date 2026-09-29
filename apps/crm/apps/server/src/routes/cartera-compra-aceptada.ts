@@ -5,6 +5,7 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { investorContractBatches } from "../db/schema/investor-contracts";
 import { notifications } from "../db/schema/notifications";
+import { conCandadoDeBateria } from "../lib/contratos-candado";
 import { createNotification } from "../lib/notificaciones";
 import { ROLES } from "../lib/roles";
 
@@ -241,55 +242,60 @@ app.post("/", async (c) => {
 			// La batería vuelve a ser trabajo sólo si esto es otra compra: si es
 			// el mismo aviso, la que estaba abierta sigue abierta y la cerrada
 			// sigue cerrada.
-			const actualizada = await db
-				.update(investorContractBatches)
-				.set({
-					investorName: inversionista.nombre,
-					investorDpi: inversionista.dpi ?? null,
-					investorDpiRepLegal: inversionista.dpiRepLegal ?? null,
-					investorEmail: inversionista.email ?? null,
-					investorPhone: inversionista.celular ?? null,
-					creditos: compra.creditos,
-					montoTotal: compra.montoTotal,
-					modalidad: compra.modalidad ?? null,
-					facturacion: compra.facturacion ?? null,
-					updatedAt: new Date(),
-					...(otraCompra
-						? {
-								acceptedAt: aceptadaEn,
-								acceptedByEmail: compra.aceptadaPor ?? null,
-								// Otra compra es otro correo: los contratos de ésta se
-								// contestan en su hilo, no en el de la anterior. Y vuelve a
-								// ser trabajo de jurídico hasta que le dé "Listo".
-								emailThreadId: compra.correoId ?? null,
-								status: "pendiente",
-								startedAt: null,
-								startedBy: null,
-								completedAt: null,
-								completedBy: null,
-							}
-						: // El mismo aviso repetido no cambia de hilo; sólo lo completa si
-							// la primera vez llegó sin él.
-							!existente.emailThreadId && compra.correoId
-							? { emailThreadId: compra.correoId }
-							: {}),
-				})
-				.where(
-					and(
-						eq(investorContractBatches.id, existente.id),
-						// Dos avisos de la misma compra nueva pueden leer los dos la
-						// aceptación vieja. Sólo uno la registra; el otro no encuentra la
-						// fila y sigue como aviso repetido, sin volver a notificar.
-						//
-						// Y el mismo aviso repetido sólo refresca si la batería sigue
-						// siendo de esa aceptación: una compra nueva que entró en el
-						// medio no se pisa con la foto de ésta.
-						otraCompra
-							? lt(investorContractBatches.acceptedAt, aceptadaEn)
-							: eq(investorContractBatches.acceptedAt, aceptadaEn),
-					),
-				)
-				.returning({ id: investorContractBatches.id });
+			// Con el candado de la batería, el mismo del Listo: si jurídico le
+			// está dando Listo a la compra anterior, esto espera a que termine en
+			// vez de cambiarle la aceptación y el hilo en el medio del envío.
+			const actualizada = await conCandadoDeBateria(existente.id, () =>
+				db
+					.update(investorContractBatches)
+					.set({
+						investorName: inversionista.nombre,
+						investorDpi: inversionista.dpi ?? null,
+						investorDpiRepLegal: inversionista.dpiRepLegal ?? null,
+						investorEmail: inversionista.email ?? null,
+						investorPhone: inversionista.celular ?? null,
+						creditos: compra.creditos,
+						montoTotal: compra.montoTotal,
+						modalidad: compra.modalidad ?? null,
+						facturacion: compra.facturacion ?? null,
+						updatedAt: new Date(),
+						...(otraCompra
+							? {
+									acceptedAt: aceptadaEn,
+									acceptedByEmail: compra.aceptadaPor ?? null,
+									// Otra compra es otro correo: los contratos de ésta se
+									// contestan en su hilo, no en el de la anterior. Y vuelve a
+									// ser trabajo de jurídico hasta que le dé "Listo".
+									emailThreadId: compra.correoId ?? null,
+									status: "pendiente",
+									startedAt: null,
+									startedBy: null,
+									completedAt: null,
+									completedBy: null,
+								}
+							: // El mismo aviso repetido no cambia de hilo; sólo lo completa si
+								// la primera vez llegó sin él.
+								!existente.emailThreadId && compra.correoId
+								? { emailThreadId: compra.correoId }
+								: {}),
+					})
+					.where(
+						and(
+							eq(investorContractBatches.id, existente.id),
+							// Dos avisos de la misma compra nueva pueden leer los dos la
+							// aceptación vieja. Sólo uno la registra; el otro no encuentra la
+							// fila y sigue como aviso repetido, sin volver a notificar.
+							//
+							// Y el mismo aviso repetido sólo refresca si la batería sigue
+							// siendo de esa aceptación: una compra nueva que entró en el
+							// medio no se pisa con la foto de ésta.
+							otraCompra
+								? lt(investorContractBatches.acceptedAt, aceptadaEn)
+								: eq(investorContractBatches.acceptedAt, aceptadaEn),
+						),
+					)
+					.returning({ id: investorContractBatches.id }),
+			);
 
 			if (otraCompra && actualizada.length === 0) otraCompra = false;
 		}

@@ -1,3 +1,8 @@
+import {
+  excluirTraspasosSinBorrar,
+  poolsConTraspasoRechazado,
+  type EntradaPool,
+} from "./poolsTraspasos";
 import Big from "big.js";
 import { eq, and, inArray } from "drizzle-orm";
 import fs from "fs";
@@ -11,7 +16,9 @@ import {
   pagos_credito_inversionistas,
   boletas,
   efectividad_asesores,
+  rubros,
 } from "../database/db";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { findOrCreateInvestor } from "./investor";
 import { updateInstallments } from "./updateCredit";
 import { marcarCuotasPagadasHastaNumero } from "./migratePayments";
@@ -567,19 +574,26 @@ export async function processPoolsRaros(
 
   // Separar: creditos que coinciden con el pool → recalcular
   //          creditos con numero diferente → eliminar de la BD
-  const creditosParaRecalcular: CreditoAgrupado[] = [];
+  // Las entradas se ARMAN MARCADAS con el crédito origen del que dependen, para
+  // poder descartar después los traspasos cuyo borrado no llegó a ocurrir. Ver
+  // `excluirTraspasosSinBorrar`.
+  const poolsMarcados: {
+    numeroCredito: string;
+    entradas: EntradaPool<CreditoJson>[];
+  }[] = [];
   const creditosParaEliminar: CreditoEliminar[] = [];
 
   for (const pool of pools) {
     const numeroBasePool = pool.numeroCredito.split("_")[0];
-    const creditosDelPool: CreditoJson[] = [];
+    const entradasDelPool: EntradaPool<CreditoJson>[] = [];
 
     for (const credito of pool.creditos) {
       const numeroBaseCredito = credito.numeroCredito.split("_")[0];
 
       if (numeroBaseCredito === numeroBasePool) {
-        // Coincide con el pool → asignar al credito principal
-        creditosDelPool.push(credito);
+        // Coincide con el pool → asignar al credito principal. No depende de
+        // ningún borrado, así que va sin origen.
+        entradasDelPool.push({ credito, origenBase: null });
       } else {
         // Numero diferente → eliminar ese credito de la BD
         creditosParaEliminar.push({
@@ -587,18 +601,23 @@ export async function processPoolsRaros(
           inversionista: credito.inversionista,
           capitalRestante: credito.capitalRestante,
         });
-        // Pero el inversionista va al credito principal con su capital
-        creditosDelPool.push({
-          ...credito,
-          numeroCredito: numeroBasePool, // Reasignar al credito correcto
+        // Pero el inversionista va al credito principal con su capital — SÓLO
+        // si el borrado de arriba de verdad ocurre. Se guarda de qué crédito
+        // depende para poder verificarlo después.
+        entradasDelPool.push({
+          credito: {
+            ...credito,
+            numeroCredito: numeroBasePool, // Reasignar al credito correcto
+          },
+          origenBase: numeroBaseCredito,
         });
       }
     }
 
-    if (creditosDelPool.length > 0) {
-      creditosParaRecalcular.push({
+    if (entradasDelPool.length > 0) {
+      poolsMarcados.push({
         numeroCredito: numeroBasePool,
-        creditos: creditosDelPool,
+        entradas: entradasDelPool,
       });
     }
   }
@@ -613,7 +632,36 @@ export async function processPoolsRaros(
     });
   }
 
-  // 2. Luego recalcular los creditos correctos con todos sus inversionistas
+  /**
+   * 2. Recién ACÁ se decide qué se recalcula, y con el resultado del borrado en
+   * la mano — no antes.
+   *
+   * El borrado puede rechazarse (crédito con un cobro adicional con deuda viva),
+   * y mientras esto no se miraba, el recálculo le sumaba al crédito principal
+   * las tenencias de un crédito que quedó en pie: el mismo capital contado dos
+   * veces. Ver `excluirTraspasosSinBorrar` para por qué se excluye el traspaso
+   * en vez de abortar el pool o tirar.
+   */
+  const creditosParaRecalcular: CreditoAgrupado[] = excluirTraspasosSinBorrar(
+    poolsMarcados,
+    resultadoEliminacion?.detalles ?? null
+  );
+
+  /**
+   * Y los pools que NO pueden tocar el plan de pagos, por el mismo motivo.
+   *
+   * El filtro de arriba cubre el recálculo de capital, pero el paso de cuotas de
+   * más abajo recorre `pools` —la lista ORIGINAL— y le marca cuotas pagadas y le
+   * sobrescribe el monto al crédito principal con el `numeroCuota` y la `cuota`
+   * del pool, que asumen que los traspasos entraron. Filtrar sólo el capital
+   * dejaba esa mitad abierta: el censo de quién consume `pools` da exactamente
+   * dos lugares, y éste era el segundo.
+   */
+  const poolsSinTocarCuotas = poolsConTraspasoRechazado(
+    poolsMarcados,
+    resultadoEliminacion?.detalles ?? null
+  );
+
   const resultadoRecalculo = await recalcularCreditosDesdeJson(
     creditosParaRecalcular,
     {
@@ -691,6 +739,7 @@ export async function processPoolsRaros(
   let cuotasError = 0;
   let cuotasRecalculadas = 0;
   let cuotasRecalculoError = 0;
+  let cuotasSalteadasPorRubros = 0;
 
   for (const pool of pools) {
     const numeroBasePool = pool.numeroCredito.split("_")[0];
@@ -702,6 +751,15 @@ export async function processPoolsRaros(
     const cuotaCredito = datosUltimoPago?.cuota ?? 0;
 
     if (numeroCuota <= 0) continue;
+
+      // El plan de pagos NO se toca si alguno de los traspasos de este pool no
+      // se borró: `numeroCuota` y `cuotaCredito` describen un pool que absorbió
+      // TODO su capital, y acá eso no pasó. Marcarle cuotas pagadas al principal
+      // con esa foto es peor que no marcarle ninguna.
+      if (poolsSinTocarCuotas.has(numeroBasePool)) {
+        cuotasSalteadasPorRubros++;
+        continue;
+      }
 
     try {
       await marcarCuotasPagadasHastaNumero({
@@ -758,7 +816,17 @@ export async function processPoolsRaros(
     success: resultadoRecalculo.success || (resultadoEliminacion?.success ?? false),
     recalculo: resultadoRecalculo,
     eliminacion: resultadoEliminacion,
-    cuotas: { marcadas: cuotasMarcadas, recalculadas: cuotasRecalculadas, errores: cuotasError },
+    cuotas: {
+      marcadas: cuotasMarcadas,
+      recalculadas: cuotasRecalculadas,
+      errores: cuotasError,
+      // Sale en el resultado, no sólo en un contador: un pool que se salteó
+      // queda a medio aplicar —capital recalculado sin sus traspasos rechazados,
+      // plan de pagos sin tocar— y el operador tiene que saber que le falta una
+      // pasada después de anular el rubro. Un salteo silencioso se lee como
+      // "salió todo bien".
+      salteadas_por_rubros: cuotasSalteadasPorRubros,
+    },
   };
 }
 
@@ -809,56 +877,128 @@ export async function eliminarCreditos(
 
       const creditoId = creditoDB.credito_id;
 
-      // 2. Obtener pago_ids para limpiar boletas
-      const pagos = await db
-        .select({ pago_id: pagos_credito.pago_id })
-        .from(pagos_credito)
-        .where(eq(pagos_credito.credito_id, creditoId));
+      /**
+       * 🔒 El chequeo de rubros y TODO el borrado van bajo el advisory lock del
+       * crédito — el mismo que toman `crearRubro`, `editarRubro` y el registro
+       * de pagos.
+       *
+       * Sin él era un TOCTOU: el chequeo es un SELECT plano y los borrados que
+       * le siguen son autocommit sueltos, así que un `crearRubro` que entrara en
+       * el medio commiteaba su rubro y el DELETE final del crédito se lo llevaba
+       * por cascada. La protección existía y la carrera la esquivaba entera.
+       *
+       * No cambia el orden de candados del módulo: advisory afuera, filas
+       * adentro.
+       */
+      const rubrosQueBloquean = await withPaymentAdvisoryLock(
+        creditoId,
+        async () => {
+          /**
+           * 🛡️ Un crédito con deuda viva por cobros adicionales no se borra en
+           * silencio.
+           *
+           * El DELETE de `creditos` cascadea a `cartera.rubros`, y con ellos se
+           * van los reclamos y el historial. El crédito se reconstruye desde un
+           * JSON que no tiene concepto de rubro, así que no se recrean: se
+           * pierde la deuda vigente por cobros adicionales.
+           *
+           * La condición mira `completado`, NO `anulado`, y la diferencia
+           * importa: un rubro totalmente PAGADO queda `completado = true` con
+           * `anulado = false`, y `puedeAnularRubro` rechaza anularlo con un 409
+           * ("no hay nada que anular"). Bloqueando por `anulado` —como estaba—
+           * cualquier crédito que alguna vez terminara de pagar un rubro quedaba
+           * INDELEBLE para siempre, y el mensaje le pedía al operador algo que
+           * el sistema le iba a negar.
+           *
+           * Lo que esto NO protege, y conviene saberlo: el historial de los
+           * rubros ya saldados se va igual con la cascada. Protegerlo también
+           * dejaría el crédito sin forma de borrarse nunca, que es peor; la
+           * evidencia de lo cobrado vive además en las facturas.
+           */
+          const rubrosConDeuda = await db
+            .select({ rubro_id: rubros.rubro_id, descripcion: rubros.descripcion })
+            .from(rubros)
+            .where(
+              and(
+                eq(rubros.credito_id, creditoId),
+                eq(rubros.anulado, false),
+                eq(rubros.completado, false)
+              )
+            );
 
-      const pagoIds = pagos.map(p => p.pago_id);
+          // `continue` no sirve adentro del callback: se devuelve el motivo y
+          // decide el llamador, ya fuera del candado.
+          if (rubrosConDeuda.length > 0) return rubrosConDeuda;
 
-      // 3. Eliminar en orden (respetando FKs sin CASCADE)
-      if (pagoIds.length > 0) {
-        // Boletas (referencia pago_id sin CASCADE)
+
+      
+        // 2. Obtener pago_ids para limpiar boletas
+        const pagos = await db
+          .select({ pago_id: pagos_credito.pago_id })
+          .from(pagos_credito)
+          .where(eq(pagos_credito.credito_id, creditoId));
+
+        const pagoIds = pagos.map(p => p.pago_id);
+
+        // 3. Eliminar en orden (respetando FKs sin CASCADE)
+        if (pagoIds.length > 0) {
+          // Boletas (referencia pago_id sin CASCADE)
+          await db
+            .delete(boletas)
+            .where(inArray(boletas.pago_id, pagoIds));
+          hasPersistedChanges = true;
+          notifyPersisted(telemetry);
+
+          // Pagos inversionistas (referencia pago_id y credito_id sin CASCADE)
+          await db
+            .delete(pagos_credito_inversionistas)
+            .where(eq(pagos_credito_inversionistas.credito_id, creditoId));
+
+          // Pagos credito (referencia credito_id sin CASCADE)
+          await db
+            .delete(pagos_credito)
+            .where(eq(pagos_credito.credito_id, creditoId));
+        }
+
+        // Cuotas (referencia credito_id sin CASCADE)
         await db
-          .delete(boletas)
-          .where(inArray(boletas.pago_id, pagoIds));
+          .delete(cuotas_credito)
+          .where(eq(cuotas_credito.credito_id, creditoId));
         hasPersistedChanges = true;
         notifyPersisted(telemetry);
 
-        // Pagos inversionistas (referencia pago_id y credito_id sin CASCADE)
+        // Inversionistas del credito (sin CASCADE)
         await db
-          .delete(pagos_credito_inversionistas)
-          .where(eq(pagos_credito_inversionistas.credito_id, creditoId));
+          .delete(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, creditoId));
 
-        // Pagos credito (referencia credito_id sin CASCADE)
+        // Efectividad asesores (sin CASCADE)
         await db
-          .delete(pagos_credito)
-          .where(eq(pagos_credito.credito_id, creditoId));
+          .delete(efectividad_asesores)
+          .where(eq(efectividad_asesores.credito_id, creditoId));
+
+        // 4. Eliminar el credito (CASCADE borra: moras, condonaciones, rubros, cancelaciones, bad_debts, montos_adicionales, convenios)
+        // facturas_electronicas pone pago_id en NULL automaticamente (SET NULL)
+        await db
+          .delete(creditos)
+          .where(eq(creditos.credito_id, creditoId));
+
+          return null;
+        }
+      );
+
+      if (rubrosQueBloquean) {
+        resultados.push({
+          numeroCredito: numeroBase,
+          status: "error",
+          message:
+            `El crédito tiene ${rubrosQueBloquean.length} cobro(s) adicional(es) con saldo ` +
+            `pendiente (${rubrosQueBloquean.map((r) => r.descripcion).join(", ")}). Borrarlo ` +
+            `se llevaría esa deuda. Anulalos primero desde la pantalla de Rubros del ` +
+            `crédito y volvé a intentar.`,
+        });
+        continue;
       }
-
-      // Cuotas (referencia credito_id sin CASCADE)
-      await db
-        .delete(cuotas_credito)
-        .where(eq(cuotas_credito.credito_id, creditoId));
-      hasPersistedChanges = true;
-      notifyPersisted(telemetry);
-
-      // Inversionistas del credito (sin CASCADE)
-      await db
-        .delete(creditos_inversionistas)
-        .where(eq(creditos_inversionistas.credito_id, creditoId));
-
-      // Efectividad asesores (sin CASCADE)
-      await db
-        .delete(efectividad_asesores)
-        .where(eq(efectividad_asesores.credito_id, creditoId));
-
-      // 4. Eliminar el credito (CASCADE borra: moras, condonaciones, rubros, cancelaciones, bad_debts, montos_adicionales, convenios)
-      // facturas_electronicas pone pago_id en NULL automaticamente (SET NULL)
-      await db
-        .delete(creditos)
-        .where(eq(creditos.credito_id, creditoId));
 
       resultados.push({
         numeroCredito: numeroBase,

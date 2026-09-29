@@ -53,6 +53,75 @@ describe("bank analysis coverage save lifecycle", () => {
 		);
 	});
 
+	test("assigns the first three PDFs to bank statement slots when month detection fails", () => {
+		const ambiguousFiles = files.slice(0, 3);
+		const plan = buildBankStatementArtifactPlan({
+			analysisBatchId: "analysis-ambiguous",
+			files: ambiguousFiles,
+			coverage: resolveBankStatementMonthlyCoverage({
+				uploadedFileCount: ambiguousFiles.length,
+				coverageByFile: [],
+			}),
+			existingDocuments: [],
+		});
+
+		expect(
+			plan.map(({ documentType, fileIndex }) => ({ documentType, fileIndex })),
+		).toEqual([
+			{ documentType: "estados_cuenta_1", fileIndex: 0 },
+			{ documentType: "estados_cuenta_2", fileIndex: 1 },
+			{ documentType: "estados_cuenta_3", fileIndex: 2 },
+		]);
+	});
+
+	test("keeps duplicate-month support PDFs out of later checklist slots", () => {
+		const duplicateMonthFiles = files.slice(0, 3);
+		const plan = buildBankStatementArtifactPlan({
+			analysisBatchId: "analysis-duplicate-month",
+			files: duplicateMonthFiles,
+			coverage: resolveBankStatementMonthlyCoverage({
+				uploadedFileCount: duplicateMonthFiles.length,
+				coverageByFile: duplicateMonthFiles.map(({ fileIndex }) => ({
+					indice_archivo: fileIndex,
+					meses: ["2026-01"],
+				})),
+			}),
+			existingDocuments: [],
+		});
+
+		expect(
+			plan.map(({ documentType, fileIndex }) => ({ documentType, fileIndex })),
+		).toEqual([
+			{ documentType: "estados_cuenta_1", fileIndex: 0 },
+			{ documentType: "other", fileIndex: 1 },
+			{ documentType: "other", fileIndex: 2 },
+		]);
+	});
+
+	test("does not fill checklist slots when partial coverage includes a reliable month", () => {
+		const partiallyDetectedFiles = files.slice(0, 3);
+		const plan = buildBankStatementArtifactPlan({
+			analysisBatchId: "analysis-partial-coverage",
+			files: partiallyDetectedFiles,
+			coverage: resolveBankStatementMonthlyCoverage({
+				uploadedFileCount: partiallyDetectedFiles.length,
+				coverageByFile: [
+					{ indice_archivo: 0, meses: ["2026-01"] },
+					{ indice_archivo: 1, meses: ["2026-01"] },
+				],
+			}),
+			existingDocuments: [],
+		});
+
+		expect(
+			plan.map(({ documentType, fileIndex }) => ({ documentType, fileIndex })),
+		).toEqual([
+			{ documentType: "other", fileIndex: 0 },
+			{ documentType: "other", fileIndex: 1 },
+			{ documentType: "other", fileIndex: 2 },
+		]);
+	});
+
 	test("does not overwrite manual adjuntos or checklist documents from another analysis", () => {
 		const plan = buildBankStatementArtifactPlan({
 			analysisBatchId: "analysis-1",

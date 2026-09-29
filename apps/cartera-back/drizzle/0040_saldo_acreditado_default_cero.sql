@@ -1,0 +1,26 @@
+-- El `DEFAULT 0` de `saldo_a_favor_acreditado`, SEPARADO de la 0039 a propósito.
+--
+-- 🔴 ESTA MIGRACIÓN NO SE ADELANTA AL DESPLIEGUE. Va después de que el código
+-- nuevo esté arriba y ya no queden instancias viejas escribiendo pagos.
+--
+-- Por qué, que es el punto entero:
+--
+-- El `DEFAULT 0` hace que toda fila nueva nazca diciendo "acreditó cero" en vez
+-- de "no se sabe". Eso es cierto para el código NUEVO, que estampa la columna
+-- cuando acredita de verdad. Pero una instancia VIEJA todavía corriendo no
+-- conoce la columna: registra un abono directo a capital, le acredita el
+-- sobrante al `saldo_a_favor` del cliente, y la fila queda en 0 por el default.
+-- Revertir después ese pago devolvería CERO y le dejaría al cliente plata
+-- acreditada que ya no le corresponde.
+--
+-- Con la 0039 sola —columna anulable, sin default— esas filas de la ventana de
+-- despliegue quedan en NULL, que es lo que de verdad son: escritas por código
+-- que no sabía. Y NULL cae en la conducta vieja, que para ellas es la correcta.
+--
+-- O sea: la 0039 puede ir cuando se quiera; ésta espera.
+--
+-- Lo que la 0039 ya dejó hecho, y que este archivo NO toca: las filas que
+-- existían antes quedaron en NULL para siempre, porque el `ADD COLUMN` fue sin
+-- default. Este `SET DEFAULT` no las rellena: sólo gobierna los inserts futuros.
+ALTER TABLE cartera.pagos_credito
+  ALTER COLUMN saldo_a_favor_acreditado SET DEFAULT 0;

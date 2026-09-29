@@ -15,7 +15,7 @@ import {
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { Button } from "@/components/ui/button";
-import { Eye, Pencil, XCircle, FileCheck, CheckCircle2, DollarSign, ShieldCheck } from "lucide-react";
+import { FileCheck, ShieldCheck } from "lucide-react";
 
 import {
   Table,
@@ -26,7 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import React from "react";
-import { Hash, History, Info, ListOrdered, RefreshCw, CalendarClock } from "lucide-react";
+import { Hash, Info, ListOrdered, RefreshCw } from "lucide-react";
 import { useMemo } from "react";
 import { AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -53,6 +53,9 @@ import { Switch } from "@/components/ui/switch";
 import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
 import { toast } from "sonner";
 import { ModalCaidoCredit } from "./ModalCaidoCredit";
+import RubrosCredito from "./RubrosCredito";
+import { CreditoAcciones } from "./CreditoAcciones";
+import { construirMoraTarjeta } from "@/lib/moraTarjeta";
 
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
@@ -119,6 +122,19 @@ export function ListaCreditosPagos() {
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
 
+  /**
+   * El crédito cuyo modal de rubros está abierto.
+   *
+   * Vive ACÁ, por encima del `isMobile ? <MobileView/> : <DesktopView/>`, y no
+   * dentro de cada vista. Con una copia por vista, cruzar el breakpoint de
+   * 1200px —rotar una tablet, arrastrar el borde de la ventana— desmontaba la
+   * vista activa y con ella el diálogo: el borrador a medio escribir se perdía,
+   * y peor, se saltaba la protección del propio modal contra cerrarse con una
+   * escritura en curso, porque no es el modal el que se cierra sino el árbol
+   * entero el que se va.
+   */
+  const [rubrosCredito, setRubrosCredito] = useState<any | null>(null);
+
   // Aseguradoras para el filtro
   const [aseguradoras, setAseguradoras] = useState<Aseguradora[]>([]);
   React.useEffect(() => {
@@ -132,31 +148,14 @@ export function ListaCreditosPagos() {
     [estado]
   );
 
-  type CreditStatus =
-    | "ACTIVO"
-    | "PENDIENTE_CANCELACION"
-    | "CANCELADO"
-    | "INCOBRABLE"
-    | "MOROSO"
-    | "EN_CONVENIO"
-    | "CAIDO";
-
-  // Helpers de permisos
-  const canEdit = (_s: CreditStatus) => true;
-  const canCancel = (s: CreditStatus) => ["ACTIVO", "MOROSO"].includes(s);
-  const canActivate = (s: CreditStatus) => s === "PENDIENTE_CANCELACION";
-  const canViewPayments = (_s: CreditStatus) => true;
-  const canCreateConvenio = (s: CreditStatus) =>
-    ["ACTIVO", "MOROSO"].includes(s);
-  const canMarkCaido = (s: CreditStatus) =>
-    ["ACTIVO", "MOROSO"].includes(s);
+  // Los helpers de permisos (canEdit, canCancel, …) viven en
+  // ../lib/permisosCredito: la barra de acciones los comparte, para que cada
+  // condición de visibilidad esté escrita una sola vez.
 
   // Dentro del componente, después de los otros hooks:
   const reportCancelation = useReport("cancelation");
   const reportCancelationIntern = useReport("cancelation-intern");
   const reportCostDetail = useReport("cost-detail");
-  const canViewReports = (s: CreditStatus) =>
-    s === "PENDIENTE_CANCELACION" || s === "CANCELADO";
 
   // State para el modal de reportes
   const [reportModalOpen, setReportModalOpen] = useState(false);
@@ -748,6 +747,7 @@ export function ListaCreditosPagos() {
         <>
           {isMobile ? (
             <MobileView
+              setRubrosCredito={setRubrosCredito}
               data={data}
               expandedRow={expandedRow}
               setExpandedRow={setExpandedRow}
@@ -764,20 +764,17 @@ export function ListaCreditosPagos() {
               setReportModalOpen={setReportModalOpen}
               handleActivarConvenio={handleActivarConvenio}
               user={user}
-              canViewReports={canViewReports}
-              canCreateConvenio={canCreateConvenio}
-              canCancel={canCancel}
-              canActivate={canActivate}
+              activateCreditMutation={activateCreditMutation}
               toggleCancelacionMutation={toggleCancelacionMutation}
               refetch={refetch}
               setSelectedCreditFechaInicio={setSelectedCreditFechaInicio}
               setFechaInicioModalOpen={setFechaInicioModalOpen}
-              canMarkCaido={canMarkCaido}
               setSelectedCreditCaido={setSelectedCreditCaido}
               setCaidoModalOpen={setCaidoModalOpen}
             />
           ) : (
             <DesktopView
+              setRubrosCredito={setRubrosCredito}
               data={data}
               expandedRow={expandedRow}
               setExpandedRow={setExpandedRow}
@@ -796,16 +793,9 @@ export function ListaCreditosPagos() {
               activateCreditMutation={activateCreditMutation}
               toggleCancelacionMutation={toggleCancelacionMutation}
               user={user}
-              canViewReports={canViewReports}
-              canEdit={canEdit}
-              canCancel={canCancel}
-              canActivate={canActivate}
-              canViewPayments={canViewPayments}
-              canCreateConvenio={canCreateConvenio}
               refetch={refetch}
               setSelectedCreditFechaInicio={setSelectedCreditFechaInicio}
               setFechaInicioModalOpen={setFechaInicioModalOpen}
-              canMarkCaido={canMarkCaido}
               setSelectedCreditCaido={setSelectedCreditCaido}
               setCaidoModalOpen={setCaidoModalOpen}
             />
@@ -838,6 +828,14 @@ export function ListaCreditosPagos() {
           )}
         </>
       )}
+
+      <RubrosCredito
+        open={!!rubrosCredito}
+        onOpenChange={(o) => !o && setRubrosCredito(null)}
+        creditoId={rubrosCredito?.credito_id ?? null}
+        statusCredit={rubrosCredito?.statusCredit ?? null}
+        rol={user?.role ?? null}
+      />
 
       <ModalEditCredit
         open={editModalOpen}
@@ -1298,18 +1296,18 @@ function MobileView({
   setReportModalOpen,
   handleActivarConvenio,
   user,
-  canViewReports,
-  canCreateConvenio,
-  canCancel,
-  canActivate,
+  activateCreditMutation,
   toggleCancelacionMutation,
   refetch,
   setSelectedCreditFechaInicio,
   setFechaInicioModalOpen,
-  canMarkCaido,
   setSelectedCreditCaido,
   setCaidoModalOpen,
+  setRubrosCredito,
 }: any) {
+  // Crédito cuyo modal de Rubros está abierto (uno a la vez). El modal vive
+  // FUERA del map: montarlo por fila lo desmontaría al colapsar la tarjeta.
+
   return (
     <div className="space-y-4">
       {data.data.map((item: any, idx: number) => (
@@ -1398,166 +1396,30 @@ function MobileView({
           </p>
 
           {/* Acciones */}
-          <div className="flex justify-center flex-wrap gap-2 mt-3">
-            {(user?.role === "ADMIN" || user?.role === "ASESOR") && (
-              <Button
-                variant="outline"
-                className="text-green-700 border-green-300 hover:bg-green-50"
-                onClick={() =>
-                  navigate(`/realizarPago?sifco=${item.creditos.numero_credito_sifco}`)
-                }
-              >
-                <DollarSign className="w-4 h-4 mr-1" /> Registrar Pago
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              className="text-blue-700 border-blue-300 hover:bg-blue-50"
-              onClick={() =>
-                navigate(`/pagos/${item.creditos.numero_credito_sifco}`)
-              }
-            >
-              <Eye className="w-4 h-4 mr-1" /> Ver pagos
-            </Button>
-
-            {/* Historial de mora: ADMIN, CONTA y ASESOR. Va acá y no dentro del
-                bloque de ADMIN porque ASESOR no tiene acceso a /mora: si el
-                botón solo existiera en escritorio, en teléfono se quedaba sin
-                ninguna forma de ver el historial. */}
-            {(user?.role === "ADMIN" ||
-              user?.role === "CONTA" ||
-              user?.role === "ASESOR") && (
-              <Button
-                variant="outline"
-                className="text-indigo-700 border-indigo-300 hover:bg-indigo-50"
-                onClick={() => {
-                  setSelectedCreditHistorialMora(item.creditos);
-                  setOpenHistorialMoraModal(true);
-                }}
-              >
-                <History className="w-4 h-4 mr-1" /> Historial de mora
-              </Button>
-            )}
-
-            {canCancel(item.creditos.statusCredit) && (
-              <Button
-                variant="outline"
-                className="text-red-700 border-red-300 hover:bg-red-50"
-                onClick={() => handleOpenModal(item.creditos.credito_id)}
-              >
-                <XCircle className="w-4 h-4 mr-1" /> Cancelar
-              </Button>
-            )}
-            {canActivate(item.creditos.statusCredit) && user?.role === "ADMIN" && (
-              <Button
-                variant="outline"
-                className="text-green-700 border-green-300 hover:bg-green-50"
-                onClick={() =>
-                  toggleCancelacionMutation.mutate(
-                    { creditId: item.creditos.credito_id, activo: true },
-                    {
-                      onSuccess: () => {
-                        toast.success("Cancelación activada correctamente");
-                        refetch();
-                      },
-                      onError: (err: any) => {
-                        toast.error(err?.message || "Error al activar cancelación");
-                      }
-                    }
-                  )
-                }
-                disabled={toggleCancelacionMutation.isPending}
-              >
-                <FileCheck className="w-4 h-4 mr-1" />
-                {toggleCancelacionMutation.isPending ? "Activando..." : "Activar Cancelación"}
-              </Button>
-            )}
-            {user?.role === "ADMIN" && (
-              <>
-                <Button
-                  variant="outline"
-                  className="text-yellow-700 border-yellow-300 hover:bg-yellow-50"
-                  onClick={() =>
-                    handleOpenEdit(
-                      {
-                        ...item.creditos,
-                        creditos_inversionistas_espejo:
-                          item.creditos_inversionistas_espejo,
-                        tiene_pagos_sin_liquidar: item.tiene_pagos_sin_liquidar,
-                      },
-                      item.inversionistas,
-                      item.usuarios
-                    )
-                  }
-                >
-                  <Pencil className="w-4 h-4 mr-1" /> Editar
-                </Button>
-                <Button
-                  variant="outline"
-                  className="text-purple-700 border-purple-300 hover:bg-purple-50"
-                  onClick={() => {
-                    setSelectedCreditMora(item.creditos);
-                    setOpenMoraModal(true);
-                  }}
-                >
-                  ➕ Mora
-                </Button>
-                <Button
-                  variant="outline"
-                  className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
-                  onClick={() => {
-                    setSelectedCreditMarcarCuotas(item.creditos.numero_credito_sifco);
-                    setOpenMarcarCuotasModal(true);
-                  }}
-                >
-                  <CheckCircle2 className="w-4 h-4 mr-1" /> Marcar Cuotas
-                </Button>
-                <Button
-                  variant="outline"
-                  className="text-blue-700 border-blue-300 hover:bg-blue-50"
-                  onClick={() => {
-                    setSelectedCreditFechaInicio({
-                      sifco: item.creditos.numero_credito_sifco,
-                      fechaActual: item.fecha_inicio ?? null,
-                    });
-                    setFechaInicioModalOpen(true);
-                  }}
-                >
-                  <CalendarClock className="w-4 h-4 mr-1" /> Cambiar fecha inicio
-                </Button>
-
-              </>
-            )}
-            {canMarkCaido(item.creditos.statusCredit) &&
-              user?.role === "ADMIN" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-1 text-gray-700 border-gray-400 hover:bg-gray-100"
-                  onClick={() => {
-                    setSelectedCreditCaido(item.creditos.credito_id);
-                    setCaidoModalOpen(true);
-                  }}
-                >
-                  <XCircle className="w-4 h-4" />
-                  Marcar Caído
-                </Button>
-              )}
-            {canViewReports(item.creditos.statusCredit) &&
-              (user?.role === "ADMIN" || user?.role === "ASESOR") && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-1 text-green-700 border-green-300 hover:bg-green-50"
-                  onClick={() => {
-                    setSelectedCreditForReport(item.creditos);
-                    setReportModalOpen(true);
-                  }}
-                >
-                  <Download className="w-4 h-4" />
-                  Reportes
-                </Button>
-              )}
+          <div className="mt-3">
+            <CreditoAcciones
+              item={item}
+              user={user}
+              navigate={navigate}
+              handleOpenModal={handleOpenModal}
+              handleOpenEdit={handleOpenEdit}
+              setSelectedCreditMora={setSelectedCreditMora}
+              setOpenMoraModal={setOpenMoraModal}
+              setSelectedCreditHistorialMora={setSelectedCreditHistorialMora}
+              setOpenHistorialMoraModal={setOpenHistorialMoraModal}
+              setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
+              setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
+              setSelectedCreditFechaInicio={setSelectedCreditFechaInicio}
+              setFechaInicioModalOpen={setFechaInicioModalOpen}
+              setSelectedCreditCaido={setSelectedCreditCaido}
+              setCaidoModalOpen={setCaidoModalOpen}
+              setSelectedCreditForReport={setSelectedCreditForReport}
+              setReportModalOpen={setReportModalOpen}
+              toggleCancelacionMutation={toggleCancelacionMutation}
+              activateCreditMutation={activateCreditMutation}
+              refetch={refetch}
+              onAbrirRubros={() => setRubrosCredito(item.creditos)}
+            />
           </div>
 
           {/* Expandible */}
@@ -1572,7 +1434,13 @@ function MobileView({
               )}
 
               {/* Mora */}
-              {item?.mora?.activa && <MoraInfo mora={item.mora} />}
+              {item?.mora?.activa && (
+                <MoraInfo
+                  mora={item.mora}
+                  incrementoDiarioMora={item.incrementoDiarioMora}
+                  incrementoMaximoMensualMora={item.incrementoMaximoMensualMora}
+                />
+              )}
 
               {/* Incobrable */}
               {item.incobrable && (
@@ -1600,6 +1468,8 @@ function MobileView({
           )}
         </div>
       ))}
+
+      {/* Rubros: cobros adicionales del crédito (ADMIN y ASESOR). */}
     </div>
   );
 }
@@ -1624,19 +1494,16 @@ function DesktopView({
   activateCreditMutation,
   toggleCancelacionMutation,
   user,
-  canViewReports,
-  canEdit,
-  canCancel,
-  canActivate,
-  canViewPayments,
-  canCreateConvenio,
   refetch,
   setSelectedCreditFechaInicio,
   setFechaInicioModalOpen,
-  canMarkCaido,
   setSelectedCreditCaido,
   setCaidoModalOpen,
+  setRubrosCredito,
 }: any) {
+  // Crédito cuyo modal de Rubros está abierto (uno a la vez). El modal vive
+  // FUERA de la tabla: montarlo por fila lo desmontaría al colapsar la fila.
+
   return (
 <div className="w-full">
   <Table className="w-full border-separate border-spacing-y-1">
@@ -1741,234 +1608,30 @@ function DesktopView({
                 <TableRow>
                   <TableCell colSpan={6} className="p-0 bg-blue-50 rounded-b-2xl">
                     {/* Botones de acción */}
-                    <div className="flex flex-wrap justify-center gap-2 px-6 py-4 border-b border-blue-100">
-                        {(user?.role === "ADMIN" || user?.role === "ASESOR") && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex items-center gap-1 text-green-700 border-green-300 hover:bg-green-50"
-                            onClick={() =>
-                              navigate(
-                                `/realizarPago?sifco=${item.creditos.numero_credito_sifco}`
-                              )
-                            }
-                          >
-                            <DollarSign className="w-4 h-4" />
-                            Registrar Pago
-                          </Button>
-                        )}
-
-                        {canViewPayments(item.creditos.statusCredit) && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex items-center gap-1 text-blue-700 border-blue-300 hover:bg-blue-50"
-                            onClick={() =>
-                              navigate(
-                                `/pagos/${item.creditos.numero_credito_sifco}`
-                              )
-                            }
-                          >
-                            <Eye className="w-4 h-4" />
-                            Ver pagos
-                          </Button>
-                        )}
-
-                        {canEdit(item.creditos.statusCredit) &&
-                          user?.role === "ADMIN" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-1 text-yellow-700 border-yellow-300 hover:bg-yellow-50"
-                              onClick={() =>
-                                handleOpenEdit(
-                                  {
-                                    ...item.creditos,
-                                    creditos_inversionistas_espejo:
-                                      item.creditos_inversionistas_espejo,
-                                    tiene_pagos_sin_liquidar:
-                                      item.tiene_pagos_sin_liquidar,
-                                  },
-                                  item.inversionistas,
-                                  item.usuarios
-                                )
-                              }
-                            >
-                              <Pencil className="w-4 h-4" />
-                              Editar
-                            </Button>
-                          )}
-
-                        {canCancel(item.creditos.statusCredit) && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-1 text-red-700 border-red-300 hover:bg-red-50"
-                              onClick={() =>
-                                handleOpenModal(item.creditos.credito_id)
-                              }
-                            >
-                              <XCircle className="w-4 h-4" />
-                              Cancelar
-                            </Button>
-                          )}
-
-                        {canEdit(item.creditos.statusCredit) &&
-                          user?.role === "ADMIN" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-1 text-purple-700 border-purple-300 hover:bg-purple-50"
-                              onClick={() => {
-                                setSelectedCreditMora(item.creditos);
-                                setOpenMoraModal(true);
-                              }}
-                            >
-                              ➕ Mora
-                            </Button>
-                          )}
-
-                        {/* Historial de mora: ADMIN, CONTA y ASESOR */}
-                        {(user?.role === "ADMIN" ||
-                          user?.role === "CONTA" ||
-                          user?.role === "ASESOR") && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex items-center gap-1 text-indigo-700 border-indigo-300 hover:bg-indigo-50"
-                            onClick={() => {
-                              setSelectedCreditHistorialMora(item.creditos);
-                              setOpenHistorialMoraModal(true);
-                            }}
-                          >
-                            <History className="w-4 h-4" />
-                            Historial de mora
-                          </Button>
-                        )}
-
-                          {user?.role === "ADMIN" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-1 text-emerald-700 border-emerald-300 hover:bg-emerald-50"
-                              onClick={() => {
-                                setSelectedCreditMarcarCuotas(item.creditos.numero_credito_sifco);
-                                setOpenMarcarCuotasModal(true);
-                              }}
-                            >
-                              <CheckCircle2 className="w-4 h-4" /> Marcar Cuotas
-                            </Button>
-                          )}
-
-                          {user?.role === "ADMIN" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-1 text-blue-700 border-blue-300 hover:bg-blue-50"
-                              onClick={() => {
-                                setSelectedCreditFechaInicio({
-                                  sifco: item.creditos.numero_credito_sifco,
-                                  fechaActual: item.fecha_inicio ?? null,
-                                });
-                                setFechaInicioModalOpen(true);
-                              }}
-                            >
-                              <CalendarClock className="w-4 h-4" /> Cambiar fecha inicio
-                            </Button>
-                          )}
-
-                        {canMarkCaido(item.creditos.statusCredit) &&
-                          user?.role === "ADMIN" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-1 text-gray-700 border-gray-400 hover:bg-gray-100"
-                              onClick={() => {
-                                setSelectedCreditCaido(item.creditos.credito_id);
-                                setCaidoModalOpen(true);
-                              }}
-                            >
-                              <XCircle className="w-4 h-4" />
-                              Marcar Caído
-                            </Button>
-                          )}
-
-                        {canViewReports(item.creditos.statusCredit) &&
-                          (user?.role === "ADMIN" || user?.role === "ASESOR") && (
-                            <Button
-                              variant="outline"
-                              className="text-green-700 border-green-300 hover:bg-green-50"
-                              onClick={() => {
-                                setSelectedCreditForReport(item.creditos);
-                                setReportModalOpen(true);
-                              }}
-                            >
-                              <Download className="w-4 h-4 mr-1" /> Reportes
-                            </Button>
-                          )}
-
-                        {canActivate(item.creditos.statusCredit) &&
-                          user?.role === "ADMIN" && (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="flex items-center gap-1 text-green-700 border-green-300 hover:bg-green-50"
-                                onClick={() =>
-                                  toggleCancelacionMutation.mutate(
-                                    { creditId: item.creditos.credito_id, activo: true },
-                                    {
-                                      onSuccess: () => {
-                                        toast.success("Cancelación activada correctamente");
-                                        refetch();
-                                      },
-                                      onError: (err: any) => {
-                                        toast.error(err?.message || "Error al activar cancelación");
-                                      }
-                                    }
-                                  )
-                                }
-                                disabled={toggleCancelacionMutation.isPending}
-                              >
-                                <FileCheck className="w-4 h-4" />
-                                {toggleCancelacionMutation.isPending ? "Activando..." : "Activar Cancelación"}
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="flex items-center gap-1 text-blue-700 border-blue-300 hover:bg-blue-50"
-                                onClick={() =>
-                                  activateCreditMutation.mutate(
-                                    {
-                                      creditId: item.creditos.credito_id,
-                                      accion: "ACTIVAR",
-                                    },
-                                    {
-                                      onSuccess: () => {
-                                        toast.success("Crédito reactivado correctamente");
-                                        refetch();
-                                      },
-                                      onError: (err: any) => {
-                                        toast.error(err?.message || "Error al reactivar crédito");
-                                      }
-                                    }
-                                  )
-                                }
-                              >
-                                <RefreshCw className="w-4 h-4" />
-                                Reactivar Crédito
-                              </Button>
-                            </>
-                          )}
-
-                        {(canEdit(item.creditos.statusCredit) ||
-                          canCancel(item.creditos.statusCredit) ||
-                          canActivate(item.creditos.statusCredit)) &&
-                          user?.role !== "ADMIN" && (
-                            <span className="text-gray-400 italic">
-                              Sin permisos
-                            </span>
-                          )}
+                    <div className="px-6 py-4 border-b border-blue-100">
+                      <CreditoAcciones
+                        item={item}
+                        user={user}
+                        navigate={navigate}
+                        handleOpenModal={handleOpenModal}
+                        handleOpenEdit={handleOpenEdit}
+                        setSelectedCreditMora={setSelectedCreditMora}
+                        setOpenMoraModal={setOpenMoraModal}
+                        setSelectedCreditHistorialMora={setSelectedCreditHistorialMora}
+                        setOpenHistorialMoraModal={setOpenHistorialMoraModal}
+                        setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
+                        setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
+                        setSelectedCreditFechaInicio={setSelectedCreditFechaInicio}
+                        setFechaInicioModalOpen={setFechaInicioModalOpen}
+                        setSelectedCreditCaido={setSelectedCreditCaido}
+                        setCaidoModalOpen={setCaidoModalOpen}
+                        setSelectedCreditForReport={setSelectedCreditForReport}
+                        setReportModalOpen={setReportModalOpen}
+                        toggleCancelacionMutation={toggleCancelacionMutation}
+                        activateCreditMutation={activateCreditMutation}
+                        refetch={refetch}
+                        onAbrirRubros={() => setRubrosCredito(item.creditos)}
+                      />
                     </div>
 
                     {/* Detalles del crédito */}
@@ -1984,7 +1647,13 @@ function DesktopView({
 
                       {item?.mora?.activa && (
                         <div className="col-span-full">
-                          <MoraInfo mora={item.mora} />
+                          <MoraInfo
+                            mora={item.mora}
+                            incrementoDiarioMora={item.incrementoDiarioMora}
+                            incrementoMaximoMensualMora={
+                              item.incrementoMaximoMensualMora
+                            }
+                          />
                         </div>
                       )}
 
@@ -2025,6 +1694,8 @@ function DesktopView({
           ))}
         </TableBody>
       </Table>
+
+      {/* Rubros: cobros adicionales del crédito (ADMIN y ASESOR). */}
     </div>
   );
 }
@@ -2120,7 +1791,25 @@ function DetallesCredito({
   );
 }
 
-function MoraInfo({ mora }: { mora: any }) {
+function MoraInfo({
+  mora,
+  incrementoDiarioMora,
+  incrementoMaximoMensualMora,
+}: {
+  mora: any;
+  incrementoDiarioMora?: unknown;
+  incrementoMaximoMensualMora?: unknown;
+}) {
+  // Qué decir lo decide `construirMoraTarjeta` (src/lib/moraTarjeta.ts), donde
+  // se puede probar sin montar la pantalla. Acá solo se pinta.
+  const tarjeta = construirMoraTarjeta({
+    montoMora: mora?.monto_mora,
+    cuotasAtrasadas: mora?.cuotas_atrasadas,
+    porcentajeMora: mora?.porcentaje_mora,
+    incrementoDiarioMora,
+    incrementoMaximoMensualMora,
+  });
+
   return (
     <div className="bg-yellow-50 rounded-2xl p-4">
       <h4 className="text-lg font-extrabold text-yellow-800 mb-3 text-center">
@@ -2128,29 +1817,28 @@ function MoraInfo({ mora }: { mora: any }) {
       </h4>
       <div className="grid grid-cols-2 gap-3 text-center">
         <div className="p-3 bg-white border rounded-lg shadow-sm">
-          <span className="font-bold text-yellow-700 block">Monto Mora</span>
-          <span className="text-gray-900 font-semibold">
-            Q
-            {Number(mora?.monto_mora || 0).toLocaleString("es-GT", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+          <span className="font-bold text-yellow-700 block">
+            {tarjeta.rotuloMonto}
           </span>
+          <span className="text-gray-900 font-semibold">{tarjeta.monto}</span>
         </div>
         <div className="p-3 bg-white border rounded-lg shadow-sm">
-          <span className="font-bold text-yellow-700 block">% Mora</span>
-          <span className="text-gray-900 font-semibold">
-            {mora?.porcentaje_mora}%
-          </span>
-        </div>
-        <div className="p-3 bg-white border rounded-lg shadow-sm col-span-2">
           <span className="font-bold text-yellow-700 block">
             Cuotas atrasadas
           </span>
-          <span className="text-gray-900 font-semibold">
-            {mora?.cuotas_atrasadas}
-          </span>
+          <span className="text-gray-900 font-semibold">{tarjeta.cuotas}</span>
         </div>
+        {tarjeta.ritmo && (
+          <div className="p-3 bg-white border rounded-lg shadow-sm col-span-2">
+            <span className="text-gray-900 font-semibold">{tarjeta.ritmo}</span>
+            {tarjeta.techo && (
+              <span className="text-gray-700 block">{tarjeta.techo}</span>
+            )}
+          </div>
+        )}
+        <p className="col-span-2 text-xs text-gray-600 text-left leading-relaxed">
+          {tarjeta.explicacion}
+        </p>
       </div>
     </div>
   );

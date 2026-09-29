@@ -1,4 +1,4 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, gte, ne } from "drizzle-orm";
 import { db } from "../db";
 import { investorContractBatches } from "../db/schema/investor-contracts";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
@@ -53,6 +53,11 @@ export async function recalcularEstadoDeLaBateria(
 
 		if (!bateria || bateria.status === "descartada") return null;
 
+		// Sólo los de la compra actual, como el Listo y el descarte. Otra compra
+		// sobre los mismos créditos reusa la batería con los contratos de la
+		// anterior adentro: contándolos, sus firmas viejas cerraban una batería
+		// cuya compra nueva no tenía nada vigente, y un pendiente viejo la
+		// dejaba trabada aunque lo nuevo estuviera firmado.
 		const vigentes = await tx
 			.select({ status: generatedLegalContracts.status })
 			.from(generatedLegalContracts)
@@ -60,6 +65,7 @@ export async function recalcularEstadoDeLaBateria(
 				and(
 					eq(generatedLegalContracts.batchId, batchId),
 					ne(generatedLegalContracts.status, "cancelled"),
+					gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
 				),
 			);
 

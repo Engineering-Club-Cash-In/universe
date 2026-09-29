@@ -29,6 +29,7 @@ import {
 	firmadoSinCerrar,
 	firmantesEnFicha,
 	identidadesFallidas,
+	salioPorDocumenso,
 } from "@/lib/contract-signers-display";
 import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { client } from "@/utils/orpc";
@@ -359,7 +360,7 @@ function ContratoFila({
 	// que si no dejaría a esa persona sin forma de firmar.
 	// Los que cayeron al fallback de Documenso no tienen documento en WeeTrust:
 	// consultar o regenerar sólo devolvería un error.
-	const enWeeTrust = contract.signingProvider !== "documenso";
+	const enWeeTrust = !salioPorDocumenso(contract);
 	// Un anulado ya fue reemplazado por otro: reemitirlo lo resucitaría.
 	const puedeRegenerar =
 		tienePermiso && enWeeTrust && !inactivo && (alguienFirmo || hayVencidos);

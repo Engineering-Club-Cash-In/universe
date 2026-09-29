@@ -83,7 +83,10 @@ test("late-fee guards cover credit lookup and lock acquisition failures", () => 
   expect(source).toContain("Math.min(86_400_000");
   const updateStart = source.indexOf("export async function updateMora");
   const updateTry = source.indexOf("try {", updateStart);
-  const creditLookup = source.indexOf("const [credito] = await db", updateStart);
+  // La búsqueda del crédito pasó a ir por `executor` —`db` o la transacción
+  // que traiga el caller—, pero lo que esta prueba vigila sigue igual: que
+  // ocurra DENTRO del try, para que su fallo se emita en vez de escaparse.
+  const creditLookup = source.indexOf("const [credito] = await executor", updateStart);
   expect(updateStart).toBeGreaterThanOrEqual(0);
   expect(updateTry).toBeGreaterThan(updateStart);
   expect(updateTry).toBeLessThan(creditLookup);

@@ -29,9 +29,11 @@ import {
 } from "../lib/contract-generation-gender";
 import {
 	alguienFirmo,
+	documentIdDesdeLosEnlaces,
 	type FirmanteEnviado,
 	filasDeFirmantes,
 	linksPorRol,
+	salioPorDocumenso,
 } from "../lib/contract-signatories";
 import {
 	esFirmaFisica,
@@ -430,6 +432,25 @@ export async function anularContratoReemplazado(
 
 	if (!viejo) return null;
 
+	// Los generados antes de que se guardara el `documentID` lo llevan en el
+	// enlace. Sin recuperarlo, el reemplazo lo trataba como si no tuviera
+	// documento allá: borraba la fila y sus enlaces seguían firmando, sin
+	// rastro en el CRM. Se guarda en la fila, como hace "Anular".
+	if (!viejo.weetrustDocumentId) {
+		const recuperado = documentIdDesdeLosEnlaces(viejo);
+		if (recuperado) {
+			await db
+				.update(generatedLegalContracts)
+				.set({ weetrustDocumentId: recuperado })
+				.where(eq(generatedLegalContracts.id, contractId));
+			viejo.weetrustDocumentId = recuperado;
+		}
+	}
+
+	// Y uno de Documenso no se puede borrar desde acá: la fila queda anulada,
+	// diciendo que allá sigue vivo, en vez de desaparecer con sus enlaces.
+	const deDocumenso = salioPorDocumenso(viejo);
+
 	// El mismo documento de WeeTrust en otra fila: ésta es un duplicado (un
 	// reintento que volvió a enlazar el mismo resultado). Borrarlo allá dejaría
 	// sin enlaces a la otra, que lo sigue usando; sólo se quita esta fila. El
@@ -512,13 +533,20 @@ export async function anularContratoReemplazado(
 		}
 	}
 
-	if (viejo.weetrustDocumentId || conFirmas || opciones.conservarFila) {
+	if (
+		viejo.weetrustDocumentId ||
+		conFirmas ||
+		deDocumenso ||
+		opciones.conservarFila
+	) {
 		// Qué pasó con el documento allá, para que quien mire la fila anulada lo
 		// sepa sin entrar a WeeTrust. Uno completo nunca se intenta borrar
 		// (WeeTrust no deja), así que no es un "no se pudo".
 		const base = etiquetaDeMotivo(motivo);
 		let cancellationReason: string;
-		if (!viejo.weetrustDocumentId) {
+		if (deDocumenso) {
+			cancellationReason = `${base} (salió por Documenso: sus enlaces siguen vivos allá, hay que cancelarlo en Documenso)`;
+		} else if (!viejo.weetrustDocumentId) {
 			cancellationReason = base;
 		} else if (completo) {
 			cancellationReason = `${base} (ya lo habían firmado todos: queda en WeeTrust, que no deja borrarlo)`;

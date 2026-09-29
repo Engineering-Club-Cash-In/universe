@@ -1,3 +1,5 @@
+/// <reference lib="es2022.array" />
+// The cross-service test below imports Nexa, whose TypeScript target is ES2022.
 import { expect, test } from "bun:test";
 import { createHash, createHmac } from "node:crypto";
 import Big from "big.js";
@@ -90,6 +92,54 @@ integrationTest("constraints Nexa resisten concurrencia, replay y rollback", asy
       SELECT status, error FROM cartera.nexa_payment_events WHERE id = ${uncertain!.id}
     `;
     expect(manual).toEqual({ status: "manual_review", error: "payment_outcome_uncertain" });
+
+    await sql`INSERT INTO cartera.pagos_credito (pago_id) VALUES (17)`;
+    const [billingEvent] = await sql<{ id: number }[]>`
+      INSERT INTO cartera.nexa_payment_events
+        (external_reference, nonce, credito_id, amount, currency, payload_hash)
+      VALUES ('qa-billing-state', 'nonce-billing-state', 10, 10.00, 'GTQ', ${"d".repeat(64)})
+      RETURNING id
+    `;
+    await nexaPaymentDependencies.complete(billingEvent!.id, 17);
+    const [pendingBilling] = await sql<{ status: string; pago_id: number }[]>`
+      SELECT status, pago_id FROM cartera.nexa_payment_events WHERE id = ${billingEvent!.id}
+    `;
+    expect(pendingBilling).toEqual({ status: "billing_pending", pago_id: 17 });
+
+    const runtime = await import("./nexaPaymentRuntime");
+    const starts = await Promise.all([
+      runtime.startNexaBilling(billingEvent!.id),
+      runtime.startNexaBilling(billingEvent!.id),
+    ]);
+    expect(starts.sort()).toEqual([false, true]);
+    await runtime.completeNexaBilling(billingEvent!.id, 17);
+    await expectRejected(
+      runtime.completeNexaBilling(billingEvent!.id, 17),
+      "nexa billing completion fence failed",
+    );
+    const [billed] = await sql<{ status: string; pago_id: number }[]>`
+      SELECT status, pago_id FROM cartera.nexa_payment_events WHERE id = ${billingEvent!.id}
+    `;
+    expect(billed).toEqual({ status: "billed", pago_id: 17 });
+
+    const [unknownEvent] = await sql<{ id: number }[]>`
+      INSERT INTO cartera.nexa_payment_events
+        (external_reference, nonce, credito_id, amount, currency, payload_hash, status, pago_id)
+      VALUES ('qa-billing-unknown', 'nonce-billing-unknown', 10, 10.00, 'GTQ', ${"e".repeat(64)}, 'billing_running', 17)
+      RETURNING id
+    `;
+    await runtime.failNexaBilling(
+      unknownEvent!.id,
+      "billing_unknown",
+      "provider_response_ambiguous",
+    );
+    const [unknownBilling] = await sql<{ status: string; error: string }[]>`
+      SELECT status, error FROM cartera.nexa_payment_events WHERE id = ${unknownEvent!.id}
+    `;
+    expect(unknownBilling).toEqual({
+      status: "billing_unknown",
+      error: "provider_response_ambiguous",
+    });
   } finally {
     await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
     await sql.end();
@@ -547,5 +597,155 @@ integrationTest("la aplicación confiable no readquiere el lock canónico ya sos
     await applyPromise?.catch(() => undefined);
     await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
     await sql.end();
+  }
+}, 30_000);
+
+integrationTest("inbox reiniciado factura una sola vez después de aprobación bancaria; unknown queda cerrado", async () => {
+  parseTestDatabaseUrl(testDatabaseUrl!);
+  process.env.SUPABASE_DB_URL = testDatabaseUrl;
+  const { createDb } = await import("../../../nexa-server/src/db");
+  const { DbPaymentTransactionRepository, DbReviewRepository } = await import("../../../nexa-server/src/db/repositories");
+  const { runApplicationWorkerOnce } = await import("../../../nexa-server/src/payments/application-worker");
+  const { runReviewWorkerOnce } = await import("../../../nexa-server/src/payments/review-worker");
+  const { HttpCarteraPaymentClient } = await import("../../../nexa-server/src/payments/cartera-client");
+  const { createNexaPaymentHandler } = await import("./nexaPayments");
+  const { claimNexaPaymentEvent } = await import("./nexaPaymentRepository");
+  const { runNexaBilling, createDeferredNexaBilling } = await import("./nexaBilling");
+  const { nexaPaymentDependencies, startNexaBilling } = await import("./nexaPaymentRuntime");
+  const { withPaymentAdvisoryLock } = await import("../utils/paymentAdvisoryLock");
+  const db = createDb(testDatabaseUrl!);
+  const query = db.$client;
+  const secret = "synthetic-local-only-secret".repeat(2);
+  const options = { leaseSeconds: 10, maxAttempts: 3, backoffSeconds: 1, maxBackoffSeconds: 2 };
+  let now = new Date("2026-09-08T12:00:00Z");
+  let enabled = false;
+  let unknown = false;
+  let rejected = false;
+  let invoices = 0;
+  let registrations = 0;
+  let applications = 0;
+  let approvals = 0;
+  const bodies: string[] = [];
+  let fiscalGate = Promise.withResolvers<void>();
+  let invoiceStarted = false;
+  try {
+    await query.query(`DROP SCHEMA IF EXISTS cartera CASCADE; CREATE SCHEMA cartera;
+      CREATE TABLE cartera.creditos (credito_id integer PRIMARY KEY);
+      CREATE TABLE cartera.pagos_credito (pago_id serial PRIMARY KEY, validated boolean NOT NULL DEFAULT false);
+      INSERT INTO cartera.creditos VALUES (10);`);
+    await query.query(await Bun.file(new URL("../../drizzle/0039_add_nexa_internal_payments.sql", import.meta.url)).text());
+    for (const file of ["0000_aspiring_mimic", "0001_mute_shockwave", "0002_durable_inbox", "0003_durable_reviews", "0004_classify_legacy_pending"]) {
+      await query.query(await Bun.file(new URL(`../../../nexa-server/drizzle/${file}.sql`, import.meta.url)).text());
+    }
+    await query.query(`INSERT INTO nexa_payment_tokens (nexa_token_id, prefix, account, name) VALUES (1, '1234567', 'local', 'local');
+      INSERT INTO nexa_token_users (payment_token_id, credito_id, identifier, description, national_id, nexa_user_id, token)
+      VALUES (1, 10, '10005010', 'local', 'local', 1, '123456710005010');`);
+    const deferred = createDeferredNexaBilling({
+      run: (eventId, paymentIds) => runNexaBilling({ enabled, eventId, paymentIds, start: startNexaBilling,
+        invoice: async () => {
+          invoices++;
+          invoiceStarted = true;
+          await fiscalGate.promise;
+          if (rejected) return { status: 400, response: { success: false } };
+          return unknown
+            ? { status: 502, response: { success: false } }
+            : { status: 200, response: { success: true, data: { total_facturas: 1, facturas: [{ factura_id: invoices }] } } };
+        },
+      }),
+      complete: nexaPaymentDependencies.completeBilling!,
+      fail: nexaPaymentDependencies.failBilling!,
+      logError: () => { throw new Error("unexpected background finalization failure"); },
+    });
+    const handler = createNexaPaymentHandler({ secret, now: () => now.getTime(), dependencies: {
+      ...nexaPaymentDependencies,
+      withCreditLock: (creditoId, work) => withPaymentAdvisoryLock(creditoId, work),
+      claim: (body, context) => claimNexaPaymentEvent(query, body, context, deferred.isRunning),
+      loadCredit: async () => ({ usuarioId: 1, statusCredit: "ACTIVO", binding: { activo: true, expires_at: null, max_payment_amount: null } }),
+      findPayments: async (eventId) => (await query.query<{ paymentId: number; validationStatus: string; amount: string }>(
+        `SELECT pago_id AS "paymentId", CASE WHEN validated THEN 'validated' ELSE 'pending' END AS "validationStatus", '50.00' AS amount
+         FROM cartera.pagos_credito WHERE nexa_payment_event_id = $1`, [eventId],
+      )).rows,
+      registerPayment: async (_body, eventId) => {
+        registrations++;
+        await query.query("INSERT INTO cartera.pagos_credito (nexa_payment_event_id) VALUES ($1)", [eventId]);
+        return { success: true };
+      },
+      applyPayment: async (paymentId) => {
+        applications++;
+        await query.query("UPDATE cartera.pagos_credito SET validated = true WHERE pago_id = $1", [paymentId]);
+        return { success: true };
+      },
+      billPayments: deferred.run,
+    } });
+    const cartera = new HttpCarteraPaymentClient({ baseUrl: "http://local-only.invalid", secret, clock: () => now.getTime(),
+      fetch: async (url, init) => {
+        bodies.push(String(init?.body));
+        const set: { status?: number | string } = {};
+        const response = await handler({ request: new Request(url, init), body: undefined, set });
+        return Response.json(response, { status: Number(set.status) });
+      },
+    });
+    const run = async () => {
+      // Reconnect to PostgreSQL as a restarted worker: no pending work lives in memory.
+      const restarted = createDb(testDatabaseUrl!);
+      try {
+        return await runApplicationWorkerOnce({ repository: new DbPaymentTransactionRepository(restarted), cartera, now: () => now, ...options });
+      } finally { await restarted.$client.end(); }
+    };
+    for (const reference of ["4617307", "4617308", "4617309"]) {
+      enabled = false;
+      fiscalGate = Promise.withResolvers<void>();
+      invoiceStarted = false;
+      unknown = reference === "4617308";
+      rejected = reference === "4617309";
+      const repository = new DbPaymentTransactionRepository(db);
+      await repository.upsertReceived({ bank: "local", comments: "", account: "local", token: "123456710005010", tokenName: "local", reference, amount: 50, currency: "GTQ", tokenDate: "2026-09-08T12:00:00Z", tokenIdentifier: "10005010", tokenPrefix: "1234567", transactionId: "7293", wasReturn: 0 });
+      expect(await run()).toBe(true);
+      expect(await runReviewWorkerOnce({ repository: new DbReviewRepository(db), now: () => now, ...options,
+        nexa: { reviewTransfer: async (payload) => { approvals++; return payload; } },
+      })).toBe(true);
+      for (let wait = 0; wait < 5; wait++) {
+        now = new Date(now.getTime() + 2_000);
+        expect(await run()).toBe(true);
+      }
+      enabled = true;
+      now = new Date(now.getTime() + 2_000);
+      expect(await run()).toBe(true);
+      for (let wait = 0; wait < 100 && !invoiceStarted; wait++) await Bun.sleep(5);
+      expect(invoiceStarted).toBe(true);
+      // Fiscal work remains blocked while the HTTP-facing handler answers promptly.
+      for (let wait = 0; wait < 6; wait++) {
+        now = new Date(now.getTime() + 2_000);
+        expect(await run()).toBe(true);
+      }
+      expect((await query.query("SELECT failure_reason FROM nexa_payment_transactions WHERE reference = $1", [reference])).rows[0]?.failure_reason).toBe("billing_pending");
+      fiscalGate.resolve();
+      const eventId = Number((await query.query("SELECT id FROM cartera.nexa_payment_events WHERE external_reference = $1", [reference])).rows[0].id);
+      for (let wait = 0; wait < 200 && deferred.isRunning(eventId); wait++) await Bun.sleep(5);
+      expect(deferred.isRunning(eventId)).toBe(false);
+      now = new Date(now.getTime() + 2_000);
+      expect(await run()).toBe(true);
+      // Successful disabled waits no longer consume the subsequent failure budget.
+      if (unknown || rejected) for (let attempt = 1; attempt < options.maxAttempts; attempt++) {
+        now = new Date(now.getTime() + 2_000);
+        expect(await run()).toBe(true);
+      }
+      now = new Date(now.getTime() + 60_000);
+      expect(await run()).toBe(false);
+      const [payment] = (await query.query("SELECT processing_status, failure_reason, next_attempt_at, lease_until FROM nexa_payment_transactions WHERE reference = $1", [reference])).rows;
+      expect(payment).toEqual({ processing_status: "COMPLETED", failure_reason: unknown || rejected ? "billing_reconciliation_required" : null, next_attempt_at: null, lease_until: null });
+      expect((await query.query("SELECT status FROM cartera.nexa_payment_events WHERE external_reference = $1", [reference])).rows[0]?.status).toBe(unknown ? "billing_unknown" : rejected ? "billing_failed" : "billed");
+      expect(new Set(bodies).size).toBe(1);
+      // A replay after an unknown fiscal outcome must not reach the provider again.
+      const replay = () => cartera.applyNexaPayment({ creditoId: 10, transaction: { reference, amount: 50, currency: "GTQ", tokenDate: "2026-09-08T12:00:00Z", transactionId: "7293" } });
+      if (unknown || rejected) await expect(replay()).rejects.toThrow();
+      else expect(await replay()).toMatchObject({ status: "APPLIED", idempotent: true });
+      bodies.length = 0;
+    }
+    expect({ registrations, applications, invoices, approvals }).toEqual({ registrations: 3, applications: 3, invoices: 3, approvals: 3 });
+    expect((await query.query("SELECT id FROM nexa_reviews")).rows).toHaveLength(3);
+  } finally {
+    await query.query("DROP SCHEMA IF EXISTS cartera CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public");
+    await query.end();
   }
 }, 30_000);

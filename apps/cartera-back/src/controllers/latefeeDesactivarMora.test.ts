@@ -7,9 +7,14 @@ import { describe, expect, it, mock, beforeEach } from "bun:test";
 //   1. db.select(...).from(moras_credito).where(...)            → moras activas
 //   2. db.select(...).from(creditos).where(...)                 → status del crédito
 //   3. db.select(...).from(cuotas_credito).innerJoin(...).where → cuotas + hasPaidPayment
-//   4. db.update(moras_credito).set(...).where(...).returning() → apagar mora
-//   5. db.update(creditos).set(...).where(...)                  → MOROSO → ACTIVO
+//   4. db.update(creditos).set(...).where(...)                  → MOROSO → ACTIVO
+//   5. db.update(moras_credito).set(...).where(...).returning() → apagar mora
 //   6. db.insert(moras_historial).values(...)                   → evento DESACTIVACION
+//
+// 🔒 El 4 va antes que el 5 por la regla de orden de candados del módulo
+// (`creditos` antes que `moras_credito`); ver latefee.ts. Por eso la cola
+// `updateReturningQueue` la consume SOLO el update de `moras_credito`: es el
+// único con `.returning()`, y atarla al orden de llamada la haría frágil.
 //
 // La fake alimenta los SELECT por orden de llamada y graba todos los writes.
 // ============================================================================
@@ -19,6 +24,20 @@ type SelectResult = any[];
 const state: {
   selectQueue: SelectResult[];
   selectCalls: number;
+  /**
+   * Contra qué tabla se consumió cada entrada de `selectQueue`, EN ORDEN.
+   *
+   * ── Por qué hace falta ACÁ en particular ──────────────────────────────────
+   * Este harness indexa con `state.selectQueue[state.selectCalls] ?? []`: si la
+   * cola se corre un lugar, cada consulta recibe la respuesta de otra y la que
+   * sobra recibe `[]`, sin una sola excepción. Se midió: quitándole a la cola
+   * la entrada del crédito, las 8 pruebas de este archivo seguían en VERDE.
+   *
+   * Aseverar sobre `state.updates` / `state.inserts` no lo detecta: el orden y
+   * el contenido de las ESCRITURAS los decide el flujo de control, no lo que
+   * devuelven las LECTURAS. Esto es lo único que lo delata.
+   */
+  lecturas: Array<{ tabla: string; filas: any[] }>;
   updates: Array<{ table: any; set: any; returning: boolean }>;
   inserts: Array<{ table: any; values: any }>;
   updateReturningQueue: SelectResult[];
@@ -27,6 +46,7 @@ const state: {
 } = {
   selectQueue: [],
   selectCalls: 0,
+  lecturas: [],
   updates: [],
   inserts: [],
   updateReturningQueue: [],
@@ -34,11 +54,24 @@ const state: {
   failNextInsert: false,
 };
 
+/** El nombre de la tabla que drizzle lleva adentro del objeto. */
+const tablaDe = (t: any) =>
+  t?.[Symbol.for("drizzle:Name")] ?? t?._?.name ?? "?";
+
 const makeSelectChain = () => {
   const result = state.selectQueue[state.selectCalls] ?? [];
   state.selectCalls++;
   const chain: any = {
-    from: () => chain,
+    // Contra qué tabla se consumió esta entrada de `selectQueue`. Ver el
+    // comentario de `state.lecturas`.
+    from: (tabla?: unknown) => {
+      // Se anota la tabla JUNTO CON las filas que recibió. La tabla sola no
+      // alcanza: el código lee siempre las mismas tablas en el mismo orden, así
+      // que una cola corrida no la cambia. Lo que sí cambia es QUÉ le tocó a
+      // cada una, y eso es la alineación.
+      state.lecturas.push({ tabla: tablaDe(tabla), filas: result });
+      return chain;
+    },
     innerJoin: () => chain,
     where: () => Promise.resolve(result),
   };
@@ -55,14 +88,22 @@ const fakeDb = {
       where: () => {
         if (state.failNextUpdate) {
           state.failNextUpdate = false;
-          const failing: any = Promise.resolve([]);
+          // Revienta lo mismo si se espera el update directo (el de `creditos`)
+          // o su `.returning()` (el de `moras_credito`).
+          const failing: any = Promise.reject(new Error("db caída simulada"));
+          // Sin esto bun reporta un rechazo no manejado cuando el camino usa
+          // `.returning()` en vez de esperar la promesa de arriba.
+          failing.catch(() => {});
           failing.returning = () =>
             Promise.reject(new Error("db caída simulada"));
           return failing;
         }
         const entry = { table, set: setValues, returning: false };
         state.updates.push(entry);
-        const rows = state.updateReturningQueue.shift() ?? [];
+        // Solo el update de la mora usa `.returning()`; el del crédito no debe
+        // comerse la fila que la prueba preparó para aquél.
+        const rows =
+          table === moras_credito ? state.updateReturningQueue.shift() ?? [] : [];
         const promise: any = Promise.resolve(rows);
         promise.returning = () => {
           entry.returning = true;
@@ -76,10 +117,19 @@ const fakeDb = {
     values: (values: any) => {
       if (state.failNextInsert) {
         state.failNextInsert = false;
-        return Promise.reject(new Error("historial caído simulado"));
+        const caido: any = Promise.reject(new Error("historial caído simulado"));
+        caido.catch(() => {});
+        caido.returning = () =>
+          Promise.reject(new Error("historial caído simulado"));
+        return caido;
       }
       state.inserts.push({ table, values });
-      return Promise.resolve([]);
+      // `registrarHistorialMora` pide `.returning({ historial_id })`: el id del
+      // evento es lo que `registerPayment` necesita para ligar el DECREMENTO de
+      // mora con su pago.
+      return Object.assign(Promise.resolve([]), {
+        returning: () => Promise.resolve([{ historial_id: 6101 }]),
+      });
     },
   }),
 };
@@ -133,6 +183,7 @@ const CUOTAS_CON_ATRASO = [
 
 beforeEach(() => {
   state.selectQueue = [];
+  state.lecturas = [];
   state.selectCalls = 0;
   state.updates = [];
   state.inserts = [];
@@ -149,6 +200,24 @@ describe("desactivarMoraSiCreditoAlDia", () => {
     const result = await correr(8685);
 
     expect(result.desactivada).toBe(true);
+
+    // ── LA ALINEACIÓN DE LA COLA ────────────────────────────────────────────
+    // Cada entrada de `selectQueue` contra la tabla que de verdad la consumió.
+    // Es la única aserción de este archivo que se pone roja si la cola se
+    // corre: se midió quitándole la entrada del crédito y las 8 pruebas
+    // seguían en verde, porque el harness rellena con `[]` en silencio y el
+    // resto asevera sobre las ESCRITURAS, cuyo orden decide el flujo de
+    // control y no las lecturas.
+    //
+    // 🔒 Y de paso fija el ORDEN DE CANDADOS del módulo (ver el bloque al
+    // inicio de `latefee.ts`): `creditos` antes que `moras_credito` para quien
+    // escribe. Acá se LEE la mora primero —sin candado— y se toma el crédito
+    // después; si alguien invirtiera las escrituras, esta traza lo muestra.
+    expect(state.lecturas).toEqual([
+      { tabla: "moras_credito", filas: [MORA_ACTIVA] }, // la mora activa
+      { tabla: "creditos", filas: [CREDITO_MOROSO] }, // ¿está MOROSO?
+      { tabla: "cuotas_credito", filas: CUOTAS_AL_DIA }, // ¿queda alguna vencida?
+    ]);
 
     // Update 1: la mora queda en 0 e inactiva
     const moraUpdate = state.updates.find((u) => u.table === moras_credito);

@@ -10,6 +10,7 @@ import {
 	MENSAJE_CORRECCION_POR_ADMINISTRADOR,
 	MENSAJE_DPI_EN_BLANCO,
 	MENSAJE_GATE_APAGADO,
+	MENSAJE_PASO_SIN_VERIFICAR,
 	mensajeRechazoGateMora,
 	type ResolucionEdicionConMora,
 	requiereConsultaDeMora,
@@ -141,8 +142,9 @@ describe("gate de mora: altas", () => {
 });
 
 describe("gate de mora: fail-closed", () => {
-	test("si el cliente lanza ConsultaMoraNoDisponibleError, no pasa nadie", async () => {
-		const { deps } = banco(async () => {
+	// HOTFIX 2026-09-28: "no se pudo verificar" deja pasar y anota su fila.
+	test("si el cliente lanza ConsultaMoraNoDisponibleError, deja pasar y lo anota", async () => {
+		const { deps, anotaciones } = banco(async () => {
 			throw new ConsultaMoraNoDisponibleError(
 				"timeout de SIFCO",
 				new Error("ETIMEDOUT"),
@@ -151,14 +153,32 @@ describe("gate de mora: fail-closed", () => {
 
 		const veredicto = await evaluarGateMoraDpi(DPI, deps);
 
-		expect(veredicto.rechazado).toBe(true);
+		expect(veredicto.rechazado).toBe(false);
 		expect(veredicto.motivo).toBe("SERVICIO_NO_DISPONIBLE");
+		expect(veredicto.mensaje).toBe(MENSAJE_PASO_SIN_VERIFICAR);
+		expect(anotaciones.map((a) => a.action)).toContain(
+			"validar_mora_dpi_paso_sin_verificar",
+		);
 	});
 
-	test("un HTTP 200 con motivo SERVICIO_NO_DISPONIBLE también bloquea", async () => {
+	test("un HTTP 200 con motivo SERVICIO_NO_DISPONIBLE también deja pasar", async () => {
 		// El camino que se pierde si uno mira solo el status: cartera contestó
 		// bien, pero lo que contestó es "no sé".
-		const { deps } = banco(async () => SERVICIO_CAIDO_200);
+		const { deps, anotaciones } = banco(async () => SERVICIO_CAIDO_200);
+
+		const veredicto = await evaluarGateMoraDpi(DPI, deps);
+
+		expect(veredicto.rechazado).toBe(false);
+		expect(veredicto.motivo).toBe("SERVICIO_NO_DISPONIBLE");
+		expect(anotaciones.map((a) => a.action)).toContain(
+			"validar_mora_dpi_paso_sin_verificar",
+		);
+	});
+
+	test("un fallo DEFINITIVO de la consulta sigue bloqueando", async () => {
+		const { deps } = banco(async () => {
+			throw new ConsultaMoraNoDisponibleError("más de 50 créditos", "tope", true);
+		});
 
 		const veredicto = await evaluarGateMoraDpi(DPI, deps);
 
@@ -177,7 +197,8 @@ describe("gate de mora: fail-closed", () => {
 		);
 
 		expect(caido.mensaje).toContain("No se pudo verificar");
-		expect(caido.mensaje).toContain("intenta de nuevo");
+		// HOTFIX 2026-09-28: ya no rechaza, así que avisa que se dejó continuar.
+		expect(caido.mensaje).toBe(MENSAJE_PASO_SIN_VERIFICAR);
 		// Y sobre todo: no acusa al cliente de tener mora.
 		expect(caido.mensaje).not.toContain("saldo en mora");
 		expect(caido.mensaje).not.toBe(moroso.mensaje);

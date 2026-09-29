@@ -74,7 +74,7 @@ export function armarCorreoFacturaSeguro(
  *   Un reenvío puede usar otro intento.
  * - `incierto`: pudo haber salido (red caída, 5xx, llave usada con otro
  *   contenido). Se conserva el intento: reintentarlo con la misma llave no
- *   duplica si Resend ya lo aceptó.
+ *   duplica si Resend ya lo aceptó, mientras la llave siga vigente (24 h).
  * - `en_curso`: la misma llave se está procesando en Resend.
  */
 export type ResultadoEnvio =

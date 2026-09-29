@@ -63,6 +63,10 @@ import {
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
+import {
+	debeAnunciarCrecimientoMora,
+	hayIncrementoMora,
+} from "@/lib/cobros/plantillas-mensajes";
 import { formatFechaLocal } from "@/lib/date-utils";
 import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -583,18 +587,13 @@ function RouteComponent() {
 										<CalendarClock className="h-4 w-4 text-muted-foreground" />
 										<span className="font-medium">Días de Mora:</span>
 									</div>
-									<p>
-										{caso.estadoMora === "mora_30"
-											? "30"
-											: caso.estadoMora === "mora_60"
-												? "60"
-												: caso.estadoMora === "mora_90"
-													? "90"
-													: caso.estadoMora === "mora_120"
-														? "120+"
-														: "0"}{" "}
-										días
-									</p>
+									{/*
+									 * Días REALES de atraso (los de la cuota vencida más
+									 * antigua), no la etiqueta del bucket de aging: la mora se
+									 * cobra por día, así que anunciar "30 días" al lado de un
+									 * monto de 3 días es una contradicción frente al cliente.
+									 */}
+									<p>{caso.diasMoraMaximo ?? 0} días</p>
 								</div>
 								<div className="space-y-2">
 									<div className="flex items-center gap-2 text-sm">
@@ -661,6 +660,32 @@ function RouteComponent() {
 												Number(caso.cuotaMensual || 0)
 										).toLocaleString()}
 									</p>
+									{/* La mora ya no es un bloque fijo del mes: sube todos los
+									    días. Sin este dato el asesor cotiza por teléfono el
+									    total de HOY, el cliente paga dos días después y queda
+									    un residuo que no cubre la cuota.
+									    Manda el TECHO, no el ritmo: el ritmo es el delta de UN
+									    día y la víspera del próximo vencimiento da 0 (la cuota
+									    vieja ya topó y la nueva todavía no vence) aunque la
+									    mora sí vaya a crecer. Y exige mora HOY: un crédito
+									    AL DÍA con su próxima cuota dentro de 30 días devuelve techo
+									    > 0, y sin ese chequeo la ficha le anunciaba un aumento a
+									    quien no debe nada. */}
+									{caso.cuotaConvenio == null &&
+										debeAnunciarCrecimientoMora({
+											montoEnMora: caso.montoEnMora,
+											incrementoDiarioMora: caso.incrementoDiarioMora,
+											incrementoMaximoMensualMora:
+												caso.incrementoMaximoMensualMora,
+										}) && (
+											<p className="text-muted-foreground text-xs">
+												{hayIncrementoMora(caso.incrementoDiarioMora)
+													? `Sube alrededor de Q${caso.incrementoDiarioMora} por día`
+													: "Va a seguir subiendo"}
+												{hayIncrementoMora(caso.incrementoMaximoMensualMora) &&
+													`, y puede aumentar hasta Q${caso.incrementoMaximoMensualMora} más en los próximos 30 días`}
+											</p>
+										)}
 								</div>
 							</div>
 
@@ -1114,6 +1139,11 @@ function RouteComponent() {
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
+											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
+											incrementoDiarioMora={caso.incrementoDiarioMora || ""}
+											incrementoMaximoMensualMora={
+												caso.incrementoMaximoMensualMora || ""
+											}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
@@ -1147,6 +1177,11 @@ function RouteComponent() {
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
+											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
+											incrementoDiarioMora={caso.incrementoDiarioMora || ""}
+											incrementoMaximoMensualMora={
+												caso.incrementoMaximoMensualMora || ""
+											}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>
@@ -1183,6 +1218,11 @@ function RouteComponent() {
 											nombreAsesor={caso.asesor?.nombre || ""}
 											telefonoAsesor={caso.asesor?.telefono || ""}
 											expectativaMora={caso.expectativaMora || ""}
+											expectativaMoraDiaria={caso.expectativaMoraDiaria || ""}
+											incrementoDiarioMora={caso.incrementoDiarioMora || ""}
+											incrementoMaximoMensualMora={
+												caso.incrementoMaximoMensualMora || ""
+											}
 											aseguradora={caso.aseguradora || ""}
 											cabinaSeguro={caso.cabinaSeguro || ""}
 										>

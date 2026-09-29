@@ -23,6 +23,7 @@ import {
 	isOpportunityFromSource,
 	type LeadSource,
 } from "../lib/lead-opportunity-source";
+import { CONSULTAR_RENAP } from "../lib/renap-config";
 import { normalizarDpi, validarDpi } from "../utils/cui-validation";
 
 const REINTENTOS_AUTOMATICOS = 1;
@@ -650,9 +651,11 @@ async function ejecutarValidacionesInterno({
 	}
 
 	// 1. RENAP: sincronizar datos de identidad en renap_info (se salta si ya está vigente)
-	let renapResumen: ReusoRenap;
+	let renapResumen: ReusoRenap | undefined;
 
-	if (renapVigente) {
+	if (!CONSULTAR_RENAP) {
+		// Deshabilitado: sin consulta no hay veredicto de RENAP que registrar ni que bloquee
+	} else if (renapVigente) {
 		renapResumen = renapVigente;
 	} else {
 		const renapResultado = await conReintento(
@@ -717,7 +720,7 @@ async function ejecutarValidacionesInterno({
 	}
 
 	// Sigue siendo un fallo actual aunque se haya continuado hacia Buró: cada fuente bloquea por su cuenta
-	const renapFalloAhora = renapResumen.estado === "error";
+	const renapFalloAhora = renapResumen?.estado === "error";
 
 	// 2. Buró: usa el caché de 30 días (se salta si ya está vigente, incluido un
 	// override manual). El fallo se clasifica ANTES de reintentar, porque
@@ -728,7 +731,7 @@ async function ejecutarValidacionesInterno({
 			faltaDpi: false,
 			errorTecnico: renapFalloAhora,
 			sinRegistroBuro: buroVigente.estado === "sin_registro",
-			mensaje: renapFalloAhora ? `RENAP: ${renapResumen.mensaje}` : undefined,
+			mensaje: renapFalloAhora ? `RENAP: ${renapResumen?.mensaje}` : undefined,
 			renap: renapResumen,
 			buro: buroVigente,
 		};
@@ -799,7 +802,7 @@ async function ejecutarValidacionesInterno({
 			mensaje: !buroSinRegistro
 				? `Buró: ${mensajeBuro}`
 				: renapFalloAhora
-					? `RENAP: ${renapResumen.mensaje}`
+					? `RENAP: ${renapResumen?.mensaje}`
 					: undefined,
 			renap: renapResumen,
 			buro: {
@@ -889,7 +892,7 @@ async function ejecutarValidacionesInterno({
 		faltaDpi: false,
 		errorTecnico: renapFalloAhora,
 		sinRegistroBuro: false,
-		mensaje: renapFalloAhora ? `RENAP: ${renapResumen.mensaje}` : undefined,
+		mensaje: renapFalloAhora ? `RENAP: ${renapResumen?.mensaje}` : undefined,
 		renap: renapResumen,
 		buro: {
 			estado: estadoBuro,
@@ -1266,7 +1269,7 @@ export async function getValidaciones({
 	// una fila desactualizada no cuenta, para no contradecir al gate real
 	const aprobacionBloqueada =
 		(buro?.estado === "error" && !buroDesactualizado) ||
-		(renap?.estado === "error" && !renapDesactualizado);
+		(CONSULTAR_RENAP && renap?.estado === "error" && !renapDesactualizado);
 
 	const [detalleRenap, detalleBuro] = await Promise.all([
 		renap?.dpi ? obtenerDetalleRenap(renap.dpi) : null,

@@ -51,14 +51,17 @@ import {
 } from "../lib/cobros-credit-detail";
 import {
 	calcularExpectativaMora,
+	calcularExpectativaMoraDiaria,
 	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
 	cuerpoUsaFechaLimiteImpuesto,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
+	formatearIncrementoMora,
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
+	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
 	seguroPorAseguradora,
@@ -70,7 +73,11 @@ import {
 	isTestModeEnabled,
 	TEST_EMAIL,
 } from "../lib/messaging-test-mode";
-import { calcularDiasMoraExactos } from "../lib/mora-utils";
+import {
+	calcularDiasMoraExactos,
+	diasMoraDeListado,
+	estadoMoraPorCuotasAtrasadas,
+} from "../lib/mora-utils";
 import {
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
@@ -1070,10 +1077,12 @@ export const cobrosRouter = {
 							const statusCredit = credito.creditos.statusCredit;
 							const cuotasAtrasadas = credito.mora?.cuotas_atrasadas ?? 0;
 
-							// NOTA: Usamos aproximación (30 días por cuota) porque /getAllCredits
-							// NO retorna las fechas de vencimiento de las cuotas individuales.
-							// Solo /credito retorna el array completo con fechas para cálculo exacto.
-							const diasMora = cuotasAtrasadas * 30;
+							// Días REALES de atraso: los de la cuota vencida más antigua.
+							// Los manda cartera-back en `diasAtrasoMoraMaximo`, calculados en
+							// el mismo paso y con el mismo filtro de elegibilidad que el monto
+							// proporcional, así que el número y la plata no se contradicen.
+							// Este es además el que ordena la lista de cobranza.
+							const diasMora = diasMoraDeListado(credito.diasAtrasoMoraMaximo);
 
 							// Monto en mora REAL: usamos moras_credito.monto_mora (capital × 1.12% ×
 							// cuotas) que /getAllCredits ya trae en `mora`, para que coincida con el
@@ -1081,15 +1090,14 @@ export const cobrosRouter = {
 							// `cuota × cuotas`, dando un número distinto al del detalle para el mismo crédito.
 							const montoEnMora = Number(credito.mora?.monto_mora ?? 0);
 
-							// Determinar estado de mora según statusCredit y días de mora
-							let estadoMora: string | null = null;
-							if (statusCredit === "EN_CONVENIO") estadoMora = "en_convenio";
-							else if (diasMora === 0) estadoMora = "al_dia";
-							else if (diasMora <= 30) estadoMora = "mora_30";
-							else if (diasMora <= 60) estadoMora = "mora_60";
-							else if (diasMora <= 90) estadoMora = "mora_90";
-							else if (diasMora <= 120) estadoMora = "mora_120";
-							else estadoMora = "mora_120_plus";
+							// Bucket de aging: sale de las CUOTAS vencidas, no de los días.
+							// Antes se derivaba del mismo `cuotasAtrasadas × 30`, así que
+							// arreglar los días lo habría movido; el mapeo resultante es
+							// idéntico al de antes (1 cuota → mora_30, 2 → mora_60, …).
+							const estadoMora: string | null = estadoMoraPorCuotasAtrasadas(
+								cuotasAtrasadas,
+								statusCredit,
+							);
 
 							// Determinar estado del contrato según statusCredit
 							let estadoContrato = "activo";
@@ -2301,13 +2309,34 @@ export const cobrosRouter = {
 					// Datos de mora / convenio
 					estadoMora,
 					montoEnMora: montoEnMora.toFixed(2),
-					// Recargo de UNA cuota vencida más (capital × 1.12%, misma fórmula
-					// que procesarMoras en cartera-back) para el {expectativaMora} de
-					// las plantillas. Vacío si el estado está excluido de mora
+					// Mora proporcional (misma fórmula que procesarMoras en cartera-back)
+					// para el recordatorio del día de pago: {expectativaMoraDiaria} es lo
+					// que suma cada día de atraso (1/30 del cargo mensual) y
+					// {expectativaMora} el tope de la cuota (el cargo mensual completo,
+					// capital × 1.12%). Vacíos si el estado está excluido de mora
 					// (EN_CONVENIO, INCOBRABLE, etc.) o no hay capital, igual que el job.
 					expectativaMora: calcularExpectativaMora(
 						creditoCompleto.credito.capital,
 						creditoCompleto.credito.statusCredit,
+					),
+					expectativaMoraDiaria: calcularExpectativaMoraDiaria(
+						creditoCompleto.credito.capital,
+						creditoCompleto.credito.statusCredit,
+					),
+					// {incrementoDiarioMora} de las plantillas de mora: lo que crece
+					// este crédito por día — 1/30 del cargo mensual por CADA cuota
+					// vencida que aún no llegó a su techo de 30 días. No es
+					// expectativaMoraDiaria (esa es una sola cuota): lo calcula
+					// cartera-back, que es el único que conoce los días de cada cuota.
+					// "" cuando ya no crece (todas topadas) o el estado está excluido.
+					incrementoDiarioMora: formatearIncrementoMora(
+						creditoCompleto.incrementoDiarioMora,
+					),
+					// Y su techo: lo máximo que esa mora puede subir en un mes. El
+					// ritmo sin tope promete un crecimiento infinito; las dos
+					// cifras juntas son el estándar de la plantilla del día de pago.
+					incrementoMaximoMensualMora: formatearIncrementoMora(
+						creditoCompleto.incrementoMaximoMensualMora,
 					),
 					// {montoAdeudado} de las plantillas de mora (1 cuota, 2-3 cuotas,
 					// jurídico): saldo real de cada cuota vencida — recibo menos lo ya
@@ -2588,9 +2617,10 @@ export const cobrosRouter = {
 					capitalRestante: null, // No disponible en endpoint /credito
 					interesRestante: null, // No disponible en endpoint /credito
 					totalRestante: null, // No disponible en endpoint /credito
-					diasMora: creditoData.cuotasAtrasadas?.length
-						? creditoData.cuotasAtrasadas.length * 30
-						: 0,
+					// Días REALES de atraso (cuota vencida más antigua). Acá SÍ vienen
+					// las fechas de vencimiento, así que se calculan exactos en vez de
+					// aproximar a 30 por cuota, que contradice al monto proporcional.
+					diasMora: calcularDiasMoraExactos(creditoData.cuotasAtrasadas || []),
 					montoMora: creditoData.moraActual, // ya es string
 					cuotasAtrasadas: creditoData.cuotasAtrasadas?.length || 0,
 				};
@@ -3675,9 +3705,24 @@ export const cobrosRouter = {
 			// contando — y el mensaje diría "2 cuotas" con el monto de una.
 			const detallePorSifco = new Map<
 				string,
-				{ montoAdeudado: string; cuotasAtraso: number } | null
+				{
+					montoAdeudado: string;
+					cuotasAtraso: number;
+					incrementoDiarioMora: string;
+					incrementoMaximoMensualMora: string;
+				} | null
 			>();
-			if (cuerpoBase.includes("{montoAdeudado}")) {
+			// Las tres variables salen del MISMO detalle de cartera-back, así que
+			// la carga se dispara con cualquiera de ellas. El incremento diario y
+			// su techo se ofrecen como variables insertables por su cuenta en el
+			// modal del masivo: si el gate mirara solo {montoAdeudado}, una
+			// plantilla editada que use únicamente una de ellas se quedaría sin
+			// detalle y la cláusula desaparecería en silencio.
+			if (
+				cuerpoBase.includes("{montoAdeudado}") ||
+				cuerpoBase.includes("{incrementoDiarioMora}") ||
+				cuerpoBase.includes("{incrementoMaximoMensualMora}")
+			) {
 				const sifcosElegibles = creditosFiltrados
 					.filter(
 						(c) =>
@@ -3705,6 +3750,14 @@ export const cobrosRouter = {
 											detalle.credito.statusCredit,
 										),
 										cuotasAtraso: contarCuotasAtrasadasUnicas(cuotasDetalle),
+										// Del MISMO detalle que el monto: lo que ese saldo
+										// crece por día (ver {incrementoDiarioMora}).
+										incrementoDiarioMora: formatearIncrementoMora(
+											detalle.incrementoDiarioMora,
+										),
+										incrementoMaximoMensualMora: formatearIncrementoMora(
+											detalle.incrementoMaximoMensualMora,
+										),
 									});
 								} catch (err) {
 									console.error(
@@ -3774,10 +3827,10 @@ export const cobrosRouter = {
 					continue;
 				}
 
-				// Si el cuerpo usa {expectativaMora} y el crédito no genera mora
-				// (sin capital válido, o en estado que el job excluye: EN_CONVENIO,
-				// INCOBRABLE, etc.), se descarta en vez de anunciar un recargo que
-				// jamás se va a asignar.
+				// Si el cuerpo usa {expectativaMoraDiaria} o {expectativaMora} y el
+				// crédito no genera mora (sin capital válido, o en estado que el job
+				// excluye: EN_CONVENIO, INCOBRABLE, etc.), se descarta en vez de
+				// anunciar un recargo que jamás se va a asignar.
 				const expectativaMora = prepararExpectativaMoraParaEnvio(
 					cuerpoBase,
 					credito.creditos.capital,
@@ -3810,6 +3863,27 @@ export const cobrosRouter = {
 					continue;
 				}
 
+				// La cláusula incorporada del aumento desaparece sola al interpolar
+				// cuando no hay nada que anunciar, pero el modal ofrece
+				// {incrementoDiarioMora} y {incrementoMaximoMensualMora} como
+				// variables SUELTAS: una plantilla editada a mano ("El saldo aumenta
+				// Q{incrementoDiarioMora} diario") sobrevive al borrado y, sin el
+				// dato, le llegaría al cliente "El saldo aumenta Q diario". Un
+				// mensaje roto es peor que no mandarlo.
+				const incremento = prepararIncrementoMoraParaEnvio(
+					cuerpoBase,
+					detalleCartera?.incrementoDiarioMora,
+					detalleCartera?.incrementoMaximoMensualMora,
+				);
+				if (!incremento.enviar) {
+					descartados.push({
+						numeroSifco: sifco,
+						clienteNombre,
+						motivo: incremento.motivo,
+					});
+					continue;
+				}
+
 				// Día de pago: tomar el día del mes de la fecha de vencimiento de la
 				// próxima cuota que devuelve cartera (`proxima_cuota`). Es el mismo
 				// criterio que usa el detalle individual de este router, y la única
@@ -3838,6 +3912,17 @@ export const cobrosRouter = {
 					telefonoAsesor: telefonoAsesor.telefonoAsesor,
 					nombreAsesor: asesor.nombre ?? "",
 					expectativaMora: expectativaMora.expectativaMora,
+					expectativaMoraDiaria: expectativaMora.expectativaMoraDiaria,
+					// Cuánto crece por día el saldo que el mensaje acaba de anunciar
+					// (mismo detalle, ver 4.b), ya pasado por el gate de arriba.
+					// Vacío es legítimo cuando el crédito no crece (todas sus cuotas
+					// en el techo de 30 días): la cláusula incorporada se borra sola
+					// al interpolar. Lo que el gate no deja pasar es un placeholder
+					// suelto sin dato, que dejaría el hueco a la vista.
+					incrementoDiarioMora: incremento.incrementoDiarioMora,
+					// Su techo, del mismo detalle. Vacío = la frase se queda solo
+					// con el ritmo, corta pero sana.
+					incrementoMaximoMensualMora: incremento.incrementoMaximoMensualMora,
 					// Bloque del seguro de la bienvenida según la aseguradora de la
 					// oportunidad de cada crédito (Universales o G&T).
 					...seguroPorAseguradora(info?.insuranceProvider),

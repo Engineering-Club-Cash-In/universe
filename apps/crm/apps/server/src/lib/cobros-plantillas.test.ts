@@ -1,20 +1,29 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
 	anioImpuestoCirculacion,
+	CLAUSULA_INCREMENTO_DIARIO_MORA,
 	COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
+	COBROS_MOTIVO_SIN_INCREMENTO_MORA,
 	COBROS_MOTIVO_SIN_MONTO_ADEUDADO,
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	COBROS_NO_REPLY_WARNING,
 	calcularExpectativaMora,
+	calcularExpectativaMoraDiaria,
 	calcularMontoAdeudadoDesdeCuotas,
 	contarCuotasAtrasadasUnicas,
 	cuerpoUsaFechaLimiteImpuesto,
 	type FilaCuotaAtrasada,
+	FRAGMENTO_RITMO_INCREMENTO_MORA,
+	FRAGMENTO_TOPE_INCREMENTO_MORA,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
+	formatearIncrementoMora,
+	hayIncrementoMora,
 	interpolar,
 	PLANTILLAS_MENSAJES,
 	prepararExpectativaMoraParaEnvio,
+	prepararIncrementoMoraParaEnvio,
 	prepararMontoAdeudadoParaEnvio,
 	prepararTelefonoAsesorParaEnvio,
 	seguroPorAseguradora,
@@ -287,25 +296,50 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		expect(mensaje.match(/notificaciones automáticas/g)?.length).toBe(1);
 	});
 
-	test("calcula la expectativa de mora con la fórmula de procesarMoras (capital × 1.12%)", () => {
-		// Mismos números que el job de cartera-back: capital × 0.0112, half-up a
-		// 2 decimales. 45000 × 0.0112 = 504.00; 123456.78 × 0.0112 = 1382.72.
+	test("calcula la mora proporcional con la fórmula de procesarMoras", () => {
+		// Mora proporcional de cartera-back (calcularMoraProporcional): cada
+		// cuota suma capital × 1.12% × min(1, días/30), half-up a 2 decimales al
+		// final. El TOPE de una cuota es su cargo mensual completo:
+		// 45000 × 0.0112 = 504.00; 123456.78 × 0.0112 = 1382.72.
 		expect(calcularExpectativaMora("45000.00")).toBe("504.00");
 		expect(calcularExpectativaMora("123456.78")).toBe("1,382.72");
+		// Y cada día de atraso suma 1/30 de ese cargo: 504 / 30 = 16.80;
+		// 1382.7159 / 30 = 46.0905 → 46.09.
+		expect(calcularExpectativaMoraDiaria("45000.00")).toBe("16.80");
+		expect(calcularExpectativaMoraDiaria("123456.78")).toBe("46.09");
+
+		// Paridad con la tabla que publica el PR del cron (#1691) para un capital
+		// de Q10,000: 1 día de atraso = Q3.73, 30 días en adelante = Q112.00.
+		expect(calcularExpectativaMoraDiaria("10000")).toBe("3.73");
+		expect(calcularExpectativaMora("10000")).toBe("112.00");
+
 		// Sin capital no aplica mora (igual que el job) → sin monto.
-		expect(calcularExpectativaMora("0.00")).toBe("");
-		expect(calcularExpectativaMora(null)).toBe("");
-		expect(calcularExpectativaMora(undefined)).toBe("");
-		expect(calcularExpectativaMora("no-numerico")).toBe("");
+		for (const capital of ["0.00", null, undefined, "no-numerico"]) {
+			expect(calcularExpectativaMora(capital)).toBe("");
+			expect(calcularExpectativaMoraDiaria(capital)).toBe("");
+		}
+
+		// Capital tan chico que UN día redondea a Q0.00 (10 × 1.12% / 30 ≈
+		// 0.0037): el cron no crea mora en ese caso (decidirMoraDelCron →
+		// "menor a un centavo"), así que no hay recargo diario que anunciar.
+		expect(calcularExpectativaMoraDiaria("10.00")).toBe("");
+		expect(calcularExpectativaMora("10.00")).toBe("0.11");
 	});
 
-	test("el recordatorio del día de pago interpola la expectativa de mora", () => {
+	test("el recordatorio del día de pago anuncia el recargo diario y su tope", () => {
 		const alDia = PLANTILLAS_MENSAJES.find(
 			(plantilla) => plantilla.id === "al_dia",
 		);
 
+		// Con la mora proporcional ya NO se anuncia el cargo mensual completo
+		// como el recargo de mañana (sería ~30× lo que cobra el cron el primer
+		// día): se anuncia lo que suma cada día y hasta dónde llega.
+		// "alrededor de": el diario es 1/30 de un cargo YA redondeado a centavos,
+		// así que 30 días de ritmo casi nunca dan el techo exacto (30 × Q3.73 =
+		// Q111.90, no Q112.00). Sin esa palabra la misma oración se contradice y
+		// el cliente lo ve en cinco segundos.
 		expect(alDia?.cuerpo).toContain(
-			"se agregará un recargo por mora de Q{expectativaMora}.",
+			"🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de alrededor de Q{expectativaMoraDiaria} por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.*",
 		);
 
 		const mensaje = interpolar(alDia?.cuerpo ?? "", {
@@ -319,9 +353,16 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 			telefonoAsesor: "41286630",
 			nombreAsesor: "Carlos Pérez",
 			expectativaMora: calcularExpectativaMora("45000.00"),
+			expectativaMoraDiaria: calcularExpectativaMoraDiaria("45000.00"),
 		});
 
-		expect(mensaje).toContain("un recargo por mora de Q504.00.");
+		expect(mensaje).toContain(
+			"un recargo por mora de alrededor de Q16.80 por cada día de atraso, hasta un máximo de Q504.00 al mes.",
+		);
+		// {expectativaMora} no se come el prefijo de {expectativaMoraDiaria}.
+		expect(mensaje).not.toContain("{expectativaMora");
+		// Sigue en 4 bloques → mismo template de SimpleTech (mensaje4parametro).
+		expect(bloques(alDia?.cuerpo ?? "")).toHaveLength(4);
 	});
 
 	test("descarta el envío que usa expectativa de mora cuando el capital no la genera", () => {
@@ -339,18 +380,44 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 			});
 		}
 
-		// Con capital sí, y entrega el monto ya calculado.
+		// Capital tan chico que el recargo de un día redondea a Q0.00: el cron no
+		// cobraría mañana, así que la oración ("Q… por cada día") no se puede
+		// armar → tampoco se envía.
+		expect(
+			prepararExpectativaMoraParaEnvio(alDia?.cuerpo ?? "", "10.00"),
+		).toEqual({
+			enviar: false,
+			motivo: COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
+		});
+
+		// Con capital sí, y entrega los dos montos ya calculados.
 		expect(
 			prepararExpectativaMoraParaEnvio(alDia?.cuerpo ?? "", "45000.00"),
-		).toEqual({ enviar: true, expectativaMora: "504.00" });
+		).toEqual({
+			enviar: true,
+			expectativaMora: "504.00",
+			expectativaMoraDiaria: "16.80",
+		});
 
-		// Una plantilla que no usa la variable se envía aunque no haya capital.
+		// Basta con que el cuerpo use UNA de las dos variables para exigir ambas
+		// (el asesor puede editar el mensaje en el masivo).
+		expect(
+			prepararExpectativaMoraParaEnvio(
+				"Recargo diario: Q{expectativaMoraDiaria}",
+				null,
+			),
+		).toEqual({
+			enviar: false,
+			motivo: COBROS_MOTIVO_SIN_EXPECTATIVA_MORA,
+		});
+
+		// Una plantilla que no usa las variables se envía aunque no haya capital.
 		const mora30 = PLANTILLAS_MENSAJES.find(
 			(plantilla) => plantilla.id === "mora_30",
 		);
 		expect(
 			prepararExpectativaMoraParaEnvio(mora30?.cuerpo ?? "", null),
-		).toEqual({ enviar: true, expectativaMora: "" });
+		).toEqual({ enviar: true, expectativaMora: "", expectativaMoraDiaria: "" });
 	});
 
 	test("los estados que el job excluye de mora tampoco generan expectativa", () => {
@@ -369,6 +436,7 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 
 		for (const status of excluidos) {
 			expect(calcularExpectativaMora("45000.00", status)).toBe("");
+			expect(calcularExpectativaMoraDiaria("45000.00", status)).toBe("");
 			expect(
 				prepararExpectativaMoraParaEnvio(
 					alDia?.cuerpo ?? "",
@@ -384,6 +452,7 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 		// Estados que sí generan mora siguen calculando normal.
 		for (const status of ["ACTIVO", "MOROSO", null, undefined]) {
 			expect(calcularExpectativaMora("45000.00", status)).toBe("504.00");
+			expect(calcularExpectativaMoraDiaria("45000.00", status)).toBe("16.80");
 		}
 	});
 
@@ -894,5 +963,360 @@ Te recordamos realizar el pago de tu *Impuesto de Circulación {anioImpuesto}*.
 				"ACTIVO",
 			),
 		).toBe("2,000.00");
+	});
+});
+
+// El aumento diario del crédito completo ({incrementoDiarioMora}) es OTRO
+// número que el recargo de una cuota ({expectativaMoraDiaria}): lo calcula
+// cartera-back sumando 1/30 por cada cuota vencida que aún no llegó a su techo.
+describe("incrementoDiarioMora en las plantillas de mora", () => {
+	const porId = (id: string) =>
+		PLANTILLAS_MENSAJES.find((p) => p.id === id)?.cuerpo ?? "";
+
+	const base = {
+		clienteNombre: "MARIA LOPEZ",
+		fechaPago: "5",
+		cuotaMensual: "1,000.00",
+		placa: "P123ABC",
+		marcaLineaModelo: "Toyota Yaris 2020",
+		telefonoAsesor: "41286630",
+		nombreAsesor: "Carlos Pérez",
+		expectativaMora: "",
+	};
+
+	test("las tres plantillas de mora anuncian el aumento por día Y su techo", () => {
+		for (const id of ["mora_30", "mora_60", "aviso_juridico"]) {
+			expect(porId(id)).toContain("{incrementoDiarioMora}");
+			expect(porId(id)).toContain("{incrementoMaximoMensualMora}");
+			expect(porId(id)).toContain(CLAUSULA_INCREMENTO_DIARIO_MORA);
+			expect(porId(id)).toContain(FRAGMENTO_TOPE_INCREMENTO_MORA);
+			expect(porId(id)).toContain(FRAGMENTO_RITMO_INCREMENTO_MORA);
+			// Sin el techo, "por cada día" promete un crecimiento infinito.
+			expect(porId(id)).not.toContain("por cada día que pase");
+			// Y el ritmo no se promete constante: es un delta de UN día que el
+			// calendario mueve (y que la víspera del vencimiento da 0).
+			expect(porId(id)).not.toContain("por cada día de atraso");
+			expect(porId(id)).toContain("alrededor de");
+		}
+	});
+
+	test("1 cuota atrasada: dice el saldo de hoy y cuánto sube por día", () => {
+		const mensaje = interpolar(porId("mora_30"), {
+			...base,
+			montoAdeudado: "4,318.20",
+			cuotasAtraso: 1,
+			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "93.33",
+		});
+		expect(mensaje).toContain(
+			"Tienes *1 cuota con atraso por un monto de Q4,318.20* al día de hoy, que sube alrededor de Q3.73 por día, y puede aumentar hasta Q93.33 más en los próximos 30 días.",
+		);
+	});
+
+	test("2-3 cuotas atrasadas: el aumento es el del crédito completo", () => {
+		const mensaje = interpolar(porId("mora_60"), {
+			...base,
+			montoAdeudado: "8,600.00",
+			cuotasAtraso: 3,
+			incrementoDiarioMora: "11.20",
+			incrementoMaximoMensualMora: "205.33",
+		});
+		expect(mensaje).toContain(
+			"tienes *3 cuotas en atraso, por un monto total de Q8,600.00* al día de hoy, que sube alrededor de Q11.20 por día, y puede aumentar hasta Q205.33 más en los próximos 30 días.",
+		);
+	});
+
+	test("aviso jurídico: el aumento va después de 'incluyendo moras'", () => {
+		const mensaje = interpolar(porId("aviso_juridico"), {
+			...base,
+			montoAdeudado: "20,150.00",
+			cuotasAtraso: 5,
+			incrementoDiarioMora: "7.47",
+			incrementoMaximoMensualMora: "1,120.00",
+		});
+		expect(mensaje).toContain(
+			"por un monto de 20,150.00 incluyendo moras al día de hoy, que sube alrededor de Q7.47 por día, y puede aumentar hasta Q1,120.00 más en los próximos 30 días.",
+		);
+	});
+
+	test("incremento 0: la frase del aumento NO se imprime", () => {
+		const mensaje = interpolar(porId("mora_60"), {
+			...base,
+			montoAdeudado: "8,600.00",
+			cuotasAtraso: 3,
+			incrementoDiarioMora: "0.00",
+			incrementoMaximoMensualMora: "0.00",
+		});
+		expect(mensaje).toContain(
+			"tienes *3 cuotas en atraso, por un monto total de Q8,600.00* al día de hoy.",
+		);
+		expect(mensaje).not.toContain("sube alrededor de");
+		expect(mensaje).not.toContain("puede aumentar");
+		expect(mensaje).not.toContain("Q0.00");
+		expect(mensaje).not.toContain("{incrementoDiarioMora}");
+		expect(mensaje).not.toContain("{incrementoMaximoMensualMora}");
+	});
+
+	test("con incremento pero SIN techo la frase queda corta, no rota", () => {
+		// Un cartera-back anterior a este cambio manda el diario y no el techo:
+		// se borra solo el tope, no la oración entera — el cliente sigue viendo
+		// el ritmo, que es el dato que evita que pague de menos.
+		const mensaje = interpolar(porId("mora_30"), {
+			...base,
+			montoAdeudado: "4,318.20",
+			cuotasAtraso: 1,
+			incrementoDiarioMora: "3.73",
+		});
+		expect(mensaje).toContain(
+			"Tienes *1 cuota con atraso por un monto de Q4,318.20* al día de hoy, que sube alrededor de Q3.73 por día.",
+		);
+		expect(mensaje).not.toContain("puede aumentar");
+		expect(mensaje).not.toContain("{incrementoMaximoMensualMora}");
+		expect(mensaje).not.toContain("hasta Q más");
+	});
+
+	test("sin el dato (cartera viejo) tampoco queda la variable ni un 'Q.' roto", () => {
+		const mensaje = interpolar(porId("mora_30"), {
+			...base,
+			montoAdeudado: "4,318.20",
+			cuotasAtraso: 1,
+		});
+		expect(mensaje).toContain(
+			"Tienes *1 cuota con atraso por un monto de Q4,318.20* al día de hoy.",
+		);
+		expect(mensaje).not.toContain("{incrementoDiarioMora}");
+		expect(mensaje).not.toContain("sube alrededor de");
+		expect(mensaje).not.toContain("puede aumentar");
+	});
+
+	// EL defecto que arregla esta rebanada: la víspera del siguiente
+	// vencimiento la cuota vieja ya tocó su techo y la nueva todavía no vence,
+	// así que el delta de UN día da Q0.00 — pero la mora sí va a crecer y el
+	// techo a 30 días lo dice. Antes se borraba la cláusula entera y ese día el
+	// mensaje no anunciaba ningún aumento: el cliente pagaba lo anunciado y
+	// quedaba corto (−Q33.60 a los 10 días con capital Q10,000).
+	test("VÍSPERA: sin ritmo pero con techo, el mensaje NO se queda mudo", () => {
+		for (const id of ["mora_30", "mora_60", "aviso_juridico"]) {
+			const mensaje = interpolar(porId(id), {
+				...base,
+				montoAdeudado: "1,612.00",
+				cuotasAtraso: 1,
+				incrementoDiarioMora: "0.00",
+				incrementoMaximoMensualMora: "108.27",
+			});
+			expect(mensaje).toContain(
+				"al día de hoy, y puede aumentar hasta Q108.27 más en los próximos 30 días.",
+			);
+			expect(mensaje).not.toContain("Q0.00");
+			expect(mensaje).not.toContain("sube alrededor de");
+			expect(mensaje).not.toContain("{incrementoDiarioMora}");
+			expect(mensaje).not.toContain("{incrementoMaximoMensualMora}");
+			// Y el bloque no se parte: mismo template aprobado en Meta.
+			expect(mensaje.split("\n\n").length).toBe(porId(id).split("\n\n").length);
+		}
+	});
+
+	// El gate de envío tiene que dejar pasar ese mismo día: la cláusula queda
+	// sana, así que no hay nada que bloquear.
+	test("VÍSPERA: el gate de envío deja pasar el ritmo en cero con techo", () => {
+		expect(
+			prepararIncrementoMoraParaEnvio(porId("mora_30"), "0.00", "108.27"),
+		).toEqual({
+			enviar: true,
+			incrementoDiarioMora: "0.00",
+			incrementoMaximoMensualMora: "108.27",
+		});
+	});
+
+	test("el monto adeudado sigue intacto: la oración del aumento no se lo come", () => {
+		const mensaje = interpolar(porId("mora_30"), {
+			...base,
+			montoAdeudado: "4,318.20",
+			cuotasAtraso: 1,
+			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "93.33",
+		});
+		expect(mensaje).toContain("Q4,318.20");
+	});
+
+	test("hayIncrementoMora: 0, vacío y basura no anuncian nada", () => {
+		expect(hayIncrementoMora("3.73")).toBe(true);
+		expect(hayIncrementoMora("1,120.00")).toBe(true);
+		expect(hayIncrementoMora("0.00")).toBe(false);
+		expect(hayIncrementoMora("")).toBe(false);
+		expect(hayIncrementoMora(null)).toBe(false);
+		expect(hayIncrementoMora(undefined)).toBe(false);
+	});
+
+	test("el mismo formateador sirve para el techo mensual", () => {
+		expect(formatearIncrementoMora("93.33")).toBe("93.33");
+		expect(formatearIncrementoMora("1120")).toBe("1,120.00");
+		expect(formatearIncrementoMora("0.00")).toBe("");
+	});
+
+	test("formatearIncrementoMora pasa el toFixed de cartera a es-GT", () => {
+		expect(formatearIncrementoMora("1120.00")).toBe("1,120.00");
+		expect(formatearIncrementoMora("3.73")).toBe("3.73");
+		// Cartera manda "0.00" cuando todas las cuotas ya están en el techo.
+		expect(formatearIncrementoMora("0.00")).toBe("");
+		expect(formatearIncrementoMora(undefined)).toBe("");
+		expect(formatearIncrementoMora("")).toBe("");
+		expect(formatearIncrementoMora("abc")).toBe("");
+	});
+
+	test("no cambia el conteo de bloques del template aprobado en Meta", () => {
+		// La oración va DENTRO del párrafo del monto: los `\n\n` no se mueven,
+		// con aumento o sin él.
+		for (const id of ["mora_30", "mora_60", "aviso_juridico"]) {
+			const bloques = porId(id).split("\n\n").length;
+			const con = interpolar(porId(id), {
+				...base,
+				montoAdeudado: "100.00",
+				cuotasAtraso: 1,
+				incrementoDiarioMora: "3.73",
+				incrementoMaximoMensualMora: "93.33",
+			}).split("\n\n").length;
+			const sin = interpolar(porId(id), {
+				...base,
+				montoAdeudado: "100.00",
+				cuotasAtraso: 1,
+				incrementoDiarioMora: "0.00",
+				incrementoMaximoMensualMora: "0.00",
+			}).split("\n\n").length;
+			// Y con el ritmo pero sin su techo (se borra solo el tope).
+			const soloRitmo = interpolar(porId(id), {
+				...base,
+				montoAdeudado: "100.00",
+				cuotasAtraso: 1,
+				incrementoDiarioMora: "3.73",
+			}).split("\n\n").length;
+			expect(con).toBe(bloques);
+			expect(sin).toBe(bloques);
+			expect(soloRitmo).toBe(bloques);
+		}
+	});
+});
+
+// El modal del masivo ofrece {incrementoDiarioMora} y
+// {incrementoMaximoMensualMora} como variables insertables SUELTAS: la
+// cláusula incorporada se borra sola, pero una oración escrita a mano por el
+// asesor no, y sin el dato le llega al cliente "El saldo aumenta Q diario".
+describe("prepararIncrementoMoraParaEnvio — el placeholder suelto sin dato bloquea", () => {
+	const porId = (id: string) =>
+		PLANTILLAS_MENSAJES.find((p) => p.id === id)?.cuerpo ?? "";
+	const suelto = "El saldo aumenta Q{incrementoDiarioMora} diario.";
+	const sueltoTope =
+		"El saldo aumenta Q{incrementoDiarioMora} diario, hasta Q{incrementoMaximoMensualMora}.";
+
+	test("placeholder suelto del ritmo sin valor → no se envía", () => {
+		expect(prepararIncrementoMoraParaEnvio(suelto, "", "")).toEqual({
+			enviar: false,
+			motivo: COBROS_MOTIVO_SIN_INCREMENTO_MORA,
+		});
+	});
+
+	test("cartera manda 0.00 (crédito topado) y el asesor lo escribió suelto → tampoco", () => {
+		// "0.00" y "" son lo mismo para el mensaje: no hay frase que armar.
+		expect(prepararIncrementoMoraParaEnvio(suelto, "0.00", "0.00")).toEqual({
+			enviar: false,
+			motivo: COBROS_MOTIVO_SIN_INCREMENTO_MORA,
+		});
+	});
+
+	test("el techo suelto sin valor también bloquea, aunque llegue el ritmo", () => {
+		expect(prepararIncrementoMoraParaEnvio(sueltoTope, "3.73", "")).toEqual({
+			enviar: false,
+			motivo: COBROS_MOTIVO_SIN_INCREMENTO_MORA,
+		});
+	});
+
+	test("con los dos valores se envía y los devuelve", () => {
+		expect(
+			prepararIncrementoMoraParaEnvio(sueltoTope, "3.73", "93.33"),
+		).toEqual({
+			enviar: true,
+			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "93.33",
+		});
+	});
+
+	test("la cláusula incorporada sin dato NO bloquea: desaparece sola", () => {
+		// Es el caso legítimo del crédito que ya no crece; bloquearlo dejaría sin
+		// enviar la plantilla de mora más usada.
+		const plantilla = porId("mora_30");
+		expect(plantilla).toContain("{incrementoDiarioMora}");
+		expect(prepararIncrementoMoraParaEnvio(plantilla, "", "")).toEqual({
+			enviar: true,
+			incrementoDiarioMora: "",
+			incrementoMaximoMensualMora: "",
+		});
+		expect(prepararIncrementoMoraParaEnvio(plantilla, "3.73", "")).toEqual({
+			enviar: true,
+			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "",
+		});
+	});
+
+	test("una plantilla que no habla del aumento pasa derecho", () => {
+		expect(
+			prepararIncrementoMoraParaEnvio("Buenos días {clienteNombre}.", "", ""),
+		).toEqual({
+			enviar: true,
+			incrementoDiarioMora: "",
+			incrementoMaximoMensualMora: "",
+		});
+	});
+
+	test("lo que bloquea es el hueco, no el placeholder: con dato se envía", () => {
+		expect(prepararIncrementoMoraParaEnvio(suelto, "3.73", "0.00")).toEqual({
+			enviar: true,
+			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "0.00",
+		});
+	});
+});
+
+/**
+ * El archivo del front (apps/web/src/lib/cobros/plantillas-mensajes.ts) es un
+ * ESPEJO de este: el asesor edita en el modal el mismo texto que el masivo
+ * manda por su cuenta. Si las dos oraciones se separan, el mensaje que el
+ * asesor revisó no es el que le llega al cliente. Se compara el FUENTE porque
+ * el server del CRM no compila nada fuera de su `src/` (mismo candado que
+ * estados-cobranza.test.ts contra cartera-back).
+ */
+describe("CONTRATO: la oración del aumento no se separa de la del front", () => {
+	const fuenteFront = readFileSync(
+		new URL(
+			"../../../web/src/lib/cobros/plantillas-mensajes.ts",
+			import.meta.url,
+		),
+		"utf8",
+	);
+
+	test("los dos fragmentos son literalmente los mismos", () => {
+		expect(fuenteFront).toContain(
+			`export const FRAGMENTO_RITMO_INCREMENTO_MORA =\n\t"${FRAGMENTO_RITMO_INCREMENTO_MORA}";`,
+		);
+		expect(fuenteFront).toContain(
+			`export const FRAGMENTO_TOPE_INCREMENTO_MORA =\n\t"${FRAGMENTO_TOPE_INCREMENTO_MORA}";`,
+		);
+	});
+
+	test("el front borra los fragmentos con la misma regla", () => {
+		// El orden (cláusula entera primero, después cada parte) es lo que hace
+		// que la víspera se vaya SOLO el ritmo y el techo sobreviva.
+		expect(fuenteFront).toContain("if (hayRitmo && hayTecho) return texto;");
+		expect(fuenteFront).toContain(
+			'return texto.split(FRAGMENTO_RITMO_INCREMENTO_MORA).join("");',
+		);
+	});
+
+	test("la oración del día de pago dice 'alrededor de' en los dos lados", () => {
+		const oracion =
+			"recargo por mora de alrededor de Q{expectativaMoraDiaria} por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.";
+		expect(fuenteFront).toContain(oracion);
+		expect(
+			PLANTILLAS_MENSAJES.find((p) => p.id === "al_dia")?.cuerpo,
+		).toContain(oracion);
 	});
 });

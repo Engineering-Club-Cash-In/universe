@@ -7,11 +7,11 @@
  * TS7056 trunca el tipo inferido en el web (ver el comentario de esos
  * archivos y https://orpc.dev/docs/advanced/exceeds-the-maximum-length-problem).
  *
- * Modo de ejecución: MANUAL. La integración con LEGION (`unit/exec_cmd`,
- * CB-120) está bloqueada hasta confirmar permisos/comandos/relé de su lado
- * — ver services/inmovilizacion/ejecutor.ts. `marcarEjecutada` deja
- * constancia de que el supervisor coordinó el apagado/reactivación con
- * LEGION por fuera del CRM.
+ * Modo de ejecución: MANUAL. El envío automático al proveedor (LEGION,
+ * `unit/exec_cmd`) no forma parte de este flujo: depende de que LEGION habilite
+ * comandos/permisos/relé — ver services/inmovilizacion/ejecutor.ts.
+ * `marcarEjecutada` deja constancia de que el supervisor coordinó el
+ * apagado/reactivación con LEGION por fuera del CRM.
  */
 
 import { ORPCError } from "@orpc/server";
@@ -34,6 +34,7 @@ import { vehicles } from "../db/schema/vehicles";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import {
 	BUCKETS_INMOVILIZACION,
+	bucketsInmovilizacionTexto,
 	estadoUnidad,
 	type InmovilizacionHistorialItem,
 	puedeSolicitar,
@@ -568,7 +569,7 @@ export const inmovilizacionUnidadRouter = {
 					message =
 						"No se pudo confirmar el bucket del crédito. Intentá de nuevo en unos minutos.";
 				} else {
-					message = `El apagado aplica a créditos en B2/B3 y este está en B${bucket}.`;
+					message = `El apagado aplica a créditos en ${bucketsInmovilizacionTexto()} y este está en B${bucket}.`;
 				}
 				throw new ORPCError("BAD_REQUEST", { message });
 			}
@@ -651,7 +652,7 @@ export const inmovilizacionUnidadRouter = {
 							message =
 								"No se pudo confirmar el bucket del crédito. Intentá de nuevo en unos minutos.";
 						} else {
-							message = `El apagado aplica a créditos en B2/B3 y este está en B${bucket}.`;
+							message = `El apagado aplica a créditos en ${bucketsInmovilizacionTexto()} y este está en B${bucket}.`;
 						}
 						throw new ORPCError("CONFLICT", { message });
 					}
@@ -913,7 +914,7 @@ export const inmovilizacionUnidadRouter = {
 			let motivoFalloPrecondicion: string | null = null;
 			let detalleFalloPrecondicion: Record<string, unknown> | undefined;
 
-			// Si la acción es apagado, revalidar que el crédito siga en mora B2/B3:
+			// Si la acción es apagado, revalidar que el crédito siga en mora en un bucket habilitado:
 			// si el cliente pagó entre la aprobación y la ejecución, el crédito bajó
 			// a B0/B1 (o salió del funnel) y no debe apagarse el vehículo. Review de Codex.
 			if (inm.accion === "apagado" && isCarteraBackEnabled()) {
@@ -938,7 +939,7 @@ export const inmovilizacionUnidadRouter = {
 					});
 				}
 				if (!BUCKETS_INMOVILIZACION.includes(bucket)) {
-					motivoFalloPrecondicion = `El crédito ya no se encuentra en mora B2/B3 (está en B${bucket}). El apagado ya no aplica.`;
+					motivoFalloPrecondicion = `El crédito ya no se encuentra en mora ${bucketsInmovilizacionTexto()} (está en B${bucket}). El apagado ya no aplica.`;
 					detalleFalloPrecondicion = { bucket };
 				}
 			}

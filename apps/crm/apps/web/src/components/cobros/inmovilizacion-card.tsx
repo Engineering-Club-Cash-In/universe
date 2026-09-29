@@ -27,7 +27,10 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { authClient } from "@/lib/auth-client";
-import { debeMostrarCardInmovilizacion } from "@/lib/inmovilizacion-card-gate";
+import {
+	BUCKETS_CON_CARD_INMOVILIZACION,
+	debeMostrarCardInmovilizacion,
+} from "@/lib/inmovilizacion-card-gate";
 import { client, orpc } from "@/utils/orpc";
 import { SolicitarInmovilizacionModal } from "./inmovilizacion-solicitar-modal";
 
@@ -55,7 +58,7 @@ function formatFechaHoraGT(date: Date | string): string {
  * CB-041 — Tarjeta de inmovilización (apagado/reactivación) en la Ficha 360.
  *
  * Modo manual: LEGION ejecuta el apagado/reactivación por fuera del CRM
- * (integración `unit/exec_cmd` bloqueada, ver CB-120) — acá se solicita, se
+ * (la integración `unit/exec_cmd` con el proveedor es futura) — acá se solicita, se
  * aprueba, se deja constancia de la ejecución, y se enlaza la llamada
  * posterior al cliente con `registrarResultadoLlamada`.
  *
@@ -64,7 +67,6 @@ function formatFechaHoraGT(date: Date | string): string {
  * ya creada con la inmovilización, para no tocar `ContactoModal` (compartido
  * por toda la ficha) desde un componente de alcance chico.
  */
-const BUCKETS_INMOVILIZACION = [2, 3];
 
 export function InmovilizacionCard({
 	bucketNumero,
@@ -127,14 +129,14 @@ export function InmovilizacionCard({
 		pendienteLlamarReactivacion,
 		tieneGps,
 	} = inmov.data;
-	// El apagado exige bucket B2/B3 (mismo criterio que el server,
+	// El apagado exige bucket B2/B3/B4 (mismo criterio que el server,
 	// lib/inmovilizacion-unidad.ts) y unidad GPS vinculada (wialonUnitId != null).
 	const puedeApagar =
 		tieneGps &&
 		estadoUnidad === "activa" &&
 		!solicitudAbierta &&
 		bucketNumero !== null &&
-		BUCKETS_INMOVILIZACION.includes(bucketNumero);
+		BUCKETS_CON_CARD_INMOVILIZACION.includes(bucketNumero);
 	const puedeReactivar =
 		tieneGps && estadoUnidad === "inmovilizada" && !solicitudAbierta;
 

@@ -4690,11 +4690,11 @@ function RouteComponent() {
 						    caso.vehicleId (que viene de opportunities.vehicleId y puede
 						    estar vacío o desactualizado aun con contrato y GPS vigentes,
 						    hallazgo de review). El propio card ya oculta sus acciones si
-						    `tieneGps` es false. El server valida bucket B2/B3 para apagar
+						    `tieneGps` es false. El server valida bucket B2/B3/B4 para apagar
 						    (fail closed), pero el botón de "Solicitar apagado" también se
-						    oculta acá con bucketNumero — sin esto quedaba visible en B4 y
-						    el asesor solo se enteraba del rechazo después de hacer el
-						    pedido. */}
+						    oculta acá con bucketNumero — sin esto quedaba visible fuera de
+						    los buckets habilitados y el asesor solo se enteraba del
+						    rechazo después de hacer el pedido. */}
 						{caso.id && (
 							<InmovilizacionCard
 								bucketNumero={bucketNumero}

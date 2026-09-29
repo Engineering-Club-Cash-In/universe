@@ -20,12 +20,12 @@ import { vehicles } from "./vehicles";
  * unidad, con aprobación del `cobros_supervisor` y llamada posterior al
  * cliente.
  *
- * Modo manual a propósito: la integración con LEGION (`unit/exec_cmd`) está
- * bloqueada hasta confirmar permisos/comandos de su lado (CB-120). Por eso
- * `modoEjecucion` default 'manual' — el supervisor coordina con LEGION por
- * fuera y marca acá cuando ya se ejecutó. CB-120 solo cambia
- * `ejecutarInmovilizacion()` (services/inmovilizacion/ejecutor.ts) por la
- * llamada real a Wialon; el resto del flujo no se toca.
+ * Modo manual a propósito: la ejecución automática con LEGION
+ * (`unit/exec_cmd`) no forma parte de este flujo (depende de que ellos
+ * habiliten permisos/comandos). Por eso `modoEjecucion` default 'manual' — el
+ * supervisor coordina con LEGION por fuera y marca acá cuando ya se ejecutó.
+ * Si se integra el proveedor, solo cambia `ejecutarInmovilizacion()`
+ * (services/inmovilizacion/ejecutor.ts).
  */
 export const inmovilizacionAccionEnum = pgEnum("inmovilizacion_accion", [
 	"apagado",
@@ -96,7 +96,7 @@ export const inmovilizacionesUnidad = pgTable(
 
 		ejecutadoPor: text("ejecutado_por").references(() => user.id),
 		ejecutadoAt: timestamp("ejecutado_at"),
-		// 'manual' (default, CB-041) | 'proveedor' (CB-120, vía Wialon).
+		// 'manual' (default, CB-041) | 'proveedor' (integración futura, vía Wialon).
 		modoEjecucion: text("modo_ejecucion").notNull().default("manual"),
 		// Nota o ticket de LEGION que respalda la ejecución manual.
 		referenciaEjecucion: text("referencia_ejecucion"),

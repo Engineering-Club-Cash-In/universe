@@ -68,7 +68,7 @@ describe("debeMostrarCardInmovilizacion", () => {
 		).toBe(true);
 	});
 
-	it("B4 se muestra aunque no habilite apagado (LEGION pendiente CB-120)", () => {
+	it("B4 se muestra (habilita apagado, CB-120)", () => {
 		expect(
 			debeMostrarCardInmovilizacion({
 				bucketNumero: 4,
@@ -124,7 +124,7 @@ describe("debeMostrarCardInmovilizacion", () => {
 		).toBe(true);
 	});
 
-	it("Vehículo sin GPS (tieneGps: false) en B2/B3 sin nada en curso: NO se muestra", () => {
+	it("Vehículo sin GPS (tieneGps: false) en un bucket habilitado sin nada en curso: NO se muestra", () => {
 		expect(
 			debeMostrarCardInmovilizacion({
 				bucketNumero: 2,

@@ -2,17 +2,14 @@
  * CB-041 — Punto único donde el flujo de inmovilización EJECUTA la acción
  * sobre la unidad.
  *
- * Hoy (CB-041) siempre es manual: LEGION no tiene habilitado `unit/exec_cmd`
- * para nuestro usuario/token (pendiente de confirmar comandos, permisos y
- * relé instalado — ver conversación con Luis). El supervisor coordina el
- * apagado/reactivación con LEGION por fuera del CRM y usa
- * `marcarEjecutada` (routers/inmovilizacion-unidad.ts) para dejarlo
- * registrado acá.
+ * LIMITACIÓN: la ejecución es siempre manual. El envío automático al
+ * proveedor (Wialon/LEGION, `unit/exec_cmd`) es una integración futura y NO
+ * forma parte de este flujo (CB-120 solo habilita B4): depende de que LEGION habilite comandos, permisos y relé para
+ * nuestro usuario/token. El supervisor coordina el apagado/reactivación con
+ * LEGION por fuera del CRM y usa `marcarEjecutada`
+ * (routers/inmovilizacion-unidad.ts) para dejarlo registrado.
  *
- * CB-120 cambia ESTA función (y solo esta) para llamar a
- * `wialonClient.ejecutarComando` (services/wialon/wialon-client.ts) cuando
- * LEGION confirme el acceso — el resto del flujo (router, notificaciones,
- * UI) no se toca.
+ * Si algún día se integra el proveedor, el cambio se acota a ESTA función.
  */
 
 import type { InmovilizacionAccion } from "../../lib/inmovilizacion-unidad";

@@ -37,7 +37,7 @@ const MAX_SENSOR_CACHE_SIZE = 1000; // Cota máxima de entradas en memoria para 
 // ── Política de reintentos y circuit breaker (CB-121) ─────────────────────────
 // Solo operaciones de LECTURA (ver WIALON_SVC_IDEMPOTENTES) se reintentan de
 // forma transparente ante una falla clasificada como transitoria. Las
-// escrituras (crear/borrar link, futuros comandos de CB-120) nunca se
+// escrituras (crear/borrar link, futuros comandos de ejecución) nunca se
 // reintentan automáticamente: si su resultado queda incierto, se propaga tal
 // cual para que quien las llamó decida — nunca se ejecuta una acción
 // ambigua sin que alguien lo confirme.

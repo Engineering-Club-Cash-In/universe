@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	BUCKETS_INMOVILIZACION,
+	bucketsInmovilizacionTexto,
 	estadoUnidad,
 	puedeSolicitar,
 	siguienteEstado,
@@ -154,9 +155,15 @@ describe("puedeSolicitar", () => {
 		);
 	});
 
+	it("B4 (Asesor Especializado) habilita el apagado con unidad activa", () => {
+		expect(puedeSolicitar("apagado", "activa", 4)).toBe(true);
+		expect(puedeSolicitar("apagado", "inmovilizada", 4)).toBe(false);
+	});
+
 	it("bucket fuera de BUCKETS_INMOVILIZACION rechaza, aun con estado correcto", () => {
+		expect(puedeSolicitar("apagado", "activa", 0)).toBe(false);
 		expect(puedeSolicitar("apagado", "activa", 1)).toBe(false);
-		expect(puedeSolicitar("apagado", "activa", 4)).toBe(false);
+		expect(puedeSolicitar("apagado", "activa", 5)).toBe(false);
 	});
 
 	it("bucket null o undefined rechaza (fail closed)", () => {
@@ -164,7 +171,8 @@ describe("puedeSolicitar", () => {
 		expect(puedeSolicitar("apagado", "activa", undefined)).toBe(false);
 	});
 
-	it("BUCKETS_INMOVILIZACION es exactamente [2, 3] en CB-041", () => {
-		expect(BUCKETS_INMOVILIZACION).toEqual([2, 3]);
+	it("BUCKETS_INMOVILIZACION es exactamente [2, 3, 4] (CB-120)", () => {
+		expect(BUCKETS_INMOVILIZACION).toEqual([2, 3, 4]);
+		expect(bucketsInmovilizacionTexto()).toBe("B2/B3/B4");
 	});
 });

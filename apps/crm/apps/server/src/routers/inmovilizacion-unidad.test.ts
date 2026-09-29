@@ -487,12 +487,12 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 
-	it("bucket B4 (fuera de rango en CB-041): rechaza", async () => {
+	it("bucket B5 (fuera de rango): rechaza", async () => {
 		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
 			asesor: { emailCashIn: "u@example.com" },
 		} as never);
 		spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
-			bucket: 4,
+			bucket: 5,
 		} as never);
 
 		await expect(
@@ -923,7 +923,7 @@ describe("CB-041 — marcarEjecutada", () => {
 		).rejects.toMatchObject({
 			code: "CONFLICT",
 			message:
-				"El crédito ya no se encuentra en mora B2/B3 (está en B0). El apagado ya no aplica.",
+				"El crédito ya no se encuentra en mora B2/B3/B4 (está en B0). El apagado ya no aplica.",
 		});
 		expect(notificarLlamarClienteLlamadas).toHaveLength(0);
 		expect(inmovilizacionExistente.estado).toBe("cancelada");
@@ -1085,7 +1085,7 @@ describe("CB-041 — marcarEjecutada", () => {
 		).rejects.toMatchObject({
 			code: "CONFLICT",
 			message:
-				"El crédito ya no se encuentra en mora B2/B3 (está en B1). El apagado ya no aplica.",
+				"El crédito ya no se encuentra en mora B2/B3/B4 (está en B1). El apagado ya no aplica.",
 		});
 		// No debe haberse insertado evento de cancelar porque no afectó filas
 		expect(eventosInsertados.some((e) => e.evento === "cancelar")).toBe(false);

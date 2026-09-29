@@ -23,10 +23,20 @@ export type InmovilizacionEvento =
 	| "cancelar";
 
 /**
- * Buckets donde CB-041 habilita el flujo (Asesor Sr: B2/B3). CB-120 agrega
- * el 4 (Asesor Especializado) — se cambia SOLO acá, no en el router.
+ * Buckets donde se habilita el flujo: B2/B3 (Asesor Sr) y B4 (Asesor
+ * Especializado, CB-120). El rol lo define el bucket del caso, no un atributo
+ * del usuario. Se cambia SOLO acá, no en el router.
+ *
+ * Limitación conocida: la ejecución automática sobre la unidad (Wialon/LEGION,
+ * `unit/exec_cmd`) NO forma parte de este flujo. Ver
+ * services/inmovilizacion/ejecutor.ts.
  */
-export const BUCKETS_INMOVILIZACION: readonly number[] = [2, 3];
+export const BUCKETS_INMOVILIZACION: readonly number[] = [2, 3, 4];
+
+/** Texto legible de los buckets habilitados, para mensajes de error ("B2/B3/B4"). */
+export function bucketsInmovilizacionTexto(): string {
+	return BUCKETS_INMOVILIZACION.map((b) => `B${b}`).join("/");
+}
 
 /**
  * Tabla de transiciones válidas. Una transición fuera de esta tabla es un
@@ -123,7 +133,7 @@ export function estadoUnidad(
  *   mismo criterio que ubicaciones-clave.ts para B4.
  * - `reactivacion` exige SOLO unidad inmovilizada, sin mirar el bucket: el
  *   caso normal es justamente que el cliente pagó y su crédito bajó a B0/B1
- *   (o salió del funnel, p. ej. EN_CONVENIO). Exigir B2/B3 dejaría el carro
+ *   (o salió del funnel, p. ej. EN_CONVENIO). Exigir un bucket habilitado dejaría el carro
  *   apagado sin forma de reactivarlo.
  */
 export function puedeSolicitar(

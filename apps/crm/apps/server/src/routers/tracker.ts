@@ -443,7 +443,8 @@ async function datosDelCorreo(
 }
 
 // La llave de idempotencia es por registro e intento: reintentar el mismo
-// intento (resultado desconocido) no duplica el correo en Resend.
+// intento (resultado desconocido) no duplica el correo en Resend mientras la
+// llave siga vigente allá (24 h); después Resend lo trata como un correo nuevo.
 export function llaveDeEnvio(registroId: string, intento: number): string {
 	return `factura-seguro/${registroId}/${intento}`;
 }
@@ -867,7 +868,9 @@ export const trackerRouter = {
 				);
 				// Un `pendiente` abandonado tiene resultado desconocido: se repite el
 				// mismo intento (misma llave y mismos destinatarios) y Resend no lo
-				// duplica si ya salió. Solo un envío que falló pasa a otro intento.
+				// duplica si ya salió, dentro de las 24 h de la llave. Pasado ese
+				// plazo puede llegar dos veces; se permite igual para que el caso no
+				// quede trabado. Solo un envío que falló pasa a otro intento.
 				// Repetir el intento es reenviar exactamente el correo guardado; los
 				// registros previos a guardarlo (sin correo) se arman de nuevo.
 				const correoGuardado =

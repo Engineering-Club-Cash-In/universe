@@ -16,6 +16,7 @@ import {
 	type BuroInternoCategoria,
 	type BuroInternoPersona,
 	type BuroInternoSeveridad,
+	buroInternoAutorizaciones,
 	buroInternoEventos,
 	buroInternoPersonas,
 	buroInternoReglas,
@@ -36,6 +37,7 @@ import {
 	type OrigenCandidato,
 	type RegistroParaMatch,
 	type ReglaEfectiva,
+	registrosQueBloquean,
 	resolverReglas,
 	sugerirNombresApellidos,
 	validarParametrosRegla,
@@ -88,6 +90,24 @@ async function registrarEvento(
 		realizadoPor: evento.actor.id,
 		realizadoPorRol: evento.actor.rol,
 	});
+}
+
+/**
+ * Candado de Postgres que serializa las escrituras del buró con la aprobación
+ * del análisis. Sin él, la huella de `huellaEvaluacionSql` es solo una foto:
+ * en READ COMMITTED un alta que se confirma mientras corre el UPDATE de
+ * aprobación no la invalida. Lo toman las dos puntas, así que una espera a la
+ * otra y la huella siempre se evalúa contra un catálogo quieto.
+ *
+ * Es por transacción: se libera solo al terminar, sin nada que desbloquear a
+ * mano. El orden es siempre candado → escritura, así que no hay abrazos.
+ */
+export async function tomarCandadoBuroInterno(
+	ejecutor: Pick<typeof db, "execute">,
+): Promise<void> {
+	await ejecutor.execute(
+		sql`SELECT pg_advisory_xact_lock(hashtext('buro_interno'))`,
+	);
 }
 
 /** "" y espacios cuentan como vacío */
@@ -532,6 +552,8 @@ export async function crearPersona(
 
 	try {
 		return await db.transaction(async (tx) => {
+			await tomarCandadoBuroInterno(tx);
+
 			const [persona] = await tx
 				.insert(buroInternoPersonas)
 				.values({ ...limpios, creadoPor: actor.id })
@@ -589,6 +611,8 @@ export async function actualizarPersona(
 
 	try {
 		return await db.transaction(async (tx) => {
+			await tomarCandadoBuroInterno(tx);
+
 			// `activo` va en el mismo UPDATE: si alguien lo retiró después de la
 			// lectura de arriba, no se toca la fila ni se anota una edición
 			// posterior a su baja
@@ -629,6 +653,8 @@ export async function desactivarPersona(
 	actor: ActorBuroInterno,
 ): Promise<BuroInternoPersona> {
 	return db.transaction(async (tx) => {
+		await tomarCandadoBuroInterno(tx);
+
 		const [persona] = await tx
 			.update(buroInternoPersonas)
 			.set({
@@ -729,6 +755,8 @@ export async function actualizarRegla(
 	const parametros = { ...anterior.parametros, ...validacion.parametros };
 
 	await db.transaction(async (tx) => {
+		await tomarCandadoBuroInterno(tx);
+
 		await tx
 			.insert(buroInternoReglas)
 			.values({
@@ -983,9 +1011,204 @@ export async function evaluarOportunidad(opportunityId: string) {
 		referencia: referencias.length,
 	};
 
+	const identidad: IdentidadEvaluada = {
+		leadId: fila.leadId,
+		dpi: normalizarDpiMatch(fila.dpi),
+	};
+
+	const [coincidencias, autorizaciones] = await Promise.all([
+		evaluar(candidatos),
+		cargarAutorizaciones(opportunityId, identidad),
+	]);
+
+	const bloqueantes = registrosQueBloquean(
+		coincidencias,
+		new Set(autorizaciones.map((a) => a.personaId)),
+	);
+
 	return {
 		evaluadoEn: new Date(),
 		evaluados,
-		coincidencias: await evaluar(candidatos),
+		identidad,
+		coincidencias,
+		autorizaciones,
+		bloqueantes: bloqueantes.map((c) => ({
+			registroId: c.registroId,
+			nombreCompleto: c.registro.nombreCompleto,
+			etiqueta: c.etiqueta,
+		})),
+		bloqueaAprobacion: bloqueantes.length > 0,
 	};
+}
+
+/** A quién se evaluó: si esto cambia, las autorizaciones anteriores no valen */
+type IdentidadEvaluada = { leadId: string | null; dpi: string | null };
+
+/**
+ * Autorizaciones vigentes para esta oportunidad. Solo cuentan las que se
+ * dieron sobre la misma identidad: cambiarle el lead a la oportunidad, o
+ * cambiarle el DPI al lead, las deja sin efecto.
+ */
+async function cargarAutorizaciones(
+	opportunityId: string,
+	identidad: IdentidadEvaluada,
+) {
+	return db
+		.select({
+			personaId: buroInternoAutorizaciones.personaId,
+			motivo: buroInternoAutorizaciones.motivo,
+			autorizadoPorNombre: user.name,
+			createdAt: buroInternoAutorizaciones.createdAt,
+		})
+		.from(buroInternoAutorizaciones)
+		.leftJoin(user, eq(user.id, buroInternoAutorizaciones.autorizadoPor))
+		.where(
+			and(
+				eq(buroInternoAutorizaciones.opportunityId, opportunityId),
+				sql`${buroInternoAutorizaciones.leadId} IS NOT DISTINCT FROM ${identidad.leadId}::uuid`,
+				sql`${buroInternoAutorizaciones.dpi} IS NOT DISTINCT FROM ${identidad.dpi}::text`,
+			),
+		)
+		.orderBy(desc(buroInternoAutorizaciones.createdAt));
+}
+
+/**
+ * Foto de todo lo que entra en una evaluación: el catálogo activo, las reglas
+ * de coincidencia y la gente de la solicitud (lead, sus datos de RENAP,
+ * codeudores y referencias).
+ *
+ * El gate de aprobación compara esta misma expresión dentro del UPDATE que
+ * aprueba: si algo de eso cambió entre la revisión y la escritura —cobros
+ * registró a alguien, supervisión encendió una regla, ventas agregó un
+ * codeudor— la huella no coincide, no se afecta ninguna fila y la aprobación
+ * falla en vez de pasar sin haber evaluado lo nuevo.
+ */
+export function huellaEvaluacionSql(
+	opportunityIdExpr: SQL,
+	leadIdExpr: SQL,
+): SQL {
+	const foto = (tabla: string, filtro?: SQL) =>
+		sql`(SELECT count(*)::text || ':' || coalesce(max(updated_at)::text, '')
+			FROM ${sql.raw(tabla)}${filtro ? sql` WHERE ${filtro}` : sql``})`;
+
+	// `renapinfo` no tiene timestamps y el titular se arma con esos nombres
+	// cuando ya está sincronizado, así que se versiona con un hash de ellos
+	const fotoRenap = sql`(SELECT coalesce(md5(string_agg(
+			concat_ws('|', r.first_name, r.second_name, r.third_name, r.first_last_name, r.second_last_name),
+			'~' ORDER BY r.dpi)), '')
+		FROM public.renapinfo r
+		WHERE regexp_replace(r.dpi, '\s', '', 'g') = (
+			SELECT regexp_replace(coalesce(l.dpi, ''), '\s', '', 'g')
+			FROM public.leads l WHERE l.id = ${leadIdExpr}
+		))`;
+
+	return sql`concat_ws('|',
+		${foto("public.buro_interno_personas", sql`activo`)},
+		${foto("public.buro_interno_reglas")},
+		${foto("public.co_debtors", sql`opportunity_id = ${opportunityIdExpr}`)},
+		${foto("public.referencias_lead", sql`lead_id = ${leadIdExpr}`)},
+		${foto("public.leads", sql`id = ${leadIdExpr}`)},
+		${fotoRenap}
+	)`;
+}
+
+export async function huellaEvaluacion(opportunityId: string): Promise<string> {
+	const { rows } = await db.execute<{ huella: string }>(sql`
+		SELECT ${huellaEvaluacionSql(sql`o.id`, sql`o.lead_id`)} AS huella
+		FROM public.opportunities o
+		WHERE o.id = ${opportunityId}
+	`);
+	return rows[0]?.huella ?? "";
+}
+
+/**
+ * El analista levanta el bloqueo con una justificación. Vale solo para las
+ * personas que están frenando hoy esta oportunidad: si mañana cobros registra
+ * a otra que también coincide, vuelve a frenar.
+ */
+export async function autorizarOportunidad(
+	opportunityId: string,
+	motivo: string,
+	actor: ActorBuroInterno,
+) {
+	const evaluacion = await evaluarOportunidad(opportunityId);
+
+	if (evaluacion.bloqueantes.length === 0) {
+		throw new BuroInternoValidacionError(
+			"No hay coincidencias del buró interno frenando esta oportunidad",
+		);
+	}
+
+	await db.transaction(async (tx) => {
+		for (const bloqueante of evaluacion.bloqueantes) {
+			// Si ya hay una fila para esta persona pero de otra identidad (le
+			// cambiaron el lead o el DPI), se reemplaza: esa autorización vieja
+			// ya no aplica y sin esto el analista no podría dar la nueva.
+			// Cuando la fila existente es de la MISMA identidad no se escribe
+			// nada, así dos analistas a la vez no anotan dos autorizaciones.
+			const [guardada] = await tx
+				.insert(buroInternoAutorizaciones)
+				.values({
+					opportunityId,
+					personaId: bloqueante.registroId,
+					leadId: evaluacion.identidad.leadId,
+					dpi: evaluacion.identidad.dpi,
+					motivo: motivo.trim(),
+					autorizadoPor: actor.id,
+				})
+				.onConflictDoUpdate({
+					target: [
+						buroInternoAutorizaciones.opportunityId,
+						buroInternoAutorizaciones.personaId,
+					],
+					set: {
+						leadId: evaluacion.identidad.leadId,
+						dpi: evaluacion.identidad.dpi,
+						motivo: motivo.trim(),
+						autorizadoPor: actor.id,
+						createdAt: new Date(),
+					},
+					setWhere: sql`${buroInternoAutorizaciones.leadId} IS DISTINCT FROM excluded.lead_id
+						OR ${buroInternoAutorizaciones.dpi} IS DISTINCT FROM excluded.dpi`,
+				})
+				.returning({ id: buroInternoAutorizaciones.id });
+
+			if (!guardada) continue;
+
+			await registrarEvento(tx, {
+				accion: "autorizacion_analisis",
+				actor,
+				personaId: bloqueante.registroId,
+				detalle: { opportunityId, motivo: motivo.trim() },
+			});
+		}
+	});
+
+	return evaluarOportunidad(opportunityId);
+}
+
+/**
+ * Para el gate de aprobación del análisis. Una oportunidad sin lead no tiene a
+ * quién comparar, así que no frena.
+ */
+export async function bloqueoBuroInterno(
+	opportunityId: string,
+): Promise<{ bloquea: boolean; nombres: string[]; huella: string }> {
+	// Se toma ANTES de evaluar: si algo cambia mientras se evalúa, la huella
+	// queda vieja y la aprobación falla, que es el lado seguro del error
+	const huella = await huellaEvaluacion(opportunityId);
+
+	try {
+		const evaluacion = await evaluarOportunidad(opportunityId);
+		return {
+			bloquea: evaluacion.bloqueaAprobacion,
+			nombres: evaluacion.bloqueantes.map((b) => b.nombreCompleto),
+			huella,
+		};
+	} catch (error) {
+		if (error instanceof OportunidadSinLeadError) {
+			return { bloquea: false, nombres: [], huella };
+		}
+		throw error;
+	}
 }

@@ -27,6 +27,7 @@ export async function claimNexaPaymentEvent(
   client: QueryClient,
   body: NexaPaymentBody,
   context: NexaPaymentContext,
+  isBillingRunning: (eventId: number) => boolean = () => false,
 ): Promise<NexaClaim> {
   const eventFingerprint = context.eventFingerprint ?? context.payloadHash;
   const [claimRow] = (await client.query(
@@ -74,7 +75,7 @@ export async function claimNexaPaymentEvent(
     currency: body.currency,
     payloadHash: context.payloadHash,
     compatiblePayloadHashes: [eventFingerprint, context.legacyPayloadHash].filter((value): value is string => Boolean(value)),
-  });
+  }, event !== null && isBillingRunning(event.id));
   if (event?.status === "failed" && claim.kind === "retry") {
     const transitioned = await client.query(
       `UPDATE cartera.nexa_payment_events

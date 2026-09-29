@@ -31,9 +31,10 @@ const configSchema = z.object({
   carteraInternalApiSecret: z.string().trim().min(1).optional(),
   carteraApiBaseUrl: z.string().url().optional(),
   carteraApiTimeoutMs: z.coerce.number().int().positive().default(10_000),
-  carteraTargetEnv: z.enum(["development", "qa"]).optional(),
+  carteraTargetEnv: z.enum(["development", "qa", "production"]).optional(),
   carteraDevelopmentAllowedOrigins: envOrigins,
   carteraQaAllowedOrigins: envOrigins,
+  carteraProductionAllowedOrigins: envOrigins,
   mockCartera: envBoolean.default(false),
   enableAdminApi: envBoolean.default(false),
   enableTestUi: envBoolean.default(false),
@@ -87,6 +88,13 @@ const configSchema = z.object({
     }
   }
   if (config.deploymentMode === "production") {
+    if (new URL(config.nexaBaseUrl).protocol !== "https:") {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["nexaBaseUrl"], message: "Production requires an HTTPS Nexa endpoint" });
+    }
+    const origin = config.carteraApiBaseUrl ? new URL(config.carteraApiBaseUrl) : null;
+    if (config.carteraTargetEnv !== "production" || origin?.protocol !== "https:" || !config.carteraProductionAllowedOrigins?.includes(origin.origin)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["carteraTargetEnv"], message: "Production requires an explicitly allowed HTTPS production Cartera target" });
+    }
     if (config.mockCartera) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -123,7 +131,7 @@ const configSchema = z.object({
     if (config.nexaMtlsMode !== "required") {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["nexaMtlsMode"], message: "qa_real_payments requires mTLS" });
     }
-    if (!config.carteraTargetEnv) {
+    if (!config.carteraTargetEnv || config.carteraTargetEnv === "production") {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ["carteraTargetEnv"], message: "qa_real_payments requires CARTERA_TARGET_ENV development or qa" });
     }
     if (config.enableTestUi) {
@@ -172,6 +180,7 @@ export function loadConfig(env = process.env) {
     carteraTargetEnv: env.CARTERA_TARGET_ENV,
     carteraDevelopmentAllowedOrigins: env.CARTERA_DEVELOPMENT_ALLOWED_ORIGINS,
     carteraQaAllowedOrigins: env.CARTERA_QA_ALLOWED_ORIGINS,
+    carteraProductionAllowedOrigins: env.CARTERA_PRODUCTION_ALLOWED_ORIGINS,
     mockCartera: env.MOCK_CARTERA,
     enableAdminApi: env.ENABLE_ADMIN_API,
     enableTestUi: env.ENABLE_TEST_UI,

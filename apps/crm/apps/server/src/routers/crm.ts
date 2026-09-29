@@ -174,6 +174,12 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import {
+	bloqueoBuroInterno,
+	huellaEvaluacion,
+	huellaEvaluacionSql,
+	tomarCandadoBuroInterno,
+} from "../services/buro-interno";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import {
@@ -4396,6 +4402,9 @@ export const crmRouter = {
 			// El UPDATE de aprobación se condiciona a que el lead siga teniendo
 			// este DPI, tanto si se validó como si quedó exenta
 			let dpiVerificado: string | null = null;
+			// Foto de lo que se evaluó (catálogo, reglas, lead, codeudores y
+			// referencias) al momento de revisar el buró; viaja en el UPDATE
+			let huellaBuro: string | null = null;
 
 			if (input.approved && !input.bypassValidation) {
 				// La exención se resuelve en el servicio: `source` es editable por el
@@ -4462,6 +4471,20 @@ export const crmRouter = {
 					// quedan en la bitácora y visibles en la página de análisis
 					// para que el analista decida bajo su criterio
 				}
+
+				// Buró interno: corre también en las oportunidades exentas del bot,
+				// porque es una lista propia y no depende de fuentes externas. Solo
+				// frenan las coincidencias de severidad alta sin autorizar (ver
+				// `registrosQueBloquean`); el analista las levanta con un motivo
+				// desde la tarjeta "Buró interno" del análisis.
+				const buroInterno = await bloqueoBuroInterno(input.opportunityId);
+				huellaBuro = buroInterno.huella;
+
+				if (buroInterno.bloquea) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `El buró interno bloquea la aprobación: ${buroInterno.nombres.join(", ")}. Revisá la tarjeta "Buró interno" en el análisis y autorizá con una justificación si no corresponde.`,
+					});
+				}
 			}
 
 			// Get the next stage (40% - Cierre de propuesta) for approval
@@ -4514,7 +4537,11 @@ export const crmRouter = {
 				// mismo UPDATE: si el lead cambia de DPI entre la verificación y
 				// la escritura, no se afecta ninguna fila y la aprobación falla
 				// en vez de aprobar con el veredicto de otra persona
-				const whereClause = dpiVerificado
+				// Misma idea para el buró interno: si entre la revisión y esta
+				// escritura cambió algo de lo evaluado (el catálogo, una regla, el
+				// lead, un codeudor o una referencia), la huella no coincide y no se
+				// afecta ninguna fila, en vez de aprobar sin evaluar lo nuevo
+				const condicionesConDpi = dpiVerificado
 					? and(
 							condicionesBase,
 							sql`exists (
@@ -4525,26 +4552,60 @@ export const crmRouter = {
 						)
 					: condicionesBase;
 
-				// Update opportunity with analysisStatus
-				const updatedRows = await db
-					.update(opportunities)
-					.set({
-						stageId: newStageId,
-						analysisStatus: input.approved ? "approved" : "rejected",
-						analysisRejectionCount: input.approved
-							? opportunity[0].analysisRejectionCount
-							: opportunity[0].analysisRejectionCount + 1,
-						lastAnalysisRejectedAt: input.approved ? null : new Date(),
-						lastAnalysisRejectedBy: input.approved ? null : context.userId,
-						notes: input.reason
-							? `${opportunity[0].notes || ""}\n\n[Análisis ${input.approved ? "Aprobado" : "Rechazado"}]: ${input.reason}`
-							: opportunity[0].notes,
-						updatedAt: new Date(),
-					})
-					.where(whereClause)
-					.returning();
+				const whereClause = huellaBuro
+					? and(
+							condicionesConDpi,
+							sql`${huellaEvaluacionSql(
+								sql`${opportunities.id}`,
+								sql`${opportunities.leadId}`,
+							)} = ${huellaBuro}`,
+						)
+					: condicionesConDpi;
+
+				// Update opportunity with analysisStatus.
+				// Cuando hay huella de buró, la escritura va dentro de una
+				// transacción que primero toma el candado que usan las escrituras
+				// del buró: así ninguna se confirma mientras se evalúa la huella,
+				// que por sí sola es una foto y en READ COMMITTED no alcanza.
+				const escribirAprobacion = (ejecutor: Pick<typeof db, "update">) =>
+					ejecutor
+						.update(opportunities)
+						.set({
+							stageId: newStageId,
+							analysisStatus: input.approved ? "approved" : "rejected",
+							analysisRejectionCount: input.approved
+								? opportunity[0].analysisRejectionCount
+								: opportunity[0].analysisRejectionCount + 1,
+							lastAnalysisRejectedAt: input.approved ? null : new Date(),
+							lastAnalysisRejectedBy: input.approved ? null : context.userId,
+							notes: input.reason
+								? `${opportunity[0].notes || ""}\n\n[Análisis ${input.approved ? "Aprobado" : "Rechazado"}]: ${input.reason}`
+								: opportunity[0].notes,
+							updatedAt: new Date(),
+						})
+						.where(whereClause)
+						.returning();
+
+				const updatedRows = huellaBuro
+					? await db.transaction(async (tx) => {
+							await tomarCandadoBuroInterno(tx);
+							return escribirAprobacion(tx);
+						})
+					: await escribirAprobacion(db);
 				// Check for concurrent modification
 				if (updatedRows.length === 0) {
+					// Con el chequeo atómico del buró interno, 0 filas también
+					// significa que cambió algo de lo evaluado mientras se aprobaba
+					if (
+						huellaBuro &&
+						(await huellaEvaluacion(input.opportunityId)) !== huellaBuro
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Cambiaron los datos que revisa el buró interno mientras se aprobaba (el buró, sus reglas, el cliente, un codeudor o una referencia). Recarga la página para revisar las coincidencias e intenta de nuevo.",
+						});
+					}
+
 					// Con el chequeo atómico de DPI, 0 filas también significa que el
 					// DPI del lead cambió después de validar: se relee para dar el
 					// mensaje correcto en vez del de conflicto genérico

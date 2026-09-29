@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
 	documentIdDesdeLink,
+	documentIdDesdeLosEnlaces,
 	filasDeFirmantes,
 	linksPorRol,
+	salioPorDocumenso,
 } from "./contract-signatories";
 
 describe("linksPorRol", () => {
@@ -66,5 +68,52 @@ describe("documentIdDesdeLink", () => {
 	test("devuelve null cuando el link no tiene la forma esperada", () => {
 		expect(documentIdDesdeLink("https://app.weetrust.mx/otra/cosa")).toBeNull();
 		expect(documentIdDesdeLink(null)).toBeNull();
+	});
+});
+
+describe("contratos de antes de guardar el proveedor", () => {
+	const SIN_NADA = {
+		signingProvider: null,
+		clientSigningLink: null,
+		representativeSigningLink: null,
+		additionalSigningLinks: null,
+	};
+
+	test("uno de WeeTrust recupera su documento del enlace", () => {
+		const viejo = {
+			...SIN_NADA,
+			clientSigningLink:
+				"https://app.weetrust.mx/signatory/doc-123/firmante-9/abc/0d1f30",
+		};
+		expect(salioPorDocumenso(viejo)).toBe(false);
+		expect(documentIdDesdeLosEnlaces(viejo)).toBe("doc-123");
+	});
+
+	test("uno de Documenso se reconoce por el enlace y no da documento de WeeTrust", () => {
+		const viejo = {
+			...SIN_NADA,
+			clientSigningLink:
+				"https://documenso.s2.ejemplo.site/sign/akyMR7PGgJuzddsu0dHsq",
+		};
+		expect(salioPorDocumenso(viejo)).toBe(true);
+		expect(documentIdDesdeLosEnlaces(viejo)).toBeNull();
+	});
+
+	test("si el proveedor está guardado, manda el proveedor", () => {
+		expect(
+			salioPorDocumenso({ ...SIN_NADA, signingProvider: "documenso" }),
+		).toBe(true);
+		expect(
+			salioPorDocumenso({
+				...SIN_NADA,
+				signingProvider: "weetrust",
+				clientSigningLink: "https://documenso.s2.ejemplo.site/sign/x",
+			}),
+		).toBe(false);
+	});
+
+	test("sin enlaces no hay nada que recuperar", () => {
+		expect(salioPorDocumenso(SIN_NADA)).toBe(false);
+		expect(documentIdDesdeLosEnlaces(SIN_NADA)).toBeNull();
 	});
 });

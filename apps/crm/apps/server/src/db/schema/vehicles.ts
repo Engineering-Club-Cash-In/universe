@@ -62,14 +62,21 @@ export const vehicleVendors = pgTable("vehicle_vendors", {
 	name: text("name").notNull(),
 	// Opcional: el vendedor que se registra desde el DPI del dueño no trae teléfono.
 	phone: text("phone"),
-	dpi: text("dpi").notNull().unique(),
+	// Opcional solo para vendedores de agencia; individual y empresa lo exigen.
+	dpi: text("dpi").unique(),
 	gender: text("gender"), // 'male' | 'female', lo usa la Declaración de Vendedor
 
-	// Vendor type
-	vendorType: text("vendor_type").notNull(), // 'individual' or 'empresa'
+	// 'individual' | 'empresa' (vendedor legal del carro usado) | 'agencia'
+	// (vendedor de una agencia/predio; nunca va al contrato).
+	vendorType: text("vendor_type").notNull(),
 
 	// Company info (if empresa)
 	companyName: text("company_name"), // Solo si es empresa
+
+	// Agencia/predio del vendedor. Obligatoria solo para 'agencia'.
+	companyId: uuid("company_id").references(() => companies.id, {
+		onDelete: "restrict",
+	}),
 
 	// Contact details
 	email: text("email"),

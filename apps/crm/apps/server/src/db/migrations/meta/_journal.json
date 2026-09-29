@@ -267,6 +267,13 @@
 			"when": 1790373775351,
 			"tag": "0044_add_batch_monto_aportado_previo",
 			"breakpoints": true
+		},
+		{
+			"idx": 37,
+			"version": "7",
+			"when": 1790622959899,
+			"tag": "0045_add_agency_sellers",
+			"breakpoints": true
 		}
 	]
 }

@@ -12,11 +12,15 @@ import {
 	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
-import { partnerAccounts } from "../db/schema/partners";
+import {
+	opportunityAgencySellers,
+	partnerAccounts,
+} from "../db/schema/partners";
 import { quotations } from "../db/schema/quotations";
-import { vehicles } from "../db/schema/vehicles";
+import { vehicles, vehicleVendors } from "../db/schema/vehicles";
 import { partnerIdentityProcedure, partnerProcedure } from "../lib/orpc";
 import { PARTNER_CHANGE_PASSWORD_PATH, partnerAuth } from "../lib/partner-auth";
+import { casoDentroDeAlcance, condicionDeAlcance } from "../lib/partner-scope";
 import { extraerIp, partnerAuthLimiter } from "../lib/rate-limit";
 import {
 	construirHistorial,
@@ -42,6 +46,7 @@ export type CasoTracker = {
 	referencia: string;
 	cliente: string;
 	agencia: string;
+	vendedor: string | null;
 	vehiculo: string | null;
 	valorVehiculo: number | null;
 	pasoActual: PasoTracker;
@@ -92,7 +97,10 @@ const filaSelect = {
 	createdAt: opportunities.createdAt,
 	updatedAt: opportunities.updatedAt,
 	closurePercentage: salesStages.closurePercentage,
+	companyId: opportunities.companyId,
 	agenciaNombre: companies.name,
+	sellerId: opportunityAgencySellers.sellerId,
+	vendedorNombre: vehicleVendors.name,
 	leadFirstName: leads.firstName,
 	leadMiddleName: leads.middleName,
 	leadLastName: leads.lastName,
@@ -112,7 +120,10 @@ type Fila = {
 	createdAt: Date;
 	updatedAt: Date;
 	closurePercentage: number;
+	companyId: string | null;
 	agenciaNombre: string;
+	sellerId: string | null;
+	vendedorNombre: string | null;
 	leadFirstName: string | null;
 	leadMiddleName: string | null;
 	leadLastName: string | null;
@@ -224,6 +235,7 @@ function aCaso(fila: Fila, historial: EntradaHistorial[]): CasoTracker {
 			fila.leadSecondLastName,
 		),
 		agencia: fila.agenciaNombre.trim(),
+		vendedor: fila.vendedorNombre?.trim() || null,
 		vehiculo: descripcionVehiculo(fila),
 		valorVehiculo:
 			fila.vehicleValue === null ? null : Number(fila.vehicleValue),
@@ -247,6 +259,15 @@ const consultaBase = () =>
 		.leftJoin(
 			ultimaCotizacion,
 			eq(ultimaCotizacion.opportunityId, opportunities.id),
+		)
+		// El UNIQUE(opportunity_id) evita que este join duplique casos.
+		.leftJoin(
+			opportunityAgencySellers,
+			eq(opportunityAgencySellers.opportunityId, opportunities.id),
+		)
+		.leftJoin(
+			vehicleVendors,
+			eq(vehicleVendors.id, opportunityAgencySellers.sellerId),
 		);
 
 export const changePartnerPasswordInputSchema = z
@@ -368,7 +389,7 @@ export const trackerRouter = {
 		const filas = await consultaBase()
 			.where(
 				and(
-					inArray(opportunities.companyId, context.companyIds),
+					condicionDeAlcance(context.membresias),
 					dentroDeVentanaDeRetencion(desde),
 				),
 			)
@@ -386,17 +407,7 @@ export const trackerRouter = {
 			const desde = new Date();
 			desde.setUTCMonth(desde.getUTCMonth() - MESES_HISTORICO);
 
-			const [fila] = await db
-				.select({ ...filaSelect, companyId: opportunities.companyId })
-				.from(opportunities)
-				.innerJoin(salesStages, eq(salesStages.id, opportunities.stageId))
-				.innerJoin(companies, eq(companies.id, opportunities.companyId))
-				.leftJoin(leads, eq(leads.id, opportunities.leadId))
-				.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
-				.leftJoin(
-					ultimaCotizacion,
-					eq(ultimaCotizacion.opportunityId, opportunities.id),
-				)
+			const [fila] = await consultaBase()
 				.where(
 					and(
 						eq(opportunities.id, input.id),
@@ -410,7 +421,7 @@ export const trackerRouter = {
 			}
 
 			// El alcance se revalida contra la membresía, nunca contra el id que manda el cliente.
-			if (!fila.companyId || !context.companyIds.includes(fila.companyId)) {
+			if (!casoDentroDeAlcance(fila, context.membresias)) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "Este caso no pertenece a tu agencia",
 				});

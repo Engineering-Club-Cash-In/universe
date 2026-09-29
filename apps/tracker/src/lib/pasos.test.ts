@@ -16,6 +16,7 @@ const caso = (parcial: Partial<Caso>): Caso => ({
 	referencia: "11111111",
 	cliente: "Juan P.",
 	agencia: "JAC GUATEMALA",
+	vendedor: null,
 	vehiculo: null,
 	valorVehiculo: 100000,
 	pasoActual: 1,

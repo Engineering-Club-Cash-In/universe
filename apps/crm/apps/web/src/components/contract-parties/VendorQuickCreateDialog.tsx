@@ -87,34 +87,42 @@ export function VendorQuickCreateDialog({
 		if (initialDpi) lookup.buscar(initialDpi, { force: true });
 	}, [open]);
 
+	const guardarVendedor = async (
+		dpiLimpio: string,
+		existenteId: string | null,
+	) => {
+		if (existenteId) {
+			const actual = await client.getVendorById({ id: existenteId });
+			return client.updateVendor({
+				id: existenteId,
+				data: {
+					name: nombre.trim(),
+					phone: telefono.trim() || actual.phone || undefined,
+					dpi: dpiLimpio,
+					vendorType: actual.vendorType as "individual" | "empresa",
+					companyName: actual.companyName || undefined,
+					email: correo.trim() || actual.email || undefined,
+					address: actual.address || undefined,
+					gender: genero || null,
+				},
+			});
+		}
+		return client.createVendor({
+			name: nombre.trim(),
+			email: correo.trim() || undefined,
+			phone: telefono.trim() || undefined,
+			dpi: dpiLimpio,
+			vendorType: "individual",
+			gender: genero || null,
+		});
+	};
+
 	const saveMutation = useMutation({
 		mutationFn: async (): Promise<QuickVendor> => {
 			const dpiLimpio = soloDigitosDpi(dpi);
 			const existenteId = existente?.dpi === dpiLimpio ? existente.id : null;
-			if (existenteId) {
-				const actual = await client.getVendorById({ id: existenteId });
-				return client.updateVendor({
-					id: existenteId,
-					data: {
-						name: nombre.trim(),
-						phone: telefono.trim() || actual.phone || undefined,
-						dpi: dpiLimpio,
-						vendorType: actual.vendorType as "individual" | "empresa",
-						companyName: actual.companyName || undefined,
-						email: correo.trim() || actual.email || undefined,
-						address: actual.address || undefined,
-						gender: genero || null,
-					},
-				});
-			}
-			return client.createVendor({
-				name: nombre.trim(),
-				email: correo.trim() || undefined,
-				phone: telefono.trim() || undefined,
-				dpi: dpiLimpio,
-				vendorType: "individual",
-				gender: genero || null,
-			});
+			const guardado = await guardarVendedor(dpiLimpio, existenteId);
+			return { ...guardado, dpi: guardado.dpi ?? dpiLimpio };
 		},
 		onSuccess: (vendor) => {
 			queryClient.invalidateQueries({ queryKey: orpc.getVendors.key() });

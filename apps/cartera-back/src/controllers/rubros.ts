@@ -1,0 +1,2556 @@
+/**
+ * Rubros — cobros adicionales por crédito (tarjeta de circulación, traspaso…).
+ *
+ * Catálogo, alta y corrección manual (arriba), y el COBRO desde el flujo de
+ * pagos (al final del archivo). El cobro respeta las dos etapas del pago:
+ * registrar una boleta sólo APARTA saldo del rubro (`rubros_pagos` con
+ * `aplicado = false`) y aplicarla es lo que de verdad lo baja — por eso la
+ * corrección manual de un rubro con reclamos vivos se rechaza con 409 en vez
+ * de dejar que el saldo se mueva por debajo de una boleta ya registrada.
+ *
+ * Las REGLAS de negocio no viven en este archivo: están en `rubrosPolicy.ts`
+ * como funciones puras (qué crédito admite qué rubro, hasta dónde se puede
+ * bajar un monto). Acá sólo se orquesta —leer la base, preguntarle a la policy,
+ * escribir en una transacción— para que las reglas se puedan testear sin base
+ * de datos y no se dupliquen cuando el cobro dentro de los pagos las necesite.
+ *
+ * Toda la aritmética de dinero pasa por `Big`: los montos son `numeric(18,2)` y
+ * un float haría que cada resta de saldo arrastre centavos fantasma. Lo
+ * ABONADO, en cambio, no se deriva restando: se SUMA de los reclamos ya
+ * aplicados (`rubros_pagos.monto_aplicado`), que es lo único que dice cuánto
+ * puso el cliente — ver `listarRubrosDeCredito`.
+ */
+
+import Big from "big.js";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
+import { db } from "../database";
+import {
+  asesores,
+  creditos,
+  moras_credito,
+  pagos_credito,
+  platform_users,
+  rubros,
+  rubros_historial,
+  rubros_pagos,
+  rubros_tipos,
+} from "../database/db";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
+import {
+  eventoDeEdicion,
+  nuevoSaldoTrasEdicion,
+  origenDeRole,
+  puedeActuar,
+  puedeAnularRubro,
+  puedeApartarReclamo,
+  puedeAplicarReclamo,
+  puedeCrearRubro,
+  puedeEditarMonto,
+  puedeEditarRubro,
+  puedeOperarCredito,
+  puedeTocarRubroConReclamosVivos,
+  puedeUsarMonto,
+  redondearMonto,
+  repartirEnRubros,
+  rubroCompletado,
+  saldoTrasReversaDeReclamo,
+  textoLimpio,
+} from "./rubrosPolicy";
+
+/**
+ * Quien ejecuta las consultas: la conexión normal o la transacción en curso.
+ *
+ * Existe para que los helpers de lectura se puedan llamar DENTRO de una
+ * transacción. Leer con `db` mientras `tx` tiene la fila bloqueada es leer un
+ * snapshot distinto al que se está por escribir, que es exactamente el bug que
+ * el `FOR UPDATE` de `editarRubro` viene a cerrar.
+ */
+type Ejecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Error con código HTTP ya decidido. El router lo traduce tal cual: así el
+ * "por qué" de un 409 lo redacta quien conoce la regla (la policy) y no un
+ * catch genérico que lo aplastaría en 500.
+ */
+export class RubroError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = "RubroError";
+  }
+}
+
+/** Código de Postgres para violación de índice único. */
+const PG_UNIQUE_VIOLATION = "23505";
+
+const esViolacionUnica = (e: unknown): boolean =>
+  (e as { code?: string })?.code === PG_UNIQUE_VIOLATION;
+
+/**
+ * `numeric(18,2)`: la base guarda string, no float.
+ *
+ * Es el `redondearMonto` de la policy, no un redondeo propio: los guards
+ * validan exactamente el mismo número que acá se escribe. Si el redondeo
+ * viviera en dos lados, un monto podría pasar la regla con un valor y guardarse
+ * con otro (así entraba el rubro de Q0 con `monto: 0.004`).
+ */
+const aMonto = redondearMonto;
+
+/**
+ * El "ahora" de `updated_at`: el reloj de POSTGRES, no el de este proceso.
+ *
+ * `created_at` sale del `DEFAULT now()` de la columna, así que escribir
+ * `updated_at` con un `new Date()` de JS mezclaba dos relojes en la misma fila
+ * — y las columnas son `timestamp` SIN zona horaria, donde el driver manda el
+ * Date como parámetro y este repo tiene un incidente documentado de
+ * corrimiento de +6h por exactamente eso. Con un rubro editado, `updated_at`
+ * quedaba seis horas en el futuro respecto de su `created_at` y de su propio
+ * evento de historial, que sí usa el default de la base: el mismo cambio
+ * fechado de dos maneras distintas. `now()` los deja en el mismo reloj.
+ */
+const SELLO_DE_TIEMPO = sql`now()`;
+
+/**
+ * Quién ejecuta la acción: su id de `platform_users` y el asesor al que está
+ * ligada la cuenta (null para un ADMIN, que no lo tiene).
+ *
+ * Sale del TOKEN, nunca del body: el body lo escribe el cliente y el historial
+ * de rubros es la evidencia de quién cobró qué. El id directo del JWT es el
+ * camino normal; el fallback por email cubre los tokens viejos que no lo traen
+ * (mismo patrón que `condonarMora`).
+ *
+ * El `asesor_id` sale de la MISMA fila, y no del claim homónimo que el JWT sí
+ * trae, por dos razones. La primera es la que ya justificaba verificar el id:
+ * este módulo no toma por bueno lo que dice el token sin confirmarlo contra la
+ * base. La segunda es que el claim se congela cuando se firma y los tokens de
+ * acá duran hasta 7 días (el refresh): un asesor al que le cambian la cartera
+ * —o al que le sacan el vínculo— seguiría presentando su asignación vieja toda
+ * una semana, y el permiso se decidiría con ella. No cuesta ninguna consulta
+ * extra: es una columna más en el SELECT que ya se hacía.
+ */
+export type Identidad = {
+  usuario_id: number | null;
+  /** `platform_users.asesor_id`: null en las cuentas ADMIN y CONTA. */
+  asesor_id: number | null;
+};
+
+const SIN_IDENTIDAD: Identidad = { usuario_id: null, asesor_id: null };
+
+export async function resolverIdentidad({
+  usuario_id,
+  usuario_email,
+}: {
+  usuario_id?: number | null;
+  usuario_email?: string | null;
+}): Promise<Identidad> {
+  // El id del token NO se toma como bueno sin verificarlo: `created_by` y
+  // `rubros_historial.usuario_id` son llaves foráneas a platform_users, así que
+  // un id que no existe (token viejo de una cuenta borrada, o firmado con otro
+  // payload) no daba un 403 sino un 500 crudo de violación de FK a mitad de la
+  // transacción. Confirmarlo cuesta una consulta por escritura, y las
+  // escrituras de rubros son raras.
+  if (usuario_id) {
+    const [porId] = await db
+      .select({ id: platform_users.id, asesor_id: platform_users.asesor_id })
+      .from(platform_users)
+      .where(eq(platform_users.id, usuario_id))
+      .limit(1);
+
+    if (porId) return { usuario_id: porId.id, asesor_id: porId.asesor_id };
+    // El id no corresponde a ninguna cuenta viva; queda el email como respaldo.
+  }
+
+  if (!usuario_email) return SIN_IDENTIDAD;
+
+  const [user] = await db
+    .select({ id: platform_users.id, asesor_id: platform_users.asesor_id })
+    .from(platform_users)
+    .where(eq(platform_users.email, usuario_email))
+    .limit(1);
+
+  return user
+    ? { usuario_id: user.id, asesor_id: user.asesor_id }
+    : SIN_IDENTIDAD;
+}
+
+/**
+ * El id del autor o un 403 — nunca un null que se guarde igual.
+ *
+ * Un JWT bien firmado cuyo email no está en `platform_users` deja
+ * `resolverUsuarioId` en null: la firma prueba que la sesión es legítima, no
+ * que exista la persona detrás. Antes ese null entraba a la base tal cual y el
+ * rubro quedaba sin `created_by` y el historial sin `usuario_id`, o sea un
+ * cobro que nadie hizo. Es 403 y no 401 a propósito: el token vale, lo que
+ * falta es la cuenta que respalde la escritura.
+ */
+function exigirUsuario(usuario_id?: number | null): number {
+  const veredicto = puedeActuar(usuario_id);
+  if (!veredicto.permitido) {
+    // El `status` del veredicto manda, igual que en el resto de los call sites.
+    // Acá el default es 403 y no 409 a propósito: el token vale, lo que falta
+    // es la cuenta que respalde la escritura.
+    throw new RubroError(
+      veredicto.status ?? 403,
+      veredicto.motivo ?? "Usuario no identificado."
+    );
+  }
+  return usuario_id as number;
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo de tipos
+// ---------------------------------------------------------------------------
+
+export async function listarTipos({
+  incluir_inactivos = false,
+}: {
+  incluir_inactivos?: boolean;
+} = {}) {
+  const q = db.select().from(rubros_tipos);
+  const tipos = incluir_inactivos
+    ? await q.orderBy(rubros_tipos.nombre)
+    : await q.where(eq(rubros_tipos.activo, true)).orderBy(rubros_tipos.nombre);
+
+  return tipos;
+}
+
+export async function crearTipo({
+  nombre,
+  descripcion,
+  obligatorio = false,
+  usuario_id,
+}: {
+  nombre: string;
+  descripcion?: string | null;
+  obligatorio?: boolean;
+  usuario_id?: number | null;
+}) {
+  const autor = exigirUsuario(usuario_id);
+
+  // Mismo criterio que la descripción del rubro: se juzga el texto YA
+  // RECORTADO, que es el que se guarda. `"   "` pasa el `minLength: 1` de
+  // TypeBox (mide 3 caracteres) y se guardaba como `""` — y como el índice
+  // único es sobre `lower(nombre)`, ese blanco se quedaba con el lugar para
+  // siempre y el segundo intento recibía un 409 diciendo que "ya existe un tipo
+  // con ese nombre", que no explica nada de lo que realmente pasó.
+  const nombreStr = textoLimpio(nombre);
+  if (!nombreStr) {
+    throw new RubroError(400, "El nombre del tipo de rubro es obligatorio.");
+  }
+
+  try {
+    const [tipo] = await db
+      .insert(rubros_tipos)
+      .values({
+        nombre: nombreStr,
+        descripcion: descripcion ?? null,
+        obligatorio,
+        created_by: autor,
+      })
+      .returning();
+
+    return tipo;
+  } catch (e) {
+    // El índice único es sobre `lower(nombre)` de los tipos ACTIVOS: dos tipos
+    // "Tarjeta de circulación" harían ambiguo el catálogo del front.
+    if (esViolacionUnica(e)) {
+      throw new RubroError(409, "Ya existe un tipo de rubro activo con ese nombre.");
+    }
+    throw e;
+  }
+}
+
+export async function actualizarTipo(
+  tipo_id: number,
+  patch: {
+    nombre?: string;
+    descripcion?: string | null;
+    obligatorio?: boolean;
+    activo?: boolean;
+    // La tabla de tipos no guarda `updated_by`, así que el autor acá sólo sirve
+    // de gate: quien no se pueda identificar tampoco toca el catálogo.
+    usuario_id?: number | null;
+  }
+) {
+  exigirUsuario(patch.usuario_id);
+
+  const cambios: Record<string, unknown> = { updated_at: SELLO_DE_TIEMPO };
+  // Vale igual que en el alta, y acá es peor dejarlo pasar: el PUT podía
+  // blanquearle el nombre a un tipo YA EN USO, dejando sin etiqueta los rubros
+  // que lo referencian. Omitir el campo sigue significando "no lo toques".
+  if (patch.nombre !== undefined) {
+    const nombreStr = textoLimpio(patch.nombre);
+    if (!nombreStr) {
+      throw new RubroError(400, "El nombre del tipo de rubro es obligatorio.");
+    }
+    cambios.nombre = nombreStr;
+  }
+  if (patch.descripcion !== undefined) cambios.descripcion = patch.descripcion;
+  if (patch.obligatorio !== undefined) cambios.obligatorio = patch.obligatorio;
+  if (patch.activo !== undefined) cambios.activo = patch.activo;
+
+  try {
+    /**
+     * LEER y ESCRIBIR en la MISMA transacción, con la fila bloqueada.
+     *
+     * Antes la existencia se comprobaba con un `SELECT` suelto, fuera de
+     * transacción y sin bloqueo, y el `UPDATE` venía después. Entre los dos
+     * cabía el `DELETE` de un tipo sin usar: el UPDATE no tocaba ninguna fila,
+     * `.returning()` devolvía vacío, y esta función retornaba `undefined`. El
+     * router no distingue eso de un éxito —`return { success: true, tipo }`—,
+     * así que la pantalla daba por guardado el cambio sobre un tipo que ya no
+     * existía, sin error ni aviso.
+     *
+     * Con el `FOR UPDATE` el borrado espera a que esta transacción termine, y
+     * cuando le toca ya no encuentra nada que borrar. Es el mismo patrón que
+     * usan `editarRubro` y `anularRubro`.
+     */
+    return await db.transaction(async (tx) => {
+      const [actual] = await tx
+        .select({ tipo_id: rubros_tipos.tipo_id })
+        .from(rubros_tipos)
+        .where(eq(rubros_tipos.tipo_id, tipo_id))
+        .limit(1)
+        .for("update");
+
+      if (!actual) throw new RubroError(404, "El tipo de rubro no existe.");
+
+      const [tipo] = await tx
+        .update(rubros_tipos)
+        .set(cambios)
+        .where(eq(rubros_tipos.tipo_id, tipo_id))
+        .returning();
+
+      // Cinturón además del bloqueo: si por lo que sea el UPDATE no tocó la
+      // fila, esto es un 404 y no un éxito mudo. Devolver `undefined` acá es
+      // justo lo que hacía que el front creyera que guardó.
+      if (!tipo) throw new RubroError(404, "El tipo de rubro no existe.");
+
+      return tipo;
+    });
+  } catch (e) {
+    if (e instanceof RubroError) throw e;
+    if (esViolacionUnica(e)) {
+      throw new RubroError(409, "Ya existe un tipo de rubro activo con ese nombre.");
+    }
+    throw e;
+  }
+}
+
+/** Código de Postgres para violación de llave foránea. */
+const PG_FK_VIOLATION = "23503";
+
+const esViolacionFk = (e: unknown): boolean =>
+  (e as { code?: string })?.code === PG_FK_VIOLATION;
+
+/**
+ * Borra un tipo del catálogo — DE VERDAD, y sólo si nadie lo usa.
+ *
+ * Es un borrado real y no un `activo = false` encubierto porque el catálogo se
+ * ensucia: un tipo creado con el nombre mal escrito, o de prueba, que nunca se
+ * le cobró a nadie, no tiene por qué quedar como fantasma desactivado. Pero en
+ * cuanto EXISTE un rubro de ese tipo, el tipo dejó de ser una entrada de
+ * catálogo y pasó a ser parte de la evidencia de un cobro: `rubros_historial`
+ * cuelga de `rubros`, y `rubros` de `rubros_tipos`, así que borrarlo en cascada
+ * se llevaría en silencio el historial de cobros de clientes reales — el
+ * registro que este módulo existe para conservar. Por eso la FK es RESTRICT y
+ * no CASCADE, y por eso la negativa es 409 con la salida escrita en el mensaje:
+ * desactivar el tipo lo saca del catálogo para cobros NUEVOS sin tocar nada de
+ * lo ya cobrado.
+ *
+ * El conteo y el DELETE van en la MISMA transacción con la fila del tipo
+ * bloqueada: si no, un rubro creado entre el `count` y el `delete` haría que el
+ * borrado sí se llevara historial. Igual se traduce la violación de FK, que es
+ * la red que el motor tiende si algo se cuela por debajo del bloqueo.
+ */
+export async function eliminarTipo(
+  tipo_id: number,
+  { usuario_id }: { usuario_id?: number | null }
+) {
+  exigirUsuario(usuario_id);
+
+  try {
+    return await db.transaction(async (tx) => {
+      const [tipo] = await tx
+        .select({ tipo_id: rubros_tipos.tipo_id, nombre: rubros_tipos.nombre })
+        .from(rubros_tipos)
+        .where(eq(rubros_tipos.tipo_id, tipo_id))
+        .limit(1)
+        .for("update");
+
+      if (!tipo) throw new RubroError(404, "El tipo de rubro no existe.");
+
+      // Cuentan TODOS los rubros, no sólo los vivos: un rubro completado es
+      // precisamente un cobro ya hecho, y su historial es lo que hay que
+      // proteger.
+      const [{ usos }] = await tx
+        .select({ usos: count() })
+        .from(rubros)
+        .where(eq(rubros.tipo_id, tipo_id));
+
+      if (Number(usos) > 0) {
+        throw new RubroError(
+          409,
+          `No se puede borrar el tipo "${tipo.nombre}": ${usos} rubro(s) lo usan y borrarlo se llevaría su historial de cobros. Para sacarlo del catálogo sin perder nada, desactivalo (PUT /rubros/tipos/${tipo_id} con activo: false).`
+        );
+      }
+
+      await tx.delete(rubros_tipos).where(eq(rubros_tipos.tipo_id, tipo_id));
+
+      return { tipo_id: tipo.tipo_id, nombre: tipo.nombre };
+    });
+  } catch (e) {
+    if (e instanceof RubroError) throw e;
+    if (esViolacionFk(e)) {
+      throw new RubroError(
+        409,
+        "No se puede borrar el tipo: hay rubros que lo usan y borrarlo se llevaría su historial de cobros. Desactivalo en vez de borrarlo."
+      );
+    }
+    throw e;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rubros de un crédito
+// ---------------------------------------------------------------------------
+
+/**
+ * Σ de lo REALMENTE APLICADO a cada rubro — o sea, lo que el cliente PAGÓ.
+ *
+ * Es la única fuente honesta de "abonado": `monto_aplicado` lo escribe
+ * `aplicarRubrosDelPago` en el momento en que el saldo del rubro baja de
+ * verdad, así que suma exactamente lo que se le cobró al cliente y se facturó.
+ *
+ * Sólo los reclamos `aplicado = true`: un reclamo apartado y sin aplicar no
+ * movió plata todavía (registrar sólo APARTA), y contarlo mostraría como pagado
+ * lo que contabilidad aún no validó.
+ *
+ * NO hace falta filtrar por `paymentFalse`: toda ruta que invalida un pago se
+ * lleva sus reclamos con él —`reversePayment` y `/false-payment` llaman a
+ * `revertirRubrosDelPago`, que los BORRA, y el "Revertir Especial" los devuelve
+ * a `aplicado = false`—, así que un reclamo aplicado es, por construcción, un
+ * reclamo de una boleta viva.
+ *
+ * UNA sola consulta agregada para TODOS los rubros del crédito: la ficha los
+ * lista completos y una consulta por rubro convertiría la pantalla en N+1
+ * viajes a la base.
+ */
+async function abonosAplicadosDeRubros(
+  rubroIds: number[],
+  ejecutor: Ejecutor = db
+): Promise<Map<number, string>> {
+  const porRubro = new Map<number, string>();
+  if (rubroIds.length === 0) return porRubro;
+
+  const filas = await ejecutor
+    .select({
+      rubro_id: rubros_pagos.rubro_id,
+      // COALESCE porque `monto_aplicado` es nullable: si una fila aplicada lo
+      // tuviera en NULL, `SUM` la ignoraría fila a fila, pero un grupo entero
+      // en NULL devolvería NULL y arrastraría la ambigüedad hasta el `Big`.
+      abonado: sql<string>`COALESCE(SUM(${rubros_pagos.monto_aplicado}), 0)`,
+    })
+    .from(rubros_pagos)
+    .where(
+      and(
+        inArray(rubros_pagos.rubro_id, rubroIds),
+        eq(rubros_pagos.aplicado, true)
+      )
+    )
+    .groupBy(rubros_pagos.rubro_id);
+
+  for (const fila of filas) porRubro.set(fila.rubro_id, fila.abonado ?? "0");
+  return porRubro;
+}
+
+/**
+ * Lo abonado SEGÚN EL HISTORIAL — la última evidencia que queda cuando ya no
+ * hay ni reclamo ni saldo que restar.
+ *
+ * Existe por un caso puntual y feo: un rubro ANULADO al que después le borraron
+ * el pago. Ahí las dos fuentes normales fallan a la vez. El reclamo se fue con
+ * el pago (`rubros_pagos.pago_id` es ON DELETE CASCADE, y la carga por Excel,
+ * `migratePayments`, `eliminarCreditos` y `marcarCreditoComoCaido` borran
+ * `pagos_credito` sin pasar por `revertirRubrosDelPago` — los dos últimos sólo
+ * cuando el rubro ya está saldado o anulado, que es justo este caso), así que la
+ * suma da 0;
+ * y la resta `monto − saldo` tampoco sirve porque anular ya había forzado el
+ * saldo a 0, así que daría el monto ENTERO. La ficha terminaba diciendo que el
+ * cliente no pagó nada sobre plata que sí pagó y que además se facturó.
+ *
+ * `rubros_historial` sobrevive a eso: su `pago_id` es ON DELETE SET NULL, así
+ * que la fila queda huérfana del pago pero conserva el par
+ * `saldo_anterior`/`saldo_nuevo` de cada evento `abono`. La suma de esas
+ * diferencias es cuánto bajó el saldo por cobros, que es exactamente lo abonado.
+ *
+ * Por eso también se cuentan las REVERSAS, y no es un detalle: revertir un pago
+ * sobre un rubro anulado borra el reclamo pero NO restituye el saldo —a
+ * propósito, restituirlo reviviría un cargo ya cancelado—, así que su evento
+ * queda con `saldo_anterior == saldo_nuevo`, o sea diferencia cero. El historial
+ * registra QUE hubo una reversa, pero no CUÁNTO volvió. Sumar los abonos a
+ * ciegas ahí diría que el cliente pagó Q400 sobre una boleta anulada.
+ *
+ * El conteo NO distingue qué clase de reversa fue, y es a propósito: cuenta
+ * también la del rubro que todavía no estaba anulado (donde el saldo sí se
+ * restituyó) y la de `desaplicarRubrosDelPago` —el "Revertir Especial", que
+ * devuelve el pago a PENDIENTE y estampa `reversa` con el mismo evento porque
+ * el enum de la base no tiene uno propio—. O sea que una boleta que va y viene
+ * de pendiente apaga esta red para ese rubro de por vida.
+ *
+ * Se elige así porque los dos errores no cuestan lo mismo: apagarla de más deja
+ * el `abonado` en lo que ya reportaba antes —corto, nunca menos que eso—,
+ * mientras encenderla de más inventaría un cobro que el cliente no hizo. Entre
+ * quedarse corto y mentir sobre plata cobrada, corto.
+ */
+async function abonosSegunHistorial(
+  rubroIds: number[],
+  ejecutor: Ejecutor = db
+): Promise<Map<number, { abonado: string; huboReversa: boolean }>> {
+  const porRubro = new Map<number, { abonado: string; huboReversa: boolean }>();
+  if (rubroIds.length === 0) return porRubro;
+
+  const filas = await ejecutor
+    .select({
+      rubro_id: rubros_historial.rubro_id,
+      abonado: sql<string>`COALESCE(SUM(${rubros_historial.saldo_anterior} - ${rubros_historial.saldo_nuevo}) FILTER (WHERE ${rubros_historial.tipo_evento} = 'abono'), 0)`,
+      reversas: sql<string>`COUNT(*) FILTER (WHERE ${rubros_historial.tipo_evento} = 'reversa')`,
+    })
+    .from(rubros_historial)
+    .where(inArray(rubros_historial.rubro_id, rubroIds))
+    .groupBy(rubros_historial.rubro_id);
+
+  for (const fila of filas) {
+    porRubro.set(fila.rubro_id, {
+      abonado: fila.abonado ?? "0",
+      // `COUNT` viaja como STRING: es `bigint` y el driver no lo convierte.
+      // `"0" > 0` da false igual, porque el operador relacional castea el
+      // string a número, así que el `Number()` no arregla un bug — lo hace
+      // explícito. Se queda porque de lo contrario el lector tiene que saberse
+      // de memoria que `>` castea pero `Boolean("0")` es true, y esa asimetría
+      // es justo donde se cuela un `if (fila.reversas)` en el próximo cambio.
+      huboReversa: Number(fila.reversas ?? 0) > 0,
+    });
+  }
+  return porRubro;
+}
+
+/**
+ * TODOS los rubros del crédito, activos e inactivos: la ficha muestra también
+ * los ya completados, que son parte del historial de cobro del cliente — y la
+ * única explicación de por qué se puede volver a crear un rubro del mismo tipo.
+ *
+ * `abonado` sale de SUMAR los reclamos aplicados (`abonosAplicadosDeRubros`) y
+ * NO de restar `monto_original − saldo_pendiente`, que es lo que hacía antes:
+ * esa resta confunde dos hechos distintos que mueven el mismo saldo. Anular
+ * también deja `saldo_pendiente = 0`, así que un rubro de Q1,000 con Q400 ya
+ * cobrados y facturados pasaba, al anularlo, a "abonado Q1,000" con la resta —o
+ * a "abonado Q0.00" con el caso especial que la rama de `anulado` le hacía—: las
+ * dos respuestas borran los Q400 que el cliente sí pagó, y la pantalla de
+ * confirmación de anular los muestra un segundo antes de que la tabla los
+ * desaparezca. Sumar lo aplicado responde la única pregunta que importa: cuánto
+ * puso el cliente.
+ *
+ * Los reclamos no siempre sobreviven, así que la suma tiene dos redes según el
+ * rubro esté vivo o anulado —la resta `monto − saldo` para uno, el historial
+ * para el otro—. El porqué de cada una está donde se calcula el `abonado`.
+ *
+ * Se convierte con `Big` (vía `aMonto`) y no se devuelve el string crudo del
+ * SUM para que salga con la misma escala que los demás montos de la fila.
+ */
+export async function listarRubrosDeCredito(credito_id: number) {
+  // Un crédito inexistente NO es una lista vacía: sin este chequeo, pedir los
+  // rubros de un id equivocado responde 200 con [] y la pantalla dice "no hay
+  // rubros" — indistinguible de un crédito que de verdad no tiene ninguno, que
+  // es como se esconde un bug de enrutamiento en vez de verlo.
+  return await db.transaction(async (tx) => {
+  const [credito] = await tx
+    .select({ credito_id: creditos.credito_id })
+    .from(creditos)
+    .where(eq(creditos.credito_id, credito_id))
+    .limit(1);
+
+  if (!credito) throw new RubroError(404, "El crédito no existe.");
+
+  const filas = await tx
+    .select({
+      rubro: rubros,
+      tipo_nombre: rubros_tipos.nombre,
+    })
+    .from(rubros)
+    .innerJoin(rubros_tipos, eq(rubros.tipo_id, rubros_tipos.tipo_id))
+    .where(eq(rubros.credito_id, credito_id))
+    .orderBy(desc(rubros.created_at));
+
+  // TODAS las lecturas bajo la MISMA instantánea: `abonado` sale de una consulta
+  // y `saldo_pendiente` de otra, así que sin esto un `/aplicar-pago` que caiga
+  // entre las dos deja la ficha con monto, abonado y saldo que no cierran entre
+  // sí — justo lo que este `abonado` vino a evitar.
+  //
+  // El `isolationLevel` NO es decorativo: la base corre en READ COMMITTED, donde
+  // cada sentencia toma una instantánea nueva, así que un `db.transaction` pelado
+  // no compra nada acá. `repeatable read` es lo que las congela en el mismo
+  // instante, y `read only` le dice a Postgres que no hay nada que versionar. Es
+  // el mismo idioma que usa `reportes.ts`.
+  const abonados = await abonosAplicadosDeRubros(
+    filas.map(({ rubro }) => rubro.rubro_id),
+    tx
+  );
+
+  // El historial se consulta SÓLO si hay algún rubro anulado: es la única rama
+  // que puede necesitarlo, y así la ficha normal —que es el caso de siempre—
+  // sigue costando las mismas tres consultas de antes.
+  const porHistorial = await abonosSegunHistorial(
+    filas.filter(({ rubro }) => rubro.anulado).map(({ rubro }) => rubro.rubro_id),
+    tx
+  );
+
+  return filas.map(({ rubro, tipo_nombre }) => {
+    /**
+     * `abonado` sale de los reclamos aplicados, PERO con la resta como red.
+     *
+     * La suma de `rubros_pagos.monto_aplicado` es la fuente honesta: dice
+     * exactamente cuánto entró por boletas validadas, y es lo único que sigue
+     * siendo cierto después de anular (donde la resta daría el monto entero,
+     * porque anular pone el saldo en 0).
+     *
+     * Pero el FK de `rubros_pagos.pago_id` es ON DELETE CASCADE, y hay varios
+     * flujos que borran filas de `pagos_credito` sin pasar por
+     * `revertirRubrosDelPago`: la carga por Excel (`processFromExcelFull` y las
+     * dos de `migration.ts`), `migratePayments`, `eliminarCreditos` y
+     * `marcarCreditoComoCaido`.
+     *
+     * Los dos últimos BLOQUEAN si el crédito tiene rubros con deuda viva
+     * (`anulado = false AND completado = false`), así que por esas dos vías sólo
+     * llegan acá rubros ya saldados o anulados — que es exactamente el caso que
+     * esta función atiende, no una excepción. Las de Excel y `migratePayments`
+     * no tienen guard, y ahí el rubro puede ser cualquiera.
+     *
+     * ⚠️ Ojo con la ruta, que acá decía `/recalculate` y es inexacto: el guard
+     * vive en `eliminarCreditos` (`/recalculate/eliminar-creditos` y
+     * `/recalculate/pools-raros`). `recalcularCreditosDesdeJson` —la que sirve
+     * `/recalculate/from-json`— NO tiene guard de rubros de ningún tipo, y ésa
+     * no borra pagos: los recrea desde el JSON.
+     *
+     * Después de cualquiera de esos los reclamos ya no existen pero
+     * `saldo_pendiente` sigue descontado, y la suma sola diría 0.00 sobre plata
+     * que el cliente SÍ pagó y que además se facturó. La ficha mostraría monto Q1,000 / abonado Q0.00 / saldo Q600:
+     * tres números que no pueden ser ciertos a la vez.
+     *
+     * Por eso: si no hay ningún reclamo aplicado pero el saldo ES MENOR que el
+     * monto, ese hueco sólo puede venir de un borrado en cascada, y la resta es
+     * la mejor evidencia que queda. Es además el mismo número que usa
+     * `puedeEditarMonto` para decidir hasta dónde se puede bajar el monto, así
+     * que la pantalla deja de contradecir al 409 que recibiría el admin.
+     *
+     * La red de la RESTA no aplica a los rubros ANULADOS, y esto es lo sutil:
+     * anular fuerza `saldo_pendiente` a 0, así que la resta da SIEMPRE el monto
+     * entero. Un rubro anulado sin reclamos reportaría haber cobrado todo, que
+     * es exactamente el defecto que la suma vino a arreglar.
+     *
+     * Pero "entonces para ellos vale 0" tampoco era cierto, y ese es el hueco
+     * que tapa `abonosSegunHistorial`: un rubro anulado al que DESPUÉS le
+     * borraron el pago se queda sin reclamo y sin saldo que restar, y la ficha
+     * decía Q0.00 sobre plata cobrada y facturada. Ahí manda el historial, que
+     * es la única fuente que sobrevive al borrado — salvo que haya habido una
+     * reversa, porque sobre un rubro anulado la reversa no mueve el saldo y el
+     * historial no puede decir cuánto volvió. Ver el docblock de esa función.
+     */
+    const sumado = abonados.get(rubro.rubro_id);
+    let abonado: string;
+    if (rubro.anulado) {
+      const historial = porHistorial.get(rubro.rubro_id);
+      const delHistorial =
+        historial && !historial.huboReversa
+          ? new Big(historial.abonado)
+          : new Big(0);
+      const porSuma = new Big(sumado ?? 0);
+      // El MAYOR, por la misma razón que abajo: una limpieza puede llevarse UN
+      // reclamo y dejar otro, y ahí la suma se queda corta mientras el
+      // historial conserva los dos eventos.
+      const mayor = delHistorial.gt(porSuma) ? delHistorial : porSuma;
+      abonado = aMonto(mayor.gt(0) ? mayor : 0);
+    } else {
+      // El MAYOR de los dos, no uno u otro. La red no es todo-o-nada: la
+      // reducción de plazo borra sólo los pagos de las cuotas que caen fuera
+      // del plazo nuevo, así que puede llevarse UN reclamo y dejar otro. Ahí
+      // la suma se queda corta (dice Q200 de Q600) mientras el saldo sigue
+      // descontado por los dos, y `puedeEditarMonto` —que usa la resta— le
+      // exigiría al admin un mínimo que la pantalla no le mostró.
+      const derivado = new Big(rubro.monto_original ?? 0).minus(
+        new Big(rubro.saldo_pendiente ?? 0)
+      );
+      const porSuma = new Big(sumado ?? 0);
+      const mayor = derivado.gt(porSuma) ? derivado : porSuma;
+      abonado = aMonto(mayor.gt(0) ? mayor : 0);
+    }
+
+    return { ...rubro, tipo_nombre, abonado };
+  });
+    },
+    // Las opciones van en `db.transaction`, NO acá arriba. Estuvieron mal
+    // puestas como segundo argumento de `filas.map()`, donde `map` las toma
+    // como su `thisArg` y las ignora en silencio — el tipado no se queja, así
+    // que la transacción corrió en READ COMMITTED durante varios commits, con
+    // el comentario de más arriba explicando al lado por qué eso no alcanza.
+    // Hay un test que fija que lleguen.
+    { isolationLevel: "repeatable read", accessMode: "read only" }
+  );
+}
+
+/**
+ * Mora activa del crédito: la SUMA de las moras vivas, o "0" si no tiene.
+ *
+ * Suma en vez de tomar una fila porque las moras duplicadas son un hecho
+ * documentado de esta base (el cron de moras corrió sin lock y dejó pares para
+ * el mismo crédito). Con el `.limit(1)` SIN `ORDER BY` que había acá, Postgres
+ * podía devolver cualquiera de las dos: si una quedó en 0 y la otra en 5,000,
+ * la mitad de las veces el guard leía 0 y dejaba entrar un rubro OPCIONAL a un
+ * crédito con mora viva — justo lo que la regla prohíbe, y de forma
+ * intermitente, que es la peor manera de fallar. Sumar es fail-closed: cualquier
+ * mora con saldo bloquea, sin importar cuántas filas la representen.
+ *
+ * ⚠️ Va SIN candado a propósito, y no es un olvido: es la única lectura que
+ * decide en este módulo que se deja plana. Ponerle `FOR SHARE` o `FOR UPDATE`
+ * cerraría un ciclo de verdad, porque los dos lados toman los mismos dos
+ * recursos en orden opuesto: acá se toma primero `creditos` y después se
+ * miraría `moras_credito`, mientras `latefee.ts` toma `moras_credito` con
+ * `FOR UPDATE` y después escribe `creditos`. Hoy no hay deadlock sólo porque
+ * esta lectura es plana y bajo READ COMMITTED no espera a nadie.
+ *
+ * Lo que se pierde es real y está aceptado: una mora que se salda justo entre
+ * esta lectura y el commit puede dejar pasar un rubro que el guard habría
+ * frenado, o al revés. Es una ventana de milisegundos sobre una acción manual,
+ * y el precio de cerrarla sería colgar el cron de moras contra el alta de
+ * rubros. Si algún día hay que cerrarla igual, el camino NO es agregar el
+ * candado acá: es que las dos rutas tomen los recursos en el mismo orden.
+ */
+async function moraActivaMonto(
+  credito_id: number,
+  ejecutor: Ejecutor = db
+): Promise<string | null> {
+  const [mora] = await ejecutor
+    .select({
+      // COALESCE porque `sum()` de cero filas es NULL, no 0, y ese NULL
+      // atravesaba el `?? 0` de la policy igual que un "sin mora" legítimo —
+      // pero mejor que la ambigüedad viaje resuelta desde el SQL.
+      monto: sql<string>`COALESCE(SUM(${moras_credito.monto_mora}), 0)`,
+    })
+    .from(moras_credito)
+    .where(
+      and(eq(moras_credito.credito_id, credito_id), eq(moras_credito.activa, true))
+    );
+
+  return mora?.monto ?? null;
+}
+
+export async function crearRubro({
+  credito_id,
+  tipo_id,
+  monto,
+  descripcion,
+  motivo,
+  role,
+  usuario_id,
+  asesor_id,
+}: {
+  credito_id: number;
+  tipo_id: number;
+  monto: number | string;
+  descripcion?: string | null;
+  motivo?: string | null;
+  /** Rol del TOKEN (nunca del body): decide si puede cobrar un tipo obligatorio. */
+  role?: string | null;
+  usuario_id?: number | null;
+  /**
+   * Asesor de la SESIÓN (resuelto contra `platform_users`, nunca del body):
+   * decide si el crédito es de su cartera. Null en un ADMIN, que pasa igual.
+   */
+  asesor_id?: number | null;
+}) {
+  const autor = exigirUsuario(usuario_id);
+
+  // La descripción es NOT NULL y con contenido real: el tipo dice QUÉ se cobra
+  // ("tarjeta de circulación"), la descripción dice por qué en ESTE crédito, y
+  // es lo único que el cliente puede leer cuando reclame el cargo. Un string de
+  // espacios pasa el NOT NULL de la columna pero no informa nada, así que el
+  // guard mira el texto ya recortado — el mismo que se guarda.
+  const descripcionStr = textoLimpio(descripcion);
+  if (!descripcionStr) {
+    throw new RubroError(400, "La descripción del rubro es obligatoria.");
+  }
+
+  // Se redondea ANTES de validar y ese mismo string es el que se guarda: si el
+  // guard mirara el crudo, `monto: 0.004` pasaría como "mayor a cero" y la fila
+  // nacería en "0.00" y `completado`.
+  const montoStr = aMonto(monto);
+
+  const montoValido = puedeUsarMonto(montoStr);
+  if (!montoValido.permitido) {
+    throw new RubroError(
+      montoValido.status ?? 409,
+      montoValido.motivo ?? "Monto de rubro inválido."
+    );
+  }
+
+  /**
+   * El candado del CRÉDITO primero, la transacción después — el mismo orden
+   * que `editarRubro`, `anularRubro` e `insertPayment`. Invertirlo (tomar la
+   * fila y después pedir el lock) es lo que crearía el deadlock.
+   *
+   * `crearRubro` no lo tomaba: el alta era inofensiva frente a una boleta en
+   * vuelo (el rubro nuevo simplemente no entra en el reparto de esa boleta), y
+   * la unicidad de "un vivo por crédito+tipo" la garantizaba el índice
+   * `rubros_uq_credito_tipo_vivo`. Ese índice se cayó en la migración 0038
+   * —afirmaba una invariante permanente que el dominio no sostiene: tras una
+   * reversa legítima existen DE VERDAD dos deudas del mismo concepto— y la
+   * exclusividad se volvió una regla de ALTA, chequeada acá abajo. Un chequeo
+   * "¿ya hay uno vivo?" seguido de un INSERT es exactamente el patrón que dos
+   * altas simultáneas del mismo tipo atraviesan juntas: las dos leen "no hay
+   * ninguno" y las dos entran. El candado es lo que las serializa, y es lo
+   * único que el índice protegía de más.
+   */
+  try {
+    return await withPaymentAdvisoryLock(credito_id, async () => {
+    /**
+     * LEER, DECIDIR Y ESCRIBIR van en la MISMA transacción, con la fila del
+     * crédito bloqueada. Mismo patrón que `editarRubro`.
+     *
+     * Antes el status del crédito, el tipo y la mora se leían con `db` plano
+     * ANTES de abrir la transacción: entre esa lectura y el INSERT cabía el
+     * cron de moras marcando el crédito MOROSO, y el rubro OPCIONAL entraba
+     * igual en un crédito moroso — exactamente lo que la política prohíbe, y
+     * sólo bajo carrera, o sea invisible en pruebas y esporádico en producción.
+     * Moverlas adentro no alcanza por sí solo (en READ COMMITTED cada consulta
+     * ve el último commit, así que la ventana se achica pero no se cierra): el
+     * `FOR UPDATE` sobre el crédito es lo que serializa esto contra quien
+     * cambia su status, y lo tiene que soltar antes de que el cron lo toque.
+     *
+     * Rubro e historial siguen escribiéndose juntos o ninguno: un rubro sin su
+     * evento de creación sería un cobro sin autor ni motivo.
+     */
+    return await db.transaction(async (tx) => {
+      const [credito] = await tx
+        .select({
+          statusCredit: creditos.statusCredit,
+          // El dueño del crédito viaja en la MISMA lectura que ya se hacía:
+          // cero consultas nuevas y —lo que importa— el `asesor_id` con el que
+          // se decide es el de la fila bloqueada por `FOR UPDATE`, no el de un
+          // snapshot anterior que una reasignación podría haber movido.
+          asesor_id: creditos.asesor_id,
+        })
+        .from(creditos)
+        .where(eq(creditos.credito_id, credito_id))
+        .limit(1)
+        .for("update");
+
+      if (!credito) throw new RubroError(404, "El crédito no existe.");
+
+      /**
+       * ¿Es de su cartera? Se pregunta ACÁ, apenas se sabe de qué crédito se
+       * habla y ANTES de mirar el tipo, la mora o el status.
+       *
+       * El orden no es estético. Todo lo que viene después le contesta al
+       * cliente algo sobre un crédito que quizá no le toca: que el tipo existe
+       * y está activo (catálogo, da igual), pero también que el crédito está
+       * CANCELADO, o MOROSO, o que tiene mora activa —el estado de cobranza de
+       * un cliente ajeno—. A quien no le corresponde el crédito se le contesta
+       * una sola cosa, y es que no le corresponde.
+       */
+      const veredictoCartera = puedeOperarCredito({
+        role,
+        asesorSesion: asesor_id,
+        asesorDelCredito: credito.asesor_id,
+      });
+
+      if (!veredictoCartera.permitido) {
+        throw new RubroError(
+          veredictoCartera.status ?? 403,
+          veredictoCartera.motivo ?? "El crédito no es de tu cartera."
+        );
+      }
+
+      // Se lee `obligatorio` y `activo`: la naturaleza del cobro vive en el
+      // TIPO, no en el body — quien crea el rubro elige el concepto, no si ese
+      // concepto se salta los frenos de mora.
+      //
+      // `FOR SHARE` sobre esta fila: sin bloqueo, la lectura era plana y corría
+      // en paralelo con el `FOR UPDATE` de `eliminarTipo` sobre el mismo tipo.
+      // Si el borrado alcanzaba a contar CERO usos (todavía no existe ningún
+      // rubro de ese tipo) mientras este alta ya había leído el tipo como
+      // bueno, el borrado commiteaba y el INSERT de más abajo reventaba contra
+      // la FK de `tipo_id` con un 500 — sobre una petición que era válida
+      // cuando se hizo. Con el candado el borrado queda esperando, y cuando le
+      // toca ya cuenta este rubro como uso y se rechaza solo con su propio 409.
+      //
+      // `SHARE` y no `KEY SHARE`, aunque `KEY SHARE` alcance para el DELETE:
+      // esta lectura también mira `activo`, y DESACTIVAR el tipo es un UPDATE
+      // de una columna común, que `KEY SHARE` deja pasar. Con la cerradura
+      // débil el alta podía ver `activo = true` mientras `actualizarTipo`
+      // commiteaba su `activo = false`, y el rubro entraba sobre un concepto ya
+      // retirado del catálogo. Hoy no se notaría porque `actualizarTipo` toma
+      // `FOR UPDATE` explícito, pero depender de ese detalle del OTRO lado es
+      // la clase de invariante que se rompe sola el día que alguien escriba el
+      // UPDATE directo. Y no cuesta nada: `SHARE` sigue sin estorbar a otro
+      // lector ni a otra alta del mismo tipo.
+      const [tipo] = await tx
+        .select({
+          tipo_id: rubros_tipos.tipo_id,
+          obligatorio: rubros_tipos.obligatorio,
+          activo: rubros_tipos.activo,
+        })
+        .from(rubros_tipos)
+        .where(eq(rubros_tipos.tipo_id, tipo_id))
+        .limit(1)
+        .for("share");
+
+      if (!tipo) throw new RubroError(404, "El tipo de rubro no existe.");
+
+      // Un tipo dado de baja NO es un 404: el tipo existe y su historial sigue
+      // vivo en los rubros ya creados, así que responder "no existe" sería
+      // mentira y mandaría a buscar un bug de datos. Es un 409 —el catálogo ya
+      // no ofrece ese concepto para cobros NUEVOS—, y el mensaje lo dice para
+      // que el front sepa que la salida es reactivar el tipo, no crear otro.
+      if (!tipo.activo) {
+        throw new RubroError(
+          409,
+          "El tipo de rubro está inactivo: no se pueden crear rubros nuevos de ese tipo."
+        );
+      }
+
+      const veredicto = puedeCrearRubro({
+        role,
+        statusCredit: credito.statusCredit,
+        tipoObligatorio: tipo.obligatorio,
+        moraActivaMonto: await moraActivaMonto(credito_id, tx),
+      });
+
+      if (!veredicto.permitido) {
+        throw new RubroError(
+          veredicto.status ?? 409,
+          veredicto.motivo ?? "No se puede crear el rubro."
+        );
+      }
+
+      /**
+       * UN SOLO RUBRO VIVO POR CRÉDITO Y TIPO — pero como regla de ALTA.
+       *
+       * Esto lo garantizaba el índice único parcial
+       * `rubros_uq_credito_tipo_vivo`, que la migración 0038 eliminó: la base
+       * afirmaba que dos cobros vivos del mismo concepto no pueden coexistir
+       * NUNCA, y el dominio no lo sostiene. Cuando contabilidad anula la boleta
+       * con que se pagó la tarjeta de circulación 2026, la reversa devuelve el
+       * saldo de ese rubro y apaga su `completado`: ahí existen de verdad dos
+       * deudas, la de 2026 que volvió y la de 2027 que ya se había cargado. El
+       * índice lo leía como duplicado y hacía fallar la reversa entera con un
+       * 500, dejando el pago atascado en `validated`.
+       *
+       * La regla que sí vale es más angosta: no se puede CREAR un segundo rubro
+       * vivo del mismo tipo. Se juzga acá, adentro de la transacción y bajo el
+       * advisory lock del crédito, que es lo que impide que dos altas
+       * simultáneas lean las dos "no hay ninguno".
+       *
+       * `anulado` se excluye aparte de `completado` por prudencia, no porque
+       * hoy haga falta: `anularRubro` deja la fila en `completado = true` y
+       * `anulado = true` a la vez, así que el primer filtro ya la descarta. Pero
+       * el que manda es el hecho —un cobro cancelado no bloquea el alta del
+       * correcto— y no el flag que hoy lo acompaña.
+       */
+      const [vivo] = await tx
+        .select({ rubro_id: rubros.rubro_id })
+        .from(rubros)
+        .where(
+          and(
+            eq(rubros.credito_id, credito_id),
+            eq(rubros.tipo_id, tipo_id),
+            eq(rubros.completado, false),
+            eq(rubros.anulado, false)
+          )
+        )
+        .limit(1);
+
+      if (vivo) {
+        // El MISMO texto que traducía la violación del índice: para quien está
+        // del otro lado de la pantalla no cambió nada, y la salida sigue siendo
+        // cobrar el rubro que ya existe, no crear un duplicado.
+        throw new RubroError(
+          409,
+          "Este crédito ya tiene un rubro vivo de ese tipo."
+        );
+      }
+
+      const [rubro] = await tx
+        .insert(rubros)
+        .values({
+          credito_id,
+          tipo_id,
+          descripcion: descripcionStr,
+          monto_original: montoStr,
+          saldo_pendiente: montoStr,
+          // Sin activación diferida: un rubro se cobra desde que se crea.
+          activo: true,
+          // Derivado del saldo, no hardcodeado: así el flag no puede contradecir
+          // al saldo con el que nace el rubro.
+          completado: rubroCompletado(montoStr),
+          created_by: autor,
+        })
+        .returning();
+
+      await tx.insert(rubros_historial).values({
+        rubro_id: rubro.rubro_id,
+        tipo_evento: "creacion",
+        monto_nuevo: montoStr,
+        saldo_nuevo: montoStr,
+        usuario_id: autor,
+        // Del ROL de quien ejecuta, no un literal: desde que el ASESOR puede
+        // dar de alta rubros, un "admin" fijo acá volvía irrespondible desde
+        // el historial la pregunta "¿qué rubros dio de alta un asesor?".
+        origen: origenDeRole(role),
+        motivo: textoLimpio(motivo) || null,
+      });
+
+      return rubro;
+    });
+  });
+  } catch (e) {
+    if (e instanceof RubroError) throw e;
+    /**
+     * NO hay catch de violación de unicidad, y su ausencia es deliberada.
+     *
+     * El que vivía acá traducía `rubros_uq_credito_tipo_vivo` a un 409, pero
+     * ese índice ya no existe (migración 0038): la exclusividad pasó a ser el
+     * chequeo explícito de más arriba, bajo el candado. De las dos tablas que
+     * esta función escribe, `rubros` se quedó sin ningún índice único y
+     * `rubros_historial` nunca tuvo otro que su PK serial, así que lo único
+     * que podría dar un 23505 acá es una secuencia desincronizada — corrupción
+     * de la base, que merece el 500 crudo y no un 409 diciéndole al usuario
+     * "ya existe ese rubro" sobre algo que no tiene nada que ver.
+     *
+     * La FK de `tipo_id` sí sigue siendo un freno real: el `FOR SHARE` de
+     * arriba cierra la ventana con `eliminarTipo`, pero si algo se colara por
+     * debajo (o mañana apareciera otra vía de borrado del tipo), sin esto el
+     * asesor vería un 500 por una petición que era válida cuando la hizo.
+     */
+    if (esViolacionFk(e)) {
+      throw new RubroError(
+        409,
+        "El tipo de rubro dejó de estar disponible mientras se creaba el cobro. Volvé a intentar eligiendo otro tipo."
+      );
+    }
+    throw e;
+  }
+}
+
+
+/**
+ * A qué crédito pertenece el rubro — lectura previa y DELIBERADAMENTE sin
+ * bloqueo, sólo para saber qué advisory lock tomar.
+ *
+ * `editarRubro` y `anularRubro` reciben `rubro_id`, pero el lock que serializa
+ * los escritores del crédito (el mismo que toma `insertPayment`) se toma por
+ * `credito_id`, así que hay que averiguarlo antes de poder pedirlo. Esta lectura
+ * NO es la autoritativa: la que manda sigue siendo el `SELECT ... FOR UPDATE`
+ * de adentro de la transacción. Y no hace falta que lo sea, porque el rubro no
+ * cambia de crédito nunca: `credito_id` se escribe en el alta y ninguna ruta lo
+ * toca. Lo único que puede pasar entre esta lectura y el lock es que el rubro
+ * deje de existir, y ahí el 404 lo da igual la lectura de adentro.
+ */
+async function creditoDeRubro(rubro_id: number): Promise<number> {
+  const [fila] = await db
+    .select({ credito_id: rubros.credito_id })
+    .from(rubros)
+    .where(eq(rubros.rubro_id, rubro_id))
+    .limit(1);
+
+  if (!fila) throw new RubroError(404, "El rubro no existe.");
+  return fila.credito_id;
+}
+
+export async function editarRubro(
+  rubro_id: number,
+  {
+    monto,
+    descripcion,
+    motivo,
+    role,
+    usuario_id,
+  }: {
+    monto?: number | string;
+    descripcion?: string | null;
+    motivo?: string | null;
+    /**
+     * Rol del TOKEN: la política lo necesita al re-evaluar un alza de monto, y
+     * de él sale el `origen` que queda en el historial.
+     */
+    role?: string | null;
+    usuario_id?: number | null;
+  }
+) {
+  const autor = exigirUsuario(usuario_id);
+
+  /**
+   * El motivo es obligatorio en TODA edición, no sólo cuando cambia el monto.
+   *
+   * Cambiar la descripción de un rubro cambia lo único que el cliente puede
+   * leer cuando reclame el cargo, así que "por qué se editó" vale tanto como en
+   * un ajuste de monto. Se juzga el texto YA RECORTADO —el mismo que se
+   * guarda—, porque el front manda `motivo: ""` cuando el usuario no escribió
+   * nada y un string de espacios deja el historial igual de mudo que un vacío.
+   */
+  const motivoStr = textoLimpio(motivo);
+  if (!motivoStr) {
+    throw new RubroError(400, "El motivo es obligatorio para editar el rubro.");
+  }
+
+  // Misma regla que el alta: la descripción es NOT NULL y con contenido. Sólo
+  // se juzga si VINO en el patch — omitirla significa "no la toques", que es
+  // distinto de mandarla vacía (eso sería borrar el único texto que le explica
+  // el cargo al cliente, y además reventaría el NOT NULL con un 500).
+  let descripcionStr: string | undefined;
+  if (descripcion !== undefined) {
+    descripcionStr = textoLimpio(descripcion);
+    if (!descripcionStr) {
+      throw new RubroError(400, "La descripción del rubro es obligatoria.");
+    }
+  }
+
+  /**
+   * La comparación es con `Big` y sobre el monto YA REDONDEADO, nunca con
+   * strings: del body llega `500` y en la columna está `"500.00"`, que como
+   * texto son distintos y como número son el mismo monto.
+   */
+  const montoPedido =
+    monto === undefined || monto === null ? null : aMonto(monto);
+
+  /**
+   * 🔒 ADVISORY LOCK POR CRÉDITO — el mismo que toma `insertPayment`.
+   *
+   * El `FOR UPDATE` de acá abajo NO alcanza para serializar contra el registro
+   * de una boleta, y por una razón de tiempos: `insertPayment` calcula el
+   * reparto de rubros al principio (`cobrarRubrosParaBoleta`, lectura sin
+   * bloqueo) y escribe los reclamos recién al final, después de todo el
+   * recorrido de cuotas. En esa ventana ancha la fila del rubro está libre, así
+   * que `puedeTocarRubroConReclamosVivos` la ve sin reclamos —el de la boleta
+   * en vuelo todavía no existe— y deja pasar la edición. El reparto ya decidido
+   * se escribía igual contra un saldo achicado, y el 409 aparecía días después
+   * al validar, tumbando la boleta entera.
+   *
+   * ORDEN DE CANDADOS: primero el advisory lock, DESPUÉS la transacción con el
+   * `FOR UPDATE`. Es exactamente el orden de `insertPayment`, y por eso no hay
+   * deadlock: nadie toma la fila del rubro y después pide el lock del crédito.
+   * Invertirlo sí lo crearía.
+   *
+   * `crearRubro` también lo toma desde que la unicidad de "un vivo por
+   * crédito+tipo" dejó de ser un índice de la base (0038) y pasó a ser un
+   * chequeo suyo: no por el saldo —crear un rubro durante la ventana sigue
+   * siendo inofensivo, el rubro nuevo simplemente no entra en el reparto de esa
+   * boleta— sino para que dos altas simultáneas del mismo tipo no lean las dos
+   * "no hay ninguno". Todas toman el lock en el MISMO orden, y por eso siguen
+   * sin poder deadlockear entre sí.
+   */
+  const credito_id = await creditoDeRubro(rubro_id);
+
+  try {
+    return await withPaymentAdvisoryLock(credito_id, async () => {
+    /**
+     * TODO —leer la fila, decidir y escribir— va en UNA transacción, con la
+     * fila bloqueada por `FOR UPDATE`. Mismo patrón que `condonarMora`.
+     *
+     * Antes `actual` se leía con `db` plano y afuera: la decisión se tomaba
+     * sobre un snapshot viejo y después se escribía un `saldo_pendiente`
+     * ABSOLUTO derivado de esa lectura. Dos ediciones simultáneas se pisaban
+     * (la segunda escribía el saldo calculado desde el monto que la primera ya
+     * había cambiado), y contra el cobro —que ya existe: `aplicarRubrosDelPago`
+     * baja el saldo— el daño es peor: un abono que caiga entre el SELECT y el
+     * UPDATE queda borrado, o sea deuda ya pagada resucitada en la cara del
+     * cliente. Con el bloqueo, la segunda edición espera y recalcula sobre el
+     * saldo real.
+     */
+    return await db.transaction(async (tx) => {
+      /**
+       * ORDEN DE CANDADOS: el CRÉDITO primero, el rubro después — el mismo que
+       * toma `crearRubro` (crédito → tipo → INSERT en `rubros`).
+       *
+       * OJO, porque esta capa cambió el argumento: cuando este orden se
+       * introdujo, era lo ÚNICO que evitaba un deadlock real entre editar y
+       * crear —reproducido contra Postgres—, porque el ciclo se cerraba por la
+       * entrada sin commitear del índice único `(credito_id, tipo_id) WHERE
+       * completado = false` que dejaba una edición al revivir un rubro
+       * completado.
+       *
+       * Hoy ese ciclo ya no puede formarse, y por DOS razones independientes:
+       * la migración 0038 borró ese índice, y las tres escrituras de rubros
+       * (`crearRubro`, `editarRubro`, `anularRubro`) toman el mismo advisory
+       * lock del crédito, así que ni siquiera corren en paralelo.
+       *
+       * El orden se mantiene igual, y a propósito: es defensa en profundidad y
+       * cuesta cero. Que hoy el advisory lock alcance no es motivo para que la
+       * seguridad de esta función DEPENDA de que ese lock siga estando — es
+       * exactamente la clase de invariante a distancia que este módulo ya
+       * aprendió a no cultivar. Lo que NO hay que hacer es invertirlo "porque
+       * total el lock protege".
+       */
+      /**
+       * `FOR UPDATE` sobre el crédito, y se toma SIEMPRE, no sólo cuando el
+       * monto sube.
+       *
+       * El `statusCredit` decide si un alza entra (`puedeCrearRubro`, más
+       * abajo), y una lectura que decide no puede ser plana. Esa columna la
+       * escriben varios: el cron de moras la mueve entre ACTIVO y MOROSO
+       * (`latefee.ts`), y las transiciones terminales —INCOBRABLE, CANCELADO,
+       * CAIDO— salen de `credits.ts` y de la caída de créditos. Sin candado,
+       * esta lectura puede ver un estado que admite deuda mientras una de esas
+       * transiciones commitea el suyo un instante después, y el alza termina
+       * escrita sobre un crédito que ya no la admitía. Es exactamente la
+       * carrera que `crearRubro` cerró con su propio `FOR UPDATE`, entrando por
+       * la puerta de al lado.
+       *
+       * Se toma siempre —y no dentro del `if (subeMonto)`— para que el orden de
+       * adquisición NO dependa de la forma del patch. Condicionarlo haría que
+       * una edición de sólo-descripción tome los candados en otro orden que una
+       * que sube el monto, y ese es el tipo de diferencia que nadie recuerda al
+       * agregar la tercera variante.
+       *
+       * Sí tiene un costo, y conviene decirlo entero: una corrección de sólo la
+       * DESCRIPCIÓN también bloquea la fila del crédito, y el cron de moras
+       * —que escribe `statusCredit` y NO toma el advisory lock— puede quedar
+       * esperándola, o al revés. Son transacciones cortas de un lado y del otro
+       * (el cron escribe en autocommit), y editar un rubro es una acción manual
+       * de administrador, no un camino caliente: el cambio se acepta a
+       * sabiendas.
+       */
+      const [credito] = await tx
+        .select({ statusCredit: creditos.statusCredit })
+        .from(creditos)
+        .where(eq(creditos.credito_id, credito_id))
+        .limit(1)
+        .for("update");
+
+      // Mismo 404 explícito que el alta, y por la misma razón que el del tipo:
+      // sin esto, un crédito ausente se colaba hasta `credito?.statusCredit` y
+      // la policy juzgaba un estado `undefined`. Es inalcanzable —el
+      // `credito_id` del rubro es FK con ON DELETE CASCADE, así que un rubro no
+      // sobrevive a su crédito—, pero dejar la misma decisión resuelta de dos
+      // maneras en el mismo bloque es lo que hace que una de las dos se
+      // pudra callada.
+      if (!credito) throw new RubroError(404, "El crédito no existe.");
+
+      const [actual] = await tx
+        .select()
+        .from(rubros)
+        .where(eq(rubros.rubro_id, rubro_id))
+        .limit(1)
+        .for("update");
+
+      if (!actual) throw new RubroError(404, "El rubro no existe.");
+
+      // Se juzga ANTES que cualquier otra guarda de esta función: un rubro
+      // anulado no admite ningún cambio, así que no tiene sentido calcular
+      // "qué difiere" o "sube el monto" sobre una fila que de entrada se
+      // rechaza. Editarlo lo reviviría (activo vuelve a true) mientras
+      // `anulado` se queda en true, un estado que no puede existir.
+      //
+      // Va antes que el bloqueo por reclamos vivos de acá abajo por dos
+      // razones. Se resuelve con la fila que el `FOR UPDATE` ya trajo, sin la
+      // consulta extra que pide el otro; y sobre todo porque el mensaje del
+      // otro —"aplique esa boleta o reviértala y vuelva a intentar"— promete
+      // una salida que en un rubro anulado no existe: por mucho que se aplique
+      // la boleta, el rubro va a seguir sin poder editarse. Un rubro anulado
+      // no debería llegar a tener reclamos vivos (anular se bloquea si los
+      // hay), así que en la práctica el orden casi nunca se nota; importa el
+      // día que esa invariante se rompa.
+      const veredictoAnulado = puedeEditarRubro({ anulado: actual.anulado });
+      if (!veredictoAnulado.permitido) {
+        throw new RubroError(
+          veredictoAnulado.status ?? 409,
+          veredictoAnulado.motivo ?? "No se puede editar el rubro."
+        );
+      }
+
+      /**
+       * El rubro con una boleta registrada encima está CONGELADO.
+       *
+       * Con la fila ya bloqueada por el `FOR UPDATE` de arriba: si hay algún
+       * reclamo `aplicado = false`, hay una boleta que ya apartó parte de este
+       * saldo y espera a contabilidad. Editarla ahora —aunque sea para
+       * subirle el monto— es cambiar el cobro por debajo de un pago en vuelo:
+       * si el monto baja, al validar esa boleta el saldo ya no alcanzaría y la
+       * aplicación fallaría (o, peor, abonaría de menos). Este 409 es lo que
+       * vuelve IMPOSIBLE ese descuadre, y por eso el guard ruidoso de
+       * `aplicarRubrosDelPago` no debería dispararse nunca.
+       *
+       * Se rechaza ANTES de calcular si la edición cambia algo: la respuesta a
+       * "este rubro está tomado" no depende de qué campo se quiso tocar, y
+       * dejar pasar la edición que "no cambia nada" sólo haría que el front
+       * descubra el bloqueo recién cuando el usuario sí cambie algo.
+       */
+      const veredictoReclamos = puedeTocarRubroConReclamosVivos({
+        reclamos: await reclamosVivosDeRubro(rubro_id, tx),
+      });
+      if (!veredictoReclamos.permitido) {
+        throw new RubroError(
+          veredictoReclamos.status ?? 409,
+          veredictoReclamos.motivo ?? "No se puede editar el rubro."
+        );
+      }
+
+      // `updated_at` NO se pone acá: se agrega recién cuando ya se sabe que la
+      // edición cambia algo. Si se inicializa el objeto con él, `cambios` nunca
+      // está vacío y toda edición —incluso la que no cambia nada— termina en un
+      // UPDATE.
+      const cambios: Record<string, unknown> = {};
+      if (descripcionStr !== undefined) cambios.descripcion = descripcionStr;
+
+      /**
+       * Se compara contra el VALOR ACTUAL, no contra "vino en el body": el
+       * front manda el formulario completo, así que volver a guardar la ficha
+       * sin tocar nada escribía un evento de auditoría por cada clic. Un
+       * historial que crece sin que nada cambie es ruido que termina
+       * escondiendo los cambios de verdad.
+       */
+      const difiere = (pedido: unknown, actualValor: unknown) =>
+        pedido !== undefined && String(pedido ?? "") !== String(actualValor ?? "");
+
+      // Lo único editable fuera del monto. `obligatorio` ya no vive en el rubro
+      // sino en el tipo, así que no hay nada que voltear acá: cambiar la
+      // naturaleza del cobro es editar el CATÁLOGO, no una fila suelta.
+      const cambiaOtroCampo = difiere(cambios.descripcion, actual.descripcion);
+
+      /**
+       * El monto cambia cuando DIFIERE del guardado, no cuando viene en el
+       * body: el modal del front manda siempre `monto`, así que medir presencia
+       * convertía cada guardado en un "cambio de monto" y el historial se
+       * llenaba de filas `edicion_monto` con `monto_anterior === monto_nuevo`.
+       */
+      const cambiaMonto =
+        montoPedido !== null &&
+        !new Big(montoPedido).eq(new Big(actual.monto_original));
+
+      const subeMonto =
+        montoPedido !== null &&
+        new Big(montoPedido).gt(new Big(actual.monto_original));
+
+      let saldoNuevo: string | null = null;
+      if (cambiaMonto) {
+        const veredicto = puedeEditarMonto({
+          montoOriginal: actual.monto_original,
+          saldoPendiente: actual.saldo_pendiente,
+          montoNuevo: montoPedido!,
+        });
+
+        if (!veredicto.permitido) {
+          // El `status` del veredicto manda: la policy es quien sabe si el
+          // rechazo es de permisos o de negocio, y aplastarlo en 409 fijo le
+          // mentía al front sobre qué hacer con el error.
+          throw new RubroError(
+            veredicto.status ?? 409,
+            veredicto.motivo ?? "No se puede editar el monto."
+          );
+        }
+
+        saldoNuevo = aMonto(
+          nuevoSaldoTrasEdicion({
+            montoOriginal: actual.monto_original,
+            saldoPendiente: actual.saldo_pendiente,
+            montoNuevo: montoPedido!,
+          })
+        );
+
+        cambios.monto_original = montoPedido;
+        cambios.saldo_pendiente = saldoNuevo;
+        cambios.completado = rubroCompletado(saldoNuevo);
+
+        /**
+         * REVIVIR un rubro saldado también está sujeto a la exclusividad.
+         *
+         * Subirle el monto a un rubro que estaba en cero lo devuelve a la vida
+         * (`completado` vuelve a false). Hasta la migración 0038 eso chocaba
+         * contra `rubros_uq_credito_tipo_vivo` y salía como 409; al quitar el
+         * índice, el choque dejó de existir y esta puerta quedó abierta: se
+         * podían terminar con dos rubros vivos del mismo concepto sin que nadie
+         * lo mirara.
+         *
+         * Se chequea acá y no en cualquier edición porque sólo esta revive. Y
+         * la regla es la misma del alta —y por la misma razón—: dos cobros
+         * vivos del mismo concepto en un crédito son un error de captura, y la
+         * salida es cobrar el que ya existe, no duplicarlo.
+         *
+         * Ojo con lo que NO cubre, que es deliberado: la RESTITUCIÓN de saldo
+         * que hacen la reversa y la desaplicación sí puede dejar dos vivos del
+         * mismo tipo, y está bien que lo haga. Ahí no hay nadie capturando un
+         * cobro: el sistema está deshaciendo lo suyo, y las dos deudas que
+         * quedan son reales (la del año pasado que volvió y la de este año).
+         * Esa distinción —persona que captura vs sistema que deshace— es toda
+         * la diferencia entre las dos situaciones.
+         */
+        if (!rubroCompletado(saldoNuevo) && actual.completado) {
+          const [otroVivo] = await tx
+            .select({ rubro_id: rubros.rubro_id })
+            .from(rubros)
+            .where(
+              and(
+                eq(rubros.credito_id, actual.credito_id),
+                eq(rubros.tipo_id, actual.tipo_id),
+                eq(rubros.completado, false),
+                eq(rubros.anulado, false)
+              )
+            )
+            .limit(1);
+
+          if (otroVivo) {
+            throw new RubroError(
+              409,
+              "Este crédito ya tiene un rubro vivo de ese tipo."
+            );
+          }
+        }
+      }
+
+      /**
+       * La política del alta se RE-APLICA cuando la edición SUBE el monto: sin
+       * esto se le podía subir el monto a un rubro de un crédito terminal, o
+       * sea crearle deuda nueva por la puerta de atrás — exactamente lo que el
+       * POST rechaza.
+       *
+       * BAJAR el monto NO pasa por acá a propósito, ni siquiera en un crédito
+       * CANCELADO o INCOBRABLE: corregir hacia abajo no endeuda a nadie, y
+       * "cóbrenle sólo lo que ya pagó" tiene que seguir siendo posible
+       * justamente en los créditos terminados. Por eso el gate mira `subeMonto`
+       * y no `cambiaMonto`.
+       */
+      if (subeMonto) {
+        // El crédito ya se leyó BLOQUEADO al abrir la transacción; acá sólo se
+        // usa. Se lee allá arriba y no en este punto —que sería lo natural—
+        // porque el orden de candados tiene que ser el mismo que el del alta
+        // (crédito antes que rubro) o las dos rutas deadlockean; el porqué
+        // completo está en el comentario de aquella lectura.
+
+        // Se lee `activo` además de `obligatorio`, y por la misma razón que lo
+        // lee el alta: subir el monto CREA DEUDA NUEVA. Sin esto, retirar un
+        // tipo del catálogo (`activo: false`) frenaba el `POST /rubros` con
+        // 409 pero dejaba pasar con 200 un alza sobre un rubro existente de ese
+        // tipo — la misma deuda nueva de un concepto retirado, por la puerta
+        // de al lado.
+        /**
+         * `FOR SHARE` sobre el tipo: esta lectura DECIDE, así que no puede ser
+         * plana.
+         *
+         * Sin bloqueo, puede ver `activo = true` mientras `actualizarTipo`
+         * commitea su `activo = false` un instante después, y el alza entra
+         * sobre un concepto ya retirado del catálogo — exactamente la deuda
+         * nueva que este chequeo existe para impedir.
+         *
+         * `SHARE` y no `KEY SHARE`, la misma cerradura que toma el alta y por
+         * la misma razón: `KEY SHARE` defiende de que el tipo se BORRE (un
+         * DELETE toma `FOR UPDATE`), pero DESACTIVARLO es un UPDATE de una
+         * columna común, que `KEY SHARE` deja pasar. Hoy no se notaría porque
+         * `actualizarTipo` toma `FOR UPDATE` explícito, pero depender de ese
+         * detalle del otro lado es la clase de invariante que se rompe sola el
+         * día que alguien escriba el UPDATE directo.
+         */
+        const [tipo] = await tx
+          .select({
+            obligatorio: rubros_tipos.obligatorio,
+            activo: rubros_tipos.activo,
+          })
+          .from(rubros_tipos)
+          .where(eq(rubros_tipos.tipo_id, actual.tipo_id))
+          .limit(1)
+          .for("share");
+
+        // El 404 va primero y con la misma grafía que el alta (`if (!tipo)`).
+        // Antes se preguntaba `if (tipo && !tipo.activo)`: un tipo ausente se
+        // colaba en silencio y más abajo caía en `tipo?.obligatorio ?? false`,
+        // o sea se juzgaba como OPCIONAL y el alza se saltaba el freno de mora
+        // que su propio tipo obligatorio le habría puesto. Hoy es inalcanzable
+        // —la FK no admite borrar un tipo en uso—, pero es la misma decisión
+        // resuelta de dos maneras a 300 líneas de distancia, y esa clase de
+        // asimetría es la que sobrevive al refactor que sí la alcanza.
+        if (!tipo) throw new RubroError(404, "El tipo de rubro no existe.");
+
+        if (!tipo.activo) {
+          throw new RubroError(
+            409,
+            "El tipo de rubro está inactivo: no se puede aumentar el monto de un rubro de ese tipo."
+          );
+        }
+
+        const veredicto = puedeCrearRubro({
+          role,
+          statusCredit: credito.statusCredit,
+          tipoObligatorio: tipo.obligatorio,
+          moraActivaMonto: await moraActivaMonto(actual.credito_id, tx),
+        });
+
+        if (!veredicto.permitido) {
+          throw new RubroError(
+            veredicto.status ?? 409,
+            veredicto.motivo ?? "No se puede editar el rubro."
+          );
+        }
+      }
+
+      /**
+       * `activo` se DERIVA del saldo, no se apaga a mano. Antes sólo existía la
+       * rama que lo ponía en false al completarse: un rubro completado (saldo 0,
+       * activo false) al que se le subía el monto quedaba con saldo vivo y
+       * `activo = false`, y la fase 2 —que recorre por el índice
+       * `(credito_id, activo)`— no lo cobraba nunca. Sin activación programada
+       * la regla es directa: está activo mientras le quede saldo.
+       */
+      if (cambiaMonto) {
+        // Se mira el SALDO resultante y no el flag `completado` guardado, para
+        // que una fila vieja con el flag contradiciendo su saldo no arrastre el
+        // error.
+        const saldoResultante = saldoNuevo ?? actual.saldo_pendiente;
+        cambios.activo = !rubroCompletado(saldoResultante);
+      }
+
+      const tipo_evento = eventoDeEdicion({ cambiaMonto, cambiaOtroCampo });
+
+      /**
+       * Una edición que no cambia NADA no escribe NADA: se devuelve la fila tal
+       * como está.
+       *
+       * El front manda el formulario completo, así que volver a guardar la
+       * ficha sin tocar un campo llegaba acá con `descripcion` y `monto`
+       * idénticos a los guardados. El historial ya estaba a salvo (sin evento
+       * si nada difiere), pero el UPDATE corría igual y movía `updated_at`: la
+       * ficha decía "modificado hace un minuto" por un clic que no modificó
+       * nada, y ese campo es lo primero que se mira al reconstruir qué le pasó
+       * a un cobro. Sin evento no hay cambio, y sin cambio no hay escritura.
+       */
+      if (!tipo_evento) return actual;
+
+      cambios.updated_at = SELLO_DE_TIEMPO;
+
+      const [rubro] = await tx
+        .update(rubros)
+        .set(cambios)
+        .where(eq(rubros.rubro_id, rubro_id))
+        .returning();
+
+      // Ningún cambio se guarda sin su fila de historial —y ya no hace falta
+      // preguntar si hay evento: sin evento la función ya salió sin escribir—.
+      // El evento `edicion` no lleva montos porque no los toca; su valor es
+      // dejar constancia de que alguien identificado editó el rubro y por qué.
+      await tx.insert(rubros_historial).values({
+        rubro_id,
+        tipo_evento,
+        ...(cambiaMonto
+          ? {
+              monto_anterior: actual.monto_original,
+              monto_nuevo: montoPedido,
+              saldo_anterior: actual.saldo_pendiente,
+              saldo_nuevo: saldoNuevo,
+            }
+          : {}),
+        usuario_id: autor,
+        origen: origenDeRole(role),
+        motivo: motivoStr,
+      });
+
+      return rubro;
+      });
+    });
+  } catch (e) {
+    if (e instanceof RubroError) throw e;
+    /**
+     * SIN traducción de violación única, por la misma razón que `crearRubro`.
+     *
+     * Acá vivía un `esViolacionUnica(e) → 409 "ya tiene un rubro vivo de ese
+     * tipo"`, que tenía sentido mientras revivir un rubro saldado chocaba
+     * contra `rubros_uq_credito_tipo_vivo`. La migración 0038 borró ese índice
+     * y la exclusividad pasó a ser el chequeo explícito de más arriba, que tira
+     * ese mismo 409 a mano y con el rubro en la mano.
+     *
+     * Dejarlo era peor que quitarlo: de las dos tablas que esta función
+     * escribe, `rubros` ya no tiene ningún índice único y `rubros_historial`
+     * sólo su PK serial. O sea que el único 23505 que queda alcanzable acá es
+     * una secuencia desincronizada —corrupción de base— y traducirla a "ya
+     * existe ese rubro" le mentiría al admin sobre un crédito donde no hay
+     * ningún duplicado, además de tapar el problema real que merece salir
+     * como 500.
+     */
+    throw e;
+  }
+}
+
+/**
+ * Anula un rubro: deja de cobrarse, pero NO desaparece.
+ *
+ * Es la única salida para el cobro cargado por error, y hasta ahora no existía:
+ * no hay DELETE (el historial de un cobro es evidencia y `rubros_historial`
+ * cuelga de la fila), editarlo a 0 lo rechaza `puedeUsarMonto` —con razón: un
+ * rubro de Q0 no es un rubro—, y `completado` se enciende cuando el cliente
+ * TERMINA DE PAGARLO (el abono de `aplicarRubrosDelPago`), que es justo lo que
+ * nunca va a pasar con un cargo que no correspondía: esperar a que se complete
+ * es esperar a cobrarle al cliente el error. Mientras tanto la exclusividad por
+ * crédito+tipo impide crear el rubro CORRECTO de ese mismo tipo, así que un
+ * dedazo dejaba el crédito bloqueado para ese concepto para siempre y la única
+ * salida era un UPDATE a mano en producción. (Esa exclusividad era el índice
+ * único `rubros_uq_credito_tipo_vivo` hasta la migración 0038; hoy es el
+ * chequeo de `crearRubro`. Para esta función da igual: lo que la justifica es
+ * que el tipo quede bloqueado, no quién lo bloquea.)
+ *
+ * Qué hace: `saldo_pendiente = 0` (ya no se cobra), `completado = true` (libera
+ * el tipo para el cobro del año siguiente) y `activo = false` (el barrido de la fase
+ * 2 no lo mira). `monto_original` NO se toca a propósito: es el rastro de
+ * cuánto se había llegado a cobrar, y ponerlo en 0 borraría la evidencia del
+ * error que la anulación viene a documentar. El evento `anulacion` del
+ * historial guarda el saldo anterior y el motivo obligatorio.
+ *
+ * Sólo ADMIN (lo gatea el router): anular libera el tipo y cierra un cobro,
+ * que es la misma clase de decisión que corregir un monto ya cobrado.
+ */
+export async function anularRubro(
+  rubro_id: number,
+  {
+    motivo,
+    role,
+    usuario_id,
+  }: {
+    motivo?: string | null;
+    /** Rol del TOKEN: de él sale el `origen` que queda en el historial. */
+    role?: string | null;
+    usuario_id?: number | null;
+  }
+) {
+  const autor = exigirUsuario(usuario_id);
+
+  // Obligatorio y con contenido real, igual que en la edición: la anulación
+  // borra un cobro de la cuenta del cliente y "por qué" es lo único que después
+  // explica el hueco. Se juzga el texto ya recortado, que es el que se guarda.
+  const motivoStr = textoLimpio(motivo);
+  if (!motivoStr) {
+    throw new RubroError(400, "El motivo es obligatorio para anular el rubro.");
+  }
+
+  // 🔒 Advisory lock por crédito ANTES de la transacción, por la misma razón y
+  // en el mismo orden que `editarRubro` (ver el comentario largo allá). Acá
+  // pesa todavía más: anular deja el saldo en 0, así que colarse en la ventana
+  // del registro de una boleta garantiza que el reclamo que esa boleta escriba
+  // sea inaplicable.
+  const credito_id = await creditoDeRubro(rubro_id);
+
+  // Leer, decidir y escribir en UNA transacción con la fila bloqueada, igual
+  // que `editarRubro`: sin el `FOR UPDATE`, dos anulaciones simultáneas —o una
+  // anulación contra un abono de la fase 2— escribirían dos eventos sobre el
+  // mismo saldo leído.
+  return await withPaymentAdvisoryLock(credito_id, async () =>
+    db.transaction(async (tx) => {
+    const [actual] = await tx
+      .select()
+      .from(rubros)
+      .where(eq(rubros.rubro_id, rubro_id))
+      .limit(1)
+      .for("update");
+
+    if (!actual) throw new RubroError(404, "El rubro no existe.");
+
+    // Mismo bloqueo que la edición, y acá es todavía más claro: anular deja el
+    // saldo en 0, así que hacerlo con una boleta registrada encima garantiza
+    // que al validarla el saldo no alcance. Primero se resuelve esa boleta
+    // —aplicándola o revirtiéndola—, después se anula el rubro.
+    const veredictoReclamos = puedeTocarRubroConReclamosVivos({
+      reclamos: await reclamosVivosDeRubro(rubro_id, tx),
+    });
+    if (!veredictoReclamos.permitido) {
+      throw new RubroError(
+        veredictoReclamos.status ?? 409,
+        veredictoReclamos.motivo ?? "No se puede anular el rubro."
+      );
+    }
+
+    // Y los montos van al veredicto: los dos chequeos son distintos y hacen
+    // falta los dos. El de arriba mira si hay una boleta EN VUELO sobre el
+    // rubro; éste mira si ya se le ABONÓ algo, que es plata cobrada y cerrada.
+    // Sin él, anular pone el saldo en 0 y el listado informa `abonado: 0`, así
+    // que el pago del cliente desaparece de la vista sin dejar constancia.
+    const veredicto = puedeAnularRubro({
+      completado: actual.completado,
+      montoOriginal: actual.monto_original,
+      saldoPendiente: actual.saldo_pendiente,
+    });
+    if (!veredicto.permitido) {
+      throw new RubroError(
+        veredicto.status ?? 409,
+        veredicto.motivo ?? "No se puede anular el rubro."
+      );
+    }
+
+    const [rubro] = await tx
+      .update(rubros)
+      .set({
+        saldo_pendiente: aMonto(0),
+        completado: true,
+        activo: false,
+        anulado: true,
+        updated_at: SELLO_DE_TIEMPO,
+      })
+      .where(eq(rubros.rubro_id, rubro_id))
+      .returning();
+
+    await tx.insert(rubros_historial).values({
+      rubro_id,
+      tipo_evento: "anulacion",
+      // El monto NO cambia, así que no se registra un "monto nuevo" que sería
+      // mentira. Lo que cambia —y lo que hay que poder reconstruir— es el
+      // saldo que dejó de cobrarse.
+      saldo_anterior: actual.saldo_pendiente,
+      saldo_nuevo: aMonto(0),
+      usuario_id: autor,
+      origen: origenDeRole(role),
+      motivo: motivoStr,
+    });
+
+      return rubro;
+    })
+  );
+}
+
+/**
+ * Historial del rubro, del evento más reciente al más viejo, CON el autor
+ * resuelto.
+ *
+ * El `usuario_id` crudo no sirve para lo que este historial existe: la pregunta
+ * real es "¿quién le cobró esto al cliente?", y responderla con un número
+ * obliga a ir a consultar la base a mano. Por eso el join.
+ *
+ * Se devuelven `usuario_email` y `usuario_nombre` porque ninguno alcanza solo:
+ * `platform_users` no guarda nombre (solo email y el rol), y el nombre vive en
+ * `asesores`, ligado por `asesor_id` — que las cuentas ADMIN no tienen. Para un
+ * evento de un ADMIN el nombre viene null y el email ES la identidad; para uno
+ * de un ASESOR viene el nombre (y el `origen` de la fila ya dice cuál de los
+ * dos fue, sin depender del join). El `leftJoin` (y no `innerJoin`) es
+ * deliberado en los dos casos: un evento del job de la fase 2 no tendrá autor,
+ * y perder la fila del historial por eso sería peor que mostrarla sin nombre.
+ */
+export async function listarHistorial(rubro_id: number) {
+  const [rubro] = await db
+    .select({ rubro_id: rubros.rubro_id })
+    .from(rubros)
+    .where(eq(rubros.rubro_id, rubro_id))
+    .limit(1);
+
+  if (!rubro) throw new RubroError(404, "El rubro no existe.");
+
+  const filas = await db
+    .select({
+      evento: rubros_historial,
+      usuario_email: platform_users.email,
+      usuario_nombre: asesores.nombre,
+    })
+    .from(rubros_historial)
+    .leftJoin(platform_users, eq(rubros_historial.usuario_id, platform_users.id))
+    .leftJoin(asesores, eq(platform_users.asesor_id, asesores.asesor_id))
+    .where(eq(rubros_historial.rubro_id, rubro_id))
+    // Ordena por `historial_id` y no por `created_at`, aunque el timestamp sea
+    // lo que se muestra. `created_at` sale del `DEFAULT now()` de la columna, y
+    // `now()` en Postgres es la hora de INICIO DE LA TRANSACCIÓN, no del INSERT:
+    // una edición que abrió su transacción primero pero se quedó esperando el
+    // candado del rubro commitea DESPUÉS y con una hora ANTERIOR. Ordenando por
+    // la hora, esas dos ediciones se muestran al revés — y este historial existe
+    // justamente para responder en qué orden se tocó un cobro y por qué.
+    //
+    // El `historial_id` es un serial: lo asigna la secuencia al insertar, así
+    // que respeta el orden real de las escrituras aunque los relojes mientan.
+    // La hora se sigue mostrando; lo que deja de decidir es el ORDEN.
+    .orderBy(desc(rubros_historial.historial_id));
+
+  return filas.map(({ evento, usuario_email, usuario_nombre }) => ({
+    ...evento,
+    usuario_email: usuario_email ?? null,
+    usuario_nombre: usuario_nombre ?? null,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// FASE 2 — COBRO DE RUBROS EN EL FLUJO DE PAGOS
+//
+// El pago corre en DOS ETAPAS y este bloque vive en las dos:
+//
+//   REGISTRAR (`insertPayment`)  → `cobrarRubrosParaBoleta` calcula el reparto
+//                                  y `registrarReclamosDeRubros` lo escribe en
+//                                  `rubros_pagos` con `aplicado = false`. NO se
+//                                  toca `rubros.saldo_pendiente`: registrar
+//                                  sólo APARTA.
+//   APLICAR (`/aplicar-pago`)    → `aplicarRubrosDelPago` baja el saldo, marca
+//                                  el reclamo y escribe el historial.
+//   REVERTIR (`reversePayment`)  → `revertirRubrosDelPago` devuelve lo aplicado
+//                                  y suelta el reclamo.
+//
+// Las reglas decidibles (orden de cobro, neteo contra hermanos, guards) están
+// en `rubrosPolicy.ts` como funciones puras; acá sólo se lee la base, se le
+// pregunta a la policy y se escribe.
+// ---------------------------------------------------------------------------
+
+/**
+ * Σ de lo APARTADO y todavía sin aplicar por las boletas VIVAS, por rubro.
+ *
+ * "Vivas" = `paymentFalse = false`, y NADA MÁS. Una boleta anulada dejó de ser
+ * un reclamo sobre la plata del cliente, y contarla seguiría restando
+ * disponible del rubro —y congelando su edición— por un pago que ya no existe.
+ *
+ * ⚠️ NO es el mismo filtro que el de `pagosHermanos` en `registerPayment.ts`, y
+ * la diferencia es DELIBERADA: el de cuotas exige además
+ * `validationStatus IN ('validated','pending','no_required')` y pasa después
+ * por `cuentaComoHermanoVivo`, porque allá la pregunta es "¿cuánto de ESTA
+ * CUOTA ya cubrieron otras filas?" y sólo esos tres estados amortizan una
+ * cuota. Acá la pregunta es otra: "¿cuánta plata de este rubro ya está
+ * comprometida por una boleta viva?", y eso NO depende del estado de la fila
+ * frente a la cuota. El caso concreto es el ABONO DIRECTO A CAPITAL: cuando el
+ * crédito no tiene cuotas abiertas, la única fila que escribe la boleta nace
+ * con `validationStatus: "capital"` y es ella la que lleva el cobro de rubros
+ * (ver el estampado en `insertPayment`, y la rama de capital de
+ * `aplicarPagoAlCredito`, que los aplica). Con el filtro de cuotas ese reclamo
+ * no se contaría: la boleta siguiente volvería a apartar un saldo ya
+ * comprometido y al aplicar la segunda el saldo no alcanzaría.
+ *
+ * Los estados que hoy no cargan reclamos (`reset`, por ejemplo) no molestan al
+ * aceptar cualquiera: sin filas no hay nada que netear. El riesgo es todo del
+ * otro lado — cada status que se le agregue al WHERE es un reclamo vivo que
+ * desaparece de la suma.
+ *
+ * O sea: si alguna vez parece que hay que "alinear los criterios" con el de
+ * cuotas, el que está bien es éste. El estado del pago no dice nada sobre si su
+ * reclamo sobre el rubro sigue vivo; lo único que lo mata es que la boleta se
+ * declare falsa (`paymentFalse`) o que el reclamo se borre al revertirla.
+ *
+ * Es la consulta que responde "¿este rubro tiene reclamos vivos?", y por eso la
+ * migración 0037 le puso el índice `(rubro_id, aplicado)`.
+ */
+export async function reclamosVivosDeRubros(
+  rubroIds: number[],
+  ejecutor: Ejecutor = db
+): Promise<Map<number, { pago_id: number; monto: string }[]>> {
+  const porRubro = new Map<number, { pago_id: number; monto: string }[]>();
+  if (rubroIds.length === 0) return porRubro;
+
+  const filas = await ejecutor
+    .select({
+      rubro_id: rubros_pagos.rubro_id,
+      pago_id: rubros_pagos.pago_id,
+      monto: rubros_pagos.monto,
+    })
+    .from(rubros_pagos)
+    .innerJoin(pagos_credito, eq(rubros_pagos.pago_id, pagos_credito.pago_id))
+    .where(
+      and(
+        inArray(rubros_pagos.rubro_id, rubroIds),
+        eq(rubros_pagos.aplicado, false),
+        eq(pagos_credito.paymentFalse, false)
+      )
+    );
+
+  for (const fila of filas) {
+    const previos = porRubro.get(fila.rubro_id) ?? [];
+    previos.push({ pago_id: fila.pago_id, monto: fila.monto ?? "0" });
+    porRubro.set(fila.rubro_id, previos);
+  }
+  return porRubro;
+}
+
+/**
+ * Los reclamos vivos de UN rubro — lo que congela su edición.
+ *
+ * Exportado porque `editarRubro`/`anularRubro` lo consultan con la fila ya
+ * bloqueada por `FOR UPDATE`: leer con `db` mientras `tx` la tiene tomada sería
+ * decidir sobre un snapshot distinto al que se está por escribir.
+ */
+async function reclamosVivosDeRubro(
+  rubro_id: number,
+  ejecutor: Ejecutor = db
+): Promise<{ pago_id: number; monto: string }[]> {
+  const mapa = await reclamosVivosDeRubros([rubro_id], ejecutor);
+  return mapa.get(rubro_id) ?? [];
+}
+
+/**
+ * Qué rubros cobra esta boleta y por cuánto — SIN escribir nada.
+ *
+ * Se separa del INSERT porque en el registro el `pago_id` todavía no existe:
+ * `insertPayment` necesita el TOTAL para descontarlo del disponible antes de
+ * repartir el resto entre las cuotas, y recién cuando una fila de
+ * `pagos_credito` quedó persistida se pueden escribir los reclamos (mismo
+ * diferimiento que hace el convenio con `commitConvenio`).
+ *
+ * Trae los rubros VIVOS del crédito —`activo`, no `completado`, no `anulado`—
+ * junto con el `obligatorio` de su TIPO (que es donde vive la naturaleza del
+ * cobro, ver `puedeCrearRubro`) y lo ya apartado por las boletas hermanas. El
+ * orden y el reparto los decide `repartirEnRubros`.
+ */
+export async function cobrarRubrosParaBoleta({
+  credito_id,
+  disponible,
+  ejecutor = db,
+}: {
+  credito_id: number;
+  disponible: Big | string | number;
+  ejecutor?: Ejecutor;
+}): Promise<{ cobros: { rubro_id: number; monto: string }[]; total: Big }> {
+  if (new Big(disponible ?? 0).lte(0)) {
+    return { cobros: [], total: new Big(0) };
+  }
+
+  const vivos = await ejecutor
+    .select({
+      rubro_id: rubros.rubro_id,
+      saldo_pendiente: rubros.saldo_pendiente,
+      created_at: rubros.created_at,
+      obligatorio: rubros_tipos.obligatorio,
+    })
+    .from(rubros)
+    .innerJoin(rubros_tipos, eq(rubros.tipo_id, rubros_tipos.tipo_id))
+    .where(
+      and(
+        eq(rubros.credito_id, credito_id),
+        eq(rubros.activo, true),
+        eq(rubros.completado, false),
+        eq(rubros.anulado, false)
+      )
+    );
+
+  if (vivos.length === 0) return { cobros: [], total: new Big(0) };
+
+  const reclamos = await reclamosVivosDeRubros(
+    vivos.map((r) => r.rubro_id),
+    ejecutor
+  );
+
+  const reparto = repartirEnRubros({
+    disponible,
+    rubros: vivos.map((r) => ({
+      rubro_id: r.rubro_id,
+      obligatorio: r.obligatorio,
+      created_at: r.created_at,
+      saldoPendiente: r.saldo_pendiente ?? "0",
+      // Neteo contra las boletas hermanas: sin esto, tres boletas registradas
+      // antes de que conta valide la primera apartarían el saldo COMPLETO cada
+      // una (el registro no lo baja) y al aplicar la segunda ya no alcanzaría.
+      reclamadoVivo: (reclamos.get(r.rubro_id) ?? []).reduce(
+        (acc, c) => acc.plus(new Big(c.monto ?? 0)),
+        new Big(0)
+      ),
+    })),
+  });
+
+  return { cobros: reparto.cobros, total: reparto.total };
+}
+
+/**
+ * Escribe los reclamos de la boleta: `aplicado = false` y `saldo_pendiente`
+ * INTACTO.
+ *
+ * Acá está la regla del dueño del dominio: el saldo del rubro baja al APLICAR,
+ * no al registrar. Registrar sólo aparta — y lo apartado es lo que
+ * `cobrarRubrosParaBoleta` de la siguiente boleta va a netear, y lo que congela
+ * la edición del rubro hasta que contabilidad se pronuncie.
+ *
+ * No escribe historial: todavía no pasó nada en la cuenta del cliente. El
+ * evento `abono` lo escribe la aplicación, que es cuando el saldo se mueve.
+ *
+ * ANTES DE INSERTAR REVALIDA el reparto contra el saldo actual, con los rubros
+ * releídos `FOR UPDATE` en esta misma transacción. Es defensa en profundidad
+ * sobre el advisory lock que ahora toman `editarRubro`/`anularRubro`: el lock
+ * cierra la carrera, esto se asegura de que si igual se abre —un UPDATE a mano
+ * en producción, una ruta futura que se olvide del lock— el daño se vea acá y
+ * no en la validación. Fallar en el REGISTRO es barato: el asesor tiene la
+ * boleta en la mano y reintenta. Fallar en la VALIDACIÓN no lo es: el 409
+ * aborta la transacción que aplica TODO el pago, así que la boleta entera se
+ * cae —cuota sin cerrar, capital sin tocar, inversionistas sin repartir— y lo
+ * descubre contabilidad días después.
+ */
+/**
+ * `cobrarRubrosParaBoleta` con red: si revienta, la boleta sigue sin cobrar
+ * rubros en vez de caerse.
+ *
+ * Existe por una asimetría de consecuencias, no por prolijidad. Esta consulta
+ * corre en medio del reparto de TODA boleta de la empresa: sin red, cualquier
+ * fallo suyo —la migración todavía no corrió y `cartera.rubros` no existe, un
+ * corte de conexión, un bug del módulo— tumba el pago entero. O sea que un
+ * módulo NUEVO y OPCIONAL podía dejar a la financiera sin poder cobrar nada.
+ *
+ * Los dos errores no cuestan lo mismo:
+ *
+ *   * fallar → nadie puede registrar pagos hasta que alguien lo note;
+ *   * seguir sin cobrar → ese cargo adicional queda pendiente y lo toma la
+ *     próxima boleta. No se pierde plata: el `saldo_pendiente` del rubro no se
+ *     toca, y el `total` en cero deja el disponible de la boleta intacto, así
+ *     que las cuotas reciben exactamente lo que habrían recibido sin el módulo.
+ *
+ * Es la misma red que `getCreditoByNumero` ya se puso alrededor de su lectura de
+ * rubros y por la misma razón. Que el motor de pagos —que es más crítico— no la
+ * tuviera era una asimetría, no una decisión.
+ *
+ * El `console.error` no es decorativo: tragarse el error es aceptable sólo si
+ * queda ruidoso en los logs. Un módulo que deja de cobrar en silencio es peor
+ * que uno que falla.
+ */
+export async function cobroRubrosSeguro(args: {
+  credito_id: number;
+  disponible: Big | string | number;
+  ejecutor?: Ejecutor;
+}): Promise<{ cobros: { rubro_id: number; monto: string }[]; total: Big }> {
+  try {
+    return await cobrarRubrosParaBoleta(args);
+  } catch (error) {
+    console.error(
+      `[cobroRubrosSeguro] El cobro de rubros del crédito ${args.credito_id} falló; la boleta sigue SIN cobrarlos:`,
+      error
+    );
+    return { cobros: [], total: new Big(0) };
+  }
+}
+
+/**
+ * Lo que una boleta tiene comprometido en rubros — vivo o ya aplicado.
+ *
+ * Existe para un guard de `editarPago`, y el porqué es incómodo: el total de
+ * rubros de una boleta no se guarda en ninguna columna propia, se SUMA a
+ * `pagos_credito.otros`. Y esa columna es editable por
+ * `PATCH /editPayment/:pagoId`, que la pisa sin enterarse de `rubros_pagos`.
+ *
+ * Si un admin la edita con un reclamo encima, los dos lados quedan diciendo
+ * cosas distintas del mismo cobro: la validación le descuenta al rubro el monto
+ * ORIGINAL del reclamo, mientras los reportes y la facturación leen el `otros`
+ * nuevo. Según para qué lado se edite, se factura un cargo que nunca se cobró o
+ * se omite uno que sí.
+ *
+ * Cuenta `aplicado` en cualquiera de sus dos valores a propósito: un reclamo
+ * todavía sin aplicar ya apartó saldo del rubro, así que editar el `otros` por
+ * debajo de él rompe igual.
+ */
+export async function totalReclamadoPorPago(
+  pago_id: number,
+  ejecutor: Ejecutor = db
+): Promise<Big> {
+  const [fila] = await ejecutor
+    .select({
+      // COALESCE porque el SUM de cero filas es NULL, no 0, y ese NULL llegando
+      // crudo al `Big` reventaría el guard sobre una boleta editable.
+      total: sql<string>`COALESCE(SUM(${rubros_pagos.monto}), 0)`,
+    })
+    .from(rubros_pagos)
+    .where(eq(rubros_pagos.pago_id, pago_id));
+
+  return new Big(fila?.total ?? 0);
+}
+
+export async function registrarReclamosDeRubros(
+  pago_id: number,
+  cobros: { rubro_id: number; monto: string }[],
+  ejecutor: Ejecutor = db
+): Promise<void> {
+  if (cobros.length === 0) return;
+
+  const rubroIds = cobros.map((c) => c.rubro_id);
+
+  // `FOR UPDATE` y no una lectura suelta: el saldo que se juzga tiene que ser
+  // el mismo que quede congelado hasta que este INSERT commitee, o el guard
+  // decide sobre un número que puede cambiar dos líneas más abajo.
+  const actuales = await ejecutor
+    .select({
+      rubro_id: rubros.rubro_id,
+      saldo_pendiente: rubros.saldo_pendiente,
+      anulado: rubros.anulado,
+    })
+    .from(rubros)
+    .where(inArray(rubros.rubro_id, rubroIds))
+    .for("update");
+
+  const porId = new Map(actuales.map((r) => [r.rubro_id, r]));
+
+  // Los reclamos de ESTA boleta todavía no existen (se insertan abajo), así que
+  // lo que cuenta acá son sólo los de las boletas hermanas — exactamente el
+  // mismo neteo con el que `cobrarRubrosParaBoleta` había decidido el reparto.
+  const reclamos = await reclamosVivosDeRubros(rubroIds, ejecutor);
+
+  for (const cobro of cobros) {
+    const actual = porId.get(cobro.rubro_id);
+
+    // Anulado o desaparecido: el reparto se decidió sobre un rubro que ya no se
+    // cobra. Se trata aparte del guard de saldo porque el motivo es otro y la
+    // salida también: no es "quedó menos plata", es "ese cargo se canceló".
+    if (!actual || actual.anulado) {
+      throw new RubroError(
+        409,
+        `El cobro adicional #${cobro.rubro_id} se anuló mientras se registraba esta boleta, así que no se cobró. LA BOLETA SÍ QUEDÓ REGISTRADA y el resto del pago se aplicó: NO la registre de nuevo. Revise el crédito para confirmar el reparto.`
+      );
+    }
+
+    const veredicto = puedeApartarReclamo({
+      rubro_id: cobro.rubro_id,
+      saldoPendiente: actual.saldo_pendiente,
+      reclamadoVivo: (reclamos.get(cobro.rubro_id) ?? []).reduce(
+        (acc, r) => acc.plus(new Big(r.monto ?? 0)),
+        new Big(0)
+      ),
+      montoApartado: cobro.monto,
+    });
+
+    if (!veredicto.permitido) {
+      throw new RubroError(
+        veredicto.status ?? 409,
+        veredicto.motivo ?? "No se puede apartar el cobro del rubro."
+      );
+    }
+  }
+
+  await ejecutor.insert(rubros_pagos).values(
+    cobros.map((c) => ({
+      pago_id,
+      rubro_id: c.rubro_id,
+      monto: c.monto,
+      // NULL hasta que se aplique: un 0 sería indistinguible de "se aplicó y no
+      // descontó nada".
+      monto_aplicado: null,
+      aplicado: false,
+    }))
+  );
+}
+
+/**
+ * APLICA los rubros que esta boleta había apartado: baja el saldo, recalcula
+ * `completado`/`activo`, escribe el historial y marca el reclamo.
+ *
+ * Corre DENTRO de la transacción de `/aplicar-pago`: si algo de lo que sigue
+ * falla, el rubro tampoco queda cobrado. Cada rubro se relee con `FOR UPDATE`
+ * porque entre el registro de la boleta y esta validación pudo pasar cualquier
+ * cosa, y el saldo que se decrementa tiene que ser el que está bloqueado.
+ *
+ * El guard de `puedeAplicarReclamo` es RUIDOSO a propósito: si el saldo ya no
+ * alcanza, la aplicación FALLA en vez de abonar de menos. Por diseño no debería
+ * pasar —`puedeTocarRubroConReclamosVivos` impide que el saldo se achique
+ * mientras el reclamo vive, y el neteo impide apartar de más—, así que si pasa
+ * es un agujero que queremos ver, no tapar.
+ */
+export async function aplicarRubrosDelPago(
+  pago_id: number,
+  ejecutor: Ejecutor
+): Promise<{ rubro_id: number; monto_aplicado: string }[]> {
+  /**
+   * Igual que en `revertirRubrosDelPago`: los reclamos se toman con `FOR UPDATE`.
+   *
+   * Es la misma forma —leer y después escribir— con el mismo desenlace si dos
+   * llamadores llegaran a solaparse: un doble descuento acá, una doble
+   * restitución allá. Hoy todos toman el advisory lock del crédito, pero esa es
+   * justo la invariante que ya se rompió una vez cuando una ruta nueva empezó a
+   * llamar sin tomarlo.
+   */
+  /**
+   * La boleta tiene que seguir VIVA. Sin esto, se le cobra al cliente un cargo
+   * por un pago que la empresa ya declaró falso.
+   *
+   * No es teórico: `resetCredit` y la caída a incobrable de `credits.ts` marcan
+   * `paymentFalse = true` EN BLOQUE sobre los pagos no pagados de un crédito, y
+   * no tocan `rubros_pagos` —no tienen por qué saber que existe—. El reclamo
+   * queda ahí, sin aplicar, colgado de una boleta muerta; y como esta consulta
+   * elegía sólo por `pago_id` y `aplicado`, aplicar después ese pago le
+   * descontaba el saldo al rubro y marcaba el reclamo como aplicado.
+   *
+   * El guard va ACÁ y no en cada ruta que marca pagos falsos, que es la otra
+   * salida posible: acá hay un solo lugar por donde se aplica, y allá hay tantos
+   * como rutas existan hoy y se agreguen mañana. Una guarda en el cuello de
+   * botella sobrevive a las rutas que todavía no se escribieron.
+   */
+  const [pago] = await ejecutor
+    .select({ paymentFalse: pagos_credito.paymentFalse })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.pago_id, pago_id))
+    .limit(1)
+    // `FOR UPDATE`, y no una lectura plana, por la misma razón que el guard
+    // existe: los dos escritores de los que defiende —`actualizarEstadoCredito`
+    // y `resetCredit`, en `credits.ts`— **no toman el advisory lock del
+    // crédito** (ese archivo no tiene una sola llamada a `pg_advisory`). O sea
+    // que el candado que sí toma `/aplicar-pago` no los excluye, y bajo READ
+    // COMMITTED quedaba la ventana entera abierta: esta lectura ve la boleta
+    // viva, el otro la marca falsa en bloque y commitea, y acá se cobra el rubro
+    // igual. Bloquear la fila hace que ese UPDATE espere. No cambia el orden de
+    // candados —el advisory sigue afuera y la fila adentro—, así que no reabre
+    // el deadlock que ya costó una vez.
+    .for("update");
+
+  if (!pago) {
+    // Sin fila de pago no hay nada que aplicar, y tampoco puede haber reclamos:
+    // la FK de `rubros_pagos.pago_id` lo impide. Se sale en silencio —con un
+    // log, porque si alguna vez pasa es corrupción— y NO se tira: hacerlo
+    // convertiría en 409 a una docena de llamadores cuyos pagos son legítimos y
+    // simplemente no tienen rubros, sin ganar nada a cambio.
+    console.warn(
+      `[aplicarRubrosDelPago] El pago ${pago_id} no existe; no hay rubros que aplicar.`
+    );
+    return [];
+  }
+
+  if (pago.paymentFalse) {
+    // ABORTA, no devuelve vacío. Saltearlo en silencio dejaba el peor estado de
+    // los tres: quien llama sigue de largo, marca el pago como aplicado y le
+    // aplica capital y cuotas igual — o sea que la boleta declarada falsa se
+    // aplica entera y lo único que se perdona es el rubro.
+    //
+    // Y encima queda descuadrado: `pagos_credito.otros` YA trae el cargo del
+    // rubro desde que se registró la boleta (lo suma `commitRubros`), así que el
+    // saldo del rubro sigue intacto mientras los reportes muestran plata cobrada
+    // que nadie le acreditó. Tirar acá tumba la transacción entera, que es lo
+    // único que deja los dos lados diciendo lo mismo.
+    //
+    // ⚠️ ALCANCE REAL, y es más ancho de lo que parece: esto rechaza TODA
+    // boleta falsa en `/aplicar-pago`, tenga rubros o no.
+    //
+    // El motivo es que este chequeo corre ANTES de leer `rubros_pagos`, y la
+    // función se llama incondicionalmente desde `aplicarPagoNormalEnTx` y desde
+    // la rama de capital — no sólo cuando hay rubros. Una versión anterior de
+    // este comentario decía que el agujero de `/aplicar-pago` quedaba abierto y
+    // que cerrarlo iba aparte; era falso, ya está cerrado acá.
+    //
+    // Se deja así porque aplicar una boleta que la empresa declaró falsa es
+    // aplicar plata que no entró, y `revalidatePayment` ya lo rechazaba de
+    // entrada: lo raro era la asimetría, no el bloqueo. Pero conviene saberlo al
+    // desplegar: `resetCredit` y la caída a incobrable marcan `paymentFalse` en
+    // BLOQUE sobre los pagos no pagados de un crédito, así que cualquier flujo
+    // que después reaplicara una de esas boletas ahora recibe este 409.
+    throw new RubroError(
+      409,
+      `La boleta #${pago_id} está marcada como falsa: no se puede aplicar. Si la invalidación fue un error, revertila antes de volver a aplicar el pago.`
+    );
+  }
+
+  const reclamos = await ejecutor
+    .select({
+      id: rubros_pagos.id,
+      rubro_id: rubros_pagos.rubro_id,
+      monto: rubros_pagos.monto,
+    })
+    .from(rubros_pagos)
+    .where(
+      and(eq(rubros_pagos.pago_id, pago_id), eq(rubros_pagos.aplicado, false))
+    )
+    .for("update");
+
+  const aplicados: { rubro_id: number; monto_aplicado: string }[] = [];
+
+  for (const reclamo of reclamos) {
+    const [rubro] = await ejecutor
+      .select()
+      .from(rubros)
+      .where(eq(rubros.rubro_id, reclamo.rubro_id))
+      .limit(1)
+      .for("update");
+
+    if (!rubro) {
+      // El rubro no se borra nunca (se anula), así que esto sólo puede ser un
+      // borrado a mano: mismo criterio ruidoso que el guard de abajo.
+      throw new RubroError(
+        409,
+        `Inconsistencia de integridad: el pago ${pago_id} apartó Q${reclamo.monto} del rubro ${reclamo.rubro_id}, que ya no existe. El pago NO se aplica.`
+      );
+    }
+
+    const veredicto = puedeAplicarReclamo({
+      rubro_id: rubro.rubro_id,
+      saldoPendiente: rubro.saldo_pendiente,
+      montoApartado: reclamo.monto ?? 0,
+    });
+    if (!veredicto.permitido) {
+      throw new RubroError(
+        veredicto.status ?? 409,
+        veredicto.motivo ?? "No se puede aplicar el cobro del rubro."
+      );
+    }
+
+    const montoAplicado = aMonto(reclamo.monto ?? 0);
+    const saldoNuevo = aMonto(
+      new Big(rubro.saldo_pendiente).minus(new Big(montoAplicado))
+    );
+    const completado = rubroCompletado(saldoNuevo);
+
+    await ejecutor
+      .update(rubros)
+      .set({
+        saldo_pendiente: saldoNuevo,
+        completado,
+        // `activo` se DERIVA del saldo, igual que en la edición: está activo
+        // mientras le quede saldo. Así el barrido del próximo pago no vuelve a
+        // ofrecer un rubro ya saldado, y uno que quedó con saldo sigue vivo.
+        activo: !completado,
+        updated_at: SELLO_DE_TIEMPO,
+      })
+      .where(eq(rubros.rubro_id, rubro.rubro_id));
+
+    await ejecutor.insert(rubros_historial).values({
+      rubro_id: rubro.rubro_id,
+      tipo_evento: "abono",
+      // El monto del rubro no cambia con un abono; lo que cambia —y lo que hay
+      // que poder reconstruir— es el saldo.
+      saldo_anterior: aMonto(rubro.saldo_pendiente),
+      saldo_nuevo: saldoNuevo,
+      pago_id,
+      // Sin `usuario_id`: el abono no lo decide una persona, lo produce la
+      // validación de una boleta. El `pago_id` es la trazabilidad real.
+      origen: "pago",
+    });
+
+    await ejecutor
+      .update(rubros_pagos)
+      .set({ aplicado: true, monto_aplicado: montoAplicado })
+      .where(eq(rubros_pagos.id, reclamo.id));
+
+    aplicados.push({ rubro_id: rubro.rubro_id, monto_aplicado: montoAplicado });
+  }
+
+  return aplicados;
+}
+
+/**
+ * REVIERTE los rubros de una boleta que se reversa.
+ *
+ * Dos casos, que no son simétricos porque las dos etapas del pago no lo son:
+ *
+ *   * Reclamo YA APLICADO: el saldo del rubro se había bajado de verdad, así
+ *     que se devuelve `monto_aplicado` y queda el evento `reversa` en el
+ *     historial. La única excepción es el rubro ANULADO, donde el saldo NO se
+ *     restituye: ver `saldoTrasReversaDeReclamo`.
+ *   * Reclamo SIN APLICAR: nunca se descontó nada, así que no hay saldo que
+ *     devolver — sólo se suelta lo apartado.
+ *
+ * En ambos casos el reclamo se BORRA, y eso es el guard de doble reversa: una
+ * segunda reversa del mismo pago no encuentra filas y no devuelve nada. Es el
+ * mismo criterio del convenio, que deja su sello en `pagoConvenio = 0` para que
+ * la segunda pasada lo vea vacío.
+ *
+ * Corre DENTRO de la transacción de la reversa y ANTES de que la rama de pago
+ * parcial borre la fila de `pagos_credito`: ese DELETE se llevaría los reclamos
+ * por cascada sin devolverle el saldo al rubro.
+ */
+export async function revertirRubrosDelPago(
+  pago_id: number,
+  ejecutor: Ejecutor
+): Promise<{ rubro_id: number; devuelto: string }[]> {
+  /**
+   * Los reclamos se toman con `FOR UPDATE`, no se leen y listo.
+   *
+   * Sin el bloqueo, dos reversas solapadas del MISMO pago ven las dos el
+   * reclamo: la segunda espera al commit de la primera, relee un
+   * `saldo_pendiente` que YA fue restituido, y le vuelve a sumar
+   * `monto_aplicado`. Su `DELETE` pega en cero filas y no se queja de nada. Un
+   * rubro de Q1,000 con Q400 aplicados va 600 → 1000 → 1400: por encima de su
+   * propio monto original, y la siguiente boleta le cobra al cliente una
+   * diferencia que nunca debió.
+   *
+   * Los llamadores toman el advisory lock del crédito, así que en teoría no
+   * pueden solaparse. Esto es defensa en profundidad, y no es teórica: ya pasó
+   * que una ruta nueva (`falsePayment`) empezara a llamar acá sin tomarlo.
+   * Depender de que todos los llamadores presentes y futuros se acuerden del
+   * candado es exactamente la clase de invariante que se rompe sola.
+   */
+  const reclamos = await ejecutor
+    .select({
+      id: rubros_pagos.id,
+      rubro_id: rubros_pagos.rubro_id,
+      monto: rubros_pagos.monto,
+      monto_aplicado: rubros_pagos.monto_aplicado,
+      aplicado: rubros_pagos.aplicado,
+    })
+    .from(rubros_pagos)
+    .where(eq(rubros_pagos.pago_id, pago_id))
+    .for("update");
+
+  const revertidos: { rubro_id: number; devuelto: string }[] = [];
+
+  for (const reclamo of reclamos) {
+    if (reclamo.aplicado) {
+      const [rubro] = await ejecutor
+        .select()
+        .from(rubros)
+        .where(eq(rubros.rubro_id, reclamo.rubro_id))
+        .limit(1)
+        .for("update");
+
+      if (rubro) {
+        const saldoNuevo = aMonto(
+          saldoTrasReversaDeReclamo({
+            saldoPendiente: rubro.saldo_pendiente,
+            // Lo que REALMENTE se descontó, no lo apartado: son el mismo número
+            // hoy, pero el que manda es el que movió el saldo.
+            montoAplicado: reclamo.monto_aplicado ?? reclamo.monto ?? 0,
+            anulado: rubro.anulado,
+          })
+        );
+        const completado = rubroCompletado(saldoNuevo);
+
+        await ejecutor
+          .update(rubros)
+          .set({
+            saldo_pendiente: saldoNuevo,
+            completado,
+            activo: !completado,
+            updated_at: SELLO_DE_TIEMPO,
+          })
+          .where(eq(rubros.rubro_id, rubro.rubro_id));
+
+        await ejecutor.insert(rubros_historial).values({
+          rubro_id: rubro.rubro_id,
+          tipo_evento: "reversa",
+          saldo_anterior: aMonto(rubro.saldo_pendiente),
+          saldo_nuevo: saldoNuevo,
+          pago_id,
+          origen: "reversa",
+          motivo: rubro.anulado
+            ? "Reversa de un pago sobre un rubro ANULADO: el saldo no se restituye para no revivir un cargo cancelado."
+            : null,
+        });
+
+        revertidos.push({
+          rubro_id: rubro.rubro_id,
+          devuelto: new Big(saldoNuevo)
+            .minus(new Big(rubro.saldo_pendiente))
+            .toFixed(2),
+        });
+      }
+    }
+
+    // Se borra en los dos casos: es el guard de doble reversa.
+    await ejecutor.delete(rubros_pagos).where(eq(rubros_pagos.id, reclamo.id));
+  }
+
+  return revertidos;
+}
+
+/**
+ * DESAPLICA los rubros de un pago que vuelve de `validated` a `pending`
+ * ("Revertir Especial"), que NO es lo mismo que revertirlos.
+ *
+ * La diferencia está en qué pasa con el RECLAMO, no con el saldo:
+ *
+ *   * `revertirRubrosDelPago` devuelve el saldo y BORRA la fila de
+ *     `rubros_pagos`, porque ahí el pago se anula: deja de existir un cobro que
+ *     reclame nada.
+ *   * acá el pago sigue vivo, sólo retrocedió de etapa. Su reserva tiene que
+ *     seguir existiendo, así que la fila se CONSERVA con `aplicado = false` y
+ *     `monto_aplicado` en null — que es exactamente el estado en el que la dejó
+ *     el registro de la boleta.
+ *
+ * Conservarla no es cosmético: es lo que devuelve el pago a un estado
+ * `pending` legítimo. Sin la fila, `cobrarRubrosParaBoleta` de la siguiente
+ * boleta no netearía nada contra este pago y apartaría un saldo ya
+ * comprometido, y sobre todo el rubro perdía su congelamiento —
+ * `puedeTocarRubroConReclamosVivos` no veía reclamos y dejaba editarlo con 200,
+ * cuando en un pago pendiente normal eso se rechaza con 409.
+ *
+ * Sólo toca los reclamos `aplicado = true`: los que ya estaban apartados sin
+ * aplicar no movieron saldo, así que no hay nada que devolver y la fila ya está
+ * en el estado destino. Eso también lo vuelve idempotente, igual que el borrado
+ * es el guard de doble reversa: una segunda pasada no encuentra aplicados.
+ *
+ * Corre DENTRO de la transacción de la reversión a pendiente: si algo de lo que
+ * sigue falla, el rubro tampoco queda desaplicado.
+ */
+export async function desaplicarRubrosDelPago(
+  pago_id: number,
+  ejecutor: Ejecutor
+): Promise<{ rubro_id: number; devuelto: string }[]> {
+  /**
+   * Igual que en `revertirRubrosDelPago`: los reclamos se toman con `FOR UPDATE`.
+   *
+   * Es la misma forma —leer y después escribir— con el mismo desenlace si dos
+   * llamadores llegaran a solaparse: un doble descuento acá, una doble
+   * restitución allá. Hoy todos toman el advisory lock del crédito, pero esa es
+   * justo la invariante que ya se rompió una vez cuando una ruta nueva empezó a
+   * llamar sin tomarlo.
+   */
+  const reclamos = await ejecutor
+    .select({
+      id: rubros_pagos.id,
+      rubro_id: rubros_pagos.rubro_id,
+      monto: rubros_pagos.monto,
+      monto_aplicado: rubros_pagos.monto_aplicado,
+    })
+    .from(rubros_pagos)
+    .where(
+      and(eq(rubros_pagos.pago_id, pago_id), eq(rubros_pagos.aplicado, true))
+    )
+    .for("update");
+
+  const desaplicados: { rubro_id: number; devuelto: string }[] = [];
+
+  for (const reclamo of reclamos) {
+    const [rubro] = await ejecutor
+      .select()
+      .from(rubros)
+      .where(eq(rubros.rubro_id, reclamo.rubro_id))
+      .limit(1)
+      .for("update");
+
+    if (rubro) {
+      // MISMA aritmética que la reversa —y el mismo helper puro—, incluida la
+      // regla de que un rubro ANULADO no resucita. Acá esa regla deja el
+      // conflicto a la vista a propósito: el reclamo sobrevive, así que un
+      // rubro anulado queda en saldo 0 con un reclamo vivo encima y "Revalidar
+      // Pago" lo rechaza con el 409 de `puedeAplicarReclamo`, que dice
+      // literalmente que el rubro se anuló con la boleta ya registrada. La
+      // salida correcta ahí es revertir el pago, no revalidarlo. Restituir el
+      // saldo sería volver a cobrarle al cliente un cargo que un admin canceló
+      // —y, como el saldo apaga `completado`, dejar dos cobros vivos del mismo
+      // tipo: el cancelado y el correcto que se creó después de la anulación.
+      // (Antes de la migración 0038 eso además chocaba contra el índice único y
+      // reventaba la revalidación entera; hoy no revienta nada, y por eso el
+      // `anulado` de `saldoTrasReversaDeReclamo` importa MÁS que antes: es lo
+      // único que impide resucitar el cargo cancelado.)
+      const saldoNuevo = aMonto(
+        saldoTrasReversaDeReclamo({
+          saldoPendiente: rubro.saldo_pendiente,
+          // Lo que REALMENTE se descontó, no lo apartado: son el mismo número
+          // hoy, pero el que manda es el que movió el saldo.
+          montoAplicado: reclamo.monto_aplicado ?? reclamo.monto ?? 0,
+          anulado: rubro.anulado,
+        })
+      );
+      const completado = rubroCompletado(saldoNuevo);
+
+      await ejecutor
+        .update(rubros)
+        .set({
+          saldo_pendiente: saldoNuevo,
+          completado,
+          // `activo` se DERIVA del saldo, igual que en el resto del módulo: el
+          // rubro vuelve a estar vivo porque volvió a tener saldo.
+          activo: !completado,
+          updated_at: SELLO_DE_TIEMPO,
+        })
+        .where(eq(rubros.rubro_id, rubro.rubro_id));
+
+      // Evento `reversa` y no uno propio: el enum `rubro_evento` de la base no
+      // tiene un valor para esto y agregarlo pide una migración, que es mucho
+      // más riesgo del que justifica la etiqueta. El motivo dice cuál de las
+      // dos reversas fue, que es lo que hace falta para leer el historial.
+      await ejecutor.insert(rubros_historial).values({
+        rubro_id: rubro.rubro_id,
+        tipo_evento: "reversa",
+        saldo_anterior: aMonto(rubro.saldo_pendiente),
+        saldo_nuevo: saldoNuevo,
+        pago_id,
+        origen: "reversa",
+        motivo: rubro.anulado
+          ? "El pago volvió a PENDIENTE (Revertir Especial) sobre un rubro ANULADO: el saldo no se restituye para no revivir un cargo cancelado."
+          : "El pago volvió a PENDIENTE (Revertir Especial): el saldo se devuelve y la boleta conserva su reserva sobre el rubro.",
+      });
+
+      desaplicados.push({
+        rubro_id: rubro.rubro_id,
+        devuelto: new Big(saldoNuevo)
+          .minus(new Big(rubro.saldo_pendiente))
+          .toFixed(2),
+      });
+    }
+
+    // El reclamo NO se borra: vuelve al estado en que lo dejó el registro de la
+    // boleta. `monto_aplicado` a null y no a 0 por la misma razón que en el
+    // registro: un 0 sería indistinguible de "se aplicó y no descontó nada".
+    await ejecutor
+      .update(rubros_pagos)
+      .set({ aplicado: false, monto_aplicado: null })
+      .where(eq(rubros_pagos.id, reclamo.id));
+  }
+
+  return desaplicados;
+}

@@ -141,6 +141,11 @@ mock.module("@/lib/lead-opportunity", () => ({
 	getOpenOpportunityBySource: async () => openOpportunity,
 }));
 
+// El mock reemplaza al módulo entero para TODO el suite, no sólo para este
+// archivo: lo que no se declare acá deja de existir para cualquier otra prueba
+// que cargue `lib/storage`, y esa prueba revienta al importarlo con un
+// "Export named ... not found" que no dice de dónde viene. Por eso están
+// también las funciones que este archivo no usa.
 mock.module("@/lib/storage", () => ({
 	generateUniqueFilename: (filename: string) => filename,
 	uploadFileFromUrlToR2: async () => ({
@@ -148,6 +153,15 @@ mock.module("@/lib/storage", () => ({
 		size: 0,
 		mimeType: "application/pdf",
 	}),
+	buildUploadPrefix: () => "mock-prefix",
+	deleteFileFromR2: async () => {},
+	getFileUrl: async () => "https://r2.mock/archivo",
+	getFileUrlWithBucketInKey: async () => "https://r2.mock/archivo",
+	verifyUploadedDocumentInR2: async ({ key }: { key: string }) => ({ key }),
+	generatePresignedUploadUrl: async () => ({ url: "https://r2.mock/subida" }),
+	getR2ObjectMetadata: async () => ({ size: 0, contentType: "application/pdf" }),
+	assertUploadKeyMatchesPrefix: () => {},
+	resolveDocumentMimeType: async () => "application/pdf",
 }));
 
 mock.module("../utils/cui-validation", () => ({

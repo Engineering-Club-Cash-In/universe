@@ -6,6 +6,7 @@
 		{ "key": "AUTH_GOOGLE_URL", "runtime": true },
 		{ "key": "BUCKET_REPORTS", "runtime": true },
 		{ "key": "BUCKET_REPORTS_URL", "runtime": true },
+		{ "key": "CARTERA_RELAY_SECRET", "runtime": true },
 
 		{ "key": "CREACION_IMAGEN_PASSWORD", "runtime": true },
 		{ "key": "CREACION_IMAGEN_REQUESTOR", "runtime": true },

@@ -252,6 +252,46 @@ export const PERMISSIONS = {
 		role === ROLES.ANALYST ||
 		role === ROLES.ACCOUNTING,
 
+	/**
+	 * Ver los contratos de un inversionista y sus enlaces de firma.
+	 *
+	 * Los emite jurídico, pero quien los usa es inversiones: son los que le pasan
+	 * los enlaces al cliente y miran si ya firmó. Ventas no entra: sus contratos
+	 * son los de la oportunidad.
+	 */
+	canViewInvestorContracts: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.INVESTMENT_ADVISOR_JR ||
+		role === ROLES.INVESTMENT_ADVISOR_SR ||
+		role === ROLES.INVESTMENT_MANAGER,
+
+	/**
+	 * Regenerar los enlaces de firma de un contrato de inversionista.
+	 *
+	 * Más restringido que verlos: emite otro documento en WeeTrust y deja
+	 * muertos los enlaces que el inversionista ya tenía. Los asesores ven y
+	 * copian; regenerar es de la gerencia de inversiones o de jurídico.
+	 */
+	canRegenerateInvestorContractLinks: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.INVESTMENT_MANAGER,
+
+	/**
+	 * Resolver una verificación facial que WeeTrust no validó: pedirle a la
+	 * persona que se identifique de nuevo, u omitirla para que el contrato cierre.
+	 *
+	 * Es de inversiones, que le da seguimiento a la firma con el inversionista.
+	 * Jurídico no: entrega los contratos —los emite, reemplaza y anula—, pero el
+	 * seguimiento ya no es suyo.
+	 */
+	canResolveInvestorIdentity: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.INVESTMENT_ADVISOR_JR ||
+		role === ROLES.INVESTMENT_ADVISOR_SR ||
+		role === ROLES.INVESTMENT_MANAGER,
+
 	canCreateLegalContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 
@@ -265,6 +305,23 @@ export const PERMISSIONS = {
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 
 	// Confirm contracts have been signed (85% → 90%)
+	// Regenerar los enlaces de firma crea otro documento en WeeTrust y deja sin
+	// efecto los enlaces anteriores. Es de análisis, no de quien sólo los mira.
+	canRegenerateContractLinks: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST,
+
+	// Reenviar enlaces (WhatsApp o correo de WeeTrust) le escribe al cliente.
+	// Lo hacen análisis, después de regenerar, y jurídico, después de reemplazar.
+	canResendContractLinks: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
+
+	// Anular un contrato lo descarta sin reemplazarlo: la oportunidad se queda
+	// sin ese documento hasta que se genere o suba otro. Lo deciden los dos que
+	// trabajan la papelería —jurídico en 80% y análisis en 85%—, no quien sólo
+	// la mira.
+	canAnnulContracts: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST || role === ROLES.JURIDICO,
+
 	canConfirmContractsSigning: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||

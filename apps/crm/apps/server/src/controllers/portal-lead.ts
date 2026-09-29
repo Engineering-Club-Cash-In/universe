@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -628,7 +628,18 @@ export async function getLeadLegalContracts(c: Context) {
 				opportunities,
 				eq(generatedLegalContracts.opportunityId, opportunities.id),
 			)
-			.where(eq(generatedLegalContracts.leadId, lead.id))
+			.where(
+				and(
+					eq(generatedLegalContracts.leadId, lead.id),
+					// Un contrato anulado, o reclamado por un reemplazo que todavía no
+					// terminó de anularlo, no es el vigente: si se muestra, el cliente
+					// puede firmar un documento descartado. Anulado incluye los que se
+					// eliminaron desde jurídico: si su borrado en WeeTrust falló, la
+					// fila conserva enlaces que todavía firman.
+					ne(generatedLegalContracts.status, "cancelled"),
+					isNull(generatedLegalContracts.replacedByContractId),
+				),
+			)
 			.orderBy(generatedLegalContracts.generatedAt);
 
 		// Generar URLs firmadas temporales para los PDFs

@@ -84,6 +84,15 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
     ],
   },
 
+  // Las cartas unidas: las firma el cliente, como cada carta. Nunca pasa por
+  // DocuSeal (va sólo a WeeTrust), pero el mapa exige todos los tipos.
+  [ContractType.PAQUETE_CARTAS]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
   [ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO]: {
     signerCount: 1,
     signers: [

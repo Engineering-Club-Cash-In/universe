@@ -19,6 +19,13 @@ export enum ContractType {
   SOLICITUD_COMPRA_VEHICULO = 'solicitud_compra_vehiculo_tercero',
   CARTA_ACEPTACION_INSTALACION_GPS = 'carta_aceptacion_instalacion_gps',
 
+  /**
+   * Las cartas de una venta unidas en un solo documento, con un solo enlace
+   * por firmante. No tiene template: se arma con las cartas que se pidan
+   * (ver `services/paqueteCartas.ts`).
+   */
+  PAQUETE_CARTAS = 'paquete_cartas',
+
   // ===== INVERSIONES =====
   ACUERDO_INVERSION_CASH_IN = 'acuerdo_inversion_cash_in',
   CARTA_CONFIRMACION_INVERSION_INICIAL = 'carta_confirmacion_inversion_inicial',
@@ -50,6 +57,39 @@ export enum ContractType {
   CARTA_RDBE_RICHARD = 'carta_rdbe_richard'
   // Agrega más tipos aquí según sea necesario
 }
+
+/**
+ * Los contratos de **inversiones**, individual y sociedad.
+ *
+ * Firman distinto que los de ventas: al inversionista se le pide selfie con
+ * prueba de vida además del documento, porque está entregando dinero y la
+ * relación se arma entera por correo, sin nadie de la empresa enfrente.
+ *
+ * Se declara a mano y no por prefijo del identificador porque los nombres no
+ * comparten uno: hay `acuerdo_`, `carta_`, `cesion_`, `contrato_` y `anexos_`.
+ */
+export const CONTRATOS_DE_INVERSION: ReadonlySet<ContractType> = new Set([
+  ContractType.ACUERDO_INVERSION_CASH_IN,
+  ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL,
+  ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION,
+  ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA,
+  ContractType.CARTA_INCREMENTO_INVERSION,
+  ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO,
+  ContractType.CESION_CREDITOS,
+  ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL,
+  ContractType.DESIGNACION_BENEFICIARIO,
+  ContractType.CONTRATO_PARTICIPACION_ADMINISTRACION_CARTERA,
+  ContractType.ANEXOS_CONFIRMACION_PARTICIPACION_BENEFICIARIO,
+  ContractType.ACUERDO_INVERSION_CASH_IN_SOCIEDAD,
+  ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL_SOCIEDAD,
+  ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION_SOCIEDAD,
+  ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA_SOCIEDAD,
+  ContractType.CARTA_INCREMENTO_INVERSION_SOCIEDAD,
+  ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO_SOCIEDAD,
+  ContractType.CESION_CREDITOS_SOCIEDAD,
+  ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL_SOCIEDAD,
+  ContractType.DESIGNACION_BENEFICIARIO_SOCIEDAD,
+]);
 
 /**
  * Interfaz base para todos los contratos
@@ -741,12 +781,53 @@ export interface ContractGenerationResponse {
   docx_url?: string;
   pdf_url?: string;
   signing_links?: string[];
+  /**
+   * Cómo se firma este contrato. Los `fisica` nunca llevan `signing_links`:
+   * no es una falla, es que se firman en papel.
+   */
+  signatureMode?: SignatureMode;
   /** Proveedor de firma electrónica usado (weetrust | documenso) */
   signingProvider?: 'weetrust' | 'documenso';
+  /**
+   * ID del documento en WeeTrust. Hace falta para consultar el estado de firma
+   * y para reintentar la verificación de un firmante desde el CRM.
+   */
+  documentID?: string;
+  /**
+   * Enlace de observador de WeeTrust: muestra el documento y cómo va la firma
+   * sin dejar firmar. Sólo existe si se mandaron observadores.
+   */
+  observerUrl?: string;
+  /** Firmantes efectivamente enviados, con su rol y su link. */
+  signatories?: Array<{
+    role: SignerRole;
+    email: string;
+    name: string;
+    signatoryID?: string;
+    signingUrl?: string;
+  }>;
+  /**
+   * Qué cartas trae un `paquete_cartas`, en el orden en que aparecen en el PDF.
+   * Sólo lo llevan los paquetes.
+   */
+  cartas?: ComposicionDelPaquete;
   message: string;
   error?: string;
   generatedAt?: string;
 }
+
+/**
+ * Qué cartas trae un paquete y cuántas páginas ocupa cada una, en orden.
+ *
+ * Es lo que permite volver a ubicar las firmas de un paquete ya armado: cada
+ * carta tiene su propio patrón de línea de firma, así que hay que saber en qué
+ * páginas está cada una para buscarlo donde corresponde.
+ */
+export type ComposicionDelPaquete = Array<{
+  contractType: ContractType;
+  label: string;
+  paginas: number;
+}>;
 
 /**
  * Opciones de configuración para el generador de contratos
@@ -775,6 +856,16 @@ export interface ContractGeneratorOptions {
 
   /** Prefijo para nombres de archivos */
   filenamePrefix?: string;
+
+  /**
+   * Nombre con el que el documento se ve en WeeTrust y en el correo de firma.
+   *
+   * Va aparte del nombre de archivo porque son dos cosas distintas: el de
+   * archivo lleva timestamp para no pisarse en R2, y ese timestamp no tiene
+   * por qué salir en lo que lee el cliente. Si no se manda, el generador lo
+   * arma con el nombre de quien firma y la descripción del documento.
+   */
+  documentName?: string;
 }
 
 /**
@@ -814,6 +905,78 @@ export interface DeudorAdicional {
 }
 
 /**
+ * Rol de un firmante dentro de un contrato.
+ *
+ * El rol es lo que decide en qué línea de firma del PDF cae cada persona. Antes
+ * los firmantes viajaban como una lista plana de emails y se asignaban por
+ * índice, lo que cruzaba los links cuando el template no ponía al titular
+ * primero (ver `signaturePatterns.ts`).
+ */
+export enum SignerRole {
+  /** Deudor principal de la oportunidad. */
+  TITULAR = 'TITULAR',
+  /** Cofirmante / codeudor. Puede haber varios. */
+  COFIRMANTE = 'COFIRMANTE',
+  /** Representante legal de la entidad. Su nombre viene impreso en el template. */
+  REP_LEGAL = 'REP_LEGAL',
+  /**
+   * Representante legal de la **segunda** entidad.
+   *
+   * El contrato de servicios de inversiones lo firman dos sociedades (CUBE y
+   * RDBE) además del inversionista, cada una con su línea y su nombre impreso
+   * en el template. Con un solo rol de representante las dos líneas le tocaban
+   * a la misma persona, y WeeTrust junta a los firmantes por correo: una de las
+   * dos firmas desaparecía del documento.
+   */
+  REP_LEGAL_RDBE = 'REP_LEGAL_RDBE',
+  /** Vendedor del vehículo. */
+  VENDEDOR = 'VENDEDOR',
+}
+
+/**
+ * Cómo se firma un contrato.
+ *
+ * - `electronica`: se sube a WeeTrust y cada firmante recibe su link.
+ * - `fisica`: se imprime y se firma en papel. No se manda a ningún proveedor
+ *   de firma electrónica. Hoy el único caso es la declaración de vendedor: del
+ *   vendedor tenemos nombre y DPI, pero no correo, así que no hay a dónde
+ *   mandarle un link.
+ */
+export type SignatureMode = 'electronica' | 'fisica';
+
+/**
+ * Tipo de verificación de identidad que WeeTrust le exige al firmante.
+ * - `id` / `ocr`: validación del documento de identidad (DPI).
+ * - `face`: biometría facial con prueba de vida.
+ */
+export type IdentificationMode = 'id' | 'face' | 'ocr' | 'face_login';
+
+/**
+ * Un firmante concreto de un contrato.
+ */
+export interface ContractSigner {
+  role: SignerRole;
+  email: string;
+  /** Nombre real de la persona. WeeTrust exige entre 4 y 100 caracteres. */
+  name: string;
+  /** DPI, cuando lo conocemos. Se usa para verificar el calce con el PDF. */
+  dpi?: string;
+  /** Número de WhatsApp, en formato internacional sin `+`. */
+  phone?: string;
+  /**
+   * Qué verificación de identidad pedirle, cuando la decide quien manda el
+   * contrato. `none` = sólo firma.
+   *
+   * **Sólo cuenta en los contratos de inversiones** (`CONTRATOS_DE_INVERSION`):
+   * el CRM la decide por compra —selfie y DPI en la primera del inversionista,
+   * sólo firma en las siguientes— en `lib/identidad-inversionista.ts`. En ventas
+   * se ignora y manda `identificacionDe` (WeeTrustService). Sin el campo, cada
+   * contrato pide lo de siempre.
+   */
+  identification?: IdentificationMode | 'none';
+}
+
+/**
  * Request para generación de contrato
  */
 export interface GenerateContractRequest {
@@ -823,13 +986,30 @@ export interface GenerateContractRequest {
   /** Datos específicos del contrato */
   data: Record<string, any>;
 
-  /** Emails de los firmantes (número depende del tipo de contrato) */
+  /**
+   * Firmantes con su rol. Es la forma preferida: permite ubicar a cada persona
+   * en la línea de firma que le toca según el layout del template.
+   */
+  signers?: ContractSigner[];
+
+  /**
+   * Emails de los firmantes, en orden posicional.
+   * @deprecated Usar `signers`. Se mantiene para los llamadores que todavía no
+   * mandan roles; se interpreta como `[TITULAR, COFIRMANTE...]`.
+   */
   emails?: string[];
+
+  /**
+   * Observadores: reciben copia del flujo de firma en WeeTrust pero no firman.
+   */
+  observers?: string[];
 
   /** Opciones adicionales */
   options?: {
     generatePdf?: boolean;
     filenamePrefix?: string;
+    /** Ver `ContractGenerationOptions.documentName`. */
+    documentName?: string;
     gender?: "male" | "female";
     /** Si hay múltiples deudores, usar template plural */
     isPlural?: boolean;

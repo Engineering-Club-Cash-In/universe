@@ -2,7 +2,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
 	Check,
 	Clock,
-	Copy,
 	ExternalLink,
 	Loader2,
 	Phone,
@@ -123,7 +122,9 @@ interface WhatsappLogRecipient {
 	recipientName: string;
 	phone: string | null;
 	message: string | null;
-	contracts: { contractName: string; link: string | null; pdfLink?: string | null }[] | null;
+	contracts:
+		| { contractName: string; link: string | null; pdfLink?: string | null }[]
+		| null;
 	status: "sent" | "pending" | "failed";
 	reason: string | null;
 	sentAt: string | null;
@@ -151,7 +152,7 @@ function WhatsappLogModal({
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent
-				className="max-h-[85vh] w-[90vw] sm:max-w-[900px] overflow-y-auto"
+				className="max-h-[85vh] w-[90vw] overflow-y-auto sm:max-w-[900px]"
 				onClick={(e) => e.stopPropagation()}
 			>
 				<DialogHeader>
@@ -160,17 +161,13 @@ function WhatsappLogModal({
 						Envío de contratos por WhatsApp
 					</DialogTitle>
 					<DialogDescription>
-						Gestiona el envío de links de contratos a cada
-						destinatario.
+						Gestiona el envío de links de contratos a cada destinatario.
 					</DialogDescription>
 				</DialogHeader>
 
 				<div className="space-y-4">
 					{log.recipients.map((recipient) => (
-						<RecipientCard
-							key={recipient.id}
-							recipient={recipient}
-						/>
+						<RecipientCard key={recipient.id} recipient={recipient} />
 					))}
 				</div>
 			</DialogContent>
@@ -180,11 +177,7 @@ function WhatsappLogModal({
 
 type Recipient = WhatsappLog["recipients"][number];
 
-function RecipientCard({
-	recipient,
-}: {
-	recipient: Recipient;
-}) {
+function RecipientCard({ recipient }: { recipient: Recipient }) {
 	const [editing, setEditing] = useState(false);
 	const [phone, setPhone] = useState(recipient.phone ?? "");
 
@@ -194,45 +187,24 @@ function RecipientCard({
 		pdfLink?: string | null;
 	}[];
 
-	const [contractLinks, setContractLinks] = useState<
-		Record<number, string>
-	>(() => {
-		const initial: Record<number, string> = {};
-		for (let i = 0; i < recipientContracts.length; i++) {
-			initial[i] = recipientContracts[i].link ?? "";
-		}
-		return initial;
-	});
-
-	const currentContracts = recipientContracts.map((c, i) => ({
-		contractName: c.contractName,
-		link: contractLinks[i]?.trim() || null,
-	}));
-
-	const allLinksComplete = currentContracts.every((c) => c.link);
-
-	// Generar preview del mensaje
-	const previewMessage = allLinksComplete
-		? `Hola ${recipient.recipientName}, tus contratos están listos para firmar. Por favor ingresa a los siguientes enlaces:\n\n${currentContracts.map((c) => `📄 ${c.contractName}:\n${c.link}`).join("\n\n")}\n\nSi tienes alguna duda, no dudes en contactarnos.`
-		: null;
+	// Los enlaces ya no se pegan acá ni se muestran: el servidor resuelve los que
+	// le tocan a esta persona hoy y arma el mensaje. Pegarlos a mano permitía
+	// mandarle a alguien el enlace de otro firmante, que lo dejaba firmando en su
+	// nombre. Tampoco hay vista previa: sin los enlaces sería un mensaje que no
+	// sirve para copiar y mandar por fuera.
 
 	const updateMutation = useMutation({
 		mutationFn: async () => {
 			return await client.updateWhatsappLog({
 				recipientId: recipient.id,
 				phone,
-				contracts: currentContracts,
 			});
 		},
 		onSuccess: (data) => {
 			if (data.status === "sent") {
-				toast.success(
-					`Mensaje enviado a ${recipient.recipientName}`,
-				);
+				toast.success(`Mensaje enviado a ${recipient.recipientName}`);
 			} else {
-				toast.error(
-					`Error al enviar: ${data.reason || "Error desconocido"}`,
-				);
+				toast.error(`Error al enviar: ${data.reason || "Error desconocido"}`);
 			}
 			setEditing(false);
 			queryClient.invalidateQueries({
@@ -249,7 +221,7 @@ function RecipientCard({
 	const isSent = recipient.status === "sent";
 
 	return (
-		<div className="rounded-lg border p-4 space-y-3">
+		<div className="space-y-3 rounded-lg border p-4">
 			<div className="flex items-center justify-between">
 				<div className="flex items-center gap-2">
 					{isLead ? (
@@ -257,9 +229,7 @@ function RecipientCard({
 					) : (
 						<Users className="h-4 w-4 text-purple-600" />
 					)}
-					<span className="font-medium text-sm">
-						{recipient.recipientName}
-					</span>
+					<span className="font-medium text-sm">{recipient.recipientName}</span>
 					<Badge
 						variant="outline"
 						className={`text-xs ${isLead ? "border-blue-200 text-blue-600" : "border-purple-200 text-purple-600"}`}
@@ -292,10 +262,7 @@ function RecipientCard({
 					{recipientContracts.length > 0 && (
 						<div className="space-y-1 pt-1">
 							{recipientContracts.map((c, i) => (
-								<p
-									key={i}
-									className="text-muted-foreground text-xs truncate"
-								>
+								<p key={i} className="truncate text-muted-foreground text-xs">
 									📄 {c.contractName}
 								</p>
 							))}
@@ -314,71 +281,31 @@ function RecipientCard({
 					</div>
 
 					<div className="space-y-2">
-						<Label className="text-xs">
-							Links de firma por contrato
-						</Label>
-						{recipientContracts.map((c, i) => (
-							<div key={i} className="space-y-1">
-								<div className="flex items-center gap-2">
-									<span className="text-muted-foreground text-xs">
-										📄 {c.contractName}
-									</span>
-									{c.pdfLink && (
-										<a
-											href={c.pdfLink}
-											target="_blank"
-											rel="noopener noreferrer"
-											className="inline-flex items-center gap-1 text-blue-600 text-xs hover:underline"
-											onClick={(e) =>
-												e.stopPropagation()
-											}
-										>
-											<ExternalLink className="h-3 w-3" />
-											PDF
-										</a>
-									)}
-								</div>
-								<Input
-									value={contractLinks[i] ?? ""}
-									onChange={(e) =>
-										setContractLinks((prev) => ({
-											...prev,
-											[i]: e.target.value,
-										}))
-									}
-									placeholder="Pegar link de firma aquí..."
-									className={`text-xs ${contractLinks[i]?.trim() ? "border-green-300" : "border-amber-300"}`}
-								/>
+						<Label className="text-xs">Contratos</Label>
+						{recipientContracts.map((c) => (
+							<div
+								key={c.contractName}
+								className="flex items-center gap-2 text-muted-foreground text-xs"
+							>
+								<span className="truncate">📄 {c.contractName}</span>
+								{c.pdfLink && (
+									<a
+										href={c.pdfLink}
+										target="_blank"
+										rel="noopener noreferrer"
+										className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+										onClick={(e) => e.stopPropagation()}
+									>
+										<ExternalLink className="h-3 w-3" />
+										PDF
+									</a>
+								)}
 							</div>
 						))}
+						<p className="text-muted-foreground text-xs italic">
+							Se mandan los enlaces de firma vigentes de esta persona.
+						</p>
 					</div>
-
-					{previewMessage && (
-						<div className="space-y-1">
-							<Label className="text-xs">
-								Vista previa del mensaje
-							</Label>
-							<div className="rounded-md border bg-muted/30 p-3 text-xs whitespace-pre-wrap max-h-40 overflow-y-auto">
-								{previewMessage}
-							</div>
-							<Button
-								size="sm"
-								variant="outline"
-								className="w-full"
-								onClick={() => {
-									navigator.clipboard.writeText(
-										previewMessage,
-									);
-									toast.success(
-										"Mensaje copiado al portapapeles",
-									);
-								}}
-							>
-								<Copy className="mr-1 h-3 w-3" />
-								Copiar mensaje
-							</Button>
-						</div>
-					)}
 
 					<div className="flex gap-2">
 						<Button
@@ -392,11 +319,7 @@ function RecipientCard({
 						<Button
 							size="sm"
 							onClick={() => updateMutation.mutate()}
-							disabled={
-								updateMutation.isPending ||
-								!phone.trim() ||
-								!allLinksComplete
-							}
+							disabled={updateMutation.isPending || !phone.trim()}
 							className="flex-1"
 						>
 							{updateMutation.isPending ? (

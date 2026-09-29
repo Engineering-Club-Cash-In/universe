@@ -1,6 +1,7 @@
 import { relations } from "drizzle-orm";
 import {
 	index,
+	integer,
 	pgTable,
 	text,
 	timestamp,
@@ -9,6 +10,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
 import { companies, opportunities } from "./crm";
+import { opportunityDocuments } from "./documents";
 import { vehicleVendors } from "./vehicles";
 
 // Estado exclusivo de autenticación de una cuenta partner. La contraseña
@@ -122,3 +124,49 @@ export type PartnerAccount = typeof partnerAccounts.$inferSelect;
 export type NewPartnerAccount = typeof partnerAccounts.$inferInsert;
 export type OpportunityAgencySeller =
 	typeof opportunityAgencySellers.$inferSelect;
+
+export const ESTADOS_ENVIO_FACTURA = [
+	"pendiente",
+	"enviado",
+	"fallido",
+	"sin_destinatario",
+] as const;
+export type EstadoEnvioFactura = (typeof ESTADOS_ENVIO_FACTURA)[number];
+
+// Factura del seguro subida desde el tracker: el archivo vive en
+// opportunity_documents; aquí queda a quién se mandó y cómo terminó el envío.
+export const insuranceInvoiceSubmissions = pgTable(
+	"insurance_invoice_submissions",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		opportunityId: uuid("opportunity_id")
+			.notNull()
+			.references(() => opportunities.id, { onDelete: "cascade" }),
+		// RESTRICT: borrar la factura no puede liberar el UNIQUE por oportunidad.
+		documentId: uuid("document_id")
+			.notNull()
+			.references(() => opportunityDocuments.id, { onDelete: "restrict" }),
+		insuranceProvider: text("insurance_provider").notNull(),
+		recipients: text("recipients").array().notNull().default([]),
+		status: text("status", { enum: ESTADOS_ENVIO_FACTURA })
+			.notNull()
+			.default("pendiente"),
+		error: text("error"),
+		// Forma la llave de idempotencia de Resend (ver 0038).
+		intento: integer("intento").notNull().default(1),
+		// Correo exacto del intento, para reintentarlo idéntico.
+		correoAsunto: text("correo_asunto"),
+		correoHtml: text("correo_html"),
+		sentAt: timestamp("sent_at"),
+		submittedBy: text("submitted_by").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		unique("insurance_invoice_submissions_opportunity_id_unique").on(
+			table.opportunityId,
+		),
+	],
+);

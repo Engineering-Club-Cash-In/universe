@@ -245,14 +245,19 @@ describe("getCasoById: aislamiento por vendedor", () => {
 });
 
 describe("superficie de escritura del tracker", () => {
-	test("el router expone exactamente estas 5 procedures (si agregás una, este test te obliga a revisarla)", () => {
+	// Las de la factura del seguro sí escriben: sus reglas y aislamiento se
+	// prueban en tracker.factura-seguro.test.ts.
+	test("el router expone exactamente estas 8 procedures (si agregás una, este test te obliga a revisarla)", () => {
 		expect(Object.keys(trackerRouter).sort()).toEqual(
 			[
 				"changePartnerPassword",
+				"confirmFacturaSeguro",
 				"getCasoById",
 				"getCasos",
+				"getFacturaSeguroUploadUrl",
 				"getPartnerAgencies",
 				"getPartnerPasswordStatus",
+				"reenviarFacturaSeguro",
 			].sort(),
 		);
 	});

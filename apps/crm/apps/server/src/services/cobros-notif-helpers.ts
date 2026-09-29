@@ -12,9 +12,10 @@
  *    mapeo asesor→supervisor; hoy son uno o dos).
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { casosCobros } from "../db/schema/cobros";
 import type { NewNotification } from "../db/schema/notifications";
 import { carteraBackClient } from "./cartera-back-client";
 
@@ -32,7 +33,9 @@ export type CobrosNotifTipo =
 	| "inmovilizacion_pendiente_aprobacion"
 	| "inmovilizacion_resuelta"
 	| "inmovilizacion_llamar_cliente"
-	| "recuperacion_vehiculo";
+	| "recuperacion_vehiculo"
+	| "b3_llamada_supervisor"
+	| "b3_llamada_vencida";
 
 /**
  * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando el correo de cash-in del
@@ -135,16 +138,23 @@ export function filasNotificacionCobros(params: {
 	 * haga su trabajo en vez de reventar.
 	 */
 	dedupKey?: string;
+	/** `type` de la notificación. Default `reminder`; las tareas usan `action_required`. */
+	type?: "reminder" | "action_required";
+	/** Plazo de la tarea (CB-035). Se omite en los avisos que no tienen vencimiento. */
+	fechaVencimiento?: Date;
 }): NewNotification[] {
 	const base = {
 		titulo: params.titulo,
-		type: "reminder" as const,
+		type: params.type ?? ("reminder" as const),
 		status: "pending" as const,
 		cobrosTipo: params.cobrosTipo,
 		relatedEntityType: "collection_case" as const,
 		relatedEntityId: params.casoId,
 		redirectPage: "cobros_detail" as const,
 		...(params.dedupKey ? { cobrosDedupKey: params.dedupKey } : {}),
+		...(params.fechaVencimiento
+			? { fechaVencimiento: params.fechaVencimiento }
+			: {}),
 	};
 
 	const filas: NewNotification[] = [];
@@ -170,4 +180,24 @@ export function filasNotificacionCobros(params: {
 		});
 	}
 	return filas;
+}
+
+/** Mapa `numero_credito_sifco → caso.id` (solo casos activos). */
+export async function mapearCasosPorSifco(
+	sifcos: string[],
+): Promise<Map<string, string>> {
+	const unicos = [...new Set(sifcos.filter(Boolean))];
+	if (unicos.length === 0) return new Map();
+	const rows = await db
+		.select({ id: casosCobros.id, sifco: casosCobros.numeroCreditoSifco })
+		.from(casosCobros)
+		.where(
+			and(
+				eq(casosCobros.activo, true),
+				inArray(casosCobros.numeroCreditoSifco, unicos),
+			),
+		);
+	const map = new Map<string, string>();
+	for (const r of rows) if (r.sifco) map.set(r.sifco, r.id);
+	return map;
 }

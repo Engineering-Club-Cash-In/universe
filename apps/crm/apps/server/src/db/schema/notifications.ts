@@ -116,6 +116,13 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// B4. Va al asesor de B4 que lo lleva y a los cobros_supervisor, con el
 	// motivo y los datos de la entrega. Dedup por registro (migración 0065).
 	"recuperacion_vehiculo",
+	// CB-035: un crédito ingresó a B3 (Rescate) — tarea de llamada para los
+	// cobros_supervisor, con vencimiento a los 3 días hábiles del ingreso
+	// (`fecha_vencimiento`). Se cierra al registrar una llamada en el caso.
+	"b3_llamada_supervisor",
+	// CB-035: la tarea b3_llamada_supervisor venció sin que nadie llamara. Va a
+	// los cobros_supervisor y al asesor dueño del crédito. Dedup por episodio.
+	"b3_llamada_vencida",
 ]);
 
 // Notifications table
@@ -200,6 +207,10 @@ export const notifications = pgTable(
 			(): AnyPgColumn => notifications.id,
 			{ onDelete: "set null" },
 		),
+
+		// CB-035: vencimiento de la tarea (hoy solo `b3_llamada_supervisor`). Null
+		// para el resto de notificaciones, que no tienen plazo propio.
+		fechaVencimiento: timestamp("fecha_vencimiento"),
 
 		// Timestamps de estado
 		readAt: timestamp("read_at"),

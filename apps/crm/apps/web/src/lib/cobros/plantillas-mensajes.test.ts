@@ -2,15 +2,21 @@ import { describe, expect, test } from "bun:test";
 import {
 	accionUsaCuerpoNoReply,
 	anioImpuestoCirculacion,
+	CLAUSULA_INCREMENTO_DIARIO_MORA,
 	COBROS_MOTIVO_SIN_TELEFONO_ASESOR,
 	COBROS_NO_REPLY_WARNING,
 	crearUrlWhatsappManual,
 	cuerpoParaValidarNoReply,
 	FRAGMENTO_EXPECTATIVA_MORA,
+	FRAGMENTO_RITMO_INCREMENTO_MORA,
+	FRAGMENTO_TOPE_INCREMENTO_MORA,
 	fechaLimiteImpuestoCirculacion,
 	fechaLimiteImpuestoVencida,
+	hayIncrementoMora,
 	interpolar,
+	debeAnunciarCrecimientoMora,
 	mensajeAnunciaExpectativaMora,
+	mensajeAnunciaIncrementoMoraSinDato,
 	mensajeAnunciaMontoAdeudado,
 	mensajeEmailEditable,
 	mensajePlantillaEditable,
@@ -136,19 +142,46 @@ describe("plantillas web de cobros", () => {
 		expect(bienvenida?.cuerpoWhastapp).toMatch(/confirmar la recepción/i);
 	});
 
-	test("el recordatorio del día de pago usa la expectativa de mora del server", () => {
+	test("el recordatorio del día de pago anuncia la mora proporcional del server", () => {
 		const alDia = PLANTILLAS_MENSAJES.find(
 			(plantilla) => plantilla.id === "al_dia",
 		);
+		// "alrededor de": el diario es 1/30 de un cargo YA redondeado a centavos,
+		// así que 30 días de ritmo casi nunca dan el techo exacto (30 × Q3.73 =
+		// Q111.90, no Q112.00). Sin esa palabra la oración se contradice sola.
+		const oracion =
+			"se agregará un recargo por mora de alrededor de Q{expectativaMoraDiaria} por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.";
 
-		// El monto lo calcula el server (capital × 1.12%, misma fórmula que
-		// procesarMoras en cartera-back) y llega por getDetallesCreditoCarteraBack.
+		// Los dos montos los calcula el server con la misma fórmula proporcional
+		// que procesarMoras en cartera-back y llegan por
+		// getDetallesCreditoCarteraBack: lo que suma cada día y el tope de la
+		// cuota. WhatsApp lleva la oración entera en negrita (como el deck); el
+		// email, la misma oración sin asteriscos.
 		expect(alDia?.cuerpoWhastapp).toContain(
-			"se agregará un recargo por mora de Q{expectativaMora}.",
+			`🛑 *Si no realizas tu pago hoy, ${oracion}*`,
 		);
 		expect(alDia?.cuerpo).toContain(
-			"se agregará un recargo por mora de Q{expectativaMora}.",
+			`🛑 Si no realizas tu pago hoy, ${oracion}`,
 		);
+		expect(alDia?.cuerpo).not.toContain("*");
+
+		const mensaje = interpolar(alDia?.cuerpoWhastapp ?? "", {
+			clienteNombre: "MARIA LOPEZ",
+			fechaPago: "5",
+			cuotaMensual: "2,500.00",
+			placa: "",
+			marcaLineaModelo: "",
+			montoAdeudado: "",
+			cuotasAtraso: 0,
+			telefonoAsesor: "41286630",
+			nombreAsesor: "Carlos Pérez",
+			expectativaMora: "504.00",
+			expectativaMoraDiaria: "16.80",
+		});
+		expect(mensaje).toContain(
+			"recargo por mora de alrededor de Q16.80 por cada día de atraso, hasta un máximo de Q504.00 al mes.",
+		);
+		expect(mensaje).not.toContain("{expectativaMora");
 	});
 
 	test("crea links manuales de WhatsApp con el cuerpo de WhatsApp", () => {
@@ -329,8 +362,8 @@ describe("plantillas web de cobros", () => {
 		expect(alDia).toContain(FRAGMENTO_EXPECTATIVA_MORA);
 		expect(mensajeAnunciaExpectativaMora(alDia)).toBe(true);
 
-		// Interpolado sin expectativa queda "recargo por mora de Q." → sigue
-		// bloqueando…
+		// Interpolado sin montos quedan los huecos ("recargo por mora de Q por
+		// cada día…, hasta un máximo de Q al mes") → sigue bloqueando…
 		const interpolado = interpolar(alDia, {
 			clienteNombre: "MARIA LOPEZ",
 			fechaPago: "5",
@@ -342,9 +375,33 @@ describe("plantillas web de cobros", () => {
 			telefonoAsesor: "41286630",
 			nombreAsesor: "Carlos Pérez",
 			expectativaMora: "",
+			expectativaMoraDiaria: "",
 		});
-		expect(interpolado).toContain("recargo por mora de Q.");
+		expect(interpolado).toContain(
+			"recargo por mora de alrededor de Q por cada día de atraso, hasta un máximo de Q al mes.",
+		);
 		expect(mensajeAnunciaExpectativaMora(interpolado)).toBe(true);
+
+		// El modal bloquea si falta CUALQUIERA de los dos montos: el guard detecta
+		// la oración y el modal revisa los dos valores. Con uno solo el texto
+		// igual sale con un hueco.
+		expect(mensajeAnunciaExpectativaMora("Q{expectativaMoraDiaria}")).toBe(
+			true,
+		);
+		expect(mensajeAnunciaExpectativaMora("Q{expectativaMora}")).toBe(true);
+
+		// …pero NO bloquea una frase que el asesor escribió a mano y que empieza
+		// igual. El guard solo corre en créditos SIN mora calculable, que es
+		// justo donde el asesor escribe esto; con un fragmento más corto
+		// ("recargo por mora de") casaba y le bloqueaba un mensaje legítimo.
+		expect(
+			mensajeAnunciaExpectativaMora(
+				"El recargo por mora de este crédito no aplica por estar en convenio.",
+			),
+		).toBe(false);
+		expect(
+			mensajeAnunciaExpectativaMora("No se cobra recargo por mora de ningún tipo."),
+		).toBe(false);
 
 		// …pero si el asesor borra esa oración, el mensaje se puede enviar.
 		const sinOracion = interpolado
@@ -528,7 +585,10 @@ describe("plantillas web de cobros", () => {
 				montoAdeudado: "450.00",
 				cuotasAtraso: 1,
 			}),
-		).toContain("Tienes *1 cuota con atraso por un monto de Q450.00*.");
+			// Sin incrementoDiarioMora, la oración del aumento no se imprime.
+		).toContain(
+			"Tienes *1 cuota con atraso por un monto de Q450.00* al día de hoy.",
+		);
 		expect(
 			interpolar(mora60?.cuerpoWhastapp ?? "", {
 				...base,
@@ -536,7 +596,7 @@ describe("plantillas web de cobros", () => {
 				cuotasAtraso: 2,
 			}),
 		).toContain(
-			"tienes *2 cuotas en atraso, por un monto total de Q2,100.00*.",
+			"tienes *2 cuotas en atraso, por un monto total de Q2,100.00* al día de hoy.",
 		);
 	});
 
@@ -580,5 +640,365 @@ describe("plantillas web de cobros", () => {
 		});
 		expect(mensajeGyt).toContain("a través de Seguro GYT.*");
 		expect(mensajeGyt).toContain("cabina de emergencia al 1778*,");
+	});
+});
+
+// {incrementoDiarioMora} = lo que crece el crédito COMPLETO por día (1/30 por
+// cada cuota vencida bajo el techo), distinto de {expectativaMoraDiaria}, que
+// es el recargo de UNA cuota para un cliente al día.
+describe("incrementoDiarioMora en las plantillas de mora (front)", () => {
+	const porId = (id: string) => PLANTILLAS_MENSAJES.find((p) => p.id === id);
+
+	const base = {
+		clienteNombre: "MARIA LOPEZ",
+		fechaPago: "5",
+		cuotaMensual: "1,000.00",
+		placa: "P123ABC",
+		marcaLineaModelo: "Toyota Yaris 2020",
+		telefonoAsesor: "41286630",
+		nombreAsesor: "Carlos Pérez",
+		expectativaMora: "",
+	};
+
+	test("las tres plantillas traen el ritmo Y su techo, en WhatsApp y en email", () => {
+		for (const id of ["mora_30", "mora_60", "aviso_juridico"]) {
+			const plantilla = porId(id);
+			for (const cuerpo of [plantilla?.cuerpo, plantilla?.cuerpoWhastapp]) {
+				expect(cuerpo).toContain(CLAUSULA_INCREMENTO_DIARIO_MORA);
+				expect(cuerpo).toContain(FRAGMENTO_TOPE_INCREMENTO_MORA);
+				expect(cuerpo).toContain(FRAGMENTO_RITMO_INCREMENTO_MORA);
+				// El ritmo sin techo prometía un crecimiento infinito.
+				expect(cuerpo).not.toContain("por cada día que pase");
+				// Y el ritmo tampoco se promete constante: es un delta de UN día.
+				expect(cuerpo).not.toContain("por cada día de atraso");
+				expect(cuerpo).toContain("alrededor de");
+			}
+		}
+	});
+
+	test("1 cuota atrasada: saldo de hoy + cuánto sube por día", () => {
+		expect(
+			interpolar(porId("mora_30")?.cuerpoWhastapp ?? "", {
+				...base,
+				montoAdeudado: "450.00",
+				cuotasAtraso: 1,
+				incrementoDiarioMora: "3.73",
+				incrementoMaximoMensualMora: "93.33",
+			}),
+		).toContain(
+			"Tienes *1 cuota con atraso por un monto de Q450.00* al día de hoy, que sube alrededor de Q3.73 por día, y puede aumentar hasta Q93.33 más en los próximos 30 días.",
+		);
+	});
+
+	test("2-3 cuotas atrasadas: el aumento es el del crédito completo", () => {
+		expect(
+			interpolar(porId("mora_60")?.cuerpoWhastapp ?? "", {
+				...base,
+				montoAdeudado: "2,100.00",
+				cuotasAtraso: 2,
+				incrementoDiarioMora: "7.47",
+				incrementoMaximoMensualMora: "186.67",
+			}),
+		).toContain(
+			"tienes *2 cuotas en atraso, por un monto total de Q2,100.00* al día de hoy, que sube alrededor de Q7.47 por día, y puede aumentar hasta Q186.67 más en los próximos 30 días.",
+		);
+	});
+
+	test("aviso jurídico", () => {
+		expect(
+			interpolar(porId("aviso_juridico")?.cuerpoWhastapp ?? "", {
+				...base,
+				montoAdeudado: "20,150.00",
+				cuotasAtraso: 5,
+				incrementoDiarioMora: "11.20",
+				incrementoMaximoMensualMora: "1,120.00",
+			}),
+		).toContain(
+			"por un monto de 20,150.00 incluyendo moras al día de hoy, que sube alrededor de Q11.20 por día, y puede aumentar hasta Q1,120.00 más en los próximos 30 días.",
+		);
+	});
+
+	test("incremento 0 (todas las cuotas en el techo): sin frase de aumento", () => {
+		const mensaje = interpolar(porId("mora_30")?.cuerpoWhastapp ?? "", {
+			...base,
+			montoAdeudado: "450.00",
+			cuotasAtraso: 1,
+			incrementoDiarioMora: "0.00",
+			incrementoMaximoMensualMora: "0.00",
+		});
+		expect(mensaje).toContain(
+			"Tienes *1 cuota con atraso por un monto de Q450.00* al día de hoy.",
+		);
+		expect(mensaje).not.toContain("sube alrededor de");
+		expect(mensaje).not.toContain("puede aumentar");
+		expect(mensaje).not.toContain("Q0.00");
+		expect(mensaje).not.toContain("{incrementoDiarioMora}");
+		expect(mensaje).not.toContain("{incrementoMaximoMensualMora}");
+	});
+
+	test("con ritmo pero sin techo: la frase se corta, no se rompe", () => {
+		const mensaje = interpolar(porId("mora_30")?.cuerpoWhastapp ?? "", {
+			...base,
+			montoAdeudado: "450.00",
+			cuotasAtraso: 1,
+			incrementoDiarioMora: "3.73",
+		});
+		expect(mensaje).toContain(
+			"Tienes *1 cuota con atraso por un monto de Q450.00* al día de hoy, que sube alrededor de Q3.73 por día.",
+		);
+		expect(mensaje).not.toContain("puede aumentar");
+		expect(mensaje).not.toContain("hasta Q más");
+		expect(mensaje).not.toContain("{incrementoMaximoMensualMora}");
+	});
+
+	// EL defecto que arregla esta rebanada: la víspera del siguiente
+	// vencimiento el delta de UN día da Q0.00 (la cuota vieja ya topó y la nueva
+	// todavía no vence) aunque la mora sí vaya a crecer. Antes se borraba la
+	// cláusula entera —techo incluido— y ese día el mensaje no anunciaba ningún
+	// aumento.
+	test("VÍSPERA: sin ritmo pero con techo, el mensaje NO se queda mudo", () => {
+		for (const id of ["mora_30", "mora_60", "aviso_juridico"]) {
+			for (const cuerpo of [porId(id)?.cuerpo, porId(id)?.cuerpoWhastapp]) {
+				const mensaje = interpolar(cuerpo ?? "", {
+					...base,
+					montoAdeudado: "1,612.00",
+					cuotasAtraso: 1,
+					incrementoDiarioMora: "0.00",
+					incrementoMaximoMensualMora: "108.27",
+				});
+				expect(mensaje).toContain(
+					"al día de hoy, y puede aumentar hasta Q108.27 más en los próximos 30 días.",
+				);
+				expect(mensaje).not.toContain("Q0.00");
+				expect(mensaje).not.toContain("sube alrededor de");
+				expect(mensaje).not.toContain("{incrementoDiarioMora}");
+				expect(mensaje).not.toContain("{incrementoMaximoMensualMora}");
+			}
+		}
+	});
+
+	// Y el guard del modal no lo bloquea: la cláusula queda sana.
+	test("VÍSPERA: el guard no bloquea el ritmo en cero con techo", () => {
+		const mensaje = interpolar(porId("mora_30")?.cuerpoWhastapp ?? "", {
+			...base,
+			montoAdeudado: "1,612.00",
+			cuotasAtraso: 1,
+			incrementoDiarioMora: "0.00",
+			incrementoMaximoMensualMora: "108.27",
+		});
+		expect(mensajeAnunciaIncrementoMoraSinDato(mensaje, "0.00", "108.27")).toBe(
+			false,
+		);
+	});
+
+	test("el email (cuerpo) se comporta igual que el de WhatsApp", () => {
+		const conAumento = interpolar(porId("mora_60")?.cuerpo ?? "", {
+			...base,
+			montoAdeudado: "2,100.00",
+			cuotasAtraso: 2,
+			incrementoDiarioMora: "7.47",
+			incrementoMaximoMensualMora: "186.67",
+		});
+		expect(conAumento).toContain(
+			"por un monto total de Q2,100.00 al día de hoy, que sube alrededor de Q7.47 por día, y puede aumentar hasta Q186.67 más en los próximos 30 días.",
+		);
+		const sinAumento = interpolar(porId("mora_60")?.cuerpo ?? "", {
+			...base,
+			montoAdeudado: "2,100.00",
+			cuotasAtraso: 2,
+			incrementoDiarioMora: "0.00",
+			incrementoMaximoMensualMora: "0.00",
+		});
+		expect(sinAumento).toContain(
+			"por un monto total de Q2,100.00 al día de hoy.",
+		);
+		expect(sinAumento).not.toContain("sube alrededor de");
+		expect(sinAumento).not.toContain("puede aumentar");
+	});
+
+	test("sin el dato (cartera viejo) no queda ni la variable ni un 'Q.' roto", () => {
+		const mensaje = interpolar(porId("mora_30")?.cuerpoWhastapp ?? "", {
+			...base,
+			montoAdeudado: "450.00",
+			cuotasAtraso: 1,
+		});
+		expect(mensaje).not.toContain("{incrementoDiarioMora}");
+		expect(mensaje).not.toContain("aumenta");
+	});
+
+	test("el monto adeudado sigue detectándose para el guard de envío", () => {
+		// La oración nueva no puede romper mensajeAnunciaMontoAdeudado: si lo
+		// rompiera, un mensaje sin monto se enviaría con el hueco "Q.".
+		const mensaje = interpolar(porId("mora_30")?.cuerpoWhastapp ?? "", {
+			...base,
+			montoAdeudado: "450.00",
+			cuotasAtraso: 1,
+			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "93.33",
+		});
+		expect(mensajeAnunciaMontoAdeudado(mensaje)).toBe(true);
+		const juridico = interpolar(porId("aviso_juridico")?.cuerpoWhastapp ?? "", {
+			...base,
+			montoAdeudado: "20,150.00",
+			cuotasAtraso: 5,
+			incrementoDiarioMora: "3.73",
+			incrementoMaximoMensualMora: "93.33",
+		});
+		expect(mensajeAnunciaMontoAdeudado(juridico)).toBe(true);
+	});
+
+	test("el mismo predicado decide si hay techo que anunciar", () => {
+		expect(hayIncrementoMora("93.33")).toBe(true);
+		expect(hayIncrementoMora("0.00")).toBe(false);
+	});
+
+	test("hayIncrementoMora: 0, vacío y nulo no anuncian nada", () => {
+		expect(hayIncrementoMora("3.73")).toBe(true);
+		expect(hayIncrementoMora("1,120.00")).toBe(true);
+		expect(hayIncrementoMora("0.00")).toBe(false);
+		expect(hayIncrementoMora("")).toBe(false);
+		expect(hayIncrementoMora(null)).toBe(false);
+		expect(hayIncrementoMora(undefined)).toBe(false);
+	});
+
+	test("no cambia el conteo de bloques de la plantilla aprobada", () => {
+		for (const id of ["mora_30", "mora_60", "aviso_juridico"]) {
+			const cuerpo = porId(id)?.cuerpoWhastapp ?? "";
+			const bloques = cuerpo.split("\n\n").length;
+			// Con las dos cifras, sin ninguna, y con el ritmo pero sin su techo.
+			for (const [inc, max] of [
+				["3.73", "93.33"],
+				["0.00", "0.00"],
+				["3.73", ""],
+			]) {
+				expect(
+					interpolar(cuerpo, {
+						...base,
+						montoAdeudado: "100.00",
+						cuotasAtraso: 1,
+						incrementoDiarioMora: inc,
+						incrementoMaximoMensualMora: max,
+					}).split("\n\n").length,
+				).toBe(bloques);
+			}
+		}
+	});
+});
+
+// Gemelo del gate del server (prepararIncrementoMoraParaEnvio): el modal
+// ofrece las dos variables sueltas, así que el asesor puede escribir su propia
+// oración y esa no la borra `interpolar`.
+describe("mensajeAnunciaIncrementoMoraSinDato — el hueco que llegaría al cliente", () => {
+	const suelto = "El saldo aumenta Q{incrementoDiarioMora} diario.";
+
+	test("placeholder suelto sin valor: hay que bloquear", () => {
+		expect(mensajeAnunciaIncrementoMoraSinDato(suelto, "", "")).toBe(true);
+		expect(mensajeAnunciaIncrementoMoraSinDato(suelto, "0.00", "0.00")).toBe(
+			true,
+		);
+	});
+
+	test("el techo suelto sin valor también, aunque llegue el ritmo", () => {
+		expect(
+			mensajeAnunciaIncrementoMoraSinDato(
+				"…hasta Q{incrementoMaximoMensualMora}.",
+				"3.73",
+				"",
+			),
+		).toBe(true);
+	});
+
+	test("con el dato no hay nada que bloquear", () => {
+		expect(mensajeAnunciaIncrementoMoraSinDato(suelto, "3.73", "")).toBe(false);
+	});
+
+	test("la cláusula incorporada no bloquea: desaparece sola al interpolar", () => {
+		const cuerpo = `Tienes 1 cuota vencida${CLAUSULA_INCREMENTO_DIARIO_MORA}.`;
+		expect(mensajeAnunciaIncrementoMoraSinDato(cuerpo, "", "")).toBe(false);
+		expect(mensajeAnunciaIncrementoMoraSinDato(cuerpo, "3.73", "")).toBe(false);
+		// Y en efecto el mensaje sale sano: sin "Q" colgando.
+		expect(
+			interpolar(cuerpo, {
+				clienteNombre: "MARIA LOPEZ",
+				fechaPago: "5",
+				cuotaMensual: "2,500.00",
+				placa: "P123ABC",
+				marcaLineaModelo: "Toyota Yaris 2018",
+				montoAdeudado: "4,318.20",
+				cuotasAtraso: 1,
+				telefonoAsesor: "41286630",
+				nombreAsesor: "Carlos Pérez",
+				expectativaMora: "1,382.72",
+			}),
+		).toBe("Tienes 1 cuota vencida.");
+	});
+
+	test("un mensaje sin el tema pasa derecho", () => {
+		expect(mensajeAnunciaIncrementoMoraSinDato("Buenos días.", "", "")).toBe(
+			false,
+		);
+	});
+});
+
+describe("debeAnunciarCrecimientoMora", () => {
+	test("crédito AL DÍA con cuota por vencer: NO anuncia nada", () => {
+		// incrementosMoraPorCredito incluye las cuotas que vencen dentro de 30
+		// días, así que un crédito sin mora devuelve techo > 0. Medido con las
+		// funciones reales: capital Q45,000, cuota a 10 días → ritmo 0.00,
+		// techo Q336.00, mora de hoy Q0.00.
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: "0",
+				incrementoDiarioMora: "0.00",
+				incrementoMaximoMensualMora: "336.00",
+			}),
+		).toBe(false);
+	});
+
+	test("la VÍSPERA del próximo vencimiento sí anuncia: ritmo 0 pero techo > 0", () => {
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: "1,612.00",
+				incrementoDiarioMora: "0.00",
+				incrementoMaximoMensualMora: "108.27",
+			}),
+		).toBe(true);
+	});
+
+	test("crédito con mora que sube todos los días: anuncia", () => {
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: "84.00",
+				incrementoDiarioMora: "16.80",
+				incrementoMaximoMensualMora: "420.00",
+			}),
+		).toBe(true);
+	});
+
+	test("con mora pero sin nada que crezca (todas las cuotas topadas): NO anuncia", () => {
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: "504.00",
+				incrementoDiarioMora: "0.00",
+				incrementoMaximoMensualMora: "0.00",
+			}),
+		).toBe(false);
+	});
+
+	test("valores ausentes o basura no anuncian", () => {
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: null,
+				incrementoDiarioMora: "16.80",
+				incrementoMaximoMensualMora: "420.00",
+			}),
+		).toBe(false);
+		expect(
+			debeAnunciarCrecimientoMora({
+				montoEnMora: "no-es-un-numero",
+				incrementoDiarioMora: "16.80",
+				incrementoMaximoMensualMora: "420.00",
+			}),
+		).toBe(false);
 	});
 });

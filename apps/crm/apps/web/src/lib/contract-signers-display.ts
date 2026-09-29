@@ -129,3 +129,25 @@ export function estaAnulado(contract: {
 }): boolean {
 	return contract.status === "cancelled" || !!contract.replacedByContractId;
 }
+
+/**
+ * Si el contrato salió por el respaldo de Documenso.
+ *
+ * `signing_provider` se agregó sin rellenar los de antes, así que en esos se
+ * mira el enlace: los de Documenso son `/sign/{token}`, los de WeeTrust
+ * `/signatory/...`. Sin esto, uno viejo de Documenso ofrecía acciones que sólo
+ * existen en WeeTrust (bajar el firmado, anular, regenerar) y fallaban siempre.
+ */
+export function salioPorDocumenso(contract: {
+	signingProvider?: string | null;
+	clientSigningLink?: string | null;
+	representativeSigningLink?: string | null;
+	additionalSigningLinks?: string[] | null;
+}): boolean {
+	if (contract.signingProvider) return contract.signingProvider === "documenso";
+	return [
+		contract.clientSigningLink,
+		contract.representativeSigningLink,
+		...(contract.additionalSigningLinks ?? []),
+	].some((link) => Boolean(link && /\/sign\/[^/?#]+/.test(link)));
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
 import { Elysia } from "elysia";
 import jwt from "jsonwebtoken";
+import { lockPoolMock } from "../utils/testMocks";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Gates de rol y motivo obligatorio del módulo de moras.
@@ -32,9 +33,15 @@ const SIN_BD = () => ({
 });
 
 let dbImpl: any = SIN_BD();
+// `lockPool` va aunque este archivo no lo use: `mock.module` es GLOBAL en bun
+// test, así que este mock de "../database" es el que ven los demás archivos de
+// `src/routers/` — y `rubrosGuards.test.ts` llega a `paymentAdvisoryLock.ts`,
+// que hace `import { lockPool } from "../database"`. Sin la clave, ESE archivo
+// revienta entero al cargarse con "Export named 'lockPool' not found".
 mock.module("../database", () => ({
   db: new Proxy({}, { get: (_t, p) => dbImpl[p] }),
   client: {},
+  lockPool: lockPoolMock,
 }));
 
 const { morasRouter } = await import("./latefee");

@@ -1197,7 +1197,9 @@ export class WeeTrustService {
 	 *   tipo (el aire de abajo de la hoja, entre el pie y el texto). Cada
 	 *   firmante tiene su parte del ancho y su rúbrica va centrada en ella: con
 	 *   pocos firmantes quedan grandes y separadas, y con muchos se achican
-	 *   hasta un mínimo legible; de ahí en más pasan a otra fila.
+	 *   hasta un mínimo legible; de ahí en más pasan a otra fila. Si las filas
+	 *   no entran en el alto de la franja, se achican un poco más antes que
+	 *   salirse de ella; si ni así, el layout corta con error.
 	 * - **Cuándo no.** En la hoja donde una persona firma, esa persona no
 	 *   rubrica: su firma ya marca la hoja. Así la hoja de las firmas finales no
 	 *   lleva rúbricas, y un documento de una sola hoja (el pagaré) tampoco.
@@ -1223,17 +1225,17 @@ export class WeeTrustService {
 		const anchoDeLaFranja = franja.derecha - franja.izquierda;
 
 		// Tamaño de cada rúbrica. Por debajo de 100×50, que es una firma, para
-		// que se distingan; y nunca más chica que 60 de ancho, que ya cuesta
-		// firmar ahí. El alto sigue al ancho para que la proporción sea siempre
-		// la misma.
+		// que se distingan; y de preferencia no más chica que 60 de ancho, que ya
+		// cuesta firmar ahí. El alto sigue al ancho para que la proporción sea
+		// siempre la misma.
 		const ANCHO_MAXIMO = 90;
 		const ANCHO_MINIMO = 60;
+		// Sólo cuando con 60 no entran en el alto de la franja: antes de salirse
+		// se achican hasta acá. Más chico ya no se puede firmar.
+		const ANCHO_MINIMO_APRETADO = 40;
 		const PROPORCION = 0.4;
 		const separacion = 12;
-		const porFila = Math.max(
-			1,
-			Math.floor((anchoDeLaFranja + separacion) / (ANCHO_MINIMO + separacion)),
-		);
+		const altoDeLaFranja = franja.arriba - franja.abajo;
 
 		/**
 		 * Tamaño y filas para `cuantos` rúbricas. Depende de la hoja: en la que
@@ -1241,25 +1243,69 @@ export class WeeTrustService {
 		 * vez de dejarle el hueco.
 		 */
 		const disposicion = (cuantos: number) => {
+			const medidas = (filas: number) => {
+				const porFila = Math.ceil(cuantos / filas);
+				const porAncho =
+					(anchoDeLaFranja - (porFila - 1) * separacion) / porFila;
+				const porAlto =
+					(altoDeLaFranja - (filas - 1) * separacion) / filas / PROPORCION;
+				return { porFila, porAncho, porAlto };
+			};
+
+			// Lo de siempre: tantas por fila como entren a 60, y las demás a otra.
+			let porFila = Math.max(
+				1,
+				Math.floor((anchoDeLaFranja + separacion) / (ANCHO_MINIMO + separacion)),
+			);
+			let filas = Math.ceil(cuantos / porFila);
 			const enLaFilaMasLlena = Math.min(cuantos, porFila);
-			const ancho = Math.floor(
+			let ancho = Math.floor(
 				Math.min(
 					ANCHO_MAXIMO,
 					(anchoDeLaFranja - (enLaFilaMasLlena - 1) * separacion) /
 						enLaFilaMasLlena,
 				),
 			);
+
+			// Si esas filas no entran en el alto de la franja, se busca cuántas
+			// filas dejan las rúbricas más grandes sin salirse de ella. La franja es
+			// el aire entre el pie y el texto: abajo está el pie de página (en el
+			// reconocimiento de deuda llega casi hasta su borde), arriba el
+			// contrato, y una rúbrica obligatoria encima de cualquiera de los dos lo
+			// tapa.
+			if (
+				filas * Math.round(ancho * PROPORCION) + (filas - 1) * separacion >
+				altoDeLaFranja
+			) {
+				let mejor: { filas: number; porFila: number; ancho: number } | null =
+					null;
+				for (let f = 1; f <= cuantos; f++) {
+					const m = medidas(f);
+					const a = Math.floor(Math.min(ANCHO_MAXIMO, m.porAncho, m.porAlto));
+					if (!mejor || a > mejor.ancho)
+						mejor = { filas: f, porFila: m.porFila, ancho: a };
+				}
+				if (!mejor || mejor.ancho < ANCHO_MINIMO_APRETADO) {
+					throw new SignatureLayoutError(
+						`${contractType}: las rúbricas de ${cuantos} firmantes no caben en la franja de la página sin tapar el pie ni el texto.`,
+					);
+				}
+				({ filas, porFila, ancho } = mejor);
+			}
+
 			const alto = Math.round(ancho * PROPORCION);
-			// Las filas van centradas en el alto de la franja. Si son tantas que no
-			// entran, se cuelgan del borde de arriba de la franja y crecen hacia el
-			// borde de la hoja, porque arriba está el texto del contrato: sin tope
-			// de firmantes, pero sin salirse de la hoja (eso se verifica abajo).
-			const filas = Math.ceil(cuantos / porFila);
+			// Las filas van centradas en el alto de la franja: ya se sabe que entran.
 			const altoDelBloque = filas * alto + (filas - 1) * separacion;
-			const sobra = franja.arriba - franja.abajo - altoDelBloque;
 			const baseDelBloque =
-				sobra >= 0 ? franja.abajo + sobra / 2 : franja.arriba - altoDelBloque;
-			return { ancho, alto, pasoY: alto + separacion, filas, baseDelBloque };
+				franja.abajo + (altoDeLaFranja - altoDelBloque) / 2;
+			return {
+				ancho,
+				alto,
+				pasoY: alto + separacion,
+				filas,
+				porFila,
+				baseDelBloque,
+			};
 		};
 
 		const paginas = await WeeTrustService.dimensionesDePaginas(pdfBuffer);
@@ -1274,9 +1320,8 @@ export class WeeTrustService {
 			);
 			if (quienes.length === 0) continue;
 
-			const { ancho, alto, pasoY, filas, baseDelBloque } = disposicion(
-				quienes.length,
-			);
+			const { ancho, alto, pasoY, filas, porFila, baseDelBloque } =
+				disposicion(quienes.length);
 
 			// Dónde va cada rúbrica, con el grupo corrido `hacia` puntos para arriba.
 			// Se leen en el orden declarado: de izquierda a derecha, y de la fila

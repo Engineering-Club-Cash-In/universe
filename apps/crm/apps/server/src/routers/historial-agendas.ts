@@ -92,6 +92,8 @@ const METODOS_CONTACTO = [
 	"carta_notarial",
 	// CB-128: mismo motivo que arriba.
 	"pago",
+	// CB-038 (migración 0068).
+	"visita_trabajo",
 ] as const;
 
 const filtrosSchema = z.object({

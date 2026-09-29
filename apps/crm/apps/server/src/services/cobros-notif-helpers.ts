@@ -32,7 +32,8 @@ export type CobrosNotifTipo =
 	| "inmovilizacion_pendiente_aprobacion"
 	| "inmovilizacion_resuelta"
 	| "inmovilizacion_llamar_cliente"
-	| "recuperacion_vehiculo";
+	| "recuperacion_vehiculo"
+	| "visita_programada";
 
 /**
  * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando el correo de cash-in del

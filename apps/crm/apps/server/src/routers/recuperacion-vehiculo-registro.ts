@@ -40,6 +40,7 @@ import {
 	registrarEntregaSinTraslado,
 	tomarCandadoRecuperacion,
 } from "../services/recuperacion-vehiculo";
+import { assertVisitaParaSeguimiento } from "../services/visitas-cobros";
 import { assertAccesoCasoCobro } from "./cobros";
 
 type ContextoProcedure = {
@@ -219,6 +220,8 @@ export const recuperacionVehiculoRegistroRouter = {
 				.object({
 					casoCobroId: z.string().uuid(),
 					detalle: detalleRecuperacionSchema,
+					// CB-037/038: la entrega sale de una visita.
+					visitaId: z.string().uuid().optional(),
 				})
 				.superRefine((v, ctx) =>
 					validarDetalleRecuperacion("entrega_voluntaria", v.detalle, ctx),
@@ -230,12 +233,20 @@ export const recuperacionVehiculoRegistroRouter = {
 				context,
 				"registrar la entrega voluntaria",
 			);
+			if (input.visitaId) {
+				await assertVisitaParaSeguimiento({
+					visitaId: input.visitaId,
+					casoCobroId: input.casoCobroId,
+					seguimiento: "entrega",
+				});
+			}
 			return registrarEntregaSinTraslado({
 				casoCobroId: input.casoCobroId,
 				numeroSifco,
 				bucket,
 				detalle: input.detalle,
 				registradoPor: context.userId,
+				visitaId: input.visitaId,
 			});
 		}),
 

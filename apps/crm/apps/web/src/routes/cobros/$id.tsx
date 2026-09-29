@@ -4,6 +4,7 @@ import {
 	AlertTriangle,
 	ArrowLeft,
 	Banknote,
+	Briefcase,
 	CalendarClock,
 	Car,
 	ChevronDown,
@@ -14,6 +15,7 @@ import {
 	FileText,
 	HandCoins,
 	Handshake,
+	Home,
 	KeyRound,
 	Loader,
 	Mail,
@@ -44,6 +46,12 @@ import {
 	operacionRecuperacion,
 	type TipoEnvioRecuperacion,
 } from "server/src/lib/recuperacion-vehiculo";
+import {
+	deudaVencida,
+	metodoContactoDeVisita,
+	motivoBloqueoVisita,
+	type TipoVisita,
+} from "server/src/lib/visitas-cobros";
 import { toast } from "sonner";
 import { ActividadBot } from "@/components/cobros/actividad-bot";
 import { ConvenioDecisionesHistorial } from "@/components/cobros/convenio-decisiones-historial";
@@ -64,6 +72,12 @@ import {
 	TelefonosEditor,
 	telefonosParaGuardar,
 } from "@/components/cobros/telefonos-editor";
+import {
+	VisitaDialog,
+	type VisitaProgramadaParaCompletar,
+	type VisitaRegistrada,
+} from "@/components/cobros/visita-dialog";
+import { type Visita, VisitasCard } from "@/components/cobros/visitas-card";
 import { ContactoModal } from "@/components/contacto-modal";
 import {
 	OpportunityDetailModal,
@@ -320,6 +334,10 @@ function getMetodoIcon(metodo: string) {
 			return <MessageSquare className="h-3 w-3" />;
 		case "email":
 			return <Mail className="h-3 w-3" />;
+		case "visita_domicilio":
+			return <Home className="h-3 w-3" />;
+		case "visita_trabajo":
+			return <Briefcase className="h-3 w-3" />;
 		default:
 			return <Phone className="h-3 w-3" />;
 	}
@@ -494,10 +512,30 @@ function RouteComponent() {
 	// Generar links dejó de ser un botón suelto: ahora es una de las dos formas
 	// de registrar un pago, así que el diálogo lo abre el dropdown principal.
 	const [pagaloAbierto, setPagaloAbierto] = useState(false);
+	// CB-037/038: la visita (residencia o trabajo) y lo que sale de ella. Al
+	// guardar una visita con promesa o entrega, se abre ese formulario ya
+	// vinculado a la visita.
+	const [visitaAbierta, setVisitaAbierta] = useState<{
+		tipo: TipoVisita;
+		programada?: VisitaProgramadaParaCompletar;
+	} | null>(null);
+	const [promesaDesdeVisita, setPromesaDesdeVisita] = useState<{
+		visitaId: string;
+		tipo: TipoVisita;
+		montoRecibido: number | null;
+	} | null>(null);
+	const [entregaDesdeVisita, setEntregaDesdeVisita] = useState<{
+		visitaId: string;
+		lugar: string;
+		fecha: Date;
+	} | null>(null);
 	/**
 	 * Los canales del dropdown "Registrar Contacto". Todos abren el MISMO modal
 	 * (ContactoModal) con su `metodoInicial`; agregar un canal nuevo es una fila
 	 * acá, no otra copia del blob de props.
+	 *
+	 * La visita ya no va acá (CB-037/038): tiene su propio botón y formulario
+	 * (dirección, responsable, fotos, resultado), porque no es "un canal más".
 	 */
 	const CANALES_CONTACTO = [
 		{
@@ -523,12 +561,6 @@ function RouteComponent() {
 			label: "SMS",
 			Icono: MessageSquare,
 			color: "text-amber-600 dark:text-amber-400",
-		},
-		{
-			metodo: "visita_domicilio",
-			label: "Visita",
-			Icono: MapPin,
-			color: "text-slate-600 dark:text-slate-400",
 		},
 	] as const;
 
@@ -627,6 +659,16 @@ function RouteComponent() {
 			input: { casoCobroId: casoDetails.data?.id || "" },
 		}),
 		enabled: !!session && !!casoDetails.data?.id,
+	});
+
+	// CB-037/038: el trabajo del cliente, de su Solicitud de Crédito. Lo pinta
+	// la tarjeta de contacto y precarga la visita al trabajo.
+	const datosLaborales = useQuery({
+		...orpc.getDatosLaboralesCaso.queryOptions({
+			input: { casoCobroId: casoDetails.data?.id || "" },
+		}),
+		enabled: !!session && !!casoDetails.data?.id,
+		staleTime: 5 * 60 * 1000,
 	});
 
 	// La lista COMPLETA (limit 200), solo para las derivaciones que necesitan
@@ -1524,6 +1566,68 @@ function RouteComponent() {
 	const operacionEnvio = envioRecuperacion
 		? operacionRecuperacion(envioRecuperacion, bucketNumero)
 		: null;
+
+	// CB-037/038: las visitas nuevas, en B3 y B4 (la regla vive en la librería
+	// compartida con el servidor). Registrar el resultado de una ya programada
+	// no pasa por acá: se hace desde su tarjeta, sin mirar el bucket.
+	const bloqueoVisita: string | null = !puedeRecuperarVehiculo
+		? "Solo el equipo de cobros registra visitas."
+		: !caso.numeroCreditoSifco
+			? "Este caso todavía no tiene crédito de cartera asociado."
+			: bucketActual.isPending
+				? "Cargando el bucket del crédito…"
+				: motivoBloqueoVisita(bucketNumero, bucketPrefijo);
+	// Base del 50% de "50% + promesa": cuotas vencidas × cuota + mora.
+	const deudaVencidaCaso = deudaVencida({
+		cuotasVencidas: caso.cuotasVencidas,
+		cuota: caso.cuotaMensual,
+		mora: caso.montoEnMora,
+	});
+	const direccionesCliente = {
+		residencia: caso.direccionContacto?.trim() || null,
+		trabajo: datosLaborales.data
+			? {
+					direccion: datosLaborales.data.direccion,
+					empresa: datosLaborales.data.empresa,
+					horario: datosLaborales.data.horario,
+				}
+			: null,
+	};
+	const abrirEntregaDesdeVisita = (datos: {
+		visitaId: string;
+		lugar: string;
+		fecha: Date;
+	}) => {
+		const bloqueo = bloqueoRecuperacion("entrega_voluntaria");
+		if (bloqueo) {
+			toast.error(bloqueo);
+			return;
+		}
+		setEntregaDesdeVisita(datos);
+		setEnvioRecuperacion("entrega_voluntaria");
+	};
+	/** Al guardar la visita: abre el flujo que sigue (promesa o entrega). */
+	const alRegistrarVisita = (r: VisitaRegistrada) => {
+		if (r.siguientes.promesa) {
+			setPromesaDesdeVisita({
+				visitaId: r.visitaId,
+				tipo: r.tipo,
+				montoRecibido: r.montoRecibido,
+			});
+		} else if (r.siguientes.entrega) {
+			abrirEntregaDesdeVisita({
+				visitaId: r.visitaId,
+				lugar: r.direccion,
+				fecha: r.fechaVisita,
+			});
+		}
+	};
+	const registrarPromesaDeVisita = (v: Visita) =>
+		setPromesaDesdeVisita({
+			visitaId: v.id,
+			tipo: v.tipo,
+			montoRecibido: v.montoRecibido != null ? Number(v.montoRecibido) : null,
+		});
 	// El cliente ORPC infiere `{}` para esta query (mismo caso que CasoDetalle).
 	const maxMesesConvenio =
 		(convenioConfig.data as { maxMeses?: number } | undefined)?.maxMeses ?? 6;
@@ -1730,12 +1834,14 @@ function RouteComponent() {
 					</div>
 
 					{/* Acciones de gestión — antes vivían enterradas al final de la
-					    tarjeta de Contacto; acá están siempre a la mano. */}
-					<div className="shrink-0">
+					    tarjeta de Contacto; acá están siempre a la mano. En pantalla
+					    chica (el asesor en la calle, CB-037/038) bajan a todo el
+					    ancho en dos columnas, con "Registrar Pago" primero. */}
+					<div className="w-full lg:w-auto lg:shrink-0">
 						{/* Botones de Contacto - Solo si existe caso de cobros */}
 						{caso.id ? (
 							<>
-								<div className="flex flex-wrap justify-end gap-2">
+								<div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-start lg:justify-end">
 									{/* 1 · Los CANALES, en un solo dropdown: registrar una
 									    llamada, un WhatsApp, un email, un SMS o una visita es
 									    la misma acción por distinta vía — no cinco botones. */}
@@ -1743,10 +1849,13 @@ function RouteComponent() {
 										<DropdownMenuTrigger asChild>
 											<Button
 												variant="outline"
-												className="flex items-center gap-2"
+												className="flex w-full items-center justify-center gap-2 sm:w-auto"
 											>
 												<Phone className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-												Registrar Contacto
+												<span className="sm:hidden">Contacto</span>
+												<span className="hidden sm:inline">
+													Registrar Contacto
+												</span>
 												<ChevronDown className="h-3.5 w-3.5 opacity-60" />
 											</Button>
 										</DropdownMenuTrigger>
@@ -1775,10 +1884,13 @@ function RouteComponent() {
 										<DropdownMenuTrigger asChild>
 											<Button
 												variant="outline"
-												className="flex items-center gap-2"
+												className="flex w-full items-center justify-center gap-2 sm:w-auto"
 											>
 												<HandCoins className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-												Promesa / Convenio
+												<span className="sm:hidden">Promesa</span>
+												<span className="hidden sm:inline">
+													Promesa / Convenio
+												</span>
 												<ChevronDown className="h-3.5 w-3.5 opacity-60" />
 											</Button>
 										</DropdownMenuTrigger>
@@ -1821,20 +1933,35 @@ function RouteComponent() {
 									    dropdown de arriba. Mismo criterio que el card "Total a
 									    Pagar": con convenio activo la mora se reemplaza por la
 									    cuota del convenio, no se suma (Codex, PR #1191). */}
+									{/* CB-037/038: el mismo modal registra la promesa que sale
+									    de una visita, con el canal de la visita y vinculada a
+									    ella. El `key` lo remonta con esos valores. En "50% +
+									    promesa" sugiere lo que falta después de lo que pagó. */}
 									<ContactoModal
+										key={promesaDesdeVisita?.visitaId ?? "promesa"}
 										{...propsContacto}
-										metodoInicial="llamada"
+										metodoInicial={
+											promesaDesdeVisita
+												? metodoContactoDeVisita(promesaDesdeVisita.tipo)
+												: "llamada"
+										}
+										visitaId={promesaDesdeVisita?.visitaId}
 										variante="promesa"
-										open={promesaAbierta}
-										onOpenChange={setPromesaAbierta}
-										montoSugerido={
-											caso.cuotaConvenio != null
+										open={promesaAbierta || !!promesaDesdeVisita}
+										onOpenChange={(abierto) => {
+											setPromesaAbierta(abierto);
+											if (!abierto) setPromesaDesdeVisita(null);
+										}}
+										montoSugerido={Math.max(
+											0,
+											(caso.cuotaConvenio != null
 												? Number(caso.cuotaConvenio) +
 													Number(caso.cuotaMensual || 0)
 												: Number(caso.montoEnMora || 0) +
 													Number(caso.cuotasVencidas || 0) *
-														Number(caso.cuotaMensual || 0)
-										}
+														Number(caso.cuotaMensual || 0)) -
+												(promesaDesdeVisita?.montoRecibido ?? 0),
+										)}
 										cuotasDisponibles={cuotas
 											.filter(
 												(c: any) =>
@@ -1897,6 +2024,59 @@ function RouteComponent() {
 										}}
 									/>
 
+									{/* CB-037/038 · La visita tiene su propio botón (ya no es un
+									    canal más de "Registrar Contacto"): dos lugares, y en el
+									    formulario se elige si ya se fue o se programa. Solo B3 y
+									    B4; fuera de ahí se ve deshabilitado con el motivo. */}
+									<DropdownMenu>
+										<DropdownMenuTrigger asChild>
+											<Button
+												variant="outline"
+												className="flex w-full items-center justify-center gap-2 sm:w-auto"
+												disabled={bloqueoVisita !== null}
+												title={bloqueoVisita ?? undefined}
+											>
+												<MapPin className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+												<span className="sm:hidden">Visita</span>
+												<span className="hidden sm:inline">
+													Registrar visita
+												</span>
+												<ChevronDown className="h-3.5 w-3.5 opacity-60" />
+											</Button>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="end" className="w-72">
+											<DropdownMenuItem
+												className="cursor-pointer items-start gap-2 py-2"
+												onClick={() => setVisitaAbierta({ tipo: "residencia" })}
+											>
+												<Home className="mt-0.5 h-4 w-4 text-violet-600 dark:text-violet-400" />
+												<div>
+													<p className="font-medium">Visita a residencia</p>
+													<p className="text-muted-foreground text-xs">
+														A la casa del cliente: pago, promesa o entrega de la
+														unidad.
+													</p>
+												</div>
+											</DropdownMenuItem>
+											<DropdownMenuItem
+												className="cursor-pointer items-start gap-2 py-2"
+												onClick={() => setVisitaAbierta({ tipo: "trabajo" })}
+											>
+												<Briefcase className="mt-0.5 h-4 w-4 text-violet-600 dark:text-violet-400" />
+												<div>
+													<p className="font-medium">
+														Visita al lugar de trabajo
+													</p>
+													<p className="text-muted-foreground text-xs">
+														{datosLaborales.data?.empresa
+															? `${datosLaborales.data.empresa}. Con los lineamientos para no exponer al cliente.`
+															: "Con los lineamientos para no exponer al cliente frente a su trabajo."}
+													</p>
+												</div>
+											</DropdownMenuItem>
+										</DropdownMenuContent>
+									</DropdownMenu>
+
 									{/* 3 · COBROS-02 Fase 3 — RESOLUCIÓN de la cuenta: las
 									    decisiones que sacan al crédito del ciclo normal de
 									    cobro. Van visibles y en rojo, no escondidas en un
@@ -1906,10 +2086,13 @@ function RouteComponent() {
 											<DropdownMenuTrigger asChild>
 												<Button
 													variant="outline"
-													className="flex items-center gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:hover:bg-red-950"
+													className="flex w-full items-center justify-center gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 sm:w-auto dark:border-red-900 dark:hover:bg-red-950"
 												>
 													<Handshake className="h-4 w-4" />
-													Deshacer convenio
+													<span className="sm:hidden">Deshacer</span>
+													<span className="hidden sm:inline">
+														Deshacer convenio
+													</span>
 													<ChevronDown className="h-3.5 w-3.5 opacity-60" />
 												</Button>
 											</DropdownMenuTrigger>
@@ -1964,7 +2147,7 @@ function RouteComponent() {
 											<DropdownMenuTrigger asChild>
 												<Button
 													variant="outline"
-													className="flex items-center gap-2"
+													className="flex w-full items-center justify-center gap-2 sm:w-auto"
 													disabled={
 														bloqueoForzosa !== null &&
 														bloqueoVoluntaria !== null
@@ -1977,7 +2160,10 @@ function RouteComponent() {
 													}
 												>
 													<Car className="h-4 w-4" />
-													Recuperación de vehículo
+													<span className="sm:hidden">Recuperación</span>
+													<span className="hidden sm:inline">
+														Recuperación de vehículo
+													</span>
 													<ChevronDown className="h-3.5 w-3.5 opacity-60" />
 												</Button>
 											</DropdownMenuTrigger>
@@ -2024,7 +2210,7 @@ function RouteComponent() {
 										<DropdownMenuTrigger asChild>
 											<Button
 												variant="outline"
-												className="flex items-center gap-2"
+												className="flex w-full items-center justify-center gap-2 sm:w-auto"
 											>
 												Más acciones
 												<ChevronDown className="h-3.5 w-3.5 opacity-60" />
@@ -2069,7 +2255,7 @@ function RouteComponent() {
 									    si fueran otra gestión. */}
 									<DropdownMenu>
 										<DropdownMenuTrigger asChild>
-											<Button className="flex items-center gap-2">
+											<Button className="order-first col-span-2 flex w-full items-center justify-center gap-2 sm:order-0 sm:w-auto">
 												<Banknote className="h-4 w-4" />
 												Registrar Pago
 												<ChevronDown className="h-3.5 w-3.5 opacity-60" />
@@ -2163,12 +2349,39 @@ function RouteComponent() {
 									<RecuperacionVehiculoDialog
 										open
 										onOpenChange={(abierto) => {
-											if (!abierto) setEnvioRecuperacion(null);
+											if (!abierto) {
+												setEnvioRecuperacion(null);
+												setEntregaDesdeVisita(null);
+											}
 										}}
 										tipo={envioRecuperacion}
 										operacion={operacionEnvio}
 										casoCobroId={caso.id}
 										vehicleId={caso.vehicleId ?? null}
+										desdeVisita={
+											envioRecuperacion === "entrega_voluntaria"
+												? (entregaDesdeVisita ?? undefined)
+												: undefined
+										}
+									/>
+								)}
+
+								{/* CB-037/038 · La visita: programarla, registrarla o
+								    completar una programada. Al guardar abre lo que sigue. */}
+								{caso.id && visitaAbierta && (
+									<VisitaDialog
+										open
+										onOpenChange={(abierto) => {
+											if (!abierto) setVisitaAbierta(null);
+										}}
+										casoCobroId={caso.id}
+										tipoInicial={visitaAbierta.tipo}
+										programada={visitaAbierta.programada ?? null}
+										direcciones={direccionesCliente}
+										deudaVencida={deudaVencidaCaso}
+										bucketNumero={bucketNumero}
+										vehicleId={caso.vehicleId ?? null}
+										onRegistrada={alRegistrarVisita}
 									/>
 								)}
 
@@ -2346,6 +2559,57 @@ function RouteComponent() {
 									enRecuperacion={enRecuperacion}
 									puedeGestionar={puedeRecuperarVehiculo}
 									onVerVehiculo={() => setTabActiva("vehiculo")}
+								/>
+							)}
+							{/* CB-037/038 · Las visitas: las programadas (lo que hay que
+							    hacer) y lo que pasó en las realizadas, con lo pendiente. */}
+							{caso.id && (
+								<VisitasCard
+									casoCobroId={caso.id}
+									puedeGestionar={puedeRecuperarVehiculo}
+									onRegistrarResultado={(programada) =>
+										setVisitaAbierta({ tipo: programada.tipo, programada })
+									}
+									onRegistrarPromesa={registrarPromesaDeVisita}
+									onRegistrarEntrega={(v) =>
+										abrirEntregaDesdeVisita({
+											visitaId: v.id,
+											lugar: v.direccion,
+											fecha: v.fechaVisita
+												? new Date(v.fechaVisita)
+												: new Date(),
+										})
+									}
+									accionesPago={
+										<>
+											{caso.numeroCreditoSifco && caso.carteraCreditoId && (
+												<Button
+													size="sm"
+													variant="outline"
+													className="h-8"
+													onClick={() => setPagaloAbierto(true)}
+												>
+													<CreditCard className="mr-1.5 h-4 w-4 text-violet-600" />
+													Generar link
+												</Button>
+											)}
+											<Button
+												size="sm"
+												variant="outline"
+												className="h-8"
+												asChild
+											>
+												<Link
+													to="/cobros/registrar-pago/$id"
+													params={{ id }}
+													search={{ tipo }}
+												>
+													<Upload className="mr-1.5 h-4 w-4 text-emerald-600" />
+													Subir boleta
+												</Link>
+											</Button>
+										</>
+									}
 								/>
 							)}
 							{/* Resumen del Caso */}
@@ -3114,7 +3378,7 @@ function RouteComponent() {
 											</div>
 										</div>
 									) : (
-										<div className="grid grid-cols-2 gap-4">
+										<div className="grid gap-4 sm:grid-cols-2">
 											<div>
 												<p className="text-muted-foreground text-sm">
 													Teléfono Principal
@@ -3174,14 +3438,87 @@ function RouteComponent() {
 													<p className="font-medium">-</p>
 												)}
 											</div>
-											<div>
+											<div className="sm:col-span-2">
 												<p className="text-muted-foreground text-sm">
-													Dirección
+													Residencia
 												</p>
-												<p className="font-medium">{caso.direccionContacto}</p>
+												<p className="break-words font-medium">
+													{caso.direccionContacto || "-"}
+												</p>
 											</div>
 										</div>
 									)}
+									{/* CB-037/038: el trabajo, como lo declaró en la Solicitud
+									    de Crédito. Sirve para ubicarlo y para la visita al
+									    trabajo (el horario dice a qué hora ir). Solo lectura:
+									    es lo que firmó el cliente. */}
+									{!isEditingContact &&
+										(datosLaborales.data ? (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+												<p className="flex items-center gap-2 font-medium text-sm">
+													<Briefcase className="h-4 w-4 text-muted-foreground" />
+													Trabajo
+												</p>
+												<div className="grid gap-3 sm:grid-cols-2">
+													<div>
+														<p className="text-muted-foreground text-xs">
+															Empresa
+														</p>
+														<p className="break-words font-medium text-sm">
+															{datosLaborales.data.empresa ?? "-"}
+														</p>
+														{datosLaborales.data.puesto && (
+															<p className="text-muted-foreground text-xs">
+																{datosLaborales.data.puesto}
+															</p>
+														)}
+													</div>
+													<div>
+														<p className="text-muted-foreground text-xs">
+															Teléfono del trabajo
+														</p>
+														{datosLaborales.data.telefono ? (
+															<a
+																href={`tel:${datosLaborales.data.telefono.replace(/[^0-9+]/g, "")}`}
+																className="inline-flex items-center rounded-md border px-2 py-0.5 font-medium text-primary text-sm hover:underline"
+															>
+																{datosLaborales.data.telefono}
+															</a>
+														) : (
+															<p className="font-medium text-sm">-</p>
+														)}
+													</div>
+													<div className="sm:col-span-2">
+														<p className="text-muted-foreground text-xs">
+															Dirección del trabajo
+														</p>
+														<p className="break-words font-medium text-sm">
+															{datosLaborales.data.direccion ?? "-"}
+														</p>
+													</div>
+													{datosLaborales.data.horario && (
+														<div className="sm:col-span-2">
+															<p className="text-muted-foreground text-xs">
+																Horario
+															</p>
+															<p className="font-medium text-sm">
+																{datosLaborales.data.horario}
+															</p>
+														</div>
+													)}
+												</div>
+												<p className="text-muted-foreground text-xs">
+													De la solicitud de crédito.
+												</p>
+											</div>
+										) : (
+											datosLaborales.isSuccess && (
+												<p className="flex items-center gap-2 text-muted-foreground text-xs">
+													<Briefcase className="h-3.5 w-3.5" />
+													La solicitud de crédito no tiene datos de su trabajo.
+												</p>
+											)
+										))}
 									{!isEditingContact &&
 										(telefonosNuevosCliente.length > 0 ||
 											totalReferencias > 0) && (

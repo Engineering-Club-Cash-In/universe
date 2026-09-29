@@ -116,6 +116,10 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// B4. Va al asesor de B4 que lo lleva y a los cobros_supervisor, con el
 	// motivo y los datos de la entrega. Dedup por registro (migración 0065).
 	"recuperacion_vehiculo",
+	// CB-037/038: una visita programada. Va al responsable de la visita: al
+	// programarla (si la programó otro) y la mañana del día. Dedup por visita
+	// y día (migración 0068).
+	"visita_programada",
 ]);
 
 // Notifications table

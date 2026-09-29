@@ -210,6 +210,10 @@ import {
 	getUltimasSincronizaciones,
 	sincronizarCasosCobros,
 } from "../services/sync-casos-cobros";
+import {
+	assertVisitaParaSeguimiento,
+	vincularPromesaAVisita,
+} from "../services/visitas-cobros";
 import type { CreditoDirectoResponse } from "../types/cartera-back";
 import { normalizarDpi } from "../utils/cui-validation";
 import { createNotification } from "./notifications";
@@ -548,6 +552,8 @@ const METODOS_CONTACTO_SELECCIONABLES = [
 	"email",
 	"visita_domicilio",
 	"carta_notarial",
+	// CB-038: la promesa que sale de una visita al trabajo queda con ese canal.
+	"visita_trabajo",
 ] as const;
 
 export const createContactoCobrosSchema = z
@@ -567,6 +573,9 @@ export const createContactoCobrosSchema = z
 		// CB-029: si viene, se EDITA esa promesa activa en vez de crear una nueva
 		// (una sola promesa activa por caso; el modal lo pasa al abrir en edición).
 		promesaContactoId: z.string().uuid().optional(),
+		// CB-037/038: la promesa sale de una visita ("promesa" o "50% + promesa"):
+		// queda anotada en la visita. No es columna de contactos_cobros.
+		visitaId: z.string().uuid().optional(),
 		// CB-025: qué hacer, no cuándo (eso es fechaProximoContacto). Texto
 		// libre, opcional — sin catálogo cerrado (ver nota en
 		// estadoContactoEnum sobre catálogos pendientes de negocio).
@@ -1886,10 +1895,25 @@ export const cobrosRouter = {
 	createContactoCobros: cobrosProcedure
 		.input(createContactoCobrosSchema)
 		.handler(async ({ input, context }) => {
-			// promesaContactoId no es columna: se separa del payload de escritura.
-			const { promesaContactoId, ...datos } = input;
+			// promesaContactoId y visitaId no son columnas: se separan del payload.
+			const { promesaContactoId, visitaId, ...datos } = input;
 			const esPromesa = datos.estadoContacto === "promesa_pago";
 			const estadoPromesa = esPromesa ? ("pendiente" as const) : undefined;
+
+			// CB-037/038: se revisa la visita ANTES de escribir, para no dejar una
+			// promesa colgada de una visita que no es del caso o que no la pedía.
+			if (visitaId) {
+				if (!esPromesa) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Desde una visita solo se registra la promesa de pago.",
+					});
+				}
+				await assertVisitaParaSeguimiento({
+					visitaId,
+					casoCobroId: datos.casoCobroId,
+					seguimiento: "promesa",
+				});
+			}
 
 			const inicioHoyGt = gtDateStrToDate(toDateStrGT(new Date()));
 			let filas: (typeof contactosCobros.$inferSelect)[];
@@ -2015,6 +2039,8 @@ export const cobrosRouter = {
 			// que esperarlo colgaría el guardado de la promesa hasta ~127s si
 			// cartera-back está caído — inaceptable para un push best-effort cuya
 			// red de seguridad es la reconciliación diaria (Codex PR #1237).
+			if (visitaId) await vincularPromesaAVisita(visitaId, filas[0].id);
+
 			if (esPromesa) {
 				pushPromesaActivaEnSegundoPlano({
 					id: filas[0].id,
@@ -8512,8 +8538,17 @@ export const cobrosRouter = {
 					motivo: z.string().trim().max(2000).optional(),
 					tipo: z.enum(TIPOS_ENVIO_RECUPERACION).default("tomado"),
 					detalle: detalleRecuperacionSchema.optional(),
+					// CB-037/038: la entrega voluntaria sale de una visita.
+					visitaId: z.string().uuid().optional(),
 				})
 				.superRefine((v, ctx) => {
+					if (v.visitaId && v.tipo !== "entrega_voluntaria") {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message:
+								"Desde una visita solo se registra la entrega voluntaria.",
+						});
+					}
 					if (v.detalle) {
 						validarDetalleRecuperacion(v.tipo, v.detalle, ctx);
 						return;
@@ -8587,6 +8622,13 @@ export const cobrosRouter = {
 			)
 				? undefined
 				: context.session.user.email;
+			if (input.visitaId) {
+				await assertVisitaParaSeguimiento({
+					visitaId: input.visitaId,
+					casoCobroId: input.casoCobroId,
+					seguimiento: "entrega",
+				});
+			}
 			// CB-042: el formulario se guarda ANTES del traslado y se descarta si
 			// cartera lo rechaza (el porqué del orden, en services/recuperacion-vehiculo.ts).
 			const detalle: DetalleRecuperacion = input.detalle ?? {
@@ -8600,6 +8642,7 @@ export const cobrosRouter = {
 				tipo: input.tipo,
 				detalle,
 				registradoPor: context.userId,
+				visitaId: input.visitaId,
 			});
 			let res: TrasladoConfirmado;
 			try {

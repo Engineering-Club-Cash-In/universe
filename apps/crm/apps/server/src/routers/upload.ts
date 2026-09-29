@@ -6,6 +6,7 @@ import { user } from "../db/schema/auth";
 import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { notifications } from "../db/schema/notifications";
 import { vehicles } from "../db/schema/vehicles";
+import { assertAccesoCasoCobro } from "../lib/acceso-caso-cobro";
 import { protectedProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -16,6 +17,7 @@ import {
 	UPLOAD_RESOURCE_TYPES,
 	validateResolvedMimeType,
 } from "../lib/storage";
+import { MIME_EVIDENCIA_VISITA } from "../lib/visitas-cobros";
 
 const MAX_BANK_STATEMENT_SIZE = 15 * 1024 * 1024;
 
@@ -223,6 +225,18 @@ async function assertCanUploadToResource(params: {
 			}
 			return;
 		}
+
+		// CB-037/038: fotos de una visita. Mismo permiso que la ficha: el caso
+		// tiene que ser uno que el usuario trabaja según cartera.
+		case "cobros_visita_evidencia": {
+			if (!PERMISSIONS.canAccessCobros(userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para subir evidencia de visitas",
+				});
+			}
+			await assertAccesoCasoCobro(resourceId, userId, userRole);
+			return;
+		}
 	}
 }
 
@@ -275,6 +289,17 @@ export const uploadRouter = {
 			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "Los estados de cuenta deben subirse en formato PDF.",
+				});
+			}
+
+			if (
+				input.resourceType === "cobros_visita_evidencia" &&
+				!(MIME_EVIDENCIA_VISITA as readonly string[]).includes(
+					resolvedMime.mimeType,
+				)
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "La evidencia de la visita va en fotos (JPG, PNG o WebP).",
 				});
 			}
 

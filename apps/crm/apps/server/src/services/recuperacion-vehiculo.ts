@@ -43,6 +43,7 @@ import {
 	filasNotificacionCobros,
 	obtenerSupervisoresCobros,
 } from "./cobros-notif-helpers";
+import { vincularRecuperacionAVisita } from "./visitas-cobros";
 
 type RespuestaCartera = Awaited<
 	ReturnType<typeof carteraBackClient.enviarARecuperacionVehiculo>
@@ -80,8 +81,15 @@ export async function tomarCandadoRecuperacion(
 	);
 }
 
+/**
+ * `visitaId`: la entrega sale de una visita (CB-037/038). El vínculo se anota
+ * en la misma transacción, así un doble clic no deja dos entregas para la
+ * misma visita. Si cartera rechaza el traslado y el registro se borra, el
+ * vínculo se limpia solo (FK con ON DELETE SET NULL).
+ */
 async function insertarRegistro(
 	valores: typeof recuperacionesVehiculo.$inferInsert,
+	visitaId?: string,
 ): Promise<string> {
 	return db.transaction(async (tx) => {
 		await tomarCandadoRecuperacion(tx, valores.casoCobroId);
@@ -89,6 +97,7 @@ async function insertarRegistro(
 			.insert(recuperacionesVehiculo)
 			.values(valores)
 			.returning({ id: recuperacionesVehiculo.id });
+		if (visitaId) await vincularRecuperacionAVisita(tx, visitaId, registro.id);
 		return registro.id;
 	});
 }
@@ -281,6 +290,8 @@ export async function prepararEnvioRecuperacion(params: {
 	tipo: TipoEnvioRecuperacion;
 	detalle: DetalleRecuperacion;
 	registradoPor: string;
+	/** La visita de la que sale la entrega (CB-037/038), ya validada. */
+	visitaId?: string;
 }) {
 	const contexto = await leerContextoCartera(params.numeroSifco);
 	const registroId = await insertarRegistro(
@@ -292,6 +303,7 @@ export async function prepararEnvioRecuperacion(params: {
 			registradoPor: params.registradoPor,
 			foto: contexto.foto,
 		}),
+		params.visitaId,
 	);
 
 	const descartar = async (): Promise<void> => {
@@ -426,6 +438,8 @@ export async function registrarEntregaSinTraslado(params: {
 	bucket: number;
 	detalle: DetalleRecuperacion;
 	registradoPor: string;
+	/** La visita de la que sale la entrega (CB-037/038), ya validada. */
+	visitaId?: string;
 }): Promise<{ registroId: string }> {
 	const contexto = await leerContextoCartera(params.numeroSifco);
 	const responsable = await usuarioPorEmail(contexto.asesorEmail);
@@ -442,6 +456,7 @@ export async function registrarEntregaSinTraslado(params: {
 				bucketOrigen: params.bucket,
 				bucketDestino: params.bucket,
 			}),
+			params.visitaId,
 		),
 	};
 	await avisarRecuperacion({

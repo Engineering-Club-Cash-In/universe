@@ -113,6 +113,46 @@ export function documentIdDesdeLink(link: string | null): string | null {
 	return m?.[1] ?? null;
 }
 
+/** Los enlaces de firma guardados en las columnas de siempre. */
+interface ConEnlacesViejos {
+	signingProvider: string | null;
+	clientSigningLink: string | null;
+	representativeSigningLink: string | null;
+	additionalSigningLinks: string[] | null;
+}
+
+/**
+ * Si el contrato salió por el respaldo de Documenso.
+ *
+ * `signing_provider` se agregó sin rellenar los de antes, así que en esos se
+ * mira el enlace: los de Documenso son `/sign/{token}`, los de WeeTrust
+ * `/signatory/...`. El CRM no sabe borrar en Documenso: tratarlo como uno de
+ * WeeTrust sin documento dejaba sus enlaces vivos sin rastro acá.
+ */
+export function salioPorDocumenso(contrato: ConEnlacesViejos): boolean {
+	if (contrato.signingProvider) return contrato.signingProvider === "documenso";
+	return [
+		contrato.clientSigningLink,
+		contrato.representativeSigningLink,
+		...(contrato.additionalSigningLinks ?? []),
+	].some((link) => Boolean(link && /\/sign\/[^/?#]+/.test(link)));
+}
+
+/**
+ * El `documentID` de WeeTrust sacado de los enlaces guardados, para los
+ * contratos de antes de que se guardara. Nunca de uno de Documenso.
+ */
+export function documentIdDesdeLosEnlaces(
+	contrato: ConEnlacesViejos,
+): string | null {
+	if (salioPorDocumenso(contrato)) return null;
+	return (
+		documentIdDesdeLink(contrato.clientSigningLink) ??
+		documentIdDesdeLink(contrato.representativeSigningLink) ??
+		documentIdDesdeLink(contrato.additionalSigningLinks?.[0] ?? null)
+	);
+}
+
 /**
  * Guarda quién firma un contrato, con su rol y su enlace.
  *

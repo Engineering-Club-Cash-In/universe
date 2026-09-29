@@ -6,10 +6,19 @@ export function formatInsuranceProviderLabel(
 	return provider === "gyt" ? "Seguro: GyT" : "Seguro: Universales";
 }
 
-export function getQuotationInsuranceFieldName(
+export function formatFinancedInsuranceLabel(
 	provider: "universales" | "gyt",
-): "insuranceCost" | "extraInsuranceCost" {
-	return provider === "gyt" ? "extraInsuranceCost" : "insuranceCost";
+	membershipCost: number,
+): string {
+	return provider === "gyt" && membershipCost > 0
+		? "Seguro + membresía: GyT"
+		: formatInsuranceProviderLabel(provider);
+}
+
+export function getQuotationInsuranceFieldName(
+	_provider: "universales" | "gyt",
+): "insuranceCost" {
+	return "insuranceCost";
 }
 
 export function isQuotationInsuranceBreakdownLocked(
@@ -31,18 +40,19 @@ export function getQuotationInsuranceDisplay(input: {
 
 	return {
 		insuranceProvider,
-		insuranceCost:
-			Number(isGyt ? input.extraInsuranceCost : input.insuranceCost) || 0,
+		insuranceCost: Number(input.insuranceCost) || 0,
 		membershipCost:
 			Number(isGyt ? input.extraMembershipCost : input.membershipCost) || 0,
 	};
 }
 
-export function formatQuotationClientName(input: object & {
-	leadFirstName?: string | null;
-	leadLastName?: string | null;
-	companyName?: string | null;
-}) {
+export function formatQuotationClientName(
+	input: object & {
+		leadFirstName?: string | null;
+		leadLastName?: string | null;
+		companyName?: string | null;
+	},
+) {
 	return (
 		[input.leadFirstName, input.leadLastName]
 			.filter((part): part is string => Boolean(part?.trim()))

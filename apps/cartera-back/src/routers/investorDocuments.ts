@@ -10,6 +10,26 @@ import {
 } from "../utils/functions/uploadsFiles";
 import { authMiddleware } from "./midleware";
 
+/**
+ * Los firmantes de un contrato del CRM, sin sus enlaces de firma.
+ *
+ * Con un enlace se firma en nombre de esa persona, y acá nadie lo usa: la
+ * ficha y el portal muestran el documento. El CRM ya no los manda; esto los
+ * saca también de las filas que se copiaron antes, para que ningún listado los
+ * entregue.
+ */
+function sinEnlacesDeFirma<T extends { firmantes?: unknown }>(doc: T): T {
+  if (!Array.isArray(doc.firmantes)) return doc;
+  return {
+    ...doc,
+    firmantes: doc.firmantes.map((firmante) =>
+      firmante && typeof firmante === "object"
+        ? { ...(firmante as Record<string, unknown>), enlace: null }
+        : firmante,
+    ),
+  };
+}
+
 export const investorDocumentsRouter = new Elysia()
   .use(authMiddleware)
 
@@ -92,7 +112,7 @@ export const investorDocumentsRouter = new Elysia()
         // Firmar URLs
         const documentosConUrl = await Promise.all(
           documentos.map(async (doc) => ({
-            ...doc,
+            ...sinEnlacesDeFirma(doc),
             url: await getSignedDocumentUrl(doc.key),
           }))
         );
@@ -146,7 +166,7 @@ export const investorDocumentsRouter = new Elysia()
           documentos.map(async (doc) => {
             const mimeType = await resolveDocumentMimeType(doc.key);
             return {
-              ...doc,
+              ...sinEnlacesDeFirma(doc),
               url: await getSignedDocumentUrl(doc.key, { disposition: "inline", filename: doc.nombre, mimeType }),
               downloadUrl: await getSignedDocumentUrl(doc.key, { disposition: "attachment", filename: doc.nombre, mimeType }),
             };
@@ -204,7 +224,7 @@ export const investorDocumentsRouter = new Elysia()
           documentos.map(async (doc) => {
             const mimeType = await resolveDocumentMimeType(doc.key);
             return {
-              ...doc,
+              ...sinEnlacesDeFirma(doc),
               url: await getSignedDocumentUrl(doc.key, { disposition: "inline", filename: doc.nombre, mimeType }),
               downloadUrl: await getSignedDocumentUrl(doc.key, { disposition: "attachment", filename: doc.nombre, mimeType }),
             };
@@ -235,6 +255,25 @@ export const investorDocumentsRouter = new Elysia()
     async ({ params, body, set }) => {
       try {
         const documentoId = Number(params.documentoId);
+
+        // Un contrato del CRM anulado no se vuelve a mostrar desde acá: sus
+        // enlaces ya no sirven y el CRM lo ocultó a propósito. Mostrarlo le
+        // ofrecería al inversionista un contrato que se descartó.
+        const [actual] = await db
+          .select({
+            contrato_id: documentos_inversionista.contrato_id,
+            estado_firma: documentos_inversionista.estado_firma,
+          })
+          .from(documentos_inversionista)
+          .where(eq(documentos_inversionista.documento_id, documentoId));
+
+        if (actual?.contrato_id && body.visible && actual.estado_firma === "cancelled") {
+          set.status = 409;
+          return {
+            success: false,
+            message: "Este contrato está anulado en el CRM: no se puede volver a mostrar.",
+          };
+        }
 
         const [updated] = await db
           .update(documentos_inversionista)
@@ -288,6 +327,17 @@ export const investorDocumentsRouter = new Elysia()
         if (!documento) {
           set.status = 404;
           return { success: false, message: "Documento no encontrado" };
+        }
+
+        // Los contratos los maneja el CRM, que es el dueño: borrarlos acá
+        // perdía la copia de un documento legal (el CRM la vuelve a mandar en
+        // la próxima firma) sin anularlo en ningún lado. Se anulan desde allá.
+        if (documento.contrato_id) {
+          set.status = 409;
+          return {
+            success: false,
+            message: "Es un contrato del CRM: se anula desde el CRM, no se borra acá.",
+          };
         }
 
         // Eliminar de R2

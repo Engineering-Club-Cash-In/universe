@@ -29,6 +29,7 @@ import {
 	linksPorRol,
 } from "../lib/contract-signatories";
 import { getSignatureMode } from "../lib/contract-signature-mode";
+import { compraDelContrato, conMarcaDeCompra } from "../lib/contrato-compra";
 import {
 	estadoEnWeeTrust,
 	sincronizarEstadoDeFirma,
@@ -211,6 +212,13 @@ async function contratoDeInversionista(contractId: string): Promise<{
  * reenviar los enlaces, así que ese contrato no sirve y es mejor deshacerlo que
  * dejarlo a medias.
  */
+/**
+ * Cómo empieza el motivo de los contratos que se anularon al descartar la
+ * vista previa ("Volver" antes del Listo). El guardado lo busca para no dejar
+ * vivo un contrato que se estaba generando mientras se descartaba.
+ */
+const MOTIVO_VISTA_PREVIA_DESCARTADA = "Se corrigió antes de mandarlo";
+
 async function guardarContratoDeInversion(params: {
 	batchId: string;
 	investorId: number;
@@ -221,6 +229,20 @@ async function guardarContratoDeInversion(params: {
 	/** Lo armó una persona por fuera, no la plantilla. */
 	subidoAMano?: boolean;
 	/**
+	 * La aceptación de la compra que se leyó al empezar, antes de ir a
+	 * WeeTrust. Si con el candado tomado la batería ya es de otra compra (entró
+	 * un aviso nuevo mientras se generaba), no se guarda: el documento se armó
+	 * con los términos de la compra anterior, y guardarlo lo daba por de la
+	 * nueva —su marca, su fecha— y el Listo lo mandaba en el hilo que no era.
+	 */
+	aceptadaEn: Date;
+	/**
+	 * Cuándo empezó el pedido, antes de ir a WeeTrust. Si en ese rato se
+	 * descartó la vista previa, este contrato era parte de lo que se descartó:
+	 * no se guarda.
+	 */
+	iniciadoEn: Date;
+	/**
 	 * El contrato al que reemplaza, con el motivo por el que se anula.
 	 *
 	 * Va en la misma transacción que el nuevo: si dos personas reemplazan el
@@ -228,7 +250,15 @@ async function guardarContratoDeInversion(params: {
 	 * reclamado y pierde. Su documento se borra en WeeTrust.
 	 */
 	reemplaza?: { contractId: string; motivo: string };
-}): Promise<string> {
+}): Promise<{
+	id: string;
+	/**
+	 * Cómo estaba el contrato reemplazado al bloquearlo, que es lo que vale
+	 * para limpiarlo en WeeTrust: pudo terminar de firmarse mientras el nuevo
+	 * se generaba, y lo que se leyó antes ya no sirve. null si no reemplaza.
+	 */
+	estadoDelReemplazado: string | null;
+}> {
 	const { resultado } = params;
 	const firmantes = resultado.signatories ?? [];
 
@@ -259,6 +289,35 @@ async function guardarContratoDeInversion(params: {
 		// Tampoco una que se completó en ese rato (se firmaron todos los que
 		// tenía): una cerrada no admite cambios, y guardar éste la reabría con
 		// un contrato nuevo que nadie pidió sobre una batería ya terminada.
+		if (
+			bateria &&
+			bateria.acceptedAt.getTime() !== params.aceptadaEn.getTime()
+		) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Entró otra compra sobre estos créditos mientras se generaba el contrato: no se guardó. Recargá la batería y volvé a emitirlo.",
+			});
+		}
+		// Un "Volver" mientras éste esperaba a WeeTrust: la vista previa que se
+		// descartó incluía este contrato, aunque todavía no tuviera fila.
+		const [descartadoEnElMedio] = await tx
+			.select({ id: generatedLegalContracts.id })
+			.from(generatedLegalContracts)
+			.where(
+				and(
+					eq(generatedLegalContracts.batchId, params.batchId),
+					eq(generatedLegalContracts.status, "cancelled"),
+					gte(generatedLegalContracts.cancelledAt, params.iniciadoEn),
+					sql`${generatedLegalContracts.cancellationReason} like ${`${MOTIVO_VISTA_PREVIA_DESCARTADA}%`}`,
+				),
+			)
+			.limit(1);
+		if (descartadoEnElMedio) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Se descartó la vista previa mientras se generaba el contrato: no se guardó.",
+			});
+		}
 		if (bateria?.status === "descartada" || bateria?.status === "completada") {
 			throw new ORPCError("CONFLICT", {
 				message:
@@ -278,7 +337,7 @@ async function guardarContratoDeInversion(params: {
 					eq(generatedLegalContracts.weetrustDocumentId, resultado.documentID),
 				)
 				.limit(1);
-			if (existente) return existente.id;
+			if (existente) return { id: existente.id, estadoDelReemplazado: null };
 		}
 
 		// Uno vigente por tipo en ESTA compra: los de una compra anterior sobre
@@ -308,6 +367,7 @@ async function guardarContratoDeInversion(params: {
 
 		// Se reclama el viejo ANTES de insertar el nuevo: bloquea la fila, y si
 		// otra persona ya lo reemplazó, ésta pierde acá y no llega a guardar nada.
+		let estadoDelReemplazado: string | null = null;
 		if (params.reemplaza) {
 			const [original] = await tx
 				.select({
@@ -329,6 +389,7 @@ async function guardarContratoDeInversion(params: {
 						"Otra persona acaba de reemplazar este contrato. Recargá para ver el nuevo.",
 				});
 			}
+			estadoDelReemplazado = original.status;
 		}
 
 		const [guardado] = await tx
@@ -347,9 +408,15 @@ async function guardarContratoDeInversion(params: {
 				// Con la marca, la ficha pide mirar dónde quedaron las firmas: el
 				// documento lo armó una persona y puede traer las líneas en otro lado
 				// que la plantilla.
-				apiResponse: params.subidoAMano
-					? conMarcaDeSubidoAMano(resultado)
-					: resultado,
+				// Y de qué compra es: la batería sólo guarda la última.
+				apiResponse: (() => {
+					const respuesta = params.subidoAMano
+						? conMarcaDeSubidoAMano(resultado)
+						: resultado;
+					return bateria
+						? conMarcaDeCompra(respuesta, bateria.acceptedAt)
+						: respuesta;
+				})(),
 				// La key de R2, no la URL firmada que se muestra: esa vence en una
 				// hora, y con ella no se puede volver a emitir el documento.
 				pdfLink: resultado.r2Key || resultado.linkDocument || null,
@@ -378,7 +445,7 @@ async function guardarContratoDeInversion(params: {
 				.where(eq(generatedLegalContracts.id, params.reemplaza.contractId));
 		}
 
-		return guardado.id;
+		return { id: guardado.id, estadoDelReemplazado };
 	});
 }
 
@@ -877,6 +944,8 @@ export const investorContractsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Antes de hablar con WeeTrust: ver `iniciadoEn` en el guardado.
+			const iniciadoEn = new Date();
 			const bateria = await bateriaAbierta(input.batchId);
 
 			const tipos = input.contracts.map((c) => c.contractType);
@@ -995,22 +1064,26 @@ export const investorContractsRouter = {
 				try {
 					const reemplazado = vigentePorTipo.get(pedido.contractType);
 
-					const id = await guardarContratoDeInversion({
-						batchId: input.batchId,
-						investorId: bateria.investorId,
-						contractType: pedido.contractType,
-						contractName: pedido.contractName,
-						resultado,
-						userId: context.userId,
-						...(reemplazado
-							? {
-									reemplaza: {
-										contractId: reemplazado.id,
-										motivo: "se volvió a emitir desde jurídico",
-									},
-								}
-							: {}),
-					});
+					const { id, estadoDelReemplazado } = await guardarContratoDeInversion(
+						{
+							batchId: input.batchId,
+							aceptadaEn: bateria.acceptedAt,
+							iniciadoEn,
+							investorId: bateria.investorId,
+							contractType: pedido.contractType,
+							contractName: pedido.contractName,
+							resultado,
+							userId: context.userId,
+							...(reemplazado
+								? {
+										reemplaza: {
+											contractId: reemplazado.id,
+											motivo: "se volvió a emitir desde jurídico",
+										},
+									}
+								: {}),
+						},
+					);
 
 					// El documento viejo, ya con su fila anulada: se borra allá para
 					// que sus enlaces no sigan firmando, y la papelería del
@@ -1018,7 +1091,9 @@ export const investorContractsRouter = {
 					if (reemplazado) {
 						await borrarElViejoEnWeeTrust({
 							contractId: reemplazado.id,
-							status: reemplazado.status,
+							// Lo que se leyó con la fila bloqueada: pudo terminar de
+							// firmarse mientras se generaba el nuevo.
+							status: estadoDelReemplazado ?? reemplazado.status,
 							weetrustDocumentId: reemplazado.weetrustDocumentId,
 							razon: "Reemplazado: se volvió a emitir desde jurídico",
 							origen: "generateInvestorContracts",
@@ -1122,6 +1197,8 @@ export const investorContractsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Antes de hablar con WeeTrust: ver `iniciadoEn` en el guardado.
+			const iniciadoEn = new Date();
 			if (input.replaceContractId && !input.motivo) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "Hay que decir por qué se anula el contrato anterior.",
@@ -1236,24 +1313,28 @@ export const investorContractsRouter = {
 			}
 
 			let contractId: string;
+			let estadoDelReemplazado: string | null = null;
 			try {
-				contractId = await guardarContratoDeInversion({
-					batchId: input.batchId,
-					investorId: bateria.investorId,
-					contractType: input.contractType,
-					contractName: input.contractName,
-					resultado,
-					userId: context.userId,
-					subidoAMano: true,
-					...(reemplazado && input.motivo
-						? {
-								reemplaza: {
-									contractId: reemplazado.id,
-									motivo: etiquetaDeMotivo(input.motivo),
-								},
-							}
-						: {}),
-				});
+				({ id: contractId, estadoDelReemplazado } =
+					await guardarContratoDeInversion({
+						batchId: input.batchId,
+						aceptadaEn: bateria.acceptedAt,
+						iniciadoEn,
+						investorId: bateria.investorId,
+						contractType: input.contractType,
+						contractName: input.contractName,
+						resultado,
+						userId: context.userId,
+						subidoAMano: true,
+						...(reemplazado && input.motivo
+							? {
+									reemplaza: {
+										contractId: reemplazado.id,
+										motivo: etiquetaDeMotivo(input.motivo),
+									},
+								}
+							: {}),
+					}));
 			} catch (error) {
 				// El documento ya salió a WeeTrust con sus invitaciones: se borra allá
 				// para que un reintento no deje dos vivos del mismo contrato.
@@ -1280,7 +1361,8 @@ export const investorContractsRouter = {
 			if (reemplazado && input.motivo) {
 				await borrarElViejoEnWeeTrust({
 					contractId: reemplazado.id,
-					status: reemplazado.status,
+					// El leído con la fila bloqueada, como al generar.
+					status: estadoDelReemplazado ?? reemplazado.status,
 					weetrustDocumentId: reemplazado.weetrustDocumentId,
 					razon: `Reemplazado: ${etiquetaDeMotivo(input.motivo)}`,
 					origen: "uploadInvestorContract",
@@ -1372,36 +1454,45 @@ export const investorContractsRouter = {
 			// Y lo que se hace allá sale del estado leído con la fila bloqueada, no
 			// del de arriba: si la última firma entró en el medio, el documento ya
 			// está completo y no se intenta borrar como si faltara firmar.
-			const estadoAlAnular = await db.transaction(async (tx) => {
-				const [actual] = await tx
-					.select({
-						status: generatedLegalContracts.status,
-						reemplazadoPor: generatedLegalContracts.replacedByContractId,
-					})
-					.from(generatedLegalContracts)
-					.where(eq(generatedLegalContracts.id, input.contractId))
-					.for("update")
-					.limit(1);
+			// Y con el candado de la batería, el del Listo: si no, una anulación que
+			// caía mientras el Listo armaba el correo dejaba en el hilo los enlaces
+			// de un contrato recién anulado, cuyo documento se borra enseguida.
+			const estadoAlAnular = await conCandadoDeBateria(contrato.batchId, () =>
+				db.transaction(async (tx) => {
+					const [actual] = await tx
+						.select({
+							status: generatedLegalContracts.status,
+							reemplazadoPor: generatedLegalContracts.replacedByContractId,
+						})
+						.from(generatedLegalContracts)
+						.where(eq(generatedLegalContracts.id, input.contractId))
+						.for("update")
+						.limit(1);
 
-				if (!actual || actual.status === "cancelled" || actual.reemplazadoPor) {
-					throw new ORPCError("CONFLICT", {
-						message:
-							"Otra persona acaba de anular o reemplazar este contrato. Recargá para ver cómo quedó.",
-					});
-				}
+					if (
+						!actual ||
+						actual.status === "cancelled" ||
+						actual.reemplazadoPor
+					) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Otra persona acaba de anular o reemplazar este contrato. Recargá para ver cómo quedó.",
+						});
+					}
 
-				await tx
-					.update(generatedLegalContracts)
-					.set({
-						status: "cancelled",
-						cancellationReason: razon,
-						cancelledAt: ahora,
-						updatedAt: ahora,
-					})
-					.where(eq(generatedLegalContracts.id, input.contractId));
+					await tx
+						.update(generatedLegalContracts)
+						.set({
+							status: "cancelled",
+							cancellationReason: razon,
+							cancelledAt: ahora,
+							updatedAt: ahora,
+						})
+						.where(eq(generatedLegalContracts.id, input.contractId));
 
-				return actual.status;
-			});
+					return actual.status;
+				}),
+			);
 
 			// Recién ahora el documento allá, con el detalle de cómo quedó pegado
 			// al motivo.
@@ -1449,73 +1540,102 @@ export const investorContractsRouter = {
 	descartarVistaPrevia: juridicoProcedure
 		.input(z.object({ batchId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			const [bateria] = await db
-				.select({
-					status: investorContractBatches.status,
-					acceptedAt: investorContractBatches.acceptedAt,
-				})
-				.from(investorContractBatches)
-				.where(eq(investorContractBatches.id, input.batchId))
-				.limit(1);
-
-			if (!bateria) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Esa batería de contratos no existe",
-				});
-			}
-
-			if (bateria.status !== "pendiente") {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"Estos contratos ya se mandaron al hilo de la compra: para corregir uno, reemplazalo o anulalo.",
-				});
-			}
-
-			// Los de la vista previa: los de esta compra que siguen vigentes. Uno
-			// firmado no se toca —WeeTrust no deja borrarlo— y se dice.
-			const vigentes = await db
-				.select()
-				.from(generatedLegalContracts)
-				.where(
-					and(
-						eq(generatedLegalContracts.batchId, input.batchId),
-						ne(generatedLegalContracts.status, "cancelled"),
-						sql`${generatedLegalContracts.replacedByContractId} is null`,
-						gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
-					),
-				);
-
 			const quien = context.session?.user?.name ?? "alguien del CRM";
-			const razon = `Se corrigió antes de mandarlo (descartado por ${quien})`;
-			const firmados: string[] = [];
-			let descartados = 0;
+			const razon = `${MOTIVO_VISTA_PREVIA_DESCARTADA} (descartado por ${quien})`;
 
-			for (const contrato of vigentes) {
-				if (contrato.status === "signed") {
-					firmados.push(contrato.contractName);
-					continue;
-				}
+			// Mirar qué hay y anularlo, con el candado de la batería: el mismo que
+			// toma el guardado de un contrato. Uno que termina de guardarse después
+			// ve la marca de este descarte y no queda (ver `iniciadoEn`). Lo de
+			// WeeTrust va afuera: puede tardar, y el candado no espera 300s.
+			const { anulados, firmados } = await conCandadoDeBateria(
+				input.batchId,
+				async () => {
+					const [bateria] = await db
+						.select({
+							status: investorContractBatches.status,
+							acceptedAt: investorContractBatches.acceptedAt,
+						})
+						.from(investorContractBatches)
+						.where(eq(investorContractBatches.id, input.batchId))
+						.limit(1);
 
-				// Igual que al anular: la fila primero, y sólo si nadie la tocó.
-				const [marcado] = await db
-					.update(generatedLegalContracts)
-					.set({
-						status: "cancelled",
-						cancellationReason: razon,
-						cancelledAt: new Date(),
-						updatedAt: new Date(),
-					})
-					.where(
-						and(
-							eq(generatedLegalContracts.id, contrato.id),
-							eq(generatedLegalContracts.status, "pending"),
-							sql`${generatedLegalContracts.replacedByContractId} is null`,
-						),
-					)
-					.returning({ id: generatedLegalContracts.id });
+					if (!bateria) {
+						throw new ORPCError("NOT_FOUND", {
+							message: "Esa batería de contratos no existe",
+						});
+					}
 
-				if (!marcado) continue;
+					if (bateria.status !== "pendiente") {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Estos contratos ya se mandaron al hilo de la compra: para corregir uno, reemplazalo o anulalo.",
+						});
+					}
 
+					// Los de la vista previa: los de esta compra que siguen vigentes.
+					// Uno firmado no se toca —WeeTrust no deja borrarlo— y se dice.
+					const vigentes = await db
+						.select()
+						.from(generatedLegalContracts)
+						.where(
+							and(
+								eq(generatedLegalContracts.batchId, input.batchId),
+								ne(generatedLegalContracts.status, "cancelled"),
+								sql`${generatedLegalContracts.replacedByContractId} is null`,
+								gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
+							),
+						);
+
+					const firmados: string[] = [];
+					const anulados: typeof vigentes = [];
+					for (const contrato of vigentes) {
+						if (contrato.status === "signed") {
+							firmados.push(contrato.contractName);
+							continue;
+						}
+
+						// Igual que al anular: la fila primero, y sólo si nadie la tocó.
+						const [marcado] = await db
+							.update(generatedLegalContracts)
+							.set({
+								status: "cancelled",
+								cancellationReason: razon,
+								cancelledAt: new Date(),
+								updatedAt: new Date(),
+							})
+							.where(
+								and(
+									eq(generatedLegalContracts.id, contrato.id),
+									eq(generatedLegalContracts.status, "pending"),
+									sql`${generatedLegalContracts.replacedByContractId} is null`,
+								),
+							)
+							.returning({ id: generatedLegalContracts.id });
+
+						if (marcado) {
+							anulados.push(contrato);
+							continue;
+						}
+
+						// No se pudo: alguien lo tocó entre la lectura y el UPDATE. Si
+						// es que se terminó de firmar (un webhook o una consulta de
+						// estado), va con los firmados: sigue vivo y hay que decirlo,
+						// no dar el descarte por completo. Si lo anuló o reemplazó otra
+						// persona, ya no está en la vista previa.
+						const [ahora] = await db
+							.select({ status: generatedLegalContracts.status })
+							.from(generatedLegalContracts)
+							.where(eq(generatedLegalContracts.id, contrato.id))
+							.limit(1);
+						if (ahora?.status === "signed") {
+							firmados.push(contrato.contractName);
+						}
+					}
+					return { anulados, firmados };
+				},
+			);
+
+			for (const contrato of anulados) {
 				await borrarElViejoEnWeeTrust({
 					contractId: contrato.id,
 					status: contrato.status,
@@ -1524,8 +1644,8 @@ export const investorContractsRouter = {
 					origen: "descartarVistaPrevia",
 				});
 				void espejarEstadoDeFirmaEnCartera(contrato.id);
-				descartados += 1;
 			}
+			const descartados = anulados.length;
 
 			await recalcularEstadoDeLaBateria(input.batchId, context.userId);
 
@@ -1548,115 +1668,124 @@ export const investorContractsRouter = {
 	marcarBateriaLista: juridicoProcedure
 		.input(z.object({ batchId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			const [bateria] = await db
-				.select({
-					status: investorContractBatches.status,
-					acceptedAt: investorContractBatches.acceptedAt,
-				})
-				.from(investorContractBatches)
-				.where(eq(investorContractBatches.id, input.batchId))
-				.limit(1);
+			// Todo con el candado de la batería, el mismo del envío de lo que se
+			// agrega después y el del aviso de una compra nueva: leer qué se manda,
+			// reclamar, mandar y, si el correo falla, devolver. Leyendo afuera, otra
+			// compra sobre los mismos créditos podía entrar en el medio —nueva
+			// aceptación, nuevo hilo— y el Listo mandaba los contratos de la compra
+			// anterior en el hilo de la nueva, dándola por enviada.
+			const { correo, contratos } = await conCandadoDeBateria(
+				input.batchId,
+				async () => {
+					const [bateria] = await db
+						.select({
+							status: investorContractBatches.status,
+							acceptedAt: investorContractBatches.acceptedAt,
+						})
+						.from(investorContractBatches)
+						.where(eq(investorContractBatches.id, input.batchId))
+						.limit(1);
 
-			if (!bateria) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Esa batería de contratos no existe",
-				});
-			}
+					if (!bateria) {
+						throw new ORPCError("NOT_FOUND", {
+							message: "Esa batería de contratos no existe",
+						});
+					}
 
-			if (bateria.status !== "pendiente") {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						bateria.status === "en_proceso"
-							? "Esta batería ya se mandó. Lo que agregues o reemplaces sale solo al hilo."
-							: bateria.status === "completada"
-								? "Esta batería ya está cerrada: se firmó todo."
-								: "Esta batería se descartó.",
-				});
-			}
+					if (bateria.status !== "pendiente") {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								bateria.status === "en_proceso"
+									? "Esta batería ya se mandó. Lo que agregues o reemplaces sale solo al hilo."
+									: bateria.status === "completada"
+										? "Esta batería ya está cerrada: se firmó todo."
+										: "Esta batería se descartó.",
+						});
+					}
 
-			// Los de ESTA compra. Una batería puede venir de otra compra anterior
-			// sobre los mismos créditos, y los contratos de aquélla ya salieron en
-			// su propio hilo.
-			const contratos = await db
-				.select({ id: generatedLegalContracts.id })
-				.from(generatedLegalContracts)
-				.where(
-					and(
-						eq(generatedLegalContracts.batchId, input.batchId),
-						ne(generatedLegalContracts.status, "cancelled"),
-						gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
-					),
-				)
-				.orderBy(asc(generatedLegalContracts.generatedAt));
+					// Los de ESTA compra. Una batería puede venir de otra compra
+					// anterior sobre los mismos créditos, y los contratos de aquélla ya
+					// salieron en su propio hilo.
+					const contratos = await db
+						.select({ id: generatedLegalContracts.id })
+						.from(generatedLegalContracts)
+						.where(
+							and(
+								eq(generatedLegalContracts.batchId, input.batchId),
+								ne(generatedLegalContracts.status, "cancelled"),
+								gte(generatedLegalContracts.generatedAt, bateria.acceptedAt),
+							),
+						)
+						.orderBy(asc(generatedLegalContracts.generatedAt));
 
-			if (contratos.length === 0) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Todavía no hay contratos que mandar.",
-				});
-			}
+					if (contratos.length === 0) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: "Todavía no hay contratos que mandar.",
+						});
+					}
 
-			// Reclamar, mandar y, si el correo falla, devolver: todo con el candado
-			// de la batería, el mismo del envío de lo que se agrega después. Así un
-			// agregado no sale al hilo en medio de un "Listo" que termina fallando.
-			const correo = await conCandadoDeBateria(input.batchId, async () => {
-				// Se reclama el paso a "Por firmar" antes de mandar: dos clics a la vez
-				// mandaban dos correos. El que no lo reclama, no manda.
-				const ahora = new Date();
-				const [reclamada] = await db
-					.update(investorContractBatches)
-					.set({
-						status: "en_proceso",
-						startedAt: ahora,
-						startedBy: context.userId,
-						updatedAt: ahora,
-					})
-					.where(
-						and(
-							eq(investorContractBatches.id, input.batchId),
-							eq(investorContractBatches.status, "pendiente"),
-						),
-					)
-					.returning({ id: investorContractBatches.id });
-
-				if (!reclamada) {
-					throw new ORPCError("CONFLICT", {
-						message: "Otra persona le acaba de dar Listo a esta batería.",
-					});
-				}
-
-				const correo = await mandarContratosAlHilo({
-					batchId: input.batchId,
-					contractIds: contratos.map((c) => c.id),
-					motivo: { tipo: "listo" },
-				}).catch((error: unknown) => ({
-					enviado: false,
-					enHilo: false,
-					error: error instanceof Error ? error.message : "No se pudo mandar",
-				}));
-
-				if (!correo.enviado) {
-					// Sin correo no hay Listo: vuelve a pendiente, para que se pueda
-					// reintentar sin que nadie crea que los enlaces ya salieron.
-					await db
+					// Se reclama el paso a "Por firmar" antes de mandar: dos clics a la
+					// vez mandaban dos correos. El que no lo reclama, no manda. Y sólo si
+					// la batería sigue en la compra que se leyó.
+					const ahora = new Date();
+					const [reclamada] = await db
 						.update(investorContractBatches)
 						.set({
-							status: "pendiente",
-							startedAt: null,
-							startedBy: null,
-							updatedAt: new Date(),
+							status: "en_proceso",
+							startedAt: ahora,
+							startedBy: context.userId,
+							updatedAt: ahora,
 						})
 						.where(
 							and(
 								eq(investorContractBatches.id, input.batchId),
-								eq(investorContractBatches.status, "en_proceso"),
+								eq(investorContractBatches.status, "pendiente"),
+								eq(investorContractBatches.acceptedAt, bateria.acceptedAt),
 							),
-						);
-					throw new ORPCError("BAD_REQUEST", {
-						message: `No se pudo mandar el correo (${correo.error ?? "sin detalle"}). La batería sigue pendiente: probá de nuevo.`,
-					});
-				}
-				return correo;
-			});
+						)
+						.returning({ id: investorContractBatches.id });
+
+					if (!reclamada) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La batería cambió mientras se mandaba (otra persona le dio Listo, o entró otra compra). Recargá la pantalla.",
+						});
+					}
+
+					const correo = await mandarContratosAlHilo({
+						batchId: input.batchId,
+						contractIds: contratos.map((c) => c.id),
+						motivo: { tipo: "listo" },
+					}).catch((error: unknown) => ({
+						enviado: false,
+						enHilo: false,
+						error: error instanceof Error ? error.message : "No se pudo mandar",
+					}));
+
+					if (!correo.enviado) {
+						// Sin correo no hay Listo: vuelve a pendiente, para que se pueda
+						// reintentar sin que nadie crea que los enlaces ya salieron.
+						await db
+							.update(investorContractBatches)
+							.set({
+								status: "pendiente",
+								startedAt: null,
+								startedBy: null,
+								updatedAt: new Date(),
+							})
+							.where(
+								and(
+									eq(investorContractBatches.id, input.batchId),
+									eq(investorContractBatches.status, "en_proceso"),
+								),
+							);
+						throw new ORPCError("BAD_REQUEST", {
+							message: `No se pudo mandar el correo (${correo.error ?? "sin detalle"}). La batería sigue pendiente: probá de nuevo.`,
+						});
+					}
+					return { correo, contratos };
+				},
+			);
 
 			// Puede que ya estén todos firmados (uno subido ya firmado, o gente
 			// rápida): entonces se cierra de una vez.
@@ -2109,7 +2238,13 @@ export const investorContractsRouter = {
 							contractType: contrato.contractType,
 							contractName: contrato.contractName,
 							templateId: contrato.templateId,
-							apiResponse: resultado,
+							// Se lleva la compra del original: es el mismo contrato.
+							apiResponse: (() => {
+								const compra = compraDelContrato(contrato.apiResponse);
+								return compra
+									? conMarcaDeCompra(resultado, new Date(compra))
+									: resultado;
+							})(),
 							pdfLink: r2KeyDelPdf,
 							signingProvider: resultado.signingProvider ?? "weetrust",
 							signatureMode: contrato.signatureMode,

@@ -1,4 +1,5 @@
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import config from "../config";
 import { client, db } from "../database";
 import {
   creditos,
@@ -6,18 +7,89 @@ import {
   nexa_payment_events,
   pagos_credito,
 } from "../database/db";
+import { facturarPagoCompleto } from "../routers/cofidi";
 import { aplicarPagoAlCredito, insertPayment } from "./registerPayment";
+import { createDeferredNexaBilling, runNexaBilling } from "./nexaBilling";
 import {
   withPaymentAdvisoryLock,
   withPaymentBindingLock,
 } from "../utils/paymentAdvisoryLock";
 import { claimNexaPaymentEvent } from "./nexaPaymentRepository";
 import {
+  canAutomaticallyInvoiceNexa,
   createNexaPaymentHandler,
-  formatNexaPaymentDate,
+  getNexaReceiptFields,
   NexaPaymentError,
   type NexaPaymentDependencies,
 } from "./nexaPayments";
+
+export async function startNexaBilling(eventId: number) {
+  const [started] = await db
+    .update(nexa_payment_events)
+    .set({ status: "billing_running", error: null, updated_at: new Date() })
+    .where(and(
+      eq(nexa_payment_events.id, eventId),
+      inArray(nexa_payment_events.status, ["billing_pending", "billing_failed"]),
+    ))
+    .returning({ id: nexa_payment_events.id });
+  return Boolean(started);
+}
+
+export async function completeNexaBilling(eventId: number, paymentId: number) {
+  const [completed] = await db
+    .update(nexa_payment_events)
+    .set({
+      status: "billed",
+      pago_id: paymentId,
+      error: null,
+      updated_at: new Date(),
+    })
+    .where(and(
+      eq(nexa_payment_events.id, eventId),
+      eq(nexa_payment_events.status, "billing_running"),
+    ))
+    .returning({ id: nexa_payment_events.id });
+  if (!completed) throw new Error("nexa billing completion fence failed");
+}
+
+export async function failNexaBilling(
+  eventId: number,
+  status: "billing_failed" | "billing_unknown",
+  code: string,
+) {
+  await db
+    .update(nexa_payment_events)
+    .set({ status, error: code, updated_at: new Date() })
+    .where(and(
+      eq(nexa_payment_events.id, eventId),
+      ne(nexa_payment_events.status, "billed"),
+    ));
+}
+
+const deferredBilling = createDeferredNexaBilling({
+  run: (eventId, paymentIds) => runNexaBilling({
+    enabled: canAutomaticallyInvoiceNexa({
+      environment: config.environment,
+      enabled: config.nexaAutomaticInvoicingEnabled,
+      simulated: process.env.SIMULAR_FACTURAS === "true",
+    }),
+    eventId,
+    paymentIds,
+    start: startNexaBilling,
+    invoice: async (paymentId) => {
+      const set: { status?: number | string } = { status: 200 };
+      const response = await facturarPagoCompleto({
+        body: { pago_id: paymentId },
+        set,
+      });
+      const status = typeof set.status === "number" ? set.status : Number(set.status ?? 200);
+      return { status: Number.isFinite(status) ? status : 500, response };
+    },
+  }),
+  complete: completeNexaBilling,
+  fail: failNexaBilling,
+  logError: () => console.error("Nexa billing finalization failed; durable fence retained"),
+});
 
 export const nexaPaymentDependencies: NexaPaymentDependencies = {
   withCreditLock: (creditoId, work) => withPaymentAdvisoryLock(
@@ -38,6 +110,7 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
     } },
     body,
     context,
+    deferredBilling.isRunning,
   ),
   loadCredit: async (creditoId) => {
     const [row] = await db
@@ -102,19 +175,16 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
       throw error;
     }
 
-    const date = formatNexaPaymentDate(new Date(body.tokenDate));
     const set = { status: 200 };
     const result = await insertPayment({
       body: {
         credito_id: body.creditoId,
         usuario_id: usuarioId,
         monto_boleta: body.amount,
-        fecha_pago: body.tokenDate,
+        ...getNexaReceiptFields(body),
         cuotaApagar: 1,
         url_boletas: [],
-        numeroAutorizacion: body.transactionId,
         registerBy: "NEXA",
-        fecha_boleta: date,
         renuevo_o_nuevo: "NEXA",
         origen_pago: "transferencia",
       },
@@ -130,7 +200,7 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
     await db
       .update(nexa_payment_events)
       .set({
-        status: "applied",
+        status: "billing_pending",
         pago_id: paymentId,
         error: null,
         updated_at: new Date(),
@@ -150,6 +220,9 @@ export const nexaPaymentDependencies: NexaPaymentDependencies = {
         ne(nexa_payment_events.status, "applied"),
       ));
   },
+  billPayments: deferredBilling.run,
+  completeBilling: completeNexaBilling,
+  failBilling: failNexaBilling,
   now: () => new Date(),
 };
 

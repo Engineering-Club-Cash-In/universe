@@ -601,34 +601,112 @@ export const conveniosPago = pgTable("convenios_pago", {
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-// Recuperaciones de vehículos
-export const recuperacionesVehiculo = pgTable("recuperaciones_vehiculo", {
-	id: uuid("id").primaryKey().defaultRandom(),
-	casoCobroId: uuid("caso_cobro_id")
-		.notNull()
-		.references(() => casosCobros.id),
+// Recuperaciones de vehículos.
+//
+// CB-042: cada envío a recuperación desde la Ficha 360 deja una fila acá, con
+// el formulario que ve el asesor de B4. Dos tipos de envío:
+//   · 'tomado'             → recuperación forzosa (el asesor decide quitarla)
+//   · 'entrega_voluntaria' → el cliente la entrega (fecha, lugar, documentos)
+// 'orden_secuestro' queda para el proceso legal, que no se registra desde acá.
+//
+// La tabla ya existía y nadie la llenaba; las columnas viejas conservan su
+// sentido: `fechaRecuperacion` + `completada` = la unidad se recibió, y
+// `responsableRecuperacion` = el asesor de B4 que la lleva. Los catálogos
+// (motivos, estado, documentos) viven en lib/recuperacion-vehiculo.ts.
+export const recuperacionesVehiculo = pgTable(
+	"recuperaciones_vehiculo",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		casoCobroId: uuid("caso_cobro_id")
+			.notNull()
+			.references(() => casosCobros.id),
 
-	// Tipo de recuperación
-	tipoRecuperacion: tipoRecuperacionEnum("tipo_recuperacion").notNull(),
-	fechaRecuperacion: timestamp("fecha_recuperacion"),
+		// Tipo de recuperación
+		tipoRecuperacion: tipoRecuperacionEnum("tipo_recuperacion").notNull(),
+		fechaRecuperacion: timestamp("fecha_recuperacion"),
 
-	// Proceso legal
-	ordenSecuestro: boolean("orden_secuestro").default(false),
-	numeroExpediente: text("numero_expediente"),
-	juzgadoCompetente: text("juzgado_competente"),
+		// Proceso legal
+		ordenSecuestro: boolean("orden_secuestro").default(false),
+		numeroExpediente: text("numero_expediente"),
+		juzgadoCompetente: text("juzgado_competente"),
 
-	// Estado de la recuperación
-	completada: boolean("completada").default(false),
-	observaciones: text("observaciones"),
+		// Estado de la recuperación
+		completada: boolean("completada").default(false),
+		observaciones: text("observaciones"),
 
-	// Responsables
-	responsableRecuperacion: text("responsable_recuperacion").references(
-		() => user.id,
-	),
+		// Responsables
+		responsableRecuperacion: text("responsable_recuperacion").references(
+			() => user.id,
+		),
 
-	createdAt: timestamp("created_at").notNull().defaultNow(),
-	updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+		// CB-042 · Por qué se manda a recuperación.
+		motivos: text("motivos").array().notNull().default(sql`'{}'::text[]`),
+		motivoDetalle: text("motivo_detalle"),
+		// true = este registro movió el crédito a B4; false = se registró con el
+		// crédito ya en B4 (entrega voluntaria desde B4).
+		trasladado: boolean("trasladado").notNull().default(false),
+		bucketOrigen: integer("bucket_origen"),
+		bucketDestino: integer("bucket_destino"),
+
+		// CB-042 · Dónde está la unidad y en qué estado, al registrar.
+		ubicacionDireccion: text("ubicacion_direccion"),
+		ubicacionEnlace: text("ubicacion_enlace"),
+		ubicacionLat: decimal("ubicacion_lat", { precision: 10, scale: 7 }),
+		ubicacionLng: decimal("ubicacion_lng", { precision: 10, scale: 7 }),
+		ubicacionFuente: text("ubicacion_fuente"), // 'manual' | 'gps'
+		gpsUnidad: text("gps_unidad"),
+		gpsSenalAt: timestamp("gps_senal_at"),
+		estadoVehiculo: text("estado_vehiculo"),
+		estadoVehiculoDetalle: text("estado_vehiculo_detalle"),
+		kilometraje: integer("kilometraje"),
+
+		// CB-042 · Entrega voluntaria.
+		fechaEntrega: timestamp("fecha_entrega"),
+		lugarEntrega: text("lugar_entrega"),
+		entregaPersona: text("entrega_persona"),
+		entregaRelacion: text("entrega_relacion"),
+		documentos: text("documentos").array().notNull().default(sql`'{}'::text[]`),
+		documentosOtros: text("documentos_otros"),
+
+		// CB-042 · Foto del saldo tomada de cartera al registrar. Null si
+		// cartera no respondió: la foto es informativa, no bloquea el envío.
+		saldoPendiente: decimal("saldo_pendiente", { precision: 18, scale: 2 }),
+		cuotasVencidas: integer("cuotas_vencidas"),
+		montoVencido: decimal("monto_vencido", { precision: 18, scale: 2 }),
+		montoMora: decimal("monto_mora", { precision: 18, scale: 2 }),
+		totalParaPonerseAlDia: decimal("total_para_ponerse_al_dia", {
+			precision: 18,
+			scale: 2,
+		}),
+		saldoTomadoAt: timestamp("saldo_tomado_at"),
+		registradoPor: text("registrado_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+
+		// CB-042 · Recepción de la unidad (solo con el crédito en B4).
+		recepcionLugar: text("recepcion_lugar"),
+		recepcionEstadoVehiculo: text("recepcion_estado_vehiculo"),
+		recepcionEstadoDetalle: text("recepcion_estado_detalle"),
+		recepcionKilometraje: integer("recepcion_kilometraje"),
+		recepcionDocumentos: text("recepcion_documentos").array(),
+		recepcionDocumentosOtros: text("recepcion_documentos_otros"),
+		recepcionNotas: text("recepcion_notas"),
+		recepcionRegistradaPor: text("recepcion_registrada_por").references(
+			() => user.id,
+			{ onDelete: "set null" },
+		),
+		recepcionRegistradaAt: timestamp("recepcion_registrada_at"),
+
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(t) => [
+		index("recuperaciones_vehiculo_caso_fecha_idx").on(
+			t.casoCobroId,
+			t.createdAt.desc(),
+		),
+	],
+);
 
 // Notificaciones automáticas de cobros
 export const notificacionesCobros = pgTable("notificaciones_cobros", {

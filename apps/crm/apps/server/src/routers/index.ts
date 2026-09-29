@@ -181,7 +181,6 @@ export const cobrosAppRouter = {
 	getHistorialReasignaciones: cobrosRouter.getHistorialReasignaciones,
 	getHistorialPagos: cobrosRouter.getHistorialPagos,
 	getEstadoPromesasPago: cobrosRouter.getEstadoPromesasPago,
-	getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
 	getTodosLosCreditos: cobrosRouter.getTodosLosCreditos,
 	getDetallesContrato: cobrosRouter.getDetallesContrato,
 	getDetallesCreditoCarteraBack: cobrosRouter.getDetallesCreditoCarteraBack,

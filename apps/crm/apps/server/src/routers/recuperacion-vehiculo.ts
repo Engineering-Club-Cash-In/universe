@@ -11,10 +11,14 @@
  */
 
 import { cobrosRouter } from "./cobros";
+import { recuperacionVehiculoRegistroRouter } from "./recuperacion-vehiculo-registro";
 
 export const recuperacionVehiculoRouter = {
 	enviarCreditoARecuperacion: cobrosRouter.enviarCreditoARecuperacion,
 	// COBROS-02 Fase 3. Va acá y no en `cobrosAppRouter` por la MISMA razón:
 	// el tipo inferido de cobros ya está en el límite de TS7056.
 	deshacerConvenio: cobrosRouter.deshacerConvenio,
+	// CB-042: el registro que ve el asesor de B4 (lectura, entrega voluntaria
+	// ya en B4 y recepción de la unidad). Definidos en su propio archivo.
+	...recuperacionVehiculoRegistroRouter,
 };

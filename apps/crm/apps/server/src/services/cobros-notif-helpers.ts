@@ -31,7 +31,8 @@ export type CobrosNotifTipo =
 	| "gps_evento"
 	| "inmovilizacion_pendiente_aprobacion"
 	| "inmovilizacion_resuelta"
-	| "inmovilizacion_llamar_cliente";
+	| "inmovilizacion_llamar_cliente"
+	| "recuperacion_vehiculo";
 
 /**
  * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando el correo de cash-in del

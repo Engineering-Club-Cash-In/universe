@@ -696,6 +696,11 @@ integrationTest("inbox reiniciado factura una sola vez después de aprobación b
       enabled = true;
       now = new Date(now.getTime() + 2_000);
       expect(await run()).toBe(true);
+      // Successful disabled waits no longer consume the subsequent failure budget.
+      if (unknown) for (let attempt = 1; attempt < options.maxAttempts; attempt++) {
+        now = new Date(now.getTime() + 2_000);
+        expect(await run()).toBe(true);
+      }
       now = new Date(now.getTime() + 60_000);
       expect(await run()).toBe(false);
       const [payment] = (await query.query("SELECT processing_status, failure_reason, next_attempt_at, lease_until FROM nexa_payment_transactions WHERE reference = $1", [reference])).rows;

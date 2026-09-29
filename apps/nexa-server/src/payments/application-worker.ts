@@ -12,6 +12,7 @@ export type ApplicationClaim = {
   transactionId: string;
   wasReturn: 0 | 1;
   attemptCount: number;
+  retryAttemptCount?: number;
   carteraPaymentId?: number | null;
 };
 
@@ -101,7 +102,7 @@ export async function runApplicationWorkerOnce(options: {
   } catch {
     const nextAttemptAt = getNextAttemptAt(
       now,
-      claim.attemptCount,
+      claim.retryAttemptCount ?? claim.attemptCount,
       options.maxAttempts,
       options.backoffSeconds,
       options.maxBackoffSeconds,

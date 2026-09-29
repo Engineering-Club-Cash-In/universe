@@ -257,7 +257,8 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
         COALESCE(payment.raw_payload->>'bankTransactionId', payment.transaction_id) AS "transactionId",
         payment.was_return AS "wasReturn",
         payment.cartera_payment_id AS "carteraPaymentId",
-        payment.attempt_count AS "attemptCount"
+        payment.attempt_count AS "attemptCount",
+        payment.attempt_count - COALESCE((payment.raw_payload->>'billingRetryBase')::integer, 0) AS "retryAttemptCount"
     `);
     const row = result.rows[0];
     return row ? {
@@ -271,6 +272,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       transactionId: String(row.transactionId),
       wasReturn: paymentReturn(row.wasReturn),
       attemptCount: Number(row.attemptCount),
+      retryAttemptCount: Number(row.retryAttemptCount),
       carteraPaymentId: row.carteraPaymentId == null ? null : Number(row.carteraPaymentId),
     } : null;
   }
@@ -295,9 +297,14 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
     failureReason: string | null;
     nextAttemptAt?: Date | null;
   }, now: Date, attemptCount: number) {
+    // Keep the lease generation monotonic; a successful wait starts a fresh failure budget.
+    const rawPayload = outcome.failureReason === "billing_pending"
+      ? sql`jsonb_set(${nexaPaymentTransactions.rawPayload}, '{billingRetryBase}', to_jsonb(${attemptCount}::integer))`
+      : sql`${nexaPaymentTransactions.rawPayload} - 'billingRetryBase'`;
     await this.db.transaction(async (tx) => {
       // Billing owns only the application lease/schedule, never the bank review state.
       const [billed] = await tx.update(nexaPaymentTransactions).set({
+        rawPayload,
         failureReason: outcome.failureReason,
         nextAttemptAt: outcome.nextAttemptAt ?? null,
         leaseUntil: null,
@@ -313,6 +320,7 @@ export class DbPaymentTransactionRepository implements PaymentTransactionReposit
       if (billed) return;
       const [payment] = await tx.update(nexaPaymentTransactions).set({
         processingStatus: "REVIEW_PENDING",
+        rawPayload,
         carteraPaymentId: outcome.paymentId,
         failureReason: outcome.failureReason,
         nextAttemptAt: outcome.nextAttemptAt ?? null,

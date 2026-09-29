@@ -1096,18 +1096,23 @@ integrationTest("review without a reviewable transactionId completes without cal
 
 const billingWorkerOptions = { leaseSeconds: 10, maxAttempts: 3, backoffSeconds: 2, maxBackoffSeconds: 10 };
 
-integrationTest("disabled billing survives bank completion, repeated waits and worker restart", async () => {
+integrationTest("disabled billing preserves failure budget after many waits, bank completion and restart", async () => {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const repository = new DbPaymentTransactionRepository(db);
   await associateToken("10005010", "1234567", 42);
   const stored = await repository.upsertReceived(transaction);
   let now = new Date("2026-09-08T12:00:00Z");
   let enabled = false;
+  let transientFailure = true;
   const requests: string[] = [];
   const cartera = new HttpCarteraPaymentClient({
     baseUrl: "https://cartera.example.test", secret: "local-only-secret".repeat(3),
     fetch: async (_url, init) => {
       requests.push(String(init?.body));
+      if (enabled && transientFailure) {
+        transientFailure = false;
+        return Response.json({ error: "processing_failed" }, { status: 503 });
+      }
       return Response.json({ status: "APPLIED", paymentId: 701, ...(enabled ? {} : { billingStatus: "PENDING" }) });
     },
   });
@@ -1134,12 +1139,18 @@ integrationTest("disabled billing survives bank completion, repeated waits and w
   enabled = true;
   now = new Date(now.getTime() + 10_000);
   expect(await run()).toBe(true);
+  const [retry] = await db.select().from(nexaPaymentTransactions);
+  expect(retry).toMatchObject({ processingStatus: "COMPLETED", failureReason: "billing_pending", attemptCount: 8, nextAttemptAt: new Date(now.getTime() + 2_000) });
+  expect(await run()).toBe(false);
+  now = retry!.nextAttemptAt!;
+  expect(await run()).toBe(true);
   expect(await run()).toBe(false);
   expect(bankCalls).toBe(1);
   expect(new Set(requests).size).toBe(1);
   expect(await db.select().from(nexaReviews)).toHaveLength(1);
   const [row] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, stored.id));
-  expect(row).toMatchObject({ processingStatus: "COMPLETED", carteraPaymentId: 701, failureReason: null, nextAttemptAt: null, leaseUntil: null });
+  expect(row).toMatchObject({ processingStatus: "COMPLETED", carteraPaymentId: 701, failureReason: null, nextAttemptAt: null, leaseUntil: null, attemptCount: 9 });
+  expect(row?.rawPayload).not.toHaveProperty("billingRetryBase");
 });
 
 for (const reviewResult of ["complete", "retry", "manual"] as const) {

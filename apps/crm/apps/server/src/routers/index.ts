@@ -160,7 +160,6 @@ export const cobrosAppRouter = {
 	getConveniosListado: cobrosRouter.getConveniosListado,
 	getConvenioConfig: cobrosRouter.getConvenioConfig,
 	crearConvenioDesdeFicha: cobrosRouter.crearConvenioDesdeFicha,
-	asignarResponsableCobros: cobrosRouter.asignarResponsableCobros,
 	getUsuariosCobros: cobrosRouter.getUsuariosCobros,
 	getBucketsCatalogo: cobrosRouter.getBucketsCatalogo,
 	getBucketsCatalogoCargado: cobrosRouter.getBucketsCatalogoCargado,

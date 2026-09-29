@@ -31,6 +31,10 @@ import {
 	inmovilizacionesUnidadEventos,
 } from "../db/schema/inmovilizacion-unidad";
 import { vehicles } from "../db/schema/vehicles";
+import {
+	usuarioDuenoEnCartera,
+	usuarioDuenoEnCarteraEstricto,
+} from "../lib/acceso-caso-cobro";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import {
 	BUCKETS_INMOVILIZACION,
@@ -49,7 +53,7 @@ import {
 	notificarInmovilizacionResuelta,
 	notificarLlamarCliente,
 	notificarUnidadReactivada,
-	reasignarAvisosLlamarCliente,
+	reconciliarAvisosLlamarCliente,
 	resolverAvisoLlamarCliente,
 	resolverPendientesInmovilizacion,
 } from "../services/inmovilizacion-notif";
@@ -69,7 +73,6 @@ async function getCasoParaInmovilizacion(casoCobroId: string) {
 	const [caso] = await db
 		.select({
 			id: casosCobros.id,
-			responsableCobros: casosCobros.responsableCobros,
 			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 			vehicleId: vehicles.id,
 			wialonUnitId: vehicles.wialonUnitId,
@@ -308,47 +311,41 @@ function esViolacionUnica(error: unknown): boolean {
  * inmovilización ejecutada (`registrarResultadoLlamada` o
  * `registrarLlamadaReactivacion`).
  *
- * El caso normal exige ser el asesor asignado al caso (`responsableCobros`), o
- * tener un rol con visibilidad completa (supervisores/admin). Sin embargo, si el
- * caso quedó sin responsable asignado (`responsableCobros == null`),
- * `marcarEjecutada` enrutó el aviso de llamada a `inm.solicitadoPor` como
- * fallback: autorizar a ese usuario para registrar la llamada evita que la
- * tarea quede permanentemente trabada. Review de Codex.
+ * El caso normal es el gate de toda la ficha: el asesor que lleva el crédito
+ * en CARTERA (o lo cubre hoy), o un rol con visibilidad completa. Pero si el
+ * dueño en cartera no tiene usuario en el CRM, `marcarEjecutada` enrutó el
+ * aviso de llamada a `inm.solicitadoPor`: autorizar a ese usuario evita que la
+ * tarea quede trabada sin nadie que pueda cerrarla. Review de Codex.
  */
 async function assertAccesoLlamadaInmovilizacion(
 	inm: { casoCobroId: string; solicitadoPor: string | null },
 	userId: string,
 	userRole: string,
 ): Promise<void> {
-	if (PERMISSIONS.canViewAllCasosCobros(userRole)) return;
-
-	const [caso] = await db
-		.select({
-			id: casosCobros.id,
-			responsableCobros: casosCobros.responsableCobros,
-		})
-		.from(casosCobros)
-		.where(eq(casosCobros.id, inm.casoCobroId))
-		.limit(1);
-
-	if (!caso) {
-		throw new ORPCError("NOT_FOUND", {
-			message: "Caso de cobro no encontrado o sin acceso.",
-		});
+	try {
+		await assertAccesoCasoCobro(inm.casoCobroId, userId, userRole);
+		return;
+	} catch (error) {
+		if (!(error instanceof ORPCError) || error.code !== "NOT_FOUND")
+			throw error;
 	}
 
-	// 1. Asesor asignado al caso
-	if (caso.responsableCobros && caso.responsableCobros === userId) {
-		return;
-	}
-
-	// 2. Fallback: caso sin asesor asignado y el usuario es quien solicitó la acción
-	if (
-		!caso.responsableCobros &&
-		inm.solicitadoPor &&
-		inm.solicitadoPor === userId
-	) {
-		return;
+	// Fallback: el aviso cayó en quien solicitó porque el dueño en cartera no
+	// tiene usuario en el CRM. Con la lectura ESTRICTA: si cartera no responde
+	// se lanza (falla cerrado), no se toma como "sin usuario" (review de
+	// Codex, P1, PR #1765).
+	if (inm.solicitadoPor && inm.solicitadoPor === userId) {
+		const [caso] = await db
+			.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+			.from(casosCobros)
+			.where(eq(casosCobros.id, inm.casoCobroId))
+			.limit(1);
+		if (
+			caso &&
+			(await usuarioDuenoEnCarteraEstricto(caso.numeroCreditoSifco)) === null
+		) {
+			return;
+		}
 	}
 
 	throw new ORPCError("NOT_FOUND", {
@@ -381,6 +378,9 @@ export const inmovilizacionUnidadRouter = {
 					context.userId,
 					context.userRole,
 				);
+				// Si cartera reasignó el crédito, el aviso de "llamar al cliente"
+				// pasa al dueño de hoy antes de pintar la tarjeta.
+				await reconciliarAvisosLlamarCliente([input.casoCobroId]);
 
 				// El card (solicitudAbierta, pendienteLlamar, el historial que se
 				// LISTA) es siempre del caso — nunca se mezclan filas de otro caso
@@ -1135,10 +1135,12 @@ export const inmovilizacionUnidadRouter = {
 			}
 
 			const caso = await getCasoParaInmovilizacion(inm.casoCobroId);
-			// Fallback a quien solicitó: sin esto, un caso momentáneamente sin
-			// responsableCobros (columna nullable) se quedaba sin avisar a
-			// NADIE — ni al asesor, ni a quien pidió la acción. Review de Codex.
-			const asesorUserId = caso?.responsableCobros ?? inm.solicitadoPor;
+			// Al asesor que lleva el crédito en CARTERA. Fallback a quien
+			// solicitó: sin esto, un dueño sin usuario en el CRM dejaba el aviso
+			// sin nadie — ni el asesor, ni quien pidió la acción. Review de Codex.
+			const asesorUserId =
+				(await usuarioDuenoEnCartera(caso?.numeroCreditoSifco)) ??
+				inm.solicitadoPor;
 			if (asesorUserId) {
 				if (await necesitaAvisoLlamada(inm)) {
 					if (inm.accion === "apagado") {
@@ -1171,22 +1173,11 @@ export const inmovilizacionUnidadRouter = {
 					if (!(await necesitaAvisoLlamada(inm))) {
 						await resolverAvisoLlamarCliente(inm.id);
 					} else {
-						// 2. Si el caso fue reasignado concurrentemente entre la lectura temprana
-						// y el envío del aviso, el aviso recién creado quedó asignado al asesor
-						// anterior. Re-leer el caso actual y reasignar al responsable vigente.
-						// Review de Codex, PR #1758.
-						const casoPostEnvio = await getCasoParaInmovilizacion(
-							inm.casoCobroId,
-						);
-						const responsableActual =
-							casoPostEnvio?.responsableCobros ?? inm.solicitadoPor;
-						if (responsableActual && responsableActual !== asesorUserId) {
-							await reasignarAvisosLlamarCliente({
-								casoCobroId: inm.casoCobroId,
-								nuevoResponsableUserId: responsableActual,
-								soloSiResponsableEs: casoPostEnvio?.responsableCobros ?? null,
-							});
-						}
+						// 2. Si cartera reasignó el crédito entre la lectura temprana y el
+						// envío del aviso, el aviso recién creado quedó asignado al asesor
+						// anterior: la reconciliación relee el dueño en cartera y lo mueve
+						// con compare-and-set. Review de Codex, PR #1758 y #1765.
+						await reconciliarAvisosLlamarCliente([inm.casoCobroId]);
 					}
 				}
 			}

@@ -227,9 +227,9 @@ otro con solo cambiar el número, porque `cobrosProcedure` solo valida el rol (r
 Codex, P1).
 
 **Y el caso tampoco alcanza como autorización.** `getDetallesCreditoCarteraBack` AUTO-CREA
-un caso con `responsableCobros = quien consulta` cuando el crédito no tiene uno activo, así
-que un asesor puede fabricarse el acceso consultando un SIFCO enumerable y después pasar
-cualquier gate que mire el caso. La verdad de "de quién es este crédito" la tiene **cartera**:
+un caso cuando el crédito no tiene uno activo, y el caso no dice de quién es el crédito
+(el CRM no asigna, ver [doc 2](./02-motor-y-asignacion.md#el-crm-no-asigna-2026-09-28)).
+La verdad de "de quién es este crédito" la tiene **cartera**:
 se compara el `email_cash_in` del asesor asignado contra el correo de login
 (`assertCreditoAsignadoEnCartera`, en `lib/credito-cartera-ownership.ts`). Admin y supervisor
 de cobros quedan fuera del chequeo: ellos sí operan sobre cualquier crédito.

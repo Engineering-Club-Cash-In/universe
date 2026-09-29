@@ -6,12 +6,11 @@ import { PERMISSIONS } from "./roles";
  * COBROS-02 · "¿Este crédito es de quien lo está pidiendo?"
  *
  * La fuente autoritativa NO es el CRM sino CARTERA: el asesor asignado al
- * crédito. Un caso de cobros no sirve como autorización porque
- * `getDetallesCreditoCarteraBack` AUTO-CREA un caso con
- * `responsableCobros = quien consulta` cuando el crédito no tiene uno activo:
- * un asesor puede fabricarse el acceso consultando un SIFCO enumerable y
- * después pasar cualquier gate que mire el caso (hallazgo de Codex, PR #1570,
- * repetido en el #1591 para recuperación de vehículo y contratos).
+ * crédito. Un caso de cobros no sirve como autorización: se auto-crea al
+ * abrir un crédito y no dice de quién es (hallazgo de Codex, PR #1570,
+ * repetido en el #1591 para recuperación de vehículo y contratos). El gate
+ * general de la ficha también mira cartera (lib/acceso-caso-cobro.ts); esta
+ * regla la usan las escrituras que además mandan el dueño esperado a cartera.
  *
  * Se compara por `email_cash_in` contra el correo de login — el mismo puente
  * por correo que usa el resto del módulo (getConveniosListado, getAgendaDia),

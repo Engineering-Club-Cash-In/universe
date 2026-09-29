@@ -122,6 +122,7 @@ import {
 	type CheckPromesasResumen,
 	checkPromesasPago,
 } from "./services/check-promesas-pago";
+import { reconciliarAvisosLlamarCliente } from "./services/inmovilizacion-notif";
 import { refreshPremoraElegibilidad } from "./services/refresh-premora-elegibilidad";
 import { sendConvenioReminders } from "./services/send-convenio-reminders";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
@@ -2462,6 +2463,12 @@ if (HAY_JOBS_ACTIVOS) {
 		// de más abajo no duplica nada.
 		await checkConveniosIncumplidos().catch((error) =>
 			console.error("Error en el aviso de convenios incumplidos:", error),
+		);
+		// El motor de cartera reasigna créditos a las 23:59: los avisos de
+		// "llamar al cliente" de una inmovilización pasan al asesor de hoy antes
+		// de que arranque el día (review de Codex, PR #1765).
+		await reconciliarAvisosLlamarCliente().catch((error) =>
+			console.error("Error al reconciliar avisos de inmovilización:", error),
 		);
 	}
 

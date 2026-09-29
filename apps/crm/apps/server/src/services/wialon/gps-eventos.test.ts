@@ -26,13 +26,11 @@ import { filasNotificacionCobros } from "../cobros-notif-helpers";
 
 let vehiculoMock: { id: string } | undefined;
 let casoActivoMock: { id: string } | undefined;
-let responsableCobrosMock: string | null = "asesor-1";
 let numeroCreditoSifcoMock: string | null = "01010214100000";
-// Asesor actual según cartera-back (resolverAsesorActual): distinto de
-// responsableCobrosMock a propósito en el default, para que los tests
-// existentes (que no lo tocan) sigan probando el camino real: cartera-back
-// deshabilitado → null → cae al fallback responsableCobrosMock.
-let asesorActualUserIdMock: string | null = null;
+// Asesor que lleva el crédito en cartera-back, ya resuelto a usuario del CRM
+// (resolverAsesorActual). Es el ÚNICO destinatario individual: el caso del
+// CRM no tiene responsable al cual caer.
+let asesorActualUserIdMock: string | null = "asesor-1";
 let eventoYaExisteMock = false;
 let eventoExistenteIdMock = "evento-existente";
 let eventoExistenteNotificadoMock = true;
@@ -88,20 +86,13 @@ function mockDb() {
 					};
 				}
 				if (tabla === casosCobros) {
-					// Solo queda la consulta de responsableCobros +
-					// numeroCreditoSifco (el join de vehicle→caso ahora arranca en
-					// `vehicles`, no en `casosCobros`).
+					// Solo queda la consulta del numeroCreditoSifco (el join de
+					// vehicle→caso ahora arranca en `vehicles`, no en `casosCobros`).
 					return {
 						where: () => ({
-							limit: async () =>
-								responsableCobrosMock != null
-									? [
-											{
-												responsableCobros: responsableCobrosMock,
-												numeroCreditoSifco: numeroCreditoSifcoMock,
-											},
-										]
-									: [],
+							limit: async () => [
+								{ numeroCreditoSifco: numeroCreditoSifcoMock },
+							],
 						}),
 					};
 				}
@@ -208,9 +199,8 @@ let getCreditoSpy: any;
 beforeEach(() => {
 	vehiculoMock = { id: "vehiculo-1" };
 	casoActivoMock = { id: "caso-1" };
-	responsableCobrosMock = "asesor-1";
 	numeroCreditoSifcoMock = "01010214100000";
-	asesorActualUserIdMock = null;
+	asesorActualUserIdMock = "asesor-1";
 	eventoYaExisteMock = false;
 	eventoExistenteIdMock = "evento-existente";
 	eventoExistenteNotificadoMock = true;
@@ -221,16 +211,16 @@ beforeEach(() => {
 	eventoInsertadoValues = null;
 	ultimoNotificadoMock = null;
 
-	// Default: cartera-back deshabilitado → resolverAsesorActual devuelve
-	// null de inmediato → registrarEventoGps cae al fallback
-	// responsableCobros, igual que el comportamiento de antes de este fix.
-	// Los tests que prueban el camino NUEVO lo sobreescriben explícitamente.
+	// Default: cartera-back resuelve el dueño del crédito ("asesor-1"). Los
+	// tests de la resolución del asesor lo sobreescriben.
 	isCarteraBackEnabledSpy = spyOn(
 		carteraBackIntegration,
 		"isCarteraBackEnabled",
-	).mockReturnValue(false);
+	).mockReturnValue(true);
 	getCreditoSpy = spyOn(carteraBackClient, "getCredito");
-	getCreditoSpy.mockImplementation(async () => ({ asesor: null }));
+	getCreditoSpy.mockImplementation(async () => ({
+		asesor: { emailCashIn: "asesor1@clubcashin.com" },
+	}));
 });
 
 afterEach(() => {
@@ -359,8 +349,8 @@ describe("CB-119 — registrarEventoGps", () => {
 		expect(notificacionesInsertadas[0]?.assignedTo).toBe("asesor-1");
 	});
 
-	test("caso sin responsable resuelto (responsableCobros null): no arma fila de asesor", async () => {
-		responsableCobrosMock = null;
+	test("crédito sin dueño resuelto en cartera: no arma fila de asesor", async () => {
+		asesorActualUserIdMock = null;
 		supervisoresMock = [];
 
 		const resultado = await registrarEventoGps({
@@ -462,18 +452,8 @@ describe("CB-119 — ventana de dedup de notificación: deslizante, no por bucke
 	});
 });
 
-describe("CB-119 — resolución del asesor: prioriza cartera-back sobre responsableCobros (bug encontrado)", () => {
-	test("cartera-back deshabilitado: usa responsableCobros como siempre (comportamiento previo intacto)", async () => {
-		isCarteraBackEnabledSpy.mockReturnValue(false);
-
-		await registrarEventoGps({ tipo: "ignicion", wialonUnitId, ocurridoAt });
-
-		expect(getCreditoSpy).not.toHaveBeenCalled();
-		expect(notificacionesInsertadas[0]?.assignedTo).toBe("asesor-1");
-	});
-
-	test("cartera-back tiene un asesor DISTINTO (bucket reasignó): notifica al asesor NUEVO, no al viejo", async () => {
-		isCarteraBackEnabledSpy.mockReturnValue(true);
+describe("CB-119 — resolución del asesor: solo cartera-back decide quién lo lleva", () => {
+	test("cartera-back tiene un asesor DISTINTO (bucket reasignó): notifica al asesor NUEVO", async () => {
 		getCreditoSpy.mockImplementation(async () => ({
 			asesor: { emailCashIn: "nuevo@clubcashin.com" },
 		}));
@@ -486,28 +466,35 @@ describe("CB-119 — resolución del asesor: prioriza cartera-back sobre respons
 			false,
 			false,
 		);
-		expect(notificacionesInsertadas[0]?.assignedTo).toBe(
+		expect(notificacionesInsertadas.map((f) => f.assignedTo)).toEqual([
 			"asesor-nuevo-tras-reasignacion",
-		);
-		expect(
-			notificacionesInsertadas.some((f) => f.assignedTo === "asesor-1"),
-		).toBe(false);
+		]);
 	});
 
-	test("cartera-back habilitado pero sin asesor mapeable en el CRM: cae a responsableCobros", async () => {
-		isCarteraBackEnabledSpy.mockReturnValue(true);
-		getCreditoSpy.mockImplementation(async () => ({
-			asesor: { emailCashIn: "sin-cuenta-en-el-crm@clubcashin.com" },
-		}));
-		asesorActualUserIdMock = null; // el email no matcheó ningún user
+	test("cartera-back deshabilitado: sin dueño no hay aviso individual (ignición no escala)", async () => {
+		isCarteraBackEnabledSpy.mockReturnValue(false);
 
 		await registrarEventoGps({ tipo: "ignicion", wialonUnitId, ocurridoAt });
 
-		expect(notificacionesInsertadas[0]?.assignedTo).toBe("asesor-1");
+		expect(getCreditoSpy).not.toHaveBeenCalled();
+		expect(notificacionesInsertadas).toHaveLength(0);
 	});
 
-	test("cartera-back habilitado pero getCredito lanza: no rompe el evento, cae a responsableCobros", async () => {
-		isCarteraBackEnabledSpy.mockReturnValue(true);
+	test("dueño sin usuario en el CRM: el evento que escala avisa solo a supervisión", async () => {
+		asesorActualUserIdMock = null; // el email de cartera no matcheó ningún user
+
+		await registrarEventoGps({
+			tipo: "desconexion_energia",
+			wialonUnitId,
+			ocurridoAt,
+		});
+
+		expect(notificacionesInsertadas.map((f) => f.assignedTo)).toEqual([
+			"supervisor-1",
+		]);
+	});
+
+	test("cartera-back lanza: no rompe el evento, y se guarda aunque no haya a quién avisar", async () => {
 		getCreditoSpy.mockImplementation(async () => {
 			throw new Error("cartera-back caído");
 		});
@@ -518,17 +505,16 @@ describe("CB-119 — resolución del asesor: prioriza cartera-back sobre respons
 			ocurridoAt,
 		});
 
-		expect(resultado.notificado).toBe(true);
-		expect(notificacionesInsertadas[0]?.assignedTo).toBe("asesor-1");
+		expect(resultado.eventoId).toBeTruthy();
+		expect(notificacionesInsertadas).toHaveLength(0);
 	});
 
-	test("caso sin numeroCreditoSifco: no llama a cartera-back, cae directo a responsableCobros", async () => {
+	test("caso sin numeroCreditoSifco: no llama a cartera-back ni avisa a un asesor", async () => {
 		numeroCreditoSifcoMock = null;
-		isCarteraBackEnabledSpy.mockReturnValue(true);
 
 		await registrarEventoGps({ tipo: "ignicion", wialonUnitId, ocurridoAt });
 
 		expect(getCreditoSpy).not.toHaveBeenCalled();
-		expect(notificacionesInsertadas[0]?.assignedTo).toBe("asesor-1");
+		expect(notificacionesInsertadas).toHaveLength(0);
 	});
 });

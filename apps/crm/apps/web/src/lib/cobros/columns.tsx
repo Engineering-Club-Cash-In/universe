@@ -38,7 +38,8 @@ export type ContratoCobranza = {
 	cuotaMensual: string | null;
 	etiquetas: string[] | null;
 	isPool?: boolean;
-	responsableCobros: string | null;
+	/** Asesor que lleva el crédito en cartera. */
+	asesorNombre: string | null;
 	montoFinanciado: string;
 	/** CB-030: subestado de display — el bucket/estadoMora YA viene congelado del servidor. */
 	promesaActiva?: boolean;
@@ -235,7 +236,7 @@ export function getCobrosColumns({
 			},
 		},
 		{
-			accessorKey: "responsableCobros",
+			accessorKey: "asesorNombre",
 			header: ({ column }) => (
 				<Button
 					variant="ghost"
@@ -246,7 +247,7 @@ export function getCobrosColumns({
 				</Button>
 			),
 			cell: ({ row }) => {
-				const asesor = row.getValue("responsableCobros") as string | null;
+				const asesor = row.getValue("asesorNombre") as string | null;
 				if (!asesor)
 					return (
 						<span className="text-muted-foreground text-xs">Sin asignar</span>

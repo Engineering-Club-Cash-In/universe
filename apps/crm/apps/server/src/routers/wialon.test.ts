@@ -9,6 +9,7 @@ import {
 } from "bun:test";
 import { call, ORPCError } from "@orpc/server";
 import { casosCobros } from "../db/schema/cobros";
+import { moduloAccesoFalso } from "../lib/acceso-caso-cobro.mock";
 import type { Context } from "../lib/context";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
@@ -240,6 +241,11 @@ function mockDbAdmin() {
 }
 
 mock.module("../db", () => ({ db: mockDbAdmin() }));
+// El permiso de la ficha lo da cartera (lib/acceso-caso-cobro); acá se simula
+// con la bandera de siempre: `accesoCasoMock` = el usuario trabaja el crédito.
+mock.module("../lib/acceso-caso-cobro", () =>
+	moduloAccesoFalso({ tieneAcceso: () => accesoCasoMock }),
+);
 
 /** Wialon que responde core/search_item con el nombre dado (o error 7). */
 function wialonConNombre(nm: string | null) {
@@ -1743,6 +1749,9 @@ describe("wialonRouter", () => {
 		});
 
 		it("rechaza un caso al que el asesor no tiene acceso, sin consultar ni auditar", async () => {
+			// Rol de asesor de verdad: admin y supervisor ven toda la cartera, y
+			// el mock de antes solo pasaba porque ignoraba el rol.
+			rolUsuarioMock = "cobros";
 			accesoCasoMock = false;
 			filaVehiculoMock = {
 				licensePlate: "C-629BNC",
@@ -1764,6 +1773,7 @@ describe("wialonRouter", () => {
 				expect(insertsGpsAuditoria).toHaveLength(0);
 			} finally {
 				accesoCasoMock = true;
+				rolUsuarioMock = "admin";
 			}
 		});
 

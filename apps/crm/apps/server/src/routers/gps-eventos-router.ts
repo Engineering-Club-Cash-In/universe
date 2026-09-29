@@ -15,13 +15,13 @@ import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import { gpsEventos, gpsUbicacionesClave } from "../db/schema/gps-eventos";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure } from "../lib/orpc";
+import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	gpsEventosCasoInputSchema,
 	gpsEventosCasoOutputSchema,
 	ubicacionesClaveCasoInputSchema,
 	ubicacionesClaveCasoOutputSchema,
 } from "../services/wialon/wialon-types";
-import { carteraBackClient } from "../services/cartera-back-client";
 import { assertAccesoCasoCobro } from "./cobros";
 import { resolverCasoParaGps } from "./wialon";
 
@@ -29,14 +29,11 @@ export const gpsEventosRouter = {
 	/**
 	 * Historial de eventos GPS de un caso, para la Ficha 360.
 	 *
-	 * `assertAccesoCasoCobro` NO alcanza como autorización completa:
-	 * `getDetallesCreditoCarteraBack` auto-crea un caso con
-	 * `responsableCobros = quien consulta` cuando el crédito no tenía uno
-	 * activo — un asesor puede fabricarse el acceso abriendo el SIFCO de
-	 * otro (mismo hallazgo de Codex ya corregido en `routers/wialon.ts` vía
-	 * `assertCreditoAsignadoEnCarteraPorSifco`, la fuente autoritativa es
-	 * CARTERA, no el caso local). Acá se aplica el mismo guard antes de
-	 * devolver lat/lon histórica.
+	 * La fuente autoritativa de "de quién es este crédito" es CARTERA, no el
+	 * caso local (mismo hallazgo de Codex corregido en `routers/wialon.ts`).
+	 * `assertAccesoCasoCobro` ya la consulta; la lectura SIN cache de
+	 * `assertCreditoAsignadoEnCarteraPorSifco` la repite antes de devolver
+	 * lat/lon histórica.
 	 */
 	getGpsEventosCaso: cobrosProcedure
 		.input(gpsEventosCasoInputSchema)

@@ -36,6 +36,7 @@ import { sendWhatsappTemplate } from "../lib/simpletech";
 import type { CarteraConvenioProximoVencer } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
+import { construirMapaAsesorUsuario } from "./cobros-notif-helpers";
 
 const LOG_PREFIX = "[ConvenioRecordatorios]";
 
@@ -164,7 +165,6 @@ export async function sendConvenioReminders(
 				id: casosCobros.id,
 				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 				telefonoPrincipal: casosCobros.telefonoPrincipal,
-				responsable: casosCobros.responsableCobros,
 				activo: casosCobros.activo,
 				updatedAt: casosCobros.updatedAt,
 			})
@@ -213,6 +213,15 @@ export async function sendConvenioReminders(
 				cuotas: cuotas.length,
 			});
 		}
+
+		// El contacto automático queda a nombre del asesor que lleva el crédito
+		// en CARTERA (cada cuota trae su `asesor_id`); sin mapa, del sistema.
+		const usuarioPorAsesor = await construirMapaAsesorUsuario({
+			useCircuitBreaker: false,
+		}).catch((error) => {
+			console.error(`${LOG_PREFIX} Sin mapa asesor→usuario:`, error);
+			return new Map<number, string>();
+		});
 
 		const testMode = isTestModeEnabled();
 
@@ -367,7 +376,10 @@ export async function sendConvenioReminders(
 						metodoContacto: "whatsapp",
 						estadoContacto: "contactado",
 						comentarios: `Recordatorio automático Convenio ${tipo.replace("convenio_", "D-")} enviado por WhatsApp al ${telefonoDestino}${testMode ? " (modo prueba)" : ""}. Pago del ${fechaLegible(cuota.fecha_vencimiento)} por Q${montoLegible(cuota.monto_cuota)} (normal Q${montoLegible(cuota.monto_normal)} + convenio Q${montoLegible(cuota.monto_convenio)}).`,
-						realizadoPor: caso.responsable ?? usuarioSistema,
+						realizadoPor:
+							(cuota.asesor_id !== null
+								? usuarioPorAsesor.get(cuota.asesor_id)
+								: undefined) ?? usuarioSistema,
 					});
 					resumen.contactosRegistrados++;
 				} catch (err) {

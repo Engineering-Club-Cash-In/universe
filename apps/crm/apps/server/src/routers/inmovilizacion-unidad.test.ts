@@ -16,10 +16,13 @@ import {
 	inmovilizacionesUnidadEventos,
 } from "../db/schema/inmovilizacion-unidad";
 import { vehicles } from "../db/schema/vehicles";
+import { moduloAccesoFalso } from "../lib/acceso-caso-cobro.mock";
 import type { Context } from "../lib/context";
 
 let rolUsuarioMock = "cobros";
 let responsableCasoMock: string | null = "user-test";
+// Cartera no responde al buscar el dueño del crédito (lectura estricta).
+let carteraFallaMock = false;
 let solicitadoPorMarcarEjecutadaMock = "user-test";
 let numeroCreditoSifcoMock: string | null = "01010214100000";
 let vehicleIdMock: string | null; // inicializado abajo, junto a VEHICLE_ID
@@ -61,11 +64,7 @@ let resolverPendientesLlamadas: string[] = [];
 let unidadReactivadaNotificada = 0;
 let resolverAvisoLlamarClienteLlamadas: string[] = [];
 let notificarLlamarClienteLlamadas: { asesorUserId: string }[] = [];
-let reasignarAvisosLlamarClienteLlamadas: {
-	casoCobroId: string;
-	nuevoResponsableUserId: string;
-	soloSiResponsableEs?: string | null;
-}[] = [];
+let reconciliarAvisosLlamadas: (readonly string[] | undefined)[] = [];
 let onNotificarLlamarCliente: (() => void) | null = null;
 let reactivacionesObsoletasMock: { id: string }[] = [];
 // bloquearUnidadFisica (review de Codex, PR #1758): cada llamada a
@@ -102,7 +101,6 @@ function mockDb() {
 												? [
 														{
 															id: CASO_ID,
-															responsableCobros: responsableCasoMock,
 															numeroCreditoSifco: numeroCreditoSifcoMock,
 															vehicleId: vehicleIdMock,
 															wialonUnitId: wialonUnitIdCasoMock,
@@ -121,8 +119,12 @@ function mockDb() {
 					return {
 						where: () => ({
 							limit: async () => {
-								if (campos && "responsableCobros" in campos) {
-									return [{ id: CASO_ID, responsableCobros: responsableCasoMock }];
+								// Fallback de assertAccesoLlamadaInmovilizacion: el SIFCO
+								// para preguntar si el dueño en cartera tiene usuario.
+								if (campos && "numeroCreditoSifco" in campos) {
+									return numeroCreditoSifcoMock
+										? [{ numeroCreditoSifco: numeroCreditoSifcoMock }]
+										: [];
 								}
 								return rolUsuarioMock === "admin" ||
 									rolUsuarioMock === "cobros_supervisor" ||
@@ -342,6 +344,16 @@ function mockDb() {
 }
 
 mock.module("../db", () => ({ db: mockDb() }));
+// El permiso y el dueño del crédito los da cartera (lib/acceso-caso-cobro).
+// Se simulan con la bandera de siempre: `responsableCasoMock` es el usuario del
+// CRM que lleva el crédito en cartera (null = sin usuario vinculado).
+mock.module("../lib/acceso-caso-cobro", () =>
+	moduloAccesoFalso({
+		tieneAcceso: (userId) => responsableCasoMock === userId,
+		duenoUsuario: () => responsableCasoMock,
+		carteraFalla: () => carteraFallaMock,
+	}),
+);
 // routers/cobros.ts (de donde sale assertAccesoCasoCobro) inicializa
 // @cci/email al importarse y exige RESEND_API_KEY — mismo mock que
 // cobros.moraRecuperacion.test.ts y convenio-decision.errores.test.ts.
@@ -362,12 +374,9 @@ mock.module("../services/inmovilizacion-notif", () => ({
 	resolverPendientesInmovilizacion: async (id: string) => {
 		resolverPendientesLlamadas.push(id);
 	},
-	reasignarAvisosLlamarCliente: async (params: {
-		casoCobroId: string;
-		nuevoResponsableUserId: string;
-		soloSiResponsableEs?: string | null;
-	}) => {
-		reasignarAvisosLlamarClienteLlamadas.push(params);
+	reconciliarAvisosLlamarCliente: async (casoCobroIds?: readonly string[]) => {
+		reconciliarAvisosLlamadas.push(casoCobroIds);
+		return 0;
 	},
 }));
 // Mock propio de cartera-back-client y no spyOn sobre el módulo real: otros
@@ -406,6 +415,7 @@ function ctx(role: string, userId = "user-test"): Context {
 
 function reset() {
 	responsableCasoMock = "user-test";
+	carteraFallaMock = false;
 	solicitadoPorMarcarEjecutadaMock = "user-test";
 	numeroCreditoSifcoMock = "01010214100000";
 	vehicleIdMock = VEHICLE_ID;
@@ -432,7 +442,7 @@ function reset() {
 	resolverAvisoLlamarClienteLlamadas = [];
 	reactivacionesObsoletasMock = [];
 	onNotificarLlamarCliente = null;
-	reasignarAvisosLlamarClienteLlamadas = [];
+	reconciliarAvisosLlamadas = [];
 	executeLlamadas = [];
 	spyOn(carteraBackClient, "getBucketActualCredito").mockResolvedValue({
 		bucket: 2,
@@ -859,7 +869,7 @@ describe("CB-041 — marcarEjecutada", () => {
 		expect(res.modo).toBe("manual");
 	});
 
-	it("caso sin responsableCobros: notifica igual, con fallback a quien solicitó (review de Codex)", async () => {
+	it("dueño en cartera sin usuario en el CRM: notifica igual, con fallback a quien solicitó (review de Codex)", async () => {
 		responsableCasoMock = null;
 		inmovilizacionExistente = {
 			id: INMOV_ID,
@@ -1349,7 +1359,7 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 
-	it("caso sin responsableCobros pero el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada (review de Codex)", async () => {
+	it("dueño en cartera sin usuario en el CRM y el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada (review de Codex)", async () => {
 		responsableCasoMock = null;
 		conApagadoVigente({ solicitadoPor: "user-test" });
 
@@ -1357,11 +1367,23 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 		expect(res.ok).toBe(true);
 	});
 
-	it("caso sin responsableCobros y el usuario NO es solicitadoPor: rechaza con NOT_FOUND (review de Codex)", async () => {
+	it("dueño en cartera sin usuario en el CRM y el usuario NO es solicitadoPor: rechaza con NOT_FOUND (review de Codex)", async () => {
 		responsableCasoMock = null;
 		conApagadoVigente({ solicitadoPor: "otro-asesor" });
 
 		await expect(llamar("paga")).rejects.toMatchObject({ code: "NOT_FOUND" });
+	});
+
+	it("cartera no responde: el ex solicitante NO registra la llamada (falla cerrado, review de Codex PR #1765)", async () => {
+		// El crédito es de otro (el gate no lo deja pasar) y cartera se cae al
+		// buscar al dueño: eso no puede leerse como "el dueño no tiene usuario".
+		responsableCasoMock = "otro-asesor";
+		carteraFallaMock = true;
+		conApagadoVigente({ solicitadoPor: "user-test" });
+
+		await expect(llamar("no_paga")).rejects.toMatchObject({
+			code: "SERVICE_UNAVAILABLE",
+		});
 	});
 });
 
@@ -1736,7 +1758,7 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			inmovilizacionOrigenId: null,
 		};
 
-		// Durante el envío de la notificación, el caso se reasigna a otro asesor
+		// Durante el envío de la notificación, cartera reasigna el crédito a otro asesor
 		onNotificarLlamarCliente = () => {
 			responsableCasoMock = "asesor-nuevo";
 		};
@@ -1751,14 +1773,10 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 		expect(notificarLlamarClienteLlamadas).toEqual([
 			{ asesorUserId: "asesor-original" },
 		]);
-		// Pero la reconciliación post-envío detectó el cambio de asesor y reasignó el aviso
-		expect(reasignarAvisosLlamarClienteLlamadas).toEqual([
-			{
-				casoCobroId: CASO_ID,
-				nuevoResponsableUserId: "asesor-nuevo",
-				soloSiResponsableEs: "asesor-nuevo",
-			},
-		]);
+		// Y después del envío corre la reconciliación del caso, que relee el dueño
+		// en cartera y mueve el aviso con compare-and-set (su lógica se prueba en
+		// inmovilizacion-notif.test.ts).
+		expect(reconciliarAvisosLlamadas).toContainEqual([CASO_ID]);
 	});
 });
 
@@ -1833,7 +1851,7 @@ describe("CB-041 — registrarLlamadaReactivacion", () => {
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 
-	it("caso sin responsableCobros pero el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada (review de Codex)", async () => {
+	it("dueño en cartera sin usuario en el CRM y el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada (review de Codex)", async () => {
 		responsableCasoMock = null;
 		const fila = reactivacionEjecutada({ solicitadoPor: "user-test" });
 		inmovilizacionExistente = fila;
@@ -1843,13 +1861,25 @@ describe("CB-041 — registrarLlamadaReactivacion", () => {
 		expect(res.ok).toBe(true);
 	});
 
-	it("caso sin responsableCobros y el usuario NO es solicitadoPor: rechaza con NOT_FOUND (review de Codex)", async () => {
+	it("dueño en cartera sin usuario en el CRM y el usuario NO es solicitadoPor: rechaza con NOT_FOUND (review de Codex)", async () => {
 		responsableCasoMock = null;
 		const fila = reactivacionEjecutada({ solicitadoPor: "otro-asesor" });
 		inmovilizacionExistente = fila;
 		historialCasoMock = [fila];
 
 		await expect(llamar()).rejects.toMatchObject({ code: "NOT_FOUND" });
+	});
+
+	it("cartera no responde: el ex solicitante NO registra la llamada de reactivación (falla cerrado)", async () => {
+		responsableCasoMock = "otro-asesor";
+		carteraFallaMock = true;
+		const fila = reactivacionEjecutada({ solicitadoPor: "user-test" });
+		inmovilizacionExistente = fila;
+		historialCasoMock = [fila];
+
+		await expect(llamar()).rejects.toMatchObject({
+			code: "SERVICE_UNAVAILABLE",
+		});
 	});
 });
 

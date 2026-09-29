@@ -29,6 +29,7 @@ import { casosCobros } from "../../db/schema/cobros";
 import { coDebtors, leads } from "../../db/schema/crm";
 import { notifications } from "../../db/schema/notifications";
 import { resolverUsuarioSistemaCobros } from "../../services/cobros-notif-helpers";
+import { usuarioDuenoEnCartera } from "../acceso-caso-cobro";
 import { sendWhatsappTemplate } from "../simpletech";
 import { elegirTelefonoParaOtp } from "./identificadores";
 import { mensajesPagoRechazado } from "./mensajes-boleta";
@@ -156,18 +157,16 @@ export async function alertarAsesorDelRechazo(
 		return false;
 	}
 
-	// Va al `responsable_cobros` del caso de ese crédito; sin caso, queda para
-	// el rol.
+	// Va al asesor que lleva el crédito en CARTERA (la asignación vive allá);
+	// sin dueño resoluble, queda para el rol. El caso solo da el enlace.
 	const [caso] = numeroSifco
 		? await db
-				.select({
-					id: casosCobros.id,
-					responsable: casosCobros.responsableCobros,
-				})
+				.select({ id: casosCobros.id })
 				.from(casosCobros)
 				.where(eq(casosCobros.numeroCreditoSifco, numeroSifco))
 				.limit(1)
 		: [];
+	const dueno = await usuarioDuenoEnCartera(numeroSifco);
 
 	try {
 		return await db.transaction(async (tx) => {
@@ -197,7 +196,7 @@ export async function alertarAsesorDelRechazo(
 				createdBy: usuarioSistema,
 				createdByRole: "cobros",
 				assignedToRole: "cobros",
-				assignedTo: caso?.responsable ?? null,
+				assignedTo: dueno,
 				...(caso
 					? {
 							relatedEntityType: "collection_case" as const,

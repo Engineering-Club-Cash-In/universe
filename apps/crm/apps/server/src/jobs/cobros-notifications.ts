@@ -12,7 +12,9 @@ import { and, eq, gt, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros, seguimientosProgramados } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
+import { usuariosDuenosPorSifco } from "../lib/acceso-caso-cobro";
 import { toDateStrGT } from "../lib/guatemala-month-window";
+import { resolverUsuarioSistemaCobros } from "../services/cobros-notif-helpers";
 
 export async function checkSeguimientosVencidos() {
 	const now = new Date();
@@ -21,7 +23,6 @@ export async function checkSeguimientosVencidos() {
 	const casosVencidos = await db
 		.select({
 			id: casosCobros.id,
-			responsable: casosCobros.responsableCobros,
 			proximoContacto: casosCobros.proximoContacto,
 			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 		})
@@ -55,18 +56,46 @@ export async function checkSeguimientosVencidos() {
 		);
 
 	const notificadosSet = new Set(yaNotificados.map((n) => n.relatedEntityId));
+	const pendientes = casosVencidos.filter(
+		(caso) => !notificadosSet.has(caso.id),
+	);
 
-	const nuevasNotificaciones = casosVencidos
-		.filter((caso) => !notificadosSet.has(caso.id))
+	// El aviso va al asesor que lleva el crédito en CARTERA (la asignación
+	// vive allá, no en el caso del CRM).
+	const [duenoPorSifco, usuarioSistema] = await Promise.all([
+		usuariosDuenosPorSifco(
+			pendientes.flatMap((c) =>
+				c.numeroCreditoSifco ? [c.numeroCreditoSifco] : [],
+			),
+		),
+		resolverUsuarioSistemaCobros(),
+	]);
+	if (!usuarioSistema) {
+		console.error(
+			"[CobrosNotifications] Seguimientos vencidos: sin usuario sistema, no se avisa",
+		);
+		return;
+	}
+
+	const nuevasNotificaciones = pendientes
 		.map((caso) => ({
+			caso,
+			dueno: caso.numeroCreditoSifco
+				? (duenoPorSifco.get(caso.numeroCreditoSifco) ?? null)
+				: null,
+		}))
+		// Sin dueño en cartera no hay a quién avisarle: mejor nada que un aviso
+		// suelto que no le llega a nadie en particular.
+		.filter(({ dueno }) => dueno !== null)
+		.map(({ caso, dueno }) => ({
 			titulo: "Seguimiento vencido" as const,
 			descripcion: `El seguimiento del caso ${caso.numeroCreditoSifco || caso.id.slice(0, 8)} venció el ${caso.proximoContacto?.toLocaleDateString("es-GT")}`,
 			type: "reminder" as const,
 			status: "pending" as const,
-			createdBy: caso.responsable,
+			createdBy: usuarioSistema,
 			createdByRole: "cobros" as const,
 			assignedToRole: "cobros" as const,
-			assignedTo: caso.responsable,
+			assignedTo: dueno,
 			relatedEntityType: "collection_case" as const,
 			relatedEntityId: caso.id,
 			redirectPage: "cobros_detail" as const,
@@ -138,7 +167,6 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 			metodoContacto: seguimientosProgramados.metodoContacto,
 			agenteId: seguimientosProgramados.agenteId,
 			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
-			responsableCobros: casosCobros.responsableCobros,
 		})
 		.from(seguimientosProgramados)
 		.innerJoin(
@@ -233,6 +261,15 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 		return;
 	}
 
+	// El aviso de cada ocurrencia va al asesor que lleva el crédito en CARTERA;
+	// sin mapeo, a quien programó el seguimiento. Se resuelve ANTES de abrir la
+	// transacción: una llamada a cartera no debe retener la conexión.
+	const duenoPorSifco = await usuariosDuenosPorSifco(
+		claimRows.flatMap((r) =>
+			r.numeroCreditoSifco ? [r.numeroCreditoSifco] : [],
+		),
+	);
+
 	// Queries 3-5 en una sola transacción: CAS + update caso + insert notificaciones.
 	// Sin transacción, un fallo entre el CAS y el insert de notificaciones consumía el contador
 	// permanentemente (el siguiente run lo saltaba) sin generar el recordatorio.
@@ -315,7 +352,9 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 					r.agenteId,
 					"cobros",
 					"cobros",
-					r.responsableCobros,
+					(r.numeroCreditoSifco
+						? duenoPorSifco.get(r.numeroCreditoSifco)
+						: undefined) ?? r.agenteId,
 					"collection_case",
 					r.casoCobroId,
 					"cobros_detail",

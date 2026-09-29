@@ -330,8 +330,8 @@ export interface ContextoScoping {
  * condición por `realizadoPor` se agrega pase lo que pase con el resto de los
  * filtros. Un asesor no puede ampliar su alcance mandando parámetros.
  *
- * Se filtra por `realizadoPor` (quién hizo la gestión) y no por
- * `responsableCobros` (quién lleva la cuenta): el historial es de gestión
+ * Se filtra por `realizadoPor` (quién hizo la gestión) y no por quién lleva
+ * la cuenta en cartera: el historial es de gestión
  * REALIZADA. Si un asesor gestiona una cuenta que no es suya, esa gestión es
  * suya y debe verla; y si le reasignan una cuenta, no hereda las gestiones que
  * hizo otro.

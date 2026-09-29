@@ -19,6 +19,7 @@ import {
 import { metasMensuales } from "../db/schema/metas";
 import { quotations } from "../db/schema/quotations";
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
+import { duenosEnCarteraPorSifco } from "../lib/acceso-caso-cobro";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	getLeadSourceChannelType,
@@ -485,16 +486,44 @@ export const getReporteCreditosCerrados = closedCreditsReportProcedure
 export const getReporteCobranza = protectedProcedure
 	.input(dateRangeSchema)
 	.handler(async () => {
-		// Casos activos por responsable
-		const casosPorResponsable = await db
+		// Casos activos por asesor. El asesor es el que lleva el crédito en
+		// CARTERA (la asignación vive allá): se le pregunta de quién es cada
+		// SIFCO y se agrupa acá.
+		const casosActivos = await db
 			.select({
-				responsable: casosCobros.responsableCobros,
-				totalCasos: count(casosCobros.id),
-				montoTotal: sum(casosCobros.montoEnMora),
+				sifco: casosCobros.numeroCreditoSifco,
+				montoEnMora: casosCobros.montoEnMora,
 			})
 			.from(casosCobros)
-			.where(eq(casosCobros.activo, true))
-			.groupBy(casosCobros.responsableCobros);
+			.where(eq(casosCobros.activo, true));
+		// Sin cartera (integración apagada o caída) el reporte sale igual, con
+		// los casos bajo "sin_asesor": los datos son del CRM (Codex, P2).
+		const duenos = await duenosEnCarteraPorSifco(
+			casosActivos.flatMap((c) => (c.sifco ? [c.sifco] : [])),
+		).catch((error) => {
+			console.error("[getReporteCobranza] Sin dueños de cartera:", error);
+			return new Map<string, { asesorId: number; nombre: string }>();
+		});
+		const porAsesor = new Map<
+			string,
+			{ responsable: string | null; totalCasos: number; montoTotal: number }
+		>();
+		for (const c of casosActivos) {
+			const dueno = c.sifco ? duenos.get(c.sifco) : undefined;
+			const clave = dueno ? String(dueno.asesorId) : "sin_asesor";
+			const acc = porAsesor.get(clave) ?? {
+				responsable: dueno?.nombre ?? null,
+				totalCasos: 0,
+				montoTotal: 0,
+			};
+			acc.totalCasos += 1;
+			acc.montoTotal += Number(c.montoEnMora ?? 0);
+			porAsesor.set(clave, acc);
+		}
+		const casosPorResponsable = [...porAsesor.values()].map((a) => ({
+			...a,
+			montoTotal: a.montoTotal.toFixed(2),
+		}));
 
 		// Top 10 casos con mayor mora
 		const top10Mora = await db
@@ -505,7 +534,7 @@ export const getReporteCobranza = protectedProcedure
 				montoEnMora: casosCobros.montoEnMora,
 				diasMora: casosCobros.diasMoraMaximo,
 				cuotasVencidas: casosCobros.cuotasVencidas,
-				responsable: casosCobros.responsableCobros,
+				numeroCreditoSifco: casosCobros.numeroCreditoSifco,
 				clienteNombre: clients.contactPerson,
 			})
 			.from(casosCobros)
@@ -542,7 +571,13 @@ export const getReporteCobranza = protectedProcedure
 
 		return {
 			casosPorResponsable,
-			top10Mora,
+			// El responsable de cada caso es el asesor dueño en cartera.
+			top10Mora: top10Mora.map((c) => ({
+				...c,
+				responsable: c.numeroCreditoSifco
+					? (duenos.get(c.numeroCreditoSifco)?.nombre ?? null)
+					: null,
+			})),
 			distribucionMora,
 			estadisticasCuotas,
 		};

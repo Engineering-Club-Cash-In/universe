@@ -117,6 +117,46 @@ Reasignar = **`UPDATE cartera.creditos SET asesor_id`, únicamente ese campo**, 
 INSERT en `credito_asesor_historial`. La bitácora es obligatoria, siempre, automática o
 manual.
 
+### El CRM no asigna (2026-09-28)
+
+**Regla de la casa:** la asignación asesor ↔ crédito la dice **solo cartera**. El CRM
+gestiona lo que cartera ya asignó; no tiene una asignación propia, ni para dar acceso, ni
+para listar, ni para avisar.
+
+Hasta esta fecha existía una segunda asignación en el CRM:
+`casos_cobros.responsable_cobros`. Venía de antes de la integración con cartera y se
+llenaba por su cuenta: el job de sync le daba cada caso nuevo al agente con menos casos, la
+ficha lo ponía a nombre de quien la abría, y había un endpoint para cambiarlo a mano. No
+seguía a cartera: en producción no coincidía con el dueño en **739 de 1,550 casos activos
+(48 %)**, y en el sandbox en el 83 %. La consecuencia era concreta: el asesor que el motor
+dejaba con un crédito lo veía en su cola (que ya salía de cartera), pero al abrir la ficha
+recibía "caso no encontrado", y el responsable viejo seguía entrando.
+
+Se eliminó, y todo lo que decidía con ella pasa por `lib/acceso-caso-cobro.ts`:
+
+| Qué | Cómo se decide ahora |
+| --- | --- |
+| **Acceso a la ficha** (`assertAccesoCasoCobro`, ~20 endpoints) | Admin y supervisor de cobros: todo. Asesor: si su asesor de cartera (`email_cash_in` == correo de login) es el dueño del crédito, **o si hoy lo cubre** por vacaciones o permiso. El titular ausente conserva el acceso a lo suyo. |
+| **Listados "mis casos"** (casos, alertas de promesas y de convenios) | Los créditos que cartera le asigna al usuario (o que cubre hoy) |
+| **Avisos** (seguimientos, D-0 de premora, boleta rechazada, mora escalada, inmovilización, GPS) | Al usuario del CRM del dueño en cartera; sin mapeo, a supervisión o a quien originó la acción |
+| **Reportes** que agrupaban por responsable | Por el asesor dueño en cartera |
+
+El dueño se lee **sin cache** con `getAsesorPorSifco` (liviano, en lote). El catálogo de
+asesores (qué correo tiene cada uno) sí puede venir del cache: cambia cuando se da de alta
+a alguien, no cuando el motor reasigna un crédito. Si cartera no responde, el acceso **falla
+cerrado** (SERVICE_UNAVAILABLE), nunca se lee como "no tenés créditos".
+
+Las escrituras que ya revalidaban el dueño con `assertCreditoAsignadoEnCarteraPorSifco`
+(convenio, recuperación, deshacer convenio) lo siguen haciendo: esa lectura además manda el
+dueño esperado a cartera para que lo revalide bajo sus locks.
+
+**Migraciones del CRM, en este orden:**
+
+1. `0066`: deja `responsable_cobros` nullable. Compatible con el código viejo y el nuevo:
+   correr **antes** o junto con el deploy.
+2. `0067`: borra la columna (y la de `contratos_financiamiento`, que nunca se usó). Correr
+   **después** de desplegar: un servidor con el código anterior la sigue leyendo.
+
 ### El pool: `asesor_bucket`
 
 Un bucket tiene varios asesores (`asesor_bucket`, muchos-a-muchos, con `activo` y

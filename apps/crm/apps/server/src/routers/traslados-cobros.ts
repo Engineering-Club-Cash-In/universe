@@ -11,6 +11,7 @@ import {
 	CarteraBackHttpError,
 	carteraBackClient,
 } from "../services/cartera-back-client";
+import { reconciliarAvisosLlamarCliente } from "../services/inmovilizacion-notif";
 
 /**
  * cartera-back devuelve 400 (validación) o 409 (`TrasladoConflict`) para
@@ -118,10 +119,14 @@ export const trasladosCobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			try {
-				return await carteraBackClient.confirmarTrasladoCartera({
+				const res = await carteraBackClient.confirmarTrasladoCartera({
 					...input,
 					actorEmail: context.user.email,
 				});
+				// Los avisos pendientes de "llamar al cliente" siguen al asesor
+				// nuevo de cada crédito trasladado (review de Codex, PR #1765).
+				await reconciliarAvisosLlamarCliente();
+				return res;
 			} catch (error) {
 				traducirErrorTraslado(error);
 			}

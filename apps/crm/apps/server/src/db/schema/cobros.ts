@@ -146,9 +146,6 @@ export const contratosFinanciamiento = pgTable("contratos_financiamiento", {
 	// Estado del contrato
 	estado: estadoContratoEnum("estado").notNull().default("activo"),
 
-	// Responsable de cobros asignado
-	responsableCobros: text("responsable_cobros").references(() => user.id),
-
 	// General notes
 	notes: text("notes"),
 
@@ -205,10 +202,10 @@ export const casosCobros = pgTable(
 		diasMoraMaximo: integer("dias_mora_maximo").notNull(),
 		cuotasVencidas: integer("cuotas_vencidas").notNull(),
 
-		// Asignación
-		responsableCobros: text("responsable_cobros")
-			.notNull()
-			.references(() => user.id),
+		// Sin asignación: quién trabaja el crédito lo dice CARTERA
+		// (`creditos.asesor_id`), no el caso. La vieja columna
+		// `responsable_cobros` se eliminó (migraciones 0066 y 0067); el acceso
+		// y los avisos pasan por lib/acceso-caso-cobro.ts.
 
 		// Información de contacto del cliente
 		telefonoPrincipal: text("telefono_principal").notNull(),

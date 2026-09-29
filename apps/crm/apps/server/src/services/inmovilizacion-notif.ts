@@ -20,11 +20,12 @@
 // deja de leer una foto vieja mientras el UPDATE concurrente sigue en
 // vuelo. Review de Codex, PR #1758.
 
-import { and, eq, exists, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { casosCobros } from "../db/schema/cobros";
 import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
 import { notifications } from "../db/schema/notifications";
+import { usuariosDuenosPorSifco } from "../lib/acceso-caso-cobro";
 import { obtenerSupervisoresCobros } from "./cobros-notif-helpers";
 
 type RolNotificacion = (typeof notifications.createdByRole.enumValues)[number];
@@ -283,58 +284,90 @@ export async function notificarUnidadReactivada(params: {
 }
 
 /**
- * Al reasignar el responsable de un caso de cobro: mueve las notificaciones
- * abiertas de `inmovilizacion_llamar_cliente` al nuevo asesor, para que la
- * tarea pendiente pase a quien ahora tiene acceso para registrar la llamada
- * en la Ficha 360 y la notificación no quede huérfana en la bandeja del
- * asesor anterior. Review de Codex, PR #1758.
+ * Pone cada aviso abierto de "llamar al cliente" en manos de quien lleva HOY
+ * el crédito en CARTERA.
  *
- * `soloSiResponsableEs`: condiciona atómicamente la actualización a que el
- * caso en `casosCobros` siga teniendo este valor de `responsableCobros`
- * (string o null). Evita que una carrera entre reasignaciones concurrentes
- * (A→B seguido de B→C) sobreescriba a C y mueva el aviso de vuelta a B.
+ * El aviso nace dirigido al dueño del momento, pero cartera puede reasignar el
+ * crédito después (el motor de las 23:59, una reasignación manual, un traslado
+ * masivo). Como el acceso a la ficha lo da cartera, el asesor anterior ya no
+ * podría cerrar la tarea y el nuevo no se enteraría (review de Codex, P1,
+ * PR #1765). Se corre al abrir la inmovilización del caso, después de cada
+ * reasignación hecha desde el CRM y en la tanda de alertas de las 08:00.
+ *
+ * Sin `casoCobroIds` revisa todos los avisos abiertos de este tipo (son pocos:
+ * uno por apagado ejecutado sin llamada registrada). Un dueño sin usuario en
+ * el CRM deja el aviso donde está (típicamente en quien pidió el apagado, que
+ * es quien puede registrar la llamada en ese caso). Best-effort.
  */
-export async function reasignarAvisosLlamarCliente(params: {
-	casoCobroId: string;
-	nuevoResponsableUserId: string;
-	soloSiResponsableEs?: string | null;
-}): Promise<void> {
-	await tryNotify("reasignarAvisosLlamarCliente", () => {
-		const condiciones = [
-			eq(notifications.cobrosTipo, "inmovilizacion_llamar_cliente"),
-			eq(notifications.relatedEntityType, "collection_case"),
-			eq(notifications.relatedEntityId, params.casoCobroId),
-			inArray(notifications.status, [...ESTADOS_ABIERTOS]),
-		];
+export async function reconciliarAvisosLlamarCliente(
+	casoCobroIds?: readonly string[],
+): Promise<number> {
+	let movidos = 0;
+	await tryNotify("reconciliarAvisosLlamarCliente", async () => {
+		if (casoCobroIds && casoCobroIds.length === 0) return;
+		let pendientes = casoCobroIds ? [...casoCobroIds] : undefined;
+		// Dos reconciliaciones pueden cruzarse (la de la ficha y la de una
+		// reasignación, por ejemplo). Cada movimiento es un compare-and-set sobre
+		// el destinatario que se LEYÓ: si otro lo cambió entre medio, el UPDATE no
+		// toca nada y ese caso se vuelve a leer —aviso y dueño en cartera— en la
+		// vuelta siguiente. Así una lectura vieja nunca devuelve el aviso a un
+		// dueño anterior (review de Codex, P1, PR #1765).
+		for (let vuelta = 0; vuelta < INTENTOS_RECONCILIACION; vuelta++) {
+			const abiertos = await db
+				.select({
+					id: notifications.id,
+					casoCobroId: notifications.relatedEntityId,
+					assignedTo: notifications.assignedTo,
+					numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+				})
+				.from(notifications)
+				.innerJoin(
+					casosCobros,
+					eq(casosCobros.id, notifications.relatedEntityId),
+				)
+				.where(
+					and(
+						eq(notifications.cobrosTipo, "inmovilizacion_llamar_cliente"),
+						eq(notifications.relatedEntityType, "collection_case"),
+						inArray(notifications.status, [...ESTADOS_ABIERTOS]),
+						pendientes
+							? inArray(notifications.relatedEntityId, pendientes)
+							: undefined,
+					),
+				);
+			if (abiertos.length === 0) return;
 
-		if (params.soloSiResponsableEs !== undefined) {
-			const condicionResponsable =
-				params.soloSiResponsableEs === null
-					? isNull(casosCobros.responsableCobros)
-					: eq(casosCobros.responsableCobros, params.soloSiResponsableEs);
-
-			condiciones.push(
-				exists(
-					db
-						.select({ uno: sql`1` })
-						.from(casosCobros)
-						.where(
-							and(
-								eq(casosCobros.id, params.casoCobroId),
-								condicionResponsable,
-							),
-						),
+			const duenos = await usuariosDuenosPorSifco(
+				abiertos.flatMap((a) =>
+					a.numeroCreditoSifco ? [a.numeroCreditoSifco] : [],
 				),
 			);
+			const cruzados = new Set<string>();
+			for (const a of abiertos) {
+				const dueno = a.numeroCreditoSifco
+					? duenos.get(a.numeroCreditoSifco)
+					: undefined;
+				if (!a.casoCobroId || !dueno || a.assignedTo === dueno) continue;
+				const movido = await db
+					.update(notifications)
+					.set({ assignedTo: dueno, updatedAt: new Date() })
+					.where(
+						and(
+							eq(notifications.id, a.id),
+							sql`${notifications.assignedTo} IS NOT DISTINCT FROM ${a.assignedTo}`,
+							inArray(notifications.status, [...ESTADOS_ABIERTOS]),
+						),
+					)
+					.returning({ id: notifications.id });
+				if (movido.length > 0) movidos++;
+				else cruzados.add(a.casoCobroId);
+			}
+			if (cruzados.size === 0) return;
+			pendientes = [...cruzados];
 		}
-
-		return db
-			.update(notifications)
-			.set({
-				assignedTo: params.nuevoResponsableUserId,
-				updatedAt: new Date(),
-			})
-			.where(and(...condiciones));
 	});
+	return movidos;
 }
 
+/** Vueltas de relectura cuando otra reconciliación movió el aviso a la vez. */
+const INTENTOS_RECONCILIACION = 3;

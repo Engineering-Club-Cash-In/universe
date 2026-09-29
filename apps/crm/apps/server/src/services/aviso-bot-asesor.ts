@@ -38,7 +38,6 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
-import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
 
@@ -204,10 +203,7 @@ export async function resolverDestinoAvisoBot(
 	// asesor dueño del crédito, esté donde esté"). Un cliente al día que
 	// escribe es de los que MÁS vale la pena atender rápido.
 	const [caso] = await db
-		.select({
-			id: casosCobros.id,
-			responsableCobros: casosCobros.responsableCobros,
-		})
+		.select({ id: casosCobros.id })
 		.from(casosCobros)
 		.where(eq(casosCobros.numeroCreditoSifco, numeroSifco))
 		.orderBy(desc(casosCobros.activo), desc(casosCobros.createdAt))
@@ -248,23 +244,17 @@ export async function resolverDestinoAvisoBot(
 	// Sin caso no hay a dónde navegar: el aviso se manda igual pero sin
 	// enlace, y el texto carga el SIFCO para que se pueda buscar a mano.
 	//
-	// Y el caso tiene que poder ABRIRLO quien recibe el aviso (review de Codex,
-	// P2): el dueño sale de cartera, pero `casos_cobros.responsable_cobros` se
-	// sincroniza después. Recién reasignado el crédito, el caso local todavía
-	// nombra al asesor anterior y `getCasoCobroById` le daría NOT_FOUND al
-	// nuevo. Hasta que sincronice, el aviso va sin enlace.
-	const puedeAbrirCaso =
-		caso !== undefined &&
-		(caso.responsableCobros === usuarioAsesor.id ||
-			PERMISSIONS.canViewAllCasosCobros(usuarioAsesor.role ?? ""));
-	const anclaCaso: AnclaCaso =
-		caso && puedeAbrirCaso
-			? {
-					relatedEntityType: "collection_case",
-					relatedEntityId: caso.id,
-					redirectPage: "cobros_detail",
-				}
-			: {};
+	// El destinatario es el dueño en cartera, y el acceso a la ficha también
+	// lo da cartera (lib/acceso-caso-cobro): quien recibe el aviso siempre
+	// puede abrir el caso. Antes el acceso miraba `responsable_cobros` y el
+	// aviso tenía que ir sin enlace hasta que esa columna "sincronizara".
+	const anclaCaso: AnclaCaso = caso
+		? {
+				relatedEntityType: "collection_case",
+				relatedEntityId: caso.id,
+				redirectPage: "cobros_detail",
+			}
+		: {};
 
 	return {
 		usuarioAsesor: { id: usuarioAsesor.id, name: usuarioAsesor.name },

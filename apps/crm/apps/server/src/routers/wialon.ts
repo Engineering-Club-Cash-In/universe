@@ -730,10 +730,8 @@ export async function resolverCasoParaGps(
 	}
 	const numeroCreditoSifco = filas[0]?.casoSifco ?? null;
 
-	// El caso NO basta como autorización: getDetallesCreditoCarteraBack
-	// auto-crea uno con responsableCobros = quien consulta, así que un asesor
-	// podría fabricarse acceso abriendo el SIFCO de otro (ver
-	// credito-cartera-ownership.ts). La fuente es CARTERA, leída sin cache.
+	// La fuente de "de quién es este crédito" es CARTERA, leída sin cache (ver
+	// credito-cartera-ownership.ts): el caso local no dice de quién es.
 	// Admin / supervisor pasan sin consulta. Sin SIFCO no hay cómo verificar.
 	if (!numeroCreditoSifco) {
 		if (!PERMISSIONS.canViewAllCasosCobros(userRole)) {

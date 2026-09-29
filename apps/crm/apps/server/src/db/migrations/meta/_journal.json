@@ -183,6 +183,13 @@
 			"when": 1789776000000,
 			"tag": "0035_add_identity_revalidated_at",
 			"breakpoints": true
+		},
+		{
+			"idx": 26,
+			"version": "7",
+			"when": 1790265214957,
+			"tag": "0036_buro_interno_autorizaciones",
+			"breakpoints": true
 		}
 	]
 }

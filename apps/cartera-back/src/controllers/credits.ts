@@ -22,6 +22,8 @@ import {
   pagos_credito,
   pagos_credito_inversionistas_espejo,
   platform_users,
+  rubros,
+  rubros_tipos,
   StatusCredit,
   usuarios,
 } from "../database/db/schema";
@@ -48,6 +50,14 @@ import {
   filtrarCuotasVencidasSinCobertura,
 } from "./registerPaymentPolicy";
 import {
+  BASE_DIAS_MORA,
+  diasAtrasoMoraConSigno,
+  hoyGuatemala,
+  incrementoDiarioMora,
+  incrementoMaximoMensualMora,
+  isInstallmentWithinMoraHorizon,
+} from "./latefee";
+import {
   CREDIT_DETAIL_STATUSES,
   RESET_CREDIT_ERRORS,
   canResetCreditByStatus,
@@ -59,6 +69,8 @@ import {
   withActiveCancellation,
 } from "./creditDetailPolicy";
 import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
+import { disponibleDeRubro, ordenarRubrosParaCobro } from "./rubrosPolicy";
+import { reclamosVivosDeRubros } from "./rubros";
 
 
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
@@ -280,6 +292,24 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       currentCredit.creditos.cuota ?? 0
     );
 
+    // Cuánto le sube la mora a este crédito por cada día que pase, y su techo
+    // mensual. Sale del MISMO helper que alimenta al listado, de una sola
+    // consulta: el criterio de elegibilidad y la fórmula viven en un solo lugar
+    // (ver `incrementosMoraPorCredito`).
+    const incrementosMora = await incrementosMoraPorCredito([
+      {
+        credito_id: creditoId,
+        capital: currentCredit.creditos.capital ?? 0,
+        statusCredit: currentCredit.creditos.statusCredit,
+      },
+    ]);
+    // `!`: el mapa trae SIEMPRE una entrada por cada crédito que se le pasa
+    // —incluso sin cuotas, con "0.00"— y acá se le pasó este. Un `??` sería
+    // una rama que ningún caso puede alcanzar.
+    const { incrementoDiarioMora: incrementoDiarioMoraStr,
+      incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr } =
+      incrementosMora.get(creditoId)!;
+
     const cuotasPendientes = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
@@ -343,6 +373,117 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           eq(moras_credito.activa, true)
         )
       );
+
+    // Rubros vivos del crédito (módulo NUEVO `cartera.rubros*` — no confundir
+    // con la tabla vieja `creditos_rubros_otros`, que alimenta el campo
+    // `otros` del pago y no tiene nada que ver con esto). Paralelo a
+    // `moraActual`: una consulta para los rubros vivos + su tipo, otra para lo
+    // que boletas hermanas ya apartaron, y `disponibleDeRubro` neteando cada
+    // uno — así un segundo asesor cobrando el mismo día no ve el rubro
+    // completo si otra boleta ya lo tomó. Envuelto en su propio try/catch: si
+    // esto falla, el endpoint que alimenta la cobranza de toda la empresa NO
+    // se cae, sale en 0/[] y se loguea.
+    let rubrosActual = 0;
+    let rubrosDetalle: {
+      rubro_id: number;
+      tipo_nombre: string;
+      descripcion: string;
+      saldo_pendiente: string;
+      disponible: string;
+      obligatorio: boolean;
+    }[] = [];
+    try {
+      /**
+       * LIMITACIÓN CONOCIDA, dicha acá para que no se descubra como sorpresa.
+       *
+       * `disponible` sale de restarle al saldo del rubro lo que las boletas
+       * hermanas ya apartaron, y cada dato viene de una consulta distinta. La
+       * base corre en READ COMMITTED, donde cada sentencia toma su propia
+       * instantánea, así que un `/aplicar-pago` que commitee entre las dos deja
+       * al asesor viendo un disponible que nunca existió: saldo de antes contra
+       * reclamos de después.
+       *
+       * NO se envuelve en una transacción `repeatable read` —que es lo que lo
+       * cerraría, y es lo que sí hace `listarRubrosDeCredito`— porque este
+       * endpoint alimenta la pantalla de cobro de toda la empresa y el bloque de
+       * rubros vive dentro de un handler que hace decenas de consultas más.
+       * Acotar la transacción a estas dos exige reordenar el bloque, y el riesgo
+       * de equivocarse acá es mayor que el del defecto: la ventana es de
+       * milisegundos, el número se corrige solo al recargar, y ninguna escritura
+       * depende de él — el cobro real lo recalcula el backend con la fila
+       * bloqueada.
+       */
+      const rubrosVivos = await db
+        .select({
+          rubro_id: rubros.rubro_id,
+          descripcion: rubros.descripcion,
+          saldo_pendiente: rubros.saldo_pendiente,
+          // No se devuelve al front: se selecciona sólo para poder ordenar la
+          // lista con el mismo criterio con que se va a cobrar (ver abajo).
+          created_at: rubros.created_at,
+          tipo_nombre: rubros_tipos.nombre,
+          obligatorio: rubros_tipos.obligatorio,
+        })
+        .from(rubros)
+        .innerJoin(rubros_tipos, eq(rubros.tipo_id, rubros_tipos.tipo_id))
+        .where(
+          and(
+            eq(rubros.credito_id, creditoId),
+            eq(rubros.activo, true),
+            eq(rubros.completado, false),
+            eq(rubros.anulado, false)
+          )
+        );
+
+      if (rubrosVivos.length > 0) {
+        /**
+         * Se ordena con la MISMA función que usa el cobro, no con un `ORDER BY`
+         * propio.
+         *
+         * La pantalla le muestra al asesor la lista en este orden, y una boleta
+         * que no alcanza para todos los rubros los cobra de arriba hacia abajo.
+         * Si la lista viniera en orden arbitrario —que es lo que devuelve la
+         * base sin `ORDER BY`—, el asesor vería un orden y la plata iría en
+         * otro: con una boleta corta terminaría diciéndole al cliente que le
+         * cobró el rubro equivocado. Reusar la función pura en vez de repetir
+         * el criterio en SQL es lo que impide que los dos órdenes se separen
+         * el día que la regla cambie.
+         */
+        const enOrdenDeCobro = ordenarRubrosParaCobro(rubrosVivos);
+
+        const reclamos = await reclamosVivosDeRubros(
+          enOrdenDeCobro.map((r) => r.rubro_id)
+        );
+
+        let totalDisponible = new Big(0);
+        rubrosDetalle = enOrdenDeCobro.map((r) => {
+          const reclamadoVivo = (reclamos.get(r.rubro_id) ?? []).reduce(
+            (acc, c) => acc.plus(new Big(c.monto ?? 0)),
+            new Big(0)
+          );
+          const disponible = disponibleDeRubro({
+            saldoPendiente: r.saldo_pendiente ?? "0",
+            reclamadoVivo,
+          });
+          totalDisponible = totalDisponible.plus(disponible);
+
+          return {
+            rubro_id: r.rubro_id,
+            tipo_nombre: r.tipo_nombre,
+            descripcion: r.descripcion,
+            saldo_pendiente: new Big(r.saldo_pendiente ?? 0).toFixed(2),
+            disponible: disponible.toFixed(2),
+            obligatorio: r.obligatorio,
+          };
+        });
+
+        rubrosActual = totalDisponible.toNumber();
+      }
+    } catch (error) {
+      console.error("[getCreditoByNumero] Error consultando rubros:", error);
+      rubrosActual = 0;
+      rubrosDetalle = [];
+    }
 
     // 6. Consultar si la cuota actual ya fue pagada
     const cuotaActualDataResult = await db
@@ -437,12 +578,18 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         cuotasEnValidacion,
         cuotasPagadas,
         moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
+        incrementoDiarioMora: incrementoDiarioMoraStr,
+        incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
         mora: moraActual.length > 0 ? moraActual[0] : null,
         convenioActivo: null,
         cuotasEnConvenio: [],
         pagosConvenio: [],
         ajusteFechaIdeal: ajusteFechaIdeal ?? null,
         cuotaMensualAPagar,
+        // Módulo NUEVO de rubros (`cartera.rubros*`) — no la tabla vieja
+        // `creditos_rubros_otros` que alimenta el campo `otros` del pago.
+        rubrosActual,
+        rubros: rubrosDetalle,
         ...(contractSummary ? { contractSummary } : {}),
       }, cancelacionActiva, currentCredit.creditos.statusCredit);
     }
@@ -567,6 +714,8 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       cuotasEnValidacion,
       cuotasPagadas,
       moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
+      incrementoDiarioMora: incrementoDiarioMoraStr,
+      incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
       mora: moraActual.length > 0 ? moraActual[0] : null,
       convenioActivo:
         convenioActivo.length > 0
@@ -579,6 +728,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       pagosConvenio,
       ajusteFechaIdeal: ajusteFechaIdeal ?? null,
       cuotaMensualAPagar,
+      // Módulo NUEVO de rubros (`cartera.rubros*`) — no la tabla vieja
+      // `creditos_rubros_otros` que alimenta el campo `otros` del pago.
+      rubrosActual,
+      rubros: rubrosDetalle,
       ...(contractSummary ? { contractSummary } : {}),
     }, cancelacionActiva, currentCredit.creditos.statusCredit);
   } catch (error) {
@@ -620,6 +773,155 @@ interface ProximaCuota {
 }
 
 // 🔥 Interface actualizada
+export type IncrementoMora = {
+  /** Lo que la mora sube mañana, con 2 decimales. */
+  incrementoDiarioMora: string;
+  /** Lo MÁXIMO que puede subir de aquí a 30 días, con 2 decimales. */
+  incrementoMaximoMensualMora: string;
+  /**
+   * Días REALES de atraso del crédito: los de la cuota vencida MÁS ANTIGUA
+   * entre las que mueven la mora. 0 si ninguna venció todavía.
+   *
+   * Es el atraso del crédito, no el de una cuota cualquiera: es el número que
+   * el cliente reconoce ("llevo 3 días") y el que ordena la cobranza. Sale del
+   * mismo conjunto de cuotas con que se calcula el monto proporcional, así que
+   * el número y la plata no pueden contradecirse.
+   */
+  diasAtrasoMoraMaximo: number;
+};
+
+/**
+ * Último día que la proyección de mora mira: hoy + 30, en fecha de CALENDARIO
+ * de Guatemala (la misma que usa el cron), para que el filtro de la consulta y
+ * el de `isInstallmentWithinMoraHorizon` hablen del mismo día.
+ */
+export function limiteHorizonteMora(hoyGT: Date): string {
+  const fin = new Date(
+    hoyGT.getFullYear(),
+    hoyGT.getMonth(),
+    hoyGT.getDate() + BASE_DIAS_MORA
+  );
+  return [
+    String(fin.getFullYear()).padStart(4, "0"),
+    String(fin.getMonth() + 1).padStart(2, "0"),
+    String(fin.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+/**
+ * Ritmo diario y techo mensual de la mora para VARIOS créditos, en UNA sola
+ * consulta.
+ *
+ * Por qué en conjunto y no por crédito: el detalle (`getCreditoByNumero`) mira
+ * un crédito, pero el LISTADO devuelve una página entera. Calcularlo dentro del
+ * loop sería una consulta por fila —el patrón N+1 que el resto de este archivo
+ * evita con `inArray` + plegado en memoria—, y sin estos dos campos la tarjeta
+ * de mora del listado no puede decir ni el ritmo ni el techo. Una consulta para
+ * toda la página cuesta lo mismo que la del detalle.
+ *
+ * Por qué se consulta aparte y no se reusan las cuotas que el listado ya trae:
+ * la mora se cobra con el criterio del cron (`esCuotaElegibleParaMora`), que
+ * mira el flag `pagado` y la existencia de un pago APLICADO, mientras que las
+ * otras listas deciden la cobertura por montos. Usar el otro criterio daría un
+ * ritmo que no cuadra con lo que el cron va a escribir.
+ *
+ * Trae las cuotas impagas que vencen DENTRO DEL HORIZONTE (hasta hoy + 30
+ * días), no solo las ya vencidas: la que vence hoy mañana ya suma 1/30, y
+ * dejarla fuera anunciaría un ritmo menor al que el cron cobra.
+ *
+ * Un crédito sin cuotas que muevan la mora —o en un estado excluido, donde
+ * `isInstallmentWithinMoraHorizon` descarta todas— sale con "0.00" en ambos,
+ * nunca ausente: el que llama no tiene que distinguir "cero" de "no calculado".
+ */
+export async function incrementosMoraPorCredito(
+  creditosDeLaPagina: {
+    credito_id: number;
+    capital: Big | string | number | null;
+    statusCredit: string | null;
+  }[],
+  hoyGT: Date = hoyGuatemala()
+): Promise<Map<number, IncrementoMora>> {
+  const resultado = new Map<number, IncrementoMora>();
+  if (creditosDeLaPagina.length === 0) return resultado;
+
+  const ids = [...new Set(creditosDeLaPagina.map((c) => c.credito_id))];
+
+  // UNA consulta para toda la página. El EXISTS es el mismo predicado de pago
+  // aplicado que usa el cron.
+  const cuotasParaMora = await db
+    .select({
+      credito_id: cuotas_credito.credito_id,
+      fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+      pagado: cuotas_credito.pagado,
+      // ⚠️ La columna de la cuota va con su nombre COMPLETO y no por
+      // `${cuotas_credito.cuota_id}`: drizzle lo renderiza sin calificar
+      // (`"cuota_id"` pelado) y adentro del EXISTS gana el alcance INTERNO, o
+      // sea `pc.cuota_id`. La condición se volvía `pc.cuota_id = pc.cuota_id`
+      // —siempre cierta— y el EXISTS respondía "¿existe ALGÚN pago aplicado en
+      // toda la tabla?": true para todas las cuotas. Con eso ninguna cuota era
+      // elegible y el incremento salía "0.00" SIEMPRE.
+      hasPaidPayment: sql<boolean>`EXISTS (
+        SELECT 1
+        FROM cartera.pagos_credito pc
+        WHERE pc.cuota_id = "cartera"."cuotas_credito"."cuota_id"
+          AND pc."paymentFalse" = false
+          AND pc.pagado = true
+          AND pc.validation_status IN ('validated', 'no_required')
+          AND COALESCE(pc.monto_aplicado, 0) > 0
+      )`,
+    })
+    .from(cuotas_credito)
+    .where(
+      and(
+        inArray(cuotas_credito.credito_id, ids),
+        eq(cuotas_credito.pagado, false),
+        lte(cuotas_credito.fecha_vencimiento, limiteHorizonteMora(hoyGT))
+      )
+    );
+
+  // Plegado en memoria: una lista de cuotas por crédito.
+  const cuotasPorCredito = new Map<number, typeof cuotasParaMora>();
+  for (const cuota of cuotasParaMora) {
+    const lista = cuotasPorCredito.get(cuota.credito_id);
+    if (lista) lista.push(cuota);
+    else cuotasPorCredito.set(cuota.credito_id, [cuota]);
+  }
+
+  for (const credito of creditosDeLaPagina) {
+    // Días CON SIGNO: la que vence hoy entra con 0 y la que vence en 10 días
+    // con −10. Cada cuota empieza a cobrar sola el día que le toca; aplastarlos
+    // a 0 las haría cobrar desde hoy.
+    const diasAtrasadosPorCuota = (cuotasPorCredito.get(credito.credito_id) ?? [])
+      .filter((c) =>
+        isInstallmentWithinMoraHorizon(
+          { ...c, statusCredit: credito.statusCredit },
+          hoyGT
+        )
+      )
+      .map((c) => diasAtrasoMoraConSigno(c.fecha_vencimiento, hoyGT));
+
+    const params = {
+      capital: credito.capital ?? 0,
+      diasAtrasadosPorCuota,
+    };
+    // El MÁXIMO de los días con signo es la cuota más ANTIGUA (más días
+    // corridos desde su vencimiento). Se aplasta a 0 porque las que aún no
+    // vencen entran con signo negativo y no son atraso.
+    const diasAtrasoMoraMaximo =
+      diasAtrasadosPorCuota.length > 0
+        ? Math.max(0, ...diasAtrasadosPorCuota)
+        : 0;
+
+    resultado.set(credito.credito_id, {
+      incrementoDiarioMora: incrementoDiarioMora(params).toFixed(2),
+      incrementoMaximoMensualMora: incrementoMaximoMensualMora(params).toFixed(2),
+      diasAtrasoMoraMaximo,
+    });
+  }
+
+  return resultado;
+}
+
 export interface CreditoConInfo {
   creditos: typeof creditos.$inferSelect;
   usuarios: typeof usuarios.$inferSelect;
@@ -669,6 +971,22 @@ export interface CreditoConInfo {
   aseguradora?: string | null;
   /** Hay filas en el espejo de pagos aún sin liquidar → no puede entrar a devolución a CUBE. */
   tiene_pagos_sin_liquidar?: boolean;
+  /**
+   * Lo que la mora sube mañana y su techo mensual, con 2 decimales. Los mismos
+   * dos campos que devuelve el detalle: la tarjeta de mora del listado los
+   * recibe por `item`, y sin ellos llegaba `undefined` y no decía ni el ritmo
+   * ni el techo. Se calculan para TODA la página de una vez
+   * (`incrementosMoraPorCredito`), no por crédito.
+   */
+  incrementoDiarioMora?: string;
+  incrementoMaximoMensualMora?: string;
+  /**
+   * Días REALES de atraso del crédito (cuota vencida más antigua). El CRM los
+   * muestra como "Días de Mora" y ordena la cobranza con ellos; sin este campo
+   * los inventaba como `cuotas_atrasadas × 30`, que con la mora proporcional
+   * contradice al monto que se muestra al lado.
+   */
+  diasAtrasoMoraMaximo?: number;
 }
 
 // 🔥 Función auxiliar para calcular proximidad (con zona horaria de Guatemala)
@@ -1312,6 +1630,34 @@ export async function getCreditosWithUserByMesAnio(
     console.error("❌ Error consultando incobrables:", err);
   }
 
+  // 6.5 Ritmo y techo del crecimiento de la mora, para TODA la página de una
+  // vez. La tarjeta de mora del listado los muestra igual que el detalle, así
+  // que tienen que viajar en cada fila; calcularlos crédito por crédito sería
+  // una consulta por fila.
+  let incrementosMoraMap = new Map<number, IncrementoMora>();
+  try {
+    const creditosUnicosParaMora = new Map<
+      number,
+      { credito_id: number; capital: string | null; statusCredit: string | null }
+    >();
+    rows.forEach((row) => {
+      if (!creditosUnicosParaMora.has(row.creditos.credito_id)) {
+        creditosUnicosParaMora.set(row.creditos.credito_id, {
+          credito_id: row.creditos.credito_id,
+          capital: row.creditos.capital ?? null,
+          statusCredit: row.creditos.statusCredit,
+        });
+      }
+    });
+    incrementosMoraMap = await incrementosMoraPorCredito([
+      ...creditosUnicosParaMora.values(),
+    ]);
+  } catch (err) {
+    // Fail-open: el listado no puede caerse porque la proyección de mora falle.
+    // Los campos quedan ausentes y la tarjeta vuelve a no decir el ritmo.
+    console.error("❌ Error calculando incrementos de mora:", err);
+  }
+
   // 7️⃣ 🔥 MAP FINAL - Sin duplicados
   let data: CreditoConInfo[] = [];
   try {
@@ -1365,6 +1711,12 @@ export async function getCreditosWithUserByMesAnio(
           fecha_inicio,
           aseguradora: row.aseguradora_nombre ?? null,
           tiene_pagos_sin_liquidar: creditosConBorradores.has(creditoId),
+          incrementoDiarioMora:
+            incrementosMoraMap.get(creditoId)?.incrementoDiarioMora,
+          incrementoMaximoMensualMora:
+            incrementosMoraMap.get(creditoId)?.incrementoMaximoMensualMora,
+          diasAtrasoMoraMaximo:
+            incrementosMoraMap.get(creditoId)?.diasAtrasoMoraMaximo,
         });
       }
     });
@@ -3079,13 +3431,13 @@ interface CreditStatsResponse {
 
 export const getCreditStats = async (email?: string): Promise<CreditStatsResponse> => {
   console.log(`📊 Obteniendo estadísticas de créditos...`);
-  if (email) {
+  if (email !== undefined) {
     console.log(`   🔍 Filtrando por asesor con email: ${email}`);
   }
 
   // Obtener el asesor_id si se proporciona email
   let asesorId: number | null = null;
-  if (email) {
+  if (email !== undefined) {
     const platformUser = await db
       .select({ asesor_id: asesores.asesor_id })
       .from(asesores)
@@ -3098,6 +3450,13 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
       console.log(`   ✅ Asesor encontrado con ID: ${asesorId}`);
     } else {
       console.log(`   ⚠️ No se encontró asesor con email: ${email}`);
+      const empty: CreditStats = { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" };
+      return {
+        totalCreditos: 0,
+        efectividad: "0",
+        porCuotasAtrasadas: { "0": empty, "1": empty, "2": empty, "3": empty, "4": empty },
+        porEstado: { cancelado: empty, incobrable: empty },
+      };
     }
   }
 

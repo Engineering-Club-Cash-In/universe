@@ -3,6 +3,7 @@ import type { AppDependencies } from "./dependencies";
 import { defaultScheduler, type Scheduler } from "./jobs/scheduler";
 import { runApplicationWorkerOnce } from "./payments/application-worker";
 import { runReviewWorkerOnce } from "./payments/review-worker";
+import { runStatementEnrichmentOnce } from "./payments/statement-enrichment";
 
 export type LifecycleScheduler = Scheduler;
 
@@ -13,7 +14,7 @@ export function startPaymentLifecycle(
   deps: AppDependencies,
   options: { scheduler?: Scheduler; logError?: (message: string) => void; logInfo?: (message: string) => void } = {},
 ) {
-  if (config.deploymentMode !== "qa_real_payments") return () => {};
+  if (config.deploymentMode === "integration") return () => {};
 
   const scheduler = options.scheduler ?? defaultScheduler;
   const logError = options.logError ?? console.error;
@@ -45,6 +46,10 @@ export function startPaymentLifecycle(
     }
   };
   const stops = [
+    startWorkerLoop("Statement enrichment", 30, async () => {
+      await runStatementEnrichmentOnce({ repository: deps.transactions, nexa: deps.nexa });
+      return false;
+    }, scheduler, logError),
     startWorkerLoop("Application worker", config.workerIntervalSeconds, () => runApplicationWorkerOnce({
       repository: deps.transactions,
       cartera: deps.cartera,

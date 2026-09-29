@@ -29,12 +29,18 @@ describe("getLeadDuplicateConflict", () => {
 });
 
 describe("getLeadDuplicatePresentation", () => {
-	it("explica que está activo y asignado a otra persona", () => {
-		expect(getLeadDuplicatePresentation(activeConflict)).toEqual({
+	// El nombre del dueño NO se afirma acá a propósito: lo renderiza el diálogo
+	// (`lead-duplicate-dialog.tsx`), no este texto. Ver el comentario en
+	// `getLeadDuplicatePresentation`.
+	it("explica que está activo y dice qué hacer, sin repetir el nombre del dueño", () => {
+		const presentacion = getLeadDuplicatePresentation(activeConflict);
+
+		expect(presentacion).toEqual({
 			status: "Activo",
-			assignment: "Este lead está asignado a otra persona.",
+			assignment: "Pedile a tu supervisor que te lo reasigne.",
 			canViewLead: false,
 		});
+		expect(presentacion.assignment).not.toContain("María García");
 	});
 
 	it("explica que está inactivo y asignado al usuario actual", () => {

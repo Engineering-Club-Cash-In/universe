@@ -31,6 +31,7 @@ import { notifications } from "../db/schema/notifications";
 import { visitasCobros } from "../db/schema/visitas-cobros";
 import { usuarioDuenoEnCarteraEstricto } from "../lib/acceso-caso-cobro";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
+import { PERMISSIONS } from "../lib/roles";
 import {
 	buildUploadPrefix,
 	MAX_FILE_SIZE,
@@ -376,6 +377,15 @@ export async function avisarVisitaProgramada(params: {
 	/** Quién la programó (created_by del aviso). */
 	programadaPorId: string;
 	esHoy: boolean;
+	/**
+	 * Aviso de la mañana redirigido porque el responsable ya no lleva el
+	 * crédito (ver `destinatariosAvisoDelDia`). Sin esto, va al responsable.
+	 */
+	redirigido?: {
+		asesor: string | null;
+		supervisores: string[];
+		responsableNombre: string | null;
+	};
 }): Promise<void> {
 	if (!params.esHoy && params.responsableId === params.programadaPorId) return;
 	try {
@@ -395,14 +405,19 @@ export async function avisarVisitaProgramada(params: {
 					? null
 					: (programador?.name ?? null),
 			esHoy: params.esHoy,
+			reasignadaDe: params.redirigido
+				? params.redirigido.responsableNombre
+				: undefined,
 		});
 		const filas = filasNotificacionCobros({
 			casoId: params.casoCobroId,
 			cobrosTipo: "visita_programada",
 			titulo,
 			descripcion,
-			asesorUserId: params.responsableId,
-			supervisores: [],
+			asesorUserId: params.redirigido
+				? params.redirigido.asesor
+				: params.responsableId,
+			supervisores: params.redirigido?.supervisores ?? [],
 			usuarioSistema: params.programadaPorId,
 			dedupKey: params.esHoy
 				? `visita:${params.visitaId}:dia:${toDateStrGT(params.fechaProgramada)}`
@@ -445,9 +460,55 @@ export async function resolverAvisosDeVisita(visitaId: string): Promise<void> {
 }
 
 /**
+ * A quién le toca el aviso de la mañana. El responsable trabajaba el crédito
+ * al programarla, pero el motor pudo reasignarlo después; si ya no lo trabaja
+ * no puede ni abrir la ficha (el permiso lo da cartera, no la visita), así que
+ * el aviso va a quien lleva el crédito hoy —o, si ese asesor no tiene usuario,
+ * a los supervisores—, que decide quién va o la cancela. Mismo criterio que
+ * los avisos de "llamar al cliente" de CB-041, que siguen al dueño en cartera
+ * (review de Codex, PR #1777). Si cartera no contesta, se avisa al responsable
+ * de siempre: es best-effort.
+ */
+async function destinatariosAvisoDelDia(
+	numeroSifco: string | null,
+	responsableId: string,
+): Promise<{
+	asesor: string | null;
+	supervisores: string[];
+	responsableNombre: string | null;
+} | null> {
+	const [responsable] = await db
+		.select({ nombre: user.name, role: user.role })
+		.from(user)
+		.where(eq(user.id, responsableId))
+		.limit(1);
+	// Admin y supervisor ven toda la cartera: una reasignación no los saca.
+	if (PERMISSIONS.canViewAllCasosCobros(responsable?.role ?? "")) return null;
+	let posibles: ResponsableVisita[];
+	try {
+		posibles = await responsablesPosiblesVisita({
+			numeroSifco,
+			actor: { userId: responsableId, userRole: responsable?.role ?? "" },
+		});
+	} catch {
+		return null;
+	}
+	if (posibles.some((r) => r.id === responsableId)) return null;
+	const dueno = posibles.find((r) => r.motivo === "lleva el crédito");
+	return {
+		asesor: dueno?.id ?? null,
+		supervisores: dueno
+			? []
+			: posibles.filter((r) => r.motivo === "supervisor").map((r) => r.id),
+		responsableNombre: responsable?.nombre ?? null,
+	};
+}
+
+/**
  * Job de la mañana (08:00 GT, junto con las demás alertas de cobros): aviso al
- * responsable de cada visita programada para hoy. El dedup por día hace que el
- * run de boot no duplique.
+ * responsable de cada visita programada para hoy —o a quien lleva el crédito
+ * hoy, si cartera se lo reasignó—. El dedup por día hace que el run de boot no
+ * duplique.
  */
 export async function avisarVisitasDelDia(
 	ahora: Date = new Date(),
@@ -486,6 +547,9 @@ export async function avisarVisitasDelDia(
 			responsableId: v.responsableId,
 			programadaPorId: v.programadaPor ?? v.responsableId,
 			esHoy: true,
+			redirigido:
+				(await destinatariosAvisoDelDia(v.numeroSifco, v.responsableId)) ??
+				undefined,
 		});
 	}
 	return visitas.length;

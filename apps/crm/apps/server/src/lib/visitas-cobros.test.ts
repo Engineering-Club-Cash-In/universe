@@ -16,6 +16,7 @@ import {
 	type RegistrarVisitaInput,
 	registrarVisitaSchema,
 	siguientesPasos,
+	textoAvisoVisitaProgramada,
 	textoGestionVisita,
 	visitaPermitidaEnBucket,
 } from "./visitas-cobros";
@@ -254,6 +255,35 @@ describe("textoGestionVisita", () => {
 			),
 		).toBe(
 			"Visita a residencia — Sin contacto: Ya no vive o trabaja ahí. Dirección: 23 Avenida 12-13 zona 18.",
+		);
+	});
+});
+
+describe("textoAvisoVisitaProgramada", () => {
+	const base = {
+		tipo: "residencia" as const,
+		cliente: "Susset Archila",
+		numeroSifco: "0101",
+		fechaProgramada: new Date("2026-09-30T15:00:00.000Z"),
+		direccion: "Zona 18, casa 5",
+		programadaPor: null,
+		esHoy: true,
+	};
+
+	it("al responsable: «Hoy tenés una visita»", () => {
+		expect(textoAvisoVisitaProgramada(base).titulo).toBe(
+			"Hoy tenés una visita a residencia",
+		);
+	});
+
+	it("redirigido porque cartera reasignó el crédito: dice de quién era", () => {
+		const t = textoAvisoVisitaProgramada({
+			...base,
+			reasignadaDe: "Samuel Gamboa",
+		});
+		expect(t.titulo).toBe("Hoy hay una visita a residencia pendiente");
+		expect(t.descripcion).toContain(
+			"La tenía Samuel Gamboa, que ya no lleva el crédito",
 		);
 	});
 });

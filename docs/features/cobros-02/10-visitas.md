@@ -84,6 +84,13 @@ gestión queda con `realizado_por` = el responsable, así cuenta en su agenda.
 - **al programarla**, si la programó otra persona;
 - **la mañana del día** (08:00 GT, con las demás alertas de cobros).
 
+Si entre que se programó y el día de la visita cartera le reasignó el crédito a otro
+asesor, el responsable anterior ya no puede abrir la ficha: el permiso lo da cartera,
+no la visita. Entonces el aviso de la mañana va a **quien lleva el crédito hoy** (o a
+los supervisores, si ese asesor no tiene usuario), con el nombre de quien la tenía, para
+que decida quién va o la cancele. Es el mismo criterio de los avisos de "llamar al
+cliente" de CB-041. Si cartera no contesta, el aviso va al responsable de siempre.
+
 Deduplicado por visita y por día (`visita:<id>:programada`, `visita:<id>:dia:<fecha>`):
 el run de boot no duplica. Al registrar o cancelar la visita, sus avisos se marcan
 resueltos.

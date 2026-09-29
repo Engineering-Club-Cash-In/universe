@@ -368,6 +368,11 @@ export function textoAvisoVisitaProgramada(params: {
 	programadaPor: string | null;
 	/** true = aviso de la mañana del día; false = aviso al programarla. */
 	esHoy: boolean;
+	/**
+	 * Aviso de la mañana redirigido: el responsable ya no lleva el crédito
+	 * (cartera lo reasignó). Es su nombre, para decir de quién era la visita.
+	 */
+	reasignadaDe?: string | null;
 }): { titulo: string; descripcion: string } {
 	const quien = params.cliente?.trim()
 		? `${params.cliente.trim()}${params.numeroSifco ? ` (${params.numeroSifco})` : ""}`
@@ -379,6 +384,13 @@ export function textoAvisoVisitaProgramada(params: {
 	const por = params.programadaPor
 		? ` La programó ${params.programadaPor}.`
 		: "";
+	if (params.esHoy && params.reasignadaDe !== undefined) {
+		const deQuien = params.reasignadaDe ?? "otra persona";
+		return {
+			titulo: `Hoy hay una ${tipo} pendiente`,
+			descripcion: `${quien}: ${cuando} en ${params.direccion}. La tenía ${deQuien}, que ya no lleva el crédito: decidí quién va o cancelala.`,
+		};
+	}
 	return params.esHoy
 		? {
 				titulo: `Hoy tenés una ${tipo}`,

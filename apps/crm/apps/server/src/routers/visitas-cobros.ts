@@ -343,8 +343,12 @@ export const visitasCobrosRouter = {
 				? await bucketActualTolerante(numeroSifco)
 				: await exigirBucketDeVisita(numeroSifco);
 
-			// El responsable que ya tenía la programada vale aunque hoy no lleve el
-			// crédito (el motor pudo reasignarlo): fue él quien salió a visitar.
+			// El responsable que ya tenía la programada vale como "quién fue" aunque
+			// hoy no lleve el crédito (el motor pudo reasignarlo): la registra quien
+			// sí trabaja el caso (el dueño de hoy, su cobertura o un supervisor). Al
+			// responsable anterior no se le abre la ficha por tener la visita: el
+			// permiso lo da cartera, no un registro del CRM (review de Codex, PR
+			// #1777). El aviso del día ya le llega al dueño de hoy.
 			if (programada?.responsableId !== input.responsableId) {
 				assertResponsablePosible(
 					input.responsableId,

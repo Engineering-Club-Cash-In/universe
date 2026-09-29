@@ -179,6 +179,14 @@ const CREDITO_CON_ESPEJO = [{ credito_id: 5 }];
  */
 const ESPEJO_DEL_PAGO_YA_ESCRITO = [{ id: 900 }];
 
+/**
+ * El camino normal lee el espejo de este pago DOS veces: una antes de anular
+ * —la MARCA DE AGUA: qué filas ya había, que pueden ser viejas y legítimas de
+ * la regeneración por período— y otra adentro del candado, para no volver a
+ * escribir lo que una llamada concurrente ya escribió. Acá no hay ninguna.
+ */
+const SIN_ESPEJO_DE_ESTE_PAGO: unknown[] = [];
+
 /** El crédito, leído con FOR UPDATE: abre el orden de candados del módulo. */
 const CREDITO_CANDADO = [
   {
@@ -237,6 +245,7 @@ describe("falsePayment — la boleta falsa devuelve lo que cobró de los rubros"
     dbImpl = motorConCola(
       [{ paymentFalse: false }], // chequeo temprano: el pago existe y NO es falso
       CREDITO_CON_ESPEJO, // precondición: el crédito tiene espejo de inversionistas
+      SIN_ESPEJO_DE_ESTE_PAGO, // marca de agua: qué filas de espejo había ANTES
       CREDITO_CANDADO, // SELECT creditos FOR UPDATE (abre el orden de candados)
       PAGO_SIN_MORA, // SELECT pagos_credito FOR UPDATE (mora y createdAt)
       ...SIN_DECREMENTO, // el decremento marcado, y los eventos del cron
@@ -247,6 +256,7 @@ describe("falsePayment — la boleta falsa devuelve lo que cobró de los rubros"
       [], // INSERT rubros_historial
       [], // DELETE rubros_pagos
       [], // reset del ajuste por fecha ideal (returning)
+      SIN_ESPEJO_DE_ESTE_PAGO, // re-chequeo ADENTRO del candado contra la marca
       CUBE // nombre del inversionista del espejo — AHORA va al final
     );
 
@@ -304,6 +314,11 @@ describe("falsePayment — la boleta falsa devuelve lo que cobró de los rubros"
       { tabla: "pagos_credito", filas: [{ paymentFalse: false }] },
       // precondición: ¿el crédito puede generar espejos?
       { tabla: "creditos_inversionistas_espejo", filas: CREDITO_CON_ESPEJO },
+      // marca de agua: las filas de espejo que este pago ya tenía
+      {
+        tabla: "pagos_credito_inversionistas_espejo",
+        filas: SIN_ESPEJO_DE_ESTE_PAGO,
+      },
       // FOR UPDATE: abre el orden de candados del módulo de mora
       { tabla: "creditos", filas: CREDITO_CANDADO },
       // FOR UPDATE: mora y createdAt, leídos ANTES del UPDATE
@@ -323,7 +338,13 @@ describe("falsePayment — la boleta falsa devuelve lo que cobró de los rubros"
       { tabla: "rubros_pagos", filas: [] }, // DELETE del reclamo
       // reset del ajuste por fecha ideal: último, y dentro de la tx
       { tabla: "ajuste_fecha_ideal_pago", filas: [] },
-      // ya fuera de la tx: el nombre del inversionista, para excluir a CUBE
+      // ya fuera de la tx y ADENTRO del candado: ¿alguien más escribió el
+      // espejo de este pago mientras tanto?
+      {
+        tabla: "pagos_credito_inversionistas_espejo",
+        filas: SIN_ESPEJO_DE_ESTE_PAGO,
+      },
+      // el nombre del inversionista, para excluir a CUBE
       { tabla: "inversionistas", filas: CUBE },
     ]);
   });
@@ -380,6 +401,7 @@ describe("falsePayment — la boleta falsa devuelve lo que cobró de los rubros"
     dbImpl = motorConCola(
       [{ paymentFalse: false }],
       CREDITO_CON_ESPEJO,
+      SIN_ESPEJO_DE_ESTE_PAGO, // marca de agua
       CREDITO_CANDADO,
       PAGO_SIN_MORA,
       ...SIN_DECREMENTO,
@@ -390,6 +412,7 @@ describe("falsePayment — la boleta falsa devuelve lo que cobró de los rubros"
       [],
       [],
       [{ id: 3 }], // reset del ajuste: devolvió la fila reseteada
+      SIN_ESPEJO_DE_ESTE_PAGO, // re-chequeo adentro del candado
       CUBE
     );
 

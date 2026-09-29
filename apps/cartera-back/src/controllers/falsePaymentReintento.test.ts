@@ -54,7 +54,17 @@ const estado = {
   anulaciones: 0,
   /** Qué inversionistas ve el espejo del crédito cuando el paso corre bien. */
   inversionistasDelEspejo: [] as unknown[],
+  /** Cuánto tarda el paso de espejos (para poder solaparlo con otra llamada). */
+  demoraDelPaso: 0,
+  /**
+   * Si es true, el paso de espejos ESCRIBE su fila al pasar, como el insert de
+   * verdad. Sin esto el fake miente: la segunda llamada nunca vería lo que
+   * escribió la primera.
+   */
+  escribeAlPasar: false,
 };
+
+const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** El único inversionista es CUBE: `excludeCube` lo filtra y el paso sale limpio. */
 const SOLO_CUBE = [
@@ -105,7 +115,10 @@ const crearMotor = () => {
 
   const resolver = (nombre: string) => {
     if (nombre === "creditos_inversionistas_espejo") return estado.espejoDelCredito;
-    if (nombre === "pagos_credito_inversionistas_espejo") return estado.espejoDelPago;
+    // Copia ordenada por `id` DESC: es lo que devuelve la consulta real, que
+    // pide `orderBy(desc(id)).limit(1)` para leer la marca de agua.
+    if (nombre === "pagos_credito_inversionistas_espejo")
+      return [...(estado.espejoDelPago as { id: number }[])].sort((a, b) => b.id - a.id);
     if (nombre === "pagos_credito") return [{ paymentFalse: estado.paymentFalse }];
     // CUBE, para que el paso de espejos salga por su `return` limpio.
     if (nombre === "inversionistas")
@@ -131,6 +144,11 @@ const crearMotor = () => {
             estado.fallosTransitorios--;
             throw new Error("connection terminated unexpectedly");
           }
+          if (estado.demoraDelPaso > 0) await dormir(estado.demoraDelPaso);
+          if (estado.escribeAlPasar) {
+            const ids = (estado.espejoDelPago as { id: number }[]).map((f) => f.id);
+            estado.espejoDelPago.push({ id: Math.max(900, ...ids) + 1 });
+          }
           return estado.inversionistasDelEspejo;
         },
       },
@@ -142,15 +160,56 @@ const crearMotor = () => {
 
 let motor: any = crearMotor();
 
+/** Candado de juguete: no serializa nada. Sirve para todo lo secuencial. */
+const lockPoolTrivial = {
+  connect: async () => ({
+    query: async () => ({ rows: [] }),
+    release: () => {},
+  }),
+};
+
+/**
+ * Candado que SÍ serializa, como el `FOR NO KEY UPDATE` de verdad sobre la
+ * fila del crédito: el `BEGIN` del segundo en llegar espera a que el primero
+ * haga COMMIT/ROLLBACK. Es lo único que hace honesta una prueba de carrera.
+ */
+const crearLockPoolSerializado = () => {
+  let cola: Promise<void> = Promise.resolve();
+  return {
+    connect: async () => {
+      let soltar: () => void = () => {};
+      const anterior = cola;
+      cola = new Promise<void>((r) => {
+        soltar = r;
+      });
+      let tomado = false;
+      return {
+        query: async (sqlTexto: string) => {
+          if (sqlTexto === "BEGIN") {
+            await anterior;
+            tomado = true;
+            return { rows: [] };
+          }
+          if (sqlTexto === "COMMIT" || sqlTexto === "ROLLBACK") {
+            if (tomado) soltar();
+            return { rows: [] };
+          }
+          return { rows: [] };
+        },
+        release: () => {
+          if (!tomado) soltar();
+        },
+      };
+    },
+  };
+};
+
+let lockPoolActual: any = lockPoolTrivial;
+
 mock.module("../database/index", () => ({
   db: new Proxy({}, { get: (_t, p) => motor[p] }),
   client: {},
-  lockPool: {
-    connect: async () => ({
-      query: async () => ({ rows: [] }),
-      release: () => {},
-    }),
-  },
+  lockPool: { connect: (...args: any[]) => lockPoolActual.connect(...args) },
 }));
 
 const { falsePayment } = await import("./payments");
@@ -163,6 +222,9 @@ beforeEach(() => {
   estado.fallosTransitorios = 0;
   estado.anulaciones = 0;
   estado.inversionistasDelEspejo = SOLO_CUBE;
+  estado.demoraDelPaso = 0;
+  estado.escribeAlPasar = false;
+  lockPoolActual = lockPoolTrivial;
   motor = crearMotor();
 });
 
@@ -289,5 +351,62 @@ describe("el orden: la anulación va ANTES de los espejos", () => {
         anularPagoYRestituirMoraSerializado: original,
       }));
     }
+  });
+});
+
+describe("dos clics SOLAPADOS no duplican el espejo", () => {
+  /**
+   * Los ocho casos de arriba son secuenciales: la segunda llamada empieza
+   * cuando la primera ya terminó. Eso NO ejerce el defecto real, que es de
+   * concurrencia: A commitea la anulación y todavía está escribiendo los
+   * espejos cuando entra B (segundo clic del asesor, o el reintento impaciente).
+   *
+   * Con el chequeo de existencia AFUERA del candado, B leía «no hay filas»
+   * mientras A todavía no había insertado, hacía fila, y escribía un SEGUNDO
+   * juego: filas duplicadas sin liquidar, que aguas abajo duplican montos.
+   * No hace falta ningún fallo transitorio — alcanza un doble clic normal.
+   *
+   * El `lockPool` de esta prueba serializa de verdad, como el
+   * `FOR NO KEY UPDATE` sobre la fila del crédito. Con el chequeo adentro del
+   * candado, B toma el candado recién cuando A lo soltó, y para entonces ve
+   * las filas de A.
+   */
+  it("B entra mientras A escribe, y el espejo se escribe UNA sola vez", async () => {
+    lockPoolActual = crearLockPoolSerializado();
+    estado.escribeAlPasar = true;
+    estado.demoraDelPaso = 60; // A sigue adentro del candado cuando entra B
+
+    const a = falsePayment(PAGO_ID, CREDITO_ID);
+    await dormir(20); // A ya commiteó la anulación y está en el paso de espejos
+    const b = falsePayment(PAGO_ID, CREDITO_ID);
+
+    const resultados = await Promise.allSettled([a, b]);
+    expect(resultados.every((r) => r.status === "fulfilled")).toBe(true);
+
+    // 👇 EL DEFECTO EN DOS LÍNEAS: sin el arreglo esto da 2 y 2.
+    expect(estado.pasosDeEspejo).toBe(1);
+    expect(estado.espejoDelPago.length).toBe(1);
+    // Y la anulación, como siempre, una sola vez.
+    expect(estado.anulaciones).toBe(1);
+  });
+
+  /**
+   * El contraveneno del arreglo del camino normal: ahí el guard NO puede ser
+   * "¿hay filas de este pago?", porque un pago que era válido hasta hace un
+   * instante bien puede tener filas de espejo VIEJAS Y LEGÍTIMAS —la
+   * regeneración por período llama a la misma función sobre pagos vivos—. Con
+   * ese guard, anular un pago ya espejado se saltearía su propia escritura:
+   * plata que FALTA, que es peor que plata duplicada. Por eso lo que se guarda
+   * es una marca de agua.
+   */
+  it("las filas viejas del espejo no le impiden a la anulación escribir las suyas", async () => {
+    estado.escribeAlPasar = true;
+    estado.espejoDelPago = [{ id: 900 }]; // de la regeneración por período
+
+    const resultado = await falsePayment(PAGO_ID, CREDITO_ID);
+
+    expect(resultado.updatedCount).toBe(1);
+    expect(estado.pasosDeEspejo).toBe(1);
+    expect(estado.espejoDelPago.length).toBe(2);
   });
 });

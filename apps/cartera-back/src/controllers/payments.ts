@@ -2028,20 +2028,65 @@ export async function falsePayment(pago_id: number, credito_id: number) {
     // escribir. O sea: re-ejecutarlo sobre ese crédito vuelve a no escribir
     // nada y es inofensivo — cuesta tres consultas de lectura por reintento, no
     // una fila duplicada.
-    const [espejoDelPago] = await db
+    // El chequeo de afuera es SOLO un atajo: si ya hay filas, no vale la pena
+    // ni pedir el candado. No decide nada —el que decide es el de adentro—,
+    // pero se queda por dos razones: ahorra el connect + BEGIN + FOR NO KEY
+    // UPDATE en el caso normal (que es el 99%: el reintento del operador sobre
+    // un pago que ya tiene su espejo), y sobre todo preserva el
+    // comportamiento de esta salida: un crédito en PENDIENTE_AUTORIZACION cuyo
+    // espejo YA está escrito sigue devolviendo su 200 `updatedCount: 0` en vez
+    // de tirar `PendingReturnAuthorizationError`, que es lo que pasaría si
+    // pidiéramos el candado siempre.
+    const [espejoYaEscrito] = await db
       .select({ id: pagos_credito_inversionistas_espejo.id })
       .from(pagos_credito_inversionistas_espejo)
       .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
       .limit(1);
 
-    if (!espejoDelPago) {
-      // Bajo el MISMO portero que el camino normal, y por la misma razón: un
-      // crédito en PENDIENTE_AUTORIZACION no debe generar pagos espejo ni
-      // siquiera "falsos". Y fuera de cualquier transacción nuestra, igual que
-      // abajo, porque `withPendingReturnCreditLocks` abre su propia conexión y
-      // toma `FOR NO KEY UPDATE` sobre `creditos`: meterlo adentro de una
-      // transacción que ya candó esa fila es bloquearse contra uno mismo.
+    // ⚠️ EL CHEQUEO QUE DECIDE VA ADENTRO DEL CANDADO, NO AFUERA. No es cosmético.
+    //
+    // Con la lectura afuera, dos llamadas solapadas —un doble clic normal, sin
+    // ningún fallo transitorio de por medio— leían las dos «no hay filas»,
+    // hacían fila en el candado, y las dos escribían: filas de espejo
+    // DUPLICADAS, que aguas abajo duplican montos en liquidaciones y en la
+    // facturación de inversionistas. La ventana no es teórica: va desde el
+    // COMMIT de la anulación hasta el COMMIT del insert de espejos, y adentro
+    // corren un connect + BEGIN + SELECT FOR NO KEY UPDATE más las ~5-8
+    // consultas de `insertPagosCreditoInversionistas`. Son decenas o cientos
+    // de milisegundos.
+    //
+    // Por qué leer adentro del callback SÍ ve lo que escribió la llamada
+    // anterior, aunque el candado y la escritura vayan por conexiones
+    // distintas: `withPendingReturnCreditLocks` cande por su propia conexión
+    // (`lockPool`, BEGIN + FOR NO KEY UPDATE) y el callback escribe por `db`,
+    // que es OTRA conexión en autocommit. Justamente por eso funciona: cada
+    // sentencia de `db` es su propia transacción read-committed, así que toma
+    // una foto NUEVA al ejecutarse — no arrastra el snapshot de nada abierto
+    // antes. Y la escritura de la primera llamada commitea (el
+    // `db.transaction` de `insertPagosCreditoInversionistas` termina) ANTES de
+    // que su callback devuelva y el candado haga COMMIT, así que cuando la
+    // segunda llamada por fin toma el candado, las filas ya están visibles.
+    // Si el callback leyera por una conexión con una transacción ya abierta,
+    // esto no valdría.
+    //
+    // Lo que NO se puede hacer acá es abrir una transacción nuestra alrededor:
+    // el candado ya tiene `FOR NO KEY UPDATE` sobre esta fila de `creditos` y
+    // un `FOR UPDATE` nuestro sobre la misma fila se bloquearía contra él.
+    //
+    // El `withPendingReturnCreditLocks` es además el MISMO portero que el
+    // camino normal, y por la misma razón: un crédito en
+    // PENDIENTE_AUTORIZACION no debe generar pagos espejo ni siquiera
+    // "falsos".
+    if (!espejoYaEscrito) {
       await withPendingReturnCreditLocks([credito_id], async () => {
+        const [espejoDelPago] = await db
+          .select({ id: pagos_credito_inversionistas_espejo.id })
+          .from(pagos_credito_inversionistas_espejo)
+          .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
+          .limit(1);
+
+        if (espejoDelPago) return;
+
         await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
       });
     }
@@ -2082,6 +2127,36 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   if (!espejoDelCredito) {
     throw new CreditWithoutInvestorMirrorError(credito_id);
   }
+
+  // ── MARCA DE AGUA DEL ESPEJO, para que el camino normal tampoco duplique ───
+  //
+  // El camino normal NO puede duplicarse contra otro camino normal: el
+  // `paymentFalse = false` del WHERE de la anulación deja un solo ganador y al
+  // otro lo tira. Pero SÍ puede duplicarse contra la red de seguridad de la
+  // salida temprana de arriba: la anulación de A commitea, B entra, lee
+  // `paymentFalse = true`, se va por la salida temprana, y si B llega al
+  // candado ANTES que A, B escribe los espejos y después A los escribe otra
+  // vez. Es una ventana angosta —B tiene que hacer tres consultas mientras A
+  // no hace ninguna— pero es la misma familia de defecto y no cuesta nada
+  // cerrarla.
+  //
+  // Lo que NO se puede usar acá es el mismo guard de "¿hay filas de este
+  // pago?" que usa la salida temprana: en el camino normal el pago todavía era
+  // válido hasta hace un instante, así que puede tener filas de espejo
+  // LEGÍTIMAS y viejas, escritas por la regeneración por período
+  // (`obtenerCreditosConPagosPendientes` y `calcularYRegistrarPagosEspejo`,
+  // que llaman a esta misma función sobre pagos vivos). Con ese guard, anular
+  // un pago ya espejado se saltearía su propia escritura: plata que falta, no
+  // plata duplicada. Por eso lo que se guarda es una MARCA DE AGUA: solo se
+  // saltea si aparecieron filas DESPUÉS de este punto, que es justo lo que
+  // haría la red de seguridad de un B concurrente.
+  const [espejoPrevio] = await db
+    .select({ id: pagos_credito_inversionistas_espejo.id })
+    .from(pagos_credito_inversionistas_espejo)
+    .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
+    .orderBy(desc(pagos_credito_inversionistas_espejo.id))
+    .limit(1);
+  const marcaDeAguaEspejo = espejoPrevio?.id ?? 0;
 
   // ── EL ORDEN ES LO QUE HACE ESTO REINTENTABLE ──────────────────────────────
   //
@@ -2183,6 +2258,20 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   // un crédito en PENDIENTE_AUTORIZACION no debe generar pagos espejo, ni siquiera
   // "falsos", mientras la devolución a CUBE sigue sin resolver.
   await withPendingReturnCreditLocks([credito_id], async () => {
+    // Adentro del candado, y contra la marca de agua de arriba: si mientras
+    // tanto alguien más escribió el espejo de ESTA anulación (la red de
+    // seguridad de la salida temprana, ver arriba), no lo escribimos de nuevo.
+    const [espejoActual] = await db
+      .select({ id: pagos_credito_inversionistas_espejo.id })
+      .from(pagos_credito_inversionistas_espejo)
+      .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
+      .orderBy(desc(pagos_credito_inversionistas_espejo.id))
+      .limit(1);
+
+    // Ojo: `>` contra la marca, NO "¿hay filas?". Las filas viejas y legítimas
+    // no cuentan; solo cuentan las que aparecieron después de este punto.
+    if ((espejoActual?.id ?? 0) > marcaDeAguaEspejo) return;
+
     // updateCredito=false → NO actualiza creditos_inversionistas_espejo (monto_aportado).
     // Falsear un pago no debe descontar el aporte del crédito/espejo.
     await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false

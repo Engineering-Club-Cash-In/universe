@@ -509,6 +509,8 @@ export const buroInternoProcedures = {
 	getReglasBuroInterno: buroInternoRouter.getReglasBuroInterno,
 	actualizarReglaBuroInterno: buroInternoRouter.actualizarReglaBuroInterno,
 	getBuroInternoOportunidad: buroInternoRouter.getBuroInternoOportunidad,
+	autorizarBuroInternoOportunidad:
+		buroInternoRouter.autorizarBuroInternoOportunidad,
 };
 
 export const manualVehicleRouter = {

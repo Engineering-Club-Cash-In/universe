@@ -1227,4 +1227,9 @@ scheduleAtMidnightGT();
 export default {
 	port: process.env.PORT || 3000,
 	fetch: app.fetch,
+	// Bun cierra por defecto la conexión a los 10s sin actividad, aunque el
+	// handler siga trabajando: el análisis de capacidad de pago (p50 ~33s) le
+	// llegaba al front como error. 255s es el máximo que admite Bun y cubre el
+	// timeout de 3 minutos de la IA.
+	idleTimeout: 255,
 };

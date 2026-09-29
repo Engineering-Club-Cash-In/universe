@@ -369,12 +369,32 @@ export interface ConvenioPagosResume {
   pago_id: number;
   created_at: string;
 }
+// Un rubro pendiente de cobro (tarjeta de circulación, placas, traspaso, etc).
+// El back ya lo entrega ORDENADO en el orden en que se cobra: otros → mora →
+// rubros → convenio → cuotas.
+export interface RubroPendiente {
+  rubro_id: number;
+  tipo_nombre: string;
+  descripcion: string;
+  // Strings porque vienen de una columna numeric/decimal en la BD (igual que
+  // los montos de Cuota); convertir con Number() antes de sumar.
+  saldo_pendiente: string;
+  // Lo que ESTA boleta puede cobrar: el saldo menos lo que otras boletas ya
+  // apartaron y esperan a contabilidad. Puede ser "0.00" con saldo_pendiente > 0.
+  disponible: string;
+  obligatorio: boolean;
+}
+
 export interface GetCreditoByNumeroActivoResponse {
   flujo: "ACTIVO";
   credito: Credito;
   usuario: Usuario;
   cuotaActual: number;
   moraActual: number;
+  // Suma de los `disponible` de rubros (NO de los saldo_pendiente); 0 si no hay.
+  rubrosActual: number;
+  // Detalle de rubros, ya en el orden real de cobro.
+  rubros: RubroPendiente[];
   cuotaActualPagada: boolean;
   cuotaActualStatus: 'no_required' | 'pending' | 'validated' | 'capital' | 'reset';
 

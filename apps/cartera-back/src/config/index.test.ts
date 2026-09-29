@@ -24,6 +24,12 @@ const readFlag = async (value?: string) => {
   return { exitCode, stdout, stderr };
 };
 
+test("habilita pagos internos Nexa solo con el valor exacto true", async () => {
+  expect(await readFlag("true")).toEqual({ exitCode: 0, stdout: "true", stderr: "" });
+  expect(await readFlag("TRUE")).toEqual({ exitCode: 0, stdout: "false", stderr: "" });
+  expect(await readFlag("1")).toEqual({ exitCode: 0, stdout: "false", stderr: "" });
+});
+
 test("deshabilita pagos internos Nexa con el flag ausente o exactamente false", async () => {
   expect(await readFlag()).toEqual({ exitCode: 0, stdout: "false", stderr: "" });
   expect(await readFlag("false")).toEqual({ exitCode: 0, stdout: "false", stderr: "" });

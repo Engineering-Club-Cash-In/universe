@@ -19,8 +19,10 @@ import z from "zod";
 import { sendCompraCarteraAcceptedNotification } from "@cci/email";
 import {
   abrirBateriaDeContratosEnCrm,
+  type BateriaDeContratosInput,
   getVehicleDetailsBySifco,
 } from "../services/crm.service";
+import { guardarBateriaPendiente } from "./bateriasCrmPendientes";
 import {
   calcularExpiracionCompraCartera,
   formatFechaLargaGT,
@@ -123,6 +125,34 @@ export function montoAportadoAntesDeLaCompra(params: {
     );
   }
   return antes;
+}
+
+/**
+ * Los pares `${credito}-${inversionista}` que se volvieron a meter a mano.
+ *
+ * Cuando el inversionista tarda en pagar, la compra se cae y inversiones la
+ * vuelve a meter con el modo manual. Los contratos de esa compra jurídico ya
+ * los hizo, así que al aceptarla no se le abre batería por esos créditos, ni se
+ * le avisa, ni le queda como pendiente en el CRM.
+ *
+ * Sólo cuenta si TODAS las compras pendientes del par son manuales: si también
+ * entró una normal, es trabajo nuevo y va. Un par sin fila de compra (las
+ * operaciones de antes de esta tabla) tampoco se excluye.
+ */
+export function paresSoloManuales(
+  compras: Array<{
+    credito_id: number;
+    inversionista_id: number;
+    origen_manual: boolean;
+  }>,
+): Set<string> {
+  const conNormal = new Set<string>();
+  const conManual = new Set<string>();
+  for (const compra of compras) {
+    const par = `${compra.credito_id}-${compra.inversionista_id}`;
+    (compra.origen_manual ? conManual : conNormal).add(par);
+  }
+  return new Set([...conManual].filter((par) => !conNormal.has(par)));
 }
 
 /**
@@ -351,7 +381,7 @@ export async function abrirBateriasDeContratos(params: {
         new Big(0),
       );
 
-      const res = await abrirBateriaDeContratosEnCrm({
+      const pedido: BateriaDeContratosInput = {
         inversionista: {
           id: targetId,
           nombre: inv.nombre,
@@ -373,7 +403,14 @@ export async function abrirBateriasDeContratos(params: {
             ? (montoPrevioPorInversionista.get(targetId) ?? new Big(0)).toFixed(2)
             : null,
         },
-      });
+      };
+
+      const res = await abrirBateriaDeContratosEnCrm(pedido);
+      // Si el CRM no lo recibió, queda para reintentar: la compra ya salió de
+      // "pendientes" y nadie más lo va a volver a mandar.
+      if (!res.success) {
+        await guardarBateriaPendiente(pedido, res.error);
+      }
 
       resultados.push({ inversionista_id: targetId, ...res });
     }
@@ -529,6 +566,7 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
         credito_id: compras_credito_inversionista.credito_id,
         inversionista_id: compras_credito_inversionista.inversionista_id,
         monto_aportado: compras_credito_inversionista.monto_aportado,
+        origen_manual: compras_credito_inversionista.origen_manual,
       })
       .from(compras_credito_inversionista)
       .where(
@@ -777,6 +815,12 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
     // espejo ya se movió. Si el CRM no contesta, se pierde el aviso, no la
     // aceptación. El endpoint del CRM es idempotente por inversionista y juego
     // de créditos, así que reintentarlo no abre dos baterías.
+    const soloManuales = paresSoloManuales(comprasPendientes);
+    if (soloManuales.size > 0) {
+      console.log(
+        `[compraCarteraAceptada] ${soloManuales.size} crédito(s) vueltos a meter a mano: no abren batería en el CRM`,
+      );
+    }
     const bateriasAbiertas = await abrirBateriasDeContratos({
       targetIds,
       creditosRows,
@@ -784,14 +828,20 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       montoNuevoPorPar,
       tipoReinversionPorCredito: tipoReinvPorCredito,
       modalidadFacturacionPorCredito: modalidadFactPorCredito,
+      // Sin los pares que se volvieron a meter a mano: esos contratos jurídico
+      // ya los hizo (ver `paresSoloManuales`).
       terminosPorPar: new Map(
-        updateRes.map((r) => [
-          `${r.credito_id}-${r.inversionista_id}`,
-          {
-            tipoReinversion: r.tipo_reinversion ?? null,
-            modalidadFacturacion: r.modalidad_facturacion ?? null,
-          },
-        ]),
+        updateRes
+          .filter(
+            (r) => !soloManuales.has(`${r.credito_id}-${r.inversionista_id}`),
+          )
+          .map((r) => [
+            `${r.credito_id}-${r.inversionista_id}`,
+            {
+              tipoReinversion: r.tipo_reinversion ?? null,
+              modalidadFacturacion: r.modalidad_facturacion ?? null,
+            },
+          ]),
       ),
       aceptadaEn: ahora,
       aceptadaPor: usuarioEmail,

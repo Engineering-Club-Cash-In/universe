@@ -4,6 +4,9 @@ import Big from "big.js";
 /** Cola de resultados de `db.select().from().where()`, en orden de llamada. */
 let resultadosDeSelect: unknown[][] = [];
 
+/** Lo que quedó guardado para reintentar, si el CRM no recibió el aviso. */
+const guardadosParaReintentar: Record<string, unknown>[] = [];
+
 mock.module("../database", () => ({
   client: {},
   db: {
@@ -12,8 +15,16 @@ mock.module("../database", () => ({
         where: () => Promise.resolve(resultadosDeSelect.shift() ?? []),
       }),
     }),
+    insert: () => ({
+      values: async (valores: Record<string, unknown>) => {
+        guardadosParaReintentar.push(valores);
+      },
+    }),
   },
 }));
+
+/** Si el CRM contesta o no. */
+let crmCaido = false;
 
 /** Lo que se le mandó al CRM, una batería por llamada. */
 const bateriasPedidas: Array<{
@@ -28,12 +39,14 @@ const bateriasPedidas: Array<{
 mock.module("../services/crm.service", () => ({
   abrirBateriaDeContratosEnCrm: async (payload: (typeof bateriasPedidas)[number]) => {
     bateriasPedidas.push(payload);
-    return { success: true, batchId: `bateria-${payload.inversionista.id}` };
+    return crmCaido
+      ? { success: false, error: "CRM caído" }
+      : { success: true, batchId: `bateria-${payload.inversionista.id}` };
   },
   getVehicleDetailsBySifco: async () => ({ success: false }),
 }));
 
-const { abrirBateriasDeContratos, montoAportadoAntesDeLaCompra } = await import(
+const { abrirBateriasDeContratos, montoAportadoAntesDeLaCompra, paresSoloManuales } = await import(
   "./compraCarteraAceptada"
 );
 
@@ -62,6 +75,8 @@ const terminos = { tipoReinversion: "sin_reinversion", modalidadFacturacion: nul
 
 beforeEach(() => {
   bateriasPedidas.length = 0;
+  guardadosParaReintentar.length = 0;
+  crmCaido = false;
   resultadosDeSelect = [
     [inversionista(ANA, "Ana"), inversionista(BETO, "Beto")],
     // Sin cuotas: las fechas no importan acá.
@@ -103,6 +118,88 @@ describe("baterías de una aceptación con varios inversionistas", () => {
     expect(deAna?.compra.montoTotal).toBe("5000.00");
     expect(deBeto?.compra.creditos.map((c) => c.creditoId)).toEqual([2]);
     expect(deBeto?.compra.montoTotal).toBe("3000.00");
+  });
+});
+
+describe("compras vueltas a meter a mano", () => {
+  test("un par con sólo compras manuales no lleva papelería; con una normal, sí", () => {
+    const pares = paresSoloManuales([
+      { credito_id: 1, inversionista_id: ANA, origen_manual: true },
+      { credito_id: 2, inversionista_id: ANA, origen_manual: true },
+      { credito_id: 2, inversionista_id: ANA, origen_manual: false },
+      { credito_id: 3, inversionista_id: BETO, origen_manual: false },
+    ]);
+
+    expect([...pares]).toEqual([`1-${ANA}`]);
+  });
+
+  test("sin sus pares, el inversionista no recibe batería", async () => {
+    await abrirBateriasDeContratos({
+      targetIds: [ANA],
+      creditosRows: [
+        { credito_id: 1, numero_credito_sifco: "S1", cliente_nombre: "Cliente 1" },
+      ],
+      rowsPorCredito: new Map([[1, [fila(ANA, "5000")]]]),
+      montoNuevoPorPar: new Map([[`1-${ANA}`, new Big("5000")]]),
+      tipoReinversionPorCredito: new Map(),
+      modalidadFacturacionPorCredito: new Map(),
+      // La aceptación ya sacó el par manual de los términos.
+      terminosPorPar: new Map(),
+      aceptadaEn: new Date("2026-09-24T15:00:00.000Z"),
+    });
+
+    expect(bateriasPedidas).toHaveLength(0);
+  });
+});
+
+describe("si el CRM no recibe el aviso", () => {
+  test("queda guardado entero para reintentarlo", async () => {
+    crmCaido = true;
+
+    await abrirBateriasDeContratos({
+      targetIds: [ANA],
+      creditosRows: [
+        { credito_id: 1, numero_credito_sifco: "S1", cliente_nombre: "Cliente 1" },
+      ],
+      rowsPorCredito: new Map([[1, [fila(ANA, "5000")]]]),
+      montoNuevoPorPar: new Map([[`1-${ANA}`, new Big("5000")]]),
+      tipoReinversionPorCredito: new Map(),
+      modalidadFacturacionPorCredito: new Map(),
+      terminosPorPar: new Map([[`1-${ANA}`, terminos]]),
+      aceptadaEn: new Date("2026-09-24T15:00:00.000Z"),
+      correoId: "correo-1",
+    });
+
+    expect(guardadosParaReintentar).toHaveLength(1);
+    expect(guardadosParaReintentar[0]).toMatchObject({
+      inversionista_id: ANA,
+      ultimo_error: "CRM caído",
+      payload: {
+        inversionista: { id: ANA },
+        compra: {
+          montoTotal: "5000.00",
+          aceptadaEn: "2026-09-24T15:00:00.000Z",
+          correoId: "correo-1",
+        },
+      },
+    });
+  });
+
+  test("si lo recibe, no se guarda nada", async () => {
+    await abrirBateriasDeContratos({
+      targetIds: [ANA],
+      creditosRows: [
+        { credito_id: 1, numero_credito_sifco: "S1", cliente_nombre: "Cliente 1" },
+      ],
+      rowsPorCredito: new Map([[1, [fila(ANA, "5000")]]]),
+      montoNuevoPorPar: new Map([[`1-${ANA}`, new Big("5000")]]),
+      tipoReinversionPorCredito: new Map(),
+      modalidadFacturacionPorCredito: new Map(),
+      terminosPorPar: new Map([[`1-${ANA}`, terminos]]),
+      aceptadaEn: new Date("2026-09-24T15:00:00.000Z"),
+    });
+
+    expect(guardadosParaReintentar).toHaveLength(0);
   });
 });
 

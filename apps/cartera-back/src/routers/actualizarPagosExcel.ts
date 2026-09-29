@@ -31,10 +31,10 @@
  * está OK, se aplican todos los updates en UNA sola transacción.
  */
 import { Elysia, t } from "elysia";
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
-import { creditos, cuotas_credito, pagos_credito } from "../database/db";
+import { creditos, cuotas_credito, pagos_credito, rubros_pagos } from "../database/db";
 import { authMiddleware } from "./midleware";
 import { debeProtegerCuota, pagoTieneAplicacion } from "./actualizarPagosExcelPolicy";
 import {
@@ -346,6 +346,32 @@ export const actualizarPagosExcelRouter = new Elysia()
       const problemas: any[] = [];
       const omitidas: any[] = []; // cuotas sin match cuando omitir_sin_match=true
       const protegidas: any[] = []; // cuotas ya aplicadas que el Excel aún no trae
+      /**
+       * Pagos que cobraron un rubro. Sus cuotas NO se tocan.
+       *
+       * El total de un cobro adicional vive SUMADO dentro de
+       * `pagos_credito.otros`, y la columna "Otros" del Excel la mantiene
+       * contabilidad, que no conoce el módulo y la trae sin esa parte. Escribirla
+       * borraría el cargo del pago mientras el saldo del rubro sigue descontado:
+       * dos números para el mismo cobro, con la facturación leyendo el que quedó
+       * vacío. Y el filtro de esta ruta apunta justo a las boletas donde vive un
+       * reclamo aplicado (no pendientes, no falsas, sobre cuotas pagadas).
+       */
+      const pagosQueCobranRubros = new Set<number>();
+
+      // UNA sola consulta para todo el lote: junta los pagos de todas las cuotas
+      // de todos los créditos y pregunta cuáles tienen reclamo de rubro. Hacerlo
+      // por crédito sería un N+1 sobre una ruta que corre con listas largas.
+      const todosLosPagoIds = [...datosCredito.values()].flatMap((d) =>
+        d.cuotasPagadas.flatMap((c) => c.pagos.map((p) => p.pago_id)),
+      );
+      if (todosLosPagoIds.length > 0) {
+        const conRubros = await db
+          .selectDistinct({ pago_id: rubros_pagos.pago_id })
+          .from(rubros_pagos)
+          .where(inArray(rubros_pagos.pago_id, todosLosPagoIds));
+        for (const fila of conRubros) pagosQueCobranRubros.add(fila.pago_id);
+      }
 
       for (const sifcoRaw of lista) {
         const sifco = String(sifcoRaw);
@@ -400,6 +426,30 @@ export const actualizarPagosExcelRouter = new Elysia()
           // aplicada en la DB. Escribir esos ceros borraría el pago real, así
           // que la cuota se salta y se reporta. No aborta el resto: las demás
           // cuotas del crédito sí se reparan.
+          // 🛡️ Guard de RUBROS: ver `pagosQueCobranRubros`. Se protege la cuota
+          // ENTERA y no sólo la columna `otros`, y es a propósito: el reparto del
+          // Excel se calcula con los totales de esa cuota, así que escribir una
+          // parte dejaría el resto cuadrando contra un `otros` que no es el que el
+          // Excel supone. No aborta el lote — las demás cuotas se reparan igual y
+          // ésta sale reportada para que alguien la mire.
+          const pagosConRubros = cuota.pagos
+            .map((pago) => pago.pago_id)
+            .filter((id) => pagosQueCobranRubros.has(id));
+          
+          if (pagosConRubros.length > 0) {
+            const item = {
+              numero_credito_sifco: sifco,
+              numero_cuota: cuota.numero_cuota,
+              fecha_vencimiento: cuota.fecha_vencimiento,
+              mes_excel: excel.mes,
+              pago_ids: pagosConRubros,
+              motivo: "pago_con_cobros_adicionales",
+            };
+            protegidas.push(item);
+            cambiosCredito.push({ ...item, protegida: true, pagos: 0 });
+            return;
+          }
+          
           if (debeProtegerCuota(excel, cuota.pagos)) {
             const item = {
               numero_credito_sifco: sifco,

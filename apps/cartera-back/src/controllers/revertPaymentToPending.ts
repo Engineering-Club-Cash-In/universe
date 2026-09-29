@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
+import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import { setCapitalSource } from "../utils/withAuditContext";
 import {
   pagos_credito,
@@ -11,6 +12,7 @@ import {
 } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { anularFacturaEnCofidi } from "./reversePayment";
+import { desaplicarRubrosDelPago } from "./rubros";
 import { emitPaymentReversalToPending } from "../utils/structuredLogger";
 
 function safeNow(): number {
@@ -35,6 +37,43 @@ export function classifyRevertPaymentCredit(
   return REVERSIBLE_CREDIT_STATES.has(credit.statusCredit ?? "") ? null : "state_conflict";
 }
 
+/**
+ * ¿Esta ruta sabe revertir un pago en este estado de validación?
+ *
+ * Sólo mira `capital_validated`, y devuelve el motivo del rechazo en vez de un
+ * booleano para que quien llame pueda decir QUÉ pasó.
+ *
+ * El caso: `pagoValidado` reconoce únicamente `"validated"`, así que un abono
+ * directo a capital caía en el early-return de "el pago ya estaba pendiente" —
+ * que para ese estado es falso— y respondía ÉXITO sin haber revertido nada.
+ *
+ * Eso ya era engañoso, y desde que un abono directo a capital también cobra
+ * rubros (`aplicarRubrosDelPago` corre antes de sellar `capital_validated`)
+ * pasó a dejar daño: el saldo del rubro queda descontado y su reclamo aplicado,
+ * mientras al operador le dijeron que la reversa salió bien. Y un reclamo vivo
+ * congela el rubro, así que después tampoco se puede editar ni anular.
+ *
+ * Se RECHAZA en vez de arreglarlo acá. Desaplicar el rubro dejaría el pago
+ * diciendo que lo cobró y el rubro diciendo que no, que es el estado a medias
+ * que el comentario del early-return ya advierte para los abonos a capital. El
+ * reverso de esos pagos vive en `reversePayment`, que sí los reconoce.
+ */
+export function clasificarEstadoParaRevertir(
+  validationStatus: string | null | undefined
+): "capital_no_soportado" | null {
+  // Los DOS estados de la rama de capital, no sólo el sellado. `"capital"` es
+  // el intermedio: el pago ya cobró sus rubros y todavía no llegó a
+  // `capital_validated`, y ahí se queda si el flujo de capital falla en el
+  // medio. Cubrir sólo el de llegada dejaba pasar justo al que produce el
+  // problema —el atascado— por el `pagoValidado` de más abajo, que reconoce
+  // únicamente `"validated"`: salía por el early-return de "el pago ya estaba
+  // pendiente" respondiendo éxito, sin desaplicar los rubros ni cambiar nada.
+  return validationStatus === "capital_validated" ||
+    validationStatus === "capital"
+    ? "capital_no_soportado"
+    : null;
+}
+
 export function classifyRevertPendingTerminal({
   failedCount,
   localStateFailureCount,
@@ -47,8 +86,14 @@ export function classifyRevertPendingTerminal({
 }
 
 class RevertPaymentCreditRejection extends Error {
-  constructor(readonly reasonCode: "credit_not_found" | "state_conflict") {
-    super("Credit not found or not active");
+  constructor(
+    readonly reasonCode:
+      | "credit_not_found"
+      | "state_conflict"
+      | "capital_no_soportado",
+    mensaje = "Credit not found or not active"
+  ) {
+    super(mensaje);
   }
 }
 
@@ -69,6 +114,18 @@ export interface RevertPaymentToPendingDependencies {
   readonly voidInvoice: typeof anularFacturaEnCofidi;
   readonly setCapitalSource: typeof setCapitalSource;
   readonly emitTerminal: typeof emitPaymentReversalToPending;
+  /**
+   * Serializa contra los demás escritores del MISMO crédito.
+   *
+   * Esta ruta era la única de la familia que no lo tomaba: `reversePayment` y
+   * `revalidatePayment` sí. Se notaba poco mientras sólo tocaba cuotas y
+   * capital, pero ahora también devuelve saldo a los rubros
+   * (`desaplicarRubrosDelPago`), y ese saldo es justo lo que `insertPayment`
+   * lee sin bloqueo para decidir cuánto apartar. Sin el candado, una reversa
+   * especial corriendo a la par de un registro dejaba al registro decidiendo
+   * sobre un saldo que cambiaba debajo.
+   */
+  readonly withCreditLock: typeof withPaymentAdvisoryLock;
 }
 
 const defaultDependencies: RevertPaymentToPendingDependencies = {
@@ -77,6 +134,7 @@ const defaultDependencies: RevertPaymentToPendingDependencies = {
   voidInvoice: anularFacturaEnCofidi,
   setCapitalSource,
   emitTerminal: emitPaymentReversalToPending,
+  withCreditLock: withPaymentAdvisoryLock,
 };
 
 async function reverseAndCleanInvestors(
@@ -123,8 +181,14 @@ export function createRevertPaymentToPending(
     }
     const { credito_id, pago_id } = parseResult.data;
 
-    // 🔥 INICIAR TRANSACCIÓN ATÓMICA
-    const result = await dependencies.runTransaction(async (tx) => {
+    // 🔥 TRANSACCIÓN ATÓMICA, bajo el candado por crédito. El candado se espera
+    // en el pool DEDICADO y NO dentro de la transacción, por la misma razón que
+    // en `revalidatePayment`: un waiter que retiene una conexión del pool de
+    // trabajo mientras espera puede dejar sin conexión al propio dueño del
+    // candado. Orden: candado primero, transacción después — el mismo que usa
+    // `insertPayment`, y no se debe invertir.
+    const result = await dependencies.withCreditLock(credito_id, () =>
+      dependencies.runTransaction(async (tx) => {
       // 2️⃣ OBTENER DATOS DEL PAGO
       const [pago] = await tx
         .select()
@@ -142,6 +206,17 @@ export function createRevertPaymentToPending(
       }
 
       const pagoValidado = pago.validationStatus === "validated";
+
+      // Un abono directo a capital NO lo maneja esta ruta, y hasta acá lo decía
+      // respondiendo "éxito". Ver `clasificarEstadoParaRevertir`: el reverso de
+      // esos pagos vive en `reversePayment`, que sí los reconoce, y fingir que
+      // acá salió bien deja el rubro cobrado y congelado.
+      if (clasificarEstadoParaRevertir(pago.validationStatus) !== null) {
+        throw new RevertPaymentCreditRejection(
+          "capital_no_soportado",
+          "Este pago es un abono directo a capital: Revertir Especial no lo maneja. Usá Revertir (la reversa normal), que sí devuelve el abono y los cobros adicionales."
+        );
+      }
 
       // 3️⃣ OBTENER DATOS DEL CRÉDITO
       const [creditData] = await tx
@@ -184,6 +259,26 @@ export function createRevertPaymentToPending(
           },
         };
       }
+
+      // 🧾 RUBROS: el pago vuelve a PENDIENTE, así que sus cobros adicionales
+      // vuelven a estar sólo APARTADOS.
+      //
+      // Se DESAPLICAN, no se revierten: revertir borra el reclamo porque ahí el
+      // pago se anula, y acá el pago sigue vivo — su reserva sobre el rubro
+      // tiene que sobrevivir. Sin esto el rubro se quedaba en saldo 0 y
+      // `completado = true` con el pago en `pending`: la deuda del cliente
+      // desaparecía por una boleta que contabilidad no validó, y el rubro
+      // perdía su congelamiento (editarlo pasaba con 200 en vez del 409 que da
+      // un pago pendiente normal).
+      //
+      // Va ANTES de recalcular el crédito, en el punto espejo de donde
+      // `aplicarPagoAlCredito` aplica los rubros: el cobro del rubro no depende
+      // de lo que pase con la cuota ni con el capital, y si algo de lo que
+      // sigue falla la transacción se lleva esto también.
+      await desaplicarRubrosDelPago(
+        pago_id,
+        tx as unknown as Parameters<typeof desaplicarRubrosDelPago>[1]
+      );
 
       // 4️⃣ RECALCULAR VALORES DEL CRÉDITO
       let nuevoCapital = new Big(creditData.capital ?? 0);
@@ -320,7 +415,8 @@ export function createRevertPaymentToPending(
           localStateFailureCount: localInvoiceStateFailureCount,
         },
       };
-    });
+      })
+    );
 
     if (localInvoiceStateFailureCount === 0) externalInvoiceVoidCount = 0;
     const terminalOutcome = classifyRevertPendingTerminal({
@@ -380,7 +476,15 @@ export function createRevertPaymentToPending(
     } else if (reasonCode) {
       dependencies.emitTerminal({
         outcome: "rejected",
-        reasonCode,
+        // El motivo nuevo se reporta como `state_conflict` a la telemetría y no
+        // como código propio: la unión de motivos vive en el paquete compartido
+        // `@repo/structured-logger`, y agregarle un valor por un rechazo de esta
+        // ruta le cambia el tipo a todos los módulos que lo usan.
+        // `state_conflict` dice lo cierto —el pago está en un estado que esta
+        // ruta no maneja—; el motivo fino viaja en el mensaje de la respuesta,
+        // que es donde lo lee la persona.
+        reasonCode:
+          reasonCode === "capital_no_soportado" ? "state_conflict" : reasonCode,
         durationMs: elapsedMilliseconds(startedAt),
       });
     } else {
@@ -389,6 +493,23 @@ export function createRevertPaymentToPending(
         errorCode: "unknown",
         durationMs: elapsedMilliseconds(startedAt),
       });
+    }
+
+    // El rechazo por abono a capital sale con SU status y SU texto.
+    //
+    // El mapeo de abajo decide por el MENSAJE, y sólo conoce los dos literales
+    // históricos: un mensaje nuevo cae en el `else` y sale 500. O sea que el
+    // rechazo —que es un choque de negocio previsto, con instrucciones para el
+    // operador— se reportaba como caída del servidor, y cualquier alerta o
+    // reintento cableado a 5xx lo trataba como tal. Se decide por el TIPO del
+    // error y no por su texto, que es lo que no se rompe la próxima vez que
+    // alguien reescriba un mensaje.
+    if (
+      error instanceof RevertPaymentCreditRejection &&
+      error.reasonCode === "capital_no_soportado"
+    ) {
+      set.status = 409;
+      return { success: false, message: error.message };
     }
 
     if (error.message === "Payment not found") {

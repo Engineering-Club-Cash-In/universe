@@ -1,0 +1,2263 @@
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  AlertCircle,
+  ArrowLeft,
+  Ban,
+  Clock,
+  History,
+  Loader2,
+  Pencil,
+  PlusCircle,
+  Power,
+  Receipt,
+  Settings2,
+  Trash2,
+  UserRound,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { getApiErrorMessage } from "@/lib/apiError";
+import { aumentoRubroBloqueado, creacionRubroBloqueada, estadoCreditoStyle } from "@/lib/estadoCredito";
+import { fmtQ, sumaQ } from "@/lib/moneda";
+import { fmtFechaGT, fmtFechaHoraGT } from "@/lib/fechaGT";
+import {
+  anularRubro,
+  crearRubro,
+  crearTipoRubro,
+  editarRubro,
+  editarTipoRubro,
+  eliminarTipoRubro,
+  getHistorialRubro,
+  getRubrosByCredito,
+  getTiposRubro,
+  type EventoRubro,
+  type RubroCredito,
+  type RubroGuardado,
+  type TipoRubro,
+} from "../services/rubros.services";
+import { ajustarApertura, type SesionRubros } from "./rubrosApertura";
+import { motivoTipoNoCobrable } from "./rubrosTiposOfrecibles";
+import { motivoMontoNoEditable, montoQuedaEnCeroAlCentavo } from "./rubrosEdicionMonto";
+import { camposRealmenteEditados, camposTipoEditados } from "./rubrosCamposEditados";
+import {
+  QK_RUBROS,
+  sincronizarRubroAnulado,
+  sincronizarRubroCreado,
+  sincronizarRubroEditado,
+} from "./rubrosCache";
+import { QK_HISTORIAL, olvidarHistorialRubro } from "./rubrosHistorialCache";
+import { QK_TIPOS, sincronizarTipoEditado } from "./rubrosTiposCache";
+
+/**
+ * Modal "Rubros" de un crédito.
+ *
+ * Rubros = cobros adicionales asociados al crédito (tarjeta de circulación,
+ * calcomanía, …). Antes esto era una sección colapsable dentro de la fila
+ * expandida de la lista de créditos; ahora es un modal que abre el botón
+ * "Rubros" de la barra de acciones.
+ *
+ * Es UN SOLO `Dialog` con una vista interna por estado, no una pila de
+ * diálogos: apilar modales de Radix deja focus traps anidados y overlays
+ * encimados, y el usuario pierde de vista el crédito sobre el que está
+ * trabajando. Cada vista que no es la lista trae su botón de volver.
+ *
+ * Permisos (el backend manda; esto solo evita viajes y opciones muertas):
+ * ADMIN y ASESOR ven y crean; solo ADMIN usa tipos obligatorios, edita montos
+ * y administra el catálogo de tipos (crear, editar, desactivar, eliminar).
+ */
+
+type Vista =
+  | "lista"
+  | "crear"
+  | "editar"
+  | "anular"
+  | "historial"
+  | "tipos"
+  | "crearTipo"
+  | "editarTipo";
+
+/** Lo ya tipeado en "Agregar rubro", que sobrevive al desvío a los tipos. */
+type BorradorRubro = { tipoId: string; monto: string; descripcion: string };
+
+const BORRADOR_VACIO: BorradorRubro = { tipoId: "", monto: "", descripcion: "" };
+
+const CLASE_SELECT =
+  "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500";
+
+const CLASE_ERROR =
+  "flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700";
+
+type EstadoRubro = {
+  etiqueta: string;
+  clase: string;
+};
+
+/**
+ * Estado visible de un rubro. Completado manda sobre todo lo demás: si ya no
+ * debe nada, da igual cómo quedó `activo`.
+ *
+ * Ya no existe "Esperando activación": sin `fecha_activacion` en el modelo, un
+ * rubro nace vivo o apagado y no hay tercer estado que mostrar.
+ */
+function estadoDeRubro(r: RubroCredito): EstadoRubro {
+  // Anulado va PRIMERO, antes que completado: anular deja el saldo en cero y por
+  // tanto `completado` en true, así que preguntar por completado primero pintaba
+  // "Completado" sobre un cargo que se canceló — en una pantalla de dinero eso
+  // se lee como "ya se cobró", y no se cobró nada.
+  if (r.anulado) {
+    return { etiqueta: "Anulado", clase: "bg-red-100 text-red-800 border-red-200" };
+  }
+  if (r.completado) {
+    return { etiqueta: "Completado", clase: "bg-green-100 text-green-800 border-green-200" };
+  }
+  if (!r.activo) {
+    return { etiqueta: "Inactivo", clase: "bg-gray-100 text-gray-600 border-gray-200" };
+  }
+  return { etiqueta: "Activo", clase: "bg-blue-100 text-blue-800 border-blue-200" };
+}
+
+/**
+ * Quién hizo un evento del historial. El nombre primero, pero el email es el
+ * que casi siempre aparece: el nombre vive en `asesores` y las cuentas ADMIN no
+ * tienen asesor ligado. "Sistema" queda para los eventos sin autor humano.
+ */
+const autorDe = (ev: EventoRubro): string =>
+  ev.usuario_nombre ?? ev.usuario_email ?? "Sistema";
+
+function ErrorEnLinea({ mensaje }: { mensaje: string }) {
+  return (
+    <p className={CLASE_ERROR}>
+      <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+      {mensaje}
+    </p>
+  );
+}
+
+/**
+ * El `disabled` no es decorativo: mientras una mutación viaja, este botón es la
+ * otra puerta de salida del formulario, y la de arriba —lejos del pie, donde
+ * están "Cancelar" y "Guardar", que sí se apagan solos—. Sin apagarlo, en un
+ * PUT lento el administrador volvía a la lista, que todavía mostraba la fila
+ * VIEJA, reabría ese mismo rubro y lo guardaba de nuevo: el segundo PUT podía
+ * aterrizar después del primero y PISAR el monto y la descripción recién
+ * guardados.
+ */
+/**
+ * Reporta hacia arriba si esta vista tiene una escritura en curso.
+ *
+ * Es un hook y no una prop suelta porque las tres vistas que escriben lo
+ * necesitan igual, y porque hace falta el `false` de salida: si la vista se
+ * desmonta con la mutación todavía viva, sin esto el diálogo se quedaría
+ * trabado sin poder cerrarse nunca.
+ */
+function useReportarGuardando(
+  pendiente: boolean,
+  onGuardando?: (v: boolean) => void
+) {
+  useEffect(() => {
+    onGuardando?.(pendiente);
+    return () => onGuardando?.(false);
+  }, [pendiente, onGuardando]);
+}
+
+function BotonVolver({ onClick, disabled = false, children = "Volver a la lista" }: {
+  onClick: () => void;
+  disabled?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex items-center gap-1 text-sm font-semibold text-gray-500 hover:text-gray-800 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+    >
+      <ArrowLeft className="w-4 h-4" />
+      {children}
+    </button>
+  );
+}
+
+export default function RubrosCredito({
+  open,
+  onOpenChange,
+  creditoId,
+  statusCredit = null,
+  rol = null,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  creditoId: number | null;
+  /** `creditos."statusCredit"`; si no llega, no se gatea nada y manda el backend. */
+  statusCredit?: string | null;
+  /** `user.role`. ADMIN desbloquea tipos obligatorios, crear tipos y editar. */
+  rol?: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const esAdmin = rol === "ADMIN";
+
+  const [vista, setVista] = useState<Vista>("lista");
+  const [rubroSel, setRubroSel] = useState<RubroCredito | null>(null);
+  const [tipoSel, setTipoSel] = useState<TipoRubro | null>(null);
+  /** A dónde vuelve "Crear tipo": se llega desde "crear" y desde "tipos". */
+  const [origenCrearTipo, setOrigenCrearTipo] = useState<"crear" | "tipos">("crear");
+  /**
+   * El formulario de "Agregar rubro" vive acá y no adentro de `VistaCrear`
+   * porque ir a crear/administrar tipos desmonta esa vista: si el estado
+   * fuera suyo, el monto y la descripción ya tipeados se perderían en el
+   * desvío, que es justo el momento en que el usuario los tiene escritos.
+   */
+  const [borrador, setBorrador] = useState<BorradorRubro>(BORRADOR_VACIO);
+
+  /**
+   * `creditoId` que la UI muestra. `open` y `creditoId` salen del mismo estado
+   * en el llamador (`!!rubrosCredito` / `rubrosCredito?.credito_id`), así que al
+   * cerrar los dos cambian en el mismo commit y el crédito se vuelve null
+   * mientras el diálogo todavía está corriendo su animación de salida. Con el
+   * último valor no nulo retenido, esos ~200ms siguen mostrando el contenido de
+   * siempre en vez de un cartel de error.
+   */
+  const [sesion, setSesion] = useState<SesionRubros>(() => ({
+    abierta: open,
+    creditoId,
+  }));
+
+  /**
+   * Qué crédito se pinta y si toca volver a la lista, decidido EN LA RENDER.
+   *
+   * Antes eran dos `useEffect`, y un efecto corre DESPUÉS de que la render ya se
+   * pintó: reabrir el modal sobre otro crédito alcanzaba a mostrar un cuadro con
+   * el encabezado del crédito nuevo y los rubros del anterior, y —como el
+   * reinicio de vista también era efecto— podía reabrirse directo en el
+   * formulario de editar del rubro de antes, cargado con los datos del cliente
+   * equivocado y listo para enviarse.
+   *
+   * Ajustar estado durante la render es el patrón que React documenta para
+   * estado derivado de props: no hay bucle porque `ajustarApertura` devuelve la
+   * MISMA sesión cuando nada cambió, así que la segunda pasada no vuelve a
+   * entrar acá.
+   */
+  const apertura = ajustarApertura(sesion, { open, creditoId });
+  const creditoVisible = apertura.creditoVisible;
+  if (apertura.sesion !== sesion) {
+    setSesion(apertura.sesion);
+    if (apertura.reiniciar) {
+      setVista("lista");
+      setRubroSel(null);
+      setTipoSel(null);
+      setBorrador(BORRADOR_VACIO);
+    }
+  }
+
+  const rubrosQuery = useQuery({
+    queryKey: [QK_RUBROS, creditoVisible],
+    queryFn: () => getRubrosByCredito(creditoVisible!),
+    enabled: open && !!creditoVisible,
+  });
+
+  const rubros = useMemo(() => rubrosQuery.data ?? [], [rubrosQuery.data]);
+
+  /**
+   * Sólo los rubros VIVOS: un rubro desactivado conserva su `saldo_pendiente`
+   * en la base —desactivarlo es dejar de cobrarlo, no ponerlo en cero— y
+   * sumarlo hacía que el encabezado anunciara plata que nadie va a cobrar.
+   * `completado` ya trae saldo 0, pero se excluye igual para que el total diga
+   * exactamente "lo que queda por cobrar" y no dependa de esa coincidencia.
+   */
+  const totalPendiente = useMemo(
+    () =>
+      sumaQ(
+        rubros.filter((r) => r.activo && !r.completado).map((r) => r.saldo_pendiente)
+      ),
+    [rubros]
+  );
+
+  // Gate SOLO de creación: la lista y el historial se siguen viendo (es el
+  // registro de lo que ya se le cobró al cliente) y la edición tampoco se
+  // toca, porque puede hacer falta corregir un monto ya cobrado.
+  //
+  // ⚠️ Corrección: acá decía que "el backend la permite", y es cierto sólo para
+  // BAJAR el monto y para la descripción. SUBIRLO re-aplica la política del alta
+  // (`puedeCrearRubro` más `tipo.activo`), así que un alza sobre un crédito
+  // MOROSO con tipo opcional, sobre un crédito terminal, o con el tipo
+  // desactivado después de crear el rubro, se come un 409. `VistaEditar` no
+  // distingue subir de bajar ni recibe el estado del crédito: reportado en el
+  // PR, sin cerrar.
+  //
+  // El motivo viene armado porque no hay un solo bloqueo: el estado terminal no
+  // lo levanta nadie, mientras que MOROSO/EN_CONVENIO sólo bloquean a quien no
+  // es ADMIN (a él le quedan los tipos obligatorios).
+  const motivoBloqueo = creacionRubroBloqueada(statusCredit, rol);
+
+  const volver = () => {
+    setVista("lista");
+    setRubroSel(null);
+    // También el tipo: hoy no cambia nada porque la vista se desmonta, pero
+    // dejar la mitad de la selección viva es la clase de asimetría que después
+    // alimenta un `key` que falta.
+    setTipoSel(null);
+  };
+
+  /**
+   * Hay una escritura en curso (PUT/POST y su refresco posterior).
+   *
+   * Vive acá arriba porque los botones apagados de cada vista NO alcanzan: el
+   * diálogo tiene tres salidas propias —la X de Radix, la tecla Escape y el clic
+   * afuera— que no pasan por ningún botón nuestro. Cerrando por ahí a mitad de un
+   * guardado, el modal se puede reabrir sobre la lista en caché, entrar otra vez
+   * a la misma fila vieja y reenviarla: el segundo PUT corre después del primero
+   * y le pisa el monto o la descripción recién guardados.
+   *
+   * Las vistas lo reportan desde su propio `isPending`, que es la única fuente
+   * que cubre la ventana ENTERA —desde que sale la petición hasta que termina el
+   * refresco—, no sólo la parte que el padre ve al esperar su callback.
+   */
+  const [guardando, setGuardando] = useState(false);
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(abierto) => {
+        // Abrir siempre se deja pasar; lo que se frena es CERRAR a mitad de una
+        // escritura.
+        if (!abierto && guardando) return;
+        onOpenChange(abierto);
+      }}
+    >
+      {/*
+        Ancho: la tabla de la lista trae 8 columnas y con `max-w-5xl` el
+        `sm:max-w-lg` de la base ganaba en pantallas grandes (distinto
+        breakpoint ⇒ `tailwind-merge` no lo pisa), así que el modal se quedaba
+        en 32rem y la tabla scrolleaba con 4 columnas a la vista. Se pisa el
+        `sm:` explícitamente con un ancho fluido topado: en escritorio da aire
+        de sobra y en pantallas chicas sigue siendo un margen de 95vw.
+      */}
+      <DialogContent
+        className="bg-white max-w-[calc(100%-1.5rem)] sm:max-w-[min(95vw,1400px)] max-h-[90vh] overflow-y-auto"
+        // Las tres salidas de Radix, tapadas mientras se guarda. La X se ESCONDE
+        // en vez de quedar inerte: un botón que no responde se lee como que la
+        // pantalla se colgó.
+        showCloseButton={!guardando}
+        onEscapeKeyDown={(e) => { if (guardando) e.preventDefault(); }}
+        onPointerDownOutside={(e) => { if (guardando) e.preventDefault(); }}
+        onInteractOutside={(e) => { if (guardando) e.preventDefault(); }}
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-purple-700">
+            <Receipt className="w-5 h-5 shrink-0" />
+            Rubros — Crédito #{creditoVisible ?? "--"}
+            {statusCredit && (
+              <span
+                className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${estadoCreditoStyle(
+                  statusCredit
+                )}`}
+              >
+                {statusCredit}
+              </span>
+            )}
+          </DialogTitle>
+          <DialogDescription className="text-gray-600">
+            Cobros adicionales asociados al crédito. Se listan todos, incluidos
+            los completados e inactivos.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/*
+          El aviso de abajo decía que "el crédito todavía no tiene pagos
+          cargados": era falso —`creditoId` sale de `item.creditos.credito_id`,
+          nada que ver con los pagos— y además se veía al cerrar el modal. Con
+          el id retenido este caso solo ocurre si el llamador abre sin crédito,
+          y el texto dice exactamente eso.
+        */}
+        {!creditoVisible ? (
+          <div className="flex items-center gap-2 rounded-xl border-2 border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-600">
+            <Receipt className="w-4 h-4 shrink-0" />
+            No se pudo identificar el crédito, así que no hay rubros que mostrar.
+          </div>
+        ) : vista === "lista" ? (
+          <VistaLista
+            rubros={rubros}
+            totalPendiente={totalPendiente}
+            cargando={rubrosQuery.isLoading}
+            error={rubrosQuery.isError ? rubrosQuery.error : null}
+            onReintentar={() => rubrosQuery.refetch()}
+            esAdmin={esAdmin}
+            motivoBloqueo={motivoBloqueo}
+            onAgregar={() => {
+              setBorrador(BORRADOR_VACIO);
+              setVista("crear");
+            }}
+            onEditar={(r) => {
+              setRubroSel(r);
+              setVista("editar");
+            }}
+            onAnular={(r) => {
+              setRubroSel(r);
+              setVista("anular");
+            }}
+            onHistorial={(r) => {
+              setRubroSel(r);
+              setVista("historial");
+            }}
+          />
+        ) : vista === "crear" ? (
+          <VistaCrear
+            onGuardando={setGuardando}
+            creditoId={creditoVisible}
+            esAdmin={esAdmin}
+            borrador={borrador}
+            setBorrador={setBorrador}
+            onVolver={volver}
+            onCrearTipo={() => {
+              setOrigenCrearTipo("crear");
+              setVista("crearTipo");
+            }}
+            onAdministrarTipos={() => setVista("tipos")}
+            statusCredit={statusCredit}
+            rubrosDelCredito={rubros}
+            onCreado={async (creado, tipoNombre) => {
+              // Se ESPERA el refresco antes de volver, igual que en editar: sin
+              // el await, el toast de "Rubro creado" salía sobre la lista de
+              // antes —sin el rubro nuevo, y en un crédito que no tenía ninguno
+              // todavía con el cartel de "no hay rubros" a la vista—.
+              // Y si el refresco no trae nada —red caída, o el modal cerrado
+              // durante el POST, que deja la query DESHABILITADA y fuera del
+              // alcance del refetch—, se siembra la fila del POST. Con
+              // el refresco pelado de antes, que no sembraba, el toast de
+              // "Rubro creado" quedaba sobre una lista sin el rubro.
+              await sincronizarRubroCreado(
+                queryClient,
+                creditoVisible,
+                creado,
+                tipoNombre
+              );
+              setBorrador(BORRADOR_VACIO);
+              volver();
+            }}
+          />
+        ) : vista === "anular" && esAdmin && rubroSel ? (
+          // Una vista más del mismo Dialog, igual que "editar": anular pide un
+          // motivo y una explicación de qué le pasa al rubro, que no entran en
+          // una confirmación de fila, y apilar un segundo Dialog es justo lo que
+          // este componente evita.
+          <VistaAnular
+            onGuardando={setGuardando}
+            key={rubroSel.rubro_id}
+            rubro={rubroSel}
+            onVolver={volver}
+            onAnulado={async (anulado) => {
+              // La anulación deja el rubro en saldo 0, inactivo y con un evento
+              // nuevo en su historial. Las dos cachés que hablan de ese rubro se
+              // ponen al día ANTES de volver: sin el await, la lista seguía
+              // mostrándolo "Activo" con el saldo de antes y con los botones de
+              // editar y anular, que el backend ya rechaza con 409.
+              // Y si el refresco no trae nada se siembra la fila anulada: el
+              // mismo agujero que tenía la edición. Sin eso, la fila queda
+              // TERMINAL pero ofreciendo Editar y Anular, que dan 409.
+              olvidarHistorialRubro(queryClient, rubroSel.rubro_id);
+              await sincronizarRubroAnulado(
+                queryClient,
+                creditoVisible,
+                rubroSel.rubro_id,
+                anulado
+              );
+              volver();
+            }}
+          />
+        ) : vista === "editar" && esAdmin && rubroSel ? (
+          // `key` por rubro: los campos de `VistaEditar` se inicializan desde
+          // las props, así que sin remontar, cambiar de rubro con la vista ya
+          // montada dejaría el monto y la descripción del rubro ANTERIOR en el
+          // formulario — y el PUT guardaría un monto sobre otro rubro. Hoy sólo
+          // lo evita que el único camino a "editar" pase por la lista; eso es un
+          // invariante frágil, no una garantía.
+          <VistaEditar
+            onGuardando={setGuardando}
+            key={rubroSel.rubro_id}
+            rubro={rubroSel}
+            statusCredit={statusCredit}
+            onVolver={volver}
+            onEditado={async (guardado) => {
+              // Se ESPERA antes de volver: sin el await, la lista se pintaba con
+              // la fila vieja mientras el GET viajaba, y reabrirla en ese hueco
+              // cargaba el formulario con el monto anterior — el PUT siguiente
+              // revertía la edición recién hecha.
+              //
+              // El historial se olvida además de refrescar la lista: toda
+              // edición que cambia algo escribe su evento con el motivo, y si el
+              // administrador ya había mirado el historial de este rubro, esa
+              // caché quedó sin el cambio que acaba de hacer. (Una edición que
+              // no cambia nada no escribe evento; olvidar de más sólo cuesta un
+              // GET si se reabre el historial.)
+              olvidarHistorialRubro(queryClient, rubroSel.rubro_id);
+              await sincronizarRubroEditado(
+                queryClient,
+                creditoVisible,
+                rubroSel.rubro_id,
+                guardado
+              );
+              volver();
+            }}
+          />
+        ) : vista === "historial" && rubroSel ? (
+          <VistaHistorial rubro={rubroSel} onVolver={volver} />
+        ) : vista === "tipos" && esAdmin ? (
+          <VistaAdminTipos
+            onGuardando={setGuardando}
+            onVolver={() => setVista("crear")}
+            onCrearTipo={() => {
+              setOrigenCrearTipo("tipos");
+              setVista("crearTipo");
+            }}
+            onEditar={(t) => {
+              setTipoSel(t);
+              setVista("editarTipo");
+            }}
+          />
+        ) : vista === "editarTipo" && esAdmin && tipoSel ? (
+          <VistaEditarTipo
+            // `key` por tipo, igual que `VistaEditar` y `VistaAnular`: los campos
+            // se inicializan desde las props, así que sin remontar, cambiar de
+            // tipo con la vista ya montada dejaría el nombre y la descripción del
+            // ANTERIOR en el formulario. Hoy lo evita que el único camino acá
+            // pase por el listado; eso es un invariante frágil, no una garantía.
+            key={tipoSel.tipo_id}
+            onGuardando={setGuardando}
+            tipo={tipoSel}
+            onVolver={() => setVista("tipos")}
+            onGuardado={() => setVista("tipos")}
+          />
+        ) : vista === "crearTipo" && esAdmin ? (
+          <VistaCrearTipo
+            onGuardando={setGuardando}
+            volverA={origenCrearTipo}
+            onVolver={() => setVista(origenCrearTipo)}
+            onCreado={(tipo) => {
+              // Viniendo de "crear rubro", el tipo recién hecho queda
+              // seleccionado; viniendo de la administración, se vuelve al
+              // listado para verlo ahí.
+              if (origenCrearTipo === "crear") {
+                setBorrador((b) => ({ ...b, tipoId: String(tipo.tipo_id) }));
+                setVista("crear");
+              } else {
+                setVista("tipos");
+              }
+            }}
+          />
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ---------------------------------------------------------------- Lista --- */
+
+function VistaLista({
+  rubros,
+  totalPendiente,
+  cargando,
+  error,
+  onReintentar,
+  esAdmin,
+  motivoBloqueo,
+  onAgregar,
+  onEditar,
+  onAnular,
+  onHistorial,
+}: {
+  rubros: RubroCredito[];
+  totalPendiente: number;
+  cargando: boolean;
+  error: unknown;
+  onReintentar: () => void;
+  esAdmin: boolean;
+  /** Por qué no se puede crear un rubro, o `null` si sí se puede. */
+  motivoBloqueo: string | null;
+  onAgregar: () => void;
+  onEditar: (r: RubroCredito) => void;
+  onAnular: (r: RubroCredito) => void;
+  onHistorial: (r: RubroCredito) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-sm font-semibold text-purple-700">
+          {rubros.length} rubro{rubros.length === 1 ? "" : "s"} · pendiente{" "}
+          <span className="tabular-nums">{fmtQ(totalPendiente)}</span>
+        </span>
+        <Button
+          onClick={onAgregar}
+          disabled={motivoBloqueo !== null}
+          className="bg-purple-600 hover:bg-purple-700 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <PlusCircle className="w-4 h-4 mr-2" />
+          Agregar rubro
+        </Button>
+      </div>
+
+      {motivoBloqueo && (
+        <p className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          {motivoBloqueo}
+        </p>
+      )}
+
+      {cargando ? (
+        <div className="flex items-center justify-center gap-2 py-10 text-purple-600 font-semibold">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          Cargando rubros...
+        </div>
+      ) : error ? (
+        <div className="flex flex-col items-center gap-3 py-8">
+          <p className="flex items-center gap-2 text-red-600 font-semibold text-center">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            {getApiErrorMessage(error, "No se pudieron cargar los rubros")}
+          </p>
+          <Button variant="outline" onClick={onReintentar}>
+            Reintentar
+          </Button>
+        </div>
+      ) : rubros.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-gray-200 bg-gray-50 py-10 text-center">
+          <Receipt className="w-6 h-6 text-gray-400" />
+          <p className="font-semibold text-gray-700">
+            Este crédito no tiene rubros registrados.
+          </p>
+          <p className="text-sm text-gray-500">
+            Usá “Agregar rubro” para registrar un cobro adicional.
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-purple-50">
+                <TableHead className="text-purple-900 font-bold">Tipo</TableHead>
+                <TableHead className="text-purple-900 font-bold">Descripción</TableHead>
+                <TableHead className="text-purple-900 font-bold text-right">Monto</TableHead>
+                <TableHead className="text-purple-900 font-bold text-right">Abonado</TableHead>
+                <TableHead className="text-purple-900 font-bold text-right">Saldo</TableHead>
+                <TableHead className="text-purple-900 font-bold">Estado</TableHead>
+                <TableHead className="text-purple-900 font-bold">Creado</TableHead>
+                <TableHead className="text-purple-900 font-bold text-right">Acciones</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rubros.map((r) => {
+                const estado = estadoDeRubro(r);
+                const saldo = Number(r.saldo_pendiente ?? 0);
+                const vivo = saldo > 0;
+                return (
+                  <TableRow
+                    key={r.rubro_id}
+                    className={vivo ? "bg-white" : "bg-gray-50/70 text-gray-500"}
+                  >
+                    <TableCell className="font-semibold text-gray-900">
+                      {r.tipo_nombre}
+                    </TableCell>
+                    <TableCell className="text-gray-700">
+                      {r.descripcion || "--"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {fmtQ(r.monto_original)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-gray-700">
+                      {fmtQ(r.abonado)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right tabular-nums font-bold ${
+                        vivo ? "text-red-600" : "text-green-700"
+                      }`}
+                    >
+                      {fmtQ(saldo)}
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${estado.clase}`}
+                      >
+                        {estado.etiqueta}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-gray-700 whitespace-nowrap">
+                      {fmtFechaGT(r.created_at)}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-2">
+                        {/*
+                          Editar no sobre un rubro ANULADO: anular es la salida
+                          irreversible de un cargo que se dio de baja a
+                          propósito, y el backend lo está cerrando por su lado
+                          (aparte de esta pantalla). Se OCULTA en vez de
+                          deshabilitarse, igual que "Anular" más abajo sobre su
+                          propio criterio: un botón apagado en una fila
+                          terminal no tiene nada que ofrecer. Completado SÍ
+                          sigue editable a propósito (puede hacer falta
+                          corregir un monto ya cobrado), así que el gate es
+                          `!r.anulado` y no `!r.completado`.
+                        */}
+                        {esAdmin && !r.anulado && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="bg-blue-600 hover:bg-blue-700 text-white border-blue-600"
+                            onClick={() => onEditar(r)}
+                          >
+                            <Pencil className="w-3.5 h-3.5 mr-1" />
+                            Editar
+                          </Button>
+                        )}
+                        {/*
+                          Anular sólo sobre lo que el backend todavía acepta, y
+                          eso son DOS condiciones:
+
+                          - `!completado` — un rubro anulado queda `completado`,
+                            igual que uno ya cobrado. Sobre esas filas el botón
+                            no se muestra: son terminales y no hay nada que
+                            ofrecer.
+                          - sin nada ABONADO — `completado` sigue en false con un
+                            abono parcial, así que el backend rechaza igual. Acá
+                            sí se muestra apagado con el motivo, porque la fila NO
+                            es terminal: el admin necesita saber que primero hay
+                            que revertir o devolver el abono. Escondido, el botón
+                            ausente no explica nada.
+                        */}
+                        {esAdmin && !r.completado && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="bg-red-600 hover:bg-red-700 text-white border-red-600 disabled:opacity-50"
+                            disabled={sumaQ([r.abonado]) > 0}
+                            title={
+                              sumaQ([r.abonado]) > 0
+                                ? `Este rubro ya tiene ${fmtQ(r.abonado)} abonados: anularlo borraría ese pago. Primero hay que revertir o devolver el abono.`
+                                : undefined
+                            }
+                            onClick={() => onAnular(r)}
+                          >
+                            <Ban className="w-3.5 h-3.5 mr-1" />
+                            Anular
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="bg-gray-600 hover:bg-gray-700 text-white border-gray-600"
+                          onClick={() => onHistorial(r)}
+                        >
+                          <History className="w-3.5 h-3.5 mr-1" />
+                          Historial
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- Crear --- */
+
+function VistaCrear({
+  creditoId,
+  esAdmin,
+  borrador,
+  setBorrador,
+  onVolver,
+  onCrearTipo,
+  onAdministrarTipos,
+  onCreado,
+  statusCredit,
+  rubrosDelCredito,
+  onGuardando,
+}: {
+  creditoId: number;
+  esAdmin: boolean;
+  borrador: BorradorRubro;
+  setBorrador: React.Dispatch<React.SetStateAction<BorradorRubro>>;
+  onVolver: () => void;
+  onCrearTipo: () => void;
+  onAdministrarTipos: () => void;
+  /** Puede devolver promesa: el refresco de la lista se espera antes de volver. */
+  /**
+   * Recibe la fila que devolvió el POST y el NOMBRE del tipo elegido. El nombre
+   * no viene en la respuesta —lo agrega el join del GET—, así que si el refresco
+   * de la lista no llega, es lo único con que sembrar la fila sin dejar la
+   * columna "Tipo" en blanco.
+   */
+  onCreado: (creado: RubroGuardado | null, tipoNombre: string) => void | Promise<void>;
+  /**
+   * Para apagar los tipos que el backend va a rechazar. `statusCredit` es la
+   * foto de la fila con que se abrió el modal —no una lectura fresca— y
+   * `rubrosDelCredito` es la lista que ya está en caché. Ver
+   * `motivoTipoNoCobrable`, que explica por qué es una comodidad y no un gate.
+   */
+  statusCredit: string | null;
+  rubrosDelCredito: RubroCredito[];
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
+}) {
+  const { tipoId, monto, descripcion } = borrador;
+  const campo = (k: keyof BorradorRubro) => (v: string) =>
+    setBorrador((b) => ({ ...b, [k]: v }));
+  const [error, setError] = useState<string | null>(null);
+
+  // Solo los ACTIVOS: este desplegable es para cobrar, y un tipo desactivado
+  // se desactivó justamente para dejar de ofrecerlo. Los inactivos se ven en
+  // la vista de administración, que pide la lista completa.
+  const tiposQuery = useQuery({
+    queryKey: [QK_TIPOS, false],
+    queryFn: () => getTiposRubro(false),
+  });
+
+  // Un asesor no puede usar tipos obligatorios: el backend responde 403, así
+  // que ni siquiera se los ofrecemos en el desplegable.
+  const tipos = useMemo(() => {
+    const todos = tiposQuery.data ?? [];
+    return esAdmin ? todos : todos.filter((t) => !t.obligatorio);
+  }, [tiposQuery.data, esAdmin]);
+
+  const tipoElegido = tipos.find((t) => String(t.tipo_id) === tipoId) ?? null;
+
+  const motivoTipoElegido = tipoElegido
+    ? motivoTipoNoCobrable({ tipo: tipoElegido, statusCredit, rubros: rubrosDelCredito })
+    : null;
+
+  // El borrador sobrevive al desvío a "Administrar tipos", donde el tipo
+  // elegido puede haber quedado desactivado o borrado. Si ya no está entre los
+  // ofrecidos, se suelta la selección en vez de mandar un id muerto al backend.
+  useEffect(() => {
+    if (!tipoId || tiposQuery.isLoading || tiposQuery.isError) return;
+    if (!tipoElegido) setBorrador((b) => ({ ...b, tipoId: "" }));
+  }, [tipoId, tipoElegido, tiposQuery.isLoading, tiposQuery.isError, setBorrador]);
+
+  const crear = useMutation({
+    mutationFn: () =>
+      crearRubro({
+        credito_id: creditoId,
+        tipo_id: Number(tipoId),
+        monto: Number(monto),
+        descripcion: descripcion.trim(),
+      }),
+    onSuccess: (creado) => {
+      toast.success("Rubro creado");
+      // Se DEVUELVE la promesa, no se descarta: React Query espera lo que
+      // devuelva este callback antes de dar la mutación por terminada, así que
+      // `isPending` sigue en true durante el refresco de la lista y el
+      // formulario queda apagado hasta que la pantalla tenga el dato nuevo. Sin
+      // devolverla, la mutación se daba por cerrada al responder el POST y los
+      // botones revivían justo en el hueco en que la lista todavía era la vieja.
+      return onCreado(creado, tipoElegido?.nombre ?? "");
+    },
+    onError: (e) => {
+      // 403 = el asesor intentó un tipo obligatorio. 409 = regla de negocio
+      // (crédito en mora, estado terminal, rubro duplicado). En los dos casos
+      // el `message` del backend se muestra tal cual y se queda en pantalla:
+      // un toast se iría mientras el usuario lo está leyendo.
+      setError(getApiErrorMessage(e, "No se pudo crear el rubro"));
+    },
+  });
+
+  useReportarGuardando(crear.isPending, onGuardando);
+
+  const submit = () => {
+    setError(null);
+    if (!tipoId) return setError("Selecciona el tipo de rubro");
+    const montoNum = Number(monto);
+    // El chequeo va sobre el monto YA redondeado al centavo, no sobre el crudo:
+    // `0.004` es "mayor a cero" en crudo y `0.00` guardado, y el backend lo
+    // rechaza después de redondear igual. Es la misma regla que la edición.
+    if (!monto.trim() || !Number.isFinite(montoNum) || montoQuedaEnCeroAlCentavo(monto)) {
+      return setError("El monto debe ser un número mayor a cero");
+    }
+    if (!descripcion.trim()) return setError("La descripción es obligatoria");
+    crear.mutate();
+  };
+
+  return (
+    <div className="flex flex-col gap-3 text-gray-800">
+      <BotonVolver onClick={onVolver} disabled={crear.isPending} />
+
+      <h3 className="flex items-center gap-2 font-bold text-purple-700">
+        <PlusCircle className="w-5 h-5" />
+        Agregar rubro
+      </h3>
+
+      <div>
+        <div className="mb-1 flex items-center justify-between gap-2 flex-wrap">
+          <Label>Tipo de rubro</Label>
+          {esAdmin && (
+            <span className="flex items-center gap-3">
+              {/*
+                Apagados mientras el POST del rubro viaja. Irse por acá desmonta
+                esta vista, y su `useReportarGuardando` limpia el guard del modal
+                al desmontarse: volver monta una mutación nueva con `isPending`
+                en false y deja mandar un segundo rubro con el primero todavía en
+                vuelo. Y cuando el primero termina, borra el borrador del segundo
+                y redirige la vista.
+              */}
+              <button
+                type="button"
+                onClick={onCrearTipo}
+                disabled={crear.isPending}
+                className="text-xs font-semibold text-purple-700 hover:underline disabled:opacity-50 disabled:pointer-events-none"
+              >
+                + Crear tipo nuevo
+              </button>
+              <button
+                type="button"
+                onClick={onAdministrarTipos}
+                disabled={crear.isPending}
+                className="flex items-center gap-1 text-xs font-semibold text-gray-600 disabled:opacity-50 disabled:pointer-events-none hover:underline"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+                Administrar tipos
+              </button>
+            </span>
+          )}
+        </div>
+        {tiposQuery.isLoading ? (
+          <p className="flex items-center gap-2 text-sm text-gray-500">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Cargando tipos...
+          </p>
+        ) : tiposQuery.isError ? (
+          <p className="text-sm text-red-600">
+            {getApiErrorMessage(tiposQuery.error, "No se pudieron cargar los tipos de rubro")}
+          </p>
+        ) : tipos.length === 0 ? (
+          <p className="text-sm text-amber-700">
+            {esAdmin
+              ? "No hay tipos de rubro activos configurados."
+              : "No hay tipos de rubro opcionales disponibles. Los obligatorios solo los puede cobrar un administrador."}
+          </p>
+        ) : (
+          <>
+            <select
+              disabled={crear.isPending}
+              className={CLASE_SELECT}
+              value={tipoId}
+              onChange={(e) => campo("tipoId")(e.target.value)}
+            >
+              <option value="">Selecciona un tipo</option>
+              {tipos.map((t) => {
+                // Se APAGA con el motivo en el nombre, no se filtra: filtrar
+                // dejaría la lista vacía con el cartel FALSO de "no hay tipos
+                // activos configurados", y le borraría la selección sola a quien
+                // ya había elegido. Ver `motivoTipoNoCobrable`.
+                const motivo = motivoTipoNoCobrable({
+                  tipo: t,
+                  statusCredit,
+                  rubros: rubrosDelCredito,
+                });
+                return (
+                  <option key={t.tipo_id} value={t.tipo_id} disabled={!!motivo}>
+                    {motivo ? `${t.nombre} — ${motivo}` : t.nombre}
+                  </option>
+                );
+              })}
+            </select>
+            {/* Obligatorio vs opcional decide si el cobro se puede registrar con
+                el crédito en mora, así que se dice explícito y no se deduce. */}
+            {tipoElegido && (
+              <p
+                className={`mt-1 text-xs font-medium ${
+                  tipoElegido.obligatorio ? "text-red-700" : "text-gray-500"
+                }`}
+              >
+                {/* Antes decía "no se puede cobrar SI el crédito está en mora":
+                    una regla abstracta, con la etiqueta MOROSO del crédito a la
+                    vista. Se leía como advertencia genérica y no como
+                    impedimento, y el envío se comía un 409 con el formulario
+                    lleno. Ahora se nombra ESTE crédito. */}
+                {motivoTipoElegido ??
+                  (tipoElegido.obligatorio
+                    ? "Tipo obligatorio: se puede cobrar aunque el crédito esté en mora."
+                    : "Tipo opcional: no se puede cobrar si el crédito está en mora.")}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      <div>
+        <Label htmlFor="rubro-monto" className="mb-1 block">
+          Monto
+        </Label>
+        <Input
+          disabled={crear.isPending}
+          id="rubro-monto"
+          type="number"
+          min="0"
+          step="0.01"
+          value={monto}
+          onChange={(e) => campo("monto")(e.target.value)}
+          placeholder="0.00"
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="rubro-desc" className="mb-1 block">
+          Descripción
+        </Label>
+        <Input
+          disabled={crear.isPending}
+          id="rubro-desc"
+          value={descripcion}
+          onChange={(e) => campo("descripcion")(e.target.value)}
+          placeholder="Ej: Tarjeta de circulación 2026"
+        />
+      </div>
+
+      {error && <ErrorEnLinea mensaje={error} />}
+
+      <DialogFooter className="gap-2">
+        <Button
+          variant="outline"
+          className="bg-gray-600 hover:bg-gray-700 text-white font-semibold border-gray-600"
+          disabled={crear.isPending}
+          onClick={onVolver}
+        >
+          Cancelar
+        </Button>
+        <Button
+          onClick={submit}
+          className="bg-purple-600 hover:bg-purple-700 text-white"
+          // Se apaga también con un tipo no cobrable, y no alcanza con que la
+          // `<option>` esté deshabilitada: al crear un tipo nuevo desde acá,
+          // `onCreado` lo deja SELECCIONADO, así que el valor del select puede
+          // quedar apuntando a una opción apagada. Y el borrador sobrevive al
+          // desvío a "Administrar tipos", donde el crédito pudo cambiar de
+          // estado. Sin este guard el envío se come el 409 con el formulario ya
+          // lleno — que es justo lo que el apagado quería evitar.
+          disabled={crear.isPending || !!motivoTipoElegido}
+        >
+          {crear.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          Crear rubro
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- Editar --- */
+
+function VistaEditar({
+  rubro,
+  statusCredit,
+  onVolver,
+  onEditado,
+  onGuardando,
+}: {
+  rubro: RubroCredito;
+  /** `creditos."statusCredit"`; si no llega, no se gatea nada y manda el backend. */
+  statusCredit?: string | null;
+  onVolver: () => void;
+  /** Recibe la fila que devolvió el PUT, para sembrarla en la lista. */
+  onEditado: (guardado: RubroGuardado | null) => void | Promise<void>;
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
+}) {
+  const [monto, setMonto] = useState(String(rubro.monto_original ?? ""));
+  const [descripcion, setDescripcion] = useState(rubro.descripcion ?? "");
+  const [motivo, setMotivo] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  // El motivo es obligatorio SIEMPRE, cambie o no el monto: es lo que el
+  // backend exige ahora y lo que hace legible el historial. Acá vivía un
+  // `montoCambio` que comparaba floats crudos contra el monto original
+  // mientras el backend comparaba el redondeado con `Big`: para diferencias de
+  // sub-centavo los dos lados no coincidían y el formulario dejaba pasar un
+  // guardado que el backend rechazaba. Sin esa deducción no hay discrepancia.
+
+  /**
+   * Sólo viaja lo que el editor TOCÓ, no el formulario entero.
+   *
+   * Mandando los tres campos siempre se pierden ediciones ajenas: A abre el
+   * rubro en Q500, B lo sube a Q800, y A cambia sólo la descripción. A reenvía
+   * el Q500 que tenía cargado, el backend lo compara con su fila actual, ve una
+   * diferencia real y la guarda como edición de monto. Lo de B se deshace sin
+   * que nadie se entere, y el historial registra un cambio que A nunca pidió.
+   *
+   * Verificado contra una copia de producción que el backend acepta el patch
+   * parcial: con `monto` ausente guarda la descripción, deja el monto intacto y
+   * el historial anota la `edicion` sin cambio de monto.
+   *
+   * ⚠️ Esto NO cierra el conflicto sobre el MISMO campo: si los dos editan el
+   * monto, sigue ganando el último. Para eso haría falta un chequeo de versión
+   * optimista, que es una decisión de contrato del endpoint.
+   */
+  /**
+   * La variante que trae también los INACTIVOS: un tipo desactivado es
+   * justamente uno de los casos que bloquean el aumento, así que la lista de
+   * sólo-activos no sirve acá.
+   *
+   * Si no llega, `aumentoRubroBloqueado` no gatea nada y manda el backend.
+   */
+  const tiposTodos = useQuery({
+    queryKey: [QK_TIPOS, true],
+    queryFn: () => getTiposRubro(true),
+  });
+  const tipoDelRubro = tiposTodos.data?.find((t) => t.tipo_id === rubro.tipo_id);
+
+  const patch = camposRealmenteEditados(
+    { monto, descripcion },
+    { monto: rubro.monto_original ?? 0, descripcion: rubro.descripcion ?? "" }
+  );
+
+  const editar = useMutation({
+    mutationFn: () =>
+      editarRubro(rubro.rubro_id, { ...patch, motivo: motivo.trim() }),
+    onSuccess: (guardado) => {
+      toast.success("Rubro actualizado");
+      // Se DEVUELVE la promesa (ver el mismo comentario en `VistaCrear`): es lo
+      // que mantiene `isPending` en true mientras la lista se refresca. Acá pesa
+      // más que en ningún otro lado, porque es el hueco en el que reabrir la
+      // fila vieja y volver a guardar PISA la edición recién hecha.
+      return onEditado(guardado);
+    },
+    onError: (e) => {
+      // 409 = regla de negocio ("el monto no puede ser menor a lo ya abonado").
+      setError(getApiErrorMessage(e, "No se pudo editar el rubro"));
+    },
+  });
+
+  useReportarGuardando(editar.isPending, onGuardando);
+
+  const submit = () => {
+    setError(null);
+    /**
+     * El piso es lo ya ABONADO, no el cero.
+     *
+     * `puedeEditarMonto` rechaza con 409 si el monto nuevo queda por debajo de lo
+     * que el cliente ya pagó —bajarlo dejaría el rubro debiendo negativo—, y el
+     * formulario sólo pedía "mayor a cero": el admin llenaba el motivo, enviaba,
+     * y se comía el rechazo con todo escrito. El dato estaba a mano: `abonado`
+     * viene del GET de la lista.
+     */
+    const motivoMonto = motivoMontoNoEditable({ monto, abonado: rubro.abonado });
+    if (motivoMonto) return setError(motivoMonto);
+    /**
+     * SUBIR el monto vuelve a correr la política de creación en el backend; bajarlo
+     * no. Medido contra una copia de producción: con el crédito CANCELADO,
+     * INCOBRABLE, o MOROSO con un tipo opcional, subir da 409 y bajar pasa.
+     *
+     * Sin esto el admin llena el motivo —obligatorio— y recién al guardar se
+     * entera. Es el mismo hueco que ya se cerró en la creación.
+     */
+    if (sumaQ([Number(monto) || 0]) > sumaQ([Number(rubro.monto_original) || 0])) {
+      const motivoAumento = aumentoRubroBloqueado(statusCredit, tipoDelRubro);
+      if (motivoAumento) return setError(motivoAumento);
+    }
+    if (!descripcion.trim()) return setError("La descripción es obligatoria");
+    if (!motivo.trim()) {
+      return setError("El motivo es obligatorio: queda en el historial del rubro");
+    }
+    // Sin cambios no se manda nada: un PUT vacío sólo ensuciaría el historial
+    // con una `edicion` que no editó nada.
+    if (patch.monto === undefined && patch.descripcion === undefined) {
+      return setError("No cambiaste nada: modificá el monto o la descripción");
+    }
+    editar.mutate();
+  };
+
+  return (
+    <div className="flex flex-col gap-3 text-gray-800">
+      <BotonVolver onClick={onVolver} disabled={editar.isPending} />
+
+      <div>
+        <h3 className="flex items-center gap-2 font-bold text-blue-700">
+          <Pencil className="w-5 h-5" />
+          Editar rubro
+        </h3>
+        <p className="text-sm text-gray-600">
+          {rubro.tipo_nombre} · abonado{" "}
+          <b className="tabular-nums">{fmtQ(rubro.abonado)}</b> · saldo{" "}
+          <b className="tabular-nums">{fmtQ(rubro.saldo_pendiente)}</b>
+        </p>
+      </div>
+
+      <div>
+        <Label htmlFor="edit-monto" className="mb-1 block">
+          Monto
+        </Label>
+        <Input
+          disabled={editar.isPending}
+          id="edit-monto"
+          type="number"
+          min="0"
+          step="0.01"
+          value={monto}
+          onChange={(e) => setMonto(e.target.value)}
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="edit-desc" className="mb-1 block">
+          Descripción
+        </Label>
+        <Input
+          disabled={editar.isPending}
+          id="edit-desc"
+          value={descripcion}
+          onChange={(e) => setDescripcion(e.target.value)}
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="edit-motivo" className="mb-1 block">
+          Motivo <span className="text-red-600" aria-hidden="true">*</span>
+        </Label>
+        <Input
+          disabled={editar.isPending}
+          id="edit-motivo"
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          required
+          aria-required="true"
+          placeholder="Ej: Corrección del monto acordado con el cliente"
+        />
+        <p className="mt-1 text-xs text-gray-500">
+          Obligatorio. Queda registrado en el historial del rubro.
+        </p>
+      </div>
+
+      {error && <ErrorEnLinea mensaje={error} />}
+
+      <DialogFooter className="gap-2">
+        <Button
+          variant="outline"
+          className="bg-gray-600 hover:bg-gray-700 text-white font-semibold border-gray-600"
+          disabled={editar.isPending}
+          onClick={onVolver}
+        >
+          Cancelar
+        </Button>
+        {/*
+          Deshabilitado sin motivo: el texto de ayuda del campo, justo arriba,
+          ya dice por qué, así que el botón apagado no queda mudo.
+        */}
+        <Button
+          onClick={submit}
+          className="bg-blue-600 hover:bg-blue-700 text-white"
+          disabled={editar.isPending || !motivo.trim()}
+        >
+          {editar.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          Guardar cambios
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- Anular --- */
+
+/**
+ * Anular un rubro creado por error.
+ *
+ * Es la única salida real: un rubro no se puede borrar (se llevaría el
+ * historial de cobros) ni editar a cero (la política de montos lo rechaza), y
+ * mientras siga vivo bloquea el alta del rubro correcto de ese mismo tipo (el
+ * backend rechaza un segundo rubro vivo del mismo crédito y tipo). Sin esta
+ * pantalla el arreglo era SQL a mano en producción.
+ *
+ * Como es irreversible, la vista dice antes de ejecutar qué queda después:
+ * deja de cobrarse, NO se borra —el monto original sigue ahí y la anulación
+ * queda asentada con su motivo— y recién entonces se puede crear el rubro
+ * correcto del mismo tipo. El motivo es obligatorio (el backend responde 400
+ * si viene en blanco) y el botón está apagado hasta que haya uno.
+ */
+function VistaAnular({
+  rubro,
+  onVolver,
+  onAnulado,
+  onGuardando,
+}: {
+  rubro: RubroCredito;
+  onVolver: () => void;
+  /** Puede devolver promesa: el refresco de la lista se espera antes de volver. */
+  /** Recibe la fila anulada que devolvió el POST (saldo 0, inactiva, anulada). */
+  onAnulado: (anulado: RubroGuardado | null) => void | Promise<void>;
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
+}) {
+  const [motivo, setMotivo] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const anular = useMutation({
+    mutationFn: () => anularRubro(rubro.rubro_id, { motivo: motivo.trim() }),
+    onSuccess: (anulado) => {
+      toast.success("Rubro anulado");
+      // Se DEVUELVE la promesa (ver el mismo comentario en `VistaCrear`): la
+      // vista se queda apagada hasta que la lista traiga el rubro ya anulado, en
+      // vez de volver a una fila que todavía se ofrece para anular de nuevo.
+      return onAnulado(anulado);
+    },
+    onError: (e) => {
+      // 403 = no es ADMIN. 409 = el rubro ya estaba anulado o completado (dos
+      // pestañas, o alguien lo anuló mientras esta vista estaba abierta). Los
+      // dos traen un `message` redactado y se muestra tal cual, acá mismo: un
+      // toast se iría mientras el usuario lo está leyendo, y ésta es la única
+      // acción del modal que no se puede deshacer.
+      setError(getApiErrorMessage(e, "No se pudo anular el rubro"));
+    },
+  });
+
+  useReportarGuardando(anular.isPending, onGuardando);
+
+  const submit = () => {
+    setError(null);
+    if (!motivo.trim()) {
+      return setError("El motivo es obligatorio: queda en el historial del rubro");
+    }
+    anular.mutate();
+  };
+
+  return (
+    <div className="flex flex-col gap-3 text-gray-800">
+      <BotonVolver onClick={onVolver} disabled={anular.isPending} />
+
+      <div>
+        <h3 className="flex items-center gap-2 font-bold text-red-700">
+          <Ban className="w-5 h-5" />
+          Anular rubro
+        </h3>
+        <p className="text-sm text-gray-600">
+          {rubro.tipo_nombre}
+          {rubro.descripcion ? ` · ${rubro.descripcion}` : ""} · monto{" "}
+          <b className="tabular-nums">{fmtQ(rubro.monto_original)}</b> · abonado{" "}
+          <b className="tabular-nums">{fmtQ(rubro.abonado)}</b> · saldo{" "}
+          <b className="tabular-nums">{fmtQ(rubro.saldo_pendiente)}</b>
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <p className="flex items-start gap-2 font-semibold">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          Anular es irreversible: no hay cómo revertirlo desde el sistema.
+        </p>
+        <ul className="list-disc pl-9 space-y-1">
+          <li>
+            El saldo de{" "}
+            <b className="tabular-nums">{fmtQ(rubro.saldo_pendiente)}</b> queda en
+            cero y el rubro <b>deja de cobrarse</b>.
+          </li>
+          <li>
+            El rubro <b>no se borra</b>: sigue en la lista y en el historial con
+            su monto original de{" "}
+            <b className="tabular-nums">{fmtQ(rubro.monto_original)}</b>, y la
+            anulación queda asentada con tu motivo.
+          </li>
+          <li>
+            Después de anularlo vas a poder <b>crear otro rubro del mismo tipo</b>
+            {" "}para este crédito.
+          </li>
+        </ul>
+      </div>
+
+      <div>
+        <Label htmlFor="anular-motivo" className="mb-1 block">
+          Motivo <span className="text-red-600" aria-hidden="true">*</span>
+        </Label>
+        <Input
+          disabled={anular.isPending}
+          id="anular-motivo"
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          required
+          aria-required="true"
+          placeholder="Ej: Se cargó por error, el tipo correcto era calcomanía"
+        />
+        <p className="mt-1 text-xs text-gray-500">
+          Obligatorio. Es lo único que después explica por qué este cobro se dio
+          de baja.
+        </p>
+      </div>
+
+      {error && <ErrorEnLinea mensaje={error} />}
+
+      <DialogFooter className="gap-2">
+        <Button
+          variant="outline"
+          className="bg-gray-600 hover:bg-gray-700 text-white font-semibold border-gray-600"
+          disabled={anular.isPending}
+          onClick={onVolver}
+        >
+          Cancelar
+        </Button>
+        <Button
+          onClick={submit}
+          className="bg-red-600 hover:bg-red-700 text-white"
+          disabled={anular.isPending || !motivo.trim()}
+        >
+          {anular.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          Anular rubro
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------- Crear tipo --- */
+
+function VistaCrearTipo({
+  volverA,
+  onVolver,
+  onCreado,
+  onGuardando,
+}: {
+  /** Desde dónde se llegó; solo cambia el texto del botón de volver. */
+  volverA: "crear" | "tipos";
+  onVolver: () => void;
+  onCreado: (tipo: TipoRubro) => void;
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [nombre, setNombre] = useState("");
+  const [descripcion, setDescripcion] = useState("");
+  const [obligatorio, setObligatorio] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const crear = useMutation({
+    mutationFn: () =>
+      crearTipoRubro({
+        nombre: nombre.trim(),
+        ...(descripcion.trim() ? { descripcion: descripcion.trim() } : {}),
+        obligatorio,
+      }),
+    onSuccess: (tipo) => {
+      toast.success("Tipo de rubro creado");
+      // `invalidateQueries` NO alcanza acá: marca la query como obsoleta pero
+      // sólo la vuelve a pedir si está MONTADA en ese momento. El desplegable
+      // de "crear" y el listado de administración pueden estar desmontados en
+      // el instante del POST (por ejemplo, viniendo de "tipos"), así que
+      // esperar el `invalidateQueries` no garantiza tener el tipo nuevo en
+      // caché al volver — hay que sembrarlo a mano con lo que devolvió el
+      // propio POST. El backend siempre crea el tipo activo (no hay forma de
+      // pedirlo inactivo), así que entra en las dos variantes de la query: la
+      // que sólo trae activos (el desplegable de "crear") y la que trae todo
+      // (la administración de tipos). El orden replica el `ORDER BY nombre`
+      // del backend para no desordenar la lista.
+      const insertarOrdenado = (actuales: TipoRubro[] | undefined) => {
+        /**
+         * Sin lista en caché NO se siembra, y es el mismo defecto que ya mordió
+         * en la lista de rubros: convertir `undefined` en `[]` deja el tipo
+         * recién creado como si fuera el catálogo COMPLETO.
+         *
+         * Pasa de verdad con `[QK_TIPOS, true]` —la variante que trae también
+         * los inactivos— cuando el tipo se crea desde el formulario de rubro sin
+         * haber abierto nunca la administración: al entrar, la pantalla arranca
+         * en éxito mostrando un solo tipo y escondiendo todos los demás hasta que
+         * el refetch termine. Y si ese refetch está pausado o lento, el admin
+         * trabaja sobre un catálogo inventado.
+         *
+         * Devolver `undefined` deja la query como estaba, así que el refetch
+         * siguiente trae el catálogo entero.
+         */
+        if (!actuales) return actuales;
+
+        const lista = [...actuales];
+        if (lista.some((t) => t.tipo_id === tipo.tipo_id)) return lista;
+        const idx = lista.findIndex((t) => t.nombre.localeCompare(tipo.nombre) > 0);
+        if (idx === -1) lista.push(tipo);
+        else lista.splice(idx, 0, tipo);
+        return lista;
+      };
+      queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, false], insertarOrdenado);
+      queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, true], insertarOrdenado);
+      // Se deja además por si hay otra pestaña/instancia con la query inactiva
+      // en memoria: no es de lo que depende esta pantalla, pero sirve para
+      // refrescar a los demás.
+      queryClient.invalidateQueries({ queryKey: [QK_TIPOS] });
+      onCreado(tipo);
+    },
+    onError: (e) => {
+      setError(getApiErrorMessage(e, "No se pudo crear el tipo de rubro"));
+    },
+  });
+
+  useReportarGuardando(crear.isPending, onGuardando);
+
+  const submit = () => {
+    setError(null);
+    if (!nombre.trim()) return setError("El nombre del tipo es obligatorio");
+    crear.mutate();
+  };
+
+  return (
+    <div className="flex flex-col gap-3 text-gray-800">
+      {/*
+        Apagado mientras el POST viaja, igual que el pie. Si se vuelve a mitad
+        del alta, el formulario de crear rubro queda usable y, cuando la
+        petición termina, `onCreado` le REEMPLAZA el tipo seleccionado por el
+        recién creado: alguien que ya había elegido otro tipo se lo ve cambiar
+        solo y da de alta el rubro bajo el concepto equivocado.
+      */}
+      <BotonVolver onClick={onVolver} disabled={crear.isPending}>
+        {volverA === "crear" ? "Volver a agregar rubro" : "Volver a los tipos"}
+      </BotonVolver>
+
+      <h3 className="flex items-center gap-2 font-bold text-purple-700">
+        <PlusCircle className="w-5 h-5" />
+        Crear tipo de rubro
+      </h3>
+
+      <div>
+        <Label htmlFor="tipo-nombre" className="mb-1 block">
+          Nombre
+        </Label>
+        <Input
+          disabled={crear.isPending}
+          id="tipo-nombre"
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+          placeholder="Ej: Tarjeta de circulación"
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="tipo-desc" className="mb-1 block">
+          Descripción <span className="text-gray-400 font-normal">(opcional)</span>
+        </Label>
+        <Input
+          disabled={crear.isPending}
+          id="tipo-desc"
+          value={descripcion}
+          onChange={(e) => setDescripcion(e.target.value)}
+        />
+      </div>
+
+      <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+        <input
+          type="checkbox"
+            disabled={crear.isPending}
+          className="h-4 w-4 accent-purple-600"
+          checked={obligatorio}
+          onChange={(e) => setObligatorio(e.target.checked)}
+        />
+        Obligatorio
+      </label>
+      <p className="-mt-1 text-xs text-gray-500">
+        Un tipo obligatorio se puede cobrar aunque el crédito esté en mora, y
+        solo lo puede usar un administrador.
+      </p>
+
+      {error && <ErrorEnLinea mensaje={error} />}
+
+      <DialogFooter className="gap-2">
+        <Button
+          variant="outline"
+          className="bg-gray-600 hover:bg-gray-700 text-white font-semibold border-gray-600"
+          disabled={crear.isPending}
+          onClick={onVolver}
+        >
+          Cancelar
+        </Button>
+        <Button
+          onClick={submit}
+          className="bg-purple-600 hover:bg-purple-700 text-white"
+          disabled={crear.isPending}
+        >
+          {crear.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          Crear tipo
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+/* --------------------------------------------------- Administrar tipos --- */
+
+/**
+ * Catálogo de tipos de rubro: editar, desactivar/reactivar y borrar. Solo
+ * ADMIN, y solo se llega desde "Agregar rubro", que es donde el usuario nota
+ * que al catálogo le falta o le sobra algo.
+ *
+ * Acá se piden los INACTIVOS también (`getTiposRubro(true)`): administrar un
+ * catálogo sin ver lo que está apagado deja tipos irrecuperables desde la UI.
+ * El desplegable de creación sigue pidiendo solo los activos.
+ *
+ * Borrar vs desactivar: el backend borra de verdad solo si el tipo no tiene
+ * rubros, y si los tiene responde 409 —arrastrar el borrado se llevaría el
+ * historial de esos cobros—. Ese 409 no es un error a tapar sino la respuesta
+ * útil: se muestra el mensaje del backend y se ofrece desactivar, que consigue
+ * lo que el usuario realmente quería (dejar de ofrecerlo) sin perder nada.
+ */
+function VistaAdminTipos({
+  onVolver,
+  onCrearTipo,
+  onEditar,
+  onGuardando,
+}: {
+  onVolver: () => void;
+  onCrearTipo: () => void;
+  onEditar: (tipo: TipoRubro) => void;
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  /** Tipo con el borrado pedido y todavía sin confirmar. */
+  const [confirmando, setConfirmando] = useState<number | null>(null);
+  /**
+   * 409 del backend: el tipo tiene rubros. Se guarda por tipo junto con su
+   * mensaje para ofrecer el desactivar ahí mismo, en la fila.
+   */
+  const [bloqueado, setBloqueado] = useState<{ tipoId: number; mensaje: string } | null>(
+    null
+  );
+  const [error, setError] = useState<string | null>(null);
+  /** Tipo sobre el que corre una mutación, para apagar solo esa fila. */
+  const [ocupado, setOcupado] = useState<number | null>(null);
+
+  const tiposQuery = useQuery({
+    queryKey: [QK_TIPOS, true],
+    queryFn: () => getTiposRubro(true),
+  });
+
+  const tipos = tiposQuery.data ?? [];
+
+  const refrescar = () =>
+    queryClient.invalidateQueries({ queryKey: [QK_TIPOS] });
+
+  const eliminar = useMutation({
+    mutationFn: (tipoId: number) => eliminarTipoRubro(tipoId),
+    onSuccess: async (_d, tipoId) => {
+      toast.success("Tipo de rubro eliminado");
+      setConfirmando(null);
+      setBloqueado((b) => (b?.tipoId === tipoId ? null : b));
+      // Mismo defecto que al crear un tipo (ver VistaCrearTipo): esta vista
+      // está montada con [QK_TIPOS, true] y se refresca sola con el
+      // `invalidateQueries` de abajo, pero el desplegable de "crear" —con
+      // [QK_TIPOS, false]— puede estar desmontado y quedarse con el tipo ya
+      // borrado. Se saca a mano de las dos variantes.
+      const sacar = (actuales: TipoRubro[] | undefined) =>
+        actuales?.filter((t) => t.tipo_id !== tipoId);
+      queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, false], sacar);
+      queryClient.setQueryData<TipoRubro[]>([QK_TIPOS, true], sacar);
+      await refrescar();
+    },
+    onError: (e, tipoId) => {
+      const mensaje = getApiErrorMessage(e, "No se pudo eliminar el tipo de rubro");
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      setConfirmando(null);
+      if (status === 409) {
+        // Tiene rubros: el camino correcto es desactivarlo, no borrarlo.
+        setBloqueado({ tipoId, mensaje });
+        setError(null);
+      } else {
+        setError(mensaje);
+      }
+    },
+    onSettled: () => setOcupado(null),
+  });
+
+  const cambiarActivo = useMutation({
+    mutationFn: ({ tipoId, activo }: { tipoId: number; activo: boolean }) =>
+      editarTipoRubro(tipoId, { activo }),
+    onSuccess: async (guardado, { tipoId, activo }) => {
+      toast.success(activo ? "Tipo reactivado" : "Tipo desactivado");
+      setBloqueado((b) => (b?.tipoId === tipoId ? null : b));
+      setError(null);
+      /**
+       * Se siembra con la fila que DEVOLVIÓ el PUT, por el mismo helper que usa
+       * el formulario de edición.
+       *
+       * Acá había una copia de esa lógica que armaba la fila a mano: para
+       * desactivar parchaba `{ ...t, activo }`, y para reactivar la reconstruía
+       * desde el snapshot `tipos` que ya estaba en memoria. Las dos cosas
+       * fabrican una versión propia en vez de usar la del servidor, y eso pierde
+       * lo que otro administrador haya cambiado mientras tanto: si alguien
+       * renombró el tipo o le movió el `obligatorio` justo antes, el backend lo
+       * conserva y lo devuelve, pero la caché se quedaba con el valor viejo hasta
+       * que terminara el refetch de fondo.
+       *
+       * `sincronizarTipoEditado` ya sabe lo único que este bloque hacía de más:
+       * sacar el tipo de la lista de sólo-activos cuando vuelve inactivo.
+       */
+      // Sin `refrescar()` detrás: era un `invalidateQueries([QK_TIPOS])` pelado, y
+      // el helper ya hace ese mismo invalidate con `refetchType: "all"`, que
+      // además alcanza a las queries desmontadas. Dejarlo duplicaba el refetch.
+      await sincronizarTipoEditado(queryClient, tipoId, guardado);
+    },
+    onError: (e) => {
+      setError(getApiErrorMessage(e, "No se pudo cambiar el estado del tipo"));
+    },
+    onSettled: () => setOcupado(null),
+  });
+
+  const mutando = eliminar.isPending || cambiarActivo.isPending;
+
+  /**
+   * Reporta al guard del diálogo, igual que las otras cuatro vistas que
+   * escriben — ésta era la única que no lo hacía.
+   *
+   * Sin esto, con un borrado en vuelo el modal se podía cerrar por la X, Escape
+   * o el clic afuera, y la vista se desmontaba. Los callbacks de la mutación
+   * igual corren después del desmontaje, así que el `setBloqueado` del 409
+   * —el que explica "este tipo tiene N rubros, desactivalo en su lugar" y trae
+   * el botón para hacerlo— se aplicaba sobre un componente muerto y se perdía
+   * en silencio. Y como el ÉXITO sí toastea, la ausencia de toast se lee como
+   * "todavía está trabajando": el administrador se queda creyendo que el tipo
+   * se borró.
+   */
+  useReportarGuardando(mutando, onGuardando);
+
+  return (
+    <div className="flex flex-col gap-3 text-gray-800">
+      {/*
+        Apagados los dos mientras muta, y no es redundante con el guard del
+        diálogo: `useReportarGuardando` suelta el guard AL DESMONTARSE, así que
+        irse por acá adentro lo desactiva solo y deja la X y Escape vivas otra
+        vez. El candado sin esto queda con la llave puesta.
+      */}
+      <BotonVolver onClick={onVolver} disabled={mutando}>
+        Volver a agregar rubro
+      </BotonVolver>
+
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div>
+          <h3 className="flex items-center gap-2 font-bold text-purple-700">
+            <Settings2 className="w-5 h-5" />
+            Administrar tipos de rubro
+          </h3>
+          <p className="text-sm text-gray-600">
+            El catálogo es común a todos los créditos: lo que se cambie acá
+            aplica a los rubros que se creen de ahora en adelante.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          onClick={onCrearTipo}
+          disabled={mutando}
+          className="bg-purple-600 hover:bg-purple-700 text-white font-semibold"
+        >
+          <PlusCircle className="w-4 h-4 mr-2" />
+          Crear tipo
+        </Button>
+      </div>
+
+      {error && <ErrorEnLinea mensaje={error} />}
+
+      {tiposQuery.isLoading ? (
+        <div className="flex items-center justify-center gap-2 py-10 text-purple-600 font-semibold">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          Cargando tipos...
+        </div>
+      ) : tiposQuery.isError ? (
+        <div className="flex flex-col items-center gap-3 py-8">
+          <p className="flex items-center gap-2 text-red-600 font-semibold text-center">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            {getApiErrorMessage(
+              tiposQuery.error,
+              "No se pudieron cargar los tipos de rubro"
+            )}
+          </p>
+          <Button variant="outline" onClick={() => tiposQuery.refetch()}>
+            Reintentar
+          </Button>
+        </div>
+      ) : tipos.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-gray-200 bg-gray-50 py-10 text-center">
+          <Receipt className="w-6 h-6 text-gray-400" />
+          <p className="font-semibold text-gray-700">
+            Todavía no hay tipos de rubro configurados.
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-purple-50">
+                <TableHead className="text-purple-900 font-bold">Nombre</TableHead>
+                <TableHead className="text-purple-900 font-bold">Descripción</TableHead>
+                <TableHead className="text-purple-900 font-bold">Obligatorio</TableHead>
+                <TableHead className="text-purple-900 font-bold">Estado</TableHead>
+                <TableHead className="text-purple-900 font-bold text-right">
+                  Acciones
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tipos.map((t) => {
+                // `filaOcupada` YA NO gobierna los `disabled`: sólo dice dónde va
+                // el spinner. `ocupado` es un escalar y se repunta a la fila
+                // nueva en el mismo clic, así que con él como candado la fila
+                // anterior se re-habilitaba en el instante en que arrancaba la
+                // siguiente —ni siquiera hacía falta esperar a que settleara— y
+                // se podían disparar dos mutaciones del catálogo a la vez. La
+                // base las serializa con su `FOR UPDATE` y la segunda rebota con
+                // 404, así que no se corrompe nada; lo que quedaba era pantalla
+                // contradictoria: el toast verde de "Tipo eliminado" al lado del
+                // error rojo "El tipo de rubro no existe", sobre la misma acción.
+                //
+                // Se apaga TODO mientras cualquiera de las dos mutaciones corra.
+                // Es un catálogo de una docena de filas con operaciones de
+                // milisegundos: nadie necesita borrar dos tipos a la vez, y
+                // serializar no cuesta nada. Un conjunto de ids en vuelo no
+                // alcanzaría solo: `error`, `bloqueado` y `confirmando` también
+                // son escalares y se pisarían entre filas igual.
+                const filaOcupada = mutando && ocupado === t.tipo_id;
+                const enConfirmacion = confirmando === t.tipo_id;
+                const avisoBloqueo =
+                  bloqueado?.tipoId === t.tipo_id ? bloqueado.mensaje : null;
+                return (
+                  <TableRow
+                    key={t.tipo_id}
+                    className={t.activo ? "bg-white" : "bg-gray-50/70 text-gray-500"}
+                  >
+                    <TableCell className="font-semibold text-gray-900">
+                      {t.nombre}
+                    </TableCell>
+                    <TableCell className="text-gray-700">
+                      {t.descripcion || "--"}
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${
+                          t.obligatorio
+                            ? "bg-red-100 text-red-800 border-red-200"
+                            : "bg-gray-100 text-gray-600 border-gray-200"
+                        }`}
+                      >
+                        {t.obligatorio ? "Obligatorio" : "Opcional"}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-bold ${
+                          t.activo
+                            ? "bg-green-100 text-green-800 border-green-200"
+                            : "bg-gray-100 text-gray-600 border-gray-200"
+                        }`}
+                      >
+                        {t.activo ? "Activo" : "Inactivo"}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col items-end gap-2">
+                        {enConfirmacion ? (
+                          // Confirmar en la misma fila y no en otro Dialog:
+                          // apilar modales de Radix es justo lo que este
+                          // componente evita.
+                          <div className="flex items-center gap-2 flex-wrap justify-end">
+                            <span className="text-xs font-semibold text-red-700">
+                              ¿Eliminar “{t.nombre}”?
+                            </span>
+                            <Button
+                              size="sm"
+                              className="bg-red-600 hover:bg-red-700 text-white"
+                              disabled={mutando}
+                              onClick={() => {
+                                setOcupado(t.tipo_id);
+                                eliminar.mutate(t.tipo_id);
+                              }}
+                            >
+                              {filaOcupada && (
+                                <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                              )}
+                              Sí, eliminar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={mutando}
+                              onClick={() => setConfirmando(null)}
+                            >
+                              Cancelar
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-end gap-2 flex-wrap">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="bg-blue-600 hover:bg-blue-700 text-white border-blue-600"
+                              disabled={mutando}
+                              onClick={() => onEditar(t)}
+                            >
+                              <Pencil className="w-3.5 h-3.5 mr-1" />
+                              Editar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="bg-gray-600 hover:bg-gray-700 text-white border-gray-600"
+                              disabled={mutando}
+                              onClick={() => {
+                                setOcupado(t.tipo_id);
+                                cambiarActivo.mutate({
+                                  tipoId: t.tipo_id,
+                                  activo: !t.activo,
+                                });
+                              }}
+                            >
+                              {/*
+                                Spinner en ESTE botón, que era el único que muta
+                                sin tenerlo. Antes el indicador de fila era
+                                implícito —sólo la fila que trabajaba quedaba
+                                apagada—, y al pasar el candado a `mutando` se
+                                apagan todas: sin esto, un Desactivar/Reactivar
+                                no muestra en ninguna parte qué está pasando.
+                                `filaOcupada` sigue siendo el que sabe CUÁL es la
+                                fila, que es para lo único que quedó.
+                              */}
+                              {filaOcupada ? (
+                                <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                              ) : (
+                                <Power className="w-3.5 h-3.5 mr-1" />
+                              )}
+                              {t.activo ? "Desactivar" : "Reactivar"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="bg-red-600 hover:bg-red-700 text-white border-red-600"
+                              disabled={mutando}
+                              onClick={() => {
+                                setError(null);
+                                setBloqueado(null);
+                                setConfirmando(t.tipo_id);
+                              }}
+                            >
+                              <Trash2 className="w-3.5 h-3.5 mr-1" />
+                              Eliminar
+                            </Button>
+                          </div>
+                        )}
+
+                        {avisoBloqueo && (
+                          <div className="flex flex-col items-end gap-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-left">
+                            <p className="flex items-start gap-2 text-xs text-amber-800">
+                              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                              {avisoBloqueo}
+                            </p>
+                            {t.activo && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="bg-amber-600 hover:bg-amber-700 text-white border-amber-600"
+                                disabled={mutando}
+                                onClick={() => {
+                                  setOcupado(t.tipo_id);
+                                  cambiarActivo.mutate({
+                                    tipoId: t.tipo_id,
+                                    activo: false,
+                                  });
+                                }}
+                              >
+                                {filaOcupada && (
+                                  <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                )}
+                                Desactivarlo en su lugar
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      <p className="text-xs text-gray-500">
+        Un tipo <b>inactivo</b> deja de ofrecerse al crear rubros, pero los
+        rubros ya creados con él siguen intactos. <b>Eliminar</b> solo funciona
+        con tipos que nunca se usaron.
+      </p>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------- Editar tipo rubro --- */
+
+function VistaEditarTipo({
+  tipo,
+  onVolver,
+  onGuardado,
+  onGuardando,
+}: {
+  tipo: TipoRubro;
+  onVolver: () => void;
+  onGuardado: () => void;
+  /** Avisa al modal que hay una escritura en curso, para que no se pueda cerrar. */
+  onGuardando?: (v: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [nombre, setNombre] = useState(tipo.nombre);
+  const [descripcion, setDescripcion] = useState(tipo.descripcion ?? "");
+  const [obligatorio, setObligatorio] = useState(tipo.obligatorio);
+  const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Igual que el editor de rubros: viaja sólo lo que se tocó.
+   *
+   * Acá el campo que más duele es `obligatorio`, porque es un booleano y se
+   * reenviaba sin que nadie lo mirara: A marca el tipo como obligatorio, B —con
+   * el formulario abierto desde antes— cambia sólo la descripción y reenvía su
+   * `obligatorio: false`. Lo de A se deshacía, y en la pantalla de B nada
+   * delataba que tocó esa casilla.
+   *
+   * Vaciar la descripción se sigue mandando, que es cómo se borra: la cadena
+   * vacía contra una descripción que existía es un cambio real.
+   */
+  const patchTipo = camposTipoEditados(
+    { nombre, descripcion, obligatorio },
+    { nombre: tipo.nombre, descripcion: tipo.descripcion ?? null, obligatorio: tipo.obligatorio }
+  );
+
+  const guardar = useMutation({
+    mutationFn: () => editarTipoRubro(tipo.tipo_id, patchTipo),
+    onSuccess: async (guardado) => {
+      toast.success("Tipo de rubro actualizado");
+      // Mismo defecto que al crear o borrar un tipo (ver `VistaCrearTipo`):
+      // esta vista REEMPLAZA al listado, así que las dos queries de tipos
+      // están desmontadas y un `invalidateQueries` pelado sólo las marcaba
+      // obsoletas. Volver al listado con el nombre viejo no es cosmético: si
+      // el administrador reabre la fila antes del refetch, el formulario nace
+      // con lo viejo y el PUT siguiente revierte esta misma edición.
+      //
+      // Y se siembra con la fila que DEVOLVIÓ el PUT, no con este formulario.
+      // Desde que el patch es parcial, el servidor conserva bien lo que otro
+      // administrador cambió — pero sembrar con el formulario propio vuelve a
+      // pintar el valor viejo de los campos que no se tocaron, y el admin ve un
+      // `obligatorio` que la base ya no tiene. La respuesta del endpoint es la
+      // única versión autoritativa.
+      // Va la fila ENTERA, no una proyección de tres campos: el PUT también
+      // contesta el `activo`, y si otro administrador desactivó el tipo mientras
+      // este formulario estaba abierto, proyectarlo lo volvía a pintar activo.
+      await sincronizarTipoEditado(queryClient, tipo.tipo_id, guardado);
+      onGuardado();
+    },
+    onError: (e) => {
+      setError(getApiErrorMessage(e, "No se pudo editar el tipo de rubro"));
+    },
+  });
+
+  useReportarGuardando(guardar.isPending, onGuardando);
+
+  const submit = () => {
+    setError(null);
+    if (!nombre.trim()) return setError("El nombre del tipo es obligatorio");
+    // Sin cambios no se manda: igual que en el editor de rubros.
+    if (Object.keys(patchTipo).length === 0) {
+      return setError("No cambiaste nada");
+    }
+    guardar.mutate();
+  };
+
+  return (
+    <div className="flex flex-col gap-3 text-gray-800">
+      <BotonVolver onClick={onVolver} disabled={guardar.isPending}>
+        Volver a los tipos
+      </BotonVolver>
+
+      <div>
+        <h3 className="flex items-center gap-2 font-bold text-blue-700">
+          <Pencil className="w-5 h-5" />
+          Editar tipo de rubro
+        </h3>
+        <p className="text-sm text-gray-600">
+          Los rubros ya creados con este tipo conservan su monto y su
+          descripción; acá solo cambia el catálogo.
+        </p>
+      </div>
+
+      <div>
+        <Label htmlFor="edit-tipo-nombre" className="mb-1 block">
+          Nombre
+        </Label>
+        <Input
+          disabled={guardar.isPending}
+          id="edit-tipo-nombre"
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="edit-tipo-desc" className="mb-1 block">
+          Descripción <span className="text-gray-400 font-normal">(opcional)</span>
+        </Label>
+        <Input
+          disabled={guardar.isPending}
+          id="edit-tipo-desc"
+          value={descripcion}
+          onChange={(e) => setDescripcion(e.target.value)}
+        />
+      </div>
+
+      <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+        <input
+          type="checkbox"
+            disabled={guardar.isPending}
+          className="h-4 w-4 accent-purple-600"
+          checked={obligatorio}
+          onChange={(e) => setObligatorio(e.target.checked)}
+        />
+        Obligatorio
+      </label>
+      <p className="-mt-1 text-xs text-gray-500">
+        Un tipo obligatorio se puede cobrar aunque el crédito esté en mora, y
+        solo lo puede usar un administrador.
+      </p>
+
+      {error && <ErrorEnLinea mensaje={error} />}
+
+      <DialogFooter className="gap-2">
+        <Button
+          variant="outline"
+          className="bg-gray-600 hover:bg-gray-700 text-white font-semibold border-gray-600"
+          disabled={guardar.isPending}
+          onClick={onVolver}
+        >
+          Cancelar
+        </Button>
+        <Button
+          onClick={submit}
+          className="bg-blue-600 hover:bg-blue-700 text-white"
+          disabled={guardar.isPending}
+        >
+          {guardar.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+          Guardar cambios
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ Historial --- */
+
+function VistaHistorial({
+  rubro,
+  onVolver,
+}: {
+  rubro: RubroCredito;
+  onVolver: () => void;
+}) {
+  const historialQuery = useQuery({
+    queryKey: [QK_HISTORIAL, rubro.rubro_id],
+    queryFn: () => getHistorialRubro(rubro.rubro_id),
+  });
+
+  const eventos = historialQuery.data ?? [];
+
+  return (
+    <div className="flex flex-col gap-3">
+      <BotonVolver onClick={onVolver} />
+
+      <div>
+        <h3 className="flex items-center gap-2 font-bold text-gray-800">
+          <History className="w-5 h-5" />
+          Historial del rubro
+        </h3>
+        <p className="text-sm text-gray-600">
+          {rubro.tipo_nombre}
+          {rubro.descripcion ? ` · ${rubro.descripcion}` : ""}
+        </p>
+      </div>
+
+      {historialQuery.isLoading ? (
+        <div className="flex items-center justify-center gap-2 py-10 text-gray-600 font-semibold">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          Cargando historial...
+        </div>
+      ) : historialQuery.isError ? (
+        <div className="flex flex-col items-center gap-3 py-8">
+          <p className="flex items-center gap-2 text-red-600 font-semibold text-center">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            {getApiErrorMessage(historialQuery.error, "No se pudo cargar el historial")}
+          </p>
+          <Button variant="outline" onClick={() => historialQuery.refetch()}>
+            Reintentar
+          </Button>
+        </div>
+      ) : eventos.length === 0 ? (
+        <div className="py-8 text-center text-gray-500">
+          Este rubro todavía no tiene eventos registrados.
+        </div>
+      ) : (
+        <div className="max-h-[55vh] overflow-y-auto divide-y divide-gray-100 rounded-lg border border-gray-100">
+          {eventos.map((ev) => (
+            <div key={ev.historial_id} className="flex flex-col gap-1 bg-white px-4 py-2.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center rounded-md border border-gray-200 bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-700">
+                  {ev.tipo_evento}
+                </span>
+                <span className="inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                  {ev.origen}
+                </span>
+                <span className="text-gray-400 text-xs ml-auto flex items-center gap-3 flex-wrap justify-end">
+                  <span className="flex items-center gap-1" title={ev.usuario_email ?? undefined}>
+                    <UserRound className="w-3 h-3 shrink-0" />
+                    {autorDe(ev)}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Clock className="w-3 h-3 shrink-0" />
+                    {fmtFechaHoraGT(ev.created_at)}
+                  </span>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-4 flex-wrap text-sm">
+                {(ev.monto_anterior !== null || ev.monto_nuevo !== null) && (
+                  <span className="text-gray-700">
+                    Monto:{" "}
+                    <span className="text-gray-400 line-through tabular-nums">
+                      {ev.monto_anterior === null ? "—" : fmtQ(ev.monto_anterior)}
+                    </span>{" "}
+                    &rarr;{" "}
+                    <span className="font-semibold tabular-nums">
+                      {ev.monto_nuevo === null ? "—" : fmtQ(ev.monto_nuevo)}
+                    </span>
+                  </span>
+                )}
+                {(ev.saldo_anterior !== null || ev.saldo_nuevo !== null) && (
+                  <span className="text-gray-700">
+                    Saldo:{" "}
+                    <span className="text-gray-400 line-through tabular-nums">
+                      {ev.saldo_anterior === null ? "—" : fmtQ(ev.saldo_anterior)}
+                    </span>{" "}
+                    &rarr;{" "}
+                    <span className="font-semibold tabular-nums">
+                      {ev.saldo_nuevo === null ? "—" : fmtQ(ev.saldo_nuevo)}
+                    </span>
+                  </span>
+                )}
+              </div>
+
+              {ev.motivo && <p className="text-xs text-gray-500 italic">“{ev.motivo}”</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

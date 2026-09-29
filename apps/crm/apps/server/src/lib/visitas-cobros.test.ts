@@ -170,37 +170,6 @@ describe("erroresRegistroVisita", () => {
 		).toBeNull();
 	});
 
-	it("la visita al trabajo exige aceptar los lineamientos (CB-038)", () => {
-		expect(
-			erroresRegistroVisita(registro({ tipo: "trabajo" }), AHORA),
-		).toContain("lineamientos");
-		expect(
-			erroresRegistroVisita(
-				registro({ tipo: "trabajo", lineamientosAceptados: true }),
-				AHORA,
-			),
-		).toBeNull();
-	});
-
-	it("el próximo paso va a futuro y a no más de 90 días", () => {
-		expect(
-			erroresRegistroVisita(
-				registro({
-					fechaProximoPaso: new Date(AHORA.getTime() - 3 * 86_400_000),
-				}),
-				AHORA,
-			),
-		).toContain("ya pasó");
-		expect(
-			erroresRegistroVisita(
-				registro({
-					fechaProximoPaso: new Date(AHORA.getTime() + 91 * 86_400_000),
-				}),
-				AHORA,
-			),
-		).toContain("90 días");
-	});
-
 	it("fotos repetidas no pasan, y el máximo lo pone zod", () => {
 		const foto = {
 			key: `cobros/visitas/${CASO}/a.jpg`,
@@ -271,7 +240,6 @@ describe("textoGestionVisita", () => {
 					resultado: "pago_parcial_promesa",
 					montoRecibido: 1250,
 					comentarios: "Pagó en efectivo en la garita",
-					lineamientosAceptados: true,
 				}),
 			),
 		).toBe(

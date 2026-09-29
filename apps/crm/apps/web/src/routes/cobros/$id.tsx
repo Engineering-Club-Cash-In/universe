@@ -2069,8 +2069,8 @@ function RouteComponent() {
 													</p>
 													<p className="text-muted-foreground text-xs">
 														{datosLaborales.data?.empresa
-															? `${datosLaborales.data.empresa}. Con los lineamientos para no exponer al cliente.`
-															: "Con los lineamientos para no exponer al cliente frente a su trabajo."}
+															? `${datosLaborales.data.empresa}: pago, promesa o entrega de la unidad.`
+															: "A la oficina o negocio del cliente: pago, promesa o entrega de la unidad."}
 													</p>
 												</div>
 											</DropdownMenuItem>

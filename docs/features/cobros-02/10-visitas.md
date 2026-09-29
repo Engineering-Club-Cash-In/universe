@@ -15,7 +15,7 @@ propio botón:
 | Estado | Qué pasó | Qué se pide |
 | --- | --- | --- |
 | **Programada** | Alguien la agenda | Dirección, responsable, fecha y hora, notas |
-| **Realizada** | Se fue (programada o no) | + resultado, fotos, comentarios, próximo paso |
+| **Realizada** | Se fue (programada o no) | + resultado, fotos, comentarios y próximo paso (texto) |
 | **Cancelada** | La programada no se hizo | Motivo |
 
 Una visita se puede **programar** (y después registrarle el resultado) o **registrar
@@ -117,21 +117,15 @@ La fila de acciones de la ficha también se ordenó para el celular. Va en dos c
 con etiquetas cortas y **Registrar Pago** arriba, a todo el ancho. Antes la fila se
 salía de la pantalla.
 
-## Visita al trabajo: lineamientos (CB-038)
+## Lo que NO lleva (2026-09-29)
 
-El formulario muestra los lineamientos. En la visita realizada al trabajo hay que
-marcar que se siguieron, y la visita guarda **cuándo** se aceptaron
-(`lineamientos_aceptados_at`). En resumen:
+Se quitó en el QA lo que no pedía el ticket:
 
-- no revelar la deuda a jefes ni compañeros;
-- identificarse;
-- hablar en privado;
-- retirarse si lo piden;
-- no fotografiar personas.
-
-> ⚠️ El texto es un **borrador pendiente de revisión de Legal**
-> (`LINEAMIENTOS_VISITA_TRABAJO` en `lib/visitas-cobros.ts`). Cambiarlo no requiere
-> migración.
+- **Lineamientos de la visita al trabajo.** CB-038 solo dice "validar permisos y
+  lineamientos reputacionales/legales" en la definición de listo, como algo a validar,
+  no como parte del formulario.
+- **Fecha del próximo paso.** El criterio pide "próximo paso", y queda como texto. La
+  visita no mueve el próximo contacto del caso.
 
 ## Datos: `visitas_cobros` (CRM, migración `0068`)
 

@@ -100,8 +100,11 @@ export async function bucketActualTolerante(
 export type ResponsableVisita = {
 	id: string;
 	nombre: string;
-	/** Por qué puede ir: el texto que ve el asesor al lado del nombre. */
-	motivo: "lleva el crédito" | "lo cubre hoy" | "supervisor" | "vos";
+	/**
+	 * Por qué puede ir: el texto que ve el asesor al lado del nombre. null =
+	 * sin etiqueta (el admin que se elige a sí mismo).
+	 */
+	motivo: "lleva el crédito" | "lo cubre hoy" | "supervisor" | null;
 };
 
 /**
@@ -161,7 +164,7 @@ export async function responsablesPosiblesVisita(params: {
 	for (const s of suplentes) agregar(s, nombres.get(s), "lo cubre hoy");
 	for (const s of supervisores) agregar(s.id, s.nombre, "supervisor");
 	if (params.actor.userRole === "admin") {
-		agregar(params.actor.userId, nombres.get(params.actor.userId), "vos");
+		agregar(params.actor.userId, nombres.get(params.actor.userId), null);
 	}
 	return lista;
 }

@@ -50,14 +50,11 @@ CREATE TABLE IF NOT EXISTS "visitas_cobros" (
 	"monto_recibido" numeric(12, 2),
 	"comentarios" text,
 	"proximo_paso" text,
-	"fecha_proximo_paso" timestamp,
 	-- Dónde estaba el celular del asesor al registrar (opcional, con permiso
 	-- del navegador): respaldo de que la visita ocurrió.
 	"ubicacion_lat" numeric(10, 7),
 	"ubicacion_lng" numeric(10, 7),
 	"ubicacion_precision_m" integer,
-	-- Visita al trabajo: quién aceptó los lineamientos y cuándo (CB-038).
-	"lineamientos_aceptados_at" timestamp,
 	"registrada_por" text,
 	-- Cancelación (solo cancelada).
 	"motivo_cancelacion" text,

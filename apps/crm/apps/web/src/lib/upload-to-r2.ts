@@ -2,6 +2,8 @@ import { client } from "@/utils/orpc";
 
 interface UploadOptions {
 	onProgress?: (percent: number) => void;
+	/** Tope del PUT a R2. Sin él, una subida colgada no termina nunca. */
+	timeoutMs?: number;
 }
 
 type UploadResourceType =
@@ -75,7 +77,12 @@ function putFileToR2(
 			reject(new Error("Error de red al subir archivo"));
 		});
 
+		xhr.addEventListener("timeout", () => {
+			reject(new Error("La subida tardó demasiado"));
+		});
+
 		xhr.open("PUT", url);
+		if (options?.timeoutMs) xhr.timeout = options.timeoutMs;
 		xhr.setRequestHeader("Content-Type", contentType);
 		xhr.send(file);
 	});

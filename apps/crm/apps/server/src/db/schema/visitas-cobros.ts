@@ -53,11 +53,9 @@ export const visitasCobros = pgTable(
 		montoRecibido: decimal("monto_recibido", { precision: 12, scale: 2 }),
 		comentarios: text("comentarios"),
 		proximoPaso: text("proximo_paso"),
-		fechaProximoPaso: timestamp("fecha_proximo_paso"),
 		ubicacionLat: decimal("ubicacion_lat", { precision: 10, scale: 7 }),
 		ubicacionLng: decimal("ubicacion_lng", { precision: 10, scale: 7 }),
 		ubicacionPrecisionM: integer("ubicacion_precision_m"),
-		lineamientosAceptadosAt: timestamp("lineamientos_aceptados_at"),
 		registradaPor: text("registrada_por").references(() => user.id, {
 			onDelete: "set null",
 		}),

@@ -344,11 +344,10 @@ function FilaVisita({
 				</p>
 			)}
 			{v.comentarios && <p className="text-sm">{v.comentarios}</p>}
-			{(v.proximoPaso || v.fechaProximoPaso) && (
+			{v.proximoPaso && (
 				<p className="text-sm">
 					<span className="text-muted-foreground">Próximo paso: </span>
-					{v.proximoPaso ?? "—"}
-					{v.fechaProximoPaso ? ` (${fecha(v.fechaProximoPaso)})` : ""}
+					{v.proximoPaso}
 				</p>
 			)}
 			{v.evidencias.length > 0 && (

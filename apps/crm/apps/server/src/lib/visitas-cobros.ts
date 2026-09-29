@@ -179,25 +179,6 @@ export function montoReferenciaPagoParcial(deuda: number): number {
 	return Math.round(deuda * PORCENTAJE_PAGO_PARCIAL * 100) / 100;
 }
 
-// ── Lineamientos de la visita al trabajo (CB-038) ───────────────────────────
-
-/**
- * BORRADOR, a validar con Legal: el ticket pide "validar lineamientos
- * reputacionales/legales" y todavía no hay un texto oficial. La idea de fondo
- * es no exponer la deuda del cliente frente a su empleador ni sus compañeros.
- * Cambiar el texto no requiere migración: la visita guarda CUÁNDO se aceptó.
- */
-export const LINEAMIENTOS_PENDIENTES_DE_LEGAL = true;
-
-export const LINEAMIENTOS_VISITA_TRABAJO = [
-	"Presentate con tu nombre y como parte de Club Cash-In.",
-	"Pedí hablar con el cliente en persona. A jefes, compañeros o recepción no les digás que venís a cobrar ni les des detalles del crédito.",
-	"Si no está, dejá solo tu nombre y un teléfono. No dejés mensajes sobre la deuda.",
-	"Hablá en privado, sin levantar la voz, sin amenazas y sin exponerlo frente a otras personas.",
-	"Si el cliente o la empresa te piden que te retirés, retirate y anotalo en la visita.",
-	"La evidencia es la fachada o el lugar: no le tomés fotos al cliente ni a otras personas.",
-] as const;
-
 // ── Formularios ─────────────────────────────────────────────────────────────
 
 const textoOpcional = (max: number) =>
@@ -261,9 +242,7 @@ export const registrarVisitaSchema = z.object({
 	// motivo es "Otro" (ver erroresRegistroVisita), que sin texto no dice nada.
 	comentarios: textoOpcional(3000),
 	proximoPaso: textoOpcional(1000),
-	fechaProximoPaso: z.coerce.date().optional(),
 	ubicacion: ubicacionVisitaSchema.optional(),
-	lineamientosAceptados: z.boolean().default(false),
 	evidencias: z
 		.array(evidenciaVisitaSchema)
 		.max(
@@ -281,7 +260,6 @@ const DIA_MS = 86_400_000;
 /** Una visita se registra el mismo día o poco después, no un mes más tarde. */
 export const DIAS_MAXIMOS_REGISTRO_TARDIO = 30;
 export const DIAS_MAXIMOS_PROGRAMACION = 60;
-export const DIAS_MAXIMOS_PROXIMO_PASO = 90;
 
 /**
  * Reglas que zod por sí solo no ve. Devuelve el primer problema en texto para
@@ -310,21 +288,6 @@ export function erroresRegistroVisita(
 	}
 	if (v.montoRecibido !== undefined && !siguientesPasos(v.resultado).pago) {
 		return "El monto recibido es solo para «Pago» o «50% + promesa».";
-	}
-
-	if (v.tipo === "trabajo" && !v.lineamientosAceptados) {
-		return "Confirmá que seguiste los lineamientos de la visita al trabajo.";
-	}
-
-	if (v.fechaProximoPaso) {
-		const p = v.fechaProximoPaso.getTime();
-		if (Number.isNaN(p)) return "La fecha del próximo paso no es válida.";
-		if (p < ahora.getTime() - DIA_MS) {
-			return "La fecha del próximo paso ya pasó.";
-		}
-		if (p > ahora.getTime() + DIAS_MAXIMOS_PROXIMO_PASO * DIA_MS) {
-			return `El próximo paso no puede pasar de ${DIAS_MAXIMOS_PROXIMO_PASO} días adelante.`;
-		}
 	}
 
 	const keys = v.evidencias.map((e) => e.key);

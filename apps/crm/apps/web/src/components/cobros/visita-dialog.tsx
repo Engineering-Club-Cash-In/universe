@@ -24,15 +24,13 @@ import {
 	ImagePlus,
 	Loader2,
 	LocateFixed,
-	ShieldCheck,
+	RotateCw,
 	X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
 	erroresProgramacionVisita,
 	erroresRegistroVisita,
-	LINEAMIENTOS_PENDIENTES_DE_LEGAL,
-	LINEAMIENTOS_VISITA_TRABAJO,
 	MAX_EVIDENCIAS_VISITA,
 	MOTIVOS_SIN_CONTACTO,
 	montoReferenciaPagoParcial,
@@ -50,8 +48,11 @@ import {
 import { toast } from "sonner";
 import { GpsUbicacionesClaveCard } from "@/components/cobros/gps-ubicaciones-clave-card";
 import { AvisoFaltante } from "@/components/cobros/recuperacion-vehiculo-dialog";
+import {
+	ahoraRedondeado,
+	FechaHoraPicker,
+} from "@/components/fecha-hora-picker";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -142,16 +143,35 @@ const quetzales = (n: number) =>
 		maximumFractionDigits: 2,
 	})}`;
 
-/** `datetime-local` quiere "YYYY-MM-DDTHH:mm" en hora local. */
-function aDatetimeLocal(fecha: Date): string {
-	const p = (n: number) => String(n).padStart(2, "0");
-	return `${fecha.getFullYear()}-${p(fecha.getMonth() + 1)}-${p(fecha.getDate())}T${p(fecha.getHours())}:${p(fecha.getMinutes())}`;
-}
-
-/** "YYYY-MM-DD" del `<input type=date>` → mediodía local de ese día. */
-const deFechaDia = (v: string) => (v ? new Date(`${v}T12:00:00`) : undefined);
+/** Inicio del día de hoy, para deshabilitar días en el calendario. */
+const inicioDeHoy = () => new Date(new Date().setHours(0, 0, 0, 0));
 
 const LADO_MAXIMO_FOTO = 1600;
+
+/**
+ * Tiempo máximo de una foto. Sin tope, una subida colgada (señal mala, R2 que
+ * no contesta) dejaba la visita sin poder guardarse para siempre. El PUT a R2
+ * tiene su propio tope, y este cubre todo lo demás (achicar y pedir la URL).
+ */
+const LIMITE_PUT_MS = 45_000;
+const LIMITE_SUBIDA_MS = 100_000;
+
+async function conLimite<T>(tarea: () => Promise<T>): Promise<T> {
+	let reloj: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			tarea(),
+			new Promise<never>((_, rechazar) => {
+				reloj = setTimeout(
+					() => rechazar(new Error("La foto tardó demasiado en subir.")),
+					LIMITE_SUBIDA_MS,
+				);
+			}),
+		]);
+	} finally {
+		if (reloj) clearTimeout(reloj);
+	}
+}
 
 /**
  * Achica la foto en el teléfono antes de subirla (JPEG, lado mayor 1600 px).
@@ -232,15 +252,16 @@ function FormularioVisita({
 	const [responsableId, setResponsableId] = useState(
 		programada?.responsableId ?? "",
 	);
-	const [fechaProgramada, setFechaProgramada] = useState("");
+	const [fechaProgramada, setFechaProgramada] = useState<Date | undefined>();
 	const [notas, setNotas] = useState("");
-	const [fechaVisita, setFechaVisita] = useState(aDatetimeLocal(new Date()));
+	const [fechaVisita, setFechaVisita] = useState<Date | undefined>(
+		ahoraRedondeado,
+	);
 	const [resultado, setResultado] = useState<ResultadoVisita | null>(null);
 	const [motivoSinContacto, setMotivoSinContacto] = useState("");
 	const [montoRecibido, setMontoRecibido] = useState("");
 	const [comentarios, setComentarios] = useState("");
 	const [proximoPaso, setProximoPaso] = useState("");
-	const [fechaProximoPaso, setFechaProximoPaso] = useState("");
 	const [fotos, setFotos] = useState<Foto[]>([]);
 	const [ubicacion, setUbicacion] = useState<{
 		lat: number;
@@ -249,7 +270,6 @@ function FormularioVisita({
 	} | null>(null);
 	const [ubicandose, setUbicandose] = useState(false);
 	const [avisoUbicacion, setAvisoUbicacion] = useState<string | null>(null);
-	const [lineamientos, setLineamientos] = useState(false);
 	const [intentoEnviar, setIntentoEnviar] = useState(false);
 	const inputCamara = useRef<HTMLInputElement>(null);
 	const inputGaleria = useRef<HTMLInputElement>(null);
@@ -278,7 +298,6 @@ function FormularioVisita({
 		if (t === tipo) return;
 		setTipo(t);
 		setDireccion(direccionDe(t));
-		if (t !== "trabajo") setLineamientos(false);
 	};
 
 	const cambiarResultado = (r: ResultadoVisita) => {
@@ -287,55 +306,83 @@ function FormularioVisita({
 		if (!siguientesPasos(r).pago) setMontoRecibido("");
 	};
 
-	const agregarFotos = async (lista: FileList | null) => {
+	// El archivo original de cada foto, para poder reintentarla, y el intento
+	// vigente: si una subida vieja (vencida o reintentada) contesta tarde, no
+	// pisa a la nueva.
+	const archivosRef = useRef(new Map<string, File>());
+	const intentosRef = useRef(new Map<string, number>());
+
+	const subirFoto = async (id: string) => {
+		const original = archivosRef.current.get(id);
+		if (!original) return;
+		const intento = (intentosRef.current.get(id) ?? 0) + 1;
+		intentosRef.current.set(id, intento);
+		const vigente = () => intentosRef.current.get(id) === intento;
+		setFotos((f) =>
+			f.map((x) =>
+				x.id === id ? { ...x, estado: "subiendo", error: undefined } : x,
+			),
+		);
+		try {
+			const { archivo, key } = await conLimite(async () => {
+				const archivo = await comprimirFoto(original);
+				const { key } = await uploadFileToR2WithRetry(
+					archivo,
+					{ resourceType: "cobros_visita_evidencia", resourceId: casoCobroId },
+					{ timeoutMs: LIMITE_PUT_MS },
+				);
+				return { archivo, key };
+			});
+			if (!vigente()) return;
+			setFotos((f) =>
+				f.map((x) =>
+					x.id === id
+						? { ...x, estado: "lista", key, nombre: archivo.name }
+						: x,
+				),
+			);
+		} catch (e) {
+			if (!vigente()) return;
+			setFotos((f) =>
+				f.map((x) =>
+					x.id === id
+						? {
+								...x,
+								estado: "error",
+								error:
+									e instanceof Error ? e.message : "No se pudo subir la foto",
+							}
+						: x,
+				),
+			);
+		}
+	};
+
+	const agregarFotos = (lista: FileList | null) => {
 		if (!lista || lista.length === 0) return;
 		const libres = MAX_EVIDENCIAS_VISITA - fotos.length;
 		const archivos = Array.from(lista).slice(0, Math.max(0, libres));
 		if (lista.length > archivos.length) {
 			toast.warning(`Hasta ${MAX_EVIDENCIAS_VISITA} fotos por visita.`);
 		}
-		for (const original of archivos) {
+		const nuevas = archivos.map((original) => {
 			const id = crypto.randomUUID();
-			setFotos((f) => [
-				...f,
-				{
-					id,
-					nombre: original.name || "foto.jpg",
-					preview: URL.createObjectURL(original),
-					estado: "subiendo",
-				},
-			]);
-			try {
-				const archivo = await comprimirFoto(original);
-				const { key } = await uploadFileToR2WithRetry(archivo, {
-					resourceType: "cobros_visita_evidencia",
-					resourceId: casoCobroId,
-				});
-				setFotos((f) =>
-					f.map((x) =>
-						x.id === id
-							? { ...x, estado: "lista", key, nombre: archivo.name }
-							: x,
-					),
-				);
-			} catch (e) {
-				setFotos((f) =>
-					f.map((x) =>
-						x.id === id
-							? {
-									...x,
-									estado: "error",
-									error:
-										e instanceof Error ? e.message : "No se pudo subir la foto",
-								}
-							: x,
-					),
-				);
-			}
-		}
+			archivosRef.current.set(id, original);
+			return {
+				id,
+				nombre: original.name || "foto.jpg",
+				preview: URL.createObjectURL(original),
+				estado: "subiendo" as const,
+			};
+		});
+		setFotos((f) => [...f, ...nuevas]);
+		// En paralelo: una foto que se traba no frena a las demás.
+		for (const n of nuevas) void subirFoto(n.id);
 	};
 
 	const quitarFoto = (id: string) => {
+		archivosRef.current.delete(id);
+		intentosRef.current.delete(id);
 		setFotos((f) => {
 			const foto = f.find((x) => x.id === id);
 			if (foto) URL.revokeObjectURL(foto.preview);
@@ -385,16 +432,14 @@ function FormularioVisita({
 		referencia,
 		empresa: tipo === "trabajo" ? empresa : undefined,
 		responsableId,
-		fechaVisita: fechaVisita ? new Date(fechaVisita) : new Date(Number.NaN),
+		fechaVisita: fechaVisita ?? new Date(Number.NaN),
 		resultado: (resultado ?? "sin_contacto") as ResultadoVisita,
 		motivoSinContacto: (motivoSinContacto ||
 			undefined) as RegistrarVisitaInput["motivoSinContacto"],
 		montoRecibido: montoTexto && montoValido ? Number(montoTexto) : undefined,
 		comentarios,
 		proximoPaso,
-		fechaProximoPaso: deFechaDia(fechaProximoPaso),
 		ubicacion: ubicacion ?? undefined,
-		lineamientosAceptados: tipo === "trabajo" && lineamientos,
 		evidencias: fotos
 			.filter((f) => f.estado === "lista" && f.key)
 			.map((f) => ({ key: f.key as string, nombreArchivo: f.nombre })),
@@ -407,9 +452,7 @@ function FormularioVisita({
 		referencia,
 		empresa: tipo === "trabajo" ? empresa : undefined,
 		responsableId,
-		fechaProgramada: fechaProgramada
-			? new Date(fechaProgramada)
-			: new Date(Number.NaN),
+		fechaProgramada: fechaProgramada ?? new Date(Number.NaN),
 		notas,
 	};
 
@@ -428,6 +471,8 @@ function FormularioVisita({
 		if (!montoValido) return "El monto va en números, por ejemplo 1250.50";
 		if (fotos.some((f) => f.estado === "subiendo"))
 			return "Esperá a que terminen de subir las fotos.";
+		if (fotos.some((f) => f.estado === "error"))
+			return "Una foto no se pudo subir: reintentala o quitala.";
 		const p = registrarVisitaSchema.safeParse(payloadRegistro);
 		if (!p.success)
 			return p.error.issues[0]?.message ?? "Revisá el formulario.";
@@ -481,7 +526,7 @@ function FormularioVisita({
 				resultado: res,
 				siguientes: r.siguientes,
 				direccion: direccion.trim(),
-				fechaVisita: new Date(fechaVisita),
+				fechaVisita: fechaVisita ?? new Date(),
 				montoRecibido: payloadRegistro.montoRecibido ?? null,
 				bucket: r.bucket,
 			});
@@ -491,6 +536,10 @@ function FormularioVisita({
 	});
 
 	const enviando = programar.isPending || registrar.isPending;
+	// Mientras suba una foto no se guarda: el botón queda apagado y el motivo
+	// a la vista (no solo después de intentar).
+	const subiendoFotos =
+		modo === "registrar" && fotos.some((f) => f.estado === "subiendo");
 	const enviar = () => {
 		setIntentoEnviar(true);
 		if (faltante || enviando) return;
@@ -681,10 +730,13 @@ function FormularioVisita({
 							<SelectContent>
 								{(responsables.data ?? []).map((r) => (
 									<SelectItem key={r.id} value={r.id}>
-										{r.nombre}{" "}
-										<span className="text-muted-foreground text-xs">
-											· {r.motivo}
-										</span>
+										{r.nombre}
+										{r.motivo && (
+											<span className="text-muted-foreground text-xs">
+												{" "}
+												· {r.motivo}
+											</span>
+										)}
 									</SelectItem>
 								))}
 							</SelectContent>
@@ -701,12 +753,11 @@ function FormularioVisita({
 							<Label htmlFor="visita-fecha-programada">
 								Cuándo <span className="text-red-600">*</span>
 							</Label>
-							<Input
+							<FechaHoraPicker
 								id="visita-fecha-programada"
-								type="datetime-local"
-								className="h-10"
 								value={fechaProgramada}
-								onChange={(e) => setFechaProgramada(e.target.value)}
+								onChange={setFechaProgramada}
+								deshabilitar={(dia) => dia < inicioDeHoy()}
 							/>
 						</div>
 					) : (
@@ -714,12 +765,11 @@ function FormularioVisita({
 							<Label htmlFor="visita-fecha">
 								Cuándo fue <span className="text-red-600">*</span>
 							</Label>
-							<Input
+							<FechaHoraPicker
 								id="visita-fecha"
-								type="datetime-local"
-								className="h-10"
 								value={fechaVisita}
-								onChange={(e) => setFechaVisita(e.target.value)}
+								onChange={setFechaVisita}
+								deshabilitar={(dia) => dia > new Date()}
 							/>
 						</div>
 					)}
@@ -882,7 +932,7 @@ function FormularioVisita({
 								capture="environment"
 								className="hidden"
 								onChange={(e) => {
-									void agregarFotos(e.target.files);
+									agregarFotos(e.target.files);
 									e.target.value = "";
 								}}
 							/>
@@ -893,7 +943,7 @@ function FormularioVisita({
 								multiple
 								className="hidden"
 								onChange={(e) => {
-									void agregarFotos(e.target.files);
+									agregarFotos(e.target.files);
 									e.target.value = "";
 								}}
 							/>
@@ -916,9 +966,15 @@ function FormularioVisita({
 												<Loader2 className="absolute inset-0 m-auto h-5 w-5 animate-spin" />
 											)}
 											{f.estado === "error" && (
-												<p className="absolute inset-x-0 bottom-0 bg-destructive/90 px-1 py-0.5 text-[10px] text-white">
-													No subió
-												</p>
+												<button
+													type="button"
+													title={f.error}
+													className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-destructive/90 px-1 py-1 text-[11px] text-white"
+													onClick={() => void subirFoto(f.id)}
+												>
+													<RotateCw className="h-3 w-3" />
+													No subió · Reintentar
+												</button>
 											)}
 											<button
 												type="button"
@@ -993,72 +1049,29 @@ function FormularioVisita({
 									placeholder="Con quién habló, qué dijo, qué se acordó"
 								/>
 							</div>
-							<div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-								<div className="space-y-1.5">
-									<Label htmlFor="visita-proximo-paso">
-										Próximo paso{" "}
-										<span className="text-muted-foreground">(opcional)</span>
-									</Label>
-									<Input
-										id="visita-proximo-paso"
-										value={proximoPaso}
-										onChange={(e) => setProximoPaso(e.target.value)}
-										placeholder="Ej: volver el viernes en la tarde"
-									/>
-								</div>
-								<div className="space-y-1.5">
-									<Label htmlFor="visita-fecha-proximo">Para cuándo</Label>
-									<Input
-										id="visita-fecha-proximo"
-										type="date"
-										className="h-10"
-										value={fechaProximoPaso}
-										onChange={(e) => setFechaProximoPaso(e.target.value)}
-									/>
-								</div>
+							<div className="space-y-1.5">
+								<Label htmlFor="visita-proximo-paso">
+									Próximo paso{" "}
+									<span className="text-muted-foreground">(opcional)</span>
+								</Label>
+								<Input
+									id="visita-proximo-paso"
+									value={proximoPaso}
+									onChange={(e) => setProximoPaso(e.target.value)}
+									placeholder="Ej: volver el viernes en la tarde"
+								/>
 							</div>
 						</section>
 					</>
-				)}
-
-				{/* Visita al trabajo: los lineamientos (CB-038) */}
-				{tipo === "trabajo" && (
-					<section className="space-y-2 rounded-md border border-sky-200 bg-sky-50 p-3 text-sky-950 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
-						<p className="flex items-center gap-2 font-medium text-sm">
-							<ShieldCheck className="h-4 w-4" />
-							En el lugar de trabajo
-						</p>
-						<ul className="list-disc space-y-1 pl-5 text-xs">
-							{LINEAMIENTOS_VISITA_TRABAJO.map((l) => (
-								<li key={l}>{l}</li>
-							))}
-						</ul>
-						{LINEAMIENTOS_PENDIENTES_DE_LEGAL && (
-							<p className="text-[11px] opacity-70">
-								Texto provisional, pendiente de revisión de Legal.
-							</p>
-						)}
-						{modo === "registrar" && (
-							<label
-								htmlFor="visita-lineamientos"
-								className="flex cursor-pointer items-start gap-2 pt-1 text-sm"
-							>
-								<Checkbox
-									id="visita-lineamientos"
-									checked={lineamientos}
-									onCheckedChange={(v) => setLineamientos(v === true)}
-									className="mt-0.5"
-								/>
-								Seguí estos lineamientos en la visita.
-							</label>
-						)}
-					</section>
 				)}
 			</div>
 
 			{/* El botón siempre a la vista, también en el celular con el teclado. */}
 			<div className="flex flex-col gap-2 border-t bg-background px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-				<AvisoFaltante faltante={faltante} visible={intentoEnviar} />
+				<AvisoFaltante
+					faltante={faltante}
+					visible={intentoEnviar || subiendoFotos}
+				/>
 				<div className="flex gap-2">
 					<Button
 						type="button"
@@ -1073,9 +1086,11 @@ function FormularioVisita({
 						type="button"
 						className="h-11 flex-1 sm:h-9 sm:flex-none"
 						onClick={enviar}
-						disabled={enviando}
+						disabled={enviando || subiendoFotos}
 					>
-						{enviando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+						{(enviando || subiendoFotos) && (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						)}
 						{textoBoton}
 					</Button>
 				</div>

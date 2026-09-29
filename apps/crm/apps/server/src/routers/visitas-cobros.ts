@@ -120,11 +120,9 @@ export const visitasCobrosRouter = {
 					montoRecibido: visitasCobros.montoRecibido,
 					comentarios: visitasCobros.comentarios,
 					proximoPaso: visitasCobros.proximoPaso,
-					fechaProximoPaso: visitasCobros.fechaProximoPaso,
 					ubicacionLat: visitasCobros.ubicacionLat,
 					ubicacionLng: visitasCobros.ubicacionLng,
 					ubicacionPrecisionM: visitasCobros.ubicacionPrecisionM,
-					lineamientosAceptadosAt: visitasCobros.lineamientosAceptadosAt,
 					registradaPor: registrador.name,
 					motivoCancelacion: visitasCobros.motivoCancelacion,
 					canceladaPor: cancelador.name,
@@ -391,14 +389,9 @@ export const visitasCobrosRouter = {
 						: null,
 				comentarios: input.comentarios ?? null,
 				proximoPaso: input.proximoPaso ?? null,
-				fechaProximoPaso: input.fechaProximoPaso ?? null,
 				ubicacionLat: input.ubicacion ? String(input.ubicacion.lat) : null,
 				ubicacionLng: input.ubicacion ? String(input.ubicacion.lng) : null,
 				ubicacionPrecisionM: input.ubicacion?.precisionM ?? null,
-				lineamientosAceptadosAt:
-					input.tipo === "trabajo" && input.lineamientosAceptados
-						? new Date()
-						: null,
 				registradaPor: context.userId,
 				updatedAt: new Date(),
 			};
@@ -440,8 +433,6 @@ export const visitasCobrosRouter = {
 						estadoContacto: estadoContactoDeResultado(input.resultado),
 						comentarios: textoGestionVisita(input),
 						proximoPaso: input.proximoPaso ?? null,
-						requiereSeguimiento: !!input.fechaProximoPaso,
-						fechaProximoContacto: input.fechaProximoPaso ?? null,
 						realizadoPor: input.responsableId,
 						bucketSnapshot: bucket,
 					})
@@ -465,16 +456,6 @@ export const visitasCobrosRouter = {
 					);
 				}
 
-				if (input.fechaProximoPaso) {
-					await tx
-						.update(casosCobros)
-						.set({
-							proximoContacto: input.fechaProximoPaso,
-							metodoContactoProximo: metodo,
-							updatedAt: new Date(),
-						})
-						.where(eq(casosCobros.id, input.casoCobroId));
-				}
 				return { visitaId, contactoId: contacto.id };
 			});
 			if (!resultado) {

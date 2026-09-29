@@ -1,0 +1,164 @@
+name: Database backups
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/database-backups.yml
+      - scripts/backup-postgres-to-r2.sh
+      - scripts/backup-postgres-to-r2.test.sh
+      - scripts/validate-r2-lifecycle.py
+      - scripts/write-pg-service.py
+  schedule:
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+    inputs:
+      backup_classes:
+        description: Retention classes to upload
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - daily
+          - daily,weekly
+          - daily,weekly,monthly
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-backups-${{ github.event.pull_request.number || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate database backup workflow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Run tests and static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+          scripts/backup-postgres-to-r2.test.sh
+          shellcheck scripts/backup-postgres-to-r2.sh scripts/backup-postgres-to-r2.test.sh
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/database-backups.yml
+
+  backup:
+    name: Backup CRM and Cartera to R2
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: production-backups
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install PostgreSQL clients
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          curl --fail --silent --show-error --location \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor --yes \
+              --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-15 postgresql-client-17
+          /usr/lib/postgresql/15/bin/pg_dump --version
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          aws --version
+
+      - name: Resolve retention classes
+        id: retention
+        shell: bash
+        env:
+          REQUESTED_CLASSES: ${{ inputs.backup_classes || 'auto' }}
+        run: |
+          set -euo pipefail
+          if [[ "$REQUESTED_CLASSES" != "auto" ]]; then
+            classes=$REQUESTED_CLASSES
+          else
+            classes=daily
+            [[ $(TZ=America/Guatemala date +%u) == 7 ]] && classes+=,weekly
+            [[ $(TZ=America/Guatemala date +%d) == 01 ]] && classes+=,monthly
+          fi
+          echo "classes=$classes" >>"$GITHUB_OUTPUT"
+
+      - name: Create, verify and upload backups
+        shell: bash
+        env:
+          CRM_DATABASE_URL: ${{ secrets.BACKUP_CRM_DATABASE_URL }}
+          CARTERA_DATABASE_URL: ${{ secrets.BACKUP_CARTERA_DATABASE_URL }}
+          R2_ENDPOINT_URL: ${{ secrets.BACKUP_R2_ENDPOINT_URL }}
+          R2_BUCKET: cashin-database-backups
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET_ACCESS_KEY }}
+          SUPABASE_SSL_ROOT_CERT: ${{ secrets.BACKUP_SUPABASE_SSL_ROOT_CERT }}
+          AWS_DEFAULT_REGION: auto
+          CRM_PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
+          CARTERA_PG_DUMP: /usr/lib/postgresql/15/bin/pg_dump
+          BACKUP_CLASSES: ${{ steps.retention.outputs.classes }}
+        run: |
+          [[ -n "$SUPABASE_SSL_ROOT_CERT" ]] || {
+            echo "missing BACKUP_SUPABASE_SSL_ROOT_CERT" >&2
+            exit 2
+          }
+          cert=$(mktemp "$RUNNER_TEMP/supabase-root.XXXXXX.crt")
+          trap 'rm -f "$cert"' EXIT
+          printf '%s\n' "$SUPABASE_SSL_ROOT_CERT" >"$cert"
+          chmod 600 "$cert"
+          export CRM_SSL_ROOT_CERT=/etc/ssl/certs/ca-certificates.crt
+          export CARTERA_SSL_ROOT_CERT="$cert"
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
+          scripts/backup-postgres-to-r2.sh
+
+  report-backup-status:
+    name: Report database backup status
+    needs: backup
+    if: ${{ always() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Update backup alert
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BACKUP_RESULT: ${{ needs.backup.result }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          issue=$(gh issue list --state open \
+            --search 'Database backup failed in:title' \
+            --json number --jq '.[0].number // empty')
+          if [[ "$BACKUP_RESULT" == success ]]; then
+            if [[ -n "$issue" ]]; then
+              gh issue close "$issue" --comment "Resolved by successful run: $run_url"
+            fi
+          elif [[ -n "$issue" ]]; then
+            gh issue comment "$issue" \
+              --body "Another backup run ended with $BACKUP_RESULT: $run_url"
+          else
+            gh issue create \
+              --title "Database backup failed" \
+              --body "The production database backup run ended with $BACKUP_RESULT: $run_url"
+          fi

@@ -31,7 +31,10 @@ import {
 	inmovilizacionesUnidadEventos,
 } from "../db/schema/inmovilizacion-unidad";
 import { vehicles } from "../db/schema/vehicles";
-import { usuarioDuenoEnCartera } from "../lib/acceso-caso-cobro";
+import {
+	usuarioDuenoEnCartera,
+	usuarioDuenoEnCarteraEstricto,
+} from "../lib/acceso-caso-cobro";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import {
 	BUCKETS_INMOVILIZACION,
@@ -327,7 +330,9 @@ async function assertAccesoLlamadaInmovilizacion(
 	}
 
 	// Fallback: el aviso cayó en quien solicitó porque el dueño en cartera no
-	// tiene usuario en el CRM.
+	// tiene usuario en el CRM. Con la lectura ESTRICTA: si cartera no responde
+	// se lanza (falla cerrado), no se toma como "sin usuario" (review de
+	// Codex, P1, PR #1765).
 	if (inm.solicitadoPor && inm.solicitadoPor === userId) {
 		const [caso] = await db
 			.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
@@ -336,7 +341,7 @@ async function assertAccesoLlamadaInmovilizacion(
 			.limit(1);
 		if (
 			caso &&
-			(await usuarioDuenoEnCartera(caso.numeroCreditoSifco)) === null
+			(await usuarioDuenoEnCarteraEstricto(caso.numeroCreditoSifco)) === null
 		) {
 			return;
 		}

@@ -21,6 +21,8 @@ import type { Context } from "../lib/context";
 
 let rolUsuarioMock = "cobros";
 let responsableCasoMock: string | null = "user-test";
+// Cartera no responde al buscar el dueño del crédito (lectura estricta).
+let carteraFallaMock = false;
 let solicitadoPorMarcarEjecutadaMock = "user-test";
 let numeroCreditoSifcoMock: string | null = "01010214100000";
 let vehicleIdMock: string | null; // inicializado abajo, junto a VEHICLE_ID
@@ -349,6 +351,7 @@ mock.module("../lib/acceso-caso-cobro", () =>
 	moduloAccesoFalso({
 		tieneAcceso: (userId) => responsableCasoMock === userId,
 		duenoUsuario: () => responsableCasoMock,
+		carteraFalla: () => carteraFallaMock,
 	}),
 );
 // routers/cobros.ts (de donde sale assertAccesoCasoCobro) inicializa
@@ -412,6 +415,7 @@ function ctx(role: string, userId = "user-test"): Context {
 
 function reset() {
 	responsableCasoMock = "user-test";
+	carteraFallaMock = false;
 	solicitadoPorMarcarEjecutadaMock = "user-test";
 	numeroCreditoSifcoMock = "01010214100000";
 	vehicleIdMock = VEHICLE_ID;
@@ -865,7 +869,7 @@ describe("CB-041 — marcarEjecutada", () => {
 		expect(res.modo).toBe("manual");
 	});
 
-	it("caso sin responsableCobros: notifica igual, con fallback a quien solicitó (review de Codex)", async () => {
+	it("dueño en cartera sin usuario en el CRM: notifica igual, con fallback a quien solicitó (review de Codex)", async () => {
 		responsableCasoMock = null;
 		inmovilizacionExistente = {
 			id: INMOV_ID,
@@ -1355,7 +1359,7 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 
-	it("caso sin responsableCobros pero el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada (review de Codex)", async () => {
+	it("dueño en cartera sin usuario en el CRM y el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada (review de Codex)", async () => {
 		responsableCasoMock = null;
 		conApagadoVigente({ solicitadoPor: "user-test" });
 
@@ -1363,11 +1367,23 @@ describe("CB-041 — registrarResultadoLlamada", () => {
 		expect(res.ok).toBe(true);
 	});
 
-	it("caso sin responsableCobros y el usuario NO es solicitadoPor: rechaza con NOT_FOUND (review de Codex)", async () => {
+	it("dueño en cartera sin usuario en el CRM y el usuario NO es solicitadoPor: rechaza con NOT_FOUND (review de Codex)", async () => {
 		responsableCasoMock = null;
 		conApagadoVigente({ solicitadoPor: "otro-asesor" });
 
 		await expect(llamar("paga")).rejects.toMatchObject({ code: "NOT_FOUND" });
+	});
+
+	it("cartera no responde: el ex solicitante NO registra la llamada (falla cerrado, review de Codex PR #1765)", async () => {
+		// El crédito es de otro (el gate no lo deja pasar) y cartera se cae al
+		// buscar al dueño: eso no puede leerse como "el dueño no tiene usuario".
+		responsableCasoMock = "otro-asesor";
+		carteraFallaMock = true;
+		conApagadoVigente({ solicitadoPor: "user-test" });
+
+		await expect(llamar("no_paga")).rejects.toMatchObject({
+			code: "SERVICE_UNAVAILABLE",
+		});
 	});
 });
 
@@ -1835,7 +1851,7 @@ describe("CB-041 — registrarLlamadaReactivacion", () => {
 		expect(inmovilizacionesInsertadas).toHaveLength(0);
 	});
 
-	it("caso sin responsableCobros pero el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada (review de Codex)", async () => {
+	it("dueño en cartera sin usuario en el CRM y el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada (review de Codex)", async () => {
 		responsableCasoMock = null;
 		const fila = reactivacionEjecutada({ solicitadoPor: "user-test" });
 		inmovilizacionExistente = fila;
@@ -1845,13 +1861,25 @@ describe("CB-041 — registrarLlamadaReactivacion", () => {
 		expect(res.ok).toBe(true);
 	});
 
-	it("caso sin responsableCobros y el usuario NO es solicitadoPor: rechaza con NOT_FOUND (review de Codex)", async () => {
+	it("dueño en cartera sin usuario en el CRM y el usuario NO es solicitadoPor: rechaza con NOT_FOUND (review de Codex)", async () => {
 		responsableCasoMock = null;
 		const fila = reactivacionEjecutada({ solicitadoPor: "otro-asesor" });
 		inmovilizacionExistente = fila;
 		historialCasoMock = [fila];
 
 		await expect(llamar()).rejects.toMatchObject({ code: "NOT_FOUND" });
+	});
+
+	it("cartera no responde: el ex solicitante NO registra la llamada de reactivación (falla cerrado)", async () => {
+		responsableCasoMock = "otro-asesor";
+		carteraFallaMock = true;
+		const fila = reactivacionEjecutada({ solicitadoPor: "user-test" });
+		inmovilizacionExistente = fila;
+		historialCasoMock = [fila];
+
+		await expect(llamar()).rejects.toMatchObject({
+			code: "SERVICE_UNAVAILABLE",
+		});
 	});
 });
 

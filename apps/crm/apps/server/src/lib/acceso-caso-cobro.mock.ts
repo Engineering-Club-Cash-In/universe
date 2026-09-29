@@ -18,6 +18,8 @@ export function moduloAccesoFalso(opciones: {
 	tieneAcceso: (userId: string) => boolean;
 	/** Usuario del CRM dueño del crédito en cartera (para avisos). */
 	duenoUsuario?: () => string | null;
+	/** Simula que cartera no responde (solo la lectura estricta lanza). */
+	carteraFalla?: () => boolean;
 }) {
 	const dueno = () => opciones.duenoUsuario?.() ?? null;
 	return {
@@ -49,5 +51,14 @@ export function moduloAccesoFalso(opciones: {
 			return new Map<string, string>(d ? sifcos.map((s) => [s, d]) : []);
 		},
 		usuarioDuenoEnCartera: async () => dueno(),
+		usuarioDuenoEnCarteraEstricto: async () => {
+			if (opciones.carteraFalla?.()) {
+				throw new ORPCError("SERVICE_UNAVAILABLE", {
+					message:
+						"No se pudo confirmar en cartera quién lleva este crédito. Intentá de nuevo en un momento.",
+				});
+			}
+			return dueno();
+		},
 	};
 }

@@ -288,6 +288,34 @@ export async function usuariosDuenosPorSifco(
 	return usuarios;
 }
 
+/**
+ * Usuario del CRM dueño del crédito en cartera, para decisiones de ACCESO.
+ *
+ * A diferencia de `usuarioDuenoEnCartera` (avisos, best-effort), NO se traga
+ * las fallas: si cartera no responde, lanza SERVICE_UNAVAILABLE. `null` quiere
+ * decir una sola cosa —cartera contestó y el dueño no tiene usuario en el CRM
+ * (o el crédito no tiene dueño)—, nunca "no se pudo averiguar". Confundir las
+ * dos le daba acceso de respaldo a quien ya no lleva el crédito con solo que
+ * cartera tuviera un mal momento (review de Codex, P1, PR #1765).
+ */
+export async function usuarioDuenoEnCarteraEstricto(
+	numeroSifco: string | null | undefined,
+): Promise<string | null> {
+	const sifco = numeroSifco?.trim();
+	if (!sifco) return null;
+	if (!isCarteraBackEnabled()) throw carteraNoDisponible();
+	try {
+		const [duenos, usuarioPorAsesor] = await Promise.all([
+			duenosEnCarteraPorSifco([sifco]),
+			construirMapaAsesorUsuario({ useCircuitBreaker: false }),
+		]);
+		const dueno = duenos.get(sifco);
+		return dueno ? (usuarioPorAsesor.get(dueno.asesorId) ?? null) : null;
+	} catch (error) {
+		throw carteraNoDisponible(error);
+	}
+}
+
 /** Atajo de `usuariosDuenosPorSifco` para un solo crédito. */
 export async function usuarioDuenoEnCartera(
 	numeroSifco: string | null | undefined,

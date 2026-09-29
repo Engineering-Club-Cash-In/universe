@@ -17,17 +17,19 @@
 
 import { and, eq, inArray, max, ne } from "drizzle-orm";
 import { db } from "../db";
-import { casosCobros, contactosCobros } from "../db/schema/cobros";
+import { contactosCobros } from "../db/schema/cobros";
 import type { NewNotification } from "../db/schema/notifications";
 import { notifications } from "../db/schema/notifications";
 import { contarDiasHabilesGT, siguienteDiaGT } from "../lib/business-days-gt";
 import type { CarteraBucketHistorialRow } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
+import { procesarTareasB3 } from "./check-b3-llamada";
 import {
 	type CobrosNotifTipo,
 	construirMapaAsesorUsuario,
 	filasNotificacionCobros,
+	mapearCasosPorSifco,
 	obtenerSupervisoresCobros,
 	resolverUsuarioSistemaCobros,
 } from "./cobros-notif-helpers";
@@ -56,6 +58,8 @@ function gtDateKey(d: Date): string {
 export interface CobrosAlertasResumen {
 	subidas: number; // notificaciones cliente_subido (una por caso)
 	sinContacto: number; // casos escalados por sin_contacto_3d
+	b3Tareas: number; // CB-035: casos con tarea nueva de llamada por ingreso a B3
+	b3Vencidas: number; // CB-035: casos con alerta nueva de tarea B3 vencida
 	skipped?: boolean;
 	reason?: string;
 }
@@ -67,6 +71,8 @@ export async function checkCobrosAlertas(): Promise<CobrosAlertasResumen> {
 			return {
 				subidas: 0,
 				sinContacto: 0,
+				b3Tareas: 0,
+				b3Vencidas: 0,
 				skipped: true,
 				reason: "cartera_back_disabled",
 			};
@@ -80,6 +86,8 @@ export async function checkCobrosAlertas(): Promise<CobrosAlertasResumen> {
 			return {
 				subidas: 0,
 				sinContacto: 0,
+				b3Tareas: 0,
+				b3Vencidas: 0,
 				skipped: true,
 				reason: "sin_usuario_sistema",
 			};
@@ -109,13 +117,28 @@ export async function checkCobrosAlertas(): Promise<CobrosAlertasResumen> {
 			usuarioSistema,
 		);
 
+		// CB-035: tarea de llamada al supervisor por ingreso a B3. Reusa los eventos
+		// ya traídos; procesarTareasB3 no lanza, así que no puede tumbar lo de arriba.
+		const b3 = await procesarTareasB3({
+			eventos,
+			ahora,
+			mapaAsesor,
+			supervisores,
+			usuarioSistema,
+		});
+
 		console.log(
 			`${LOG_PREFIX} cliente_subido: ${subidas} · sin_contacto_3d: ${sinContacto} caso(s)`,
 		);
-		return { subidas, sinContacto };
+		return {
+			subidas,
+			sinContacto,
+			b3Tareas: b3.tareas,
+			b3Vencidas: b3.vencidas,
+		};
 	} catch (err) {
 		console.error(`${LOG_PREFIX} Error general del job:`, err);
-		return { subidas: 0, sinContacto: 0 };
+		return { subidas: 0, sinContacto: 0, b3Tareas: 0, b3Vencidas: 0 };
 	}
 }
 
@@ -300,26 +323,6 @@ async function notificarSinContacto(
 	if (filas.length > 0) await db.insert(notifications).values(filas);
 	// #casos (no #filas: cada caso genera asesor + N supervisores).
 	return new Set(filas.map((f) => f.relatedEntityId)).size;
-}
-
-/** Mapa `numero_credito_sifco → caso.id` (solo casos activos). */
-async function mapearCasosPorSifco(
-	sifcos: string[],
-): Promise<Map<string, string>> {
-	const unicos = [...new Set(sifcos.filter(Boolean))];
-	if (unicos.length === 0) return new Map();
-	const rows = await db
-		.select({ id: casosCobros.id, sifco: casosCobros.numeroCreditoSifco })
-		.from(casosCobros)
-		.where(
-			and(
-				eq(casosCobros.activo, true),
-				inArray(casosCobros.numeroCreditoSifco, unicos),
-			),
-		);
-	const map = new Map<string, string>();
-	for (const r of rows) if (r.sifco) map.set(r.sifco, r.id);
-	return map;
 }
 
 /** max(fecha_contacto) por caso. */

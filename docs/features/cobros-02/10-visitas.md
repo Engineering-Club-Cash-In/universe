@@ -1,6 +1,6 @@
 # 10 · Visitas a residencia y al lugar de trabajo (CB-037 / CB-038)
 
-**Estado:** ✅ Implementado · migración CRM `0068` corrida en DEV, pendiente en prod (sale a fin de año)
+**Estado:** ✅ Implementado · migración CRM `0069` corrida en DEV, pendiente en prod (sale a fin de año)
 **Jira:** CC2-73 (CB-037, residencia) · CC2-74 (CB-038, lugar de trabajo)
 
 ---
@@ -127,7 +127,7 @@ Se quitó en el QA lo que no pedía el ticket:
 - **Fecha del próximo paso.** El criterio pide "próximo paso", y queda como texto. La
   visita no mueve el próximo contacto del caso.
 
-## Datos: `visitas_cobros` (CRM, migración `0068`)
+## Datos: `visitas_cobros` (CRM, migración `0069`)
 
 - `visitas_cobros`: tipo (`residencia` | `trabajo`) y estado con CHECK. `resultado` y
   `motivo_sin_contacto` van en text validado en TypeScript, porque el catálogo es del

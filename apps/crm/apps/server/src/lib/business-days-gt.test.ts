@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test";
 import {
 	contarDiasHabilesGT,
 	esDiaHabilGT,
+	finDelDiaGT,
 	siguienteDiaGT,
+	sumarDiasHabilesGT,
 } from "./business-days-gt";
 
 const gtDay = (d: Date) =>
@@ -83,5 +85,54 @@ describe("siguienteDiaGT + SLA de subida sellada 23:59 GT (Codex P2)", () => {
 		expect(
 			contarDiasHabilesGT(siguienteDiaGT(subidaLun2359), gt("2025-02-14")),
 		).toBe(3);
+	});
+});
+
+describe("sumarDiasHabilesGT (CB-035)", () => {
+	it("n=1 es el propio día si es hábil", () => {
+		expect(gtDay(sumarDiasHabilesGT(gt("2025-02-11"), 1))).toBe("2025-02-11");
+	});
+
+	it("n=1 desde un sábado normal salta al lunes", () => {
+		// 2025-02-08 = sábado (no es quincena ni fin de mes).
+		expect(gtDay(sumarDiasHabilesGT(gt("2025-02-08"), 1))).toBe("2025-02-10");
+	});
+
+	it("3 hábiles desde el martes: mar+mié+jue → jueves", () => {
+		expect(gtDay(sumarDiasHabilesGT(gt("2025-02-11"), 3))).toBe("2025-02-13");
+	});
+
+	it("salta el fin de semana: 3 hábiles desde el jueves → lunes", () => {
+		// jue 13, vie 14, (sáb 15 ES quincena → hábil).
+		expect(gtDay(sumarDiasHabilesGT(gt("2025-02-13"), 3))).toBe("2025-02-15");
+	});
+
+	it("salta un fin de semana sin quincena", () => {
+		// jue 2025-02-20, vie 21, (sáb 22 y dom 23 no) lun 24.
+		expect(gtDay(sumarDiasHabilesGT(gt("2025-02-20"), 3))).toBe("2025-02-24");
+	});
+
+	it("es la inversa de contarDiasHabilesGT", () => {
+		const inicio = gt("2025-02-20");
+		const vence = sumarDiasHabilesGT(inicio, 3);
+		const diaSiguiente = new Date(vence.getTime() + 24 * 60 * 60 * 1000);
+		expect(contarDiasHabilesGT(inicio, diaSiguiente)).toBe(3);
+	});
+
+	it("rechaza n < 1", () => {
+		expect(() => sumarDiasHabilesGT(gt("2025-02-11"), 0)).toThrow(RangeError);
+	});
+});
+
+describe("finDelDiaGT", () => {
+	it("es 23:59:59.999 GT del mismo día", () => {
+		const fin = finDelDiaGT(gt("2025-02-11"));
+		expect(gtDay(fin)).toBe("2025-02-11");
+		expect(fin.toISOString()).toBe("2025-02-12T05:59:59.999Z");
+	});
+
+	it("un instante después ya es el día siguiente GT", () => {
+		const fin = finDelDiaGT(gt("2025-02-11"));
+		expect(gtDay(new Date(fin.getTime() + 1))).toBe("2025-02-12");
 	});
 });

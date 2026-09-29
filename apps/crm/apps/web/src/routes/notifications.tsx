@@ -368,6 +368,17 @@ const COBROS_TIPO_CONFIG: Record<
 		badge:
 			"bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
 	},
+	// CB-037/038: una visita programada (al programarla y la mañana del día).
+	visita_programada: {
+		label: "Visita programada",
+		border: "border-violet-200 dark:border-violet-900/50",
+		bg: "bg-violet-50/50 dark:bg-violet-950/20",
+		icon: MapPin,
+		iconWrap: "bg-violet-100 dark:bg-violet-900/40",
+		iconColor: "text-violet-600 dark:text-violet-400",
+		badge:
+			"bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400",
+	},
 };
 
 // Acento lateral por redirectPage: da variedad de color al resto de la lista

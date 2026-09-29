@@ -60,7 +60,7 @@ export const metodoContactoEnum = pgEnum("metodo_contacto", [
 	"carta_notarial",
 	"pago",
 	// CB-038: la visita al lugar de trabajo, como canal propio en el historial
-	// (la de residencia sigue siendo "visita_domicilio"). Migración 0068.
+	// (la de residencia sigue siendo "visita_domicilio"). Migración 0069.
 	"visita_trabajo",
 ]);
 

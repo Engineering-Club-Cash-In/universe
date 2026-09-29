@@ -92,7 +92,7 @@ const METODOS_CONTACTO = [
 	"carta_notarial",
 	// CB-128: mismo motivo que arriba.
 	"pago",
-	// CB-038 (migración 0068).
+	// CB-038 (migración 0069).
 	"visita_trabajo",
 ] as const;
 

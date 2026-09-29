@@ -322,6 +322,12 @@ const ALERTA_COBROS_CONFIG: Record<string, { label: string; clase: string }> = {
 		clase:
 			"bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
 	},
+	// CB-037/038: visita programada para el responsable.
+	visita_programada: {
+		label: "Visita programada",
+		clase:
+			"bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300",
+	},
 };
 
 function getMetodoIcon(metodo: string) {

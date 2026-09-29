@@ -105,7 +105,7 @@ Y en el CRM: `0025` premora · `0027` alertas de cobros · `0030` reducción CB-
 `0066` y `0067` quitan la asignación del CRM (`responsable_cobros`): la `0066` antes o junto
 con el deploy, la `0067` **después** — ver
 [el CRM no asigna](./02-motor-y-asignacion.md#el-crm-no-asigna-2026-09-28) ·
-`0068` visitas a residencia y trabajo (CB-037/038) — ver [doc 10](./10-visitas.md).
+`0069` visitas a residencia y trabajo (CB-037/038) — ver [doc 10](./10-visitas.md).
 
 ---
 

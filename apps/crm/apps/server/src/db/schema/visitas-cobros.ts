@@ -13,7 +13,7 @@ import { casosCobros, contactosCobros, recuperacionesVehiculo } from "./cobros";
 
 /**
  * CB-037 / CB-038 — Visita de cobros a la residencia o al lugar de trabajo del
- * cliente (migración 0068).
+ * cliente (migración 0069).
  *
  * Es una tarea con dos momentos: `programada` (dirección, responsable, fecha)
  * y `realizada` (resultado, evidencia, próximo paso); también se puede

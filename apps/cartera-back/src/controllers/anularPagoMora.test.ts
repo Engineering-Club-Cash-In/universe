@@ -1,0 +1,570 @@
+/**
+ * Anular una boleta y devolverle su mora al crédito: UN SOLO HECHO.
+ *
+ * ── Los dos defectos que estas pruebas fijan ────────────────────────────────
+ *
+ * 1) NO ERA ATÓMICO. `falsePayment` marcaba el pago (`paymentFalse = true`) en
+ *    un commit y restituía la mora en otro. Si la restitución fallaba, la
+ *    anulación ya estaba firme —lanzar no la deshace— y el reintento leía
+ *    `paymentFalse = true`, con lo que la regla devolvía `null` y la
+ *    restitución quedaba saltada PARA SIEMPRE.
+ *
+ * 2) SOBRECOBRABA. Registrar un pago baja la mora en el acto, pero el criterio
+ *    de cobertura del cron solo cuenta pagos `validated`/`no_required`: un pago
+ *    que amanece `pending` deja su cuota contada como vencida y `procesarMoras`
+ *    vuelve a FIJAR la mora completa. Sumarle después `pagos_credito.mora` al
+ *    anular dejaba el doble (Q100 → Q0 → Q100 del cron → Q200).
+ *
+ * Se ejerce la función de verdad contra una base falsa: `updateMora` entra por
+ * `deps` porque tres archivos de la suite lo mockean globalmente con
+ * `mock.module("./latefee")` y la prueba no puede quedar a merced de cuál gane
+ * la corrida.
+ */
+import { beforeEach, describe, expect, it } from "bun:test";
+import { creditos, moras_historial, pagos_credito } from "../database/db/schema";
+import { MOTIVO_ANULACION_MORA_PREFIJO } from "../utils/motivoReversaMora";
+
+// El módulo arrastra `../database` (por `./latefee`), que exige la URL al
+// cargarse. Se le da una inválida a propósito: nada de esta prueba toca la
+// base —el `tx` y `updateMora` entran inyectados— y así no hace falta un
+// `mock.module("../database")` más, que sería global a toda la corrida.
+process.env.SUPABASE_DB_URL ??= "postgresql://nadie:nadie@127.0.0.1:1/ninguna";
+const { anularPagoYRestituirMora } = await import("./anularPagoMora");
+
+const PAGO_ID = 301;
+const CREDITO_ID = 4242;
+const AYER = new Date("2026-09-22T10:00:00.000Z");
+
+type Llamada = { tabla: any; via: "select for update" | "select" | "update" };
+
+const estado: {
+  selects: any[][];
+  llamadas: Llamada[];
+  rowCount: number;
+  updateMoraArgs: any[];
+  updateMoraResultado: { success: boolean; message?: string };
+  resets: number[];
+  /** Los `pago_id` a los que se les devolvieron los rubros, en orden. */
+  rubrosRevertidos: number[];
+  /** Las condiciones que recibió cada `.where()`, para poder mirarlas. */
+  wheres: any[];
+} = {
+  selects: [],
+  llamadas: [],
+  rowCount: 1,
+  updateMoraArgs: [],
+  updateMoraResultado: { success: true },
+  resets: [],
+  rubrosRevertidos: [],
+  wheres: [],
+};
+
+/**
+ * Un `where` de drizzle es un árbol con los valores adentro; serializarlo deja
+ * ver QUÉ filtra, que es lo único que una base falsa no evalúa por su cuenta.
+ */
+const textoDeCondicion = (cond: any) =>
+  JSON.stringify(cond, (_k, v) =>
+    typeof v === "object" && v !== null && "table" in v ? "<col>" : v,
+  );
+
+/** Un `tx` de drizzle lo bastante real para este camino. */
+const txFalso: any = {
+  select: () => {
+    let tabla: any = null;
+    let candado = false;
+    const b: any = {
+      from: (t: any) => ((tabla = t), b),
+      where: (cond: any) => (estado.wheres.push(cond), b),
+      limit: () => b,
+      orderBy: () => b,
+      for: () => ((candado = true), b),
+      then: (res: any, rej: any) => {
+        estado.llamadas.push({
+          tabla,
+          via: candado ? "select for update" : "select",
+        });
+        return Promise.resolve(estado.selects.shift() ?? []).then(res, rej);
+      },
+    };
+    return b;
+  },
+  update: (tabla: any) => ({
+    set: () => {
+      const b: any = {
+        where: () => b,
+        returning: () => {
+          estado.llamadas.push({ tabla, via: "update" });
+          return Promise.resolve([]);
+        },
+        then: (res: any, rej: any) => {
+          estado.llamadas.push({ tabla, via: "update" });
+          return Promise.resolve({ rowCount: estado.rowCount }).then(res, rej);
+        },
+      };
+      return b;
+    },
+  }),
+};
+
+const deps = {
+  updateMora: (async (args: any) => {
+    estado.updateMoraArgs.push(args);
+    return estado.updateMoraResultado;
+  }) as any,
+  resetAjusteFechaIdeal: (async (pago_id: number) => {
+    estado.resets.push(pago_id);
+  }) as any,
+  // Los rubros que la boleta falsa había cobrado se devuelven acá adentro, en
+  // la MISMA transacción. Entra por `deps` como las demás: `./rubros` arrastra
+  // la conexión real y varios archivos de la suite lo mockean.
+  revertirRubros: (async (pago_id: number) => {
+    estado.rubrosRevertidos.push(pago_id);
+    return [];
+  }) as any,
+};
+
+const anular = () =>
+  anularPagoYRestituirMora(
+    txFalso,
+    { pago_id: PAGO_ID, credito_id: CREDITO_ID },
+    deps,
+  );
+
+/**
+ * Los SELECT que consume el camino, EN ORDEN: el crédito (candado), el pago,
+ * el `DECREMENTO` marcado con este pago y —solo si no hay decremento marcado—
+ * los eventos automáticos del cron posteriores al pago.
+ *
+ * `decremento: []` es el caso de los decrementos VIEJOS, los que se escribieron
+ * antes de que la marca existiera: ahí el camino cae al criterio de antes, y es
+ * por eso que los casos del cron de más abajo siguen valiendo tal cual.
+ */
+const prepararBase = ({
+  pago,
+  decremento = [],
+  posteriores = [],
+  eventosDelCron = [],
+  credito = [{ credito_id: CREDITO_ID }],
+}: {
+  pago: any[];
+  decremento?: any[];
+  posteriores?: any[];
+  eventosDelCron?: any[];
+  credito?: any[];
+}) => {
+  estado.selects = decremento.length
+    ? [credito, pago, decremento, posteriores]
+    : [credito, pago, decremento, eventosDelCron];
+};
+
+const PAGO_CON_MORA = [
+  { mora: "100.00", paymentFalse: false, created_at: AYER },
+];
+
+beforeEach(() => {
+  estado.selects = [];
+  estado.llamadas = [];
+  estado.rowCount = 1;
+  estado.updateMoraArgs = [];
+  estado.updateMoraResultado = { success: true };
+  estado.resets = [];
+  estado.rubrosRevertidos = [];
+  estado.wheres = [];
+});
+
+describe("anular la boleta y restituir su mora", () => {
+  it("marca el pago y devuelve la mora que esa boleta había cobrado", async () => {
+    prepararBase({ pago: PAGO_CON_MORA });
+
+    const filas = await anular();
+
+    expect(filas).toBe(1);
+    expect(estado.llamadas.some((l) => l.tabla === pagos_credito && l.via === "update")).toBe(true);
+    expect(estado.updateMoraArgs.length).toBe(1);
+    expect(estado.updateMoraArgs[0].monto_cambio).toBe(100);
+    expect(estado.updateMoraArgs[0].tipo).toBe("INCREMENTO");
+    expect(estado.updateMoraArgs[0].motivo.startsWith(MOTIVO_ANULACION_MORA_PREFIJO)).toBe(true);
+    // Y la restitución viaja por la MISMA transacción: sin esto commitearía
+    // sola y el rollback del caller no la alcanzaría.
+    expect(estado.updateMoraArgs[0].dbClient).toBe(txFalso);
+  });
+
+  it("si la restitución falla, TIRA: el pago no puede quedar marcado", async () => {
+    prepararBase({ pago: PAGO_CON_MORA });
+    estado.updateMoraResultado = { success: false, message: "mora no encontrada" };
+
+    // Tirar es lo que aborta la transacción del caller y deja el pago SIN
+    // marcar. Sin esto, la boleta quedaba anulada y la mora no volvía nunca:
+    // el reintento leía `paymentFalse = true` y se saltaba la restitución.
+    await expect(anular()).rejects.toThrow(
+      "Error al restituir la mora del pago anulado",
+    );
+  });
+
+  it("un reintento después de ese fallo vuelve a intentar LAS DOS cosas", async () => {
+    // El rollback dejó el pago como estaba (`paymentFalse = false`), así que la
+    // segunda pasada ve exactamente lo mismo que la primera y restituye.
+    prepararBase({ pago: PAGO_CON_MORA });
+    estado.updateMoraResultado = { success: false, message: "error transitorio" };
+    await expect(anular()).rejects.toThrow();
+
+    estado.llamadas = [];
+    estado.updateMoraArgs = [];
+    estado.updateMoraResultado = { success: true };
+    prepararBase({ pago: PAGO_CON_MORA });
+
+    await anular();
+
+    expect(estado.updateMoraArgs.length).toBe(1);
+    expect(estado.updateMoraArgs[0].monto_cambio).toBe(100);
+    expect(estado.llamadas.some((l) => l.tabla === pagos_credito && l.via === "update")).toBe(true);
+  });
+
+  it("anular dos veces no restituye dos veces, ni devuelve los rubros dos veces", async () => {
+    // La boleta ya estaba falsa. Quien corta la repetición es el
+    // `paymentFalse = false` del WHERE del UPDATE: no encuentra fila, el
+    // `rowCount` es 0, y el guard tira ANTES de devolver rubros o mora.
+    //
+    // (Antes lo cortaba el `paymentFalse` leído en el SELECT, que seguía
+    // adelante y solo se saltaba la restitución. Era más débil: el UPDATE
+    // pasaba igual y los rubros se devolvían de nuevo, sumándole al rubro un
+    // `monto_aplicado` que ya le habían devuelto.)
+    prepararBase({
+      pago: [{ mora: "100.00", paymentFalse: true, created_at: AYER }],
+    });
+    estado.rowCount = 0;
+
+    await expect(anular()).rejects.toThrow("No payment found");
+
+    expect(estado.updateMoraArgs.length).toBe(0);
+    expect(estado.rubrosRevertidos).toEqual([]);
+  });
+
+  it("🧾 devuelve los rubros que la boleta falsa cobró, DESPUÉS del UPDATE y ANTES de la mora", async () => {
+    prepararBase({ pago: PAGO_CON_MORA });
+
+    await anular();
+
+    // Que se hayan devuelto: sin esto, un reclamo YA APLICADO dejaba el saldo
+    // del rubro descontado por una boleta que se declaró falsa.
+    expect(estado.rubrosRevertidos).toEqual([PAGO_ID]);
+
+    // Y el ORDEN: el UPDATE (con su guard de rowCount) primero, para no
+    // devolverle rubros a un pago que no es de este crédito; la mora al final,
+    // porque su fallo es el que tiene que abortar todo lo demás.
+    const updatePago = estado.llamadas.findIndex(
+      (l) => l.tabla === pagos_credito && l.via === "update",
+    );
+    expect(updatePago).toBeGreaterThan(-1);
+    expect(estado.updateMoraArgs.length).toBe(1);
+  });
+
+  it("si el UPDATE no encuentra la fila, los rubros NO se tocan", async () => {
+    prepararBase({ pago: PAGO_CON_MORA });
+    estado.rowCount = 0;
+
+    await expect(anular()).rejects.toThrow("No payment found");
+    expect(estado.rubrosRevertidos).toEqual([]);
+  });
+
+  it("lee la fila del pago CON CANDADO (dos anulaciones simultáneas leían las dos `false`)", async () => {
+    prepararBase({ pago: PAGO_CON_MORA });
+
+    await anular();
+
+    expect(
+      estado.llamadas.some(
+        (l) => l.tabla === pagos_credito && l.via === "select for update",
+      ),
+    ).toBe(true);
+  });
+
+  it("🔒 toma el candado de `creditos` antes de pedirle la mora a updateMora", async () => {
+    prepararBase({ pago: PAGO_CON_MORA });
+
+    await anular();
+
+    // La regla del módulo (bloque al inicio de latefee.ts): creditos primero,
+    // moras_credito después. `updateMora` toma la de la mora, así que su
+    // llamada tiene que venir DESPUÉS del candado del crédito.
+    const candadoCredito = estado.llamadas.findIndex(
+      (l) => l.tabla === creditos && l.via === "select for update",
+    );
+    expect(candadoCredito).toBe(0);
+    expect(estado.updateMoraArgs.length).toBe(1);
+  });
+
+  it("un pago sin mora no toca la mora del crédito", async () => {
+    prepararBase({
+      pago: [{ mora: "0.00", paymentFalse: false, created_at: AYER }],
+    });
+
+    await anular();
+
+    expect(estado.updateMoraArgs.length).toBe(0);
+    expect(estado.resets).toEqual([PAGO_ID]);
+  });
+
+  it("un pago que no existe no marca nada", async () => {
+    prepararBase({ pago: [] });
+    estado.rowCount = 0;
+
+    await expect(anular()).rejects.toThrow("No payment found");
+    expect(estado.updateMoraArgs.length).toBe(0);
+  });
+
+  it("un crédito que no existe tira ANTES de tocar el pago", async () => {
+    prepararBase({ pago: PAGO_CON_MORA, credito: [] });
+
+    await expect(anular()).rejects.toThrow("No payment found");
+    expect(estado.llamadas.some((l) => l.tabla === pagos_credito)).toBe(false);
+  });
+});
+
+describe("el pago pendiente que sobrevivió una corrida del cron", () => {
+  it("si el cron ya repuso la mora, anular NO la suma otra vez", async () => {
+    // Q100 de mora → el pago pendiente la baja a Q0 → el cron, que no cuenta
+    // los pagos `pending` como cobertura, la vuelve a fijar en Q100 (CREACION)
+    // → anular sumaba otros Q100 y el crédito quedaba en Q200.
+    prepararBase({
+      pago: PAGO_CON_MORA,
+      eventosDelCron: [{ historial_id: 9001 }],
+    });
+
+    await anular();
+
+    expect(estado.updateMoraArgs.length).toBe(0);
+    // Pero la boleta SÍ queda anulada: lo que sobra es la restitución, no la
+    // anulación.
+    expect(
+      estado.llamadas.some((l) => l.tabla === pagos_credito && l.via === "update"),
+    ).toBe(true);
+  });
+
+  it("si el cron no pasó, restituye completa", async () => {
+    prepararBase({ pago: PAGO_CON_MORA, eventosDelCron: [] });
+
+    await anular();
+
+    expect(estado.updateMoraArgs.length).toBe(1);
+    expect(estado.updateMoraArgs[0].monto_cambio).toBe(100);
+  });
+
+  it("sin fecha en la fila del pago y sin marca no se reconcilia: se restituye", async () => {
+    // Doblemente a ciegas: el decremento no lleva marca y la fila del pago
+    // tampoco tiene `createdat`, así que no se puede saber qué pasó después.
+    // Se restituye: el sobrecobro lo corrige el cron en su próxima corrida,
+    // perderle la mora al crédito no lo corrige nadie.
+    //
+    // Lo que ya NO vale es la afirmación vieja de "ni siquiera se consulta el
+    // historial": la búsqueda del decremento marcado NO depende de la fecha, y
+    // por eso se hace igual. Esa independencia es justamente el arreglo.
+    prepararBase({
+      pago: [{ mora: "100.00", paymentFalse: false, created_at: null }],
+      eventosDelCron: [{ historial_id: 9001 }],
+    });
+
+    await anular();
+
+    expect(estado.updateMoraArgs.length).toBe(1);
+    expect(estado.updateMoraArgs[0].monto_cambio).toBe(100);
+  });
+
+  it("si el cron ya repuso, NO restituye pero DEJA EL DECREMENTO MARCADO", async () => {
+    // El tercer defecto: la regla devolvía `null` y la anulación no dejaba
+    // ningún rastro. El reporte seguía viendo la bajada sin contrapartida y
+    // contaba la reposición del cron como mora NUEVA (Q100 de foto terminaban
+    // en Q200 de esperado). No hacía falta un monto: hacía falta que el HECHO
+    // quedara escrito.
+    prepararBase({
+      pago: PAGO_CON_MORA,
+      decremento: [
+        {
+          historial_id: 7001,
+          fecha: AYER,
+          monto_anterior: "100.00",
+          monto_nuevo: "0.00",
+          motivo: `Pago aplicado a mora (crédito 4242) [pago #${PAGO_ID}]`,
+        },
+      ],
+      posteriores: [{ monto_anterior: "0.00", monto_nuevo: "100.00" }],
+    });
+
+    await anular();
+
+    expect(estado.updateMoraArgs.length).toBe(0);
+    expect(
+      estado.llamadas.filter(
+        (l) => l.tabla === moras_historial && l.via === "update",
+      ).length,
+    ).toBe(1);
+  });
+
+  it("restituye la DIFERENCIA cuando el cron repuso solo una parte", async () => {
+    prepararBase({
+      pago: PAGO_CON_MORA,
+      decremento: [
+        {
+          historial_id: 7001,
+          fecha: AYER,
+          monto_anterior: "100.00",
+          monto_nuevo: "0.00",
+          motivo: `Pago aplicado a mora (crédito 4242) [pago #${PAGO_ID}]`,
+        },
+      ],
+      posteriores: [{ monto_anterior: "0.00", monto_nuevo: "60.00" }],
+    });
+
+    await anular();
+
+    expect(estado.updateMoraArgs.length).toBe(1);
+    expect(estado.updateMoraArgs[0].monto_cambio).toBe(40);
+    // Y la marca va igual: el monto y el rastro son cosas distintas.
+    expect(
+      estado.llamadas.some(
+        (l) => l.tabla === moras_historial && l.via === "update",
+      ),
+    ).toBe(true);
+  });
+
+  it("una boleta YA falsa no vuelve a marcar el decremento", async () => {
+    // Cambió QUIÉN lo impide, no el resultado. Antes el camino seguía hasta el
+    // final y se salteaba la marca porque había leído `paymentFalse` en el
+    // SELECT. Ahora ni siquiera llega: el `paymentFalse = false` del WHERE del
+    // UPDATE no encuentra fila, el `rowCount` es 0 y el guard tira. Es más
+    // fuerte, porque también corta los rubros y la mora, que el criterio viejo
+    // dejaba pasar.
+    prepararBase({
+      pago: [{ mora: "100.00", paymentFalse: true, created_at: AYER }],
+      decremento: [
+        {
+          historial_id: 7001,
+          fecha: AYER,
+          monto_anterior: "100.00",
+          monto_nuevo: "0.00",
+          motivo: `Pago aplicado a mora (crédito 4242) [pago #${PAGO_ID}]`,
+        },
+      ],
+      posteriores: [],
+    });
+    estado.rowCount = 0;
+
+    await expect(anular()).rejects.toThrow("No payment found");
+
+    expect(estado.updateMoraArgs.length).toBe(0);
+    expect(estado.rubrosRevertidos).toEqual([]);
+    expect(
+      estado.llamadas.some(
+        (l) => l.tabla === moras_historial && l.via === "update",
+      ),
+    ).toBe(false);
+  });
+
+  it("consulta el historial del cron con candado del crédito ya tomado", async () => {
+    prepararBase({ pago: PAGO_CON_MORA, eventosDelCron: [] });
+
+    await anular();
+
+    expect(estado.llamadas.some((l) => l.tabla === moras_historial)).toBe(true);
+  });
+
+  it("solo cuentan los eventos con los que el cron FIJA el monto", async () => {
+    prepararBase({ pago: PAGO_CON_MORA, eventosDelCron: [] });
+
+    await anular();
+
+    const condicion = estado.wheres
+      .map(textoDeCondicion)
+      .find((t) => t.includes("PROCESO_AUTO"));
+    expect(condicion).toBeDefined();
+    // CREACION y RECALCULO son los dos con los que el cron REEMPLAZA el monto
+    // desde la fórmula: son los que deshacen la bajada del pago.
+    expect(condicion).toContain("CREACION");
+    expect(condicion).toContain("RECALCULO");
+    // Una DESACTIVACION es lo contrario —apagó la mora— y no repone nada:
+    // contarla dejaría al crédito sin la mora que su cliente volvió a deber.
+    expect(condicion).not.toContain("DESACTIVACION");
+    // Y un ajuste manual tampoco es el cron.
+    expect(condicion).not.toContain("API_MANUAL");
+  });
+});
+
+/**
+ * EL BLOQUEO POR DEVOLUCIÓN PENDIENTE SE DECIDE ANTES DE TOCAR NADA.
+ *
+ * El guard existía, pero corría DESPUÉS de esta transacción, en `falsePayment`:
+ * para cuando rechazaba, la boleta ya estaba marcada falsa y la mora ya estaba
+ * restituida —las dos commiteadas—, y lo único que veía el operador era un 422.
+ * Reintentaba, le salía 422 otra vez, y el pago seguía anulado desde el primer
+ * intento, con su espejo de inversionistas sin escribir.
+ *
+ * Ahora la pregunta se hace sobre la MISMA fila del crédito que esta
+ * transacción ya tiene candada, y el throw la aborta entera.
+ */
+describe("crédito con la devolución a CUBE pendiente de autorización", () => {
+  const CREDITO_BLOQUEADO = [
+    {
+      credito_id: CREDITO_ID,
+      numero_credito_sifco: "SIFCO-4242",
+      estado_devolucion: "PENDIENTE_AUTORIZACION",
+    },
+  ];
+
+  it("rechaza con el código que la ruta traduce a 422", async () => {
+    prepararBase({ pago: PAGO_CON_MORA, credito: CREDITO_BLOQUEADO });
+
+    await expect(anular()).rejects.toMatchObject({
+      code: "CREDIT_PENDING_RETURN_AUTHORIZATION",
+      creditos_bloqueados: [
+        {
+          credito_id: CREDITO_ID,
+          numero_credito_sifco: "SIFCO-4242",
+          estado_devolucion: "PENDIENTE_AUTORIZACION",
+        },
+      ],
+    });
+  });
+
+  it("NO marca la boleta ni restituye mora: el 422 dice la verdad", async () => {
+    prepararBase({ pago: PAGO_CON_MORA, credito: CREDITO_BLOQUEADO });
+
+    await expect(anular()).rejects.toThrow();
+
+    // Esto es el defecto entero: antes las dos cosas YA habían pasado.
+    expect(
+      estado.llamadas.some((l) => l.tabla === pagos_credito && l.via === "update"),
+    ).toBe(false);
+    expect(estado.updateMoraArgs.length).toBe(0);
+    expect(estado.resets.length).toBe(0);
+  });
+
+  it("el crédito se lee CON candado antes de decidir", async () => {
+    // Si se decidiera sobre una lectura sin candado, otro podría estar
+    // cambiando `estado_devolucion` en el mismo instante.
+    prepararBase({ pago: PAGO_CON_MORA, credito: CREDITO_BLOQUEADO });
+    await expect(anular()).rejects.toThrow();
+
+    expect(estado.llamadas[0]).toEqual({
+      tabla: creditos,
+      via: "select for update",
+    });
+  });
+
+  it("un crédito SIN devolución pendiente sigue anulándose normal", async () => {
+    // El guard no puede haberse vuelto un portazo para todos.
+    prepararBase({
+      pago: PAGO_CON_MORA,
+      credito: [
+        {
+          credito_id: CREDITO_ID,
+          numero_credito_sifco: "SIFCO-4242",
+          estado_devolucion: "NO_APLICA",
+        },
+      ],
+    });
+
+    expect(await anular()).toBe(1);
+    expect(estado.updateMoraArgs.length).toBe(1);
+  });
+});

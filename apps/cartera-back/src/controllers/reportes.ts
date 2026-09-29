@@ -2281,8 +2281,21 @@ export async function getMoraRecuperacionPorAsesor({
     asesor_id: number | null;
     nombre: string | null;
     esperado: string;
-    cobrado_en_snapshot: string;
-    cobrado_fuera_snapshot: string;
+    // `JSON_BUILD_OBJECT` devuelve los montos como texto a propósito: numeric →
+    // número de JSON los haría pasar por el double del driver.
+    eventos: {
+      tipoEvento: string;
+      montoAnterior: string;
+      montoNuevo: string;
+      reverso: boolean;
+      // El DECREMENTO cuyo pago se cayó. Viaja en el JSON desde
+      // `esDecrementoAnuladoSql`; si no se mapea, `plegarNivel` no lo
+      // saltea y la reposición del cron se cuenta como mora NUEVA.
+      anulado: boolean;
+    }[];
+    // Techo sembrado con el historial ANTERIOR al ciclo, ya agregado en SQL.
+    nivel_sembrado: string;
+    cobrado: string;
   }>(buildMoraRecoveryQuery({ ...period, asesores, emailCobrador }));
 
   return buildMoraRecoveryReport(
@@ -2290,8 +2303,15 @@ export async function getMoraRecuperacionPorAsesor({
       asesorId: row.asesor_id,
       nombre: row.nombre ?? "Sin asignar",
       esperado: row.esperado,
-      cobradoEnSnapshot: row.cobrado_en_snapshot,
-      cobradoFueraSnapshot: row.cobrado_fuera_snapshot,
+      eventos: (row.eventos ?? []).map((evento) => ({
+        tipoEvento: evento.tipoEvento,
+        montoAnterior: Number(evento.montoAnterior),
+        montoNuevo: Number(evento.montoNuevo),
+        reverso: evento.reverso === true,
+        anulado: evento.anulado === true,
+      })),
+      nivelSembrado: row.nivel_sembrado,
+      cobrado: row.cobrado,
     })),
     period,
   );

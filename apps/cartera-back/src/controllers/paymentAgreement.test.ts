@@ -17,6 +17,30 @@ const eventos: Array<
 > = [];
 /** Cola de resultados para cada db.select() en orden de ejecución. */
 let selectQueue: unknown[][] = [];
+/**
+ * El CAMINO DE LECTURAS: contra qué tabla se consumió cada entrada de
+ * `selectQueue`, en orden.
+ *
+ * ── Qué vigila y qué NO ────────────────────────────────────────────────────
+ * Vigila que el camino de lecturas del convenio no cambie sin que nadie se
+ * entere, y de paso lo documenta en un solo lugar legible.
+ *
+ * NO es un detector de cola desalineada, y conviene decirlo porque es fácil
+ * creer que sí: el código lee siempre las mismas tablas en el mismo orden, así
+ * que correr la cola un lugar no cambia esta secuencia —solo cambia QUÉ filas
+ * le tocan a cada una—. Para detectar eso haría falta parear tabla con filas,
+ * como se hizo en `latefeeDesactivarMora.test.ts`.
+ *
+ * Acá no hizo falta: se midió que las aserciones que ya tenía este archivo SÍ
+ * se ponen rojas con la cola corrida (11 de 23 en rojo), porque están pegadas
+ * a los valores que salen de las lecturas —el email, el `credito_id`, los
+ * montos de la mora—. Este rastro le agrega diagnóstico, no cobertura.
+ */
+let lecturas: string[] = [];
+
+/** El nombre de la tabla que drizzle lleva adentro del objeto. */
+const tablaDe = (t: any) =>
+  t?.[Symbol.for("drizzle:Name")] ?? t?._?.name ?? "?";
 /** Simula el update guardado del commit: false = 0 filas afectadas. */
 let updateAffectsRows = true;
 let updateResultQueue: boolean[] = [];
@@ -57,7 +81,15 @@ const makeSelect = () => {
     innerJoin: () => fromChain,
     leftJoin: () => fromChain,
   };
-  return { from: () => fromChain };
+  // La entrada de la cola ya se consumió arriba (en `makeSelect`), pero la
+  // tabla recién se conoce acá. Drizzle siempre encadena `.from()` justo
+  // después de `.select()`, así que el par queda 1:1 y en orden.
+  return {
+    from: (tabla?: unknown) => {
+      lecturas.push(tablaDe(tabla));
+      return fromChain;
+    },
+  };
 };
 
 const dbMock = {
@@ -184,6 +216,7 @@ beforeEach(() => {
   eventos.length = 0;
   inserts.length = 0;
   selectQueue = [];
+  lecturas = [];
   insertReturnQueue = [];
   deleteCalls = 0;
   updateAffectsRows = true;
@@ -412,6 +445,19 @@ describe("createPaymentAgreement: la mora se desactiva, NO se borra", () => {
     armarBase();
 
     await createPaymentAgreement(input);
+
+    // ── EL CAMINO DE LECTURAS DEL CONVENIO, EN ORDEN ───────────────────────
+    // Documenta el camino y lo congela: si alguien agrega o quita una lectura,
+    // esto lo dice y señala dónde. (Que la cola esté BIEN ALINEADA lo cubren
+    // las aserciones de más abajo, que están pegadas a los valores leídos.)
+    expect(lecturas).toEqual([
+      "platform_users", // quién crea el convenio (created_by)
+      "pagos_credito", // los pagos que el convenio va a absorber
+      "creditos", // el crédito, ya marcado EN_CONVENIO
+      "convenios_pago", // ¿ya hay un convenio activo? (guard de duplicado)
+      "cuotas_credito", // las cuotas sobre las que se arma el plan
+      "moras_credito", // la mora a desactivar — FOR UPDATE, y ÚLTIMA
+    ]);
 
     const updMora = updates.find((values) => values.activa === false);
     expect(updMora).toBeDefined();

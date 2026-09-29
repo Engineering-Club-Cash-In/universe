@@ -398,6 +398,24 @@ describe("orden de candados: creditos ANTES que moras_credito", () => {
     expect(desactiva).toBeGreaterThan(-1);
     expect(update).toBeLessThan(desactiva);
   });
+
+  it("la reversa de pago restituye la mora FUERA de su transacción", () => {
+    // `reversePayment` abre una transacción larga que toca `creditos` (paso
+    // 7️⃣) y muchas tablas más, y restituye la mora llamando a `updateMora` por
+    // el `db` global: su transacción NUNCA candea `moras_credito`, así que no
+    // puede formar el ciclo. La reconciliación que decide CUÁNTO restituir sí
+    // lee por `tx`, pero es una lectura sin `FOR UPDATE` y no candea nada.
+    //
+    // Si alguien le pasa `dbClient: tx` a esa llamada, el camino entra al
+    // alcance de la regla y hay que pensarlo de nuevo —además de cambiarle la
+    // semántica de rollback a toda la reversa—. Esta prueba existe para que ese
+    // cambio no pase de largo.
+    const fuente = readFileSync(join(import.meta.dir, "reversePayment.ts"), "utf8");
+    const desde = fuente.indexOf("await dependencies.restituirMora({");
+    expect(desde).toBeGreaterThan(-1);
+    const llamada = fuente.slice(desde, fuente.indexOf("});", desde));
+    expect(llamada).not.toContain("dbClient");
+  });
 });
 
 describe("moras_historial.fecha: la hora de la ESCRITURA, no la del BEGIN", () => {

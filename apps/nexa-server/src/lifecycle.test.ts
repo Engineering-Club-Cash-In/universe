@@ -26,7 +26,7 @@ const baseEnv = {
   NEXA_CA_CERT_PATH: "/certs/ca.crt",
 };
 
-test("qa lifecycle drains application and review work without polling, then stop prevents later cycles", async () => {
+test.each(["qa_real_payments", "production"])("%s lifecycle drains application and review work without polling, then stop prevents later cycles", async (mode) => {
   const scheduler = controlledScheduler();
   let polls = 0;
   let applications = 0;
@@ -37,7 +37,7 @@ test("qa lifecycle drains application and review work without polling, then stop
     review: () => ++reviews < 2,
   });
 
-  const stop = startPaymentLifecycle(loadConfig(baseEnv), deps, { scheduler });
+  const stop = startPaymentLifecycle(loadConfig({ ...baseEnv, NEXA_DEPLOYMENT_MODE: mode, ...(mode === "production" ? { CARTERA_TARGET_ENV: "production", CARTERA_PRODUCTION_ALLOWED_ORIGINS: baseEnv.CARTERA_API_BASE_URL } : {}) }), deps, { scheduler });
   await waitFor(() => applications === 3 && reviews === 2);
   const scheduled = [...scheduler.callbacks];
   stop();
@@ -47,7 +47,7 @@ test("qa lifecycle drains application and review work without polling, then stop
   expect({ polls, applications, reviews }).toEqual({ polls: 0, applications: 3, reviews: 2 });
 });
 
-test.each(["integration", "production"] as const)("%s lifecycle does not start payment loops", async (deploymentMode) => {
+test.each(["integration"] as const)("%s lifecycle does not start payment loops", async (deploymentMode) => {
   let calls = 0;
   const config = { ...loadConfig(baseEnv), deploymentMode } as AppConfig;
   const stop = startPaymentLifecycle(config, lifecycleDependencies({

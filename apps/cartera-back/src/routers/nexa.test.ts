@@ -129,6 +129,9 @@ test.each([
     applyPayment: touchedDependency,
     complete: touchedDependency,
     fail: touchedDependency,
+    billPayments: touchedDependency,
+    completeBilling: touchedDependency,
+    failBilling: touchedDependency,
   };
   const handler = createNexaPaymentHandler({
     secret: "s".repeat(32),
@@ -169,8 +172,11 @@ test("una solicitud firmada usa el handler real y la idempotencia en producción
       return { success: true };
     },
     applyPayment: async () => { applied += 1; return { success: true }; },
-    complete: async () => { eventStatus = "applied"; },
+    complete: async () => undefined,
     fail: async () => { eventStatus = "failed"; },
+    billPayments: async () => ({ kind: "billed" }),
+    completeBilling: async () => { eventStatus = "applied"; },
+    failBilling: async () => { eventStatus = "failed"; },
   };
   const handler = createNexaPaymentHandler({ secret, now: () => now, dependencies });
   const router = createNexaInternalRouter("production", true, handler);
@@ -198,6 +204,9 @@ test("rechaza un crédito sin binding a través de la ruta de producción", asyn
     applyPayment: async () => { paymentMutations += 1; return { success: true }; },
     complete: async () => { paymentMutations += 1; },
     fail: async () => undefined,
+    billPayments: async () => { paymentMutations += 1; return { kind: "billed" }; },
+    completeBilling: async () => { paymentMutations += 1; },
+    failBilling: async () => undefined,
   };
   const handler = createNexaPaymentHandler({ secret, now: () => now, dependencies });
   const router = createNexaInternalRouter("production", true, handler);

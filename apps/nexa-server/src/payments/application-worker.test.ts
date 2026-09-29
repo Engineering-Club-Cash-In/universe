@@ -61,6 +61,37 @@ test.each([
   });
 });
 
+test("applied payment keeps billing pending durable while queuing bank approval", async () => {
+  const finalized: unknown[] = [];
+
+  await runApplicationWorkerOnce({
+    repository: repository(baseClaim, {
+      finalize: (...args) => { finalized.push(args); },
+      lookup: () => 42,
+      fail: () => { throw new Error("applied payment must not retry"); },
+    }),
+    cartera: {
+      applyNexaPayment: async () => ({
+        status: "APPLIED",
+        paymentId: 701,
+        billingStatus: "PENDING",
+      }),
+    },
+    now: () => new Date("2026-09-08T12:00:00Z"),
+    leaseSeconds: 10,
+    maxAttempts: 3,
+    backoffSeconds: 1,
+    maxBackoffSeconds: 10,
+  });
+
+  expect(finalized[0]).toEqual([
+    7,
+    { paymentId: 701, reviewStatus: "APPROVED", failureReason: "billing_pending" },
+    new Date("2026-09-08T12:00:00Z"),
+    1,
+  ]);
+});
+
 test("malformed persisted date fails closed before unsupported classification", async () => {
   const finalized: unknown[] = [];
   let tokenLookups = 0;

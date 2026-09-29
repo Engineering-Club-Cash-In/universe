@@ -90,6 +90,54 @@ integrationTest("constraints Nexa resisten concurrencia, replay y rollback", asy
       SELECT status, error FROM cartera.nexa_payment_events WHERE id = ${uncertain!.id}
     `;
     expect(manual).toEqual({ status: "manual_review", error: "payment_outcome_uncertain" });
+
+    await sql`INSERT INTO cartera.pagos_credito (pago_id) VALUES (17)`;
+    const [billingEvent] = await sql<{ id: number }[]>`
+      INSERT INTO cartera.nexa_payment_events
+        (external_reference, nonce, credito_id, amount, currency, payload_hash)
+      VALUES ('qa-billing-state', 'nonce-billing-state', 10, 10.00, 'GTQ', ${"d".repeat(64)})
+      RETURNING id
+    `;
+    await nexaPaymentDependencies.complete(billingEvent!.id, 17);
+    const [pendingBilling] = await sql<{ status: string; pago_id: number }[]>`
+      SELECT status, pago_id FROM cartera.nexa_payment_events WHERE id = ${billingEvent!.id}
+    `;
+    expect(pendingBilling).toEqual({ status: "billing_pending", pago_id: 17 });
+
+    const runtime = await import("./nexaPaymentRuntime");
+    const starts = await Promise.all([
+      runtime.startNexaBilling(billingEvent!.id),
+      runtime.startNexaBilling(billingEvent!.id),
+    ]);
+    expect(starts.sort()).toEqual([false, true]);
+    await runtime.completeNexaBilling(billingEvent!.id, 17);
+    await expectRejected(
+      runtime.completeNexaBilling(billingEvent!.id, 17),
+      "nexa billing completion fence failed",
+    );
+    const [billed] = await sql<{ status: string; pago_id: number }[]>`
+      SELECT status, pago_id FROM cartera.nexa_payment_events WHERE id = ${billingEvent!.id}
+    `;
+    expect(billed).toEqual({ status: "billed", pago_id: 17 });
+
+    const [unknownEvent] = await sql<{ id: number }[]>`
+      INSERT INTO cartera.nexa_payment_events
+        (external_reference, nonce, credito_id, amount, currency, payload_hash, status, pago_id)
+      VALUES ('qa-billing-unknown', 'nonce-billing-unknown', 10, 10.00, 'GTQ', ${"e".repeat(64)}, 'billing_running', 17)
+      RETURNING id
+    `;
+    await runtime.failNexaBilling(
+      unknownEvent!.id,
+      "billing_unknown",
+      "provider_response_ambiguous",
+    );
+    const [unknownBilling] = await sql<{ status: string; error: string }[]>`
+      SELECT status, error FROM cartera.nexa_payment_events WHERE id = ${unknownEvent!.id}
+    `;
+    expect(unknownBilling).toEqual({
+      status: "billing_unknown",
+      error: "provider_response_ambiguous",
+    });
   } finally {
     await sql`DROP SCHEMA IF EXISTS cartera CASCADE`;
     await sql.end();

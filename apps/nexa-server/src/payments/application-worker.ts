@@ -82,7 +82,7 @@ export async function runApplicationWorkerOnce(options: {
     await options.repository.finalizeApplication(claim.id, result.status === "APPLIED" ? {
       paymentId: result.paymentId,
       reviewStatus: "APPROVED",
-      failureReason: null,
+      failureReason: result.billingStatus === "PENDING" ? "billing_pending" : null,
     } : {
       paymentId: null,
       reviewStatus: "REJECTED",

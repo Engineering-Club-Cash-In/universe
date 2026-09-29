@@ -112,9 +112,9 @@ export function puedeReenviarFacturaSeguro(caso: {
 	return { ok: true };
 }
 
-// PROVISIONAL, pendiente de confirmar con negocio qué define la aseguradora.
-// La cotización es la fuente mientras la oportunidad no se cierra; la
-// oportunidad recién copia la aseguradora al cerrarse (close-opportunity.ts).
+// La aseguradora es la de la última cotización (confirmado con negocio). La
+// oportunidad recién la copia al cerrarse (close-opportunity.ts): sin
+// cotización se usa la de la oportunidad y, si tampoco hay, Universales.
 export function resolverAseguradora(
 	deCotizacion: string | null | undefined,
 	deOportunidad: string | null | undefined,

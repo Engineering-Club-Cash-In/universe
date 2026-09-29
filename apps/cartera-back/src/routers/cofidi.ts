@@ -88,8 +88,10 @@ function generarIdInternoRandom(): string {
 }
 
 
-export const dteController = new Elysia({ prefix: "/api/dte" })
-  .use(authMiddleware)
+type FacturarPagoCompletoContext = {
+  body: { pago_id: number; created_by?: number };
+  set: { status?: number | string };
+};
 
   // 🔥 POST - Certificar DTE
   // ========================================================================
@@ -108,9 +110,7 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
   //  6️⃣  FACTURAS DE INTERESES         (1 por cada inversionista no-Cube + 1 para Cube por residuo)
   //  7️⃣  RESPUESTA FINAL
   // ========================================================================
-.post(
-  "/facturar-pago-completo",
-  async ({ body, set }) => {
+export const facturarPagoCompleto = async ({ body, set }: FacturarPagoCompletoContext) => {
     try {
       const { pago_id, created_by } = body;
 
@@ -2243,14 +2243,20 @@ if (facturasExistentes.length > 0) {
         stack: (error as Error).stack,
       };
     }
-  },
-  {
-    body: t.Object({
-      pago_id: t.Number(),
-      created_by: t.Optional(t.Number()),
-    }),
-  }
-)
+};
+
+export const dteController = new Elysia({ prefix: "/api/dte" })
+  .use(authMiddleware)
+  .post(
+    "/facturar-pago-completo",
+    ({ body, set }) => facturarPagoCompleto({ body, set }),
+    {
+      body: t.Object({
+        pago_id: t.Number(),
+        created_by: t.Optional(t.Number()),
+      }),
+    }
+  )
   // 🔥 GET - Obtener por UUID
 
   // 🔥 GET - Obtener por UUID (COFIDI + BD)

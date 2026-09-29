@@ -46,6 +46,7 @@ const notificationWithCreator = {
 	relatedEntityId: notifications.relatedEntityId,
 	redirectPage: notifications.redirectPage,
 	cobrosTipo: notifications.cobrosTipo,
+	fechaVencimiento: notifications.fechaVencimiento,
 	notificacionOrigenId: notifications.notificacionOrigenId,
 	readAt: notifications.readAt,
 	resolvedAt: notifications.resolvedAt,
@@ -392,14 +393,23 @@ export const notificationsRouter = {
 			const COBROS_TIPO_RESOLUCION_BLOQUEADA = [
 				"inmovilizacion_pendiente_aprobacion",
 				"inmovilizacion_llamar_cliente",
+				// CB-035: la tarea de llamada por ingreso a B3 se cierra al registrar
+				// una llamada en el caso (createContactoCobros) o por el job; ocultarla
+				// a mano dejaría al supervisor sin la tarea y sin la alerta de vencida.
+				"b3_llamada_supervisor",
 			] as const;
-			const esWorkflowInmovilizacion =
+			// El texto conserva "inmovilización" para ese flujo (lo asertan sus tests).
+			const mensajeReaperturaCobros = (tipo: string | null) =>
+				tipo?.startsWith("inmovilizacion")
+					? "No se puede reabrir una notificación de inmovilización que ya fue resuelta."
+					: "No se puede reabrir una notificación de un flujo de cobros que ya fue resuelta.";
+			const esWorkflowCobros =
 				notif.cobrosTipo &&
-				(
-					COBROS_TIPO_RESOLUCION_BLOQUEADA as readonly string[]
-				).includes(notif.cobrosTipo);
+				(COBROS_TIPO_RESOLUCION_BLOQUEADA as readonly string[]).includes(
+					notif.cobrosTipo,
+				);
 
-			if (esWorkflowInmovilizacion) {
+			if (esWorkflowCobros) {
 				if (input.status === "resolved" || input.status === "dismissed") {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
@@ -411,8 +421,7 @@ export const notificationsRouter = {
 					notif.status === "resolved" || notif.status === "dismissed";
 				if (esTerminal && input.status !== notif.status) {
 					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
+						message: mensajeReaperturaCobros(notif.cobrosTipo),
 					});
 				}
 			}
@@ -435,12 +444,12 @@ export const notificationsRouter = {
 
 			const now = new Date();
 
-			// CB-041: Si es una notificación de inmovilización, condicionar
+			// CB-041: Si es una notificación de un flujo de cobros, condicionar
 			// atómicamente el UPDATE a que la fila siga abierta (status no terminal).
 			// Si el flujo de negocio la resolvió concurrentemente entre el SELECT
 			// inicial y este UPDATE, el UPDATE no afecta ninguna fila y se rechaza
 			// con BAD_REQUEST en vez de sobreescribir el estado terminal (review de Codex, PR #1758).
-			const whereClause = esWorkflowInmovilizacion
+			const whereClause = esWorkflowCobros
 				? and(
 						eq(notifications.id, input.notificationId),
 						notInArray(notifications.status, ["resolved", "dismissed"]),
@@ -459,10 +468,9 @@ export const notificationsRouter = {
 				.returning();
 
 			if (!updated) {
-				if (esWorkflowInmovilizacion) {
+				if (esWorkflowCobros) {
 					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
+						message: mensajeReaperturaCobros(notif.cobrosTipo),
 					});
 				}
 				throw new ORPCError("NOT_FOUND", {

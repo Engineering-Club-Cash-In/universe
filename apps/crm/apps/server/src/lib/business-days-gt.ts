@@ -75,3 +75,42 @@ export function contarDiasHabilesGT(inicio: Date, fin: Date): number {
 	}
 	return habiles;
 }
+
+/**
+ * Mediodía UTC del `n`-ésimo día hábil (regla de oro) contando DESDE el día
+ * calendario GT de `inicio`, inclusive: `n = 1` es el propio día de `inicio` si
+ * es hábil, si no el siguiente hábil. Es la inversa de `contarDiasHabilesGT`:
+ * `contarDiasHabilesGT(inicio, <día siguiente al resultado>) === n`.
+ *
+ * Uso en cobros (CB-035): el plazo de una tarea "a 3 días hábiles" arranca el
+ * día siguiente a la subida de bucket (`siguienteDiaGT`) y vence el tercer día
+ * hábil contado desde ahí.
+ */
+export function sumarDiasHabilesGT(inicio: Date, n: number): Date {
+	if (!Number.isInteger(n) || n < 1) {
+		throw new RangeError("sumarDiasHabilesGT: n debe ser un entero >= 1");
+	}
+	const { y, m, day } = gtYMD(inicio);
+	let cursor = Date.UTC(y, m - 1, day, 12, 0, 0);
+	let habiles = 0;
+	// Misma guarda defensiva que contarDiasHabilesGT (~3 años).
+	for (let seguridad = 0; seguridad < 1200; seguridad++) {
+		if (esDiaHabilGT(new Date(cursor))) {
+			habiles++;
+			if (habiles === n) return new Date(cursor);
+		}
+		cursor += 24 * 60 * 60 * 1000;
+	}
+	throw new RangeError("sumarDiasHabilesGT: n fuera de rango");
+}
+
+/**
+ * Último instante (23:59:59.999 GT) del día calendario GT de `d`. GT no tiene
+ * DST, así que es siempre las 05:59:59.999 UTC del día siguiente.
+ */
+export function finDelDiaGT(d: Date): Date {
+	const { y, m, day } = gtYMD(d);
+	return new Date(
+		Date.UTC(y, m - 1, day, 12, 0, 0) + 17 * 3_600_000 + 3_599_999,
+	);
+}

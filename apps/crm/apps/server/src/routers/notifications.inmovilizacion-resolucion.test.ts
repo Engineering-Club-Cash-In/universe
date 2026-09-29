@@ -102,7 +102,10 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		await expect(
 			call(
 				notificationsRouter.changeNotificationStatus,
-				{ notificationId: "11111111-1111-1111-1111-111111111111", status: "resolved" },
+				{
+					notificationId: "11111111-1111-1111-1111-111111111111",
+					status: "resolved",
+				},
 				{ context: ctx() },
 			),
 		).rejects.toMatchObject({ code: "BAD_REQUEST" });
@@ -113,7 +116,10 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		await expect(
 			call(
 				notificationsRouter.changeNotificationStatus,
-				{ notificationId: "11111111-1111-1111-1111-111111111111", status: "dismissed" },
+				{
+					notificationId: "11111111-1111-1111-1111-111111111111",
+					status: "dismissed",
+				},
 				{ context: ctx() },
 			),
 		).rejects.toMatchObject({ code: "BAD_REQUEST" });
@@ -126,7 +132,10 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		await expect(
 			call(
 				notificationsRouter.changeNotificationStatus,
-				{ notificationId: "11111111-1111-1111-1111-111111111111", status: "resolved" },
+				{
+					notificationId: "11111111-1111-1111-1111-111111111111",
+					status: "resolved",
+				},
 				{ context: ctx() },
 			),
 		).rejects.toMatchObject({ code: "BAD_REQUEST" });
@@ -136,7 +145,10 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 	it("inmovilizacion_pendiente_aprobacion: 'read' SÍ se permite (no es resolución)", async () => {
 		const res = await call(
 			notificationsRouter.changeNotificationStatus,
-			{ notificationId: "11111111-1111-1111-1111-111111111111", status: "read" },
+			{
+				notificationId: "11111111-1111-1111-1111-111111111111",
+				status: "read",
+			},
 			{ context: ctx() },
 		);
 		expect(res.status).toBe("resolved"); // lo que devuelve el mock del UPDATE
@@ -148,7 +160,10 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		assignedToRoleMock = "cobros";
 		const res = await call(
 			notificationsRouter.changeNotificationStatus,
-			{ notificationId: "11111111-1111-1111-1111-111111111111", status: "resolved" },
+			{
+				notificationId: "11111111-1111-1111-1111-111111111111",
+				status: "resolved",
+			},
 			{ context: ctx() },
 		);
 		expect(res.status).toBe("resolved");
@@ -159,7 +174,10 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		cobrosTipoMock = "promesa_incumplida";
 		const res = await call(
 			notificationsRouter.changeNotificationStatus,
-			{ notificationId: "11111111-1111-1111-1111-111111111111", status: "resolved" },
+			{
+				notificationId: "11111111-1111-1111-1111-111111111111",
+				status: "resolved",
+			},
 			{ context: ctx() },
 		);
 		expect(res.status).toBe("resolved");
@@ -170,7 +188,10 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		cobrosTipoMock = null;
 		const res = await call(
 			notificationsRouter.changeNotificationStatus,
-			{ notificationId: "11111111-1111-1111-1111-111111111111", status: "resolved" },
+			{
+				notificationId: "11111111-1111-1111-1111-111111111111",
+				status: "resolved",
+			},
 			{ context: ctx() },
 		);
 		expect(res.status).toBe("resolved");
@@ -182,7 +203,10 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		await expect(
 			call(
 				notificationsRouter.changeNotificationStatus,
-				{ notificationId: "11111111-1111-1111-1111-111111111111", status: "pending" },
+				{
+					notificationId: "11111111-1111-1111-1111-111111111111",
+					status: "pending",
+				},
 				{ context: ctx() },
 			),
 		).rejects.toMatchObject({
@@ -200,7 +224,10 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		await expect(
 			call(
 				notificationsRouter.changeNotificationStatus,
-				{ notificationId: "11111111-1111-1111-1111-111111111111", status: "read" },
+				{
+					notificationId: "11111111-1111-1111-1111-111111111111",
+					status: "read",
+				},
 				{ context: ctx() },
 			),
 		).rejects.toMatchObject({
@@ -218,7 +245,10 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		await expect(
 			call(
 				notificationsRouter.changeNotificationStatus,
-				{ notificationId: "11111111-1111-1111-1111-111111111111", status: "in_progress" },
+				{
+					notificationId: "11111111-1111-1111-1111-111111111111",
+					status: "in_progress",
+				},
 				{ context: ctx() },
 			),
 		).rejects.toMatchObject({
@@ -238,7 +268,10 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 		await expect(
 			call(
 				notificationsRouter.changeNotificationStatus,
-				{ notificationId: "11111111-1111-1111-1111-111111111111", status: "read" },
+				{
+					notificationId: "11111111-1111-1111-1111-111111111111",
+					status: "read",
+				},
 				{ context: ctx() },
 			),
 		).rejects.toMatchObject({
@@ -247,5 +280,34 @@ describe("CB-041 — changeNotificationStatus bloquea resolución manual del flu
 				"No se puede reabrir una notificación de inmovilización que ya fue resuelta.",
 		});
 		expect(updateLlamado).toBe(true);
+	});
+
+	it("b3_llamada_supervisor (CB-035): resolved/dismissed a mano rechaza y reabrir una terminal usa el texto genérico", async () => {
+		cobrosTipoMock = "b3_llamada_supervisor";
+		notifStatusMock = "pending";
+		for (const status of ["resolved", "dismissed"] as const) {
+			await expect(
+				call(
+					notificationsRouter.changeNotificationStatus,
+					{ notificationId: "11111111-1111-1111-1111-111111111111", status },
+					{ context: ctx() },
+				),
+			).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		}
+		notifStatusMock = "resolved";
+		await expect(
+			call(
+				notificationsRouter.changeNotificationStatus,
+				{
+					notificationId: "11111111-1111-1111-1111-111111111111",
+					status: "pending",
+				},
+				{ context: ctx() },
+			),
+		).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message:
+				"No se puede reabrir una notificación de un flujo de cobros que ya fue resuelta.",
+		});
 	});
 });

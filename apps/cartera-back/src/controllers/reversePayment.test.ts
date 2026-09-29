@@ -113,6 +113,13 @@ type RecordedUpdate = {
   where?: unknown;
 };
 
+/** Contra qué tabla se consumió cada lectura del harness, EN ORDEN. */
+let lecturas: string[] = [];
+
+/** El nombre de la tabla que drizzle lleva adentro del objeto. */
+const tablaDe = (t: any) =>
+  t?.[Symbol.for("drizzle:Name")] ?? t?._?.name ?? "?";
+
 function createTransactionTx(
   payment: Record<string, unknown> = pendingPayment,
   recordedUpdates: RecordedUpdate[] = [],
@@ -126,6 +133,8 @@ function createTransactionTx(
   /** Cláusulas WHERE con las que la reversa pidió ese `COUNT(*)`. */
   recordedCountWheres: unknown[] = [],
 ) {
+  // Cada harness es una corrida: la traza de lecturas arranca limpia.
+  lecturas = [];
   const selectResults: unknown[][] = [[payment], [activeCredit], [user], []];
   const takeRows = () => {
     const rows = selectResults.shift() ?? [];
@@ -155,10 +164,18 @@ function createTransactionTx(
   };
   return {
     select: mock((fields?: Record<string, unknown>) => ({
-      from: () => ({
-        innerJoin: () => ({ where: takeRows }),
-        where: fields && "count" in fields ? takeCount : takeRows,
-      }),
+      from: (tabla?: unknown) => {
+        // El CAMINO de lecturas de la reversa, en orden: documenta el camino y
+        // lo congela. NO es un detector de cola desalineada —el código lee las
+        // mismas tablas pase lo que pase; correr la cola solo cambia qué filas
+        // recibe cada una—. Eso acá ya lo agarran las aserciones pegadas a los
+        // valores leídos (medido: 8 de 14 en rojo con la cola corrida).
+        lecturas.push(tablaDe(tabla));
+        return {
+          innerJoin: () => ({ where: takeRows }),
+          where: fields && "count" in fields ? takeCount : takeRows,
+        };
+      },
     })),
     update: mock((table: unknown) => ({
       set: (payload: Record<string, unknown>) => {
@@ -213,6 +230,11 @@ function createPersistenceHarness(
     refrescarProyeccion: mock(() =>
       Promise.resolve({ corrio: true as const }),
     ) as unknown as ReversePaymentDependencies["refrescarProyeccion"],
+    // La restitución de mora entra inyectada (ver ReversePaymentDependencies);
+    // estos escenarios corren con `mora: "0"`, así que no debería llamarse.
+    restituirMora: (async () => ({
+      success: true,
+    })) as unknown as ReversePaymentDependencies["restituirMora"],
   });
   return { handler, runTransaction };
 }
@@ -459,6 +481,25 @@ describe("reversePayment replica el saldo restaurado a toda la cuota", () => {
     // replica el restante restaurado se pierde entero: las hermanas siguen
     // diciendo "esta cuota ya no debe nada".
     const replicas = await reversarYCapturarReplicas(pagoDeCuota, 3);
+
+    // ── EL CAMINO DE LECTURAS, para el camino ESTÁNDAR de la reversa ────────
+    // Lo congela: si alguien agrega o quita una lectura, esto lo dice y señala
+    // dónde. `selectResults` solo trae 4 entradas y después devuelve `[]` en
+    // silencio, así que una lectura nueva no se notaba por ningún lado.
+    //
+    // Va acá y no en el helper a propósito: la secuencia DEPENDE de la forma
+    // del pago. Un abono directo a capital (sin cuota) no lee los rubros ni
+    // cuenta las filas hermanas —lee `moras_historial`—, así que una única
+    // secuencia compartida sería falsa para la mitad de los casos. Éste es el
+    // camino estándar: pago de una cuota, con hermanas vivas.
+    expect(lecturas).toEqual([
+      "pagos_credito", // el pago a revertir
+      "creditos", // el crédito activo
+      "usuarios", // el dueño, para devolverle el saldo a favor
+      "facturas_electronicas", // ¿la boleta ya se facturó? (guard de reversa)
+      "rubros_pagos", // los reclamos de rubro de este pago, FOR UPDATE
+      "pagos_credito", // COUNT(*) de filas vivas: ¿borrar la fila o resetearla?
+    ]);
 
     expect(replicas).toHaveLength(1);
     expect(replicas[0]?.payload).toEqual({

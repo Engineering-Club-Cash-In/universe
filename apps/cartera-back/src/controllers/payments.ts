@@ -1,5 +1,4 @@
 import { db, lockPool } from "../database/index";
-import { withPaymentAdvisoryLock } from "../utils/paymentAdvisoryLock";
 import {
   creditos,
   pagos_credito,
@@ -21,13 +20,14 @@ import Big from "big.js";
 import { z } from "zod";
 import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
-import { revertirRubrosDelPago } from "./rubros";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
+import { anularPagoYRestituirMoraSerializado } from "./anularPagoMora";
+import { CreditWithoutInvestorMirrorError } from "../utils/espejoInversionistasGuard";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { calcularFactoresProrrateoInteresV2 } from "../cofidi/prorrateoPciInteres";
 import { calcularVentanaProporcional } from "../utils/functions/diasParticipacion";
@@ -1947,21 +1947,26 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   console.log(
     `Falsificando pago con ID: ${pago_id} para crédito ID: ${credito_id}`
   );
+
   /**
    * Si el pago YA está declarado falso, salir ANTES de tocar nada.
    *
-   * Tiene que estar acá arriba y no dentro de la transacción de más abajo, y
-   * ese detalle es todo el punto: `insertPagosCreditoInversionistas` corre
-   * primero, commitea sus filas de `pagos_credito_inversionistas` y resta de
-   * `creditos_inversionistas.monto_aportado`, y NO es idempotente —no tiene
-   * ON CONFLICT—. Una segunda llamada sobre un pago ya falso duplicaba el
-   * espejo y restaba el aporte dos veces, rompiendo el invariante
-   * `capital == Σ monto_aportado`, y recién después chocaba con el guard de la
-   * transacción y devolvía un 400 que suena a "no pasó nada" e invita a otro
-   * clic que repite el daño.
+   * No es el guard de integridad —ese es el `paymentFalse = false` del UPDATE
+   * de `anularPagoYRestituirMora`, que es atómico y sí decide—. Este de acá
+   * hace dos cosas que aquél no puede:
    *
-   * El filtro `paymentFalse = false` del UPDATE de abajo NO alcanza para esto:
-   * frena la escritura del pago, pero el espejo ya se escribió.
+   *   * convierte el reintento inocente en un `updatedCount: 0` honesto en vez
+   *     del 400 que tira el UPDATE cuando no encuentra fila, que suena a "no
+   *     pasó nada" e invita a otro clic;
+   *   * corre la red de seguridad del ajuste por fecha ideal (abajo).
+   *
+   * OJO al leer esto contra la versión anterior: el argumento que justificaba
+   * esta salida temprana era que `insertPagosCreditoInversionistas` corría
+   * PRIMERO, no es idempotente, y una segunda llamada duplicaba el espejo
+   * antes de chocar con el guard. Ese orden se invirtió (ver el bloque de
+   * abajo): hoy la anulación va primero y su throw ya impide que los espejos
+   * se escriban una segunda vez. La salida temprana queda por las dos razones
+   * de arriba, no por aquélla.
    */
   const [yaFalso] = await db
     .select({ paymentFalse: pagos_credito.paymentFalse })
@@ -1995,22 +2000,218 @@ export async function falsePayment(pago_id: number, credito_id: number) {
     // en un ciclo de deadlock.
     await resetAjusteFechaIdealSiPagoInvalidado(pago_id);
 
+    // Y la SEGUNDA red de seguridad, por el mismo motivo y con la misma forma:
+    // si la boleta ya está falsa pero NO tiene pagos espejo, escribirlos ahora.
+    //
+    // Es el agujero que abrió invertir el orden. La anulación commitea primero;
+    // si el paso de espejos falla después —un error transitorio de base—, el
+    // router devuelve 400, el operador reintenta, y el reintento entraba justo
+    // por acá y se iba con un 200 `updatedCount: 0`. Éxito aparente sobre un
+    // estado a medias: boleta falsa, mora restituida, rubros devueltos… y el
+    // espejo del inversionista sin escribir, para siempre, porque ninguna otra
+    // ruta lo repara. Con el orden viejo esto no podía pasar (los espejos iban
+    // primero y su fallo dejaba el pago sin marcar), así que la salida temprana
+    // tiene que hacerse cargo de lo que el orden nuevo dejó de garantizar.
+    //
+    // Correrlo de más no cuesta nada, y acá está el porqué: el guard es sobre
+    // ESTE `pago_id`, así que en el caso normal encuentra sus filas y no hace
+    // nada. Y tiene que ser un guard de existencia y no un `ON CONFLICT`:
+    // `pagos_credito_inversionistas_espejo` NO tiene unicidad por
+    // `(pago_id, inversionista_id)` —el espejo se regenera por período y ya hay
+    // pares repetidos legítimos en la base—, así que lo único que impide
+    // duplicar es no volver a entrar cuando ya hay filas.
+    //
+    // «Cero filas» es un test válido aunque haya un caso que legítimamente
+    // escribe cero: el crédito cuyo único inversionista es CUBE. Ahí
+    // `insertPagosCreditoInversionistas` filtra con `excludeCube = true`, se
+    // queda sin nadie a quien repartirle y hace `return` limpio ANTES de
+    // escribir. O sea: re-ejecutarlo sobre ese crédito vuelve a no escribir
+    // nada y es inofensivo — cuesta tres consultas de lectura por reintento, no
+    // una fila duplicada.
+    // El chequeo de afuera es SOLO un atajo: si ya hay filas, no vale la pena
+    // ni pedir el candado. No decide nada —el que decide es el de adentro—,
+    // pero se queda por dos razones: ahorra el connect + BEGIN + FOR NO KEY
+    // UPDATE en el caso normal (que es el 99%: el reintento del operador sobre
+    // un pago que ya tiene su espejo), y sobre todo preserva el
+    // comportamiento de esta salida: un crédito en PENDIENTE_AUTORIZACION cuyo
+    // espejo YA está escrito sigue devolviendo su 200 `updatedCount: 0` en vez
+    // de tirar `PendingReturnAuthorizationError`, que es lo que pasaría si
+    // pidiéramos el candado siempre.
+    const [espejoYaEscrito] = await db
+      .select({ id: pagos_credito_inversionistas_espejo.id })
+      .from(pagos_credito_inversionistas_espejo)
+      .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
+      .limit(1);
+
+    // ⚠️ EL CHEQUEO QUE DECIDE VA ADENTRO DEL CANDADO, NO AFUERA. No es cosmético.
+    //
+    // Con la lectura afuera, dos llamadas solapadas —un doble clic normal, sin
+    // ningún fallo transitorio de por medio— leían las dos «no hay filas»,
+    // hacían fila en el candado, y las dos escribían: filas de espejo
+    // DUPLICADAS, que aguas abajo duplican montos en liquidaciones y en la
+    // facturación de inversionistas. La ventana no es teórica: va desde el
+    // COMMIT de la anulación hasta el COMMIT del insert de espejos, y adentro
+    // corren un connect + BEGIN + SELECT FOR NO KEY UPDATE más las ~5-8
+    // consultas de `insertPagosCreditoInversionistas`. Son decenas o cientos
+    // de milisegundos.
+    //
+    // Por qué leer adentro del callback SÍ ve lo que escribió la llamada
+    // anterior, aunque el candado y la escritura vayan por conexiones
+    // distintas: `withPendingReturnCreditLocks` cande por su propia conexión
+    // (`lockPool`, BEGIN + FOR NO KEY UPDATE) y el callback escribe por `db`,
+    // que es OTRA conexión en autocommit. Justamente por eso funciona: cada
+    // sentencia de `db` es su propia transacción read-committed, así que toma
+    // una foto NUEVA al ejecutarse — no arrastra el snapshot de nada abierto
+    // antes. Y la escritura de la primera llamada commitea (el
+    // `db.transaction` de `insertPagosCreditoInversionistas` termina) ANTES de
+    // que su callback devuelva y el candado haga COMMIT, así que cuando la
+    // segunda llamada por fin toma el candado, las filas ya están visibles.
+    // Si el callback leyera por una conexión con una transacción ya abierta,
+    // esto no valdría.
+    //
+    // Lo que NO se puede hacer acá es abrir una transacción nuestra alrededor:
+    // el candado ya tiene `FOR NO KEY UPDATE` sobre esta fila de `creditos` y
+    // un `FOR UPDATE` nuestro sobre la misma fila se bloquearía contra él.
+    //
+    // El `withPendingReturnCreditLocks` es además el MISMO portero que el
+    // camino normal, y por la misma razón: un crédito en
+    // PENDIENTE_AUTORIZACION no debe generar pagos espejo ni siquiera
+    // "falsos".
+    if (!espejoYaEscrito) {
+      await withPendingReturnCreditLocks([credito_id], async () => {
+        const [espejoDelPago] = await db
+          .select({ id: pagos_credito_inversionistas_espejo.id })
+          .from(pagos_credito_inversionistas_espejo)
+          .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
+          .limit(1);
+
+        if (espejoDelPago) return;
+
+        await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
+      });
+    }
+
     return {
       message: "Payment was already marked as false",
       updatedCount: 0,
     };
   }
 
-  // Mismo guard que obtenerCreditosConPagosPendientes/calcularYRegistrarPagosEspejo:
-  // un crédito en PENDIENTE_AUTORIZACION no debe generar pagos espejo, ni siquiera
-  // "falsos", mientras la devolución a CUBE sigue sin resolver.
-  await withPendingReturnCreditLocks([credito_id], async () => {
-    // updateCredito=false → NO actualiza creditos_inversionistas_espejo (monto_aportado).
-    // Falsear un pago no debe descontar el aporte del crédito/espejo.
-    await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
-  });
-  // Actualizar el estado del pago a falso — Y devolver los rubros que cobró,
-  // en la MISMA transacción.
+  // ── PRECONDICIÓN: el crédito tiene que poder generar sus pagos espejo ──────
+  //
+  // Se chequea ACÁ, antes de que la anulación commitee nada, porque el orden
+  // nuevo dejó al paso de espejos DESPUÉS del punto de no retorno. Si el
+  // crédito no tiene ni una fila en `creditos_inversionistas_espejo`,
+  // `insertPagosCreditoInversionistas` tira —es su primer guard— y para
+  // entonces la boleta ya está falsa, la mora restituida y los rubros
+  // devueltos. El operador ve un 400 y reintenta, y el reintento vuelve a
+  // fallar en el mismo lugar: queda un estado a medias que nadie repara.
+  //
+  // Por qué se PUEDE preguntar antes: la precondición es determinística y no
+  // depende de nada que la anulación cambie. La anulación toca `pagos_credito`,
+  // `rubros`/`rubros_pagos`, `moras_credito`/`moras_historial` y el ajuste por
+  // fecha ideal. Ninguna de esas escrituras crea ni borra filas de
+  // `creditos_inversionistas_espejo`: la participación de los inversionistas en
+  // un crédito no cambia porque se invalide una boleta. Así que lo que se lee
+  // acá vale igual un instante después, y adelantarlo no es una carrera: es
+  // preguntar lo mismo más temprano. (Que ESTA llamada además pase por
+  // `excludeCube` y pueda terminar escribiendo cero filas no cambia nada: el
+  // guard que puede TIRAR es el de "cero inversionistas en el espejo", que es
+  // exactamente lo que se pregunta acá.)
+  const [espejoDelCredito] = await db
+    .select({ credito_id: creditos_inversionistas_espejo.credito_id })
+    .from(creditos_inversionistas_espejo)
+    .where(eq(creditos_inversionistas_espejo.credito_id, credito_id))
+    .limit(1);
+
+  if (!espejoDelCredito) {
+    throw new CreditWithoutInvestorMirrorError(credito_id);
+  }
+
+  // ── MARCA DE AGUA DEL ESPEJO, para que el camino normal tampoco duplique ───
+  //
+  // El camino normal NO puede duplicarse contra otro camino normal: el
+  // `paymentFalse = false` del WHERE de la anulación deja un solo ganador y al
+  // otro lo tira. Pero SÍ puede duplicarse contra la red de seguridad de la
+  // salida temprana de arriba: la anulación de A commitea, B entra, lee
+  // `paymentFalse = true`, se va por la salida temprana, y si B llega al
+  // candado ANTES que A, B escribe los espejos y después A los escribe otra
+  // vez. Es una ventana angosta —B tiene que hacer tres consultas mientras A
+  // no hace ninguna— pero es la misma familia de defecto y no cuesta nada
+  // cerrarla.
+  //
+  // Lo que NO se puede usar acá es el mismo guard de "¿hay filas de este
+  // pago?" que usa la salida temprana: en el camino normal el pago todavía era
+  // válido hasta hace un instante, así que puede tener filas de espejo
+  // LEGÍTIMAS y viejas, escritas por la regeneración por período
+  // (`obtenerCreditosConPagosPendientes` y `calcularYRegistrarPagosEspejo`,
+  // que llaman a esta misma función sobre pagos vivos). Con ese guard, anular
+  // un pago ya espejado se saltearía su propia escritura: plata que falta, no
+  // plata duplicada. Por eso lo que se guarda es una MARCA DE AGUA: solo se
+  // saltea si aparecieron filas DESPUÉS de este punto, que es justo lo que
+  // haría la red de seguridad de un B concurrente.
+  const [espejoPrevio] = await db
+    .select({ id: pagos_credito_inversionistas_espejo.id })
+    .from(pagos_credito_inversionistas_espejo)
+    .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
+    .orderBy(desc(pagos_credito_inversionistas_espejo.id))
+    .limit(1);
+  const marcaDeAguaEspejo = espejoPrevio?.id ?? 0;
+
+  // ── EL ORDEN ES LO QUE HACE ESTO REINTENTABLE ──────────────────────────────
+  //
+  // La anulación va PRIMERO y los espejos de inversionistas DESPUÉS. Al revés
+  // —como estaba— si la anulación fallaba (la restitución de mora tira a
+  // propósito para abortar su transacción) el caller reintentaba `falsePayment`
+  // entera y los espejos se volvían a escribir:
+  // `pagos_credito_inversionistas_espejo` NO tiene restricción de unicidad por
+  // pago e inversionista (verificado contra el esquema: solo la PK por `id`,
+  // `idx_pagos_liquidacion_espejo` y los dos parciales por `no liquidado`; la
+  // que sí existe, `uk_pago_inversionista`, es de la tabla vieja
+  // `pagos_credito_inversionistas`), así que quedaban filas DUPLICADAS sin
+  // liquidar, que aguas abajo duplican montos.
+  //
+  // Y no se puede juntar todo en UNA transacción, que sería lo natural:
+  // `withPendingReturnCreditLocks` abre su PROPIA conexión (`lockPool`) y toma
+  // `FOR NO KEY UPDATE` sobre la fila de `cartera.creditos` mientras corre su
+  // callback. `anularPagoYRestituirMoraSerializado` pide `FOR UPDATE` sobre esa
+  // MISMA fila —el candado que abre el orden del módulo de mora— desde la
+  // conexión de la transacción: los dos modos entran en conflicto, así que
+  // meter la anulación adentro del callback la dejaría esperando un candado que
+  // solo se suelta cuando el callback termine. Bloqueo contra uno mismo.
+  //
+  // Por eso el guard de devolución pendiente NO se movió acá adentro sino que
+  // se DUPLICÓ donde sí puede decidir a tiempo: la anulación lo revalida ella
+  // misma, sobre la fila del crédito que ya tiene candada, y aborta su
+  // transacción antes de escribir nada. El `withPendingReturnCreditLocks` de
+  // abajo sigue siendo el portero de los espejos.
+  //
+  // Invertir el orden resuelve las dos cosas sin tocar esa arquitectura, PERO
+  // se lleva puesta una garantía que hay que reponer a mano:
+  //
+  //   * si la ANULACIÓN falla, su transacción no dejó nada y los espejos ni
+  //     siquiera se intentaron: el reintento arranca limpio. Esto sale gratis.
+  //
+  //   * si fallan los ESPEJOS, la anulación YA COMMITEÓ. El reintento entra por
+  //     la salida temprana de `yaFalso` de arriba y —ojo— NO llega hasta acá
+  //     abajo: hace `return` mucho antes. Con el orden viejo esto se recuperaba
+  //     solo (los espejos iban primero y su fallo dejaba el pago sin marcar);
+  //     con el orden nuevo no, y por eso la salida temprana tiene su propia red
+  //     de seguridad que escribe los espejos faltantes antes de devolver. Sin
+  //     esa red, el operador recibía un 200 `updatedCount: 0` sobre un crédito
+  //     con la boleta anulada y el espejo del inversionista en blanco.
+  //
+  //   * y el caso que NO es transitorio —un crédito sin filas en
+  //     `creditos_inversionistas_espejo`, donde el paso de espejos falla
+  //     SIEMPRE— se ataja antes de empezar, con la precondición de más arriba.
+  //     Reintentar no lo arreglaría nunca.
+  //
+  // El resultado del espejo no depende del orden: solo lee la cuota del pago,
+  // el espejo del crédito y los abonos no liquidados; nada de eso lo toca la
+  // anulación.
+
+  // Marcar la boleta como falsa, DEVOLVER LOS RUBROS QUE COBRÓ y RESTITUIR SU
+  // MORA son UN SOLO HECHO, así que van en UNA transacción.
   //
   // 🧾 RUBROS: declarar falsa una boleta la invalida, así que lo que cobró de
   // los rubros tiene que irse con ella. Un reclamo SIN APLICAR se soltaba solo
@@ -2018,99 +2219,67 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   // uno YA APLICADO dejaba el saldo descontado: si el abono había dejado el
   // rubro en cero, quedaba `completado` y `activo = false` —o sea, la deuda
   // desaparecía por una boleta que se declaró falsa— y no había ninguna ruta
-  // que la devolviera.
+  // que la devolviera. Sin transacción compartida existiría el estado
+  // intermedio "boleta falsa con el rubro todavía cobrado".
   //
-  // `revertirRubrosDelPago` y no `desaplicarRubrosDelPago`: acá el pago NO
-  // vuelve a estar pendiente, se INVALIDA. Es la misma operación que hace
-  // `reversePayment`, y borra el reclamo, que es a la vez el guard de doble
-  // reversa (una segunda pasada no encuentra filas).
-  //
-  // Todo en UNA transacción para que no exista el estado intermedio "boleta
-  // falsa con el rubro todavía cobrado".
-  //
-  // OJO con reintentar si esta transacción falla: NO es una operación limpia.
-  // `insertPagosCreditoInversionistas` de más arriba ya commiteó sus filas de
-  // `pagos_credito_inversionistas` y ya restó de `creditos_inversionistas`, y no
-  // tiene ON CONFLICT — así que un reintento duplica el espejo y resta el aporte
-  // dos veces, rompiendo el invariante `capital == Σ monto_aportado`. Si esto
-  // falla, hay que revisar el espejo antes de volver a intentar.
+  // 💸 MORA: si la restitución falla, el pago NO queda marcado y el reintento
+  // vuelve a intentar las dos cosas. Sueltos, una restitución fallida dejaba la
+  // anulación firme y el reintento la SALTEABA para siempre (leía
+  // `paymentFalse = true` y la regla devolvía `null`).
   //
   // BAJO EL CANDADO DEL CRÉDITO, como todos los demás que escriben
-  // `rubros.saldo_pendiente`. `withPendingReturnCreditLocks` de arriba NO sirve
-  // para esto: es un `FOR NO KEY UPDATE` sobre `creditos` que hace COMMIT y
-  // suelta antes de que esta transacción abra. Sin el advisory lock, esta ruta
-  // quedaba como la única de la familia sin serializar — justo lo que se acababa
-  // de cerrar en `revertPaymentToPending`.
-  const result = await withPaymentAdvisoryLock(credito_id, () =>
-    db.transaction(async (tx) => {
-    // El `paymentFalse = false` del WHERE es el guard de idempotencia: sin él,
-    // dos llamadas solapadas sobre el mismo pago actualizaban las dos, y como
-    // `revertirRubrosDelPago` relee el saldo YA restituido y le vuelve a sumar
-    // `monto_aplicado`, el rubro terminaba por encima de su monto original
-    // (Q1,000 con Q400 cobrados: 600 → 1000 → 1400) y la siguiente boleta le
-    // cobraba al cliente una diferencia que nunca debió.
-    const actualizado = await tx
-      .update(pagos_credito)
-      .set({
-        pagado: false,
-        paymentFalse: true,
-      })
-      .where(
-        and(
-          eq(pagos_credito.pago_id, pago_id),
-          eq(pagos_credito.credito_id, credito_id),
-          eq(pagos_credito.paymentFalse, false)
-        )
-      );
+  // `rubros.saldo_pendiente`, y además porque la reversa de un pago
+  // (`reversePayment`) restituye exactamente la misma mora y devuelve los mismos
+  // rubros que esta anulación: sin cola compartida las dos lo devolvían por
+  // separado y el cliente quedaba debiendo el doble. Sin el advisory lock, esta
+  // ruta quedaba como la única de la familia sin serializar — justo lo que se
+  // acababa de cerrar en `revertPaymentToPending`.
+  // `withPendingReturnCreditLocks` NO sirve para esto: es un `FOR NO KEY UPDATE`
+  // sobre `creditos` que hace COMMIT y suelta antes de que la transacción abra.
+  //
+  // ⚠️ EL CANDADO NO SE TOMA ACÁ: no se perdió, se mudó. El sufijo
+  // `…Serializado` es justamente eso — esa función compone
+  // `withPaymentAdvisoryLock(credito_id, () => db.transaction(…))` y recién
+  // adentro llama al cuerpo. Es el MISMO helper y la MISMA llave que tomaba
+  // esta función antes; lo único que cambió es dónde se escribe, y cambió
+  // porque allá una prueba puede inyectar las tres piezas y verificar la traza
+  // real `lock → begin → anular → commit → unlock`, cosa que acá es imposible.
+  // Tomarlo también acá lo ANIDARÍA: no lo agregues.
+  //
+  // El cuerpo vive en `anularPagoMora.ts` —no acá— para poder ejercerse en una
+  // prueba: varios tests registran un `mock.module("./payments")` global y este
+  // módulo desaparece en la corrida completa.
+  const updatedCount = await anularPagoYRestituirMoraSerializado({
+    pago_id,
+    credito_id,
+  });
 
-    // 🚨 Si no se actualizó ningún registro, lanza error controlado. Va ANTES
-    // de tocar los rubros: sin fila actualizada no hay boleta de este crédito
-    // que invalidar, y revertirle los rubros a un pago que no le pertenece
-    // sería peor que no hacer nada.
-    if (!actualizado.rowCount || actualizado.rowCount === 0) {
-      throw new Error(
-        "No payment found to mark as false with the given criteria"
-      );
-    }
+  // Mismo guard que obtenerCreditosConPagosPendientes/calcularYRegistrarPagosEspejo:
+  // un crédito en PENDIENTE_AUTORIZACION no debe generar pagos espejo, ni siquiera
+  // "falsos", mientras la devolución a CUBE sigue sin resolver.
+  await withPendingReturnCreditLocks([credito_id], async () => {
+    // Adentro del candado, y contra la marca de agua de arriba: si mientras
+    // tanto alguien más escribió el espejo de ESTA anulación (la red de
+    // seguridad de la salida temprana, ver arriba), no lo escribimos de nuevo.
+    const [espejoActual] = await db
+      .select({ id: pagos_credito_inversionistas_espejo.id })
+      .from(pagos_credito_inversionistas_espejo)
+      .where(eq(pagos_credito_inversionistas_espejo.pago_id, pago_id))
+      .orderBy(desc(pagos_credito_inversionistas_espejo.id))
+      .limit(1);
 
-    await revertirRubrosDelPago(
-      pago_id,
-      tx as unknown as Parameters<typeof revertirRubrosDelPago>[1]
-    );
+    // Ojo: `>` contra la marca, NO "¿hay filas?". Las filas viejas y legítimas
+    // no cuentan; solo cuentan las que aparecieron después de este punto.
+    if ((espejoActual?.id ?? 0) > marcaDeAguaEspejo) return;
 
-    // Si este pago era el que cobró un ajuste por fecha ideal de pago,
-    // resetearlo a pendiente — la boleta resultó falsa, el dinero nunca entró
-    // de verdad y el ajuste tiene que quedar disponible para un pago futuro.
-    //
-    // DENTRO de la transacción, igual que en `reversePayment` y en la anulación
-    // por incobrable de `credits.ts`. Afuera —donde estaba— no era atómico:
-    // si esta consulta fallaba, el `paymentFalse = true` ya estaba commiteado y
-    // el ajuste se quedaba marcado como cobrado sin nadie que lo soltara. Acá
-    // adentro, o se invalida la boleta y se suelta el ajuste, o no pasa ninguna
-    // de las dos.
-    //
-    // No estrena una inversión de orden de candados, que es el riesgo real de
-    // meter una tabla más adentro de una transacción. Va ÚLTIMA, después de
-    // `pagos_credito` y de los rubros, y las otras dos rutas que resetean el
-    // ajuste dentro de su transacción —la caída a incobrable y la anulación de
-    // `credits.ts`— también tocan `pagos_credito` ANTES. O sea: nadie toma este
-    // par al revés.
-    //
-    // Se dice `credits.ts` y no "todos" a propósito: esas rutas NO toman el
-    // advisory lock del crédito, así que la serialización no viene de ahí sino
-    // del orden. El advisory lock sí envuelve a esta transacción
-    // (`withPaymentAdvisoryLock`, más arriba), pero no es lo que sostiene este
-    // argumento. El índice único por `credito_id` garantiza que sea a lo sumo
-    // una fila.
-    await resetAjusteFechaIdealSiPagoInvalidado(pago_id, tx);
-
-    return actualizado;
-    })
-  );
+    // updateCredito=false → NO actualiza creditos_inversionistas_espejo (monto_aportado).
+    // Falsear un pago no debe descontar el aporte del crédito/espejo.
+    await insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
+  });
 
   return {
     message: "Payment marked as false successfully",
-    updatedCount: result.rowCount ?? 0,
+    updatedCount,
   };
 }
 

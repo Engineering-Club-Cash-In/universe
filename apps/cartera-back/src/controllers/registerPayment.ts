@@ -235,13 +235,12 @@ const procesarPagoMora = async ({
   stats: StatsInfo;
   disponible: Big;
 }): Promise<ResultadoMora> => {
-  // 🔍 Verificar si NO hay mora activa
+  // 🔍 Verificar si NO hay mora que cobrar (nula, inactiva, o con monto 0)
 
 
 
 
-
-  if (!stats.tieneMora || !mora || !mora.activa) {
+  if (!stats.tieneMora || !mora || !hayMoraQueCobrar(mora)) {
 
     return {
       teniaMora: false,
@@ -249,11 +248,11 @@ const procesarPagoMora = async ({
       montoAplicadoMora: 0,
       saldoMoraRestante: 0,
       disponibleRestante: disponible.toNumber(),
-      mensaje: "Sin mora activa",
+      mensaje: "Sin mora que cobrar",
     };
   }
 
-  // ⚠️ Hay mora activa
+  // ⚠️ Hay mora activa con monto > 0
 
 
 
@@ -716,11 +715,14 @@ export const insertPayment = async (
   {
     nexaPaymentEventId,
     paymentLock,
+    deps,
   }: {
     nexaPaymentEventId?: number;
     paymentLock?: PaymentAdvisoryLock;
+    deps?: InsertarPagoDeps;
   } = {},
 ) => {
+  const safeDeps = deps || DEPS_INSERTAR_PAGO();
   // 🔒 Conexión dedicada para el advisory lock (se libera en finally).
   let lockConn: PaymentAdvisoryLockConnection | undefined;
   let lockedCreditoId: number | undefined;
@@ -892,6 +894,7 @@ export const insertPayment = async (
 
     if (montoBoleta.eq(otrosBig)) {
       await insertarPago({
+        deps: safeDeps,
         numero_credito_sifco: credito.numero_credito_sifco,
         numero_cuota: cuotaApagar,
         cuotaId: cuotaIdPagoEspecial,
@@ -934,6 +937,12 @@ export const insertPayment = async (
     });
     // Actualizar disponible
     disponible = new Big(resultadoMora.disponibleRestante);
+    // Lo que esta boleta REALMENTE cobró de mora, y si ya quedó anotado. El
+    // ledger se anota UNA vez por boleta y con lo cobrado: `moraBig` puede
+    // seguir valiendo la mora entera del crédito (p. ej. un abono solo a
+    // capital que no alcanzó la mora) y varias filas de la boleta la llevan.
+    const moraCobradaEnBoleta = new Big(resultadoMora.montoAplicadoMora ?? 0);
+    let moraYaAnotada = false;
     // 🔗 LIGAR EL DECREMENTO DE MORA A SU PAGO.
     //
     // La mora acaba de bajar, pero la fila del pago todavía no existe: esa es
@@ -957,6 +966,7 @@ export const insertPayment = async (
         moraBig = new Big(resultadoMora.montoAplicadoMora);
         if (disponible_restante.lte(0)) {
           const pagoDeMora = await insertarPago({
+            deps: safeDeps,
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
             cuotaId: cuotaIdPagoEspecial,
@@ -974,6 +984,8 @@ export const insertPayment = async (
             observaciones,
             nexaPaymentEventId,
           });
+          // `insertarPago` ya anotó la mora de esta boleta en el ledger.
+          moraYaAnotada = true;
           await estamparDecrementoMora(pagoDeMora?.pago_id);
         }
 
@@ -981,6 +993,7 @@ export const insertPayment = async (
       if (!resultadoMora.moraPagada && resultadoMora.pagoParcial) {
         if (disponible_restante.lte(0)) {
           const pagoDeMora = await insertarPago({
+            deps: safeDeps,
             numero_credito_sifco: credito.numero_credito_sifco,
             numero_cuota: cuotaApagar,
             cuotaId: cuotaIdPagoEspecial,
@@ -1011,6 +1024,7 @@ export const insertPayment = async (
     if (!resultadoMora.moraPagada && resultadoMora.montoAplicadoMora > 0) {
       if (disponible_restante.lte(0)) {
         const pagoDeMora = await insertarPago({
+          deps: safeDeps,
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
           cuotaId: cuotaIdPagoEspecial,
@@ -1213,6 +1227,12 @@ export const insertPayment = async (
     let cuotas_saltadas = 0;
     let disponible_para_cuotasPosteriores = new Big(0);
     let ultimoPagoInsertado: typeof pagos_credito.$inferSelect | undefined;
+
+    // Para anotar mora: necesita fecha de hoy para calcular diasAtraso
+    // Fecha de Guatemala, no UTC: después de las 18:00 UTC ya es "mañana" y
+    // los días de atraso —y con ellos el reparto— saldrían corridos un día.
+    const hoyParaAnotacion = hoyGuatemala();
+
     for (const cuota of cuotasPendientes) {
 
 
@@ -1866,6 +1886,18 @@ export const insertPayment = async (
                     `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
                   );
                 }
+                // Anotar mora cobrada en el pago normal, si aplica
+                if (inserted && moraParaPago.gt(0) && !moraYaAnotada && moraCobradaEnBoleta.gt(0)) {
+                  await anotarMoraPagoNormal({
+                    credito_id: credito.credito_id,
+                    mora: moraCobradaEnBoleta,
+                    pago_id: inserted.pago_id,
+                    tx,
+                    deps: safeDeps,
+                    hoy: hoyParaAnotacion,
+                  });
+                  moraYaAnotada = true;
+                }
                 return rows;
               });
               if (cuota.cuotas_credito.numero_cuota === 1 && pagoInsertado) {
@@ -2012,6 +2044,18 @@ export const insertPayment = async (
                 console.log(
                   `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
                 );
+              }
+              // Anotar mora cobrada en el pago normal, si aplica
+              if (inserted && moraParaPago.gt(0) && !moraYaAnotada && moraCobradaEnBoleta.gt(0)) {
+                await anotarMoraPagoNormal({
+                  credito_id: credito.credito_id,
+                  mora: moraCobradaEnBoleta,
+                  pago_id: inserted.pago_id,
+                  tx,
+                  deps: safeDeps,
+                  hoy: hoyParaAnotacion,
+                });
+                moraYaAnotada = true;
               }
               return rows;
               });
@@ -2179,6 +2223,18 @@ export const insertPayment = async (
                 console.log(
                   `🧾 Ajuste por fecha ideal de pago #${ajusteFechaIdealId} marcado como cobrado (pago_id=${inserted.pago_id}).`
                 );
+              }
+              // Anotar mora cobrada en el pago normal, si aplica
+              if (inserted && moraParaPago.gt(0) && !moraYaAnotada && moraCobradaEnBoleta.gt(0)) {
+                await anotarMoraPagoNormal({
+                  credito_id: credito.credito_id,
+                  mora: moraCobradaEnBoleta,
+                  pago_id: inserted.pago_id,
+                  tx,
+                  deps: safeDeps,
+                  hoy: hoyParaAnotacion,
+                });
+                moraYaAnotada = true;
               }
               return rows;
               });
@@ -2448,11 +2504,24 @@ export const insertPayment = async (
 
 
 
-      // 2️⃣ Registrar el pago
-      const [pagoInsertado] = await db
-        .insert(pagos_credito)
-        .values(pagoData)
-        .returning();
+      // 2️⃣ Registrar el pago — y, si se llevó mora, anotarla en el ledger en la
+      // MISMA transacción, igual que las ramas por cuota: sin esto el cron de
+      // la noche no ve la mora pagada y la vuelve a cobrar entera.
+      const [pagoInsertado] = await db.transaction(async (tx) => {
+        const filas = await tx.insert(pagos_credito).values(pagoData).returning();
+        if (filas[0] && !moraYaAnotada && moraCobradaEnBoleta.gt(0)) {
+          await anotarMoraPagoNormal({
+            credito_id,
+            mora: moraCobradaEnBoleta,
+            pago_id: filas[0].pago_id,
+            tx,
+            deps: safeDeps,
+            hoy: hoyGuatemala(),
+          });
+          moraYaAnotada = true;
+        }
+        return filas;
+      });
       if (new Big(pagoConvenioParaFila).gt(0)) {
         pagoConvenioPagoId = pagoInsertado.pago_id;
       }
@@ -2699,7 +2768,10 @@ export const insertPayment = async (
           );
         }
 
+        const anotaEstaFila = !moraYaAnotada;
         const pagoEspecialInsertado = await insertarPago({
+          deps: safeDeps,
+          anotarMoraEnLedger: anotaEstaFila,
           numero_credito_sifco: credito.numero_credito_sifco,
           numero_cuota: cuotaApagar,
           cuotaId: cuotaFilaRastro,
@@ -2718,6 +2790,7 @@ export const insertPayment = async (
           observaciones,
           nexaPaymentEventId,
         });
+        if (anotaEstaFila && moraCobradaEnBoleta.gt(0)) moraYaAnotada = true;
         if (new Big(pagoConvenioParaFila).gt(0)) {
           pagoConvenioPagoId = pagoEspecialInsertado.pago_id;
         }

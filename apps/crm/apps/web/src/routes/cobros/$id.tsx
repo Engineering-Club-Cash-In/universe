@@ -519,11 +519,13 @@ function RouteComponent() {
 	const [canalContacto, setCanalContacto] = useState<CanalContacto | null>(
 		null,
 	);
-	// CB-041: apagado cuya llamada al cliente se está registrando. Al crearse la
-	// gestión se enlaza sola a esta inmovilización (sin elegirla de un select).
-	const [inmovilizacionLlamadaId, setInmovilizacionLlamadaId] = useState<
-		string | null
-	>(null);
+	// CB-041: apagado o reactivación cuya llamada al cliente se está registrando.
+	// Al crearse la gestión se enlaza sola a esta inmovilización (sin elegirla de
+	// un select).
+	const [inmovilizacionLlamada, setInmovilizacionLlamada] = useState<{
+		id: string;
+		accion: "apagado" | "reactivacion";
+	} | null>(null);
 	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] = useState(false);
 	// CB-042: los dos envíos a recuperación (forzosa / entrega voluntaria)
 	// comparten formulario; null = cerrado.
@@ -1436,20 +1438,28 @@ function RouteComponent() {
 		setIsEditingVehicle(true);
 	};
 
-	// CB-041: la llamada que el asesor acaba de registrar tras un apagado queda
-	// enlazada a esa inmovilización. La gestión ya se guardó: si el enlace falla
-	// (p. ej. no era una llamada) se avisa y el banner de la carta sigue ahí.
-	const enlazarLlamadaApagado = async (
-		inmovilizacionId: string,
+	// CB-041: la llamada que el asesor acaba de registrar tras un apagado o una
+	// reactivación queda enlazada a esa inmovilización. La gestión ya se guardó:
+	// si el enlace falla (p. ej. no era una llamada) se avisa y el banner de la
+	// carta sigue ahí.
+	const enlazarLlamadaInmovilizacion = async (
+		inmovilizacion: { id: string; accion: "apagado" | "reactivacion" },
 		contactoId: string,
 	) => {
+		const datos = { inmovilizacionId: inmovilizacion.id, contactoId };
 		try {
-			await client.registrarLlamadaApagado({ inmovilizacionId, contactoId });
-			toast.success("Llamada enlazada al apagado.");
+			if (inmovilizacion.accion === "apagado") {
+				await client.registrarLlamadaApagado(datos);
+			} else {
+				await client.registrarLlamadaReactivacion(datos);
+			}
+			toast.success(
+				`Llamada enlazada ${inmovilizacion.accion === "apagado" ? "al apagado" : "a la reactivación"}.`,
+			);
 		} catch (error) {
 			toast.error(
 				(error as { message?: string })?.message ??
-					"La gestión se guardó, pero no se pudo enlazar al apagado.",
+					"La gestión se guardó, pero no se pudo enlazar a la inmovilización.",
 			);
 		} finally {
 			if (caso.id) {
@@ -2343,10 +2353,10 @@ function RouteComponent() {
 										{...propsContacto}
 										metodoInicial={canalContacto}
 										onCreado={
-											inmovilizacionLlamadaId
+											inmovilizacionLlamada
 												? (contacto) =>
-														enlazarLlamadaApagado(
-															inmovilizacionLlamadaId,
+														enlazarLlamadaInmovilizacion(
+															inmovilizacionLlamada,
 															contacto.id,
 														)
 												: undefined
@@ -2355,7 +2365,7 @@ function RouteComponent() {
 										onOpenChange={(abierto) => {
 											if (!abierto) {
 												setCanalContacto(null);
-												setInmovilizacionLlamadaId(null);
+												setInmovilizacionLlamada(null);
 											}
 										}}
 									/>
@@ -5059,8 +5069,8 @@ function RouteComponent() {
 								casoCobroId={caso.id}
 								esSupervisor={esSupervisorCobros}
 								key={`inmov:${caso.id}`}
-								onRegistrarLlamada={(inmovilizacionId) => {
-									setInmovilizacionLlamadaId(inmovilizacionId);
+								onRegistrarLlamada={(inmovilizacionId, accion) => {
+									setInmovilizacionLlamada({ id: inmovilizacionId, accion });
 									setCanalContacto("llamada");
 								}}
 							/>

@@ -26,6 +26,8 @@ export type MomentoUbicacion = "solicitud" | "ejecucion";
 export function useUbicacionInmovilizacion(
 	casoCobroId: string,
 	momento: MomentoUbicacion,
+	/** Falso = no consultar (la reactivación no pide ubicación). */
+	habilitado = true,
 ) {
 	const consulta = useMutation(
 		orpc.getUbicacionInmovilizacion.mutationOptions(),
@@ -34,10 +36,10 @@ export function useUbicacionInmovilizacion(
 	// Un remontado en desarrollo (StrictMode) no debe duplicar la consulta.
 	const pedidaRef = useRef(false);
 	useEffect(() => {
-		if (pedidaRef.current) return;
+		if (!habilitado || pedidaRef.current) return;
 		pedidaRef.current = true;
 		mutate({ casoCobroId, momento });
-	}, [mutate, casoCobroId, momento]);
+	}, [habilitado, mutate, casoCobroId, momento]);
 
 	return {
 		resultado: consulta.data ?? null,

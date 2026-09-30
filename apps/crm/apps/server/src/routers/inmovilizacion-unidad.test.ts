@@ -79,6 +79,11 @@ let ejecucionNotificadaASupervisores: {
 	accion: string;
 	advertencia?: string;
 }[] = [];
+// Pagos de cartera-back del crédito (shape de `getPagosByCredito`) y la promesa
+// activa del caso — lo que respalda una reactivación.
+let pagosCarteraMock: Record<string, unknown>[] = [];
+let pagosCarteraFalla = false;
+let promesaActivaMock: Record<string, unknown> | null = null;
 // Gestiones enlazadas (la llamada de cada inmovilización) y nombres de usuario
 // que lee `getInmovilizacionesCaso` para el historial de la carta.
 let llamadasEnlazadasMock: Record<string, unknown>[] = [];
@@ -244,6 +249,18 @@ function mockDb() {
 				if (tabla === contactosCobros && campos && "comentarios" in campos) {
 					// enriquecerFilasCarta: la llamada enlazada a cada inmovilización
 					return { where: async () => llamadasEnlazadasMock };
+				}
+				if (
+					tabla === contactosCobros &&
+					campos &&
+					"fechaProximoContacto" in campos
+				) {
+					// leerPromesaActivaCaso
+					return {
+						where: () => ({
+							limit: async () => (promesaActivaMock ? [promesaActivaMock] : []),
+						}),
+					};
 				}
 				if (tabla === contactosCobros) {
 					return {
@@ -458,6 +475,10 @@ mock.module("../services/inmovilizacion-notif", () => ({
 const carteraBackClientMock = {
 	getCredito: async () => ({ asesor: { emailCashIn: "u@example.com" } }),
 	getBucketActualCredito: async () => ({ bucket: 2 }),
+	getPagosByCredito: async () => {
+		if (pagosCarteraFalla) throw new Error("cartera-back caído");
+		return pagosCarteraMock;
+	},
 };
 mock.module("../services/cartera-back-client", () => ({
 	carteraBackClient: carteraBackClientMock,
@@ -472,6 +493,8 @@ mock.module("../services/cartera-back-integration", () => ({
 
 const {
 	inmovilizacionUnidadRouter,
+	ejecutarReactivacion,
+	getRespaldoReactivacion,
 	registrarLlamadaApagado,
 	registrarLlamadaReactivacion,
 	marcarInmovilizacionEnviadaARecuperacion,
@@ -506,8 +529,25 @@ function reset() {
 	notificarLlamarClienteLlamadas = [];
 	ejecucionNotificadaASupervisores = [];
 	carteraHabilitadaMock = true;
+	pagosCarteraFalla = false;
 	llamadasEnlazadasMock = [];
 	nombresUsuarioMock = [];
+	// Por defecto hay respaldo para cualquier opción: un pago muy posterior a
+	// cualquier apagado y una promesa activa. Cada test lo quita o lo cambia.
+	pagosCarteraMock = [
+		{
+			pago_id: 501,
+			fecha_pago: "2099-01-10",
+			monto_boleta: "1500.00",
+			numeroAutorizacion: "REF-1",
+			paymentFalse: false,
+		},
+	];
+	promesaActivaMock = {
+		id: "77777777-7777-7777-7777-777777777777",
+		fechaProximoContacto: new Date("2099-02-01T00:00:00.000Z"),
+		montoComprometido: "800.00",
+	};
 	insertError = null;
 	transactionError = null;
 	inmovilizacionesInsertadas = [];
@@ -734,7 +774,7 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 				{
 					casoCobroId: CASO_ID,
 					accion: "reactivacion",
-					motivo: "Pidió reactivar",
+					quePaso: "promesa",
 				},
 				{ context: ctx("cobros") },
 			),
@@ -818,7 +858,7 @@ describe("CB-041 — solicitarInmovilizacion", () => {
 			{
 				casoCobroId: CASO_ID,
 				accion: "reactivacion",
-				motivo: "Reactivar unidad",
+				quePaso: "promesa",
 			},
 			{ context: ctx("cobros") },
 		);
@@ -1134,7 +1174,7 @@ describe("CB-041 — ejecución del apagado (ejecutarApagado)", () => {
 			{
 				casoCobroId: CASO_ID,
 				accion: "reactivacion",
-				motivo: "Cliente pagó",
+				quePaso: "promesa",
 			},
 			{ context: ctx("cobros") },
 		);
@@ -1628,7 +1668,9 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			{
 				casoCobroId: CASO_ID,
 				accion: "reactivacion",
-				motivo: "Cliente pagó por ventanilla",
+				quePaso: "pago",
+				pagoId: 501,
+				motivoDetalle: "Cliente pagó por ventanilla",
 			},
 			{ context: ctx("cobros") },
 		);
@@ -1649,7 +1691,8 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			{
 				casoCobroId: CASO_ID,
 				accion: "reactivacion",
-				motivo: "Entró en convenio",
+				quePaso: "promesa",
+				motivoDetalle: "Entró en convenio",
 			},
 			{ context: ctx("cobros") },
 		);
@@ -1883,7 +1926,7 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 		expect(res.pendienteLlamar).toBeNull();
 	});
 
-	it("marcarEjecutada de una reactivación no genera el aviso de 'apagado ejecutado'", async () => {
+	it("ejecutarReactivacion avisa a los supervisores con la acción 'reactivacion'", async () => {
 		inmovilizacionExistente = {
 			id: INMOV_ID,
 			casoCobroId: CASO_ID,
@@ -1896,14 +1939,16 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			inmovilizacionOrigenId: null,
 		};
 		await call(
-			inmovilizacionUnidadRouter.marcarEjecutada,
-			{ id: INMOV_ID },
-			{ context: ctx("cobros_supervisor") },
+			ejecutarReactivacion,
+			{ id: INMOV_ID, nota: NOTA_LEGION },
+			{ context: ctx("cobros") },
 		);
-		expect(ejecucionNotificadaASupervisores).toHaveLength(0);
+		expect(ejecucionNotificadaASupervisores).toEqual([
+			{ ejecutadoPorUserId: "user-test", accion: "reactivacion" },
+		]);
 	});
 
-	it("marcarEjecutada de una reactivación avisa al asesor", async () => {
+	it("ejecutarReactivacion avisa al asesor", async () => {
 		inmovilizacionExistente = {
 			...apagadoEjecutado(),
 			accion: "reactivacion",
@@ -1911,14 +1956,14 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			inmovilizacionOrigenId: "88888888-8888-8888-8888-888888888888",
 		};
 		await call(
-			inmovilizacionUnidadRouter.marcarEjecutada,
-			{ id: INMOV_ID },
-			{ context: ctx("cobros_supervisor") },
+			ejecutarReactivacion,
+			{ id: INMOV_ID, nota: NOTA_LEGION },
+			{ context: ctx("cobros") },
 		);
 		expect(unidadReactivadaNotificada).toBe(1);
 	});
 
-	it("marcarEjecutada de una reactivación cierra el aviso 'llamar al cliente' del apagado origen (review de Codex)", async () => {
+	it("ejecutarReactivacion cierra el aviso 'llamar al cliente' del apagado origen (review de Codex)", async () => {
 		const ORIGEN_ID = "88888888-8888-8888-8888-888888888888";
 		inmovilizacionExistente = {
 			...apagadoEjecutado(),
@@ -1927,15 +1972,15 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			inmovilizacionOrigenId: ORIGEN_ID,
 		};
 		await call(
-			inmovilizacionUnidadRouter.marcarEjecutada,
-			{ id: INMOV_ID },
-			{ context: ctx("cobros_supervisor") },
+			ejecutarReactivacion,
+			{ id: INMOV_ID, nota: NOTA_LEGION },
+			{ context: ctx("cobros") },
 		);
 		expect(resolverAvisoLlamarClienteLlamadas).toEqual([ORIGEN_ID]);
 	});
 
-	it("marcarEjecutada toma el advisory lock ANTES de tocar cualquier fila (review de Codex — evita deadlock 40P01)", async () => {
-		// marcarEjecutada y registrarResultadoLlamada/registrarLlamadaReactivacion
+	it("ejecutarReactivacion toma el advisory lock ANTES de tocar cualquier fila (review de Codex — evita deadlock 40P01)", async () => {
+		// ejecutarReactivacion y registrarResultadoLlamada/registrarLlamadaReactivacion
 		// pueden tomar locks de FILA en orden cruzado si compiten por la misma
 		// unidad física — el advisory lock (adquirido primero, antes de
 		// cualquier UPDATE/SELECT FOR UPDATE) serializa esa carrera en vez de
@@ -1947,9 +1992,9 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			inmovilizacionOrigenId: "88888888-8888-8888-8888-888888888888",
 		};
 		await call(
-			inmovilizacionUnidadRouter.marcarEjecutada,
-			{ id: INMOV_ID },
-			{ context: ctx("cobros_supervisor") },
+			ejecutarReactivacion,
+			{ id: INMOV_ID, nota: NOTA_LEGION },
+			{ context: ctx("cobros") },
 		);
 		expect(executeLlamadas[0]).toBe("advisory_lock");
 	});
@@ -2473,17 +2518,8 @@ describe("CB-041 — el asesor ejecuta el apagado", () => {
 		};
 	}
 
-	it("el supervisor ya no ejecuta apagados desde la cola: BAD_REQUEST", async () => {
-		apagadoAprobado();
-		await expect(
-			call(
-				inmovilizacionUnidadRouter.marcarEjecutada,
-				{ id: INMOV_ID },
-				{ context: ctx("cobros_supervisor") },
-			),
-		).rejects.toMatchObject({ code: "BAD_REQUEST" });
-		expect(eventosInsertados).toHaveLength(0);
-		expect(inmovilizacionExistente?.estado).toBe("aprobada");
+	it("el supervisor ya no marca ejecutadas desde la cola: el procedure no existe", () => {
+		expect("marcarEjecutada" in inmovilizacionUnidadRouter).toBe(false);
 	});
 
 	it("sin archivo ni nota: BAD_REQUEST y no ejecuta", async () => {
@@ -2694,5 +2730,354 @@ describe("CB-041 — registrarLlamadaApagado", () => {
 			fila,
 		];
 		await expect(llamar()).rejects.toMatchObject({ code: "CONFLICT" });
+	});
+});
+
+// ── Reactivación: qué pasó, respaldo y ejecución por el asesor ───────────────
+
+describe("CB-041 — solicitarInmovilizacion de una reactivación: respaldo", () => {
+	afterEach(reset);
+
+	const APAGADO_EJECUTADO_AT = new Date("2026-09-20T10:00:00.000Z");
+
+	function conApagadoVigente() {
+		historialCasoMock = [
+			{
+				id: INMOV_ID,
+				casoCobroId: CASO_ID,
+				accion: "apagado",
+				estado: "ejecutada",
+				ejecutadoAt: APAGADO_EJECUTADO_AT,
+				wialonUnitId: 12345,
+			},
+		];
+	}
+
+	const solicitar = (extra: Record<string, unknown>) =>
+		call(
+			inmovilizacionUnidadRouter.solicitarInmovilizacion,
+			{ casoCobroId: CASO_ID, accion: "reactivacion", ...extra },
+			{ context: ctx("cobros") },
+		);
+
+	it("sin elegir qué pasó: BAD_REQUEST", async () => {
+		conApagadoVigente();
+		await expect(solicitar({})).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("'Pago' con un pago posterior al apagado: guarda la opción y el pago tal como está en cartera", async () => {
+		conApagadoVigente();
+		await solicitar({
+			quePaso: "pago",
+			pagoId: 501,
+			motivoDetalle: "Depositó en ventanilla",
+		});
+		const fila = inmovilizacionesInsertadas[0];
+		expect(fila?.quePaso).toBe("pago");
+		expect(fila?.motivo).toBe("Pago — Depositó en ventanilla");
+		expect(fila?.respaldoReactivacion).toEqual({
+			pago: {
+				pagoId: 501,
+				fechaPago: "2099-01-10",
+				monto: "1500.00",
+				referencia: "REF-1",
+				validacion: null,
+			},
+		});
+	});
+
+	it("'Pago' con un pago pendiente de validación: se puede solicitar y queda marcado como pendiente (solo informativo)", async () => {
+		conApagadoVigente();
+		pagosCarteraMock = [
+			{ ...pagosCarteraMock[0], validationStatus: "pending" },
+		];
+		await solicitar({ quePaso: "pago", pagoId: 501 });
+		expect(inmovilizacionesInsertadas).toHaveLength(1);
+		expect(
+			(
+				inmovilizacionesInsertadas[0]?.respaldoReactivacion as {
+					pago: { validacion: string };
+				}
+			).pago.validacion,
+		).toBe("pending");
+	});
+
+	it("'Pago' sin elegir el pago: BAD_REQUEST", async () => {
+		conApagadoVigente();
+		await expect(solicitar({ quePaso: "pago" })).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+		});
+	});
+
+	it("'Pago' con un pago que no es de este crédito (id inventado): BAD_REQUEST", async () => {
+		conApagadoVigente();
+		await expect(
+			solicitar({ quePaso: "pago", pagoId: 999999 }),
+		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+	});
+
+	it("'Pago' con un pago ANTERIOR al apagado: no cuenta", async () => {
+		conApagadoVigente();
+		pagosCarteraMock = [
+			{
+				pago_id: 400,
+				fecha_pago: "2026-09-10",
+				monto_boleta: "900.00",
+				numeroAutorizacion: null,
+				paymentFalse: false,
+			},
+		];
+		await expect(
+			solicitar({ quePaso: "pago", pagoId: 400 }),
+		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+	});
+
+	it("'Pago' con un pago anulado (paymentFalse): no cuenta", async () => {
+		conApagadoVigente();
+		pagosCarteraMock = [
+			{
+				pago_id: 501,
+				fecha_pago: "2099-01-10",
+				monto_boleta: "1500.00",
+				numeroAutorizacion: null,
+				paymentFalse: true,
+			},
+		];
+		await expect(
+			solicitar({ quePaso: "pago", pagoId: 501 }),
+		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+	});
+
+	it("'Pago' con cartera caída: SERVICE_UNAVAILABLE, no se aprueba a ciegas", async () => {
+		conApagadoVigente();
+		pagosCarteraFalla = true;
+		await expect(
+			solicitar({ quePaso: "pago", pagoId: 501 }),
+		).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("'Promesa de pago' con una promesa activa: la guarda con su fecha y monto", async () => {
+		conApagadoVigente();
+		await solicitar({ quePaso: "promesa" });
+		expect(inmovilizacionesInsertadas[0]?.respaldoReactivacion).toEqual({
+			promesa: {
+				contactoId: "77777777-7777-7777-7777-777777777777",
+				fechaPrometida: "2099-02-01T00:00:00.000Z",
+				monto: "800.00",
+			},
+		});
+	});
+
+	it("'Promesa de pago' sin promesa activa en el caso: BAD_REQUEST", async () => {
+		conApagadoVigente();
+		promesaActivaMock = null;
+		await expect(solicitar({ quePaso: "promesa" })).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+		});
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("'Promesa de pago' no consulta pagos: sirve aunque cartera no los dé", async () => {
+		conApagadoVigente();
+		pagosCarteraFalla = true;
+		await solicitar({ quePaso: "promesa" });
+		expect(inmovilizacionesInsertadas).toHaveLength(1);
+	});
+
+	it("'50% + promesa' exige las dos cosas", async () => {
+		conApagadoVigente();
+		promesaActivaMock = null;
+		await expect(
+			solicitar({ quePaso: "pago_parcial_promesa", pagoId: 501 }),
+		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		promesaActivaMock = {
+			id: "77777777-7777-7777-7777-777777777777",
+			fechaProximoContacto: new Date("2099-02-01T00:00:00.000Z"),
+			montoComprometido: null,
+		};
+		await expect(
+			solicitar({ quePaso: "pago_parcial_promesa" }),
+		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		await solicitar({ quePaso: "pago_parcial_promesa", pagoId: 501 });
+		const respaldo = inmovilizacionesInsertadas[0]?.respaldoReactivacion as {
+			pago?: unknown;
+			promesa?: { monto: string | null };
+		};
+		expect(respaldo.pago).toBeDefined();
+		expect(respaldo.promesa?.monto).toBeNull();
+	});
+
+	it("'Entrega voluntaria' y 'Sin contacto' no son opciones de reactivación: BAD_REQUEST", async () => {
+		conApagadoVigente();
+		await expect(
+			solicitar({ quePaso: "entrega_voluntaria" }),
+		).rejects.toBeInstanceOf(ORPCError);
+		await expect(solicitar({ quePaso: "sin_contacto" })).rejects.toBeInstanceOf(
+			ORPCError,
+		);
+	});
+});
+
+describe("CB-041 — getRespaldoReactivacion", () => {
+	afterEach(reset);
+
+	const leer = () =>
+		call(
+			getRespaldoReactivacion,
+			{ casoCobroId: CASO_ID },
+			{ context: ctx("cobros") },
+		);
+
+	function conApagadoVigente() {
+		historialCasoMock = [
+			{
+				id: INMOV_ID,
+				casoCobroId: CASO_ID,
+				accion: "apagado",
+				estado: "ejecutada",
+				ejecutadoAt: new Date("2026-09-20T10:00:00.000Z"),
+				wialonUnitId: 12345,
+			},
+		];
+	}
+
+	it("da los pagos posteriores al apagado (más reciente primero) y la promesa activa", async () => {
+		conApagadoVigente();
+		pagosCarteraMock = [
+			{
+				pago_id: 1,
+				fecha_pago: "2026-09-01",
+				monto_boleta: "100.00",
+				numeroAutorizacion: null,
+				paymentFalse: false,
+			},
+			{
+				pago_id: 2,
+				fecha_pago: "2026-09-21",
+				monto_boleta: "200.00",
+				numeroAutorizacion: "A",
+				paymentFalse: false,
+			},
+			{
+				pago_id: 3,
+				fecha_pago: "2026-09-25",
+				monto_boleta: "300.00",
+				numeroAutorizacion: null,
+				paymentFalse: false,
+			},
+		];
+		const res = await leer();
+		expect(res.pagos.map((p) => p.pagoId)).toEqual([3, 2]);
+		expect(res.promesa?.monto).toBe("800.00");
+		expect(res.errorPagos).toBeNull();
+	});
+
+	it("cartera caída: no rompe, devuelve la promesa y el motivo por el que no hay pagos", async () => {
+		conApagadoVigente();
+		pagosCarteraFalla = true;
+		const res = await leer();
+		expect(res.pagos).toEqual([]);
+		expect(res.errorPagos).toContain("pagos");
+		expect(res.promesa).not.toBeNull();
+	});
+
+	it("unidad que no está apagada: sin fecha de apagado y sin pagos", async () => {
+		historialCasoMock = [];
+		const res = await leer();
+		expect(res.apagadoEjecutadoAt).toBeNull();
+		expect(res.pagos).toEqual([]);
+	});
+
+	it("un asesor ajeno al caso: NOT_FOUND", async () => {
+		responsableCasoMock = "otro-asesor";
+		await expect(leer()).rejects.toMatchObject({ code: "NOT_FOUND" });
+	});
+});
+
+describe("CB-041 — el asesor ejecuta la reactivación", () => {
+	afterEach(reset);
+
+	function reactivacionAprobada() {
+		inmovilizacionExistente = {
+			...{
+				id: INMOV_ID,
+				casoCobroId: CASO_ID,
+				accion: "reactivacion",
+				estado: "aprobada",
+				wialonUnitId: 12345,
+				bucketSnapshot: 0,
+				numeroCreditoSifco: "01010214100000",
+				vehicleId: VEHICLE_ID,
+				solicitadoPor: "user-test",
+				inmovilizacionOrigenId: null,
+			},
+		};
+	}
+
+	it("sin archivo ni nota: BAD_REQUEST", async () => {
+		reactivacionAprobada();
+		await expect(
+			call(ejecutarReactivacion, { id: INMOV_ID }, { context: ctx("cobros") }),
+		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		expect(inmovilizacionExistente?.estado).toBe("aprobada");
+	});
+
+	it("con nota: queda ejecutada por el asesor, sin ubicación (la reactivación no la consulta)", async () => {
+		reactivacionAprobada();
+		await call(
+			ejecutarReactivacion,
+			{ id: INMOV_ID, nota: NOTA_LEGION },
+			{ context: ctx("cobros") },
+		);
+		expect(inmovilizacionExistente).toMatchObject({
+			estado: "ejecutada",
+			ejecutadoPor: "user-test",
+			evidenciaNota: NOTA_LEGION,
+			ubicacionEjecucion: null,
+		});
+		const evento = eventosInsertados.find(
+			(e) => e.evento === "marcar_ejecutada",
+		);
+		expect(evento?.usuarioId).toBe("user-test");
+	});
+
+	it("ignora una consulta GPS: la reactivación no guarda ubicación", async () => {
+		reactivacionAprobada();
+		consultaGpsMock = {
+			snapshot: snapshotConPosicion(),
+			unitName: "P-123ABC",
+		};
+		await call(
+			ejecutarReactivacion,
+			{ id: INMOV_ID, nota: NOTA_LEGION, consultaLogId: CONSULTA_ID },
+			{ context: ctx("cobros") },
+		);
+		expect(inmovilizacionExistente?.ubicacionEjecucion).toBeNull();
+	});
+
+	it("un apagado no se ejecuta por este endpoint: NOT_FOUND", async () => {
+		reactivacionAprobada();
+		inmovilizacionExistente = { ...inmovilizacionExistente, accion: "apagado" };
+		await expect(
+			call(
+				ejecutarReactivacion,
+				{ id: INMOV_ID, nota: NOTA_LEGION },
+				{ context: ctx("cobros") },
+			),
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
+	});
+
+	it("un asesor que no lleva el caso no puede ejecutarla: NOT_FOUND", async () => {
+		reactivacionAprobada();
+		responsableCasoMock = "otro-asesor";
+		await expect(
+			call(
+				ejecutarReactivacion,
+				{ id: INMOV_ID, nota: NOTA_LEGION },
+				{ context: ctx("cobros") },
+			),
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
 	});
 });

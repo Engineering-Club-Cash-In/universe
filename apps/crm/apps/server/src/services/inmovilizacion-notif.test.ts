@@ -37,7 +37,7 @@ function siguienteLectura(): AvisoAbierto[] {
 		: (lecturasAvisos[0] ?? []);
 }
 let duenoEnCarteraMock: string | null = null;
-// Apagados aprobados hace más de 24 h (recordarApagadosSinEjecutar).
+// Apagados aprobados hace más de 24 h (recordarInmovilizacionesSinEjecutar).
 let apagadosSinEjecutarMock: {
 	accion?: "apagado" | "reactivacion";
 	id: string;
@@ -148,7 +148,7 @@ const {
 	notificarInmovilizacionPendiente,
 	notificarInmovilizacionResuelta,
 	reconciliarAvisosLlamarCliente,
-	recordarApagadosSinEjecutar,
+	recordarInmovilizacionesSinEjecutar,
 } = await import("./inmovilizacion-notif");
 
 function reset() {
@@ -385,7 +385,7 @@ describe("CB-041 — apagado aprobado: aviso al asesor", () => {
 		});
 	});
 
-	it("al aprobar una reactivación el texto sigue siendo el de siempre (la ejecuta el supervisor)", async () => {
+	it("al aprobar una reactivación el asesor también la ejecuta él, con la confirmación de LEGION", async () => {
 		await notificarInmovilizacionResuelta({
 			...aprobada,
 			accion: "reactivacion",
@@ -394,16 +394,17 @@ describe("CB-041 — apagado aprobado: aviso al asesor", () => {
 			string,
 			unknown
 		>;
-		expect(String(aviso.descripcion)).not.toContain("LEGION");
+		expect(String(aviso.descripcion)).toContain("la reactivación");
+		expect(String(aviso.descripcion)).toContain("LEGION");
 	});
 });
 
-describe("CB-041 — recordarApagadosSinEjecutar", () => {
+describe("CB-041 — recordarInmovilizacionesSinEjecutar", () => {
 	afterEach(reset);
 
 	it("sin apagados aprobados de hace más de 24 h: no avisa", async () => {
 		apagadosSinEjecutarMock = [];
-		expect(await recordarApagadosSinEjecutar()).toBe(0);
+		expect(await recordarInmovilizacionesSinEjecutar()).toBe(0);
 		expect(notificacionesInsertadas).toHaveLength(0);
 	});
 
@@ -419,7 +420,7 @@ describe("CB-041 — recordarApagadosSinEjecutar", () => {
 		];
 		duenoEnCarteraMock = "asesor-hoy";
 
-		const creados = await recordarApagadosSinEjecutar(
+		const creados = await recordarInmovilizacionesSinEjecutar(
 			new Date("2026-09-30T14:00:00.000Z"),
 		);
 		expect(creados).toBe(1);
@@ -433,6 +434,28 @@ describe("CB-041 — recordarApagadosSinEjecutar", () => {
 		});
 	});
 
+	it("una reactivación aprobada sin ejecutar también se recuerda, con su propio texto", async () => {
+		apagadosSinEjecutarMock = [
+			{
+				id: "inm-2",
+				casoCobroId: "caso-1",
+				numeroCreditoSifco: "0101",
+				solicitadoPor: "quien-solicito",
+				accion: "reactivacion",
+			},
+		];
+		duenoEnCarteraMock = "asesor-hoy";
+		await recordarInmovilizacionesSinEjecutar(
+			new Date("2026-09-30T14:00:00.000Z"),
+		);
+		const [fila] = notificacionesInsertadas[0] ?? [];
+		expect(fila).toMatchObject({
+			titulo: "Reactivación aprobada sin ejecutar",
+			assignedTo: "asesor-hoy",
+		});
+		expect(String(fila?.descripcion)).toContain("la reactivación");
+	});
+
 	it("dueño sin usuario en el CRM: cae en quien solicitó", async () => {
 		apagadosSinEjecutarMock = [
 			{
@@ -444,7 +467,7 @@ describe("CB-041 — recordarApagadosSinEjecutar", () => {
 			},
 		];
 		duenoEnCarteraMock = null;
-		await recordarApagadosSinEjecutar();
+		await recordarInmovilizacionesSinEjecutar();
 		const [fila] = notificacionesInsertadas[0] ?? [];
 		expect(fila).toMatchObject({ assignedTo: "quien-solicito" });
 	});

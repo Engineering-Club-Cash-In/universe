@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
 	Check,
-	CheckCircle2,
 	ChevronDown,
 	ClipboardList,
 	FileText,
@@ -30,24 +29,18 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
 import { authClient } from "@/lib/auth-client";
 import {
 	BUCKETS_CON_CARD_INMOVILIZACION,
 	debeMostrarCardInmovilizacion,
 } from "@/lib/inmovilizacion-card-gate";
-import { client, orpc } from "@/utils/orpc";
+import { type client, orpc } from "@/utils/orpc";
 import {
 	type DecisionInmovilizacion,
 	DecisionInmovilizacionModal,
 } from "./inmovilizacion-decision-modal";
-import { EjecutarApagadoModal } from "./inmovilizacion-ejecutar-modal";
+import { EjecutarInmovilizacionModal } from "./inmovilizacion-ejecutar-modal";
+import { RespaldoReactivacionResumen } from "./inmovilizacion-respaldo";
 import { SolicitarInmovilizacionModal } from "./inmovilizacion-solicitar-modal";
 import { UbicacionGuardada } from "./inmovilizacion-ubicacion";
 
@@ -100,18 +93,24 @@ export function InmovilizacionCard({
 	/** Supervisor o admin: puede ir directo a la cola de aprobación. */
 	esSupervisor: boolean;
 	/**
-	 * Abre "Registrar Contacto" (llamada) para el apagado `inmovilizacionId` y,
-	 * al guardarlo, enlaza la gestión a esa inmovilización (lo resuelve el
-	 * padre: es quien tiene el modal de contacto).
+	 * Abre "Registrar Contacto" (llamada) para el apagado o la reactivación
+	 * `inmovilizacionId` y, al guardarlo, enlaza la gestión a esa inmovilización
+	 * (lo resuelve el padre: es quien tiene el modal de contacto).
 	 */
-	onRegistrarLlamada: (inmovilizacionId: string) => void;
+	onRegistrarLlamada: (
+		inmovilizacionId: string,
+		accion: "apagado" | "reactivacion",
+	) => void;
 }) {
 	const queryClient = useQueryClient();
 	const { data: session } = authClient.useSession();
 	const [modalAbierto, setModalAbierto] = useState<
 		"apagado" | "reactivacion" | null
 	>(null);
-	const [ejecutandoId, setEjecutandoId] = useState<string | null>(null);
+	const [ejecutando, setEjecutando] = useState<{
+		id: string;
+		accion: "apagado" | "reactivacion";
+	} | null>(null);
 	// Supervisor/admin decidiendo la solicitud abierta desde la Ficha 360.
 	const [decision, setDecision] = useState<DecisionInmovilizacion | null>(null);
 
@@ -235,6 +234,21 @@ export function InmovilizacionCard({
 						<p className="mt-1 text-muted-foreground">
 							Motivo: {solicitudAbierta.motivo}
 						</p>
+						{solicitudAbierta.accion === "reactivacion" && (
+							<div className="mt-2">
+								<RespaldoReactivacionResumen
+									bucket={
+										bucketNumero !== null
+											? `B${bucketNumero} (hoy)`
+											: solicitudAbierta.bucketSnapshot != null
+												? `B${solicitudAbierta.bucketSnapshot} (al solicitar)`
+												: null
+									}
+									quePaso={solicitudAbierta.quePaso}
+									respaldo={solicitudAbierta.respaldoReactivacion}
+								/>
+							</div>
+						)}
 						<div className="mt-2">
 							<UbicacionGuardada
 								conMapa
@@ -263,25 +277,46 @@ export function InmovilizacionCard({
 							)}
 						{/* El apagado lo ejecuta el asesor, no el supervisor: LEGION lo
 						    aplica y acá se deja constancia con su confirmación. */}
-						{solicitudAbierta.accion === "apagado" &&
-							solicitudAbierta.estado === "aprobada" && (
-								<div className="mt-3 space-y-2">
-									<p className="text-muted-foreground">
-										Aprobada. Pedile a LEGION que apague la unidad y, cuando lo
-										confirme, registralo acá con su confirmación.
-									</p>
-									<div className="flex flex-wrap gap-2">
-										<Button
-											onClick={() => setEjecutandoId(solicitudAbierta.id)}
-											size="sm"
-											variant="destructive"
-										>
+						{solicitudAbierta.estado === "aprobada" && (
+							<div className="mt-3 space-y-2">
+								<p className="text-muted-foreground">
+									Aprobada. Pedile a LEGION que{" "}
+									{solicitudAbierta.accion === "apagado"
+										? "apague"
+										: "reactive"}{" "}
+									la unidad y, cuando lo confirme, registralo acá con su
+									confirmación.
+								</p>
+								<div className="flex flex-wrap gap-2">
+									<Button
+										onClick={() =>
+											setEjecutando({
+												id: solicitudAbierta.id,
+												accion: solicitudAbierta.accion,
+											})
+										}
+										size="sm"
+										variant={
+											solicitudAbierta.accion === "apagado"
+												? "destructive"
+												: "default"
+										}
+									>
+										{solicitudAbierta.accion === "apagado" ? (
 											<Lock className="mr-2 h-4 w-4" />
-											Registrar apagado ejecutado
-										</Button>
-										{/* Si LEGION no lo aplica o ya no corresponde: sin esto la
+										) : (
+											<LockOpen className="mr-2 h-4 w-4" />
+										)}
+										{solicitudAbierta.accion === "apagado"
+											? "Registrar apagado ejecutado"
+											: "Registrar reactivación ejecutada"}
+									</Button>
+									{/* Si LEGION no lo aplica o ya no corresponde: sin esto la
 									    solicitud quedaba aprobada para siempre. El server exige el
-									    mismo acceso que para ejecutarlo. */}
+									    mismo acceso que para ejecutarlo. Solo para el apagado: la
+									    cancelación de una reactivación aprobada no existe en el
+									    server. */}
+									{solicitudAbierta.accion === "apagado" && (
 										<Button
 											disabled={cancelar.isPending}
 											onClick={() =>
@@ -295,9 +330,10 @@ export function InmovilizacionCard({
 											)}
 											Cancelar apagado
 										</Button>
-									</div>
+									)}
 								</div>
-							)}
+							</div>
+						)}
 						{/* Antes de que se decida solo quien la pidió (el server aplica
 						    la misma regla en cancelarSolicitud). */}
 						{solicitudAbierta.estado === "pendiente_aprobacion" &&
@@ -320,16 +356,19 @@ export function InmovilizacionCard({
 
 				{pendienteLlamar && (
 					<LlamarClienteBanner
-						onRegistrarLlamada={() => onRegistrarLlamada(pendienteLlamar.id)}
+						accion="apagado"
+						onRegistrarLlamada={() =>
+							onRegistrarLlamada(pendienteLlamar.id, "apagado")
+						}
 					/>
 				)}
 
 				{pendienteLlamarReactivacion && (
-					<LlamarClienteReactivacionBanner
-						casoCobroId={casoCobroId}
-						ejecutadoAt={pendienteLlamarReactivacion.ejecutadoAt}
-						inmovilizacionId={pendienteLlamarReactivacion.id}
-						onEnlazado={invalidar}
+					<LlamarClienteBanner
+						accion="reactivacion"
+						onRegistrarLlamada={() =>
+							onRegistrarLlamada(pendienteLlamarReactivacion.id, "reactivacion")
+						}
 					/>
 				)}
 
@@ -382,16 +421,17 @@ export function InmovilizacionCard({
 				/>
 			)}
 
-			{ejecutandoId && (
-				<EjecutarApagadoModal
+			{ejecutando && (
+				<EjecutarInmovilizacionModal
+					accion={ejecutando.accion}
 					casoCobroId={casoCobroId}
-					inmovilizacionId={ejecutandoId}
+					inmovilizacionId={ejecutando.id}
 					onEjecutada={(id) => {
 						invalidar();
-						onRegistrarLlamada(id);
+						onRegistrarLlamada(id, ejecutando.accion);
 					}}
-					onOpenChange={(open) => !open && setEjecutandoId(null)}
-					open={!!ejecutandoId}
+					onOpenChange={(open) => !open && setEjecutando(null)}
+					open={!!ejecutando}
 				/>
 			)}
 
@@ -409,134 +449,36 @@ export function InmovilizacionCard({
 }
 
 /**
- * Se muestra cuando el apagado ya se ejecutó y falta la llamada al cliente.
- * Normalmente "Registrar Contacto" se abre solo al ejecutarlo; este banner es
- * para quien lo cerró sin guardar (o vuelve después): un botón para llamar de
- * una vez. La gestión queda enlazada a la inmovilización sola, sin elegirla.
+ * Se muestra cuando el apagado o la reactivación ya se ejecutó y falta la
+ * llamada al cliente. Normalmente "Registrar Contacto" se abre solo al
+ * ejecutarla; este banner es para quien lo cerró sin guardar (o vuelve
+ * después): un botón para llamar de una vez. La gestión queda enlazada a la
+ * inmovilización sola, sin elegirla de una lista.
  */
 function LlamarClienteBanner({
+	accion,
 	onRegistrarLlamada,
 }: {
+	accion: "apagado" | "reactivacion";
 	onRegistrarLlamada: () => void;
 }) {
 	return (
 		<div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/30">
 			<p className="flex items-center gap-2 font-medium text-amber-900 dark:text-amber-200">
 				<PhoneCall className="h-4 w-4" />
-				Pendiente: llamar al cliente
+				{accion === "apagado"
+					? "Pendiente: llamar al cliente"
+					: "Pendiente: llamar al cliente (unidad reactivada)"}
 			</p>
 			<p className="mt-1 text-amber-800 dark:text-amber-300">
-				Se ejecutó el apagado. Llamá al cliente para avisarle lo sucedido y
-				registrá la llamada.
+				{accion === "apagado"
+					? "Se ejecutó el apagado. Llamá al cliente para avisarle lo sucedido y registrá la llamada."
+					: "Se ejecutó la reactivación. Llamá al cliente para avisarle que ya puede usar el vehículo y registrá la llamada."}
 			</p>
 			<Button className="mt-3" onClick={onRegistrarLlamada} size="sm">
 				<PhoneCall className="mr-2 h-4 w-4" />
 				Registrar llamada
 			</Button>
-		</div>
-	);
-}
-
-type ContactosCaso = Awaited<ReturnType<typeof client.getHistorialContactos>>;
-
-/**
- * Se muestra cuando la reactivación ya se ejecutó y falta confirmar que el
- * asesor llamó al cliente. La gestión (contacto) se registra con el flujo
- * normal de la ficha (Registrar Contacto) — acá solo se elige cuál de las
- * gestiones recientes fue esa llamada y se enlaza.
- */
-function LlamarClienteReactivacionBanner({
-	casoCobroId,
-	ejecutadoAt,
-	inmovilizacionId,
-	onEnlazado,
-}: {
-	casoCobroId: string;
-	ejecutadoAt?: Date | string | null;
-	inmovilizacionId: string;
-	onEnlazado: () => void;
-}) {
-	const [contactoId, setContactoId] = useState<string>("");
-	const [enviando, setEnviando] = useState(false);
-
-	const contactos = useQuery({
-		...orpc.getHistorialContactos.queryOptions({
-			input: { casoCobroId, limit: 200 },
-		}),
-	});
-
-	const disponibles: ContactosCaso =
-		contactos.data?.filter(
-			(c) =>
-				!c.inmovilizacionId &&
-				c.metodoContacto === "llamada" &&
-				(!ejecutadoAt || new Date(c.fechaContacto) > new Date(ejecutadoAt)),
-		) ?? [];
-
-	async function registrar() {
-		if (!contactoId) {
-			toast.error("Elegí primero la gestión que registra la llamada.");
-			return;
-		}
-		setEnviando(true);
-		try {
-			await client.registrarLlamadaReactivacion({
-				inmovilizacionId,
-				contactoId,
-			});
-			toast.success("Registrado.");
-			onEnlazado();
-		} catch (error) {
-			toast.error(
-				(error as { message?: string })?.message ??
-					"No se pudo registrar la llamada.",
-			);
-		} finally {
-			setEnviando(false);
-		}
-	}
-
-	return (
-		<div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/30">
-			<p className="flex items-center gap-2 font-medium text-amber-900 dark:text-amber-200">
-				<PhoneCall className="h-4 w-4" />
-				Pendiente: llamar al cliente (unidad reactivada)
-			</p>
-			<p className="mt-1 text-amber-800 dark:text-amber-300">
-				Se ejecutó la reactivación. Registrá la llamada con "Registrar Contacto"
-				y después elegila acá para cerrar el ciclo.
-			</p>
-			<div className="mt-3 flex flex-wrap items-center gap-2">
-				<Select onValueChange={setContactoId} value={contactoId}>
-					<SelectTrigger className="w-64">
-						<SelectValue
-							placeholder={
-								contactos.isLoading
-									? "Cargando llamadas..."
-									: disponibles.length === 0
-										? "Sin llamadas posteriores disponibles"
-										: "Elegí la gestión de la llamada"
-							}
-						/>
-					</SelectTrigger>
-					<SelectContent>
-						{disponibles.map((c) => (
-							<SelectItem key={c.id} value={c.id}>
-								{formatFechaHoraGT(c.fechaContacto)} — {c.metodoContacto} (
-								{c.estadoContacto})
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
-				<Button
-					disabled={enviando || !contactoId}
-					onClick={registrar}
-					size="sm"
-				>
-					<CheckCircle2 className="mr-2 h-4 w-4" />
-					Ya llamé
-				</Button>
-			</div>
 		</div>
 	);
 }
@@ -646,7 +588,7 @@ function FilaDetalle({
 /**
  * Historial de la unidad: una tarjeta por solicitud. La línea de arriba (acción,
  * estado y fecha) siempre se ve; el detalle —motivo, quién la ejecutó, la
- * confirmación de LEGION y las ubicaciones— va debajo en filas
+ * confirmación de LEGION, el respaldo y las ubicaciones— va debajo en filas
  * rotuladas, y solo la más reciente viene abierta.
  */
 function HistorialInmovilizacion({
@@ -702,6 +644,15 @@ function HistorialInmovilizacion({
 											{h.motivoRechazo}
 										</FilaDetalle>
 									)}
+									{h.accion === "reactivacion" &&
+										(h.quePaso || h.respaldoReactivacion) && (
+											<FilaDetalle etiqueta="Respaldo">
+												<RespaldoReactivacionResumen
+													quePaso={h.quePaso}
+													respaldo={h.respaldoReactivacion}
+												/>
+											</FilaDetalle>
+										)}
 									{ejecutada && h.ejecutadoPorNombre && (
 										<FilaDetalle etiqueta="Registrado por">
 											{h.ejecutadoPorNombre}

@@ -4,12 +4,18 @@ import {
 	BUCKETS_INMOVILIZACION,
 	bucketsInmovilizacionTexto,
 	componerMotivoApagado,
+	componerMotivoReactivacion,
 	erroresEvidenciaEjecucion,
 	erroresMotivosInmovilizacion,
+	erroresRespaldoReactivacion,
 	erroresUbicacionSolicitud,
 	estadoUnidad,
 	MOTIVOS_INMOVILIZACION,
+	pagosPosterioresAlApagado,
 	puedeSolicitar,
+	QUE_PASO_REACTIVACION,
+	quePasoRequierePago,
+	quePasoRequierePromesa,
 	siguienteEstado,
 	transicionValida,
 } from "./inmovilizacion-unidad";
@@ -263,5 +269,135 @@ describe("ubicación y evidencia del apagado", () => {
 		expect(advertenciaEnMarcha({ velocidadKmh: 0, ignicion: true })).toBe(
 			"El vehículo tiene el motor encendido.",
 		);
+	});
+});
+
+describe("reactivación: qué pasó y respaldo", () => {
+	it("son tres opciones: pago, promesa de pago y 50% + promesa", () => {
+		expect(Object.keys(QUE_PASO_REACTIVACION)).toEqual([
+			"pago",
+			"promesa",
+			"pago_parcial_promesa",
+		]);
+		expect(QUE_PASO_REACTIVACION.pago_parcial_promesa.label).toBe(
+			"50% + promesa",
+		);
+	});
+
+	it("qué respaldo pide cada opción", () => {
+		expect(quePasoRequierePago("pago")).toBe(true);
+		expect(quePasoRequierePromesa("pago")).toBe(false);
+		expect(quePasoRequierePago("promesa")).toBe(false);
+		expect(quePasoRequierePromesa("promesa")).toBe(true);
+		expect(quePasoRequierePago("pago_parcial_promesa")).toBe(true);
+		expect(quePasoRequierePromesa("pago_parcial_promesa")).toBe(true);
+	});
+
+	it("valida el respaldo según la opción", () => {
+		expect(erroresRespaldoReactivacion("pago", {})).not.toBeNull();
+		expect(erroresRespaldoReactivacion("pago", { pago: {} })).toBeNull();
+		expect(erroresRespaldoReactivacion("promesa", {})).not.toBeNull();
+		expect(erroresRespaldoReactivacion("promesa", { promesa: {} })).toBeNull();
+		expect(
+			erroresRespaldoReactivacion("pago_parcial_promesa", { pago: {} }),
+		).not.toBeNull();
+		expect(
+			erroresRespaldoReactivacion("pago_parcial_promesa", { promesa: {} }),
+		).not.toBeNull();
+		expect(
+			erroresRespaldoReactivacion("pago_parcial_promesa", {
+				pago: {},
+				promesa: {},
+			}),
+		).toBeNull();
+	});
+
+	it("compone el motivo con la opción y el detalle", () => {
+		expect(componerMotivoReactivacion("promesa", null)).toBe("Promesa de pago");
+		expect(componerMotivoReactivacion("pago", " Depositó ")).toBe(
+			"Pago — Depositó",
+		);
+	});
+
+	const pago = (id: number, fecha: string, extra = {}) => ({
+		pago_id: id,
+		fecha_pago: fecha,
+		monto_boleta: "100.00",
+		numeroAutorizacion: null,
+		paymentFalse: false,
+		...extra,
+	});
+
+	it("solo cuentan los pagos del día del apagado en adelante, sin anulados, el más reciente primero", () => {
+		// 2026-09-20T03:00Z es el 19/09 a las 21:00 en Guatemala (UTC-6).
+		const apagadoAt = new Date("2026-09-20T03:00:00.000Z");
+		const res = pagosPosterioresAlApagado(
+			[
+				pago(1, "2026-09-18"),
+				pago(2, "2026-09-19"),
+				pago(3, "2026-09-25", { paymentFalse: true }),
+				pago(4, "2026-09-22T00:00:00.000Z"),
+			],
+			apagadoAt,
+		);
+		expect(res.map((p) => p.pagoId)).toEqual([4, 2]);
+		expect(res[0]?.fechaPago).toBe("2026-09-22");
+	});
+
+	it("ignora las filas de cartera sin fecha o con monto 0 (cuotas sin pagar), sin romperse", () => {
+		const res = pagosPosterioresAlApagado(
+			[
+				pago(10, "2026-09-25", { monto_boleta: "0.00" }),
+				{ ...pago(11, "2026-09-25"), fecha_pago: null },
+				{ ...pago(12, "2026-09-25"), monto_boleta: null },
+				pago(13, "2026-09-25", { monto_boleta: "250.50" }),
+			],
+			new Date("2026-09-20T15:00:00.000Z"),
+		);
+		expect(res.map((p) => p.pagoId)).toEqual([13]);
+	});
+
+	it("una fecha con hora se pasa al día de Guatemala; una a medianoche UTC se toma tal cual", () => {
+		const res = pagosPosterioresAlApagado(
+			[
+				// 02:00 UTC del 21 = 20:00 del 20 en Guatemala: es del día 20.
+				pago(20, "2026-09-21T02:00:00.000Z"),
+				// Medianoche UTC = columna `date` del día 21, no del 20.
+				pago(21, "2026-09-21T00:00:00.000Z"),
+			],
+			new Date("2026-09-21T15:00:00.000Z"),
+		);
+		expect(res.map((p) => p.pagoId)).toEqual([21]);
+	});
+
+	it("deja el estado de validación de cada pago, solo para informar", () => {
+		const res = pagosPosterioresAlApagado(
+			[
+				pago(30, "2026-09-25", { validationStatus: "pending" }),
+				pago(31, "2026-09-24", { validationStatus: "validated" }),
+				pago(32, "2026-09-23", { validationStatus: "reset" }),
+				pago(33, "2026-09-22"),
+			],
+			new Date("2026-09-20T15:00:00.000Z"),
+		);
+		expect(res.map((p) => p.validacion)).toEqual([
+			"pending",
+			"validated",
+			null,
+			null,
+		]);
+	});
+
+	it("un texto que no es fecha ('pending', 'N/A') no pasa como un día", () => {
+		const res = pagosPosterioresAlApagado(
+			[
+				pago(40, "pending"),
+				pago(41, "N/A"),
+				pago(42, ""),
+				pago(43, "2026-09-25"),
+			],
+			new Date("2026-09-20T15:00:00.000Z"),
+		);
+		expect(res.map((p) => p.pagoId)).toEqual([43]);
 	});
 });

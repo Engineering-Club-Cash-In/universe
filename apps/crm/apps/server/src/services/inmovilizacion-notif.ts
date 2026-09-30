@@ -174,13 +174,11 @@ export async function notificarInmovilizacionResuelta(params: {
 			params.decision === "aprobada"
 				? `Solicitud de ${accionTexto} aprobada`
 				: `Solicitud de ${accionTexto} rechazada`;
-		// Apagado aprobado: a partir de acá el asesor es quien lo ejecuta (no el
+		// Aprobada: a partir de acá el asesor es quien la ejecuta (no el
 		// supervisor), así que el aviso le dice qué sigue.
 		const descripcion =
 			params.decision === "aprobada"
-				? params.accion === "apagado"
-					? "El supervisor aprobó el apagado de la unidad. Pedile a LEGION que lo aplique y, cuando lo confirme, registralo en la Ficha 360 con su confirmación."
-					: `El supervisor aprobó la solicitud de ${accionTexto} de unidad.`
+				? `El supervisor aprobó ${params.accion === "apagado" ? "el apagado" : "la reactivación"} de la unidad. Pedile a LEGION que la aplique y, cuando lo confirme, registralo en la Ficha 360 con su confirmación.`
 				: `El supervisor rechazó la solicitud de ${accionTexto} de unidad. Motivo: ${params.motivoRechazo ?? "sin especificar"}.`;
 
 		const ejecutaElDueno =
@@ -419,21 +417,21 @@ export async function resolverRecordatoriosEjecucion(
 	);
 }
 
-/** Horas que pueden pasar entre la aprobación de un apagado y su ejecución antes de recordarlo. */
+/** Horas que pueden pasar entre la aprobación y su ejecución antes de recordarla. */
 const HORAS_PARA_RECORDAR_EJECUCION = 24;
 
 /**
- * Recordatorio al asesor de un apagado APROBADO que lleva más de 24 h sin
+ * Recordatorio al asesor de un apagado o reactivación APROBADOS que llevan más de 24 h sin
  * ejecutarse. Corre en la tanda de las 08:00 GT, así que sale una vez por día
  * mientras siga abierto; la llave de dedup lleva el día, y el run de boot no
  * duplica. Va al dueño en cartera de hoy, con fallback a quien solicitó (mismo
  * criterio que el aviso de llamar al cliente). Best-effort.
  */
-export async function recordarApagadosSinEjecutar(
+export async function recordarInmovilizacionesSinEjecutar(
 	ahora: Date = new Date(),
 ): Promise<number> {
 	let creados = 0;
-	await tryNotify("recordarApagadosSinEjecutar", async () => {
+	await tryNotify("recordarInmovilizacionesSinEjecutar", async () => {
 		const limite = new Date(
 			ahora.getTime() - HORAS_PARA_RECORDAR_EJECUCION * 60 * 60 * 1000,
 		);
@@ -443,11 +441,11 @@ export async function recordarApagadosSinEjecutar(
 				casoCobroId: inmovilizacionesUnidad.casoCobroId,
 				numeroCreditoSifco: inmovilizacionesUnidad.numeroCreditoSifco,
 				solicitadoPor: inmovilizacionesUnidad.solicitadoPor,
+				accion: inmovilizacionesUnidad.accion,
 			})
 			.from(inmovilizacionesUnidad)
 			.where(
 				and(
-					eq(inmovilizacionesUnidad.accion, "apagado"),
 					eq(inmovilizacionesUnidad.estado, "aprobada"),
 					lte(inmovilizacionesUnidad.decididoAt, limite),
 				),
@@ -462,9 +460,11 @@ export async function recordarApagadosSinEjecutar(
 			.insert(notifications)
 			.values(
 				pendientes.map((p) => ({
-					titulo: "Apagado aprobado sin ejecutar",
-					descripcion:
-						"Hace más de un día se aprobó el apagado de esta unidad y todavía no se registró su ejecución. Coordiná con LEGION y registralo en la Ficha 360, o cancelá la solicitud si ya no aplica.",
+					titulo:
+						p.accion === "apagado"
+							? "Apagado aprobado sin ejecutar"
+							: "Reactivación aprobada sin ejecutar",
+					descripcion: `Hace más de un día se aprobó ${p.accion === "apagado" ? "el apagado" : "la reactivación"} de esta unidad y todavía no se registró su ejecución. Coordiná con LEGION y registralo en la Ficha 360.`,
 					type: "action_required" as const,
 					status: "pending" as const,
 					cobrosTipo: "inmovilizacion_ejecutar_pendiente" as const,

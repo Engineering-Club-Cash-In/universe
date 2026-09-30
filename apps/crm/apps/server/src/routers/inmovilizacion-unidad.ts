@@ -10,9 +10,9 @@
  * Modo de ejecución: MANUAL. El envío automático al proveedor (LEGION,
  * `unit/exec_cmd`) no forma parte de este flujo: depende de que LEGION habilite
  * comandos/permisos/relé — ver services/inmovilizacion/ejecutor.ts.
- * `ejecutarApagado` deja constancia —a cargo del asesor, con la confirmación
- * de LEGION— de que se coordinó el apagado por fuera del CRM; la reactivación
- * la marca ejecutada el supervisor (`marcarEjecutada`).
+ * `ejecutarApagado` / `ejecutarReactivacion` dejan constancia —a cargo del
+ * asesor, con la confirmación de LEGION— de que se coordinó el
+ * apagado/reactivación por fuera del CRM.
  */
 
 import { ORPCError } from "@orpc/server";
@@ -42,17 +42,28 @@ import {
 	advertenciaEnMarcha,
 	BUCKETS_INMOVILIZACION,
 	bucketsInmovilizacionTexto,
+	CLAVES_QUE_PASO_REACTIVACION,
 	componerMotivoApagado,
+	componerMotivoReactivacion,
 	erroresEvidenciaEjecucion,
 	erroresMotivosInmovilizacion,
+	erroresRespaldoReactivacion,
 	erroresUbicacionSolicitud,
 	estadoUnidad,
 	type InmovilizacionHistorialItem,
 	MIME_EVIDENCIA_INMOVILIZACION,
+	type PagoRespaldo,
+	type PromesaRespaldo,
+	pagosPosterioresAlApagado,
 	puedeSolicitar,
+	type QuePasoReactivacion,
+	quePasoRequierePago,
+	quePasoRequierePromesa,
+	type RespaldoReactivacion,
 	type UbicacionInmovilizacion,
 } from "../lib/inmovilizacion-unidad";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import { condicionesPromesaVigente } from "../lib/promesa-vigente";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	buildUploadPrefix,
@@ -587,6 +598,96 @@ async function assertAccesoLlamadaInmovilizacion(
 	});
 }
 
+// ── Respaldo de la reactivación: pagos posteriores al apagado y promesa ─────
+
+/**
+ * Pagos de cartera-back que pueden respaldar la reactivación: los del día del
+ * apagado en adelante. Sin caché (un pago recién registrado tiene que verse de
+ * inmediato). Si cartera no responde, lanza: no se puede verificar el pago.
+ */
+async function leerPagosPosterioresAlApagado(
+	numeroCreditoSifco: string,
+	apagadoEjecutadoAt: Date,
+): Promise<PagoRespaldo[]> {
+	if (!isCarteraBackEnabled()) {
+		throw new ORPCError("SERVICE_UNAVAILABLE", {
+			message:
+				"La integración con cartera no está habilitada: no se pueden verificar pagos.",
+		});
+	}
+	let pagos: Awaited<ReturnType<typeof carteraBackClient.getPagosByCredito>>;
+	try {
+		pagos = await carteraBackClient.getPagosByCredito(
+			numeroCreditoSifco,
+			false,
+		);
+	} catch (error) {
+		console.error("[inmovilizacion] No se pudieron leer los pagos:", error);
+		throw new ORPCError("SERVICE_UNAVAILABLE", {
+			message:
+				"No se pudieron consultar los pagos en cartera. Intentá de nuevo en un momento.",
+		});
+	}
+	return pagosPosterioresAlApagado(pagos, apagadoEjecutadoAt);
+}
+
+/** La promesa de pago activa del caso (la misma definición que usa la ficha), o null. */
+async function leerPromesaActivaCaso(
+	casoCobroId: string,
+): Promise<PromesaRespaldo | null> {
+	const [promesa] = await db
+		.select({
+			id: contactosCobros.id,
+			fechaProximoContacto: contactosCobros.fechaProximoContacto,
+			montoComprometido: contactosCobros.montoComprometido,
+		})
+		.from(contactosCobros)
+		.where(
+			and(
+				eq(contactosCobros.casoCobroId, casoCobroId),
+				...condicionesPromesaVigente(),
+			),
+		)
+		.limit(1);
+	if (!promesa?.fechaProximoContacto) return null;
+	return {
+		contactoId: promesa.id,
+		fechaPrometida: new Date(promesa.fechaProximoContacto).toISOString(),
+		monto: promesa.montoComprometido ?? null,
+	};
+}
+
+/**
+ * Arma el respaldo de una reactivación desde los datos REALES (no los que
+ * mande el navegador): el pago elegido tiene que estar en cartera y ser
+ * posterior al apagado; la promesa, la activa del caso. Lanza BAD_REQUEST con
+ * lo que falte según la opción elegida.
+ */
+async function resolverRespaldoReactivacion(params: {
+	quePaso: QuePasoReactivacion;
+	pagoId: number | undefined;
+	casoCobroId: string;
+	numeroCreditoSifco: string;
+	apagadoEjecutadoAt: Date;
+}): Promise<RespaldoReactivacion> {
+	const respaldo: RespaldoReactivacion = {};
+	if (quePasoRequierePago(params.quePaso)) {
+		const pagos = await leerPagosPosterioresAlApagado(
+			params.numeroCreditoSifco,
+			params.apagadoEjecutadoAt,
+		);
+		const elegido = pagos.find((p) => p.pagoId === params.pagoId);
+		if (elegido) respaldo.pago = elegido;
+	}
+	if (quePasoRequierePromesa(params.quePaso)) {
+		const promesa = await leerPromesaActivaCaso(params.casoCobroId);
+		if (promesa) respaldo.promesa = promesa;
+	}
+	const error = erroresRespaldoReactivacion(params.quePaso, respaldo);
+	if (error) throw new ORPCError("BAD_REQUEST", { message: error });
+	return respaldo;
+}
+
 /**
  * Datos que aporta el asesor al ejecutar un apagado (vs. la ejecución manual del
  * supervisor, que solo trae una referencia de texto): la confirmación de LEGION
@@ -601,8 +702,7 @@ type ExtrasEjecucion = {
 
 /**
  * Pasa una solicitud `aprobada` a `ejecutada` — cuerpo compartido por
- * `ejecutarApagado` (la registra el asesor) y `marcarEjecutada` (el supervisor,
- * para las reactivaciones).
+ * `ejecutarApagado` y `ejecutarReactivacion` (las dos las registra el asesor).
  * Revalida bucket y vínculo GPS, deja el evento de auditoría con quién lo hizo
  * y avisa al asesor que llame al cliente.
  */
@@ -879,20 +979,17 @@ async function ejecutarAprobada(
 
 	const caso = await getCasoParaInmovilizacion(inm.casoCobroId);
 
-	// Los supervisores se enteran de que el apagado ya se aplicó (la reactivación
-	// la marca ejecutada un supervisor: no hay a quién avisarle).
-	if (inm.accion === "apagado") {
-		await notificarEjecucionASupervisores({
-			inmovilizacionId: inm.id,
-			casoCobroId: inm.casoCobroId,
-			accion: inm.accion,
-			advertencia: advertencia ?? undefined,
-			clienteNombre: caso?.clienteNombre ?? undefined,
-			numeroCreditoSifco: inm.numeroCreditoSifco,
-			ejecutadoPorUserId: context.userId,
-			ejecutadoPorRole: context.userRole,
-		});
-	}
+	// Los supervisores se enteran de que el apagado o la reactivación ya se aplicó.
+	await notificarEjecucionASupervisores({
+		inmovilizacionId: inm.id,
+		casoCobroId: inm.casoCobroId,
+		accion: inm.accion,
+		advertencia: advertencia ?? undefined,
+		clienteNombre: caso?.clienteNombre ?? undefined,
+		numeroCreditoSifco: inm.numeroCreditoSifco,
+		ejecutadoPorUserId: context.userId,
+		ejecutadoPorRole: context.userRole,
+	});
 
 	// Al asesor que lleva el crédito en CARTERA. Fallback a quien
 	// solicitó: sin esto, un dueño sin usuario en el CRM dejaba el aviso
@@ -956,6 +1053,8 @@ async function ejecutarAprobada(
  * revalidación SIN cache de cartera. El resto de la ejecución (bucket, vínculo
  * GPS, avisos) está en `ejecutarAprobada`.
  *
+ * Fábrica en vez de dos procedures copiados; `ejecutarReactivacion` se exporta
+ * aparte del router por el mismo límite de TS7056 que los demás.
  */
 function ejecutarPorAsesor(accion: "apagado" | "reactivacion") {
 	return cobrosProcedure
@@ -1394,8 +1493,9 @@ export const inmovilizacionUnidadRouter = {
 			z.object({
 				casoCobroId: z.string().uuid(),
 				accion: z.enum(["apagado", "reactivacion"]),
-				// Reactivación: texto libre, como siempre.
-				motivo: z.string().trim().optional(),
+				// Reactivación: qué pasó, el pago que lo respalda (si aplica) y detalle.
+				quePaso: z.enum(CLAVES_QUE_PASO_REACTIVACION).optional(),
+				pagoId: z.number().int().positive().optional(),
 				// Apagado: motivos del catálogo + detalle + dónde está el vehículo.
 				motivos: z.array(z.string().min(1).max(60)).max(12).optional(),
 				motivoDetalle: z.string().trim().max(2000).optional(),
@@ -1436,12 +1536,15 @@ export const inmovilizacionUnidadRouter = {
 					input.motivoDetalle,
 				);
 			} else {
-				if (!input.motivo || input.motivo.length < 5) {
+				if (!input.quePaso) {
 					throw new ORPCError("BAD_REQUEST", {
-						message: "El motivo es obligatorio (mínimo 5 caracteres)",
+						message: "Elegí qué pasó: pago, promesa de pago o 50% + promesa.",
 					});
 				}
-				motivoTexto = input.motivo;
+				motivoTexto = componerMotivoReactivacion(
+					input.quePaso,
+					input.motivoDetalle,
+				);
 			}
 
 			await assertAccesoCasoCobro(
@@ -1577,6 +1680,25 @@ export const inmovilizacionUnidadRouter = {
 				throw new ORPCError("BAD_REQUEST", { message });
 			}
 
+			// Reactivación: el respaldo (pago y/o promesa) se verifica contra
+			// cartera y contra las gestiones del caso, no contra el navegador.
+			let respaldoReactivacion: RespaldoReactivacion | null = null;
+			if (input.accion === "reactivacion" && input.quePaso) {
+				const apagadoVigente = ultimaEjecutada(historial, "apagado");
+				if (!apagadoVigente?.ejecutadoAt) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "No se encontró el apagado que se quiere revertir.",
+					});
+				}
+				respaldoReactivacion = await resolverRespaldoReactivacion({
+					quePaso: input.quePaso,
+					pagoId: input.pagoId,
+					casoCobroId: input.casoCobroId,
+					numeroCreditoSifco: caso.numeroCreditoSifco,
+					apagadoEjecutadoAt: apagadoVigente.ejecutadoAt,
+				});
+			}
+
 			// La reactivación pedida directo (sin pasar por "pagó" en la llamada)
 			// también apunta al apagado que revierte, para que al ejecutarse ese
 			// apagado quede con resultado = 'reactivada'.
@@ -1675,8 +1797,9 @@ export const inmovilizacionUnidadRouter = {
 							accion: input.accion,
 							motivo: motivoTexto,
 							motivos: input.accion === "apagado" ? input.motivos : null,
-							motivoDetalle:
-								input.accion === "apagado" ? input.motivoDetalle || null : null,
+							motivoDetalle: input.motivoDetalle || null,
+							quePaso: input.accion === "reactivacion" ? input.quePaso : null,
+							respaldoReactivacion,
 							ubicacionSolicitud,
 							bucketSnapshot: bucket,
 							solicitadoPor: context.userId,
@@ -1693,6 +1816,8 @@ export const inmovilizacionUnidadRouter = {
 							accion: input.accion,
 							motivo: motivoTexto,
 							motivos: input.accion === "apagado" ? input.motivos : undefined,
+							quePaso: input.quePaso,
+							respaldo: respaldoReactivacion ?? undefined,
 							ubicacion: ubicacionSolicitud ?? undefined,
 						},
 					});
@@ -1823,6 +1948,8 @@ export const inmovilizacionUnidadRouter = {
 				accion: inmovilizacionesUnidad.accion,
 				estado: inmovilizacionesUnidad.estado,
 				motivo: inmovilizacionesUnidad.motivo,
+				quePaso: inmovilizacionesUnidad.quePaso,
+				respaldoReactivacion: inmovilizacionesUnidad.respaldoReactivacion,
 				ubicacionSolicitud: inmovilizacionesUnidad.ubicacionSolicitud,
 				bucketSnapshot: inmovilizacionesUnidad.bucketSnapshot,
 				solicitadoAt: inmovilizacionesUnidad.solicitadoAt,
@@ -1971,34 +2098,6 @@ export const inmovilizacionUnidadRouter = {
 		}),
 
 	ejecutarApagado: ejecutarPorAsesor("apagado"),
-
-	/**
-	 * El supervisor marca que una REACTIVACIÓN YA se ejecutó — hoy siempre en
-	 * modo manual: coordinó con LEGION por fuera del CRM. `referencia` es la
-	 * nota o ticket de LEGION que respalda eso. El apagado no pasa por acá: lo
-	 * registra el asesor con la confirmación de LEGION (`ejecutarApagado`).
-	 */
-	marcarEjecutada: cobrosSupervisorProcedure
-		.input(
-			z.object({
-				id: z.string().uuid(),
-				referencia: z.string().trim().max(500).optional(),
-			}),
-		)
-		.handler(async ({ input, context }) => {
-			const [fila] = await db
-				.select()
-				.from(inmovilizacionesUnidad)
-				.where(eq(inmovilizacionesUnidad.id, input.id))
-				.limit(1);
-			if (fila?.accion === "apagado") {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"El apagado lo ejecuta el asesor desde la Ficha 360, con la confirmación de LEGION.",
-				});
-			}
-			return ejecutarAprobada(input, context);
-		}),
 
 	/**
 	 * Registra el resultado de la llamada posterior al apagado. La gestión en
@@ -2588,6 +2687,80 @@ export const registrarLlamadaApagado = cobrosProcedure
 
 		return { ok: true };
 	});
+
+/**
+ * Lo que el modal de "Solicitar reactivación" ofrece como respaldo: los pagos
+ * registrados en cartera desde el apagado y la promesa activa del caso. Es solo
+ * lectura: al solicitar, el server vuelve a verificarlo (`solicitarInmovilizacion`).
+ * Aparte del router por el límite de TS7056.
+ */
+export const getRespaldoReactivacion = cobrosProcedure
+	.input(z.object({ casoCobroId: z.string().uuid() }))
+	.handler(
+		async ({
+			input,
+			context,
+		}): Promise<{
+			apagadoEjecutadoAt: Date | null;
+			pagos: PagoRespaldo[];
+			promesa: PromesaRespaldo | null;
+			/** Por qué no se pudieron leer los pagos (cartera caída o deshabilitada). */
+			errorPagos: string | null;
+		}> => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const caso = await getCasoParaInmovilizacion(input.casoCobroId);
+			if (!caso?.numeroCreditoSifco) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El caso no tiene crédito de cartera asociado.",
+				});
+			}
+			const historial = await getHistorialUnidadFisica(
+				input.casoCobroId,
+				caso.wialonUnitId ?? null,
+			);
+			const apagado = ultimaEjecutada(historial, "apagado");
+			const promesa = await leerPromesaActivaCaso(input.casoCobroId);
+			if (!apagado?.ejecutadoAt) {
+				return {
+					apagadoEjecutadoAt: null,
+					pagos: [],
+					promesa,
+					errorPagos: null,
+				};
+			}
+			let pagos: PagoRespaldo[] = [];
+			let errorPagos: string | null = null;
+			try {
+				pagos = await leerPagosPosterioresAlApagado(
+					caso.numeroCreditoSifco,
+					apagado.ejecutadoAt,
+				);
+			} catch (error) {
+				if (!(error instanceof ORPCError)) {
+					// Un error nuestro (no de cartera) no debe esconderse tras el
+					// mensaje genérico: queda en el log del server.
+					console.error("[getRespaldoReactivacion] Error inesperado:", error);
+				}
+				errorPagos =
+					error instanceof ORPCError
+						? error.message
+						: "No se pudieron consultar los pagos en cartera.";
+			}
+			return {
+				apagadoEjecutadoAt: apagado.ejecutadoAt,
+				pagos,
+				promesa,
+				errorPagos,
+			};
+		},
+	);
+
+/** El asesor registra que LEGION reactivó la unidad — ver `ejecutarPorAsesor`. */
+export const ejecutarReactivacion = ejecutarPorAsesor("reactivacion");
 
 const usuarioDecisor = alias(user, "usuario_decisor");
 const usuarioEjecutor = alias(user, "usuario_ejecutor");

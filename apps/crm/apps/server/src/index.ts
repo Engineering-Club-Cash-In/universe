@@ -127,7 +127,7 @@ import {
 } from "./services/check-promesas-pago";
 import {
 	reconciliarAvisosLlamarCliente,
-	recordarApagadosSinEjecutar,
+	recordarInmovilizacionesSinEjecutar,
 } from "./services/inmovilizacion-notif";
 import { refreshPremoraElegibilidad } from "./services/refresh-premora-elegibilidad";
 import { sendConvenioReminders } from "./services/send-convenio-reminders";
@@ -2480,11 +2480,11 @@ if (HAY_JOBS_ACTIVOS) {
 		await reconciliarAvisosLlamarCliente().catch((error) =>
 			console.error("Error al reconciliar avisos de inmovilización:", error),
 		);
-		// CB-041: apagados aprobados que el asesor aún no ejecutó (más de 24 h).
+		// CB-041: apagados y reactivaciones aprobados que el asesor aún no ejecutó (más de 24 h).
 		// Dedup por apagado y día: el run de boot no duplica.
-		await recordarApagadosSinEjecutar().catch((error) =>
+		await recordarInmovilizacionesSinEjecutar().catch((error) =>
 			console.error(
-				"Error en el recordatorio de apagados sin ejecutar:",
+				"Error en el recordatorio de inmovilizaciones sin ejecutar:",
 				error,
 			),
 		);

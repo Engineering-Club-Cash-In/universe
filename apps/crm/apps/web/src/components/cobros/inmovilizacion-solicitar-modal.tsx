@@ -1,9 +1,15 @@
-import { useMutation } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { CalendarClock, Loader2 } from "lucide-react";
 import { useState } from "react";
 import {
+	CLAVES_QUE_PASO_REACTIVACION,
 	erroresMotivosInmovilizacion,
+	erroresRespaldoReactivacion,
 	MOTIVOS_INMOVILIZACION,
+	QUE_PASO_REACTIVACION,
+	type QuePasoReactivacion,
+	quePasoRequierePago,
+	quePasoRequierePromesa,
 } from "server/src/lib/inmovilizacion-unidad";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -19,13 +25,18 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { orpc } from "@/utils/orpc";
+import {
+	formatFechaPago,
+	formatFechaPrometida,
+	formatQuetzales,
+	PagoPendienteBadge,
+} from "./inmovilizacion-respaldo";
 import {
 	UbicacionGpsBloque,
 	useUbicacionInmovilizacion,
 } from "./inmovilizacion-ubicacion";
-
-const MOTIVO_MIN_LENGTH = 5;
 
 /**
  * CB-041 — Solicita el apagado o la reactivación de la unidad del caso. El
@@ -33,7 +44,8 @@ const MOTIVO_MIN_LENGTH = 5;
  *
  * El apagado pide lo mismo que la recuperación forzosa: por qué (motivos del
  * catálogo + detalle) y dónde está el vehículo, que se toma de Wialon al abrir
- * el modal. La reactivación sigue pidiendo solo un motivo de texto.
+ * el modal. La reactivación pide qué pasó (pago, promesa o 50% + promesa) con
+ * el pago o la promesa que lo respaldan, que el server verifica.
  */
 export function SolicitarInmovilizacionModal({
 	accion,
@@ -239,8 +251,16 @@ function FormularioReactivacion({
 	onCerrar,
 	onSolicitado,
 }: PropsFormulario) {
-	const [motivo, setMotivo] = useState("");
-	const motivoValido = motivo.trim().length >= MOTIVO_MIN_LENGTH;
+	const [quePaso, setQuePaso] = useState<QuePasoReactivacion | null>(null);
+	const [pagoId, setPagoId] = useState<number | null>(null);
+	const [detalle, setDetalle] = useState("");
+
+	// Pagos de cartera desde el apagado y promesa activa: lo único que puede
+	// respaldar la reactivación. El server lo vuelve a verificar al enviar.
+	const respaldo = useQuery({
+		...orpc.getRespaldoReactivacion.queryOptions({ input: { casoCobroId } }),
+		refetchOnWindowFocus: false,
+	});
 
 	const solicitar = useMutation({
 		...orpc.solicitarInmovilizacion.mutationOptions(),
@@ -258,51 +278,183 @@ function FormularioReactivacion({
 		},
 	});
 
+	const pagos = respaldo.data?.pagos ?? [];
+	const promesa = respaldo.data?.promesa ?? null;
+	const pagoElegido = pagos.find((p) => p.pagoId === pagoId) ?? null;
+	// Mismas reglas que el server: el botón se habilita con lo que va a aceptar.
+	const error = !quePaso
+		? "Elegí qué pasó."
+		: erroresRespaldoReactivacion(quePaso, {
+				pago: quePasoRequierePago(quePaso) ? pagoElegido : undefined,
+				promesa: quePasoRequierePromesa(quePaso) ? promesa : undefined,
+			});
+
 	return (
 		<>
 			<DialogHeader>
 				<DialogTitle>Solicitar reactivación de unidad</DialogTitle>
 				<DialogDescription>
-					Un supervisor debe aprobar la solicitud antes de que LEGION reactive
-					la unidad.
+					Un supervisor debe aprobar la solicitud. Después, LEGION reactiva la
+					unidad y vos registrás su confirmación en la Ficha 360.
 				</DialogDescription>
 			</DialogHeader>
 
-			<div>
-				<Label htmlFor="motivo-inmovilizacion">Motivo</Label>
-				<Textarea
-					id="motivo-inmovilizacion"
-					onChange={(e) => setMotivo(e.target.value)}
-					placeholder="Explicá por qué se solicita esta acción"
-					rows={4}
-					value={motivo}
-				/>
-				{!motivoValido && motivo.length > 0 && (
-					<p className="mt-1 text-destructive text-xs">
-						Ingresá al menos {MOTIVO_MIN_LENGTH} caracteres.
-					</p>
+			<div className="space-y-5">
+				<section className="space-y-2">
+					<Label>
+						¿Qué pasó? <span className="text-red-600">*</span>
+					</Label>
+					<div className="grid gap-2 sm:grid-cols-2">
+						{CLAVES_QUE_PASO_REACTIVACION.map((clave) => (
+							<button
+								className={cn(
+									"rounded-md border p-3 text-left transition-colors",
+									quePaso === clave
+										? "border-primary bg-primary/5"
+										: "hover:bg-muted/50",
+								)}
+								key={clave}
+								onClick={() => setQuePaso(clave)}
+								type="button"
+							>
+								<p className="font-medium text-sm">
+									{QUE_PASO_REACTIVACION[clave].label}
+								</p>
+								<p className="text-muted-foreground text-xs">
+									{QUE_PASO_REACTIVACION[clave].descripcion}
+								</p>
+							</button>
+						))}
+					</div>
+				</section>
+
+				{quePaso && quePasoRequierePago(quePaso) && (
+					<section className="space-y-2">
+						<Label>
+							Pago que lo respalda <span className="text-red-600">*</span>
+						</Label>
+						{respaldo.isLoading && (
+							<p className="flex items-center gap-2 text-muted-foreground text-xs">
+								<Loader2 className="h-3.5 w-3.5 animate-spin" />
+								Buscando los pagos registrados después del apagado…
+							</p>
+						)}
+						{respaldo.data?.errorPagos && (
+							<p className="text-destructive text-xs">
+								{respaldo.data.errorPagos}
+							</p>
+						)}
+						{respaldo.data &&
+							!respaldo.data.errorPagos &&
+							pagos.length === 0 && (
+								<p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+									No hay pagos registrados después del apagado. Registrá el pago
+									primero con «Registrar Pago» y volvé acá.
+								</p>
+							)}
+						<div className="space-y-1.5">
+							{pagos.map((p) => (
+								<label
+									className={cn(
+										"flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm",
+										pagoId === p.pagoId
+											? "border-primary bg-primary/5"
+											: "hover:bg-muted/50",
+									)}
+									htmlFor={`pago-respaldo-${p.pagoId}`}
+									key={p.pagoId}
+								>
+									<input
+										checked={pagoId === p.pagoId}
+										id={`pago-respaldo-${p.pagoId}`}
+										name="pago-respaldo"
+										onChange={() => setPagoId(p.pagoId)}
+										type="radio"
+									/>
+									<span className="font-medium">
+										{formatQuetzales(p.monto)}
+									</span>
+									<span className="text-muted-foreground text-xs">
+										{formatFechaPago(p.fechaPago)}
+										{p.referencia ? ` · ref. ${p.referencia}` : ""}
+									</span>
+									<PagoPendienteBadge validacion={p.validacion} />
+								</label>
+							))}
+						</div>
+					</section>
 				)}
+
+				{quePaso && quePasoRequierePromesa(quePaso) && (
+					<section className="space-y-2">
+						<Label>
+							Promesa de pago <span className="text-red-600">*</span>
+						</Label>
+						{respaldo.isLoading ? (
+							<p className="text-muted-foreground text-xs">
+								Buscando la promesa…
+							</p>
+						) : promesa ? (
+							<p className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+								<CalendarClock className="h-4 w-4 text-sky-600" />
+								Promesa activa para el{" "}
+								{formatFechaPrometida(promesa.fechaPrometida)}
+								{promesa.monto ? ` · ${formatQuetzales(promesa.monto)}` : ""}
+							</p>
+						) : (
+							<p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900 text-xs dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+								El caso no tiene una promesa de pago activa. Registrala primero
+								con «Promesa / Convenio» y volvé acá.
+							</p>
+						)}
+					</section>
+				)}
+
+				<section className="space-y-1.5">
+					<Label className="font-normal text-sm" htmlFor="detalle-reactivacion">
+						Detalle <span className="text-muted-foreground">(opcional)</span>
+					</Label>
+					<Textarea
+						id="detalle-reactivacion"
+						maxLength={2000}
+						onChange={(e) => setDetalle(e.target.value)}
+						placeholder="Ej: Depositó hoy en ventanilla y el banco ya acreditó"
+						rows={2}
+						value={detalle}
+					/>
+				</section>
 			</div>
 
-			<DialogFooter>
-				<Button onClick={onCerrar} variant="outline">
-					Cancelar
-				</Button>
-				<Button
-					disabled={!motivoValido || solicitar.isPending}
-					onClick={() =>
-						solicitar.mutate({
-							casoCobroId,
-							accion: "reactivacion",
-							motivo: motivo.trim(),
-						})
-					}
-				>
-					{solicitar.isPending && (
-						<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-					)}
-					Solicitar reactivación
-				</Button>
+			<DialogFooter className="items-center sm:justify-between">
+				<p className="text-muted-foreground text-xs">
+					{error ?? "Listo para enviar."}
+				</p>
+				<div className="flex gap-2">
+					<Button onClick={onCerrar} variant="outline">
+						Cancelar
+					</Button>
+					<Button
+						disabled={!!error || solicitar.isPending}
+						onClick={() =>
+							quePaso &&
+							solicitar.mutate({
+								casoCobroId,
+								accion: "reactivacion",
+								quePaso,
+								pagoId:
+									quePasoRequierePago(quePaso) && pagoElegido
+										? pagoElegido.pagoId
+										: undefined,
+								motivoDetalle: detalle.trim() || undefined,
+							})
+						}
+					>
+						{solicitar.isPending && (
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+						)}
+						Solicitar reactivación
+					</Button>
+				</div>
 			</DialogFooter>
 		</>
 	);

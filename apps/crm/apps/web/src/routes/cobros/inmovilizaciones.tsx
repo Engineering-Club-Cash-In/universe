@@ -13,6 +13,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { DecisionInmovilizacionModal } from "@/components/cobros/inmovilizacion-decision-modal";
+import { RespaldoReactivacionResumen } from "@/components/cobros/inmovilizacion-respaldo";
 import { UbicacionGuardada } from "@/components/cobros/inmovilizacion-ubicacion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -116,11 +117,6 @@ function ColaInmovilizaciones() {
 		resumen: string;
 	} | null>(null);
 
-	const [ejecutarAbierto, setEjecutarAbierto] = useState<{
-		id: string;
-		resumen: string;
-	} | null>(null);
-
 	const cola = useQuery({
 		...orpc.getColaInmovilizaciones.queryOptions(),
 		refetchOnWindowFocus: false,
@@ -207,6 +203,17 @@ function ColaInmovilizaciones() {
 													etiqueta="Ubicación al solicitar"
 													ubicacion={item.ubicacionSolicitud}
 												/>
+												{item.accion === "reactivacion" && (
+													<RespaldoReactivacionResumen
+														bucket={
+															item.bucketSnapshot != null
+																? `B${item.bucketSnapshot} al solicitar`
+																: null
+														}
+														quePaso={item.quePaso}
+														respaldo={item.respaldoReactivacion}
+													/>
+												)}
 											</div>
 										</TableCell>
 										<TableCell className="text-sm">
@@ -256,9 +263,9 @@ function ColaInmovilizaciones() {
 				<CardHeader>
 					<CardTitle>Por ejecutar</CardTitle>
 					<CardDescription>
-						Aprobadas, esperando que LEGION las aplique. El apagado lo registra
-						el asesor desde la Ficha 360, con la confirmación de LEGION; las
-						reactivaciones las marcás vos como ejecutadas.
+						Aprobadas, esperando que LEGION las aplique. El asesor registra la
+						ejecución desde la Ficha 360, con la confirmación de LEGION; acá
+						solo se ve qué falta.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -298,23 +305,9 @@ function ColaInmovilizaciones() {
 											</Badge>
 										</TableCell>
 										<TableCell className="text-right">
-											{item.accion === "apagado" ? (
-												<span className="text-muted-foreground text-xs">
-													Lo registra el asesor en la Ficha 360
-												</span>
-											) : (
-												<Button
-													onClick={() =>
-														setEjecutarAbierto({
-															id: item.id,
-															resumen: resumenDe(item),
-														})
-													}
-													size="sm"
-												>
-													Marcar ejecutada
-												</Button>
-											)}
+											<span className="text-muted-foreground text-xs">
+												Lo registra el asesor en la Ficha 360
+											</span>
 										</TableCell>
 									</TableRow>
 								))}
@@ -334,88 +327,7 @@ function ColaInmovilizaciones() {
 					resumen={decisionAbierta.resumen}
 				/>
 			)}
-			{ejecutarAbierto && (
-				<EjecutarModal
-					id={ejecutarAbierto.id}
-					onOpenChange={(open) => !open && setEjecutarAbierto(null)}
-					onEjecutado={invalidar}
-					open={!!ejecutarAbierto}
-					resumen={ejecutarAbierto.resumen}
-				/>
-			)}
 		</div>
-	);
-}
-
-function EjecutarModal({
-	id,
-	resumen,
-	open,
-	onOpenChange,
-	onEjecutado,
-}: {
-	id: string;
-	resumen: string;
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
-	onEjecutado: () => void;
-}) {
-	const [referencia, setReferencia] = useState("");
-
-	const mutation = useMutation({
-		...orpc.marcarEjecutada.mutationOptions(),
-		onSuccess: () => {
-			toast.success("Marcada como ejecutada.");
-			onEjecutado();
-			onOpenChange(false);
-			setReferencia("");
-		},
-		onError: (error) => {
-			toast.error(error.message || "No se pudo marcar como ejecutada.", {
-				duration: 8000,
-			});
-		},
-	});
-
-	return (
-		<Dialog onOpenChange={onOpenChange} open={open}>
-			<DialogContent>
-				<DialogHeader>
-					<DialogTitle>Marcar como ejecutada</DialogTitle>
-					<DialogDescription>
-						{resumen} — confirmá que LEGION ya aplicó la acción sobre la unidad.
-					</DialogDescription>
-				</DialogHeader>
-
-				<div>
-					<Label htmlFor="referencia-ejecucion">
-						Referencia o ticket de LEGION (opcional)
-					</Label>
-					<Input
-						id="referencia-ejecucion"
-						onChange={(e) => setReferencia(e.target.value)}
-						value={referencia}
-					/>
-				</div>
-
-				<DialogFooter>
-					<Button onClick={() => onOpenChange(false)} variant="outline">
-						Cancelar
-					</Button>
-					<Button
-						disabled={mutation.isPending}
-						onClick={() =>
-							mutation.mutate({
-								id,
-								referencia: referencia.trim() || undefined,
-							})
-						}
-					>
-						Confirmar ejecución
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
 	);
 }
 

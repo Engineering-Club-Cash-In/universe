@@ -9,9 +9,12 @@
 --    ubicación. Quién lo hizo queda en `ejecutado_por` / `ejecutado_at`.
 --  * Si pasan 24 h aprobado y sin ejecutar, el asesor recibe un recordatorio
 --    (`inmovilizacion_ejecutar_pendiente`).
---  * Al registrarse un apagado ejecutado, los cobros_supervisor reciben un
---    aviso (`inmovilizacion_apagado_ejecutado`). El tipo
---    `inmovilizacion_reactivacion_ejecutada` queda creado para la reactivación.
+--  * Al registrarse un apagado o una reactivación ejecutados, los
+--    cobros_supervisor reciben un aviso (`inmovilizacion_apagado_ejecutado` /
+--    `inmovilizacion_reactivacion_ejecutada`).
+--  * La reactivación se pide con una opción ("Pago", "Promesa de pago", "50% +
+--    promesa") y el pago o la promesa que la respaldan (`que_paso`,
+--    `respaldo_reactivacion`), y la ejecuta también el asesor.
 --
 -- Todas las columnas son nullable: las filas anteriores (y las reactivaciones)
 -- no las usan. `motivo` sigue siendo NOT NULL y guarda el texto compuesto.
@@ -19,6 +22,10 @@
 ALTER TABLE "inmovilizaciones_unidad" ADD COLUMN IF NOT EXISTS "motivos" jsonb;
 --> statement-breakpoint
 ALTER TABLE "inmovilizaciones_unidad" ADD COLUMN IF NOT EXISTS "motivo_detalle" text;
+--> statement-breakpoint
+ALTER TABLE "inmovilizaciones_unidad" ADD COLUMN IF NOT EXISTS "que_paso" text;
+--> statement-breakpoint
+ALTER TABLE "inmovilizaciones_unidad" ADD COLUMN IF NOT EXISTS "respaldo_reactivacion" jsonb;
 --> statement-breakpoint
 ALTER TABLE "inmovilizaciones_unidad" ADD COLUMN IF NOT EXISTS "ubicacion_solicitud" jsonb;
 --> statement-breakpoint

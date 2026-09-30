@@ -11,7 +11,10 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
-import type { UbicacionInmovilizacion } from "../../lib/inmovilizacion-unidad";
+import type {
+	RespaldoReactivacion,
+	UbicacionInmovilizacion,
+} from "../../lib/inmovilizacion-unidad";
 import { user } from "./auth";
 import { casosCobros, contactosCobros } from "./cobros";
 import { vehicles } from "./vehicles";
@@ -87,6 +90,12 @@ export const inmovilizacionesUnidad = pgTable(
 		// para que la cola y el historial lo sigan leyendo sin cambios.
 		motivos: jsonb("motivos").$type<string[]>(),
 		motivoDetalle: text("motivo_detalle"),
+		// Reactivación: la opción elegida ("pago", "promesa", "pago_parcial_promesa")
+		// y el pago/promesa que la respaldan, tal como los vio el supervisor.
+		quePaso: text("que_paso"),
+		respaldoReactivacion: jsonb(
+			"respaldo_reactivacion",
+		).$type<RespaldoReactivacion>(),
 		// Dónde estaba el vehículo al solicitar / al ejecutar el apagado. Ver
 		// UbicacionInmovilizacion en lib/inmovilizacion-unidad.ts.
 		ubicacionSolicitud: jsonb(

@@ -35,20 +35,23 @@ type Archivo = {
 };
 
 /**
- * CB-041 — El asesor declara que LEGION ya apagó la unidad aprobada. Adjunta su
- * confirmación (archivo y/o nota) y se vuelve a consultar dónde está el
- * vehículo. Todo queda auditado en el server con quién lo registró.
+ * CB-041 — El asesor declara que LEGION ya aplicó el apagado o la reactivación
+ * aprobados. Adjunta su confirmación (archivo y/o nota); en el apagado además se
+ * vuelve a consultar dónde está el vehículo. Todo queda auditado en el server
+ * con quién lo registró.
  *
  * Al terminar, `onEjecutada` abre el registro de la llamada al cliente: es lo
- * que sigue siempre después de un apagado.
+ * que sigue siempre después.
  */
-export function EjecutarApagadoModal({
+export function EjecutarInmovilizacionModal({
+	accion,
 	inmovilizacionId,
 	casoCobroId,
 	open,
 	onOpenChange,
 	onEjecutada,
 }: {
+	accion: "apagado" | "reactivacion";
 	inmovilizacionId: string;
 	casoCobroId: string;
 	open: boolean;
@@ -59,6 +62,7 @@ export function EjecutarApagadoModal({
 		<Dialog onOpenChange={onOpenChange} open={open}>
 			<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
 				<Formulario
+					accion={accion}
 					casoCobroId={casoCobroId}
 					inmovilizacionId={inmovilizacionId}
 					onCerrar={() => onOpenChange(false)}
@@ -70,11 +74,13 @@ export function EjecutarApagadoModal({
 }
 
 function Formulario({
+	accion,
 	inmovilizacionId,
 	casoCobroId,
 	onCerrar,
 	onEjecutada,
 }: {
+	accion: "apagado" | "reactivacion";
 	inmovilizacionId: string;
 	casoCobroId: string;
 	onCerrar: () => void;
@@ -85,13 +91,14 @@ function Formulario({
 	// Una subida vieja que contesta tarde no pisa al archivo que se eligió después.
 	const intentoRef = useRef(0);
 	const inputRef = useRef<HTMLInputElement>(null);
-	const gps = useUbicacionInmovilizacion(casoCobroId, "ejecucion");
+	const esApagado = accion === "apagado";
+	// Solo el apagado consulta dónde está el vehículo.
+	const gps = useUbicacionInmovilizacion(casoCobroId, "ejecucion", esApagado);
 
-	const ejecutar = useMutation({
-		...orpc.ejecutarApagado.mutationOptions(),
-		onSuccess: (data) => {
+	const opcionesMutation = {
+		onSuccess: (data: { advertencia?: string | null }) => {
 			toast.success(
-				"Apagado registrado. Ahora registrá la llamada al cliente.",
+				`${esApagado ? "Apagado" : "Reactivación"} registrad${esApagado ? "o" : "a"}. Ahora registrá la llamada al cliente.`,
 			);
 			// Registrado igual, pero con algo que saber (p. ej. el crédito ya bajó
 			// de bucket porque el cliente pagó: hay que solicitar la reactivación).
@@ -101,12 +108,23 @@ function Formulario({
 			onCerrar();
 			onEjecutada(inmovilizacionId);
 		},
-		onError: (error) => {
-			toast.error(error.message || "No se pudo registrar el apagado.", {
-				duration: 8000,
-			});
+		onError: (error: Error) => {
+			toast.error(
+				error.message ||
+					`No se pudo registrar ${esApagado ? "el apagado" : "la reactivación"}.`,
+				{ duration: 8000 },
+			);
 		},
+	};
+	const ejecutarApagado = useMutation({
+		...orpc.ejecutarApagado.mutationOptions(),
+		...opcionesMutation,
 	});
+	const ejecutarReactivacion = useMutation({
+		...orpc.ejecutarReactivacion.mutationOptions(),
+		...opcionesMutation,
+	});
+	const ejecutar = esApagado ? ejecutarApagado : ejecutarReactivacion;
 
 	const elegirArchivo = async (file: File | undefined) => {
 		if (!file) return;
@@ -162,10 +180,15 @@ function Formulario({
 	return (
 		<>
 			<DialogHeader>
-				<DialogTitle>Registrar apagado ejecutado</DialogTitle>
+				<DialogTitle>
+					{esApagado
+						? "Registrar apagado ejecutado"
+						: "Registrar reactivación ejecutada"}
+				</DialogTitle>
 				<DialogDescription>
-					Confirmá que LEGION ya apagó la unidad. Adjuntá su confirmación: queda
-					registrado que la subiste vos, con la fecha y la ubicación.
+					Confirmá que LEGION ya {esApagado ? "apagó" : "reactivó"} la unidad.
+					Adjuntá su confirmación: queda registrado que la subiste vos, con la
+					fecha{esApagado ? " y la ubicación" : ""}.
 				</DialogDescription>
 			</DialogHeader>
 
@@ -231,19 +254,21 @@ function Formulario({
 						id="nota-apagado"
 						maxLength={1000}
 						onChange={(e) => setNota(e.target.value)}
-						placeholder="Ej: LEGION confirmó por WhatsApp a las 10:32 que la unidad quedó apagada"
+						placeholder={`Ej: LEGION confirmó por WhatsApp a las 10:32 que la unidad quedó ${esApagado ? "apagada" : "reactivada"}`}
 						rows={3}
 						value={nota}
 					/>
 				</section>
 
-				<UbicacionGpsBloque
-					cargando={gps.cargando}
-					errorRed={gps.errorRed}
-					onActualizar={gps.actualizar}
-					resultado={gps.resultado}
-					titulo="Dónde está el vehículo ahora"
-				/>
+				{esApagado && (
+					<UbicacionGpsBloque
+						cargando={gps.cargando}
+						errorRed={gps.errorRed}
+						onActualizar={gps.actualizar}
+						resultado={gps.resultado}
+						titulo="Dónde está el vehículo ahora"
+					/>
+				)}
 			</div>
 
 			<DialogFooter className="items-center sm:justify-between">
@@ -256,19 +281,26 @@ function Formulario({
 					</Button>
 					<Button
 						disabled={!!error || gps.cargando || ejecutar.isPending}
-						onClick={() =>
-							ejecutar.mutate({
+						onClick={() => {
+							const datos = {
 								id: inmovilizacionId,
 								evidencia,
 								nota: nota.trim() || undefined,
-								consultaLogId: gps.resultado?.consultaLogId ?? undefined,
-							})
-						}
+							};
+							if (esApagado) {
+								ejecutarApagado.mutate({
+									...datos,
+									consultaLogId: gps.resultado?.consultaLogId ?? undefined,
+								});
+							} else {
+								ejecutarReactivacion.mutate(datos);
+							}
+						}}
 					>
 						{ejecutar.isPending && (
 							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 						)}
-						Registrar apagado
+						{esApagado ? "Registrar apagado" : "Registrar reactivación"}
 					</Button>
 				</div>
 			</DialogFooter>

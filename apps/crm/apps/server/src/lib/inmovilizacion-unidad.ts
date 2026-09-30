@@ -7,6 +7,7 @@
  * base de datos — mismo criterio que caso-vigente.ts y business-days-gt.ts.
  */
 
+import { toDateStrGT } from "./guatemala-month-window";
 import { MOTIVOS_RECUPERACION_FORZOSA } from "./recuperacion-vehiculo";
 
 export type InmovilizacionAccion = "apagado" | "reactivacion";
@@ -275,3 +276,150 @@ export const MIME_EVIDENCIA_INMOVILIZACION = [
 	"image/webp",
 	"application/pdf",
 ] as const;
+
+// ── Solicitud de reactivación: qué pasó y con qué se respalda ───────────────
+
+/**
+ * Por qué se devuelve la unidad. Son las tres salidas reales de una visita o
+ * llamada que justifican reactivar; "entrega voluntaria" y "sin contacto" no
+ * aplican (la primera lleva a recuperación).
+ */
+export const QUE_PASO_REACTIVACION = {
+	pago: {
+		label: "Pago",
+		descripcion: "Pagó lo vencido. El pago tiene que estar registrado.",
+	},
+	promesa: {
+		label: "Promesa de pago",
+		descripcion:
+			"Se comprometió a pagar en una fecha. La promesa tiene que estar registrada.",
+	},
+	pago_parcial_promesa: {
+		label: "50% + promesa",
+		descripcion:
+			"Pagó una parte ahora y promete el resto en una fecha. Pago y promesa registrados.",
+	},
+} as const;
+export type QuePasoReactivacion = keyof typeof QUE_PASO_REACTIVACION;
+export const CLAVES_QUE_PASO_REACTIVACION = Object.keys(
+	QUE_PASO_REACTIVACION,
+) as [QuePasoReactivacion, ...QuePasoReactivacion[]];
+
+export const quePasoRequierePago = (q: QuePasoReactivacion) =>
+	q === "pago" || q === "pago_parcial_promesa";
+export const quePasoRequierePromesa = (q: QuePasoReactivacion) =>
+	q === "promesa" || q === "pago_parcial_promesa";
+
+/** Un pago de cartera-back ofrecido como respaldo (ya posterior al apagado). */
+export type PagoRespaldo = {
+	pagoId: number;
+	/** Fecha del pago (YYYY-MM-DD, día de Guatemala). */
+	fechaPago: string;
+	monto: string;
+	referencia: string | null;
+	/**
+	 * Estado de validación en cartera-back: `pending` = contabilidad todavía no lo
+	 * validó. Es solo informativo (no bloquea la reactivación): el supervisor lo ve
+	 * al decidir. Null en solicitudes anteriores a que se guardara.
+	 */
+	validacion?: "validated" | "pending" | "no_required" | null;
+};
+
+/** La promesa activa del caso que respalda la reactivación. */
+export type PromesaRespaldo = {
+	contactoId: string;
+	/** ISO de la fecha prometida. */
+	fechaPrometida: string;
+	monto: string | null;
+};
+
+/** Lo que se guarda con la solicitud: qué vio el supervisor al decidir. */
+export type RespaldoReactivacion = {
+	pago?: PagoRespaldo;
+	promesa?: PromesaRespaldo;
+};
+
+/**
+ * Día (YYYY-MM-DD, Guatemala) de la `fecha_pago` que devuelve cartera-back: a
+ * veces una fecha a medianoche UTC (columna `date`, se toma tal cual) y a veces
+ * un instante con hora (se pasa a día de Guatemala). Null si no hay fecha.
+ */
+function diaDelPago(fechaPago: string | null | undefined): string | null {
+	if (!fechaPago) return null;
+	const f = fechaPago.trim();
+	// Solo lo que empieza como fecha: un texto de estado ("pending", "N/A") no es
+	// un día y no debe colarse al filtro ni a la pantalla.
+	if (!/^\d{4}-\d{2}-\d{2}/.test(f)) return null;
+	if (f.length <= 10 || /T00:00:00(\.0+)?Z?$/.test(f)) return f.slice(0, 10);
+	const d = new Date(f);
+	return Number.isNaN(d.getTime()) ? f.slice(0, 10) : toDateStrGT(d);
+}
+
+/**
+ * Pagos de cartera que pueden respaldar una reactivación: los registrados el
+ * día del apagado o después, con monto y sin anular. Cartera-back también
+ * devuelve filas sin fecha o con monto 0 (cuotas todavía sin pagar): no son un
+ * pago. Más reciente primero.
+ */
+export function pagosPosterioresAlApagado(
+	pagos: readonly {
+		pago_id: number;
+		fecha_pago: string | null;
+		monto_boleta: string | null;
+		numeroAutorizacion: string | null;
+		paymentFalse?: boolean;
+		validationStatus?: string | null;
+	}[],
+	apagadoEjecutadoAt: Date,
+): PagoRespaldo[] {
+	const desde = toDateStrGT(apagadoEjecutadoAt);
+	const respaldos: PagoRespaldo[] = [];
+	for (const p of pagos) {
+		const dia = diaDelPago(p.fecha_pago);
+		const monto = Number(p.monto_boleta);
+		if (!dia || dia < desde) continue;
+		if (p.paymentFalse || !Number.isFinite(monto) || monto <= 0) continue;
+		respaldos.push({
+			pagoId: p.pago_id,
+			fechaPago: dia,
+			monto: p.monto_boleta as string,
+			referencia: p.numeroAutorizacion,
+			validacion:
+				p.validationStatus === "validated" ||
+				p.validationStatus === "pending" ||
+				p.validationStatus === "no_required"
+					? p.validationStatus
+					: null,
+		});
+	}
+	return respaldos.sort(
+		(a, b) => b.fechaPago.localeCompare(a.fechaPago) || b.pagoId - a.pagoId,
+	);
+}
+
+/**
+ * Primer problema del respaldo para esa opción, o null si alcanza. "Pago" pide
+ * un pago elegido; "Promesa", una promesa activa; "50% + promesa", las dos.
+ */
+export function erroresRespaldoReactivacion(
+	quePaso: QuePasoReactivacion,
+	respaldo: { pago?: unknown; promesa?: unknown },
+): string | null {
+	if (quePasoRequierePago(quePaso) && !respaldo.pago) {
+		return "Elegí el pago que respalda la reactivación (tiene que estar registrado después del apagado).";
+	}
+	if (quePasoRequierePromesa(quePaso) && !respaldo.promesa) {
+		return "El caso no tiene una promesa de pago activa: registrala primero en «Promesa / Convenio».";
+	}
+	return null;
+}
+
+/** Texto de la columna `motivo` de una reactivación: opción elegida y detalle. */
+export function componerMotivoReactivacion(
+	quePaso: QuePasoReactivacion,
+	detalle: string | null | undefined,
+): string {
+	const base = QUE_PASO_REACTIVACION[quePaso].label;
+	const extra = detalle?.trim();
+	return extra ? `${base} — ${extra}` : base;
+}

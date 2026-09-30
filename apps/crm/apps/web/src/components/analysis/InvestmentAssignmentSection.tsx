@@ -962,15 +962,6 @@ export function InvestmentAssignmentSection({
 									</div>
 								</div>
 
-									{/* Partes del contrato: solo con vehículo, que decide qué pedir */}
-									{selectedOpportunity.vehicle && (
-										<ContractPartiesFields
-											vehicleIsNew={selectedOpportunity.vehicle.isNew}
-											value={contractParties}
-											onChange={setContractParties}
-										/>
-									)}
-
 									{/* A estos números les llegan los enlaces de firma al aprobar
 									    los contratos: se revisan antes de pasar a jurídico. */}
 									<TelefonosParaFirmar
@@ -990,6 +981,17 @@ export function InvestmentAssignmentSection({
 									</div>
 
 									<div className="space-y-4">
+									{/* Partes del contrato: solo con vehículo, que decide qué pedir.
+									    Va a la derecha, arriba de los inversionistas: así quedan dos
+									    bloques por columna. */}
+									{selectedOpportunity.vehicle && (
+										<ContractPartiesFields
+											vehicleIsNew={selectedOpportunity.vehicle.isNew}
+											value={contractParties}
+											onChange={setContractParties}
+										/>
+									)}
+
 							{/* Existing Investors section */}
 							{selectedOpportunity?.existingInvestors &&
 								selectedOpportunity.existingInvestors.length > 0 && (

@@ -1101,6 +1101,7 @@ export const wialonRouter = o.use(contextoGpsPorEndpoint).router({
 							motivo: input.motivo,
 							unitId: unitId != null ? String(unitId) : null,
 							unitName,
+							origen: "telemetria",
 							userId,
 						})
 						.returning({ id: gpsConsultaLogs.id });
@@ -1377,14 +1378,33 @@ export const wialonRouter = o.use(contextoGpsPorEndpoint).router({
 					})(),
 			);
 
-			if (respuesta.estado === "no_disponible") {
-				return {
-					...respuesta,
-					auditada: auditado === true,
-					referencia: correlationId,
-				};
+			const final: GpsVehiculoOutput =
+				respuesta.estado === "no_disponible"
+					? {
+							...respuesta,
+							auditada: auditado === true,
+							referencia: correlationId,
+						}
+					: { ...respuesta, auditada: auditado === true };
+
+			// Guarda lo que respondió Wialon junto a la fila de auditoría para poder
+			// verlo después en el historial sin volver a consultar. Best-effort: la
+			// auditoría ya quedó registrada y un fallo acá no debe tumbar la respuesta.
+			if (gpsConsultaLogId) {
+				try {
+					await db
+						.update(gpsConsultaLogs)
+						.set({ snapshot: final })
+						.where(eq(gpsConsultaLogs.id, gpsConsultaLogId));
+				} catch (error) {
+					console.error("GPS_CONSULTA_SNAPSHOT_FALLIDO", {
+						vehicleId: input.vehicleId,
+						message: error instanceof Error ? error.message : String(error),
+					});
+				}
 			}
-			return { ...respuesta, auditada: auditado === true };
+
+			return final;
 		}),
 
 	/**

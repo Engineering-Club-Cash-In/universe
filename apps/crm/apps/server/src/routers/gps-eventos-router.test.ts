@@ -3,7 +3,15 @@
  * Mock de `db` propio: identifica ramas por TABLA (`.from(tabla)`) y por los
  * campos pedidos en `select()`, igual que wialon.test.ts.
  */
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	mock,
+	spyOn,
+} from "bun:test";
 import { call, ORPCError } from "@orpc/server";
 import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
@@ -30,6 +38,8 @@ let insertGpsConsultaLogFalla = false;
 let gpsConsultaLogsInsertados: Record<string, unknown>[] = [];
 let ubicacionesWhereCondition: unknown = null;
 let ubicacionesClaveBorradasCount = 0;
+let consultasFilasMock: Record<string, unknown>[] = [];
+let consultasLimitPedido: number | null = null;
 
 function mockDb() {
 	return {
@@ -76,6 +86,21 @@ function mockDb() {
 								responsableCasoMock === "user-test"
 									? [{ id: "caso-1" }]
 									: [],
+						}),
+					};
+				}
+
+				if (tabla === gpsConsultaLogs) {
+					return {
+						leftJoin: () => ({
+							where: () => ({
+								orderBy: () => ({
+									limit: async (n: number) => {
+										consultasLimitPedido = n;
+										return consultasFilasMock;
+									},
+								}),
+							}),
 						}),
 					};
 				}
@@ -538,5 +563,188 @@ describe("CB-119 (D-15) — getUbicacionesClaveCaso", () => {
 		expect(res.auditada).toBe(true);
 		expect(res.ubicaciones).toEqual([]);
 		expect(ubicacionesClaveBorradasCount).toBe(0);
+	});
+});
+
+describe("getGpsConsultasCaso — historial de consultas del vehículo", () => {
+	afterEach(() => {
+		consultasFilasMock = [];
+		consultasLimitPedido = null;
+		casoGpsMock = {
+			casoSifco: "01010214100000",
+			vehiculoOportunidad: VEHICLE_ID,
+		};
+		responsableCasoMock = "user-test";
+		gpsConsultaLogsInsertados = [];
+		mock.restore();
+	});
+
+	const input = { casoCobroId: CASO_ID, vehicleId: VEHICLE_ID, limit: 20 };
+
+	it("con acceso: devuelve las consultas y NO registra otra auditoría", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		consultasFilasMock = [
+			{
+				id: "log-1",
+				motivo: "Cliente no contesta hace una semana",
+				origen: "telemetria",
+				unitName: "P-909LPL - CON APAGADO",
+				userNombre: "Ana",
+				createdAt: new Date("2026-09-30T09:06:00.000Z"),
+				// Como sale de la columna jsonb: fechas en texto ISO.
+				snapshot: {
+					estado: "vinculado",
+					auditada: true,
+					unitId: 123,
+					unitName: "P-909LPL - CON APAGADO",
+					vinculoOrigen: "placa",
+					placa: "P-909LPL",
+					telemetria: {
+						speedKmh: 0,
+						latitude: 14.561926,
+						longitude: -90.509186,
+						ultimaSenalAt: "2026-09-30T09:06:00.000Z",
+						ultimaPosicionAt: "2026-09-30T09:05:00.000Z",
+					},
+				},
+			},
+			{
+				id: "log-0",
+				motivo: "Verificar ubicación previa",
+				origen: null,
+				unitName: null,
+				userNombre: null,
+				createdAt: new Date("2026-09-29T09:06:00.000Z"),
+				snapshot: null,
+			},
+		];
+
+		const res = await call(gpsEventosRouter.getGpsConsultasCaso, input, {
+			context: ctx("cobros"),
+		});
+
+		expect(res).toHaveLength(2);
+		expect(res[0]?.motivo).toBe("Cliente no contesta hace una semana");
+		expect(res[1]?.origen).toBeNull();
+		const snap = res[0]?.snapshot;
+		expect(snap?.estado).toBe("vinculado");
+		if (snap?.estado === "vinculado") {
+			expect(snap.telemetria.latitude).toBe(14.561926);
+			expect(snap.telemetria.ultimaSenalAt).toBeInstanceOf(Date);
+			expect(snap.telemetria.ultimaPosicionAt?.toISOString()).toBe(
+				"2026-09-30T09:05:00.000Z",
+			);
+		}
+		expect(res[1]?.snapshot).toBeNull();
+		expect(consultasLimitPedido).toBe(20);
+		expect(gpsConsultaLogsInsertados).toHaveLength(0);
+	});
+
+	it("consultas con la misma ubicación salen como una entrada, sin perder ninguna", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		const snapshot = (hora: string) => ({
+			estado: "vinculado",
+			auditada: true,
+			unitId: 1,
+			unitName: "U",
+			vinculoOrigen: "placa",
+			placa: null,
+			telemetria: {
+				latitude: 14.5,
+				longitude: -90.5,
+				ultimaSenalAt: hora,
+				ultimaPosicionAt: hora,
+			},
+		});
+		consultasFilasMock = [
+			{
+				id: "nueva",
+				motivo: "Segunda revisión",
+				origen: "telemetria",
+				unitName: "U",
+				userNombre: "Beto",
+				createdAt: new Date("2026-09-30T12:30:00.000Z"),
+				snapshot: snapshot("2026-09-30T12:29:00.000Z"),
+			},
+			{
+				id: "vieja",
+				motivo: "Primera revisión",
+				origen: "telemetria",
+				unitName: "U",
+				userNombre: "Ana",
+				createdAt: new Date("2026-09-30T12:10:00.000Z"),
+				snapshot: snapshot("2026-09-30T12:09:00.000Z"),
+			},
+		];
+
+		const res = await call(gpsEventosRouter.getGpsConsultasCaso, input, {
+			context: ctx("cobros"),
+		});
+
+		expect(res).toHaveLength(1);
+		expect(res[0]?.id).toBe("nueva");
+		expect(res[0]?.motivo).toBe("Segunda revisión");
+		expect(res[0]?.snapshot?.estado).toBe("vinculado");
+		// La auditoría de la consulta anterior sigue a la vista: quién y por qué.
+		expect(res[0]?.consultas.map((c) => [c.userNombre, c.motivo])).toEqual([
+			["Beto", "Segunda revisión"],
+			["Ana", "Primera revisión"],
+		]);
+	});
+
+	it("un snapshot que no cumple el schema se descarta sin tumbar el historial", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		consultasFilasMock = [
+			{
+				id: "log-x",
+				motivo: "Consulta con snapshot viejo",
+				origen: "telemetria",
+				unitName: null,
+				userNombre: "Ana",
+				createdAt: new Date("2026-09-30T09:06:00.000Z"),
+				snapshot: { formato: "viejo" },
+			},
+		];
+
+		const res = await call(gpsEventosRouter.getGpsConsultasCaso, input, {
+			context: ctx("cobros"),
+		});
+
+		expect(res).toHaveLength(1);
+		expect(res[0]?.snapshot).toBeNull();
+	});
+
+	it("sin acceso al caso: rechaza y no lee el historial", async () => {
+		responsableCasoMock = "otro-usuario";
+
+		await expect(
+			call(gpsEventosRouter.getGpsConsultasCaso, input, {
+				context: ctx("cobros"),
+			}),
+		).rejects.toThrow();
+		expect(consultasLimitPedido).toBeNull();
+	});
+
+	it("vehículo que no es el del caso: rechaza", async () => {
+		spyOn(carteraBackClient, "getCredito").mockResolvedValue({
+			asesor: { emailCashIn: "u@example.com" },
+		} as never);
+		casoGpsMock = {
+			casoSifco: "01010214100000",
+			vehiculoOportunidad: "99999999-9999-9999-9999-999999999999",
+		};
+
+		await expect(
+			call(gpsEventosRouter.getGpsConsultasCaso, input, {
+				context: ctx("cobros"),
+			}),
+		).rejects.toThrow();
+		expect(consultasLimitPedido).toBeNull();
 	});
 });

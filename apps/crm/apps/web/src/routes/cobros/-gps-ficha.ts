@@ -167,6 +167,24 @@ export function googleMapsUrl(
 }
 
 /**
+ * URL para previsualizar la posición dentro del CRM (iframe). Mismo criterio
+ * que `googleMapsUrl`: null sin posición válida, y además fuera del rango
+ * geográfico (un fix corrupto no debe pedirle a Google un punto inexistente).
+ */
+export function googleMapsEmbedUrl(
+	lat: number | undefined,
+	lon: number | undefined,
+): string | null {
+	if (lat == null || lon == null) return null;
+	if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+	if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+	// (0, 0) es lo que reportan algunos equipos sin fix satelital: el mapa
+	// apuntaría al Golfo de Guinea en vez de mostrar que no hay posición.
+	if (lat === 0 && lon === 0) return null;
+	return `https://www.google.com/maps?q=${lat},${lon}&z=16&output=embed`;
+}
+
+/**
  * Extrae de una placa la parte que sirve para buscarla en el catálogo de
  * Wialon (`filterName` de `getWialonUnits`, que hace match de SUBCADENA
  * LITERAL contra `sys_name`, no una comparación normalizada).

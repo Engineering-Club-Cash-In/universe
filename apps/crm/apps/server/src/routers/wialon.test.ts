@@ -9,6 +9,7 @@ import {
 } from "bun:test";
 import { call, ORPCError } from "@orpc/server";
 import { casosCobros } from "../db/schema/cobros";
+import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import { moduloAccesoFalso } from "../lib/acceso-caso-cobro.mock";
 import type { Context } from "../lib/context";
 import { carteraBackClient } from "../services/cartera-back-client";
@@ -34,6 +35,8 @@ let filaVehiculoMock: Record<string, unknown> | null = null;
 let rolUsuarioMock = "admin";
 let errorSelectVehiculo: Error | null = null;
 let insertsGpsAuditoria: Record<string, unknown>[] = [];
+// set() de los update sobre gps_consulta_logs (snapshot de la respuesta).
+let snapshotsGuardados: Record<string, unknown>[] = [];
 let bitacoraFilasMock: Record<string, unknown>[] = [];
 // UPDATEs sobre vehicles (vínculo manual o deducido por placa) y cuántas filas
 // "afecta" el mock: 0 simula un vehicleId inexistente.
@@ -186,37 +189,49 @@ function mockDbAdmin() {
 				}),
 			};
 		},
-		update: () => ({
-			set: (data: Record<string, unknown>) => ({
-				// Se puede await-ear directo (fijarVinculoPorPlaca) o encadenar
-				// .returning() (vincularUnidadWialon), igual que drizzle.
-				where: () => {
-					if (errorUpdateVehiculo) {
-						// Rechazo perezoso: solo se crea si alguien lo await-ea o
-						// encadena .returning() (un Promise.reject ansioso quedaría
-						// sin manejar en el camino que usa .returning()).
-						const error = errorUpdateVehiculo;
-						return {
-							// biome-ignore lint/suspicious/noThenProperty: imita el query builder thenable de drizzle
-							then: (
-								ok: (v: unknown) => unknown,
-								fallo: (e: unknown) => unknown,
-							) => Promise.reject(error).then(ok, fallo),
-							returning: async () => {
-								throw error;
+		update: (tabla?: unknown) =>
+			tabla === gpsConsultaLogs
+				? {
+						set: (data: Record<string, unknown>) => ({
+							where: async () => {
+								snapshotsGuardados.push(data);
 							},
-						};
+						}),
 					}
-					updatesVehiculo.push(data);
-					const filas = Array.from({ length: filasAfectadasUpdate }, () => ({
-						id: "11111111-1111-1111-1111-111111111111",
-					}));
-					return Object.assign(Promise.resolve(undefined), {
-						returning: async () => filas,
-					});
-				},
-			}),
-		}),
+				: {
+						set: (data: Record<string, unknown>) => ({
+							// Se puede await-ear directo (fijarVinculoPorPlaca) o encadenar
+							// .returning() (vincularUnidadWialon), igual que drizzle.
+							where: () => {
+								if (errorUpdateVehiculo) {
+									// Rechazo perezoso: solo se crea si alguien lo await-ea o
+									// encadena .returning() (un Promise.reject ansioso quedaría
+									// sin manejar en el camino que usa .returning()).
+									const error = errorUpdateVehiculo;
+									return {
+										// biome-ignore lint/suspicious/noThenProperty: imita el query builder thenable de drizzle
+										then: (
+											ok: (v: unknown) => unknown,
+											fallo: (e: unknown) => unknown,
+										) => Promise.reject(error).then(ok, fallo),
+										returning: async () => {
+											throw error;
+										},
+									};
+								}
+								updatesVehiculo.push(data);
+								const filas = Array.from(
+									{ length: filasAfectadasUpdate },
+									() => ({
+										id: "11111111-1111-1111-1111-111111111111",
+									}),
+								);
+								return Object.assign(Promise.resolve(undefined), {
+									returning: async () => filas,
+								});
+							},
+						}),
+					},
 		// getGpsVehiculo audita cada consulta en gps_consulta_logs (CB-118).
 		// Se captura en insertsGpsAuditoria para poder aserir motivo/usuario.
 		// `.returning()` simula el id generado (CB-121: se enlaza con la
@@ -1564,6 +1579,7 @@ describe("wialonRouter", () => {
 			filaVehiculoMock = null;
 			errorSelectVehiculo = null;
 			insertsGpsAuditoria = [];
+			snapshotsGuardados = [];
 			updatesVehiculo = [];
 			setWialonClient(null);
 		});
@@ -1627,6 +1643,17 @@ describe("wialonRouter", () => {
 				motivo: "Verificar ubicación para gestión de cobro",
 				unitId: "28554757",
 				userId: "user-cob-1",
+			});
+			expect(insertsGpsAuditoria[0]).toMatchObject({ origen: "telemetria" });
+
+			// Lo que respondió Wialon queda guardado junto a la auditoría para el
+			// historial de la ficha (se ve sin volver a consultar).
+			expect(snapshotsGuardados).toHaveLength(1);
+			expect(snapshotsGuardados[0]?.snapshot).toMatchObject({
+				estado: "vinculado",
+				unitId: 28554757,
+				auditada: true,
+				telemetria: { latitude: 14.6 },
 			});
 		});
 

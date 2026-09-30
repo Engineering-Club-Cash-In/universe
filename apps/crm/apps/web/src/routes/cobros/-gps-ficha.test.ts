@@ -6,6 +6,7 @@ import {
 	formatIgnicion,
 	formatUltimaSenal,
 	formatVelocidad,
+	googleMapsEmbedUrl,
 	googleMapsUrl,
 	limpiarPlacaParaBusqueda,
 	resolveEstadoSenal,
@@ -105,6 +106,21 @@ describe("formatVelocidad / formatCoordenadas / googleMapsUrl", () => {
 		);
 		expect(googleMapsUrl(undefined, undefined)).toBeNull();
 		expect(googleMapsUrl(14.6, undefined)).toBeNull();
+	});
+
+	test("la URL de previsualización es null sin posición y trae output=embed", () => {
+		expect(googleMapsEmbedUrl(14.610365, -90.5158933)).toBe(
+			"https://www.google.com/maps?q=14.610365,-90.5158933&z=16&output=embed",
+		);
+		expect(googleMapsEmbedUrl(undefined, -90.5)).toBeNull();
+		expect(googleMapsEmbedUrl(Number.NaN, -90.5)).toBeNull();
+		// Fuera del rango geográfico: no hay un punto que mostrar.
+		expect(googleMapsEmbedUrl(91, -90.5)).toBeNull();
+		expect(googleMapsEmbedUrl(14.6, -181)).toBeNull();
+		expect(googleMapsEmbedUrl(-90, 180)).not.toBeNull();
+		// (0, 0): equipo sin fix, no hay posición real que previsualizar.
+		expect(googleMapsEmbedUrl(0, 0)).toBeNull();
+		expect(googleMapsEmbedUrl(0, -90.5)).not.toBeNull();
 	});
 });
 

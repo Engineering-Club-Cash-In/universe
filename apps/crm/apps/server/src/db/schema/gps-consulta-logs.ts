@@ -1,4 +1,11 @@
-import { index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+	index,
+	jsonb,
+	pgTable,
+	text,
+	timestamp,
+	uuid,
+} from "drizzle-orm/pg-core";
 import { user } from "./auth";
 
 /**
@@ -32,6 +39,17 @@ export const gpsConsultaLogs = pgTable(
 		unitId: text("unit_id"),
 		unitName: text("unit_name"),
 
+		// Qué se consultó: 'telemetria' (ubicación actual) o 'ubicaciones_clave'.
+		// Null en filas anteriores a la 0070, que no distinguían el origen.
+		origen: text("origen"),
+
+		// Lo que Wialon devolvió en esa consulta (ya mapeado: unidad, telemetría,
+		// fechas en ISO). Permite ver la consulta anterior en la Ficha 360 sin
+		// volver a pedirla. La fila se inserta ANTES de llamar a Wialon (auditoría
+		// fail-closed), así que se llena después; NULL si la consulta no llegó a
+		// responder o es anterior a la 0070.
+		snapshot: jsonb("snapshot"),
+
 		userId: text("user_id")
 			.notNull()
 			.references(() => user.id, { onDelete: "restrict" }),
@@ -42,5 +60,7 @@ export const gpsConsultaLogs = pgTable(
 		index("idx_gps_consulta_logs_vehicle").on(t.vehicleId),
 		index("idx_gps_consulta_logs_sifco").on(t.numeroCreditoSifco),
 		index("idx_gps_consulta_logs_created_at").on(t.createdAt),
+		// Historial de la ficha: WHERE vehicle_id = ? ORDER BY created_at DESC.
+		index("idx_gps_consulta_logs_vehicle_created").on(t.vehicleId, t.createdAt),
 	],
 );

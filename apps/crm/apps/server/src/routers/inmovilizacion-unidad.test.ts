@@ -9,6 +9,7 @@
  */
 import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { call, ORPCError } from "@orpc/server";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { user } from "../db/schema/auth";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
 import { opportunities } from "../db/schema/crm";
@@ -94,6 +95,8 @@ let contratoIdMock: string | null = "contrato-1";
 // Vehículo que da el CONTRATO del caso; undefined = el mismo `vehicleIdMock`.
 let vehicleIdContratoMock: string | null | undefined;
 let vehiculosOportunidadMock: Record<string, unknown>[] = [];
+// La condición (`where`) con que se buscó el vehículo en las oportunidades.
+let condicionOportunidadMock: unknown = null;
 let nombresUsuarioMock: { id: string; name: string }[] = [];
 let reconciliarAvisosLlamadas: (readonly string[] | undefined)[] = [];
 let onNotificarLlamarCliente: (() => void) | null = null;
@@ -254,7 +257,12 @@ function mockDb() {
 					// getCasoParaInmovilizacion (fallback): from().innerJoin().leftJoin().where()
 					return {
 						innerJoin: () => ({
-							leftJoin: () => ({ where: async () => vehiculosOportunidadMock }),
+							leftJoin: () => ({
+								where: async (condicion: unknown) => {
+									condicionOportunidadMock = condicion;
+									return vehiculosOportunidadMock;
+								},
+							}),
 						}),
 					};
 				}
@@ -554,6 +562,7 @@ function reset() {
 	contratoIdMock = "contrato-1";
 	vehicleIdContratoMock = undefined;
 	vehiculosOportunidadMock = [];
+	condicionOportunidadMock = null;
 	// Por defecto hay respaldo para cualquier opción: un pago muy posterior a
 	// cualquier apagado y una promesa activa. Cada test lo quita o lo cambia.
 	pagosCarteraMock = [
@@ -3006,6 +3015,25 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 			vehicleId: VEHICLE_ID,
 			wialonUnitId: 12345,
 		});
+	});
+
+	it("sin contrato: solo mira oportunidades de un crédito otorgado (won/migrate), no open/lost/on_hold", async () => {
+		contratoIdMock = null;
+		vehicleIdContratoMock = null;
+		wialonUnitIdCasoMock = null;
+		vehiculosOportunidadMock = [vehiculoOportunidad()];
+		await solicitar();
+		// La base no se puede consultar en el mock: se revisa el SQL de la condición.
+		const { sql, params } = new PgDialect().sqlToQuery(
+			condicionOportunidadMock as never,
+		);
+		expect(sql).toContain('"status" in');
+		expect(params).toEqual(
+			expect.arrayContaining(["01010214100000", "won", "migrate"]),
+		);
+		expect(params).not.toContain("lost");
+		expect(params).not.toContain("open");
+		expect(params).not.toContain("on_hold");
 	});
 
 	it("sin contrato y varias oportunidades del MISMO vehículo: lo usa (no es ambiguo)", async () => {

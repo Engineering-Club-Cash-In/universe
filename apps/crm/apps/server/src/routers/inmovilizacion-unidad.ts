@@ -102,6 +102,15 @@ import { mensajeUsuarioWialon } from "./wialon";
 export { marcarInmovilizacionEnviadaARecuperacion };
 
 /**
+ * Estados de una oportunidad que SÍ corresponden a un crédito otorgado: solo
+ * esas pueden dar el vehículo de un SIFCO. Una oportunidad `open`, `lost` o
+ * `on_hold` que comparta el SIFCO es un dato viejo o ajeno y podría apuntar a
+ * otra unidad GPS. Mismo criterio que `getVehicleByCodigoController`
+ * (controllers/vehicles.ts) y el recordatorio de Págalo.
+ */
+const ESTADOS_OPORTUNIDAD_CON_CREDITO = ["won", "migrate"] as const;
+
+/**
  * Trae el caso con lo que hace falta para autorizar y para armar el mensaje
  * de las notificaciones ("Fulano (crédito 12345)"). No usa `getCasoCobroById`
  * (routers/cobros.ts) porque ese trae columnas de UI que acá no hacen falta.
@@ -160,7 +169,12 @@ async function getCasoParaInmovilizacion(casoCobroId: string) {
 		.from(opportunities)
 		.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 		.leftJoin(leads, eq(opportunities.leadId, leads.id))
-		.where(eq(opportunities.numeroSifco, base.numeroCreditoSifco));
+		.where(
+			and(
+				eq(opportunities.numeroSifco, base.numeroCreditoSifco),
+				inArray(opportunities.status, [...ESTADOS_OPORTUNIDAD_CON_CREDITO]),
+			),
+		);
 	const distintos = new Set(filas.map((f) => f.vehicleId));
 	if (distintos.size !== 1) {
 		return { ...delContrato, vehiculoAmbiguo: distintos.size > 1 };

@@ -944,6 +944,12 @@ async function ejecutarAprobada(
 		// (que toma lock exclusivo al reasignar la unidad del vehículo),
 		// evitando que el GPS sea reemplazado concurrentemente entre esta
 		// lectura y ejecutarInmovilizacion. Review de Codex.
+		//
+		// Solo aplica al apagado: la reactivación revierte un apagado ya
+		// ejecutado sobre la unidad guardada en la fila, y esa unidad sigue
+		// apagada aunque el GPS se haya reasignado después a otro vehículo
+		// (`vincularUnidadWialon` le quita el vínculo al anterior). Exigirlo
+		// dejaría la unidad apagada sin forma de reactivarla desde el CRM.
 		if (!motivoFalloPrecondicion) {
 			if (!inm.vehicleId) {
 				motivoFalloPrecondicion =
@@ -959,13 +965,19 @@ async function ejecutarAprobada(
 				if (!vehiculoTx) {
 					motivoFalloPrecondicion =
 						"El vehículo asociado a la solicitud ya no existe o fue desasociado.";
+				} else if (inm.wialonUnitId == null) {
+					motivoFalloPrecondicion =
+						"El vehículo asociado no tiene una unidad GPS vinculada.";
 				} else if (
-					inm.wialonUnitId == null ||
+					inm.accion === "apagado" &&
 					vehiculoTx.wialonUnitId == null
 				) {
 					motivoFalloPrecondicion =
 						"El vehículo asociado no tiene una unidad GPS vinculada.";
-				} else if (vehiculoTx.wialonUnitId !== inm.wialonUnitId) {
+				} else if (
+					inm.accion === "apagado" &&
+					vehiculoTx.wialonUnitId !== inm.wialonUnitId
+				) {
 					motivoFalloPrecondicion =
 						"La unidad GPS del vehículo cambió o fue reasignada tras la aprobación. La acción ya no aplica a la unidad original.";
 				}
@@ -1907,18 +1919,24 @@ export const inmovilizacionUnidadRouter = {
 						});
 					}
 
-					if (vehiculoTx.wialonUnitId == null) {
-						throw new ORPCError("CONFLICT", {
-							message:
-								"El vehículo asociado no tiene una unidad GPS vinculada.",
-						});
-					}
+					// La reactivación va contra la unidad guardada en el apagado
+					// (`getCasoParaInmovilizacion`), que sigue apagada aunque su GPS se
+					// haya reasignado a otro vehículo: no se exige el vínculo vigente.
+					// Que esa unidad siga inmovilizada se confirma abajo, bajo lock.
+					if (input.accion === "apagado") {
+						if (vehiculoTx.wialonUnitId == null) {
+							throw new ORPCError("CONFLICT", {
+								message:
+									"El vehículo asociado no tiene una unidad GPS vinculada.",
+							});
+						}
 
-					if (vehiculoTx.wialonUnitId !== wialonUnitId) {
-						throw new ORPCError("CONFLICT", {
-							message:
-								"La unidad GPS del vehículo cambió durante la solicitud. Por favor intentá de nuevo.",
-						});
+						if (vehiculoTx.wialonUnitId !== wialonUnitId) {
+							throw new ORPCError("CONFLICT", {
+								message:
+									"La unidad GPS del vehículo cambió durante la solicitud. Por favor intentá de nuevo.",
+							});
+						}
 					}
 
 					// Re-validar estado bajo lock: entre la lectura temprana fuera
@@ -1928,7 +1946,7 @@ export const inmovilizacionUnidadRouter = {
 					// lock garantiza que el estado y el origenId sean los reales.
 					const historialTx = await getHistorialUnidadFisicaTx(tx)(
 						input.casoCobroId,
-						vehiculoTx.wialonUnitId,
+						wialonUnitId,
 					);
 					const estadoActualTx = estadoUnidad(
 						historialTx.map((h) => ({
@@ -1965,7 +1983,7 @@ export const inmovilizacionUnidadRouter = {
 							casoCobroId: input.casoCobroId,
 							numeroCreditoSifco: caso.numeroCreditoSifco as string,
 							vehicleId: caso.vehicleId,
-							wialonUnitId: vehiculoTx.wialonUnitId,
+							wialonUnitId,
 							accion: input.accion,
 							motivo: motivoTexto,
 							motivos: input.accion === "apagado" ? input.motivos : null,

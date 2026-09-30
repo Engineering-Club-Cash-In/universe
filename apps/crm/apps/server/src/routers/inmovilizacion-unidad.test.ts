@@ -2965,6 +2965,20 @@ describe("CB-041 — el asesor ejecuta la reactivación", () => {
 		expect(evento?.usuarioId).toBe("user-test");
 	});
 
+	it("con el GPS ya reasignado a otro vehículo (o sin vínculo) sigue ejecutándose: la unidad apagada es la de la fila", async () => {
+		for (const unidadActual of [99999, null]) {
+			reset();
+			reactivacionAprobada();
+			wialonUnitIdVehiculoMock = unidadActual;
+			await call(
+				ejecutarReactivacion,
+				{ id: INMOV_ID, nota: NOTA_LEGION },
+				{ context: ctx("cobros") },
+			);
+			expect(inmovilizacionExistente?.estado).toBe("ejecutada");
+		}
+	});
+
 	it("ignora una consulta GPS: la reactivación no guarda ubicación", async () => {
 		reactivacionAprobada();
 		consultaGpsMock = {
@@ -3168,6 +3182,24 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 			expect(carta.estadoUnidad).toBe("inmovilizada");
 			expect(carta.tieneGps).toBe(true);
 
+			await call(
+				inmovilizacionUnidadRouter.solicitarInmovilizacion,
+				{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+				{ context: ctx("cobros") },
+			);
+			expect(inmovilizacionesInsertadas[0]).toMatchObject({
+				accion: "reactivacion",
+				vehicleId: VEHICLE_ID,
+				wialonUnitId: 12345,
+			});
+		});
+
+		it("si el GPS del vehículo apagado se reasignó (ya no tiene vínculo), la reactivación se pide igual contra la unidad guardada", async () => {
+			vehicleIdContratoMock = "88888888-8888-8888-8888-888888888888";
+			wialonUnitIdCasoMock = 99999;
+			// `vincularUnidadWialon` le quitó la unidad al vehículo apagado.
+			wialonUnitIdVehiculoMock = null;
+			historialCasoMock = [apagadoEjecutado()];
 			await call(
 				inmovilizacionUnidadRouter.solicitarInmovilizacion,
 				{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },

@@ -211,7 +211,7 @@ export async function notificarInmovilizacionResuelta(params: {
 /**
  * Al ejecutar un APAGADO: avisa al asesor dueño del caso que debe llamar al
  * cliente. Queda `pending`/`action_required` hasta que
- * `registrarResultadoLlamada` la resuelva.
+ * `registrarLlamadaApagado` la resuelva.
  */
 export async function notificarLlamarCliente(params: {
 	inmovilizacionId: string;

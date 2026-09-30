@@ -51,7 +51,7 @@ export const inmovilizacionEstadoEnum = pgEnum("inmovilizacion_estado", [
  * `no_pago_pendiente_recuperacion` (respuesta "no pagó" de la llamada) y
  * `enviada_recuperacion` (el crédito YA se mandó a recuperación de
  * vehículo, vía enviarCreditoARecuperacion en routers/cobros.ts) son
- * estados distintos a propósito — registrarResultadoLlamada solo conoce el
+ * estados distintos a propósito — el flujo de la llamada solo conoce el
  * primero, nunca el segundo. Review de Codex, PR #1758.
  */
 export const inmovilizacionResultadoEnum = pgEnum("inmovilizacion_resultado", [
@@ -140,7 +140,7 @@ export const inmovilizacionesUnidad = pgTable(
 			{ onDelete: "set null" },
 		),
 		// Gestión (contactos_cobros) que registra la llamada posterior a la
-		// ejecución — apagado (registrarResultadoLlamada) o reactivación
+		// ejecución — apagado (registrarLlamadaApagado) o reactivación
 		// (registrarLlamadaReactivacion).
 		llamadaContactoId: uuid("llamada_contacto_id").references(
 			() => contactosCobros.id,

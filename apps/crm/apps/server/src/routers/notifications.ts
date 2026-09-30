@@ -378,7 +378,7 @@ export const notificationsRouter = {
 
 			// CB-041: estos cobrosTipo se resuelven SOLO por su flujo de
 			// negocio (decidirInmovilizacion, marcarEjecutada,
-			// registrarResultadoLlamada / registrarLlamadaReactivacion) — nunca
+			// registrarLlamadaApagado / registrarLlamadaReactivacion) — nunca
 			// a mano desde acá. La UI de notificaciones expone "Resolver" para
 			// cualquier action_required sin mirar cobrosTipo: un supervisor
 			// podía ocultar "por aprobar" sin decidirla, o un asesor ocultar

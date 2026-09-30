@@ -2,7 +2,7 @@
  * CB-041 — changeNotificationStatus rechaza resolver/descartar a mano las
  * notificaciones del flujo de inmovilización (review de Codex, PR #1758):
  * esos avisos se cierran SOLO por su propio flujo de negocio
- * (decidirInmovilizacion, registrarResultadoLlamada /
+ * (decidirInmovilizacion, registrarLlamadaApagado /
  * registrarLlamadaReactivacion), nunca desde el botón "Resolver" genérico.
  *
  * Mock de `db` propio, mismo criterio que inmovilizacion-unidad.test.ts:

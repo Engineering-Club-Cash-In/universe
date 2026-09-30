@@ -388,11 +388,11 @@ type TxExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * física (o, sin `wialonUnitId`, del caso) — mismo patrón que
  * `bloquearUnidadWialon` en `routers/wialon.ts`.
  *
- * Necesario porque `ejecutarAprobada` y `registrarResultadoLlamada` /
+ * Necesario porque `ejecutarAprobada` y `registrarLlamadaApagado` /
  * `registrarLlamadaReactivacion` toman locks de FILA en orden potencialmente
  * inverso: `ejecutarAprobada` de una reactivación lockea primero la
  * reactivación (su propio UPDATE) y DESPUÉS el apagado origen
- * (inmovilizacionOrigenId); `registrarResultadoLlamada` sobre ese mismo
+ * (inmovilizacionOrigenId); `registrarLlamadaApagado` sobre ese mismo
  * apagado lockea primero el apagado (SELECT ... FOR UPDATE) y su INSERT de
  * la reactivación de seguimiento puede esperar por el índice único parcial,
  * que depende de esa otra fila. Dos transacciones esperándose la una a la
@@ -455,7 +455,7 @@ function getHistorialUnidadFisicaTx(
  *     detecta que una acción MÁS RECIENTE de otro tipo ya superó a `fila`.
  *  2. Esa fila vigente es justo `fila.id` (no otra fila vieja de otro caso,
  *     D-10 — unidad compartida).
- * Se usa en `registrarResultadoLlamada` y `registrarLlamadaReactivacion`,
+ * Se usa en `registrarLlamadaApagado` y `registrarLlamadaReactivacion`,
  * primero sin lock (mensaje de error temprano) y de nuevo con
  * `SELECT ... FOR UPDATE` dentro de la transacción (la garantía real bajo
  * concurrencia). Review de Codex, PR #1758.
@@ -553,7 +553,7 @@ function esViolacionUnica(error: unknown): boolean {
 
 /**
  * Verifica que el usuario tenga acceso para registrar la llamada de una
- * inmovilización ejecutada (`registrarResultadoLlamada` o
+ * inmovilización ejecutada (`registrarLlamadaApagado` o
  * `registrarLlamadaReactivacion`).
  *
  * El caso normal es el gate de toda la ficha: el asesor que lleva el crédito
@@ -763,7 +763,7 @@ async function ejecutarAprobada(
 	let resultado!: Awaited<ReturnType<typeof ejecutarInmovilizacion>>;
 
 	await db.transaction(async (tx) => {
-		// Serializa contra registrarResultadoLlamada / registrarLlamadaReactivacion
+		// Serializa contra registrarLlamadaApagado / registrarLlamadaReactivacion
 		// sobre la MISMA unidad física — evita el deadlock de locks de fila
 		// en orden cruzado (esta transacción toca `input.id` y después
 		// `inmovilizacionOrigenId`; la otra puede tocarlos al revés). Ver
@@ -930,7 +930,7 @@ async function ejecutarAprobada(
 	await resolverRecordatoriosEjecucion(input.id);
 
 	// Reactivación directa (cliente pagó por ventanilla, sin pasar por
-	// registrarResultadoLlamada): el aviso "llamar al cliente" del
+	// registrarLlamadaApagado): el aviso "llamar al cliente" del
 	// apagado que originó esto queda con nada que resolverlo — el
 	// banner ya desapareció de la Ficha 360 (pendienteLlamar se apaga
 	// solo cuando la unidad vuelve a "activa"), pero el aviso en
@@ -1699,9 +1699,8 @@ export const inmovilizacionUnidadRouter = {
 				});
 			}
 
-			// La reactivación pedida directo (sin pasar por "pagó" en la llamada)
-			// también apunta al apagado que revierte, para que al ejecutarse ese
-			// apagado quede con resultado = 'reactivada'.
+			// La reactivación también apunta al apagado que revierte, para que al
+			// ejecutarse ese apagado quede con resultado = 'reactivada'.
 			const origenId =
 				input.accion === "reactivacion"
 					? (ultimaEjecutada(historial, "apagado")?.id ?? null)
@@ -2098,273 +2097,12 @@ export const inmovilizacionUnidadRouter = {
 		}),
 
 	ejecutarApagado: ejecutarPorAsesor("apagado"),
-
-	/**
-	 * Registra el resultado de la llamada posterior al apagado. La gestión en
-	 * sí (contactosCobros) ya se creó por `createContactoCobros` — acá solo
-	 * se ENLAZA esa gestión con la inmovilización y se decide el siguiente
-	 * paso: `paga` abre una solicitud de reactivación (a aprobación); `no_paga`
-	 * cierra el ciclo dejando que la UI ofrezca `enviarCreditoARecuperacion`
-	 * (ya existe, no se duplica acá).
-	 */
-	registrarResultadoLlamada: cobrosProcedure
-		.input(
-			z.object({
-				inmovilizacionId: z.string().uuid(),
-				contactoId: z.string().uuid(),
-				resultado: z.enum(["paga", "no_paga"]),
-			}),
-		)
-		.handler(async ({ input, context }) => {
-			const [inm] = await db
-				.select()
-				.from(inmovilizacionesUnidad)
-				.where(
-					and(
-						eq(inmovilizacionesUnidad.id, input.inmovilizacionId),
-						eq(inmovilizacionesUnidad.accion, "apagado"),
-						eq(inmovilizacionesUnidad.estado, "ejecutada"),
-					),
-				)
-				.limit(1);
-
-			if (!inm) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "No hay un apagado ejecutado con ese id.",
-				});
-			}
-
-			await assertAccesoLlamadaInmovilizacion(
-				inm,
-				context.userId,
-				context.userRole,
-			);
-
-			if (inm.llamadaContactoId !== null) {
-				throw new ORPCError("CONFLICT", {
-					message: "El resultado de esta llamada ya se registró.",
-				});
-			}
-
-			// Chequeo temprano SIN lock: da un mensaje claro rápido para el caso
-			// común. La garantía real bajo concurrencia es el re-chequeo CON
-			// lock, dentro de la transacción (ver más abajo) — este de acá
-			// puede quedar desactualizado si algo cambia entre esta lectura y
-			// el UPDATE. Review de Codex, PR #1758.
-			if (!(await filaSigueVigente(inm, getHistorialUnidadFisica))) {
-				throw new ORPCError("CONFLICT", {
-					message:
-						"Este apagado ya no es el vigente de la unidad: fue superado por un ciclo más reciente.",
-				});
-			}
-
-			// El contacto tiene que ser del MISMO caso — evita enlazar la
-			// llamada de un caso distinto (contactoId enumerable) —, una LLAMADA
-			// (no whatsapp/sms/visita/pago) POSTERIOR al apagado, y no puede
-			// estar ya enlazado a otra inmovilización. Sin el filtro de método y
-			// fecha, cualquier gestión vieja o de otro canal —incluso una de
-			// `resultado: "paga"`— podía enlazarse como si fuera la llamada
-			// posterior exigida, sin que esa llamada hubiera ocurrido. Review de
-			// Codex, PR #1758.
-			const [contacto] = await db
-				.select({
-					id: contactosCobros.id,
-					inmovilizacionId: contactosCobros.inmovilizacionId,
-				})
-				.from(contactosCobros)
-				.where(
-					and(
-						eq(contactosCobros.id, input.contactoId),
-						eq(contactosCobros.casoCobroId, inm.casoCobroId),
-						eq(contactosCobros.metodoContacto, "llamada"),
-						gt(contactosCobros.fechaContacto, inm.ejecutadoAt ?? new Date(0)),
-					),
-				)
-				.limit(1);
-			if (!contacto) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"El contacto indicado no es una llamada registrada después del apagado.",
-				});
-			}
-			if (contacto.inmovilizacionId !== null) {
-				throw new ORPCError("CONFLICT", {
-					message:
-						"Esa gestión ya está registrada como la llamada de otra inmovilización.",
-				});
-			}
-
-			if (input.resultado === "paga") {
-				await assertCreditoAsignadoEnCarteraPorSifco({
-					numeroSifco: inm.numeroCreditoSifco,
-					emailUsuario: context.session.user.email,
-					userRole: context.userRole,
-					accion: "solicitar la reactivación de la unidad",
-				});
-			}
-
-			let reactivacionId: string | null = null;
-
-			try {
-				await db.transaction(async (tx) => {
-					// El advisory lock (por unidad, adquirido PRIMERO) serializa esta
-					// transacción contra ejecutarAprobada — sin él, las dos podían
-					// tomar locks de fila en orden cruzado (deadlock 40P01, review de
-					// Codex, PR #1758: ver comentario de `bloquearUnidadFisica`). El
-					// SELECT ... FOR UPDATE de esta fila que sigue abajo ya no es la
-					// única defensa, pero queda como cinturón y tirantes: si
-					// `inm` sigue con `resultado` desactualizado (ejecutarAprobada
-					// tenía que marcarla `resultado = 'reactivada'` porque es el
-					// origen de una reactivación que se está ejecutando AHORA), esta
-					// espera a que esa transacción termine y re-verifica con el
-					// estado YA actualizado.
-					await bloquearUnidadFisica(tx, {
-						casoCobroId: inm.casoCobroId,
-						wialonUnitId: inm.wialonUnitId,
-					});
-					await tx
-						.select({ id: inmovilizacionesUnidad.id })
-						.from(inmovilizacionesUnidad)
-						.where(eq(inmovilizacionesUnidad.id, inm.id))
-						.for("update");
-					if (!(await filaSigueVigente(inm, getHistorialUnidadFisicaTx(tx)))) {
-						throw new ORPCError("CONFLICT", {
-							message:
-								"Este apagado ya no es el vigente de la unidad: fue superado por un ciclo más reciente.",
-						});
-					}
-
-					// Los chequeos de arriba son para dar un mensaje claro; la garantía
-					// bajo concurrencia (doble clic, dos asesores a la vez) son estos
-					// UPDATE condicionados a `IS NULL`: si otro ya enlazó, no devuelven
-					// fila y la transacción entera se revierte.
-					const [apagado] = await tx
-						.update(inmovilizacionesUnidad)
-						.set({
-							llamadaContactoId: input.contactoId,
-							// "no_pago_pendiente_recuperacion": este endpoint solo conoce la
-							// respuesta de la llamada; al ejecutarse enviarCreditoARecuperacion
-							// (vía cobros.ts), esa transición actualiza el resultado a
-							// "enviada_recuperacion".
-							resultado:
-								input.resultado === "paga"
-									? null
-									: "no_pago_pendiente_recuperacion",
-							updatedAt: new Date(),
-						})
-						.where(
-							and(
-								eq(inmovilizacionesUnidad.id, inm.id),
-								isNull(inmovilizacionesUnidad.llamadaContactoId),
-							),
-						)
-						.returning({ id: inmovilizacionesUnidad.id });
-					if (!apagado) {
-						throw new ORPCError("CONFLICT", {
-							message: "El resultado de esta llamada ya se registró.",
-						});
-					}
-
-					const [enlazado] = await tx
-						.update(contactosCobros)
-						.set({ inmovilizacionId: inm.id })
-						.where(
-							and(
-								eq(contactosCobros.id, input.contactoId),
-								isNull(contactosCobros.inmovilizacionId),
-							),
-						)
-						.returning({ id: contactosCobros.id });
-					if (!enlazado) {
-						throw new ORPCError("CONFLICT", {
-							message:
-								"Esa gestión ya está registrada como la llamada de otra inmovilización.",
-						});
-					}
-
-					if (input.resultado === "paga") {
-						if (inm.wialonUnitId == null) {
-							throw new ORPCError("CONFLICT", {
-								message:
-									"El vehículo asociado no tiene una unidad GPS vinculada.",
-							});
-						}
-						const [reactivacion] = await tx
-							.insert(inmovilizacionesUnidad)
-							.values({
-								casoCobroId: inm.casoCobroId,
-								numeroCreditoSifco: inm.numeroCreditoSifco,
-								vehicleId: inm.vehicleId,
-								wialonUnitId: inm.wialonUnitId,
-								accion: "reactivacion",
-								motivo: "Cliente pagó tras la llamada posterior al apagado.",
-								bucketSnapshot: inm.bucketSnapshot,
-								solicitadoPor: context.userId,
-								inmovilizacionOrigenId: inm.id,
-							})
-							.returning({ id: inmovilizacionesUnidad.id });
-						reactivacionId = reactivacion.id;
-
-						await tx.insert(inmovilizacionesUnidadEventos).values({
-							inmovilizacionId: reactivacion.id,
-							evento: "solicitar",
-							estadoNuevo: "pendiente_aprobacion",
-							usuarioId: context.userId,
-							detalle: { accion: "reactivacion", origenId: inm.id },
-						});
-					}
-
-					await tx.insert(inmovilizacionesUnidadEventos).values({
-						inmovilizacionId: inm.id,
-						evento: "registrar_resultado_llamada",
-						estadoAnterior: "ejecutada",
-						estadoNuevo: "ejecutada",
-						usuarioId: context.userId,
-						detalle: {
-							resultado: input.resultado,
-							contactoId: input.contactoId,
-						},
-					});
-				});
-			} catch (error) {
-				// "paga" choca con el índice único si ya hay una solicitud abierta
-				// en el caso (p. ej. alguien pidió la reactivación directo).
-				if (esViolacionUnica(error)) {
-					throw new ORPCError("CONFLICT", {
-						message:
-							"Ya hay una solicitud de inmovilización abierta para este caso. Resolvé esa primero.",
-					});
-				}
-				throw error;
-			}
-
-			await resolverAvisoLlamarCliente(inm.id);
-
-			if (input.resultado === "paga" && reactivacionId) {
-				const casoActualizado = await getCasoParaInmovilizacion(
-					inm.casoCobroId,
-				);
-				await notificarInmovilizacionPendiente({
-					inmovilizacionId: reactivacionId,
-					casoCobroId: inm.casoCobroId,
-					accion: "reactivacion",
-					clienteNombre: casoActualizado?.clienteNombre ?? undefined,
-					numeroCreditoSifco: inm.numeroCreditoSifco,
-					motivo: "Cliente pagó tras la llamada posterior al apagado.",
-					solicitadoPorUserId: context.userId,
-					solicitadoPorRole: context.userRole,
-				});
-			}
-
-			return { ok: true };
-		}),
 };
 
 /**
  * Confirma que el asesor ya llamó al cliente tras una REACTIVACIÓN
- * ejecutada. Simétrico a `registrarResultadoLlamada` pero sin su
- * bifurcación paga/no_paga — acá no hay siguiente paso que decidir, solo
- * cerrar el ciclo dejando constancia de la gestión.
+ * ejecutada. Simétrico a `registrarLlamadaApagado`: no hay siguiente paso
+ * que decidir, solo cerrar el ciclo dejando constancia de la gestión.
  *
  * Aparte de `inmovilizacionUnidadRouter` (no como una propiedad más) y
  * re-exportado por inmovilizacion-reactivacion-llamada.ts: agregarlo ahí
@@ -2419,7 +2157,7 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 			});
 		}
 
-		// Mismo guard que registrarResultadoLlamada: MISMO caso, una LLAMADA
+		// Mismo guard que registrarLlamadaApagado: MISMO caso, una LLAMADA
 		// posterior a la ejecución (no cualquier gestión vieja o de otro
 		// canal), y no enlazada ya a otra inmovilización. Review de Codex, PR
 		// #1758.
@@ -2452,7 +2190,7 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 		}
 
 		await db.transaction(async (tx) => {
-			// Mismo criterio que registrarResultadoLlamada: advisory lock por
+			// Mismo criterio que registrarLlamadaApagado: advisory lock por
 			// unidad PRIMERO (serializa contra ejecutarAprobada, evita el
 			// deadlock de locks de fila cruzados — review de Codex, PR #1758,
 			// ver `bloquearUnidadFisica`), y el SELECT ... FOR UPDATE de esta
@@ -2474,7 +2212,7 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 				});
 			}
 
-			// Mismo criterio que registrarResultadoLlamada: los UPDATE
+			// Mismo criterio que registrarLlamadaApagado: los UPDATE
 			// condicionados a IS NULL son la garantía bajo concurrencia.
 			const [reactivacion] = await tx
 				.update(inmovilizacionesUnidad)
@@ -2530,9 +2268,9 @@ export const registrarLlamadaReactivacion = cobrosProcedure
  * Ficha 360 lo abre sola al ejecutar el apagado— y acá solo se la ata a la
  * inmovilización para cerrar el ciclo del aviso.
  *
- * Reemplaza a `registrarResultadoLlamada` en la UI: ya no hay "Pagó / No
- * pagó" ni reactivación automática; el seguimiento posterior (reactivar,
- * recuperar) es manual. Aparte del router por el mismo límite de TS7056 que
+ * Ya no hay "Pagó / No pagó" ni reactivación automática: pedir la
+ * reactivación exige el respaldo de pago o promesa de `solicitarInmovilizacion`,
+ * y el seguimiento posterior (reactivar, recuperar) es manual. Aparte del router por el mismo límite de TS7056 que
  * `registrarLlamadaReactivacion`.
  */
 export const registrarLlamadaApagado = cobrosProcedure
@@ -2583,7 +2321,7 @@ export const registrarLlamadaApagado = cobrosProcedure
 			});
 		}
 
-		// Mismo guard que registrarResultadoLlamada: MISMO caso, una LLAMADA
+		// Mismo guard que registrarLlamadaReactivacion: MISMO caso, una LLAMADA
 		// posterior a la ejecución (no cualquier gestión vieja o de otro
 		// canal), y no enlazada ya a otra inmovilización. Review de Codex, PR
 		// #1758.
@@ -2616,7 +2354,7 @@ export const registrarLlamadaApagado = cobrosProcedure
 		}
 
 		await db.transaction(async (tx) => {
-			// Mismo criterio que registrarResultadoLlamada: advisory lock por
+			// Mismo criterio que registrarLlamadaReactivacion: advisory lock por
 			// unidad PRIMERO (serializa contra ejecutarAprobada, evita el
 			// deadlock de locks de fila cruzados — review de Codex, PR #1758,
 			// ver `bloquearUnidadFisica`), y el SELECT ... FOR UPDATE de esta
@@ -2638,7 +2376,7 @@ export const registrarLlamadaApagado = cobrosProcedure
 				});
 			}
 
-			// Mismo criterio que registrarResultadoLlamada: los UPDATE
+			// Mismo criterio que registrarLlamadaReactivacion: los UPDATE
 			// condicionados a IS NULL son la garantía bajo concurrencia.
 			const [apagado] = await tx
 				.update(inmovilizacionesUnidad)

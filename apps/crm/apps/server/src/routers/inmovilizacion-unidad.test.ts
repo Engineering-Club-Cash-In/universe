@@ -1,6 +1,6 @@
 /**
  * CB-041 — solicitarInmovilizacion, decidirInmovilizacion, ejecutarApagado,
- * registrarResultadoLlamada.
+ * registrarLlamadaApagado.
  *
  * Mock de `db` propio: identifica ramas por TABLA (`.from(tabla)` /
  * `.insert(tabla)` / `.update(tabla)`), igual que gps-eventos-router.test.ts
@@ -51,7 +51,7 @@ let historialCasoMock: Record<string, unknown>[] = [];
 // `llamadasAntesDeHistorialFisico`, ver abajo):
 //  - getInmovilizacionesCaso llama primero getHistorialCaso y DESPUÉS
 //    getHistorialUnidadFisica → 1 llamada antes (el default).
-//  - registrarResultadoLlamada / registrarLlamadaReactivacion llaman SOLO
+//  - registrarLlamadaApagado / registrarLlamadaReactivacion llaman SOLO
 //    getHistorialUnidadFisica, nada antes → 0 (los tests de esos describe
 //    lo pisan).
 let historialUnidadFisicaMock: Record<string, unknown>[] | null = null;
@@ -202,9 +202,9 @@ function mockDb() {
 					// getHistorialUnidadFisica: misma firma — ver comentario de
 					// historialUnidadFisicaMock arriba. El contador solo cuenta
 					// llamadas a `orderBy` (una por cada getHistorial*), no a
-					// `limit` (marcarEjecutada / registrarResultadoLlamada /
+					// `limit` (marcarEjecutada / registrarLlamadaApagado /
 					// registrarLlamadaReactivacion, que traen una fila por id).
-					// marcarEjecutada / registrarResultadoLlamada: select().from().where().limit()
+					// marcarEjecutada / registrarLlamadaApagado: select().from().where().limit()
 					return {
 						where: () => ({
 							orderBy: async () => {
@@ -1401,252 +1401,6 @@ function apagadoEjecutado(extra: Record<string, unknown> = {}) {
 	};
 }
 
-describe("CB-041 — registrarResultadoLlamada", () => {
-	afterEach(reset);
-
-	const llamar = (resultado: "paga" | "no_paga") =>
-		call(
-			inmovilizacionUnidadRouter.registrarResultadoLlamada,
-			{ inmovilizacionId: INMOV_ID, contactoId: CONTACTO_ID, resultado },
-			{ context: ctx("cobros") },
-		);
-
-	// El nuevo guard (review de Codex, PR #1758) exige que `inm` sea el
-	// apagado VIGENTE de la unidad física: getHistorialUnidadFisica necesita
-	// verlo en su propio historial. `historialCasoMock` alimenta esa consulta
-	// (ver el mock de inmovilizacionesUnidad arriba) — sin esto, todos los
-	// tests de este describe fallarían con CONFLICT por "ya no es el
-	// vigente", aunque el escenario real sí lo sea.
-	function conApagadoVigente(extra: Record<string, unknown> = {}) {
-		const fila = apagadoEjecutado(extra);
-		inmovilizacionExistente = fila;
-		historialCasoMock = [fila];
-		return fila;
-	}
-
-	it("resultado=paga: enlaza el contacto y abre reactivación apuntando al apagado", async () => {
-		conApagadoVigente();
-
-		const res = await llamar("paga");
-		expect(res.ok).toBe(true);
-		const reactivacion = inmovilizacionesInsertadas.find(
-			(f) => f.accion === "reactivacion",
-		);
-		expect(reactivacion?.inmovilizacionOrigenId).toBe(INMOV_ID);
-	});
-
-	it("resultado=no_paga: no abre reactivación", async () => {
-		conApagadoVigente();
-
-		const res = await llamar("no_paga");
-		expect(res.ok).toBe(true);
-		expect(inmovilizacionesInsertadas).toHaveLength(0);
-	});
-
-	it("resultado=paga pero el crédito fue reasignado en cartera a otro asesor: rechaza con FORBIDDEN y no abre reactivación (review de Codex)", async () => {
-		conApagadoVigente();
-		const getCreditoSpy = spyOn(
-			carteraBackClient,
-			"getCredito",
-		).mockResolvedValueOnce({
-			asesor: { emailCashIn: "otro-asesor@example.com" },
-		});
-
-		try {
-			await expect(llamar("paga")).rejects.toMatchObject({
-				code: "FORBIDDEN",
-			});
-			expect(inmovilizacionesInsertadas).toHaveLength(0);
-		} finally {
-			getCreditoSpy.mockRestore();
-		}
-	});
-
-	it("resultado=no_paga: permite registrar llamada aunque en cartera esté asignado a otro asesor (no abre reactivación)", async () => {
-		conApagadoVigente();
-		const getCreditoSpy = spyOn(
-			carteraBackClient,
-			"getCredito",
-		).mockResolvedValueOnce({
-			asesor: { emailCashIn: "otro-asesor@example.com" },
-		});
-
-		try {
-			const res = await llamar("no_paga");
-			expect(res.ok).toBe(true);
-			expect(inmovilizacionesInsertadas).toHaveLength(0);
-			// No debe haber consultado Cartera para validar ownership de reactivación
-			expect(getCreditoSpy).not.toHaveBeenCalled();
-		} finally {
-			getCreditoSpy.mockRestore();
-		}
-	});
-
-	it("toma el advisory lock ANTES del SELECT ... FOR UPDATE de fila (review de Codex — evita deadlock 40P01)", async () => {
-		conApagadoVigente();
-		await llamar("paga");
-		expect(executeLlamadas).toEqual([
-			"advisory_lock",
-			"select_for_update_fila",
-		]);
-	});
-
-	it("no hay apagado ejecutado con ese id: BAD_REQUEST", async () => {
-		inmovilizacionExistente = null;
-		await expect(llamar("paga")).rejects.toMatchObject({
-			code: "BAD_REQUEST",
-		});
-	});
-
-	it("contacto no encontrado por el filtro (caso distinto, canal distinto de llamada, o anterior a la ejecución): BAD_REQUEST", async () => {
-		// El mock de contactosCobros no distingue condiciones del WHERE real
-		// (caso, metodo_contacto='llamada', fecha_contacto > ejecutado_at) —
-		// contactoExisteMock=false simula que NINGUNA de esas condiciones
-		// matchea, sea porque el contacto es de otro caso, de otro canal
-		// (whatsapp/sms/visita/pago), o de antes del apagado. El filtro SQL
-		// real se verificó a mano contra Postgres: 3 contactos (whatsapp
-		// posterior, llamada anterior, llamada posterior) — solo el tercero
-		// pasa. Review de Codex, PR #1758.
-		conApagadoVigente();
-		contactoExisteMock = false;
-		await expect(llamar("paga")).rejects.toMatchObject({
-			code: "BAD_REQUEST",
-		});
-	});
-
-	it("la llamada ya estaba registrada: CONFLICT y no abre otra reactivación", async () => {
-		conApagadoVigente({
-			llamadaContactoId: "55555555-5555-5555-5555-555555555555",
-		});
-		await expect(llamar("paga")).rejects.toMatchObject({ code: "CONFLICT" });
-		expect(inmovilizacionesInsertadas).toHaveLength(0);
-	});
-
-	it("la gestión ya está enlazada a otra inmovilización: CONFLICT", async () => {
-		conApagadoVigente();
-		contactoInmovilizacionIdMock = "66666666-6666-6666-6666-666666666666";
-		await expect(llamar("no_paga")).rejects.toMatchObject({
-			code: "CONFLICT",
-		});
-	});
-
-	it("carrera (doble clic): el UPDATE condicionado no devuelve fila → CONFLICT y no inserta nada", async () => {
-		// El SELECT inicial todavía ve la llamada sin registrar; el otro
-		// request ya la registró antes del UPDATE.
-		conApagadoVigente();
-		updateDevuelveFila = false;
-		await expect(llamar("paga")).rejects.toMatchObject({ code: "CONFLICT" });
-		expect(inmovilizacionesInsertadas).toHaveLength(0);
-	});
-
-	it("carrera sobre la gestión: el enlace del contacto no devuelve fila → CONFLICT", async () => {
-		conApagadoVigente();
-		contactoUpdateDevuelveFila = false;
-		await expect(llamar("paga")).rejects.toMatchObject({ code: "CONFLICT" });
-		expect(inmovilizacionesInsertadas).toHaveLength(0);
-	});
-
-	it("paga con otra solicitud ya abierta en el caso (índice único): CONFLICT, no 500", async () => {
-		conApagadoVigente();
-		insertError = "unique_envuelto";
-		await expect(llamar("paga")).rejects.toMatchObject({ code: "CONFLICT" });
-	});
-
-	it("apagado superado por un ciclo más reciente en la unidad física (D-10): CONFLICT, no abre reactivación (review de Codex)", async () => {
-		const OTRO_CASO_ID = "55555555-5555-5555-5555-555555555555";
-		inmovilizacionExistente = apagadoEjecutado(); // sigue con llamadaContactoId=null
-		// registrarResultadoLlamada llama getHistorialUnidadFisica UNA sola
-		// vez, nada antes (a diferencia de getInmovilizacionesCaso, default=1).
-		llamadasAntesDeHistorialFisico = 0;
-		// La unidad física ya pasó a un ciclo más reciente, ejecutado desde
-		// OTRO caso: este apagado (INMOV_ID) quedó superado.
-		historialUnidadFisicaMock = [
-			{
-				...apagadoEjecutado(),
-				id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
-				casoCobroId: OTRO_CASO_ID,
-				ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"),
-			},
-			apagadoEjecutado(), // el propio INMOV_ID, más antiguo
-		];
-		await expect(llamar("paga")).rejects.toMatchObject({ code: "CONFLICT" });
-		expect(inmovilizacionesInsertadas).toHaveLength(0);
-	});
-
-	it("apagado seguido de una reactivación DIRECTA más reciente en la unidad física: CONFLICT (review de Codex, comparación solo-apagados no lo veía)", async () => {
-		// Apagado A (este, INMOV_ID) ejecutado, nunca se llamó. Después la
-		// unidad se reactivó DIRECTO (sin pasar por acá, p. ej. el cliente
-		// pagó por ventanilla) — un evento MÁS RECIENTE que el apagado, pero
-		// de otra acción. ultimaEjecutada(..., "apagado") sigue devolviendo A
-		// (es el único/último apagado), así que comparar solo IDs entre
-		// apagados no detecta que la unidad ya no está inmovilizada.
-		const fila = apagadoEjecutado();
-		inmovilizacionExistente = fila;
-		historialCasoMock = [fila];
-		historialUnidadFisicaMock = [
-			{
-				...apagadoEjecutado(),
-				id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
-				accion: "reactivacion",
-				ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"), // posterior
-			},
-			fila, // el propio INMOV_ID, más antiguo
-		];
-		await expect(llamar("paga")).rejects.toMatchObject({ code: "CONFLICT" });
-		expect(inmovilizacionesInsertadas).toHaveLength(0);
-	});
-
-	it("apagado superado por un ciclo más reciente DETECTADO SOLO por el lock dentro de la transacción — carrera real, no el guard temprano (review de Codex)", async () => {
-		// El guard TEMPRANO (1ra consulta, sin lock, historialCasoMock) ve el
-		// apagado como vigente y pasa. La carrera real: entre ese guard y el
-		// UPDATE, marcarEjecutada ejecuta una reactivación directa más
-		// reciente desde otro lado. La transacción, con el lock adquirido,
-		// re-consulta (2da consulta, historialUnidadFisicaMock) y ahí SÍ ve
-		// el evento más reciente — tiene que rechazar en ese punto, no antes.
-		const fila = apagadoEjecutado();
-		inmovilizacionExistente = fila;
-		historialCasoMock = [fila]; // guard temprano: sigue vigente, pasa
-		historialUnidadFisicaMock = [
-			{
-				...apagadoEjecutado(),
-				id: "ffffffff-ffff-ffff-ffff-ffffffffffff",
-				accion: "reactivacion",
-				ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"), // posterior
-			},
-			fila, // ya no es el vigente
-		];
-		await expect(llamar("paga")).rejects.toMatchObject({ code: "CONFLICT" });
-		expect(inmovilizacionesInsertadas).toHaveLength(0);
-	});
-
-	it("dueño en cartera sin usuario en el CRM y el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada (review de Codex)", async () => {
-		responsableCasoMock = null;
-		conApagadoVigente({ solicitadoPor: "user-test" });
-
-		const res = await llamar("paga");
-		expect(res.ok).toBe(true);
-	});
-
-	it("dueño en cartera sin usuario en el CRM y el usuario NO es solicitadoPor: rechaza con NOT_FOUND (review de Codex)", async () => {
-		responsableCasoMock = null;
-		conApagadoVigente({ solicitadoPor: "otro-asesor" });
-
-		await expect(llamar("paga")).rejects.toMatchObject({ code: "NOT_FOUND" });
-	});
-
-	it("cartera no responde: el ex solicitante NO registra la llamada (falla cerrado, review de Codex PR #1765)", async () => {
-		// El crédito es de otro (el gate no lo deja pasar) y cartera se cae al
-		// buscar al dueño: eso no puede leerse como "el dueño no tiene usuario".
-		responsableCasoMock = "otro-asesor";
-		carteraFallaMock = true;
-		conApagadoVigente({ solicitadoPor: "user-test" });
-
-		await expect(llamar("no_paga")).rejects.toMatchObject({
-			code: "SERVICE_UNAVAILABLE",
-		});
-	});
-});
-
 describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () => {
 	afterEach(reset);
 
@@ -1980,7 +1734,7 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 	});
 
 	it("ejecutarReactivacion toma el advisory lock ANTES de tocar cualquier fila (review de Codex — evita deadlock 40P01)", async () => {
-		// ejecutarReactivacion y registrarResultadoLlamada/registrarLlamadaReactivacion
+		// ejecutarReactivacion y registrarLlamadaApagado/registrarLlamadaReactivacion
 		// pueden tomar locks de FILA en orden cruzado si compiten por la misma
 		// unidad física — el advisory lock (adquirido primero, antes de
 		// cualquier UPDATE/SELECT FOR UPDATE) serializa esa carrera en vez de
@@ -2730,6 +2484,41 @@ describe("CB-041 — registrarLlamadaApagado", () => {
 			fila,
 		];
 		await expect(llamar()).rejects.toMatchObject({ code: "CONFLICT" });
+	});
+
+	it("dueño en cartera sin usuario en el CRM y el usuario es solicitadoPor (fallback del aviso): permite registrar la llamada", async () => {
+		responsableCasoMock = null;
+		apagadoEjecutado({ solicitadoPor: "user-test" });
+		const res = await llamar();
+		expect(res.ok).toBe(true);
+	});
+
+	it("dueño en cartera sin usuario en el CRM y el usuario NO es solicitadoPor: rechaza con NOT_FOUND", async () => {
+		responsableCasoMock = null;
+		apagadoEjecutado({ solicitadoPor: "otro-asesor" });
+		await expect(llamar()).rejects.toMatchObject({ code: "NOT_FOUND" });
+	});
+
+	it("cartera no responde: el ex solicitante NO registra la llamada (falla cerrado)", async () => {
+		// El crédito es de otro (el gate no lo deja pasar) y cartera se cae al
+		// buscar al dueño: eso no puede leerse como "el dueño no tiene usuario".
+		responsableCasoMock = "otro-asesor";
+		carteraFallaMock = true;
+		apagadoEjecutado({ solicitadoPor: "user-test" });
+		await expect(llamar()).rejects.toMatchObject({
+			code: "SERVICE_UNAVAILABLE",
+		});
+	});
+});
+
+describe("CB-041 — la reactivación solo se pide con respaldo", () => {
+	// Review de Codex, PR #1808: `registrarResultadoLlamada` ("paga") abría una
+	// reactivación sin `quePaso` ni respaldo. La única vía es
+	// `solicitarInmovilizacion`, que valida el pago o la promesa.
+	it("el router ya no expone registrarResultadoLlamada (no hay reactivación sin respaldo)", () => {
+		expect("registrarResultadoLlamada" in inmovilizacionUnidadRouter).toBe(
+			false,
+		);
 	});
 });
 

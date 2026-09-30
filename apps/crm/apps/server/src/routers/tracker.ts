@@ -1,6 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { APIError } from "better-auth/api";
-import { and, desc, eq, gte, inArray, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { db } from "../db";
@@ -391,9 +391,33 @@ function exigirReglaFactura(fila: Fila, membresias: MembresiaSocio[]) {
 async function datosDelCorreo(
 	fila: Fila,
 ): Promise<{ aseguradora: Aseguradora; datos: DatosCorreoFacturaSeguro }> {
-	// La última cotización (confirmado con negocio), con el mismo orden que el
-	// cierre (getLatestApprovedQuotation): una aceptada manda sobre las más
-	// nuevas, para que el correo diga lo mismo que el crédito.
+	const [oportunidad] = await db
+		.select({
+			insuranceProvider: opportunities.insuranceProvider,
+			cuotaMensual: opportunities.cuotaMensual,
+			actualCloseDate: opportunities.actualCloseDate,
+			vin: vehicles.vinNumber,
+			tipoVehiculo: vehicles.vehicleType,
+		})
+		.from(opportunities)
+		.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
+		.where(eq(opportunities.id, fila.id))
+		.limit(1);
+
+	// Ya ganada (el caso normal al 90%), el crédito se armó con la cotización
+	// que eligió el cierre y la aseguradora quedó estampada en la oportunidad.
+	// Se reconstruye esa elección: solo las cotizaciones que existían al cerrar
+	// y, entre ellas, las de la aseguradora del crédito. Una cotización creada
+	// o aceptada después del cierre no cambia el correo.
+	const cerradaAt =
+		fila.status === "won" ? (oportunidad?.actualCloseDate ?? null) : null;
+	const aseguradoraDelCredito = cerradaAt
+		? (oportunidad?.insuranceProvider ?? null)
+		: null;
+
+	// Sin cerrar: la última cotización (confirmado con negocio), con el mismo
+	// orden que el cierre (getLatestApprovedQuotation): una aceptada manda
+	// sobre las más nuevas.
 	const [cotizacion] = await db
 		.select({
 			insuranceProvider: quotations.insuranceProvider,
@@ -405,28 +429,27 @@ async function datosDelCorreo(
 			vehicleModel: quotations.vehicleModel,
 		})
 		.from(quotations)
-		.where(eq(quotations.opportunityId, fila.id))
+		.where(
+			and(
+				eq(quotations.opportunityId, fila.id),
+				cerradaAt ? lte(quotations.createdAt, cerradaAt) : undefined,
+			),
+		)
 		.orderBy(
+			...(aseguradoraDelCredito
+				? [desc(eq(quotations.insuranceProvider, aseguradoraDelCredito))]
+				: []),
 			desc(eq(quotations.status, "accepted")),
 			desc(quotations.createdAt),
 		)
 		.limit(1);
-	const [oportunidad] = await db
-		.select({
-			insuranceProvider: opportunities.insuranceProvider,
-			cuotaMensual: opportunities.cuotaMensual,
-			vin: vehicles.vinNumber,
-			tipoVehiculo: vehicles.vehicleType,
-		})
-		.from(opportunities)
-		.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
-		.where(eq(opportunities.id, fila.id))
-		.limit(1);
 
-	const aseguradora = resolverAseguradora(
-		cotizacion?.insuranceProvider,
-		oportunidad?.insuranceProvider,
-	);
+	const aseguradora = aseguradoraDelCredito
+		? resolverAseguradora(aseguradoraDelCredito, cotizacion?.insuranceProvider)
+		: resolverAseguradora(
+				cotizacion?.insuranceProvider,
+				oportunidad?.insuranceProvider,
+			);
 	return {
 		aseguradora,
 		datos: {

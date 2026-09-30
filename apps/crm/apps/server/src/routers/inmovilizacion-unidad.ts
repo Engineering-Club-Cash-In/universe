@@ -161,11 +161,12 @@ async function getCasoParaInmovilizacion(casoCobroId: string) {
 /**
  * El vehículo y la unidad GPS del último apagado ejecutado de este caso, solo
  * mientras la unidad siga apagada por él (no hubo una reactivación ejecutada
- * después de esa MISMA unidad). Null si no hay apagado vigente o la fila no
- * guardó la unidad.
+ * después de esa MISMA unidad, ni de este caso ni de otro que comparta la
+ * unidad). Null si no hay apagado vigente o la fila no guardó la unidad.
  *
- * Consulta propia y angosta (solo las filas ejecutadas del caso): esta función
- * corre en cada llamada, así que no reutiliza `getHistorialCaso`.
+ * Consultas propias y angostas (las filas ejecutadas del caso y, si sigue
+ * apagada, una sola reactivación posterior de la unidad): esta función corre
+ * en cada llamada, así que no reutiliza `getHistorialCaso`.
  */
 async function apagadoVigenteDelCaso(
 	casoCobroId: string,
@@ -204,6 +205,21 @@ async function apagadoVigenteDelCaso(
 			f.ejecutadoAt > apagadoAt,
 	);
 	if (reactivada) return null;
+	// Con unidad compartida (D-10) la reactivación pudo ejecutarla OTRO caso
+	// sobre esa misma unidad física: el apagado de este caso ya no sigue vigente.
+	const [deOtroCaso] = await db
+		.select({ reactivadaAt: inmovilizacionesUnidad.ejecutadoAt })
+		.from(inmovilizacionesUnidad)
+		.where(
+			and(
+				eq(inmovilizacionesUnidad.wialonUnitId, wialonUnitId),
+				eq(inmovilizacionesUnidad.estado, "ejecutada"),
+				eq(inmovilizacionesUnidad.accion, "reactivacion"),
+				gt(inmovilizacionesUnidad.ejecutadoAt, apagadoAt),
+			),
+		)
+		.limit(1);
+	if (deOtroCaso) return null;
 	return { vehicleId, wialonUnitId };
 }
 

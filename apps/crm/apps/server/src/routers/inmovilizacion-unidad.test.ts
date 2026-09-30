@@ -51,6 +51,9 @@ let inmovilizacionesInsertadas: Record<string, unknown>[] = [];
 let eventosInsertados: Record<string, unknown>[] = [];
 let inmovilizacionExistente: Record<string, unknown> | null = null;
 let historialCasoMock: Record<string, unknown>[] = [];
+// Reactivaciones ejecutadas sobre la misma unidad desde OTRO caso
+// (apagadoVigenteDelCaso): la base filtra por unidad, el mock no.
+let reactivacionesOtroCasoMock: Record<string, unknown>[] = [];
 // Por defecto null (la mayoría de los tests no necesitan distinguir unidad
 // compartida). Los tests que SÍ prueban D-10 lo sobreescriben para simular
 // un historial de UNIDAD FÍSICA distinto al del caso — getHistorialCaso y
@@ -201,6 +204,16 @@ function mockDb() {
 							limit: async () =>
 								solicitudACancelarMock ? [solicitudACancelarMock] : [],
 						}),
+					};
+				}
+				if (
+					tabla === inmovilizacionesUnidad &&
+					campos &&
+					"reactivadaAt" in campos
+				) {
+					// apagadoVigenteDelCaso: reactivación posterior de la unidad (otro caso)
+					return {
+						where: () => ({ limit: async () => reactivacionesOtroCasoMock }),
 					};
 				}
 				if (
@@ -610,6 +623,7 @@ function reset() {
 	eventosInsertados = [];
 	inmovilizacionExistente = null;
 	historialCasoMock = [];
+	reactivacionesOtroCasoMock = [];
 	historialUnidadFisicaMock = null;
 	llamadasAntesDeHistorialFisico = 1;
 	llamadasHistorialUnidad = 0;
@@ -3206,6 +3220,32 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 				{ context: ctx("cobros") },
 			);
 			expect(carta.estadoUnidad).toBe("activa");
+		});
+
+		it("si otro caso que comparte la unidad ya la reactivó, el apagado viejo no sigue mandando sobre el vehículo actual", async () => {
+			contratoIdMock = null;
+			vehicleIdContratoMock = null;
+			wialonUnitIdCasoMock = null;
+			wialonUnitIdVehiculoMock = 99999; // relectura de la unidad en la transacción
+			vehiculosOportunidadMock = [
+				vehiculoOportunidad({
+					vehicleId: "88888888-8888-8888-8888-888888888888",
+					wialonUnitId: 99999,
+				}),
+			];
+			historialCasoMock = [apagadoEjecutado()];
+			reactivacionesOtroCasoMock = [
+				{ reactivadaAt: new Date("2026-09-25T10:00:00.000Z") },
+			];
+			// La unidad actual (B) no tiene movimientos: el guard la ve activa.
+			historialUnidadFisicaMock = [];
+			llamadasAntesDeHistorialFisico = 0;
+			await solicitar();
+			expect(inmovilizacionesInsertadas[0]).toMatchObject({
+				accion: "apagado",
+				vehicleId: "88888888-8888-8888-8888-888888888888",
+				wialonUnitId: 99999,
+			});
 		});
 
 		it("una reactivación ejecutada de OTRA unidad del caso no da por reactivada la unidad apagada", async () => {

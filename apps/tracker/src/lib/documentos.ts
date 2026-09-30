@@ -1,7 +1,7 @@
 import { vistaFacturaSeguro } from "./factura-seguro";
 import type { Caso } from "./pasos";
 
-type CasoConDocumentos = Pick<Caso, "facturaSeguro" | "porcentaje" | "cerrado">;
+type CasoConDocumentos = Pick<Caso, "facturaSeguro" | "porcentaje" | "estado">;
 
 /**
  * - `pendiente`: falta subirlo.

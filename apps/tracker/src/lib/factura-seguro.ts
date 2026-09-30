@@ -26,7 +26,7 @@ export interface VistaFactura {
  * `null` = el caso todavía no llega a esa etapa y la sección no se muestra.
  */
 export function vistaFacturaSeguro(
-	caso: Pick<Caso, "facturaSeguro" | "porcentaje" | "cerrado">,
+	caso: Pick<Caso, "facturaSeguro" | "porcentaje" | "estado">,
 ): VistaFactura | null {
 	const f = caso.facturaSeguro;
 	const subida = f.subidaAt ? ` Subida el ${formatearFecha(f.subidaAt)}.` : "";
@@ -96,8 +96,13 @@ export function vistaFacturaSeguro(
 		};
 	}
 	// En formalización final sin factura: quien no puede subirla (el gerente)
-	// ve que está pendiente y por qué.
-	if (!caso.cerrado && caso.porcentaje >= 90 && caso.porcentaje < 100) {
+	// ve que está pendiente y por qué. No se mira `cerrado`: en el flujo normal
+	// el caso llega a 90% ya ganado.
+	if (
+		caso.estado !== "rechazado" &&
+		caso.porcentaje >= 90 &&
+		caso.porcentaje < 100
+	) {
 		return {
 			tono: "info",
 			titulo: "Factura del seguro pendiente",

@@ -266,12 +266,40 @@ describe("subirFacturaSeguro", () => {
 		call(trackerRouter.subirFacturaSeguro, { opportunityId: ID, archivo }, ctx);
 
 	test("se sube con la oportunidad ganada al 90%, como llega en el flujo normal", async () => {
-		caso = casoAl(90, { status: "won" });
+		caso = casoAl(90, {
+			status: "won",
+			actualCloseDate: new Date("2026-09-01"),
+		});
 		const r = await subir();
 		expect(r.envio).toBe("enviado");
 		expect(
 			insertados.find((i) => i.tabla === insuranceInvoiceSubmissions)?.valores,
 		).toMatchObject({ companyId: "agencia-1" });
+	});
+
+	test("ya ganada, la aseguradora es la que el cierre le mandó al crédito, no la de una cotización posterior", async () => {
+		// El cierre estampó Universales; la cotización que devuelve la BD es G&T.
+		caso = casoAl(90, {
+			status: "won",
+			actualCloseDate: new Date("2026-09-01"),
+			insuranceProvider: "universales",
+		});
+		cotizacion = [{ insuranceProvider: "gyt", insuredAmount: "300000" }];
+		const r = await subir();
+		expect(r.aseguradora).toBe("universales");
+		expect(
+			insertados.find((i) => i.tabla === insuranceInvoiceSubmissions)?.valores,
+		).toMatchObject({
+			insuranceProvider: "universales",
+			recipients: ["polizas@universales.test"],
+		});
+	});
+
+	test("sin cerrar, la aseguradora sigue saliendo de la cotización", async () => {
+		caso = casoAl(90, { insuranceProvider: "universales" });
+		cotizacion = [{ insuranceProvider: "gyt", insuredAmount: "300000" }];
+		const r = await subir();
+		expect(r.aseguradora).toBe("gyt");
 	});
 
 	test("si falla la lectura de los datos del correo, no se sube nada a R2", async () => {

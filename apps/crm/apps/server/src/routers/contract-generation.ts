@@ -2579,6 +2579,15 @@ export const contractGenerationRouter = {
 									? conMarcaDeFaltaVincular(conMarcaDeSubidoAMano(resultado), {
 											motivo: sinLineas,
 											desde: new Date().toISOString(),
+											// Para quiénes se subió: contra ellos se compara el
+											// documento que se agregue después.
+											firmantes: (firmantes ?? []).map(
+												({ role, email, name }) => ({
+													role,
+													email,
+													name,
+												}),
+											),
 										})
 									: conMarcaDeSubidoAMano(resultado),
 								pdfLink: resultado.r2Key || resultado.linkDocument || null,

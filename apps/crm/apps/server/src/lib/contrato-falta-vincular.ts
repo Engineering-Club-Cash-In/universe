@@ -30,12 +30,27 @@
  * OJO: lo importa también el navegador, así que no puede leer `process.env`.
  */
 
+/** Alguien que firma el contrato, tal como se decidió al subirlo. */
+export interface FirmanteDeLaSubida {
+	role: string;
+	email: string;
+	name: string;
+}
+
 /** El contrato está guardado pero no salió a firma. */
 export interface FaltaVincular {
 	/** Por qué no se pudieron ubicar las firmas, como lo dijo el generador. */
 	motivo: string;
 	/** ISO. */
 	desde: string;
+	/**
+	 * Quiénes lo firman, como se decidió al subirlo. El documento que se agregue
+	 * después se compara contra ellos y no contra la oportunidad de ese momento:
+	 * si en el medio se corrige un correo o se cambia un codeudor, el PDF sigue
+	 * siendo el de esas personas. Es lo mismo que guardan los firmantes de un
+	 * contrato que sí salió a firma.
+	 */
+	firmantes?: FirmanteDeLaSubida[];
 }
 
 export function conMarcaDeFaltaVincular<T extends object>(
@@ -49,9 +64,23 @@ export function faltaVincular(apiResponse: unknown): FaltaVincular | null {
 	if (typeof apiResponse !== "object" || apiResponse === null) return null;
 	const marca = (apiResponse as { faltaVincular?: unknown }).faltaVincular;
 	if (typeof marca !== "object" || marca === null) return null;
-	const { motivo, desde } = marca as Partial<FaltaVincular>;
+	const { motivo, desde, firmantes } = marca as Partial<FaltaVincular>;
 	if (typeof desde !== "string") return null;
-	return { motivo: typeof motivo === "string" ? motivo : "", desde };
+	const validos = Array.isArray(firmantes)
+		? firmantes.filter(
+				(f): f is FirmanteDeLaSubida =>
+					typeof f === "object" &&
+					f !== null &&
+					typeof f.role === "string" &&
+					typeof f.email === "string" &&
+					typeof f.name === "string",
+			)
+		: [];
+	return {
+		motivo: typeof motivo === "string" ? motivo : "",
+		desde,
+		...(validos.length > 0 ? { firmantes: validos } : {}),
+	};
 }
 
 /**

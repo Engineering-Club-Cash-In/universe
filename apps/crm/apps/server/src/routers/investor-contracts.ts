@@ -85,6 +85,7 @@ import {
 } from "../lib/vincular-documento-weetrust";
 import {
 	borrarDocumentoDeWeeTrust,
+	type ContractSigner,
 	consultarEstadoFirma,
 	type DocumentResult,
 	type EstadoDocumentoFirma,
@@ -253,9 +254,9 @@ async function guardarContratoDeInversion(params: {
 	/**
 	 * El PDF subido no trae los espacios de firma y NO salió a firmar: se guarda
 	 * sin documento ni firmantes, esperando que alguien lo suba a WeeTrust y lo
-	 * vincule. Trae el motivo que dio el generador.
+	 * vincule. Trae el motivo que dio el generador y para quiénes se subió.
 	 */
-	sinLineasDeFirma?: string;
+	sinLineasDeFirma?: { motivo: string; firmantes: ContractSigner[] };
 	/**
 	 * Qué verificación de identidad se le pidió al inversionista. Queda en el
 	 * contrato para que renovarle los enlaces pida lo mismo.
@@ -450,8 +451,12 @@ async function guardarContratoDeInversion(params: {
 							: resultado;
 						const respuesta = params.sinLineasDeFirma
 							? conMarcaDeFaltaVincular(subido, {
-									motivo: params.sinLineasDeFirma,
+									motivo: params.sinLineasDeFirma.motivo,
 									desde: new Date().toISOString(),
+									// Contra ellos se compara el documento que se agregue.
+									firmantes: params.sinLineasDeFirma.firmantes.map(
+										({ role, email, name }) => ({ role, email, name }),
+									),
 								})
 							: subido;
 						return bateria
@@ -711,8 +716,9 @@ async function contratoDeInversionParaVincular(
  * Quiénes tienen que firmar el documento que se vincula, y qué verificación de
  * identidad le toca al inversionista.
  *
- * Si el contrato ya salió a firma, los mismos que tenía. Si no, salen de la
- * batería y del catálogo, como al subirlo. La verificación es la que se decidió
+ * Si el contrato ya salió a firma, los mismos que tenía. Si no, los que
+ * quedaron anotados al subirlo (la batería pudo cambiar en el medio). La
+ * verificación es la que se decidió
  * al guardarlo (selfie y DPI en la primera compra, sólo firma después).
  */
 async function firmantesParaVincularInversion(
@@ -734,6 +740,18 @@ async function firmantesParaVincularInversion(
 		.orderBy(contractSignatories.position);
 
 	if (guardados.length === 0) {
+		// Subido sin espacios de firma: los que se decidieron al subirlo.
+		const deLaSubida = faltaVincular(contrato.apiResponse)?.firmantes;
+		if (deLaSubida?.length) {
+			return {
+				esperados: deLaSubida.map((f) => ({
+					role: f.role as SignerRole,
+					email: f.email,
+					name: f.name,
+				})),
+				identificacion,
+			};
+		}
 		return {
 			esperados: firmantesDeContratoDeInversion(contrato.contractType, {
 				nombre: bateria.investorName,
@@ -1640,7 +1658,9 @@ export const investorContractsRouter = {
 						userId: context.userId,
 						identificacion,
 						subidoAMano: true,
-						...(sinLineas ? { sinLineasDeFirma: sinLineas } : {}),
+						...(sinLineas
+							? { sinLineasDeFirma: { motivo: sinLineas, firmantes: signers } }
+							: {}),
 						...(reemplazado && input.motivo
 							? {
 									reemplaza: {

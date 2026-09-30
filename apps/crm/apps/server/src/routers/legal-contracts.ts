@@ -215,8 +215,8 @@ async function contratoParaVincular(
  *
  * Si el contrato ya salió a firma, los mismos que tenía: el documento nuevo
  * reemplaza al anterior y tiene que llevar a la misma gente, aunque después
- * alguien haya editado un contacto. Si no salió, no tiene a nadie guardado y
- * salen de la oportunidad, como al subirlo.
+ * alguien haya editado un contacto. Si no salió, los que quedaron anotados al
+ * subirlo, por lo mismo.
  */
 async function firmantesParaVincular(
 	contract: typeof generatedLegalContracts.$inferSelect,
@@ -228,6 +228,16 @@ async function firmantesParaVincular(
 		.orderBy(contractSignatories.position);
 
 	if (guardados.length === 0) {
+		// Subido sin espacios de firma: los que se decidieron al subirlo. El PDF
+		// es de esas personas aunque después se haya editado un contacto.
+		const deLaSubida = faltaVincular(contract.apiResponse)?.firmantes;
+		if (deLaSubida?.length) {
+			return deLaSubida.map((f) => ({
+				role: f.role as ContractSigner["role"],
+				email: f.email,
+				name: f.name,
+			}));
+		}
 		const { signers } = await firmantesDeLaOportunidad(
 			contract.opportunityId as string,
 		);

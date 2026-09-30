@@ -66,6 +66,33 @@ describe("marcas del contrato", () => {
 		expect(faltaVincular(null)).toBeNull();
 	});
 
+	test("guarda para quiénes se subió, y descarta lo que no es un firmante", () => {
+		const respuesta = conMarcaDeFaltaVincular(
+			{},
+			{
+				motivo: "0 líneas",
+				desde: "2026-09-30T10:00:00.000Z",
+				firmantes: [
+					{ role: "TITULAR", email: "ana@x.com", name: "ANA" },
+					{ role: "REP_LEGAL", email: "andres@x.com", name: "ANDRÉS" },
+				],
+			},
+		);
+		expect(faltaVincular(respuesta)?.firmantes).toEqual([
+			{ role: "TITULAR", email: "ana@x.com", name: "ANA" },
+			{ role: "REP_LEGAL", email: "andres@x.com", name: "ANDRÉS" },
+		]);
+		expect(
+			faltaVincular({
+				faltaVincular: {
+					motivo: "x",
+					desde: "2026-09-30T10:00:00.000Z",
+					firmantes: [{ role: "TITULAR" }, "basura"],
+				},
+			})?.firmantes,
+		).toBeUndefined();
+	});
+
 	test("al vincular se quita el 'falta' y queda quién y qué documento tenía", () => {
 		const antes = conMarcaDeFaltaVincular(
 			{ r2Key: "x.pdf", subidoAMano: true },

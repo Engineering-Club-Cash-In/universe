@@ -36,6 +36,51 @@ test("allows a reconciled distribution without CUBE", () => {
     recipients: [recipients[0]!],
   }).keys()]).toEqual([1]);
 });
+test("recovers the exact persisted CUBE base and IVA residual after a full sale", () => {
+  const result = nexaPersistedInvoiceAmounts([rows[0]!], {
+    ...expected,
+    recipients: [recipients[0]!],
+    absentCubeFullSale: { investorIds: [1], cube: recipients[1] },
+  });
+
+  expect(result.get(86)).toEqual({
+    precioUnitario: 235.05,
+    precio: 235.05,
+    montoGravable: 209.87,
+    montoImpuesto: 25.18,
+    total: 235.05,
+  });
+});
+test("rejects absent-CUBE residuals without an unambiguous full-sale shape", () => {
+  expect(() => nexaPersistedInvoiceAmounts([rows[0]!], {
+    ...expected,
+    recipients: [recipients[0]!],
+  })).toThrow("nexa_invoice_distribution_mismatch");
+  expect(() => nexaPersistedInvoiceAmounts([rows[0]!], {
+    ...expected,
+    recipients: [recipients[0]!],
+    absentCubeFullSale: { investorIds: [1, 2], cube: recipients[1] },
+  })).toThrow("nexa_invoice_distribution_mismatch");
+  expect(() => nexaPersistedInvoiceAmounts([rows[0]!], {
+    interest: "500",
+    vat: "60",
+    recipients: [recipients[0]!],
+    absentCubeFullSale: { investorIds: [1], cube: recipients[1] },
+  })).toThrow("nexa_invoice_distribution_mismatch");
+  expect(() => nexaPersistedInvoiceAmounts([rows[0]!], {
+    ...expected,
+    recipients: [recipients[0]!],
+    absentCubeFullSale: { investorIds: [1], cube: undefined },
+  })).toThrow("nexa_invoice_distribution_mismatch");
+  expect(() => nexaPersistedInvoiceAmounts([rows[0]!], {
+    ...expected,
+    recipients: [recipients[0]!],
+    absentCubeFullSale: {
+      investorIds: [1],
+      cube: { ...recipients[1]!, nombre: "OTRO INVERSOR" },
+    },
+  })).toThrow("nexa_invoice_distribution_mismatch");
+});
 test("requires canonical id 86 when CUBE is present", () => {
   expect(() => nexaPersistedInvoiceAmounts([
     rows[0]!,
@@ -81,18 +126,34 @@ test("handles zero components without rederiving VAT", () => {
 });
 test("selects only the oldest activated purchase at payment application", () => {
   const pending = [
-    { id: 20, fecha_completada: new Date("2026-09-30T10:00:00Z") },
-    { id: 10, fecha_completada: new Date("2026-09-30T10:30:00Z") },
-    { id: 15, fecha_completada: null },
-    { id: 5, fecha_completada: new Date("2026-09-30T12:00:00Z") },
+    {
+      id: 20,
+      fecha_completada: new Date("2026-09-01T12:00:00Z"),
+      updated_at: new Date("2026-09-30T12:00:00Z"),
+    },
+    {
+      id: 10,
+      fecha_completada: new Date("2026-09-15T12:00:00Z"),
+      updated_at: new Date("2026-09-30T10:30:00Z"),
+    },
+    {
+      id: 5,
+      fecha_completada: new Date("2026-09-20T12:00:00Z"),
+      updated_at: new Date("2026-09-30T10:30:00Z"),
+    },
+    {
+      id: 15,
+      fecha_completada: new Date("2026-09-10T12:00:00Z"),
+      updated_at: null,
+    },
   ];
   const selected = oldestActivatedPendingPurchaseAtCutoff(
     pending,
     new Date("2026-09-30T11:00:00Z"),
   );
 
-  expect(selected?.id).toBe(20);
-  expect(pending.filter(operation => operation.id !== selected?.id).map(operation => operation.id)).toEqual([10, 15, 5]);
+  expect(selected?.id).toBe(5);
+  expect(pending.filter(operation => operation.id !== selected?.id).map(operation => operation.id)).toEqual([20, 10, 15]);
 });
 test("runtime-only opt-in and persisted amounts reach both fiscal item builders", async () => {
   const router = await Bun.file(new URL("../routers/cofidi.ts", import.meta.url)).text();
@@ -106,7 +167,7 @@ test("runtime-only opt-in and persisted amounts reach both fiscal item builders"
   expect(router).not.toContain("nexa_invoice_distribution_requires_reconciliation");
   expect(router).toContain("} else if (!nexaInvoiceAmounts && tieneOperacionesPendientesFacturar) {");
   expect(router).toContain(".from(inversionistas)");
-  expect(router).toContain("inArray(inversionistas.inversionista_id, rows.map(row => row.inversionista_id))");
+  expect(router).toContain("inArray(inversionistas.inversionista_id, absentCubeFullSale");
   expect(router).not.toContain("investorIds: [...inversionistasDelPago.map");
   expect(router).toContain("const inversionistasMalConfigurados = nexaInvoiceAmounts ? [] : inversionistasDelCredito");
   expect(router).toContain("const persistedCubeId = nexaInvoiceAmounts ? 86 : cubeId");
@@ -115,9 +176,11 @@ test("runtime-only opt-in and persisted amounts reach both fiscal item builders"
   expect(router).toContain(": inversionistasDelPago.map(inv => inv.inversionista_id)");
   expect(router).toContain("const inv = nexaInvoiceRecipients?.get(invId)");
   expect(router).toContain("const persistedCube = nexaInvoiceAmounts?.get(86)");
+  expect(router).toContain("absentCubeFullSale:");
+  expect(router).toContain("investorIds: inversionistasDelCredito.map(inv => inv.inversionista_id)");
   expect(router).toContain("fecha_aplicado: pagos_credito.fecha_aplicado");
   expect(router).toContain("createdAt: pagos_credito.createdAt");
-  expect(router).toContain("fecha_completada: compras_credito_inversionista.fecha_completada");
+  expect(router).toContain("updated_at: compras_credito_inversionista.updated_at");
   expect(router).toMatch(/const redirigirACube =\s*!nexaInvoiceAmounts &&\s*pagoData\.bandera_reinversion === true/);
   expect(router).toContain("const cutoffNexa = pagoData.fecha_aplicado ?? pagoData.createdAt");
   expect(router).toContain("oldestActivatedPendingPurchaseAtCutoff(operacionesPendientesFacturar, cutoffNexa)");

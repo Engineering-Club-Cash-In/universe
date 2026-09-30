@@ -334,6 +334,7 @@ if (facturasExistentes.length > 0) {
           status: compras_credito_inversionista.status,
           fecha: compras_credito_inversionista.fecha,
           fecha_completada: compras_credito_inversionista.fecha_completada,
+          updated_at: compras_credito_inversionista.updated_at,
         })
         .from(compras_credito_inversionista)
         .where(
@@ -383,19 +384,31 @@ if (facturasExistentes.length > 0) {
               .where(eq(cuotas_credito.cuota_id, pagoData.cuota_id)))[0]
           : undefined;
         if (cuotaInfo?.pagado !== false) {
+          const absentCubeFullSale = rows.length > 0
+            && !inversionistasDelCredito.some(inv => inv.inversionista_id === 86);
+          const rowInvestorIds = rows.map(row => row.inversionista_id);
           const recipients = rows.length === 0 ? [] : await db.select({
             inversionista_id: inversionistas.inversionista_id,
             nombre: inversionistas.nombre,
             emite_factura: inversionistas.emite_factura,
           }).from(inversionistas)
-            .where(inArray(inversionistas.inversionista_id, rows.map(row => row.inversionista_id)));
+            .where(inArray(inversionistas.inversionista_id, absentCubeFullSale
+              ? [...rowInvestorIds, 86]
+              : rowInvestorIds));
+          const persistedRecipients = recipients.filter(inv => rowInvestorIds.includes(inv.inversionista_id));
           nexaInvoiceAmounts = nexaPersistedInvoiceAmounts(rows.map(row => ({
             ...row, abono_interes: row.abono_interes ?? "0", abono_iva_12: row.abono_iva_12 ?? "0",
           })), {
             interest: pagoData.abono_interes || "0", vat: pagoData.abono_iva_12 || "0",
-            recipients,
+            recipients: persistedRecipients,
+            absentCubeFullSale: absentCubeFullSale ? {
+              investorIds: inversionistasDelCredito.map(inv => inv.inversionista_id),
+              cube: recipients.find(inv => inv.inversionista_id === 86),
+            } : undefined,
           });
-          nexaInvoiceRecipients = new Map(recipients.map(inv => [inv.inversionista_id, inv]));
+          nexaInvoiceRecipients = new Map(recipients
+            .filter(inv => nexaInvoiceAmounts?.has(inv.inversionista_id))
+            .map(inv => [inv.inversionista_id, inv]));
         }
       }
 

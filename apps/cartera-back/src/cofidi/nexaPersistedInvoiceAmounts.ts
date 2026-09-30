@@ -1,23 +1,25 @@
 import Big from "big.js";
 
 type Row = { inversionista_id: number; abono_interes: string; abono_iva_12: string };
+type Recipient = { inversionista_id: number; nombre: string; emite_factura: boolean };
 
-export function oldestActivatedPendingPurchaseAtCutoff<T extends { id: number; fecha_completada: Date | null }>(
+export function oldestActivatedPendingPurchaseAtCutoff<T extends { id: number; updated_at: Date | null }>(
   operations: T[],
   cutoff: Date | null | undefined,
 ) {
   if (!cutoff) return undefined;
   return operations
-    .filter((operation): operation is T & { fecha_completada: Date } =>
-      operation.fecha_completada !== null && operation.fecha_completada <= cutoff
+    .filter((operation): operation is T & { updated_at: Date } =>
+      operation.updated_at !== null && operation.updated_at <= cutoff
     )
-    .sort((a, b) => a.fecha_completada.getTime() - b.fecha_completada.getTime() || a.id - b.id)[0];
+    .sort((a, b) => a.updated_at.getTime() - b.updated_at.getTime() || a.id - b.id)[0];
 }
 
 export function nexaPersistedInvoiceAmounts(rows: Row[], expected: {
   interest: string;
   vat: string;
-  recipients: { inversionista_id: number; nombre: string; emite_factura: boolean }[];
+  recipients: Recipient[];
+  absentCubeFullSale?: { investorIds: number[]; cube: Recipient | undefined };
 }) {
   const result = new Map<number, {
     precioUnitario: number; precio: number; montoGravable: number;
@@ -54,7 +56,34 @@ export function nexaPersistedInvoiceAmounts(rows: Row[], expected: {
     throw new Error("nexa_invoice_distribution_invalid");
   }
   if (!interest.eq(expected.interest) || !vat.eq(expected.vat)) {
-    throw new Error("nexa_invoice_distribution_mismatch");
+    const fullSale = expected.absentCubeFullSale;
+    const investorIds = fullSale?.investorIds ?? [];
+    const cube = fullSale?.cube;
+    const expectedInterest = new Big(expected.interest);
+    const expectedVat = new Big(expected.vat);
+    const residualInterest = expectedInterest.minus(interest);
+    const residualVat = expectedVat.minus(vat);
+    if (result.has(86)
+      || investorIds.length !== result.size
+      || new Set(investorIds).size !== investorIds.length
+      || investorIds.some(id => id === 86 || !result.has(id))
+      || !cube
+      || cube.inversionista_id !== 86
+      || !cube.nombre.trim().toUpperCase().includes("CUBE INVESTMENTS")
+      || expectedInterest.lt(0) || expectedVat.lt(0)
+      || !expectedInterest.eq(expectedInterest.round(2)) || !expectedVat.eq(expectedVat.round(2))
+      || residualInterest.lt(0) || residualVat.lt(0)
+      || (residualInterest.eq(0) && residualVat.eq(0))) {
+      throw new Error("nexa_invoice_distribution_mismatch");
+    }
+    const total = residualInterest.plus(residualVat).toNumber();
+    result.set(86, {
+      precioUnitario: total,
+      precio: total,
+      montoGravable: residualInterest.toNumber(),
+      montoImpuesto: residualVat.toNumber(),
+      total,
+    });
   }
   return result;
 }

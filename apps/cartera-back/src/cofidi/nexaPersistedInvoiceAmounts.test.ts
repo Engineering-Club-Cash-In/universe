@@ -41,4 +41,6 @@ test("runtime-only opt-in and persisted amounts reach both fiscal item builders"
   expect(router).toContain("const calcCube = persistedCube ?? calcularIvaExacto");
   expect(router).toContain("const calc = persistedAmounts ?? calcularIvaExacto(parseFloat(totalInv.toFixed(2)))");
   expect(router).toContain("const calcCube = persistedCube ?? calcularIvaExacto(parseFloat(totalCubeRounded.toFixed(2)))");
+  expect(router.match(/interesCubeIvaPersistido = persistedCube\?\.montoImpuesto;/g)).toHaveLength(2);
+  expect(router).toContain('pushRubro("INTERES", interesCubeConIva, true, interesCubeIvaPersistido)');
 });

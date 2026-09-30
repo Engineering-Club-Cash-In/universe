@@ -984,6 +984,7 @@ if (facturasExistentes.length > 0) {
       //    Se setea dentro de cada flujo (estándar/prorrateado) y se usa al
       //    final para guardar el rubro INTERES en facturacion_desglose.
       let interesCubeConIva = new Big(0);
+      let interesCubeIvaPersistido: number | undefined;
       // Marca que el flujo de interés realmente se calculó (NO abortó). Si
       // queda en false con interés > 0 (p. ej. abort por espejo sin fecha de
       // participación), NO escribimos los rubros INTERES / INTERES_INVERSIONISTAS,
@@ -1351,6 +1352,7 @@ if (facturasExistentes.length > 0) {
 
           // Total que va a CUBE = lo de las DOS ventanas sumado.
           const persistedCube = cubeId === null ? undefined : nexaInvoiceAmounts?.get(cubeId);
+          interesCubeIvaPersistido = persistedCube?.montoImpuesto;
           const totalCubeFinal = persistedCube
             ? new Big(persistedCube.total)
             : repartoAntes.totalCubeParcial.plus(repartoDespues.totalCubeParcial);
@@ -1857,6 +1859,7 @@ if (facturasExistentes.length > 0) {
 
         const cubeInvestor = inversionistasDelPago.find(inv => inv.nombre.trim().toUpperCase().includes("CUBE INVESTMENTS"));
         const persistedCube = cubeInvestor ? nexaInvoiceAmounts?.get(cubeInvestor.inversionista_id) : undefined;
+        interesCubeIvaPersistido = persistedCube?.montoImpuesto;
         const totalCube = persistedCube ? new Big(persistedCube.total) : cubePropio.plus(cashInAcumulado);
 
         // 🧾 Guardar para el desglose de facturación (rubro INTERES, con IVA).
@@ -1993,13 +1996,16 @@ if (facturasExistentes.length > 0) {
         const pushRubro = (
           rubro: string,
           totalConIva: any,
-          gravadoIva: boolean
+          gravadoIva: boolean,
+          ivaPersistido?: number
         ) => {
           const t = new Big(totalConIva || 0);
           if (t.lte(0)) return;
-          const iva = gravadoIva
-            ? new Big(calcularIvaExacto(parseFloat(t.toFixed(2))).montoImpuesto)
-            : new Big(0);
+          const iva = ivaPersistido === undefined
+            ? gravadoIva
+              ? new Big(calcularIvaExacto(parseFloat(t.toFixed(2))).montoImpuesto)
+              : new Big(0)
+            : new Big(ivaPersistido);
           rubrosDesglose.push({
             rubro,
             monto_total: t.toFixed(2),
@@ -2062,7 +2068,7 @@ if (facturasExistentes.length > 0) {
         // interesCubeConIva quedó en 0 y NO debemos volcar todo el interés a
         // INTERES_INVERSIONISTAS → dejamos ambos rubros sin escribir.
         if (interesFlujoOk) {
-          pushRubro("INTERES", interesCubeConIva, true); // residuo CUBE, ya con IVA
+          pushRubro("INTERES", interesCubeConIva, true, interesCubeIvaPersistido); // residuo CUBE, ya con IVA
         }
         // INTERES_INVERSIONISTAS: pci manda cuando ya tiene reparto (no se
         // recalcula el IVA); si pci está en 0 porque el pago es PARCIAL, se usa

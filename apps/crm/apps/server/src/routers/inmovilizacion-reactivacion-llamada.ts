@@ -9,11 +9,17 @@
  */
 
 import {
+	ejecutarReactivacion,
 	getHistorialInmovilizaciones,
+	getRespaldoReactivacion,
+	registrarLlamadaApagado,
 	registrarLlamadaReactivacion,
 } from "./inmovilizacion-unidad";
 
 export const inmovilizacionReactivacionLlamadaRouter = {
+	ejecutarReactivacion,
+	getRespaldoReactivacion,
+	registrarLlamadaApagado,
 	registrarLlamadaReactivacion,
 	getHistorialInmovilizaciones,
 };

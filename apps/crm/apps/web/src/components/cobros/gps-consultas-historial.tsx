@@ -25,6 +25,8 @@ const MAX_CONSULTAS = 100;
 const ORIGEN_LABEL: Record<string, string> = {
 	telemetria: "Ubicación actual",
 	ubicaciones_clave: "Ubicaciones clave",
+	inmovilizacion_solicitud: "Solicitud de apagado",
+	inmovilizacion_ejecucion: "Apagado ejecutado",
 };
 
 function DatosDeLaConsulta({ consulta }: { consulta: ConsultaGps }) {

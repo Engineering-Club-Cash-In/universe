@@ -349,6 +349,38 @@ const COBROS_TIPO_CONFIG: Record<
 		iconColor: "text-red-600 dark:text-red-400",
 		badge: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 	},
+	// CB-041: apagado aprobado que el asesor todavía no registró como ejecutado.
+	inmovilizacion_ejecutar_pendiente: {
+		label: "Apagado sin ejecutar",
+		border: "border-orange-200 dark:border-orange-900/50",
+		bg: "bg-orange-50/50 dark:bg-orange-950/20",
+		icon: Lock,
+		iconWrap: "bg-orange-100 dark:bg-orange-900/40",
+		iconColor: "text-orange-600 dark:text-orange-400",
+		badge:
+			"bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+	},
+	// CB-041: un asesor registró un apagado ejecutado — aviso a los supervisores.
+	inmovilizacion_apagado_ejecutado: {
+		label: "Apagado ejecutado",
+		border: "border-red-300 dark:border-red-800",
+		bg: "bg-red-50 dark:bg-red-950/30",
+		icon: Lock,
+		iconWrap: "bg-red-100 dark:bg-red-900/40",
+		iconColor: "text-red-600 dark:text-red-400",
+		badge: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+	},
+	// CB-041: un asesor registró una reactivación ejecutada — aviso a los supervisores.
+	inmovilizacion_reactivacion_ejecutada: {
+		label: "Reactivación ejecutada",
+		border: "border-emerald-200 dark:border-emerald-900/50",
+		bg: "bg-emerald-50/50 dark:bg-emerald-950/20",
+		icon: LockOpen,
+		iconWrap: "bg-emerald-100 dark:bg-emerald-900/40",
+		iconColor: "text-emerald-600 dark:text-emerald-400",
+		badge:
+			"bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+	},
 	// CB-119: evento GPS (bucket B4 en ubicación clave) que requiere revisión.
 	gps_evento: {
 		label: "Evento GPS",

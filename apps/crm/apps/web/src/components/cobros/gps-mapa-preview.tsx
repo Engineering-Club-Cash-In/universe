@@ -8,16 +8,19 @@ import { googleMapsEmbedUrl } from "@/routes/cobros/-gps-ficha";
 export function GpsMapaPreview({
 	latitude,
 	longitude,
+	className = "h-56",
 }: {
 	latitude: number | undefined;
 	longitude: number | undefined;
+	/** Alto del mapa; el ancho y el borde son siempre los mismos. */
+	className?: string;
 }) {
 	const src = googleMapsEmbedUrl(latitude, longitude);
 	if (!src) return null;
 
 	return (
 		<iframe
-			className="h-56 w-full rounded-md border"
+			className={`${className} w-full rounded-md border`}
 			loading="lazy"
 			referrerPolicy="no-referrer-when-downgrade"
 			src={src}

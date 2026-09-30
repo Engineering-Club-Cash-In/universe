@@ -378,7 +378,7 @@ export const notificationsRouter = {
 
 			// CB-041: estos cobrosTipo se resuelven SOLO por su flujo de
 			// negocio (decidirInmovilizacion, marcarEjecutada,
-			// registrarResultadoLlamada / registrarLlamadaReactivacion) — nunca
+			// registrarLlamadaApagado / registrarLlamadaReactivacion) — nunca
 			// a mano desde acá. La UI de notificaciones expone "Resolver" para
 			// cualquier action_required sin mirar cobrosTipo: un supervisor
 			// podía ocultar "por aprobar" sin decidirla, o un asesor ocultar
@@ -393,6 +393,9 @@ export const notificationsRouter = {
 			const COBROS_TIPO_RESOLUCION_BLOQUEADA = [
 				"inmovilizacion_pendiente_aprobacion",
 				"inmovilizacion_llamar_cliente",
+				// Recordatorio de apagado aprobado sin ejecutar: se cierra al ejecutarlo
+				// o cancelarlo, no a mano (ocultarlo no ejecuta nada).
+				"inmovilizacion_ejecutar_pendiente",
 				// CB-035: la tarea de llamada por ingreso a B3 se cierra al registrar
 				// una llamada en el caso (createContactoCobros) o por el job; ocultarla
 				// a mano dejaría al supervisor sin la tarea y sin la alerta de vencida.

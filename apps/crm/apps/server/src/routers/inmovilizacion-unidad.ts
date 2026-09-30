@@ -10,8 +10,9 @@
  * Modo de ejecución: MANUAL. El envío automático al proveedor (LEGION,
  * `unit/exec_cmd`) no forma parte de este flujo: depende de que LEGION habilite
  * comandos/permisos/relé — ver services/inmovilizacion/ejecutor.ts.
- * `marcarEjecutada` deja constancia de que el supervisor coordinó el
- * apagado/reactivación con LEGION por fuera del CRM.
+ * `ejecutarApagado` / `ejecutarReactivacion` dejan constancia —a cargo del
+ * asesor, con la confirmación de LEGION— de que se coordinó el
+ * apagado/reactivación por fuera del CRM.
  */
 
 import { ORPCError } from "@orpc/server";
@@ -25,7 +26,8 @@ import {
 	contactosCobros,
 	contratosFinanciamiento,
 } from "../db/schema/cobros";
-import { clients } from "../db/schema/crm";
+import { clients, leads, opportunities } from "../db/schema/crm";
+import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import {
 	inmovilizacionesUnidad,
 	inmovilizacionesUnidadEventos,
@@ -37,18 +39,45 @@ import {
 } from "../lib/acceso-caso-cobro";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import {
+	advertenciaEnMarcha,
 	BUCKETS_INMOVILIZACION,
 	bucketsInmovilizacionTexto,
+	CLAVES_QUE_PASO_REACTIVACION,
+	componerMotivoApagado,
+	componerMotivoReactivacion,
+	erroresEvidenciaEjecucion,
+	erroresMotivosInmovilizacion,
+	erroresRespaldoReactivacion,
+	erroresUbicacionSolicitud,
 	estadoUnidad,
 	type InmovilizacionHistorialItem,
+	MENSAJE_REACTIVACION_SIN_RESPALDO,
+	MIME_EVIDENCIA_INMOVILIZACION,
+	type PagoRespaldo,
+	type PromesaRespaldo,
+	pagosPosterioresAlApagado,
 	puedeSolicitar,
+	type QuePasoReactivacion,
+	quePasoRequierePago,
+	quePasoRequierePromesa,
+	type RespaldoReactivacion,
+	reactivacionSinRespaldo,
+	type UbicacionInmovilizacion,
 } from "../lib/inmovilizacion-unidad";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import { condicionesPromesaVigente } from "../lib/promesa-vigente";
 import { PERMISSIONS } from "../lib/roles";
+import {
+	buildUploadPrefix,
+	getFileUrl,
+	MAX_FILE_SIZE,
+	verifyUploadedDocumentInR2,
+} from "../lib/storage";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import { ejecutarInmovilizacion } from "../services/inmovilizacion/ejecutor";
 import {
+	notificarEjecucionASupervisores,
 	notificarInmovilizacionPendiente,
 	notificarInmovilizacionResuelta,
 	notificarLlamarCliente,
@@ -56,26 +85,154 @@ import {
 	reconciliarAvisosLlamarCliente,
 	resolverAvisoLlamarCliente,
 	resolverPendientesInmovilizacion,
+	resolverRecordatoriosEjecucion,
 } from "../services/inmovilizacion-notif";
+import { getWialonClient } from "../services/wialon/wialon-client";
+import {
+	conContextoGps,
+	enlazarConsultaLogEnContexto,
+} from "../services/wialon/wialon-contexto";
+import { WialonClientError } from "../services/wialon/wialon-types";
 import {
 	assertAccesoCasoCobro,
 	marcarInmovilizacionEnviadaARecuperacion,
 } from "./cobros";
+import { mensajeUsuarioWialon } from "./wialon";
 
 export { marcarInmovilizacionEnviadaARecuperacion };
+
+/**
+ * Estados de una oportunidad que SÍ corresponden a un crédito otorgado: solo
+ * esas pueden dar el vehículo de un SIFCO. Una oportunidad `open`, `lost` o
+ * `on_hold` que comparta el SIFCO es un dato viejo o ajeno y podría apuntar a
+ * otra unidad GPS. Mismo criterio que `getVehicleByCodigoController`
+ * (controllers/vehicles.ts) y el recordatorio de Págalo.
+ */
+const ESTADOS_OPORTUNIDAD_CON_CREDITO = ["won", "migrate"] as const;
 
 /**
  * Trae el caso con lo que hace falta para autorizar y para armar el mensaje
  * de las notificaciones ("Fulano (crédito 12345)"). No usa `getCasoCobroById`
  * (routers/cobros.ts) porque ese trae columnas de UI que acá no hacen falta.
+ *
+ * El vehículo sale del CONTRATO del caso (`contratoId → vehicleId`), la fuente
+ * más confiable (un review de Codex pidió ese orden: el de la oportunidad puede
+ * estar vacío o desactualizado). Un caso sin contrato —es lo normal en los
+ * créditos migrados de cartera— cae al vehículo de la OPORTUNIDAD con ese
+ * SIFCO, con la misma cautela que la tarjeta GPS (`resolverCasoParaGps`): si
+ * las oportunidades apuntan a más de un vehículo no se sabe cuál es y no se
+ * elige ninguno (`vehiculoAmbiguo`). Mismo criterio que Págalo
+ * (`resolverVehiculoCasoPagalo`): si el contrato existe manda, aunque le falte
+ * el vehículo — no se cae a la oportunidad para no mostrar uno distinto.
+ *
+ * Mientras la unidad esté APAGADA por este caso, manda la unidad que quedó
+ * guardada en ese apagado (`apagadoVigenteDelCaso`) sobre lo que resuelvan hoy
+ * el contrato o las oportunidades: el carro apagado en la realidad es ese,
+ * aunque después se sume otra oportunidad o se repunte a otro vehículo, y hay
+ * que poder reactivarlo (y no ofrecer apagar otro mientras tanto).
  */
 async function getCasoParaInmovilizacion(casoCobroId: string) {
+	const caso = await resolverCasoConVehiculo(casoCobroId);
+	if (!caso) return null;
+
+	const apagado = await apagadoVigenteDelCaso(casoCobroId);
+	if (
+		!apagado ||
+		(caso.vehicleId === apagado.vehicleId &&
+			caso.wialonUnitId === apagado.wialonUnitId)
+	) {
+		return caso;
+	}
+	const [vehiculo] = await db
+		.select({ wialonUnitName: vehicles.wialonUnitName })
+		.from(vehicles)
+		.where(eq(vehicles.id, apagado.vehicleId))
+		.limit(1);
+	return {
+		...caso,
+		vehicleId: apagado.vehicleId,
+		wialonUnitId: apagado.wialonUnitId,
+		wialonUnitName: vehiculo?.wialonUnitName ?? null,
+		vehiculoOrigen: "apagado_ejecutado" as const,
+		vehiculoAmbiguo: false,
+	};
+}
+
+/**
+ * El vehículo y la unidad GPS del último apagado ejecutado de este caso, solo
+ * mientras la unidad siga apagada por él (no hubo una reactivación ejecutada
+ * después de esa MISMA unidad, ni de este caso ni de otro que comparta la
+ * unidad). Null si no hay apagado vigente o la fila no guardó la unidad.
+ *
+ * Consultas propias y angostas (las filas ejecutadas del caso y, si sigue
+ * apagada, una sola reactivación posterior de la unidad): esta función corre
+ * en cada llamada, así que no reutiliza `getHistorialCaso`.
+ */
+async function apagadoVigenteDelCaso(
+	casoCobroId: string,
+): Promise<{ vehicleId: string; wialonUnitId: number } | null> {
+	const ejecutadas = await db
+		.select({
+			accion: inmovilizacionesUnidad.accion,
+			vehicleId: inmovilizacionesUnidad.vehicleId,
+			wialonUnitId: inmovilizacionesUnidad.wialonUnitId,
+			ejecutadoAt: inmovilizacionesUnidad.ejecutadoAt,
+		})
+		.from(inmovilizacionesUnidad)
+		.where(
+			and(
+				eq(inmovilizacionesUnidad.casoCobroId, casoCobroId),
+				eq(inmovilizacionesUnidad.estado, "ejecutada"),
+			),
+		);
+	let apagado: (typeof ejecutadas)[number] | null = null;
+	for (const f of ejecutadas) {
+		if (!f.ejecutadoAt || f.accion !== "apagado") continue;
+		if (!apagado?.ejecutadoAt || f.ejecutadoAt > apagado.ejecutadoAt) {
+			apagado = f;
+		}
+	}
+	if (!apagado?.ejecutadoAt || !apagado.vehicleId) return null;
+	if (apagado.wialonUnitId == null) return null;
+	// Solo cuenta una reactivación de ESA unidad: la de otra unidad del mismo
+	// caso (p. ej. el vehículo al que pasó el mapeo) no la volvió a encender.
+	const { vehicleId, wialonUnitId, ejecutadoAt: apagadoAt } = apagado;
+	const reactivada = ejecutadas.some(
+		(f) =>
+			f.accion !== "apagado" &&
+			f.wialonUnitId === wialonUnitId &&
+			f.ejecutadoAt != null &&
+			f.ejecutadoAt > apagadoAt,
+	);
+	if (reactivada) return null;
+	// Con unidad compartida (D-10) la reactivación pudo ejecutarla OTRO caso
+	// sobre esa misma unidad física: el apagado de este caso ya no sigue vigente.
+	const [deOtroCaso] = await db
+		.select({ reactivadaAt: inmovilizacionesUnidad.ejecutadoAt })
+		.from(inmovilizacionesUnidad)
+		.where(
+			and(
+				eq(inmovilizacionesUnidad.wialonUnitId, wialonUnitId),
+				eq(inmovilizacionesUnidad.estado, "ejecutada"),
+				eq(inmovilizacionesUnidad.accion, "reactivacion"),
+				gt(inmovilizacionesUnidad.ejecutadoAt, apagadoAt),
+			),
+		)
+		.limit(1);
+	if (deOtroCaso) return null;
+	return { vehicleId, wialonUnitId };
+}
+
+/** El caso con el vehículo del contrato o, sin contrato, el de la oportunidad. */
+async function resolverCasoConVehiculo(casoCobroId: string) {
 	const [caso] = await db
 		.select({
 			id: casosCobros.id,
 			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			contratoId: casosCobros.contratoId,
 			vehicleId: vehicles.id,
 			wialonUnitId: vehicles.wialonUnitId,
+			wialonUnitName: vehicles.wialonUnitName,
 			clienteNombre: clients.contactPerson,
 		})
 		.from(casosCobros)
@@ -87,7 +244,158 @@ async function getCasoParaInmovilizacion(casoCobroId: string) {
 		.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
 		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
-	return caso ?? null;
+	if (!caso) return null;
+
+	const { contratoId, ...base } = caso;
+	const delContrato = {
+		...base,
+		vehiculoOrigen: (base.vehicleId ? "contrato" : null) as
+			| "contrato"
+			| "oportunidad"
+			| "apagado_ejecutado"
+			| null,
+		vehiculoAmbiguo: false,
+	};
+	if (contratoId || !base.numeroCreditoSifco) return delContrato;
+
+	const filas = await db
+		.select({
+			vehicleId: vehicles.id,
+			wialonUnitId: vehicles.wialonUnitId,
+			wialonUnitName: vehicles.wialonUnitName,
+			nombre: leads.firstName,
+			apellido: leads.lastName,
+		})
+		.from(opportunities)
+		.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+		.leftJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(
+			and(
+				eq(opportunities.numeroSifco, base.numeroCreditoSifco),
+				inArray(opportunities.status, [...ESTADOS_OPORTUNIDAD_CON_CREDITO]),
+			),
+		);
+	const distintos = new Set(filas.map((f) => f.vehicleId));
+	if (distintos.size !== 1) {
+		return { ...delContrato, vehiculoAmbiguo: distintos.size > 1 };
+	}
+	const f = filas[0];
+	return {
+		...base,
+		vehicleId: f.vehicleId,
+		wialonUnitId: f.wialonUnitId,
+		wialonUnitName: f.wialonUnitName,
+		clienteNombre:
+			[f.nombre, f.apellido].filter(Boolean).join(" ").trim() || null,
+		vehiculoOrigen: "oportunidad" as const,
+		vehiculoAmbiguo: false,
+	};
+}
+
+// ── Ubicación del vehículo (solicitud y ejecución del apagado) ──────────────
+
+/**
+ * Motivo fijo de la consulta: queda en `gps_consulta_logs` (CB-118) sin pedirle
+ * nada al asesor, igual que la recuperación de vehículo (CB-042).
+ */
+const MOTIVO_CONSULTA_UBICACION = {
+	solicitud: "Solicitud de apagado de la unidad (CB-041)",
+	ejecucion: "Apagado de la unidad ejecutado (CB-041)",
+} as const;
+type MomentoUbicacion = keyof typeof MOTIVO_CONSULTA_UBICACION;
+
+/** Cuánto tiempo vale una consulta para adjuntarla a una solicitud o ejecución. */
+const VIGENCIA_CONSULTA_UBICACION_MS = 30 * 60 * 1000;
+
+const origenConsultaUbicacion = (momento: MomentoUbicacion) =>
+	`inmovilizacion_${momento}`;
+
+/**
+ * La ubicación que quedó guardada en el snapshot de una consulta. El snapshot
+ * tiene la misma forma que el de `getGpsVehiculo` (así el historial GPS de la
+ * ficha también lo muestra). Una consulta sin posición da `sin_ubicacion` con
+ * el motivo, para dejar constancia en la solicitud o la ejecución.
+ */
+function ubicacionDesdeSnapshot(
+	snapshot: unknown,
+	consultaLogId: string,
+	unidad: string | null,
+): UbicacionInmovilizacion {
+	const crudo = (snapshot ?? null) as {
+		estado?: string;
+		telemetria?: {
+			latitude?: number;
+			longitude?: number;
+			speedKmh?: number;
+			isIgnitionOn?: boolean;
+			ultimaPosicionAt?: string | null;
+			ultimaSenalAt?: string | null;
+		};
+		error?: { message?: string };
+	} | null;
+	const t = crudo?.estado === "vinculado" ? crudo.telemetria : undefined;
+	if (t && t.latitude != null && t.longitude != null) {
+		const u: UbicacionInmovilizacion = {
+			fuente: "gps",
+			lat: t.latitude,
+			lng: t.longitude,
+			unidad,
+			senalAt: t.ultimaPosicionAt ?? t.ultimaSenalAt ?? null,
+			velocidadKmh: t.speedKmh ?? null,
+			ignicion: t.isIgnitionOn ?? null,
+			consultaLogId,
+		};
+		return { ...u, aviso: advertenciaEnMarcha(u) };
+	}
+	return {
+		fuente: "sin_ubicacion",
+		unidad,
+		consultaLogId,
+		aviso:
+			crudo?.error?.message ??
+			(crudo?.estado === "vinculado"
+				? "La unidad respondió sin posición."
+				: "No se pudo consultar el GPS."),
+	};
+}
+
+/**
+ * Lee una consulta de ubicación ya hecha, para adjuntarla a la solicitud o a la
+ * ejecución. Tiene que ser del mismo usuario y vehículo, del mismo momento y
+ * reciente: así el cliente no puede mandar coordenadas inventadas, solo apuntar
+ * a una consulta auditada.
+ */
+async function leerUbicacionConsulta(params: {
+	consultaLogId: string;
+	userId: string;
+	vehicleId: string;
+	momento: MomentoUbicacion;
+}): Promise<UbicacionInmovilizacion | null> {
+	const [log] = await db
+		.select({
+			snapshot: gpsConsultaLogs.snapshot,
+			unitName: gpsConsultaLogs.unitName,
+		})
+		.from(gpsConsultaLogs)
+		.where(
+			and(
+				eq(gpsConsultaLogs.id, params.consultaLogId),
+				eq(gpsConsultaLogs.userId, params.userId),
+				eq(gpsConsultaLogs.vehicleId, params.vehicleId),
+				eq(gpsConsultaLogs.origen, origenConsultaUbicacion(params.momento)),
+				gt(
+					gpsConsultaLogs.createdAt,
+					new Date(Date.now() - VIGENCIA_CONSULTA_UBICACION_MS),
+				),
+			),
+		)
+		.limit(1);
+	if (!log) return null;
+	return ubicacionDesdeSnapshot(
+		log.snapshot,
+		params.consultaLogId,
+		log.unitName,
+	);
 }
 
 /**
@@ -103,6 +411,109 @@ async function getHistorialCaso(casoCobroId: string) {
 }
 
 type FilaInmovilizacion = Awaited<ReturnType<typeof getHistorialCaso>>[number];
+
+/**
+ * La llamada al cliente enlazada a una inmovilización (la gestión que se
+ * registró tras el apagado o la reactivación), para verla desde el historial.
+ */
+type LlamadaInmovilizacion = {
+	id: string;
+	fechaContacto: Date;
+	estadoContacto: string;
+	duracionLlamada: number | null;
+	comentarios: string;
+	acuerdosAlcanzados: string | null;
+	realizadoPorNombre: string | null;
+};
+
+/**
+ * La fila de la carta: lo mismo más lo que hace falta para mostrar la
+ * ejecución del asesor —quién la registró y la confirmación de LEGION— y la
+ * llamada enlazada. La llave de R2 se reemplaza por una URL firmada (el bucket
+ * es privado); una que no se pueda firmar queda en null, sin tumbar la carta.
+ */
+type FilaInmovilizacionCarta = Omit<FilaInmovilizacion, "evidenciaR2Key"> & {
+	evidenciaUrl: string | null;
+	ejecutadoPorNombre: string | null;
+	llamada: LlamadaInmovilizacion | null;
+};
+
+async function enriquecerFilasCarta(
+	filas: readonly FilaInmovilizacion[],
+): Promise<FilaInmovilizacionCarta[]> {
+	// Las gestiones enlazadas (la llamada de cada inmovilización). Se leen antes
+	// que los nombres para pedir en una sola consulta a los usuarios de ambos.
+	const contactoIds = [
+		...new Set(
+			filas.map((f) => f.llamadaContactoId).filter((id): id is string => !!id),
+		),
+	];
+	const contactos = new Map<
+		string,
+		Omit<LlamadaInmovilizacion, "realizadoPorNombre"> & {
+			realizadoPor: string;
+		}
+	>();
+	if (contactoIds.length > 0) {
+		for (const c of await db
+			.select({
+				id: contactosCobros.id,
+				fechaContacto: contactosCobros.fechaContacto,
+				estadoContacto: contactosCobros.estadoContacto,
+				duracionLlamada: contactosCobros.duracionLlamada,
+				comentarios: contactosCobros.comentarios,
+				acuerdosAlcanzados: contactosCobros.acuerdosAlcanzados,
+				realizadoPor: contactosCobros.realizadoPor,
+			})
+			.from(contactosCobros)
+			.where(inArray(contactosCobros.id, contactoIds))) {
+			contactos.set(c.id, c);
+		}
+	}
+
+	const ids = [
+		...new Set([
+			...filas.map((f) => f.ejecutadoPor).filter((id): id is string => !!id),
+			...[...contactos.values()].map((c) => c.realizadoPor),
+		]),
+	];
+	const nombres = new Map<string, string>();
+	if (ids.length > 0) {
+		for (const u of await db
+			.select({ id: user.id, name: user.name })
+			.from(user)
+			.where(inArray(user.id, ids))) {
+			nombres.set(u.id, u.name);
+		}
+	}
+	return Promise.all(
+		filas.map(async ({ evidenciaR2Key, ...fila }) => {
+			const contacto = fila.llamadaContactoId
+				? contactos.get(fila.llamadaContactoId)
+				: undefined;
+			return {
+				...fila,
+				evidenciaUrl: evidenciaR2Key
+					? await getFileUrl(evidenciaR2Key).catch(() => null)
+					: null,
+				ejecutadoPorNombre: fila.ejecutadoPor
+					? (nombres.get(fila.ejecutadoPor) ?? null)
+					: null,
+				llamada: contacto
+					? {
+							id: contacto.id,
+							fechaContacto: contacto.fechaContacto,
+							estadoContacto: contacto.estadoContacto,
+							duracionLlamada: contacto.duracionLlamada,
+							comentarios: contacto.comentarios,
+							acuerdosAlcanzados: contacto.acuerdosAlcanzados,
+							realizadoPorNombre: nombres.get(contacto.realizadoPor) ?? null,
+						}
+					: null,
+			};
+		}),
+	);
+}
 
 /**
  * Historial de inmovilizaciones de la UNIDAD FÍSICA, cruzando todos los
@@ -143,11 +554,11 @@ type TxExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * física (o, sin `wialonUnitId`, del caso) — mismo patrón que
  * `bloquearUnidadWialon` en `routers/wialon.ts`.
  *
- * Necesario porque `marcarEjecutada` y `registrarResultadoLlamada` /
+ * Necesario porque `ejecutarAprobada` y `registrarLlamadaApagado` /
  * `registrarLlamadaReactivacion` toman locks de FILA en orden potencialmente
- * inverso: `marcarEjecutada` de una reactivación lockea primero la
+ * inverso: `ejecutarAprobada` de una reactivación lockea primero la
  * reactivación (su propio UPDATE) y DESPUÉS el apagado origen
- * (inmovilizacionOrigenId); `registrarResultadoLlamada` sobre ese mismo
+ * (inmovilizacionOrigenId); `registrarLlamadaApagado` sobre ese mismo
  * apagado lockea primero el apagado (SELECT ... FOR UPDATE) y su INSERT de
  * la reactivación de seguimiento puede esperar por el índice único parcial,
  * que depende de esa otra fila. Dos transacciones esperándose la una a la
@@ -210,7 +621,7 @@ function getHistorialUnidadFisicaTx(
  *     detecta que una acción MÁS RECIENTE de otro tipo ya superó a `fila`.
  *  2. Esa fila vigente es justo `fila.id` (no otra fila vieja de otro caso,
  *     D-10 — unidad compartida).
- * Se usa en `registrarResultadoLlamada` y `registrarLlamadaReactivacion`,
+ * Se usa en `registrarLlamadaApagado` y `registrarLlamadaReactivacion`,
  * primero sin lock (mensaje de error temprano) y de nuevo con
  * `SELECT ... FOR UPDATE` dentro de la transacción (la garantía real bajo
  * concurrencia). Review de Codex, PR #1758.
@@ -308,12 +719,12 @@ function esViolacionUnica(error: unknown): boolean {
 
 /**
  * Verifica que el usuario tenga acceso para registrar la llamada de una
- * inmovilización ejecutada (`registrarResultadoLlamada` o
+ * inmovilización ejecutada (`registrarLlamadaApagado` o
  * `registrarLlamadaReactivacion`).
  *
  * El caso normal es el gate de toda la ficha: el asesor que lleva el crédito
  * en CARTERA (o lo cubre hoy), o un rol con visibilidad completa. Pero si el
- * dueño en cartera no tiene usuario en el CRM, `marcarEjecutada` enrutó el
+ * dueño en cartera no tiene usuario en el CRM, `ejecutarAprobada` enrutó el
  * aviso de llamada a `inm.solicitadoPor`: autorizar a ese usuario evita que la
  * tarea quede trabada sin nadie que pueda cerrarla. Review de Codex.
  */
@@ -353,6 +764,608 @@ async function assertAccesoLlamadaInmovilizacion(
 	});
 }
 
+// ── Respaldo de la reactivación: pagos posteriores al apagado y promesa ─────
+
+/**
+ * Pagos de cartera-back que pueden respaldar la reactivación: los del día del
+ * apagado en adelante. Sin caché (un pago recién registrado tiene que verse de
+ * inmediato). Si cartera no responde, lanza: no se puede verificar el pago.
+ */
+async function leerPagosPosterioresAlApagado(
+	numeroCreditoSifco: string,
+	apagadoEjecutadoAt: Date,
+): Promise<PagoRespaldo[]> {
+	if (!isCarteraBackEnabled()) {
+		throw new ORPCError("SERVICE_UNAVAILABLE", {
+			message:
+				"La integración con cartera no está habilitada: no se pueden verificar pagos.",
+		});
+	}
+	let pagos: Awaited<ReturnType<typeof carteraBackClient.getPagosByCredito>>;
+	try {
+		pagos = await carteraBackClient.getPagosByCredito(
+			numeroCreditoSifco,
+			false,
+		);
+	} catch (error) {
+		console.error("[inmovilizacion] No se pudieron leer los pagos:", error);
+		throw new ORPCError("SERVICE_UNAVAILABLE", {
+			message:
+				"No se pudieron consultar los pagos en cartera. Intentá de nuevo en un momento.",
+		});
+	}
+	return pagosPosterioresAlApagado(pagos, apagadoEjecutadoAt);
+}
+
+/** La promesa de pago activa del caso (la misma definición que usa la ficha), o null. */
+async function leerPromesaActivaCaso(
+	casoCobroId: string,
+): Promise<PromesaRespaldo | null> {
+	const [promesa] = await db
+		.select({
+			id: contactosCobros.id,
+			fechaProximoContacto: contactosCobros.fechaProximoContacto,
+			montoComprometido: contactosCobros.montoComprometido,
+		})
+		.from(contactosCobros)
+		.where(
+			and(
+				eq(contactosCobros.casoCobroId, casoCobroId),
+				...condicionesPromesaVigente(),
+			),
+		)
+		.limit(1);
+	if (!promesa?.fechaProximoContacto) return null;
+	return {
+		contactoId: promesa.id,
+		fechaPrometida: new Date(promesa.fechaProximoContacto).toISOString(),
+		monto: promesa.montoComprometido ?? null,
+	};
+}
+
+/**
+ * Arma el respaldo de una reactivación desde los datos REALES (no los que
+ * mande el navegador): el pago elegido tiene que estar en cartera y ser
+ * posterior al apagado; la promesa, la activa del caso. Lanza BAD_REQUEST con
+ * lo que falte según la opción elegida.
+ */
+async function resolverRespaldoReactivacion(params: {
+	quePaso: QuePasoReactivacion;
+	pagoId: number | undefined;
+	casoCobroId: string;
+	numeroCreditoSifco: string;
+	apagadoEjecutadoAt: Date;
+}): Promise<RespaldoReactivacion> {
+	const respaldo: RespaldoReactivacion = {};
+	if (quePasoRequierePago(params.quePaso)) {
+		const pagos = await leerPagosPosterioresAlApagado(
+			params.numeroCreditoSifco,
+			params.apagadoEjecutadoAt,
+		);
+		const elegido = pagos.find((p) => p.pagoId === params.pagoId);
+		if (elegido) respaldo.pago = elegido;
+	}
+	if (quePasoRequierePromesa(params.quePaso)) {
+		const promesa = await leerPromesaActivaCaso(params.casoCobroId);
+		if (promesa) respaldo.promesa = promesa;
+	}
+	const error = erroresRespaldoReactivacion(params.quePaso, respaldo);
+	if (error) throw new ORPCError("BAD_REQUEST", { message: error });
+	return respaldo;
+}
+
+/**
+ * Datos que aporta el asesor al ejecutar un apagado (vs. la ejecución manual del
+ * supervisor, que solo trae una referencia de texto): la confirmación de LEGION
+ * como archivo y/o nota, y dónde estaba el vehículo en ese momento.
+ */
+type ExtrasEjecucion = {
+	evidencia: { key: string; nombreArchivo: string; mime: string } | null;
+	nota: string | null;
+	/** Solo el apagado consulta dónde está el vehículo. */
+	ubicacion: UbicacionInmovilizacion | null;
+};
+
+/**
+ * Pasa una solicitud `aprobada` a `ejecutada` — cuerpo compartido por
+ * `ejecutarApagado` y `ejecutarReactivacion` (las dos las registra el asesor).
+ * Revalida bucket y vínculo GPS, deja el evento de auditoría con quién lo hizo
+ * y avisa al asesor que llame al cliente.
+ */
+async function ejecutarAprobada(
+	input: { id: string; referencia?: string; extras?: ExtrasEjecucion },
+	context: {
+		userId: string;
+		userRole: NonNullable<
+			Parameters<typeof notificarLlamarCliente>[0]["ejecutadoPorRole"]
+		>;
+	},
+) {
+	const [inm] = await db
+		.select()
+		.from(inmovilizacionesUnidad)
+		.where(
+			and(
+				eq(inmovilizacionesUnidad.id, input.id),
+				eq(inmovilizacionesUnidad.estado, "aprobada"),
+			),
+		)
+		.limit(1);
+
+	if (!inm) {
+		throw new ORPCError("CONFLICT", {
+			message: "La solicitud no está aprobada (o ya fue ejecutada).",
+		});
+	}
+
+	let motivoFalloPrecondicion: string | null = null;
+
+	// Apagado: el asesor lo registra DESPUÉS de que LEGION ya lo aplicó. Si el
+	// crédito bajó de bucket entre la aprobación y ahora (lo normal: el cliente
+	// notó el apagado y pagó), cancelar la solicitud dejaría el carro apagado en
+	// la realidad y "activo" en el CRM, sin forma de pedir la reactivación. Por
+	// eso el bucket ya no cancela: la revisión estricta vive en la aprobación
+	// (`decidirInmovilizacion`) y acá solo queda la advertencia, en la respuesta,
+	// en el evento de auditoría y en el aviso a los supervisores.
+	let advertencia: string | null = null;
+	let bucketAlEjecutar: number | null = null;
+	if (inm.accion === "apagado" && isCarteraBackEnabled()) {
+		try {
+			const bucketActual = await carteraBackClient.getBucketActualCredito(
+				inm.numeroCreditoSifco,
+			);
+			bucketAlEjecutar = bucketActual?.bucket ?? null;
+		} catch (error) {
+			console.error("[ejecutarAprobada] No se pudo resolver el bucket:", error);
+		}
+		if (bucketAlEjecutar == null) {
+			advertencia =
+				"No se pudo confirmar el bucket del crédito en cartera: verificá que el apagado siga aplicando.";
+		} else if (!BUCKETS_INMOVILIZACION.includes(bucketAlEjecutar)) {
+			advertencia = `El crédito ya no está en ${bucketsInmovilizacionTexto()} (está en B${bucketAlEjecutar}), seguramente porque el cliente pagó. El apagado quedó registrado porque LEGION ya lo aplicó: solicitá la reactivación.`;
+		}
+	}
+
+	let resultado!: Awaited<ReturnType<typeof ejecutarInmovilizacion>>;
+
+	await db.transaction(async (tx) => {
+		// Serializa contra registrarLlamadaApagado / registrarLlamadaReactivacion
+		// sobre la MISMA unidad física — evita el deadlock de locks de fila
+		// en orden cruzado (esta transacción toca `input.id` y después
+		// `inmovilizacionOrigenId`; la otra puede tocarlos al revés). Ver
+		// comentario de `bloquearUnidadFisica`. Review de Codex, PR #1758.
+		await bloquearUnidadFisica(tx, {
+			casoCobroId: inm.casoCobroId,
+			wialonUnitId: inm.wialonUnitId,
+		});
+
+		// Re-validar la vinculación Wialon del vehículo bajo lock (FOR UPDATE):
+		// el lock de fila sobre vehicles serializa contra vincularUnidadWialon
+		// (que toma lock exclusivo al reasignar la unidad del vehículo),
+		// evitando que el GPS sea reemplazado concurrentemente entre esta
+		// lectura y ejecutarInmovilizacion. Review de Codex.
+		//
+		// Solo aplica al apagado: la reactivación revierte un apagado ya
+		// ejecutado sobre la unidad guardada en la fila, y esa unidad sigue
+		// apagada aunque el GPS se haya reasignado después a otro vehículo
+		// (`vincularUnidadWialon` le quita el vínculo al anterior). Exigirlo
+		// dejaría la unidad apagada sin forma de reactivarla desde el CRM.
+		if (!motivoFalloPrecondicion) {
+			if (!inm.vehicleId) {
+				motivoFalloPrecondicion =
+					"El vehículo asociado a la solicitud ya no existe o fue desasociado.";
+			} else {
+				const [vehiculoTx] = await tx
+					.select({ wialonUnitId: vehicles.wialonUnitId })
+					.from(vehicles)
+					.where(eq(vehicles.id, inm.vehicleId))
+					.for("update")
+					.limit(1);
+
+				if (!vehiculoTx) {
+					motivoFalloPrecondicion =
+						"El vehículo asociado a la solicitud ya no existe o fue desasociado.";
+				} else if (inm.wialonUnitId == null) {
+					motivoFalloPrecondicion =
+						"El vehículo asociado no tiene una unidad GPS vinculada.";
+				} else if (
+					inm.accion === "apagado" &&
+					vehiculoTx.wialonUnitId == null
+				) {
+					motivoFalloPrecondicion =
+						"El vehículo asociado no tiene una unidad GPS vinculada.";
+				} else if (
+					inm.accion === "apagado" &&
+					vehiculoTx.wialonUnitId !== inm.wialonUnitId
+				) {
+					motivoFalloPrecondicion =
+						"La unidad GPS del vehículo cambió o fue reasignada tras la aprobación. La acción ya no aplica a la unidad original.";
+				}
+			}
+		}
+
+		if (motivoFalloPrecondicion) {
+			// Precondición de ejecución falló (el cliente pagó, el vehículo fue
+			// desasociado o el GPS fue reasignado tras la aprobación). En vez de
+			// dejar la fila huérfana en 'aprobada' (que bloquearía permanentemente
+			// cualquier solicitud futura del caso por el índice único de abiertas),
+			// se cancela atómicamente la aprobación y se audita el evento. Review de Codex.
+			const [cancelada] = await tx
+				.update(inmovilizacionesUnidad)
+				.set({
+					estado: "cancelada",
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(inmovilizacionesUnidad.id, input.id),
+						eq(inmovilizacionesUnidad.estado, "aprobada"),
+					),
+				)
+				.returning({ id: inmovilizacionesUnidad.id });
+
+			// Solo auditar si esta transacción fue la que canceló la fila: si dos
+			// supervisores ejecutaron concurrentemente con precondición fallida,
+			// el segundo UPDATE devuelve cero filas y no debe duplicar el evento.
+			// Review de Codex, PR #1758.
+			if (cancelada) {
+				await tx.insert(inmovilizacionesUnidadEventos).values({
+					inmovilizacionId: input.id,
+					evento: "cancelar",
+					estadoAnterior: "aprobada",
+					estadoNuevo: "cancelada",
+					usuarioId: context.userId,
+					detalle: { motivo: motivoFalloPrecondicion },
+				});
+			}
+			return;
+		}
+
+		resultado = await ejecutarInmovilizacion({
+			accion: inm.accion,
+			wialonUnitId: inm.wialonUnitId,
+		});
+
+		const [actualizada] = await tx
+			.update(inmovilizacionesUnidad)
+			.set({
+				estado: "ejecutada",
+				ejecutadoPor: context.userId,
+				ejecutadoAt: new Date(),
+				modoEjecucion: resultado.modo,
+				// Ejecución del asesor: la nota hace de referencia, para que la cola
+				// y el historial (que leen `referenciaEjecucion`) la sigan mostrando.
+				referenciaEjecucion: input.extras?.nota ?? input.referencia ?? null,
+				...(input.extras
+					? {
+							evidenciaR2Key: input.extras.evidencia?.key ?? null,
+							evidenciaNombreArchivo:
+								input.extras.evidencia?.nombreArchivo ?? null,
+							evidenciaMime: input.extras.evidencia?.mime ?? null,
+							evidenciaNota: input.extras.nota,
+							ubicacionEjecucion: input.extras.ubicacion,
+						}
+					: {}),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(inmovilizacionesUnidad.id, input.id),
+					eq(inmovilizacionesUnidad.estado, "aprobada"),
+				),
+			)
+			.returning({ id: inmovilizacionesUnidad.id });
+
+		if (!actualizada) {
+			throw new ORPCError("CONFLICT", {
+				message: "La solicitud ya no está aprobada.",
+			});
+		}
+
+		await tx.insert(inmovilizacionesUnidadEventos).values({
+			inmovilizacionId: input.id,
+			evento: "marcar_ejecutada",
+			estadoAnterior: "aprobada",
+			estadoNuevo: "ejecutada",
+			usuarioId: context.userId,
+			detalle: {
+				modo: resultado.modo,
+				referencia: input.referencia,
+				// Bucket del crédito al registrar (y si salió con advertencia): el
+				// apagado ya estaba aplicado, esto solo deja constancia.
+				bucketAlEjecutar,
+				advertencia,
+				// Auditoría de la ejecución del asesor: qué adjuntó y dónde estaba
+				// el vehículo. Quién lo hizo y cuándo: `usuarioId` y `createdAt`.
+				...(input.extras
+					? {
+							nota: input.extras.nota,
+							evidencia: input.extras.evidencia,
+							ubicacion: input.extras.ubicacion,
+						}
+					: {}),
+			},
+		});
+
+		// La reactivación cierra el ciclo del apagado que la originó.
+		if (inm.accion === "reactivacion" && inm.inmovilizacionOrigenId) {
+			await tx
+				.update(inmovilizacionesUnidad)
+				.set({ resultado: "reactivada", updatedAt: new Date() })
+				.where(eq(inmovilizacionesUnidad.id, inm.inmovilizacionOrigenId));
+		}
+	});
+
+	if (motivoFalloPrecondicion) {
+		await resolverPendientesInmovilizacion(input.id);
+		await resolverRecordatoriosEjecucion(input.id);
+		throw new ORPCError("CONFLICT", {
+			message: motivoFalloPrecondicion,
+		});
+	}
+
+	// Ya se ejecutó: el recordatorio de "falta ejecutarlo" deja de aplicar.
+	await resolverRecordatoriosEjecucion(input.id);
+
+	// Reactivación directa (cliente pagó por ventanilla, sin pasar por
+	// registrarLlamadaApagado): el aviso "llamar al cliente" del
+	// apagado que originó esto queda con nada que resolverlo — el
+	// banner ya desapareció de la Ficha 360 (pendienteLlamar se apaga
+	// solo cuando la unidad vuelve a "activa"), pero el aviso en
+	// notifications seguía pending para siempre. Review de Codex.
+	if (inm.accion === "reactivacion" && inm.inmovilizacionOrigenId) {
+		await resolverAvisoLlamarCliente(inm.inmovilizacionOrigenId);
+	}
+
+	// Apagado posterior: deja la unidad inmovilizada y deja obsoleta
+	// cualquier llamada de confirmación pendiente de una reactivación
+	// anterior sobre la misma unidad física (o caso): la Ficha 360 ya
+	// no muestra el banner (pendienteLlamarReactivacion requiere unidad
+	// activa) y registrarLlamadaReactivacion la rechaza. Sin esto, el
+	// aviso "unidad reactivada" quedaba pending para siempre en
+	// notifications (la resolución manual está bloqueada para este
+	// tipo).
+	if (inm.accion === "apagado") {
+		const reactivacionesObsoletas = await (inm.wialonUnitId != null
+			? db
+					.select({ id: inmovilizacionesUnidad.id })
+					.from(inmovilizacionesUnidad)
+					.where(
+						and(
+							eq(inmovilizacionesUnidad.wialonUnitId, inm.wialonUnitId),
+							eq(inmovilizacionesUnidad.accion, "reactivacion"),
+							eq(inmovilizacionesUnidad.estado, "ejecutada"),
+							isNull(inmovilizacionesUnidad.llamadaContactoId),
+						),
+					)
+			: db
+					.select({ id: inmovilizacionesUnidad.id })
+					.from(inmovilizacionesUnidad)
+					.where(
+						and(
+							eq(inmovilizacionesUnidad.casoCobroId, inm.casoCobroId),
+							eq(inmovilizacionesUnidad.accion, "reactivacion"),
+							eq(inmovilizacionesUnidad.estado, "ejecutada"),
+							isNull(inmovilizacionesUnidad.llamadaContactoId),
+						),
+					));
+
+		for (const r of reactivacionesObsoletas) {
+			await resolverAvisoLlamarCliente(r.id);
+		}
+	}
+
+	const caso = await getCasoParaInmovilizacion(inm.casoCobroId);
+
+	// Los supervisores se enteran de que el apagado o la reactivación ya se aplicó.
+	await notificarEjecucionASupervisores({
+		inmovilizacionId: inm.id,
+		casoCobroId: inm.casoCobroId,
+		accion: inm.accion,
+		advertencia: advertencia ?? undefined,
+		clienteNombre: caso?.clienteNombre ?? undefined,
+		numeroCreditoSifco: inm.numeroCreditoSifco,
+		ejecutadoPorUserId: context.userId,
+		ejecutadoPorRole: context.userRole,
+	});
+
+	// Al asesor que lleva el crédito en CARTERA. Fallback a quien
+	// solicitó: sin esto, un dueño sin usuario en el CRM dejaba el aviso
+	// sin nadie — ni el asesor, ni quien pidió la acción. Review de Codex.
+	const asesorUserId =
+		(await usuarioDuenoEnCartera(caso?.numeroCreditoSifco)) ??
+		inm.solicitadoPor;
+	if (asesorUserId) {
+		if (await necesitaAvisoLlamada(inm)) {
+			if (inm.accion === "apagado") {
+				await notificarLlamarCliente({
+					inmovilizacionId: inm.id,
+					casoCobroId: inm.casoCobroId,
+					asesorUserId,
+					clienteNombre: caso?.clienteNombre ?? undefined,
+					ejecutadoPorUserId: context.userId,
+					ejecutadoPorRole: context.userRole,
+				});
+			} else {
+				// El asesor es quien le avisa al cliente que ya puede usar el
+				// vehículo: sin este aviso no se entera de que LEGION lo reactivó.
+				await notificarUnidadReactivada({
+					inmovilizacionId: inm.id,
+					casoCobroId: inm.casoCobroId,
+					asesorUserId,
+					clienteNombre: caso?.clienteNombre ?? undefined,
+					ejecutadoPorUserId: context.userId,
+					ejecutadoPorRole: context.userRole,
+				});
+			}
+
+			// Reconciliación:
+			// 1. Si entre la comprobación previa y el await de envío se completó una
+			// llamada o la acción quedó superada por un evento posterior en la unidad
+			// física, la resolución de avisos corrió antes de que esta fila existiera
+			// en notifications. Re-verificamos y cerramos el aviso si ya no aplica.
+			if (!(await necesitaAvisoLlamada(inm))) {
+				await resolverAvisoLlamarCliente(inm.id);
+			} else {
+				// 2. Si cartera reasignó el crédito entre la lectura temprana y el
+				// envío del aviso, el aviso recién creado quedó asignado al asesor
+				// anterior: la reconciliación relee el dueño en cartera y lo mueve
+				// con compare-and-set. Review de Codex, PR #1758 y #1765.
+				await reconciliarAvisosLlamarCliente([inm.casoCobroId]);
+			}
+		}
+	}
+
+	return { ok: true, modo: resultado.modo, advertencia };
+}
+
+/**
+ * El ASESOR declara que LEGION ya aplicó el apagado o la reactivación de la
+ * unidad, una vez aprobada la solicitud. Adjunta la confirmación de LEGION
+ * (archivo y/o nota); en el apagado además la ubicación del vehículo en ese
+ * momento. Todo queda en la fila y en el evento `marcar_ejecutada` (quién,
+ * cuándo, qué adjuntó).
+ *
+ * Quien ejecuta tiene que ser quien lleva el crédito en cartera (o un rol con
+ * visibilidad completa, que pasa sin consulta): `assertAccesoCasoCobro` más la
+ * revalidación SIN cache de cartera. El resto de la ejecución (bucket, vínculo
+ * GPS, avisos) está en `ejecutarAprobada`.
+ *
+ * Fábrica en vez de dos procedures copiados; `ejecutarReactivacion` se exporta
+ * aparte del router por el mismo límite de TS7056 que los demás.
+ */
+function ejecutarPorAsesor(accion: "apagado" | "reactivacion") {
+	return cobrosProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				evidencia: z
+					.object({
+						key: z.string().min(1).max(500),
+						nombreArchivo: z.string().trim().min(1).max(255),
+					})
+					.optional(),
+				nota: z.string().trim().max(1000).optional(),
+				// Consulta de ubicación hecha al abrir el modal (momento "ejecucion").
+				consultaLogId: z.string().uuid().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const errorEvidencia = erroresEvidenciaEjecucion({
+				evidencia: input.evidencia,
+				nota: input.nota,
+			});
+			if (errorEvidencia) {
+				throw new ORPCError("BAD_REQUEST", { message: errorEvidencia });
+			}
+
+			const [inm] = await db
+				.select()
+				.from(inmovilizacionesUnidad)
+				.where(eq(inmovilizacionesUnidad.id, input.id))
+				.limit(1);
+			if (!inm || inm.accion !== accion) {
+				throw new ORPCError("NOT_FOUND", {
+					message: `Solicitud de ${accion === "apagado" ? "apagado" : "reactivación"} no encontrada.`,
+				});
+			}
+			if (inm.estado !== "aprobada") {
+				throw new ORPCError("CONFLICT", {
+					message: "La solicitud no está aprobada (o ya fue ejecutada).",
+				});
+			}
+			if (reactivacionSinRespaldo(inm)) {
+				throw new ORPCError("CONFLICT", {
+					message: MENSAJE_REACTIVACION_SIN_RESPALDO,
+				});
+			}
+
+			await assertAccesoCasoCobro(
+				inm.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			await assertCreditoAsignadoEnCarteraPorSifco({
+				numeroSifco: inm.numeroCreditoSifco,
+				emailUsuario: context.session.user.email,
+				userRole: context.userRole,
+				accion:
+					accion === "apagado"
+						? "registrar el apagado de la unidad"
+						: "registrar la reactivación de la unidad",
+			});
+
+			// La llave la fijó la URL firmada que pidió el navegador
+			// (`cobros_inmovilizacion_evidencia` + este caso): una de otro caso o
+			// de otro módulo no pasa.
+			let evidencia: ExtrasEjecucion["evidencia"] = null;
+			if (input.evidencia) {
+				const r = await verifyUploadedDocumentInR2({
+					key: input.evidencia.key,
+					expectedPrefix: buildUploadPrefix(
+						"cobros_inmovilizacion_evidencia",
+						inm.casoCobroId,
+					),
+					filename: input.evidencia.nombreArchivo,
+					maxSizeBytes: MAX_FILE_SIZE,
+				});
+				if (
+					!(MIME_EVIDENCIA_INMOVILIZACION as readonly string[]).includes(
+						r.mimeType,
+					)
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `«${input.evidencia.nombreArchivo}» no es JPG, PNG, WebP ni PDF.`,
+					});
+				}
+				evidencia = {
+					key: r.key,
+					nombreArchivo: input.evidencia.nombreArchivo,
+					mime: r.mimeType,
+				};
+			}
+
+			// Una falla de Wialon no frena la ejecución (el apagado ya lo hizo
+			// LEGION): queda constancia de que no hubo ubicación.
+			let ubicacion: UbicacionInmovilizacion | null =
+				accion === "apagado"
+					? {
+							fuente: "sin_ubicacion",
+							aviso: "No se consultó la ubicación del vehículo.",
+						}
+					: null;
+			// La reactivación no consulta la ubicación del vehículo.
+			if (accion === "apagado" && input.consultaLogId) {
+				if (!inm.vehicleId) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "La solicitud no tiene un vehículo asociado.",
+					});
+				}
+				const consultada = await leerUbicacionConsulta({
+					consultaLogId: input.consultaLogId,
+					userId: context.userId,
+					vehicleId: inm.vehicleId,
+					momento: "ejecucion",
+				});
+				if (!consultada) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"La consulta de ubicación venció o no es válida. Actualizá la ubicación del GPS.",
+					});
+				}
+				ubicacion = consultada;
+			}
+
+			return ejecutarAprobada(
+				{
+					id: input.id,
+					extras: { evidencia, nota: input.nota || null, ubicacion },
+				},
+				context,
+			);
+		});
+}
+
 export const inmovilizacionUnidadRouter = {
 	/**
 	 * Historial de inmovilizaciones del caso + estado derivado de la unidad +
@@ -367,10 +1380,10 @@ export const inmovilizacionUnidadRouter = {
 				context,
 			}): Promise<{
 				estadoUnidad: ReturnType<typeof estadoUnidad>;
-				solicitudAbierta: FilaInmovilizacion | null;
+				solicitudAbierta: FilaInmovilizacionCarta | null;
 				pendienteLlamar: FilaInmovilizacion | null;
 				pendienteLlamarReactivacion: FilaInmovilizacion | null;
-				historial: FilaInmovilizacion[];
+				historial: FilaInmovilizacionCarta[];
 				tieneGps: boolean;
 			}> => {
 				await assertAccesoCasoCobro(
@@ -403,8 +1416,9 @@ export const inmovilizacionUnidadRouter = {
 						ejecutadoAt: h.ejecutadoAt,
 					}));
 
+				const historialCarta = await enriquecerFilasCarta(historial);
 				const solicitudAbierta =
-					historial.find(
+					historialCarta.find(
 						(h) =>
 							h.estado === "pendiente_aprobacion" || h.estado === "aprobada",
 					) ?? null;
@@ -453,8 +1467,197 @@ export const inmovilizacionUnidadRouter = {
 					solicitudAbierta,
 					pendienteLlamar,
 					pendienteLlamarReactivacion,
-					historial,
+					historial: historialCarta,
 					tieneGps: caso?.wialonUnitId != null,
+				};
+			},
+		),
+
+	/**
+	 * Ubicación actual del vehículo a inmovilizar, desde Wialon. La piden el
+	 * modal de solicitud y el de ejecución. Cada consulta queda auditada en
+	 * `gps_consulta_logs` ANTES de llamar a Wialon (CB-118) y su resultado, en
+	 * el snapshot; `consultaLogId` es lo que después se adjunta a la
+	 * solicitud/ejecución (el server relee ahí la ubicación, no confía en el
+	 * cliente).
+	 *
+	 * No usa `getGpsVehiculo`: ese valida el vehículo contra la oportunidad,
+	 * y la inmovilización resuelve la unidad desde el contrato (ver el
+	 * comentario de la carta en la Ficha 360). Una falla de Wialon NO lanza:
+	 * devuelve `no_disponible` para que el asesor pueda seguir (con la
+	 * dirección escrita a mano al solicitar, o con aviso al ejecutar).
+	 */
+	getUbicacionInmovilizacion: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				momento: z.enum(["solicitud", "ejecucion"]),
+			}),
+		)
+		.handler(
+			async ({
+				input,
+				context,
+			}): Promise<{
+				estado: "ok" | "sin_posicion" | "no_disponible";
+				consultaLogId: string | null;
+				ubicacion: UbicacionInmovilizacion | null;
+				mensaje: string | null;
+			}> => {
+				await assertAccesoCasoCobro(
+					input.casoCobroId,
+					context.userId,
+					context.userRole,
+				);
+				const caso = await getCasoParaInmovilizacion(input.casoCobroId);
+				if (!caso?.numeroCreditoSifco || !caso.vehicleId) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "El caso no tiene un vehículo asociado.",
+					});
+				}
+				if (caso.wialonUnitId == null) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "El vehículo asociado no tiene una unidad GPS vinculada.",
+					});
+				}
+				await assertCreditoAsignadoEnCarteraPorSifco({
+					numeroSifco: caso.numeroCreditoSifco,
+					emailUsuario: context.session.user.email,
+					userRole: context.userRole,
+					accion: "ver la ubicación GPS de este vehículo",
+				});
+
+				const vehicleId = caso.vehicleId;
+				const unitId = caso.wialonUnitId;
+				const unitName = caso.wialonUnitName ?? String(unitId);
+
+				// Auditoría primero: sin fila no se muestra ubicación (fail closed,
+				// mismo criterio que `AUDITORIA_NO_DISPONIBLE` en getGpsVehiculo).
+				let consultaLogId: string;
+				try {
+					const [fila] = await db
+						.insert(gpsConsultaLogs)
+						.values({
+							vehicleId,
+							numeroCreditoSifco: caso.numeroCreditoSifco,
+							motivo: MOTIVO_CONSULTA_UBICACION[input.momento],
+							unitId: String(unitId),
+							unitName,
+							origen: origenConsultaUbicacion(input.momento),
+							userId: context.userId,
+						})
+						.returning({ id: gpsConsultaLogs.id });
+					consultaLogId = fila.id;
+				} catch (error) {
+					console.error("GPS_CONSULTA_LOG_FALLIDO", {
+						vehicleId,
+						message: error instanceof Error ? error.message : String(error),
+					});
+					return {
+						estado: "no_disponible",
+						consultaLogId: null,
+						ubicacion: null,
+						mensaje:
+							"No se pudo registrar la consulta; por seguridad no se muestra la ubicación. Intentá de nuevo.",
+					};
+				}
+
+				let snapshot: Record<string, unknown>;
+				try {
+					const { status, fechas } = await conContextoGps(
+						{
+							origen: "getUbicacionInmovilizacion",
+							userId: context.userId,
+							vehicleId,
+							numeroCreditoSifco: caso.numeroCreditoSifco,
+						},
+						async () => {
+							enlazarConsultaLogEnContexto(consultaLogId);
+							const client = getWialonClient();
+							const [statusList, tiempos] = await Promise.all([
+								client.getUnitsStatus([unitId]),
+								client.getUnitLastTimes(unitId).catch(() => ({
+									ultimoMensajeAt: null,
+									ultimaPosicionAt: null,
+								})),
+							]);
+							return { status: statusList[0], fechas: tiempos };
+						},
+					);
+					snapshot = {
+						estado: "vinculado",
+						auditada: true,
+						unitId,
+						unitName,
+						vinculoOrigen: "persistido",
+						placa: null,
+						telemetria: {
+							mileageKm: status?.mileageKm,
+							mileageFormatted: status?.mileageFormatted,
+							engineHours: status?.engineHours,
+							engineHoursFormatted: status?.engineHoursFormatted,
+							speedKmh: status?.speedKmh,
+							latitude: status?.latitude,
+							longitude: status?.longitude,
+							isIgnitionOn: status?.isIgnitionOn,
+							ultimaSenalAt: fechas.ultimoMensajeAt,
+							ultimaPosicionAt: fechas.ultimaPosicionAt,
+						},
+					};
+				} catch (error) {
+					console.error("GPS_UBICACION_INMOVILIZACION_ERROR", {
+						vehicleId,
+						code: error instanceof WialonClientError ? error.code : undefined,
+						message: error instanceof Error ? error.message : String(error),
+					});
+					snapshot = {
+						estado: "no_disponible",
+						auditada: true,
+						error: {
+							code:
+								error instanceof WialonClientError
+									? error.code
+									: "ERROR_INTERNO",
+							message:
+								error instanceof WialonClientError
+									? mensajeUsuarioWialon(error)
+									: "No se pudo consultar el GPS del vehículo. Intente de nuevo.",
+						},
+						referencia: null,
+					};
+				}
+
+				// Mismo criterio que getGpsVehiculo: el snapshot es best-effort, la
+				// auditoría ya quedó. El mismo objeto se relee después al adjuntar la
+				// consulta, así que si no se guarda la ubicación no se puede adjuntar.
+				try {
+					await db
+						.update(gpsConsultaLogs)
+						.set({ snapshot })
+						.where(eq(gpsConsultaLogs.id, consultaLogId));
+				} catch (error) {
+					console.error("GPS_CONSULTA_SNAPSHOT_FALLIDO", {
+						vehicleId,
+						message: error instanceof Error ? error.message : String(error),
+					});
+				}
+
+				const ubicacion = ubicacionDesdeSnapshot(
+					snapshot,
+					consultaLogId,
+					unitName,
+				);
+				if (ubicacion.fuente === "gps") {
+					return { estado: "ok", consultaLogId, ubicacion, mensaje: null };
+				}
+				return {
+					estado:
+						(snapshot as { estado?: string }).estado === "vinculado"
+							? "sin_posicion"
+							: "no_disponible",
+					consultaLogId,
+					ubicacion,
+					mensaje: ubicacion.aviso ?? null,
 				};
 			},
 		),
@@ -473,13 +1676,60 @@ export const inmovilizacionUnidadRouter = {
 			z.object({
 				casoCobroId: z.string().uuid(),
 				accion: z.enum(["apagado", "reactivacion"]),
-				motivo: z
-					.string()
-					.trim()
-					.min(5, "El motivo es obligatorio (mínimo 5 caracteres)"),
+				// Reactivación: qué pasó, el pago que lo respalda (si aplica) y detalle.
+				quePaso: z.enum(CLAVES_QUE_PASO_REACTIVACION).optional(),
+				pagoId: z.number().int().positive().optional(),
+				// Apagado: motivos del catálogo + detalle + dónde está el vehículo.
+				motivos: z.array(z.string().min(1).max(60)).max(12).optional(),
+				motivoDetalle: z.string().trim().max(2000).optional(),
+				ubicacion: z
+					.object({
+						consultaLogId: z.string().uuid().optional(),
+						direccion: z.string().trim().max(500).optional(),
+						enlace: z.string().trim().max(1000).optional(),
+					})
+					.optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
+			// Lo que depende solo del input se valida antes de tocar la base.
+			let motivoTexto: string;
+			if (input.accion === "apagado") {
+				const errorMotivos = erroresMotivosInmovilizacion(
+					input.motivos ?? [],
+					input.motivoDetalle,
+				);
+				if (errorMotivos) {
+					throw new ORPCError("BAD_REQUEST", { message: errorMotivos });
+				}
+				if (
+					input.ubicacion?.enlace &&
+					!/^https?:\/\//i.test(input.ubicacion.enlace)
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "El enlace tiene que empezar con http:// o https://",
+					});
+				}
+				const errorUbicacion = erroresUbicacionSolicitud(input.ubicacion ?? {});
+				if (errorUbicacion) {
+					throw new ORPCError("BAD_REQUEST", { message: errorUbicacion });
+				}
+				motivoTexto = componerMotivoApagado(
+					input.motivos ?? [],
+					input.motivoDetalle,
+				);
+			} else {
+				if (!input.quePaso) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "Elegí qué pasó: pago, promesa de pago o 50% + promesa.",
+					});
+				}
+				motivoTexto = componerMotivoReactivacion(
+					input.quePaso,
+					input.motivoDetalle,
+				);
+			}
+
 			await assertAccesoCasoCobro(
 				input.casoCobroId,
 				context.userId,
@@ -497,7 +1747,9 @@ export const inmovilizacionUnidadRouter = {
 			// solicitud de "apagar" sin unidad real. Review de Codex.
 			if (!caso.vehicleId) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: "El caso no tiene un vehículo asociado para inmovilizar.",
+					message: caso.vehiculoAmbiguo
+						? "El crédito tiene más de un vehículo registrado; no se puede determinar cuál inmovilizar. Hay que corregir las oportunidades del SIFCO."
+						: "El caso no tiene un vehículo asociado para inmovilizar.",
 				});
 			}
 			const vehicleId = caso.vehicleId;
@@ -507,11 +1759,50 @@ export const inmovilizacionUnidadRouter = {
 			// Review de Codex.
 			if (caso.wialonUnitId == null) {
 				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"El vehículo asociado no tiene una unidad GPS vinculada.",
+					message: "El vehículo asociado no tiene una unidad GPS vinculada.",
 				});
 			}
 			const wialonUnitId = caso.wialonUnitId;
+
+			// Apagado: la ubicación sale de una consulta GPS auditada (se relee
+			// acá, no se confía en lo que mande el cliente) o, si Wialon no
+			// respondió, de la dirección/enlace que escribió el asesor.
+			let ubicacionSolicitud: UbicacionInmovilizacion | null = null;
+			if (input.accion === "apagado") {
+				const consultada = input.ubicacion?.consultaLogId
+					? await leerUbicacionConsulta({
+							consultaLogId: input.ubicacion.consultaLogId,
+							userId: context.userId,
+							vehicleId,
+							momento: "solicitud",
+						})
+					: null;
+				if (input.ubicacion?.consultaLogId && !consultada) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"La consulta de ubicación venció o no es válida. Actualizá la ubicación del GPS.",
+					});
+				}
+				const direccion = input.ubicacion?.direccion || null;
+				const enlace = input.ubicacion?.enlace || null;
+				if (consultada?.fuente === "gps") {
+					ubicacionSolicitud = { ...consultada, direccion, enlace };
+				} else if (direccion || enlace) {
+					ubicacionSolicitud = {
+						fuente: "manual",
+						direccion,
+						enlace,
+						consultaLogId: consultada?.consultaLogId ?? null,
+						unidad: consultada?.unidad ?? null,
+						aviso: consultada?.aviso ?? null,
+					};
+				} else {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El GPS no devolvió la ubicación: escribí la dirección o el enlace del vehículo.",
+					});
+				}
+			}
 
 			await assertCreditoAsignadoEnCarteraPorSifco({
 				numeroSifco: caso.numeroCreditoSifco,
@@ -574,9 +1865,27 @@ export const inmovilizacionUnidadRouter = {
 				throw new ORPCError("BAD_REQUEST", { message });
 			}
 
-			// La reactivación pedida directo (sin pasar por "pagó" en la llamada)
-			// también apunta al apagado que revierte, para que al ejecutarse ese
-			// apagado quede con resultado = 'reactivada'.
+			// Reactivación: el respaldo (pago y/o promesa) se verifica contra
+			// cartera y contra las gestiones del caso, no contra el navegador.
+			let respaldoReactivacion: RespaldoReactivacion | null = null;
+			if (input.accion === "reactivacion" && input.quePaso) {
+				const apagadoVigente = ultimaEjecutada(historial, "apagado");
+				if (!apagadoVigente?.ejecutadoAt) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "No se encontró el apagado que se quiere revertir.",
+					});
+				}
+				respaldoReactivacion = await resolverRespaldoReactivacion({
+					quePaso: input.quePaso,
+					pagoId: input.pagoId,
+					casoCobroId: input.casoCobroId,
+					numeroCreditoSifco: caso.numeroCreditoSifco,
+					apagadoEjecutadoAt: apagadoVigente.ejecutadoAt,
+				});
+			}
+
+			// La reactivación también apunta al apagado que revierte, para que al
+			// ejecutarse ese apagado quede con resultado = 'reactivada'.
 			const origenId =
 				input.accion === "reactivacion"
 					? (ultimaEjecutada(historial, "apagado")?.id ?? null)
@@ -610,28 +1919,34 @@ export const inmovilizacionUnidadRouter = {
 						});
 					}
 
-					if (vehiculoTx.wialonUnitId == null) {
-						throw new ORPCError("CONFLICT", {
-							message:
-								"El vehículo asociado no tiene una unidad GPS vinculada.",
-						});
-					}
+					// La reactivación va contra la unidad guardada en el apagado
+					// (`getCasoParaInmovilizacion`), que sigue apagada aunque su GPS se
+					// haya reasignado a otro vehículo: no se exige el vínculo vigente.
+					// Que esa unidad siga inmovilizada se confirma abajo, bajo lock.
+					if (input.accion === "apagado") {
+						if (vehiculoTx.wialonUnitId == null) {
+							throw new ORPCError("CONFLICT", {
+								message:
+									"El vehículo asociado no tiene una unidad GPS vinculada.",
+							});
+						}
 
-					if (vehiculoTx.wialonUnitId !== wialonUnitId) {
-						throw new ORPCError("CONFLICT", {
-							message:
-								"La unidad GPS del vehículo cambió durante la solicitud. Por favor intentá de nuevo.",
-						});
+						if (vehiculoTx.wialonUnitId !== wialonUnitId) {
+							throw new ORPCError("CONFLICT", {
+								message:
+									"La unidad GPS del vehículo cambió durante la solicitud. Por favor intentá de nuevo.",
+							});
+						}
 					}
 
 					// Re-validar estado bajo lock: entre la lectura temprana fuera
 					// de transacción y la adquisición del advisory lock, otro caso
 					// compartiendo la misma unidad física pudo haber completado la
-					// acción opuesta (marcarEjecutada). Re-leer el historial bajo
+					// acción opuesta (ejecutarAprobada). Re-leer el historial bajo
 					// lock garantiza que el estado y el origenId sean los reales.
 					const historialTx = await getHistorialUnidadFisicaTx(tx)(
 						input.casoCobroId,
-						vehiculoTx.wialonUnitId,
+						wialonUnitId,
 					);
 					const estadoActualTx = estadoUnidad(
 						historialTx.map((h) => ({
@@ -668,9 +1983,14 @@ export const inmovilizacionUnidadRouter = {
 							casoCobroId: input.casoCobroId,
 							numeroCreditoSifco: caso.numeroCreditoSifco as string,
 							vehicleId: caso.vehicleId,
-							wialonUnitId: vehiculoTx.wialonUnitId,
+							wialonUnitId,
 							accion: input.accion,
-							motivo: input.motivo,
+							motivo: motivoTexto,
+							motivos: input.accion === "apagado" ? input.motivos : null,
+							motivoDetalle: input.motivoDetalle || null,
+							quePaso: input.accion === "reactivacion" ? input.quePaso : null,
+							respaldoReactivacion,
+							ubicacionSolicitud,
 							bucketSnapshot: bucket,
 							solicitadoPor: context.userId,
 							inmovilizacionOrigenId: origenIdTx,
@@ -682,7 +2002,14 @@ export const inmovilizacionUnidadRouter = {
 						evento: "solicitar",
 						estadoNuevo: "pendiente_aprobacion",
 						usuarioId: context.userId,
-						detalle: { accion: input.accion, motivo: input.motivo },
+						detalle: {
+							accion: input.accion,
+							motivo: motivoTexto,
+							motivos: input.accion === "apagado" ? input.motivos : undefined,
+							quePaso: input.quePaso,
+							respaldo: respaldoReactivacion ?? undefined,
+							ubicacion: ubicacionSolicitud ?? undefined,
+						},
 					});
 
 					return fila.id;
@@ -707,7 +2034,7 @@ export const inmovilizacionUnidadRouter = {
 				accion: input.accion,
 				clienteNombre: caso.clienteNombre ?? undefined,
 				numeroCreditoSifco: caso.numeroCreditoSifco,
-				motivo: input.motivo,
+				motivo: motivoTexto,
 				solicitadoPorUserId: context.userId,
 				solicitadoPorRole: context.userRole,
 			});
@@ -716,13 +2043,46 @@ export const inmovilizacionUnidadRouter = {
 		}),
 
 	/**
-	 * El propio solicitante cancela su solicitud, solo mientras siga
-	 * `pendiente_aprobacion`. Una vez aprobada ya no se cancela desde acá: el
-	 * supervisor ya la está coordinando con LEGION.
+	 * Cancela una solicitud abierta. Mientras está `pendiente_aprobacion` solo
+	 * la retira quien la pidió. Un APAGADO ya aprobado lo retira quien puede
+	 * ejecutarlo (mismo acceso que `ejecutarApagado`): si LEGION no lo aplica o
+	 * ya no corresponde, sin esto la solicitud quedaba `aprobada` para siempre,
+	 * bloqueando nuevas solicitudes del caso y con un recordatorio diario que
+	 * nadie podía cerrar (review de Codex, PR #1807).
 	 */
 	cancelarSolicitud: cobrosProcedure
 		.input(z.object({ id: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
+			const [previa] = await db
+				.select({
+					accion: inmovilizacionesUnidad.accion,
+					estado: inmovilizacionesUnidad.estado,
+					casoCobroId: inmovilizacionesUnidad.casoCobroId,
+					numeroCreditoSifco: inmovilizacionesUnidad.numeroCreditoSifco,
+				})
+				.from(inmovilizacionesUnidad)
+				.where(eq(inmovilizacionesUnidad.id, input.id))
+				.limit(1);
+
+			const cancelaApagadoAprobado =
+				previa?.accion === "apagado" && previa.estado === "aprobada";
+			if (cancelaApagadoAprobado) {
+				await assertAccesoCasoCobro(
+					previa.casoCobroId,
+					context.userId,
+					context.userRole,
+				);
+				await assertCreditoAsignadoEnCarteraPorSifco({
+					numeroSifco: previa.numeroCreditoSifco,
+					emailUsuario: context.session.user.email,
+					userRole: context.userRole,
+					accion: "cancelar el apagado aprobado de la unidad",
+				});
+			}
+			const estadoAnterior = cancelaApagadoAprobado
+				? ("aprobada" as const)
+				: ("pendiente_aprobacion" as const);
+
 			const cancelada = await db.transaction(async (tx) => {
 				const [fila] = await tx
 					.update(inmovilizacionesUnidad)
@@ -730,8 +2090,10 @@ export const inmovilizacionUnidadRouter = {
 					.where(
 						and(
 							eq(inmovilizacionesUnidad.id, input.id),
-							eq(inmovilizacionesUnidad.solicitadoPor, context.userId),
-							eq(inmovilizacionesUnidad.estado, "pendiente_aprobacion"),
+							eq(inmovilizacionesUnidad.estado, estadoAnterior),
+							cancelaApagadoAprobado
+								? eq(inmovilizacionesUnidad.accion, "apagado")
+								: eq(inmovilizacionesUnidad.solicitadoPor, context.userId),
 						),
 					)
 					.returning({ id: inmovilizacionesUnidad.id });
@@ -740,7 +2102,7 @@ export const inmovilizacionUnidadRouter = {
 				await tx.insert(inmovilizacionesUnidadEventos).values({
 					inmovilizacionId: input.id,
 					evento: "cancelar",
-					estadoAnterior: "pendiente_aprobacion",
+					estadoAnterior,
 					estadoNuevo: "cancelada",
 					usuarioId: context.userId,
 				});
@@ -750,13 +2112,15 @@ export const inmovilizacionUnidadRouter = {
 			if (!cancelada) {
 				throw new ORPCError("CONFLICT", {
 					message:
-						"La solicitud ya no está pendiente de aprobación, o no te pertenece.",
+						"La solicitud ya no se puede cancelar (ya se decidió o ejecutó), o no te pertenece.",
 				});
 			}
 
 			// Los supervisores ya no tienen nada que decidir: sin esto seguían
-			// viendo el aviso y al abrirlo chocaban con un CONFLICT.
+			// viendo el aviso y al abrirlo chocaban con un CONFLICT. Y el
+			// recordatorio de "falta ejecutarlo" deja de aplicar.
 			await resolverPendientesInmovilizacion(input.id);
+			await resolverRecordatoriosEjecucion(input.id);
 
 			return { ok: true };
 		}),
@@ -774,6 +2138,9 @@ export const inmovilizacionUnidadRouter = {
 				accion: inmovilizacionesUnidad.accion,
 				estado: inmovilizacionesUnidad.estado,
 				motivo: inmovilizacionesUnidad.motivo,
+				quePaso: inmovilizacionesUnidad.quePaso,
+				respaldoReactivacion: inmovilizacionesUnidad.respaldoReactivacion,
+				ubicacionSolicitud: inmovilizacionesUnidad.ubicacionSolicitud,
 				bucketSnapshot: inmovilizacionesUnidad.bucketSnapshot,
 				solicitadoAt: inmovilizacionesUnidad.solicitadoAt,
 				solicitanteNombre: user.name,
@@ -822,6 +2189,50 @@ export const inmovilizacionUnidadRouter = {
 			const nuevoEstado =
 				input.decision === "aprobar" ? "aprobada" : "rechazada";
 
+			// Aprobar un apagado es el último control antes de pedirle a LEGION que
+			// lo aplique: el crédito tiene que seguir en B2-B4 (si el cliente ya
+			// pagó, no se apaga). Falla cerrado: sin poder confirmar el bucket no
+			// se aprueba. Después de aplicado ya no se cancela (ver `ejecutarAprobada`).
+			if (input.decision === "aprobar") {
+				const [pendiente] = await db
+					.select()
+					.from(inmovilizacionesUnidad)
+					.where(eq(inmovilizacionesUnidad.id, input.id))
+					.limit(1);
+				// Una reactivación sin respaldo (pedida antes de exigirlo) no se
+				// aprueba: se rechaza y se pide de nuevo con el pago o la promesa.
+				if (pendiente && reactivacionSinRespaldo(pendiente)) {
+					throw new ORPCError("CONFLICT", {
+						message: `${MENSAJE_REACTIVACION_SIN_RESPALDO} Rechazá esta solicitud.`,
+					});
+				}
+				if (pendiente?.accion === "apagado" && isCarteraBackEnabled()) {
+					let bucket: number | null = null;
+					try {
+						const actual = await carteraBackClient.getBucketActualCredito(
+							pendiente.numeroCreditoSifco,
+						);
+						bucket = actual?.bucket ?? null;
+					} catch (error) {
+						console.error(
+							"[decidirInmovilizacion] No se pudo resolver el bucket:",
+							error,
+						);
+					}
+					if (bucket == null) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"No se pudo confirmar el bucket del crédito en cartera. Intentá de nuevo en unos minutos.",
+						});
+					}
+					if (!BUCKETS_INMOVILIZACION.includes(bucket)) {
+						throw new ORPCError("CONFLICT", {
+							message: `El crédito ya no está en ${bucketsInmovilizacionTexto()} (está en B${bucket}): el apagado ya no aplica. Rechazá la solicitud.`,
+						});
+					}
+				}
+			}
+
 			const actualizada = await db.transaction(async (tx) => {
 				const [fila] = await tx
 					.update(inmovilizacionesUnidad)
@@ -844,6 +2255,7 @@ export const inmovilizacionUnidadRouter = {
 						casoCobroId: inmovilizacionesUnidad.casoCobroId,
 						accion: inmovilizacionesUnidad.accion,
 						solicitadoPor: inmovilizacionesUnidad.solicitadoPor,
+						numeroCreditoSifco: inmovilizacionesUnidad.numeroCreditoSifco,
 					});
 				if (!fila) return null;
 
@@ -870,6 +2282,7 @@ export const inmovilizacionUnidadRouter = {
 			await notificarInmovilizacionResuelta({
 				inmovilizacionId: actualizada.id,
 				casoCobroId: actualizada.casoCobroId,
+				numeroCreditoSifco: actualizada.numeroCreditoSifco,
 				accion: actualizada.accion,
 				decision: nuevoEstado,
 				motivoRechazo: input.motivoRechazo,
@@ -881,576 +2294,13 @@ export const inmovilizacionUnidadRouter = {
 			return { ok: true };
 		}),
 
-	/**
-	 * El supervisor marca que la acción YA se ejecutó — hoy siempre en modo
-	 * manual: coordinó con LEGION por fuera del CRM. `referencia` es la nota
-	 * o ticket de LEGION que respalda eso.
-	 */
-	marcarEjecutada: cobrosSupervisorProcedure
-		.input(
-			z.object({
-				id: z.string().uuid(),
-				referencia: z.string().trim().max(500).optional(),
-			}),
-		)
-		.handler(async ({ input, context }) => {
-			const [inm] = await db
-				.select()
-				.from(inmovilizacionesUnidad)
-				.where(
-					and(
-						eq(inmovilizacionesUnidad.id, input.id),
-						eq(inmovilizacionesUnidad.estado, "aprobada"),
-					),
-				)
-				.limit(1);
-
-			if (!inm) {
-				throw new ORPCError("CONFLICT", {
-					message: "La solicitud no está aprobada (o ya fue ejecutada).",
-				});
-			}
-
-			let motivoFalloPrecondicion: string | null = null;
-			let detalleFalloPrecondicion: Record<string, unknown> | undefined;
-
-			// Si la acción es apagado, revalidar que el crédito siga en mora en un bucket habilitado:
-			// si el cliente pagó entre la aprobación y la ejecución, el crédito bajó
-			// a B0/B1 (o salió del funnel) y no debe apagarse el vehículo. Review de Codex.
-			if (inm.accion === "apagado" && isCarteraBackEnabled()) {
-				let bucket: number | null = null;
-				try {
-					const bucketActual = await carteraBackClient.getBucketActualCredito(
-						inm.numeroCreditoSifco,
-					);
-					bucket = bucketActual?.bucket ?? null;
-				} catch (error) {
-					console.error(
-						"[marcarEjecutada] No se pudo resolver el bucket:",
-						error,
-					);
-				}
-				if (bucket == null) {
-					// Fallo transitorio de red/timeout con cartera-back: se rechaza la
-					// ejecución pero no se cancela la aprobación para permitir reintentar.
-					throw new ORPCError("CONFLICT", {
-						message:
-							"No se pudo confirmar el bucket del crédito en cartera. Intentá de nuevo en unos minutos.",
-					});
-				}
-				if (!BUCKETS_INMOVILIZACION.includes(bucket)) {
-					motivoFalloPrecondicion = `El crédito ya no se encuentra en mora ${bucketsInmovilizacionTexto()} (está en B${bucket}). El apagado ya no aplica.`;
-					detalleFalloPrecondicion = { bucket };
-				}
-			}
-
-			let resultado!: Awaited<ReturnType<typeof ejecutarInmovilizacion>>;
-
-			await db.transaction(async (tx) => {
-				// Serializa contra registrarResultadoLlamada / registrarLlamadaReactivacion
-				// sobre la MISMA unidad física — evita el deadlock de locks de fila
-				// en orden cruzado (esta transacción toca `input.id` y después
-				// `inmovilizacionOrigenId`; la otra puede tocarlos al revés). Ver
-				// comentario de `bloquearUnidadFisica`. Review de Codex, PR #1758.
-				await bloquearUnidadFisica(tx, {
-					casoCobroId: inm.casoCobroId,
-					wialonUnitId: inm.wialonUnitId,
-				});
-
-				// Re-validar la vinculación Wialon del vehículo bajo lock (FOR UPDATE):
-				// el lock de fila sobre vehicles serializa contra vincularUnidadWialon
-				// (que toma lock exclusivo al reasignar la unidad del vehículo),
-				// evitando que el GPS sea reemplazado concurrentemente entre esta
-				// lectura y ejecutarInmovilizacion. Review de Codex.
-				if (!motivoFalloPrecondicion) {
-					if (!inm.vehicleId) {
-						motivoFalloPrecondicion =
-							"El vehículo asociado a la solicitud ya no existe o fue desasociado.";
-					} else {
-						const [vehiculoTx] = await tx
-							.select({ wialonUnitId: vehicles.wialonUnitId })
-							.from(vehicles)
-							.where(eq(vehicles.id, inm.vehicleId))
-							.for("update")
-							.limit(1);
-
-						if (!vehiculoTx) {
-							motivoFalloPrecondicion =
-								"El vehículo asociado a la solicitud ya no existe o fue desasociado.";
-						} else if (
-							inm.wialonUnitId == null ||
-							vehiculoTx.wialonUnitId == null
-						) {
-							motivoFalloPrecondicion =
-								"El vehículo asociado no tiene una unidad GPS vinculada.";
-						} else if (
-							vehiculoTx.wialonUnitId !== inm.wialonUnitId
-						) {
-							motivoFalloPrecondicion =
-								"La unidad GPS del vehículo cambió o fue reasignada tras la aprobación. La acción ya no aplica a la unidad original.";
-						}
-					}
-				}
-
-				if (motivoFalloPrecondicion) {
-					// Precondición de ejecución falló (el cliente pagó, el vehículo fue
-					// desasociado o el GPS fue reasignado tras la aprobación). En vez de
-					// dejar la fila huérfana en 'aprobada' (que bloquearía permanentemente
-					// cualquier solicitud futura del caso por el índice único de abiertas),
-					// se cancela atómicamente la aprobación y se audita el evento. Review de Codex.
-					const [cancelada] = await tx
-						.update(inmovilizacionesUnidad)
-						.set({
-							estado: "cancelada",
-							updatedAt: new Date(),
-						})
-						.where(
-							and(
-								eq(inmovilizacionesUnidad.id, input.id),
-								eq(inmovilizacionesUnidad.estado, "aprobada"),
-							),
-						)
-						.returning({ id: inmovilizacionesUnidad.id });
-
-					// Solo auditar si esta transacción fue la que canceló la fila: si dos
-					// supervisores ejecutaron concurrentemente con precondición fallida,
-					// el segundo UPDATE devuelve cero filas y no debe duplicar el evento.
-					// Review de Codex, PR #1758.
-					if (cancelada) {
-						await tx.insert(inmovilizacionesUnidadEventos).values({
-							inmovilizacionId: input.id,
-							evento: "cancelar",
-							estadoAnterior: "aprobada",
-							estadoNuevo: "cancelada",
-							usuarioId: context.userId,
-							detalle: {
-								motivo: motivoFalloPrecondicion,
-								...detalleFalloPrecondicion,
-							},
-						});
-					}
-					return;
-				}
-
-				resultado = await ejecutarInmovilizacion({
-					accion: inm.accion,
-					wialonUnitId: inm.wialonUnitId,
-				});
-
-				const [actualizada] = await tx
-					.update(inmovilizacionesUnidad)
-					.set({
-						estado: "ejecutada",
-						ejecutadoPor: context.userId,
-						ejecutadoAt: new Date(),
-						modoEjecucion: resultado.modo,
-						referenciaEjecucion: input.referencia ?? null,
-						updatedAt: new Date(),
-					})
-					.where(
-						and(
-							eq(inmovilizacionesUnidad.id, input.id),
-							eq(inmovilizacionesUnidad.estado, "aprobada"),
-						),
-					)
-					.returning({ id: inmovilizacionesUnidad.id });
-
-				if (!actualizada) {
-					throw new ORPCError("CONFLICT", {
-						message: "La solicitud ya no está aprobada.",
-					});
-				}
-
-				await tx.insert(inmovilizacionesUnidadEventos).values({
-					inmovilizacionId: input.id,
-					evento: "marcar_ejecutada",
-					estadoAnterior: "aprobada",
-					estadoNuevo: "ejecutada",
-					usuarioId: context.userId,
-					detalle: { modo: resultado.modo, referencia: input.referencia },
-				});
-
-				// La reactivación cierra el ciclo del apagado que la originó.
-				if (inm.accion === "reactivacion" && inm.inmovilizacionOrigenId) {
-					await tx
-						.update(inmovilizacionesUnidad)
-						.set({ resultado: "reactivada", updatedAt: new Date() })
-						.where(eq(inmovilizacionesUnidad.id, inm.inmovilizacionOrigenId));
-				}
-			});
-
-			if (motivoFalloPrecondicion) {
-				await resolverPendientesInmovilizacion(input.id);
-				throw new ORPCError("CONFLICT", {
-					message: motivoFalloPrecondicion,
-				});
-			}
-
-			// Reactivación directa (cliente pagó por ventanilla, sin pasar por
-			// registrarResultadoLlamada): el aviso "llamar al cliente" del
-			// apagado que originó esto queda con nada que resolverlo — el
-			// banner ya desapareció de la Ficha 360 (pendienteLlamar se apaga
-			// solo cuando la unidad vuelve a "activa"), pero el aviso en
-			// notifications seguía pending para siempre. Review de Codex.
-			if (inm.accion === "reactivacion" && inm.inmovilizacionOrigenId) {
-				await resolverAvisoLlamarCliente(inm.inmovilizacionOrigenId);
-			}
-
-			// Apagado posterior: deja la unidad inmovilizada y deja obsoleta
-			// cualquier llamada de confirmación pendiente de una reactivación
-			// anterior sobre la misma unidad física (o caso): la Ficha 360 ya
-			// no muestra el banner (pendienteLlamarReactivacion requiere unidad
-			// activa) y registrarLlamadaReactivacion la rechaza. Sin esto, el
-			// aviso "unidad reactivada" quedaba pending para siempre en
-			// notifications (la resolución manual está bloqueada para este
-			// tipo).
-			if (inm.accion === "apagado") {
-				const reactivacionesObsoletas = await (inm.wialonUnitId != null
-					? db
-							.select({ id: inmovilizacionesUnidad.id })
-							.from(inmovilizacionesUnidad)
-							.where(
-								and(
-									eq(inmovilizacionesUnidad.wialonUnitId, inm.wialonUnitId),
-									eq(inmovilizacionesUnidad.accion, "reactivacion"),
-									eq(inmovilizacionesUnidad.estado, "ejecutada"),
-									isNull(inmovilizacionesUnidad.llamadaContactoId),
-								),
-							)
-					: db
-							.select({ id: inmovilizacionesUnidad.id })
-							.from(inmovilizacionesUnidad)
-							.where(
-								and(
-									eq(inmovilizacionesUnidad.casoCobroId, inm.casoCobroId),
-									eq(inmovilizacionesUnidad.accion, "reactivacion"),
-									eq(inmovilizacionesUnidad.estado, "ejecutada"),
-									isNull(inmovilizacionesUnidad.llamadaContactoId),
-								),
-							));
-
-				for (const r of reactivacionesObsoletas) {
-					await resolverAvisoLlamarCliente(r.id);
-				}
-			}
-
-			const caso = await getCasoParaInmovilizacion(inm.casoCobroId);
-			// Al asesor que lleva el crédito en CARTERA. Fallback a quien
-			// solicitó: sin esto, un dueño sin usuario en el CRM dejaba el aviso
-			// sin nadie — ni el asesor, ni quien pidió la acción. Review de Codex.
-			const asesorUserId =
-				(await usuarioDuenoEnCartera(caso?.numeroCreditoSifco)) ??
-				inm.solicitadoPor;
-			if (asesorUserId) {
-				if (await necesitaAvisoLlamada(inm)) {
-					if (inm.accion === "apagado") {
-						await notificarLlamarCliente({
-							inmovilizacionId: inm.id,
-							casoCobroId: inm.casoCobroId,
-							asesorUserId,
-							clienteNombre: caso?.clienteNombre ?? undefined,
-							ejecutadoPorUserId: context.userId,
-							ejecutadoPorRole: context.userRole,
-						});
-					} else {
-						// El asesor es quien le avisa al cliente que ya puede usar el
-						// vehículo: sin este aviso no se entera de que LEGION lo reactivó.
-						await notificarUnidadReactivada({
-							inmovilizacionId: inm.id,
-							casoCobroId: inm.casoCobroId,
-							asesorUserId,
-							clienteNombre: caso?.clienteNombre ?? undefined,
-							ejecutadoPorUserId: context.userId,
-							ejecutadoPorRole: context.userRole,
-						});
-					}
-
-					// Reconciliación:
-					// 1. Si entre la comprobación previa y el await de envío se completó una
-					// llamada o la acción quedó superada por un evento posterior en la unidad
-					// física, la resolución de avisos corrió antes de que esta fila existiera
-					// en notifications. Re-verificamos y cerramos el aviso si ya no aplica.
-					if (!(await necesitaAvisoLlamada(inm))) {
-						await resolverAvisoLlamarCliente(inm.id);
-					} else {
-						// 2. Si cartera reasignó el crédito entre la lectura temprana y el
-						// envío del aviso, el aviso recién creado quedó asignado al asesor
-						// anterior: la reconciliación relee el dueño en cartera y lo mueve
-						// con compare-and-set. Review de Codex, PR #1758 y #1765.
-						await reconciliarAvisosLlamarCliente([inm.casoCobroId]);
-					}
-				}
-			}
-
-			return { ok: true, modo: resultado.modo };
-		}),
-
-	/**
-	 * Registra el resultado de la llamada posterior al apagado. La gestión en
-	 * sí (contactosCobros) ya se creó por `createContactoCobros` — acá solo
-	 * se ENLAZA esa gestión con la inmovilización y se decide el siguiente
-	 * paso: `paga` abre una solicitud de reactivación (a aprobación); `no_paga`
-	 * cierra el ciclo dejando que la UI ofrezca `enviarCreditoARecuperacion`
-	 * (ya existe, no se duplica acá).
-	 */
-	registrarResultadoLlamada: cobrosProcedure
-		.input(
-			z.object({
-				inmovilizacionId: z.string().uuid(),
-				contactoId: z.string().uuid(),
-				resultado: z.enum(["paga", "no_paga"]),
-			}),
-		)
-		.handler(async ({ input, context }) => {
-			const [inm] = await db
-				.select()
-				.from(inmovilizacionesUnidad)
-				.where(
-					and(
-						eq(inmovilizacionesUnidad.id, input.inmovilizacionId),
-						eq(inmovilizacionesUnidad.accion, "apagado"),
-						eq(inmovilizacionesUnidad.estado, "ejecutada"),
-					),
-				)
-				.limit(1);
-
-			if (!inm) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "No hay un apagado ejecutado con ese id.",
-				});
-			}
-
-			await assertAccesoLlamadaInmovilizacion(
-				inm,
-				context.userId,
-				context.userRole,
-			);
-
-			if (inm.llamadaContactoId !== null) {
-				throw new ORPCError("CONFLICT", {
-					message: "El resultado de esta llamada ya se registró.",
-				});
-			}
-
-			// Chequeo temprano SIN lock: da un mensaje claro rápido para el caso
-			// común. La garantía real bajo concurrencia es el re-chequeo CON
-			// lock, dentro de la transacción (ver más abajo) — este de acá
-			// puede quedar desactualizado si algo cambia entre esta lectura y
-			// el UPDATE. Review de Codex, PR #1758.
-			if (!(await filaSigueVigente(inm, getHistorialUnidadFisica))) {
-				throw new ORPCError("CONFLICT", {
-					message:
-						"Este apagado ya no es el vigente de la unidad: fue superado por un ciclo más reciente.",
-				});
-			}
-
-			// El contacto tiene que ser del MISMO caso — evita enlazar la
-			// llamada de un caso distinto (contactoId enumerable) —, una LLAMADA
-			// (no whatsapp/sms/visita/pago) POSTERIOR al apagado, y no puede
-			// estar ya enlazado a otra inmovilización. Sin el filtro de método y
-			// fecha, cualquier gestión vieja o de otro canal —incluso una de
-			// `resultado: "paga"`— podía enlazarse como si fuera la llamada
-			// posterior exigida, sin que esa llamada hubiera ocurrido. Review de
-			// Codex, PR #1758.
-			const [contacto] = await db
-				.select({
-					id: contactosCobros.id,
-					inmovilizacionId: contactosCobros.inmovilizacionId,
-				})
-				.from(contactosCobros)
-				.where(
-					and(
-						eq(contactosCobros.id, input.contactoId),
-						eq(contactosCobros.casoCobroId, inm.casoCobroId),
-						eq(contactosCobros.metodoContacto, "llamada"),
-						gt(contactosCobros.fechaContacto, inm.ejecutadoAt ?? new Date(0)),
-					),
-				)
-				.limit(1);
-			if (!contacto) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"El contacto indicado no es una llamada registrada después del apagado.",
-				});
-			}
-			if (contacto.inmovilizacionId !== null) {
-				throw new ORPCError("CONFLICT", {
-					message:
-						"Esa gestión ya está registrada como la llamada de otra inmovilización.",
-				});
-			}
-
-			if (input.resultado === "paga") {
-				await assertCreditoAsignadoEnCarteraPorSifco({
-					numeroSifco: inm.numeroCreditoSifco,
-					emailUsuario: context.session.user.email,
-					userRole: context.userRole,
-					accion: "solicitar la reactivación de la unidad",
-				});
-			}
-
-			let reactivacionId: string | null = null;
-
-			try {
-				await db.transaction(async (tx) => {
-					// El advisory lock (por unidad, adquirido PRIMERO) serializa esta
-					// transacción contra marcarEjecutada — sin él, las dos podían
-					// tomar locks de fila en orden cruzado (deadlock 40P01, review de
-					// Codex, PR #1758: ver comentario de `bloquearUnidadFisica`). El
-					// SELECT ... FOR UPDATE de esta fila que sigue abajo ya no es la
-					// única defensa, pero queda como cinturón y tirantes: si
-					// `inm` sigue con `resultado` desactualizado (marcarEjecutada
-					// tenía que marcarla `resultado = 'reactivada'` porque es el
-					// origen de una reactivación que se está ejecutando AHORA), esta
-					// espera a que esa transacción termine y re-verifica con el
-					// estado YA actualizado.
-					await bloquearUnidadFisica(tx, {
-						casoCobroId: inm.casoCobroId,
-						wialonUnitId: inm.wialonUnitId,
-					});
-					await tx
-						.select({ id: inmovilizacionesUnidad.id })
-						.from(inmovilizacionesUnidad)
-						.where(eq(inmovilizacionesUnidad.id, inm.id))
-						.for("update");
-					if (!(await filaSigueVigente(inm, getHistorialUnidadFisicaTx(tx)))) {
-						throw new ORPCError("CONFLICT", {
-							message:
-								"Este apagado ya no es el vigente de la unidad: fue superado por un ciclo más reciente.",
-						});
-					}
-
-					// Los chequeos de arriba son para dar un mensaje claro; la garantía
-					// bajo concurrencia (doble clic, dos asesores a la vez) son estos
-					// UPDATE condicionados a `IS NULL`: si otro ya enlazó, no devuelven
-					// fila y la transacción entera se revierte.
-					const [apagado] = await tx
-						.update(inmovilizacionesUnidad)
-						.set({
-							llamadaContactoId: input.contactoId,
-							// "no_pago_pendiente_recuperacion": este endpoint solo conoce la
-							// respuesta de la llamada; al ejecutarse enviarCreditoARecuperacion
-							// (vía cobros.ts), esa transición actualiza el resultado a
-							// "enviada_recuperacion".
-							resultado:
-								input.resultado === "paga"
-									? null
-									: "no_pago_pendiente_recuperacion",
-							updatedAt: new Date(),
-						})
-						.where(
-							and(
-								eq(inmovilizacionesUnidad.id, inm.id),
-								isNull(inmovilizacionesUnidad.llamadaContactoId),
-							),
-						)
-						.returning({ id: inmovilizacionesUnidad.id });
-					if (!apagado) {
-						throw new ORPCError("CONFLICT", {
-							message: "El resultado de esta llamada ya se registró.",
-						});
-					}
-
-					const [enlazado] = await tx
-						.update(contactosCobros)
-						.set({ inmovilizacionId: inm.id })
-						.where(
-							and(
-								eq(contactosCobros.id, input.contactoId),
-								isNull(contactosCobros.inmovilizacionId),
-							),
-						)
-						.returning({ id: contactosCobros.id });
-					if (!enlazado) {
-						throw new ORPCError("CONFLICT", {
-							message:
-								"Esa gestión ya está registrada como la llamada de otra inmovilización.",
-						});
-					}
-
-					if (input.resultado === "paga") {
-						if (inm.wialonUnitId == null) {
-							throw new ORPCError("CONFLICT", {
-								message:
-									"El vehículo asociado no tiene una unidad GPS vinculada.",
-							});
-						}
-						const [reactivacion] = await tx
-							.insert(inmovilizacionesUnidad)
-							.values({
-								casoCobroId: inm.casoCobroId,
-								numeroCreditoSifco: inm.numeroCreditoSifco,
-								vehicleId: inm.vehicleId,
-								wialonUnitId: inm.wialonUnitId,
-								accion: "reactivacion",
-								motivo: "Cliente pagó tras la llamada posterior al apagado.",
-								bucketSnapshot: inm.bucketSnapshot,
-								solicitadoPor: context.userId,
-								inmovilizacionOrigenId: inm.id,
-							})
-							.returning({ id: inmovilizacionesUnidad.id });
-						reactivacionId = reactivacion.id;
-
-						await tx.insert(inmovilizacionesUnidadEventos).values({
-							inmovilizacionId: reactivacion.id,
-							evento: "solicitar",
-							estadoNuevo: "pendiente_aprobacion",
-							usuarioId: context.userId,
-							detalle: { accion: "reactivacion", origenId: inm.id },
-						});
-					}
-
-					await tx.insert(inmovilizacionesUnidadEventos).values({
-						inmovilizacionId: inm.id,
-						evento: "registrar_resultado_llamada",
-						estadoAnterior: "ejecutada",
-						estadoNuevo: "ejecutada",
-						usuarioId: context.userId,
-						detalle: {
-							resultado: input.resultado,
-							contactoId: input.contactoId,
-						},
-					});
-				});
-			} catch (error) {
-				// "paga" choca con el índice único si ya hay una solicitud abierta
-				// en el caso (p. ej. alguien pidió la reactivación directo).
-				if (esViolacionUnica(error)) {
-					throw new ORPCError("CONFLICT", {
-						message:
-							"Ya hay una solicitud de inmovilización abierta para este caso. Resolvé esa primero.",
-					});
-				}
-				throw error;
-			}
-
-			await resolverAvisoLlamarCliente(inm.id);
-
-			if (input.resultado === "paga" && reactivacionId) {
-				const casoActualizado = await getCasoParaInmovilizacion(
-					inm.casoCobroId,
-				);
-				await notificarInmovilizacionPendiente({
-					inmovilizacionId: reactivacionId,
-					casoCobroId: inm.casoCobroId,
-					accion: "reactivacion",
-					clienteNombre: casoActualizado?.clienteNombre ?? undefined,
-					numeroCreditoSifco: inm.numeroCreditoSifco,
-					motivo: "Cliente pagó tras la llamada posterior al apagado.",
-					solicitadoPorUserId: context.userId,
-					solicitadoPorRole: context.userRole,
-				});
-			}
-
-			return { ok: true };
-		}),
+	ejecutarApagado: ejecutarPorAsesor("apagado"),
 };
 
 /**
  * Confirma que el asesor ya llamó al cliente tras una REACTIVACIÓN
- * ejecutada. Simétrico a `registrarResultadoLlamada` pero sin su
- * bifurcación paga/no_paga — acá no hay siguiente paso que decidir, solo
- * cerrar el ciclo dejando constancia de la gestión.
+ * ejecutada. Simétrico a `registrarLlamadaApagado`: no hay siguiente paso
+ * que decidir, solo cerrar el ciclo dejando constancia de la gestión.
  *
  * Aparte de `inmovilizacionUnidadRouter` (no como una propiedad más) y
  * re-exportado por inmovilizacion-reactivacion-llamada.ts: agregarlo ahí
@@ -1505,7 +2355,7 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 			});
 		}
 
-		// Mismo guard que registrarResultadoLlamada: MISMO caso, una LLAMADA
+		// Mismo guard que registrarLlamadaApagado: MISMO caso, una LLAMADA
 		// posterior a la ejecución (no cualquier gestión vieja o de otro
 		// canal), y no enlazada ya a otra inmovilización. Review de Codex, PR
 		// #1758.
@@ -1538,8 +2388,8 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 		}
 
 		await db.transaction(async (tx) => {
-			// Mismo criterio que registrarResultadoLlamada: advisory lock por
-			// unidad PRIMERO (serializa contra marcarEjecutada, evita el
+			// Mismo criterio que registrarLlamadaApagado: advisory lock por
+			// unidad PRIMERO (serializa contra ejecutarAprobada, evita el
 			// deadlock de locks de fila cruzados — review de Codex, PR #1758,
 			// ver `bloquearUnidadFisica`), y el SELECT ... FOR UPDATE de esta
 			// fila como defensa adicional antes de re-verificar que sigue
@@ -1560,7 +2410,7 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 				});
 			}
 
-			// Mismo criterio que registrarResultadoLlamada: los UPDATE
+			// Mismo criterio que registrarLlamadaApagado: los UPDATE
 			// condicionados a IS NULL son la garantía bajo concurrencia.
 			const [reactivacion] = await tx
 				.update(inmovilizacionesUnidad)
@@ -1610,6 +2460,244 @@ export const registrarLlamadaReactivacion = cobrosProcedure
 		return { ok: true };
 	});
 
+/**
+ * Enlaza la llamada al cliente con un APAGADO ya ejecutado. La gestión
+ * (contactosCobros) se crea con el flujo normal de "Registrar Contacto" —la
+ * Ficha 360 lo abre sola al ejecutar el apagado— y acá solo se la ata a la
+ * inmovilización para cerrar el ciclo del aviso.
+ *
+ * Ya no hay "Pagó / No pagó" ni reactivación automática: pedir la
+ * reactivación exige el respaldo de pago o promesa de `solicitarInmovilizacion`,
+ * y el seguimiento posterior (reactivar, recuperar) es manual. Aparte del router por el mismo límite de TS7056 que
+ * `registrarLlamadaReactivacion`.
+ */
+export const registrarLlamadaApagado = cobrosProcedure
+	.input(
+		z.object({
+			inmovilizacionId: z.string().uuid(),
+			contactoId: z.string().uuid(),
+		}),
+	)
+	.handler(async ({ input, context }) => {
+		const [inm] = await db
+			.select()
+			.from(inmovilizacionesUnidad)
+			.where(
+				and(
+					eq(inmovilizacionesUnidad.id, input.inmovilizacionId),
+					eq(inmovilizacionesUnidad.accion, "apagado"),
+					eq(inmovilizacionesUnidad.estado, "ejecutada"),
+				),
+			)
+			.limit(1);
+
+		if (!inm) {
+			throw new ORPCError("BAD_REQUEST", {
+				message: "No hay un apagado ejecutado con ese id.",
+			});
+		}
+
+		await assertAccesoLlamadaInmovilizacion(
+			inm,
+			context.userId,
+			context.userRole,
+		);
+
+		if (inm.llamadaContactoId !== null) {
+			throw new ORPCError("CONFLICT", {
+				message: "Esta llamada ya se registró.",
+			});
+		}
+
+		// Chequeo temprano SIN lock (mensaje claro rápido); el re-chequeo CON
+		// lock dentro de la transacción es la garantía real bajo concurrencia
+		// — ver comentario de `filaSigueVigente`. Review de Codex, PR #1758.
+		if (!(await filaSigueVigente(inm, getHistorialUnidadFisica))) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Este apagado ya no es el vigente de la unidad: fue superado por un ciclo más reciente.",
+			});
+		}
+
+		// Mismo guard que registrarLlamadaReactivacion: MISMO caso, una LLAMADA
+		// posterior a la ejecución (no cualquier gestión vieja o de otro
+		// canal), y no enlazada ya a otra inmovilización. Review de Codex, PR
+		// #1758.
+		const [contacto] = await db
+			.select({
+				id: contactosCobros.id,
+				inmovilizacionId: contactosCobros.inmovilizacionId,
+			})
+			.from(contactosCobros)
+			.where(
+				and(
+					eq(contactosCobros.id, input.contactoId),
+					eq(contactosCobros.casoCobroId, inm.casoCobroId),
+					eq(contactosCobros.metodoContacto, "llamada"),
+					gt(contactosCobros.fechaContacto, inm.ejecutadoAt ?? new Date(0)),
+				),
+			)
+			.limit(1);
+		if (!contacto) {
+			throw new ORPCError("BAD_REQUEST", {
+				message:
+					"El contacto indicado no es una llamada registrada después del apagado.",
+			});
+		}
+		if (contacto.inmovilizacionId !== null) {
+			throw new ORPCError("CONFLICT", {
+				message:
+					"Esa gestión ya está registrada como la llamada de otra inmovilización.",
+			});
+		}
+
+		await db.transaction(async (tx) => {
+			// Mismo criterio que registrarLlamadaReactivacion: advisory lock por
+			// unidad PRIMERO (serializa contra ejecutarAprobada, evita el
+			// deadlock de locks de fila cruzados — review de Codex, PR #1758,
+			// ver `bloquearUnidadFisica`), y el SELECT ... FOR UPDATE de esta
+			// fila como defensa adicional antes de re-verificar que sigue
+			// siendo la vigente.
+			await bloquearUnidadFisica(tx, {
+				casoCobroId: inm.casoCobroId,
+				wialonUnitId: inm.wialonUnitId,
+			});
+			await tx
+				.select({ id: inmovilizacionesUnidad.id })
+				.from(inmovilizacionesUnidad)
+				.where(eq(inmovilizacionesUnidad.id, inm.id))
+				.for("update");
+			if (!(await filaSigueVigente(inm, getHistorialUnidadFisicaTx(tx)))) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Este apagado ya no es el vigente de la unidad: fue superado por un ciclo más reciente.",
+				});
+			}
+
+			// Mismo criterio que registrarLlamadaReactivacion: los UPDATE
+			// condicionados a IS NULL son la garantía bajo concurrencia.
+			const [apagado] = await tx
+				.update(inmovilizacionesUnidad)
+				.set({ llamadaContactoId: input.contactoId, updatedAt: new Date() })
+				.where(
+					and(
+						eq(inmovilizacionesUnidad.id, inm.id),
+						isNull(inmovilizacionesUnidad.llamadaContactoId),
+					),
+				)
+				.returning({ id: inmovilizacionesUnidad.id });
+			if (!apagado) {
+				throw new ORPCError("CONFLICT", {
+					message: "Esta llamada ya se registró.",
+				});
+			}
+
+			const [enlazado] = await tx
+				.update(contactosCobros)
+				.set({ inmovilizacionId: inm.id })
+				.where(
+					and(
+						eq(contactosCobros.id, input.contactoId),
+						isNull(contactosCobros.inmovilizacionId),
+					),
+				)
+				.returning({ id: contactosCobros.id });
+			if (!enlazado) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Esa gestión ya está registrada como la llamada de otra inmovilización.",
+				});
+			}
+
+			await tx.insert(inmovilizacionesUnidadEventos).values({
+				inmovilizacionId: inm.id,
+				evento: "registrar_llamada_apagado",
+				estadoAnterior: "ejecutada",
+				estadoNuevo: "ejecutada",
+				usuarioId: context.userId,
+				detalle: { contactoId: input.contactoId },
+			});
+		});
+
+		await resolverAvisoLlamarCliente(inm.id);
+
+		return { ok: true };
+	});
+
+/**
+ * Lo que el modal de "Solicitar reactivación" ofrece como respaldo: los pagos
+ * registrados en cartera desde el apagado y la promesa activa del caso. Es solo
+ * lectura: al solicitar, el server vuelve a verificarlo (`solicitarInmovilizacion`).
+ * Aparte del router por el límite de TS7056.
+ */
+export const getRespaldoReactivacion = cobrosProcedure
+	.input(z.object({ casoCobroId: z.string().uuid() }))
+	.handler(
+		async ({
+			input,
+			context,
+		}): Promise<{
+			apagadoEjecutadoAt: Date | null;
+			pagos: PagoRespaldo[];
+			promesa: PromesaRespaldo | null;
+			/** Por qué no se pudieron leer los pagos (cartera caída o deshabilitada). */
+			errorPagos: string | null;
+		}> => {
+			await assertAccesoCasoCobro(
+				input.casoCobroId,
+				context.userId,
+				context.userRole,
+			);
+			const caso = await getCasoParaInmovilizacion(input.casoCobroId);
+			if (!caso?.numeroCreditoSifco) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El caso no tiene crédito de cartera asociado.",
+				});
+			}
+			const historial = await getHistorialUnidadFisica(
+				input.casoCobroId,
+				caso.wialonUnitId ?? null,
+			);
+			const apagado = ultimaEjecutada(historial, "apagado");
+			const promesa = await leerPromesaActivaCaso(input.casoCobroId);
+			if (!apagado?.ejecutadoAt) {
+				return {
+					apagadoEjecutadoAt: null,
+					pagos: [],
+					promesa,
+					errorPagos: null,
+				};
+			}
+			let pagos: PagoRespaldo[] = [];
+			let errorPagos: string | null = null;
+			try {
+				pagos = await leerPagosPosterioresAlApagado(
+					caso.numeroCreditoSifco,
+					apagado.ejecutadoAt,
+				);
+			} catch (error) {
+				if (!(error instanceof ORPCError)) {
+					// Un error nuestro (no de cartera) no debe esconderse tras el
+					// mensaje genérico: queda en el log del server.
+					console.error("[getRespaldoReactivacion] Error inesperado:", error);
+				}
+				errorPagos =
+					error instanceof ORPCError
+						? error.message
+						: "No se pudieron consultar los pagos en cartera.";
+			}
+			return {
+				apagadoEjecutadoAt: apagado.ejecutadoAt,
+				pagos,
+				promesa,
+				errorPagos,
+			};
+		},
+	);
+
+/** El asesor registra que LEGION reactivó la unidad — ver `ejecutarPorAsesor`. */
+export const ejecutarReactivacion = ejecutarPorAsesor("reactivacion");
+
 const usuarioDecisor = alias(user, "usuario_decisor");
 const usuarioEjecutor = alias(user, "usuario_ejecutor");
 
@@ -1652,6 +2740,11 @@ export const getHistorialInmovilizaciones = cobrosSupervisorProcedure
 					modoEjecucion: inmovilizacionesUnidad.modoEjecucion,
 					referenciaEjecucion: inmovilizacionesUnidad.referenciaEjecucion,
 					resultado: inmovilizacionesUnidad.resultado,
+					ubicacionSolicitud: inmovilizacionesUnidad.ubicacionSolicitud,
+					ubicacionEjecucion: inmovilizacionesUnidad.ubicacionEjecucion,
+					evidenciaR2Key: inmovilizacionesUnidad.evidenciaR2Key,
+					evidenciaNombreArchivo: inmovilizacionesUnidad.evidenciaNombreArchivo,
+					evidenciaNota: inmovilizacionesUnidad.evidenciaNota,
 					clienteNombre: clients.contactPerson,
 				})
 				.from(inmovilizacionesUnidad)
@@ -1681,8 +2774,19 @@ export const getHistorialInmovilizaciones = cobrosSupervisorProcedure
 				.from(inmovilizacionesUnidad),
 		]);
 
+		// La llave de R2 no sale del server: el supervisor recibe la URL firmada
+		// (el bucket es privado) o null si no se pudo firmar.
+		const items = await Promise.all(
+			filas.map(async ({ evidenciaR2Key, ...fila }) => ({
+				...fila,
+				evidenciaUrl: evidenciaR2Key
+					? await getFileUrl(evidenciaR2Key).catch(() => null)
+					: null,
+			})),
+		);
+
 		return {
-			items: filas,
+			items,
 			page: input.page,
 			perPage: input.perPage,
 			total,

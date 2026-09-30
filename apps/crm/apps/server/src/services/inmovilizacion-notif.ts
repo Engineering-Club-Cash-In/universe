@@ -20,12 +20,17 @@
 // deja de leer una foto vieja mientras el UPDATE concurrente sigue en
 // vuelo. Review de Codex, PR #1758.
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { db } from "../db";
+import { user } from "../db/schema/auth";
 import { casosCobros } from "../db/schema/cobros";
 import { inmovilizacionesUnidad } from "../db/schema/inmovilizacion-unidad";
 import { notifications } from "../db/schema/notifications";
-import { usuariosDuenosPorSifco } from "../lib/acceso-caso-cobro";
+import {
+	usuarioDuenoEnCartera,
+	usuariosDuenosPorSifco,
+} from "../lib/acceso-caso-cobro";
+import { toDateStrGT } from "../lib/guatemala-month-window";
 import { obtenerSupervisoresCobros } from "./cobros-notif-helpers";
 
 type RolNotificacion = (typeof notifications.createdByRole.enumValues)[number];
@@ -145,11 +150,17 @@ export async function resolverPendientesInmovilizacion(
 
 /**
  * Al aprobar/rechazar: avisa al asesor que solicitó. El rechazo lleva el
- * motivo del supervisor.
+ * motivo del supervisor. Un apagado o una reactivación APROBADOS, en cambio, los
+ * ejecuta quien lleva el crédito en cartera HOY (puede no ser quien los pidió
+ * si cartera lo reasignó mientras esperaba la decisión), así que ese aviso va
+ * al dueño actual, con quien solicitó de respaldo (review de Codex, PRs #1807 y
+ * #1808).
  */
 export async function notificarInmovilizacionResuelta(params: {
 	inmovilizacionId: string;
 	casoCobroId: string;
+	/** Crédito del caso: con él se resuelve el dueño en cartera de la acción aprobada. */
+	numeroCreditoSifco?: string | null;
 	accion: "apagado" | "reactivacion";
 	decision: "aprobada" | "rechazada";
 	motivoRechazo?: string | null;
@@ -164,10 +175,20 @@ export async function notificarInmovilizacionResuelta(params: {
 			params.decision === "aprobada"
 				? `Solicitud de ${accionTexto} aprobada`
 				: `Solicitud de ${accionTexto} rechazada`;
+		// Aprobada: a partir de acá el asesor es quien la ejecuta (no el
+		// supervisor), así que el aviso le dice qué sigue.
 		const descripcion =
 			params.decision === "aprobada"
-				? `El supervisor aprobó la solicitud de ${accionTexto} de unidad.`
+				? `El supervisor aprobó ${params.accion === "apagado" ? "el apagado" : "la reactivación"} de la unidad. Pedile a LEGION que la aplique y, cuando lo confirme, registralo en la Ficha 360 con su confirmación.`
 				: `El supervisor rechazó la solicitud de ${accionTexto} de unidad. Motivo: ${params.motivoRechazo ?? "sin especificar"}.`;
+
+		// Apagado y reactivación aprobados los ejecuta quien lleva el crédito en
+		// cartera HOY (`ejecutarPorAsesor` exige esa asignación en ambos).
+		const ejecutaElDueno = params.decision === "aprobada";
+		const destinatario =
+			(ejecutaElDueno
+				? await usuarioDuenoEnCartera(params.numeroCreditoSifco)
+				: null) ?? params.solicitanteUserId;
 
 		await db.insert(notifications).values({
 			titulo,
@@ -182,7 +203,7 @@ export async function notificarInmovilizacionResuelta(params: {
 			createdBy: params.decididoPorUserId,
 			createdByRole: params.decididoPorRole ?? ("cobros_supervisor" as const),
 			assignedToRole: "cobros" as const,
-			assignedTo: params.solicitanteUserId,
+			assignedTo: destinatario,
 		});
 	});
 
@@ -192,7 +213,7 @@ export async function notificarInmovilizacionResuelta(params: {
 /**
  * Al ejecutar un APAGADO: avisa al asesor dueño del caso que debe llamar al
  * cliente. Queda `pending`/`action_required` hasta que
- * `registrarResultadoLlamada` la resuelva.
+ * `registrarLlamadaApagado` la resuelva.
  */
 export async function notificarLlamarCliente(params: {
 	inmovilizacionId: string;
@@ -206,7 +227,7 @@ export async function notificarLlamarCliente(params: {
 		const quien = params.clienteNombre?.trim() || "El cliente";
 		await db.insert(notifications).values({
 			titulo: "Llamar al cliente: unidad apagada",
-			descripcion: `Se ejecutó el apagado de la unidad. Llamá a ${quien} y registrá el resultado en la Ficha 360.`,
+			descripcion: `Se ejecutó el apagado de la unidad. Llamá a ${quien} y registrá la llamada en la Ficha 360.`,
 			type: "action_required" as const,
 			status: "pending" as const,
 			cobrosTipo: "inmovilizacion_llamar_cliente" as const,
@@ -371,3 +392,163 @@ export async function reconciliarAvisosLlamarCliente(
 
 /** Vueltas de relectura cuando otra reconciliación movió el aviso a la vez. */
 const INTENTOS_RECONCILIACION = 3;
+
+/**
+ * Tipos de aviso que se cierran cuando el apagado se ejecuta o se cancela: el
+ * recordatorio de "falta ejecutarlo". El aviso de aprobación es informativo
+ * (`aviso`) y no necesita cierre.
+ */
+export async function resolverRecordatoriosEjecucion(
+	inmovilizacionId: string,
+): Promise<void> {
+	await tryNotify("resolverRecordatoriosEjecucion", () =>
+		db
+			.update(notifications)
+			.set({
+				status: "resolved",
+				resolvedAt: new Date(),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(notifications.cobrosTipo, "inmovilizacion_ejecutar_pendiente"),
+					eq(notifications.inmovilizacionId, inmovilizacionId),
+					inArray(notifications.status, [...ESTADOS_ABIERTOS]),
+				),
+			),
+	);
+}
+
+/** Horas que pueden pasar entre la aprobación y su ejecución antes de recordarla. */
+const HORAS_PARA_RECORDAR_EJECUCION = 24;
+
+/**
+ * Recordatorio al asesor de un apagado o reactivación APROBADOS que llevan más de 24 h sin
+ * ejecutarse. Corre en la tanda de las 08:00 GT, así que sale una vez por día
+ * mientras siga abierto; la llave de dedup lleva el día, y el run de boot no
+ * duplica. Va al dueño en cartera de hoy, con fallback a quien solicitó (mismo
+ * criterio que el aviso de llamar al cliente). Best-effort.
+ */
+export async function recordarInmovilizacionesSinEjecutar(
+	ahora: Date = new Date(),
+): Promise<number> {
+	let creados = 0;
+	await tryNotify("recordarInmovilizacionesSinEjecutar", async () => {
+		const limite = new Date(
+			ahora.getTime() - HORAS_PARA_RECORDAR_EJECUCION * 60 * 60 * 1000,
+		);
+		const pendientes = await db
+			.select({
+				id: inmovilizacionesUnidad.id,
+				casoCobroId: inmovilizacionesUnidad.casoCobroId,
+				numeroCreditoSifco: inmovilizacionesUnidad.numeroCreditoSifco,
+				solicitadoPor: inmovilizacionesUnidad.solicitadoPor,
+				accion: inmovilizacionesUnidad.accion,
+			})
+			.from(inmovilizacionesUnidad)
+			.where(
+				and(
+					eq(inmovilizacionesUnidad.estado, "aprobada"),
+					lte(inmovilizacionesUnidad.decididoAt, limite),
+				),
+			);
+		if (pendientes.length === 0) return;
+
+		const duenos = await usuariosDuenosPorSifco(
+			pendientes.map((p) => p.numeroCreditoSifco),
+		);
+		const dia = toDateStrGT(ahora);
+		const insertadas = await db
+			.insert(notifications)
+			.values(
+				pendientes.map((p) => ({
+					titulo:
+						p.accion === "apagado"
+							? "Apagado aprobado sin ejecutar"
+							: "Reactivación aprobada sin ejecutar",
+					descripcion: `Hace más de un día se aprobó ${p.accion === "apagado" ? "el apagado" : "la reactivación"} de esta unidad y todavía no se registró su ejecución. Coordiná con LEGION y registralo en la Ficha 360.`,
+					type: "action_required" as const,
+					status: "pending" as const,
+					cobrosTipo: "inmovilizacion_ejecutar_pendiente" as const,
+					cobrosDedupKey: `inmov-ejecutar:${p.id}:${dia}`,
+					relatedEntityType: "collection_case" as const,
+					relatedEntityId: p.casoCobroId,
+					inmovilizacionId: p.id,
+					redirectPage: "cobros_detail" as const,
+					createdBy: p.solicitadoPor,
+					createdByRole: "cobros" as const,
+					assignedToRole: "cobros" as const,
+					assignedTo: duenos.get(p.numeroCreditoSifco) ?? p.solicitadoPor,
+				})),
+			)
+			.onConflictDoNothing()
+			.returning({ id: notifications.id });
+		creados = insertadas.length;
+	});
+	return creados;
+}
+
+/**
+ * Al ejecutarse un apagado o una reactivación: avisa a los cobros_supervisor que
+ * ya se aplicó, con quién lo registró y de qué caso es. Va SOLO a supervisores
+ * (el asesor es quien lo hizo, y ya tiene su propio aviso de llamar al
+ * cliente); si quien lo registra es un supervisor, no se avisa a sí mismo.
+ * Deduplica por inmovilización: un reintento no repite el aviso. Best-effort.
+ */
+export async function notificarEjecucionASupervisores(params: {
+	inmovilizacionId: string;
+	casoCobroId: string;
+	accion: "apagado" | "reactivacion";
+	/** Algo que los supervisores deben saber (p. ej. el crédito ya cambió de bucket). */
+	advertencia?: string;
+	clienteNombre?: string;
+	numeroCreditoSifco?: string;
+	ejecutadoPorUserId: string;
+	ejecutadoPorRole?: RolNotificacion;
+}): Promise<void> {
+	await tryNotify("notificarEjecucionASupervisores", async () => {
+		const supervisores = (await obtenerSupervisoresCobros()).filter(
+			(id) => id !== params.ejecutadoPorUserId,
+		);
+		if (supervisores.length === 0) return;
+
+		const [quien] = await db
+			.select({ name: user.name })
+			.from(user)
+			.where(eq(user.id, params.ejecutadoPorUserId))
+			.limit(1);
+		// "de Fulano (crédito 123)", "del crédito 123" o "de un cliente": la
+		// preposición va con el nombre para que lea bien en los tres casos.
+		const nombre = params.clienteNombre?.trim();
+		const deQuien = nombre
+			? `de ${nombre}${params.numeroCreditoSifco ? ` (crédito ${params.numeroCreditoSifco})` : ""}`
+			: params.numeroCreditoSifco
+				? `del crédito ${params.numeroCreditoSifco}`
+				: "de un cliente";
+		const esApagado = params.accion === "apagado";
+
+		await db
+			.insert(notifications)
+			.values(
+				supervisores.map((supervisorId) => ({
+					titulo: esApagado ? "Apagado ejecutado" : "Reactivación ejecutada",
+					descripcion: `${quien?.name ?? "Un asesor"} registró que LEGION ${esApagado ? "apagó" : "reactivó"} la unidad ${deQuien}. Revisá la confirmación en la Ficha 360.${params.advertencia ? ` ${params.advertencia}` : ""}`,
+					type: "aviso" as const,
+					status: "pending" as const,
+					cobrosTipo: esApagado
+						? ("inmovilizacion_apagado_ejecutado" as const)
+						: ("inmovilizacion_reactivacion_ejecutada" as const),
+					cobrosDedupKey: `inmov-${esApagado ? "apagado" : "reactivacion"}:${params.inmovilizacionId}`,
+					relatedEntityType: "collection_case" as const,
+					relatedEntityId: params.casoCobroId,
+					inmovilizacionId: params.inmovilizacionId,
+					redirectPage: "cobros_detail" as const,
+					createdBy: params.ejecutadoPorUserId,
+					createdByRole: params.ejecutadoPorRole ?? ("cobros" as const),
+					assignedToRole: "cobros_supervisor" as const,
+					assignedTo: supervisorId,
+				})),
+			)
+			.onConflictDoNothing();
+	});
+}

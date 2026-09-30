@@ -519,6 +519,13 @@ function RouteComponent() {
 	const [canalContacto, setCanalContacto] = useState<CanalContacto | null>(
 		null,
 	);
+	// CB-041: apagado o reactivación cuya llamada al cliente se está registrando.
+	// Al crearse la gestión se enlaza sola a esta inmovilización (sin elegirla de
+	// un select).
+	const [inmovilizacionLlamada, setInmovilizacionLlamada] = useState<{
+		id: string;
+		accion: "apagado" | "reactivacion";
+	} | null>(null);
 	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] = useState(false);
 	// CB-042: los dos envíos a recuperación (forzosa / entrega voluntaria)
 	// comparten formulario; null = cerrado.
@@ -1431,6 +1438,40 @@ function RouteComponent() {
 		setIsEditingVehicle(true);
 	};
 
+	// CB-041: la llamada que el asesor acaba de registrar tras un apagado o una
+	// reactivación queda enlazada a esa inmovilización. La gestión ya se guardó:
+	// si el enlace falla (p. ej. no era una llamada) se avisa y el banner de la
+	// carta sigue ahí.
+	const enlazarLlamadaInmovilizacion = async (
+		inmovilizacion: { id: string; accion: "apagado" | "reactivacion" },
+		contactoId: string,
+	) => {
+		const datos = { inmovilizacionId: inmovilizacion.id, contactoId };
+		try {
+			if (inmovilizacion.accion === "apagado") {
+				await client.registrarLlamadaApagado(datos);
+			} else {
+				await client.registrarLlamadaReactivacion(datos);
+			}
+			toast.success(
+				`Llamada enlazada ${inmovilizacion.accion === "apagado" ? "al apagado" : "a la reactivación"}.`,
+			);
+		} catch (error) {
+			toast.error(
+				(error as { message?: string })?.message ??
+					"La gestión se guardó, pero no se pudo enlazar a la inmovilización.",
+			);
+		} finally {
+			if (caso.id) {
+				queryClient.invalidateQueries({
+					queryKey: orpc.getInmovilizacionesCaso.key({
+						input: { casoCobroId: caso.id },
+					}),
+				});
+			}
+		}
+	};
+
 	const getEstadoBadge = (estado: string | null | undefined) =>
 		estiloBucket(bucketDeEstado(estado, bucketsCatalogo.data).colorHex);
 
@@ -2311,9 +2352,21 @@ function RouteComponent() {
 										key={canalContacto}
 										{...propsContacto}
 										metodoInicial={canalContacto}
+										onCreado={
+											inmovilizacionLlamada
+												? (contacto) =>
+														enlazarLlamadaInmovilizacion(
+															inmovilizacionLlamada,
+															contacto.id,
+														)
+												: undefined
+										}
 										open
 										onOpenChange={(abierto) => {
-											if (!abierto) setCanalContacto(null);
+											if (!abierto) {
+												setCanalContacto(null);
+												setInmovilizacionLlamada(null);
+											}
 										}}
 									/>
 								)}
@@ -5001,7 +5054,9 @@ function RouteComponent() {
 						{/* CB-041: solicitar/aprobar apagado o reactivación de la unidad,
 						    con llamada posterior al cliente. Solo requiere caso.id (a
 						    diferencia de GpsVehiculoCard): el servidor resuelve la unidad
-						    física desde contratos_financiamiento.vehicleId, no desde
+						    física desde contratos_financiamiento.vehicleId y, solo si el
+						    caso NO tiene contrato (créditos migrados de cartera), desde
+						    el vehículo de la oportunidad con ese SIFCO. No usa
 						    caso.vehicleId (que viene de opportunities.vehicleId y puede
 						    estar vacío o desactualizado aun con contrato y GPS vigentes,
 						    hallazgo de review). El propio card ya oculta sus acciones si
@@ -5016,6 +5071,10 @@ function RouteComponent() {
 								casoCobroId={caso.id}
 								esSupervisor={esSupervisorCobros}
 								key={`inmov:${caso.id}`}
+								onRegistrarLlamada={(inmovilizacionId, accion) => {
+									setInmovilizacionLlamada({ id: inmovilizacionId, accion });
+									setCanalContacto("llamada");
+								}}
 							/>
 						)}
 						{/* CB-042 · El registro de recuperación (forzosa o entrega

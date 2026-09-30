@@ -4,6 +4,7 @@ import {
 	Check,
 	ChevronLeft,
 	ChevronRight,
+	FileText,
 	Loader2,
 	Lock,
 	LockOpen,
@@ -11,6 +12,9 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { DecisionInmovilizacionModal } from "@/components/cobros/inmovilizacion-decision-modal";
+import { RespaldoReactivacionResumen } from "@/components/cobros/inmovilizacion-respaldo";
+import { UbicacionGuardada } from "@/components/cobros/inmovilizacion-ubicacion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,7 +43,6 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
@@ -106,17 +109,11 @@ function InmovilizacionesPage() {
 	);
 }
 
-type Decision = "aprobar" | "rechazar";
-
 function ColaInmovilizaciones() {
 	const queryClient = useQueryClient();
 	const [decisionAbierta, setDecisionAbierta] = useState<{
 		id: string;
-		decision: Decision;
-		resumen: string;
-	} | null>(null);
-	const [ejecutarAbierto, setEjecutarAbierto] = useState<{
-		id: string;
+		decision: "aprobar" | "rechazar";
 		resumen: string;
 	} | null>(null);
 
@@ -195,8 +192,29 @@ function ColaInmovilizaciones() {
 												{item.accion === "apagado" ? "Apagado" : "Reactivación"}
 											</Badge>
 										</TableCell>
-										<TableCell className="max-w-64 truncate text-sm">
-											{item.motivo}
+										<TableCell className="max-w-72 text-sm">
+											<p className="truncate" title={item.motivo}>
+												{item.motivo}
+											</p>
+											{/* Dónde estaba el vehículo al solicitarlo (y si va en
+											    marcha): lo que el supervisor mira antes de aprobar. */}
+											<div className="mt-1 space-y-1">
+												<UbicacionGuardada
+													etiqueta="Ubicación al solicitar"
+													ubicacion={item.ubicacionSolicitud}
+												/>
+												{item.accion === "reactivacion" && (
+													<RespaldoReactivacionResumen
+														bucket={
+															item.bucketSnapshot != null
+																? `B${item.bucketSnapshot} al solicitar`
+																: null
+														}
+														quePaso={item.quePaso}
+														respaldo={item.respaldoReactivacion}
+													/>
+												)}
+											</div>
 										</TableCell>
 										<TableCell className="text-sm">
 											{item.solicitanteNombre}
@@ -245,8 +263,9 @@ function ColaInmovilizaciones() {
 				<CardHeader>
 					<CardTitle>Por ejecutar</CardTitle>
 					<CardDescription>
-						Aprobadas, esperando que LEGION las aplique. Marcá "ejecutada"
-						cuando LEGION confirme el apagado/reactivación.
+						Aprobadas, esperando que LEGION las aplique. El asesor registra la
+						ejecución desde la Ficha 360, con la confirmación de LEGION; acá
+						solo se ve qué falta.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -286,17 +305,9 @@ function ColaInmovilizaciones() {
 											</Badge>
 										</TableCell>
 										<TableCell className="text-right">
-											<Button
-												onClick={() =>
-													setEjecutarAbierto({
-														id: item.id,
-														resumen: resumenDe(item),
-													})
-												}
-												size="sm"
-											>
-												Marcar ejecutada
-											</Button>
+											<span className="text-muted-foreground text-xs">
+												Lo registra el asesor en la Ficha 360
+											</span>
 										</TableCell>
 									</TableRow>
 								))}
@@ -307,7 +318,7 @@ function ColaInmovilizaciones() {
 			</Card>
 
 			{decisionAbierta && (
-				<DecisionModal
+				<DecisionInmovilizacionModal
 					decision={decisionAbierta.decision}
 					id={decisionAbierta.id}
 					onOpenChange={(open) => !open && setDecisionAbierta(null)}
@@ -316,188 +327,10 @@ function ColaInmovilizaciones() {
 					resumen={decisionAbierta.resumen}
 				/>
 			)}
-			{ejecutarAbierto && (
-				<EjecutarModal
-					id={ejecutarAbierto.id}
-					onOpenChange={(open) => !open && setEjecutarAbierto(null)}
-					onEjecutado={invalidar}
-					open={!!ejecutarAbierto}
-					resumen={ejecutarAbierto.resumen}
-				/>
-			)}
 		</div>
 	);
 }
 
-function DecisionModal({
-	id,
-	decision,
-	resumen,
-	open,
-	onOpenChange,
-	onResuelto,
-}: {
-	id: string;
-	decision: Decision;
-	resumen: string;
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
-	onResuelto: () => void;
-}) {
-	const [motivoRechazo, setMotivoRechazo] = useState("");
-	const motivoValido = motivoRechazo.trim().length >= 5;
-
-	const mutation = useMutation({
-		...orpc.decidirInmovilizacion.mutationOptions(),
-		onSuccess: () => {
-			toast.success(
-				decision === "aprobar" ? "Solicitud aprobada." : "Solicitud rechazada.",
-			);
-			onResuelto();
-			onOpenChange(false);
-			setMotivoRechazo("");
-		},
-		onError: (error) => {
-			toast.error(error.message || "No se pudo procesar la decisión.", {
-				duration: 8000,
-			});
-		},
-	});
-
-	return (
-		<Dialog onOpenChange={onOpenChange} open={open}>
-			<DialogContent>
-				<DialogHeader>
-					<DialogTitle>
-						{decision === "aprobar"
-							? "Aprobar solicitud"
-							: "Rechazar solicitud"}
-					</DialogTitle>
-					<DialogDescription>{resumen}</DialogDescription>
-				</DialogHeader>
-
-				{decision === "rechazar" && (
-					<div>
-						<Label htmlFor="motivo-rechazo-inmov">Motivo del rechazo</Label>
-						<Textarea
-							id="motivo-rechazo-inmov"
-							onChange={(e) => setMotivoRechazo(e.target.value)}
-							rows={3}
-							value={motivoRechazo}
-						/>
-						{!motivoValido && motivoRechazo.length > 0 && (
-							<p className="mt-1 text-destructive text-xs">
-								Ingresá al menos 5 caracteres.
-							</p>
-						)}
-					</div>
-				)}
-
-				<DialogFooter>
-					<Button onClick={() => onOpenChange(false)} variant="outline">
-						Cancelar
-					</Button>
-					<Button
-						disabled={
-							mutation.isPending || (decision === "rechazar" && !motivoValido)
-						}
-						onClick={() =>
-							mutation.mutate({
-								id,
-								decision,
-								motivoRechazo:
-									decision === "rechazar" ? motivoRechazo.trim() : undefined,
-							})
-						}
-						variant={decision === "aprobar" ? "default" : "destructive"}
-					>
-						Confirmar
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	);
-}
-
-function EjecutarModal({
-	id,
-	resumen,
-	open,
-	onOpenChange,
-	onEjecutado,
-}: {
-	id: string;
-	resumen: string;
-	open: boolean;
-	onOpenChange: (open: boolean) => void;
-	onEjecutado: () => void;
-}) {
-	const [referencia, setReferencia] = useState("");
-
-	const mutation = useMutation({
-		...orpc.marcarEjecutada.mutationOptions(),
-		onSuccess: () => {
-			toast.success("Marcada como ejecutada.");
-			onEjecutado();
-			onOpenChange(false);
-			setReferencia("");
-		},
-		onError: (error) => {
-			toast.error(error.message || "No se pudo marcar como ejecutada.", {
-				duration: 8000,
-			});
-		},
-	});
-
-	return (
-		<Dialog onOpenChange={onOpenChange} open={open}>
-			<DialogContent>
-				<DialogHeader>
-					<DialogTitle>Marcar como ejecutada</DialogTitle>
-					<DialogDescription>
-						{resumen} — confirmá que LEGION ya aplicó la acción sobre la unidad.
-					</DialogDescription>
-				</DialogHeader>
-
-				<div>
-					<Label htmlFor="referencia-ejecucion">
-						Referencia o ticket de LEGION (opcional)
-					</Label>
-					<Input
-						id="referencia-ejecucion"
-						onChange={(e) => setReferencia(e.target.value)}
-						value={referencia}
-					/>
-				</div>
-
-				<DialogFooter>
-					<Button onClick={() => onOpenChange(false)} variant="outline">
-						Cancelar
-					</Button>
-					<Button
-						disabled={mutation.isPending}
-						onClick={() =>
-							mutation.mutate({
-								id,
-								referencia: referencia.trim() || undefined,
-							})
-						}
-					>
-						Confirmar ejecución
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	);
-}
-
-/**
- * El supervisor necesita revisar el caso (GPS, pagos, promesas) antes de
- * aprobar o de confirmar el apagado — la fila lleva a la Ficha 360. Cliente y
- * SIFCO van en el mismo link: son la misma fila del caso, no dos datos
- * sueltos, y separarlos en columnas distintas dejaba el sifco como texto
- * plano sin poder clickearlo directo.
- */
 function LinkFicha({
 	item,
 }: {
@@ -618,7 +451,9 @@ function HistorialInmovilizaciones() {
 										<TableCell>
 											<Badge
 												variant={
-													item.accion === "apagado" ? "destructive" : "secondary"
+													item.accion === "apagado"
+														? "destructive"
+														: "secondary"
 												}
 											>
 												{item.accion === "apagado" ? (
@@ -630,7 +465,9 @@ function HistorialInmovilizaciones() {
 											</Badge>
 										</TableCell>
 										<TableCell>
-											<Badge variant={ESTADO_BADGE_VARIANT[item.estado] ?? "outline"}>
+											<Badge
+												variant={ESTADO_BADGE_VARIANT[item.estado] ?? "outline"}
+											>
 												{ESTADO_LABEL[item.estado] ?? item.estado}
 											</Badge>
 											{item.estado === "rechazada" && item.motivoRechazo && (
@@ -673,6 +510,21 @@ function HistorialInmovilizaciones() {
 															Ref: {item.referenciaEjecucion}
 														</p>
 													)}
+													{item.evidenciaUrl && (
+														<a
+															className="inline-flex items-center gap-1 text-primary text-xs hover:underline"
+															href={item.evidenciaUrl}
+															rel="noreferrer"
+															target="_blank"
+														>
+															<FileText className="h-3.5 w-3.5" />
+															{item.evidenciaNombreArchivo ?? "Confirmación"}
+														</a>
+													)}
+													<UbicacionGuardada
+														etiqueta="Ubicación al ejecutar"
+														ubicacion={item.ubicacionEjecucion}
+													/>
 												</>
 											) : (
 												<span className="text-muted-foreground">—</span>

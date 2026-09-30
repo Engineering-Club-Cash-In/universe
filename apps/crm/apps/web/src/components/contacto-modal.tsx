@@ -108,6 +108,7 @@ interface ContactoModalProps {
 		| "sms"
 		| "email"
 		| "visita_domicilio"
+		| "visita_trabajo"
 		| "carta_notarial";
 	children?: React.ReactNode;
 	// Modo controlado opcional (cuando el padre maneja el estado open)
@@ -157,6 +158,9 @@ interface ContactoModalProps {
 		fechaAlerta?: string | Date | null;
 		proximoPaso?: string | null;
 	} | null;
+	// CB-037/038: la promesa sale de una visita ("promesa" o "50% + promesa").
+	// Se manda al server, que la anota en la visita.
+	visitaId?: string;
 	// Variables para plantillas de mensaje
 	fechaPago?: string;
 	cuotaMensual?: string;
@@ -177,6 +181,7 @@ const CANAL_LABEL: Record<string, string> = {
 	sms: "📱 SMS",
 	email: "📧 Email",
 	visita_domicilio: "🏠 Visita a domicilio",
+	visita_trabajo: "💼 Visita al trabajo",
 	carta_notarial: "📋 Carta notarial",
 };
 
@@ -197,6 +202,7 @@ export function ContactoModal({
 	esConvenio = false,
 	cuotaConvenio,
 	promesaActiva = null,
+	visitaId,
 	fechaPago = "",
 	cuotaMensual = "",
 	placa = "",
@@ -450,6 +456,7 @@ export function ContactoModal({
 				...data,
 				// CB-029: en edición, UPDATE de la promesa activa (no crea otra).
 				promesaContactoId: promesaActiva?.id,
+				visitaId,
 				// Enter dispara submit sin pasar por el onBlur del CurrencyInput
 				// (que es donde normalmente se limpia un punto colgante como
 				// "2500.") — se normaliza también acá, justo antes de armar el
@@ -483,6 +490,9 @@ export function ContactoModal({
 							k.includes("getDetallesCreditoCarteraBack"),
 					),
 			});
+			if (visitaId) {
+				queryClient.invalidateQueries({ queryKey: orpc.getVisitasCaso.key() });
+			}
 			form.reset();
 			handleOpenChange(false);
 		},
@@ -865,7 +875,7 @@ export function ContactoModal({
 	return (
 		<Dialog open={isOpen} onOpenChange={handleOpenChange}>
 			{children && <DialogTrigger asChild>{children}</DialogTrigger>}
-			<DialogContent className="max-h-[90vh] min-w-3xl max-w-4xl overflow-y-auto">
+			<DialogContent className="max-h-[90vh] overflow-y-auto md:min-w-3xl md:max-w-4xl">
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2">
 						{esPromesa ? (

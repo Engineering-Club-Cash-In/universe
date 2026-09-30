@@ -148,6 +148,7 @@ const ETIQUETAS_METODO: Record<string, string> = {
 	sms: "SMS",
 	email: "Email",
 	visita_domicilio: "Visita a domicilio",
+	visita_trabajo: "Visita al trabajo",
 	carta_notarial: "Carta notarial",
 };
 

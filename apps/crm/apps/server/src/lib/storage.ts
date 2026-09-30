@@ -114,6 +114,9 @@ export const UPLOAD_RESOURCE_TYPES = [
 	"legal_contract_pdf",
 	"bank_statement",
 	"investment_document",
+	// CB-037/038: fotos de una visita de cobros. El id es el del CASO: las fotos
+	// se suben antes de guardar la visita (que puede no existir todavía).
+	"cobros_visita_evidencia",
 ] as const;
 
 export type UploadResourceType = (typeof UPLOAD_RESOURCE_TYPES)[number];
@@ -152,6 +155,8 @@ export function buildUploadPrefix(
 			return `bank-statements/${resourceId}`;
 		case "investment_document":
 			return `investment-documents/${resourceId}`;
+		case "cobros_visita_evidencia":
+			return `cobros/visitas/${resourceId}`;
 	}
 }
 

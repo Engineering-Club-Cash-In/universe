@@ -1,5 +1,6 @@
 import {
 	Banknote,
+	Briefcase,
 	Mail,
 	MapPin,
 	MessageSquare,
@@ -32,7 +33,9 @@ export const METODOS_CONTACTO = [
 	{ value: "whatsapp", label: "WhatsApp", icono: MessageSquare },
 	{ value: "sms", label: "SMS", icono: Smartphone },
 	{ value: "email", label: "Email", icono: Mail },
-	{ value: "visita_domicilio", label: "Visita", icono: MapPin },
+	{ value: "visita_domicilio", label: "Visita a residencia", icono: MapPin },
+	// CB-038: la visita al lugar de trabajo tiene canal propio (migración 0069).
+	{ value: "visita_trabajo", label: "Visita al trabajo", icono: Briefcase },
 	{ value: "carta_notarial", label: "Carta notarial", icono: Send },
 	// CB-128: mismo motivo que arriba — sin esto la columna "Tipo" mostraba
 	// "—" para un pago registrado desde la Ficha 360, indistinguible de una

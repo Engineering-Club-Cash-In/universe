@@ -35,7 +35,8 @@ export type CobrosNotifTipo =
 	| "inmovilizacion_llamar_cliente"
 	| "recuperacion_vehiculo"
 	| "b3_llamada_supervisor"
-	| "b3_llamada_vencida";
+	| "b3_llamada_vencida"
+	| "visita_programada";
 
 /**
  * Mapa `asesor_id (cartera) → user.id (CRM)`, cruzando el correo de cash-in del

@@ -70,7 +70,7 @@ type ContextoCaso = {
  * buscar la oportunidad por texto — así ningún crédito pierde las referencias
  * que ya mostraba.
  */
-async function resolverContextoCaso(
+export async function resolverContextoCaso(
 	casoCobroId: string,
 ): Promise<ContextoCaso> {
 	const [caso] = await db

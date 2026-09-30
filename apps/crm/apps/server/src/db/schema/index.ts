@@ -34,4 +34,5 @@ export * from "./referencias-cobros";
 export * from "./renap";
 export * from "./vehicles";
 export * from "./views";
+export * from "./visitas-cobros";
 export * from "./whatsapp-logs";

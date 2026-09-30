@@ -123,6 +123,10 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// CB-035: la tarea b3_llamada_supervisor venció sin que nadie llamara. Va a
 	// los cobros_supervisor y al asesor dueño del crédito. Dedup por episodio.
 	"b3_llamada_vencida",
+	// CB-037/038: una visita programada. Va al responsable de la visita: al
+	// programarla (si la programó otro) y la mañana del día. Dedup por visita
+	// y día (migración 0069).
+	"visita_programada",
 ]);
 
 // Notifications table

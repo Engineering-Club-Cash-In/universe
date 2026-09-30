@@ -59,6 +59,9 @@ export const metodoContactoEnum = pgEnum("metodo_contacto", [
 	"visita_domicilio",
 	"carta_notarial",
 	"pago",
+	// CB-038: la visita al lugar de trabajo, como canal propio en el historial
+	// (la de residencia sigue siendo "visita_domicilio"). Migración 0069.
+	"visita_trabajo",
 ]);
 
 // CB-025: catálogo de resultados PROVISIONAL — "Definición de listo" del

@@ -113,6 +113,7 @@ import {
 } from "./routers/pagalo-supervision";
 import { recuperacionVehiculoRouter } from "./routers/recuperacion-vehiculo";
 import { referenciasCobrosRouter } from "./routers/referencias-cobros";
+import { visitasCobrosRouter } from "./routers/visitas-cobros";
 import { wialonRouter } from "./routers/wialon";
 import externalContractsRouter from "./routes/external-contracts";
 import { carteraBackClient } from "./services/cartera-back-client";
@@ -127,6 +128,7 @@ import { refreshPremoraElegibilidad } from "./services/refresh-premora-elegibili
 import { sendConvenioReminders } from "./services/send-convenio-reminders";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
 import { sincronizarPromesasCarteraBack } from "./services/sync-promesas-cartera-back";
+import { avisarVisitasDelDia } from "./services/visitas-cobros";
 
 const app = new Hono();
 const AUTH_DIAG_PREFIX = "CRM_AUTH_DIAG";
@@ -268,6 +270,7 @@ const handler = new RPCHandler(
 		gpsIntegracionRouter,
 		gpsEventosRouter,
 		referenciasCobrosRouter,
+		visitasCobrosRouter,
 	),
 );
 app.use("/rpc/*", async (c, next) => {
@@ -2469,6 +2472,11 @@ if (HAY_JOBS_ACTIVOS) {
 		// de que arranque el día (review de Codex, PR #1765).
 		await reconciliarAvisosLlamarCliente().catch((error) =>
 			console.error("Error al reconciliar avisos de inmovilización:", error),
+		);
+		// CB-037/038: aviso al responsable de cada visita programada para hoy.
+		// Dedup por visita y día: el run de boot no duplica.
+		await avisarVisitasDelDia().catch((error) =>
+			console.error("Error en el aviso de visitas del día:", error),
 		);
 	}
 

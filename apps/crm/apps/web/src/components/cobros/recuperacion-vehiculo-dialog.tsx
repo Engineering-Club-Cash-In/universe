@@ -78,6 +78,11 @@ interface RecuperacionVehiculoDialogProps {
 	casoCobroId: string;
 	/** Sin vehículo no se puede consultar el GPS; el resto del formulario sigue. */
 	vehicleId: string | null;
+	/**
+	 * CB-037/038: la entrega sale de una visita. Llega con el lugar y la fecha
+	 * de la visita ya puestos (editables), y el registro queda vinculado a ella.
+	 */
+	desdeVisita?: { visitaId: string; lugar: string; fecha: Date };
 }
 
 /** `datetime-local` quiere "YYYY-MM-DDTHH:mm" en hora local. */
@@ -130,6 +135,7 @@ function FormularioRecuperacion({
 	operacion,
 	casoCobroId,
 	vehicleId,
+	desdeVisita,
 }: RecuperacionVehiculoDialogProps) {
 	const queryClient = useQueryClient();
 	const voluntaria = tipo === "entrega_voluntaria";
@@ -144,8 +150,10 @@ function FormularioRecuperacion({
 	const [estado, setEstado] = useState<string>("");
 	const [estadoDetalle, setEstadoDetalle] = useState("");
 	const [kilometraje, setKilometraje] = useState("");
-	const [fechaEntrega, setFechaEntrega] = useState("");
-	const [lugarEntrega, setLugarEntrega] = useState("");
+	const [fechaEntrega, setFechaEntrega] = useState(
+		desdeVisita ? aDatetimeLocal(desdeVisita.fecha) : "",
+	);
+	const [lugarEntrega, setLugarEntrega] = useState(desdeVisita?.lugar ?? "");
 	const [persona, setPersona] = useState("");
 	const [relacion, setRelacion] = useState("");
 	const [documentos, setDocumentos] = useState<string[]>([]);
@@ -263,6 +271,7 @@ function FormularioRecuperacion({
 				await client.registrarEntregaVoluntariaEnB4({
 					casoCobroId,
 					detalle: parsed,
+					visitaId: desdeVisita?.visitaId,
 				});
 				return null;
 			}
@@ -270,6 +279,7 @@ function FormularioRecuperacion({
 				casoCobroId,
 				tipo,
 				detalle: parsed,
+				visitaId: desdeVisita?.visitaId,
 			});
 		},
 		onSuccess: (r) => {
@@ -286,6 +296,9 @@ function FormularioRecuperacion({
 			}
 			queryClient.invalidateQueries({
 				queryKey: orpc.getRecuperacionesVehiculoCaso.key(),
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getVisitasCaso.key(),
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getBucketActualCredito.key(),
@@ -325,6 +338,12 @@ function FormularioRecuperacion({
 								El estado se levanta <strong>solo</strong> si el cliente paga
 								todo lo que debe —cuotas vencidas y mora— y contabilidad valida
 								ese pago. Un convenio no lo levanta.
+							</p>
+						)}
+						{desdeVisita && (
+							<p className="rounded-md border border-sky-200 bg-sky-50 p-2 text-sky-900 text-xs dark:border-sky-900 dark:bg-sky-950 dark:text-sky-200">
+								Viene de la visita: el lugar y la fecha ya están puestos.
+								Revisalos y completá el resto.
 							</p>
 						)}
 					</div>

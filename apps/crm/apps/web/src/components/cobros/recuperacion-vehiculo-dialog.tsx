@@ -6,29 +6,43 @@
  *  · Entrega voluntaria: el cliente la entrega. Además fecha, lugar, quién la
  *    entrega y qué documentos trae.
  *
- * De B1 a B3 el envío traslada el crédito a B4 (`enviarCreditoARecuperacion`).
+ * De B2 a B3 el envío traslada el crédito a B4 (`enviarCreditoARecuperacion`).
  * La entrega voluntaria también se registra con el crédito ya en B4: ahí solo
  * se guarda el formulario (`registrarEntregaVoluntariaEnB4`).
+ *
+ * CB-043: la forzosa es una SOLICITUD, la pida quien la pida. Lleva la
+ * justificación y el checklist de lo que ya se hizo, y la aprueba OTRO
+ * supervisor o admin antes de que el crédito se mueva.
  *
  * Las reglas del formulario son las MISMAS del servidor (se importan de
  * server/src/lib/recuperacion-vehiculo): el botón se habilita con lo mismo que
  * el servidor va a aceptar.
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, MapPin, Navigation, Send, TriangleAlert } from "lucide-react";
 import { useState } from "react";
+import {
+	faltanteDePaso,
+	type RespuestaPasoInput,
+} from "server/src/lib/recuperacion-solicitud";
 import {
 	type DetalleRecuperacionInput,
 	DOCUMENTOS_VEHICULO,
 	detalleRecuperacionSchema,
 	ESTADOS_VEHICULO,
 	erroresDetalleRecuperacion,
+	MIN_JUSTIFICACION_FORZOSA,
 	motivosDelTipo,
 	type OperacionRecuperacion,
 	TIPO_RECUPERACION_LABEL,
 	type TipoEnvioRecuperacion,
 } from "server/src/lib/recuperacion-vehiculo";
 import { toast } from "sonner";
+import {
+	ChecklistFormulario,
+	type RespuestasChecklist,
+	respuestasIniciales,
+} from "@/components/cobros/recuperacion-checklist";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -140,6 +154,35 @@ function FormularioRecuperacion({
 	const queryClient = useQueryClient();
 	const voluntaria = tipo === "entrega_voluntaria";
 	const catalogoMotivos = motivosDelTipo(tipo);
+	/** La forzosa se solicita, no se traslada (CB-043). */
+	const esSolicitud = !voluntaria;
+
+	// CB-043: el checklist de la forzosa, con la evidencia que el CRM tiene hoy.
+	const checklist = useQuery({
+		...orpc.getChecklistRecuperacion.queryOptions({ input: { casoCobroId } }),
+		enabled: !voluntaria,
+		// Mientras se llena no se refresca: cambiaría pasos bajo los dedos.
+		staleTime: Number.POSITIVE_INFINITY,
+		refetchOnWindowFocus: false,
+	});
+	const pasos = checklist.data?.pasos ?? [];
+	const [respuestas, setRespuestas] = useState<RespuestasChecklist | null>(
+		null,
+	);
+	const respuestasActuales =
+		respuestas ?? (checklist.data ? respuestasIniciales(pasos) : {});
+	const cambiarPaso = (paso: string, cambio: Partial<RespuestaPasoInput>) =>
+		setRespuestas({
+			...respuestasActuales,
+			[paso]: {
+				...respuestasActuales[paso],
+				paso: paso as RespuestaPasoInput["paso"],
+				...cambio,
+			},
+		});
+	const faltantesChecklist: Record<string, string | null> = Object.fromEntries(
+		pasos.map((p) => [p.paso, faltanteDePaso(p, respuestasActuales[p.paso])]),
+	);
 
 	const [motivos, setMotivos] = useState<string[]>([]);
 	const [motivoDetalle, setMotivoDetalle] = useState("");
@@ -204,6 +247,15 @@ function FormularioRecuperacion({
 		if (motivos.length === 0) return "Elegí al menos un motivo.";
 		if (motivos.includes("otro") && !motivoDetalle.trim())
 			return "Marcaste «Otro»: contá en el detalle cuál es el motivo.";
+		if (!voluntaria) {
+			if (motivoDetalle.trim().length < MIN_JUSTIFICACION_FORZOSA)
+				return `Escribí la justificación para el supervisor (mínimo ${MIN_JUSTIFICACION_FORZOSA} caracteres).`;
+			if (checklist.isPending) return "Cargando el checklist…";
+			if (checklist.isError)
+				return "No se pudo cargar el checklist. Cerrá y volvé a intentar.";
+			const pasoFaltante = Object.values(faltantesChecklist).find(Boolean);
+			if (pasoFaltante) return pasoFaltante;
+		}
 		if (voluntaria && !fechaEntrega) return "Falta la fecha de la entrega.";
 		if (voluntaria && lugarEntrega.trim().length < 3)
 			return "Falta el lugar de la entrega.";
@@ -280,12 +332,26 @@ function FormularioRecuperacion({
 				tipo,
 				detalle: parsed,
 				visitaId: desdeVisita?.visitaId,
+				checklist: voluntaria
+					? undefined
+					: pasos.map((p) => {
+							const r = respuestasActuales[p.paso];
+							return {
+								paso: p.paso,
+								justificacion: r?.justificacion,
+								nota: r?.nota,
+							};
+						}),
 			});
 		},
 		onSuccess: (r) => {
 			if (r === null) {
 				toast.success(
 					"Entrega voluntaria registrada. El asesor de B4 ya tiene el aviso.",
+				);
+			} else if (r.modo === "solicitud") {
+				toast.success(
+					"Solicitud enviada. El crédito pasa a B4 cuando un supervisor la apruebe.",
 				);
 			} else {
 				toast.success(
@@ -296,6 +362,9 @@ function FormularioRecuperacion({
 			}
 			queryClient.invalidateQueries({
 				queryKey: orpc.getRecuperacionesVehiculoCaso.key(),
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getSolicitudesRecuperacion.key(),
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getVisitasCaso.key(),
@@ -316,10 +385,24 @@ function FormularioRecuperacion({
 	return (
 		<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
 			<DialogHeader>
-				<DialogTitle>{TIPO_RECUPERACION_LABEL[tipo]}</DialogTitle>
+				<DialogTitle>
+					{esSolicitud
+						? "Solicitar recuperación forzosa"
+						: TIPO_RECUPERACION_LABEL[tipo]}
+				</DialogTitle>
 				<DialogDescription asChild>
 					<div className="space-y-2">
-						{operacion === "trasladar" ? (
+						{esSolicitud ? (
+							<p>
+								La recuperación la aprueba{" "}
+								<strong>otro supervisor o admin</strong>. Le llega esta
+								solicitud con tu justificación y el checklist de lo que ya se
+								hizo; cuando la apruebe, el crédito pasa a{" "}
+								<strong>B4 · Última Instancia / Pre Jurídico</strong> en estado{" "}
+								<strong>En recuperación</strong>. Hasta entonces sigue donde
+								está.
+							</p>
+						) : operacion === "trasladar" ? (
 							<p>
 								El crédito pasa a{" "}
 								<strong>B4 · Última Instancia / Pre Jurídico</strong> en estado{" "}
@@ -374,8 +457,8 @@ function FormularioRecuperacion({
 						))}
 					</div>
 					<Label htmlFor="motivo-detalle" className="pt-1 font-normal text-sm">
-						Detalle{" "}
-						{motivos.includes("otro") ? (
+						{voluntaria ? "Detalle" : "Justificación para el supervisor"}{" "}
+						{!voluntaria || motivos.includes("otro") ? (
 							<span className="text-red-600">*</span>
 						) : (
 							<span className="text-muted-foreground">(opcional)</span>
@@ -388,11 +471,48 @@ function FormularioRecuperacion({
 						placeholder={
 							voluntaria
 								? "Ej: Perdió el trabajo, prefiere entregar el carro antes de seguir atrasándose"
-								: "Ej: Tercera promesa rota este mes y ya no contesta"
+								: "Por qué ya no hay otra salida. Ej: Tercera promesa rota, no contesta desde el 10/09 y en la visita la familia dijo que se fue del país"
 						}
-						rows={2}
+						rows={voluntaria ? 2 : 3}
 					/>
 				</section>
+
+				{/* CB-043 · Lo que ya se hizo (solo la forzosa) */}
+				{!voluntaria && (
+					<section className="space-y-2">
+						<div>
+							<h3 className="font-medium text-sm">
+								Lo que ya se hizo <span className="text-red-600">*</span>
+							</h3>
+							<p className="text-muted-foreground text-xs">
+								Lo marcado sale de lo que el CRM tiene registrado
+								{checklist.data
+									? ` desde el ${new Date(checklist.data.desde).toLocaleDateString("es-GT")}`
+									: ""}
+								. Lo que no se hizo, justificalo: es lo primero que lee el
+								supervisor.
+							</p>
+						</div>
+						{checklist.isPending ? (
+							<p className="flex items-center gap-2 text-muted-foreground text-sm">
+								<Loader2 className="h-4 w-4 animate-spin" />
+								Revisando la gestión del caso…
+							</p>
+						) : checklist.isError ? (
+							<p className="text-red-600 text-sm">
+								{checklist.error.message || "No se pudo cargar el checklist."}
+							</p>
+						) : (
+							<ChecklistFormulario
+								pasos={pasos}
+								respuestas={respuestasActuales}
+								onChange={cambiarPaso}
+								faltantes={faltantesChecklist}
+								mostrarFaltantes={intentoEnviar}
+							/>
+						)}
+					</section>
+				)}
 
 				{/* 2 · La entrega (solo voluntaria) */}
 				{voluntaria && (
@@ -620,7 +740,11 @@ function FormularioRecuperacion({
 						) : (
 							<Send className="mr-2 h-4 w-4" />
 						)}
-						{operacion === "trasladar" ? "Enviar a B4" : "Registrar entrega"}
+						{esSolicitud
+							? "Enviar solicitud"
+							: operacion === "trasladar"
+								? "Enviar a B4"
+								: "Registrar entrega"}
 					</Button>
 				</div>
 			</DialogFooter>

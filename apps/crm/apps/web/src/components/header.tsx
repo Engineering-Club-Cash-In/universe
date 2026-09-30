@@ -393,13 +393,30 @@ export default function Header() {
 														Metas de Mora
 													</Link>
 												</DropdownMenuItem>
+											</DropdownMenuGroup>
+											{/* Lo que los asesores piden y el supervisor aprueba. Cada
+											    solicitud tiene su pantalla: son flujos distintos. */}
+											<DropdownMenuSeparator />
+											<DropdownMenuLabel className={MENU_GROUP_LABEL_CLASS}>
+												Solicitudes
+											</DropdownMenuLabel>
+											<DropdownMenuGroup>
 												<DropdownMenuItem asChild>
 													<Link
 														to="/cobros/inmovilizaciones"
 														className="cursor-pointer"
 													>
 														<Lock className="mr-2 h-4 w-4" />
-														Inmovilización de unidades
+														Apagado de unidades (GPS)
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link
+														to="/cobros/recuperaciones"
+														className="cursor-pointer"
+													>
+														<Car className="mr-2 h-4 w-4" />
+														Recuperación de vehículo
 													</Link>
 												</DropdownMenuItem>
 											</DropdownMenuGroup>
@@ -849,12 +866,20 @@ function MobileNav({
 													<Target />
 													Metas de Mora
 												</Link>
+												<MobileGroupLabel>Solicitudes</MobileGroupLabel>
 												<Link
 													to="/cobros/inmovilizaciones"
 													className={MOBILE_LINK_CLASS}
 												>
 													<Lock />
-													Inmovilización de unidades
+													Apagado de unidades (GPS)
+												</Link>
+												<Link
+													to="/cobros/recuperaciones"
+													className={MOBILE_LINK_CLASS}
+												>
+													<Car />
+													Recuperación de vehículo
 												</Link>
 												<MobileGroupLabel>
 													Configuración y análisis

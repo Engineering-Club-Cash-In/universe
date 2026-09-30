@@ -39,8 +39,8 @@ function voluntaria(extra: Record<string, unknown> = {}): DetalleRecuperacion {
 }
 
 describe("operacionRecuperacion", () => {
-	it("de B1 a B3 los dos envíos trasladan a B4", () => {
-		for (const b of [1, 2, 3]) {
+	it("de B2 a B3 los dos envíos trasladan a B4", () => {
+		for (const b of [2, 3]) {
 			expect(operacionRecuperacion("tomado", b)).toBe("trasladar");
 			expect(operacionRecuperacion("entrega_voluntaria", b)).toBe("trasladar");
 		}
@@ -53,26 +53,39 @@ describe("operacionRecuperacion", () => {
 		expect(operacionRecuperacion("tomado", 4)).toBeNull();
 	});
 
-	it("en B0, B5 o sin bucket no aplica ninguno", () => {
-		for (const b of [0, 5, null]) {
+	it("en B0, B1, B5 o sin bucket no aplica ninguno", () => {
+		for (const b of [0, 1, 5, null]) {
 			expect(operacionRecuperacion("tomado", b)).toBeNull();
 			expect(operacionRecuperacion("entrega_voluntaria", b)).toBeNull();
 		}
 	});
 
 	it("el motivo de bloqueo dice el rango de cada tipo", () => {
-		expect(motivoBloqueoRecuperacion("tomado", 4, "B4")).toContain("B1 a B3");
+		expect(motivoBloqueoRecuperacion("tomado", 4, "B4")).toContain("B2 a B3");
 		expect(motivoBloqueoRecuperacion("entrega_voluntaria", 5, "B5")).toContain(
-			"B1 a B4",
+			"B2 a B4",
 		);
 		expect(motivoBloqueoRecuperacion("entrega_voluntaria", 4)).toBeNull();
 	});
 });
 
 describe("erroresDetalleRecuperacion", () => {
-	it("el detalle es opcional si los motivos ya lo dicen", () => {
-		const d = forzosa({ motivoDetalle: undefined });
-		expect(erroresDetalleRecuperacion("tomado", d, AHORA)).toBeNull();
+	it("en la voluntaria el detalle es opcional si los motivos ya lo dicen", () => {
+		const d = voluntaria({ motivoDetalle: undefined });
+		expect(
+			erroresDetalleRecuperacion("entrega_voluntaria", d, AHORA),
+		).toBeNull();
+	});
+
+	it("en la forzosa la justificación es obligatoria (CB-043)", () => {
+		const sin = forzosa({ motivoDetalle: undefined });
+		expect(erroresDetalleRecuperacion("tomado", sin, AHORA)).toContain(
+			"justificación",
+		);
+		const corta = forzosa({ motivoDetalle: "No paga" });
+		expect(erroresDetalleRecuperacion("tomado", corta, AHORA)).toContain(
+			"mínimo 20",
+		);
 	});
 
 	it("«Otro» sin detalle no dice nada: se pide el detalle", () => {

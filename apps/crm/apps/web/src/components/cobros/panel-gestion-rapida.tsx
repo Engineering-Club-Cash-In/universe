@@ -150,6 +150,8 @@ const ALERTA_LABEL: Record<string, string> = {
 	visita_programada: "Visita programada",
 	b3_llamada_supervisor: "Llamar: ingresó a B3",
 	b3_llamada_vencida: "Llamada B3 vencida",
+	recuperacion_pendiente_aprobacion: "Recuperación por aprobar",
+	recuperacion_resuelta: "Recuperación resuelta",
 };
 
 function money(v: string | number | null | undefined) {

@@ -111,6 +111,7 @@ import {
 	pagaloSupervisionRouter,
 	resolverSifcosPermitidosPagalo,
 } from "./routers/pagalo-supervision";
+import { recuperacionSolicitudesRouter } from "./routers/recuperacion-solicitudes";
 import { recuperacionVehiculoRouter } from "./routers/recuperacion-vehiculo";
 import { referenciasCobrosRouter } from "./routers/referencias-cobros";
 import { tareasCobrosRouter } from "./routers/tareas-cobros";
@@ -265,6 +266,7 @@ const handler = new RPCHandler(
 		pagaloSupervisionRouter,
 		convenioDecisionRouter,
 		recuperacionVehiculoRouter,
+		recuperacionSolicitudesRouter,
 		inmovilizacionUnidadRouter,
 		inmovilizacionReactivacionLlamadaRouter,
 		wialonRouter,

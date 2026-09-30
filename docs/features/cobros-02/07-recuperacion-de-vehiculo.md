@@ -4,8 +4,10 @@
 `EN_RECUPERACION` ([plan 08](./08-plan-convenios-y-recuperacion.md), fase 4). Desde
 **CB-042** hay **dos tipos de envío** —recuperación forzosa y entrega voluntaria— y cada
 uno deja un formulario en el CRM que ve el asesor de B4. Ver
-[Los dos envíos y su formulario](#los-dos-envíos-y-su-formulario-cb-042).
-**Migración CRM `0065` pendiente en producción.**
+[Los dos envíos y su formulario](#los-dos-envíos-y-su-formulario-cb-042). Desde
+**CB-043** la forzosa de un asesor es una **solicitud con checklist que aprueba un
+supervisor**. Ver [La solicitud y la aprobación](#la-solicitud-y-la-aprobación-cb-043).
+**Migraciones CRM `0065` y `0071` pendientes en producción.**
 
 ---
 
@@ -36,8 +38,13 @@ cliente colaborando.
 
 | Opción | `tipo_recuperacion` | Cuándo | Buckets | Qué se llena |
 | --- | --- | --- | --- | --- |
-| **Recuperar vehículo** | `tomado` | El cliente no paga y el asesor decide quitarle la unidad | B1–B3 (traslada) | Motivos, dónde está el vehículo, estado, observaciones |
-| **Entrega voluntaria** | `entrega_voluntaria` | El cliente entrega la unidad por su cuenta | B1–B3 (traslada) · **B4 (solo registra)** | Lo mismo + fecha y hora, lugar, quién entrega, documentos |
+| **Recuperar vehículo** | `tomado` | El cliente no paga y hay que quitarle la unidad | B2–B3 (traslada **al aprobarse**, CB-043) | Motivos, **justificación**, **checklist**, dónde está el vehículo, estado, observaciones |
+| **Entrega voluntaria** | `entrega_voluntaria` | El cliente entrega la unidad por su cuenta | B2–B3 (traslada) · **B4 (solo registra)** | Motivos, fecha y hora, lugar, quién entrega, documentos, estado |
+
+> **Rango (2026-09-30):** los dos envíos salen de **B2 o B3**. El plan 08 los tenía de B1 a
+> B3; con CB-043 se sacó B1. El CRM lo exige en el servidor antes de guardar nada (el
+> formulario y la solicitud); cartera sigue aceptando de B1 a B3 bajo sus locks, que queda
+> como la cota de afuera.
 
 - **Motivos:** casillas de un catálogo por tipo (`lib/recuperacion-vehiculo.ts`) más un
   detalle **opcional**. El detalle solo se exige si se marcó «Otro», que sin texto no
@@ -108,6 +115,134 @@ explicación no se explica solo.
 `enviarCreditoARecuperacion` recibe `tipo` y `detalle` **opcionales**. Un llamador que
 manda solo `motivo` (por ejemplo, el cierre "no pagó" de la inmovilización de CB-041)
 sigue funcionando y queda registrado como forzosa con ese texto.
+
+---
+
+## La solicitud y la aprobación (CB-043)
+
+CB-043 pedía "activar B4 antes del día 91 si ya se agotaron los pasos de B3, con checklist
+y aprobación de supervisor/gerente", con un subestado "B4 operativo anticipado". El PM lo
+**unificó con la recuperación forzosa** (2026-09-30): las dos terminan igual —B4 con
+`EN_RECUPERACION`, por el mismo endpoint de cartera— y no tenía sentido que una fuera
+directa y la otra pasara por aprobación. Dicho por el PM: *"¿qué pasa si un asesor dice
+'no quiero tratar este caso, mandémoslo a B4'? El supervisor tiene que ver la
+justificación."* Así quedó:
+
+| Quién | Recuperación forzosa | Entrega voluntaria |
+| --- | --- | --- |
+| Asesor, supervisor o admin | **Solicita**: el crédito no se mueve hasta que la apruebe **otro** supervisor o admin | Directa, como siempre |
+
+**Cuatro ojos (2026-09-30):** nadie aprueba ni rechaza su propia solicitud, ni siquiera
+un admin. Así al menos otra persona se entera antes de que el crédito pase a B4. Quien la
+pidió solo puede cancelarla. El aviso va a los `cobros_supervisor` menos quien pidió; si
+no queda ninguno (la pidió el único supervisor), va a los admins.
+
+### Qué lleva la solicitud
+
+- Lo de siempre de la forzosa (motivos, dónde está la unidad, estado) más una
+  **justificación obligatoria** de al menos 20 caracteres: por qué ya no hay otra salida.
+- El **checklist de gestión**: nueve pasos que salen de la épica B3 · Rescate (CB-035 a
+  CB-042) más lo básico de cualquier cobro. Es un checklist de **evidencia**, no de
+  casillas: cada paso llega marcado con lo que el CRM (o cartera) encontró desde que el
+  crédito salió de B0 (la salida de B0 más reciente, del historial de buckets; sin
+  historial, los últimos 180 días). **Nada se marca a mano**, y solo entran pasos que
+  dependen de quien pide:
+
+  | Paso | De dónde sale |
+  | --- | --- |
+  | Llamadas al cliente | `contactos_cobros` por llamada (sin los envíos automáticos) |
+  | WhatsApp, SMS o correo | `contactos_cobros` por esos canales (sin premora ni masivos) |
+  | Promesa de pago | Promesas y acuerdos parciales, con cuántas se incumplieron |
+  | Convenio de pago | Convenios del crédito en cartera: vigentes, completados, pendientes o deshechos (`GET /payment-agreements?status=all`), más los rechazados, que borran su fila y quedan en el historial de decisiones. Como la promesa, cuenta que se generó |
+  | Referencias | Cuántas referencias del crédito se gestionaron (todas = hecho, algunas = a medias) |
+  | Visita a la residencia / al trabajo | `visitas_cobros` realizadas de cada tipo |
+  | Ubicación por GPS | Consultas en `gps_consulta_logs` del vehículo |
+  | Apagado de la unidad | La última solicitud de CB-041 (ejecutada = hecho; pedida o rechazada = a medias) |
+
+  Lo que no está hecho **se justifica** con un catálogo (no aplica, sin datos, nadie
+  contesta, no se localiza, se niega a pagar, alertaría al cliente y escondería el
+  vehículo, urgencia, zona de riesgo, sin GPS, se hizo fuera del CRM, otro). "Se hizo fuera
+  del CRM" y "Otro" piden nota. **No se bloquea por pasos pendientes** —obligaría a
+  inventar registros—, pero ninguno queda sin explicación. Cuando falta el dato para hacer
+  el paso (sin referencias, sin lugar de trabajo, sin GPS) la justificación viene
+  sugerida.
+- **Qué quedó afuera (2026-09-30):** la *llamada del supervisor* (no depende del asesor:
+  no la puede hacer ni justificar) y la *búsqueda en redes sociales* (CB-039 no está
+  hecho, no hay dónde registrarla). Si cartera no responde, el paso de convenio lo dice
+  ("no se sabe si hubo convenio") en vez de afirmar que no hubo.
+- El checklist lo **arma el servidor** dos veces: para mostrar el formulario y otra vez al
+  guardar. Del navegador solo salen las justificaciones y notas: lo que lee el supervisor
+  es lo que el CRM encontró, no lo que alguien dijo que encontró.
+- Catálogos provisionales en `lib/recuperacion-solicitud.ts`, en TypeScript: el checklist
+  se guarda como jsonb con su título y su evidencia, así que cambiar pasos no rompe los
+  registros viejos.
+
+### El ciclo
+
+```
+asesor ── enviarCreditoARecuperacion (tipo tomado) ──▶ estado_solicitud = 'pendiente'
+                                                        (cartera no se toca; aviso a los supervisores)
+                                                                   │
+            ┌──────────────────────┬───────────────────────────────┼────────────────────────┐
+            ▼                      ▼                               ▼                        ▼
+   supervisor aprueba      supervisor rechaza            el asesor la cancela    el crédito sale de B2–B3
+   → cartera traslada      (motivo ≥ 10 caracteres)                              o llega a B4 por otra vía
+   → 'aprobada'            → 'rechazada'                 → 'cancelada'           → 'sin_efecto'
+```
+
+- La solicitud es la **misma fila** de `recuperaciones_vehiculo` que después ve el asesor
+  de B4: al aprobarse se completa con los buckets, el asesor de B4 y la **foto del saldo
+  del momento del traslado** (no la de cuando se pidió).
+- **Una pendiente por caso**, con índice único parcial. Mientras hay una, la ficha no ofrece
+  pedir otra.
+- **Al aprobar** se relee el bucket sin cache: si el crédito ya no está en B2–B3, la
+  solicitud queda `sin_efecto` y se avisa. La transacción que bloquea la solicitud queda
+  abierta mientras cartera traslada: es una acción puntual y garantiza que dos supervisores
+  no la aprueben a la vez.
+- **Si cartera trasladó pero la respuesta se perdió**, la solicitud sigue pendiente. El
+  siguiente intento recibe "ya está en B4" (un 4xx), pero antes de darlo por bueno se busca
+  la huella `[ref CRM <id>]` en el historial de buckets. Si la encuentra, la da por
+  aprobada sin volver a mover nada.
+- **Si el crédito llega a B4 por otro camino** (una entrega voluntaria, o solo por cuotas),
+  la solicitud pendiente se cierra como `sin_efecto` y se le avisa a quien la pidió.
+- **"Deshacer convenio y mandar a recuperación" ya no existe.** Llevaba el crédito a B4 sin
+  solicitud, sin checklist y sin aprobación. Ahora "Deshacer convenio" solo deshace, y la
+  recuperación se solicita aparte como cualquier otra. Un test sobre la fuente
+  (`cobros.deshacer-convenio.test.ts`) cuida que ningún camino vuelva a trasladar sin
+  solicitud.
+- **Registros efectivos:** una solicitud pendiente, rechazada, cancelada o sin efecto no es
+  una recuperación. No cuenta en `reportes-cartera.ts`, no es "el registro vigente" de la
+  tarjeta y no admite confirmar la recepción de la unidad.
+
+### Dónde se ve
+
+- **Ficha 360 → tarjeta "Recuperación de vehículo":** la solicitud pendiente arriba, con la
+  justificación, el checklist y los botones **Aprobar y mandar a B4 / Rechazar** (otro
+  supervisor o admin) o **Cancelar mi solicitud** (quien la pidió). Aprobada, el checklist queda plegado debajo
+  del envío para el asesor de B4.
+- **Cobros → Solicitudes → Recuperación de vehículo** (`/cobros/recuperaciones`, solo
+  supervisor y admin): las pendientes, las más viejas primero, con todo lo necesario para
+  decidir sin abrir la ficha, y el historial de las decididas. En el mismo grupo del menú
+  quedó **Apagado de unidades (GPS)** (`/cobros/inmovilizaciones`, CB-041): cada solicitud
+  con su pantalla, porque son flujos distintos.
+- **Avisos:** `recuperacion_pendiente_aprobacion` a todos los `cobros_supervisor` (acción
+  requerida; se cierra sola al decidir, cancelar o quedar sin efecto, y no se puede
+  resolver a mano) y `recuperacion_resuelta` de vuelta a quien pidió. Al aprobar sale
+  además el aviso de siempre (`recuperacion_vehiculo`) al asesor de B4.
+
+### "B4 anticipado" sin subestado
+
+El ticket pedía un subestado "B4 operativo anticipado" porque "activar B4 antes del día 91
+es excepción operativa, no cambio de bucket financiero". No hizo falta:
+
+- **El bucket ya es operativo** (qué equipo atiende el crédito). La clasificación financiera
+  —cuotas vencidas, días de mora, `casos_cobros.estado_mora`, la mora en quetzales— se
+  calcula por cuotas y no se mueve con el traslado.
+- **Lo que sostiene el B4 es `EN_RECUPERACION`**, que ya existía. No se agregó estado nuevo
+  en cartera.
+- **"Anticipado" es una etiqueta calculada:** B4 con `EN_RECUPERACION` y menos de 4 cuotas
+  vencidas. La ficha la muestra junto al bucket ("B4 anticipado · 3 cuotas"), y la tarjeta
+  de recuperación lo explica.
 
 ---
 
@@ -194,7 +329,7 @@ la misma que usa el job. O sea:
 `tipo_evento` se calcula comparando contra el bucket actual, no se asume.
 
 > **Actualización (plan 08, review de Codex):** este documento contemplaba llegar a B4
-> también *desde B5*. Ya no: el origen válido es **B1–B3** y cartera lo exige bajo sus locks
+> también *desde B5*. Ya no: el origen válido es **B1–B3** (en el CRM, B2–B3 desde CB-043) y cartera lo exige bajo sus locks
 > (`motivoBucketNoRecuperable`). Desde B5 la operación le restaba gravedad a la cuenta, y con
 > el piso de `EN_RECUPERACION` el motor la devolvía a B5 esa misma noche. Hoy toda
 > recuperación es una `SUBIDA`; el cálculo contra el bucket actual se conserva igual.
@@ -217,8 +352,11 @@ la misma que usa el job. O sea:
 ## Quién puede hacerlo
 
 `cobrosProcedure` → **cualquiera del módulo de cobros** (`canAccessCobros`: asesor,
-supervisor o admin). Lo dispara el asesor que lleva la cuenta: es quien sabe que la unidad
-ya no se recupera por teléfono.
+supervisor o admin). Lo inicia el asesor que lleva la cuenta: es quien sabe que la unidad
+ya no se recupera por teléfono. **Desde CB-043 la forzosa solo crea la solicitud, la pida
+quien la pida**; el traslado lo hace `decidirSolicitudRecuperacion`, que exige
+`cobrosSupervisorProcedure` (supervisor o admin) y que quien decide no sea quien pidió. La
+entrega voluntaria sigue siendo directa.
 
 **El crédito no se recibe del cliente: sale del caso.** El procedure toma un `casoCobroId`,
 pasa por `assertAccesoCasoCobro` y resuelve el `credito_id` contra `carteraBackReferences`.
@@ -342,4 +480,10 @@ aditiva cuando se retome el tema.
 | Reglas puras y catálogos (CB-042) | `apps/crm/apps/server/src/lib/recuperacion-vehiculo.ts` (+ `.test.ts`) |
 | Foto del saldo, registro y avisos (CB-042) | `apps/crm/apps/server/src/services/recuperacion-vehiculo.ts` |
 | Migración (CB-042) | `apps/crm/apps/server/src/db/migrations/0065_cb042_recuperacion_vehiculo.sql` |
+| Solicitud: reglas, checklist, textos (CB-043) | `apps/crm/apps/server/src/lib/recuperacion-solicitud.ts` (+ `.test.ts`) |
+| Solicitud: evidencia del checklist (CB-043) | `apps/crm/apps/server/src/services/recuperacion-checklist.ts` |
+| Solicitud: crear, aprobar, rechazar, cancelar (CB-043) | `apps/crm/apps/server/src/services/recuperacion-solicitud.ts` · avisos en `recuperacion-solicitud-avisos.ts` |
+| Solicitud: endpoints (CB-043) | `apps/crm/apps/server/src/routers/recuperacion-solicitudes.ts` (checklist, bandeja, decidir, cancelar); se crea desde `enviarCreditoARecuperacion` |
+| Migración (CB-043) | `apps/crm/apps/server/src/db/migrations/0071_cb043_recuperacion_con_aprobacion.sql` |
+| UI de la solicitud (CB-043) | `components/cobros/recuperacion-checklist.tsx` (formulario, vista y diálogo de decisión) · `routes/cobros/recuperaciones.tsx` (bandeja del supervisor) |
 | UI | `apps/crm/apps/web/src/routes/cobros/$id.tsx` (menú "Recuperación de vehículo ▾") · `components/cobros/recuperacion-vehiculo-dialog.tsx` (formulario) · `components/cobros/recuperacion-vehiculo-card.tsx` (tarjeta y recepción) |

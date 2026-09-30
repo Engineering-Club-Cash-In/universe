@@ -12,7 +12,7 @@
  * ya está en el límite); se monta como router propio en index.ts.
  *
  * Autorización: la de toda la ficha (`assertAccesoCasoCobro`, que pregunta a
- * cartera quién lleva el crédito). Las visitas NUEVAS solo en B3 y B4, con el
+ * cartera quién lleva el crédito). Las visitas NUEVAS solo de B2 a B4, con el
  * bucket leído de cartera sin cache y fallando cerrado.
  */
 
@@ -44,6 +44,7 @@ import {
 	textoGestionVisita,
 	visitaPermitidaEnBucket,
 } from "../lib/visitas-cobros";
+import { resolverContextoCaso } from "../services/referencias-cobros-datos";
 import {
 	assertResponsablePosible,
 	avisarVisitaProgramada,
@@ -54,7 +55,6 @@ import {
 	verificarEvidencias,
 } from "../services/visitas-cobros";
 import { assertAccesoCasoCobro } from "./cobros";
-import { resolverContextoCaso } from "./referencias-cobros";
 
 type ContextoProcedure = { userId: string; userRole: string };
 

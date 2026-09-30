@@ -700,6 +700,20 @@ export const recuperacionesVehiculo = pgTable(
 		),
 		recepcionRegistradaAt: timestamp("recepcion_registrada_at"),
 
+		// CB-043 · La forzosa se SOLICITA y la aprueba un supervisor. NULL = el
+		// registro no pasó por aprobación (entrega voluntaria, o forzosa anterior
+		// a CB-043). Valores y reglas en lib/recuperacion-solicitud.ts.
+		estadoSolicitud: text("estado_solicitud"),
+		// Lo que se hizo antes de pedir, con la evidencia y las justificaciones
+		// (`PasoChecklist[]`). NULL en los registros sin checklist.
+		checklist: jsonb("checklist"),
+		decididoPor: text("decidido_por").references(() => user.id, {
+			onDelete: "set null",
+		}),
+		decididoAt: timestamp("decidido_at"),
+		// Por qué se rechazó, se canceló o quedó sin efecto.
+		motivoDecision: text("motivo_decision"),
+
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 		updatedAt: timestamp("updated_at").notNull().defaultNow(),
 	},
@@ -708,6 +722,13 @@ export const recuperacionesVehiculo = pgTable(
 			t.casoCobroId,
 			t.createdAt.desc(),
 		),
+		// CB-043 · Una sola solicitud pendiente por caso (migración 0071).
+		uniqueIndex("uq_recuperaciones_vehiculo_caso_pendiente")
+			.on(t.casoCobroId)
+			.where(sql`${t.estadoSolicitud} = 'pendiente'`),
+		index("recuperaciones_vehiculo_estado_solicitud_idx")
+			.on(t.estadoSolicitud, t.createdAt)
+			.where(sql`${t.estadoSolicitud} IS NOT NULL`),
 	],
 );
 

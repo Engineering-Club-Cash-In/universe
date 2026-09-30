@@ -397,6 +397,10 @@ export const notificationsRouter = {
 				// una llamada en el caso (createContactoCobros) o por el job; ocultarla
 				// a mano dejaría al supervisor sin la tarea y sin la alerta de vencida.
 				"b3_llamada_supervisor",
+				// CB-043: la solicitud de recuperación se cierra al decidirla (o al
+				// cancelarse / quedar sin efecto). Ocultarla a mano dejaba la
+				// solicitud pendiente sin nadie que la viera.
+				"recuperacion_pendiente_aprobacion",
 			] as const;
 			// El texto conserva "inmovilización" para ese flujo (lo asertan sus tests).
 			const mensajeReaperturaCobros = (tipo: string | null) =>

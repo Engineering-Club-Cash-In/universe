@@ -337,6 +337,17 @@ const ALERTA_COBROS_CONFIG: Record<string, { label: string; clase: string }> = {
 		label: "Llamada B3 vencida",
 		clase: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
 	},
+	// CB-043: solicitud de recuperación esperando al supervisor, y su decisión.
+	recuperacion_pendiente_aprobacion: {
+		label: "Recuperación por aprobar",
+		clase:
+			"bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+	},
+	recuperacion_resuelta: {
+		label: "Recuperación resuelta",
+		clase:
+			"bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-300",
+	},
 };
 
 function getMetodoIcon(metodo: string) {
@@ -513,11 +524,10 @@ function RouteComponent() {
 	// comparten formulario; null = cerrado.
 	const [envioRecuperacion, setEnvioRecuperacion] =
 		useState<TipoEnvioRecuperacion | null>(null);
-	// COBROS-02 Fase 3: deshacer el convenio, con o sin recuperación en el mismo
-	// gesto. El mismo modal sirve para las dos; lo que cambia es el interruptor.
+	// COBROS-02 Fase 3: deshacer el convenio. Desde CB-043 ya no manda a
+	// recuperación en el mismo gesto: eso se solicita aparte, con su checklist.
 	const [deshacerAbierto, setDeshacerAbierto] = useState(false);
 	const [motivoDeshacer, setMotivoDeshacer] = useState("");
-	const [deshacerConRecuperacion, setDeshacerConRecuperacion] = useState(false);
 	// CB-032: el botón "Promesa / Convenio" abre UNO de dos modales distintos.
 	// Promesa = gestión del CRM (ContactoModal variante promesa); convenio =
 	// reestructura en cartera (ConvenioModal). Estados controlados para que un
@@ -880,14 +890,24 @@ function RouteComponent() {
 		enabled: !!session && !!casoDetails.data?.id,
 	});
 
+	// CB-043: si ya hay una solicitud de recuperación esperando al supervisor,
+	// no se ofrece pedir otra. Misma consulta que la tarjeta de recuperación
+	// (react-query la comparte).
+	const recuperacionesCaso = useQuery({
+		...orpc.getRecuperacionesVehiculoCaso.queryOptions({
+			input: { casoCobroId: casoDetails.data?.id || "" },
+		}),
+		enabled: !!session && !!casoDetails.data?.id,
+	});
+
 	// Rol real del usuario: el modal de la oportunidad decide con el que se le
 	// pase (contratos, cotizaciones). Antes se le mandaba ROLES.COBROS fijo y
 	// hasta un admin veia la ficha recortada.
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 
-	// Lo dispara el asesor que lleva la cuenta, no solo el supervisor: es quien
-	// sabe que la unidad ya no se recupera por teléfono. Va separada y en rojo
-	// en el menú para que no se apriete de pasada.
+	// La pide el asesor que lleva la cuenta, no solo el supervisor: es quien
+	// sabe que la unidad ya no se recupera por teléfono. Desde CB-043 la forzosa
+	// de un asesor es una solicitud que aprueba un supervisor.
 	const puedeRecuperarVehiculo = PERMISSIONS.canAccessCobros(
 		userProfile.data?.role ?? "",
 	);
@@ -1014,8 +1034,7 @@ function RouteComponent() {
 		},
 	});
 
-	// COBROS-02 Fase 3 — deshacer el convenio (soft delete), con la opción de
-	// mandar el crédito a recuperación en el mismo gesto.
+	// COBROS-02 Fase 3 — deshacer el convenio (soft delete).
 	const deshacerConvenioMutation = useMutation({
 		mutationFn: () =>
 			client.deshacerConvenio({
@@ -1024,30 +1043,15 @@ function RouteComponent() {
 				// y enumerable, mismo criterio que la recuperación).
 				casoCobroId: casoDetails.data?.id ?? "",
 				motivo: motivoDeshacer.trim(),
-				mandarARecuperacion: deshacerConRecuperacion,
 			}),
 		onSuccess: (r: any) => {
 			const base =
 				r.status_credito === "MOROSO"
 					? `Convenio deshecho. El crédito vuelve a MOROSO con ${r.cuotas_atrasadas} cuota(s) vencida(s) y su mora recalculada.`
 					: "Convenio deshecho. El crédito queda ACTIVO: no tiene cuotas vencidas.";
-			// El parcial se reporta como parcial. Son dos transacciones distintas
-			// en cartera y el convenio YA quedó deshecho: decir "falló" mandaría al
-			// asesor a reintentar algo que no se puede repetir.
-			if (r.recuperacionError) {
-				toast.warning(
-					`${base} No se pudo mandar a recuperación: ${r.recuperacionError}`,
-				);
-			} else if (r.recuperacion) {
-				toast.success(
-					`${base} Y se envió a B${r.recuperacion.bucket_nuevo} por recuperación de vehículo.`,
-				);
-			} else {
-				toast.success(base);
-			}
+			toast.success(base);
 			setDeshacerAbierto(false);
 			setMotivoDeshacer("");
-			setDeshacerConRecuperacion(false);
 			// Deshacer cambia status, mora, bucket y el convenio mismo: es todo lo
 			// que la ficha lee de cartera.
 			queryClient.invalidateQueries({
@@ -1055,10 +1059,6 @@ function RouteComponent() {
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getBucketActualCredito.key(),
-			});
-			// CB-042: "deshacer y mandar" también deja registro de recuperación.
-			queryClient.invalidateQueries({
-				queryKey: orpc.getRecuperacionesVehiculoCaso.key(),
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getAlertaConvenioDelCaso.key(),
@@ -1561,11 +1561,11 @@ function RouteComponent() {
 		enRecuperacion && bucketNumero !== null && bucketNumero >= 5;
 
 	// Recuperación de vehículo (CB-042): dos envíos con su propio rango, que
-	// define la librería compartida con el servidor. La forzosa, de B1 a B3
-	// (plan 08: en B0 no hay nada que recuperar y en B4/B5 ya está donde la
-	// pondría). La entrega voluntaria, de B1 a B4: en B4 solo se registra. Las
-	// opciones NO se esconden — el asesor tiene que saber que existen y por
-	// qué hoy no aplican, mismo criterio que el convenio.
+	// define la librería compartida con el servidor. La forzosa, de B2 a B3
+	// (decisión del 2026-09-30; en B4/B5 ya está donde la pondría). La entrega
+	// voluntaria, de B2 a B4: en B4 solo se registra. Las opciones NO se
+	// esconden — el asesor tiene que saber que existen y por qué hoy no
+	// aplican, mismo criterio que el convenio.
 	const recuperacionBloqueoBase: string | null = !puedeRecuperarVehiculo
 		? "Solo el equipo de cobros puede mandar una cuenta a recuperación."
 		: !caso.id || !caso.numeroCreditoSifco
@@ -1576,13 +1576,22 @@ function RouteComponent() {
 	const bloqueoRecuperacion = (tipo: TipoEnvioRecuperacion) =>
 		recuperacionBloqueoBase ??
 		motivoBloqueoRecuperacion(tipo, bucketNumero, bucketPrefijo);
-	const bloqueoForzosa = bloqueoRecuperacion("tomado");
+	// CB-043: una solicitud pendiente a la vez. Se decide (o se cancela) en la
+	// tarjeta de recuperación, no pidiendo otra.
+	const solicitudRecuperacionPendiente =
+		recuperacionesCaso.data?.some((r) => r.estadoSolicitud === "pendiente") ??
+		false;
+	const bloqueoForzosa =
+		bloqueoRecuperacion("tomado") ??
+		(solicitudRecuperacionPendiente
+			? "Ya hay una solicitud de recuperación esperando aprobación: se decide en la tarjeta de Recuperación de vehículo."
+			: null);
 	const bloqueoVoluntaria = bloqueoRecuperacion("entrega_voluntaria");
 	const operacionEnvio = envioRecuperacion
 		? operacionRecuperacion(envioRecuperacion, bucketNumero)
 		: null;
 
-	// CB-037/038: las visitas nuevas, en B3 y B4 (la regla vive en la librería
+	// CB-037/038: las visitas nuevas, de B2 a B4 (la regla vive en la librería
 	// compartida con el servidor). Registrar el resultado de una ya programada
 	// no pasa por acá: se hace desde su tarjeta, sin mirar el bucket.
 	const bloqueoVisita: string | null = !puedeRecuperarVehiculo
@@ -1843,6 +1852,21 @@ function RouteComponent() {
 										{getEstadoLabel(caso.estadoMora || "")}
 									</Badge>
 								)}
+								{/* CB-043 · En B4 por recuperación con menos de 4 cuotas
+								    vencidas: una excepción operativa, no un cambio en su mora. */}
+								{bucketNumero === 4 &&
+									enRecuperacion &&
+									caso.cuotasVencidas != null &&
+									caso.cuotasVencidas < 4 && (
+										<Badge
+											variant="outline"
+											className="whitespace-nowrap border-orange-300 text-orange-700 dark:border-orange-800 dark:text-orange-300"
+											title="Llegó a B4 por recuperación de vehículo antes del día 91. Sus cuotas y su mora no cambian."
+										>
+											B4 anticipado · {caso.cuotasVencidas}{" "}
+											{caso.cuotasVencidas === 1 ? "cuota" : "cuotas"}
+										</Badge>
+									)}
 								{mostrarPromesaActiva && <PromesaActivaBadge />}
 							</div>
 						</div>
@@ -2097,58 +2121,18 @@ function RouteComponent() {
 									    cobro. Van visibles y en rojo, no escondidas en un
 									    dropdown de gestiones. */}
 									{puedeDeshacerConvenio && (
-										<DropdownMenu>
-											<DropdownMenuTrigger asChild>
-												<Button
-													variant="outline"
-													className="flex w-full items-center justify-center gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 sm:w-auto dark:border-red-900 dark:hover:bg-red-950"
-												>
-													<Handshake className="h-4 w-4" />
-													<span className="sm:hidden">Deshacer</span>
-													<span className="hidden sm:inline">
-														Deshacer convenio
-													</span>
-													<ChevronDown className="h-3.5 w-3.5 opacity-60" />
-												</Button>
-											</DropdownMenuTrigger>
-											<DropdownMenuContent align="end" className="w-80">
-												<DropdownMenuItem
-													className="cursor-pointer items-start gap-2 py-2"
-													onClick={() => {
-														setDeshacerConRecuperacion(false);
-														setDeshacerAbierto(true);
-													}}
-												>
-													<Handshake className="mt-0.5 h-4 w-4 text-red-600" />
-													<div>
-														<p className="font-medium">Deshacer convenio</p>
-														<p className="text-muted-foreground text-xs">
-															El crédito vuelve a MOROSO con su mora
-															recalculada. El acuerdo y sus pagos quedan
-															guardados.
-														</p>
-													</div>
-												</DropdownMenuItem>
-												<DropdownMenuItem
-													className="cursor-pointer items-start gap-2 py-2"
-													onClick={() => {
-														setDeshacerConRecuperacion(true);
-														setDeshacerAbierto(true);
-													}}
-												>
-													<Car className="mt-0.5 h-4 w-4 text-red-600" />
-													<div>
-														<p className="font-medium">
-															Deshacer y mandar a recuperación
-														</p>
-														<p className="text-muted-foreground text-xs">
-															Lo mismo, y además pasa a B4 · Última Instancia /
-															Pre Jurídico.
-														</p>
-													</div>
-												</DropdownMenuItem>
-											</DropdownMenuContent>
-										</DropdownMenu>
+										<Button
+											variant="outline"
+											className="flex w-full items-center justify-center gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 sm:w-auto dark:border-red-900 dark:hover:bg-red-950"
+											title="El crédito vuelve a MOROSO con su mora recalculada. El acuerdo y sus pagos quedan guardados."
+											onClick={() => setDeshacerAbierto(true)}
+										>
+											<Handshake className="h-4 w-4" />
+											<span className="sm:hidden">Deshacer</span>
+											<span className="hidden sm:inline">
+												Deshacer convenio
+											</span>
+										</Button>
 									)}
 
 									{/* CB-042 · Mandar a recuperación, sin convenio de por
@@ -2190,10 +2174,12 @@ function RouteComponent() {
 												>
 													<Car className="mt-0.5 h-4 w-4 text-amber-600" />
 													<div>
-														<p className="font-medium">Recuperar vehículo</p>
+														<p className="font-medium">
+															Solicitar recuperación
+														</p>
 														<p className="text-muted-foreground text-xs">
 															{bloqueoForzosa ??
-																"El cliente no paga: pasa a B4 con los motivos y dónde está la unidad."}
+																"El cliente no paga: se pide con el checklist de lo que ya se hizo y la aprueba otro supervisor o admin."}
 														</p>
 													</div>
 												</DropdownMenuItem>
@@ -2400,25 +2386,21 @@ function RouteComponent() {
 									/>
 								)}
 
-								{/* COBROS-02 Fase 3 — deshacer el convenio. Un solo modal
-								    para las dos variantes: lo que cambia es si además manda el
-								    crédito a recuperación. */}
+								{/* COBROS-02 Fase 3 — deshacer el convenio. Desde CB-043 solo
+								    deshace: la recuperación se solicita aparte. */}
 								<AlertDialog
 									open={deshacerAbierto}
 									onOpenChange={(abierto) => {
 										setDeshacerAbierto(abierto);
 										if (!abierto) {
 											setMotivoDeshacer("");
-											setDeshacerConRecuperacion(false);
 										}
 									}}
 								>
 									<AlertDialogContent>
 										<AlertDialogHeader>
 											<AlertDialogTitle>
-												{deshacerConRecuperacion
-													? "¿Deshacer el convenio y mandar a recuperación?"
-													: "¿Deshacer el convenio de pago?"}
+												¿Deshacer el convenio de pago?
 											</AlertDialogTitle>
 											<AlertDialogDescription asChild>
 												<div className="space-y-3">
@@ -2432,15 +2414,10 @@ function RouteComponent() {
 														cuotas y los pagos que recibió quedan guardados para
 														auditoría.
 													</p>
-													{deshacerConRecuperacion && (
-														<p className="rounded-md border border-red-200 bg-red-50 p-3 text-red-900 text-xs dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-															Además pasa a{" "}
-															<strong>
-																B4 · Última Instancia / Pre Jurídico
-															</strong>{" "}
-															y queda con el asesor que cubre ese bucket.
-														</p>
-													)}
+													<p className="text-xs">
+														Si además hay que recuperar el vehículo, después
+														solicitalo desde «Recuperación de vehículo».
+													</p>
 												</div>
 											</AlertDialogDescription>
 										</AlertDialogHeader>
@@ -2472,9 +2449,7 @@ function RouteComponent() {
 											>
 												{deshacerConvenioMutation.isPending
 													? "Deshaciendo…"
-													: deshacerConRecuperacion
-														? "Deshacer y mandar a recuperación"
-														: "Deshacer convenio"}
+													: "Deshacer convenio"}
 											</AlertDialogAction>
 										</AlertDialogFooter>
 									</AlertDialogContent>
@@ -2573,6 +2548,7 @@ function RouteComponent() {
 									bucketNumero={bucketNumero}
 									enRecuperacion={enRecuperacion}
 									puedeGestionar={puedeRecuperarVehiculo}
+									esSupervisor={esSupervisorCobros}
 									onVerVehiculo={() => setTabActiva("vehiculo")}
 								/>
 							)}
@@ -5051,6 +5027,7 @@ function RouteComponent() {
 								bucketNumero={bucketNumero}
 								enRecuperacion={enRecuperacion}
 								puedeGestionar={puedeRecuperarVehiculo}
+								esSupervisor={esSupervisorCobros}
 							/>
 						)}
 					</div>

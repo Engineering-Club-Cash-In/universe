@@ -1,57 +1,51 @@
 import { describe, expect, it } from "bun:test";
 
 /**
- * "Deshacer convenio y mandar a recuperación" son dos escrituras en cartera y
- * no hay forma de unirlas en una transacción desde acá. Por eso el rango B1–B3
- * tiene que verificarse ANTES de deshacer (review de Codex, P2): después, un
- * rechazo deja el convenio deshecho y la recuperación sin hacer.
+ * CB-043: nada llega a B4 por recuperación forzosa sin una solicitud que
+ * apruebe otra persona. Antes había dos caminos directos, "deshacer convenio
+ * y mandar a recuperación" y la forzosa pedida por un supervisor o admin, y
+ * cualquiera de los dos se saltaba la aprobación.
  *
- * Cartera revalida bajo sus locks —eso es lo que manda—; esto cuida que el
- * caso normal no termine en parcial. Se afirma sobre la fuente porque es un
- * orden dentro de un handler de 9k líneas que un refactor puede invertir.
+ * Se afirma sobre la fuente porque son órdenes y ausencias dentro de handlers
+ * de un router de 9k líneas, que un refactor puede reintroducir sin que ningún
+ * test de comportamiento lo note.
  */
-describe("deshacerConvenio: orden del chequeo de bucket", () => {
-	it("lee el bucket antes de anular cuando se pide mandar a recuperación", async () => {
-		const fuente = await Bun.file(
-			new URL("./cobros.ts", import.meta.url).pathname,
-		).text();
-		const inicio = fuente.indexOf("deshacerConvenio:");
-		expect(inicio).toBeGreaterThan(-1);
-		const handler = fuente.slice(inicio);
+async function handler(nombre: string, siguiente: string): Promise<string> {
+	const fuente = await Bun.file(
+		new URL("./cobros.ts", import.meta.url).pathname,
+	).text();
+	const inicio = fuente.indexOf(`${nombre}:`);
+	expect(inicio).toBeGreaterThan(-1);
+	const fin = fuente.indexOf(`${siguiente}:`, inicio);
+	expect(fin).toBeGreaterThan(inicio);
+	return fuente.slice(inicio, fin);
+}
 
-		const chequeo = handler.indexOf("getBucketActualCredito(");
-		const rango = handler.indexOf("bucket > BUCKET_MAXIMO_RECUPERACION");
-		const anular = handler.indexOf("carteraBackClient.anularConvenio(");
-
-		expect(chequeo).toBeGreaterThan(-1);
-		expect(rango).toBeGreaterThan(-1);
-		expect(anular).toBeGreaterThan(-1);
-		expect(chequeo).toBeLessThan(anular);
-		expect(rango).toBeLessThan(anular);
+describe("CB-043: ningún camino a B4 sin solicitud", () => {
+	it("deshacerConvenio solo deshace: no manda a recuperación", async () => {
+		const deshacer = await handler(
+			"deshacerConvenio",
+			"getHistorialReasignaciones",
+		);
+		expect(deshacer).toContain("carteraBackClient.anularConvenio(");
+		expect(deshacer).not.toContain("enviarARecuperacionVehiculo(");
+		expect(deshacer).not.toContain("prepararEnvioRecuperacion(");
+		expect(deshacer).not.toContain("mandarARecuperacion");
 	});
 
-	it("preserva la respuesta de recuperación exitosa desacoplada de la reconciliación de inmovilización", async () => {
-		const fuente = await Bun.file(
-			new URL("./cobros.ts", import.meta.url).pathname,
-		).text();
-		const inicio = fuente.indexOf("deshacerConvenio:");
-		expect(inicio).toBeGreaterThan(-1);
-		const handler = fuente.slice(inicio);
-
-		const enviarRecup = handler.indexOf(
-			"carteraBackClient.enviarARecuperacionVehiculo(",
+	it("la forzosa siempre crea una solicitud, sin excepción por rol, antes de cualquier traslado", async () => {
+		const envio = await handler(
+			"enviarCreditoARecuperacion",
+			"getAlertaConvenioDelCaso",
 		);
-		const catchRecup = handler.indexOf("recuperacionError =");
-		const ifRecup = handler.indexOf("if (recuperacion) {");
-		const marcarInmov = handler.indexOf(
-			"marcarInmovilizacionEnviadaARecuperacion(",
-		);
-
-		expect(enviarRecup).toBeGreaterThan(-1);
-		expect(catchRecup).toBeGreaterThan(-1);
-		expect(ifRecup).toBeGreaterThan(-1);
-		expect(marcarInmov).toBeGreaterThan(-1);
-		expect(catchRecup).toBeLessThan(ifRecup);
-		expect(ifRecup).toBeLessThan(marcarInmov);
+		const ramaForzosa = envio.indexOf('if (input.tipo === "tomado")');
+		const solicitud = envio.indexOf("crearSolicitudRecuperacion(");
+		const retorno = envio.indexOf('return { modo: "solicitud" as const');
+		const traslado = envio.indexOf("prepararEnvioRecuperacion(");
+		expect(ramaForzosa).toBeGreaterThan(-1);
+		expect(ramaForzosa).toBeLessThan(solicitud);
+		expect(solicitud).toBeLessThan(retorno);
+		expect(retorno).toBeLessThan(traslado);
+		expect(envio.slice(ramaForzosa, retorno)).not.toContain("canAssignCobros");
 	});
 });

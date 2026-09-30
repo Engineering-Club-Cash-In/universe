@@ -7,7 +7,7 @@
 
 ## Qué es
 
-En B3 y B4 el asesor sale a buscar al cliente: a su casa o a su trabajo. Antes eso se
+De B2 a B4 el asesor sale a buscar al cliente: a su casa o a su trabajo. Antes eso se
 registraba como "Visita" dentro de **Registrar Contacto**, con el formulario genérico de
 contacto, sin dirección, responsable ni fotos. Ahora la visita es una **tarea** con su
 propio botón:
@@ -24,8 +24,10 @@ directo**, ya hecha. En el formulario se elige con "Ya fui" / "Programarla".
 ## Dónde está en la Ficha 360
 
 - **Botón "Registrar visita ▾"** en la fila de acciones, con dos opciones:
-  **Visita a residencia** y **Visita al lugar de trabajo**. Solo en **B3 y B4**
-  (decisión del 2026-09-29). Fuera de esos buckets se ve deshabilitado con el motivo.
+  **Visita a residencia** y **Visita al lugar de trabajo**. De **B2 a B4**: el
+  2026-09-29 se decidió B3 y B4, y el 2026-09-30 se abrió a B2 junto con CB-043 ("¿para
+  qué vamos a restringir una visita a un bucket?"). Fuera de esos buckets se ve
+  deshabilitado con el motivo.
 - **Tarjeta "Visitas"** en la pestaña Resumen. Arriba van las programadas, con
   "Registrar resultado" y "Cancelar visita". Abajo van las realizadas: qué pasó, quién
   fue, las fotos y lo que falta.

@@ -16,6 +16,7 @@ import {
 	QUE_PASO_REACTIVACION,
 	quePasoRequierePago,
 	quePasoRequierePromesa,
+	reactivacionSinRespaldo,
 	siguienteEstado,
 	transicionValida,
 } from "./inmovilizacion-unidad";
@@ -399,5 +400,49 @@ describe("reactivación: qué pasó y respaldo", () => {
 			new Date("2026-09-20T15:00:00.000Z"),
 		);
 		expect(res.map((p) => p.pagoId)).toEqual([43]);
+	});
+});
+
+describe("reactivacionSinRespaldo", () => {
+	const respaldo = { pago: { id: 1 } };
+
+	it("reactivación sin opción ni respaldo: sin respaldo", () => {
+		expect(
+			reactivacionSinRespaldo({
+				accion: "reactivacion",
+				quePaso: null,
+				respaldoReactivacion: null,
+			}),
+		).toBe(true);
+	});
+
+	it("reactivación con opción pero sin respaldo guardado: sin respaldo", () => {
+		expect(
+			reactivacionSinRespaldo({
+				accion: "reactivacion",
+				quePaso: "pago",
+				respaldoReactivacion: null,
+			}),
+		).toBe(true);
+	});
+
+	it("reactivación con opción y respaldo: con respaldo", () => {
+		expect(
+			reactivacionSinRespaldo({
+				accion: "reactivacion",
+				quePaso: "pago",
+				respaldoReactivacion: respaldo,
+			}),
+		).toBe(false);
+	});
+
+	it("un apagado nunca lleva respaldo: no aplica", () => {
+		expect(
+			reactivacionSinRespaldo({
+				accion: "apagado",
+				quePaso: null,
+				respaldoReactivacion: null,
+			}),
+		).toBe(false);
 	});
 });

@@ -44,3 +44,34 @@ ALTER TYPE "cobros_notif_tipo" ADD VALUE IF NOT EXISTS 'inmovilizacion_ejecutar_
 ALTER TYPE "cobros_notif_tipo" ADD VALUE IF NOT EXISTS 'inmovilizacion_apagado_ejecutado';
 --> statement-breakpoint
 ALTER TYPE "cobros_notif_tipo" ADD VALUE IF NOT EXISTS 'inmovilizacion_reactivacion_ejecutada';
+--> statement-breakpoint
+-- Reactivaciones ABIERTAS sin respaldo: las creó la llamada posterior al apagado
+-- ("Pagó") o se pidieron con un texto libre, antes de exigir `que_paso` y
+-- `respaldo_reactivacion`. No se pueden aprobar ni ejecutar sin el pago o la
+-- promesa (la aprobación y la ejecución las rechazan) y, abiertas, bloquean
+-- pedir una nueva por el índice único por caso/unidad: se cancelan y el asesor
+-- la pide de nuevo con respaldo. Las ya ejecutadas no se tocan. Idempotente.
+INSERT INTO "inmovilizaciones_unidad_eventos" ("inmovilizacion_id", "evento", "estado_anterior", "estado_nuevo", "usuario_id", "detalle")
+SELECT "id", 'cancelar', "estado", 'cancelada', "solicitado_por",
+	'{"motivo": "Reactivación pedida sin respaldo de pago o promesa"}'::jsonb
+FROM "inmovilizaciones_unidad"
+WHERE "accion" = 'reactivacion'
+	AND "estado" IN ('pendiente_aprobacion', 'aprobada')
+	AND "que_paso" IS NULL;
+--> statement-breakpoint
+UPDATE "notifications"
+SET "status" = 'resolved', "resolved_at" = now(), "updated_at" = now()
+WHERE "inmovilizacion_id" IN (
+		SELECT "id" FROM "inmovilizaciones_unidad"
+		WHERE "accion" = 'reactivacion'
+			AND "estado" IN ('pendiente_aprobacion', 'aprobada')
+			AND "que_paso" IS NULL
+	)
+	AND "cobros_tipo" IN ('inmovilizacion_pendiente_aprobacion', 'inmovilizacion_resuelta')
+	AND "status" IN ('pending', 'read', 'in_progress');
+--> statement-breakpoint
+UPDATE "inmovilizaciones_unidad"
+SET "estado" = 'cancelada', "updated_at" = now()
+WHERE "accion" = 'reactivacion'
+	AND "estado" IN ('pendiente_aprobacion', 'aprobada')
+	AND "que_paso" IS NULL;

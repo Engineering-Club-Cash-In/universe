@@ -51,6 +51,7 @@ import {
 	erroresUbicacionSolicitud,
 	estadoUnidad,
 	type InmovilizacionHistorialItem,
+	MENSAJE_REACTIVACION_SIN_RESPALDO,
 	MIME_EVIDENCIA_INMOVILIZACION,
 	type PagoRespaldo,
 	type PromesaRespaldo,
@@ -60,6 +61,7 @@ import {
 	quePasoRequierePago,
 	quePasoRequierePromesa,
 	type RespaldoReactivacion,
+	reactivacionSinRespaldo,
 	type UbicacionInmovilizacion,
 } from "../lib/inmovilizacion-unidad";
 import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
@@ -1096,6 +1098,11 @@ function ejecutarPorAsesor(accion: "apagado" | "reactivacion") {
 					message: "La solicitud no está aprobada (o ya fue ejecutada).",
 				});
 			}
+			if (reactivacionSinRespaldo(inm)) {
+				throw new ORPCError("CONFLICT", {
+					message: MENSAJE_REACTIVACION_SIN_RESPALDO,
+				});
+			}
 
 			await assertAccesoCasoCobro(
 				inm.casoCobroId,
@@ -2002,13 +2009,20 @@ export const inmovilizacionUnidadRouter = {
 			// lo aplique: el crédito tiene que seguir en B2-B4 (si el cliente ya
 			// pagó, no se apaga). Falla cerrado: sin poder confirmar el bucket no
 			// se aprueba. Después de aplicado ya no se cancela (ver `ejecutarAprobada`).
-			if (input.decision === "aprobar" && isCarteraBackEnabled()) {
+			if (input.decision === "aprobar") {
 				const [pendiente] = await db
 					.select()
 					.from(inmovilizacionesUnidad)
 					.where(eq(inmovilizacionesUnidad.id, input.id))
 					.limit(1);
-				if (pendiente?.accion === "apagado") {
+				// Una reactivación sin respaldo (pedida antes de exigirlo) no se
+				// aprueba: se rechaza y se pide de nuevo con el pago o la promesa.
+				if (pendiente && reactivacionSinRespaldo(pendiente)) {
+					throw new ORPCError("CONFLICT", {
+						message: `${MENSAJE_REACTIVACION_SIN_RESPALDO} Rechazá esta solicitud.`,
+					});
+				}
+				if (pendiente?.accion === "apagado" && isCarteraBackEnabled()) {
 					let bucket: number | null = null;
 					try {
 						const actual = await carteraBackClient.getBucketActualCredito(

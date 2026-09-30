@@ -968,6 +968,9 @@ describe("CB-041 — decidirInmovilizacion", () => {
 				wialonUnitId: 12345,
 				numeroCreditoSifco: "01010214100000",
 				solicitadoPor: "user-test",
+				quePaso: accion === "reactivacion" ? "pago" : null,
+				respaldoReactivacion:
+					accion === "reactivacion" ? { pago: { id: 501 } } : null,
 			};
 		};
 		const aprobar = () =>
@@ -984,6 +987,39 @@ describe("CB-041 — decidirInmovilizacion", () => {
 			} as never);
 			expect((await aprobar()).ok).toBe(true);
 			expect(inmovilizacionExistente?.estado).toBe("aprobada");
+		});
+
+		it("una reactivación sin respaldo (pedida antes de exigirlo) no se aprueba: CONFLICT y sigue pendiente", async () => {
+			solicitudPendiente("reactivacion");
+			inmovilizacionExistente = {
+				...inmovilizacionExistente,
+				quePaso: null,
+				respaldoReactivacion: null,
+			};
+			await expect(aprobar()).rejects.toMatchObject({
+				code: "CONFLICT",
+				message: expect.stringContaining("Rechazá esta solicitud"),
+			});
+			expect(inmovilizacionExistente?.estado).toBe("pendiente_aprobacion");
+		});
+
+		it("una reactivación sin respaldo sí se puede rechazar", async () => {
+			solicitudPendiente("reactivacion");
+			inmovilizacionExistente = {
+				...inmovilizacionExistente,
+				quePaso: null,
+				respaldoReactivacion: null,
+			};
+			const res = await call(
+				inmovilizacionUnidadRouter.decidirInmovilizacion,
+				{
+					id: INMOV_ID,
+					decision: "rechazar",
+					motivoRechazo: "Sin pago ni promesa",
+				},
+				{ context: ctx("cobros_supervisor") },
+			);
+			expect(res.ok).toBe(true);
 		});
 
 		it("el cliente ya pagó (B0): no se aprueba, con el mensaje de rechazarla", async () => {
@@ -1686,6 +1722,8 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			casoCobroId: CASO_ID,
 			accion: "reactivacion",
 			estado: "aprobada",
+			quePaso: "pago",
+			respaldoReactivacion: { pago: { id: 501 } },
 			wialonUnitId: 12345,
 			bucketSnapshot: 2,
 			numeroCreditoSifco: "01010214100000",
@@ -1707,6 +1745,8 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			...apagadoEjecutado(),
 			accion: "reactivacion",
 			estado: "aprobada",
+			quePaso: "pago",
+			respaldoReactivacion: { pago: { id: 501 } },
 			inmovilizacionOrigenId: "88888888-8888-8888-8888-888888888888",
 		};
 		await call(
@@ -1723,6 +1763,8 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			...apagadoEjecutado(),
 			accion: "reactivacion",
 			estado: "aprobada",
+			quePaso: "pago",
+			respaldoReactivacion: { pago: { id: 501 } },
 			inmovilizacionOrigenId: ORIGEN_ID,
 		};
 		await call(
@@ -1743,6 +1785,8 @@ describe("CB-041 — reactivación y ciclo de vida (hallazgos del review)", () =
 			...apagadoEjecutado(),
 			accion: "reactivacion",
 			estado: "aprobada",
+			quePaso: "pago",
+			respaldoReactivacion: { pago: { id: 501 } },
 			inmovilizacionOrigenId: "88888888-8888-8888-8888-888888888888",
 		};
 		await call(
@@ -2795,6 +2839,8 @@ describe("CB-041 — el asesor ejecuta la reactivación", () => {
 				casoCobroId: CASO_ID,
 				accion: "reactivacion",
 				estado: "aprobada",
+				quePaso: "pago",
+				respaldoReactivacion: { pago: { id: 501 } },
 				wialonUnitId: 12345,
 				bucketSnapshot: 0,
 				numeroCreditoSifco: "01010214100000",
@@ -2810,6 +2856,23 @@ describe("CB-041 — el asesor ejecuta la reactivación", () => {
 		await expect(
 			call(ejecutarReactivacion, { id: INMOV_ID }, { context: ctx("cobros") }),
 		).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		expect(inmovilizacionExistente?.estado).toBe("aprobada");
+	});
+
+	it("una reactivación aprobada sin respaldo (anterior a exigirlo) no se ejecuta: CONFLICT", async () => {
+		reactivacionAprobada();
+		inmovilizacionExistente = {
+			...inmovilizacionExistente,
+			quePaso: null,
+			respaldoReactivacion: null,
+		};
+		await expect(
+			call(
+				ejecutarReactivacion,
+				{ id: INMOV_ID, nota: NOTA_LEGION },
+				{ context: ctx("cobros") },
+			),
+		).rejects.toMatchObject({ code: "CONFLICT" });
 		expect(inmovilizacionExistente?.estado).toBe("aprobada");
 	});
 

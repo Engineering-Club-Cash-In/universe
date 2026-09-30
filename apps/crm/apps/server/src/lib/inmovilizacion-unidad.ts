@@ -414,6 +414,26 @@ export function erroresRespaldoReactivacion(
 	return null;
 }
 
+/**
+ * Una reactivación pedida antes de que hiciera falta el respaldo (la abría la
+ * llamada posterior al apagado, o se pedía con un texto libre) no tiene
+ * `quePaso` ni `respaldoReactivacion`: ni se aprueba ni se ejecuta, se pide de
+ * nuevo con el pago o la promesa.
+ */
+export function reactivacionSinRespaldo(fila: {
+	accion: string;
+	quePaso: string | null;
+	respaldoReactivacion: unknown;
+}): boolean {
+	return (
+		fila.accion === "reactivacion" &&
+		(!fila.quePaso || !fila.respaldoReactivacion)
+	);
+}
+
+export const MENSAJE_REACTIVACION_SIN_RESPALDO =
+	"Esta reactivación se pidió sin el respaldo de pago o promesa que ahora se exige. Pedila de nuevo eligiendo qué pasó.";
+
 /** Texto de la columna `motivo` de una reactivación: opción elegida y detalle. */
 export function componerMotivoReactivacion(
 	quePaso: QuePasoReactivacion,

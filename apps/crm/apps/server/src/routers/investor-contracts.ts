@@ -74,6 +74,7 @@ import { PERMISSIONS, ROLES } from "../lib/roles";
 import { getFileUrlWithBucketInKey } from "../lib/storage";
 import { resolverVerificacionFacial } from "../lib/verificacion-facial";
 import {
+	exigirQueElActualNoEsteFirmado,
 	type FirmanteEsperado,
 	guiaParaVincular,
 	leerDocumentoParaVincular,
@@ -2444,6 +2445,10 @@ export const investorContractsRouter = {
 								"La batería se cerró o se descartó mientras se agregaba el documento: no se guardó.",
 						});
 					}
+
+					// El documento que tiene ahora pudo terminar de firmarse sin que el
+					// CRM se enterara: reemplazarlo borraría un acuerdo firmado.
+					await exigirQueElActualNoEsteFirmado(contrato.id);
 
 					return db.transaction((tx) =>
 						vincularEnLaFila(tx, {

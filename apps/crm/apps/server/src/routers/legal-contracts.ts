@@ -62,6 +62,7 @@ import {
 } from "../lib/storage";
 import { resolverVerificacionFacial } from "../lib/verificacion-facial";
 import {
+	exigirQueElActualNoEsteFirmado,
 	type FirmanteEsperado,
 	guiaParaVincular,
 	leerDocumentoParaVincular,
@@ -2420,6 +2421,10 @@ export const legalContractsRouter = {
 			// mandando justo esos enlaces.
 			return conCandadoDeFirma(opportunityId, async () => {
 				let porcentajeEtapa: number | null = null;
+
+				// El documento que tiene ahora pudo terminar de firmarse sin que el
+				// CRM se enterara: reemplazarlo borraría un acuerdo firmado.
+				await exigirQueElActualNoEsteFirmado(input.contractId);
 
 				const { documentoAnterior } = await db.transaction(async (tx) => {
 					// La misma etapa que al empezar, con la oportunidad bloqueada: si la

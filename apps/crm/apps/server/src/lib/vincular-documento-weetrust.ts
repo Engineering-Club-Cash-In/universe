@@ -441,6 +441,74 @@ export function motivoPorElQueNoSeVincula(contrato: {
 }
 
 /**
+ * Antes de cambiarle el documento a un contrato que ya tenía uno: que ese
+ * documento no se haya terminado de firmar.
+ *
+ * El estado de firma se consulta a demanda (no hay webhooks registrados), así
+ * que la fila puede decir "pendiente" con el documento ya completo en WeeTrust.
+ * Reemplazarlo ahí borraría los firmantes de un acuerdo que ya vale y lo
+ * volvería a dejar pendiente. Se pregunta en el momento, con el candado del
+ * área tomado —el de la oportunidad o el de la batería—, para que nadie cambie
+ * el documento entre la consulta y el guardado.
+ *
+ * - Completo: se baja el estado al CRM y se rechaza.
+ * - Ya no existe en WeeTrust: no hay nada que cuidar, se deja seguir.
+ * - No se pudo consultar: se rechaza; es preferible reintentar a adivinar.
+ */
+export async function exigirQueElActualNoEsteFirmado(
+	contractId: string,
+): Promise<void> {
+	const [fila] = await db
+		.select({
+			weetrustDocumentId: generatedLegalContracts.weetrustDocumentId,
+			signingProvider: generatedLegalContracts.signingProvider,
+			clientSigningLink: generatedLegalContracts.clientSigningLink,
+			representativeSigningLink:
+				generatedLegalContracts.representativeSigningLink,
+			additionalSigningLinks: generatedLegalContracts.additionalSigningLinks,
+		})
+		.from(generatedLegalContracts)
+		.where(eq(generatedLegalContracts.id, contractId))
+		.limit(1);
+	const actual = fila
+		? (fila.weetrustDocumentId ?? documentIdDesdeLosEnlaces(fila))
+		: null;
+	if (!actual) return;
+
+	const observadoEn = new Date();
+	let estado: EstadoDocumentoFirma;
+	try {
+		estado = await consultarEstadoFirma(actual);
+	} catch (error) {
+		const mensaje = error instanceof Error ? error.message : String(error);
+		// Lo borraron allá: sus enlaces ya no firman nada.
+		if (/document not found/i.test(mensaje)) return;
+		console.error(
+			`[vincular] contrato ${contractId}: no se pudo consultar el documento actual ${actual}:`,
+			error,
+		);
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"No pude confirmar en WeeTrust cómo va el documento actual de este contrato, así que no lo cambié. Probá de nuevo en un momento.",
+		});
+	}
+
+	if (estado.status === "COMPLETED") {
+		await sincronizarEstadoDeFirma(contractId, estado, { observadoEn }).catch(
+			(error) =>
+				console.error(
+					`[vincular] contrato ${contractId}: no se pudo bajar el firmado:`,
+					error,
+				),
+		);
+		throw new ORPCError("CONFLICT", {
+			message:
+				"El documento actual de este contrato ya lo firmaron todos en WeeTrust: no se puede reemplazar. Recargá para verlo firmado.",
+		});
+	}
+}
+
+/**
  * Lo que queda por hacer con la vinculación ya confirmada, fuera del candado de
  * la fila: bajar a la base quién ya firmó en el documento nuevo, y borrar en
  * WeeTrust el que tenía.

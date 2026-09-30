@@ -18,7 +18,7 @@ const firmante = (emailID: string, isSigned = false) => ({
 	signatoryID: `id-${emailID}`,
 	isSigned,
 	signingUrl: `https://app.weetrust.mx/signatory/doc/id-${emailID}/1/x`,
-	expiry: null,
+	expiry: null as number | null,
 });
 
 const estado = (

@@ -35,6 +35,10 @@ test("runtime-only opt-in and persisted amounts reach both fiscal item builders"
   expect(router).toContain("useNexaPersistedDistribution = false");
   expect(router).toContain("({ body, set }) => facturarPagoCompleto({ body, set })");
   expect(router.indexOf("nexaPersistedInvoiceAmounts(rows.map")).toBeLessThan(router.indexOf("// 3️⃣ CONSTRUIR RECEPTOR"));
+  expect(router).toContain("rows.length === 0 && pagoData.cuota_id !== null");
+  expect(router).toContain("cuotaInfo?.pagado !== false");
   expect(router).toContain("const calc = persistedAmounts ?? calcularIvaExacto");
   expect(router).toContain("const calcCube = persistedCube ?? calcularIvaExacto");
+  expect(router).toContain("const calc = persistedAmounts ?? calcularIvaExacto(parseFloat(totalInv.toFixed(2)))");
+  expect(router).toContain("const calcCube = persistedCube ?? calcularIvaExacto(parseFloat(totalCubeRounded.toFixed(2)))");
 });

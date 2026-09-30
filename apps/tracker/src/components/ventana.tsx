@@ -1,9 +1,14 @@
 import { X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useRef } from "react";
+import { destinoDelTab } from "@/lib/ciclo-foco";
+
+const ENFOCABLES =
+	'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Ventana flotante. No usa `<dialog>` nativo: en modo modal queda por encima
- * de todo, incluidos los toasts, que se verían detrás del fondo.
+ * de todo, incluidos los toasts, que se verían detrás del fondo. Por eso el
+ * foco se atrapa a mano: con Tab no se llega a la página de atrás.
  * `onCerrar` debe ser estable (useCallback).
  */
 export function Ventana({
@@ -21,6 +26,7 @@ export function Ventana({
 }) {
 	const idTitulo = useId();
 	const cerrarRef = useRef<HTMLButtonElement>(null);
+	const panelRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		if (!abierta) return;
@@ -28,12 +34,43 @@ export function Ventana({
 		const overflow = document.body.style.overflow;
 		document.body.style.overflow = "hidden";
 		cerrarRef.current?.focus();
+		const enfocables = () =>
+			Array.from(
+				panelRef.current?.querySelectorAll<HTMLElement>(ENFOCABLES) ?? [],
+			);
 		const alTeclear = (e: KeyboardEvent) => {
-			if (e.key === "Escape") onCerrar();
+			if (e.key === "Escape") {
+				onCerrar();
+				return;
+			}
+			if (e.key !== "Tab") return;
+			const destino = destinoDelTab(
+				enfocables(),
+				document.activeElement as HTMLElement | null,
+				e.shiftKey,
+			);
+			if (destino) {
+				e.preventDefault();
+				destino.focus();
+			}
+		};
+		// Si el foco sale por otra vía (lector de pantalla, clic), vuelve adentro.
+		// Los toasts quedan fuera de la regla para poder cerrarlos.
+		const alEnfocar = (e: FocusEvent) => {
+			const destino = e.target as HTMLElement | null;
+			if (
+				!destino ||
+				panelRef.current?.contains(destino) ||
+				destino.closest("[data-sonner-toaster]")
+			)
+				return;
+			(enfocables()[0] ?? cerrarRef.current)?.focus();
 		};
 		document.addEventListener("keydown", alTeclear);
+		document.addEventListener("focusin", alEnfocar);
 		return () => {
 			document.removeEventListener("keydown", alTeclear);
+			document.removeEventListener("focusin", alEnfocar);
 			document.body.style.overflow = overflow;
 			previo?.focus();
 		};
@@ -49,6 +86,7 @@ export function Ventana({
 			}}
 		>
 			<div
+				ref={panelRef}
 				role="dialog"
 				aria-modal="true"
 				aria-labelledby={idTitulo}

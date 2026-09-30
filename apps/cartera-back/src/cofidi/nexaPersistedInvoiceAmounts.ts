@@ -1,6 +1,17 @@
 import Big from "big.js";
 
 type Row = { inversionista_id: number; abono_interes: string; abono_iva_12: string };
+
+export function oldestPendingPurchaseAtCutoff<T extends { id: number; created_at: Date }>(
+  operations: T[],
+  cutoff: Date | null | undefined,
+) {
+  if (!cutoff) return undefined;
+  return operations
+    .filter(operation => operation.created_at <= cutoff)
+    .sort((a, b) => a.created_at.getTime() - b.created_at.getTime() || a.id - b.id)[0];
+}
+
 export function nexaPersistedInvoiceAmounts(rows: Row[], expected: {
   interest: string;
   vat: string;

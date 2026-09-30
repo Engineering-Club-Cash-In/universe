@@ -11,7 +11,10 @@ import {
   decidirRubroInteresInversionistas,
 } from "../cofidi/rubroInteresInversionistas";
 import { calcularSplitInteresPci } from "../cofidi/splitInteresPci";
-import { nexaPersistedInvoiceAmounts } from "../cofidi/nexaPersistedInvoiceAmounts";
+import {
+  nexaPersistedInvoiceAmounts,
+  oldestPendingPurchaseAtCutoff,
+} from "../cofidi/nexaPersistedInvoiceAmounts";
 import { db } from "../database";
 import {
   audit_logs,
@@ -171,6 +174,8 @@ if (facturasExistentes.length > 0) {
           cuota_id: pagos_credito.cuota_id,
           monto_boleta: pagos_credito.monto_boleta,
           fecha_pago: pagos_credito.fecha_pago,
+          fecha_aplicado: pagos_credito.fecha_aplicado,
+          createdAt: pagos_credito.createdAt,
           fecha_vencimiento: pagos_credito.fecha_vencimiento,
           validationStatus: pagos_credito.validationStatus,
 
@@ -328,6 +333,7 @@ if (facturasExistentes.length > 0) {
           tipo_reinversion: compras_credito_inversionista.tipo_reinversion,
           status: compras_credito_inversionista.status,
           fecha: compras_credito_inversionista.fecha,
+          created_at: compras_credito_inversionista.created_at,
           fecha_completada: compras_credito_inversionista.fecha_completada,
         })
         .from(compras_credito_inversionista)
@@ -1008,6 +1014,7 @@ if (facturasExistentes.length > 0) {
       //    que el renglón cuadre exacto con lo emitido.
       let invNoEmiteFacturadoConIva = new Big(0);
       let invNoEmiteIva = new Big(0);
+      const facturasAntesIntereses = facturasGeneradas.length;
 
       if (!hayInteresEnPago) {
         console.log("\n⏭️  NO hay intereses en este pago - Saltando facturas de intereses (ambos flujos)");
@@ -1725,6 +1732,7 @@ if (facturasExistentes.length > 0) {
           // 🔥 REDIRIGIR A CUBE: si bandera_reinversion del crédito activa
           // y status del espejo = pendiente_reinversion o pendiente_compra_cartera
           const redirigirACube =
+            !nexaInvoiceAmounts &&
             pagoData.bandera_reinversion === true &&
             (liveInv?.status_espejo === "pendiente_reinversion" ||
               liveInv?.status_espejo === "pendiente_compra_cartera");
@@ -1960,6 +1968,41 @@ if (facturasExistentes.length > 0) {
           }
         }
       } // 🔚 cierre del else (flujo actual de intereses)
+
+      const cutoffNexa = pagoData.fecha_aplicado ?? pagoData.createdAt;
+      const huboErroresInteresNexa = facturasGeneradas
+        .slice(facturasAntesIntereses)
+        .some(factura => factura.tipo === "ERROR");
+      if (
+        nexaInvoiceAmounts &&
+        hayInteresEnPago &&
+        interesFlujoOk &&
+        pagoData.cuota_id &&
+        cutoffNexa &&
+        process.env.SIMULAR_FACTURAS !== "true"
+      ) {
+        const operacionPendienteNexa = oldestPendingPurchaseAtCutoff(operacionesPendientesFacturar, cutoffNexa);
+        if (operacionPendienteNexa) {
+          const [cuotaInfo] = await db
+            .select({ pagado: cuotas_credito.pagado })
+            .from(cuotas_credito)
+            .where(eq(cuotas_credito.cuota_id, pagoData.cuota_id));
+          if (cuotaInfo?.pagado === true && !huboErroresInteresNexa) {
+            try {
+              await db
+                .update(compras_credito_inversionista)
+                .set({ pendiente_facturar: false, updated_at: new Date() })
+                .where(eq(compras_credito_inversionista.id, operacionPendienteNexa.id));
+            } catch (error: any) {
+              facturasGeneradas.push({
+                tipo: "ERROR",
+                concepto: "MARCAR_PENDIENTE_FACTURAR",
+                error: error.message,
+              });
+            }
+          }
+        }
+      }
 
       // ============================================
       // 7️⃣ RESPUESTA FINAL

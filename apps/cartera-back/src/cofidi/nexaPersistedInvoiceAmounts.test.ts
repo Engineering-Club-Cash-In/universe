@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import Big from "big.js";
-import { nexaPersistedInvoiceAmounts } from "./nexaPersistedInvoiceAmounts";
+import {
+  nexaPersistedInvoiceAmounts,
+  oldestPendingPurchaseAtCutoff,
+} from "./nexaPersistedInvoiceAmounts";
 const rows = [
   { inversionista_id: 1, abono_interes: "569.65", abono_iva_12: "68.36" },
   { inversionista_id: 86, abono_interes: "209.87", abono_iva_12: "25.18" },
@@ -69,6 +72,20 @@ test("handles zero components without rederiving VAT", () => {
     recipients: [recipients[1]!],
   }).get(86)?.total).toBe(0);
 });
+test("selects only the oldest pending purchase present at payment application", () => {
+  const pending = [
+    { id: 20, created_at: new Date("2026-09-30T12:00:00Z") },
+    { id: 10, created_at: new Date("2026-09-30T10:00:00Z") },
+    { id: 15, created_at: new Date("2026-09-30T10:30:00Z") },
+  ];
+  const selected = oldestPendingPurchaseAtCutoff(
+    pending,
+    new Date("2026-09-30T11:00:00Z"),
+  );
+
+  expect(selected?.id).toBe(10);
+  expect(pending.filter(operation => operation.id !== selected?.id).map(operation => operation.id)).toEqual([20, 15]);
+});
 test("runtime-only opt-in and persisted amounts reach both fiscal item builders", async () => {
   const router = await Bun.file(new URL("../routers/cofidi.ts", import.meta.url)).text();
   const runtime = await Bun.file(new URL("../controllers/nexaPaymentRuntime.ts", import.meta.url)).text();
@@ -90,6 +107,15 @@ test("runtime-only opt-in and persisted amounts reach both fiscal item builders"
   expect(router).toContain(": inversionistasDelPago.map(inv => inv.inversionista_id)");
   expect(router).toContain("const inv = nexaInvoiceRecipients?.get(invId)");
   expect(router).toContain("const persistedCube = nexaInvoiceAmounts?.get(86)");
+  expect(router).toContain("fecha_aplicado: pagos_credito.fecha_aplicado");
+  expect(router).toContain("createdAt: pagos_credito.createdAt");
+  expect(router).toContain("created_at: compras_credito_inversionista.created_at");
+  expect(router).toMatch(/const redirigirACube =\s*!nexaInvoiceAmounts &&\s*pagoData\.bandera_reinversion === true/);
+  expect(router).toContain("const cutoffNexa = pagoData.fecha_aplicado ?? pagoData.createdAt");
+  expect(router).toContain("oldestPendingPurchaseAtCutoff(operacionesPendientesFacturar, cutoffNexa)");
+  expect(router).toMatch(/nexaInvoiceAmounts &&\s*hayInteresEnPago &&\s*interesFlujoOk/);
+  expect(router).toContain("cuotaInfo?.pagado === true && !huboErroresInteresNexa");
+  expect(router).toContain('process.env.SIMULAR_FACTURAS !== "true"');
   expect(router).toContain("const calc = persistedAmounts ?? calcularIvaExacto");
   expect(router).toContain("const calcCube = persistedCube ?? calcularIvaExacto");
   expect(router).toContain("const calc = persistedAmounts ?? calcularIvaExacto(parseFloat(totalInv.toFixed(2)))");

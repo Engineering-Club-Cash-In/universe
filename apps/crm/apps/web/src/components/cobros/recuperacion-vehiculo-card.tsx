@@ -412,10 +412,17 @@ function SolicitudPendiente({
 				. El crédito no se mueve hasta que un supervisor la apruebe.
 			</p>
 			<DetalleRegistro registro={r} />
-			<div className="space-y-1.5">
-				<p className="font-medium text-sm">Lo que se hizo antes de pedirla</p>
-				<ChecklistVista pasos={r.checklist ?? []} />
-			</div>
+			{/* Plegado de entrada: el resumen alcanza para ubicarse (QA de CB-043). */}
+			<Collapsible>
+				<CollapsibleTrigger className="flex items-center gap-1 font-medium text-sm hover:underline">
+					<ChevronDown className="h-4 w-4" />
+					Lo que se hizo antes de pedirla ·{" "}
+					{resumenChecklist(r.checklist ?? []).texto}
+				</CollapsibleTrigger>
+				<CollapsibleContent className="mt-2">
+					<ChecklistVista pasos={r.checklist ?? []} />
+				</CollapsibleContent>
+			</Collapsible>
 			{/* Cuatro ojos: la decide OTRA persona. Quien la pidió solo la
 			    puede cancelar (el servidor lo exige igual). */}
 			{(esSupervisor || r.esMia) && (

@@ -699,20 +699,20 @@ function FormularioRecuperacion({
 					/>
 				</section>
 
-				<section className="space-y-1.5">
-					<Label htmlFor="observaciones-recuperacion">Observaciones</Label>
-					<Textarea
-						id="observaciones-recuperacion"
-						value={observaciones}
-						onChange={(e) => setObservaciones(e.target.value)}
-						placeholder={
-							voluntaria
-								? "Algo más que deba saber quien recibe"
-								: "Horarios, con quién vive, a qué se dedica… (opcional)"
-						}
-						rows={2}
-					/>
-				</section>
+				{/* Solo en la entrega voluntaria: en la solicitud de recuperación
+				    forzosa lo cubre la justificación (QA de CB-043). */}
+				{voluntaria && (
+					<section className="space-y-1.5">
+						<Label htmlFor="observaciones-recuperacion">Observaciones</Label>
+						<Textarea
+							id="observaciones-recuperacion"
+							value={observaciones}
+							onChange={(e) => setObservaciones(e.target.value)}
+							placeholder="Algo más que deba saber quien recibe"
+							rows={2}
+						/>
+					</section>
+				)}
 			</div>
 
 			<DialogFooter className="items-center gap-2 sm:justify-between">

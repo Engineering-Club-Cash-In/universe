@@ -25,13 +25,7 @@ import {
 } from "@/components/cobros/recuperacion-checklist";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -96,17 +90,6 @@ type Solicitud = Datos["pendientes"][number];
 const fecha = (v: Date | string | null | undefined) =>
 	v ? new Date(v).toLocaleDateString("es-GT") : "—";
 
-const fechaHora = (v: Date | string | null | undefined) =>
-	v
-		? new Date(v).toLocaleString("es-GT", {
-				day: "2-digit",
-				month: "2-digit",
-				year: "numeric",
-				hour: "2-digit",
-				minute: "2-digit",
-			})
-		: "—";
-
 const quetzales = (v: string | number | null | undefined) =>
 	v == null
 		? "—"
@@ -141,9 +124,8 @@ function Bandeja() {
 					Recuperación de vehículo
 				</h1>
 				<p className="text-muted-foreground text-sm">
-					Solicitudes de los asesores para mandar un crédito a B4 y recuperar la
-					unidad. Al aprobar, el crédito pasa a B4 · Última Instancia / Pre
-					Jurídico en estado En recuperación.
+					Lo que piden los asesores para mandar un crédito a B4. Al aprobar,
+					pasa a B4 en estado En recuperación.
 				</p>
 			</div>
 			<Tabs className="w-full" defaultValue="pendientes">
@@ -161,7 +143,7 @@ function Bandeja() {
 					</TabsTrigger>
 					<TabsTrigger value="historial">Historial</TabsTrigger>
 				</TabsList>
-				<TabsContent value="pendientes" className="space-y-3">
+				<TabsContent value="pendientes">
 					{datos.isLoading ? (
 						<Cargando />
 					) : datos.isError ? (
@@ -173,7 +155,13 @@ function Bandeja() {
 							</CardContent>
 						</Card>
 					) : (
-						pendientes.map((s) => <SolicitudPorAprobar key={s.id} s={s} />)
+						<Card className="py-0">
+							<ul className="divide-y">
+								{pendientes.map((s) => (
+									<SolicitudPorAprobar key={s.id} s={s} />
+								))}
+							</ul>
+						</Card>
 					)}
 				</TabsContent>
 				<TabsContent value="historial">
@@ -211,91 +199,118 @@ function ErrorCarga({ mensaje }: { mensaje: string }) {
 	);
 }
 
-function LinkFicha({ s }: { s: Solicitud }) {
-	return (
-		<Link
-			className="group inline-flex flex-col hover:underline"
-			params={{ id: s.casoCobroId }}
-			search={{ tipo: "caso" as const }}
-			to="/cobros/$id"
-		>
-			<span className="flex items-center gap-1 font-semibold text-primary">
-				{quienEs(s)}
-				<ExternalLink className="h-3.5 w-3.5 opacity-60" />
-			</span>
-			<span className="font-mono text-muted-foreground text-xs">
-				{s.numeroSifco}
-			</span>
-		</Link>
-	);
-}
-
-function Dato({ label, children }: { label: string; children: ReactNode }) {
-	return (
-		<div className="min-w-0">
-			<p className="text-muted-foreground text-xs">{label}</p>
-			<div className="break-words font-medium text-sm">{children}</div>
-		</div>
-	);
-}
-
-/** Lo que el supervisor necesita para decidir, sin abrir la ficha. */
-function DetalleSolicitud({ s }: { s: Solicitud }) {
+/**
+ * Una solicitud en pocas líneas: quién y dónde, por qué y los números. El
+ * detalle (justificación completa, ubicación, checklist) queda plegado.
+ */
+function FilaSolicitud({
+	s,
+	acciones,
+	pie,
+}: {
+	s: Solicitud;
+	/** A la derecha: los botones de decisión, o el estado en el historial. */
+	acciones: ReactNode;
+	/** Una línea más abajo, para lo que se decidió (historial). */
+	pie?: ReactNode;
+}) {
 	const motivos = s.motivos.filter((m) => m !== "otro").map(etiquetaMotivo);
+	const resumen = resumenChecklist(s.checklist);
+	return (
+		<li className="px-4 py-3">
+			<Collapsible>
+				<div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+					<div className="min-w-0 flex-1 space-y-0.5">
+						<div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+							<Link
+								className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
+								params={{ id: s.casoCobroId }}
+								search={{ tipo: "caso" as const }}
+								to="/cobros/$id"
+							>
+								{quienEs(s)}
+								<ExternalLink className="h-3 w-3 opacity-60" />
+							</Link>
+							{s.bucketOrigen != null && (
+								<Badge variant="outline" className="h-5 px-1.5 text-[11px]">
+									B{s.bucketOrigen}
+								</Badge>
+							)}
+							<span className="text-muted-foreground text-xs">
+								{s.solicitante ?? "—"} · {haceCuanto(s.solicitadoAt)}
+							</span>
+						</div>
+						<p className="line-clamp-2 text-sm">
+							{motivos.length > 0 && (
+								<span className="font-medium">{motivos.join(", ")}</span>
+							)}
+							{motivos.length > 0 && s.motivoDetalle ? " — " : ""}
+							{s.motivoDetalle && (
+								<span className="text-muted-foreground">
+									“{s.motivoDetalle}”
+								</span>
+							)}
+						</p>
+						<p className="text-muted-foreground text-xs">
+							{s.cuotasVencidas ?? "—"} cuotas vencidas ·{" "}
+							{quetzales(s.totalParaPonerseAlDia)} para ponerse al día ·
+							checklist {resumen.hechos}/{resumen.total}
+						</p>
+						{pie}
+					</div>
+					<div className="flex items-center gap-1.5">
+						{acciones}
+						<CollapsibleTrigger asChild>
+							<Button size="sm" variant="ghost" className="h-8 px-2">
+								<ChevronDown className="mr-1 h-4 w-4" />
+								Detalle
+							</Button>
+						</CollapsibleTrigger>
+					</div>
+				</div>
+				<CollapsibleContent className="mt-3 space-y-3 rounded-md bg-muted/40 p-3">
+					<DetalleSolicitud s={s} />
+					<ChecklistVista pasos={s.checklist} />
+				</CollapsibleContent>
+			</Collapsible>
+		</li>
+	);
+}
+
+/** Lo que no entra en la fila: la justificación completa, el vehículo y el saldo. */
+function DetalleSolicitud({ s }: { s: Solicitud }) {
 	const lat = s.ubicacionLat != null ? Number(s.ubicacionLat) : undefined;
 	const lng = s.ubicacionLng != null ? Number(s.ubicacionLng) : undefined;
 	const mapa = s.ubicacionEnlace ?? googleMapsUrl(lat, lng);
 	const estadoVehiculo = s.estadoVehiculo
 		? ((ESTADOS_VEHICULO as Record<string, string>)[s.estadoVehiculo] ??
 			s.estadoVehiculo)
-		: null;
+		: "no se indicó";
 	return (
-		<div className="space-y-3">
-			{motivos.length > 0 && (
-				<div className="flex flex-wrap gap-1.5">
-					{motivos.map((m) => (
-						<Badge key={m} variant="outline" className="font-normal">
-							{m}
-						</Badge>
-					))}
-				</div>
-			)}
-			{s.motivoDetalle && (
-				<div className="rounded-md bg-muted/50 p-3">
-					<p className="mb-1 text-muted-foreground text-xs">Justificación</p>
-					<p className="text-sm">“{s.motivoDetalle}”</p>
-				</div>
-			)}
-			<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-				<Dato label="Cuotas vencidas">{s.cuotasVencidas ?? "—"}</Dato>
-				<Dato label="Para ponerse al día">
-					{quetzales(s.totalParaPonerseAlDia)}
-				</Dato>
-				<Dato label="Saldo pendiente">{quetzales(s.saldoPendiente)}</Dato>
-				<Dato label="Estado del vehículo">
-					{estadoVehiculo ?? "No se indicó"}
-				</Dato>
-			</div>
-			{(s.ubicacionDireccion || mapa) && (
-				<Dato label="Dónde está el vehículo">
-					{s.ubicacionDireccion && <span>{s.ubicacionDireccion} </span>}
-					{mapa && (
+		<div className="space-y-1.5 text-sm">
+			{s.motivoDetalle && <p>“{s.motivoDetalle}”</p>}
+			<p className="text-muted-foreground text-xs">
+				Saldo pendiente {quetzales(s.saldoPendiente)} · Vehículo:{" "}
+				{estadoVehiculo}
+				{s.ubicacionDireccion ? ` · ${s.ubicacionDireccion}` : ""}
+				{mapa && (
+					<>
+						{" · "}
 						<a
 							href={mapa}
 							target="_blank"
 							rel="noopener noreferrer"
-							className="inline-flex items-center gap-1 text-primary text-xs hover:underline"
+							className="text-primary hover:underline"
 						>
-							<ExternalLink className="h-3 w-3" />
 							Abrir en el mapa
 						</a>
-					)}
-				</Dato>
-			)}
+					</>
+				)}
+			</p>
 			{s.observaciones && (
-				<Dato label="Observaciones">
-					<span className="font-normal">{s.observaciones}</span>
-				</Dato>
+				<p className="text-muted-foreground text-xs">
+					Observaciones: {s.observaciones}
+				</p>
 			)}
 		</div>
 	);
@@ -303,58 +318,42 @@ function DetalleSolicitud({ s }: { s: Solicitud }) {
 
 function SolicitudPorAprobar({ s }: { s: Solicitud }) {
 	const [decision, setDecision] = useState<"aprobar" | "rechazar" | null>(null);
-	const resumen = resumenChecklist(s.checklist);
 	return (
-		<Card>
-			<CardHeader className="pb-3">
-				<div className="flex flex-wrap items-start justify-between gap-3">
-					<div className="space-y-1">
-						<LinkFicha s={s} />
-						<CardDescription>
-							La pidió {s.solicitante ?? "—"} {haceCuanto(s.solicitadoAt)} (
-							{fechaHora(s.solicitadoAt)})
-							{s.bucketOrigen != null ? ` · en B${s.bucketOrigen}` : ""}
-						</CardDescription>
-					</div>
-					{/* Cuatro ojos: la propia no se decide (el servidor lo exige igual). */}
-					{s.esMia ? (
-						<p className="max-w-56 text-right text-muted-foreground text-xs">
-							Es tu solicitud: la tiene que aprobar otro supervisor o admin. Si
-							ya no aplica, cancelala desde la ficha.
-						</p>
+		<>
+			<FilaSolicitud
+				s={s}
+				acciones={
+					// Cuatro ojos: la propia no se decide (el servidor lo exige igual).
+					s.esMia ? (
+						<Badge
+							variant="secondary"
+							title="La tiene que aprobar otro supervisor o admin. Si ya no aplica, cancelala desde la ficha."
+						>
+							Tu solicitud
+						</Badge>
 					) : (
-						<div className="flex gap-2">
-							<Button size="sm" onClick={() => setDecision("aprobar")}>
+						<>
+							<Button
+								size="sm"
+								className="h-8"
+								onClick={() => setDecision("aprobar")}
+							>
 								<Check className="mr-1 h-4 w-4" />
 								Aprobar
 							</Button>
 							<Button
 								size="sm"
 								variant="outline"
+								className="h-8"
 								onClick={() => setDecision("rechazar")}
 							>
 								<X className="mr-1 h-4 w-4" />
 								Rechazar
 							</Button>
-						</div>
-					)}
-				</div>
-			</CardHeader>
-			<CardContent className="space-y-4">
-				<DetalleSolicitud s={s} />
-				<Collapsible defaultOpen className="border-t pt-3">
-					<CollapsibleTrigger className="flex items-center gap-1 font-medium text-sm hover:underline">
-						<ChevronDown className="h-4 w-4" />
-						Checklist · {resumen.texto}
-						{resumen.justificados > 0
-							? `, ${resumen.justificados} justificados`
-							: ""}
-					</CollapsibleTrigger>
-					<CollapsibleContent className="mt-2">
-						<ChecklistVista pasos={s.checklist} />
-					</CollapsibleContent>
-				</Collapsible>
-			</CardContent>
+						</>
+					)
+				}
+			/>
 			{decision && (
 				<DecidirSolicitudDialog
 					solicitud={{ id: s.id, quien: quienEs(s) }}
@@ -364,7 +363,7 @@ function SolicitudPorAprobar({ s }: { s: Solicitud }) {
 					}}
 				/>
 			)}
-		</Card>
+		</>
 	);
 }
 
@@ -384,14 +383,11 @@ function Historial({ historial }: { historial: Solicitud[] }) {
 			? historial
 			: historial.filter((s) => s.estadoSolicitud === filtro);
 	return (
-		<Card>
-			<CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
-				<div>
-					<CardTitle>Historial</CardTitle>
-					<CardDescription>
-						Las últimas {historial.length} solicitudes decididas.
-					</CardDescription>
-				</div>
+		<div className="space-y-3">
+			<div className="flex flex-wrap items-center justify-between gap-3">
+				<p className="text-muted-foreground text-sm">
+					Las últimas {historial.length} solicitudes decididas.
+				</p>
 				<Select
 					value={filtro}
 					onValueChange={(v) =>
@@ -411,54 +407,35 @@ function Historial({ historial }: { historial: Solicitud[] }) {
 						))}
 					</SelectContent>
 				</Select>
-			</CardHeader>
-			<CardContent>
-				{visibles.length === 0 ? (
-					<p className="py-6 text-center text-muted-foreground text-sm">
+			</div>
+			{visibles.length === 0 ? (
+				<Card>
+					<CardContent className="py-10 text-center text-muted-foreground text-sm">
 						No hay solicitudes en este estado.
-					</p>
-				) : (
+					</CardContent>
+				</Card>
+			) : (
+				<Card className="py-0">
 					<ul className="divide-y">
 						{visibles.map((s) => (
-							<li key={s.id}>
-								<Collapsible>
-									<div className="flex flex-wrap items-start justify-between gap-3 py-3">
-										<div className="min-w-0 space-y-1">
-											<LinkFicha s={s} />
-											<p className="text-muted-foreground text-xs">
-												Pidió {s.solicitante ?? "—"} el {fecha(s.solicitadoAt)}
-												{s.decidioPor
-													? ` · ${s.estadoSolicitud === "cancelada" ? "canceló" : "decidió"} ${s.decidioPor}`
-													: ""}
-												{s.decididoAt ? ` el ${fecha(s.decididoAt)}` : ""}
-												{s.bucketOrigen != null
-													? ` · B${s.bucketOrigen}${s.estadoSolicitud === "aprobada" ? ` → B${s.bucketDestino ?? 4}` : ""}`
-													: ""}
-											</p>
-											{s.motivoDecision && (
-												<p className="text-sm">{s.motivoDecision}</p>
-											)}
-										</div>
-										<div className="flex items-center gap-2">
-											<EstadoSolicitudBadge estado={s.estadoSolicitud} />
-											<CollapsibleTrigger asChild>
-												<Button size="sm" variant="ghost">
-													<ChevronDown className="mr-1 h-4 w-4" />
-													Ver
-												</Button>
-											</CollapsibleTrigger>
-										</div>
-									</div>
-									<CollapsibleContent className="space-y-3 pb-4">
-										<DetalleSolicitud s={s} />
-										<ChecklistVista pasos={s.checklist} />
-									</CollapsibleContent>
-								</Collapsible>
-							</li>
+							<FilaSolicitud
+								key={s.id}
+								s={s}
+								acciones={<EstadoSolicitudBadge estado={s.estadoSolicitud} />}
+								pie={
+									<p className="text-muted-foreground text-xs">
+										{s.estadoSolicitud === "cancelada"
+											? "La canceló"
+											: "Decidió"}{" "}
+										{s.decidioPor ?? "—"} el {fecha(s.decididoAt)}
+										{s.motivoDecision ? `: ${s.motivoDecision}` : ""}
+									</p>
+								}
+							/>
 						))}
 					</ul>
-				)}
-			</CardContent>
-		</Card>
+				</Card>
+			)}
+		</div>
 	);
 }

@@ -44,13 +44,21 @@ export function limiteFacturaSeguro(maximo = MAXIMO_CUERPO_FACTURA_SEGURO) {
 
 		const partes: Uint8Array[] = [];
 		let leidos = 0;
-		for await (const parte of cuerpo) {
-			leidos += parte.byteLength;
-			// Pasado el límite se sigue leyendo sin guardar: cortar la lectura deja
-			// bytes en la conexión y la siguiente petición en ella falla con 400.
-			if (leidos <= maximo) partes.push(parte);
+		const lector = cuerpo.getReader();
+		for (;;) {
+			const { done, value } = await lector.read();
+			if (done) break;
+			leidos += value.byteLength;
+			// Se corta apenas se pasa, sin esperar el resto: un cuerpo enorme o muy
+			// lento no puede retener la petición. Bun descarta lo que falte por su
+			// cuenta y la conexión sigue sirviendo.
+			if (leidos > maximo) {
+				lector.cancel().catch(() => {});
+				c.header("Connection", "close");
+				return facturaMuyGrande(c);
+			}
+			partes.push(value);
 		}
-		if (leidos > maximo) return facturaMuyGrande(c);
 		c.req.raw = new Request(c.req.raw, { body: Buffer.concat(partes) });
 		return next();
 	};

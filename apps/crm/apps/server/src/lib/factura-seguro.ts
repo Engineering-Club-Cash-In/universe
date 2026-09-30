@@ -112,9 +112,10 @@ export function puedeReenviarFacturaSeguro(caso: {
 	return { ok: true };
 }
 
-// La aseguradora es la de la última cotización (confirmado con negocio). La
-// oportunidad recién la copia al cerrarse (close-opportunity.ts): sin
-// cotización se usa la de la oportunidad y, si tampoco hay, Universales.
+// La aseguradora es la de la cotización que usa el cierre: la aceptada o, si no
+// hay, la última (confirmado con negocio). La oportunidad recién la copia al
+// cerrarse (close-opportunity.ts): sin cotización se usa la de la oportunidad
+// y, si tampoco hay, Universales.
 export function resolverAseguradora(
 	deCotizacion: string | null | undefined,
 	deOportunidad: string | null | undefined,

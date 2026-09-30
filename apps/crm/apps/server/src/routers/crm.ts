@@ -6325,10 +6325,9 @@ export const crmRouter = {
 					eq(insuranceInvoiceSubmissions.documentId, opportunityDocuments.id),
 				)
 				.leftJoin(
-					opportunities,
-					eq(opportunities.id, insuranceInvoiceSubmissions.opportunityId),
+					companies,
+					eq(companies.id, insuranceInvoiceSubmissions.companyId),
 				)
-				.leftJoin(companies, eq(companies.id, opportunities.companyId))
 				.where(eq(opportunityDocuments.opportunityId, input.opportunityId))
 				.orderBy(opportunityDocuments.uploadedAt);
 

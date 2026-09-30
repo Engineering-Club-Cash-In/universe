@@ -372,6 +372,43 @@ describe("CB-041 — apagado aprobado: aviso al asesor", () => {
 		});
 	});
 
+	it("reactivación aprobada con el crédito reasignado: el aviso va al dueño de hoy, que es quien puede ejecutarla (review de Codex, PR #1808)", async () => {
+		duenoEnCarteraMock = "asesor-nuevo";
+		await notificarInmovilizacionResuelta({
+			...aprobada,
+			accion: "reactivacion",
+			numeroCreditoSifco: "0101",
+		});
+		expect(notificacionesInsertadas[0]).toMatchObject({
+			assignedTo: "asesor-nuevo",
+		});
+	});
+
+	it("reactivación aprobada con el dueño sin usuario en el CRM: cae en quien solicitó", async () => {
+		duenoEnCarteraMock = null;
+		await notificarInmovilizacionResuelta({
+			...aprobada,
+			accion: "reactivacion",
+			numeroCreditoSifco: "0101",
+		});
+		expect(notificacionesInsertadas[0]).toMatchObject({
+			assignedTo: "asesor-1",
+		});
+	});
+
+	it("un rechazo de reactivación sigue yendo a quien solicitó aunque el crédito tenga otro dueño", async () => {
+		duenoEnCarteraMock = "asesor-nuevo";
+		await notificarInmovilizacionResuelta({
+			...aprobada,
+			accion: "reactivacion",
+			decision: "rechazada",
+			numeroCreditoSifco: "0101",
+		});
+		expect(notificacionesInsertadas[0]).toMatchObject({
+			assignedTo: "asesor-1",
+		});
+	});
+
 	it("un rechazo sigue yendo a quien solicitó aunque el crédito tenga otro dueño", async () => {
 		duenoEnCarteraMock = "asesor-nuevo";
 		await notificarInmovilizacionResuelta({

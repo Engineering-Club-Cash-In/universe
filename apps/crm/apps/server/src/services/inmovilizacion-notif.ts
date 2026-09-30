@@ -150,15 +150,16 @@ export async function resolverPendientesInmovilizacion(
 
 /**
  * Al aprobar/rechazar: avisa al asesor que solicitó. El rechazo lleva el
- * motivo del supervisor. Un apagado APROBADO, en cambio, lo ejecuta quien lleva
- * el crédito en cartera HOY (puede no ser quien lo pidió si cartera lo reasignó
- * mientras esperaba la decisión), así que ese aviso va al dueño actual, con
- * quien solicitó de respaldo (review de Codex, PR #1807).
+ * motivo del supervisor. Un apagado o una reactivación APROBADOS, en cambio, los
+ * ejecuta quien lleva el crédito en cartera HOY (puede no ser quien los pidió
+ * si cartera lo reasignó mientras esperaba la decisión), así que ese aviso va
+ * al dueño actual, con quien solicitó de respaldo (review de Codex, PRs #1807 y
+ * #1808).
  */
 export async function notificarInmovilizacionResuelta(params: {
 	inmovilizacionId: string;
 	casoCobroId: string;
-	/** Crédito del caso: con él se resuelve el dueño en cartera del apagado aprobado. */
+	/** Crédito del caso: con él se resuelve el dueño en cartera de la acción aprobada. */
 	numeroCreditoSifco?: string | null;
 	accion: "apagado" | "reactivacion";
 	decision: "aprobada" | "rechazada";
@@ -181,8 +182,9 @@ export async function notificarInmovilizacionResuelta(params: {
 				? `El supervisor aprobó ${params.accion === "apagado" ? "el apagado" : "la reactivación"} de la unidad. Pedile a LEGION que la aplique y, cuando lo confirme, registralo en la Ficha 360 con su confirmación.`
 				: `El supervisor rechazó la solicitud de ${accionTexto} de unidad. Motivo: ${params.motivoRechazo ?? "sin especificar"}.`;
 
-		const ejecutaElDueno =
-			params.decision === "aprobada" && params.accion === "apagado";
+		// Apagado y reactivación aprobados los ejecuta quien lleva el crédito en
+		// cartera HOY (`ejecutarPorAsesor` exige esa asignación en ambos).
+		const ejecutaElDueno = params.decision === "aprobada";
 		const destinatario =
 			(ejecutaElDueno
 				? await usuarioDuenoEnCartera(params.numeroCreditoSifco)

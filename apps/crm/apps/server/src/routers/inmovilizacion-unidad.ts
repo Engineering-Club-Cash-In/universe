@@ -125,17 +125,24 @@ const ESTADOS_OPORTUNIDAD_CON_CREDITO = ["won", "migrate"] as const;
  * (`resolverVehiculoCasoPagalo`): si el contrato existe manda, aunque le falte
  * el vehículo — no se cae a la oportunidad para no mostrar uno distinto.
  *
- * Si con eso no hay vehículo pero la unidad está APAGADA por este caso, se usa
- * la unidad que quedó guardada en ese apagado (`apagadoVigenteDelCaso`): el
- * carro sigue apagado en la realidad aunque después cambien las oportunidades
- * (p. ej. aparezca un segundo vehículo) y hay que poder reactivarlo.
+ * Mientras la unidad esté APAGADA por este caso, manda la unidad que quedó
+ * guardada en ese apagado (`apagadoVigenteDelCaso`) sobre lo que resuelvan hoy
+ * el contrato o las oportunidades: el carro apagado en la realidad es ese,
+ * aunque después se sume otra oportunidad o se repunte a otro vehículo, y hay
+ * que poder reactivarlo (y no ofrecer apagar otro mientras tanto).
  */
 async function getCasoParaInmovilizacion(casoCobroId: string) {
 	const caso = await resolverCasoConVehiculo(casoCobroId);
-	if (!caso || caso.vehicleId) return caso;
+	if (!caso) return null;
 
 	const apagado = await apagadoVigenteDelCaso(casoCobroId);
-	if (!apagado) return caso;
+	if (
+		!apagado ||
+		(caso.vehicleId === apagado.vehicleId &&
+			caso.wialonUnitId === apagado.wialonUnitId)
+	) {
+		return caso;
+	}
 	const [vehiculo] = await db
 		.select({ wialonUnitName: vehicles.wialonUnitName })
 		.from(vehicles)
@@ -155,21 +162,42 @@ async function getCasoParaInmovilizacion(casoCobroId: string) {
  * El vehículo y la unidad GPS del último apagado ejecutado de este caso, solo
  * mientras la unidad siga apagada por él (no hubo una reactivación ejecutada
  * después). Null si no hay apagado vigente o la fila no guardó la unidad.
+ *
+ * Consulta propia y angosta (solo las filas ejecutadas del caso): esta función
+ * corre en cada llamada, así que no reutiliza `getHistorialCaso`.
  */
 async function apagadoVigenteDelCaso(
 	casoCobroId: string,
 ): Promise<{ vehicleId: string; wialonUnitId: number } | null> {
-	const historial = await getHistorialCaso(casoCobroId);
-	const apagado = ultimaEjecutada(historial, "apagado");
+	const ejecutadas = await db
+		.select({
+			accion: inmovilizacionesUnidad.accion,
+			vehicleId: inmovilizacionesUnidad.vehicleId,
+			wialonUnitId: inmovilizacionesUnidad.wialonUnitId,
+			ejecutadoAt: inmovilizacionesUnidad.ejecutadoAt,
+		})
+		.from(inmovilizacionesUnidad)
+		.where(
+			and(
+				eq(inmovilizacionesUnidad.casoCobroId, casoCobroId),
+				eq(inmovilizacionesUnidad.estado, "ejecutada"),
+			),
+		);
+	let apagado: (typeof ejecutadas)[number] | null = null;
+	let reactivadoAt: Date | null = null;
+	for (const f of ejecutadas) {
+		if (!f.ejecutadoAt) continue;
+		if (f.accion === "apagado") {
+			if (!apagado?.ejecutadoAt || f.ejecutadoAt > apagado.ejecutadoAt) {
+				apagado = f;
+			}
+		} else if (!reactivadoAt || f.ejecutadoAt > reactivadoAt) {
+			reactivadoAt = f.ejecutadoAt;
+		}
+	}
 	if (!apagado?.ejecutadoAt || !apagado.vehicleId) return null;
 	if (apagado.wialonUnitId == null) return null;
-	const reactivacion = ultimaEjecutada(historial, "reactivacion");
-	if (
-		reactivacion?.ejecutadoAt &&
-		reactivacion.ejecutadoAt > apagado.ejecutadoAt
-	) {
-		return null;
-	}
+	if (reactivadoAt && reactivadoAt > apagado.ejecutadoAt) return null;
 	return { vehicleId: apagado.vehicleId, wialonUnitId: apagado.wialonUnitId };
 }
 

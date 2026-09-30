@@ -203,6 +203,23 @@ function mockDb() {
 						}),
 					};
 				}
+				if (
+					tabla === inmovilizacionesUnidad &&
+					campos &&
+					"ejecutadoAt" in campos &&
+					!("id" in campos)
+				) {
+					// apagadoVigenteDelCaso: solo las filas ejecutadas del caso
+					return {
+						where: async () =>
+							(historialCasoMock.length > 0
+								? historialCasoMock
+								: inmovilizacionExistente
+									? [inmovilizacionExistente]
+									: []
+							).filter((f) => f.estado === "ejecutada"),
+					};
+				}
 				if (tabla === inmovilizacionesUnidad && campos && "id" in campos) {
 					// Usado por:
 					// 1. filaSigueVigente: select({ id }).from(...).where().for("update")
@@ -3115,6 +3132,80 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 				message: expect.stringContaining("más de un vehículo"),
 			});
 			expect(inmovilizacionesInsertadas).toHaveLength(0);
+		});
+
+		it("si la oportunidad se repunta a OTRO vehículo tras el apagado, sigue mandando la unidad apagada (no se ofrece apagar el nuevo ni se pierde la reactivación)", async () => {
+			contratoIdMock = null;
+			vehicleIdContratoMock = null;
+			wialonUnitIdCasoMock = null;
+			vehiculosOportunidadMock = [
+				vehiculoOportunidad({
+					vehicleId: "88888888-8888-8888-8888-888888888888",
+					wialonUnitId: 99999,
+				}),
+			];
+			historialCasoMock = [apagadoEjecutado()];
+
+			const carta = await call(
+				inmovilizacionUnidadRouter.getInmovilizacionesCaso,
+				{ casoCobroId: CASO_ID },
+				{ context: ctx("cobros") },
+			);
+			expect(carta.estadoUnidad).toBe("inmovilizada");
+			expect(carta.tieneGps).toBe(true);
+
+			await call(
+				inmovilizacionUnidadRouter.solicitarInmovilizacion,
+				{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+				{ context: ctx("cobros") },
+			);
+			expect(inmovilizacionesInsertadas[0]).toMatchObject({
+				accion: "reactivacion",
+				vehicleId: VEHICLE_ID,
+				wialonUnitId: 12345,
+			});
+		});
+
+		it("lo mismo si el contrato pasó a otro vehículo: manda la unidad apagada", async () => {
+			vehicleIdContratoMock = "88888888-8888-8888-8888-888888888888";
+			wialonUnitIdCasoMock = 99999;
+			historialCasoMock = [apagadoEjecutado()];
+			await call(
+				inmovilizacionUnidadRouter.solicitarInmovilizacion,
+				{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+				{ context: ctx("cobros") },
+			);
+			expect(inmovilizacionesInsertadas[0]).toMatchObject({
+				vehicleId: VEHICLE_ID,
+				wialonUnitId: 12345,
+			});
+		});
+
+		it("si la unidad ya está activa (hubo una reactivación), vale lo que resuelva hoy el caso", async () => {
+			contratoIdMock = null;
+			vehicleIdContratoMock = null;
+			wialonUnitIdCasoMock = null;
+			vehiculosOportunidadMock = [
+				vehiculoOportunidad({
+					vehicleId: "88888888-8888-8888-8888-888888888888",
+					wialonUnitId: 99999,
+				}),
+			];
+			historialCasoMock = [
+				apagadoEjecutado(),
+				{
+					...apagadoEjecutado(),
+					id: "77777777-7777-7777-7777-777777777777",
+					accion: "reactivacion",
+					ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"),
+				},
+			];
+			const carta = await call(
+				inmovilizacionUnidadRouter.getInmovilizacionesCaso,
+				{ casoCobroId: CASO_ID },
+				{ context: ctx("cobros") },
+			);
+			expect(carta.estadoUnidad).toBe("activa");
 		});
 
 		it("un apagado que no guardó la unidad (filas viejas) no sirve de respaldo", async () => {

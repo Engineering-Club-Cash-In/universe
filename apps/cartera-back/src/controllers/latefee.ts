@@ -212,6 +212,23 @@ export function isOverdueInstallmentForMora(cuota: CuotaParaMora, hoy: Date) {
 }
 
 /**
+ * Cuántas cuotas sin pagar vencen HOY: hoy no devengan mora (el cron exige
+ * vencimiento < hoy), mañana sí. Mismo criterio de elegibilidad que el cron,
+ * para que la proyección de «mañana sube» no se aparte de lo que va a cobrar.
+ */
+export function contarCuotasQueVencenHoy(
+  cuotas: Omit<CuotaParaMora, "statusCredit">[],
+  hoy: Date,
+  statusCredit: CuotaParaMora["statusCredit"],
+): number {
+  return cuotas.filter(
+    (c) =>
+      diasAtrasoMoraConSigno(c.fecha_vencimiento, hoy) === 0 &&
+      esCuotaElegibleParaMora({ ...c, statusCredit }),
+  ).length;
+}
+
+/**
  * Las cuotas que entran en la PROYECCIÓN de la mora: las elegibles cuyo
  * vencimiento cae dentro del horizonte que se le anuncia al cliente (por
  * defecto los próximos 30 días), estén ya vencidas o no.

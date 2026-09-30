@@ -51,12 +51,17 @@ import {
 } from "./registerPaymentPolicy";
 import {
   BASE_DIAS_MORA,
+  contarCuotasQueVencenHoy,
   diasAtrasoMoraConSigno,
   hoyGuatemala,
   incrementoDiarioMora,
   incrementoMaximoMensualMora,
   isInstallmentWithinMoraHorizon,
+  cuotasParaPendienteDeCreditos,
 } from "./latefee";
+import { moraAbonadaPorOrigen } from "../utils/moraAbonadaPorOrigen";
+import { construirDesgloseMora } from "../utils/desgloseMora";
+import { hasPaidPaymentSql } from "../utils/cuotaYaPagadaSql";
 import { compensarAnotacionesVivas } from "../utils/anotarMoraPagada";
 import { mora_pagada_cuota } from "../database/db/schema";
 import {
@@ -309,8 +314,67 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     // —incluso sin cuotas, con "0.00"— y acá se le pasó este. Un `??` sería
     // una rama que ningún caso puede alcanzar.
     const { incrementoDiarioMora: incrementoDiarioMoraStr,
-      incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr } =
+      incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
+      diasAtrasoMoraMaximo } =
       incrementosMora.get(creditoId)!;
+
+    // El «por qué» de la mora para la pantalla de cobro: las cuotas y los días
+    // con el MISMO cargador del cron, así que incluye las cuotas cuyo pago aún
+    // no validó contabilidad (el cron las sigue cobrando aunque no se vean
+    // como atrasadas) y resta lo ya abonado a cada una.
+    const hoyGT = hoyGuatemala();
+    const cargadas =
+      (await cuotasParaPendienteDeCreditos([creditoId], db, hoyGT)).get(creditoId)?.cuotas ?? [];
+
+    // Mora pagada/condonada: separa lo que el cliente ya abonó (PAGO/REVERSA de PAGO)
+    // de lo que fue condonado (CONDONACION/REVERSA de CONDONACION).
+    // Sobre las cuotas del desglose (`cargadas`) MÁS las atrasadas: las
+    // atrasadas excluyen las cuotas cubiertas por boletas sin validar, que el
+    // cron —y el desglose— sí cuentan; sin sumarlas, lo abonado a una cuota en
+    // validación salía en el desglose pero no en `moraPagada`. Y `cargadas`
+    // sola viene vacía en créditos EN_CONVENIO/INCOBRABLE (no elegibles para
+    // el cron), donde lo ya pagado se seguiría mostrando.
+    const moraAbonoOrigen = await moraAbonadaPorOrigen(
+      [...new Set([...cargadas.map((c) => c.cuota_id), ...cuotasAtrasadas.map((c) => c.cuota_id)])],
+      db
+    );
+    const moraPagada = moraAbonoOrigen.pagada.toFixed(2);
+    const moraCondonada = moraAbonoOrigen.condonada.toFixed(2);
+    const datosCuota = cargadas.length
+      ? await db
+          .select({
+            cuota_id: cuotas_credito.cuota_id,
+            numero_cuota: cuotas_credito.numero_cuota,
+            fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+          })
+          .from(cuotas_credito)
+          .where(inArray(cuotas_credito.cuota_id, cargadas.map((c) => c.cuota_id)))
+      : [];
+    const datoPorCuota = new Map(datosCuota.map((d) => [d.cuota_id, d]));
+    // Cuotas sin pagar que vencen HOY: hoy no generan mora, mañana sí (su
+    // primer día). Mismo criterio de elegibilidad que el cron.
+    const cuotasQueVencenHoy = contarCuotasQueVencenHoy(
+      await db
+        .select({
+          fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+          pagado: cuotas_credito.pagado,
+          hasPaidPayment: hasPaidPaymentSql(),
+        })
+        .from(cuotas_credito)
+        .where(and(eq(cuotas_credito.credito_id, creditoId), eq(cuotas_credito.pagado, false))),
+      hoyGT,
+      currentCredit.creditos.statusCredit,
+    );
+    const desgloseMora = construirDesgloseMora({
+      capital: currentCredit.creditos.capital ?? 0,
+      cuotas: cargadas.map((c) => ({
+        ...c,
+        numero_cuota: datoPorCuota.get(c.cuota_id)?.numero_cuota ?? 0,
+        fecha_vencimiento: String(datoPorCuota.get(c.cuota_id)?.fecha_vencimiento ?? ""),
+      })),
+      numerosEnValidacion: new Set(cuotasEnValidacion.map((c) => c.numero_cuota)),
+      cuotasQueVencenHoy,
+    });
 
     const cuotasPendientes = await db
       .select({
@@ -582,6 +646,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
         incrementoDiarioMora: incrementoDiarioMoraStr,
         incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
+        diasAtrasoMoraMaximo,
+        moraPagada,
+        moraCondonada,
+        desgloseMora,
         mora: moraActual.length > 0 ? moraActual[0] : null,
         convenioActivo: null,
         cuotasEnConvenio: [],
@@ -718,6 +786,10 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
       incrementoDiarioMora: incrementoDiarioMoraStr,
       incrementoMaximoMensualMora: incrementoMaximoMensualMoraStr,
+      diasAtrasoMoraMaximo,
+      moraPagada,
+      moraCondonada,
+      desgloseMora,
       mora: moraActual.length > 0 ? moraActual[0] : null,
       convenioActivo:
         convenioActivo.length > 0

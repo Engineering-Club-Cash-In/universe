@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { sql } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 // Opt in to a disposable PostgreSQL container; never uses application DB credentials.
 const container = process.env.PAYMENT_DATE_TEST_CONTAINER;
@@ -8,6 +10,11 @@ integration("payment list preserves Nexa calendar dates and legacy Guatemala dat
   const source = await Bun.file(new URL("./payments.ts", import.meta.url)).text();
   const expression = source.match(/const fechaPagoLocalSQL = `([^`]+)`/)?.[1]
     ?? "p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala'";
+  const projection = source.includes("TO_CHAR(${sql.raw(fechaPagoLocalSQL)},")
+    ? sql`to_char(${sql.raw(expression)}, 'YYYY-MM-DD HH24:MI:SS')`
+    : sql`to_char(${expression}, 'YYYY-MM-DD HH24:MI:SS')`;
+  const compiled = new PgDialect().sqlToQuery(projection);
+  expect(compiled.params).toEqual([]);
   const query = `
     BEGIN READ ONLY;
     WITH p(id, fecha_pago, nexa_payment_event_id) AS (VALUES
@@ -18,7 +25,7 @@ integration("payment list preserves Nexa calendar dates and legacy Guatemala dat
       (5, timestamp '2026-09-30 14:20:38', NULL),
       (6, NULL::timestamp, 4)
     ) SELECT json_agg(row_to_json(result) ORDER BY id) FROM (
-      SELECT id, to_char((${expression}), 'YYYY-MM-DD HH24:MI:SS') AS displayed,
+      SELECT id, ${compiled.sql} AS displayed,
         (${expression})::date = date '2026-09-30' AS same_day,
         extract(year from (${expression}))::int AS year
       FROM p
@@ -40,5 +47,6 @@ integration("payment list preserves Nexa calendar dates and legacy Guatemala dat
   ]);
   // Projection and all five payment-date filters must share this expression.
   const listing = source.slice(source.indexOf("export async function getPagosConInversionistas"), source.indexOf("fechaPago: r.fechaPago"));
-  expect(listing.match(/\$\{fechaPagoLocalSQL\}/g)?.length).toBe(6);
+  expect(listing.match(/\$\{fechaPagoLocalSQL\}/g)?.length).toBe(5);
+  expect(listing).toContain("TO_CHAR(${sql.raw(fechaPagoLocalSQL)},");
 });

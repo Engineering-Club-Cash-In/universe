@@ -2653,7 +2653,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.credito_id AS "creditoId",
         p.monto_boleta AS "montoBoleta",
         p.numeroAutorizacion AS "numeroAutorizacion",
-        TO_CHAR(${fechaPagoLocalSQL}, 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
+        TO_CHAR(${sql.raw(fechaPagoLocalSQL)}, 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
 
         -- 💸 Campos propios del pago
         p.mora AS "mora",

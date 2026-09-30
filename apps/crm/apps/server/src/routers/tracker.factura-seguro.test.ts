@@ -141,6 +141,7 @@ mock.module("../lib/storage", () => ({
 	deleteFileFromR2: async (key: string) => {
 		borradosR2.push(key);
 	},
+	getFileUrl: async (key: string) => `https://r2.test/${key}`,
 }));
 // La plantilla real sí corre; solo el envío se simula.
 const correoReal = await import("../lib/correo-factura-seguro");
@@ -458,5 +459,46 @@ describe("reenviarFacturaSeguro", () => {
 		await expect(
 			call(trackerRouter.reenviarFacturaSeguro, { opportunityId: ID }, ctx),
 		).rejects.toMatchObject({ code: "FORBIDDEN" });
+	});
+});
+
+describe("verFacturaSeguro", () => {
+	test("el vendedor asignado recibe un link temporal al archivo", async () => {
+		facturaPrevia = [{ key: KEY }];
+		expect(
+			await call(trackerRouter.verFacturaSeguro, { opportunityId: ID }, ctx),
+		).toEqual({ url: `https://r2.test/${KEY}` });
+	});
+
+	test("el gerente de la agencia también puede abrirla", async () => {
+		membresias = [{ companyId: "agencia-1", sellerId: null }];
+		facturaPrevia = [{ key: KEY }];
+		expect(
+			await call(trackerRouter.verFacturaSeguro, { opportunityId: ID }, ctx),
+		).toEqual({ url: `https://r2.test/${KEY}` });
+	});
+
+	test("otro vendedor de la agencia o de otra agencia: no la ve", async () => {
+		facturaPrevia = [{ key: KEY }];
+		membresias = [{ companyId: "agencia-1", sellerId: "v2" }];
+		await expect(
+			call(trackerRouter.verFacturaSeguro, { opportunityId: ID }, ctx),
+		).rejects.toMatchObject({
+			code: "FORBIDDEN",
+			message: "Este caso no está asignado a ti",
+		});
+		membresias = [{ companyId: "agencia-2", sellerId: null }];
+		await expect(
+			call(trackerRouter.verFacturaSeguro, { opportunityId: ID }, ctx),
+		).rejects.toMatchObject({ code: "FORBIDDEN" });
+	});
+
+	test("sin factura subida: no encontrada", async () => {
+		await expect(
+			call(trackerRouter.verFacturaSeguro, { opportunityId: ID }, ctx),
+		).rejects.toMatchObject({
+			code: "NOT_FOUND",
+			message: "Este caso todavía no tiene factura del seguro",
+		});
 	});
 });

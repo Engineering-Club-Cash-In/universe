@@ -47,6 +47,7 @@ import {
 	buildUploadPrefix,
 	deleteFileFromR2,
 	generateUniqueFilename,
+	getFileUrl,
 	MAX_FILE_SIZE,
 	uploadBufferToR2,
 	validateResolvedMimeType,
@@ -922,5 +923,30 @@ export const trackerRouter = {
 				correo: reservado.correo,
 			});
 			return { envio, aseguradora: reservado.aseguradora };
+		}),
+
+	// Solo lectura: la abre cualquiera que tenga el caso a su alcance (el
+	// vendedor asignado o el gerente de la agencia).
+	verFacturaSeguro: partnerProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			await casoDelSocio(input.opportunityId, context.membresias);
+			const [documento] = await db
+				.select({ key: opportunityDocuments.filePath })
+				.from(insuranceInvoiceSubmissions)
+				.innerJoin(
+					opportunityDocuments,
+					eq(opportunityDocuments.id, insuranceInvoiceSubmissions.documentId),
+				)
+				.where(
+					eq(insuranceInvoiceSubmissions.opportunityId, input.opportunityId),
+				)
+				.limit(1);
+			if (!documento) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Este caso todavía no tiene factura del seguro",
+				});
+			}
+			return { url: await getFileUrl(documento.key) };
 		}),
 };

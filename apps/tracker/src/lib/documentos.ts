@@ -5,7 +5,7 @@ type CasoConDocumentos = Pick<Caso, "facturaSeguro" | "porcentaje" | "estado">;
 
 /**
  * - `pendiente`: falta subirlo.
- * - `atencion`: se subió pero el envío falló y hay que reenviarlo.
+ * - `atencion`: se subió pero el envío falló o quedó sin confirmar.
  * - `subido`: no requiere nada del socio.
  */
 export type EstadoDocumento = "pendiente" | "atencion" | "subido";
@@ -27,7 +27,7 @@ export function documentosDelCaso(caso: CasoConDocumentos): DocumentoCaso[] {
 			estado:
 				caso.facturaSeguro.envio === null
 					? "pendiente"
-					: factura.tono === "error"
+					: factura.tono === "error" || caso.facturaSeguro.sinConfirmar
 						? "atencion"
 						: "subido",
 		});

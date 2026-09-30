@@ -8,6 +8,7 @@ const base: Caso["facturaSeguro"] = {
 	subidaAt: null,
 	envio: null,
 	reenviable: false,
+	sinConfirmar: false,
 };
 
 function vista(
@@ -46,7 +47,7 @@ describe("vistaFacturaSeguro", () => {
 	});
 
 	test("pendiente abandonado: no se afirma que falló y se puede reintentar", () => {
-		const v = vista({ envio: "pendiente", reenviable: true });
+		const v = vista({ envio: "pendiente", sinConfirmar: true, reenviable: true });
 		expect(v).toMatchObject({
 			tono: "info",
 			titulo: "No pudimos confirmar el envío",
@@ -56,6 +57,16 @@ describe("vistaFacturaSeguro", () => {
 		expect(v?.titulo).not.toContain("no se pudo enviar");
 		expect(v?.texto).toContain("Puedes reintentar el envío");
 		expect(v?.texto).not.toContain("no se enviará de nuevo");
+	});
+
+	test("pendiente abandonado visto por el gerente: sin confirmar, sin acción (ya no dice 'Enviando')", () => {
+		const v = vista({ envio: "pendiente", sinConfirmar: true, reenviable: false });
+		expect(v).toMatchObject({
+			tono: "info",
+			titulo: "No pudimos confirmar el envío",
+			accion: null,
+		});
+		expect(v?.texto).toContain("El vendedor asignado puede reintentar el envío");
 	});
 
 	test("rechazada: el vendedor reenvía; el gerente solo ve el estado", () => {

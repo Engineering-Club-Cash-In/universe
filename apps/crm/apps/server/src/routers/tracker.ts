@@ -776,7 +776,8 @@ export const trackerRouter = {
 						.insert(insuranceInvoiceSubmissions)
 						.values({
 							opportunityId: fila.id,
-							companyId: fila.companyId,
+							// La leída bajo el lock: es contra la que se autorizó.
+							companyId: vigente?.companyId ?? null,
 							documentId: documento.id,
 							insuranceProvider: aseguradora,
 							recipients: destinatarios,

@@ -16,8 +16,19 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { compraDelContrato } from "server/src/lib/contrato-compra";
+import {
+	faltaVincular,
+	vinculadoDesdeWeeTrust,
+} from "server/src/lib/contrato-falta-vincular";
 import type { MOTIVOS_DE_ANULACION } from "server/src/lib/contratos-anulacion";
 import { toast } from "sonner";
+import { CopiarEnlacesMenu } from "@/components/contracts/CopiarEnlacesMenu";
+import {
+	AvisoFaltaVincular,
+	BotonVincularSecundario,
+	ETIQUETA_FALTA_VINCULAR,
+	EtiquetaVinculado,
+} from "@/components/contracts/FaltaVincular";
 import { RegenerarEnlacesDialog } from "@/components/contracts/RegenerarEnlacesDialog";
 import {
 	EtiquetaSubidoAMano,
@@ -27,6 +38,7 @@ import {
 	EtiquetaIdentidadOmitida,
 	VerificacionFacialFallida,
 } from "@/components/contracts/VerificacionFacialFallida";
+import { VincularDocumentoDialog } from "@/components/contracts/VincularDocumentoDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +58,7 @@ import {
 	firmantesEnFicha,
 	identidadesFallidas,
 } from "@/lib/contract-signers-display";
+import { enlacesPendientesPorPersona } from "@/lib/enlaces-para-copiar";
 import { client, orpc } from "@/utils/orpc";
 
 interface ContratoDeInversionista {
@@ -120,15 +133,24 @@ function FilaDeContrato({
 	contrato,
 	onCambio,
 	puedeRenovar,
+	puedeVincular: puedeVincularDelRol,
 }: {
 	contrato: ContratoDeInversionista;
 	onCambio: () => void;
 	/** Si quien mira puede renovar los enlaces: el mismo permiso del servidor. */
 	puedeRenovar: boolean;
+	/** Si quien mira puede vincular un documento armado a mano en WeeTrust. */
+	puedeVincular: boolean;
 }) {
 	const [regenerando, setRegenerando] = useState(false);
+	const [vinculando, setVinculando] = useState(false);
 
 	const inactivo = estaAnulado(contrato);
+	// Subido a mano sin espacios de firma: guardado, pero sin salir a firmar.
+	const sinVincular = !inactivo && Boolean(faltaVincular(contrato.apiResponse));
+	// El que no salió, o cambiarle el documento a uno que nadie terminó de firmar.
+	const puedeVincular =
+		puedeVincularDelRol && !inactivo && contrato.status === "pending";
 	const firmantes = firmantesEnFicha(
 		contrato.firmantes,
 		contrato,
@@ -173,11 +195,13 @@ function FilaDeContrato({
 		? identidadesFallidas(cierreQuery.data?.signatories)
 		: [];
 
-	const estado = !sinCerrar
-		? (ESTADO[contrato.status] ?? ESTADO.pending)
-		: fallaronIdentidad.length > 0
-			? ETIQUETA_IDENTIDAD_FALLIDA
-			: ETIQUETA_SIN_CERRAR;
+	const estado = sinVincular
+		? ETIQUETA_FALTA_VINCULAR
+		: !sinCerrar
+			? (ESTADO[contrato.status] ?? ESTADO.pending)
+			: fallaronIdentidad.length > 0
+				? ETIQUETA_IDENTIDAD_FALLIDA
+				: ETIQUETA_SIN_CERRAR;
 
 	const actualizarEstado = useMutation({
 		mutationFn: () =>
@@ -214,6 +238,7 @@ function FilaDeContrato({
 	// están los botones de arriba, que no tocan a quien ya firmó.
 	const puedeRegenerar =
 		puedeRenovar &&
+		!sinVincular &&
 		contrato.status !== "signed" &&
 		!sinCerrar &&
 		(alguienFirmo || hayVencidos);
@@ -234,6 +259,7 @@ function FilaDeContrato({
 			</div>
 			<div className="mt-1.5 flex flex-wrap items-center gap-1">
 				<EtiquetaSubidoAMano apiResponse={contrato.apiResponse} />
+				<EtiquetaVinculado apiResponse={contrato.apiResponse} />
 				<EtiquetaIdentidadOmitida apiResponse={contrato.apiResponse} />
 				<Badge
 					variant="outline"
@@ -312,9 +338,22 @@ function FilaDeContrato({
 				/>
 			)}
 
+			{/* Subido a mano sin espacios de firma: lo único que falta es que
+			    alguien lo suba a WeeTrust y lo vincule. */}
+			{sinVincular && (
+				<div className="mt-3">
+					<AvisoFaltaVincular
+						apiResponse={contrato.apiResponse}
+						puedeVincular={puedeVincular}
+						quienVincula="inversiones"
+						onVincular={() => setVinculando(true)}
+					/>
+				</div>
+			)}
+
 			{/* Mientras falta firmar, el subido a mano pide un vistazo: después ya no
 			    hay nada que corregir. */}
-			{contrato.status !== "signed" && !inactivo && (
+			{contrato.status !== "signed" && !inactivo && !sinVincular && (
 				<div className="mt-3">
 					<RevisarSubidoAMano
 						apiResponse={contrato.apiResponse}
@@ -327,7 +366,9 @@ function FilaDeContrato({
 			<div className="mt-2 space-y-0.5 border-t pt-1.5">
 				{firmantes.length === 0 ? (
 					<p className="text-muted-foreground text-xs">
-						Sin firmantes guardados.
+						{sinVincular
+							? "Sin enlaces hasta que se agregue el documento de WeeTrust."
+							: "Sin firmantes guardados."}
 					</p>
 				) : (
 					firmantes.map((firmante) => (
@@ -413,20 +454,22 @@ function FilaDeContrato({
 			{/* Acciones */}
 			{!inactivo && (
 				<div className="mt-2 flex flex-wrap items-center gap-1 border-t pt-1.5">
-					<Button
-						variant="ghost"
-						size="sm"
-						className="h-6 text-[11px]"
-						disabled={ocupado}
-						onClick={() => actualizarEstado.mutate()}
-					>
-						{actualizarEstado.isPending ? (
-							<Loader2 className="mr-1 h-3 w-3 animate-spin" />
-						) : (
-							<RefreshCw className="mr-1 h-3 w-3" />
-						)}
-						Actualizar estado
-					</Button>
+					{!sinVincular && (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-6 text-[11px]"
+							disabled={ocupado}
+							onClick={() => actualizarEstado.mutate()}
+						>
+							{actualizarEstado.isPending ? (
+								<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+							) : (
+								<RefreshCw className="mr-1 h-3 w-3" />
+							)}
+							Actualizar estado
+						</Button>
+					)}
 
 					{/* Aparece cuando alguien firmó y todavía falta firmar, o si algún
 					    enlace venció, que si no dejaría a esa persona sin forma de
@@ -445,6 +488,13 @@ function FilaDeContrato({
 						</Button>
 					)}
 
+					{puedeVincular && !sinVincular && (
+						<BotonVincularSecundario
+							disabled={ocupado}
+							onVincular={() => setVinculando(true)}
+						/>
+					)}
+
 					{contrato.signingStatusCheckedAt && (
 						<span className="ml-auto text-muted-foreground text-xs">
 							Revisado{" "}
@@ -460,10 +510,31 @@ function FilaDeContrato({
 				</div>
 			)}
 
+			<VincularDocumentoDialog
+				open={vinculando}
+				onOpenChange={setVinculando}
+				contractName={contrato.contractName}
+				pdfUrl={contrato.pdfUrl}
+				faltaVincular={faltaVincular(contrato.apiResponse)}
+				claveDeGuia={contrato.id}
+				cargarGuia={() =>
+					client.getInvestorWeetrustLinkGuide({ contractId: contrato.id })
+				}
+				vincular={(enlace, soloRevisar) =>
+					client.linkInvestorWeetrustDocument({
+						contractId: contrato.id,
+						enlace,
+						soloRevisar,
+					})
+				}
+				onVinculado={onCambio}
+			/>
+
 			<RegenerarEnlacesDialog
 				contractId={contrato.id}
 				contractName={contrato.contractName}
 				hayFirmas={firmantes.some((f) => f.estado === "signed")}
+				mismoDocumento={Boolean(vinculadoDesdeWeeTrust(contrato.apiResponse))}
 				open={regenerando}
 				onOpenChange={setRegenerando}
 				onRegenerado={onCambio}
@@ -578,6 +649,7 @@ function porCompra(contratos: ContratoDeInversionista[]) {
 export function InvestorContractsCard({
 	inversionistaId,
 	puedeRenovar = false,
+	puedeVincular = false,
 }: {
 	inversionistaId: number;
 	/**
@@ -586,6 +658,8 @@ export function InvestorContractsCard({
 	 * terminaba siempre en "no tenés permiso".
 	 */
 	puedeRenovar?: boolean;
+	/** Si quien mira puede vincular un documento armado a mano en WeeTrust. */
+	puedeVincular?: boolean;
 }) {
 	const queryClient = useQueryClient();
 	const [verAnulados, setVerAnulados] = useState(false);
@@ -659,6 +733,21 @@ export function InvestorContractsCard({
 									<Badge variant="secondary" className="h-5 px-1.5 text-[11px]">
 										{grupo.contratos.length}
 									</Badge>
+									{/* Los enlaces que faltan firmar de esta compra, por persona,
+									    para copiarlos de una vez. */}
+									<div className="ml-auto">
+										<CopiarEnlacesMenu
+											personas={enlacesPendientesPorPersona(
+												grupo.contratos
+													.filter((c) => c.status === "pending")
+													.map((c) => ({
+														nombre: c.contractName,
+														firmantes: c.firmantes,
+													})),
+												ETIQUETAS_DE_INVERSIONES,
+											)}
+										/>
+									</div>
 								</div>
 
 								{/* En rejilla: a lo ancho, una fila por contrato hacía una
@@ -670,6 +759,7 @@ export function InvestorContractsCard({
 											contrato={contrato}
 											onCambio={refrescar}
 											puedeRenovar={puedeRenovar}
+											puedeVincular={puedeVincular}
 										/>
 									))}
 								</div>
@@ -698,6 +788,7 @@ export function InvestorContractsCard({
 												contrato={contrato}
 												onCambio={refrescar}
 												puedeRenovar={puedeRenovar}
+												puedeVincular={puedeVincular}
 											/>
 										))}
 									</div>

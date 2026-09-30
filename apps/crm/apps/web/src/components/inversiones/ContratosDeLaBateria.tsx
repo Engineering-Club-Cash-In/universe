@@ -9,8 +9,13 @@ import {
 	Send,
 } from "lucide-react";
 import { useState } from "react";
+import { faltaVincular } from "server/src/lib/contrato-falta-vincular";
 import type { MOTIVOS_DE_ANULACION } from "server/src/lib/contratos-anulacion";
 import { AnularContratoDialog } from "@/components/contracts/AnularContratoDialog";
+import {
+	ETIQUETA_FALTA_VINCULAR,
+	EtiquetaVinculado,
+} from "@/components/contracts/FaltaVincular";
 import { EtiquetaSubidoAMano } from "@/components/contracts/SubidoAMano";
 import { EtiquetaIdentidadOmitida } from "@/components/contracts/VerificacionFacialFallida";
 import { Badge } from "@/components/ui/badge";
@@ -202,11 +207,17 @@ export function ContratosDeLaBateria({
 					const fallaronIdentidad = abierto
 						? identidadesFallidas(cierreQuery.data?.[contrato.id]?.signatories)
 						: [];
-					const estado = !abierto
-						? (ESTADO[contrato.status] ?? ESTADO.pending)
-						: fallaronIdentidad.length > 0
-							? ETIQUETA_IDENTIDAD_FALLIDA
-							: ETIQUETA_SIN_CERRAR;
+					// Subido a mano sin espacios de firma: lo agrega inversiones desde
+					// WeeTrust. Jurídico sólo lo ve; puede reemplazarlo o anularlo.
+					const sinVincular =
+						!inactivo && Boolean(faltaVincular(contrato.apiResponse));
+					const estado = sinVincular
+						? ETIQUETA_FALTA_VINCULAR
+						: !abierto
+							? (ESTADO[contrato.status] ?? ESTADO.pending)
+							: fallaronIdentidad.length > 0
+								? ETIQUETA_IDENTIDAD_FALLIDA
+								: ETIQUETA_SIN_CERRAR;
 					const firmado = contrato.status === "signed";
 
 					return (
@@ -225,9 +236,17 @@ export function ContratosDeLaBateria({
 										{contrato.cancellationReason}
 									</p>
 								)}
+								{sinVincular && (
+									<p className="text-amber-700 text-xs dark:text-amber-400">
+										No se encontraron los espacios de firma: no salió a firmar.
+										Inversiones ya tiene el aviso para subirlo a WeeTrust y
+										agregarlo.
+									</p>
+								)}
 							</div>
 
 							<EtiquetaSubidoAMano apiResponse={contrato.apiResponse} />
+							<EtiquetaVinculado apiResponse={contrato.apiResponse} />
 							<EtiquetaIdentidadOmitida apiResponse={contrato.apiResponse} />
 							<Badge
 								variant="outline"

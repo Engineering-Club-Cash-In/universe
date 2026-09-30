@@ -798,6 +798,13 @@ export interface ContractGenerationResponse {
    * sin dejar firmar. Sólo existe si se mandaron observadores.
    */
   observerUrl?: string;
+  /**
+   * El PDF quedó guardado pero NO salió a firma: no se encontraron las líneas
+   * de firma donde el layout las espera (un documento armado por fuera). Trae
+   * el motivo. Sólo en una subida a mano que lo pidió (`guardarSiNoHayLineas`):
+   * alguien lo sube a WeeTrust, pone las firmas y lo vincula desde el CRM.
+   */
+  sinLineasDeFirma?: string;
   /** Firmantes efectivamente enviados, con su rol y su link. */
   signatories?: Array<{
     role: SignerRole;

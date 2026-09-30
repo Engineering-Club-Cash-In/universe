@@ -522,6 +522,15 @@ export function OpportunityDetailModal({
 									PERMISSIONS.canAnnulContracts(userRole) &&
 									etapaPermite("anular", opportunity.stage?.closurePercentage)
 								}
+								puedeVincular={
+									!!userRole &&
+									PERMISSIONS.canLinkWeetrustDocument(userRole) &&
+									etapaPermite("regenerar", opportunity.stage?.closurePercentage)
+								}
+								enEtapaDeFirma={etapaPermite(
+									"regenerar",
+									opportunity.stage?.closurePercentage,
+								)}
 								onUpdate={() => opportunityContractsQuery.refetch()}
 							/>
 						)}

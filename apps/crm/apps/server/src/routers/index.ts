@@ -277,6 +277,8 @@ export const legalAppRouter = {
 
 	// Estado de firma y reintentos, para no tener que entrar a WeeTrust
 	getMessagingMode: legalContractsRouter.getMessagingMode,
+	getWeetrustLinkGuide: legalContractsRouter.getWeetrustLinkGuide,
+	linkWeetrustDocument: legalContractsRouter.linkWeetrustDocument,
 	resendContractLinksWhatsapp: legalContractsRouter.resendContractLinksWhatsapp,
 	getContractSigningStatus: legalContractsRouter.getContractSigningStatus,
 	retryContractBiometric: legalContractsRouter.retryContractBiometric,
@@ -332,6 +334,10 @@ export const legalAppRouter = {
 	refreshInvestorContractSigningLinks:
 		investorContractsRouter.refreshInvestorContractSigningLinks,
 	uploadInvestorContract: investorContractsRouter.uploadInvestorContract,
+	getInvestorWeetrustLinkGuide:
+		investorContractsRouter.getInvestorWeetrustLinkGuide,
+	linkInvestorWeetrustDocument:
+		investorContractsRouter.linkInvestorWeetrustDocument,
 	cancelInvestorContract: investorContractsRouter.cancelInvestorContract,
 	marcarBateriaLista: investorContractsRouter.marcarBateriaLista,
 	descartarVistaPrevia: investorContractsRouter.descartarVistaPrevia,

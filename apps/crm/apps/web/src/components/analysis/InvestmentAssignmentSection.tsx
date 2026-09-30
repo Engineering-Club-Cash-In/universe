@@ -27,6 +27,7 @@ import {
 	emptyContractParties,
 	toContractPartiesPayload,
 } from "@/components/contract-parties/ContractPartiesFields";
+import { TelefonosParaFirmar } from "@/components/analysis/TelefonosParaFirmar";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -969,6 +970,23 @@ export function InvestmentAssignmentSection({
 											onChange={setContractParties}
 										/>
 									)}
+
+									{/* A estos números les llegan los enlaces de firma al aprobar
+									    los contratos: se revisan antes de pasar a jurídico. */}
+									<TelefonosParaFirmar
+										key={selectedOpportunity.id}
+										opportunityId={selectedOpportunity.id}
+										cliente={
+											selectedOpportunity.lead
+												? {
+														id: selectedOpportunity.lead.id,
+														nombre: selectedOpportunity.lead.name,
+														phone: selectedOpportunity.lead.phone ?? null,
+													}
+												: null
+										}
+										onGuardado={() => refetchOpportunities()}
+									/>
 									</div>
 
 									<div className="space-y-4">

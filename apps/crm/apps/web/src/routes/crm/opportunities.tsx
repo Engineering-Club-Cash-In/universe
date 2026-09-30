@@ -2797,6 +2797,19 @@ function RouteComponent() {
 													selectedOpportunity.stage?.closurePercentage,
 												)
 											}
+											puedeVincular={
+												PERMISSIONS.canLinkWeetrustDocument(
+													userProfile.data.role,
+												) &&
+												etapaPermite(
+													"regenerar",
+													selectedOpportunity.stage?.closurePercentage,
+												)
+											}
+											enEtapaDeFirma={etapaPermite(
+												"regenerar",
+												selectedOpportunity.stage?.closurePercentage,
+											)}
 											onUpdate={() => opportunityContractsQuery.refetch()}
 										/>
 									)}

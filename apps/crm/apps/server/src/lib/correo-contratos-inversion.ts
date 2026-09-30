@@ -10,6 +10,7 @@ import {
 	contractSignatories,
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
+import { faltaVincular } from "./contrato-falta-vincular";
 import { getFileUrlWithBucketInKey } from "./storage";
 
 /**
@@ -122,6 +123,8 @@ function armarHtml(params: {
 	contratos: Array<{ contractName: string }>;
 	personas: ReturnType<typeof enlacesPorFirmante>;
 	adjuntosFaltantes: string[];
+	/** Subidos a mano que no salieron a firma: todavía no tienen enlaces. */
+	sinVincular: string[];
 }): string {
 	const { inversionista, monto, motivo, contratos, personas } = params;
 	const nombres = contratos
@@ -163,11 +166,23 @@ function armarHtml(params: {
 					.join(", ")}. Está en la ficha del inversionista.</p>`
 			: "";
 
+	// Se dice en el hilo para que nadie espere esos enlaces acá: llegan cuando
+	// inversiones sube el documento a WeeTrust y lo vincula.
+	const porVincular =
+		params.sinVincular.length > 0
+			? `<p style="margin:16px 0 0 0;color:#b45309;">Todavía sin enlaces: ${params.sinVincular
+					.map((n) => `«${escapar(n)}»`)
+					.join(
+						", ",
+					)}. No se encontraron los espacios de firma en el PDF, así que hay que subirlo a WeeTrust, poner las firmas a mano y agregarlo desde la ficha del inversionista. Sus enlaces llegan por este hilo cuando se agregue.</p>`
+			: "";
+
 	return `
     <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;max-width:720px;">
       <p style="margin:0 0 8px 0;">Buen día,</p>
       <p style="margin:0 0 8px 0;">${encabezado}</p>
-      ${bloques || '<p style="color:#6b7280;">Este contrato no tiene enlaces de firma.</p>'}
+      ${bloques || (porVincular ? "" : '<p style="color:#6b7280;">Este contrato no tiene enlaces de firma.</p>')}
+      ${porVincular}
       ${faltantes}
       <p style="margin:20px 0 0 0;color:#6b7280;font-size:12px;">
         Lo manda el CRM cuando jurídico termina de emitir los contratos. Cada enlace es personal: se le pasa sólo a quien le corresponde.
@@ -296,6 +311,9 @@ export async function mandarContratosAlHilo(params: {
 			contratos,
 			personas: enlacesPorFirmante(contratos, firmantes),
 			adjuntosFaltantes,
+			sinVincular: contratos
+				.filter((c) => faltaVincular(c.apiResponse))
+				.map((c) => c.contractName),
 		}),
 		adjuntos,
 	});

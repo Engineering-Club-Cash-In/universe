@@ -231,6 +231,12 @@ export interface DocumentResult {
 		signatoryID?: string;
 		signingUrl?: string;
 	}>;
+	/**
+	 * El PDF quedó guardado pero NO salió a firma: no se encontraron las líneas
+	 * de firma. Trae el motivo. Sólo en una subida a mano que lo pidió con
+	 * `guardarSiNoHayLineas` (ver `lib/contrato-falta-vincular.ts`).
+	 */
+	sinLineasDeFirma?: string;
 	error?: string;
 }
 
@@ -249,6 +255,9 @@ export function motivoDeFalla(result: DocumentResult): string | null {
 	if (!result.r2Key && !result.linkDocument) {
 		return "El documento se generó pero no quedó el PDF (falló la conversión). Reintenta este documento.";
 	}
+	// Subido a mano sin líneas de firma: no salió a firma a propósito, y el PDF
+	// está guardado. Sigue por el camino de "falta vincular", no es una falla.
+	if (result.sinLineasDeFirma && result.r2Key) return null;
 	// Un contrato electrónico sin links no está listo, por más que el PDF exista:
 	// nadie lo puede firmar. Volvía marcado como éxito y jurídico se enteraba
 	// recién al buscar el link que no estaba.
@@ -461,6 +470,11 @@ export interface EstadoDocumentoFirma {
 	documentID: string;
 	status: "DRAFT" | "PENDING" | "COMPLETED" | string;
 	signatories: EstadoFirmante[];
+	/**
+	 * Enlace de observador del documento, si tiene alguno. Se usa al vincular un
+	 * documento armado a mano en WeeTrust; un generador de antes no lo manda.
+	 */
+	observerUrl?: string | null;
 	error?: string;
 }
 
@@ -530,6 +544,23 @@ export async function consultarEstadoFirma(
 }
 
 /** Reenvía el correo de invitación a los firmantes pendientes. */
+/**
+ * Renueva los enlaces de firma **sobre el mismo documento**: WeeTrust emite
+ * direcciones nuevas para quien todavía no firmó y no toca a los demás.
+ *
+ * Es la salida para un documento armado a mano en WeeTrust: reemitirlo desde
+ * acá volvería a buscar las líneas de firma, que es justo lo que no tiene.
+ */
+export async function renovarEnlacesEnElMismoDocumento(
+	documentID: string,
+): Promise<EstadoDocumentoFirma> {
+	return pedirAlGenerador<EstadoDocumentoFirma>(
+		`/contracts/refresh-signing-links/${encodeURIComponent(documentID)}`,
+		"PUT",
+		"No se pudieron renovar los enlaces de firma",
+	);
+}
+
 export async function reenviarCorreoDeFirma(
 	documentID: string,
 ): Promise<{ success: boolean; documentID: string }> {
@@ -555,6 +586,11 @@ export async function subirContratoParaFirma(payload: {
 	documentName?: string;
 	signers?: ContractSigner[];
 	observers?: string[];
+	/**
+	 * Si el PDF no trae las líneas de firma, guardarlo igual sin mandarlo a
+	 * firmar (vuelve con `sinLineasDeFirma`). Sin esto, se rechaza.
+	 */
+	guardarSiNoHayLineas?: boolean;
 }): Promise<DocumentResult & { message?: string }> {
 	const response = await fetch(
 		`${LEGAL_DOCS_API_URL}/contracts/upload-for-signing`,

@@ -40,6 +40,7 @@ import {
 	getSignatureMode,
 } from "../lib/contract-signature-mode";
 import { estadoEnWeeTrust } from "../lib/contrato-estado-firma";
+import { conMarcaDeFaltaVincular } from "../lib/contrato-falta-vincular";
 import { conMarcaDeSubidoAMano } from "../lib/contrato-subido-a-mano";
 import {
 	ETAPAS_POR_ACCION,
@@ -61,6 +62,7 @@ import {
 import { esContratoVentaMapeado } from "../lib/contratos-venta";
 import { eqDpi } from "../lib/dpi-lookup";
 import { isTestModeEnabled } from "../lib/messaging-test-mode";
+import { createNotification } from "../lib/notificaciones";
 import { juridicoProcedure } from "../lib/orpc";
 import {
 	agruparCartas,
@@ -112,7 +114,7 @@ function nombreDelTitular(
 	return signers?.find((s) => s.role === "TITULAR")?.name;
 }
 
-function firmantesDelContrato(
+export function firmantesDelContrato(
 	contractType: string,
 	signersDelFront: ContractSigner[] | undefined,
 	legado?: {
@@ -285,7 +287,7 @@ function firmaDelGenerador(apiResponse: unknown): {
  * Los cofirmantes sin correo se omiten: no hay a dónde mandarles el link, y
  * meterlos igual hace que WeeTrust rechace el envío entero.
  */
-async function firmantesDeLaOportunidad(
+export async function firmantesDeLaOportunidad(
 	opportunityId: string,
 ): Promise<{ leadId: string; signers: ContractSigner[] }> {
 	const [datos] = await db
@@ -2327,7 +2329,10 @@ export const contractGenerationRouter = {
 	 * El tipo tiene que ser uno de los que tenemos mapeados: así el generador
 	 * ubica las líneas de firma por el layout de ese tipo y reparte por rol
 	 * igual que en el camino automático. Si el PDF no trae esas líneas no se
-	 * manda nada a firmar; es preferible a colocar las firmas a ojo.
+	 * manda nada a firmar —es preferible a colocar las firmas a ojo—, pero el
+	 * contrato queda guardado con su PDF, marcado como que falta vincularlo, y
+	 * se le avisa a análisis: lo sube a WeeTrust, pone las firmas a mano y pega
+	 * el enlace en la ficha (ver `lib/contrato-falta-vincular.ts`).
 	 *
 	 * Los firmantes salen de la oportunidad (titular + cofirmantes con correo) y
 	 * el representante legal lo agrega el servidor, como en el wizard.
@@ -2443,12 +2448,19 @@ export const contractGenerationRouter = {
 					observers: esFirmaFisica(input.contractType)
 						? undefined
 						: CONTRATOS_OBSERVADORES,
+					// Un documento armado por fuera puede no traer las líneas de firma
+					// donde las espera el layout: se guarda igual, sin mandarlo.
+					guardarSiNoHayLineas: true,
 				});
 
 				const falla = motivoDeFalla(resultado);
 				if (falla) {
 					throw new ORPCError("BAD_REQUEST", { message: falla });
 				}
+
+				// No salió a firma: no hay documento en WeeTrust, ni enlaces, ni
+				// firmantes que guardar. Queda esperando que alguien lo vincule.
+				const sinLineas = resultado.sinLineasDeFirma ?? null;
 
 				// Primero se guarda el nuevo y recién después se anula el viejo: si el
 				// guardado fallara con el viejo ya borrado, la oportunidad se quedaba
@@ -2563,7 +2575,12 @@ export const contractGenerationRouter = {
 								signatureMode: getSignatureMode(input.contractType),
 								// Para que la ficha pida mirar dónde quedaron las firmas: el
 								// documento lo armó una persona, no la plantilla.
-								apiResponse: conMarcaDeSubidoAMano(resultado),
+								apiResponse: sinLineas
+									? conMarcaDeFaltaVincular(conMarcaDeSubidoAMano(resultado), {
+											motivo: sinLineas,
+											desde: new Date().toISOString(),
+										})
+									: conMarcaDeSubidoAMano(resultado),
 								pdfLink: resultado.r2Key || resultado.linkDocument || null,
 								status: "pending",
 								generatedBy: context.userId,
@@ -2615,10 +2632,27 @@ export const contractGenerationRouter = {
 						.where(eq(generatedLegalContracts.id, anulado.contractId));
 				}
 
+				if (sinLineas) {
+					await avisarQueFaltaVincular({
+						opportunityId: input.opportunityId,
+						contractName:
+							input.contractName ||
+							resultado.nameDocument?.[0]?.label ||
+							"Contrato subido manualmente",
+						cliente: titularQueSube?.name,
+						quien: {
+							createdBy: context.userId,
+							createdByRole: context.userRole,
+						},
+					});
+				}
+
 				return {
 					success: true,
 					contractId: saved.id,
 					contractType: input.contractType,
+					/** No salió a firma: falta subirlo a WeeTrust y vincularlo. */
+					faltaVincular: Boolean(sinLineas),
 					// La etapa con la que se subió, no la que tenía la pantalla.
 					porcentajeEtapa,
 					// El contrato ya está enviado y guardado: que falle firmar la URL no
@@ -2635,8 +2669,9 @@ export const contractGenerationRouter = {
 							)
 						: resultado.linkDocument,
 					signingLinks: resultado.signing_links ?? [],
-					message:
-						getSignatureMode(input.contractType) === "fisica"
+					message: sinLineas
+						? "No se encontraron los espacios de firma en el PDF. El contrato quedó guardado sin enviar, y se le avisó a análisis para que lo suba a WeeTrust y lo agregue manualmente."
+						: getSignatureMode(input.contractType) === "fisica"
 							? input.replaceContractId
 								? "Contrato reemplazado. Se firma en papel."
 								: "Contrato subido. Se firma en papel."
@@ -2645,6 +2680,44 @@ export const contractGenerationRouter = {
 			});
 		}),
 };
+
+/**
+ * Le avisa a análisis que un contrato subido a mano no salió a firma.
+ *
+ * Análisis es quien le da seguimiento a la firma: baja el PDF de la ficha, lo
+ * sube a WeeTrust, pone las firmas y pega el enlace para vincularlo. Es
+ * best-effort: el contrato ya quedó guardado y marcado en la ficha, y perder la
+ * subida porque falló el aviso sería peor.
+ */
+async function avisarQueFaltaVincular(params: {
+	opportunityId: string;
+	contractName: string;
+	cliente: string | undefined;
+	quien: Pick<
+		Parameters<typeof createNotification>[0],
+		"createdBy" | "createdByRole"
+	>;
+}): Promise<void> {
+	try {
+		await createNotification({
+			titulo: `Contrato por subir a WeeTrust${params.cliente ? `: ${params.cliente}` : ""}`,
+			descripcion:
+				`Jurídico subió "${params.contractName}", pero no se encontraron los espacios de firma y no salió a firmar. ` +
+				'Bajá el PDF desde los contratos de la oportunidad, subilo a WeeTrust, poné las firmas y pegá el enlace en "Agregar manualmente de WeeTrust".',
+			type: "action_required",
+			...params.quien,
+			assignedToRole: "analyst",
+			relatedEntityType: "opportunity",
+			relatedEntityId: params.opportunityId,
+			redirectPage: "opportunity_details",
+		});
+	} catch (error) {
+		console.error(
+			`[uploadContractForSigning] no se pudo avisar a análisis de ${params.opportunityId}:`,
+			error,
+		);
+	}
+}
 
 /**
  * Normaliza un año que puede venir con 2 o 4 dígitos ("26" | "2026").

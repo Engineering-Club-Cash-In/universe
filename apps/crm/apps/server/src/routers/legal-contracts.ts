@@ -17,6 +17,7 @@ import { vehicles } from "../db/schema/vehicles";
 import { auditedTransaction, auditRecord } from "../lib/audit";
 import {
 	documentIdDesdeLink,
+	documentIdDesdeLosEnlaces,
 	filasDeFirmantes,
 	linksPorRol,
 } from "../lib/contract-signatories";
@@ -25,6 +26,10 @@ import {
 	estadoEnWeeTrust,
 	sincronizarEstadoDeFirma,
 } from "../lib/contrato-estado-firma";
+import {
+	faltaVincular,
+	vinculadoDesdeWeeTrust,
+} from "../lib/contrato-falta-vincular";
 import {
 	conMarcaDeSubidoAMano,
 	fueSubidoAMano,
@@ -56,6 +61,15 @@ import {
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import { resolverVerificacionFacial } from "../lib/verificacion-facial";
+import {
+	type FirmanteEsperado,
+	guiaParaVincular,
+	leerDocumentoParaVincular,
+	motivoPorElQueNoSeVincula,
+	renovarEnlacesDelVinculado,
+	terminarDeVincular,
+	vincularEnLaFila,
+} from "../lib/vincular-documento-weetrust";
 import { closeOpportunity } from "../services/close-opportunity";
 import {
 	borrarDocumentoDeWeeTrust,
@@ -68,7 +82,11 @@ import {
 	reemitirContratoEnWeeTrust,
 	reenviarCorreoDeFirma,
 } from "../services/legal-docs-api";
-import { anularContratoReemplazado } from "./contract-generation";
+import {
+	anularContratoReemplazado,
+	firmantesDeLaOportunidad,
+	firmantesDelContrato,
+} from "./contract-generation";
 import { sendContractLinksToLead } from "./messaging";
 import { createNotification } from "./notifications";
 
@@ -143,12 +161,94 @@ async function contratoConDocumentID(contractId: string): Promise<{
 
 	if (!documentID) {
 		throw new ORPCError("BAD_REQUEST", {
-			message:
-				"Este contrato no tiene documento en WeeTrust. Hay que regenerarlo.",
+			message: faltaVincular(contract.apiResponse)
+				? "Este contrato todavía no salió a firma: falta subirlo a WeeTrust y agregarlo manualmente."
+				: "Este contrato no tiene documento en WeeTrust. Hay que regenerarlo.",
 		});
 	}
 
 	return { contract, documentID };
+}
+
+/** El tipo que lleva selfie además del DPI: es el título que se ejecuta. */
+const RECONOCIMIENTO_DE_DEUDA = "reconocimiento_deuda_feb_2025";
+
+/**
+ * El contrato de una oportunidad al que se le quiere vincular un documento de
+ * WeeTrust, o el motivo por el que no se puede.
+ */
+async function contratoParaVincular(
+	contractId: string,
+	rol: string,
+): Promise<typeof generatedLegalContracts.$inferSelect> {
+	// Ver los contratos no alcanza: esto cambia a qué documento apuntan.
+	if (!PERMISSIONS.canLinkWeetrustDocument(rol)) {
+		throw new ORPCError("FORBIDDEN", {
+			message:
+				"Sólo análisis y jurídico pueden agregar un documento de WeeTrust",
+		});
+	}
+
+	const [contract] = await db
+		.select()
+		.from(generatedLegalContracts)
+		.where(eq(generatedLegalContracts.id, contractId));
+
+	if (!contract?.opportunityId) {
+		throw new ORPCError("NOT_FOUND", { message: "Contrato no encontrado" });
+	}
+	if (!estaVigente(contract) || contract.status !== "pending") {
+		throw new ORPCError("BAD_REQUEST", {
+			message:
+				"Este contrato ya no está pendiente de firma: no se le puede agregar un documento.",
+		});
+	}
+	const motivo = motivoPorElQueNoSeVincula(contract);
+	if (motivo) throw new ORPCError("BAD_REQUEST", { message: motivo });
+
+	return contract;
+}
+
+/**
+ * Quiénes tienen que firmar el documento que se vincula.
+ *
+ * Si el contrato ya salió a firma, los mismos que tenía: el documento nuevo
+ * reemplaza al anterior y tiene que llevar a la misma gente, aunque después
+ * alguien haya editado un contacto. Si no salió, no tiene a nadie guardado y
+ * salen de la oportunidad, como al subirlo.
+ */
+async function firmantesParaVincular(
+	contract: typeof generatedLegalContracts.$inferSelect,
+): Promise<FirmanteEsperado[]> {
+	const guardados = await db
+		.select()
+		.from(contractSignatories)
+		.where(eq(contractSignatories.contractId, contract.id))
+		.orderBy(contractSignatories.position);
+
+	if (guardados.length === 0) {
+		const { signers } = await firmantesDeLaOportunidad(
+			contract.opportunityId as string,
+		);
+		return firmantesDelContrato(contract.contractType, signers) ?? [];
+	}
+
+	const lista: FirmanteEsperado[] = guardados.map((f) => ({
+		role: f.role as ContractSigner["role"],
+		email: f.email,
+		name: f.name,
+	}));
+	if (!isTestModeEnabled()) return lista;
+
+	// En modo prueba, igual que al renovar: un contrato emitido con correos
+	// reales (datos copiados de prod) se vincula contra los de prueba.
+	const faltan = correosDePruebaFaltantes(lista);
+	if (faltan.length > 0) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `TEST_MESSAGE=true pero falta configurar ${faltan.join(" y ")}: el documento saldría a los correos reales.`,
+		});
+	}
+	return aplicarCorreosDePrueba(lista);
 }
 
 /**
@@ -1819,6 +1919,96 @@ export const legalContractsRouter = {
 				});
 			}
 
+			// Subido a mano sin espacios de firma: todavía no salió a firmar, así
+			// que no tiene enlaces que renovar.
+			if (faltaVincular(contract.apiResponse)) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Este contrato todavía no salió a firma: falta subirlo a WeeTrust y agregarlo manualmente.",
+				});
+			}
+
+			// Armado a mano en WeeTrust: no se puede reemitir, porque sus firmas no
+			// están donde el layout las busca. Se le renuevan los enlaces sobre el
+			// mismo documento; los que ya firmaron no se tocan.
+			if (
+				vinculadoDesdeWeeTrust(contract.apiResponse) &&
+				contract.weetrustDocumentId
+			) {
+				const documentID = contract.weetrustDocumentId;
+				const etapaAlEmpezar = contract.opportunityId
+					? await exigirEtapaDeFirma(contract.opportunityId, "regenerar")
+					: null;
+
+				return conCandadoDeFirma(contract.opportunityId, async () => {
+					let porcentajeEtapa: number | null = null;
+					if (contract.opportunityId) {
+						const [etapa] = await db
+							.select({
+								stageId: opportunities.stageId,
+								porcentaje: salesStages.closurePercentage,
+							})
+							.from(opportunities)
+							.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+							.where(eq(opportunities.id, contract.opportunityId))
+							.limit(1);
+						if (!etapa || etapa.stageId !== etapaAlEmpezar) {
+							throw new ORPCError("CONFLICT", {
+								message:
+									"La oportunidad cambió de etapa mientras se esperaba. Recargá y, si todavía hace falta, volvé a renovar los enlaces.",
+							});
+						}
+						porcentajeEtapa = etapa.porcentaje;
+					}
+
+					// Otra persona pudo reemplazarlo, anularlo o vincularle otro
+					// documento mientras se esperaba el candado.
+					const [ahora] = await db
+						.select({
+							status: generatedLegalContracts.status,
+							replacedByContractId:
+								generatedLegalContracts.replacedByContractId,
+							weetrustDocumentId: generatedLegalContracts.weetrustDocumentId,
+						})
+						.from(generatedLegalContracts)
+						.where(eq(generatedLegalContracts.id, input.contractId))
+						.limit(1);
+					if (
+						!ahora ||
+						!estaVigente(ahora) ||
+						ahora.weetrustDocumentId !== documentID
+					) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"Otra persona acaba de cambiar este contrato. Recargá para verlo.",
+						});
+					}
+
+					let enlaces: number;
+					try {
+						enlaces = await renovarEnlacesDelVinculado(contract.id, documentID);
+					} catch (error) {
+						console.error(
+							`[refreshContractSigningLinks] ${documentID}: no se renovaron los enlaces:`,
+							error,
+						);
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"WeeTrust no renovó los enlaces de este documento (pasa cuando ya firmaron todos). Si hay que mandarlo de nuevo, armá otro en WeeTrust y agregalo manualmente.",
+						});
+					}
+
+					return {
+						success: true,
+						message: "Enlaces renovados: los anteriores ya no sirven",
+						contractId: contract.id,
+						porcentajeEtapa,
+						documentID,
+						enlaces,
+					};
+				});
+			}
+
 			// La key de R2 del PDF. Hay contratos que guardaron en `pdfLink` una
 			// URL firmada (la que se muestra, que vence) en vez de la key: para
 			// esos se recupera de la respuesta del generador. Con una URL entera
@@ -2140,6 +2330,148 @@ export const legalContractsRouter = {
 					porcentajeEtapa,
 					documentID: resultado.documentID,
 					enlaces: resultado.signing_links?.length ?? 0,
+				};
+			});
+		}),
+
+	/**
+	 * Lo que hace falta para armar en WeeTrust el documento de un contrato y
+	 * vincularlo: a quiénes agregar como firmantes, con qué correo y qué
+	 * verificación de identidad pedirle a cada uno.
+	 */
+	getWeetrustLinkGuide: viewOpportunityContractsProcedure
+		.input(z.object({ contractId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			const contract = await contratoParaVincular(
+				input.contractId,
+				context.userRole,
+			);
+			const esperados = await firmantesParaVincular(contract);
+
+			return {
+				firmantes: guiaParaVincular(
+					esperados,
+					// Lo mismo que pide el generador cuando lo emite él: selfie con
+					// prueba de vida en el reconocimiento de deuda, DPI en el resto.
+					contract.contractType === RECONOCIMIENTO_DE_DEUDA
+						? "Selfie y DPI"
+						: "DPI",
+				),
+				/** Ya tiene documento en WeeTrust: vincular otro lo reemplaza. */
+				reemplaza: Boolean(
+					contract.weetrustDocumentId ?? documentIdDesdeLosEnlaces(contract),
+				),
+			};
+		}),
+
+	/**
+	 * Vincula con un contrato un documento que alguien armó a mano en WeeTrust.
+	 *
+	 * Es la salida para el contrato subido a mano que no salió a firma porque el
+	 * PDF no trae los espacios donde el layout los busca, y para el que sí salió
+	 * pero con las firmas mal puestas: en WeeTrust se acomodan a mano, y acá se
+	 * pega un enlace de ese documento. Con el enlace se lee el documento, se
+	 * empareja a los firmantes por correo y el contrato queda como cualquier
+	 * otro —estado de firma, PDF firmado, reenvíos—. Si ya tenía documento, ése
+	 * se borra en WeeTrust.
+	 *
+	 * Con `soloRevisar` no guarda nada: devuelve lo que encontró, para que quien
+	 * vincula vea a quiénes reconoció antes de confirmar.
+	 */
+	linkWeetrustDocument: viewOpportunityContractsProcedure
+		.input(
+			z.object({
+				contractId: z.string().uuid(),
+				/** Un enlace del documento en WeeTrust, o su ID. */
+				enlace: z.string().trim().min(1).max(600),
+				soloRevisar: z.boolean().default(false),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const contract = await contratoParaVincular(
+				input.contractId,
+				context.userRole,
+			);
+			const opportunityId = contract.opportunityId as string;
+
+			const etapaInicial = await exigirEtapaDeFirma(opportunityId, "regenerar");
+			const esperados = await firmantesParaVincular(contract);
+			const { revision, estado, observadoEn } = await leerDocumentoParaVincular(
+				input.enlace,
+				esperados,
+			);
+			const { enviados: _enviados, ...loQueSeVio } = revision;
+
+			if (input.soloRevisar) {
+				return {
+					vinculado: false as const,
+					revision: loQueSeVio,
+					aviso: null,
+					porcentajeEtapa: null,
+					reemplazo: false,
+				};
+			}
+			if (revision.problema) {
+				throw new ORPCError("BAD_REQUEST", { message: revision.problema });
+			}
+
+			// Con el candado de la oportunidad: cambiar de documento borra el
+			// anterior en WeeTrust, y un envío por WhatsApp en curso estaría
+			// mandando justo esos enlaces.
+			return conCandadoDeFirma(opportunityId, async () => {
+				let porcentajeEtapa: number | null = null;
+
+				const { documentoAnterior } = await db.transaction(async (tx) => {
+					// La misma etapa que al empezar, con la oportunidad bloqueada: si la
+					// aprobaron de 80 a 85 en el medio, el WhatsApp de la aprobación ya
+					// salió sin este contrato (o con los enlaces del documento viejo).
+					const [etapa] = await tx
+						.select({
+							stageId: opportunities.stageId,
+							porcentaje: salesStages.closurePercentage,
+						})
+						.from(opportunities)
+						.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+						.where(eq(opportunities.id, opportunityId))
+						.for("update", { of: opportunities });
+					if (
+						!etapa?.porcentaje ||
+						etapa.stageId !== etapaInicial ||
+						!ETAPAS_POR_ACCION.regenerar.includes(etapa.porcentaje as never)
+					) {
+						throw new ORPCError("CONFLICT", {
+							message:
+								"La oportunidad cambió de etapa mientras se agregaba el documento, así que no se guardó. Recargá y volvé a intentarlo.",
+						});
+					}
+					porcentajeEtapa = etapa.porcentaje;
+
+					return vincularEnLaFila(tx, {
+						contractId: input.contractId,
+						revision,
+						observerUrl: estado.observerUrl ?? null,
+						por:
+							context.session?.user?.name ||
+							context.session?.user?.email ||
+							context.userId,
+					});
+				});
+
+				const { aviso } = await terminarDeVincular({
+					contractId: input.contractId,
+					estado,
+					observadoEn,
+					documentoAnterior,
+				});
+
+				return {
+					vinculado: true as const,
+					revision: loQueSeVio,
+					aviso,
+					// En 85% el cliente ya tiene los enlaces por WhatsApp: a éste hay
+					// que mandárselo (o volver a mandárselo, si cambió de documento).
+					porcentajeEtapa,
+					reemplazo: Boolean(documentoAnterior),
 				};
 			});
 		}),

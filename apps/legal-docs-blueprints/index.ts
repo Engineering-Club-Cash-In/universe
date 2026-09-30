@@ -401,21 +401,34 @@ const app = new Elysia()
    * error: un documento que no es el contrato que dice ser se detecta acá y no
    * cuando alguien vaya a firmarlo.
    *
-   * Body: { contractType, pdfBase64, filenamePrefix?, signers?, observers? }
+   * Con `guardarSiNoHayLineas: true` tampoco se manda a firmar, pero el PDF
+   * queda guardado y la respuesta es exitosa con `sinLineasDeFirma`: alguien lo
+   * sube a WeeTrust, acomoda las firmas a mano y vincula ese documento.
+   *
+   * Body: { contractType, pdfBase64, filenamePrefix?, signers?, observers?,
+   *         guardarSiNoHayLineas? }
    */
   .post('/contracts/upload-for-signing', async ({ body, set, headers }) => {
     const rechazo = rechazoSinSecretoDelCrm(headers, set);
     if (rechazo) return rechazo;
     try {
-      const { contractType, pdfBase64, filenamePrefix, documentName, signers, observers } =
-        body as {
-          contractType?: ContractType;
-          pdfBase64?: string;
-          filenamePrefix?: string;
-          documentName?: string;
-          signers?: GenerateContractRequest['signers'];
-          observers?: string[];
-        };
+      const {
+        contractType,
+        pdfBase64,
+        filenamePrefix,
+        documentName,
+        signers,
+        observers,
+        guardarSiNoHayLineas,
+      } = body as {
+        contractType?: ContractType;
+        pdfBase64?: string;
+        filenamePrefix?: string;
+        documentName?: string;
+        signers?: GenerateContractRequest['signers'];
+        observers?: string[];
+        guardarSiNoHayLineas?: boolean;
+      };
 
       if (!contractType || !Object.values(ContractType).includes(contractType)) {
         set.status = 400;
@@ -469,7 +482,13 @@ const app = new Elysia()
       const result = await contractGenerator.signExistingPdf(
         contractType,
         pdfBuffer,
-        { filenamePrefix, documentName, signers, observers }
+        {
+          filenamePrefix,
+          documentName,
+          signers,
+          observers,
+          guardarSiNoHayLineas: guardarSiNoHayLineas === true,
+        }
       );
 
       set.status = result.success ? 200 : 400;
@@ -581,6 +600,9 @@ const app = new Elysia()
         success: true,
         documentID: documento.documentID,
         status: documento.status,
+        // Para quien vincula un documento armado a mano en WeeTrust: es el
+        // único enlace que se le puede pasar a alguien para que mire.
+        observerUrl: documento.sharedWith?.find((o) => o.url)?.url ?? null,
         signatories: (documento.signatory ?? []).map((s) => ({
           emailID: s.emailID,
           name: s.name,

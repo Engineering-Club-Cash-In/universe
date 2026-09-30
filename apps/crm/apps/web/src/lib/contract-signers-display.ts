@@ -49,7 +49,7 @@ function linkVencido(expiry: Date | string | null | undefined): boolean {
 	return !Number.isNaN(vence.getTime()) && vence.getTime() < Date.now();
 }
 
-const ETIQUETA_POR_ROL: Record<string, string> = {
+export const ETIQUETA_POR_ROL: Record<string, string> = {
 	TITULAR: "Cliente",
 	COFIRMANTE: "Codeudor",
 	REP_LEGAL: "Rep. Legal",

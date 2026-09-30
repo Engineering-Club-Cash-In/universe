@@ -236,6 +236,13 @@ describe("facturaSeguro en el caso", () => {
 		});
 	});
 
+	test("habilitada al 90% con la oportunidad ya ganada (flujo normal)", async () => {
+		caso = casoAl(90, { status: "won" });
+		const [c] = await call(trackerRouter.getCasos, {}, ctx);
+		expect(c.facturaSeguro.habilitada).toBe(true);
+		expect(c.cerrado).toBe(true);
+	});
+
 	test("reenviable solo si el envío quedó fallido", async () => {
 		caso = casoAl(90, { facturaEnvio: "fallido", facturaSubidaAt: new Date() });
 		let [c] = await call(trackerRouter.getCasos, {}, ctx);
@@ -257,6 +264,15 @@ describe("facturaSeguro en el caso", () => {
 describe("subirFacturaSeguro", () => {
 	const subir = (archivo = pdf()) =>
 		call(trackerRouter.subirFacturaSeguro, { opportunityId: ID, archivo }, ctx);
+
+	test("se sube con la oportunidad ganada al 90%, como llega en el flujo normal", async () => {
+		caso = casoAl(90, { status: "won" });
+		const r = await subir();
+		expect(r.envio).toBe("enviado");
+		expect(
+			insertados.find((i) => i.tabla === insuranceInvoiceSubmissions)?.valores,
+		).toMatchObject({ companyId: "agencia-1" });
+	});
 
 	test("si falla la lectura de los datos del correo, no se sube nada a R2", async () => {
 		fallaLecturaCotizacion = true;

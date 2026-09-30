@@ -30,6 +30,10 @@ describe("puedeSubirFacturaSeguro", () => {
 		expect(caso({ status: "on_hold" })).toEqual({ ok: true });
 	});
 
+	test("al 90% ya ganada (el flujo normal: confirmar contratos la cierra y la mueve a 90%)", () => {
+		expect(caso({ status: "won" })).toEqual({ ok: true });
+	});
+
 	test("solo en formalización final: ni antes del 90% ni ya desembolsado", () => {
 		expect(caso({ closurePercentage: 85 })).toEqual({
 			ok: false,
@@ -41,9 +45,8 @@ describe("puedeSubirFacturaSeguro", () => {
 		});
 	});
 
-	test("un crédito perdido o ganado ya no la admite", () => {
+	test("un crédito perdido ya no la admite", () => {
 		expect(caso({ status: "lost" })).toEqual({ ok: false, motivo: "estado" });
-		expect(caso({ status: "won" })).toEqual({ ok: false, motivo: "estado" });
 	});
 
 	test("el gerente, otro vendedor o un caso sin vendedor no pueden", () => {

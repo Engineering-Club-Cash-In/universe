@@ -31,6 +31,10 @@ export const MENSAJE_MOTIVO: Record<MotivoSinFactura, string> = {
 	ya_subida: "La factura del seguro de este crédito ya fue subida",
 };
 
+// En el flujo normal la oportunidad llega a 90% ya ganada: confirmar los
+// contratos firmados la cierra (won) y después la mueve a formalización.
+const ESTADOS_CON_FACTURA = new Set(["open", "on_hold", "won"]);
+
 export function puedeSubirFacturaSeguro(caso: {
 	closurePercentage: number;
 	status: string;
@@ -40,7 +44,7 @@ export function puedeSubirFacturaSeguro(caso: {
 	yaSubida: boolean;
 }): { ok: true } | { ok: false; motivo: MotivoSinFactura } {
 	if (caso.yaSubida) return { ok: false, motivo: "ya_subida" };
-	if (caso.status !== "open" && caso.status !== "on_hold") {
+	if (!ESTADOS_CON_FACTURA.has(caso.status)) {
 		return { ok: false, motivo: "estado" };
 	}
 	if (

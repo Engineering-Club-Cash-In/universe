@@ -263,6 +263,7 @@ describe("facturaSeguro en el caso", () => {
 			subidaAt: null,
 			envio: null,
 			reenviable: false,
+			sinConfirmar: false,
 		});
 	});
 
@@ -281,6 +282,41 @@ describe("facturaSeguro en el caso", () => {
 		caso = casoAl(90, { facturaEnvio: "enviado", facturaSubidaAt: new Date() });
 		[c] = await call(trackerRouter.getCasos, {}, ctx);
 		expect(c.facturaSeguro.reenviable).toBe(false);
+	});
+
+	test("un envío pendiente pasado el plazo sale sin confirmar también para el gerente, que no puede reintentarlo", async () => {
+		const viejo = new Date(Date.now() - 11 * 60 * 1000);
+		caso = casoAl(90, {
+			facturaEnvio: "pendiente",
+			facturaSubidaAt: viejo,
+			facturaActualizadaAt: viejo,
+		});
+		let [c] = await call(trackerRouter.getCasos, {}, ctx);
+		expect(c.facturaSeguro).toMatchObject({
+			sinConfirmar: true,
+			reenviable: true,
+		});
+
+		membresias = [{ companyId: "agencia-1", sellerId: null }];
+		[c] = await call(trackerRouter.getCasos, {}, ctx);
+		expect(c.facturaSeguro).toMatchObject({
+			sinConfirmar: true,
+			reenviable: false,
+		});
+	});
+
+	test("un envío pendiente reciente sigue en curso para todos", async () => {
+		const reciente = new Date();
+		caso = casoAl(90, {
+			facturaEnvio: "pendiente",
+			facturaSubidaAt: reciente,
+			facturaActualizadaAt: reciente,
+		});
+		const [c] = await call(trackerRouter.getCasos, {}, ctx);
+		expect(c.facturaSeguro).toMatchObject({
+			sinConfirmar: false,
+			reenviable: false,
+		});
 	});
 
 	test("el gerente ve el caso pero no puede subir la factura", async () => {

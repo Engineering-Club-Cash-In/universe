@@ -18,8 +18,10 @@ import {
 } from "../database/db";
 import { eq, and, lt, lte, asc, desc, sql, gt, or, ne, inArray, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { desactivarMoraSiCreditoAlDia, updateMora } from "./latefee";
+import { desactivarMoraSiCreditoAlDia, updateMora, cuotasParaPendienteDeCreditos, hoyGuatemala } from "./latefee";
 import { crearEstampadorDecrementoMora } from "./moraDecrementoDePago";
+import { anotarMoraPagada } from "../utils/anotarMoraPagada";
+import { anotacionesDeMoraAbonada } from "../utils/anotacionesDeMoraAbonada";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor";
 import { prepararConvenioPayment } from "./paymentAgreement";
@@ -155,6 +157,70 @@ interface ResultadoMora {
   disponibleRestante: number;
   mensaje: string;
 }
+
+/**
+ * Verifica si hay mora que cobrar (existe, está activa y tiene monto > 0).
+ *
+ * Evita que `updateMora` procese una mora activa con monto 0: desactivarla
+ * movería incorrectamente el crédito a ACTIVO aunque aún tenga cuotas vencidas,
+ * haciendo que el cron la recree y el crédito rebote entre MOROSO y ACTIVO todos
+ * los días, llenando moras_historial de eventos 0→0.
+ */
+export function hayMoraQueCobrar(mora: { activa: boolean | null; monto_mora: string | number | Big | null | undefined } | null | undefined): boolean {
+  if (!mora || !mora.activa) return false;
+  return new Big(mora.monto_mora ?? 0).gt(0);
+}
+
+/**
+ * Anota la mora cobrada en un pago normal (cuota normal, no solo mora).
+ *
+ * Se llama DENTRO de la misma transacción que escribe el pago en pagos_credito.
+ * Si falla, la transacción se revierte completa.
+ *
+ * Solo se ejecuta si el pago cobró mora (moraParaPago > 0) en la cuota 1.
+ */
+export const anotarMoraPagoNormal = async ({
+  credito_id,
+  mora,
+  pago_id,
+  tx,
+  deps,
+  hoy,
+  cargarCuotas = cuotasParaPendienteDeCreditos,
+}: {
+  credito_id: number;
+  mora: Big;
+  pago_id: number;
+  tx: any;
+  deps: InsertarPagoDeps;
+  hoy: Date;
+  /** Inyectable para las pruebas; en producción es el cargador del cron. */
+  cargarCuotas?: typeof cuotasParaPendienteDeCreditos;
+}): Promise<void> => {
+  const moraBig = new Big(mora || 0);
+  if (moraBig.lte(0)) return;
+
+  // Obtener cuotas vencidas con la fórmula exacta del cron
+  const cuotasMap = await cargarCuotas([credito_id], tx as any, hoy);
+  const cuotasParaPendiente = cuotasMap.get(credito_id);
+
+  if (!cuotasParaPendiente || cuotasParaPendiente.cuotas.length === 0) {
+    return;
+  }
+
+  const filas = anotacionesDeMoraAbonada({
+    credito_id,
+    monto: moraBig,
+    capital: cuotasParaPendiente.capital,
+    cuotas: cuotasParaPendiente.cuotas,
+    tipo: "PAGO",
+    pago_id,
+  });
+
+  if (filas.length > 0) {
+    await deps.anotarMoraPagada(filas, tx);
+  }
+};
 
 const procesarPagoMora = async ({
   credito_id,
@@ -635,6 +701,11 @@ const insertarBoletas = async (pago_id: number, urlCompletas: string[]) => {
 /**
  * Procesa el pago de una cuota individual
  */
+
+// ========================================
+// TIPOS PARA INYECCIÓN DE DEPENDENCIAS
+// ========================================
+
 
 // ========================================
 // FUNCIÓN PRINCIPAL
@@ -2804,7 +2875,33 @@ export async function getPagosDelMesActual(credito_id: number) {
 }
 
 // Interfaz para los parámetros
+/**
+ * Las dependencias que `insertarPago` acepta inyectadas.
+ *
+ * Existe por una sola razón: para poder PROBAR que el pago anota la mora.
+ * Sin inyección, la única forma de verificarlo sería mockear medio cliente de
+ * base de datos, y una prueba así no se escribe — con lo cual el día que
+ * alguien borre la anotación, nada se pone rojo y el cliente vuelve a pagar
+ * mora que ya había pagado.
+ *
+ * Es el mismo patrón que usa `anularPagoMora.ts` con su `deps`, y por el mismo
+ * motivo: varias pruebas de la suite registran un `mock.module` global y el
+ * módulo real desaparece en la corrida completa.
+ */
+export type InsertarPagoDeps = {
+  anotarMoraPagada: typeof anotarMoraPagada;
+};
+
+const DEPS_INSERTAR_PAGO = (): InsertarPagoDeps => ({ anotarMoraPagada });
+
 interface InsertarPagoParams {
+  /** Inyectables, solo para pruebas. En producción se usan los reales. */
+  deps?: InsertarPagoDeps;
+  /**
+   * `false` cuando otra fila de la MISMA boleta ya anotó su mora en el ledger:
+   * se anota una sola vez por boleta. Por defecto anota.
+   */
+  anotarMoraEnLedger?: boolean;
   numero_credito_sifco: string;
   numero_cuota: number;
   cuotaId: number;
@@ -2841,6 +2938,8 @@ export async function insertarPago({
   pagoConvenio = 0,
   observaciones = "",
   nexaPaymentEventId,
+  deps = DEPS_INSERTAR_PAGO(),
+  anotarMoraEnLedger = true,
 }: InsertarPagoParams) {
 
 
@@ -2930,63 +3029,80 @@ export async function insertarPago({
   const monthPayments = await getPagosDelMesActual(creditData.credito_id);
   const monthPaymentsBig = new Big(monthPayments ?? 0).add(boleta ?? 0);
 
-  // 💾 Insertar nuevo pago
-  const [nuevoPago] = await db
-    .insert(pagos_credito)
-    .values({
-      credito_id: creditData.credito_id,
-      cuota_id: getCuotaIdForPaymentInsert(creditData.cuota_id),
-      cuota: creditData.cuota?.toString() ?? "0",
-      cuota_interes: creditData.cuota_interes?.toString() ?? "0",
+  // 💾 Insertar nuevo pago (dentro de transacción si hay mora a anotar)
+  const nuevoPago = await db.transaction(async (tx) => {
+    const [pago] = await tx
+      .insert(pagos_credito)
+      .values({
+        credito_id: creditData.credito_id,
+        cuota_id: getCuotaIdForPaymentInsert(creditData.cuota_id),
+        cuota: creditData.cuota?.toString() ?? "0",
+        cuota_interes: creditData.cuota_interes?.toString() ?? "0",
 
-      abono_capital: "0",
-      abono_interes: "0",
-      abono_iva_12: "0",
-      abono_interes_ci: "0",
-      abono_iva_ci: "0",
-      abono_seguro: "0",
-      abono_gps: "0",
-      pago_del_mes: monthPaymentsBig.toString() ?? "0",
-      monto_boleta: boleta.toString(),
+        abono_capital: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_interes_ci: "0",
+        abono_iva_ci: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        pago_del_mes: monthPaymentsBig.toString() ?? "0",
+        monto_boleta: boleta.toString(),
 
-      capital_restante: "0",
-      interes_restante: "0",
-      iva_12_restante: "0",
-      seguro_restante: "0",
-      gps_restante: "0",
-      total_restante: "0",
+        capital_restante: "0",
+        interes_restante: "0",
+        iva_12_restante: "0",
+        seguro_restante: "0",
+        gps_restante: "0",
+        total_restante: "0",
 
-      llamada: "",
-      fecha_pago,
+        llamada: "",
+        fecha_pago,
 
-      renuevo_o_nuevo: "renuevo",
+        renuevo_o_nuevo: "renuevo",
 
-      membresias: "0",
-      membresias_pago: "0",
-      membresias_mes: "0",
-      otros: otros.toString() ?? "0",
-      mora: mora.toString(),
-      monto_boleta_cuota: boleta.toString(),
-      seguro_total: creditData.seguro_10_cuotas?.toString() ?? "0",
-      pagado: pagado,
-      facturacion: "si",
-      mes_pagado: "",
-      seguro_facturado: creditData.seguro_10_cuotas?.toString() ?? "0",
-      gps_facturado: creditData.gps?.toString() ?? "0",
-      reserva: "0",
-      observaciones: observaciones,
-      validationStatus: "pending",
-      fecha_boleta: fecha_boleta,
-      banco_id: banco_id ?? undefined,
-      numeroAutorizacion: numeroAutorizacion ?? "",
-      registerBy: registerBy,
-      pagoConvenio: pagoConvenio.toString(),
-      monto_aplicado: monto_aplicado.toString(),
-      nexaPaymentEventId,
-    })
-    .returning();
+        membresias: "0",
+        membresias_pago: "0",
+        membresias_mes: "0",
+        otros: otros.toString() ?? "0",
+        mora: mora.toString(),
+        monto_boleta_cuota: boleta.toString(),
+        seguro_total: creditData.seguro_10_cuotas?.toString() ?? "0",
+        pagado: pagado,
+        facturacion: "si",
+        mes_pagado: "",
+        seguro_facturado: creditData.seguro_10_cuotas?.toString() ?? "0",
+        gps_facturado: creditData.gps?.toString() ?? "0",
+        reserva: "0",
+        observaciones: observaciones,
+        validationStatus: "pending",
+        fecha_boleta: fecha_boleta,
+        banco_id: banco_id ?? undefined,
+        numeroAutorizacion: numeroAutorizacion ?? "",
+        registerBy: registerBy,
+        pagoConvenio: pagoConvenio.toString(),
+        monto_aplicado: monto_aplicado.toString(),
+        nexaPaymentEventId,
+      })
+      .returning();
 
-  // 📎 Insertar boletas si existen
+    // 📝 Anotar la mora cobrada, dentro de la tx del pago: mismo camino que
+    // las tres ramas de insertPayment (cuotas del cron, fecha de Guatemala).
+    if (pago?.pago_id && anotarMoraEnLedger) {
+      await anotarMoraPagoNormal({
+        credito_id: creditData.credito_id,
+        mora: new Big(mora || 0),
+        pago_id: pago.pago_id,
+        tx,
+        deps,
+        hoy: hoyGuatemala(),
+      });
+    }
+
+    return pago;
+  });
+
+  // 📎 Insertar boletas si existen (fuera de transacción)
   if (urlBoletas && urlBoletas.length > 0) {
     await db.insert(boletas).values(
       urlBoletas.map((url) => ({

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { connect } from "node:net";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import { os, type RouterClient } from "@orpc/server";
@@ -140,6 +141,9 @@ describe("límite de la factura del seguro", () => {
 					method: "POST",
 					headers: { "content-type": tipo },
 					body: porPartes(cuerpo),
+					// El cliente fetch de Bun reusa la conexión mientras su cuerpo
+					// todavía se está enviando; el server no tiene problema.
+					keepalive: false,
 				}),
 			);
 		});
@@ -154,6 +158,36 @@ describe("límite de la factura del seguro", () => {
 		});
 		expect(respuesta.status).toBe(200);
 		expect(await respuesta.json()).toEqual({ json: { tamano: 20 * 1024 } });
+	});
+
+	test("un cuerpo por partes que nunca termina recibe el 413 sin esperar el final", async () => {
+		const respuesta = await new Promise<string>((resolve, reject) => {
+			let intervalo: ReturnType<typeof setInterval> | undefined;
+			const sock = connect(Number(servidor.port), "127.0.0.1", () => {
+				sock.write(
+					"POST /rpc/subirFacturaSeguro HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n",
+				);
+				const trozo = "a".repeat(8192);
+				// Sigue mandando mientras no haya respuesta: nunca manda el final.
+				intervalo = setInterval(() => {
+					if (!sock.destroyed) sock.write(`2000\r\n${trozo}\r\n`);
+				}, 2);
+			});
+			const terminar = (resultado: string | Error) => {
+				clearInterval(intervalo);
+				clearTimeout(limite);
+				sock.destroy();
+				if (resultado instanceof Error) reject(resultado);
+				else resolve(resultado);
+			};
+			const limite = setTimeout(
+				() => terminar(new Error("el server esperó el final del cuerpo")),
+				3000,
+			);
+			sock.on("data", (d) => terminar(d.toString().split("\r\n")[0] ?? ""));
+			sock.on("error", (e) => terminar(e));
+		});
+		expect(respuesta).toBe("HTTP/1.1 413 Payload Too Large");
 	});
 
 	test("no afecta a los demás procedures", async () => {

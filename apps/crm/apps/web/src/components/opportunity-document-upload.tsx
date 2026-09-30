@@ -397,11 +397,14 @@ export function OpportunityDocumentUpload({
 										{doc.originalName || doc.filename || "Documento sin nombre"}{" "}
 										• {formatUploadedDate(doc.uploadedAt)}
 									</p>
-									{doc.description && (
-										<p className="text-muted-foreground text-xs">
-											{doc.description}
-										</p>
-									)}
+									{doc.documentType === "other" &&
+										doc.description?.startsWith(
+											"Estados de cuenta del cofirmante",
+										) && (
+											<p className="text-muted-foreground text-xs">
+												{doc.description}
+											</p>
+										)}
 								</div>
 								<div className="flex items-center gap-2">
 									{doc.url && (

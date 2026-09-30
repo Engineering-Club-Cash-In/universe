@@ -74,6 +74,10 @@ const clientFalso = {
 };
 
 mock.module("../database", () => ({ db: dbFalsa, client: clientFalso }));
+// ledger vacío = créditos existentes arrancan de cero
+mock.module("../utils/moraPagadaPorCuota", () => ({
+  moraPagadaPorCuota: async () => new Map(),
+}));
 
 const { procesarMoras, hoyGuatemala } = await import("./latefee");
 const { creditos, moras_credito, moras_historial } = await import("../database/db/schema");

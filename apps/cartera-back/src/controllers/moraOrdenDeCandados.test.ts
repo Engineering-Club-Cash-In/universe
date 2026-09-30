@@ -158,6 +158,10 @@ const clientFalso = {
 
 mock.module("../database", () => ({ db: dbFalsa, client: clientFalso }));
 mock.module("../utils/structuredLogger", () => ({ emitCreditLateFee: () => {} }));
+// ledger vacío = créditos existentes arrancan de cero
+mock.module("../utils/moraPagadaPorCuota", () => ({
+  moraPagadaPorCuota: async () => new Map(),
+}));
 
 const {
   procesarMoras,

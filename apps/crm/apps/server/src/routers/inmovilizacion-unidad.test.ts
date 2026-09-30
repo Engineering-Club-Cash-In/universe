@@ -3208,6 +3208,47 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 			expect(carta.estadoUnidad).toBe("activa");
 		});
 
+		it("una reactivación ejecutada de OTRA unidad del caso no da por reactivada la unidad apagada", async () => {
+			contratoIdMock = null;
+			vehicleIdContratoMock = null;
+			wialonUnitIdCasoMock = null;
+			vehiculosOportunidadMock = [
+				vehiculoOportunidad({
+					vehicleId: "88888888-8888-8888-8888-888888888888",
+					wialonUnitId: 99999,
+				}),
+			];
+			historialCasoMock = [
+				apagadoEjecutado(),
+				{
+					...apagadoEjecutado(),
+					id: "77777777-7777-7777-7777-777777777777",
+					accion: "reactivacion",
+					vehicleId: "88888888-8888-8888-8888-888888888888",
+					wialonUnitId: 99999,
+					ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"),
+				},
+			];
+			// La base filtra por unidad física: para la unidad 12345 solo está el apagado.
+			historialUnidadFisicaMock = [apagadoEjecutado()];
+			const carta = await call(
+				inmovilizacionUnidadRouter.getInmovilizacionesCaso,
+				{ casoCobroId: CASO_ID },
+				{ context: ctx("cobros") },
+			);
+			expect(carta.estadoUnidad).toBe("inmovilizada");
+
+			await call(
+				inmovilizacionUnidadRouter.solicitarInmovilizacion,
+				{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+				{ context: ctx("cobros") },
+			);
+			expect(inmovilizacionesInsertadas[0]).toMatchObject({
+				vehicleId: VEHICLE_ID,
+				wialonUnitId: 12345,
+			});
+		});
+
 		it("un apagado que no guardó la unidad (filas viejas) no sirve de respaldo", async () => {
 			oportunidadesAmbiguas();
 			historialCasoMock = [apagadoEjecutado({ wialonUnitId: null })];

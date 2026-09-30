@@ -161,7 +161,8 @@ async function getCasoParaInmovilizacion(casoCobroId: string) {
 /**
  * El vehículo y la unidad GPS del último apagado ejecutado de este caso, solo
  * mientras la unidad siga apagada por él (no hubo una reactivación ejecutada
- * después). Null si no hay apagado vigente o la fila no guardó la unidad.
+ * después de esa MISMA unidad). Null si no hay apagado vigente o la fila no
+ * guardó la unidad.
  *
  * Consulta propia y angosta (solo las filas ejecutadas del caso): esta función
  * corre en cada llamada, así que no reutiliza `getHistorialCaso`.
@@ -184,21 +185,26 @@ async function apagadoVigenteDelCaso(
 			),
 		);
 	let apagado: (typeof ejecutadas)[number] | null = null;
-	let reactivadoAt: Date | null = null;
 	for (const f of ejecutadas) {
-		if (!f.ejecutadoAt) continue;
-		if (f.accion === "apagado") {
-			if (!apagado?.ejecutadoAt || f.ejecutadoAt > apagado.ejecutadoAt) {
-				apagado = f;
-			}
-		} else if (!reactivadoAt || f.ejecutadoAt > reactivadoAt) {
-			reactivadoAt = f.ejecutadoAt;
+		if (!f.ejecutadoAt || f.accion !== "apagado") continue;
+		if (!apagado?.ejecutadoAt || f.ejecutadoAt > apagado.ejecutadoAt) {
+			apagado = f;
 		}
 	}
 	if (!apagado?.ejecutadoAt || !apagado.vehicleId) return null;
 	if (apagado.wialonUnitId == null) return null;
-	if (reactivadoAt && reactivadoAt > apagado.ejecutadoAt) return null;
-	return { vehicleId: apagado.vehicleId, wialonUnitId: apagado.wialonUnitId };
+	// Solo cuenta una reactivación de ESA unidad: la de otra unidad del mismo
+	// caso (p. ej. el vehículo al que pasó el mapeo) no la volvió a encender.
+	const { vehicleId, wialonUnitId, ejecutadoAt: apagadoAt } = apagado;
+	const reactivada = ejecutadas.some(
+		(f) =>
+			f.accion !== "apagado" &&
+			f.wialonUnitId === wialonUnitId &&
+			f.ejecutadoAt != null &&
+			f.ejecutadoAt > apagadoAt,
+	);
+	if (reactivada) return null;
+	return { vehicleId, wialonUnitId };
 }
 
 /** El caso con el vehículo del contrato o, sin contrato, el de la oportunidad. */

@@ -524,5 +524,15 @@ export async function registrarEntregaSinTraslado(params: {
 		asesorUserId: responsable,
 		actorId: params.registradoPor,
 	});
+	// CB-043: una solicitud de recuperación pedida en B2–B3 puede seguir
+	// pendiente con el crédito ya en B4 (llegó solo, por cuotas). Si el
+	// cliente entrega la unidad, la solicitud ya no tiene nada que decidir: se
+	// cierra igual que cuando la entrega traslada (review de Codex, PR #1806).
+	await cerrarSolicitudesPendientesDelCaso({
+		casoCobroId: params.casoCobroId,
+		exceptoId: registro.id,
+		motivo: "Se registró una entrega voluntaria con el crédito ya en B4.",
+		actorId: params.registradoPor,
+	});
 	return { registroId: registro.id };
 }

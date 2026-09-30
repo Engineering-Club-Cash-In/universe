@@ -6309,9 +6309,26 @@ export const crmRouter = {
 						id: user.id,
 						name: user.name,
 					},
+					// Solo la factura del seguro subida desde el tracker trae la agencia
+					// y el estado del correo a la aseguradora.
+					subidoDesde: companies.name,
+					envioAseguradora: {
+						estado: insuranceInvoiceSubmissions.status,
+						aseguradora: insuranceInvoiceSubmissions.insuranceProvider,
+						enviadoAt: insuranceInvoiceSubmissions.sentAt,
+					},
 				})
 				.from(opportunityDocuments)
 				.leftJoin(user, eq(opportunityDocuments.uploadedBy, user.id))
+				.leftJoin(
+					insuranceInvoiceSubmissions,
+					eq(insuranceInvoiceSubmissions.documentId, opportunityDocuments.id),
+				)
+				.leftJoin(
+					opportunities,
+					eq(opportunities.id, insuranceInvoiceSubmissions.opportunityId),
+				)
+				.leftJoin(companies, eq(companies.id, opportunities.companyId))
 				.where(eq(opportunityDocuments.opportunityId, input.opportunityId))
 				.orderBy(opportunityDocuments.uploadedAt);
 

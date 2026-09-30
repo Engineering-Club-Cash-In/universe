@@ -33,7 +33,10 @@ export function getLeadDuplicatePresentation(
 		status: conflict.isActive ? "Activo" : "Inactivo",
 		assignment: conflict.assignedToCurrentUser
 			? "Este lead está asignado a ti."
-			: "Este lead está asignado a otra persona.",
+			: // El nombre del asesor NO va acá: el diálogo ya lo renderiza justo
+				// encima de esta línea (`lead-duplicate-dialog.tsx`), y repetirlo
+				// lo mostraba dos veces seguidas. Este texto es solo la acción.
+				"Pedile a tu supervisor que te lo reasigne.",
 		canViewLead: conflict.assignedToCurrentUser,
 	};
 }

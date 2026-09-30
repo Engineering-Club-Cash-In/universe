@@ -10,6 +10,26 @@ import {
 } from "../utils/functions/uploadsFiles";
 import { authMiddleware } from "./midleware";
 
+/**
+ * Los firmantes de un contrato del CRM, sin sus enlaces de firma.
+ *
+ * Con un enlace se firma en nombre de esa persona, y acá nadie lo usa: la
+ * ficha y el portal muestran el documento. El CRM ya no los manda; esto los
+ * saca también de las filas que se copiaron antes, para que ningún listado los
+ * entregue.
+ */
+function sinEnlacesDeFirma<T extends { firmantes?: unknown }>(doc: T): T {
+  if (!Array.isArray(doc.firmantes)) return doc;
+  return {
+    ...doc,
+    firmantes: doc.firmantes.map((firmante) =>
+      firmante && typeof firmante === "object"
+        ? { ...(firmante as Record<string, unknown>), enlace: null }
+        : firmante,
+    ),
+  };
+}
+
 export const investorDocumentsRouter = new Elysia()
   .use(authMiddleware)
 
@@ -92,7 +112,7 @@ export const investorDocumentsRouter = new Elysia()
         // Firmar URLs
         const documentosConUrl = await Promise.all(
           documentos.map(async (doc) => ({
-            ...doc,
+            ...sinEnlacesDeFirma(doc),
             url: await getSignedDocumentUrl(doc.key),
           }))
         );
@@ -146,7 +166,7 @@ export const investorDocumentsRouter = new Elysia()
           documentos.map(async (doc) => {
             const mimeType = await resolveDocumentMimeType(doc.key);
             return {
-              ...doc,
+              ...sinEnlacesDeFirma(doc),
               url: await getSignedDocumentUrl(doc.key, { disposition: "inline", filename: doc.nombre, mimeType }),
               downloadUrl: await getSignedDocumentUrl(doc.key, { disposition: "attachment", filename: doc.nombre, mimeType }),
             };
@@ -204,7 +224,7 @@ export const investorDocumentsRouter = new Elysia()
           documentos.map(async (doc) => {
             const mimeType = await resolveDocumentMimeType(doc.key);
             return {
-              ...doc,
+              ...sinEnlacesDeFirma(doc),
               url: await getSignedDocumentUrl(doc.key, { disposition: "inline", filename: doc.nombre, mimeType }),
               downloadUrl: await getSignedDocumentUrl(doc.key, { disposition: "attachment", filename: doc.nombre, mimeType }),
             };
@@ -235,6 +255,25 @@ export const investorDocumentsRouter = new Elysia()
     async ({ params, body, set }) => {
       try {
         const documentoId = Number(params.documentoId);
+
+        // Un contrato del CRM anulado no se vuelve a mostrar desde acá: sus
+        // enlaces ya no sirven y el CRM lo ocultó a propósito. Mostrarlo le
+        // ofrecería al inversionista un contrato que se descartó.
+        const [actual] = await db
+          .select({
+            contrato_id: documentos_inversionista.contrato_id,
+            estado_firma: documentos_inversionista.estado_firma,
+          })
+          .from(documentos_inversionista)
+          .where(eq(documentos_inversionista.documento_id, documentoId));
+
+        if (actual?.contrato_id && body.visible && actual.estado_firma === "cancelled") {
+          set.status = 409;
+          return {
+            success: false,
+            message: "Este contrato está anulado en el CRM: no se puede volver a mostrar.",
+          };
+        }
 
         const [updated] = await db
           .update(documentos_inversionista)
@@ -290,6 +329,17 @@ export const investorDocumentsRouter = new Elysia()
           return { success: false, message: "Documento no encontrado" };
         }
 
+        // Los contratos los maneja el CRM, que es el dueño: borrarlos acá
+        // perdía la copia de un documento legal (el CRM la vuelve a mandar en
+        // la próxima firma) sin anularlo en ningún lado. Se anulan desde allá.
+        if (documento.contrato_id) {
+          set.status = 409;
+          return {
+            success: false,
+            message: "Es un contrato del CRM: se anula desde el CRM, no se borra acá.",
+          };
+        }
+
         // Eliminar de R2
         await deleteDocumentoFromR2(documento.key);
 
@@ -317,6 +367,242 @@ export const investorDocumentsRouter = new Elysia()
     {
       params: t.Object({
         documentoId: t.String(),
+      }),
+    }
+  )
+
+  // ============================================================
+  // ESPEJO DE CONTRATOS DEL CRM
+  // Los contratos de inversión se emiten en el CRM (que habla con WeeTrust) y
+  // se copian acá para que la ficha del inversionista y el portal los vean
+  // como un documento más. El CRM es el dueño del estado de firma; esto es la
+  // copia con la que trabaja inversiones.
+  // ============================================================
+
+  // POST - Crear o reemplazar el documento de un contrato del CRM
+  .post(
+    "/investor-documents/contrato",
+    async ({ body, set, headers }) => {
+      // Sólo el CRM escribe acá, con el secreto que comparten. El JWT solo no
+      // alcanza: cualquier cuenta de cartera podía crear o pisar el contrato de
+      // otro inversionista, hacerlo visible en su portal y meterle enlaces.
+      const secreto = process.env.CARTERA_RELAY_SECRET;
+      if (!secreto || headers["x-cartera-relay-secret"] !== secreto) {
+        set.status = 403;
+        return {
+          success: false,
+          message: "Sólo el CRM puede escribir los contratos de inversión",
+        };
+      }
+      try {
+        const {
+          file,
+          inversionista_id,
+          contrato_id,
+          nombre,
+          tipo_contrato,
+          weetrust_document_id,
+          observer_url,
+          firmantes,
+          estado_firma,
+          created_by,
+          visible,
+        } = body;
+
+        const [investor] = await db
+          .select()
+          .from(inversionistas)
+          .where(eq(inversionistas.inversionista_id, inversionista_id));
+
+        if (!investor) {
+          set.status = 404;
+          return { success: false, message: "Inversionista no encontrado" };
+        }
+
+        // Puede llegar ya parseado (Elysia) o como texto, según cómo se arme el
+        // multipart. Se acepta cualquiera de los dos.
+        const firmantesParsed =
+          typeof firmantes === "string"
+            ? JSON.parse(firmantes)
+            : (firmantes ?? null);
+        const ahora = new Date();
+
+        // ¿Ya teníamos este contrato? El espejo se vuelve a mandar cada vez que
+        // se reemite el documento, y tiene que ocupar la misma fila.
+        const [existente] = await db
+          .select()
+          .from(documentos_inversionista)
+          .where(eq(documentos_inversionista.contrato_id, contrato_id));
+
+        const key = await uploadDocumentoInversionista(file, inversionista_id);
+
+        if (existente) {
+          const [actualizado] = await db
+            .update(documentos_inversionista)
+            .set({
+              key,
+              nombre,
+              tipo_contrato,
+              weetrust_document_id: weetrust_document_id ?? null,
+              observer_url: observer_url ?? null,
+              firmantes: firmantesParsed,
+              estado_firma: estado_firma ?? null,
+              actualizado_at: ahora,
+              // Sólo cuando el CRM opina: lo enciende al firmarse y lo apaga al
+              // anularse. Sin el campo no se toca, para no pisar a quien haya
+              // decidido mostrárselo al inversionista desde la ficha.
+              ...(visible !== undefined ? { visible } : {}),
+            })
+            .where(eq(documentos_inversionista.documento_id, existente.documento_id))
+            .returning();
+
+          // El archivo viejo ya no lo apunta nadie. Si falla el borrado queda
+          // huérfano en R2, que es molesto pero no rompe nada.
+          if (existente.key !== key) {
+            await deleteDocumentoFromR2(existente.key).catch((error) =>
+              console.warn(
+                `[espejo-contrato] no se pudo borrar ${existente.key}:`,
+                error
+              )
+            );
+          }
+
+          return {
+            success: true,
+            message: "Contrato actualizado",
+            data: { ...actualizado, url: await getSignedDocumentUrl(key) },
+          };
+        }
+
+        const [documento] = await db
+          .insert(documentos_inversionista)
+          .values({
+            inversionista_id,
+            key,
+            nombre,
+            // Oculto mientras se firma: en el portal, el inversionista tiene
+            // que ver el contrato que vale, no el borrador sin firmas. El CRM
+            // lo enciende cuando lo firman todos.
+            visible: visible ?? false,
+            created_by: created_by || null,
+            contrato_id,
+            tipo_contrato,
+            weetrust_document_id: weetrust_document_id ?? null,
+            observer_url: observer_url ?? null,
+            firmantes: firmantesParsed,
+            estado_firma: estado_firma ?? null,
+            actualizado_at: ahora,
+          })
+          .returning();
+
+        return {
+          success: true,
+          message: "Contrato guardado",
+          data: { ...documento, url: await getSignedDocumentUrl(key) },
+        };
+      } catch (error) {
+        console.error("Error al guardar el contrato del CRM:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al guardar el contrato",
+          error: error instanceof Error ? error.message : "Error desconocido",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        file: t.File(),
+        inversionista_id: t.Numeric(),
+        contrato_id: t.String(),
+        nombre: t.String(),
+        tipo_contrato: t.String(),
+        weetrust_document_id: t.Optional(t.String()),
+        observer_url: t.Optional(t.String()),
+        /**
+         * Los firmantes, con su rol, su enlace y su estado.
+         *
+         * `t.Any()` y no `t.String()` porque el CRM los manda como JSON dentro
+         * de un multipart, y Elysia lo parsea antes de validar: pedir un string
+         * rechazaba el espejo entero con "el valor del campo no es válido".
+         */
+        firmantes: t.Optional(t.Any()),
+        estado_firma: t.Optional(t.String()),
+        created_by: t.Optional(t.String()),
+        /** Si el inversionista lo ve en su portal. */
+        visible: t.Optional(t.BooleanString()),
+      }),
+    }
+  )
+
+  // PATCH - Actualizar sólo el estado de firma de un contrato ya espejado
+  .patch(
+    "/investor-documents/contrato/:contratoId",
+    async ({ params, body, set, headers }) => {
+      // Sólo el CRM escribe acá, con el secreto que comparten. El JWT solo no
+      // alcanza: cualquier cuenta de cartera podía crear o pisar el contrato de
+      // otro inversionista, hacerlo visible en su portal y meterle enlaces.
+      const secreto = process.env.CARTERA_RELAY_SECRET;
+      if (!secreto || headers["x-cartera-relay-secret"] !== secreto) {
+        set.status = 403;
+        return {
+          success: false,
+          message: "Sólo el CRM puede escribir los contratos de inversión",
+        };
+      }
+      try {
+        // Cómo estaba antes: el CRM lo usa para saber si esta es la primera vez
+        // que el contrato queda firmado y toca reemplazar el PDF por el firmado.
+        // Sin esto, cada consulta de estado de un contrato ya cerrado volvía a
+        // pasear el archivo entero.
+        const [previo] = await db
+          .select({ estado_firma: documentos_inversionista.estado_firma })
+          .from(documentos_inversionista)
+          .where(eq(documentos_inversionista.contrato_id, params.contratoId));
+
+        const [actualizado] = await db
+          .update(documentos_inversionista)
+          .set({
+            observer_url: body.observer_url ?? null,
+            firmantes: body.firmantes ?? null,
+            estado_firma: body.estado_firma ?? null,
+            actualizado_at: new Date(),
+            // Igual que en la copia: sólo cuando el CRM opina.
+            ...(body.visible !== undefined ? { visible: body.visible } : {}),
+          })
+          .where(eq(documentos_inversionista.contrato_id, params.contratoId))
+          .returning();
+
+        // No es un error: el contrato puede no haberse espejado todavía (el CRM
+        // guarda primero y copia después). Quien llama decide si reintenta.
+        if (!actualizado) {
+          return { success: true, espejado: false };
+        }
+
+        return {
+          success: true,
+          espejado: true,
+          estadoAnterior: previo?.estado_firma ?? null,
+          data: actualizado,
+        };
+      } catch (error) {
+        console.error("Error al actualizar el estado del contrato:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al actualizar el estado del contrato",
+          error: error instanceof Error ? error.message : "Error desconocido",
+        };
+      }
+    },
+    {
+      params: t.Object({ contratoId: t.String() }),
+      body: t.Object({
+        observer_url: t.Optional(t.String()),
+        firmantes: t.Optional(t.Any()),
+        estado_firma: t.Optional(t.String()),
+        /** Si el inversionista lo ve en su portal. Sólo para encenderlo. */
+        visible: t.Optional(t.Boolean()),
       }),
     }
   );

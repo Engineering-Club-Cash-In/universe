@@ -13,6 +13,7 @@ import {
   enviarResumenProvisionamiento,
   provisionarCuentasPortal,
 } from './src/controllers/provisionarCuentasPortal';
+import { reintentarBateriasPendientes } from './src/controllers/bateriasCrmPendientes';
 import { runScheduledJob, runScheduledJobAttempts } from './scheduledJobRunner';
 
 const TZ_GUATEMALA = 'America/Guatemala';
@@ -39,8 +40,16 @@ function getFechaGuatemalaISO(offsetDays = 0) {
 }
 
 export function iniciarTareasProgramadas() {
-  // 🌙 procesarMoras - 11:59 PM hora Guatemala (sin importar dónde esté el server)
-  schedule.scheduleJob({ rule: '59 23 * * *', tz: TZ_GUATEMALA }, async () => {
+  // 🌙 procesarMoras - 00:05 hora Guatemala (sin importar dónde esté el server).
+  //    Corría a las 23:59, y eso dejaba la mora un día por detrás: la cuota que
+  //    vencía el día D recién recibía su primer día de atraso a las 23:59 del
+  //    D+1, así que quien pagaba durante todo el D+1 no pagaba mora. Con la mora
+  //    proporcional eso además volvía mentiroso el aviso del CRM ("si no pagas
+  //    hoy, mañana se agrega el recargo"): el recargo aparecía 24 h después.
+  //    Al correr apenas pasada la medianoche, la mora del día anterior ya está
+  //    escrita cuando amanece. Sigue antes del cierre mensual de las 02:00, que
+  //    depende de que procesarMoras haya corrido.
+  schedule.scheduleJob({ rule: '5 0 * * *', tz: TZ_GUATEMALA }, async () => {
     await runScheduledJob('process_late_fees', () => procesarMoras());
   });
 
@@ -145,6 +154,18 @@ export function iniciarTareasProgramadas() {
     await runScheduledJob(
       'provision_portal_accounts',
       () => provisionarCuentasPortal({ enviarResumen: enviarResumenProvisionamiento }),
+    );
+  });
+
+  // 📨 Avisos de compra aceptada que el CRM no recibió - cada 10 minutos.
+  //    Si el CRM no contestó al aceptar la compra, jurídico se quedaba sin su
+  //    batería de contratos para siempre. Ver bateriasCrmPendientes.ts.
+  schedule.scheduleJob({ rule: '*/10 * * * *', tz: TZ_GUATEMALA }, async () => {
+    await runScheduledJob(
+      'retry_crm_contract_batches',
+      async () => {
+        await reintentarBateriasPendientes();
+      },
     );
   });
 }

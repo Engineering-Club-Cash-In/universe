@@ -30,6 +30,13 @@ import {
 } from "../services/services";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+/** El `message` que manda cartera en el cuerpo del error, si vino. */
+function mensajeDelServidor(error: unknown): string | undefined {
+  const cuerpo = (error as { response?: { data?: { message?: unknown } } })
+    ?.response?.data;
+  return typeof cuerpo?.message === "string" ? cuerpo.message : undefined;
+}
+
 interface InvestorDocument {
   documento_id: number;
   inversionista_id: number;
@@ -40,6 +47,8 @@ interface InvestorDocument {
   created_by: string | null;
   created_at: string;
   url: string;
+  /** Si es la copia de un contrato del CRM: ése se anula allá, no se borra acá. */
+  contrato_id?: string | null;
 }
 
 interface InvestorDocumentsModalProps {
@@ -104,8 +113,10 @@ function DocumentRow({
         </span>
       </div>
 
-      {/* Delete */}
-      {!confirmDelete ? (
+      {/* Delete. Un contrato del CRM no: se anula desde el CRM. */}
+      {doc.contrato_id ? (
+        <span className="shrink-0 h-8 w-8" aria-hidden />
+      ) : !confirmDelete ? (
         <button
           type="button"
           className="shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-md transition-colors"
@@ -366,8 +377,8 @@ export function InvestorDocumentsModal({
           d.documento_id === doc.documento_id ? { ...d, visible: !d.visible } : d
         )
       );
-    } catch {
-      toast.error("Error al actualizar visibilidad");
+    } catch (error) {
+      toast.error(mensajeDelServidor(error) ?? "Error al actualizar visibilidad");
     } finally {
       setTogglingId(null);
     }
@@ -380,8 +391,8 @@ export function InvestorDocumentsModal({
         prev.filter((d) => d.documento_id !== doc.documento_id)
       );
       toast.success("Documento eliminado");
-    } catch {
-      toast.error("Error al eliminar documento");
+    } catch (error) {
+      toast.error(mensajeDelServidor(error) ?? "Error al eliminar documento");
     }
   };
 

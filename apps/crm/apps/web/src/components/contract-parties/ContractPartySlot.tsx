@@ -9,9 +9,9 @@ export type ContractPartyStatus =
 	| { tipo: "completo" };
 
 /** DPI agrupado como aparece impreso en el documento: 4-5-4. */
-export function formatDpiGrupos(dpi: string): string {
-	const d = dpi.replace(/\D/g, "");
-	if (d.length !== 13) return dpi;
+export function formatDpiGrupos(dpi: string | null | undefined): string {
+	const d = (dpi ?? "").replace(/\D/g, "");
+	if (d.length !== 13) return dpi ?? "";
 	return `${d.slice(0, 4)} ${d.slice(4, 9)} ${d.slice(9)}`;
 }
 

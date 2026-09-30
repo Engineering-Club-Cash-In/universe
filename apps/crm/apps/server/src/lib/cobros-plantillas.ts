@@ -35,7 +35,46 @@ export interface VariablesPlantilla {
 	cuotasAtraso: number;
 	telefonoAsesor: string;
 	nombreAsesor: string;
+	/**
+	 * Tope de mora de UNA cuota: su cargo mensual completo (capital × 1.12%).
+	 * Es lo máximo que puede llegar a cobrar esa cuota por más días que pasen.
+	 */
 	expectativaMora: string;
+	/**
+	 * Recargo por cada día de atraso de una cuota: 1/30 del cargo mensual. Es
+	 * lo que el cron sumará mañana si el cliente no paga hoy.
+	 */
+	expectativaMoraDiaria?: string;
+	/**
+	 * Lo que sube POR DÍA el crédito que YA está en mora — no confundir con
+	 * `expectativaMoraDiaria`:
+	 *  - expectativaMoraDiaria es el recargo de UNA cuota (1/30 de su cargo
+	 *    mensual). Se le dice a un cliente AL DÍA: "si no pagás hoy, empieza a
+	 *    correr esto".
+	 *  - incrementoDiarioMora es lo que crece el crédito COMPLETO: 1/30 por
+	 *    CADA cuota vencida que todavía no llegó a su techo de 30 días. Tres
+	 *    cuotas frescas crecen 3/30 por día; una cuota abandonada hace 200 días
+	 *    ya está congelada y aporta 0, así que un crédito viejo puede traer
+	 *    "0.00" aunque deba mucho.
+	 * Lo calcula cartera-back (`incrementoDiarioMora` en latefee.ts), que es el
+	 * único que conoce los días de cada cuota. Lo usan las plantillas de mora
+	 * (1 cuota, 2-3 cuotas, jurídico) para que el cliente pueda calcular lo que
+	 * debe el día que pague, en vez de pagar el monto de hoy dos días después y
+	 * dejar residuo.
+	 */
+	incrementoDiarioMora?: string;
+	/**
+	 * El TECHO de ese aumento: lo máximo que la mora de este crédito puede
+	 * subir en un mes. Va SIEMPRE junto a `incrementoDiarioMora`, porque el
+	 * ritmo solo ("aumenta Q16.80 por cada día") promete un crecimiento que no
+	 * dura para siempre: cada cuota deja de crecer al llegar a su cargo
+	 * mensual. Decir las dos cifras es el mismo estándar que ya usa la
+	 * plantilla del día de pago ({expectativaMoraDiaria} + {expectativaMora}).
+	 * Lo calcula cartera-back (`incrementoMaximoMensualMora` en latefee.ts) a
+	 * partir de las MISMAS cuotas que el diario, así que las dos no pueden
+	 * contradecirse.
+	 */
+	incrementoMaximoMensualMora?: string;
 	/** Año del impuesto de circulación. Default: año actual en Guatemala. */
 	anioImpuesto?: string;
 	/** Fecha límite del impuesto (dd/mm/año). Default: 31/07 del año actual. */
@@ -359,11 +398,18 @@ export function cuerpoUsaFechaLimiteImpuesto(cuerpo: string): boolean {
 }
 
 /**
- * Porcentaje de mora por cuota vencida. MISMA fórmula que el job nocturno
- * `procesarMoras` de cartera-back (apps/cartera-back/src/controllers/latefee.ts):
- * mora = capital × 1.12% × cuotas vencidas.
+ * Mora PROPORCIONAL a los días de atraso. MISMA fórmula que el job nocturno
+ * `procesarMoras` de cartera-back (`calcularMoraProporcional` en
+ * apps/cartera-back/src/controllers/latefee.ts):
+ *
+ *   mora = Σ capital × 1.12% × min(1, días_i / 30)   (por cada cuota vencida)
+ *
+ * Una cuota suma 1/30 de su cargo mensual por cada día de atraso y se congela
+ * al llegar al cargo completo (día 30). Base FIJA de 30 días, no los del mes.
+ * El día del vencimiento no cuenta: al día siguiente ya corre 1/30.
  */
 const PORCENTAJE_MORA_POR_CUOTA = "0.0112";
+const BASE_DIAS_MORA = 30;
 
 /**
  * Estados que el job `procesarMoras` excluye de mora (STATUS_EXCLUIDOS_MORA
@@ -380,27 +426,134 @@ const STATUS_EXCLUIDOS_MORA = new Set([
 ]);
 
 /**
- * "Expectativa de mora" del recordatorio del día de pago: el recargo de UNA
- * cuota adicional que el job de cartera asignaría si el cliente no paga hoy
- * (mora aún no asignada). Devuelve el monto formateado es-GT ("1,382.72") o
- * "" si no hay capital o el estado del crédito está excluido de mora (igual
- * que el job).
+ * Mora de UNA cuota con `dias` de atraso, con el mismo orden de operaciones
+ * que `calcularMoraProporcional` del cron (cargo mensual × factor, factor =
+ * min(1, días/30)) para que el redondeo coincida al centavo. Devuelve el monto
+ * formateado es-GT ("1,382.72"), o "" si el job no cobraría nada: estado
+ * excluido de mora, sin capital, o un monto que redondea a Q0.00 (el cron,
+ * `decidirMoraDelCron`, tampoco crea mora en ese caso).
  */
-export function calcularExpectativaMora(
+function moraDeUnaCuota(
 	capital: string | number | null | undefined,
-	statusCredit?: string | null,
+	statusCredit: string | null | undefined,
+	dias: number,
 ): string {
 	if (statusCredit && STATUS_EXCLUIDOS_MORA.has(statusCredit)) return "";
 	if (capital === null || capital === undefined || capital === "") return "";
 	let monto: Big;
 	try {
-		monto = new Big(capital).times(PORCENTAJE_MORA_POR_CUOTA);
+		const cargoMensual = new Big(capital).times(PORCENTAJE_MORA_POR_CUOTA);
+		if (cargoMensual.lte(0)) return "";
+		const factor =
+			dias >= BASE_DIAS_MORA ? new Big(1) : new Big(dias).div(BASE_DIAS_MORA);
+		monto = cargoMensual.times(factor);
 	} catch {
 		return "";
 	}
-	if (monto.lte(0)) return "";
 	// Redondeo half-up a 2 decimales, idéntico al toFixed(2) de Big en el job.
-	return Number(monto.toFixed(2)).toLocaleString("es-GT", {
+	const redondeado = monto.toFixed(2);
+	if (!(Number(redondeado) > 0)) return "";
+	return Number(redondeado).toLocaleString("es-GT", {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
+	});
+}
+
+/**
+ * Tope de mora de una cuota ({expectativaMora}): su cargo mensual completo,
+ * capital × 1.12%. Es lo que llega a cobrar esa cuota al cumplir 30 días de
+ * atraso, y ahí se congela. "" si el crédito no genera mora.
+ */
+export function calcularExpectativaMora(
+	capital: string | number | null | undefined,
+	statusCredit?: string | null,
+): string {
+	return moraDeUnaCuota(capital, statusCredit, BASE_DIAS_MORA);
+}
+
+/**
+ * Recargo por cada día de atraso ({expectativaMoraDiaria}): 1/30 del cargo
+ * mensual. Es lo que el cron sumará mañana si el cliente no paga hoy. "" si el
+ * crédito no genera mora — incluido un capital tan chico que un día redondea a
+ * Q0.00, porque en ese caso el cron tampoco cobra al día siguiente.
+ */
+export function calcularExpectativaMoraDiaria(
+	capital: string | number | null | undefined,
+	statusCredit?: string | null,
+): string {
+	return moraDeUnaCuota(capital, statusCredit, 1);
+}
+
+/**
+ * Oración que anuncia cuánto va a subir el saldo en las plantillas de mora.
+ * Son DOS fragmentos independientes, y el que manda es el TECHO:
+ *
+ *   "…al día de hoy, que sube alrededor de Q3.73 por día, y puede aumentar
+ *    hasta Q108.27 más en los próximos 30 días."
+ *
+ * Por qué el techo va primero en importancia y el ritmo es secundario: el
+ * ritmo diario (`incrementoDiarioMora`) es el delta de UN solo día, y el
+ * calendario lo rompe. La víspera del siguiente vencimiento la cuota vieja ya
+ * tocó su techo y la nueva todavía no vence, así que ese día el delta da
+ * Q0.00 — pero la mora SÍ va a seguir creciendo (mañana vence la cuota nueva).
+ * Eso pasa siempre que el mes trae 31 días, o sea ~7 veces al año en cualquier
+ * crédito mensual. El techo a 30 días, en cambio, nunca es cero mientras haya
+ * mora devengándose, así que es la única cifra que siempre es verdadera.
+ *
+ * Por eso los fragmentos se borran por SEPARADO (ver
+ * `quitarClausulaIncrementoMora`): el día que el ritmo no es informativo
+ * desaparece SOLO el ritmo y el mensaje sigue anunciando el techo, en vez de
+ * quedarse mudo justo cuando el cliente está por pagar.
+ *
+ * Por qué "alrededor de" y "hasta": los dos números NO se multiplican entre
+ * sí. El ritmo es 1/30 de un cargo redondeado a centavos, así que 30 días de
+ * ritmo no dan el cargo mensual exacto (30 × Q3.73 = Q111.90, no Q112.00), y
+ * además el ritmo varía de un día para otro según qué cuotas están bajo su
+ * techo. "Alrededor de" no promete exactitud y "hasta" es una cota superior
+ * cierta, así que la oración no puede contradecirse a sí misma ni prometer un
+ * ritmo constante que el calendario no sostiene.
+ *
+ * Tienen que ser idénticas a las del archivo del front
+ * (apps/web/src/lib/cobros/plantillas-mensajes.ts) — ver la nota de cabecera.
+ *
+ * Van DENTRO del párrafo del monto adeudado, así que no cambian el conteo de
+ * bloques (`\n\n`) del que depende la selección de template en Meta.
+ */
+export const FRAGMENTO_RITMO_INCREMENTO_MORA =
+	", que sube alrededor de Q{incrementoDiarioMora} por día";
+
+export const FRAGMENTO_TOPE_INCREMENTO_MORA =
+	", y puede aumentar hasta Q{incrementoMaximoMensualMora} más en los próximos 30 días";
+
+export const CLAUSULA_INCREMENTO_DIARIO_MORA =
+	FRAGMENTO_RITMO_INCREMENTO_MORA + FRAGMENTO_TOPE_INCREMENTO_MORA;
+
+/**
+ * true si hay un monto de aumento REAL que anunciar — sirve igual para el
+ * ritmo diario y para su techo mensual. "" (cartera no lo mandó, versión vieja
+ * del back) y "0.00" son lo mismo para el mensaje: no hay frase.
+ * El valor viene formateado es-GT, así que se le quitan los separadores de
+ * miles antes de compararlo.
+ */
+export function hayIncrementoMora(valor: string | null | undefined): boolean {
+	if (!valor) return false;
+	return Number(valor.replace(/,/g, "")) > 0;
+}
+
+/**
+ * Formatea a es-GT un incremento de mora que manda cartera-back —el diario o
+ * su techo mensual— (un
+ * `Big.toFixed(2)`, p. ej. "1120.00" → "1,120.00"). "" cuando no hay nada que
+ * anunciar: cartera no lo mandó, no es un número, o es 0 (todas las cuotas ya
+ * topadas). El "" hace que la oración desaparezca sola en `interpolar`.
+ */
+export function formatearIncrementoMora(
+	valor: string | number | null | undefined,
+): string {
+	if (valor === null || valor === undefined || valor === "") return "";
+	const numero = Number(valor);
+	if (!Number.isFinite(numero) || numero <= 0) return "";
+	return numero.toLocaleString("es-GT", {
 		minimumFractionDigits: 2,
 		maximumFractionDigits: 2,
 	});
@@ -418,29 +571,46 @@ export const COBROS_NO_REPLY_WARNING =
 	"⚠️ Este número es únicamente para el envío de notificaciones automáticas. Por favor, no respondas a este número.";
 export const COBROS_MOTIVO_SIN_TELEFONO_ASESOR = "sin teléfono de asesor";
 export const COBROS_MOTIVO_SIN_EXPECTATIVA_MORA =
-	"el crédito no genera mora (estado excluido o sin capital)";
+	"el crédito no genera mora (estado excluido o sin capital suficiente)";
+
+/** true si el cuerpo menciona el recargo diario o su tope mensual. */
+export function cuerpoUsaExpectativaMora(cuerpo: string): boolean {
+	return (
+		cuerpo.includes("{expectativaMora}") ||
+		cuerpo.includes("{expectativaMoraDiaria}")
+	);
+}
 
 /**
- * Un cuerpo que usa {expectativaMora} no se puede enviar si el crédito no
- * genera mora: sin capital válido (p. ej. insolutos) o en un estado que el
- * job excluye (EN_CONVENIO, INCOBRABLE, etc.), el mensaje anunciaría un
- * recargo que jamás se va a asignar. Mismo patrón de gate que
- * prepararTelefonoAsesorParaEnvio.
+ * Un cuerpo que usa {expectativaMoraDiaria} o {expectativaMora} no se puede
+ * enviar si el crédito no genera mora: sin capital válido (p. ej. insolutos),
+ * en un estado que el job excluye (EN_CONVENIO, INCOBRABLE, etc.) o con un
+ * capital tan chico que un día redondea a Q0.00. El mensaje anunciaría un
+ * recargo que jamás se va a asignar. Se exigen LOS DOS montos porque la
+ * oración los dice juntos ("Q… por cada día, hasta un máximo de Q…"). Mismo
+ * patrón de gate que prepararTelefonoAsesorParaEnvio.
  */
 export function prepararExpectativaMoraParaEnvio(
 	cuerpo: string,
 	capital: string | number | null | undefined,
 	statusCredit?: string | null,
 ):
-	| { enviar: true; expectativaMora: string }
+	| { enviar: true; expectativaMora: string; expectativaMoraDiaria: string }
 	| { enviar: false; motivo: string } {
 	const expectativaMora = calcularExpectativaMora(capital, statusCredit);
+	const expectativaMoraDiaria = calcularExpectativaMoraDiaria(
+		capital,
+		statusCredit,
+	);
 
-	if (cuerpo.includes("{expectativaMora}") && !expectativaMora) {
+	if (
+		cuerpoUsaExpectativaMora(cuerpo) &&
+		(!expectativaMora || !expectativaMoraDiaria)
+	) {
 		return { enviar: false, motivo: COBROS_MOTIVO_SIN_EXPECTATIVA_MORA };
 	}
 
-	return { enviar: true, expectativaMora };
+	return { enviar: true, expectativaMora, expectativaMoraDiaria };
 }
 
 export const COBROS_MOTIVO_SIN_MONTO_ADEUDADO =
@@ -490,6 +660,96 @@ function toCapitalCase(str: string): string {
 		.join(" ");
 }
 
+/**
+ * Borra de la oración del aumento solo lo que ese día no se puede anunciar.
+ * Cada fragmento se evalúa por su cuenta, y los tres resultados son frases
+ * sanas en español:
+ *  - sin ritmo pero con techo (la víspera del próximo vencimiento, cuando el
+ *    delta de un día da Q0.00 y la mora igual va a crecer): se va SOLO el
+ *    ritmo y queda "…al día de hoy, y puede aumentar hasta Q108.27 más en los
+ *    próximos 30 días". Antes se borraba la cláusula entera, techo incluido, y
+ *    el mensaje no anunciaba ningún aumento el día previo al vencimiento — el
+ *    cliente pagaba lo anunciado y quedaba corto.
+ *  - con ritmo pero sin techo (cartera-back viejo que no lo manda): se va solo
+ *    el techo y queda "…al día de hoy, que sube alrededor de Q3.73 por día".
+ *  - sin ninguno de los dos (crédito con TODAS las cuotas en su techo, que ya
+ *    no crece): se va la cláusula entera. Ahí el silencio es la verdad.
+ *
+ * El orden importa: la cláusula completa se busca ANTES que sus partes, porque
+ * sacando primero un fragmento ya no coincidiría para poder borrarse.
+ *
+ * Vive aparte de `interpolar` porque el gate de envío necesita preguntar lo
+ * mismo ANTES de mandar: qué queda del cuerpo una vez borrada la cláusula.
+ */
+export function quitarClausulaIncrementoMora(
+	texto: string,
+	incrementoDiarioMora: string,
+	incrementoMaximoMensualMora: string,
+): string {
+	const hayRitmo = hayIncrementoMora(incrementoDiarioMora);
+	const hayTecho = hayIncrementoMora(incrementoMaximoMensualMora);
+
+	if (hayRitmo && hayTecho) return texto;
+	if (!hayRitmo && !hayTecho) {
+		return texto.split(CLAUSULA_INCREMENTO_DIARIO_MORA).join("");
+	}
+	if (!hayRitmo) {
+		return texto.split(FRAGMENTO_RITMO_INCREMENTO_MORA).join("");
+	}
+	return texto.split(FRAGMENTO_TOPE_INCREMENTO_MORA).join("");
+}
+
+export const COBROS_MOTIVO_SIN_INCREMENTO_MORA =
+	"la plantilla anuncia el aumento de la mora y cartera no lo pudo calcular";
+
+/**
+ * Un cuerpo que TODAVÍA menciona {incrementoDiarioMora} o
+ * {incrementoMaximoMensualMora} después de borrar la cláusula incorporada no
+ * se puede enviar si el valor correspondiente viene vacío: al cliente le
+ * llegaría "El saldo aumenta Q diario".
+ *
+ * Por qué no alcanza con borrar la cláusula: el modal del masivo ofrece las
+ * dos como variables insertables SUELTAS, así que un asesor puede escribir su
+ * propia oración ("El saldo aumenta Q{incrementoDiarioMora} diario") que no
+ * coincide con `CLAUSULA_INCREMENTO_DIARIO_MORA` y sobrevive al borrado. Un
+ * mensaje roto al cliente es peor que no mandarlo, así que se descarta con
+ * motivo — mismo patrón que prepararMontoAdeudadoParaEnvio.
+ *
+ * Lo que NO bloquea: el crédito que legítimamente no crece (todas las cuotas
+ * en su techo) usando la cláusula incorporada, que desaparece sola y deja el
+ * mensaje sano.
+ */
+export function prepararIncrementoMoraParaEnvio(
+	cuerpo: string,
+	incrementoDiarioMora: string | null | undefined,
+	incrementoMaximoMensualMora: string | null | undefined,
+):
+	| {
+			enviar: true;
+			incrementoDiarioMora: string;
+			incrementoMaximoMensualMora: string;
+	  }
+	| { enviar: false; motivo: string } {
+	const diario = incrementoDiarioMora ?? "";
+	const maximo = incrementoMaximoMensualMora ?? "";
+	const restante = quitarClausulaIncrementoMora(cuerpo, diario, maximo);
+
+	if (
+		(restante.includes("{incrementoDiarioMora}") &&
+			!hayIncrementoMora(diario)) ||
+		(restante.includes("{incrementoMaximoMensualMora}") &&
+			!hayIncrementoMora(maximo))
+	) {
+		return { enviar: false, motivo: COBROS_MOTIVO_SIN_INCREMENTO_MORA };
+	}
+
+	return {
+		enviar: true,
+		incrementoDiarioMora: diario,
+		incrementoMaximoMensualMora: maximo,
+	};
+}
+
 export function interpolar(
 	texto: string,
 	variables: VariablesPlantilla,
@@ -503,7 +763,18 @@ export function interpolar(
 		? toCapitalCase(variables.clienteNombre)
 		: "";
 
-	return texto
+	const incrementoDiarioMora = variables.incrementoDiarioMora ?? "";
+	const incrementoMaximoMensualMora =
+		variables.incrementoMaximoMensualMora ?? "";
+	const base = quitarClausulaIncrementoMora(
+		texto,
+		incrementoDiarioMora,
+		incrementoMaximoMensualMora,
+	);
+
+	return base
+		.replace(/{incrementoDiarioMora}/g, v(incrementoDiarioMora))
+		.replace(/{incrementoMaximoMensualMora}/g, v(incrementoMaximoMensualMora))
 		.replace(/{clienteNombre}/g, v(nombre))
 		.replace(/{fechaPago}/g, v(variables.fechaPago))
 		.replace(/{cuotaMensual}/g, v(variables.cuotaMensual))
@@ -514,6 +785,10 @@ export function interpolar(
 		.replace(/{telefonoAsesor}/g, v(variables.telefonoAsesor))
 		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor))
 		.replace(/{expectativaMora}/g, v(variables.expectativaMora))
+		.replace(
+			/{expectativaMoraDiaria}/g,
+			v(variables.expectativaMoraDiaria ?? ""),
+		)
 		.replace(
 			/{anioImpuesto}/g,
 			v(variables.anioImpuesto ?? anioImpuestoCirculacion()),
@@ -573,7 +848,7 @@ Si tienes alguna consulta, con gusto estamos para apoyarte. Agradeceremos confir
 		cuerpo: `Hola {clienteNombre} 👋
 Te recordamos que *hoy es la fecha de pago de tu cuota, por un monto de Q{cuotaMensual}*. Agradeceremos realizar tu pago y compartir tu comprobante para aplicarlo a tu cuenta.
 
-🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de Q{expectativaMora}.*
+🛑 *Si no realizas tu pago hoy, se agregará un recargo por mora de alrededor de Q{expectativaMoraDiaria} por cada día de atraso, hasta un máximo de Q{expectativaMora} al mes.*
 
 📞 Si necesitas apoyo, comunícate con tu asesor:
 *{nombreAsesor} - Asesor de Cobros*
@@ -626,7 +901,7 @@ ${COBROS_NO_REPLY_WARNING}
 		asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola {clienteNombre} 👋
-Tienes *1 cuota con atraso por un monto de Q{montoAdeudado}*.
+Tienes *1 cuota con atraso por un monto de Q{montoAdeudado}* al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 Es importante que realices tu pago lo antes posible para evitar mayores recargos en tu cuenta.
 
@@ -644,7 +919,7 @@ Es importante que realices tu pago lo antes posible para evitar mayores recargos
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
 		cuerpo: `Hola {clienteNombre},
-Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}*.
+Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un monto total de Q{montoAdeudado}* al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 ⚠️ *En caso de no recibir el pago, CashIn podrá aplicar las medidas de recuperación contempladas en tu contrato y la ejecución de garantía.*
 
@@ -661,7 +936,7 @@ Te informamos que actualmente tienes *{cuotasAtraso} cuotas en atraso, por un mo
 		etapa: "mora_90",
 		asunto: "ÚLTIMO AVISO: Proceso jurídico - Vehículo {placa}",
 		// 4 bloques → template `mensaje4parametro`.
-		cuerpo: `Señor(a) {clienteNombre}, le informamos que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
+		cuerpo: `Señor(a) {clienteNombre}, le informamos que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras al día de hoy${CLAUSULA_INCREMENTO_DIARIO_MORA}.
 
 Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.
 

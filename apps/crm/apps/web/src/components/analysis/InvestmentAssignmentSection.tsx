@@ -27,6 +27,7 @@ import {
 	emptyContractParties,
 	toContractPartiesPayload,
 } from "@/components/contract-parties/ContractPartiesFields";
+import { TelefonosParaFirmar } from "@/components/analysis/TelefonosParaFirmar";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -961,7 +962,28 @@ export function InvestmentAssignmentSection({
 									</div>
 								</div>
 
-									{/* Partes del contrato: solo con vehículo, que decide qué pedir */}
+									{/* A estos números les llegan los enlaces de firma al aprobar
+									    los contratos: se revisan antes de pasar a jurídico. */}
+									<TelefonosParaFirmar
+										key={selectedOpportunity.id}
+										opportunityId={selectedOpportunity.id}
+										cliente={
+											selectedOpportunity.lead
+												? {
+														id: selectedOpportunity.lead.id,
+														nombre: selectedOpportunity.lead.name,
+														phone: selectedOpportunity.lead.phone ?? null,
+													}
+												: null
+										}
+										onGuardado={() => refetchOpportunities()}
+									/>
+									</div>
+
+									<div className="space-y-4">
+									{/* Partes del contrato: solo con vehículo, que decide qué pedir.
+									    Va a la derecha, arriba de los inversionistas: así quedan dos
+									    bloques por columna. */}
 									{selectedOpportunity.vehicle && (
 										<ContractPartiesFields
 											vehicleIsNew={selectedOpportunity.vehicle.isNew}
@@ -969,9 +991,7 @@ export function InvestmentAssignmentSection({
 											onChange={setContractParties}
 										/>
 									)}
-									</div>
 
-									<div className="space-y-4">
 							{/* Existing Investors section */}
 							{selectedOpportunity?.existingInvestors &&
 								selectedOpportunity.existingInvestors.length > 0 && (

@@ -1094,6 +1094,159 @@ integrationTest("review without a reviewable transactionId completes without cal
   expect(called).toBe(false);
 });
 
+const billingWorkerOptions = { leaseSeconds: 10, maxAttempts: 3, backoffSeconds: 2, maxBackoffSeconds: 10 };
+
+integrationTest("disabled billing preserves failure budget after many waits, bank completion and restart", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await associateToken("10005010", "1234567", 42);
+  const stored = await repository.upsertReceived(transaction);
+  let now = new Date("2026-09-08T12:00:00Z");
+  let enabled = false;
+  let transientFailure = true;
+  const requests: string[] = [];
+  const cartera = new HttpCarteraPaymentClient({
+    baseUrl: "https://cartera.example.test", secret: "local-only-secret".repeat(3),
+    fetch: async (_url, init) => {
+      requests.push(String(init?.body));
+      if (enabled && transientFailure) {
+        transientFailure = false;
+        return Response.json({ error: "processing_failed" }, { status: 503 });
+      }
+      return Response.json({ status: "APPLIED", paymentId: 701, ...(enabled ? {} : { billingStatus: "PENDING" }) });
+    },
+  });
+  const run = () => runApplicationWorkerOnce({
+    // No in-memory retry state survives between worker invocations.
+    repository: new DbPaymentTransactionRepository(db!), cartera, now: () => now, ...billingWorkerOptions,
+  });
+  expect(await run()).toBe(true);
+  let bankCalls = 0;
+  const review = () => runReviewWorkerOnce({
+    repository: new DbReviewRepository(db!), now: () => now, ...billingWorkerOptions,
+    nexa: { reviewTransfer: async (payload) => { bankCalls++; return payload; } },
+  });
+  expect(await review()).toBe(true);
+  for (let wait = 0; wait < 6; wait++) {
+    const [row] = await db.select().from(nexaPaymentTransactions);
+    expect(row).toMatchObject({ processingStatus: "COMPLETED", carteraPaymentId: 701, failureReason: "billing_pending", leaseUntil: null });
+    expect(row?.nextAttemptAt).toBeInstanceOf(Date);
+    expect(await run()).toBe(false);
+    now = row!.nextAttemptAt!;
+    expect(await run()).toBe(true);
+    expect(await review()).toBe(false);
+  }
+  enabled = true;
+  now = new Date(now.getTime() + 10_000);
+  expect(await run()).toBe(true);
+  const [retry] = await db.select().from(nexaPaymentTransactions);
+  expect(retry).toMatchObject({ processingStatus: "COMPLETED", failureReason: "billing_pending", attemptCount: 8, nextAttemptAt: new Date(now.getTime() + 2_000) });
+  expect(await run()).toBe(false);
+  now = retry!.nextAttemptAt!;
+  expect(await run()).toBe(true);
+  expect(await run()).toBe(false);
+  expect(bankCalls).toBe(1);
+  expect(new Set(requests).size).toBe(1);
+  expect(await db.select().from(nexaReviews)).toHaveLength(1);
+  const [row] = await db.select().from(nexaPaymentTransactions).where(eq(nexaPaymentTransactions.id, stored.id));
+  expect(row).toMatchObject({ processingStatus: "COMPLETED", carteraPaymentId: 701, failureReason: null, nextAttemptAt: null, leaseUntil: null, attemptCount: 9 });
+  expect(row?.rawPayload).not.toHaveProperty("billingRetryBase");
+});
+
+for (const reviewResult of ["complete", "retry", "manual"] as const) {
+  for (const billingResult of ["success", "pending", "failed"] as const) {
+    integrationTest(`simultaneous billing ${billingResult} and review ${reviewResult} keep independent state`, async () => {
+      if (!db) throw new Error("TEST_DATABASE_URL is required");
+      const repository = new DbPaymentTransactionRepository(db);
+      const { paymentId, repository: reviews } = await queuedReview("4617307", "7293");
+      const now = new Date("2026-09-08T12:01:00Z");
+      const next = new Date(now.getTime() + 10_000);
+      // Also covers already stranded pre-fix rows without a next_attempt_at.
+      await db.update(nexaPaymentTransactions).set({ failureReason: "billing_pending" }).where(eq(nexaPaymentTransactions.id, paymentId));
+      const claims = await Promise.all([repository.claimNextApplication(now, 10), repository.claimNextApplication(now, 10)]);
+      expect(claims.filter(Boolean)).toHaveLength(1);
+      const billing = claims.find((claim) => claim !== null)!;
+      const review = await reviews.claimNextReview(now, 10);
+      if (!review) throw new Error("missing review");
+      expect(await repository.claimNextApplication(new Date(now.getTime() + 9999), 10)).toBeNull();
+      await Promise.all([
+        billingResult === "failed"
+          ? repository.markApplicationFailed(paymentId, "application_processing_failed", null, now, billing.attemptCount)
+          : repository.finalizeApplication(paymentId, {
+            paymentId: 900, reviewStatus: "APPROVED",
+            failureReason: billingResult === "pending" ? "billing_pending" : null,
+            nextAttemptAt: billingResult === "pending" ? next : null,
+          }, now, billing.attemptCount),
+        reviewResult === "complete"
+          ? reviews.completeReview(review, { reference: 4617307, status: "APPROVED" }, now)
+          : reviews.failReview(review, reviewResult === "retry" ? next : null, now),
+      ]);
+      const [row] = await db.select().from(nexaPaymentTransactions);
+      expect(row).toMatchObject({
+        processingStatus: reviewResult === "complete" ? "COMPLETED" : reviewResult === "retry" ? "REVIEW_PENDING" : "MANUAL_REVIEW",
+        carteraPaymentId: 900, leaseUntil: null,
+        failureReason: billingResult === "failed" ? "billing_reconciliation_required" : billingResult === "pending" ? "billing_pending" : null,
+        nextAttemptAt: billingResult === "pending" ? next : null,
+      });
+      expect(await db.select().from(nexaReviews)).toHaveLength(1);
+      if (billingResult === "pending") {
+        expect(await repository.claimNextApplication(next, 10)).not.toBeNull();
+      } else {
+        expect(await repository.claimNextApplication(next, 10)).toBeNull();
+      }
+      if (billingResult === "failed") {
+        expect(await repository.listManualReviewAlerts(now)).toEqual([expect.objectContaining({ failureReason: "billing_reconciliation_required", alertType: "MANUAL_REVIEW" })]);
+      }
+    });
+  }
+}
+
+integrationTest("billing transport errors back off and require reconciliation without losing completed bank approval", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  await associateToken("10005010", "1234567", 42);
+  const { paymentId, repository: reviews } = await queuedReview("4617307", "7293");
+  let now = new Date("2026-09-08T12:01:00Z");
+  const review = await reviews.claimNextReview(now, 10);
+  if (!review) throw new Error("missing review");
+  await reviews.completeReview(review, { reference: 4617307, status: "APPROVED" }, now);
+  // An existing COMPLETED row stranded by the old code has no retry schedule.
+  await db.update(nexaPaymentTransactions).set({ failureReason: "billing_pending" }).where(eq(nexaPaymentTransactions.id, paymentId));
+  const completedReview = await db.select().from(nexaReviews);
+  const run = () => runApplicationWorkerOnce({ repository, now: () => now, ...billingWorkerOptions,
+    cartera: { applyNexaPayment: async () => { throw new Error("local simulated transport failure"); } },
+  });
+  expect(await run()).toBe(true);
+  expect((await db.select().from(nexaPaymentTransactions))[0]).toMatchObject({ processingStatus: "COMPLETED", carteraPaymentId: 900, failureReason: "billing_pending", nextAttemptAt: new Date(now.getTime() + 4_000), leaseUntil: null });
+  expect(await run()).toBe(false);
+  now = new Date(now.getTime() + 4_000);
+  expect(await run()).toBe(true);
+  expect((await db.select().from(nexaPaymentTransactions))[0]).toMatchObject({ processingStatus: "COMPLETED", carteraPaymentId: 900, failureReason: "billing_reconciliation_required", nextAttemptAt: null, leaseUntil: null });
+  expect(await db.select().from(nexaReviews)).toEqual(completedReview);
+  now = new Date(now.getTime() + 100_000);
+  expect(await run()).toBe(false);
+});
+
+integrationTest("expired billing leases fence stale success and failure without requeuing bank approval", async () => {
+  if (!db) throw new Error("TEST_DATABASE_URL is required");
+  const repository = new DbPaymentTransactionRepository(db);
+  const { paymentId } = await queuedReview("4617307", "7293");
+  await db.update(nexaPaymentTransactions).set({ failureReason: "billing_pending" }).where(eq(nexaPaymentTransactions.id, paymentId));
+  const now = new Date("2026-09-08T12:01:00Z");
+  const later = new Date(now.getTime() + 11_000);
+  const old = await repository.claimNextApplication(now, 10);
+  const fresh = await repository.claimNextApplication(later, 10);
+  if (!old || !fresh) throw new Error("missing claims");
+  const success = { paymentId: 900, reviewStatus: "APPROVED" as const, failureReason: null };
+  await repository.finalizeApplication(paymentId, success, later, old.attemptCount);
+  await repository.markApplicationFailed(paymentId, "application_processing_failed", null, later, old.attemptCount);
+  expect((await db.select().from(nexaPaymentTransactions))[0]).toMatchObject({ failureReason: "billing_pending", attemptCount: fresh.attemptCount });
+  await repository.finalizeApplication(paymentId, success, later, fresh.attemptCount);
+  await repository.markApplicationFailed(paymentId, "application_processing_failed", null, later, fresh.attemptCount);
+  expect((await db.select().from(nexaPaymentTransactions))[0]).toMatchObject({ failureReason: null, leaseUntil: null, processingStatus: "REVIEW_PENDING" });
+  expect(await db.select().from(nexaReviews)).toHaveLength(1);
+});
+
 async function associateToken(identifier: string, prefix: string, creditoId: number) {
   if (!db) throw new Error("TEST_DATABASE_URL is required");
   const [paymentToken] = await db.insert(nexaPaymentTokens).values({

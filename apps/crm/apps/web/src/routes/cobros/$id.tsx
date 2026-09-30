@@ -5054,7 +5054,9 @@ function RouteComponent() {
 						{/* CB-041: solicitar/aprobar apagado o reactivación de la unidad,
 						    con llamada posterior al cliente. Solo requiere caso.id (a
 						    diferencia de GpsVehiculoCard): el servidor resuelve la unidad
-						    física desde contratos_financiamiento.vehicleId, no desde
+						    física desde contratos_financiamiento.vehicleId y, solo si el
+						    caso NO tiene contrato (créditos migrados de cartera), desde
+						    el vehículo de la oportunidad con ese SIFCO. No usa
 						    caso.vehicleId (que viene de opportunities.vehicleId y puede
 						    estar vacío o desactualizado aun con contrato y GPS vigentes,
 						    hallazgo de review). El propio card ya oculta sus acciones si

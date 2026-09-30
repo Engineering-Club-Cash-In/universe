@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { call, ORPCError } from "@orpc/server";
 import { user } from "../db/schema/auth";
 import { casosCobros, contactosCobros } from "../db/schema/cobros";
+import { opportunities } from "../db/schema/crm";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import {
 	inmovilizacionesUnidad,
@@ -87,6 +88,12 @@ let promesaActivaMock: Record<string, unknown> | null = null;
 // Gestiones enlazadas (la llamada de cada inmovilización) y nombres de usuario
 // que lee `getInmovilizacionesCaso` para el historial de la carta.
 let llamadasEnlazadasMock: Record<string, unknown>[] = [];
+// `casos_cobros.contrato_id` del caso (null = crédito migrado sin contrato) y los
+// vehículos que dan sus oportunidades con ese SIFCO (el fallback).
+let contratoIdMock: string | null = "contrato-1";
+// Vehículo que da el CONTRATO del caso; undefined = el mismo `vehicleIdMock`.
+let vehicleIdContratoMock: string | null | undefined;
+let vehiculosOportunidadMock: Record<string, unknown>[] = [];
 let nombresUsuarioMock: { id: string; name: string }[] = [];
 let reconciliarAvisosLlamadas: (readonly string[] | undefined)[] = [];
 let onNotificarLlamarCliente: (() => void) | null = null;
@@ -133,7 +140,11 @@ function mockDb() {
 														{
 															id: CASO_ID,
 															numeroCreditoSifco: numeroCreditoSifcoMock,
-															vehicleId: vehicleIdMock,
+															contratoId: contratoIdMock,
+															vehicleId:
+																vehicleIdContratoMock === undefined
+																	? vehicleIdMock
+																	: vehicleIdContratoMock,
 															wialonUnitId: wialonUnitIdCasoMock,
 															clienteNombre: "Juan Pérez",
 														},
@@ -236,6 +247,14 @@ function mockDb() {
 							},
 							limit: async () =>
 								inmovilizacionExistente ? [inmovilizacionExistente] : [],
+						}),
+					};
+				}
+				if (tabla === opportunities) {
+					// getCasoParaInmovilizacion (fallback): from().innerJoin().leftJoin().where()
+					return {
+						innerJoin: () => ({
+							leftJoin: () => ({ where: async () => vehiculosOportunidadMock }),
 						}),
 					};
 				}
@@ -532,6 +551,9 @@ function reset() {
 	pagosCarteraFalla = false;
 	llamadasEnlazadasMock = [];
 	nombresUsuarioMock = [];
+	contratoIdMock = "contrato-1";
+	vehicleIdContratoMock = undefined;
+	vehiculosOportunidadMock = [];
 	// Por defecto hay respaldo para cualquier opción: un pago muy posterior a
 	// cualquier apagado y una promesa activa. Cada test lo quita o lo cambia.
 	pagosCarteraMock = [
@@ -2931,5 +2953,119 @@ describe("CB-041 — el asesor ejecuta la reactivación", () => {
 				{ context: ctx("cobros") },
 			),
 		).rejects.toMatchObject({ code: "NOT_FOUND" });
+	});
+});
+
+// ── Vehículo del caso: contrato primero, oportunidad si no hay contrato ──────
+
+describe("CB-041 — de dónde sale el vehículo del caso", () => {
+	afterEach(reset);
+
+	const solicitar = () =>
+		call(
+			inmovilizacionUnidadRouter.solicitarInmovilizacion,
+			{ casoCobroId: CASO_ID, accion: "apagado", ...FORMULARIO_APAGADO },
+			{ context: ctx("cobros") },
+		);
+
+	const vehiculoOportunidad = (extra: Record<string, unknown> = {}) => ({
+		vehicleId: VEHICLE_ID,
+		wialonUnitId: 12345,
+		wialonUnitName: "P-123ABC CON APAGADO",
+		nombre: "Jaime",
+		apellido: "Monzón",
+		...extra,
+	});
+
+	it("con contrato: usa el vehículo del contrato y no consulta la oportunidad", async () => {
+		vehiculosOportunidadMock = [
+			vehiculoOportunidad({
+				vehicleId: "99999999-9999-9999-9999-999999999999",
+			}),
+		];
+		await solicitar();
+		expect(inmovilizacionesInsertadas[0]?.vehicleId).toBe(VEHICLE_ID);
+	});
+
+	it("con contrato pero sin vehículo: no cae a la oportunidad (el contrato manda) y rechaza", async () => {
+		vehicleIdContratoMock = null;
+		wialonUnitIdCasoMock = null;
+		vehiculosOportunidadMock = [vehiculoOportunidad()];
+		await expect(solicitar()).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("sin contrato: usa el vehículo de la oportunidad con ese SIFCO", async () => {
+		contratoIdMock = null;
+		vehicleIdContratoMock = null;
+		wialonUnitIdCasoMock = null;
+		vehiculosOportunidadMock = [vehiculoOportunidad()];
+		const res = await solicitar();
+		expect(res.id).toBe(INMOV_ID);
+		expect(inmovilizacionesInsertadas[0]).toMatchObject({
+			vehicleId: VEHICLE_ID,
+			wialonUnitId: 12345,
+		});
+	});
+
+	it("sin contrato y varias oportunidades del MISMO vehículo: lo usa (no es ambiguo)", async () => {
+		contratoIdMock = null;
+		vehicleIdContratoMock = null;
+		wialonUnitIdCasoMock = null;
+		vehiculosOportunidadMock = [vehiculoOportunidad(), vehiculoOportunidad()];
+		await solicitar();
+		expect(inmovilizacionesInsertadas).toHaveLength(1);
+	});
+
+	it("sin contrato y oportunidades con vehículos DISTINTOS: no elige ninguno y lo dice", async () => {
+		contratoIdMock = null;
+		vehicleIdContratoMock = null;
+		wialonUnitIdCasoMock = null;
+		vehiculosOportunidadMock = [
+			vehiculoOportunidad(),
+			vehiculoOportunidad({
+				vehicleId: "88888888-8888-8888-8888-888888888888",
+			}),
+		];
+		await expect(solicitar()).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message: expect.stringContaining("más de un vehículo"),
+		});
+		expect(inmovilizacionesInsertadas).toHaveLength(0);
+	});
+
+	it("sin contrato y sin oportunidad con vehículo: rechaza como un caso sin vehículo", async () => {
+		contratoIdMock = null;
+		vehicleIdContratoMock = null;
+		wialonUnitIdCasoMock = null;
+		vehiculosOportunidadMock = [];
+		await expect(solicitar()).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message: expect.stringContaining("no tiene un vehículo asociado"),
+		});
+	});
+
+	it("sin contrato, el vehículo de la oportunidad sin GPS vinculada: rechaza por la unidad", async () => {
+		contratoIdMock = null;
+		vehicleIdContratoMock = null;
+		wialonUnitIdCasoMock = null;
+		vehiculosOportunidadMock = [vehiculoOportunidad({ wialonUnitId: null })];
+		await expect(solicitar()).rejects.toMatchObject({
+			code: "BAD_REQUEST",
+			message: expect.stringContaining("unidad GPS"),
+		});
+	});
+
+	it("sin contrato: la carta ve tieneGps según la unidad del vehículo de la oportunidad", async () => {
+		contratoIdMock = null;
+		vehicleIdContratoMock = null;
+		wialonUnitIdCasoMock = null;
+		vehiculosOportunidadMock = [vehiculoOportunidad()];
+		const res = await call(
+			inmovilizacionUnidadRouter.getInmovilizacionesCaso,
+			{ casoCobroId: CASO_ID },
+			{ context: ctx("cobros") },
+		);
+		expect(res.tieneGps).toBe(true);
 	});
 });

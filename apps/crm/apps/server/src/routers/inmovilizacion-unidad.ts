@@ -26,7 +26,7 @@ import {
 	contactosCobros,
 	contratosFinanciamiento,
 } from "../db/schema/cobros";
-import { clients } from "../db/schema/crm";
+import { clients, leads, opportunities } from "../db/schema/crm";
 import { gpsConsultaLogs } from "../db/schema/gps-consulta-logs";
 import {
 	inmovilizacionesUnidad,
@@ -105,12 +105,23 @@ export { marcarInmovilizacionEnviadaARecuperacion };
  * Trae el caso con lo que hace falta para autorizar y para armar el mensaje
  * de las notificaciones ("Fulano (crédito 12345)"). No usa `getCasoCobroById`
  * (routers/cobros.ts) porque ese trae columnas de UI que acá no hacen falta.
+ *
+ * El vehículo sale del CONTRATO del caso (`contratoId → vehicleId`), la fuente
+ * más confiable (un review de Codex pidió ese orden: el de la oportunidad puede
+ * estar vacío o desactualizado). Un caso sin contrato —es lo normal en los
+ * créditos migrados de cartera— cae al vehículo de la OPORTUNIDAD con ese
+ * SIFCO, con la misma cautela que la tarjeta GPS (`resolverCasoParaGps`): si
+ * las oportunidades apuntan a más de un vehículo no se sabe cuál es y no se
+ * elige ninguno (`vehiculoAmbiguo`). Mismo criterio que Págalo
+ * (`resolverVehiculoCasoPagalo`): si el contrato existe manda, aunque le falte
+ * el vehículo — no se cae a la oportunidad para no mostrar uno distinto.
  */
 async function getCasoParaInmovilizacion(casoCobroId: string) {
 	const [caso] = await db
 		.select({
 			id: casosCobros.id,
 			numeroCreditoSifco: casosCobros.numeroCreditoSifco,
+			contratoId: casosCobros.contratoId,
 			vehicleId: vehicles.id,
 			wialonUnitId: vehicles.wialonUnitId,
 			wialonUnitName: vehicles.wialonUnitName,
@@ -125,7 +136,46 @@ async function getCasoParaInmovilizacion(casoCobroId: string) {
 		.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
 		.where(eq(casosCobros.id, casoCobroId))
 		.limit(1);
-	return caso ?? null;
+	if (!caso) return null;
+
+	const { contratoId, ...base } = caso;
+	const delContrato = {
+		...base,
+		vehiculoOrigen: (base.vehicleId ? "contrato" : null) as
+			| "contrato"
+			| "oportunidad"
+			| null,
+		vehiculoAmbiguo: false,
+	};
+	if (contratoId || !base.numeroCreditoSifco) return delContrato;
+
+	const filas = await db
+		.select({
+			vehicleId: vehicles.id,
+			wialonUnitId: vehicles.wialonUnitId,
+			wialonUnitName: vehicles.wialonUnitName,
+			nombre: leads.firstName,
+			apellido: leads.lastName,
+		})
+		.from(opportunities)
+		.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+		.leftJoin(leads, eq(opportunities.leadId, leads.id))
+		.where(eq(opportunities.numeroSifco, base.numeroCreditoSifco));
+	const distintos = new Set(filas.map((f) => f.vehicleId));
+	if (distintos.size !== 1) {
+		return { ...delContrato, vehiculoAmbiguo: distintos.size > 1 };
+	}
+	const f = filas[0];
+	return {
+		...base,
+		vehicleId: f.vehicleId,
+		wialonUnitId: f.wialonUnitId,
+		wialonUnitName: f.wialonUnitName,
+		clienteNombre:
+			[f.nombre, f.apellido].filter(Boolean).join(" ").trim() || null,
+		vehiculoOrigen: "oportunidad" as const,
+		vehiculoAmbiguo: false,
+	};
 }
 
 // ── Ubicación del vehículo (solicitud y ejecución del apagado) ──────────────
@@ -1571,7 +1621,9 @@ export const inmovilizacionUnidadRouter = {
 			// solicitud de "apagar" sin unidad real. Review de Codex.
 			if (!caso.vehicleId) {
 				throw new ORPCError("BAD_REQUEST", {
-					message: "El caso no tiene un vehículo asociado para inmovilizar.",
+					message: caso.vehiculoAmbiguo
+						? "El crédito tiene más de un vehículo registrado; no se puede determinar cuál inmovilizar. Hay que corregir las oportunidades del SIFCO."
+						: "El caso no tiene un vehículo asociado para inmovilizar.",
 				});
 			}
 			const vehicleId = caso.vehicleId;

@@ -142,6 +142,11 @@ export const insuranceInvoiceSubmissions = pgTable(
 		opportunityId: uuid("opportunity_id")
 			.notNull()
 			.references(() => opportunities.id, { onDelete: "cascade" }),
+		// Agencia desde la que se subió: la oportunidad puede cambiar de agencia
+		// después, y el CRM muestra "Subido desde <agencia>".
+		companyId: uuid("company_id").references(() => companies.id, {
+			onDelete: "set null",
+		}),
 		// RESTRICT: borrar la factura no puede liberar el UNIQUE por oportunidad.
 		documentId: uuid("document_id")
 			.notNull()

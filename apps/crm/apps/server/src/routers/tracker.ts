@@ -391,8 +391,9 @@ function exigirReglaFactura(fila: Fila, membresias: MembresiaSocio[]) {
 async function datosDelCorreo(
 	fila: Fila,
 ): Promise<{ aseguradora: Aseguradora; datos: DatosCorreoFacturaSeguro }> {
-	// Regla confirmada con negocio: la aseguradora es la de la última
-	// cotización de la oportunidad (el cotizador la calcula y no se edita).
+	// La última cotización (confirmado con negocio), con el mismo orden que el
+	// cierre (getLatestApprovedQuotation): una aceptada manda sobre las más
+	// nuevas, para que el correo diga lo mismo que el crédito.
 	const [cotizacion] = await db
 		.select({
 			insuranceProvider: quotations.insuranceProvider,
@@ -402,7 +403,10 @@ async function datosDelCorreo(
 		})
 		.from(quotations)
 		.where(eq(quotations.opportunityId, fila.id))
-		.orderBy(desc(quotations.createdAt))
+		.orderBy(
+			desc(eq(quotations.status, "accepted")),
+			desc(quotations.createdAt),
+		)
 		.limit(1);
 	const [oportunidad] = await db
 		.select({
@@ -762,6 +766,7 @@ export const trackerRouter = {
 						.insert(insuranceInvoiceSubmissions)
 						.values({
 							opportunityId: fila.id,
+							companyId: fila.companyId,
 							documentId: documento.id,
 							insuranceProvider: aseguradora,
 							recipients: destinatarios,

@@ -285,6 +285,8 @@ describe("subirFacturaSeguro", () => {
 			insuranceProvider: "gyt",
 			recipients: ["polizas@gyt.test"],
 			status: "pendiente",
+			// La agencia queda fija aunque la oportunidad cambie de agencia después.
+			companyId: "agencia-1",
 		});
 		// El correo se guarda en el registro y se envía ese mismo.
 		const guardado = {

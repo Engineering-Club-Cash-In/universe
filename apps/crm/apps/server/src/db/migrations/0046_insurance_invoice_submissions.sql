@@ -10,11 +10,15 @@
 -- el correo exacto del intento, porque Resend exige el mismo contenido con la
 -- misma llave.
 --
+-- `company_id` guarda la agencia desde la que se subió: la oportunidad puede
+-- cambiar de agencia después y el CRM muestra "Subido desde <agencia>".
+--
 -- Idempotente: se puede correr más de una vez sin romper nada.
 
 CREATE TABLE IF NOT EXISTS "public"."insurance_invoice_submissions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"opportunity_id" uuid NOT NULL,
+	"company_id" uuid,
 	"document_id" uuid NOT NULL,
 	"insurance_provider" text NOT NULL,
 	"recipients" text[] DEFAULT '{}' NOT NULL,
@@ -33,6 +37,12 @@ CREATE TABLE IF NOT EXISTS "public"."insurance_invoice_submissions" (
 
 DO $$ BEGIN
 	ALTER TABLE "public"."insurance_invoice_submissions" ADD CONSTRAINT "insurance_invoice_submissions_opportunity_id_opportunities_id_fk" FOREIGN KEY ("opportunity_id") REFERENCES "public"."opportunities"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+	WHEN duplicate_object THEN null;
+END $$;--> statement-breakpoint
+
+DO $$ BEGIN
+	ALTER TABLE "public"."insurance_invoice_submissions" ADD CONSTRAINT "insurance_invoice_submissions_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE set null ON UPDATE no action;
 EXCEPTION
 	WHEN duplicate_object THEN null;
 END $$;--> statement-breakpoint

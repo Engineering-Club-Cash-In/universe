@@ -78,7 +78,7 @@ export function DesgloseMoraPanel({
                     <div className="text-[10px] text-gray-500">venció {fecha(c.fecha_vencimiento)}</div>
                     {c.en_validacion && (
                       <div className="text-[10px] font-semibold text-amber-700">
-                        ⏳ pago en validación: sigue generando mora
+                        ⏳ pago sin validar hace más de 7 días: genera mora
                       </div>
                     )}
                   </td>
@@ -111,8 +111,8 @@ export function DesgloseMoraPanel({
 
           {hayEnValidacion && (
             <p className="text-amber-700">
-              Las cuotas con pago en validación no aparecen como atrasadas, pero generan mora hasta
-              que contabilidad valide el pago.
+              Las cuotas con pago en validación no aparecen como atrasadas. El pago les frena la mora
+              hasta 7 días; si pasado ese plazo contabilidad no lo valida, la cuota vuelve a generar mora.
             </p>
           )}
           {/* Si lo registrado difiere del cálculo, «sube Q…» engaña: el cierre

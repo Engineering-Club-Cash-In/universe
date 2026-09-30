@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { DesgloseMoraPanel } from "./desgloseMora";
 
 // El caso de la captura: 1 cuota atrasada a la vista, pero Q625.18 de mora,
-// porque la cuota #41 tiene un pago en validación y el cron la sigue contando.
+// porque la cuota #41 tiene un pago que lleva más de 7 días sin validar y el
+// cron la volvió a contar (uno de ≤7 días le frena la mora y no llega acá).
 const desglose = {
   cargoMensual: "312.59",
   cargoDiario: "10.42",
@@ -28,7 +29,10 @@ describe("DesgloseMoraPanel — el porqué de la mora para el asesor", () => {
     const t = texto(renderToStaticMarkup(<DesgloseMoraPanel desglose={desglose} moraRegistrada={625.18} capital={27909.73} abiertoInicial />));
     expect(t).toContain("Q10.42 por día");
     expect(t).toContain("Q312.59 por cuota");
-    expect(t).toContain("#41 venció 23/08/2026 ⏳ pago en validación: sigue generando mora 38 tope");
+    expect(t).toContain("#41 venció 23/08/2026 ⏳ pago sin validar hace más de 7 días: genera mora 38 tope");
+    // La regla dice la verdad: el pendiente frena la mora solo 7 días.
+    expect(t).toContain("El pago les frena la mora hasta 7 días; si pasado ese plazo contabilidad no lo valida, la cuota vuelve a generar mora.");
+    expect(t).not.toContain("generan mora hasta que contabilidad valide");
     expect(t).toContain("−Q20.84");
     expect(t).toContain("Total calculado hoy Q364.69");
     // Registrada Q625.18 ≠ calculada: el cierre la REEMPLAZA por el cálculo de mañana (baja).

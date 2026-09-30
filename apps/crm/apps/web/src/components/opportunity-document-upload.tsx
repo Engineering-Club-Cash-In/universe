@@ -18,12 +18,15 @@ import { Label } from "@/components/ui/label";
 import { getDocumentTypeLabel } from "@/lib/crm-formatters";
 import { VEHICLE_DOCUMENT_TYPES } from "@/lib/document-constants";
 import {
+	etiquetaEnvioAseguradora,
+	textoSubidoPor,
+} from "@/lib/envio-aseguradora";
+import {
 	COFIRMANTE_BANK_STATEMENT_HELP,
 	COFIRMANTE_BANK_STATEMENT_OPTION,
 	getManualOpportunityDocumentFields,
 	type ManualOpportunityDocumentType,
 } from "@/lib/manual-opportunity-document";
-import { etiquetaEnvioAseguradora } from "@/lib/envio-aseguradora";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client } from "@/utils/orpc";
 
@@ -407,6 +410,11 @@ export function OpportunityDocumentUpload({
 												{doc.description}
 											</p>
 										)}
+									{doc.subidoDesde && (
+										<p className="text-muted-foreground text-xs">
+											{textoSubidoPor(doc)}
+										</p>
+									)}
 									{(() => {
 										const envio = etiquetaEnvioAseguradora(doc.envioAseguradora);
 										return (

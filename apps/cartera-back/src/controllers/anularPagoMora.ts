@@ -4,6 +4,7 @@ import { creditos, pagos_credito } from "../database/db/schema";
 import { updateMora } from "./latefee";
 import { resetAjusteFechaIdealSiPagoInvalidado } from "./ajusteFechaIdealPago";
 import { restitucionMoraDePago } from "../utils/restitucionMoraDePago";
+import { revertirMoraPagadaDePago } from "../utils/anotarMoraPagada";
 // ── `./rubros` ENTRA COMO TIPO, Y COMO VALOR SOLO DENTRO DE LA FÁBRICA ─────
 // `./rubros` arrastra `../database/index`, o sea la conexión real. Importarlo
 // como VALOR en la cabecera de este módulo lo mete en cualquier archivo de la
@@ -222,6 +223,17 @@ export async function anularPagoYRestituirMora(
   await deps.revertirRubros(
     pago_id,
     tx as unknown as Parameters<typeof revertirRubrosDelPago>[1],
+  );
+
+  // ── DESHACER LO QUE EL PAGO HABÍA ANOTADO EN `mora_pagada_cuota` ──────────
+  // Anular una boleta significa que el cliente NO pagó: lo que esa boleta había
+  // anotado como "pagado" en el histórico de mora tiene que deshacerse con una
+  // fila compensatoria. Es distinto de restituir: restituir es devolverle al
+  // crédito la mora que se calculó sobre sus vencimientos; esto es descartar lo
+  // que esa boleta particular había contribuido al histórico.
+  await revertirMoraPagadaDePago(
+    { pago_id, tipo: "ANULACION" },
+    tx,
   );
 
   // ── RESTITUIR LA MORA QUE LA BOLETA FALSA HABÍA COBRADO ───────────────────

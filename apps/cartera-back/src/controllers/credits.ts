@@ -57,6 +57,8 @@ import {
   incrementoMaximoMensualMora,
   isInstallmentWithinMoraHorizon,
 } from "./latefee";
+import { compensarAnotacionesVivas } from "../utils/anotarMoraPagada";
+import { mora_pagada_cuota } from "../database/db/schema";
 import {
   CREDIT_DETAIL_STATUSES,
   RESET_CREDIT_ERRORS,
@@ -2063,7 +2065,20 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
             eq(pagos_credito.pagado, false)
           )
         )
-        .returning({ pago_id: pagos_credito.pago_id });
+        .returning({ pago_id: pagos_credito.pago_id, paymentFalse: pagos_credito.paymentFalse });
+
+      // Lo que estos pagos anulados habían abonado a mora sale del ledger en la
+      // MISMA tx (tipo ANULACION): si no, `mora_pagada_cuota` seguiría contando
+      // como pagada mora de boletas que ya no valen y el cron la descontaría.
+      // Solo las que quedaron anuladas: una validada es plata real y se queda.
+      const anuladosIds = pagosNoPagados.filter((p) => p.paymentFalse).map((p) => p.pago_id);
+      if (anuladosIds.length > 0) {
+        await compensarAnotacionesVivas(
+          and(inArray(mora_pagada_cuota.pago_id, anuladosIds), eq(mora_pagada_cuota.tipo, "PAGO"))!,
+          { tipo: "ANULACION", motivo: "Pago pendiente anulado al pasar el crédito a INCOBRABLE" },
+          tx as unknown as typeof db,
+        );
+      }
 
       const pagoIds = pagosNoPagados.map(p => p.pago_id);
 
@@ -2523,7 +2538,20 @@ export async function resetCredit({
             eq(pagos_credito.pagado, false),
           ),
         )
-        .returning({ pago_id: pagos_credito.pago_id });
+        .returning({ pago_id: pagos_credito.pago_id, paymentFalse: pagos_credito.paymentFalse });
+
+      // Lo que estos pagos anulados habían abonado a mora sale del ledger en la
+      // MISMA tx (tipo ANULACION): si no, `mora_pagada_cuota` seguiría contando
+      // como pagada mora de boletas que ya no valen y el cron la descontaría.
+      // Solo las que quedaron anuladas: una validada es plata real y se queda.
+      const anuladosIds = pagosAnuladosReset.filter((p) => p.paymentFalse).map((p) => p.pago_id);
+      if (anuladosIds.length > 0) {
+        await compensarAnotacionesVivas(
+          and(inArray(mora_pagada_cuota.pago_id, anuladosIds), eq(mora_pagada_cuota.tipo, "PAGO"))!,
+          { tipo: "ANULACION", motivo: "Pago pendiente anulado en el reset del crédito" },
+          tx as unknown as typeof db,
+        );
+      }
 
       // Si alguno de estos pagos anulados era el que cobró un ajuste por fecha
       // ideal de pago, resetearlo a pendiente (a lo sumo 1 fila por crédito).

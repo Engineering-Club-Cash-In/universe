@@ -124,8 +124,57 @@ const ESTADOS_OPORTUNIDAD_CON_CREDITO = ["won", "migrate"] as const;
  * elige ninguno (`vehiculoAmbiguo`). Mismo criterio que Págalo
  * (`resolverVehiculoCasoPagalo`): si el contrato existe manda, aunque le falte
  * el vehículo — no se cae a la oportunidad para no mostrar uno distinto.
+ *
+ * Si con eso no hay vehículo pero la unidad está APAGADA por este caso, se usa
+ * la unidad que quedó guardada en ese apagado (`apagadoVigenteDelCaso`): el
+ * carro sigue apagado en la realidad aunque después cambien las oportunidades
+ * (p. ej. aparezca un segundo vehículo) y hay que poder reactivarlo.
  */
 async function getCasoParaInmovilizacion(casoCobroId: string) {
+	const caso = await resolverCasoConVehiculo(casoCobroId);
+	if (!caso || caso.vehicleId) return caso;
+
+	const apagado = await apagadoVigenteDelCaso(casoCobroId);
+	if (!apagado) return caso;
+	const [vehiculo] = await db
+		.select({ wialonUnitName: vehicles.wialonUnitName })
+		.from(vehicles)
+		.where(eq(vehicles.id, apagado.vehicleId))
+		.limit(1);
+	return {
+		...caso,
+		vehicleId: apagado.vehicleId,
+		wialonUnitId: apagado.wialonUnitId,
+		wialonUnitName: vehiculo?.wialonUnitName ?? null,
+		vehiculoOrigen: "apagado_ejecutado" as const,
+		vehiculoAmbiguo: false,
+	};
+}
+
+/**
+ * El vehículo y la unidad GPS del último apagado ejecutado de este caso, solo
+ * mientras la unidad siga apagada por él (no hubo una reactivación ejecutada
+ * después). Null si no hay apagado vigente o la fila no guardó la unidad.
+ */
+async function apagadoVigenteDelCaso(
+	casoCobroId: string,
+): Promise<{ vehicleId: string; wialonUnitId: number } | null> {
+	const historial = await getHistorialCaso(casoCobroId);
+	const apagado = ultimaEjecutada(historial, "apagado");
+	if (!apagado?.ejecutadoAt || !apagado.vehicleId) return null;
+	if (apagado.wialonUnitId == null) return null;
+	const reactivacion = ultimaEjecutada(historial, "reactivacion");
+	if (
+		reactivacion?.ejecutadoAt &&
+		reactivacion.ejecutadoAt > apagado.ejecutadoAt
+	) {
+		return null;
+	}
+	return { vehicleId: apagado.vehicleId, wialonUnitId: apagado.wialonUnitId };
+}
+
+/** El caso con el vehículo del contrato o, sin contrato, el de la oportunidad. */
+async function resolverCasoConVehiculo(casoCobroId: string) {
 	const [caso] = await db
 		.select({
 			id: casosCobros.id,
@@ -153,6 +202,7 @@ async function getCasoParaInmovilizacion(casoCobroId: string) {
 		vehiculoOrigen: (base.vehicleId ? "contrato" : null) as
 			| "contrato"
 			| "oportunidad"
+			| "apagado_ejecutado"
 			| null,
 		vehiculoAmbiguo: false,
 	};

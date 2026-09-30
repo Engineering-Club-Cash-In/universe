@@ -7,7 +7,15 @@
  * y wialon.test.ts. `db.transaction` recibe un `tx` con la misma forma que
  * `db` — alcanza para los casos que este router necesita en transacción.
  */
-import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	mock,
+	spyOn,
+} from "bun:test";
 import { call, ORPCError } from "@orpc/server";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { user } from "../db/schema/auth";
@@ -3034,6 +3042,92 @@ describe("CB-041 — de dónde sale el vehículo del caso", () => {
 		expect(params).not.toContain("lost");
 		expect(params).not.toContain("open");
 		expect(params).not.toContain("on_hold");
+	});
+
+	describe("con la unidad ya apagada por este caso, el vehículo guardado en el apagado no se pierde", () => {
+		// `reset` deja el respaldo por defecto (pago y promesa): sin esto el primer
+		// test dependería de que otro corriera antes.
+		beforeEach(reset);
+		const apagadoEjecutado = (extra: Record<string, unknown> = {}) => ({
+			id: INMOV_ID,
+			casoCobroId: CASO_ID,
+			accion: "apagado",
+			estado: "ejecutada",
+			vehicleId: VEHICLE_ID,
+			wialonUnitId: 12345,
+			ejecutadoAt: new Date("2026-09-20T10:00:00.000Z"),
+			...extra,
+		});
+		// Sin contrato y con dos vehículos won/migrate en las oportunidades: hoy no
+		// se podría elegir ninguno (p. ej. se sumó una oportunidad después).
+		const oportunidadesAmbiguas = () => {
+			contratoIdMock = null;
+			vehicleIdContratoMock = null;
+			wialonUnitIdCasoMock = null;
+			vehiculosOportunidadMock = [
+				vehiculoOportunidad(),
+				vehiculoOportunidad({
+					vehicleId: "88888888-8888-8888-8888-888888888888",
+				}),
+			];
+		};
+
+		it("se puede pedir la reactivación contra la unidad del apagado", async () => {
+			oportunidadesAmbiguas();
+			historialCasoMock = [apagadoEjecutado()];
+			await call(
+				inmovilizacionUnidadRouter.solicitarInmovilizacion,
+				{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+				{ context: ctx("cobros") },
+			);
+			expect(inmovilizacionesInsertadas[0]).toMatchObject({
+				accion: "reactivacion",
+				vehicleId: VEHICLE_ID,
+				wialonUnitId: 12345,
+			});
+		});
+
+		it("la carta sigue ofreciendo la unidad (tieneGps) aunque las oportunidades ya no den un único vehículo", async () => {
+			oportunidadesAmbiguas();
+			historialCasoMock = [apagadoEjecutado()];
+			const res = await call(
+				inmovilizacionUnidadRouter.getInmovilizacionesCaso,
+				{ casoCobroId: CASO_ID },
+				{ context: ctx("cobros") },
+			);
+			expect(res.tieneGps).toBe(true);
+			expect(res.estadoUnidad).toBe("inmovilizada");
+		});
+
+		it("si después se reactivó (la unidad volvió a estar activa), no se reutiliza el apagado viejo: un apagado nuevo sigue rechazándose por ambiguo", async () => {
+			oportunidadesAmbiguas();
+			historialCasoMock = [
+				apagadoEjecutado(),
+				{
+					...apagadoEjecutado(),
+					id: "77777777-7777-7777-7777-777777777777",
+					accion: "reactivacion",
+					ejecutadoAt: new Date("2026-09-25T10:00:00.000Z"),
+				},
+			];
+			await expect(solicitar()).rejects.toMatchObject({
+				code: "BAD_REQUEST",
+				message: expect.stringContaining("más de un vehículo"),
+			});
+			expect(inmovilizacionesInsertadas).toHaveLength(0);
+		});
+
+		it("un apagado que no guardó la unidad (filas viejas) no sirve de respaldo", async () => {
+			oportunidadesAmbiguas();
+			historialCasoMock = [apagadoEjecutado({ wialonUnitId: null })];
+			await expect(
+				call(
+					inmovilizacionUnidadRouter.solicitarInmovilizacion,
+					{ casoCobroId: CASO_ID, accion: "reactivacion", quePaso: "promesa" },
+					{ context: ctx("cobros") },
+				),
+			).rejects.toMatchObject({ code: "BAD_REQUEST" });
+		});
 	});
 
 	it("sin contrato y varias oportunidades del MISMO vehículo: lo usa (no es ambiguo)", async () => {

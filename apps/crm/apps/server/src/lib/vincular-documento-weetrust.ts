@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ilike, ne, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
 	contractSignatories,
@@ -280,17 +280,7 @@ export async function vincularEnLaFila(
 		});
 	}
 
-	const [deOtro] = await tx
-		.select({ id: generatedLegalContracts.id })
-		.from(generatedLegalContracts)
-		.where(
-			and(
-				eq(generatedLegalContracts.weetrustDocumentId, revision.documentID),
-				ne(generatedLegalContracts.id, contractId),
-			),
-		)
-		.limit(1);
-	if (deOtro) {
+	if (await documentoDeOtroContrato(tx, revision.documentID, contractId)) {
 		throw new ORPCError("CONFLICT", {
 			message:
 				"Ese documento de WeeTrust ya es el de otro contrato del CRM. Revisá que sea el enlace correcto.",
@@ -330,6 +320,61 @@ export async function vincularEnLaFila(
 		.values(filasDeFirmantes(contractId, revision.enviados));
 
 	return { documentoAnterior };
+}
+
+/**
+ * Si el documento ya es el de otro contrato del CRM.
+ *
+ * No alcanza con `weetrust_document_id`: los contratos de antes no lo
+ * guardaron, y en prod son la mayoría de los pendientes. Su documento viaja en
+ * los enlaces —`/signatory/{documento}/…` y `/observer/{documento}/…`—, en las
+ * columnas del contrato o en sus firmantes. Si se aceptara, dos filas
+ * apuntarían al mismo documento: el estado de firma se lo llevaría la nueva, y
+ * cambiarlo o anularlo le dejaría muertos al otro contrato los enlaces que ya
+ * tiene la gente.
+ *
+ * El id ya viene validado (24 caracteres hexadecimales), así que no hay nada
+ * que escapar en el `like`.
+ */
+async function documentoDeOtroContrato(
+	tx: Transaccion,
+	documentID: string,
+	contractId: string,
+): Promise<boolean> {
+	const deFirma = `%/signatory/${documentID}/%`;
+	const deObservador = `%/observer/${documentID}/%`;
+
+	const [enElContrato] = await tx
+		.select({ id: generatedLegalContracts.id })
+		.from(generatedLegalContracts)
+		.where(
+			and(
+				ne(generatedLegalContracts.id, contractId),
+				or(
+					eq(generatedLegalContracts.weetrustDocumentId, documentID),
+					ilike(generatedLegalContracts.clientSigningLink, deFirma),
+					ilike(generatedLegalContracts.representativeSigningLink, deFirma),
+					sql`array_to_string(${generatedLegalContracts.additionalSigningLinks}, ' ') ilike ${deFirma}`,
+					ilike(generatedLegalContracts.observerUrl, deObservador),
+				),
+			),
+		)
+		.limit(1);
+	if (enElContrato) return true;
+
+	// Consulta aparte y no un EXISTS correlacionado: Drizzle deja la columna de
+	// afuera sin calificar y el predicado da siempre verdadero.
+	const [enSusFirmantes] = await tx
+		.select({ id: contractSignatories.id })
+		.from(contractSignatories)
+		.where(
+			and(
+				ne(contractSignatories.contractId, contractId),
+				ilike(contractSignatories.signingUrl, deFirma),
+			),
+		)
+		.limit(1);
+	return Boolean(enSusFirmantes);
 }
 
 /**

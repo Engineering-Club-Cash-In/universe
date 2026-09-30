@@ -15,8 +15,19 @@ import { sql, type SQL } from "drizzle-orm";
  * subquery se resuelve a `pc.cuota_id` — la condición queda
  * `pc.cuota_id = pc.cuota_id` y cualquier pago validado de la base marca
  * todas las cuotas como pagadas. Mismo cuidado que `incrementosMoraPorCredito`.
+ *
+ * `excluirPagoId`: el pago que se está registrando NO cuenta como cobertura de
+ * su propia cuota. Al anotar la mora que cobró la boleta, su fila ya existe y,
+ * si contara, la cuota saldría del reparto: la mora pagada no quedaría
+ * anotada en esa cuota.
  */
-export function hasPaidPaymentSql(): SQL<boolean> {
+export function hasPaidPaymentSql(
+  opciones: { excluirPagoId?: number } = {},
+): SQL<boolean> {
+  const exclusion =
+    opciones.excluirPagoId !== undefined
+      ? sql` AND pc.pago_id <> ${opciones.excluirPagoId}`
+      : sql``;
   return sql<boolean>`EXISTS (
     SELECT 1
     FROM cartera.pagos_credito pc
@@ -24,6 +35,6 @@ export function hasPaidPaymentSql(): SQL<boolean> {
       AND pc."paymentFalse" = false
       AND pc.pagado = true
       AND pc.validation_status IN ('validated', 'no_required')
-      AND COALESCE(pc.monto_aplicado, 0) > 0
+      AND COALESCE(pc.monto_aplicado, 0) > 0${exclusion}
   )`;
 }

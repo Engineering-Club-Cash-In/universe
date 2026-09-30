@@ -18,7 +18,8 @@ describe("un solo criterio de «cuota ya pagada» para el cron y el ledger", () 
 	});
 	test("procesarMoras y cuotasParaPendienteDeCreditos usan el mismo helper", () => {
 		expect(cuerpo("export async function procesarMoras")).toContain("hasPaidPayment: hasPaidPaymentSql()");
-		expect(cuerpo("export async function cuotasParaPendienteDeCreditos")).toContain("hasPaidPayment: hasPaidPaymentSql()");
+		// El cargador le pasa sus opciones (solo `excluirPagoId`, que usa el pago normal).
+		expect(cuerpo("export async function cuotasParaPendienteDeCreditos")).toContain("hasPaidPayment: hasPaidPaymentSql(opciones)");
 	});
 });
 

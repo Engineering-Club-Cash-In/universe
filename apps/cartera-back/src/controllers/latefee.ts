@@ -314,6 +314,12 @@ export async function cuotasParaPendienteDeCreditos(
   creditoIds: number[],
   ejecutor: typeof db,
   hoy: Date,
+  /**
+   * `excluirPagoId`: el pago que se está anotando no cubre su propia cuota
+   * (ver `hasPaidPaymentSql`). Solo lo pasa el pago normal; el cron, la
+   * condonación y el desglose miran la cobertura completa.
+   */
+  opciones: { excluirPagoId?: number } = {},
 ): Promise<Map<number, { capital: string; cuotas: CuotaParaPendiente[] }>> {
   const resultado = new Map<number, { capital: string; cuotas: CuotaParaPendiente[] }>();
   if (creditoIds.length === 0) return resultado;
@@ -328,7 +334,7 @@ export async function cuotasParaPendienteDeCreditos(
       capital: creditos.capital,
       // La subconsulta está centralizada en utils/cuotaYaPagadaSql
       // para evitar copias desincronizadas.
-      hasPaidPayment: hasPaidPaymentSql(),
+      hasPaidPayment: hasPaidPaymentSql(opciones),
     })
     .from(cuotas_credito)
     .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id))

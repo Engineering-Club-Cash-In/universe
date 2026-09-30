@@ -200,8 +200,13 @@ export const anotarMoraPagoNormal = async ({
   const moraBig = new Big(mora || 0);
   if (moraBig.lte(0)) return;
 
-  // Obtener cuotas vencidas con la fórmula exacta del cron
-  const cuotasMap = await cargarCuotas([credito_id], tx as any, hoy);
+  // Obtener cuotas vencidas con la fórmula exacta del cron, SIN contar este
+  // mismo pago como cobertura de su cuota: su fila ya existe cuando se anota y,
+  // si contara como pago que cubre, la cuota saldría del reparto y la mora que
+  // cobró esta boleta no quedaría anotada en ella.
+  const cuotasMap = await cargarCuotas([credito_id], tx as any, hoy, {
+    excluirPagoId: pago_id,
+  });
   const cuotasParaPendiente = cuotasMap.get(credito_id);
 
   if (!cuotasParaPendiente || cuotasParaPendiente.cuotas.length === 0) {

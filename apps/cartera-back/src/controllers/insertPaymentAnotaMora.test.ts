@@ -24,12 +24,15 @@ const PENDIENTE = moraPendientePorCuota({ capital: CAPITAL, cuotas: CUOTAS });
 
 function montaje() {
   const cargas: unknown[][] = [];
+  const opciones: unknown[] = [];
   const anotaciones: { filas: any[]; ejecutor: unknown }[] = [];
   return {
     cargas,
+    opciones,
     anotaciones,
-    cargarCuotas: (async (ids: number[], ejecutor: unknown, hoy: Date) => {
+    cargarCuotas: (async (ids: number[], ejecutor: unknown, hoy: Date, opts?: unknown) => {
       cargas.push([ids, ejecutor, hoy]);
+      opciones.push(opts);
       return new Map([[7, { capital: CAPITAL, cuotas: CUOTAS }]]);
     }) as any,
     deps: {
@@ -65,6 +68,14 @@ describe("anotarMoraPagoNormal", () => {
     const m = montaje();
     await anotarMoraPagoNormal({ credito_id: 7, mora: new Big(1), pago_id: 1, tx: TX, deps: m.deps, hoy: HOY, cargarCuotas: m.cargarCuotas });
     expect(m.cargas).toEqual([[[7], TX, HOY]]);
+  });
+
+  // Su propia fila ya existe cuando se anota: si contara como cobertura, la
+  // cuota saldría del reparto y la mora cobrada no quedaría anotada en ella.
+  test("el cargador NO cuenta este mismo pago como cobertura de su cuota", async () => {
+    const m = montaje();
+    await anotarMoraPagoNormal({ credito_id: 7, mora: new Big(1), pago_id: 900, tx: TX, deps: m.deps, hoy: HOY, cargarCuotas: m.cargarCuotas });
+    expect(m.opciones).toEqual([{ excluirPagoId: 900 }]);
   });
 
   test("lo cobrado por encima del pendiente no se anota", async () => {

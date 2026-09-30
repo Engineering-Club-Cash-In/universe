@@ -473,10 +473,8 @@ if (facturasExistentes.length > 0) {
       // authoritative; validate it before any fiscal/provider side effect.
       // Legitimate partials without PCI retain the existing frozen-split path.
       let nexaInvoiceAmounts: ReturnType<typeof nexaPersistedInvoiceAmounts> | undefined;
+      let nexaPersistedCubeId: number | undefined;
       if (useNexaPersistedDistribution && pagoData.validationStatus === "validated") {
-        if (pagoData.bandera_reinversion || inversionistasDelPago.filter(inv => inv.nombre.trim().toUpperCase().includes("CUBE INVESTMENTS")).length !== 1) {
-          throw new Error("nexa_invoice_distribution_requires_reconciliation");
-        }
         const rows = await db.select({
           inversionista_id: pagos_credito_inversionistas.inversionista_id,
           abono_interes: pagos_credito_inversionistas.abono_interes,
@@ -489,11 +487,22 @@ if (facturasExistentes.length > 0) {
               .where(eq(cuotas_credito.cuota_id, pagoData.cuota_id)))[0]
           : undefined;
         if (cuotaInfo?.pagado !== false) {
+          const liveCubeIds = inversionistasDelPago
+            .filter(inv => inv.nombre.trim().toUpperCase().includes("CUBE INVESTMENTS"))
+            .map(inv => inv.inversionista_id);
+          const hasSyntheticCube = tieneOperacionesPendientesFacturar
+            && liveCubeIds.length === 0
+            && rows.some(row => row.inversionista_id === 86);
+          if (pagoData.bandera_reinversion || (liveCubeIds.length !== 1 && !hasSyntheticCube)) {
+            throw new Error("nexa_invoice_distribution_requires_reconciliation");
+          }
+          const resolvedCubeId = liveCubeIds[0] ?? (hasSyntheticCube ? 86 : undefined);
+          nexaPersistedCubeId = resolvedCubeId;
           nexaInvoiceAmounts = nexaPersistedInvoiceAmounts(rows.map(row => ({
             ...row, abono_interes: row.abono_interes ?? "0", abono_iva_12: row.abono_iva_12 ?? "0",
           })), {
             interest: pagoData.abono_interes || "0", vat: pagoData.abono_iva_12 || "0",
-            investorIds: inversionistasDelPago.map(inv => inv.inversionista_id),
+            investorIds: [...inversionistasDelPago.map(inv => inv.inversionista_id), ...(hasSyntheticCube ? [86] : [])],
           });
         }
       }
@@ -1351,7 +1360,8 @@ if (facturasExistentes.length > 0) {
           console.log("\n   🧾 Sumando parte1 + parte2 y emitiendo facturas...");
 
           // Total que va a CUBE = lo de las DOS ventanas sumado.
-          const persistedCube = cubeId === null ? undefined : nexaInvoiceAmounts?.get(cubeId);
+          const persistedCubeId = nexaPersistedCubeId ?? cubeId;
+          const persistedCube = persistedCubeId == null ? undefined : nexaInvoiceAmounts?.get(persistedCubeId);
           interesCubeIvaPersistido = persistedCube?.montoImpuesto;
           const totalCubeFinal = persistedCube
             ? new Big(persistedCube.total)
@@ -1364,7 +1374,7 @@ if (facturasExistentes.length > 0) {
           // Set con todos los IDs de inversionistas que aparecieron en cualquier
           // ventana (algunos podrían tener parte solo en una de las dos).
           const idsInv = nexaInvoiceAmounts
-            ? new Set([...nexaInvoiceAmounts.keys()].filter(id => id !== cubeId))
+            ? new Set([...nexaInvoiceAmounts.keys()].filter(id => id !== persistedCubeId))
             : new Set<number>([
                 ...repartoAntes.parteInvPorId.keys(),
                 ...repartoDespues.parteInvPorId.keys(),
@@ -1857,8 +1867,7 @@ if (facturasExistentes.length > 0) {
         const cubePropio = totalInteresesConIvaPago.minus(totalInteresesNoCube);
         console.log(`\n   📊 CUBE propio (residuo): Q${cubePropio.toFixed(2)} (total Q${totalInteresesConIvaPago.toFixed(2)} - otros Q${totalInteresesNoCube.toFixed(2)})`);
 
-        const cubeInvestor = inversionistasDelPago.find(inv => inv.nombre.trim().toUpperCase().includes("CUBE INVESTMENTS"));
-        const persistedCube = cubeInvestor ? nexaInvoiceAmounts?.get(cubeInvestor.inversionista_id) : undefined;
+        const persistedCube = nexaPersistedCubeId === undefined ? undefined : nexaInvoiceAmounts?.get(nexaPersistedCubeId);
         interesCubeIvaPersistido = persistedCube?.montoImpuesto;
         const totalCube = persistedCube ? new Big(persistedCube.total) : cubePropio.plus(cashInAcumulado);
 

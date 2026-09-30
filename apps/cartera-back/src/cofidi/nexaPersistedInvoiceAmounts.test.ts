@@ -37,6 +37,12 @@ test("runtime-only opt-in and persisted amounts reach both fiscal item builders"
   expect(router.indexOf("nexaPersistedInvoiceAmounts(rows.map")).toBeLessThan(router.indexOf("// 3️⃣ CONSTRUIR RECEPTOR"));
   expect(router).toContain("rows.length === 0 && pagoData.cuota_id !== null");
   expect(router).toContain("cuotaInfo?.pagado !== false");
+  expect(router.indexOf("cuotaInfo?.pagado !== false")).toBeLessThan(router.indexOf("pagoData.bandera_reinversion"));
+  expect(router).toContain("const resolvedCubeId = liveCubeIds[0] ?? (hasSyntheticCube ? 86 : undefined)");
+  expect(router).toContain("investorIds: [...inversionistasDelPago.map(inv => inv.inversionista_id), ...(hasSyntheticCube ? [86] : [])]");
+  expect(router).toContain("const persistedCubeId = nexaPersistedCubeId ?? cubeId");
+  expect(router).toContain(".filter(id => id !== persistedCubeId)");
+  expect(router).toContain("const persistedCube = nexaPersistedCubeId === undefined ? undefined : nexaInvoiceAmounts?.get(nexaPersistedCubeId)");
   expect(router).toContain("const calc = persistedAmounts ?? calcularIvaExacto");
   expect(router).toContain("const calcCube = persistedCube ?? calcularIvaExacto");
   expect(router).toContain("const calc = persistedAmounts ?? calcularIvaExacto(parseFloat(totalInv.toFixed(2)))");

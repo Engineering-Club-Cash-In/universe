@@ -117,6 +117,9 @@ export const UPLOAD_RESOURCE_TYPES = [
 	// CB-037/038: fotos de una visita de cobros. El id es el del CASO: las fotos
 	// se suben antes de guardar la visita (que puede no existir todavía).
 	"cobros_visita_evidencia",
+	// CB-041: confirmación de LEGION de que la unidad ya se apagó. Igual que
+	// las visitas, el id es el del CASO: el archivo se sube antes de ejecutar.
+	"cobros_inmovilizacion_evidencia",
 ] as const;
 
 export type UploadResourceType = (typeof UPLOAD_RESOURCE_TYPES)[number];
@@ -157,6 +160,8 @@ export function buildUploadPrefix(
 			return `investment-documents/${resourceId}`;
 		case "cobros_visita_evidencia":
 			return `cobros/visitas/${resourceId}`;
+		case "cobros_inmovilizacion_evidencia":
+			return `cobros/inmovilizaciones/${resourceId}`;
 	}
 }
 

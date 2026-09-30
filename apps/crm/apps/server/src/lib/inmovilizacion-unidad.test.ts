@@ -1,8 +1,14 @@
 import { describe, expect, it } from "bun:test";
 import {
+	advertenciaEnMarcha,
 	BUCKETS_INMOVILIZACION,
 	bucketsInmovilizacionTexto,
+	componerMotivoApagado,
+	erroresEvidenciaEjecucion,
+	erroresMotivosInmovilizacion,
+	erroresUbicacionSolicitud,
 	estadoUnidad,
+	MOTIVOS_INMOVILIZACION,
 	puedeSolicitar,
 	siguienteEstado,
 	transicionValida,
@@ -174,5 +180,88 @@ describe("puedeSolicitar", () => {
 	it("BUCKETS_INMOVILIZACION es exactamente [2, 3, 4] (CB-120)", () => {
 		expect(BUCKETS_INMOVILIZACION).toEqual([2, 3, 4]);
 		expect(bucketsInmovilizacionTexto()).toBe("B2/B3/B4");
+	});
+});
+
+describe("motivos del apagado", () => {
+	it("usa el catálogo de la recuperación forzosa, sin 'Se inmovilizó la unidad y no pagó'", () => {
+		expect(MOTIVOS_INMOVILIZACION.se_niega_a_pagar).toBe("Se niega a pagar");
+		expect(MOTIVOS_INMOVILIZACION.otro).toBe("Otro");
+		expect("inmovilizada_sin_pago" in MOTIVOS_INMOVILIZACION).toBe(false);
+	});
+
+	it("exige al menos un motivo válido y sin repetir", () => {
+		expect(erroresMotivosInmovilizacion([], null)).not.toBeNull();
+		expect(erroresMotivosInmovilizacion(["no_existe"], null)).not.toBeNull();
+		expect(
+			erroresMotivosInmovilizacion(["inmovilizada_sin_pago"], null),
+		).not.toBeNull();
+		expect(
+			erroresMotivosInmovilizacion(
+				["se_niega_a_pagar", "se_niega_a_pagar"],
+				null,
+			),
+		).not.toBeNull();
+		expect(erroresMotivosInmovilizacion(["se_niega_a_pagar"], null)).toBeNull();
+	});
+
+	it("'Otro' pide detalle", () => {
+		expect(erroresMotivosInmovilizacion(["otro"], "  ")).not.toBeNull();
+		expect(erroresMotivosInmovilizacion(["otro"], "No contesta")).toBeNull();
+	});
+
+	it("compone el texto de la columna `motivo` con etiquetas y detalle", () => {
+		expect(componerMotivoApagado(["se_niega_a_pagar"], null)).toBe(
+			"Se niega a pagar",
+		);
+		expect(
+			componerMotivoApagado(
+				["se_niega_a_pagar", "otro"],
+				" Dejó de contestar ",
+			),
+		).toBe("Se niega a pagar, Otro — Dejó de contestar");
+	});
+});
+
+describe("ubicación y evidencia del apagado", () => {
+	it("la ubicación al solicitar: consulta GPS, dirección o enlace — alguna", () => {
+		expect(erroresUbicacionSolicitud({})).not.toBeNull();
+		expect(erroresUbicacionSolicitud({ direccion: "  " })).not.toBeNull();
+		expect(erroresUbicacionSolicitud({ consultaLogId: "abc" })).toBeNull();
+		expect(erroresUbicacionSolicitud({ direccion: "Zona 1" })).toBeNull();
+		expect(
+			erroresUbicacionSolicitud({ enlace: "https://maps.app/x" }),
+		).toBeNull();
+	});
+
+	it("la ejecución pide archivo o nota, no ninguno", () => {
+		expect(erroresEvidenciaEjecucion({})).not.toBeNull();
+		expect(erroresEvidenciaEjecucion({ nota: "   " })).not.toBeNull();
+		expect(
+			erroresEvidenciaEjecucion({ evidencia: null, nota: null }),
+		).not.toBeNull();
+		expect(erroresEvidenciaEjecucion({ nota: "LEGION confirmó" })).toBeNull();
+		expect(
+			erroresEvidenciaEjecucion({ evidencia: { key: "a/b.png" } }),
+		).toBeNull();
+		expect(
+			erroresEvidenciaEjecucion({ evidencia: { key: "a/b.png" }, nota: "ok" }),
+		).toBeNull();
+	});
+
+	it("advierte si el vehículo va en marcha o con el motor encendido, sin bloquear", () => {
+		expect(advertenciaEnMarcha(null)).toBeNull();
+		expect(
+			advertenciaEnMarcha({ velocidadKmh: 0, ignicion: false }),
+		).toBeNull();
+		expect(
+			advertenciaEnMarcha({ velocidadKmh: 3, ignicion: false }),
+		).toBeNull();
+		expect(advertenciaEnMarcha({ velocidadKmh: 48.4, ignicion: true })).toBe(
+			"El vehículo va en movimiento (48 km/h).",
+		);
+		expect(advertenciaEnMarcha({ velocidadKmh: 0, ignicion: true })).toBe(
+			"El vehículo tiene el motor encendido.",
+		);
 	});
 });

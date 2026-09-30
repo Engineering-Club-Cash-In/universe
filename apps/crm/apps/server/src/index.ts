@@ -125,7 +125,10 @@ import {
 	type CheckPromesasResumen,
 	checkPromesasPago,
 } from "./services/check-promesas-pago";
-import { reconciliarAvisosLlamarCliente } from "./services/inmovilizacion-notif";
+import {
+	reconciliarAvisosLlamarCliente,
+	recordarApagadosSinEjecutar,
+} from "./services/inmovilizacion-notif";
 import { refreshPremoraElegibilidad } from "./services/refresh-premora-elegibilidad";
 import { sendConvenioReminders } from "./services/send-convenio-reminders";
 import { sendPremoraReminders } from "./services/send-premora-reminders";
@@ -2476,6 +2479,14 @@ if (HAY_JOBS_ACTIVOS) {
 		// de que arranque el día (review de Codex, PR #1765).
 		await reconciliarAvisosLlamarCliente().catch((error) =>
 			console.error("Error al reconciliar avisos de inmovilización:", error),
+		);
+		// CB-041: apagados aprobados que el asesor aún no ejecutó (más de 24 h).
+		// Dedup por apagado y día: el run de boot no duplica.
+		await recordarApagadosSinEjecutar().catch((error) =>
+			console.error(
+				"Error en el recordatorio de apagados sin ejecutar:",
+				error,
+			),
 		);
 		// CB-037/038: aviso al responsable de cada visita programada para hoy.
 		// Dedup por visita y día: el run de boot no duplica.

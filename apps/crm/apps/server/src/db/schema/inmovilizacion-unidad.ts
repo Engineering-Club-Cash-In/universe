@@ -11,6 +11,7 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
+import type { UbicacionInmovilizacion } from "../../lib/inmovilizacion-unidad";
 import { user } from "./auth";
 import { casosCobros, contactosCobros } from "./cobros";
 import { vehicles } from "./vehicles";
@@ -81,6 +82,19 @@ export const inmovilizacionesUnidad = pgTable(
 			.notNull()
 			.default("pendiente_aprobacion"),
 		motivo: text("motivo").notNull(),
+		// Apagado: claves del catálogo (lib/inmovilizacion-unidad.ts) y el
+		// detalle libre que las acompaña. `motivo` guarda el texto compuesto
+		// para que la cola y el historial lo sigan leyendo sin cambios.
+		motivos: jsonb("motivos").$type<string[]>(),
+		motivoDetalle: text("motivo_detalle"),
+		// Dónde estaba el vehículo al solicitar / al ejecutar el apagado. Ver
+		// UbicacionInmovilizacion en lib/inmovilizacion-unidad.ts.
+		ubicacionSolicitud: jsonb(
+			"ubicacion_solicitud",
+		).$type<UbicacionInmovilizacion>(),
+		ubicacionEjecucion: jsonb(
+			"ubicacion_ejecucion",
+		).$type<UbicacionInmovilizacion>(),
 		// Bucket del crédito al momento de solicitar (congelado, mismo criterio
 		// que bucketSnapshot en contactosCobros — CB-128).
 		bucketSnapshot: integer("bucket_snapshot"),
@@ -100,6 +114,12 @@ export const inmovilizacionesUnidad = pgTable(
 		modoEjecucion: text("modo_ejecucion").notNull().default("manual"),
 		// Nota o ticket de LEGION que respalda la ejecución manual.
 		referenciaEjecucion: text("referencia_ejecucion"),
+		// Apagado: lo ejecuta el asesor y avala que LEGION ya lo aplicó con un
+		// archivo (llave en R2) y/o una nota. Al menos uno de los dos.
+		evidenciaR2Key: text("evidencia_r2_key"),
+		evidenciaNombreArchivo: text("evidencia_nombre_archivo"),
+		evidenciaMime: text("evidencia_mime"),
+		evidenciaNota: text("evidencia_nota"),
 
 		// La reactivación apunta al apagado que la originó — permite cerrar el
 		// ciclo (marcar `resultado = 'reactivada'` en el apagado origen).

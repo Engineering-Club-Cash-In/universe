@@ -519,6 +519,11 @@ function RouteComponent() {
 	const [canalContacto, setCanalContacto] = useState<CanalContacto | null>(
 		null,
 	);
+	// CB-041: apagado cuya llamada al cliente se está registrando. Al crearse la
+	// gestión se enlaza sola a esta inmovilización (sin elegirla de un select).
+	const [inmovilizacionLlamadaId, setInmovilizacionLlamadaId] = useState<
+		string | null
+	>(null);
 	const [confirmarEstadoCuenta, setConfirmarEstadoCuenta] = useState(false);
 	// CB-042: los dos envíos a recuperación (forzosa / entrega voluntaria)
 	// comparten formulario; null = cerrado.
@@ -1431,6 +1436,32 @@ function RouteComponent() {
 		setIsEditingVehicle(true);
 	};
 
+	// CB-041: la llamada que el asesor acaba de registrar tras un apagado queda
+	// enlazada a esa inmovilización. La gestión ya se guardó: si el enlace falla
+	// (p. ej. no era una llamada) se avisa y el banner de la carta sigue ahí.
+	const enlazarLlamadaApagado = async (
+		inmovilizacionId: string,
+		contactoId: string,
+	) => {
+		try {
+			await client.registrarLlamadaApagado({ inmovilizacionId, contactoId });
+			toast.success("Llamada enlazada al apagado.");
+		} catch (error) {
+			toast.error(
+				(error as { message?: string })?.message ??
+					"La gestión se guardó, pero no se pudo enlazar al apagado.",
+			);
+		} finally {
+			if (caso.id) {
+				queryClient.invalidateQueries({
+					queryKey: orpc.getInmovilizacionesCaso.key({
+						input: { casoCobroId: caso.id },
+					}),
+				});
+			}
+		}
+	};
+
 	const getEstadoBadge = (estado: string | null | undefined) =>
 		estiloBucket(bucketDeEstado(estado, bucketsCatalogo.data).colorHex);
 
@@ -2311,9 +2342,21 @@ function RouteComponent() {
 										key={canalContacto}
 										{...propsContacto}
 										metodoInicial={canalContacto}
+										onCreado={
+											inmovilizacionLlamadaId
+												? (contacto) =>
+														enlazarLlamadaApagado(
+															inmovilizacionLlamadaId,
+															contacto.id,
+														)
+												: undefined
+										}
 										open
 										onOpenChange={(abierto) => {
-											if (!abierto) setCanalContacto(null);
+											if (!abierto) {
+												setCanalContacto(null);
+												setInmovilizacionLlamadaId(null);
+											}
 										}}
 									/>
 								)}
@@ -5016,6 +5059,10 @@ function RouteComponent() {
 								casoCobroId={caso.id}
 								esSupervisor={esSupervisorCobros}
 								key={`inmov:${caso.id}`}
+								onRegistrarLlamada={(inmovilizacionId) => {
+									setInmovilizacionLlamadaId(inmovilizacionId);
+									setCanalContacto("llamada");
+								}}
 							/>
 						)}
 						{/* CB-042 · El registro de recuperación (forzosa o entrega

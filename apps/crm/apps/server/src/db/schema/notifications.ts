@@ -111,6 +111,14 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// cliente. Se resuelve al registrar esa llamada, o, si es el aviso de un
 	// apagado, también cuando se ejecuta la reactivación que lo revierte.
 	"inmovilizacion_llamar_cliente",
+	// CB-041: apagado aprobado que el asesor todavía no ejecutó (recordatorio
+	// cada 24 h, jobs/inmovilizacion-recordatorio.ts). Solo al asesor dueño.
+	"inmovilizacion_ejecutar_pendiente",
+	// CB-041: el asesor registró un apagado ejecutado. Aviso SOLO a los
+	// cobros_supervisor (no al asesor, que es quien lo hizo).
+	"inmovilizacion_apagado_ejecutado",
+	// CB-041: el asesor registró una reactivación ejecutada. Solo supervisores.
+	"inmovilizacion_reactivacion_ejecutada",
 	// CB-042: un crédito llegó a recuperación de vehículo (forzosa o entrega
 	// voluntaria), o se registró una entrega voluntaria con el crédito ya en
 	// B4. Va al asesor de B4 que lo lleva y a los cobros_supervisor, con el

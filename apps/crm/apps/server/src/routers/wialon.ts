@@ -272,7 +272,7 @@ function vinculoAutoVigente(
  * Los de la API (WIALON_API_ERROR) ya vienen de la tabla fija
  * WIALON_ERROR_MESSAGES y se muestran tal cual.
  */
-function mensajeUsuarioWialon(error: WialonClientError): string {
+export function mensajeUsuarioWialon(error: WialonClientError): string {
 	switch (error.code) {
 		case "WIALON_API_ERROR":
 			return error.message;

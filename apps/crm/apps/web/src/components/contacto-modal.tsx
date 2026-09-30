@@ -172,6 +172,11 @@ interface ContactoModalProps {
 	fechaInicio?: string | null;
 	nombreAsesor?: string;
 	telefonoAsesor?: string;
+	/**
+	 * Se llama con la gestión ya creada, antes de cerrar. La usa quien necesita
+	 * enlazarla a algo más (p. ej. la llamada posterior a un apagado de unidad).
+	 */
+	onCreado?: (contacto: { id: string }) => void;
 }
 
 /** Etiqueta del canal — el método ya no se elige dentro de la modal. */
@@ -213,6 +218,7 @@ export function ContactoModal({
 	fechaInicio,
 	nombreAsesor = "",
 	telefonoAsesor = "",
+	onCreado,
 }: ContactoModalProps) {
 	const queryClient = useQueryClient();
 
@@ -466,7 +472,7 @@ export function ContactoModal({
 					normalizeForSubmit(data.montoComprometido) || undefined,
 				proximoPaso: data.proximoPaso || undefined,
 			}),
-		onSuccess: () => {
+		onSuccess: (contacto) => {
 			toast.success(
 				esEdicion
 					? "Promesa actualizada correctamente"
@@ -495,6 +501,7 @@ export function ContactoModal({
 			}
 			// CB-035: una llamada cierra la tarea B3 del caso en el servidor.
 			queryClient.invalidateQueries(orpc.getMisTareasCobros.queryOptions());
+			onCreado?.(contacto);
 			form.reset();
 			handleOpenChange(false);
 		},

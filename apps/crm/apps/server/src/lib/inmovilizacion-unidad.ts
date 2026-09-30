@@ -7,6 +7,8 @@
  * base de datos — mismo criterio que caso-vigente.ts y business-days-gt.ts.
  */
 
+import { MOTIVOS_RECUPERACION_FORZOSA } from "./recuperacion-vehiculo";
+
 export type InmovilizacionAccion = "apagado" | "reactivacion";
 
 export type InmovilizacionEstado =
@@ -147,3 +149,129 @@ export function puedeSolicitar(
 	}
 	return estado === "activa";
 }
+
+// ── Solicitud de apagado: motivos y ubicación ───────────────────────────────
+
+/**
+ * Motivos que el asesor marca al pedir un apagado: los mismos de la
+ * recuperación forzosa, menos "Se inmovilizó la unidad y no pagó", que solo
+ * tiene sentido DESPUÉS de haber apagado la unidad.
+ */
+export const MOTIVOS_INMOVILIZACION: Record<string, string> =
+	Object.fromEntries(
+		Object.entries(MOTIVOS_RECUPERACION_FORZOSA).filter(
+			([clave]) => clave !== "inmovilizada_sin_pago",
+		),
+	);
+
+/**
+ * Dónde estaba el vehículo al solicitar o al ejecutar el apagado. `gps` viene
+ * de una consulta auditada a Wialon (`consultaLogId` la enlaza con
+ * `gps_consulta_logs`); `manual` es lo que escribió el asesor; `sin_ubicacion`
+ * es una ejecución con Wialon caído (solo válida al ejecutar).
+ */
+export type UbicacionInmovilizacion = {
+	fuente: "gps" | "manual" | "sin_ubicacion";
+	lat?: number | null;
+	lng?: number | null;
+	unidad?: string | null;
+	/** ISO de la última posición/señal que reportó la unidad. */
+	senalAt?: string | null;
+	velocidadKmh?: number | null;
+	ignicion?: boolean | null;
+	consultaLogId?: string | null;
+	direccion?: string | null;
+	enlace?: string | null;
+	/** Por qué no hay posición GPS (Wialon caído, sin posición, etc.). */
+	aviso?: string | null;
+};
+
+/** Por encima de esta velocidad (km/h) se considera que la unidad va en marcha. */
+const VELOCIDAD_EN_MARCHA_KMH = 5;
+
+/**
+ * Advertencia si la unidad parece estar en uso. Solo se muestra y se guarda:
+ * no bloquea (decisión de negocio) — la seguridad del apagado la valora quien
+ * lo aprueba y LEGION.
+ */
+export function advertenciaEnMarcha(
+	u:
+		| Pick<UbicacionInmovilizacion, "velocidadKmh" | "ignicion">
+		| null
+		| undefined,
+): string | null {
+	if (!u) return null;
+	if (u.velocidadKmh != null && u.velocidadKmh >= VELOCIDAD_EN_MARCHA_KMH) {
+		return `El vehículo va en movimiento (${Math.round(u.velocidadKmh)} km/h).`;
+	}
+	if (u.ignicion === true) return "El vehículo tiene el motor encendido.";
+	return null;
+}
+
+/**
+ * Primer problema de los motivos marcados (catálogo, repetidos, "Otro" sin
+ * detalle) o null si están completos. Mismas reglas que la recuperación
+ * forzosa (`erroresDetalleRecuperacion`).
+ */
+export function erroresMotivosInmovilizacion(
+	motivos: readonly string[],
+	detalle: string | null | undefined,
+): string | null {
+	if (motivos.length === 0) return "Elegí al menos un motivo.";
+	const invalido = motivos.find((m) => !(m in MOTIVOS_INMOVILIZACION));
+	if (invalido) return `Motivo no válido para un apagado: ${invalido}`;
+	if (new Set(motivos).size !== motivos.length) return "Hay motivos repetidos.";
+	if (motivos.includes("otro") && !detalle?.trim()) {
+		return "Marcaste «Otro»: contá en el detalle cuál es el motivo.";
+	}
+	return null;
+}
+
+/**
+ * Texto que va en la columna `motivo` (NOT NULL): etiquetas de los motivos y,
+ * si hay, el detalle. Es lo que leen la cola, el historial y las
+ * notificaciones, que no conocen la lista estructurada.
+ */
+export function componerMotivoApagado(
+	motivos: readonly string[],
+	detalle: string | null | undefined,
+): string {
+	const etiquetas = motivos
+		.map((m) => MOTIVOS_INMOVILIZACION[m] ?? m)
+		.join(", ");
+	const extra = detalle?.trim();
+	return extra ? `${etiquetas} — ${extra}` : etiquetas;
+}
+
+/**
+ * La ubicación del apagado es obligatoria al solicitar: o la consulta GPS, o
+ * una dirección/enlace que escribió el asesor (si Wialon no respondió).
+ */
+export function erroresUbicacionSolicitud(u: {
+	consultaLogId?: string | null;
+	direccion?: string | null;
+	enlace?: string | null;
+}): string | null {
+	if (u.consultaLogId || u.direccion?.trim() || u.enlace?.trim()) return null;
+	return "Falta la ubicación del vehículo: tomala del GPS o escribí la dirección.";
+}
+
+/**
+ * Para declarar el apagado ejecutado el asesor adjunta la confirmación de
+ * LEGION como archivo, como nota, o ambos — pero no ninguno.
+ */
+export function erroresEvidenciaEjecucion(e: {
+	evidencia?: { key: string } | null;
+	nota?: string | null;
+}): string | null {
+	if (e.evidencia?.key || e.nota?.trim()) return null;
+	return "Adjuntá la confirmación de LEGION (archivo) o escribí una nota.";
+}
+
+/** Formatos de la confirmación de LEGION: captura, foto o PDF del mensaje. */
+export const MIME_EVIDENCIA_INMOVILIZACION = [
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+	"application/pdf",
+] as const;

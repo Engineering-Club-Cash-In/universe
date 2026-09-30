@@ -7,6 +7,7 @@ import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { notifications } from "../db/schema/notifications";
 import { vehicles } from "../db/schema/vehicles";
 import { assertAccesoCasoCobro } from "../lib/acceso-caso-cobro";
+import { MIME_EVIDENCIA_INMOVILIZACION } from "../lib/inmovilizacion-unidad";
 import { protectedProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -237,6 +238,18 @@ async function assertCanUploadToResource(params: {
 			await assertAccesoCasoCobro(resourceId, userId, userRole);
 			return;
 		}
+
+		// CB-041: confirmación de que LEGION apagó la unidad. Mismo gate que las
+		// fotos de visita: el caso tiene que ser uno que el usuario trabaja.
+		case "cobros_inmovilizacion_evidencia": {
+			if (!PERMISSIONS.canAccessCobros(userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para subir evidencia de inmovilización",
+				});
+			}
+			await assertAccesoCasoCobro(resourceId, userId, userRole);
+			return;
+		}
 	}
 }
 
@@ -300,6 +313,17 @@ export const uploadRouter = {
 			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "La evidencia de la visita va en fotos (JPG, PNG o WebP).",
+				});
+			}
+
+			if (
+				input.resourceType === "cobros_inmovilizacion_evidencia" &&
+				!(MIME_EVIDENCIA_INMOVILIZACION as readonly string[]).includes(
+					resolvedMime.mimeType,
+				)
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "La confirmación de LEGION va en JPG, PNG, WebP o PDF.",
 				});
 			}
 

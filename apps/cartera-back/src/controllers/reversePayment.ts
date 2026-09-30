@@ -357,8 +357,8 @@ export function createReversePayment(
         // ── ¿HAY ALGO QUE RESTITUIR? ──────────────────────────────────────
         // Esto sumaba `pago.mora` A CIEGAS, y por eso sobrecobraba: registrar
         // un pago baja la mora EN EL ACTO, pero el criterio de cobertura del
-        // cron solo cuenta pagos `validated`/`no_required`, así que un pago que
-        // amanece `pending` deja su cuota contada como vencida y `procesarMoras`
+        // cron solo cuenta pagos `validated`/`no_required` (y `pending` de hasta
+        // 7 días), así que un pago que sigue `pending` pasado ese plazo deja su cuota contada como vencida y `procesarMoras`
         // vuelve a FIJAR la mora completa desde la fórmula —REEMPLAZA, no
         // acumula—. Para cuando alguien revierte, la bajada del pago YA está
         // deshecha y sumarla otra vez deja el doble. Medido sobre el dump: 32 de

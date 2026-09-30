@@ -17,14 +17,17 @@ describe("getCreditoByNumero devuelve el desglose de la mora", () => {
     expect(fuente).toContain("hasPaidPayment: hasPaidPaymentSql()");
     expect(fuente).toMatch(/numerosEnValidacion: [^\n]+\n\s+cuotasQueVencenHoy,/);
   });
-  test("moraPagada/condonada incluyen las cuotas del desglose (y conservan las atrasadas)", () => {
+  test("moraPagada/condonada incluyen las cuotas del desglose, las atrasadas y las en validación", () => {
     // Solo con `cuotasAtrasadas` (que excluye las cuotas con boleta sin
     // validar) lo abonado a una cuota en validación salía en el desglose pero
     // no en `moraPagada`. Solo con `cargadas`, un crédito EN_CONVENIO o
-    // INCOBRABLE dejaba de mostrar lo ya pagado.
-    const llamada = fuente.match(/moraAbonadaPorOrigen\(\s*([^\n]+)\n/)?.[1] ?? "";
+    // INCOBRABLE dejaba de mostrar lo ya pagado. Y una cuota con pago
+    // pendiente de ≤7 días no está en ninguna de las dos: sin
+    // `cuotasEnValidacion`, lo abonado a ella desaparecía hasta que se validara.
+    const llamada = fuente.match(/moraAbonadaPorOrigen\(\s*([\s\S]*?)\]\)\]/)?.[1] ?? "";
     expect(llamada).toContain("cargadas.map((c) => c.cuota_id)");
     expect(llamada).toContain("cuotasAtrasadas.map((c) => c.cuota_id)");
+    expect(llamada).toContain("cuotasEnValidacion.map((c) => c.cuota_id)");
     expect(fuente).toMatch(/construirDesgloseMora\(\{[\s\S]*?cuotas: cargadas\.map\(/);
   });
 });

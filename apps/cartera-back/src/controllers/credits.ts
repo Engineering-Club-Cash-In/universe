@@ -292,8 +292,9 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     );
 
     // Cuotas vencidas ya cubiertas por boletas que contabilidad aún no valida:
-    // no son deuda (no van en atrasadas), pero el asesor debe verlas — mientras
-    // no se validen, el cron de moras las sigue tratando como atraso.
+    // no son deuda (no van en atrasadas), pero el asesor debe verlas. El cron
+    // les frena la mora solo 7 días desde la fecha del pago; pasado eso, si
+    // siguen sin validar, las vuelve a tratar como atraso.
     const cuotasEnValidacion = filtrarCuotasEnValidacion(
       cuotasVencidasSinCerrar,
       currentCredit.creditos.cuota ?? 0
@@ -319,23 +320,28 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       incrementosMora.get(creditoId)!;
 
     // El «por qué» de la mora para la pantalla de cobro: las cuotas y los días
-    // con el MISMO cargador del cron, así que incluye las cuotas cuyo pago aún
-    // no validó contabilidad (el cron las sigue cobrando aunque no se vean
-    // como atrasadas) y resta lo ya abonado a cada una.
+    // con el MISMO cargador del cron, así que incluye las cuotas cuyo pago
+    // lleva MÁS de 7 días sin validar (el cron las vuelve a cobrar aunque no se
+    // vean como atrasadas) y resta lo ya abonado a cada una.
     const hoyGT = hoyGuatemala();
     const cargadas =
       (await cuotasParaPendienteDeCreditos([creditoId], db, hoyGT)).get(creditoId)?.cuotas ?? [];
 
     // Mora pagada/condonada: separa lo que el cliente ya abonó (PAGO/REVERSA de PAGO)
     // de lo que fue condonado (CONDONACION/REVERSA de CONDONACION).
-    // Sobre las cuotas del desglose (`cargadas`) MÁS las atrasadas: las
-    // atrasadas excluyen las cuotas cubiertas por boletas sin validar, que el
-    // cron —y el desglose— sí cuentan; sin sumarlas, lo abonado a una cuota en
-    // validación salía en el desglose pero no en `moraPagada`. Y `cargadas`
-    // sola viene vacía en créditos EN_CONVENIO/INCOBRABLE (no elegibles para
-    // el cron), donde lo ya pagado se seguiría mostrando.
+    // Sobre las cuotas del desglose (`cargadas`) MÁS las atrasadas MÁS las en
+    // validación: las atrasadas excluyen las cuotas cubiertas por boletas sin
+    // validar, y el cron —y el desglose— tampoco cuentan las de un pago
+    // pendiente de hasta 7 días; sin sumarlas, lo ya abonado a esa cuota
+    // desaparecía de `moraPagada` mientras contabilidad no validara. Y
+    // `cargadas` sola viene vacía en créditos EN_CONVENIO/INCOBRABLE (no
+    // elegibles para el cron), donde lo ya pagado se seguiría mostrando.
     const moraAbonoOrigen = await moraAbonadaPorOrigen(
-      [...new Set([...cargadas.map((c) => c.cuota_id), ...cuotasAtrasadas.map((c) => c.cuota_id)])],
+      [...new Set([
+        ...cargadas.map((c) => c.cuota_id),
+        ...cuotasAtrasadas.map((c) => c.cuota_id),
+        ...cuotasEnValidacion.map((c) => c.cuota_id),
+      ])],
       db
     );
     const moraPagada = moraAbonoOrigen.pagada.toFixed(2);
@@ -927,22 +933,11 @@ export async function incrementosMoraPorCredito(
       credito_id: cuotas_credito.credito_id,
       fecha_vencimiento: cuotas_credito.fecha_vencimiento,
       pagado: cuotas_credito.pagado,
-      // ⚠️ La columna de la cuota va con su nombre COMPLETO y no por
-      // `${cuotas_credito.cuota_id}`: drizzle lo renderiza sin calificar
-      // (`"cuota_id"` pelado) y adentro del EXISTS gana el alcance INTERNO, o
-      // sea `pc.cuota_id`. La condición se volvía `pc.cuota_id = pc.cuota_id`
-      // —siempre cierta— y el EXISTS respondía "¿existe ALGÚN pago aplicado en
-      // toda la tabla?": true para todas las cuotas. Con eso ninguna cuota era
-      // elegible y el incremento salía "0.00" SIEMPRE.
-      hasPaidPayment: sql<boolean>`EXISTS (
-        SELECT 1
-        FROM cartera.pagos_credito pc
-        WHERE pc.cuota_id = "cartera"."cuotas_credito"."cuota_id"
-          AND pc."paymentFalse" = false
-          AND pc.pagado = true
-          AND pc.validation_status IN ('validated', 'no_required')
-          AND COALESCE(pc.monto_aplicado, 0) > 0
-      )`,
+      // El MISMO helper del cron (incluye el pago pendiente de hasta 7 días):
+      // una copia a mano se quedaba atrás cada vez que cambiaba el criterio y
+      // el ritmo anunciado dejaba de cuadrar con lo que el cron cobra. El
+      // helper ya trae la cuota de afuera calificada a mano (ver su comentario).
+      hasPaidPayment: hasPaidPaymentSql(),
     })
     .from(cuotas_credito)
     .where(

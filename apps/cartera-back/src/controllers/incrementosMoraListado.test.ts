@@ -222,13 +222,15 @@ describe("CONTRATO: el listado cablea los tres campos, y fuera del loop", () => 
     // aplicado en toda la tabla?" —true para todas las cuotas—, ninguna cuota
     // queda elegible y el incremento da "0.00" siempre, en el listado Y en el
     // detalle. Este test lo fija sobre el fuente porque el doble de `db` de
-    // arriba nunca ejecuta SQL de verdad.
+    // arriba nunca ejecuta SQL de verdad. La subconsulta vive ahora en
+    // `hasPaidPaymentSql` (cuyo test fija la calificación); acá se fija que el
+    // listado la use y no vuelva a una copia a mano.
     expect(fuente).not.toContain(
       "WHERE pc.cuota_id = ${cuotas_credito.cuota_id}",
     );
-    expect(fuente).toContain(
-      'WHERE pc.cuota_id = "cartera"."cuotas_credito"."cuota_id"',
-    );
+    const inc = fuente.slice(fuente.indexOf("export async function incrementosMoraPorCredito"));
+    expect(inc.slice(0, inc.indexOf("\nexport "))).toContain("hasPaidPayment: hasPaidPaymentSql()");
+    expect(fuente).not.toContain("pc.validation_status IN");
   });
   const listado = fuente.slice(
     fuente.indexOf("export async function getCreditosWithUserByMesAnio"),

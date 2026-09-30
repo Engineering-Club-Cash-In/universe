@@ -29,7 +29,12 @@ export type DesgloseMora = {
     dias_atraso: number;
     /** Ya llegó al tope de 30 días: no crece más. */
     topada: boolean;
-    /** Tiene un pago que contabilidad no validó: el cron la sigue contando. */
+    /**
+     * Tiene un pago que contabilidad no validó y el cron igual la cuenta: un
+     * pendiente frena la mora solo 7 días (`DIAS_PAGO_PENDIENTE_FRENA_MORA`),
+     * así que las cuotas marcadas son las de un pago de MÁS de 7 días sin
+     * validar. Las de menos no llegan al desglose (el cargador las descarta).
+     */
     en_validacion: boolean;
     generado: string;
     abonado: string;

@@ -15,6 +15,10 @@ describe("un solo criterio de «cuota ya pagada» para el cron y el ledger", () 
 	test("la subconsulta vive en un solo módulo", () => {
 		// Si reaparece una copia en latefee.ts, el cron y el reparto pueden divergir.
 		expect(latefee).not.toContain("pc.cuota_id = ${cuotas_credito.cuota_id}");
+		expect(latefee).not.toContain("pc.validation_status IN");
+	});
+	test("el reconteo de createMora usa el helper del cron (si no, overdue_count_mismatch)", () => {
+		expect(cuerpo("export async function createMora")).toContain("AND NOT ${hasPaidPaymentSql()}");
 	});
 	test("procesarMoras y cuotasParaPendienteDeCreditos usan el mismo helper", () => {
 		expect(cuerpo("export async function procesarMoras")).toContain("hasPaidPayment: hasPaidPaymentSql()");

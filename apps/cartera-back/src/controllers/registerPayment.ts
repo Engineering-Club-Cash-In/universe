@@ -3517,7 +3517,8 @@ async function aplicarPagoNormalEnTx(
             // (dejó su recibo en 0). Si se queda así ya validada, la mora
             // tomaría la cuota como satisfecha aunque el hermano nunca se
             // valide (latefee/procesarMoras excluyen cuotas con una fila viva
-            // pagado=true validated/no_required con monto>0). Mientras el
+            // pagado=true validated/no_required —o pending de hasta 7 días—
+            // con monto>0). Mientras el
             // cierre esté diferido, la fila viaja como parcial (pagado=false);
             // cuotas_credito.pagado lo pone el hermano que cierra en RAMA B.
             cierreDiferido = pago.pagado === true;

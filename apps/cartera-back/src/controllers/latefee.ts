@@ -801,7 +801,8 @@ export function decidirLimpiezaMoraTrasAplicar(params: {
  *
  * Por qué: una boleta registrada queda `pending` hasta que contabilidad la
  * valida; si esa ventana cruza la corrida nocturna de procesarMoras, el cron
- * crea una mora (correcta bajo la regla "solo cuenta lo validado") que nadie
+ * crea una mora (correcta bajo la regla de cobertura; un pending solo cubre
+ * hasta 7 días, ver `hasPaidPaymentSql`) que nadie
  * apaga al validar — quedaba viva hasta el cron siguiente y el crédito se veía
  * "0 atrasadas pero con mora y MOROSO" todo el día, forzando condonaciones
  * manuales. Esta función es el espejo acotado-a-un-crédito del paso
@@ -1052,18 +1053,18 @@ export async function createMora({
     // no es un bloque por cuota sino proporcional a los días de atraso (con techo
     // de un cargo mensual). Va en el MISMO query para no pagar un segundo viaje ni
     // arriesgar que los dos vean fotos distintas de las cuotas.
+    // El «ya pagada» es el MISMO helper del cron (con el pago pendiente de
+    // hasta 7 días): una copia a mano que se quedara atrás contaría una cuota
+    // que el cron no cobra y rechazaría con overdue_count_mismatch. Sin alias
+    // en la tabla: el helper la nombra completa ("cartera"."cuotas_credito").
     const ovRes = await ejecutor.execute<any>(sql`
       SELECT COUNT(*)::int AS n,
-             COALESCE(SUM(LEAST(1.0, GREATEST(0, ((now() AT TIME ZONE 'America/Guatemala')::date - cu.fecha_vencimiento::date))::numeric / 30.0)), 0)::numeric AS factor
-      FROM cartera.cuotas_credito cu
-      WHERE cu.credito_id = ${credito_id}
-        AND cu.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
-        AND cu.pagado = false
-        AND NOT EXISTS (
-          SELECT 1 FROM cartera.pagos_credito pc
-          WHERE pc.cuota_id = cu.cuota_id AND pc."paymentFalse" = false AND pc.pagado = true
-            AND pc.validation_status IN ('validated', 'no_required')
-            AND COALESCE(pc.monto_aplicado, 0) > 0)`);
+             COALESCE(SUM(LEAST(1.0, GREATEST(0, ((now() AT TIME ZONE 'America/Guatemala')::date - cartera.cuotas_credito.fecha_vencimiento::date))::numeric / 30.0)), 0)::numeric AS factor
+      FROM cartera.cuotas_credito
+      WHERE cartera.cuotas_credito.credito_id = ${credito_id}
+        AND cartera.cuotas_credito.fecha_vencimiento::date < (now() AT TIME ZONE 'America/Guatemala')::date
+        AND cartera.cuotas_credito.pagado = false
+        AND NOT ${hasPaidPaymentSql()}`);
     const cuotasReales = Number(ovRes.rows?.[0]?.n ?? 0);
     const factorDias = new Big(ovRes.rows?.[0]?.factor ?? 0);
 

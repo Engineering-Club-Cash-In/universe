@@ -483,12 +483,19 @@ if (facturasExistentes.length > 0) {
           abono_iva_12: pagos_credito_inversionistas.abono_iva_12,
         }).from(pagos_credito_inversionistas)
           .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
-        nexaInvoiceAmounts = nexaPersistedInvoiceAmounts(rows.map(row => ({
-          ...row, abono_interes: row.abono_interes ?? "0", abono_iva_12: row.abono_iva_12 ?? "0",
-        })), {
-          interest: pagoData.abono_interes || "0", vat: pagoData.abono_iva_12 || "0",
-          investorIds: inversionistasDelPago.map(inv => inv.inversionista_id),
-        });
+        const cuotaInfo = rows.length === 0 && pagoData.cuota_id !== null
+          ? (await db.select({ pagado: cuotas_credito.pagado })
+              .from(cuotas_credito)
+              .where(eq(cuotas_credito.cuota_id, pagoData.cuota_id)))[0]
+          : undefined;
+        if (cuotaInfo?.pagado !== false) {
+          nexaInvoiceAmounts = nexaPersistedInvoiceAmounts(rows.map(row => ({
+            ...row, abono_interes: row.abono_interes ?? "0", abono_iva_12: row.abono_iva_12 ?? "0",
+          })), {
+            interest: pagoData.abono_interes || "0", vat: pagoData.abono_iva_12 || "0",
+            investorIds: inversionistasDelPago.map(inv => inv.inversionista_id),
+          });
+        }
       }
 
       // ============================================
@@ -1343,7 +1350,10 @@ if (facturasExistentes.length > 0) {
           console.log("\n   🧾 Sumando parte1 + parte2 y emitiendo facturas...");
 
           // Total que va a CUBE = lo de las DOS ventanas sumado.
-          const totalCubeFinal = repartoAntes.totalCubeParcial.plus(repartoDespues.totalCubeParcial);
+          const persistedCube = cubeId === null ? undefined : nexaInvoiceAmounts?.get(cubeId);
+          const totalCubeFinal = persistedCube
+            ? new Big(persistedCube.total)
+            : repartoAntes.totalCubeParcial.plus(repartoDespues.totalCubeParcial);
 
           // 🧾 Guardar para el desglose de facturación (rubro INTERES, con IVA).
           interesCubeConIva = totalCubeFinal;
@@ -1351,10 +1361,12 @@ if (facturasExistentes.length > 0) {
 
           // Set con todos los IDs de inversionistas que aparecieron en cualquier
           // ventana (algunos podrían tener parte solo en una de las dos).
-          const idsInv = new Set<number>([
-            ...repartoAntes.parteInvPorId.keys(),
-            ...repartoDespues.parteInvPorId.keys(),
-          ]);
+          const idsInv = nexaInvoiceAmounts
+            ? new Set([...nexaInvoiceAmounts.keys()].filter(id => id !== cubeId))
+            : new Set<number>([
+                ...repartoAntes.parteInvPorId.keys(),
+                ...repartoDespues.parteInvPorId.keys(),
+              ]);
 
           // Fecha de vencimiento para el complemento cambiario de la factura.
           // Cascada: usa fecha_vencimiento del pago, sino fecha_pago, sino HOY.
@@ -1376,7 +1388,10 @@ if (facturasExistentes.length > 0) {
             const parteDespues = repartoDespues.parteInvPorId.get(invId) ?? new Big(0);
 
             // Total a facturar al inversionista, redondeado a 2 decimales.
-            const totalInv = parteAntes.plus(parteDespues).round(2);
+            const persistedAmounts = nexaInvoiceAmounts?.get(invId);
+            const totalInv = persistedAmounts
+              ? new Big(persistedAmounts.total)
+              : parteAntes.plus(parteDespues).round(2);
 
             // Si por redondeo o porque no le tocaba nada da Q0 → no facturamos.
             if (totalInv.lte(0)) {
@@ -1396,7 +1411,7 @@ if (facturasExistentes.length > 0) {
               continue;
             }
 
-            const calc = calcularIvaExacto(parseFloat(totalInv.toFixed(2)));
+            const calc = persistedAmounts ?? calcularIvaExacto(parseFloat(totalInv.toFixed(2)));
             console.log(`      💼 Factura ${inv.nombre}: Q${totalInv.toFixed(2)} (antes Q${parteAntes.toFixed(2)} + después Q${parteDespues.toFixed(2)})`);
 
             const itemsInv = [
@@ -1494,7 +1509,7 @@ if (facturasExistentes.length > 0) {
             // Redondeo a 2 decimales antes de calcular IVA.
             const totalCubeRounded = totalCubeFinal.round(2);
             console.log(`\n      💼 Factura CUBE: Q${totalCubeRounded.toFixed(2)} (antes Q${repartoAntes.totalCubeParcial.toFixed(2)} + después Q${repartoDespues.totalCubeParcial.toFixed(2)})`);
-            const calcCube = calcularIvaExacto(parseFloat(totalCubeRounded.toFixed(2)));
+            const calcCube = persistedCube ?? calcularIvaExacto(parseFloat(totalCubeRounded.toFixed(2)));
 
             const itemsCube = [
               {

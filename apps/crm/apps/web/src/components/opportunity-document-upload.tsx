@@ -17,7 +17,10 @@ import { Combobox } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
 import { getDocumentTypeLabel } from "@/lib/crm-formatters";
 import { VEHICLE_DOCUMENT_TYPES } from "@/lib/document-constants";
-import { etiquetaEnvioAseguradora } from "@/lib/envio-aseguradora";
+import {
+	etiquetaEnvioAseguradora,
+	textoSubidoPor,
+} from "@/lib/envio-aseguradora";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client } from "@/utils/orpc";
 
@@ -383,6 +386,11 @@ export function OpportunityDocumentUpload({
 										{doc.originalName || doc.filename || "Documento sin nombre"}{" "}
 										• {formatUploadedDate(doc.uploadedAt)}
 									</p>
+									{doc.subidoDesde && (
+										<p className="text-muted-foreground text-xs">
+											{textoSubidoPor(doc)}
+										</p>
+									)}
 									{(() => {
 										const envio = etiquetaEnvioAseguradora(doc.envioAseguradora);
 										return (

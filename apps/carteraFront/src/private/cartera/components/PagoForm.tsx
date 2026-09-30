@@ -766,6 +766,7 @@ export function PagoForm() {
                 onCuotaSeleccionadaChange={setCuotaSeleccionada}
                 cuotasPendientesInfo={cuotasPendientesInfo ?? { cuotas: [] }}
                 mora={mora || 0}
+                desgloseMora={dataCredito.desgloseMora}
                 rubros={rubros}
                 rubrosActual={rubrosActual}
                 convenioActivoInfo={convenioActivoInfo}

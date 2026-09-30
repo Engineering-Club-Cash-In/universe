@@ -13,6 +13,8 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import type { RubroPendiente } from "../services/services";
 import { calcularTotalACobrar } from "./totalACobrar";
+import { DesgloseMoraPanel } from "./desgloseMora";
+import type { DesgloseMora } from "../services/services";
 
 export function MiniCardCredito({
   credito,
@@ -26,6 +28,7 @@ export function MiniCardCredito({
   onCuotaSeleccionadaChange,
   cuotasPendientesInfo,
   mora,
+  desgloseMora,
   rubros,
   rubrosActual,
   convenioActivoInfo,
@@ -75,6 +78,8 @@ export function MiniCardCredito({
     }[];
   };
   mora: number;
+  /** El porqué de la mora, cuota por cuota (del back). */
+  desgloseMora?: DesgloseMora;
   // Rubros pendientes (tarjeta de circulación, placas, traspaso...). Ausentes
   // en la enorme mayoría de créditos: el desglose solo aparece si hay algo que
   // desglosar.
@@ -545,6 +550,14 @@ export function MiniCardCredito({
                 </span>
               )}
             </div>
+
+            {desgloseMora && (
+              <DesgloseMoraPanel
+                desglose={desgloseMora}
+                moraRegistrada={moraNum}
+                capital={credito?.capital ?? 0}
+              />
+            )}
 
             {(cuotasEnValidacionInfo?.total ?? 0) > 0 && (
               <div className="mt-1 px-2 py-1 bg-amber-50 border border-amber-300 rounded text-[11px] font-semibold text-amber-700">

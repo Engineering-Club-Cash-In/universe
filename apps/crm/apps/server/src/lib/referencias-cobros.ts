@@ -24,7 +24,10 @@
  * a `construirReferencias`.
  */
 
-import { normalizarTelefono } from "./bot-cobros/identificadores";
+// De ./telefonos y no de ./identificadores: este módulo entra al bundle de la
+// web, e identificadores arrastra utils/cui-validation (fuera de lo que copia
+// el Dockerfile de la web).
+import { normalizarTelefono } from "./bot-cobros/telefonos";
 
 export const ORIGENES_REFERENCIA = [
 	"cobros",

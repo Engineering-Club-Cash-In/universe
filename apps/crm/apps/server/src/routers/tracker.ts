@@ -19,7 +19,10 @@ import {
 	opportunityAgencySellers,
 	partnerAccounts,
 } from "../db/schema/partners";
-import { quotations } from "../db/schema/quotations";
+import {
+	opportunityCloseQuotations,
+	quotations,
+} from "../db/schema/quotations";
 import { vehicles, vehicleVendors } from "../db/schema/vehicles";
 import {
 	armarCorreoFacturaSeguro,
@@ -407,10 +410,18 @@ async function datosDelCorreo(
 		.limit(1);
 
 	// Ya ganada (el caso normal al 90%), el crédito se armó con la cotización
-	// que eligió el cierre y la aseguradora quedó estampada en la oportunidad.
-	// Se reconstruye esa elección: solo las cotizaciones que existían al cerrar
-	// y, entre ellas, las de la aseguradora del crédito. Una cotización creada
-	// o aceptada después del cierre no cambia el correo.
+	// que eligió el cierre, que la guarda en opportunity_close_quotations, y la
+	// aseguradora quedó estampada en la oportunidad. Si el cierre no la guardó
+	// (cierres anteriores), se reconstruye: solo las cotizaciones que existían
+	// al cerrar y, entre ellas, las de la aseguradora del crédito.
+	const [delCierre] =
+		fila.status === "won"
+			? await db
+					.select({ quotationId: opportunityCloseQuotations.quotationId })
+					.from(opportunityCloseQuotations)
+					.where(eq(opportunityCloseQuotations.opportunityId, fila.id))
+					.limit(1)
+			: [];
 	const cerradaAt =
 		fila.status === "won" ? (oportunidad?.actualCloseDate ?? null) : null;
 	const aseguradoraDelCredito = cerradaAt
@@ -434,7 +445,11 @@ async function datosDelCorreo(
 		.where(
 			and(
 				eq(quotations.opportunityId, fila.id),
-				cerradaAt ? lte(quotations.createdAt, cerradaAt) : undefined,
+				delCierre
+					? eq(quotations.id, delCierre.quotationId)
+					: cerradaAt
+						? lte(quotations.createdAt, cerradaAt)
+						: undefined,
 			),
 		)
 		.orderBy(

@@ -13,6 +13,10 @@
 -- `company_id` guarda la agencia desde la que se subió: la oportunidad puede
 -- cambiar de agencia después y el CRM muestra "Subido desde <agencia>".
 --
+-- `opportunity_close_quotations` guarda la cotización con la que el cierre
+-- armó el crédito: después del cierre se pueden crear o aceptar otras, y la
+-- factura tiene que decir lo mismo que el crédito.
+--
 -- Idempotente: se puede correr más de una vez sin romper nada.
 
 CREATE TABLE IF NOT EXISTS "public"."insurance_invoice_submissions" (
@@ -57,6 +61,24 @@ END $$;--> statement-breakpoint
 
 DO $$ BEGIN
 	ALTER TABLE "public"."insurance_invoice_submissions" ADD CONSTRAINT "insurance_invoice_submissions_submitted_by_user_id_fk" FOREIGN KEY ("submitted_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION
+	WHEN duplicate_object THEN null;
+END $$;--> statement-breakpoint
+
+CREATE TABLE IF NOT EXISTS "public"."opportunity_close_quotations" (
+	"opportunity_id" uuid PRIMARY KEY NOT NULL,
+	"quotation_id" uuid NOT NULL,
+	"created_at" timestamp DEFAULT now() NOT NULL
+);--> statement-breakpoint
+
+DO $$ BEGIN
+	ALTER TABLE "public"."opportunity_close_quotations" ADD CONSTRAINT "opportunity_close_quotations_opportunity_id_opportunities_id_fk" FOREIGN KEY ("opportunity_id") REFERENCES "public"."opportunities"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+	WHEN duplicate_object THEN null;
+END $$;--> statement-breakpoint
+
+DO $$ BEGIN
+	ALTER TABLE "public"."opportunity_close_quotations" ADD CONSTRAINT "opportunity_close_quotations_quotation_id_quotations_id_fk" FOREIGN KEY ("quotation_id") REFERENCES "public"."quotations"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
 	WHEN duplicate_object THEN null;
 END $$;

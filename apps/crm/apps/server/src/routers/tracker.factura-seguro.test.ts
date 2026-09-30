@@ -375,6 +375,33 @@ describe("subirFacturaSeguro", () => {
 		expect(borradosR2).toHaveLength(0);
 	});
 
+	test("sin vehículo vinculado, el correo nombra el vehículo de la cotización elegida, no el de la última editada", async () => {
+		// La fila trae el vehículo de la última cotización editada (Kia); la
+		// cotización elegida para el correo (la aceptada) es de otro vehículo.
+		caso = casoAl(90, {
+			vehicleMake: null,
+			vehicleModel: null,
+			vehicleYear: null,
+			quotationBrand: "Kia",
+			quotationLine: "Rio",
+			quotationModel: "2019",
+		});
+		cotizacion = [
+			{
+				insuranceProvider: "gyt",
+				insuredAmount: "300000",
+				vehicleBrand: "Toyota",
+				vehicleLine: "Hilux",
+				vehicleModel: "2024",
+			},
+		];
+		await subir();
+		const html = insertados.find((i) => i.tabla === insuranceInvoiceSubmissions)
+			?.valores.correoHtml as string;
+		expect(html).toContain("Toyota Hilux 2024");
+		expect(html).not.toContain("Kia");
+	});
+
 	test("sin destinatarios no se envía, pero la factura queda", async () => {
 		correosPolizas = { ...correosPolizas, gyt: [] };
 		const r = await subir();

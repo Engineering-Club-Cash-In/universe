@@ -400,6 +400,9 @@ async function datosDelCorreo(
 			insuredAmount: quotations.insuredAmount,
 			monthlyPayment: quotations.monthlyPayment,
 			vehicleType: quotations.vehicleType,
+			vehicleBrand: quotations.vehicleBrand,
+			vehicleLine: quotations.vehicleLine,
+			vehicleModel: quotations.vehicleModel,
 		})
 		.from(quotations)
 		.where(eq(quotations.opportunityId, fila.id))
@@ -434,7 +437,14 @@ async function datosDelCorreo(
 				fila.leadLastName,
 				fila.leadSecondLastName,
 			),
-			vehiculo: descripcionVehiculo(fila),
+			// Sin vehículo vinculado, el nombre sale de esta misma cotización y no
+			// de la última editada: si no, mezclaría datos de dos cotizaciones.
+			vehiculo: descripcionVehiculo({
+				...fila,
+				quotationBrand: cotizacion?.vehicleBrand ?? null,
+				quotationLine: cotizacion?.vehicleLine ?? null,
+				quotationModel: cotizacion?.vehicleModel ?? null,
+			}),
 			vin: oportunidad?.vin ?? null,
 			tipoVehiculo:
 				oportunidad?.tipoVehiculo?.trim() || cotizacion?.vehicleType || null,

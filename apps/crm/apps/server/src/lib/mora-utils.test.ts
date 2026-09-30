@@ -4,6 +4,7 @@ import type { CarteraCuotaCredito } from "../types/cartera-back";
 import {
 	calcularDiasMoraExactos,
 	diasMoraDeListado,
+	diasMoraDelDetalle,
 	estadoMoraPorCuotasAtrasadas,
 	fechaCalendarioGT,
 	hoyCalendarioGT,
@@ -228,6 +229,10 @@ describe("CONTRATO: ningún camino de cobranza vuelve a multiplicar por 30", () 
 		new URL("../routers/cobros.ts", import.meta.url),
 		"utf8",
 	);
+	const fuenteBuildCaso = readFileSync(
+		new URL("./build-caso-from-cartera.ts", import.meta.url),
+		"utf8",
+	);
 
 	test("el router de cobros no inventa días como cuotas × 30", () => {
 		// Los dos sitios que lo hacían: el listado (/getAllCredits, que no trae
@@ -240,5 +245,76 @@ describe("CONTRATO: ningún camino de cobranza vuelve a multiplicar por 30", () 
 		expect(fuente).toContain(
 			"diasMoraDeListado(credito.diasAtrasoMoraMaximo)",
 		);
+	});
+
+	test("las tres rutas de la ficha deciden el respaldo por el CAMPO, no por el valor", () => {
+		// Antes esto afirmaba que el código contuviera `diasMoraDeListado(…) ||
+		// calcularDiasMoraExactos` — o sea, afirmaba que el DEFECTO estuviera
+		// presente: con `||`, un 0 legítimo de un crédito incobrable caía al
+		// cálculo viejo. Esa prueba congelaba el bug; quien lo arreglara la veía
+		// roja. La decisión vive ahora en `diasMoraDelDetalle`, que se prueba
+		// por comportamiento más abajo. Acá solo se verifica que ninguna ruta
+		// volvió a la forma defectuosa.
+		expect(fuente).not.toMatch(/diasMoraDeListado\([^)]*\)\s*\|\|\s*calcularDiasMoraExactos/);
+		// 2 uses en cobros.ts + 1 en build-caso-from-cartera.ts = 3 total
+		const usosEnCobros = (fuente.match(/diasMoraDelDetalle\(/g) ?? []).length;
+		const usosEnBuildCaso = (fuenteBuildCaso.match(/diasMoraDelDetalle\(/g) ?? []).length;
+		expect(usosEnCobros + usosEnBuildCaso).toBe(3);
+	});
+});
+
+describe("diasMoraDeListado: fallback behavior when cartera-back doesn't send the field", () => {
+	test("cuando diasAtrasoMoraMaximo viene del detalle, usa ese valor", () => {
+		// Simulamos el valor que cartera-back mandaría
+		const diasDesdeCartera = 25;
+		const resultado = diasMoraDeListado(diasDesdeCartera);
+		expect(resultado).toBe(25);
+	});
+
+	test("cuando diasAtrasoMoraMaximo es undefined (cartera viejo), devuelve 0", () => {
+		const resultado = diasMoraDeListado(undefined);
+		expect(resultado).toBe(0);
+	});
+
+	test("cuando diasAtrasoMoraMaximo es null, devuelve 0", () => {
+		const resultado = diasMoraDeListado(null);
+		expect(resultado).toBe(0);
+	});
+
+	test("cuando diasAtrasoMoraMaximo es 0 (al día), devuelve 0", () => {
+		const resultado = diasMoraDeListado(0);
+		expect(resultado).toBe(0);
+	});
+});
+
+// ============================================================================
+// diasMoraDelDetalle — el respaldo se decide por si VINO el campo, no por su valor
+//
+// Un crédito INCOBRABLE o CAÍDO no devenga mora, y cartera-back manda 0 días.
+// Ese 0 es un valor legítimo. Si el respaldo se decidiera con `||`, contaría
+// como "no vino", se recalcularía con el criterio de MONTOS —que no mira el
+// estado del crédito— y la ficha volvería a mostrar muchos días de atraso con
+// Q0 de mora: el defecto que esto arregla.
+// ============================================================================
+describe("diasMoraDelDetalle", () => {
+	const respaldoQueNoDebeUsarse = () => 999;
+
+	test("un 0 que manda cartera se RESPETA — no cae al cálculo viejo", () => {
+		expect(diasMoraDelDetalle(0, respaldoQueNoDebeUsarse)).toBe(0);
+	});
+
+	test("un valor positivo que manda cartera se usa tal cual", () => {
+		expect(diasMoraDelDetalle(45, respaldoQueNoDebeUsarse)).toBe(45);
+	});
+
+	test("si el campo NO vino (cartera vieja), recién ahí se recalcula", () => {
+		expect(diasMoraDelDetalle(undefined, () => 62)).toBe(62);
+		expect(diasMoraDelDetalle(null, () => 62)).toBe(62);
+	});
+
+	test("el respaldo ni se ejecuta cuando el campo vino", () => {
+		let llamado = false;
+		diasMoraDelDetalle(0, () => { llamado = true; return 1; });
+		expect(llamado).toBe(false);
 	});
 });

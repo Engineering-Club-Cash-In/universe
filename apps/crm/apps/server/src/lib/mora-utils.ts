@@ -129,3 +129,30 @@ export function diasMoraDeListado(
 	if (!Number.isFinite(diasAtrasoMoraMaximo)) return 0;
 	return Math.max(0, Math.trunc(diasAtrasoMoraMaximo));
 }
+
+/**
+ * Los días de mora de la FICHA y de la sincronización de un caso.
+ *
+ * Usa `diasAtrasoMoraMaximo` que manda cartera-back —calculado con el MISMO
+ * criterio de elegibilidad que el monto de mora— y solo cae a recalcular
+ * cuando el campo **no vino** (una cartera-back vieja desplegada: los dos
+ * sistemas salen por separado).
+ *
+ * ⚠️ La pregunta es «¿vino el campo?», NO «¿dio distinto de cero?». Cero es un
+ * valor legítimo y es justamente el caso importante: un crédito INCOBRABLE o
+ * CAÍDO no devenga mora y cartera manda 0 días. Si el respaldo se decidiera
+ * con `||`, ese 0 contaría como "no vino", se recalcularía con el criterio de
+ * montos —que no mira el estado del crédito— y la ficha volvería a mostrar
+ * muchos días de atraso con Q0 de mora. Que es el defecto que esto arregla.
+ *
+ * Por eso tampoco se puede decidir mirando la salida de `diasMoraDeListado`:
+ * devuelve 0 tanto para un campo ausente como para un 0 real.
+ */
+export function diasMoraDelDetalle(
+	diasAtrasoMoraMaximo: number | null | undefined,
+	calcularRespaldo: () => number,
+): number {
+	return diasAtrasoMoraMaximo != null
+		? diasMoraDeListado(diasAtrasoMoraMaximo)
+		: calcularRespaldo();
+}

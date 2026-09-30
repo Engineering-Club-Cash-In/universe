@@ -211,6 +211,10 @@ export interface CreditoDetailResponse {
 	 * Ausente si la proyección de mora falló (cartera-back responde igual).
 	 */
 	diasAtrasoMoraMaximo?: number;
+	/** Mora ya pagada en efectivo sobre las cuotas que SIGUEN atrasadas (lo que baja la mora de hoy). No es el histórico: lo abonado a cuotas ya cubiertas sale de la cuenta. */
+	moraPagada?: string;
+	/** Mora condonada sobre las cuotas que SIGUEN atrasadas. Baja la mora igual que un pago, pero no es plata que entró. */
+	moraCondonada?: string;
 }
 
 /**
@@ -322,6 +326,17 @@ export interface CreditoDirectoResponse {
 	 * porque un cartera-back anterior a ese cambio no lo manda.
 	 */
 	incrementoMaximoMensualMora?: string;
+	/**
+	 * Días REALES de atraso del crédito: los de la cuota vencida MÁS ANTIGUA
+	 * entre las que mueven la mora. cartera-back los calcula junto con el monto
+	 * proporcional (`incrementosMoraPorCredito`), así que cuadran con él.
+	 * Ausente si la proyección de mora falló (cartera-back responde igual).
+	 */
+	diasAtrasoMoraMaximo?: number;
+	/** Mora ya pagada en efectivo sobre las cuotas que SIGUEN atrasadas (lo que baja la mora de hoy). No es el histórico: lo abonado a cuotas ya cubiertas sale de la cuenta. */
+	moraPagada?: string;
+	/** Mora condonada sobre las cuotas que SIGUEN atrasadas. Baja la mora igual que un pago, pero no es plata que entró. */
+	moraCondonada?: string;
 	mora?: CarteraMoraCredito | null;
 	convenioActivo?: CarteraConvenio | null;
 	ajusteFechaIdeal?: CarteraAjusteFechaIdeal | null;

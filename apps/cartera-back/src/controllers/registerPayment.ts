@@ -3308,8 +3308,9 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
       // Un abono directo a capital puede dejar el crédito sin capital: la
       // regla sinCapital debe apagar la mora aquí mismo (igual que haría el
       // cron esa noche). Post-commit del abono; barato si no hay mora activa.
+      // Ahora ligamos el evento de desactivación al pago que la causó.
       if (resultadoCapital?.success && pago.credito_id !== null) {
-        await desactivarMoraSiCreditoAlDia(pago.credito_id);
+        await desactivarMoraSiCreditoAlDia(pago.credito_id, { pago_id });
       }
       return resultadoCapital;
     }
@@ -3372,8 +3373,9 @@ async function aplicarPagoAlCreditoSinLock(pago_id: number) {
     // conexión), así que dentro de la tx leería el snapshot viejo (no-op) y
     // su UPDATE a creditos chocaría con el row lock de la tx (bloqueo mutuo).
     // Nunca lanza, así que no puede tirar una aplicación ya commiteada.
+    // Se liga el evento de desactivación al pago que la causó.
     if (resultado?.success) {
-      await desactivarMoraSiCreditoAlDia(pago.credito_id);
+      await desactivarMoraSiCreditoAlDia(pago.credito_id, { pago_id });
     }
 
     return resultado;

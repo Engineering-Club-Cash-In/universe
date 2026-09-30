@@ -653,6 +653,9 @@ async function registrarHistorialMora(params: {
   porcentaje_mora?: string | number | null;
   usuario_id?: number | null;
   motivo?: string | null;
+  // Qué pago causó este movimiento de mora. Opcional: habrá movimientos que no
+  // vienen de ningún pago (recálculo automático, condonación, ajuste manual).
+  pago_id?: number | null;
   dbClient?: typeof db;
   // Dentro de una transacción el swallow es mentiroso: un insert fallido deja
   // la tx abortada y el COMMIT se vuelve rollback silencioso, pero el caller
@@ -681,6 +684,7 @@ async function registrarHistorialMora(params: {
           : null,
       usuario_id: params.usuario_id ?? null,
       motivo: params.motivo ?? null,
+      pago_id: params.pago_id ?? null,
       // 🕐 La hora REAL de esta escritura, no la del BEGIN.
       //
       // La columna tiene `DEFAULT now()`, y en Postgres `now()` es
@@ -786,7 +790,7 @@ export function decidirLimpiezaMoraTrasAplicar(params: {
  */
 export async function desactivarMoraSiCreditoAlDia(
   credito_id: number,
-  opts: { motivo?: string; dbClient?: typeof db } = {},
+  opts: { motivo?: string; pago_id?: number; dbClient?: typeof db } = {},
 ): Promise<{ desactivada: boolean; error?: string }> {
   const startedAt = safeNow();
   const dbi = opts.dbClient ?? db;
@@ -915,6 +919,9 @@ export async function desactivarMoraSiCreditoAlDia(
         motivo: decision.sinCapital && cuotasVencidas > 0
           ? "Crédito sin capital — no aplica mora"
           : (opts.motivo ?? "Crédito se puso al día al validar pago"),
+        // Qué pago causó esta desactivación (si aplica). Si no viene, el
+        // evento se registra sin trazabilidad al pago.
+        pago_id: opts.pago_id ?? null,
         dbClient: txm as unknown as typeof db,
         propagarError: true,
       });
@@ -1252,6 +1259,7 @@ export async function updateMora({
   activa,
   usuario_email,
   motivo,
+  pago_id,
   dbClient,
 }: {
   credito_id?: number;
@@ -1267,6 +1275,11 @@ export async function updateMora({
    * ruta POST /mora/update, la única puerta de entrada desde la interfaz.
    */
   motivo?: string;
+  /**
+   * El pago que causó este ajuste de mora (para restituciones). Opcional: habrá
+   * ajustes que no vienen de ningún pago (recálculo automático, condonación, etc.).
+   */
+  pago_id?: number | string | null;
   /**
    * Transacción del CALLER. Sin esto, `updateMora` abre la suya y commitea
    * sola: el ajuste de mora quedaba firme aunque el caller fallara un paso
@@ -1476,6 +1489,7 @@ export async function updateMora({
         porcentaje_mora: updated.porcentaje_mora,
         usuario_id: usuarioId,
         motivo,
+        pago_id: pago_id !== null && pago_id !== undefined ? Number(pago_id) : null,
         dbClient: tx,
         propagarError: true,
       });

@@ -9,7 +9,7 @@ export type PagoParaRestituir = {
 };
 
 /** El ajuste de mora que deja un pago invalidado, o `null` si no deja ninguno. */
-export type RestitucionMora = { monto_cambio: number; motivo: string };
+export type RestitucionMora = { monto_cambio: number; motivo: string; pago_id: number | string };
 
 /**
  * Los dos hechos que invalidan un pago y le devuelven su mora al crédito.
@@ -140,6 +140,7 @@ export function restitucionMoraDePago(
 	return {
 		monto_cambio: redondearCentavos(monto),
 		motivo: MOTIVO_POR_CAUSA[causa](pagoId),
+		pago_id: pagoId,
 	};
 }
 

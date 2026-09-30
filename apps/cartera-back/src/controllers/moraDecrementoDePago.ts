@@ -424,6 +424,7 @@ export async function estamparPagoEnDecremento(
 			.update(moras_historial)
 			.set({
 				motivo: sql`COALESCE(${moras_historial.motivo}, '') || ${marca}`,
+				pago_id: sql`COALESCE(${moras_historial.pago_id}, ${pago_id})`,
 			})
 			.where(
 				and(

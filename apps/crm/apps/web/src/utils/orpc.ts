@@ -20,6 +20,7 @@ import type { inmovilizacionUnidadRouter } from "../../../server/src/routers/inm
 import type { pagaloGrupoActivoRouter } from "../../../server/src/routers/pagalo-grupo-activo";
 import type { pagaloLinkActionsRouter } from "../../../server/src/routers/pagalo-link-actions";
 import type { pagaloSupervisionRouter } from "../../../server/src/routers/pagalo-supervision";
+import type { recuperacionSolicitudesRouter } from "../../../server/src/routers/recuperacion-solicitudes";
 import type { recuperacionVehiculoRouter } from "../../../server/src/routers/recuperacion-vehiculo";
 import type { referenciasCobrosRouter } from "../../../server/src/routers/referencias-cobros";
 import type { tareasCobrosRouter } from "../../../server/src/routers/tareas-cobros";
@@ -104,6 +105,7 @@ type MergedRouter = AppRouter &
 	typeof pagaloSupervisionRouter &
 	typeof convenioDecisionRouter &
 	typeof recuperacionVehiculoRouter &
+	typeof recuperacionSolicitudesRouter &
 	typeof inmovilizacionUnidadRouter &
 	typeof inmovilizacionReactivacionLlamadaRouter &
 	typeof wialonRouter &

@@ -35,10 +35,10 @@ accountability medible (un asesor responde por su bucket, no por una lista hered
 | 4 | [Operación diaria](./04-operacion-diaria.md) | Apertura, cola del día, SLA, agenda, alertas, promesas y convenios, reasignación manual |
 | 5 | [Datos y ambientes](./05-datos-y-ambientes.md) | Dónde vive cada base, el sandbox `cartera_cobros2`, migraciones, trampas conocidas |
 | 6 | [Ficha 360 del crédito](./06-ficha-360.md) | La pantalla de trabajo del asesor: anatomía, fuentes de datos, registro de contactos, promesa y convenio de pago, estado de cuenta y decisiones |
-| 7 | [Recuperación de vehículo](./07-recuperacion-de-vehiculo.md) | El traslado manual a B4: por qué es la única decisión humana de bucket, y por qué hoy el motor la deshace |
+| 7 | [Recuperación de vehículo](./07-recuperacion-de-vehiculo.md) | El traslado manual a B4: por qué es la única decisión humana de bucket, sus dos envíos (CB-042) y la solicitud con checklist que aprueba el supervisor (CB-043) |
 | 8 | [**Plan** · Convenios y `EN_RECUPERACION`](./08-plan-convenios-y-recuperacion.md) | Lo acordado con el PM el 10-sep: el convenio congela el bucket, el estado nuevo actúa como piso en B4, y las 4 fases pendientes |
 | 9 | [Integración GPS / Wialon (La Legión)](./09-integracion-gps-wialon.md) | Rastreo satelital en vivo, telemetría (odómetro, ignición), generación y revocación de links Locator para recuperación de unidades |
-| 10 | [Visitas a residencia y trabajo](./10-visitas.md) | CB-037/038: programar y registrar visitas en B3–B4, con fotos desde el celular; el resultado abre la promesa o la entrega voluntaria |
+| 10 | [Visitas a residencia y trabajo](./10-visitas.md) | CB-037/038: programar y registrar visitas de B2 a B4, con fotos desde el celular; el resultado abre la promesa o la entrega voluntaria |
 | — | [**Runbook · Refrescar el sandbox**](./RUNBOOK-refrescar-sandbox.md) | Cómo poner el sandbox al día con producción sin perder el historial. Es también el ensayo del pase a producción |
 
 Y aparte, con documentación propia:
@@ -135,10 +135,10 @@ le habla, cuándo y por dónde → CRM. El bot solo habla con el CRM
 | Traslado masivo de cartera (CB-114) | ✅ Implementado — preview + confirmación idempotente, 3 modos. Ver [motor y asignación](./02-motor-y-asignacion.md#traslado-masivo-de-cartera-cb-114) |
 | Coberturas temporales (CC2-23) | ✅ Implementado — vacaciones y permisos redirigen el día **sin mover la cartera** |
 | Sandbox al día con producción | ✅ Scriptado y a demanda: `alinear_desde_prod.sh`. Corre el motor, así que las bajadas de quien ya pagó quedan registradas. Ver [datos y ambientes](./05-datos-y-ambientes.md#poner-el-sandbox-al-día-con-producción) |
-| Recuperación de vehículo (traslado a B4) | ✅ Se sostiene con `EN_RECUPERACION` ([plan 08](./08-plan-convenios-y-recuperacion.md)). Desde CB-042, dos envíos —forzosa y **entrega voluntaria** (también desde B4)— con formulario, foto del saldo, ubicación desde el GPS, aviso al asesor de B4 y supervisores, y recepción de la unidad en B4. Migración CRM `0065` pendiente en prod. Ver [doc 7](./07-recuperacion-de-vehiculo.md#los-dos-envíos-y-su-formulario-cb-042) |
+| Recuperación de vehículo (traslado a B4) | ✅ Se sostiene con `EN_RECUPERACION` ([plan 08](./08-plan-convenios-y-recuperacion.md)). Desde CB-042, dos envíos —forzosa y **entrega voluntaria** (también desde B4)— con formulario, foto del saldo, ubicación desde el GPS, aviso al asesor de B4 y supervisores, y recepción de la unidad en B4. Desde CB-043 la forzosa es una **solicitud con checklist** que aprueba otro supervisor o admin (nadie aprueba la suya) (pantalla Cobros → Solicitudes → Recuperación de vehículo); ambos envíos, de B2 a B3. Migraciones CRM `0065` y `0071` pendientes en prod. Ver [doc 7](./07-recuperacion-de-vehiculo.md#la-solicitud-y-la-aprobación-cb-043) |
 | Convenios que no bajan de bucket | 🔵 Acordado, sin implementar. Hoy el job hace lo CONTRARIO (un convenio nuevo cae a B0). [Doc 8, fase 2](./08-plan-convenios-y-recuperacion.md) |
 | Referencias y contactos de emergencia (CB-036) | ✅ Implementado — seis fuentes juntas (cobros, ventas, cónyuge, emergencia, cofirmantes), bitácora de gestiones, teléfonos agregados e información nueva del cliente. Migración CRM `0060` pendiente en prod. Ver [Ficha 360 §4.c](./06-ficha-360.md#4c-referencias-y-contactos-de-emergencia-cb-036) |
-| Visitas a residencia y trabajo (CB-037/038) | ✅ Implementado — botón propio en B3–B4, programar o registrar, fotos desde el celular, avisos al responsable; el resultado abre la promesa o la entrega voluntaria de CB-042. Datos laborales de la solicitud en la tarjeta de contacto. Migración CRM `0069` pendiente en prod. Ver [doc 10](./10-visitas.md) |
+| Visitas a residencia y trabajo (CB-037/038) | ✅ Implementado — botón propio de B2 a B4, programar o registrar, fotos desde el celular, avisos al responsable; el resultado abre la promesa o la entrega voluntaria de CB-042. Datos laborales de la solicitud en la tarjeta de contacto. Migración CRM `0069` pendiente en prod. Ver [doc 10](./10-visitas.md) |
 | Carga inicial en producción | ⚪ Pendiente — mismo runbook, pero **sin replay**: línea base limpia |
 
 ---

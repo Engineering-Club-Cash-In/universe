@@ -27,6 +27,10 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { recuperacionesVehiculo } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
+import type {
+	EstadoSolicitudRecuperacion,
+	PasoChecklist,
+} from "../lib/recuperacion-solicitud";
 import {
 	calcularFotoSaldo,
 	type DetalleRecuperacion,
@@ -43,6 +47,7 @@ import {
 	filasNotificacionCobros,
 	obtenerSupervisoresCobros,
 } from "./cobros-notif-helpers";
+import { cerrarSolicitudesPendientesDelCaso } from "./recuperacion-solicitud-avisos";
 import { vincularRecuperacionAVisita } from "./visitas-cobros";
 
 type RespuestaCartera = Awaited<
@@ -87,7 +92,7 @@ export async function tomarCandadoRecuperacion(
  * misma visita. Si cartera rechaza el traslado y el registro se borra, el
  * vínculo se limpia solo (FK con ON DELETE SET NULL).
  */
-async function insertarRegistro(
+export async function insertarRegistro(
 	valores: typeof recuperacionesVehiculo.$inferInsert,
 	visitaId?: string,
 ): Promise<string> {
@@ -152,8 +157,16 @@ export function valoresRegistro(params: {
 	responsable?: string | null;
 	bucketOrigen?: number | null;
 	bucketDestino?: number | null;
+	/**
+	 * CB-043: la forzosa entra como solicitud (`pendiente`) y la aprueba otra
+	 * persona. Sin esto, el registro no pasa por aprobación (entrega voluntaria).
+	 */
+	solicitud?: {
+		estado: EstadoSolicitudRecuperacion;
+		checklist: PasoChecklist[] | null;
+	};
 }): typeof recuperacionesVehiculo.$inferInsert {
-	const { detalle, foto } = params;
+	const { detalle, foto, solicitud } = params;
 	const u = detalle.ubicacion;
 	const e = params.tipo === "entrega_voluntaria" ? detalle.entrega : undefined;
 	return {
@@ -189,6 +202,23 @@ export function valoresRegistro(params: {
 		totalParaPonerseAlDia: foto ? foto.totalParaPonerseAlDia.toFixed(2) : null,
 		saldoTomadoAt: foto ? new Date() : null,
 		registradoPor: params.registradoPor,
+		estadoSolicitud: solicitud?.estado ?? null,
+		checklist: solicitud?.checklist ?? null,
+	};
+}
+
+/** Las columnas de la foto del saldo, para refrescarla al aprobar (CB-043). */
+export function columnasFotoSaldo(
+	foto: FotoSaldo | null,
+): Partial<typeof recuperacionesVehiculo.$inferInsert> {
+	if (!foto) return {};
+	return {
+		saldoPendiente: foto.saldoPendiente.toFixed(2),
+		cuotasVencidas: foto.cuotasVencidas,
+		montoVencido: foto.montoVencido.toFixed(2),
+		montoMora: foto.montoMora.toFixed(2),
+		totalParaPonerseAlDia: foto.totalParaPonerseAlDia.toFixed(2),
+		saldoTomadoAt: new Date(),
 	};
 }
 
@@ -204,7 +234,7 @@ async function usuarioPorEmail(email: string | null): Promise<string | null> {
 }
 
 /** user.id del CRM del asesor de cartera que quedó con el crédito. */
-async function usuarioDeAsesorCartera(
+export async function usuarioDeAsesorCartera(
 	asesorId: number | null,
 ): Promise<string | null> {
 	if (asesorId === null) return null;
@@ -225,7 +255,7 @@ async function usuarioDeAsesorCartera(
  * Quien registró no se avisa a sí mismo. Best-effort: un aviso que no sale no
  * deshace un envío que ya ocurrió. Dedup por registro: un reintento no duplica.
  */
-async function avisarRecuperacion(params: {
+export async function avisarRecuperacion(params: {
 	registroId: string;
 	casoCobroId: string;
 	tipo: TipoEnvioRecuperacion;
@@ -279,8 +309,44 @@ async function avisarRecuperacion(params: {
 }
 
 /**
- * Envío CON traslado (B1–B3): guarda el registro antes de llamar a cartera y
+ * ¿El traslado lo hizo ESTA solicitud? Se busca su huella (`[ref CRM <id>]`)
+ * en el historial de buckets de cartera, que la guarda en la misma transacción
+ * que el traslado. Que el crédito esté en B4 no prueba nada: lo pudo mover otro
+ * actor o el motor. `null` = no está la huella; lanza si el historial no se
+ * puede leer.
+ */
+export async function buscarTrasladoPorHuella(params: {
+	creditoId: number;
+	numeroSifco: string;
+	referencia: string;
+}): Promise<TrasladoConfirmado | null> {
+	const eventos = await carteraBackClient.getBucketsHistorialCredito(
+		params.creditoId,
+	);
+	const evento = eventos.find((e) => e.motivo?.includes(params.referencia));
+	if (!evento) return null;
+	const asesorNuevo = await carteraBackClient
+		.getAsesorPorSifco({ sifcos: [params.numeroSifco] })
+		.then((r) => r.data?.[0]?.asesor_id ?? null)
+		.catch(() => null);
+	return {
+		success: true,
+		credito_id: params.creditoId,
+		bucket_anterior: evento.bucket_anterior,
+		bucket_nuevo: evento.bucket_nuevo,
+		tipo_evento: "SUBIDA",
+		asesor_anterior: null,
+		asesor_nuevo: asesorNuevo,
+		asesor_sin_cambio: false,
+		reconciliado: true,
+	};
+}
+
+/**
+ * Envío CON traslado (B2–B3): guarda el registro antes de llamar a cartera y
  * devuelve con qué seguir según lo que responda. Ver el orden en el encabezado.
+ * Desde CB-043 solo lo usa la entrega voluntaria: la forzosa se solicita y la
+ * traslada `aprobarSolicitudRecuperacion` (services/recuperacion-solicitud.ts).
  */
 export async function prepararEnvioRecuperacion(params: {
 	casoCobroId: string;
@@ -348,13 +414,13 @@ export async function prepararEnvioRecuperacion(params: {
 				`[recuperacion-vehiculo] Resultado incierto del traslado de ${params.numeroSifco}; se busca la huella en cartera:`,
 				error,
 			);
-			let eventos: Awaited<
-				ReturnType<typeof carteraBackClient.getBucketsHistorialCredito>
-			>;
+			let traslado: TrasladoConfirmado | null;
 			try {
-				eventos = await carteraBackClient.getBucketsHistorialCredito(
-					params.creditoId,
-				);
+				traslado = await buscarTrasladoPorHuella({
+					creditoId: params.creditoId,
+					numeroSifco: params.numeroSifco,
+					referencia: referenciaCartera,
+				});
 			} catch (consulta) {
 				console.error(
 					`[recuperacion-vehiculo] Tampoco se pudo leer el historial de ${params.numeroSifco}; el registro ${registroId} se conserva:`,
@@ -362,31 +428,11 @@ export async function prepararEnvioRecuperacion(params: {
 				);
 				return { estado: "incierto" };
 			}
-			// Que el crédito esté en B4 no prueba nada: lo pudo mover otro actor o
-			// el motor. Lo que prueba el traslado es la fila con NUESTRA huella.
-			const evento = eventos.find((e) => e.motivo?.includes(referenciaCartera));
-			if (!evento) {
+			if (!traslado) {
 				await descartar();
 				return { estado: "descartado" };
 			}
-			const asesorNuevo = await carteraBackClient
-				.getAsesorPorSifco({ sifcos: [params.numeroSifco] })
-				.then((r) => r.data?.[0]?.asesor_id ?? null)
-				.catch(() => null);
-			return {
-				estado: "trasladado",
-				traslado: {
-					success: true,
-					credito_id: params.creditoId,
-					bucket_anterior: evento.bucket_anterior,
-					bucket_nuevo: evento.bucket_nuevo,
-					tipo_evento: "SUBIDA",
-					asesor_anterior: null,
-					asesor_nuevo: asesorNuevo,
-					asesor_sin_cambio: false,
-					reconciliado: true,
-				},
-			};
+			return { estado: "trasladado", traslado };
 		},
 
 		/** Cartera no trasladó: el registro no describe nada que haya pasado. */
@@ -421,6 +467,14 @@ export async function prepararEnvioRecuperacion(params: {
 				cliente: contexto.cliente,
 				detalle: params.detalle,
 				asesorUserId,
+				actorId: params.registradoPor,
+			});
+			// CB-043: si había una solicitud de recuperación esperando
+			// aprobación, el crédito ya llegó a B4 por la entrega voluntaria.
+			await cerrarSolicitudesPendientesDelCaso({
+				casoCobroId: params.casoCobroId,
+				exceptoId: registroId,
+				motivo: "Se registró una entrega voluntaria y el crédito ya pasó a B4.",
 				actorId: params.registradoPor,
 			});
 		},
@@ -468,6 +522,16 @@ export async function registrarEntregaSinTraslado(params: {
 		cliente: contexto.cliente,
 		detalle: params.detalle,
 		asesorUserId: responsable,
+		actorId: params.registradoPor,
+	});
+	// CB-043: una solicitud de recuperación pedida en B2–B3 puede seguir
+	// pendiente con el crédito ya en B4 (llegó solo, por cuotas). Si el
+	// cliente entrega la unidad, la solicitud ya no tiene nada que decidir: se
+	// cierra igual que cuando la entrega traslada (review de Codex, PR #1806).
+	await cerrarSolicitudesPendientesDelCaso({
+		casoCobroId: params.casoCobroId,
+		exceptoId: registro.id,
+		motivo: "Se registró una entrega voluntaria con el crédito ya en B4.",
 		actorId: params.registradoPor,
 	});
 	return { registroId: registro.id };

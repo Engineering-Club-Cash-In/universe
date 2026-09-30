@@ -151,11 +151,14 @@ import {
 import { condicionesPromesaVigente } from "../lib/promesa-vigente";
 import { pushPromesaActivaEnSegundoPlano } from "../lib/push-promesa-cartera-back";
 import {
-	BUCKET_MAXIMO_RECUPERACION,
-	BUCKET_MINIMO_RECUPERACION,
-	type DetalleRecuperacion,
+	combinarChecklist,
+	respuestasChecklistSchema,
+} from "../lib/recuperacion-solicitud";
+import {
 	detalleRecuperacionSchema,
 	MENSAJE_TRASLADO_INCIERTO,
+	motivoBloqueoRecuperacion,
+	operacionRecuperacion,
 	TIPOS_ENVIO_RECUPERACION,
 	validarDetalleRecuperacion,
 } from "../lib/recuperacion-vehiculo";
@@ -184,11 +187,11 @@ import {
 	isCarteraBackEnabled,
 	isCarteraBackPaymentsEnabled,
 } from "../services/cartera-back-integration";
+import { cerrarTareasB3DelCaso } from "../services/check-b3-llamada";
 import {
 	notificarConvenioPendienteAprobacion,
 	notificarConvenioResuelto,
 } from "../services/convenio-decision-notif";
-import { cerrarTareasB3DelCaso } from "../services/check-b3-llamada";
 import { reconciliarAvisosLlamarCliente } from "../services/inmovilizacion-notif";
 import {
 	createPagaloClient,
@@ -199,6 +202,8 @@ import {
 	reintentarGestionLinkPagalo,
 } from "../services/pagalo-link-orchestrator";
 import { resolverVehiculoCasoPagalo } from "../services/pagalo-vehiculo";
+import { checklistDelCaso } from "../services/recuperacion-checklist";
+import { crearSolicitudRecuperacion } from "../services/recuperacion-solicitud";
 import {
 	prepararEnvioRecuperacion,
 	type TrasladoConfirmado,
@@ -8527,25 +8532,27 @@ export const cobrosRouter = {
 		}),
 
 	// Recuperación de vehículo: manda el crédito a B4 (Última Instancia / Pre
-	// Jurídico) sin importar en qué escalón de mora vaya. Lo dispara el asesor
-	// que lleva la cuenta (cobrosProcedure), no solo el supervisor: es él quien
-	// sabe que la unidad ya no se recupera por teléfono. La trazabilidad la da
-	// el motivo obligatorio + la bitácora API_MANUAL con su usuario.
+	// Jurídico) sin importar en qué escalón de mora vaya, desde B2 o B3.
 	//
 	// CB-042: dos tipos de envío —recuperación forzosa (`tomado`) y entrega
 	// voluntaria— y cada uno deja su formulario en `recuperaciones_vehiculo`,
-	// que es lo que ve el asesor de B4. `tipo` y `detalle` son opcionales a
-	// propósito: un llamador sin formulario (el cierre de la inmovilización de
-	// CB-041, por ejemplo) sigue mandando solo `motivo` y queda registrado
-	// como forzosa con ese texto.
+	// que es lo que ve el asesor de B4.
+	//
+	// CB-043: la forzosa ya no es directa, para nadie. Se SOLICITA con la
+	// justificación y el checklist de lo que se hizo, y un supervisor o admin
+	// la aprueba (routers/recuperacion-solicitudes.ts) — recién ahí se
+	// traslada. La entrega voluntaria sigue directa: es el cliente colaborando.
 	enviarCreditoARecuperacion: cobrosProcedure
 		.input(
 			z
 				.object({
 					casoCobroId: z.string().uuid(),
-					motivo: z.string().trim().max(2000).optional(),
 					tipo: z.enum(TIPOS_ENVIO_RECUPERACION).default("tomado"),
-					detalle: detalleRecuperacionSchema.optional(),
+					detalle: detalleRecuperacionSchema,
+					// CB-043: lo que responde quien pide a cada paso del checklist.
+					// La evidencia la vuelve a armar el servidor (no se le cree al
+					// cliente); de acá solo salen las justificaciones y notas.
+					checklist: respuestasChecklistSchema.optional(),
 					// CB-037/038: la entrega voluntaria sale de una visita.
 					visitaId: z.string().uuid().optional(),
 				})
@@ -8557,22 +8564,14 @@ export const cobrosRouter = {
 								"Desde una visita solo se registra la entrega voluntaria.",
 						});
 					}
-					if (v.detalle) {
-						validarDetalleRecuperacion(v.tipo, v.detalle, ctx);
-						return;
-					}
-					if (v.tipo === "entrega_voluntaria") {
+					if (v.tipo === "tomado" && !v.checklist) {
 						ctx.addIssue({
 							code: z.ZodIssueCode.custom,
 							message:
-								"La entrega voluntaria necesita el formulario (fecha, lugar y estado).",
-						});
-					} else if (!v.motivo) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: "El motivo es obligatorio",
+								"La recuperación forzosa necesita el checklist de lo que ya se hizo.",
 						});
 					}
+					validarDetalleRecuperacion(v.tipo, v.detalle, ctx);
 				}),
 		)
 		.handler(async ({ input, context }) => {
@@ -8630,6 +8629,29 @@ export const cobrosRouter = {
 			)
 				? undefined
 				: context.session.user.email;
+			// CB-043: el rango (B2–B3) lo exige el CRM. Cartera acepta desde B1, y
+			// una solicitud ni siquiera pasa por cartera hasta que se aprueba. Si
+			// no se puede leer el bucket, no se arriesga: falla cerrado.
+			const bucket = await carteraBackClient
+				.getBucketActualCredito(caso.numeroCreditoSifco)
+				.then((b) => b?.bucket ?? null)
+				.catch((error) => {
+					console.error(
+						`[recuperacion] No se pudo leer el bucket de ${caso.numeroCreditoSifco}:`,
+						error,
+					);
+					throw new ORPCError("SERVICE_UNAVAILABLE", {
+						message:
+							"No se pudo confirmar el bucket del crédito. Intentá de nuevo en un momento.",
+					});
+				});
+			if (operacionRecuperacion(input.tipo, bucket) !== "trasladar") {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						motivoBloqueoRecuperacion(input.tipo, bucket) ??
+						"Con el crédito en B4 la entrega voluntaria solo se registra.",
+				});
+			}
 			if (input.visitaId) {
 				await assertVisitaParaSeguimiento({
 					visitaId: input.visitaId,
@@ -8637,18 +8659,41 @@ export const cobrosRouter = {
 					seguimiento: "entrega",
 				});
 			}
+
+			// CB-043: la forzosa SIEMPRE es una solicitud, la pida quien la pida
+			// (también un supervisor o un admin): nada se mueve a B4 sin que
+			// alguien la apruebe. El checklist se arma otra vez acá, con lo que el
+			// CRM tiene HOY, y se le suman las justificaciones de quien pide.
+			if (input.tipo === "tomado") {
+				const { pasos } = await checklistDelCaso({
+					casoCobroId: input.casoCobroId,
+					creditoId: referencia.carteraCreditoId,
+				});
+				const combinado = combinarChecklist(pasos, input.checklist ?? []);
+				if ("error" in combinado) {
+					throw new ORPCError("BAD_REQUEST", { message: combinado.error });
+				}
+				const { registroId } = await crearSolicitudRecuperacion({
+					casoCobroId: input.casoCobroId,
+					numeroSifco: caso.numeroCreditoSifco,
+					// bucket no es null: operacionRecuperacion ya lo exigió.
+					bucket: bucket as number,
+					detalle: input.detalle,
+					checklist: combinado.checklist,
+					registradoPor: context.userId,
+				});
+				return { modo: "solicitud" as const, recuperacionId: registroId };
+			}
+
+			// De acá en adelante, solo la entrega voluntaria: se traslada directo.
 			// CB-042: el formulario se guarda ANTES del traslado y se descarta si
 			// cartera lo rechaza (el porqué del orden, en services/recuperacion-vehiculo.ts).
-			const detalle: DetalleRecuperacion = input.detalle ?? {
-				motivos: [],
-				motivoDetalle: input.motivo,
-			};
 			const envio = await prepararEnvioRecuperacion({
 				casoCobroId: input.casoCobroId,
 				numeroSifco: caso.numeroCreditoSifco,
 				creditoId: referencia.carteraCreditoId,
 				tipo: input.tipo,
-				detalle,
+				detalle: input.detalle,
 				registradoPor: context.userId,
 				visitaId: input.visitaId,
 			});
@@ -8688,7 +8733,11 @@ export const cobrosRouter = {
 				motivo: envio.motivoCartera,
 			});
 
-			return { ...res, recuperacionId: envio.registroId };
+			return {
+				modo: "trasladado" as const,
+				...res,
+				recuperacionId: envio.registroId,
+			};
 		}),
 
 	/**
@@ -8765,8 +8814,12 @@ export const cobrosRouter = {
 		}),
 
 	/**
-	 * COBROS-02 Fase 3 — DESHACER el convenio de un crédito (soft delete), con
-	 * la opción de mandarlo en el mismo gesto a recuperación de vehículo.
+	 * COBROS-02 Fase 3 — DESHACER el convenio de un crédito (soft delete).
+	 *
+	 * CB-043: ya no ofrece "deshacer y mandar a recuperación" en el mismo gesto.
+	 * Ese camino llevaba el crédito a B4 sin solicitud, sin checklist y sin que
+	 * nadie más lo aprobara. Ahora se deshace el convenio y la recuperación se
+	 * solicita aparte, como cualquier otra.
 	 *
 	 * Autorización: exactamente la misma cadena que `enviarCreditoARecuperacion`,
 	 * y por las mismas razones (el caso se puede fabricar, cartera es la verdad
@@ -8786,8 +8839,6 @@ export const cobrosRouter = {
 					.string()
 					.trim()
 					.min(5, "El motivo debe tener al menos 5 caracteres"),
-				/** Encadena la recuperación de vehículo después de deshacer. */
-				mandarARecuperacion: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -8830,43 +8881,6 @@ export const cobrosRouter = {
 				? undefined
 				: context.session.user.email;
 
-			// "Deshacer y mandar a recuperación": el rango B1–B3 se verifica ANTES
-			// de deshacer (review de Codex, P2). La regla vivía solo en el botón
-			// suelto de la ficha, y este flujo no pasa por él:
-			//  · en B4, el convenio quedaba deshecho y la recuperación rechazaba
-			//    después ("ya está en B4") — la mitad de lo que el asesor pidió;
-			//  · en B5, la recuperación registraba una BAJADA a B4 y le restaba
-			//    gravedad a la cuenta.
-			//
-			// El bucket que se lee es el congelado del convenio, y es el correcto:
-			// deshacer no escribe historial de bucket, así que es el mismo que la
-			// recuperación va a leer un instante después.
-			//
-			// Este chequeo es de conveniencia —evita el parcial en el caso normal—
-			// y cartera lo vuelve a hacer bajo sus locks, que es el que manda. Si
-			// no se puede leer el bucket, no se arriesga: el asesor todavía puede
-			// deshacer solo.
-			if (input.mandarARecuperacion) {
-				const actual = await carteraBackClient
-					.getBucketActualCredito(caso.numeroCreditoSifco)
-					.catch(() => null);
-				const bucket = actual?.bucket ?? null;
-				if (bucket === null) {
-					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"No se pudo confirmar el bucket del crédito, así que no se deshizo nada. Podés deshacer el convenio solo, o intentar de nuevo en un momento.",
-					});
-				}
-				if (
-					bucket < BUCKET_MINIMO_RECUPERACION ||
-					bucket > BUCKET_MAXIMO_RECUPERACION
-				) {
-					throw new ORPCError("BAD_REQUEST", {
-						message: `La recuperación de vehículo aplica de B${BUCKET_MINIMO_RECUPERACION} a B${BUCKET_MAXIMO_RECUPERACION} y este crédito está en B${bucket}. No se deshizo nada: si corresponde, deshacé el convenio solo.`,
-					});
-				}
-			}
-
 			let resultado: Awaited<
 				ReturnType<typeof carteraBackClient.anularConvenio>
 			>;
@@ -8894,80 +8908,7 @@ export const cobrosRouter = {
 				});
 			}
 
-			if (!input.mandarARecuperacion) {
-				return { ...resultado, recuperacion: null };
-			}
-
-			// La recuperación va DESPUÉS y por separado a propósito: son dos
-			// operaciones en dos transacciones distintas de cartera y no hay forma
-			// de unirlas desde acá. Si esta falla, el convenio YA quedó deshecho —
-			// se reporta el parcial en vez de mentir con un error total, porque
-			// reintentar "deshacer y mandar" fallaría en el primer paso (el
-			// convenio ya no está vigente) y el asesor no entendería por qué.
-			//
-			// El rango de origen ya se verificó arriba, antes de deshacer. Cartera
-			// lo revalida bajo sus locks: si entre medio el crédito cambió de
-			// bucket, esto falla y se reporta el parcial como siempre.
-			//
-			// CB-042: también deja su registro para el asesor de B4, con el mismo
-			// orden que el envío suelto (se guarda antes, se descarta si falla).
-			// Sin formulario: el motivo es el del modal de deshacer.
-			let envio: Awaited<ReturnType<typeof prepararEnvioRecuperacion>> | null =
-				null;
-			let recuperacion: TrasladoConfirmado | null = null;
-			let recuperacionError: string | null = null;
-			try {
-				envio = await prepararEnvioRecuperacion({
-					casoCobroId: input.casoCobroId,
-					numeroSifco: caso.numeroCreditoSifco,
-					creditoId: resultado.credito_id,
-					tipo: "tomado",
-					detalle: {
-						motivos: ["convenio_incumplido"],
-						motivoDetalle: input.motivo,
-					},
-					registradoPor: context.userId,
-				});
-				recuperacion = await carteraBackClient.enviarARecuperacionVehiculo({
-					credito_id: resultado.credito_id,
-					// La huella del registro va al final, para poder reconciliar
-					// si la respuesta se pierde (review de Codex, P2).
-					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo} ${envio.referenciaCartera}`,
-					usuario_email: context.session.user.email,
-					asesor_esperado_email: dueñoEsperado,
-				});
-			} catch (err) {
-				// Mismo criterio que el envío suelto: sin respuesta no se asume que
-				// falló; se pregunta dónde quedó el crédito (review de Codex, P1).
-				const resolucion = envio ? await envio.resolverFallo(err) : null;
-				if (resolucion?.estado === "trasladado") {
-					recuperacion = resolucion.traslado;
-				} else {
-					recuperacionError =
-						resolucion?.estado === "incierto"
-							? MENSAJE_TRASLADO_INCIERTO
-							: err instanceof Error
-								? err.message
-								: "No se pudo enviar el crédito a recuperación";
-				}
-			}
-
-			if (recuperacion) {
-				await envio?.confirmarTraslado(recuperacion);
-				await marcarInmovilizacionEnviadaARecuperacion({
-					casoCobroId: input.casoCobroId,
-					usuarioId: context.userId,
-					motivo: `Convenio deshecho y enviado a recuperación: ${input.motivo}`,
-				});
-				return { ...resultado, recuperacion };
-			}
-
-			return {
-				...resultado,
-				recuperacion: null,
-				recuperacionError:
-					recuperacionError ?? "No se pudo enviar el crédito a recuperación",
-			};
+			return resultado;
 		}),
 
 	// Bitácora de reasignaciones de asesor (auditoría) — manual + automática.

@@ -22,12 +22,14 @@ import { z } from "zod";
 // ── Rangos de bucket ────────────────────────────────────────────────────────
 
 /**
- * Rango de origen del TRASLADO a recuperación: B1 a B3 (plan 08). La misma
- * regla vive en tres lugares y tienen que coincidir: la ficha (deshabilita las
- * opciones), el CRM (la exige antes de "deshacer y mandar") y cartera
- * (`BUCKET_MINIMO/MAXIMO_RECUPERACION`, que manda bajo sus locks).
+ * Rango de origen del TRASLADO a recuperación: B2 a B3 (decisión del
+ * 2026-09-30, CB-043; el plan 08 lo tenía de B1 a B3). La ficha deshabilita las
+ * opciones con esto y el CRM lo exige en el servidor antes de guardar nada.
+ * Cartera sigue aceptando de B1 a B3 bajo sus locks
+ * (`BUCKET_MINIMO/MAXIMO_RECUPERACION` de cartera-back): es la cota de afuera,
+ * y la de acá, más estrecha, es la que manda.
  */
-export const BUCKET_MINIMO_RECUPERACION = 1;
+export const BUCKET_MINIMO_RECUPERACION = 2;
 export const BUCKET_MAXIMO_RECUPERACION = 3;
 
 /**
@@ -199,13 +201,22 @@ export const entregaVoluntariaSchema = z.object({
 	documentosOtros: textoOpcional(500),
 });
 
+/**
+ * CB-043: la recuperación forzosa pasa por el supervisor, y lo primero que
+ * tiene que leer es POR QUÉ ya no hay otra salida. Unas palabras no alcanzan
+ * para eso (el PM: "¿qué pasa si un asesor dice 'no quiero este caso, mandalo
+ * a B4'?"), así que el detalle deja de ser opcional en la forzosa.
+ */
+export const MIN_JUSTIFICACION_FORZOSA = 20;
+
 export const detalleRecuperacionSchema = z.object({
 	motivos: z
 		.array(z.string().min(1).max(60))
 		.min(1, "Elegí al menos un motivo")
 		.max(12),
-	// Opcional: los motivos marcados ya dicen el porqué. Solo se exige si se
-	// marcó "Otro" (ver erroresDetalleRecuperacion), que sin texto no dice nada.
+	// En la entrega voluntaria es opcional: los motivos ya dicen el porqué, y
+	// solo se exige si se marcó "Otro". En la forzosa es la justificación que
+	// lee el supervisor (ver erroresDetalleRecuperacion).
 	motivoDetalle: textoOpcional(2000),
 	ubicacion: ubicacionRecuperacionSchema.optional(),
 	estadoVehiculo: z.enum(CLAVES_ESTADO_VEHICULO).optional(),
@@ -246,6 +257,9 @@ export function erroresDetalleRecuperacion(
 	if (tipo === "tomado") {
 		if (detalle.entrega) {
 			return "Los datos de entrega son solo para la entrega voluntaria.";
+		}
+		if ((detalle.motivoDetalle?.length ?? 0) < MIN_JUSTIFICACION_FORZOSA) {
+			return `Escribí la justificación para el supervisor (mínimo ${MIN_JUSTIFICACION_FORZOSA} caracteres): por qué ya no hay otra salida que recuperar el vehículo.`;
 		}
 		return null;
 	}

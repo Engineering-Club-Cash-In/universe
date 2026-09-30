@@ -181,6 +181,8 @@ export const reportesCarteraRouter = {
 										FROM recuperaciones_vehiculo
 										WHERE caso_cobro_id = ${casoCobros[0].id}
 										AND completada = false
+										-- CB-043: una solicitud pendiente o rechazada no es una recuperación.
+										AND (estado_solicitud IS NULL OR estado_solicitud = 'aprobada')
 									`,
 								);
 								tieneRecuperacion =
@@ -383,6 +385,8 @@ export const reportesCarteraRouter = {
 						AND contactos.estado_contacto != 'link_pago_generado'
 					LEFT JOIN convenios_pago convenios ON convenios.caso_cobro_id = cc.id
 					LEFT JOIN recuperaciones_vehiculo recuperaciones ON recuperaciones.caso_cobro_id = cc.id
+						-- CB-043: una solicitud pendiente o rechazada no es una recuperación.
+						AND (recuperaciones.estado_solicitud IS NULL OR recuperaciones.estado_solicitud = 'aprobada')
 					WHERE cc.created_at BETWEEN ${input.fechaInicio} AND ${input.fechaFin}
 					GROUP BY cc.id
 				`,

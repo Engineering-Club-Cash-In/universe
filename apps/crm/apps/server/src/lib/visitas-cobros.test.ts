@@ -36,11 +36,11 @@ const registro = (extra: Partial<RegistrarVisitaInput> = {}) =>
 	});
 
 describe("buckets", () => {
-	it("solo B3 y B4", () => {
+	it("de B2 a B4", () => {
 		expect([0, 1, 2, 3, 4, 5].map(visitaPermitidaEnBucket)).toEqual([
 			false,
 			false,
-			false,
+			true,
 			true,
 			true,
 			false,
@@ -49,9 +49,9 @@ describe("buckets", () => {
 	});
 
 	it("el motivo dice dónde está el caso", () => {
-		expect(motivoBloqueoVisita(3)).toBeNull();
+		expect(motivoBloqueoVisita(2)).toBeNull();
 		expect(motivoBloqueoVisita(1, "B1")).toBe(
-			"Disponible en B3 y B4. Este caso está en B1.",
+			"Disponible de B2 a B4. Este caso está en B1.",
 		);
 		expect(motivoBloqueoVisita(null)).toContain("no tiene bucket");
 	});

@@ -371,6 +371,29 @@ const COBROS_TIPO_CONFIG: Record<
 		badge:
 			"bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
 	},
+	// CB-043: un asesor pidió mandar un crédito a recuperación; lo decide un
+	// supervisor desde la ficha o desde Solicitudes → Recuperación de vehículo.
+	recuperacion_pendiente_aprobacion: {
+		label: "Recuperación por aprobar",
+		border: "border-orange-200 dark:border-orange-900/50",
+		bg: "bg-orange-50/50 dark:bg-orange-950/20",
+		icon: Car,
+		iconWrap: "bg-orange-100 dark:bg-orange-900/40",
+		iconColor: "text-orange-600 dark:text-orange-400",
+		badge:
+			"bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+	},
+	// CB-043: la decisión del supervisor, de vuelta a quien pidió.
+	recuperacion_resuelta: {
+		label: "Recuperación resuelta",
+		border: "border-slate-200 dark:border-slate-800",
+		bg: "bg-slate-50/50 dark:bg-slate-900/20",
+		icon: Car,
+		iconWrap: "bg-slate-100 dark:bg-slate-800/60",
+		iconColor: "text-slate-600 dark:text-slate-400",
+		badge:
+			"bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-300",
+	},
 	// CB-037/038: una visita programada (al programarla y la mañana del día).
 	visita_programada: {
 		label: "Visita programada",

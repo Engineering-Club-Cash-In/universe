@@ -4,8 +4,14 @@
  * dónde está el vehículo, en qué estado y cuánto debía al momento del envío.
  *
  * Va arriba del Resumen de la Ficha 360 y en la pestaña Vehículo. Sin
- * registros no pinta nada. El registro vigente es el más reciente; los
+ * registros no pinta nada. El registro vigente es el envío más reciente; los
  * anteriores quedan plegados abajo.
+ *
+ * CB-043: la recuperación forzosa llega primero como solicitud, la pida quien
+ * la pida. Mientras espera se muestra arriba, con el checklist y los botones
+ * de aprobar/rechazar para OTRO supervisor o admin (quien la pidió solo la
+ * cancela); aprobada, pasa a ser el envío vigente y el checklist queda a mano
+ * para el asesor de B4.
  *
  * La recepción de la unidad se confirma desde acá, y solo con el crédito en
  * B4 (el servidor lo vuelve a exigir).
@@ -15,12 +21,20 @@ import {
 	Car,
 	CheckCircle2,
 	ChevronDown,
+	Clock,
 	ExternalLink,
 	Loader2,
 	MapPin,
 	PackageCheck,
+	ShieldCheck,
+	XCircle,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import {
+	ESTADO_SOLICITUD_LABEL,
+	esRecuperacionEfectiva,
+	resumenChecklist,
+} from "server/src/lib/recuperacion-solicitud";
 import {
 	DOCUMENTOS_VEHICULO,
 	ESTADOS_VEHICULO,
@@ -28,6 +42,11 @@ import {
 	TIPO_RECUPERACION_LABEL,
 } from "server/src/lib/recuperacion-vehiculo";
 import { toast } from "sonner";
+import {
+	ChecklistVista,
+	DecidirSolicitudDialog,
+	EstadoSolicitudBadge,
+} from "@/components/cobros/recuperacion-checklist";
 import { AvisoFaltante } from "@/components/cobros/recuperacion-vehiculo-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -126,6 +145,8 @@ interface RecuperacionVehiculoCardProps {
 	enRecuperacion: boolean;
 	/** Si puede confirmar la recepción (equipo de cobros). */
 	puedeGestionar: boolean;
+	/** CB-043: supervisor o admin — aprueba o rechaza las solicitudes. */
+	esSupervisor: boolean;
 	/** Solo en el Resumen: lleva a la pestaña Vehículo (GPS en vivo y ubicaciones clave). */
 	onVerVehiculo?: () => void;
 }
@@ -135,6 +156,7 @@ export function RecuperacionVehiculoCard({
 	bucketNumero,
 	enRecuperacion,
 	puedeGestionar,
+	esSupervisor,
 	onVerVehiculo,
 }: RecuperacionVehiculoCardProps) {
 	const [recepcionAbierta, setRecepcionAbierta] = useState(false);
@@ -144,9 +166,166 @@ export function RecuperacionVehiculoCard({
 
 	const lista = registros.data ?? [];
 	if (lista.length === 0) return null;
-	const [vigente, ...anteriores] = lista;
+
+	// CB-043: una solicitud (pendiente, rechazada…) no es un envío. El registro
+	// VIGENTE es el envío efectivo más reciente; la solicitud pendiente va
+	// aparte, arriba, y la última cerrada se menciona si es posterior al envío.
+	const vigente =
+		lista.find((r) => esRecuperacionEfectiva(r.estadoSolicitud)) ?? null;
+	const pendiente =
+		lista.find((r) => r.estadoSolicitud === "pendiente") ?? null;
+	const ultimaCerrada =
+		lista.find(
+			(r) =>
+				!esRecuperacionEfectiva(r.estadoSolicitud) &&
+				r.estadoSolicitud !== "pendiente",
+		) ?? null;
+	const cerradaReciente =
+		ultimaCerrada &&
+		(!vigente ||
+			new Date(ultimaCerrada.createdAt) > new Date(vigente.createdAt))
+			? ultimaCerrada
+			: null;
+	const anteriores = lista.filter(
+		(r) => r !== vigente && r !== pendiente && r !== cerradaReciente,
+	);
 	const enB4 = bucketNumero === 4;
 
+	return (
+		<Card>
+			<CardHeader className="pb-3">
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<CardTitle className="flex items-center gap-2">
+						<Car className="h-5 w-5" />
+						Recuperación de vehículo
+					</CardTitle>
+					{vigente && (
+						<EncabezadoVigente
+							vigente={vigente}
+							bucketNumero={bucketNumero}
+							enRecuperacion={enRecuperacion}
+						/>
+					)}
+				</div>
+				{vigente && (
+					<p className="text-muted-foreground text-xs">
+						{vigente.trasladado
+							? `Enviado a recuperación el ${fecha(vigente.decididoAt ?? vigente.createdAt)}${vigente.registradoPor ? ` · lo pidió ${vigente.registradoPor}` : ""}${vigente.estadoSolicitud === "aprobada" && vigente.decidioPor && vigente.decidioPor !== vigente.registradoPor ? ` · lo aprobó ${vigente.decidioPor}` : ""}${vigente.bucketOrigen != null ? ` · de B${vigente.bucketOrigen} a B${vigente.bucketDestino ?? 4}` : ""}`
+							: `Registrado el ${fecha(vigente.createdAt)}${vigente.registradoPor ? ` por ${vigente.registradoPor}` : ""}, con el crédito ya en B${vigente.bucketOrigen ?? 4}`}
+						{vigente.responsable ? ` · lo lleva ${vigente.responsable}` : ""}
+					</p>
+				)}
+			</CardHeader>
+			<CardContent className="space-y-4">
+				{pendiente && (
+					<SolicitudPendiente
+						registro={pendiente}
+						esSupervisor={esSupervisor}
+					/>
+				)}
+
+				{cerradaReciente && (
+					<p className="flex flex-wrap items-center gap-1.5 rounded-md border border-dashed p-2 text-muted-foreground text-xs">
+						<EstadoSolicitudBadge estado={cerradaReciente.estadoSolicitud} />
+						Última solicitud de recuperación, del{" "}
+						{fecha(cerradaReciente.createdAt)}
+						{cerradaReciente.registradoPor
+							? ` (${cerradaReciente.registradoPor})`
+							: ""}
+						{cerradaReciente.decidioPor &&
+						cerradaReciente.estadoSolicitud === "rechazada"
+							? ` · la rechazó ${cerradaReciente.decidioPor}`
+							: ""}
+						{cerradaReciente.motivoDecision
+							? `: ${cerradaReciente.motivoDecision}`
+							: ""}
+					</p>
+				)}
+
+				{vigente && (
+					<>
+						<AvisoAnticipado registro={vigente} />
+						<DetalleRegistro registro={vigente} />
+						{vigente.checklist && vigente.checklist.length > 0 && (
+							<Collapsible className="border-t pt-3">
+								<CollapsibleTrigger className="flex items-center gap-1 font-medium text-sm hover:underline">
+									<ChevronDown className="h-4 w-4" />
+									Lo que se hizo antes de mandarlo ·{" "}
+									{resumenChecklist(vigente.checklist).texto}
+								</CollapsibleTrigger>
+								<CollapsibleContent className="mt-2">
+									<ChecklistVista pasos={vigente.checklist} />
+								</CollapsibleContent>
+							</Collapsible>
+						)}
+
+						{vigente.completada ? (
+							<Recepcion registro={vigente} />
+						) : (
+							<div className="flex flex-wrap gap-2 border-t pt-3">
+								{puedeGestionar && enB4 && (
+									<Button size="sm" onClick={() => setRecepcionAbierta(true)}>
+										<PackageCheck className="mr-1.5 h-4 w-4" />
+										Confirmar recepción de la unidad
+									</Button>
+								)}
+								{onVerVehiculo && (
+									<Button size="sm" variant="outline" onClick={onVerVehiculo}>
+										<MapPin className="mr-1.5 h-4 w-4" />
+										Ver GPS y ubicaciones clave
+									</Button>
+								)}
+							</div>
+						)}
+					</>
+				)}
+
+				{anteriores.length > 0 && (
+					<Collapsible className="border-t pt-3">
+						<CollapsibleTrigger className="flex items-center gap-1 text-muted-foreground text-xs hover:text-foreground">
+							<ChevronDown className="h-3.5 w-3.5" />
+							Registros anteriores ({anteriores.length})
+						</CollapsibleTrigger>
+						<CollapsibleContent className="mt-2 space-y-1.5">
+							{anteriores.map((r) => (
+								<p key={r.id} className="text-muted-foreground text-xs">
+									{fecha(r.createdAt)} · {TIPO_RECUPERACION_LABEL[r.tipo]}
+									{r.estadoSolicitud && r.estadoSolicitud !== "aprobada"
+										? ` (solicitud ${(ESTADO_SOLICITUD_LABEL as Record<string, string>)[r.estadoSolicitud]?.toLowerCase() ?? r.estadoSolicitud})`
+										: ""}
+									{r.registradoPor ? ` · ${r.registradoPor}` : ""}
+									{r.motivos.length > 0
+										? ` · ${r.motivos.map(etiquetaMotivo).join(", ")}`
+										: r.motivoDetalle
+											? ` · ${r.motivoDetalle}`
+											: ""}
+									{r.completada ? " · unidad recibida" : ""}
+								</p>
+							))}
+						</CollapsibleContent>
+					</Collapsible>
+				)}
+			</CardContent>
+
+			{recepcionAbierta && vigente && (
+				<ConfirmarRecepcionDialog
+					registro={vigente}
+					onOpenChange={setRecepcionAbierta}
+				/>
+			)}
+		</Card>
+	);
+}
+
+function EncabezadoVigente({
+	vigente,
+	bucketNumero,
+	enRecuperacion,
+}: {
+	vigente: Registro;
+	bucketNumero: number | null;
+	enRecuperacion: boolean;
+}) {
 	const estadoBadge = vigente.completada
 		? {
 				texto: "Unidad recibida",
@@ -162,84 +341,139 @@ export function RecuperacionVehiculoCard({
 					texto: "Ya salió de recuperación",
 					clase: "bg-muted text-muted-foreground",
 				};
+	return (
+		<div className="flex flex-wrap gap-1.5">
+			<Badge className={TIPO_BADGE[vigente.tipo] ?? TIPO_BADGE.tomado}>
+				{TIPO_RECUPERACION_LABEL[vigente.tipo]}
+			</Badge>
+			<Badge variant="secondary" className={estadoBadge.clase}>
+				{estadoBadge.texto}
+			</Badge>
+		</div>
+	);
+}
+
+/**
+ * CB-043 · "B4 anticipado": el crédito llegó a B4 por la recuperación con menos
+ * de cuatro cuotas vencidas. Es una excepción operativa, no un cambio en su
+ * mora: las cuotas y la mora siguen siendo las que son.
+ */
+function AvisoAnticipado({ registro: r }: { registro: Registro }) {
+	if (!r.trasladado || r.cuotasVencidas == null || r.cuotasVencidas >= 4) {
+		return null;
+	}
+	return (
+		<p className="rounded-md border border-orange-200 bg-orange-50 p-2 text-orange-900 text-xs dark:border-orange-900 dark:bg-orange-950/40 dark:text-orange-200">
+			<strong>B4 anticipado:</strong> llegó con {r.cuotasVencidas}{" "}
+			{r.cuotasVencidas === 1 ? "cuota vencida" : "cuotas vencidas"}, antes del
+			día 91. Se mandó por decisión de gestión, no por el atraso.
+		</p>
+	);
+}
+
+/** CB-043 · La solicitud que espera al supervisor, con lo que necesita para decidir. */
+function SolicitudPendiente({
+	registro: r,
+	esSupervisor,
+}: {
+	registro: Registro;
+	esSupervisor: boolean;
+}) {
+	const queryClient = useQueryClient();
+	const [decision, setDecision] = useState<"aprobar" | "rechazar" | null>(null);
+	const cancelar = useMutation({
+		mutationFn: () =>
+			client.cancelarSolicitudRecuperacion({ recuperacionId: r.id }),
+		onSuccess: () => toast.success("Solicitud cancelada."),
+		onError: (e: Error) =>
+			toast.error(e.message || "No se pudo cancelar la solicitud"),
+		onSettled: () => {
+			queryClient.invalidateQueries({
+				queryKey: orpc.getRecuperacionesVehiculoCaso.key(),
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getSolicitudesRecuperacion.key(),
+			});
+		},
+	});
 
 	return (
-		<Card>
-			<CardHeader className="pb-3">
-				<div className="flex flex-wrap items-center justify-between gap-2">
-					<CardTitle className="flex items-center gap-2">
-						<Car className="h-5 w-5" />
-						Recuperación de vehículo
-					</CardTitle>
-					<div className="flex flex-wrap gap-1.5">
-						<Badge className={TIPO_BADGE[vigente.tipo] ?? TIPO_BADGE.tomado}>
-							{TIPO_RECUPERACION_LABEL[vigente.tipo]}
-						</Badge>
-						<Badge variant="secondary" className={estadoBadge.clase}>
-							{estadoBadge.texto}
-						</Badge>
-					</div>
-				</div>
-				<p className="text-muted-foreground text-xs">
-					{vigente.trasladado
-						? `Enviado a recuperación el ${fecha(vigente.createdAt)}${vigente.registradoPor ? ` por ${vigente.registradoPor}` : ""}${vigente.bucketOrigen != null ? `, de B${vigente.bucketOrigen} a B${vigente.bucketDestino ?? 4}` : ""}`
-						: `Registrado el ${fecha(vigente.createdAt)}${vigente.registradoPor ? ` por ${vigente.registradoPor}` : ""}, con el crédito ya en B${vigente.bucketOrigen ?? 4}`}
-					{vigente.responsable ? ` · lo lleva ${vigente.responsable}` : ""}
+		<div className="space-y-3 rounded-md border border-orange-200 bg-orange-50/60 p-3 dark:border-orange-900 dark:bg-orange-950/20">
+			<div className="flex flex-wrap items-center justify-between gap-2">
+				<p className="flex items-center gap-1.5 font-medium text-orange-900 text-sm dark:text-orange-200">
+					<Clock className="h-4 w-4" />
+					Solicitud de recuperación esperando aprobación
 				</p>
-			</CardHeader>
-			<CardContent className="space-y-4">
-				<DetalleRegistro registro={vigente} />
-
-				{vigente.completada ? (
-					<Recepcion registro={vigente} />
-				) : (
-					<div className="flex flex-wrap gap-2 border-t pt-3">
-						{puedeGestionar && enB4 && (
-							<Button size="sm" onClick={() => setRecepcionAbierta(true)}>
-								<PackageCheck className="mr-1.5 h-4 w-4" />
-								Confirmar recepción de la unidad
+				<EstadoSolicitudBadge estado={r.estadoSolicitud} />
+			</div>
+			<p className="text-muted-foreground text-xs">
+				La pidió {r.registradoPor ?? "—"} el {fechaHora(r.createdAt)}
+				{r.bucketOrigen != null ? `, con el crédito en B${r.bucketOrigen}` : ""}
+				. El crédito no se mueve hasta que un supervisor la apruebe.
+			</p>
+			<DetalleRegistro registro={r} />
+			{/* Plegado de entrada: el resumen alcanza para ubicarse (QA de CB-043). */}
+			<Collapsible>
+				<CollapsibleTrigger className="flex items-center gap-1 font-medium text-sm hover:underline">
+					<ChevronDown className="h-4 w-4" />
+					Lo que se hizo antes de pedirla ·{" "}
+					{resumenChecklist(r.checklist ?? []).texto}
+				</CollapsibleTrigger>
+				<CollapsibleContent className="mt-2">
+					<ChecklistVista pasos={r.checklist ?? []} />
+				</CollapsibleContent>
+			</Collapsible>
+			{/* Cuatro ojos: la decide OTRA persona. Quien la pidió solo la
+			    puede cancelar (el servidor lo exige igual). */}
+			{(esSupervisor || r.esMia) && (
+				<div className="flex flex-wrap items-center gap-2 border-t pt-3">
+					{esSupervisor && !r.esMia && (
+						<>
+							<Button size="sm" onClick={() => setDecision("aprobar")}>
+								<ShieldCheck className="mr-1.5 h-4 w-4" />
+								Aprobar y mandar a B4
 							</Button>
-						)}
-						{onVerVehiculo && (
-							<Button size="sm" variant="outline" onClick={onVerVehiculo}>
-								<MapPin className="mr-1.5 h-4 w-4" />
-								Ver GPS y ubicaciones clave
+							<Button
+								size="sm"
+								variant="outline"
+								className="border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+								onClick={() => setDecision("rechazar")}
+							>
+								<XCircle className="mr-1.5 h-4 w-4" />
+								Rechazar
 							</Button>
-						)}
-					</div>
-				)}
-
-				{anteriores.length > 0 && (
-					<Collapsible className="border-t pt-3">
-						<CollapsibleTrigger className="flex items-center gap-1 text-muted-foreground text-xs hover:text-foreground">
-							<ChevronDown className="h-3.5 w-3.5" />
-							Registros anteriores ({anteriores.length})
-						</CollapsibleTrigger>
-						<CollapsibleContent className="mt-2 space-y-1.5">
-							{anteriores.map((r) => (
-								<p key={r.id} className="text-muted-foreground text-xs">
-									{fecha(r.createdAt)} · {TIPO_RECUPERACION_LABEL[r.tipo]}
-									{r.registradoPor ? ` · ${r.registradoPor}` : ""}
-									{r.motivos.length > 0
-										? ` · ${r.motivos.map(etiquetaMotivo).join(", ")}`
-										: r.motivoDetalle
-											? ` · ${r.motivoDetalle}`
-											: ""}
-									{r.completada ? " · unidad recibida" : ""}
-								</p>
-							))}
-						</CollapsibleContent>
-					</Collapsible>
-				)}
-			</CardContent>
-
-			{recepcionAbierta && (
-				<ConfirmarRecepcionDialog
-					registro={vigente}
-					onOpenChange={setRecepcionAbierta}
+						</>
+					)}
+					{r.esMia && (
+						<>
+							<Button
+								size="sm"
+								variant="outline"
+								disabled={cancelar.isPending}
+								onClick={() => cancelar.mutate()}
+							>
+								{cancelar.isPending && (
+									<Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+								)}
+								Cancelar mi solicitud
+							</Button>
+							<p className="text-muted-foreground text-xs">
+								La tiene que aprobar otro supervisor o admin.
+							</p>
+						</>
+					)}
+				</div>
+			)}
+			{decision && (
+				<DecidirSolicitudDialog
+					solicitud={{ id: r.id, quien: "Este crédito" }}
+					decision={decision}
+					onOpenChange={(abierto) => {
+						if (!abierto) setDecision(null);
+					}}
 				/>
 			)}
-		</Card>
+		</div>
 	);
 }
 

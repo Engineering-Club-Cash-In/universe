@@ -4,7 +4,7 @@
  *
  *  · `getRecuperacionesVehiculoCaso`  — los registros del caso, el vigente primero.
  *  · `registrarEntregaVoluntariaEnB4` — entrega voluntaria con el crédito YA en
- *    B4: solo el formulario, sin traslado (de B1 a B3 va por
+ *    B4: solo el formulario, sin traslado (de B2 a B3 va por
  *    `enviarCreditoARecuperacion`, que traslada y registra en el mismo gesto).
  *  · `confirmarRecepcionUnidad`       — la unidad ya se recibió. Solo en B4.
  *
@@ -27,6 +27,10 @@ import { user } from "../db/schema/auth";
 import { casosCobros, recuperacionesVehiculo } from "../db/schema/cobros";
 import { assertCreditoAsignadoEnCarteraPorSifco } from "../lib/credito-cartera-ownership";
 import { cobrosProcedure } from "../lib/orpc";
+import {
+	esRecuperacionEfectiva,
+	leerChecklistGuardado,
+} from "../lib/recuperacion-solicitud";
 import {
 	BUCKET_RECUPERACION,
 	detalleRecuperacionSchema,
@@ -132,6 +136,14 @@ async function resolverCreditoEnB4(
 const registrador = alias(user, "registrador");
 const responsable = alias(user, "responsable");
 const receptor = alias(user, "receptor");
+const decisor = alias(user, "decisor");
+
+/**
+ * CB-043: solo un registro EFECTIVO (sin aprobación de por medio, o aprobado)
+ * describe una recuperación que ocurrió. Una solicitud pendiente o rechazada
+ * no cuenta para "el registro vigente" de la recepción.
+ */
+const registroEfectivo = sql`(${recuperacionesVehiculo.estadoSolicitud} IS NULL OR ${recuperacionesVehiculo.estadoSolicitud} = 'aprobada')`;
 
 export const recuperacionVehiculoRegistroRouter = {
 	getRecuperacionesVehiculoCaso: cobrosProcedure
@@ -190,6 +202,13 @@ export const recuperacionVehiculoRegistroRouter = {
 					recepcionNotas: recuperacionesVehiculo.recepcionNotas,
 					recepcionRegistradaPor: receptor.name,
 					recepcionRegistradaAt: recuperacionesVehiculo.recepcionRegistradaAt,
+					// CB-043 · La solicitud y su checklist.
+					registradoPorId: recuperacionesVehiculo.registradoPor,
+					estadoSolicitud: recuperacionesVehiculo.estadoSolicitud,
+					checklist: recuperacionesVehiculo.checklist,
+					decidioPor: decisor.name,
+					decididoAt: recuperacionesVehiculo.decididoAt,
+					motivoDecision: recuperacionesVehiculo.motivoDecision,
 					createdAt: recuperacionesVehiculo.createdAt,
 				})
 				.from(recuperacionesVehiculo)
@@ -205,13 +224,20 @@ export const recuperacionVehiculoRegistroRouter = {
 					receptor,
 					eq(recuperacionesVehiculo.recepcionRegistradaPor, receptor.id),
 				)
+				.leftJoin(decisor, eq(recuperacionesVehiculo.decididoPor, decisor.id))
 				.where(eq(recuperacionesVehiculo.casoCobroId, input.casoCobroId))
 				.orderBy(
 					desc(recuperacionesVehiculo.createdAt),
 					desc(recuperacionesVehiculo.id),
 				)
 				.limit(20);
-			return filas.map((f) => ({ ...f, completada: f.completada === true }));
+			return filas.map(({ registradoPorId, checklist, ...f }) => ({
+				...f,
+				completada: f.completada === true,
+				checklist: leerChecklistGuardado(checklist),
+				/** Quien mira es quien la pidió: puede cancelarla mientras espera. */
+				esMia: registradoPorId === context.userId,
+			}));
 		}),
 
 	registrarEntregaVoluntariaEnB4: cobrosProcedure
@@ -266,7 +292,10 @@ export const recuperacionVehiculoRegistroRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const [registro] = await db
-				.select({ casoCobroId: recuperacionesVehiculo.casoCobroId })
+				.select({
+					casoCobroId: recuperacionesVehiculo.casoCobroId,
+					estadoSolicitud: recuperacionesVehiculo.estadoSolicitud,
+				})
 				.from(recuperacionesVehiculo)
 				.where(eq(recuperacionesVehiculo.id, input.recuperacionId))
 				.limit(1);
@@ -275,6 +304,14 @@ export const recuperacionVehiculoRegistroRouter = {
 			if (!registro) {
 				throw new ORPCError("NOT_FOUND", {
 					message: "No se encontró el registro de recuperación.",
+				});
+			}
+			// CB-043: una solicitud que no se aprobó no trasladó nada: no hay
+			// unidad que recibir por ella.
+			if (!esRecuperacionEfectiva(registro.estadoSolicitud)) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Esa solicitud de recuperación no se aprobó: la recepción se registra sobre el envío a B4.",
 				});
 			}
 			await resolverCreditoEnB4(
@@ -299,6 +336,7 @@ export const recuperacionVehiculoRegistroRouter = {
 					.where(
 						and(
 							eq(recuperacionesVehiculo.casoCobroId, registro.casoCobroId),
+							registroEfectivo,
 							sql`${recuperacionesVehiculo.createdAt} > (select r.created_at from recuperaciones_vehiculo r where r.id = ${input.recuperacionId})`,
 						),
 					)

@@ -127,6 +127,13 @@ export const cobrosNotifTipoEnum = pgEnum("cobros_notif_tipo", [
 	// programarla (si la programó otro) y la mañana del día. Dedup por visita
 	// y día (migración 0069).
 	"visita_programada",
+	// CB-043: un asesor solicitó mandar un crédito a recuperación de vehículo.
+	// Va a TODOS los cobros_supervisor (action_required) y se cierra cuando
+	// alguien decide. Dedup por solicitud (migración 0071).
+	"recuperacion_pendiente_aprobacion",
+	// CB-043: la decisión (aprobada, rechazada o sin efecto) de vuelta a quien
+	// pidió la recuperación.
+	"recuperacion_resuelta",
 ]);
 
 // Notifications table

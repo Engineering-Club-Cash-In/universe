@@ -27,12 +27,14 @@ import { z } from "zod";
 // ── Buckets ─────────────────────────────────────────────────────────────────
 
 /**
- * Las visitas se programan y registran en B3 y B4 (decisión del 2026-09-29: el
- * ticket es de B3 · Rescate, y en B4 también se sale a buscar al cliente).
+ * Las visitas se programan y registran de B2 a B4. El ticket es de B3 ·
+ * Rescate, pero en B4 también se sale a buscar al cliente (decisión del
+ * 2026-09-29) y desde B2 ya se puede visitar: no hay motivo para esperar a la
+ * tercera cuota (decisión del 2026-09-30, junto con CB-043).
  * Registrar el resultado de una visita YA programada no mira el bucket: la
  * visita ocurrió aunque el crédito se haya movido después.
  */
-export const BUCKET_MINIMO_VISITA = 3;
+export const BUCKET_MINIMO_VISITA = 2;
 export const BUCKET_MAXIMO_VISITA = 4;
 
 export function visitaPermitidaEnBucket(bucket: number | null): boolean {
@@ -51,8 +53,8 @@ export function motivoBloqueoVisita(
 	if (visitaPermitidaEnBucket(bucket)) return null;
 	const donde = prefijo ?? (bucket === null ? null : `B${bucket}`);
 	return donde
-		? `Disponible en B${BUCKET_MINIMO_VISITA} y B${BUCKET_MAXIMO_VISITA}. Este caso está en ${donde}.`
-		: `Disponible en B${BUCKET_MINIMO_VISITA} y B${BUCKET_MAXIMO_VISITA}. El crédito no tiene bucket.`;
+		? `Disponible de B${BUCKET_MINIMO_VISITA} a B${BUCKET_MAXIMO_VISITA}. Este caso está en ${donde}.`
+		: `Disponible de B${BUCKET_MINIMO_VISITA} a B${BUCKET_MAXIMO_VISITA}. El crédito no tiene bucket.`;
 }
 
 // ── Tipos, estados y resultados ─────────────────────────────────────────────

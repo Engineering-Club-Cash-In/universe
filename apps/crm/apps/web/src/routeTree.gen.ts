@@ -33,6 +33,7 @@ import { Route as CrmCompaniesRouteImport } from './routes/crm/companies'
 import { Route as CrmClientsRouteImport } from './routes/crm/clients'
 import { Route as CobrosReportesRouteImport } from './routes/cobros/reportes'
 import { Route as CobrosReduccionRouteImport } from './routes/cobros/reduccion'
+import { Route as CobrosRecuperacionesRouteImport } from './routes/cobros/recuperaciones'
 import { Route as CobrosReasignacionesRouteImport } from './routes/cobros/reasignaciones'
 import { Route as CobrosPromesasRouteImport } from './routes/cobros/promesas'
 import { Route as CobrosPagaloRouteImport } from './routes/cobros/pagalo'
@@ -187,6 +188,11 @@ const CobrosReportesRoute = CobrosReportesRouteImport.update({
 const CobrosReduccionRoute = CobrosReduccionRouteImport.update({
   id: '/cobros/reduccion',
   path: '/cobros/reduccion',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CobrosRecuperacionesRoute = CobrosRecuperacionesRouteImport.update({
+  id: '/cobros/recuperaciones',
+  path: '/cobros/recuperaciones',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CobrosReasignacionesRoute = CobrosReasignacionesRouteImport.update({
@@ -393,6 +399,7 @@ export interface FileRoutesByFullPath {
   '/cobros/pagalo': typeof CobrosPagaloRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
+  '/cobros/recuperaciones': typeof CobrosRecuperacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
   '/cobros/reportes': typeof CobrosReportesRoute
   '/crm/clients': typeof CrmClientsRoute
@@ -453,6 +460,7 @@ export interface FileRoutesByTo {
   '/cobros/pagalo': typeof CobrosPagaloRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
+  '/cobros/recuperaciones': typeof CobrosRecuperacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
   '/cobros/reportes': typeof CobrosReportesRoute
   '/crm/clients': typeof CrmClientsRoute
@@ -514,6 +522,7 @@ export interface FileRoutesById {
   '/cobros/pagalo': typeof CobrosPagaloRoute
   '/cobros/promesas': typeof CobrosPromesasRoute
   '/cobros/reasignaciones': typeof CobrosReasignacionesRoute
+  '/cobros/recuperaciones': typeof CobrosRecuperacionesRoute
   '/cobros/reduccion': typeof CobrosReduccionRoute
   '/cobros/reportes': typeof CobrosReportesRoute
   '/crm/clients': typeof CrmClientsRoute
@@ -576,6 +585,7 @@ export interface FileRouteTypes {
     | '/cobros/pagalo'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
+    | '/cobros/recuperaciones'
     | '/cobros/reduccion'
     | '/cobros/reportes'
     | '/crm/clients'
@@ -636,6 +646,7 @@ export interface FileRouteTypes {
     | '/cobros/pagalo'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
+    | '/cobros/recuperaciones'
     | '/cobros/reduccion'
     | '/cobros/reportes'
     | '/crm/clients'
@@ -696,6 +707,7 @@ export interface FileRouteTypes {
     | '/cobros/pagalo'
     | '/cobros/promesas'
     | '/cobros/reasignaciones'
+    | '/cobros/recuperaciones'
     | '/cobros/reduccion'
     | '/cobros/reportes'
     | '/crm/clients'
@@ -757,6 +769,7 @@ export interface RootRouteChildren {
   CobrosPagaloRoute: typeof CobrosPagaloRoute
   CobrosPromesasRoute: typeof CobrosPromesasRoute
   CobrosReasignacionesRoute: typeof CobrosReasignacionesRoute
+  CobrosRecuperacionesRoute: typeof CobrosRecuperacionesRoute
   CobrosReduccionRoute: typeof CobrosReduccionRoute
   CobrosReportesRoute: typeof CobrosReportesRoute
   CrmClientsRoute: typeof CrmClientsRoute
@@ -960,6 +973,13 @@ declare module '@tanstack/react-router' {
       path: '/cobros/reduccion'
       fullPath: '/cobros/reduccion'
       preLoaderRoute: typeof CobrosReduccionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cobros/recuperaciones': {
+      id: '/cobros/recuperaciones'
+      path: '/cobros/recuperaciones'
+      fullPath: '/cobros/recuperaciones'
+      preLoaderRoute: typeof CobrosRecuperacionesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cobros/reasignaciones': {
@@ -1229,6 +1249,7 @@ const rootRouteChildren: RootRouteChildren = {
   CobrosPagaloRoute: CobrosPagaloRoute,
   CobrosPromesasRoute: CobrosPromesasRoute,
   CobrosReasignacionesRoute: CobrosReasignacionesRoute,
+  CobrosRecuperacionesRoute: CobrosRecuperacionesRoute,
   CobrosReduccionRoute: CobrosReduccionRoute,
   CobrosReportesRoute: CobrosReportesRoute,
   CrmClientsRoute: CrmClientsRoute,

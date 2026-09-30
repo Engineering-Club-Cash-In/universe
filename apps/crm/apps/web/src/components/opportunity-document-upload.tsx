@@ -10,6 +10,7 @@ import {
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
@@ -22,6 +23,7 @@ import {
 	getManualOpportunityDocumentFields,
 	type ManualOpportunityDocumentType,
 } from "@/lib/manual-opportunity-document";
+import { etiquetaEnvioAseguradora } from "@/lib/envio-aseguradora";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client } from "@/utils/orpc";
 
@@ -405,6 +407,16 @@ export function OpportunityDocumentUpload({
 												{doc.description}
 											</p>
 										)}
+									{(() => {
+										const envio = etiquetaEnvioAseguradora(doc.envioAseguradora);
+										return (
+											envio && (
+												<Badge className={`mt-1 text-xs ${envio.className}`}>
+													{envio.texto}
+												</Badge>
+											)
+										);
+									})()}
 								</div>
 								<div className="flex items-center gap-2">
 									{doc.url && (

@@ -12,6 +12,7 @@ import type {
 	VehiculoSatPropio,
 } from "../controllers/satVehiculos";
 import {
+	asegurarConsultaSatActiva,
 	obtenerVehiculosDelegados,
 	titularesDelegadosDelEntorno,
 } from "../controllers/satVehiculos";
@@ -64,7 +65,7 @@ interface OpcionesVerificacion {
 	intento?: number;
 	titulares?: SatTitularObjetivo[];
 	/** Sustituible para probar el cruce y el guardado sin levantar Puppeteer. */
-	proveedor?: () => Promise<SatVehiculosDelegadosResponse>;
+	proveedor?: (signal?: AbortSignal) => Promise<SatVehiculosDelegadosResponse>;
 	/** Sustituible para pruebas; en produccion se consulta el dump de Cartera. */
 	universoEsperado?: () => Promise<VehiculoCarteraEsperado[]>;
 	/** Se notifica únicamente después de crear el lote y todas sus corridas. */
@@ -72,11 +73,43 @@ interface OpcionesVerificacion {
 }
 
 interface AdvisoryLockClient {
+	signal: AbortSignal;
+	asegurarActivo(): void;
 	query<T extends object>(
 		text: string,
 		values?: unknown[],
 	): Promise<{ rows: T[] }>;
 	release(): void;
+}
+
+interface AdvisoryLockConnection {
+	query<T extends object>(
+		text: string,
+		values?: unknown[],
+	): Promise<{ rows: T[] }>;
+	release(error?: Error | boolean): void;
+	on?(event: "error", listener: (error: Error) => void): unknown;
+	removeListener?(event: "error", listener: (error: Error) => void): unknown;
+}
+
+export function crearControlCandadoDistribuido() {
+	const controlador = new AbortController();
+	return {
+		signal: controlador.signal,
+		perder(error: unknown) {
+			if (controlador.signal.aborted) return;
+			const causa = error instanceof Error ? error : new Error(String(error));
+			controlador.abort(
+				new Error(
+					"Se perdió el candado distribuido de la verificación SAT.",
+					{ cause: causa },
+				),
+			);
+		},
+		asegurarActivo() {
+			asegurarConsultaSatActiva(controlador.signal);
+		},
+	};
 }
 
 /**
@@ -232,7 +265,7 @@ async function hayCorridaRecienteOk(): Promise<boolean> {
 }
 
 async function adquirirCandadoDistribuido(): Promise<AdvisoryLockClient | null> {
-	const conexion = (await db.$client.connect()) as AdvisoryLockClient;
+	const conexion = (await db.$client.connect()) as AdvisoryLockConnection;
 
 	try {
 		const { rows } = await conexion.query<{ acquired: boolean }>(
@@ -245,21 +278,48 @@ async function adquirirCandadoDistribuido(): Promise<AdvisoryLockClient | null> 
 			return null;
 		}
 
+		const control = crearControlCandadoDistribuido();
+		let consultaKeepaliveActiva = false;
+		let liberado = false;
+		const perderCandado = (error: unknown) => {
+			console.error(
+				"[SAT] Se perdió el candado distribuido durante la verificación:",
+				error,
+			);
+			control.perder(error);
+		};
+		const manejarErrorConexion = (error: Error) => perderCandado(error);
+		conexion.on?.("error", manejarErrorConexion);
 		const keepAlive = setInterval(() => {
-			void conexion.query("SELECT 1").catch((error) => {
-				console.error(
-					"[SAT] Fallo el keepalive del candado distribuido:",
-					error,
-				);
-			});
+			if (consultaKeepaliveActiva || control.signal.aborted) return;
+			consultaKeepaliveActiva = true;
+			void conexion
+				.query("SELECT 1")
+				.catch(perderCandado)
+				.finally(() => {
+					consultaKeepaliveActiva = false;
+				});
 		}, INTERVALO_KEEPALIVE_CANDADO_MS);
 		(keepAlive as unknown as { unref?: () => void }).unref?.();
 
 		return {
-			query: (text, values) => conexion.query(text, values),
+			signal: control.signal,
+			asegurarActivo: control.asegurarActivo,
+			query: async (text, values) => {
+				control.asegurarActivo();
+				try {
+					return await conexion.query(text, values);
+				} catch (error) {
+					perderCandado(error);
+					throw error;
+				}
+			},
 			release: () => {
+				if (liberado) return;
+				liberado = true;
 				clearInterval(keepAlive);
-				conexion.release();
+				conexion.removeListener?.("error", manejarErrorConexion);
+				conexion.release(control.signal.aborted ? true : undefined);
 			},
 		};
 	} catch (error) {
@@ -270,9 +330,13 @@ async function adquirirCandadoDistribuido(): Promise<AdvisoryLockClient | null> 
 
 async function liberarCandadoDistribuido(client: AdvisoryLockClient) {
 	try {
-		await client.query("SELECT pg_advisory_unlock($1, $2)", [
-			...SAT_VERIFICACION_LOCK,
-		]);
+		if (!client.signal.aborted) {
+			await client.query("SELECT pg_advisory_unlock($1, $2)", [
+				...SAT_VERIFICACION_LOCK,
+			]);
+		}
+	} catch (error) {
+		console.error("[SAT] No se pudo liberar el candado distribuido:", error);
 	} finally {
 		client.release();
 	}
@@ -280,7 +344,7 @@ async function liberarCandadoDistribuido(client: AdvisoryLockClient) {
 
 /** El advisory lock, no una fila persistida, define si el proceso sigue vivo. */
 async function hayCandadoDistribuidoActivo(): Promise<boolean> {
-	const client = (await db.$client.connect()) as AdvisoryLockClient;
+	const client = (await db.$client.connect()) as AdvisoryLockConnection;
 	try {
 		const { rows } = await client.query<{ active: boolean }>(
 			`SELECT EXISTS (
@@ -573,13 +637,19 @@ export function construirUpsertExternos(filas: FilaActual[]) {
 }
 
 /** Publica una foto completa sin dejar resultados de consultas anteriores. */
-async function guardarEstadoActual(loteId: string, filas: FilaActual[]) {
+async function guardarEstadoActual(
+	loteId: string,
+	filas: FilaActual[],
+	signal?: AbortSignal,
+) {
+	asegurarConsultaSatActiva(signal);
 	await db.transaction(async (tx) => {
 		const internas = filas.filter((fila) => fila.vehicleId !== null);
 		const externas = filas.filter((fila) => fila.vehicleId === null);
 		const tamanoLote = 500;
 
 		for (let i = 0; i < internas.length; i += tamanoLote) {
+			asegurarConsultaSatActiva(signal);
 			await tx
 				.insert(satVerificacionResultados)
 				.values(internas.slice(i, i + tamanoLote))
@@ -588,30 +658,37 @@ async function guardarEstadoActual(loteId: string, filas: FilaActual[]) {
 					targetWhere: sql`vehicle_id IS NOT NULL`,
 					set: camposActualizados,
 				});
+			asegurarConsultaSatActiva(signal);
 		}
 
 		for (let i = 0; i < externas.length; i += tamanoLote) {
+			asegurarConsultaSatActiva(signal);
 			// Drizzle no genera ON CONFLICT para indices de expresion. La consulta
 			// parametrizada apunta al mismo indice parcial definido en la 0035.
 			await tx.execute(
 				construirUpsertExternos(externas.slice(i, i + tamanoLote)),
 			);
+			asegurarConsultaSatActiva(signal);
 		}
 
 		// Un listado completo define el universo vigente. Retiramos las filas
 		// externas que ya no aparecen y los vehiculos que salieron del CRM.
+		asegurarConsultaSatActiva(signal);
 		await tx
 			.delete(satVerificacionResultados)
 			.where(ne(satVerificacionResultados.loteId, loteId));
+		asegurarConsultaSatActiva(signal);
 		await tx
 			.update(satVerificacionLotes)
 			.set({ estado: "ok", finalizadaAt: new Date() })
 			.where(eq(satVerificacionLotes.id, loteId));
+		asegurarConsultaSatActiva(signal);
 	});
 }
 
 async function ejecutarVerificacionVehiculosEnSat(
 	opciones: OpcionesVerificacion = {},
+	signal?: AbortSignal,
 ): Promise<ResumenVerificacion> {
 	const {
 		usuarioId,
@@ -622,6 +699,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 		universoEsperado,
 		alRegistrar,
 	} = opciones;
+	asegurarConsultaSatActiva(signal);
 	if (usuarioId === undefined) {
 		throw new Error("La verificación SAT requiere un usuario autenticado.");
 	}
@@ -634,6 +712,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 	const usuarioNit = usuarioNitParaLote();
 
 	if (!forzar && (await hayCorridaRecienteOk())) {
+		asegurarConsultaSatActiva(signal);
 		return {
 			corridaId: null,
 			loteId: null,
@@ -649,6 +728,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 	// El lote y sus corridas se registran antes de consultar Cartera o SAT: si
 	// cualquier dependencia falla, queda constancia del intento y su estado.
 	const { lote, corridas } = await db.transaction(async (tx) => {
+		asegurarConsultaSatActiva(signal);
 		const [lote] = await tx
 			.insert(satVerificacionLotes)
 			.values({
@@ -658,6 +738,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 				intento,
 			})
 			.returning({ id: satVerificacionLotes.id });
+		asegurarConsultaSatActiva(signal);
 
 		const corridas = await tx
 			.insert(satVerificacionCorridas)
@@ -673,6 +754,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 				id: satVerificacionCorridas.id,
 				titularNit: satVerificacionCorridas.titularNit,
 			});
+		asegurarConsultaSatActiva(signal);
 
 		return { lote, corridas };
 	});
@@ -704,9 +786,12 @@ async function ejecutarVerificacionVehiculosEnSat(
 	};
 
 	try {
+		asegurarConsultaSatActiva(signal);
 		const esperados = await obtenerUniversoEsperado(universoEsperado);
+		asegurarConsultaSatActiva(signal);
 		totalEsperados = esperados.length;
-		const respuesta = await proveedor();
+		const respuesta = await proveedor(signal);
+		asegurarConsultaSatActiva(signal);
 		const respuestasPorNit = new Map(
 			respuesta.titulares.map((titular) => [
 				normalizarNit(titular.nit),
@@ -723,6 +808,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 		const vehiculosPorCorrida = new Map<string, VehiculoSatPropio[]>();
 
 		for (const corrida of corridas) {
+			asegurarConsultaSatActiva(signal);
 			const titular = respuestasPorNit.get(normalizarNit(corrida.titularNit));
 			const listadoIncompleto =
 				titular?.estado === "OK" &&
@@ -747,6 +833,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 						mensajeError,
 					})
 					.where(eq(satVerificacionCorridas.id, corrida.id));
+				asegurarConsultaSatActiva(signal);
 				resumenes.push({
 					corridaId: corrida.id,
 					estado,
@@ -767,6 +854,7 @@ async function ejecutarVerificacionVehiculosEnSat(
 					estado: "ok",
 				})
 				.where(eq(satVerificacionCorridas.id, corrida.id));
+			asegurarConsultaSatActiva(signal);
 			resumenes.push({
 				corridaId: corrida.id,
 				estado: "ok",
@@ -839,12 +927,14 @@ async function ejecutarVerificacionVehiculosEnSat(
 		).length;
 
 		if (loteCompleto) {
-			await guardarEstadoActual(lote.id, filasPersistir);
+			await guardarEstadoActual(lote.id, filasPersistir, signal);
 		} else {
+			asegurarConsultaSatActiva(signal);
 			await db
 				.update(satVerificacionLotes)
 				.set({ estado: estadoLote, finalizadaAt: new Date() })
 				.where(eq(satVerificacionLotes.id, lote.id));
+			asegurarConsultaSatActiva(signal);
 		}
 
 		return {
@@ -1119,7 +1209,8 @@ export function verificarVehiculosEnSat(
 		}
 
 		try {
-			return await ejecutarVerificacionVehiculosEnSat(opciones);
+			candado.asegurarActivo();
+			return await ejecutarVerificacionVehiculosEnSat(opciones, candado.signal);
 		} finally {
 			await liberarCandadoDistribuido(candado);
 		}

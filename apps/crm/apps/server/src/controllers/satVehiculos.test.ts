@@ -2,8 +2,10 @@ import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import puppeteer from "puppeteer";
 import {
+	asegurarConsultaSatActiva,
 	capturarEvidenciaSat,
 	clasificarError,
+	conNavegador,
 	dividirRangosPaginas,
 	esperarSatConReintento,
 	irAListadoVehiculosDelegado,
@@ -11,6 +13,14 @@ import {
 	leerTodasLasPaginas,
 	seleccionarTitular,
 } from "./satVehiculos";
+
+test("propaga la causa al cancelar una consulta SAT", () => {
+	const controlador = new AbortController();
+	const causa = new Error("Candado distribuido perdido");
+	controlador.abort(causa);
+
+	expect(() => asegurarConsultaSatActiva(controlador.signal)).toThrow(causa);
+});
 
 test("reparte todas las páginas entre varios trabajadores sin huecos", () => {
 	const rangos = dividirRangosPaginas(154, 4);
@@ -138,6 +148,36 @@ const chromePath =
 		? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
 		: puppeteer.executablePath());
 const testConChrome = existsSync(chromePath) ? test : test.skip;
+
+testConChrome(
+	"cierra Chromium cuando se cancela una consulta SAT",
+	async () => {
+		const executablePathAnterior = process.env.PUPPETEER_EXECUTABLE_PATH;
+		process.env.PUPPETEER_EXECUTABLE_PATH = chromePath;
+		const controlador = new AbortController();
+		let resolverInicio!: () => void;
+		const iniciado = new Promise<void>((resolve) => {
+			resolverInicio = resolve;
+		});
+
+		try {
+			const consulta = conNavegador(async () => {
+				resolverInicio();
+				return await new Promise<never>(() => undefined);
+			}, controlador.signal);
+			await iniciado;
+			controlador.abort(new Error("Candado PostgreSQL perdido"));
+
+			await expect(consulta).rejects.toThrow("Candado PostgreSQL perdido");
+		} finally {
+			if (executablePathAnterior === undefined) {
+				delete process.env.PUPPETEER_EXECUTABLE_PATH;
+			} else {
+				process.env.PUPPETEER_EXECUTABLE_PATH = executablePathAnterior;
+			}
+		}
+	},
+);
 
 function tabla(impresiones: string) {
 	return `<table id="frmAcciones:dtListadoVehiculos"><tbody><tr>

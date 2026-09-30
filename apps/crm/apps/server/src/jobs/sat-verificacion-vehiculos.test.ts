@@ -16,6 +16,7 @@ import {
 	construirResultados,
 	construirUpsertExternos,
 	contarPlacasReportadasSat,
+	crearControlCandadoDistribuido,
 	desacoplarVerificacionSat,
 	esAlertaSat,
 	estadoCorridaDesdeSat,
@@ -23,6 +24,18 @@ import {
 	estadoLoteParaUsuario,
 	type ResumenVerificacion,
 } from "./sat-verificacion-vehiculos";
+
+test("cancela la ejecucion cuando se pierde el candado distribuido", () => {
+	const control = crearControlCandadoDistribuido();
+	expect(control.signal.aborted).toBe(false);
+
+	control.perder(new Error("Conexion PostgreSQL cerrada"));
+
+	expect(control.signal.aborted).toBe(true);
+	expect(() => control.asegurarActivo()).toThrow(
+		"Se perdió el candado distribuido de la verificación SAT.",
+	);
+});
 
 function vehiculoSat(
 	placa: string,

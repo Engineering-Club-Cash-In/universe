@@ -1173,16 +1173,46 @@ export async function leerTodasLasPaginas(
 	return { vehiculos: [...vehiculos.values()], listadoCompleto: false };
 }
 
+function errorDeCancelacion(signal: AbortSignal): Error {
+	if (signal.reason instanceof Error) return signal.reason;
+	return new Error(
+		typeof signal.reason === "string"
+			? signal.reason
+			: "La consulta SAT fue cancelada.",
+	);
+}
+
+export function asegurarConsultaSatActiva(signal?: AbortSignal): void {
+	if (signal?.aborted) throw errorDeCancelacion(signal);
+}
+
 export async function conNavegador<T>(
 	fn: (page: Page, browser: Browser) => Promise<T>,
+	signal?: AbortSignal,
 ): Promise<T> {
+	asegurarConsultaSatActiva(signal);
 	const browser = await launchBrowser();
+	let cancelar: (() => void) | undefined;
 	try {
+		asegurarConsultaSatActiva(signal);
 		const page = await browser.newPage();
 		await page.setViewport({ width: 1400, height: 900 });
-		return await fn(page, browser);
+		const trabajo = fn(page, browser);
+		if (!signal) return await trabajo;
+
+		const cancelacion = new Promise<never>((_resolve, reject) => {
+			cancelar = () => {
+				const error = errorDeCancelacion(signal);
+				void browser.close().catch(() => undefined);
+				reject(error);
+			};
+			signal.addEventListener("abort", cancelar, { once: true });
+		});
+		asegurarConsultaSatActiva(signal);
+		return await Promise.race([trabajo, cancelacion]);
 	} finally {
-		await browser.close();
+		if (signal && cancelar) signal.removeEventListener("abort", cancelar);
+		await browser.close().catch(() => undefined);
 	}
 }
 
@@ -1480,19 +1510,24 @@ async function consultarContextoTitular(
 }
 
 /** Inicia una sola sesión y consulta todos los titulares delegados configurados. */
-export async function obtenerVehiculosDelegados(): Promise<SatVehiculosDelegadosResponse> {
+export async function obtenerVehiculosDelegados(
+	signal?: AbortSignal,
+): Promise<SatVehiculosDelegadosResponse> {
 	const credenciales = credencialesDelEntorno();
 	const titulares = titularesDelegadosDelEntorno();
 
 	try {
 		const resultados = await conNavegador(async (page, browser) => {
+			asegurarConsultaSatActiva(signal);
 			await capturarEvidenciaSat(page, () =>
 				iniciarSesion(page, credenciales, { permisosDelegados: true }),
 			);
+			asegurarConsultaSatActiva(signal);
 			const urlPortal = page.url();
 			const respuestas = new Map<string, SatVehiculosTitularResponse>();
 
 			for (let indice = 0; indice < titulares.length; indice += 1) {
+				asegurarConsultaSatActiva(signal);
 				const titular = titulares[indice];
 				const paginaTitular =
 					indice === 0 ? page : await abrirPaginaPortal(browser, urlPortal);
@@ -1535,7 +1570,9 @@ export async function obtenerVehiculosDelegados(): Promise<SatVehiculosDelegados
 						normalizarNitTitular(titular.nit),
 						await consultarContextoTitular(contexto, secundarios),
 					);
+					asegurarConsultaSatActiva(signal);
 				} catch (error) {
+					asegurarConsultaSatActiva(signal);
 					const evidencia = await paginaTitular.content().catch(() => "");
 					respuestas.set(
 						normalizarNitTitular(titular.nit),
@@ -1558,6 +1595,7 @@ export async function obtenerVehiculosDelegados(): Promise<SatVehiculosDelegados
 				}
 			}
 
+			asegurarConsultaSatActiva(signal);
 			return titulares.map(
 				(titular) =>
 					respuestas.get(normalizarNitTitular(titular.nit)) ??
@@ -1567,7 +1605,8 @@ export async function obtenerVehiculosDelegados(): Promise<SatVehiculosDelegados
 						"No se obtuvo respuesta para el titular configurado.",
 					),
 			);
-		});
+		}, signal);
+		asegurarConsultaSatActiva(signal);
 
 		const estado = estadoGeneralDelegado(resultados);
 		return {
@@ -1584,6 +1623,7 @@ export async function obtenerVehiculosDelegados(): Promise<SatVehiculosDelegados
 			evidencia: resultados.find((titular) => titular.evidencia)?.evidencia,
 		};
 	} catch (error) {
+		asegurarConsultaSatActiva(signal);
 		const evidencia = (error as { evidencia?: string }).evidencia;
 		const estado = clasificarError(error, evidencia);
 		return {
@@ -1603,14 +1643,18 @@ export async function obtenerVehiculosDelegados(): Promise<SatVehiculosDelegados
 	}
 }
 
-export async function obtenerVehiculosPropios(): Promise<SatVehiculosPropiosResponse> {
+export async function obtenerVehiculosPropios(
+	signal?: AbortSignal,
+): Promise<SatVehiculosPropiosResponse> {
 	const nit = process.env.SAT_AV_USUARIO ?? "";
 
 	try {
 		const credenciales = credencialesDelEntorno();
 		const vehiculos = await conNavegador(async (page) => {
 			try {
+				asegurarConsultaSatActiva(signal);
 				await iniciarSesion(page, credenciales);
+				asegurarConsultaSatActiva(signal);
 				const listado = await irAVehiculosPropios(page);
 
 				if (!(await verTodosLosVehiculos(listado))) {
@@ -1626,12 +1670,14 @@ export async function obtenerVehiculosPropios(): Promise<SatVehiculosPropiosResp
 
 				return await leerTablaVehiculos(listado);
 			} catch (error) {
+				asegurarConsultaSatActiva(signal);
 				const evidencia = await page.content().catch(() => "");
 				throw Object.assign(error as Error, {
 					evidencia: evidencia.slice(0, MAX_EVIDENCIA),
 				});
 			}
-		});
+		}, signal);
+		asegurarConsultaSatActiva(signal);
 
 		if (vehiculos.length === 0) {
 			throw new SatScrapeError(
@@ -1641,6 +1687,7 @@ export async function obtenerVehiculosPropios(): Promise<SatVehiculosPropiosResp
 
 		return { nit, estado: "OK", vehiculos, listadoCompleto: true };
 	} catch (error) {
+		asegurarConsultaSatActiva(signal);
 		const evidencia = (error as { evidencia?: string }).evidencia;
 		return {
 			nit,
